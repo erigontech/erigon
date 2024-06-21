@@ -33,6 +33,11 @@ const TableHashKey = "HermezSmtHashKey"
 type EriDb struct {
 	kvTx kv.RwTx
 	tx   SmtDbTx
+	*EriRoDb
+}
+
+type EriRoDb struct {
+	kvTxRo kv.Getter
 }
 
 func CreateEriDbBuckets(tx kv.RwTx) error {
@@ -66,18 +71,25 @@ func CreateEriDbBuckets(tx kv.RwTx) error {
 
 func NewEriDb(tx kv.RwTx) *EriDb {
 	return &EriDb{
-		kvTx: tx,
-		tx:   tx,
+		tx:      tx,
+		kvTx:    tx,
+		EriRoDb: NewRoEriDb(tx),
+	}
+}
+
+func NewRoEriDb(tx kv.Getter) *EriRoDb {
+	return &EriRoDb{
+		kvTxRo: tx,
 	}
 }
 
 func (m *EriDb) OpenBatch(quitCh <-chan struct{}) {
-	// var batch kv.PendingMutations
 	batch := membatch.NewHashBatch(m.kvTx, quitCh, "./tempdb", log.New())
 	defer func() {
 		batch.Close()
 	}()
 	m.tx = batch
+	m.kvTxRo = batch
 }
 
 func (m *EriDb) CommitBatch() error {
@@ -94,6 +106,7 @@ func (m *EriDb) CommitBatch() error {
 		return err
 	}
 	m.tx = m.kvTx
+	m.kvTxRo = m.kvTx
 	return nil
 }
 
@@ -103,10 +116,11 @@ func (m *EriDb) RollbackBatch() {
 	}
 	m.tx.(kv.PendingMutations).Close()
 	m.tx = m.kvTx
+	m.kvTxRo = m.kvTx
 }
 
-func (m *EriDb) GetLastRoot() (*big.Int, error) {
-	data, err := m.tx.GetOne(TableStats, []byte("lastRoot"))
+func (m *EriRoDb) GetLastRoot() (*big.Int, error) {
+	data, err := m.kvTxRo.GetOne(TableStats, []byte("lastRoot"))
 	if err != nil {
 		return big.NewInt(0), err
 	}
@@ -123,8 +137,8 @@ func (m *EriDb) SetLastRoot(r *big.Int) error {
 	return m.tx.Put(TableStats, []byte("lastRoot"), []byte(v))
 }
 
-func (m *EriDb) GetDepth() (uint8, error) {
-	data, err := m.tx.GetOne(TableStats, []byte("depth"))
+func (m *EriRoDb) GetDepth() (uint8, error) {
+	data, err := m.kvTxRo.GetOne(TableStats, []byte("depth"))
 	if err != nil {
 		return 0, err
 	}
@@ -140,11 +154,11 @@ func (m *EriDb) SetDepth(depth uint8) error {
 	return m.tx.Put(TableStats, []byte("lastRoot"), []byte{depth})
 }
 
-func (m *EriDb) Get(key utils.NodeKey) (utils.NodeValue12, error) {
+func (m *EriRoDb) Get(key utils.NodeKey) (utils.NodeValue12, error) {
 	keyConc := utils.ArrayToScalar(key[:])
 	k := utils.ConvertBigIntToHex(keyConc)
 
-	data, err := m.tx.GetOne(TableSmt, []byte(k))
+	data, err := m.kvTxRo.GetOne(TableSmt, []byte(k))
 	if err != nil {
 		return utils.NodeValue12{}, err
 	}
@@ -164,9 +178,7 @@ func (m *EriDb) Insert(key utils.NodeKey, value utils.NodeValue12) error {
 	k := utils.ConvertBigIntToHex(keyConc)
 
 	vals := make([]*big.Int, 12)
-	for i, v := range value {
-		vals[i] = v
-	}
+	copy(vals, value[:])
 
 	vConc := utils.ArrayToScalarBig(vals)
 	v := utils.ConvertBigIntToHex(vConc)
@@ -184,11 +196,11 @@ func (m *EriDb) DeleteByNodeKey(key utils.NodeKey) error {
 	return m.tx.Delete(TableSmt, []byte(k))
 }
 
-func (m *EriDb) GetAccountValue(key utils.NodeKey) (utils.NodeValue8, error) {
+func (m *EriRoDb) GetAccountValue(key utils.NodeKey) (utils.NodeValue8, error) {
 	keyConc := utils.ArrayToScalar(key[:])
 	k := utils.ConvertBigIntToHex(keyConc)
 
-	data, err := m.tx.GetOne(TableAccountValues, []byte(k))
+	data, err := m.kvTxRo.GetOne(TableAccountValues, []byte(k))
 	if err != nil {
 		return utils.NodeValue8{}, err
 	}
@@ -208,9 +220,7 @@ func (m *EriDb) InsertAccountValue(key utils.NodeKey, value utils.NodeValue8) er
 	k := utils.ConvertBigIntToHex(keyConc)
 
 	vals := make([]*big.Int, 8)
-	for i, v := range value {
-		vals[i] = v
-	}
+	copy(vals, value[:]) // Replace the loop with the copy function
 
 	vConc := utils.ArrayToScalarBig(vals)
 	v := utils.ConvertBigIntToHex(vConc)
@@ -230,10 +240,10 @@ func (m *EriDb) DeleteKeySource(key utils.NodeKey) error {
 	return m.tx.Delete(TableMetadata, keyConc.Bytes())
 }
 
-func (m *EriDb) GetKeySource(key utils.NodeKey) ([]byte, error) {
+func (m *EriRoDb) GetKeySource(key utils.NodeKey) ([]byte, error) {
 	keyConc := utils.ArrayToScalar(key[:])
 
-	data, err := m.tx.GetOne(TableMetadata, keyConc.Bytes())
+	data, err := m.kvTxRo.GetOne(TableMetadata, keyConc.Bytes())
 	if err != nil {
 		return nil, err
 	}
@@ -258,10 +268,10 @@ func (m *EriDb) DeleteHashKey(key utils.NodeKey) error {
 	return m.tx.Delete(TableHashKey, keyConc.Bytes())
 }
 
-func (m *EriDb) GetHashKey(key utils.NodeKey) (utils.NodeKey, error) {
+func (m *EriRoDb) GetHashKey(key utils.NodeKey) (utils.NodeKey, error) {
 	keyConc := utils.ArrayToScalar(key[:])
 
-	data, err := m.tx.GetOne(TableHashKey, keyConc.Bytes())
+	data, err := m.kvTxRo.GetOne(TableHashKey, keyConc.Bytes())
 	if err != nil {
 		return utils.NodeKey{}, err
 	}
@@ -277,10 +287,10 @@ func (m *EriDb) GetHashKey(key utils.NodeKey) (utils.NodeKey, error) {
 	return utils.NodeKey{na[0], na[1], na[2], na[3]}, nil
 }
 
-func (m *EriDb) GetCode(codeHash []byte) ([]byte, error) {
+func (m *EriRoDb) GetCode(codeHash []byte) ([]byte, error) {
 	codeHash = utils.ResizeHashTo32BytesByPrefixingWithZeroes(codeHash)
 
-	data, err := m.tx.GetOne(kv.Code, codeHash)
+	data, err := m.kvTxRo.GetOne(kv.Code, codeHash)
 	if err != nil {
 		return nil, err
 	}
@@ -292,8 +302,8 @@ func (m *EriDb) GetCode(codeHash []byte) ([]byte, error) {
 	return data, nil
 }
 
-func (m *EriDb) PrintDb() {
-	err := m.tx.ForEach(TableSmt, []byte{}, func(k, v []byte) error {
+func (m *EriRoDb) PrintDb() {
+	err := m.kvTxRo.ForEach(TableSmt, []byte{}, func(k, v []byte) error {
 		println(string(k), string(v))
 		return nil
 	})
@@ -302,10 +312,10 @@ func (m *EriDb) PrintDb() {
 	}
 }
 
-func (m *EriDb) GetDb() map[string][]string {
+func (m *EriRoDb) GetDb() map[string][]string {
 	transformedDb := make(map[string][]string)
 
-	err := m.tx.ForEach(TableSmt, []byte{}, func(k, v []byte) error {
+	err := m.kvTxRo.ForEach(TableSmt, []byte{}, func(k, v []byte) error {
 		hk := string(k)
 
 		vConc := utils.ConvertHexToBigInt(string(v))

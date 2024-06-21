@@ -19,8 +19,11 @@ package utils
 
 import (
 	"crypto/ecdsa"
+	"encoding/json"
 	"fmt"
 	"math/big"
+	"os"
+	"path"
 	"path/filepath"
 	"runtime"
 	"strconv"
@@ -33,7 +36,6 @@ import (
 	"github.com/spf13/pflag"
 	"github.com/urfave/cli/v2"
 
-	"github.com/ledgerwatch/erigon-lib/chain/networkname"
 	"github.com/ledgerwatch/erigon-lib/chain/snapcfg"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/cmp"
@@ -44,10 +46,7 @@ import (
 	downloadercfg2 "github.com/ledgerwatch/erigon-lib/downloader/downloadercfg"
 	"github.com/ledgerwatch/erigon-lib/txpool/txpoolcfg"
 
-	"encoding/json"
-	"os"
-	"path"
-
+	"github.com/ledgerwatch/erigon-lib/chain/networkname"
 	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/cmd/downloader/downloadernat"
 	"github.com/ledgerwatch/erigon/cmd/utils/flags"
@@ -64,7 +63,9 @@ import (
 	"github.com/ledgerwatch/erigon/p2p/nat"
 	"github.com/ledgerwatch/erigon/p2p/netutil"
 	"github.com/ledgerwatch/erigon/params"
+	borsnaptype "github.com/ledgerwatch/erigon/polygon/bor/snaptype"
 	"github.com/ledgerwatch/erigon/rpc/rpccfg"
+	"github.com/ledgerwatch/erigon/turbo/logging"
 )
 
 // These are all the command line flags we support.
@@ -143,6 +144,10 @@ var (
 		Name:  "snapshots",
 		Usage: `Default: use snapshots "true" for Mainnet, Goerli, Gnosis Chain and Chiado. use snapshots "false" in all other cases`,
 		Value: true,
+	}
+	ExternalConsensusFlag = cli.BoolFlag{
+		Name:  "externalcl",
+		Usage: "enables external consensus",
 	}
 	InternalConsensusFlag = cli.BoolFlag{
 		Name:  "internalcl",
@@ -466,6 +471,11 @@ var (
 		Usage:    "Ethereum L1 delay between queries for verifications and sequences - in milliseconds",
 		Value:    6000,
 	}
+	L1HighestBlockTypeFlag = cli.StringFlag{
+		Name:  "zkevm.l1-highest-block-type",
+		Usage: "The type of the highest block in the L1 chain. latest, safe, or finalized",
+		Value: "finalized",
+	}
 	L1MaticContractAddressFlag = cli.StringFlag{
 		Name:  "zkevm.l1-matic-contract-address",
 		Usage: "Ethereum L1 Matic contract address",
@@ -480,6 +490,11 @@ var (
 		Name:  "zkevm.rebuild-tree-after",
 		Usage: "Rebuild the state tree after this many blocks behind",
 		Value: 10000,
+	}
+	IncrementTreeAlways = cli.BoolFlag{
+		Name:  "zkevm.increment-tree-always",
+		Usage: "Increment the state tree, never rebuild",
+		Value: false,
 	}
 	SequencerInitialForkId = cli.Uint64Flag{
 		Name:  "zkevm.sequencer-initial-fork-id",
@@ -515,6 +530,11 @@ var (
 		Name:  "zkevm.executor-request-timeout",
 		Usage: "The timeout for the executor request",
 		Value: 60 * time.Second,
+	}
+	DatastreamNewBlockTimeout = cli.DurationFlag{
+		Name:  "zkevm.datastream-new-block-timeout",
+		Usage: "The timeout for the executor request",
+		Value: 500 * time.Millisecond,
 	}
 	ExecutorMaxConcurrentRequests = cli.IntFlag{
 		Name:  "zkevm.executor-max-concurrent-requests",
@@ -616,6 +636,11 @@ var (
 		Usage: "Output the payload of the executor, serialised requests stored to disk by batch number",
 		Value: "",
 	}
+	DAUrl = cli.StringFlag{
+		Name:  "zkevm.da-url",
+		Usage: "The URL of the data availability service",
+		Value: "",
+	}
 	DebugNoSync = cli.BoolFlag{
 		Name:  "debug.no-sync",
 		Usage: "Disable syncing",
@@ -655,7 +680,11 @@ var (
 	}
 	HTTPTraceFlag = cli.BoolFlag{
 		Name:  "http.trace",
-		Usage: "Trace HTTP requests with INFO level",
+		Usage: "Print all HTTP requests to logs with INFO level",
+	}
+	HTTPDebugSingleFlag = cli.BoolFlag{
+		Name:  "http.dbg.single",
+		Usage: "Allow pass HTTP header 'dbg: true' to printt more detailed logs - how this request was executed",
 	}
 	DBReadConcurrencyFlag = cli.IntFlag{
 		Name:  "db.read.concurrency",
@@ -690,7 +719,7 @@ var (
 
 	HTTPPathPrefixFlag = cli.StringFlag{
 		Name:  "http.rpcprefix",
-		Usage: "HTTP path path prefix on which JSON-RPC is served. Use '/' to serve on all paths.",
+		Usage: "HTTP path prefix on which JSON-RPC is served. Use '/' to serve on all paths.",
 		Value: "",
 	}
 	TLSFlag = cli.BoolFlag{
@@ -740,6 +769,11 @@ var (
 		Name:  "ws.rpcprefix",
 		Usage: "HTTP path prefix on which JSON-RPC is served. Use '/' to serve on all paths.",
 		Value: "",
+	}
+	WSSubscribeLogsChannelSize = cli.IntFlag{
+		Name:  "ws.api.subscribelogs.channelsize",
+		Usage: "Size of the channel used for websocket logs subscriptions",
+		Value: 8192,
 	}
 	ExecFlag = cli.StringFlag{
 		Name:  "exec",
@@ -904,10 +938,6 @@ var (
 		Usage: "Metrics HTTP server listening port",
 		Value: metrics.DefaultConfig.Port,
 	}
-	HistoryV3Flag = cli.BoolFlag{
-		Name:  "experimental.history.v3",
-		Usage: "(Also known as Erigon3) Not recommended yet: Can't change this flag after node creation. New DB and Snapshots format of history allows: parallel blocks execution, get state as of given transaction without executing whole block.",
-	}
 
 	CliqueSnapshotCheckpointIntervalFlag = cli.UintFlag{
 		Name:  "clique.checkpoint",
@@ -1052,6 +1082,12 @@ var (
 		Value: true,
 	}
 
+	WithHeimdallWaypoints = cli.BoolFlag{
+		Name:  "bor.waypoints",
+		Usage: "Enabling bor waypont recording",
+		Value: false,
+	}
+
 	PolygonSyncFlag = cli.BoolFlag{
 		Name:  "polygon.sync",
 		Usage: "Enabling syncing using the new polygon sync component",
@@ -1117,11 +1153,51 @@ var (
 	}
 	SilkwormRpcDaemonFlag = cli.BoolFlag{
 		Name:  "silkworm.rpc",
-		Usage: "Enable embedded Silkworm RPC daemon",
+		Usage: "Enable embedded Silkworm RPC service",
 	}
 	SilkwormSentryFlag = cli.BoolFlag{
 		Name:  "silkworm.sentry",
 		Usage: "Enable embedded Silkworm Sentry service",
+	}
+	SilkwormVerbosityFlag = cli.StringFlag{
+		Name:  "silkworm.verbosity",
+		Usage: "Set the log level for Silkworm console logs",
+		Value: log.LvlInfo.String(),
+	}
+	SilkwormNumContextsFlag = cli.UintFlag{
+		Name:  "silkworm.contexts",
+		Usage: "Number of I/O contexts used in embedded Silkworm RPC and Sentry services (zero means use default in Silkworm)",
+		Value: 0,
+	}
+	SilkwormRpcLogEnabledFlag = cli.BoolFlag{
+		Name:  "silkworm.rpc.log",
+		Usage: "Enable interface log for embedded Silkworm RPC service",
+		Value: false,
+	}
+	SilkwormRpcLogMaxFileSizeFlag = cli.UintFlag{
+		Name:  "silkworm.rpc.log.maxsize",
+		Usage: "Max interface log file size in MB for embedded Silkworm RPC service",
+		Value: 1,
+	}
+	SilkwormRpcLogMaxFilesFlag = cli.UintFlag{
+		Name:  "silkworm.rpc.log.maxfiles",
+		Usage: "Max interface log files for embedded Silkworm RPC service",
+		Value: 100,
+	}
+	SilkwormRpcLogDumpResponseFlag = cli.BoolFlag{
+		Name:  "silkworm.rpc.log.response",
+		Usage: "Dump responses in interface logs for embedded Silkworm RPC service",
+		Value: false,
+	}
+	SilkwormRpcNumWorkersFlag = cli.UintFlag{
+		Name:  "silkworm.rpc.workers",
+		Usage: "Number of worker threads used in embedded Silkworm RPC service (zero means use default in Silkworm)",
+		Value: 0,
+	}
+	SilkwormRpcJsonCompatibilityFlag = cli.BoolFlag{
+		Name:  "silkworm.rpc.compatibility",
+		Usage: "Preserve JSON-RPC compatibility using embedded Silkworm RPC service",
+		Value: true,
 	}
 
 	BeaconAPIFlag = cli.StringSliceFlag{
@@ -1198,9 +1274,29 @@ var (
 		Usage: "set the cors' allow origins",
 		Value: cli.NewStringSlice(),
 	}
+	DiagDisabledFlag = cli.BoolFlag{
+		Name:  "diagnostics.disabled",
+		Usage: "Disable diagnostics",
+		Value: false,
+	}
+	DiagEndpointAddrFlag = cli.StringFlag{
+		Name:  "diagnostics.endpoint.addr",
+		Usage: "Diagnostics HTTP server listening interface",
+		Value: "0.0.0.0",
+	}
+	DiagEndpointPortFlag = cli.UintFlag{
+		Name:  "diagnostics.endpoint.port",
+		Usage: "Diagnostics HTTP server listening port",
+		Value: 6060,
+	}
+	DiagSpeedTestFlag = cli.BoolFlag{
+		Name:  "diagnostics.speedtest",
+		Usage: "Enable speed test",
+		Value: false,
+	}
 )
 
-var MetricFlags = []cli.Flag{&MetricsEnabledFlag, &MetricsHTTPFlag, &MetricsPortFlag}
+var MetricFlags = []cli.Flag{&MetricsEnabledFlag, &MetricsHTTPFlag, &MetricsPortFlag, &DiagDisabledFlag, &DiagEndpointAddrFlag, &DiagEndpointPortFlag, &DiagSpeedTestFlag}
 
 var DiagnosticsFlags = []cli.Flag{&DiagnosticsURLFlag, &DiagnosticsURLFlag, &DiagnosticsSessionsFlag}
 
@@ -1768,6 +1864,8 @@ func setBorConfig(ctx *cli.Context, cfg *ethconfig.Config) {
 	cfg.HeimdallURL = ctx.String(HeimdallURLFlag.Name)
 	cfg.WithoutHeimdall = ctx.Bool(WithoutHeimdallFlag.Name)
 	cfg.WithHeimdallMilestones = ctx.Bool(WithHeimdallMilestones.Name)
+	cfg.WithHeimdallWaypointRecording = ctx.Bool(WithHeimdallWaypoints.Name)
+	borsnaptype.RecordWayPoints(cfg.WithHeimdallWaypointRecording)
 	cfg.PolygonSync = ctx.Bool(PolygonSyncFlag.Name)
 }
 
@@ -1858,6 +1956,15 @@ func setSilkworm(ctx *cli.Context, cfg *ethconfig.Config) {
 	cfg.SilkwormExecution = ctx.Bool(SilkwormExecutionFlag.Name)
 	cfg.SilkwormRpcDaemon = ctx.Bool(SilkwormRpcDaemonFlag.Name)
 	cfg.SilkwormSentry = ctx.Bool(SilkwormSentryFlag.Name)
+	cfg.SilkwormVerbosity = ctx.String(SilkwormVerbosityFlag.Name)
+	cfg.SilkwormNumContexts = uint32(ctx.Uint64(SilkwormNumContextsFlag.Name))
+	cfg.SilkwormRpcLogEnabled = ctx.Bool(SilkwormRpcLogEnabledFlag.Name)
+	cfg.SilkwormRpcLogDirPath = logging.LogDirPath(ctx)
+	cfg.SilkwormRpcLogMaxFileSize = uint16(ctx.Uint64(SilkwormRpcLogMaxFileSizeFlag.Name))
+	cfg.SilkwormRpcLogMaxFiles = uint16(ctx.Uint(SilkwormRpcLogMaxFilesFlag.Name))
+	cfg.SilkwormRpcLogDumpResponse = ctx.Bool(SilkwormRpcLogDumpResponseFlag.Name)
+	cfg.SilkwormRpcNumWorkers = uint32(ctx.Uint64(SilkwormRpcNumWorkersFlag.Name))
+	cfg.SilkwormRpcJsonCompatibility = ctx.Bool(SilkwormRpcJsonCompatibilityFlag.Name)
 }
 
 // CheckExclusive verifies that only a single instance of the provided flags was
@@ -1916,8 +2023,6 @@ func SetEthConfig(ctx *cli.Context, nodeConfig *nodecfg.Config, cfg *ethconfig.C
 		if cfg.NetworkID != 1 && !ctx.IsSet(ChainFlag.Name) {
 			chain = "" // don't default to mainnet if NetworkID != 1
 		}
-	} else {
-		cfg.NetworkID = params.NetworkIDByChainName(chain)
 	}
 
 	cfg.Sync.UseSnapshots = ethconfig.UseSnapshotsByChainName(chain)
@@ -1983,7 +2088,6 @@ func SetEthConfig(ctx *cli.Context, nodeConfig *nodecfg.Config, cfg *ethconfig.C
 	setCaplin(ctx, cfg)
 
 	cfg.Ethstats = ctx.String(EthStatsURLFlag.Name)
-	cfg.HistoryV3 = ctx.Bool(HistoryV3Flag.Name)
 
 	if ctx.IsSet(RPCGlobalGasCapFlag.Name) {
 		cfg.RPCGasCap = ctx.Uint64(RPCGlobalGasCapFlag.Name)
@@ -2009,17 +2113,18 @@ func SetEthConfig(ctx *cli.Context, nodeConfig *nodecfg.Config, cfg *ethconfig.C
 	// Override any default configs for hard coded networks.
 	chain = ctx.String(ChainFlag.Name)
 	if strings.HasPrefix(chain, "dynamic") {
+		configFilePath := ctx.String(ConfigFlag.Name)
+		if configFilePath == "" {
+			Fatalf("Config file is required for dynamic chain")
+		}
+
+		// Be sure to set this first
+		params.DynamicChainConfigPath = filepath.Dir(configFilePath)
+		filename := path.Join(params.DynamicChainConfigPath, chain+"-conf.json")
+
 		genesis := core.GenesisBlockByChainName(chain)
 
 		dConf := DynamicConfig{}
-
-		homeDir, err := os.UserHomeDir()
-		if err != nil {
-			panic(err)
-		}
-
-		basePath := path.Join(homeDir, "dynamic-configs")
-		filename := path.Join(basePath, chain+"-conf.json")
 
 		if _, err := os.Stat(filename); err == nil {
 			dConfBytes, err := os.ReadFile(filename)
@@ -2039,7 +2144,7 @@ func SetEthConfig(ctx *cli.Context, nodeConfig *nodecfg.Config, cfg *ethconfig.C
 
 		genesisHash := libcommon.HexToHash(dConf.Root)
 		if !ctx.IsSet(NetworkIdFlag.Name) {
-			log.Warn("NetworkID is not set for dynamic chain", "chain", chain, "networkID", cfg.NetworkID)
+			cfg.NetworkID = params.NetworkIDByChainName(chain)
 		}
 		SetDNSDiscoveryDefaults(cfg, genesisHash)
 	} else {
@@ -2134,6 +2239,8 @@ func CobraFlags(cmd *cobra.Command, urfaveCliFlagsLists ...[]cli.Flag) {
 			switch f := flag.(type) {
 			case *cli.IntFlag:
 				flags.Int(f.Name, f.Value, f.Usage)
+			case *cli.UintFlag:
+				flags.Uint(f.Name, f.Value, f.Usage)
 			case *cli.StringFlag:
 				flags.String(f.Name, f.Value, f.Usage)
 			case *cli.BoolFlag:

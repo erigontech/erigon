@@ -694,7 +694,7 @@ func opCreate2(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]
 	scope.Contract.UseGas(gas)
 	// reuse size int for stackvalue
 	stackValue := size
-	res, addr, returnGas, suberr := interpreter.evm.Create2(scope.Contract, input, gas, &endowment, &salt)
+	res, addr, returnGas, suberr := interpreter.evm.Create2(scope.Contract, input, gas, &endowment, &salt, gas)
 
 	// Push item on the stack based on the returned error.
 	if suberr != nil {
@@ -768,7 +768,7 @@ func opCallCode(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([
 		gas += params.CallStipend
 	}
 
-	ret, returnGas, err := interpreter.evm.CallCode(scope.Contract, toAddr, args, gas, &value)
+	ret, returnGas, err := interpreter.evm.CallCode_zkEvm(scope.Contract, toAddr, args, gas, &value, int(retSize.Uint64()))
 	if err != nil {
 		temp.Clear()
 	} else {
@@ -798,7 +798,7 @@ func opDelegateCall(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext
 	// Get arguments from the memory.
 	args := scope.Memory.GetPtr(int64(inOffset.Uint64()), int64(inSize.Uint64()))
 
-	ret, returnGas, err := interpreter.evm.DelegateCall(scope.Contract, toAddr, args, gas)
+	ret, returnGas, err := interpreter.evm.DelegateCall_zkEvm(scope.Contract, toAddr, args, gas, int(retSize.Uint64()))
 	if err != nil {
 		temp.Clear()
 	} else {
@@ -828,7 +828,7 @@ func opStaticCall(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) 
 	// Get arguments from the memory.
 	args := scope.Memory.GetPtr(int64(inOffset.Uint64()), int64(inSize.Uint64()))
 
-	ret, returnGas, err := interpreter.evm.StaticCall(scope.Contract, toAddr, args, gas)
+	ret, returnGas, err := interpreter.evm.StaticCall_zkEvm(scope.Contract, toAddr, args, gas, int(retSize.Uint64()))
 	if err != nil {
 		temp.Clear()
 	} else {

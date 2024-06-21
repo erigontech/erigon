@@ -43,8 +43,8 @@ var ForkIdsOrdered = []ForkId{
 // that any network, identified by its genesis block, can have its own
 // set of configuration options.
 type Config struct {
-	ChainName string
-	ChainID   *big.Int `json:"chainId"` // chainId identifies the current chain and is used for replay protection
+	ChainName string   `json:"chainName"` // chain name, eg: mainnet, sepolia, bor-mainnet
+	ChainID   *big.Int `json:"chainId"`   // chainId identifies the current chain and is used for replay protection
 
 	Consensus ConsensusName `json:"consensus,omitempty"` // aura, ethash or clique
 
@@ -344,6 +344,10 @@ func (c *Config) IsForkID7Etrog(num uint64) bool {
 
 func (c *Config) IsForkID8Elderberry(num uint64) bool {
 	return isForked(c.ForkID88ElderberryBlock, num)
+}
+
+func (c *Config) IsForkId9Elderberry2(num uint64) bool {
+	return isForked(c.ForkID9Elderberry2Block, num)
 }
 
 // CheckCompatible checks whether scheduled fork transitions have been imported

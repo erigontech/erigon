@@ -31,11 +31,7 @@ func (a *ApiHandler) getDutiesProposer(w http.ResponseWriter, r *http.Request) (
 	if s == nil {
 		return nil, beaconhttp.NewEndpointError(http.StatusServiceUnavailable, fmt.Errorf("node is syncing"))
 	}
-	dependentRoot, err := s.GetBlockRootAtSlot((epoch * a.beaconChainCfg.SlotsPerEpoch) - 1)
-	if err != nil {
-		return nil, err
-	}
-
+	dependentRoot := a.getDependentRoot(s, epoch)
 	if epoch < a.forkchoiceStore.FinalizedCheckpoint().Epoch() {
 		tx, err := a.indiciesDB.BeginRo(r.Context())
 		if err != nil {

@@ -168,7 +168,7 @@ func TestClientWebsocketPing(t *testing.T) {
 func TestClientWebsocketLargeMessage(t *testing.T) {
 	logger := log.New()
 	var (
-		srv     = NewServer(50, false /* traceRequests */, true, logger, 100)
+		srv     = NewServer(50, false /* traceRequests */, false /* debugSingleRequests */, true, logger, 100)
 		httpsrv = httptest.NewServer(srv.WebsocketHandler(nil, nil, false, logger))
 		wsURL   = "ws:" + strings.TrimPrefix(httpsrv.URL, "http:")
 	)

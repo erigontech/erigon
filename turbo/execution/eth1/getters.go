@@ -5,10 +5,11 @@ import (
 	"errors"
 	"fmt"
 
+	"google.golang.org/protobuf/types/known/emptypb"
+
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces"
 	"github.com/ledgerwatch/erigon-lib/kv"
-	"google.golang.org/protobuf/types/known/emptypb"
 
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/execution"
 	types2 "github.com/ledgerwatch/erigon-lib/gointerfaces/types"
@@ -52,7 +53,7 @@ func (e *EthereumExecutionModule) GetBody(ctx context.Context, req *execution.Ge
 	}
 	tx, err := e.db.BeginRo(ctx)
 	if err != nil {
-		return nil, fmt.Errorf("ethereumExecutionModule.GetHeader: could not open database: %s", err)
+		return nil, fmt.Errorf("ethereumExecutionModule.GetBody: could not begin database tx %w", err)
 	}
 	defer tx.Rollback()
 
@@ -61,18 +62,18 @@ func (e *EthereumExecutionModule) GetBody(ctx context.Context, req *execution.Ge
 		return &execution.GetBodyResponse{Body: nil}, nil
 	}
 	if err != nil {
-		return nil, fmt.Errorf("ethereumExecutionModule.GetBody: %s", err)
+		return nil, fmt.Errorf("ethereumExecutionModule.GetBody: parseSegmentRequest error %w", err)
 	}
 	td, err := rawdb.ReadTd(tx, blockHash, blockNumber)
 	if err != nil {
-		return nil, fmt.Errorf("ethereumExecutionModule.GetBody: %s", err)
+		return nil, fmt.Errorf("ethereumExecutionModule.GetBody: ReadTd error %w", err)
 	}
 	if td == nil {
 		return &execution.GetBodyResponse{Body: nil}, nil
 	}
 	body, err := e.getBody(ctx, tx, blockHash, blockNumber)
 	if err != nil {
-		return nil, fmt.Errorf("ethereumExecutionModule.GetBody: coild not read body: %s", err)
+		return nil, fmt.Errorf("ethereumExecutionModule.GetBody: getBody error %w", err)
 	}
 	if body == nil {
 		return &execution.GetBodyResponse{Body: nil}, nil
@@ -89,7 +90,7 @@ func (e *EthereumExecutionModule) GetHeader(ctx context.Context, req *execution.
 	}
 	tx, err := e.db.BeginRo(ctx)
 	if err != nil {
-		return nil, fmt.Errorf("ethereumExecutionModule.GetHeader: could not open database: %s", err)
+		return nil, fmt.Errorf("ethereumExecutionModule.GetHeader: could not begin database tx %w", err)
 	}
 	defer tx.Rollback()
 
@@ -99,14 +100,14 @@ func (e *EthereumExecutionModule) GetHeader(ctx context.Context, req *execution.
 	}
 	td, err := rawdb.ReadTd(tx, blockHash, blockNumber)
 	if err != nil {
-		return nil, fmt.Errorf("ethereumExecutionModule.GetHeader: %s", err)
+		return nil, fmt.Errorf("ethereumExecutionModule.GetHeader: ReadTd error %w", err)
 	}
 	if td == nil {
 		return &execution.GetHeaderResponse{Header: nil}, nil
 	}
 	header, err := e.getHeader(ctx, tx, blockHash, blockNumber)
 	if err != nil {
-		return nil, fmt.Errorf("ethereumExecutionModule.GetHeader: coild not read body: %s", err)
+		return nil, fmt.Errorf("ethereumExecutionModule.GetHeader: getHeader error %w", err)
 	}
 	if header == nil {
 		return &execution.GetHeaderResponse{Header: nil}, nil
@@ -118,7 +119,7 @@ func (e *EthereumExecutionModule) GetHeader(ctx context.Context, req *execution.
 func (e *EthereumExecutionModule) GetBodiesByHashes(ctx context.Context, req *execution.GetBodiesByHashesRequest) (*execution.GetBodiesBatchResponse, error) {
 	tx, err := e.db.BeginRo(ctx)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("ethereumExecutionModule.GetBodiesByHashes: could not begin database tx %w", err)
 	}
 	defer tx.Rollback()
 
@@ -133,7 +134,7 @@ func (e *EthereumExecutionModule) GetBodiesByHashes(ctx context.Context, req *ex
 		}
 		body, err := e.getBody(ctx, tx, h, *number)
 		if err != nil {
-			return nil, err
+			return nil, fmt.Errorf("ethereumExecutionModule.GetBodiesByHashes: getBody error %w", err)
 		}
 		if body == nil {
 			bodies = append(bodies, nil)
@@ -141,7 +142,7 @@ func (e *EthereumExecutionModule) GetBodiesByHashes(ctx context.Context, req *ex
 		}
 		txs, err := types.MarshalTransactionsBinary(body.Transactions)
 		if err != nil {
-			return nil, err
+			return nil, fmt.Errorf("ethereumExecutionModule.GetBodiesByHashes: MarshalTransactionsBinary error %w", err)
 		}
 		bodies = append(bodies, &execution.BlockBody{
 			Transactions: txs,
@@ -155,7 +156,7 @@ func (e *EthereumExecutionModule) GetBodiesByHashes(ctx context.Context, req *ex
 func (e *EthereumExecutionModule) GetBodiesByRange(ctx context.Context, req *execution.GetBodiesByRangeRequest) (*execution.GetBodiesBatchResponse, error) {
 	tx, err := e.db.BeginRo(ctx)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("ethereumExecutionModule.GetBodiesByRange: could not begin database tx %w", err)
 	}
 	defer tx.Rollback()
 
@@ -164,7 +165,7 @@ func (e *EthereumExecutionModule) GetBodiesByRange(ctx context.Context, req *exe
 	for i := uint64(0); i < req.Count; i++ {
 		hash, err := rawdb.ReadCanonicalHash(tx, req.Start+i)
 		if err != nil {
-			return nil, err
+			return nil, fmt.Errorf("ethereumExecutionModule.GetBodiesByRange: ReadCanonicalHash error %w", err)
 		}
 		if hash == (libcommon.Hash{}) {
 			// break early if beyond the last known canonical header
@@ -173,7 +174,7 @@ func (e *EthereumExecutionModule) GetBodiesByRange(ctx context.Context, req *exe
 
 		body, err := e.getBody(ctx, tx, hash, req.Start+i)
 		if err != nil {
-			return nil, err
+			return nil, fmt.Errorf("ethereumExecutionModule.GetBodiesByRange: getBody error %w", err)
 		}
 		if body == nil {
 			// Append nil and no further processing
@@ -183,7 +184,7 @@ func (e *EthereumExecutionModule) GetBodiesByRange(ctx context.Context, req *exe
 
 		txs, err := types.MarshalTransactionsBinary(body.Transactions)
 		if err != nil {
-			return nil, err
+			return nil, fmt.Errorf("ethereumExecutionModule.GetBodiesByRange: MarshalTransactionsBinary error %w", err)
 		}
 		bodies = append(bodies, &execution.BlockBody{
 			Transactions: txs,
@@ -206,7 +207,7 @@ func (e *EthereumExecutionModule) GetBodiesByRange(ctx context.Context, req *exe
 func (e *EthereumExecutionModule) GetHeaderHashNumber(ctx context.Context, req *types2.H256) (*execution.GetHeaderHashNumberResponse, error) {
 	tx, err := e.db.BeginRo(ctx)
 	if err != nil {
-		return nil, fmt.Errorf("ethereumExecutionModule.GetBody: could not open database: %s", err)
+		return nil, fmt.Errorf("ethereumExecutionModule.GetHeaderHashNumber: could not begin database tx %w", err)
 	}
 	defer tx.Rollback()
 	blockNumber := rawdb.ReadHeaderNumber(tx, gointerfaces.ConvertH256ToHash(req))
@@ -223,11 +224,11 @@ func (e *EthereumExecutionModule) isCanonicalHash(ctx context.Context, tx kv.Tx,
 	}
 	expectedHash, err := e.canonicalHash(ctx, tx, *blockNumber)
 	if err != nil {
-		return false, fmt.Errorf("ethereumExecutionModule.CanonicalHash: could not read canonical hash")
+		return false, fmt.Errorf("ethereumExecutionModule.isCanonicalHash: could not read canonical hash %w", err)
 	}
 	td, err := rawdb.ReadTd(tx, hash, *blockNumber)
 	if err != nil {
-		return false, fmt.Errorf("ethereumExecutionModule.GetBody: %s", err)
+		return false, fmt.Errorf("ethereumExecutionModule.isCanonicalHash: ReadTd error %w", err)
 	}
 	if td == nil {
 		return false, nil
@@ -238,13 +239,13 @@ func (e *EthereumExecutionModule) isCanonicalHash(ctx context.Context, tx kv.Tx,
 func (e *EthereumExecutionModule) IsCanonicalHash(ctx context.Context, req *types2.H256) (*execution.IsCanonicalResponse, error) {
 	tx, err := e.db.BeginRo(ctx)
 	if err != nil {
-		return nil, fmt.Errorf("ethereumExecutionModule.CanonicalHash: could not open database: %s", err)
+		return nil, fmt.Errorf("ethereumExecutionModule.CanonicalHash: could not begin database tx %w", err)
 	}
 	defer tx.Rollback()
 
 	isCanonical, err := e.isCanonicalHash(ctx, tx, gointerfaces.ConvertH256ToHash(req))
 	if err != nil {
-		return nil, fmt.Errorf("ethereumExecutionModule.CanonicalHash: could not read canonical hash")
+		return nil, fmt.Errorf("ethereumExecutionModule.CanonicalHash: could not read canonical hash %w", err)
 	}
 
 	return &execution.IsCanonicalResponse{Canonical: isCanonical}, nil
@@ -253,14 +254,14 @@ func (e *EthereumExecutionModule) IsCanonicalHash(ctx context.Context, req *type
 func (e *EthereumExecutionModule) CurrentHeader(ctx context.Context, _ *emptypb.Empty) (*execution.GetHeaderResponse, error) {
 	tx, err := e.db.BeginRo(ctx)
 	if err != nil {
-		return nil, fmt.Errorf("ethereumExecutionModule.CurrentHeader: could not open database: %s", err)
+		return nil, fmt.Errorf("ethereumExecutionModule.CurrentHeader: could not begin database tx %w", err)
 	}
 	defer tx.Rollback()
 	hash := rawdb.ReadHeadHeaderHash(tx)
 	number := rawdb.ReadHeaderNumber(tx, hash)
-	h, err := e.blockReader.Header(context.Background(), tx, hash, *number)
+	h, err := e.blockReader.Header(ctx, tx, hash, *number)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("ethereumExecutionModule.CurrentHeader: blockReader.Header error %w", err)
 	}
 	if h == nil {
 		return nil, fmt.Errorf("ethereumExecutionModule.CurrentHeader: no current header yet - probabably node not synced yet")
@@ -273,11 +274,11 @@ func (e *EthereumExecutionModule) CurrentHeader(ctx context.Context, _ *emptypb.
 func (e *EthereumExecutionModule) GetTD(ctx context.Context, req *execution.GetSegmentRequest) (*execution.GetTDResponse, error) {
 	// Invalid case: request is invalid.
 	if req == nil || (req.BlockHash == nil && req.BlockNumber == nil) {
-		return nil, errors.New("ethereumExecutionModule.GetHeader: bad request")
+		return nil, errors.New("ethereumExecutionModule.GetTD: bad request")
 	}
 	tx, err := e.db.BeginRo(ctx)
 	if err != nil {
-		return nil, fmt.Errorf("ethereumExecutionModule.GetHeader: could not open database: %s", err)
+		return nil, fmt.Errorf("ethereumExecutionModule.GetTD: could not begin database tx %w", err)
 	}
 	defer tx.Rollback()
 
@@ -286,11 +287,11 @@ func (e *EthereumExecutionModule) GetTD(ctx context.Context, req *execution.GetS
 		return &execution.GetTDResponse{Td: nil}, nil
 	}
 	if err != nil {
-		return nil, fmt.Errorf("ethereumExecutionModule.GetHeader: %s", err)
+		return nil, fmt.Errorf("ethereumExecutionModule.GetTD: parseSegmentRequest error %w", err)
 	}
 	td, err := e.getTD(ctx, tx, blockHash, blockNumber)
 	if err != nil {
-		return nil, fmt.Errorf("ethereumExecutionModule.GetHeader: coild not read body: %s", err)
+		return nil, fmt.Errorf("ethereumExecutionModule.GetTD: getTD error %w", err)
 	}
 	if td == nil {
 		return &execution.GetTDResponse{Td: nil}, nil
@@ -302,7 +303,7 @@ func (e *EthereumExecutionModule) GetTD(ctx context.Context, req *execution.GetS
 func (e *EthereumExecutionModule) GetForkChoice(ctx context.Context, _ *emptypb.Empty) (*execution.ForkChoice, error) {
 	tx, err := e.db.BeginRo(ctx)
 	if err != nil {
-		return nil, fmt.Errorf("ethereumExecutionModule.GetHeader: could not open database: %s", err)
+		return nil, fmt.Errorf("ethereumExecutionModule.GetForkChoice: could not begin database tx %w", err)
 	}
 	defer tx.Rollback()
 	return &execution.ForkChoice{

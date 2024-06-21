@@ -62,6 +62,9 @@ func (a *ApiHandler) getSyncDuties(w http.ResponseWriter, r *http.Request) (*bea
 
 	// Now try reading the sync committee
 	syncCommittee, _, ok := a.forkchoiceStore.GetSyncCommittees(period)
+	if !ok {
+		_, syncCommittee, ok = a.forkchoiceStore.GetSyncCommittees(period - 1)
+	}
 	// Read them from the archive node if we do not have them in the fast-access storage
 	if !ok {
 		syncCommittee, err = state_accessors.ReadCurrentSyncCommittee(tx, a.beaconChainCfg.RoundSlotToSyncCommitteePeriod(startSlotAtEpoch))

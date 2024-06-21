@@ -52,7 +52,7 @@ func createFiles(dataDir, chain string) error {
 	return nil
 }
 
-func setup(t *testing.T, ctx context.Context) simulator.HeimdallSimulator {
+func setup(t *testing.T, ctx context.Context, iterations []uint64) simulator.HeimdallSimulator {
 	chain := "mumbai"
 	logger := log.New()
 	logger.SetHandler(log.StdoutHandler)
@@ -63,7 +63,7 @@ func setup(t *testing.T, ctx context.Context) simulator.HeimdallSimulator {
 		t.Fatal(err)
 	}
 
-	sim, err := simulator.NewHeimdall(ctx, chain, dataDir, logger)
+	sim, err := simulator.NewHeimdall(ctx, chain, dataDir, logger, iterations)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -75,7 +75,7 @@ func TestSimulatorEvents(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	sim := setup(t, ctx)
+	sim := setup(t, ctx, []uint64{1_000_000})
 
 	res, err := sim.FetchStateSyncEvents(ctx, 0, time.Now(), 100)
 	assert.NoError(t, err)
@@ -103,20 +103,40 @@ func TestSimulatorSpans(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	sim := setup(t, ctx)
+	sim := setup(t, ctx, []uint64{100_000, 205_055})
 
+	// should have the final span from first iteration
 	span, err := sim.FetchLatestSpan(ctx)
 	assert.NoError(t, err)
-	assert.Equal(t, heimdall.SpanId(78), span.Id)
-	assert.Equal(t, uint64(493056), span.StartBlock)
-	assert.Equal(t, uint64(499455), span.EndBlock)
+	assert.Equal(t, heimdall.SpanIdAt(100_000), span.Id)
+	assert.Equal(t, uint64(96_256), span.StartBlock)
+	assert.Equal(t, uint64(102_655), span.EndBlock)
 
-	span2, err := sim.FetchSpan(ctx, 78)
+	// get last span to move to next iteration
+	span2, err := sim.FetchSpan(ctx, uint64(heimdall.SpanIdAt(100_000)))
 	assert.NoError(t, err)
 	assert.Equal(t, span, span2)
 
-	span3, err := sim.FetchSpan(ctx, 77)
+	// check if we are in the next iteration
+	span3, err := sim.FetchLatestSpan(ctx)
 	assert.NoError(t, err)
-	assert.Equal(t, heimdall.SpanId(77), span3.Id)
-	assert.Equal(t, span.StartBlock-1, span3.EndBlock)
+	assert.Equal(t, heimdall.SpanIdAt(205_055), span3.Id)
+	assert.Equal(t, uint64(198_656), span3.StartBlock)
+	assert.Equal(t, uint64(205_055), span3.EndBlock)
+
+	// higher spans should not be available
+	_, err = sim.FetchSpan(ctx, uint64(heimdall.SpanIdAt(205_055)+1))
+	assert.Error(t, err, "span not found")
+
+	// move to next iteration (should be +1 block since we have no more iterations defined)
+	span4, err := sim.FetchSpan(ctx, uint64(heimdall.SpanIdAt(205_055)))
+	assert.NoError(t, err)
+	assert.Equal(t, span4, span3)
+
+	// check latest span (should be the same since we are
+	span5, err := sim.FetchLatestSpan(ctx)
+	assert.NoError(t, err)
+	assert.Equal(t, heimdall.SpanIdAt(205_056), span5.Id)
+	assert.Equal(t, uint64(205_056), span5.StartBlock)
+	assert.Equal(t, uint64(211_455), span5.EndBlock)
 }

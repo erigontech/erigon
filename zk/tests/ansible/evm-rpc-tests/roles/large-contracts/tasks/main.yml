@@ -1,0 +1,41 @@
+---
+
+# contracts/return-variable-sized-contract.lisp
+- name: Create a variable sized contracts and call them
+  ansible.builtin.shell: |
+    cast send \
+        -j {{ legacy_flag }} \
+        --private-key {{ private_key }} \
+        --rpc-url {{ rpc_url }} \
+        --create "600061{{ item.hex_size }}60005B7F5B5B5B5B5B5B5B5B5B5B5B5B5B5B5B5B5B5B5B5B5B5B5B5B5B5B5B5B5B5B5B5B81526020018082116300000007575B6000F3" > {{ work_dir }}/large-contract-create.{{ item.size }}.json
+
+    retVal=$?
+    if [[ {{ item.size }} -gt 24576 && $retVal -ne 0 ]]; then
+        echo "task failed successfully"
+        exit 0;
+    fi
+
+    cast send {{ legacy_flag }} --gas-limit {{ max_block_size }} --private-key {{ private_key }} --rpc-url {{ rpc_url }} $(jq -r '.contractAddress' {{ work_dir }}/large-contract-create.{{ item.size }}.json) &>> {{ log_file }}
+  args:
+    executable: /bin/bash
+  loop:
+    - { size: 32,    hex_size: '0020' }
+    - { size: 64,    hex_size: '0040' }
+    - { size: 128,   hex_size: '0100' }
+    - { size: 256,   hex_size: '0080' }
+    - { size: 512,   hex_size: '0200' }
+    - { size: 1024,  hex_size: '0400' }
+    - { size: 2048,  hex_size: '0800' }
+    - { size: 4096,  hex_size: '1000' }
+    - { size: 8192,  hex_size: '2000' }
+    - { size: 16384, hex_size: '4000' }
+    - { size: 24576, hex_size: '6000' }
+    - { size: 24608, hex_size: '6020' }
+    - { size: 32768, hex_size: '8000' }
+
+- name: Add inscription to mark test end
+  ansible.builtin.include_role:
+    name: common
+    tasks_from: clear_chain
+  vars:
+    inscription_message: Finished {{ ansible_role_name }}

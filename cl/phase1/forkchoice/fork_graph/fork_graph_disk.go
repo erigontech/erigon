@@ -409,7 +409,6 @@ func (f *forkGraphDisk) Prune(pruneSlot uint64) (err error) {
 		f.currentJustifiedCheckpoints.Delete(root)
 		f.finalizedCheckpoints.Delete(root)
 		f.headers.Delete(root)
-		f.syncCommittees.Delete(root)
 		f.blockRewards.Delete(root)
 		f.fs.Remove(getBeaconStateFilename(root))
 		f.fs.Remove(getBeaconStateCacheFilename(root))

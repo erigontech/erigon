@@ -9,6 +9,7 @@ import (
 	"github.com/c2h5oh/datasize"
 	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/cmp"
+	"github.com/ledgerwatch/erigon-lib/config3"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/wrap"
 
@@ -27,7 +28,6 @@ import (
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/core/vm"
 	"github.com/ledgerwatch/erigon/eth/calltracer"
-	"github.com/ledgerwatch/erigon/eth/ethconfig"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 	"github.com/ledgerwatch/erigon/eth/tracers/logger"
 	rawdbZk "github.com/ledgerwatch/erigon/zk/rawdb"
@@ -148,6 +148,12 @@ Loop:
 			break Loop
 		}
 
+		if execRs.BlockInfoTree != nil {
+			if err = hermezDb.WriteBlockInfoRoot(blockNum, *execRs.BlockInfoTree); err != nil {
+				return err
+			}
+		}
+
 		// exec loop variables
 		header := block.HeaderNoCopy()
 		header.GasUsed = uint64(execRs.GasUsed)
@@ -243,6 +249,19 @@ func getBlockHashValues(cfg ExecuteBlockCfg, ctx context.Context, tx kv.RwTx, nu
 
 // returns calculated "to" block number for execution and the total blocks to be executed
 func getExecRange(cfg ExecuteBlockCfg, tx kv.RwTx, stageProgress, toBlock uint64, logPrefix string) (uint64, uint64, error) {
+	if cfg.zk.DebugLimit > 0 {
+		prevStageProgress, err := stages.GetStageProgress(tx, stages.Senders)
+		if err != nil {
+			return 0, 0, err
+		}
+		to := prevStageProgress
+		if cfg.zk.DebugLimit < to {
+			to = cfg.zk.DebugLimit
+		}
+		total := to - stageProgress
+		return to, total, nil
+	}
+
 	shouldShortCircuit, noProgressTo, err := utils.ShouldShortCircuitExecution(tx, logPrefix)
 	if err != nil {
 		return 0, 0, err
@@ -259,15 +278,6 @@ func getExecRange(cfg ExecuteBlockCfg, tx kv.RwTx, stageProgress, toBlock uint64
 
 	if shouldShortCircuit {
 		to = noProgressTo
-	}
-
-	// if debug limit set, use it
-	if cfg.zk.DebugLimit > 0 {
-		log.Info(fmt.Sprintf("[%s] Debug limit set, switching to it", logPrefix), "regularTo", to, "debugTo", cfg.zk.DebugLimit)
-
-		if cfg.zk.DebugLimit < to {
-			to = cfg.zk.DebugLimit
-		}
 	}
 
 	total := to - stageProgress
@@ -379,7 +389,7 @@ func executeBlockZk(
 	initialCycle bool,
 	stateStream bool,
 	roHermezDb state.ReadOnlyHermezDb,
-) (*core.EphemeralExecResult, error) {
+) (*core.EphemeralExecResultZk, error) {
 	blockNum := block.NumberU64()
 
 	stateReader, stateWriter, err := newStateReaderWriter(batch, tx, block, writeChangesets, cfg.accumulator, cfg.blockReader, stateStream)
@@ -480,7 +490,7 @@ func PruneExecutionStageZk(s *PruneState, tx kv.RwTx, cfg ExecuteBlockCfg, ctx c
 	if cfg.historyV3 {
 		cfg.agg.SetTx(tx)
 		if initialCycle {
-			if err = cfg.agg.Prune(ctx, ethconfig.HistoryV3AggregationStep/10); err != nil { // prune part of retired data, before commit
+			if err = cfg.agg.Prune(ctx, config3.HistoryV3AggregationStep/10); err != nil { // prune part of retired data, before commit
 				return err
 			}
 		} else {

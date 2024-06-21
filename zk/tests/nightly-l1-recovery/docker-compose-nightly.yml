@@ -1,0 +1,44 @@
+version: '3.8'
+
+services:
+  cache:
+    image: golang:1.19
+    command: ["go", "run", "cmd/hack/rpc_cache/main.go", "-file", "zk/tests/nightly-l1-recovery/network5-cache.db"]
+    volumes:
+      - ../../../:/repo
+    working_dir: /repo
+    networks:
+      - erigon-net
+
+  erigon:
+    build:
+      context: ../../../
+      dockerfile: Dockerfile
+    command: ["--config", "/config/network5-config.yaml"]
+    environment:
+      - CDK_ERIGON_SEQUENCER=1
+    volumes:
+      - ./:/config
+      - datadir:/datadir
+    networks:
+      - erigon-net
+    depends_on:
+      - cache
+
+  block-checker:
+    image: golang:1.19
+    command: ["go", "run", "/repo/zk/debug_tools/nightly-block-compare-wait/main.go", "--compare=http://34.175.214.161:8505"]
+    volumes:
+      - ../../../:/repo
+    working_dir: /repo
+    networks:
+      - erigon-net
+    depends_on:
+      - erigon
+
+networks:
+  erigon-net:
+    driver: bridge
+
+volumes:
+  datadir:

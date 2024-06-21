@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/ledgerwatch/log/v3"
+
 	"github.com/ledgerwatch/erigon-lib/chain"
 	"github.com/ledgerwatch/erigon-lib/common/datadir"
 	"github.com/ledgerwatch/erigon-lib/kv"
@@ -17,7 +19,6 @@ import (
 	"github.com/ledgerwatch/erigon/eth/stagedsync"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 	"github.com/ledgerwatch/erigon/turbo/services"
-	"github.com/ledgerwatch/log/v3"
 )
 
 func ResetState(db kv.RwDB, ctx context.Context, chain string, tmpDir string, logger log.Logger) error {
@@ -50,7 +51,7 @@ func ResetState(db kv.RwDB, ctx context.Context, chain string, tmpDir string, lo
 	return nil
 }
 
-func ResetBlocks(tx kv.RwTx, db kv.RoDB, agg *state.AggregatorV3,
+func ResetBlocks(tx kv.RwTx, db kv.RoDB, agg *state.Aggregator,
 	br services.FullBlockReader, bw *blockio.BlockWriter, dirs datadir.Dirs, cc chain.Config, engine consensus.Engine, logger log.Logger) error {
 	// keep Genesis
 	if err := rawdb.TruncateBlocks(context.Background(), tx, 1); err != nil {
@@ -241,6 +242,13 @@ func Reset(ctx context.Context, db kv.RwDB, stagesList ...stages.SyncStage) erro
 		return nil
 	})
 }
+
+func ResetPruneAt(ctx context.Context, db kv.RwDB, stage stages.SyncStage) error {
+	return db.Update(ctx, func(tx kv.RwTx) error {
+		return stages.SaveStagePruneProgress(tx, stage, 0)
+	})
+}
+
 func Warmup(ctx context.Context, db kv.RwDB, lvl log.Lvl, stList ...stages.SyncStage) error {
 	for _, st := range stList {
 		for _, tbl := range Tables[st] {

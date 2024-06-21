@@ -29,6 +29,8 @@ import (
 	"github.com/ledgerwatch/erigon/turbo/services"
 )
 
+var _ services.FullBlockReader = &RemoteBackend{}
+
 type RemoteBackend struct {
 	remoteEthBackend remote.ETHBACKENDClient
 	log              log.Logger

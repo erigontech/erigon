@@ -22,6 +22,15 @@ func NewClient(url string) *Client {
 	}
 }
 
+// HTTPError custom error type for handling HTTP responses
+type HTTPError struct {
+	StatusCode int
+}
+
+func (e *HTTPError) Error() string {
+	return fmt.Sprintf("invalid status code, expected: %d, found: %d", http.StatusOK, e.StatusCode)
+}
+
 // JSONRPCCall executes a 2.0 JSON RPC HTTP Post Request to the provided URL with
 // the provided method and parameters, which is compatible with the Ethereum
 // JSON RPC Server.
@@ -59,7 +68,7 @@ func JSONRPCCall(url, method string, parameters ...interface{}) (types.Response,
 	}
 
 	if httpRes.StatusCode != http.StatusOK {
-		return types.Response{}, fmt.Errorf("Invalid status code, expected: %v, found: %v", http.StatusOK, httpRes.StatusCode)
+		return types.Response{}, &HTTPError{StatusCode: httpRes.StatusCode}
 	}
 
 	resBody, err := io.ReadAll(httpRes.Body)

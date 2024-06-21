@@ -21,11 +21,13 @@ import (
 	"container/heap"
 	"context"
 	"encoding/binary"
+	"errors"
 	"fmt"
 	"math"
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strconv"
 	"sync/atomic"
 	"time"
@@ -34,7 +36,6 @@ import (
 	"github.com/c2h5oh/datasize"
 	"github.com/ledgerwatch/log/v3"
 	btree2 "github.com/tidwall/btree"
-	"golang.org/x/exp/slices"
 	"golang.org/x/sync/errgroup"
 
 	"github.com/ledgerwatch/erigon-lib/common/background"
@@ -51,7 +52,7 @@ import (
 )
 
 type InvertedIndex struct {
-	dirtyFiles *btree2.BTreeG[*filesItem] // thread-safe, but maybe need 1 RWLock for all trees in AggregatorV3
+	dirtyFiles *btree2.BTreeG[*filesItem] // thread-safe, but maybe need 1 RWLock for all trees in Aggregator
 
 	// roFiles derivative from field `file`, but without garbage (canDelete=true, overlaps, etc...)
 	// BeginFilesRo() using this field in zero-copy way
@@ -108,7 +109,7 @@ func NewInvertedIndex(
 }
 
 func (ii *InvertedIndex) fileNamesOnDisk() ([]string, error) {
-	files, err := os.ReadDir(ii.dir)
+	files, err := dir.ReadDir(ii.dir)
 	if err != nil {
 		return nil, err
 	}
@@ -126,7 +127,7 @@ func (ii *InvertedIndex) OpenList(fNames []string) error {
 	ii.closeWhatNotInList(fNames)
 	ii.garbageFiles = ii.scanStateFiles(fNames)
 	if err := ii.openFiles(); err != nil {
-		return fmt.Errorf("NewHistory.openFiles: %s, %w", ii.filenameBase, err)
+		return fmt.Errorf("NewHistory.openFiles: %w, %s", err, ii.filenameBase)
 	}
 	return nil
 }
@@ -299,7 +300,10 @@ func (ii *InvertedIndex) openFiles() error {
 			}
 
 			if item.decompressor, err = seg.NewDecompressor(datPath); err != nil {
-				ii.logger.Debug("InvertedIndex.openFiles: %w, %s", err, datPath)
+				ii.logger.Debug("InvertedIndex.openFiles:", "err", err, "file", datPath)
+				if errors.Is(err, &seg.ErrCompressedFileCorrupted{}) {
+					err = nil
+				}
 				continue
 			}
 
@@ -309,7 +313,7 @@ func (ii *InvertedIndex) openFiles() error {
 			idxPath := filepath.Join(ii.dir, fmt.Sprintf("%s.%d-%d.efi", ii.filenameBase, fromStep, toStep))
 			if dir.FileExist(idxPath) {
 				if item.index, err = recsplit.OpenIndex(idxPath); err != nil {
-					ii.logger.Debug("InvertedIndex.openFiles: %w, %s", err, idxPath)
+					ii.logger.Debug("InvertedIndex.openFiles:", "err", err, "file", idxPath)
 					return false
 				}
 				totalKeys += item.index.KeyCount()

@@ -10,6 +10,7 @@ import (
 
 	"github.com/ledgerwatch/erigon/cl/sentinel/communication"
 	"github.com/ledgerwatch/erigon/cl/sentinel/communication/ssz_snappy"
+	"github.com/ledgerwatch/erigon/cl/utils/eth_clock"
 
 	"github.com/c2h5oh/datasize"
 	"github.com/golang/snappy"
@@ -22,7 +23,6 @@ import (
 	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/cl/cltypes"
 	"github.com/ledgerwatch/erigon/cl/cltypes/solid"
-	"github.com/ledgerwatch/erigon/cl/fork"
 	"github.com/ledgerwatch/erigon/cl/utils"
 )
 
@@ -36,18 +36,18 @@ type BeaconRpcP2P struct {
 	sentinel sentinel.SentinelClient
 	// beaconConfig is the configuration for the beacon chain.
 	beaconConfig *clparams.BeaconChainConfig
-	// genesisConfig is the configuration for the genesis block of the beacon chain.
-	genesisConfig *clparams.GenesisConfig
+	// ethClock handles all time-related operations.
+	ethClock eth_clock.EthereumClock
 }
 
 // NewBeaconRpcP2P creates a new BeaconRpcP2P struct and returns a pointer to it.
 // It takes a context, a sentinel.Sent
-func NewBeaconRpcP2P(ctx context.Context, sentinel sentinel.SentinelClient, beaconConfig *clparams.BeaconChainConfig, genesisConfig *clparams.GenesisConfig) *BeaconRpcP2P {
+func NewBeaconRpcP2P(ctx context.Context, sentinel sentinel.SentinelClient, beaconConfig *clparams.BeaconChainConfig, ethClock eth_clock.EthereumClock) *BeaconRpcP2P {
 	return &BeaconRpcP2P{
-		ctx:           ctx,
-		sentinel:      sentinel,
-		beaconConfig:  beaconConfig,
-		genesisConfig: genesisConfig,
+		ctx:          ctx,
+		sentinel:     sentinel,
+		beaconConfig: beaconConfig,
+		ethClock:     ethClock,
 	}
 }
 
@@ -108,7 +108,7 @@ func (b *BeaconRpcP2P) sendBlocksRequest(ctx context.Context, topic string, reqD
 			return nil, message.Peer.Pid, fmt.Errorf("null fork digest")
 		}
 
-		version, err := fork.ForkDigestVersion(utils.Uint32ToBytes4(respForkDigest), b.beaconConfig, b.genesisConfig.GenesisValidatorRoot)
+		version, err := b.ethClock.StateVersionByForkDigest(utils.Uint32ToBytes4(respForkDigest))
 		if err != nil {
 			return nil, message.Peer.Pid, err
 		}
@@ -182,7 +182,7 @@ func (b *BeaconRpcP2P) sendBlobsSidecar(ctx context.Context, topic string, reqDa
 			return nil, message.Peer.Pid, fmt.Errorf("null fork digest")
 		}
 
-		version, err := fork.ForkDigestVersion(utils.Uint32ToBytes4(respForkDigest), b.beaconConfig, b.genesisConfig.GenesisValidatorRoot)
+		version, err := b.ethClock.StateVersionByForkDigest(utils.Uint32ToBytes4(respForkDigest))
 		if err != nil {
 			return nil, message.Peer.Pid, err
 		}
@@ -264,7 +264,7 @@ func (b *BeaconRpcP2P) Peers() (uint64, error) {
 }
 
 func (b *BeaconRpcP2P) SetStatus(finalizedRoot libcommon.Hash, finalizedEpoch uint64, headRoot libcommon.Hash, headSlot uint64) error {
-	forkDigest, err := fork.ComputeForkDigest(b.beaconConfig, b.genesisConfig)
+	forkDigest, err := b.ethClock.CurrentForkDigest()
 	if err != nil {
 		return err
 	}

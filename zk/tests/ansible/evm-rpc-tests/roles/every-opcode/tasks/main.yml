@@ -1,0 +1,38 @@
+---
+
+- name: Copy the every opcode smart contract
+  ansible.builtin.copy:
+    src: every-opcode.deploy.bin
+    dest: "{{ work_dir }}"
+
+
+- name: Deploy the every opcode contract
+  ansible.builtin.shell: |
+    pushd {{ work_dir }} || exit 1
+    cast send {{ legacy_flag }} --private-key {{ private_key }} --rpc-url {{ rpc_url }} -j \
+        --create $(cat every-opcode.deploy.bin) | jq '.' > every-opcode.out.tmp.json
+  args:
+    executable: /bin/bash
+
+- name: Call the every op code contract
+  ansible.builtin.shell: |
+    pushd {{ work_dir }} || exit 1
+    cast send {{ legacy_flag }} --private-key {{ private_key }} --rpc-url {{ rpc_url }} "$(jq -r .contractAddress every-opcode.out.tmp.json)" -j | jq '.' &>> {{ log_file }}
+  args:
+    executable: /bin/bash
+
+# The gas limit here is meant to speed things up vs being a block gas limit.
+- name: Call the every op code contract many times
+  ansible.builtin.shell: |
+    pushd {{ work_dir }} || exit 1
+    polycli loadtest {{ legacy_flag }} --private-key {{ private_key }} --mode cc --rate-limit 1000 --requests 12 --concurrency 5 \
+        --contract-address "$(jq -r '.contractAddress' every-opcode.out.tmp.json)" --calldata "0xDEADBEEF01" --rpc-url {{ rpc_url }} --gas-limit 500000 &>> {{ log_file }}
+  args:
+    executable: /bin/bash
+
+- name: Add inscription to mark test end
+  ansible.builtin.include_role:
+    name: common
+    tasks_from: clear_chain
+  vars:
+    inscription_message: Finished {{ ansible_role_name }}

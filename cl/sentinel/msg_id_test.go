@@ -13,13 +13,11 @@ import (
 )
 
 func TestMsgID(t *testing.T) {
-	g := clparams.GenesisConfigs[clparams.MainnetNetwork]
 	n := clparams.NetworkConfigs[clparams.MainnetNetwork]
 	s := &Sentinel{
 		ctx: context.TODO(),
 		cfg: &SentinelConfig{
 			BeaconConfig:  &clparams.MainnetBeaconConfig,
-			GenesisConfig: &g,
 			NetworkConfig: &n,
 		},
 	}

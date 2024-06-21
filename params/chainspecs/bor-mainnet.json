@@ -1,5 +1,5 @@
 {
-  "ChainName": "bor-mainnet",
+  "chainName": "bor-mainnet",
   "chainId": 137,
   "consensus": "bor",
   "homesteadBlock": 0,

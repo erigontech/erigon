@@ -28,6 +28,7 @@ import (
 	"github.com/ledgerwatch/erigon/cl/sentinel/handshake"
 	"github.com/ledgerwatch/erigon/cl/sentinel/peers"
 	"github.com/ledgerwatch/erigon/cl/utils"
+	"github.com/ledgerwatch/erigon/cl/utils/eth_clock"
 	"github.com/ledgerwatch/erigon/p2p/enode"
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync/freezeblocks"
 	"golang.org/x/time/rate"
@@ -72,12 +73,12 @@ var rateLimits = RateLimits{
 }
 
 type ConsensusHandlers struct {
-	handlers      map[protocol.ID]network.StreamHandler
-	hs            *handshake.HandShaker
-	beaconConfig  *clparams.BeaconChainConfig
-	genesisConfig *clparams.GenesisConfig
-	ctx           context.Context
-	beaconDB      freezeblocks.BeaconSnapshotReader
+	handlers     map[protocol.ID]network.StreamHandler
+	hs           *handshake.HandShaker
+	beaconConfig *clparams.BeaconChainConfig
+	ethClock     eth_clock.EthereumClock
+	ctx          context.Context
+	beaconDB     freezeblocks.BeaconSnapshotReader
 
 	indiciesDB         kv.RoDB
 	peerRateLimits     sync.Map
@@ -98,13 +99,13 @@ const (
 )
 
 func NewConsensusHandlers(ctx context.Context, db freezeblocks.BeaconSnapshotReader, indiciesDB kv.RoDB, host host.Host,
-	peers *peers.Pool, netCfg *clparams.NetworkConfig, me *enode.LocalNode, beaconConfig *clparams.BeaconChainConfig, genesisConfig *clparams.GenesisConfig, hs *handshake.HandShaker, forkChoiceReader forkchoice.ForkChoiceStorageReader, blobsStorage blob_storage.BlobStorage, enabledBlocks bool) *ConsensusHandlers {
+	peers *peers.Pool, netCfg *clparams.NetworkConfig, me *enode.LocalNode, beaconConfig *clparams.BeaconChainConfig, ethClock eth_clock.EthereumClock, hs *handshake.HandShaker, forkChoiceReader forkchoice.ForkChoiceStorageReader, blobsStorage blob_storage.BlobStorage, enabledBlocks bool) *ConsensusHandlers {
 	c := &ConsensusHandlers{
 		host:               host,
 		hs:                 hs,
 		beaconDB:           db,
 		indiciesDB:         indiciesDB,
-		genesisConfig:      genesisConfig,
+		ethClock:           ethClock,
 		beaconConfig:       beaconConfig,
 		ctx:                ctx,
 		peerRateLimits:     sync.Map{},

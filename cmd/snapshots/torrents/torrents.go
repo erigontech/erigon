@@ -5,12 +5,11 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	gosync "sync"
 	"time"
-
-	"golang.org/x/exp/slices"
 
 	"github.com/ledgerwatch/log/v3"
 
@@ -350,7 +349,7 @@ func updateTorrents(ctx context.Context, srcSession *downloader.RCloneSession, f
 	g, gctx := errgroup.WithContext(ctx)
 	g.SetLimit(16)
 
-	torrentFiles := downloader.NewAtomicTorrentFiles(srcSession.LocalFsRoot())
+	torrentFiles := downloader.NewAtomicTorrentFS(srcSession.LocalFsRoot())
 
 	for _, fi := range entries {
 		if filepath.Ext(fi.Name()) != ".torrent" {
@@ -382,7 +381,7 @@ func updateTorrents(ctx context.Context, srcSession *downloader.RCloneSession, f
 
 			defer os.Remove(filepath.Join(srcSession.LocalFsRoot(), file))
 
-			err = downloader.BuildTorrentIfNeed(gctx, file, srcSession.LocalFsRoot(), torrentFiles)
+			_, err = downloader.BuildTorrentIfNeed(gctx, file, srcSession.LocalFsRoot(), torrentFiles)
 
 			if err != nil {
 				return err
@@ -407,7 +406,7 @@ func verifyTorrents(ctx context.Context, srcSession *downloader.RCloneSession, f
 	g, gctx := errgroup.WithContext(ctx)
 	g.SetLimit(16)
 
-	torrentFiles := downloader.NewAtomicTorrentFiles(srcSession.LocalFsRoot())
+	torrentFiles := downloader.NewAtomicTorrentFS(srcSession.LocalFsRoot())
 
 	for _, fi := range entries {
 		if filepath.Ext(fi.Name()) != ".torrent" {
@@ -475,7 +474,7 @@ func verifyTorrents(ctx context.Context, srcSession *downloader.RCloneSession, f
 
 			defer os.Remove(filepath.Join(srcSession.LocalFsRoot(), file))
 
-			err = downloader.BuildTorrentIfNeed(gctx, file, srcSession.LocalFsRoot(), torrentFiles)
+			_, err = downloader.BuildTorrentIfNeed(gctx, file, srcSession.LocalFsRoot(), torrentFiles)
 
 			if err != nil {
 				return err

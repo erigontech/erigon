@@ -32,7 +32,6 @@ import (
 	mdbx1 "github.com/erigontech/mdbx-go/mdbx"
 	"github.com/ledgerwatch/log/v3"
 
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/mdbx"
 	"github.com/ledgerwatch/erigon/rlp"
@@ -97,7 +96,7 @@ func bucketsConfig(_ kv.TableCfg) kv.TableCfg {
 	}
 }
 
-// newMemoryNodeDB creates a new in-memory node database without a persistent backend.
+// newMemoryDB creates a new in-memory node database without a persistent backend.
 func newMemoryDB(ctx context.Context, logger log.Logger, tmpDir string) (*DB, error) {
 	db, err := mdbx.NewMDBX(logger).
 		InMem(tmpDir).
@@ -115,7 +114,7 @@ func newMemoryDB(ctx context.Context, logger log.Logger, tmpDir string) (*DB, er
 	return nodeDB, nil
 }
 
-// newPersistentNodeDB creates/opens a persistent node database,
+// newPersistentDB creates/opens a persistent node database,
 // also flushing its contents in case of a version mismatch.
 func newPersistentDB(ctx context.Context, logger log.Logger, path string) (*DB, error) {
 	db, err := mdbx.NewMDBX(logger).
@@ -262,7 +261,7 @@ func (db *DB) storeInt64(key []byte, n int64) error {
 	blob := make([]byte, binary.MaxVarintLen64)
 	blob = blob[:binary.PutVarint(blob, n)]
 	return db.kv.Update(db.ctx, func(tx kv.RwTx) error {
-		return tx.Put(kv.Inodes, libcommon.CopyBytes(key), blob)
+		return tx.Put(kv.Inodes, key, blob)
 	})
 }
 
@@ -286,11 +285,14 @@ func (db *DB) fetchUint64(key []byte) uint64 {
 
 // storeUint64 stores an integer in the given key.
 func (db *DB) storeUint64(key []byte, n uint64) error {
+	return db.kv.Update(db.ctx, func(tx kv.RwTx) error {
+		return db._storeUint64(tx, key, n)
+	})
+}
+func (db *DB) _storeUint64(tx kv.RwTx, key []byte, n uint64) error {
 	blob := make([]byte, binary.MaxVarintLen64)
 	blob = blob[:binary.PutUvarint(blob, n)]
-	return db.kv.Update(db.ctx, func(tx kv.RwTx) error {
-		return tx.Put(kv.Inodes, libcommon.CopyBytes(key), blob)
-	})
+	return tx.Put(kv.Inodes, key, blob)
 }
 
 // Node retrieves a node with a given id from the database.
@@ -334,12 +336,13 @@ func (db *DB) UpdateNode(node *Node) error {
 	if err != nil {
 		return err
 	}
-	if err := db.kv.Update(db.ctx, func(tx kv.RwTx) error {
-		return tx.Put(kv.NodeRecords, nodeKey(node.ID()), blob)
-	}); err != nil {
-		return err
-	}
-	return db.storeUint64(nodeItemKey(node.ID(), zeroIP, dbNodeSeq), node.Seq())
+	return db.kv.Update(db.ctx, func(tx kv.RwTx) error {
+		err = tx.Put(kv.NodeRecords, nodeKey(node.ID()), blob)
+		if err != nil {
+			return err
+		}
+		return db._storeUint64(tx, nodeItemKey(node.ID(), zeroIP, dbNodeSeq), node.Seq())
+	})
 }
 
 // NodeSeq returns the stored record sequence number of the given node.

@@ -10,6 +10,10 @@ import (
 )
 
 func SetupBlockBodyDownload(metricsMux *http.ServeMux) {
+	if metricsMux == nil {
+		return
+	}
+
 	metricsMux.HandleFunc("/block_body_download", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Access-Control-Allow-Origin", "*")
 		writeBlockBodyDownload(w, r)

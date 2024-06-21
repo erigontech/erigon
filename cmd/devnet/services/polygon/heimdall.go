@@ -238,6 +238,10 @@ func (h *Heimdall) FetchStateSyncEvents(ctx context.Context, fromID uint64, to t
 	return nil, fmt.Errorf("TODO")
 }
 
+func (h *Heimdall) FetchStateSyncEvent(ctx context.Context, id uint64) (*heimdall.EventRecordWithTime, error) {
+	return nil, fmt.Errorf("TODO")
+}
+
 func (h *Heimdall) Close() {
 	h.unsubscribe()
 }

@@ -20,9 +20,8 @@ import (
 )
 
 func testConfig(t *testing.T, n NetworkType) {
-	genesis, network, beacon := GetConfigsByNetwork(n)
+	network, beacon := GetConfigsByNetwork(n)
 
-	require.Equal(t, *genesis, GenesisConfigs[n])
 	require.Equal(t, *network, NetworkConfigs[n])
 	require.Equal(t, *beacon, BeaconConfigs[n])
 }

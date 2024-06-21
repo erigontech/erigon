@@ -35,6 +35,7 @@ func (s *EthereumExecutionModule) validatePayloadBlobs(expectedBlobHashes []libc
 
 func (e *EthereumExecutionModule) InsertBlocks(ctx context.Context, req *execution.InsertBlocksRequest) (*execution.InsertionResult, error) {
 	if !e.semaphore.TryAcquire(1) {
+		e.logger.Trace("ethereumExecutionModule.InsertBlocks: ExecutionStatus_Busy")
 		return &execution.InsertionResult{
 			Result: execution.ExecutionStatus_Busy,
 		}, nil

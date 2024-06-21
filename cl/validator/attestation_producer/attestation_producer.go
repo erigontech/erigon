@@ -42,7 +42,7 @@ func (ap *attestationProducer) ProduceAndCacheAttestationData(baseState *state.C
 	if err != nil {
 		return solid.AttestationData{}, err
 	}
-	if baseAttestationData, ok := ap.attestationsCache.Get(epoch); ok {
+	if baseAttestationData, ok := ap.attestationsCache.Get(slot); ok {
 		beaconBlockRoot := baseStateBlockRoot
 		if baseState.Slot() > slot {
 			beaconBlockRoot, err = baseState.GetBlockRootAtSlot(slot)
@@ -58,10 +58,11 @@ func (ap *attestationProducer) ProduceAndCacheAttestationData(baseState *state.C
 			baseAttestationData.Target(),
 		), nil
 	}
+	stateEpoch := state.Epoch(baseState)
+
 	if baseState.Slot() > slot {
 		return solid.AttestationData{}, errors.New("head state slot is bigger than requested slot, the attestation should have been cached, try again later.")
 	}
-	stateEpoch := state.Epoch(baseState)
 
 	if stateEpoch < epoch {
 		baseState, err = baseState.Copy()
@@ -74,7 +75,7 @@ func (ap *attestationProducer) ProduceAndCacheAttestationData(baseState *state.C
 	}
 
 	targetEpoch := state.Epoch(baseState)
-	epochStartTargetSlot := (targetEpoch * ap.beaconCfg.SlotsPerEpoch) - (ap.beaconCfg.SlotsPerEpoch - 1)
+	epochStartTargetSlot := targetEpoch * ap.beaconCfg.SlotsPerEpoch
 	var targetRoot libcommon.Hash
 	if epochStartTargetSlot == baseState.Slot() {
 		targetRoot = baseStateBlockRoot
@@ -98,7 +99,7 @@ func (ap *attestationProducer) ProduceAndCacheAttestationData(baseState *state.C
 			targetEpoch,
 		),
 	)
-	ap.attestationsCache.Add(epoch, baseAttestationData)
+	ap.attestationsCache.Add(slot, baseAttestationData)
 	return solid.NewAttestionDataFromParameters(
 		slot,
 		committeeIndex,

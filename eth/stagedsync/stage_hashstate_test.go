@@ -6,9 +6,9 @@ import (
 	"testing"
 
 	"github.com/ledgerwatch/erigon-lib/common/datadir"
+	"github.com/ledgerwatch/erigon-lib/config3"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/memdb"
-	"github.com/ledgerwatch/erigon/eth/ethconfig"
 	"github.com/stretchr/testify/require"
 
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
@@ -16,7 +16,7 @@ import (
 )
 
 func TestPromoteHashedStateClearState(t *testing.T) {
-	if ethconfig.EnableHistoryV4InTest {
+	if config3.EnableHistoryV4InTest {
 		t.Skip()
 	}
 	logger := log.New()
@@ -37,7 +37,7 @@ func TestPromoteHashedStateClearState(t *testing.T) {
 }
 
 func TestPromoteHashedStateIncremental(t *testing.T) {
-	if ethconfig.EnableHistoryV4InTest {
+	if config3.EnableHistoryV4InTest {
 		t.Skip()
 	}
 	logger := log.New()
@@ -67,7 +67,7 @@ func TestPromoteHashedStateIncremental(t *testing.T) {
 }
 
 func TestPromoteHashedStateIncrementalMixed(t *testing.T) {
-	if ethconfig.EnableHistoryV4InTest {
+	if config3.EnableHistoryV4InTest {
 		t.Skip()
 	}
 	logger := log.New()
@@ -88,7 +88,7 @@ func TestPromoteHashedStateIncrementalMixed(t *testing.T) {
 }
 
 func TestUnwindHashed(t *testing.T) {
-	if ethconfig.EnableHistoryV4InTest {
+	if config3.EnableHistoryV4InTest {
 		t.Skip()
 	}
 	logger := log.New()
@@ -115,7 +115,7 @@ func TestUnwindHashed(t *testing.T) {
 }
 
 func TestPromoteIncrementallyShutdown(t *testing.T) {
-	if ethconfig.EnableHistoryV4InTest {
+	if config3.EnableHistoryV4InTest {
 		t.Skip()
 	}
 	historyV3 := false
@@ -150,7 +150,7 @@ func TestPromoteIncrementallyShutdown(t *testing.T) {
 }
 
 func TestPromoteHashedStateCleanlyShutdown(t *testing.T) {
-	if ethconfig.EnableHistoryV4InTest {
+	if config3.EnableHistoryV4InTest {
 		t.Skip()
 	}
 	logger := log.New()
@@ -189,7 +189,7 @@ func TestPromoteHashedStateCleanlyShutdown(t *testing.T) {
 }
 
 func TestUnwindHashStateShutdown(t *testing.T) {
-	if ethconfig.EnableHistoryV4InTest {
+	if config3.EnableHistoryV4InTest {
 		t.Skip()
 	}
 	logger := log.New()

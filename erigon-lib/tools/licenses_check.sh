@@ -33,6 +33,7 @@ output=$(find "$projectDir" -maxdepth 1 -type 'd' \
     | grep -v "erigon-lib/seg/sais"                 `# MIT` \
     | grep -v "github.com/anacrolix/go-libutp"      `# MIT` \
     | grep -v "github.com/cespare/xxhash/v2"        `# MIT` \
+    | grep -v "github.com/cespare/xxhash"           `# MIT` \
     | grep -v "github.com/anacrolix/mmsg"           `# MPL-2.0` \
     | grep -v "github.com/anacrolix/multiless"      `# MPL-2.0` \
     | grep -v "github.com/anacrolix/sync"           `# MPL-2.0` \

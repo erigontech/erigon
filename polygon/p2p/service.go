@@ -10,7 +10,7 @@ import (
 	sentrymulticlient "github.com/ledgerwatch/erigon/p2p/sentry/sentry_multi_client"
 )
 
-//go:generate mockgen -source=./service.go -destination=./service_mock.go -package=p2p . Service
+//go:generate mockgen -typed=true -source=./service.go -destination=./service_mock.go -package=p2p . Service
 type Service interface {
 	Fetcher
 	MessageListener
@@ -43,9 +43,9 @@ func newService(
 	requestIdGenerator RequestIdGenerator,
 ) *service {
 	peerTracker := NewPeerTracker()
-	peerPenalizer := NewTrackingPeerPenalizer(NewPeerPenalizer(sentryClient), peerTracker)
+	peerPenalizer := NewPeerPenalizer(sentryClient)
 	messageListener := NewMessageListener(logger, sentryClient, statusDataFactory, peerPenalizer)
-	messageListener.RegisterPeerEventObserver(NewPeerEventObserver(peerTracker))
+	messageListener.RegisterPeerEventObserver(NewPeerEventObserver(logger, peerTracker))
 	messageSender := NewMessageSender(sentryClient)
 	fetcher := NewFetcher(fetcherConfig, messageListener, messageSender, requestIdGenerator)
 	fetcher = NewPenalizingFetcher(logger, fetcher, peerPenalizer)

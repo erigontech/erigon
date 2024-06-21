@@ -170,7 +170,18 @@ func (ml *messageListener) notifyPeerEventObservers(peerEvent *sentry.PeerEvent)
 	ml.observersMu.Lock()
 	defer ml.observersMu.Unlock()
 
-	notifyObservers(ml.peerEventObservers, peerEvent)
+	// wait on all observers to finish processing the peer event before notifying them
+	// with subsequent events in order to preserve the ordering of the sentry messages
+	var wg sync.WaitGroup
+	for _, observer := range ml.peerEventObservers {
+		wg.Add(1)
+		go func(observer MessageObserver[*sentry.PeerEvent]) {
+			defer wg.Done()
+			observer(peerEvent)
+		}(observer)
+	}
+
+	wg.Wait()
 	return nil
 }
 

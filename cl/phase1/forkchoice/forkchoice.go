@@ -1,13 +1,11 @@
 package forkchoice
 
 import (
+	"slices"
 	"sort"
 	"sync"
 	"sync/atomic"
 
-	"golang.org/x/exp/slices"
-
-	"github.com/ledgerwatch/erigon/cl/aggregation"
 	"github.com/ledgerwatch/erigon/cl/beacon/beaconevents"
 	"github.com/ledgerwatch/erigon/cl/beacon/synced_data"
 	"github.com/ledgerwatch/erigon/cl/clparams"
@@ -20,6 +18,7 @@ import (
 	"github.com/ledgerwatch/erigon/cl/phase1/forkchoice/fork_graph"
 	"github.com/ledgerwatch/erigon/cl/pool"
 	"github.com/ledgerwatch/erigon/cl/transition/impl/eth2"
+	"github.com/ledgerwatch/erigon/cl/utils/eth_clock"
 
 	lru "github.com/hashicorp/golang-lru/v2"
 
@@ -72,10 +71,7 @@ type ForkChoiceStore struct {
 	unrealizedJustifiedCheckpoint atomic.Value
 	unrealizedFinalizedCheckpoint atomic.Value
 
-	proposerBoostRoot atomic.Value
-	// messages that are not yet processed but can be processable in the future.
-	aggregatesSet sync.Map
-	// head data
+	proposerBoostRoot     atomic.Value
 	headHash              libcommon.Hash
 	headSlot              uint64
 	genesisTime           uint64
@@ -110,25 +106,18 @@ type ForkChoiceStore struct {
 	participation *lru.Cache[uint64, *solid.BitList] // epoch -> [partecipation]
 
 	mu sync.RWMutex
-	// sync committees messages processing
-	muSyncCommitteeMessages sync.Mutex
-	muSyncContribution      sync.Mutex
+
 	// EL
 	engine execution_client.ExecutionEngine
 
 	// operations pool
 	operationsPool pool.OperationsPool
 	beaconCfg      *clparams.BeaconChainConfig
-	netCfg         *clparams.NetworkConfig
-
-	aggregationPool aggregation.AggregationPool
 
 	emitters *beaconevents.Emitters
 	synced   atomic.Bool
 
-	// validatorAttestationSeen maps from epoch to validator index. This is used to ignore duplicate validator attestations in the same epoch.
-	validatorAttestationSeen map[uint64]map[uint64]struct{}
-	validatorAttSeenLock     sync.Mutex
+	ethClock eth_clock.EthereumClock
 }
 
 type LatestMessage struct {
@@ -142,9 +131,16 @@ type childrens struct {
 }
 
 // NewForkChoiceStore initialize a new store from the given anchor state, either genesis or checkpoint sync state.
-func NewForkChoiceStore(anchorState *state2.CachingBeaconState, engine execution_client.ExecutionEngine,
-	operationsPool pool.OperationsPool, forkGraph fork_graph.ForkGraph, emitters *beaconevents.Emitters,
-	syncedDataManager *synced_data.SyncedDataManager, blobStorage blob_storage.BlobStorage, netCfg *clparams.NetworkConfig, aggrPool aggregation.AggregationPool) (*ForkChoiceStore, error) {
+func NewForkChoiceStore(
+	ethClock eth_clock.EthereumClock,
+	anchorState *state2.CachingBeaconState,
+	engine execution_client.ExecutionEngine,
+	operationsPool pool.OperationsPool,
+	forkGraph fork_graph.ForkGraph,
+	emitters *beaconevents.Emitters,
+	syncedDataManager *synced_data.SyncedDataManager,
+	blobStorage blob_storage.BlobStorage,
+) (*ForkChoiceStore, error) {
 	anchorRoot, err := anchorState.BlockRoot()
 	if err != nil {
 		return nil, err
@@ -225,7 +221,6 @@ func NewForkChoiceStore(anchorState *state2.CachingBeaconState, engine execution
 		operationsPool:        operationsPool,
 		anchorPublicKeys:      anchorPublicKeys,
 		beaconCfg:             anchorState.BeaconConfig(),
-		netCfg:                netCfg,
 		preverifiedSizes:      preverifiedSizes,
 		finalityCheckpoints:   finalityCheckpoints,
 		totalActiveBalances:   totalActiveBalances,
@@ -241,7 +236,7 @@ func NewForkChoiceStore(anchorState *state2.CachingBeaconState, engine execution
 		genesisValidatorsRoot: anchorState.GenesisValidatorsRoot(),
 		hotSidecars:           make(map[libcommon.Hash][]*cltypes.BlobSidecar),
 		blobStorage:           blobStorage,
-		aggregationPool:       aggrPool,
+		ethClock:              ethClock,
 	}
 	f.justifiedCheckpoint.Store(anchorCheckpoint.Copy())
 	f.finalizedCheckpoint.Store(anchorCheckpoint.Copy())
@@ -372,6 +367,10 @@ func (f *ForkChoiceStore) GetFinalityCheckpoints(blockRoot libcommon.Hash) (bool
 
 func (f *ForkChoiceStore) GetSyncCommittees(period uint64) (*solid.SyncCommittee, *solid.SyncCommittee, bool) {
 	return f.forkGraph.GetSyncCommittees(period)
+}
+
+func (f *ForkChoiceStore) GetBeaconCommitee(slot, committeeIndex uint64) ([]uint64, error) {
+	return f.syncedDataManager.HeadState().GetBeaconCommitee(slot, committeeIndex)
 }
 
 func (f *ForkChoiceStore) BlockRewards(root libcommon.Hash) (*eth2.BlockRewardsCollector, bool) {

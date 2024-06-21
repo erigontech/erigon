@@ -6,6 +6,9 @@ import (
 	"time"
 
 	"github.com/holiman/uint256"
+	db2 "github.com/ledgerwatch/erigon/smt/pkg/db"
+	"github.com/ledgerwatch/erigon/smt/pkg/smt"
+	"github.com/ledgerwatch/erigon/zk/hermez_db"
 	"github.com/ledgerwatch/log/v3"
 
 	"github.com/ledgerwatch/erigon-lib/chain"
@@ -125,13 +128,14 @@ func MakeHeaderGetter(requireCanonical bool, tx kv.Tx, headerReader services.Hea
 }
 
 type ReusableCaller struct {
-	evm             *vm.EVM
+	evm             vm.EVM
 	intraBlockState *state.IntraBlockState
 	gasCap          uint64
 	baseFee         *uint256.Int
 	stateReader     state.StateReader
 	callTimeout     time.Duration
 	message         *types.Message
+	batchCounters   *vm.BatchCounterCollector
 }
 
 func (r *ReusableCaller) DoCallWithNewGas(
@@ -164,7 +168,7 @@ func (r *ReusableCaller) DoCallWithNewGas(
 
 	gp := new(core.GasPool).AddGas(r.message.Gas()).AddBlobGas(r.message.BlobGas())
 
-	result, err := core.ApplyMessage(r.evm, r.message, gp, true /* refunds */, false /* gasBailout */)
+	result, err := core.ApplyMessage(&r.evm, r.message, gp, true /* refunds */, false /* gasBailout */)
 	if err != nil {
 		return nil, err
 	}
@@ -215,15 +219,51 @@ func NewReusableCaller(
 	blockCtx := NewEVMBlockContext(engine, header, blockNrOrHash.RequireCanonical, tx, headerReader)
 	txCtx := core.NewEVMTxContext(msg)
 
-	evm := vm.NewEVM(blockCtx, txCtx, ibs, chainConfig, vm.Config{NoBaseFee: true})
+	eriDb := db2.NewRoEriDb(tx)
+	smt := smt.NewRoSMT(eriDb)
+	hermezDb := hermez_db.NewHermezDbReader(tx)
+
+	forkId, err := hermezDb.GetForkIdByBlockNum(header.Number.Uint64())
+	if err != nil {
+		return nil, err
+	}
+
+	smtDepth := smt.GetDepth()
+
+	to := msg.To()
+	if to == nil {
+		to = &libcommon.Address{}
+	}
+
+	// transaction from message
+	transaction := types.NewTransaction(
+		msg.Nonce(),
+		*to,
+		msg.Value(),
+		msg.Gas(),
+		msg.GasPrice(),
+		msg.Data(),
+	)
+
+	batchCounters := vm.NewBatchCounterCollector(smtDepth, uint16(forkId), false)
+	txCounters := vm.NewTransactionCounter(transaction, smtDepth, false)
+
+	_, err = batchCounters.AddNewTransactionCounters(txCounters)
+	if err != nil {
+		return nil, err
+	}
+
+	zkConfig := vm.ZkConfig{Config: vm.Config{NoBaseFee: true}, CounterCollector: txCounters.ExecutionCounters()}
+	evm := vm.NewZkEVM(blockCtx, txCtx, ibs, chainConfig, zkConfig)
 
 	return &ReusableCaller{
-		evm:             evm,
+		evm:             *evm,
 		intraBlockState: ibs,
 		baseFee:         baseFee,
 		gasCap:          gasCap,
 		callTimeout:     callTimeout,
 		stateReader:     stateReader,
 		message:         &msg,
+		batchCounters:   batchCounters,
 	}, nil
 }

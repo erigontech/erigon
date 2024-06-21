@@ -481,3 +481,25 @@ func BenchmarkGetVerificationByBatchNo(b *testing.B) {
 		}
 	}
 }
+
+func TestBatchBlocks(t *testing.T) {
+	tx, cleanup := GetDbTx()
+	defer cleanup()
+	db := NewHermezDb(tx)
+
+	for i := 0; i < 1000; i++ {
+		err := db.WriteBlockBatch(uint64(i), uint64(1))
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	blocks, err := db.GetL2BlockNosByBatch(1)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if len(blocks) != 1000 {
+		t.Fatal("Expected 1000 blocks")
+	}
+}

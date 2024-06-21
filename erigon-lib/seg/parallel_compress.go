@@ -25,6 +25,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"slices"
 	"strconv"
 	"sync"
 	"sync/atomic"
@@ -37,7 +38,6 @@ import (
 	"github.com/ledgerwatch/erigon-lib/seg/sais"
 
 	"github.com/ledgerwatch/log/v3"
-	"golang.org/x/exp/slices"
 )
 
 // MinPatternScore is minimum score (per superstring) required to consider including pattern into the dictionary

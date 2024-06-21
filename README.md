@@ -20,13 +20,13 @@ Current status of cdk-erigon's support for running various chains and fork ids:
 ## Dynamic Chain Configuration
 To use chains other than the defaults above, a set of configuration files can be supplied to run any chain.
 
-1. Create a directory `~/dynamic-configs` (in the user home directory)
-2. Ensure your chain name starts with the word `dynamic` e.g. `dynamic-mynetwork`
-3. Create 3 files in dynamic configs (examples for Cardona in `zk/examples/dynamic-configs`, copy these into your dynamic-configs folder and edit as required)
+1. Ensure your chain name starts with the word `dynamic` e.g. `dynamic-mynetwork`
+3. Create 3 files for dynamic configs (examples for Cardona in `zk/examples/dynamic-configs`, edit as required)
    - `dynamic-{network}-allocs.json` - the allocs file
    - `dynamic-{network}-chainspec.json` - the chainspec file
    - `dynamic-{network}-conf.json` - an additional configuration file
    - `dynamic-{network}.yaml` - the run config file for erigon.  You can use any of the example yaml files at the root of the repo as a base and edit as required, but ensure the `chain` field is in the format `dynamic-{network}` and matches the names of the config files above.
+4. Place the erigon config file along with the other files in the directory of your choice, for example `dynamic-mynetwork`.
 
 **Tip**: if you have allocs in the format from Polygon when originally launching the network you can save this file to the root of the cdk-erigon code
 base and run `go run cmd/hack/allocs/main.go [your-file-name]` to convert it to the format needed by erigon, this will form the `dynamic-{network}-allocs.json` file.
@@ -38,9 +38,9 @@ base and run `go run cmd/hack/allocs/main.go [your-file-name]` to convert it to 
 - zkevm.address-rollup => deploy_output.json => `polygonRollupManagerAddress`
 - zkevm.address-ger-manager => deploy_output.json => `polygonZkEVMGlobalExitRootAddress`
 
-Mount point for this folder on docker container: `~/dynamic-configs` (home directory of erigon user)
+Mount the directory containing the config files on docker container: `/dynamic-mynetwork` for example
 
-To use the new config when starting erigon use the `--config` flag with the path to the config file e.g. `--config="/path/to/home-dir/dynamic-networks/dynamic-mynetwork.yaml"`
+To use the new config when starting erigon use the `--cfg` flag with the path to the config file e.g. `--cfg="/dynamic-mynetwork/dynamic-mynetwork.yaml"`
 
 ## Prereqs
 In order to use the optimal vectorized poseidon hashing for the Sparse Merkle Tree, on x86 the following packages are required (for Apple silicon it will fall back to the iden3 library and as such these dependencies are not required in that case.
@@ -53,9 +53,15 @@ Using the Makefile command: `make build-libs` will install these for the relevan
 
 Due to dependency requirements Go 1.21 is required to build.
 
+## L1 Interaction
+In order to retrieve data from the L1, the L1 syncer must be configured to know how to request the highest block, this can be configured by flag:
+
+- `zkevm.l1-highest-block-type` which defaults to retrieving the 'finalized' block, however there are cases where you may wish to pass 'safe' or 'latest'.
+
 ## Sequencer (WIP)
 
 Enable Sequencer: `CDK_ERIGON_SEQUENCER=1 ./build/bin/cdk-erigon <flags>`
+[Golang version >= 1.21](https://golang.org/doc/install); GCC 10+ or Clang; On Linux: kernel > v4
 
 ### Special mode - L1 recovery
 The sequencer supports a special recovery mode which allows it to continue the chain using data from the L1.  To enable
@@ -83,6 +89,8 @@ In order to enable the zkevm_ namespace, please add 'zkevm' to the http.api flag
 - `zkevm_virtualBatchNumber`
 - `zkevm_getFullBlockByHash`
 - `zkevm_getFullBlockByNumber`
+- `zkevm_virtualCounters`
+- `zkevm_traceTransactionCounters`
 
 ### Supported (remote)
 - `zkevm_getBatchByNumber`
@@ -112,8 +120,6 @@ Depending on the RPC provider you are using, you may wish to alter `zkevm.rpc-ra
 - Build using  `make cdk-erigon`
 - Set up your config file (copy one of the examples found in the repository root directory, and edit as required)
 - run `./build/bin/cdk-erigon --config="./hermezconfig-{network}.yaml"` (complete the name of your config file as required)
-
-NB: `--externalcl` flag is removed in upstream erigon so beware of re-using commands/config
 
 ### Run modes
 cdk-erigon can be run as an RPC node which will use the data stream to fetch new block/batch information and track a 
@@ -169,7 +175,6 @@ For a full explanation of the config options, see below:
 - `zkevm.data-stream-port`: Port for the data stream.  This needs to be set to enable the datastream server
 - `zkevm.data-stream-host`: The host for the data stream i.e. `localhost`.  This must be set to enable the datastream server
 - `zkevm.datastream-version:` Version of the data stream protocol.
-- `externalcl`: External consensus layer flag.
 - `http.api`: List of enabled HTTP API modules.
 
 Sequencer specific config:

@@ -209,6 +209,8 @@ var (
 	}
 
 	TestRules = TestChainConfig.Rules(0, 0)
+
+	DynamicChainConfigPath string
 )
 
 type ConsensusSnapshotConfig struct {
@@ -222,13 +224,7 @@ type ConsensusSnapshotConfig struct {
 const cliquePath = "clique"
 
 func DynamicChainConfig(ch string) *chain.Config {
-	homeDir, err := os.UserHomeDir()
-	if err != nil {
-		panic(err)
-	}
-
-	basePath := path.Join(homeDir, "dynamic-configs")
-	filename := path.Join(basePath, ch+"-chainspec.json")
+	filename := path.Join(DynamicChainConfigPath, ch+"-chainspec.json")
 
 	f, err := os.Open(filename)
 	if err != nil {

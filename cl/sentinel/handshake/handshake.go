@@ -11,10 +11,10 @@ import (
 	communication2 "github.com/ledgerwatch/erigon/cl/sentinel/communication"
 	"github.com/ledgerwatch/erigon/cl/sentinel/communication/ssz_snappy"
 	"github.com/ledgerwatch/erigon/cl/sentinel/httpreqresp"
+	"github.com/ledgerwatch/erigon/cl/utils/eth_clock"
 
 	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/cl/cltypes"
-	"github.com/ledgerwatch/erigon/cl/fork"
 	"github.com/libp2p/go-libp2p/core/peer"
 )
 
@@ -23,22 +23,22 @@ import (
 type HandShaker struct {
 	ctx context.Context
 	// Status object to send over.
-	status        *cltypes.Status // Contains status object for handshakes
-	set           bool
-	handler       http.Handler
-	genesisConfig *clparams.GenesisConfig
-	beaconConfig  *clparams.BeaconChainConfig
+	status       *cltypes.Status // Contains status object for handshakes
+	set          bool
+	handler      http.Handler
+	beaconConfig *clparams.BeaconChainConfig
+	ethClock     eth_clock.EthereumClock
 
 	mu sync.Mutex
 }
 
-func New(ctx context.Context, genesisConfig *clparams.GenesisConfig, beaconConfig *clparams.BeaconChainConfig, handler http.Handler) *HandShaker {
+func New(ctx context.Context, ethClock eth_clock.EthereumClock, beaconConfig *clparams.BeaconChainConfig, handler http.Handler) *HandShaker {
 	return &HandShaker{
-		ctx:           ctx,
-		handler:       handler,
-		genesisConfig: genesisConfig,
-		beaconConfig:  beaconConfig,
-		status:        &cltypes.Status{},
+		ctx:          ctx,
+		handler:      handler,
+		ethClock:     ethClock,
+		beaconConfig: beaconConfig,
+		status:       &cltypes.Status{},
 	}
 }
 
@@ -96,9 +96,6 @@ func (h *HandShaker) ValidatePeer(id peer.ID) (bool, error) {
 	if err := ssz_snappy.DecodeAndReadNoForkDigest(resp.Body, responseStatus, clparams.Phase0Version); err != nil {
 		return false, nil
 	}
-	forkDigest, err := fork.ComputeForkDigest(h.beaconConfig, h.genesisConfig)
-	if err != nil {
-		return false, nil
-	}
-	return responseStatus.ForkDigest == forkDigest, nil
+	forkDigest, err := h.ethClock.CurrentForkDigest()
+	return responseStatus.ForkDigest == forkDigest, err
 }

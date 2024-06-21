@@ -23,6 +23,7 @@ import (
 	"encoding/base64"
 	"fmt"
 	"io"
+	"slices"
 	"strings"
 
 	"github.com/ledgerwatch/erigon/crypto"
@@ -30,7 +31,6 @@ import (
 	"github.com/ledgerwatch/erigon/p2p/enr"
 	"github.com/ledgerwatch/erigon/rlp"
 	"golang.org/x/crypto/sha3"
-	"golang.org/x/exp/slices"
 )
 
 // Tree is a merkle tree of node records.

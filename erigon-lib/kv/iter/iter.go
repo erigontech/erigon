@@ -18,10 +18,10 @@ package iter
 
 import (
 	"bytes"
+	"slices"
 
 	"github.com/ledgerwatch/erigon-lib/kv/order"
 	"golang.org/x/exp/constraints"
-	"golang.org/x/exp/slices"
 )
 
 type Closer interface {

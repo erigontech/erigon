@@ -3,13 +3,11 @@ package types
 import (
 	"encoding/binary"
 	"fmt"
+	"github.com/ledgerwatch/erigon/zk/datastream/proto/github.com/0xPolygonHermez/zkevm-node/state/datastream"
 )
 
-type EntryType uint32
-
 const (
-	FileEntryMinSize  uint32    = 17 // 1+4+4+8
-	BookmarkEntryType EntryType = 176
+	FileEntryMinSize uint32 = 17 // 1+4+4+8
 )
 
 type FileEntry struct {
@@ -20,21 +18,41 @@ type FileEntry struct {
 	Data       []byte
 }
 
-func (f *FileEntry) IsBlockStart() bool {
-	return f.EntryType == EntryTypeStartL2Block
-}
-
-func (f *FileEntry) IsTx() bool {
-	return f.EntryType == EntryTypeL2Tx
-}
-
-func (f *FileEntry) IsBlockEnd() bool {
-	return f.EntryType == EntryTypeEndL2Block
-}
-
 func (f *FileEntry) IsBookmark() bool {
 	return f.EntryType == BookmarkEntryType
 }
+
+// PROTO TYPES
+
+func (f *FileEntry) IsBookmarkBatch() bool {
+	return uint32(f.EntryType) == uint32(datastream.BookmarkType_BOOKMARK_TYPE_BATCH)
+}
+
+func (f *FileEntry) IsBookmarkBlock() bool {
+	return uint32(f.EntryType) == uint32(datastream.BookmarkType_BOOKMARK_TYPE_L2_BLOCK)
+}
+
+func (f *FileEntry) IsL2Block() bool {
+	return uint32(f.EntryType) == uint32(datastream.EntryType_ENTRY_TYPE_L2_BLOCK)
+}
+
+func (f *FileEntry) IsL2Tx() bool {
+	return uint32(f.EntryType) == uint32(datastream.EntryType_ENTRY_TYPE_TRANSACTION)
+}
+
+func (f *FileEntry) IsBatchStart() bool {
+	return uint32(f.EntryType) == uint32(datastream.EntryType_ENTRY_TYPE_BATCH_START)
+}
+
+func (f *FileEntry) IsBatchEnd() bool {
+	return uint32(f.EntryType) == uint32(datastream.EntryType_ENTRY_TYPE_BATCH_END)
+}
+
+func (f *FileEntry) IsUpdateGer() bool {
+	return uint32(f.EntryType) == uint32(datastream.EntryType_ENTRY_TYPE_UPDATE_GER)
+}
+
+// End PROTO TYPES
 
 func (f *FileEntry) IsGerUpdate() bool {
 	return f.EntryType == EntryTypeGerUpdate

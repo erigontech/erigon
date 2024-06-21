@@ -369,7 +369,7 @@ func decodeBlobVersionedHashes(hashes *[]libcommon.Hash, s *rlp.Stream) error {
 			copy((_hash)[:], b)
 			*hashes = append(*hashes, _hash)
 		} else {
-			return fmt.Errorf("wrong size for blobVersionedHashes: %d, %v", len(b), b[0])
+			return fmt.Errorf("wrong size for blobVersionedHashes: %d", len(b))
 		}
 	}
 

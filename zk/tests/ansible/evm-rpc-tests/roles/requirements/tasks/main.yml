@@ -1,0 +1,38 @@
+---
+- name: Check if cast is installed
+  ansible.builtin.shell:
+    cast --version
+
+- name: Check if polycli is installed
+  ansible.builtin.shell:
+    polycli version
+
+- name: Check if jq is installed
+  ansible.builtin.shell:
+    jq --version
+
+- name: Checking balance
+  ansible.builtin.shell: |
+    addr="$(cast wallet address --private-key {{ private_key }})"
+    if [[ $addr != "{{ eth_address }}" ]]; then
+        echo "The configured address {{ eth_address }} doesn't match the private key's address $addr"
+        exit 1
+    fi
+    cast balance --ether --rpc-url {{ rpc_url }} $addr
+  args:
+    executable: /bin/bash
+  register:
+    balance
+
+- name: Print balance
+  debug:
+    msg: "The balance for the test account is {{ balance.stdout }}"
+
+- name: Create a directory to store various output files
+  ansible.builtin.file:
+    path: "{{ work_dir }}"
+    state: directory
+    mode: '0755'
+
+
+

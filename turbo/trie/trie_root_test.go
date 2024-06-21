@@ -4,11 +4,12 @@ import (
 	"bytes"
 	"context"
 	"encoding/binary"
-	"github.com/ledgerwatch/erigon-lib/common/hexutil"
-	"github.com/ledgerwatch/erigon-lib/kv/dbutils"
 	"math/big"
 	"testing"
 	"time"
+
+	"github.com/ledgerwatch/erigon-lib/common/hexutil"
+	"github.com/ledgerwatch/erigon-lib/kv/dbutils"
 
 	"github.com/holiman/uint256"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
@@ -473,7 +474,7 @@ func FuzzTrieRootAccounts(f *testing.F) {
 // populates the trie tables. Then, it modifies the database of accounts but
 // does not update the trie tables.  Finally, for every seeded account (modified
 // and not), it computes a proof for that key and verifies that the proof
-// matches the one as computed by the naive trie implementation and that that
+// matches the one as computed by the naive trie implementation and that
 // proof is valid.
 func FuzzTrieRootAccountProofs(f *testing.F) {
 	addFuzzTrieSeeds(f)
@@ -554,7 +555,7 @@ func FuzzTrieRootAccountProofs(f *testing.F) {
 // modifies the database of storage but does not update the trie tables.
 // Finally, for every seeded storage key (modified and not), it computes a proof for
 // that key and verifies that the proof matches the one as computed by the naive
-// trie implementation and that that proof is valid.
+// trie implementation and that proof is valid.
 func FuzzTrieRootStorageProofs(f *testing.F) {
 	addFuzzTrieSeeds(f)
 

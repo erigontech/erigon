@@ -1,5 +1,5 @@
 {
-  "ChainName": "gnosis",
+  "chainName": "gnosis",
   "chainId": 100,
   "consensus": "aura",
   "homesteadBlock": 0,

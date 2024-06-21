@@ -40,21 +40,22 @@ type HttpCfg struct {
 	AuthRpcPort    int
 	PrivateApiAddr string
 
-	API                  []string
-	Gascap               uint64
-	MaxTraces            uint64
-	WebsocketPort        int
-	WebsocketEnabled     bool
-	WebsocketCompression bool
-	RpcAllowListFilePath string
-	RpcBatchConcurrency  uint
-	RpcStreamingDisable  bool
-	DBReadConcurrency    int
-	TraceCompatibility   bool // Bug for bug compatibility for trace_ routines with OpenEthereum
-	TxPoolApiAddr        string
-	StateCache           kvcache.CoherentConfig
-	Snap                 ethconfig.BlocksFreezing
-	Sync                 ethconfig.Sync
+	API                               []string
+	Gascap                            uint64
+	MaxTraces                         uint64
+	WebsocketPort                     int
+	WebsocketEnabled                  bool
+	WebsocketCompression              bool
+	WebsocketSubscribeLogsChannelSize int
+	RpcAllowListFilePath              string
+	RpcBatchConcurrency               uint
+	RpcStreamingDisable               bool
+	DBReadConcurrency                 int
+	TraceCompatibility                bool // Bug for bug compatibility for trace_ routines with OpenEthereum
+	TxPoolApiAddr                     string
+	StateCache                        kvcache.CoherentConfig
+	Snap                              ethconfig.BlocksFreezing
+	Sync                              ethconfig.Sync
 
 	// GRPC server
 	GRPCServerEnabled      bool
@@ -67,7 +68,8 @@ type HttpCfg struct {
 	SocketListenUrl     string
 
 	JWTSecretPath             string // Engine API Authentication
-	TraceRequests             bool   // Always trace requests in INFO level
+	TraceRequests             bool   // Print requests to logs at INFO level
+	DebugSingleRequest        bool   // Print single-request-related debugging info to logs at INFO level
 	HTTPTimeouts              rpccfg.HTTPTimeouts
 	AuthRpcTimeouts           rpccfg.HTTPTimeouts
 	EvmCallTimeout            time.Duration

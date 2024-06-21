@@ -16,7 +16,9 @@
 
 package diagnostics
 
-import "time"
+import (
+	"time"
+)
 
 type PeerStatisticsGetter interface {
 	GetPeersStatistics() map[string]*PeerStatistics

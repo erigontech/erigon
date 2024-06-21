@@ -1,0 +1,180 @@
+{
+  "openrpc": "1.0.0-rc1",
+  "info": {
+    "title": "zkEVM Endpoints",
+    "version": "2.0.0"
+  },
+  "methods": [
+    {
+      "name": "zkevm_estimateCounters",
+      "summary": "Estimates the transaction ZK Counters",
+      "params": [
+        {
+          "$ref": "#/components/contentDescriptors/Transaction"
+        }
+      ],
+      "result": {
+        "name": "counters",
+        "description": "The counters used, limits and revert info when tx reverted",
+        "schema": {
+          "$ref": "#/components/schemas/ZKCountersResponse"
+        }
+      }
+    }
+  ],
+  "components": {
+    "contentDescriptors": {
+      "Transaction": {
+        "required": true,
+        "name": "transaction",
+        "schema": {
+          "$ref": "#/components/schemas/Transaction"
+        }
+      }
+    },
+    "schemas": {
+      "Integer": {
+        "title": "integer",
+        "type": "string",
+        "pattern": "^0x[a-fA-F0-9]+$",
+        "description": "Hex representation of the integer"
+      },
+      "Address": {
+        "title": "address",
+        "type": "string",
+        "pattern": "^0x[a-fA-F\\d]{40}$"
+      },
+      "Nonce": {
+        "title": "nonce",
+        "description": "A number only to be used once",
+        "$ref": "#/components/schemas/Integer"
+      },
+      "Transaction": {
+        "title": "transaction",
+        "type": "object",
+        "required": [
+          "to",
+          "from",
+          "value",
+          "gas",
+          "gasPrice",
+          "nonce",
+          "v",
+          "r",
+          "s"
+        ],
+        "properties": {
+          "gas": {
+            "title": "transactionGas",
+            "type": "string",
+            "description": "The gas limit provided by the sender in Wei"
+          },
+          "gasPrice": {
+            "title": "transactionGasPrice",
+            "type": "string",
+            "description": "The gas price willing to be paid by the sender in Wei"
+          },
+          "input": {
+            "title": "transactionInput",
+            "type": "string",
+            "description": "The data field sent with the transaction"
+          },
+          "nonce": {
+            "title": "transactionNonce",
+            "description": "The total number of prior transactions made by the sender",
+            "$ref": "#/components/schemas/Nonce"
+          },
+          "to": {
+            "$ref": "#/components/schemas/Address"
+          },
+          "value": {
+            "title": "transactionValue",
+            "description": "Value of Ether being transferred in Wei",
+            "type": "string"
+          },
+          "v": {
+            "title": "transactionSigV",
+            "type": "string",
+            "description": "ECDSA recovery id"
+          },
+          "r": {
+            "title": "transactionSigR",
+            "type": "string",
+            "description": "ECDSA signature r"
+          },
+          "s": {
+            "title": "transactionSigS",
+            "type": "string",
+            "description": "ECDSA signature s"
+          }
+        }
+      },
+      "ZKCountersResponse": {
+        "title": "ZKCountersResponse",
+        "type": "object",
+        "readOnly": true,
+        "properties": {
+          "countersUsed": {
+            "$ref": "#/components/schemas/ZKCounters"
+          },
+          "countersLimits": {
+            "$ref": "#/components/schemas/ZKCounters"
+          },
+          "revertInfo": {
+            "$ref": "#/components/schemas/RevertInfo"
+          },
+          "oocError": {
+            "type": "string"
+          }
+        }
+      },
+      "ZKCounters": {
+        "title": "ZKCounters",
+        "type": "object",
+        "readOnly": true,
+        "properties": {
+          "gasUsed": {
+            "type": "integer"
+          },  
+          "usedKeccakHashes": {
+            "type": "integer"
+          },
+          "usedPoseidonHashes": {
+            "type": "integer"
+          },
+          "usedPoseidonPaddings": {
+            "type": "integer"
+          },
+          "usedMemAligns": {
+            "type": "integer"
+          },
+          "usedArithmetics": {
+            "type": "integer"
+          },
+          "usedBinaries": {
+            "type": "integer"
+          },
+          "usedSteps": {
+            "type": "integer"
+          },
+          "usedSHA256Hashes": {
+            "type": "integer"
+          }
+        }
+      },
+      "RevertInfo":{
+        "title": "RevertInfo",
+        "type": "object",
+        "readOnly": true,
+        "properties": {
+          "message": {
+            "type": "string"
+          },
+          "data": {
+            "$ref": "#/components/schemas/Integer"
+          }
+        }
+      }
+    }
+  }
+}

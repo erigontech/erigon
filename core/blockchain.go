@@ -20,11 +20,11 @@ package core
 import (
 	"encoding/json"
 	"fmt"
+	"slices"
 	"time"
 
 	"github.com/ledgerwatch/log/v3"
 	"golang.org/x/crypto/sha3"
-	"golang.org/x/exp/slices"
 
 	"github.com/ledgerwatch/erigon-lib/chain"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
@@ -42,6 +42,7 @@ import (
 	"github.com/ledgerwatch/erigon/core/vm"
 	"github.com/ledgerwatch/erigon/core/vm/evmtypes"
 	"github.com/ledgerwatch/erigon/eth/ethutils"
+	bortypes "github.com/ledgerwatch/erigon/polygon/bor/types"
 	"github.com/ledgerwatch/erigon/rlp"
 )
 
@@ -207,7 +208,7 @@ func ExecuteBlockEphemerally(
 				stateSyncReceipt.Logs = blockLogs[len(logs):] // get state-sync logs from `state.Logs()`
 
 				// fill the state sync with the correct information
-				types.DeriveFieldsForBorReceipt(stateSyncReceipt, block.Hash(), block.NumberU64(), receipts)
+				bortypes.DeriveFieldsForBorReceipt(stateSyncReceipt, block.Hash(), block.NumberU64(), receipts)
 				stateSyncReceipt.Status = types.ReceiptStatusSuccessful
 			}
 		}
@@ -231,7 +232,7 @@ func logReceipts(receipts types.Receipts, txns types.Transactions, cc *chain.Con
 		return
 	}
 
-	marshalled := make([]map[string]interface{}, len(receipts))
+	marshalled := make([]map[string]interface{}, 0, len(receipts))
 	for i, receipt := range receipts {
 		txn := txns[i]
 		marshalled = append(marshalled, ethutils.MarshalReceipt(receipt, txn, cc, header, txn.Hash(), true))

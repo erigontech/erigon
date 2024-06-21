@@ -14,6 +14,21 @@ import (
 	"github.com/ledgerwatch/erigon-lib/common/metrics"
 )
 
+// Determine the log dir path based on the given urfave context
+func LogDirPath(ctx *cli.Context) string {
+	dirPath := ""
+	if !ctx.Bool(LogDirDisableFlag.Name) {
+		dirPath = ctx.String(LogDirPathFlag.Name)
+		if dirPath == "" {
+			datadir := ctx.String("datadir")
+			if datadir != "" {
+				dirPath = filepath.Join(datadir, "logs")
+			}
+		}
+	}
+	return dirPath
+}
+
 // SetupLoggerCtx performs the logging setup according to the parameters
 // containted in the given urfave context. It returns either root logger,
 // if rootHandler argument is set to true, or a newly created logger.
@@ -216,7 +231,6 @@ func initSeparatedLogging(
 	mux := log.MultiHandler(consoleHandler, log.LvlFilterHandler(dirLevel, userLog))
 	logger.SetHandler(mux)
 	logger.Info("logging to file system", "log dir", dirPath, "file prefix", filePrefix, "log level", dirLevel, "json", dirJson)
-	return
 }
 
 func tryGetLogLevel(s string) (log.Lvl, error) {

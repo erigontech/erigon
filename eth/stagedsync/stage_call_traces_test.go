@@ -10,9 +10,9 @@ import (
 	"github.com/ledgerwatch/erigon-lib/common/hexutility"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/bitmapdb"
+	"github.com/ledgerwatch/erigon-lib/kv/temporal/temporaltest"
 	"github.com/stretchr/testify/require"
 
-	"github.com/ledgerwatch/erigon/core/state/temporal"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 	"github.com/ledgerwatch/log/v3"
 )
@@ -35,7 +35,7 @@ func genTestCallTraceSet(t *testing.T, tx kv.RwTx, to uint64) {
 func TestCallTrace(t *testing.T) {
 	logger := log.New()
 	ctx, require := context.Background(), require.New(t)
-	histV3, db, _ := temporal.NewTestDB(t, datadir.New(t.TempDir()), nil)
+	histV3, db, _ := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
 	if histV3 {
 		t.Skip()
 	}

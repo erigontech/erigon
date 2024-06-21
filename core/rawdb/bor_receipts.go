@@ -13,12 +13,13 @@ import (
 	"github.com/ledgerwatch/erigon-lib/kv/dbutils"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/ethdb/cbor"
+	bortypes "github.com/ledgerwatch/erigon/polygon/bor/types"
 	"github.com/ledgerwatch/erigon/rlp"
 )
 
 var (
 	// bor receipt key
-	borReceiptKey = types.BorReceiptKey
+	borReceiptKey = bortypes.BorReceiptKey
 )
 
 // HasBorReceipts verifies the existence of all block receipt belonging to a block.
@@ -78,7 +79,7 @@ func ReadBorReceipt(db kv.Tx, blockHash libcommon.Hash, blockNumber uint64, rece
 		}
 	}
 
-	types.DeriveFieldsForBorReceipt(borReceipt, blockHash, blockNumber, receipts)
+	bortypes.DeriveFieldsForBorReceipt(borReceipt, blockHash, blockNumber, receipts)
 
 	return borReceipt, nil
 }
@@ -126,7 +127,7 @@ func ReadBorTransactionForBlock(db kv.Tx, blockNum uint64) types.Transaction {
 	if !HasBorReceipts(db, blockNum) {
 		return nil
 	}
-	return types.NewBorTransaction()
+	return bortypes.NewBorTransaction()
 }
 
 // TruncateBorReceipts removes all bor receipt for given block number or newer

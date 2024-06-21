@@ -26,19 +26,26 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
 
+	"github.com/ledgerwatch/erigon-lib/common/dir"
+	"github.com/ledgerwatch/erigon-lib/common/disk"
+	"github.com/ledgerwatch/erigon-lib/common/mem"
+
 	"github.com/0xPolygonHermez/zkevm-data-streamer/datastreamer"
+	"github.com/ledgerwatch/erigon/zk/sequencer"
+
 	"github.com/erigontech/mdbx-go/mdbx"
 	lru "github.com/hashicorp/golang-lru/arc/v2"
 	"github.com/holiman/uint256"
-	"github.com/ledgerwatch/erigon/zk/sequencer"
+	"github.com/ledgerwatch/erigon-lib/config3"
+	"github.com/ledgerwatch/erigon-lib/kv/temporal"
 	"github.com/ledgerwatch/log/v3"
-	"golang.org/x/exp/slices"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
 	"google.golang.org/protobuf/types/known/emptypb"
@@ -49,8 +56,6 @@ import (
 	"github.com/ledgerwatch/erigon-lib/chain/snapcfg"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/datadir"
-	"github.com/ledgerwatch/erigon-lib/common/disk"
-	"github.com/ledgerwatch/erigon-lib/common/mem"
 	"github.com/ledgerwatch/erigon-lib/direct"
 	"github.com/ledgerwatch/erigon-lib/downloader"
 	"github.com/ledgerwatch/erigon-lib/downloader/downloadercfg"
@@ -68,7 +73,8 @@ import (
 	"github.com/ledgerwatch/erigon-lib/kv/kvcfg"
 	"github.com/ledgerwatch/erigon-lib/kv/remotedbserver"
 	libstate "github.com/ledgerwatch/erigon-lib/state"
-	types2 "github.com/ledgerwatch/erigon-lib/types"
+	"github.com/ledgerwatch/erigon-lib/txpool/txpoolcfg"
+	libtypes "github.com/ledgerwatch/erigon-lib/types"
 	"github.com/ledgerwatch/erigon-lib/wrap"
 	"github.com/ledgerwatch/erigon/cmd/rpcdaemon/cli"
 	"github.com/ledgerwatch/erigon/common/debug"
@@ -79,8 +85,6 @@ import (
 	"github.com/ledgerwatch/erigon/core"
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/rawdb/blockio"
-	"github.com/ledgerwatch/erigon/core/state/temporal"
-	"github.com/ledgerwatch/erigon/core/systemcontracts"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/core/vm"
 	"github.com/ledgerwatch/erigon/crypto"
@@ -191,7 +195,7 @@ type Ethereum struct {
 
 	txPool2DB               kv.RwDB
 	txPool2                 *txpool2.TxPool
-	newTxs2                 chan types2.Announcements
+	newTxs2                 chan libtypes.Announcements
 	txPool2Fetch            *txpool2.Fetch
 	txPool2Send             *txpool2.Send
 	txPool2GrpcServer       txpoolproto.TxpoolServer
@@ -199,7 +203,7 @@ type Ethereum struct {
 	forkValidator           *engine_helpers.ForkValidator
 	downloader              *downloader.Downloader
 
-	agg            *libstate.AggregatorV3
+	agg            *libstate.Aggregator
 	blockSnapshots *freezeblocks.RoSnapshots
 	blockReader    services.FullBlockReader
 	blockWriter    *blockio.BlockWriter
@@ -273,6 +277,9 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 		return nil, err
 	}
 
+	if config.HistoryV3 {
+		return nil, errors.New("seems you using erigon2 git branch on erigon3 DB")
+	}
 	ctx, ctxCancel := context.WithCancel(context.Background())
 
 	// kv_remote architecture does blocks on stream.Send - means current architecture require unlimited amount of txs to provide good throughput
@@ -321,7 +328,8 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 	backend.genesisBlock = genesis
 	backend.genesisHash = genesis.Hash()
 
-	logger.Info("Initialised chain configuration", "config", chainConfig, "genesis", genesis.Hash())
+	setBorDefaultMinerGasPrice(chainConfig, config, logger)
+	setBorDefaultTxPoolPriceLimit(chainConfig, config.TxPool, logger)
 
 	if err := chainKv.Update(context.Background(), func(tx kv.RwTx) error {
 		isCorrectSync, useSnapshots, err := snap.EnsureNotChanged(tx, config.Snapshot)
@@ -352,7 +360,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 	backend.agg, backend.blockSnapshots, backend.blockReader, backend.blockWriter = agg, allSnapshots, blockReader, blockWriter
 
 	if config.HistoryV3 {
-		backend.chainDB, err = temporal.New(backend.chainDB, agg, systemcontracts.SystemContractCodeLookup[config.Genesis.Config.ChainName])
+		backend.chainDB, err = temporal.New(backend.chainDB, agg)
 		if err != nil {
 			return nil, err
 		}
@@ -370,7 +378,11 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 	backend.gasPrice, _ = uint256.FromBig(config.Miner.GasPrice)
 
 	if config.SilkwormExecution || config.SilkwormRpcDaemon || config.SilkwormSentry {
-		backend.silkworm, err = silkworm.New(config.Dirs.DataDir, mdbx.Version())
+		logLevel, err := log.LvlFromString(config.SilkwormVerbosity)
+		if err != nil {
+			return nil, err
+		}
+		backend.silkworm, err = silkworm.New(config.Dirs.DataDir, mdbx.Version(), config.SilkwormNumContexts, logLevel)
 		if err != nil {
 			return nil, err
 		}
@@ -536,7 +548,9 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 	} else {
 		consensusConfig = &config.Ethash
 	}
+
 	var heimdallClient heimdall.HeimdallClient
+
 	if chainConfig.Bor != nil {
 		if !config.WithoutHeimdall {
 			heimdallClient = heimdall.NewHeimdallClient(config.HeimdallURL, logger)
@@ -576,6 +590,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 		chainConfig,
 		genesis,
 		backend.config.NetworkID,
+		logger,
 	)
 
 	// limit "new block" broadcasts to at most 10 random peers at time
@@ -598,6 +613,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 		}
 	}
 
+	sentryMcDisableBlockDownload := config.PolygonSync
 	backend.sentriesClient, err = sentry_multi_client.NewMultiClient(
 		chainKv,
 		chainConfig,
@@ -609,6 +625,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 		statusDataProvider,
 		stack.Config().SentryLogPeerInfo,
 		maxBlockBroadcastPeers,
+		sentryMcDisableBlockDownload,
 		logger,
 	)
 	if err != nil {
@@ -624,7 +641,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 		//cacheConfig := kvcache.DefaultCoherentCacheConfig
 		//cacheConfig.MetricsLabel = "txpool"
 
-		backend.newTxs2 = make(chan types2.Announcements, 1024)
+		backend.newTxs2 = make(chan libtypes.Announcements, 1024)
 		//defer close(newTxs)
 		backend.txPool2DB, backend.txPool2, backend.txPool2Fetch, backend.txPool2Send, backend.txPool2GrpcServer, err = txpooluitl.AllComponents(
 			ctx, config.TxPool, config, kvcache.NewDummy(), backend.newTxs2, backend.chainDB, backend.sentriesClient.Sentries(), stateDiffClient,
@@ -657,7 +674,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 		config.Sync,
 		stagedsync.MiningStages(backend.sentryCtx,
 			stagedsync.StageMiningCreateBlockCfg(backend.chainDB, miner, *backend.chainConfig, backend.engine, backend.txPool2DB, nil, tmpdir, backend.blockReader),
-			stagedsync.StageBorHeimdallCfg(backend.chainDB, snapDb, miner, *backend.chainConfig, heimdallClient, backend.blockReader, nil, nil, nil, recents, signatures),
+			stagedsync.StageBorHeimdallCfg(backend.chainDB, snapDb, miner, *backend.chainConfig, heimdallClient, backend.blockReader, nil, nil, nil, recents, signatures, false, nil),
 			stagedsync.StageMiningExecCfg(backend.chainDB, miner, backend.notifications.Events, *backend.chainConfig, backend.engine, &vm.Config{}, tmpdir, nil, 0, backend.txPool2, backend.txPool2DB, blockReader),
 			stagedsync.StageHashStateCfg(backend.chainDB, dirs, config.HistoryV3, agg),
 			stagedsync.StageTrieCfg(backend.chainDB, false, true, true, tmpdir, blockReader, nil, config.HistoryV3, backend.agg),
@@ -678,7 +695,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 			config.Sync,
 			stagedsync.MiningStages(backend.sentryCtx,
 				stagedsync.StageMiningCreateBlockCfg(backend.chainDB, miningStatePos, *backend.chainConfig, backend.engine, backend.txPool2DB, param, tmpdir, backend.blockReader),
-				stagedsync.StageBorHeimdallCfg(backend.chainDB, snapDb, miningStatePos, *backend.chainConfig, heimdallClient, backend.blockReader, nil, nil, nil, recents, signatures),
+				stagedsync.StageBorHeimdallCfg(backend.chainDB, snapDb, miningStatePos, *backend.chainConfig, heimdallClient, backend.blockReader, nil, nil, nil, recents, signatures, false, nil),
 				stagedsync.StageMiningExecCfg(backend.chainDB, miningStatePos, backend.notifications.Events, *backend.chainConfig, backend.engine, &vm.Config{}, tmpdir, interrupt, param.PayloadId, backend.txPool2, backend.txPool2DB, blockReader),
 				stagedsync.StageHashStateCfg(backend.chainDB, dirs, config.HistoryV3, agg),
 				stagedsync.StageTrieCfg(backend.chainDB, false, true, true, tmpdir, blockReader, nil, config.HistoryV3, backend.agg),
@@ -805,13 +822,13 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 	if !config.Sync.UseSnapshots && backend.downloaderClient != nil {
 		for _, p := range blockReader.AllTypes() {
 			backend.downloaderClient.ProhibitNewDownloads(ctx, &protodownloader.ProhibitNewDownloadsRequest{
-				Type: p.String(),
+				Type: p.Name(),
 			})
 		}
 
 		for _, p := range snaptype.CaplinSnapshotTypes {
 			backend.downloaderClient.ProhibitNewDownloads(ctx, &protodownloader.ProhibitNewDownloadsRequest{
-				Type: p.String(),
+				Type: p.Name(),
 			})
 		}
 
@@ -944,7 +961,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 				Outputs:     nil,
 			}
 			// todo [zkevm] read the stream version from config and figure out what system id is used for
-			backend.dataStream, err = datastreamer.NewServer(uint16(httpCfg.DataStreamPort), uint8(2), 1, datastreamer.StreamType(1), file, logConfig)
+			backend.dataStream, err = datastreamer.NewServer(uint16(httpCfg.DataStreamPort), uint8(backend.config.DatastreamVersion), 1, datastreamer.StreamType(1), file, logConfig)
 			if err != nil {
 				return nil, err
 			}
@@ -992,8 +1009,9 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 				contracts.SequencedBatchTopicEtrog,
 				contracts.VerificationTopicPreEtrog,
 				contracts.VerificationTopicEtrog,
+				contracts.VerificationValidiumTopicEtrog,
 			}}
-			l1Contracts = []libcommon.Address{cfg.AddressRollup, cfg.AddressAdmin}
+			l1Contracts = []libcommon.Address{cfg.AddressRollup, cfg.AddressAdmin, cfg.AddressZkevm}
 		}
 
 		ethermanClients := make([]syncer.IEtherman, len(backend.etherManClients))
@@ -1007,6 +1025,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 			l1Topics,
 			cfg.L1BlockRange,
 			cfg.L1QueryDelay,
+			cfg.L1HighestBlockType,
 		)
 
 		l1InfoTreeSyncer := syncer.NewL1Syncer(
@@ -1015,6 +1034,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 			[][]libcommon.Hash{{contracts.UpdateL1InfoTreeTopic}},
 			cfg.L1BlockRange,
 			cfg.L1QueryDelay,
+			cfg.L1HighestBlockType,
 		)
 
 		if isSequencer {
@@ -1062,6 +1082,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 				[][]libcommon.Hash{{contracts.SequenceBatchesTopic}},
 				cfg.L1BlockRange,
 				cfg.L1QueryDelay,
+				cfg.L1HighestBlockType,
 			)
 
 			backend.syncStages = stages2.NewSequencerZkStages(
@@ -1097,8 +1118,11 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 			  ZZZZZZZ  K   K  R   R   P       CCCC
 
 			*/
-
-			streamClient := initDataStreamClient(ctx, cfg.Zk)
+			latestForkId, err := stages.GetStageProgress(tx, stages.ForkId)
+			if err != nil {
+				return nil, err
+			}
+			streamClient := initDataStreamClient(ctx, cfg.Zk, uint16(latestForkId))
 
 			backend.syncStages = stages2.NewDefaultZkStages(
 				backend.sentryCtx,
@@ -1155,12 +1179,12 @@ func newEtherMan(cfg *ethconfig.Config, l2ChainName, url string) *etherman.Clien
 }
 
 // creates a datastream client with default parameters
-func initDataStreamClient(ctx context.Context, cfg *ethconfig.Zk) *client.StreamClient {
+func initDataStreamClient(ctx context.Context, cfg *ethconfig.Zk, latestForkId uint16) *client.StreamClient {
 	// datastream
 	// Create client
 	log.Info("Starting datastream client...")
 	// retry connection
-	datastreamClient := client.NewClient(ctx, cfg.L2DataStreamerUrl, cfg.DatastreamVersion, cfg.L2DataStreamerTimeout)
+	datastreamClient := client.NewClient(ctx, cfg.L2DataStreamerUrl, cfg.DatastreamVersion, cfg.L2DataStreamerTimeout, latestForkId)
 
 	for i := 0; i < 30; i++ {
 		// Start client (connect to the server)
@@ -1224,7 +1248,27 @@ func (s *Ethereum) Init(stack *node.Node, config *ethconfig.Config, chainConfig 
 	s.apiList = jsonrpc.APIList(chainKv, ethRpcClient, txPoolRpcClient, miningRpcClient, ff, stateCache, blockReader, s.agg, &httpRpcCfg, s.engine, config, s.l1Syncer, s.logger)
 
 	if config.SilkwormRpcDaemon && httpRpcCfg.Enabled {
-		silkwormRPCDaemonService := silkworm.NewRpcDaemonService(s.silkworm, chainKv)
+		interface_log_settings := silkworm.RpcInterfaceLogSettings{
+			Enabled:         config.SilkwormRpcLogEnabled,
+			ContainerFolder: config.SilkwormRpcLogDirPath,
+			MaxFileSizeMB:   config.SilkwormRpcLogMaxFileSize,
+			MaxFiles:        config.SilkwormRpcLogMaxFiles,
+			DumpResponse:    config.SilkwormRpcLogDumpResponse,
+		}
+		settings := silkworm.RpcDaemonSettings{
+			EthLogSettings:       interface_log_settings,
+			EthAPIHost:           httpRpcCfg.HttpListenAddress,
+			EthAPIPort:           httpRpcCfg.HttpPort,
+			EthAPISpec:           httpRpcCfg.API,
+			NumWorkers:           config.SilkwormRpcNumWorkers,
+			CORSDomains:          httpRpcCfg.HttpCORSDomain,
+			JWTFilePath:          httpRpcCfg.JWTSecretPath,
+			JSONRPCCompatibility: config.SilkwormRpcJsonCompatibility,
+			WebSocketEnabled:     httpRpcCfg.WebsocketEnabled,
+			WebSocketCompression: httpRpcCfg.WebsocketCompression,
+			HTTPCompression:      httpRpcCfg.HttpCompression,
+		}
+		silkwormRPCDaemonService := silkworm.NewRpcDaemonService(s.silkworm, chainKv, settings)
 		s.silkwormRPCDaemonService = &silkwormRPCDaemonService
 	} else {
 		go func() {
@@ -1263,7 +1307,7 @@ func (s *Ethereum) PreStart() error {
 		// so here we loop and take a brief pause waiting for it to be ready
 		attempts := 0
 		for {
-			_, err = zkStages.CatchupDatastream("stream-catchup", tx, s.dataStream, s.chainConfig.ChainID.Uint64())
+			_, err = zkStages.CatchupDatastream("stream-catchup", tx, s.dataStream, s.chainConfig.ChainID.Uint64(), s.config.DatastreamVersion)
 			if err != nil {
 				if errors.Is(err, datastreamer.ErrAtomicOpNotAllowed) {
 					attempts++
@@ -1635,7 +1679,7 @@ func (s *Ethereum) setUpSnapDownloader(ctx context.Context, downloaderCfg *downl
 	return err
 }
 
-func setUpBlockReader(ctx context.Context, db kv.RwDB, dirs datadir.Dirs, snConfig *ethconfig.Config, histV3 bool, isBor bool, logger log.Logger) (services.FullBlockReader, *blockio.BlockWriter, *freezeblocks.RoSnapshots, *freezeblocks.BorRoSnapshots, *libstate.AggregatorV3, error) {
+func setUpBlockReader(ctx context.Context, db kv.RwDB, dirs datadir.Dirs, snConfig *ethconfig.Config, histV3 bool, isBor bool, logger log.Logger) (services.FullBlockReader, *blockio.BlockWriter, *freezeblocks.RoSnapshots, *freezeblocks.BorRoSnapshots, *libstate.Aggregator, error) {
 	var minFrozenBlock uint64
 
 	if frozenLimit := snConfig.Sync.FrozenBlockLimit; frozenLimit != 0 {
@@ -1666,7 +1710,7 @@ func setUpBlockReader(ctx context.Context, db kv.RwDB, dirs datadir.Dirs, snConf
 	blockReader := freezeblocks.NewBlockReader(allSnapshots, allBorSnapshots)
 	blockWriter := blockio.NewBlockWriter(histV3)
 
-	agg, err := libstate.NewAggregatorV3(ctx, dirs.SnapHistory, dirs.Tmp, ethconfig.HistoryV3AggregationStep, db, logger)
+	agg, err := libstate.NewAggregator(ctx, dirs.SnapHistory, dirs.Tmp, config3.HistoryV3AggregationStep, db, logger)
 	if err != nil {
 		return nil, nil, nil, nil, nil, err
 	}
@@ -1729,6 +1773,7 @@ func (s *Ethereum) Start() error {
 		s.waitForStageLoopStop = nil // TODO: Ethereum.Stop should wait for execution_server shutdown
 		go s.eth1ExecutionServer.Start(s.sentryCtx)
 	} else if s.config.PolygonSync {
+		s.waitForStageLoopStop = nil // Shutdown is handled by context
 		go func() {
 			ctx := s.sentryCtx
 			err := s.polygonSyncService.Run(ctx)
@@ -1865,23 +1910,23 @@ func (s *Ethereum) ExecutionModule() *eth1.EthereumExecutionModule {
 }
 
 // RemoveContents is like os.RemoveAll, but preserve dir itself
-func RemoveContents(dir string) error {
-	d, err := os.Open(dir)
+func RemoveContents(dirname string) error {
+	d, err := os.Open(dirname)
 	if err != nil {
 		if errors.Is(err, fs.ErrNotExist) {
 			// ignore due to windows
-			_ = os.MkdirAll(dir, 0o755)
+			_ = os.MkdirAll(dirname, 0o755)
 			return nil
 		}
 		return err
 	}
 	defer d.Close()
-	names, err := d.Readdirnames(-1)
+	files, err := dir.ReadDir(dirname)
 	if err != nil {
 		return err
 	}
-	for _, name := range names {
-		err = os.RemoveAll(filepath.Join(dir, name))
+	for _, file := range files {
+		err = os.RemoveAll(filepath.Join(dirname, file.Name()))
 		if err != nil {
 			return err
 		}
@@ -1922,4 +1967,20 @@ func (s *Ethereum) Sentinel() rpcsentinel.SentinelClient {
 
 func (s *Ethereum) DataDir() string {
 	return s.config.Dirs.DataDir
+}
+
+// setBorDefaultMinerGasPrice enforces Miner.GasPrice to be equal to BorDefaultMinerGasPrice (30gwei by default)
+func setBorDefaultMinerGasPrice(chainConfig *chain.Config, config *ethconfig.Config, logger log.Logger) {
+	if chainConfig.Bor != nil && (config.Miner.GasPrice == nil || config.Miner.GasPrice.Cmp(ethconfig.BorDefaultMinerGasPrice) != 0) {
+		logger.Warn("Sanitizing invalid bor miner gas price", "provided", config.Miner.GasPrice, "updated", ethconfig.BorDefaultMinerGasPrice)
+		config.Miner.GasPrice = ethconfig.BorDefaultMinerGasPrice
+	}
+}
+
+// setBorDefaultTxPoolPriceLimit enforces MinFeeCap to be equal to BorDefaultTxPoolPriceLimit  (30gwei by default)
+func setBorDefaultTxPoolPriceLimit(chainConfig *chain.Config, config txpoolcfg.Config, logger log.Logger) {
+	if chainConfig.Bor != nil && config.MinFeeCap != txpoolcfg.BorDefaultTxPoolPriceLimit {
+		logger.Warn("Sanitizing invalid bor min fee cap", "provided", config.MinFeeCap, "updated", txpoolcfg.BorDefaultTxPoolPriceLimit)
+		config.MinFeeCap = txpoolcfg.BorDefaultTxPoolPriceLimit
+	}
 }

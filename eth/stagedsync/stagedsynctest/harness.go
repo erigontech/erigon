@@ -60,6 +60,8 @@ func InitHarness(ctx context.Context, t *testing.T, cfg HarnessCfg) Harness {
 		nil, // loopBreakCheck
 		nil, // recent bor snapshots cached
 		nil, // signatures lru cache
+		false,
+		nil,
 	)
 	stateSyncStages := stagedsync.DefaultStages(
 		ctx,
@@ -649,6 +651,13 @@ func (h *Harness) mockHeimdallClient() {
 
 			// 1 per sprint
 			return []*heimdall.EventRecordWithTime{&newEvent}, nil
+		}).
+		AnyTimes()
+	h.heimdallClient.
+		EXPECT().
+		FetchStateSyncEvent(gomock.Any(), gomock.Any()).
+		DoAndReturn(func(_ context.Context, _ uint64) (*heimdall.EventRecordWithTime, error) {
+			return nil, heimdall.ErrEventRecordNotFound
 		}).
 		AnyTimes()
 }

@@ -1,0 +1,111 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Nightly GitHub Actions Status</title>
+    <style>
+        body {
+            font-family: 'Arial', sans-serif;
+            background-color: #f0f2f5;
+            margin: 0;
+            padding: 20px;
+        }
+        h1 {
+            text-align: center;
+            color: #333;
+        }
+        .status-container {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 20px;
+            justify-content: center;
+        }
+        .status {
+            background: rgba(255, 255, 255, 0.7);
+            border-radius: 10px;
+            box-shadow: 0 4px 8px rgba(0,0,0,0.1);
+            width: 300px;
+            padding: 20px;
+            position: relative;
+            backdrop-filter: blur(10px);
+        }
+        .status h2 {
+            margin-top: 0;
+            margin-bottom: 10px;
+            font-size: 1.5em;
+            color: #555;
+        }
+        .status p {
+            margin: 5px 0;
+            color: #666;
+        }
+        .status a {
+            text-decoration: none;
+            color: #007bff;
+        }
+        .status.success {
+            background: rgba(144, 238, 144, 0.7); /* Light green */
+        }
+        .status.failure {
+            background: rgba(255, 99, 71, 0.7); /* Light red */
+        }
+        .status.in_progress {
+            background: rgba(173, 216, 230, 0.7); /* Light blue */
+        }
+        .conclusion {
+            font-weight: bold;
+        }
+    </style>
+</head>
+<body>
+<h1>Nightly GitHub Actions Status</h1>
+<div id="status-container" class="status-container"></div>
+
+<script>
+    const workflows = [
+        'nightly_zkevm.yml',
+        'nightly-node-compare.yml',
+        'nightly-eth-bench.yml'
+    ];
+
+    const owner = '0xPolygonHermez';
+    const repo = 'cdk-erigon';
+
+    async function fetchWorkflowRun(workflow) {
+        const response = await fetch(`https://api.github.com/repos/${owner}/${repo}/actions/workflows/${workflow}/runs`);
+        const data = await response.json();
+        return data.workflow_runs[0];
+    }
+
+    function displayWorkflowRun(run, workflowName) {
+        const container = document.getElementById('status-container');
+        const div = document.createElement('div');
+        div.className = 'status ' + (run.conclusion || 'in_progress');
+        const runTime = (new Date(run.updated_at) - new Date(run.created_at)) / 1000 / 60;
+        div.innerHTML = `
+                <h2>${run.name}</h2>
+                <p><strong>Workflow:</strong> ${workflowName}</p>
+                <p><strong>Status:</strong> ${run.status}</p>
+                <p><strong>Conclusion:</strong> <span class="conclusion">${run.conclusion || 'in progress'}</span></p>
+                <p><strong>Run Time:</strong> ${runTime.toFixed(2)} minutes</p>
+                <p><strong>Started At:</strong> ${new Date(run.created_at).toLocaleString()}</p>
+                <p><strong>Updated At:</strong> ${new Date(run.updated_at).toLocaleString()}</p>
+                <p><a href="${run.html_url}" target="_blank">View Job Run</a></p>
+            `;
+        container.appendChild(div);
+    }
+
+    async function main() {
+        for (const workflow of workflows) {
+            const run = await fetchWorkflowRun(workflow);
+            if (run) {
+                displayWorkflowRun(run, workflow);
+            }
+        }
+    }
+
+    main();
+</script>
+</body>
+</html>

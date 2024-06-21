@@ -10,7 +10,7 @@ import (
 	"github.com/ledgerwatch/erigon/core/types"
 )
 
-//go:generate mockgen -destination=./storage_mock.go -package=sync . Storage
+//go:generate mockgen -typed=true -destination=./storage_mock.go -package=sync . Storage
 type Storage interface {
 	// InsertBlocks queues blocks for writing into the local canonical chain.
 	InsertBlocks(ctx context.Context, blocks []*types.Block) error

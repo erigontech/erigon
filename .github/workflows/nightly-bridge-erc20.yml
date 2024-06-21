@@ -1,0 +1,46 @@
+name: Nightly - Bridge ERC20 L2->L1
+
+on:
+  schedule:
+    - cron: '0 1 * * *' # run at 1am to stagger tests
+  workflow_dispatch:
+
+jobs:
+  build-and-run:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        include:
+          - profile_name: "network5"
+            l1_ep: "https://rpc.eu-central-1.gateway.fm/v4/ethereum/non-archival/sepolia"
+            l2_ep: "http://34.175.214.161:8500"
+            bridge_ep: "http://34.175.214.161:8085"
+            l1_pk_secret_name: "L1_SEPOLIA_FUNDED_PRIVATE_KEY"
+            l2_pk_secret_name: "NETWORK5_PRIVATE_KEY"
+            bridge_addr: "0xb566BE17B22404BD46F389030ec5592F8ffAde12"
+            
+    steps:
+      - name: Clone bridge repository
+        run:  git clone --recurse-submodules -j8 https://github.com/0xPolygonHermez/zkevm-bridge-service.git -b develop  bridge
+        
+      - name: Build docker image
+        run: |
+          cd bridge
+          make build-docker-e2e-real_network
+
+      - name: Run test ERC20 Bridge
+        run: |
+          #!/bin/bash
+          cd bridge
+          mkdir tmp
+          cat <<EOF > ./tmp/test.toml
+          TestAddrPrivate= "${{ secrets[matrix.l1_pk_secret_name] }}"
+          [ConnectionConfig]
+          L1NodeURL="${{ matrix.l1_ep }}"
+          L2NodeURL="${{ matrix.l2_ep }}"
+          BridgeURL="${{ matrix.bridge_ep }}"
+          L1BridgeAddr="${{ matrix.bridge_addr }}"
+          L2BridgeAddr="${{ matrix.bridge_addr }}"
+          EOF
+          docker run  --volume "./tmp/:/config/" --env BRIDGE_TEST_CONFIG_FILE=/config/test.toml bridge-e2e-realnetwork-erc20
+        

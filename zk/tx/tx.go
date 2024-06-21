@@ -189,9 +189,9 @@ func DecodeBatchL2Blocks(txsData []byte, forkID uint64) ([]DecodedBatchL2Data, e
 	return result, nil
 }
 
-func DecodeTx(encodedTx []byte, efficiencyPercentage byte, forkId uint16) (types.Transaction, uint8, error) {
+func DecodeTx(encodedTx []byte, efficiencyPercentage byte, forkId uint64) (types.Transaction, uint8, error) {
 	// efficiencyPercentage := uint8(0)
-	if forkId >= uint16(constants.ForkID5Dragonfruit) {
+	if forkId >= uint64(constants.ForkID5Dragonfruit) {
 		encodedTx = append(encodedTx, efficiencyPercentage)
 	}
 

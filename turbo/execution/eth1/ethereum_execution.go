@@ -5,15 +5,16 @@ import (
 	"errors"
 	"math/big"
 
+	"github.com/ledgerwatch/log/v3"
+	"golang.org/x/sync/semaphore"
+	"google.golang.org/protobuf/types/known/emptypb"
+
 	"github.com/ledgerwatch/erigon-lib/chain"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/execution"
 	"github.com/ledgerwatch/erigon-lib/kv/dbutils"
 	"github.com/ledgerwatch/erigon-lib/wrap"
-	"github.com/ledgerwatch/log/v3"
-	"golang.org/x/sync/semaphore"
-	"google.golang.org/protobuf/types/known/emptypb"
 
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/common/math"
@@ -150,6 +151,7 @@ func (e *EthereumExecutionModule) canonicalHash(ctx context.Context, tx kv.Tx, b
 
 func (e *EthereumExecutionModule) ValidateChain(ctx context.Context, req *execution.ValidationRequest) (*execution.ValidationReceipt, error) {
 	if !e.semaphore.TryAcquire(1) {
+		e.logger.Trace("ethereumExecutionModule.ValidateChain: ExecutionStatus_Busy")
 		return &execution.ValidationReceipt{
 			LatestValidHash:  gointerfaces.ConvertHashToH256(libcommon.Hash{}),
 			ValidationStatus: execution.ExecutionStatus_Busy,
@@ -267,6 +269,7 @@ func (e *EthereumExecutionModule) Start(ctx context.Context) {
 
 func (e *EthereumExecutionModule) Ready(context.Context, *emptypb.Empty) (*execution.ReadyResponse, error) {
 	if !e.semaphore.TryAcquire(1) {
+		e.logger.Trace("ethereumExecutionModule.Ready: ExecutionStatus_Busy")
 		return &execution.ReadyResponse{Ready: false}, nil
 	}
 	defer e.semaphore.Release(1)

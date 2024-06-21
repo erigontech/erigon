@@ -18,6 +18,7 @@ import (
 	"github.com/ledgerwatch/erigon/zk/hermez_db"
 
 	"github.com/holiman/uint256"
+	"errors"
 )
 
 type TxInfo struct {
@@ -63,9 +64,9 @@ func (api *ZkEvmAPIImpl) GetL2BlockInfoTree(ctx context.Context, blockNum rpc.Bl
 		hashOk   bool
 	)
 	if number, numberOk = blockNum.Number(); numberOk {
-		block, err = api.ethApi.blockByRPCNumber(number, tx)
+		block, err = api.ethApi.blockByRPCNumber(ctx, number, tx)
 	} else if hash, hashOk = blockNum.Hash(); hashOk {
-		block, err = api.ethApi.blockByHashWithSenders(tx, hash)
+		block, err = api.ethApi.blockByHashWithSenders(ctx, tx, hash)
 	} else {
 		return nil, fmt.Errorf("invalid arguments; neither block nor hash specified")
 	}
@@ -78,7 +79,7 @@ func (api *ZkEvmAPIImpl) GetL2BlockInfoTree(ctx context.Context, blockNum rpc.Bl
 		return nil, fmt.Errorf("block 0 doesn't have block info tree")
 	}
 
-	previousBlock, err := api.ethApi.blockByNumberWithSenders(tx, block.NumberU64())
+	previousBlock, err := api.ethApi.blockByNumberWithSenders(ctx, tx, block.NumberU64())
 	if err != nil {
 		return nil, err
 	}
@@ -88,7 +89,7 @@ func (api *ZkEvmAPIImpl) GetL2BlockInfoTree(ctx context.Context, blockNum rpc.Bl
 		}
 		return nil, fmt.Errorf("invalid arguments; block with hash %x not found", hash)
 	}
-	chainConfig, err := api.ethApi.chainConfig(tx)
+	chainConfig, err := api.ethApi.chainConfig(ctx, tx)
 	if err != nil {
 		return nil, err
 	}
@@ -123,9 +124,8 @@ func (api *ZkEvmAPIImpl) GetL2BlockInfoTree(ctx context.Context, blockNum rpc.Bl
 			return nil, err
 		}
 
-		//TODO: remove this after bug is fixed
 		localReceipt := *receipt
-		if execResult.Err == vm.ErrUnsupportedPrecompile {
+		if !chainConfig.IsForkID8Elderberry(block.NumberU64()) && errors.Is(execResult.Err, vm.ErrUnsupportedPrecompile) {
 			localReceipt.Status = 1
 		}
 

@@ -87,11 +87,13 @@ func ApplyFlagsForZkConfig(ctx *cli.Context, cfg *ethconfig.Config) {
 		L1RollupId:                             ctx.Uint64(utils.L1RollupIdFlag.Name),
 		L1BlockRange:                           ctx.Uint64(utils.L1BlockRangeFlag.Name),
 		L1QueryDelay:                           ctx.Uint64(utils.L1QueryDelayFlag.Name),
+		L1HighestBlockType:                     ctx.String(utils.L1HighestBlockTypeFlag.Name),
 		L1MaticContractAddress:                 libcommon.HexToAddress(ctx.String(utils.L1MaticContractAddressFlag.Name)),
 		L1FirstBlock:                           ctx.Uint64(utils.L1FirstBlockFlag.Name),
 		RpcRateLimits:                          ctx.Int(utils.RpcRateLimitsFlag.Name),
 		DatastreamVersion:                      ctx.Int(utils.DatastreamVersionFlag.Name),
 		RebuildTreeAfter:                       ctx.Uint64(utils.RebuildTreeAfterFlag.Name),
+		IncrementTreeAlways:                    ctx.Bool(utils.IncrementTreeAlways.Name),
 		SequencerInitialForkId:                 ctx.Uint64(utils.SequencerInitialForkId.Name),
 		SequencerBlockSealTime:                 sequencerBlockSealTime,
 		SequencerBatchSealTime:                 sequencerBatchSealTime,
@@ -99,6 +101,7 @@ func ApplyFlagsForZkConfig(ctx *cli.Context, cfg *ethconfig.Config) {
 		ExecutorUrls:                           strings.Split(ctx.String(utils.ExecutorUrls.Name), ","),
 		ExecutorStrictMode:                     ctx.Bool(utils.ExecutorStrictMode.Name),
 		ExecutorRequestTimeout:                 ctx.Duration(utils.ExecutorRequestTimeout.Name),
+		DatastreamNewBlockTimeout:              ctx.Duration(utils.DatastreamNewBlockTimeout.Name),
 		ExecutorMaxConcurrentRequests:          ctx.Int(utils.ExecutorMaxConcurrentRequests.Name),
 		AllowFreeTransactions:                  ctx.Bool(utils.AllowFreeTransactions.Name),
 		AllowPreEIP155Transactions:             ctx.Bool(utils.AllowPreEIP155Transactions.Name),
@@ -119,6 +122,9 @@ func ApplyFlagsForZkConfig(ctx *cli.Context, cfg *ethconfig.Config) {
 		PoolManagerUrl:                         ctx.String(utils.PoolManagerUrl.Name),
 		DisableVirtualCounters:                 ctx.Bool(utils.DisableVirtualCounters.Name),
 		ExecutorPayloadOutput:                  ctx.String(utils.ExecutorPayloadOutput.Name),
+		DAUrl:                                  ctx.String(utils.DAUrl.Name),
+		DataStreamHost:                         ctx.String(utils.DataStreamHost.Name),
+		DataStreamPort:                         ctx.Uint(utils.DataStreamPort.Name),
 	}
 
 	checkFlag(utils.L2ChainIdFlag.Name, cfg.Zk.L2ChainId)
@@ -130,6 +136,8 @@ func ApplyFlagsForZkConfig(ctx *cli.Context, cfg *ethconfig.Config) {
 		checkFlag(utils.SequencerInitialForkId.Name, cfg.SequencerInitialForkId)
 		checkFlag(utils.ExecutorUrls.Name, cfg.ExecutorUrls)
 		checkFlag(utils.ExecutorStrictMode.Name, cfg.ExecutorStrictMode)
+		checkFlag(utils.DataStreamHost.Name, cfg.DataStreamHost)
+		checkFlag(utils.DataStreamPort.Name, cfg.DataStreamPort)
 
 		// if we are running in strict mode, the default, and we have no executor URLs then we panic
 		if cfg.ExecutorStrictMode && !cfg.HasExecutors() {

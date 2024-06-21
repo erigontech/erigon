@@ -94,7 +94,7 @@ func (a *Antiquary) Loop() error {
 		case <-a.ctx.Done():
 		}
 	}
-	if err := a.sn.BuildMissingIndices(a.ctx, a.logger, log.LvlDebug); err != nil {
+	if err := a.sn.BuildMissingIndices(a.ctx, a.logger); err != nil {
 		return err
 	}
 	// Here we need to start mdbx transaction and lock the thread

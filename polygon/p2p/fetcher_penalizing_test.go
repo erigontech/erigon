@@ -43,7 +43,7 @@ func TestPenalizingFetcherFetchHeadersShouldPenalizePeerWhenErrTooManyHeaders(t 
 		require.ErrorAs(t, err, &errTooManyHeaders)
 		require.Equal(t, 2, errTooManyHeaders.requested)
 		require.Equal(t, 5, errTooManyHeaders.received)
-		require.Nil(t, headers)
+		require.Nil(t, headers.Data)
 	})
 }
 
@@ -82,7 +82,7 @@ func TestPenalizingFetcherFetchHeadersShouldPenalizePeerWhenErrNonSequentialHead
 		require.ErrorAs(t, err, &errNonSequentialHeaderNumbers)
 		require.Equal(t, uint64(3), errNonSequentialHeaderNumbers.current)
 		require.Equal(t, uint64(2), errNonSequentialHeaderNumbers.expected)
-		require.Nil(t, headers)
+		require.Nil(t, headers.Data)
 	})
 }
 
@@ -119,7 +119,7 @@ func TestPenalizingFetcherFetchHeadersShouldPenalizePeerWhenIncorrectOrigin(t *t
 		require.ErrorAs(t, err, &errNonSequentialHeaderNumbers)
 		require.Equal(t, uint64(2), errNonSequentialHeaderNumbers.current)
 		require.Equal(t, uint64(1), errNonSequentialHeaderNumbers.expected)
-		require.Nil(t, headers)
+		require.Nil(t, headers.Data)
 	})
 }
 
@@ -154,7 +154,7 @@ func TestPenalizingFetcherFetchBodiesShouldPenalizePeerWhenErrTooManyBodies(t *t
 		require.ErrorAs(t, err, &errTooManyBodies)
 		require.Equal(t, 1, errTooManyBodies.requested)
 		require.Equal(t, 2, errTooManyBodies.received)
-		require.Nil(t, bodies)
+		require.Nil(t, bodies.Data)
 	})
 }
 

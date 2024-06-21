@@ -47,7 +47,7 @@ func (c *ConsensusHandlers) goodbyeHandler(s network.Stream) error {
 		return err
 	}
 
-	if gid.Id == 250 { // 250 is the status code for getting banned due to whatever reason
+	if gid.Id > 250 { // 250 is the status code for getting banned due to whatever reason
 		v, err := c.host.Peerstore().Get("AgentVersion", peerId)
 		if err == nil {
 			log.Debug("Received goodbye message from peer", "v", v)

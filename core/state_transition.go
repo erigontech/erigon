@@ -56,17 +56,17 @@ The state transitioning model does all the necessary work to work out a valid ne
 6) Derive new state root
 */
 type StateTransition struct {
-	gp         *GasPool
-	msg        Message
-	gas        uint64
-	gasPrice   *uint256.Int
-	gasFeeCap  *uint256.Int
-	tip        *uint256.Int
-	initialGas uint64
-	value      *uint256.Int
-	data       []byte
-	state      evmtypes.IntraBlockState
-	evm        *vm.EVM
+	gp           *GasPool
+	msg          Message
+	gasRemaining uint64
+	gasPrice     *uint256.Int
+	gasFeeCap    *uint256.Int
+	tip          *uint256.Int
+	initialGas   uint64
+	value        *uint256.Int
+	data         []byte
+	state        evmtypes.IntraBlockState
+	evm          *vm.EVM
 
 	//some pre-allocated intermediate variables
 	sharedBuyGas        *uint256.Int
@@ -271,7 +271,7 @@ func (st *StateTransition) buyGas(gasBailout bool) error {
 			return err
 		}
 	}
-	st.gas += st.msg.Gas()
+	st.gasRemaining += st.msg.Gas()
 	st.initialGas = st.msg.Gas()
 
 	if subBalance {
@@ -387,7 +387,7 @@ func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (*Executi
 	if st.evm.Config().Debug {
 		st.evm.Config().Tracer.CaptureTxStart(st.initialGas)
 		defer func() {
-			st.evm.Config().Tracer.CaptureTxEnd(st.gas)
+			st.evm.Config().Tracer.CaptureTxEnd(st.gasRemaining)
 		}()
 	}
 
@@ -403,10 +403,10 @@ func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (*Executi
 	if err != nil {
 		return nil, err
 	}
-	if st.gas < intrinsicGas {
-		return nil, fmt.Errorf("%w: have %d, want %d", ErrIntrinsicGas, st.gas, intrinsicGas)
+	if st.gasRemaining < intrinsicGas {
+		return nil, fmt.Errorf("%w: have %d, want %d", ErrIntrinsicGas, st.gasRemaining, intrinsicGas)
 	}
-	st.gas -= intrinsicGas
+	st.gasRemaining -= intrinsicGas
 
 	var bailout bool
 	// Gas bailout (for trace_call) should only be applied if there is not sufficient balance to perform value transfer
@@ -421,10 +421,14 @@ func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (*Executi
 		return nil, fmt.Errorf("%w: code size %v limit %v", ErrMaxInitCodeSizeExceeded, len(st.data), params.MaxInitCodeSize)
 	}
 
-	// Execute the preparatory steps for state transition which includes:
-	// - prepare accessList(post-berlin)
-	// - reset transient storage(eip 1153)
-	st.state.Prepare(rules, msg.From(), coinbase, msg.To(), vm.ActivePrecompiles(rules), msg.AccessList())
+	// Set up the initial access list.
+	if rules.IsBerlin {
+		st.state.Prepare(rules, msg.From(), st.evm.Context.Coinbase, msg.To(), vm.ActivePrecompiles(rules), msg.AccessList())
+		// EIP-3651 warm COINBASE
+		if rules.IsShanghai {
+			st.state.AddAddressToAccessList(st.evm.Context.Coinbase)
+		}
+	}
 
 	var (
 		ret   []byte
@@ -435,11 +439,11 @@ func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (*Executi
 		// nonce to calculate the address of the contract that is being created
 		// It does get incremented inside the `Create` call, after the computation
 		// of the contract's address, but before the execution of the code.
-		ret, _, st.gas, vmerr = st.evm.Create(sender, st.data, st.gas, st.value, intrinsicGas)
+		ret, _, st.gasRemaining, vmerr = st.evm.Deploy(sender, st.data, st.gasRemaining, st.value, intrinsicGas)
 	} else {
 		// Increment the nonce for the next transaction
 		st.state.SetNonce(msg.From(), st.state.GetNonce(sender.Address())+1)
-		ret, st.gas, vmerr = st.evm.Call(sender, st.to(), st.data, st.gas, st.value, bailout, intrinsicGas)
+		ret, st.gasRemaining, vmerr = st.evm.Call(sender, st.to(), st.data, st.gasRemaining, st.value, bailout, intrinsicGas)
 	}
 	if refunds {
 		if rules.IsLondon {
@@ -502,18 +506,18 @@ func (st *StateTransition) refundGas(refundQuotient uint64) {
 	if refund > st.state.GetRefund() {
 		refund = st.state.GetRefund()
 	}
-	st.gas += refund
+	st.gasRemaining += refund
 
 	// Return ETH for remaining gas, exchanged at the original rate.
-	remaining := new(uint256.Int).Mul(new(uint256.Int).SetUint64(st.gas), st.gasPrice)
+	remaining := new(uint256.Int).Mul(new(uint256.Int).SetUint64(st.gasRemaining), st.gasPrice)
 	st.state.AddBalance(st.msg.From(), remaining)
 
 	// Also return remaining gas to the block gas counter so it is
 	// available for the next transaction.
-	st.gp.AddGas(st.gas)
+	st.gp.AddGas(st.gasRemaining)
 }
 
 // gasUsed returns the amount of gas used up by the state transition.
 func (st *StateTransition) gasUsed() uint64 {
-	return st.initialGas - st.gas
+	return st.initialGas - st.gasRemaining
 }

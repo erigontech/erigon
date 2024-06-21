@@ -73,6 +73,11 @@ func TestEriDbBatch(t *testing.T) {
 	err = db.Insert(altKey, altValue)
 	assert.NoError(t, err)
 
+	// Testing Get method before rollback or commit, expecting no value for the altKey
+	altValRes, err := db.Get(altKey)
+	assert.NoError(t, err)
+	assert.Equal(t, altValue, altValRes)
+
 	// Rollback the batch
 	db.RollbackBatch()
 

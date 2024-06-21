@@ -109,8 +109,11 @@ Loop:
 	cfg.syncer.Stop()
 
 	progress = cfg.syncer.GetLastCheckedL1Block()
-	if err = stages.SaveStageProgress(tx, stages.L1SequencerSync, progress); err != nil {
-		return err
+	if progress >= cfg.zkCfg.L1FirstBlock {
+		// do not save progress if progress less than L1FirstBlock
+		if err = stages.SaveStageProgress(tx, stages.L1SequencerSync, progress); err != nil {
+			return err
+		}
 	}
 
 	log.Info(fmt.Sprintf("[%s] L1 Sequencer sync finished", logPrefix))
@@ -149,7 +152,7 @@ func HandleL1InfoTreeUpdate(
 	}
 
 	if !found {
-		// starting from a fresh db here, so we need to create index 0
+		// this is a special case, so we need to start at index 0
 		update.Index = 0
 	} else {
 		// increment the index from the previous entry

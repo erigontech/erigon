@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"net/http"
@@ -16,7 +17,7 @@ import (
 )
 
 func (a *ApiHandler) GetEthV1BeaconPoolVoluntaryExits(w http.ResponseWriter, r *http.Request) (*beaconhttp.BeaconResponse, error) {
-	return newBeaconResponse(a.operationsPool.VoluntaryExistsPool.Raw()), nil
+	return newBeaconResponse(a.operationsPool.VoluntaryExitsPool.Raw()), nil
 }
 
 func (a *ApiHandler) GetEthV1BeaconPoolAttesterSlashings(w http.ResponseWriter, r *http.Request) (*beaconhttp.BeaconResponse, error) {
@@ -64,16 +65,23 @@ func (a *ApiHandler) PostEthV1BeaconPoolAttestations(w http.ResponseWriter, r *h
 		beaconhttp.NewEndpointError(http.StatusBadRequest, err).WriteTo(w)
 		return
 	}
+
+	headState := a.syncedData.HeadState()
+	if headState == nil {
+		beaconhttp.NewEndpointError(http.StatusServiceUnavailable, errors.New("head state not available")).WriteTo(w)
+		return
+	}
 	failures := []poolingFailure{}
 	for i, attestation := range req {
-		if err := a.forkchoiceStore.ValidateOnAttestation(attestation); err != nil {
-			failures = append(failures, poolingFailure{
-				Index:   i,
-				Message: err.Error(),
-			})
-			continue
-		}
-		if err := a.committeeSub.CheckAggregateAttestation(attestation); err != nil {
+		var (
+			slot                  = attestation.AttestantionData().Slot()
+			cIndex                = attestation.AttestantionData().CommitteeIndex()
+			committeeCountPerSlot = headState.CommitteeCount(slot / a.beaconChainCfg.SlotsPerEpoch)
+			subnet                = subnets.ComputeSubnetForAttestation(committeeCountPerSlot, slot, cIndex, a.beaconChainCfg.SlotsPerEpoch, a.netConfig.AttestationSubnetCount)
+		)
+		_ = i
+		if err := a.attestationService.ProcessMessage(r.Context(), &subnet, attestation); err != nil {
+			log.Warn("[Beacon REST] failed to process attestation", "err", err)
 			failures = append(failures, poolingFailure{
 				Index:   i,
 				Message: err.Error(),
@@ -81,13 +89,6 @@ func (a *ApiHandler) PostEthV1BeaconPoolAttestations(w http.ResponseWriter, r *h
 			continue
 		}
 		if a.sentinel != nil {
-			// broadcast
-			var (
-				slot                  = attestation.AttestantionData().Slot()
-				cIndex                = attestation.AttestantionData().CommitteeIndex()
-				committeeCountPerSlot = subnets.ComputeCommitteeCountPerSlot(a.syncedData.HeadState(), slot, a.beaconChainCfg.SlotsPerEpoch)
-				subnet                = subnets.ComputeSubnetForAttestation(committeeCountPerSlot, slot, cIndex, a.beaconChainCfg.SlotsPerEpoch, a.netConfig.AttestationSubnetCount)
-			)
 			encodedSSZ, err := attestation.EncodeSSZ(nil)
 			if err != nil {
 				beaconhttp.NewEndpointError(http.StatusInternalServerError, err).WriteTo(w)
@@ -95,7 +96,7 @@ func (a *ApiHandler) PostEthV1BeaconPoolAttestations(w http.ResponseWriter, r *h
 			}
 			if _, err := a.sentinel.PublishGossip(r.Context(), &sentinel.GossipData{
 				Data:     encodedSSZ,
-				Name:     gossip.TopicNameBeaconAttestation(subnet),
+				Name:     gossip.TopicNamePrefixBeaconAttestation,
 				SubnetId: &subnet,
 			}); err != nil {
 				beaconhttp.NewEndpointError(http.StatusInternalServerError, err).WriteTo(w)
@@ -124,10 +125,11 @@ func (a *ApiHandler) PostEthV1BeaconPoolVoluntaryExits(w http.ResponseWriter, r 
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
-	if err := a.forkchoiceStore.OnVoluntaryExit(&req, false); err != nil {
+	if err := a.voluntaryExitService.ProcessMessage(r.Context(), nil, &req); err != nil && !errors.Is(err, services.ErrIgnore) {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
+
 	// Broadcast to gossip
 	if a.sentinel != nil {
 		encodedSSZ, err := req.EncodeSSZ(nil)
@@ -142,7 +144,7 @@ func (a *ApiHandler) PostEthV1BeaconPoolVoluntaryExits(w http.ResponseWriter, r 
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
-		a.operationsPool.VoluntaryExistsPool.Insert(req.VoluntaryExit.ValidatorIndex, &req)
+		a.operationsPool.VoluntaryExitsPool.Insert(req.VoluntaryExit.ValidatorIndex, &req)
 	}
 	// Only write 200
 	w.WriteHeader(http.StatusOK)
@@ -183,7 +185,7 @@ func (a *ApiHandler) PostEthV1BeaconPoolProposerSlashings(w http.ResponseWriter,
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
-	if err := a.forkchoiceStore.OnProposerSlashing(&req, false); err != nil {
+	if err := a.proposerSlashingService.ProcessMessage(r.Context(), nil, &req); err != nil && !errors.Is(err, services.ErrIgnore) {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
@@ -225,7 +227,7 @@ func (a *ApiHandler) PostEthV1BeaconPoolBlsToExecutionChanges(w http.ResponseWri
 	}
 	failures := []poolingFailure{}
 	for _, v := range req {
-		if err := a.forkchoiceStore.OnBlsToExecutionChange(v, false); err != nil {
+		if err := a.blsToExecutionChangeService.ProcessMessage(r.Context(), nil, v); err != nil && !errors.Is(err, services.ErrIgnore) {
 			failures = append(failures, poolingFailure{Index: len(failures), Message: err.Error()})
 			continue
 		}
@@ -266,6 +268,7 @@ func (a *ApiHandler) PostEthV1ValidatorAggregatesAndProof(w http.ResponseWriter,
 	failures := []poolingFailure{}
 	for _, v := range req {
 		if err := a.aggregateAndProofsService.ProcessMessage(r.Context(), nil, v); err != nil && !errors.Is(err, services.ErrIgnore) {
+			log.Warn("[Beacon REST] failed to process bls-change", "err", err)
 			failures = append(failures, poolingFailure{Index: len(failures), Message: err.Error()})
 			continue
 		}
@@ -274,12 +277,14 @@ func (a *ApiHandler) PostEthV1ValidatorAggregatesAndProof(w http.ResponseWriter,
 			encodedSSZ, err := v.EncodeSSZ(nil)
 			if err != nil {
 				http.Error(w, err.Error(), http.StatusInternalServerError)
+				log.Warn("[Beacon REST] failed to encode aggregate and proof", "err", err)
 				return
 			}
 			if _, err := a.sentinel.PublishGossip(r.Context(), &sentinel.GossipData{
 				Data: encodedSSZ,
 				Name: gossip.TopicNameBeaconAggregateAndProof,
 			}); err != nil {
+				log.Warn("[Beacon REST] failed to publish gossip", "err", err)
 				http.Error(w, err.Error(), http.StatusInternalServerError)
 				return
 			}
@@ -308,7 +313,8 @@ func (a *ApiHandler) PostEthV1BeaconPoolSyncCommittees(w http.ResponseWriter, r 
 			continue
 		}
 		for _, subnet := range publishingSubnets {
-			if err := a.syncCommitteeMessagesService.ProcessMessage(r.Context(), &subnet, v); err != nil && !errors.Is(err, services.ErrIgnore) {
+			if err = a.syncCommitteeMessagesService.ProcessMessage(r.Context(), &subnet, v); err != nil && !errors.Is(err, services.ErrIgnore) {
+				log.Warn("[Beacon REST] failed to process attestation", "err", err)
 				failures = append(failures, poolingFailure{Index: idx, Message: err.Error()})
 				break
 			}
@@ -354,8 +360,13 @@ func (a *ApiHandler) PostEthV1ValidatorContributionsAndProofs(w http.ResponseWri
 		return
 	}
 	failures := []poolingFailure{}
+	var err error
 	for idx, v := range msgs {
-		if err := a.syncContributionAndProofsService.ProcessMessage(r.Context(), nil, v); err != nil && !errors.Is(err, services.ErrIgnore) {
+		if bytes.Equal(v.Message.Contribution.AggregationBits, make([]byte, len(v.Message.Contribution.AggregationBits))) {
+			continue // skip empty contributions
+		}
+		if err = a.syncContributionAndProofsService.ProcessMessage(r.Context(), nil, v); err != nil && !errors.Is(err, services.ErrIgnore) {
+			log.Warn("[Beacon REST] failed to process sync contribution", "err", err)
 			failures = append(failures, poolingFailure{Index: idx, Message: err.Error()})
 			continue
 		}
@@ -364,12 +375,14 @@ func (a *ApiHandler) PostEthV1ValidatorContributionsAndProofs(w http.ResponseWri
 			encodedSSZ, err := v.EncodeSSZ(nil)
 			if err != nil {
 				http.Error(w, err.Error(), http.StatusInternalServerError)
+				log.Warn("[Beacon REST] failed to encode sync contribution", "err", err)
 				return
 			}
 			if _, err := a.sentinel.PublishGossip(r.Context(), &sentinel.GossipData{
 				Data: encodedSSZ,
 				Name: gossip.TopicNameSyncCommitteeContributionAndProof,
 			}); err != nil {
+				log.Warn("[Beacon REST] failed to publish gossip", "err", err)
 				http.Error(w, err.Error(), http.StatusInternalServerError)
 				return
 			}

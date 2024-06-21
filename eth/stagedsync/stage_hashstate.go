@@ -37,10 +37,10 @@ type HashStateCfg struct {
 
 	historyV3 bool
 
-	agg *state.AggregatorV3
+	agg *state.Aggregator
 }
 
-func StageHashStateCfg(db kv.RwDB, dirs datadir.Dirs, historyV3 bool, agg *state.AggregatorV3) HashStateCfg {
+func StageHashStateCfg(db kv.RwDB, dirs datadir.Dirs, historyV3 bool, agg *state.Aggregator) HashStateCfg {
 	return HashStateCfg{
 		db:        db,
 		dirs:      dirs,
@@ -722,7 +722,7 @@ func (p *Promoter) Promote(logPrefix string, from, to uint64, storage, codes boo
 	return nil
 }
 
-func (p *Promoter) UnwindOnHistoryV3(logPrefix string, agg *state.AggregatorV3, unwindFrom, unwindTo uint64, storage, codes bool) error {
+func (p *Promoter) UnwindOnHistoryV3(logPrefix string, agg *state.Aggregator, unwindFrom, unwindTo uint64, storage, codes bool) error {
 	p.logger.Info(fmt.Sprintf("[%s] Unwinding started", logPrefix), "from", unwindFrom, "to", unwindTo, "storage", storage, "codes", codes)
 
 	txnFrom, err := rawdbv3.TxNums.Min(p.tx, unwindTo+1)

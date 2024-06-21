@@ -1,0 +1,18 @@
+---
+
+- name: Sending synchronous inscription with pending nonce
+  ansible.builtin.shell: |
+    sleep {{ block_interval }}
+    cur_nonce=$(cast nonce --block pending --rpc-url {{ rpc_url }} {{ eth_address }})
+    inscr_data=$(echo -n 'data:,{"msg":"{{ inscription_message }} - 1"}' | xxd -p | tr -d "\n")
+    cast send --nonce $cur_nonce {{ legacy_flag }} --private-key {{ private_key }} --rpc-url {{ rpc_url }} -j {{ eth_address }} 0x$inscr_data >> {{ log_file }}
+  args:
+    executable: /bin/bash
+
+- name: Sending synchronous inscription with default nonce
+  ansible.builtin.shell: |
+    inscr_data=$(echo -n 'data:,{"msg":"{{ inscription_message }} - 2"}' | xxd -p | tr -d "\n")
+    cast send {{ legacy_flag }} --private-key {{ private_key }} --rpc-url {{ rpc_url }} -j {{ eth_address }} 0x$inscr_data >> {{ log_file }}
+  args:
+    executable: /bin/bash
+

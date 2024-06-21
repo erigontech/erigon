@@ -43,7 +43,7 @@ type Generator struct {
 	tx          kv.Tx
 	dirs        datadir.Dirs
 	historyV3   bool
-	agg         *libstate.AggregatorV3
+	agg         *libstate.Aggregator
 	blockReader services.FullBlockReader
 	chainCfg    *chain.Config
 	engine      consensus.EngineReader
@@ -52,7 +52,7 @@ type Generator struct {
 func NewGenerator(
 	dirs datadir.Dirs,
 	historyV3 bool,
-	agg *libstate.AggregatorV3,
+	agg *libstate.Aggregator,
 	blockReader services.FullBlockReader,
 	chainCfg *chain.Config,
 	engine consensus.EngineReader,
@@ -261,6 +261,7 @@ func populateDbTables(batch *membatchwithdb.MemoryMutation) error {
 		db2.TableStats,
 		hermez_db.TX_PRICE_PERCENTAGE,
 		hermez_db.BLOCKBATCHES,
+		hermez_db.BATCH_BLOCKS,
 		hermez_db.BLOCK_GLOBAL_EXIT_ROOTS,
 		hermez_db.GLOBAL_EXIT_ROOTS_BATCHES,
 		hermez_db.STATE_ROOTS,
@@ -271,6 +272,8 @@ func populateDbTables(batch *membatchwithdb.MemoryMutation) error {
 		hermez_db.REUSED_L1_INFO_TREE_INDEX,
 		hermez_db.LATEST_USED_GER,
 		hermez_db.L1_INFO_TREE_UPDATES_BY_GER,
+		hermez_db.SMT_DEPTHS,
+		hermez_db.INVALID_BATCHES,
 	}
 
 	for _, t := range tables {

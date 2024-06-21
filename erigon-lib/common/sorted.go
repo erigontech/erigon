@@ -17,8 +17,9 @@
 package common
 
 import (
+	"slices"
+
 	"golang.org/x/exp/constraints"
-	"golang.org/x/exp/slices"
 )
 
 func SortedKeys[K constraints.Ordered, V any](m map[K]V) []K {

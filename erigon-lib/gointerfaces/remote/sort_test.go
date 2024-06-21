@@ -1,12 +1,12 @@
 package remote_test
 
 import (
+	"slices"
 	"testing"
 
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/remote"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/types"
 	"github.com/stretchr/testify/assert"
-	"golang.org/x/exp/slices"
 )
 
 func TestSort(t *testing.T) {

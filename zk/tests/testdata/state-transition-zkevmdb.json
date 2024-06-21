@@ -67,9 +67,9 @@
     "expectedNewAccInputHash": "0xe50b49f540b950cad5526ef669ff2d5bd8c81c86d9daeeb26d72a7a82920d25c",
     "timestampLimit": 1944498031,
     "virtualCounters": {
-      "steps": 11052,
+      "steps": 11112,
       "arith": 581,
-      "binary": 726,
+      "binary": 728,
       "memAlign": 0,
       "keccaks": 41,
       "padding": 13,

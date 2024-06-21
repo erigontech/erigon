@@ -29,6 +29,7 @@ import (
 	"github.com/libp2p/go-libp2p/core/peer"
 	"github.com/multiformats/go-multiaddr"
 	"github.com/pion/randutil"
+	"github.com/prysmaticlabs/go-bitfield"
 )
 
 func convertToInterfacePubkey(pubkey *ecdsa.PublicKey) (crypto.PubKey, error) {
@@ -121,12 +122,14 @@ func (s *Sentinel) inMeshCap() float64 {
 
 // updateENRAttSubnets calls the ENR to notify other peers their attnets preferences.
 func (s *Sentinel) updateENRAttSubnets(subnetIndex int, on bool) {
-	var subnetField []byte
-	if err := s.listener.LocalNode().Node().Load(enr.WithEntry(s.cfg.NetworkConfig.AttSubnetKey, subnetField)); err != nil {
+	subnetField := bitfield.NewBitvector64()
+	if err := s.listener.LocalNode().Node().Load(enr.WithEntry(s.cfg.NetworkConfig.AttSubnetKey, &subnetField)); err != nil {
+		log.Error("[Sentinel] Could not load attSubnetKey", "err", err)
 		return
 	}
 	subnetField = common.Copy(subnetField)
 	if len(subnetField) <= subnetIndex/8 {
+		log.Error("[Sentinel] Subnet index out of range", "subnetIndex", subnetIndex, "len", len(subnetField))
 		return
 	}
 	if on {
@@ -134,17 +137,19 @@ func (s *Sentinel) updateENRAttSubnets(subnetIndex int, on bool) {
 	} else {
 		subnetField[subnetIndex/8] &^= 1 << (subnetIndex % 8)
 	}
-	s.listener.LocalNode().Set(enr.WithEntry(s.cfg.NetworkConfig.AttSubnetKey, subnetField))
+	s.listener.LocalNode().Set(enr.WithEntry(s.cfg.NetworkConfig.AttSubnetKey, &subnetField))
 }
 
 // updateENRSyncNets calls the ENR to notify other peers their attnets preferences.
 func (s *Sentinel) updateENRSyncNets(subnetIndex int, on bool) {
-	var subnetField []byte
-	if err := s.listener.LocalNode().Node().Load(enr.WithEntry(s.cfg.NetworkConfig.SyncCommsSubnetKey, subnetField)); err != nil {
+	subnetField := bitfield.NewBitvector4()
+	if err := s.listener.LocalNode().Node().Load(enr.WithEntry(s.cfg.NetworkConfig.SyncCommsSubnetKey, &subnetField)); err != nil {
+		log.Error("[Sentinel] Could not load syncCommsSubnetKey", "err", err)
 		return
 	}
 	subnetField = common.Copy(subnetField)
 	if len(subnetField) <= subnetIndex/8 {
+		log.Error("[Sentinel] Subnet index out of range", "subnetIndex", subnetIndex, "len", len(subnetField))
 		return
 	}
 	if on {
@@ -152,21 +157,30 @@ func (s *Sentinel) updateENRSyncNets(subnetIndex int, on bool) {
 	} else {
 		subnetField[subnetIndex/8] &^= 1 << (subnetIndex % 8)
 	}
-	s.listener.LocalNode().Set(enr.WithEntry(s.cfg.NetworkConfig.SyncCommsSubnetKey, subnetField))
+	s.listener.LocalNode().Set(enr.WithEntry(s.cfg.NetworkConfig.SyncCommsSubnetKey, &subnetField))
 }
 
 // updateENROnSubscription updates the ENR based on the subscription status to subnets/syncnets.
 func (s *Sentinel) updateENROnSubscription(topicName string, subscribe bool) {
 	s.metadataLock.Lock()
 	defer s.metadataLock.Unlock()
+	//. topic: /eth2/d31f6191/beacon_attestation_45/ssz_snappy
+	// extract third part of the topic name
+	parts := strings.Split(topicName, "/")
+	if len(parts) < 4 {
+		return
+	}
+	part := parts[3]
 	for i := 0; i < int(s.cfg.NetworkConfig.AttestationSubnetCount); i++ {
-		if strings.Contains(topicName, fmt.Sprintf(gossip.TopicNamePrefixBeaconAttestation, i)) {
+		if part == gossip.TopicNameBeaconAttestation(uint64(i)) {
+			log.Info("[Sentinel] Update ENR on subscription", "subnet", i, "subscribe", subscribe, "type", "attestation")
 			s.updateENRAttSubnets(i, subscribe)
 			return
 		}
 	}
 	for i := 0; i < int(s.cfg.BeaconConfig.SyncCommitteeSubnetCount); i++ {
-		if strings.Contains(topicName, fmt.Sprintf(gossip.TopicNamePrefixSyncCommittee, i)) {
+		if part == gossip.TopicNameSyncCommittee(i) {
+			log.Info("[Sentinel] Update ENR on subscription", "subnet", i, "subscribe", subscribe, "type", "syncnets")
 			s.updateENRSyncNets(i, subscribe)
 			return
 		}

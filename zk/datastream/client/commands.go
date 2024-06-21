@@ -11,8 +11,6 @@ const (
 	CmdStartBookmark Command = 4 // CmdStartBookmark for the start from bookmark TCP client command
 	CmdEntry         Command = 5 // CmdEntry for the get entry TCP client command
 	CmdBookmark      Command = 6 // CmdBookmark for the get bookmark TCP client command
-
-	BookmarkLength = 9
 )
 
 // sendHeaderCmd sends the header command to the server.
@@ -28,10 +26,6 @@ func (c *StreamClient) sendHeaderCmd() error {
 // sendStartBookmarkCmd sends a start command to the server, indicating
 // that the client wishes to start streaming from the given bookmark
 func (c *StreamClient) sendStartBookmarkCmd(bookmark []byte) error {
-	if len(bookmark) != BookmarkLength {
-		return fmt.Errorf("bookmark length must be 9 bytes, got %d", len(bookmark))
-	}
-
 	err := c.sendCommand(CmdStartBookmark)
 	if err != nil {
 		return err

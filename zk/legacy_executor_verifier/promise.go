@@ -3,10 +3,11 @@ package legacy_executor_verifier
 import "sync"
 
 type Promise[T any] struct {
-	result T
-	err    error
-	wg     sync.WaitGroup
-	mutex  sync.Mutex
+	result    T
+	err       error
+	wg        sync.WaitGroup
+	mutex     sync.Mutex
+	ExtraInfo interface{}
 }
 
 func NewPromise[T any](f func() (T, error)) *Promise[T] {

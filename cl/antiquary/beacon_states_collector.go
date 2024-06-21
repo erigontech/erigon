@@ -350,7 +350,7 @@ func (i *beaconStatesCollector) close() {
 	i.effectiveBalancesDumpCollector.Close()
 }
 
-// antiquateFullSlashings goes on mdbx as it is full of common repeated patter always and thus fits with 16KB pages.
+// antiquateFullUint64List goes on mdbx as it is full of common repeated patter always and thus fits with 16KB pages.
 func antiquateFullUint64List(collector *etl.Collector, slot uint64, raw []byte, buffer *bytes.Buffer, compressor *zstd.Encoder) error {
 	buffer.Reset()
 	compressor.Reset(buffer)

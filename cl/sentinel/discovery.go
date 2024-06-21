@@ -6,7 +6,6 @@ import (
 	"time"
 
 	"github.com/ledgerwatch/erigon/cl/clparams"
-	"github.com/ledgerwatch/erigon/cl/fork"
 	"github.com/ledgerwatch/erigon/p2p/enode"
 	"github.com/ledgerwatch/erigon/p2p/enr"
 	"github.com/ledgerwatch/log/v3"
@@ -54,7 +53,6 @@ func (s *Sentinel) connectWithAllPeers(multiAddrs []multiaddr.Multiaddr) error {
 }
 
 func (s *Sentinel) listenForPeers() {
-	s.listenForPeersDoneCh = make(chan struct{}, 3)
 	enodes := []*enode.Node{}
 	for _, node := range s.cfg.NetworkConfig.StaticPeers {
 		newNode, err := enode.Parse(enode.ValidSchemes, node)
@@ -80,11 +78,7 @@ func (s *Sentinel) listenForPeers() {
 			log.Debug("Stopping Ethereum 2.0 peer discovery", "err", err)
 			break
 		}
-		select {
-		case <-s.listenForPeersDoneCh:
-			return
-		default:
-		}
+
 		if s.HasTooManyPeers() {
 			log.Trace("[Sentinel] Not looking for peers, at peer limit")
 			time.Sleep(100 * time.Millisecond)
@@ -132,7 +126,7 @@ func (s *Sentinel) connectToBootnodes() error {
 func (s *Sentinel) setupENR(
 	node *enode.LocalNode,
 ) (*enode.LocalNode, error) {
-	forkId, err := fork.ComputeForkId(s.cfg.BeaconConfig, s.cfg.GenesisConfig)
+	forkId, err := s.ethClock.ForkId()
 	if err != nil {
 		return nil, err
 	}

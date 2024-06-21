@@ -252,7 +252,7 @@ func (a *AccessListTracer) AccessList() types2.AccessList {
 	return a.list.accessList()
 }
 
-// AccessList returns the current accesslist maintained by the tracer.
+// AccessListSorted returns the current accesslist maintained by the tracer.
 func (a *AccessListTracer) AccessListSorted() types2.AccessList {
 	return a.list.accessListSorted()
 }

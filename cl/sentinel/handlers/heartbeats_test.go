@@ -6,10 +6,16 @@ import (
 	"crypto/ecdsa"
 	"testing"
 
+	"github.com/ledgerwatch/log/v3"
+	"github.com/libp2p/go-libp2p"
+	"github.com/libp2p/go-libp2p/core/peer"
+	"github.com/libp2p/go-libp2p/core/protocol"
+	"github.com/stretchr/testify/require"
+
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/cl/cltypes"
-	"github.com/ledgerwatch/erigon/cl/phase1/forkchoice"
+	"github.com/ledgerwatch/erigon/cl/phase1/forkchoice/mock_services"
 	"github.com/ledgerwatch/erigon/cl/sentinel/communication"
 	"github.com/ledgerwatch/erigon/cl/sentinel/communication/ssz_snappy"
 	"github.com/ledgerwatch/erigon/cl/sentinel/handshake"
@@ -17,11 +23,6 @@ import (
 	"github.com/ledgerwatch/erigon/crypto"
 	"github.com/ledgerwatch/erigon/p2p/enode"
 	"github.com/ledgerwatch/erigon/p2p/enr"
-	"github.com/ledgerwatch/log/v3"
-	"github.com/libp2p/go-libp2p"
-	"github.com/libp2p/go-libp2p/core/peer"
-	"github.com/libp2p/go-libp2p/core/protocol"
-	"github.com/stretchr/testify/require"
 )
 
 var (
@@ -68,9 +69,10 @@ func TestPing(t *testing.T) {
 	peersPool := peers.NewPool()
 	beaconDB, indiciesDB := setupStore(t)
 
-	f := forkchoice.NewForkChoiceStorageMock()
+	f := mock_services.NewForkChoiceStorageMock(t)
+	ethClock := getEthClock(t)
 
-	genesisCfg, _, beaconCfg := clparams.GetConfigsByNetwork(1)
+	_, beaconCfg := clparams.GetConfigsByNetwork(1)
 	c := NewConsensusHandlers(
 		ctx,
 		beaconDB,
@@ -80,7 +82,7 @@ func TestPing(t *testing.T) {
 		&clparams.NetworkConfig{},
 		testLocalNode(),
 		beaconCfg,
-		genesisCfg,
+		ethClock,
 		nil, f, nil, true,
 	)
 	c.Start()
@@ -122,9 +124,9 @@ func TestGoodbye(t *testing.T) {
 	peersPool := peers.NewPool()
 	beaconDB, indiciesDB := setupStore(t)
 
-	f := forkchoice.NewForkChoiceStorageMock()
-
-	genesisCfg, _, beaconCfg := clparams.GetConfigsByNetwork(1)
+	f := mock_services.NewForkChoiceStorageMock(t)
+	ethClock := getEthClock(t)
+	_, beaconCfg := clparams.GetConfigsByNetwork(1)
 	c := NewConsensusHandlers(
 		ctx,
 		beaconDB,
@@ -134,7 +136,7 @@ func TestGoodbye(t *testing.T) {
 		&clparams.NetworkConfig{},
 		testLocalNode(),
 		beaconCfg,
-		genesisCfg,
+		ethClock,
 		nil, f, nil, true,
 	)
 	c.Start()
@@ -182,10 +184,10 @@ func TestMetadataV2(t *testing.T) {
 	peersPool := peers.NewPool()
 	beaconDB, indiciesDB := setupStore(t)
 
-	f := forkchoice.NewForkChoiceStorageMock()
-
+	f := mock_services.NewForkChoiceStorageMock(t)
+	ethClock := getEthClock(t)
 	nc := clparams.NetworkConfigs[clparams.MainnetNetwork]
-	genesisCfg, _, beaconCfg := clparams.GetConfigsByNetwork(1)
+	_, beaconCfg := clparams.GetConfigsByNetwork(1)
 	c := NewConsensusHandlers(
 		ctx,
 		beaconDB,
@@ -195,7 +197,7 @@ func TestMetadataV2(t *testing.T) {
 		&nc,
 		testLocalNode(),
 		beaconCfg,
-		genesisCfg,
+		ethClock,
 		nil, f, nil, true,
 	)
 	c.Start()
@@ -240,10 +242,11 @@ func TestMetadataV1(t *testing.T) {
 	peersPool := peers.NewPool()
 	beaconDB, indiciesDB := setupStore(t)
 
-	f := forkchoice.NewForkChoiceStorageMock()
+	f := mock_services.NewForkChoiceStorageMock(t)
 
 	nc := clparams.NetworkConfigs[clparams.MainnetNetwork]
-	genesisCfg, _, beaconCfg := clparams.GetConfigsByNetwork(1)
+	ethClock := getEthClock(t)
+	_, beaconCfg := clparams.GetConfigsByNetwork(1)
 	c := NewConsensusHandlers(
 		ctx,
 		beaconDB,
@@ -253,7 +256,7 @@ func TestMetadataV1(t *testing.T) {
 		&nc,
 		testLocalNode(),
 		beaconCfg,
-		genesisCfg,
+		ethClock,
 		nil, f, nil, true,
 	)
 	c.Start()
@@ -297,9 +300,9 @@ func TestStatus(t *testing.T) {
 	peersPool := peers.NewPool()
 	beaconDB, indiciesDB := setupStore(t)
 
-	f := forkchoice.NewForkChoiceStorageMock()
+	f := mock_services.NewForkChoiceStorageMock(t)
 
-	hs := handshake.New(ctx, &clparams.GenesisConfig{}, &clparams.MainnetBeaconConfig, nil)
+	hs := handshake.New(ctx, getEthClock(t), &clparams.MainnetBeaconConfig, nil)
 	s := &cltypes.Status{
 		FinalizedRoot:  libcommon.Hash{1, 2, 4},
 		HeadRoot:       libcommon.Hash{1, 2, 4},
@@ -308,7 +311,7 @@ func TestStatus(t *testing.T) {
 	}
 	hs.SetStatus(s)
 	nc := clparams.NetworkConfigs[clparams.MainnetNetwork]
-	genesisCfg, _, beaconCfg := clparams.GetConfigsByNetwork(1)
+	_, beaconCfg := clparams.GetConfigsByNetwork(1)
 	c := NewConsensusHandlers(
 		ctx,
 		beaconDB,
@@ -318,7 +321,7 @@ func TestStatus(t *testing.T) {
 		&nc,
 		testLocalNode(),
 		beaconCfg,
-		genesisCfg,
+		getEthClock(t),
 		hs, f, nil, true,
 	)
 	c.Start()

@@ -10,25 +10,33 @@ import (
 	"testing"
 
 	"github.com/golang/snappy"
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/kv/memdb"
-	"github.com/ledgerwatch/erigon/cl/antiquary/tests"
-	"github.com/ledgerwatch/erigon/cl/clparams"
-	"github.com/ledgerwatch/erigon/cl/cltypes"
-	"github.com/ledgerwatch/erigon/cl/cltypes/solid"
-	"github.com/ledgerwatch/erigon/cl/fork"
-	"github.com/ledgerwatch/erigon/cl/persistence/blob_storage"
-	"github.com/ledgerwatch/erigon/cl/phase1/forkchoice"
-	"github.com/ledgerwatch/erigon/cl/sentinel/communication"
-	"github.com/ledgerwatch/erigon/cl/sentinel/communication/ssz_snappy"
-	"github.com/ledgerwatch/erigon/cl/sentinel/peers"
-	"github.com/ledgerwatch/erigon/cl/utils"
 	"github.com/libp2p/go-libp2p"
 	"github.com/libp2p/go-libp2p/core/peer"
 	"github.com/libp2p/go-libp2p/core/protocol"
 	"github.com/spf13/afero"
 	"github.com/stretchr/testify/require"
+
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/kv/memdb"
+	"github.com/ledgerwatch/erigon/cl/antiquary/tests"
+	"github.com/ledgerwatch/erigon/cl/clparams"
+	"github.com/ledgerwatch/erigon/cl/clparams/initial_state"
+	"github.com/ledgerwatch/erigon/cl/cltypes"
+	"github.com/ledgerwatch/erigon/cl/cltypes/solid"
+	"github.com/ledgerwatch/erigon/cl/persistence/blob_storage"
+	"github.com/ledgerwatch/erigon/cl/phase1/forkchoice/mock_services"
+	"github.com/ledgerwatch/erigon/cl/sentinel/communication"
+	"github.com/ledgerwatch/erigon/cl/sentinel/communication/ssz_snappy"
+	"github.com/ledgerwatch/erigon/cl/sentinel/peers"
+	"github.com/ledgerwatch/erigon/cl/utils"
+	"github.com/ledgerwatch/erigon/cl/utils/eth_clock"
 )
+
+func getEthClock(t *testing.T) eth_clock.EthereumClock {
+	s, err := initial_state.GetGenesisState(clparams.MainnetNetwork)
+	require.NoError(t, err)
+	return eth_clock.NewEthereumClock(s.GenesisTime(), s.GenesisValidatorsRoot(), s.BeaconConfig())
+}
 
 func getTestBlobSidecars(blockHeader *cltypes.SignedBeaconBlockHeader) []*cltypes.BlobSidecar {
 	out := []*cltypes.BlobSidecar{}
@@ -76,13 +84,14 @@ func TestBlobsByRangeHandler(t *testing.T) {
 	expBlocks := populateDatabaseWithBlocks(t, store, tx, startSlot, count)
 	h := expBlocks[0].SignedBeaconBlockHeader()
 	sidecars := getTestBlobSidecars(h)
-	genesisCfg, _, beaconCfg := clparams.GetConfigsByNetwork(1)
-	blobStorage := blob_storage.NewBlobStore(blobDb, afero.NewMemMapFs(), math.MaxUint64, beaconCfg, genesisCfg)
+	_, beaconCfg := clparams.GetConfigsByNetwork(1)
+	blobStorage := blob_storage.NewBlobStore(blobDb, afero.NewMemMapFs(), math.MaxUint64, beaconCfg, nil)
 	r, _ := h.Header.HashSSZ()
 	require.NoError(t, blobStorage.WriteBlobSidecars(ctx, r, sidecars))
 
 	tx.Commit()
 
+	ethClock := getEthClock(t)
 	c := NewConsensusHandlers(
 		ctx,
 		store,
@@ -92,8 +101,8 @@ func TestBlobsByRangeHandler(t *testing.T) {
 		&clparams.NetworkConfig{},
 		nil,
 		beaconCfg,
-		genesisCfg,
-		nil, &forkchoice.ForkChoiceStorageMock{}, blobStorage, true,
+		ethClock,
+		nil, &mock_services.ForkChoiceStorageMock{}, blobStorage, true,
 	)
 	c.Start()
 	req := &cltypes.BlobsByRangeRequest{
@@ -143,7 +152,7 @@ func TestBlobsByRangeHandler(t *testing.T) {
 		if respForkDigest == 0 {
 			require.NoError(t, fmt.Errorf("null fork digest"))
 		}
-		version, err := fork.ForkDigestVersion(utils.Uint32ToBytes4(respForkDigest), beaconCfg, genesisCfg.GenesisValidatorRoot)
+		version, err := ethClock.StateVersionByForkDigest(utils.Uint32ToBytes4(respForkDigest))
 		if err != nil {
 			require.NoError(t, err)
 		}
@@ -193,11 +202,12 @@ func TestBlobsByIdentifiersHandler(t *testing.T) {
 	startSlot := uint64(100)
 	count := uint64(10)
 
+	ethClock := getEthClock(t)
 	expBlocks := populateDatabaseWithBlocks(t, store, tx, startSlot, count)
 	h := expBlocks[0].SignedBeaconBlockHeader()
 	sidecars := getTestBlobSidecars(h)
-	genesisCfg, _, beaconCfg := clparams.GetConfigsByNetwork(1)
-	blobStorage := blob_storage.NewBlobStore(blobDb, afero.NewMemMapFs(), math.MaxUint64, beaconCfg, genesisCfg)
+	_, beaconCfg := clparams.GetConfigsByNetwork(1)
+	blobStorage := blob_storage.NewBlobStore(blobDb, afero.NewMemMapFs(), math.MaxUint64, beaconCfg, ethClock)
 	r, _ := h.Header.HashSSZ()
 	require.NoError(t, blobStorage.WriteBlobSidecars(ctx, r, sidecars))
 
@@ -212,8 +222,8 @@ func TestBlobsByIdentifiersHandler(t *testing.T) {
 		&clparams.NetworkConfig{},
 		nil,
 		beaconCfg,
-		genesisCfg,
-		nil, &forkchoice.ForkChoiceStorageMock{}, blobStorage, true,
+		ethClock,
+		nil, &mock_services.ForkChoiceStorageMock{}, blobStorage, true,
 	)
 	c.Start()
 	req := solid.NewStaticListSSZ[*cltypes.BlobIdentifier](40269, 40)
@@ -264,7 +274,7 @@ func TestBlobsByIdentifiersHandler(t *testing.T) {
 		if respForkDigest == 0 {
 			require.NoError(t, fmt.Errorf("null fork digest"))
 		}
-		version, err := fork.ForkDigestVersion(utils.Uint32ToBytes4(respForkDigest), beaconCfg, genesisCfg.GenesisValidatorRoot)
+		version, err := ethClock.StateVersionByForkDigest(utils.Uint32ToBytes4(respForkDigest))
 		if err != nil {
 			require.NoError(t, err)
 		}

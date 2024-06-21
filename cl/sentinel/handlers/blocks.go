@@ -18,7 +18,6 @@ import (
 	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/cl/cltypes"
 	"github.com/ledgerwatch/erigon/cl/cltypes/solid"
-	"github.com/ledgerwatch/erigon/cl/fork"
 	"github.com/ledgerwatch/erigon/cl/sentinel/communication/ssz_snappy"
 	"github.com/ledgerwatch/erigon/cl/utils"
 	"github.com/libp2p/go-libp2p/core/network"
@@ -58,10 +57,7 @@ func (c *ConsensusHandlers) beaconBlocksByRangeHandler(s network.Stream) error {
 
 		version := c.beaconConfig.GetCurrentStateVersion(slot / c.beaconConfig.SlotsPerEpoch)
 		// Read the fork digest
-		forkDigest, err := fork.ComputeForkDigestForVersion(
-			utils.Uint32ToBytes4(c.beaconConfig.GetForkVersionByVersion(version)),
-			c.genesisConfig.GenesisValidatorRoot,
-		)
+		forkDigest, err := c.ethClock.ComputeForkDigestForVersion(utils.Uint32ToBytes4(c.beaconConfig.GetForkVersionByVersion(version)))
 		if err != nil {
 			return err
 		}
@@ -128,10 +124,7 @@ func (c *ConsensusHandlers) beaconBlocksByRootHandler(s network.Stream) error {
 
 		// Read the fork digest
 		var forkDigest [4]byte
-		forkDigest, err = fork.ComputeForkDigestForVersion(
-			utils.Uint32ToBytes4(c.beaconConfig.GetForkVersionByVersion(block.Version())),
-			c.genesisConfig.GenesisValidatorRoot,
-		)
+		forkDigest, err = c.ethClock.ComputeForkDigestForVersion(utils.Uint32ToBytes4(c.beaconConfig.GetForkVersionByVersion(block.Version())))
 		if err != nil {
 			return false
 		}

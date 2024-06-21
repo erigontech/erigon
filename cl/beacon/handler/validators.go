@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"math"
 	"net/http"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -18,7 +19,6 @@ import (
 	"github.com/ledgerwatch/erigon/cl/phase1/core/state"
 	"github.com/ledgerwatch/log/v3"
 	"github.com/pkg/errors"
-	"golang.org/x/exp/slices"
 )
 
 var stringsBuilderPool = sync.Pool{

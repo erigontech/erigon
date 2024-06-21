@@ -19,10 +19,10 @@ import (
 	"github.com/ledgerwatch/erigon/cl/clparams/initial_state"
 	"github.com/ledgerwatch/erigon/cl/cltypes"
 	"github.com/ledgerwatch/erigon/cl/cltypes/solid"
-	"github.com/ledgerwatch/erigon/cl/fork"
 	"github.com/ledgerwatch/erigon/cl/rpc"
 	"github.com/ledgerwatch/erigon/cl/sentinel"
 	"github.com/ledgerwatch/erigon/cl/sentinel/service"
+	"github.com/ledgerwatch/erigon/cl/utils/eth_clock"
 	"github.com/ledgerwatch/erigon/cl/validator/attestation_producer"
 	"github.com/ledgerwatch/erigon/cl/validator/committee_subscription"
 	"github.com/ledgerwatch/erigon/cl/validator/sync_contribution_pool"
@@ -60,7 +60,7 @@ import (
 func OpenCaplinDatabase(ctx context.Context,
 	databaseConfig db_config.DatabaseConfiguration,
 	beaconConfig *clparams.BeaconChainConfig,
-	genesisConfig *clparams.GenesisConfig,
+	ethClock eth_clock.EthereumClock,
 	dbPath string,
 	blobDir string,
 	engine execution_client.ExecutionEngine,
@@ -101,11 +101,11 @@ func OpenCaplinDatabase(ctx context.Context,
 			blobDB.Close() // close blob database here
 		}()
 	}
-	return db, blob_storage.NewBlobStore(blobDB, afero.NewBasePathFs(afero.NewOsFs(), blobDir), blobPruneDistance, beaconConfig, genesisConfig), nil
+	return db, blob_storage.NewBlobStore(blobDB, afero.NewBasePathFs(afero.NewOsFs(), blobDir), blobPruneDistance, beaconConfig, ethClock), nil
 }
 
 func RunCaplinPhase1(ctx context.Context, engine execution_client.ExecutionEngine, config *ethconfig.Config, networkConfig *clparams.NetworkConfig,
-	beaconConfig *clparams.BeaconChainConfig, genesisConfig *clparams.GenesisConfig, state *state.CachingBeaconState, dirs datadir.Dirs, eth1Getter snapshot_format.ExecutionBlockReaderByNumber,
+	beaconConfig *clparams.BeaconChainConfig, ethClock eth_clock.EthereumClock, state *state.CachingBeaconState, dirs datadir.Dirs, eth1Getter snapshot_format.ExecutionBlockReaderByNumber,
 	snDownloader proto_downloader.DownloaderClient, backfilling, blobBackfilling bool, states bool, indexDB kv.RwDB, blobStorage blob_storage.BlobStorage, creds credentials.TransportCredentials) error {
 	ctx, cn := context.WithCancel(ctx)
 	defer cn()
@@ -127,10 +127,10 @@ func RunCaplinPhase1(ctx context.Context, engine execution_client.ExecutionEngin
 	fcuFs := afero.NewBasePathFs(afero.NewOsFs(), caplinFcuPath)
 	syncedDataManager := synced_data.NewSyncedDataManager(true, beaconConfig)
 
-	syncContributionPool := sync_contribution_pool.NewSyncContributionPool()
+	syncContributionPool := sync_contribution_pool.NewSyncContributionPool(beaconConfig)
 	emitters := beaconevents.NewEmitters()
-	aggregationPool := aggregation.NewAggregationPool(ctx, genesisConfig, beaconConfig, networkConfig)
-	forkChoice, err := forkchoice.NewForkChoiceStore(state, engine, pool, fork_graph.NewForkGraphDisk(state, fcuFs, config.BeaconRouter), emitters, syncedDataManager, blobStorage, networkConfig, aggregationPool)
+	aggregationPool := aggregation.NewAggregationPool(ctx, beaconConfig, networkConfig, ethClock)
+	forkChoice, err := forkchoice.NewForkChoiceStore(ethClock, state, engine, pool, fork_graph.NewForkGraphDisk(state, fcuFs, config.BeaconRouter), emitters, syncedDataManager, blobStorage)
 	if err != nil {
 		logger.Error("Could not create forkchoice", "err", err)
 		return err
@@ -144,20 +144,21 @@ func RunCaplinPhase1(ctx context.Context, engine execution_client.ExecutionEngin
 		return true
 	})
 
-	forkDigest, err := fork.ComputeForkDigest(beaconConfig, genesisConfig)
+	forkDigest, err := ethClock.CurrentForkDigest()
 	if err != nil {
 		return err
 	}
+	activeIndicies := state.GetActiveValidatorsIndices(state.Slot() / beaconConfig.SlotsPerEpoch)
 
 	sentinel, err := service.StartSentinelService(&sentinel.SentinelConfig{
-		IpAddr:        config.LightClientDiscoveryAddr,
-		Port:          int(config.LightClientDiscoveryPort),
-		TCPPort:       uint(config.LightClientDiscoveryTCPPort),
-		GenesisConfig: genesisConfig,
-		NetworkConfig: networkConfig,
-		BeaconConfig:  beaconConfig,
-		TmpDir:        dirs.Tmp,
-		EnableBlocks:  true,
+		IpAddr:         config.LightClientDiscoveryAddr,
+		Port:           int(config.LightClientDiscoveryPort),
+		TCPPort:        uint(config.LightClientDiscoveryTCPPort),
+		NetworkConfig:  networkConfig,
+		BeaconConfig:   beaconConfig,
+		TmpDir:         dirs.Tmp,
+		EnableBlocks:   true,
+		ActiveIndicies: uint64(len(activeIndicies)),
 	}, rcsn, blobStorage, indexDB, &service.ServerConfig{
 		Network:   "tcp",
 		Addr:      fmt.Sprintf("%s:%d", config.SentinelAddr, config.SentinelPort),
@@ -170,20 +171,26 @@ func RunCaplinPhase1(ctx context.Context, engine execution_client.ExecutionEngin
 			HeadSlot:       state.FinalizedCheckpoint().Epoch() * beaconConfig.SlotsPerEpoch,
 			HeadRoot:       state.FinalizedCheckpoint().BlockRoot(),
 		},
-	}, forkChoice, logger)
+	}, ethClock, forkChoice, logger)
 	if err != nil {
 		return err
 	}
-	beaconRpc := rpc.NewBeaconRpcP2P(ctx, sentinel, beaconConfig, genesisConfig)
-	committeeSub := committee_subscription.NewCommitteeSubscribeManagement(ctx, indexDB, beaconConfig, networkConfig, genesisConfig, sentinel, state, aggregationPool, syncedDataManager)
+	beaconRpc := rpc.NewBeaconRpcP2P(ctx, sentinel, beaconConfig, ethClock)
+	committeeSub := committee_subscription.NewCommitteeSubscribeManagement(ctx, indexDB, beaconConfig, networkConfig, ethClock, sentinel, state, aggregationPool, syncedDataManager)
 	// Define gossip services
-	blockService := services.NewBlockService(ctx, indexDB, forkChoice, syncedDataManager, genesisConfig, beaconConfig, emitters)
-	blobService := services.NewBlobSidecarService(ctx, beaconConfig, forkChoice, syncedDataManager, false)
-	syncCommitteeMessagesService := services.NewSyncCommitteeMessagesService(beaconConfig, syncedDataManager, syncContributionPool, false)
-	syncContributionService := services.NewSyncContributionService(syncedDataManager, beaconConfig, syncContributionPool, emitters)
-	aggregateAndProofService := services.NewAggregateAndProofService(ctx, syncedDataManager, forkChoice, beaconConfig, aggregationPool)
+	blockService := services.NewBlockService(ctx, indexDB, forkChoice, syncedDataManager, ethClock, beaconConfig, emitters)
+	blobService := services.NewBlobSidecarService(ctx, beaconConfig, forkChoice, syncedDataManager, ethClock, false)
+	syncCommitteeMessagesService := services.NewSyncCommitteeMessagesService(beaconConfig, ethClock, syncedDataManager, syncContributionPool, false)
+	attestationService := services.NewAttestationService(ctx, forkChoice, committeeSub, ethClock, syncedDataManager, beaconConfig, networkConfig)
+	syncContributionService := services.NewSyncContributionService(syncedDataManager, beaconConfig, syncContributionPool, ethClock, emitters, false)
+	aggregateAndProofService := services.NewAggregateAndProofService(ctx, syncedDataManager, forkChoice, beaconConfig, pool, false)
+	voluntaryExitService := services.NewVoluntaryExitService(pool, emitters, syncedDataManager, beaconConfig, ethClock)
+	blsToExecutionChangeService := services.NewBLSToExecutionChangeService(pool, emitters, syncedDataManager, beaconConfig)
+	proposerSlashingService := services.NewProposerSlashingService(pool, syncedDataManager, beaconConfig, ethClock)
 	// Create the gossip manager
-	gossipManager := network.NewGossipReceiver(sentinel, forkChoice, beaconConfig, genesisConfig, emitters, committeeSub, blockService, blobService, syncCommitteeMessagesService, syncContributionService, aggregateAndProofService)
+	gossipManager := network.NewGossipReceiver(sentinel, forkChoice, beaconConfig, ethClock, emitters, committeeSub,
+		blockService, blobService, syncCommitteeMessagesService, syncContributionService, aggregateAndProofService,
+		attestationService, voluntaryExitService, blsToExecutionChangeService, proposerSlashingService)
 	{ // start ticking forkChoice
 		go func() {
 			tickInterval := time.NewTicker(2 * time.Millisecond)
@@ -267,7 +274,7 @@ func RunCaplinPhase1(ctx context.Context, engine execution_client.ExecutionEngin
 		apiHandler := handler.NewApiHandler(
 			logger,
 			networkConfig,
-			genesisConfig,
+			ethClock,
 			beaconConfig,
 			indexDB,
 			forkChoice,
@@ -290,6 +297,10 @@ func RunCaplinPhase1(ctx context.Context, engine execution_client.ExecutionEngin
 			syncCommitteeMessagesService,
 			syncContributionService,
 			aggregateAndProofService,
+			attestationService,
+			voluntaryExitService,
+			blsToExecutionChangeService,
+			proposerSlashingService,
 		)
 		go beacon.ListenAndServe(&beacon.LayeredBeaconHandler{
 			ArchiveApi: apiHandler,
@@ -297,7 +308,7 @@ func RunCaplinPhase1(ctx context.Context, engine execution_client.ExecutionEngin
 		log.Info("Beacon API started", "addr", config.BeaconRouter.Address)
 	}
 
-	stageCfg := stages.ClStagesCfg(beaconRpc, antiq, genesisConfig, beaconConfig, state, engine, gossipManager, forkChoice, indexDB, csn, rcsn, dirs.Tmp, dbConfig, backfilling, blobBackfilling, syncedDataManager, emitters, blobStorage, attestationProducer)
+	stageCfg := stages.ClStagesCfg(beaconRpc, antiq, ethClock, beaconConfig, state, engine, gossipManager, forkChoice, indexDB, csn, rcsn, dirs.Tmp, dbConfig, backfilling, blobBackfilling, syncedDataManager, emitters, blobStorage, attestationProducer)
 	sync := stages.ConsensusClStages(ctx, stageCfg)
 
 	logger.Info("[Caplin] starting clstages loop")

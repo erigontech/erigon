@@ -63,6 +63,30 @@ func testDbAndDomain(t *testing.T, logger log.Logger) (string, kv.RwDB, *Domain)
 	return path, db, d
 }
 
+func TestDomain_OpenFolder(t *testing.T) {
+	fp, db, d, txs := filledDomain(t, log.New())
+	defer db.Close()
+	defer d.Close()
+	defer os.RemoveAll(fp)
+
+	collateAndMerge(t, db, nil, d, txs)
+
+	list := d.visibleFiles.Load()
+	require.NotEmpty(t, list)
+	ff := (*list)[len(*list)-1]
+	fn := ff.src.decompressor.FilePath()
+	d.Close()
+
+	err := os.Remove(fn)
+	require.NoError(t, err)
+	err = os.WriteFile(fn, make([]byte, 33), 0644)
+	require.NoError(t, err)
+
+	err = d.OpenFolder()
+	require.NoError(t, err)
+	d.Close()
+}
+
 // btree index should work correctly if K < m
 func TestCollationBuild(t *testing.T) {
 	logger := log.New()

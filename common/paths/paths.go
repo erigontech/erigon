@@ -36,7 +36,7 @@ func DefaultDataDir() string {
 			if xdgDataDir := os.Getenv("XDG_DATA_HOME"); xdgDataDir != "" {
 				return filepath.Join(xdgDataDir, strings.ToLower(dirname))
 			}
-			return filepath.Join(home, ".local/share", strings.ToLower(dirname))
+			return filepath.Join(home, ".local", "share", strings.ToLower(dirname))
 		}
 	}
 	// As we cannot guess a stable location, return empty and handle later

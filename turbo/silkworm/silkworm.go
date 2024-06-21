@@ -8,16 +8,19 @@ import (
 	silkworm_go "github.com/erigontech/silkworm-go"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/consensus"
+	"github.com/ledgerwatch/log/v3"
 )
 
 type Silkworm = silkworm_go.Silkworm
+type SilkwormLogLevel = silkworm_go.SilkwormLogLevel
 type SentrySettings = silkworm_go.SentrySettings
+type RpcDaemonSettings = silkworm_go.RpcDaemonSettings
+type RpcInterfaceLogSettings = silkworm_go.RpcInterfaceLogSettings
 type MappedHeaderSnapshot = silkworm_go.MappedHeaderSnapshot
 type MappedBodySnapshot = silkworm_go.MappedBodySnapshot
 type MappedTxnSnapshot = silkworm_go.MappedTxnSnapshot
 type MappedChainSnapshot = silkworm_go.MappedChainSnapshot
 
-var New = silkworm_go.New
 var NewMemoryMappedRegion = silkworm_go.NewMemoryMappedRegion
 var NewMappedHeaderSnapshot = silkworm_go.NewMappedHeaderSnapshot
 var NewMappedBodySnapshot = silkworm_go.NewMappedBodySnapshot
@@ -25,20 +28,41 @@ var NewMappedTxnSnapshot = silkworm_go.NewMappedTxnSnapshot
 
 var ErrInterrupted = silkworm_go.ErrInterrupted
 
+func New(dataDirPath string, libMdbxVersion string, numIOContexts uint32, logLevel log.Lvl) (*Silkworm, error) {
+	var logVerbosity SilkwormLogLevel
+	switch logLevel {
+	case log.LvlCrit:
+		logVerbosity = silkworm_go.LogLevelCritical
+	case log.LvlError:
+		logVerbosity = silkworm_go.LogLevelError
+	case log.LvlWarn:
+		logVerbosity = silkworm_go.LogLevelWarning
+	case log.LvlInfo:
+		logVerbosity = silkworm_go.LogLevelInfo
+	case log.LvlDebug:
+		logVerbosity = silkworm_go.LogLevelDebug
+	case log.LvlTrace:
+		logVerbosity = silkworm_go.LogLevelTrace
+	}
+	return silkworm_go.New(dataDirPath, libMdbxVersion, numIOContexts, logVerbosity)
+}
+
 type RpcDaemonService struct {
 	silkworm *Silkworm
 	db       kv.RoDB
+	settings RpcDaemonSettings
 }
 
-func NewRpcDaemonService(s *Silkworm, db kv.RoDB) RpcDaemonService {
+func NewRpcDaemonService(s *Silkworm, db kv.RoDB, settings RpcDaemonSettings) RpcDaemonService {
 	return RpcDaemonService{
 		silkworm: s,
 		db:       db,
+		settings: settings,
 	}
 }
 
 func (service RpcDaemonService) Start() error {
-	return service.silkworm.StartRpcDaemon(service.db.CHandle())
+	return service.silkworm.StartRpcDaemon(service.db.CHandle(), service.settings)
 }
 
 func (service RpcDaemonService) Stop() error {
@@ -46,11 +70,11 @@ func (service RpcDaemonService) Stop() error {
 }
 
 type SentryService struct {
-	silkworm *silkworm_go.Silkworm
-	settings silkworm_go.SentrySettings
+	silkworm *Silkworm
+	settings SentrySettings
 }
 
-func NewSentryService(s *Silkworm, settings silkworm_go.SentrySettings) SentryService {
+func NewSentryService(s *Silkworm, settings SentrySettings) SentryService {
 	return SentryService{
 		silkworm: s,
 		settings: settings,

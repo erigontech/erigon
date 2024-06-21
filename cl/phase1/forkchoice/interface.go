@@ -30,9 +30,15 @@ type ForkChoiceStorageReader interface {
 	JustifiedCheckpoint() solid.Checkpoint
 	JustifiedSlot() uint64
 	ProposerBoostRoot() common.Hash
-	GetStateAtBlockRoot(blockRoot libcommon.Hash, alwaysCopy bool) (*state.CachingBeaconState, error)
-	GetFinalityCheckpoints(blockRoot libcommon.Hash) (bool, solid.Checkpoint, solid.Checkpoint, solid.Checkpoint)
+	GetStateAtBlockRoot(
+		blockRoot libcommon.Hash,
+		alwaysCopy bool,
+	) (*state.CachingBeaconState, error)
+	GetFinalityCheckpoints(
+		blockRoot libcommon.Hash,
+	) (bool, solid.Checkpoint, solid.Checkpoint, solid.Checkpoint)
 	GetSyncCommittees(period uint64) (*solid.SyncCommittee, *solid.SyncCommittee, bool)
+	GetBeaconCommitee(slot, committeeIndex uint64) ([]uint64, error)
 	Slot() uint64
 	Time() uint64
 	Partecipation(epoch uint64) (*solid.BitList, bool)
@@ -59,11 +65,15 @@ type ForkChoiceStorageReader interface {
 type ForkChoiceStorageWriter interface {
 	OnAttestation(attestation *solid.Attestation, fromBlock, insert bool) error
 	OnAttesterSlashing(attesterSlashing *cltypes.AttesterSlashing, test bool) error
-	OnVoluntaryExit(signedVoluntaryExit *cltypes.SignedVoluntaryExit, test bool) error
-	OnProposerSlashing(proposerSlashing *cltypes.ProposerSlashing, test bool) error
-	OnBlsToExecutionChange(signedChange *cltypes.SignedBLSToExecutionChange, test bool) error
-	OnBlock(ctx context.Context, block *cltypes.SignedBeaconBlock, newPayload bool, fullValidation bool, checkDataAvaibility bool) error
+	OnBlock(
+		ctx context.Context,
+		block *cltypes.SignedBeaconBlock,
+		newPayload bool,
+		fullValidation bool,
+		checkDataAvaibility bool,
+	) error
 	AddPreverifiedBlobSidecar(blobSidecar *cltypes.BlobSidecar) error
 	OnTick(time uint64)
 	SetSynced(synced bool)
+	ProcessAttestingIndicies(attestation *solid.Attestation, attestionIndicies []uint64)
 }

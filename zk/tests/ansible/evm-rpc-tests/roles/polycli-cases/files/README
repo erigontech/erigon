@@ -1,0 +1,4 @@
+The contracts here from from polycli
+
+cp ~/code/polygon-cli/bindings/tokens/*.bin .
+cp ~/code/polygon-cli/bindings/tester/LoadTester.bin  .

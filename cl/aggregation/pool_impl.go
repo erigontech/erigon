@@ -11,7 +11,10 @@ import (
 	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/cl/cltypes/solid"
 	"github.com/ledgerwatch/erigon/cl/utils"
+	"github.com/ledgerwatch/erigon/cl/utils/eth_clock"
 )
+
+var ErrIsSuperset = fmt.Errorf("attestation is superset of existing attestation")
 
 var (
 	blsAggregate = bls.AggregateSignatures
@@ -19,21 +22,21 @@ var (
 
 type aggregationPoolImpl struct {
 	// config
-	genesisConfig  *clparams.GenesisConfig
 	beaconConfig   *clparams.BeaconChainConfig
 	netConfig      *clparams.NetworkConfig
+	ethClock       eth_clock.EthereumClock
 	aggregatesLock sync.RWMutex
 	aggregates     map[common.Hash]*solid.Attestation
 }
 
 func NewAggregationPool(
 	ctx context.Context,
-	genesisConfig *clparams.GenesisConfig,
 	beaconConfig *clparams.BeaconChainConfig,
 	netConfig *clparams.NetworkConfig,
+	ethClock eth_clock.EthereumClock,
 ) AggregationPool {
 	p := &aggregationPoolImpl{
-		genesisConfig:  genesisConfig,
+		ethClock:       ethClock,
 		beaconConfig:   beaconConfig,
 		netConfig:      netConfig,
 		aggregatesLock: sync.RWMutex{},
@@ -54,13 +57,13 @@ func (p *aggregationPoolImpl) AddAttestation(inAtt *solid.Attestation) error {
 	defer p.aggregatesLock.Unlock()
 	att, ok := p.aggregates[hashRoot]
 	if !ok {
-		p.aggregates[hashRoot] = inAtt.Clone().(*solid.Attestation)
+		p.aggregates[hashRoot] = inAtt.Copy()
 		return nil
 	}
 
-	if utils.IsSupersetBitlist(att.AggregationBits(), inAtt.AggregationBits()) {
-		// no need to merge existing signatures
-		return nil
+	if utils.IsNonStrictSupersetBitlist(att.AggregationBits(), inAtt.AggregationBits()) {
+		// the on bit is already set, so ignore
+		return ErrIsSuperset
 	}
 
 	// merge signature
@@ -70,7 +73,7 @@ func (p *aggregationPoolImpl) AddAttestation(inAtt *solid.Attestation) error {
 	if err != nil {
 		return err
 	}
-	if len(merged) > 96 {
+	if len(merged) != 96 {
 		return fmt.Errorf("merged signature is too long")
 	}
 	var mergedSig [96]byte
@@ -98,7 +101,7 @@ func (p *aggregationPoolImpl) GetAggregatationByRoot(root common.Hash) *solid.At
 	if att == nil {
 		return nil
 	}
-	return att.Clone().(*solid.Attestation)
+	return att.Copy()
 }
 
 func (p *aggregationPoolImpl) sweepStaleAtt(ctx context.Context) {
@@ -126,6 +129,6 @@ func (p *aggregationPoolImpl) sweepStaleAtt(ctx context.Context) {
 }
 
 func (p *aggregationPoolImpl) slotIsStale(targetSlot uint64) bool {
-	curSlot := utils.GetCurrentSlot(p.genesisConfig.GenesisTime, p.beaconConfig.SecondsPerSlot)
+	curSlot := p.ethClock.GetCurrentSlot()
 	return curSlot-targetSlot > p.netConfig.AttestationPropagationSlotRange
 }

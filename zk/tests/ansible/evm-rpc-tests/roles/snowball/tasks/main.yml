@@ -1,0 +1,58 @@
+---
+
+- name: Copy the snowball contract files
+  ansible.builtin.copy:
+    src: snowball
+    dest: "{{ work_dir }}"
+
+- name: Deploy the snowball contract
+  ansible.builtin.shell: |
+    pushd {{ work_dir }}/snowball || exit 1
+    forge create {{ legacy_flag }} --private-key {{ private_key }} --rpc-url {{ rpc_url }} --json Snowball| jq '.' > ../snowball.out.tmp.json
+  args:
+    executable: /bin/bash
+
+- name: Call the snowball test function a buch of times
+  ansible.builtin.shell: |
+    pushd {{ work_dir }} || exit 1
+    cast send {{ legacy_flag }} --private-key {{ private_key }} --rpc-url {{ rpc_url }} "$(jq -r .deployedTo snowball.out.tmp.json)" -j \
+         'test(uint64,uint32,uint256)(bytes32)' \
+         {{ item.seed }} {{ item.loops }} {{ item.mode }} | jq '.' &>> {{ log_file }}
+  args:
+    executable: /bin/bash
+  loop:
+    - { "seed": 1,  "loops": 1,  "mode": 65519 }
+    - { "seed": 2,  "loops": 2,  "mode": 65519 }
+    - { "seed": 4,  "loops": 4,  "mode": 65519 }
+    - { "seed": 8,  "loops": 8,  "mode": 65519 }
+    - { "seed": 16, "loops": 16, "mode": 65519 }
+    - { "seed": 32, "loops": 32, "mode": 65519 }
+
+- name: Call the snowball prime function a buch of times
+  ansible.builtin.shell: |
+    pushd {{ work_dir }} || exit 1
+    cast send {{ legacy_flag }} --private-key {{ private_key }} --rpc-url {{ rpc_url }} "$(jq -r .deployedTo snowball.out.tmp.json)" -j \
+         'calcPrimes(uint256)(uint256)' {{ item.primes }} | jq '.' &>> {{ log_file }}
+  args:
+    executable: /bin/bash
+  loop:
+    - { "primes": 4 }
+    - { "primes": 8 }
+    - { "primes": 16 }
+    - { "primes": 32 }
+    - { "primes": 64 }
+    - { "primes": 128 }
+    - { "primes": 256 }
+    - { "primes": 512 }
+    - { "primes": 1024 }
+    - { "primes": 2048 }
+    - { "primes": 4096 }
+    - { "primes": 8192 }
+    - { "primes": 16384 }
+
+- name: Add inscription to mark test end
+  ansible.builtin.include_role:
+    name: common
+    tasks_from: clear_chain
+  vars:
+    inscription_message: Finished {{ ansible_role_name }}

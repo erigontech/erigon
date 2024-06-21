@@ -1,5 +1,5 @@
 {
-  "ChainName": "sepolia",
+  "chainName": "sepolia",
   "chainId": 11155111,
   "consensus": "ethash",
   "homesteadBlock": 0,

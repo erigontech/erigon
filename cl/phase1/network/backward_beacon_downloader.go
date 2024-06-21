@@ -158,7 +158,7 @@ Loop:
 		}
 		// No? Reject.
 		if blockRoot != b.expectedRoot {
-			log.Debug("Gotten unexpected root", "got", blockRoot, "expected", b.expectedRoot)
+			log.Debug("Gotten unexpected root", "got", libcommon.Hash(blockRoot), "expected", b.expectedRoot)
 			continue
 		}
 		// Yes? then go for the callback.

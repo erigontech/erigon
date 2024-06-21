@@ -29,7 +29,6 @@ func (s *SyncedDataManager) OnHeadState(newState *state.CachingBeaconState) (err
 		return err
 	}
 	s.headState.Store(st)
-	//fmt.Println(newState.CurrentSyncCommittee().GetCommittee())
 
 	return
 }
@@ -42,6 +41,14 @@ func (s *SyncedDataManager) HeadState() *state.CachingBeaconState {
 		return ret
 	}
 	return nil
+}
+
+func (s *SyncedDataManager) HeadStateReader() state.BeaconStateReader {
+	headstate := s.HeadState()
+	if headstate == nil {
+		return nil
+	}
+	return headstate
 }
 
 func (s *SyncedDataManager) Syncing() bool {
