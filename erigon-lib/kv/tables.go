@@ -298,10 +298,6 @@ const (
 	CallFromIndex = "CallFromIndex"
 	CallToIndex   = "CallToIndex"
 
-	// Cumulative indexes for estimation of stage execution
-	CumulativeGasIndex         = "CumulativeGasIndex"
-	CumulativeTransactionIndex = "CumulativeTransactionIndex"
-
 	TxLookup = "BlockTransactionLookup" // hash -> transaction/receipt lookup metadata
 
 	ConfigTable = "Config" // config prefix for the db
@@ -947,7 +943,7 @@ const (
 	CodeDomain       Domain = 2
 	CommitmentDomain Domain = 3
 
-	DomainLen Domain = 5
+	DomainLen Domain = 4
 )
 
 const (

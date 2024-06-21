@@ -93,8 +93,6 @@ type AppendableCfg struct {
 	Dirs datadir.Dirs
 	DB   kv.RoDB // global db pointer. mostly for background warmup.
 
-	CanonicalMarkersTable string
-
 	iters IterFactory
 }
 

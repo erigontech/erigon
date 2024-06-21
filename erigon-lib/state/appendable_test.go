@@ -54,7 +54,7 @@ func testDbAndAppendable(tb testing.TB, aggStep uint64, logger log.Logger) (kv.R
 	}).MustOpen()
 	tb.Cleanup(db.Close)
 	salt := uint32(1)
-	cfg := AppendableCfg{Salt: &salt, Dirs: dirs, DB: db, CanonicalMarkersTable: kv.HeaderCanonical}
+	cfg := AppendableCfg{Salt: &salt, Dirs: dirs, DB: db}
 	ii, err := NewAppendable(cfg, aggStep, "receipt", table, nil, logger)
 	require.NoError(tb, err)
 	ii.DisableFsync()
@@ -297,7 +297,7 @@ func mergeAppendable(tb testing.TB, db kv.RwDB, ii *Appendable, txs uint64) {
 func emptyTestAppendable(aggStep uint64) *Appendable {
 	salt := uint32(1)
 	logger := log.New()
-	return &Appendable{cfg: AppendableCfg{Salt: &salt, DB: nil, CanonicalMarkersTable: kv.HeaderCanonical},
+	return &Appendable{cfg: AppendableCfg{Salt: &salt, DB: nil},
 		logger:       logger,
 		filenameBase: "test", aggregationStep: aggStep, dirtyFiles: btree2.NewBTreeG[*filesItem](filesItemLess)}
 }
