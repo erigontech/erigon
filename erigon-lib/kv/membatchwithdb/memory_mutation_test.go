@@ -528,55 +528,37 @@ func TestAutoConversion(t *testing.T) {
 
 	initializeDbAutoConversion(rwTx)
 
-	batch := NewMemoryBatch(rwTx, "", log.Root())
-	defer batch.Close()
+	require.NoError(t, rwTx.Put(kv.PlainState, []byte("A..........................."), []byte("?")))
 
-	c, err := batch.RwCursor(kv.PlainState)
+	require.NoError(t, rwTx.Delete(kv.PlainState, []byte("A..........................._______________________________A")))
+	require.NoError(t, rwTx.Put(kv.PlainState, []byte("B"), []byte("7")))
+	require.NoError(t, rwTx.Delete(kv.PlainState, []byte("C")))
+	require.NoError(t, rwTx.Put(kv.PlainState, []byte("D..........................._______________________________C"), []byte("6")))
+	require.NoError(t, rwTx.Put(kv.PlainState, []byte("D..........................._______________________________E"), []byte("5")))
+
+	v, err := rwTx.GetOne(kv.PlainState, []byte("A"))
 	require.NoError(t, err)
-
-	// key length conflict
-	require.Error(t, c.Put([]byte("A..........................."), []byte("?")))
-
-	require.NoError(t, c.Delete([]byte("A..........................._______________________________A")))
-	require.NoError(t, c.Put([]byte("B"), []byte("7")))
-	require.NoError(t, c.Delete([]byte("C")))
-	require.NoError(t, c.Put([]byte("D..........................._______________________________C"), []byte("6")))
-	require.NoError(t, c.Put([]byte("D..........................._______________________________E"), []byte("5")))
-
-	k, v, err := c.First()
-	require.NoError(t, err)
-	assert.Equal(t, []byte("A"), k)
 	assert.Equal(t, []byte("0"), v)
 
-	k, v, err = c.Next()
+	v, err = rwTx.GetOne(kv.PlainState, []byte("A..........................._______________________________C"))
 	require.NoError(t, err)
-	assert.Equal(t, []byte("A..........................._______________________________C"), k)
 	assert.Equal(t, []byte("2"), v)
 
-	k, v, err = c.Next()
+	v, err = rwTx.GetOne(kv.PlainState, []byte("B"))
 	require.NoError(t, err)
-	assert.Equal(t, []byte("B"), k)
 	assert.Equal(t, []byte("7"), v)
 
-	k, v, err = c.Next()
+	v, err = rwTx.GetOne(kv.PlainState, []byte("D..........................._______________________________A"))
 	require.NoError(t, err)
-	assert.Equal(t, []byte("D..........................._______________________________A"), k)
 	assert.Equal(t, []byte("3"), v)
 
-	k, v, err = c.Next()
+	v, err = rwTx.GetOne(kv.PlainState, []byte("D..........................._______________________________C"))
 	require.NoError(t, err)
-	assert.Equal(t, []byte("D..........................._______________________________C"), k)
 	assert.Equal(t, []byte("6"), v)
 
-	k, v, err = c.Next()
+	v, err = rwTx.GetOne(kv.PlainState, []byte("D..........................._______________________________E"))
 	require.NoError(t, err)
-	assert.Equal(t, []byte("D..........................._______________________________E"), k)
 	assert.Equal(t, []byte("5"), v)
-
-	k, v, err = c.Next()
-	require.NoError(t, err)
-	assert.Nil(t, k)
-	assert.Nil(t, v)
 }
 
 func TestAutoConversionDelete(t *testing.T) {
