@@ -308,7 +308,7 @@ func initialState1() error {
 	// We generate the blocks without plainstant because it's not supported in core.GenerateChain
 	chain, err := core.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 8, func(i int, block *core.BlockGen) {
 		var (
-			tx  types.Transaction
+			txn types.Transaction
 			txs []types.Transaction
 			err error
 		)
@@ -316,29 +316,29 @@ func initialState1() error {
 		ctx := context.Background()
 		switch i {
 		case 0:
-			tx, err = types.SignTx(types.NewTransaction(0, theAddr, uint256.NewInt(1000000000000000), 21000, new(uint256.Int), nil), *signer, key)
+			txn, err = types.SignTx(types.NewTransaction(0, theAddr, uint256.NewInt(1000000000000000), 21000, new(uint256.Int), nil), *signer, key)
 			if err != nil {
 				panic(err)
 			}
-			err = contractBackend.SendTransaction(ctx, tx)
+			err = contractBackend.SendTransaction(ctx, txn)
 			if err != nil {
 				panic(err)
 			}
 		case 1:
-			tx, err = types.SignTx(types.NewTransaction(1, theAddr, uint256.NewInt(1000000000000000), 21000, new(uint256.Int), nil), *signer, key)
+			txn, err = types.SignTx(types.NewTransaction(1, theAddr, uint256.NewInt(1000000000000000), 21000, new(uint256.Int), nil), *signer, key)
 			if err != nil {
 				panic(err)
 			}
-			err = contractBackend.SendTransaction(ctx, tx)
+			err = contractBackend.SendTransaction(ctx, txn)
 			if err != nil {
 				panic(err)
 			}
 		case 2:
-			_, tx, tokenContract, err = contracts.DeployToken(transactOpts, contractBackend, address1)
+			_, txn, tokenContract, err = contracts.DeployToken(transactOpts, contractBackend, address1)
 		case 3:
-			tx, err = tokenContract.Mint(transactOpts1, address2, big.NewInt(10))
+			txn, err = tokenContract.Mint(transactOpts1, address2, big.NewInt(10))
 		case 4:
-			tx, err = tokenContract.Transfer(transactOpts2, address, big.NewInt(3))
+			txn, err = tokenContract.Transfer(transactOpts2, address, big.NewInt(3))
 		case 5:
 			// Multiple transactions sending small amounts of ether to various accounts
 			var j uint64
@@ -346,69 +346,69 @@ func initialState1() error {
 			nonce := block.TxNonce(address)
 			for j = 1; j <= 32; j++ {
 				binary.BigEndian.PutUint64(toAddr[:], j)
-				tx, err = types.SignTx(types.NewTransaction(nonce, toAddr, uint256.NewInt(1000000000000000), 21000, new(uint256.Int), nil), *signer, key)
+				txn, err = types.SignTx(types.NewTransaction(nonce, toAddr, uint256.NewInt(1000000000000000), 21000, new(uint256.Int), nil), *signer, key)
 				if err != nil {
 					panic(err)
 				}
-				err = contractBackend.SendTransaction(ctx, tx)
+				err = contractBackend.SendTransaction(ctx, txn)
 				if err != nil {
 					panic(err)
 				}
-				txs = append(txs, tx)
+				txs = append(txs, txn)
 				nonce++
 			}
 		case 6:
-			_, tx, tokenContract, err = contracts.DeployToken(transactOpts, contractBackend, address1)
+			_, txn, tokenContract, err = contracts.DeployToken(transactOpts, contractBackend, address1)
 			if err != nil {
 				panic(err)
 			}
-			txs = append(txs, tx)
-			tx, err = tokenContract.Mint(transactOpts1, address2, big.NewInt(100))
+			txs = append(txs, txn)
+			txn, err = tokenContract.Mint(transactOpts1, address2, big.NewInt(100))
 			if err != nil {
 				panic(err)
 			}
-			txs = append(txs, tx)
+			txs = append(txs, txn)
 			// Multiple transactions sending small amounts of ether to various accounts
 			var j uint64
 			var toAddr libcommon.Address
 			for j = 1; j <= 32; j++ {
 				binary.BigEndian.PutUint64(toAddr[:], j)
-				tx, err = tokenContract.Transfer(transactOpts2, toAddr, big.NewInt(1))
+				txn, err = tokenContract.Transfer(transactOpts2, toAddr, big.NewInt(1))
 				if err != nil {
 					panic(err)
 				}
-				txs = append(txs, tx)
+				txs = append(txs, txn)
 			}
 		case 7:
 			var toAddr libcommon.Address
 			nonce := block.TxNonce(address)
 			binary.BigEndian.PutUint64(toAddr[:], 4)
-			tx, err = types.SignTx(types.NewTransaction(nonce, toAddr, uint256.NewInt(1000000000000000), 21000, new(uint256.Int), nil), *signer, key)
+			txn, err = types.SignTx(types.NewTransaction(nonce, toAddr, uint256.NewInt(1000000000000000), 21000, new(uint256.Int), nil), *signer, key)
 			if err != nil {
 				panic(err)
 			}
-			err = contractBackend.SendTransaction(ctx, tx)
+			err = contractBackend.SendTransaction(ctx, txn)
 			if err != nil {
 				panic(err)
 			}
-			txs = append(txs, tx)
+			txs = append(txs, txn)
 			binary.BigEndian.PutUint64(toAddr[:], 12)
-			tx, err = tokenContract.Transfer(transactOpts2, toAddr, big.NewInt(1))
+			txn, err = tokenContract.Transfer(transactOpts2, toAddr, big.NewInt(1))
 			if err != nil {
 				panic(err)
 			}
-			txs = append(txs, tx)
+			txs = append(txs, txn)
 		}
 
 		if err != nil {
 			panic(err)
 		}
-		if txs == nil && tx != nil {
-			txs = append(txs, tx)
+		if txs == nil && txn != nil {
+			txs = append(txs, txn)
 		}
 
-		for _, tx := range txs {
-			block.AddTx(tx)
+		for _, txn := range txs {
+			block.AddTx(txn)
 		}
 		contractBackend.Commit()
 	})

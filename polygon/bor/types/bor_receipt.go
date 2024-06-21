@@ -17,7 +17,7 @@ func BorReceiptKey(number uint64) []byte {
 	return dbutils.EncodeBlockNumber(number)
 }
 
-// ComputeBorTxHash get derived tx hash from block number and hash
+// ComputeBorTxHash get derived txn hash from block number and hash
 func ComputeBorTxHash(blockNumber uint64, blockHash libcommon.Hash) libcommon.Hash {
 	txKeyPlain := make([]byte, 0, len(BorTxKeyPrefix)+8+32)
 	txKeyPlain = append(txKeyPlain, BorTxKeyPrefix...)
@@ -37,7 +37,7 @@ func DeriveFieldsForBorReceipt(receipt *types.Receipt, blockHash libcommon.Hash,
 	txHash := ComputeBorTxHash(blockNumber, blockHash)
 	txIndex := uint(len(receipts))
 
-	// set tx hash and tx index
+	// set txn hash and txn index
 	receipt.TxHash = txHash
 	receipt.TransactionIndex = txIndex
 	receipt.BlockHash = blockHash

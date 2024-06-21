@@ -466,10 +466,10 @@ func NonCanonicalTransactions(db kv.Getter, baseTxnID types.BaseTxnID, amount ui
 func WriteTransactions(rwTx kv.RwTx, txs []types.Transaction, txnID uint64) error {
 	txIdKey := make([]byte, 8)
 	buf := bytes.NewBuffer(nil)
-	for _, tx := range txs {
+	for _, txn := range txs {
 		buf.Reset()
-		if err := rlp.Encode(buf, tx); err != nil {
-			return fmt.Errorf("broken tx rlp: %w", err)
+		if err := rlp.Encode(buf, txn); err != nil {
+			return fmt.Errorf("broken txn rlp: %w", err)
 		}
 
 		binary.BigEndian.PutUint64(txIdKey, txnID)

@@ -696,9 +696,9 @@ func (r RawBlock) AsBlock() (*Block, error) {
 	b.requests = r.Body.Requests
 
 	txs := make([]Transaction, len(r.Body.Transactions))
-	for i, tx := range r.Body.Transactions {
+	for i, txn := range r.Body.Transactions {
 		var err error
-		if txs[i], err = DecodeTransaction(tx); err != nil {
+		if txs[i], err = DecodeTransaction(txn); err != nil {
 			return nil, err
 		}
 	}
@@ -725,16 +725,16 @@ func (b *Body) SendersToTxs(senders []libcommon.Address) {
 	if senders == nil {
 		return
 	}
-	for i, tx := range b.Transactions {
-		tx.SetSender(senders[i])
+	for i, txn := range b.Transactions {
+		txn.SetSender(senders[i])
 	}
 }
 
 // Copy transaction senders from transactions to the body
 func (b *Body) SendersFromTxs() []libcommon.Address {
 	senders := make([]libcommon.Address, len(b.Transactions))
-	for i, tx := range b.Transactions {
-		if sender, ok := tx.GetSender(); ok {
+	for i, txn := range b.Transactions {
+		if sender, ok := txn.GetSender(); ok {
 			senders[i] = sender
 		}
 	}
@@ -748,8 +748,8 @@ func (rb RawBody) EncodingSize() int {
 
 func (rb RawBody) payloadSize() (payloadSize, txsLen, unclesLen, withdrawalsLen, requestsLen int) {
 	// size of Transactions
-	for _, tx := range rb.Transactions {
-		txsLen += len(tx)
+	for _, txn := range rb.Transactions {
+		txsLen += len(txn)
 	}
 	payloadSize += rlp2.ListPrefixLen(txsLen) + txsLen
 
@@ -783,8 +783,8 @@ func (rb RawBody) EncodeRLP(w io.Writer) error {
 	if err := EncodeStructSizePrefix(txsLen, w, b[:]); err != nil {
 		return err
 	}
-	for _, tx := range rb.Transactions {
-		if _, err := w.Write(tx); err != nil {
+	for _, txn := range rb.Transactions {
+		if _, err := w.Write(txn); err != nil {
 			return nil
 		}
 	}
@@ -814,12 +814,12 @@ func (rb *RawBody) DecodeRLP(s *rlp.Stream) error {
 	if _, err = s.List(); err != nil {
 		return err
 	}
-	var tx []byte
-	for tx, err = s.Raw(); err == nil; tx, err = s.Raw() {
-		if tx == nil {
-			return errors.New("RawBody.DecodeRLP tx nil")
+	var txn []byte
+	for txn, err = s.Raw(); err == nil; txn, err = s.Raw() {
+		if txn == nil {
+			return errors.New("RawBody.DecodeRLP txn nil")
 		}
-		rb.Transactions = append(rb.Transactions, tx)
+		rb.Transactions = append(rb.Transactions, txn)
 	}
 	if !errors.Is(err, rlp.EOL) {
 		return err
@@ -1324,8 +1324,8 @@ func (b *Block) SendersToTxs(senders []libcommon.Address) {
 	if len(senders) == 0 {
 		return
 	}
-	for i, tx := range b.transactions {
-		tx.SetSender(senders[i])
+	for i, txn := range b.transactions {
+		txn.SetSender(senders[i])
 	}
 }
 
@@ -1333,9 +1333,9 @@ func (b *Block) SendersToTxs(senders []libcommon.Address) {
 // will probably be removed in favour of RawBlock. Also it panics
 func (b *Block) RawBody() *RawBody {
 	br := &RawBody{Transactions: make([][]byte, len(b.transactions)), Uncles: b.uncles, Withdrawals: b.withdrawals, Requests: b.requests}
-	for i, tx := range b.transactions {
+	for i, txn := range b.transactions {
 		var err error
-		br.Transactions[i], err = rlp.EncodeToBytes(tx)
+		br.Transactions[i], err = rlp.EncodeToBytes(txn)
 		if err != nil {
 			panic(err)
 		}
@@ -1346,9 +1346,9 @@ func (b *Block) RawBody() *RawBody {
 // RawBody creates a RawBody based on the body.
 func (b *Body) RawBody() *RawBody {
 	br := &RawBody{Transactions: make([][]byte, len(b.Transactions)), Uncles: b.Uncles, Withdrawals: b.Withdrawals, Requests: b.Requests}
-	for i, tx := range b.Transactions {
+	for i, txn := range b.Transactions {
 		var err error
-		br.Transactions[i], err = rlp.EncodeToBytes(tx)
+		br.Transactions[i], err = rlp.EncodeToBytes(txn)
 		if err != nil {
 			panic(err)
 		}
@@ -1443,8 +1443,8 @@ func CopyTxs(in Transactions) Transactions {
 	if err != nil {
 		panic(fmt.Errorf("DecodeTransactions failed: %w", err))
 	}
-	for i, tx := range in {
-		if txWrapper, ok := tx.(*BlobTxWrapper); ok {
+	for i, txn := range in {
+		if txWrapper, ok := txn.(*BlobTxWrapper); ok {
 			blobTx := out[i].(*BlobTx)
 			out[i] = &BlobTxWrapper{
 				Tx:          *blobTx,
@@ -1585,10 +1585,10 @@ func decodeTxns(appendList *[]Transaction, s *rlp.Stream) error {
 	if _, err = s.List(); err != nil {
 		return err
 	}
-	var tx Transaction
+	var txn Transaction
 	blobTxnsAreWrappedWithBlobs := false
-	for tx, err = DecodeRLPTransaction(s, blobTxnsAreWrappedWithBlobs); err == nil; tx, err = DecodeRLPTransaction(s, blobTxnsAreWrappedWithBlobs) {
-		*appendList = append(*appendList, tx)
+	for txn, err = DecodeRLPTransaction(s, blobTxnsAreWrappedWithBlobs); err == nil; txn, err = DecodeRLPTransaction(s, blobTxnsAreWrappedWithBlobs) {
+		*appendList = append(*appendList, txn)
 	}
 	return checkErrListEnd(s, err)
 }
