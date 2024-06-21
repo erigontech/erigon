@@ -964,9 +964,9 @@ func (ac *AggregatorRoTx) PruneSmallBatches(ctx context.Context, timeout time.Du
 			ac.a.logger.Warn("[snapshots] PruneSmallBatches failed", "err", err)
 			return false, err
 		}
-		if stat == nil {
-			if fstat := fullStat.String(); fstat != "" {
-				ac.a.logger.Info("[snapshots] PruneSmallBatches finished", "took", time.Since(started).String(), "stat", fstat)
+		if stat == nil || stat.PrunedNothing() {
+			if !fullStat.PrunedNothing() {
+				ac.a.logger.Info("[snapshots] PruneSmallBatches finished", "took", time.Since(started).String(), "stat", fullStat.String())
 			}
 			return false, nil
 		}
@@ -1017,6 +1017,20 @@ type AggregatorPruneStat struct {
 	Domains    map[string]*DomainPruneStat
 	Indices    map[string]*InvertedIndexPruneStat
 	Appendable map[string]*AppendablePruneStat
+}
+
+func (as *AggregatorPruneStat) PrunedNothing() bool {
+	for _, d := range as.Domains {
+		if d != nil && !d.PrunedNothing() {
+			return false
+		}
+	}
+	for _, i := range as.Indices {
+		if i != nil && !i.PrunedNothing() {
+			return false
+		}
+	}
+	return true
 }
 
 func newAggregatorPruneStat() *AggregatorPruneStat {

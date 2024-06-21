@@ -1605,17 +1605,21 @@ type DomainPruneStat struct {
 	History *InvertedIndexPruneStat
 }
 
-func (dc *DomainPruneStat) String() string {
-	if dc.MinStep == math.MaxUint64 && dc.Values == 0 {
-		if dc.History == nil {
-			return ""
-		}
-		return dc.History.String()
+func (dc *DomainPruneStat) PrunedNothing() bool {
+	return dc.Values == 0 && (dc.History == nil || dc.History.PrunedNothing())
+}
+
+func (dc *DomainPruneStat) String() (kvstr string) {
+	if dc.PrunedNothing() {
+		return ""
 	}
-	if dc.History == nil {
-		return fmt.Sprintf("%d kv's step %d-%d", dc.Values, dc.MinStep, dc.MaxStep)
+	if dc.Values > 0 {
+		kvstr = fmt.Sprintf(".kv %d from steps %d-%d", dc.Values, dc.MinStep, dc.MaxStep)
 	}
-	return fmt.Sprintf("%d kv's step %d-%d; v%s", dc.Values, dc.MinStep, dc.MaxStep, dc.History)
+	if dc.History != nil {
+		kvstr += dc.History.String()
+	}
+	return kvstr
 }
 
 func (dc *DomainPruneStat) Accumulate(other *DomainPruneStat) {
