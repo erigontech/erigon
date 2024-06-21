@@ -3,6 +3,7 @@ package state
 import (
 	"bytes"
 	"encoding/binary"
+	"math"
 	"sort"
 
 	"github.com/ledgerwatch/erigon-lib/common"
@@ -312,4 +313,26 @@ func ReadDiffSet(tx kv.Tx, blockNumber uint64, blockHash common.Hash) ([kv.Domai
 	}
 
 	return DeserializeKeys(val), true, nil
+}
+
+func ReadLowestUnwindableBlock(tx kv.Tx) (uint64, error) {
+	changesetsCursor, err := tx.Cursor(kv.ChangeSets3)
+	if err != nil {
+		return 0, err
+	}
+	defer changesetsCursor.Close()
+
+	first, _, err := changesetsCursor.First()
+	if err != nil {
+		return 0, err
+	}
+	if len(first) < 8 {
+		return math.MaxUint64, nil
+	}
+	blockNumber, err := dbutils.DecodeBlockNumber(first[:8])
+	if err != nil {
+		return 0, err
+	}
+	return blockNumber, nil
+
 }

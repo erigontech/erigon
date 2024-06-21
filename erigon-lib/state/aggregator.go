@@ -438,6 +438,9 @@ func (a *Aggregator) BuildMissedIndices(ctx context.Context, workers int) error 
 		for _, ii := range a.iis {
 			ii.BuildMissedAccessors(ctx, g, ps)
 		}
+		for _, appendable := range a.ap {
+			appendable.BuildMissedAccessors(ctx, g, ps)
+		}
 
 		if err := g.Wait(); err != nil {
 			return err
@@ -500,8 +503,9 @@ func (c AggV3Collation) Close() {
 }
 
 type AggV3StaticFiles struct {
-	d    [kv.DomainLen]StaticFiles
-	ivfs [kv.StandaloneIdxLen]InvertedFiles
+	d          [kv.DomainLen]StaticFiles
+	ivfs       [kv.StandaloneIdxLen]InvertedFiles
+	appendable [kv.AppendableLen]AppendableFiles
 }
 
 // CleanupOnError - call it on collation fail. It's closing all files
@@ -609,6 +613,31 @@ func (a *Aggregator) buildFiles(ctx context.Context, step uint64) error {
 			default:
 				panic("unknown index " + ii.indexKeysTable)
 			}
+			return nil
+		})
+	}
+
+	for name, ap := range a.ap {
+		name := name
+		ap := ap
+		a.wg.Add(1)
+		g.Go(func() error {
+			defer a.wg.Done()
+
+			var collation AppendableCollation
+			err := a.db.View(ctx, func(tx kv.Tx) (err error) {
+				collation, err = ap.collate(ctx, step, tx)
+				return err
+			})
+			if err != nil {
+				return fmt.Errorf("index collation %q has failed: %w", ap.filenameBase, err)
+			}
+			sf, err := ap.buildFiles(ctx, step, collation, a.ps)
+			if err != nil {
+				sf.CleanupOnError()
+				return err
+			}
+			static.appendable[name] = sf
 			return nil
 		})
 	}
@@ -985,8 +1014,9 @@ func (a *Aggregator) StepsRangeInDBAsStr(tx kv.Tx) string {
 }
 
 type AggregatorPruneStat struct {
-	Domains map[string]*DomainPruneStat
-	Indices map[string]*InvertedIndexPruneStat
+	Domains    map[string]*DomainPruneStat
+	Indices    map[string]*InvertedIndexPruneStat
+	Appendable map[string]*AppendablePruneStat
 }
 
 func newAggregatorPruneStat() *AggregatorPruneStat {
@@ -1122,6 +1152,14 @@ func (ac *AggregatorRoTx) Prune(ctx context.Context, tx kv.RwTx, limit uint64, w
 		aggStat.Indices[ac.iis[i].ii.filenameBase] = stats[i]
 	}
 
+	for i := 0; i < int(kv.AppendableLen); i++ {
+		var err error
+		aggStat.Appendable[ac.appendable[i].ap.filenameBase], err = ac.appendable[i].Prune(ctx, tx, txFrom, txTo, limit, logEvery, false, withWarmup, nil)
+		if err != nil {
+			return nil, err
+		}
+	}
+
 	return aggStat, nil
 }
 
@@ -1247,20 +1285,21 @@ func (a *Aggregator) recalcVisibleFilesMinimaxTxNum() {
 }
 
 type RangesV3 struct {
-	d      [kv.DomainLen]DomainRanges
-	ranges [kv.StandaloneIdxLen]*MergeRange
+	domain        [kv.DomainLen]DomainRanges
+	invertedIndex [kv.StandaloneIdxLen]*MergeRange
+	appendable    [kv.AppendableLen]*MergeRange
 }
 
 func (r RangesV3) String() string {
 	ss := []string{}
-	for _, d := range r.d {
+	for _, d := range r.domain {
 		if d.any() {
 			ss = append(ss, fmt.Sprintf("%s(%s)", d.name, d.String()))
 		}
 	}
 
-	aggStep := r.d[kv.AccountsDomain].aggStep
-	for p, mr := range r.ranges {
+	aggStep := r.domain[kv.AccountsDomain].aggStep
+	for p, mr := range r.invertedIndex {
 		if mr != nil && mr.needMerge {
 			ss = append(ss, mr.String(kv.InvertedIdxPos(p).String(), aggStep))
 		}
@@ -1269,12 +1308,12 @@ func (r RangesV3) String() string {
 }
 
 func (r RangesV3) any() bool {
-	for _, d := range r.d {
+	for _, d := range r.domain {
 		if d.any() {
 			return true
 		}
 	}
-	for _, ii := range r.ranges {
+	for _, ii := range r.invertedIndex {
 		if ii.needMerge {
 			return true
 		}
@@ -1285,10 +1324,10 @@ func (r RangesV3) any() bool {
 func (ac *AggregatorRoTx) findMergeRange(maxEndTxNum, maxSpan uint64) RangesV3 {
 	var r RangesV3
 	for id, d := range ac.d {
-		r.d[id] = d.findMergeRange(maxEndTxNum, maxSpan)
+		r.domain[id] = d.findMergeRange(maxEndTxNum, maxSpan)
 	}
 	for id, ii := range ac.iis {
-		r.ranges[id] = ii.findMergeRange(maxEndTxNum, maxSpan)
+		r.invertedIndex[id] = ii.findMergeRange(maxEndTxNum, maxSpan)
 	}
 	//log.Info(fmt.Sprintf("findMergeRange(%d, %d)=%s\n", maxEndTxNum/ac.a.aggregationStep, maxSpan/ac.a.aggregationStep, r))
 	return r
@@ -1485,7 +1524,7 @@ func (ac *AggregatorRoTx) mergeFiles(ctx context.Context, files SelectedStaticFi
 	accStorageMerged := new(sync.WaitGroup)
 
 	for id := range ac.d {
-		if !r.d[id].any() {
+		if !r.domain[id].any() {
 			continue
 		}
 
@@ -1505,7 +1544,7 @@ func (ac *AggregatorRoTx) mergeFiles(ctx context.Context, files SelectedStaticFi
 					mf.d[kv.AccountsDomain], mf.d[kv.StorageDomain])
 			}
 
-			mf.d[id], mf.dIdx[id], mf.dHist[id], err = ac.d[id].mergeFiles(ctx, files.d[id], files.dIdx[id], files.dHist[id], r.d[id], vt, ac.a.ps)
+			mf.d[id], mf.dIdx[id], mf.dHist[id], err = ac.d[id].mergeFiles(ctx, files.d[id], files.dIdx[id], files.dHist[id], r.domain[id], vt, ac.a.ps)
 			if ac.a.commitmentValuesTransform {
 				if kid == kv.AccountsDomain || kid == kv.StorageDomain {
 					accStorageMerged.Done()
@@ -1518,16 +1557,30 @@ func (ac *AggregatorRoTx) mergeFiles(ctx context.Context, files SelectedStaticFi
 		})
 	}
 
-	for id, rng := range r.ranges {
+	for id, rng := range r.invertedIndex {
+		if !rng.needMerge {
+			continue
+		}
 		id := id
 		rng := rng
-		if rng.needMerge {
-			g.Go(func() error {
-				var err error
-				mf.iis[id], err = ac.iis[id].mergeFiles(ctx, files.ii[id], rng.from, rng.to, ac.a.ps)
-				return err
-			})
+		g.Go(func() error {
+			var err error
+			mf.iis[id], err = ac.iis[id].mergeFiles(ctx, files.ii[id], rng.from, rng.to, ac.a.ps)
+			return err
+		})
+	}
+
+	for id, rng := range r.appendable {
+		if !rng.needMerge {
+			continue
 		}
+		id := id
+		rng := rng
+		g.Go(func() error {
+			var err error
+			mf.appendable[id], err = ac.appendable[id].mergeFiles(ctx, files.appendable[id], rng.from, rng.to, ac.a.ps)
+			return err
+		})
 	}
 
 	err := g.Wait()
@@ -1554,6 +1607,10 @@ func (a *Aggregator) integrateMergedDirtyFiles(outs SelectedStaticFilesV3, in Me
 	for id, ii := range a.iis {
 		ii.integrateMergedDirtyFiles(outs.ii[id], in.iis[id])
 	}
+
+	for id, ap := range a.ap {
+		ap.integrateMergedDirtyFiles(outs.appendable[id], in.appendable[id])
+	}
 }
 
 func (a *Aggregator) cleanAfterMerge(in MergedFilesV3) {
@@ -1568,6 +1625,9 @@ func (a *Aggregator) cleanAfterMerge(in MergedFilesV3) {
 	}
 	for id, ii := range at.iis {
 		ii.cleanAfterMerge(in.iis[id])
+	}
+	for id, ap := range at.appendable {
+		ap.cleanAfterMerge(in.appendable[id])
 	}
 }
 
