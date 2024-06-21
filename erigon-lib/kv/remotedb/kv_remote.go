@@ -701,7 +701,7 @@ func (tx *tx) IndexRange(name kv.InvertedIdx, k []byte, fromTs, toTs int, asc or
 		return reply.Timestamps, reply.NextPageToken, nil
 	}), nil
 }
-func (tx *tx) AppendableGet(name kv.Appendable, ts uint64) ([]byte, bool, error) {
+func (tx *tx) AppendableGet(name kv.Appendable, ts kv.TxnId) ([]byte, bool, error) {
 	panic("not implemented yet")
 }
 

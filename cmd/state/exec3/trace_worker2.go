@@ -320,27 +320,13 @@ func processResultQueue2(consumer TraceConsumer, rws *state.ResultsQueue, output
 		}
 
 		if !txTask.Final && txTask.TxIndex >= 0 {
-			// by the tx.
-			receipt := &types.Receipt{
-				BlockNumber:       txTask.Header.Number,
-				TransactionIndex:  uint(txTask.TxIndex),
-				Type:              txTask.Tx.Type(),
-				CumulativeGasUsed: usedGas,
-				TxHash:            txTask.Tx.Hash(),
-				Logs:              txTask.Logs,
-			}
-			if txTask.Failed {
-				receipt.Status = types.ReceiptStatusFailed
-			} else {
-				receipt.Status = types.ReceiptStatusSuccessful
-			}
 			// if the transaction created a contract, store the creation address in the receipt.
 			//if msg.To() == nil {
 			//	receipt.ContractAddress = crypto.CreateAddress(evm.Origin, tx.GetNonce())
 			//}
 			// Set the receipt logs and create a bloom for filtering
 			//receipt.Bloom = types.CreateBloom(types.Receipts{receipt})
-			receipts = append(receipts, receipt)
+			receipts = append(receipts, txTask.CreateReceipt(usedGas))
 		}
 
 		usedGas += txTask.UsedGas

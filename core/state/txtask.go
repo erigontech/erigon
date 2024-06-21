@@ -66,6 +66,23 @@ type TxTask struct {
 	Requests types.Requests
 }
 
+func (t *TxTask) CreateReceipt(cumulativeGasUsed uint64) *types.Receipt {
+	receipt := &types.Receipt{
+		BlockNumber:       t.Header.Number,
+		BlockHash:         t.BlockHash,
+		TransactionIndex:  uint(t.TxIndex),
+		Type:              t.Tx.Type(),
+		CumulativeGasUsed: cumulativeGasUsed,
+		TxHash:            t.Tx.Hash(),
+		Logs:              t.Logs,
+	}
+	if t.Failed {
+		receipt.Status = types.ReceiptStatusFailed
+	} else {
+		receipt.Status = types.ReceiptStatusSuccessful
+	}
+	return receipt
+}
 func (t *TxTask) Reset() {
 	t.BalanceIncreaseSet = nil
 	returnReadList(t.ReadLists)

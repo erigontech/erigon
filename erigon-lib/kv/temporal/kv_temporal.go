@@ -227,6 +227,6 @@ func (tx *Tx) HistoryRange(name kv.History, fromTs, toTs int, asc order.By, limi
 	return it, nil
 }
 
-func (tx *Tx) AppendableGet(name kv.Appendable, ts uint64) ([]byte, bool, error) {
+func (tx *Tx) AppendableGet(name kv.Appendable, ts kv.TxnId) ([]byte, bool, error) {
 	return tx.aggCtx.AppendableGet(name, ts, tx.MdbxTx)
 }

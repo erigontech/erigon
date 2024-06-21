@@ -87,12 +87,12 @@ func TestAppendableCollationBuild(t *testing.T) {
 		require.Equal(1, int(binary.BigEndian.Uint64(v)))
 
 		//never existed key
-		_, ok, err = ic.Get(txs+1, tx)
+		_, ok, err = ic.Get(kv.TxnId(txs+1), tx)
 		require.NoError(err)
 		require.False(ok)
 
 		//non-canonical key: must exist before collate+prune
-		_, ok, err = ic.Get(steps+1, tx)
+		_, ok, err = ic.Get(kv.TxnId(steps+1), tx)
 		require.NoError(err)
 		require.True(ok)
 
@@ -195,7 +195,7 @@ func filledAppendableOfSize(tb testing.TB, txs, aggStep uint64, logger log.Logge
 	defer ic.Close()
 
 	for i := uint64(0); i < txs; i++ {
-		err = ic.Append(i, hexutility.EncodeTs(i), tx)
+		err = ic.Append(kv.TxnId(i), hexutility.EncodeTs(i), tx)
 		require.NoError(err)
 	}
 	err = tx.Commit()
@@ -229,12 +229,12 @@ func checkAppendableGet(t *testing.T, dbtx kv.Tx, tx *AppendableRoTx, txs uint64
 	require.Equal(62.4375, to)
 
 	//non-canonical key: must exist before collate+prune
-	_, ok, err = tx.Get(steps+1, dbtx)
+	_, ok, err = tx.Get(kv.TxnId(steps+1), dbtx)
 	require.NoError(err)
 	require.False(ok)
 
 	//non-canonical keys of last step: must exist after collate+prune
-	_, ok, err = tx.Get(aggStep*steps+2, dbtx)
+	_, ok, err = tx.Get(kv.TxnId(aggStep*steps+2), dbtx)
 	require.NoError(err)
 	require.True(ok)
 }

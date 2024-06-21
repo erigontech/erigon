@@ -579,8 +579,10 @@ type TemporalTx interface {
 	//   no duplicates
 	HistoryRange(name History, fromTs, toTs int, asc order.By, limit int) (it iter.KV, err error)
 
-	AppendableGet(name Appendable, ts uint64) ([]byte, bool, error)
+	AppendableGet(name Appendable, ts TxnId) ([]byte, bool, error)
 }
+
+type TxnId uint64 // internal auto-increment ID. can't cast to eth-network canonical blocks txNum
 
 type TemporalCommitment interface {
 	ComputeCommitment(ctx context.Context, saveStateAfter, trace bool) (rootHash []byte, err error)
@@ -607,7 +609,7 @@ type TemporalPutDel interface {
 	DomainDel(domain Domain, k1, k2 []byte, prevVal []byte, prevStep uint64) error
 	DomainDelPrefix(domain Domain, prefix []byte) error
 
-	AppendablePut(name Appendable, ts uint64, v []byte) error
+	AppendablePut(name Appendable, ts TxnId, v []byte) error
 }
 type CanWarmupDB interface {
 	WarmupDB(force bool) error

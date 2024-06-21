@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 	"github.com/ledgerwatch/erigon-lib/common/u256"
+	"github.com/ledgerwatch/erigon/core/rawdb"
+	"github.com/ledgerwatch/erigon/rlp"
 	"runtime"
 	"time"
 
@@ -104,6 +106,13 @@ func SpawnCustomTrace(s *StageState, txc wrap.TxContainer, cfg CustomTraceCfg, c
 	cumulative := uint256.NewInt(0)
 	var lastBlockNum uint64
 
+	canonicalReader := doms.CanonicalReader()
+	lastFrozenID, err := canonicalReader.LastFrozenTxNum(tx)
+	if err != nil {
+		return err
+	}
+
+	var baseBlockTxnID, txnID kv.TxnId
 	fmt.Printf("dbg1: %s\n", tx.ViewID())
 	//TODO: new tracer may get tracer from pool, maybe add it to TxTask field
 	/// maybe need startTxNum/endTxNum
@@ -116,14 +125,34 @@ func SpawnCustomTrace(s *StageState, txc wrap.TxContainer, cfg CustomTraceCfg, c
 
 			if lastBlockNum != txTask.BlockNum {
 				cumulative.Set(u256.N0)
+				lastBlockNum = txTask.BlockNum
+
+				if txTask.TxNum < uint64(lastFrozenID) {
+					txnID = kv.TxnId(txTask.TxNum)
+				} else {
+					h, err := rawdb.ReadCanonicalHash(tx, txTask.BlockNum)
+					baseBlockTxnID, err = canonicalReader.BaseTxnID(tx, txTask.BlockNum, h)
+					if err != nil {
+						return err
+					}
+					txnID = baseBlockTxnID
+				}
+			} else {
+				txnID++
 			}
 			cumulative.AddUint64(cumulative, txTask.UsedGas)
 
-			doms.SetTx(tx)
-			doms.SetTxNum(txTask.TxNum)
-			err = doms.AppendablePut(kv.ReceiptsAppendable, txTask.TxNum, cumulative.Bytes())
-			if err != nil {
-				return err
+			if !txTask.Final && txTask.TxIndex >= 0 {
+				r := txTask.CreateReceipt(cumulative.Uint64())
+				v, err := rlp.EncodeToBytes(r)
+				if err != nil {
+					return err
+				}
+				doms.SetTx(tx)
+				err = doms.AppendablePut(kv.ReceiptsAppendable, txnID, v)
+				if err != nil {
+					return err
+				}
 			}
 
 			select {

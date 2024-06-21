@@ -341,15 +341,15 @@ func (tx *AppendableRoTx) Files() (res []string) {
 	return res
 }
 
-func (tx *AppendableRoTx) Get(ts uint64, dbtx kv.Tx) (v []byte, ok bool, err error) {
-	v, ok = tx.getFromFiles(ts)
+func (tx *AppendableRoTx) Get(txnID kv.TxnId, dbtx kv.Tx) (v []byte, ok bool, err error) {
+	v, ok = tx.getFromFiles(uint64(txnID))
 	if ok {
 		return v, true, nil
 	}
-	return tx.ap.getFromDBByTs(ts, dbtx)
+	return tx.ap.getFromDBByTs(uint64(txnID), dbtx)
 }
-func (tx *AppendableRoTx) Append(ts uint64, v []byte, dbtx kv.RwTx) error {
-	return dbtx.Put(tx.ap.table, hexutility.EncodeTs(ts), v)
+func (tx *AppendableRoTx) Append(txnID kv.TxnId, v []byte, dbtx kv.RwTx) error {
+	return dbtx.Put(tx.ap.table, hexutility.EncodeTs(uint64(txnID)), v)
 }
 
 func (tx *AppendableRoTx) getFromFiles(ts uint64) (v []byte, ok bool) {
@@ -392,11 +392,11 @@ func (ap *Appendable) getFromDB(k []byte, dbtx kv.Tx) ([]byte, bool, error) {
 }
 
 // Add - !NotThreadSafe. Must use WalRLock/BatchHistoryWriteEnd
-func (w *appendableBufferedWriter) Append(ts uint64, v []byte) error {
+func (w *appendableBufferedWriter) Append(ts kv.TxnId, v []byte) error {
 	if w.discard {
 		return nil
 	}
-	if err := w.tableCollector.Collect(hexutility.EncodeTs(ts), v); err != nil {
+	if err := w.tableCollector.Collect(hexutility.EncodeTs(uint64(ts)), v); err != nil {
 		return err
 	}
 	return nil

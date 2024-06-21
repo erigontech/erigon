@@ -1017,7 +1017,7 @@ type AggregatorPruneStat struct {
 }
 
 func newAggregatorPruneStat() *AggregatorPruneStat {
-	return &AggregatorPruneStat{Domains: make(map[string]*DomainPruneStat), Indices: make(map[string]*InvertedIndexPruneStat)}
+	return &AggregatorPruneStat{Domains: make(map[string]*DomainPruneStat), Indices: make(map[string]*InvertedIndexPruneStat), Appendable: make(map[string]*AppendablePruneStat)}
 }
 
 func (as *AggregatorPruneStat) String() string {
@@ -1946,12 +1946,12 @@ func (ac *AggregatorRoTx) DebugEFAllValuesAreInRange(ctx context.Context, name k
 
 // --- Domain part END ---
 
-func (ac *AggregatorRoTx) AppendableGet(name kv.Appendable, ts uint64, tx kv.Tx) (v []byte, ok bool, err error) {
+func (ac *AggregatorRoTx) AppendableGet(name kv.Appendable, ts kv.TxnId, tx kv.Tx) (v []byte, ok bool, err error) {
 	return ac.appendable[name].Get(ts, tx)
 }
 
-func (ac *AggregatorRoTx) AppendablePut(name kv.Appendable, ts uint64, v []byte, tx kv.RwTx) (err error) {
-	return ac.appendable[name].Append(ts, v, tx)
+func (ac *AggregatorRoTx) AppendablePut(name kv.Appendable, txnID kv.TxnId, v []byte, tx kv.RwTx) (err error) {
+	return ac.appendable[name].Append(txnID, v, tx)
 }
 
 func (ac *AggregatorRoTx) Close() {
