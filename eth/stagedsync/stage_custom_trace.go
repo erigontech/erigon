@@ -3,6 +3,7 @@ package stagedsync
 import (
 	"context"
 	"fmt"
+	"github.com/ledgerwatch/erigon-lib/common/u256"
 	"runtime"
 	"time"
 
@@ -94,17 +95,14 @@ func SpawnCustomTrace(s *StageState, txc wrap.TxContainer, cfg CustomTraceCfg, c
 	var m runtime.MemStats
 	var prevBlockNumLog uint64 = startBlock
 
-	keyTotal := []byte("total")
-	total, err := lastGasUsed(tx, keyTotal)
-	if err != nil {
-		return err
-	}
-
 	doms, err := state2.NewSharedDomains(tx, logger)
 	if err != nil {
 		return err
 	}
 	defer doms.Close()
+
+	cumulative := uint256.NewInt(0)
+	var lastBlockNum uint64
 
 	fmt.Printf("dbg1: %s\n", tx.ViewID())
 	//TODO: new tracer may get tracer from pool, maybe add it to TxTask field
@@ -116,12 +114,14 @@ func SpawnCustomTrace(s *StageState, txc wrap.TxContainer, cfg CustomTraceCfg, c
 				return err
 			}
 
-			total.AddUint64(total, txTask.UsedGas)
-			v := total.Bytes()
+			if lastBlockNum != txTask.BlockNum {
+				cumulative.Set(u256.N0)
+			}
+			cumulative.AddUint64(cumulative, txTask.UsedGas)
 
 			doms.SetTx(tx)
 			doms.SetTxNum(txTask.TxNum)
-			err = doms.DomainPut(kv.GasUsedDomain, keyTotal, nil, v, nil, 0)
+			err = doms.AppendablePut(kv.ReceiptsAppendable, txTask.TxNum, cumulative.Bytes())
 			if err != nil {
 				return err
 			}
@@ -154,40 +154,6 @@ func SpawnCustomTrace(s *StageState, txc wrap.TxContainer, cfg CustomTraceCfg, c
 	}
 
 	return nil
-}
-
-func lastGasUsed(tx kv.TemporalTx, key []byte) (*uint256.Int, error) {
-	total := uint256.NewInt(0)
-	v, _, err := tx.DomainGet(kv.GasUsedDomain, key, nil)
-	if err != nil {
-		return nil, err
-	}
-	if len(v) > 0 {
-		total.SetBytes(v)
-	}
-	return total, nil
-
-	/*
-		it, err := tx.IndexRange(kv.GasUsedHistoryIdx, key, -1, -1, order.Desc, 1)
-		if err != nil {
-			return nil, err
-		}
-		defer it.Close()
-		if it.HasNext() {
-			lastTxNum, err := it.Next()
-			if err != nil {
-				return nil, err
-			}
-			lastTotal, ok, err := tx.HistoryGet(kv.GasUsedHistory, key, lastTxNum)
-			if err != nil {
-				return nil, err
-			}
-			if ok {
-				total.SetBytes(lastTotal)
-			}
-		}
-		return total, nil
-	*/
 }
 
 func UnwindCustomTrace(u *UnwindState, s *StageState, txc wrap.TxContainer, cfg CustomTraceCfg, ctx context.Context, logger log.Logger) (err error) {

@@ -1946,7 +1946,11 @@ func (ac *AggregatorRoTx) DebugEFAllValuesAreInRange(ctx context.Context, name k
 
 // --- Domain part END ---
 
-func (ac *AggregatorRoTx) Appendable(name kv.Appendable, ts uint64, v []byte, tx kv.RwTx) (err error) {
+func (ac *AggregatorRoTx) AppendableGet(name kv.Appendable, ts uint64, tx kv.Tx) (v []byte, ok bool, err error) {
+	return ac.appendable[name].Get(ts, tx)
+}
+
+func (ac *AggregatorRoTx) AppendablePut(name kv.Appendable, ts uint64, v []byte, tx kv.RwTx) (err error) {
 	return ac.appendable[name].Append(ts, v, tx)
 }
 

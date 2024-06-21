@@ -578,6 +578,8 @@ type TemporalTx interface {
 	// HistoryRange - producing "state patch" - sorted list of keys updated at [fromTs,toTs) with their most-recent value.
 	//   no duplicates
 	HistoryRange(name History, fromTs, toTs int, asc order.By, limit int) (it iter.KV, err error)
+
+	AppendableGet(name Appendable, ts uint64) ([]byte, bool, error)
 }
 
 type TemporalCommitment interface {
