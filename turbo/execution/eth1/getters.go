@@ -2,6 +2,7 @@ package eth1
 
 import (
 	"context"
+	"encoding/binary"
 	"errors"
 	"fmt"
 
@@ -10,6 +11,7 @@ import (
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces"
 	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/ledgerwatch/erigon-lib/kv/rawdbv3"
 
 	execution "github.com/ledgerwatch/erigon-lib/gointerfaces/executionproto"
 	types2 "github.com/ledgerwatch/erigon-lib/gointerfaces/typesproto"
@@ -326,7 +328,23 @@ func (e *EthereumExecutionModule) GetForkChoice(ctx context.Context, _ *emptypb.
 }
 
 func (e *EthereumExecutionModule) FrozenBlocks(ctx context.Context, _ *emptypb.Empty) (*execution.FrozenBlocksResponse, error) {
+	tx, err := e.db.BeginRo(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("ethereumExecutionModule.GetForkChoice: could not begin database tx %w", err)
+	}
+	defer tx.Rollback()
+
+	firstNonGenesis, err := rawdbv3.SecondKey(tx, kv.Headers)
+	if err != nil {
+		return nil, err
+	}
+	gap := false
+	if firstNonGenesis != nil {
+		firstNonGenesisBlockNumber := binary.BigEndian.Uint64(firstNonGenesis)
+		gap = e.blockReader.Snapshots().SegmentsMax()+1 < firstNonGenesisBlockNumber
+	}
 	return &execution.FrozenBlocksResponse{
 		FrozenBlocks: e.blockReader.FrozenBlocks(),
+		HasGap:       gap,
 	}, nil
 }
