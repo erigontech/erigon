@@ -11,8 +11,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/ledgerwatch/erigon-lib/config3"
-
 	"github.com/holiman/uint256"
 
 	"github.com/ledgerwatch/erigon-lib/chain/networkname"
