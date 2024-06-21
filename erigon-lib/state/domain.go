@@ -1699,6 +1699,9 @@ func (dt *DomainRoTx) Prune(ctx context.Context, rwTx kv.RwTx, step, txFrom, txT
 	}
 	var valsCursor kv.RwCursor
 
+	ancientDomainValsCollector := etl.NewCollector("DomainAncientVals", dt.d.dirs.Tmp, etl.NewSortableBuffer(etl.BufferOptimalSize/8), dt.d.logger)
+	defer ancientDomainValsCollector.Close()
+
 	if dt.d.largeVals {
 		valsCursor, err = rwTx.RwCursor(dt.d.valsTable)
 		if err != nil {
@@ -1711,6 +1714,13 @@ func (dt *DomainRoTx) Prune(ctx context.Context, rwTx kv.RwTx, step, txFrom, txT
 		}
 	}
 	defer valsCursor.Close()
+
+	loadFunc := func(k, v []byte, _ etl.CurrentTableReader, _ etl.LoadNextFunc) error {
+		if dt.d.largeVals {
+			return valsCursor.Delete(k)
+		}
+		return valsCursor.(kv.RwCursorDupSort).DeleteExact(k, v)
+	}
 
 	prunedKey, err := GetExecV3PruneProgress(rwTx, dt.d.valsTable)
 	if err != nil {
@@ -1746,15 +1756,16 @@ func (dt *DomainRoTx) Prune(ctx context.Context, rwTx kv.RwTx, step, txFrom, txT
 			continue
 		}
 		if limit == 0 {
+			if err := ancientDomainValsCollector.Load(rwTx, dt.d.valsTable, loadFunc, etl.TransformArgs{Quit: ctx.Done()}); err != nil {
+				return stat, fmt.Errorf("load domain values: %w", err)
+			}
 			if err := SaveExecV3PruneProgress(rwTx, dt.d.valsTable, k); err != nil {
 				return stat, fmt.Errorf("save domain pruning progress: %s, %w", dt.d.filenameBase, err)
 			}
 			return stat, nil
 		}
 		limit--
-		if err := valsCursor.DeleteCurrent(); err != nil {
-			return stat, err
-		}
+		ancientDomainValsCollector.Collect(k, v)
 
 		select {
 		case <-ctx.Done():
@@ -1768,7 +1779,9 @@ func (dt *DomainRoTx) Prune(ctx context.Context, rwTx kv.RwTx, step, txFrom, txT
 		}
 	}
 	mxPruneSizeDomain.AddUint64(stat.Values)
-
+	if err := ancientDomainValsCollector.Load(rwTx, dt.d.valsTable, loadFunc, etl.TransformArgs{Quit: ctx.Done()}); err != nil {
+		return stat, fmt.Errorf("load domain values: %w", err)
+	}
 	if err := SaveExecV3PruneProgress(rwTx, dt.d.valsTable, nil); err != nil {
 		return stat, fmt.Errorf("save domain pruning progress: %s, %w", dt.d.filenameBase, err)
 	}
