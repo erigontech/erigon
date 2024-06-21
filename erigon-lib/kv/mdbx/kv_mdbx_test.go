@@ -49,9 +49,9 @@ func BaseCaseDB(t *testing.T) kv.RwDB {
 	return db
 }
 
-func BaseCaseDBForBenchmark(t *testing.B) kv.RwDB {
-	t.Helper()
-	path := t.TempDir()
+func BaseCaseDBForBenchmark(b *testing.B) kv.RwDB {
+	b.Helper()
+	path := b.TempDir()
 	logger := log.New()
 	table := "Table"
 	db := NewMDBX(logger).InMem(path).WithTableCfg(func(defaultBuckets kv.TableCfg) kv.TableCfg {
@@ -60,7 +60,7 @@ func BaseCaseDBForBenchmark(t *testing.B) kv.RwDB {
 			kv.Sequence: kv.TableCfgItem{},
 		}
 	}).MapSize(128 * datasize.MB).MustOpen()
-	t.Cleanup(db.Close)
+	b.Cleanup(db.Close)
 	return db
 }
 
