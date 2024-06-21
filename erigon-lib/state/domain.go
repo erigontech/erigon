@@ -1699,8 +1699,12 @@ func (dt *DomainRoTx) Prune(ctx context.Context, rwTx kv.RwTx, step, txFrom, txT
 	}
 	var valsCursor kv.RwCursor
 
-	ancientDomainValsCollector := etl.NewCollector("DomainAncientVals", dt.d.dirs.Tmp, etl.NewSortableBuffer(etl.BufferOptimalSize/8), dt.d.logger)
+	ancientDomainValsCollector := etl.NewCollector("DomainAncientVals", dt.d.dirs.Tmp, etl.NewSortableBuffer(etl.BufferOptimalSize), dt.d.logger)
 	defer ancientDomainValsCollector.Close()
+
+	dbgFile, _ := os.Create(fmt.Sprintf("prune_%s_%d.log", dt.d.filenameBase, step))
+	defer dbgFile.Sync()
+	defer dbgFile.Close()
 
 	if dt.d.largeVals {
 		valsCursor, err = rwTx.RwCursor(dt.d.valsTable)
@@ -1766,6 +1770,7 @@ func (dt *DomainRoTx) Prune(ctx context.Context, rwTx kv.RwTx, step, txFrom, txT
 		}
 		limit--
 		ancientDomainValsCollector.Collect(k, v)
+		dbgFile.WriteString(fmt.Sprintf("prune %x %x\n", k, v))
 
 		select {
 		case <-ctx.Done():
