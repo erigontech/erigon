@@ -1123,8 +1123,8 @@ func BenchmarkDB_Get(b *testing.B) {
 
 	// Ensure data is correct.
 	if err := db.View(context.Background(), func(tx kv.Tx) error {
-		b.ResetTimer()
 		key := u64tob(uint64(1))
+		b.ResetTimer()
 		for i := 1; i <= b.N; i++ {
 			v, err := tx.GetOne(table, key)
 			if err != nil {
