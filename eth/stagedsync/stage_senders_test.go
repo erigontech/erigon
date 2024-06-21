@@ -41,7 +41,7 @@ func TestSenders(t *testing.T) {
 		return r
 	}
 
-	// prepare tx so it works with our test
+	// prepare txn so it works with our test
 	signer1 := types.MakeSigner(params.TestChainConfig, params.TestChainConfig.BerlinBlock.Uint64(), 0)
 	header := &types.Header{Number: libcommon.Big1}
 	hash := header.Hash()

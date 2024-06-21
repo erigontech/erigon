@@ -215,7 +215,7 @@ func (r *Receipt) DecodeRLP(s *rlp.Stream) error {
 		}
 		r.Type = LegacyTxType
 	case rlp.String:
-		// It's an EIP-2718 typed tx receipt.
+		// It's an EIP-2718 typed txn receipt.
 		s.NewList(size) // Hack - convert String (envelope) into List
 		var b []byte
 		if b, err = s.Bytes(); err != nil {
@@ -385,10 +385,10 @@ func (rs Receipts) EncodeIndex(i int, w *bytes.Buffer) {
 func (r Receipts) DeriveFields(hash libcommon.Hash, number uint64, txs Transactions, senders []libcommon.Address) error {
 	logIndex := uint(0) // logIdx is unique within the block and starts from 0
 	if len(txs) != len(r) {
-		return fmt.Errorf("transaction and receipt count mismatch, tx count = %d, receipts count = %d", len(txs), len(r))
+		return fmt.Errorf("transaction and receipt count mismatch, txn count = %d, receipts count = %d", len(txs), len(r))
 	}
 	if len(senders) != len(txs) {
-		return fmt.Errorf("transaction and senders count mismatch, tx count = %d, senders count = %d", len(txs), len(senders))
+		return fmt.Errorf("transaction and senders count mismatch, txn count = %d, senders count = %d", len(txs), len(senders))
 	}
 
 	blockNumber := new(big.Int).SetUint64(number)

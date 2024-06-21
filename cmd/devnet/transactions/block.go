@@ -118,7 +118,7 @@ func txHashInBlock(client *rpc.Client, hashmap map[libcommon.Hash]bool, blockNum
 		// check if txn is in the hash set and remove it from the set if it is present
 		if _, ok := hashmap[txnHash]; ok {
 			numFound++
-			logger.Info("SUCCESS => Tx included into block", "txHash", txnHash, "blockNum", blockNumber)
+			logger.Info("SUCCESS => Txn included into block", "txHash", txnHash, "blockNum", blockNumber)
 			// add the block number as an entry to the map
 			txToBlockMap[txnHash] = devnetutils.HexToInt(blockNumber)
 			delete(hashmap, txnHash)

@@ -41,7 +41,7 @@ import (
 // Fetch connects to sentry and implements eth/66 protocol regarding the transaction
 // messages. It tries to "prime" the sentry with StatusData message containing given
 // genesis hash and list of forks, but with zero max block and total difficulty
-// Sentry should have a logic not to overwrite statusData with messages from tx pool
+// Sentry should have a logic not to overwrite statusData with messages from txn pool
 type Fetch struct {
 	ctx                      context.Context // Context used for cancellation and closing of the fetcher
 	pool                     Pool            // Transaction pool implementation
@@ -487,7 +487,7 @@ func (f *Fetch) handleStateChangesRequest(ctx context.Context, req *remote.State
 					return err
 				}); err != nil && !errors.Is(err, context.Canceled) {
 					f.logger.Warn("[txpool.fetch] stream.Recv", "err", err)
-					continue // 1 tx handling error must not stop batch processing
+					continue // 1 txn handling error must not stop batch processing
 				}
 			}
 		} else if change.Direction == remote.Direction_UNWIND {
@@ -507,7 +507,7 @@ func (f *Fetch) handleStateChangesRequest(ctx context.Context, req *remote.State
 					return nil
 				}); err != nil && !errors.Is(err, context.Canceled) {
 					f.logger.Warn("[txpool.fetch] stream.Recv", "err", err)
-					continue // 1 tx handling error must not stop batch processing
+					continue // 1 txn handling error must not stop batch processing
 				}
 			}
 		}

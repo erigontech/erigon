@@ -77,7 +77,7 @@ func TestBlockSubscription(t *testing.T) {
 	<-sub1.Err()
 }
 
-// TestPendingTxFilter tests whether pending tx filters retrieve all pending transactions that are posted to the event mux.
+// TestPendingTxFilter tests whether pending txn filters retrieve all pending transactions that are posted to the event mux.
 func TestPendingTxFilter(t *testing.T) {
 	t.Parallel()
 
@@ -509,7 +509,7 @@ func TestPendingTxFilterDeadlock(t *testing.T) {
 	for i := 0; i < len(fids); i++ {
 		fid := api.NewPendingTransactionFilter()
 		fids[i] = fid
-		// Wait for at least one tx to arrive in filter
+		// Wait for at least one txn to arrive in filter
 		for {
 			hashes, err := api.GetFilterChanges(fid)
 			if err != nil {
@@ -525,7 +525,7 @@ func TestPendingTxFilterDeadlock(t *testing.T) {
 	// Wait until filters have timed out
 	time.Sleep(3 * timeout)
 
-	// If tx loop doesn't consume `done` after a second
+	// If txn loop doesn't consume `done` after a second
 	// it's hanging.
 	select {
 	case done <- struct{}{}:
