@@ -541,8 +541,6 @@ github.com/kylelemons/godebug v0.0.0-20170224010052-a616ab194758 h1:0D5M2HQSGD3P
 github.com/kylelemons/godebug v0.0.0-20170224010052-a616ab194758/go.mod h1:B69LEHPfb2qLo0BaaOLcbitczOKLWTsrBG9LczfCD4k=
 github.com/leanovate/gopter v0.2.9 h1:fQjYxZaynp97ozCzfOyOuAGOU4aU/z37zf/tOujFk7c=
 github.com/leanovate/gopter v0.2.9/go.mod h1:U2L/78B+KVFIx2VmW6onHJQzXtFb+p5y3y2Sh+Jxxv8=
-github.com/ledgerwatch/erigon-snapshot v1.3.1-0.20240621084335-e09f9eb199e9 h1:3n1qn0VUUA2ka++Wc2CG1VZzpvZp0ivtwGYyL1Q8/RY=
-github.com/ledgerwatch/erigon-snapshot v1.3.1-0.20240621084335-e09f9eb199e9/go.mod h1:3AuPxZc85jkehh/HA9h8gabv5MSi3kb/ddtzBsTVJFo=
 github.com/ledgerwatch/erigon-snapshot v1.3.1-0.20240621134121-8602e942c6e3 h1:nsLdjkm05aGQ28rBDAjLw4NkHVOOPj6uPFPCcyvb0AA=
 github.com/ledgerwatch/erigon-snapshot v1.3.1-0.20240621134121-8602e942c6e3/go.mod h1:3AuPxZc85jkehh/HA9h8gabv5MSi3kb/ddtzBsTVJFo=
 github.com/ledgerwatch/erigonwatch v0.1.0 h1:TrCjklOu9ZI9/uiMigo1Jnknnk1I/dXUxXymA3xHfzo=
