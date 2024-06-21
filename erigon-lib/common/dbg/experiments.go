@@ -62,6 +62,8 @@ var (
 	OnlyCreateDB          = EnvBool("ONLY_CREATE_DB", false)
 
 	CommitEachStage = EnvBool("COMMIT_EACH_STAGE", false)
+
+	WithReceipts = EnvBool("WITH_RECEIPTS", false)
 )
 
 func ReadMemStats(m *runtime.MemStats) {

@@ -343,7 +343,7 @@ func aggregatorV3_RestartOnDatadir(t *testing.T, rc runCfg) {
 
 	ctrl := gomock.NewController(t)
 	defer ctrl.Finish()
-	canonicalsReader := NewMockIterFactory(ctrl)
+	canonicalsReader := NewMockCanonicalsReader(ctrl)
 	canonicalsReader.EXPECT().TxnIdsOfCanonicalBlocks(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).
 		Return(iter.EmptyU64, nil).
 		AnyTimes()
@@ -790,7 +790,7 @@ func TestAggregatorV3_RestartOnFiles(t *testing.T) {
 
 	ctrl := gomock.NewController(t)
 	defer ctrl.Finish()
-	canonicalsReader := NewMockIterFactory(ctrl)
+	canonicalsReader := NewMockCanonicalsReader(ctrl)
 	canonicalsReader.EXPECT().TxnIdsOfCanonicalBlocks(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).
 		DoAndReturn(func(tx kv.Tx, txFrom, txTo int, by order.By, i3 int) (iter.U64, error) {
 			currentStep := uint64(txFrom) / aggStep
@@ -1093,7 +1093,7 @@ func testDbAndAggregatorv3(t *testing.T, aggStep uint64) (kv.RwDB, *Aggregator) 
 
 	ctrl := gomock.NewController(t)
 	defer ctrl.Finish()
-	canonicalsReader := NewMockIterFactory(ctrl)
+	canonicalsReader := NewMockCanonicalsReader(ctrl)
 	canonicalsReader.EXPECT().TxnIdsOfCanonicalBlocks(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).
 		Return(iter.EmptyU64, nil).
 		AnyTimes()

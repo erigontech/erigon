@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"github.com/ledgerwatch/erigon-lib/common/u256"
 	"github.com/ledgerwatch/erigon/core/rawdb"
-	"github.com/ledgerwatch/erigon/rlp"
 	"runtime"
 	"time"
 
@@ -142,18 +141,19 @@ func SpawnCustomTrace(s *StageState, txc wrap.TxContainer, cfg CustomTraceCfg, c
 			}
 			cumulative.AddUint64(cumulative, txTask.UsedGas)
 
-			if !txTask.Final && txTask.TxIndex >= 0 {
-				r := txTask.CreateReceipt(cumulative.Uint64())
-				v, err := rlp.EncodeToBytes(r)
-				if err != nil {
-					return err
-				}
-				doms.SetTx(tx)
-				err = doms.AppendablePut(kv.ReceiptsAppendable, txnID, v)
-				if err != nil {
-					return err
-				}
+			if txTask.Final || txTask.TxIndex < 0 {
+				return nil
 			}
+			//r := txTask.CreateReceipt(cumulative.Uint64())
+			//v, err := rlp.EncodeToBytes(r)
+			//if err != nil {
+			//	return err
+			//}
+			//doms.SetTx(tx)
+			//err = doms.AppendablePut(kv.ReceiptsAppendable, txnID, v)
+			//if err != nil {
+			//	return err
+			//}
 
 			select {
 			case <-logEvery.C:

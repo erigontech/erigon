@@ -149,11 +149,10 @@ func (tx *Tx) ForceReopenAggCtx() {
 	tx.aggCtx = tx.Agg().BeginFilesRo()
 }
 
-func (tx *Tx) InternalMdbxTx() *mdbx.MdbxTx { return tx.MdbxTx }
-func (tx *Tx) WarmupDB(force bool) error    { return tx.MdbxTx.WarmupDB(force) }
-func (tx *Tx) LockDBInRam() error           { return tx.MdbxTx.LockDBInRam() }
-func (tx *Tx) AggTx() interface{}           { return tx.aggCtx }
-func (tx *Tx) Agg() *state.Aggregator       { return tx.db.agg }
+func (tx *Tx) WarmupDB(force bool) error { return tx.MdbxTx.WarmupDB(force) }
+func (tx *Tx) LockDBInRam() error        { return tx.MdbxTx.LockDBInRam() }
+func (tx *Tx) AggTx() interface{}        { return tx.aggCtx }
+func (tx *Tx) Agg() *state.Aggregator    { return tx.db.agg }
 func (tx *Tx) Rollback() {
 	tx.autoClose()
 	if tx.MdbxTx == nil { // invariant: it's safe to call Commit/Rollback multiple times

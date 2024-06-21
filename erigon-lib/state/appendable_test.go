@@ -103,7 +103,7 @@ func TestAppendableCollationBuild(t *testing.T) {
 	defer ctrl.Finish()
 
 	//see only canonical records in files
-	iters := NewMockIterFactory(ctrl)
+	iters := NewMockCanonicalsReader(ctrl)
 	iters.EXPECT().TxnIdsOfCanonicalBlocks(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).
 		DoAndReturn(func(tx kv.Tx, txFrom, txTo int, by order.By, i3 int) (iter.U64, error) {
 			currentStep := uint64(txFrom) / aggStep

@@ -7,8 +7,8 @@ import (
 	"github.com/ledgerwatch/erigon-lib/kv/order"
 )
 
-//go:generate mockgen -typed=true -destination=./iters_mock.go -package=state . IterFactory
-type IterFactory interface {
+//go:generate mockgen -typed=true -destination=./iters_mock.go -package=state . CanonicalsReader
+type CanonicalsReader interface {
 	// TxnIdsOfCanonicalBlocks - for given canonical blocks range returns non-canonical txnIds (not txNums)
 	// [fromTxNum, toTxNum)
 	// To get all canonical blocks, use fromTxNum=0, toTxNum=-1

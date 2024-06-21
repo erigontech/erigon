@@ -93,7 +93,7 @@ type AppendableCfg struct {
 	Dirs datadir.Dirs
 	DB   kv.RoDB // global db pointer. mostly for background warmup.
 
-	iters IterFactory
+	iters CanonicalsReader
 }
 
 func NewAppendable(cfg AppendableCfg, aggregationStep uint64, filenameBase, table string, integrityCheck func(fromStep uint64, toStep uint64) bool, logger log.Logger) (*Appendable, error) {

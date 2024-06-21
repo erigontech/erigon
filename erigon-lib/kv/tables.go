@@ -940,8 +940,7 @@ const (
 	StorageDomain    Domain = 1
 	CodeDomain       Domain = 2
 	CommitmentDomain Domain = 3
-
-	DomainLen Domain = 4
+	DomainLen        Domain = 4
 )
 
 const (
@@ -966,13 +965,13 @@ const (
 	LogTopicIdxPos   InvertedIdxPos = 1
 	TracesFromIdxPos InvertedIdxPos = 2
 	TracesToIdxPos   InvertedIdxPos = 3
-	StandaloneIdxLen uint16         = 4
+	StandaloneIdxLen InvertedIdxPos = 4
 )
 
 const (
-	ReceiptsAppendable Appendable = 0
-
-	AppendableLen Appendable = 1
+	//ReceiptsAppendable Appendable = 0
+	//AppendableLen      Appendable = 1
+	AppendableLen Appendable = 0
 )
 
 func (iip InvertedIdxPos) String() string {
@@ -1022,8 +1021,8 @@ func String2Domain(in string) (Domain, error) {
 
 func (iip Appendable) String() string {
 	switch iip {
-	case ReceiptsAppendable:
-		return "receipts"
+	//case ReceiptsAppendable:
+	//	return "receipts"
 	default:
 		return "unknown Appendable"
 	}
@@ -1031,8 +1030,8 @@ func (iip Appendable) String() string {
 
 func String2Appendable(in string) (Appendable, error) {
 	switch in {
-	case "receipts":
-		return ReceiptsAppendable, nil
+	//case "receipts":
+	//	return ReceiptsAppendable, nil
 	default:
 		return 0, fmt.Errorf("unknown Appendable name: %s", in)
 	}
