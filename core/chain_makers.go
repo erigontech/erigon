@@ -115,33 +115,33 @@ func (b *BlockGen) AddFailedTx(tx types.Transaction) {
 // further limitations on the content of transactions that can be
 // added. If contract code relies on the BLOCKHASH instruction,
 // the block in chain will be returned.
-func (b *BlockGen) AddTxWithChain(getHeader func(hash libcommon.Hash, number uint64) *types.Header, engine consensus.Engine, tx types.Transaction) {
+func (b *BlockGen) AddTxWithChain(getHeader func(hash libcommon.Hash, number uint64) *types.Header, engine consensus.Engine, txn types.Transaction) {
 	if b.beforeAddTx != nil {
 		b.beforeAddTx()
 	}
 	if b.gasPool == nil {
 		b.SetCoinbase(libcommon.Address{})
 	}
-	b.ibs.SetTxContext(tx.Hash(), libcommon.Hash{}, len(b.txs))
-	receipt, _, err := ApplyTransaction(b.config, GetHashFn(b.header, getHeader), engine, &b.header.Coinbase, b.gasPool, b.ibs, state.NewNoopWriter(), b.header, tx, &b.header.GasUsed, b.header.BlobGasUsed, vm.Config{})
+	b.ibs.SetTxContext(txn.Hash(), libcommon.Hash{}, len(b.txs))
+	receipt, _, err := ApplyTransaction(b.config, GetHashFn(b.header, getHeader), engine, &b.header.Coinbase, b.gasPool, b.ibs, state.NewNoopWriter(), b.header, txn, &b.header.GasUsed, b.header.BlobGasUsed, vm.Config{})
 	if err != nil {
 		panic(err)
 	}
-	b.txs = append(b.txs, tx)
+	b.txs = append(b.txs, txn)
 	b.receipts = append(b.receipts, receipt)
 }
 
-func (b *BlockGen) AddFailedTxWithChain(getHeader func(hash libcommon.Hash, number uint64) *types.Header, engine consensus.Engine, tx types.Transaction) {
+func (b *BlockGen) AddFailedTxWithChain(getHeader func(hash libcommon.Hash, number uint64) *types.Header, engine consensus.Engine, txn types.Transaction) {
 	if b.beforeAddTx != nil {
 		b.beforeAddTx()
 	}
 	if b.gasPool == nil {
 		b.SetCoinbase(libcommon.Address{})
 	}
-	b.ibs.SetTxContext(tx.Hash(), libcommon.Hash{}, len(b.txs))
-	receipt, _, err := ApplyTransaction(b.config, GetHashFn(b.header, getHeader), engine, &b.header.Coinbase, b.gasPool, b.ibs, state.NewNoopWriter(), b.header, tx, &b.header.GasUsed, b.header.BlobGasUsed, vm.Config{})
+	b.ibs.SetTxContext(txn.Hash(), libcommon.Hash{}, len(b.txs))
+	receipt, _, err := ApplyTransaction(b.config, GetHashFn(b.header, getHeader), engine, &b.header.Coinbase, b.gasPool, b.ibs, state.NewNoopWriter(), b.header, txn, &b.header.GasUsed, b.header.BlobGasUsed, vm.Config{})
 	_ = err // accept failed transactions
-	b.txs = append(b.txs, tx)
+	b.txs = append(b.txs, txn)
 	b.receipts = append(b.receipts, receipt)
 }
 

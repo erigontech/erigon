@@ -276,7 +276,7 @@ func getReceiptProof(ctx context.Context, node requests.RequestGenerator, receip
 
 		for _, transaction := range block.Transactions {
 			if transaction.Hash == stateSyncTxHash {
-				// ignore if tx hash is bor state-sync tx
+				// ignore if txn hash is bor state-sync tx
 				continue
 			}
 

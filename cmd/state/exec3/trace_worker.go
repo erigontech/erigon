@@ -6,6 +6,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/chain"
 	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/kv"
+
 	"github.com/ledgerwatch/erigon/consensus"
 	"github.com/ledgerwatch/erigon/core"
 	"github.com/ledgerwatch/erigon/core/state"
@@ -82,7 +83,7 @@ func (e *TraceWorker) GetLogs(txIdx int, txn types.Transaction) types.Logs {
 	return e.ibs.GetLogs(txn.Hash())
 }
 
-func (e *TraceWorker) ExecTxn(txNum uint64, txIndex int, txn types.Transaction) (*core.ExecutionResult, error) {
+func (e *TraceWorker) ExecTxn(txNum uint64, txIndex int, txn types.Transaction) (*evmtypes.ExecutionResult, error) {
 	e.stateReader.SetTxNum(txNum)
 	txHash := txn.Hash()
 	e.ibs.Reset()

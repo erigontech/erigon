@@ -1015,19 +1015,19 @@ func (it *FrozenInvertedIdxIter) advanceInFiles() {
 			if bytes.Equal(k, it.key) {
 				eliasVal, _ := g.NextUncompressed()
 				it.ef.Reset(eliasVal)
+				var efiter *eliasfano32.EliasFanoIter
 				if it.orderAscend {
-					efiter := it.ef.Iterator()
-					if it.startTxNum > 0 {
-						efiter.Seek(uint64(it.startTxNum))
-					}
-					it.efIt = efiter
+					efiter = it.ef.Iterator()
 				} else {
-					it.efIt = it.ef.ReverseIterator()
+					efiter = it.ef.ReverseIterator()
 				}
+				if it.startTxNum > 0 {
+					efiter.Seek(uint64(it.startTxNum))
+				}
+				it.efIt = efiter
 			}
 		}
 
-		//TODO: add seek method
 		//Asc:  [from, to) AND from < to
 		//Desc: [from, to) AND from > to
 		if it.orderAscend {
