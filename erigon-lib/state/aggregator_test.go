@@ -6,6 +6,7 @@ import (
 	"encoding/binary"
 	"encoding/hex"
 	"fmt"
+	"go.uber.org/mock/gomock"
 	"math"
 	"math/rand"
 	"os"
@@ -342,8 +343,15 @@ func aggregatorV3_RestartOnDatadir(t *testing.T, rc runCfg) {
 
 	agg.Close()
 
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+	canonicalsReader := NewMockIterFactory(ctrl)
+	canonicalsReader.EXPECT().TxnIdsOfCanonicalBlocks(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).
+		Return(iter.EmptyU64, nil).
+		AnyTimes()
+
 	// Start another aggregator on same datadir
-	anotherAgg, err := NewAggregator(context.Background(), agg.dirs, aggStep, db, logger)
+	anotherAgg, err := NewAggregator(context.Background(), agg.dirs, aggStep, db, canonicalsReader, logger)
 	require.NoError(t, err)
 	defer anotherAgg.Close()
 
@@ -782,7 +790,18 @@ func TestAggregatorV3_RestartOnFiles(t *testing.T) {
 	}).MustOpen()
 	t.Cleanup(newDb.Close)
 
-	newAgg, err := NewAggregator(context.Background(), agg.dirs, aggStep, newDb, logger)
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+	canonicalsReader := NewMockIterFactory(ctrl)
+	canonicalsReader.EXPECT().TxnIdsOfCanonicalBlocks(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).
+		DoAndReturn(func(tx kv.Tx, txFrom, txTo int, by order.By, i3 int) (iter.U64, error) {
+			currentStep := uint64(txFrom) / aggStep
+			canonicalBlockTxNum := aggStep*currentStep + 1
+			it := iter.Array[uint64]([]uint64{canonicalBlockTxNum})
+			return it, nil
+		}).
+		AnyTimes()
+	newAgg, err := NewAggregator(context.Background(), agg.dirs, aggStep, newDb, canonicalsReader, logger)
 	require.NoError(t, err)
 	require.NoError(t, newAgg.OpenFolder())
 
@@ -1074,7 +1093,14 @@ func testDbAndAggregatorv3(t *testing.T, aggStep uint64) (kv.RwDB, *Aggregator) 
 	}).MustOpen()
 	t.Cleanup(db.Close)
 
-	agg, err := NewAggregator(context.Background(), dirs, aggStep, db, logger)
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+	canonicalsReader := NewMockIterFactory(ctrl)
+	canonicalsReader.EXPECT().TxnIdsOfCanonicalBlocks(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).
+		Return(iter.EmptyU64, nil).
+		AnyTimes()
+
+	agg, err := NewAggregator(context.Background(), dirs, aggStep, db, canonicalsReader, logger)
 	require.NoError(err)
 	t.Cleanup(agg.Close)
 	err = agg.OpenFolder()

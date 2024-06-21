@@ -18,6 +18,7 @@ package runtime
 
 import (
 	"context"
+	"github.com/ledgerwatch/erigon/core/rawdb"
 	"math"
 	"math/big"
 	"os"
@@ -129,7 +130,8 @@ func Execute(code, input []byte, cfg *Config, tempdir string) ([]byte, *state.In
 	if !externalState {
 		db := memdb.NewStateDB(tempdir)
 		defer db.Close()
-		agg, err := state3.NewAggregator(context.Background(), datadir.New(tempdir), config3.HistoryV3AggregationStep, db, log.New())
+		cr := rawdb.NewCanonicalReader()
+		agg, err := state3.NewAggregator(context.Background(), datadir.New(tempdir), config3.HistoryV3AggregationStep, db, cr, log.New())
 		if err != nil {
 			return nil, nil, err
 		}

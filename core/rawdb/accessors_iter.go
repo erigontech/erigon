@@ -26,6 +26,15 @@ type CanonicalTxnIds struct {
 	hasNext           bool
 	endOfCurrentBlock uint64
 }
+type CanonicalReader struct {
+}
+
+func NewCanonicalReader() *CanonicalReader {
+	return &CanonicalReader{}
+}
+func (*CanonicalReader) TxnIdsOfCanonicalBlocks(tx kv.Tx, fromTxNum, toTxNum int, asc order.By, limit int) (iter.U64, error) {
+	return TxnIdsOfCanonicalBlocks(tx, fromTxNum, toTxNum, asc, limit)
+}
 
 // TxnIdsOfCanonicalBlocks - returns non-canonical txnIds of canonical block range
 // [fromTxNum, toTxNum)
