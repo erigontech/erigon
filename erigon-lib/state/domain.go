@@ -21,11 +21,9 @@ import (
 	"container/heap"
 	"context"
 	"encoding/binary"
-	"encoding/hex"
 	"errors"
 	"fmt"
 	"math"
-	"os"
 	"path/filepath"
 	"regexp"
 	"sort"
@@ -853,7 +851,6 @@ func (d *Domain) collate(ctx context.Context, step, txFrom, txTo uint64, roTx kv
 	binary.BigEndian.PutUint64(stepBytes, ^step)
 
 	var valsCursor kv.Cursor
-	fmt.Println("collating", d.filenameBase, "step", step, "txFrom", txFrom, "txTo", txTo)
 
 	if d.largeVals {
 		valsCursor, err = roTx.Cursor(d.valsTable)
@@ -871,9 +868,7 @@ func (d *Domain) collate(ctx context.Context, step, txFrom, txTo uint64, roTx kv
 	kvs := []struct {
 		k, v []byte
 	}{}
-	dbgFile, _ := os.Create("collate-" + d.filenameBase + "-" + fmt.Sprintf("%d", step) + ".txt")
-	defer dbgFile.Sync()
-	defer dbgFile.Close()
+
 	var stepInDB []byte
 	for k, v, err := valsCursor.First(); k != nil; {
 		if err != nil {
@@ -902,9 +897,7 @@ func (d *Domain) collate(ctx context.Context, step, txFrom, txTo uint64, roTx kv
 			if err = comp.AddWord(common.Copy(v[8:])); err != nil {
 				return coll, fmt.Errorf("add %s values [%x]=>[%x]: %w", d.filenameBase, k, v[8:], err)
 			}
-			dbgFile.WriteString(hex.EncodeToString(k) + " => " + hex.EncodeToString(v[8:]) + "\n")
 			k, v, err = valsCursor.(kv.CursorDupSort).NextNoDup()
-			// Write k as hex to file
 		}
 	}
 
@@ -1674,7 +1667,6 @@ func (dt *DomainRoTx) Prune(ctx context.Context, rwTx kv.RwTx, step, txFrom, txT
 	if limit == 0 {
 		limit = math.MaxUint64
 	}
-	fmt.Println("pruning", step)
 
 	stat = &DomainPruneStat{MinStep: math.MaxUint64}
 	if stat.History, err = dt.ht.Prune(ctx, rwTx, txFrom, txTo, limit, false, withWarmup, logEvery); err != nil {
@@ -1687,7 +1679,6 @@ func (dt *DomainRoTx) Prune(ctx context.Context, rwTx kv.RwTx, step, txFrom, txT
 	if step > maxPrunableStep {
 		step = maxPrunableStep
 	}
-	fmt.Println("pruning2", step)
 
 	st := time.Now()
 	mxPruneInProgress.Inc()
@@ -1701,10 +1692,6 @@ func (dt *DomainRoTx) Prune(ctx context.Context, rwTx kv.RwTx, step, txFrom, txT
 
 	ancientDomainValsCollector := etl.NewCollector("DomainAncientVals", dt.d.dirs.Tmp, etl.NewSortableBuffer(etl.BufferOptimalSize), dt.d.logger)
 	defer ancientDomainValsCollector.Close()
-
-	dbgFile, _ := os.Create(fmt.Sprintf("prune_%s_%d.log", dt.d.filenameBase, step))
-	defer dbgFile.Sync()
-	defer dbgFile.Close()
 
 	if dt.d.largeVals {
 		valsCursor, err = rwTx.RwCursor(dt.d.valsTable)
@@ -1770,7 +1757,6 @@ func (dt *DomainRoTx) Prune(ctx context.Context, rwTx kv.RwTx, step, txFrom, txT
 		}
 		limit--
 		ancientDomainValsCollector.Collect(k, v)
-		dbgFile.WriteString(fmt.Sprintf("prune %x %x\n", k, v))
 
 		select {
 		case <-ctx.Done():
@@ -1790,12 +1776,10 @@ func (dt *DomainRoTx) Prune(ctx context.Context, rwTx kv.RwTx, step, txFrom, txT
 	if err := SaveExecV3PruneProgress(rwTx, dt.d.valsTable, nil); err != nil {
 		return stat, fmt.Errorf("save domain pruning progress: %s, %w", dt.d.filenameBase, err)
 	}
-	fmt.Println(GetExecV3PrunableProgress(rwTx, []byte(kv.TblAccountVals)))
-	fmt.Println("SaveExecV3PruneProgress", dt.d.valsTable, step+1)
+
 	if err := SaveExecV3PrunableProgress(rwTx, []byte(dt.d.valsTable), step+1); err != nil {
 		return stat, err
 	}
-	fmt.Println(GetExecV3PrunableProgress(rwTx, []byte(kv.TblAccountVals)))
 	mxPruneTookDomain.ObserveDuration(st)
 	return stat, nil
 }
@@ -1977,7 +1961,6 @@ func (hi *DomainLatestIterFile) Next() ([]byte, []byte, error) {
 	if err := hi.advanceInFiles(); err != nil {
 		return nil, nil, err
 	}
-	fmt.Println("N", hi.kBackup, hi.vBackup)
 	return hi.kBackup, hi.vBackup, nil
 }
 

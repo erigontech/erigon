@@ -5,14 +5,11 @@ import (
 	"context"
 	"encoding/binary"
 	"encoding/hex"
-	"fmt"
 	"math/rand"
 	"sort"
 	"testing"
 
 	"github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon-lib/kv/memdb"
 
 	"github.com/stretchr/testify/require"
 )
@@ -386,18 +383,4 @@ func TestUpdateTree_TouchPlainKey(t *testing.T) {
 		return nil
 	})
 	require.NoError(t, err)
-}
-
-func TestXXX(t *testing.T) {
-	_, tx := memdb.NewTestTx(t)
-
-	tx.Put(kv.TblAccountVals, []byte("key1"), []byte("value1"))
-	tx.Put(kv.TblAccountVals, []byte("key1"), []byte("value2"))
-	c, _ := tx.RwCursorDupSort(kv.TblAccountVals)
-	fmt.Println(c.SeekExact([]byte("key1")))
-	c.DeleteCurrent()
-	fmt.Println(c.SeekExact([]byte("key1")))
-	c.DeleteCurrent()
-	fmt.Println(c.SeekExact([]byte("key1")))
-	panic("A")
 }
