@@ -431,8 +431,8 @@ func SendManyTransactions(ctx context.Context, signedTransactions []types.Transa
 	logger.Info(fmt.Sprintf("Sending %d transactions to the txpool...", len(signedTransactions)))
 	hashes := make([]libcommon.Hash, len(signedTransactions))
 
-	for idx, tx := range signedTransactions {
-		hash, err := devnet.SelectNode(ctx).SendTransaction(tx)
+	for idx, txn := range signedTransactions {
+		hash, err := devnet.SelectNode(ctx).SendTransaction(txn)
 		if err != nil {
 			logger.Error("failed SendTransaction", "error", err)
 			return nil, err

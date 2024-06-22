@@ -110,8 +110,8 @@ func (oracle *Oracle) processBlock(bf *blockFees, percentiles []float64) {
 	if bf.block.BaseFee() != nil {
 		baseFee.SetFromBig(bf.block.BaseFee())
 	}
-	for i, tx := range bf.block.Transactions() {
-		reward := tx.GetEffectiveGasTip(baseFee)
+	for i, txn := range bf.block.Transactions() {
+		reward := txn.GetEffectiveGasTip(baseFee)
 		sorter[i] = txGasAndReward{gasUsed: bf.receipts[i].GasUsed, reward: reward.ToBig()}
 	}
 	sort.Sort(sorter)

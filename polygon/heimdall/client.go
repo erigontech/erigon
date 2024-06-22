@@ -140,9 +140,9 @@ func (c *Client) FetchStateSyncEvents(ctx context.Context, fromID uint64, to tim
 
 		c.logger.Trace(heimdallLogPrefix("Fetching state sync events"), "queryParams", url.RawQuery)
 
-		ctx = withRequestType(ctx, stateSyncRequest)
+		reqCtx := withRequestType(ctx, stateSyncRequest)
 
-		response, err := FetchWithRetry[StateSyncEventsResponse](ctx, c, url, c.logger)
+		response, err := FetchWithRetry[StateSyncEventsResponse](reqCtx, c, url, c.logger)
 		if err != nil {
 			if errors.Is(err, ErrNoResponse) {
 				// for more info check https://github.com/maticnetwork/heimdall/pull/993

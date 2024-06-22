@@ -445,7 +445,7 @@ func (h *Harness) generateChain(ctx context.Context, t *testing.T, ctrl *gomock.
 				t.Fatal(err)
 			}
 
-			h.logger.Info("Adding 1 mock tx to block", "blockNum", gen.GetHeader().Number)
+			h.logger.Info("Adding 1 mock txn to block", "blockNum", gen.GetHeader().Number)
 			chainID := uint256.Int{}
 			overflow := chainID.SetFromBig(h.chainConfig.ChainID)
 			require.False(t, overflow)

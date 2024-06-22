@@ -109,32 +109,32 @@ func ExecuteBlockEphemerally(
 	includedTxs := make(types.Transactions, 0, block.Transactions().Len())
 	receipts := make(types.Receipts, 0, block.Transactions().Len())
 	noop := state.NewNoopWriter()
-	for i, tx := range block.Transactions() {
-		ibs.SetTxContext(tx.Hash(), block.Hash(), i)
+	for i, txn := range block.Transactions() {
+		ibs.SetTxContext(txn.Hash(), block.Hash(), i)
 		writeTrace := false
 		if vmConfig.Debug && vmConfig.Tracer == nil {
-			tracer, err := getTracer(i, tx.Hash())
+			tracer, err := getTracer(i, txn.Hash())
 			if err != nil {
 				return nil, fmt.Errorf("could not obtain tracer: %w", err)
 			}
 			vmConfig.Tracer = tracer
 			writeTrace = true
 		}
-		receipt, _, err := ApplyTransaction(chainConfig, blockHashFunc, engine, nil, gp, ibs, noop, header, tx, usedGas, usedBlobGas, *vmConfig)
+		receipt, _, err := ApplyTransaction(chainConfig, blockHashFunc, engine, nil, gp, ibs, noop, header, txn, usedGas, usedBlobGas, *vmConfig)
 		if writeTrace {
 			if ftracer, ok := vmConfig.Tracer.(vm.FlushableTracer); ok {
-				ftracer.Flush(tx)
+				ftracer.Flush(txn)
 			}
 
 			vmConfig.Tracer = nil
 		}
 		if err != nil {
 			if !vmConfig.StatelessExec {
-				return nil, fmt.Errorf("could not apply tx %d from block %d [%v]: %w", i, block.NumberU64(), tx.Hash().Hex(), err)
+				return nil, fmt.Errorf("could not apply txn %d from block %d [%v]: %w", i, block.NumberU64(), txn.Hash().Hex(), err)
 			}
 			rejectedTxs = append(rejectedTxs, &RejectedTx{i, err.Error()})
 		} else {
-			includedTxs = append(includedTxs, tx)
+			includedTxs = append(includedTxs, txn)
 			if !vmConfig.NoReceipts {
 				receipts = append(receipts, receipt)
 			}

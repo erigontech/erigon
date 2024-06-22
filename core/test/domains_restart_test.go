@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/binary"
 	"fmt"
+	"github.com/ledgerwatch/erigon/core/rawdb"
 	"io/fs"
 	"math/big"
 	"math/rand"
@@ -53,7 +54,8 @@ func testDbAndAggregatorv3(t *testing.T, fpath string, aggStep uint64) (kv.RwDB,
 	}).MustOpen()
 	t.Cleanup(db.Close)
 
-	agg, err := state.NewAggregator(context.Background(), dirs, aggStep, db, logger)
+	cr := rawdb.NewCanonicalReader()
+	agg, err := state.NewAggregator(context.Background(), dirs, aggStep, db, cr, logger)
 	require.NoError(t, err)
 	t.Cleanup(agg.Close)
 	err = agg.OpenFolder()
