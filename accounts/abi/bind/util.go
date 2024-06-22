@@ -27,15 +27,15 @@ import (
 	"github.com/ledgerwatch/erigon/core/types"
 )
 
-// WaitMined waits for tx to be mined on the blockchain.
+// WaitMined waits for txn to be mined on the blockchain.
 // It stops waiting when the context is canceled.
-func WaitMined(ctx context.Context, b DeployBackend, tx types.Transaction) (*types.Receipt, error) {
+func WaitMined(ctx context.Context, b DeployBackend, txn types.Transaction) (*types.Receipt, error) {
 	queryTicker := time.NewTicker(time.Second)
 	defer queryTicker.Stop()
 
-	logger := log.New("hash", tx.Hash())
+	logger := log.New("hash", txn.Hash())
 	for {
-		receipt, err := b.TransactionReceipt(ctx, tx.Hash())
+		receipt, err := b.TransactionReceipt(ctx, txn.Hash())
 		if receipt != nil {
 			return receipt, nil
 		}
@@ -55,11 +55,11 @@ func WaitMined(ctx context.Context, b DeployBackend, tx types.Transaction) (*typ
 
 // WaitDeployed waits for a contract deployment transaction and returns the on-chain
 // contract address when it is mined. It stops waiting when ctx is canceled.
-func WaitDeployed(ctx context.Context, b DeployBackend, tx types.Transaction) (libcommon.Address, error) {
-	if tx.GetTo() != nil {
+func WaitDeployed(ctx context.Context, b DeployBackend, txn types.Transaction) (libcommon.Address, error) {
+	if txn.GetTo() != nil {
 		return libcommon.Address{}, errors.New("tx is not contract creation")
 	}
-	receipt, err := WaitMined(ctx, b, tx)
+	receipt, err := WaitMined(ctx, b, txn)
 	if err != nil {
 		return libcommon.Address{}, err
 	}

@@ -39,8 +39,8 @@ func Bench2(erigon_url string) error {
 			fmt.Printf("Error retrieving block: %d %s\n", b.Error.Code, b.Error.Message)
 		}
 
-		for i, tx := range b.Result.Transactions {
-			if tx.To != nil && tx.Gas.ToInt().Uint64() > 21000 {
+		for i, txn := range b.Result.Transactions {
+			if txn.To != nil && txn.Gas.ToInt().Uint64() > 21000 {
 				// Request storage range
 				// blockHash libcommon.Hash, txIndex int, contractAddress libcommon.Address, keyStart hexutil.Bytes, maxResult int
 				req_id++
@@ -49,8 +49,8 @@ func Bench2(erigon_url string) error {
 				nextKey := &libcommon.Hash{}
 				for nextKey != nil {
 					var sr DebugStorageRange
-					if err := post(client, erigon_url, fmt.Sprintf(storageRangeTemplate, b.Result.Hash, i, tx.To, *nextKey, 1024, req_id), &sr); err != nil {
-						return fmt.Errorf("Could not get storageRange: %x: %v\n", tx.Hash, err)
+					if err := post(client, erigon_url, fmt.Sprintf(storageRangeTemplate, b.Result.Hash, i, txn.To, *nextKey, 1024, req_id), &sr); err != nil {
+						return fmt.Errorf("Could not get storageRange: %x: %v\n", txn.Hash, err)
 					}
 					if sr.Error != nil {
 						fmt.Printf("Error getting storageRange: %d %s\n", sr.Error.Code, sr.Error.Message)

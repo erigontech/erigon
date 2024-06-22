@@ -117,7 +117,7 @@ func (a *Antiquary) Loop() error {
 		return err
 	}
 	defer logInterval.Stop()
-	log.Info("[Antiquary]: Stopping Caplin to process historical indicies", "from", from, "to", a.sn.BlocksAvailable())
+	log.Info("[Antiquary] Stopping Caplin to process historical indicies", "from", from, "to", a.sn.BlocksAvailable())
 
 	// Now write the snapshots as indicies
 	for i := from; i < a.sn.BlocksAvailable(); i++ {
@@ -153,7 +153,7 @@ func (a *Antiquary) Loop() error {
 		}
 		select {
 		case <-logInterval.C:
-			log.Info("[Antiquary]: Processed snapshots", "progress", i, "target", a.sn.BlocksAvailable())
+			log.Info("[Antiquary] Processed snapshots", "progress", i, "target", a.sn.BlocksAvailable())
 		case <-a.ctx.Done():
 		default:
 		}
@@ -177,7 +177,7 @@ func (a *Antiquary) Loop() error {
 	if err := beacon_indicies.WriteLastBeaconSnapshot(tx, frozenSlots); err != nil {
 		return err
 	}
-	log.Info("[Antiquary]: Restarting Caplin")
+	log.Info("[Antiquary] Restarting Caplin")
 	if err := tx.Commit(); err != nil {
 		return err
 	}
@@ -243,7 +243,7 @@ func (a *Antiquary) antiquate(from, to uint64) error {
 		defer a.snBuildSema.TryAcquire(caplinSnapshotBuildSemaWeight)
 	}
 
-	log.Info("[Antiquary]: Antiquating", "from", from, "to", to)
+	log.Info("[Antiquary] Antiquating", "from", from, "to", to)
 	if err := freezeblocks.DumpBeaconBlocks(a.ctx, a.mainDB, from, to, a.sn.Salt, a.dirs, 1, log.LvlDebug, a.logger); err != nil {
 		return err
 	}
@@ -276,7 +276,7 @@ func (a *Antiquary) antiquate(from, to uint64) error {
 	}
 	// Notify bittorent to seed the new snapshots
 	if _, err := a.downloader.Add(a.ctx, &proto_downloader.AddRequest{Items: downloadItems}); err != nil {
-		log.Warn("[Antiquary]: Failed to add items to bittorent", "err", err)
+		log.Warn("[Antiquary] Failed to add items to bittorent", "err", err)
 	}
 
 	return tx.Commit()
@@ -305,7 +305,7 @@ func (a *Antiquary) loopBlobs(ctx context.Context) {
 				continue
 			}
 			if err := a.antiquateBlobs(); err != nil {
-				log.Error("[Antiquary]: Failed to antiquate blobs", "err", err)
+				log.Error("[Antiquary] Failed to antiquate blobs", "err", err)
 			}
 		}
 	}
@@ -330,13 +330,13 @@ func (a *Antiquary) antiquateBlobs() error {
 		return nil
 	}
 	roTx.Rollback()
-	a.logger.Info("[Antiquary]: Antiquating blobs", "from", currentBlobsProgress, "to", to)
+	a.logger.Info("[Antiquary] Antiquating blobs", "from", currentBlobsProgress, "to", to)
 	// now, we need to retire the blobs
 	if err := freezeblocks.DumpBlobsSidecar(a.ctx, a.blobStorage, a.mainDB, currentBlobsProgress, to, a.sn.Salt, a.dirs, 1, log.LvlDebug, a.logger); err != nil {
 		return err
 	}
 	to = (to / snaptype.Erigon2MergeLimit) * snaptype.Erigon2MergeLimit
-	a.logger.Info("[Antiquary]: Finished Antiquating blobs", "from", currentBlobsProgress, "to", to)
+	a.logger.Info("[Antiquary] Finished Antiquating blobs", "from", currentBlobsProgress, "to", to)
 	if err := a.sn.ReopenFolder(); err != nil {
 		return err
 	}
@@ -350,7 +350,7 @@ func (a *Antiquary) antiquateBlobs() error {
 	}
 	// Notify bittorent to seed the new snapshots
 	if _, err := a.downloader.Add(a.ctx, &proto_downloader.AddRequest{Items: downloadItems}); err != nil {
-		log.Warn("[Antiquary]: Failed to add items to bittorent", "err", err)
+		log.Warn("[Antiquary] Failed to add items to bittorent", "err", err)
 	}
 
 	roTx, err = a.mainDB.BeginRo(a.ctx)

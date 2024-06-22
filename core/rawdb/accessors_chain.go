@@ -466,13 +466,13 @@ func WriteTransactions(db kv.RwTx, txs []types.Transaction, baseTxId uint64) err
 	txId := baseTxId
 	txIdKey := make([]byte, 8)
 	buf := bytes.NewBuffer(nil)
-	for _, tx := range txs {
+	for _, txn := range txs {
 		binary.BigEndian.PutUint64(txIdKey, txId)
 		txId++
 
 		buf.Reset()
-		if err := rlp.Encode(buf, tx); err != nil {
-			return fmt.Errorf("broken tx rlp: %w", err)
+		if err := rlp.Encode(buf, txn); err != nil {
+			return fmt.Errorf("broken txn rlp: %w", err)
 		}
 
 		if err := db.Append(kv.EthTx, txIdKey, buf.Bytes()); err != nil {

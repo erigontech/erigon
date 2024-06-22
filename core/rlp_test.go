@@ -127,8 +127,8 @@ func testRlpIterator(t *testing.T, txs, uncles, datasize int) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, tx := range expBody.Transactions {
-		expHashes = append(expHashes, tx.Hash())
+	for _, txn := range expBody.Transactions {
+		expHashes = append(expHashes, txn.Hash())
 	}
 	if gotLen, expLen := len(gotHashes), len(expHashes); gotLen != expLen {
 		t.Fatalf("testcase %v: length wrong, got %d exp %d", desc, gotLen, expLen)
@@ -187,8 +187,8 @@ func BenchmarkHashing(b *testing.B) {
 		for i := 0; i < b.N; i++ {
 			var body types.Body
 			rlp.DecodeBytes(bodyRlp, &body)
-			for _, tx := range body.Transactions {
-				exp = tx.Hash()
+			for _, txn := range body.Transactions {
+				exp = txn.Hash()
 			}
 		}
 	})
@@ -197,8 +197,8 @@ func BenchmarkHashing(b *testing.B) {
 		for i := 0; i < b.N; i++ {
 			var block types.Block
 			rlp.DecodeBytes(blockRlp, &block)
-			for _, tx := range block.Transactions() {
-				tx.Hash()
+			for _, txn := range block.Transactions() {
+				txn.Hash()
 			}
 		}
 	})

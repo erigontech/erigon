@@ -1213,11 +1213,11 @@ func (tx *MdbxTx) Delete(table string, k []byte) error {
 }
 
 func (tx *MdbxTx) GetOne(bucket string, k []byte) ([]byte, error) {
-	c, err := tx.statelessCursor(bucket)
-	if err != nil {
-		return nil, err
+	v, err := tx.tx.Get(mdbx.DBI(tx.db.buckets[bucket].DBI), k)
+	//TODO: revise the logic, why we should drop not found err? maybe we need another function for get with key error
+	if mdbx.IsNotFound(err) {
+		return nil, nil
 	}
-	_, v, err := c.SeekExact(k)
 	return v, err
 }
 
@@ -2023,15 +2023,11 @@ func (s *cursor2iter) init(table string, tx kv.Tx) error {
 	if s.fromPrefix == nil { // no initial position
 		if s.orderAscend {
 			s.nextK, s.nextV, err = s.c.First()
-			if err != nil {
-				return err
-			}
 		} else {
 			s.nextK, s.nextV, err = s.c.Last()
-			if err != nil {
-				return err
-			}
-
+		}
+		if err != nil {
+			return err
 		}
 		return nil
 	}
@@ -2041,40 +2037,52 @@ func (s *cursor2iter) init(table string, tx kv.Tx) error {
 		if err != nil {
 			return err
 		}
-		return err
+		return nil
 	}
 
-	// to find LAST key with given prefix:
-	nextSubtree, ok := kv.NextSubtree(s.fromPrefix)
-	if ok {
-		s.nextK, s.nextV, err = s.c.SeekExact(nextSubtree)
-		if err != nil {
-			return err
-		}
-		s.nextK, s.nextV, err = s.c.Prev()
-		if err != nil {
-			return err
-		}
-		if s.nextK != nil { // go to last value of this key
-			if casted, ok := s.c.(kv.CursorDupSort); ok {
-				s.nextV, err = casted.LastDup()
-				if err != nil {
-					return err
-				}
-			}
-		}
-	} else {
+	// `Seek(s.fromPrefix)` find first key with prefix `s.fromPrefix`, but we need LAST one.
+	// `Seek(nextPrefix)+Prev()` will do the job.
+	nextPrefix, ok := kv.NextSubtree(s.fromPrefix)
+	if !ok { // end of table
 		s.nextK, s.nextV, err = s.c.Last()
 		if err != nil {
 			return err
 		}
-		if s.nextK != nil { // go to last value of this key
-			if casted, ok := s.c.(kv.CursorDupSort); ok {
-				s.nextV, err = casted.LastDup()
-				if err != nil {
-					return err
-				}
+		if s.nextK == nil {
+			return nil
+		}
+
+		// go to last value of this key
+		if casted, ok := s.c.(kv.CursorDupSort); ok {
+			s.nextV, err = casted.LastDup()
+			if err != nil {
+				return err
 			}
+		}
+		return nil
+	}
+
+	s.nextK, s.nextV, err = s.c.Seek(nextPrefix)
+	if err != nil {
+		return err
+	}
+	if s.nextK == nil {
+		s.nextK, s.nextV, err = s.c.Last()
+	} else {
+		s.nextK, s.nextV, err = s.c.Prev()
+	}
+	if err != nil {
+		return err
+	}
+	if s.nextK == nil {
+		return nil
+	}
+
+	// go to last value of this key
+	if casted, ok := s.c.(kv.CursorDupSort); ok {
+		s.nextV, err = casted.LastDup()
+		if err != nil {
+			return err
 		}
 	}
 	return nil

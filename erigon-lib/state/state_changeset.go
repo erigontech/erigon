@@ -3,6 +3,7 @@ package state
 import (
 	"bytes"
 	"encoding/binary"
+	"math"
 	"sort"
 
 	"github.com/ledgerwatch/erigon-lib/common"
@@ -312,4 +313,41 @@ func ReadDiffSet(tx kv.Tx, blockNumber uint64, blockHash common.Hash) ([kv.Domai
 	}
 
 	return DeserializeKeys(val), true, nil
+}
+
+func ReadLowestUnwindableBlock(tx kv.Tx) (uint64, error) {
+	changesetsCursor, err := tx.Cursor(kv.ChangeSets3)
+	if err != nil {
+		return 0, err
+	}
+	defer changesetsCursor.Close()
+
+	/* Rationale */
+	/*
+		We need to find the first block number in the changesets table that has a valid block number, however we need to avoid gaps.
+		In the table there are 2 kinds of keys:
+			1. BlockBodyKey(blockNumber, blockHash) -> chunkCount
+			2. BlockBodyKey(blockNumber, blockHash) + index -> chunk
+		Since key 1 is always lexigographically smaller than key 2, then if we have key 1, we also must have all key 2s for that block number without gaps in chunks.
+		Therefore, we can iterate over the keys and find the first key that conform to key 1 (aka len(key) == 40).
+	*/
+	var first []byte
+	for first, _, err = changesetsCursor.First(); first != nil; first, _, err = changesetsCursor.Next() {
+		if err != nil {
+			return 0, err
+		}
+		if len(first) == 40 {
+			break
+		}
+	}
+	if len(first) < 8 {
+		return math.MaxUint64, nil
+	}
+
+	blockNumber, err := dbutils.DecodeBlockNumber(first[:8])
+	if err != nil {
+		return 0, err
+	}
+	return blockNumber, nil
+
 }

@@ -136,9 +136,9 @@ func readTransactionByHash(db kv.Tx, hash libcommon.Hash, br services.FullBlockR
 		return nil, libcommon.Hash{}, 0, 0, err1
 	}
 	body.SendersToTxs(senders)
-	for txIndex, tx := range body.Transactions {
-		if tx.Hash() == hash {
-			return tx, blockHash, *blockNumber, uint64(txIndex), nil
+	for txIndex, txn := range body.Transactions {
+		if txn.Hash() == hash {
+			return txn, blockHash, *blockNumber, uint64(txIndex), nil
 		}
 	}
 	log.Error("Transaction not found", "number", blockNumber, "hash", blockHash, "txhash", hash)

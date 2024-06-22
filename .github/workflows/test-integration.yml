@@ -23,7 +23,7 @@ jobs:
         # list of os: https://github.com/actions/virtual-environments
         os:
           - ubuntu-22.04
-          - macos-13
+          - macos-14
     runs-on: ${{ matrix.os }}
 
     steps:

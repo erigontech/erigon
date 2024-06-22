@@ -2,7 +2,7 @@
 
 scriptDir=$(dirname "${BASH_SOURCE[0]}")
 scriptName=$(basename "${BASH_SOURCE[0]}")
-version="v1.57.2"
+version="v1.59.1"
 
 if [[ "$1" == "--install-deps" ]]
 then
