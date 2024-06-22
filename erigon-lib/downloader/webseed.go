@@ -573,7 +573,7 @@ func (d *WebSeeds) downloadTorrentFilesFromProviders(ctx context.Context, rootDi
 		e3blackListed := strings.Contains(name, "commitment") && (strings.HasSuffix(name, ".v.torrent") || strings.HasSuffix(name, ".ef.torrent"))
 		if e3blackListed {
 			_, fName := filepath.Split(name)
-			d.logger.Log(d.verbosity, "[snapshots] webseed has .torrent, but we skip it because this file-type not supported yet", "name", fName)
+			d.logger.Debug("[snapshots] webseed has .torrent, but we skip it because this file-type not supported yet", "name", fName)
 			continue
 		}
 
@@ -583,7 +583,7 @@ func (d *WebSeeds) downloadTorrentFilesFromProviders(ctx context.Context, rootDi
 				//validation happens inside
 				_, err := d.callTorrentHttpProvider(ctx, url, name)
 				if err != nil {
-					d.logger.Debug(d.verbosity, "[snapshots] got from webseed", "name", name, "err", err, "url", url)
+					d.logger.Debug("[snapshots] got from webseed", "name", name, "err", err, "url", url)
 					continue
 				}
 				//don't save .torrent here - do it inside downloader.Add
