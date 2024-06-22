@@ -2026,15 +2026,11 @@ func (s *cursor2iter) init(table string, tx kv.Tx) error {
 	if s.fromPrefix == nil { // no initial position
 		if s.orderAscend {
 			s.nextK, s.nextV, err = s.c.First()
-			if err != nil {
-				return err
-			}
 		} else {
 			s.nextK, s.nextV, err = s.c.Last()
-			if err != nil {
-				return err
-			}
-
+		}
+		if err != nil {
+			return err
 		}
 		return nil
 	}
@@ -2050,7 +2046,7 @@ func (s *cursor2iter) init(table string, tx kv.Tx) error {
 	// `Seek(s.fromPrefix)` find first key with prefix `s.fromPrefix`, but we need LAST one.
 	// `Seek(nextPrefix)+Prev()` will do the job.
 	nextPrefix, ok := kv.NextSubtree(s.fromPrefix)
-	if !ok {
+	if !ok { // end of table
 		s.nextK, s.nextV, err = s.c.Last()
 		if err != nil {
 			return err

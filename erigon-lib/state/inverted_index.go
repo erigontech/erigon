@@ -716,11 +716,20 @@ type InvertedIndexPruneStat struct {
 	PruneCountValues uint64
 }
 
+func (is *InvertedIndexPruneStat) PrunedNothing() bool {
+	return is.PruneCountTx == 0 && is.PruneCountValues == 0
+}
+
 func (is *InvertedIndexPruneStat) String() string {
-	if is == nil || is.MinTxNum == math.MaxUint64 && is.PruneCountTx == 0 {
+	if is.PrunedNothing() {
 		return ""
 	}
-	return fmt.Sprintf("ii %d txs and %d vals in %.2fM-%.2fM", is.PruneCountTx, is.PruneCountValues, float64(is.MinTxNum)/1_000_000.0, float64(is.MaxTxNum)/1_000_000.0)
+	vstr := ""
+	if is.PruneCountValues > 0 {
+		vstr = fmt.Sprintf("values: %d,", is.PruneCountValues)
+	}
+	return fmt.Sprintf("%s txns: %d from %.2fM-%.2fM",
+		vstr, is.PruneCountTx, float64(is.MinTxNum)/1_000_000.0, float64(is.MaxTxNum)/1_000_000.0)
 }
 
 func (is *InvertedIndexPruneStat) Accumulate(other *InvertedIndexPruneStat) {

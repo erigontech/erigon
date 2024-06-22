@@ -19,6 +19,7 @@ package runtime
 import (
 	"context"
 	"fmt"
+	"github.com/ledgerwatch/erigon/core/rawdb"
 	"math/big"
 	"os"
 	"strings"
@@ -152,7 +153,8 @@ func testTemporalDB(t testing.TB) *temporal.DB {
 
 	t.Cleanup(db.Close)
 
-	agg, err := state3.NewAggregator(context.Background(), datadir.New(t.TempDir()), 16, db, log.New())
+	cr := rawdb.NewCanonicalReader()
+	agg, err := state3.NewAggregator(context.Background(), datadir.New(t.TempDir()), 16, db, cr, log.New())
 	require.NoError(t, err)
 	t.Cleanup(agg.Close)
 
@@ -478,7 +480,8 @@ func TestBlockHashEip2935(t *testing.T) {
 	db := memdb.NewStateDB(t.TempDir())
 	defer db.Close()
 
-	agg, err := state3.NewAggregator(context.Background(), datadir.New(t.TempDir()), 16, db, log.New())
+	cr := rawdb.NewCanonicalReader()
+	agg, err := state3.NewAggregator(context.Background(), datadir.New(t.TempDir()), 16, db, cr, log.New())
 	require.NoError(t, err)
 	defer agg.Close()
 
