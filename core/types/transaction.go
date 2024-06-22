@@ -93,7 +93,7 @@ type Transaction interface {
 	GetSender() (libcommon.Address, bool)
 	SetSender(libcommon.Address)
 	IsContractDeploy() bool
-	Unwrap() Transaction // If this is a network wrapper, returns the unwrapped tx. Otherwise returns itself.
+	Unwrap() Transaction // If this is a network wrapper, returns the unwrapped txn. Otherwise returns itself.
 }
 
 // TransactionMisc is collection of miscellaneous fields for transaction that is supposed to be embedded into concrete
@@ -121,16 +121,16 @@ func DecodeRLPTransaction(s *rlp.Stream, blobTxnsAreWrappedWithBlobs bool) (Tran
 		return nil, err
 	}
 	if rlp.List == kind {
-		tx := &LegacyTx{}
-		if err = tx.DecodeRLP(s); err != nil {
+		txn := &LegacyTx{}
+		if err = txn.DecodeRLP(s); err != nil {
 			return nil, err
 		}
-		return tx, nil
+		return txn, nil
 	}
 	if rlp.String != kind {
 		return nil, fmt.Errorf("not an RLP encoded transaction. If this is a canonical encoded transaction, use UnmarshalTransactionFromBinary instead. Got %v for kind, expected String", kind)
 	}
-	// Decode the EIP-2718 typed TX envelope.
+	// Decode the EIP-2718 typed txn envelope.
 	var b []byte
 	if b, err = s.Bytes(); err != nil {
 		return nil, err
@@ -196,7 +196,7 @@ func UnmarshalTransactionFromBinary(data []byte, blobTxnsAreWrappedWithBlobs boo
 		}
 	default:
 		if data[0] >= 0x80 {
-			// Tx is type legacy which is RLP encoded
+			// txn is type legacy which is RLP encoded
 			return DecodeTransaction(data)
 		}
 		return nil, ErrTxTypeNotSupported
@@ -318,13 +318,13 @@ func TxDifference(a, b Transactions) Transactions {
 	keep := make(Transactions, 0, len(a))
 
 	remove := make(map[libcommon.Hash]struct{})
-	for _, tx := range b {
-		remove[tx.Hash()] = struct{}{}
+	for _, txn := range b {
+		remove[txn.Hash()] = struct{}{}
 	}
 
-	for _, tx := range a {
-		if _, ok := remove[tx.Hash()]; !ok {
-			keep = append(keep, tx)
+	for _, txn := range a {
+		if _, ok := remove[txn.Hash()]; !ok {
+			keep = append(keep, txn)
 		}
 	}
 

@@ -716,11 +716,20 @@ type InvertedIndexPruneStat struct {
 	PruneCountValues uint64
 }
 
+func (is *InvertedIndexPruneStat) PrunedNothing() bool {
+	return is.PruneCountTx == 0 && is.PruneCountValues == 0
+}
+
 func (is *InvertedIndexPruneStat) String() string {
-	if is == nil || is.MinTxNum == math.MaxUint64 && is.PruneCountTx == 0 {
+	if is.PrunedNothing() {
 		return ""
 	}
-	return fmt.Sprintf("ii %d txs and %d vals in %.2fM-%.2fM", is.PruneCountTx, is.PruneCountValues, float64(is.MinTxNum)/1_000_000.0, float64(is.MaxTxNum)/1_000_000.0)
+	vstr := ""
+	if is.PruneCountValues > 0 {
+		vstr = fmt.Sprintf("values: %d,", is.PruneCountValues)
+	}
+	return fmt.Sprintf("%s txns: %d from %.2fM-%.2fM",
+		vstr, is.PruneCountTx, float64(is.MinTxNum)/1_000_000.0, float64(is.MaxTxNum)/1_000_000.0)
 }
 
 func (is *InvertedIndexPruneStat) Accumulate(other *InvertedIndexPruneStat) {
@@ -748,6 +757,14 @@ func (iit *InvertedIndexRoTx) Warmup(ctx context.Context) (cleanup func()) {
 		cancel()
 		_ = wg.Wait()
 	}
+}
+
+func (iit *InvertedIndexRoTx) Unwind(ctx context.Context, rwTx kv.RwTx, txFrom, txTo, limit uint64, logEvery *time.Ticker, forced, withWarmup bool, fn func(key []byte, txnum []byte) error) error {
+	_, err := iit.Prune(ctx, rwTx, txFrom, txTo, limit, logEvery, forced, withWarmup, fn)
+	if err != nil {
+		return err
+	}
+	return nil
 }
 
 // [txFrom; txTo)
@@ -1007,19 +1024,19 @@ func (it *FrozenInvertedIdxIter) advanceInFiles() {
 			if bytes.Equal(k, it.key) {
 				eliasVal, _ := g.NextUncompressed()
 				it.ef.Reset(eliasVal)
+				var efiter *eliasfano32.EliasFanoIter
 				if it.orderAscend {
-					efiter := it.ef.Iterator()
-					if it.startTxNum > 0 {
-						efiter.Seek(uint64(it.startTxNum))
-					}
-					it.efIt = efiter
+					efiter = it.ef.Iterator()
 				} else {
-					it.efIt = it.ef.ReverseIterator()
+					efiter = it.ef.ReverseIterator()
 				}
+				if it.startTxNum > 0 {
+					efiter.Seek(uint64(it.startTxNum))
+				}
+				it.efIt = efiter
 			}
 		}
 
-		//TODO: add seek method
 		//Asc:  [from, to) AND from < to
 		//Desc: [from, to) AND from > to
 		if it.orderAscend {

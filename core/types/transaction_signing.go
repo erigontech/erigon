@@ -143,29 +143,29 @@ func LatestSignerForChainID(chainID *big.Int) *Signer {
 }
 
 // SignTx signs the transaction using the given signer and private key.
-func SignTx(tx Transaction, s Signer, prv *ecdsa.PrivateKey) (Transaction, error) {
-	h := tx.SigningHash(s.chainID.ToBig())
+func SignTx(txn Transaction, s Signer, prv *ecdsa.PrivateKey) (Transaction, error) {
+	h := txn.SigningHash(s.chainID.ToBig())
 	sig, err := crypto.Sign(h[:], prv)
 	if err != nil {
 		return nil, err
 	}
-	return tx.WithSignature(s, sig)
+	return txn.WithSignature(s, sig)
 }
 
 // SignNewTx creates a transaction and signs it.
-func SignNewTx(prv *ecdsa.PrivateKey, s Signer, tx Transaction) (Transaction, error) {
-	h := tx.SigningHash(s.chainID.ToBig())
+func SignNewTx(prv *ecdsa.PrivateKey, s Signer, txn Transaction) (Transaction, error) {
+	h := txn.SigningHash(s.chainID.ToBig())
 	sig, err := crypto.Sign(h[:], prv)
 	if err != nil {
 		return nil, err
 	}
-	return tx.WithSignature(s, sig)
+	return txn.WithSignature(s, sig)
 }
 
 // MustSignNewTx creates a transaction and signs it.
 // This panics if the transaction cannot be signed.
-func MustSignNewTx(prv *ecdsa.PrivateKey, s Signer, tx Transaction) Transaction {
-	tx1, err := SignNewTx(prv, s, tx)
+func MustSignNewTx(prv *ecdsa.PrivateKey, s Signer, txn Transaction) Transaction {
+	tx1, err := SignNewTx(prv, s, txn)
 	if err != nil {
 		panic(err)
 	}
@@ -199,22 +199,22 @@ func (sg Signer) Sender(tx Transaction) (libcommon.Address, error) {
 }
 
 // SenderWithContext returns the sender address of the transaction.
-func (sg Signer) SenderWithContext(context *secp256k1.Context, tx Transaction) (libcommon.Address, error) {
+func (sg Signer) SenderWithContext(context *secp256k1.Context, txn Transaction) (libcommon.Address, error) {
 	var V uint256.Int
 	var R, S *uint256.Int
-	signChainID := sg.chainID.ToBig() // This is reset to nil if tx is unprotected
+	signChainID := sg.chainID.ToBig() // This is reset to nil if txn is unprotected
 	// recoverPlain below will subract 27 from V
-	switch t := tx.(type) {
+	switch t := txn.(type) {
 	case *LegacyTx:
 		if !t.Protected() {
 			if !sg.unprotected {
-				return libcommon.Address{}, fmt.Errorf("unprotected tx is not supported by signer %s", sg)
+				return libcommon.Address{}, fmt.Errorf("unprotected txn is not supported by signer %s", sg)
 			}
 			signChainID = nil
 			V.Set(&t.V)
 		} else {
 			if !sg.protected {
-				return libcommon.Address{}, fmt.Errorf("protected tx is not supported by signer %s", sg)
+				return libcommon.Address{}, fmt.Errorf("protected txn is not supported by signer %s", sg)
 			}
 			if !DeriveChainId(&t.V).Eq(&sg.chainID) {
 				return libcommon.Address{}, ErrInvalidChainId
@@ -225,7 +225,7 @@ func (sg Signer) SenderWithContext(context *secp256k1.Context, tx Transaction) (
 		R, S = &t.R, &t.S
 	case *AccessListTx:
 		if !sg.accessList {
-			return libcommon.Address{}, fmt.Errorf("accessList tx is not supported by signer %s", sg)
+			return libcommon.Address{}, fmt.Errorf("accessList txn is not supported by signer %s", sg)
 		}
 		if t.ChainID == nil {
 			if !sg.chainID.IsZero() {
@@ -240,7 +240,7 @@ func (sg Signer) SenderWithContext(context *secp256k1.Context, tx Transaction) (
 		R, S = &t.R, &t.S
 	case *DynamicFeeTransaction:
 		if !sg.dynamicFee {
-			return libcommon.Address{}, fmt.Errorf("dynamicFee tx is not supported by signer %s", sg)
+			return libcommon.Address{}, fmt.Errorf("dynamicFee txn is not supported by signer %s", sg)
 		}
 		if t.ChainID == nil {
 			if !sg.chainID.IsZero() {
@@ -255,7 +255,7 @@ func (sg Signer) SenderWithContext(context *secp256k1.Context, tx Transaction) (
 		R, S = &t.R, &t.S
 	case *BlobTx:
 		if !sg.blob {
-			return libcommon.Address{}, fmt.Errorf("blob tx is not supported by signer %s", sg)
+			return libcommon.Address{}, fmt.Errorf("blob txn is not supported by signer %s", sg)
 		}
 		if t.ChainID == nil {
 			if !sg.chainID.IsZero() {
@@ -271,13 +271,13 @@ func (sg Signer) SenderWithContext(context *secp256k1.Context, tx Transaction) (
 	default:
 		return libcommon.Address{}, ErrTxTypeNotSupported
 	}
-	return recoverPlain(context, tx.SigningHash(signChainID), R, S, &V, !sg.malleable)
+	return recoverPlain(context, txn.SigningHash(signChainID), R, S, &V, !sg.malleable)
 }
 
 // SignatureValues returns the raw R, S, V values corresponding to the
 // given signature.
-func (sg Signer) SignatureValues(tx Transaction, sig []byte) (R, S, V *uint256.Int, err error) {
-	switch t := tx.(type) {
+func (sg Signer) SignatureValues(txn Transaction, sig []byte) (R, S, V *uint256.Int, err error) {
+	switch t := txn.(type) {
 	case *LegacyTx:
 		R, S, V = decodeSignature(sig)
 		if sg.chainID.IsZero() {
@@ -287,22 +287,22 @@ func (sg Signer) SignatureValues(tx Transaction, sig []byte) (R, S, V *uint256.I
 			V.Add(V, &sg.chainIDMul)
 		}
 	case *AccessListTx:
-		// Check that chain ID of tx matches the signer. We also accept ID zero here,
-		// because it indicates that the chain ID was not specified in the tx.
+		// Check that chain ID of txn matches the signer. We also accept ID zero here,
+		// because it indicates that the chain ID was not specified in the txn.
 		if t.ChainID != nil && !t.ChainID.IsZero() && !t.ChainID.Eq(&sg.chainID) {
 			return nil, nil, nil, ErrInvalidChainId
 		}
 		R, S, V = decodeSignature(sig)
 	case *DynamicFeeTransaction:
-		// Check that chain ID of tx matches the signer. We also accept ID zero here,
-		// because it indicates that the chain ID was not specified in the tx.
+		// Check that chain ID of txn matches the signer. We also accept ID zero here,
+		// because it indicates that the chain ID was not specified in the txn.
 		if t.ChainID != nil && !t.ChainID.IsZero() && !t.ChainID.Eq(&sg.chainID) {
 			return nil, nil, nil, ErrInvalidChainId
 		}
 		R, S, V = decodeSignature(sig)
 	case *BlobTx:
-		// Check that chain ID of tx matches the signer. We also accept ID zero here,
-		// because it indicates that the chain ID was not specified in the tx.
+		// Check that chain ID of txn matches the signer. We also accept ID zero here,
+		// because it indicates that the chain ID was not specified in the txn.
 		if t.ChainID != nil && !t.ChainID.IsZero() && !t.ChainID.Eq(&sg.chainID) {
 			return nil, nil, nil, ErrInvalidChainId
 		}

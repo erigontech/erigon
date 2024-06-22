@@ -49,7 +49,7 @@
 	result: function(ctx, db) {
 		if (this.prestate === null) {
 			this.prestate = {};
-			// If tx is transfer-only, the recipient account
+			// If txn is transfer-only, the recipient account
 			// hasn't been populated.
 			this.lookupAccount(ctx.to, db);
 		}
