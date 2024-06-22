@@ -44,7 +44,6 @@ type Filters struct {
 	logsRequestor    atomic.Value
 	onNewSnapshot    func()
 
-	storeMu            sync.Mutex
 	logsStores         *concurrent.SyncMap[LogsSubID, []*types.Log]
 	pendingHeadsStores *concurrent.SyncMap[HeadsSubID, []*types.Header]
 	pendingTxsStores   *concurrent.SyncMap[PendingTxsSubID, [][]types.Transaction]
@@ -647,8 +646,20 @@ func (ff *Filters) AddLogs(id LogsSubID, log *types.Log) {
 
 		maxLogs := ff.config.RpcSubscriptionFiltersMaxLogs
 		if maxLogs > 0 && len(st)+1 > maxLogs {
-			st = st[len(st)+1-maxLogs:] // Remove oldest logs to make space
+			// Calculate the number of logs to remove
+			excessLogs := len(st) + 1 - maxLogs
+			if excessLogs > 0 {
+				if excessLogs >= len(st) {
+					// If excessLogs is greater than or equal to the length of st, remove all
+					st = []*types.Log{}
+				} else {
+					// Otherwise, remove the oldest logs
+					st = st[excessLogs:]
+				}
+			}
 		}
+
+		// Append the new log
 		st = append(st, log)
 		return st
 	})
@@ -672,9 +683,21 @@ func (ff *Filters) AddPendingBlock(id HeadsSubID, block *types.Header) {
 		}
 
 		maxHeaders := ff.config.RpcSubscriptionFiltersMaxHeaders
-		if maxHeaders > 0 && len(st) >= maxHeaders {
-			st = st[1:] // Remove the oldest header to make space
+		if maxHeaders > 0 && len(st)+1 > maxHeaders {
+			// Calculate the number of headers to remove
+			excessHeaders := len(st) + 1 - maxHeaders
+			if excessHeaders > 0 {
+				if excessHeaders >= len(st) {
+					// If excessHeaders is greater than or equal to the length of st, remove all
+					st = []*types.Header{}
+				} else {
+					// Otherwise, remove the oldest headers
+					st = st[excessHeaders:]
+				}
+			}
 		}
+
+		// Append the new header
 		st = append(st, block)
 		return st
 	})
@@ -712,9 +735,16 @@ func (ff *Filters) AddPendingTxs(id PendingTxsSubID, txs []types.Transaction) {
 				flatSt = append(flatSt, txBatch...)
 			}
 
-			// Remove the oldest transactions to make space for new ones
-			if len(flatSt)+len(txs) > maxTxs {
-				flatSt = flatSt[len(flatSt)+len(txs)-maxTxs:]
+			// Calculate how many transactions need to be removed
+			excessTxs := len(flatSt) + len(txs) - maxTxs
+			if excessTxs > 0 {
+				if excessTxs >= len(flatSt) {
+					// If excessTxs is greater than or equal to the length of flatSt, remove all
+					flatSt = []types.Transaction{}
+				} else {
+					// Otherwise, remove the oldest transactions
+					flatSt = flatSt[excessTxs:]
+				}
 			}
 
 			// Convert flatSt back to [][]types.Transaction with a single batch
