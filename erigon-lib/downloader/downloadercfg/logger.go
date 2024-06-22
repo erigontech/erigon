@@ -156,5 +156,5 @@ func (l *RetryableHttpLogger) Info(msg string, keysAndValues ...interface{}) {
 	l.l.Debug(msg, keysAndValues...)
 }
 func (l *RetryableHttpLogger) Debug(msg string, keysAndValues ...interface{}) {
-	l.l.Debug(msg, keysAndValues...)
+	l.l.Trace(msg, keysAndValues...)
 }
