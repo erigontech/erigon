@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/ledgerwatch/erigon-lib/downloader/downloadercfg"
 	"io"
 	"net/http"
 	"net/url"
@@ -57,7 +58,7 @@ func NewWebSeeds(seeds []*url.URL, verbosity log.Lvl, logger log.Logger) *WebSee
 
 	rc := retryablehttp.NewClient()
 	rc.RetryMax = 5
-	rc.Logger = logger
+	rc.Logger = downloadercfg.NewRetryableHttpLogger(logger)
 	ws.client = rc.StandardClient()
 	return ws
 }
