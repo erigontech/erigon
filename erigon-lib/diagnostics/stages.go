@@ -125,7 +125,7 @@ func (d *DiagnosticClient) runCurrentSyncStageListener(rootCtx context.Context) 
 				d.mu.Lock()
 				err := d.SetCurrentSyncStage(info)
 				if err != nil {
-					log.Error("[Diagnostics] Failed to set current stage", "err", err)
+					log.Warn("[Diagnostics] Failed to set current stage", "err", err)
 				}
 				d.mu.Unlock()
 
