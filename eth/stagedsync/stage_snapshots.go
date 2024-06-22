@@ -339,6 +339,7 @@ func FillDBFromSnapshots(logPrefix string, ctx context.Context, tx kv.RwTx, dirs
 		case stages.Headers:
 			h2n := etl.NewCollector(logPrefix, dirs.Tmp, etl.NewSortableBuffer(etl.BufferOptimalSize), logger)
 			defer h2n.Close()
+			h2n.SortAndFlushInBackground(true)
 			h2n.LogLvl(log.LvlDebug)
 
 			// fill some small tables from snapshots, in future we may store this data in snapshots also, but
