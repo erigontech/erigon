@@ -58,7 +58,7 @@ func NewWebSeeds(seeds []*url.URL, verbosity log.Lvl, logger log.Logger) *WebSee
 
 	rc := retryablehttp.NewClient()
 	rc.RetryMax = 5
-	rc.Logger = downloadercfg.NewRetryableHttpLogger(logger)
+	rc.Logger = downloadercfg.NewRetryableHttpLogger(logger.New("app", "downloader"))
 	ws.client = rc.StandardClient()
 	return ws
 }
