@@ -29,7 +29,7 @@ var SqueezeCommitmentFiles = Migration{
 		logEvery := time.NewTicker(10 * time.Second)
 		defer logEvery.Stop()
 
-		agg, err := libstate.NewAggregator(ctx, dirs, config3.HistoryV3AggregationStep, db, logger)
+		agg, err := libstate.NewAggregator(ctx, dirs, config3.HistoryV3AggregationStep, db, nil, logger)
 		if err != nil {
 			return err
 		}

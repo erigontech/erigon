@@ -1317,14 +1317,14 @@ func stageCustomTrace(db kv.RwDB, ctx context.Context, logger log.Logger) error 
 		if err != nil {
 			return err
 		}
-		err = stagedsync.PruneCustomTrace(p, tx, cfg, ctx, true, logger)
+		err = stagedsync.PruneCustomTrace(p, tx, cfg, ctx, logger)
 		if err != nil {
 			return err
 		}
 		return nil
 	}
 
-	err := stagedsync.SpawnCustomTrace(s, txc, cfg, ctx, true /* initialCycle */, 0, logger)
+	err := stagedsync.SpawnCustomTrace(s, txc, cfg, ctx, block, logger)
 	if err != nil {
 		return err
 	}
@@ -1778,7 +1778,8 @@ func allSnapshots(ctx context.Context, db kv.RoDB, logger log.Logger) (*freezebl
 		_allSnapshotsSingleton = freezeblocks.NewRoSnapshots(snapCfg, dirs.Snap, 0, logger)
 		_allBorSnapshotsSingleton = freezeblocks.NewBorRoSnapshots(snapCfg, dirs.Snap, 0, logger)
 		var err error
-		_aggSingleton, err = libstate.NewAggregator(ctx, dirs, config3.HistoryV3AggregationStep, db, logger)
+		cr := rawdb.NewCanonicalReader()
+		_aggSingleton, err = libstate.NewAggregator(ctx, dirs, config3.HistoryV3AggregationStep, db, cr, logger)
 		if err != nil {
 			panic(err)
 		}

@@ -1419,7 +1419,7 @@ func (dt *DomainRoTx) getLatestFromDb(key []byte, roTx kv.Tx) ([]byte, uint64, b
 			}
 			_, v, err = valsC.SeekExact(append(append(dt.valBuf[:0], key...), foundInvStep...))
 			if err != nil {
-				return nil, foundStep, false, fmt.Errorf("GetLatest value: %w", err)
+				return nil, foundStep, false, err
 			}
 			return v, foundStep, true, nil
 		}
