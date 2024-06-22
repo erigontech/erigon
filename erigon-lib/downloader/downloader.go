@@ -2304,7 +2304,7 @@ func getPeersRatesForlogs(peersOfThisFile []*torrent.PeerConn, fName string) ([]
 			DownloadRate: dr,
 		}
 		peers = append(peers, segPeer)
-		rates = append(rates, peer.PeerClientName.Load(), fmt.Sprintf("%s/s", common.ByteCount(dr)))
+		rates = append(rates, url, fmt.Sprintf("%s/s", common.ByteCount(dr)))
 	}
 
 	return rates, peers
