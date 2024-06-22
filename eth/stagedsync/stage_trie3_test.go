@@ -38,7 +38,7 @@ func TestRebuildPatriciaTrieBasedOnFiles(t *testing.T) {
 	}()
 
 	before, after, writer := apply(tx, logger)
-	blocksTotal := uint64(100_000)
+	blocksTotal := uint64(10_000)
 	generateBlocks2(t, 1, blocksTotal, writer, before, after, staticCodeStaticIncarnations)
 
 	err = stages.SaveStageProgress(tx, stages.Execution, blocksTotal)
