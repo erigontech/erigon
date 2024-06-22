@@ -179,9 +179,18 @@ func calcBackoff(min, max time.Duration, attemptNum int, resp *http.Response) ti
 }
 
 func (r *requestHandler) RoundTrip(req *http.Request) (resp *http.Response, err error) {
-	activeTrips := r.downloader.stats.WebseedActiveTrips.Add(1)
-	if activeTrips > r.downloader.stats.WebseedMaxActiveTrips.Load() {
-		r.downloader.stats.WebseedMaxActiveTrips.Store(activeTrips)
+	r.downloader.lock.RLock()
+	webseedMaxActiveTrips := r.downloader.stats.WebseedMaxActiveTrips
+	webseedActiveTrips := r.downloader.stats.WebseedActiveTrips
+	webseedTripCount := r.downloader.stats.WebseedTripCount
+	webseedBytesDownload := r.downloader.stats.WebseedBytesDownload
+	webseedDiscardCount := r.downloader.stats.WebseedDiscardCount
+	WebseedServerFails := r.downloader.stats.WebseedServerFails
+	r.downloader.lock.RUnlock()
+
+	activeTrips := webseedActiveTrips.Add(1)
+	if activeTrips > webseedMaxActiveTrips.Load() {
+		webseedMaxActiveTrips.Store(activeTrips)
 	}
 
 	defer func() {
@@ -194,7 +203,7 @@ func (r *requestHandler) RoundTrip(req *http.Request) (resp *http.Response, err 
 			err = fmt.Errorf("http client panic: %s", r)
 		}
 
-		r.downloader.stats.WebseedActiveTrips.Add(-1)
+		webseedActiveTrips.Add(-1)
 	}()
 
 	insertCloudflareHeaders(req)
@@ -209,7 +218,7 @@ func (r *requestHandler) RoundTrip(req *http.Request) (resp *http.Response, err 
 	const maxAttempts = 10
 
 	for err == nil && retry {
-		r.downloader.stats.WebseedTripCount.Add(1)
+		webseedTripCount.Add(1)
 
 		switch resp.StatusCode {
 		case http.StatusOK:
@@ -222,10 +231,10 @@ func (r *requestHandler) RoundTrip(req *http.Request) (resp *http.Response, err 
 				// TODO: We could count the bytes - probably need to take this from the req though
 				// as its not clear the amount of the content which will be read.  This needs
 				// further investigation - if required.
-				r.downloader.stats.WebseedDiscardCount.Add(1)
+				webseedDiscardCount.Add(1)
 			}
 
-			r.downloader.stats.WebseedBytesDownload.Add(resp.ContentLength)
+			webseedBytesDownload.Add(resp.ContentLength)
 			retry = false
 
 		// the first two statuses here have been observed from cloudflare
@@ -237,7 +246,7 @@ func (r *requestHandler) RoundTrip(req *http.Request) (resp *http.Response, err 
 			http.StatusTooManyRequests, http.StatusServiceUnavailable,
 			http.StatusGatewayTimeout:
 
-			r.downloader.stats.WebseedServerFails.Add(1)
+			WebseedServerFails.Add(1)
 
 			if resp.Body != nil {
 				resp.Body.Close()
@@ -251,7 +260,7 @@ func (r *requestHandler) RoundTrip(req *http.Request) (resp *http.Response, err 
 			case <-delayTimer.C:
 				// Note this assumes the req.Body is nil
 				resp, err = r.Transport.RoundTrip(req)
-				r.downloader.stats.WebseedTripCount.Add(1)
+				webseedTripCount.Add(1)
 
 			case <-req.Context().Done():
 				err = req.Context().Err()
@@ -259,7 +268,7 @@ func (r *requestHandler) RoundTrip(req *http.Request) (resp *http.Response, err 
 			retry = attempts < maxAttempts
 
 		default:
-			r.downloader.stats.WebseedBytesDownload.Add(resp.ContentLength)
+			webseedBytesDownload.Add(resp.ContentLength)
 			retry = false
 		}
 	}
