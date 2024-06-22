@@ -4,14 +4,14 @@ on:
     branches:
       - main
       - 'release/**'
-  #    paths:
-  #      - 'go.mod'
+    paths:
+      - 'go.mod'
   pull_request:
     branches:
       - main
       - 'release/**'
-    #    paths:
-    #      - 'go.mod'
+    paths:
+      - 'go.mod'
     types:
       - opened
       - reopened
