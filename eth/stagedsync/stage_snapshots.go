@@ -323,6 +323,7 @@ func FillDBFromSnapshots(logPrefix string, ctx context.Context, tx kv.RwTx, dirs
 	defer logEvery.Stop()
 	// updating the progress of further stages (but only forward) that are contained inside of snapshots
 	for _, stage := range []stages.SyncStage{stages.Headers, stages.Bodies, stages.BlockHashes, stages.Senders} {
+		startTime := time.Now()
 		progress, err := stages.GetStageProgress(tx, stage)
 		if err != nil {
 			return fmt.Errorf("get %s stage progress to advance: %w", stage, err)
@@ -440,6 +441,9 @@ func FillDBFromSnapshots(logPrefix string, ctx context.Context, tx kv.RwTx, dirs
 			}
 			ac.Close()
 		}
+
+		endTime := time.Now()
+		fmt.Printf("[%s] %s stage: %v\n", logPrefix, stage, endTime.Sub(startTime))
 	}
 	return nil
 }
