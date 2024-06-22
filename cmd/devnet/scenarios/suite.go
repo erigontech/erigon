@@ -52,7 +52,7 @@ func (s *suite) runSteps(ctx context.Context, scenario *Scenario, steps []*Step)
 
 		var stepResult StepResult
 
-		ctx, stepResult = s.runStep(ctx, scenario, step, err, isFirst, isLast, logger)
+		ctx, stepResult = s.runStep(ctx, scenario, step, err, isFirst, isLast, logger) //nolint:fatcontext
 
 		switch {
 		case stepResult.Err == nil:

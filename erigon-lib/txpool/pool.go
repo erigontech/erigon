@@ -199,7 +199,7 @@ type TxPool struct {
 	//   - and as a result reducing lock contention
 	unprocessedRemoteTxs    *types.TxSlots
 	unprocessedRemoteByHash map[string]int                                  // to reject duplicates
-	byHash                  map[string]*metaTx                              // tx_hash => tx : only those records not committed to db yet
+	byHash                  map[string]*metaTx                              // tx_hash => txn : only those records not committed to db yet
 	discardReasonsLRU       *simplelru.LRU[string, txpoolcfg.DiscardReason] // tx_hash => discard_reason : non-persisted
 	pending                 *PendingPool
 	baseFee                 *SubPool
@@ -208,7 +208,7 @@ type TxPool struct {
 	minedBlobTxsByHash      map[string]*metaTx               // (hash => mt): map of recently mined blobs
 	isLocalLRU              *simplelru.LRU[string, struct{}] // tx_hash => is_local : to restore isLocal flag of unwinded transactions
 	newPendingTxs           chan types.Announcements         // notifications about new txs in Pending sub-pool
-	all                     *BySenderAndNonce                // senderID => (sorted map of tx nonce => *metaTx)
+	all                     *BySenderAndNonce                // senderID => (sorted map of txn nonce => *metaTx)
 	deletedTxs              []*metaTx                        // list of discarded txs since last db commit
 	promoted                types.Announcements
 	cfg                     txpoolcfg.Config
@@ -763,7 +763,7 @@ func (p *TxPool) best(n uint16, txs *types.TxsRlp, tx kv.Tx, onTopOf, availableG
 		// this stage
 		intrinsicGas, _ := txpoolcfg.CalcIntrinsicGas(uint64(mt.Tx.DataLen), uint64(mt.Tx.DataNonZeroLen), nil, mt.Tx.Creation, true, true, isShanghai)
 		if intrinsicGas > availableGas {
-			// we might find another TX with a low enough intrinsic gas to include so carry on
+			// we might find another txn with a low enough intrinsic gas to include so carry on
 			continue
 		}
 		availableGas -= intrinsicGas
@@ -803,7 +803,7 @@ func (p *TxPool) AddRemoteTxs(_ context.Context, newTxs types.TxSlots) {
 	if p.cfg.NoGossip {
 		// if no gossip, then
 		// disable adding remote transactions
-		// consume remote tx from fetch
+		// consume remote txn from fetch
 		return
 	}
 
@@ -1419,7 +1419,7 @@ func (p *TxPool) addLocked(mt *metaTx, announcements *types.Announcements) txpoo
 		p.discardLocked(found, txpoolcfg.ReplacedByHigherTip)
 	}
 
-	// Don't add blob tx to queued if it's less than current pending blob base fee
+	// Don't add blob txn to queued if it's less than current pending blob base fee
 	if mt.Tx.Type == types.BlobTxType && mt.Tx.BlobFeeCap.LtUint64(p.pendingBlobFee.Load()) {
 		return txpoolcfg.FeeTooLow
 	}
@@ -1835,7 +1835,7 @@ func MainLoop(ctx context.Context, db kv.RwDB, p *TxPool, newTxs chan types.Anno
 					// drain newTxs for emptying newTx channel
 					// newTx channel will be filled only with local transactions
 					// early return to avoid outbound transaction propagation
-					log.Debug("[txpool] tx gossip disabled", "state", "drain new transactions")
+					log.Debug("[txpool] txn gossip disabled", "state", "drain new transactions")
 					return
 				}
 
@@ -1902,12 +1902,12 @@ func MainLoop(ctx context.Context, db kv.RwDB, p *TxPool, newTxs chan types.Anno
 				const localTxsBroadcastMaxPeers uint64 = 10
 				txSentTo := send.BroadcastPooledTxs(localTxRlps, localTxsBroadcastMaxPeers)
 				for i, peer := range txSentTo {
-					p.logger.Trace("Local tx broadcast", "txHash", hex.EncodeToString(broadcastHashes.At(i)), "to peer", peer)
+					p.logger.Trace("Local txn broadcast", "txHash", hex.EncodeToString(broadcastHashes.At(i)), "to peer", peer)
 				}
 				hashSentTo := send.AnnouncePooledTxs(localTxTypes, localTxSizes, localTxHashes, localTxsBroadcastMaxPeers*2)
 				for i := 0; i < localTxHashes.Len(); i++ {
 					hash := localTxHashes.At(i)
-					p.logger.Trace("Local tx announced", "txHash", hex.EncodeToString(hash), "to peer", hashSentTo[i], "baseFee", p.pendingBaseFee.Load())
+					p.logger.Trace("Local txn announced", "txHash", hex.EncodeToString(hash), "to peer", hashSentTo[i], "baseFee", p.pendingBaseFee.Load())
 				}
 
 				// broadcast remote transactions
@@ -1922,7 +1922,7 @@ func MainLoop(ctx context.Context, db kv.RwDB, p *TxPool, newTxs chan types.Anno
 			}
 			if p.cfg.NoGossip {
 				// avoid transaction gossiping for new peers
-				log.Debug("[txpool] tx gossip disabled", "state", "sync new peers")
+				log.Debug("[txpool] txn gossip disabled", "state", "sync new peers")
 				continue
 			}
 			t := time.Now()
@@ -1939,7 +1939,7 @@ func MainLoop(ctx context.Context, db kv.RwDB, p *TxPool, newTxs chan types.Anno
 func (p *TxPool) flushNoFsync(ctx context.Context, db kv.RwDB) (written uint64, err error) {
 	p.lock.Lock()
 	defer p.lock.Unlock()
-	//it's important that write db tx is done inside lock, to make last writes visible for all read operations
+	//it's important that write db txn is done inside lock, to make last writes visible for all read operations
 	if err := db.UpdateNosync(ctx, func(tx kv.RwTx) error {
 		err = p.flushLocked(tx)
 		if err != nil {
@@ -2048,7 +2048,7 @@ func (p *TxPool) flushLocked(tx kv.RwTx) (err error) {
 		return err
 	}
 
-	// clean - in-memory data structure as later as possible - because if during this Tx will happen error,
+	// clean - in-memory data structure as later as possible - because if during this txn will happen error,
 	// DB will stay consistent but some in-memory structures may be already cleaned, and retry will not work
 	// failed write transaction must not create side-effects
 	p.deletedTxs = p.deletedTxs[:0]
@@ -2076,7 +2076,7 @@ func (p *TxPool) fromDB(ctx context.Context, tx kv.Tx, coreTx kv.Tx) error {
 
 	if p.lastSeenBlock.Load() < lastSeenProgress {
 		// TODO we need to process the blocks since the
-		// last seen to make sure that the tx pool is in
+		// last seen to make sure that the txn pool is in
 		// sync with the processed blocks
 
 		p.lastSeenBlock.Store(lastSeenProgress)
@@ -2308,11 +2308,11 @@ func (p *TxPool) deprecatedForEach(_ context.Context, f func(rlp []byte, sender 
 		if slot.Rlp == nil {
 			v, err := tx.GetOne(kv.PoolTransaction, slot.IDHash[:])
 			if err != nil {
-				p.logger.Warn("[txpool] foreach: get tx from db", "err", err)
+				p.logger.Warn("[txpool] foreach: get txn from db", "err", err)
 				return true
 			}
 			if v == nil {
-				p.logger.Warn("[txpool] foreach: tx not found in db")
+				p.logger.Warn("[txpool] foreach: txn not found in db")
 				return true
 			}
 			slotRlp = v[20:]
@@ -2540,7 +2540,7 @@ func (b *BySenderAndNonce) has(mt *metaTx) bool {
 func (b *BySenderAndNonce) delete(mt *metaTx, reason txpoolcfg.DiscardReason, logger log.Logger) {
 	if _, ok := b.tree.Delete(mt); ok {
 		if mt.Tx.Traced {
-			logger.Info("TX TRACING: Deleted tx by nonce", "idHash", fmt.Sprintf("%x", mt.Tx.IDHash), "sender", mt.Tx.SenderID, "nonce", mt.Tx.Nonce, "reason", reason)
+			logger.Info("TX TRACING: Deleted txn by nonce", "idHash", fmt.Sprintf("%x", mt.Tx.IDHash), "sender", mt.Tx.SenderID, "nonce", mt.Tx.Nonce, "reason", reason)
 		}
 
 		senderID := mt.Tx.SenderID
@@ -2568,13 +2568,13 @@ func (b *BySenderAndNonce) replaceOrInsert(mt *metaTx, logger log.Logger) *metaT
 
 	if ok {
 		if mt.Tx.Traced {
-			logger.Info("TX TRACING: Replaced tx by nonce", "idHash", fmt.Sprintf("%x", mt.Tx.IDHash), "sender", mt.Tx.SenderID, "nonce", mt.Tx.Nonce)
+			logger.Info("TX TRACING: Replaced txn by nonce", "idHash", fmt.Sprintf("%x", mt.Tx.IDHash), "sender", mt.Tx.SenderID, "nonce", mt.Tx.Nonce)
 		}
 		return it
 	}
 
 	if mt.Tx.Traced {
-		logger.Info("TX TRACING: Inserted tx by nonce", "idHash", fmt.Sprintf("%x", mt.Tx.IDHash), "sender", mt.Tx.SenderID, "nonce", mt.Tx.Nonce)
+		logger.Info("TX TRACING: Inserted txn by nonce", "idHash", fmt.Sprintf("%x", mt.Tx.IDHash), "sender", mt.Tx.SenderID, "nonce", mt.Tx.Nonce)
 	}
 
 	b.senderIDTxnCount[mt.Tx.SenderID]++

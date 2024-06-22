@@ -100,7 +100,7 @@ func Bench3(erigon_url, geth_url string) error {
 		}
 		//print(client, erigon_url, fmt.Sprintf(template, txhash, req_id))
 		if !compareTraces(&trace, &traceg) {
-			return fmt.Errorf("Different traces block %d, tx %s\n", 1720000, txhash)
+			return fmt.Errorf("Different traces block %d, txn %s\n", 1720000, txhash)
 		}
 	}
 	to := libcommon.HexToAddress("0xbb9bc244d798123fde783fcc1c72d3bb8c189413")

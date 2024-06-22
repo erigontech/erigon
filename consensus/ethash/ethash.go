@@ -34,12 +34,13 @@ import (
 	"github.com/edsrzf/mmap-go"
 	"github.com/hashicorp/golang-lru/v2/simplelru"
 
-	"github.com/ledgerwatch/erigon/consensus/ethash/ethashcfg"
-
 	"github.com/ledgerwatch/erigon-lib/log/v3"
+
 	"github.com/ledgerwatch/erigon/common/debug"
 	cmath "github.com/ledgerwatch/erigon/common/math"
 	"github.com/ledgerwatch/erigon/consensus"
+	"github.com/ledgerwatch/erigon/consensus/ethash/ethashcfg"
+	"github.com/ledgerwatch/erigon/core/vm/evmtypes"
 	"github.com/ledgerwatch/erigon/rpc"
 )
 
@@ -573,4 +574,12 @@ func (ethash *Ethash) APIs(chain consensus.ChainHeaderReader) []rpc.API {
 // dataset.
 func SeedHash(block uint64) []byte {
 	return seedHash(block)
+}
+
+func (ethash *Ethash) GetTransferFunc() evmtypes.TransferFunc {
+	return consensus.Transfer
+}
+
+func (ethash *Ethash) GetPostApplyMessageFunc() evmtypes.PostApplyMessageFunc {
+	return nil
 }
