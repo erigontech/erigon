@@ -267,7 +267,7 @@ func (st *StateTransition) preCheck(gasBailout bool) error {
 	// Make sure the transaction gasFeeCap is greater than the block's baseFee.
 	if st.evm.ChainRules().IsLondon {
 		// Skip the checks if gas fields are zero and baseFee was explicitly disabled (eth_call)
-		skipCheck := st.evm.Config().NoBaseFee && st.gasFeeCap.BitLen() == 0 && st.tip.BitLen() == 0
+		skipCheck := st.evm.Config().NoBaseFee && st.gasFeeCap.IsZero() && st.tip.IsZero()
 		if !skipCheck {
 			if err := CheckEip1559TxGasFeeCap(st.msg.From(), st.gasFeeCap, st.tip, st.evm.Context.BaseFee, st.msg.IsFree()); err != nil {
 				return err
