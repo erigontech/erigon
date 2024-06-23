@@ -391,6 +391,9 @@ func readBodyForStorage(db kv.Getter, hash common.Hash, number uint64) (*types.B
 	if err != nil {
 		return nil, err
 	}
+	if len(data) == 0 {
+		return nil, nil
+	}
 	bodyForStorage := new(types.BodyForStorage)
 	err = rlp.DecodeBytes(data, bodyForStorage)
 	if err != nil {
