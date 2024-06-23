@@ -3,17 +3,27 @@ package stagedsync
 import (
 	"context"
 	"fmt"
+	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/erigon-lib/chain"
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/datadir"
+	"github.com/ledgerwatch/erigon-lib/common/dbg"
+	"github.com/ledgerwatch/erigon-lib/common/u256"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/log/v3"
+	state2 "github.com/ledgerwatch/erigon-lib/state"
 	"github.com/ledgerwatch/erigon-lib/wrap"
 	"github.com/ledgerwatch/erigon/cmd/state/exec3"
 	"github.com/ledgerwatch/erigon/consensus"
+	"github.com/ledgerwatch/erigon/core/rawdb"
+	"github.com/ledgerwatch/erigon/core/state"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/eth/ethconfig"
 	"github.com/ledgerwatch/erigon/ethdb/prune"
+	"github.com/ledgerwatch/erigon/rlp"
 	"github.com/ledgerwatch/erigon/turbo/services"
+	"runtime"
+	"time"
 )
 
 type CustomTraceCfg struct {
@@ -56,114 +66,114 @@ func SpawnCustomTrace(s *StageState, txc wrap.TxContainer, cfg CustomTraceCfg, c
 		tx = txc.Ttx.(kv.TemporalRwTx)
 	}
 
-	//endBlock, err := s.ExecutionAt(tx)
-	//if err != nil {
-	//	return fmt.Errorf("getting last executed block: %w", err)
-	//}
-	//if s.BlockNumber > endBlock { // Erigon will self-heal (download missed blocks) eventually
-	//	return nil
-	//}
-	//// if prematureEndBlock is nonzero and less than the latest executed block,
-	//// then we only run the log index stage until prematureEndBlock
-	//if prematureEndBlock != 0 && prematureEndBlock < endBlock {
-	//	endBlock = prematureEndBlock
-	//}
-	//// It is possible that prematureEndBlock < s.BlockNumber,
-	//// in which case it is important that we skip this stage,
-	//// or else we could overwrite stage_at with prematureEndBlock
-	//if endBlock <= s.BlockNumber {
-	//	return nil
-	//}
-	//
-	//startBlock := s.BlockNumber
-	//if startBlock > 0 {
-	//	startBlock++
-	//}
-	//
-	//logEvery := time.NewTicker(10 * time.Second)
-	//defer logEvery.Stop()
-	//var m runtime.MemStats
-	//var prevBlockNumLog uint64 = startBlock
-	//
-	//doms, err := state2.NewSharedDomains(tx, logger)
-	//if err != nil {
-	//	return err
-	//}
-	//defer doms.Close()
-	//
-	//cumulative := uint256.NewInt(0)
-	//var lastBlockNum uint64
-	//
-	//canonicalReader := doms.CanonicalReader()
-	//lastFrozenID, err := canonicalReader.LastFrozenTxNum(tx)
-	//if err != nil {
-	//	return err
-	//}
-	//
-	//var baseBlockTxnID, txnID kv.TxnId
-	//fmt.Printf("dbg1: %s\n", tx.ViewID())
-	////TODO: new tracer may get tracer from pool, maybe add it to TxTask field
-	///// maybe need startTxNum/endTxNum
-	//if err = exec3.CustomTraceMapReduce(startBlock, endBlock, exec3.TraceConsumer{
-	//	NewTracer: func() exec3.GenericTracer { return nil },
-	//	Reduce: func(txTask *state.TxTask, tx kv.Tx) error {
-	//		if txTask.Error != nil {
-	//			return err
-	//		}
-	//
-	//		if lastBlockNum != txTask.BlockNum {
-	//			cumulative.Set(u256.N0)
-	//			lastBlockNum = txTask.BlockNum
-	//
-	//			if txTask.TxNum < uint64(lastFrozenID) {
-	//				txnID = kv.TxnId(txTask.TxNum)
-	//			} else {
-	//				h, err := rawdb.ReadCanonicalHash(tx, txTask.BlockNum)
-	//				baseBlockTxnID, err = canonicalReader.BaseTxnID(tx, txTask.BlockNum, h)
-	//				if err != nil {
-	//					return err
-	//				}
-	//				txnID = baseBlockTxnID
-	//			}
-	//		} else {
-	//			txnID++
-	//		}
-	//		cumulative.AddUint64(cumulative, txTask.UsedGas)
-	//
-	//		if txTask.Final || txTask.TxIndex < 0 {
-	//			return nil
-	//		}
-	//		r := txTask.CreateReceipt(cumulative.Uint64())
-	//		v, err := rlp.EncodeToBytes(r)
-	//		if err != nil {
-	//			return err
-	//		}
-	//		doms.SetTx(tx)
-	//		err = doms.AppendablePut(kv.ReceiptsAppendable, txnID, v)
-	//		if err != nil {
-	//			return err
-	//		}
-	//
-	//		select {
-	//		case <-logEvery.C:
-	//			dbg.ReadMemStats(&m)
-	//			log.Info("Scanned", "block", txTask.BlockNum, "blk/sec", float64(txTask.BlockNum-prevBlockNumLog)/10, "alloc", libcommon.ByteCount(m.Alloc), "sys", libcommon.ByteCount(m.Sys))
-	//			prevBlockNumLog = txTask.BlockNum
-	//		default:
-	//		}
-	//
-	//		return nil
-	//	},
-	//}, ctx, tx, cfg.execArgs, logger); err != nil {
-	//	return err
-	//}
-	//if err := doms.Flush(ctx, tx); err != nil {
-	//	return err
-	//}
-	//
-	//if err = s.Update(tx.(kv.RwTx), endBlock); err != nil {
-	//	return err
-	//}
+	endBlock, err := s.ExecutionAt(tx)
+	if err != nil {
+		return fmt.Errorf("getting last executed block: %w", err)
+	}
+	if s.BlockNumber > endBlock { // Erigon will self-heal (download missed blocks) eventually
+		return nil
+	}
+	// if prematureEndBlock is nonzero and less than the latest executed block,
+	// then we only run the log index stage until prematureEndBlock
+	if prematureEndBlock != 0 && prematureEndBlock < endBlock {
+		endBlock = prematureEndBlock
+	}
+	// It is possible that prematureEndBlock < s.BlockNumber,
+	// in which case it is important that we skip this stage,
+	// or else we could overwrite stage_at with prematureEndBlock
+	if endBlock <= s.BlockNumber {
+		return nil
+	}
+
+	startBlock := s.BlockNumber
+	if startBlock > 0 {
+		startBlock++
+	}
+
+	logEvery := time.NewTicker(10 * time.Second)
+	defer logEvery.Stop()
+	var m runtime.MemStats
+	var prevBlockNumLog uint64 = startBlock
+
+	doms, err := state2.NewSharedDomains(tx, logger)
+	if err != nil {
+		return err
+	}
+	defer doms.Close()
+
+	cumulative := uint256.NewInt(0)
+	var lastBlockNum uint64
+
+	canonicalReader := doms.CanonicalReader()
+	lastFrozenID, err := canonicalReader.LastFrozenTxNum(tx)
+	if err != nil {
+		return err
+	}
+
+	var baseBlockTxnID, txnID kv.TxnId
+	fmt.Printf("dbg1: %s\n", tx.ViewID())
+	//TODO: new tracer may get tracer from pool, maybe add it to TxTask field
+	/// maybe need startTxNum/endTxNum
+	if err = exec3.CustomTraceMapReduce(startBlock, endBlock, exec3.TraceConsumer{
+		NewTracer: func() exec3.GenericTracer { return nil },
+		Reduce: func(txTask *state.TxTask, tx kv.Tx) error {
+			if txTask.Error != nil {
+				return err
+			}
+
+			if lastBlockNum != txTask.BlockNum {
+				cumulative.Set(u256.N0)
+				lastBlockNum = txTask.BlockNum
+
+				if txTask.TxNum < uint64(lastFrozenID) {
+					txnID = kv.TxnId(txTask.TxNum)
+				} else {
+					h, err := rawdb.ReadCanonicalHash(tx, txTask.BlockNum)
+					baseBlockTxnID, err = canonicalReader.BaseTxnID(tx, txTask.BlockNum, h)
+					if err != nil {
+						return err
+					}
+					txnID = baseBlockTxnID
+				}
+			} else {
+				txnID++
+			}
+			cumulative.AddUint64(cumulative, txTask.UsedGas)
+
+			if txTask.Final || txTask.TxIndex < 0 {
+				return nil
+			}
+			r := txTask.CreateReceipt(cumulative.Uint64())
+			v, err := rlp.EncodeToBytes(r)
+			if err != nil {
+				return err
+			}
+			doms.SetTx(tx)
+			err = doms.AppendablePut(kv.ReceiptsAppendable, txnID, v)
+			if err != nil {
+				return err
+			}
+
+			select {
+			case <-logEvery.C:
+				dbg.ReadMemStats(&m)
+				log.Info("Scanned", "block", txTask.BlockNum, "blk/sec", float64(txTask.BlockNum-prevBlockNumLog)/10, "alloc", libcommon.ByteCount(m.Alloc), "sys", libcommon.ByteCount(m.Sys))
+				prevBlockNumLog = txTask.BlockNum
+			default:
+			}
+
+			return nil
+		},
+	}, ctx, tx, cfg.execArgs, logger); err != nil {
+		return err
+	}
+	if err := doms.Flush(ctx, tx); err != nil {
+		return err
+	}
+
+	if err = s.Update(tx.(kv.RwTx), endBlock); err != nil {
+		return err
+	}
 
 	if !useExternalTx {
 		if err := tx.Commit(); err != nil {
