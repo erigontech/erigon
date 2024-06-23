@@ -1089,10 +1089,10 @@ func (d *Downloader) mainLoop(silent bool) error {
 				}
 			}
 
-			d.lock.RLock()
+			d.lock.Lock()
 			downloadingLen := len(d.downloading)
 			d.stats.Downloading = int32(downloadingLen)
-			d.lock.RUnlock()
+			d.lock.Unlock()
 
 			// the call interval of the loop (elapsed sec) used to get slots/sec for
 			// calculating the number of files to download based on the loop speed
