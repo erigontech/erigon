@@ -511,11 +511,13 @@ func (w *domainBufferedWriter) Flush(ctx context.Context, tx kv.RwTx) error {
 		return err
 	}
 
+	s := time.Now()
 	if w.largeVals {
 		if err := w.values.Load(tx, w.valsTable, loadFunc, etl.TransformArgs{Quit: ctx.Done(), EmptyVals: true}); err != nil {
 			return err
 		}
 		w.close()
+		fmt.Println("flush largeVals", time.Since(s))
 		return nil
 	}
 
@@ -541,6 +543,8 @@ func (w *domainBufferedWriter) Flush(ctx context.Context, tx kv.RwTx) error {
 		return err
 	}
 	w.close()
+	fmt.Println("flush non-largeVals", time.Since(s))
+
 	return nil
 }
 
