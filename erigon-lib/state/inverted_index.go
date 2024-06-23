@@ -438,12 +438,16 @@ func (w *invertedIndexBufferedWriter) add(key, indexKey []byte) error {
 	if w.discard {
 		return nil
 	}
+	s := time.Now()
 	if err := w.indexKeys.Collect(w.txNumBytes[:], key); err != nil {
 		return err
 	}
+	fmt.Println("indexKeys.Collect", time.Since(s))
+	s = time.Now()
 	if err := w.index.Collect(indexKey, w.txNumBytes[:]); err != nil {
 		return err
 	}
+	fmt.Println("index.Collect", time.Since(s))
 	return nil
 }
 
