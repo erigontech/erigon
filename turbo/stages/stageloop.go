@@ -608,7 +608,6 @@ func NewDefaultStages(ctx context.Context,
 		depositContract = cfg.Genesis.Config.DepositContract
 	}
 
-	historyV3 := true
 	return stagedsync.DefaultStages(ctx,
 		stagedsync.StageSnapshotsCfg(db, *controlServer.ChainConfig, cfg.Sync, dirs, blockRetire, snapDownloader, blockReader, notifications, agg, cfg.InternalCL && cfg.CaplinConfig.Backfilling, cfg.CaplinConfig.BlobBackfilling, silkworm, cfg.Prune),
 		stagedsync.StageHeadersCfg(db, controlServer.Hd, controlServer.Bd, *controlServer.ChainConfig, cfg.Sync, controlServer.SendHeaderRequest, controlServer.PropagateNewBlockHashes, controlServer.Penalize, cfg.BatchSize, p2pCfg.NoDiscovery, blockReader, blockWriter, dirs.Tmp, notifications, loopBreakCheck),
@@ -635,8 +634,6 @@ func NewDefaultStages(ctx context.Context,
 			agg,
 			SilkwormForExecutionStage(silkworm, cfg),
 		),
-		stagedsync.StageHashStateCfg(db, dirs),
-		stagedsync.StageTrieCfg(db, true, true, false, dirs.Tmp, blockReader, controlServer.Hd, historyV3, agg),
 		stagedsync.StageHistoryCfg(db, cfg.Prune, dirs.Tmp),
 		stagedsync.StageLogIndexCfg(db, cfg.Prune, dirs.Tmp, &depositContract),
 		stagedsync.StageCallTracesCfg(db, cfg.Prune, 0, dirs.Tmp),
