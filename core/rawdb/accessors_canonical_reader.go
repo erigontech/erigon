@@ -47,7 +47,7 @@ func (*CanonicalReader) TxNum2ID(tx kv.Tx, blockNum uint64, blockHash common2.Ha
 		if err != nil {
 			return 0, err
 		}
-		_max, err := rawdbv3.TxNums.Min(tx, blockNum)
+		_max, err := rawdbv3.TxNums.Max(tx, blockNum)
 		if err != nil {
 			return 0, err
 		}
