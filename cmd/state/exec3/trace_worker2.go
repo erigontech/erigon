@@ -27,10 +27,10 @@ import (
 	"github.com/ledgerwatch/erigon/turbo/services"
 )
 
-type TraceWorker2 struct {
+type HistoricalTraceWorker struct {
 	consumer TraceConsumer
 	in       *state.QueueWithRetry
-	resultCh *state.ResultsQueue
+	out      *state.ResultsQueue
 
 	stateReader *state.HistoryReaderV3
 	ibs         *state.IntraBlockState
@@ -63,20 +63,20 @@ type TraceConsumer struct {
 	Reduce func(task *state.TxTask, tx kv.Tx) error
 }
 
-func NewTraceWorker2(
+func NewHistoricalTraceWorker(
 	consumer TraceConsumer,
 	in *state.QueueWithRetry,
-	resultCh *state.ResultsQueue,
+	out *state.ResultsQueue,
 
 	ctx context.Context,
 	execArgs *ExecArgs,
 	logger log.Logger,
-) *TraceWorker2 {
+) *HistoricalTraceWorker {
 	stateReader := state.NewHistoryReaderV3()
-	ie := &TraceWorker2{
+	ie := &HistoricalTraceWorker{
 		consumer: consumer,
 		in:       in,
-		resultCh: resultCh,
+		out:      out,
 
 		execArgs: execArgs,
 
@@ -95,17 +95,17 @@ func NewTraceWorker2(
 	return ie
 }
 
-func (rw *TraceWorker2) Run() error {
+func (rw *HistoricalTraceWorker) Run() error {
 	for txTask, ok := rw.in.Next(rw.ctx); ok; txTask, ok = rw.in.Next(rw.ctx) {
 		rw.RunTxTask(txTask)
-		if err := rw.resultCh.Add(rw.ctx, txTask); err != nil {
+		if err := rw.out.Add(rw.ctx, txTask); err != nil {
 			return err
 		}
 	}
 	return nil
 }
 
-func (rw *TraceWorker2) RunTxTask(txTask *state.TxTask) {
+func (rw *HistoricalTraceWorker) RunTxTask(txTask *state.TxTask) {
 	if rw.background && rw.chainTx == nil {
 		var err error
 		if rw.chainTx, err = rw.execArgs.ChainDB.BeginRo(rw.ctx); err != nil {
@@ -196,7 +196,7 @@ func (rw *TraceWorker2) RunTxTask(txTask *state.TxTask) {
 		//txTask.Tracer = tracer
 	}
 }
-func (rw *TraceWorker2) ResetTx(chainTx kv.Tx) {
+func (rw *HistoricalTraceWorker) ResetTx(chainTx kv.Tx) {
 	if rw.background && rw.chainTx != nil {
 		rw.chainTx.Rollback()
 		rw.chainTx = nil
@@ -221,8 +221,8 @@ type ExecArgs struct {
 	Workers     int
 }
 
-func NewTraceWorkers2Pool(consumer TraceConsumer, cfg *ExecArgs, ctx context.Context, toTxNum uint64, in *state.QueueWithRetry, workerCount int, outputTxNum *atomic.Uint64, logger log.Logger) (g *errgroup.Group, clearFunc func()) {
-	workers := make([]*TraceWorker2, workerCount)
+func NewHistoricalTraceWorkers(consumer TraceConsumer, cfg *ExecArgs, ctx context.Context, toTxNum uint64, in *state.QueueWithRetry, workerCount int, outputTxNum *atomic.Uint64, logger log.Logger) (g *errgroup.Group, clearFunc func()) {
+	workers := make([]*HistoricalTraceWorker, workerCount)
 
 	resultChSize := workerCount * 8
 	rws := state.NewResultsQueue(resultChSize, workerCount) // workerCount * 4
@@ -231,7 +231,7 @@ func NewTraceWorkers2Pool(consumer TraceConsumer, cfg *ExecArgs, ctx context.Con
 	ctx, cancel := context.WithCancel(ctx)
 	g, ctx = errgroup.WithContext(ctx)
 	for i := 0; i < workerCount; i++ {
-		workers[i] = NewTraceWorker2(consumer, in, rws, ctx, cfg, logger)
+		workers[i] = NewHistoricalTraceWorker(consumer, in, rws, ctx, cfg, logger)
 	}
 	for i := 0; i < workerCount; i++ {
 		i := i
@@ -260,15 +260,15 @@ func NewTraceWorkers2Pool(consumer TraceConsumer, cfg *ExecArgs, ctx context.Con
 		}
 		defer tx.Rollback()
 
-		applyWorker := NewTraceWorker2(consumer, in, rws, ctx, cfg, logger)
+		applyWorker := NewHistoricalTraceWorker(consumer, in, rws, ctx, cfg, logger)
 		applyWorker.background = false
 		applyWorker.ResetTx(tx)
 		for outputTxNum.Load() <= toTxNum {
 			rws.DrainNonBlocking()
 
-			processedTxNum, _, err := processResultQueue2(consumer, rws, outputTxNum.Load(), applyWorker, true)
+			processedTxNum, _, err := processResultQueueHistorical(consumer, rws, outputTxNum.Load(), applyWorker, true)
 			if err != nil {
-				return fmt.Errorf("processResultQueue2: %w", err)
+				return fmt.Errorf("processResultQueueHistorical: %w", err)
 			}
 			if processedTxNum > 0 {
 				outputTxNum.Store(processedTxNum)
@@ -293,7 +293,7 @@ func NewTraceWorkers2Pool(consumer TraceConsumer, cfg *ExecArgs, ctx context.Con
 	return g, clearFunc
 }
 
-func processResultQueue2(consumer TraceConsumer, rws *state.ResultsQueue, outputTxNumIn uint64, applyWorker *TraceWorker2, forceStopAtBlockEnd bool) (outputTxNum uint64, stopedAtBlockEnd bool, err error) {
+func processResultQueueHistorical(consumer TraceConsumer, rws *state.ResultsQueue, outputTxNumIn uint64, applyWorker *HistoricalTraceWorker, forceStopAtBlockEnd bool) (outputTxNum uint64, stopedAtBlockEnd bool, err error) {
 	rwsIt := rws.Iter()
 	defer rwsIt.Close()
 
@@ -380,7 +380,7 @@ func CustomTraceMapReduce(fromBlock, toBlock uint64, consumer TraceConsumer, ctx
 	}
 	outTxNum := &atomic.Uint64{}
 	outTxNum.Store(fromTxNum)
-	workers, cleanup := NewTraceWorkers2Pool(consumer, cfg, ctx, toTxNum, in, WorkerCount, outTxNum, logger)
+	workers, cleanup := NewHistoricalTraceWorkers(consumer, cfg, ctx, toTxNum, in, WorkerCount, outTxNum, logger)
 	defer workers.Wait()
 	defer cleanup()
 
@@ -459,7 +459,6 @@ func CustomTraceMapReduce(fromBlock, toBlock uint64, consumer TraceConsumer, ctx
 					logger.Warn("[Execution] expensive lazy sender recovery", "blockNum", txTask.BlockNum, "txIdx", txTask.TxIndex)
 				}
 			}
-			fmt.Printf("[dbg] loopal: %d, \n", blockNum)
 			if workersExited.Load() {
 				return workers.Wait()
 			}
