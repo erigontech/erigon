@@ -101,11 +101,12 @@ func (d *DiagnosticClient) runSyncStagesListListener(rootCtx context.Context) {
 			case <-rootCtx.Done():
 				return
 			case info := <-ch:
-				d.mu.Lock()
-				d.SetStagesList(info.StagesList)
-				d.mu.Unlock()
-
-				d.saveSyncStagesToDB()
+				func() {
+					d.mu.Lock()
+					defer d.mu.Unlock()
+					d.SetStagesList(info.StagesList)
+					d.saveSyncStagesToDB()
+				}()
 			}
 		}
 	}()
@@ -233,6 +234,8 @@ func (d *DiagnosticClient) SetCurrentSyncStage(css CurrentSyncStage) error {
 	}
 
 	isSet := false
+	d.mu.Lock()
+	defer d.mu.Unlock()
 	for idx, stage := range d.syncStages {
 		if !isSet {
 			if stage.ID == css.Stage {
