@@ -682,6 +682,7 @@ func (r *BlockReader) blockWithSenders(ctx context.Context, tx kv.Getter, hash c
 		return
 	}
 	if txCount == 0 {
+		fmt.Printf("txcount: %d, %d\n", blockHeight, txCount)
 		block = types.NewBlockFromStorage(hash, h, nil, b.Uncles, b.Withdrawals, b.Requests)
 		if len(senders) != block.Transactions().Len() {
 			if dbgLogs {
