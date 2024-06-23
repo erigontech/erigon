@@ -129,23 +129,23 @@ func DefaultStages(ctx context.Context,
 				return PruneExecutionStage(p, tx, exec, ctx)
 			},
 		},
-		//{
-		//	ID:          stages.CustomTrace,
-		//	Description: "Re-Execute blocks on history state - with custom tracer",
-		//	Disabled:    dbg.StagesOnlyBlocks ,
-		//	Forward: func(badBlockUnwind bool, s *StageState, u Unwinder, txc wrap.TxContainer, logger log.Logger) error {
-		//		cfg := StageCustomTraceCfg(exec.db, exec.prune, exec.dirs, exec.blockReader, exec.chainConfig, exec.engine, exec.genesis, &exec.syncCfg)
-		//		return SpawnCustomTrace(s, txc, cfg, ctx, 0, logger)
-		//	},
-		//	Unwind: func(u *UnwindState, s *StageState, txc wrap.TxContainer, logger log.Logger) error {
-		//		cfg := StageCustomTraceCfg(exec.db, exec.prune, exec.dirs, exec.blockReader, exec.chainConfig, exec.engine, exec.genesis, &exec.syncCfg)
-		//		return UnwindCustomTrace(u, s, txc, cfg, ctx, logger)
-		//	},
-		//	Prune: func(p *PruneState, tx kv.RwTx, logger log.Logger) error {
-		//		cfg := StageCustomTraceCfg(exec.db, exec.prune, exec.dirs, exec.blockReader, exec.chainConfig, exec.engine, exec.genesis, &exec.syncCfg)
-		//		return PruneCustomTrace(p, tx, cfg, ctx, logger)
-		//	},
-		//},
+		{
+			ID:          stages.CustomTrace,
+			Description: "Re-Execute blocks on history state - with custom tracer",
+			Disabled:    dbg.StagesOnlyBlocks,
+			Forward: func(badBlockUnwind bool, s *StageState, u Unwinder, txc wrap.TxContainer, logger log.Logger) error {
+				cfg := StageCustomTraceCfg(exec.db, exec.prune, exec.dirs, exec.blockReader, exec.chainConfig, exec.engine, exec.genesis, &exec.syncCfg)
+				return SpawnCustomTrace(s, txc, cfg, ctx, 0, logger)
+			},
+			Unwind: func(u *UnwindState, s *StageState, txc wrap.TxContainer, logger log.Logger) error {
+				cfg := StageCustomTraceCfg(exec.db, exec.prune, exec.dirs, exec.blockReader, exec.chainConfig, exec.engine, exec.genesis, &exec.syncCfg)
+				return UnwindCustomTrace(u, s, txc, cfg, ctx, logger)
+			},
+			Prune: func(p *PruneState, tx kv.RwTx, logger log.Logger) error {
+				cfg := StageCustomTraceCfg(exec.db, exec.prune, exec.dirs, exec.blockReader, exec.chainConfig, exec.engine, exec.genesis, &exec.syncCfg)
+				return PruneCustomTrace(p, tx, cfg, ctx, logger)
+			},
+		},
 		{
 			ID:          stages.HashState,
 			Description: "Hash the key in the state",
