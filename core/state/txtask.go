@@ -329,7 +329,7 @@ func (q *ResultsQueueIter) Close() {
 }
 func (q *ResultsQueueIter) HasNext(outputTxNum uint64) bool {
 	if len(*q.results) > 0 {
-		log.Warn("[dbg] HasNext", "(*q.results)[0].TxNum", (*q.results)[0].TxNum)
+		log.Warn("[dbg] HasNext", "(*q.results)[0].BlockNum", (*q.results)[0].BlockNum, "(*q.results)[0].TxNum", (*q.results)[0].TxNum)
 	}
 	return len(*q.results) > 0 && (*q.results)[0].TxNum == outputTxNum
 }
