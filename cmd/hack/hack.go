@@ -306,63 +306,6 @@ func printBucket(chaindata string) {
 	}
 }
 
-func extractCode(chaindata string) error {
-	db := mdbx.MustOpen(chaindata)
-	defer db.Close()
-	var contractCount int
-	if err1 := db.View(context.Background(), func(tx kv.Tx) error {
-		c, err := tx.Cursor(kv.Code)
-		if err != nil {
-			return err
-		}
-		// This is a mapping of CodeHash => Byte code
-		for k, v, err := c.First(); k != nil; k, v, err = c.Next() {
-			if err != nil {
-				return err
-			}
-			fmt.Printf("%x,%x", k, v)
-			contractCount++
-		}
-		return nil
-	}); err1 != nil {
-		return err1
-	}
-	fmt.Fprintf(os.Stderr, "contractCount: %d\n", contractCount)
-	return nil
-}
-
-func iterateOverCode(chaindata string) error {
-	db := mdbx.MustOpen(chaindata)
-	defer db.Close()
-	hashes := make(map[libcommon.Hash][]byte)
-	if err1 := db.View(context.Background(), func(tx kv.Tx) error {
-		// This is a mapping of CodeHash => Byte code
-		if err := tx.ForEach(kv.Code, nil, func(k, v []byte) error {
-			if len(v) > 0 && v[0] == 0xef {
-				fmt.Printf("Found code with hash %x: %x\n", k, v)
-				hashes[libcommon.BytesToHash(k)] = libcommon.CopyBytes(v)
-			}
-			return nil
-		}); err != nil {
-			return err
-		}
-		// This is a mapping of contractAddress + incarnation => CodeHash
-		if err := tx.ForEach(kv.PlainContractCode, nil, func(k, v []byte) error {
-			hash := libcommon.BytesToHash(v)
-			if code, ok := hashes[hash]; ok {
-				fmt.Printf("address: %x: %x\n", k[:20], code)
-			}
-			return nil
-		}); err != nil {
-			return err
-		}
-		return nil
-	}); err1 != nil {
-		return err1
-	}
-	return nil
-}
-
 func getBlockTotal(tx kv.Tx, blockFrom uint64, blockTotalOrOffset int64) uint64 {
 	if blockTotalOrOffset > 0 {
 		return uint64(blockTotalOrOffset)
@@ -1198,12 +1141,6 @@ func main() {
 
 	case "slice":
 		dbSlice(*chaindata, *bucket, common.FromHex(*hash))
-
-	case "extractCode":
-		err = extractCode(*chaindata)
-
-	case "iterateOverCode":
-		err = iterateOverCode(*chaindata)
 
 	case "extractHeaders":
 		err = extractHeaders(*chaindata, uint64(*block), int64(*blockTotal))
