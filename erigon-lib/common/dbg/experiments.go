@@ -29,7 +29,7 @@ import (
 var (
 	doMemstat        = EnvBool("NO_MEMSTAT", true)
 	writeMap         = EnvBool("WRITE_MAP", false)
-	noSync           = EnvBool("NO_SYNC", true)
+	noSync           = EnvBool("NO_SYNC", false)
 	mdbxReadahead    = EnvBool("MDBX_READAHEAD", false)
 	mdbxLockInRam    = EnvBool("MDBX_LOCK_IN_RAM", false)
 	StagesOnlyBlocks = EnvBool("STAGES_ONLY_BLOCKS", false)

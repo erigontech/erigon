@@ -776,6 +776,7 @@ const (
 	ReverseKey TableFlags = 0x02
 	DupSort    TableFlags = 0x04
 	IntegerKey TableFlags = 0x08
+	DupFixed   TableFlags = 0x10
 	IntegerDup TableFlags = 0x20
 	ReverseDup TableFlags = 0x40
 )

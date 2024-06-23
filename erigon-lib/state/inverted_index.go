@@ -23,7 +23,6 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
-	"github.com/ledgerwatch/erigon-lib/common"
 	"math"
 	"os"
 	"path"
@@ -33,6 +32,8 @@ import (
 	"strconv"
 	"sync"
 	"time"
+
+	"github.com/ledgerwatch/erigon-lib/common"
 
 	"github.com/RoaringBitmap/roaring/roaring64"
 	"github.com/spaolacci/murmur3"
