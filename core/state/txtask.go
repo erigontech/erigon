@@ -10,7 +10,6 @@ import (
 
 	"github.com/ledgerwatch/erigon-lib/chain"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/log/v3"
 	"github.com/ledgerwatch/erigon-lib/state"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/core/types/accounts"
@@ -290,13 +289,12 @@ func (q *ResultsQueue) Add(ctx context.Context, task *TxTask) error {
 	}
 	return nil
 }
-func (q *ResultsQueue) drainNoBlock(task *TxTask) (resultsQueueLen int) {
+func (q *ResultsQueue) drainNoBlock(task *TxTask) {
 	q.Lock()
 	defer q.Unlock()
 	if task != nil {
 		heap.Push(q.results, task)
 	}
-	resultsQueueLen = q.results.Len()
 
 	for {
 		select {
@@ -306,10 +304,10 @@ func (q *ResultsQueue) drainNoBlock(task *TxTask) (resultsQueueLen int) {
 			}
 			if txTask != nil {
 				heap.Push(q.results, txTask)
-				resultsQueueLen = q.results.Len()
+				q.results.Len()
 			}
 		default: // we are inside mutex section, can't block here
-			return resultsQueueLen
+			return
 		}
 	}
 }
@@ -328,9 +326,6 @@ func (q *ResultsQueueIter) Close() {
 	q.q.Unlock()
 }
 func (q *ResultsQueueIter) HasNext(outputTxNum uint64) bool {
-	if len(*q.results) > 0 {
-		log.Warn("[dbg] HasNext", "(*q.results)[0].BlockNum", (*q.results)[0].BlockNum, "(*q.results)[0].TxNum", (*q.results)[0].TxNum)
-	}
 	return len(*q.results) > 0 && (*q.results)[0].TxNum == outputTxNum
 }
 func (q *ResultsQueueIter) PopNext() *TxTask {

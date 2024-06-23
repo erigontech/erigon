@@ -264,9 +264,7 @@ func NewTraceWorkers2Pool(consumer TraceConsumer, cfg *ExecArgs, ctx context.Con
 		applyWorker.background = false
 		applyWorker.ResetTx(tx)
 		for outputTxNum.Load() <= toTxNum {
-			if err := rws.Drain(ctx); err != nil {
-				return fmt.Errorf("rws.Drain: %w", err)
-			}
+			rws.DrainNonBlocking()
 
 			processedTxNum, _, err := processResultQueue2(consumer, rws, outputTxNum.Load(), applyWorker, true)
 			if err != nil {
@@ -461,6 +459,7 @@ func CustomTraceMapReduce(fromBlock, toBlock uint64, consumer TraceConsumer, ctx
 					logger.Warn("[Execution] expensive lazy sender recovery", "blockNum", txTask.BlockNum, "txIdx", txTask.TxIndex)
 				}
 			}
+			fmt.Printf("[dbg] loopal: %d, \n", blockNum)
 			if workersExited.Load() {
 				return workers.Wait()
 			}
