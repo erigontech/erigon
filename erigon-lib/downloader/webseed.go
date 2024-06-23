@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/ledgerwatch/erigon-lib/downloader/downloadercfg"
 	"io"
 	"net/http"
 	"net/url"
@@ -57,7 +58,7 @@ func NewWebSeeds(seeds []*url.URL, verbosity log.Lvl, logger log.Logger) *WebSee
 
 	rc := retryablehttp.NewClient()
 	rc.RetryMax = 5
-	rc.Logger = logger
+	rc.Logger = downloadercfg.NewRetryableHttpLogger(logger.New("app", "downloader"))
 	ws.client = rc.StandardClient()
 	return ws
 }
@@ -572,7 +573,7 @@ func (d *WebSeeds) downloadTorrentFilesFromProviders(ctx context.Context, rootDi
 		e3blackListed := strings.Contains(name, "commitment") && (strings.HasSuffix(name, ".v.torrent") || strings.HasSuffix(name, ".ef.torrent"))
 		if e3blackListed {
 			_, fName := filepath.Split(name)
-			d.logger.Log(d.verbosity, "[snapshots] webseed has .torrent, but we skip it because this file-type not supported yet", "name", fName)
+			d.logger.Debug("[snapshots] webseed has .torrent, but we skip it because this file-type not supported yet", "name", fName)
 			continue
 		}
 
@@ -582,7 +583,7 @@ func (d *WebSeeds) downloadTorrentFilesFromProviders(ctx context.Context, rootDi
 				//validation happens inside
 				_, err := d.callTorrentHttpProvider(ctx, url, name)
 				if err != nil {
-					d.logger.Log(d.verbosity, "[snapshots] got from webseed", "name", name, "err", err, "url", url)
+					d.logger.Debug("[snapshots] got from webseed", "name", name, "err", err, "url", url)
 					continue
 				}
 				//don't save .torrent here - do it inside downloader.Add
@@ -614,7 +615,7 @@ func (d *WebSeeds) DownloadAndSaveTorrentFile(ctx context.Context, name string) 
 		}
 		res, err := d.callTorrentHttpProvider(ctx, parsedUrl, name)
 		if err != nil {
-			d.logger.Log(d.verbosity, "[snapshots] .torrent from webseed rejected", "name", name, "err", err, "url", urlStr)
+			d.logger.Debug("[snapshots] .torrent from webseed rejected", "name", name, "err", err, "url", urlStr)
 			continue // it's ok if some HTTP provider failed - try next one
 		}
 		ts, _, err = d.torrentFiles.Create(name, res)
