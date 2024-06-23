@@ -86,7 +86,11 @@ func (*CanonicalReader) LastFrozenTxNum(tx kv.Tx) (kv.TxnId, error) {
 		return 0, err
 	}
 	if !ok {
-		panic(1)
+		//seq, err := tx.ReadSequence(kv.EthTx)
+		//seq-1
+		_, _lastTxNumInFiles, err := rawdbv3.TxNums.Last(tx)
+		return kv.TxnId(_lastTxNumInFiles), err
+
 	}
 	_max, err := rawdbv3.TxNums.Max(tx, n)
 	if err != nil {
