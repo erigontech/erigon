@@ -19,8 +19,6 @@ func DefaultStages(ctx context.Context,
 	bodies BodiesCfg,
 	senders SendersCfg,
 	exec ExecuteBlockCfg,
-	hashState HashStateCfg,
-	trieCfg TrieCfg,
 	history HistoryCfg,
 	logIndex LogIndexCfg,
 	callTraces CallTracesCfg,
@@ -132,10 +130,10 @@ func DefaultStages(ctx context.Context,
 		//{
 		//	ID:          stages.CustomTrace,
 		//	Description: "Re-Execute blocks on history state - with custom tracer",
-		//	Disabled:    !bodies.historyV3 || dbg.StagesOnlyBlocks,
+		//	Disabled:    dbg.StagesOnlyBlocks,
 		//	Forward: func(badBlockUnwind bool, s *StageState, u Unwinder, txc wrap.TxContainer, logger log.Logger) error {
 		//		cfg := StageCustomTraceCfg(exec.db, exec.prune, exec.dirs, exec.blockReader, exec.chainConfig, exec.engine, exec.genesis, &exec.syncCfg)
-		//		return SpawnCustomTrace(s, txc, cfg, ctx, firstCycle, 0, logger)
+		//		return SpawnCustomTrace(s, txc, cfg, ctx, 0, logger)
 		//	},
 		//	Unwind: func(u *UnwindState, s *StageState, txc wrap.TxContainer, logger log.Logger) error {
 		//		cfg := StageCustomTraceCfg(exec.db, exec.prune, exec.dirs, exec.blockReader, exec.chainConfig, exec.engine, exec.genesis, &exec.syncCfg)
@@ -143,45 +141,9 @@ func DefaultStages(ctx context.Context,
 		//	},
 		//	Prune: func(p *PruneState, tx kv.RwTx, logger log.Logger) error {
 		//		cfg := StageCustomTraceCfg(exec.db, exec.prune, exec.dirs, exec.blockReader, exec.chainConfig, exec.engine, exec.genesis, &exec.syncCfg)
-		//		return PruneCustomTrace(p, tx, cfg, ctx, firstCycle, logger)
+		//		return PruneCustomTrace(p, tx, cfg, ctx, logger)
 		//	},
 		//},
-		{
-			ID:          stages.HashState,
-			Description: "Hash the key in the state",
-			Disabled:    true,
-			Forward: func(badBlockUnwind bool, s *StageState, u Unwinder, txc wrap.TxContainer, logger log.Logger) error {
-				return SpawnHashStateStage(s, txc.Tx, hashState, ctx, logger)
-			},
-			Unwind: func(u *UnwindState, s *StageState, txc wrap.TxContainer, logger log.Logger) error {
-				return UnwindHashStateStage(u, s, txc.Tx, hashState, ctx, logger)
-			},
-			Prune: func(p *PruneState, tx kv.RwTx, logger log.Logger) error {
-				return PruneHashStateStage(p, tx, hashState, ctx)
-			},
-		},
-		{
-			ID:          stages.IntermediateHashes,
-			Description: "Generate intermediate hashes and computing state root",
-			Disabled:    true,
-			Forward: func(badBlockUnwind bool, s *StageState, u Unwinder, txc wrap.TxContainer, logger log.Logger) error {
-				if exec.chainConfig.IsOsaka(0) {
-					_, err := SpawnVerkleTrie(s, u, txc.Tx, trieCfg, ctx, logger)
-					return err
-				}
-				_, err := SpawnIntermediateHashesStage(s, u, txc.Tx, trieCfg, ctx, logger)
-				return err
-			},
-			Unwind: func(u *UnwindState, s *StageState, txc wrap.TxContainer, logger log.Logger) error {
-				if exec.chainConfig.IsOsaka(0) {
-					return UnwindVerkleTrie(u, s, txc.Tx, trieCfg, ctx, logger)
-				}
-				return UnwindIntermediateHashesStage(u, s, txc.Tx, trieCfg, ctx, logger)
-			},
-			Prune: func(p *PruneState, tx kv.RwTx, logger log.Logger) error {
-				return PruneIntermediateHashesStage(p, tx, trieCfg, ctx)
-			},
-		},
 		{
 			ID:                  stages.CallTraces,
 			Description:         "Generate call traces index",
@@ -269,7 +231,7 @@ func DefaultStages(ctx context.Context,
 	}
 }
 
-func PipelineStages(ctx context.Context, snapshots SnapshotsCfg, blockHashCfg BlockHashesCfg, senders SendersCfg, exec ExecuteBlockCfg, hashState HashStateCfg, trieCfg TrieCfg, history HistoryCfg, logIndex LogIndexCfg, callTraces CallTracesCfg, txLookup TxLookupCfg, finish FinishCfg, test bool) []*Stage {
+func PipelineStages(ctx context.Context, snapshots SnapshotsCfg, blockHashCfg BlockHashesCfg, senders SendersCfg, exec ExecuteBlockCfg, history HistoryCfg, logIndex LogIndexCfg, callTraces CallTracesCfg, txLookup TxLookupCfg, finish FinishCfg, test bool) []*Stage {
 	return []*Stage{
 		{
 			ID:          stages.Snapshots,
@@ -326,42 +288,7 @@ func PipelineStages(ctx context.Context, snapshots SnapshotsCfg, blockHashCfg Bl
 				return PruneExecutionStage(p, tx, exec, ctx)
 			},
 		},
-		{
-			ID:          stages.HashState,
-			Description: "Hash the key in the state",
-			Disabled:    exec.historyV3,
-			Forward: func(badBlockUnwind bool, s *StageState, u Unwinder, txc wrap.TxContainer, logger log.Logger) error {
-				return SpawnHashStateStage(s, txc.Tx, hashState, ctx, logger)
-			},
-			Unwind: func(u *UnwindState, s *StageState, txc wrap.TxContainer, logger log.Logger) error {
-				return UnwindHashStateStage(u, s, txc.Tx, hashState, ctx, logger)
-			},
-			Prune: func(p *PruneState, tx kv.RwTx, logger log.Logger) error {
-				return PruneHashStateStage(p, tx, hashState, ctx)
-			},
-		},
-		{
-			ID:          stages.IntermediateHashes,
-			Description: "Generate intermediate hashes and computing state root",
-			Disabled:    exec.historyV3,
-			Forward: func(badBlockUnwind bool, s *StageState, u Unwinder, txc wrap.TxContainer, logger log.Logger) error {
-				if exec.chainConfig.IsOsaka(0) {
-					_, err := SpawnVerkleTrie(s, u, txc.Tx, trieCfg, ctx, logger)
-					return err
-				}
-				_, err := SpawnIntermediateHashesStage(s, u, txc.Tx, trieCfg, ctx, logger)
-				return err
-			},
-			Unwind: func(u *UnwindState, s *StageState, txc wrap.TxContainer, logger log.Logger) error {
-				if exec.chainConfig.IsOsaka(0) {
-					return UnwindVerkleTrie(u, s, txc.Tx, trieCfg, ctx, logger)
-				}
-				return UnwindIntermediateHashesStage(u, s, txc.Tx, trieCfg, ctx, logger)
-			},
-			Prune: func(p *PruneState, tx kv.RwTx, logger log.Logger) error {
-				return PruneIntermediateHashesStage(p, tx, trieCfg, ctx)
-			},
-		},
+
 		{
 			ID:                  stages.CallTraces,
 			Description:         "Generate call traces index",
@@ -449,7 +376,7 @@ func PipelineStages(ctx context.Context, snapshots SnapshotsCfg, blockHashCfg Bl
 }
 
 // when uploading - potentially from zero we need to include headers and bodies stages otherwise we won't recover the POW portion of the chain
-func UploaderPipelineStages(ctx context.Context, snapshots SnapshotsCfg, headers HeadersCfg, blockHashCfg BlockHashesCfg, senders SendersCfg, bodies BodiesCfg, exec ExecuteBlockCfg, hashState HashStateCfg, trieCfg TrieCfg, history HistoryCfg, logIndex LogIndexCfg, callTraces CallTracesCfg, txLookup TxLookupCfg, finish FinishCfg, test bool) []*Stage {
+func UploaderPipelineStages(ctx context.Context, snapshots SnapshotsCfg, headers HeadersCfg, blockHashCfg BlockHashesCfg, senders SendersCfg, bodies BodiesCfg, exec ExecuteBlockCfg, history HistoryCfg, logIndex LogIndexCfg, callTraces CallTracesCfg, txLookup TxLookupCfg, finish FinishCfg, test bool) []*Stage {
 	return []*Stage{
 		{
 			ID:          stages.Snapshots,
@@ -533,42 +460,6 @@ func UploaderPipelineStages(ctx context.Context, snapshots SnapshotsCfg, headers
 			},
 			Prune: func(p *PruneState, tx kv.RwTx, logger log.Logger) error {
 				return PruneExecutionStage(p, tx, exec, ctx)
-			},
-		},
-		{
-			ID:          stages.HashState,
-			Description: "Hash the key in the state",
-			Disabled:    true,
-			Forward: func(badBlockUnwind bool, s *StageState, u Unwinder, txc wrap.TxContainer, logger log.Logger) error {
-				return SpawnHashStateStage(s, txc.Tx, hashState, ctx, logger)
-			},
-			Unwind: func(u *UnwindState, s *StageState, txc wrap.TxContainer, logger log.Logger) error {
-				return UnwindHashStateStage(u, s, txc.Tx, hashState, ctx, logger)
-			},
-			Prune: func(p *PruneState, tx kv.RwTx, logger log.Logger) error {
-				return PruneHashStateStage(p, tx, hashState, ctx)
-			},
-		},
-		{
-			ID:          stages.IntermediateHashes,
-			Description: "Generate intermediate hashes and computing state root",
-			Disabled:    true,
-			Forward: func(badBlockUnwind bool, s *StageState, u Unwinder, txc wrap.TxContainer, logger log.Logger) error {
-				if exec.chainConfig.IsOsaka(0) {
-					_, err := SpawnVerkleTrie(s, u, txc.Tx, trieCfg, ctx, logger)
-					return err
-				}
-				_, err := SpawnIntermediateHashesStage(s, u, txc.Tx, trieCfg, ctx, logger)
-				return err
-			},
-			Unwind: func(u *UnwindState, s *StageState, txc wrap.TxContainer, logger log.Logger) error {
-				if exec.chainConfig.IsOsaka(0) {
-					return UnwindVerkleTrie(u, s, txc.Tx, trieCfg, ctx, logger)
-				}
-				return UnwindIntermediateHashesStage(u, s, txc.Tx, trieCfg, ctx, logger)
-			},
-			Prune: func(p *PruneState, tx kv.RwTx, logger log.Logger) error {
-				return PruneIntermediateHashesStage(p, tx, trieCfg, ctx)
 			},
 		},
 		{
@@ -658,7 +549,7 @@ func UploaderPipelineStages(ctx context.Context, snapshots SnapshotsCfg, headers
 }
 
 // StateStages are all stages necessary for basic unwind and stage computation, it is primarily used to process side forks and memory execution.
-func StateStages(ctx context.Context, headers HeadersCfg, bodies BodiesCfg, blockHashCfg BlockHashesCfg, senders SendersCfg, exec ExecuteBlockCfg, hashState HashStateCfg, trieCfg TrieCfg) []*Stage {
+func StateStages(ctx context.Context, headers HeadersCfg, bodies BodiesCfg, blockHashCfg BlockHashesCfg, senders SendersCfg, exec ExecuteBlockCfg) []*Stage {
 	return []*Stage{
 		{
 			ID:          stages.Headers,
@@ -708,29 +599,6 @@ func StateStages(ctx context.Context, headers HeadersCfg, bodies BodiesCfg, bloc
 			},
 			Unwind: func(u *UnwindState, s *StageState, txc wrap.TxContainer, logger log.Logger) error {
 				return UnwindExecutionStage(u, s, txc, ctx, exec, logger)
-			},
-		},
-		{
-			ID:          stages.HashState,
-			Description: "Hash the key in the state",
-			Disabled:    true,
-			Forward: func(badBlockUnwind bool, s *StageState, u Unwinder, txc wrap.TxContainer, logger log.Logger) error {
-				return SpawnHashStateStage(s, txc.Tx, hashState, ctx, logger)
-			},
-			Unwind: func(u *UnwindState, s *StageState, txc wrap.TxContainer, logger log.Logger) error {
-				return UnwindHashStateStage(u, s, txc.Tx, hashState, ctx, logger)
-			},
-		},
-		{
-			ID:          stages.IntermediateHashes,
-			Description: "Generate intermediate hashes and computing state root",
-			Disabled:    true,
-			Forward: func(badBlockUnwind bool, s *StageState, u Unwinder, txc wrap.TxContainer, logger log.Logger) error {
-				_, err := SpawnIntermediateHashesStage(s, u, txc.Tx, trieCfg, ctx, logger)
-				return err
-			},
-			Unwind: func(u *UnwindState, s *StageState, txc wrap.TxContainer, logger log.Logger) error {
-				return UnwindIntermediateHashesStage(u, s, txc.Tx, trieCfg, ctx, logger)
 			},
 		},
 	}
@@ -842,8 +710,7 @@ var DefaultForwardOrder = UnwindOrder{
 	// Stages below don't use Internet
 	stages.Senders,
 	stages.Execution,
-	stages.HashState,
-	stages.IntermediateHashes,
+	//stages.CustomTrace,
 	stages.CallTraces,
 	stages.AccountHistoryIndex,
 	stages.StorageHistoryIndex,
@@ -867,11 +734,7 @@ var DefaultUnwindOrder = UnwindOrder{
 	stages.AccountHistoryIndex,
 	stages.CallTraces,
 
-	// Unwinding of IHashes needs to happen after unwinding HashState
-	stages.HashState,
-	stages.IntermediateHashes,
-
-	stages.CustomTrace,
+	//stages.CustomTrace,
 	stages.Execution,
 	stages.Senders,
 
@@ -889,10 +752,6 @@ var PipelineUnwindOrder = UnwindOrder{
 	stages.AccountHistoryIndex,
 	stages.CallTraces,
 
-	// Unwinding of IHashes needs to happen after unwinding HashState
-	stages.HashState,
-	stages.IntermediateHashes,
-
 	stages.Execution,
 	stages.Senders,
 
@@ -900,9 +759,6 @@ var PipelineUnwindOrder = UnwindOrder{
 }
 
 var StateUnwindOrder = UnwindOrder{
-	// Unwinding of IHashes needs to happen after unwinding HashState
-	stages.HashState,
-	stages.IntermediateHashes,
 	stages.Execution,
 	stages.Senders,
 	stages.Bodies,
@@ -926,10 +782,6 @@ var DefaultPruneOrder = PruneOrder{
 	stages.AccountHistoryIndex,
 	stages.CallTraces,
 
-	// Pruning of IHashes needs to happen after pruning HashState
-	stages.HashState,
-	stages.IntermediateHashes,
-
 	stages.Execution,
 	stages.Senders,
 
@@ -947,10 +799,6 @@ var PipelinePruneOrder = PruneOrder{
 	stages.StorageHistoryIndex,
 	stages.AccountHistoryIndex,
 	stages.CallTraces,
-
-	// Unwinding of IHashes needs to happen after unwinding HashState
-	stages.HashState,
-	stages.IntermediateHashes,
 
 	stages.Execution,
 	stages.Senders,

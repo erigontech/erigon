@@ -11,6 +11,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/chain"
 	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/datadir"
+	"github.com/ledgerwatch/erigon-lib/common/dbg"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/rawdbv3"
 	"github.com/ledgerwatch/erigon-lib/log/v3"
@@ -26,10 +27,10 @@ import (
 	"github.com/ledgerwatch/erigon/turbo/services"
 )
 
-type TraceWorker2 struct {
+type HistoricalTraceWorker struct {
 	consumer TraceConsumer
 	in       *state.QueueWithRetry
-	resultCh *state.ResultsQueue
+	out      *state.ResultsQueue
 
 	stateReader *state.HistoryReaderV3
 	ibs         *state.IntraBlockState
@@ -58,24 +59,24 @@ type TraceWorker2 struct {
 
 type TraceConsumer struct {
 	NewTracer func() GenericTracer
-	//Collect receiving results of execution. They are sorted and have no gaps.
-	Collect func(task *state.TxTask) error
+	//Reduce receiving results of execution. They are sorted and have no gaps.
+	Reduce func(task *state.TxTask, tx kv.Tx) error
 }
 
-func NewTraceWorker2(
+func NewHistoricalTraceWorker(
 	consumer TraceConsumer,
 	in *state.QueueWithRetry,
-	resultCh *state.ResultsQueue,
+	out *state.ResultsQueue,
 
 	ctx context.Context,
 	execArgs *ExecArgs,
 	logger log.Logger,
-) *TraceWorker2 {
+) *HistoricalTraceWorker {
 	stateReader := state.NewHistoryReaderV3()
-	ie := &TraceWorker2{
+	ie := &HistoricalTraceWorker{
 		consumer: consumer,
 		in:       in,
-		resultCh: resultCh,
+		out:      out,
 
 		execArgs: execArgs,
 
@@ -94,21 +95,21 @@ func NewTraceWorker2(
 	return ie
 }
 
-func (rw *TraceWorker2) Run() error {
+func (rw *HistoricalTraceWorker) Run() error {
 	for txTask, ok := rw.in.Next(rw.ctx); ok; txTask, ok = rw.in.Next(rw.ctx) {
 		rw.RunTxTask(txTask)
-		if err := rw.resultCh.Add(rw.ctx, txTask); err != nil {
+		if err := rw.out.Add(rw.ctx, txTask); err != nil {
 			return err
 		}
 	}
 	return nil
 }
 
-func (rw *TraceWorker2) RunTxTask(txTask *state.TxTask) {
+func (rw *HistoricalTraceWorker) RunTxTask(txTask *state.TxTask) {
 	if rw.background && rw.chainTx == nil {
 		var err error
 		if rw.chainTx, err = rw.execArgs.ChainDB.BeginRo(rw.ctx); err != nil {
-			panic(err)
+			panic(fmt.Errorf("BeginRo: %w", err))
 		}
 		rw.stateReader.SetTx(rw.chainTx)
 		rw.chain = consensuschain.NewReader(rw.execArgs.ChainConfig, rw.chainTx, rw.execArgs.BlockReader, rw.logger)
@@ -133,7 +134,7 @@ func (rw *TraceWorker2) RunTxTask(txTask *state.TxTask) {
 			// Genesis block
 			_, ibs, err = core.GenesisToBlock(rw.execArgs.Genesis, rw.execArgs.Dirs.Tmp, rw.logger)
 			if err != nil {
-				panic(err)
+				panic(fmt.Errorf("GenesisToBlock: %w", err))
 			}
 			// For Genesis, rules should be empty, so that empty accounts can be included
 			rules = &chain.Rules{} //nolint
@@ -195,7 +196,7 @@ func (rw *TraceWorker2) RunTxTask(txTask *state.TxTask) {
 		//txTask.Tracer = tracer
 	}
 }
-func (rw *TraceWorker2) ResetTx(chainTx kv.Tx) {
+func (rw *HistoricalTraceWorker) ResetTx(chainTx kv.Tx) {
 	if rw.background && rw.chainTx != nil {
 		rw.chainTx.Rollback()
 		rw.chainTx = nil
@@ -220,8 +221,8 @@ type ExecArgs struct {
 	Workers     int
 }
 
-func NewTraceWorkers2Pool(consumer TraceConsumer, cfg *ExecArgs, ctx context.Context, toTxNum uint64, in *state.QueueWithRetry, workerCount int, logger log.Logger) (g *errgroup.Group, clearFunc func()) {
-	workers := make([]*TraceWorker2, workerCount)
+func NewHistoricalTraceWorkers(consumer TraceConsumer, cfg *ExecArgs, ctx context.Context, toTxNum uint64, in *state.QueueWithRetry, workerCount int, outputTxNum *atomic.Uint64, logger log.Logger) (g *errgroup.Group, clearFunc func()) {
+	workers := make([]*HistoricalTraceWorker, workerCount)
 
 	resultChSize := workerCount * 8
 	rws := state.NewResultsQueue(resultChSize, workerCount) // workerCount * 4
@@ -230,38 +231,47 @@ func NewTraceWorkers2Pool(consumer TraceConsumer, cfg *ExecArgs, ctx context.Con
 	ctx, cancel := context.WithCancel(ctx)
 	g, ctx = errgroup.WithContext(ctx)
 	for i := 0; i < workerCount; i++ {
-		workers[i] = NewTraceWorker2(consumer, in, rws, ctx, cfg, logger)
+		workers[i] = NewHistoricalTraceWorker(consumer, in, rws, ctx, cfg, logger)
 	}
 	for i := 0; i < workerCount; i++ {
 		i := i
-		g.Go(func() error {
+		g.Go(func() (err error) {
+			defer func() {
+				if rec := recover(); rec != nil {
+					err = fmt.Errorf("%s, %s", rec, dbg.Stack())
+				}
+			}()
+
 			return workers[i].Run()
 		})
 	}
 
 	//Reducer
-	g.Go(func() error {
-		defer logger.Warn("[dbg] reduce goroutine exit", "toTxNum", toTxNum)
+	g.Go(func() (err error) {
+		defer func() {
+			if rec := recover(); rec != nil {
+				err = fmt.Errorf("%s, %s", rec, dbg.Stack())
+			}
+		}()
+
 		tx, err := cfg.ChainDB.BeginRo(ctx)
 		if err != nil {
 			return err
 		}
 		defer tx.Rollback()
 
-		applyWorker := NewTraceWorker2(consumer, in, rws, ctx, cfg, logger)
+		applyWorker := NewHistoricalTraceWorker(consumer, in, rws, ctx, cfg, logger)
+		applyWorker.background = false
 		applyWorker.ResetTx(tx)
-		var outputTxNum uint64
-		for outputTxNum <= toTxNum {
-			if err := rws.Drain(ctx); err != nil {
-				return err
-			}
+		for outputTxNum.Load() <= toTxNum {
+			rws.DrainNonBlocking()
 
-			processedTxNum, _, err := processResultQueue2(consumer, rws, outputTxNum, applyWorker, true)
+			processedTxNum, _, err := processResultQueueHistorical(consumer, rws, outputTxNum.Load(), applyWorker, true)
 			if err != nil {
-				return err
+				return fmt.Errorf("processResultQueueHistorical: %w", err)
 			}
 			if processedTxNum > 0 {
-				outputTxNum = processedTxNum
+				outputTxNum.Store(processedTxNum)
 			}
 		}
 		return nil
@@ -283,7 +293,7 @@ func NewTraceWorkers2Pool(consumer TraceConsumer, cfg *ExecArgs, ctx context.Con
 	return g, clearFunc
 }
 
-func processResultQueue2(consumer TraceConsumer, rws *state.ResultsQueue, outputTxNumIn uint64, applyWorker *TraceWorker2, forceStopAtBlockEnd bool) (outputTxNum uint64, stopedAtBlockEnd bool, err error) {
+func processResultQueueHistorical(consumer TraceConsumer, rws *state.ResultsQueue, outputTxNumIn uint64, applyWorker *HistoricalTraceWorker, forceStopAtBlockEnd bool) (outputTxNum uint64, stopedAtBlockEnd bool, err error) {
 	rwsIt := rws.Iter()
 	defer rwsIt.Close()
 
@@ -301,35 +311,20 @@ func processResultQueue2(consumer TraceConsumer, rws *state.ResultsQueue, output
 			applyWorker.RunTxTask(txTask)
 		}
 		if txTask.Error != nil {
-			err := fmt.Errorf("%w: %v, blockNum=%d, TxNum=%d, TxIndex=%d, Final=%t", consensus.ErrInvalidBlock, txTask.Error, txTask.BlockNum, txTask.TxNum, txTask.TxIndex, txTask.Final)
 			return outputTxNum, false, err
 		}
-		if err := consumer.Collect(txTask); err != nil {
+		if err := consumer.Reduce(txTask, applyWorker.chainTx); err != nil {
 			return outputTxNum, false, err
 		}
 
 		if !txTask.Final && txTask.TxIndex >= 0 {
-			// by the tx.
-			receipt := &types.Receipt{
-				BlockNumber:       txTask.Header.Number,
-				TransactionIndex:  uint(txTask.TxIndex),
-				Type:              txTask.Tx.Type(),
-				CumulativeGasUsed: usedGas,
-				TxHash:            txTask.Tx.Hash(),
-				Logs:              txTask.Logs,
-			}
-			if txTask.Failed {
-				receipt.Status = types.ReceiptStatusFailed
-			} else {
-				receipt.Status = types.ReceiptStatusSuccessful
-			}
 			// if the transaction created a contract, store the creation address in the receipt.
 			//if msg.To() == nil {
 			//	receipt.ContractAddress = crypto.CreateAddress(evm.Origin, tx.GetNonce())
 			//}
 			// Set the receipt logs and create a bloom for filtering
 			//receipt.Bloom = types.CreateBloom(types.Receipts{receipt})
-			receipts = append(receipts, receipt)
+			receipts = append(receipts, txTask.CreateReceipt(usedGas))
 		}
 
 		usedGas += txTask.UsedGas
@@ -348,7 +343,7 @@ func processResultQueue2(consumer TraceConsumer, rws *state.ResultsQueue, output
 }
 
 func CustomTraceMapReduce(fromBlock, toBlock uint64, consumer TraceConsumer, ctx context.Context, tx kv.TemporalTx, cfg *ExecArgs, logger log.Logger) (err error) {
-	log.Info("[CustomTraceMapReduce] start", "fromBlock", fromBlock, "toBlock", toBlock)
+	log.Info("[CustomTraceMapReduce] start", "fromBlock", fromBlock, "toBlock", toBlock, "workers", cfg.Workers)
 	br := cfg.BlockReader
 	chainConfig := cfg.ChainConfig
 	getHeaderFunc := func(hash common.Hash, number uint64) (h *types.Header) {
@@ -365,12 +360,17 @@ func CustomTraceMapReduce(fromBlock, toBlock uint64, consumer TraceConsumer, ctx
 		return h
 	}
 
+	fromTxNum, err := rawdbv3.TxNums.Min(tx, fromBlock)
+	if err != nil {
+		return err
+	}
 	toTxNum, err := rawdbv3.TxNums.Max(tx, toBlock)
 	if err != nil {
 		return err
 	}
 
-	// input queue
+	// "Map-Reduce on history" is conflict-free - means we don't need "Retry" feature.
+	// But still can use this data-type as simple queue.
 	in := state.NewQueueWithRetry(100_000)
 	defer in.Close()
 
@@ -378,7 +378,9 @@ func CustomTraceMapReduce(fromBlock, toBlock uint64, consumer TraceConsumer, ctx
 	if cfg.Workers > 0 {
 		WorkerCount = cfg.Workers
 	}
-	workers, cleanup := NewTraceWorkers2Pool(consumer, cfg, ctx, toTxNum, in, WorkerCount, logger)
+	outTxNum := &atomic.Uint64{}
+	outTxNum.Store(fromTxNum)
+	workers, cleanup := NewHistoricalTraceWorkers(consumer, cfg, ctx, toTxNum, in, WorkerCount, outTxNum, logger)
 	defer workers.Wait()
 	defer cleanup()
 
@@ -464,9 +466,10 @@ func CustomTraceMapReduce(fromBlock, toBlock uint64, consumer TraceConsumer, ctx
 			inputTxNum++
 		}
 	}
+	in.Close() //no more work. no retries in map-reduce. means can close here.
 
 	if err := workers.Wait(); err != nil {
-		return err
+		return fmt.Errorf("WorkersPool: %w", err)
 	}
 
 	return nil

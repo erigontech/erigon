@@ -87,6 +87,8 @@ type Domain struct {
 	// underlying array is immutable - means it's ready for zero-copy use
 	_visibleFiles []ctxItem
 
+	integrityCheck func(name kv.Domain, fromStep, toStep uint64) bool
+
 	// replaceKeysInValues allows to replace commitment branch values with shorter keys.
 	// for commitment domain only
 	replaceKeysInValues bool
@@ -108,7 +110,7 @@ type domainCfg struct {
 	restrictSubsetFileDeletions bool
 }
 
-func NewDomain(cfg domainCfg, aggregationStep uint64, filenameBase, keysTable, valsTable, indexKeysTable, historyValsTable, indexTable string, logger log.Logger) (*Domain, error) {
+func NewDomain(cfg domainCfg, aggregationStep uint64, filenameBase, keysTable, valsTable, indexKeysTable, historyValsTable, indexTable string, integrityCheck func(name kv.Domain, fromStep, toStep uint64) bool, logger log.Logger) (*Domain, error) {
 	if cfg.hist.iiCfg.dirs.SnapDomain == "" {
 		panic("empty `dirs` variable")
 	}
@@ -122,6 +124,7 @@ func NewDomain(cfg domainCfg, aggregationStep uint64, filenameBase, keysTable, v
 		indexList:                   withBTree | withExistence,
 		replaceKeysInValues:         cfg.replaceKeysInValues,         // for commitment domain only
 		restrictSubsetFileDeletions: cfg.restrictSubsetFileDeletions, // to prevent not merged 'garbage' to delete on start
+		integrityCheck:              integrityCheck,
 	}
 
 	d._visibleFiles = []ctxItem{}
@@ -226,7 +229,11 @@ func (d *Domain) closeFilesAfterStep(lowerBound uint64) {
 	})
 	for _, item := range toClose {
 		d.dirtyFiles.Delete(item)
-		log.Debug(fmt.Sprintf("[snapshots] closing %s, because step %d has not enough files (was not complete). stack: %s", item.decompressor.FileName(), lowerBound, dbg.Stack()))
+		fName := ""
+		if item.decompressor != nil {
+			fName = item.decompressor.FileName()
+		}
+		log.Debug(fmt.Sprintf("[snapshots] closing %s, because step %d was not complete", fName, lowerBound))
 		item.closeFiles()
 	}
 
@@ -239,7 +246,11 @@ func (d *Domain) closeFilesAfterStep(lowerBound uint64) {
 	})
 	for _, item := range toClose {
 		d.History.dirtyFiles.Delete(item)
-		log.Debug(fmt.Sprintf("[snapshots] closing some histor files - because step %d has not enough files (was not complete)", lowerBound))
+		fName := ""
+		if item.decompressor != nil {
+			fName = item.decompressor.FileName()
+		}
+		log.Debug(fmt.Sprintf("[snapshots] closing %s, because step %d was not complete", fName, lowerBound))
 		item.closeFiles()
 	}
 
@@ -252,7 +263,11 @@ func (d *Domain) closeFilesAfterStep(lowerBound uint64) {
 	})
 	for _, item := range toClose {
 		d.History.InvertedIndex.dirtyFiles.Delete(item)
-		log.Debug(fmt.Sprintf("[snapshots] closing %s, because step %d has not enough files (was not complete)", item.decompressor.FileName(), lowerBound))
+		fName := ""
+		if item.decompressor != nil {
+			fName = item.decompressor.FileName()
+		}
+		log.Debug(fmt.Sprintf("[snapshots] closing %s, because step %d was not complete", fName, lowerBound))
 		item.closeFiles()
 	}
 }
@@ -280,6 +295,12 @@ func (d *Domain) scanStateFiles(fileNames []string) (garbageFiles []*filesItem) 
 		}
 		if startStep > endStep {
 			d.logger.Warn("File ignored by domain scan, startTxNum > endTxNum", "name", name)
+			continue
+		}
+
+		domainName, _ := kv.String2Domain(d.filenameBase)
+		if d.integrityCheck != nil && !d.integrityCheck(domainName, startStep, endStep) {
+			d.logger.Debug("[agg] skip garbage file", "name", name)
 			continue
 		}
 
@@ -1419,7 +1440,7 @@ func (dt *DomainRoTx) getLatestFromDb(key []byte, roTx kv.Tx) ([]byte, uint64, b
 			}
 			_, v, err = valsC.SeekExact(append(append(dt.valBuf[:0], key...), foundInvStep...))
 			if err != nil {
-				return nil, foundStep, false, fmt.Errorf("GetLatest value: %w", err)
+				return nil, foundStep, false, err
 			}
 			return v, foundStep, true, nil
 		}
@@ -1605,17 +1626,21 @@ type DomainPruneStat struct {
 	History *InvertedIndexPruneStat
 }
 
-func (dc *DomainPruneStat) String() string {
-	if dc.MinStep == math.MaxUint64 && dc.Values == 0 {
-		if dc.History == nil {
-			return ""
-		}
-		return dc.History.String()
+func (dc *DomainPruneStat) PrunedNothing() bool {
+	return dc.Values == 0 && (dc.History == nil || dc.History.PrunedNothing())
+}
+
+func (dc *DomainPruneStat) String() (kvstr string) {
+	if dc.PrunedNothing() {
+		return ""
 	}
-	if dc.History == nil {
-		return fmt.Sprintf("%d kv's step %d-%d", dc.Values, dc.MinStep, dc.MaxStep)
+	if dc.Values > 0 {
+		kvstr = fmt.Sprintf("kv: %d from steps %d-%d", dc.Values, dc.MinStep, dc.MaxStep)
 	}
-	return fmt.Sprintf("%d kv's step %d-%d; v%s", dc.Values, dc.MinStep, dc.MaxStep, dc.History)
+	if dc.History != nil {
+		kvstr += dc.History.String()
+	}
+	return kvstr
 }
 
 func (dc *DomainPruneStat) Accumulate(other *DomainPruneStat) {

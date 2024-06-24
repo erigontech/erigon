@@ -50,7 +50,6 @@ func ReadChainConfig(db kv.Getter, hash libcommon.Hash) (*chain.Config, error) {
 		}
 		config.Bor = borConfig
 	}
-
 	return &config, nil
 }
 

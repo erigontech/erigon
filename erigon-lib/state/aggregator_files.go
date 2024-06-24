@@ -34,7 +34,7 @@ type SelectedStaticFilesV3 struct {
 }
 
 func (sf SelectedStaticFilesV3) Close() {
-	clist := make([][]*filesItem, 0, uint16(kv.DomainLen)+kv.StandaloneIdxLen)
+	clist := make([][]*filesItem, 0, int(kv.DomainLen)+int(kv.StandaloneIdxLen))
 	for id := range sf.d {
 		clist = append(clist, sf.d[id], sf.dIdx[id], sf.dHist[id])
 	}
