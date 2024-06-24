@@ -3,6 +3,7 @@ package stages
 import (
 	"context"
 	"math"
+	"time"
 
 	"bytes"
 	"errors"
@@ -228,7 +229,11 @@ func SpawnSequencerExecutorVerifyStage(
 				cfg.verifier.CancelAllRequestsUnsafe()
 				return nil
 			} else {
-				log.Info(fmt.Sprintf("[%s] identified an invalid batch but limbo is disabled so mark is as valid anyway and continue", s.LogPrefix()), "batch", response.BatchNumber)
+				// this infinite loop will make the node to print the error once every minute therefore preventing it for creating new blocks
+				for {
+					time.Sleep(time.Minute)
+					log.Error(fmt.Sprintf("[%s] identified an invalid batch with number %d", s.LogPrefix(), response.BatchNumber))
+				}
 			}
 		}
 
