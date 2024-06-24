@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -51,24 +52,31 @@ func (b *builderClient) RegisterValidator(ctx context.Context, registers []*clty
 	// https://ethereum.github.io/builder-specs/#/Builder/registerValidator
 	path := "/eth/v1/builder/validators"
 	url := b.url.JoinPath(path).String()
+	if len(registers) == 0 {
+		return errors.New("empty registers")
+	}
 	payload, err := json.Marshal(registers)
 	if err != nil {
 		return err
 	}
 	_, err = httpCall[json.RawMessage](ctx, b.httpClient, http.MethodPost, url, nil, bytes.NewBuffer(payload))
+	if err == ErrNoContent {
+		// no content is ok
+		return nil
+	}
 	if err != nil {
 		log.Warn("[mev builder] httpCall error on RegisterValidator", "err", err)
 	}
 	return err
 }
 
-func (b *builderClient) GetExecutionPayloadHeader(ctx context.Context, slot int64, parentHash common.Hash, pubKey common.Bytes48) (*ExecutionPayloadHeader, error) {
+func (b *builderClient) GetHeader(ctx context.Context, slot int64, parentHash common.Hash, pubKey common.Bytes48) (*ExecutionPayloadHeader, error) {
 	// https://ethereum.github.io/builder-specs/#/Builder/getHeader
 	path := fmt.Sprintf("/eth/v1/builder/header/%d/%s/%s", slot, parentHash.Hex(), pubKey.Hex())
 	url := b.url.JoinPath(path).String()
 	header, err := httpCall[ExecutionPayloadHeader](ctx, b.httpClient, http.MethodGet, url, nil, nil)
 	if err != nil {
-		log.Warn("[mev builder] httpCall error on GetExecutionPayloadHeader", "err", err, "path", path)
+		log.Warn("[mev builder] httpCall error on GetExecutionPayloadHeader", "err", err, "slot", slot, "parentHash", parentHash.Hex(), "pubKey", pubKey.Hex())
 		return nil, err
 	}
 	return header, nil
@@ -87,7 +95,7 @@ func (b *builderClient) SubmitBlindedBlocks(ctx context.Context, block *cltypes.
 	}
 	resp, err := httpCall[BlindedBlockResponse](ctx, b.httpClient, http.MethodPost, url, headers, bytes.NewBuffer(payload))
 	if err != nil {
-		log.Warn("[mev builder] httpCall error on SubmitBlindedBlocks", "headers", headers, "err", err, "payload", string(payload))
+		log.Warn("[mev builder] httpCall error on SubmitBlindedBlocks", "err", err, "slot", block.Block.Slot)
 		return nil, nil, err
 	}
 
@@ -120,6 +128,10 @@ func (b *builderClient) GetStatus(ctx context.Context) error {
 	path := "/eth/v1/builder/status"
 	url := b.url.JoinPath(path).String()
 	_, err := httpCall[json.RawMessage](ctx, b.httpClient, http.MethodGet, url, nil, nil)
+	if err == ErrNoContent {
+		// no content is ok, we just need to check if the server is up
+		return nil
+	}
 	return err
 }
 
@@ -142,6 +154,9 @@ func httpCall[T any](ctx context.Context, client *http.Client, method, url strin
 	defer response.Body.Close()
 	if response.StatusCode < 200 || response.StatusCode > 299 {
 		// read response body
+		if response.Body == nil {
+			return nil, fmt.Errorf("status code: %d", response.StatusCode)
+		}
 		bytes, err := io.ReadAll(response.Body)
 		if err != nil {
 			log.Warn("[mev builder] io.ReadAll failed", "err", err, "url", url, "method", method)
@@ -155,13 +170,15 @@ func httpCall[T any](ctx context.Context, client *http.Client, method, url strin
 	}
 
 	// read response body
+	var body T
+	if response.Body == nil {
+		return &body, nil
+	}
 	bytes, err := io.ReadAll(response.Body)
 	if err != nil {
 		log.Warn("[mev builder] io.ReadAll failed", "err", err, "url", url, "method", method)
 		return nil, err
 	}
-
-	var body T
 	if len(bytes) == 0 {
 		return &body, nil
 	}
