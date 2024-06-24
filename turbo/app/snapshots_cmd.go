@@ -471,9 +471,7 @@ func doIntegrity(cliCtx *cli.Context) error {
 				return err
 			}
 		default:
-			if err := fmt.Errorf("unknown check: %s", chk); err != nil {
-				return err
-			}
+			return fmt.Errorf("unknown check: %s", chk)
 		}
 	}
 
