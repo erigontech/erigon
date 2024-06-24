@@ -233,7 +233,7 @@ func (d *Domain) closeFilesAfterStep(lowerBound uint64) {
 		if item.decompressor != nil {
 			fName = item.decompressor.FileName()
 		}
-		log.Debug(fmt.Sprintf("[snapshots] closing %s, because step %d has not enough files (was not complete)", fName, lowerBound))
+		log.Debug(fmt.Sprintf("[snapshots] closing %s, because step %d was not complete", fName, lowerBound))
 		item.closeFiles()
 	}
 
@@ -250,7 +250,7 @@ func (d *Domain) closeFilesAfterStep(lowerBound uint64) {
 		if item.decompressor != nil {
 			fName = item.decompressor.FileName()
 		}
-		log.Debug(fmt.Sprintf("[snapshots] closing %s, because step %d has not enough files (was not complete)", fName, lowerBound))
+		log.Debug(fmt.Sprintf("[snapshots] closing %s, because step %d was not complete", fName, lowerBound))
 		item.closeFiles()
 	}
 
@@ -267,7 +267,7 @@ func (d *Domain) closeFilesAfterStep(lowerBound uint64) {
 		if item.decompressor != nil {
 			fName = item.decompressor.FileName()
 		}
-		log.Debug(fmt.Sprintf("[snapshots] closing %s, because step %d has not enough files (was not complete)", fName, lowerBound))
+		log.Debug(fmt.Sprintf("[snapshots] closing %s, because step %d was not complete", fName, lowerBound))
 		item.closeFiles()
 	}
 }
