@@ -453,7 +453,6 @@ func doIntegrity(cliCtx *cli.Context) error {
 		if requestedCheck != "" && requestedCheck != chk {
 			continue
 		}
-		fmt.Printf("ru: %s\n", chk)
 		switch chk {
 		case integrity.BlocksTxnID:
 			if err := blockReader.(*freezeblocks.BlockReader).IntegrityTxnID(failFast); err != nil {
