@@ -173,7 +173,7 @@ func withStartTx(cmd *cobra.Command) {
 }
 
 func withTraceFromTx(cmd *cobra.Command) {
-	cmd.Flags().Uint64Var(&traceFromTx, "txtrace.from", 0, "start tracing from tx number")
+	cmd.Flags().Uint64Var(&traceFromTx, "txtrace.from", 0, "start tracing from txn number")
 }
 
 func withOutputCsvFile(cmd *cobra.Command) {

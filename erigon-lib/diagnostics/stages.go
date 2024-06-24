@@ -3,6 +3,7 @@ package diagnostics
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/log/v3"
@@ -121,9 +122,11 @@ func (d *DiagnosticClient) runCurrentSyncStageListener(rootCtx context.Context) 
 			case <-rootCtx.Done():
 				return
 			case info := <-ch:
-				d.mu.Lock()
-				d.SetCurrentSyncStage(info)
-				d.mu.Unlock()
+
+				err := d.SetCurrentSyncStage(info)
+				if err != nil {
+					log.Warn("[Diagnostics] Failed to set current stage", "err", err)
+				}
 
 				d.saveSyncStagesToDB()
 			}
@@ -179,7 +182,7 @@ func (d *DiagnosticClient) saveSyncStagesToDB() {
 	}
 }
 
-func (d *DiagnosticClient) getCurrentSyncIdxs() CurrentSyncStagesIdxs {
+func (d *DiagnosticClient) GetCurrentSyncIdxs() CurrentSyncStagesIdxs {
 	currentIdxs := CurrentSyncStagesIdxs{
 		Stage:    -1,
 		SubStage: -1,
@@ -218,7 +221,18 @@ func (d *DiagnosticClient) SetSubStagesList(stageId string, subStages []SyncSubS
 	}
 }
 
-func (d *DiagnosticClient) SetCurrentSyncStage(css CurrentSyncStage) {
+func (d *DiagnosticClient) SetCurrentSyncStage(css CurrentSyncStage) error {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	stageState, err := d.GetStageState(css.Stage)
+	if err != nil {
+		return err
+	}
+
+	if stageState == Completed {
+		return nil
+	}
+
 	isSet := false
 	for idx, stage := range d.syncStages {
 		if !isSet {
@@ -232,6 +246,8 @@ func (d *DiagnosticClient) SetCurrentSyncStage(css CurrentSyncStage) {
 			d.setStagesState(idx, Queued)
 		}
 	}
+
+	return nil
 }
 
 func (d *DiagnosticClient) setStagesState(stadeIdx int, state StageState) {
@@ -265,6 +281,21 @@ func (d *DiagnosticClient) SetCurrentSyncSubStage(css CurrentSyncSubStage) {
 			break
 		}
 	}
+}
+
+func (d *DiagnosticClient) GetStageState(stageId string) (StageState, error) {
+	for _, stage := range d.syncStages {
+		if stage.ID == stageId {
+			return stage.State, nil
+		}
+	}
+
+	stagesIdsList := make([]string, 0, len(d.syncStages))
+	for _, stage := range d.syncStages {
+		stagesIdsList = append(stagesIdsList, stage.ID)
+	}
+
+	return 0, fmt.Errorf("stage %s not found in stages list %s", stageId, stagesIdsList)
 }
 
 func ReadSyncStages(db kv.RoDB) []SyncStage {

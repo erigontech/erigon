@@ -25,6 +25,7 @@ import (
 
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 
+	"github.com/ledgerwatch/erigon/core/tracing"
 	"github.com/ledgerwatch/erigon/params"
 )
 
@@ -248,7 +249,7 @@ func enable3860(jt *JumpTable) {
 }
 
 // enable4844 applies mini-danksharding (BLOBHASH opcode)
-// - Adds an opcode that returns the versioned blob hash of the tx at a index.
+// - Adds an opcode that returns the versioned blob hash of the txn at a index.
 func enable4844(jt *JumpTable) {
 	jt[BLOBHASH] = &operation{
 		execute:     opBlobHash,
@@ -630,7 +631,7 @@ func opCreate3(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]
 	}
 	// Apply EIP150
 	gas -= gas / 64
-	scope.Contract.UseGas(gas)
+	scope.Contract.UseGas(gas, tracing.GasChangeUnspecified) // TODO(racytech): what's the reason?
 
 	stackValue := size
 

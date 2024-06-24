@@ -8,10 +8,9 @@ import (
 
 	"github.com/holiman/uint256"
 
-	"github.com/ledgerwatch/erigon-lib/state"
-
 	"github.com/ledgerwatch/erigon-lib/chain"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/state"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/core/types/accounts"
 	"github.com/ledgerwatch/erigon/core/vm/evmtypes"
@@ -66,6 +65,23 @@ type TxTask struct {
 	Requests types.Requests
 }
 
+func (t *TxTask) CreateReceipt(cumulativeGasUsed uint64) *types.Receipt {
+	receipt := &types.Receipt{
+		BlockNumber:       t.Header.Number,
+		BlockHash:         t.BlockHash,
+		TransactionIndex:  uint(t.TxIndex),
+		Type:              t.Tx.Type(),
+		CumulativeGasUsed: cumulativeGasUsed,
+		TxHash:            t.Tx.Hash(),
+		Logs:              t.Logs,
+	}
+	if t.Failed {
+		receipt.Status = types.ReceiptStatusFailed
+	} else {
+		receipt.Status = types.ReceiptStatusSuccessful
+	}
+	return receipt
+}
 func (t *TxTask) Reset() {
 	t.BalanceIncreaseSet = nil
 	returnReadList(t.ReadLists)
@@ -273,13 +289,12 @@ func (q *ResultsQueue) Add(ctx context.Context, task *TxTask) error {
 	}
 	return nil
 }
-func (q *ResultsQueue) drainNoBlock(task *TxTask) (resultsQueueLen int) {
+func (q *ResultsQueue) drainNoBlock(task *TxTask) {
 	q.Lock()
 	defer q.Unlock()
 	if task != nil {
 		heap.Push(q.results, task)
 	}
-	resultsQueueLen = q.results.Len()
 
 	for {
 		select {
@@ -289,10 +304,10 @@ func (q *ResultsQueue) drainNoBlock(task *TxTask) (resultsQueueLen int) {
 			}
 			if txTask != nil {
 				heap.Push(q.results, txTask)
-				resultsQueueLen = q.results.Len()
+				q.results.Len()
 			}
 		default: // we are inside mutex section, can't block here
-			return resultsQueueLen
+			return
 		}
 	}
 }

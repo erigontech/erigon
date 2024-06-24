@@ -19,6 +19,7 @@ package vm
 import (
 	"context"
 	"errors"
+	"github.com/ledgerwatch/erigon/core/rawdb"
 	"math"
 	"strconv"
 	"testing"
@@ -101,7 +102,8 @@ func testTemporalDB(t *testing.T) *temporal.DB {
 
 	t.Cleanup(db.Close)
 
-	agg, err := state3.NewAggregator(context.Background(), datadir.New(t.TempDir()), 16, db, log.New())
+	cr := rawdb.NewCanonicalReader()
+	agg, err := state3.NewAggregator(context.Background(), datadir.New(t.TempDir()), 16, db, cr, log.New())
 	require.NoError(t, err)
 	t.Cleanup(agg.Close)
 
