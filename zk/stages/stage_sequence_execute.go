@@ -21,6 +21,7 @@ import (
 	"github.com/ledgerwatch/erigon/zk"
 	zktx "github.com/ledgerwatch/erigon/zk/tx"
 	"github.com/ledgerwatch/erigon/zk/utils"
+	"github.com/ledgerwatch/erigon/zk/datastream/server"
 )
 
 var SpecialZeroIndexHash = common.HexToHash("0x27AE5BA08D7291C96C8CBDDCC148BF48A6D68C7974B94356F53754EF6171D757")
@@ -83,6 +84,12 @@ func SpawnSequencingStage(
 
 		err = processInjectedInitialBatch(ctx, cfg, s, sdb, forkId, header, parentBlock, &blockContext)
 		if err != nil {
+			return err
+		}
+
+		// write the batch directly to the stream
+		srv := server.NewDataStreamServer(cfg.stream, cfg.chainConfig.ChainID.Uint64())
+		if err = server.WriteBlocksToStream(tx, sdb.hermezDb.HermezDbReader, srv, cfg.stream, 1, 1, logPrefix); err != nil {
 			return err
 		}
 

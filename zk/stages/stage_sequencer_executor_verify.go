@@ -97,6 +97,9 @@ func SpawnSequencerExecutorVerifyStage(
 	// this mode of operation
 	canVerify := cfg.verifier.HasExecutorsUnsafe()
 	if !canVerify {
+		if latestBatch == injectedBatchNumber {
+			return nil
+		}
 		hermezDbReader := hermez_db.NewHermezDbReader(tx)
 		if err = cfg.verifier.WriteBatchToStream(latestBatch, hermezDbReader, tx); err != nil {
 			return err
