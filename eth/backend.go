@@ -1394,6 +1394,7 @@ func (s *Ethereum) setUpSnapDownloader(ctx context.Context, downloaderCfg *downl
 
 		s.downloaderClient = direct.NewDownloaderClient(bittorrentServer)
 	}
+
 	s.agg.OnFreeze(func(frozenFileNames []string) {
 		events := s.notifications.Events
 		events.OnNewSnapshot()
@@ -1508,13 +1509,12 @@ func (s *Ethereum) Start() error {
 		return currentTD
 	}
 
-	nodeStages := s.stagedSync.StagesIdsList()
-
 	if params.IsChainPoS(s.chainConfig, currentTDProvider) {
-		nodeStages = s.pipelineStagedSync.StagesIdsList()
+		diagnostics.Send(diagnostics.SyncStageList{StagesList: diagnostics.InitStagesFromList(s.pipelineStagedSync.StagesIdsList())})
 		s.waitForStageLoopStop = nil // TODO: Ethereum.Stop should wait for execution_server shutdown
 		go s.eth1ExecutionServer.Start(s.sentryCtx)
 	} else if s.config.PolygonSync {
+		diagnostics.Send(diagnostics.SyncStageList{StagesList: diagnostics.InitStagesFromList(s.stagedSync.StagesIdsList())})
 		s.waitForStageLoopStop = nil // Shutdown is handled by context
 		go func() {
 			ctx := s.sentryCtx
@@ -1530,11 +1530,9 @@ func (s *Ethereum) Start() error {
 			}
 		}()
 	} else {
+		diagnostics.Send(diagnostics.SyncStageList{StagesList: diagnostics.InitStagesFromList(s.stagedSync.StagesIdsList())})
 		go stages2.StageLoop(s.sentryCtx, s.chainDB, s.stagedSync, s.sentriesClient.Hd, s.waitForStageLoopStop, s.config.Sync.LoopThrottle, s.logger, s.blockReader, hook)
 	}
-
-	stages := diagnostics.InitStagesFromList(nodeStages)
-	diagnostics.Send(diagnostics.SyncStageList{StagesList: stages})
 
 	if s.chainConfig.Bor != nil {
 		s.engine.(*bor.Bor).Start(s.chainDB)

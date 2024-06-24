@@ -123,12 +123,11 @@ func (d *DiagnosticClient) runCurrentSyncStageListener(rootCtx context.Context) 
 			case <-rootCtx.Done():
 				return
 			case info := <-ch:
-				d.mu.Lock()
+
 				err := d.SetCurrentSyncStage(info)
 				if err != nil {
-					log.Error("[Diagnostics] Failed to set current stage", "err", err)
+					log.Warn("[Diagnostics] Failed to set current stage", "err", err)
 				}
-				d.mu.Unlock()
 
 				d.saveSyncStagesToDB()
 			}
@@ -224,6 +223,8 @@ func (d *DiagnosticClient) SetSubStagesList(stageId string, subStages []SyncSubS
 }
 
 func (d *DiagnosticClient) SetCurrentSyncStage(css CurrentSyncStage) error {
+	d.mu.Lock()
+	defer d.mu.Unlock()
 	stageState, err := d.GetStageState(css.Stage)
 	if err != nil {
 		return err
