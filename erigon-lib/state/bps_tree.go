@@ -127,9 +127,9 @@ func (b *BpsTree) traverse(g ArchiveGetter, mx [][]Node, n, di, i uint64) {
 		}
 		if k != nil {
 			mx[di] = append(mx[di], Node{off: b.offt.Get(ik), prefix: common.Copy(k), di: ik})
-			//fmt.Printf("d=%d k %x %d\n", di+1, k, offt)
+			fmt.Printf("d=%d k %x %d\n", di, k, ik)
 		}
-		b.traverse(g, mx, n, di, ik)
+		b.traverse(g, mx, n, di+1, ik)
 	}
 }
 
