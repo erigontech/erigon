@@ -1,0 +1,24 @@
+{
+    "tests/prague/eip7692_eof_v1/eip4200_relative_jumps/test_rjump.py::test_rjump_into_eofcreate[fork_CancunEIP7692-eof_test]": {
+        "vectors": {
+            "0": {
+                "code": "0xef0001010004020001000e03000100320400000000800004e000016000600060006000ec0000ef000101000402000100060300010014040000000080000260006000ee00ef00010100040200010001040000000080000000",
+                "results": {
+                    "Prague": {
+                        "exception": "EOFException.INVALID_RJUMP_DESTINATION",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0xf5d6af2cc8275ba90bca4b41f14510fee34c2e343033898a475ff0a84b219ad5",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evmone-t8n 0.12.0-dev+commit.85a89e56",
+            "description": "Test function documentation:\nEOF code containing RJUMP with target EOFCREATE immediate",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.0.4/tests/prague/eip7692_eof_v1/eip4200_relative_jumps/test_rjump.py#L489",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-4200.md",
+            "reference-spec-version": "17d4a8d12d2b5e0f2985c866376c16c8c6df7cba"
+        }
+    }
+}

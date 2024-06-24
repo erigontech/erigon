@@ -1,0 +1,24 @@
+{
+    "tests/prague/eip7692_eof_v1/eip4200_relative_jumps/test_rjump.py::test_rjump_into_swapn[fork_CancunEIP7692-eof_test]": {
+        "vectors": {
+            "0": {
+                "code": "0xef0001010004020001000b040000000080000260016001e00001e7015500",
+                "results": {
+                    "Prague": {
+                        "exception": "EOFException.INVALID_RJUMP_DESTINATION",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0xde6bf469f6f0ca063c565074f2496758deff4f2b81917e93c691fe917fc52b6c",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evmone-t8n 0.12.0-dev+commit.85a89e56",
+            "description": "Test function documentation:\nEOF code containing RJUMP with target SWAPN immediate",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.0.4/tests/prague/eip7692_eof_v1/eip4200_relative_jumps/test_rjump.py#L446",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-4200.md",
+            "reference-spec-version": "17d4a8d12d2b5e0f2985c866376c16c8c6df7cba"
+        }
+    }
+}

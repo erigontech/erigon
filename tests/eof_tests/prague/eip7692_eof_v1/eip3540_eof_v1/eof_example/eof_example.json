@@ -1,0 +1,23 @@
+{
+    "tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_eof_example.py::test_eof_example[fork_CancunEIP7692-eof_test]": {
+        "vectors": {
+            "0": {
+                "code": "0xef0001010010020004000500060008000204000100008000010100000100010003020300035fe300010050e3000250e43080e300035050e480e4ef",
+                "results": {
+                    "Prague": {
+                        "result": true
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0xf91c0d32c0e59772417a3e223b57590c91593cb17369253549b946f971c5fcbf",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evmone-t8n 0.12.0-dev+commit.85a89e56",
+            "description": "Test function documentation:\n\n    Example of python EOF classes",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.0.4/tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_eof_example.py#L25",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-3540.md",
+            "reference-spec-version": "8dcb0a8c1c0102c87224308028632cc986a61183"
+        }
+    }
+}

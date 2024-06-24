@@ -1,0 +1,23 @@
+{
+    "tests/prague/eip7692_eof_v1/eip4200_relative_jumps/test_rjump.py::test_rjump_positive_negative[fork_CancunEIP7692-eof_test]": {
+        "vectors": {
+            "0": {
+                "code": "0xef0001010004020001001104000000008000025fe10003e0000761201560015500e0fff6",
+                "results": {
+                    "Prague": {
+                        "result": true
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0xfc71301039485cc0eb3388b1164f294e5228c02e07a36184233b42e572f27e5c",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evmone-t8n 0.12.0-dev+commit.85a89e56",
+            "description": "Test function documentation:\nEOF1V4200_0001 (Valid) EOF code containing RJUMP (Positive, Negative)",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.0.4/tests/prague/eip7692_eof_v1/eip4200_relative_jumps/test_rjump.py#L20",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-4200.md",
+            "reference-spec-version": "17d4a8d12d2b5e0f2985c866376c16c8c6df7cba"
+        }
+    }
+}

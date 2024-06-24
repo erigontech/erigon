@@ -1,0 +1,197 @@
+{
+    "tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_section_size.py::test_section_size[fork_CancunEIP7692-eof_test-section_kind_DATA-section_size_NORMAL-exception_None]": {
+        "vectors": {
+            "0": {
+                "code": "0xef00010100040200010003040003000080000130500000aaaa",
+                "results": {
+                    "Prague": {
+                        "result": true
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0x35a339078e9cee540492224ae9e3437594dad4c37a9a7139b1898975b38891de",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evmone-t8n 0.12.0-dev+commit.85a89e56",
+            "description": "Test function documentation:\n\n    Test custom_size is auto, more or less then the actual size of the section",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.0.4/tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_section_size.py#L37",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-3540.md",
+            "reference-spec-version": "8dcb0a8c1c0102c87224308028632cc986a61183"
+        }
+    },
+    "tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_section_size.py::test_section_size[fork_CancunEIP7692-eof_test-section_kind_DATA-section_size_UNDERSIZE-exception_EOFException.INVALID_SECTION_BODIES_SIZE]": {
+        "vectors": {
+            "0": {
+                "code": "0xef00010100040200010003040002000080000130500000daaa",
+                "results": {
+                    "Prague": {
+                        "exception": "EOFException.INVALID_SECTION_BODIES_SIZE",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0x4758eac0d5f58c8a7b4f66064e1178fec48deb846f29bd3740380902755d3357",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evmone-t8n 0.12.0-dev+commit.85a89e56",
+            "description": "Test function documentation:\n\n    Test custom_size is auto, more or less then the actual size of the section",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.0.4/tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_section_size.py#L37",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-3540.md",
+            "reference-spec-version": "8dcb0a8c1c0102c87224308028632cc986a61183"
+        }
+    },
+    "tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_section_size.py::test_section_size[fork_CancunEIP7692-eof_test-section_kind_DATA-section_size_OVERSIZE-exception_EOFException.TOPLEVEL_CONTAINER_TRUNCATED]": {
+        "vectors": {
+            "0": {
+                "code": "0xef00010100040200010003040064000080000130500000daaa",
+                "results": {
+                    "Prague": {
+                        "exception": "EOFException.TOPLEVEL_CONTAINER_TRUNCATED",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0x63e015a40baf37f0c1a02ddf4486c7a1fc831d6617ec403ff746ce9cf58f9901",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evmone-t8n 0.12.0-dev+commit.85a89e56",
+            "description": "Test function documentation:\n\n    Test custom_size is auto, more or less then the actual size of the section",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.0.4/tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_section_size.py#L37",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-3540.md",
+            "reference-spec-version": "8dcb0a8c1c0102c87224308028632cc986a61183"
+        }
+    },
+    "tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_section_size.py::test_section_size[fork_CancunEIP7692-eof_test-section_kind_CODE-section_size_UNDERSIZE-exception_EOFException.INVALID_SECTION_BODIES_SIZE]": {
+        "vectors": {
+            "0": {
+                "code": "0xef00010100040200010002040003000080000130500000aaaa",
+                "results": {
+                    "Prague": {
+                        "exception": "EOFException.INVALID_SECTION_BODIES_SIZE",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0x98b148f814353d745a82cfd33ca11bb1b692e51a21bbf0c1cf82511aeaf09058",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evmone-t8n 0.12.0-dev+commit.85a89e56",
+            "description": "Test function documentation:\n\n    Test custom_size is auto, more or less then the actual size of the section",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.0.4/tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_section_size.py#L37",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-3540.md",
+            "reference-spec-version": "8dcb0a8c1c0102c87224308028632cc986a61183"
+        }
+    },
+    "tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_section_size.py::test_section_size[fork_CancunEIP7692-eof_test-section_kind_CODE-section_size_OVERSIZE-exception_EOFException.INVALID_SECTION_BODIES_SIZE]": {
+        "vectors": {
+            "0": {
+                "code": "0xef00010100040200010064040003000080000130500000aaaa",
+                "results": {
+                    "Prague": {
+                        "exception": "EOFException.INVALID_SECTION_BODIES_SIZE",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0xea5335ce4f71cceb70dab53c445bde495699a8bf7d87ca8368eb5537174917d3",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evmone-t8n 0.12.0-dev+commit.85a89e56",
+            "description": "Test function documentation:\n\n    Test custom_size is auto, more or less then the actual size of the section",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.0.4/tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_section_size.py#L37",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-3540.md",
+            "reference-spec-version": "8dcb0a8c1c0102c87224308028632cc986a61183"
+        }
+    },
+    "tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_section_size.py::test_section_size[fork_CancunEIP7692-eof_test-section_kind_CODE-section_size_NORMAL-exception_None]": {
+        "vectors": {
+            "0": {
+                "code": "0xef00010100040200010003040003000080000130500000aaaa",
+                "results": {
+                    "Prague": {
+                        "result": true
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0x35a339078e9cee540492224ae9e3437594dad4c37a9a7139b1898975b38891de",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evmone-t8n 0.12.0-dev+commit.85a89e56",
+            "description": "Test function documentation:\n\n    Test custom_size is auto, more or less then the actual size of the section",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.0.4/tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_section_size.py#L37",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-3540.md",
+            "reference-spec-version": "8dcb0a8c1c0102c87224308028632cc986a61183"
+        }
+    },
+    "tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_section_size.py::test_section_size[fork_CancunEIP7692-eof_test-section_kind_TYPE-section_size_UNDERSIZE-exception_EOFException.INVALID_TYPE_SECTION_SIZE]": {
+        "vectors": {
+            "0": {
+                "code": "0xef00010100020200010003040003000080000130500000aaaa",
+                "results": {
+                    "Prague": {
+                        "exception": "EOFException.INVALID_TYPE_SECTION_SIZE",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0xb9dec30e9d4af5f90f145b399c62657e83b8ea92c4dbe80604c3d0987f6101f4",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evmone-t8n 0.12.0-dev+commit.85a89e56",
+            "description": "Test function documentation:\n\n    Test custom_size is auto, more or less then the actual size of the section",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.0.4/tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_section_size.py#L37",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-3540.md",
+            "reference-spec-version": "8dcb0a8c1c0102c87224308028632cc986a61183"
+        }
+    },
+    "tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_section_size.py::test_section_size[fork_CancunEIP7692-eof_test-section_kind_TYPE-section_size_OVERSIZE-exception_EOFException.INVALID_SECTION_BODIES_SIZE]": {
+        "vectors": {
+            "0": {
+                "code": "0xef00010100640200010003040003000080000130500000aaaa",
+                "results": {
+                    "Prague": {
+                        "exception": "EOFException.INVALID_SECTION_BODIES_SIZE",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0x02d5d0d64ce2f8e2b307645e4c9d20d5d1ba0aaef994b7403232734871c9d558",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evmone-t8n 0.12.0-dev+commit.85a89e56",
+            "description": "Test function documentation:\n\n    Test custom_size is auto, more or less then the actual size of the section",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.0.4/tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_section_size.py#L37",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-3540.md",
+            "reference-spec-version": "8dcb0a8c1c0102c87224308028632cc986a61183"
+        }
+    },
+    "tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_section_size.py::test_section_size[fork_CancunEIP7692-eof_test-section_kind_TYPE-section_size_NORMAL-exception_None]": {
+        "vectors": {
+            "0": {
+                "code": "0xef00010100040200010003040003000080000130500000aaaa",
+                "results": {
+                    "Prague": {
+                        "result": true
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0x35a339078e9cee540492224ae9e3437594dad4c37a9a7139b1898975b38891de",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evmone-t8n 0.12.0-dev+commit.85a89e56",
+            "description": "Test function documentation:\n\n    Test custom_size is auto, more or less then the actual size of the section",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.0.4/tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_section_size.py#L37",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-3540.md",
+            "reference-spec-version": "8dcb0a8c1c0102c87224308028632cc986a61183"
+        }
+    }
+}

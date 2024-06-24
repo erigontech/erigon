@@ -1,0 +1,1049 @@
+{
+    "tests/prague/eip7692_eof_v1/eip6206_jumpf/test_jumpf_stack.py::test_jumpf_stack_returning_rules[fork_CancunEIP7692-eof_test-less-stack-to-2-to-0-so-0]": {
+        "vectors": {
+            "0": {
+                "code": "0xef000101000c020003000a0004000304000000008000020000000202000002e30001612015600155005fe500025050e4",
+                "results": {
+                    "Prague": {
+                        "exception": "EOFException.STACK_UNDERFLOW",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0x1318bbbd6f8adce4011d58d57ac3c0df181108c5da713769718c6d1cc72a5581",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evmone-t8n 0.12.0-dev+commit.85a89e56",
+            "description": "Test function documentation:\n\n    Tests for JUMPF validation stack rules.  Returning section cases.\n    Valid cases are executed.",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.0.4/tests/prague/eip7692_eof_v1/eip6206_jumpf/test_jumpf_stack.py#L68",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-6206.md",
+            "reference-spec-version": "2f365ea0cd58faa6e26013ea77ce6d538175f7d0"
+        }
+    },
+    "tests/prague/eip7692_eof_v1/eip6206_jumpf/test_jumpf_stack.py::test_jumpf_stack_returning_rules[fork_CancunEIP7692-eof_test-less-stack-to-2-to-0-so-2]": {
+        "vectors": {
+            "0": {
+                "code": "0xef000101000c020003000a0004000304000000008000040002000202000002e30001612015600155005fe500025050e4",
+                "results": {
+                    "Prague": {
+                        "exception": "EOFException.STACK_UNDERFLOW",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0x637b64d7852c25891190bc727cfb2a710e9cb4e2ac950aa793b49111f5aa7eae",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evmone-t8n 0.12.0-dev+commit.85a89e56",
+            "description": "Test function documentation:\n\n    Tests for JUMPF validation stack rules.  Returning section cases.\n    Valid cases are executed.",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.0.4/tests/prague/eip7692_eof_v1/eip6206_jumpf/test_jumpf_stack.py#L68",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-6206.md",
+            "reference-spec-version": "2f365ea0cd58faa6e26013ea77ce6d538175f7d0"
+        }
+    },
+    "tests/prague/eip7692_eof_v1/eip6206_jumpf/test_jumpf_stack.py::test_jumpf_stack_returning_rules[fork_CancunEIP7692-eof_test-less-stack-to-2-to-0-so-4]": {
+        "vectors": {
+            "0": {
+                "code": "0xef000101000c020003000a0004000304000000008000060004000202000002e30001612015600155005fe500025050e4",
+                "results": {
+                    "Prague": {
+                        "exception": "EOFException.STACK_UNDERFLOW",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0x0dfd1d36d769f46055d6703b21437d055f2b3a7cd5484d01033b431933a4a833",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evmone-t8n 0.12.0-dev+commit.85a89e56",
+            "description": "Test function documentation:\n\n    Tests for JUMPF validation stack rules.  Returning section cases.\n    Valid cases are executed.",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.0.4/tests/prague/eip7692_eof_v1/eip6206_jumpf/test_jumpf_stack.py#L68",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-6206.md",
+            "reference-spec-version": "2f365ea0cd58faa6e26013ea77ce6d538175f7d0"
+        }
+    },
+    "tests/prague/eip7692_eof_v1/eip6206_jumpf/test_jumpf_stack.py::test_jumpf_stack_returning_rules[fork_CancunEIP7692-eof_test-less-stack-to-2-to-2-so-2]": {
+        "vectors": {
+            "0": {
+                "code": "0xef000101000c020003000a0004000104000000008000040002000202020002e30001612015600155005fe50002e4",
+                "results": {
+                    "Prague": {
+                        "exception": "EOFException.STACK_UNDERFLOW",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0x5a4c5834ebfbc4824879a4844bb86776b231337d295ccf667ee0cb33c399d6c9",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evmone-t8n 0.12.0-dev+commit.85a89e56",
+            "description": "Test function documentation:\n\n    Tests for JUMPF validation stack rules.  Returning section cases.\n    Valid cases are executed.",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.0.4/tests/prague/eip7692_eof_v1/eip6206_jumpf/test_jumpf_stack.py#L68",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-6206.md",
+            "reference-spec-version": "2f365ea0cd58faa6e26013ea77ce6d538175f7d0"
+        }
+    },
+    "tests/prague/eip7692_eof_v1/eip6206_jumpf/test_jumpf_stack.py::test_jumpf_stack_returning_rules[fork_CancunEIP7692-eof_test-less-stack-to-2-to-2-so-4]": {
+        "vectors": {
+            "0": {
+                "code": "0xef000101000c020003000a0004000104000000008000060004000202020002e30001612015600155005fe50002e4",
+                "results": {
+                    "Prague": {
+                        "exception": "EOFException.STACK_UNDERFLOW",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0xf8498836d9bc1ff92a97765d09060b287e24b41b9823b677f3a02da73b73c155",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evmone-t8n 0.12.0-dev+commit.85a89e56",
+            "description": "Test function documentation:\n\n    Tests for JUMPF validation stack rules.  Returning section cases.\n    Valid cases are executed.",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.0.4/tests/prague/eip7692_eof_v1/eip6206_jumpf/test_jumpf_stack.py#L68",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-6206.md",
+            "reference-spec-version": "2f365ea0cd58faa6e26013ea77ce6d538175f7d0"
+        }
+    },
+    "tests/prague/eip7692_eof_v1/eip6206_jumpf/test_jumpf_stack.py::test_jumpf_stack_returning_rules[fork_CancunEIP7692-eof_test-less-stack-to-2-to-4-so-4]": {
+        "vectors": {
+            "0": {
+                "code": "0xef000101000c020003000a0004000304000000008000060004000202040004e30001612015600155005fe500025f5fe4",
+                "results": {
+                    "Prague": {
+                        "exception": "EOFException.STACK_UNDERFLOW",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0xd44597682407f19cda6fec167e42a6746e8b87e0e2f97d8e80a188da3f59af12",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evmone-t8n 0.12.0-dev+commit.85a89e56",
+            "description": "Test function documentation:\n\n    Tests for JUMPF validation stack rules.  Returning section cases.\n    Valid cases are executed.",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.0.4/tests/prague/eip7692_eof_v1/eip6206_jumpf/test_jumpf_stack.py#L68",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-6206.md",
+            "reference-spec-version": "2f365ea0cd58faa6e26013ea77ce6d538175f7d0"
+        }
+    },
+    "tests/prague/eip7692_eof_v1/eip6206_jumpf/test_jumpf_stack.py::test_jumpf_stack_returning_rules[fork_CancunEIP7692-eof_test-less-stack-to-4-to-0-so-0]": {
+        "vectors": {
+            "0": {
+                "code": "0xef000101000c020003000a0006000504000000008000020000000404000004e30001612015600155005f5f5fe5000250505050e4",
+                "results": {
+                    "Prague": {
+                        "exception": "EOFException.STACK_UNDERFLOW",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0xaf086b8089f1fcfd6d10938d9a06ecd6cc593d26dcbb8dcb5bae71dc5f8c3668",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evmone-t8n 0.12.0-dev+commit.85a89e56",
+            "description": "Test function documentation:\n\n    Tests for JUMPF validation stack rules.  Returning section cases.\n    Valid cases are executed.",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.0.4/tests/prague/eip7692_eof_v1/eip6206_jumpf/test_jumpf_stack.py#L68",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-6206.md",
+            "reference-spec-version": "2f365ea0cd58faa6e26013ea77ce6d538175f7d0"
+        }
+    },
+    "tests/prague/eip7692_eof_v1/eip6206_jumpf/test_jumpf_stack.py::test_jumpf_stack_returning_rules[fork_CancunEIP7692-eof_test-less-stack-to-4-to-0-so-2]": {
+        "vectors": {
+            "0": {
+                "code": "0xef000101000c020003000a0006000504000000008000040002000404000004e30001612015600155005f5f5fe5000250505050e4",
+                "results": {
+                    "Prague": {
+                        "exception": "EOFException.STACK_UNDERFLOW",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0x4163b4e55ff84284e10c0713f4b27d5aa00032e080c66b3d5eddad97ec092a84",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evmone-t8n 0.12.0-dev+commit.85a89e56",
+            "description": "Test function documentation:\n\n    Tests for JUMPF validation stack rules.  Returning section cases.\n    Valid cases are executed.",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.0.4/tests/prague/eip7692_eof_v1/eip6206_jumpf/test_jumpf_stack.py#L68",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-6206.md",
+            "reference-spec-version": "2f365ea0cd58faa6e26013ea77ce6d538175f7d0"
+        }
+    },
+    "tests/prague/eip7692_eof_v1/eip6206_jumpf/test_jumpf_stack.py::test_jumpf_stack_returning_rules[fork_CancunEIP7692-eof_test-less-stack-to-4-to-0-so-4]": {
+        "vectors": {
+            "0": {
+                "code": "0xef000101000c020003000a0006000504000000008000060004000404000004e30001612015600155005f5f5fe5000250505050e4",
+                "results": {
+                    "Prague": {
+                        "exception": "EOFException.STACK_UNDERFLOW",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0x51ced9f12be147ffef0eff1523e86b0bf1868d6646af20b8f705417bab4d5e95",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evmone-t8n 0.12.0-dev+commit.85a89e56",
+            "description": "Test function documentation:\n\n    Tests for JUMPF validation stack rules.  Returning section cases.\n    Valid cases are executed.",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.0.4/tests/prague/eip7692_eof_v1/eip6206_jumpf/test_jumpf_stack.py#L68",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-6206.md",
+            "reference-spec-version": "2f365ea0cd58faa6e26013ea77ce6d538175f7d0"
+        }
+    },
+    "tests/prague/eip7692_eof_v1/eip6206_jumpf/test_jumpf_stack.py::test_jumpf_stack_returning_rules[fork_CancunEIP7692-eof_test-less-stack-to-4-to-2-so-2]": {
+        "vectors": {
+            "0": {
+                "code": "0xef000101000c020003000a0006000304000000008000040002000404020004e30001612015600155005f5f5fe500025050e4",
+                "results": {
+                    "Prague": {
+                        "exception": "EOFException.STACK_UNDERFLOW",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0x78072639e345b7aba656b6d3dae842b05eb9edf1bb1f4152509fedd054f96a5b",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evmone-t8n 0.12.0-dev+commit.85a89e56",
+            "description": "Test function documentation:\n\n    Tests for JUMPF validation stack rules.  Returning section cases.\n    Valid cases are executed.",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.0.4/tests/prague/eip7692_eof_v1/eip6206_jumpf/test_jumpf_stack.py#L68",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-6206.md",
+            "reference-spec-version": "2f365ea0cd58faa6e26013ea77ce6d538175f7d0"
+        }
+    },
+    "tests/prague/eip7692_eof_v1/eip6206_jumpf/test_jumpf_stack.py::test_jumpf_stack_returning_rules[fork_CancunEIP7692-eof_test-less-stack-to-4-to-2-so-4]": {
+        "vectors": {
+            "0": {
+                "code": "0xef000101000c020003000a0006000304000000008000060004000404020004e30001612015600155005f5f5fe500025050e4",
+                "results": {
+                    "Prague": {
+                        "exception": "EOFException.STACK_UNDERFLOW",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0x22163e8bfd96d3508910f3a30c3eb92cdb20b7d56e8ee895a2be835f36c52653",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evmone-t8n 0.12.0-dev+commit.85a89e56",
+            "description": "Test function documentation:\n\n    Tests for JUMPF validation stack rules.  Returning section cases.\n    Valid cases are executed.",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.0.4/tests/prague/eip7692_eof_v1/eip6206_jumpf/test_jumpf_stack.py#L68",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-6206.md",
+            "reference-spec-version": "2f365ea0cd58faa6e26013ea77ce6d538175f7d0"
+        }
+    },
+    "tests/prague/eip7692_eof_v1/eip6206_jumpf/test_jumpf_stack.py::test_jumpf_stack_returning_rules[fork_CancunEIP7692-eof_test-less-stack-to-4-to-4-so-4]": {
+        "vectors": {
+            "0": {
+                "code": "0xef000101000c020003000a0006000104000000008000060004000404040004e30001612015600155005f5f5fe50002e4",
+                "results": {
+                    "Prague": {
+                        "exception": "EOFException.STACK_UNDERFLOW",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0xa65623ff1dacbed5a2a3f757c07d1e470fca3d33c2470d079a2684426bbe8190",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evmone-t8n 0.12.0-dev+commit.85a89e56",
+            "description": "Test function documentation:\n\n    Tests for JUMPF validation stack rules.  Returning section cases.\n    Valid cases are executed.",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.0.4/tests/prague/eip7692_eof_v1/eip6206_jumpf/test_jumpf_stack.py#L68",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-6206.md",
+            "reference-spec-version": "2f365ea0cd58faa6e26013ea77ce6d538175f7d0"
+        }
+    },
+    "tests/prague/eip7692_eof_v1/eip6206_jumpf/test_jumpf_stack.py::test_jumpf_stack_returning_rules[fork_CancunEIP7692-eof_test-same-stack-to-0-to-0-so-0]": {
+        "vectors": {
+            "0": {
+                "code": "0xef000101000c020003000a0003000104000000008000020000000000000000e3000161201560015500e50002e4",
+                "results": {
+                    "Prague": {
+                        "result": true
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0x0b0cd0a3595f111cfb0a26f895b89ef5520c4f0ded44829a8acdf4341f06807d",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evmone-t8n 0.12.0-dev+commit.85a89e56",
+            "description": "Test function documentation:\n\n    Tests for JUMPF validation stack rules.  Returning section cases.\n    Valid cases are executed.",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.0.4/tests/prague/eip7692_eof_v1/eip6206_jumpf/test_jumpf_stack.py#L68",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-6206.md",
+            "reference-spec-version": "2f365ea0cd58faa6e26013ea77ce6d538175f7d0"
+        }
+    },
+    "tests/prague/eip7692_eof_v1/eip6206_jumpf/test_jumpf_stack.py::test_jumpf_stack_returning_rules[fork_CancunEIP7692-eof_test-same-stack-to-0-to-0-so-2]": {
+        "vectors": {
+            "0": {
+                "code": "0xef000101000c020003000a0003000104000000008000040002000000000000e3000161201560015500e50002e4",
+                "results": {
+                    "Prague": {
+                        "exception": "EOFException.STACK_UNDERFLOW",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0x327f9d901fae47ee7af5c9fc5fc2d4583f817b151c458fa742efa419b259eab1",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evmone-t8n 0.12.0-dev+commit.85a89e56",
+            "description": "Test function documentation:\n\n    Tests for JUMPF validation stack rules.  Returning section cases.\n    Valid cases are executed.",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.0.4/tests/prague/eip7692_eof_v1/eip6206_jumpf/test_jumpf_stack.py#L68",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-6206.md",
+            "reference-spec-version": "2f365ea0cd58faa6e26013ea77ce6d538175f7d0"
+        }
+    },
+    "tests/prague/eip7692_eof_v1/eip6206_jumpf/test_jumpf_stack.py::test_jumpf_stack_returning_rules[fork_CancunEIP7692-eof_test-same-stack-to-0-to-0-so-4]": {
+        "vectors": {
+            "0": {
+                "code": "0xef000101000c020003000a0003000104000000008000060004000000000000e3000161201560015500e50002e4",
+                "results": {
+                    "Prague": {
+                        "exception": "EOFException.STACK_UNDERFLOW",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0xc1b1d3735241c060b64f1ce9a43a734094f40a93bccc0ac610980e89c8fed9c3",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evmone-t8n 0.12.0-dev+commit.85a89e56",
+            "description": "Test function documentation:\n\n    Tests for JUMPF validation stack rules.  Returning section cases.\n    Valid cases are executed.",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.0.4/tests/prague/eip7692_eof_v1/eip6206_jumpf/test_jumpf_stack.py#L68",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-6206.md",
+            "reference-spec-version": "2f365ea0cd58faa6e26013ea77ce6d538175f7d0"
+        }
+    },
+    "tests/prague/eip7692_eof_v1/eip6206_jumpf/test_jumpf_stack.py::test_jumpf_stack_returning_rules[fork_CancunEIP7692-eof_test-same-stack-to-0-to-2-so-2]": {
+        "vectors": {
+            "0": {
+                "code": "0xef000101000c020003000a0003000304000000008000040002000000020002e3000161201560015500e500025f5fe4",
+                "results": {
+                    "Prague": {
+                        "result": true
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0x6e0dc03ecbcbd4c033b27a1e597fd1056b8fb9b032a1d79abbd67740842dc772",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evmone-t8n 0.12.0-dev+commit.85a89e56",
+            "description": "Test function documentation:\n\n    Tests for JUMPF validation stack rules.  Returning section cases.\n    Valid cases are executed.",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.0.4/tests/prague/eip7692_eof_v1/eip6206_jumpf/test_jumpf_stack.py#L68",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-6206.md",
+            "reference-spec-version": "2f365ea0cd58faa6e26013ea77ce6d538175f7d0"
+        }
+    },
+    "tests/prague/eip7692_eof_v1/eip6206_jumpf/test_jumpf_stack.py::test_jumpf_stack_returning_rules[fork_CancunEIP7692-eof_test-same-stack-to-0-to-2-so-4]": {
+        "vectors": {
+            "0": {
+                "code": "0xef000101000c020003000a0003000304000000008000060004000000020002e3000161201560015500e500025f5fe4",
+                "results": {
+                    "Prague": {
+                        "exception": "EOFException.STACK_UNDERFLOW",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0xcf7487073a93ccc2e7846f300c10442ff5f467e08e19b09c5e0116ab49521d28",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evmone-t8n 0.12.0-dev+commit.85a89e56",
+            "description": "Test function documentation:\n\n    Tests for JUMPF validation stack rules.  Returning section cases.\n    Valid cases are executed.",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.0.4/tests/prague/eip7692_eof_v1/eip6206_jumpf/test_jumpf_stack.py#L68",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-6206.md",
+            "reference-spec-version": "2f365ea0cd58faa6e26013ea77ce6d538175f7d0"
+        }
+    },
+    "tests/prague/eip7692_eof_v1/eip6206_jumpf/test_jumpf_stack.py::test_jumpf_stack_returning_rules[fork_CancunEIP7692-eof_test-same-stack-to-0-to-4-so-4]": {
+        "vectors": {
+            "0": {
+                "code": "0xef000101000c020003000a0003000504000000008000060004000000040004e3000161201560015500e500025f5f5f5fe4",
+                "results": {
+                    "Prague": {
+                        "result": true
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0xd6761fe360191b1c503af503aa092a9b9f392aaec5b3dd9596c9740319f2953a",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evmone-t8n 0.12.0-dev+commit.85a89e56",
+            "description": "Test function documentation:\n\n    Tests for JUMPF validation stack rules.  Returning section cases.\n    Valid cases are executed.",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.0.4/tests/prague/eip7692_eof_v1/eip6206_jumpf/test_jumpf_stack.py#L68",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-6206.md",
+            "reference-spec-version": "2f365ea0cd58faa6e26013ea77ce6d538175f7d0"
+        }
+    },
+    "tests/prague/eip7692_eof_v1/eip6206_jumpf/test_jumpf_stack.py::test_jumpf_stack_returning_rules[fork_CancunEIP7692-eof_test-same-stack-to-2-to-0-so-0]": {
+        "vectors": {
+            "0": {
+                "code": "0xef000101000c020003000a0005000304000000008000020000000202000002e30001612015600155005f5fe500025050e4",
+                "results": {
+                    "Prague": {
+                        "result": true
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0xf48399098ee3771bd3d90f08ca8fdc2efb706ade98dbbf23effcaae0d0e553a4",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evmone-t8n 0.12.0-dev+commit.85a89e56",
+            "description": "Test function documentation:\n\n    Tests for JUMPF validation stack rules.  Returning section cases.\n    Valid cases are executed.",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.0.4/tests/prague/eip7692_eof_v1/eip6206_jumpf/test_jumpf_stack.py#L68",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-6206.md",
+            "reference-spec-version": "2f365ea0cd58faa6e26013ea77ce6d538175f7d0"
+        }
+    },
+    "tests/prague/eip7692_eof_v1/eip6206_jumpf/test_jumpf_stack.py::test_jumpf_stack_returning_rules[fork_CancunEIP7692-eof_test-same-stack-to-2-to-0-so-2]": {
+        "vectors": {
+            "0": {
+                "code": "0xef000101000c020003000a0005000304000000008000040002000202000002e30001612015600155005f5fe500025050e4",
+                "results": {
+                    "Prague": {
+                        "exception": "EOFException.STACK_UNDERFLOW",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0xa33d13f0ad342f51c42ea34ea1ccabe18f85b82919266612829c8fa122dbad48",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evmone-t8n 0.12.0-dev+commit.85a89e56",
+            "description": "Test function documentation:\n\n    Tests for JUMPF validation stack rules.  Returning section cases.\n    Valid cases are executed.",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.0.4/tests/prague/eip7692_eof_v1/eip6206_jumpf/test_jumpf_stack.py#L68",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-6206.md",
+            "reference-spec-version": "2f365ea0cd58faa6e26013ea77ce6d538175f7d0"
+        }
+    },
+    "tests/prague/eip7692_eof_v1/eip6206_jumpf/test_jumpf_stack.py::test_jumpf_stack_returning_rules[fork_CancunEIP7692-eof_test-same-stack-to-2-to-0-so-4]": {
+        "vectors": {
+            "0": {
+                "code": "0xef000101000c020003000a0005000304000000008000060004000202000002e30001612015600155005f5fe500025050e4",
+                "results": {
+                    "Prague": {
+                        "exception": "EOFException.STACK_UNDERFLOW",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0xc9015cfe72fc8c18aff11c64f48bc4ea2c1b86246865c47d125be3a17812aa11",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evmone-t8n 0.12.0-dev+commit.85a89e56",
+            "description": "Test function documentation:\n\n    Tests for JUMPF validation stack rules.  Returning section cases.\n    Valid cases are executed.",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.0.4/tests/prague/eip7692_eof_v1/eip6206_jumpf/test_jumpf_stack.py#L68",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-6206.md",
+            "reference-spec-version": "2f365ea0cd58faa6e26013ea77ce6d538175f7d0"
+        }
+    },
+    "tests/prague/eip7692_eof_v1/eip6206_jumpf/test_jumpf_stack.py::test_jumpf_stack_returning_rules[fork_CancunEIP7692-eof_test-same-stack-to-2-to-2-so-2]": {
+        "vectors": {
+            "0": {
+                "code": "0xef000101000c020003000a0005000104000000008000040002000202020002e30001612015600155005f5fe50002e4",
+                "results": {
+                    "Prague": {
+                        "result": true
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0xf2cd4a81950b458296760907c25f35b7c19bce4e066b11c6ee789b01e6783443",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evmone-t8n 0.12.0-dev+commit.85a89e56",
+            "description": "Test function documentation:\n\n    Tests for JUMPF validation stack rules.  Returning section cases.\n    Valid cases are executed.",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.0.4/tests/prague/eip7692_eof_v1/eip6206_jumpf/test_jumpf_stack.py#L68",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-6206.md",
+            "reference-spec-version": "2f365ea0cd58faa6e26013ea77ce6d538175f7d0"
+        }
+    },
+    "tests/prague/eip7692_eof_v1/eip6206_jumpf/test_jumpf_stack.py::test_jumpf_stack_returning_rules[fork_CancunEIP7692-eof_test-same-stack-to-2-to-2-so-4]": {
+        "vectors": {
+            "0": {
+                "code": "0xef000101000c020003000a0005000104000000008000060004000202020002e30001612015600155005f5fe50002e4",
+                "results": {
+                    "Prague": {
+                        "exception": "EOFException.STACK_UNDERFLOW",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0xe1d0bdffa56da643ee1a722e1b9178f5d764bb8a8715b4660dfea939d6d28436",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evmone-t8n 0.12.0-dev+commit.85a89e56",
+            "description": "Test function documentation:\n\n    Tests for JUMPF validation stack rules.  Returning section cases.\n    Valid cases are executed.",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.0.4/tests/prague/eip7692_eof_v1/eip6206_jumpf/test_jumpf_stack.py#L68",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-6206.md",
+            "reference-spec-version": "2f365ea0cd58faa6e26013ea77ce6d538175f7d0"
+        }
+    },
+    "tests/prague/eip7692_eof_v1/eip6206_jumpf/test_jumpf_stack.py::test_jumpf_stack_returning_rules[fork_CancunEIP7692-eof_test-same-stack-to-2-to-4-so-4]": {
+        "vectors": {
+            "0": {
+                "code": "0xef000101000c020003000a0005000304000000008000060004000202040004e30001612015600155005f5fe500025f5fe4",
+                "results": {
+                    "Prague": {
+                        "result": true
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0x05cc3b9b903c8dabb285398bb76c9e31a5c8d73236d8598a73eebd5b4b810dd0",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evmone-t8n 0.12.0-dev+commit.85a89e56",
+            "description": "Test function documentation:\n\n    Tests for JUMPF validation stack rules.  Returning section cases.\n    Valid cases are executed.",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.0.4/tests/prague/eip7692_eof_v1/eip6206_jumpf/test_jumpf_stack.py#L68",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-6206.md",
+            "reference-spec-version": "2f365ea0cd58faa6e26013ea77ce6d538175f7d0"
+        }
+    },
+    "tests/prague/eip7692_eof_v1/eip6206_jumpf/test_jumpf_stack.py::test_jumpf_stack_returning_rules[fork_CancunEIP7692-eof_test-same-stack-to-4-to-0-so-0]": {
+        "vectors": {
+            "0": {
+                "code": "0xef000101000c020003000a0007000504000000008000020000000404000004e30001612015600155005f5f5f5fe5000250505050e4",
+                "results": {
+                    "Prague": {
+                        "result": true
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0xe82a923ae4a35842e7bfb7d03f55a74665d5828c1d420771c76c9d033b62298b",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evmone-t8n 0.12.0-dev+commit.85a89e56",
+            "description": "Test function documentation:\n\n    Tests for JUMPF validation stack rules.  Returning section cases.\n    Valid cases are executed.",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.0.4/tests/prague/eip7692_eof_v1/eip6206_jumpf/test_jumpf_stack.py#L68",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-6206.md",
+            "reference-spec-version": "2f365ea0cd58faa6e26013ea77ce6d538175f7d0"
+        }
+    },
+    "tests/prague/eip7692_eof_v1/eip6206_jumpf/test_jumpf_stack.py::test_jumpf_stack_returning_rules[fork_CancunEIP7692-eof_test-same-stack-to-4-to-0-so-2]": {
+        "vectors": {
+            "0": {
+                "code": "0xef000101000c020003000a0007000504000000008000040002000404000004e30001612015600155005f5f5f5fe5000250505050e4",
+                "results": {
+                    "Prague": {
+                        "exception": "EOFException.STACK_UNDERFLOW",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0x655e374c5f875ac660f2e065d0d9feb338db03eb4a6068ec7ddf4dce4c8d6ab0",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evmone-t8n 0.12.0-dev+commit.85a89e56",
+            "description": "Test function documentation:\n\n    Tests for JUMPF validation stack rules.  Returning section cases.\n    Valid cases are executed.",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.0.4/tests/prague/eip7692_eof_v1/eip6206_jumpf/test_jumpf_stack.py#L68",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-6206.md",
+            "reference-spec-version": "2f365ea0cd58faa6e26013ea77ce6d538175f7d0"
+        }
+    },
+    "tests/prague/eip7692_eof_v1/eip6206_jumpf/test_jumpf_stack.py::test_jumpf_stack_returning_rules[fork_CancunEIP7692-eof_test-same-stack-to-4-to-0-so-4]": {
+        "vectors": {
+            "0": {
+                "code": "0xef000101000c020003000a0007000504000000008000060004000404000004e30001612015600155005f5f5f5fe5000250505050e4",
+                "results": {
+                    "Prague": {
+                        "exception": "EOFException.STACK_UNDERFLOW",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0x7a6addf5b322c42069b8464bf41b64554c9755be714c255a637320f75f283dc4",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evmone-t8n 0.12.0-dev+commit.85a89e56",
+            "description": "Test function documentation:\n\n    Tests for JUMPF validation stack rules.  Returning section cases.\n    Valid cases are executed.",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.0.4/tests/prague/eip7692_eof_v1/eip6206_jumpf/test_jumpf_stack.py#L68",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-6206.md",
+            "reference-spec-version": "2f365ea0cd58faa6e26013ea77ce6d538175f7d0"
+        }
+    },
+    "tests/prague/eip7692_eof_v1/eip6206_jumpf/test_jumpf_stack.py::test_jumpf_stack_returning_rules[fork_CancunEIP7692-eof_test-same-stack-to-4-to-2-so-2]": {
+        "vectors": {
+            "0": {
+                "code": "0xef000101000c020003000a0007000304000000008000040002000404020004e30001612015600155005f5f5f5fe500025050e4",
+                "results": {
+                    "Prague": {
+                        "result": true
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0x19923a57a9cbb62004424c8fc93b4b9c9ec4f35fb87b00aa009cc978bca32c59",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evmone-t8n 0.12.0-dev+commit.85a89e56",
+            "description": "Test function documentation:\n\n    Tests for JUMPF validation stack rules.  Returning section cases.\n    Valid cases are executed.",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.0.4/tests/prague/eip7692_eof_v1/eip6206_jumpf/test_jumpf_stack.py#L68",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-6206.md",
+            "reference-spec-version": "2f365ea0cd58faa6e26013ea77ce6d538175f7d0"
+        }
+    },
+    "tests/prague/eip7692_eof_v1/eip6206_jumpf/test_jumpf_stack.py::test_jumpf_stack_returning_rules[fork_CancunEIP7692-eof_test-same-stack-to-4-to-2-so-4]": {
+        "vectors": {
+            "0": {
+                "code": "0xef000101000c020003000a0007000304000000008000060004000404020004e30001612015600155005f5f5f5fe500025050e4",
+                "results": {
+                    "Prague": {
+                        "exception": "EOFException.STACK_UNDERFLOW",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0x683a365b0a6a65a2d78f53776d9473cfe992b4e0c20e50507085f1430d402da0",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evmone-t8n 0.12.0-dev+commit.85a89e56",
+            "description": "Test function documentation:\n\n    Tests for JUMPF validation stack rules.  Returning section cases.\n    Valid cases are executed.",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.0.4/tests/prague/eip7692_eof_v1/eip6206_jumpf/test_jumpf_stack.py#L68",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-6206.md",
+            "reference-spec-version": "2f365ea0cd58faa6e26013ea77ce6d538175f7d0"
+        }
+    },
+    "tests/prague/eip7692_eof_v1/eip6206_jumpf/test_jumpf_stack.py::test_jumpf_stack_returning_rules[fork_CancunEIP7692-eof_test-same-stack-to-4-to-4-so-4]": {
+        "vectors": {
+            "0": {
+                "code": "0xef000101000c020003000a0007000104000000008000060004000404040004e30001612015600155005f5f5f5fe50002e4",
+                "results": {
+                    "Prague": {
+                        "result": true
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0xd4e13c011cce648ed8774a99ce75576798c555eb8bf700dde61f4b9311243e5a",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evmone-t8n 0.12.0-dev+commit.85a89e56",
+            "description": "Test function documentation:\n\n    Tests for JUMPF validation stack rules.  Returning section cases.\n    Valid cases are executed.",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.0.4/tests/prague/eip7692_eof_v1/eip6206_jumpf/test_jumpf_stack.py#L68",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-6206.md",
+            "reference-spec-version": "2f365ea0cd58faa6e26013ea77ce6d538175f7d0"
+        }
+    },
+    "tests/prague/eip7692_eof_v1/eip6206_jumpf/test_jumpf_stack.py::test_jumpf_stack_returning_rules[fork_CancunEIP7692-eof_test-more-stack-to-0-to-0-so-0]": {
+        "vectors": {
+            "0": {
+                "code": "0xef000101000c020003000a0004000104000000008000020000000000000000e30001612015600155005fe50002e4",
+                "results": {
+                    "Prague": {
+                        "exception": "EOFException.STACK_HIGHER_THAN_OUTPUTS",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0xba434ffece272e3eeda7ac226baaf42ddfc1fa74423ecf5430947dd62da1235b",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evmone-t8n 0.12.0-dev+commit.85a89e56",
+            "description": "Test function documentation:\n\n    Tests for JUMPF validation stack rules.  Returning section cases.\n    Valid cases are executed.",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.0.4/tests/prague/eip7692_eof_v1/eip6206_jumpf/test_jumpf_stack.py#L68",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-6206.md",
+            "reference-spec-version": "2f365ea0cd58faa6e26013ea77ce6d538175f7d0"
+        }
+    },
+    "tests/prague/eip7692_eof_v1/eip6206_jumpf/test_jumpf_stack.py::test_jumpf_stack_returning_rules[fork_CancunEIP7692-eof_test-more-stack-to-0-to-0-so-2]": {
+        "vectors": {
+            "0": {
+                "code": "0xef000101000c020003000a0004000104000000008000040002000000000000e30001612015600155005fe50002e4",
+                "results": {
+                    "Prague": {
+                        "exception": "EOFException.STACK_UNDERFLOW",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0x37197c015e58657010e22617838f9352bfe6c5d72ff604c1ce458f74917b3f6f",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evmone-t8n 0.12.0-dev+commit.85a89e56",
+            "description": "Test function documentation:\n\n    Tests for JUMPF validation stack rules.  Returning section cases.\n    Valid cases are executed.",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.0.4/tests/prague/eip7692_eof_v1/eip6206_jumpf/test_jumpf_stack.py#L68",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-6206.md",
+            "reference-spec-version": "2f365ea0cd58faa6e26013ea77ce6d538175f7d0"
+        }
+    },
+    "tests/prague/eip7692_eof_v1/eip6206_jumpf/test_jumpf_stack.py::test_jumpf_stack_returning_rules[fork_CancunEIP7692-eof_test-more-stack-to-0-to-0-so-4]": {
+        "vectors": {
+            "0": {
+                "code": "0xef000101000c020003000a0004000104000000008000060004000000000000e30001612015600155005fe50002e4",
+                "results": {
+                    "Prague": {
+                        "exception": "EOFException.STACK_UNDERFLOW",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0xee8e10bd34394d0bd65b3c7cbe591757ac6e21a11347fdfd7e342f3f65d54560",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evmone-t8n 0.12.0-dev+commit.85a89e56",
+            "description": "Test function documentation:\n\n    Tests for JUMPF validation stack rules.  Returning section cases.\n    Valid cases are executed.",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.0.4/tests/prague/eip7692_eof_v1/eip6206_jumpf/test_jumpf_stack.py#L68",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-6206.md",
+            "reference-spec-version": "2f365ea0cd58faa6e26013ea77ce6d538175f7d0"
+        }
+    },
+    "tests/prague/eip7692_eof_v1/eip6206_jumpf/test_jumpf_stack.py::test_jumpf_stack_returning_rules[fork_CancunEIP7692-eof_test-more-stack-to-0-to-2-so-2]": {
+        "vectors": {
+            "0": {
+                "code": "0xef000101000c020003000a0004000304000000008000040002000000020002e30001612015600155005fe500025f5fe4",
+                "results": {
+                    "Prague": {
+                        "exception": "EOFException.STACK_HIGHER_THAN_OUTPUTS",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0x9a4e437011807ec7460b1802874c5a0744d1deeba3a5b7f79758bf5d503d6b75",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evmone-t8n 0.12.0-dev+commit.85a89e56",
+            "description": "Test function documentation:\n\n    Tests for JUMPF validation stack rules.  Returning section cases.\n    Valid cases are executed.",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.0.4/tests/prague/eip7692_eof_v1/eip6206_jumpf/test_jumpf_stack.py#L68",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-6206.md",
+            "reference-spec-version": "2f365ea0cd58faa6e26013ea77ce6d538175f7d0"
+        }
+    },
+    "tests/prague/eip7692_eof_v1/eip6206_jumpf/test_jumpf_stack.py::test_jumpf_stack_returning_rules[fork_CancunEIP7692-eof_test-more-stack-to-0-to-2-so-4]": {
+        "vectors": {
+            "0": {
+                "code": "0xef000101000c020003000a0004000304000000008000060004000000020002e30001612015600155005fe500025f5fe4",
+                "results": {
+                    "Prague": {
+                        "exception": "EOFException.STACK_UNDERFLOW",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0xf1e4baa2649d531510b9ce0b92a7f0dec84b9e077c30709ac9ccdd1047b3a8fb",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evmone-t8n 0.12.0-dev+commit.85a89e56",
+            "description": "Test function documentation:\n\n    Tests for JUMPF validation stack rules.  Returning section cases.\n    Valid cases are executed.",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.0.4/tests/prague/eip7692_eof_v1/eip6206_jumpf/test_jumpf_stack.py#L68",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-6206.md",
+            "reference-spec-version": "2f365ea0cd58faa6e26013ea77ce6d538175f7d0"
+        }
+    },
+    "tests/prague/eip7692_eof_v1/eip6206_jumpf/test_jumpf_stack.py::test_jumpf_stack_returning_rules[fork_CancunEIP7692-eof_test-more-stack-to-0-to-4-so-4]": {
+        "vectors": {
+            "0": {
+                "code": "0xef000101000c020003000a0004000504000000008000060004000000040004e30001612015600155005fe500025f5f5f5fe4",
+                "results": {
+                    "Prague": {
+                        "exception": "EOFException.STACK_HIGHER_THAN_OUTPUTS",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0x14399b0ab977568b6a132e671a2ae85f5e29e5beade8f56b726d42dbeefcf332",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evmone-t8n 0.12.0-dev+commit.85a89e56",
+            "description": "Test function documentation:\n\n    Tests for JUMPF validation stack rules.  Returning section cases.\n    Valid cases are executed.",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.0.4/tests/prague/eip7692_eof_v1/eip6206_jumpf/test_jumpf_stack.py#L68",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-6206.md",
+            "reference-spec-version": "2f365ea0cd58faa6e26013ea77ce6d538175f7d0"
+        }
+    },
+    "tests/prague/eip7692_eof_v1/eip6206_jumpf/test_jumpf_stack.py::test_jumpf_stack_returning_rules[fork_CancunEIP7692-eof_test-more-stack-to-2-to-0-so-0]": {
+        "vectors": {
+            "0": {
+                "code": "0xef000101000c020003000a0006000304000000008000020000000202000002e30001612015600155005f5f5fe500025050e4",
+                "results": {
+                    "Prague": {
+                        "exception": "EOFException.STACK_HIGHER_THAN_OUTPUTS",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0xc5b939fab45cb96833ecef53a3ab3a62a72c07eb7abb33e9ef284ef606a0382e",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evmone-t8n 0.12.0-dev+commit.85a89e56",
+            "description": "Test function documentation:\n\n    Tests for JUMPF validation stack rules.  Returning section cases.\n    Valid cases are executed.",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.0.4/tests/prague/eip7692_eof_v1/eip6206_jumpf/test_jumpf_stack.py#L68",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-6206.md",
+            "reference-spec-version": "2f365ea0cd58faa6e26013ea77ce6d538175f7d0"
+        }
+    },
+    "tests/prague/eip7692_eof_v1/eip6206_jumpf/test_jumpf_stack.py::test_jumpf_stack_returning_rules[fork_CancunEIP7692-eof_test-more-stack-to-2-to-0-so-2]": {
+        "vectors": {
+            "0": {
+                "code": "0xef000101000c020003000a0006000304000000008000040002000202000002e30001612015600155005f5f5fe500025050e4",
+                "results": {
+                    "Prague": {
+                        "exception": "EOFException.STACK_UNDERFLOW",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0xe733186ee0007878fb6ff3ccc7f2adcb83d3e899c233180e52c6431c9ad273b0",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evmone-t8n 0.12.0-dev+commit.85a89e56",
+            "description": "Test function documentation:\n\n    Tests for JUMPF validation stack rules.  Returning section cases.\n    Valid cases are executed.",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.0.4/tests/prague/eip7692_eof_v1/eip6206_jumpf/test_jumpf_stack.py#L68",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-6206.md",
+            "reference-spec-version": "2f365ea0cd58faa6e26013ea77ce6d538175f7d0"
+        }
+    },
+    "tests/prague/eip7692_eof_v1/eip6206_jumpf/test_jumpf_stack.py::test_jumpf_stack_returning_rules[fork_CancunEIP7692-eof_test-more-stack-to-2-to-0-so-4]": {
+        "vectors": {
+            "0": {
+                "code": "0xef000101000c020003000a0006000304000000008000060004000202000002e30001612015600155005f5f5fe500025050e4",
+                "results": {
+                    "Prague": {
+                        "exception": "EOFException.STACK_UNDERFLOW",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0x4653b0a6c347fd53b1dfded0de59b0fdef0d3b66c6cdcd2461db2b63eb9eaa63",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evmone-t8n 0.12.0-dev+commit.85a89e56",
+            "description": "Test function documentation:\n\n    Tests for JUMPF validation stack rules.  Returning section cases.\n    Valid cases are executed.",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.0.4/tests/prague/eip7692_eof_v1/eip6206_jumpf/test_jumpf_stack.py#L68",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-6206.md",
+            "reference-spec-version": "2f365ea0cd58faa6e26013ea77ce6d538175f7d0"
+        }
+    },
+    "tests/prague/eip7692_eof_v1/eip6206_jumpf/test_jumpf_stack.py::test_jumpf_stack_returning_rules[fork_CancunEIP7692-eof_test-more-stack-to-2-to-2-so-2]": {
+        "vectors": {
+            "0": {
+                "code": "0xef000101000c020003000a0006000104000000008000040002000202020002e30001612015600155005f5f5fe50002e4",
+                "results": {
+                    "Prague": {
+                        "exception": "EOFException.STACK_HIGHER_THAN_OUTPUTS",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0x9d1f109b4afaa8ec692ce5f936fc68ff477b78fdf84edc8bee8c1e1deaf98d96",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evmone-t8n 0.12.0-dev+commit.85a89e56",
+            "description": "Test function documentation:\n\n    Tests for JUMPF validation stack rules.  Returning section cases.\n    Valid cases are executed.",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.0.4/tests/prague/eip7692_eof_v1/eip6206_jumpf/test_jumpf_stack.py#L68",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-6206.md",
+            "reference-spec-version": "2f365ea0cd58faa6e26013ea77ce6d538175f7d0"
+        }
+    },
+    "tests/prague/eip7692_eof_v1/eip6206_jumpf/test_jumpf_stack.py::test_jumpf_stack_returning_rules[fork_CancunEIP7692-eof_test-more-stack-to-2-to-2-so-4]": {
+        "vectors": {
+            "0": {
+                "code": "0xef000101000c020003000a0006000104000000008000060004000202020002e30001612015600155005f5f5fe50002e4",
+                "results": {
+                    "Prague": {
+                        "exception": "EOFException.STACK_UNDERFLOW",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0xb31f908cd733c4d61ccd07201971b4b5412bbec7e12980f9bf1d8aee164f0aea",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evmone-t8n 0.12.0-dev+commit.85a89e56",
+            "description": "Test function documentation:\n\n    Tests for JUMPF validation stack rules.  Returning section cases.\n    Valid cases are executed.",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.0.4/tests/prague/eip7692_eof_v1/eip6206_jumpf/test_jumpf_stack.py#L68",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-6206.md",
+            "reference-spec-version": "2f365ea0cd58faa6e26013ea77ce6d538175f7d0"
+        }
+    },
+    "tests/prague/eip7692_eof_v1/eip6206_jumpf/test_jumpf_stack.py::test_jumpf_stack_returning_rules[fork_CancunEIP7692-eof_test-more-stack-to-2-to-4-so-4]": {
+        "vectors": {
+            "0": {
+                "code": "0xef000101000c020003000a0006000304000000008000060004000202040004e30001612015600155005f5f5fe500025f5fe4",
+                "results": {
+                    "Prague": {
+                        "exception": "EOFException.STACK_HIGHER_THAN_OUTPUTS",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0x399c5163a07cdf1810bd7ea4f5d8250d871567695a960462f549ba4bc2c791cd",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evmone-t8n 0.12.0-dev+commit.85a89e56",
+            "description": "Test function documentation:\n\n    Tests for JUMPF validation stack rules.  Returning section cases.\n    Valid cases are executed.",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.0.4/tests/prague/eip7692_eof_v1/eip6206_jumpf/test_jumpf_stack.py#L68",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-6206.md",
+            "reference-spec-version": "2f365ea0cd58faa6e26013ea77ce6d538175f7d0"
+        }
+    },
+    "tests/prague/eip7692_eof_v1/eip6206_jumpf/test_jumpf_stack.py::test_jumpf_stack_returning_rules[fork_CancunEIP7692-eof_test-more-stack-to-4-to-0-so-0]": {
+        "vectors": {
+            "0": {
+                "code": "0xef000101000c020003000a0008000504000000008000020000000404000004e30001612015600155005f5f5f5f5fe5000250505050e4",
+                "results": {
+                    "Prague": {
+                        "exception": "EOFException.STACK_HIGHER_THAN_OUTPUTS",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0xdbfaf4e34610e045e3921f61c05c5af9ae5f996d29459c0cdd8a75af48e73b46",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evmone-t8n 0.12.0-dev+commit.85a89e56",
+            "description": "Test function documentation:\n\n    Tests for JUMPF validation stack rules.  Returning section cases.\n    Valid cases are executed.",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.0.4/tests/prague/eip7692_eof_v1/eip6206_jumpf/test_jumpf_stack.py#L68",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-6206.md",
+            "reference-spec-version": "2f365ea0cd58faa6e26013ea77ce6d538175f7d0"
+        }
+    },
+    "tests/prague/eip7692_eof_v1/eip6206_jumpf/test_jumpf_stack.py::test_jumpf_stack_returning_rules[fork_CancunEIP7692-eof_test-more-stack-to-4-to-0-so-2]": {
+        "vectors": {
+            "0": {
+                "code": "0xef000101000c020003000a0008000504000000008000040002000404000004e30001612015600155005f5f5f5f5fe5000250505050e4",
+                "results": {
+                    "Prague": {
+                        "exception": "EOFException.STACK_UNDERFLOW",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0xc2dd2b605f21835ea73406e7d4200b9cb7f77c68fab70303e646d64a42b659ba",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evmone-t8n 0.12.0-dev+commit.85a89e56",
+            "description": "Test function documentation:\n\n    Tests for JUMPF validation stack rules.  Returning section cases.\n    Valid cases are executed.",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.0.4/tests/prague/eip7692_eof_v1/eip6206_jumpf/test_jumpf_stack.py#L68",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-6206.md",
+            "reference-spec-version": "2f365ea0cd58faa6e26013ea77ce6d538175f7d0"
+        }
+    },
+    "tests/prague/eip7692_eof_v1/eip6206_jumpf/test_jumpf_stack.py::test_jumpf_stack_returning_rules[fork_CancunEIP7692-eof_test-more-stack-to-4-to-0-so-4]": {
+        "vectors": {
+            "0": {
+                "code": "0xef000101000c020003000a0008000504000000008000060004000404000004e30001612015600155005f5f5f5f5fe5000250505050e4",
+                "results": {
+                    "Prague": {
+                        "exception": "EOFException.STACK_UNDERFLOW",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0xdc3e4c4142f6323eb4dcc99fcddd9f267ee39c3ad27908459163fba8f88b3a41",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evmone-t8n 0.12.0-dev+commit.85a89e56",
+            "description": "Test function documentation:\n\n    Tests for JUMPF validation stack rules.  Returning section cases.\n    Valid cases are executed.",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.0.4/tests/prague/eip7692_eof_v1/eip6206_jumpf/test_jumpf_stack.py#L68",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-6206.md",
+            "reference-spec-version": "2f365ea0cd58faa6e26013ea77ce6d538175f7d0"
+        }
+    },
+    "tests/prague/eip7692_eof_v1/eip6206_jumpf/test_jumpf_stack.py::test_jumpf_stack_returning_rules[fork_CancunEIP7692-eof_test-more-stack-to-4-to-2-so-2]": {
+        "vectors": {
+            "0": {
+                "code": "0xef000101000c020003000a0008000304000000008000040002000404020004e30001612015600155005f5f5f5f5fe500025050e4",
+                "results": {
+                    "Prague": {
+                        "exception": "EOFException.STACK_HIGHER_THAN_OUTPUTS",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0x68724403855bace60a63204dcd62a2012c6dd54f8b21b1c7e5b5c55c378082d6",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evmone-t8n 0.12.0-dev+commit.85a89e56",
+            "description": "Test function documentation:\n\n    Tests for JUMPF validation stack rules.  Returning section cases.\n    Valid cases are executed.",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.0.4/tests/prague/eip7692_eof_v1/eip6206_jumpf/test_jumpf_stack.py#L68",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-6206.md",
+            "reference-spec-version": "2f365ea0cd58faa6e26013ea77ce6d538175f7d0"
+        }
+    },
+    "tests/prague/eip7692_eof_v1/eip6206_jumpf/test_jumpf_stack.py::test_jumpf_stack_returning_rules[fork_CancunEIP7692-eof_test-more-stack-to-4-to-2-so-4]": {
+        "vectors": {
+            "0": {
+                "code": "0xef000101000c020003000a0008000304000000008000060004000404020004e30001612015600155005f5f5f5f5fe500025050e4",
+                "results": {
+                    "Prague": {
+                        "exception": "EOFException.STACK_UNDERFLOW",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0x06a587bca0b359de81326ac51f5c707f9c2e12f21e1994a7692bf32a3e559385",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evmone-t8n 0.12.0-dev+commit.85a89e56",
+            "description": "Test function documentation:\n\n    Tests for JUMPF validation stack rules.  Returning section cases.\n    Valid cases are executed.",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.0.4/tests/prague/eip7692_eof_v1/eip6206_jumpf/test_jumpf_stack.py#L68",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-6206.md",
+            "reference-spec-version": "2f365ea0cd58faa6e26013ea77ce6d538175f7d0"
+        }
+    },
+    "tests/prague/eip7692_eof_v1/eip6206_jumpf/test_jumpf_stack.py::test_jumpf_stack_returning_rules[fork_CancunEIP7692-eof_test-more-stack-to-4-to-4-so-4]": {
+        "vectors": {
+            "0": {
+                "code": "0xef000101000c020003000a0008000104000000008000060004000404040004e30001612015600155005f5f5f5f5fe50002e4",
+                "results": {
+                    "Prague": {
+                        "exception": "EOFException.STACK_HIGHER_THAN_OUTPUTS",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0xa54582ed0e5fbff89bab9d378c5c675866ec10e59c236c912a50ea3cf2dc140c",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evmone-t8n 0.12.0-dev+commit.85a89e56",
+            "description": "Test function documentation:\n\n    Tests for JUMPF validation stack rules.  Returning section cases.\n    Valid cases are executed.",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.0.4/tests/prague/eip7692_eof_v1/eip6206_jumpf/test_jumpf_stack.py#L68",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-6206.md",
+            "reference-spec-version": "2f365ea0cd58faa6e26013ea77ce6d538175f7d0"
+        }
+    }
+}

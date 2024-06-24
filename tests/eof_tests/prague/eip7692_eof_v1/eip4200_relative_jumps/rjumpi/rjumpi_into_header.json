@@ -1,0 +1,24 @@
+{
+    "tests/prague/eip7692_eof_v1/eip4200_relative_jumps/test_rjumpi.py::test_rjumpi_into_header[fork_CancunEIP7692-eof_test]": {
+        "vectors": {
+            "0": {
+                "code": "0xef0001010004020001000604000000008000016001e1fff900",
+                "results": {
+                    "Prague": {
+                        "exception": "EOFException.INVALID_RJUMP_DESTINATION",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0x3085d1682f19eb099c91614165c9659afd6b8352f490c6f6f8c477e1d003c3fd",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evmone-t8n 0.12.0-dev+commit.85a89e56",
+            "description": "Test function documentation:\n\n    EOF1I4200_0016 (Invalid) EOF code containing RJUMPI with target outside code bounds\n    (Jumping into header)",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.0.4/tests/prague/eip7692_eof_v1/eip4200_relative_jumps/test_rjumpi.py#L301",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-4200.md",
+            "reference-spec-version": "17d4a8d12d2b5e0f2985c866376c16c8c6df7cba"
+        }
+    }
+}

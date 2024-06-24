@@ -1,0 +1,24 @@
+{
+    "tests/prague/eip7692_eof_v1/eip6206_jumpf/test_jumpf_execution.py::test_callf_to_non_returning_section[fork_CancunEIP7692-eof_test]": {
+        "vectors": {
+            "0": {
+                "code": "0xef000101000802000200030001040000000080000000000000e3000100",
+                "results": {
+                    "Prague": {
+                        "exception": "EOFException.MISSING_STOP_OPCODE",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0xba914baffd6217f660640b3af55be5bf8ae16b7860bf1da99c2bc809387ad47b",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evmone-t8n 0.12.0-dev+commit.85a89e56",
+            "description": "Test function documentation:\nTests CALLF into a non-returning section",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.0.4/tests/prague/eip7692_eof_v1/eip6206_jumpf/test_jumpf_execution.py#L134",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-6206.md",
+            "reference-spec-version": "2f365ea0cd58faa6e26013ea77ce6d538175f7d0"
+        }
+    }
+}

@@ -1,0 +1,24 @@
+{
+    "tests/prague/eip7692_eof_v1/eip6206_jumpf/test_jumpf_execution.py::test_jumpf_too_large[fork_CancunEIP7692-eof_test]": {
+        "vectors": {
+            "0": {
+                "code": "0xef000101000402000100030400000000800000e50401",
+                "results": {
+                    "Prague": {
+                        "exception": "EOFException.UNDEFINED_EXCEPTION",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0xa1226d793467c6d1f5a3f3feabd4c1c75436d68fafb49a6b7c0c309db94b154d",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evmone-t8n 0.12.0-dev+commit.85a89e56",
+            "description": "Test function documentation:\nTests JUMPF jumping to a section outside the max section range",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.0.4/tests/prague/eip7692_eof_v1/eip6206_jumpf/test_jumpf_execution.py#L86",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-6206.md",
+            "reference-spec-version": "2f365ea0cd58faa6e26013ea77ce6d538175f7d0"
+        }
+    }
+}

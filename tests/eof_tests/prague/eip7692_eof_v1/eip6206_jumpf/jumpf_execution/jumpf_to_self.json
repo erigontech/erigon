@@ -1,0 +1,23 @@
+{
+    "tests/prague/eip7692_eof_v1/eip6206_jumpf/test_jumpf_execution.py::test_jumpf_to_self[fork_CancunEIP7692-eof_test]": {
+        "vectors": {
+            "0": {
+                "code": "0xef00010100040200010011040000000080000260015415e1000100612015600155e50000",
+                "results": {
+                    "Prague": {
+                        "result": true
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0x3860426b4b1760e5445953b962ae65fb9bfb1a45f525246424b21ec74f7cb3d0",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evmone-t8n 0.12.0-dev+commit.85a89e56",
+            "description": "Test function documentation:\nTests JUMPF jumping to self",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.0.4/tests/prague/eip7692_eof_v1/eip6206_jumpf/test_jumpf_execution.py#L64",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-6206.md",
+            "reference-spec-version": "2f365ea0cd58faa6e26013ea77ce6d538175f7d0"
+        }
+    }
+}

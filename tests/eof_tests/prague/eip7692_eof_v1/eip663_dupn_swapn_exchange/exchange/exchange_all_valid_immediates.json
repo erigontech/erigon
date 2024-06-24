@@ -1,0 +1,23 @@
+{
+    "tests/prague/eip7692_eof_v1/eip663_dupn_swapn_exchange/test_exchange.py::test_exchange_all_valid_immediates[fork_CancunEIP7692-eof_test]": {
+        "vectors": {
+            "0": {
+                "code": "0xef000101000402000102cd04000000008000236103e86103e96103ea6103eb6103ec6103ed6103ee6103ef6103f06103f16103f26103f36103f46103f56103f66103f76103f86103f96103fa6103fb6103fc6103fd6103fe6103ff610400610401610402610403610404610405610406610407610408610409e800e801e802e803e804e805e806e807e808e809e80ae80be80ce80de80ee80fe810e811e812e813e814e815e816e817e818e819e81ae81be81ce81de81ee81fe820e821e822e823e824e825e826e827e828e829e82ae82be82ce82de82ee82fe830e831e832e833e834e835e836e837e838e839e83ae83be83ce83de83ee83fe840e841e842e843e844e845e846e847e848e849e84ae84be84ce84de84ee84fe850e851e852e853e854e855e856e857e858e859e85ae85be85ce85de85ee85fe860e861e862e863e864e865e866e867e868e869e86ae86be86ce86de86ee86fe870e871e872e873e874e875e876e877e878e879e87ae87be87ce87de87ee87fe880e881e882e883e884e885e886e887e888e889e88ae88be88ce88de88ee88fe890e891e892e893e894e895e896e897e898e899e89ae89be89ce89de89ee89fe8a0e8a1e8a2e8a3e8a4e8a5e8a6e8a7e8a8e8a9e8aae8abe8ace8ade8aee8afe8b0e8b1e8b2e8b3e8b4e8b5e8b6e8b7e8b8e8b9e8bae8bbe8bce8bde8bee8bfe8c0e8c1e8c2e8c3e8c4e8c5e8c6e8c7e8c8e8c9e8cae8cbe8cce8cde8cee8cfe8d0e8d1e8d2e8d3e8d4e8d5e8d6e8d7e8d8e8d9e8dae8dbe8dce8dde8dee8dfe8e0e8e1e8e2e8e3e8e4e8e5e8e6e8e7e8e8e8e9e8eae8ebe8ece8ede8eee8efe8f0e8f1e8f2e8f3e8f4e8f5e8f6e8f7e8f8e8f9e8fae8fbe8fce8fde8fee8ff600055600155600255600355600455600555600655600755600855600955600a55600b55600c55600d55600e55600f55601055601155601255601355601455601555601655601755601855601955601a55601b55601c55601d55601e55601f5560205560215500",
+                "results": {
+                    "Prague": {
+                        "result": true
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0x5f7f6b93c281c7dd87e3e72e1e60477463a826a191183e52c52430f20a295256",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evmone-t8n 0.12.0-dev+commit.85a89e56",
+            "description": "Test function documentation:\n\n    Test case for all valid EXCHANGE immediates.",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.0.4/tests/prague/eip7692_eof_v1/eip663_dupn_swapn_exchange/test_exchange.py#L19",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-663.md",
+            "reference-spec-version": "b658bb87fe039d29e9475d5cfaebca9b92e0fca2"
+        }
+    }
+}

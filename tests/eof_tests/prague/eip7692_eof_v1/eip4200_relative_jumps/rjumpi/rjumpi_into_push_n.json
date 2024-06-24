@@ -1,0 +1,2730 @@
+{
+    "tests/prague/eip7692_eof_v1/eip4200_relative_jumps/test_rjumpi.py::test_rjumpi_into_push_n[fork_CancunEIP7692-eof_test-data_portion_end-jump_JumpDirection.FORWARD-opcode_PUSH2]": {
+        "vectors": {
+            "0": {
+                "code": "0xef0001010004020001000804000000008000016001e10002610000",
+                "results": {
+                    "Prague": {
+                        "exception": "EOFException.INVALID_RJUMP_DESTINATION",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0x151a59ef35d878d3389dfd4643ad63140a5437b4dd1360deabf0a0a32dc16b4a",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evmone-t8n 0.12.0-dev+commit.85a89e56",
+            "description": "Test function documentation:\nEOF1I4200_0024 (Invalid) EOF code containing RJUMPI with target PUSH2+ immediate",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.0.4/tests/prague/eip7692_eof_v1/eip4200_relative_jumps/test_rjumpi.py#L471",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-4200.md",
+            "reference-spec-version": "17d4a8d12d2b5e0f2985c866376c16c8c6df7cba"
+        }
+    },
+    "tests/prague/eip7692_eof_v1/eip4200_relative_jumps/test_rjumpi.py::test_rjumpi_into_push_n[fork_CancunEIP7692-eof_test-data_portion_end-jump_JumpDirection.FORWARD-opcode_PUSH3]": {
+        "vectors": {
+            "0": {
+                "code": "0xef0001010004020001000904000000008000016001e1000362000000",
+                "results": {
+                    "Prague": {
+                        "exception": "EOFException.INVALID_RJUMP_DESTINATION",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0xa3b9ab9140fca0ce793598dee44ed4c91d84d1656f6185907226f2cf1c7116c6",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evmone-t8n 0.12.0-dev+commit.85a89e56",
+            "description": "Test function documentation:\nEOF1I4200_0024 (Invalid) EOF code containing RJUMPI with target PUSH2+ immediate",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.0.4/tests/prague/eip7692_eof_v1/eip4200_relative_jumps/test_rjumpi.py#L471",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-4200.md",
+            "reference-spec-version": "17d4a8d12d2b5e0f2985c866376c16c8c6df7cba"
+        }
+    },
+    "tests/prague/eip7692_eof_v1/eip4200_relative_jumps/test_rjumpi.py::test_rjumpi_into_push_n[fork_CancunEIP7692-eof_test-data_portion_end-jump_JumpDirection.FORWARD-opcode_PUSH4]": {
+        "vectors": {
+            "0": {
+                "code": "0xef0001010004020001000a04000000008000016001e100046300000000",
+                "results": {
+                    "Prague": {
+                        "exception": "EOFException.INVALID_RJUMP_DESTINATION",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0x36475f27d7cc7a0e3146bd234ae50c6441791a4837a73e996d645cb391e3680b",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evmone-t8n 0.12.0-dev+commit.85a89e56",
+            "description": "Test function documentation:\nEOF1I4200_0024 (Invalid) EOF code containing RJUMPI with target PUSH2+ immediate",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.0.4/tests/prague/eip7692_eof_v1/eip4200_relative_jumps/test_rjumpi.py#L471",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-4200.md",
+            "reference-spec-version": "17d4a8d12d2b5e0f2985c866376c16c8c6df7cba"
+        }
+    },
+    "tests/prague/eip7692_eof_v1/eip4200_relative_jumps/test_rjumpi.py::test_rjumpi_into_push_n[fork_CancunEIP7692-eof_test-data_portion_end-jump_JumpDirection.FORWARD-opcode_PUSH5]": {
+        "vectors": {
+            "0": {
+                "code": "0xef0001010004020001000b04000000008000016001e10005640000000000",
+                "results": {
+                    "Prague": {
+                        "exception": "EOFException.INVALID_RJUMP_DESTINATION",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0xa1241e81c7d2b42484c1b1376fa2e3c97ad9c9fdc6b814d928d4a5fb2bba1706",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evmone-t8n 0.12.0-dev+commit.85a89e56",
+            "description": "Test function documentation:\nEOF1I4200_0024 (Invalid) EOF code containing RJUMPI with target PUSH2+ immediate",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.0.4/tests/prague/eip7692_eof_v1/eip4200_relative_jumps/test_rjumpi.py#L471",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-4200.md",
+            "reference-spec-version": "17d4a8d12d2b5e0f2985c866376c16c8c6df7cba"
+        }
+    },
+    "tests/prague/eip7692_eof_v1/eip4200_relative_jumps/test_rjumpi.py::test_rjumpi_into_push_n[fork_CancunEIP7692-eof_test-data_portion_end-jump_JumpDirection.FORWARD-opcode_PUSH6]": {
+        "vectors": {
+            "0": {
+                "code": "0xef0001010004020001000c04000000008000016001e1000665000000000000",
+                "results": {
+                    "Prague": {
+                        "exception": "EOFException.INVALID_RJUMP_DESTINATION",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0x1fa66119436148620a759e40f11d0cdf969b7b1f61c670eb204495fdd62ec75c",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evmone-t8n 0.12.0-dev+commit.85a89e56",
+            "description": "Test function documentation:\nEOF1I4200_0024 (Invalid) EOF code containing RJUMPI with target PUSH2+ immediate",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.0.4/tests/prague/eip7692_eof_v1/eip4200_relative_jumps/test_rjumpi.py#L471",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-4200.md",
+            "reference-spec-version": "17d4a8d12d2b5e0f2985c866376c16c8c6df7cba"
+        }
+    },
+    "tests/prague/eip7692_eof_v1/eip4200_relative_jumps/test_rjumpi.py::test_rjumpi_into_push_n[fork_CancunEIP7692-eof_test-data_portion_end-jump_JumpDirection.FORWARD-opcode_PUSH7]": {
+        "vectors": {
+            "0": {
+                "code": "0xef0001010004020001000d04000000008000016001e100076600000000000000",
+                "results": {
+                    "Prague": {
+                        "exception": "EOFException.INVALID_RJUMP_DESTINATION",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0x8d5076deb55f37e42ad4c03c07986c2bf9d00e72544df0d98fef73d2ba2902ec",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evmone-t8n 0.12.0-dev+commit.85a89e56",
+            "description": "Test function documentation:\nEOF1I4200_0024 (Invalid) EOF code containing RJUMPI with target PUSH2+ immediate",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.0.4/tests/prague/eip7692_eof_v1/eip4200_relative_jumps/test_rjumpi.py#L471",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-4200.md",
+            "reference-spec-version": "17d4a8d12d2b5e0f2985c866376c16c8c6df7cba"
+        }
+    },
+    "tests/prague/eip7692_eof_v1/eip4200_relative_jumps/test_rjumpi.py::test_rjumpi_into_push_n[fork_CancunEIP7692-eof_test-data_portion_end-jump_JumpDirection.FORWARD-opcode_PUSH8]": {
+        "vectors": {
+            "0": {
+                "code": "0xef0001010004020001000e04000000008000016001e10008670000000000000000",
+                "results": {
+                    "Prague": {
+                        "exception": "EOFException.INVALID_RJUMP_DESTINATION",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0xadd74a96df6fabddc3b41c2bc7977b74475fb697bfa601ce21730dc6c2c8956e",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evmone-t8n 0.12.0-dev+commit.85a89e56",
+            "description": "Test function documentation:\nEOF1I4200_0024 (Invalid) EOF code containing RJUMPI with target PUSH2+ immediate",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.0.4/tests/prague/eip7692_eof_v1/eip4200_relative_jumps/test_rjumpi.py#L471",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-4200.md",
+            "reference-spec-version": "17d4a8d12d2b5e0f2985c866376c16c8c6df7cba"
+        }
+    },
+    "tests/prague/eip7692_eof_v1/eip4200_relative_jumps/test_rjumpi.py::test_rjumpi_into_push_n[fork_CancunEIP7692-eof_test-data_portion_end-jump_JumpDirection.FORWARD-opcode_PUSH9]": {
+        "vectors": {
+            "0": {
+                "code": "0xef0001010004020001000f04000000008000016001e1000968000000000000000000",
+                "results": {
+                    "Prague": {
+                        "exception": "EOFException.INVALID_RJUMP_DESTINATION",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0x557cbe6202dfff37ab4fed83f2c6cfbf152f8da8f61a96df619fd67458a0c3e1",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evmone-t8n 0.12.0-dev+commit.85a89e56",
+            "description": "Test function documentation:\nEOF1I4200_0024 (Invalid) EOF code containing RJUMPI with target PUSH2+ immediate",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.0.4/tests/prague/eip7692_eof_v1/eip4200_relative_jumps/test_rjumpi.py#L471",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-4200.md",
+            "reference-spec-version": "17d4a8d12d2b5e0f2985c866376c16c8c6df7cba"
+        }
+    },
+    "tests/prague/eip7692_eof_v1/eip4200_relative_jumps/test_rjumpi.py::test_rjumpi_into_push_n[fork_CancunEIP7692-eof_test-data_portion_end-jump_JumpDirection.FORWARD-opcode_PUSH10]": {
+        "vectors": {
+            "0": {
+                "code": "0xef0001010004020001001004000000008000016001e1000a6900000000000000000000",
+                "results": {
+                    "Prague": {
+                        "exception": "EOFException.INVALID_RJUMP_DESTINATION",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0xfacd4a148f058c718408090f469d71e003e00c1fadee29429d6bd2fad995fda7",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evmone-t8n 0.12.0-dev+commit.85a89e56",
+            "description": "Test function documentation:\nEOF1I4200_0024 (Invalid) EOF code containing RJUMPI with target PUSH2+ immediate",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.0.4/tests/prague/eip7692_eof_v1/eip4200_relative_jumps/test_rjumpi.py#L471",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-4200.md",
+            "reference-spec-version": "17d4a8d12d2b5e0f2985c866376c16c8c6df7cba"
+        }
+    },
+    "tests/prague/eip7692_eof_v1/eip4200_relative_jumps/test_rjumpi.py::test_rjumpi_into_push_n[fork_CancunEIP7692-eof_test-data_portion_end-jump_JumpDirection.FORWARD-opcode_PUSH11]": {
+        "vectors": {
+            "0": {
+                "code": "0xef0001010004020001001104000000008000016001e1000b6a0000000000000000000000",
+                "results": {
+                    "Prague": {
+                        "exception": "EOFException.INVALID_RJUMP_DESTINATION",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0x497b3df39ee36d2558f8891add7e6ac44002970e0f55a1d688e7f1cb63e81ef2",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evmone-t8n 0.12.0-dev+commit.85a89e56",
+            "description": "Test function documentation:\nEOF1I4200_0024 (Invalid) EOF code containing RJUMPI with target PUSH2+ immediate",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.0.4/tests/prague/eip7692_eof_v1/eip4200_relative_jumps/test_rjumpi.py#L471",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-4200.md",
+            "reference-spec-version": "17d4a8d12d2b5e0f2985c866376c16c8c6df7cba"
+        }
+    },
+    "tests/prague/eip7692_eof_v1/eip4200_relative_jumps/test_rjumpi.py::test_rjumpi_into_push_n[fork_CancunEIP7692-eof_test-data_portion_end-jump_JumpDirection.FORWARD-opcode_PUSH12]": {
+        "vectors": {
+            "0": {
+                "code": "0xef0001010004020001001204000000008000016001e1000c6b000000000000000000000000",
+                "results": {
+                    "Prague": {
+                        "exception": "EOFException.INVALID_RJUMP_DESTINATION",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0x3ab67e9ff6cab41eea4c41b3d97cd821c3dc8a68e7cf76e1d960899eff1057a0",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evmone-t8n 0.12.0-dev+commit.85a89e56",
+            "description": "Test function documentation:\nEOF1I4200_0024 (Invalid) EOF code containing RJUMPI with target PUSH2+ immediate",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.0.4/tests/prague/eip7692_eof_v1/eip4200_relative_jumps/test_rjumpi.py#L471",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-4200.md",
+            "reference-spec-version": "17d4a8d12d2b5e0f2985c866376c16c8c6df7cba"
+        }
+    },
+    "tests/prague/eip7692_eof_v1/eip4200_relative_jumps/test_rjumpi.py::test_rjumpi_into_push_n[fork_CancunEIP7692-eof_test-data_portion_end-jump_JumpDirection.FORWARD-opcode_PUSH13]": {
+        "vectors": {
+            "0": {
+                "code": "0xef0001010004020001001304000000008000016001e1000d6c00000000000000000000000000",
+                "results": {
+                    "Prague": {
+                        "exception": "EOFException.INVALID_RJUMP_DESTINATION",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0xa0ae0770677a6051806b31b6315d3594f1dfb3c94eb42cd75347799fc7ed7f0a",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evmone-t8n 0.12.0-dev+commit.85a89e56",
+            "description": "Test function documentation:\nEOF1I4200_0024 (Invalid) EOF code containing RJUMPI with target PUSH2+ immediate",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.0.4/tests/prague/eip7692_eof_v1/eip4200_relative_jumps/test_rjumpi.py#L471",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-4200.md",
+            "reference-spec-version": "17d4a8d12d2b5e0f2985c866376c16c8c6df7cba"
+        }
+    },
+    "tests/prague/eip7692_eof_v1/eip4200_relative_jumps/test_rjumpi.py::test_rjumpi_into_push_n[fork_CancunEIP7692-eof_test-data_portion_end-jump_JumpDirection.FORWARD-opcode_PUSH14]": {
+        "vectors": {
+            "0": {
+                "code": "0xef0001010004020001001404000000008000016001e1000e6d0000000000000000000000000000",
+                "results": {
+                    "Prague": {
+                        "exception": "EOFException.INVALID_RJUMP_DESTINATION",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0x159c9332111f8de15f43acc0b8d2a75e039469c83fcc4a844495aa3173ce5f4d",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evmone-t8n 0.12.0-dev+commit.85a89e56",
+            "description": "Test function documentation:\nEOF1I4200_0024 (Invalid) EOF code containing RJUMPI with target PUSH2+ immediate",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.0.4/tests/prague/eip7692_eof_v1/eip4200_relative_jumps/test_rjumpi.py#L471",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-4200.md",
+            "reference-spec-version": "17d4a8d12d2b5e0f2985c866376c16c8c6df7cba"
+        }
+    },
+    "tests/prague/eip7692_eof_v1/eip4200_relative_jumps/test_rjumpi.py::test_rjumpi_into_push_n[fork_CancunEIP7692-eof_test-data_portion_end-jump_JumpDirection.FORWARD-opcode_PUSH15]": {
+        "vectors": {
+            "0": {
+                "code": "0xef0001010004020001001504000000008000016001e1000f6e000000000000000000000000000000",
+                "results": {
+                    "Prague": {
+                        "exception": "EOFException.INVALID_RJUMP_DESTINATION",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0xe5357f3fa844110fafa7cb2aa9ea44e946f835024403b39b955524eef2d934be",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evmone-t8n 0.12.0-dev+commit.85a89e56",
+            "description": "Test function documentation:\nEOF1I4200_0024 (Invalid) EOF code containing RJUMPI with target PUSH2+ immediate",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.0.4/tests/prague/eip7692_eof_v1/eip4200_relative_jumps/test_rjumpi.py#L471",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-4200.md",
+            "reference-spec-version": "17d4a8d12d2b5e0f2985c866376c16c8c6df7cba"
+        }
+    },
+    "tests/prague/eip7692_eof_v1/eip4200_relative_jumps/test_rjumpi.py::test_rjumpi_into_push_n[fork_CancunEIP7692-eof_test-data_portion_end-jump_JumpDirection.FORWARD-opcode_PUSH16]": {
+        "vectors": {
+            "0": {
+                "code": "0xef0001010004020001001604000000008000016001e100106f00000000000000000000000000000000",
+                "results": {
+                    "Prague": {
+                        "exception": "EOFException.INVALID_RJUMP_DESTINATION",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0x02bb58a04cf23d844c6135ab9b81ff1bc958aabf50cc8d13cc7ce8e8d65f12b8",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evmone-t8n 0.12.0-dev+commit.85a89e56",
+            "description": "Test function documentation:\nEOF1I4200_0024 (Invalid) EOF code containing RJUMPI with target PUSH2+ immediate",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.0.4/tests/prague/eip7692_eof_v1/eip4200_relative_jumps/test_rjumpi.py#L471",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-4200.md",
+            "reference-spec-version": "17d4a8d12d2b5e0f2985c866376c16c8c6df7cba"
+        }
+    },
+    "tests/prague/eip7692_eof_v1/eip4200_relative_jumps/test_rjumpi.py::test_rjumpi_into_push_n[fork_CancunEIP7692-eof_test-data_portion_end-jump_JumpDirection.FORWARD-opcode_PUSH17]": {
+        "vectors": {
+            "0": {
+                "code": "0xef0001010004020001001704000000008000016001e10011700000000000000000000000000000000000",
+                "results": {
+                    "Prague": {
+                        "exception": "EOFException.INVALID_RJUMP_DESTINATION",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0x63684126a7a1ae6e964f8f377f5e87fa47dc0b8f7092c6175ac335fe0c9e9827",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evmone-t8n 0.12.0-dev+commit.85a89e56",
+            "description": "Test function documentation:\nEOF1I4200_0024 (Invalid) EOF code containing RJUMPI with target PUSH2+ immediate",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.0.4/tests/prague/eip7692_eof_v1/eip4200_relative_jumps/test_rjumpi.py#L471",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-4200.md",
+            "reference-spec-version": "17d4a8d12d2b5e0f2985c866376c16c8c6df7cba"
+        }
+    },
+    "tests/prague/eip7692_eof_v1/eip4200_relative_jumps/test_rjumpi.py::test_rjumpi_into_push_n[fork_CancunEIP7692-eof_test-data_portion_end-jump_JumpDirection.FORWARD-opcode_PUSH18]": {
+        "vectors": {
+            "0": {
+                "code": "0xef0001010004020001001804000000008000016001e1001271000000000000000000000000000000000000",
+                "results": {
+                    "Prague": {
+                        "exception": "EOFException.INVALID_RJUMP_DESTINATION",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0xd77717e166350f68f6d92c4f3c1a0f78af6de386057540f35ab0ef7effe164b0",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evmone-t8n 0.12.0-dev+commit.85a89e56",
+            "description": "Test function documentation:\nEOF1I4200_0024 (Invalid) EOF code containing RJUMPI with target PUSH2+ immediate",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.0.4/tests/prague/eip7692_eof_v1/eip4200_relative_jumps/test_rjumpi.py#L471",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-4200.md",
+            "reference-spec-version": "17d4a8d12d2b5e0f2985c866376c16c8c6df7cba"
+        }
+    },
+    "tests/prague/eip7692_eof_v1/eip4200_relative_jumps/test_rjumpi.py::test_rjumpi_into_push_n[fork_CancunEIP7692-eof_test-data_portion_end-jump_JumpDirection.FORWARD-opcode_PUSH19]": {
+        "vectors": {
+            "0": {
+                "code": "0xef0001010004020001001904000000008000016001e100137200000000000000000000000000000000000000",
+                "results": {
+                    "Prague": {
+                        "exception": "EOFException.INVALID_RJUMP_DESTINATION",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0xf1118cab419ba207ba3043e0f1d115c37aa8d55db90eb5af72061bf8cc5d86c1",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evmone-t8n 0.12.0-dev+commit.85a89e56",
+            "description": "Test function documentation:\nEOF1I4200_0024 (Invalid) EOF code containing RJUMPI with target PUSH2+ immediate",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.0.4/tests/prague/eip7692_eof_v1/eip4200_relative_jumps/test_rjumpi.py#L471",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-4200.md",
+            "reference-spec-version": "17d4a8d12d2b5e0f2985c866376c16c8c6df7cba"
+        }
+    },
+    "tests/prague/eip7692_eof_v1/eip4200_relative_jumps/test_rjumpi.py::test_rjumpi_into_push_n[fork_CancunEIP7692-eof_test-data_portion_end-jump_JumpDirection.FORWARD-opcode_PUSH20]": {
+        "vectors": {
+            "0": {
+                "code": "0xef0001010004020001001a04000000008000016001e10014730000000000000000000000000000000000000000",
+                "results": {
+                    "Prague": {
+                        "exception": "EOFException.INVALID_RJUMP_DESTINATION",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0x42a3bcc084a6e1b2d9dc33efcd935eb27b1480641b091252c63ede52ddaea4bd",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evmone-t8n 0.12.0-dev+commit.85a89e56",
+            "description": "Test function documentation:\nEOF1I4200_0024 (Invalid) EOF code containing RJUMPI with target PUSH2+ immediate",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.0.4/tests/prague/eip7692_eof_v1/eip4200_relative_jumps/test_rjumpi.py#L471",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-4200.md",
+            "reference-spec-version": "17d4a8d12d2b5e0f2985c866376c16c8c6df7cba"
+        }
+    },
+    "tests/prague/eip7692_eof_v1/eip4200_relative_jumps/test_rjumpi.py::test_rjumpi_into_push_n[fork_CancunEIP7692-eof_test-data_portion_end-jump_JumpDirection.FORWARD-opcode_PUSH21]": {
+        "vectors": {
+            "0": {
+                "code": "0xef0001010004020001001b04000000008000016001e1001574000000000000000000000000000000000000000000",
+                "results": {
+                    "Prague": {
+                        "exception": "EOFException.INVALID_RJUMP_DESTINATION",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0xdc846ddd93082baf965a55f2357d8897a00d043a86e4ed9cde4b638c3822c240",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evmone-t8n 0.12.0-dev+commit.85a89e56",
+            "description": "Test function documentation:\nEOF1I4200_0024 (Invalid) EOF code containing RJUMPI with target PUSH2+ immediate",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.0.4/tests/prague/eip7692_eof_v1/eip4200_relative_jumps/test_rjumpi.py#L471",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-4200.md",
+            "reference-spec-version": "17d4a8d12d2b5e0f2985c866376c16c8c6df7cba"
+        }
+    },
+    "tests/prague/eip7692_eof_v1/eip4200_relative_jumps/test_rjumpi.py::test_rjumpi_into_push_n[fork_CancunEIP7692-eof_test-data_portion_end-jump_JumpDirection.FORWARD-opcode_PUSH22]": {
+        "vectors": {
+            "0": {
+                "code": "0xef0001010004020001001c04000000008000016001e100167500000000000000000000000000000000000000000000",
+                "results": {
+                    "Prague": {
+                        "exception": "EOFException.INVALID_RJUMP_DESTINATION",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0x1f495b631368410a5dfe451c0e933ca8742975b9bf29b755de31edb3a1908a2b",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evmone-t8n 0.12.0-dev+commit.85a89e56",
+            "description": "Test function documentation:\nEOF1I4200_0024 (Invalid) EOF code containing RJUMPI with target PUSH2+ immediate",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.0.4/tests/prague/eip7692_eof_v1/eip4200_relative_jumps/test_rjumpi.py#L471",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-4200.md",
+            "reference-spec-version": "17d4a8d12d2b5e0f2985c866376c16c8c6df7cba"
+        }
+    },
+    "tests/prague/eip7692_eof_v1/eip4200_relative_jumps/test_rjumpi.py::test_rjumpi_into_push_n[fork_CancunEIP7692-eof_test-data_portion_end-jump_JumpDirection.FORWARD-opcode_PUSH23]": {
+        "vectors": {
+            "0": {
+                "code": "0xef0001010004020001001d04000000008000016001e10017760000000000000000000000000000000000000000000000",
+                "results": {
+                    "Prague": {
+                        "exception": "EOFException.INVALID_RJUMP_DESTINATION",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0xfe74b986805ba84a11e00ccf1f718e5b066e57b4831708c80f988196be880e23",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evmone-t8n 0.12.0-dev+commit.85a89e56",
+            "description": "Test function documentation:\nEOF1I4200_0024 (Invalid) EOF code containing RJUMPI with target PUSH2+ immediate",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.0.4/tests/prague/eip7692_eof_v1/eip4200_relative_jumps/test_rjumpi.py#L471",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-4200.md",
+            "reference-spec-version": "17d4a8d12d2b5e0f2985c866376c16c8c6df7cba"
+        }
+    },
+    "tests/prague/eip7692_eof_v1/eip4200_relative_jumps/test_rjumpi.py::test_rjumpi_into_push_n[fork_CancunEIP7692-eof_test-data_portion_end-jump_JumpDirection.FORWARD-opcode_PUSH24]": {
+        "vectors": {
+            "0": {
+                "code": "0xef0001010004020001001e04000000008000016001e1001877000000000000000000000000000000000000000000000000",
+                "results": {
+                    "Prague": {
+                        "exception": "EOFException.INVALID_RJUMP_DESTINATION",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0xa364cb2423c09e5fee3a4bac9e90e91dc175ba3c4e2c565f40de35d473fc0a1b",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evmone-t8n 0.12.0-dev+commit.85a89e56",
+            "description": "Test function documentation:\nEOF1I4200_0024 (Invalid) EOF code containing RJUMPI with target PUSH2+ immediate",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.0.4/tests/prague/eip7692_eof_v1/eip4200_relative_jumps/test_rjumpi.py#L471",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-4200.md",
+            "reference-spec-version": "17d4a8d12d2b5e0f2985c866376c16c8c6df7cba"
+        }
+    },
+    "tests/prague/eip7692_eof_v1/eip4200_relative_jumps/test_rjumpi.py::test_rjumpi_into_push_n[fork_CancunEIP7692-eof_test-data_portion_end-jump_JumpDirection.FORWARD-opcode_PUSH25]": {
+        "vectors": {
+            "0": {
+                "code": "0xef0001010004020001001f04000000008000016001e100197800000000000000000000000000000000000000000000000000",
+                "results": {
+                    "Prague": {
+                        "exception": "EOFException.INVALID_RJUMP_DESTINATION",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0x0eb1ecfba468a0e7b281ea600d6efdb9226964afd97ecd6af335e0a9adb92c4e",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evmone-t8n 0.12.0-dev+commit.85a89e56",
+            "description": "Test function documentation:\nEOF1I4200_0024 (Invalid) EOF code containing RJUMPI with target PUSH2+ immediate",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.0.4/tests/prague/eip7692_eof_v1/eip4200_relative_jumps/test_rjumpi.py#L471",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-4200.md",
+            "reference-spec-version": "17d4a8d12d2b5e0f2985c866376c16c8c6df7cba"
+        }
+    },
+    "tests/prague/eip7692_eof_v1/eip4200_relative_jumps/test_rjumpi.py::test_rjumpi_into_push_n[fork_CancunEIP7692-eof_test-data_portion_end-jump_JumpDirection.FORWARD-opcode_PUSH26]": {
+        "vectors": {
+            "0": {
+                "code": "0xef0001010004020001002004000000008000016001e1001a790000000000000000000000000000000000000000000000000000",
+                "results": {
+                    "Prague": {
+                        "exception": "EOFException.INVALID_RJUMP_DESTINATION",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0xede017a01440f068d4313c34d14aa759aa5786d17d6d87d6a03fed7ed9efc2c4",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evmone-t8n 0.12.0-dev+commit.85a89e56",
+            "description": "Test function documentation:\nEOF1I4200_0024 (Invalid) EOF code containing RJUMPI with target PUSH2+ immediate",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.0.4/tests/prague/eip7692_eof_v1/eip4200_relative_jumps/test_rjumpi.py#L471",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-4200.md",
+            "reference-spec-version": "17d4a8d12d2b5e0f2985c866376c16c8c6df7cba"
+        }
+    },
+    "tests/prague/eip7692_eof_v1/eip4200_relative_jumps/test_rjumpi.py::test_rjumpi_into_push_n[fork_CancunEIP7692-eof_test-data_portion_end-jump_JumpDirection.FORWARD-opcode_PUSH27]": {
+        "vectors": {
+            "0": {
+                "code": "0xef0001010004020001002104000000008000016001e1001b7a000000000000000000000000000000000000000000000000000000",
+                "results": {
+                    "Prague": {
+                        "exception": "EOFException.INVALID_RJUMP_DESTINATION",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0x860297af5019a7e0f6329b83cca49ec3f85bd8985ca2494a6c2cc3a0b3214826",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evmone-t8n 0.12.0-dev+commit.85a89e56",
+            "description": "Test function documentation:\nEOF1I4200_0024 (Invalid) EOF code containing RJUMPI with target PUSH2+ immediate",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.0.4/tests/prague/eip7692_eof_v1/eip4200_relative_jumps/test_rjumpi.py#L471",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-4200.md",
+            "reference-spec-version": "17d4a8d12d2b5e0f2985c866376c16c8c6df7cba"
+        }
+    },
+    "tests/prague/eip7692_eof_v1/eip4200_relative_jumps/test_rjumpi.py::test_rjumpi_into_push_n[fork_CancunEIP7692-eof_test-data_portion_end-jump_JumpDirection.FORWARD-opcode_PUSH28]": {
+        "vectors": {
+            "0": {
+                "code": "0xef0001010004020001002204000000008000016001e1001c7b00000000000000000000000000000000000000000000000000000000",
+                "results": {
+                    "Prague": {
+                        "exception": "EOFException.INVALID_RJUMP_DESTINATION",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0x4d5e7744ec043494597d58528540d80dfb0456bf6e5c039f62316a9ae0af250d",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evmone-t8n 0.12.0-dev+commit.85a89e56",
+            "description": "Test function documentation:\nEOF1I4200_0024 (Invalid) EOF code containing RJUMPI with target PUSH2+ immediate",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.0.4/tests/prague/eip7692_eof_v1/eip4200_relative_jumps/test_rjumpi.py#L471",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-4200.md",
+            "reference-spec-version": "17d4a8d12d2b5e0f2985c866376c16c8c6df7cba"
+        }
+    },
+    "tests/prague/eip7692_eof_v1/eip4200_relative_jumps/test_rjumpi.py::test_rjumpi_into_push_n[fork_CancunEIP7692-eof_test-data_portion_end-jump_JumpDirection.FORWARD-opcode_PUSH29]": {
+        "vectors": {
+            "0": {
+                "code": "0xef0001010004020001002304000000008000016001e1001d7c0000000000000000000000000000000000000000000000000000000000",
+                "results": {
+                    "Prague": {
+                        "exception": "EOFException.INVALID_RJUMP_DESTINATION",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0x4962e919e7f574141d1dcde35cc07fca390d10f468d6c228e334d767fe278c9d",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evmone-t8n 0.12.0-dev+commit.85a89e56",
+            "description": "Test function documentation:\nEOF1I4200_0024 (Invalid) EOF code containing RJUMPI with target PUSH2+ immediate",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.0.4/tests/prague/eip7692_eof_v1/eip4200_relative_jumps/test_rjumpi.py#L471",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-4200.md",
+            "reference-spec-version": "17d4a8d12d2b5e0f2985c866376c16c8c6df7cba"
+        }
+    },
+    "tests/prague/eip7692_eof_v1/eip4200_relative_jumps/test_rjumpi.py::test_rjumpi_into_push_n[fork_CancunEIP7692-eof_test-data_portion_end-jump_JumpDirection.FORWARD-opcode_PUSH30]": {
+        "vectors": {
+            "0": {
+                "code": "0xef0001010004020001002404000000008000016001e1001e7d000000000000000000000000000000000000000000000000000000000000",
+                "results": {
+                    "Prague": {
+                        "exception": "EOFException.INVALID_RJUMP_DESTINATION",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0x4e09263e6b6c112df690cdb482569da75d36426c863f370e29716a769ce9a4cf",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evmone-t8n 0.12.0-dev+commit.85a89e56",
+            "description": "Test function documentation:\nEOF1I4200_0024 (Invalid) EOF code containing RJUMPI with target PUSH2+ immediate",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.0.4/tests/prague/eip7692_eof_v1/eip4200_relative_jumps/test_rjumpi.py#L471",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-4200.md",
+            "reference-spec-version": "17d4a8d12d2b5e0f2985c866376c16c8c6df7cba"
+        }
+    },
+    "tests/prague/eip7692_eof_v1/eip4200_relative_jumps/test_rjumpi.py::test_rjumpi_into_push_n[fork_CancunEIP7692-eof_test-data_portion_end-jump_JumpDirection.FORWARD-opcode_PUSH31]": {
+        "vectors": {
+            "0": {
+                "code": "0xef0001010004020001002504000000008000016001e1001f7e00000000000000000000000000000000000000000000000000000000000000",
+                "results": {
+                    "Prague": {
+                        "exception": "EOFException.INVALID_RJUMP_DESTINATION",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0x7a94136b69fd53f851f05a854e467c57cc07fa9543f5a743b3565c0cb401cdf5",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evmone-t8n 0.12.0-dev+commit.85a89e56",
+            "description": "Test function documentation:\nEOF1I4200_0024 (Invalid) EOF code containing RJUMPI with target PUSH2+ immediate",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.0.4/tests/prague/eip7692_eof_v1/eip4200_relative_jumps/test_rjumpi.py#L471",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-4200.md",
+            "reference-spec-version": "17d4a8d12d2b5e0f2985c866376c16c8c6df7cba"
+        }
+    },
+    "tests/prague/eip7692_eof_v1/eip4200_relative_jumps/test_rjumpi.py::test_rjumpi_into_push_n[fork_CancunEIP7692-eof_test-data_portion_end-jump_JumpDirection.FORWARD-opcode_PUSH32]": {
+        "vectors": {
+            "0": {
+                "code": "0xef0001010004020001002604000000008000016001e100207f0000000000000000000000000000000000000000000000000000000000000000",
+                "results": {
+                    "Prague": {
+                        "exception": "EOFException.INVALID_RJUMP_DESTINATION",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0x97ed523fc9c1944a14e242f05d1e8c989425e1f67eade671268135e6a796d04d",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evmone-t8n 0.12.0-dev+commit.85a89e56",
+            "description": "Test function documentation:\nEOF1I4200_0024 (Invalid) EOF code containing RJUMPI with target PUSH2+ immediate",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.0.4/tests/prague/eip7692_eof_v1/eip4200_relative_jumps/test_rjumpi.py#L471",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-4200.md",
+            "reference-spec-version": "17d4a8d12d2b5e0f2985c866376c16c8c6df7cba"
+        }
+    },
+    "tests/prague/eip7692_eof_v1/eip4200_relative_jumps/test_rjumpi.py::test_rjumpi_into_push_n[fork_CancunEIP7692-eof_test-data_portion_end-jump_JumpDirection.BACKWARD-opcode_PUSH2]": {
+        "vectors": {
+            "0": {
+                "code": "0xef000101000402000100060400000000800001610000e1fffc",
+                "results": {
+                    "Prague": {
+                        "exception": "EOFException.INVALID_RJUMP_DESTINATION",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0x474bd9e23c7ad17eab8d6d3953a38e84c314083742300e34f5cc0c6c5a0b76a8",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evmone-t8n 0.12.0-dev+commit.85a89e56",
+            "description": "Test function documentation:\nEOF1I4200_0024 (Invalid) EOF code containing RJUMPI with target PUSH2+ immediate",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.0.4/tests/prague/eip7692_eof_v1/eip4200_relative_jumps/test_rjumpi.py#L471",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-4200.md",
+            "reference-spec-version": "17d4a8d12d2b5e0f2985c866376c16c8c6df7cba"
+        }
+    },
+    "tests/prague/eip7692_eof_v1/eip4200_relative_jumps/test_rjumpi.py::test_rjumpi_into_push_n[fork_CancunEIP7692-eof_test-data_portion_end-jump_JumpDirection.BACKWARD-opcode_PUSH3]": {
+        "vectors": {
+            "0": {
+                "code": "0xef00010100040200010007040000000080000162000000e1fffc",
+                "results": {
+                    "Prague": {
+                        "exception": "EOFException.INVALID_RJUMP_DESTINATION",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0x6e8c09f57050d4bff43afde51bc89b0b9cd37e3e3fc2084eaca7c3c54802d125",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evmone-t8n 0.12.0-dev+commit.85a89e56",
+            "description": "Test function documentation:\nEOF1I4200_0024 (Invalid) EOF code containing RJUMPI with target PUSH2+ immediate",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.0.4/tests/prague/eip7692_eof_v1/eip4200_relative_jumps/test_rjumpi.py#L471",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-4200.md",
+            "reference-spec-version": "17d4a8d12d2b5e0f2985c866376c16c8c6df7cba"
+        }
+    },
+    "tests/prague/eip7692_eof_v1/eip4200_relative_jumps/test_rjumpi.py::test_rjumpi_into_push_n[fork_CancunEIP7692-eof_test-data_portion_end-jump_JumpDirection.BACKWARD-opcode_PUSH4]": {
+        "vectors": {
+            "0": {
+                "code": "0xef0001010004020001000804000000008000016300000000e1fffc",
+                "results": {
+                    "Prague": {
+                        "exception": "EOFException.INVALID_RJUMP_DESTINATION",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0x15123e547a8ed2b78e36b96b8984abfe0470887697b424d0817fdba011b7a496",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evmone-t8n 0.12.0-dev+commit.85a89e56",
+            "description": "Test function documentation:\nEOF1I4200_0024 (Invalid) EOF code containing RJUMPI with target PUSH2+ immediate",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.0.4/tests/prague/eip7692_eof_v1/eip4200_relative_jumps/test_rjumpi.py#L471",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-4200.md",
+            "reference-spec-version": "17d4a8d12d2b5e0f2985c866376c16c8c6df7cba"
+        }
+    },
+    "tests/prague/eip7692_eof_v1/eip4200_relative_jumps/test_rjumpi.py::test_rjumpi_into_push_n[fork_CancunEIP7692-eof_test-data_portion_end-jump_JumpDirection.BACKWARD-opcode_PUSH5]": {
+        "vectors": {
+            "0": {
+                "code": "0xef000101000402000100090400000000800001640000000000e1fffc",
+                "results": {
+                    "Prague": {
+                        "exception": "EOFException.INVALID_RJUMP_DESTINATION",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0xb15191e7b3ee117ade3b3884cf21e76f56111c7cd29f5cd834ccc0d4bacd9f23",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evmone-t8n 0.12.0-dev+commit.85a89e56",
+            "description": "Test function documentation:\nEOF1I4200_0024 (Invalid) EOF code containing RJUMPI with target PUSH2+ immediate",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.0.4/tests/prague/eip7692_eof_v1/eip4200_relative_jumps/test_rjumpi.py#L471",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-4200.md",
+            "reference-spec-version": "17d4a8d12d2b5e0f2985c866376c16c8c6df7cba"
+        }
+    },
+    "tests/prague/eip7692_eof_v1/eip4200_relative_jumps/test_rjumpi.py::test_rjumpi_into_push_n[fork_CancunEIP7692-eof_test-data_portion_end-jump_JumpDirection.BACKWARD-opcode_PUSH6]": {
+        "vectors": {
+            "0": {
+                "code": "0xef0001010004020001000a040000000080000165000000000000e1fffc",
+                "results": {
+                    "Prague": {
+                        "exception": "EOFException.INVALID_RJUMP_DESTINATION",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0xabc12590c706294377fd442f9ded6b041492cc85e317ebe0a0f29122d0425408",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evmone-t8n 0.12.0-dev+commit.85a89e56",
+            "description": "Test function documentation:\nEOF1I4200_0024 (Invalid) EOF code containing RJUMPI with target PUSH2+ immediate",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.0.4/tests/prague/eip7692_eof_v1/eip4200_relative_jumps/test_rjumpi.py#L471",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-4200.md",
+            "reference-spec-version": "17d4a8d12d2b5e0f2985c866376c16c8c6df7cba"
+        }
+    },
+    "tests/prague/eip7692_eof_v1/eip4200_relative_jumps/test_rjumpi.py::test_rjumpi_into_push_n[fork_CancunEIP7692-eof_test-data_portion_end-jump_JumpDirection.BACKWARD-opcode_PUSH7]": {
+        "vectors": {
+            "0": {
+                "code": "0xef0001010004020001000b04000000008000016600000000000000e1fffc",
+                "results": {
+                    "Prague": {
+                        "exception": "EOFException.INVALID_RJUMP_DESTINATION",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0x335dc9eb4c216fb8f78334ddd0a2f9065267aea3261b44a912ef3610fa1ebe9d",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evmone-t8n 0.12.0-dev+commit.85a89e56",
+            "description": "Test function documentation:\nEOF1I4200_0024 (Invalid) EOF code containing RJUMPI with target PUSH2+ immediate",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.0.4/tests/prague/eip7692_eof_v1/eip4200_relative_jumps/test_rjumpi.py#L471",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-4200.md",
+            "reference-spec-version": "17d4a8d12d2b5e0f2985c866376c16c8c6df7cba"
+        }
+    },
+    "tests/prague/eip7692_eof_v1/eip4200_relative_jumps/test_rjumpi.py::test_rjumpi_into_push_n[fork_CancunEIP7692-eof_test-data_portion_end-jump_JumpDirection.BACKWARD-opcode_PUSH8]": {
+        "vectors": {
+            "0": {
+                "code": "0xef0001010004020001000c0400000000800001670000000000000000e1fffc",
+                "results": {
+                    "Prague": {
+                        "exception": "EOFException.INVALID_RJUMP_DESTINATION",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0xa45c5af29e0fc49f82061ee5e8b5747b66ae0ff0a148447f5d5f9652ff096426",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evmone-t8n 0.12.0-dev+commit.85a89e56",
+            "description": "Test function documentation:\nEOF1I4200_0024 (Invalid) EOF code containing RJUMPI with target PUSH2+ immediate",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.0.4/tests/prague/eip7692_eof_v1/eip4200_relative_jumps/test_rjumpi.py#L471",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-4200.md",
+            "reference-spec-version": "17d4a8d12d2b5e0f2985c866376c16c8c6df7cba"
+        }
+    },
+    "tests/prague/eip7692_eof_v1/eip4200_relative_jumps/test_rjumpi.py::test_rjumpi_into_push_n[fork_CancunEIP7692-eof_test-data_portion_end-jump_JumpDirection.BACKWARD-opcode_PUSH9]": {
+        "vectors": {
+            "0": {
+                "code": "0xef0001010004020001000d040000000080000168000000000000000000e1fffc",
+                "results": {
+                    "Prague": {
+                        "exception": "EOFException.INVALID_RJUMP_DESTINATION",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0xb2874b1c4e24c9bdb8535f6edeb1bd12bdd6f926aa4bf676895a478a162001a3",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evmone-t8n 0.12.0-dev+commit.85a89e56",
+            "description": "Test function documentation:\nEOF1I4200_0024 (Invalid) EOF code containing RJUMPI with target PUSH2+ immediate",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.0.4/tests/prague/eip7692_eof_v1/eip4200_relative_jumps/test_rjumpi.py#L471",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-4200.md",
+            "reference-spec-version": "17d4a8d12d2b5e0f2985c866376c16c8c6df7cba"
+        }
+    },
+    "tests/prague/eip7692_eof_v1/eip4200_relative_jumps/test_rjumpi.py::test_rjumpi_into_push_n[fork_CancunEIP7692-eof_test-data_portion_end-jump_JumpDirection.BACKWARD-opcode_PUSH10]": {
+        "vectors": {
+            "0": {
+                "code": "0xef0001010004020001000e04000000008000016900000000000000000000e1fffc",
+                "results": {
+                    "Prague": {
+                        "exception": "EOFException.INVALID_RJUMP_DESTINATION",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0x72c78c2298f8c11e39e50cb2fdb2386c1be5336e55f9d4c90823e30eaaf8764c",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evmone-t8n 0.12.0-dev+commit.85a89e56",
+            "description": "Test function documentation:\nEOF1I4200_0024 (Invalid) EOF code containing RJUMPI with target PUSH2+ immediate",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.0.4/tests/prague/eip7692_eof_v1/eip4200_relative_jumps/test_rjumpi.py#L471",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-4200.md",
+            "reference-spec-version": "17d4a8d12d2b5e0f2985c866376c16c8c6df7cba"
+        }
+    },
+    "tests/prague/eip7692_eof_v1/eip4200_relative_jumps/test_rjumpi.py::test_rjumpi_into_push_n[fork_CancunEIP7692-eof_test-data_portion_end-jump_JumpDirection.BACKWARD-opcode_PUSH11]": {
+        "vectors": {
+            "0": {
+                "code": "0xef0001010004020001000f04000000008000016a0000000000000000000000e1fffc",
+                "results": {
+                    "Prague": {
+                        "exception": "EOFException.INVALID_RJUMP_DESTINATION",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0xad30b9a18bcedb623124e110d7c56613fe78af3fe307024f3c4c4825de633152",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evmone-t8n 0.12.0-dev+commit.85a89e56",
+            "description": "Test function documentation:\nEOF1I4200_0024 (Invalid) EOF code containing RJUMPI with target PUSH2+ immediate",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.0.4/tests/prague/eip7692_eof_v1/eip4200_relative_jumps/test_rjumpi.py#L471",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-4200.md",
+            "reference-spec-version": "17d4a8d12d2b5e0f2985c866376c16c8c6df7cba"
+        }
+    },
+    "tests/prague/eip7692_eof_v1/eip4200_relative_jumps/test_rjumpi.py::test_rjumpi_into_push_n[fork_CancunEIP7692-eof_test-data_portion_end-jump_JumpDirection.BACKWARD-opcode_PUSH12]": {
+        "vectors": {
+            "0": {
+                "code": "0xef0001010004020001001004000000008000016b000000000000000000000000e1fffc",
+                "results": {
+                    "Prague": {
+                        "exception": "EOFException.INVALID_RJUMP_DESTINATION",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0xb592519ff7dc7f3f3f468a472dcd5cec1fbfa078aa57551f9c425101fbcd56d8",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evmone-t8n 0.12.0-dev+commit.85a89e56",
+            "description": "Test function documentation:\nEOF1I4200_0024 (Invalid) EOF code containing RJUMPI with target PUSH2+ immediate",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.0.4/tests/prague/eip7692_eof_v1/eip4200_relative_jumps/test_rjumpi.py#L471",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-4200.md",
+            "reference-spec-version": "17d4a8d12d2b5e0f2985c866376c16c8c6df7cba"
+        }
+    },
+    "tests/prague/eip7692_eof_v1/eip4200_relative_jumps/test_rjumpi.py::test_rjumpi_into_push_n[fork_CancunEIP7692-eof_test-data_portion_end-jump_JumpDirection.BACKWARD-opcode_PUSH13]": {
+        "vectors": {
+            "0": {
+                "code": "0xef0001010004020001001104000000008000016c00000000000000000000000000e1fffc",
+                "results": {
+                    "Prague": {
+                        "exception": "EOFException.INVALID_RJUMP_DESTINATION",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0xebb092931a28ac755b89840e9762627c18e03d0fa05c866a533b061106d815fd",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evmone-t8n 0.12.0-dev+commit.85a89e56",
+            "description": "Test function documentation:\nEOF1I4200_0024 (Invalid) EOF code containing RJUMPI with target PUSH2+ immediate",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.0.4/tests/prague/eip7692_eof_v1/eip4200_relative_jumps/test_rjumpi.py#L471",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-4200.md",
+            "reference-spec-version": "17d4a8d12d2b5e0f2985c866376c16c8c6df7cba"
+        }
+    },
+    "tests/prague/eip7692_eof_v1/eip4200_relative_jumps/test_rjumpi.py::test_rjumpi_into_push_n[fork_CancunEIP7692-eof_test-data_portion_end-jump_JumpDirection.BACKWARD-opcode_PUSH14]": {
+        "vectors": {
+            "0": {
+                "code": "0xef0001010004020001001204000000008000016d0000000000000000000000000000e1fffc",
+                "results": {
+                    "Prague": {
+                        "exception": "EOFException.INVALID_RJUMP_DESTINATION",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0x74376702ea391cdb5af6f34844e95478666d4675c9dc8e63b5d36fdf4d80db9d",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evmone-t8n 0.12.0-dev+commit.85a89e56",
+            "description": "Test function documentation:\nEOF1I4200_0024 (Invalid) EOF code containing RJUMPI with target PUSH2+ immediate",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.0.4/tests/prague/eip7692_eof_v1/eip4200_relative_jumps/test_rjumpi.py#L471",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-4200.md",
+            "reference-spec-version": "17d4a8d12d2b5e0f2985c866376c16c8c6df7cba"
+        }
+    },
+    "tests/prague/eip7692_eof_v1/eip4200_relative_jumps/test_rjumpi.py::test_rjumpi_into_push_n[fork_CancunEIP7692-eof_test-data_portion_end-jump_JumpDirection.BACKWARD-opcode_PUSH15]": {
+        "vectors": {
+            "0": {
+                "code": "0xef0001010004020001001304000000008000016e000000000000000000000000000000e1fffc",
+                "results": {
+                    "Prague": {
+                        "exception": "EOFException.INVALID_RJUMP_DESTINATION",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0x32f7d1cbd8c460e4eaa71358388e5d5423bbbf6ca8ccf7505b7bd7923c50e1bf",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evmone-t8n 0.12.0-dev+commit.85a89e56",
+            "description": "Test function documentation:\nEOF1I4200_0024 (Invalid) EOF code containing RJUMPI with target PUSH2+ immediate",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.0.4/tests/prague/eip7692_eof_v1/eip4200_relative_jumps/test_rjumpi.py#L471",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-4200.md",
+            "reference-spec-version": "17d4a8d12d2b5e0f2985c866376c16c8c6df7cba"
+        }
+    },
+    "tests/prague/eip7692_eof_v1/eip4200_relative_jumps/test_rjumpi.py::test_rjumpi_into_push_n[fork_CancunEIP7692-eof_test-data_portion_end-jump_JumpDirection.BACKWARD-opcode_PUSH16]": {
+        "vectors": {
+            "0": {
+                "code": "0xef0001010004020001001404000000008000016f00000000000000000000000000000000e1fffc",
+                "results": {
+                    "Prague": {
+                        "exception": "EOFException.INVALID_RJUMP_DESTINATION",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0xcfa240cc6f389efd2aabb9176a9242374da0c5ea2d39d7fc4718b97d66ae2fe2",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evmone-t8n 0.12.0-dev+commit.85a89e56",
+            "description": "Test function documentation:\nEOF1I4200_0024 (Invalid) EOF code containing RJUMPI with target PUSH2+ immediate",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.0.4/tests/prague/eip7692_eof_v1/eip4200_relative_jumps/test_rjumpi.py#L471",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-4200.md",
+            "reference-spec-version": "17d4a8d12d2b5e0f2985c866376c16c8c6df7cba"
+        }
+    },
+    "tests/prague/eip7692_eof_v1/eip4200_relative_jumps/test_rjumpi.py::test_rjumpi_into_push_n[fork_CancunEIP7692-eof_test-data_portion_end-jump_JumpDirection.BACKWARD-opcode_PUSH17]": {
+        "vectors": {
+            "0": {
+                "code": "0xef000101000402000100150400000000800001700000000000000000000000000000000000e1fffc",
+                "results": {
+                    "Prague": {
+                        "exception": "EOFException.INVALID_RJUMP_DESTINATION",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0xbfa487efb7b64f9cd5bb76991033c054d72048969cec23298a797f9e1a93de91",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evmone-t8n 0.12.0-dev+commit.85a89e56",
+            "description": "Test function documentation:\nEOF1I4200_0024 (Invalid) EOF code containing RJUMPI with target PUSH2+ immediate",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.0.4/tests/prague/eip7692_eof_v1/eip4200_relative_jumps/test_rjumpi.py#L471",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-4200.md",
+            "reference-spec-version": "17d4a8d12d2b5e0f2985c866376c16c8c6df7cba"
+        }
+    },
+    "tests/prague/eip7692_eof_v1/eip4200_relative_jumps/test_rjumpi.py::test_rjumpi_into_push_n[fork_CancunEIP7692-eof_test-data_portion_end-jump_JumpDirection.BACKWARD-opcode_PUSH18]": {
+        "vectors": {
+            "0": {
+                "code": "0xef00010100040200010016040000000080000171000000000000000000000000000000000000e1fffc",
+                "results": {
+                    "Prague": {
+                        "exception": "EOFException.INVALID_RJUMP_DESTINATION",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0x65bf54e187c16ce3075318e20e04255a5bc70897aee0733bcf0e533684dd435a",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evmone-t8n 0.12.0-dev+commit.85a89e56",
+            "description": "Test function documentation:\nEOF1I4200_0024 (Invalid) EOF code containing RJUMPI with target PUSH2+ immediate",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.0.4/tests/prague/eip7692_eof_v1/eip4200_relative_jumps/test_rjumpi.py#L471",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-4200.md",
+            "reference-spec-version": "17d4a8d12d2b5e0f2985c866376c16c8c6df7cba"
+        }
+    },
+    "tests/prague/eip7692_eof_v1/eip4200_relative_jumps/test_rjumpi.py::test_rjumpi_into_push_n[fork_CancunEIP7692-eof_test-data_portion_end-jump_JumpDirection.BACKWARD-opcode_PUSH19]": {
+        "vectors": {
+            "0": {
+                "code": "0xef0001010004020001001704000000008000017200000000000000000000000000000000000000e1fffc",
+                "results": {
+                    "Prague": {
+                        "exception": "EOFException.INVALID_RJUMP_DESTINATION",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0xfcf5f536076208e81dbe81b28221bc61d405a5a228a5d6ab319296fe50b4dbf2",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evmone-t8n 0.12.0-dev+commit.85a89e56",
+            "description": "Test function documentation:\nEOF1I4200_0024 (Invalid) EOF code containing RJUMPI with target PUSH2+ immediate",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.0.4/tests/prague/eip7692_eof_v1/eip4200_relative_jumps/test_rjumpi.py#L471",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-4200.md",
+            "reference-spec-version": "17d4a8d12d2b5e0f2985c866376c16c8c6df7cba"
+        }
+    },
+    "tests/prague/eip7692_eof_v1/eip4200_relative_jumps/test_rjumpi.py::test_rjumpi_into_push_n[fork_CancunEIP7692-eof_test-data_portion_end-jump_JumpDirection.BACKWARD-opcode_PUSH20]": {
+        "vectors": {
+            "0": {
+                "code": "0xef000101000402000100180400000000800001730000000000000000000000000000000000000000e1fffc",
+                "results": {
+                    "Prague": {
+                        "exception": "EOFException.INVALID_RJUMP_DESTINATION",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0xfb91f5bdd61d0159b1f973d1962f43ab0457ae255734c13f123a8fa061060074",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evmone-t8n 0.12.0-dev+commit.85a89e56",
+            "description": "Test function documentation:\nEOF1I4200_0024 (Invalid) EOF code containing RJUMPI with target PUSH2+ immediate",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.0.4/tests/prague/eip7692_eof_v1/eip4200_relative_jumps/test_rjumpi.py#L471",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-4200.md",
+            "reference-spec-version": "17d4a8d12d2b5e0f2985c866376c16c8c6df7cba"
+        }
+    },
+    "tests/prague/eip7692_eof_v1/eip4200_relative_jumps/test_rjumpi.py::test_rjumpi_into_push_n[fork_CancunEIP7692-eof_test-data_portion_end-jump_JumpDirection.BACKWARD-opcode_PUSH21]": {
+        "vectors": {
+            "0": {
+                "code": "0xef00010100040200010019040000000080000174000000000000000000000000000000000000000000e1fffc",
+                "results": {
+                    "Prague": {
+                        "exception": "EOFException.INVALID_RJUMP_DESTINATION",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0x04fdfc0f2d1157e4f3cafc58ec1bb136c6e29969a22caf4cca62c4404b8e015a",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evmone-t8n 0.12.0-dev+commit.85a89e56",
+            "description": "Test function documentation:\nEOF1I4200_0024 (Invalid) EOF code containing RJUMPI with target PUSH2+ immediate",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.0.4/tests/prague/eip7692_eof_v1/eip4200_relative_jumps/test_rjumpi.py#L471",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-4200.md",
+            "reference-spec-version": "17d4a8d12d2b5e0f2985c866376c16c8c6df7cba"
+        }
+    },
+    "tests/prague/eip7692_eof_v1/eip4200_relative_jumps/test_rjumpi.py::test_rjumpi_into_push_n[fork_CancunEIP7692-eof_test-data_portion_end-jump_JumpDirection.BACKWARD-opcode_PUSH22]": {
+        "vectors": {
+            "0": {
+                "code": "0xef0001010004020001001a04000000008000017500000000000000000000000000000000000000000000e1fffc",
+                "results": {
+                    "Prague": {
+                        "exception": "EOFException.INVALID_RJUMP_DESTINATION",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0x08ae7c7289fcebaa9540eb4697a5174d63cfc5de5e537c14cac264d2708a5096",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evmone-t8n 0.12.0-dev+commit.85a89e56",
+            "description": "Test function documentation:\nEOF1I4200_0024 (Invalid) EOF code containing RJUMPI with target PUSH2+ immediate",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.0.4/tests/prague/eip7692_eof_v1/eip4200_relative_jumps/test_rjumpi.py#L471",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-4200.md",
+            "reference-spec-version": "17d4a8d12d2b5e0f2985c866376c16c8c6df7cba"
+        }
+    },
+    "tests/prague/eip7692_eof_v1/eip4200_relative_jumps/test_rjumpi.py::test_rjumpi_into_push_n[fork_CancunEIP7692-eof_test-data_portion_end-jump_JumpDirection.BACKWARD-opcode_PUSH23]": {
+        "vectors": {
+            "0": {
+                "code": "0xef0001010004020001001b0400000000800001760000000000000000000000000000000000000000000000e1fffc",
+                "results": {
+                    "Prague": {
+                        "exception": "EOFException.INVALID_RJUMP_DESTINATION",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0x01f43b2a438c371e3f4814e95cc92df794bec369c85edc415620df506e02c562",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evmone-t8n 0.12.0-dev+commit.85a89e56",
+            "description": "Test function documentation:\nEOF1I4200_0024 (Invalid) EOF code containing RJUMPI with target PUSH2+ immediate",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.0.4/tests/prague/eip7692_eof_v1/eip4200_relative_jumps/test_rjumpi.py#L471",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-4200.md",
+            "reference-spec-version": "17d4a8d12d2b5e0f2985c866376c16c8c6df7cba"
+        }
+    },
+    "tests/prague/eip7692_eof_v1/eip4200_relative_jumps/test_rjumpi.py::test_rjumpi_into_push_n[fork_CancunEIP7692-eof_test-data_portion_end-jump_JumpDirection.BACKWARD-opcode_PUSH24]": {
+        "vectors": {
+            "0": {
+                "code": "0xef0001010004020001001c040000000080000177000000000000000000000000000000000000000000000000e1fffc",
+                "results": {
+                    "Prague": {
+                        "exception": "EOFException.INVALID_RJUMP_DESTINATION",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0x28a742fe49269d99f723b809a7c7bba490b1f94bff5af60708bdb45546396f5a",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evmone-t8n 0.12.0-dev+commit.85a89e56",
+            "description": "Test function documentation:\nEOF1I4200_0024 (Invalid) EOF code containing RJUMPI with target PUSH2+ immediate",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.0.4/tests/prague/eip7692_eof_v1/eip4200_relative_jumps/test_rjumpi.py#L471",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-4200.md",
+            "reference-spec-version": "17d4a8d12d2b5e0f2985c866376c16c8c6df7cba"
+        }
+    },
+    "tests/prague/eip7692_eof_v1/eip4200_relative_jumps/test_rjumpi.py::test_rjumpi_into_push_n[fork_CancunEIP7692-eof_test-data_portion_end-jump_JumpDirection.BACKWARD-opcode_PUSH25]": {
+        "vectors": {
+            "0": {
+                "code": "0xef0001010004020001001d04000000008000017800000000000000000000000000000000000000000000000000e1fffc",
+                "results": {
+                    "Prague": {
+                        "exception": "EOFException.INVALID_RJUMP_DESTINATION",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0x2b7520605bfb729d4304696941ee76fa3476ed80bd1aba8c44a35b96077f6f6d",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evmone-t8n 0.12.0-dev+commit.85a89e56",
+            "description": "Test function documentation:\nEOF1I4200_0024 (Invalid) EOF code containing RJUMPI with target PUSH2+ immediate",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.0.4/tests/prague/eip7692_eof_v1/eip4200_relative_jumps/test_rjumpi.py#L471",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-4200.md",
+            "reference-spec-version": "17d4a8d12d2b5e0f2985c866376c16c8c6df7cba"
+        }
+    },
+    "tests/prague/eip7692_eof_v1/eip4200_relative_jumps/test_rjumpi.py::test_rjumpi_into_push_n[fork_CancunEIP7692-eof_test-data_portion_end-jump_JumpDirection.BACKWARD-opcode_PUSH26]": {
+        "vectors": {
+            "0": {
+                "code": "0xef0001010004020001001e0400000000800001790000000000000000000000000000000000000000000000000000e1fffc",
+                "results": {
+                    "Prague": {
+                        "exception": "EOFException.INVALID_RJUMP_DESTINATION",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0x48e585b0f4d86e44eacfa69d3a97d26d9e6f7207a11e7c32cbfb2634269309f0",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evmone-t8n 0.12.0-dev+commit.85a89e56",
+            "description": "Test function documentation:\nEOF1I4200_0024 (Invalid) EOF code containing RJUMPI with target PUSH2+ immediate",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.0.4/tests/prague/eip7692_eof_v1/eip4200_relative_jumps/test_rjumpi.py#L471",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-4200.md",
+            "reference-spec-version": "17d4a8d12d2b5e0f2985c866376c16c8c6df7cba"
+        }
+    },
+    "tests/prague/eip7692_eof_v1/eip4200_relative_jumps/test_rjumpi.py::test_rjumpi_into_push_n[fork_CancunEIP7692-eof_test-data_portion_end-jump_JumpDirection.BACKWARD-opcode_PUSH27]": {
+        "vectors": {
+            "0": {
+                "code": "0xef0001010004020001001f04000000008000017a000000000000000000000000000000000000000000000000000000e1fffc",
+                "results": {
+                    "Prague": {
+                        "exception": "EOFException.INVALID_RJUMP_DESTINATION",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0xb27cf56a61b1af296503d31d80562f6deb7d65f6ad04b932d069fdc4401bfcb0",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evmone-t8n 0.12.0-dev+commit.85a89e56",
+            "description": "Test function documentation:\nEOF1I4200_0024 (Invalid) EOF code containing RJUMPI with target PUSH2+ immediate",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.0.4/tests/prague/eip7692_eof_v1/eip4200_relative_jumps/test_rjumpi.py#L471",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-4200.md",
+            "reference-spec-version": "17d4a8d12d2b5e0f2985c866376c16c8c6df7cba"
+        }
+    },
+    "tests/prague/eip7692_eof_v1/eip4200_relative_jumps/test_rjumpi.py::test_rjumpi_into_push_n[fork_CancunEIP7692-eof_test-data_portion_end-jump_JumpDirection.BACKWARD-opcode_PUSH28]": {
+        "vectors": {
+            "0": {
+                "code": "0xef0001010004020001002004000000008000017b00000000000000000000000000000000000000000000000000000000e1fffc",
+                "results": {
+                    "Prague": {
+                        "exception": "EOFException.INVALID_RJUMP_DESTINATION",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0x35f14d38ce902cf7071fe3d82828397a719abf571d4e17c964d2a66f4e637f33",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evmone-t8n 0.12.0-dev+commit.85a89e56",
+            "description": "Test function documentation:\nEOF1I4200_0024 (Invalid) EOF code containing RJUMPI with target PUSH2+ immediate",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.0.4/tests/prague/eip7692_eof_v1/eip4200_relative_jumps/test_rjumpi.py#L471",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-4200.md",
+            "reference-spec-version": "17d4a8d12d2b5e0f2985c866376c16c8c6df7cba"
+        }
+    },
+    "tests/prague/eip7692_eof_v1/eip4200_relative_jumps/test_rjumpi.py::test_rjumpi_into_push_n[fork_CancunEIP7692-eof_test-data_portion_end-jump_JumpDirection.BACKWARD-opcode_PUSH29]": {
+        "vectors": {
+            "0": {
+                "code": "0xef0001010004020001002104000000008000017c0000000000000000000000000000000000000000000000000000000000e1fffc",
+                "results": {
+                    "Prague": {
+                        "exception": "EOFException.INVALID_RJUMP_DESTINATION",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0x453910f66abe97ee05646c75cd9ccfbb8b4542205220e2edabd51c770b16aac9",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evmone-t8n 0.12.0-dev+commit.85a89e56",
+            "description": "Test function documentation:\nEOF1I4200_0024 (Invalid) EOF code containing RJUMPI with target PUSH2+ immediate",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.0.4/tests/prague/eip7692_eof_v1/eip4200_relative_jumps/test_rjumpi.py#L471",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-4200.md",
+            "reference-spec-version": "17d4a8d12d2b5e0f2985c866376c16c8c6df7cba"
+        }
+    },
+    "tests/prague/eip7692_eof_v1/eip4200_relative_jumps/test_rjumpi.py::test_rjumpi_into_push_n[fork_CancunEIP7692-eof_test-data_portion_end-jump_JumpDirection.BACKWARD-opcode_PUSH30]": {
+        "vectors": {
+            "0": {
+                "code": "0xef0001010004020001002204000000008000017d000000000000000000000000000000000000000000000000000000000000e1fffc",
+                "results": {
+                    "Prague": {
+                        "exception": "EOFException.INVALID_RJUMP_DESTINATION",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0xeefd77f65ac1b9c798a2daf8d4b6e888d7e105e24090efe172b5da72e92ec0b1",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evmone-t8n 0.12.0-dev+commit.85a89e56",
+            "description": "Test function documentation:\nEOF1I4200_0024 (Invalid) EOF code containing RJUMPI with target PUSH2+ immediate",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.0.4/tests/prague/eip7692_eof_v1/eip4200_relative_jumps/test_rjumpi.py#L471",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-4200.md",
+            "reference-spec-version": "17d4a8d12d2b5e0f2985c866376c16c8c6df7cba"
+        }
+    },
+    "tests/prague/eip7692_eof_v1/eip4200_relative_jumps/test_rjumpi.py::test_rjumpi_into_push_n[fork_CancunEIP7692-eof_test-data_portion_end-jump_JumpDirection.BACKWARD-opcode_PUSH31]": {
+        "vectors": {
+            "0": {
+                "code": "0xef0001010004020001002304000000008000017e00000000000000000000000000000000000000000000000000000000000000e1fffc",
+                "results": {
+                    "Prague": {
+                        "exception": "EOFException.INVALID_RJUMP_DESTINATION",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0x7ae1c78645daae205f524d06500a9bacad729a1547d1ff67213e9ab705c23abe",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evmone-t8n 0.12.0-dev+commit.85a89e56",
+            "description": "Test function documentation:\nEOF1I4200_0024 (Invalid) EOF code containing RJUMPI with target PUSH2+ immediate",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.0.4/tests/prague/eip7692_eof_v1/eip4200_relative_jumps/test_rjumpi.py#L471",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-4200.md",
+            "reference-spec-version": "17d4a8d12d2b5e0f2985c866376c16c8c6df7cba"
+        }
+    },
+    "tests/prague/eip7692_eof_v1/eip4200_relative_jumps/test_rjumpi.py::test_rjumpi_into_push_n[fork_CancunEIP7692-eof_test-data_portion_end-jump_JumpDirection.BACKWARD-opcode_PUSH32]": {
+        "vectors": {
+            "0": {
+                "code": "0xef0001010004020001002404000000008000017f0000000000000000000000000000000000000000000000000000000000000000e1fffc",
+                "results": {
+                    "Prague": {
+                        "exception": "EOFException.INVALID_RJUMP_DESTINATION",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0xb58879129e43dc4a7d6c76c6231efa5cf970861cf2aa6159f2d4084400e8f55c",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evmone-t8n 0.12.0-dev+commit.85a89e56",
+            "description": "Test function documentation:\nEOF1I4200_0024 (Invalid) EOF code containing RJUMPI with target PUSH2+ immediate",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.0.4/tests/prague/eip7692_eof_v1/eip4200_relative_jumps/test_rjumpi.py#L471",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-4200.md",
+            "reference-spec-version": "17d4a8d12d2b5e0f2985c866376c16c8c6df7cba"
+        }
+    },
+    "tests/prague/eip7692_eof_v1/eip4200_relative_jumps/test_rjumpi.py::test_rjumpi_into_push_n[fork_CancunEIP7692-eof_test-data_portion_start-jump_JumpDirection.FORWARD-opcode_PUSH2]": {
+        "vectors": {
+            "0": {
+                "code": "0xef0001010004020001000804000000008000016001e10001610000",
+                "results": {
+                    "Prague": {
+                        "exception": "EOFException.INVALID_RJUMP_DESTINATION",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0xf20803740fc4fae453bdfd838ea10b751acb4cc545536baee421db8f928567df",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evmone-t8n 0.12.0-dev+commit.85a89e56",
+            "description": "Test function documentation:\nEOF1I4200_0024 (Invalid) EOF code containing RJUMPI with target PUSH2+ immediate",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.0.4/tests/prague/eip7692_eof_v1/eip4200_relative_jumps/test_rjumpi.py#L471",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-4200.md",
+            "reference-spec-version": "17d4a8d12d2b5e0f2985c866376c16c8c6df7cba"
+        }
+    },
+    "tests/prague/eip7692_eof_v1/eip4200_relative_jumps/test_rjumpi.py::test_rjumpi_into_push_n[fork_CancunEIP7692-eof_test-data_portion_start-jump_JumpDirection.FORWARD-opcode_PUSH3]": {
+        "vectors": {
+            "0": {
+                "code": "0xef0001010004020001000904000000008000016001e1000162000000",
+                "results": {
+                    "Prague": {
+                        "exception": "EOFException.INVALID_RJUMP_DESTINATION",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0x775aea95a607919747e7a6b333f75699101b945afaabbe48ba460b9c6ba6bf01",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evmone-t8n 0.12.0-dev+commit.85a89e56",
+            "description": "Test function documentation:\nEOF1I4200_0024 (Invalid) EOF code containing RJUMPI with target PUSH2+ immediate",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.0.4/tests/prague/eip7692_eof_v1/eip4200_relative_jumps/test_rjumpi.py#L471",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-4200.md",
+            "reference-spec-version": "17d4a8d12d2b5e0f2985c866376c16c8c6df7cba"
+        }
+    },
+    "tests/prague/eip7692_eof_v1/eip4200_relative_jumps/test_rjumpi.py::test_rjumpi_into_push_n[fork_CancunEIP7692-eof_test-data_portion_start-jump_JumpDirection.FORWARD-opcode_PUSH4]": {
+        "vectors": {
+            "0": {
+                "code": "0xef0001010004020001000a04000000008000016001e100016300000000",
+                "results": {
+                    "Prague": {
+                        "exception": "EOFException.INVALID_RJUMP_DESTINATION",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0xec3c7ff5bb6bc4b3b9ed867f1e0e60c5195c82ec7da3192781c91c132be69669",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evmone-t8n 0.12.0-dev+commit.85a89e56",
+            "description": "Test function documentation:\nEOF1I4200_0024 (Invalid) EOF code containing RJUMPI with target PUSH2+ immediate",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.0.4/tests/prague/eip7692_eof_v1/eip4200_relative_jumps/test_rjumpi.py#L471",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-4200.md",
+            "reference-spec-version": "17d4a8d12d2b5e0f2985c866376c16c8c6df7cba"
+        }
+    },
+    "tests/prague/eip7692_eof_v1/eip4200_relative_jumps/test_rjumpi.py::test_rjumpi_into_push_n[fork_CancunEIP7692-eof_test-data_portion_start-jump_JumpDirection.FORWARD-opcode_PUSH5]": {
+        "vectors": {
+            "0": {
+                "code": "0xef0001010004020001000b04000000008000016001e10001640000000000",
+                "results": {
+                    "Prague": {
+                        "exception": "EOFException.INVALID_RJUMP_DESTINATION",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0x1677a1fd44c546dbb45e8af6be2f47bca84d26b08edcd9430b340d9b99d261dd",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evmone-t8n 0.12.0-dev+commit.85a89e56",
+            "description": "Test function documentation:\nEOF1I4200_0024 (Invalid) EOF code containing RJUMPI with target PUSH2+ immediate",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.0.4/tests/prague/eip7692_eof_v1/eip4200_relative_jumps/test_rjumpi.py#L471",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-4200.md",
+            "reference-spec-version": "17d4a8d12d2b5e0f2985c866376c16c8c6df7cba"
+        }
+    },
+    "tests/prague/eip7692_eof_v1/eip4200_relative_jumps/test_rjumpi.py::test_rjumpi_into_push_n[fork_CancunEIP7692-eof_test-data_portion_start-jump_JumpDirection.FORWARD-opcode_PUSH6]": {
+        "vectors": {
+            "0": {
+                "code": "0xef0001010004020001000c04000000008000016001e1000165000000000000",
+                "results": {
+                    "Prague": {
+                        "exception": "EOFException.INVALID_RJUMP_DESTINATION",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0xb487a811580df400b26aa2392fa8906f0425c3e77cf0018288bc36effca7cded",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evmone-t8n 0.12.0-dev+commit.85a89e56",
+            "description": "Test function documentation:\nEOF1I4200_0024 (Invalid) EOF code containing RJUMPI with target PUSH2+ immediate",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.0.4/tests/prague/eip7692_eof_v1/eip4200_relative_jumps/test_rjumpi.py#L471",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-4200.md",
+            "reference-spec-version": "17d4a8d12d2b5e0f2985c866376c16c8c6df7cba"
+        }
+    },
+    "tests/prague/eip7692_eof_v1/eip4200_relative_jumps/test_rjumpi.py::test_rjumpi_into_push_n[fork_CancunEIP7692-eof_test-data_portion_start-jump_JumpDirection.FORWARD-opcode_PUSH7]": {
+        "vectors": {
+            "0": {
+                "code": "0xef0001010004020001000d04000000008000016001e100016600000000000000",
+                "results": {
+                    "Prague": {
+                        "exception": "EOFException.INVALID_RJUMP_DESTINATION",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0x84cbd77865a8e66c65c8c5cd506810899d718d9afcfd3b2a9bc573c88a9b19f2",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evmone-t8n 0.12.0-dev+commit.85a89e56",
+            "description": "Test function documentation:\nEOF1I4200_0024 (Invalid) EOF code containing RJUMPI with target PUSH2+ immediate",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.0.4/tests/prague/eip7692_eof_v1/eip4200_relative_jumps/test_rjumpi.py#L471",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-4200.md",
+            "reference-spec-version": "17d4a8d12d2b5e0f2985c866376c16c8c6df7cba"
+        }
+    },
+    "tests/prague/eip7692_eof_v1/eip4200_relative_jumps/test_rjumpi.py::test_rjumpi_into_push_n[fork_CancunEIP7692-eof_test-data_portion_start-jump_JumpDirection.FORWARD-opcode_PUSH8]": {
+        "vectors": {
+            "0": {
+                "code": "0xef0001010004020001000e04000000008000016001e10001670000000000000000",
+                "results": {
+                    "Prague": {
+                        "exception": "EOFException.INVALID_RJUMP_DESTINATION",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0xe993b2743ccab226fca305784755531be53e86d4ae898b830e6839eb9b3d63ce",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evmone-t8n 0.12.0-dev+commit.85a89e56",
+            "description": "Test function documentation:\nEOF1I4200_0024 (Invalid) EOF code containing RJUMPI with target PUSH2+ immediate",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.0.4/tests/prague/eip7692_eof_v1/eip4200_relative_jumps/test_rjumpi.py#L471",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-4200.md",
+            "reference-spec-version": "17d4a8d12d2b5e0f2985c866376c16c8c6df7cba"
+        }
+    },
+    "tests/prague/eip7692_eof_v1/eip4200_relative_jumps/test_rjumpi.py::test_rjumpi_into_push_n[fork_CancunEIP7692-eof_test-data_portion_start-jump_JumpDirection.FORWARD-opcode_PUSH9]": {
+        "vectors": {
+            "0": {
+                "code": "0xef0001010004020001000f04000000008000016001e1000168000000000000000000",
+                "results": {
+                    "Prague": {
+                        "exception": "EOFException.INVALID_RJUMP_DESTINATION",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0x43808b65de4ef0180f1f1666622d28774fbf49fe0b2edb2807b6087991a01a55",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evmone-t8n 0.12.0-dev+commit.85a89e56",
+            "description": "Test function documentation:\nEOF1I4200_0024 (Invalid) EOF code containing RJUMPI with target PUSH2+ immediate",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.0.4/tests/prague/eip7692_eof_v1/eip4200_relative_jumps/test_rjumpi.py#L471",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-4200.md",
+            "reference-spec-version": "17d4a8d12d2b5e0f2985c866376c16c8c6df7cba"
+        }
+    },
+    "tests/prague/eip7692_eof_v1/eip4200_relative_jumps/test_rjumpi.py::test_rjumpi_into_push_n[fork_CancunEIP7692-eof_test-data_portion_start-jump_JumpDirection.FORWARD-opcode_PUSH10]": {
+        "vectors": {
+            "0": {
+                "code": "0xef0001010004020001001004000000008000016001e100016900000000000000000000",
+                "results": {
+                    "Prague": {
+                        "exception": "EOFException.INVALID_RJUMP_DESTINATION",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0xf3e3e10b9ccfa8c64dc3dd9751340c797bb29a6769edefda30048cd77e36341e",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evmone-t8n 0.12.0-dev+commit.85a89e56",
+            "description": "Test function documentation:\nEOF1I4200_0024 (Invalid) EOF code containing RJUMPI with target PUSH2+ immediate",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.0.4/tests/prague/eip7692_eof_v1/eip4200_relative_jumps/test_rjumpi.py#L471",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-4200.md",
+            "reference-spec-version": "17d4a8d12d2b5e0f2985c866376c16c8c6df7cba"
+        }
+    },
+    "tests/prague/eip7692_eof_v1/eip4200_relative_jumps/test_rjumpi.py::test_rjumpi_into_push_n[fork_CancunEIP7692-eof_test-data_portion_start-jump_JumpDirection.FORWARD-opcode_PUSH11]": {
+        "vectors": {
+            "0": {
+                "code": "0xef0001010004020001001104000000008000016001e100016a0000000000000000000000",
+                "results": {
+                    "Prague": {
+                        "exception": "EOFException.INVALID_RJUMP_DESTINATION",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0x7767fafe07b6669ab55033f5820ac4a84b67b1e7b017971749ece43bd6e0ca42",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evmone-t8n 0.12.0-dev+commit.85a89e56",
+            "description": "Test function documentation:\nEOF1I4200_0024 (Invalid) EOF code containing RJUMPI with target PUSH2+ immediate",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.0.4/tests/prague/eip7692_eof_v1/eip4200_relative_jumps/test_rjumpi.py#L471",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-4200.md",
+            "reference-spec-version": "17d4a8d12d2b5e0f2985c866376c16c8c6df7cba"
+        }
+    },
+    "tests/prague/eip7692_eof_v1/eip4200_relative_jumps/test_rjumpi.py::test_rjumpi_into_push_n[fork_CancunEIP7692-eof_test-data_portion_start-jump_JumpDirection.FORWARD-opcode_PUSH12]": {
+        "vectors": {
+            "0": {
+                "code": "0xef0001010004020001001204000000008000016001e100016b000000000000000000000000",
+                "results": {
+                    "Prague": {
+                        "exception": "EOFException.INVALID_RJUMP_DESTINATION",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0x65c096e9765d36b5fc05375361dfa6c0d99ffbe1b6b278f80b4a6c9bc68c97bc",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evmone-t8n 0.12.0-dev+commit.85a89e56",
+            "description": "Test function documentation:\nEOF1I4200_0024 (Invalid) EOF code containing RJUMPI with target PUSH2+ immediate",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.0.4/tests/prague/eip7692_eof_v1/eip4200_relative_jumps/test_rjumpi.py#L471",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-4200.md",
+            "reference-spec-version": "17d4a8d12d2b5e0f2985c866376c16c8c6df7cba"
+        }
+    },
+    "tests/prague/eip7692_eof_v1/eip4200_relative_jumps/test_rjumpi.py::test_rjumpi_into_push_n[fork_CancunEIP7692-eof_test-data_portion_start-jump_JumpDirection.FORWARD-opcode_PUSH13]": {
+        "vectors": {
+            "0": {
+                "code": "0xef0001010004020001001304000000008000016001e100016c00000000000000000000000000",
+                "results": {
+                    "Prague": {
+                        "exception": "EOFException.INVALID_RJUMP_DESTINATION",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0x006f8ab53ec7b65dfd753c5f08966c9d11963ae3719b0933749de3d15e0a8245",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evmone-t8n 0.12.0-dev+commit.85a89e56",
+            "description": "Test function documentation:\nEOF1I4200_0024 (Invalid) EOF code containing RJUMPI with target PUSH2+ immediate",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.0.4/tests/prague/eip7692_eof_v1/eip4200_relative_jumps/test_rjumpi.py#L471",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-4200.md",
+            "reference-spec-version": "17d4a8d12d2b5e0f2985c866376c16c8c6df7cba"
+        }
+    },
+    "tests/prague/eip7692_eof_v1/eip4200_relative_jumps/test_rjumpi.py::test_rjumpi_into_push_n[fork_CancunEIP7692-eof_test-data_portion_start-jump_JumpDirection.FORWARD-opcode_PUSH14]": {
+        "vectors": {
+            "0": {
+                "code": "0xef0001010004020001001404000000008000016001e100016d0000000000000000000000000000",
+                "results": {
+                    "Prague": {
+                        "exception": "EOFException.INVALID_RJUMP_DESTINATION",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0x612427aca2f4f02dd4e5a85d81be905e2b70e8095178ecb9def490b156878130",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evmone-t8n 0.12.0-dev+commit.85a89e56",
+            "description": "Test function documentation:\nEOF1I4200_0024 (Invalid) EOF code containing RJUMPI with target PUSH2+ immediate",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.0.4/tests/prague/eip7692_eof_v1/eip4200_relative_jumps/test_rjumpi.py#L471",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-4200.md",
+            "reference-spec-version": "17d4a8d12d2b5e0f2985c866376c16c8c6df7cba"
+        }
+    },
+    "tests/prague/eip7692_eof_v1/eip4200_relative_jumps/test_rjumpi.py::test_rjumpi_into_push_n[fork_CancunEIP7692-eof_test-data_portion_start-jump_JumpDirection.FORWARD-opcode_PUSH15]": {
+        "vectors": {
+            "0": {
+                "code": "0xef0001010004020001001504000000008000016001e100016e000000000000000000000000000000",
+                "results": {
+                    "Prague": {
+                        "exception": "EOFException.INVALID_RJUMP_DESTINATION",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0xc6fe6b78064582e3438df6a9d84dcd1f704697e3f9a7398b66a88c2388da62ce",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evmone-t8n 0.12.0-dev+commit.85a89e56",
+            "description": "Test function documentation:\nEOF1I4200_0024 (Invalid) EOF code containing RJUMPI with target PUSH2+ immediate",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.0.4/tests/prague/eip7692_eof_v1/eip4200_relative_jumps/test_rjumpi.py#L471",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-4200.md",
+            "reference-spec-version": "17d4a8d12d2b5e0f2985c866376c16c8c6df7cba"
+        }
+    },
+    "tests/prague/eip7692_eof_v1/eip4200_relative_jumps/test_rjumpi.py::test_rjumpi_into_push_n[fork_CancunEIP7692-eof_test-data_portion_start-jump_JumpDirection.FORWARD-opcode_PUSH16]": {
+        "vectors": {
+            "0": {
+                "code": "0xef0001010004020001001604000000008000016001e100016f00000000000000000000000000000000",
+                "results": {
+                    "Prague": {
+                        "exception": "EOFException.INVALID_RJUMP_DESTINATION",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0xbfd05342cde7393db3d6498d715864619a041f2ce752761bd2da1f132675a247",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evmone-t8n 0.12.0-dev+commit.85a89e56",
+            "description": "Test function documentation:\nEOF1I4200_0024 (Invalid) EOF code containing RJUMPI with target PUSH2+ immediate",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.0.4/tests/prague/eip7692_eof_v1/eip4200_relative_jumps/test_rjumpi.py#L471",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-4200.md",
+            "reference-spec-version": "17d4a8d12d2b5e0f2985c866376c16c8c6df7cba"
+        }
+    },
+    "tests/prague/eip7692_eof_v1/eip4200_relative_jumps/test_rjumpi.py::test_rjumpi_into_push_n[fork_CancunEIP7692-eof_test-data_portion_start-jump_JumpDirection.FORWARD-opcode_PUSH17]": {
+        "vectors": {
+            "0": {
+                "code": "0xef0001010004020001001704000000008000016001e10001700000000000000000000000000000000000",
+                "results": {
+                    "Prague": {
+                        "exception": "EOFException.INVALID_RJUMP_DESTINATION",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0xd8d435b05981cd047f3d71004b4ad4f596c9e1672b764c5e159251da25b0f805",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evmone-t8n 0.12.0-dev+commit.85a89e56",
+            "description": "Test function documentation:\nEOF1I4200_0024 (Invalid) EOF code containing RJUMPI with target PUSH2+ immediate",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.0.4/tests/prague/eip7692_eof_v1/eip4200_relative_jumps/test_rjumpi.py#L471",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-4200.md",
+            "reference-spec-version": "17d4a8d12d2b5e0f2985c866376c16c8c6df7cba"
+        }
+    },
+    "tests/prague/eip7692_eof_v1/eip4200_relative_jumps/test_rjumpi.py::test_rjumpi_into_push_n[fork_CancunEIP7692-eof_test-data_portion_start-jump_JumpDirection.FORWARD-opcode_PUSH18]": {
+        "vectors": {
+            "0": {
+                "code": "0xef0001010004020001001804000000008000016001e1000171000000000000000000000000000000000000",
+                "results": {
+                    "Prague": {
+                        "exception": "EOFException.INVALID_RJUMP_DESTINATION",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0x0d48ab551ae06e70cf3444e775373de4bafb19ad16fbdd3fdd46d10448d3047a",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evmone-t8n 0.12.0-dev+commit.85a89e56",
+            "description": "Test function documentation:\nEOF1I4200_0024 (Invalid) EOF code containing RJUMPI with target PUSH2+ immediate",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.0.4/tests/prague/eip7692_eof_v1/eip4200_relative_jumps/test_rjumpi.py#L471",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-4200.md",
+            "reference-spec-version": "17d4a8d12d2b5e0f2985c866376c16c8c6df7cba"
+        }
+    },
+    "tests/prague/eip7692_eof_v1/eip4200_relative_jumps/test_rjumpi.py::test_rjumpi_into_push_n[fork_CancunEIP7692-eof_test-data_portion_start-jump_JumpDirection.FORWARD-opcode_PUSH19]": {
+        "vectors": {
+            "0": {
+                "code": "0xef0001010004020001001904000000008000016001e100017200000000000000000000000000000000000000",
+                "results": {
+                    "Prague": {
+                        "exception": "EOFException.INVALID_RJUMP_DESTINATION",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0x14d58550f292f8e17ab6fd01a922649f9da090353a54a831c92d2106859e451f",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evmone-t8n 0.12.0-dev+commit.85a89e56",
+            "description": "Test function documentation:\nEOF1I4200_0024 (Invalid) EOF code containing RJUMPI with target PUSH2+ immediate",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.0.4/tests/prague/eip7692_eof_v1/eip4200_relative_jumps/test_rjumpi.py#L471",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-4200.md",
+            "reference-spec-version": "17d4a8d12d2b5e0f2985c866376c16c8c6df7cba"
+        }
+    },
+    "tests/prague/eip7692_eof_v1/eip4200_relative_jumps/test_rjumpi.py::test_rjumpi_into_push_n[fork_CancunEIP7692-eof_test-data_portion_start-jump_JumpDirection.FORWARD-opcode_PUSH20]": {
+        "vectors": {
+            "0": {
+                "code": "0xef0001010004020001001a04000000008000016001e10001730000000000000000000000000000000000000000",
+                "results": {
+                    "Prague": {
+                        "exception": "EOFException.INVALID_RJUMP_DESTINATION",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0x75f66259125097e0f08124d9145216b3e0a7625495b7b356c7e17bc65c95355f",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evmone-t8n 0.12.0-dev+commit.85a89e56",
+            "description": "Test function documentation:\nEOF1I4200_0024 (Invalid) EOF code containing RJUMPI with target PUSH2+ immediate",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.0.4/tests/prague/eip7692_eof_v1/eip4200_relative_jumps/test_rjumpi.py#L471",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-4200.md",
+            "reference-spec-version": "17d4a8d12d2b5e0f2985c866376c16c8c6df7cba"
+        }
+    },
+    "tests/prague/eip7692_eof_v1/eip4200_relative_jumps/test_rjumpi.py::test_rjumpi_into_push_n[fork_CancunEIP7692-eof_test-data_portion_start-jump_JumpDirection.FORWARD-opcode_PUSH21]": {
+        "vectors": {
+            "0": {
+                "code": "0xef0001010004020001001b04000000008000016001e1000174000000000000000000000000000000000000000000",
+                "results": {
+                    "Prague": {
+                        "exception": "EOFException.INVALID_RJUMP_DESTINATION",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0xfca2b5541e57ec99d64d510c83edcd7e60b6acde51b8d82f9e08050c12d7a1c8",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evmone-t8n 0.12.0-dev+commit.85a89e56",
+            "description": "Test function documentation:\nEOF1I4200_0024 (Invalid) EOF code containing RJUMPI with target PUSH2+ immediate",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.0.4/tests/prague/eip7692_eof_v1/eip4200_relative_jumps/test_rjumpi.py#L471",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-4200.md",
+            "reference-spec-version": "17d4a8d12d2b5e0f2985c866376c16c8c6df7cba"
+        }
+    },
+    "tests/prague/eip7692_eof_v1/eip4200_relative_jumps/test_rjumpi.py::test_rjumpi_into_push_n[fork_CancunEIP7692-eof_test-data_portion_start-jump_JumpDirection.FORWARD-opcode_PUSH22]": {
+        "vectors": {
+            "0": {
+                "code": "0xef0001010004020001001c04000000008000016001e100017500000000000000000000000000000000000000000000",
+                "results": {
+                    "Prague": {
+                        "exception": "EOFException.INVALID_RJUMP_DESTINATION",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0xf471cb8b2f683530e6b6c8c4efa4943c9c157df34503be4d85f4e3de06844bdf",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evmone-t8n 0.12.0-dev+commit.85a89e56",
+            "description": "Test function documentation:\nEOF1I4200_0024 (Invalid) EOF code containing RJUMPI with target PUSH2+ immediate",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.0.4/tests/prague/eip7692_eof_v1/eip4200_relative_jumps/test_rjumpi.py#L471",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-4200.md",
+            "reference-spec-version": "17d4a8d12d2b5e0f2985c866376c16c8c6df7cba"
+        }
+    },
+    "tests/prague/eip7692_eof_v1/eip4200_relative_jumps/test_rjumpi.py::test_rjumpi_into_push_n[fork_CancunEIP7692-eof_test-data_portion_start-jump_JumpDirection.FORWARD-opcode_PUSH23]": {
+        "vectors": {
+            "0": {
+                "code": "0xef0001010004020001001d04000000008000016001e10001760000000000000000000000000000000000000000000000",
+                "results": {
+                    "Prague": {
+                        "exception": "EOFException.INVALID_RJUMP_DESTINATION",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0xab390299e7a4d7b1fbfc091b4e40720dac34e377415dee2d5f6af2d917bbb8cd",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evmone-t8n 0.12.0-dev+commit.85a89e56",
+            "description": "Test function documentation:\nEOF1I4200_0024 (Invalid) EOF code containing RJUMPI with target PUSH2+ immediate",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.0.4/tests/prague/eip7692_eof_v1/eip4200_relative_jumps/test_rjumpi.py#L471",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-4200.md",
+            "reference-spec-version": "17d4a8d12d2b5e0f2985c866376c16c8c6df7cba"
+        }
+    },
+    "tests/prague/eip7692_eof_v1/eip4200_relative_jumps/test_rjumpi.py::test_rjumpi_into_push_n[fork_CancunEIP7692-eof_test-data_portion_start-jump_JumpDirection.FORWARD-opcode_PUSH24]": {
+        "vectors": {
+            "0": {
+                "code": "0xef0001010004020001001e04000000008000016001e1000177000000000000000000000000000000000000000000000000",
+                "results": {
+                    "Prague": {
+                        "exception": "EOFException.INVALID_RJUMP_DESTINATION",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0xe17da6f0d6d4c9b47b53d31b637e4b719223c0af1832c190f917499903755416",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evmone-t8n 0.12.0-dev+commit.85a89e56",
+            "description": "Test function documentation:\nEOF1I4200_0024 (Invalid) EOF code containing RJUMPI with target PUSH2+ immediate",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.0.4/tests/prague/eip7692_eof_v1/eip4200_relative_jumps/test_rjumpi.py#L471",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-4200.md",
+            "reference-spec-version": "17d4a8d12d2b5e0f2985c866376c16c8c6df7cba"
+        }
+    },
+    "tests/prague/eip7692_eof_v1/eip4200_relative_jumps/test_rjumpi.py::test_rjumpi_into_push_n[fork_CancunEIP7692-eof_test-data_portion_start-jump_JumpDirection.FORWARD-opcode_PUSH25]": {
+        "vectors": {
+            "0": {
+                "code": "0xef0001010004020001001f04000000008000016001e100017800000000000000000000000000000000000000000000000000",
+                "results": {
+                    "Prague": {
+                        "exception": "EOFException.INVALID_RJUMP_DESTINATION",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0x79a20b6863e521ef6d1e0b4e307f51aa5e4dfa6350e71ef7701662fcb9dcf15a",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evmone-t8n 0.12.0-dev+commit.85a89e56",
+            "description": "Test function documentation:\nEOF1I4200_0024 (Invalid) EOF code containing RJUMPI with target PUSH2+ immediate",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.0.4/tests/prague/eip7692_eof_v1/eip4200_relative_jumps/test_rjumpi.py#L471",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-4200.md",
+            "reference-spec-version": "17d4a8d12d2b5e0f2985c866376c16c8c6df7cba"
+        }
+    },
+    "tests/prague/eip7692_eof_v1/eip4200_relative_jumps/test_rjumpi.py::test_rjumpi_into_push_n[fork_CancunEIP7692-eof_test-data_portion_start-jump_JumpDirection.FORWARD-opcode_PUSH26]": {
+        "vectors": {
+            "0": {
+                "code": "0xef0001010004020001002004000000008000016001e10001790000000000000000000000000000000000000000000000000000",
+                "results": {
+                    "Prague": {
+                        "exception": "EOFException.INVALID_RJUMP_DESTINATION",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0x2ff8a86ccac9864acc7d6eb3d296d8865825577e8307d120620dc91cfea7192b",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evmone-t8n 0.12.0-dev+commit.85a89e56",
+            "description": "Test function documentation:\nEOF1I4200_0024 (Invalid) EOF code containing RJUMPI with target PUSH2+ immediate",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.0.4/tests/prague/eip7692_eof_v1/eip4200_relative_jumps/test_rjumpi.py#L471",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-4200.md",
+            "reference-spec-version": "17d4a8d12d2b5e0f2985c866376c16c8c6df7cba"
+        }
+    },
+    "tests/prague/eip7692_eof_v1/eip4200_relative_jumps/test_rjumpi.py::test_rjumpi_into_push_n[fork_CancunEIP7692-eof_test-data_portion_start-jump_JumpDirection.FORWARD-opcode_PUSH27]": {
+        "vectors": {
+            "0": {
+                "code": "0xef0001010004020001002104000000008000016001e100017a000000000000000000000000000000000000000000000000000000",
+                "results": {
+                    "Prague": {
+                        "exception": "EOFException.INVALID_RJUMP_DESTINATION",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0x286570ba79aef788a0eedccabd07d022313aa0be242310cd9b78dcee3105e1f3",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evmone-t8n 0.12.0-dev+commit.85a89e56",
+            "description": "Test function documentation:\nEOF1I4200_0024 (Invalid) EOF code containing RJUMPI with target PUSH2+ immediate",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.0.4/tests/prague/eip7692_eof_v1/eip4200_relative_jumps/test_rjumpi.py#L471",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-4200.md",
+            "reference-spec-version": "17d4a8d12d2b5e0f2985c866376c16c8c6df7cba"
+        }
+    },
+    "tests/prague/eip7692_eof_v1/eip4200_relative_jumps/test_rjumpi.py::test_rjumpi_into_push_n[fork_CancunEIP7692-eof_test-data_portion_start-jump_JumpDirection.FORWARD-opcode_PUSH28]": {
+        "vectors": {
+            "0": {
+                "code": "0xef0001010004020001002204000000008000016001e100017b00000000000000000000000000000000000000000000000000000000",
+                "results": {
+                    "Prague": {
+                        "exception": "EOFException.INVALID_RJUMP_DESTINATION",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0x8d7f51af7c9e52a587d55c8a0ab4c708a6363877f929a25e06ef29ded56e4056",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evmone-t8n 0.12.0-dev+commit.85a89e56",
+            "description": "Test function documentation:\nEOF1I4200_0024 (Invalid) EOF code containing RJUMPI with target PUSH2+ immediate",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.0.4/tests/prague/eip7692_eof_v1/eip4200_relative_jumps/test_rjumpi.py#L471",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-4200.md",
+            "reference-spec-version": "17d4a8d12d2b5e0f2985c866376c16c8c6df7cba"
+        }
+    },
+    "tests/prague/eip7692_eof_v1/eip4200_relative_jumps/test_rjumpi.py::test_rjumpi_into_push_n[fork_CancunEIP7692-eof_test-data_portion_start-jump_JumpDirection.FORWARD-opcode_PUSH29]": {
+        "vectors": {
+            "0": {
+                "code": "0xef0001010004020001002304000000008000016001e100017c0000000000000000000000000000000000000000000000000000000000",
+                "results": {
+                    "Prague": {
+                        "exception": "EOFException.INVALID_RJUMP_DESTINATION",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0xfc124f695574b63d9c8598e7338423381632f6959df617114182934d97bc8c9b",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evmone-t8n 0.12.0-dev+commit.85a89e56",
+            "description": "Test function documentation:\nEOF1I4200_0024 (Invalid) EOF code containing RJUMPI with target PUSH2+ immediate",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.0.4/tests/prague/eip7692_eof_v1/eip4200_relative_jumps/test_rjumpi.py#L471",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-4200.md",
+            "reference-spec-version": "17d4a8d12d2b5e0f2985c866376c16c8c6df7cba"
+        }
+    },
+    "tests/prague/eip7692_eof_v1/eip4200_relative_jumps/test_rjumpi.py::test_rjumpi_into_push_n[fork_CancunEIP7692-eof_test-data_portion_start-jump_JumpDirection.FORWARD-opcode_PUSH30]": {
+        "vectors": {
+            "0": {
+                "code": "0xef0001010004020001002404000000008000016001e100017d000000000000000000000000000000000000000000000000000000000000",
+                "results": {
+                    "Prague": {
+                        "exception": "EOFException.INVALID_RJUMP_DESTINATION",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0xa1e5eb60bc32752d7ff733a3e7c563bb82dfc58829be626d241b5a36fb5f6cdd",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evmone-t8n 0.12.0-dev+commit.85a89e56",
+            "description": "Test function documentation:\nEOF1I4200_0024 (Invalid) EOF code containing RJUMPI with target PUSH2+ immediate",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.0.4/tests/prague/eip7692_eof_v1/eip4200_relative_jumps/test_rjumpi.py#L471",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-4200.md",
+            "reference-spec-version": "17d4a8d12d2b5e0f2985c866376c16c8c6df7cba"
+        }
+    },
+    "tests/prague/eip7692_eof_v1/eip4200_relative_jumps/test_rjumpi.py::test_rjumpi_into_push_n[fork_CancunEIP7692-eof_test-data_portion_start-jump_JumpDirection.FORWARD-opcode_PUSH31]": {
+        "vectors": {
+            "0": {
+                "code": "0xef0001010004020001002504000000008000016001e100017e00000000000000000000000000000000000000000000000000000000000000",
+                "results": {
+                    "Prague": {
+                        "exception": "EOFException.INVALID_RJUMP_DESTINATION",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0xdb924c07deb15651b0944048313fc92be248bdb8ee0ebf8390d4e1f147bd96ed",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evmone-t8n 0.12.0-dev+commit.85a89e56",
+            "description": "Test function documentation:\nEOF1I4200_0024 (Invalid) EOF code containing RJUMPI with target PUSH2+ immediate",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.0.4/tests/prague/eip7692_eof_v1/eip4200_relative_jumps/test_rjumpi.py#L471",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-4200.md",
+            "reference-spec-version": "17d4a8d12d2b5e0f2985c866376c16c8c6df7cba"
+        }
+    },
+    "tests/prague/eip7692_eof_v1/eip4200_relative_jumps/test_rjumpi.py::test_rjumpi_into_push_n[fork_CancunEIP7692-eof_test-data_portion_start-jump_JumpDirection.FORWARD-opcode_PUSH32]": {
+        "vectors": {
+            "0": {
+                "code": "0xef0001010004020001002604000000008000016001e100017f0000000000000000000000000000000000000000000000000000000000000000",
+                "results": {
+                    "Prague": {
+                        "exception": "EOFException.INVALID_RJUMP_DESTINATION",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0x36e83089935b1fe71b14751e22178a9e09179c7531f48040011f525175c6b663",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evmone-t8n 0.12.0-dev+commit.85a89e56",
+            "description": "Test function documentation:\nEOF1I4200_0024 (Invalid) EOF code containing RJUMPI with target PUSH2+ immediate",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.0.4/tests/prague/eip7692_eof_v1/eip4200_relative_jumps/test_rjumpi.py#L471",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-4200.md",
+            "reference-spec-version": "17d4a8d12d2b5e0f2985c866376c16c8c6df7cba"
+        }
+    },
+    "tests/prague/eip7692_eof_v1/eip4200_relative_jumps/test_rjumpi.py::test_rjumpi_into_push_n[fork_CancunEIP7692-eof_test-data_portion_start-jump_JumpDirection.BACKWARD-opcode_PUSH2]": {
+        "vectors": {
+            "0": {
+                "code": "0xef000101000402000100060400000000800001610000e1fffb",
+                "results": {
+                    "Prague": {
+                        "exception": "EOFException.INVALID_RJUMP_DESTINATION",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0x05a3dedc774ac068f4f11784170aaa03f345d680544e0de1116a82b6cc7f74ca",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evmone-t8n 0.12.0-dev+commit.85a89e56",
+            "description": "Test function documentation:\nEOF1I4200_0024 (Invalid) EOF code containing RJUMPI with target PUSH2+ immediate",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.0.4/tests/prague/eip7692_eof_v1/eip4200_relative_jumps/test_rjumpi.py#L471",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-4200.md",
+            "reference-spec-version": "17d4a8d12d2b5e0f2985c866376c16c8c6df7cba"
+        }
+    },
+    "tests/prague/eip7692_eof_v1/eip4200_relative_jumps/test_rjumpi.py::test_rjumpi_into_push_n[fork_CancunEIP7692-eof_test-data_portion_start-jump_JumpDirection.BACKWARD-opcode_PUSH3]": {
+        "vectors": {
+            "0": {
+                "code": "0xef00010100040200010007040000000080000162000000e1fffa",
+                "results": {
+                    "Prague": {
+                        "exception": "EOFException.INVALID_RJUMP_DESTINATION",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0xd9a851eaca9fc2a0c51e1eddb3bd1ed4d21e6b31f1adfcf8fd9aefe6ac762b7d",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evmone-t8n 0.12.0-dev+commit.85a89e56",
+            "description": "Test function documentation:\nEOF1I4200_0024 (Invalid) EOF code containing RJUMPI with target PUSH2+ immediate",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.0.4/tests/prague/eip7692_eof_v1/eip4200_relative_jumps/test_rjumpi.py#L471",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-4200.md",
+            "reference-spec-version": "17d4a8d12d2b5e0f2985c866376c16c8c6df7cba"
+        }
+    },
+    "tests/prague/eip7692_eof_v1/eip4200_relative_jumps/test_rjumpi.py::test_rjumpi_into_push_n[fork_CancunEIP7692-eof_test-data_portion_start-jump_JumpDirection.BACKWARD-opcode_PUSH4]": {
+        "vectors": {
+            "0": {
+                "code": "0xef0001010004020001000804000000008000016300000000e1fff9",
+                "results": {
+                    "Prague": {
+                        "exception": "EOFException.INVALID_RJUMP_DESTINATION",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0x88a89d934c11188b31d2d8122cc2b0e03145c0e99e1c496565e404f9808923ed",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evmone-t8n 0.12.0-dev+commit.85a89e56",
+            "description": "Test function documentation:\nEOF1I4200_0024 (Invalid) EOF code containing RJUMPI with target PUSH2+ immediate",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.0.4/tests/prague/eip7692_eof_v1/eip4200_relative_jumps/test_rjumpi.py#L471",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-4200.md",
+            "reference-spec-version": "17d4a8d12d2b5e0f2985c866376c16c8c6df7cba"
+        }
+    },
+    "tests/prague/eip7692_eof_v1/eip4200_relative_jumps/test_rjumpi.py::test_rjumpi_into_push_n[fork_CancunEIP7692-eof_test-data_portion_start-jump_JumpDirection.BACKWARD-opcode_PUSH5]": {
+        "vectors": {
+            "0": {
+                "code": "0xef000101000402000100090400000000800001640000000000e1fff8",
+                "results": {
+                    "Prague": {
+                        "exception": "EOFException.INVALID_RJUMP_DESTINATION",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0x518608039a20769ea0101390dd07294bafd3a90f69fa927f9fdb614b44f04901",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evmone-t8n 0.12.0-dev+commit.85a89e56",
+            "description": "Test function documentation:\nEOF1I4200_0024 (Invalid) EOF code containing RJUMPI with target PUSH2+ immediate",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.0.4/tests/prague/eip7692_eof_v1/eip4200_relative_jumps/test_rjumpi.py#L471",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-4200.md",
+            "reference-spec-version": "17d4a8d12d2b5e0f2985c866376c16c8c6df7cba"
+        }
+    },
+    "tests/prague/eip7692_eof_v1/eip4200_relative_jumps/test_rjumpi.py::test_rjumpi_into_push_n[fork_CancunEIP7692-eof_test-data_portion_start-jump_JumpDirection.BACKWARD-opcode_PUSH6]": {
+        "vectors": {
+            "0": {
+                "code": "0xef0001010004020001000a040000000080000165000000000000e1fff7",
+                "results": {
+                    "Prague": {
+                        "exception": "EOFException.INVALID_RJUMP_DESTINATION",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0x72197e9046a8e2367605d7c94d1ba24e8ebe950db8fb87ee1ebbc2aeb117770c",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evmone-t8n 0.12.0-dev+commit.85a89e56",
+            "description": "Test function documentation:\nEOF1I4200_0024 (Invalid) EOF code containing RJUMPI with target PUSH2+ immediate",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.0.4/tests/prague/eip7692_eof_v1/eip4200_relative_jumps/test_rjumpi.py#L471",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-4200.md",
+            "reference-spec-version": "17d4a8d12d2b5e0f2985c866376c16c8c6df7cba"
+        }
+    },
+    "tests/prague/eip7692_eof_v1/eip4200_relative_jumps/test_rjumpi.py::test_rjumpi_into_push_n[fork_CancunEIP7692-eof_test-data_portion_start-jump_JumpDirection.BACKWARD-opcode_PUSH7]": {
+        "vectors": {
+            "0": {
+                "code": "0xef0001010004020001000b04000000008000016600000000000000e1fff6",
+                "results": {
+                    "Prague": {
+                        "exception": "EOFException.INVALID_RJUMP_DESTINATION",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0xa3b8e53d919790f5c34c01af7b936d80debf88e87c5072d8bac2829687730339",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evmone-t8n 0.12.0-dev+commit.85a89e56",
+            "description": "Test function documentation:\nEOF1I4200_0024 (Invalid) EOF code containing RJUMPI with target PUSH2+ immediate",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.0.4/tests/prague/eip7692_eof_v1/eip4200_relative_jumps/test_rjumpi.py#L471",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-4200.md",
+            "reference-spec-version": "17d4a8d12d2b5e0f2985c866376c16c8c6df7cba"
+        }
+    },
+    "tests/prague/eip7692_eof_v1/eip4200_relative_jumps/test_rjumpi.py::test_rjumpi_into_push_n[fork_CancunEIP7692-eof_test-data_portion_start-jump_JumpDirection.BACKWARD-opcode_PUSH8]": {
+        "vectors": {
+            "0": {
+                "code": "0xef0001010004020001000c0400000000800001670000000000000000e1fff5",
+                "results": {
+                    "Prague": {
+                        "exception": "EOFException.INVALID_RJUMP_DESTINATION",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0x093fbcc7c97d93584a0563f0c3525c8cb757da0e16dfc750657ac94114ff729f",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evmone-t8n 0.12.0-dev+commit.85a89e56",
+            "description": "Test function documentation:\nEOF1I4200_0024 (Invalid) EOF code containing RJUMPI with target PUSH2+ immediate",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.0.4/tests/prague/eip7692_eof_v1/eip4200_relative_jumps/test_rjumpi.py#L471",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-4200.md",
+            "reference-spec-version": "17d4a8d12d2b5e0f2985c866376c16c8c6df7cba"
+        }
+    },
+    "tests/prague/eip7692_eof_v1/eip4200_relative_jumps/test_rjumpi.py::test_rjumpi_into_push_n[fork_CancunEIP7692-eof_test-data_portion_start-jump_JumpDirection.BACKWARD-opcode_PUSH9]": {
+        "vectors": {
+            "0": {
+                "code": "0xef0001010004020001000d040000000080000168000000000000000000e1fff4",
+                "results": {
+                    "Prague": {
+                        "exception": "EOFException.INVALID_RJUMP_DESTINATION",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0xa7df72c7fd9690f7fe6a1eb29a2ab937314bfedf51b5834ad3451afd506d2ef2",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evmone-t8n 0.12.0-dev+commit.85a89e56",
+            "description": "Test function documentation:\nEOF1I4200_0024 (Invalid) EOF code containing RJUMPI with target PUSH2+ immediate",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.0.4/tests/prague/eip7692_eof_v1/eip4200_relative_jumps/test_rjumpi.py#L471",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-4200.md",
+            "reference-spec-version": "17d4a8d12d2b5e0f2985c866376c16c8c6df7cba"
+        }
+    },
+    "tests/prague/eip7692_eof_v1/eip4200_relative_jumps/test_rjumpi.py::test_rjumpi_into_push_n[fork_CancunEIP7692-eof_test-data_portion_start-jump_JumpDirection.BACKWARD-opcode_PUSH10]": {
+        "vectors": {
+            "0": {
+                "code": "0xef0001010004020001000e04000000008000016900000000000000000000e1fff3",
+                "results": {
+                    "Prague": {
+                        "exception": "EOFException.INVALID_RJUMP_DESTINATION",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0x8f72a654ee8db8c920b67a16ac2a73fe9c161a60450d04df029f020f8fd6ef6e",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evmone-t8n 0.12.0-dev+commit.85a89e56",
+            "description": "Test function documentation:\nEOF1I4200_0024 (Invalid) EOF code containing RJUMPI with target PUSH2+ immediate",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.0.4/tests/prague/eip7692_eof_v1/eip4200_relative_jumps/test_rjumpi.py#L471",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-4200.md",
+            "reference-spec-version": "17d4a8d12d2b5e0f2985c866376c16c8c6df7cba"
+        }
+    },
+    "tests/prague/eip7692_eof_v1/eip4200_relative_jumps/test_rjumpi.py::test_rjumpi_into_push_n[fork_CancunEIP7692-eof_test-data_portion_start-jump_JumpDirection.BACKWARD-opcode_PUSH11]": {
+        "vectors": {
+            "0": {
+                "code": "0xef0001010004020001000f04000000008000016a0000000000000000000000e1fff2",
+                "results": {
+                    "Prague": {
+                        "exception": "EOFException.INVALID_RJUMP_DESTINATION",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0xc45ca7afd99026c61d48757d8818bc4232c533f5e38d247a4a460655b4ff4197",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evmone-t8n 0.12.0-dev+commit.85a89e56",
+            "description": "Test function documentation:\nEOF1I4200_0024 (Invalid) EOF code containing RJUMPI with target PUSH2+ immediate",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.0.4/tests/prague/eip7692_eof_v1/eip4200_relative_jumps/test_rjumpi.py#L471",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-4200.md",
+            "reference-spec-version": "17d4a8d12d2b5e0f2985c866376c16c8c6df7cba"
+        }
+    },
+    "tests/prague/eip7692_eof_v1/eip4200_relative_jumps/test_rjumpi.py::test_rjumpi_into_push_n[fork_CancunEIP7692-eof_test-data_portion_start-jump_JumpDirection.BACKWARD-opcode_PUSH12]": {
+        "vectors": {
+            "0": {
+                "code": "0xef0001010004020001001004000000008000016b000000000000000000000000e1fff1",
+                "results": {
+                    "Prague": {
+                        "exception": "EOFException.INVALID_RJUMP_DESTINATION",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0x1176a9364623dc49c7135c16bd6f10e37b225b5756499e58e24f140681376188",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evmone-t8n 0.12.0-dev+commit.85a89e56",
+            "description": "Test function documentation:\nEOF1I4200_0024 (Invalid) EOF code containing RJUMPI with target PUSH2+ immediate",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.0.4/tests/prague/eip7692_eof_v1/eip4200_relative_jumps/test_rjumpi.py#L471",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-4200.md",
+            "reference-spec-version": "17d4a8d12d2b5e0f2985c866376c16c8c6df7cba"
+        }
+    },
+    "tests/prague/eip7692_eof_v1/eip4200_relative_jumps/test_rjumpi.py::test_rjumpi_into_push_n[fork_CancunEIP7692-eof_test-data_portion_start-jump_JumpDirection.BACKWARD-opcode_PUSH13]": {
+        "vectors": {
+            "0": {
+                "code": "0xef0001010004020001001104000000008000016c00000000000000000000000000e1fff0",
+                "results": {
+                    "Prague": {
+                        "exception": "EOFException.INVALID_RJUMP_DESTINATION",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0x272f4f21956c9a6d38c34b73b58367dc7cf6219de45ab5d5b74af9fd6d564838",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evmone-t8n 0.12.0-dev+commit.85a89e56",
+            "description": "Test function documentation:\nEOF1I4200_0024 (Invalid) EOF code containing RJUMPI with target PUSH2+ immediate",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.0.4/tests/prague/eip7692_eof_v1/eip4200_relative_jumps/test_rjumpi.py#L471",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-4200.md",
+            "reference-spec-version": "17d4a8d12d2b5e0f2985c866376c16c8c6df7cba"
+        }
+    },
+    "tests/prague/eip7692_eof_v1/eip4200_relative_jumps/test_rjumpi.py::test_rjumpi_into_push_n[fork_CancunEIP7692-eof_test-data_portion_start-jump_JumpDirection.BACKWARD-opcode_PUSH14]": {
+        "vectors": {
+            "0": {
+                "code": "0xef0001010004020001001204000000008000016d0000000000000000000000000000e1ffef",
+                "results": {
+                    "Prague": {
+                        "exception": "EOFException.INVALID_RJUMP_DESTINATION",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0xfcef95723edbd213683557d79bbaefd2626f26ae67d21178a800018445bf6baa",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evmone-t8n 0.12.0-dev+commit.85a89e56",
+            "description": "Test function documentation:\nEOF1I4200_0024 (Invalid) EOF code containing RJUMPI with target PUSH2+ immediate",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.0.4/tests/prague/eip7692_eof_v1/eip4200_relative_jumps/test_rjumpi.py#L471",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-4200.md",
+            "reference-spec-version": "17d4a8d12d2b5e0f2985c866376c16c8c6df7cba"
+        }
+    },
+    "tests/prague/eip7692_eof_v1/eip4200_relative_jumps/test_rjumpi.py::test_rjumpi_into_push_n[fork_CancunEIP7692-eof_test-data_portion_start-jump_JumpDirection.BACKWARD-opcode_PUSH15]": {
+        "vectors": {
+            "0": {
+                "code": "0xef0001010004020001001304000000008000016e000000000000000000000000000000e1ffee",
+                "results": {
+                    "Prague": {
+                        "exception": "EOFException.INVALID_RJUMP_DESTINATION",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0x74cf05124b129e4057022f479988c6141c8820be7aead02434f03f292c14da6b",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evmone-t8n 0.12.0-dev+commit.85a89e56",
+            "description": "Test function documentation:\nEOF1I4200_0024 (Invalid) EOF code containing RJUMPI with target PUSH2+ immediate",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.0.4/tests/prague/eip7692_eof_v1/eip4200_relative_jumps/test_rjumpi.py#L471",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-4200.md",
+            "reference-spec-version": "17d4a8d12d2b5e0f2985c866376c16c8c6df7cba"
+        }
+    },
+    "tests/prague/eip7692_eof_v1/eip4200_relative_jumps/test_rjumpi.py::test_rjumpi_into_push_n[fork_CancunEIP7692-eof_test-data_portion_start-jump_JumpDirection.BACKWARD-opcode_PUSH16]": {
+        "vectors": {
+            "0": {
+                "code": "0xef0001010004020001001404000000008000016f00000000000000000000000000000000e1ffed",
+                "results": {
+                    "Prague": {
+                        "exception": "EOFException.INVALID_RJUMP_DESTINATION",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0x42c2b282c5ce3a92225e1f69a42ca71588b162abf98ae9fe0905cdb69db0076b",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evmone-t8n 0.12.0-dev+commit.85a89e56",
+            "description": "Test function documentation:\nEOF1I4200_0024 (Invalid) EOF code containing RJUMPI with target PUSH2+ immediate",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.0.4/tests/prague/eip7692_eof_v1/eip4200_relative_jumps/test_rjumpi.py#L471",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-4200.md",
+            "reference-spec-version": "17d4a8d12d2b5e0f2985c866376c16c8c6df7cba"
+        }
+    },
+    "tests/prague/eip7692_eof_v1/eip4200_relative_jumps/test_rjumpi.py::test_rjumpi_into_push_n[fork_CancunEIP7692-eof_test-data_portion_start-jump_JumpDirection.BACKWARD-opcode_PUSH17]": {
+        "vectors": {
+            "0": {
+                "code": "0xef000101000402000100150400000000800001700000000000000000000000000000000000e1ffec",
+                "results": {
+                    "Prague": {
+                        "exception": "EOFException.INVALID_RJUMP_DESTINATION",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0x094ed4092e8359782d0b35a77a628afc04183fe5fafef6a00a3bc8dca3f17086",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evmone-t8n 0.12.0-dev+commit.85a89e56",
+            "description": "Test function documentation:\nEOF1I4200_0024 (Invalid) EOF code containing RJUMPI with target PUSH2+ immediate",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.0.4/tests/prague/eip7692_eof_v1/eip4200_relative_jumps/test_rjumpi.py#L471",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-4200.md",
+            "reference-spec-version": "17d4a8d12d2b5e0f2985c866376c16c8c6df7cba"
+        }
+    },
+    "tests/prague/eip7692_eof_v1/eip4200_relative_jumps/test_rjumpi.py::test_rjumpi_into_push_n[fork_CancunEIP7692-eof_test-data_portion_start-jump_JumpDirection.BACKWARD-opcode_PUSH18]": {
+        "vectors": {
+            "0": {
+                "code": "0xef00010100040200010016040000000080000171000000000000000000000000000000000000e1ffeb",
+                "results": {
+                    "Prague": {
+                        "exception": "EOFException.INVALID_RJUMP_DESTINATION",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0x5b875262690d61885792633ba01a958e606341c22bc021d298a468ac2498adf1",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evmone-t8n 0.12.0-dev+commit.85a89e56",
+            "description": "Test function documentation:\nEOF1I4200_0024 (Invalid) EOF code containing RJUMPI with target PUSH2+ immediate",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.0.4/tests/prague/eip7692_eof_v1/eip4200_relative_jumps/test_rjumpi.py#L471",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-4200.md",
+            "reference-spec-version": "17d4a8d12d2b5e0f2985c866376c16c8c6df7cba"
+        }
+    },
+    "tests/prague/eip7692_eof_v1/eip4200_relative_jumps/test_rjumpi.py::test_rjumpi_into_push_n[fork_CancunEIP7692-eof_test-data_portion_start-jump_JumpDirection.BACKWARD-opcode_PUSH19]": {
+        "vectors": {
+            "0": {
+                "code": "0xef0001010004020001001704000000008000017200000000000000000000000000000000000000e1ffea",
+                "results": {
+                    "Prague": {
+                        "exception": "EOFException.INVALID_RJUMP_DESTINATION",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0x97d3360fe41713b4425da815f2027280a51fd26dd17a699975456e5c382b751d",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evmone-t8n 0.12.0-dev+commit.85a89e56",
+            "description": "Test function documentation:\nEOF1I4200_0024 (Invalid) EOF code containing RJUMPI with target PUSH2+ immediate",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.0.4/tests/prague/eip7692_eof_v1/eip4200_relative_jumps/test_rjumpi.py#L471",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-4200.md",
+            "reference-spec-version": "17d4a8d12d2b5e0f2985c866376c16c8c6df7cba"
+        }
+    },
+    "tests/prague/eip7692_eof_v1/eip4200_relative_jumps/test_rjumpi.py::test_rjumpi_into_push_n[fork_CancunEIP7692-eof_test-data_portion_start-jump_JumpDirection.BACKWARD-opcode_PUSH20]": {
+        "vectors": {
+            "0": {
+                "code": "0xef000101000402000100180400000000800001730000000000000000000000000000000000000000e1ffe9",
+                "results": {
+                    "Prague": {
+                        "exception": "EOFException.INVALID_RJUMP_DESTINATION",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0xe98338317d7f72e161a21056c5b7954a4b539fb629b1df4b66c0777d853cbada",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evmone-t8n 0.12.0-dev+commit.85a89e56",
+            "description": "Test function documentation:\nEOF1I4200_0024 (Invalid) EOF code containing RJUMPI with target PUSH2+ immediate",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.0.4/tests/prague/eip7692_eof_v1/eip4200_relative_jumps/test_rjumpi.py#L471",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-4200.md",
+            "reference-spec-version": "17d4a8d12d2b5e0f2985c866376c16c8c6df7cba"
+        }
+    },
+    "tests/prague/eip7692_eof_v1/eip4200_relative_jumps/test_rjumpi.py::test_rjumpi_into_push_n[fork_CancunEIP7692-eof_test-data_portion_start-jump_JumpDirection.BACKWARD-opcode_PUSH21]": {
+        "vectors": {
+            "0": {
+                "code": "0xef00010100040200010019040000000080000174000000000000000000000000000000000000000000e1ffe8",
+                "results": {
+                    "Prague": {
+                        "exception": "EOFException.INVALID_RJUMP_DESTINATION",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0x6f5baa915d4ed7a74c244946353cb02ed8e8bcb958378e6b828714a7124e8c53",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evmone-t8n 0.12.0-dev+commit.85a89e56",
+            "description": "Test function documentation:\nEOF1I4200_0024 (Invalid) EOF code containing RJUMPI with target PUSH2+ immediate",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.0.4/tests/prague/eip7692_eof_v1/eip4200_relative_jumps/test_rjumpi.py#L471",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-4200.md",
+            "reference-spec-version": "17d4a8d12d2b5e0f2985c866376c16c8c6df7cba"
+        }
+    },
+    "tests/prague/eip7692_eof_v1/eip4200_relative_jumps/test_rjumpi.py::test_rjumpi_into_push_n[fork_CancunEIP7692-eof_test-data_portion_start-jump_JumpDirection.BACKWARD-opcode_PUSH22]": {
+        "vectors": {
+            "0": {
+                "code": "0xef0001010004020001001a04000000008000017500000000000000000000000000000000000000000000e1ffe7",
+                "results": {
+                    "Prague": {
+                        "exception": "EOFException.INVALID_RJUMP_DESTINATION",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0x0ec682c1fc5c58ce2894d9c9e7bf49a74bda3e6d4be2e391fb5c70e83eb8cb90",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evmone-t8n 0.12.0-dev+commit.85a89e56",
+            "description": "Test function documentation:\nEOF1I4200_0024 (Invalid) EOF code containing RJUMPI with target PUSH2+ immediate",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.0.4/tests/prague/eip7692_eof_v1/eip4200_relative_jumps/test_rjumpi.py#L471",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-4200.md",
+            "reference-spec-version": "17d4a8d12d2b5e0f2985c866376c16c8c6df7cba"
+        }
+    },
+    "tests/prague/eip7692_eof_v1/eip4200_relative_jumps/test_rjumpi.py::test_rjumpi_into_push_n[fork_CancunEIP7692-eof_test-data_portion_start-jump_JumpDirection.BACKWARD-opcode_PUSH23]": {
+        "vectors": {
+            "0": {
+                "code": "0xef0001010004020001001b0400000000800001760000000000000000000000000000000000000000000000e1ffe6",
+                "results": {
+                    "Prague": {
+                        "exception": "EOFException.INVALID_RJUMP_DESTINATION",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0x986aaacfc474ff9824702d9eb50f19f3ae62e4ee16ce962605463063d08450b2",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evmone-t8n 0.12.0-dev+commit.85a89e56",
+            "description": "Test function documentation:\nEOF1I4200_0024 (Invalid) EOF code containing RJUMPI with target PUSH2+ immediate",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.0.4/tests/prague/eip7692_eof_v1/eip4200_relative_jumps/test_rjumpi.py#L471",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-4200.md",
+            "reference-spec-version": "17d4a8d12d2b5e0f2985c866376c16c8c6df7cba"
+        }
+    },
+    "tests/prague/eip7692_eof_v1/eip4200_relative_jumps/test_rjumpi.py::test_rjumpi_into_push_n[fork_CancunEIP7692-eof_test-data_portion_start-jump_JumpDirection.BACKWARD-opcode_PUSH24]": {
+        "vectors": {
+            "0": {
+                "code": "0xef0001010004020001001c040000000080000177000000000000000000000000000000000000000000000000e1ffe5",
+                "results": {
+                    "Prague": {
+                        "exception": "EOFException.INVALID_RJUMP_DESTINATION",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0x0dd1df370c3096c00d856e87dd0b3f1fe87d83797f42ea420005d6c463689aeb",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evmone-t8n 0.12.0-dev+commit.85a89e56",
+            "description": "Test function documentation:\nEOF1I4200_0024 (Invalid) EOF code containing RJUMPI with target PUSH2+ immediate",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.0.4/tests/prague/eip7692_eof_v1/eip4200_relative_jumps/test_rjumpi.py#L471",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-4200.md",
+            "reference-spec-version": "17d4a8d12d2b5e0f2985c866376c16c8c6df7cba"
+        }
+    },
+    "tests/prague/eip7692_eof_v1/eip4200_relative_jumps/test_rjumpi.py::test_rjumpi_into_push_n[fork_CancunEIP7692-eof_test-data_portion_start-jump_JumpDirection.BACKWARD-opcode_PUSH25]": {
+        "vectors": {
+            "0": {
+                "code": "0xef0001010004020001001d04000000008000017800000000000000000000000000000000000000000000000000e1ffe4",
+                "results": {
+                    "Prague": {
+                        "exception": "EOFException.INVALID_RJUMP_DESTINATION",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0x0e81a5ac94cba339423b3c478e0eed58eb2c05e8ca8b92fb613b37e8e5de68ac",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evmone-t8n 0.12.0-dev+commit.85a89e56",
+            "description": "Test function documentation:\nEOF1I4200_0024 (Invalid) EOF code containing RJUMPI with target PUSH2+ immediate",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.0.4/tests/prague/eip7692_eof_v1/eip4200_relative_jumps/test_rjumpi.py#L471",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-4200.md",
+            "reference-spec-version": "17d4a8d12d2b5e0f2985c866376c16c8c6df7cba"
+        }
+    },
+    "tests/prague/eip7692_eof_v1/eip4200_relative_jumps/test_rjumpi.py::test_rjumpi_into_push_n[fork_CancunEIP7692-eof_test-data_portion_start-jump_JumpDirection.BACKWARD-opcode_PUSH26]": {
+        "vectors": {
+            "0": {
+                "code": "0xef0001010004020001001e0400000000800001790000000000000000000000000000000000000000000000000000e1ffe3",
+                "results": {
+                    "Prague": {
+                        "exception": "EOFException.INVALID_RJUMP_DESTINATION",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0x75f69b28d4814d85ec20fe7588a8abe15b32b0fd3f99e956185dd80ba239ca09",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evmone-t8n 0.12.0-dev+commit.85a89e56",
+            "description": "Test function documentation:\nEOF1I4200_0024 (Invalid) EOF code containing RJUMPI with target PUSH2+ immediate",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.0.4/tests/prague/eip7692_eof_v1/eip4200_relative_jumps/test_rjumpi.py#L471",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-4200.md",
+            "reference-spec-version": "17d4a8d12d2b5e0f2985c866376c16c8c6df7cba"
+        }
+    },
+    "tests/prague/eip7692_eof_v1/eip4200_relative_jumps/test_rjumpi.py::test_rjumpi_into_push_n[fork_CancunEIP7692-eof_test-data_portion_start-jump_JumpDirection.BACKWARD-opcode_PUSH27]": {
+        "vectors": {
+            "0": {
+                "code": "0xef0001010004020001001f04000000008000017a000000000000000000000000000000000000000000000000000000e1ffe2",
+                "results": {
+                    "Prague": {
+                        "exception": "EOFException.INVALID_RJUMP_DESTINATION",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0x62078c7307575cb5d74c0550f49aaa5a2b2e0db7d2d1126712c37070dc880fa2",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evmone-t8n 0.12.0-dev+commit.85a89e56",
+            "description": "Test function documentation:\nEOF1I4200_0024 (Invalid) EOF code containing RJUMPI with target PUSH2+ immediate",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.0.4/tests/prague/eip7692_eof_v1/eip4200_relative_jumps/test_rjumpi.py#L471",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-4200.md",
+            "reference-spec-version": "17d4a8d12d2b5e0f2985c866376c16c8c6df7cba"
+        }
+    },
+    "tests/prague/eip7692_eof_v1/eip4200_relative_jumps/test_rjumpi.py::test_rjumpi_into_push_n[fork_CancunEIP7692-eof_test-data_portion_start-jump_JumpDirection.BACKWARD-opcode_PUSH28]": {
+        "vectors": {
+            "0": {
+                "code": "0xef0001010004020001002004000000008000017b00000000000000000000000000000000000000000000000000000000e1ffe1",
+                "results": {
+                    "Prague": {
+                        "exception": "EOFException.INVALID_RJUMP_DESTINATION",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0xe942abd2c4da5684bf6bc8319ed1928c4cc3a41a25d67581432d64991e99240b",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evmone-t8n 0.12.0-dev+commit.85a89e56",
+            "description": "Test function documentation:\nEOF1I4200_0024 (Invalid) EOF code containing RJUMPI with target PUSH2+ immediate",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.0.4/tests/prague/eip7692_eof_v1/eip4200_relative_jumps/test_rjumpi.py#L471",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-4200.md",
+            "reference-spec-version": "17d4a8d12d2b5e0f2985c866376c16c8c6df7cba"
+        }
+    },
+    "tests/prague/eip7692_eof_v1/eip4200_relative_jumps/test_rjumpi.py::test_rjumpi_into_push_n[fork_CancunEIP7692-eof_test-data_portion_start-jump_JumpDirection.BACKWARD-opcode_PUSH29]": {
+        "vectors": {
+            "0": {
+                "code": "0xef0001010004020001002104000000008000017c0000000000000000000000000000000000000000000000000000000000e1ffe0",
+                "results": {
+                    "Prague": {
+                        "exception": "EOFException.INVALID_RJUMP_DESTINATION",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0xdb6c8da373140a7e69418abdcc47e651d28b644ad148be5e0e25d902ac04b329",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evmone-t8n 0.12.0-dev+commit.85a89e56",
+            "description": "Test function documentation:\nEOF1I4200_0024 (Invalid) EOF code containing RJUMPI with target PUSH2+ immediate",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.0.4/tests/prague/eip7692_eof_v1/eip4200_relative_jumps/test_rjumpi.py#L471",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-4200.md",
+            "reference-spec-version": "17d4a8d12d2b5e0f2985c866376c16c8c6df7cba"
+        }
+    },
+    "tests/prague/eip7692_eof_v1/eip4200_relative_jumps/test_rjumpi.py::test_rjumpi_into_push_n[fork_CancunEIP7692-eof_test-data_portion_start-jump_JumpDirection.BACKWARD-opcode_PUSH30]": {
+        "vectors": {
+            "0": {
+                "code": "0xef0001010004020001002204000000008000017d000000000000000000000000000000000000000000000000000000000000e1ffdf",
+                "results": {
+                    "Prague": {
+                        "exception": "EOFException.INVALID_RJUMP_DESTINATION",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0x3369f2f235befec5fdf1e97b71b61c62ca21bb13b179accca62db83aa1995f07",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evmone-t8n 0.12.0-dev+commit.85a89e56",
+            "description": "Test function documentation:\nEOF1I4200_0024 (Invalid) EOF code containing RJUMPI with target PUSH2+ immediate",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.0.4/tests/prague/eip7692_eof_v1/eip4200_relative_jumps/test_rjumpi.py#L471",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-4200.md",
+            "reference-spec-version": "17d4a8d12d2b5e0f2985c866376c16c8c6df7cba"
+        }
+    },
+    "tests/prague/eip7692_eof_v1/eip4200_relative_jumps/test_rjumpi.py::test_rjumpi_into_push_n[fork_CancunEIP7692-eof_test-data_portion_start-jump_JumpDirection.BACKWARD-opcode_PUSH31]": {
+        "vectors": {
+            "0": {
+                "code": "0xef0001010004020001002304000000008000017e00000000000000000000000000000000000000000000000000000000000000e1ffde",
+                "results": {
+                    "Prague": {
+                        "exception": "EOFException.INVALID_RJUMP_DESTINATION",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0xa1a99e23cd927bb19715be7b496e7eae85f9f5f04e43c54db778f8975a1959a1",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evmone-t8n 0.12.0-dev+commit.85a89e56",
+            "description": "Test function documentation:\nEOF1I4200_0024 (Invalid) EOF code containing RJUMPI with target PUSH2+ immediate",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.0.4/tests/prague/eip7692_eof_v1/eip4200_relative_jumps/test_rjumpi.py#L471",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-4200.md",
+            "reference-spec-version": "17d4a8d12d2b5e0f2985c866376c16c8c6df7cba"
+        }
+    },
+    "tests/prague/eip7692_eof_v1/eip4200_relative_jumps/test_rjumpi.py::test_rjumpi_into_push_n[fork_CancunEIP7692-eof_test-data_portion_start-jump_JumpDirection.BACKWARD-opcode_PUSH32]": {
+        "vectors": {
+            "0": {
+                "code": "0xef0001010004020001002404000000008000017f0000000000000000000000000000000000000000000000000000000000000000e1ffdd",
+                "results": {
+                    "Prague": {
+                        "exception": "EOFException.INVALID_RJUMP_DESTINATION",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0x08876b9edc42d5558a2b38322c5129585e5acd1f59351e5fd172e2f91c9ee4dc",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evmone-t8n 0.12.0-dev+commit.85a89e56",
+            "description": "Test function documentation:\nEOF1I4200_0024 (Invalid) EOF code containing RJUMPI with target PUSH2+ immediate",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.0.4/tests/prague/eip7692_eof_v1/eip4200_relative_jumps/test_rjumpi.py#L471",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-4200.md",
+            "reference-spec-version": "17d4a8d12d2b5e0f2985c866376c16c8c6df7cba"
+        }
+    }
+}

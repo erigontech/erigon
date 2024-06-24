@@ -1,0 +1,88 @@
+{
+    "tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_eof_example.py::test_eof_example_parameters[fork_CancunEIP7692-eof_test-code_section_code_-exception_None-data_section_bytes_0x01]": {
+        "vectors": {
+            "0": {
+                "code": "0xef000101000402000100030400010000800001600a0001",
+                "results": {
+                    "Prague": {
+                        "result": true
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0x98bf2e7f4a27c0af8612ec8609beeb897def44d489e4119346686fa80ae3ae61",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evmone-t8n 0.12.0-dev+commit.85a89e56",
+            "description": "Test function documentation:\n\n    Example of python EOF classes",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.0.4/tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_eof_example.py#L130",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-3540.md",
+            "reference-spec-version": "8dcb0a8c1c0102c87224308028632cc986a61183"
+        }
+    },
+    "tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_eof_example.py::test_eof_example_parameters[fork_CancunEIP7692-eof_test-code_section_code_-exception_None-data_section_bytes_0xef]": {
+        "vectors": {
+            "0": {
+                "code": "0xef000101000402000100030400010000800001600a00ef",
+                "results": {
+                    "Prague": {
+                        "result": true
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0x45c640d20b9938644deb69f0657808813ddaf56774aeeeb57a66bf984f804e07",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evmone-t8n 0.12.0-dev+commit.85a89e56",
+            "description": "Test function documentation:\n\n    Example of python EOF classes",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.0.4/tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_eof_example.py#L130",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-3540.md",
+            "reference-spec-version": "8dcb0a8c1c0102c87224308028632cc986a61183"
+        }
+    },
+    "tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_eof_example.py::test_eof_example_parameters[fork_CancunEIP7692-eof_test-code_section_code_PUSH1-exception_EOFException.MISSING_STOP_OPCODE-data_section_bytes_0x01]": {
+        "vectors": {
+            "0": {
+                "code": "0xef000101000402000100020400010000800001600e01",
+                "results": {
+                    "Prague": {
+                        "exception": "EOFException.MISSING_STOP_OPCODE",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0xa18294ca43118f7e64bd3f7dc2c9b0042d63151c8a3918f949a806d9cf0ce8c8",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evmone-t8n 0.12.0-dev+commit.85a89e56",
+            "description": "Test function documentation:\n\n    Example of python EOF classes",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.0.4/tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_eof_example.py#L130",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-3540.md",
+            "reference-spec-version": "8dcb0a8c1c0102c87224308028632cc986a61183"
+        }
+    },
+    "tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_eof_example.py::test_eof_example_parameters[fork_CancunEIP7692-eof_test-code_section_code_PUSH1-exception_EOFException.MISSING_STOP_OPCODE-data_section_bytes_0xef]": {
+        "vectors": {
+            "0": {
+                "code": "0xef000101000402000100020400010000800001600eef",
+                "results": {
+                    "Prague": {
+                        "exception": "EOFException.MISSING_STOP_OPCODE",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0x6095b99c072661c797e3f016a70380ba190747fad3c37211d8e091913e0f07b3",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evmone-t8n 0.12.0-dev+commit.85a89e56",
+            "description": "Test function documentation:\n\n    Example of python EOF classes",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.0.4/tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_eof_example.py#L130",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-3540.md",
+            "reference-spec-version": "8dcb0a8c1c0102c87224308028632cc986a61183"
+        }
+    }
+}

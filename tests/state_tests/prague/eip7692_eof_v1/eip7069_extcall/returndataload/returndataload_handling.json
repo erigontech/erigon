@@ -1,0 +1,3410 @@
+{
+    "tests/prague/eip7692_eof_v1/eip7069_extcall/test_returndataload.py::test_returndataload_handling[fork_CancunEIP7692-state_test-offset_0-len_0-EXTCALL]": {
+        "env": {
+            "currentCoinbase": "0x2adc25665018aa1fe0e6bc666dac8fc2697ff9ba",
+            "currentGasLimit": "0x016345785d8a0000",
+            "currentNumber": "0x01",
+            "currentTimestamp": "0x03e8",
+            "currentRandom": "0x0000000000000000000000000000000000000000000000000000000000000000",
+            "currentDifficulty": "0x00",
+            "currentBaseFee": "0x07",
+            "currentExcessBlobGas": "0x00"
+        },
+        "pre": {
+            "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b": {
+                "nonce": "0x00",
+                "balance": "0x0de0b6b3a7640000",
+                "code": "0x",
+                "storage": {}
+            },
+            "0x0000000000000000000000000000000000001000": {
+                "nonce": "0x01",
+                "balance": "0x00",
+                "code": "0xef0001010004020001000a0400000000800003d260006000d3d26000f3",
+                "storage": {}
+            },
+            "0x0000000000000000000000000000000000001100": {
+                "nonce": "0x01",
+                "balance": "0x00",
+                "code": "0xef0001010004020001002a0400000000800004600060006000730000000000000000000000000000000000001000f86000f76110005561201560015500",
+                "storage": {}
+            }
+        },
+        "transaction": {
+            "nonce": "0x00",
+            "gasPrice": "0x0a",
+            "gasLimit": [
+                "0x1e8480"
+            ],
+            "to": "0x0000000000000000000000000000000000001100",
+            "value": [
+                "0x00"
+            ],
+            "data": [
+                "0x"
+            ],
+            "sender": "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b",
+            "secretKey": "0x45a915e4d060149eb4365960e6a7a45f334393093061116b197e3240065ff2d8"
+        },
+        "post": {
+            "Prague": [
+                {
+                    "hash": "0xff6eba77b51a8622f0ea0ee50defe8ae573596b63323e394d3dbba4efb69556e",
+                    "logs": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
+                    "txbytes": "0xf860800a831e8480940000000000000000000000000000000000001100808025a0b3afc79e7eb6744553c987dfa51e04eec7c6d695e6f730badd8150d43c6611fda056587ba537d9e4baf5e9fdb797ed4d7cf237c28c5d368b92f2f3681334585fec",
+                    "indexes": {
+                        "data": 0,
+                        "gas": 0,
+                        "value": 0
+                    }
+                }
+            ]
+        },
+        "_info": {
+            "hash": "0xc0fa52532c18e7d5dd2ad9ac20168f59fb8c954b16149c7e75f1ac2ec429d301",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evmone-t8n 0.12.0-dev+commit.85a89e56",
+            "description": "Test function documentation:\n\n    Much simpler than returndatacopy, no memory or boosted call.  Returner is called\n    and results are stored in storage slot, which is asserted for expected values.\n    The parameters offset and return data are configured to test boundary conditions.",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.0.4/tests/prague/eip7692_eof_v1/eip7069_extcall/test_returndataload.py#L185",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7069.md",
+            "reference-spec-version": "1795943aeacc86131d5ab6bb3d65824b3b1d4cad"
+        }
+    },
+    "tests/prague/eip7692_eof_v1/eip7069_extcall/test_returndataload.py::test_returndataload_handling[fork_CancunEIP7692-state_test-offset_0-len_0-EXTDELEGATECALL]": {
+        "env": {
+            "currentCoinbase": "0x2adc25665018aa1fe0e6bc666dac8fc2697ff9ba",
+            "currentGasLimit": "0x016345785d8a0000",
+            "currentNumber": "0x01",
+            "currentTimestamp": "0x03e8",
+            "currentRandom": "0x0000000000000000000000000000000000000000000000000000000000000000",
+            "currentDifficulty": "0x00",
+            "currentBaseFee": "0x07",
+            "currentExcessBlobGas": "0x00"
+        },
+        "pre": {
+            "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b": {
+                "nonce": "0x00",
+                "balance": "0x0de0b6b3a7640000",
+                "code": "0x",
+                "storage": {}
+            },
+            "0x0000000000000000000000000000000000001000": {
+                "nonce": "0x01",
+                "balance": "0x00",
+                "code": "0xef0001010004020001000a0400000000800003d260006000d3d26000f3",
+                "storage": {}
+            },
+            "0x0000000000000000000000000000000000001100": {
+                "nonce": "0x01",
+                "balance": "0x00",
+                "code": "0xef00010100040200010028040000000080000360006000730000000000000000000000000000000000001000f96000f76110005561201560015500",
+                "storage": {}
+            }
+        },
+        "transaction": {
+            "nonce": "0x00",
+            "gasPrice": "0x0a",
+            "gasLimit": [
+                "0x1e8480"
+            ],
+            "to": "0x0000000000000000000000000000000000001100",
+            "value": [
+                "0x00"
+            ],
+            "data": [
+                "0x"
+            ],
+            "sender": "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b",
+            "secretKey": "0x45a915e4d060149eb4365960e6a7a45f334393093061116b197e3240065ff2d8"
+        },
+        "post": {
+            "Prague": [
+                {
+                    "hash": "0xdbd29c81bf1098f6cac58ffd21a06dc8200ffab5c37ec2d8db390078c6cdfad4",
+                    "logs": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
+                    "txbytes": "0xf860800a831e8480940000000000000000000000000000000000001100808025a0b3afc79e7eb6744553c987dfa51e04eec7c6d695e6f730badd8150d43c6611fda056587ba537d9e4baf5e9fdb797ed4d7cf237c28c5d368b92f2f3681334585fec",
+                    "indexes": {
+                        "data": 0,
+                        "gas": 0,
+                        "value": 0
+                    }
+                }
+            ]
+        },
+        "_info": {
+            "hash": "0x4ad6c1c87e6765c6228808e603cda01ef82a1cd60aa6f5e918efd48ffd1603f4",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evmone-t8n 0.12.0-dev+commit.85a89e56",
+            "description": "Test function documentation:\n\n    Much simpler than returndatacopy, no memory or boosted call.  Returner is called\n    and results are stored in storage slot, which is asserted for expected values.\n    The parameters offset and return data are configured to test boundary conditions.",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.0.4/tests/prague/eip7692_eof_v1/eip7069_extcall/test_returndataload.py#L185",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7069.md",
+            "reference-spec-version": "1795943aeacc86131d5ab6bb3d65824b3b1d4cad"
+        }
+    },
+    "tests/prague/eip7692_eof_v1/eip7069_extcall/test_returndataload.py::test_returndataload_handling[fork_CancunEIP7692-state_test-offset_0-len_0-EXTSTATICCALL]": {
+        "env": {
+            "currentCoinbase": "0x2adc25665018aa1fe0e6bc666dac8fc2697ff9ba",
+            "currentGasLimit": "0x016345785d8a0000",
+            "currentNumber": "0x01",
+            "currentTimestamp": "0x03e8",
+            "currentRandom": "0x0000000000000000000000000000000000000000000000000000000000000000",
+            "currentDifficulty": "0x00",
+            "currentBaseFee": "0x07",
+            "currentExcessBlobGas": "0x00"
+        },
+        "pre": {
+            "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b": {
+                "nonce": "0x00",
+                "balance": "0x0de0b6b3a7640000",
+                "code": "0x",
+                "storage": {}
+            },
+            "0x0000000000000000000000000000000000001000": {
+                "nonce": "0x01",
+                "balance": "0x00",
+                "code": "0xef0001010004020001000a0400000000800003d260006000d3d26000f3",
+                "storage": {}
+            },
+            "0x0000000000000000000000000000000000001100": {
+                "nonce": "0x01",
+                "balance": "0x00",
+                "code": "0xef00010100040200010028040000000080000360006000730000000000000000000000000000000000001000fb6000f76110005561201560015500",
+                "storage": {}
+            }
+        },
+        "transaction": {
+            "nonce": "0x00",
+            "gasPrice": "0x0a",
+            "gasLimit": [
+                "0x1e8480"
+            ],
+            "to": "0x0000000000000000000000000000000000001100",
+            "value": [
+                "0x00"
+            ],
+            "data": [
+                "0x"
+            ],
+            "sender": "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b",
+            "secretKey": "0x45a915e4d060149eb4365960e6a7a45f334393093061116b197e3240065ff2d8"
+        },
+        "post": {
+            "Prague": [
+                {
+                    "hash": "0x187cb962d5ff04055c3ab13717afc41069f1a53ffcee8b79fd3ad3474dc6b8ce",
+                    "logs": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
+                    "txbytes": "0xf860800a831e8480940000000000000000000000000000000000001100808025a0b3afc79e7eb6744553c987dfa51e04eec7c6d695e6f730badd8150d43c6611fda056587ba537d9e4baf5e9fdb797ed4d7cf237c28c5d368b92f2f3681334585fec",
+                    "indexes": {
+                        "data": 0,
+                        "gas": 0,
+                        "value": 0
+                    }
+                }
+            ]
+        },
+        "_info": {
+            "hash": "0xff039cbdc3d2f29c9d1696372b912719b8d9f6afd957bc2d079cb7432373da9f",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evmone-t8n 0.12.0-dev+commit.85a89e56",
+            "description": "Test function documentation:\n\n    Much simpler than returndatacopy, no memory or boosted call.  Returner is called\n    and results are stored in storage slot, which is asserted for expected values.\n    The parameters offset and return data are configured to test boundary conditions.",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.0.4/tests/prague/eip7692_eof_v1/eip7069_extcall/test_returndataload.py#L185",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7069.md",
+            "reference-spec-version": "1795943aeacc86131d5ab6bb3d65824b3b1d4cad"
+        }
+    },
+    "tests/prague/eip7692_eof_v1/eip7069_extcall/test_returndataload.py::test_returndataload_handling[fork_CancunEIP7692-state_test-offset_0-len_10-EXTCALL]": {
+        "env": {
+            "currentCoinbase": "0x2adc25665018aa1fe0e6bc666dac8fc2697ff9ba",
+            "currentGasLimit": "0x016345785d8a0000",
+            "currentNumber": "0x01",
+            "currentTimestamp": "0x03e8",
+            "currentRandom": "0x0000000000000000000000000000000000000000000000000000000000000000",
+            "currentDifficulty": "0x00",
+            "currentBaseFee": "0x07",
+            "currentExcessBlobGas": "0x00"
+        },
+        "pre": {
+            "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b": {
+                "nonce": "0x00",
+                "balance": "0x0de0b6b3a7640000",
+                "code": "0x",
+                "storage": {}
+            },
+            "0x0000000000000000000000000000000000001000": {
+                "nonce": "0x01",
+                "balance": "0x00",
+                "code": "0xef0001010004020001000a0400100000800003d260006000d3d26000f310101010101010101010101010101010",
+                "storage": {}
+            },
+            "0x0000000000000000000000000000000000001100": {
+                "nonce": "0x01",
+                "balance": "0x00",
+                "code": "0xef0001010004020001002a0400000000800004600060006000730000000000000000000000000000000000001000f86000f76110005561201560015500",
+                "storage": {}
+            }
+        },
+        "transaction": {
+            "nonce": "0x00",
+            "gasPrice": "0x0a",
+            "gasLimit": [
+                "0x1e8480"
+            ],
+            "to": "0x0000000000000000000000000000000000001100",
+            "value": [
+                "0x00"
+            ],
+            "data": [
+                "0x"
+            ],
+            "sender": "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b",
+            "secretKey": "0x45a915e4d060149eb4365960e6a7a45f334393093061116b197e3240065ff2d8"
+        },
+        "post": {
+            "Prague": [
+                {
+                    "hash": "0x7a67bd6f80355b012b575572733aef6bcec1dfc55e81809704bef38b71ca0e8c",
+                    "logs": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
+                    "txbytes": "0xf860800a831e8480940000000000000000000000000000000000001100808025a0b3afc79e7eb6744553c987dfa51e04eec7c6d695e6f730badd8150d43c6611fda056587ba537d9e4baf5e9fdb797ed4d7cf237c28c5d368b92f2f3681334585fec",
+                    "indexes": {
+                        "data": 0,
+                        "gas": 0,
+                        "value": 0
+                    }
+                }
+            ]
+        },
+        "_info": {
+            "hash": "0xe573284e69902c1e5643f4862978d075e2a8d7ef1f08abab155e2ab8ee668522",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evmone-t8n 0.12.0-dev+commit.85a89e56",
+            "description": "Test function documentation:\n\n    Much simpler than returndatacopy, no memory or boosted call.  Returner is called\n    and results are stored in storage slot, which is asserted for expected values.\n    The parameters offset and return data are configured to test boundary conditions.",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.0.4/tests/prague/eip7692_eof_v1/eip7069_extcall/test_returndataload.py#L185",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7069.md",
+            "reference-spec-version": "1795943aeacc86131d5ab6bb3d65824b3b1d4cad"
+        }
+    },
+    "tests/prague/eip7692_eof_v1/eip7069_extcall/test_returndataload.py::test_returndataload_handling[fork_CancunEIP7692-state_test-offset_0-len_10-EXTDELEGATECALL]": {
+        "env": {
+            "currentCoinbase": "0x2adc25665018aa1fe0e6bc666dac8fc2697ff9ba",
+            "currentGasLimit": "0x016345785d8a0000",
+            "currentNumber": "0x01",
+            "currentTimestamp": "0x03e8",
+            "currentRandom": "0x0000000000000000000000000000000000000000000000000000000000000000",
+            "currentDifficulty": "0x00",
+            "currentBaseFee": "0x07",
+            "currentExcessBlobGas": "0x00"
+        },
+        "pre": {
+            "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b": {
+                "nonce": "0x00",
+                "balance": "0x0de0b6b3a7640000",
+                "code": "0x",
+                "storage": {}
+            },
+            "0x0000000000000000000000000000000000001000": {
+                "nonce": "0x01",
+                "balance": "0x00",
+                "code": "0xef0001010004020001000a0400100000800003d260006000d3d26000f310101010101010101010101010101010",
+                "storage": {}
+            },
+            "0x0000000000000000000000000000000000001100": {
+                "nonce": "0x01",
+                "balance": "0x00",
+                "code": "0xef00010100040200010028040000000080000360006000730000000000000000000000000000000000001000f96000f76110005561201560015500",
+                "storage": {}
+            }
+        },
+        "transaction": {
+            "nonce": "0x00",
+            "gasPrice": "0x0a",
+            "gasLimit": [
+                "0x1e8480"
+            ],
+            "to": "0x0000000000000000000000000000000000001100",
+            "value": [
+                "0x00"
+            ],
+            "data": [
+                "0x"
+            ],
+            "sender": "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b",
+            "secretKey": "0x45a915e4d060149eb4365960e6a7a45f334393093061116b197e3240065ff2d8"
+        },
+        "post": {
+            "Prague": [
+                {
+                    "hash": "0xc4d5d8592dc5ba91af4d4ccb0ec51c2cb39f479d9790633f72cf27fc85320d76",
+                    "logs": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
+                    "txbytes": "0xf860800a831e8480940000000000000000000000000000000000001100808025a0b3afc79e7eb6744553c987dfa51e04eec7c6d695e6f730badd8150d43c6611fda056587ba537d9e4baf5e9fdb797ed4d7cf237c28c5d368b92f2f3681334585fec",
+                    "indexes": {
+                        "data": 0,
+                        "gas": 0,
+                        "value": 0
+                    }
+                }
+            ]
+        },
+        "_info": {
+            "hash": "0x23b9ca4485f45f37fa285484403b2560a0c673a3cd97313c2d273b4cbda88447",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evmone-t8n 0.12.0-dev+commit.85a89e56",
+            "description": "Test function documentation:\n\n    Much simpler than returndatacopy, no memory or boosted call.  Returner is called\n    and results are stored in storage slot, which is asserted for expected values.\n    The parameters offset and return data are configured to test boundary conditions.",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.0.4/tests/prague/eip7692_eof_v1/eip7069_extcall/test_returndataload.py#L185",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7069.md",
+            "reference-spec-version": "1795943aeacc86131d5ab6bb3d65824b3b1d4cad"
+        }
+    },
+    "tests/prague/eip7692_eof_v1/eip7069_extcall/test_returndataload.py::test_returndataload_handling[fork_CancunEIP7692-state_test-offset_0-len_10-EXTSTATICCALL]": {
+        "env": {
+            "currentCoinbase": "0x2adc25665018aa1fe0e6bc666dac8fc2697ff9ba",
+            "currentGasLimit": "0x016345785d8a0000",
+            "currentNumber": "0x01",
+            "currentTimestamp": "0x03e8",
+            "currentRandom": "0x0000000000000000000000000000000000000000000000000000000000000000",
+            "currentDifficulty": "0x00",
+            "currentBaseFee": "0x07",
+            "currentExcessBlobGas": "0x00"
+        },
+        "pre": {
+            "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b": {
+                "nonce": "0x00",
+                "balance": "0x0de0b6b3a7640000",
+                "code": "0x",
+                "storage": {}
+            },
+            "0x0000000000000000000000000000000000001000": {
+                "nonce": "0x01",
+                "balance": "0x00",
+                "code": "0xef0001010004020001000a0400100000800003d260006000d3d26000f310101010101010101010101010101010",
+                "storage": {}
+            },
+            "0x0000000000000000000000000000000000001100": {
+                "nonce": "0x01",
+                "balance": "0x00",
+                "code": "0xef00010100040200010028040000000080000360006000730000000000000000000000000000000000001000fb6000f76110005561201560015500",
+                "storage": {}
+            }
+        },
+        "transaction": {
+            "nonce": "0x00",
+            "gasPrice": "0x0a",
+            "gasLimit": [
+                "0x1e8480"
+            ],
+            "to": "0x0000000000000000000000000000000000001100",
+            "value": [
+                "0x00"
+            ],
+            "data": [
+                "0x"
+            ],
+            "sender": "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b",
+            "secretKey": "0x45a915e4d060149eb4365960e6a7a45f334393093061116b197e3240065ff2d8"
+        },
+        "post": {
+            "Prague": [
+                {
+                    "hash": "0x203cb7388a112c1ef584983dc7b807a9dcfc1ca21b43b078bcae2040c426b9d8",
+                    "logs": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
+                    "txbytes": "0xf860800a831e8480940000000000000000000000000000000000001100808025a0b3afc79e7eb6744553c987dfa51e04eec7c6d695e6f730badd8150d43c6611fda056587ba537d9e4baf5e9fdb797ed4d7cf237c28c5d368b92f2f3681334585fec",
+                    "indexes": {
+                        "data": 0,
+                        "gas": 0,
+                        "value": 0
+                    }
+                }
+            ]
+        },
+        "_info": {
+            "hash": "0x64e222c1d3e1872994bdd36e44a249fca9b71f35850ef2e67a74114abe5c547f",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evmone-t8n 0.12.0-dev+commit.85a89e56",
+            "description": "Test function documentation:\n\n    Much simpler than returndatacopy, no memory or boosted call.  Returner is called\n    and results are stored in storage slot, which is asserted for expected values.\n    The parameters offset and return data are configured to test boundary conditions.",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.0.4/tests/prague/eip7692_eof_v1/eip7069_extcall/test_returndataload.py#L185",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7069.md",
+            "reference-spec-version": "1795943aeacc86131d5ab6bb3d65824b3b1d4cad"
+        }
+    },
+    "tests/prague/eip7692_eof_v1/eip7069_extcall/test_returndataload.py::test_returndataload_handling[fork_CancunEIP7692-state_test-offset_0-len_20-EXTCALL]": {
+        "env": {
+            "currentCoinbase": "0x2adc25665018aa1fe0e6bc666dac8fc2697ff9ba",
+            "currentGasLimit": "0x016345785d8a0000",
+            "currentNumber": "0x01",
+            "currentTimestamp": "0x03e8",
+            "currentRandom": "0x0000000000000000000000000000000000000000000000000000000000000000",
+            "currentDifficulty": "0x00",
+            "currentBaseFee": "0x07",
+            "currentExcessBlobGas": "0x00"
+        },
+        "pre": {
+            "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b": {
+                "nonce": "0x00",
+                "balance": "0x0de0b6b3a7640000",
+                "code": "0x",
+                "storage": {}
+            },
+            "0x0000000000000000000000000000000000001000": {
+                "nonce": "0x01",
+                "balance": "0x00",
+                "code": "0xef0001010004020001000a0400200000800003d260006000d3d26000f32020202020202020202020202020202020202020202020202020202020202020",
+                "storage": {}
+            },
+            "0x0000000000000000000000000000000000001100": {
+                "nonce": "0x01",
+                "balance": "0x00",
+                "code": "0xef0001010004020001002a0400000000800004600060006000730000000000000000000000000000000000001000f86000f76110005561201560015500",
+                "storage": {}
+            }
+        },
+        "transaction": {
+            "nonce": "0x00",
+            "gasPrice": "0x0a",
+            "gasLimit": [
+                "0x1e8480"
+            ],
+            "to": "0x0000000000000000000000000000000000001100",
+            "value": [
+                "0x00"
+            ],
+            "data": [
+                "0x"
+            ],
+            "sender": "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b",
+            "secretKey": "0x45a915e4d060149eb4365960e6a7a45f334393093061116b197e3240065ff2d8"
+        },
+        "post": {
+            "Prague": [
+                {
+                    "hash": "0xd17198fd7c4b09d230db4d07c55587eb9467da6e9b07497f6d47937900a059da",
+                    "logs": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
+                    "txbytes": "0xf860800a831e8480940000000000000000000000000000000000001100808025a0b3afc79e7eb6744553c987dfa51e04eec7c6d695e6f730badd8150d43c6611fda056587ba537d9e4baf5e9fdb797ed4d7cf237c28c5d368b92f2f3681334585fec",
+                    "indexes": {
+                        "data": 0,
+                        "gas": 0,
+                        "value": 0
+                    }
+                }
+            ]
+        },
+        "_info": {
+            "hash": "0x3e39cd4ee8500beafa0fb64b530d6e00cb656b65ec856f4b7fef7aa7002982bf",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evmone-t8n 0.12.0-dev+commit.85a89e56",
+            "description": "Test function documentation:\n\n    Much simpler than returndatacopy, no memory or boosted call.  Returner is called\n    and results are stored in storage slot, which is asserted for expected values.\n    The parameters offset and return data are configured to test boundary conditions.",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.0.4/tests/prague/eip7692_eof_v1/eip7069_extcall/test_returndataload.py#L185",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7069.md",
+            "reference-spec-version": "1795943aeacc86131d5ab6bb3d65824b3b1d4cad"
+        }
+    },
+    "tests/prague/eip7692_eof_v1/eip7069_extcall/test_returndataload.py::test_returndataload_handling[fork_CancunEIP7692-state_test-offset_0-len_20-EXTDELEGATECALL]": {
+        "env": {
+            "currentCoinbase": "0x2adc25665018aa1fe0e6bc666dac8fc2697ff9ba",
+            "currentGasLimit": "0x016345785d8a0000",
+            "currentNumber": "0x01",
+            "currentTimestamp": "0x03e8",
+            "currentRandom": "0x0000000000000000000000000000000000000000000000000000000000000000",
+            "currentDifficulty": "0x00",
+            "currentBaseFee": "0x07",
+            "currentExcessBlobGas": "0x00"
+        },
+        "pre": {
+            "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b": {
+                "nonce": "0x00",
+                "balance": "0x0de0b6b3a7640000",
+                "code": "0x",
+                "storage": {}
+            },
+            "0x0000000000000000000000000000000000001000": {
+                "nonce": "0x01",
+                "balance": "0x00",
+                "code": "0xef0001010004020001000a0400200000800003d260006000d3d26000f32020202020202020202020202020202020202020202020202020202020202020",
+                "storage": {}
+            },
+            "0x0000000000000000000000000000000000001100": {
+                "nonce": "0x01",
+                "balance": "0x00",
+                "code": "0xef00010100040200010028040000000080000360006000730000000000000000000000000000000000001000f96000f76110005561201560015500",
+                "storage": {}
+            }
+        },
+        "transaction": {
+            "nonce": "0x00",
+            "gasPrice": "0x0a",
+            "gasLimit": [
+                "0x1e8480"
+            ],
+            "to": "0x0000000000000000000000000000000000001100",
+            "value": [
+                "0x00"
+            ],
+            "data": [
+                "0x"
+            ],
+            "sender": "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b",
+            "secretKey": "0x45a915e4d060149eb4365960e6a7a45f334393093061116b197e3240065ff2d8"
+        },
+        "post": {
+            "Prague": [
+                {
+                    "hash": "0xb3b295f8d6ce2c3af1eb6dbd261a9877e6a72d3ba5f5550fb2d768407062c0bd",
+                    "logs": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
+                    "txbytes": "0xf860800a831e8480940000000000000000000000000000000000001100808025a0b3afc79e7eb6744553c987dfa51e04eec7c6d695e6f730badd8150d43c6611fda056587ba537d9e4baf5e9fdb797ed4d7cf237c28c5d368b92f2f3681334585fec",
+                    "indexes": {
+                        "data": 0,
+                        "gas": 0,
+                        "value": 0
+                    }
+                }
+            ]
+        },
+        "_info": {
+            "hash": "0xa600f034a610634a916d347f5053ca6ee3ed136acc753779ccc70d7466274d95",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evmone-t8n 0.12.0-dev+commit.85a89e56",
+            "description": "Test function documentation:\n\n    Much simpler than returndatacopy, no memory or boosted call.  Returner is called\n    and results are stored in storage slot, which is asserted for expected values.\n    The parameters offset and return data are configured to test boundary conditions.",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.0.4/tests/prague/eip7692_eof_v1/eip7069_extcall/test_returndataload.py#L185",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7069.md",
+            "reference-spec-version": "1795943aeacc86131d5ab6bb3d65824b3b1d4cad"
+        }
+    },
+    "tests/prague/eip7692_eof_v1/eip7069_extcall/test_returndataload.py::test_returndataload_handling[fork_CancunEIP7692-state_test-offset_0-len_20-EXTSTATICCALL]": {
+        "env": {
+            "currentCoinbase": "0x2adc25665018aa1fe0e6bc666dac8fc2697ff9ba",
+            "currentGasLimit": "0x016345785d8a0000",
+            "currentNumber": "0x01",
+            "currentTimestamp": "0x03e8",
+            "currentRandom": "0x0000000000000000000000000000000000000000000000000000000000000000",
+            "currentDifficulty": "0x00",
+            "currentBaseFee": "0x07",
+            "currentExcessBlobGas": "0x00"
+        },
+        "pre": {
+            "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b": {
+                "nonce": "0x00",
+                "balance": "0x0de0b6b3a7640000",
+                "code": "0x",
+                "storage": {}
+            },
+            "0x0000000000000000000000000000000000001000": {
+                "nonce": "0x01",
+                "balance": "0x00",
+                "code": "0xef0001010004020001000a0400200000800003d260006000d3d26000f32020202020202020202020202020202020202020202020202020202020202020",
+                "storage": {}
+            },
+            "0x0000000000000000000000000000000000001100": {
+                "nonce": "0x01",
+                "balance": "0x00",
+                "code": "0xef00010100040200010028040000000080000360006000730000000000000000000000000000000000001000fb6000f76110005561201560015500",
+                "storage": {}
+            }
+        },
+        "transaction": {
+            "nonce": "0x00",
+            "gasPrice": "0x0a",
+            "gasLimit": [
+                "0x1e8480"
+            ],
+            "to": "0x0000000000000000000000000000000000001100",
+            "value": [
+                "0x00"
+            ],
+            "data": [
+                "0x"
+            ],
+            "sender": "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b",
+            "secretKey": "0x45a915e4d060149eb4365960e6a7a45f334393093061116b197e3240065ff2d8"
+        },
+        "post": {
+            "Prague": [
+                {
+                    "hash": "0xdd9ec08ce44667fb07116d6ffa9c5f9a319b53a896f87311a89ff77035432ccf",
+                    "logs": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
+                    "txbytes": "0xf860800a831e8480940000000000000000000000000000000000001100808025a0b3afc79e7eb6744553c987dfa51e04eec7c6d695e6f730badd8150d43c6611fda056587ba537d9e4baf5e9fdb797ed4d7cf237c28c5d368b92f2f3681334585fec",
+                    "indexes": {
+                        "data": 0,
+                        "gas": 0,
+                        "value": 0
+                    }
+                }
+            ]
+        },
+        "_info": {
+            "hash": "0x3dbe22bfa3bff1a8c6908c9ee07f5103cd78d6494109d6590b36632901fe8d22",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evmone-t8n 0.12.0-dev+commit.85a89e56",
+            "description": "Test function documentation:\n\n    Much simpler than returndatacopy, no memory or boosted call.  Returner is called\n    and results are stored in storage slot, which is asserted for expected values.\n    The parameters offset and return data are configured to test boundary conditions.",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.0.4/tests/prague/eip7692_eof_v1/eip7069_extcall/test_returndataload.py#L185",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7069.md",
+            "reference-spec-version": "1795943aeacc86131d5ab6bb3d65824b3b1d4cad"
+        }
+    },
+    "tests/prague/eip7692_eof_v1/eip7069_extcall/test_returndataload.py::test_returndataload_handling[fork_CancunEIP7692-state_test-offset_0-len_30-EXTCALL]": {
+        "env": {
+            "currentCoinbase": "0x2adc25665018aa1fe0e6bc666dac8fc2697ff9ba",
+            "currentGasLimit": "0x016345785d8a0000",
+            "currentNumber": "0x01",
+            "currentTimestamp": "0x03e8",
+            "currentRandom": "0x0000000000000000000000000000000000000000000000000000000000000000",
+            "currentDifficulty": "0x00",
+            "currentBaseFee": "0x07",
+            "currentExcessBlobGas": "0x00"
+        },
+        "pre": {
+            "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b": {
+                "nonce": "0x00",
+                "balance": "0x0de0b6b3a7640000",
+                "code": "0x",
+                "storage": {}
+            },
+            "0x0000000000000000000000000000000000001000": {
+                "nonce": "0x01",
+                "balance": "0x00",
+                "code": "0xef0001010004020001000a0400300000800003d260006000d3d26000f3303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030",
+                "storage": {}
+            },
+            "0x0000000000000000000000000000000000001100": {
+                "nonce": "0x01",
+                "balance": "0x00",
+                "code": "0xef0001010004020001002a0400000000800004600060006000730000000000000000000000000000000000001000f86000f76110005561201560015500",
+                "storage": {}
+            }
+        },
+        "transaction": {
+            "nonce": "0x00",
+            "gasPrice": "0x0a",
+            "gasLimit": [
+                "0x1e8480"
+            ],
+            "to": "0x0000000000000000000000000000000000001100",
+            "value": [
+                "0x00"
+            ],
+            "data": [
+                "0x"
+            ],
+            "sender": "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b",
+            "secretKey": "0x45a915e4d060149eb4365960e6a7a45f334393093061116b197e3240065ff2d8"
+        },
+        "post": {
+            "Prague": [
+                {
+                    "hash": "0x228c198e88fd3e34135a276371d8ae643465e7c0f8887d2d0723803ae620b542",
+                    "logs": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
+                    "txbytes": "0xf860800a831e8480940000000000000000000000000000000000001100808025a0b3afc79e7eb6744553c987dfa51e04eec7c6d695e6f730badd8150d43c6611fda056587ba537d9e4baf5e9fdb797ed4d7cf237c28c5d368b92f2f3681334585fec",
+                    "indexes": {
+                        "data": 0,
+                        "gas": 0,
+                        "value": 0
+                    }
+                }
+            ]
+        },
+        "_info": {
+            "hash": "0x6f80ffd3d93c43d0ce73c960a6b159630b12c384e6c2fde83e0bd3ea93ba7ebd",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evmone-t8n 0.12.0-dev+commit.85a89e56",
+            "description": "Test function documentation:\n\n    Much simpler than returndatacopy, no memory or boosted call.  Returner is called\n    and results are stored in storage slot, which is asserted for expected values.\n    The parameters offset and return data are configured to test boundary conditions.",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.0.4/tests/prague/eip7692_eof_v1/eip7069_extcall/test_returndataload.py#L185",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7069.md",
+            "reference-spec-version": "1795943aeacc86131d5ab6bb3d65824b3b1d4cad"
+        }
+    },
+    "tests/prague/eip7692_eof_v1/eip7069_extcall/test_returndataload.py::test_returndataload_handling[fork_CancunEIP7692-state_test-offset_0-len_30-EXTDELEGATECALL]": {
+        "env": {
+            "currentCoinbase": "0x2adc25665018aa1fe0e6bc666dac8fc2697ff9ba",
+            "currentGasLimit": "0x016345785d8a0000",
+            "currentNumber": "0x01",
+            "currentTimestamp": "0x03e8",
+            "currentRandom": "0x0000000000000000000000000000000000000000000000000000000000000000",
+            "currentDifficulty": "0x00",
+            "currentBaseFee": "0x07",
+            "currentExcessBlobGas": "0x00"
+        },
+        "pre": {
+            "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b": {
+                "nonce": "0x00",
+                "balance": "0x0de0b6b3a7640000",
+                "code": "0x",
+                "storage": {}
+            },
+            "0x0000000000000000000000000000000000001000": {
+                "nonce": "0x01",
+                "balance": "0x00",
+                "code": "0xef0001010004020001000a0400300000800003d260006000d3d26000f3303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030",
+                "storage": {}
+            },
+            "0x0000000000000000000000000000000000001100": {
+                "nonce": "0x01",
+                "balance": "0x00",
+                "code": "0xef00010100040200010028040000000080000360006000730000000000000000000000000000000000001000f96000f76110005561201560015500",
+                "storage": {}
+            }
+        },
+        "transaction": {
+            "nonce": "0x00",
+            "gasPrice": "0x0a",
+            "gasLimit": [
+                "0x1e8480"
+            ],
+            "to": "0x0000000000000000000000000000000000001100",
+            "value": [
+                "0x00"
+            ],
+            "data": [
+                "0x"
+            ],
+            "sender": "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b",
+            "secretKey": "0x45a915e4d060149eb4365960e6a7a45f334393093061116b197e3240065ff2d8"
+        },
+        "post": {
+            "Prague": [
+                {
+                    "hash": "0x0eeb27a5879286c750a6aa9b021c1e8abf5df9221e694f05d474d481a7c0ecb3",
+                    "logs": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
+                    "txbytes": "0xf860800a831e8480940000000000000000000000000000000000001100808025a0b3afc79e7eb6744553c987dfa51e04eec7c6d695e6f730badd8150d43c6611fda056587ba537d9e4baf5e9fdb797ed4d7cf237c28c5d368b92f2f3681334585fec",
+                    "indexes": {
+                        "data": 0,
+                        "gas": 0,
+                        "value": 0
+                    }
+                }
+            ]
+        },
+        "_info": {
+            "hash": "0x22d46fbd9e64d107060141729b1444382da6ed040d449773b583e24414451c97",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evmone-t8n 0.12.0-dev+commit.85a89e56",
+            "description": "Test function documentation:\n\n    Much simpler than returndatacopy, no memory or boosted call.  Returner is called\n    and results are stored in storage slot, which is asserted for expected values.\n    The parameters offset and return data are configured to test boundary conditions.",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.0.4/tests/prague/eip7692_eof_v1/eip7069_extcall/test_returndataload.py#L185",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7069.md",
+            "reference-spec-version": "1795943aeacc86131d5ab6bb3d65824b3b1d4cad"
+        }
+    },
+    "tests/prague/eip7692_eof_v1/eip7069_extcall/test_returndataload.py::test_returndataload_handling[fork_CancunEIP7692-state_test-offset_0-len_30-EXTSTATICCALL]": {
+        "env": {
+            "currentCoinbase": "0x2adc25665018aa1fe0e6bc666dac8fc2697ff9ba",
+            "currentGasLimit": "0x016345785d8a0000",
+            "currentNumber": "0x01",
+            "currentTimestamp": "0x03e8",
+            "currentRandom": "0x0000000000000000000000000000000000000000000000000000000000000000",
+            "currentDifficulty": "0x00",
+            "currentBaseFee": "0x07",
+            "currentExcessBlobGas": "0x00"
+        },
+        "pre": {
+            "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b": {
+                "nonce": "0x00",
+                "balance": "0x0de0b6b3a7640000",
+                "code": "0x",
+                "storage": {}
+            },
+            "0x0000000000000000000000000000000000001000": {
+                "nonce": "0x01",
+                "balance": "0x00",
+                "code": "0xef0001010004020001000a0400300000800003d260006000d3d26000f3303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030",
+                "storage": {}
+            },
+            "0x0000000000000000000000000000000000001100": {
+                "nonce": "0x01",
+                "balance": "0x00",
+                "code": "0xef00010100040200010028040000000080000360006000730000000000000000000000000000000000001000fb6000f76110005561201560015500",
+                "storage": {}
+            }
+        },
+        "transaction": {
+            "nonce": "0x00",
+            "gasPrice": "0x0a",
+            "gasLimit": [
+                "0x1e8480"
+            ],
+            "to": "0x0000000000000000000000000000000000001100",
+            "value": [
+                "0x00"
+            ],
+            "data": [
+                "0x"
+            ],
+            "sender": "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b",
+            "secretKey": "0x45a915e4d060149eb4365960e6a7a45f334393093061116b197e3240065ff2d8"
+        },
+        "post": {
+            "Prague": [
+                {
+                    "hash": "0x74eb8dd148e4591798441ec8fa8cd715d3a5ce274dcfd8aecc66f61b029bc594",
+                    "logs": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
+                    "txbytes": "0xf860800a831e8480940000000000000000000000000000000000001100808025a0b3afc79e7eb6744553c987dfa51e04eec7c6d695e6f730badd8150d43c6611fda056587ba537d9e4baf5e9fdb797ed4d7cf237c28c5d368b92f2f3681334585fec",
+                    "indexes": {
+                        "data": 0,
+                        "gas": 0,
+                        "value": 0
+                    }
+                }
+            ]
+        },
+        "_info": {
+            "hash": "0xa077e8da6aa74e46bf1426857d0549ea8c709012effed4d509e3f8444e07045b",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evmone-t8n 0.12.0-dev+commit.85a89e56",
+            "description": "Test function documentation:\n\n    Much simpler than returndatacopy, no memory or boosted call.  Returner is called\n    and results are stored in storage slot, which is asserted for expected values.\n    The parameters offset and return data are configured to test boundary conditions.",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.0.4/tests/prague/eip7692_eof_v1/eip7069_extcall/test_returndataload.py#L185",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7069.md",
+            "reference-spec-version": "1795943aeacc86131d5ab6bb3d65824b3b1d4cad"
+        }
+    },
+    "tests/prague/eip7692_eof_v1/eip7069_extcall/test_returndataload.py::test_returndataload_handling[fork_CancunEIP7692-state_test-offset_10-len_0-EXTCALL]": {
+        "env": {
+            "currentCoinbase": "0x2adc25665018aa1fe0e6bc666dac8fc2697ff9ba",
+            "currentGasLimit": "0x016345785d8a0000",
+            "currentNumber": "0x01",
+            "currentTimestamp": "0x03e8",
+            "currentRandom": "0x0000000000000000000000000000000000000000000000000000000000000000",
+            "currentDifficulty": "0x00",
+            "currentBaseFee": "0x07",
+            "currentExcessBlobGas": "0x00"
+        },
+        "pre": {
+            "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b": {
+                "nonce": "0x00",
+                "balance": "0x0de0b6b3a7640000",
+                "code": "0x",
+                "storage": {}
+            },
+            "0x0000000000000000000000000000000000001000": {
+                "nonce": "0x01",
+                "balance": "0x00",
+                "code": "0xef0001010004020001000a0400000000800003d260006000d3d26000f3",
+                "storage": {}
+            },
+            "0x0000000000000000000000000000000000001100": {
+                "nonce": "0x01",
+                "balance": "0x00",
+                "code": "0xef0001010004020001002a0400000000800004600060006000730000000000000000000000000000000000001000f86010f76110005561201560015500",
+                "storage": {}
+            }
+        },
+        "transaction": {
+            "nonce": "0x00",
+            "gasPrice": "0x0a",
+            "gasLimit": [
+                "0x1e8480"
+            ],
+            "to": "0x0000000000000000000000000000000000001100",
+            "value": [
+                "0x00"
+            ],
+            "data": [
+                "0x"
+            ],
+            "sender": "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b",
+            "secretKey": "0x45a915e4d060149eb4365960e6a7a45f334393093061116b197e3240065ff2d8"
+        },
+        "post": {
+            "Prague": [
+                {
+                    "hash": "0x90b6dc5411291d8ed03f3de37eb7079164737fe7413e873888719e0351886815",
+                    "logs": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
+                    "txbytes": "0xf860800a831e8480940000000000000000000000000000000000001100808025a0b3afc79e7eb6744553c987dfa51e04eec7c6d695e6f730badd8150d43c6611fda056587ba537d9e4baf5e9fdb797ed4d7cf237c28c5d368b92f2f3681334585fec",
+                    "indexes": {
+                        "data": 0,
+                        "gas": 0,
+                        "value": 0
+                    }
+                }
+            ]
+        },
+        "_info": {
+            "hash": "0x77514204491bbc51bed87eecfc3db5f982fb732391141e4e67d20bdca4e7d4f4",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evmone-t8n 0.12.0-dev+commit.85a89e56",
+            "description": "Test function documentation:\n\n    Much simpler than returndatacopy, no memory or boosted call.  Returner is called\n    and results are stored in storage slot, which is asserted for expected values.\n    The parameters offset and return data are configured to test boundary conditions.",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.0.4/tests/prague/eip7692_eof_v1/eip7069_extcall/test_returndataload.py#L185",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7069.md",
+            "reference-spec-version": "1795943aeacc86131d5ab6bb3d65824b3b1d4cad"
+        }
+    },
+    "tests/prague/eip7692_eof_v1/eip7069_extcall/test_returndataload.py::test_returndataload_handling[fork_CancunEIP7692-state_test-offset_10-len_0-EXTDELEGATECALL]": {
+        "env": {
+            "currentCoinbase": "0x2adc25665018aa1fe0e6bc666dac8fc2697ff9ba",
+            "currentGasLimit": "0x016345785d8a0000",
+            "currentNumber": "0x01",
+            "currentTimestamp": "0x03e8",
+            "currentRandom": "0x0000000000000000000000000000000000000000000000000000000000000000",
+            "currentDifficulty": "0x00",
+            "currentBaseFee": "0x07",
+            "currentExcessBlobGas": "0x00"
+        },
+        "pre": {
+            "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b": {
+                "nonce": "0x00",
+                "balance": "0x0de0b6b3a7640000",
+                "code": "0x",
+                "storage": {}
+            },
+            "0x0000000000000000000000000000000000001000": {
+                "nonce": "0x01",
+                "balance": "0x00",
+                "code": "0xef0001010004020001000a0400000000800003d260006000d3d26000f3",
+                "storage": {}
+            },
+            "0x0000000000000000000000000000000000001100": {
+                "nonce": "0x01",
+                "balance": "0x00",
+                "code": "0xef00010100040200010028040000000080000360006000730000000000000000000000000000000000001000f96010f76110005561201560015500",
+                "storage": {}
+            }
+        },
+        "transaction": {
+            "nonce": "0x00",
+            "gasPrice": "0x0a",
+            "gasLimit": [
+                "0x1e8480"
+            ],
+            "to": "0x0000000000000000000000000000000000001100",
+            "value": [
+                "0x00"
+            ],
+            "data": [
+                "0x"
+            ],
+            "sender": "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b",
+            "secretKey": "0x45a915e4d060149eb4365960e6a7a45f334393093061116b197e3240065ff2d8"
+        },
+        "post": {
+            "Prague": [
+                {
+                    "hash": "0x94b200a1d41562861850cd5f72a292d3db8717db7b74b09dcbea8b3ede77ad0f",
+                    "logs": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
+                    "txbytes": "0xf860800a831e8480940000000000000000000000000000000000001100808025a0b3afc79e7eb6744553c987dfa51e04eec7c6d695e6f730badd8150d43c6611fda056587ba537d9e4baf5e9fdb797ed4d7cf237c28c5d368b92f2f3681334585fec",
+                    "indexes": {
+                        "data": 0,
+                        "gas": 0,
+                        "value": 0
+                    }
+                }
+            ]
+        },
+        "_info": {
+            "hash": "0x6b9be1ae4b6be4dc997f393a71d07dd03eac7041113e98bdae22791f45640776",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evmone-t8n 0.12.0-dev+commit.85a89e56",
+            "description": "Test function documentation:\n\n    Much simpler than returndatacopy, no memory or boosted call.  Returner is called\n    and results are stored in storage slot, which is asserted for expected values.\n    The parameters offset and return data are configured to test boundary conditions.",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.0.4/tests/prague/eip7692_eof_v1/eip7069_extcall/test_returndataload.py#L185",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7069.md",
+            "reference-spec-version": "1795943aeacc86131d5ab6bb3d65824b3b1d4cad"
+        }
+    },
+    "tests/prague/eip7692_eof_v1/eip7069_extcall/test_returndataload.py::test_returndataload_handling[fork_CancunEIP7692-state_test-offset_10-len_0-EXTSTATICCALL]": {
+        "env": {
+            "currentCoinbase": "0x2adc25665018aa1fe0e6bc666dac8fc2697ff9ba",
+            "currentGasLimit": "0x016345785d8a0000",
+            "currentNumber": "0x01",
+            "currentTimestamp": "0x03e8",
+            "currentRandom": "0x0000000000000000000000000000000000000000000000000000000000000000",
+            "currentDifficulty": "0x00",
+            "currentBaseFee": "0x07",
+            "currentExcessBlobGas": "0x00"
+        },
+        "pre": {
+            "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b": {
+                "nonce": "0x00",
+                "balance": "0x0de0b6b3a7640000",
+                "code": "0x",
+                "storage": {}
+            },
+            "0x0000000000000000000000000000000000001000": {
+                "nonce": "0x01",
+                "balance": "0x00",
+                "code": "0xef0001010004020001000a0400000000800003d260006000d3d26000f3",
+                "storage": {}
+            },
+            "0x0000000000000000000000000000000000001100": {
+                "nonce": "0x01",
+                "balance": "0x00",
+                "code": "0xef00010100040200010028040000000080000360006000730000000000000000000000000000000000001000fb6010f76110005561201560015500",
+                "storage": {}
+            }
+        },
+        "transaction": {
+            "nonce": "0x00",
+            "gasPrice": "0x0a",
+            "gasLimit": [
+                "0x1e8480"
+            ],
+            "to": "0x0000000000000000000000000000000000001100",
+            "value": [
+                "0x00"
+            ],
+            "data": [
+                "0x"
+            ],
+            "sender": "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b",
+            "secretKey": "0x45a915e4d060149eb4365960e6a7a45f334393093061116b197e3240065ff2d8"
+        },
+        "post": {
+            "Prague": [
+                {
+                    "hash": "0x9c46da369e41e83fd553fdc88e8024f56b99e17819a444a3506bc064f474a8c6",
+                    "logs": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
+                    "txbytes": "0xf860800a831e8480940000000000000000000000000000000000001100808025a0b3afc79e7eb6744553c987dfa51e04eec7c6d695e6f730badd8150d43c6611fda056587ba537d9e4baf5e9fdb797ed4d7cf237c28c5d368b92f2f3681334585fec",
+                    "indexes": {
+                        "data": 0,
+                        "gas": 0,
+                        "value": 0
+                    }
+                }
+            ]
+        },
+        "_info": {
+            "hash": "0x20362fbc3df3369cde996a099ee1115f20c21dbd946a703bc79888cfc0f612a6",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evmone-t8n 0.12.0-dev+commit.85a89e56",
+            "description": "Test function documentation:\n\n    Much simpler than returndatacopy, no memory or boosted call.  Returner is called\n    and results are stored in storage slot, which is asserted for expected values.\n    The parameters offset and return data are configured to test boundary conditions.",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.0.4/tests/prague/eip7692_eof_v1/eip7069_extcall/test_returndataload.py#L185",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7069.md",
+            "reference-spec-version": "1795943aeacc86131d5ab6bb3d65824b3b1d4cad"
+        }
+    },
+    "tests/prague/eip7692_eof_v1/eip7069_extcall/test_returndataload.py::test_returndataload_handling[fork_CancunEIP7692-state_test-offset_10-len_10-EXTCALL]": {
+        "env": {
+            "currentCoinbase": "0x2adc25665018aa1fe0e6bc666dac8fc2697ff9ba",
+            "currentGasLimit": "0x016345785d8a0000",
+            "currentNumber": "0x01",
+            "currentTimestamp": "0x03e8",
+            "currentRandom": "0x0000000000000000000000000000000000000000000000000000000000000000",
+            "currentDifficulty": "0x00",
+            "currentBaseFee": "0x07",
+            "currentExcessBlobGas": "0x00"
+        },
+        "pre": {
+            "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b": {
+                "nonce": "0x00",
+                "balance": "0x0de0b6b3a7640000",
+                "code": "0x",
+                "storage": {}
+            },
+            "0x0000000000000000000000000000000000001000": {
+                "nonce": "0x01",
+                "balance": "0x00",
+                "code": "0xef0001010004020001000a0400100000800003d260006000d3d26000f310101010101010101010101010101010",
+                "storage": {}
+            },
+            "0x0000000000000000000000000000000000001100": {
+                "nonce": "0x01",
+                "balance": "0x00",
+                "code": "0xef0001010004020001002a0400000000800004600060006000730000000000000000000000000000000000001000f86010f76110005561201560015500",
+                "storage": {}
+            }
+        },
+        "transaction": {
+            "nonce": "0x00",
+            "gasPrice": "0x0a",
+            "gasLimit": [
+                "0x1e8480"
+            ],
+            "to": "0x0000000000000000000000000000000000001100",
+            "value": [
+                "0x00"
+            ],
+            "data": [
+                "0x"
+            ],
+            "sender": "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b",
+            "secretKey": "0x45a915e4d060149eb4365960e6a7a45f334393093061116b197e3240065ff2d8"
+        },
+        "post": {
+            "Prague": [
+                {
+                    "hash": "0xb47b44e04b4ff5c287c380475f03b3df4ad0ac4b469d5d36268f556b067f77fa",
+                    "logs": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
+                    "txbytes": "0xf860800a831e8480940000000000000000000000000000000000001100808025a0b3afc79e7eb6744553c987dfa51e04eec7c6d695e6f730badd8150d43c6611fda056587ba537d9e4baf5e9fdb797ed4d7cf237c28c5d368b92f2f3681334585fec",
+                    "indexes": {
+                        "data": 0,
+                        "gas": 0,
+                        "value": 0
+                    }
+                }
+            ]
+        },
+        "_info": {
+            "hash": "0x35afe02955a9237227f07c4f9b570150964f8724af9efc59087522a5f6d0b43f",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evmone-t8n 0.12.0-dev+commit.85a89e56",
+            "description": "Test function documentation:\n\n    Much simpler than returndatacopy, no memory or boosted call.  Returner is called\n    and results are stored in storage slot, which is asserted for expected values.\n    The parameters offset and return data are configured to test boundary conditions.",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.0.4/tests/prague/eip7692_eof_v1/eip7069_extcall/test_returndataload.py#L185",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7069.md",
+            "reference-spec-version": "1795943aeacc86131d5ab6bb3d65824b3b1d4cad"
+        }
+    },
+    "tests/prague/eip7692_eof_v1/eip7069_extcall/test_returndataload.py::test_returndataload_handling[fork_CancunEIP7692-state_test-offset_10-len_10-EXTDELEGATECALL]": {
+        "env": {
+            "currentCoinbase": "0x2adc25665018aa1fe0e6bc666dac8fc2697ff9ba",
+            "currentGasLimit": "0x016345785d8a0000",
+            "currentNumber": "0x01",
+            "currentTimestamp": "0x03e8",
+            "currentRandom": "0x0000000000000000000000000000000000000000000000000000000000000000",
+            "currentDifficulty": "0x00",
+            "currentBaseFee": "0x07",
+            "currentExcessBlobGas": "0x00"
+        },
+        "pre": {
+            "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b": {
+                "nonce": "0x00",
+                "balance": "0x0de0b6b3a7640000",
+                "code": "0x",
+                "storage": {}
+            },
+            "0x0000000000000000000000000000000000001000": {
+                "nonce": "0x01",
+                "balance": "0x00",
+                "code": "0xef0001010004020001000a0400100000800003d260006000d3d26000f310101010101010101010101010101010",
+                "storage": {}
+            },
+            "0x0000000000000000000000000000000000001100": {
+                "nonce": "0x01",
+                "balance": "0x00",
+                "code": "0xef00010100040200010028040000000080000360006000730000000000000000000000000000000000001000f96010f76110005561201560015500",
+                "storage": {}
+            }
+        },
+        "transaction": {
+            "nonce": "0x00",
+            "gasPrice": "0x0a",
+            "gasLimit": [
+                "0x1e8480"
+            ],
+            "to": "0x0000000000000000000000000000000000001100",
+            "value": [
+                "0x00"
+            ],
+            "data": [
+                "0x"
+            ],
+            "sender": "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b",
+            "secretKey": "0x45a915e4d060149eb4365960e6a7a45f334393093061116b197e3240065ff2d8"
+        },
+        "post": {
+            "Prague": [
+                {
+                    "hash": "0xe3b1f41cbc626c913dfc0fcc5659ea82431f9d443033b26f7531ff2f607645cb",
+                    "logs": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
+                    "txbytes": "0xf860800a831e8480940000000000000000000000000000000000001100808025a0b3afc79e7eb6744553c987dfa51e04eec7c6d695e6f730badd8150d43c6611fda056587ba537d9e4baf5e9fdb797ed4d7cf237c28c5d368b92f2f3681334585fec",
+                    "indexes": {
+                        "data": 0,
+                        "gas": 0,
+                        "value": 0
+                    }
+                }
+            ]
+        },
+        "_info": {
+            "hash": "0xfc6b610d209d65372f2e1540664d37fae7e7608bee2283db05bf9a9b7aab4566",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evmone-t8n 0.12.0-dev+commit.85a89e56",
+            "description": "Test function documentation:\n\n    Much simpler than returndatacopy, no memory or boosted call.  Returner is called\n    and results are stored in storage slot, which is asserted for expected values.\n    The parameters offset and return data are configured to test boundary conditions.",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.0.4/tests/prague/eip7692_eof_v1/eip7069_extcall/test_returndataload.py#L185",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7069.md",
+            "reference-spec-version": "1795943aeacc86131d5ab6bb3d65824b3b1d4cad"
+        }
+    },
+    "tests/prague/eip7692_eof_v1/eip7069_extcall/test_returndataload.py::test_returndataload_handling[fork_CancunEIP7692-state_test-offset_10-len_10-EXTSTATICCALL]": {
+        "env": {
+            "currentCoinbase": "0x2adc25665018aa1fe0e6bc666dac8fc2697ff9ba",
+            "currentGasLimit": "0x016345785d8a0000",
+            "currentNumber": "0x01",
+            "currentTimestamp": "0x03e8",
+            "currentRandom": "0x0000000000000000000000000000000000000000000000000000000000000000",
+            "currentDifficulty": "0x00",
+            "currentBaseFee": "0x07",
+            "currentExcessBlobGas": "0x00"
+        },
+        "pre": {
+            "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b": {
+                "nonce": "0x00",
+                "balance": "0x0de0b6b3a7640000",
+                "code": "0x",
+                "storage": {}
+            },
+            "0x0000000000000000000000000000000000001000": {
+                "nonce": "0x01",
+                "balance": "0x00",
+                "code": "0xef0001010004020001000a0400100000800003d260006000d3d26000f310101010101010101010101010101010",
+                "storage": {}
+            },
+            "0x0000000000000000000000000000000000001100": {
+                "nonce": "0x01",
+                "balance": "0x00",
+                "code": "0xef00010100040200010028040000000080000360006000730000000000000000000000000000000000001000fb6010f76110005561201560015500",
+                "storage": {}
+            }
+        },
+        "transaction": {
+            "nonce": "0x00",
+            "gasPrice": "0x0a",
+            "gasLimit": [
+                "0x1e8480"
+            ],
+            "to": "0x0000000000000000000000000000000000001100",
+            "value": [
+                "0x00"
+            ],
+            "data": [
+                "0x"
+            ],
+            "sender": "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b",
+            "secretKey": "0x45a915e4d060149eb4365960e6a7a45f334393093061116b197e3240065ff2d8"
+        },
+        "post": {
+            "Prague": [
+                {
+                    "hash": "0x79ea2890aa6ca3e864b8b19b136d767a8dcc30d6159020e9352f063c03b94166",
+                    "logs": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
+                    "txbytes": "0xf860800a831e8480940000000000000000000000000000000000001100808025a0b3afc79e7eb6744553c987dfa51e04eec7c6d695e6f730badd8150d43c6611fda056587ba537d9e4baf5e9fdb797ed4d7cf237c28c5d368b92f2f3681334585fec",
+                    "indexes": {
+                        "data": 0,
+                        "gas": 0,
+                        "value": 0
+                    }
+                }
+            ]
+        },
+        "_info": {
+            "hash": "0x3222a377687e394693928ddcc8d51d938633dd54e248e411af865ee8b91b7430",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evmone-t8n 0.12.0-dev+commit.85a89e56",
+            "description": "Test function documentation:\n\n    Much simpler than returndatacopy, no memory or boosted call.  Returner is called\n    and results are stored in storage slot, which is asserted for expected values.\n    The parameters offset and return data are configured to test boundary conditions.",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.0.4/tests/prague/eip7692_eof_v1/eip7069_extcall/test_returndataload.py#L185",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7069.md",
+            "reference-spec-version": "1795943aeacc86131d5ab6bb3d65824b3b1d4cad"
+        }
+    },
+    "tests/prague/eip7692_eof_v1/eip7069_extcall/test_returndataload.py::test_returndataload_handling[fork_CancunEIP7692-state_test-offset_10-len_20-EXTCALL]": {
+        "env": {
+            "currentCoinbase": "0x2adc25665018aa1fe0e6bc666dac8fc2697ff9ba",
+            "currentGasLimit": "0x016345785d8a0000",
+            "currentNumber": "0x01",
+            "currentTimestamp": "0x03e8",
+            "currentRandom": "0x0000000000000000000000000000000000000000000000000000000000000000",
+            "currentDifficulty": "0x00",
+            "currentBaseFee": "0x07",
+            "currentExcessBlobGas": "0x00"
+        },
+        "pre": {
+            "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b": {
+                "nonce": "0x00",
+                "balance": "0x0de0b6b3a7640000",
+                "code": "0x",
+                "storage": {}
+            },
+            "0x0000000000000000000000000000000000001000": {
+                "nonce": "0x01",
+                "balance": "0x00",
+                "code": "0xef0001010004020001000a0400200000800003d260006000d3d26000f32020202020202020202020202020202020202020202020202020202020202020",
+                "storage": {}
+            },
+            "0x0000000000000000000000000000000000001100": {
+                "nonce": "0x01",
+                "balance": "0x00",
+                "code": "0xef0001010004020001002a0400000000800004600060006000730000000000000000000000000000000000001000f86010f76110005561201560015500",
+                "storage": {}
+            }
+        },
+        "transaction": {
+            "nonce": "0x00",
+            "gasPrice": "0x0a",
+            "gasLimit": [
+                "0x1e8480"
+            ],
+            "to": "0x0000000000000000000000000000000000001100",
+            "value": [
+                "0x00"
+            ],
+            "data": [
+                "0x"
+            ],
+            "sender": "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b",
+            "secretKey": "0x45a915e4d060149eb4365960e6a7a45f334393093061116b197e3240065ff2d8"
+        },
+        "post": {
+            "Prague": [
+                {
+                    "hash": "0x7bf0d29f1f1580f7d436cd6f2c7ec2ab0420b25714d9f466ad63a09287972ff6",
+                    "logs": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
+                    "txbytes": "0xf860800a831e8480940000000000000000000000000000000000001100808025a0b3afc79e7eb6744553c987dfa51e04eec7c6d695e6f730badd8150d43c6611fda056587ba537d9e4baf5e9fdb797ed4d7cf237c28c5d368b92f2f3681334585fec",
+                    "indexes": {
+                        "data": 0,
+                        "gas": 0,
+                        "value": 0
+                    }
+                }
+            ]
+        },
+        "_info": {
+            "hash": "0x6dff0e1d73802e3dc6b0cf34e6a6b35478f2a85d9244b8c596d7438b46d6df4e",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evmone-t8n 0.12.0-dev+commit.85a89e56",
+            "description": "Test function documentation:\n\n    Much simpler than returndatacopy, no memory or boosted call.  Returner is called\n    and results are stored in storage slot, which is asserted for expected values.\n    The parameters offset and return data are configured to test boundary conditions.",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.0.4/tests/prague/eip7692_eof_v1/eip7069_extcall/test_returndataload.py#L185",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7069.md",
+            "reference-spec-version": "1795943aeacc86131d5ab6bb3d65824b3b1d4cad"
+        }
+    },
+    "tests/prague/eip7692_eof_v1/eip7069_extcall/test_returndataload.py::test_returndataload_handling[fork_CancunEIP7692-state_test-offset_10-len_20-EXTDELEGATECALL]": {
+        "env": {
+            "currentCoinbase": "0x2adc25665018aa1fe0e6bc666dac8fc2697ff9ba",
+            "currentGasLimit": "0x016345785d8a0000",
+            "currentNumber": "0x01",
+            "currentTimestamp": "0x03e8",
+            "currentRandom": "0x0000000000000000000000000000000000000000000000000000000000000000",
+            "currentDifficulty": "0x00",
+            "currentBaseFee": "0x07",
+            "currentExcessBlobGas": "0x00"
+        },
+        "pre": {
+            "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b": {
+                "nonce": "0x00",
+                "balance": "0x0de0b6b3a7640000",
+                "code": "0x",
+                "storage": {}
+            },
+            "0x0000000000000000000000000000000000001000": {
+                "nonce": "0x01",
+                "balance": "0x00",
+                "code": "0xef0001010004020001000a0400200000800003d260006000d3d26000f32020202020202020202020202020202020202020202020202020202020202020",
+                "storage": {}
+            },
+            "0x0000000000000000000000000000000000001100": {
+                "nonce": "0x01",
+                "balance": "0x00",
+                "code": "0xef00010100040200010028040000000080000360006000730000000000000000000000000000000000001000f96010f76110005561201560015500",
+                "storage": {}
+            }
+        },
+        "transaction": {
+            "nonce": "0x00",
+            "gasPrice": "0x0a",
+            "gasLimit": [
+                "0x1e8480"
+            ],
+            "to": "0x0000000000000000000000000000000000001100",
+            "value": [
+                "0x00"
+            ],
+            "data": [
+                "0x"
+            ],
+            "sender": "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b",
+            "secretKey": "0x45a915e4d060149eb4365960e6a7a45f334393093061116b197e3240065ff2d8"
+        },
+        "post": {
+            "Prague": [
+                {
+                    "hash": "0x8d017d9a7632d21a1e8a1694dfe934a9f0d3bad34816d29b8cdd4b368e9520b7",
+                    "logs": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
+                    "txbytes": "0xf860800a831e8480940000000000000000000000000000000000001100808025a0b3afc79e7eb6744553c987dfa51e04eec7c6d695e6f730badd8150d43c6611fda056587ba537d9e4baf5e9fdb797ed4d7cf237c28c5d368b92f2f3681334585fec",
+                    "indexes": {
+                        "data": 0,
+                        "gas": 0,
+                        "value": 0
+                    }
+                }
+            ]
+        },
+        "_info": {
+            "hash": "0x0b1730556a3aaeb54587098bbdb97e9d38e3f6bb7cd3628913f0a198177fb479",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evmone-t8n 0.12.0-dev+commit.85a89e56",
+            "description": "Test function documentation:\n\n    Much simpler than returndatacopy, no memory or boosted call.  Returner is called\n    and results are stored in storage slot, which is asserted for expected values.\n    The parameters offset and return data are configured to test boundary conditions.",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.0.4/tests/prague/eip7692_eof_v1/eip7069_extcall/test_returndataload.py#L185",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7069.md",
+            "reference-spec-version": "1795943aeacc86131d5ab6bb3d65824b3b1d4cad"
+        }
+    },
+    "tests/prague/eip7692_eof_v1/eip7069_extcall/test_returndataload.py::test_returndataload_handling[fork_CancunEIP7692-state_test-offset_10-len_20-EXTSTATICCALL]": {
+        "env": {
+            "currentCoinbase": "0x2adc25665018aa1fe0e6bc666dac8fc2697ff9ba",
+            "currentGasLimit": "0x016345785d8a0000",
+            "currentNumber": "0x01",
+            "currentTimestamp": "0x03e8",
+            "currentRandom": "0x0000000000000000000000000000000000000000000000000000000000000000",
+            "currentDifficulty": "0x00",
+            "currentBaseFee": "0x07",
+            "currentExcessBlobGas": "0x00"
+        },
+        "pre": {
+            "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b": {
+                "nonce": "0x00",
+                "balance": "0x0de0b6b3a7640000",
+                "code": "0x",
+                "storage": {}
+            },
+            "0x0000000000000000000000000000000000001000": {
+                "nonce": "0x01",
+                "balance": "0x00",
+                "code": "0xef0001010004020001000a0400200000800003d260006000d3d26000f32020202020202020202020202020202020202020202020202020202020202020",
+                "storage": {}
+            },
+            "0x0000000000000000000000000000000000001100": {
+                "nonce": "0x01",
+                "balance": "0x00",
+                "code": "0xef00010100040200010028040000000080000360006000730000000000000000000000000000000000001000fb6010f76110005561201560015500",
+                "storage": {}
+            }
+        },
+        "transaction": {
+            "nonce": "0x00",
+            "gasPrice": "0x0a",
+            "gasLimit": [
+                "0x1e8480"
+            ],
+            "to": "0x0000000000000000000000000000000000001100",
+            "value": [
+                "0x00"
+            ],
+            "data": [
+                "0x"
+            ],
+            "sender": "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b",
+            "secretKey": "0x45a915e4d060149eb4365960e6a7a45f334393093061116b197e3240065ff2d8"
+        },
+        "post": {
+            "Prague": [
+                {
+                    "hash": "0xb3c82ed0c01969cfddcb2f91d0d0daf4bcbd75daff83be9186a27e9ba1ac995a",
+                    "logs": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
+                    "txbytes": "0xf860800a831e8480940000000000000000000000000000000000001100808025a0b3afc79e7eb6744553c987dfa51e04eec7c6d695e6f730badd8150d43c6611fda056587ba537d9e4baf5e9fdb797ed4d7cf237c28c5d368b92f2f3681334585fec",
+                    "indexes": {
+                        "data": 0,
+                        "gas": 0,
+                        "value": 0
+                    }
+                }
+            ]
+        },
+        "_info": {
+            "hash": "0x425ab6db17f4576567e09a46c0f3c208221afc4ccf1116e3387930264c3dd0ca",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evmone-t8n 0.12.0-dev+commit.85a89e56",
+            "description": "Test function documentation:\n\n    Much simpler than returndatacopy, no memory or boosted call.  Returner is called\n    and results are stored in storage slot, which is asserted for expected values.\n    The parameters offset and return data are configured to test boundary conditions.",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.0.4/tests/prague/eip7692_eof_v1/eip7069_extcall/test_returndataload.py#L185",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7069.md",
+            "reference-spec-version": "1795943aeacc86131d5ab6bb3d65824b3b1d4cad"
+        }
+    },
+    "tests/prague/eip7692_eof_v1/eip7069_extcall/test_returndataload.py::test_returndataload_handling[fork_CancunEIP7692-state_test-offset_10-len_30-EXTCALL]": {
+        "env": {
+            "currentCoinbase": "0x2adc25665018aa1fe0e6bc666dac8fc2697ff9ba",
+            "currentGasLimit": "0x016345785d8a0000",
+            "currentNumber": "0x01",
+            "currentTimestamp": "0x03e8",
+            "currentRandom": "0x0000000000000000000000000000000000000000000000000000000000000000",
+            "currentDifficulty": "0x00",
+            "currentBaseFee": "0x07",
+            "currentExcessBlobGas": "0x00"
+        },
+        "pre": {
+            "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b": {
+                "nonce": "0x00",
+                "balance": "0x0de0b6b3a7640000",
+                "code": "0x",
+                "storage": {}
+            },
+            "0x0000000000000000000000000000000000001000": {
+                "nonce": "0x01",
+                "balance": "0x00",
+                "code": "0xef0001010004020001000a0400300000800003d260006000d3d26000f3303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030",
+                "storage": {}
+            },
+            "0x0000000000000000000000000000000000001100": {
+                "nonce": "0x01",
+                "balance": "0x00",
+                "code": "0xef0001010004020001002a0400000000800004600060006000730000000000000000000000000000000000001000f86010f76110005561201560015500",
+                "storage": {}
+            }
+        },
+        "transaction": {
+            "nonce": "0x00",
+            "gasPrice": "0x0a",
+            "gasLimit": [
+                "0x1e8480"
+            ],
+            "to": "0x0000000000000000000000000000000000001100",
+            "value": [
+                "0x00"
+            ],
+            "data": [
+                "0x"
+            ],
+            "sender": "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b",
+            "secretKey": "0x45a915e4d060149eb4365960e6a7a45f334393093061116b197e3240065ff2d8"
+        },
+        "post": {
+            "Prague": [
+                {
+                    "hash": "0x2f095ad1b32946191b6e686d1c3e9513cc2fff82e8a171e7452caf26a7669889",
+                    "logs": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
+                    "txbytes": "0xf860800a831e8480940000000000000000000000000000000000001100808025a0b3afc79e7eb6744553c987dfa51e04eec7c6d695e6f730badd8150d43c6611fda056587ba537d9e4baf5e9fdb797ed4d7cf237c28c5d368b92f2f3681334585fec",
+                    "indexes": {
+                        "data": 0,
+                        "gas": 0,
+                        "value": 0
+                    }
+                }
+            ]
+        },
+        "_info": {
+            "hash": "0x2410ab697d05a4efca8d0ade78ad60c9dbe99404fd1e7ef01bc3a361a2385211",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evmone-t8n 0.12.0-dev+commit.85a89e56",
+            "description": "Test function documentation:\n\n    Much simpler than returndatacopy, no memory or boosted call.  Returner is called\n    and results are stored in storage slot, which is asserted for expected values.\n    The parameters offset and return data are configured to test boundary conditions.",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.0.4/tests/prague/eip7692_eof_v1/eip7069_extcall/test_returndataload.py#L185",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7069.md",
+            "reference-spec-version": "1795943aeacc86131d5ab6bb3d65824b3b1d4cad"
+        }
+    },
+    "tests/prague/eip7692_eof_v1/eip7069_extcall/test_returndataload.py::test_returndataload_handling[fork_CancunEIP7692-state_test-offset_10-len_30-EXTDELEGATECALL]": {
+        "env": {
+            "currentCoinbase": "0x2adc25665018aa1fe0e6bc666dac8fc2697ff9ba",
+            "currentGasLimit": "0x016345785d8a0000",
+            "currentNumber": "0x01",
+            "currentTimestamp": "0x03e8",
+            "currentRandom": "0x0000000000000000000000000000000000000000000000000000000000000000",
+            "currentDifficulty": "0x00",
+            "currentBaseFee": "0x07",
+            "currentExcessBlobGas": "0x00"
+        },
+        "pre": {
+            "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b": {
+                "nonce": "0x00",
+                "balance": "0x0de0b6b3a7640000",
+                "code": "0x",
+                "storage": {}
+            },
+            "0x0000000000000000000000000000000000001000": {
+                "nonce": "0x01",
+                "balance": "0x00",
+                "code": "0xef0001010004020001000a0400300000800003d260006000d3d26000f3303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030",
+                "storage": {}
+            },
+            "0x0000000000000000000000000000000000001100": {
+                "nonce": "0x01",
+                "balance": "0x00",
+                "code": "0xef00010100040200010028040000000080000360006000730000000000000000000000000000000000001000f96010f76110005561201560015500",
+                "storage": {}
+            }
+        },
+        "transaction": {
+            "nonce": "0x00",
+            "gasPrice": "0x0a",
+            "gasLimit": [
+                "0x1e8480"
+            ],
+            "to": "0x0000000000000000000000000000000000001100",
+            "value": [
+                "0x00"
+            ],
+            "data": [
+                "0x"
+            ],
+            "sender": "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b",
+            "secretKey": "0x45a915e4d060149eb4365960e6a7a45f334393093061116b197e3240065ff2d8"
+        },
+        "post": {
+            "Prague": [
+                {
+                    "hash": "0xf12ea8312eea1f9a0443b15467b8bc275456625dd21540c4af489e948d54ea09",
+                    "logs": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
+                    "txbytes": "0xf860800a831e8480940000000000000000000000000000000000001100808025a0b3afc79e7eb6744553c987dfa51e04eec7c6d695e6f730badd8150d43c6611fda056587ba537d9e4baf5e9fdb797ed4d7cf237c28c5d368b92f2f3681334585fec",
+                    "indexes": {
+                        "data": 0,
+                        "gas": 0,
+                        "value": 0
+                    }
+                }
+            ]
+        },
+        "_info": {
+            "hash": "0x9c973f2d15513d6188d8d19aef4098f99c9385d65d507efe476912e645a50749",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evmone-t8n 0.12.0-dev+commit.85a89e56",
+            "description": "Test function documentation:\n\n    Much simpler than returndatacopy, no memory or boosted call.  Returner is called\n    and results are stored in storage slot, which is asserted for expected values.\n    The parameters offset and return data are configured to test boundary conditions.",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.0.4/tests/prague/eip7692_eof_v1/eip7069_extcall/test_returndataload.py#L185",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7069.md",
+            "reference-spec-version": "1795943aeacc86131d5ab6bb3d65824b3b1d4cad"
+        }
+    },
+    "tests/prague/eip7692_eof_v1/eip7069_extcall/test_returndataload.py::test_returndataload_handling[fork_CancunEIP7692-state_test-offset_10-len_30-EXTSTATICCALL]": {
+        "env": {
+            "currentCoinbase": "0x2adc25665018aa1fe0e6bc666dac8fc2697ff9ba",
+            "currentGasLimit": "0x016345785d8a0000",
+            "currentNumber": "0x01",
+            "currentTimestamp": "0x03e8",
+            "currentRandom": "0x0000000000000000000000000000000000000000000000000000000000000000",
+            "currentDifficulty": "0x00",
+            "currentBaseFee": "0x07",
+            "currentExcessBlobGas": "0x00"
+        },
+        "pre": {
+            "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b": {
+                "nonce": "0x00",
+                "balance": "0x0de0b6b3a7640000",
+                "code": "0x",
+                "storage": {}
+            },
+            "0x0000000000000000000000000000000000001000": {
+                "nonce": "0x01",
+                "balance": "0x00",
+                "code": "0xef0001010004020001000a0400300000800003d260006000d3d26000f3303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030",
+                "storage": {}
+            },
+            "0x0000000000000000000000000000000000001100": {
+                "nonce": "0x01",
+                "balance": "0x00",
+                "code": "0xef00010100040200010028040000000080000360006000730000000000000000000000000000000000001000fb6010f76110005561201560015500",
+                "storage": {}
+            }
+        },
+        "transaction": {
+            "nonce": "0x00",
+            "gasPrice": "0x0a",
+            "gasLimit": [
+                "0x1e8480"
+            ],
+            "to": "0x0000000000000000000000000000000000001100",
+            "value": [
+                "0x00"
+            ],
+            "data": [
+                "0x"
+            ],
+            "sender": "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b",
+            "secretKey": "0x45a915e4d060149eb4365960e6a7a45f334393093061116b197e3240065ff2d8"
+        },
+        "post": {
+            "Prague": [
+                {
+                    "hash": "0xdaa85285b6156c7e71173f4655a034915c0c470842aecca3ddc1e87e1bd8f871",
+                    "logs": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
+                    "txbytes": "0xf860800a831e8480940000000000000000000000000000000000001100808025a0b3afc79e7eb6744553c987dfa51e04eec7c6d695e6f730badd8150d43c6611fda056587ba537d9e4baf5e9fdb797ed4d7cf237c28c5d368b92f2f3681334585fec",
+                    "indexes": {
+                        "data": 0,
+                        "gas": 0,
+                        "value": 0
+                    }
+                }
+            ]
+        },
+        "_info": {
+            "hash": "0xb5b5e761aa9b26080723400fd85df35232043ef32c408fb6f991e2cd3a9359cd",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evmone-t8n 0.12.0-dev+commit.85a89e56",
+            "description": "Test function documentation:\n\n    Much simpler than returndatacopy, no memory or boosted call.  Returner is called\n    and results are stored in storage slot, which is asserted for expected values.\n    The parameters offset and return data are configured to test boundary conditions.",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.0.4/tests/prague/eip7692_eof_v1/eip7069_extcall/test_returndataload.py#L185",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7069.md",
+            "reference-spec-version": "1795943aeacc86131d5ab6bb3d65824b3b1d4cad"
+        }
+    },
+    "tests/prague/eip7692_eof_v1/eip7069_extcall/test_returndataload.py::test_returndataload_handling[fork_CancunEIP7692-state_test-offset_20-len_0-EXTCALL]": {
+        "env": {
+            "currentCoinbase": "0x2adc25665018aa1fe0e6bc666dac8fc2697ff9ba",
+            "currentGasLimit": "0x016345785d8a0000",
+            "currentNumber": "0x01",
+            "currentTimestamp": "0x03e8",
+            "currentRandom": "0x0000000000000000000000000000000000000000000000000000000000000000",
+            "currentDifficulty": "0x00",
+            "currentBaseFee": "0x07",
+            "currentExcessBlobGas": "0x00"
+        },
+        "pre": {
+            "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b": {
+                "nonce": "0x00",
+                "balance": "0x0de0b6b3a7640000",
+                "code": "0x",
+                "storage": {}
+            },
+            "0x0000000000000000000000000000000000001000": {
+                "nonce": "0x01",
+                "balance": "0x00",
+                "code": "0xef0001010004020001000a0400000000800003d260006000d3d26000f3",
+                "storage": {}
+            },
+            "0x0000000000000000000000000000000000001100": {
+                "nonce": "0x01",
+                "balance": "0x00",
+                "code": "0xef0001010004020001002a0400000000800004600060006000730000000000000000000000000000000000001000f86020f76110005561201560015500",
+                "storage": {}
+            }
+        },
+        "transaction": {
+            "nonce": "0x00",
+            "gasPrice": "0x0a",
+            "gasLimit": [
+                "0x1e8480"
+            ],
+            "to": "0x0000000000000000000000000000000000001100",
+            "value": [
+                "0x00"
+            ],
+            "data": [
+                "0x"
+            ],
+            "sender": "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b",
+            "secretKey": "0x45a915e4d060149eb4365960e6a7a45f334393093061116b197e3240065ff2d8"
+        },
+        "post": {
+            "Prague": [
+                {
+                    "hash": "0x78c797c07448890c3b1980e6e4e084b43ddf0fe80aeee4fe4e0fec15a9cfb2dc",
+                    "logs": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
+                    "txbytes": "0xf860800a831e8480940000000000000000000000000000000000001100808025a0b3afc79e7eb6744553c987dfa51e04eec7c6d695e6f730badd8150d43c6611fda056587ba537d9e4baf5e9fdb797ed4d7cf237c28c5d368b92f2f3681334585fec",
+                    "indexes": {
+                        "data": 0,
+                        "gas": 0,
+                        "value": 0
+                    }
+                }
+            ]
+        },
+        "_info": {
+            "hash": "0x9d532f4afe9565d2723ded942c534899471b331c2e632610e999574b83630d36",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evmone-t8n 0.12.0-dev+commit.85a89e56",
+            "description": "Test function documentation:\n\n    Much simpler than returndatacopy, no memory or boosted call.  Returner is called\n    and results are stored in storage slot, which is asserted for expected values.\n    The parameters offset and return data are configured to test boundary conditions.",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.0.4/tests/prague/eip7692_eof_v1/eip7069_extcall/test_returndataload.py#L185",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7069.md",
+            "reference-spec-version": "1795943aeacc86131d5ab6bb3d65824b3b1d4cad"
+        }
+    },
+    "tests/prague/eip7692_eof_v1/eip7069_extcall/test_returndataload.py::test_returndataload_handling[fork_CancunEIP7692-state_test-offset_20-len_0-EXTDELEGATECALL]": {
+        "env": {
+            "currentCoinbase": "0x2adc25665018aa1fe0e6bc666dac8fc2697ff9ba",
+            "currentGasLimit": "0x016345785d8a0000",
+            "currentNumber": "0x01",
+            "currentTimestamp": "0x03e8",
+            "currentRandom": "0x0000000000000000000000000000000000000000000000000000000000000000",
+            "currentDifficulty": "0x00",
+            "currentBaseFee": "0x07",
+            "currentExcessBlobGas": "0x00"
+        },
+        "pre": {
+            "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b": {
+                "nonce": "0x00",
+                "balance": "0x0de0b6b3a7640000",
+                "code": "0x",
+                "storage": {}
+            },
+            "0x0000000000000000000000000000000000001000": {
+                "nonce": "0x01",
+                "balance": "0x00",
+                "code": "0xef0001010004020001000a0400000000800003d260006000d3d26000f3",
+                "storage": {}
+            },
+            "0x0000000000000000000000000000000000001100": {
+                "nonce": "0x01",
+                "balance": "0x00",
+                "code": "0xef00010100040200010028040000000080000360006000730000000000000000000000000000000000001000f96020f76110005561201560015500",
+                "storage": {}
+            }
+        },
+        "transaction": {
+            "nonce": "0x00",
+            "gasPrice": "0x0a",
+            "gasLimit": [
+                "0x1e8480"
+            ],
+            "to": "0x0000000000000000000000000000000000001100",
+            "value": [
+                "0x00"
+            ],
+            "data": [
+                "0x"
+            ],
+            "sender": "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b",
+            "secretKey": "0x45a915e4d060149eb4365960e6a7a45f334393093061116b197e3240065ff2d8"
+        },
+        "post": {
+            "Prague": [
+                {
+                    "hash": "0xa5960316cf3bda4fc936279ee4f5145d77a546d0c49f4720d75876e5aff2ff94",
+                    "logs": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
+                    "txbytes": "0xf860800a831e8480940000000000000000000000000000000000001100808025a0b3afc79e7eb6744553c987dfa51e04eec7c6d695e6f730badd8150d43c6611fda056587ba537d9e4baf5e9fdb797ed4d7cf237c28c5d368b92f2f3681334585fec",
+                    "indexes": {
+                        "data": 0,
+                        "gas": 0,
+                        "value": 0
+                    }
+                }
+            ]
+        },
+        "_info": {
+            "hash": "0x68709342e4cbc19b2784023cb4736a2c7c5d10e2855a80912c5fa2d824e8f1b2",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evmone-t8n 0.12.0-dev+commit.85a89e56",
+            "description": "Test function documentation:\n\n    Much simpler than returndatacopy, no memory or boosted call.  Returner is called\n    and results are stored in storage slot, which is asserted for expected values.\n    The parameters offset and return data are configured to test boundary conditions.",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.0.4/tests/prague/eip7692_eof_v1/eip7069_extcall/test_returndataload.py#L185",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7069.md",
+            "reference-spec-version": "1795943aeacc86131d5ab6bb3d65824b3b1d4cad"
+        }
+    },
+    "tests/prague/eip7692_eof_v1/eip7069_extcall/test_returndataload.py::test_returndataload_handling[fork_CancunEIP7692-state_test-offset_20-len_0-EXTSTATICCALL]": {
+        "env": {
+            "currentCoinbase": "0x2adc25665018aa1fe0e6bc666dac8fc2697ff9ba",
+            "currentGasLimit": "0x016345785d8a0000",
+            "currentNumber": "0x01",
+            "currentTimestamp": "0x03e8",
+            "currentRandom": "0x0000000000000000000000000000000000000000000000000000000000000000",
+            "currentDifficulty": "0x00",
+            "currentBaseFee": "0x07",
+            "currentExcessBlobGas": "0x00"
+        },
+        "pre": {
+            "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b": {
+                "nonce": "0x00",
+                "balance": "0x0de0b6b3a7640000",
+                "code": "0x",
+                "storage": {}
+            },
+            "0x0000000000000000000000000000000000001000": {
+                "nonce": "0x01",
+                "balance": "0x00",
+                "code": "0xef0001010004020001000a0400000000800003d260006000d3d26000f3",
+                "storage": {}
+            },
+            "0x0000000000000000000000000000000000001100": {
+                "nonce": "0x01",
+                "balance": "0x00",
+                "code": "0xef00010100040200010028040000000080000360006000730000000000000000000000000000000000001000fb6020f76110005561201560015500",
+                "storage": {}
+            }
+        },
+        "transaction": {
+            "nonce": "0x00",
+            "gasPrice": "0x0a",
+            "gasLimit": [
+                "0x1e8480"
+            ],
+            "to": "0x0000000000000000000000000000000000001100",
+            "value": [
+                "0x00"
+            ],
+            "data": [
+                "0x"
+            ],
+            "sender": "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b",
+            "secretKey": "0x45a915e4d060149eb4365960e6a7a45f334393093061116b197e3240065ff2d8"
+        },
+        "post": {
+            "Prague": [
+                {
+                    "hash": "0xcca8a1dc6c376438c2a920e85cedbcf987b9318c2e82b9bf6400bf44c5a0a5aa",
+                    "logs": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
+                    "txbytes": "0xf860800a831e8480940000000000000000000000000000000000001100808025a0b3afc79e7eb6744553c987dfa51e04eec7c6d695e6f730badd8150d43c6611fda056587ba537d9e4baf5e9fdb797ed4d7cf237c28c5d368b92f2f3681334585fec",
+                    "indexes": {
+                        "data": 0,
+                        "gas": 0,
+                        "value": 0
+                    }
+                }
+            ]
+        },
+        "_info": {
+            "hash": "0xf6a1edc9a0d3a21d37342f0c7318e997d6e949a40520d8323b194b529681af09",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evmone-t8n 0.12.0-dev+commit.85a89e56",
+            "description": "Test function documentation:\n\n    Much simpler than returndatacopy, no memory or boosted call.  Returner is called\n    and results are stored in storage slot, which is asserted for expected values.\n    The parameters offset and return data are configured to test boundary conditions.",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.0.4/tests/prague/eip7692_eof_v1/eip7069_extcall/test_returndataload.py#L185",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7069.md",
+            "reference-spec-version": "1795943aeacc86131d5ab6bb3d65824b3b1d4cad"
+        }
+    },
+    "tests/prague/eip7692_eof_v1/eip7069_extcall/test_returndataload.py::test_returndataload_handling[fork_CancunEIP7692-state_test-offset_20-len_10-EXTCALL]": {
+        "env": {
+            "currentCoinbase": "0x2adc25665018aa1fe0e6bc666dac8fc2697ff9ba",
+            "currentGasLimit": "0x016345785d8a0000",
+            "currentNumber": "0x01",
+            "currentTimestamp": "0x03e8",
+            "currentRandom": "0x0000000000000000000000000000000000000000000000000000000000000000",
+            "currentDifficulty": "0x00",
+            "currentBaseFee": "0x07",
+            "currentExcessBlobGas": "0x00"
+        },
+        "pre": {
+            "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b": {
+                "nonce": "0x00",
+                "balance": "0x0de0b6b3a7640000",
+                "code": "0x",
+                "storage": {}
+            },
+            "0x0000000000000000000000000000000000001000": {
+                "nonce": "0x01",
+                "balance": "0x00",
+                "code": "0xef0001010004020001000a0400100000800003d260006000d3d26000f310101010101010101010101010101010",
+                "storage": {}
+            },
+            "0x0000000000000000000000000000000000001100": {
+                "nonce": "0x01",
+                "balance": "0x00",
+                "code": "0xef0001010004020001002a0400000000800004600060006000730000000000000000000000000000000000001000f86020f76110005561201560015500",
+                "storage": {}
+            }
+        },
+        "transaction": {
+            "nonce": "0x00",
+            "gasPrice": "0x0a",
+            "gasLimit": [
+                "0x1e8480"
+            ],
+            "to": "0x0000000000000000000000000000000000001100",
+            "value": [
+                "0x00"
+            ],
+            "data": [
+                "0x"
+            ],
+            "sender": "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b",
+            "secretKey": "0x45a915e4d060149eb4365960e6a7a45f334393093061116b197e3240065ff2d8"
+        },
+        "post": {
+            "Prague": [
+                {
+                    "hash": "0x19afb868b73b713215c2fdb1bab1efdf55a839bbe5f858bab8a4c90c9ba53733",
+                    "logs": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
+                    "txbytes": "0xf860800a831e8480940000000000000000000000000000000000001100808025a0b3afc79e7eb6744553c987dfa51e04eec7c6d695e6f730badd8150d43c6611fda056587ba537d9e4baf5e9fdb797ed4d7cf237c28c5d368b92f2f3681334585fec",
+                    "indexes": {
+                        "data": 0,
+                        "gas": 0,
+                        "value": 0
+                    }
+                }
+            ]
+        },
+        "_info": {
+            "hash": "0xa7ac5dcb782e7f10f08c58424dbeaccc8de45c864bd01cc30b4223e8ac9d6224",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evmone-t8n 0.12.0-dev+commit.85a89e56",
+            "description": "Test function documentation:\n\n    Much simpler than returndatacopy, no memory or boosted call.  Returner is called\n    and results are stored in storage slot, which is asserted for expected values.\n    The parameters offset and return data are configured to test boundary conditions.",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.0.4/tests/prague/eip7692_eof_v1/eip7069_extcall/test_returndataload.py#L185",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7069.md",
+            "reference-spec-version": "1795943aeacc86131d5ab6bb3d65824b3b1d4cad"
+        }
+    },
+    "tests/prague/eip7692_eof_v1/eip7069_extcall/test_returndataload.py::test_returndataload_handling[fork_CancunEIP7692-state_test-offset_20-len_10-EXTDELEGATECALL]": {
+        "env": {
+            "currentCoinbase": "0x2adc25665018aa1fe0e6bc666dac8fc2697ff9ba",
+            "currentGasLimit": "0x016345785d8a0000",
+            "currentNumber": "0x01",
+            "currentTimestamp": "0x03e8",
+            "currentRandom": "0x0000000000000000000000000000000000000000000000000000000000000000",
+            "currentDifficulty": "0x00",
+            "currentBaseFee": "0x07",
+            "currentExcessBlobGas": "0x00"
+        },
+        "pre": {
+            "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b": {
+                "nonce": "0x00",
+                "balance": "0x0de0b6b3a7640000",
+                "code": "0x",
+                "storage": {}
+            },
+            "0x0000000000000000000000000000000000001000": {
+                "nonce": "0x01",
+                "balance": "0x00",
+                "code": "0xef0001010004020001000a0400100000800003d260006000d3d26000f310101010101010101010101010101010",
+                "storage": {}
+            },
+            "0x0000000000000000000000000000000000001100": {
+                "nonce": "0x01",
+                "balance": "0x00",
+                "code": "0xef00010100040200010028040000000080000360006000730000000000000000000000000000000000001000f96020f76110005561201560015500",
+                "storage": {}
+            }
+        },
+        "transaction": {
+            "nonce": "0x00",
+            "gasPrice": "0x0a",
+            "gasLimit": [
+                "0x1e8480"
+            ],
+            "to": "0x0000000000000000000000000000000000001100",
+            "value": [
+                "0x00"
+            ],
+            "data": [
+                "0x"
+            ],
+            "sender": "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b",
+            "secretKey": "0x45a915e4d060149eb4365960e6a7a45f334393093061116b197e3240065ff2d8"
+        },
+        "post": {
+            "Prague": [
+                {
+                    "hash": "0x917d69a57d7164206bfb8b6049b66f57f5bbca0f7c6296389542167fa7f038a2",
+                    "logs": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
+                    "txbytes": "0xf860800a831e8480940000000000000000000000000000000000001100808025a0b3afc79e7eb6744553c987dfa51e04eec7c6d695e6f730badd8150d43c6611fda056587ba537d9e4baf5e9fdb797ed4d7cf237c28c5d368b92f2f3681334585fec",
+                    "indexes": {
+                        "data": 0,
+                        "gas": 0,
+                        "value": 0
+                    }
+                }
+            ]
+        },
+        "_info": {
+            "hash": "0x5af01c1dfc1ed40bb3ea551f984c39c6f11d5d1d54548f4838937a08f40438a6",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evmone-t8n 0.12.0-dev+commit.85a89e56",
+            "description": "Test function documentation:\n\n    Much simpler than returndatacopy, no memory or boosted call.  Returner is called\n    and results are stored in storage slot, which is asserted for expected values.\n    The parameters offset and return data are configured to test boundary conditions.",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.0.4/tests/prague/eip7692_eof_v1/eip7069_extcall/test_returndataload.py#L185",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7069.md",
+            "reference-spec-version": "1795943aeacc86131d5ab6bb3d65824b3b1d4cad"
+        }
+    },
+    "tests/prague/eip7692_eof_v1/eip7069_extcall/test_returndataload.py::test_returndataload_handling[fork_CancunEIP7692-state_test-offset_20-len_10-EXTSTATICCALL]": {
+        "env": {
+            "currentCoinbase": "0x2adc25665018aa1fe0e6bc666dac8fc2697ff9ba",
+            "currentGasLimit": "0x016345785d8a0000",
+            "currentNumber": "0x01",
+            "currentTimestamp": "0x03e8",
+            "currentRandom": "0x0000000000000000000000000000000000000000000000000000000000000000",
+            "currentDifficulty": "0x00",
+            "currentBaseFee": "0x07",
+            "currentExcessBlobGas": "0x00"
+        },
+        "pre": {
+            "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b": {
+                "nonce": "0x00",
+                "balance": "0x0de0b6b3a7640000",
+                "code": "0x",
+                "storage": {}
+            },
+            "0x0000000000000000000000000000000000001000": {
+                "nonce": "0x01",
+                "balance": "0x00",
+                "code": "0xef0001010004020001000a0400100000800003d260006000d3d26000f310101010101010101010101010101010",
+                "storage": {}
+            },
+            "0x0000000000000000000000000000000000001100": {
+                "nonce": "0x01",
+                "balance": "0x00",
+                "code": "0xef00010100040200010028040000000080000360006000730000000000000000000000000000000000001000fb6020f76110005561201560015500",
+                "storage": {}
+            }
+        },
+        "transaction": {
+            "nonce": "0x00",
+            "gasPrice": "0x0a",
+            "gasLimit": [
+                "0x1e8480"
+            ],
+            "to": "0x0000000000000000000000000000000000001100",
+            "value": [
+                "0x00"
+            ],
+            "data": [
+                "0x"
+            ],
+            "sender": "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b",
+            "secretKey": "0x45a915e4d060149eb4365960e6a7a45f334393093061116b197e3240065ff2d8"
+        },
+        "post": {
+            "Prague": [
+                {
+                    "hash": "0x7103a66adc8cfdb1bcb495ff4697fd52c43e403c8469cf96326b964e43a03422",
+                    "logs": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
+                    "txbytes": "0xf860800a831e8480940000000000000000000000000000000000001100808025a0b3afc79e7eb6744553c987dfa51e04eec7c6d695e6f730badd8150d43c6611fda056587ba537d9e4baf5e9fdb797ed4d7cf237c28c5d368b92f2f3681334585fec",
+                    "indexes": {
+                        "data": 0,
+                        "gas": 0,
+                        "value": 0
+                    }
+                }
+            ]
+        },
+        "_info": {
+            "hash": "0xb3fdef4eef004e4bed790c45d71f558fe28de06654f85353c30520b69d415aa8",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evmone-t8n 0.12.0-dev+commit.85a89e56",
+            "description": "Test function documentation:\n\n    Much simpler than returndatacopy, no memory or boosted call.  Returner is called\n    and results are stored in storage slot, which is asserted for expected values.\n    The parameters offset and return data are configured to test boundary conditions.",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.0.4/tests/prague/eip7692_eof_v1/eip7069_extcall/test_returndataload.py#L185",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7069.md",
+            "reference-spec-version": "1795943aeacc86131d5ab6bb3d65824b3b1d4cad"
+        }
+    },
+    "tests/prague/eip7692_eof_v1/eip7069_extcall/test_returndataload.py::test_returndataload_handling[fork_CancunEIP7692-state_test-offset_20-len_20-EXTCALL]": {
+        "env": {
+            "currentCoinbase": "0x2adc25665018aa1fe0e6bc666dac8fc2697ff9ba",
+            "currentGasLimit": "0x016345785d8a0000",
+            "currentNumber": "0x01",
+            "currentTimestamp": "0x03e8",
+            "currentRandom": "0x0000000000000000000000000000000000000000000000000000000000000000",
+            "currentDifficulty": "0x00",
+            "currentBaseFee": "0x07",
+            "currentExcessBlobGas": "0x00"
+        },
+        "pre": {
+            "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b": {
+                "nonce": "0x00",
+                "balance": "0x0de0b6b3a7640000",
+                "code": "0x",
+                "storage": {}
+            },
+            "0x0000000000000000000000000000000000001000": {
+                "nonce": "0x01",
+                "balance": "0x00",
+                "code": "0xef0001010004020001000a0400200000800003d260006000d3d26000f32020202020202020202020202020202020202020202020202020202020202020",
+                "storage": {}
+            },
+            "0x0000000000000000000000000000000000001100": {
+                "nonce": "0x01",
+                "balance": "0x00",
+                "code": "0xef0001010004020001002a0400000000800004600060006000730000000000000000000000000000000000001000f86020f76110005561201560015500",
+                "storage": {}
+            }
+        },
+        "transaction": {
+            "nonce": "0x00",
+            "gasPrice": "0x0a",
+            "gasLimit": [
+                "0x1e8480"
+            ],
+            "to": "0x0000000000000000000000000000000000001100",
+            "value": [
+                "0x00"
+            ],
+            "data": [
+                "0x"
+            ],
+            "sender": "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b",
+            "secretKey": "0x45a915e4d060149eb4365960e6a7a45f334393093061116b197e3240065ff2d8"
+        },
+        "post": {
+            "Prague": [
+                {
+                    "hash": "0xb468b3922830690a2cb5be02e1dd45b341a0ee9ecc83ce02fd796423f0845217",
+                    "logs": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
+                    "txbytes": "0xf860800a831e8480940000000000000000000000000000000000001100808025a0b3afc79e7eb6744553c987dfa51e04eec7c6d695e6f730badd8150d43c6611fda056587ba537d9e4baf5e9fdb797ed4d7cf237c28c5d368b92f2f3681334585fec",
+                    "indexes": {
+                        "data": 0,
+                        "gas": 0,
+                        "value": 0
+                    }
+                }
+            ]
+        },
+        "_info": {
+            "hash": "0x236014cf364c19ecdfd01687f4d4d636f04c60bde49a25c7fc263ab739132d4a",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evmone-t8n 0.12.0-dev+commit.85a89e56",
+            "description": "Test function documentation:\n\n    Much simpler than returndatacopy, no memory or boosted call.  Returner is called\n    and results are stored in storage slot, which is asserted for expected values.\n    The parameters offset and return data are configured to test boundary conditions.",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.0.4/tests/prague/eip7692_eof_v1/eip7069_extcall/test_returndataload.py#L185",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7069.md",
+            "reference-spec-version": "1795943aeacc86131d5ab6bb3d65824b3b1d4cad"
+        }
+    },
+    "tests/prague/eip7692_eof_v1/eip7069_extcall/test_returndataload.py::test_returndataload_handling[fork_CancunEIP7692-state_test-offset_20-len_20-EXTDELEGATECALL]": {
+        "env": {
+            "currentCoinbase": "0x2adc25665018aa1fe0e6bc666dac8fc2697ff9ba",
+            "currentGasLimit": "0x016345785d8a0000",
+            "currentNumber": "0x01",
+            "currentTimestamp": "0x03e8",
+            "currentRandom": "0x0000000000000000000000000000000000000000000000000000000000000000",
+            "currentDifficulty": "0x00",
+            "currentBaseFee": "0x07",
+            "currentExcessBlobGas": "0x00"
+        },
+        "pre": {
+            "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b": {
+                "nonce": "0x00",
+                "balance": "0x0de0b6b3a7640000",
+                "code": "0x",
+                "storage": {}
+            },
+            "0x0000000000000000000000000000000000001000": {
+                "nonce": "0x01",
+                "balance": "0x00",
+                "code": "0xef0001010004020001000a0400200000800003d260006000d3d26000f32020202020202020202020202020202020202020202020202020202020202020",
+                "storage": {}
+            },
+            "0x0000000000000000000000000000000000001100": {
+                "nonce": "0x01",
+                "balance": "0x00",
+                "code": "0xef00010100040200010028040000000080000360006000730000000000000000000000000000000000001000f96020f76110005561201560015500",
+                "storage": {}
+            }
+        },
+        "transaction": {
+            "nonce": "0x00",
+            "gasPrice": "0x0a",
+            "gasLimit": [
+                "0x1e8480"
+            ],
+            "to": "0x0000000000000000000000000000000000001100",
+            "value": [
+                "0x00"
+            ],
+            "data": [
+                "0x"
+            ],
+            "sender": "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b",
+            "secretKey": "0x45a915e4d060149eb4365960e6a7a45f334393093061116b197e3240065ff2d8"
+        },
+        "post": {
+            "Prague": [
+                {
+                    "hash": "0x688692c806730b80e5bd80f9546ce8ff1881f607eee0de47f18bf8af6a52ad5e",
+                    "logs": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
+                    "txbytes": "0xf860800a831e8480940000000000000000000000000000000000001100808025a0b3afc79e7eb6744553c987dfa51e04eec7c6d695e6f730badd8150d43c6611fda056587ba537d9e4baf5e9fdb797ed4d7cf237c28c5d368b92f2f3681334585fec",
+                    "indexes": {
+                        "data": 0,
+                        "gas": 0,
+                        "value": 0
+                    }
+                }
+            ]
+        },
+        "_info": {
+            "hash": "0x28710627f119cc361cfd5b2e58ebc733e8e209e309301ffca9fa7703b9159273",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evmone-t8n 0.12.0-dev+commit.85a89e56",
+            "description": "Test function documentation:\n\n    Much simpler than returndatacopy, no memory or boosted call.  Returner is called\n    and results are stored in storage slot, which is asserted for expected values.\n    The parameters offset and return data are configured to test boundary conditions.",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.0.4/tests/prague/eip7692_eof_v1/eip7069_extcall/test_returndataload.py#L185",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7069.md",
+            "reference-spec-version": "1795943aeacc86131d5ab6bb3d65824b3b1d4cad"
+        }
+    },
+    "tests/prague/eip7692_eof_v1/eip7069_extcall/test_returndataload.py::test_returndataload_handling[fork_CancunEIP7692-state_test-offset_20-len_20-EXTSTATICCALL]": {
+        "env": {
+            "currentCoinbase": "0x2adc25665018aa1fe0e6bc666dac8fc2697ff9ba",
+            "currentGasLimit": "0x016345785d8a0000",
+            "currentNumber": "0x01",
+            "currentTimestamp": "0x03e8",
+            "currentRandom": "0x0000000000000000000000000000000000000000000000000000000000000000",
+            "currentDifficulty": "0x00",
+            "currentBaseFee": "0x07",
+            "currentExcessBlobGas": "0x00"
+        },
+        "pre": {
+            "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b": {
+                "nonce": "0x00",
+                "balance": "0x0de0b6b3a7640000",
+                "code": "0x",
+                "storage": {}
+            },
+            "0x0000000000000000000000000000000000001000": {
+                "nonce": "0x01",
+                "balance": "0x00",
+                "code": "0xef0001010004020001000a0400200000800003d260006000d3d26000f32020202020202020202020202020202020202020202020202020202020202020",
+                "storage": {}
+            },
+            "0x0000000000000000000000000000000000001100": {
+                "nonce": "0x01",
+                "balance": "0x00",
+                "code": "0xef00010100040200010028040000000080000360006000730000000000000000000000000000000000001000fb6020f76110005561201560015500",
+                "storage": {}
+            }
+        },
+        "transaction": {
+            "nonce": "0x00",
+            "gasPrice": "0x0a",
+            "gasLimit": [
+                "0x1e8480"
+            ],
+            "to": "0x0000000000000000000000000000000000001100",
+            "value": [
+                "0x00"
+            ],
+            "data": [
+                "0x"
+            ],
+            "sender": "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b",
+            "secretKey": "0x45a915e4d060149eb4365960e6a7a45f334393093061116b197e3240065ff2d8"
+        },
+        "post": {
+            "Prague": [
+                {
+                    "hash": "0x4143eed6d906b6c52b458d5184f19a7aa4ba9e8647082a5fa62802470f8e9aa2",
+                    "logs": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
+                    "txbytes": "0xf860800a831e8480940000000000000000000000000000000000001100808025a0b3afc79e7eb6744553c987dfa51e04eec7c6d695e6f730badd8150d43c6611fda056587ba537d9e4baf5e9fdb797ed4d7cf237c28c5d368b92f2f3681334585fec",
+                    "indexes": {
+                        "data": 0,
+                        "gas": 0,
+                        "value": 0
+                    }
+                }
+            ]
+        },
+        "_info": {
+            "hash": "0x596cc0d2c496e720f897ce79849afe88028e921229b28b3d15cc9e7cc0879b4a",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evmone-t8n 0.12.0-dev+commit.85a89e56",
+            "description": "Test function documentation:\n\n    Much simpler than returndatacopy, no memory or boosted call.  Returner is called\n    and results are stored in storage slot, which is asserted for expected values.\n    The parameters offset and return data are configured to test boundary conditions.",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.0.4/tests/prague/eip7692_eof_v1/eip7069_extcall/test_returndataload.py#L185",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7069.md",
+            "reference-spec-version": "1795943aeacc86131d5ab6bb3d65824b3b1d4cad"
+        }
+    },
+    "tests/prague/eip7692_eof_v1/eip7069_extcall/test_returndataload.py::test_returndataload_handling[fork_CancunEIP7692-state_test-offset_20-len_30-EXTCALL]": {
+        "env": {
+            "currentCoinbase": "0x2adc25665018aa1fe0e6bc666dac8fc2697ff9ba",
+            "currentGasLimit": "0x016345785d8a0000",
+            "currentNumber": "0x01",
+            "currentTimestamp": "0x03e8",
+            "currentRandom": "0x0000000000000000000000000000000000000000000000000000000000000000",
+            "currentDifficulty": "0x00",
+            "currentBaseFee": "0x07",
+            "currentExcessBlobGas": "0x00"
+        },
+        "pre": {
+            "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b": {
+                "nonce": "0x00",
+                "balance": "0x0de0b6b3a7640000",
+                "code": "0x",
+                "storage": {}
+            },
+            "0x0000000000000000000000000000000000001000": {
+                "nonce": "0x01",
+                "balance": "0x00",
+                "code": "0xef0001010004020001000a0400300000800003d260006000d3d26000f3303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030",
+                "storage": {}
+            },
+            "0x0000000000000000000000000000000000001100": {
+                "nonce": "0x01",
+                "balance": "0x00",
+                "code": "0xef0001010004020001002a0400000000800004600060006000730000000000000000000000000000000000001000f86020f76110005561201560015500",
+                "storage": {}
+            }
+        },
+        "transaction": {
+            "nonce": "0x00",
+            "gasPrice": "0x0a",
+            "gasLimit": [
+                "0x1e8480"
+            ],
+            "to": "0x0000000000000000000000000000000000001100",
+            "value": [
+                "0x00"
+            ],
+            "data": [
+                "0x"
+            ],
+            "sender": "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b",
+            "secretKey": "0x45a915e4d060149eb4365960e6a7a45f334393093061116b197e3240065ff2d8"
+        },
+        "post": {
+            "Prague": [
+                {
+                    "hash": "0xc827eb4893dd5ee9c9b8a28812a35c4bf0da4f12fda188375c2b9542c375a01d",
+                    "logs": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
+                    "txbytes": "0xf860800a831e8480940000000000000000000000000000000000001100808025a0b3afc79e7eb6744553c987dfa51e04eec7c6d695e6f730badd8150d43c6611fda056587ba537d9e4baf5e9fdb797ed4d7cf237c28c5d368b92f2f3681334585fec",
+                    "indexes": {
+                        "data": 0,
+                        "gas": 0,
+                        "value": 0
+                    }
+                }
+            ]
+        },
+        "_info": {
+            "hash": "0xf2a39e3a046bfa7d6872d084bb6c30802c38f3e4eff92bea8ca353489c218230",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evmone-t8n 0.12.0-dev+commit.85a89e56",
+            "description": "Test function documentation:\n\n    Much simpler than returndatacopy, no memory or boosted call.  Returner is called\n    and results are stored in storage slot, which is asserted for expected values.\n    The parameters offset and return data are configured to test boundary conditions.",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.0.4/tests/prague/eip7692_eof_v1/eip7069_extcall/test_returndataload.py#L185",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7069.md",
+            "reference-spec-version": "1795943aeacc86131d5ab6bb3d65824b3b1d4cad"
+        }
+    },
+    "tests/prague/eip7692_eof_v1/eip7069_extcall/test_returndataload.py::test_returndataload_handling[fork_CancunEIP7692-state_test-offset_20-len_30-EXTDELEGATECALL]": {
+        "env": {
+            "currentCoinbase": "0x2adc25665018aa1fe0e6bc666dac8fc2697ff9ba",
+            "currentGasLimit": "0x016345785d8a0000",
+            "currentNumber": "0x01",
+            "currentTimestamp": "0x03e8",
+            "currentRandom": "0x0000000000000000000000000000000000000000000000000000000000000000",
+            "currentDifficulty": "0x00",
+            "currentBaseFee": "0x07",
+            "currentExcessBlobGas": "0x00"
+        },
+        "pre": {
+            "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b": {
+                "nonce": "0x00",
+                "balance": "0x0de0b6b3a7640000",
+                "code": "0x",
+                "storage": {}
+            },
+            "0x0000000000000000000000000000000000001000": {
+                "nonce": "0x01",
+                "balance": "0x00",
+                "code": "0xef0001010004020001000a0400300000800003d260006000d3d26000f3303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030",
+                "storage": {}
+            },
+            "0x0000000000000000000000000000000000001100": {
+                "nonce": "0x01",
+                "balance": "0x00",
+                "code": "0xef00010100040200010028040000000080000360006000730000000000000000000000000000000000001000f96020f76110005561201560015500",
+                "storage": {}
+            }
+        },
+        "transaction": {
+            "nonce": "0x00",
+            "gasPrice": "0x0a",
+            "gasLimit": [
+                "0x1e8480"
+            ],
+            "to": "0x0000000000000000000000000000000000001100",
+            "value": [
+                "0x00"
+            ],
+            "data": [
+                "0x"
+            ],
+            "sender": "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b",
+            "secretKey": "0x45a915e4d060149eb4365960e6a7a45f334393093061116b197e3240065ff2d8"
+        },
+        "post": {
+            "Prague": [
+                {
+                    "hash": "0x84c76e193d7c2e8f6bc154e8a872744eaf9a856f960f52f3aa10f33aa521660a",
+                    "logs": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
+                    "txbytes": "0xf860800a831e8480940000000000000000000000000000000000001100808025a0b3afc79e7eb6744553c987dfa51e04eec7c6d695e6f730badd8150d43c6611fda056587ba537d9e4baf5e9fdb797ed4d7cf237c28c5d368b92f2f3681334585fec",
+                    "indexes": {
+                        "data": 0,
+                        "gas": 0,
+                        "value": 0
+                    }
+                }
+            ]
+        },
+        "_info": {
+            "hash": "0xbdcf21b20be8dafd951a7567d272857469a887867fa21804e9b1f657f1fc5812",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evmone-t8n 0.12.0-dev+commit.85a89e56",
+            "description": "Test function documentation:\n\n    Much simpler than returndatacopy, no memory or boosted call.  Returner is called\n    and results are stored in storage slot, which is asserted for expected values.\n    The parameters offset and return data are configured to test boundary conditions.",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.0.4/tests/prague/eip7692_eof_v1/eip7069_extcall/test_returndataload.py#L185",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7069.md",
+            "reference-spec-version": "1795943aeacc86131d5ab6bb3d65824b3b1d4cad"
+        }
+    },
+    "tests/prague/eip7692_eof_v1/eip7069_extcall/test_returndataload.py::test_returndataload_handling[fork_CancunEIP7692-state_test-offset_20-len_30-EXTSTATICCALL]": {
+        "env": {
+            "currentCoinbase": "0x2adc25665018aa1fe0e6bc666dac8fc2697ff9ba",
+            "currentGasLimit": "0x016345785d8a0000",
+            "currentNumber": "0x01",
+            "currentTimestamp": "0x03e8",
+            "currentRandom": "0x0000000000000000000000000000000000000000000000000000000000000000",
+            "currentDifficulty": "0x00",
+            "currentBaseFee": "0x07",
+            "currentExcessBlobGas": "0x00"
+        },
+        "pre": {
+            "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b": {
+                "nonce": "0x00",
+                "balance": "0x0de0b6b3a7640000",
+                "code": "0x",
+                "storage": {}
+            },
+            "0x0000000000000000000000000000000000001000": {
+                "nonce": "0x01",
+                "balance": "0x00",
+                "code": "0xef0001010004020001000a0400300000800003d260006000d3d26000f3303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030",
+                "storage": {}
+            },
+            "0x0000000000000000000000000000000000001100": {
+                "nonce": "0x01",
+                "balance": "0x00",
+                "code": "0xef00010100040200010028040000000080000360006000730000000000000000000000000000000000001000fb6020f76110005561201560015500",
+                "storage": {}
+            }
+        },
+        "transaction": {
+            "nonce": "0x00",
+            "gasPrice": "0x0a",
+            "gasLimit": [
+                "0x1e8480"
+            ],
+            "to": "0x0000000000000000000000000000000000001100",
+            "value": [
+                "0x00"
+            ],
+            "data": [
+                "0x"
+            ],
+            "sender": "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b",
+            "secretKey": "0x45a915e4d060149eb4365960e6a7a45f334393093061116b197e3240065ff2d8"
+        },
+        "post": {
+            "Prague": [
+                {
+                    "hash": "0xb903d1b4380eedb53ee9642bea8dba5b3ffed1b5dd2d8bcea23d49b4ed6fafaa",
+                    "logs": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
+                    "txbytes": "0xf860800a831e8480940000000000000000000000000000000000001100808025a0b3afc79e7eb6744553c987dfa51e04eec7c6d695e6f730badd8150d43c6611fda056587ba537d9e4baf5e9fdb797ed4d7cf237c28c5d368b92f2f3681334585fec",
+                    "indexes": {
+                        "data": 0,
+                        "gas": 0,
+                        "value": 0
+                    }
+                }
+            ]
+        },
+        "_info": {
+            "hash": "0xbaa54865af1cc15056313f327c3527b3023bf5b4c66e7b43037c0bf1cbf0010d",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evmone-t8n 0.12.0-dev+commit.85a89e56",
+            "description": "Test function documentation:\n\n    Much simpler than returndatacopy, no memory or boosted call.  Returner is called\n    and results are stored in storage slot, which is asserted for expected values.\n    The parameters offset and return data are configured to test boundary conditions.",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.0.4/tests/prague/eip7692_eof_v1/eip7069_extcall/test_returndataload.py#L185",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7069.md",
+            "reference-spec-version": "1795943aeacc86131d5ab6bb3d65824b3b1d4cad"
+        }
+    },
+    "tests/prague/eip7692_eof_v1/eip7069_extcall/test_returndataload.py::test_returndataload_handling[fork_CancunEIP7692-state_test-offset_30-len_0-EXTCALL]": {
+        "env": {
+            "currentCoinbase": "0x2adc25665018aa1fe0e6bc666dac8fc2697ff9ba",
+            "currentGasLimit": "0x016345785d8a0000",
+            "currentNumber": "0x01",
+            "currentTimestamp": "0x03e8",
+            "currentRandom": "0x0000000000000000000000000000000000000000000000000000000000000000",
+            "currentDifficulty": "0x00",
+            "currentBaseFee": "0x07",
+            "currentExcessBlobGas": "0x00"
+        },
+        "pre": {
+            "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b": {
+                "nonce": "0x00",
+                "balance": "0x0de0b6b3a7640000",
+                "code": "0x",
+                "storage": {}
+            },
+            "0x0000000000000000000000000000000000001000": {
+                "nonce": "0x01",
+                "balance": "0x00",
+                "code": "0xef0001010004020001000a0400000000800003d260006000d3d26000f3",
+                "storage": {}
+            },
+            "0x0000000000000000000000000000000000001100": {
+                "nonce": "0x01",
+                "balance": "0x00",
+                "code": "0xef0001010004020001002a0400000000800004600060006000730000000000000000000000000000000000001000f86030f76110005561201560015500",
+                "storage": {}
+            }
+        },
+        "transaction": {
+            "nonce": "0x00",
+            "gasPrice": "0x0a",
+            "gasLimit": [
+                "0x1e8480"
+            ],
+            "to": "0x0000000000000000000000000000000000001100",
+            "value": [
+                "0x00"
+            ],
+            "data": [
+                "0x"
+            ],
+            "sender": "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b",
+            "secretKey": "0x45a915e4d060149eb4365960e6a7a45f334393093061116b197e3240065ff2d8"
+        },
+        "post": {
+            "Prague": [
+                {
+                    "hash": "0x0f41f124a06581ee4eb498f326bc238b7d6d76ab7c98544397e7338b81257cc4",
+                    "logs": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
+                    "txbytes": "0xf860800a831e8480940000000000000000000000000000000000001100808025a0b3afc79e7eb6744553c987dfa51e04eec7c6d695e6f730badd8150d43c6611fda056587ba537d9e4baf5e9fdb797ed4d7cf237c28c5d368b92f2f3681334585fec",
+                    "indexes": {
+                        "data": 0,
+                        "gas": 0,
+                        "value": 0
+                    }
+                }
+            ]
+        },
+        "_info": {
+            "hash": "0x19c03df6cd6386d375d3c4c0db401a73ab793a0648a0638172871b0750912ea9",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evmone-t8n 0.12.0-dev+commit.85a89e56",
+            "description": "Test function documentation:\n\n    Much simpler than returndatacopy, no memory or boosted call.  Returner is called\n    and results are stored in storage slot, which is asserted for expected values.\n    The parameters offset and return data are configured to test boundary conditions.",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.0.4/tests/prague/eip7692_eof_v1/eip7069_extcall/test_returndataload.py#L185",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7069.md",
+            "reference-spec-version": "1795943aeacc86131d5ab6bb3d65824b3b1d4cad"
+        }
+    },
+    "tests/prague/eip7692_eof_v1/eip7069_extcall/test_returndataload.py::test_returndataload_handling[fork_CancunEIP7692-state_test-offset_30-len_0-EXTDELEGATECALL]": {
+        "env": {
+            "currentCoinbase": "0x2adc25665018aa1fe0e6bc666dac8fc2697ff9ba",
+            "currentGasLimit": "0x016345785d8a0000",
+            "currentNumber": "0x01",
+            "currentTimestamp": "0x03e8",
+            "currentRandom": "0x0000000000000000000000000000000000000000000000000000000000000000",
+            "currentDifficulty": "0x00",
+            "currentBaseFee": "0x07",
+            "currentExcessBlobGas": "0x00"
+        },
+        "pre": {
+            "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b": {
+                "nonce": "0x00",
+                "balance": "0x0de0b6b3a7640000",
+                "code": "0x",
+                "storage": {}
+            },
+            "0x0000000000000000000000000000000000001000": {
+                "nonce": "0x01",
+                "balance": "0x00",
+                "code": "0xef0001010004020001000a0400000000800003d260006000d3d26000f3",
+                "storage": {}
+            },
+            "0x0000000000000000000000000000000000001100": {
+                "nonce": "0x01",
+                "balance": "0x00",
+                "code": "0xef00010100040200010028040000000080000360006000730000000000000000000000000000000000001000f96030f76110005561201560015500",
+                "storage": {}
+            }
+        },
+        "transaction": {
+            "nonce": "0x00",
+            "gasPrice": "0x0a",
+            "gasLimit": [
+                "0x1e8480"
+            ],
+            "to": "0x0000000000000000000000000000000000001100",
+            "value": [
+                "0x00"
+            ],
+            "data": [
+                "0x"
+            ],
+            "sender": "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b",
+            "secretKey": "0x45a915e4d060149eb4365960e6a7a45f334393093061116b197e3240065ff2d8"
+        },
+        "post": {
+            "Prague": [
+                {
+                    "hash": "0x63fb122b6824c0cc07d49cfd3ad5b2858a9bf08178401a5d6fd11fc6e435926c",
+                    "logs": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
+                    "txbytes": "0xf860800a831e8480940000000000000000000000000000000000001100808025a0b3afc79e7eb6744553c987dfa51e04eec7c6d695e6f730badd8150d43c6611fda056587ba537d9e4baf5e9fdb797ed4d7cf237c28c5d368b92f2f3681334585fec",
+                    "indexes": {
+                        "data": 0,
+                        "gas": 0,
+                        "value": 0
+                    }
+                }
+            ]
+        },
+        "_info": {
+            "hash": "0xf49f98062fcaced79e27b34879c2a8373c26dd5f70aff9a1dec87e331c1a1a51",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evmone-t8n 0.12.0-dev+commit.85a89e56",
+            "description": "Test function documentation:\n\n    Much simpler than returndatacopy, no memory or boosted call.  Returner is called\n    and results are stored in storage slot, which is asserted for expected values.\n    The parameters offset and return data are configured to test boundary conditions.",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.0.4/tests/prague/eip7692_eof_v1/eip7069_extcall/test_returndataload.py#L185",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7069.md",
+            "reference-spec-version": "1795943aeacc86131d5ab6bb3d65824b3b1d4cad"
+        }
+    },
+    "tests/prague/eip7692_eof_v1/eip7069_extcall/test_returndataload.py::test_returndataload_handling[fork_CancunEIP7692-state_test-offset_30-len_0-EXTSTATICCALL]": {
+        "env": {
+            "currentCoinbase": "0x2adc25665018aa1fe0e6bc666dac8fc2697ff9ba",
+            "currentGasLimit": "0x016345785d8a0000",
+            "currentNumber": "0x01",
+            "currentTimestamp": "0x03e8",
+            "currentRandom": "0x0000000000000000000000000000000000000000000000000000000000000000",
+            "currentDifficulty": "0x00",
+            "currentBaseFee": "0x07",
+            "currentExcessBlobGas": "0x00"
+        },
+        "pre": {
+            "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b": {
+                "nonce": "0x00",
+                "balance": "0x0de0b6b3a7640000",
+                "code": "0x",
+                "storage": {}
+            },
+            "0x0000000000000000000000000000000000001000": {
+                "nonce": "0x01",
+                "balance": "0x00",
+                "code": "0xef0001010004020001000a0400000000800003d260006000d3d26000f3",
+                "storage": {}
+            },
+            "0x0000000000000000000000000000000000001100": {
+                "nonce": "0x01",
+                "balance": "0x00",
+                "code": "0xef00010100040200010028040000000080000360006000730000000000000000000000000000000000001000fb6030f76110005561201560015500",
+                "storage": {}
+            }
+        },
+        "transaction": {
+            "nonce": "0x00",
+            "gasPrice": "0x0a",
+            "gasLimit": [
+                "0x1e8480"
+            ],
+            "to": "0x0000000000000000000000000000000000001100",
+            "value": [
+                "0x00"
+            ],
+            "data": [
+                "0x"
+            ],
+            "sender": "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b",
+            "secretKey": "0x45a915e4d060149eb4365960e6a7a45f334393093061116b197e3240065ff2d8"
+        },
+        "post": {
+            "Prague": [
+                {
+                    "hash": "0x6697652d03819ed8c21cb2e94e0d7c42a617a7a36738c00fc44cb72836b7e579",
+                    "logs": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
+                    "txbytes": "0xf860800a831e8480940000000000000000000000000000000000001100808025a0b3afc79e7eb6744553c987dfa51e04eec7c6d695e6f730badd8150d43c6611fda056587ba537d9e4baf5e9fdb797ed4d7cf237c28c5d368b92f2f3681334585fec",
+                    "indexes": {
+                        "data": 0,
+                        "gas": 0,
+                        "value": 0
+                    }
+                }
+            ]
+        },
+        "_info": {
+            "hash": "0x59fed93a5df0a7c2f021f2ead43e4fb3d8e9c5fd5c56a642b878bdf34bf19b31",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evmone-t8n 0.12.0-dev+commit.85a89e56",
+            "description": "Test function documentation:\n\n    Much simpler than returndatacopy, no memory or boosted call.  Returner is called\n    and results are stored in storage slot, which is asserted for expected values.\n    The parameters offset and return data are configured to test boundary conditions.",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.0.4/tests/prague/eip7692_eof_v1/eip7069_extcall/test_returndataload.py#L185",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7069.md",
+            "reference-spec-version": "1795943aeacc86131d5ab6bb3d65824b3b1d4cad"
+        }
+    },
+    "tests/prague/eip7692_eof_v1/eip7069_extcall/test_returndataload.py::test_returndataload_handling[fork_CancunEIP7692-state_test-offset_30-len_10-EXTCALL]": {
+        "env": {
+            "currentCoinbase": "0x2adc25665018aa1fe0e6bc666dac8fc2697ff9ba",
+            "currentGasLimit": "0x016345785d8a0000",
+            "currentNumber": "0x01",
+            "currentTimestamp": "0x03e8",
+            "currentRandom": "0x0000000000000000000000000000000000000000000000000000000000000000",
+            "currentDifficulty": "0x00",
+            "currentBaseFee": "0x07",
+            "currentExcessBlobGas": "0x00"
+        },
+        "pre": {
+            "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b": {
+                "nonce": "0x00",
+                "balance": "0x0de0b6b3a7640000",
+                "code": "0x",
+                "storage": {}
+            },
+            "0x0000000000000000000000000000000000001000": {
+                "nonce": "0x01",
+                "balance": "0x00",
+                "code": "0xef0001010004020001000a0400100000800003d260006000d3d26000f310101010101010101010101010101010",
+                "storage": {}
+            },
+            "0x0000000000000000000000000000000000001100": {
+                "nonce": "0x01",
+                "balance": "0x00",
+                "code": "0xef0001010004020001002a0400000000800004600060006000730000000000000000000000000000000000001000f86030f76110005561201560015500",
+                "storage": {}
+            }
+        },
+        "transaction": {
+            "nonce": "0x00",
+            "gasPrice": "0x0a",
+            "gasLimit": [
+                "0x1e8480"
+            ],
+            "to": "0x0000000000000000000000000000000000001100",
+            "value": [
+                "0x00"
+            ],
+            "data": [
+                "0x"
+            ],
+            "sender": "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b",
+            "secretKey": "0x45a915e4d060149eb4365960e6a7a45f334393093061116b197e3240065ff2d8"
+        },
+        "post": {
+            "Prague": [
+                {
+                    "hash": "0x45a2464fc2fcc25cd615292d59b70d8f403625748067060d256a616bc7bc396d",
+                    "logs": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
+                    "txbytes": "0xf860800a831e8480940000000000000000000000000000000000001100808025a0b3afc79e7eb6744553c987dfa51e04eec7c6d695e6f730badd8150d43c6611fda056587ba537d9e4baf5e9fdb797ed4d7cf237c28c5d368b92f2f3681334585fec",
+                    "indexes": {
+                        "data": 0,
+                        "gas": 0,
+                        "value": 0
+                    }
+                }
+            ]
+        },
+        "_info": {
+            "hash": "0x538b468744db0b3d91ff91a65134c3fc6da999ba6be7d96ba117df0d0f94a356",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evmone-t8n 0.12.0-dev+commit.85a89e56",
+            "description": "Test function documentation:\n\n    Much simpler than returndatacopy, no memory or boosted call.  Returner is called\n    and results are stored in storage slot, which is asserted for expected values.\n    The parameters offset and return data are configured to test boundary conditions.",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.0.4/tests/prague/eip7692_eof_v1/eip7069_extcall/test_returndataload.py#L185",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7069.md",
+            "reference-spec-version": "1795943aeacc86131d5ab6bb3d65824b3b1d4cad"
+        }
+    },
+    "tests/prague/eip7692_eof_v1/eip7069_extcall/test_returndataload.py::test_returndataload_handling[fork_CancunEIP7692-state_test-offset_30-len_10-EXTDELEGATECALL]": {
+        "env": {
+            "currentCoinbase": "0x2adc25665018aa1fe0e6bc666dac8fc2697ff9ba",
+            "currentGasLimit": "0x016345785d8a0000",
+            "currentNumber": "0x01",
+            "currentTimestamp": "0x03e8",
+            "currentRandom": "0x0000000000000000000000000000000000000000000000000000000000000000",
+            "currentDifficulty": "0x00",
+            "currentBaseFee": "0x07",
+            "currentExcessBlobGas": "0x00"
+        },
+        "pre": {
+            "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b": {
+                "nonce": "0x00",
+                "balance": "0x0de0b6b3a7640000",
+                "code": "0x",
+                "storage": {}
+            },
+            "0x0000000000000000000000000000000000001000": {
+                "nonce": "0x01",
+                "balance": "0x00",
+                "code": "0xef0001010004020001000a0400100000800003d260006000d3d26000f310101010101010101010101010101010",
+                "storage": {}
+            },
+            "0x0000000000000000000000000000000000001100": {
+                "nonce": "0x01",
+                "balance": "0x00",
+                "code": "0xef00010100040200010028040000000080000360006000730000000000000000000000000000000000001000f96030f76110005561201560015500",
+                "storage": {}
+            }
+        },
+        "transaction": {
+            "nonce": "0x00",
+            "gasPrice": "0x0a",
+            "gasLimit": [
+                "0x1e8480"
+            ],
+            "to": "0x0000000000000000000000000000000000001100",
+            "value": [
+                "0x00"
+            ],
+            "data": [
+                "0x"
+            ],
+            "sender": "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b",
+            "secretKey": "0x45a915e4d060149eb4365960e6a7a45f334393093061116b197e3240065ff2d8"
+        },
+        "post": {
+            "Prague": [
+                {
+                    "hash": "0xd21db0d68825a707fc83ce0192d51b83aac69e61292520a9e365dde0ca706ea5",
+                    "logs": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
+                    "txbytes": "0xf860800a831e8480940000000000000000000000000000000000001100808025a0b3afc79e7eb6744553c987dfa51e04eec7c6d695e6f730badd8150d43c6611fda056587ba537d9e4baf5e9fdb797ed4d7cf237c28c5d368b92f2f3681334585fec",
+                    "indexes": {
+                        "data": 0,
+                        "gas": 0,
+                        "value": 0
+                    }
+                }
+            ]
+        },
+        "_info": {
+            "hash": "0xdc8387b6c5811cd85e615d984e253474938e14f617e434fcdb0ae94088072990",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evmone-t8n 0.12.0-dev+commit.85a89e56",
+            "description": "Test function documentation:\n\n    Much simpler than returndatacopy, no memory or boosted call.  Returner is called\n    and results are stored in storage slot, which is asserted for expected values.\n    The parameters offset and return data are configured to test boundary conditions.",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.0.4/tests/prague/eip7692_eof_v1/eip7069_extcall/test_returndataload.py#L185",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7069.md",
+            "reference-spec-version": "1795943aeacc86131d5ab6bb3d65824b3b1d4cad"
+        }
+    },
+    "tests/prague/eip7692_eof_v1/eip7069_extcall/test_returndataload.py::test_returndataload_handling[fork_CancunEIP7692-state_test-offset_30-len_10-EXTSTATICCALL]": {
+        "env": {
+            "currentCoinbase": "0x2adc25665018aa1fe0e6bc666dac8fc2697ff9ba",
+            "currentGasLimit": "0x016345785d8a0000",
+            "currentNumber": "0x01",
+            "currentTimestamp": "0x03e8",
+            "currentRandom": "0x0000000000000000000000000000000000000000000000000000000000000000",
+            "currentDifficulty": "0x00",
+            "currentBaseFee": "0x07",
+            "currentExcessBlobGas": "0x00"
+        },
+        "pre": {
+            "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b": {
+                "nonce": "0x00",
+                "balance": "0x0de0b6b3a7640000",
+                "code": "0x",
+                "storage": {}
+            },
+            "0x0000000000000000000000000000000000001000": {
+                "nonce": "0x01",
+                "balance": "0x00",
+                "code": "0xef0001010004020001000a0400100000800003d260006000d3d26000f310101010101010101010101010101010",
+                "storage": {}
+            },
+            "0x0000000000000000000000000000000000001100": {
+                "nonce": "0x01",
+                "balance": "0x00",
+                "code": "0xef00010100040200010028040000000080000360006000730000000000000000000000000000000000001000fb6030f76110005561201560015500",
+                "storage": {}
+            }
+        },
+        "transaction": {
+            "nonce": "0x00",
+            "gasPrice": "0x0a",
+            "gasLimit": [
+                "0x1e8480"
+            ],
+            "to": "0x0000000000000000000000000000000000001100",
+            "value": [
+                "0x00"
+            ],
+            "data": [
+                "0x"
+            ],
+            "sender": "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b",
+            "secretKey": "0x45a915e4d060149eb4365960e6a7a45f334393093061116b197e3240065ff2d8"
+        },
+        "post": {
+            "Prague": [
+                {
+                    "hash": "0x7982ab44ff40f5fd741553a308bfb62bded9cae8492fc5ec1bf87842fa9b6bfe",
+                    "logs": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
+                    "txbytes": "0xf860800a831e8480940000000000000000000000000000000000001100808025a0b3afc79e7eb6744553c987dfa51e04eec7c6d695e6f730badd8150d43c6611fda056587ba537d9e4baf5e9fdb797ed4d7cf237c28c5d368b92f2f3681334585fec",
+                    "indexes": {
+                        "data": 0,
+                        "gas": 0,
+                        "value": 0
+                    }
+                }
+            ]
+        },
+        "_info": {
+            "hash": "0xa7586b190590b2aa3a2dd905fd5bd6da63674d8feec719a3aedab6102d06097d",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evmone-t8n 0.12.0-dev+commit.85a89e56",
+            "description": "Test function documentation:\n\n    Much simpler than returndatacopy, no memory or boosted call.  Returner is called\n    and results are stored in storage slot, which is asserted for expected values.\n    The parameters offset and return data are configured to test boundary conditions.",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.0.4/tests/prague/eip7692_eof_v1/eip7069_extcall/test_returndataload.py#L185",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7069.md",
+            "reference-spec-version": "1795943aeacc86131d5ab6bb3d65824b3b1d4cad"
+        }
+    },
+    "tests/prague/eip7692_eof_v1/eip7069_extcall/test_returndataload.py::test_returndataload_handling[fork_CancunEIP7692-state_test-offset_30-len_20-EXTCALL]": {
+        "env": {
+            "currentCoinbase": "0x2adc25665018aa1fe0e6bc666dac8fc2697ff9ba",
+            "currentGasLimit": "0x016345785d8a0000",
+            "currentNumber": "0x01",
+            "currentTimestamp": "0x03e8",
+            "currentRandom": "0x0000000000000000000000000000000000000000000000000000000000000000",
+            "currentDifficulty": "0x00",
+            "currentBaseFee": "0x07",
+            "currentExcessBlobGas": "0x00"
+        },
+        "pre": {
+            "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b": {
+                "nonce": "0x00",
+                "balance": "0x0de0b6b3a7640000",
+                "code": "0x",
+                "storage": {}
+            },
+            "0x0000000000000000000000000000000000001000": {
+                "nonce": "0x01",
+                "balance": "0x00",
+                "code": "0xef0001010004020001000a0400200000800003d260006000d3d26000f32020202020202020202020202020202020202020202020202020202020202020",
+                "storage": {}
+            },
+            "0x0000000000000000000000000000000000001100": {
+                "nonce": "0x01",
+                "balance": "0x00",
+                "code": "0xef0001010004020001002a0400000000800004600060006000730000000000000000000000000000000000001000f86030f76110005561201560015500",
+                "storage": {}
+            }
+        },
+        "transaction": {
+            "nonce": "0x00",
+            "gasPrice": "0x0a",
+            "gasLimit": [
+                "0x1e8480"
+            ],
+            "to": "0x0000000000000000000000000000000000001100",
+            "value": [
+                "0x00"
+            ],
+            "data": [
+                "0x"
+            ],
+            "sender": "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b",
+            "secretKey": "0x45a915e4d060149eb4365960e6a7a45f334393093061116b197e3240065ff2d8"
+        },
+        "post": {
+            "Prague": [
+                {
+                    "hash": "0xb59118963caaa58c19ac119de5a8fa0a210e35053893d866e5e4077de9dc343c",
+                    "logs": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
+                    "txbytes": "0xf860800a831e8480940000000000000000000000000000000000001100808025a0b3afc79e7eb6744553c987dfa51e04eec7c6d695e6f730badd8150d43c6611fda056587ba537d9e4baf5e9fdb797ed4d7cf237c28c5d368b92f2f3681334585fec",
+                    "indexes": {
+                        "data": 0,
+                        "gas": 0,
+                        "value": 0
+                    }
+                }
+            ]
+        },
+        "_info": {
+            "hash": "0x7fbabc9d2616bf46239656d71ef8a97b9e3d426010052b96cab28988e4e61e85",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evmone-t8n 0.12.0-dev+commit.85a89e56",
+            "description": "Test function documentation:\n\n    Much simpler than returndatacopy, no memory or boosted call.  Returner is called\n    and results are stored in storage slot, which is asserted for expected values.\n    The parameters offset and return data are configured to test boundary conditions.",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.0.4/tests/prague/eip7692_eof_v1/eip7069_extcall/test_returndataload.py#L185",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7069.md",
+            "reference-spec-version": "1795943aeacc86131d5ab6bb3d65824b3b1d4cad"
+        }
+    },
+    "tests/prague/eip7692_eof_v1/eip7069_extcall/test_returndataload.py::test_returndataload_handling[fork_CancunEIP7692-state_test-offset_30-len_20-EXTDELEGATECALL]": {
+        "env": {
+            "currentCoinbase": "0x2adc25665018aa1fe0e6bc666dac8fc2697ff9ba",
+            "currentGasLimit": "0x016345785d8a0000",
+            "currentNumber": "0x01",
+            "currentTimestamp": "0x03e8",
+            "currentRandom": "0x0000000000000000000000000000000000000000000000000000000000000000",
+            "currentDifficulty": "0x00",
+            "currentBaseFee": "0x07",
+            "currentExcessBlobGas": "0x00"
+        },
+        "pre": {
+            "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b": {
+                "nonce": "0x00",
+                "balance": "0x0de0b6b3a7640000",
+                "code": "0x",
+                "storage": {}
+            },
+            "0x0000000000000000000000000000000000001000": {
+                "nonce": "0x01",
+                "balance": "0x00",
+                "code": "0xef0001010004020001000a0400200000800003d260006000d3d26000f32020202020202020202020202020202020202020202020202020202020202020",
+                "storage": {}
+            },
+            "0x0000000000000000000000000000000000001100": {
+                "nonce": "0x01",
+                "balance": "0x00",
+                "code": "0xef00010100040200010028040000000080000360006000730000000000000000000000000000000000001000f96030f76110005561201560015500",
+                "storage": {}
+            }
+        },
+        "transaction": {
+            "nonce": "0x00",
+            "gasPrice": "0x0a",
+            "gasLimit": [
+                "0x1e8480"
+            ],
+            "to": "0x0000000000000000000000000000000000001100",
+            "value": [
+                "0x00"
+            ],
+            "data": [
+                "0x"
+            ],
+            "sender": "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b",
+            "secretKey": "0x45a915e4d060149eb4365960e6a7a45f334393093061116b197e3240065ff2d8"
+        },
+        "post": {
+            "Prague": [
+                {
+                    "hash": "0x3b2a0760d053fbc470d35041cc8f8038b4be4651cca604c608d44415ac1b11f3",
+                    "logs": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
+                    "txbytes": "0xf860800a831e8480940000000000000000000000000000000000001100808025a0b3afc79e7eb6744553c987dfa51e04eec7c6d695e6f730badd8150d43c6611fda056587ba537d9e4baf5e9fdb797ed4d7cf237c28c5d368b92f2f3681334585fec",
+                    "indexes": {
+                        "data": 0,
+                        "gas": 0,
+                        "value": 0
+                    }
+                }
+            ]
+        },
+        "_info": {
+            "hash": "0xcce008684a98ad93da22c0c3561a2400ff457f41711277d0575114ae3425a85f",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evmone-t8n 0.12.0-dev+commit.85a89e56",
+            "description": "Test function documentation:\n\n    Much simpler than returndatacopy, no memory or boosted call.  Returner is called\n    and results are stored in storage slot, which is asserted for expected values.\n    The parameters offset and return data are configured to test boundary conditions.",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.0.4/tests/prague/eip7692_eof_v1/eip7069_extcall/test_returndataload.py#L185",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7069.md",
+            "reference-spec-version": "1795943aeacc86131d5ab6bb3d65824b3b1d4cad"
+        }
+    },
+    "tests/prague/eip7692_eof_v1/eip7069_extcall/test_returndataload.py::test_returndataload_handling[fork_CancunEIP7692-state_test-offset_30-len_20-EXTSTATICCALL]": {
+        "env": {
+            "currentCoinbase": "0x2adc25665018aa1fe0e6bc666dac8fc2697ff9ba",
+            "currentGasLimit": "0x016345785d8a0000",
+            "currentNumber": "0x01",
+            "currentTimestamp": "0x03e8",
+            "currentRandom": "0x0000000000000000000000000000000000000000000000000000000000000000",
+            "currentDifficulty": "0x00",
+            "currentBaseFee": "0x07",
+            "currentExcessBlobGas": "0x00"
+        },
+        "pre": {
+            "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b": {
+                "nonce": "0x00",
+                "balance": "0x0de0b6b3a7640000",
+                "code": "0x",
+                "storage": {}
+            },
+            "0x0000000000000000000000000000000000001000": {
+                "nonce": "0x01",
+                "balance": "0x00",
+                "code": "0xef0001010004020001000a0400200000800003d260006000d3d26000f32020202020202020202020202020202020202020202020202020202020202020",
+                "storage": {}
+            },
+            "0x0000000000000000000000000000000000001100": {
+                "nonce": "0x01",
+                "balance": "0x00",
+                "code": "0xef00010100040200010028040000000080000360006000730000000000000000000000000000000000001000fb6030f76110005561201560015500",
+                "storage": {}
+            }
+        },
+        "transaction": {
+            "nonce": "0x00",
+            "gasPrice": "0x0a",
+            "gasLimit": [
+                "0x1e8480"
+            ],
+            "to": "0x0000000000000000000000000000000000001100",
+            "value": [
+                "0x00"
+            ],
+            "data": [
+                "0x"
+            ],
+            "sender": "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b",
+            "secretKey": "0x45a915e4d060149eb4365960e6a7a45f334393093061116b197e3240065ff2d8"
+        },
+        "post": {
+            "Prague": [
+                {
+                    "hash": "0x27c9927b03725a2687e5b30c53476f36f4516c2cf932a6d5fbf540fd06f732fb",
+                    "logs": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
+                    "txbytes": "0xf860800a831e8480940000000000000000000000000000000000001100808025a0b3afc79e7eb6744553c987dfa51e04eec7c6d695e6f730badd8150d43c6611fda056587ba537d9e4baf5e9fdb797ed4d7cf237c28c5d368b92f2f3681334585fec",
+                    "indexes": {
+                        "data": 0,
+                        "gas": 0,
+                        "value": 0
+                    }
+                }
+            ]
+        },
+        "_info": {
+            "hash": "0xf5dc9e91ce37ca6efeb11c7a6180f6a8a097d1f8149724a4504dd3708ff6d087",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evmone-t8n 0.12.0-dev+commit.85a89e56",
+            "description": "Test function documentation:\n\n    Much simpler than returndatacopy, no memory or boosted call.  Returner is called\n    and results are stored in storage slot, which is asserted for expected values.\n    The parameters offset and return data are configured to test boundary conditions.",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.0.4/tests/prague/eip7692_eof_v1/eip7069_extcall/test_returndataload.py#L185",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7069.md",
+            "reference-spec-version": "1795943aeacc86131d5ab6bb3d65824b3b1d4cad"
+        }
+    },
+    "tests/prague/eip7692_eof_v1/eip7069_extcall/test_returndataload.py::test_returndataload_handling[fork_CancunEIP7692-state_test-offset_30-len_30-EXTCALL]": {
+        "env": {
+            "currentCoinbase": "0x2adc25665018aa1fe0e6bc666dac8fc2697ff9ba",
+            "currentGasLimit": "0x016345785d8a0000",
+            "currentNumber": "0x01",
+            "currentTimestamp": "0x03e8",
+            "currentRandom": "0x0000000000000000000000000000000000000000000000000000000000000000",
+            "currentDifficulty": "0x00",
+            "currentBaseFee": "0x07",
+            "currentExcessBlobGas": "0x00"
+        },
+        "pre": {
+            "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b": {
+                "nonce": "0x00",
+                "balance": "0x0de0b6b3a7640000",
+                "code": "0x",
+                "storage": {}
+            },
+            "0x0000000000000000000000000000000000001000": {
+                "nonce": "0x01",
+                "balance": "0x00",
+                "code": "0xef0001010004020001000a0400300000800003d260006000d3d26000f3303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030",
+                "storage": {}
+            },
+            "0x0000000000000000000000000000000000001100": {
+                "nonce": "0x01",
+                "balance": "0x00",
+                "code": "0xef0001010004020001002a0400000000800004600060006000730000000000000000000000000000000000001000f86030f76110005561201560015500",
+                "storage": {}
+            }
+        },
+        "transaction": {
+            "nonce": "0x00",
+            "gasPrice": "0x0a",
+            "gasLimit": [
+                "0x1e8480"
+            ],
+            "to": "0x0000000000000000000000000000000000001100",
+            "value": [
+                "0x00"
+            ],
+            "data": [
+                "0x"
+            ],
+            "sender": "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b",
+            "secretKey": "0x45a915e4d060149eb4365960e6a7a45f334393093061116b197e3240065ff2d8"
+        },
+        "post": {
+            "Prague": [
+                {
+                    "hash": "0x16a5d618e2945b913a84a89b544034bfa3546e5e58765d8d38a234e75be09717",
+                    "logs": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
+                    "txbytes": "0xf860800a831e8480940000000000000000000000000000000000001100808025a0b3afc79e7eb6744553c987dfa51e04eec7c6d695e6f730badd8150d43c6611fda056587ba537d9e4baf5e9fdb797ed4d7cf237c28c5d368b92f2f3681334585fec",
+                    "indexes": {
+                        "data": 0,
+                        "gas": 0,
+                        "value": 0
+                    }
+                }
+            ]
+        },
+        "_info": {
+            "hash": "0xe13b325bde1a636f5ada5dfebd0f872a6a98e2a0e57c5908219dec21f911c380",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evmone-t8n 0.12.0-dev+commit.85a89e56",
+            "description": "Test function documentation:\n\n    Much simpler than returndatacopy, no memory or boosted call.  Returner is called\n    and results are stored in storage slot, which is asserted for expected values.\n    The parameters offset and return data are configured to test boundary conditions.",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.0.4/tests/prague/eip7692_eof_v1/eip7069_extcall/test_returndataload.py#L185",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7069.md",
+            "reference-spec-version": "1795943aeacc86131d5ab6bb3d65824b3b1d4cad"
+        }
+    },
+    "tests/prague/eip7692_eof_v1/eip7069_extcall/test_returndataload.py::test_returndataload_handling[fork_CancunEIP7692-state_test-offset_30-len_30-EXTDELEGATECALL]": {
+        "env": {
+            "currentCoinbase": "0x2adc25665018aa1fe0e6bc666dac8fc2697ff9ba",
+            "currentGasLimit": "0x016345785d8a0000",
+            "currentNumber": "0x01",
+            "currentTimestamp": "0x03e8",
+            "currentRandom": "0x0000000000000000000000000000000000000000000000000000000000000000",
+            "currentDifficulty": "0x00",
+            "currentBaseFee": "0x07",
+            "currentExcessBlobGas": "0x00"
+        },
+        "pre": {
+            "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b": {
+                "nonce": "0x00",
+                "balance": "0x0de0b6b3a7640000",
+                "code": "0x",
+                "storage": {}
+            },
+            "0x0000000000000000000000000000000000001000": {
+                "nonce": "0x01",
+                "balance": "0x00",
+                "code": "0xef0001010004020001000a0400300000800003d260006000d3d26000f3303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030",
+                "storage": {}
+            },
+            "0x0000000000000000000000000000000000001100": {
+                "nonce": "0x01",
+                "balance": "0x00",
+                "code": "0xef00010100040200010028040000000080000360006000730000000000000000000000000000000000001000f96030f76110005561201560015500",
+                "storage": {}
+            }
+        },
+        "transaction": {
+            "nonce": "0x00",
+            "gasPrice": "0x0a",
+            "gasLimit": [
+                "0x1e8480"
+            ],
+            "to": "0x0000000000000000000000000000000000001100",
+            "value": [
+                "0x00"
+            ],
+            "data": [
+                "0x"
+            ],
+            "sender": "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b",
+            "secretKey": "0x45a915e4d060149eb4365960e6a7a45f334393093061116b197e3240065ff2d8"
+        },
+        "post": {
+            "Prague": [
+                {
+                    "hash": "0x8c013da62fc74d042b6c0e37116eac7572859e05c7e3c684104c352eaad2709f",
+                    "logs": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
+                    "txbytes": "0xf860800a831e8480940000000000000000000000000000000000001100808025a0b3afc79e7eb6744553c987dfa51e04eec7c6d695e6f730badd8150d43c6611fda056587ba537d9e4baf5e9fdb797ed4d7cf237c28c5d368b92f2f3681334585fec",
+                    "indexes": {
+                        "data": 0,
+                        "gas": 0,
+                        "value": 0
+                    }
+                }
+            ]
+        },
+        "_info": {
+            "hash": "0x1d45b74c7cc13bbd7efc8b7f1e5d98634bbdfaaaf24861a09f748269f19130b9",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evmone-t8n 0.12.0-dev+commit.85a89e56",
+            "description": "Test function documentation:\n\n    Much simpler than returndatacopy, no memory or boosted call.  Returner is called\n    and results are stored in storage slot, which is asserted for expected values.\n    The parameters offset and return data are configured to test boundary conditions.",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.0.4/tests/prague/eip7692_eof_v1/eip7069_extcall/test_returndataload.py#L185",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7069.md",
+            "reference-spec-version": "1795943aeacc86131d5ab6bb3d65824b3b1d4cad"
+        }
+    },
+    "tests/prague/eip7692_eof_v1/eip7069_extcall/test_returndataload.py::test_returndataload_handling[fork_CancunEIP7692-state_test-offset_30-len_30-EXTSTATICCALL]": {
+        "env": {
+            "currentCoinbase": "0x2adc25665018aa1fe0e6bc666dac8fc2697ff9ba",
+            "currentGasLimit": "0x016345785d8a0000",
+            "currentNumber": "0x01",
+            "currentTimestamp": "0x03e8",
+            "currentRandom": "0x0000000000000000000000000000000000000000000000000000000000000000",
+            "currentDifficulty": "0x00",
+            "currentBaseFee": "0x07",
+            "currentExcessBlobGas": "0x00"
+        },
+        "pre": {
+            "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b": {
+                "nonce": "0x00",
+                "balance": "0x0de0b6b3a7640000",
+                "code": "0x",
+                "storage": {}
+            },
+            "0x0000000000000000000000000000000000001000": {
+                "nonce": "0x01",
+                "balance": "0x00",
+                "code": "0xef0001010004020001000a0400300000800003d260006000d3d26000f3303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030",
+                "storage": {}
+            },
+            "0x0000000000000000000000000000000000001100": {
+                "nonce": "0x01",
+                "balance": "0x00",
+                "code": "0xef00010100040200010028040000000080000360006000730000000000000000000000000000000000001000fb6030f76110005561201560015500",
+                "storage": {}
+            }
+        },
+        "transaction": {
+            "nonce": "0x00",
+            "gasPrice": "0x0a",
+            "gasLimit": [
+                "0x1e8480"
+            ],
+            "to": "0x0000000000000000000000000000000000001100",
+            "value": [
+                "0x00"
+            ],
+            "data": [
+                "0x"
+            ],
+            "sender": "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b",
+            "secretKey": "0x45a915e4d060149eb4365960e6a7a45f334393093061116b197e3240065ff2d8"
+        },
+        "post": {
+            "Prague": [
+                {
+                    "hash": "0x0542d865e7fff55aeebb858f3a88f58d15cd52ca3f05fedcb7ef7f987236ac5a",
+                    "logs": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
+                    "txbytes": "0xf860800a831e8480940000000000000000000000000000000000001100808025a0b3afc79e7eb6744553c987dfa51e04eec7c6d695e6f730badd8150d43c6611fda056587ba537d9e4baf5e9fdb797ed4d7cf237c28c5d368b92f2f3681334585fec",
+                    "indexes": {
+                        "data": 0,
+                        "gas": 0,
+                        "value": 0
+                    }
+                }
+            ]
+        },
+        "_info": {
+            "hash": "0xad03e57ba277dc76c500a8400f58bd00d4a9425beb835fb88129c1a605412990",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evmone-t8n 0.12.0-dev+commit.85a89e56",
+            "description": "Test function documentation:\n\n    Much simpler than returndatacopy, no memory or boosted call.  Returner is called\n    and results are stored in storage slot, which is asserted for expected values.\n    The parameters offset and return data are configured to test boundary conditions.",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.0.4/tests/prague/eip7692_eof_v1/eip7069_extcall/test_returndataload.py#L185",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7069.md",
+            "reference-spec-version": "1795943aeacc86131d5ab6bb3d65824b3b1d4cad"
+        }
+    }
+}

@@ -1,0 +1,398 @@
+{
+    "tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_section_order.py::test_section_order[fork_CancunEIP7692-eof_test-test_position_CasePosition.BODY-section_test_SectionTest.MISSING-section_kind_TYPE]": {
+        "vectors": {
+            "0": {
+                "code": "0xef0001010004020001000304000100305000ef",
+                "results": {
+                    "Prague": {
+                        "exception": "EOFException.INVALID_SECTION_BODIES_SIZE",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0x67a60bfb7402aca0658b6a82696ee94d9277dca2f9951ff431009823d85efa6d",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evmone-t8n 0.12.0-dev+commit.85a89e56",
+            "description": "Test function documentation:\n\n    Test sections order and it appearance in body and header",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.0.4/tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_section_order.py#L133",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-3540.md",
+            "reference-spec-version": "8dcb0a8c1c0102c87224308028632cc986a61183"
+        }
+    },
+    "tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_section_order.py::test_section_order[fork_CancunEIP7692-eof_test-test_position_CasePosition.BODY-section_test_SectionTest.MISSING-section_kind_CODE]": {
+        "vectors": {
+            "0": {
+                "code": "0xef000101000402000100030400010000800001ef",
+                "results": {
+                    "Prague": {
+                        "exception": "EOFException.INVALID_SECTION_BODIES_SIZE",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0xdb21f493fc5d2168319a8878ddb8e0ef5e40ab1b1608e55444b1cd903b6c8a30",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evmone-t8n 0.12.0-dev+commit.85a89e56",
+            "description": "Test function documentation:\n\n    Test sections order and it appearance in body and header",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.0.4/tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_section_order.py#L133",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-3540.md",
+            "reference-spec-version": "8dcb0a8c1c0102c87224308028632cc986a61183"
+        }
+    },
+    "tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_section_order.py::test_section_order[fork_CancunEIP7692-eof_test-test_position_CasePosition.BODY-section_test_SectionTest.MISSING-section_kind_DATA]": {
+        "vectors": {
+            "0": {
+                "code": "0xef000101000402000100030400010000800001305000",
+                "results": {
+                    "Prague": {
+                        "exception": "EOFException.TOPLEVEL_CONTAINER_TRUNCATED",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0x5d07f5741b4d5b90d3278c88c03273f0fbf1a0ed49a1b40ff4b859dc04287df6",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evmone-t8n 0.12.0-dev+commit.85a89e56",
+            "description": "Test function documentation:\n\n    Test sections order and it appearance in body and header",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.0.4/tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_section_order.py#L133",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-3540.md",
+            "reference-spec-version": "8dcb0a8c1c0102c87224308028632cc986a61183"
+        }
+    },
+    "tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_section_order.py::test_section_order[fork_CancunEIP7692-eof_test-test_position_CasePosition.BODY-section_test_SectionTest.WRONG_ORDER-section_kind_TYPE]": {
+        "vectors": {
+            "0": {
+                "code": "0xef000101000402000100030400010030500000800001ef",
+                "results": {
+                    "Prague": {
+                        "exception": "EOFException.INVALID_FIRST_SECTION_TYPE",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0x22c515f3d8f3a763813279d64c881b28582d86aa582352d296f2fd1ad5c87c57",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evmone-t8n 0.12.0-dev+commit.85a89e56",
+            "description": "Test function documentation:\n\n    Test sections order and it appearance in body and header",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.0.4/tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_section_order.py#L133",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-3540.md",
+            "reference-spec-version": "8dcb0a8c1c0102c87224308028632cc986a61183"
+        }
+    },
+    "tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_section_order.py::test_section_order[fork_CancunEIP7692-eof_test-test_position_CasePosition.BODY-section_test_SectionTest.WRONG_ORDER-section_kind_CODE]": {
+        "vectors": {
+            "0": {
+                "code": "0xef000101000402000100030400010000800001ef305000",
+                "results": {
+                    "Prague": {
+                        "exception": "EOFException.UNDEFINED_INSTRUCTION",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0xca77704f237cd8c85e340d729d3a7688b2995a2fcd35cf27d5cdc028c4439d3d",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evmone-t8n 0.12.0-dev+commit.85a89e56",
+            "description": "Test function documentation:\n\n    Test sections order and it appearance in body and header",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.0.4/tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_section_order.py#L133",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-3540.md",
+            "reference-spec-version": "8dcb0a8c1c0102c87224308028632cc986a61183"
+        }
+    },
+    "tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_section_order.py::test_section_order[fork_CancunEIP7692-eof_test-test_position_CasePosition.BODY-section_test_SectionTest.WRONG_ORDER-section_kind_DATA]": {
+        "vectors": {
+            "0": {
+                "code": "0xef0001010004020001000304000100ef00800001305000",
+                "results": {
+                    "Prague": {
+                        "exception": "EOFException.INVALID_FIRST_SECTION_TYPE",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0xa60a15a7919d41e6e06a602abf3a57168bb894c181c1ce78660e57931d1743cc",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evmone-t8n 0.12.0-dev+commit.85a89e56",
+            "description": "Test function documentation:\n\n    Test sections order and it appearance in body and header",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.0.4/tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_section_order.py#L133",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-3540.md",
+            "reference-spec-version": "8dcb0a8c1c0102c87224308028632cc986a61183"
+        }
+    },
+    "tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_section_order.py::test_section_order[fork_CancunEIP7692-eof_test-test_position_CasePosition.HEADER-section_test_SectionTest.MISSING-section_kind_TYPE]": {
+        "vectors": {
+            "0": {
+                "code": "0xef000102000100030400010000800001305000ef",
+                "results": {
+                    "Prague": {
+                        "exception": "EOFException.MISSING_TYPE_HEADER",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0xb2acf6a1a4eee9336b39d5c90ec3eef8cf4ca8f94a2a0976440a889b29a928e3",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evmone-t8n 0.12.0-dev+commit.85a89e56",
+            "description": "Test function documentation:\n\n    Test sections order and it appearance in body and header",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.0.4/tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_section_order.py#L133",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-3540.md",
+            "reference-spec-version": "8dcb0a8c1c0102c87224308028632cc986a61183"
+        }
+    },
+    "tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_section_order.py::test_section_order[fork_CancunEIP7692-eof_test-test_position_CasePosition.HEADER-section_test_SectionTest.MISSING-section_kind_CODE]": {
+        "vectors": {
+            "0": {
+                "code": "0xef00010100040400010000800001305000ef",
+                "results": {
+                    "Prague": {
+                        "exception": "EOFException.MISSING_CODE_HEADER",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0x75008ac51d333b0c188f8d9e5b6c9abb27b7109423e56d127d73de00de55f610",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evmone-t8n 0.12.0-dev+commit.85a89e56",
+            "description": "Test function documentation:\n\n    Test sections order and it appearance in body and header",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.0.4/tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_section_order.py#L133",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-3540.md",
+            "reference-spec-version": "8dcb0a8c1c0102c87224308028632cc986a61183"
+        }
+    },
+    "tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_section_order.py::test_section_order[fork_CancunEIP7692-eof_test-test_position_CasePosition.HEADER-section_test_SectionTest.MISSING-section_kind_DATA]": {
+        "vectors": {
+            "0": {
+                "code": "0xef000101000402000100030000800001305000ef",
+                "results": {
+                    "Prague": {
+                        "exception": "EOFException.MISSING_DATA_SECTION",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0xfdefaf07157c06653423e1c58bf62b7afb02ccd6c8385a18ebc261ec28ad95ed",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evmone-t8n 0.12.0-dev+commit.85a89e56",
+            "description": "Test function documentation:\n\n    Test sections order and it appearance in body and header",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.0.4/tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_section_order.py#L133",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-3540.md",
+            "reference-spec-version": "8dcb0a8c1c0102c87224308028632cc986a61183"
+        }
+    },
+    "tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_section_order.py::test_section_order[fork_CancunEIP7692-eof_test-test_position_CasePosition.HEADER-section_test_SectionTest.WRONG_ORDER-section_kind_TYPE]": {
+        "vectors": {
+            "0": {
+                "code": "0xef000102000100030100040400010000800001305000ef",
+                "results": {
+                    "Prague": {
+                        "exception": "EOFException.MISSING_TYPE_HEADER",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0xeed68e78a749bd7129ef99cfb8ab6d67eb48d5dca1d1f6f127701c83544a0fe5",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evmone-t8n 0.12.0-dev+commit.85a89e56",
+            "description": "Test function documentation:\n\n    Test sections order and it appearance in body and header",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.0.4/tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_section_order.py#L133",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-3540.md",
+            "reference-spec-version": "8dcb0a8c1c0102c87224308028632cc986a61183"
+        }
+    },
+    "tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_section_order.py::test_section_order[fork_CancunEIP7692-eof_test-test_position_CasePosition.HEADER-section_test_SectionTest.WRONG_ORDER-section_kind_CODE]": {
+        "vectors": {
+            "0": {
+                "code": "0xef000101000404000102000100030000800001305000ef",
+                "results": {
+                    "Prague": {
+                        "exception": "EOFException.MISSING_CODE_HEADER",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0x1ab9ac185ba4df95881320b0b516011b5dba6b8946aead9d9764f61d9667947f",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evmone-t8n 0.12.0-dev+commit.85a89e56",
+            "description": "Test function documentation:\n\n    Test sections order and it appearance in body and header",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.0.4/tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_section_order.py#L133",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-3540.md",
+            "reference-spec-version": "8dcb0a8c1c0102c87224308028632cc986a61183"
+        }
+    },
+    "tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_section_order.py::test_section_order[fork_CancunEIP7692-eof_test-test_position_CasePosition.HEADER-section_test_SectionTest.WRONG_ORDER-section_kind_DATA]": {
+        "vectors": {
+            "0": {
+                "code": "0xef000104000101000402000100030000800001305000ef",
+                "results": {
+                    "Prague": {
+                        "exception": "EOFException.MISSING_TYPE_HEADER",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0x9c2214df9e6ec90bd21a68da604289fd9ae01f6d9f5ddde81e2e4cd4f0931d8c",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evmone-t8n 0.12.0-dev+commit.85a89e56",
+            "description": "Test function documentation:\n\n    Test sections order and it appearance in body and header",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.0.4/tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_section_order.py#L133",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-3540.md",
+            "reference-spec-version": "8dcb0a8c1c0102c87224308028632cc986a61183"
+        }
+    },
+    "tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_section_order.py::test_section_order[fork_CancunEIP7692-eof_test-test_position_CasePosition.BODY_AND_HEADER-section_test_SectionTest.MISSING-section_kind_TYPE]": {
+        "vectors": {
+            "0": {
+                "code": "0xef0001020001000304000100305000ef",
+                "results": {
+                    "Prague": {
+                        "exception": "EOFException.MISSING_TYPE_HEADER",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0xd15e504303037f546841d2fa2ecdd8fbb1b4e16ab0047591135be366785c33ee",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evmone-t8n 0.12.0-dev+commit.85a89e56",
+            "description": "Test function documentation:\n\n    Test sections order and it appearance in body and header",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.0.4/tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_section_order.py#L133",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-3540.md",
+            "reference-spec-version": "8dcb0a8c1c0102c87224308028632cc986a61183"
+        }
+    },
+    "tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_section_order.py::test_section_order[fork_CancunEIP7692-eof_test-test_position_CasePosition.BODY_AND_HEADER-section_test_SectionTest.MISSING-section_kind_CODE]": {
+        "vectors": {
+            "0": {
+                "code": "0xef00010100040400010000800001ef",
+                "results": {
+                    "Prague": {
+                        "exception": "EOFException.MISSING_CODE_HEADER",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0x5b7bea71b714708f6020ccc88d169801a2875e7f5d327a92fdf64bd55e3fc9fd",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evmone-t8n 0.12.0-dev+commit.85a89e56",
+            "description": "Test function documentation:\n\n    Test sections order and it appearance in body and header",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.0.4/tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_section_order.py#L133",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-3540.md",
+            "reference-spec-version": "8dcb0a8c1c0102c87224308028632cc986a61183"
+        }
+    },
+    "tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_section_order.py::test_section_order[fork_CancunEIP7692-eof_test-test_position_CasePosition.BODY_AND_HEADER-section_test_SectionTest.MISSING-section_kind_DATA]": {
+        "vectors": {
+            "0": {
+                "code": "0xef000101000402000100030000800001305000",
+                "results": {
+                    "Prague": {
+                        "exception": "EOFException.MISSING_DATA_SECTION",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0xb66871bddb25885d01fa5d5a69092c6d9e7edefd71f0fe79e0ca955846a80314",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evmone-t8n 0.12.0-dev+commit.85a89e56",
+            "description": "Test function documentation:\n\n    Test sections order and it appearance in body and header",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.0.4/tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_section_order.py#L133",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-3540.md",
+            "reference-spec-version": "8dcb0a8c1c0102c87224308028632cc986a61183"
+        }
+    },
+    "tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_section_order.py::test_section_order[fork_CancunEIP7692-eof_test-test_position_CasePosition.BODY_AND_HEADER-section_test_SectionTest.WRONG_ORDER-section_kind_TYPE]": {
+        "vectors": {
+            "0": {
+                "code": "0xef000102000100030100040400010030500000800001ef",
+                "results": {
+                    "Prague": {
+                        "exception": "EOFException.MISSING_TYPE_HEADER",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0x660c390638e51c2d5c40ac9c346eacf595c06d6c36af903d1cb09c33763a1aba",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evmone-t8n 0.12.0-dev+commit.85a89e56",
+            "description": "Test function documentation:\n\n    Test sections order and it appearance in body and header",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.0.4/tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_section_order.py#L133",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-3540.md",
+            "reference-spec-version": "8dcb0a8c1c0102c87224308028632cc986a61183"
+        }
+    },
+    "tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_section_order.py::test_section_order[fork_CancunEIP7692-eof_test-test_position_CasePosition.BODY_AND_HEADER-section_test_SectionTest.WRONG_ORDER-section_kind_CODE]": {
+        "vectors": {
+            "0": {
+                "code": "0xef000101000404000102000100030000800001ef305000",
+                "results": {
+                    "Prague": {
+                        "exception": "EOFException.MISSING_CODE_HEADER",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0x8afd5bd0179bbcf5a709ed2d9f9fc6d0ed1a054428651361365239cae1b8b236",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evmone-t8n 0.12.0-dev+commit.85a89e56",
+            "description": "Test function documentation:\n\n    Test sections order and it appearance in body and header",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.0.4/tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_section_order.py#L133",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-3540.md",
+            "reference-spec-version": "8dcb0a8c1c0102c87224308028632cc986a61183"
+        }
+    },
+    "tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_section_order.py::test_section_order[fork_CancunEIP7692-eof_test-test_position_CasePosition.BODY_AND_HEADER-section_test_SectionTest.WRONG_ORDER-section_kind_DATA]": {
+        "vectors": {
+            "0": {
+                "code": "0xef0001040001010004020001000300ef00800001305000",
+                "results": {
+                    "Prague": {
+                        "exception": "EOFException.MISSING_TYPE_HEADER",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0x2e20011a382613383e213430128c175f495381a056559b4ba72a9703fa88c9b9",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evmone-t8n 0.12.0-dev+commit.85a89e56",
+            "description": "Test function documentation:\n\n    Test sections order and it appearance in body and header",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.0.4/tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_section_order.py#L133",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-3540.md",
+            "reference-spec-version": "8dcb0a8c1c0102c87224308028632cc986a61183"
+        }
+    }
+}
