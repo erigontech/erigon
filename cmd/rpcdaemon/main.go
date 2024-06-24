@@ -38,7 +38,7 @@ func main() {
 		ethConfig := ethconfig.Defaults
 		ethConfig.L2RpcUrl = cfg.L2RpcUrl
 
-		apiList := jsonrpc.APIList(db, backend, txPool, mining, ff, stateCache, blockReader, agg, cfg, engine, &ethConfig, nil, logger)
+		apiList := jsonrpc.APIList(db, backend, txPool, nil, mining, ff, stateCache, blockReader, agg, cfg, engine, &ethConfig, nil, logger)
 		rpc.PreAllocateRPCMetricLabels(apiList)
 		if err := cli.StartRpcServer(ctx, cfg, apiList, logger); err != nil {
 			logger.Error(err.Error())

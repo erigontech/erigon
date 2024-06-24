@@ -20,6 +20,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/state"
 	"github.com/ledgerwatch/erigon-lib/wrap"
 	"github.com/ledgerwatch/erigon/polygon/bor/finality"
+	"github.com/ledgerwatch/erigon/zk"
 
 	"github.com/ledgerwatch/erigon/consensus"
 	"github.com/ledgerwatch/erigon/consensus/misc"
@@ -75,7 +76,9 @@ func StageLoop(ctx context.Context,
 				return
 			}
 
-			logger.Error("Staged Sync", "err", err)
+			if !errors.Is(err, zk.ErrLimboState) {
+				logger.Error("Staged Sync", "err", err)
+			}
 			if recoveryErr := hd.RecoverFromDb(db); recoveryErr != nil {
 				logger.Error("Failed to recover header sentriesClient", "err", recoveryErr)
 			}

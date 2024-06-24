@@ -36,3 +36,20 @@ func WriteTxLookupEntries_zkEvm(db kv.Putter, block *types.Block) error {
 
 	return nil
 }
+
+func TruncateTxLookupEntries_zkEvm(db kv.RwTx, fromBlockNum, toBlockNum uint64) error {
+	for i := fromBlockNum; i <= toBlockNum; i++ {
+		block, err := ReadBlockByNumber(db, i)
+		if err != nil {
+			return err
+		}
+
+		for _, tx := range block.Transactions() {
+			if err := db.Delete(kv.TxLookup, tx.Hash().Bytes()); err != nil {
+				return fmt.Errorf("failed to store transaction lookup entry: %W", err)
+			}
+		}
+	}
+
+	return nil
+}

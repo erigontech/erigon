@@ -561,6 +561,11 @@ var (
 		Usage: "Define the host used for the zkevm data stream",
 		Value: "",
 	}
+	Limbo = cli.BoolFlag{
+		Name:  "zkevm.limbo",
+		Usage: "Enable limbo processing on batches that failed verification",
+		Value: false,
+	}
 	AllowFreeTransactions = cli.BoolFlag{
 		Name:  "zkevm.allow-free-transactions",
 		Usage: "Allow the sequencer to proceed transactions with 0 gas price",

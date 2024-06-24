@@ -49,7 +49,7 @@ LOOP:
 				time.Sleep(500 * time.Microsecond)
 				return nil
 			}
-			transactions, err = extractTransactionsFromSlot(slots)
+			transactions, err = extractTransactionsFromSlot(&slots)
 			if err != nil {
 				return err
 			}
@@ -66,16 +66,42 @@ LOOP:
 	return transactions, err
 }
 
-type nextBatchL1Data struct {
-	DecodedData     []zktx.DecodedBatchL2Data
-	Coinbase        common.Address
-	L1InfoRoot      common.Hash
-	IsWorkRemaining bool
-	LimitTimestamp  uint64
+func getLimboTransaction(cfg SequenceBlockCfg, txHash *common.Hash) ([]types.Transaction, error) {
+	var transactions []types.Transaction
+
+	for {
+		// ensure we don't spin forever looking for transactions, attempt for a while then exit up to the caller
+		if err := cfg.txPoolDb.View(context.Background(), func(poolTx kv.Tx) error {
+			slots, err := cfg.txPool.GetLimboTxRplsByHash(poolTx, txHash)
+			if err != nil {
+				return err
+			}
+
+			if slots != nil {
+				transactions, err = extractTransactionsFromSlot(slots)
+				if err != nil {
+					return err
+				}
+			}
+
+			return nil
+		}); err != nil {
+			return nil, err
+		}
+
+		if len(transactions) == 0 {
+			time.Sleep(250 * time.Millisecond)
+		} else {
+			break
+		}
+
+	}
+
+	return transactions, nil
 }
 
-func getNextL1BatchData(batchNumber uint64, forkId uint64, hermezDb *hermez_db.HermezDb) (nextBatchL1Data, error) {
-	nextData := nextBatchL1Data{}
+func getNextL1BatchData(batchNumber uint64, forkId uint64, hermezDb *hermez_db.HermezDb) (*nextBatchL1Data, error) {
+	nextData := &nextBatchL1Data{}
 	// we expect that the batch we're going to load in next should be in the db already because of the l1 block sync
 	// stage, if it is not there we need to panic as we're in a bad state
 	batchL2Data, err := hermezDb.GetL1BatchData(batchNumber)
@@ -124,7 +150,7 @@ func getNextL1BatchData(batchNumber uint64, forkId uint64, hermezDb *hermez_db.H
 	return nextData, err
 }
 
-func extractTransactionsFromSlot(slot types2.TxsRlp) ([]types.Transaction, error) {
+func extractTransactionsFromSlot(slot *types2.TxsRlp) ([]types.Transaction, error) {
 	transactions := make([]types.Transaction, 0, len(slot.Txs))
 	reader := bytes.NewReader([]byte{})
 	stream := new(rlp.Stream)

@@ -11,6 +11,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/common/fixedgas"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/types"
+	types2 "github.com/ledgerwatch/erigon-lib/types"
 	"github.com/ledgerwatch/erigon/common/math"
 	"github.com/ledgerwatch/log/v3"
 )
@@ -150,6 +151,10 @@ func (p *TxPool) best(n uint16, txs *types.TxsRlp, tx kv.Tx, onTopOf, availableG
 	p.lock.Lock()
 	defer p.lock.Unlock()
 
+	if p.isDeniedYieldingTransactions() {
+		return false, 0, nil
+	}
+
 	// First wait for the corresponding block to arrive
 	if p.lastSeenBlock.Load() < onTopOf {
 		return false, 0, nil // Too early
@@ -259,13 +264,25 @@ func (p *TxPool) MarkForDiscardFromPendingBest(txHash common.Hash) {
 
 // Discard a metaTx from the best pending pool if it has overflow the zk-counters during execution
 func promoteZk(pending *PendingPool, baseFee, queued *SubPool, pendingBaseFee uint64, discard func(*metaTx, DiscardReason), announcements *types.Announcements) {
+	invalidMts := []*metaTx{}
+
 	for i := 0; i < len(pending.best.ms); i++ {
 		mt := pending.best.ms[i]
 		if mt.overflowZkCountersDuringExecution {
-			pending.Remove(mt)
-			discard(mt, OverflowZkCounters)
+			invalidMts = append(invalidMts, mt)
 		}
 	}
 
+	for _, mt := range invalidMts {
+		pending.Remove(mt)
+		discard(mt, OverflowZkCounters)
+	}
+
 	promote(pending, baseFee, queued, pendingBaseFee, discard, announcements)
+}
+
+func markAsLocal(txSlots *types2.TxSlots) {
+	for i := range txSlots.IsLocal {
+		txSlots.IsLocal[i] = true
+	}
 }

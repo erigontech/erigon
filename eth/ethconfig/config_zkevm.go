@@ -37,6 +37,7 @@ type Zk struct {
 	ExecutorRequestTimeout                 time.Duration
 	DatastreamNewBlockTimeout              time.Duration
 	ExecutorMaxConcurrentRequests          int
+	Limbo                                  bool
 	AllowFreeTransactions                  bool
 	AllowPreEIP155Transactions             bool
 	EffectiveGasPriceForEthTransfer        uint8
