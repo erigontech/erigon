@@ -29,7 +29,7 @@ func makeType[T any]() *T {
 }
 
 func AssembleService(heimdallUrl string, dataDir string, tmpDir string, logger log.Logger) Service {
-	persistence := NewMdbxPersistence(logger, dataDir, tmpDir)
+	persistence := NewMdbxServicePersistence(logger, dataDir, tmpDir)
 	client := NewHeimdallClient(heimdallUrl, logger)
 	return NewService(client, persistence, logger)
 }

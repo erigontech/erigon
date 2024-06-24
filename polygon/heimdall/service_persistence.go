@@ -18,7 +18,7 @@ type ServicePersistence interface {
 	Close()
 }
 
-func NewMdbxPersistence(logger log.Logger, dataDir string, tmpDir string) *MdbxServicePersistence {
+func NewMdbxServicePersistence(logger log.Logger, dataDir string, tmpDir string) *MdbxServicePersistence {
 	db := polygoncommon.NewDatabase(dataDir, logger)
 	blockNumToIdIndexFactory := func(ctx context.Context) (*RangeIndex, error) {
 		return NewRangeIndex(ctx, tmpDir, logger)
