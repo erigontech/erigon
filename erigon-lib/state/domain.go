@@ -87,6 +87,8 @@ type Domain struct {
 	// underlying array is immutable - means it's ready for zero-copy use
 	_visibleFiles []ctxItem
 
+	integrityCheck func(name kv.Domain, fromStep, toStep uint64) bool
+
 	// replaceKeysInValues allows to replace commitment branch values with shorter keys.
 	// for commitment domain only
 	replaceKeysInValues bool
@@ -108,7 +110,7 @@ type domainCfg struct {
 	restrictSubsetFileDeletions bool
 }
 
-func NewDomain(cfg domainCfg, aggregationStep uint64, filenameBase, keysTable, valsTable, indexKeysTable, historyValsTable, indexTable string, logger log.Logger) (*Domain, error) {
+func NewDomain(cfg domainCfg, aggregationStep uint64, filenameBase, keysTable, valsTable, indexKeysTable, historyValsTable, indexTable string, integrityCheck func(name kv.Domain, fromStep, toStep uint64) bool, logger log.Logger) (*Domain, error) {
 	if cfg.hist.iiCfg.dirs.SnapDomain == "" {
 		panic("empty `dirs` variable")
 	}
@@ -122,6 +124,7 @@ func NewDomain(cfg domainCfg, aggregationStep uint64, filenameBase, keysTable, v
 		indexList:                   withBTree | withExistence,
 		replaceKeysInValues:         cfg.replaceKeysInValues,         // for commitment domain only
 		restrictSubsetFileDeletions: cfg.restrictSubsetFileDeletions, // to prevent not merged 'garbage' to delete on start
+		integrityCheck:              integrityCheck,
 	}
 
 	d._visibleFiles = []ctxItem{}
@@ -280,6 +283,12 @@ func (d *Domain) scanStateFiles(fileNames []string) (garbageFiles []*filesItem) 
 		}
 		if startStep > endStep {
 			d.logger.Warn("File ignored by domain scan, startTxNum > endTxNum", "name", name)
+			continue
+		}
+
+		domainName, _ := kv.String2Domain(d.filenameBase)
+		if !d.integrityCheck(domainName, startStep, endStep) {
+			d.logger.Debug("skip garbage file", "name", name)
 			continue
 		}
 
