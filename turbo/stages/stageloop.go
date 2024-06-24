@@ -18,7 +18,6 @@ import (
 	"github.com/ledgerwatch/erigon-lib/direct"
 	proto_downloader "github.com/ledgerwatch/erigon-lib/gointerfaces/downloaderproto"
 	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon-lib/kv/membatchwithdb"
 	"github.com/ledgerwatch/erigon-lib/kv/rawdbv3"
 	"github.com/ledgerwatch/erigon-lib/state"
 	"github.com/ledgerwatch/erigon-lib/wrap"
@@ -404,12 +403,12 @@ func MiningStep(ctx context.Context, db kv.RwDB, mining *stagedsync.Sync, tmpDir
 
 	var miningBatch kv.RwTx
 
-	mb := membatchwithdb.NewMemoryBatch(tx, tmpDir, logger)
-	defer mb.Rollback()
-	miningBatch = mb
+	//mb := membatchwithdb.NewMemoryBatch(tx, tmpDir, logger)
+	//defer mb.Rollback()
+	//miningBatch = mb
 
 	txc := wrap.TxContainer{Tx: miningBatch}
-	sd, err := state.NewSharedDomains(mb, logger)
+	sd, err := state.NewSharedDomains(tx, logger)
 	if err != nil {
 		return err
 	}
