@@ -145,7 +145,7 @@ func NewAggregator(ctx context.Context, dirs datadir.Dirs, aggregationStep uint6
 		//  - means we must ignore step X in another domains
 		switch name {
 		case kv.AccountsDomain, kv.StorageDomain, kv.CommitmentDomain:
-			if toStep-fromStep > 1 { //only recently built files
+			if toStep-fromStep > 1 { // only recently built files
 				return true
 			}
 			return commitmentFileMustExist(fromStep, toStep)
