@@ -27,6 +27,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/log/v3"
 
 	"github.com/ledgerwatch/erigon/core/state"
+	"github.com/ledgerwatch/erigon/core/tracing"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/core/vm/evmtypes"
 	"github.com/ledgerwatch/erigon/rlp"
@@ -211,7 +212,7 @@ type PoW interface {
 // Transfer subtracts amount from sender and adds amount to recipient using the given Db
 func Transfer(db evmtypes.IntraBlockState, sender, recipient libcommon.Address, amount *uint256.Int, bailout bool) {
 	if !bailout {
-		db.SubBalance(sender, amount)
+		db.SubBalance(sender, amount, tracing.BalanceChangeTransfer)
 	}
-	db.AddBalance(recipient, amount)
+	db.AddBalance(recipient, amount, tracing.BalanceChangeTransfer)
 }

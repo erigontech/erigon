@@ -62,11 +62,23 @@ func (d *DiagnosticClient) runSnapshotListener(rootCtx context.Context) {
 					Progress:    downloadedPercent,
 				}, "Downloading snapshots")
 
-				if err := d.db.Update(d.ctx, SnapshotDownloadUpdater(d.syncStats.SnapshotDownload)); err != nil {
-					log.Error("[Diagnostics] Failed to update snapshot download info", "err", err)
-				}
+				err := d.db.Update(d.ctx, func(tx kv.RwTx) error {
+					err := SnapshotDownloadUpdater(d.syncStats.SnapshotDownload)(tx)
+					if err != nil {
+						return err
+					}
 
-				d.saveSyncStagesToDB()
+					err = StagesListUpdater(d.syncStages)(tx)
+					if err != nil {
+						return err
+					}
+
+					return nil
+				})
+
+				if err != nil {
+					log.Warn("[Diagnostics] Failed to update snapshot download info", "err", err)
+				}
 
 				d.mu.Unlock()
 

@@ -103,7 +103,7 @@ type OnFreezeFunc func(frozenFileNames []string)
 
 const AggregatorSqueezeCommitmentValues = true
 
-func NewAggregator(ctx context.Context, dirs datadir.Dirs, aggregationStep uint64, db kv.RoDB, logger log.Logger) (*Aggregator, error) {
+func NewAggregator(ctx context.Context, dirs datadir.Dirs, aggregationStep uint64, db kv.RoDB, iters CanonicalsReader, logger log.Logger) (*Aggregator, error) {
 	tmpdir := dirs.Tmp
 	salt, err := getStateIndicesSalt(dirs.Snap)
 	if err != nil {
@@ -172,13 +172,10 @@ func NewAggregator(ctx context.Context, dirs datadir.Dirs, aggregationStep uint6
 	if a.d[kv.CommitmentDomain], err = NewDomain(cfg, aggregationStep, kv.FileCommitmentDomain, kv.TblCommitmentKeys, kv.TblCommitmentVals, kv.TblCommitmentHistoryKeys, kv.TblCommitmentHistoryVals, kv.TblCommitmentIdx, logger); err != nil {
 		return nil, err
 	}
-	//cfg = domainCfg{
-	//	hist: histCfg{
-	//		iiCfg:             iiCfg{salt: salt, dirs: dirs},
-	//		withLocalityIndex: false, withExistenceIndex: false, historyLargeValues: false,
-	//	},
+	//aCfg := AppendableCfg{
+	//	Salt: salt, Dirs: dirs, DB: db, iters: iters,
 	//}
-	//if a.d[kv.GasUsedDomain], err = NewDomain(cfg, aggregationStep, "gasused", kv.TblGasUsedKeys, kv.TblGasUsedVals, kv.TblGasUsedHistoryKeys, kv.TblGasUsedHistoryVals, kv.TblGasUsedIdx, logger); err != nil {
+	//if a.ap[kv.ReceiptsAppendable], err = NewAppendable(aCfg, aggregationStep, "receipts", kv.Receipts, nil, logger); err != nil {
 	//	return nil, err
 	//}
 	if err := a.registerII(kv.LogAddrIdxPos, salt, dirs, db, aggregationStep, kv.FileLogAddressIdx, kv.TblLogAddressKeys, kv.TblLogAddressIdx, logger); err != nil {
@@ -964,9 +961,9 @@ func (ac *AggregatorRoTx) PruneSmallBatches(ctx context.Context, timeout time.Du
 			ac.a.logger.Warn("[snapshots] PruneSmallBatches failed", "err", err)
 			return false, err
 		}
-		if stat == nil {
-			if fstat := fullStat.String(); fstat != "" {
-				ac.a.logger.Info("[snapshots] PruneSmallBatches finished", "took", time.Since(started).String(), "stat", fstat)
+		if stat == nil || stat.PrunedNothing() {
+			if !fullStat.PrunedNothing() {
+				ac.a.logger.Info("[snapshots] PruneSmallBatches finished", "took", time.Since(started).String(), "stat", fullStat.String())
 			}
 			return false, nil
 		}
@@ -1019,8 +1016,22 @@ type AggregatorPruneStat struct {
 	Appendable map[string]*AppendablePruneStat
 }
 
+func (as *AggregatorPruneStat) PrunedNothing() bool {
+	for _, d := range as.Domains {
+		if d != nil && !d.PrunedNothing() {
+			return false
+		}
+	}
+	for _, i := range as.Indices {
+		if i != nil && !i.PrunedNothing() {
+			return false
+		}
+	}
+	return true
+}
+
 func newAggregatorPruneStat() *AggregatorPruneStat {
-	return &AggregatorPruneStat{Domains: make(map[string]*DomainPruneStat), Indices: make(map[string]*InvertedIndexPruneStat)}
+	return &AggregatorPruneStat{Domains: make(map[string]*DomainPruneStat), Indices: make(map[string]*InvertedIndexPruneStat), Appendable: make(map[string]*AppendablePruneStat)}
 }
 
 func (as *AggregatorPruneStat) String() string {
@@ -1328,6 +1339,9 @@ func (ac *AggregatorRoTx) findMergeRange(maxEndTxNum, maxSpan uint64) RangesV3 {
 	}
 	for id, ii := range ac.iis {
 		r.invertedIndex[id] = ii.findMergeRange(maxEndTxNum, maxSpan)
+	}
+	for id, ap := range ac.appendable {
+		r.appendable[id] = ap.findMergeRange(maxEndTxNum, maxSpan)
 	}
 	//log.Info(fmt.Sprintf("findMergeRange(%d, %d)=%s\n", maxEndTxNum/ac.a.aggregationStep, maxSpan/ac.a.aggregationStep, r))
 	return r
@@ -1946,8 +1960,12 @@ func (ac *AggregatorRoTx) DebugEFAllValuesAreInRange(ctx context.Context, name k
 
 // --- Domain part END ---
 
-func (ac *AggregatorRoTx) Appendable(name kv.Appendable, ts uint64, v []byte, tx kv.RwTx) (err error) {
-	return ac.appendable[name].Append(ts, v, tx)
+func (ac *AggregatorRoTx) AppendableGet(name kv.Appendable, ts kv.TxnId, tx kv.Tx) (v []byte, ok bool, err error) {
+	return ac.appendable[name].Get(ts, tx)
+}
+
+func (ac *AggregatorRoTx) AppendablePut(name kv.Appendable, txnID kv.TxnId, v []byte, tx kv.RwTx) (err error) {
+	return ac.appendable[name].Append(txnID, v, tx)
 }
 
 func (ac *AggregatorRoTx) Close() {
