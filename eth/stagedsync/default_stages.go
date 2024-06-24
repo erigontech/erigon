@@ -746,7 +746,7 @@ var DefaultForwardOrder = UnwindOrder{
 	// Stages below don't use Internet
 	stages.Senders,
 	stages.Execution,
-	stages.CustomTrace,
+	//stages.CustomTrace,
 	stages.CallTraces,
 	stages.AccountHistoryIndex,
 	stages.StorageHistoryIndex,
@@ -770,7 +770,7 @@ var DefaultUnwindOrder = UnwindOrder{
 	stages.AccountHistoryIndex,
 	stages.CallTraces,
 
-	stages.CustomTrace,
+	//stages.CustomTrace,
 	stages.Execution,
 	stages.Senders,
 
