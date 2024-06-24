@@ -111,49 +111,32 @@ type Node struct {
 	prefix []byte
 }
 
-func (b *BpsTree) traverse(g ArchiveGetter, mx [][]Node, n, di, i uint64) {
-	if i >= n {
-		return
-	}
-
-	for j := uint64(1); j <= b.M; j += b.M / 2 {
-		ik := i*b.M + j
-		if ik >= n {
-			break
-		}
-		_, k, err := b.keyCmpFunc(nil, ik, g)
-		if err != nil {
-			panic(err)
-		}
-		if k != nil {
-			mx[di] = append(mx[di], Node{off: b.offt.Get(ik), prefix: common.Copy(k), di: ik})
-			fmt.Printf("d=%d k %x %d\n", di, k, ik)
-		}
-		b.traverse(g, mx, n, di+1, ik)
-	}
-}
-
 func (b *BpsTree) WarmUp(kv ArchiveGetter) error {
 	k := b.offt.Count()
-	d := logBase(k, b.M)
+	// d := logBase(k, b.M)
+	mFraqtion := uint64(2)  // could increase to put more nodes into cache
+	mx := make([][]Node, 1) // usually d+1 but for experiments we put them all into flat list
 
-	mx := make([][]Node, d+1)
-	_, key, err := b.keyCmpFunc(nil, 0, kv)
-	if err != nil {
-		return err
+	// instead of using leveled iteration we can use whole list of cached nodes at once
+	for ik := uint64(0); ik < k; ik += b.M / mFraqtion {
+		_, key, err := b.keyCmpFunc(nil, uint64(ik), kv)
+		if err != nil {
+			return err
+		}
+		if key != nil {
+			mx[0] = append(mx[0], Node{off: b.offt.Get(uint64(ik)), prefix: common.Copy(key), di: uint64(ik)})
+		}
 	}
-	if key != nil {
-		mx[0] = append(mx[0], Node{off: b.offt.Get(0), prefix: common.Copy(key)})
-		//fmt.Printf("d=%d k %x %d\n", di, k, offt)
-	}
-	b.traverse(kv, mx, k, 0, 0)
 
 	if b.trace {
+		c := 0
 		for i := 0; i < len(mx); i++ {
+			c += len(mx[i])
 			for j := 0; j < len(mx[i]); j++ {
 				fmt.Printf("mx[%d][%d] %x %d %d\n", i, j, mx[i][j].prefix, mx[i][j].off, mx[i][j].di)
 			}
 		}
+		fmt.Printf("[cachedLookupMatrix %s]; depth %d;  total offsets: %d; cached %d (%.2f%%);\n", kv.FileName(), len(mx), k, c, float64(c)/float64(k)*100)
 	}
 	b.mx = mx
 	return nil
