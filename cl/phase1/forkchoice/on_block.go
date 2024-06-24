@@ -114,7 +114,7 @@ func (f *ForkChoiceStore) OnBlock(ctx context.Context, block *cltypes.SignedBeac
 			}
 			return fmt.Errorf("block is invalid")
 		case execution_client.PayloadStatusValidated:
-			log.Debug("OnBlock: block is validated", "block", libcommon.Hash(blockRoot))
+			log.Trace("OnBlock: block is validated", "block", libcommon.Hash(blockRoot))
 			// remove from optimistic candidate
 			if err := f.optimisticStore.ValidateBlock(block.Block); err != nil {
 				return fmt.Errorf("failed to validate block in optimistic store: %v", err)
