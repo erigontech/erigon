@@ -271,9 +271,8 @@ const (
 	// block has no system-tx - records are absent, but TxnID increasing
 	//
 	// In Erigon3: table MaxTxNum storing TxNum (not TxnID). History/Indices are using TxNum (not TxnID).
-	EthTx           = "BlockTransaction"        // tx_id_u64 -> rlp(tx)
-	NonCanonicalTxs = "NonCanonicalTransaction" // tbl_sequence_u64 -> rlp(tx)
-	MaxTxNum        = "MaxTxNum"                // block_number_u64 -> max_tx_num_in_block_u64
+	EthTx    = "BlockTransaction" // tx_id_u64 -> rlp(tx)
+	MaxTxNum = "MaxTxNum"         // block_number_u64 -> max_tx_num_in_block_u64
 
 	Receipts = "Receipt"        // block_num_u64 -> canonical block receipts (non-canonical are not stored)
 	Log      = "TransactionLog" // block_num_u64 + txId -> logs of transaction
@@ -585,7 +584,6 @@ var ChaindataTables = []string{
 	Log,
 	Sequence,
 	EthTx,
-	NonCanonicalTxs,
 	TrieOfAccounts,
 	TrieOfStorage,
 	HashedAccounts,

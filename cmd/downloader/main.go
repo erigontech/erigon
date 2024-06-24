@@ -641,14 +641,11 @@ func checkChainName(ctx context.Context, dirs datadir.Dirs, chainName string) er
 		return err
 	}
 	defer db.Close()
-	if err := db.View(context.Background(), func(tx kv.Tx) error {
-		cc := tool.ChainConfig(tx)
-		if cc != nil && cc.ChainName != chainName {
+
+	if cc := tool.ChainConfigFromDB(db); cc != nil {
+		if params.ChainConfigByChainName(chainName).ChainID.Uint64() != cc.ChainID.Uint64() {
 			return fmt.Errorf("datadir already was configured with --chain=%s. can't change to '%s'", cc.ChainName, chainName)
 		}
-		return nil
-	}); err != nil {
-		return err
 	}
 	return nil
 }

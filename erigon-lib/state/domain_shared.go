@@ -351,7 +351,10 @@ func (sd *SharedDomains) get(table kv.Domain, key []byte) (v []byte, prevStep ui
 func (sd *SharedDomains) SizeEstimate() uint64 {
 	//sd.muMaps.RLock()
 	//defer sd.muMaps.RUnlock()
-	return uint64(sd.estSize) * 2 // multiply 2 here, to cover data-structures overhead. more precise accounting - expensive.
+
+	// multiply 2: to cover data-structures overhead (and keep accounting cheap)
+	// and muliply 2 more: for Commitment calculation when batch is full
+	return uint64(sd.estSize) * 4
 }
 
 func (sd *SharedDomains) LatestCommitment(prefix []byte) ([]byte, uint64, error) {
