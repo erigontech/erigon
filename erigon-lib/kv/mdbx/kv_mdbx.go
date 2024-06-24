@@ -830,9 +830,6 @@ type MdbxTx struct {
 	readOnly         bool
 	ctx              context.Context
 
-	cursors  map[uint64]*mdbx.Cursor
-	cursorID uint64
-
 	streams  map[int]kv.Closer
 	streamID int
 }
@@ -843,7 +840,6 @@ type MdbxCursor struct {
 	bucketName string
 	bucketCfg  kv.TableCfgItem
 	dbi        mdbx.DBI
-	id         uint64
 }
 
 func (db *MdbxKV) Env() *mdbx.Env {
@@ -1075,7 +1071,7 @@ func (tx *MdbxTx) Commit() error {
 		}
 		tx.db.leakDetector.Del(tx.id)
 	}()
-	tx.closeCursors()
+	tx.closeStreams()
 
 	//slowTx := 10 * time.Second
 	//if debug.SlowCommit() > 0 {
@@ -1126,7 +1122,7 @@ func (tx *MdbxTx) Rollback() {
 		}
 		tx.db.leakDetector.Del(tx.id)
 	}()
-	tx.closeCursors()
+	tx.closeStreams()
 	//tx.printDebugInfo()
 	tx.tx.Abort()
 }
@@ -1164,13 +1160,7 @@ func (tx *MdbxTx) PrintDebugInfo() {
 	*/
 }
 
-func (tx *MdbxTx) closeCursors() {
-	for _, c := range tx.cursors {
-		if c != nil {
-			c.Close()
-		}
-	}
-	tx.cursors = nil
+func (tx *MdbxTx) closeStreams() {
 	for _, c := range tx.streams {
 		if c != nil {
 			c.Close()
@@ -1339,8 +1329,7 @@ func (tx *MdbxTx) Cursor(bucket string) (kv.Cursor, error) {
 
 func (tx *MdbxTx) stdCursor(bucket string) (kv.RwCursor, error) {
 	b := tx.db.buckets[bucket]
-	c := &MdbxCursor{bucketName: bucket, tx: tx, bucketCfg: b, dbi: mdbx.DBI(tx.db.buckets[bucket].DBI), id: tx.cursorID}
-	tx.cursorID++
+	c := &MdbxCursor{bucketName: bucket, tx: tx, bucketCfg: b, dbi: mdbx.DBI(tx.db.buckets[bucket].DBI)}
 
 	var err error
 	c.c, err = tx.tx.OpenCursor(c.dbi)
@@ -1348,11 +1337,6 @@ func (tx *MdbxTx) stdCursor(bucket string) (kv.RwCursor, error) {
 		return nil, fmt.Errorf("table: %s, %w, stack: %s", c.bucketName, err, dbg.Stack())
 	}
 
-	// add to auto-cleanup on end of transactions
-	if tx.cursors == nil {
-		tx.cursors = map[uint64]*mdbx.Cursor{}
-	}
-	tx.cursors[c.id] = c.c
 	return c, nil
 }
 
@@ -1761,7 +1745,6 @@ func (c *MdbxCursor) Append(k []byte, v []byte) error {
 func (c *MdbxCursor) Close() {
 	if c.c != nil {
 		c.c.Close()
-		delete(c.tx.cursors, c.id)
 		c.c = nil
 	}
 }
