@@ -52,7 +52,7 @@ import (
 // - Each record key has `AutoIncrementID` format.
 // - Use external table to refer it.
 // - Only data which belongs to `canonical` block moving from DB to files.
-// - It doesn't need Unwind
+// - It doesn't need Unwind - because `AutoIncrementID` always-growing
 type Appendable struct {
 	cfg AppendableCfg
 
@@ -93,9 +93,7 @@ type AppendableCfg struct {
 	Dirs datadir.Dirs
 	DB   kv.RoDB // global db pointer. mostly for background warmup.
 
-	CanonicalMarkersTable string
-
-	iters IterFactory
+	iters CanonicalsReader
 }
 
 func NewAppendable(cfg AppendableCfg, aggregationStep uint64, filenameBase, table string, integrityCheck func(fromStep uint64, toStep uint64) bool, logger log.Logger) (*Appendable, error) {
@@ -343,15 +341,15 @@ func (tx *AppendableRoTx) Files() (res []string) {
 	return res
 }
 
-func (tx *AppendableRoTx) Get(ts uint64, dbtx kv.Tx) (v []byte, ok bool, err error) {
-	v, ok = tx.getFromFiles(ts)
+func (tx *AppendableRoTx) Get(txnID kv.TxnId, dbtx kv.Tx) (v []byte, ok bool, err error) {
+	v, ok = tx.getFromFiles(uint64(txnID))
 	if ok {
 		return v, true, nil
 	}
-	return tx.ap.getFromDBByTs(ts, dbtx)
+	return tx.ap.getFromDBByTs(uint64(txnID), dbtx)
 }
-func (tx *AppendableRoTx) Append(ts uint64, v []byte, dbtx kv.RwTx) error {
-	return dbtx.Put(tx.ap.table, hexutility.EncodeTs(ts), v)
+func (tx *AppendableRoTx) Append(txnID kv.TxnId, v []byte, dbtx kv.RwTx) error {
+	return dbtx.Put(tx.ap.table, hexutility.EncodeTs(uint64(txnID)), v)
 }
 
 func (tx *AppendableRoTx) getFromFiles(ts uint64) (v []byte, ok bool) {
@@ -394,11 +392,11 @@ func (ap *Appendable) getFromDB(k []byte, dbtx kv.Tx) ([]byte, bool, error) {
 }
 
 // Add - !NotThreadSafe. Must use WalRLock/BatchHistoryWriteEnd
-func (w *appendableBufferedWriter) Append(ts uint64, v []byte) error {
+func (w *appendableBufferedWriter) Append(ts kv.TxnId, v []byte) error {
 	if w.discard {
 		return nil
 	}
-	if err := w.tableCollector.Collect(hexutility.EncodeTs(ts), v); err != nil {
+	if err := w.tableCollector.Collect(hexutility.EncodeTs(uint64(ts)), v); err != nil {
 		return err
 	}
 	return nil
@@ -792,4 +790,8 @@ func (ap *Appendable) integrateDirtyFiles(sf AppendableFiles, txNumFrom, txNumTo
 	fi.decompressor = sf.decomp
 	fi.index = sf.index
 	ap.dirtyFiles.Set(fi)
+}
+
+func (tx *AppendableRoTx) Unwind(ctx context.Context, rwTx kv.RwTx, txFrom, txTo, limit uint64, logEvery *time.Ticker, forced, withWarmup bool, fn func(key []byte, txnum []byte) error) error {
+	return nil //Appendable type is unwind-less. See docs of Appendable type.
 }

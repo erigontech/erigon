@@ -138,7 +138,7 @@ type AccessListTracer struct {
 	excl               map[libcommon.Address]struct{} // Set of account to exclude from the list
 	list               accessList                     // Set of accounts and storage slots touched
 	state              evmtypes.IntraBlockState       // State for nonce calculation of created contracts
-	createdContracts   map[libcommon.Address]struct{} // Set of all addresses of contracts created during tx execution
+	createdContracts   map[libcommon.Address]struct{} // Set of all addresses of contracts created during txn execution
 	usedBeforeCreation map[libcommon.Address]struct{} // Set of all contract addresses first used before creation
 }
 
@@ -257,7 +257,7 @@ func (a *AccessListTracer) AccessListSorted() types2.AccessList {
 	return a.list.accessListSorted()
 }
 
-// CreatedContracts returns the set of all addresses of contracts created during tx execution.
+// CreatedContracts returns the set of all addresses of contracts created during txn execution.
 func (a *AccessListTracer) CreatedContracts() map[libcommon.Address]struct{} {
 	return a.createdContracts
 }
