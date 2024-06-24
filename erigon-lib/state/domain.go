@@ -299,7 +299,7 @@ func (d *Domain) scanStateFiles(fileNames []string) (garbageFiles []*filesItem) 
 		}
 
 		domainName, _ := kv.String2Domain(d.filenameBase)
-		if !d.integrityCheck(domainName, startStep, endStep) {
+		if d.integrityCheck != nil && !d.integrityCheck(domainName, startStep, endStep) {
 			d.logger.Debug("[agg] skip garbage file", "name", name)
 			continue
 		}
