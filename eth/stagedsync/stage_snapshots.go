@@ -239,7 +239,7 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 		cstate = snapshotsync.AlsoCaplin
 	}
 
-	subStages := diagnostics.InitSubStagesFromList([]string{"Download header-chain", "Download snapshots", "Indexing", "Fill DB"})
+	subStages := diagnostics.InitSubStagesFromList([]string{"Download header-chain", "Download snapshots", "E2 Indexing", "E3 Indexing", "Fill DB"})
 	diagnostics.Send(diagnostics.SetSyncSubStageList{
 		Stage: string(stages.Snapshots),
 		List:  subStages,
@@ -264,7 +264,7 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 		cfg.notifier.Events.OnNewSnapshot()
 	}
 
-	diagnostics.Send(diagnostics.CurrentSyncSubStage{SubStage: "Indexing"})
+	diagnostics.Send(diagnostics.CurrentSyncSubStage{SubStage: "E2 Indexing"})
 	if err := cfg.blockRetire.BuildMissedIndicesIfNeed(ctx, s.LogPrefix(), cfg.notifier.Events, &cfg.chainConfig); err != nil {
 		return err
 	}
@@ -279,6 +279,8 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 	if err := cfg.agg.BuildOptionalMissedIndices(ctx, indexWorkers); err != nil {
 		return err
 	}
+
+	diagnostics.Send(diagnostics.CurrentSyncSubStage{SubStage: "E3 Indexing"})
 	if err := cfg.agg.BuildMissedIndices(ctx, indexWorkers); err != nil {
 		return err
 	}
@@ -325,6 +327,7 @@ func FillDBFromSnapshots(logPrefix string, ctx context.Context, tx kv.RwTx, dirs
 	for _, stage := range []stages.SyncStage{stages.Headers, stages.Bodies, stages.BlockHashes, stages.Senders} {
 		startTime := time.Now()
 		progress, err := stages.GetStageProgress(tx, stage)
+		log.Info(fmt.Sprintf("[DIAGGGGG] %s stage progress: %d", stage, progress))
 		if err != nil {
 			return fmt.Errorf("get %s stage progress to advance: %w", stage, err)
 		}
