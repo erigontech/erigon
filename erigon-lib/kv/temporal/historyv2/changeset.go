@@ -162,16 +162,28 @@ func ForEach(db kv.Tx, bucket string, startkey []byte, walker func(blockN uint64
 		return walker(blockN, k, v)
 	})
 }
-func ForPrefix(db kv.Tx, bucket string, startkey []byte, walker func(blockN uint64, k, v []byte) error) error {
+func Prefix(db kv.Tx, bucket string, startkey []byte, walker func(blockN uint64, k, v []byte) error) error {
 	var blockN uint64
-	return db.ForPrefix(bucket, startkey, func(k, v []byte) error {
-		var err error
+	kvs, err := db.Prefix(bucket, startkey)
+	if err != nil {
+		return err
+	}
+	var k, v []byte
+	for kvs.HasNext() {
+		k, v, err = kvs.Next()
+		if err != nil {
+			return err
+		}
 		blockN, k, v, err = FromDBFormat(k, v)
 		if err != nil {
 			return err
 		}
-		return walker(blockN, k, v)
-	})
+		err = walker(blockN, k, v)
+		if err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func Truncate(tx kv.RwTx, from uint64) error {

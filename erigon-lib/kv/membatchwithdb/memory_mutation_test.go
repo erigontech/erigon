@@ -20,8 +20,11 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/ledgerwatch/erigon-lib/common/datadir"
 	"github.com/ledgerwatch/erigon-lib/kv/memdb"
+	"github.com/ledgerwatch/erigon-lib/kv/temporal"
 	"github.com/ledgerwatch/erigon-lib/log/v3"
+	stateLib "github.com/ledgerwatch/erigon-lib/state"
 
 	"github.com/ledgerwatch/erigon-lib/kv"
 )
@@ -201,29 +204,62 @@ func TestForEach(t *testing.T) {
 	require.Equal(t, []string{"value", "value1", "value2", "value3", "value5"}, values1)
 }
 
-func TestForPrefix(t *testing.T) {
-	_, rwTx := memdb.NewTestTx(t)
+func NewTestTemporalDb(tb testing.TB) (kv.RwDB, kv.RwTx, *stateLib.Aggregator) {
+	tb.Helper()
+	db := memdb.NewStateDB(tb.TempDir())
+	tb.Cleanup(db.Close)
+
+	//cr := rawdb.NewCanonicalReader()
+	agg, err := stateLib.NewAggregator(context.Background(), datadir.New(tb.TempDir()), 16, db, nil, log.New())
+	if err != nil {
+		tb.Fatal(err)
+	}
+	tb.Cleanup(agg.Close)
+
+	_db, err := temporal.New(db, agg)
+	if err != nil {
+		tb.Fatal(err)
+	}
+	tx, err := _db.BeginTemporalRw(context.Background()) //nolint:gocritic
+	if err != nil {
+		tb.Fatal(err)
+	}
+	tb.Cleanup(tx.Rollback)
+	return _db, tx, agg
+}
+
+func TestPrefix(t *testing.T) {
+	_, rwTx, _ := NewTestTemporalDb(t)
 
 	initializeDbNonDupSort(rwTx)
 
-	batch := NewMemoryBatch(rwTx, "", log.Root())
+	kvs, err := rwTx.Prefix(kv.HashedAccounts, []byte("AB"))
+	require.Nil(t, err)
+	require.False(t, kvs.HasNext())
+
 	var keys1 []string
 	var values1 []string
-
-	_, err := batch.Prefix(kv.HashedAccounts, []byte("AB"))
+	kvs, err = rwTx.Prefix(kv.HashedAccounts, []byte("AAAA"))
 	require.Nil(t, err)
-	require.Nil(t, keys1)
-	require.Nil(t, values1)
-
-	_, err = batch.ForPrefix(kv.HashedAccounts, []byte("AAAA"))
-	require.Nil(t, err)
+	for kvs.HasNext() {
+		k1, v1, err := kvs.Next()
+		require.Nil(t, err)
+		keys1 = append(keys1, string(k1))
+		values1 = append(values1, string(v1))
+	}
 	require.Equal(t, []string{"AAAA"}, keys1)
 	require.Equal(t, []string{"value"}, values1)
 
 	var keys []string
 	var values []string
-	_, err = batch.Prefix(kv.HashedAccounts, []byte("C"))
+	kvs, err = rwTx.Prefix(kv.HashedAccounts, []byte("C"))
 	require.Nil(t, err)
+	for kvs.HasNext() {
+		k1, v1, err := kvs.Next()
+		require.Nil(t, err)
+		keys = append(keys, string(k1))
+		values = append(values, string(v1))
+	}
 	require.Equal(t, []string{"CAAA", "CBAA", "CCAA"}, keys)
 	require.Equal(t, []string{"value1", "value2", "value3"}, values)
 }

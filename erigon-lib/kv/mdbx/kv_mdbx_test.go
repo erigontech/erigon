@@ -392,21 +392,36 @@ func TestForAmount(t *testing.T) {
 	require.Nil(t, keys3)
 }
 
-func TestForPrefix(t *testing.T) {
+func TestPrefix(t *testing.T) {
 	_, tx, _ := BaseCase(t)
 
 	table := "Table"
-
-	keys, err := tx.Prefix(table, []byte("key"))
+	var keys, keys1, keys2 []string
+	kvs, err := tx.Prefix(table, []byte("key"))
 	require.Nil(t, err)
+	for kvs.HasNext() {
+		k1, _, err := kvs.Next()
+		require.Nil(t, err)
+		keys = append(keys, string(k1))
+	}
 	require.Equal(t, []string{"key1", "key1", "key3", "key3"}, keys)
 
-	keys1, err := tx.Prefix(table, []byte("key1"))
+	kvs, err = tx.Prefix(table, []byte("key1"))
 	require.Nil(t, err)
+	for kvs.HasNext() {
+		k1, _, err := kvs.Next()
+		require.Nil(t, err)
+		keys1 = append(keys1, string(k1))
+	}
 	require.Equal(t, []string{"key1", "key1"}, keys1)
 
-	keys2, err := tx.Prefix(table, []byte("e"))
+	kvs, err = tx.Prefix(table, []byte("e"))
 	require.Nil(t, err)
+	for kvs.HasNext() {
+		k1, _, err := kvs.Next()
+		require.Nil(t, err)
+		keys2 = append(keys2, string(k1))
+	}
 	require.Nil(t, keys2)
 }
 

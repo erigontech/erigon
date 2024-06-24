@@ -229,7 +229,7 @@ type Getter interface {
 	//   - implementations of local db - stop
 	//   - implementations of remote db - do not handle this error and may finish (send all entries to client) before error happen.
 	ForEach(table string, fromPrefix []byte, walker func(k, v []byte) error) error
-	ForPrefix(table string, prefix []byte, walker func(k, v []byte) error) error
+	Prefix(table string, prefix []byte) (iter.KV, error)
 	ForAmount(table string, prefix []byte, amount uint32, walker func(k, v []byte) error) error
 }
 
@@ -421,7 +421,6 @@ type Tx interface {
 	// --- High-Level deprecated methods ---
 
 	ForEach(table string, fromPrefix []byte, walker func(k, v []byte) error) error
-	ForPrefix(table string, prefix []byte, walker func(k, v []byte) error) error
 	ForAmount(table string, prefix []byte, amount uint32, walker func(k, v []byte) error) error
 
 	// Pointer to the underlying C transaction handle (e.g. *C.MDBX_txn)
