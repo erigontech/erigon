@@ -119,12 +119,12 @@ func (b *BpsTree) WarmUp(kv ArchiveGetter) error {
 
 	// instead of using leveled iteration we can use whole list of cached nodes at once
 	for ik := uint64(0); ik < k; ik += b.M / mFraqtion {
-		_, key, err := b.keyCmpFunc(nil, uint64(ik), kv)
+		_, key, err := b.keyCmpFunc(nil, ik, kv)
 		if err != nil {
 			return err
 		}
 		if key != nil {
-			mx[0] = append(mx[0], Node{off: b.offt.Get(uint64(ik)), prefix: common.Copy(key), di: uint64(ik)})
+			mx[0] = append(mx[0], Node{off: b.offt.Get(ik), prefix: common.Copy(key), di: uint64(ik)})
 		}
 	}
 
