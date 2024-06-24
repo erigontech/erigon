@@ -441,27 +441,6 @@ func CanonicalTransactions(db kv.Getter, baseTxId uint64, amount uint32) ([]type
 	txs = txs[:i] // user may request big "amount", but db can return small "amount". Return as much as we found.
 	return txs, nil
 }
-
-func NonCanonicalTransactions(db kv.Getter, baseTxId uint64, amount uint32) ([]types.Transaction, error) {
-	if amount == 0 {
-		return []types.Transaction{}, nil
-	}
-	txs := make([]types.Transaction, amount)
-	i := uint32(0)
-	if err := db.ForAmount(kv.NonCanonicalTxs, hexutility.EncodeTs(baseTxId), amount, func(k, v []byte) error {
-		var decodeErr error
-		if txs[i], decodeErr = types.DecodeTransaction(v); decodeErr != nil {
-			return decodeErr
-		}
-		i++
-		return nil
-	}); err != nil {
-		return nil, err
-	}
-	txs = txs[:i] // user may request big "amount", but db can return small "amount". Return as much as we found.
-	return txs, nil
-}
-
 func WriteTransactions(db kv.RwTx, txs []types.Transaction, baseTxId uint64) error {
 	txId := baseTxId
 	txIdKey := make([]byte, 8)
@@ -1020,7 +999,7 @@ func WriteBlock(db kv.RwTx, block *types.Block) error {
 
 // PruneBlocks - delete [1, to) old blocks after moving it to snapshots.
 // keeps genesis in db: [1, to)
-// doesn't change sequences of kv.EthTx and kv.NonCanonicalTxs
+// doesn't change sequences of kv.EthTx
 // doesn't delete Receipts, Senders, Canonical markers, TotalDifficulty
 // Returns false if there is nothing to prune
 func PruneBlocks(tx kv.RwTx, blockTo uint64, blocksDeleteLimit int) (deleted int, err error) {
@@ -1094,7 +1073,7 @@ func TruncateCanonicalChain(ctx context.Context, db kv.RwTx, from uint64) error 
 }
 
 // TruncateBlocks - delete block >= blockFrom
-// does decrement sequences of kv.EthTx and kv.NonCanonicalTxs
+// does decrement sequences of kv.EthTx
 // doesn't delete Receipts, Senders, Canonical markers, TotalDifficulty
 func TruncateBlocks(ctx context.Context, tx kv.RwTx, blockFrom uint64) error {
 	logEvery := time.NewTicker(20 * time.Second)
