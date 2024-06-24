@@ -130,7 +130,7 @@ func DefaultStages(ctx context.Context,
 		//{
 		//	ID:          stages.CustomTrace,
 		//	Description: "Re-Execute blocks on history state - with custom tracer",
-		//	Disabled:    dbg.StagesOnlyBlocks ,
+		//	Disabled:    dbg.StagesOnlyBlocks,
 		//	Forward: func(badBlockUnwind bool, s *StageState, u Unwinder, txc wrap.TxContainer, logger log.Logger) error {
 		//		cfg := StageCustomTraceCfg(exec.db, exec.prune, exec.dirs, exec.blockReader, exec.chainConfig, exec.engine, exec.genesis, &exec.syncCfg)
 		//		return SpawnCustomTrace(s, txc, cfg, ctx, 0, logger)
@@ -710,7 +710,7 @@ var DefaultForwardOrder = UnwindOrder{
 	// Stages below don't use Internet
 	stages.Senders,
 	stages.Execution,
-	stages.CustomTrace,
+	//stages.CustomTrace,
 	stages.CallTraces,
 	stages.AccountHistoryIndex,
 	stages.StorageHistoryIndex,
@@ -734,7 +734,7 @@ var DefaultUnwindOrder = UnwindOrder{
 	stages.AccountHistoryIndex,
 	stages.CallTraces,
 
-	stages.CustomTrace,
+	//stages.CustomTrace,
 	stages.Execution,
 	stages.Senders,
 
