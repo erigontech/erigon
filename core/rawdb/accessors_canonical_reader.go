@@ -3,6 +3,7 @@ package rawdb
 import (
 	"encoding/binary"
 	"fmt"
+
 	common2 "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/hexutility"
 	"github.com/ledgerwatch/erigon-lib/kv"
@@ -56,7 +57,7 @@ func (*CanonicalReader) TxNum2ID(tx kv.Tx, blockNum uint64, blockHash common2.Ha
 		}
 		return kv.TxnId(txNum), nil
 	}
-	return kv.TxnId(b.BaseTxId), nil
+	return kv.TxnId(b.BaseTxnID), nil
 }
 
 func (*CanonicalReader) BaseTxnID(tx kv.Tx, blockNum uint64, blockHash common2.Hash) (kv.TxnId, error) {
@@ -76,8 +77,7 @@ func (*CanonicalReader) BaseTxnID(tx kv.Tx, blockNum uint64, blockHash common2.H
 		}
 		return kv.TxnId(_min), nil
 	}
-	return kv.TxnId(b.BaseTxId), nil
-
+	return kv.TxnId(b.BaseTxnID), nil
 }
 
 func (*CanonicalReader) LastFrozenTxNum(tx kv.Tx) (kv.TxnId, error) {
