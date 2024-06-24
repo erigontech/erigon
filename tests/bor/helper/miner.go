@@ -7,9 +7,11 @@ import (
 	"fmt"
 	"math/big"
 	"os"
+	"testing"
 	"time"
 
 	"github.com/ledgerwatch/erigon/polygon/bor/borcfg"
+	"github.com/ledgerwatch/erigon/turbo/testlog"
 
 	"github.com/c2h5oh/datasize"
 
@@ -78,11 +80,17 @@ func NewNodeConfig() *nodecfg.Config {
 }
 
 // InitNode initializes a node with the given genesis file and config
-func InitMiner(ctx context.Context, genesis *types.Genesis, privKey *ecdsa.PrivateKey, withoutHeimdall bool, minerID int) (*node.Node, *eth.Ethereum, error) {
+func InitMiner(ctx context.Context, t *testing.T, genesis *types.Genesis, privKey *ecdsa.PrivateKey, withoutHeimdall bool, minerID int) (*node.Node, *eth.Ethereum, error) {
 	// Define the basic configurations for the Ethereum node
 	ddir, _ := os.MkdirTemp("", "")
 
-	logger := log.New()
+	var logger log.Logger
+	if val, ok := os.LookupEnv("TEST_LOGGER"); ok && val == "true" {
+		logger = testlog.Logger(t, log.LvlDebug)
+	} else {
+		logger = log.New()
+	}
+
 	inat, err := nat.Parse("stun")
 	if err != nil {
 		return nil, nil, err
