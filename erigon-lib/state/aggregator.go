@@ -144,7 +144,7 @@ func NewAggregator(ctx context.Context, dirs datadir.Dirs, aggregationStep uint6
 		//  - problem! `commitment` domain doesn't have step X in DB
 		//  - means we must ignore step X in another domains
 		switch name {
-		case kv.AccountsDomain, kv.StorageDomain, kv.Code:
+		case kv.AccountsDomain, kv.StorageDomain, kv.CodeDomain:
 			if toStep-fromStep > 1 { // only recently built files
 				return true
 			}
