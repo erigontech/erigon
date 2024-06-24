@@ -185,7 +185,7 @@ func TestGetHeader(t *testing.T) {
 				require.Equal(t, expectMethod, req.Method)
 				return &http.Response{
 					StatusCode: http.StatusOK,
-					Body:       io.NopCloser(bytes.NewBuffer([]byte(mockHeaderBytes))),
+					Body:       io.NopCloser(bytes.NewBuffer(mockHeaderBytes)),
 					Request:    req.Clone(context.Background()),
 				}, nil
 			}),
