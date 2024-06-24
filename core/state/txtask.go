@@ -8,10 +8,10 @@ import (
 
 	"github.com/holiman/uint256"
 
-	"github.com/ledgerwatch/erigon-lib/state"
-
 	"github.com/ledgerwatch/erigon-lib/chain"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/log/v3"
+	"github.com/ledgerwatch/erigon-lib/state"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/core/types/accounts"
 	"github.com/ledgerwatch/erigon/core/vm/evmtypes"
@@ -66,6 +66,23 @@ type TxTask struct {
 	Requests types.Requests
 }
 
+func (t *TxTask) CreateReceipt(cumulativeGasUsed uint64) *types.Receipt {
+	receipt := &types.Receipt{
+		BlockNumber:       t.Header.Number,
+		BlockHash:         t.BlockHash,
+		TransactionIndex:  uint(t.TxIndex),
+		Type:              t.Tx.Type(),
+		CumulativeGasUsed: cumulativeGasUsed,
+		TxHash:            t.Tx.Hash(),
+		Logs:              t.Logs,
+	}
+	if t.Failed {
+		receipt.Status = types.ReceiptStatusFailed
+	} else {
+		receipt.Status = types.ReceiptStatusSuccessful
+	}
+	return receipt
+}
 func (t *TxTask) Reset() {
 	t.BalanceIncreaseSet = nil
 	returnReadList(t.ReadLists)
@@ -311,6 +328,9 @@ func (q *ResultsQueueIter) Close() {
 	q.q.Unlock()
 }
 func (q *ResultsQueueIter) HasNext(outputTxNum uint64) bool {
+	if len(*q.results) > 0 {
+		log.Warn("[dbg] HasNext", "(*q.results)[0].TxNum", (*q.results)[0].TxNum)
+	}
 	return len(*q.results) > 0 && (*q.results)[0].TxNum == outputTxNum
 }
 func (q *ResultsQueueIter) PopNext() *TxTask {

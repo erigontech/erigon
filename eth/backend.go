@@ -1150,11 +1150,9 @@ func (s *Ethereum) StartMining(ctx context.Context, db kv.RwDB, stateDiffClient 
 		}
 	}
 
-	//if borcfg == nil {
 	if !miner.MiningConfig.Enabled {
 		return nil
 	}
-	//}
 
 	// Configure the local mining address
 	eb, err := s.Etherbase()
@@ -1163,61 +1161,45 @@ func (s *Ethereum) StartMining(ctx context.Context, db kv.RwDB, stateDiffClient 
 		return fmt.Errorf("etherbase missing: %w", err)
 	}
 
-	if borcfg != nil {
-		if miner.MiningConfig.Enabled {
-			if miner.MiningConfig.SigKey == nil {
-				s.logger.Error("Etherbase account unavailable locally", "err", err)
-				return fmt.Errorf("signer missing: %w", err)
-			}
-
-			borcfg.Authorize(eb, func(_ libcommon.Address, mimeType string, message []byte) ([]byte, error) {
-				return crypto.Sign(crypto.Keccak256(message), miner.MiningConfig.SigKey)
-			})
-
-			if !s.config.WithoutHeimdall {
-				err := stagedsync.FetchSpanZeroForMiningIfNeeded(
-					ctx,
-					s.chainDB,
-					s.blockReader,
-					borcfg.HeimdallClient,
-					logger,
-				)
-				if err != nil {
-					return err
-				}
-			}
-		} else {
-			// for the bor dev network without heimdall we need the authorizer to be set otherwise there is no
-			// validator defined in the bor validator set and non mining nodes will reject all blocks
-			// this assumes in this mode we're only running a single validator
-
-			if s.chainConfig.ChainName == networkname.BorDevnetChainName && s.config.WithoutHeimdall {
-				borcfg.Authorize(eb, func(addr libcommon.Address, _ string, _ []byte) ([]byte, error) {
-					return nil, &valset.UnauthorizedSignerError{Number: 0, Signer: addr.Bytes()}
-				})
-			}
-
-			return nil
-		}
+	if borcfg == nil {
+		s.logger.Error("mining is not supported after the Merge")
+		return errors.New("mining is not supported after the Merge")
 	}
 
-	var clq *clique.Clique
-	if c, ok := s.engine.(*clique.Clique); ok {
-		clq = c
-	} else if cl, ok := s.engine.(*merge.Merge); ok {
-		if c, ok := cl.InnerEngine().(*clique.Clique); ok {
-			clq = c
-		}
-	}
-	if clq != nil {
+	if miner.MiningConfig.Enabled {
 		if miner.MiningConfig.SigKey == nil {
 			s.logger.Error("Etherbase account unavailable locally", "err", err)
 			return fmt.Errorf("signer missing: %w", err)
 		}
 
-		clq.Authorize(eb, func(_ libcommon.Address, mimeType string, message []byte) ([]byte, error) {
+		borcfg.Authorize(eb, func(_ libcommon.Address, mimeType string, message []byte) ([]byte, error) {
 			return crypto.Sign(crypto.Keccak256(message), miner.MiningConfig.SigKey)
 		})
+
+		if !s.config.WithoutHeimdall {
+			err := stagedsync.FetchSpanZeroForMiningIfNeeded(
+				ctx,
+				s.chainDB,
+				s.blockReader,
+				borcfg.HeimdallClient,
+				logger,
+			)
+			if err != nil {
+				return err
+			}
+		}
+	} else {
+		// for the bor dev network without heimdall we need the authorizer to be set otherwise there is no
+		// validator defined in the bor validator set and non mining nodes will reject all blocks
+		// this assumes in this mode we're only running a single validator
+
+		if s.chainConfig.ChainName == networkname.BorDevnetChainName && s.config.WithoutHeimdall {
+			borcfg.Authorize(eb, func(addr libcommon.Address, _ string, _ []byte) ([]byte, error) {
+				return nil, &valset.UnauthorizedSignerError{Number: 0, Signer: addr.Bytes()}
+			})
+		}
+
+		return nil
 	}
 
 	streamCtx, streamCancel := context.WithCancel(ctx)
@@ -1445,7 +1427,8 @@ func setUpBlockReader(ctx context.Context, db kv.RwDB, dirs datadir.Dirs, snConf
 	if isBor {
 		allBorSnapshots = freezeblocks.NewBorRoSnapshots(snConfig.Snapshot, dirs.Snap, minFrozenBlock, logger)
 	}
-	agg, err := libstate.NewAggregator(ctx, dirs, config3.HistoryV3AggregationStep, db, logger)
+	cr := rawdb.NewCanonicalReader()
+	agg, err := libstate.NewAggregator(ctx, dirs, config3.HistoryV3AggregationStep, db, cr, logger)
 	if err != nil {
 		return nil, nil, nil, nil, nil, err
 	}
