@@ -219,6 +219,8 @@ func StageHashStateCfg(db kv.RwDB, dirs datadir.Dirs) HashStateCfg {
 	}
 }
 
+var ErrInvalidStateRootHash = fmt.Errorf("invalid state root hash")
+
 func RebuildPatriciaTrieBasedOnFiles(rwTx kv.RwTx, cfg TrieCfg, ctx context.Context, logger log.Logger) (libcommon.Hash, error) {
 	useExternalTx := rwTx != nil
 	if !useExternalTx {
