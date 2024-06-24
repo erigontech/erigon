@@ -10,20 +10,24 @@ import (
 	"github.com/ledgerwatch/erigon/cl/cltypes/solid"
 )
 
-type ExecutionPayloadHeader struct {
-	Version string `json:"version"`
-	Data    struct {
-		Message struct {
-			Header             *cltypes.Eth1Header                    `json:"header"`
-			BlobKzgCommitments *solid.ListSSZ[*cltypes.KZGCommitment] `json:"blob_kzg_commitments"`
-			Value              string                                 `json:"value"`
-			PubKey             common.Bytes48                         `json:"pubkey"`
-		} `json:"message"`
-		Signature common.Bytes96 `json:"signature"`
-	} `json:"data"`
+type ExecutionHeader struct {
+	Version string              `json:"version"`
+	Data    ExecutionHeaderData `json:"data"`
 }
 
-func (h ExecutionPayloadHeader) BlockValue() *big.Int {
+type ExecutionHeaderData struct {
+	Message   ExecutionHeaderMessage `json:"message"`
+	Signature common.Bytes96         `json:"signature"`
+}
+
+type ExecutionHeaderMessage struct {
+	Header             *cltypes.Eth1Header                    `json:"header"`
+	BlobKzgCommitments *solid.ListSSZ[*cltypes.KZGCommitment] `json:"blob_kzg_commitments"`
+	Value              string                                 `json:"value"`
+	PubKey             common.Bytes48                         `json:"pubkey"`
+}
+
+func (h ExecutionHeader) BlockValue() *big.Int {
 	if h.Data.Message.Value == "" {
 		return nil
 	}

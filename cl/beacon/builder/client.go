@@ -70,11 +70,11 @@ func (b *builderClient) RegisterValidator(ctx context.Context, registers []*clty
 	return err
 }
 
-func (b *builderClient) GetHeader(ctx context.Context, slot int64, parentHash common.Hash, pubKey common.Bytes48) (*ExecutionPayloadHeader, error) {
+func (b *builderClient) GetHeader(ctx context.Context, slot int64, parentHash common.Hash, pubKey common.Bytes48) (*ExecutionHeader, error) {
 	// https://ethereum.github.io/builder-specs/#/Builder/getHeader
 	path := fmt.Sprintf("/eth/v1/builder/header/%d/%s/%s", slot, parentHash.Hex(), pubKey.Hex())
 	url := b.url.JoinPath(path).String()
-	header, err := httpCall[ExecutionPayloadHeader](ctx, b.httpClient, http.MethodGet, url, nil, nil)
+	header, err := httpCall[ExecutionHeader](ctx, b.httpClient, http.MethodGet, url, nil, nil)
 	if err != nil {
 		log.Warn("[mev builder] httpCall error on GetExecutionPayloadHeader", "err", err, "slot", slot, "parentHash", parentHash.Hex(), "pubKey", pubKey.Hex())
 		return nil, err

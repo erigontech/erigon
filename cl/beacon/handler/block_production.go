@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"math/big"
@@ -263,7 +264,7 @@ func (a *ApiHandler) produceBlock(
 
 	// get the builder payload
 	var (
-		builderHeader *builder.ExecutionPayloadHeader
+		builderHeader *builder.ExecutionHeader
 		builderErr    error
 	)
 	go func() {
@@ -346,7 +347,7 @@ func (a *ApiHandler) getBuilderPayload(
 	baseBlock *cltypes.BeaconBlock,
 	baseState *state.CachingBeaconState,
 	targetSlot uint64,
-) (*builder.ExecutionPayloadHeader, error) {
+) (*builder.ExecutionHeader, error) {
 	if !a.routerCfg.Builder || a.builderClient == nil {
 		return nil, errBuilderNotEnabled
 	}
@@ -796,7 +797,26 @@ func (a *ApiHandler) publishBlindedBlocks(w http.ResponseWriter, r *http.Request
 
 	// check blob bundle
 	if blobsBundle != nil && blockPayload.Version() >= clparams.DenebVersion {
-		if err := blobsBundle.Check(); err != nil {
+		err := func(b *engine_types.BlobsBundleV1) error {
+			// check the length of the blobs bundle
+			if len(b.Commitments) != len(b.Proofs) || len(b.Commitments) != len(b.Blobs) {
+				return errors.New("commitments, proofs and blobs must have the same length")
+			}
+			for i := range b.Commitments {
+				// check the length of each blob
+				if len(b.Commitments[i]) != length.Bytes48 {
+					return errors.New("commitment must be 48 bytes long")
+				}
+				if len(b.Proofs[i]) != length.Bytes48 {
+					return errors.New("proof must be 48 bytes long")
+				}
+				if len(b.Blobs[i]) != 4096*32 {
+					return errors.New("blob must be 4096 * 32 bytes long")
+				}
+			}
+			return nil
+		}(blobsBundle)
+		if err != nil {
 			return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, err)
 		}
 		// check commitments

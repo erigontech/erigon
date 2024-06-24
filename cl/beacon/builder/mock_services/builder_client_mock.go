@@ -43,41 +43,41 @@ func (m *MockBuilderClient) EXPECT() *MockBuilderClientMockRecorder {
 	return m.recorder
 }
 
-// GetExecutionPayloadHeader mocks base method.
-func (m *MockBuilderClient) GetExecutionPayloadHeader(arg0 context.Context, arg1 int64, arg2 common.Hash, arg3 common.Bytes48) (*builder.ExecutionPayloadHeader, error) {
+// GetHeader mocks base method.
+func (m *MockBuilderClient) GetHeader(arg0 context.Context, arg1 int64, arg2 common.Hash, arg3 common.Bytes48) (*builder.ExecutionHeader, error) {
 	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "GetExecutionPayloadHeader", arg0, arg1, arg2, arg3)
-	ret0, _ := ret[0].(*builder.ExecutionPayloadHeader)
+	ret := m.ctrl.Call(m, "GetHeader", arg0, arg1, arg2, arg3)
+	ret0, _ := ret[0].(*builder.ExecutionHeader)
 	ret1, _ := ret[1].(error)
 	return ret0, ret1
 }
 
-// GetExecutionPayloadHeader indicates an expected call of GetExecutionPayloadHeader.
-func (mr *MockBuilderClientMockRecorder) GetExecutionPayloadHeader(arg0, arg1, arg2, arg3 any) *MockBuilderClientGetExecutionPayloadHeaderCall {
+// GetHeader indicates an expected call of GetHeader.
+func (mr *MockBuilderClientMockRecorder) GetHeader(arg0, arg1, arg2, arg3 any) *MockBuilderClientGetHeaderCall {
 	mr.mock.ctrl.T.Helper()
-	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetExecutionPayloadHeader", reflect.TypeOf((*MockBuilderClient)(nil).GetExecutionPayloadHeader), arg0, arg1, arg2, arg3)
-	return &MockBuilderClientGetExecutionPayloadHeaderCall{Call: call}
+	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetHeader", reflect.TypeOf((*MockBuilderClient)(nil).GetHeader), arg0, arg1, arg2, arg3)
+	return &MockBuilderClientGetHeaderCall{Call: call}
 }
 
-// MockBuilderClientGetExecutionPayloadHeaderCall wrap *gomock.Call
-type MockBuilderClientGetExecutionPayloadHeaderCall struct {
+// MockBuilderClientGetHeaderCall wrap *gomock.Call
+type MockBuilderClientGetHeaderCall struct {
 	*gomock.Call
 }
 
 // Return rewrite *gomock.Call.Return
-func (c *MockBuilderClientGetExecutionPayloadHeaderCall) Return(arg0 *builder.ExecutionPayloadHeader, arg1 error) *MockBuilderClientGetExecutionPayloadHeaderCall {
+func (c *MockBuilderClientGetHeaderCall) Return(arg0 *builder.ExecutionHeader, arg1 error) *MockBuilderClientGetHeaderCall {
 	c.Call = c.Call.Return(arg0, arg1)
 	return c
 }
 
 // Do rewrite *gomock.Call.Do
-func (c *MockBuilderClientGetExecutionPayloadHeaderCall) Do(f func(context.Context, int64, common.Hash, common.Bytes48) (*builder.ExecutionPayloadHeader, error)) *MockBuilderClientGetExecutionPayloadHeaderCall {
+func (c *MockBuilderClientGetHeaderCall) Do(f func(context.Context, int64, common.Hash, common.Bytes48) (*builder.ExecutionHeader, error)) *MockBuilderClientGetHeaderCall {
 	c.Call = c.Call.Do(f)
 	return c
 }
 
 // DoAndReturn rewrite *gomock.Call.DoAndReturn
-func (c *MockBuilderClientGetExecutionPayloadHeaderCall) DoAndReturn(f func(context.Context, int64, common.Hash, common.Bytes48) (*builder.ExecutionPayloadHeader, error)) *MockBuilderClientGetExecutionPayloadHeaderCall {
+func (c *MockBuilderClientGetHeaderCall) DoAndReturn(f func(context.Context, int64, common.Hash, common.Bytes48) (*builder.ExecutionHeader, error)) *MockBuilderClientGetHeaderCall {
 	c.Call = c.Call.DoAndReturn(f)
 	return c
 }
