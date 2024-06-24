@@ -51,7 +51,7 @@ func NewService(
 	p2pService := p2p.NewService(maxPeers, logger, sentryClient, statusDataProvider.GetStatusData)
 	heimdallClient := heimdall.NewHeimdallClient(heimdallUrl, logger)
 	heimdallService := heimdall.NewHeimdall(heimdallClient, logger)
-	heimdallServiceV2 := heimdall.InitialiseService(heimdallUrl, dataDir, tmpDir, logger)
+	heimdallServiceV2 := heimdall.AssembleService(heimdallUrl, dataDir, tmpDir, logger)
 	execution := NewExecutionClient(executionClient)
 	polygonBridge := bridge.NewBridge(dataDir, logger, borConfig, heimdallClient.FetchStateSyncEvents, bor.GenesisContractStateReceiverABI())
 	store := NewStore(logger, execution, polygonBridge)

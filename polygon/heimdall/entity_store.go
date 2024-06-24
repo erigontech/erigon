@@ -49,7 +49,7 @@ func newMdbxEntityStore[TEntity Entity](
 	table string,
 	makeEntity func() TEntity,
 	blockNumToIdIndexFactory RangeIndexFactory,
-) EntityStore[TEntity] {
+) *mdbxEntityStore[TEntity] {
 	return &mdbxEntityStore[TEntity]{
 		db:    db,
 		label: label,

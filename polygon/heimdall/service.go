@@ -28,7 +28,7 @@ func makeType[T any]() *T {
 	return new(T)
 }
 
-func InitialiseService(heimdallUrl string, dataDir string, tmpDir string, logger log.Logger) Service {
+func AssembleService(heimdallUrl string, dataDir string, tmpDir string, logger log.Logger) Service {
 	persistence := NewMdbxPersistence(logger, dataDir, tmpDir)
 	client := NewHeimdallClient(heimdallUrl, logger)
 	return NewService(client, persistence, logger)
