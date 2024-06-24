@@ -229,7 +229,11 @@ func (d *Domain) closeFilesAfterStep(lowerBound uint64) {
 	})
 	for _, item := range toClose {
 		d.dirtyFiles.Delete(item)
-		log.Debug(fmt.Sprintf("[snapshots] closing %s, because step %d has not enough files (was not complete). stack: %s", item.decompressor.FileName(), lowerBound, dbg.Stack()))
+		fName := ""
+		if item.decompressor != nil {
+			fName = item.decompressor.FileName()
+		}
+		log.Debug(fmt.Sprintf("[snapshots] closing %s, because step %d has not enough files (was not complete)", fName, lowerBound))
 		item.closeFiles()
 	}
 
@@ -242,7 +246,11 @@ func (d *Domain) closeFilesAfterStep(lowerBound uint64) {
 	})
 	for _, item := range toClose {
 		d.History.dirtyFiles.Delete(item)
-		log.Debug(fmt.Sprintf("[snapshots] closing some histor files - because step %d has not enough files (was not complete)", lowerBound))
+		fName := ""
+		if item.decompressor != nil {
+			fName = item.decompressor.FileName()
+		}
+		log.Debug(fmt.Sprintf("[snapshots] closing %s, because step %d has not enough files (was not complete)", fName, lowerBound))
 		item.closeFiles()
 	}
 
@@ -255,7 +263,11 @@ func (d *Domain) closeFilesAfterStep(lowerBound uint64) {
 	})
 	for _, item := range toClose {
 		d.History.InvertedIndex.dirtyFiles.Delete(item)
-		log.Debug(fmt.Sprintf("[snapshots] closing %s, because step %d has not enough files (was not complete)", item.decompressor.FileName(), lowerBound))
+		fName := ""
+		if item.decompressor != nil {
+			fName = item.decompressor.FileName()
+		}
+		log.Debug(fmt.Sprintf("[snapshots] closing %s, because step %d has not enough files (was not complete)", fName, lowerBound))
 		item.closeFiles()
 	}
 }
