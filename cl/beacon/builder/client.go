@@ -151,7 +151,11 @@ func httpCall[T any](ctx context.Context, client *http.Client, method, url strin
 		log.Warn("[mev builder] client.Do failed", "err", err, "url", url, "method", method)
 		return nil, err
 	}
-	defer response.Body.Close()
+	defer func() {
+		if response.Body != nil {
+			response.Body.Close()
+		}
+	}()
 	if response.StatusCode < 200 || response.StatusCode > 299 {
 		// read response body
 		if response.Body == nil {

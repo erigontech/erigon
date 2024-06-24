@@ -27,6 +27,13 @@ func (m mockRoundTripper) RoundTrip(req *http.Request) (*http.Response, error) {
 var (
 	mockUrl, _       = url.Parse("https://anywhere.io")
 	mockBeaconConfig = &clparams.BeaconChainConfig{}
+
+	//go:embed test_data/mock_blinded_block.json
+	mockBlindedBlockBytes []byte
+	//go:embed test_data/mock_blinded_block_resp.json
+	mockBlindedResponseBytes []byte
+	//go:embed test_data/mock_header.json
+	mockHeaderBytes []byte
 )
 
 func TestGetStatus(t *testing.T) {
@@ -166,9 +173,6 @@ func TestRegisterValidator(t *testing.T) {
 	})
 }
 
-//go:embed test_data/mock_header.json
-var mockHeaderBytes []byte
-
 func TestGetHeader(t *testing.T) {
 	ctx := context.Background()
 	expectMethod := http.MethodGet
@@ -227,12 +231,6 @@ func TestGetHeader(t *testing.T) {
 		require.Nil(t, header)
 	})
 }
-
-//go:embed test_data/mock_blinded_block.json
-var mockBlindedBlockBytes []byte
-
-//go:embed test_data/mock_blinded_block_resp.json
-var mockBlindedResponseBytes []byte
 
 func TestSubmitBlindedBlocks(t *testing.T) {
 	ctx := context.Background()
