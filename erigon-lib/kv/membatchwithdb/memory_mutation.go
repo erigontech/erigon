@@ -666,9 +666,6 @@ func isTablePurelyDupsort(bucket string) bool {
 	if !ok {
 		return false
 	}
-	if config.AutoDupSortKeysConversion {
-		panic("AutoDupSortKeysConversion is not supported: " + bucket)
-	}
 	return !config.AutoDupSortKeysConversion && config.Flags == kv.DupSort
 }
 
