@@ -142,7 +142,7 @@ func NewAggregator(ctx context.Context, dirs datadir.Dirs, aggregationStep uint6
 		// case2: `kill -9` during building new .kv and `rm -rf chaindata`
 		//  - `accounts` domain may be at step X and `commitment` domain at step X-1
 		//  - problem! `commitment` domain doesn't have step X in DB
-		//  - means we must ignore step X in another domains
+		// solution: ignore step X files in both cases
 		switch name {
 		case kv.AccountsDomain, kv.StorageDomain, kv.CodeDomain:
 			if toStep-fromStep > 1 { // only recently built files
