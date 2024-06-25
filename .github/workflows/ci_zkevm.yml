@@ -3,10 +3,11 @@ on:
   push:
     branches:
       - zkevm
+      - zkevm-2.60
   pull_request:
     branches:
       - zkevm
-      - upstream-merge
+      - zkevm-2.60
     types:
       - opened
       - reopened
