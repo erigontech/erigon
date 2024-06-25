@@ -1139,3 +1139,64 @@ func BenchmarkDB_Get(b *testing.B) {
 		b.Fatal(err)
 	}
 }
+
+func BenchmarkDB_Put(b *testing.B) {
+	_db := BaseCaseDBForBenchmark(b)
+	table := "Table"
+	db := _db.(*MdbxKV)
+
+	// Ensure data is correct.
+	if err := db.Update(context.Background(), func(tx kv.RwTx) error {
+		keys := make([][]byte, b.N)
+		for i := 1; i <= b.N; i++ {
+			keys[i-1] = u64tob(uint64(i))
+		}
+		b.ResetTimer()
+		for i := 0; i < b.N; i++ {
+			err := tx.Put(table, keys[i], keys[i])
+			if err != nil {
+				return err
+			}
+		}
+		return nil
+	}); err != nil {
+		b.Fatal(err)
+	}
+}
+
+func BenchmarkDB_Delete(b *testing.B) {
+	_db := BaseCaseDBForBenchmark(b)
+	table := "Table"
+	db := _db.(*MdbxKV)
+
+	keys := make([][]byte, b.N)
+	for i := 1; i <= b.N; i++ {
+		keys[i-1] = u64tob(uint64(i))
+	}
+
+	if err := db.Update(context.Background(), func(tx kv.RwTx) error {
+		for i := 0; i < b.N; i++ {
+			err := tx.Put(table, keys[i], keys[i])
+			if err != nil {
+				return err
+			}
+		}
+		return nil
+	}); err != nil {
+		b.Fatal(err)
+	}
+
+	// Ensure data is correct.
+	if err := db.Update(context.Background(), func(tx kv.RwTx) error {
+		b.ResetTimer()
+		for i := 0; i < b.N; i++ {
+			err := tx.Delete(table, keys[i])
+			if err != nil {
+				return err
+			}
+		}
+		return nil
+	}); err != nil {
+		b.Fatal(err)
+	}
+}
