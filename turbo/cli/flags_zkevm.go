@@ -26,6 +26,18 @@ func ApplyFlagsForZkConfig(ctx *cli.Context, cfg *ethconfig.Config) {
 			if v == 0 {
 				panic(fmt.Sprintf("Flag not set: %s", flagName))
 			}
+		case uint32:
+			if v == 0 {
+				panic(fmt.Sprintf("Flag not set: %s", flagName))
+			}
+		case uint:
+			if v == 0 {
+				panic(fmt.Sprintf("Flag not set: %s", flagName))
+			}
+		case int:
+			if v == 0 {
+				panic(fmt.Sprintf("Flag not set: %s", flagName))
+			}
 		}
 	}
 
@@ -139,6 +151,10 @@ func ApplyFlagsForZkConfig(ctx *cli.Context, cfg *ethconfig.Config) {
 		checkFlag(utils.ExecutorStrictMode.Name, cfg.ExecutorStrictMode)
 		checkFlag(utils.DataStreamHost.Name, cfg.DataStreamHost)
 		checkFlag(utils.DataStreamPort.Name, cfg.DataStreamPort)
+
+		if cfg.DeprecatedTxPool.Disable {
+			panic("You need tx-pool in order to run a sequencer. Enable it using txpool.disable: false")
+		}
 
 		// if we are running in strict mode, the default, and we have no executor URLs then we panic
 		if cfg.ExecutorStrictMode && !cfg.HasExecutors() {

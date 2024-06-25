@@ -8,6 +8,7 @@ import (
 	"github.com/ledgerwatch/erigon/core/types"
 	ethTypes "github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/smt/pkg/smt"
+	"github.com/ledgerwatch/erigon/zk/utils"
 )
 
 /*
@@ -55,7 +56,7 @@ func TestBlockInfoHeader(t *testing.T) {
 			BlockHash:          "0x045fa48a1342813a61c1dd2d235620d621b59cdda0bd07ff3536c6cf64f5e688",
 			CoinbaseAddress:    "0x9aeCf44E36f20DC407d1A580630c9a2419912dcB",
 			NewBlockNumber:     592221,
-			BlockGasLimit:      1125899906842624,
+			BlockGasLimit:      utils.ForkId8BlockGasLimit,
 			FinalTimestamp:     1708198045,
 			FinalGER:           "0x0000000000000000000000000000000000000000000000000000000000000000",
 			L1BlochHash:        "0x0000000000000000000000000000000000000000000000000000000000000000",
@@ -64,7 +65,7 @@ func TestBlockInfoHeader(t *testing.T) {
 			BlockHash:          "0x268a22af2bae40acd1cc4228896de4420c5f3bc3bbdd8515d6d01b1b99731f82",
 			CoinbaseAddress:    "0x9aeCf44E36f20DC407d1A580630c9a2419912dcB",
 			NewBlockNumber:     592223,
-			BlockGasLimit:      18446744073709551615,
+			BlockGasLimit:      utils.ForkId7BlockGasLimit,
 			FinalTimestamp:     1708198051,
 			FinalGER:           "0x0000000000000000000000000000000000000000000000000000000000000000",
 			L1BlochHash:        "0x0000000000000000000000000000000000000000000000000000000000000000",

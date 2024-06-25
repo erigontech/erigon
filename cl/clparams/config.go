@@ -28,6 +28,7 @@ import (
 	"gopkg.in/yaml.v2"
 
 	"github.com/ledgerwatch/erigon/cl/utils"
+	zkUtils "github.com/ledgerwatch/erigon/zk/utils"
 )
 
 type CaplinConfig struct {
@@ -728,7 +729,7 @@ var MainnetBeaconConfig BeaconChainConfig = BeaconChainConfig{
 	MinSyncCommitteeParticipants: 1,
 
 	// Bellatrix
-	TerminalBlockHashActivationEpoch: 18446744073709551615,
+	TerminalBlockHashActivationEpoch: zkUtils.ForkId7BlockGasLimit,
 	TerminalBlockHash:                [32]byte{},
 	TerminalTotalDifficulty:          "58750000000000000000000", // Estimated: Sept 15, 2022
 	DefaultBuilderGasLimit:           uint64(30000000),

@@ -14,10 +14,6 @@ import (
 	"github.com/ledgerwatch/erigon-lib/common"
 )
 
-const (
-	BlockGasLimit = 18446744073709551615
-)
-
 type ExecutedTxInfo struct {
 	Tx                ethTypes.Transaction
 	EffectiveGasPrice uint8

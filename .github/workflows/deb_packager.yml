@@ -1,0 +1,139 @@
+name: deb_packager
+
+on:
+  push:
+    branches:
+      - 'main'
+    paths:
+      - '**'
+    tags:
+      - 'v*.*.*'
+      - 'v*.*.*-*'
+
+jobs:
+  build:
+    permissions:
+      id-token: write
+      contents: write
+    runs-on: ubuntu-20.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v2
+        with:
+          fetch-depth: 0
+      - name: Set up Go
+        uses: actions/setup-go@master
+        with:
+          go-version: 1.20.x
+      # Variables
+      - name: Adding TAG to ENV
+        run: echo "GIT_TAG=`echo $(git describe --tags --abbrev=0)`" >> $GITHUB_ENV
+      - name: adding version
+        run: |
+          NUMERIC_VERSION=$( echo ${{ env.GIT_TAG }} | sed 's/[^0-9.]//g' ) 
+          echo "VERSION=$NUMERIC_VERSION" >> $GITHUB_ENV
+
+      # Update the VM
+      - name: update and install required packages
+        run: sudo apt-get update && sudo apt-get upgrade -y && sudo apt-get install -y dpkg-dev debhelper libgtest-dev libomp-dev libgmp-dev
+
+      # Repo setup and build
+      - name: Cleaning repo
+        run: make clean
+      - name: Building for amd64
+        run: make cdk-erigon
+      - name: clearing dpkg
+        run: sudo dpkg --clear-avail
+
+      # Creating directory structure
+      - name: making directory structure
+        run: mkdir -p packaging/deb/cdk-erigon/usr/bin
+      - name: making directory structure for toml
+        run: mkdir -p packaging/deb/cdk-erigon/opt/erigon
+      - name: copy the binary for amd64 over
+        run: cp -rp build/bin/cdk-erigon packaging/deb/cdk-erigon/usr/bin/
+      - name: create systemd directory for service file
+        run: mkdir -p packaging/deb/cdk-erigon/lib/systemd/system
+      - name: copy the erigon service file for systemd
+        run: cp -rp packaging/package_scripts/erigon.service packaging/deb/cdk-erigon/lib/systemd/system/
+
+      # Create control file and packaging
+      - name: create control file
+        run: |
+          touch packaging/deb/cdk-erigon/DEBIAN/control
+          echo "Package: cdk-erigon" >> packaging/deb/cdk-erigon/DEBIAN/control
+          echo "Version: ${{ env.VERSION }}" >> packaging/deb/cdk-erigon/DEBIAN/control
+          echo "Section: base" >> packaging/deb/cdk-erigon/DEBIAN/control
+          echo "Priority: optional" >> packaging/deb/cdk-erigon/DEBIAN/control
+          echo "Architecture: amd64" >> packaging/deb/cdk-erigon/DEBIAN/control
+          echo "Maintainer: devops@polygon.technology" >> packaging/deb/cdk-erigon/DEBIAN/control
+          echo "Description: cdk-erigon package" >> packaging/deb/cdk-erigon/DEBIAN/control
+
+      - name: Creating package directory for binary for erigon ${{ env.ARCH }}
+        run: cp -rp packaging/deb/cdk-erigon packaging/deb/cdk-erigon-${{ env.GIT_TAG }}-${{ env.ARCH }}
+        env:
+          ARCH: amd64
+      - name: Running package build  for ${{ env.ARCH }}
+        run: dpkg-deb --build --root-owner-group packaging/deb/cdk-erigon-${{ env.GIT_TAG }}-${{ env.ARCH }}
+        env:
+          ARCH: amd64
+
+      # arm64 setup
+      - name: prepping environment for arm64 build
+        run: make clean
+
+      - name: removing amd64 control file
+        run: rm -rf packaging/deb/cdk-erigon/DEBIAN/control
+
+      - name: Adding requirements for cross compile
+        run: sudo apt-get install g++-aarch64-linux-gnu gcc-aarch64-linux-gnu
+
+      - name: build for arm64
+        run: GOARCH=arm64 GOOS=linux CC=aarch64-linux-gnu-gcc CXX=aarch64-linux-gnu-g++ CGO_ENABLED=1 go build -o build/bin/cdk-erigon ./cmd/cdk-erigon/main.go
+
+      - name: Copying necessary files
+        run: cp -rp build/bin/cdk-erigon packaging/deb/cdk-erigon/usr/bin/
+      - name: create control file
+        run: |
+          touch packaging/deb/cdk-erigon/DEBIAN/control
+          echo "Package: cdk-erigon" >> packaging/deb/cdk-erigon/DEBIAN/control
+          echo "Version: ${{ env.VERSION }}" >> packaging/deb/cdk-erigon/DEBIAN/control
+          echo "Section: base" >> packaging/deb/cdk-erigon/DEBIAN/control
+          echo "Priority: optional" >> packaging/deb/cdk-erigon/DEBIAN/control
+          echo "Architecture: arm64" >> packaging/deb/cdk-erigon/DEBIAN/control
+          echo "Maintainer: devops@polygon.technology" >> packaging/deb/cdk-erigon/DEBIAN/control
+          echo "Description: cdk-erigon package" >> packaging/deb/cdk-erigon/DEBIAN/control
+
+      - name: Creating package directory for binary for erigon ${{ env.ARCH }}
+        run: cp -rp packaging/deb/cdk-erigon packaging/deb/cdk-erigon-${{ env.GIT_TAG }}-${{ env.ARCH }}
+        env:
+          ARCH: arm64
+
+      - name: Running package build for ${{ env.ARCH }}
+        run: dpkg-deb --build --root-owner-group packaging/deb/cdk-erigon-${{ env.GIT_TAG }}-${{ env.ARCH }}
+        env:
+          ARCH: arm64
+
+      - name: shasum the ${{ env.ARCH }} debian package
+        run: cd packaging/deb/ && sha256sum cdk-erigon-${{ env.GIT_TAG }}-${{ env.ARCH }}.deb > cdk-erigon-${{ env.GIT_TAG }}-${{ env.ARCH }}.deb.checksum
+        env:
+          ARCH: amd64
+
+      - name: shasum the ${{ env.ARCH }} debian package
+        run: cd packaging/deb/ && sha256sum cdk-erigon-${{ env.GIT_TAG }}-${{ env.ARCH }}.deb > cdk-erigon-${{ env.GIT_TAG }}-${{ env.ARCH }}.deb.checksum
+        env:
+          ARCH: arm64
+
+      # Confirm packages built and upload
+      - name: Confirming package built
+        run: ls -ltr packaging/deb/ | grep cdk-erigon
+
+      - name: Release erigon Packages
+        uses: softprops/action-gh-release@v1
+        with:
+          tag_name: ${{ env.GIT_TAG }}
+          prerelease: true
+          files: |
+            packaging/deb/cdk-erigon**.deb
+            packaging/deb/cdk-erigon**.deb.checksum
+
