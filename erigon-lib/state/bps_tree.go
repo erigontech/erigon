@@ -115,20 +115,17 @@ type Node struct {
 func (b *BpsTree) WarmUp(kv ArchiveGetter) error {
 	k := b.offt.Count()
 	d := logBase(k, b.M)
-	mFraqtion := uint64(4)    // could increase to put more nodes into cache
+	cacheEvery := uint64(2)   // could increase to put more nodes into cache
 	mx := make([][]Node, d+1) // usually d+1 but for experiments we put them all into flat list
 
 	l := len(mx)
-	for ik := uint64(0); ik < k; ik += b.M / mFraqtion {
+	for ik := uint64(0); ik < k; ik += b.M / cacheEvery {
 		_, key, err := b.keyCmpFunc(nil, ik, kv)
 		if err != nil {
 			return err
 		}
 		if key != nil {
 			l--
-			if l < 0 {
-				panic("l <0")
-			}
 			mx[l] = append(mx[l], Node{off: b.offt.Get(ik), prefix: common.Copy(key), di: uint64(ik)})
 			if l == 0 {
 				l = len(mx)
