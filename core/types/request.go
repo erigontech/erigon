@@ -120,6 +120,26 @@ func (r Requests) Deposits() DepositRequests {
 	return deposits
 }
 
+func (r *Requests) Consolidations() ConsolidationRequests {
+	crs := make(ConsolidationRequests, 0, len(*r))
+	for _, req := range *r {
+		if req.RequestType() == ConsolidationRequestType {
+			crs = append(crs, req.(*ConsolidationRequest))
+		}
+	}
+	return crs
+}
+
+func (r *Requests) Withdrawals() WithdrawalRequests {
+	wrs := make(WithdrawalRequests, 0, len(*r))
+	for _, req := range *r {
+		if req.RequestType() == WithdrawalRequestType {
+			wrs = append(wrs, req.(*WithdrawalRequest))
+		}
+	}
+	return wrs
+}
+
 func MarshalRequestsBinary(requests Requests) ([][]byte, error) {
 	ret := make([][]byte, 0)
 	for _, req := range requests {
