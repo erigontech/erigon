@@ -346,7 +346,7 @@ func TestHistoryAfterPrune(t *testing.T) {
 		hc.Close()
 
 		hc = h.BeginFilesRo()
-		_, err = hc.Prune(ctx, tx, 0, 16, math.MaxUint64, false, false, logEvery)
+		_, err = hc.Prune(ctx, tx, 0, 16, math.MaxUint64, false, logEvery)
 		hc.Close()
 
 		require.NoError(err)
@@ -448,7 +448,7 @@ func TestHistoryCanPrune(t *testing.T) {
 			} else {
 				require.Truef(t, cp, "step %d should be prunable", i)
 			}
-			stat, err := hc.Prune(context.Background(), rwTx, i*h.aggregationStep, (i+1)*h.aggregationStep, math.MaxUint64, false, false, logEvery)
+			stat, err := hc.Prune(context.Background(), rwTx, i*h.aggregationStep, (i+1)*h.aggregationStep, math.MaxUint64, false, logEvery)
 			require.NoError(t, err)
 			if i >= stepsTotal-stepKeepInDB {
 				require.Falsef(t, cp, "step %d should be NOT prunable", i)
@@ -484,7 +484,7 @@ func TestHistoryCanPrune(t *testing.T) {
 			} else {
 				require.Truef(t, cp, "step %d should be prunable", i)
 			}
-			stat, err := hc.Prune(context.Background(), rwTx, i*h.aggregationStep, (i+1)*h.aggregationStep, math.MaxUint64, false, false, logEvery)
+			stat, err := hc.Prune(context.Background(), rwTx, i*h.aggregationStep, (i+1)*h.aggregationStep, math.MaxUint64, false, logEvery)
 			require.NoError(t, err)
 			if i >= stepsTotal-stepKeepInDB {
 				require.Falsef(t, cp, "step %d should be NOT prunable", i)
@@ -540,21 +540,21 @@ func TestHistoryPruneCorrectnessWithFiles(t *testing.T) {
 	canHist, txTo := hc.canPruneUntil(rwTx, math.MaxUint64)
 	t.Logf("canPrune=%t [%s] to=%d", canHist, hc.h.indexKeysTable, txTo)
 
-	stat, err := hc.Prune(context.Background(), rwTx, 0, txTo, 50, false, false, logEvery)
+	stat, err := hc.Prune(context.Background(), rwTx, 0, txTo, 50, false, logEvery)
 	require.NoError(t, err)
 	require.NotNil(t, stat)
 	t.Logf("stat=%v", stat)
 
-	stat, err = hc.Prune(context.Background(), rwTx, 0, 600, 500, false, false, logEvery)
+	stat, err = hc.Prune(context.Background(), rwTx, 0, 600, 500, false, logEvery)
 	require.NoError(t, err)
 	require.NotNil(t, stat)
 	t.Logf("stat=%v", stat)
-	stat, err = hc.Prune(context.Background(), rwTx, 0, 600, 10, true, false, logEvery)
+	stat, err = hc.Prune(context.Background(), rwTx, 0, 600, 10, true, logEvery)
 	require.NoError(t, err)
 	// require.NotNil(t, stat)
 	t.Logf("stat=%v", stat)
 
-	stat, err = hc.Prune(context.Background(), rwTx, 0, 600, 10, false, false, logEvery)
+	stat, err = hc.Prune(context.Background(), rwTx, 0, 600, 10, false, logEvery)
 	require.NoError(t, err)
 	t.Logf("stat=%v", stat)
 
@@ -666,19 +666,19 @@ func TestHistoryPruneCorrectness(t *testing.T) {
 	defer hc.Close()
 
 	// this one should not prune anything due to forced=false but no files built
-	stat, err := hc.Prune(context.Background(), rwTx, 0, 10, pruneLimit, false, false, logEvery)
+	stat, err := hc.Prune(context.Background(), rwTx, 0, 10, pruneLimit, false, logEvery)
 	require.NoError(t, err)
 	require.Nil(t, stat)
 
 	// this one should prune value of tx=0 due to given range [0,1) (we have first value at tx=0) even it is forced
-	stat, err = hc.Prune(context.Background(), rwTx, 0, 1, pruneLimit, true, false, logEvery)
+	stat, err = hc.Prune(context.Background(), rwTx, 0, 1, pruneLimit, true, logEvery)
 	require.NoError(t, err)
 	require.EqualValues(t, 1, stat.PruneCountValues)
 	require.EqualValues(t, 1, stat.PruneCountTx)
 
 	// this should prune exactly pruneLimit*pruneIter transactions
 	for i := 0; i < pruneIters; i++ {
-		stat, err = hc.Prune(context.Background(), rwTx, 0, 1000, pruneLimit, true, false, logEvery)
+		stat, err = hc.Prune(context.Background(), rwTx, 0, 1000, pruneLimit, true, logEvery)
 		require.NoError(t, err)
 		t.Logf("[%d] stats: %v", i, stat)
 	}
@@ -863,7 +863,7 @@ func TestHistoryHistory(t *testing.T) {
 				h.reCalcVisibleFiles()
 
 				hc := h.BeginFilesRo()
-				_, err = hc.Prune(ctx, tx, step*h.aggregationStep, (step+1)*h.aggregationStep, math.MaxUint64, false, false, logEvery)
+				_, err = hc.Prune(ctx, tx, step*h.aggregationStep, (step+1)*h.aggregationStep, math.MaxUint64, false, logEvery)
 				hc.Close()
 				require.NoError(err)
 			}()
@@ -903,7 +903,7 @@ func collateAndMergeHistory(tb testing.TB, db kv.RwDB, h *History, txs uint64, d
 
 		if doPrune {
 			hc := h.BeginFilesRo()
-			_, err = hc.Prune(ctx, tx, step*h.aggregationStep, (step+1)*h.aggregationStep, math.MaxUint64, false, false, logEvery)
+			_, err = hc.Prune(ctx, tx, step*h.aggregationStep, (step+1)*h.aggregationStep, math.MaxUint64, false, logEvery)
 			hc.Close()
 			require.NoError(err)
 		}

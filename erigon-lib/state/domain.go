@@ -34,7 +34,6 @@ import (
 	btree2 "github.com/tidwall/btree"
 	"golang.org/x/sync/errgroup"
 
-	"github.com/ledgerwatch/erigon-lib/kv/backup"
 	"github.com/ledgerwatch/erigon-lib/log/v3"
 	"github.com/ledgerwatch/erigon-lib/recsplit/eliasfano32"
 
@@ -1237,7 +1236,7 @@ func (dt *DomainRoTx) Unwind(ctx context.Context, rwTx kv.RwTx, step, txNumUnwin
 		}
 	}
 	// Compare valsKV with prevSeenKeys
-	if _, err := dt.ht.Prune(ctx, rwTx, txNumUnwindTo, math.MaxUint64, math.MaxUint64, true, false, logEvery); err != nil {
+	if _, err := dt.ht.Prune(ctx, rwTx, txNumUnwindTo, math.MaxUint64, math.MaxUint64, true, logEvery); err != nil {
 		return fmt.Errorf("[domain][%s] unwinding, prune history to txNum=%d, step %d: %w", dt.d.filenameBase, txNumUnwindTo, step, err)
 	}
 	return nil
@@ -1659,35 +1658,13 @@ func (dc *DomainPruneStat) Accumulate(other *DomainPruneStat) {
 	}
 }
 
-// TODO test idea. Generate 4 keys with updates for several steps. Count commitment after each prune over 4 known keys.
-//   минус локалити - не умеет отсеивать несуществующие ключи, и это не шардед индекс а кросс шардед (1 файл на все кв или еф файлы)
-
-// history prunes keys in range [txFrom; txTo), domain prunes any records with rStep <= step.
-// In case of context cancellation pruning stops and returns error, but simply could be started again straight away.
-func (dt *DomainRoTx) Warmup(ctx context.Context) (cleanup func()) {
-	ctx, cancel := context.WithCancel(ctx)
-	wg := &errgroup.Group{}
-	wg.Go(func() error {
-		backup.WarmupTable(ctx, dt.d.db, dt.d.keysTable, log.LvlDebug, 4)
-		return nil
-	})
-	wg.Go(func() error {
-		backup.WarmupTable(ctx, dt.d.db, dt.d.valsTable, log.LvlDebug, 4)
-		return nil
-	})
-	return func() {
-		cancel()
-		_ = wg.Wait()
-	}
-}
-
-func (dt *DomainRoTx) Prune(ctx context.Context, rwTx kv.RwTx, step, txFrom, txTo, limit uint64, withWarmup bool, logEvery *time.Ticker) (stat *DomainPruneStat, err error) {
+func (dt *DomainRoTx) Prune(ctx context.Context, rwTx kv.RwTx, step, txFrom, txTo, limit uint64, logEvery *time.Ticker) (stat *DomainPruneStat, err error) {
 	if limit == 0 {
 		limit = math.MaxUint64
 	}
 
 	stat = &DomainPruneStat{MinStep: math.MaxUint64}
-	if stat.History, err = dt.ht.Prune(ctx, rwTx, txFrom, txTo, limit, false, withWarmup, logEvery); err != nil {
+	if stat.History, err = dt.ht.Prune(ctx, rwTx, txFrom, txTo, limit, false, logEvery); err != nil {
 		return nil, fmt.Errorf("prune history at step %d [%d, %d): %w", step, txFrom, txTo, err)
 	}
 	canPrune, maxPrunableStep := dt.canPruneDomainTables(rwTx, txTo)
@@ -1701,11 +1678,6 @@ func (dt *DomainRoTx) Prune(ctx context.Context, rwTx kv.RwTx, step, txFrom, txT
 	st := time.Now()
 	mxPruneInProgress.Inc()
 	defer mxPruneInProgress.Dec()
-
-	if withWarmup {
-		cleanup := dt.Warmup(ctx)
-		defer cleanup()
-	}
 
 	keysCursorForDeletes, err := rwTx.RwCursorDupSort(dt.d.keysTable)
 	if err != nil {

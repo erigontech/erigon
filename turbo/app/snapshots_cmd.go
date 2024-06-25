@@ -930,7 +930,7 @@ func doRetireCommand(cliCtx *cli.Context, dirs datadir.Dirs) error {
 		logEvery := time.NewTicker(30 * time.Second)
 		defer logEvery.Stop()
 
-		stat, err := ac.Prune(ctx, tx, math.MaxUint64, true, logEvery)
+		stat, err := ac.Prune(ctx, tx, math.MaxUint64, logEvery)
 		if err != nil {
 			return err
 		}
