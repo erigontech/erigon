@@ -513,7 +513,7 @@ func TestSeekBothRange(t *testing.T) {
 	require.Equal(t, "value3.3", string(v))
 }
 
-func initializeDbAutoConversion(rwTx kv.RwTx) {
+func initializeDbHeaders(rwTx kv.RwTx) {
 	rwTx.Put(kv.Headers, []byte("A"), []byte("0"))
 	rwTx.Put(kv.Headers, []byte("A..........................._______________________________A"), []byte("1"))
 	rwTx.Put(kv.Headers, []byte("A..........................._______________________________C"), []byte("2"))
@@ -523,10 +523,10 @@ func initializeDbAutoConversion(rwTx kv.RwTx) {
 	rwTx.Put(kv.Headers, []byte("D..........................._______________________________C"), []byte("4"))
 }
 
-func TestAutoConversion(t *testing.T) {
+func TestGetOne(t *testing.T) {
 	_, rwTx := memdb.NewTestTx(t)
 
-	initializeDbAutoConversion(rwTx)
+	initializeDbHeaders(rwTx)
 
 	require.NoError(t, rwTx.Put(kv.Headers, []byte("A..........................."), []byte("?")))
 
