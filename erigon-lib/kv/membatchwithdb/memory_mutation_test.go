@@ -234,15 +234,15 @@ func TestPrefix(t *testing.T) {
 	initializeDbNonDupSort(rwTx)
 
 	kvs1, err := rwTx.Prefix(kv.HashedAccounts, []byte("AB"))
-	defer kvs1.Close()
 	require.Nil(t, err)
+	defer kvs1.Close()
 	require.False(t, kvs1.HasNext())
 
 	var keys1 []string
 	var values1 []string
 	kvs2, err := rwTx.Prefix(kv.HashedAccounts, []byte("AAAA"))
-	defer kvs2.Close()
 	require.Nil(t, err)
+	defer kvs2.Close()
 	for kvs2.HasNext() {
 		k1, v1, err := kvs2.Next()
 		require.Nil(t, err)
@@ -255,8 +255,8 @@ func TestPrefix(t *testing.T) {
 	var keys []string
 	var values []string
 	kvs3, err := rwTx.Prefix(kv.HashedAccounts, []byte("C"))
-	defer kvs3.Close()
 	require.Nil(t, err)
+	defer kvs3.Close()
 	for kvs3.HasNext() {
 		k1, v1, err := kvs3.Next()
 		require.Nil(t, err)

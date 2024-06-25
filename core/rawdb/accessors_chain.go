@@ -310,10 +310,10 @@ func ReadCurrentHeaderHavingBody(db kv.Getter) *types.Header {
 func ReadHeadersByNumber(db kv.Tx, number uint64) (res []*types.Header, err error) {
 	prefix := hexutility.EncodeTs(number)
 	kvs, err := db.Prefix(kv.Headers, prefix)
-	defer kvs.Close()
 	if err != nil {
 		return nil, err
 	}
+	defer kvs.Close()
 	for kvs.HasNext() {
 		k, v, err := kvs.Next()
 		if err != nil {

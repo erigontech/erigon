@@ -398,8 +398,8 @@ func TestPrefix(t *testing.T) {
 	table := "Table"
 	var keys, keys1, keys2 []string
 	kvs1, err := tx.Prefix(table, []byte("key"))
-	defer kvs1.Close()
 	require.Nil(t, err)
+	defer kvs1.Close()
 	for kvs1.HasNext() {
 		k1, _, err := kvs1.Next()
 		require.Nil(t, err)
@@ -408,8 +408,8 @@ func TestPrefix(t *testing.T) {
 	require.Equal(t, []string{"key1", "key1", "key3", "key3"}, keys)
 
 	kvs2, err := tx.Prefix(table, []byte("key1"))
-	defer kvs2.Close()
 	require.Nil(t, err)
+	defer kvs2.Close()
 	for kvs2.HasNext() {
 		k1, _, err := kvs2.Next()
 		require.Nil(t, err)
@@ -418,8 +418,8 @@ func TestPrefix(t *testing.T) {
 	require.Equal(t, []string{"key1", "key1"}, keys1)
 
 	kvs3, err := tx.Prefix(table, []byte("e"))
-	defer kvs3.Close()
 	require.Nil(t, err)
+	defer kvs3.Close()
 	for kvs3.HasNext() {
 		k1, _, err := kvs3.Next()
 		require.Nil(t, err)
