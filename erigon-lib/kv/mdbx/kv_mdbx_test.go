@@ -20,6 +20,7 @@ import (
 	"context"
 	"encoding/binary"
 	"errors"
+	"math/rand"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -1154,6 +1155,30 @@ func BenchmarkDB_Put(b *testing.B) {
 		b.ResetTimer()
 		for i := 0; i < b.N; i++ {
 			err := tx.Put(table, keys[i], keys[i])
+			if err != nil {
+				return err
+			}
+		}
+		return nil
+	}); err != nil {
+		b.Fatal(err)
+	}
+}
+
+func BenchmarkDB_PutRandom(b *testing.B) {
+	_db := BaseCaseDBForBenchmark(b)
+	table := "Table"
+	db := _db.(*MdbxKV)
+
+	// Ensure data is correct.
+	if err := db.Update(context.Background(), func(tx kv.RwTx) error {
+		keys := make(map[string]struct{}, b.N)
+		for len(keys) < b.N {
+			keys[string(u64tob(uint64(rand.Intn(1e10))))] = struct{}{}
+		}
+		b.ResetTimer()
+		for key := range keys {
+			err := tx.Put(table, []byte(key), []byte(key))
 			if err != nil {
 				return err
 			}
