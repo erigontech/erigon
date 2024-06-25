@@ -20,6 +20,7 @@
 package core
 
 import (
+	"bytes"
 	"fmt"
 
 	"github.com/holiman/uint256"
@@ -31,6 +32,7 @@ import (
 	cmath "github.com/ledgerwatch/erigon/common/math"
 	"github.com/ledgerwatch/erigon/common/u256"
 	"github.com/ledgerwatch/erigon/core/tracing"
+	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/core/vm"
 	"github.com/ledgerwatch/erigon/core/vm/evmtypes"
 	"github.com/ledgerwatch/erigon/crypto"
@@ -96,12 +98,13 @@ type Message interface {
 	Data() []byte
 	AccessList() types2.AccessList
 	BlobHashes() []libcommon.Hash
+	Authorizations() []types.Authorization
 
 	IsFree() bool
 }
 
 // IntrinsicGas computes the 'intrinsic gas' for a message with the given data.
-func IntrinsicGas(data []byte, accessList types2.AccessList, isContractCreation bool, isHomestead, isEIP2028, isEIP3860 bool) (uint64, error) {
+func IntrinsicGas(data []byte, accessList types2.AccessList, isContractCreation bool, isHomestead, isEIP2028, isEIP3860 bool, authorizationsLen uint64) (uint64, error) {
 	// Zero and non-zero bytes are priced differently
 	dataLen := uint64(len(data))
 	dataNonZeroLen := uint64(0)
@@ -111,7 +114,7 @@ func IntrinsicGas(data []byte, accessList types2.AccessList, isContractCreation 
 		}
 	}
 
-	gas, status := txpoolcfg.CalcIntrinsicGas(dataLen, dataNonZeroLen, accessList, isContractCreation, isHomestead, isEIP2028, isEIP3860)
+	gas, status := txpoolcfg.CalcIntrinsicGas(dataLen, dataNonZeroLen, authorizationsLen, accessList, isContractCreation, isHomestead, isEIP2028, isEIP3860)
 	if status != txpoolcfg.Success {
 		return 0, ErrGasUintOverflow
 	}
@@ -339,9 +342,61 @@ func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (*evmtype
 	rules := st.evm.ChainRules()
 	vmConfig := st.evm.Config()
 	isEIP3860 := vmConfig.HasEip3860(rules)
+	accessTuples := make(types2.AccessList, 0)
+	if msg.AccessList() != nil {
+		accessTuples = append(accessTuples, msg.AccessList()...)
+	}
+
+	// set code tx
+	auths := msg.Authorizations()
+	if len(auths) > 0 {
+		var b [33]byte
+		data := bytes.NewBuffer(nil)
+		for _, auth := range auths {
+
+			// 2. chainId check
+			if auth.ChainID != 0 && auth.ChainID != st.evm.ChainRules().ChainID.Uint64() {
+				continue
+				//TODO: should these errors be recorded somewhere? perhaps tracer or logs
+				//return nil, fmt.Errorf("invalid chainID %d", auth.ChainID)
+			}
+
+			// 1. authority recover
+			authorityPtr, err := auth.RecoverSigner(data, b[:])
+			if err != nil {
+				continue
+				//return nil, fmt.Errorf("authority recover failed")
+			}
+			authority := *authorityPtr
+
+			// 3. authority code should be empty
+			if codeHash := st.state.GetCodeHash(authority); codeHash != emptyCodeHash && codeHash != (libcommon.Hash{}) {
+				continue
+				//return nil, fmt.Errorf("authority code is not empty")
+			}
+
+			// 4. nonce check
+			if auth.Nonce != nil && st.state.GetNonce(authority) != auth.Nonce.Uint64() {
+				continue
+				//return nil, fmt.Errorf("invalid nonce")
+			}
+
+			// 5. set code of authority to code associated with address
+			st.state.SetCode(authority, st.state.GetCode(auth.Address))
+			defer st.state.SetCode(authority, nil) // reset code after execution
+
+			// 6. add authority account to accesses_addresses
+			if !accessTuples.IsPresent(authority) {
+				accessTuples = append(accessTuples, types2.AccessTuple{Address: authority, StorageKeys: nil})
+			}
+
+			data.Reset()
+		}
+
+	}
 
 	// Check clauses 4-5, subtract intrinsic gas if everything is correct
-	gas, err := IntrinsicGas(st.data, st.msg.AccessList(), contractCreation, rules.IsHomestead, rules.IsIstanbul, isEIP3860)
+	gas, err := IntrinsicGas(st.data, accessTuples, contractCreation, rules.IsHomestead, rules.IsIstanbul, isEIP3860, uint64(len(auths)))
 	if err != nil {
 		return nil, err
 	}
@@ -366,7 +421,7 @@ func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (*evmtype
 	// Execute the preparatory steps for state transition which includes:
 	// - prepare accessList(post-berlin)
 	// - reset transient storage(eip 1153)
-	st.state.Prepare(rules, msg.From(), coinbase, msg.To(), vm.ActivePrecompiles(rules), msg.AccessList())
+	st.state.Prepare(rules, msg.From(), coinbase, msg.To(), vm.ActivePrecompiles(rules), accessTuples)
 
 	var (
 		ret   []byte

@@ -9,7 +9,6 @@ import (
 	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/erigon-lib/chain"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/common/length"
 	rlp2 "github.com/ledgerwatch/erigon-lib/rlp"
 	types2 "github.com/ledgerwatch/erigon-lib/types"
 	"github.com/ledgerwatch/erigon/common/u256"
@@ -19,31 +18,6 @@ import (
 type SetCodeTransaction struct {
 	DynamicFeeTransaction
 	Authorizations []Authorization
-}
-
-type Authorization struct {
-	ChainID uint64            `json:"chainId"`
-	Address libcommon.Address `json:"address"`
-	Nonce   *uint256.Int      `json:"nonce,omitempty"`
-	V       uint256.Int       `json:"v"`
-	R       uint256.Int       `json:"r"`
-	S       uint256.Int       `json:"s"`
-}
-
-func (ath *Authorization) copy() *Authorization {
-	cpy := &Authorization{
-		ChainID: ath.ChainID,
-		Address: ath.Address,
-		V:       *ath.V.Clone(),
-		R:       *ath.R.Clone(),
-		S:       *ath.S.Clone(),
-	}
-
-	if ath.Nonce != nil {
-		cpy.Nonce = ath.Nonce.Clone()
-	}
-
-	return cpy
 }
 
 func (tx *SetCodeTransaction) Unwrap() Transaction {
@@ -84,35 +58,6 @@ func (tx *SetCodeTransaction) payloadSize() (payloadSize, nonceLen, gasLen, acce
 	payloadSize += rlp2.ListPrefixLen(authorizationsLen) + authorizationsLen
 
 	return
-}
-
-func authorizationsSize(authorizations []Authorization) int {
-	totalSize := 0
-	// ChainID uint64
-	// Address common.Address
-	// Nonce   *uint256.Int
-	// V, R, S uint256.Int // signature values
-	for _, auth := range authorizations {
-		size := rlp2.U64Len(auth.ChainID) // chainId
-		size += 1 + length.Addr           // address
-
-		size++
-		if auth.Nonce != nil {
-			size += rlp.Uint256LenExcludingHead(auth.Nonce)
-		}
-
-		size++
-		size += rlp.Uint256LenExcludingHead(&auth.V)
-
-		size++
-		size += rlp.Uint256LenExcludingHead(&auth.R)
-
-		size++
-		size += rlp.Uint256LenExcludingHead(&auth.S)
-
-		totalSize += size + rlp2.ListPrefixLen(size)
-	}
-	return totalSize
 }
 
 func (tx *SetCodeTransaction) WithSignature(signer Signer, sig []byte) (Transaction, error) {
@@ -289,66 +234,6 @@ func (tx *SetCodeTransaction) DecodeRLP(s *rlp.Stream) error {
 	return s.ListEnd()
 }
 
-func decodeAuthorizations(auths *[]Authorization, s *rlp.Stream) error {
-	_, err := s.List()
-	if err != nil {
-		return fmt.Errorf("open authorizations: %w", err)
-	}
-	var b []byte
-	i := 0
-	for _, err = s.List(); err == nil; _, err = s.List() {
-		auth := Authorization{}
-		if auth.ChainID, err = s.Uint(); err != nil {
-			return err
-		}
-
-		if b, err = s.Bytes(); err != nil {
-			return err
-		}
-
-		if len(b) != 20 {
-			return fmt.Errorf("wrong size for Address: %d", len(b))
-		}
-		auth.Address = libcommon.BytesToAddress(b)
-
-		if b, err = s.Uint256Bytes(); err != nil {
-			return err
-		}
-		if len(b) > 0 {
-			auth.Nonce = new(uint256.Int).SetBytes(b)
-		}
-
-		if b, err = s.Uint256Bytes(); err != nil {
-			return err
-		}
-		auth.V.SetBytes(b)
-
-		if b, err = s.Uint256Bytes(); err != nil {
-			return err
-		}
-		auth.R.SetBytes(b)
-
-		if b, err = s.Uint256Bytes(); err != nil {
-			return err
-		}
-		auth.S.SetBytes(b)
-
-		*auths = append(*auths, auth)
-		// end of authorization
-		if err = s.ListEnd(); err != nil {
-			return fmt.Errorf("close Authorization: %w", err)
-		}
-		i++
-	}
-	if !errors.Is(err, rlp.EOL) {
-		return fmt.Errorf("open authorizations: %d %w", i, err)
-	}
-	if err = s.ListEnd(); err != nil {
-		return fmt.Errorf("close authorizations: %w", err)
-	}
-	return nil
-}
-
 func (tx *SetCodeTransaction) encodePayload(w io.Writer, b []byte, payloadSize, _, _, accessListLen, authorizationsLen int) error {
 	// prefix
 	if err := EncodeStructSizePrefix(payloadSize, w, b); err != nil {
@@ -416,52 +301,4 @@ func (tx *SetCodeTransaction) encodePayload(w io.Writer, b []byte, payloadSize, 
 	}
 	return nil
 
-}
-
-func encodeAuthorizations(authorizations []Authorization, w io.Writer, b []byte) error {
-	// Authorization:
-	// 	ChainID uint64
-	// 	Address common.Address
-	// 	Nonce   *uint256.Int
-	// 	V, R, S uint256.Int
-	for _, auth := range authorizations {
-		// 0. encode length of individual Authorization
-		authLen := rlp2.U64Len(auth.ChainID)
-		authLen += (1 + length.Addr)
-		authLen += 1 // nonce prefix
-		if auth.Nonce != nil {
-			authLen += rlp.Uint256LenExcludingHead(auth.Nonce)
-		}
-
-		authLen += (1 + rlp.Uint256LenExcludingHead(&auth.V)) + (1 + rlp.Uint256LenExcludingHead(&auth.R)) + (1 + rlp.Uint256LenExcludingHead(&auth.S))
-
-		if err := EncodeStructSizePrefix(authLen, w, b); err != nil {
-			return err
-		}
-
-		// 1. encode ChainId
-		if err := rlp.EncodeInt(auth.ChainID, w, b); err != nil {
-			return err
-		}
-		// 2. encode Address
-		if err := rlp.EncodeAddress(&auth.Address, w, b); err != nil {
-			return err
-		}
-		// 3. encode Nonce
-		if err := auth.Nonce.EncodeRLP(w); err != nil {
-			return err
-		}
-		// 4. encode V, R, S
-		if err := auth.V.EncodeRLP(w); err != nil {
-			return err
-		}
-		if err := auth.R.EncodeRLP(w); err != nil {
-			return err
-		}
-		if err := auth.S.EncodeRLP(w); err != nil {
-			return err
-		}
-	}
-
-	return nil
 }
