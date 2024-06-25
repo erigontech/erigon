@@ -27,6 +27,7 @@ type indexSeekerIterator interface {
 type dataLookupFunc func(di uint64, g ArchiveGetter) ([]byte, []byte, error)
 type keyCmpFunc func(k []byte, di uint64, g ArchiveGetter) (int, []byte, error)
 
+// M limits amount of child for tree node.
 func NewBpsTree(kv ArchiveGetter, offt *eliasfano32.EliasFano, M uint64, dataLookup dataLookupFunc, keyCmp keyCmpFunc) *BpsTree {
 	bt := &BpsTree{M: M, offt: offt, dataLookupFunc: dataLookup, keyCmpFunc: keyCmp}
 	if err := bt.WarmUp(kv); err != nil {
