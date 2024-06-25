@@ -25,6 +25,7 @@ import (
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 
 	"github.com/ledgerwatch/erigon/common/u256"
+	"github.com/ledgerwatch/erigon/core/tracing"
 	"github.com/ledgerwatch/erigon/core/vm/evmtypes"
 	"github.com/ledgerwatch/erigon/crypto"
 	"github.com/ledgerwatch/erigon/params"
@@ -99,6 +100,12 @@ type EVM struct {
 // NewEVM returns a new EVM. The returned EVM is not thread safe and should
 // only ever be used *once*.
 func NewEVM(blockCtx evmtypes.BlockContext, txCtx evmtypes.TxContext, state evmtypes.IntraBlockState, chainConfig *chain.Config, vmConfig Config) *EVM {
+	if vmConfig.NoBaseFee {
+		if txCtx.GasPrice.IsZero() {
+			blockCtx.BaseFee = new(uint256.Int)
+		}
+	}
+
 	evm := &EVM{
 		Context:         blockCtx,
 		TxContext:       txCtx,
@@ -215,7 +222,7 @@ func (evm *EVM) call(typ OpCode, caller ContractRef, addr libcommon.Address, inp
 		// This doesn't matter on Mainnet, where all empties are gone at the time of Byzantium,
 		// but is the correct thing to do and matters on other networks, in tests, and potential
 		// future scenarios
-		evm.intraBlockState.AddBalance(addr, u256.Num0)
+		evm.intraBlockState.AddBalance(addr, u256.Num0, tracing.BalanceChangeTouchAccount)
 	}
 	if evm.config.Debug {
 		v := value
@@ -431,7 +438,7 @@ func (evm *EVM) create(caller ContractRef, codeAndHash *codeAndHash, gasRemainin
 	// by the error checking condition below.
 	if err == nil {
 		createDataGas := uint64(len(ret)) * params.CreateDataGas
-		if contract.UseGas(createDataGas) {
+		if contract.UseGas(createDataGas, tracing.GasChangeCallCodeStorage) {
 			evm.intraBlockState.SetCode(address, ret)
 		} else if evm.chainRules.IsHomestead {
 			err = ErrCodeStoreOutOfGas
@@ -444,7 +451,7 @@ func (evm *EVM) create(caller ContractRef, codeAndHash *codeAndHash, gasRemainin
 	if err != nil && (evm.chainRules.IsHomestead || err != ErrCodeStoreOutOfGas) {
 		evm.intraBlockState.RevertToSnapshot(snapshot)
 		if err != ErrExecutionReverted {
-			contract.UseGas(contract.Gas)
+			contract.UseGas(contract.Gas, tracing.GasChangeCallFailedExecution)
 		}
 	}
 

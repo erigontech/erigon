@@ -391,6 +391,9 @@ func readBodyForStorage(db kv.Getter, hash common.Hash, number uint64) (*types.B
 	if err != nil {
 		return nil, err
 	}
+	if len(data) == 0 {
+		return nil, nil
+	}
 	bodyForStorage := new(types.BodyForStorage)
 	err = rlp.DecodeBytes(data, bodyForStorage)
 	if err != nil {
@@ -1019,7 +1022,7 @@ func WriteBlock(db kv.RwTx, block *types.Block) error {
 
 // PruneBlocks - delete [1, to) old blocks after moving it to snapshots.
 // keeps genesis in db: [1, to)
-// doesn't change sequences of kv.EthTx and kv.NonCanonicalTxs
+// doesn't change sequences of kv.EthTx
 // doesn't delete Receipts, Senders, Canonical markers, TotalDifficulty
 // Returns false if there is nothing to prune
 func PruneBlocks(tx kv.RwTx, blockTo uint64, blocksDeleteLimit int) (deleted int, err error) {
@@ -1093,7 +1096,7 @@ func TruncateCanonicalChain(ctx context.Context, db kv.RwTx, from uint64) error 
 }
 
 // TruncateBlocks - delete block >= blockFrom
-// does decrement sequences of kv.EthTx and kv.NonCanonicalTxs
+// does decrement sequences of kv.EthTx
 // doesn't delete Receipts, Senders, Canonical markers, TotalDifficulty
 func TruncateBlocks(ctx context.Context, tx kv.RwTx, blockFrom uint64) error {
 	logEvery := time.NewTicker(20 * time.Second)

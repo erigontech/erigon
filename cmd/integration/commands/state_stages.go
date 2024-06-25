@@ -33,7 +33,6 @@ import (
 	"github.com/ledgerwatch/erigon/core/state"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/eth/ethconfig"
-	"github.com/ledgerwatch/erigon/eth/integrity"
 	"github.com/ledgerwatch/erigon/eth/stagedsync"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 	"github.com/ledgerwatch/erigon/eth/tracers/logger"
@@ -91,30 +90,6 @@ Examples:
 	},
 }
 
-var loopIhCmd = &cobra.Command{
-	Use: "loop_ih",
-	Run: func(cmd *cobra.Command, args []string) {
-		logger := debug.SetupCobra(cmd, "integration")
-		ctx, _ := common2.RootContext()
-		db, err := openDB(dbCfg(kv.ChainDB, chaindata), true, logger)
-		if err != nil {
-			logger.Error("Opening DB", "error", err)
-			return
-		}
-		defer db.Close()
-
-		if unwind == 0 {
-			unwind = 1
-		}
-		if err := loopIh(db, ctx, unwind, logger); err != nil {
-			if !errors.Is(err, context.Canceled) {
-				logger.Error(err.Error())
-			}
-			return
-		}
-	},
-}
-
 var loopExecCmd = &cobra.Command{
 	Use: "loop_exec",
 	Run: func(cmd *cobra.Command, args []string) {
@@ -151,14 +126,6 @@ func init() {
 	withHeimdall(stateStages)
 	withWorkers(stateStages)
 	rootCmd.AddCommand(stateStages)
-
-	withConfig(loopIhCmd)
-	withDataDir(loopIhCmd)
-	withBatchSize(loopIhCmd)
-	withUnwind(loopIhCmd)
-	withChain(loopIhCmd)
-	withHeimdall(loopIhCmd)
-	rootCmd.AddCommand(loopIhCmd)
 
 	withConfig(loopExecCmd)
 	withDataDir(loopExecCmd)
@@ -324,7 +291,6 @@ func syncBySmallSteps(db kv.RwDB, miningConfig params.MiningConfig, ctx context.
 			if err := checkChanges(expectedAccountChanges, tx, expectedStorageChanges, execAtBlock, pm.History.PruneTo(execToBlock)); err != nil {
 				return err
 			}
-			integrity.Trie(db, tx, integritySlow, ctx)
 		}
 		//receiptsInDB := rawdb.ReadReceiptsByNumber(tx, progress(tx, stages.Execution)+1)
 
@@ -451,78 +417,6 @@ func checkMinedBlock(b1, b2 *types.Block, chainConfig *chain2.Config) {
 		// Header()'s deep-copy doesn't matter here since it will panic anyway
 		debugprint.Headers(b1.Header(), b2.Header())
 		panic("blocks are not same")
-	}
-}
-
-func loopIh(db kv.RwDB, ctx context.Context, unwind uint64, logger log.Logger) error {
-	sn, borSn, agg := allSnapshots(ctx, db, logger)
-	defer sn.Close()
-	defer borSn.Close()
-	defer agg.Close()
-	_, _, sync, _, _ := newSync(ctx, db, nil /* miningConfig */, logger)
-	dirs := datadir.New(datadirCli)
-
-	tx, err := db.BeginRw(ctx)
-	if err != nil {
-		return err
-	}
-	defer tx.Rollback()
-	sync.DisableStages(stages.Snapshots, stages.Headers, stages.BlockHashes, stages.Bodies, stages.Senders, stages.Execution, stages.AccountHistoryIndex, stages.StorageHistoryIndex, stages.TxLookup, stages.Finish)
-	if _, err = sync.Run(db, wrap.TxContainer{Tx: tx}, false /* firstCycle */, false); err != nil {
-		return err
-	}
-	execStage := stage(sync, tx, nil, stages.HashState)
-	to := execStage.BlockNumber - unwind
-	_ = sync.SetCurrentStage(stages.HashState)
-	u := &stagedsync.UnwindState{ID: stages.HashState, UnwindPoint: to}
-	if err = stagedsync.UnwindHashStateStage(u, stage(sync, tx, nil, stages.HashState), tx, stagedsync.StageHashStateCfg(db, dirs), ctx, logger); err != nil {
-		return err
-	}
-	_ = sync.SetCurrentStage(stages.IntermediateHashes)
-	u = &stagedsync.UnwindState{ID: stages.IntermediateHashes, UnwindPoint: to}
-	br, _ := blocksIO(db, logger)
-	historyV3 := true
-	if err = stagedsync.UnwindIntermediateHashesStage(u, stage(sync, tx, nil, stages.IntermediateHashes), tx, stagedsync.StageTrieCfg(db, true, true, false, dirs.Tmp,
-		br, nil, historyV3, agg), ctx, logger); err != nil {
-		return err
-	}
-	must(tx.Commit())
-	tx, err = db.BeginRw(ctx)
-	must(err)
-	defer tx.Rollback()
-
-	sync.DisableStages(stages.IntermediateHashes)
-	_ = sync.SetCurrentStage(stages.HashState)
-	if _, err = sync.Run(db, wrap.TxContainer{Tx: tx}, false /* firstCycle */, false); err != nil {
-		return err
-	}
-	must(tx.Commit())
-	tx, err = db.BeginRw(ctx)
-	must(err)
-	defer tx.Rollback()
-
-	sync.DisableStages(stages.HashState)
-	sync.EnableStages(stages.IntermediateHashes)
-
-	for {
-		select {
-		case <-ctx.Done():
-			return nil
-		default:
-		}
-
-		_ = sync.SetCurrentStage(stages.IntermediateHashes)
-		t := time.Now()
-		if _, err = sync.Run(db, wrap.TxContainer{Tx: tx}, false /* firstCycle */, false); err != nil {
-			return err
-		}
-		logger.Warn("loop", "time", time.Since(t).String())
-		tx.Rollback()
-		tx, err = db.BeginRw(ctx)
-		if err != nil {
-			return err
-		}
-		defer tx.Rollback()
 	}
 }
 

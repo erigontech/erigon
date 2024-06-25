@@ -34,7 +34,6 @@ import (
 	btree2 "github.com/tidwall/btree"
 	"golang.org/x/sync/errgroup"
 
-	"github.com/ledgerwatch/erigon-lib/kv/backup"
 	"github.com/ledgerwatch/erigon-lib/log/v3"
 	"github.com/ledgerwatch/erigon-lib/recsplit/eliasfano32"
 
@@ -87,6 +86,8 @@ type Domain struct {
 	// underlying array is immutable - means it's ready for zero-copy use
 	_visibleFiles []ctxItem
 
+	integrityCheck func(name kv.Domain, fromStep, toStep uint64) bool
+
 	// replaceKeysInValues allows to replace commitment branch values with shorter keys.
 	// for commitment domain only
 	replaceKeysInValues bool
@@ -108,7 +109,7 @@ type domainCfg struct {
 	restrictSubsetFileDeletions bool
 }
 
-func NewDomain(cfg domainCfg, aggregationStep uint64, filenameBase, keysTable, valsTable, indexKeysTable, historyValsTable, indexTable string, logger log.Logger) (*Domain, error) {
+func NewDomain(cfg domainCfg, aggregationStep uint64, filenameBase, keysTable, valsTable, indexKeysTable, historyValsTable, indexTable string, integrityCheck func(name kv.Domain, fromStep, toStep uint64) bool, logger log.Logger) (*Domain, error) {
 	if cfg.hist.iiCfg.dirs.SnapDomain == "" {
 		panic("empty `dirs` variable")
 	}
@@ -122,6 +123,7 @@ func NewDomain(cfg domainCfg, aggregationStep uint64, filenameBase, keysTable, v
 		indexList:                   withBTree | withExistence,
 		replaceKeysInValues:         cfg.replaceKeysInValues,         // for commitment domain only
 		restrictSubsetFileDeletions: cfg.restrictSubsetFileDeletions, // to prevent not merged 'garbage' to delete on start
+		integrityCheck:              integrityCheck,
 	}
 
 	d._visibleFiles = []ctxItem{}
@@ -226,7 +228,11 @@ func (d *Domain) closeFilesAfterStep(lowerBound uint64) {
 	})
 	for _, item := range toClose {
 		d.dirtyFiles.Delete(item)
-		log.Debug(fmt.Sprintf("[snapshots] closing %s, because step %d has not enough files (was not complete). stack: %s", item.decompressor.FileName(), lowerBound, dbg.Stack()))
+		fName := ""
+		if item.decompressor != nil {
+			fName = item.decompressor.FileName()
+		}
+		log.Debug(fmt.Sprintf("[snapshots] closing %s, because step %d was not complete", fName, lowerBound))
 		item.closeFiles()
 	}
 
@@ -239,7 +245,11 @@ func (d *Domain) closeFilesAfterStep(lowerBound uint64) {
 	})
 	for _, item := range toClose {
 		d.History.dirtyFiles.Delete(item)
-		log.Debug(fmt.Sprintf("[snapshots] closing some histor files - because step %d has not enough files (was not complete)", lowerBound))
+		fName := ""
+		if item.decompressor != nil {
+			fName = item.decompressor.FileName()
+		}
+		log.Debug(fmt.Sprintf("[snapshots] closing %s, because step %d was not complete", fName, lowerBound))
 		item.closeFiles()
 	}
 
@@ -252,7 +262,11 @@ func (d *Domain) closeFilesAfterStep(lowerBound uint64) {
 	})
 	for _, item := range toClose {
 		d.History.InvertedIndex.dirtyFiles.Delete(item)
-		log.Debug(fmt.Sprintf("[snapshots] closing %s, because step %d has not enough files (was not complete)", item.decompressor.FileName(), lowerBound))
+		fName := ""
+		if item.decompressor != nil {
+			fName = item.decompressor.FileName()
+		}
+		log.Debug(fmt.Sprintf("[snapshots] closing %s, because step %d was not complete", fName, lowerBound))
 		item.closeFiles()
 	}
 }
@@ -280,6 +294,12 @@ func (d *Domain) scanStateFiles(fileNames []string) (garbageFiles []*filesItem) 
 		}
 		if startStep > endStep {
 			d.logger.Warn("File ignored by domain scan, startTxNum > endTxNum", "name", name)
+			continue
+		}
+
+		domainName, _ := kv.String2Domain(d.filenameBase)
+		if d.integrityCheck != nil && !d.integrityCheck(domainName, startStep, endStep) {
+			d.logger.Debug("[agg] skip garbage file", "name", name)
 			continue
 		}
 
@@ -1216,7 +1236,7 @@ func (dt *DomainRoTx) Unwind(ctx context.Context, rwTx kv.RwTx, step, txNumUnwin
 		}
 	}
 	// Compare valsKV with prevSeenKeys
-	if _, err := dt.ht.Prune(ctx, rwTx, txNumUnwindTo, math.MaxUint64, math.MaxUint64, true, false, logEvery); err != nil {
+	if _, err := dt.ht.Prune(ctx, rwTx, txNumUnwindTo, math.MaxUint64, math.MaxUint64, true, logEvery); err != nil {
 		return fmt.Errorf("[domain][%s] unwinding, prune history to txNum=%d, step %d: %w", dt.d.filenameBase, txNumUnwindTo, step, err)
 	}
 	return nil
@@ -1638,35 +1658,13 @@ func (dc *DomainPruneStat) Accumulate(other *DomainPruneStat) {
 	}
 }
 
-// TODO test idea. Generate 4 keys with updates for several steps. Count commitment after each prune over 4 known keys.
-//   минус локалити - не умеет отсеивать несуществующие ключи, и это не шардед индекс а кросс шардед (1 файл на все кв или еф файлы)
-
-// history prunes keys in range [txFrom; txTo), domain prunes any records with rStep <= step.
-// In case of context cancellation pruning stops and returns error, but simply could be started again straight away.
-func (dt *DomainRoTx) Warmup(ctx context.Context) (cleanup func()) {
-	ctx, cancel := context.WithCancel(ctx)
-	wg := &errgroup.Group{}
-	wg.Go(func() error {
-		backup.WarmupTable(ctx, dt.d.db, dt.d.keysTable, log.LvlDebug, 4)
-		return nil
-	})
-	wg.Go(func() error {
-		backup.WarmupTable(ctx, dt.d.db, dt.d.valsTable, log.LvlDebug, 4)
-		return nil
-	})
-	return func() {
-		cancel()
-		_ = wg.Wait()
-	}
-}
-
-func (dt *DomainRoTx) Prune(ctx context.Context, rwTx kv.RwTx, step, txFrom, txTo, limit uint64, withWarmup bool, logEvery *time.Ticker) (stat *DomainPruneStat, err error) {
+func (dt *DomainRoTx) Prune(ctx context.Context, rwTx kv.RwTx, step, txFrom, txTo, limit uint64, logEvery *time.Ticker) (stat *DomainPruneStat, err error) {
 	if limit == 0 {
 		limit = math.MaxUint64
 	}
 
 	stat = &DomainPruneStat{MinStep: math.MaxUint64}
-	if stat.History, err = dt.ht.Prune(ctx, rwTx, txFrom, txTo, limit, false, withWarmup, logEvery); err != nil {
+	if stat.History, err = dt.ht.Prune(ctx, rwTx, txFrom, txTo, limit, false, logEvery); err != nil {
 		return nil, fmt.Errorf("prune history at step %d [%d, %d): %w", step, txFrom, txTo, err)
 	}
 	canPrune, maxPrunableStep := dt.canPruneDomainTables(rwTx, txTo)
@@ -1680,11 +1678,6 @@ func (dt *DomainRoTx) Prune(ctx context.Context, rwTx kv.RwTx, step, txFrom, txT
 	st := time.Now()
 	mxPruneInProgress.Inc()
 	defer mxPruneInProgress.Dec()
-
-	if withWarmup {
-		cleanup := dt.Warmup(ctx)
-		defer cleanup()
-	}
 
 	keysCursorForDeletes, err := rwTx.RwCursorDupSort(dt.d.keysTable)
 	if err != nil {

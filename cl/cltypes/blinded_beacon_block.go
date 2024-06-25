@@ -48,10 +48,10 @@ type BlindedBeaconBody struct {
 	// Data related to crosslink records and executing operations on the Ethereum 2.0 chain
 	ExecutionPayload *Eth1Header `json:"execution_payload_header,omitempty"`
 	// Withdrawals Diffs for Execution Layer
-	ExecutionChanges *solid.ListSSZ[*SignedBLSToExecutionChange] `json:"execution_changes,omitempty"`
+	ExecutionChanges *solid.ListSSZ[*SignedBLSToExecutionChange] `json:"bls_to_execution_changes"`
 	// The commitments for beacon chain blobs
 	// With a max of 4 per block
-	BlobKzgCommitments *solid.ListSSZ[*KZGCommitment] `json:"blob_kzg_commitments,omitempty"`
+	BlobKzgCommitments *solid.ListSSZ[*KZGCommitment] `json:"blob_kzg_commitments"`
 	// The version of the beacon chain
 	Version   clparams.StateVersion `json:"-"`
 	beaconCfg *clparams.BeaconChainConfig
@@ -60,7 +60,10 @@ type BlindedBeaconBody struct {
 // Getters
 
 func NewSignedBlindedBeaconBlock(beaconCfg *clparams.BeaconChainConfig) *SignedBlindedBeaconBlock {
-	return &SignedBlindedBeaconBlock{Block: NewBlindedBeaconBlock(beaconCfg)}
+	return &SignedBlindedBeaconBlock{
+		Signature: libcommon.Bytes96{},
+		Block:     NewBlindedBeaconBlock(beaconCfg),
+	}
 }
 
 func (s *SignedBlindedBeaconBlock) SignedBeaconBlockHeader() *SignedBeaconBlockHeader {
@@ -81,12 +84,27 @@ func (s *SignedBlindedBeaconBlock) SignedBeaconBlockHeader() *SignedBeaconBlockH
 }
 
 func NewBlindedBeaconBlock(beaconCfg *clparams.BeaconChainConfig) *BlindedBeaconBlock {
-	return &BlindedBeaconBlock{Body: NewBlindedBeaconBody(beaconCfg)}
+	return &BlindedBeaconBlock{
+		Body: NewBlindedBeaconBody(beaconCfg),
+	}
 }
 
 func NewBlindedBeaconBody(beaconCfg *clparams.BeaconChainConfig) *BlindedBeaconBody {
 	return &BlindedBeaconBody{
-		beaconCfg: beaconCfg,
+		RandaoReveal:       libcommon.Bytes96{},
+		Eth1Data:           NewEth1Data(),
+		Graffiti:           libcommon.Hash{},
+		ProposerSlashings:  solid.NewStaticListSSZ[*ProposerSlashing](MaxProposerSlashings, 416),
+		AttesterSlashings:  solid.NewDynamicListSSZ[*AttesterSlashing](MaxAttesterSlashings),
+		Attestations:       solid.NewDynamicListSSZ[*solid.Attestation](MaxAttestations),
+		Deposits:           solid.NewStaticListSSZ[*Deposit](MaxDeposits, 1240),
+		VoluntaryExits:     solid.NewStaticListSSZ[*SignedVoluntaryExit](MaxVoluntaryExits, 112),
+		SyncAggregate:      NewSyncAggregate(),
+		ExecutionPayload:   nil,
+		ExecutionChanges:   solid.NewStaticListSSZ[*SignedBLSToExecutionChange](MaxExecutionChanges, 172),
+		BlobKzgCommitments: solid.NewStaticListSSZ[*KZGCommitment](MaxBlobsCommittmentsPerBlock, 48),
+		Version:            0,
+		beaconCfg:          beaconCfg,
 	}
 }
 
@@ -115,6 +133,21 @@ func (b *BlindedBeaconBlock) Full(txs *solid.TransactionsSSZ, withdrawals *solid
 		StateRoot:     b.StateRoot,
 		Body:          b.Body.Full(txs, withdrawals),
 	}
+}
+
+func (b *BlindedBeaconBlock) SetVersion(version clparams.StateVersion) *BlindedBeaconBlock {
+	b.Body.SetVersion(version)
+	return b
+}
+
+func (b *BlindedBeaconBody) SetVersion(version clparams.StateVersion) *BlindedBeaconBody {
+	b.Version = version
+	if b.ExecutionPayload == nil {
+		b.ExecutionPayload = NewEth1Header(version)
+	} else {
+		b.ExecutionPayload.SetVersion(version)
+	}
+	return b
 }
 
 func (b *BlindedBeaconBody) EncodeSSZ(dst []byte) ([]byte, error) {
@@ -207,6 +240,16 @@ func (b *BlindedBeaconBody) getSchema(storage bool) []interface{} {
 		s = append(s, b.BlobKzgCommitments)
 	}
 	return s
+}
+
+func (b *BlindedBeaconBody) SetHeader(header *Eth1Header) *BlindedBeaconBody {
+	b.ExecutionPayload = header
+	return b
+}
+
+func (b *BlindedBeaconBody) SetBlobKzgCommitments(commitments *solid.ListSSZ[*KZGCommitment]) *BlindedBeaconBody {
+	b.BlobKzgCommitments = commitments
+	return b
 }
 
 func (b *BlindedBeaconBody) Full(txs *solid.TransactionsSSZ, withdrawals *solid.ListSSZ[*Withdrawal]) *BeaconBody {
@@ -311,6 +354,21 @@ func (b *SignedBlindedBeaconBlock) Clone() clonable.Clonable {
 
 func (b *BlindedBeaconBody) ExecutionPayloadMerkleProof() ([][32]byte, error) {
 	return merkle_tree.MerkleProof(4, 9, b.getSchema(false)...)
+}
+
+func (b *SignedBlindedBeaconBlock) Unblind(blockPayload *Eth1Block) (*SignedBeaconBlock, error) {
+	if b == nil {
+		return nil, fmt.Errorf("nil block")
+	}
+	// check root
+	blindedRoot := b.Block.Body.ExecutionPayload.StateRoot
+	payloadRoot := blockPayload.StateRoot
+	if blindedRoot != payloadRoot {
+		return nil, fmt.Errorf("root mismatch: %s != %s", blindedRoot, payloadRoot)
+	}
+
+	signedBeaconBlock := b.Full(blockPayload.Transactions, blockPayload.Withdrawals)
+	return signedBeaconBlock, nil
 }
 
 // make sure that the type implements the interface ssz2.ObjectSSZ
