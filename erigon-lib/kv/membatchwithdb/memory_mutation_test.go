@@ -233,16 +233,18 @@ func TestPrefix(t *testing.T) {
 
 	initializeDbNonDupSort(rwTx)
 
-	kvs, err := rwTx.Prefix(kv.HashedAccounts, []byte("AB"))
+	kvs1, err := rwTx.Prefix(kv.HashedAccounts, []byte("AB"))
+	defer kvs1.Close()
 	require.Nil(t, err)
-	require.False(t, kvs.HasNext())
+	require.False(t, kvs1.HasNext())
 
 	var keys1 []string
 	var values1 []string
-	kvs, err = rwTx.Prefix(kv.HashedAccounts, []byte("AAAA"))
+	kvs2, err := rwTx.Prefix(kv.HashedAccounts, []byte("AAAA"))
+	defer kvs2.Close()
 	require.Nil(t, err)
-	for kvs.HasNext() {
-		k1, v1, err := kvs.Next()
+	for kvs2.HasNext() {
+		k1, v1, err := kvs2.Next()
 		require.Nil(t, err)
 		keys1 = append(keys1, string(k1))
 		values1 = append(values1, string(v1))
@@ -252,10 +254,11 @@ func TestPrefix(t *testing.T) {
 
 	var keys []string
 	var values []string
-	kvs, err = rwTx.Prefix(kv.HashedAccounts, []byte("C"))
+	kvs3, err := rwTx.Prefix(kv.HashedAccounts, []byte("C"))
+	defer kvs3.Close()
 	require.Nil(t, err)
-	for kvs.HasNext() {
-		k1, v1, err := kvs.Next()
+	for kvs3.HasNext() {
+		k1, v1, err := kvs3.Next()
 		require.Nil(t, err)
 		keys = append(keys, string(k1))
 		values = append(values, string(v1))

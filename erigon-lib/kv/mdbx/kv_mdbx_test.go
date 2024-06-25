@@ -397,28 +397,31 @@ func TestPrefix(t *testing.T) {
 
 	table := "Table"
 	var keys, keys1, keys2 []string
-	kvs, err := tx.Prefix(table, []byte("key"))
+	kvs1, err := tx.Prefix(table, []byte("key"))
+	defer kvs1.Close()
 	require.Nil(t, err)
-	for kvs.HasNext() {
-		k1, _, err := kvs.Next()
+	for kvs1.HasNext() {
+		k1, _, err := kvs1.Next()
 		require.Nil(t, err)
 		keys = append(keys, string(k1))
 	}
 	require.Equal(t, []string{"key1", "key1", "key3", "key3"}, keys)
 
-	kvs, err = tx.Prefix(table, []byte("key1"))
+	kvs2, err := tx.Prefix(table, []byte("key1"))
+	defer kvs2.Close()
 	require.Nil(t, err)
-	for kvs.HasNext() {
-		k1, _, err := kvs.Next()
+	for kvs2.HasNext() {
+		k1, _, err := kvs2.Next()
 		require.Nil(t, err)
 		keys1 = append(keys1, string(k1))
 	}
 	require.Equal(t, []string{"key1", "key1"}, keys1)
 
-	kvs, err = tx.Prefix(table, []byte("e"))
+	kvs3, err := tx.Prefix(table, []byte("e"))
+	defer kvs3.Close()
 	require.Nil(t, err)
-	for kvs.HasNext() {
-		k1, _, err := kvs.Next()
+	for kvs3.HasNext() {
+		k1, _, err := kvs3.Next()
 		require.Nil(t, err)
 		keys2 = append(keys2, string(k1))
 	}
