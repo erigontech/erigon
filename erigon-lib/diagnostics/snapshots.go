@@ -61,11 +61,23 @@ func (d *DiagnosticClient) runSnapshotListener(rootCtx context.Context) {
 					Progress:    downloadedPercent,
 				}, "Downloading snapshots")
 
-				if err := d.db.Update(d.ctx, SnapshotDownloadUpdater(d.syncStats.SnapshotDownload)); err != nil {
-					log.Error("[Diagnostics] Failed to update snapshot download info", "err", err)
-				}
+				err := d.db.Update(d.ctx, func(tx kv.RwTx) error {
+					err := SnapshotDownloadUpdater(d.syncStats.SnapshotDownload)(tx)
+					if err != nil {
+						return err
+					}
 
-				d.saveSyncStagesToDB()
+					err = StagesListUpdater(d.syncStages)(tx)
+					if err != nil {
+						return err
+					}
+
+					return nil
+				})
+
+				if err != nil {
+					log.Warn("[Diagnostics] Failed to update snapshot download info", "err", err)
+				}
 
 				d.mu.Unlock()
 
@@ -92,7 +104,7 @@ func GetShanpshotsPercentDownloaded(downloaded uint64, total uint64, torrentMeta
 }
 
 func (d *DiagnosticClient) updateSnapshotStageStats(stats SyncStageStats, subStageInfo string) {
-	idxs := d.getCurrentSyncIdxs()
+	idxs := d.GetCurrentSyncIdxs()
 	if idxs.Stage == -1 || idxs.SubStage == -1 {
 		log.Warn("[Diagnostics] Can't find running stage or substage while updating Snapshots stage stats.", "stages:", d.syncStages, "stats:", stats, "subStageInfo:", subStageInfo)
 		return
@@ -102,12 +114,13 @@ func (d *DiagnosticClient) updateSnapshotStageStats(stats SyncStageStats, subSta
 }
 
 func (d *DiagnosticClient) snapshotStageFinished() bool {
-	idx := d.getCurrentSyncIdxs()
-	if idx.Stage > 0 {
+	state, err := d.GetStageState("Snapshots")
+	if err != nil {
+		log.Error("[Diagnostics] Failed to get Snapshots stage state", "err", err)
 		return true
-	} else {
-		return false
 	}
+
+	return state == Completed
 }
 
 func (d *DiagnosticClient) runSegmentDownloadingListener(rootCtx context.Context) {

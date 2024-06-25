@@ -54,7 +54,7 @@ func testDbAndAppendable(tb testing.TB, aggStep uint64, logger log.Logger) (kv.R
 	}).MustOpen()
 	tb.Cleanup(db.Close)
 	salt := uint32(1)
-	cfg := AppendableCfg{Salt: &salt, Dirs: dirs, DB: db, CanonicalMarkersTable: kv.HeaderCanonical}
+	cfg := AppendableCfg{Salt: &salt, Dirs: dirs, DB: db}
 	ii, err := NewAppendable(cfg, aggStep, "receipt", table, nil, logger)
 	require.NoError(tb, err)
 	ii.DisableFsync()
@@ -87,12 +87,12 @@ func TestAppendableCollationBuild(t *testing.T) {
 		require.Equal(1, int(binary.BigEndian.Uint64(v)))
 
 		//never existed key
-		_, ok, err = ic.Get(txs+1, tx)
+		_, ok, err = ic.Get(kv.TxnId(txs+1), tx)
 		require.NoError(err)
 		require.False(ok)
 
 		//non-canonical key: must exist before collate+prune
-		_, ok, err = ic.Get(steps+1, tx)
+		_, ok, err = ic.Get(kv.TxnId(steps+1), tx)
 		require.NoError(err)
 		require.True(ok)
 
@@ -103,7 +103,7 @@ func TestAppendableCollationBuild(t *testing.T) {
 	defer ctrl.Finish()
 
 	//see only canonical records in files
-	iters := NewMockIterFactory(ctrl)
+	iters := NewMockCanonicalsReader(ctrl)
 	iters.EXPECT().TxnIdsOfCanonicalBlocks(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).
 		DoAndReturn(func(tx kv.Tx, txFrom, txTo int, by order.By, i3 int) (iter.U64, error) {
 			currentStep := uint64(txFrom) / aggStep
@@ -195,7 +195,7 @@ func filledAppendableOfSize(tb testing.TB, txs, aggStep uint64, logger log.Logge
 	defer ic.Close()
 
 	for i := uint64(0); i < txs; i++ {
-		err = ic.Append(i, hexutility.EncodeTs(i), tx)
+		err = ic.Append(kv.TxnId(i), hexutility.EncodeTs(i), tx)
 		require.NoError(err)
 	}
 	err = tx.Commit()
@@ -229,12 +229,12 @@ func checkAppendableGet(t *testing.T, dbtx kv.Tx, tx *AppendableRoTx, txs uint64
 	require.Equal(62.4375, to)
 
 	//non-canonical key: must exist before collate+prune
-	_, ok, err = tx.Get(steps+1, dbtx)
+	_, ok, err = tx.Get(kv.TxnId(steps+1), dbtx)
 	require.NoError(err)
 	require.False(ok)
 
 	//non-canonical keys of last step: must exist after collate+prune
-	_, ok, err = tx.Get(aggStep*steps+2, dbtx)
+	_, ok, err = tx.Get(kv.TxnId(aggStep*steps+2), dbtx)
 	require.NoError(err)
 	require.True(ok)
 }
@@ -262,10 +262,8 @@ func mergeAppendable(tb testing.TB, db kv.RwDB, ii *Appendable, txs uint64) {
 			ii.reCalcVisibleFiles()
 			ic := ii.BeginFilesRo()
 			defer ic.Close()
-			_, err = ic.Prune(ctx, tx, step*ii.aggregationStep, (step+1)*ii.aggregationStep, math.MaxUint64, logEvery, false, false, nil)
+			_, err = ic.Prune(ctx, tx, step*ii.aggregationStep, (step+1)*ii.aggregationStep, math.MaxUint64, logEvery, false, nil)
 			require.NoError(tb, err)
-			var found bool
-			var startTxNum, endTxNum uint64
 			maxEndTxNum := ii.endTxNumMinimax()
 			maxSpan := ii.aggregationStep * StepsInColdFile
 
@@ -273,12 +271,12 @@ func mergeAppendable(tb testing.TB, db kv.RwDB, ii *Appendable, txs uint64) {
 				if stop := func() bool {
 					ic := ii.BeginFilesRo()
 					defer ic.Close()
-					found, startTxNum, endTxNum = ic.findMergeRange(maxEndTxNum, maxSpan)
-					if !found {
+					r := ic.findMergeRange(maxEndTxNum, maxSpan)
+					if !r.needMerge {
 						return true
 					}
-					outs := ic.staticFilesInRange(startTxNum, endTxNum)
-					in, err := ic.mergeFiles(ctx, outs, startTxNum, endTxNum, background.NewProgressSet())
+					outs := ic.staticFilesInRange(r.from, r.to)
+					in, err := ic.mergeFiles(ctx, outs, r.from, r.to, background.NewProgressSet())
 					require.NoError(tb, err)
 					ii.integrateMergedDirtyFiles(outs, in)
 					ii.reCalcVisibleFiles()
@@ -297,7 +295,7 @@ func mergeAppendable(tb testing.TB, db kv.RwDB, ii *Appendable, txs uint64) {
 func emptyTestAppendable(aggStep uint64) *Appendable {
 	salt := uint32(1)
 	logger := log.New()
-	return &Appendable{cfg: AppendableCfg{Salt: &salt, DB: nil, CanonicalMarkersTable: kv.HeaderCanonical},
+	return &Appendable{cfg: AppendableCfg{Salt: &salt, DB: nil},
 		logger:       logger,
 		filenameBase: "test", aggregationStep: aggStep, dirtyFiles: btree2.NewBTreeG[*filesItem](filesItemLess)}
 }

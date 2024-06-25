@@ -7,7 +7,6 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
-
 	"io"
 	"math"
 	"net/http"
@@ -456,13 +455,21 @@ func doIntegrity(cliCtx *cli.Context) error {
 		}
 		switch chk {
 		case integrity.BlocksTxnID:
-			return blockReader.(*freezeblocks.BlockReader).IntegrityTxnID(failFast)
+			if err := blockReader.(*freezeblocks.BlockReader).IntegrityTxnID(failFast); err != nil {
+				return err
+			}
 		case integrity.Blocks:
-			return integrity.SnapBlocksRead(chainDB, blockReader, ctx, failFast)
+			if err := integrity.SnapBlocksRead(chainDB, blockReader, ctx, failFast); err != nil {
+				return err
+			}
 		case integrity.InvertedIndex:
-			return integrity.E3EfFiles(ctx, chainDB, agg, failFast, fromStep)
+			if err := integrity.E3EfFiles(ctx, chainDB, agg, failFast, fromStep); err != nil {
+				return err
+			}
 		case integrity.HistoryNoSystemTxs:
-			return integrity.E3HistoryNoSystemTxs(ctx, chainDB, agg)
+			if err := integrity.E3HistoryNoSystemTxs(ctx, chainDB, agg); err != nil {
+				return err
+			}
 		default:
 			return fmt.Errorf("unknown check: %s", chk)
 		}
@@ -923,7 +930,7 @@ func doRetireCommand(cliCtx *cli.Context, dirs datadir.Dirs) error {
 		logEvery := time.NewTicker(30 * time.Second)
 		defer logEvery.Stop()
 
-		stat, err := ac.Prune(ctx, tx, math.MaxUint64, true, logEvery)
+		stat, err := ac.Prune(ctx, tx, math.MaxUint64, logEvery)
 		if err != nil {
 			return err
 		}
@@ -1020,7 +1027,8 @@ func dbCfg(label kv.Label, path string) mdbx.MdbxOpts {
 	return opts
 }
 func openAgg(ctx context.Context, dirs datadir.Dirs, chainDB kv.RwDB, logger log.Logger) *libstate.Aggregator {
-	agg, err := libstate.NewAggregator(ctx, dirs, config3.HistoryV3AggregationStep, chainDB, logger)
+	cr := rawdb.NewCanonicalReader()
+	agg, err := libstate.NewAggregator(ctx, dirs, config3.HistoryV3AggregationStep, chainDB, cr, logger)
 	if err != nil {
 		panic(err)
 	}

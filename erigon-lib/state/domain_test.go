@@ -83,7 +83,7 @@ func testDbAndDomainOfStep(t *testing.T, aggStep uint64, logger log.Logger) (kv.
 			iiCfg:             iiCfg{salt: &salt, dirs: dirs, db: db},
 			withLocalityIndex: false, withExistenceIndex: false, compression: CompressNone, historyLargeValues: true,
 		}}
-	d, err := NewDomain(cfg, aggStep, kv.AccountsDomain.String(), keysTable, valsTable, historyKeysTable, historyValsTable, indexTable, logger)
+	d, err := NewDomain(cfg, aggStep, kv.AccountsDomain.String(), keysTable, valsTable, historyKeysTable, historyValsTable, indexTable, nil, logger)
 	require.NoError(t, err)
 	d.DisableFsync()
 	d.compressWorkers = 1
@@ -345,7 +345,7 @@ func TestDomain_AfterPrune(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, p2, v)
 
-	_, err = dc.Prune(ctx, tx, 0, 0, 16, math.MaxUint64, false, logEvery)
+	_, err = dc.Prune(ctx, tx, 0, 0, 16, math.MaxUint64, logEvery)
 	require.NoError(t, err)
 
 	isEmpty, err := d.isEmpty(tx)
@@ -488,7 +488,7 @@ func collateAndMerge(t *testing.T, db kv.RwDB, tx kv.RwTx, d *Domain, txs uint64
 		d.reCalcVisibleFiles()
 
 		dc := d.BeginFilesRo()
-		_, err = dc.Prune(ctx, tx, step, step*d.aggregationStep, (step+1)*d.aggregationStep, math.MaxUint64, false, logEvery)
+		_, err = dc.Prune(ctx, tx, step, step*d.aggregationStep, (step+1)*d.aggregationStep, math.MaxUint64, logEvery)
 		dc.Close()
 		require.NoError(t, err)
 	}
@@ -540,7 +540,7 @@ func collateAndMergeOnce(t *testing.T, d *Domain, tx kv.RwTx, step uint64, prune
 
 	if prune {
 		dc := d.BeginFilesRo()
-		stat, err := dc.Prune(ctx, tx, step, txFrom, txTo, math.MaxUint64, false, logEvery)
+		stat, err := dc.Prune(ctx, tx, step, txFrom, txTo, math.MaxUint64, logEvery)
 		t.Logf("prune stat: %s  (%d-%d)", stat, txFrom, txTo)
 		require.NoError(t, err)
 		dc.Close()
@@ -850,7 +850,7 @@ func TestDomain_OpenFilesWithDeletions(t *testing.T) {
 			dom.reCalcVisibleFiles()
 
 			dc := dom.BeginFilesRo()
-			_, err = dc.Prune(ctx, tx, step, s, ns, math.MaxUint64, false, logEvery)
+			_, err = dc.Prune(ctx, tx, step, s, ns, math.MaxUint64, logEvery)
 			dc.Close()
 			require.NoError(t, err)
 		}
@@ -1099,7 +1099,7 @@ func TestDomainContext_getFromFiles(t *testing.T) {
 
 		logEvery := time.NewTicker(time.Second * 30)
 
-		_, err = dc.Prune(ctx, tx, step, txFrom, txTo, math.MaxUint64, false, logEvery)
+		_, err = dc.Prune(ctx, tx, step, txFrom, txTo, math.MaxUint64, logEvery)
 		require.NoError(t, err)
 
 		ranges := dc.findMergeRange(txFrom, txTo)
@@ -1701,7 +1701,7 @@ func TestDomain_PruneProgress(t *testing.T) {
 	defer dc.Close()
 
 	ct, cancel := context.WithTimeout(context.Background(), time.Millisecond*1)
-	_, err = dc.Prune(ct, rwTx, 0, 0, aggStep, math.MaxUint64, false, time.NewTicker(time.Second))
+	_, err = dc.Prune(ct, rwTx, 0, 0, aggStep, math.MaxUint64, time.NewTicker(time.Second))
 	require.ErrorIs(t, err, context.DeadlineExceeded)
 	cancel()
 
@@ -1723,7 +1723,7 @@ func TestDomain_PruneProgress(t *testing.T) {
 		// step changing should not affect pruning. Prune should finish step 0 first.
 		i++
 		ct, cancel := context.WithTimeout(context.Background(), time.Millisecond*2)
-		_, err = dc.Prune(ct, rwTx, step, step*aggStep, (aggStep*step)+1, math.MaxUint64, false, time.NewTicker(time.Second))
+		_, err = dc.Prune(ct, rwTx, step, step*aggStep, (aggStep*step)+1, math.MaxUint64, time.NewTicker(time.Second))
 		if err != nil {
 			require.ErrorIs(t, err, context.DeadlineExceeded)
 		} else {
@@ -2045,7 +2045,7 @@ func TestDomain_PruneSimple(t *testing.T) {
 		ctx := context.Background()
 		tx, err := db.BeginRw(ctx)
 		require.NoError(t, err)
-		_, err = dc.ht.Prune(ctx, tx, pruneFrom, pruneTo, math.MaxUint64, true, false, time.NewTicker(time.Second))
+		_, err = dc.ht.Prune(ctx, tx, pruneFrom, pruneTo, math.MaxUint64, true, time.NewTicker(time.Second))
 		require.NoError(t, err)
 		err = tx.Commit()
 		require.NoError(t, err)
@@ -2057,7 +2057,7 @@ func TestDomain_PruneSimple(t *testing.T) {
 		ctx := context.Background()
 		tx, err := db.BeginRw(ctx)
 		require.NoError(t, err)
-		_, err = dc.Prune(ctx, tx, step, pruneFrom, pruneTo, math.MaxUint64, false, time.NewTicker(time.Second))
+		_, err = dc.Prune(ctx, tx, step, pruneFrom, pruneTo, math.MaxUint64, time.NewTicker(time.Second))
 		require.NoError(t, err)
 		err = tx.Commit()
 		require.NoError(t, err)
