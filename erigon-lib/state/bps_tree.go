@@ -128,7 +128,7 @@ func (b *BpsTree) WarmUp(kv ArchiveGetter) error {
 			return err
 		}
 		if key != nil {
-			mx[l] = append(mx[l], Node{off: b.offt.Get(ik), prefix: common.Copy(key), di: uint64(ik)})
+			mx[l] = append(mx[l], Node{off: b.offt.Get(ik), prefix: common.Copy(key), di: ik})
 			// l++
 			// if l == len(mx) {
 			// 	l = 0
