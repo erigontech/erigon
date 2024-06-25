@@ -1394,6 +1394,7 @@ func (s *Ethereum) setUpSnapDownloader(ctx context.Context, downloaderCfg *downl
 
 		s.downloaderClient = direct.NewDownloaderClient(bittorrentServer)
 	}
+
 	s.agg.OnFreeze(func(frozenFileNames []string) {
 		events := s.notifications.Events
 		events.OnNewSnapshot()

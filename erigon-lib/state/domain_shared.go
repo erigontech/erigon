@@ -183,20 +183,19 @@ func (sd *SharedDomains) Unwind(ctx context.Context, rwTx kv.RwTx, blockUnwindTo
 		return err
 	}
 
-	withWarmup := false
 	for idx, d := range sd.aggTx.d {
 		if err := d.Unwind(ctx, rwTx, step, txUnwindTo, changeset[idx]); err != nil {
 			return err
 		}
 	}
 	for _, ii := range sd.aggTx.iis {
-		if err := ii.Unwind(ctx, rwTx, txUnwindTo, math.MaxUint64, math.MaxUint64, logEvery, true, withWarmup, nil); err != nil {
+		if err := ii.Unwind(ctx, rwTx, txUnwindTo, math.MaxUint64, math.MaxUint64, logEvery, true, nil); err != nil {
 			return err
 		}
 	}
 
 	for _, ap := range sd.aggTx.appendable {
-		if err := ap.Unwind(ctx, rwTx, txUnwindTo, math.MaxUint64, math.MaxUint64, logEvery, true, withWarmup, nil); err != nil {
+		if err := ap.Unwind(ctx, rwTx, txUnwindTo, math.MaxUint64, math.MaxUint64, logEvery, true, nil); err != nil {
 			return err
 		}
 	}
@@ -351,7 +350,10 @@ func (sd *SharedDomains) get(table kv.Domain, key []byte) (v []byte, prevStep ui
 func (sd *SharedDomains) SizeEstimate() uint64 {
 	//sd.muMaps.RLock()
 	//defer sd.muMaps.RUnlock()
-	return uint64(sd.estSize) * 2 // multiply 2 here, to cover data-structures overhead. more precise accounting - expensive.
+
+	// multiply 2: to cover data-structures overhead (and keep accounting cheap)
+	// and muliply 2 more: for Commitment calculation when batch is full
+	return uint64(sd.estSize) * 4
 }
 
 func (sd *SharedDomains) LatestCommitment(prefix []byte) ([]byte, uint64, error) {

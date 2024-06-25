@@ -3,7 +3,6 @@ package stagedsync
 import (
 	"context"
 	"fmt"
-
 	"github.com/ledgerwatch/erigon-lib/chain"
 	"github.com/ledgerwatch/erigon-lib/common/datadir"
 	"github.com/ledgerwatch/erigon-lib/kv"
@@ -85,7 +84,7 @@ func SpawnCustomTrace(s *StageState, txc wrap.TxContainer, cfg CustomTraceCfg, c
 	//defer logEvery.Stop()
 	//var m runtime.MemStats
 	//var prevBlockNumLog uint64 = startBlock
-
+	//
 	//doms, err := state2.NewSharedDomains(tx, logger)
 	//if err != nil {
 	//	return err
@@ -161,7 +160,7 @@ func SpawnCustomTrace(s *StageState, txc wrap.TxContainer, cfg CustomTraceCfg, c
 	//if err := doms.Flush(ctx, tx); err != nil {
 	//	return err
 	//}
-
+	//
 	//if err = s.Update(tx.(kv.RwTx), endBlock); err != nil {
 	//	return err
 	//}
