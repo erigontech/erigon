@@ -1,0 +1,16 @@
+[Unit]
+  Description=cdk-erigon
+  StartLimitIntervalSec=500
+  StartLimitBurst=5
+
+[Service]
+  Restart=on-failure
+  RestartSec=5s
+  ExecStart=/usr/bin/cdk-erigon server -config "/opt/erigon/config.toml"
+  Type=simple
+  KillSignal=SIGINT
+  User=erigon
+  TimeoutStopSec=120
+
+[Install]
+  WantedBy=multi-user.target
