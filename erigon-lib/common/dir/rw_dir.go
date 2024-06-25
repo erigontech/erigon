@@ -19,6 +19,7 @@ package dir
 import (
 	"os"
 	"path/filepath"
+	"strings"
 
 	"golang.org/x/sync/errgroup"
 )
@@ -131,6 +132,9 @@ func ListFiles(dir string, extensions ...string) (paths []string, err error) {
 	paths = make([]string, 0, len(files))
 	for _, f := range files {
 		if f.IsDir() && !f.Type().IsRegular() {
+			continue
+		}
+		if strings.HasPrefix(f.Name(), ".") {
 			continue
 		}
 		match := false

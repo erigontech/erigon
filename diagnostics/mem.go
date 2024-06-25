@@ -20,8 +20,8 @@ func SetupMemAccess(metricsMux *http.ServeMux) {
 }
 
 func writeMem(w http.ResponseWriter) {
-	memStats, err := mem.ReadVirtualMemStats()
-	if err != nil {
+	memStats, err := mem.ReadVirtualMemStats() //nolint
+	if err != nil {                            //nolint
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}

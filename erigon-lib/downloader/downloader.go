@@ -330,8 +330,6 @@ func New(ctx context.Context, cfg *downloadercfg.Cfg, logger log.Logger, verbosi
 	d.ctx, d.stopMainLoop = context.WithCancel(ctx)
 
 	if cfg.AddTorrentsFromDisk {
-		var downloadMismatches []string
-
 		for _, download := range lock.Downloads {
 			if info, err := d.torrentInfo(download.Name); err == nil {
 				if info.Completed != nil {
@@ -357,28 +355,14 @@ func New(ctx context.Context, cfg *downloadercfg.Cfg, logger log.Logger, verbosi
 						fileHash := hex.EncodeToString(fileHashBytes)
 
 						if fileHash != download.Hash && fileHash != hash {
-							d.logger.Error("[snapshots] download db mismatch", "file", download.Name, "lock", download.Hash, "db", hash, "disk", fileHash, "downloaded", *info.Completed)
-							downloadMismatches = append(downloadMismatches, download.Name)
+							d.logger.Debug("[snapshots] download db mismatch", "file", download.Name, "lock", download.Hash, "db", hash, "disk", fileHash, "downloaded", *info.Completed)
 						} else {
-							d.logger.Warn("[snapshots] lock hash does not match completed download", "file", download.Name, "lock", hash, "download", download.Hash, "downloaded", *info.Completed)
+							d.logger.Debug("[snapshots] lock hash does not match completed download", "file", download.Name, "lock", hash, "download", download.Hash, "downloaded", *info.Completed)
 						}
 					}
 				}
 			}
 		}
-
-		if len(downloadMismatches) > 0 {
-			return nil, fmt.Errorf("downloaded files have mismatched hashes: %s", strings.Join(downloadMismatches, ","))
-		}
-
-		//TODO: why do we need it if we have `addTorrentFilesFromDisk`? what if they are conflict?
-		//TODO: why it's before `BuildTorrentFilesIfNeed`? what if they are conflict?
-		//TODO: even if hash is saved in "snapshots-lock.json" - it still must preserve `prohibit_new_downloads.lock` and don't download new files ("user restart" must be fast, "erigon3 has .kv files which never-ending merge and delete small files")
-		//for _, it := range lock.Downloads {
-		//	if err := d.AddMagnetLink(ctx, snaptype.Hex2InfoHash(it.Hash), it.Name); err != nil {
-		//		return nil, err
-		//	}
-		//}
 
 		if err := d.BuildTorrentFilesIfNeed(d.ctx, lock.Chain, lock.Downloads); err != nil {
 			return nil, err
@@ -2591,10 +2575,17 @@ func openClient(ctx context.Context, dbDir, snapDir string, cfg *torrent.ClientC
 	//})
 	cfg.DefaultStorage = m
 
+	dnsResolver := &downloadercfg.DnsCacheResolver{RefreshTimeout: 24 * time.Hour}
+	cfg.TrackerDialContext = dnsResolver.DialContext
+
 	torrentClient, err = torrent.NewClient(cfg)
 	if err != nil {
 		return nil, nil, nil, nil, fmt.Errorf("torrent.NewClient: %w", err)
 	}
+
+	go func() {
+		dnsResolver.Run(ctx)
+	}()
 
 	return db, c, m, torrentClient, nil
 }

@@ -29,6 +29,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/common/datadir"
 	"github.com/ledgerwatch/erigon-lib/common/dbg"
 	"github.com/ledgerwatch/erigon-lib/common/dir"
+	"github.com/ledgerwatch/erigon-lib/diagnostics"
 	"github.com/ledgerwatch/erigon-lib/downloader"
 	"github.com/ledgerwatch/erigon-lib/downloader/snaptype"
 	"github.com/ledgerwatch/erigon-lib/etl"
@@ -193,12 +194,21 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 	if !cfg.blockReader.FreezingCfg().Enabled {
 		return nil
 	}
+
+	diagnostics.Send(diagnostics.CurrentSyncStage{Stage: string(stages.Snapshots)})
+
 	cstate := snapshotsync.NoCaplin
 	if cfg.caplin { //TODO(Giulio2002): uncomment
 		cstate = snapshotsync.AlsoCaplin
 	}
 
 	if cfg.snapshotUploader != nil {
+		subStages := diagnostics.InitSubStagesFromList([]string{"Indexing", "Fill DB"})
+		diagnostics.Send(diagnostics.SetSyncSubStageList{
+			Stage: string(stages.Snapshots),
+			List:  subStages,
+		})
+
 		u := cfg.snapshotUploader
 
 		u.init(ctx, logger)
@@ -236,6 +246,13 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 			cfg.notifier.Events.OnNewSnapshot()
 		}
 	} else {
+		subStages := diagnostics.InitSubStagesFromList([]string{"Download snapshots", "Indexing", "Fill DB"})
+		diagnostics.Send(diagnostics.SetSyncSubStageList{
+			Stage: string(stages.Snapshots),
+			List:  subStages,
+		})
+
+		diagnostics.Send(diagnostics.CurrentSyncSubStage{SubStage: "Download snapshots"})
 		if err := snapshotsync.WaitForDownloader(ctx, s.LogPrefix(), cfg.historyV3, cfg.blobs, cstate, cfg.agg, tx, cfg.blockReader, &cfg.chainConfig, cfg.snapshotDownloader, s.state.StagesIdsList()); err != nil {
 			return err
 		}
@@ -252,6 +269,7 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 		return histBlockNumProgress
 	})
 
+	diagnostics.Send(diagnostics.CurrentSyncSubStage{SubStage: "Indexing"})
 	if err := cfg.blockRetire.BuildMissedIndicesIfNeed(ctx, s.LogPrefix(), cfg.notifier.Events, &cfg.chainConfig); err != nil {
 		return err
 	}
@@ -282,6 +300,7 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 		s.BlockNumber = frozenBlocks
 	}
 
+	diagnostics.Send(diagnostics.CurrentSyncSubStage{SubStage: "Fill DB"})
 	if err := FillDBFromSnapshots(s.LogPrefix(), ctx, tx, cfg.dirs, cfg.blockReader, cfg.agg, logger); err != nil {
 		return err
 	}

@@ -36,6 +36,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/common/dir"
 	"github.com/ledgerwatch/erigon-lib/common/disk"
 	"github.com/ledgerwatch/erigon-lib/common/mem"
+	"github.com/ledgerwatch/erigon-lib/diagnostics"
 
 	"github.com/0xPolygonHermez/zkevm-data-streamer/datastreamer"
 	"github.com/ledgerwatch/erigon/zk/sequencer"
@@ -1775,7 +1776,10 @@ func (s *Ethereum) Start() error {
 		return currentTD
 	}
 
+	nodeStages := s.stagedSync.StagesIdsList()
+
 	if params.IsChainPoS(s.chainConfig, currentTDProvider) {
+		nodeStages = s.pipelineStagedSync.StagesIdsList()
 		s.waitForStageLoopStop = nil // TODO: Ethereum.Stop should wait for execution_server shutdown
 		go s.eth1ExecutionServer.Start(s.sentryCtx)
 	} else if s.config.PolygonSync {
@@ -1800,6 +1804,9 @@ func (s *Ethereum) Start() error {
 		}
 		go stages2.StageLoop(s.sentryCtx, s.chainDB, s.stagedSync, s.sentriesClient.Hd, s.waitForStageLoopStop, s.config.Sync.LoopThrottle, s.logger, s.blockReader, hook, s.config.ForcePartialCommit)
 	}
+
+	stages := diagnostics.InitStagesFromList(nodeStages)
+	diagnostics.Send(diagnostics.SyncStageList{StagesList: stages})
 
 	if s.chainConfig.Bor != nil {
 		s.engine.(*bor.Bor).Start(s.chainDB)

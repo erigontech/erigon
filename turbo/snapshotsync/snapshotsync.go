@@ -249,7 +249,6 @@ func WaitForDownloader(ctx context.Context, logPrefix string, histV3, blobs bool
 func logStats(ctx context.Context, stats *proto_downloader.StatsReply, startTime time.Time, stagesIdsList []string, logPrefix string, logReason string) {
 	var m runtime.MemStats
 
-	diagnostics.Send(diagnostics.SyncStagesList{Stages: stagesIdsList})
 	diagnostics.Send(diagnostics.SnapshotDownloadStatistics{
 		Downloaded:           stats.BytesCompleted,
 		Total:                stats.BytesTotal,

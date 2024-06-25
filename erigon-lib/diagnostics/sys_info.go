@@ -1,14 +1,36 @@
 package diagnostics
 
 import (
-	"github.com/ledgerwatch/erigon-lib/diskutils"
+	"encoding/json"
+
 	"github.com/shirou/gopsutil/v3/cpu"
 	"github.com/shirou/gopsutil/v3/disk"
 	"github.com/shirou/gopsutil/v3/mem"
+
+	"github.com/ledgerwatch/erigon-lib/diskutils"
+	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/ledgerwatch/log/v3"
+)
+
+var (
+	SystemRamInfoKey  = []byte("diagSystemRamInfo")
+	SystemCpuInfoKey  = []byte("diagSystemCpuInfo")
+	SystemDiskInfoKey = []byte("diagSystemDiskInfo")
 )
 
 func (d *DiagnosticClient) setupSysInfoDiagnostics() {
 	sysInfo := GetSysInfo(d.dataDirPath)
+	if err := d.db.Update(d.ctx, RAMInfoUpdater(sysInfo.RAM)); err != nil {
+		log.Error("[Diagnostics] Failed to update RAM info", "err", err)
+	}
+
+	if err := d.db.Update(d.ctx, CPUInfoUpdater(sysInfo.CPU)); err != nil {
+		log.Error("[Diagnostics] Failed to update CPU info", "err", err)
+	}
+
+	if err := d.db.Update(d.ctx, DiskInfoUpdater(sysInfo.Disk)); err != nil {
+		log.Error("[Diagnostics] Failed to update Disk info", "err", err)
+	}
 
 	d.mu.Lock()
 	d.hardwareInfo = sysInfo
@@ -105,4 +127,82 @@ func GetCPUInfo() CPUInfo {
 		Cores:     cores,
 		Mhz:       mhz,
 	}
+}
+
+func ReadSysInfo(db kv.RoDB) (info HardwareInfo) {
+	ram := ReadRAMInfo(db)
+	cpu := ReadCPUInfo(db)
+	disk := ReadDickInfo(db)
+
+	return HardwareInfo{
+		RAM:  ram,
+		CPU:  cpu,
+		Disk: disk,
+	}
+}
+
+func ReadRAMInfo(db kv.RoDB) RAMInfo {
+	data := ReadDataFromTable(db, kv.DiagSystemInfo, SystemRamInfoKey)
+
+	if len(data) == 0 {
+		return RAMInfo{}
+	}
+
+	var info RAMInfo
+	err := json.Unmarshal(data, &info)
+
+	if err != nil {
+		log.Error("[Diagnostics] Failed to read RAM info", "err", err)
+		return RAMInfo{}
+	} else {
+		return info
+	}
+}
+
+func ReadCPUInfo(db kv.RoDB) CPUInfo {
+	data := ReadDataFromTable(db, kv.DiagSystemInfo, SystemCpuInfoKey)
+
+	if len(data) == 0 {
+		return CPUInfo{}
+	}
+
+	var info CPUInfo
+	err := json.Unmarshal(data, &info)
+
+	if err != nil {
+		log.Error("[Diagnostics] Failed to read CPU info", "err", err)
+		return CPUInfo{}
+	} else {
+		return info
+	}
+}
+
+func ReadDickInfo(db kv.RoDB) DiskInfo {
+	data := ReadDataFromTable(db, kv.DiagSystemInfo, SystemDiskInfoKey)
+
+	if len(data) == 0 {
+		return DiskInfo{}
+	}
+
+	var info DiskInfo
+	err := json.Unmarshal(data, &info)
+
+	if err != nil {
+		log.Error("[Diagnostics] Failed to read Disk info", "err", err)
+		return DiskInfo{}
+	} else {
+		return info
+	}
+}
+
+func RAMInfoUpdater(info RAMInfo) func(tx kv.RwTx) error {
+	return PutDataToTable(kv.DiagSystemInfo, SystemRamInfoKey, info)
+}
+
+func CPUInfoUpdater(info CPUInfo) func(tx kv.RwTx) error {
+	return PutDataToTable(kv.DiagSystemInfo, SystemCpuInfoKey, info)
+}
+
+func DiskInfoUpdater(info DiskInfo) func(tx kv.RwTx) error {
+	return PutDataToTable(kv.DiagSystemInfo, SystemDiskInfoKey, info)
 }
