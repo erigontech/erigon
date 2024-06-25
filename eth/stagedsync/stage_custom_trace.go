@@ -3,7 +3,11 @@ package stagedsync
 import (
 	"context"
 	"fmt"
+	"runtime"
+	"time"
+
 	"github.com/holiman/uint256"
+
 	"github.com/ledgerwatch/erigon-lib/chain"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/datadir"
@@ -22,8 +26,6 @@ import (
 	"github.com/ledgerwatch/erigon/ethdb/prune"
 	"github.com/ledgerwatch/erigon/rlp"
 	"github.com/ledgerwatch/erigon/turbo/services"
-	"runtime"
-	"time"
 )
 
 type CustomTraceCfg struct {
@@ -94,7 +96,7 @@ func SpawnCustomTrace(s *StageState, txc wrap.TxContainer, cfg CustomTraceCfg, c
 	defer logEvery.Stop()
 	var m runtime.MemStats
 	var prevBlockNumLog uint64 = startBlock
-
+	//
 	doms, err := state2.NewSharedDomains(tx, logger)
 	if err != nil {
 		return err
@@ -170,7 +172,7 @@ func SpawnCustomTrace(s *StageState, txc wrap.TxContainer, cfg CustomTraceCfg, c
 	if err := doms.Flush(ctx, tx); err != nil {
 		return err
 	}
-
+	//
 	if err = s.Update(tx.(kv.RwTx), endBlock); err != nil {
 		return err
 	}
