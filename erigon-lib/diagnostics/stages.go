@@ -235,8 +235,6 @@ func (d *DiagnosticClient) SetCurrentSyncStage(css CurrentSyncStage) error {
 	}
 
 	isSet := false
-	d.mu.Lock()
-	defer d.mu.Unlock()
 	for idx, stage := range d.syncStages {
 		if !isSet {
 			if stage.ID == css.Stage {
