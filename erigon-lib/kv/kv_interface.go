@@ -319,7 +319,7 @@ type StatelessReadTx interface {
 	Commit() error // Commit all the operations of a transaction into the database.
 	Rollback()     // Rollback - abandon all the operations of the transaction instead of saving them.
 
-	// ReadSequence - allows to create a linear sequence of unique positive integers for each table.
+	// ReadSequence - allows to create a linear sequence of unique positive integers for each table (AutoIncrement).
 	// Can be called for a read transaction to retrieve the current sequence value, and the increment must be zero.
 	// Sequence changes become visible outside the current write transaction after it is committed, and discarded on abort.
 	// Starts from 0.

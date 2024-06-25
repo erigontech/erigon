@@ -564,13 +564,11 @@ func (is *AppendablePruneStat) Accumulate(other *AppendablePruneStat) {
 
 // [txFrom; txTo)
 // forced - prune even if CanPrune returns false, so its true only when we do Unwind.
-func (tx *AppendableRoTx) Prune(ctx context.Context, rwTx kv.RwTx, txFrom, txTo, limit uint64, logEvery *time.Ticker, forced, withWarmup bool, fn func(key []byte, txnum []byte) error) (stat *AppendablePruneStat, err error) {
+func (tx *AppendableRoTx) Prune(ctx context.Context, rwTx kv.RwTx, txFrom, txTo, limit uint64, logEvery *time.Ticker, forced bool, fn func(key []byte, txnum []byte) error) (stat *AppendablePruneStat, err error) {
 	stat = &AppendablePruneStat{MinTxNum: math.MaxUint64}
 	if !forced && !tx.CanPrune(rwTx) {
 		return stat, nil
 	}
-
-	_ = withWarmup
 
 	mxPruneInProgress.Inc()
 	defer mxPruneInProgress.Dec()
@@ -792,6 +790,6 @@ func (ap *Appendable) integrateDirtyFiles(sf AppendableFiles, txNumFrom, txNumTo
 	ap.dirtyFiles.Set(fi)
 }
 
-func (tx *AppendableRoTx) Unwind(ctx context.Context, rwTx kv.RwTx, txFrom, txTo, limit uint64, logEvery *time.Ticker, forced, withWarmup bool, fn func(key []byte, txnum []byte) error) error {
+func (tx *AppendableRoTx) Unwind(ctx context.Context, rwTx kv.RwTx, txFrom, txTo, limit uint64, logEvery *time.Ticker, forced bool, fn func(key []byte, txnum []byte) error) error {
 	return nil //Appendable type is unwind-less. See docs of Appendable type.
 }
