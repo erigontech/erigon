@@ -19,7 +19,6 @@ import (
 
 	"github.com/c2h5oh/datasize"
 	"github.com/urfave/cli/v2"
-
 	"golang.org/x/sync/semaphore"
 
 	"github.com/ledgerwatch/erigon-lib/common"
@@ -29,7 +28,6 @@ import (
 	"github.com/ledgerwatch/erigon-lib/common/disk"
 	"github.com/ledgerwatch/erigon-lib/common/mem"
 	"github.com/ledgerwatch/erigon-lib/config3"
-	"github.com/ledgerwatch/erigon-lib/downloader"
 	"github.com/ledgerwatch/erigon-lib/downloader/snaptype"
 	"github.com/ledgerwatch/erigon-lib/etl"
 	"github.com/ledgerwatch/erigon-lib/kv"
@@ -171,11 +169,6 @@ var snapshotCommand = cli.Command{
 				&cli.PathFlag{Name: "src", Required: true},
 				&cli.StringFlag{Name: "key", Required: true},
 			}),
-		},
-		{
-			Name:   "stats",
-			Action: doSnapStat,
-			Flags:  joinFlags([]cli.Flag{&utils.DataDirFlag, &utils.ChainFlag}),
 		},
 		{
 			Name: "rm-all-state-snapshots",
@@ -430,38 +423,6 @@ func doDebugKey(cliCtx *cli.Context) error {
 	return nil
 }
 
-func doSnapStat(cliCtx *cli.Context) error {
-	logger, _, _, err := debug.Setup(cliCtx, true /* root logger */)
-	if err != nil {
-		return err
-	}
-
-	ctx := cliCtx.Context
-	dirs := datadir.New(cliCtx.String(utils.DataDirFlag.Name))
-	chainDB := dbCfg(kv.ChainDB, dirs.Chaindata).MustOpen()
-	defer chainDB.Close()
-
-	cfg := ethconfig.NewSnapCfg(true, false, true, true)
-
-	blockSnaps, borSnaps, caplinSnaps, _, agg, err := openSnaps(ctx, cfg, dirs, chainDB, logger)
-	if err != nil {
-		return err
-	}
-	defer blockSnaps.Close()
-	defer borSnaps.Close()
-	defer caplinSnaps.Close()
-	defer agg.Close()
-
-	ls, err := os.Stat(filepath.Join(dirs.Snap, downloader.ProhibitNewDownloadsFileName))
-	mtime := time.Time{}
-	if err == nil {
-		mtime = ls.ModTime()
-	}
-	logger.Info("[downloads]", "locked", err == nil, "at", mtime.Format("02 Jan 06 15:04 2006"))
-
-	return nil
-}
-
 func doIntegrity(cliCtx *cli.Context) error {
 	logger, _, _, err := debug.Setup(cliCtx, true /* root logger */)
 	if err != nil {
@@ -684,7 +645,7 @@ func openSnaps(ctx context.Context, cfg ethconfig.BlocksFreezing, dirs datadir.D
 	if err = blockSnaps.ReopenFolder(); err != nil {
 		return
 	}
-	blockSnaps.LogStat("block")
+	blockSnaps.LogStat("open")
 
 	borSnaps = freezeblocks.NewBorRoSnapshots(cfg, dirs.Snap, 0, logger)
 	if err = borSnaps.ReopenFolder(); err != nil {
@@ -700,10 +661,9 @@ func openSnaps(ctx context.Context, cfg ethconfig.BlocksFreezing, dirs datadir.D
 		if err = csn.ReopenFolder(); err != nil {
 			return
 		}
-		csn.LogStat("caplin")
 	}
 
-	borSnaps.LogStat("bor")
+	borSnaps.LogStat("bor:open")
 	agg = openAgg(ctx, dirs, chainDB, logger)
 	err = chainDB.View(ctx, func(tx kv.Tx) error {
 		ac := agg.BeginFilesRo()
