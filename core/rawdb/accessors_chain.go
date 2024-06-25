@@ -445,26 +445,6 @@ func CanonicalTransactions(db kv.Getter, txnID uint64, amount uint32) ([]types.T
 	return txs, nil
 }
 
-func NonCanonicalTransactions(db kv.Getter, baseTxnID types.BaseTxnID, amount uint32) ([]types.Transaction, error) {
-	if amount == 0 {
-		return []types.Transaction{}, nil
-	}
-	txs := make([]types.Transaction, amount)
-	i := uint32(0)
-	if err := db.ForAmount(kv.NonCanonicalTxs, baseTxnID.Bytes(), amount, func(k, v []byte) error {
-		var decodeErr error
-		if txs[i], decodeErr = types.DecodeTransaction(v); decodeErr != nil {
-			return decodeErr
-		}
-		i++
-		return nil
-	}); err != nil {
-		return nil, err
-	}
-	txs = txs[:i] // user may request big "amount", but db can return small "amount". Return as much as we found.
-	return txs, nil
-}
-
 // Write transactions to the database and use txnID as first identifier
 func WriteTransactions(rwTx kv.RwTx, txs []types.Transaction, txnID uint64) error {
 	txIdKey := make([]byte, 8)
