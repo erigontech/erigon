@@ -32,12 +32,14 @@ func (s *StageGraph[CONFIG, ARGUMENTS]) StartWithStage(ctx context.Context, star
 		errch := make(chan error)
 		start := time.Now()
 		go func() {
+			sctx, cn := context.WithCancel(ctx)
+			defer cn()
 			// we run this is a goroutine so that the process can exit in the middle of a stage
 			// since caplin is designed to always be able to recover regardless of db state, this should be safe
 			select {
-			case errch <- currentStage.ActionFunc(ctx, lg, cfg, args):
-			case <-ctx.Done():
-				errch <- ctx.Err()
+			case errch <- currentStage.ActionFunc(sctx, lg, cfg, args):
+			case <-sctx.Done():
+				errch <- sctx.Err()
 			}
 		}()
 		err := <-errch
