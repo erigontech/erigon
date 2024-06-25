@@ -298,18 +298,20 @@ func (d *DiagnosticClient) GetStageState(stageId string) (StageState, error) {
 	return 0, fmt.Errorf("stage %s not found in stages list %s", stageId, stagesIdsList)
 }
 
-func ReadSyncStages(db kv.RoDB) []SyncStage {
-	data := ReadDataFromTable(db, kv.DiagSyncStages, StagesListKey)
-
-	if len(data) == 0 {
-		return []SyncStage{}
+func SyncStagesFromTX(tx kv.Tx) ([]byte, error) {
+	bytes, err := ReadDataFromTable(tx, kv.DiagSyncStages, StagesListKey)
+	if err != nil {
+		return nil, err
 	}
 
-	var info []SyncStage
+	return bytes, nil
+}
+
+func ParseStagesList(data []byte) (info []SyncStage) {
 	err := json.Unmarshal(data, &info)
 
 	if err != nil {
-		log.Error("[Diagnostics] Failed to read stages list", "err", err)
+		log.Warn("[Diagnostics] Failed to parse stages list", "err", err)
 		return []SyncStage{}
 	} else {
 		return info
