@@ -296,7 +296,7 @@ func validateMaxStackHeight(code []byte, section int, metadata []*FunctionMetada
 			stackHeightRequired = int(code[pos+1]) + 1
 		} else if op == SWAPN {
 			stackHeightRequired = int(code[pos+1]) + 2
-		} else if op == EXCHANAGE {
+		} else if op == EXCHANGE {
 			n := (int(code[pos+1]) >> 4) + 1
 			m := (int(code[pos+1]) & 0x0F) + 1
 			stackHeightRequired = n + m + 1

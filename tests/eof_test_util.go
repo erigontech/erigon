@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"testing"
 
 	"github.com/ledgerwatch/erigon-lib/common/hexutil"
@@ -75,6 +76,7 @@ func getError(err error) error {
 		vm.ErrInvalidContainerArgument,
 		vm.ErrInvalidNonReturning,
 		vm.ErrEOFStackUnderflow,
+		io.ErrUnexpectedEOF,
 	}
 
 	for _, _err := range _errors {
@@ -88,7 +90,7 @@ func getError(err error) error {
 var errorsMap = map[string][]error{
 	"EOFException.INVALID_FIRST_SECTION_TYPE":             []error{vm.ErrInvalidFirstSectionType, vm.ErrTooManyInputs, vm.ErrTooManyOutputs, vm.ErrTooLargeMaxStackHeight},
 	"EOFException.INCOMPLETE_SECTION_NUMBER":              []error{vm.ErrIncompleteEOF},
-	"EOFException.MISSING_HEADERS_TERMINATOR":             []error{vm.ErrIncompleteEOF},
+	"EOFException.MISSING_HEADERS_TERMINATOR":             []error{vm.ErrIncompleteEOF, io.ErrUnexpectedEOF},
 	"EOFException.INCOMPLETE_SECTION_SIZE":                []error{vm.ErrIncompleteEOF},
 	"EOFException.TOO_MANY_CODE_SECTIONS":                 []error{vm.ErrInvalidTypeSize},
 	"EOFException.MISSING_CODE_HEADER":                    []error{vm.ErrMissingCodeHeader},

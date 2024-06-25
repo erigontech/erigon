@@ -401,6 +401,9 @@ func enableEOF(jt *JumpTable) {
 		numPush:       0,
 		immediateSize: 1,
 	}
+	jt[EXCHANGE] = &operation{
+		immediateSize: 1,
+	}
 	jt[DATALOAD] = &operation{
 		execute:     opDataLoad,
 		constantGas: GasSwiftStep,
@@ -437,6 +440,11 @@ func enableEOF(jt *JumpTable) {
 		terminal:      true,
 		immediateSize: 1,
 	}
+
+	jt[RETURNDATALOAD] = &operation{}
+	jt[EXTCALL] = &operation{}
+	jt[EXTDELEGATECALL] = &operation{}
+	jt[EXTSTATICCALL] = &operation{}
 
 	immSize := uint8(1)
 	for op := 0x60; op < 0x60+32; op++ {
