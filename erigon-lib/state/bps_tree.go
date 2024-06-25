@@ -137,12 +137,12 @@ func (b *BpsTree) WarmUp(kv ArchiveGetter) error {
 		c := 0
 		for i := 0; i < len(mx); i++ {
 			c += len(mx[i])
-			// ll := make([]uint64, len(mx[i]))
+			ll := make([]uint64, len(mx[i]))
 			for j := 0; j < len(mx[i]); j++ {
-				// ll[j] = mx[i][j].di
-				fmt.Printf("mx[%d][%d] %x %d %d\n", i, j, mx[i][j].prefix, mx[i][j].off, mx[i][j].di)
+				ll[j] = mx[i][j].di
+				// fmt.Printf("mx[%d][%d] %x %d %d\n", i, j, mx[i][j].prefix, mx[i][j].off, mx[i][j].di)
 			}
-			// fmt.Printf("mx[%s][%d] %d %v\n", kv.FileName(), i, len(mx[i]), ll)
+			fmt.Printf("mx[%s][%d] %d %v\n", kv.FileName(), i, len(mx[i]), ll)
 		}
 		fmt.Printf("[cachedLookupMatrix %s] M: %d depth:%d; total offsets: %d; cached %d (%.2f%%);\n", kv.FileName(), b.M, len(mx), k, c, float64(c)/float64(k)*100)
 	}
