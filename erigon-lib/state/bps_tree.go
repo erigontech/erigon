@@ -113,18 +113,25 @@ type Node struct {
 
 func (b *BpsTree) WarmUp(kv ArchiveGetter) error {
 	k := b.offt.Count()
-	// d := logBase(k, b.M)
-	mFraqtion := uint64(2)  // could increase to put more nodes into cache
-	mx := make([][]Node, 1) // usually d+1 but for experiments we put them all into flat list
+	d := logBase(k, b.M)
+	mFraqtion := uint64(4)    // could increase to put more nodes into cache
+	mx := make([][]Node, d+1) // usually d+1 but for experiments we put them all into flat list
 
-	// instead of using leveled iteration we can use whole list of cached nodes at once
+	l := len(mx)
 	for ik := uint64(0); ik < k; ik += b.M / mFraqtion {
 		_, key, err := b.keyCmpFunc(nil, ik, kv)
 		if err != nil {
 			return err
 		}
 		if key != nil {
-			mx[0] = append(mx[0], Node{off: b.offt.Get(ik), prefix: common.Copy(key), di: uint64(ik)})
+			l--
+			if l < 0 {
+				panic("l <0")
+			}
+			mx[l] = append(mx[l], Node{off: b.offt.Get(ik), prefix: common.Copy(key), di: uint64(ik)})
+			if l == 0 {
+				l = len(mx)
+			}
 		}
 	}
 
@@ -132,11 +139,14 @@ func (b *BpsTree) WarmUp(kv ArchiveGetter) error {
 		c := 0
 		for i := 0; i < len(mx); i++ {
 			c += len(mx[i])
+			// ll := make([]uint64, len(mx[i]))
 			for j := 0; j < len(mx[i]); j++ {
+				// ll[j] = mx[i][j].di
 				fmt.Printf("mx[%d][%d] %x %d %d\n", i, j, mx[i][j].prefix, mx[i][j].off, mx[i][j].di)
 			}
+			// fmt.Printf("mx[%s][%d] %d %v\n", kv.FileName(), i, len(mx[i]), ll)
 		}
-		fmt.Printf("[cachedLookupMatrix %s]; depth %d;  total offsets: %d; cached %d (%.2f%%);\n", kv.FileName(), len(mx), k, c, float64(c)/float64(k)*100)
+		fmt.Printf("[cachedLookupMatrix %s] M: %d depth:%d; total offsets: %d; cached %d (%.2f%%);\n", kv.FileName(), b.M, len(mx), k, c, float64(c)/float64(k)*100)
 	}
 	b.mx = mx
 	return nil
