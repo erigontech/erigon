@@ -337,9 +337,10 @@ func (c *CheckSnapshots) Run(ctx *Context) error {
 	}
 	c.withProfile()
 	log.Root().SetHandler(log.LvlFilterHandler(log.LvlDebug, log.StderrHandler))
-	log.Info("Started the checking process", "chain", c.Chain)
-	dirs := datadir.New(c.Datadir)
+	log.Info("Started the checking process", "chain", c.Chain, "datadir", c.Datadir)
 	log.Root().SetHandler(log.LvlFilterHandler(log.LvlInfo, log.StderrHandler))
+
+	dirs := datadir.New(c.Datadir)
 
 	db, _, err := caplin1.OpenCaplinDatabase(ctx, beaconConfig, nil, dirs.CaplinIndexing, dirs.CaplinBlobs, nil, false, 0)
 	if err != nil {
@@ -367,6 +368,11 @@ func (c *CheckSnapshots) Run(ctx *Context) error {
 	genesisHeader, _, _, err := csn.ReadHeader(0)
 	if err != nil {
 		return err
+	}
+
+	if genesisHeader == nil {
+		log.Warn("beaconIndices up to", "block", to, "caplinSnapIndexMax", csn.IndicesMax())
+		return fmt.Errorf("genesis header is nil")
 	}
 	previousBlockRoot, err := genesisHeader.Header.HashSSZ()
 	if err != nil {

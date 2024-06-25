@@ -12,6 +12,7 @@ import (
 	"github.com/holiman/uint256"
 	"golang.org/x/net/context"
 
+	"github.com/ledgerwatch/erigon-lib/kv/membatchwithdb"
 	"github.com/ledgerwatch/erigon-lib/log/v3"
 	state2 "github.com/ledgerwatch/erigon-lib/state"
 	"github.com/ledgerwatch/erigon-lib/wrap"
@@ -118,10 +119,10 @@ func SpawnMiningExecStage(s *StageState, txc wrap.TxContainer, cfg MiningExecCfg
 			yielded := mapset.NewSet[[32]byte]()
 			var simStateReader state.StateReader
 			var simStateWriter state.StateWriter
-			//m := membatchwithdb.NewMemoryBatch(txc.Tx, cfg.tmpdir, logger)
-			//defer m.Rollback()
+			m := membatchwithdb.NewMemoryBatch(txc.Tx, cfg.tmpdir, logger)
+			defer m.Rollback()
 			var err error
-			domains, err = state2.NewSharedDomains(txc.Tx, logger)
+			domains, err = state2.NewSharedDomains(m, logger)
 			if err != nil {
 				return err
 			}

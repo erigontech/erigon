@@ -19,11 +19,12 @@ package runtime
 import (
 	"context"
 	"fmt"
-	"github.com/ledgerwatch/erigon/core/rawdb"
 	"math/big"
 	"os"
 	"strings"
 	"testing"
+
+	"github.com/ledgerwatch/erigon/core/rawdb"
 
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
@@ -52,6 +53,30 @@ import (
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/rlp"
 )
+
+func NewTestTemporalDb(tb testing.TB) (kv.RwDB, kv.RwTx, *stateLib.Aggregator) {
+	tb.Helper()
+	db := memdb.NewStateDB(tb.TempDir())
+	tb.Cleanup(db.Close)
+
+	cr := rawdb.NewCanonicalReader()
+	agg, err := stateLib.NewAggregator(context.Background(), datadir.New(tb.TempDir()), 16, db, cr, log.New())
+	if err != nil {
+		tb.Fatal(err)
+	}
+	tb.Cleanup(agg.Close)
+
+	_db, err := temporal.New(db, agg)
+	if err != nil {
+		tb.Fatal(err)
+	}
+	tx, err := _db.BeginTemporalRw(context.Background()) //nolint:gocritic
+	if err != nil {
+		tb.Fatal(err)
+	}
+	tb.Cleanup(tx.Rollback)
+	return _db, tx, agg
+}
 
 func TestDefaults(t *testing.T) {
 	t.Parallel()
@@ -125,8 +150,11 @@ func TestExecute(t *testing.T) {
 
 func TestCall(t *testing.T) {
 	t.Parallel()
-	_, tx := memdb.NewTestTx(t)
-	state := state.New(state.NewDbStateReader(tx))
+	_, tx, _ := NewTestTemporalDb(t)
+	domains, err := stateLib.NewSharedDomains(tx, log.New())
+	require.NoError(t, err)
+	defer domains.Close()
+	state := state.New(state.NewReaderV4(domains))
 	address := libcommon.HexToAddress("0xaa")
 	state.SetCode(address, []byte{
 		byte(vm.PUSH1), 10,

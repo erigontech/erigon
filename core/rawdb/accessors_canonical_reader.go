@@ -47,7 +47,7 @@ func (*CanonicalReader) TxNum2ID(tx kv.Tx, blockNum uint64, blockHash common2.Ha
 		if err != nil {
 			return 0, err
 		}
-		_max, err := rawdbv3.TxNums.Min(tx, blockNum)
+		_max, err := rawdbv3.TxNums.Max(tx, blockNum)
 		if err != nil {
 			return 0, err
 		}
@@ -86,7 +86,11 @@ func (*CanonicalReader) LastFrozenTxNum(tx kv.Tx) (kv.TxnId, error) {
 		return 0, err
 	}
 	if !ok {
-		panic(1)
+		//seq, err := tx.ReadSequence(kv.EthTx)
+		//seq-1
+		_, _lastTxNumInFiles, err := rawdbv3.TxNums.Last(tx)
+		return kv.TxnId(_lastTxNumInFiles), err
+
 	}
 	_max, err := rawdbv3.TxNums.Max(tx, n)
 	if err != nil {
