@@ -39,7 +39,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/crypto/kzg"
 	"github.com/ledgerwatch/erigon-lib/txpool"
 	libtypes "github.com/ledgerwatch/erigon-lib/types"
-	
+
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/u256"
 	"github.com/ledgerwatch/erigon/crypto"
