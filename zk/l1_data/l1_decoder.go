@@ -11,6 +11,10 @@ import (
 	"github.com/ledgerwatch/erigon/crypto"
 	"github.com/ledgerwatch/erigon/zk/contracts"
 	"github.com/ledgerwatch/erigon/zk/da"
+	"github.com/ledgerwatch/erigon/zk/hermez_db"
+	zktx "github.com/ledgerwatch/erigon/zk/tx"
+	"github.com/gateway-fm/cdk-erigon-lib/common/length"
+	"encoding/binary"
 )
 
 type RollupBaseEtrogBatchData struct {
@@ -154,4 +158,62 @@ func DecodeL1BatchData(txData []byte, daUrl string) ([][]byte, common.Address, u
 	}
 
 	return batchL2Datas, coinbase, limitTimstamp, err
+}
+
+type DecodedL1Data struct {
+	DecodedData     []zktx.DecodedBatchL2Data
+	Coinbase        common.Address
+	L1InfoRoot      common.Hash
+	IsWorkRemaining bool
+	LimitTimestamp  uint64
+}
+
+func BreakDownL1DataByBatch(batchNo uint64, forkId uint64, reader *hermez_db.HermezDbReader) (DecodedL1Data, error) {
+	decoded := DecodedL1Data{}
+	// we expect that the batch we're going to load in next should be in the db already because of the l1 block sync
+	// stage, if it is not there we need to panic as we're in a bad state
+	batchData, err := reader.GetL1BatchData(batchNo)
+	if err != nil {
+		return decoded, err
+	}
+
+	if len(batchData) == 0 {
+		// end of the line for batch recovery so return empty
+		return decoded, nil
+	}
+
+	decoded.Coinbase = common.BytesToAddress(batchData[:length.Addr])
+	decoded.L1InfoRoot = common.BytesToHash(batchData[length.Addr : length.Addr+length.Hash])
+	tsBytes := batchData[length.Addr+length.Hash : length.Addr+length.Hash+8]
+	decoded.LimitTimestamp = binary.BigEndian.Uint64(tsBytes)
+	batchData = batchData[length.Addr+length.Hash+8:]
+
+	decoded.DecodedData, err = zktx.DecodeBatchL2Blocks(batchData, forkId)
+	if err != nil {
+		return decoded, err
+	}
+
+	// no data means no more work to do - end of the line
+	if len(decoded.DecodedData) == 0 {
+		return decoded, nil
+	}
+
+	decoded.IsWorkRemaining = true
+	transactionsInBatch := 0
+	for _, batch := range decoded.DecodedData {
+		transactionsInBatch += len(batch.Transactions)
+	}
+	if transactionsInBatch == 0 {
+		// we need to check if this batch should simply be empty or not so we need to check against the
+		// highest known batch number to see if we have work to do still
+		highestKnown, err := reader.GetLastL1BatchData()
+		if err != nil {
+			return decoded, err
+		}
+		if batchNo >= highestKnown {
+			decoded.IsWorkRemaining = false
+		}
+	}
+
+	return decoded, err
 }

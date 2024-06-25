@@ -21,6 +21,7 @@ import (
 	"github.com/ledgerwatch/erigon/zk/hermez_db"
 	zktypes "github.com/ledgerwatch/erigon/zk/types"
 	"github.com/ledgerwatch/secp256k1"
+	"github.com/ledgerwatch/erigon/zk/utils"
 )
 
 func handleStateForNewBlockStarting(
@@ -145,7 +146,7 @@ func finaliseBlock(
 	finalHeader := finalBlock.HeaderNoCopy()
 	finalHeader.Root = newRoot
 	finalHeader.Coinbase = cfg.zk.AddressSequencer
-	finalHeader.GasLimit = getGasLimit(forkId)
+	finalHeader.GasLimit = utils.GetBlockGasLimitForFork(forkId)
 	finalHeader.ReceiptHash = types.DeriveSha(receipts)
 	finalHeader.Bloom = types.CreateBloom(receipts)
 	newNum := finalBlock.Number()

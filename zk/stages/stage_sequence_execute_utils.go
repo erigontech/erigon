@@ -36,6 +36,7 @@ import (
 	"github.com/ledgerwatch/erigon/zk/txpool"
 	zktypes "github.com/ledgerwatch/erigon/zk/types"
 	"github.com/ledgerwatch/log/v3"
+	"github.com/ledgerwatch/erigon/zk/utils"
 )
 
 const (
@@ -235,7 +236,7 @@ func prepareHeader(tx kv.RwTx, previousBlockNumber, deltaTimestamp, forcedTimest
 		Coinbase:   coinbase,
 		Difficulty: blockDifficulty,
 		Number:     new(big.Int).SetUint64(previousBlockNumber + 1),
-		GasLimit:   getGasLimit(forkId),
+		GasLimit:   utils.GetBlockGasLimitForFork(forkId),
 		Time:       newBlockTimestamp,
 	}, parentBlock, nil
 }

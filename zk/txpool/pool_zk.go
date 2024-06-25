@@ -14,6 +14,7 @@ import (
 	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/erigon/common/math"
 	"github.com/ledgerwatch/log/v3"
+	"github.com/ledgerwatch/erigon/zk/utils"
 )
 
 /*
@@ -22,7 +23,7 @@ hard compilation fail when rebasing from upstream further down the line.
 */
 
 const (
-	transactionGasLimit = 30_000_000
+	transactionGasLimit = utils.PreForkId7BlockGasLimit
 )
 
 func calcProtocolBaseFee(baseFee uint64) uint64 {

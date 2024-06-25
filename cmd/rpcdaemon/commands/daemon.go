@@ -46,7 +46,7 @@ func APIList(db kv.RoDB, borDb kv.RoDB, eth rpchelper.ApiBackend, txPool txpool.
 	borImpl := NewBorAPI(base, db, borDb) // bor (consensus) specific
 	otsImpl := NewOtterscanAPI(base, db)
 	gqlImpl := NewGraphQLAPI(base, db)
-	zkEvmImpl := NewZkEvmAPI(ethImpl, db, cfg.ReturnDataLimit, ethCfg, l1Syncer)
+	zkEvmImpl := NewZkEvmAPI(ethImpl, db, cfg.ReturnDataLimit, ethCfg, l1Syncer, rpcUrl)
 
 	if cfg.GraphQLEnabled {
 		list = append(list, rpc.API{

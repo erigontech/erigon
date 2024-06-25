@@ -25,13 +25,11 @@ import (
 	"github.com/ledgerwatch/erigon/eth/ethconfig"
 	"github.com/ledgerwatch/erigon/zk/datastream/proto/github.com/0xPolygonHermez/zkevm-node/state/datastream"
 	"github.com/ledgerwatch/log/v3"
+	"github.com/ledgerwatch/erigon/zk/utils"
 )
 
 const (
-	preForkId7BlockGasLimit = 30_000_000
-	forkId7BlockGasLimit    = 18446744073709551615 // 0xffffffffffffffff
-	forkId8BlockGasLimit    = 1125899906842624     // 0x4000000000000
-	HIGHEST_KNOWN_FORK      = 9
+	HIGHEST_KNOWN_FORK = 9
 )
 
 type ErigonDb interface {
@@ -729,20 +727,6 @@ func PruneBatchesStage(s *stagedsync.PruneState, tx kv.RwTx, cfg BatchesCfg, ctx
 	return nil
 }
 
-func getGasLimit(forkId uint64) uint64 {
-	if forkId >= 8 {
-		return forkId8BlockGasLimit
-	}
-
-	// [hack] the rpc returns forkid8 value, but forkid7 is used in execution
-	if forkId == 7 {
-		return forkId8BlockGasLimit
-		// return forkId7BlockGasLimit
-	}
-
-	return preForkId7BlockGasLimit
-}
-
 // writeL2Block writes L2Block to ErigonDb and HermezDb
 // writes header, body, forkId and blockBatch
 func writeL2Block(eriDb ErigonDb, hermezDb HermezDb, l2Block *types.FullL2Block, highestL1InfoTreeIndex uint64) error {
@@ -770,7 +754,7 @@ func writeL2Block(eriDb ErigonDb, hermezDb HermezDb, l2Block *types.FullL2Block,
 	txCollection := ethTypes.Transactions(txs)
 	txHash := ethTypes.DeriveSha(txCollection)
 
-	gasLimit := getGasLimit(l2Block.ForkId)
+	gasLimit := utils.GetBlockGasLimitForFork(l2Block.ForkId)
 
 	h, err := eriDb.WriteHeader(bn, l2Block.StateRoot, txHash, l2Block.ParentHash, l2Block.Coinbase, uint64(l2Block.Timestamp), gasLimit)
 	if err != nil {

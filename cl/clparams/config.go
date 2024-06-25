@@ -27,6 +27,7 @@ import (
 	"github.com/ledgerwatch/erigon/cl/cltypes/ssz"
 	"github.com/ledgerwatch/erigon/cl/utils"
 	"github.com/ledgerwatch/erigon/params/networkname"
+	zkUtils "github.com/ledgerwatch/erigon/zk/utils"
 )
 
 type NetworkType int
@@ -718,7 +719,7 @@ var MainnetBeaconConfig BeaconChainConfig = BeaconChainConfig{
 	MinSyncCommitteeParticipants: 1,
 
 	// Bellatrix
-	TerminalBlockHashActivationEpoch: 18446744073709551615,
+	TerminalBlockHashActivationEpoch: zkUtils.ForkId7BlockGasLimit,
 	TerminalBlockHash:                [32]byte{},
 	TerminalTotalDifficulty:          "58750000000000000000000", // Estimated: Sept 15, 2022
 	EthBurnAddressHex:                "0x0000000000000000000000000000000000000000",

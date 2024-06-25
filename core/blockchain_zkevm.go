@@ -36,6 +36,7 @@ import (
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/core/vm"
 	"github.com/ledgerwatch/erigon/core/vm/evmtypes"
+	"github.com/ledgerwatch/erigon/zk/utils"
 )
 
 type EphemeralExecResultZk struct {
@@ -66,9 +67,8 @@ func ExecuteBlockEphemerallyZk(
 	blockTransactions := block.Transactions()
 	blockGasLimit := block.GasLimit()
 
-	//[hack] - on forkid7 this gas limit was used for execution but rpc is now returning forkid8 gas limit
 	if !chainConfig.IsForkID8Elderberry(block.NumberU64()) {
-		blockGasLimit = 18446744073709551615
+		blockGasLimit = utils.ForkId7BlockGasLimit
 	}
 
 	gp := new(GasPool).AddGas(blockGasLimit)
@@ -184,7 +184,6 @@ func ExecuteBlockEphemerallyZk(
 			EffectiveGasPrice: effectiveGasPricePercentage,
 			Signer:            &txSender,
 		})
-
 	}
 
 	var l2InfoRoot *common.Hash

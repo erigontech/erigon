@@ -9,6 +9,8 @@ import (
 	"testing"
 )
 
+const forkId7BlockGasLimit = 18446744073709551615
+
 func TestBinaryStringToInt64(t *testing.T) {
 	testCases := []struct {
 		binary   string
@@ -18,7 +20,7 @@ func TestBinaryStringToInt64(t *testing.T) {
 		{"110011", 51},
 		{"0", 0},
 		{"11111111", 255},
-		{"1111111111111111111111111111111111111111111111111111111111111111", 18446744073709551615}, // max uint64 value
+		{"1111111111111111111111111111111111111111111111111111111111111111", forkId7BlockGasLimit}, // max uint64 value
 		{"10000000000000000000000000000000000000000000000000000000000000000", 0},                   // overflow scenario
 	}
 
