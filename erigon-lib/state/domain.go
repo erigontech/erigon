@@ -524,9 +524,7 @@ func (w *domainBufferedWriter) Flush(ctx context.Context, tx kv.RwTx) error {
 		return err
 	}
 	defer valuesCursor.Close()
-	dTot := time.Duration(0)
 	if err := w.values.Load(tx, w.valsTable, func(k, v []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) error {
-		s := time.Now()
 		foundVal, err := valuesCursor.SeekBothRange(k, v[:8])
 		if err != nil {
 			return err
@@ -535,7 +533,6 @@ func (w *domainBufferedWriter) Flush(ctx context.Context, tx kv.RwTx) error {
 			if err := valuesCursor.Put(k, v); err != nil {
 				return err
 			}
-			dTot += time.Since(s)
 			return nil
 		}
 		if err := valuesCursor.DeleteCurrent(); err != nil {
@@ -544,13 +541,11 @@ func (w *domainBufferedWriter) Flush(ctx context.Context, tx kv.RwTx) error {
 		if err := valuesCursor.Put(k, v); err != nil {
 			return err
 		}
-		dTot += time.Since(s)
 		return nil
 	}, etl.TransformArgs{Quit: ctx.Done(), EmptyVals: true}); err != nil {
 		return err
 	}
 	w.close()
-	fmt.Println("flush non-largeVals", dTot)
 
 	return nil
 }
