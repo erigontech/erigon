@@ -143,7 +143,7 @@ func (s *Sync) UnwindTo(unwindPoint uint64, reason UnwindReason, tx kv.Tx) error
 			return err
 		}
 		if lowestUnwindableBlock > unwindPoint {
-			s.unwindPoint = lowestUnwindableBlock
+			s.unwindPoint = &lowestUnwindableBlock
 			s.unwindReason = reason
 			return nil
 		}
