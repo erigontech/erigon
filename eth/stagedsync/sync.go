@@ -3,6 +3,7 @@ package stagedsync
 import (
 	"context"
 	"fmt"
+	"math"
 	"time"
 
 	"github.com/ledgerwatch/erigon-lib/log/v3"
@@ -142,7 +143,12 @@ func (s *Sync) UnwindTo(unwindPoint uint64, reason UnwindReason, tx kv.Tx) error
 			return err
 		}
 		if lowestUnwindableBlock > unwindPoint {
-			return fmt.Errorf("cannot unwind to block %d, lowest unwindable block is %d", unwindPoint, lowestUnwindableBlock)
+			s.unwindPoint = lowestUnwindableBlock
+			s.unwindReason = reason
+			return nil
+		}
+		if unwindPoint == math.MaxUint64 {
+			return nil // Skip unwindTo entirely
 		}
 	}
 	if reason.Block != nil {
