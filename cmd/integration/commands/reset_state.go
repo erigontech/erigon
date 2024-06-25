@@ -127,15 +127,11 @@ func printStages(tx kv.Tx, snapshots *freezeblocks.RoSnapshots, borSn *freezeblo
 	_, lastBlockInHistSnap, _ := rawdbv3.TxNums.FindBlockNum(tx, agg.EndTxNumMinimax())
 	_lb, _lt, _ := rawdbv3.TxNums.Last(tx)
 	fmt.Fprintf(w, "state.history: idx steps: %.02f, lastBlockInSnap=%d, TxNums_Index(%d,%d), filesAmount: %d\n\n", rawdbhelpers.IdxStepsCountV3(tx), lastBlockInHistSnap, _lb, _lt, agg.FilesAmount())
-	s1, err := tx.ReadSequence(kv.EthTx)
+	ethTxSequence, err := tx.ReadSequence(kv.EthTx)
 	if err != nil {
 		return err
 	}
-	s2, err := tx.ReadSequence(kv.NonCanonicalTxs)
-	if err != nil {
-		return err
-	}
-	fmt.Fprintf(w, "sequence: EthTx=%d, NonCanonicalTx=%d\n\n", s1, s2)
+	fmt.Fprintf(w, "sequence: EthTx=%d\n\n", ethTxSequence)
 
 	{
 		firstNonGenesisHeader, err := rawdbv3.SecondKey(tx, kv.Headers)
