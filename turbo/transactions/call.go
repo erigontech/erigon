@@ -203,6 +203,7 @@ func NewReusableCaller(
 	headerReader services.HeaderReader,
 	chainConfig *chain.Config,
 	callTimeout time.Duration,
+	VirtualCountersSmtReduction float64,
 ) (*ReusableCaller, error) {
 	ibs := state.New(stateReader)
 
@@ -255,16 +256,16 @@ func NewReusableCaller(
 		msg.Data(),
 	)
 
-	batchCounters := vm.NewBatchCounterCollector(smtDepth, uint16(forkId), false)
-	txCounters := vm.NewTransactionCounter(transaction, smtDepth, false)
+	batchCounters := vm.NewBatchCounterCollector(smtDepth, uint16(forkId), VirtualCountersSmtReduction, false)
+	txCounters := vm.NewTransactionCounter(transaction, smtDepth, VirtualCountersSmtReduction, false)
 
 	_, err = batchCounters.AddNewTransactionCounters(txCounters)
 	if err != nil {
 		return nil, err
 	}
 
-	zkConfig := vm.ZkConfig{Config: vm.Config{NoBaseFee: true}, CounterCollector: txCounters.ExecutionCounters()}
-	evm := vm.NewZkEVM(blockCtx, txCtx, ibs, chainConfig, zkConfig)
+	zkVmConfig := vm.ZkConfig{Config: vm.Config{NoBaseFee: true}, CounterCollector: txCounters.ExecutionCounters()}
+	evm := vm.NewZkEVM(blockCtx, txCtx, ibs, chainConfig, zkVmConfig)
 
 	return &ReusableCaller{
 		evm:             evm,

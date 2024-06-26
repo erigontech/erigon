@@ -329,7 +329,7 @@ func (c *codeAndHash) Hash() libcommon.Hash {
 
 func (evm *EVM) create(caller ContractRef, codeAndHash *codeAndHash, gas uint64, value *uint256.Int, address libcommon.Address, typ OpCode, incrementNonce bool, intrinsicGas uint64) ([]byte, libcommon.Address, uint64, error) {
 	// hack to support zkeVM
-	return evm.createZkEvm(caller, codeAndHash, gas, value, address, typ, incrementNonce, intrinsicGas, false)
+	return evm.createZkEvm(caller, codeAndHash, gas, value, address, typ, incrementNonce, intrinsicGas)
 }
 
 // create creates a new contract using code as deployment code.

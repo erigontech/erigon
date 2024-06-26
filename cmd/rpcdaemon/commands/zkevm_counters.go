@@ -146,8 +146,8 @@ func (zkapi *ZkEvmAPIImpl) EstimateCounters(ctx context.Context, rpcTx *zkevmRPC
 
 	smtDepth := smt.GetDepth()
 
-	batchCounters := vm.NewBatchCounterCollector(smtDepth, uint16(forkId), false)
-	txCounters := vm.NewTransactionCounter(tx, smtDepth, false)
+	batchCounters := vm.NewBatchCounterCollector(smtDepth, uint16(forkId), zkapi.config.Zk.VirtualCountersSmtReduction, false)
+	txCounters := vm.NewTransactionCounter(tx, smtDepth, zkapi.config.Zk.VirtualCountersSmtReduction, false)
 
 	_, err = batchCounters.AddNewTransactionCounters(txCounters)
 	if err != nil {
@@ -163,7 +163,11 @@ func (zkapi *ZkEvmAPIImpl) EstimateCounters(ctx context.Context, rpcTx *zkevmRPC
 
 	execResult, oocError := core.ApplyMessage(evm, msg, gp, true /* refunds */, false /* gasBailout */)
 
-	collected, err := batchCounters.CombineCollectors()
+	l1InfoIndex, err := hermezDb.GetBlockL1InfoTreeIndex(block.NumberU64())
+	if err != nil {
+		return nil, err
+	}
+	collected, err := batchCounters.CombineCollectors(l1InfoIndex != 0)
 	if err != nil {
 		return nil, err
 	}
@@ -351,8 +355,8 @@ func (api *ZkEvmAPIImpl) TraceTransactionCounters(ctx context.Context, hash comm
 		return err
 	}
 
-	txCounters := vm.NewTransactionCounter(txn, smtDepth, false)
-	batchCounters := vm.NewBatchCounterCollector(smtDepth, uint16(forkId), false)
+	txCounters := vm.NewTransactionCounter(txn, smtDepth, api.config.Zk.VirtualCountersSmtReduction, false)
+	batchCounters := vm.NewBatchCounterCollector(smtDepth, uint16(forkId), api.config.Zk.VirtualCountersSmtReduction, false)
 	if _, err = batchCounters.AddNewTransactionCounters(txCounters); err != nil {
 		stream.WriteNil()
 		return err
@@ -451,19 +455,21 @@ func (api *ZkEvmAPIImpl) GetBatchCountersByNumber(ctx context.Context, batchNumR
 		return nil, err
 	}
 
-	batchCounters := vm.NewBatchCounterCollector(smtDepth, uint16(forkId), false)
+	batchCounters := vm.NewBatchCounterCollector(smtDepth, uint16(forkId), api.config.Zk.VirtualCountersSmtReduction, false)
 
 	var (
-		block                      *types.Block
-		stateReader                state.StateReader
-		collected                  vm.Counters
-		receipts                   types.Receipts
-		blockGasUsed, totalGasUsed uint64
+		block                                   *types.Block
+		stateReader                             state.StateReader
+		collected                               vm.Counters
+		receipts                                types.Receipts
+		blockGasUsed, totalGasUsed, l1InfoIndex uint64
 	)
 
 	for i, blockNum := range batchBlockNumbers {
-		_, err := batchCounters.StartNewBlock()
-		if err != nil {
+		if l1InfoIndex, err = roHermezDb.GetBlockL1InfoTreeIndex(block.NumberU64()); err != nil {
+			return nil, err
+		}
+		if _, err := batchCounters.StartNewBlock(l1InfoIndex != 0); err != nil {
 			return nil, err
 		}
 
@@ -497,7 +503,7 @@ func (api *ZkEvmAPIImpl) GetBatchCountersByNumber(ctx context.Context, batchNumR
 		// execute blocks
 		var txGasUsed uint64
 		for _, tx := range block.Transactions() {
-			if txGasUsed, err = execTransaction(tx, batchCounters, smtDepth, ibs, signer, header, rules, chainConfig, blockCtx, receipts); err != nil {
+			if txGasUsed, err = api.execTransaction(tx, batchCounters, smtDepth, ibs, signer, header, rules, chainConfig, blockCtx, receipts); err != nil {
 				return nil, err
 			}
 			blockGasUsed += txGasUsed
@@ -506,14 +512,14 @@ func (api *ZkEvmAPIImpl) GetBatchCountersByNumber(ctx context.Context, batchNumR
 		totalGasUsed += blockGasUsed
 	}
 
-	if collected, err = batchCounters.CombineCollectors(); err != nil {
+	if collected, err = batchCounters.CombineCollectors(l1InfoIndex != 0); err != nil {
 		return nil, err
 	}
 
 	return populateBatchCounters(&collected, smtDepth, batchNum, earliestBlockNum, latestBlockNum, totalGasUsed)
 }
 
-func execTransaction(
+func (api *ZkEvmAPIImpl) execTransaction(
 	tx types.Transaction,
 	batchCounters *vm.BatchCounterCollector,
 	smtDepth int,
@@ -529,7 +535,7 @@ func execTransaction(
 		msg        core.Message
 		execResult *core.ExecutionResult
 	)
-	txCounters := vm.NewTransactionCounter(tx, smtDepth, false)
+	txCounters := vm.NewTransactionCounter(tx, smtDepth, api.config.Zk.VirtualCountersSmtReduction, false)
 
 	if _, err = batchCounters.AddNewTransactionCounters(txCounters); err != nil {
 		return 0, err

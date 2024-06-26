@@ -148,7 +148,7 @@ type CounterCollector struct {
 	transaction types.Transaction
 }
 
-func calculateSmtLevels(smtMaxLevel int, minValue int) int {
+func calculateSmtLevels(smtMaxLevel int, minValue int, mcpReduction float64) int {
 	binary := big.NewInt(0)
 	base := big.NewInt(2)
 	power := big.NewInt(int64(smtMaxLevel))
@@ -161,6 +161,9 @@ func calculateSmtLevels(smtMaxLevel int, minValue int) int {
 	if binaryLength < minValue {
 		binaryLength = minValue
 	}
+
+	binaryLength = int(math.Floor(float64(binaryLength) * mcpReduction))
+
 	return binaryLength
 }
 
@@ -225,24 +228,24 @@ func defaultCounters() Counters {
 			initialAmount: totalSteps >> 5,
 		},
 		K: {
-			remaining:     int(math.Floor(float64(totalSteps)/155286) * 44),
+			remaining:     totalSteps / 155286 * 44, //int(math.Floor(float64(totalSteps)/155286) * 44)
 			name:          "keccaks",
-			initialAmount: int(math.Floor(float64(totalSteps)/155286) * 44),
+			initialAmount: totalSteps / 155286 * 44, //int(math.Floor(float64(totalSteps)/155286) * 44)
 		},
 		D: {
-			remaining:     int(math.Floor(float64(totalSteps) / 56)),
+			remaining:     totalSteps / 56, //int(math.Floor(float64(totalSteps) / 56))
 			name:          "padding",
-			initialAmount: int(math.Floor(float64(totalSteps) / 56)),
+			initialAmount: totalSteps / 56, //int(math.Floor(float64(totalSteps) / 56))
 		},
 		P: {
-			remaining:     int(math.Floor(float64(totalSteps) / 30)),
+			remaining:     totalSteps / 30, //int(math.Floor(float64(totalSteps) / 30))
 			name:          "poseidon",
-			initialAmount: int(math.Floor(float64(totalSteps) / 30)),
+			initialAmount: totalSteps / 30, //int(math.Floor(float64(totalSteps) / 30))
 		},
 		SHA: {
-			remaining:     int(math.Floor(float64(totalSteps-1)/31488)) * 7,
+			remaining:     (totalSteps - 1) / 31488 * 7, //int(math.Floor(float64(totalSteps-1)/31488)) * 7
 			name:          "sha256",
-			initialAmount: int(math.Floor(float64(totalSteps-1)/31488)) * 7,
+			initialAmount: (totalSteps - 1) / 31488 * 7, //int(math.Floor(float64(totalSteps-1)/31488)) * 7
 		},
 	}
 }
@@ -508,7 +511,7 @@ func SimpleCounterOperations(cc *CounterCollector) *[256]executionFunc {
 }
 
 func (cc *CounterCollector) mLoadX() {
-	cc.Deduct(S, 40)
+	cc.Deduct(S, 30)
 	cc.Deduct(B, 2)
 	cc.Deduct(M, 1)
 	cc.offsetUtil()
@@ -522,20 +525,20 @@ func (cc *CounterCollector) offsetUtil() {
 }
 
 func (cc *CounterCollector) SHRarith() {
-	cc.Deduct(S, 50)
+	cc.Deduct(S, 40)
 	cc.Deduct(B, 2)
 	cc.Deduct(A, 1)
 	cc.divArith()
 }
 
 func (cc *CounterCollector) SHLarith() {
-	cc.Deduct(S, 100)
-	cc.Deduct(B, 4)
+	cc.Deduct(S, 40)
+	cc.Deduct(B, 2)
 	cc.Deduct(A, 2)
 }
 
 func (cc *CounterCollector) divArith() {
-	cc.Deduct(S, 50)
+	cc.Deduct(S, 40)
 	cc.Deduct(B, 3)
 	cc.Deduct(A, 1)
 }
@@ -663,7 +666,7 @@ func (cc *CounterCollector) subArith() {
 }
 
 func (cc *CounterCollector) mulArith() {
-	cc.Deduct(S, 50)
+	cc.Deduct(S, 40)
 	cc.Deduct(B, 1)
 	cc.Deduct(A, 1)
 }
@@ -690,11 +693,12 @@ func (cc *CounterCollector) processContractCall(smtLevels int, bytecodeLength in
 		if isCreate {
 			cc.Deduct(S, 40)
 			cc.Deduct(K, 1)
+			cc.maskAddress()
 		} else if isCreate2 {
 			cc.Deduct(S, 40)
 			cc.divArith()
 			cc.Deduct(K, int(math.Ceil(float64(bytecodeLength+1)/136)+1))
-			cc.multiCall(cc.mLoad32, int(math.Floor(float64(bytecodeLength)/32)))
+			cc.multiCall(cc.mLoad32, bytecodeLength>>5) //int(math.Floor(float64(bytecodeLength)/32))
 			cc.mLoadX()
 			cc.SHRarith()
 			cc.Deduct(K, 1)
@@ -727,7 +731,7 @@ func (cc *CounterCollector) hashPoseidonLinearFromMemory(memSize int) {
 	cc.Deduct(P, int(math.Ceil(float64(memSize+1)/56)))
 	cc.Deduct(D, int(math.Ceil(float64(memSize+1)/56)))
 	cc.divArith()
-	cc.multiCall(cc.hashPoseidonLinearFromMemoryLoop, int(math.Floor(float64(memSize)/32)))
+	cc.multiCall(cc.hashPoseidonLinearFromMemoryLoop, memSize>>5) //int(math.Floor(float64(memSize)/32))
 	cc.mLoadX()
 	cc.SHRarith()
 }
@@ -751,14 +755,17 @@ func (cc *CounterCollector) maskAddress() {
 	cc.Deduct(B, 1)
 }
 
-func (cc *CounterCollector) processChangeL2Block() {
+func (cc *CounterCollector) processChangeL2Block(verifyMerkleProof bool) {
 	cc.Deduct(S, 70)
 	cc.Deduct(B, 4+4)
 	cc.Deduct(P, 6*cc.smtLevels)
 	cc.Deduct(K, 2)
 	cc.consolidateBlock()
 	cc.setupNewBlockInfoTree()
-	cc.verifyMerkleProof()
+
+	if verifyMerkleProof {
+		cc.verifyMerkleProof()
+	}
 }
 
 func (cc *CounterCollector) setupNewBlockInfoTree() {
@@ -800,7 +807,7 @@ func (cc *CounterCollector) readFromCallDataOffset() {
 }
 
 func (cc *CounterCollector) mStore32() {
-	cc.Deduct(S, 100)
+	cc.Deduct(S, 80)
 	cc.Deduct(B, 1)
 	cc.Deduct(M, 1)
 	cc.offsetUtil()
@@ -809,7 +816,7 @@ func (cc *CounterCollector) mStore32() {
 }
 
 func (cc *CounterCollector) mStoreX() {
-	cc.Deduct(S, 100)
+	cc.Deduct(S, 80)
 	cc.Deduct(B, 1)
 	cc.Deduct(M, 1)
 	cc.offsetUtil()
@@ -870,8 +877,8 @@ func (cc *CounterCollector) preModExp(callDataLength, returnDataLength, bLen, mL
 	cc.subArith()
 	cc.multiCall(cc.SHLarith, 2)
 	cc.multiCall(cc.mStoreX, 2)
-	cc.multiCall(cc.preModExpLoop, int(math.Floor(float64(callDataLength)/32)))
-	cc.multiCall(cc.preModExpLoop, int(math.Floor(float64(returnDataLength)/32)))
+	cc.multiCall(cc.preModExpLoop, callDataLength>>5)   //int(math.Floor(float64(memSize)/32))
+	cc.multiCall(cc.preModExpLoop, returnDataLength>>5) //int(math.Floor(float64(memSize)/32))
 	if modulus.Uint64() > 0 {
 		cc.modExp(bLen, mLen, eLen, base, exponent, modulus)
 	}
@@ -909,7 +916,7 @@ func (cc *CounterCollector) preSha256(callDataLength int) {
 	cc.multiCall(cc.divArith, 2)
 	cc.mStore32()
 	cc.mStoreX()
-	cc.multiCall(cc.preSha256Loop, int(math.Floor(float64(callDataLength)/32)))
+	cc.multiCall(cc.preSha256Loop, callDataLength>>5) //int(math.Floor(float64(callDataLength)/32))
 	cc.readFromCallDataOffset()
 	cc.SHRarith()
 }
@@ -919,16 +926,16 @@ func (cc *CounterCollector) preSha256Loop() {
 	cc.readFromCallDataOffset()
 }
 
-func (cc *CounterCollector) preIdentity(callDataLength, returnDataLength uint64) {
+func (cc *CounterCollector) preIdentity(callDataLength, returnDataLength int) {
 	cc.Deduct(S, 45)
 	cc.Deduct(B, 2)
 	cc.divArith()
 	// identity loop
-	cc.multiCall(cc.identityLoop, int(math.Floor(float64(callDataLength)/32)))
+	cc.multiCall(cc.identityLoop, callDataLength>>5) //int(math.Floor(float64(callDataLength)/32))
 	cc.readFromCallDataOffset()
 	cc.mStoreX()
 	// identity return loop
-	cc.multiCall(cc.identityReturnLoop, int(math.Floor(float64(returnDataLength)/32)))
+	cc.multiCall(cc.identityReturnLoop, returnDataLength>>5)
 	cc.mLoadX()
 	cc.mStoreX()
 }
@@ -1137,7 +1144,7 @@ func (cc *CounterCollector) opCalldataCopy(pc *uint64, interpreter *EVMInterpret
 		cc.Deduct(B, 2)
 		cc.saveMem(inputLen)
 		cc.offsetUtil()
-		cc.multiCall(cc.opCalldataCopyLoop, int(math.Floor(float64(inputLen)/32)))
+		cc.multiCall(cc.opCalldataCopyLoop, inputLen>>5) //int(math.Floor(float64(inputLen)/32))
 		cc.readFromCallDataOffset()
 		cc.multiCall(cc.mStoreX, 2)
 	}
@@ -1245,7 +1252,7 @@ func (cc *CounterCollector) opReturnDataCopy(pc *uint64, interpreter *EVMInterpr
 		cc.saveMem(length)
 		cc.divArith()
 		cc.mulArith()
-		cc.multiCall(cc.returnDataCopyLoop, int(math.Floor(float64(length)/32)))
+		cc.multiCall(cc.returnDataCopyLoop, length>>5) //int(math.Floor(float64(length)/32))
 		cc.mLoadX()
 		cc.mStoreX()
 	}
@@ -1313,7 +1320,6 @@ func (cc *CounterCollector) opAnd(pc *uint64, interpreter *EVMInterpreter, scope
 	cc.opCode(scope)
 	cc.Deduct(S, 10)
 	cc.Deduct(B, 1)
-	cc.Deduct(P, cc.smtLevels)
 	return nil, nil
 }
 
@@ -1321,21 +1327,18 @@ func (cc *CounterCollector) opOr(pc *uint64, interpreter *EVMInterpreter, scope 
 	cc.opCode(scope)
 	cc.Deduct(S, 10)
 	cc.Deduct(B, 1)
-	cc.Deduct(P, cc.smtLevels)
 	return nil, nil
 }
 func (cc *CounterCollector) opXor(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]byte, error) {
 	cc.opCode(scope)
 	cc.Deduct(S, 10)
 	cc.Deduct(B, 1)
-	cc.Deduct(P, cc.smtLevels)
 	return nil, nil
 }
 func (cc *CounterCollector) opNot(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]byte, error) {
 	cc.opCode(scope)
 	cc.Deduct(S, 10)
 	cc.Deduct(B, 1)
-	cc.Deduct(P, cc.smtLevels)
 	return nil, nil
 }
 func (cc *CounterCollector) opByte(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]byte, error) {
@@ -1557,7 +1560,7 @@ func (cc *CounterCollector) opReturn(pc *uint64, interpreter *EVMInterpreter, sc
 			cc.hashPoseidonLinearFromMemory(returnSize)
 		}
 	} else {
-		cc.multiCall(cc.returnLoop, int(math.Floor(float64(returnSize)/32)))
+		cc.multiCall(cc.returnLoop, returnSize>>5) //int(math.Floor(float64(returnSize)/32))
 		cc.mLoadX()
 		cc.mStoreX()
 	}
@@ -1578,7 +1581,7 @@ func (cc *CounterCollector) opRevert(pc *uint64, interpreter *EVMInterpreter, sc
 	cc.revertTouched()
 	cc.revertBlockInfoTree()
 	cc.saveMem(size)
-	cc.multiCall(cc.revertLoop, int(math.Floor(float64(size)/32)))
+	cc.multiCall(cc.revertLoop, size>>5) //int(math.Floor(float64(size)/32))
 	cc.mLoadX()
 	cc.mStoreX()
 	return nil, nil
@@ -1672,11 +1675,11 @@ func (cc *CounterCollector) opSha3(pc *uint64, interpreter *EVMInterpreter, scop
 	size := int(scope.Stack.PeekAt(2).Uint64())
 	cc.opCode(scope)
 	cc.Deduct(S, 40)
-	cc.Deduct(K, int(math.Ceil(float64(size+1)/32)))
+	cc.Deduct(K, int(math.Ceil(float64(size+1)/136)))
 	cc.saveMem(size)
 	cc.multiCall(cc.divArith, 2)
 	cc.mulArith()
-	cc.multiCall(cc.sha3Loop, int(math.Floor(float64(size)/32)))
+	cc.multiCall(cc.sha3Loop, size>>5) //Math.floor(input.inputSize / 32)
 	cc.mLoadX()
 	cc.SHRarith()
 	return nil, nil
@@ -1734,7 +1737,7 @@ func (cc *CounterCollector) log(scope *ScopeContext) {
 	cc.divArith()
 	cc.Deduct(P, int(math.Ceil(float64(size)/56)+4))
 	cc.Deduct(D, int(math.Ceil(float64(size)/56)+4))
-	cc.multiCall(cc.logLoop, int(math.Floor(float64(size+1)/32)))
+	cc.multiCall(cc.logLoop, (size+1)>>5) //Math.floor((input.inputSize + 1) / 32))
 	cc.mLoadX()
 	cc.SHRarith()
 	cc.fillBlockInfoTreeWithLog()

@@ -176,13 +176,13 @@
     "newStateRoot": "0x895f95fa944da09237bb1b9711a0e66f7bc3fd27b08eb4e2b2b94726d0b2d0cd",
     "expectedNewAccInputHash": "0xbc2a2f16da1eda57e334ec9903ed17685c876299758c4044964679e9e9a064ce",
     "virtualCounters": {
-      "steps": 47932,
+      "steps": 44342,
       "arith": 1892,
-      "binary": 2695,
+      "binary": 2681,
       "memAlign": 7,
-      "keccaks": 50,
+      "keccaks": 17,
       "padding": 68,
-      "poseidon": 3844,
+      "poseidon": 2553,
       "sha256": 0
     },
     "smtDepths": [3, 4, 6, 6]

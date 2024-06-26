@@ -10,9 +10,8 @@ import (
 	"bytes"
 	"io"
 
-	"errors"
-
 	"encoding/binary"
+	"errors"
 
 	mapset "github.com/deckarep/golang-set/v2"
 	types2 "github.com/gateway-fm/cdk-erigon-lib/types"
@@ -185,9 +184,9 @@ func attemptAddTransaction(
 	transaction types.Transaction,
 	effectiveGasPrice uint8,
 	l1Recovery bool,
-	forkId uint64,
+	forkId, l1InfoIndex uint64,
 ) (*types.Receipt, bool, error) {
-	txCounters := vm.NewTransactionCounter(transaction, sdb.smt.GetDepth(), cfg.zk.ShouldCountersBeUnlimited(l1Recovery))
+	txCounters := vm.NewTransactionCounter(transaction, sdb.smt.GetDepth(), cfg.zk.VirtualCountersSmtReduction, cfg.zk.ShouldCountersBeUnlimited(l1Recovery))
 	overflow, err := batchCounters.AddNewTransactionCounters(txCounters)
 	if err != nil {
 		return nil, false, err
@@ -239,7 +238,7 @@ func attemptAddTransaction(
 	}
 
 	// now that we have executed we can check again for an overflow
-	overflow, err = batchCounters.CheckForOverflow()
+	overflow, err = batchCounters.CheckForOverflow(l1InfoIndex != 0)
 
 	return receipt, overflow, err
 }

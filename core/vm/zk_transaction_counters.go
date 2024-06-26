@@ -18,8 +18,8 @@ type TransactionCounter struct {
 	smtLevels          int
 }
 
-func NewTransactionCounter(transaction types.Transaction, smtMaxLevel int, shouldCountersBeUnlimited bool) *TransactionCounter {
-	totalLevel := calculateSmtLevels(smtMaxLevel, 32)
+func NewTransactionCounter(transaction types.Transaction, smtMaxLevel int, mcpReduction float64, shouldCountersBeUnlimited bool) *TransactionCounter {
+	totalLevel := calculateSmtLevels(smtMaxLevel, 32, mcpReduction)
 
 	var tc *TransactionCounter
 

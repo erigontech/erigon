@@ -19,10 +19,10 @@ import (
 	"github.com/ledgerwatch/erigon/eth/stagedsync"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 	"github.com/ledgerwatch/erigon/zk"
+	"github.com/ledgerwatch/erigon/zk/datastream/server"
 	zktx "github.com/ledgerwatch/erigon/zk/tx"
 	"github.com/ledgerwatch/erigon/zk/utils"
 	"github.com/ledgerwatch/erigon/zk/l1_data"
-	"github.com/ledgerwatch/erigon/zk/datastream/server"
 )
 
 var SpecialZeroIndexHash = common.HexToHash("0x27AE5BA08D7291C96C8CBDDCC148BF48A6D68C7974B94356F53754EF6171D757")
@@ -83,8 +83,7 @@ func SpawnSequencingStage(
 		getHashFn := core.GetHashFn(header, getHeader)
 		blockContext := core.NewEVMBlockContext(header, getHashFn, cfg.engine, &cfg.zk.AddressSequencer, parentBlock.ExcessDataGas())
 
-		err = processInjectedInitialBatch(ctx, cfg, s, sdb, forkId, header, parentBlock, &blockContext)
-		if err != nil {
+		if err = processInjectedInitialBatch(ctx, cfg, s, sdb, forkId, header, parentBlock, &blockContext); err != nil {
 			return err
 		}
 
@@ -127,7 +126,7 @@ func SpawnSequencingStage(
 	l1Recovery := cfg.zk.L1SyncStartBlock > 0
 	hasAnyTransactionsInThisBatch := false
 	thisBatch := lastBatch + 1
-	batchCounters := vm.NewBatchCounterCollector(sdb.smt.GetDepth(), uint16(forkId), cfg.zk.ShouldCountersBeUnlimited(l1Recovery))
+	batchCounters := vm.NewBatchCounterCollector(sdb.smt.GetDepth(), uint16(forkId), cfg.zk.VirtualCountersSmtReduction, cfg.zk.ShouldCountersBeUnlimited(l1Recovery))
 	runLoopBlocks := true
 	lastStartedBn := executionAt - 1
 	yielded := mapset.NewSet[[32]byte]()
@@ -252,7 +251,12 @@ func SpawnSequencingStage(
 			}
 		}
 
-		overflowOnNewBlock, err := batchCounters.StartNewBlock()
+		l1InfoIndex, err := sdb.hermezDb.GetBlockL1InfoTreeIndex(lastStartedBn)
+		if err != nil {
+			return err
+		}
+
+		overflowOnNewBlock, err := batchCounters.StartNewBlock(l1InfoIndex != 0)
 		if err != nil {
 			return err
 		}
@@ -299,7 +303,7 @@ func SpawnSequencingStage(
 			blockTicker := time.NewTicker(cfg.zk.SequencerBlockSealTime)
 			defer blockTicker.Stop()
 			reRunBlock := false
-
+			overflow := false
 			// start to wait for transactions to come in from the pool and attempt to add them to the current batch.  Once we detect a counter
 			// overflow we revert the IBS back to the previous snapshot and don't add the transaction/receipt to the collection that will
 			// end up in the finalised block
@@ -343,6 +347,7 @@ func SpawnSequencingStage(
 						cfg.txPool.UnlockFlusher()
 					}
 
+					var receipt *types.Receipt
 					for i, transaction := range blockTransactions {
 						var effectiveGas uint8
 
@@ -352,7 +357,7 @@ func SpawnSequencingStage(
 							effectiveGas = DeriveEffectiveGasPrice(cfg, transaction)
 						}
 
-						receipt, overflow, err := attemptAddTransaction(cfg, sdb, ibs, batchCounters, &blockContext, header, transaction, effectiveGas, l1Recovery, forkId)
+						receipt, overflow, err = attemptAddTransaction(cfg, sdb, ibs, batchCounters, &blockContext, header, transaction, effectiveGas, l1Recovery, forkId, l1InfoIndex)
 						if err != nil {
 							if limboRecovery {
 								panic("limbo transaction has already been executed once so they must not fail while re-executing")
@@ -437,7 +442,7 @@ func SpawnSequencingStage(
 		} else {
 			for idx, transaction := range addedTransactions {
 				effectiveGas := effectiveGases[idx]
-				receipt, innerOverflow, err := attemptAddTransaction(cfg, sdb, ibs, batchCounters, &blockContext, header, transaction, effectiveGas, false, forkId)
+				receipt, innerOverflow, err := attemptAddTransaction(cfg, sdb, ibs, batchCounters, &blockContext, header, transaction, effectiveGas, false, forkId, l1InfoIndex)
 				if err != nil {
 					return err
 				}
@@ -473,7 +478,12 @@ func SpawnSequencingStage(
 		log.Info(fmt.Sprintf("[%s] Finish block %d with %d transactions...", logPrefix, thisBlockNumber, len(addedTransactions)))
 	}
 
-	counters, err := batchCounters.CombineCollectors()
+	l1InfoIndex, err := sdb.hermezDb.GetBlockL1InfoTreeIndex(lastStartedBn)
+	if err != nil {
+		return err
+	}
+
+	counters, err := batchCounters.CombineCollectors(l1InfoIndex != 0)
 	if err != nil {
 		return err
 	}

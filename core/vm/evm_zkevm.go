@@ -69,11 +69,11 @@ func NewZkEVM(blockCtx evmtypes.BlockContext, txCtx evmtypes.TxContext, state ev
 
 func (evm *EVM) Deploy(caller ContractRef, code []byte, gas uint64, endowment *uint256.Int, intrinsicGas uint64) (ret []byte, contractAddr libcommon.Address, leftOverGas uint64, err error) {
 	contractAddr = crypto.CreateAddress(caller.Address(), evm.intraBlockState.GetNonce(caller.Address()))
-	return evm.createZkEvm(caller, &codeAndHash{code: code}, gas, endowment, contractAddr, CREATE, true /* incrementNonce */, intrinsicGas, true)
+	return evm.createZkEvm(caller, &codeAndHash{code: code}, gas, endowment, contractAddr, CREATE, true /* incrementNonce */, intrinsicGas)
 }
 
 // create creates a new contract using code as deployment code.
-func (evm *EVM) createZkEvm(caller ContractRef, codeAndHash *codeAndHash, gas uint64, value *uint256.Int, address libcommon.Address, typ OpCode, incrementNonce bool, intrinsicGas uint64, isMsgDeploy bool) ([]byte, libcommon.Address, uint64, error) {
+func (evm *EVM) createZkEvm(caller ContractRef, codeAndHash *codeAndHash, gas uint64, value *uint256.Int, address libcommon.Address, typ OpCode, incrementNonce bool, intrinsicGas uint64) ([]byte, libcommon.Address, uint64, error) {
 	var ret []byte
 	var err error
 	var gasConsumption uint64
@@ -137,12 +137,10 @@ func (evm *EVM) createZkEvm(caller ContractRef, codeAndHash *codeAndHash, gas ui
 	contract := NewContract(caller, AccountRef(address), value, gas, evm.config.SkipAnalysis)
 	contract.SetCodeOptionalHash(&address, codeAndHash)
 
-	if !isMsgDeploy {
-		if typ == CREATE {
-			contract.IsCreate = true
-		} else if typ == CREATE2 {
-			contract.IsCreate2 = true
-		}
+	if typ == CREATE {
+		contract.IsCreate = true
+	} else if typ == CREATE2 {
+		contract.IsCreate2 = true
 	}
 
 	if evm.config.NoRecursion && depth > 0 {

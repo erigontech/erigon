@@ -20,9 +20,9 @@ type BatchCounterCollector struct {
 	unlimitedCounters       bool
 }
 
-func NewBatchCounterCollector(smtMaxLevel int, forkId uint16, unlimitedCounters bool) *BatchCounterCollector {
-	smtLevels := calculateSmtLevels(smtMaxLevel, 0)
-	smtLevelsForTransaction := calculateSmtLevels(smtMaxLevel, 32)
+func NewBatchCounterCollector(smtMaxLevel int, forkId uint16, mcpReduction float64, unlimitedCounters bool) *BatchCounterCollector {
+	smtLevels := calculateSmtLevels(smtMaxLevel, 0, mcpReduction)
+	smtLevelsForTransaction := calculateSmtLevels(smtMaxLevel, 32, mcpReduction)
 	return &BatchCounterCollector{
 		transactions:            []*TransactionCounter{},
 		smtLevels:               smtLevels,
@@ -69,7 +69,7 @@ func (bcc *BatchCounterCollector) AddNewTransactionCounters(txCounters *Transact
 
 	bcc.transactions = append(bcc.transactions, txCounters)
 
-	return bcc.CheckForOverflow()
+	return bcc.CheckForOverflow(false) //no need to calculate the merkle proof here
 }
 
 func (bcc *BatchCounterCollector) ClearTransactionCounters() {
@@ -79,9 +79,9 @@ func (bcc *BatchCounterCollector) ClearTransactionCounters() {
 // StartNewBlock adds in the counters to simulate a changeL2Block transaction.  As these transactions don't really exist
 // in a context that isn't the prover we just want to mark down that we have started one.  If adding one causes an overflow we
 // return true
-func (bcc *BatchCounterCollector) StartNewBlock() (bool, error) {
+func (bcc *BatchCounterCollector) StartNewBlock(verifyMerkleProof bool) (bool, error) {
 	bcc.blockCount++
-	return bcc.CheckForOverflow()
+	return bcc.CheckForOverflow(verifyMerkleProof)
 }
 
 func (bcc *BatchCounterCollector) processBatchLevelData() error {
@@ -118,8 +118,8 @@ func (bcc *BatchCounterCollector) processBatchLevelData() error {
 }
 
 // CheckForOverflow returns true in the case that any counter has less than 0 remaining
-func (bcc *BatchCounterCollector) CheckForOverflow() (bool, error) {
-	combined, err := bcc.CombineCollectors()
+func (bcc *BatchCounterCollector) CheckForOverflow(verifyMerkleProof bool) (bool, error) {
+	combined, err := bcc.CombineCollectors(verifyMerkleProof)
 	if err != nil {
 		return false, err
 	}
@@ -156,7 +156,7 @@ func (bcc *BatchCounterCollector) NewCounters() Counters {
 
 // CombineCollectors takes the batch level data from all transactions and combines these counters with each transactions'
 // rlp level counters and execution level counters
-func (bcc *BatchCounterCollector) CombineCollectors() (Counters, error) {
+func (bcc *BatchCounterCollector) CombineCollectors(verifyMerkleProof bool) (Counters, error) {
 	// combine all the counters we have so far
 	combined := bcc.NewCounters()
 
@@ -167,7 +167,7 @@ func (bcc *BatchCounterCollector) CombineCollectors() (Counters, error) {
 	// these counter collectors can be re-used for each new block in the batch as they don't rely on inputs
 	// from the block or transactions themselves
 	changeL2BlockCounter := NewCounterCollector(bcc.smtLevelsForTransaction)
-	changeL2BlockCounter.processChangeL2Block()
+	changeL2BlockCounter.processChangeL2Block(verifyMerkleProof)
 	changeBlockCounters := NewCounterCollector(bcc.smtLevelsForTransaction)
 	changeBlockCounters.decodeChangeL2BlockTx()
 

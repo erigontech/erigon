@@ -840,7 +840,7 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 			)
 
 			if cfg.Zk.Limbo {
-				limboSubPoolProcessor := txpool.NewLimboSubPoolProcessor(ctx, backend.chainConfig, backend.chainDB, backend.txPool2, verifier)
+				limboSubPoolProcessor := txpool.NewLimboSubPoolProcessor(ctx, cfg.Zk, backend.chainConfig, backend.chainDB, backend.txPool2, verifier)
 				limboSubPoolProcessor.StartWork()
 			}
 

@@ -8,12 +8,14 @@ import (
 	"github.com/gateway-fm/cdk-erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/chain"
 	"github.com/ledgerwatch/erigon/core/vm"
+	"github.com/ledgerwatch/erigon/eth/ethconfig"
 	"github.com/ledgerwatch/erigon/zk/legacy_executor_verifier"
 	"github.com/ledgerwatch/log/v3"
 	"github.com/status-im/keycard-go/hexutils"
 )
 
 type LimboSubPoolProcessor struct {
+	zkCfg       *ethconfig.Zk
 	chainConfig *chain.Config
 	db          kv.RwDB
 	txPool      *TxPool
@@ -21,8 +23,9 @@ type LimboSubPoolProcessor struct {
 	quit        <-chan struct{}
 }
 
-func NewLimboSubPoolProcessor(ctx context.Context, chainConfig *chain.Config, db kv.RwDB, txPool *TxPool, verifier *legacy_executor_verifier.LegacyExecutorVerifier) *LimboSubPoolProcessor {
+func NewLimboSubPoolProcessor(ctx context.Context, zkCfg *ethconfig.Zk, chainConfig *chain.Config, db kv.RwDB, txPool *TxPool, verifier *legacy_executor_verifier.LegacyExecutorVerifier) *LimboSubPoolProcessor {
 	return &LimboSubPoolProcessor{
+		zkCfg:       zkCfg,
 		chainConfig: chainConfig,
 		db:          db,
 		txPool:      txPool,
@@ -74,7 +77,7 @@ func (_this *LimboSubPoolProcessor) run() {
 	defer tx.Rollback()
 
 	// we just need some counter variable with large used values in order verify not to complain
-	batchCounters := vm.NewBatchCounterCollector(256, 1, true)
+	batchCounters := vm.NewBatchCounterCollector(256, 1, _this.zkCfg.VirtualCountersSmtReduction, true)
 	unlimitedCounters := batchCounters.NewCounters().UsedAsMap()
 	for k := range unlimitedCounters {
 		unlimitedCounters[k] = math.MaxInt32
