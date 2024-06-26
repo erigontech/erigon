@@ -118,7 +118,7 @@ func (b *BpsTree) WarmUp(kv ArchiveGetter) error {
 		return nil
 	}
 	// d := logBase(k, b.M)
-	cacheEvery := uint64(8) // could increase to put more nodes into cache
+	cacheEvery := uint64(8) // could increase to put less nodes into cache
 	mx := make([][]Node, 1) // usually d+1 but for experiments we put them all into flat list
 
 	l := int(0)
