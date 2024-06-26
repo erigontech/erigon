@@ -331,6 +331,7 @@ func (c *Clique) Prepare(chain consensus.ChainHeaderReader, header *types.Header
 	// Copy signer protected by mutex to avoid race condition
 	signer := c.signer
 	c.lock.RUnlock()
+
 	// Set the correct difficulty
 	header.Difficulty = calcDifficulty(snap, signer)
 
