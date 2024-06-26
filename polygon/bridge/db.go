@@ -30,22 +30,15 @@ type Store interface {
 	PruneEventIDs(ctx context.Context, blockNum uint64) error
 }
 
-type store struct {
+type MdbxStore struct {
 	db *polygoncommon.Database
 }
 
-func NewStore(db *polygoncommon.Database) Store {
-	return &store{db: db}
+func NewStore(db *polygoncommon.Database) *MdbxStore {
+	return &MdbxStore{db: db}
 }
 
-// used by polygon.sync.stage
-//type stageStore struct {
-//	db // readonly
-//	blockReader
-//	dataStream // send to channel, which is written to db in stage_polygon_sync.go
-//}
-
-func (s *store) Prepare(ctx context.Context) error {
+func (s *MdbxStore) Prepare(ctx context.Context) error {
 	err := s.db.OpenOnce(ctx, kv.PolygonBridgeDB, databaseTablesCfg)
 	if err != nil {
 		return err
@@ -54,13 +47,13 @@ func (s *store) Prepare(ctx context.Context) error {
 	return nil
 }
 
-func (s *store) Close() {
+func (s *MdbxStore) Close() {
 	s.db.Close()
 }
 
 // GetLatestEventID the latest state sync event ID in given DB, 0 if DB is empty
 // NOTE: Polygon sync events start at index 1
-func (s *store) GetLatestEventID(ctx context.Context) (uint64, error) {
+func (s *MdbxStore) GetLatestEventID(ctx context.Context) (uint64, error) {
 	tx, err := s.db.BeginRo(ctx)
 	if err != nil {
 		return 0, err
@@ -86,7 +79,7 @@ func (s *store) GetLatestEventID(ctx context.Context) (uint64, error) {
 }
 
 // GetSprintLastEventID gets the last event id where event.ID >= lastID and event.Time <= time
-func (s *store) GetSprintLastEventID(ctx context.Context, lastID uint64, timeLimit time.Time, stateContract abi.ABI) (uint64, error) {
+func (s *MdbxStore) GetSprintLastEventID(ctx context.Context, lastID uint64, timeLimit time.Time, stateContract abi.ABI) (uint64, error) {
 	var eventID uint64
 
 	tx, err := s.db.BeginRo(ctx)
@@ -144,7 +137,7 @@ func (s *store) GetSprintLastEventID(ctx context.Context, lastID uint64, timeLim
 	}
 }
 
-func (s *store) AddEvents(ctx context.Context, events []*heimdall.EventRecordWithTime, stateContract abi.ABI) error {
+func (s *MdbxStore) AddEvents(ctx context.Context, events []*heimdall.EventRecordWithTime, stateContract abi.ABI) error {
 	tx, err := s.db.BeginRw(ctx)
 	if err != nil {
 		return err
@@ -169,7 +162,7 @@ func (s *store) AddEvents(ctx context.Context, events []*heimdall.EventRecordWit
 }
 
 // GetEvents gets raw events, start inclusive, end exclusive
-func (s *store) GetEvents(ctx context.Context, start, end uint64) ([][]byte, error) {
+func (s *MdbxStore) GetEvents(ctx context.Context, start, end uint64) ([][]byte, error) {
 	var events [][]byte
 
 	kStart := make([]byte, 8)
@@ -201,7 +194,7 @@ func (s *store) GetEvents(ctx context.Context, start, end uint64) ([][]byte, err
 	return events, err
 }
 
-func (s *store) StoreEventID(ctx context.Context, eventMap map[uint64]uint64) error {
+func (s *MdbxStore) StoreEventID(ctx context.Context, eventMap map[uint64]uint64) error {
 	tx, err := s.db.BeginRw(ctx)
 	if err != nil {
 		return err
@@ -224,7 +217,7 @@ func (s *store) StoreEventID(ctx context.Context, eventMap map[uint64]uint64) er
 	return tx.Commit()
 }
 
-func (s *store) GetEventIDRange(ctx context.Context, blockNum uint64) (uint64, uint64, error) {
+func (s *MdbxStore) GetEventIDRange(ctx context.Context, blockNum uint64) (uint64, uint64, error) {
 	var start, end uint64
 
 	tx, err := s.db.BeginRo(ctx)
@@ -260,7 +253,7 @@ func (s *store) GetEventIDRange(ctx context.Context, blockNum uint64) (uint64, u
 	return start, end, nil
 }
 
-func (s *store) PruneEventIDs(ctx context.Context, blockNum uint64) error {
+func (s *MdbxStore) PruneEventIDs(ctx context.Context, blockNum uint64) error {
 	tx, err := s.db.BeginRw(ctx)
 	if err != nil {
 		return err
