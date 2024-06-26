@@ -65,7 +65,7 @@ type TxTask struct {
 	Requests types.Requests
 }
 
-func (t *TxTask) CreateReceipt(cumulativeGasUsed uint64) *types.Receipt {
+func (t *TxTask) CreateReceipt(gasUsed uint64) *types.Receipt {
 	receipt := &types.Receipt{
 		BlockNumber:       t.Header.Number,
 		BlockHash:         t.BlockHash,

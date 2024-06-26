@@ -5,8 +5,8 @@ import (
 	"fmt"
 
 	"github.com/RoaringBitmap/roaring"
-
 	"github.com/ledgerwatch/erigon-lib/log/v3"
+	"github.com/ledgerwatch/erigon/core/rawdb/rawtemporaldb"
 
 	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/kv"
@@ -373,6 +373,12 @@ func (api *APIImpl) getLogsV3(ctx context.Context, tx kv.TemporalTx, begin, end 
 			return nil, err
 		}
 		rawLogs := exec.GetLogs(txIndex, txn)
+
+		receipt, err := rawtemporaldb.ReadReceipt(tx, kv.TxnId(txNum), rawLogs, txIndex, blockHash, blockNum, txn)
+		if err != nil {
+			return nil, err
+		}
+		_ = receipt
 		//TODO: logIndex within the block! no way to calc it now
 		//logIndex := uint(0)
 		//for _, log := range rawLogs {
@@ -385,6 +391,7 @@ func (api *APIImpl) getLogsV3(ctx context.Context, tx kv.TemporalTx, begin, end 
 			log.BlockHash = blockHash
 			log.TxHash = txn.Hash()
 		}
+
 		logs = append(logs, filtered...)
 	}
 

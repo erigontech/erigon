@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/holiman/uint256"
+	"github.com/ledgerwatch/erigon/core/rawdb/rawtemporaldb"
 
 	"github.com/ledgerwatch/erigon-lib/chain"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
@@ -24,7 +25,6 @@ import (
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/eth/ethconfig"
 	"github.com/ledgerwatch/erigon/ethdb/prune"
-	"github.com/ledgerwatch/erigon/rlp"
 	"github.com/ledgerwatch/erigon/turbo/services"
 )
 
@@ -145,17 +145,11 @@ func SpawnCustomTrace(s *StageState, txc wrap.TxContainer, cfg CustomTraceCfg, c
 			if txTask.Final || txTask.TxIndex < 0 {
 				return nil
 			}
-			r := txTask.CreateReceipt(cumulative.Uint64())
-			v, err := rlp.EncodeToBytes(r)
-			if err != nil {
-				return err
-			}
-			//doms.SetTx(tx)
-			err = doms.AppendablePut(kv.ReceiptsAppendable, txnID, v)
-			if err != nil {
-				return err
-			}
 
+			r := txTask.CreateReceipt(cumulative.Uint64())
+			if err := rawtemporaldb.AppendReceipts(doms, txnID, r); err != nil {
+				return err
+			}
 			select {
 			case <-logEvery.C:
 				dbg.ReadMemStats(&m)
