@@ -19,21 +19,6 @@ import (
 
 func ResetState(db kv.RwDB, ctx context.Context, chain string, tmpDir string, logger log.Logger) error {
 	// don't reset senders here
-	if err := Reset(ctx, db, stages.HashState); err != nil {
-		return err
-	}
-	if err := Reset(ctx, db, stages.IntermediateHashes); err != nil {
-		return err
-	}
-	if err := Reset(ctx, db, stages.AccountHistoryIndex, stages.StorageHistoryIndex); err != nil {
-		return err
-	}
-	if err := Reset(ctx, db, stages.LogIndex); err != nil {
-		return err
-	}
-	if err := Reset(ctx, db, stages.CallTraces); err != nil {
-		return err
-	}
 	if err := db.Update(ctx, ResetTxLookup); err != nil {
 		return err
 	}
@@ -142,25 +127,6 @@ func ResetExec(ctx context.Context, db kv.RwDB, chain string, tmpDir string, log
 		// corner case: state files may be ahead of block files - so, can't use SharedDomains here. juts leave progress as 0.
 		return nil
 	})
-}
-
-func ResetExecWithTx(ctx context.Context, tx kv.RwTx, chain string, tmpDir string, logger log.Logger) (err error) {
-	cleanupList := make([]string, 0)
-	cleanupList = append(cleanupList, stateBuckets...)
-	cleanupList = append(cleanupList, stateHistoryBuckets...)
-	cleanupList = append(cleanupList, stateHistoryV3Buckets...)
-	cleanupList = append(cleanupList, stateV3Buckets...)
-
-	if err := clearStageProgress(tx, stages.Execution, stages.HashState, stages.IntermediateHashes); err != nil {
-		return err
-	}
-	for _, tbl := range cleanupList {
-		if err := tx.ClearBucket(tbl); err != nil {
-			return err
-		}
-	}
-	// corner case: state files may be ahead of block files - so, can't use SharedDomains here. juts leave progress as 0.
-	return nil
 }
 
 func ResetTxLookup(tx kv.RwTx) error {
