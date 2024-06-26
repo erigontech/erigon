@@ -931,6 +931,9 @@ func (b *BtIndex) Close() {
 		}
 		b.file = nil
 	}
+	if b.bplus != nil {
+		b.bplus.Close()
+	}
 }
 
 // Get - exact match of key. `k == nil` - means not found

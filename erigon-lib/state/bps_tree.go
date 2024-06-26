@@ -322,3 +322,8 @@ func (b *BpsTree) Distances() (map[int]int, error) {
 	}
 	return distances, nil
 }
+
+func (b *BpsTree) Close() {
+	b.mx = nil
+	b.offt = nil
+}
