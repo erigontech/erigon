@@ -376,7 +376,7 @@ func (api *APIImpl) getLogsV3(ctx context.Context, tx kv.TemporalTx, begin, end 
 
 		//TODO: how to optimize conversion of txNum to txnID
 		rrrr := rawdb.NewCanonicalReader()
-		txnID, err := rrrr.TxNum2ID(tx, blockNum, blockHash, txNum)
+		txnID, err := rrrr.TxNum2ID(tx, blockNum, blockHash, txNum, txnIdx)
 		if err != nil {
 			return nil, err
 		}
