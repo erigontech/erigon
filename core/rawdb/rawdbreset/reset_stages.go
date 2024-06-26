@@ -22,6 +22,9 @@ func ResetState(db kv.RwDB, ctx context.Context, chain string, tmpDir string, lo
 	if err := db.Update(ctx, ResetTxLookup); err != nil {
 		return err
 	}
+	if err := Reset(ctx, db, stages.CustomTrace); err != nil {
+		return err
+	}
 	if err := Reset(ctx, db, stages.Finish); err != nil {
 		return err
 	}
