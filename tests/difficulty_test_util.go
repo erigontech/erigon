@@ -49,7 +49,7 @@ type difficultyTestMarshaling struct {
 }
 
 func (test *DifficultyTest) Run(config *chain.Config) error {
-	parentNumber := big.NewInt(int64(test.CurrentBlockNumber - 1))
+	parentNumber := new(big.Int).SetUint64(test.CurrentBlockNumber - 1)
 	parent := &types.Header{
 		Difficulty: test.ParentDifficulty,
 		Time:       test.ParentTimestamp,

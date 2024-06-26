@@ -179,8 +179,8 @@ func (h *Heimdall) handleChildHeader(ctx context.Context, header *types.Header) 
 		h.pendingCheckpoint = &heimdall.Checkpoint{
 			Fields: heimdall.WaypointFields{
 				Timestamp:  timeStamp,
-				StartBlock: big.NewInt(int64(expectedCheckpointState.newStart)),
-				EndBlock:   big.NewInt(int64(expectedCheckpointState.newEnd)),
+				StartBlock: new(big.Int).SetUint64(expectedCheckpointState.newStart),
+				EndBlock:   new(big.Int).SetUint64(expectedCheckpointState.newEnd),
 			},
 		}
 	}

@@ -311,7 +311,7 @@ func BenchmarkEVM_CREATE2_1200(bench *testing.B) {
 func fakeHeader(n uint64, parentHash libcommon.Hash) *types.Header {
 	header := types.Header{
 		Coinbase:   libcommon.HexToAddress("0x00000000000000000000000000000000deadbeef"),
-		Number:     big.NewInt(int64(n)),
+		Number:     new(big.Int).SetUint64(n),
 		ParentHash: parentHash,
 		Time:       n,
 		Nonce:      types.BlockNonce{0x1},
@@ -329,7 +329,7 @@ func (cr *FakeChainHeaderReader) GetHeaderByHash(hash libcommon.Hash) *types.Hea
 	return nil
 }
 func (cr *FakeChainHeaderReader) GetHeaderByNumber(number uint64) *types.Header {
-	return cr.GetHeaderByHash(libcommon.BigToHash(big.NewInt(int64(number))))
+	return cr.GetHeaderByHash(libcommon.BigToHash(new(big.Int).SetUint64(number)))
 }
 func (cr *FakeChainHeaderReader) Config() *chain.Config                 { return nil }
 func (cr *FakeChainHeaderReader) CurrentHeader() *types.Header          { return nil }
@@ -340,8 +340,8 @@ func (cr *FakeChainHeaderReader) CurrentSafeHeader() *types.Header      { return
 func (cr *FakeChainHeaderReader) GetHeader(hash libcommon.Hash, number uint64) *types.Header {
 	return &types.Header{
 		Coinbase:   libcommon.HexToAddress("0x00000000000000000000000000000000deadbeef"),
-		Number:     big.NewInt(int64(number)),
-		ParentHash: libcommon.BigToHash(big.NewInt(int64(number - 1))),
+		Number:     new(big.Int).SetUint64(number),
+		ParentHash: libcommon.BigToHash(new(big.Int).SetUint64(number - 1)),
 		Time:       number,
 		Nonce:      types.BlockNonce{0x1},
 		Extra:      []byte{},
@@ -377,7 +377,7 @@ func (d *dummyChain) Engine() consensus.Engine {
 func (d *dummyChain) GetHeader(h libcommon.Hash, n uint64) *types.Header {
 	d.counter++
 	parentHash := libcommon.Hash{}
-	s := common.LeftPadBytes(big.NewInt(int64(n-1)).Bytes(), 32)
+	s := common.LeftPadBytes(new(big.Int).SetUint64(n-1).Bytes(), 32)
 	copy(parentHash[:], s)
 
 	//parentHash := libcommon.Hash{byte(n - 1)}
@@ -392,7 +392,7 @@ func TestBlockhash(t *testing.T) {
 	// Current head
 	n := uint64(1000)
 	parentHash := libcommon.Hash{}
-	s := common.LeftPadBytes(big.NewInt(int64(n-1)).Bytes(), 32)
+	s := common.LeftPadBytes(new(big.Int).SetUint64(n-1).Bytes(), 32)
 	copy(parentHash[:], s)
 	header := fakeHeader(n, parentHash)
 
@@ -491,10 +491,10 @@ func TestBlockHashEip2935(t *testing.T) {
 	// Current head
 	n := uint64(10000)
 	parentHash := libcommon.Hash{}
-	s := common.LeftPadBytes(big.NewInt(int64(n-1)).Bytes(), 32)
+	s := common.LeftPadBytes(new(big.Int).SetUint64(n-1).Bytes(), 32)
 	copy(parentHash[:], s)
 	fakeHeaderReader := &FakeChainHeaderReader{}
-	header := fakeHeaderReader.GetHeader(libcommon.BigToHash(big.NewInt(int64(n))), n)
+	header := fakeHeaderReader.GetHeader(libcommon.BigToHash(new(big.Int).SetUint64(n)), n)
 
 	chain := &dummyChain{}
 	cfg := &Config{
