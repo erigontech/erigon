@@ -1038,7 +1038,7 @@ func (as *AggregatorPruneStat) String() string {
 	var sb strings.Builder
 	for _, d := range names {
 		v, ok := as.Domains[d]
-		if ok && v != nil {
+		if ok && v != nil && !v.PrunedNothing() {
 			sb.WriteString(fmt.Sprintf("%s| %s; ", d, v.String()))
 		}
 	}
@@ -1050,7 +1050,7 @@ func (as *AggregatorPruneStat) String() string {
 
 	for _, d := range names {
 		v, ok := as.Indices[d]
-		if ok && v != nil {
+		if ok && v != nil && !v.PrunedNothing() {
 			sb.WriteString(fmt.Sprintf("%s| %s; ", d, v.String()))
 		}
 	}
