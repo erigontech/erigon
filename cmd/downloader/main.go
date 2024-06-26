@@ -424,7 +424,12 @@ func manifestVerify(ctx context.Context, logger log.Logger) error {
 		if !strings.HasPrefix(webseed, "v") { // has marker v1/v2/...
 			uri, err := url.ParseRequestURI(webseed)
 			if err != nil {
-				if strings.HasSuffix(webseed, ".toml") && dir.FileExist(webseed) {
+				exists, existsErr := dir.FileExist(webseed)
+				if existsErr != nil {
+					log.Warn("[webseed] FileExist error", "err", err)
+					continue
+				}
+				if strings.HasSuffix(webseed, ".toml") && exists {
 					webseedFileProviders = append(webseedFileProviders, webseed)
 				}
 				continue
@@ -632,7 +637,11 @@ func StartGrpc(snServer *downloader.GrpcServer, addr string, creds *credentials.
 }
 
 func checkChainName(ctx context.Context, dirs datadir.Dirs, chainName string) error {
-	if !dir.FileExist(filepath.Join(dirs.Chaindata, "mdbx.dat")) {
+	exists, err := dir.FileExist(filepath.Join(dirs.Chaindata, "mdbx.dat"))
+	if err != nil {
+		return err
+	}
+	if !exists {
 		return nil
 	}
 	db, err := mdbx.NewMDBX(log.New()).

@@ -993,7 +993,12 @@ MainLoop:
 		}
 		for _, t := range types {
 			p := filepath.Join(dir, snaptype.SegmentFileName(f.Version, f.From, f.To, t.Enum()))
-			if !dir2.FileExist(p) {
+			exists, err := dir2.FileExist(p)
+			if err != nil {
+				log.Debug("[snapshots] FileExist error", "err", err, "path", p)
+				continue MainLoop
+			}
+			if !exists {
 				continue MainLoop
 			}
 			res = append(res, f)

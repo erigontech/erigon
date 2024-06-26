@@ -233,7 +233,12 @@ func (ii *InvertedIndex) missedAccessors() (l []*filesItem) {
 	ii.dirtyFiles.Walk(func(items []*filesItem) bool {
 		for _, item := range items {
 			fromStep, toStep := item.startTxNum/ii.aggregationStep, item.endTxNum/ii.aggregationStep
-			if !dir.FileExist(ii.efAccessorFilePath(fromStep, toStep)) {
+			exists, err := dir.FileExist(ii.efAccessorFilePath(fromStep, toStep))
+			if err != nil {
+				_, fName := filepath.Split(ii.efAccessorFilePath(fromStep, toStep))
+				ii.logger.Warn("[agg] InvertedIndex missedAccessors", "err", err, "f", fName)
+			}
+			if !exists {
 				l = append(l, item)
 			}
 		}
@@ -265,13 +270,21 @@ func (ii *InvertedIndex) openFiles() error {
 	var invalidFileItems []*filesItem
 	invalidFileItemsLock := sync.Mutex{}
 	ii.dirtyFiles.Walk(func(items []*filesItem) bool {
-		var err error
 		for _, item := range items {
 			item := item
 			fromStep, toStep := item.startTxNum/ii.aggregationStep, item.endTxNum/ii.aggregationStep
 			if item.decompressor == nil {
 				fPath := ii.efFilePath(fromStep, toStep)
-				if !dir.FileExist(fPath) {
+				exists, err := dir.FileExist(fPath)
+				if err != nil {
+					_, fName := filepath.Split(fPath)
+					ii.logger.Debug("[agg] InvertedIndex.openFiles: FileExists error", "f", fName, "err", err)
+					invalidFileItemsLock.Lock()
+					invalidFileItems = append(invalidFileItems, item)
+					invalidFileItemsLock.Unlock()
+					continue
+				}
+				if !exists {
 					_, fName := filepath.Split(fPath)
 					ii.logger.Debug("[agg] InvertedIndex.openFiles: file does not exists", "f", fName)
 					invalidFileItemsLock.Lock()
@@ -297,7 +310,13 @@ func (ii *InvertedIndex) openFiles() error {
 
 			if item.index == nil {
 				fPath := ii.efAccessorFilePath(fromStep, toStep)
-				if dir.FileExist(fPath) {
+				exists, err := dir.FileExist(fPath)
+				if err != nil {
+					_, fName := filepath.Split(fPath)
+					ii.logger.Warn("[agg] InvertedIndex.openFiles", "err", err, "f", fName)
+					// don't interrupt on error. other files may be good
+				}
+				if exists {
 					if item.index, err = recsplit.OpenIndex(fPath); err != nil {
 						_, fName := filepath.Split(fPath)
 						ii.logger.Warn("[agg] InvertedIndex.openFiles", "err", err, "f", fName)

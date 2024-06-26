@@ -195,7 +195,11 @@ func (ap *Appendable) missedAccessors() (l []*filesItem) {
 	ap.dirtyFiles.Walk(func(items []*filesItem) bool {
 		for _, item := range items {
 			fromStep, toStep := item.startTxNum/ap.aggregationStep, item.endTxNum/ap.aggregationStep
-			if !dir.FileExist(ap.accessorFilePath(fromStep, toStep)) {
+			exists, err := dir.FileExist(ap.accessorFilePath(fromStep, toStep))
+			if err != nil {
+				panic(err)
+			}
+			if !exists {
 				l = append(l, item)
 			}
 		}
@@ -253,13 +257,21 @@ func (ap *Appendable) openFiles() error {
 	var invalidFileItems []*filesItem
 	invalidFileItemsLock := sync.Mutex{}
 	ap.dirtyFiles.Walk(func(items []*filesItem) bool {
-		var err error
 		for _, item := range items {
 			item := item
 			fromStep, toStep := item.startTxNum/ap.aggregationStep, item.endTxNum/ap.aggregationStep
 			if item.decompressor == nil {
 				fPath := ap.apFilePath(fromStep, toStep)
-				if !dir.FileExist(fPath) {
+				exists, err := dir.FileExist(fPath)
+				if err != nil {
+					_, fName := filepath.Split(fPath)
+					ap.logger.Debug("[agg] Appendable.openFiles", "err", err, "f", fName)
+					invalidFileItemsLock.Lock()
+					invalidFileItems = append(invalidFileItems, item)
+					invalidFileItemsLock.Unlock()
+					continue
+				}
+				if !exists {
 					_, fName := filepath.Split(fPath)
 					ap.logger.Debug("[agg] Appendable.openFiles: file does not exists", "f", fName)
 					invalidFileItemsLock.Lock()
@@ -285,7 +297,12 @@ func (ap *Appendable) openFiles() error {
 
 			if item.index == nil {
 				fPath := ap.accessorFilePath(fromStep, toStep)
-				if dir.FileExist(fPath) {
+				exists, err := dir.FileExist(fPath)
+				if err != nil {
+					_, fName := filepath.Split(fPath)
+					ap.logger.Warn("[agg] Appendable.openFiles", "err", err, "f", fName)
+				}
+				if exists {
 					if item.index, err = recsplit.OpenIndex(fPath); err != nil {
 						_, fName := filepath.Split(fPath)
 						ap.logger.Warn("[agg] Appendable.openFiles", "err", err, "f", fName)

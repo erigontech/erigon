@@ -330,7 +330,16 @@ func (d *Domain) openFiles() (err error) {
 			fromStep, toStep := item.startTxNum/d.aggregationStep, item.endTxNum/d.aggregationStep
 			if item.decompressor == nil {
 				fPath := d.kvFilePath(fromStep, toStep)
-				if !dir.FileExist(fPath) {
+				exists, err := dir.FileExist(fPath)
+				if err != nil {
+					_, fName := filepath.Split(fPath)
+					d.logger.Debug("[agg] Domain.openFiles: FileExist err", "f", fName, "err", err)
+					invalidFileItemsLock.Lock()
+					invalidFileItems = append(invalidFileItems, item)
+					invalidFileItemsLock.Unlock()
+					continue
+				}
+				if !exists {
 					_, fName := filepath.Split(fPath)
 					d.logger.Debug("[agg] Domain.openFiles: file does not exists", "f", fName)
 					invalidFileItemsLock.Lock()
@@ -356,7 +365,12 @@ func (d *Domain) openFiles() (err error) {
 
 			if item.index == nil && !UseBpsTree {
 				fPath := d.kvAccessorFilePath(fromStep, toStep)
-				if dir.FileExist(fPath) {
+				exists, err := dir.FileExist(fPath)
+				if err != nil {
+					_, fName := filepath.Split(fPath)
+					d.logger.Warn("[agg] Domain.openFiles", "err", err, "f", fName)
+				}
+				if exists {
 					if item.index, err = recsplit.OpenIndex(fPath); err != nil {
 						_, fName := filepath.Split(fPath)
 						d.logger.Warn("[agg] Domain.openFiles", "err", err, "f", fName)
@@ -366,7 +380,12 @@ func (d *Domain) openFiles() (err error) {
 			}
 			if item.bindex == nil {
 				fPath := d.kvBtFilePath(fromStep, toStep)
-				if dir.FileExist(fPath) {
+				exists, err := dir.FileExist(fPath)
+				if err != nil {
+					_, fName := filepath.Split(fPath)
+					d.logger.Warn("[agg] Domain.openFiles", "err", err, "f", fName)
+				}
+				if exists {
 					if item.bindex, err = OpenBtreeIndexWithDecompressor(fPath, DefaultBtreeM, item.decompressor, d.compression); err != nil {
 						_, fName := filepath.Split(fPath)
 						d.logger.Warn("[agg] Domain.openFiles", "err", err, "f", fName)
@@ -376,7 +395,12 @@ func (d *Domain) openFiles() (err error) {
 			}
 			if item.existence == nil {
 				fPath := d.kvExistenceIdxFilePath(fromStep, toStep)
-				if dir.FileExist(fPath) {
+				exists, err := dir.FileExist(fPath)
+				if err != nil {
+					_, fName := filepath.Split(fPath)
+					d.logger.Warn("[agg] Domain.openFiles", "err", err, "f", fName)
+				}
+				if exists {
 					if item.existence, err = OpenExistenceFilter(fPath); err != nil {
 						_, fName := filepath.Split(fPath)
 						d.logger.Warn("[agg] Domain.openFiles", "err", err, "f", fName)
@@ -697,7 +721,13 @@ func (dt *DomainRoTx) DebugEFKey(k []byte) error {
 			accessor := item.index
 			if accessor == nil {
 				fPath := dt.d.efAccessorFilePath(item.startTxNum/dt.d.aggregationStep, item.endTxNum/dt.d.aggregationStep)
-				if dir.FileExist(fPath) {
+				exists, err := dir.FileExist(fPath)
+				if err != nil {
+					_, fName := filepath.Split(fPath)
+					dt.d.logger.Warn("[agg] InvertedIndex.openFiles", "err", err, "f", fName)
+					continue
+				}
+				if exists {
 					var err error
 					accessor, err = recsplit.OpenIndex(fPath)
 					if err != nil {
@@ -989,7 +1019,11 @@ func (d *Domain) buildFiles(ctx context.Context, step uint64, collation Collatio
 	}
 	{
 		fPath := d.kvExistenceIdxFilePath(step, step+1)
-		if dir.FileExist(fPath) {
+		exists, err := dir.FileExist(fPath)
+		if err != nil {
+			return StaticFiles{}, fmt.Errorf("build %s .kvei: %w", d.filenameBase, err)
+		}
+		if exists {
 			bloom, err = OpenExistenceFilter(fPath)
 			if err != nil {
 				return StaticFiles{}, fmt.Errorf("build %s .kvei: %w", d.filenameBase, err)
@@ -1027,12 +1061,20 @@ func (d *Domain) missedBtreeAccessors() (l []*filesItem) {
 		for _, item := range items {
 			fromStep, toStep := item.startTxNum/d.aggregationStep, item.endTxNum/d.aggregationStep
 			fPath := d.kvBtFilePath(fromStep, toStep)
-			if !dir.FileExist(fPath) {
+			exists, err := dir.FileExist(fPath)
+			if err != nil {
+				panic(err)
+			}
+			if !exists {
 				l = append(l, item)
 				continue
 			}
 			fPath = d.kvExistenceIdxFilePath(fromStep, toStep)
-			if !dir.FileExist(fPath) {
+			exists, err = dir.FileExist(fPath)
+			if err != nil {
+				panic(err)
+			}
+			if !exists {
 				l = append(l, item)
 				continue
 			}
@@ -1046,7 +1088,11 @@ func (d *Domain) missedAccessors() (l []*filesItem) {
 		for _, item := range items {
 			fromStep, toStep := item.startTxNum/d.aggregationStep, item.endTxNum/d.aggregationStep
 			fPath := d.kvAccessorFilePath(fromStep, toStep)
-			if !dir.FileExist(fPath) {
+			exists, err := dir.FileExist(fPath)
+			if err != nil {
+				panic(err)
+			}
+			if !exists {
 				l = append(l, item)
 			}
 		}

@@ -1212,8 +1212,11 @@ func (u *snapshotUploader) upload(ctx context.Context, logger log.Logger) {
 							info:  &fi,
 							local: true,
 						}
-
-						if fi.TorrentFileExists() {
+						exists, err := fi.TorrentFileExists()
+						if err != nil {
+							logger.Debug("TorrentFileExists error", "err", err)
+						}
+						if exists {
 							state.torrent, _ = u.torrentFiles.LoadByName(f)
 						}
 
@@ -1227,8 +1230,11 @@ func (u *snapshotUploader) upload(ctx context.Context, logger log.Logger) {
 					defer state.Unlock()
 
 					state.local = true
-
-					if state.torrent == nil && state.info.TorrentFileExists() {
+					exists, err := state.info.TorrentFileExists()
+					if err != nil {
+						logger.Debug("TorrentFileExists error", "err", err)
+					}
+					if state.torrent == nil && exists {
 						state.torrent, _ = u.torrentFiles.LoadByName(f)
 						if state.torrent != nil {
 							state.localHash = state.torrent.InfoHash.String()
