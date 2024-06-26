@@ -117,7 +117,7 @@ func TestAggregatorV3_Merge(t *testing.T) {
 
 	logEvery := time.NewTicker(30 * time.Second)
 	defer logEvery.Stop()
-	stat, err := ac.Prune(context.Background(), rwTx, 0, false, logEvery)
+	stat, err := ac.Prune(context.Background(), rwTx, 0, logEvery)
 	require.NoError(t, err)
 	t.Logf("Prune: %s", stat)
 
@@ -226,7 +226,7 @@ func TestAggregatorV3_MergeValTransform(t *testing.T) {
 
 	logEvery := time.NewTicker(30 * time.Second)
 	defer logEvery.Stop()
-	stat, err := ac.Prune(context.Background(), rwTx, 0, false, logEvery)
+	stat, err := ac.Prune(context.Background(), rwTx, 0, logEvery)
 	require.NoError(t, err)
 	t.Logf("Prune: %s", stat)
 

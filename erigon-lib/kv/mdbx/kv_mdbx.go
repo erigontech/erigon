@@ -830,8 +830,8 @@ type MdbxTx struct {
 	readOnly         bool
 	ctx              context.Context
 
-	streams  map[int]kv.Closer
-	streamID int
+	toCloseMap map[uint64]kv.Closer
+	ID         uint64
 }
 
 type MdbxCursor struct {
@@ -1160,13 +1160,13 @@ func (tx *MdbxTx) PrintDebugInfo() {
 	*/
 }
 
-func (tx *MdbxTx) closeStreams() {
-	for _, c := range tx.streams {
+func (tx *MdbxTx) closeCursors() {
+	for _, c := range tx.toCloseMap {
 		if c != nil {
 			c.Close()
 		}
 	}
-	tx.streams = nil
+	tx.toCloseMap = nil
 	tx.statelessCursors = nil
 }
 
@@ -1329,7 +1329,8 @@ func (tx *MdbxTx) Cursor(bucket string) (kv.Cursor, error) {
 
 func (tx *MdbxTx) stdCursor(bucket string) (kv.RwCursor, error) {
 	b := tx.db.buckets[bucket]
-	c := &MdbxCursor{bucketName: bucket, tx: tx, bucketCfg: b, dbi: mdbx.DBI(tx.db.buckets[bucket].DBI)}
+	c := &MdbxCursor{bucketName: bucket, tx: tx, bucketCfg: b, dbi: mdbx.DBI(tx.db.buckets[bucket].DBI), id: tx.ID}
+	tx.ID++
 
 	var err error
 	c.c, err = tx.tx.OpenCursor(c.dbi)
@@ -1337,6 +1338,11 @@ func (tx *MdbxTx) stdCursor(bucket string) (kv.RwCursor, error) {
 		return nil, fmt.Errorf("table: %s, %w, stack: %s", c.bucketName, err, dbg.Stack())
 	}
 
+	// add to auto-cleanup on end of transactions
+	if tx.toCloseMap == nil {
+		tx.toCloseMap = make(map[uint64]kv.Closer)
+	}
+	tx.toCloseMap[c.ID] = c.c
 	return c, nil
 }
 
@@ -1745,6 +1751,7 @@ func (c *MdbxCursor) Append(k []byte, v []byte) error {
 func (c *MdbxCursor) Close() {
 	if c.c != nil {
 		c.c.Close()
+		delete(c.tx.toCloseMap, c.id)
 		c.c = nil
 	}
 }
@@ -1968,7 +1975,7 @@ func (tx *MdbxTx) RangeDescend(table string, fromPrefix, toPrefix []byte, limit 
 
 type cursor2iter struct {
 	c  kv.Cursor
-	id int
+	id uint64
 	tx *MdbxTx
 
 	fromPrefix, toPrefix, nextK, nextV []byte
@@ -1978,12 +1985,12 @@ type cursor2iter struct {
 }
 
 func (tx *MdbxTx) rangeOrderLimit(table string, fromPrefix, toPrefix []byte, orderAscend order.By, limit int) (*cursor2iter, error) {
-	s := &cursor2iter{ctx: tx.ctx, tx: tx, fromPrefix: fromPrefix, toPrefix: toPrefix, orderAscend: orderAscend, limit: int64(limit), id: tx.streamID}
-	tx.streamID++
-	if tx.streams == nil {
-		tx.streams = map[int]kv.Closer{}
+	s := &cursor2iter{ctx: tx.ctx, tx: tx, fromPrefix: fromPrefix, toPrefix: toPrefix, orderAscend: orderAscend, limit: int64(limit), id: tx.ID}
+	tx.ID++
+	if tx.toCloseMap == nil {
+		tx.toCloseMap = make(map[uint64]kv.Closer)
 	}
-	tx.streams[s.id] = s
+	tx.toCloseMap[s.id] = s
 	if err := s.init(table, tx); err != nil {
 		s.Close() //it's responsibility of constructor (our) to close resource on error
 		return nil, err
@@ -2092,7 +2099,7 @@ func (s *cursor2iter) Close() {
 	}
 	if s.c != nil {
 		s.c.Close()
-		delete(s.tx.streams, s.id)
+		delete(s.tx.toCloseMap, s.id)
 		s.c = nil
 	}
 }
@@ -2129,12 +2136,12 @@ func (s *cursor2iter) Next() (k, v []byte, err error) {
 }
 
 func (tx *MdbxTx) RangeDupSort(table string, key []byte, fromPrefix, toPrefix []byte, asc order.By, limit int) (iter.KV, error) {
-	s := &cursorDup2iter{ctx: tx.ctx, tx: tx, key: key, fromPrefix: fromPrefix, toPrefix: toPrefix, orderAscend: bool(asc), limit: int64(limit), id: tx.streamID}
-	tx.streamID++
-	if tx.streams == nil {
-		tx.streams = map[int]kv.Closer{}
+	s := &cursorDup2iter{ctx: tx.ctx, tx: tx, key: key, fromPrefix: fromPrefix, toPrefix: toPrefix, orderAscend: bool(asc), limit: int64(limit), id: tx.ID}
+	tx.ID++
+	if tx.toCloseMap == nil {
+		tx.toCloseMap = make(map[uint64]kv.Closer)
 	}
-	tx.streams[s.id] = s
+	tx.toCloseMap[s.id] = s
 	if err := s.init(table, tx); err != nil {
 		s.Close() //it's responsibility of constructor (our) to close resource on error
 		return nil, err
@@ -2144,7 +2151,7 @@ func (tx *MdbxTx) RangeDupSort(table string, key []byte, fromPrefix, toPrefix []
 
 type cursorDup2iter struct {
 	c  kv.CursorDupSort
-	id int
+	id uint64
 	tx *MdbxTx
 
 	key                         []byte
@@ -2255,7 +2262,7 @@ func (s *cursorDup2iter) Close() {
 	}
 	if s.c != nil {
 		s.c.Close()
-		delete(s.tx.streams, s.id)
+		delete(s.tx.toCloseMap, s.id)
 		s.c = nil
 	}
 }
