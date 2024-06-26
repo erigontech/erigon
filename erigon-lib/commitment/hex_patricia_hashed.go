@@ -1284,6 +1284,7 @@ func (hph *HexPatriciaHashed) ProcessTree(ctx context.Context, tree *UpdateTree,
 	updatesCount := tree.Size()
 
 	err = tree.HashSort(ctx, func(hashedKey, plainKey []byte) error {
+		fmt.Println(hashedKey, plainKey)
 		select {
 		case <-logEvery.C:
 			dbg.ReadMemStats(&m)

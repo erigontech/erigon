@@ -257,7 +257,13 @@ func (c *Clique) Type() chain.ConsensusName {
 // This is thread-safe (only access the header, as well as signatures, which
 // are lru.ARCCache, which is thread-safe)
 func (c *Clique) Author(header *types.Header) (libcommon.Address, error) {
-	return ecrecover(header, c.signatures)
+	addr, err := ecrecover(header, c.signatures)
+	if err != nil {
+		fmt.Println("Author", err)
+		return libcommon.Address{}, err
+	}
+	fmt.Println("Author", addr)
+	return addr, nil
 }
 
 // VerifyHeader checks whether a header conforms to the consensus rules.
@@ -331,9 +337,10 @@ func (c *Clique) Prepare(chain consensus.ChainHeaderReader, header *types.Header
 	// Copy signer protected by mutex to avoid race condition
 	signer := c.signer
 	c.lock.RUnlock()
-
+	fmt.Println("SISSI", signer)
 	// Set the correct difficulty
 	header.Difficulty = calcDifficulty(snap, signer)
+	header.Extra = []byte{}
 
 	// Ensure the extra data has all its components
 	if len(header.Extra) < ExtraVanity {

@@ -40,8 +40,11 @@ func NewEVMBlockContext(header *types.Header, blockHashFunc func(n uint64) libco
 	if author == nil {
 		beneficiary, _ = engine.Author(header) // Ignore error, we're past header validation
 	} else {
+		fmt.Println("Author-based")
 		beneficiary = *author
 	}
+	fmt.Printf("type engine: %T\n", engine)
+	fmt.Println("beneficiary: ", beneficiary)
 	var baseFee uint256.Int
 	if header.BaseFee != nil {
 		overflow := baseFee.SetFromBig(header.BaseFee)
