@@ -851,7 +851,7 @@ func (sd *SharedDomains) Flush(ctx context.Context, tx kv.RwTx) error {
 			}
 		}
 		for _, a := range sd.appendableWriter {
-			if err := iiWriter.Flush(ctx, tx); err != nil {
+			if err := a.Flush(ctx, tx); err != nil {
 				return err
 			}
 		}
