@@ -1691,9 +1691,38 @@ func (a *Aggregator) BuildFilesInBackground(txNum uint64) chan struct{} {
 			defer a.snapshotBuildSema.Release(1)
 		}
 
+		hasData := false // TODO: can we remove this check and move it inside Build?
 		// check if db has enough data (maybe we didn't commit them yet or all keys are unique so history is empty)
-		lastInDB := lastIdInDB(a.db, a.d[kv.AccountsDomain])
-		hasData := lastInDB > step // `step` must be fully-written - means `step+1` records must be visible
+		if err := a.db.View(a.ctx, func(tx kv.Tx) error {
+			for _, d := range a.d {
+				lastInDB, err := d.lastStepInDB(tx)
+				if err != nil {
+					return err
+				}
+				hasData = lastInDB > step // `step` must be fully-written - means `step+1` records must be visible
+				if hasData {
+					break
+				}
+			}
+			if hasData {
+				return nil
+			}
+			for _, d := range a.ap {
+				lastInDB, err := d.lastStepInDB(tx)
+				if err != nil {
+					return err
+				}
+				hasData = lastInDB > step // `step` must be fully-written - means `step+1` records must be visible
+				if hasData {
+					break
+				}
+			}
+
+			return nil
+		}); err != nil && !errors.Is(err, context.Canceled) {
+			log.Warn("[agg] lastStepInDB check", "err", err)
+			return
+		}
 		if !hasData {
 			close(fin)
 			return
@@ -1710,6 +1739,24 @@ func (a *Aggregator) BuildFilesInBackground(txNum uint64) chan struct{} {
 					return
 				}
 				a.logger.Warn("[snapshots] buildFilesInBackground", "err", err)
+				break
+			}
+		}
+
+		for ; ; step++ {
+			if err := a.buildFiles(a.ctx, step); err != nil {
+				if errors.Is(err, context.Canceled) || errors.Is(err, common2.ErrStopped) {
+					close(fin)
+					return
+				}
+				a.logger.Warn("[snapshots] buildFilesInBackground", "err", err)
+				break
+			}
+			lastStepInDB, err := a.ap[kv.ReceiptsAppendable].lastStepInDB2(a.db)
+			if err != nil {
+				return
+			}
+			if step < lastStepInDB {
 				break
 			}
 		}
@@ -1998,11 +2045,11 @@ func (br *BackgroundResult) GetAndReset() (bool, error) {
 
 // Inverted index tables only
 func lastIdInDB(db kv.RoDB, domain *Domain) (lstInDb uint64) {
-	if err := db.View(context.Background(), func(tx kv.Tx) error {
-		lstInDb = domain.LastStepInDB(tx)
-		return nil
+	if err := db.View(context.Background(), func(tx kv.Tx) (err error) {
+		lstInDb, err = domain.lastStepInDB(tx)
+		return err
 	}); err != nil {
-		log.Warn("[snapshots] lastIdInDB", "err", err)
+		log.Warn("[snapshots] lastStepInDB", "err", err)
 	}
 	return lstInDb
 }

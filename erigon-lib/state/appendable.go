@@ -390,6 +390,24 @@ func (ap *Appendable) getFromDB(k []byte, dbtx kv.Tx) ([]byte, bool, error) {
 	}
 	return v, v != nil, err
 }
+func (ap *Appendable) lastStepInDB(dbtx kv.Tx) (step uint64, err error) {
+	lastTxnID, err := kv.LastKey(dbtx, ap.table)
+	if err != nil {
+		return 0, err
+	}
+	if len(lastTxnID) == 0 {
+		return 0, nil
+	}
+	return binary.BigEndian.Uint64(lastTxnID) / ap.aggregationStep, nil
+}
+
+func (ap *Appendable) lastStepInDB2(db kv.RoDB) (step uint64, err error) {
+	err = db.View(context.Background(), func(tx kv.Tx) error {
+		step, err = ap.lastStepInDB(tx)
+		return err
+	})
+	return
+}
 
 // Add - !NotThreadSafe. Must use WalRLock/BatchHistoryWriteEnd
 func (w *appendableBufferedWriter) Append(ts kv.TxnId, v []byte) error {
