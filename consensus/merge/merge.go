@@ -182,7 +182,7 @@ func (s *Merge) Finalize(config *chain.Config, header *types.Header, state *stat
 			return nil, nil, nil, fmt.Errorf("error: could not parse requests logs: %v", err)
 		}
 		rs = append(rs, ds...)
-		withdrawalReqs :=  misc.DequeueWithdrawalRequests7002(syscall)
+		withdrawalReqs := misc.DequeueWithdrawalRequests7002(syscall)
 		rs = append(rs, withdrawalReqs...)
 		consolidations := misc.DequeueConsolidationRequests7251(syscall)
 		rs = append(rs, consolidations...)
@@ -197,7 +197,7 @@ func (s *Merge) Finalize(config *chain.Config, header *types.Header, state *stat
 			if !reflect.DeepEqual(requestsInBlock.Withdrawals(), withdrawalReqs.Withdrawals()) {
 				return nil, nil, nil, fmt.Errorf("error: invalid EIP-7002 Withdrawal requests in block")
 			}
-			if !reflect.DeepEqual(requestsInBlock.Consolidations(), consolidations.Consolidations()){
+			if !reflect.DeepEqual(requestsInBlock.Consolidations(), consolidations.Consolidations()) {
 				return nil, nil, nil, fmt.Errorf("error: invalid EIP-7251 Consolidation requests in block")
 			}
 		}

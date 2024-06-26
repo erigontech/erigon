@@ -34,6 +34,8 @@ func decode(data []byte) (Request, error) {
 		req = new(DepositRequest)
 	case WithdrawalRequestType:
 		req = new(WithdrawalRequest)
+	case ConsolidationRequestType:
+		req = new(ConsolidationRequest)
 	default:
 		return nil, fmt.Errorf("unknown request type - %d", data[0])
 	}
@@ -163,6 +165,12 @@ func UnmarshalRequestsFromBinary(requests [][]byte) (reqs Requests, err error) {
 			reqs = append(reqs, d)
 		case WithdrawalRequestType:
 			w := new(WithdrawalRequest)
+			if err = w.DecodeRLP(b); err != nil {
+				return nil, err
+			}
+			reqs = append(reqs, w)
+		case ConsolidationRequestType:
+			w := new(ConsolidationRequest)
 			if err = w.DecodeRLP(b); err != nil {
 				return nil, err
 			}
