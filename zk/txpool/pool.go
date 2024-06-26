@@ -315,7 +315,7 @@ type TxPool struct {
 	isPostLondon            atomic.Bool
 	shanghaiTime            *big.Int
 	isPostShanghai          atomic.Bool
-	allowFreeTransactions   bool
+	ethCfg                  *ethconfig.Config
 	aclDB                   kv.RwDB
 
 	// we cannot be in a flushing state whilst getting transactions from the pool, so we have this mutex which is
@@ -367,7 +367,7 @@ func New(newTxs chan types.Announcements, coreDB kv.RoDB, cfg txpoolcfg.Config, 
 		unprocessedRemoteByHash: map[string]int{},
 		londonBlock:             londonBlock,
 		shanghaiTime:            shanghaiTime,
-		allowFreeTransactions:   ethCfg.AllowFreeTransactions,
+		ethCfg:                  ethCfg,
 		flushMtx:                &sync.Mutex{},
 		aclDB:                   aclDB,
 		limbo:                   newLimbo(),
@@ -412,7 +412,7 @@ func (p *TxPool) OnNewBlock(ctx context.Context, stateChanges *remote.StateChang
 	}
 
 	var baseFee uint64
-	if !p.allowFreeTransactions {
+	if !p.ethCfg.AllowFreeTransactions {
 		baseFee = stateChanges.PendingBlockBaseFee
 	} else {
 		baseFee = uint64(0)

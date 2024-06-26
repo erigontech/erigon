@@ -356,6 +356,11 @@ func (p *TxPool) allowYieldingTransactions() {
 }
 
 func (p *TxPool) flushLockedLimbo(tx kv.RwTx) (err error) {
+	//TODO: remove this check once limbo persistency works
+	if !p.ethCfg.Limbo {
+		return nil
+	}
+
 	if err := tx.CreateBucket(TablePoolLimbo); err != nil {
 		return err
 	}
@@ -489,6 +494,11 @@ func (p *TxPool) flushLockedLimbo(tx kv.RwTx) (err error) {
 }
 
 func (p *TxPool) fromDBLimbo(ctx context.Context, tx kv.Tx, cacheView kvcache.CacheView) error {
+	//TODO: remove this check once limbo persistency works
+	if !p.ethCfg.Limbo {
+		return nil
+	}
+
 	it, err := tx.Range(TablePoolLimbo, nil, nil)
 	if err != nil {
 		return err

@@ -27,7 +27,10 @@ func Test_Persistency(t *testing.T) {
 
 	newTxs := make(chan types.Announcements, 1024)
 
-	pSource, err := New(make(chan types.Announcements), db, txpoolcfg.DefaultConfig, &ethconfig.Defaults, kvcache.NewDummy(), *uint256.NewInt(1101), big.NewInt(0), big.NewInt(0), aclDb)
+	ethCfg := &ethconfig.Defaults
+	ethCfg.Zk.Limbo = true
+
+	pSource, err := New(make(chan types.Announcements), db, txpoolcfg.DefaultConfig, ethCfg, kvcache.NewDummy(), *uint256.NewInt(1101), big.NewInt(0), big.NewInt(0), aclDb)
 	assert.NilError(t, err)
 
 	parseCtx := types.NewTxParseContext(pSource.chainID)
@@ -108,7 +111,7 @@ func Test_Persistency(t *testing.T) {
 	pSource.flushLockedLimbo(tx)
 
 	// restore
-	pTarget, err := New(make(chan types.Announcements), db, txpoolcfg.DefaultConfig, &ethconfig.Defaults, kvcache.NewDummy(), *uint256.NewInt(1101), big.NewInt(0), big.NewInt(0), aclDb)
+	pTarget, err := New(make(chan types.Announcements), db, txpoolcfg.DefaultConfig, ethCfg, kvcache.NewDummy(), *uint256.NewInt(1101), big.NewInt(0), big.NewInt(0), aclDb)
 	assert.NilError(t, err)
 
 	cacheView, err := pTarget._stateCache.View(context.Background(), tx)
