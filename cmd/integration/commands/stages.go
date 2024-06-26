@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
 	"slices"
 	"strings"
 	"sync"
@@ -24,11 +25,11 @@ import (
 	"github.com/ledgerwatch/erigon/turbo/logging"
 
 	chain2 "github.com/ledgerwatch/erigon-lib/chain"
-	common2 "github.com/ledgerwatch/erigon-lib/common"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/datadir"
 	"github.com/ledgerwatch/erigon-lib/common/dbg"
 	"github.com/ledgerwatch/erigon-lib/config3"
+	"github.com/ledgerwatch/erigon-lib/downloader"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/rawdbv3"
 	libstate "github.com/ledgerwatch/erigon-lib/state"
@@ -894,7 +895,7 @@ func stageSenders(db kv.RwDB, ctx context.Context, logger log.Logger) error {
 	if integritySlow {
 		secp256k1.ContextForThread(1)
 		for i := block; ; i++ {
-			if err := common2.Stopped(ctx.Done()); err != nil {
+			if err := libcommon.Stopped(ctx.Done()); err != nil {
 				return err
 			}
 			h, _ := br.HeaderByNumber(ctx, tx, i)
@@ -1348,6 +1349,17 @@ func allSnapshots(ctx context.Context, db kv.RoDB, logger log.Logger) (*freezebl
 					}
 					_allCaplinSnapshotsSingleton.LogStat("caplin")
 				}
+				return nil
+			})
+
+			g.Go(func() error {
+				ls, err := os.Stat(filepath.Join(dirs.Snap, downloader.ProhibitNewDownloadsFileName))
+				mtime := time.Time{}
+				if err == nil {
+					mtime = ls.ModTime()
+				}
+				logger.Info("[downloads]", "locked", err == nil, "at", mtime.Format("02 Jan 06 15:04 2006"))
+				return nil
 			})
 
 			_allSnapshotsSingleton.LogStat("blocks")
