@@ -30,6 +30,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/ledgerwatch/erigon-lib/kv/iter"
 	btree2 "github.com/tidwall/btree"
 	"golang.org/x/sync/errgroup"
 
@@ -347,6 +348,9 @@ func (tx *AppendableRoTx) Get(txnID kv.TxnId, dbtx kv.Tx) (v []byte, ok bool, er
 		return v, true, nil
 	}
 	return tx.ap.getFromDBByTs(uint64(txnID), dbtx)
+}
+func (tx *AppendableRoTx) Iter(dbtx kv.Tx) (iter.KV, error) {
+	return dbtx.Range(tx.ap.table, nil, nil)
 }
 func (tx *AppendableRoTx) Append(txnID kv.TxnId, v []byte, dbtx kv.RwTx) error {
 	return dbtx.Put(tx.ap.table, hexutility.EncodeTs(uint64(txnID)), v)

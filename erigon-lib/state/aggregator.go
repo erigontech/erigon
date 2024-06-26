@@ -1953,6 +1953,10 @@ func (ac *AggregatorRoTx) DebugEFAllValuesAreInRange(ctx context.Context, name k
 func (ac *AggregatorRoTx) AppendableGet(name kv.Appendable, ts kv.TxnId, tx kv.Tx) (v []byte, ok bool, err error) {
 	return ac.appendable[name].Get(ts, tx)
 }
+func (ac *AggregatorRoTx) Appendable(name kv.Appendable) *AppendableRoTx {
+	fmt.Printf("dbg tbl: %s\n", ac.appendable[name].ap.table)
+	return ac.appendable[name]
+}
 
 func (ac *AggregatorRoTx) AppendablePut(name kv.Appendable, txnID kv.TxnId, v []byte, tx kv.RwTx) (err error) {
 	return ac.appendable[name].Append(txnID, v, tx)
