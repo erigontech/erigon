@@ -12,7 +12,7 @@ func DequeueConsolidationRequests7251(syscall consensus.SystemCall) types.Reques
 	if err != nil {
 		return nil
 	}
-	// Parse out the exits - using the bytes array returned
+	// Parse out the consolidations - using the bytes array returned
 	var reqs types.Requests
 	lenPerReq := 20 + 48 + 48 // addr + sourcePubkey + targetPubkey
 	for i := 0; i <= len(res)-lenPerReq; i += lenPerReq {

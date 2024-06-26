@@ -72,7 +72,7 @@ func (s ConsolidationRequests) EncodeIndex(i int, w *bytes.Buffer) {
 }
 
 // Requests creates a deep copy of each Consolidation Request and returns a slice of the
-// withdrwawal requests as Requests object.
+// consolidation requests as Requests object.
 func (s ConsolidationRequests) Requests() (reqs Requests) {
 	for _, d := range s {
 		reqs = append(reqs, d)

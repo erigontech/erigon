@@ -101,8 +101,10 @@ func (tr *TRand) RandRequest() Request {
 		return tr.RandDepositRequest()
 	case 1:
 		return tr.RandWithdrawalRequest()
-	default:
+	case 3:
 		return tr.RandConsolidationRequest()
+	default:
+		return nil // unreachable code
 	}
 }
 

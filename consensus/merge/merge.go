@@ -177,11 +177,11 @@ func (s *Merge) Finalize(config *chain.Config, header *types.Header, state *stat
 		for _, rec := range receipts {
 			allLogs = append(allLogs, rec.Logs...)
 		}
-		ds, err := types.ParseDepositLogs(allLogs, config.DepositContract)
+		depositReqs, err := types.ParseDepositLogs(allLogs, config.DepositContract)
 		if err != nil {
 			return nil, nil, nil, fmt.Errorf("error: could not parse requests logs: %v", err)
 		}
-		rs = append(rs, ds...)
+		rs = append(rs, depositReqs...)
 		withdrawalReqs := misc.DequeueWithdrawalRequests7002(syscall)
 		rs = append(rs, withdrawalReqs...)
 		consolidations := misc.DequeueConsolidationRequests7251(syscall)
@@ -191,7 +191,7 @@ func (s *Merge) Finalize(config *chain.Config, header *types.Header, state *stat
 			if *header.RequestsRoot != rh {
 				return nil, nil, nil, fmt.Errorf("error: invalid requests root hash in header, expected: %v, got :%v", header.RequestsRoot, rh)
 			}
-			if !reflect.DeepEqual(requestsInBlock.Deposits(), ds.Deposits()) {
+			if !reflect.DeepEqual(requestsInBlock.Deposits(), depositReqs.Deposits()) {
 				return nil, nil, nil, fmt.Errorf("error: invalid EIP-6110 Deposit Requests in block")
 			}
 			if !reflect.DeepEqual(requestsInBlock.Withdrawals(), withdrawalReqs.Withdrawals()) {
