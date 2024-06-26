@@ -10,7 +10,7 @@ import (
 	"github.com/ledgerwatch/erigon/polygon/polygoncommon"
 )
 
-type ServicePersistence interface {
+type ServiceStore interface {
 	Checkpoints() EntityStore[*Checkpoint]
 	Milestones() EntityStore[*Milestone]
 	Spans() EntityStore[*Span]
@@ -18,13 +18,13 @@ type ServicePersistence interface {
 	Close()
 }
 
-func NewMdbxServicePersistence(logger log.Logger, dataDir string, tmpDir string) *MdbxServicePersistence {
+func NewMdbxServiceStore(logger log.Logger, dataDir string, tmpDir string) *MdbxServiceStore {
 	db := polygoncommon.NewDatabase(dataDir, logger)
 	blockNumToIdIndexFactory := func(ctx context.Context) (*RangeIndex, error) {
 		return NewRangeIndex(ctx, tmpDir, logger)
 	}
 
-	return &MdbxServicePersistence{
+	return &MdbxServiceStore{
 		db:          db,
 		checkpoints: newMdbxEntityStore(db, kv.HeimdallDB, kv.BorCheckpoints, makeType[Checkpoint], blockNumToIdIndexFactory),
 		milestones:  newMdbxEntityStore(db, kv.HeimdallDB, kv.BorMilestones, makeType[Milestone], blockNumToIdIndexFactory),
@@ -32,26 +32,26 @@ func NewMdbxServicePersistence(logger log.Logger, dataDir string, tmpDir string)
 	}
 }
 
-type MdbxServicePersistence struct {
+type MdbxServiceStore struct {
 	db          *polygoncommon.Database
 	checkpoints EntityStore[*Checkpoint]
 	milestones  EntityStore[*Milestone]
 	spans       EntityStore[*Span]
 }
 
-func (s *MdbxServicePersistence) Checkpoints() EntityStore[*Checkpoint] {
+func (s *MdbxServiceStore) Checkpoints() EntityStore[*Checkpoint] {
 	return s.checkpoints
 }
 
-func (s *MdbxServicePersistence) Milestones() EntityStore[*Milestone] {
+func (s *MdbxServiceStore) Milestones() EntityStore[*Milestone] {
 	return s.milestones
 }
 
-func (s *MdbxServicePersistence) Spans() EntityStore[*Span] {
+func (s *MdbxServiceStore) Spans() EntityStore[*Span] {
 	return s.spans
 }
 
-func (s *MdbxServicePersistence) Prepare(ctx context.Context) error {
+func (s *MdbxServiceStore) Prepare(ctx context.Context) error {
 	eg, ctx := errgroup.WithContext(ctx)
 	eg.Go(func() error { return s.checkpoints.Prepare(ctx) })
 	eg.Go(func() error { return s.milestones.Prepare(ctx) })
@@ -59,7 +59,7 @@ func (s *MdbxServicePersistence) Prepare(ctx context.Context) error {
 	return eg.Wait()
 }
 
-func (s *MdbxServicePersistence) Close() {
+func (s *MdbxServiceStore) Close() {
 	s.db.Close()
 	s.checkpoints.Close()
 	s.milestones.Close()

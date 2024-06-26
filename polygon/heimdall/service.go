@@ -18,7 +18,7 @@ type Service interface {
 }
 
 type service struct {
-	persistence       ServicePersistence
+	store             ServiceStore
 	checkpointScraper *scraper[*Checkpoint]
 	milestoneScraper  *scraper[*Milestone]
 	spanScraper       *scraper[*Span]
@@ -29,39 +29,39 @@ func makeType[T any]() *T {
 }
 
 func AssembleService(heimdallUrl string, dataDir string, tmpDir string, logger log.Logger) Service {
-	persistence := NewMdbxServicePersistence(logger, dataDir, tmpDir)
+	store := NewMdbxServiceStore(logger, dataDir, tmpDir)
 	client := NewHeimdallClient(heimdallUrl, logger)
-	return NewService(client, persistence, logger)
+	return NewService(client, store, logger)
 }
 
-func NewService(client HeimdallClient, persistence ServicePersistence, logger log.Logger) Service {
+func NewService(client HeimdallClient, store ServiceStore, logger log.Logger) Service {
 	checkpointFetcher := newCheckpointFetcher(client, logger)
 	milestoneFetcher := newMilestoneFetcher(client, logger)
 	spanFetcher := newSpanFetcher(client, logger)
 
 	checkpointScraper := newScrapper(
-		persistence.Checkpoints(),
+		store.Checkpoints(),
 		checkpointFetcher,
 		1*time.Second,
 		logger,
 	)
 
 	milestoneScraper := newScrapper(
-		persistence.Milestones(),
+		store.Milestones(),
 		milestoneFetcher,
 		1*time.Second,
 		logger,
 	)
 
 	spanScraper := newScrapper(
-		persistence.Spans(),
+		store.Spans(),
 		spanFetcher,
 		1*time.Second,
 		logger,
 	)
 
 	return &service{
-		persistence:       persistence,
+		store:             store,
 		checkpointScraper: checkpointScraper,
 		milestoneScraper:  milestoneScraper,
 		spanScraper:       spanScraper,
@@ -118,7 +118,7 @@ func newSpanFetcher(client HeimdallClient, logger log.Logger) entityFetcher[*Spa
 
 func (s *service) FetchLatestSpan(ctx context.Context) (*Span, error) {
 	s.checkpointScraper.Synchronize(ctx)
-	return s.persistence.Spans().GetLastEntity(ctx)
+	return s.store.Spans().GetLastEntity(ctx)
 }
 
 func (s *service) FetchLatestSpans(ctx context.Context, count uint) ([]*Span, error) {
@@ -141,7 +141,7 @@ func (s *service) FetchLatestSpans(ctx context.Context, count uint) ([]*Span, er
 			break
 		}
 
-		span, err = s.persistence.Spans().GetEntity(ctx, prevSpanRawId-1)
+		span, err = s.store.Spans().GetEntity(ctx, prevSpanRawId-1)
 		if err != nil {
 			return nil, err
 		}
@@ -166,13 +166,13 @@ func (s *service) synchronizeScrapers(ctx context.Context) {
 
 func (s *service) FetchCheckpointsFromBlock(ctx context.Context, startBlock uint64) (Waypoints, error) {
 	s.synchronizeScrapers(ctx)
-	entities, err := s.persistence.Checkpoints().RangeFromBlockNum(ctx, startBlock)
+	entities, err := s.store.Checkpoints().RangeFromBlockNum(ctx, startBlock)
 	return libcommon.SliceMap(entities, castEntityToWaypoint[*Checkpoint]), err
 }
 
 func (s *service) FetchMilestonesFromBlock(ctx context.Context, startBlock uint64) (Waypoints, error) {
 	s.synchronizeScrapers(ctx)
-	entities, err := s.persistence.Milestones().RangeFromBlockNum(ctx, startBlock)
+	entities, err := s.store.Milestones().RangeFromBlockNum(ctx, startBlock)
 	return libcommon.SliceMap(entities, castEntityToWaypoint[*Milestone]), err
 }
 
@@ -197,9 +197,9 @@ func (s *service) RegisterSpanObserver(callback func(*Span)) polygoncommon.Unreg
 }
 
 func (s *service) Run(ctx context.Context) error {
-	defer s.persistence.Close()
+	defer s.store.Close()
 
-	if err := s.persistence.Prepare(ctx); err != nil {
+	if err := s.store.Prepare(ctx); err != nil {
 		return nil
 	}
 
