@@ -2,13 +2,10 @@ package jsonrpc
 
 import (
 	"context"
-	"encoding/binary"
 	"fmt"
 
 	"github.com/RoaringBitmap/roaring"
-	"github.com/ledgerwatch/erigon-lib/kv/temporal"
 	"github.com/ledgerwatch/erigon-lib/log/v3"
-	state2 "github.com/ledgerwatch/erigon-lib/state"
 	"github.com/ledgerwatch/erigon/core/rawdb/rawtemporaldb"
 
 	"github.com/ledgerwatch/erigon-lib/common"
@@ -377,51 +374,15 @@ func (api *APIImpl) getLogsV3(ctx context.Context, tx kv.TemporalTx, begin, end 
 		}
 		rawLogs := exec.GetLogs(txIndex, txn)
 
-		aaaa := tx.(*temporal.Tx).AggTx().(*state2.AggregatorRoTx).Appendable(kv.ReceiptsAppendable)
-		fmt.Printf(" %#v\n", aaaa)
-		ttt, err := tx.(*temporal.Tx).AggTx().(*state2.AggregatorRoTx).Appendable(kv.ReceiptsAppendable).Iter(tx)
-		if err != nil {
-			return nil, err
-		}
-		iii := 0
-		for ttt.HasNext() {
-			k, _, err := ttt.Next()
-			if err != nil {
-				return nil, err
-			}
-			seeTxNum := binary.BigEndian.Uint64(k)
-			if seeTxNum > 2219279 {
-				fmt.Printf("see: %d\n", seeTxNum)
-			}
-			if iii < 10 {
-				fmt.Printf("see: %d\n", seeTxNum)
-			}
-			iii++
-		}
-
 		receipt, err := rawtemporaldb.ReadReceipt(tx, kv.TxnId(txNum), rawLogs, txIndex, blockHash, blockNum, txn)
 		if err != nil {
 			return nil, err
 		}
-		_ = receipt
-		//TODO: logIndex within the block! no way to calc it now
-		//logIndex := uint(0)
-		//for _, log := range rawLogs {
-		//	log.Index = logIndex
-		//	logIndex++
-		//}
+		_ = receipt // `ReadReceipt` does fill `rawLogs` calulated fields. but we don't need it anymore.
 		filtered := rawLogs.Filter(addrMap, crit.Topics)
-		for _, log := range filtered {
-			log.BlockNumber = blockNum
-			log.BlockHash = blockHash
-			log.TxHash = txn.Hash()
-		}
-
 		logs = append(logs, filtered...)
 	}
 
-	//stats := api._agg.GetAndResetStats()
-	//log.Info("Finished", "duration", time.Since(start), "history queries", stats.FilesQueries, "ef search duration", stats.EfSearchTime)
 	return logs, nil
 }
 
