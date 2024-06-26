@@ -150,7 +150,7 @@ func SpawnCustomTrace(s *StageState, txc wrap.TxContainer, cfg CustomTraceCfg, c
 			if err != nil {
 				return err
 			}
-			doms.SetTx(tx)
+			//doms.SetTx(tx)
 			err = doms.AppendablePut(kv.ReceiptsAppendable, txnID, v)
 			if err != nil {
 				return err
@@ -169,6 +169,8 @@ func SpawnCustomTrace(s *StageState, txc wrap.TxContainer, cfg CustomTraceCfg, c
 	}, ctx, tx, cfg.execArgs, logger); err != nil {
 		return err
 	}
+
+	doms.SetTx(tx)
 	if err := doms.Flush(ctx, tx); err != nil {
 		return err
 	}
