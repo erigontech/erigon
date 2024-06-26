@@ -1756,6 +1756,7 @@ func (a *Aggregator) BuildFilesInBackground(txNum uint64) chan struct{} {
 			if err != nil {
 				return
 			}
+			fmt.Printf("see: %d, %d\n", step, lastStepInDB)
 			if step < lastStepInDB {
 				break
 			}
