@@ -27,6 +27,7 @@ import (
 	"github.com/anacrolix/torrent/types/infohash"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/mdbx"
+	"github.com/ledgerwatch/erigon-lib/log/v3"
 )
 
 const (
@@ -38,12 +39,16 @@ type mdbxPieceCompletion struct {
 	db        *mdbx.MdbxKV
 	mu        sync.RWMutex
 	completed map[infohash.T]*roaring.Bitmap
+	logger    log.Logger
 }
 
 var _ storage.PieceCompletion = (*mdbxPieceCompletion)(nil)
 
-func NewMdbxPieceCompletion(db kv.RwDB) (ret storage.PieceCompletion, err error) {
-	ret = &mdbxPieceCompletion{db: db.(*mdbx.MdbxKV), completed: map[infohash.T]*roaring.Bitmap{}}
+func NewMdbxPieceCompletion(db kv.RwDB, logger log.Logger) (ret storage.PieceCompletion, err error) {
+	ret = &mdbxPieceCompletion{
+		db:        db.(*mdbx.MdbxKV),
+		logger:    logger,
+		completed: map[infohash.T]*roaring.Bitmap{}}
 	return
 }
 
@@ -148,9 +153,10 @@ func (m *mdbxPieceCompletion) Flushed(infoHash infohash.T, flushed *roaring.Bitm
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	tx, err := m.db.BeginRwNosync(context.Background())
+	tx, err := m.db.BeginRw(context.Background())
 
 	if err != nil {
+		m.logger.Warn("[snapshots] failed to flush piece completions", "hash", infoHash, err, err)
 		return
 	}
 
@@ -158,7 +164,11 @@ func (m *mdbxPieceCompletion) Flushed(infoHash infohash.T, flushed *roaring.Bitm
 
 	m.putFlushed(tx, infoHash, flushed)
 
-	tx.Commit()
+	err = tx.Commit()
+
+	if err != nil {
+		m.logger.Warn("[snapshots] failed to flush piece completions", "hash", infoHash, err, err)
+	}
 }
 
 func (m *mdbxPieceCompletion) putFlushed(tx kv.RwTx, infoHash infohash.T, flushed *roaring.Bitmap) {
@@ -183,61 +193,6 @@ func (m *mdbxPieceCompletion) putFlushed(tx kv.RwTx, infoHash infohash.T, flushe
 }
 
 func (m *mdbxPieceCompletion) Close() error {
-	m.db.Close()
-	return nil
-}
-
-type mdbxPieceCompletionBatch struct {
-	mdbxPieceCompletion
-}
-
-var _ storage.PieceCompletion = (*mdbxPieceCompletionBatch)(nil)
-
-func NewMdbxPieceCompletionBatch(db kv.RwDB) (ret storage.PieceCompletion, err error) {
-	return &mdbxPieceCompletionBatch{mdbxPieceCompletion{
-		db:        db.(*mdbx.MdbxKV),
-		completed: map[infohash.T]*roaring.Bitmap{}}}, nil
-}
-
-func (m *mdbxPieceCompletionBatch) Set(pk metainfo.PieceKey, b bool) error {
-	if c, err := m.Get(pk); err == nil && c.Ok && c.Complete == b {
-		return nil
-	}
-
-	m.mu.Lock()
-	defer m.mu.Unlock()
-
-	if b {
-		completed, ok := m.completed[pk.InfoHash]
-
-		if !ok {
-			completed = &roaring.Bitmap{}
-			m.completed[pk.InfoHash] = completed
-		}
-
-		completed.Add(uint32(pk.Index))
-
-		return nil
-	}
-
-	return m.db.Batch(func(tx kv.RwTx) error {
-		return putCompletion(tx, pk.InfoHash, uint32(pk.Index), b)
-	})
-}
-
-func (m *mdbxPieceCompletionBatch) Flushed(infoHash infohash.T, flushed *roaring.Bitmap) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	//fmt.Println("FLUSH", infoHash)
-	m.db.Batch(func(tx kv.RwTx) error {
-		m.putFlushed(tx, infoHash, flushed)
-		return nil
-	})
-}
-
-func (m *mdbxPieceCompletionBatch) Close() error {
-	m.mu.Lock()
-	defer m.mu.Unlock()
 	m.db.Close()
 	return nil
 }
