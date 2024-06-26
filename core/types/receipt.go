@@ -474,7 +474,6 @@ func (r *Receipt) DeriveFieldsV3ForSingleReceipt(txnIdx int, blockHash libcommon
 	} else {
 		r.GasUsed = r.CumulativeGasUsed - prevReceipt.CumulativeGasUsed
 	}
-	fmt.Printf("derive: %d, %d\n", logIndex, len(r.Logs))
 
 	// The derived log fields can simply be set from the block and transaction
 	for j := 0; j < len(r.Logs); j++ {
