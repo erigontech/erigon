@@ -2,6 +2,7 @@
 package machine
 
 import (
+	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon/cl/abstract"
 	"github.com/ledgerwatch/erigon/cl/cltypes"
 	"github.com/ledgerwatch/erigon/cl/cltypes/solid"
@@ -28,9 +29,9 @@ type SlotProcessor interface {
 }
 
 type BlockHeaderProcessor interface {
-	ProcessBlockHeader(s abstract.BeaconState, block *cltypes.BeaconBlock) error
+	ProcessBlockHeader(s abstract.BeaconState, slot, proposerIndex uint64, parentRoot common.Hash, bodyRoot [32]byte) error
 	ProcessWithdrawals(s abstract.BeaconState, withdrawals *solid.ListSSZ[*cltypes.Withdrawal]) error
-	ProcessExecutionPayload(s abstract.BeaconState, payload *cltypes.Eth1Block) error
+	ProcessExecutionPayload(s abstract.BeaconState, parentHash, prevRandao common.Hash, time uint64, payloadHeader *cltypes.Eth1Header) error
 	ProcessRandao(s abstract.BeaconState, randao [96]byte, proposerIndex uint64) error
 	ProcessEth1Data(state abstract.BeaconState, eth1Data *cltypes.Eth1Data) error
 	ProcessSyncAggregate(s abstract.BeaconState, sync *cltypes.SyncAggregate) error

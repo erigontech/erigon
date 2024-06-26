@@ -144,6 +144,14 @@ func (b *BeaconBlock) Version() clparams.StateVersion {
 	return b.Body.Version
 }
 
+func (b *BeaconBlock) SetVersion(version clparams.StateVersion) {
+	b.Body.SetVersion(version)
+}
+
+func (b *BeaconBody) SetVersion(version clparams.StateVersion) {
+	b.Version = version
+}
+
 func (b *BeaconBody) EncodeSSZ(dst []byte) ([]byte, error) {
 	return ssz2.MarshalSSZ(dst, b.getSchema(false)...)
 }
@@ -232,6 +240,7 @@ func (b *BeaconBody) Blinded() (*BlindedBeaconBody, error) {
 		ExecutionChanges:   b.ExecutionChanges,
 		BlobKzgCommitments: b.BlobKzgCommitments,
 		Version:            b.Version,
+		beaconCfg:          b.beaconCfg,
 	}, nil
 }
 

@@ -1,6 +1,7 @@
 package funcmap
 
 import (
+	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon/cl/abstract"
 	"github.com/ledgerwatch/erigon/cl/cltypes"
 	"github.com/ledgerwatch/erigon/cl/cltypes/solid"
@@ -13,9 +14,9 @@ type Impl struct {
 	FnVerifyBlockSignature        func(s abstract.BeaconState, block *cltypes.SignedBeaconBlock) error
 	FnVerifyTransition            func(s abstract.BeaconState, block *cltypes.BeaconBlock) error
 	FnProcessSlots                func(s abstract.BeaconState, slot uint64) error
-	FnProcessBlockHeader          func(s abstract.BeaconState, block *cltypes.BeaconBlock) error
+	FnProcessBlockHeader          func(s abstract.BeaconState, slot, proposerIndex uint64, parentRoot common.Hash, bodyRoot [32]byte) error
 	FnProcessWithdrawals          func(s abstract.BeaconState, withdrawals *solid.ListSSZ[*cltypes.Withdrawal]) error
-	FnProcessExecutionPayload     func(s abstract.BeaconState, payload *cltypes.Eth1Block) error
+	FnProcessExecutionPayload     func(s abstract.BeaconState, parentHash, prevRandao common.Hash, time uint64, payloadHeader *cltypes.Eth1Header) error
 	FnProcessRandao               func(s abstract.BeaconState, randao [96]byte, proposerIndex uint64) error
 	FnProcessEth1Data             func(state abstract.BeaconState, eth1Data *cltypes.Eth1Data) error
 	FnProcessSyncAggregate        func(s abstract.BeaconState, sync *cltypes.SyncAggregate) error
@@ -35,16 +36,16 @@ func (i Impl) VerifyTransition(s abstract.BeaconState, block *cltypes.BeaconBloc
 	return i.FnVerifyTransition(s, block)
 }
 
-func (i Impl) ProcessBlockHeader(s abstract.BeaconState, block *cltypes.BeaconBlock) error {
-	return i.FnProcessBlockHeader(s, block)
+func (i Impl) ProcessBlockHeader(s abstract.BeaconState, slot, proposerIndex uint64, parentRoot common.Hash, bodyRoot [32]byte) error {
+	return i.FnProcessBlockHeader(s, slot, proposerIndex, parentRoot, bodyRoot)
 }
 
 func (i Impl) ProcessWithdrawals(s abstract.BeaconState, withdrawals *solid.ListSSZ[*cltypes.Withdrawal]) error {
 	return i.FnProcessWithdrawals(s, withdrawals)
 }
 
-func (i Impl) ProcessExecutionPayload(s abstract.BeaconState, payload *cltypes.Eth1Block) error {
-	return i.FnProcessExecutionPayload(s, payload)
+func (i Impl) ProcessExecutionPayload(s abstract.BeaconState, parentHash, prevRandao common.Hash, time uint64, payloadHeader *cltypes.Eth1Header) error {
+	return i.FnProcessExecutionPayload(s, parentHash, prevRandao, time, payloadHeader)
 }
 
 func (i Impl) ProcessRandao(s abstract.BeaconState, randao [96]byte, proposerIndex uint64) error {
