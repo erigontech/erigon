@@ -850,6 +850,11 @@ func (sd *SharedDomains) Flush(ctx context.Context, tx kv.RwTx) error {
 				return err
 			}
 		}
+		for _, a := range sd.appendableWriter {
+			if err := iiWriter.Flush(ctx, tx); err != nil {
+				return err
+			}
+		}
 		if dbg.PruneOnFlushTimeout != 0 {
 			_, err = sd.aggTx.PruneSmallBatches(ctx, dbg.PruneOnFlushTimeout, tx)
 			if err != nil {
