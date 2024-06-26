@@ -191,11 +191,20 @@ func createStageRowFromStage(stage diagnostics.SyncStage) table.Row {
 }
 
 func createSubStageRowFromSubstageStage(substage diagnostics.SyncSubStage) table.Row {
+	progress := substage.Stats.Progress
+	if substage.ID == "E3 Indexing" {
+		if progress == "100%" {
+			progress = "> 50%"
+		} else {
+			progress = "< 50%"
+		}
+	}
+
 	return table.Row{
 		"",
 		substage.ID,
 		substage.State.String(),
 		substage.Stats.TimeElapsed,
-		substage.Stats.Progress,
+		progress,
 	}
 }
