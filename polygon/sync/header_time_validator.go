@@ -1,7 +1,6 @@
 package sync
 
 import (
-	"context"
 	"fmt"
 	"time"
 
@@ -23,7 +22,6 @@ type headerTimeValidator struct {
 	spans               *SpansCache
 	validatorSetFactory func(headerNum uint64) validatorSetInterface
 	signaturesCache     *lru.ARCCache[libcommon.Hash, libcommon.Address]
-	spanFetcher         SpanFetcher
 }
 
 func NewHeaderTimeValidator(
@@ -31,7 +29,6 @@ func NewHeaderTimeValidator(
 	spans *SpansCache,
 	validatorSetFactory func(headerNum uint64) validatorSetInterface,
 	signaturesCache *lru.ARCCache[libcommon.Hash, libcommon.Address],
-	spanFetcher SpanFetcher,
 ) HeaderTimeValidator {
 	if signaturesCache == nil {
 		var err error
@@ -46,7 +43,6 @@ func NewHeaderTimeValidator(
 		spans:               spans,
 		validatorSetFactory: validatorSetFactory,
 		signaturesCache:     signaturesCache,
-		spanFetcher:         spanFetcher,
 	}
 
 	if validatorSetFactory == nil {
@@ -57,19 +53,10 @@ func NewHeaderTimeValidator(
 }
 
 func (htv *headerTimeValidator) makeValidatorSet(headerNum uint64) validatorSetInterface {
-	if htv.spanFetcher == nil {
-		span := htv.spans.SpanAt(headerNum)
-		if span == nil {
-			return nil
-		}
-		return valset.NewValidatorSet(span.ValidatorSet.Validators)
-	}
-
-	span, err := htv.spanFetcher(context.Background(), headerNum)
-	if err != nil {
+	span := htv.spans.SpanAt(headerNum)
+	if span == nil {
 		return nil
 	}
-
 	return valset.NewValidatorSet(span.ValidatorSet.Validators)
 }
 

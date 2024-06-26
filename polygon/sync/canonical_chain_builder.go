@@ -41,7 +41,6 @@ type canonicalChainBuilder struct {
 	difficultyCalc  DifficultyCalculator
 	headerValidator HeaderValidator
 	spansCache      *SpansCache
-	spanFetcher     SpanFetcher
 }
 
 func NewCanonicalChainBuilder(
@@ -49,13 +48,11 @@ func NewCanonicalChainBuilder(
 	difficultyCalc DifficultyCalculator,
 	headerValidator HeaderValidator,
 	spansCache *SpansCache,
-	spanFetcher SpanFetcher,
 ) CanonicalChainBuilder {
 	ccb := &canonicalChainBuilder{
 		difficultyCalc:  difficultyCalc,
 		headerValidator: headerValidator,
 		spansCache:      spansCache,
-		spanFetcher:     spanFetcher,
 	}
 	ccb.Reset(root)
 	return ccb

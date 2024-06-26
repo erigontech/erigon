@@ -29,10 +29,6 @@ func (m *Milestone) SetRawId(id uint64) {
 	panic("unimplemented")
 }
 
-func (m *Milestone) SetRawId(id uint64) {
-	return
-}
-
 func (m *Milestone) StartBlock() *big.Int {
 	return m.Fields.StartBlock
 }

@@ -9,6 +9,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/polygon/bor/borcfg"
+	"github.com/ledgerwatch/erigon/polygon/heimdall"
 )
 
 const InMemorySignatures = 4096 // Number of recent block signatures to keep in memory
@@ -20,7 +21,6 @@ func NewCanonicalChainBuilderFactory(
 	chainConfig *chain.Config,
 	borConfig *borcfg.BorConfig,
 	spansCache *SpansCache,
-	spanFetcher SpanFetcher,
 ) CanonicalChainBuilderFactory {
 	signaturesCache, err := lru.NewARC[common.Hash, common.Address](InMemorySignatures)
 	if err != nil {
@@ -28,7 +28,7 @@ func NewCanonicalChainBuilderFactory(
 	}
 
 	difficultyCalculator := NewDifficultyCalculator(borConfig, spansCache, nil, signaturesCache)
-	headerTimeValidator := NewHeaderTimeValidator(borConfig, spansCache, nil, signaturesCache, spanFetcher)
+	headerTimeValidator := NewHeaderTimeValidator(borConfig, spansCache, nil, signaturesCache)
 	headerValidator := NewHeaderValidator(chainConfig, borConfig, headerTimeValidator)
 
 	return func(root *types.Header) CanonicalChainBuilder {
@@ -40,7 +40,6 @@ func NewCanonicalChainBuilderFactory(
 			difficultyCalculator,
 			headerValidator,
 			spansCache,
-			spanFetcher,
 		)
 	}
 }

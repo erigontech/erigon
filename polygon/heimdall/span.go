@@ -22,10 +22,6 @@ func (s *Span) RawId() uint64 {
 }
 
 func (s *Span) SetRawId(id uint64) {
-	return
-}
-
-func (s *Span) SetRawId(id uint64) {
 	panic("unimplemented")
 }
 
