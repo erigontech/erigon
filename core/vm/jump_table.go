@@ -91,8 +91,7 @@ func validateAndFillMaxStack(jt *JumpTable) {
 // constantinople, istanbul, petersburg, berlin, london, paris, shanghai,
 // cancun, and prague instructions.
 func newPragueInstructionSet() JumpTable {
-	instructionSet := newShanghaiInstructionSet()
-	enable2935(&instructionSet)
+	instructionSet := newCancunInstructionSet()
 	validateAndFillMaxStack(&instructionSet)
 	return instructionSet
 }
