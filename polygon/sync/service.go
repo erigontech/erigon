@@ -6,6 +6,7 @@ import (
 	"golang.org/x/sync/errgroup"
 
 	"github.com/ledgerwatch/erigon-lib/log/v3"
+	"github.com/ledgerwatch/erigon/polygon/polygoncommon"
 
 	"github.com/ledgerwatch/erigon-lib/chain"
 	"github.com/ledgerwatch/erigon-lib/direct"
@@ -58,8 +59,12 @@ func NewService(
 		tmpDir,
 		logger,
 	)
+
+	polygonBridgeDB := polygoncommon.NewDatabase(dataDir, logger)
+	bridgeStore := bridge.NewStore(polygonBridgeDB)
+	polygonBridge := bridge.NewBridge(bridgeStore, logger, borConfig, heimdallClient.FetchStateSyncEvents, bor.GenesisContractStateReceiverABI())
+
 	execution := NewExecutionClient(executionClient)
-	polygonBridge := bridge.NewBridge(dataDir, logger, borConfig, heimdallClient.FetchStateSyncEvents, bor.GenesisContractStateReceiverABI())
 	store := NewStore(logger, execution, polygonBridge)
 
 	blockDownloader := NewBlockDownloader(
