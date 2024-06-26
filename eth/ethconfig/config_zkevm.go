@@ -51,11 +51,12 @@ type Zk struct {
 	DataStreamHost                         string
 	DataStreamPort                         uint
 
-	RebuildTreeAfter    uint64
-	IncrementTreeAlways bool
-	WitnessFull         bool
-	SyncLimit           uint64
-	Gasless             bool
+	RebuildTreeAfter      uint64
+	IncrementTreeAlways   bool
+	SmtRegenerateInMemory bool
+	WitnessFull           bool
+	SyncLimit             uint64
+	Gasless               bool
 
 	DebugNoSync    bool
 	DebugLimit     uint64

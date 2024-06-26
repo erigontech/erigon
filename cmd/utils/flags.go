@@ -456,6 +456,11 @@ var (
 		Usage: "Increment the state tree, never rebuild",
 		Value: false,
 	}
+	SmtRegenerateInMemory = cli.BoolFlag{
+		Name:  "zkevm.smt-regenerate-in-memory",
+		Usage: "Regenerate the SMT in memory (requires a lot of RAM for most chains)",
+		Value: false,
+	}
 	SequencerInitialForkId = cli.Uint64Flag{
 		Name:  "zkevm.sequencer-initial-fork-id",
 		Usage: "The initial fork id to launch the sequencer with",

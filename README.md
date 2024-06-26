@@ -101,10 +101,13 @@ In order to enable the zkevm_ namespace, please add 'zkevm' to the http.api flag
 - `zkevm_getBroadcastURI` - it was removed by zkEvm
 ***
 
-## Limitations/Warnings
+## Limitations/Warnings/Performance
 
 - The golden poseidon hashing will be much faster on x86, so developers on Mac may experience slowness on Apple silicone
 - Falling behind the network significantly will cause a SMT rebuild - which will take some time for longer chains
+
+Initial SMT build performance can be increased if machine has enough RAM:
+- `zkevm.smt-regenerate-in-memory` - setting this to true will use RAM to build the SMT rather than disk which is faster, but requires enough RAM (OOM kill potential)
 
 ***
 
@@ -184,6 +187,9 @@ Sequencer specific config:
 - `zkevm.executor-strict`: Defaulted to true, but can be set to false when running the sequencer without verifications (use with extreme caution)
 - `zkevm.witness-full`: Defaulted to true.  Controls whether the full or partial witness is used with the executor.
 - `zkevm.sequencer-initial-fork-id`: The fork id to start the network with.
+
+Resource Utilisation config:
+- `zkevm.smt-regenerate-in-memory`: As documented above, allows SMT regeneration in memory if machine has enough RAM, for a speedup in initial sync.
 
 Useful config entries:
 - `zkevm.sync-limit`: This will ensure the network only syncs to a given block height.
