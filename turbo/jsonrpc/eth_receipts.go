@@ -374,11 +374,10 @@ func (api *APIImpl) getLogsV3(ctx context.Context, tx kv.TemporalTx, begin, end 
 		}
 		rawLogs := exec.GetLogs(txIndex, txn)
 
-		receipt, err := rawtemporaldb.ReadReceipt(tx, kv.TxnId(txNum), rawLogs, txIndex, blockHash, blockNum, txn)
-		if err != nil {
+		// `ReadReceipt` does fill `rawLogs` calulated fields. but we don't need it anymore.
+		if _, err = rawtemporaldb.ReadReceipt(tx, kv.TxnId(txNum), rawLogs, txIndex, blockHash, blockNum, txn); err != nil {
 			return nil, err
 		}
-		_ = receipt // `ReadReceipt` does fill `rawLogs` calulated fields. but we don't need it anymore.
 		filtered := rawLogs.Filter(addrMap, crit.Topics)
 		logs = append(logs, filtered...)
 	}
