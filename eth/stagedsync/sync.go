@@ -2,6 +2,7 @@ package stagedsync
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
@@ -137,14 +138,24 @@ func (s *Sync) IsAfter(stage1, stage2 stages.SyncStage) bool {
 func (s *Sync) HasUnwindPoint() bool { return s.unwindPoint != nil }
 func (s *Sync) UnwindTo(unwindPoint uint64, reason UnwindReason, tx kv.Tx) error {
 	if tx != nil {
-		lowestUnwindableBlock, err := state.ReadLowestUnwindableBlock(tx)
-		if err != nil {
-			return err
-		}
-		if lowestUnwindableBlock > unwindPoint {
-			return fmt.Errorf("cannot unwind to block %d, lowest unwindable block is %d", unwindPoint, lowestUnwindableBlock)
+		if casted, ok := tx.(state.HasAggTx); ok {
+			// protect from too far unwind
+			unwindPointWithCommitment, ok, err := casted.AggTx().(*state.AggregatorRoTx).CanUnwindBeforeBlockNum(unwindPoint, tx)
+			// Ignore in the case that snapshots are ahead of commitment, it will be resolved later.
+			// This can be a problem if snapshots include a wrong chain so it is ok to ignore it.
+			if errors.Is(err, state.ErrBehindCommitment) {
+				return nil
+			}
+			if err != nil {
+				return err
+			}
+			if !ok {
+				return fmt.Errorf("too far unwind. requested=%d, minAllowed=%d", unwindPoint, unwindPointWithCommitment)
+			}
+			unwindPoint = unwindPointWithCommitment
 		}
 	}
+
 	if reason.Block != nil {
 		s.logger.Debug("UnwindTo", "block", unwindPoint, "block_hash", reason.Block.String(), "err", reason.Err, "stack", dbg.Stack())
 	} else {
