@@ -53,7 +53,7 @@ func (b *Bridge) Run(ctx context.Context) error {
 
 	// get last known sync ID
 	lastEventID, err := b.store.GetLatestEventID(ctx)
-	if err == nil {
+	if err != nil {
 		return err
 	}
 
