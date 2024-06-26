@@ -95,7 +95,7 @@ func SpawnCustomTrace(s *StageState, txc wrap.TxContainer, cfg CustomTraceCfg, c
 	logEvery := time.NewTicker(10 * time.Second)
 	defer logEvery.Stop()
 	var m runtime.MemStats
-	var prevBlockNumLog uint64 = startBlock
+	var prevTxNumLog = startBlock
 	//
 	doms, err := state2.NewSharedDomains(tx, logger)
 	if err != nil {
@@ -153,8 +153,8 @@ func SpawnCustomTrace(s *StageState, txc wrap.TxContainer, cfg CustomTraceCfg, c
 			select {
 			case <-logEvery.C:
 				dbg.ReadMemStats(&m)
-				log.Info("Scanned", "block", txTask.BlockNum, "blk/sec", txTask.BlockNum-prevBlockNumLog, "alloc", libcommon.ByteCount(m.Alloc), "sys", libcommon.ByteCount(m.Sys))
-				prevBlockNumLog = txTask.BlockNum
+				log.Info(fmt.Sprintf("[%s] Scanned", s.LogPrefix()), "block", txTask.BlockNum, "txs/sec", txTask.TxNum-prevTxNumLog, "alloc", libcommon.ByteCount(m.Alloc), "sys", libcommon.ByteCount(m.Sys))
+				prevTxNumLog = txTask.TxNum
 			default:
 			}
 
