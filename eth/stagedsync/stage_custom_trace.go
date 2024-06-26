@@ -153,7 +153,7 @@ func SpawnCustomTrace(s *StageState, txc wrap.TxContainer, cfg CustomTraceCfg, c
 			select {
 			case <-logEvery.C:
 				dbg.ReadMemStats(&m)
-				log.Info("Scanned", "block", txTask.BlockNum, "blk/sec", float64(txTask.BlockNum-prevBlockNumLog)/10, "alloc", libcommon.ByteCount(m.Alloc), "sys", libcommon.ByteCount(m.Sys))
+				log.Info("Scanned", "block", txTask.BlockNum, "blk/sec", txTask.BlockNum-prevBlockNumLog, "alloc", libcommon.ByteCount(m.Alloc), "sys", libcommon.ByteCount(m.Sys))
 				prevBlockNumLog = txTask.BlockNum
 			default:
 			}
