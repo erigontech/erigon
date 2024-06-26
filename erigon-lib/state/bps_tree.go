@@ -145,12 +145,14 @@ func (b *BpsTree) WarmUp(kv ArchiveGetter) error {
 		c := 0
 		for i := 0; i < len(mx); i++ {
 			c += len(mx[i])
+			/* uncomment for dbug
 			ll := make([]uint64, len(mx[i]))
 			for j := 0; j < len(mx[i]); j++ {
 				ll[j] = mx[i][j].di
 				// fmt.Printf("mx[%d][%d] %x %d %d\n", i, j, mx[i][j].prefix, mx[i][j].off, mx[i][j].di)
 			}
 			logger.Debug("WarmUp", "file", kv.FileName(), "depth", i, "offsets", len(mx[i]), "v", fmt.Sprintf("%v", ll))
+			*/
 		}
 		logger.Debug("WarmUp", "M", b.M, "depth", len(mx), "total offsets", k, "cached", c, "percentage", float64(c)/float64(k)*100)
 	}
