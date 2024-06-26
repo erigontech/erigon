@@ -219,7 +219,7 @@ func getSnapshotStatusRow(snapDownload diagnostics.SnapshotDownloadStatistics) t
 	downloadedPercent := getPercentDownloaded(snapDownload.Downloaded, snapDownload.Total)
 
 	remainingBytes := snapDownload.Total - snapDownload.Downloaded
-	downloadTimeLeft := util.CalculateTime(remainingBytes, snapDownload.DownloadRate)
+	downloadTimeLeft := diagnostics.CalculateTime(remainingBytes, snapDownload.DownloadRate)
 
 	totalDownloadTimeString := time.Duration(snapDownload.TotalTime) * time.Second
 
@@ -248,7 +248,7 @@ func getFileRow(file diagnostics.SegmentDownloadStatistics) table.Row {
 	totalDownloadRate := peersDownloadRate + webseedsDownloadRate
 	downloadedPercent := getPercentDownloaded(file.DownloadedBytes, file.TotalBytes)
 	remainingBytes := file.TotalBytes - file.DownloadedBytes
-	downloadTimeLeft := util.CalculateTime(remainingBytes, totalDownloadRate)
+	downloadTimeLeft := diagnostics.CalculateTime(remainingBytes, totalDownloadRate)
 	isActive := "false"
 	if totalDownloadRate > 0 {
 		isActive = "true"

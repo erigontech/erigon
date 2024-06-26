@@ -23,10 +23,11 @@ import (
 	"math/big"
 
 	"github.com/holiman/uint256"
+
 	"github.com/ledgerwatch/erigon-lib/chain"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/log/v3"
 	"github.com/ledgerwatch/erigon/eth/gasprice/gaspricecfg"
-	"github.com/ledgerwatch/log/v3"
 
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/rpc"
@@ -112,7 +113,7 @@ func NewOracle(backend OracleBackend, params gaspricecfg.Config, cache Cache, lo
 
 // SuggestTipCap returns a TipCap so that newly created transaction can
 // have a very high chance to be included in the following blocks.
-// NODE: if caller wants legacy tx SuggestedPrice, we need to add
+// NODE: if caller wants legacy txn SuggestedPrice, we need to add
 // baseFee to the returned bigInt
 func (oracle *Oracle) SuggestTipCap(ctx context.Context) (*big.Int, error) {
 	latestHead, latestPrice := oracle.cache.GetLatest()

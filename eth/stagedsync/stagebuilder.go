@@ -3,7 +3,7 @@ package stagedsync
 import (
 	"context"
 
-	"github.com/ledgerwatch/log/v3"
+	"github.com/ledgerwatch/erigon-lib/log/v3"
 
 	remote "github.com/ledgerwatch/erigon-lib/gointerfaces/remoteproto"
 	"github.com/ledgerwatch/erigon-lib/kv"
@@ -31,7 +31,7 @@ func MiningStages(
 	return []*Stage{
 		{
 			ID:          stages.MiningCreateBlock,
-			Description: "Mining: construct new block from tx pool",
+			Description: "Mining: construct new block from txn pool",
 			Forward: func(badBlockUnwind bool, s *StageState, u Unwinder, txc wrap.TxContainer, logger log.Logger) error {
 				return SpawnMiningCreateBlockStage(s, txc.Tx, createBlockCfg, ctx.Done(), logger)
 			},
@@ -58,7 +58,7 @@ func MiningStages(
 		},
 		{
 			ID:          stages.MiningExecution,
-			Description: "Mining: execute new block from tx pool",
+			Description: "Mining: execute new block from txn pool",
 			Forward: func(badBlockUnwind bool, s *StageState, u Unwinder, txc wrap.TxContainer, logger log.Logger) error {
 				return SpawnMiningExecStage(s, txc, execCfg, sendersCfg, executeBlockCfg, ctx, logger)
 			},

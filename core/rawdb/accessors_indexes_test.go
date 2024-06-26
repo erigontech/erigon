@@ -22,14 +22,15 @@ import (
 	"testing"
 
 	"github.com/holiman/uint256"
+	"github.com/stretchr/testify/require"
+
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/ledgerwatch/erigon-lib/log/v3"
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/turbo/services"
 	"github.com/ledgerwatch/erigon/turbo/stages/mock"
-	"github.com/ledgerwatch/log/v3"
-	"github.com/stretchr/testify/require"
 )
 
 // Tests that positional lookup metadata can be stored and retrieved.
@@ -135,9 +136,9 @@ func readTransactionByHash(db kv.Tx, hash libcommon.Hash, br services.FullBlockR
 		return nil, libcommon.Hash{}, 0, 0, err1
 	}
 	body.SendersToTxs(senders)
-	for txIndex, tx := range body.Transactions {
-		if tx.Hash() == hash {
-			return tx, blockHash, *blockNumber, uint64(txIndex), nil
+	for txIndex, txn := range body.Transactions {
+		if txn.Hash() == hash {
+			return txn, blockHash, *blockNumber, uint64(txIndex), nil
 		}
 	}
 	log.Error("Transaction not found", "number", blockNumber, "hash", blockHash, "txhash", hash)

@@ -50,7 +50,7 @@ type txJSON struct {
 
 func (tx *LegacyTx) MarshalJSON() ([]byte, error) {
 	var enc txJSON
-	// These are set for all tx types.
+	// These are set for all txn types.
 	enc.Hash = tx.Hash()
 	enc.Type = hexutil.Uint64(tx.Type())
 	enc.Nonce = (*hexutil.Uint64)(&tx.Nonce)
@@ -70,7 +70,7 @@ func (tx *LegacyTx) MarshalJSON() ([]byte, error) {
 
 func (tx *AccessListTx) MarshalJSON() ([]byte, error) {
 	var enc txJSON
-	// These are set for all tx types.
+	// These are set for all txn types.
 	enc.Hash = tx.Hash()
 	enc.Type = hexutil.Uint64(tx.Type())
 	enc.ChainID = (*hexutil.Big)(tx.ChainID.ToBig())
@@ -89,7 +89,7 @@ func (tx *AccessListTx) MarshalJSON() ([]byte, error) {
 
 func (tx *DynamicFeeTransaction) MarshalJSON() ([]byte, error) {
 	var enc txJSON
-	// These are set for all tx types.
+	// These are set for all txn types.
 	enc.Hash = tx.Hash()
 	enc.Type = hexutil.Uint64(tx.Type())
 	enc.ChainID = (*hexutil.Big)(tx.ChainID.ToBig())
@@ -109,7 +109,7 @@ func (tx *DynamicFeeTransaction) MarshalJSON() ([]byte, error) {
 
 func toBlobTxJSON(tx *BlobTx) *txJSON {
 	var enc txJSON
-	// These are set for all tx types.
+	// These are set for all txn types.
 	enc.Hash = tx.Hash()
 	enc.Type = hexutil.Uint64(tx.Type())
 	enc.ChainID = (*hexutil.Big)(tx.ChainID.ToBig())

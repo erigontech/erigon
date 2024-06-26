@@ -28,17 +28,19 @@ import (
 	"path/filepath"
 
 	"github.com/holiman/uint256"
+	"github.com/urfave/cli/v2"
+
 	"github.com/ledgerwatch/erigon-lib/common/datadir"
 	"github.com/ledgerwatch/erigon-lib/kv/temporal/temporaltest"
+	"github.com/ledgerwatch/erigon-lib/log/v3"
 	"github.com/ledgerwatch/erigon/eth/consensuschain"
-	"github.com/ledgerwatch/log/v3"
-	"github.com/urfave/cli/v2"
 
 	"github.com/ledgerwatch/erigon-lib/chain"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/hexutility"
 	"github.com/ledgerwatch/erigon-lib/common/length"
 	"github.com/ledgerwatch/erigon-lib/kv"
+	libstate "github.com/ledgerwatch/erigon-lib/state"
 	"github.com/ledgerwatch/erigon/common/math"
 	"github.com/ledgerwatch/erigon/consensus/ethash"
 	"github.com/ledgerwatch/erigon/consensus/merge"
@@ -51,7 +53,6 @@ import (
 	"github.com/ledgerwatch/erigon/rlp"
 	"github.com/ledgerwatch/erigon/tests"
 	"github.com/ledgerwatch/erigon/turbo/jsonrpc"
-	"github.com/ledgerwatch/erigon/turbo/trie"
 )
 
 const (
@@ -306,7 +307,13 @@ func Main(ctx *cli.Context) error {
 	}
 	defer tx.Rollback()
 
-	reader, writer := MakePreState(chainConfig.Rules(0, 0), tx, prestate.Pre)
+	sd, err := libstate.NewSharedDomains(tx, log.New())
+	if err != nil {
+		return err
+	}
+	defer sd.Close()
+
+	reader, writer := MakePreState(chainConfig.Rules(0, 0), tx, sd, prestate.Pre)
 	// Merge engine can be used for pre-merge blocks as well, as it
 	// redirects to the ethash engine based on the block number
 	engine := merge.New(&ethash.FakeEthash{})
@@ -481,7 +488,7 @@ func getTransaction(txJson jsonrpc.RPCTransaction) (types.Transaction, error) {
 // If the condition above is not met, then it's considered a signed transaction.
 //
 // To manage this, we read the transactions twice, first trying to read the secretKeys,
-// and secondly to read them with the standard tx json format
+// and secondly to read them with the standard txn json format
 func signUnsignedTransactions(txs []*txWithKey, signer types.Signer) (types.Transactions, error) {
 	var signedTxs []types.Transaction
 	for i, txWithKey := range txs {
@@ -610,6 +617,12 @@ func CalculateStateRoot(tx kv.RwTx) (*libcommon.Hash, error) {
 	}
 	h := libcommon.NewHasher()
 	defer libcommon.ReturnHasherToPool(h)
+	domains, err := libstate.NewSharedDomains(tx, log.New())
+	if err != nil {
+		return nil, fmt.Errorf("NewSharedDomains: %w", err)
+	}
+	defer domains.Close()
+
 	for k, v, err := c.First(); k != nil; k, v, err = c.Next() {
 		if err != nil {
 			return nil, fmt.Errorf("interate over plain state: %w", err)
@@ -642,10 +655,12 @@ func CalculateStateRoot(tx kv.RwTx) (*libcommon.Hash, error) {
 		}
 	}
 	c.Close()
-	root, err := trie.CalcRoot("", tx)
+	root, err := domains.ComputeCommitment(context.Background(), true, domains.BlockNum(), "")
 	if err != nil {
 		return nil, err
 	}
+	hashRoot := libcommon.Hash{}
+	hashRoot.SetBytes(root)
 
-	return &root, nil
+	return &hashRoot, nil
 }

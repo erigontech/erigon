@@ -24,9 +24,22 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/ledgerwatch/erigon/core/rawdb"
+
+	"github.com/holiman/uint256"
+	"github.com/stretchr/testify/require"
+
+	"github.com/ledgerwatch/erigon-lib/log/v3"
+
 	"github.com/ledgerwatch/erigon-lib/chain"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/common/datadir"
+	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/memdb"
+	"github.com/ledgerwatch/erigon-lib/kv/rawdbv3"
+	"github.com/ledgerwatch/erigon-lib/kv/temporal"
+	state3 "github.com/ledgerwatch/erigon-lib/state"
+	stateLib "github.com/ledgerwatch/erigon-lib/state"
 	"github.com/ledgerwatch/erigon/accounts/abi"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/consensus"
@@ -40,6 +53,30 @@ import (
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/rlp"
 )
+
+func NewTestTemporalDb(tb testing.TB) (kv.RwDB, kv.RwTx, *stateLib.Aggregator) {
+	tb.Helper()
+	db := memdb.NewStateDB(tb.TempDir())
+	tb.Cleanup(db.Close)
+
+	cr := rawdb.NewCanonicalReader()
+	agg, err := stateLib.NewAggregator(context.Background(), datadir.New(tb.TempDir()), 16, db, cr, log.New())
+	if err != nil {
+		tb.Fatal(err)
+	}
+	tb.Cleanup(agg.Close)
+
+	_db, err := temporal.New(db, agg)
+	if err != nil {
+		tb.Fatal(err)
+	}
+	tx, err := _db.BeginTemporalRw(context.Background()) //nolint:gocritic
+	if err != nil {
+		tb.Fatal(err)
+	}
+	tb.Cleanup(tx.Rollback)
+	return _db, tx, agg
+}
 
 func TestDefaults(t *testing.T) {
 	t.Parallel()
@@ -86,7 +123,7 @@ func TestEVM(t *testing.T) {
 		byte(vm.ORIGIN),
 		byte(vm.BLOCKHASH),
 		byte(vm.COINBASE),
-	}, nil, nil, 0); err != nil {
+	}, nil, nil, t.TempDir()); err != nil {
 		t.Fatal("didn't expect error", err)
 	}
 }
@@ -100,7 +137,7 @@ func TestExecute(t *testing.T) {
 		byte(vm.PUSH1), 32,
 		byte(vm.PUSH1), 0,
 		byte(vm.RETURN),
-	}, nil, nil, 0)
+	}, nil, nil, t.TempDir())
 	if err != nil {
 		t.Fatal("didn't expect error", err)
 	}
@@ -113,8 +150,11 @@ func TestExecute(t *testing.T) {
 
 func TestCall(t *testing.T) {
 	t.Parallel()
-	_, tx := memdb.NewTestTx(t)
-	state := state.New(state.NewDbStateReader(tx))
+	_, tx, _ := NewTestTemporalDb(t)
+	domains, err := stateLib.NewSharedDomains(tx, log.New())
+	require.NoError(t, err)
+	defer domains.Close()
+	state := state.New(state.NewReaderV4(domains))
 	address := libcommon.HexToAddress("0xaa")
 	state.SetCode(address, []byte{
 		byte(vm.PUSH1), 10,
@@ -134,6 +174,33 @@ func TestCall(t *testing.T) {
 	if num.Cmp(big.NewInt(10)) != 0 {
 		t.Error("Expected 10, got", num)
 	}
+}
+
+func testTemporalDB(t testing.TB) *temporal.DB {
+	db := memdb.NewStateDB(t.TempDir())
+
+	t.Cleanup(db.Close)
+
+	cr := rawdb.NewCanonicalReader()
+	agg, err := state3.NewAggregator(context.Background(), datadir.New(t.TempDir()), 16, db, cr, log.New())
+	require.NoError(t, err)
+	t.Cleanup(agg.Close)
+
+	_db, err := temporal.New(db, agg)
+	require.NoError(t, err)
+	return _db
+}
+
+func testTemporalTxSD(t testing.TB, db *temporal.DB) (kv.RwTx, *state3.SharedDomains) {
+	tx, err := db.BeginTemporalRw(context.Background()) //nolint:gocritic
+	require.NoError(t, err)
+	t.Cleanup(tx.Rollback)
+
+	sd, err := state3.NewSharedDomains(tx, log.New())
+	require.NoError(t, err)
+	t.Cleanup(sd.Close)
+
+	return tx, sd
 }
 
 func BenchmarkCall(b *testing.B) {
@@ -158,32 +225,40 @@ func BenchmarkCall(b *testing.B) {
 	if err != nil {
 		b.Fatal(err)
 	}
-	cfg := &Config{}
-	db := memdb.New("")
-	defer db.Close()
-	tx, err := db.BeginRw(context.Background())
-	if err != nil {
-		panic(err)
-	}
+	cfg := &Config{ChainConfig: &chain.Config{}, BlockNumber: big.NewInt(0), Time: big.NewInt(0), Value: uint256.MustFromBig(big.NewInt(13377))}
+	db := testTemporalDB(b)
+	tx, sd := testTemporalTxSD(b, db)
 	defer tx.Rollback()
-	cfg.r = state.NewPlainStateReader(tx)
-	cfg.w = state.NewPlainStateWriter(tx, tx, 0)
+	cfg.r = state.NewReaderV4(sd)
+	cfg.w = state.NewWriterV4(sd)
 	cfg.State = state.New(cfg.r)
 
+	tmpdir := b.TempDir()
 	cfg.Debug = true
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		for j := 0; j < 400; j++ {
-			_, _, _ = Execute(code, cpurchase, cfg, 0)
-			_, _, _ = Execute(code, creceived, cfg, 0)
-			_, _, _ = Execute(code, refund, cfg, 0)
+			_, _, _ = Execute(code, cpurchase, cfg, tmpdir)
+			_, _, _ = Execute(code, creceived, cfg, tmpdir)
+			_, _, _ = Execute(code, refund, cfg, tmpdir)
 		}
 	}
 }
 func benchmarkEVM_Create(b *testing.B, code string) {
-	_, tx := memdb.NewTestTx(b)
+	db := testTemporalDB(b)
+	tx, err := db.BeginTemporalRw(context.Background())
+	require.NoError(b, err)
+	domains, err := stateLib.NewSharedDomains(tx, log.New())
+	require.NoError(b, err)
+	defer domains.Close()
+
+	domains.SetTxNum(1)
+	domains.SetBlockNum(1)
+	err = rawdbv3.TxNums.Append(tx, 1, 1)
+	require.NoError(b, err)
+
 	var (
-		statedb  = state.New(state.NewPlainState(tx, 1, nil))
+		statedb  = state.New(state.NewReaderV4(domains))
 		sender   = libcommon.BytesToAddress([]byte("sender"))
 		receiver = libcommon.BytesToAddress([]byte("receiver"))
 	)
@@ -256,8 +331,10 @@ func (cr *FakeChainHeaderReader) GetHeaderByHash(hash libcommon.Hash) *types.Hea
 func (cr *FakeChainHeaderReader) GetHeaderByNumber(number uint64) *types.Header {
 	return cr.GetHeaderByHash(libcommon.BigToHash(big.NewInt(int64(number))))
 }
-func (cr *FakeChainHeaderReader) Config() *chain.Config        { return nil }
-func (cr *FakeChainHeaderReader) CurrentHeader() *types.Header { return nil }
+func (cr *FakeChainHeaderReader) Config() *chain.Config                 { return nil }
+func (cr *FakeChainHeaderReader) CurrentHeader() *types.Header          { return nil }
+func (cr *FakeChainHeaderReader) CurrentFinalizedHeader() *types.Header { return nil }
+func (cr *FakeChainHeaderReader) CurrentSafeHeader() *types.Header      { return nil }
 
 // GetHeader returns a fake header with the parentHash equal to the number - 1
 func (cr *FakeChainHeaderReader) GetHeader(hash libcommon.Hash, number uint64) *types.Header {
@@ -363,7 +440,7 @@ func TestBlockhash(t *testing.T) {
 	}
 	setDefaults(cfg)
 	cfg.ChainConfig.PragueTime = big.NewInt(1)
-	ret, _, err := Execute(data, input, cfg, header.Number.Uint64())
+	ret, _, err := Execute(data, input, cfg, t.TempDir())
 	if err != nil {
 		t.Fatalf("expected no error, got %v", err)
 	}
@@ -427,12 +504,34 @@ func TestBlockHashEip2935(t *testing.T) {
 	}
 	setDefaults(cfg)
 	cfg.ChainConfig.PragueTime = big.NewInt(10000)
-	_, tx := memdb.NewTestTx(t)
-	cfg.State = state.New(state.NewPlainStateReader(tx))
+
+	db := memdb.NewStateDB(t.TempDir())
+	defer db.Close()
+
+	cr := rawdb.NewCanonicalReader()
+	agg, err := state3.NewAggregator(context.Background(), datadir.New(t.TempDir()), 16, db, cr, log.New())
+	require.NoError(t, err)
+	defer agg.Close()
+
+	_db, err := temporal.New(db, agg)
+	require.NoError(t, err)
+	defer _db.Close()
+
+	tx, err := _db.BeginTemporalRw(context.Background())
+	require.NoError(t, err)
+	defer tx.Rollback()
+
+	sd, err := state3.NewSharedDomains(tx, log.New())
+	require.NoError(t, err)
+	defer sd.Close()
+
+	cfg.r = state.NewReaderV4(sd)
+	cfg.w = state.NewWriterV4(sd)
+	cfg.State = state.New(cfg.r)
 	cfg.State.CreateAccount(params.HistoryStorageAddress, true)
 	misc.StoreBlockHashesEip2935(header, cfg.State, cfg.ChainConfig, &FakeChainHeaderReader{})
 
-	ret, _, err := Execute(data, input, cfg, header.Number.Uint64())
+	ret, _, err := Execute(data, input, cfg, t.TempDir())
 	if err != nil {
 		t.Fatalf("expected no error, got %v", err)
 	}
@@ -460,8 +559,19 @@ func TestBlockHashEip2935(t *testing.T) {
 func benchmarkNonModifyingCode(b *testing.B, gas uint64, code []byte, name string) { //nolint:unparam
 	cfg := new(Config)
 	setDefaults(cfg)
-	_, tx := memdb.NewTestTx(b)
-	cfg.State = state.New(state.NewPlainState(tx, 1, nil))
+	db := testTemporalDB(b)
+	tx, err := db.BeginTemporalRw(context.Background())
+	require.NoError(b, err)
+	domains, err := stateLib.NewSharedDomains(tx, log.New())
+	require.NoError(b, err)
+	defer domains.Close()
+
+	domains.SetTxNum(1)
+	domains.SetBlockNum(1)
+	err = rawdbv3.TxNums.Append(tx, 1, 1)
+	require.NoError(b, err)
+
+	cfg.State = state.New(state.NewReaderV4(domains))
 	cfg.GasLimit = gas
 	var (
 		destination = libcommon.BytesToAddress([]byte("contract"))
@@ -617,6 +727,7 @@ func BenchmarkSimpleLoop(b *testing.B) {
 // EIP-2929 about gas repricings
 func TestEip2929Cases(t *testing.T) {
 
+	tmpdir := t.TempDir()
 	id := 1
 	prettyPrint := func(comment string, code []byte) {
 
@@ -644,7 +755,7 @@ func TestEip2929Cases(t *testing.T) {
 		}
 		setDefaults(cfg)
 		//nolint:errcheck
-		Execute(code, nil, cfg, 0)
+		Execute(code, nil, cfg, tmpdir)
 	}
 
 	{ // First eip testcase

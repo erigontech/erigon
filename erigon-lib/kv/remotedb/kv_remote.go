@@ -24,13 +24,13 @@ import (
 	"runtime"
 	"unsafe"
 
-	"github.com/ledgerwatch/log/v3"
 	"golang.org/x/sync/semaphore"
 	"google.golang.org/grpc"
 	"google.golang.org/protobuf/types/known/emptypb"
 
 	"github.com/ledgerwatch/erigon-lib/kv/iter"
 	"github.com/ledgerwatch/erigon-lib/kv/order"
+	"github.com/ledgerwatch/erigon-lib/log/v3"
 
 	"github.com/ledgerwatch/erigon-lib/gointerfaces"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/grpcutil"
@@ -700,6 +700,9 @@ func (tx *tx) IndexRange(name kv.InvertedIdx, k []byte, fromTs, toTs int, asc or
 		}
 		return reply.Timestamps, reply.NextPageToken, nil
 	}), nil
+}
+func (tx *tx) AppendableGet(name kv.Appendable, ts kv.TxnId) ([]byte, bool, error) {
+	panic("not implemented yet")
 }
 
 func (tx *tx) Prefix(table string, prefix []byte) (iter.KV, error) {

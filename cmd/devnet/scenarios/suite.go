@@ -7,8 +7,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/ledgerwatch/erigon-lib/log/v3"
 	"github.com/ledgerwatch/erigon/cmd/devnet/devnet"
-	"github.com/ledgerwatch/log/v3"
 )
 
 type SimulationContext struct {
@@ -52,7 +52,7 @@ func (s *suite) runSteps(ctx context.Context, scenario *Scenario, steps []*Step)
 
 		var stepResult StepResult
 
-		ctx, stepResult = s.runStep(ctx, scenario, step, err, isFirst, isLast, logger)
+		ctx, stepResult = s.runStep(ctx, scenario, step, err, isFirst, isLast, logger) //nolint:fatcontext
 
 		switch {
 		case stepResult.Err == nil:

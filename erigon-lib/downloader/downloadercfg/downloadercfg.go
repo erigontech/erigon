@@ -29,11 +29,12 @@ import (
 	lg "github.com/anacrolix/log"
 	"github.com/anacrolix/torrent"
 	"github.com/c2h5oh/datasize"
+	"golang.org/x/time/rate"
+
 	"github.com/ledgerwatch/erigon-lib/chain/snapcfg"
 	"github.com/ledgerwatch/erigon-lib/common/datadir"
 	"github.com/ledgerwatch/erigon-lib/common/dir"
-	"github.com/ledgerwatch/log/v3"
-	"golang.org/x/time/rate"
+	"github.com/ledgerwatch/erigon-lib/log/v3"
 )
 
 // DefaultPieceSize - Erigon serves many big files, bigger pieces will reduce
@@ -58,6 +59,8 @@ type Cfg struct {
 	ChainName                       string
 
 	Dirs datadir.Dirs
+
+	MdbxWriteMap bool
 }
 
 func Default() *torrent.ClientConfig {
@@ -101,7 +104,7 @@ func Default() *torrent.ClientConfig {
 	return torrentConfig
 }
 
-func New(dirs datadir.Dirs, version string, verbosity lg.Level, downloadRate, uploadRate datasize.ByteSize, port, connsPerFile, downloadSlots int, staticPeers, webseeds []string, chainName string, lockSnapshots bool) (*Cfg, error) {
+func New(dirs datadir.Dirs, version string, verbosity lg.Level, downloadRate, uploadRate datasize.ByteSize, port, connsPerFile, downloadSlots int, staticPeers, webseeds []string, chainName string, lockSnapshots, mdbxWriteMap bool) (*Cfg, error) {
 	torrentConfig := Default()
 	//torrentConfig.PieceHashersPerTorrent = runtime.NumCPU()
 	torrentConfig.DataDir = dirs.Snap // `DataDir` of torrent-client-lib is different from Erigon's `DataDir`. Just same naming.
@@ -209,6 +212,7 @@ func New(dirs datadir.Dirs, version string, verbosity lg.Level, downloadRate, up
 		WebSeedUrls: webseedHttpProviders, WebSeedFiles: webseedFileProviders,
 		DownloadTorrentFilesFromWebseed: true, AddTorrentsFromDisk: true, SnapshotLock: lockSnapshots,
 		SnapshotConfig: snapcfg.KnownCfg(chainName),
+		MdbxWriteMap:   mdbxWriteMap,
 	}, nil
 }
 

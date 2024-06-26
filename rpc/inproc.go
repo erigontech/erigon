@@ -20,7 +20,7 @@ import (
 	"context"
 	"net"
 
-	"github.com/ledgerwatch/log/v3"
+	"github.com/ledgerwatch/erigon-lib/log/v3"
 )
 
 // DialInProc attaches an in-process connection to the given RPC server.

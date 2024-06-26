@@ -21,7 +21,8 @@ import (
 	"strings"
 
 	lg "github.com/anacrolix/log"
-	"github.com/ledgerwatch/log/v3"
+
+	"github.com/ledgerwatch/erigon-lib/log/v3"
 )
 
 func init() {
@@ -135,4 +136,25 @@ func (b adapterHandler) Handle(r lg.Record) {
 		}
 		log.Info("[downloader] "+r.String(), "torrent_log_type", "unknown", "or", lvl.LogString())
 	}
+}
+
+type RetryableHttpLogger struct {
+	l log.Logger
+}
+
+func NewRetryableHttpLogger(l log.Logger) *RetryableHttpLogger {
+	return &RetryableHttpLogger{l: l}
+}
+
+func (l *RetryableHttpLogger) Error(msg string, keysAndValues ...interface{}) {
+	l.l.Debug(msg, keysAndValues...)
+}
+func (l *RetryableHttpLogger) Warn(msg string, keysAndValues ...interface{}) {
+	l.l.Debug(msg, keysAndValues...)
+}
+func (l *RetryableHttpLogger) Info(msg string, keysAndValues ...interface{}) {
+	l.l.Debug(msg, keysAndValues...)
+}
+func (l *RetryableHttpLogger) Debug(msg string, keysAndValues ...interface{}) {
+	l.l.Trace(msg, keysAndValues...)
 }

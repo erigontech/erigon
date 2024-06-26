@@ -13,7 +13,7 @@ import (
 	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/eth/ethutils"
 
-	"github.com/ledgerwatch/log/v3"
+	"github.com/ledgerwatch/erigon-lib/log/v3"
 
 	"github.com/ledgerwatch/erigon-lib/chain"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
@@ -159,7 +159,7 @@ func (s *EngineServer) newPayload(ctx context.Context, req *engine_types.Executi
 		Bloom:       bloom,
 		BaseFee:     (*big.Int)(req.BaseFeePerGas),
 		Extra:       req.ExtraData,
-		Number:      big.NewInt(int64(req.BlockNumber)),
+		Number:      big.NewInt(0).SetUint64(req.BlockNumber.Uint64()),
 		GasUsed:     uint64(req.GasUsed),
 		GasLimit:    uint64(req.GasLimit),
 		Time:        uint64(req.Timestamp),

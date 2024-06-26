@@ -9,12 +9,13 @@ import (
 	"strings"
 
 	"github.com/google/btree"
+	"golang.org/x/crypto/sha3"
+
 	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/cryptozerocopy"
+	"github.com/ledgerwatch/erigon-lib/log/v3"
 	"github.com/ledgerwatch/erigon-lib/metrics"
 	"github.com/ledgerwatch/erigon-lib/types"
-	"github.com/ledgerwatch/log/v3"
-	"golang.org/x/crypto/sha3"
 
 	"github.com/ledgerwatch/erigon-lib/common/length"
 	"github.com/ledgerwatch/erigon-lib/etl"
@@ -211,6 +212,9 @@ func (be *BranchEncoder) CollectUpdate(
 		return 0, err
 	}
 	if len(prev) > 0 {
+		if bytes.Equal(prev, update) {
+			return lastNibble, nil // do not write the same data for prefix
+		}
 		update, err = be.merger.Merge(prev, update)
 		if err != nil {
 			return 0, err

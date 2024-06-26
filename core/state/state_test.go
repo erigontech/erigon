@@ -19,6 +19,7 @@ package state
 import (
 	"bytes"
 	"context"
+	"github.com/ledgerwatch/erigon/core/rawdb"
 	"testing"
 
 	"github.com/ledgerwatch/erigon-lib/common/datadir"
@@ -28,15 +29,18 @@ import (
 	"github.com/stretchr/testify/require"
 	checker "gopkg.in/check.v1"
 
+	"github.com/ledgerwatch/erigon-lib/log/v3"
+
 	"github.com/ledgerwatch/erigon-lib/chain"
 	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/memdb"
 	"github.com/ledgerwatch/erigon-lib/kv/rawdbv3"
 	"github.com/ledgerwatch/erigon-lib/state"
+	stateLib "github.com/ledgerwatch/erigon-lib/state"
+	"github.com/ledgerwatch/erigon/core/tracing"
 	"github.com/ledgerwatch/erigon/core/types/accounts"
 	"github.com/ledgerwatch/erigon/crypto"
-	"github.com/ledgerwatch/log/v3"
 )
 
 var toAddr = common.BytesToAddress
@@ -54,11 +58,11 @@ var _ = checker.Suite(&StateSuite{})
 func (s *StateSuite) TestDump(c *checker.C) {
 	// generate a few entries
 	obj1 := s.state.GetOrNewStateObject(toAddr([]byte{0x01}))
-	obj1.AddBalance(uint256.NewInt(22))
+	obj1.AddBalance(uint256.NewInt(22), tracing.BalanceChangeUnspecified)
 	obj2 := s.state.GetOrNewStateObject(toAddr([]byte{0x01, 0x02}))
 	obj2.SetCode(crypto.Keccak256Hash([]byte{3, 3, 3, 3, 3, 3, 3}), []byte{3, 3, 3, 3, 3, 3, 3})
 	obj3 := s.state.GetOrNewStateObject(toAddr([]byte{0x02}))
-	obj3.SetBalance(uint256.NewInt(44))
+	obj3.SetBalance(uint256.NewInt(44), tracing.BalanceChangeUnspecified)
 
 	// write some of them to the trie
 	err := s.w.UpdateAccountData(obj1.address, &obj1.data, new(accounts.Account))
@@ -112,15 +116,43 @@ func (s *StateSuite) TestDump(c *checker.C) {
 func (s *StateSuite) SetUpTest(c *checker.C) {
 	//var agg *state.Aggregator
 	//s.kv, s.tx, agg = memdb.NewTestTemporalDb(c.Logf)
-	s.kv = memdb.New("")
-	tx, err := s.kv.BeginRw(context.Background()) //nolint
+	db := memdb.NewStateDB("")
+	defer db.Close()
+
+	cr := rawdb.NewCanonicalReader()
+	agg, err := stateLib.NewAggregator(context.Background(), datadir.New(""), 16, db, cr, log.New())
+	if err != nil {
+		panic(err)
+	}
+	defer agg.Close()
+
+	_db, err := temporal.New(db, agg)
+	if err != nil {
+		panic(err)
+	}
+
+	tx, err := _db.BeginTemporalRw(context.Background()) //nolint:gocritic
+	if err != nil {
+		panic(err)
+	}
+	defer tx.Rollback()
+
+	domains, err := stateLib.NewSharedDomains(tx, log.New())
+	if err != nil {
+		panic(err)
+	}
+	defer domains.Close()
+
+	domains.SetTxNum(1)
+	domains.SetBlockNum(1)
+	err = rawdbv3.TxNums.Append(tx, 1, 1)
 	if err != nil {
 		panic(err)
 	}
 	s.tx = tx
 	//s.r = NewWriterV4(s.tx)
-	s.r = NewPlainState(tx, 1, nil)
-	s.w = NewPlainState(tx, 1, nil)
+	s.r = NewReaderV4(domains)
+	s.w = NewWriterV4(domains)
 	s.state = New(s.r)
 }
 
@@ -165,7 +197,7 @@ func (s *StateSuite) TestTouchDelete(c *checker.C) {
 	s.state.Reset()
 
 	snapshot := s.state.Snapshot()
-	s.state.AddBalance(common.Address{}, new(uint256.Int))
+	s.state.AddBalance(common.Address{}, new(uint256.Int), tracing.BalanceChangeUnspecified)
 
 	if len(s.state.journal.dirties) != 1 {
 		c.Fatal("expected one dirty state object")
@@ -214,10 +246,22 @@ func (s *StateSuite) TestSnapshotEmpty(c *checker.C) {
 // use testing instead of checker because checker does not support
 // printing/logging in tests (-check.vv does not work)
 func TestSnapshot2(t *testing.T) {
+	//TODO: why I shouldn't recreate writer here? And why domains.SetBlockNum(1) is enough for green test?
 	t.Parallel()
-	_, tx := memdb.NewTestTx(t)
-	w := NewPlainState(tx, 1, nil)
-	state := New(NewPlainState(tx, 1, nil))
+	_, tx, _ := NewTestTemporalDb(t)
+
+	domains, err := stateLib.NewSharedDomains(tx, log.New())
+	require.NoError(t, err)
+	defer domains.Close()
+
+	domains.SetTxNum(1)
+	domains.SetBlockNum(2)
+	err = rawdbv3.TxNums.Append(tx, 1, 1)
+	require.NoError(t, err)
+
+	w := NewWriterV4(domains)
+
+	state := New(NewReaderV4(domains))
 
 	stateobjaddr0 := toAddr([]byte("so0"))
 	stateobjaddr1 := toAddr([]byte("so1"))
@@ -231,18 +275,17 @@ func TestSnapshot2(t *testing.T) {
 
 	// db, trie are already non-empty values
 	so0 := state.getStateObject(stateobjaddr0)
-	so0.SetBalance(uint256.NewInt(42))
+	so0.SetBalance(uint256.NewInt(42), tracing.BalanceChangeUnspecified)
 	so0.SetNonce(43)
 	so0.SetCode(crypto.Keccak256Hash([]byte{'c', 'a', 'f', 'e'}), []byte{'c', 'a', 'f', 'e'})
 	so0.selfdestructed = false
 	so0.deleted = false
 	state.setStateObject(stateobjaddr0, so0)
 
-	err := state.FinalizeTx(&chain.Rules{}, w)
+	err = state.FinalizeTx(&chain.Rules{}, w)
 	if err != nil {
 		t.Fatal("error while finalizing transaction", err)
 	}
-	w = NewPlainState(tx, 2, nil)
 
 	err = state.CommitBlock(&chain.Rules{}, w)
 	if err != nil {
@@ -251,7 +294,7 @@ func TestSnapshot2(t *testing.T) {
 
 	// and one with deleted == true
 	so1 := state.getStateObject(stateobjaddr1)
-	so1.SetBalance(uint256.NewInt(52))
+	so1.SetBalance(uint256.NewInt(52), tracing.BalanceChangeUnspecified)
 	so1.SetNonce(53)
 	so1.SetCode(crypto.Keccak256Hash([]byte{'c', 'a', 'f', 'e', '2'}), []byte{'c', 'a', 'f', 'e', '2'})
 	so1.selfdestructed = true
@@ -334,7 +377,8 @@ func NewTestTemporalDb(tb testing.TB) (kv.RwDB, kv.RwTx, *state.Aggregator) {
 	db := memdb.NewStateDB(tb.TempDir())
 	tb.Cleanup(db.Close)
 
-	agg, err := state.NewAggregator(context.Background(), datadir.New(tb.TempDir()), 16, db, log.New())
+	cr := rawdb.NewCanonicalReader()
+	agg, err := state.NewAggregator(context.Background(), datadir.New(tb.TempDir()), 16, db, cr, log.New())
 	if err != nil {
 		tb.Fatal(err)
 	}
@@ -369,12 +413,12 @@ func TestDump(t *testing.T) {
 
 	// generate a few entries
 	obj1 := st.GetOrNewStateObject(toAddr([]byte{0x01}))
-	obj1.AddBalance(uint256.NewInt(22))
+	obj1.AddBalance(uint256.NewInt(22), tracing.BalanceChangeUnspecified)
 	obj2 := st.GetOrNewStateObject(toAddr([]byte{0x01, 0x02}))
 	obj2.SetCode(crypto.Keccak256Hash([]byte{3, 3, 3, 3, 3, 3, 3}), []byte{3, 3, 3, 3, 3, 3, 3})
 	obj2.setIncarnation(1)
 	obj3 := st.GetOrNewStateObject(toAddr([]byte{0x02}))
-	obj3.SetBalance(uint256.NewInt(44))
+	obj3.SetBalance(uint256.NewInt(44), tracing.BalanceChangeUnspecified)
 
 	w := NewWriterV4(domains)
 	// write some of them to the trie

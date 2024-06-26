@@ -25,6 +25,10 @@ func (s *Span) SetRawId(id uint64) {
 	return
 }
 
+func (s *Span) SetRawId(id uint64) {
+	panic("unimplemented")
+}
+
 func (s *Span) BlockNumRange() ClosedRange {
 	return ClosedRange{
 		Start: s.StartBlock,

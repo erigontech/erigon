@@ -16,18 +16,19 @@ import (
 	"fmt"
 	"os"
 
+	"github.com/urfave/cli/v2"
+	"golang.org/x/sync/semaphore"
+
 	"github.com/ledgerwatch/erigon-lib/common/dbg"
 	"github.com/ledgerwatch/erigon-lib/common/disk"
 	"github.com/ledgerwatch/erigon-lib/common/mem"
+	"github.com/ledgerwatch/erigon-lib/log/v3"
 	"github.com/ledgerwatch/erigon/cl/beacon/beacon_router_configuration"
 	"github.com/ledgerwatch/erigon/cl/phase1/core"
 	"github.com/ledgerwatch/erigon/cl/phase1/core/state"
 	execution_client2 "github.com/ledgerwatch/erigon/cl/phase1/execution_client"
 	"github.com/ledgerwatch/erigon/cl/utils/eth_clock"
 	"github.com/ledgerwatch/erigon/eth/ethconfig"
-	"github.com/ledgerwatch/log/v3"
-	"github.com/urfave/cli/v2"
-	"golang.org/x/sync/semaphore"
 
 	"github.com/ledgerwatch/erigon/cmd/caplin/caplin1"
 	"github.com/ledgerwatch/erigon/cmd/caplin/caplincli"
@@ -136,10 +137,23 @@ func runCaplinNode(cliCtx *cli.Context) error {
 	}
 
 	blockSnapBuildSema := semaphore.NewWeighted(int64(dbg.BuildSnapshotAllowance))
+
+	var options []caplin1.CaplinOption
+	// builder option
+	if rcfg.Builder {
+		if cfg.MevRelayUrl == "" {
+			log.Warn("builder mode requires mev_relay_url, but it is not set. Skipping builder mode")
+			rcfg.Builder = false
+		} else {
+			log.Info("Starting with builder mode")
+			options = append(options, caplin1.WithBuilder(cfg.MevRelayUrl, cfg.BeaconCfg))
+		}
+	}
+
 	return caplin1.RunCaplinPhase1(ctx, executionEngine, &ethconfig.Config{
 		CaplinDiscoveryAddr:    cfg.Addr,
 		CaplinDiscoveryPort:    uint64(cfg.Port),
 		CaplinDiscoveryTCPPort: uint64(cfg.ServerTcpPort),
 		BeaconRouter:           rcfg,
-	}, cfg.NetworkCfg, cfg.BeaconCfg, ethClock, state, cfg.Dirs, nil, nil, false, false, false, indiciesDB, blobStorage, nil, blockSnapBuildSema)
+	}, cfg.NetworkCfg, cfg.BeaconCfg, ethClock, state, cfg.Dirs, nil, nil, false, false, false, indiciesDB, blobStorage, nil, blockSnapBuildSema, options...)
 }

@@ -25,8 +25,9 @@ import (
 	"github.com/ledgerwatch/erigon/cmd/sentinel/sentinelcli"
 	"github.com/ledgerwatch/erigon/cmd/sentinel/sentinelflags"
 
-	"github.com/ledgerwatch/log/v3"
 	"github.com/urfave/cli/v2"
+
+	"github.com/ledgerwatch/erigon-lib/log/v3"
 
 	sentinelapp "github.com/ledgerwatch/erigon/turbo/app"
 )

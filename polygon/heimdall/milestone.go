@@ -26,6 +26,10 @@ func (m *Milestone) RawId() uint64 {
 }
 
 func (m *Milestone) SetRawId(id uint64) {
+	panic("unimplemented")
+}
+
+func (m *Milestone) SetRawId(id uint64) {
 	return
 }
 

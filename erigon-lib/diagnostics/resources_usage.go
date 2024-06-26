@@ -3,7 +3,7 @@ package diagnostics
 import (
 	"context"
 
-	"github.com/ledgerwatch/log/v3"
+	"github.com/ledgerwatch/erigon-lib/log/v3"
 )
 
 func (d *DiagnosticClient) setupResourcesUsageDiagnostics(rootCtx context.Context) {
@@ -31,7 +31,7 @@ func (d *DiagnosticClient) runMemoryStatsListener(rootCtx context.Context) {
 				return
 			case info := <-ch:
 				d.resourcesUsageMutex.Lock()
-				info.StageIndex = d.getCurrentSyncIdxs()
+				info.StageIndex = d.GetCurrentSyncIdxs()
 				d.resourcesUsage.MemoryUsage = append(d.resourcesUsage.MemoryUsage, info)
 				d.resourcesUsageMutex.Unlock()
 			}

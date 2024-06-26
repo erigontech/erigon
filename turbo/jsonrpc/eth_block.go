@@ -6,7 +6,7 @@ import (
 	"math/big"
 	"time"
 
-	"github.com/ledgerwatch/log/v3"
+	"github.com/ledgerwatch/erigon-lib/log/v3"
 
 	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/hexutil"
@@ -339,7 +339,7 @@ func (api *APIImpl) GetBlockTransactionCountByNumber(ctx context.Context, blockN
 		return nil, nil
 	}
 
-	_, txAmount, err := api._blockReader.Body(ctx, tx, blockHash, blockNum)
+	_, txCount, err := api._blockReader.Body(ctx, tx, blockHash, blockNum)
 	if err != nil {
 		return nil, err
 	}
@@ -356,11 +356,11 @@ func (api *APIImpl) GetBlockTransactionCountByNumber(ctx context.Context, blockN
 			return nil, err
 		}
 		if ok {
-			txAmount++
+			txCount++
 		}
 	}
 
-	numOfTx := hexutil.Uint(txAmount)
+	numOfTx := hexutil.Uint(txCount)
 
 	return &numOfTx, nil
 }
@@ -380,7 +380,7 @@ func (api *APIImpl) GetBlockTransactionCountByHash(ctx context.Context, blockHas
 		return nil, nil
 	}
 
-	_, txAmount, err := api._blockReader.Body(ctx, tx, blockHash, blockNum)
+	_, txCount, err := api._blockReader.Body(ctx, tx, blockHash, blockNum)
 	if err != nil {
 		return nil, err
 	}
@@ -397,11 +397,11 @@ func (api *APIImpl) GetBlockTransactionCountByHash(ctx context.Context, blockHas
 			return nil, err
 		}
 		if ok {
-			txAmount++
+			txCount++
 		}
 	}
 
-	numOfTx := hexutil.Uint(txAmount)
+	numOfTx := hexutil.Uint(txCount)
 
 	return &numOfTx, nil
 }

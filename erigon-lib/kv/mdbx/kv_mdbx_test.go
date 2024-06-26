@@ -25,12 +25,13 @@ import (
 	"time"
 
 	"github.com/c2h5oh/datasize"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/iter"
 	"github.com/ledgerwatch/erigon-lib/kv/order"
-	"github.com/ledgerwatch/log/v3"
-	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
+	"github.com/ledgerwatch/erigon-lib/log/v3"
 )
 
 func BaseCaseDB(t *testing.T) kv.RwDB {
@@ -45,6 +46,21 @@ func BaseCaseDB(t *testing.T) kv.RwDB {
 		}
 	}).MapSize(128 * datasize.MB).MustOpen()
 	t.Cleanup(db.Close)
+	return db
+}
+
+func BaseCaseDBForBenchmark(b *testing.B) kv.RwDB {
+	b.Helper()
+	path := b.TempDir()
+	logger := log.New()
+	table := "Table"
+	db := NewMDBX(logger).InMem(path).WithTableCfg(func(defaultBuckets kv.TableCfg) kv.TableCfg {
+		return kv.TableCfg{
+			table:       kv.TableCfgItem{Flags: kv.DupSort},
+			kv.Sequence: kv.TableCfgItem{},
+		}
+	}).MapSize(128 * datasize.MB).MustOpen()
+	b.Cleanup(db.Close)
 	return db
 }
 
@@ -1089,5 +1105,37 @@ func TestDB_BatchTime(t *testing.T) {
 		return nil
 	}); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func BenchmarkDB_Get(b *testing.B) {
+	_db := BaseCaseDBForBenchmark(b)
+	table := "Table"
+	db := _db.(*MdbxKV)
+
+	// buffered so we never leak goroutines
+	err := db.Update(context.Background(), func(tx kv.RwTx) error {
+		return tx.Put(table, u64tob(uint64(1)), u64tob(uint64(1)))
+	})
+	if err != nil {
+		b.Fatal(err)
+	}
+
+	// Ensure data is correct.
+	if err := db.View(context.Background(), func(tx kv.Tx) error {
+		key := u64tob(uint64(1))
+		b.ResetTimer()
+		for i := 1; i <= b.N; i++ {
+			v, err := tx.GetOne(table, key)
+			if err != nil {
+				return err
+			}
+			if v == nil {
+				b.Errorf("key not found: %d", 1)
+			}
+		}
+		return nil
+	}); err != nil {
+		b.Fatal(err)
 	}
 }

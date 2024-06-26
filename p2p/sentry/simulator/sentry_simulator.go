@@ -6,8 +6,9 @@ import (
 	"fmt"
 	"path/filepath"
 
-	"github.com/ledgerwatch/log/v3"
 	"google.golang.org/protobuf/types/known/emptypb"
+
+	"github.com/ledgerwatch/erigon-lib/log/v3"
 
 	"github.com/ledgerwatch/erigon-lib/chain/snapcfg"
 	"github.com/ledgerwatch/erigon-lib/common"
@@ -69,7 +70,7 @@ func NewSentry(ctx context.Context, chain string, snapshotLocation string, peerC
 
 	knownSnapshots := freezeblocks.NewRoSnapshots(ethconfig.BlocksFreezing{
 		Enabled:      true,
-		Produce:      false,
+		ProduceE2:    false,
 		NoDownloader: true,
 	}, "", 0, logger)
 
@@ -84,7 +85,7 @@ func NewSentry(ctx context.Context, chain string, snapshotLocation string, peerC
 	//s.knownSnapshots.ReopenList([]string{ent2.Name()}, false)
 	activeSnapshots := freezeblocks.NewRoSnapshots(ethconfig.BlocksFreezing{
 		Enabled:      true,
-		Produce:      false,
+		ProduceE2:    false,
 		NoDownloader: true,
 	}, torrentDir, 0, logger)
 

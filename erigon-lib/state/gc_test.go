@@ -5,9 +5,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/log/v3"
 	"github.com/stretchr/testify/require"
+
+	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/ledgerwatch/erigon-lib/log/v3"
 )
 
 func TestGCReadAfterRemoveFile(t *testing.T) {
@@ -36,7 +37,7 @@ func TestGCReadAfterRemoveFile(t *testing.T) {
 
 			lastOnFs, _ := h.dirtyFiles.Max()
 			require.False(lastOnFs.frozen) // prepared dataset must have some non-frozen files. or it's bad dataset.
-			h.integrateMergedFiles(nil, []*filesItem{lastOnFs}, nil, nil)
+			h.integrateMergedDirtyFiles(nil, []*filesItem{lastOnFs}, nil, nil)
 			require.NotNil(lastOnFs.decompressor)
 			h.reCalcVisibleFiles()
 
@@ -78,7 +79,7 @@ func TestGCReadAfterRemoveFile(t *testing.T) {
 			hc := h.BeginFilesRo()
 			lastOnFs, _ := h.dirtyFiles.Max()
 			require.False(lastOnFs.frozen) // prepared dataset must have some non-frozen files. or it's bad dataset.
-			h.integrateMergedFiles(nil, []*filesItem{lastOnFs}, nil, nil)
+			h.integrateMergedDirtyFiles(nil, []*filesItem{lastOnFs}, nil, nil)
 
 			require.NotNil(lastOnFs.decompressor)
 			hc.Close()

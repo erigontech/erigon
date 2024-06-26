@@ -9,12 +9,11 @@ import (
 	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/polygon/bor/borcfg"
-	"github.com/ledgerwatch/erigon/polygon/heimdall"
 )
 
 const InMemorySignatures = 4096 // Number of recent block signatures to keep in memory
 
-type CanonicalChainBuilderFactory func(root *types.Header, span *heimdall.Span) CanonicalChainBuilder
+type CanonicalChainBuilderFactory func(root *types.Header) CanonicalChainBuilder
 type SpanFetcher func(ctx context.Context, blockNum uint64) (*heimdall.Span, error)
 
 func NewCanonicalChainBuilderFactory(
@@ -32,10 +31,7 @@ func NewCanonicalChainBuilderFactory(
 	headerTimeValidator := NewHeaderTimeValidator(borConfig, spansCache, nil, signaturesCache, spanFetcher)
 	headerValidator := NewHeaderValidator(chainConfig, borConfig, headerTimeValidator)
 
-	return func(root *types.Header, span *heimdall.Span) CanonicalChainBuilder {
-		if span == nil {
-			panic("sync.Service: ccBuilderFactory - span is nil")
-		}
+	return func(root *types.Header) CanonicalChainBuilder {
 		if spansCache.IsEmpty() {
 			panic("sync.Service: ccBuilderFactory - spansCache is empty")
 		}

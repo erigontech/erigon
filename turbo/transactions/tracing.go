@@ -9,9 +9,11 @@ import (
 	"time"
 
 	jsoniter "github.com/json-iterator/go"
+
 	"github.com/ledgerwatch/erigon-lib/chain"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/kv"
+
 	"github.com/ledgerwatch/erigon/consensus"
 	"github.com/ledgerwatch/erigon/core"
 	"github.com/ledgerwatch/erigon/core/state"
@@ -19,6 +21,7 @@ import (
 	"github.com/ledgerwatch/erigon/core/vm"
 	"github.com/ledgerwatch/erigon/core/vm/evmtypes"
 	"github.com/ledgerwatch/erigon/eth/tracers"
+	tracersConfig "github.com/ledgerwatch/erigon/eth/tracers/config"
 	"github.com/ledgerwatch/erigon/eth/tracers/logger"
 	"github.com/ledgerwatch/erigon/turbo/rpchelper"
 	"github.com/ledgerwatch/erigon/turbo/services"
@@ -79,7 +82,7 @@ func TraceTx(
 	blockCtx evmtypes.BlockContext,
 	txCtx evmtypes.TxContext,
 	ibs evmtypes.IntraBlockState,
-	config *tracers.TraceConfig,
+	config *tracersConfig.TraceConfig,
 	chainConfig *chain.Config,
 	stream *jsoniter.Stream,
 	callTimeout time.Duration,
@@ -92,7 +95,7 @@ func TraceTx(
 
 	defer cancel()
 
-	execCb := func(evm *vm.EVM, refunds bool) (*core.ExecutionResult, error) {
+	execCb := func(evm *vm.EVM, refunds bool) (*evmtypes.ExecutionResult, error) {
 		gp := new(core.GasPool).AddGas(message.Gas()).AddBlobGas(message.BlobGas())
 		return core.ApplyMessage(evm, message, gp, refunds, false /* gasBailout */)
 	}
@@ -102,7 +105,7 @@ func TraceTx(
 
 func AssembleTracer(
 	ctx context.Context,
-	config *tracers.TraceConfig,
+	config *tracersConfig.TraceConfig,
 	txHash libcommon.Hash,
 	stream *jsoniter.Stream,
 	callTimeout time.Duration,
@@ -149,15 +152,15 @@ func ExecuteTraceTx(
 	blockCtx evmtypes.BlockContext,
 	txCtx evmtypes.TxContext,
 	ibs evmtypes.IntraBlockState,
-	config *tracers.TraceConfig,
+	config *tracersConfig.TraceConfig,
 	chainConfig *chain.Config,
 	stream *jsoniter.Stream,
 	tracer vm.EVMLogger,
 	streaming bool,
-	execCb func(evm *vm.EVM, refunds bool) (*core.ExecutionResult, error),
+	execCb func(evm *vm.EVM, refunds bool) (*evmtypes.ExecutionResult, error),
 ) error {
 	// Run the transaction with tracing enabled.
-	evm := vm.NewEVM(blockCtx, txCtx, ibs, chainConfig, vm.Config{Debug: true, Tracer: tracer})
+	evm := vm.NewEVM(blockCtx, txCtx, ibs, chainConfig, vm.Config{Debug: true, Tracer: tracer, NoBaseFee: true})
 
 	var refunds = true
 	if config != nil && config.NoRefunds != nil && *config.NoRefunds {

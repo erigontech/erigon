@@ -14,9 +14,10 @@ import (
 	"time"
 
 	"github.com/holiman/uint256"
-	datadir2 "github.com/ledgerwatch/erigon-lib/common/datadir"
-	"github.com/ledgerwatch/log/v3"
 	"github.com/spf13/cobra"
+
+	datadir2 "github.com/ledgerwatch/erigon-lib/common/datadir"
+	"github.com/ledgerwatch/erigon-lib/log/v3"
 
 	chain2 "github.com/ledgerwatch/erigon-lib/chain"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
@@ -78,7 +79,7 @@ type opcode struct {
 
 type RetStackTop []uint32
 
-type tx struct {
+type txn struct {
 	From        libcommon.Address
 	To          libcommon.Address
 	TxHash      *libcommon.Hash
@@ -88,7 +89,7 @@ type tx struct {
 	Bblocks     sliceBblocks
 	Fault       string //a fault set by CaptureEnd
 	OpcodeFault string //a fault set by CaptureState
-	TxAddr      string
+	TxnAddr     string
 	CodeSize    int
 	Depth       int
 	lastPc16    uint16
@@ -102,7 +103,7 @@ type sliceOpcodes []opcode
 type sliceBblocks []bblock
 
 //easyjson:json
-type slicePtrTx []*tx
+type slicePtrTx []*txn
 
 type opcodeTracer struct {
 	Txs        slicePtrTx
@@ -120,8 +121,8 @@ type opcodeTracer struct {
 func NewOpcodeTracer(blockNum uint64, saveOpcodes bool, saveBblocks bool) *opcodeTracer {
 	res := new(opcodeTracer)
 	res.txsInDepth = make([]int16, 1, 4)
-	res.stack = make([]*tx, 0, 8)
-	res.Txs = make([]*tx, 0, 64)
+	res.stack = make([]*txn, 0, 8)
+	res.Txs = make([]*txn, 0, 64)
 	res.saveOpcodes = saveOpcodes
 	res.saveBblocks = saveBblocks
 	res.blockNumber = blockNum
@@ -137,7 +138,7 @@ func resetOpcodeTracer(ot *opcodeTracer) {
 			len(ot.stack), len(ot.txsInDepth), ot.txsInDepth[0]))
 	}
 	// allocate new storage, allow past storage to be GCed
-	ot.Txs = make([]*tx, 0, 64)
+	ot.Txs = make([]*txn, 0, 64)
 	// reset the counter of Txs at depth 0
 	ot.txsInDepth[0] = 0
 }
@@ -170,8 +171,8 @@ func (ot *opcodeTracer) CaptureTxEnd(restGas uint64) {}
 func (ot *opcodeTracer) captureStartOrEnter(from, to libcommon.Address, create bool, input []byte) {
 	//fmt.Fprint(ot.summary, ot.lastLine)
 
-	// When a CaptureStart is called, a Tx is starting. Create its entry in our list and initialize it with the partial data available
-	//calculate the "address" of the Tx in its tree
+	// When a CaptureStart is called, a Txn is starting. Create its entry in our list and initialize it with the partial data available
+	//calculate the "address" of the Txn in its tree
 	ltid := len(ot.txsInDepth)
 	if ltid-1 != ot.depth {
 		panic(fmt.Sprintf("Wrong addr slice depth: d=%d, slice len=%d", ot.depth, ltid))
@@ -181,17 +182,17 @@ func (ot *opcodeTracer) captureStartOrEnter(from, to libcommon.Address, create b
 	ot.txsInDepth = append(ot.txsInDepth, 0)
 
 	ls := len(ot.stack)
-	txAddr := ""
+	txnAddr := ""
 	if ls > 0 {
-		txAddr = ot.stack[ls-1].TxAddr + "-" + strconv.Itoa(int(ot.txsInDepth[ot.depth])) // fmt.Sprintf("%s-%d", ot.stack[ls-1].TxAddr, ot.txsInDepth[depth])
+		txnAddr = ot.stack[ls-1].TxnAddr + "-" + strconv.Itoa(int(ot.txsInDepth[ot.depth])) // fmt.Sprintf("%s-%d", ot.stack[ls-1].TxAddr, ot.txsInDepth[depth])
 	} else {
-		txAddr = strconv.Itoa(int(ot.txsInDepth[ot.depth]))
+		txnAddr = strconv.Itoa(int(ot.txsInDepth[ot.depth]))
 	}
 
-	newTx := tx{From: from, To: to, Create: create, Input: input, Depth: ot.depth, TxAddr: txAddr, lastOp: 0xfe, lastPc16: MaxUint16}
+	newTx := txn{From: from, To: to, Create: create, Input: input, Depth: ot.depth, TxnAddr: txnAddr, lastOp: 0xfe, lastPc16: MaxUint16}
 	ot.Txs = append(ot.Txs, &newTx)
 
-	// take note in our own stack that the tx stack has grown
+	// take note in our own stack that the txn stack has grown
 	ot.stack = append(ot.stack, &newTx)
 }
 
@@ -207,7 +208,7 @@ func (ot *opcodeTracer) CaptureEnter(typ vm.OpCode, from libcommon.Address, to l
 }
 
 func (ot *opcodeTracer) captureEndOrExit(err error) {
-	// When a CaptureEnd is called, a Tx has finished. Pop our stack
+	// When a CaptureEnd is called, a Txn has finished. Pop our stack
 	ls := len(ot.stack)
 	currentEntry := ot.stack[ls-1]
 	ot.stack = ot.stack[:ls-1]
@@ -215,7 +216,7 @@ func (ot *opcodeTracer) captureEndOrExit(err error) {
 
 	// sanity check: depth of stack == depth reported by system
 	if ls-1 != ot.depth || ot.depth != currentEntry.Depth {
-		panic(fmt.Sprintf("End of Tx at d=%d but stack has d=%d and entry has d=%d", ot.depth, ls, currentEntry.Depth))
+		panic(fmt.Sprintf("End of Txn at d=%d but stack has d=%d and entry has d=%d", ot.depth, ls, currentEntry.Depth))
 	}
 
 	// Close the last bblock
@@ -268,10 +269,10 @@ func (ot *opcodeTracer) CaptureState(pc uint64, op vm.OpCode, gas, cost uint64, 
 		panic(fmt.Sprintf("Depth should be the same but isn't: current tx's %d, current entry's %d", currentTxDepth, currentEntry.Depth))
 	}
 
-	// is the Tx entry still not fully initialized?
+	// is the txn entry still not fully initialized?
 	if currentEntry.TxHash == nil {
-		// CaptureStart creates the entry for a new Tx, but doesn't have access to EVM data, like the Tx Hash
-		// here we ASSUME that the tx entry was recently created by CaptureStart
+		// CaptureStart creates the entry for a new Tx, but doesn't have access to EVM data, like the txn Hash
+		// here we ASSUME that the txn entry was recently created by CaptureStart
 		// AND that this is the first CaptureState that has happened since then
 		// AND that both Captures are for the same transaction
 		// AND that we can't go into another depth without executing at least 1 opcode
@@ -326,7 +327,7 @@ func (ot *opcodeTracer) CaptureState(pc uint64, op vm.OpCode, gas, cost uint64, 
 		//it's a repeated opcode. We assume this only happens when it's a Fault.
 		if err == nil {
 			panic(fmt.Sprintf("Duplicate opcode with no fault. bn=%d txaddr=%s pc=%x op=%s",
-				ot.blockNumber, currentEntry.TxAddr, pc, op.String()))
+				ot.blockNumber, currentEntry.TxnAddr, pc, op.String()))
 		}
 		faultAndRepeated = true
 		//ot.fsumWriter.WriteString("Fault for EXISTING opcode\n")
@@ -371,7 +372,7 @@ func (ot *opcodeTracer) CaptureState(pc uint64, op vm.OpCode, gas, cost uint64, 
 				// we're starting a bblock, so either we're in PC=0 or we have OP=JUMPDEST
 				if pc16 != 0 && op.String() != "JUMPDEST" {
 					panic(fmt.Sprintf("Bad bblock? lastpc=%x, lastOp=%s; pc=%x, op=%s; bn=%d txaddr=%s tx=%d-%s",
-						currentEntry.lastPc16, currentEntry.lastOp.String(), pc, op.String(), ot.blockNumber, currentEntry.TxAddr, currentEntry.Depth, currentEntry.TxHash.String()))
+						currentEntry.lastPc16, currentEntry.lastOp.String(), pc, op.String(), ot.blockNumber, currentEntry.TxnAddr, currentEntry.Depth, currentEntry.TxHash.String()))
 				}
 			}
 		}
@@ -609,7 +610,7 @@ func OpcodeTracer(genesis *types.Genesis, blockNum uint64, chaindata string, num
 			t := ot.Txs[i]
 
 			if saveBblocks {
-				sd := bblockDump{t.TxHash, &t.TxAddr, t.CodeHash, &t.Bblocks, &t.OpcodeFault, &t.Fault, t.Create, t.CodeSize}
+				sd := bblockDump{t.TxHash, &t.TxnAddr, t.CodeHash, &t.Bblocks, &t.OpcodeFault, &t.Fault, t.Create, t.CodeSize}
 				//fsegEnc.Encode(sd)
 				chanBblocksIsBlocking = len(chanSegDump) == cap(chanSegDump)-1
 				chanSegDump <- sd
@@ -620,7 +621,7 @@ func OpcodeTracer(genesis *types.Genesis, blockNum uint64, chaindata string, num
 				//only print to the summary the opcodes that are interesting
 				isOpFault := o.Fault != ""
 				if isOpFault {
-					fmt.Fprintf(ot.fsumWriter, "Opcode FAULT\tb=%d taddr=%s TxF=%s opF=%s tx=%s\n", blockNum, t.TxAddr, t.Fault, t.OpcodeFault, t.TxHash.String())
+					fmt.Fprintf(ot.fsumWriter, "Opcode FAULT\tb=%d taddr=%s TxF=%s opF=%s tx=%s\n", blockNum, t.TxnAddr, t.Fault, t.OpcodeFault, t.TxHash.String())
 					fmt.Fprint(ot.fsumWriter, "\n")
 				}
 			}
@@ -639,7 +640,7 @@ func OpcodeTracer(genesis *types.Genesis, blockNum uint64, chaindata string, num
 			if t.TxHash != nil {
 				ths = t.TxHash.String()
 			}
-			fmt.Fprintf(ot.fsumWriter, "Tx FAULT\tb=%d opF=%s\tTxF=%s\ttaddr=%s\ttx=%s\n", blockNum, t.OpcodeFault, t.Fault, t.TxAddr, ths)
+			fmt.Fprintf(ot.fsumWriter, "Tx FAULT\tb=%d opF=%s\tTxF=%s\ttaddr=%s\ttx=%s\n", blockNum, t.OpcodeFault, t.Fault, t.TxnAddr, ths)
 		}
 		if chanBblocksIsBlocking {
 			log.Debug("Channel for bblocks got full and caused some blocking", "block", blockNum)
@@ -708,11 +709,11 @@ func runBlock(engine consensus.Engine, ibs *state.IntraBlockState, txnWriter sta
 	var receipts types.Receipts
 	core.InitializeBlockExecution(engine, nil, header, chainConfig, ibs, logger)
 	rules := chainConfig.Rules(block.NumberU64(), block.Time())
-	for i, tx := range block.Transactions() {
-		ibs.SetTxContext(tx.Hash(), block.Hash(), i)
-		receipt, _, err := core.ApplyTransaction(chainConfig, core.GetHashFn(header, getHeader), engine, nil, gp, ibs, txnWriter, header, tx, usedGas, usedBlobGas, vmConfig)
+	for i, txn := range block.Transactions() {
+		ibs.SetTxContext(txn.Hash(), block.Hash(), i)
+		receipt, _, err := core.ApplyTransaction(chainConfig, core.GetHashFn(header, getHeader), engine, nil, gp, ibs, txnWriter, header, txn, usedGas, usedBlobGas, vmConfig)
 		if err != nil {
-			return nil, fmt.Errorf("could not apply tx %d [%x] failed: %w", i, tx.Hash(), err)
+			return nil, fmt.Errorf("could not apply txn %d [%x] failed: %w", i, txn.Hash(), err)
 		}
 		if trace {
 			fmt.Printf("tx idx %d, gas used %d\n", i, receipt.GasUsed)

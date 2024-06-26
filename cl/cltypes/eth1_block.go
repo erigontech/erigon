@@ -7,6 +7,7 @@ import (
 
 	"github.com/holiman/uint256"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/log/v3"
 
 	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/cl/cltypes/solid"
@@ -149,7 +150,7 @@ func (b *Eth1Block) UnmarshalJSON(data []byte) error {
 		BaseFeePerGas string                      `json:"base_fee_per_gas"`
 		BlockHash     libcommon.Hash              `json:"block_hash"`
 		Transactions  *solid.TransactionsSSZ      `json:"transactions"`
-		Withdrawals   *solid.ListSSZ[*Withdrawal] `json:"withdrawals,omitempty"`
+		Withdrawals   *solid.ListSSZ[*Withdrawal] `json:"withdrawals"`
 		BlobGasUsed   uint64                      `json:"blob_gas_used,string"`
 		ExcessBlobGas uint64                      `json:"excess_blob_gas,string"`
 	}
@@ -305,6 +306,7 @@ func (b *Eth1Block) RlpHeader(parentRoot *libcommon.Hash) (*types.Header, error)
 		*withdrawalsHash = types.DeriveSha(types.Withdrawals(withdrawals))
 	}
 	if b.version < clparams.DenebVersion {
+		log.Warn("ParentRoot is nil", "parentRoot", parentRoot, "version", b.version)
 		parentRoot = nil
 	}
 

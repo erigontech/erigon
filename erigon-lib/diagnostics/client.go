@@ -7,11 +7,12 @@ import (
 	"sync"
 
 	"github.com/c2h5oh/datasize"
+	"golang.org/x/sync/semaphore"
+
 	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/mdbx"
-	"github.com/ledgerwatch/log/v3"
-	"golang.org/x/sync/semaphore"
+	"github.com/ledgerwatch/erigon-lib/log/v3"
 )
 
 type DiagnosticClient struct {
@@ -21,6 +22,7 @@ type DiagnosticClient struct {
 	dataDirPath string
 	speedTest   bool
 
+	syncStages          []SyncStage
 	syncStats           SyncStatistics
 	snapshotFileList    SnapshoFilesList
 	mu                  sync.Mutex
@@ -43,10 +45,7 @@ func NewDiagnosticClient(ctx context.Context, metricsMux *http.ServeMux, dataDir
 		return nil, err
 	}
 
-	hInfo := ReadSysInfo(db)
-	ss := ReadSyncStages(db)
-	snpdwl := ReadSnapshotDownloadInfo(db)
-	snpidx := ReadSnapshotIndexingInfo(db)
+	hInfo, ss, snpdwl, snpidx := ReadSavedData(db)
 
 	return &DiagnosticClient{
 		ctx:         ctx,
@@ -54,8 +53,8 @@ func NewDiagnosticClient(ctx context.Context, metricsMux *http.ServeMux, dataDir
 		metricsMux:  metricsMux,
 		dataDirPath: dataDirPath,
 		speedTest:   speedTest,
+		syncStages:  ss,
 		syncStats: SyncStatistics{
-			SyncStages:       ss,
 			SnapshotDownload: snpdwl,
 			SnapshotIndexing: snpidx,
 		},
@@ -131,3 +130,60 @@ func interfaceToJSONString(i interface{}) string {
 	}
 	return string(b)
 }*/
+
+func ReadSavedData(db kv.RoDB) (hinfo HardwareInfo, ssinfo []SyncStage, snpdwl SnapshotDownloadStatistics, snpidx SnapshotIndexingStatistics) {
+	var ramBytes []byte
+	var cpuBytes []byte
+	var diskBytes []byte
+	var ssinfoData []byte
+	var snpdwlData []byte
+	var snpidxData []byte
+	var err error
+
+	if err := db.View(context.Background(), func(tx kv.Tx) error {
+		ramBytes, err = ReadRAMInfoFromTx(tx)
+		if err != nil {
+			return err
+		}
+
+		cpuBytes, err = ReadCPUInfoFromTx(tx)
+		if err != nil {
+			return err
+		}
+
+		diskBytes, err = ReadDiskInfoFromTx(tx)
+		if err != nil {
+			return err
+		}
+
+		ssinfoData, err = SyncStagesFromTX(tx)
+		if err != nil {
+			return err
+		}
+
+		snpdwlData, err = SnapshotDownloadInfoFromTx(tx)
+		if err != nil {
+			return err
+		}
+
+		snpidxData, err = SnapshotIndexingInfoFromTx(tx)
+		if err != nil {
+			return err
+		}
+
+		return nil
+	}); err != nil {
+		return HardwareInfo{}, []SyncStage{}, SnapshotDownloadStatistics{}, SnapshotIndexingStatistics{}
+	}
+
+	hinfo = HardwareInfo{
+		RAM:  ParseRamInfo(ramBytes),
+		CPU:  ParseCPUInfo(cpuBytes),
+		Disk: ParseDiskInfo(diskBytes),
+	}
+	ssinfo = ParseStagesList(ssinfoData)
+	snpdwl = ParseSnapshotDownloadInfo(snpdwlData)
+	snpidx = ParseSnapshotIndexingInfo(snpidxData)
+
+	return hinfo, ssinfo, snpdwl, snpidx
+}

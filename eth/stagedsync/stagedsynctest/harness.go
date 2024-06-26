@@ -12,9 +12,10 @@ import (
 	"time"
 
 	"github.com/holiman/uint256"
-	"github.com/ledgerwatch/log/v3"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/mock/gomock"
+
+	"github.com/ledgerwatch/erigon-lib/log/v3"
 
 	"github.com/ledgerwatch/erigon-lib/chain"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
@@ -63,24 +64,7 @@ func InitHarness(ctx context.Context, t *testing.T, cfg HarnessCfg) Harness {
 		false,
 		nil,
 	)
-	stateSyncStages := stagedsync.DefaultStages(
-		ctx,
-		stagedsync.SnapshotsCfg{},
-		stagedsync.HeadersCfg{},
-		bhCfg,
-		stagedsync.BlockHashesCfg{},
-		stagedsync.BodiesCfg{},
-		stagedsync.SendersCfg{},
-		stagedsync.ExecuteBlockCfg{},
-		stagedsync.HashStateCfg{},
-		stagedsync.TrieCfg{},
-		stagedsync.HistoryCfg{},
-		stagedsync.LogIndexCfg{},
-		stagedsync.CallTracesCfg{},
-		stagedsync.TxLookupCfg{},
-		stagedsync.FinishCfg{},
-		true,
-	)
+	stateSyncStages := stagedsync.DefaultStages(ctx, stagedsync.SnapshotsCfg{}, stagedsync.HeadersCfg{}, bhCfg, stagedsync.BlockHashesCfg{}, stagedsync.BodiesCfg{}, stagedsync.SendersCfg{}, stagedsync.ExecuteBlockCfg{}, stagedsync.TxLookupCfg{}, stagedsync.FinishCfg{}, true)
 	stateSync := stagedsync.New(
 		ethconfig.Defaults.Sync,
 		stateSyncStages,
@@ -444,7 +428,7 @@ func (h *Harness) generateChain(ctx context.Context, t *testing.T, ctrl *gomock.
 				t.Fatal(err)
 			}
 
-			h.logger.Info("Adding 1 mock tx to block", "blockNum", gen.GetHeader().Number)
+			h.logger.Info("Adding 1 mock txn to block", "blockNum", gen.GetHeader().Number)
 			chainID := uint256.Int{}
 			overflow := chainID.SetFromBig(h.chainConfig.ChainID)
 			require.False(t, overflow)

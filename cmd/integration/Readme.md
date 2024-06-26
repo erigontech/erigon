@@ -9,11 +9,11 @@ All commands require parameter `--datadir=<datadir>` - I will skip it for readab
 integration --help
 integration print_stages
 
-# Run single stage 
-integration stage_senders 
-integration stage_exec  
+# Run single stage
+integration stage_senders
+integration stage_exec
 integration stage_exec --block=1_000_000 # stop at 1M block
-integration stage_hash_state 
+integration stage_hash_state
 integration stage_trie
 integration stage_history
 integration stage_tx_lookup
@@ -21,16 +21,16 @@ integration stage_tx_lookup
 # Unwind single stage 10 blocks backward
 integration stage_exec --unwind=10
 
-# Drop data of single stage 
-integration stage_exec --reset     
+# Drop data of single stage
+integration stage_exec --reset
 integration stage_history --reset
 
 # Unwind single stage N blocks backward
-integration stage_exec --unwind=N 
+integration stage_exec --unwind=N
 integration stage_history --unwind=N
 
 # Run stage prune to block N
-integration stage_exec --prune.to=N     
+integration stage_exec --prune.to=N
 integration stage_history --prune.to=N
 
 # Reset stage_headers
@@ -40,9 +40,9 @@ integration stage_headers --reset --datadir=<my_datadir> --chain=<my_chain>
 integration stage_exec --no-commit
 ...
 
-# Run tx replay with domains [requires 6th stage to be done before run]
+# Run txn replay with domains [requires 6th stage to be done before run]
 integration state_domains --chain goerli --last-step=4 # stop replay when 4th step is merged
-integration read_domains --chain goerli account <addr> <addr> ... # read values for given accounts 
+integration read_domains --chain goerli account <addr> <addr> ... # read values for given accounts
 
 # hack which allows to force clear unwind stack of all stages
 clear_unwind_stack
@@ -84,9 +84,9 @@ make all
 ## Copy data to another db
 
 ```
-0. You will need 2x disk space (can be different disks). 
+0. You will need 2x disk space (can be different disks).
 1. Stop Erigon
-2. Create new db with new --db.pagesize: 
+2. Create new db with new --db.pagesize:
 ONLY_CREATE_DB=true ./build/bin/erigon --datadir=/erigon-new/ --chain="$CHAIN" --db.pagesize=8kb --db.size.limit=12T
 # if erigon doesn't stop after 1 min. just stop it.
 3. Build integration: cd erigon; make integration

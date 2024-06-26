@@ -3,9 +3,11 @@ package diagnostics
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 
+	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/log/v3"
+	"github.com/ledgerwatch/erigon-lib/log/v3"
 )
 
 var (
@@ -19,26 +21,30 @@ type CurrentSyncStagesIdxs struct {
 }
 
 type SyncStage struct {
-	ID        string         `json:"stage"`
+	ID        string         `json:"id"`
 	State     StageState     `json:"state"`
 	SubStages []SyncSubStage `json:"subStages"`
+	Stats     SyncStageStats `json:"stats"`
 }
 
 type SyncSubStage struct {
-	ID    string     `json:"subStage"`
-	State StageState `json:"state"`
+	ID    string         `json:"id"`
+	State StageState     `json:"state"`
+	Stats SyncStageStats `json:"stats"`
 }
 
-type UpdateSyncSubStageList struct {
-	List []UpdateSyncSubStage
+type SyncStageStats struct {
+	TimeElapsed string `json:"timeElapsed"`
+	TimeLeft    string `json:"timeLeft"`
+	Progress    string `json:"progress"`
 }
 
-type UpdateSyncSubStage struct {
-	StageId  string
-	SubStage SyncSubStage
+type SetSyncSubStageList struct {
+	Stage string
+	List  []SyncSubStage
 }
 
-func (ti UpdateSyncSubStageList) Type() Type {
+func (ti SetSyncSubStageList) Type() Type {
 	return TypeOf(ti)
 }
 
@@ -117,9 +123,11 @@ func (d *DiagnosticClient) runCurrentSyncStageListener(rootCtx context.Context) 
 			case <-rootCtx.Done():
 				return
 			case info := <-ch:
-				d.mu.Lock()
-				d.SetCurrentSyncStage(info)
-				d.mu.Unlock()
+
+				err := d.SetCurrentSyncStage(info)
+				if err != nil {
+					log.Warn("[Diagnostics] Failed to set current stage", "err", err)
+				}
 
 				d.saveSyncStagesToDB()
 			}
@@ -150,17 +158,17 @@ func (d *DiagnosticClient) runCurrentSyncSubStageListener(rootCtx context.Contex
 
 func (d *DiagnosticClient) runSubStageListener(rootCtx context.Context) {
 	go func() {
-		ctx, ch, closeChannel := Context[UpdateSyncSubStageList](rootCtx, 1)
+		ctx, ch, closeChannel := Context[SetSyncSubStageList](rootCtx, 1)
 		defer closeChannel()
 
-		StartProviders(ctx, TypeOf(UpdateSyncSubStageList{}), log.Root())
+		StartProviders(ctx, TypeOf(SetSyncSubStageList{}), log.Root())
 		for {
 			select {
 			case <-rootCtx.Done():
 				return
 			case info := <-ch:
 				d.mu.Lock()
-				d.AddOrUpdateSugStages(info)
+				d.SetSubStagesList(info.Stage, info.List)
 				d.mu.Unlock()
 
 				d.saveSyncStagesToDB()
@@ -170,18 +178,18 @@ func (d *DiagnosticClient) runSubStageListener(rootCtx context.Context) {
 }
 
 func (d *DiagnosticClient) saveSyncStagesToDB() {
-	if err := d.db.Update(d.ctx, StagesListUpdater(d.syncStats.SyncStages)); err != nil {
+	if err := d.db.Update(d.ctx, StagesListUpdater(d.syncStages)); err != nil {
 		log.Error("[Diagnostics] Failed to update stages list", "err", err)
 	}
 }
 
-func (d *DiagnosticClient) getCurrentSyncIdxs() CurrentSyncStagesIdxs {
+func (d *DiagnosticClient) GetCurrentSyncIdxs() CurrentSyncStagesIdxs {
 	currentIdxs := CurrentSyncStagesIdxs{
 		Stage:    -1,
 		SubStage: -1,
 	}
 
-	for sIdx, stage := range d.syncStats.SyncStages {
+	for sIdx, stage := range d.syncStages {
 		if stage.State == Running {
 			currentIdxs.Stage = sIdx
 
@@ -198,62 +206,76 @@ func (d *DiagnosticClient) getCurrentSyncIdxs() CurrentSyncStagesIdxs {
 }
 
 func (d *DiagnosticClient) SetStagesList(stages []SyncStage) {
-	d.syncStats.SyncStages = stages
+	if len(d.syncStages) != len(stages) {
+		d.syncStages = stages
+	}
 }
 
-func (d *DiagnosticClient) AddOrUpdateStagesList(stages []SyncStage, stage SyncStage) []SyncStage {
-	resultArr := stages
-	stageExists := false
-
-	for _, st := range resultArr {
-		if st.ID == stage.ID {
-			st.State = stage.State
-			st.SubStages = stage.SubStages
-			stageExists = true
-			break
+func (d *DiagnosticClient) SetSubStagesList(stageId string, subStages []SyncSubStage) {
+	for idx, stage := range d.syncStages {
+		if stage.ID == stageId {
+			if len(d.syncStages[idx].SubStages) != len(subStages) {
+				d.syncStages[idx].SubStages = subStages
+				break
+			}
 		}
 	}
-
-	if !stageExists {
-		resultArr = append(resultArr, stage)
-	}
-
-	return resultArr
 }
 
-func (d *DiagnosticClient) SetCurrentSyncStage(css CurrentSyncStage) {
+func (d *DiagnosticClient) SetCurrentSyncStage(css CurrentSyncStage) error {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	stageState, err := d.GetStageState(css.Stage)
+	if err != nil {
+		return err
+	}
+
+	if stageState == Completed {
+		return nil
+	}
+
 	isSet := false
-	for idx, stage := range d.syncStats.SyncStages {
+	for idx, stage := range d.syncStages {
 		if !isSet {
 			if stage.ID == css.Stage {
-				d.syncStats.SyncStages[idx].State = Running
+				d.syncStages[idx].State = Running
 				isSet = true
 			} else {
-				d.syncStats.SyncStages[idx].State = Completed
-				for subIdx := range d.syncStats.SyncStages[idx].SubStages {
-					d.syncStats.SyncStages[idx].SubStages[subIdx].State = Completed
-				}
+				d.setStagesState(idx, Completed)
 			}
 		} else {
-			d.syncStats.SyncStages[idx].State = Queued
+			d.setStagesState(idx, Queued)
 		}
+	}
+
+	return nil
+}
+
+func (d *DiagnosticClient) setStagesState(stadeIdx int, state StageState) {
+	d.syncStages[stadeIdx].State = state
+	d.setSubStagesState(stadeIdx, state)
+}
+
+func (d *DiagnosticClient) setSubStagesState(stadeIdx int, state StageState) {
+	for subIdx := range d.syncStages[stadeIdx].SubStages {
+		d.syncStages[stadeIdx].SubStages[subIdx].State = state
 	}
 }
 
 func (d *DiagnosticClient) SetCurrentSyncSubStage(css CurrentSyncSubStage) {
-	for idx, stage := range d.syncStats.SyncStages {
+	for idx, stage := range d.syncStages {
 		if stage.State == Running {
-			isSet := false
 			for subIdx, subStage := range stage.SubStages {
-				if !isSet {
-					if subStage.ID == css.SubStage {
-						d.syncStats.SyncStages[idx].SubStages[subIdx].State = Running
-						isSet = true
-					} else {
-						d.syncStats.SyncStages[idx].SubStages[subIdx].State = Completed
+				if subStage.ID == css.SubStage {
+					if d.syncStages[idx].SubStages[subIdx].State == Completed {
+						return
 					}
-				} else {
-					d.syncStats.SyncStages[idx].SubStages[subIdx].State = Queued
+
+					if subIdx > 0 {
+						d.syncStages[idx].SubStages[subIdx-1].State = Completed
+					}
+
+					d.syncStages[idx].SubStages[subIdx].State = Running
 				}
 			}
 
@@ -262,45 +284,35 @@ func (d *DiagnosticClient) SetCurrentSyncSubStage(css CurrentSyncSubStage) {
 	}
 }
 
-func (d *DiagnosticClient) AddOrUpdateSugStages(subStages UpdateSyncSubStageList) {
-	for _, subStage := range subStages.List {
-		d.AddOrUpdateSugStage(subStage)
-	}
-}
-
-func (d *DiagnosticClient) AddOrUpdateSugStage(subStage UpdateSyncSubStage) {
-	for idx, stage := range d.syncStats.SyncStages {
-		if stage.ID == subStage.StageId {
-			subStageExist := false
-			for subIdx, sub := range stage.SubStages {
-				if sub.ID == subStage.SubStage.ID {
-					subStageExist = true
-					d.syncStats.SyncStages[idx].SubStages[subIdx] = subStage.SubStage
-					break
-				}
-			}
-
-			if !subStageExist {
-				d.syncStats.SyncStages[idx].SubStages = append(d.syncStats.SyncStages[idx].SubStages, subStage.SubStage)
-			}
-
-			break
+func (d *DiagnosticClient) GetStageState(stageId string) (StageState, error) {
+	for _, stage := range d.syncStages {
+		if stage.ID == stageId {
+			return stage.State, nil
 		}
 	}
-}
 
-func ReadSyncStages(db kv.RoDB) []SyncStage {
-	data := ReadDataFromTable(db, kv.DiagSyncStages, StagesListKey)
-
-	if len(data) == 0 {
-		return []SyncStage{}
+	stagesIdsList := make([]string, 0, len(d.syncStages))
+	for _, stage := range d.syncStages {
+		stagesIdsList = append(stagesIdsList, stage.ID)
 	}
 
-	var info []SyncStage
+	return 0, fmt.Errorf("stage %s not found in stages list %s", stageId, stagesIdsList)
+}
+
+func SyncStagesFromTX(tx kv.Tx) ([]byte, error) {
+	bytes, err := ReadDataFromTable(tx, kv.DiagSyncStages, StagesListKey)
+	if err != nil {
+		return nil, err
+	}
+
+	return common.CopyBytes(bytes), nil
+}
+
+func ParseStagesList(data []byte) (info []SyncStage) {
 	err := json.Unmarshal(data, &info)
 
 	if err != nil {
-		log.Error("[Diagnostics] Failed to read stages list", "err", err)
+		log.Warn("[Diagnostics] Failed to parse stages list", "err", err)
 		return []SyncStage{}
 	} else {
 		return info
@@ -309,4 +321,8 @@ func ReadSyncStages(db kv.RoDB) []SyncStage {
 
 func StagesListUpdater(info []SyncStage) func(tx kv.RwTx) error {
 	return PutDataToTable(kv.DiagSyncStages, StagesListKey, info)
+}
+
+func (d *DiagnosticClient) GetSyncStages() []SyncStage {
+	return d.syncStages
 }

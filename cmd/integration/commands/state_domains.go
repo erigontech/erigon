@@ -10,8 +10,9 @@ import (
 
 	state3 "github.com/ledgerwatch/erigon-lib/state"
 
-	"github.com/ledgerwatch/log/v3"
 	"github.com/spf13/cobra"
+
+	"github.com/ledgerwatch/erigon-lib/log/v3"
 
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/datadir"
@@ -123,11 +124,11 @@ func requestDomains(chainDb, stateDb kv.RwDB, ctx context.Context, readDomain st
 
 	r := state.NewReaderV4(domains)
 	if err != nil && startTxNum != 0 {
-		return fmt.Errorf("failed to seek commitment to tx %d: %w", startTxNum, err)
+		return fmt.Errorf("failed to seek commitment to txn %d: %w", startTxNum, err)
 	}
 	latestTx := domains.TxNum()
 	if latestTx < startTxNum {
-		return fmt.Errorf("latest available tx to start is  %d and its less than start tx %d", latestTx, startTxNum)
+		return fmt.Errorf("latest available txn to start is  %d and its less than start txn %d", latestTx, startTxNum)
 	}
 	logger.Info("seek commitment", "block", domains.BlockNum(), "tx", latestTx)
 

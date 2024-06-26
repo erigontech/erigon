@@ -21,7 +21,7 @@ import (
 
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/log/v3"
+	"github.com/ledgerwatch/erigon-lib/log/v3"
 
 	"github.com/ledgerwatch/erigon/core/types"
 )
@@ -51,9 +51,9 @@ func ReadTxLookupEntry(db kv.Getter, txnHash libcommon.Hash) (*uint64, error) {
 // WriteTxLookupEntries stores a positional metadata for every transaction from
 // a block, enabling hash based transaction and receipt lookups.
 func WriteTxLookupEntries(db kv.Putter, block *types.Block) {
-	for _, tx := range block.Transactions() {
+	for _, txn := range block.Transactions() {
 		data := block.Number().Bytes()
-		if err := db.Put(kv.TxLookup, tx.Hash().Bytes(), data); err != nil {
+		if err := db.Put(kv.TxLookup, txn.Hash().Bytes(), data); err != nil {
 			log.Crit("Failed to store transaction lookup entry", "err", err)
 		}
 	}

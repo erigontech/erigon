@@ -24,9 +24,10 @@ import (
 	"math/big"
 	"testing"
 
-	"github.com/ledgerwatch/log/v3"
 	"github.com/stretchr/testify/require"
 	"golang.org/x/crypto/sha3"
+
+	"github.com/ledgerwatch/erigon-lib/log/v3"
 
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/hexutility"
@@ -773,7 +774,7 @@ func TestPreShanghaiBodyForStorageNoPanicOnWithdrawals(t *testing.T) {
 	rlp.DecodeBytes(bstring, body)
 
 	require.Nil(body.Withdrawals)
-	require.Equal(uint32(2), body.TxAmount)
+	require.Equal(uint32(2), body.TxCount)
 }
 
 // Tests shanghai bodyForStorage to make sure withdrawals are present
@@ -789,7 +790,7 @@ func TestShanghaiBodyForStorageHasWithdrawals(t *testing.T) {
 
 	require.NotNil(body.Withdrawals)
 	require.Equal(2, len(body.Withdrawals))
-	require.Equal(uint32(2), body.TxAmount)
+	require.Equal(uint32(2), body.TxCount)
 }
 
 // Tests shanghai bodyForStorage to make sure when no withdrawals the slice is empty (not nil)
@@ -805,7 +806,7 @@ func TestShanghaiBodyForStorageNoWithdrawals(t *testing.T) {
 
 	require.NotNil(body.Withdrawals)
 	require.Equal(0, len(body.Withdrawals))
-	require.Equal(uint32(2), body.TxAmount)
+	require.Equal(uint32(2), body.TxCount)
 }
 
 func checkReceiptsRLP(have, want types.Receipts) error {
