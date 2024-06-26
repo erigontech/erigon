@@ -58,7 +58,7 @@ func (b *Bridge) Run(ctx context.Context) error {
 	}
 
 	// start syncing
-	b.log.Warn(bridgeLogPrefix("Bridge is running"), "lastEventID", lastEventID)
+	b.log.Debug(bridgeLogPrefix("Bridge is running"), "lastEventID", lastEventID)
 
 	for {
 		select {
@@ -88,7 +88,7 @@ func (b *Bridge) Run(ctx context.Context) error {
 			}
 		}
 
-		b.log.Warn(bridgeLogPrefix(fmt.Sprintf("got %v new events, last event ID: %v, ready: %v", len(events), lastEventID, b.ready)))
+		b.log.Debug(bridgeLogPrefix(fmt.Sprintf("got %v new events, last event ID: %v, ready: %v", len(events), lastEventID, b.ready)))
 	}
 }
 
