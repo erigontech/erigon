@@ -2,6 +2,7 @@ package stagedsync
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
@@ -10,7 +11,6 @@ import (
 
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/dbg"
-	"github.com/ledgerwatch/erigon-lib/diagnostics"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/wrap"
 
@@ -94,10 +94,6 @@ func (s *Sync) NextStage() {
 		return
 	}
 	s.currentStage++
-
-	if s.currentStage < uint(len(s.stages)) {
-		diagnostics.Send(diagnostics.CurrentSyncStage{Stage: string(s.stages[s.currentStage].ID)})
-	}
 }
 
 // IsBefore returns true if stage1 goes before stage2 in staged sync
@@ -137,14 +133,24 @@ func (s *Sync) IsAfter(stage1, stage2 stages.SyncStage) bool {
 func (s *Sync) HasUnwindPoint() bool { return s.unwindPoint != nil }
 func (s *Sync) UnwindTo(unwindPoint uint64, reason UnwindReason, tx kv.Tx) error {
 	if tx != nil {
-		lowestUnwindableBlock, err := state.ReadLowestUnwindableBlock(tx)
-		if err != nil {
-			return err
-		}
-		if lowestUnwindableBlock > unwindPoint {
-			return fmt.Errorf("cannot unwind to block %d, lowest unwindable block is %d", unwindPoint, lowestUnwindableBlock)
+		if casted, ok := tx.(state.HasAggTx); ok {
+			// protect from too far unwind
+			unwindPointWithCommitment, ok, err := casted.AggTx().(*state.AggregatorRoTx).CanUnwindBeforeBlockNum(unwindPoint, tx)
+			// Ignore in the case that snapshots are ahead of commitment, it will be resolved later.
+			// This can be a problem if snapshots include a wrong chain so it is ok to ignore it.
+			if errors.Is(err, state.ErrBehindCommitment) {
+				return nil
+			}
+			if err != nil {
+				return err
+			}
+			if !ok {
+				return fmt.Errorf("too far unwind. requested=%d, minAllowed=%d", unwindPoint, unwindPointWithCommitment)
+			}
+			unwindPoint = unwindPointWithCommitment
 		}
 	}
+
 	if reason.Block != nil {
 		s.logger.Debug("UnwindTo", "block", unwindPoint, "block_hash", reason.Block.String(), "err", reason.Err, "stack", dbg.Stack())
 	} else {
@@ -178,8 +184,6 @@ func (s *Sync) SetCurrentStage(id stages.SyncStage) error {
 	for i, stage := range s.stages {
 		if stage.ID == id {
 			s.currentStage = uint(i)
-
-			diagnostics.Send(diagnostics.CurrentSyncStage{Stage: string(id)})
 
 			return nil
 		}

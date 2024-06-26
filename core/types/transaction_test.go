@@ -39,7 +39,6 @@ import (
 	"github.com/ledgerwatch/erigon-lib/crypto/kzg"
 	"github.com/ledgerwatch/erigon-lib/txpool"
 	libtypes "github.com/ledgerwatch/erigon-lib/types"
-	types2 "github.com/ledgerwatch/erigon-lib/types"
 
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/u256"
@@ -377,7 +376,7 @@ func TestTransactionCoding(t *testing.T) {
 		signer    = LatestSignerForChainID(libcommon.Big1)
 		addr      = libcommon.HexToAddress("0x0000000000000000000000000000000000000001")
 		recipient = libcommon.HexToAddress("095e7baea6a6c7c4c2dfeb977efac326af552d87")
-		accesses  = types2.AccessList{{Address: addr, StorageKeys: []libcommon.Hash{{0}}}}
+		accesses  = libtypes.AccessList{{Address: addr, StorageKeys: []libcommon.Hash{{0}}}}
 	)
 	for i := uint64(0); i < 500; i++ {
 		var txdata Transaction
@@ -576,11 +575,11 @@ func randHashes(n int) []libcommon.Hash {
 	return h
 }
 
-func randAccessList() types2.AccessList {
+func randAccessList() libtypes.AccessList {
 	size := randIntInRange(4, 10)
-	var result types2.AccessList
+	var result libtypes.AccessList
 	for i := 0; i < size; i++ {
-		var tup types2.AccessTuple
+		var tup libtypes.AccessTuple
 
 		tup.Address = *randAddr()
 		tup.StorageKeys = append(tup.StorageKeys, randHash())

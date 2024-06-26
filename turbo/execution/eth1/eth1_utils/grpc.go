@@ -110,7 +110,7 @@ func HeaderRpcToHeader(header *execution.Header) (*types.Header, error) {
 		ReceiptHash:   gointerfaces.ConvertH256ToHash(header.ReceiptRoot),
 		Bloom:         gointerfaces.ConvertH2048ToBloom(header.LogsBloom),
 		Difficulty:    gointerfaces.ConvertH256ToUint256Int(header.Difficulty).ToBig(),
-		Number:        big.NewInt(int64(header.BlockNumber)),
+		Number:        new(big.Int).SetUint64(header.BlockNumber),
 		GasLimit:      header.GasLimit,
 		GasUsed:       header.GasUsed,
 		Time:          header.Timestamp,
