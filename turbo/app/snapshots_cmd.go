@@ -173,7 +173,7 @@ var snapshotCommand = cli.Command{
 			}),
 		},
 		{
-			Name:   "stats",
+			Name:   "stat",
 			Action: doSnapStat,
 			Flags:  joinFlags([]cli.Flag{&utils.DataDirFlag, &utils.ChainFlag}),
 		},
