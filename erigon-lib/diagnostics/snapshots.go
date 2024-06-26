@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/log/v3"
 )
@@ -151,7 +152,7 @@ func (d *DiagnosticClient) runSegmentDownloadingListener(rootCtx context.Context
 				}
 
 				if err := d.db.Update(d.ctx, SnapshotDownloadUpdater(d.syncStats.SnapshotDownload)); err != nil {
-					log.Error("[Diagnostics] Failed to update snapshot download info", "err", err)
+					log.Warn("[Diagnostics] Failed to update snapshot download info", "err", err)
 				}
 
 				d.mu.Unlock()
@@ -372,34 +373,40 @@ func (d *DiagnosticClient) SnapshotFilesList() SnapshoFilesList {
 	return d.snapshotFileList
 }
 
-func ReadSnapshotDownloadInfo(db kv.RoDB) (info SnapshotDownloadStatistics) {
-	data := ReadDataFromTable(db, kv.DiagSyncStages, SnapshotDownloadStatisticsKey)
-
-	if len(data) == 0 {
-		return SnapshotDownloadStatistics{}
+func SnapshotDownloadInfoFromTx(tx kv.Tx) ([]byte, error) {
+	bytes, err := ReadDataFromTable(tx, kv.DiagSyncStages, SnapshotDownloadStatisticsKey)
+	if err != nil {
+		return nil, err
 	}
 
+	return common.CopyBytes(bytes), nil
+}
+
+func ParseSnapshotDownloadInfo(data []byte) (info SnapshotDownloadStatistics) {
 	err := json.Unmarshal(data, &info)
 
 	if err != nil {
-		log.Error("[Diagnostics] Failed to read snapshot download info", "err", err)
+		log.Warn("[Diagnostics] Failed to parse snapshot download info", "err", err)
 		return SnapshotDownloadStatistics{}
 	} else {
 		return info
 	}
 }
 
-func ReadSnapshotIndexingInfo(db kv.RoDB) (info SnapshotIndexingStatistics) {
-	data := ReadDataFromTable(db, kv.DiagSyncStages, SnapshotIndexingStatisticsKey)
-
-	if len(data) == 0 {
-		return SnapshotIndexingStatistics{}
+func SnapshotIndexingInfoFromTx(tx kv.Tx) ([]byte, error) {
+	bytes, err := ReadDataFromTable(tx, kv.DiagSyncStages, SnapshotIndexingStatisticsKey)
+	if err != nil {
+		return nil, err
 	}
 
+	return common.CopyBytes(bytes), nil
+}
+
+func ParseSnapshotIndexingInfo(data []byte) (info SnapshotIndexingStatistics) {
 	err := json.Unmarshal(data, &info)
 
 	if err != nil {
-		log.Error("[Diagnostics] Failed to read snapshot indexing info", "err", err)
+		log.Warn("[Diagnostics] Failed to parse snapshot indexing info", "err", err)
 		return SnapshotIndexingStatistics{}
 	} else {
 		return info

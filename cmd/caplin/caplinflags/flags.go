@@ -20,6 +20,7 @@ var CliFlags = []cli.Flag{
 	&RunEngineAPI,
 	&EngineApiHostFlag,
 	&EngineApiPortFlag,
+	&MevRelayUrl,
 	&JwtSecret,
 	&utils.DataDirFlag,
 	&utils.BeaconApiAllowCredentialsFlag,
@@ -106,6 +107,11 @@ var (
 	JwtSecret = cli.StringFlag{
 		Name:  "engine.api.jwtsecret",
 		Usage: "Path to the token that ensures safe connection between CL and EL",
+		Value: "",
+	}
+	MevRelayUrl = cli.StringFlag{
+		Name:  "mev-relay-url",
+		Usage: "Http URL of the MEV relay",
 		Value: "",
 	}
 )

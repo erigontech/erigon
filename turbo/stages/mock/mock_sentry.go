@@ -510,7 +510,7 @@ func MockWithEverything(tb testing.TB, gspec *types.Genesis, key *ecdsa.PrivateK
 			ethconfig.Defaults.Sync,
 			mock.agg,
 			nil,
-		), stagedsync.StageHistoryCfg(mock.DB, prune, dirs.Tmp), stagedsync.StageLogIndexCfg(mock.DB, prune, dirs.Tmp, nil), stagedsync.StageCallTracesCfg(mock.DB, prune, 0, dirs.Tmp), stagedsync.StageTxLookupCfg(mock.DB, prune, dirs.Tmp, mock.ChainConfig.Bor, mock.BlockReader), stagedsync.StageFinishCfg(mock.DB, dirs.Tmp, forkValidator), !withPosDownloader),
+		), stagedsync.StageTxLookupCfg(mock.DB, prune, dirs.Tmp, mock.ChainConfig.Bor, mock.BlockReader), stagedsync.StageFinishCfg(mock.DB, dirs.Tmp, forkValidator), !withPosDownloader),
 		stagedsync.DefaultUnwindOrder,
 		stagedsync.DefaultPruneOrder,
 		logger,

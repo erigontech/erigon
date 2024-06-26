@@ -47,7 +47,6 @@ import (
 	"github.com/ledgerwatch/erigon-lib/kv/bitmapdb"
 	"github.com/ledgerwatch/erigon-lib/kv/iter"
 	"github.com/ledgerwatch/erigon-lib/kv/order"
-	"github.com/ledgerwatch/erigon-lib/kv/rawdbv3"
 	"github.com/ledgerwatch/erigon-lib/log/v3"
 	"github.com/ledgerwatch/erigon-lib/seg"
 )
@@ -812,42 +811,20 @@ func (ac *AggregatorRoTx) CanPrune(tx kv.Tx, untilTx uint64) bool {
 }
 
 func (ac *AggregatorRoTx) CanUnwindDomainsToBlockNum(tx kv.Tx) (uint64, error) {
-	_, histBlockNumProgress, err := rawdbv3.TxNums.FindBlockNum(tx, ac.CanUnwindDomainsToTxNum())
-	return histBlockNumProgress, err
+	blockNum, err := ReadLowestUnwindableBlock(tx)
+	return blockNum, err
 }
 func (ac *AggregatorRoTx) CanUnwindDomainsToTxNum() uint64 {
 	return ac.minimaxTxNumInDomainFiles(false)
 }
-func (ac *AggregatorRoTx) MinUnwindDomainsBlockNum(tx kv.Tx) (uint64, error) {
-	_, blockNum, err := rawdbv3.TxNums.FindBlockNum(tx, ac.CanUnwindDomainsToTxNum())
-	return blockNum, err
-}
 
 func (ac *AggregatorRoTx) CanUnwindBeforeBlockNum(blockNum uint64, tx kv.Tx) (uint64, bool, error) {
-	unwindToTxNum, err := rawdbv3.TxNums.Max(tx, blockNum)
-	if err != nil {
-		return 0, false, err
-	}
-
-	// not all blocks have commitment
-	//fmt.Printf("CanUnwindBeforeBlockNum: blockNum=%d unwindTo=%d\n", blockNum, unwindToTxNum)
-	domains, err := NewSharedDomains(tx, ac.a.logger)
-	if err != nil {
-		return 0, false, err
-	}
-	defer domains.Close()
-
-	blockNumWithCommitment, _, _, err := domains.LatestCommitmentState(tx, ac.CanUnwindDomainsToTxNum(), unwindToTxNum)
-	if err != nil {
-		_minBlockNum, _ := ac.MinUnwindDomainsBlockNum(tx)
-		return _minBlockNum, blockNum >= _minBlockNum, nil //nolint
-	}
-	if blockNumWithCommitment == 0 && ac.CanUnwindDomainsToTxNum() > 0 { // don't allow unwind beyond files progress
-		_minBlockNum, _ := ac.MinUnwindDomainsBlockNum(tx)
+	if blockNum == 0 && ac.CanUnwindDomainsToTxNum() > 0 { // don't allow unwind beyond files progress
+		_minBlockNum, _ := ac.CanUnwindDomainsToBlockNum(tx)
 		return _minBlockNum, blockNum >= _minBlockNum, nil //nolint
 	}
 
-	return blockNumWithCommitment, true, nil
+	return blockNum, true, nil
 }
 
 func (ac *AggregatorRoTx) PruneSmallBatchesDb(ctx context.Context, timeout time.Duration, db kv.RwDB) (haveMore bool, err error) {
@@ -859,7 +836,6 @@ func (ac *AggregatorRoTx) PruneSmallBatchesDb(ctx context.Context, timeout time.
 	aggressivePrune := !furiousPrune && timeout >= 1*time.Minute
 
 	var pruneLimit uint64 = 1_000
-	var withWarmup bool = false //nolint
 	if furiousPrune {
 		pruneLimit = 1_000_000
 		/* disabling this feature for now - seems it doesn't cancel even after prune finished
@@ -888,7 +864,7 @@ func (ac *AggregatorRoTx) PruneSmallBatchesDb(ctx context.Context, timeout time.
 			// `context.Background()` is important here!
 			//     it allows keep DB consistent - prune all keys-related data or noting
 			//     can't interrupt by ctrl+c and leave dirt in DB
-			stat, err := ac.Prune(innerCtx, tx, pruneLimit, withWarmup, aggLogEvery)
+			stat, err := ac.Prune(innerCtx, tx, pruneLimit, aggLogEvery)
 			if err != nil {
 				ac.a.logger.Warn("[snapshots] PruneSmallBatches failed", "err", err)
 				return err
@@ -901,8 +877,6 @@ func (ac *AggregatorRoTx) PruneSmallBatchesDb(ctx context.Context, timeout time.
 				return nil
 			}
 			fullStat.Accumulate(stat)
-
-			withWarmup = false // warmup once is enough
 
 			if aggressivePrune {
 				took := time.Since(iterationStarted)
@@ -954,14 +928,8 @@ func (ac *AggregatorRoTx) PruneSmallBatches(ctx context.Context, timeout time.Du
 	aggressivePrune := !furiousPrune && timeout >= 1*time.Minute
 
 	var pruneLimit uint64 = 1_000
-	var withWarmup bool = false //nolint
 	if furiousPrune {
 		pruneLimit = 1_000_000
-		/* disabling this feature for now - seems it doesn't cancel even after prune finished
-		// start from a bit high limit to give time for warmup
-		// will disable warmup after first iteration and will adjust pruneLimit based on `time`
-		withWarmup = true
-		*/
 	}
 
 	started := time.Now()
@@ -980,7 +948,7 @@ func (ac *AggregatorRoTx) PruneSmallBatches(ctx context.Context, timeout time.Du
 		// `context.Background()` is important here!
 		//     it allows keep DB consistent - prune all keys-related data or noting
 		//     can't interrupt by ctrl+c and leave dirt in DB
-		stat, err := ac.Prune(context.Background(), tx, pruneLimit, withWarmup, aggLogEvery)
+		stat, err := ac.Prune(context.Background(), tx, pruneLimit, aggLogEvery)
 		if err != nil {
 			ac.a.logger.Warn("[snapshots] PruneSmallBatches failed", "err", err)
 			return false, err
@@ -992,8 +960,6 @@ func (ac *AggregatorRoTx) PruneSmallBatches(ctx context.Context, timeout time.Du
 			return false, nil
 		}
 		fullStat.Accumulate(stat)
-
-		withWarmup = false // warmup once is enough
 
 		if aggressivePrune {
 			took := time.Since(iterationStarted)
@@ -1114,7 +1080,7 @@ func (as *AggregatorPruneStat) Accumulate(other *AggregatorPruneStat) {
 
 // temporal function to prune history straight after commitment is done - reduce history size in db until we build
 // pruning in background. This helps on chain-tip performance (while full pruning is not available we can prune at least commit)
-func (ac *AggregatorRoTx) PruneCommitHistory(ctx context.Context, tx kv.RwTx, withWarmup bool, logEvery *time.Ticker) error {
+func (ac *AggregatorRoTx) PruneCommitHistory(ctx context.Context, tx kv.RwTx, logEvery *time.Ticker) error {
 	cd := ac.d[kv.CommitmentDomain]
 	if cd.ht.h.historyDisabled {
 		return nil
@@ -1132,7 +1098,7 @@ func (ac *AggregatorRoTx) PruneCommitHistory(ctx context.Context, tx kv.RwTx, wi
 	}
 	defer mxPruneTookAgg.ObserveDuration(time.Now())
 
-	stat, err := cd.ht.Prune(ctx, tx, txFrom, txTo, math.MaxUint64, true, withWarmup, logEvery)
+	stat, err := cd.ht.Prune(ctx, tx, txFrom, txTo, math.MaxUint64, true, logEvery)
 	if err != nil {
 		return err
 	}
@@ -1141,7 +1107,7 @@ func (ac *AggregatorRoTx) PruneCommitHistory(ctx context.Context, tx kv.RwTx, wi
 	return nil
 }
 
-func (ac *AggregatorRoTx) Prune(ctx context.Context, tx kv.RwTx, limit uint64, withWarmup bool, logEvery *time.Ticker) (*AggregatorPruneStat, error) {
+func (ac *AggregatorRoTx) Prune(ctx context.Context, tx kv.RwTx, limit uint64, logEvery *time.Ticker) (*AggregatorPruneStat, error) {
 	defer mxPruneTookAgg.ObserveDuration(time.Now())
 
 	if limit == 0 {
@@ -1169,14 +1135,14 @@ func (ac *AggregatorRoTx) Prune(ctx context.Context, tx kv.RwTx, limit uint64, w
 	aggStat := newAggregatorPruneStat()
 	for id, d := range ac.d {
 		var err error
-		aggStat.Domains[ac.d[id].d.filenameBase], err = d.Prune(ctx, tx, step, txFrom, txTo, limit, withWarmup, logEvery)
+		aggStat.Domains[ac.d[id].d.filenameBase], err = d.Prune(ctx, tx, step, txFrom, txTo, limit, logEvery)
 		if err != nil {
 			return aggStat, err
 		}
 	}
 	var stats [kv.StandaloneIdxLen]*InvertedIndexPruneStat
 	for i := 0; i < int(kv.StandaloneIdxLen); i++ {
-		stat, err := ac.iis[i].Prune(ctx, tx, txFrom, txTo, limit, logEvery, false, withWarmup, nil)
+		stat, err := ac.iis[i].Prune(ctx, tx, txFrom, txTo, limit, logEvery, false, nil)
 		if err != nil {
 			return nil, err
 		}
@@ -1189,7 +1155,7 @@ func (ac *AggregatorRoTx) Prune(ctx context.Context, tx kv.RwTx, limit uint64, w
 
 	for i := 0; i < int(kv.AppendableLen); i++ {
 		var err error
-		aggStat.Appendable[ac.appendable[i].ap.filenameBase], err = ac.appendable[i].Prune(ctx, tx, txFrom, txTo, limit, logEvery, false, withWarmup, nil)
+		aggStat.Appendable[ac.appendable[i].ap.filenameBase], err = ac.appendable[i].Prune(ctx, tx, txFrom, txTo, limit, logEvery, false, nil)
 		if err != nil {
 			return nil, err
 		}

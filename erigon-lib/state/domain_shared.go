@@ -183,20 +183,19 @@ func (sd *SharedDomains) Unwind(ctx context.Context, rwTx kv.RwTx, blockUnwindTo
 		return err
 	}
 
-	withWarmup := false
 	for idx, d := range sd.aggTx.d {
 		if err := d.Unwind(ctx, rwTx, step, txUnwindTo, changeset[idx]); err != nil {
 			return err
 		}
 	}
 	for _, ii := range sd.aggTx.iis {
-		if err := ii.Unwind(ctx, rwTx, txUnwindTo, math.MaxUint64, math.MaxUint64, logEvery, true, withWarmup, nil); err != nil {
+		if err := ii.Unwind(ctx, rwTx, txUnwindTo, math.MaxUint64, math.MaxUint64, logEvery, true, nil); err != nil {
 			return err
 		}
 	}
 
 	for _, ap := range sd.aggTx.appendable {
-		if err := ap.Unwind(ctx, rwTx, txUnwindTo, math.MaxUint64, math.MaxUint64, logEvery, true, withWarmup, nil); err != nil {
+		if err := ap.Unwind(ctx, rwTx, txUnwindTo, math.MaxUint64, math.MaxUint64, logEvery, true, nil); err != nil {
 			return err
 		}
 	}
