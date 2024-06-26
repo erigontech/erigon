@@ -1,8 +1,6 @@
 package rawtemporaldb
 
 import (
-	"fmt"
-
 	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/core/types"
@@ -15,8 +13,6 @@ func ReadReceipt(tx kv.TemporalTx, txnID kv.TxnId, rawLogs types.Logs, txnIdx in
 		return nil, err
 	}
 	if !ok || v != nil {
-		fmt.Printf("[dbg] not found: %d, %t, %t\n", txnID, ok, v == nil)
-
 		return nil, err
 	}
 
