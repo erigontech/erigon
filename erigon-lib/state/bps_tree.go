@@ -6,6 +6,7 @@ import (
 	"fmt"
 
 	"github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/log/v3"
 	"github.com/ledgerwatch/erigon-lib/recsplit/eliasfano32"
 )
 
@@ -117,12 +118,16 @@ func (b *BpsTree) WarmUp(kv ArchiveGetter) error {
 	if k == 0 {
 		return nil
 	}
+	logger := log.New()
+
+	// Value cacheNodesPerM should be tuned along with M. For M=256, cacheNodesPerM=2 is optimal, while 8 could be already too much.
+	// `cacheNodesPerM = 1` means that we put only each parent node into cache, while `cacheNodesPerM = M` means that we put all nodes into cache.
+	cacheNodesPerM := uint64(2) // could increase to put more nodes into cache from one list of childs
 	// d := logBase(k, b.M)
-	cacheEvery := uint64(8) // could increase to put less nodes into cache
 	mx := make([][]Node, 1) // usually d+1 but for experiments we put them all into flat list
 
 	l := int(0)
-	for ik := uint64(0); ik < k; ik += b.M / cacheEvery {
+	for ik := uint64(0); ik < k; ik += b.M / cacheNodesPerM {
 		_, key, err := b.keyCmpFunc(nil, ik, kv)
 		if err != nil {
 			return err
@@ -145,9 +150,9 @@ func (b *BpsTree) WarmUp(kv ArchiveGetter) error {
 				ll[j] = mx[i][j].di
 				// fmt.Printf("mx[%d][%d] %x %d %d\n", i, j, mx[i][j].prefix, mx[i][j].off, mx[i][j].di)
 			}
-			fmt.Printf("mx[%s][%d] %d %v\n", kv.FileName(), i, len(mx[i]), ll)
+			logger.Debug("WarmUp", "file", kv.FileName(), "depth", i, "offsets", len(mx[i]), "v", fmt.Sprintf("%v", ll))
 		}
-		fmt.Printf("[cachedLookupMatrix %s] M: %d depth:%d; total offsets: %d; cached %d (%.2f%%);\n", kv.FileName(), b.M, len(mx), k, c, float64(c)/float64(k)*100)
+		logger.Debug("WarmUp", "M", b.M, "depth", len(mx), "total offsets", k, "cached", c, "percentage", float64(c)/float64(k)*100)
 	}
 	b.mx = mx
 	return nil
