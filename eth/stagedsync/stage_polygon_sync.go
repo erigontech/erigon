@@ -10,6 +10,7 @@ import (
 	"golang.org/x/sync/errgroup"
 
 	"github.com/ledgerwatch/erigon-lib/log/v3"
+	"github.com/ledgerwatch/erigon/polygon/polygoncommon"
 
 	"github.com/ledgerwatch/erigon-lib/chain"
 	"github.com/ledgerwatch/erigon-lib/common"
@@ -60,7 +61,9 @@ func NewPolygonSyncStageCfg(
 	blocksVerifier := polygonsync.VerifyBlocks
 	heimdallService := heimdall.NewHeimdall(heimdallClient, logger, heimdall.WithStore(storage))
 	borConfig := chainConfig.Bor.(*borcfg.BorConfig)
-	polygonBridge := bridge.NewBridge(dataDir, logger, borConfig, heimdallClient.FetchStateSyncEvents, stateReceiverABI)
+	polygonBridgeDB := polygoncommon.NewDatabase(dataDir, logger)
+	bridgeStore := bridge.NewStore(polygonBridgeDB)
+	polygonBridge := bridge.NewBridge(bridgeStore, logger, borConfig, heimdallClient.FetchStateSyncEvents, stateReceiverABI)
 	blockDownloader := polygonsync.NewBlockDownloader(
 		logger,
 		p2pService,
