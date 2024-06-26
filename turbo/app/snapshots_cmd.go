@@ -431,6 +431,7 @@ func doDebugKey(cliCtx *cli.Context) error {
 }
 
 func doSnapStat(cliCtx *cli.Context) error {
+	cliCtx.Set(logging.LogConsoleVerbosityFlag.Name, "debug")
 	logger, _, _, err := debug.Setup(cliCtx, true /* root logger */)
 	if err != nil {
 		return err
@@ -440,7 +441,6 @@ func doSnapStat(cliCtx *cli.Context) error {
 	dirs := datadir.New(cliCtx.String(utils.DataDirFlag.Name))
 	chainDB := dbCfg(kv.ChainDB, dirs.Chaindata).MustOpen()
 	defer chainDB.Close()
-
 	cfg := ethconfig.NewSnapCfg(true, false, true, true)
 
 	blockSnaps, borSnaps, caplinSnaps, _, agg, err := openSnaps(ctx, cfg, dirs, chainDB, logger)
