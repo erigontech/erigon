@@ -840,6 +840,7 @@ type MdbxCursor struct {
 	bucketName string
 	bucketCfg  kv.TableCfgItem
 	dbi        mdbx.DBI
+	id         uint64
 }
 
 func (db *MdbxKV) Env() *mdbx.Env {
@@ -1071,7 +1072,7 @@ func (tx *MdbxTx) Commit() error {
 		}
 		tx.db.leakDetector.Del(tx.id)
 	}()
-	tx.closeStreams()
+	tx.closeCursors()
 
 	//slowTx := 10 * time.Second
 	//if debug.SlowCommit() > 0 {
@@ -1122,7 +1123,7 @@ func (tx *MdbxTx) Rollback() {
 		}
 		tx.db.leakDetector.Del(tx.id)
 	}()
-	tx.closeStreams()
+	tx.closeCursors()
 	//tx.printDebugInfo()
 	tx.tx.Abort()
 }
@@ -1342,7 +1343,7 @@ func (tx *MdbxTx) stdCursor(bucket string) (kv.RwCursor, error) {
 	if tx.toCloseMap == nil {
 		tx.toCloseMap = make(map[uint64]kv.Closer)
 	}
-	tx.toCloseMap[c.ID] = c.c
+	tx.toCloseMap[c.id] = c.c
 	return c, nil
 }
 
