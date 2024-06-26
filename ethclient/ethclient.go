@@ -379,6 +379,8 @@ func (ec *Client) TransactionByHash(ctx context.Context, hash common.Hash) (tx t
 		return nil, false, err
 	} else if json == nil {
 		return nil, false, ethereum.NotFound
+	} else if json.Tx() == nil {
+		return nil, false, fmt.Errorf("server returned transaction without type")
 	} else if _, r, _ := json.Tx().RawSignatureValues(); r == nil {
 		return nil, false, fmt.Errorf("server returned transaction without signature")
 	}

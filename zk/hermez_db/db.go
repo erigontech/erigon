@@ -615,6 +615,34 @@ func (db *HermezDb) WriteBlockGlobalExitRoot(l2BlockNo uint64, ger common.Hash) 
 	return db.tx.Put(BLOCK_GLOBAL_EXIT_ROOTS, Uint64ToBytes(l2BlockNo), ger.Bytes())
 }
 
+func (db *HermezDbReader) GetLastBlockGlobalExitRoot(l2BlockNo uint64) (common.Hash, uint64, error) {
+	c, err := db.tx.Cursor(BLOCK_GLOBAL_EXIT_ROOTS)
+	if err != nil {
+		return common.Hash{}, 0, err
+	}
+	defer c.Close()
+
+	var ger common.Hash
+	var k, v []byte
+	var currentBlockNumber, lastBlockNumber uint64
+	for k, v, err = c.First(); k != nil; k, v, err = c.Next() {
+		if err != nil {
+			break
+		}
+		currentBlockNumber = BytesToUint64(k)
+		if currentBlockNumber > l2BlockNo {
+			break
+		}
+
+		if len(v) > 0 && currentBlockNumber > lastBlockNumber && currentBlockNumber <= l2BlockNo {
+			ger = common.BytesToHash(v)
+			lastBlockNumber = currentBlockNumber
+		}
+	}
+
+	return ger, lastBlockNumber, err
+}
+
 func (db *HermezDbReader) GetBlockGlobalExitRoot(l2BlockNo uint64) (common.Hash, error) {
 	bytes, err := db.tx.GetOne(BLOCK_GLOBAL_EXIT_ROOTS, Uint64ToBytes(l2BlockNo))
 	if err != nil {
@@ -742,6 +770,36 @@ func (db *HermezDbReader) GetBatchGlobalExitRoots(fromBatchNum, toBatchNum uint6
 	}
 
 	return &gers, err
+}
+
+func (db *HermezDbReader) GetLastBatchGlobalExitRoot(batchNum uint64) (*dstypes.GerUpdate, uint64, error) {
+	c, err := db.tx.Cursor(GLOBAL_EXIT_ROOTS_BATCHES)
+	if err != nil {
+		return nil, 0, err
+	}
+	defer c.Close()
+
+	var ger *dstypes.GerUpdate
+	var k, v []byte
+	var lastWrittenbatcNo, currentBatchNo uint64
+	for k, v, err = c.First(); k != nil; k, v, err = c.Next() {
+		if err != nil {
+			break
+		}
+		currentBatchNo := BytesToUint64(k)
+		if len(v) > 0 && currentBatchNo > lastWrittenbatcNo && currentBatchNo <= batchNum {
+			ger, err = dstypes.DecodeGerUpdate(v)
+			if err != nil {
+				return nil, 0, err
+			}
+			lastWrittenbatcNo = currentBatchNo
+			if currentBatchNo == batchNum {
+				continue
+			}
+		}
+	}
+
+	return ger, currentBatchNo, err
 }
 
 func (db *HermezDbReader) GetBatchGlobalExitRootsProto(fromBatchNum, toBatchNum uint64) ([]dstypes.GerUpdateProto, error) {

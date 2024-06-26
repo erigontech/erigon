@@ -302,13 +302,45 @@ func (api *ZkEvmAPIImpl) GetBatchByNumber(ctx context.Context, batchNumber rpc.B
 		}
 	}
 
+	//for consistency with leagacy node, return nil if no transactions
+	if len(batch.Transactions) == 0 {
+		batch.Transactions = nil
+	}
+
 	// global exit root of batch
-	ger, err := hermezDb.GetBatchGlobalExitRoot(bn)
+	batchGer, foundBatchGerNumber, err := hermezDb.GetLastBatchGlobalExitRoot(bn)
 	if err != nil {
 		return nil, err
 	}
+
+	// get last block in batch
+	lastBlockInbatch, err := hermezDb.GetHighestBlockInBatch(bn)
+	if err != nil {
+		return nil, err
+	}
+
+	// get latest found ger by block
+	latestBlockHer, blockNum, err := hermezDb.GetLastBlockGlobalExitRoot(lastBlockInbatch)
+	if err != nil {
+		return nil, err
+	}
+
+	//get latest block ger batch number
+	latestBlockGerBatchNumber, err := hermezDb.GetBatchNoByL2Block(blockNum)
+	if err != nil {
+		return nil, err
+	}
+
+	var ger *common.Hash
+	if batchGer != nil {
+		ger = &batchGer.GlobalExitRoot
+	}
+	if foundBatchGerNumber < latestBlockGerBatchNumber {
+		ger = &latestBlockHer
+	}
+
 	if ger != nil {
-		batch.GlobalExitRoot = ger.GlobalExitRoot
+		batch.GlobalExitRoot = *ger
 	}
 
 	// sequence
