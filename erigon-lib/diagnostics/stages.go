@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 
+	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/log/v3"
 )
@@ -304,7 +305,7 @@ func SyncStagesFromTX(tx kv.Tx) ([]byte, error) {
 		return nil, err
 	}
 
-	return bytes, nil
+	return common.CopyBytes(bytes), nil
 }
 
 func ParseStagesList(data []byte) (info []SyncStage) {

@@ -7,6 +7,7 @@ import (
 	"github.com/shirou/gopsutil/v3/disk"
 	"github.com/shirou/gopsutil/v3/mem"
 
+	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/diskutils"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/log/v3"
@@ -135,7 +136,7 @@ func ReadRAMInfoFromTx(tx kv.Tx) ([]byte, error) {
 		return nil, err
 	}
 
-	return bytes, nil
+	return common.CopyBytes(bytes), nil
 }
 
 func ParseRamInfo(data []byte) (info RAMInfo) {
@@ -155,7 +156,7 @@ func ReadCPUInfoFromTx(tx kv.Tx) ([]byte, error) {
 		return nil, err
 	}
 
-	return bytes, nil
+	return common.CopyBytes(bytes), nil
 }
 
 func ParseCPUInfo(data []byte) (info CPUInfo) {
@@ -175,7 +176,7 @@ func ReadDiskInfoFromTx(tx kv.Tx) ([]byte, error) {
 		return nil, err
 	}
 
-	return bytes, nil
+	return common.CopyBytes(bytes), nil
 }
 
 func ParseDiskInfo(data []byte) (info DiskInfo) {
