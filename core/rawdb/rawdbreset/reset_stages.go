@@ -177,26 +177,17 @@ func ResetTxLookup(tx kv.RwTx) error {
 }
 
 var Tables = map[stages.SyncStage][]string{
-	stages.HashState:           {kv.HashedAccounts, kv.HashedStorage, kv.ContractCode},
-	stages.IntermediateHashes:  {kv.TrieOfAccounts, kv.TrieOfStorage},
-	stages.CallTraces:          {kv.CallFromIndex, kv.CallToIndex},
-	stages.LogIndex:            {kv.LogAddressIndex, kv.LogTopicIndex},
-	stages.AccountHistoryIndex: {kv.E2AccountsHistory},
-	stages.StorageHistoryIndex: {kv.E2StorageHistory},
-	stages.CustomTrace:         {},
-	stages.Finish:              {},
+	stages.HashState:          {kv.HashedAccounts, kv.HashedStorage, kv.ContractCode},
+	stages.IntermediateHashes: {kv.TrieOfAccounts, kv.TrieOfStorage},
+	stages.CustomTrace:        {},
+	stages.Finish:             {},
 }
 var stateBuckets = []string{
-	kv.PlainState, kv.HashedAccounts, kv.HashedStorage, kv.TrieOfAccounts, kv.TrieOfStorage,
 	kv.Epoch, kv.PendingEpoch, kv.BorReceipts,
 	kv.Code, kv.PlainContractCode, kv.ContractCode, kv.IncarnationMap,
 }
 var stateHistoryBuckets = []string{
-	kv.AccountChangeSet,
-	kv.StorageChangeSet,
 	kv.Receipts,
-	kv.Log,
-	kv.CallTraceSet,
 }
 var stateHistoryV3Buckets = []string{
 	kv.TblAccountHistoryKeys, kv.TblAccountHistoryVals, kv.TblAccountIdx,
@@ -211,7 +202,6 @@ var stateV3Buckets = []string{
 	kv.TblAccountKeys, kv.TblStorageKeys, kv.TblCodeKeys, kv.TblCommitmentKeys,
 	kv.TblAccountVals, kv.TblStorageVals, kv.TblCodeVals, kv.TblCommitmentVals,
 	kv.TblCommitmentHistoryKeys, kv.TblCommitmentHistoryVals, kv.TblCommitmentIdx,
-	//kv.TblGasUsedHistoryKeys, kv.TblGasUsedHistoryVals, kv.TblGasUsedIdx,
 	kv.TblPruningProgress,
 	kv.ChangeSets3,
 }
