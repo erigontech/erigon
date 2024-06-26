@@ -1954,7 +1954,6 @@ func (ac *AggregatorRoTx) AppendableGet(name kv.Appendable, ts kv.TxnId, tx kv.T
 	return ac.appendable[name].Get(ts, tx)
 }
 func (ac *AggregatorRoTx) Appendable(name kv.Appendable) *AppendableRoTx {
-	fmt.Printf("dbg tbl: %s\n", ac.appendable[name].ap.table)
 	return ac.appendable[name]
 }
 
