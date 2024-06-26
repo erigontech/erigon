@@ -187,6 +187,8 @@ type Hooks struct {
 // for tracing and reporting.
 type BalanceChangeReason byte
 
+//go:generate stringer -type=BalanceChangeReason -output gen_balance_change_reason_stringer.go
+
 const (
 	BalanceChangeUnspecified BalanceChangeReason = 0
 
@@ -241,6 +243,8 @@ const (
 // They can be recognized easily by their name, those that start with `GasChangeTx` are emitted
 // once per transaction, while those that start with `GasChangeCall` are emitted on a call basis.
 type GasChangeReason byte
+
+//go:generate stringer -type=GasChangeReason -output gen_gas_change_reason_stringer.go
 
 const (
 	GasChangeUnspecified GasChangeReason = 0

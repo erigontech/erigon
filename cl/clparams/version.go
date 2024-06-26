@@ -13,6 +13,25 @@ const (
 	ElectraVersion   StateVersion = 5
 )
 
+func (v StateVersion) String() string {
+	switch v {
+	case Phase0Version:
+		return "phase0"
+	case AltairVersion:
+		return "altair"
+	case BellatrixVersion:
+		return "bellatrix"
+	case CapellaVersion:
+		return "capella"
+	case DenebVersion:
+		return "deneb"
+	case ElectraVersion:
+		return "electra"
+	default:
+		panic("unsupported fork version")
+	}
+}
+
 // stringToClVersion converts the string to the current state version.
 func StringToClVersion(s string) (StateVersion, error) {
 	switch s {
@@ -34,20 +53,5 @@ func StringToClVersion(s string) (StateVersion, error) {
 }
 
 func ClVersionToString(s StateVersion) string {
-	switch s {
-	case Phase0Version:
-		return "phase0"
-	case AltairVersion:
-		return "altair"
-	case BellatrixVersion:
-		return "bellatrix"
-	case CapellaVersion:
-		return "capella"
-	case DenebVersion:
-		return "deneb"
-	case ElectraVersion:
-		return "electra"
-	default:
-		panic("unsupported fork version")
-	}
+	return s.String()
 }

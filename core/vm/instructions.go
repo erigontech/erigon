@@ -912,10 +912,10 @@ func opSelfdestruct(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext
 	balance := *interpreter.evm.IntraBlockState().GetBalance(callerAddr)
 	interpreter.evm.IntraBlockState().AddBalance(beneficiaryAddr, &balance, tracing.BalanceIncreaseSelfdestruct)
 	interpreter.evm.IntraBlockState().Selfdestruct(callerAddr)
-	if interpreter.evm.Config().Tracer.OnEnter != nil {
+	if interpreter.evm.Config().Tracer != nil && interpreter.evm.Config().Tracer.OnEnter != nil {
 		interpreter.evm.Config().Tracer.OnEnter(interpreter.depth, byte(SELFDESTRUCT), scope.Contract.Address(), beneficiary.Bytes20(), false, []byte{}, 0, &balance, nil)
 	}
-	if interpreter.evm.Config().Tracer.OnExit != nil {
+	if interpreter.evm.Config().Tracer != nil && interpreter.evm.Config().Tracer.OnExit != nil {
 		interpreter.evm.Config().Tracer.OnExit(interpreter.depth, []byte{}, 0, nil, false)
 	}
 	return nil, errStopToken
@@ -932,13 +932,11 @@ func opSelfdestruct6780(pc *uint64, interpreter *EVMInterpreter, scope *ScopeCon
 	interpreter.evm.IntraBlockState().SubBalance(callerAddr, &balance, tracing.BalanceDecreaseSelfdestruct)
 	interpreter.evm.IntraBlockState().AddBalance(beneficiaryAddr, &balance, tracing.BalanceIncreaseSelfdestruct)
 	interpreter.evm.IntraBlockState().Selfdestruct6780(callerAddr)
-	if interpreter.evm.Config().Debug {
-		if interpreter.cfg.Tracer.OnEnter != nil {
-			interpreter.cfg.Tracer.OnEnter(interpreter.depth, byte(SELFDESTRUCT), scope.Contract.Address(), beneficiary.Bytes20(), false, []byte{}, 0, &balance, nil)
-		}
-		if interpreter.cfg.Tracer.OnExit != nil {
-			interpreter.cfg.Tracer.OnExit(interpreter.depth, []byte{}, 0, nil, false)
-		}
+	if interpreter.evm.Config().Tracer != nil && interpreter.evm.Config().Tracer.OnEnter != nil {
+		interpreter.cfg.Tracer.OnEnter(interpreter.depth, byte(SELFDESTRUCT), scope.Contract.Address(), beneficiary.Bytes20(), false, []byte{}, 0, &balance, nil)
+	}
+	if interpreter.evm.Config().Tracer != nil && interpreter.evm.Config().Tracer.OnExit != nil {
+		interpreter.cfg.Tracer.OnExit(interpreter.depth, []byte{}, 0, nil, false)
 	}
 	return nil, errStopToken
 }

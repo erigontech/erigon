@@ -85,7 +85,7 @@ comes with these aspects:
 1. It allows matching a part of a sequence while ignoring the rest of that sequence.
 2. It can match types, letting us avoid the type-reflection functions in the semantics.
 3. It can bind variables, to be used in the other two parts of the rule - substitution and guard.
-We hope that the destructuring aspect of pattern matching will not be required for our purposes.
+   We hope that the destructuring aspect of pattern matching will not be required for our purposes.
 
 In the substitution, we describe how the part matched by the pattern in the initial state will look like
 in the end state. Substitution can use any variables bound by the pattern.
@@ -98,7 +98,7 @@ we expect that in a correct semantics, at most one rule is applicable in any giv
 Our gas purchasing transition can be expressed by the following rule:
 
 ```
-state, tx ==> store(state, tx.sender, account{
+state, txn ==> store(state, tx.sender, account{
                                           balance: prevbalance - cost,
                                           nonce: prevaccount.nonce,
                                           codelength: prevaccount.codelength,

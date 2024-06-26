@@ -30,7 +30,7 @@ import (
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/core/vm"
 	"github.com/ledgerwatch/erigon/eth/ethconfig"
-	"github.com/ledgerwatch/erigon/eth/stagedsync"
+	stagedsync "github.com/ledgerwatch/erigon/eth/stagedsync"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 	"github.com/ledgerwatch/erigon/eth/tracers"
 	"github.com/ledgerwatch/erigon/p2p"
@@ -610,12 +610,6 @@ func NewDefaultStages(ctx context.Context,
 		}
 	}
 
-	var depositContract libcommon.Address
-	if cfg.Genesis != nil {
-		depositContract = cfg.Genesis.Config.DepositContract
-	}
-
-	historyV3 := true
 	return stagedsync.DefaultStages(ctx,
 		stagedsync.StageSnapshotsCfg(db, *controlServer.ChainConfig, cfg.Sync, dirs, blockRetire, snapDownloader, blockReader, notifications, agg, cfg.InternalCL && cfg.CaplinConfig.Backfilling, cfg.CaplinConfig.BlobBackfilling, silkworm, cfg.Prune),
 		stagedsync.StageHeadersCfg(db, controlServer.Hd, controlServer.Bd, *controlServer.ChainConfig, cfg.Sync, controlServer.SendHeaderRequest, controlServer.PropagateNewBlockHashes, controlServer.Penalize, cfg.BatchSize, p2pCfg.NoDiscovery, blockReader, blockWriter, dirs.Tmp, notifications, loopBreakCheck),
@@ -642,14 +636,8 @@ func NewDefaultStages(ctx context.Context,
 			agg,
 			SilkwormForExecutionStage(silkworm, cfg),
 		),
-		stagedsync.StageHashStateCfg(db, dirs),
-		stagedsync.StageTrieCfg(db, true, true, false, dirs.Tmp, blockReader, controlServer.Hd, historyV3, agg),
-		stagedsync.StageHistoryCfg(db, cfg.Prune, dirs.Tmp),
-		stagedsync.StageLogIndexCfg(db, cfg.Prune, dirs.Tmp, &depositContract),
-		stagedsync.StageCallTracesCfg(db, cfg.Prune, 0, dirs.Tmp),
 		stagedsync.StageTxLookupCfg(db, cfg.Prune, dirs.Tmp, controlServer.ChainConfig.Bor, blockReader),
-		stagedsync.StageFinishCfg(db, dirs.Tmp, forkValidator),
-		runInTestMode)
+		stagedsync.StageFinishCfg(db, dirs.Tmp, forkValidator), runInTestMode)
 }
 
 func NewPipelineStages(ctx context.Context,
@@ -684,9 +672,9 @@ func NewPipelineStages(ctx context.Context,
 	if cfg.Genesis != nil {
 		depositContract = cfg.Genesis.Config.DepositContract
 	}
+	_ = depositContract
 
 	if len(cfg.Sync.UploadLocation) == 0 {
-		historyV3 := true
 		return stagedsync.PipelineStages(ctx,
 			stagedsync.StageSnapshotsCfg(db, *controlServer.ChainConfig, cfg.Sync, dirs, blockRetire, snapDownloader, blockReader, notifications, agg, cfg.InternalCL && cfg.CaplinConfig.Backfilling, cfg.CaplinConfig.BlobBackfilling, silkworm, cfg.Prune),
 			stagedsync.StageBlockHashesCfg(db, dirs.Tmp, controlServer.ChainConfig, blockWriter),
@@ -710,17 +698,10 @@ func NewPipelineStages(ctx context.Context,
 				agg,
 				SilkwormForExecutionStage(silkworm, cfg),
 			),
-			stagedsync.StageHashStateCfg(db, dirs),
-			stagedsync.StageTrieCfg(db, checkStateRoot, true, false, dirs.Tmp, blockReader, controlServer.Hd, historyV3, agg),
-			stagedsync.StageHistoryCfg(db, cfg.Prune, dirs.Tmp),
-			stagedsync.StageLogIndexCfg(db, cfg.Prune, dirs.Tmp, &depositContract),
-			stagedsync.StageCallTracesCfg(db, cfg.Prune, 0, dirs.Tmp),
 			stagedsync.StageTxLookupCfg(db, cfg.Prune, dirs.Tmp, controlServer.ChainConfig.Bor, blockReader),
-			stagedsync.StageFinishCfg(db, dirs.Tmp, forkValidator),
-			runInTestMode)
+			stagedsync.StageFinishCfg(db, dirs.Tmp, forkValidator), runInTestMode)
 	}
 
-	historyV3 := true
 	return stagedsync.UploaderPipelineStages(ctx,
 		stagedsync.StageSnapshotsCfg(db, *controlServer.ChainConfig, cfg.Sync, dirs, blockRetire, snapDownloader, blockReader, notifications, agg, cfg.InternalCL && cfg.CaplinConfig.Backfilling, cfg.CaplinConfig.BlobBackfilling, silkworm, cfg.Prune),
 		stagedsync.StageHeadersCfg(db, controlServer.Hd, controlServer.Bd, *controlServer.ChainConfig, cfg.Sync, controlServer.SendHeaderRequest, controlServer.PropagateNewBlockHashes, controlServer.Penalize, cfg.BatchSize, p2pCfg.NoDiscovery, blockReader, blockWriter, dirs.Tmp, notifications, loopBreakCheck),
@@ -745,15 +726,7 @@ func NewPipelineStages(ctx context.Context,
 			cfg.Sync,
 			agg,
 			SilkwormForExecutionStage(silkworm, cfg),
-		),
-		stagedsync.StageHashStateCfg(db, dirs),
-		stagedsync.StageTrieCfg(db, checkStateRoot, true, false, dirs.Tmp, blockReader, controlServer.Hd, historyV3, agg),
-		stagedsync.StageHistoryCfg(db, cfg.Prune, dirs.Tmp),
-		stagedsync.StageLogIndexCfg(db, cfg.Prune, dirs.Tmp, &depositContract),
-		stagedsync.StageCallTracesCfg(db, cfg.Prune, 0, dirs.Tmp),
-		stagedsync.StageTxLookupCfg(db, cfg.Prune, dirs.Tmp, controlServer.ChainConfig.Bor, blockReader),
-		stagedsync.StageFinishCfg(db, dirs.Tmp, forkValidator),
-		runInTestMode)
+		), stagedsync.StageTxLookupCfg(db, cfg.Prune, dirs.Tmp, controlServer.ChainConfig.Bor, blockReader), stagedsync.StageFinishCfg(db, dirs.Tmp, forkValidator), runInTestMode)
 
 }
 
@@ -764,36 +737,27 @@ func NewInMemoryExecution(ctx context.Context, db kv.RwDB, cfg *ethconfig.Config
 	if tracer != nil {
 		tracingHooks = tracer.Hooks
 	}
-
-	historyV3 := true
 	return stagedsync.New(
 		cfg.Sync,
-		stagedsync.StateStages(ctx,
-			stagedsync.StageHeadersCfg(db, controlServer.Hd, controlServer.Bd, *controlServer.ChainConfig, cfg.Sync, controlServer.SendHeaderRequest, controlServer.PropagateNewBlockHashes, controlServer.Penalize, cfg.BatchSize, false, blockReader, blockWriter, dirs.Tmp, nil, nil),
-			stagedsync.StageBodiesCfg(db, controlServer.Bd, controlServer.SendBodyRequest, controlServer.Penalize, controlServer.BroadcastNewBlock, cfg.Sync.BodyDownloadTimeoutSeconds, *controlServer.ChainConfig, blockReader, blockWriter, nil),
-			stagedsync.StageBlockHashesCfg(db, dirs.Tmp, controlServer.ChainConfig, blockWriter),
-			stagedsync.StageSendersCfg(db, controlServer.ChainConfig, cfg.Sync, true, dirs.Tmp, cfg.Prune, blockReader, controlServer.Hd, nil),
-			stagedsync.StageExecuteBlocksCfg(
-				db,
-				cfg.Prune,
-				cfg.BatchSize,
-				nil,
-				controlServer.ChainConfig,
-				controlServer.Engine,
-				&vm.Config{Tracer: tracingHooks},
-				notifications.Accumulator,
-				cfg.StateStream,
-				true,
-				cfg.Dirs,
-				blockReader,
-				controlServer.Hd,
-				cfg.Genesis,
-				cfg.Sync,
-				agg,
-				SilkwormForExecutionStage(silkworm, cfg),
-			),
-			stagedsync.StageHashStateCfg(db, dirs),
-			stagedsync.StageTrieCfg(db, true, true, true, dirs.Tmp, blockReader, controlServer.Hd, historyV3, agg)),
+		stagedsync.StateStages(ctx, stagedsync.StageHeadersCfg(db, controlServer.Hd, controlServer.Bd, *controlServer.ChainConfig, cfg.Sync, controlServer.SendHeaderRequest, controlServer.PropagateNewBlockHashes, controlServer.Penalize, cfg.BatchSize, false, blockReader, blockWriter, dirs.Tmp, nil, nil), stagedsync.StageBodiesCfg(db, controlServer.Bd, controlServer.SendBodyRequest, controlServer.Penalize, controlServer.BroadcastNewBlock, cfg.Sync.BodyDownloadTimeoutSeconds, *controlServer.ChainConfig, blockReader, blockWriter, nil), stagedsync.StageBlockHashesCfg(db, dirs.Tmp, controlServer.ChainConfig, blockWriter), stagedsync.StageSendersCfg(db, controlServer.ChainConfig, cfg.Sync, true, dirs.Tmp, cfg.Prune, blockReader, controlServer.Hd, nil), stagedsync.StageExecuteBlocksCfg(
+			db,
+			cfg.Prune,
+			cfg.BatchSize,
+			nil,
+			controlServer.ChainConfig,
+			controlServer.Engine,
+			&vm.Config{Tracer: tracingHooks},
+			notifications.Accumulator,
+			cfg.StateStream,
+			true,
+			cfg.Dirs,
+			blockReader,
+			controlServer.Hd,
+			cfg.Genesis,
+			cfg.Sync,
+			agg,
+			SilkwormForExecutionStage(silkworm, cfg),
+		)),
 		stagedsync.StateUnwindOrder,
 		nil, /* pruneOrder */
 		logger,

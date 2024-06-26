@@ -265,7 +265,7 @@ func TestReplaceWithHigherFee(t *testing.T) {
 		assert.True(ok)
 		assert.Equal(uint64(3), nonce)
 	}
-	// Bumped both tip and feeCap by 10%, tx accepted
+	// Bumped both tip and feeCap by 10%, txn accepted
 	{
 		txSlots := types.TxSlots{}
 		txSlot := &types.TxSlot{
@@ -344,7 +344,6 @@ func TestReverseNonces(t *testing.T) {
 			assert.Equal(txpoolcfg.Success, reason, reason.String())
 		}
 	}
-	fmt.Printf("AFTER TX 1\n")
 	select {
 	case annoucements := <-ch:
 		for i := 0; i < annoucements.Len(); i++ {
@@ -372,7 +371,6 @@ func TestReverseNonces(t *testing.T) {
 			assert.Equal(txpoolcfg.Success, reason, reason.String())
 		}
 	}
-	fmt.Printf("AFTER TX 2\n")
 	select {
 	case annoucements := <-ch:
 		for i := 0; i < annoucements.Len(); i++ {
@@ -400,7 +398,6 @@ func TestReverseNonces(t *testing.T) {
 			assert.Equal(txpoolcfg.Success, reason, reason.String())
 		}
 	}
-	fmt.Printf("AFTER TX 3\n")
 	select {
 	case annoucements := <-ch:
 		for i := 0; i < annoucements.Len(); i++ {
@@ -810,7 +807,7 @@ func TestBlobTxReplacement(t *testing.T) {
 	}
 
 	{
-		// try to replace it with 5% extra blob gas, 2x higher tx fee - should fail
+		// try to replace it with 5% extra blob gas, 2x higher txn fee - should fail
 		txSlots := types.TxSlots{}
 		blobTxn := makeBlobTx()
 		blobTxn.Nonce = 0x2
@@ -903,7 +900,7 @@ func TestBlobTxReplacement(t *testing.T) {
 	}
 }
 
-// Todo, make the tx more realistic with good values
+// Todo, make the txn more realistic with good values
 func makeBlobTx() types.TxSlot {
 
 	bodyRlp := hexutility.MustDecodeHex(BodyRlpHex)
@@ -1039,7 +1036,7 @@ func TestDropRemoteAtNoGossip(t *testing.T) {
 
 	}
 
-	// 2. Try same Tx, but as remote; tx must be dropped
+	// 2. Try same Tx, but as remote; txn must be dropped
 	{
 		var txSlots types.TxSlots
 		txSlot := &types.TxSlot{
@@ -1136,7 +1133,7 @@ func TestBlobSlots(t *testing.T) {
 		}
 	}
 
-	// Adding another blob tx should reject
+	// Adding another blob txn should reject
 	txSlots := types.TxSlots{}
 	addr[0] = 11
 	blobTxn := makeBlobTx()

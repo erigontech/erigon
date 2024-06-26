@@ -191,12 +191,6 @@ func (t *prestateTracer) OnOpcode(pc uint64, opcode byte, gas, cost uint64, scop
 func (t *prestateTracer) OnTxStart(env *tracing.VMContext, tx types.Transaction, from libcommon.Address) {
 	t.env = env
 
-	signer := types.MakeSigner(env.ChainConfig, env.BlockNumber, env.Time)
-	from, err := tx.Sender(*signer)
-	if err != nil {
-		t.Stop(fmt.Errorf("could not recover sender address: %v", err))
-		return
-	}
 	if tx.GetTo() == nil {
 		t.create = true
 		t.to = crypto.CreateAddress(from, env.IntraBlockState.GetNonce(from))

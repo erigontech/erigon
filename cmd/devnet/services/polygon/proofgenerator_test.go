@@ -105,9 +105,9 @@ func (rg *requestGenerator) GetBlockByNumber(ctx context.Context, blockNum rpc.B
 
 		transactions := make([]*jsonrpc.RPCTransaction, len(block.Transactions()))
 
-		for i, tx := range block.Transactions() {
-			rg.txBlockMap[tx.Hash()] = block
-			transactions[i] = jsonrpc.NewRPCTransaction(tx, block.Hash(), blockNum.Uint64(), uint64(i), block.BaseFee())
+		for i, txn := range block.Transactions() {
+			rg.txBlockMap[txn.Hash()] = block
+			transactions[i] = jsonrpc.NewRPCTransaction(txn, block.Hash(), blockNum.Uint64(), uint64(i), block.BaseFee())
 		}
 
 		return &requests.Block{
@@ -200,7 +200,7 @@ func (reader blockReader) BlockByNumber(ctx context.Context, db kv.Tx, number ui
 	return nil, fmt.Errorf("block not found")
 }
 
-func (reader blockReader) HeaderByNumber(ctx context.Context, tx kv.Getter, blockNum uint64) (*types.Header, error) {
+func (reader blockReader) HeaderByNumber(ctx context.Context, txn kv.Getter, blockNum uint64) (*types.Header, error) {
 	if int(blockNum) < len(reader.chain.Headers) {
 		return reader.chain.Headers[blockNum], nil
 	}

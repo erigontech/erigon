@@ -88,17 +88,12 @@ func (w *BlockWriter) TruncateBodies(db kv.RoDB, tx kv.RwTx, from uint64) error 
 	}
 
 	if err := backup.ClearTables(context.Background(), db, tx,
-		kv.NonCanonicalTxs,
 		kv.EthTx,
 		kv.MaxTxNum,
 	); err != nil {
 		return err
 	}
 	if err := rawdb.ResetSequence(tx, kv.EthTx, 0); err != nil {
-		return err
-	}
-
-	if err := rawdb.ResetSequence(tx, kv.NonCanonicalTxs, 0); err != nil {
 		return err
 	}
 	return nil
@@ -111,7 +106,7 @@ var (
 
 // PruneBlocks - [1, to) old blocks after moving it to snapshots.
 // keeps genesis in db
-// doesn't change sequences of kv.EthTx and kv.NonCanonicalTxs
+// doesn't change sequences of kv.EthTx
 // doesn't delete Receipts, Senders, Canonical markers, TotalDifficulty
 func (w *BlockWriter) PruneBlocks(ctx context.Context, tx kv.RwTx, blockTo uint64, blocksDeleteLimit int) (deleted int, err error) {
 	defer mxPruneTookBlocks.ObserveDuration(time.Now())
@@ -120,7 +115,7 @@ func (w *BlockWriter) PruneBlocks(ctx context.Context, tx kv.RwTx, blockTo uint6
 
 // PruneBorBlocks - [1, to) old blocks after moving it to snapshots.
 // keeps genesis in db
-// doesn't change sequences of kv.EthTx and kv.NonCanonicalTxs
+// doesn't change sequences of kv.EthTx
 // doesn't delete Receipts, Senders, Canonical markers, TotalDifficulty
 func (w *BlockWriter) PruneBorBlocks(ctx context.Context, tx kv.RwTx, blockTo uint64, blocksDeleteLimit int, SpanIdAt func(number uint64) uint64) (deleted int, err error) {
 	defer mxPruneTookBor.ObserveDuration(time.Now())

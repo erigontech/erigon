@@ -6,18 +6,16 @@ import (
 	"fmt"
 	"math/big"
 
-	"github.com/ledgerwatch/erigon-lib/common/hexutil"
-
 	"github.com/holiman/uint256"
 	"google.golang.org/grpc"
 
-	"github.com/ledgerwatch/erigon-lib/log/v3"
-
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/common/hexutil"
 	"github.com/ledgerwatch/erigon-lib/common/hexutility"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces"
 	txpool_proto "github.com/ledgerwatch/erigon-lib/gointerfaces/txpoolproto"
 	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/ledgerwatch/erigon-lib/log/v3"
 	types2 "github.com/ledgerwatch/erigon-lib/types"
 
 	"github.com/ledgerwatch/erigon/core"
@@ -25,6 +23,7 @@ import (
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/core/types/accounts"
 	"github.com/ledgerwatch/erigon/core/vm"
+	"github.com/ledgerwatch/erigon/core/vm/evmtypes"
 	"github.com/ledgerwatch/erigon/crypto"
 	"github.com/ledgerwatch/erigon/eth/tracers/logger"
 	"github.com/ledgerwatch/erigon/params"
@@ -112,7 +111,7 @@ func headerByNumberOrHash(ctx context.Context, tx kv.Tx, blockNrOrHash rpc.Block
 }
 
 // EstimateGas implements eth_estimateGas. Returns an estimate of how much gas is necessary to allow the transaction to complete. The transaction will not be added to the blockchain.
-func (api *APIImpl) EstimateGas(ctx context.Context, argsOrNil *ethapi2.CallArgs) (hexutil.Uint64, error) {
+func (api *APIImpl) EstimateGas(ctx context.Context, argsOrNil *ethapi2.CallArgs, blockNrOrHash *rpc.BlockNumberOrHash) (hexutil.Uint64, error) {
 	var args ethapi2.CallArgs
 	// if we actually get CallArgs here, we use them
 	if argsOrNil != nil {
@@ -136,39 +135,36 @@ func (api *APIImpl) EstimateGas(ctx context.Context, argsOrNil *ethapi2.CallArgs
 		args.From = new(libcommon.Address)
 	}
 
-	chainConfig, err := api.chainConfig(ctx, dbtx)
-	if err != nil {
-		return 0, err
+	bNrOrHash := rpc.BlockNumberOrHashWithNumber(rpc.PendingBlockNumber)
+	if blockNrOrHash != nil {
+		bNrOrHash = *blockNrOrHash
 	}
-
-	latestCanBlockNumber, latestCanHash, isLatest, err := rpchelper.GetCanonicalBlockNumber(latestNumOrHash, dbtx, api.filters) // DoCall cannot be executed on non-canonical blocks
-	if err != nil {
-		return 0, err
-	}
-
-	// try and get the block from the lru cache first then try DB before failing
-	block := api.tryBlockFromLru(latestCanHash)
-	if block == nil {
-		block, err = api.blockWithSenders(ctx, dbtx, latestCanHash, latestCanBlockNumber)
-		if err != nil {
-			return 0, err
-		}
-	}
-	if block == nil {
-		return 0, fmt.Errorf("could not find latest block in cache or db")
-	}
-
-	stateReader, err := rpchelper.CreateStateReaderFromBlockNumber(ctx, dbtx, latestCanBlockNumber, isLatest, 0, api.stateCache, chainConfig.ChainName)
-	if err != nil {
-		return 0, err
-	}
-	header := block.HeaderNoCopy()
 
 	// Determine the highest gas limit can be used during the estimation.
 	if args.Gas != nil && uint64(*args.Gas) >= params.TxGas {
 		hi = uint64(*args.Gas)
 	} else {
-		hi = header.GasLimit
+		// Retrieve the block to act as the gas ceiling
+		h, err := headerByNumberOrHash(ctx, dbtx, bNrOrHash, api)
+		if err != nil {
+			return 0, err
+		}
+		if h == nil {
+			// if a block number was supplied and there is no header return 0
+			if blockNrOrHash != nil {
+				return 0, nil
+			}
+
+			// block number not supplied, so we haven't found a pending block, read the latest block instead
+			h, err = headerByNumberOrHash(ctx, dbtx, latestNumOrHash, api)
+			if err != nil {
+				return 0, err
+			}
+			if h == nil {
+				return 0, nil
+			}
+		}
+		hi = h.GasLimit
 	}
 
 	var feeCap *big.Int
@@ -178,8 +174,6 @@ func (api *APIImpl) EstimateGas(ctx context.Context, argsOrNil *ethapi2.CallArgs
 		feeCap = args.GasPrice.ToInt()
 	} else if args.MaxFeePerGas != nil {
 		feeCap = args.MaxFeePerGas.ToInt()
-	} else if header.BaseFee != nil {
-		feeCap = new(big.Int).Set(header.BaseFee)
 	} else {
 		feeCap = libcommon.Big0
 	}
@@ -224,7 +218,34 @@ func (api *APIImpl) EstimateGas(ctx context.Context, argsOrNil *ethapi2.CallArgs
 	}
 	gasCap = hi
 
+	chainConfig, err := api.chainConfig(ctx, dbtx)
+	if err != nil {
+		return 0, err
+	}
 	engine := api.engine()
+
+	latestCanBlockNumber, latestCanHash, isLatest, err := rpchelper.GetCanonicalBlockNumber(latestNumOrHash, dbtx, api.filters) // DoCall cannot be executed on non-canonical blocks
+	if err != nil {
+		return 0, err
+	}
+
+	// try and get the block from the lru cache first then try DB before failing
+	block := api.tryBlockFromLru(latestCanHash)
+	if block == nil {
+		block, err = api.blockWithSenders(ctx, dbtx, latestCanHash, latestCanBlockNumber)
+		if err != nil {
+			return 0, err
+		}
+	}
+	if block == nil {
+		return 0, fmt.Errorf("could not find latest block in cache or db")
+	}
+
+	stateReader, err := rpchelper.CreateStateReaderFromBlockNumber(ctx, dbtx, latestCanBlockNumber, isLatest, 0, api.stateCache, chainConfig.ChainName)
+	if err != nil {
+		return 0, err
+	}
+	header := block.HeaderNoCopy()
 
 	caller, err := transactions.NewReusableCaller(engine, stateReader, nil, header, args, api.GasCap, latestNumOrHash, dbtx, api._blockReader, chainConfig, api.evmCallTimeout)
 	if err != nil {
@@ -232,7 +253,7 @@ func (api *APIImpl) EstimateGas(ctx context.Context, argsOrNil *ethapi2.CallArgs
 	}
 
 	// Create a helper to check if a gas allowance results in an executable transaction
-	executable := func(gas uint64) (bool, *core.ExecutionResult, error) {
+	executable := func(gas uint64) (bool, *evmtypes.ExecutionResult, error) {
 		result, err := caller.DoCallWithNewGas(ctx, gas)
 		if err != nil {
 			if errors.Is(err, core.ErrIntrinsicGas) {

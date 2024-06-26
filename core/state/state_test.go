@@ -19,6 +19,7 @@ package state
 import (
 	"bytes"
 	"context"
+	"github.com/ledgerwatch/erigon/core/rawdb"
 	"testing"
 
 	"github.com/ledgerwatch/erigon-lib/common/datadir"
@@ -118,7 +119,8 @@ func (s *StateSuite) SetUpTest(c *checker.C) {
 	db := memdb.NewStateDB("")
 	defer db.Close()
 
-	agg, err := stateLib.NewAggregator(context.Background(), datadir.New(""), 16, db, log.New())
+	cr := rawdb.NewCanonicalReader()
+	agg, err := stateLib.NewAggregator(context.Background(), datadir.New(""), 16, db, cr, log.New())
 	if err != nil {
 		panic(err)
 	}
@@ -375,7 +377,8 @@ func NewTestTemporalDb(tb testing.TB) (kv.RwDB, kv.RwTx, *state.Aggregator) {
 	db := memdb.NewStateDB(tb.TempDir())
 	tb.Cleanup(db.Close)
 
-	agg, err := state.NewAggregator(context.Background(), datadir.New(tb.TempDir()), 16, db, log.New())
+	cr := rawdb.NewCanonicalReader()
+	agg, err := state.NewAggregator(context.Background(), datadir.New(tb.TempDir()), 16, db, cr, log.New())
 	if err != nil {
 		tb.Fatal(err)
 	}

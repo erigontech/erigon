@@ -3,7 +3,6 @@ package rawdb
 import (
 	"encoding/binary"
 	"fmt"
-
 	common2 "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/hexutility"
 	"github.com/ledgerwatch/erigon-lib/kv"
@@ -25,6 +24,79 @@ type CanonicalTxnIds struct {
 	currentTxNum      int
 	hasNext           bool
 	endOfCurrentBlock uint64
+}
+type CanonicalReader struct {
+}
+
+func NewCanonicalReader() *CanonicalReader {
+	return &CanonicalReader{}
+}
+func (*CanonicalReader) TxnIdsOfCanonicalBlocks(tx kv.Tx, fromTxNum, toTxNum int, asc order.By, limit int) (iter.U64, error) {
+	return TxnIdsOfCanonicalBlocks(tx, fromTxNum, toTxNum, asc, limit)
+}
+func (*CanonicalReader) TxNum2ID(tx kv.Tx, blockNum uint64, blockHash common2.Hash, txNum uint64) (kv.TxnId, error) {
+	if blockNum == 0 {
+		return kv.TxnId(txNum), nil
+	}
+	b, err := readBodyForStorage(tx, blockHash, blockNum)
+	if err != nil {
+		return 0, err
+	}
+	if b == nil { // freezed and pruned
+		_min, err := rawdbv3.TxNums.Min(tx, blockNum)
+		if err != nil {
+			return 0, err
+		}
+		_max, err := rawdbv3.TxNums.Max(tx, blockNum)
+		if err != nil {
+			return 0, err
+		}
+		if txNum < _min || txNum > _max {
+			return 0, fmt.Errorf("TxNum2ID: txNum=%d out of range: %d, %d", txNum, _min, _max)
+		}
+		return kv.TxnId(txNum), nil
+	}
+	return kv.TxnId(b.BaseTxId), nil
+}
+
+func (*CanonicalReader) BaseTxnID(tx kv.Tx, blockNum uint64, blockHash common2.Hash) (kv.TxnId, error) {
+	if blockNum == 0 {
+		return kv.TxnId(0), nil
+	}
+
+	//TODO: what if body is in db and files?
+	b, err := readBodyForStorage(tx, blockHash, blockNum)
+	if err != nil {
+		return 0, err
+	}
+	if b == nil { // freezed and pruned
+		_min, err := rawdbv3.TxNums.Min(tx, blockNum)
+		if err != nil {
+			return 0, err
+		}
+		return kv.TxnId(_min), nil
+	}
+	return kv.TxnId(b.BaseTxId), nil
+
+}
+
+func (*CanonicalReader) LastFrozenTxNum(tx kv.Tx) (kv.TxnId, error) {
+	n, ok, err := ReadFirstNonGenesisHeaderNumber(tx)
+	if err != nil {
+		return 0, err
+	}
+	if !ok {
+		//seq, err := tx.ReadSequence(kv.EthTx)
+		//seq-1
+		_, _lastTxNumInFiles, err := rawdbv3.TxNums.Last(tx)
+		return kv.TxnId(_lastTxNumInFiles), err
+
+	}
+	_max, err := rawdbv3.TxNums.Max(tx, n)
+	if err != nil {
+		return 0, err
+	}
+	return kv.TxnId(_max), nil
 }
 
 // TxnIdsOfCanonicalBlocks - returns non-canonical txnIds of canonical block range

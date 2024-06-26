@@ -970,8 +970,21 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 		}
 
 		go func() {
+			caplinOpt := []caplin1.CaplinOption{}
+			if config.BeaconRouter.Builder {
+				if config.CaplinConfig.RelayUrlExist() {
+					caplinOpt = append(caplinOpt, caplin1.WithBuilder(config.CaplinConfig.MevRelayUrl, beaconCfg))
+				} else {
+					log.Warn("builder api enable but relay url not set. Skipping builder mode")
+					config.BeaconRouter.Builder = false
+				}
+			}
+			log.Info("Starting caplin")
 			eth1Getter := getters.NewExecutionSnapshotReader(ctx, beaconCfg, blockReader, backend.chainDB)
-			if err := caplin1.RunCaplinPhase1(ctx, executionEngine, config, networkCfg, beaconCfg, ethClock, state, dirs, eth1Getter, backend.downloaderClient, config.CaplinConfig.Backfilling, config.CaplinConfig.BlobBackfilling, config.CaplinConfig.Archive, indiciesDB, blobStorage, creds, blockSnapBuildSema); err != nil {
+			if err := caplin1.RunCaplinPhase1(ctx, executionEngine, config, networkCfg, beaconCfg, ethClock,
+				state, dirs, eth1Getter, backend.downloaderClient, config.CaplinConfig.Backfilling,
+				config.CaplinConfig.BlobBackfilling, config.CaplinConfig.Archive, indiciesDB, blobStorage, creds,
+				blockSnapBuildSema, caplinOpt...); err != nil {
 				logger.Error("could not start caplin", "err", err)
 			}
 			ctxCancel()
@@ -1156,11 +1169,9 @@ func (s *Ethereum) StartMining(ctx context.Context, db kv.RwDB, stateDiffClient 
 		}
 	}
 
-	//if borcfg == nil {
 	if !miner.MiningConfig.Enabled {
 		return nil
 	}
-	//}
 
 	// Configure the local mining address
 	eb, err := s.Etherbase()
@@ -1169,61 +1180,45 @@ func (s *Ethereum) StartMining(ctx context.Context, db kv.RwDB, stateDiffClient 
 		return fmt.Errorf("etherbase missing: %w", err)
 	}
 
-	if borcfg != nil {
-		if miner.MiningConfig.Enabled {
-			if miner.MiningConfig.SigKey == nil {
-				s.logger.Error("Etherbase account unavailable locally", "err", err)
-				return fmt.Errorf("signer missing: %w", err)
-			}
-
-			borcfg.Authorize(eb, func(_ libcommon.Address, mimeType string, message []byte) ([]byte, error) {
-				return crypto.Sign(crypto.Keccak256(message), miner.MiningConfig.SigKey)
-			})
-
-			if !s.config.WithoutHeimdall {
-				err := stagedsync.FetchSpanZeroForMiningIfNeeded(
-					ctx,
-					s.chainDB,
-					s.blockReader,
-					borcfg.HeimdallClient,
-					logger,
-				)
-				if err != nil {
-					return err
-				}
-			}
-		} else {
-			// for the bor dev network without heimdall we need the authorizer to be set otherwise there is no
-			// validator defined in the bor validator set and non mining nodes will reject all blocks
-			// this assumes in this mode we're only running a single validator
-
-			if s.chainConfig.ChainName == networkname.BorDevnetChainName && s.config.WithoutHeimdall {
-				borcfg.Authorize(eb, func(addr libcommon.Address, _ string, _ []byte) ([]byte, error) {
-					return nil, &valset.UnauthorizedSignerError{Number: 0, Signer: addr.Bytes()}
-				})
-			}
-
-			return nil
-		}
+	if borcfg == nil {
+		s.logger.Error("mining is not supported after the Merge")
+		return errors.New("mining is not supported after the Merge")
 	}
 
-	var clq *clique.Clique
-	if c, ok := s.engine.(*clique.Clique); ok {
-		clq = c
-	} else if cl, ok := s.engine.(*merge.Merge); ok {
-		if c, ok := cl.InnerEngine().(*clique.Clique); ok {
-			clq = c
-		}
-	}
-	if clq != nil {
+	if miner.MiningConfig.Enabled {
 		if miner.MiningConfig.SigKey == nil {
 			s.logger.Error("Etherbase account unavailable locally", "err", err)
 			return fmt.Errorf("signer missing: %w", err)
 		}
 
-		clq.Authorize(eb, func(_ libcommon.Address, mimeType string, message []byte) ([]byte, error) {
+		borcfg.Authorize(eb, func(_ libcommon.Address, mimeType string, message []byte) ([]byte, error) {
 			return crypto.Sign(crypto.Keccak256(message), miner.MiningConfig.SigKey)
 		})
+
+		if !s.config.WithoutHeimdall {
+			err := stagedsync.FetchSpanZeroForMiningIfNeeded(
+				ctx,
+				s.chainDB,
+				s.blockReader,
+				borcfg.HeimdallClient,
+				logger,
+			)
+			if err != nil {
+				return err
+			}
+		}
+	} else {
+		// for the bor dev network without heimdall we need the authorizer to be set otherwise there is no
+		// validator defined in the bor validator set and non mining nodes will reject all blocks
+		// this assumes in this mode we're only running a single validator
+
+		if s.chainConfig.ChainName == networkname.BorDevnetChainName && s.config.WithoutHeimdall {
+			borcfg.Authorize(eb, func(addr libcommon.Address, _ string, _ []byte) ([]byte, error) {
+				return nil, &valset.UnauthorizedSignerError{Number: 0, Signer: addr.Bytes()}
+			})
+		}
+
+		return nil
 	}
 
 	streamCtx, streamCancel := context.WithCancel(ctx)
@@ -1284,7 +1279,7 @@ func (s *Ethereum) StartMining(ctx context.Context, db kv.RwDB, stateDiffClient 
 					hasWork = true
 
 				case <-s.notifyMiningAboutNewTxs:
-					// Skip mining based on new tx notif for bor consensus
+					// Skip mining based on new txn notif for bor consensus
 					hasWork = s.chainConfig.Bor == nil
 					if hasWork {
 						s.logger.Debug("Start mining based on txpool notif")
@@ -1418,6 +1413,7 @@ func (s *Ethereum) setUpSnapDownloader(ctx context.Context, downloaderCfg *downl
 
 		s.downloaderClient = direct.NewDownloaderClient(bittorrentServer)
 	}
+
 	s.agg.OnFreeze(func(frozenFileNames []string) {
 		events := s.notifications.Events
 		events.OnNewSnapshot()
@@ -1451,7 +1447,8 @@ func setUpBlockReader(ctx context.Context, db kv.RwDB, dirs datadir.Dirs, snConf
 	if isBor {
 		allBorSnapshots = freezeblocks.NewBorRoSnapshots(snConfig.Snapshot, dirs.Snap, minFrozenBlock, logger)
 	}
-	agg, err := libstate.NewAggregator(ctx, dirs, config3.HistoryV3AggregationStep, db, logger)
+	cr := rawdb.NewCanonicalReader()
+	agg, err := libstate.NewAggregator(ctx, dirs, config3.HistoryV3AggregationStep, db, cr, logger)
 	if err != nil {
 		return nil, nil, nil, nil, nil, err
 	}
@@ -1531,13 +1528,12 @@ func (s *Ethereum) Start() error {
 		return currentTD
 	}
 
-	nodeStages := s.stagedSync.StagesIdsList()
-
 	if params.IsChainPoS(s.chainConfig, currentTDProvider) {
-		nodeStages = s.pipelineStagedSync.StagesIdsList()
+		diagnostics.Send(diagnostics.SyncStageList{StagesList: diagnostics.InitStagesFromList(s.pipelineStagedSync.StagesIdsList())})
 		s.waitForStageLoopStop = nil // TODO: Ethereum.Stop should wait for execution_server shutdown
 		go s.eth1ExecutionServer.Start(s.sentryCtx)
 	} else if s.config.PolygonSync {
+		diagnostics.Send(diagnostics.SyncStageList{StagesList: diagnostics.InitStagesFromList(s.stagedSync.StagesIdsList())})
 		s.waitForStageLoopStop = nil // Shutdown is handled by context
 		go func() {
 			ctx := s.sentryCtx
@@ -1553,11 +1549,9 @@ func (s *Ethereum) Start() error {
 			}
 		}()
 	} else {
+		diagnostics.Send(diagnostics.SyncStageList{StagesList: diagnostics.InitStagesFromList(s.stagedSync.StagesIdsList())})
 		go stages2.StageLoop(s.sentryCtx, s.chainDB, s.stagedSync, s.sentriesClient.Hd, s.waitForStageLoopStop, s.config.Sync.LoopThrottle, s.logger, s.blockReader, hook)
 	}
-
-	stages := diagnostics.InitStagesFromList(nodeStages)
-	diagnostics.Send(diagnostics.SyncStageList{StagesList: stages})
 
 	if s.chainConfig.Bor != nil {
 		s.engine.(*bor.Bor).Start(s.chainDB)

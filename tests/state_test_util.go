@@ -34,7 +34,6 @@ import (
 	"github.com/ledgerwatch/erigon-lib/chain"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/hexutility"
-	"github.com/ledgerwatch/erigon-lib/common/length"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	state2 "github.com/ledgerwatch/erigon-lib/state"
 	types2 "github.com/ledgerwatch/erigon-lib/types"
@@ -272,59 +271,12 @@ func (t *StateTest) RunNoVerify(tx kv.RwTx, subtest StateSubtest, vmconfig vm.Co
 		return nil, libcommon.Hash{}, err
 	}
 
-	if config3.EnableHistoryV4InTest {
-		var root libcommon.Hash
-		rootBytes, err := domains.ComputeCommitment(context2.Background(), false, header.Number.Uint64(), "")
-		if err != nil {
-			return statedb, root, fmt.Errorf("ComputeCommitment: %w", err)
-		}
-		return statedb, libcommon.BytesToHash(rootBytes), nil
-	}
-	// Generate hashed state
-	c, err := tx.RwCursor(kv.PlainState)
+	var root libcommon.Hash
+	rootBytes, err := domains.ComputeCommitment(context2.Background(), false, header.Number.Uint64(), "")
 	if err != nil {
-		return nil, libcommon.Hash{}, err
+		return statedb, root, fmt.Errorf("ComputeCommitment: %w", err)
 	}
-	h := libcommon.NewHasher()
-	defer libcommon.ReturnHasherToPool(h)
-	for k, v, err := c.First(); k != nil; k, v, err = c.Next() {
-		if err != nil {
-			return nil, libcommon.Hash{}, fmt.Errorf("interate over plain state: %w", err)
-		}
-		var newK []byte
-		if len(k) == length.Addr {
-			newK = make([]byte, length.Hash)
-		} else {
-			newK = make([]byte, length.Hash*2+length.Incarnation)
-		}
-		h.Sha.Reset()
-		//nolint:errcheck
-		h.Sha.Write(k[:length.Addr])
-		//nolint:errcheck
-		h.Sha.Read(newK[:length.Hash])
-		if len(k) > length.Addr {
-			copy(newK[length.Hash:], k[length.Addr:length.Addr+length.Incarnation])
-			h.Sha.Reset()
-			//nolint:errcheck
-			h.Sha.Write(k[length.Addr+length.Incarnation:])
-			//nolint:errcheck
-			h.Sha.Read(newK[length.Hash+length.Incarnation:])
-			if err = tx.Put(kv.HashedStorage, newK, libcommon.CopyBytes(v)); err != nil {
-				return nil, libcommon.Hash{}, fmt.Errorf("insert hashed key: %w", err)
-			}
-		} else {
-			if err = tx.Put(kv.HashedAccounts, newK, libcommon.CopyBytes(v)); err != nil {
-				return nil, libcommon.Hash{}, fmt.Errorf("insert hashed key: %w", err)
-			}
-		}
-	}
-	c.Close()
-
-	root, err := txc.Doms.ComputeCommitment(context2.Background(), true, writeBlockNr, "")
-	if err != nil {
-		return nil, libcommon.Hash{}, fmt.Errorf("error calculating state root: %w", err)
-	}
-	return statedb, libcommon.CastToHash(root), nil
+	return statedb, libcommon.BytesToHash(rootBytes), nil
 }
 
 func MakePreState(rules *chain.Rules, tx kv.RwTx, accounts types.GenesisAlloc, blockNr uint64, histV3 bool) (*state.IntraBlockState, error) {

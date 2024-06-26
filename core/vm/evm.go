@@ -101,6 +101,12 @@ type EVM struct {
 // NewEVM returns a new EVM. The returned EVM is not thread safe and should
 // only ever be used *once*.
 func NewEVM(blockCtx evmtypes.BlockContext, txCtx evmtypes.TxContext, state evmtypes.IntraBlockState, chainConfig *chain.Config, vmConfig Config) *EVM {
+	if vmConfig.NoBaseFee {
+		if txCtx.GasPrice.IsZero() {
+			blockCtx.BaseFee = new(uint256.Int)
+		}
+	}
+
 	evm := &EVM{
 		Context:         blockCtx,
 		TxContext:       txCtx,

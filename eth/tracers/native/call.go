@@ -128,7 +128,7 @@ func newCallTracer(ctx *tracers.Context, cfg json.RawMessage) (*tracers.Tracer, 
 			return nil, err
 		}
 	}
-	// First callframe contains tx context info
+	// First callframe contains txn context info
 	// and is populated on start and end.
 	t := &callTracer{callstack: make([]callFrame, 0, 1), config: config}
 	return &tracers.Tracer{

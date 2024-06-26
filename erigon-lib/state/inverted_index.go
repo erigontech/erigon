@@ -33,6 +33,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/ledgerwatch/erigon-lib/common"
+
 	"github.com/RoaringBitmap/roaring/roaring64"
 	"github.com/spaolacci/murmur3"
 	btree2 "github.com/tidwall/btree"
@@ -45,7 +47,6 @@ import (
 	"github.com/ledgerwatch/erigon-lib/common/dir"
 	"github.com/ledgerwatch/erigon-lib/etl"
 	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon-lib/kv/backup"
 	"github.com/ledgerwatch/erigon-lib/kv/bitmapdb"
 	"github.com/ledgerwatch/erigon-lib/kv/iter"
 	"github.com/ledgerwatch/erigon-lib/kv/order"
@@ -203,6 +204,7 @@ func (ii *InvertedIndex) scanStateFiles(fileNames []string) (garbageFiles []*fil
 		var newFile = newFilesItem(startTxNum, endTxNum, ii.aggregationStep)
 
 		if ii.integrityCheck != nil && !ii.integrityCheck(startStep, endStep) {
+			ii.logger.Debug("[agg] skip garbage file", "name", name)
 			continue
 		}
 
@@ -715,11 +717,20 @@ type InvertedIndexPruneStat struct {
 	PruneCountValues uint64
 }
 
+func (is *InvertedIndexPruneStat) PrunedNothing() bool {
+	return is.PruneCountTx == 0 && is.PruneCountValues == 0
+}
+
 func (is *InvertedIndexPruneStat) String() string {
-	if is == nil || is.MinTxNum == math.MaxUint64 && is.PruneCountTx == 0 {
+	if is.PrunedNothing() {
 		return ""
 	}
-	return fmt.Sprintf("ii %d txs and %d vals in %.2fM-%.2fM", is.PruneCountTx, is.PruneCountValues, float64(is.MinTxNum)/1_000_000.0, float64(is.MaxTxNum)/1_000_000.0)
+	vstr := ""
+	if is.PruneCountValues > 0 {
+		vstr = fmt.Sprintf("values: %d,", is.PruneCountValues)
+	}
+	return fmt.Sprintf("%s txns: %d from %.2fM-%.2fM",
+		vstr, is.PruneCountTx, float64(is.MinTxNum)/1_000_000.0, float64(is.MaxTxNum)/1_000_000.0)
 }
 
 func (is *InvertedIndexPruneStat) Accumulate(other *InvertedIndexPruneStat) {
@@ -732,26 +743,17 @@ func (is *InvertedIndexPruneStat) Accumulate(other *InvertedIndexPruneStat) {
 	is.PruneCountValues += other.PruneCountValues
 }
 
-func (iit *InvertedIndexRoTx) Warmup(ctx context.Context) (cleanup func()) {
-	ctx, cancel := context.WithCancel(ctx)
-	wg := &errgroup.Group{}
-	wg.Go(func() error {
-		backup.WarmupTable(ctx, iit.ii.db, iit.ii.indexTable, log.LvlDebug, 4)
-		return nil
-	})
-	wg.Go(func() error {
-		backup.WarmupTable(ctx, iit.ii.db, iit.ii.indexKeysTable, log.LvlDebug, 4)
-		return nil
-	})
-	return func() {
-		cancel()
-		_ = wg.Wait()
+func (iit *InvertedIndexRoTx) Unwind(ctx context.Context, rwTx kv.RwTx, txFrom, txTo, limit uint64, logEvery *time.Ticker, forced bool, fn func(key []byte, txnum []byte) error) error {
+	_, err := iit.Prune(ctx, rwTx, txFrom, txTo, limit, logEvery, forced, fn)
+	if err != nil {
+		return err
 	}
+	return nil
 }
 
 // [txFrom; txTo)
 // forced - prune even if CanPrune returns false, so its true only when we do Unwind.
-func (iit *InvertedIndexRoTx) Prune(ctx context.Context, rwTx kv.RwTx, txFrom, txTo, limit uint64, logEvery *time.Ticker, forced, withWarmup bool, fn func(key []byte, txnum []byte) error) (stat *InvertedIndexPruneStat, err error) {
+func (iit *InvertedIndexRoTx) Prune(ctx context.Context, rwTx kv.RwTx, txFrom, txTo, limit uint64, logEvery *time.Ticker, forced bool, fn func(key []byte, txnum []byte) error) (stat *InvertedIndexPruneStat, err error) {
 	stat = &InvertedIndexPruneStat{MinTxNum: math.MaxUint64}
 	if !forced && !iit.CanPrune(rwTx) {
 		return stat, nil
@@ -760,11 +762,6 @@ func (iit *InvertedIndexRoTx) Prune(ctx context.Context, rwTx kv.RwTx, txFrom, t
 	mxPruneInProgress.Inc()
 	defer mxPruneInProgress.Dec()
 	defer func(t time.Time) { mxPruneTookIndex.ObserveDuration(t) }(time.Now())
-
-	if withWarmup {
-		cleanup := iit.Warmup(ctx)
-		defer cleanup()
-	}
 
 	if limit == 0 { // limits amount of Tx to be pruned
 		limit = math.MaxUint64
@@ -875,9 +872,10 @@ func (iit *InvertedIndexRoTx) Prune(ctx context.Context, rwTx kv.RwTx, txFrom, t
 	return stat, err
 }
 
-func (iit *InvertedIndexRoTx) DebugEFAllValuesAreInRange(ctx context.Context) error {
+func (iit *InvertedIndexRoTx) DebugEFAllValuesAreInRange(ctx context.Context, failFast bool, fromStep uint64) error {
 	logEvery := time.NewTicker(30 * time.Second)
 	defer logEvery.Stop()
+	fromTxNum := fromStep * iit.ii.aggregationStep
 	iterStep := func(item ctxItem) error {
 		g := item.src.decompressor.MakeGetter()
 		g.Reset(0)
@@ -892,25 +890,27 @@ func (iit *InvertedIndexRoTx) DebugEFAllValuesAreInRange(ctx context.Context) er
 				continue
 			}
 			if item.startTxNum > ef.Min() {
-				err := fmt.Errorf("DebugEFAllValuesAreInRange1: %d > %d, %s, %x", item.startTxNum, ef.Min(), g.FileName(), k)
-				log.Warn(err.Error())
-				//return err
+				err := fmt.Errorf("[integrity] .ef file has foreign txNum: %d > %d, %s, %x", item.startTxNum, ef.Min(), g.FileName(), common.Shorten(k, 8))
+				if failFast {
+					return err
+				} else {
+					log.Warn(err.Error())
+				}
 			}
 			if item.endTxNum < ef.Max() {
-				err := fmt.Errorf("DebugEFAllValuesAreInRange2: %d < %d, %s, %x", item.endTxNum, ef.Max(), g.FileName(), k)
-				log.Warn(err.Error())
-				//return err
+				err := fmt.Errorf("[integrity] .ef file has foreign txNum: %d < %d, %s, %x", item.endTxNum, ef.Max(), g.FileName(), common.Shorten(k, 8))
+				if failFast {
+					return err
+				} else {
+					log.Warn(err.Error())
+				}
 			}
 
 			select {
 			case <-ctx.Done():
 				return ctx.Err()
 			case <-logEvery.C:
-				shortK := k
-				if len(shortK) > 8 {
-					shortK = shortK[:8]
-				}
-				log.Info(fmt.Sprintf("[integrity] progress EFAllValuesAreInRange: %s, prefix=%x", g.FileName(), shortK))
+				log.Info(fmt.Sprintf("[integrity] InvertedIndex: %s, prefix=%x", g.FileName(), common.Shorten(k, 8)))
 			default:
 			}
 		}
@@ -919,6 +919,9 @@ func (iit *InvertedIndexRoTx) DebugEFAllValuesAreInRange(ctx context.Context) er
 
 	for _, item := range iit.files {
 		if item.src.decompressor == nil {
+			continue
+		}
+		if item.endTxNum <= fromTxNum {
 			continue
 		}
 		if err := iterStep(item); err != nil {
@@ -1000,19 +1003,19 @@ func (it *FrozenInvertedIdxIter) advanceInFiles() {
 			if bytes.Equal(k, it.key) {
 				eliasVal, _ := g.NextUncompressed()
 				it.ef.Reset(eliasVal)
+				var efiter *eliasfano32.EliasFanoIter
 				if it.orderAscend {
-					efiter := it.ef.Iterator()
-					if it.startTxNum > 0 {
-						efiter.Seek(uint64(it.startTxNum))
-					}
-					it.efIt = efiter
+					efiter = it.ef.Iterator()
 				} else {
-					it.efIt = it.ef.ReverseIterator()
+					efiter = it.ef.ReverseIterator()
 				}
+				if it.startTxNum > 0 {
+					efiter.Seek(uint64(it.startTxNum))
+				}
+				it.efIt = efiter
 			}
 		}
 
-		//TODO: add seek method
 		//Asc:  [from, to) AND from < to
 		//Desc: [from, to) AND from > to
 		if it.orderAscend {

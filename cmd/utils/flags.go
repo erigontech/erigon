@@ -847,6 +847,11 @@ var (
 		Usage: "checkpoint sync endpoint",
 		Value: cli.NewStringSlice(),
 	}
+	CaplinMevRelayUrl = cli.StringFlag{
+		Name:  "caplin.mev-relay-url",
+		Usage: "MEV relay endpoint. Caplin runs in builder mode if this is set",
+		Value: "",
+	}
 
 	SentinelAddrFlag = cli.StringFlag{
 		Name:  "sentinel.addr",
@@ -1678,6 +1683,7 @@ func setCaplin(ctx *cli.Context, cfg *ethconfig.Config) {
 	cfg.CaplinConfig.BlobBackfilling = ctx.Bool(CaplinBlobBackfillingFlag.Name)
 	cfg.CaplinConfig.BlobPruningDisabled = ctx.Bool(CaplinDisableBlobPruningFlag.Name)
 	cfg.CaplinConfig.Archive = ctx.Bool(CaplinArchiveFlag.Name)
+	cfg.CaplinConfig.MevRelayUrl = ctx.String(CaplinMevRelayUrl.Name)
 	if checkpointUrls := ctx.StringSlice(CaplinCheckpointSyncUrlFlag.Name); len(checkpointUrls) > 0 {
 		clparams.ConfigurableCheckpointsURLs = checkpointUrls
 	}
@@ -1784,7 +1790,11 @@ func SetEthConfig(ctx *cli.Context, nodeConfig *nodecfg.Config, cfg *ethconfig.C
 		if known, ok := snapcfg.KnownWebseeds[chain]; ok {
 			webseedsList = append(webseedsList, known...)
 		}
-		cfg.Downloader, err = downloadercfg2.New(cfg.Dirs, version, lvl, downloadRate, uploadRate, ctx.Int(TorrentPortFlag.Name), ctx.Int(TorrentConnsPerFileFlag.Name), ctx.Int(TorrentDownloadSlotsFlag.Name), ctx.StringSlice(TorrentDownloadSlotsFlag.Name), webseedsList, chain, true)
+		cfg.Downloader, err = downloadercfg2.New(cfg.Dirs, version, lvl, downloadRate, uploadRate,
+			ctx.Int(TorrentPortFlag.Name), ctx.Int(TorrentConnsPerFileFlag.Name), ctx.Int(TorrentDownloadSlotsFlag.Name),
+			libcommon.CliString2Array(ctx.String(TorrentStaticPeersFlag.Name)),
+			webseedsList, chain, true, ctx.Bool(DbWriteMapFlag.Name),
+		)
 		if err != nil {
 			panic(err)
 		}
