@@ -1183,11 +1183,6 @@ func (s *Ethereum) StartMining(ctx context.Context, db kv.RwDB, stateDiffClient 
 		return fmt.Errorf("etherbase missing: %w", err)
 	}
 
-	// if borcfg == nil {
-	// 	s.logger.Error("mining is not supported after the Merge")
-	// 	return errors.New("mining is not supported after the Merge")
-	// }
-
 	if miner.MiningConfig.Enabled {
 		if s.chainConfig.ChainName == networkname.DevChainName {
 			miner.MiningConfig.SigKey = core.DevnetSignPrivateKey

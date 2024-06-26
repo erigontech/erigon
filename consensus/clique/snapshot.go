@@ -235,7 +235,6 @@ func (s *Snapshot) apply(sigcache *lru.ARCCache[libcommon.Hash, libcommon.Addres
 		if err != nil {
 			return nil, err
 		}
-		fmt.Println("signer", snap.Signers, signer)
 		if _, ok := snap.Signers[signer]; !ok {
 			return nil, ErrUnauthorizedSigner
 		}
