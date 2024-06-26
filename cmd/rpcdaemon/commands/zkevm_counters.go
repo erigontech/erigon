@@ -146,8 +146,8 @@ func (zkapi *ZkEvmAPIImpl) EstimateCounters(ctx context.Context, rpcTx *zkevmRPC
 
 	smtDepth := smt.GetDepth()
 
-	batchCounters := vm.NewBatchCounterCollector(smtDepth, uint16(forkId), zkapi.config.Zk.VirtualCountersSmtReduction, false)
-	txCounters := vm.NewTransactionCounter(tx, smtDepth, zkapi.config.Zk.VirtualCountersSmtReduction, false)
+	txCounters := vm.NewTransactionCounter(tx, int(smtDepth), uint16(forkId), zkapi.config.Zk.VirtualCountersSmtReduction, false)
+	batchCounters := vm.NewBatchCounterCollector(int(smtDepth), uint16(forkId), zkapi.config.Zk.VirtualCountersSmtReduction, false)
 
 	_, err = batchCounters.AddNewTransactionCounters(txCounters)
 	if err != nil {
@@ -355,8 +355,9 @@ func (api *ZkEvmAPIImpl) TraceTransactionCounters(ctx context.Context, hash comm
 		return err
 	}
 
-	txCounters := vm.NewTransactionCounter(txn, smtDepth, api.config.Zk.VirtualCountersSmtReduction, false)
-	batchCounters := vm.NewBatchCounterCollector(smtDepth, uint16(forkId), api.config.Zk.VirtualCountersSmtReduction, false)
+	txCounters := vm.NewTransactionCounter(txn, int(smtDepth), uint16(forkId), api.config.Zk.VirtualCountersSmtReduction, false)
+	batchCounters := vm.NewBatchCounterCollector(int(smtDepth), uint16(forkId), api.config.Zk.VirtualCountersSmtReduction, false)
+
 	if _, err = batchCounters.AddNewTransactionCounters(txCounters); err != nil {
 		stream.WriteNil()
 		return err
@@ -503,7 +504,7 @@ func (api *ZkEvmAPIImpl) GetBatchCountersByNumber(ctx context.Context, batchNumR
 		// execute blocks
 		var txGasUsed uint64
 		for _, tx := range block.Transactions() {
-			if txGasUsed, err = api.execTransaction(tx, batchCounters, smtDepth, ibs, signer, header, rules, chainConfig, blockCtx, receipts); err != nil {
+			if txGasUsed, err = api.execTransaction(tx, batchCounters, smtDepth, ibs, signer, header, rules, chainConfig, blockCtx, receipts, uint16(forkId)); err != nil {
 				return nil, err
 			}
 			blockGasUsed += txGasUsed
@@ -530,12 +531,13 @@ func (api *ZkEvmAPIImpl) execTransaction(
 	chainConfig *chain.Config,
 	blockCtx evmtypes.BlockContext,
 	receipts types.Receipts,
+	forkId uint16,
 ) (gasUsed uint64, err error) {
 	var (
 		msg        core.Message
 		execResult *core.ExecutionResult
 	)
-	txCounters := vm.NewTransactionCounter(tx, smtDepth, api.config.Zk.VirtualCountersSmtReduction, false)
+	txCounters := vm.NewTransactionCounter(tx, smtDepth, forkId, api.config.Zk.VirtualCountersSmtReduction, false)
 
 	if _, err = batchCounters.AddNewTransactionCounters(txCounters); err != nil {
 		return 0, err

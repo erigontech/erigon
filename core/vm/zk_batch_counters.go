@@ -101,7 +101,7 @@ func (bcc *BatchCounterCollector) processBatchLevelData() error {
 	totalEncodedTxLength += 9 * bcc.blockCount
 
 	// reset the batch processing counters ready to calc the new values
-	bcc.l2DataCollector = NewCounterCollector(bcc.smtLevels)
+	bcc.l2DataCollector = NewCounterCollector(bcc.smtLevels, bcc.forkId)
 
 	l2Deduction := int(math.Ceil(float64(totalEncodedTxLength+1) / 136))
 
@@ -146,9 +146,9 @@ func (bcc *BatchCounterCollector) CheckForOverflow(verifyMerkleProof bool) (bool
 func (bcc *BatchCounterCollector) NewCounters() Counters {
 	var combined Counters
 	if bcc.unlimitedCounters {
-		combined = unlimitedCounters()
+		combined = *createCountrsByLimits(unlimitedCounters)
 	} else {
-		combined = defaultCounters()
+		combined = *getCounterLimits(bcc.forkId)
 	}
 
 	return combined
@@ -166,9 +166,9 @@ func (bcc *BatchCounterCollector) CombineCollectors(verifyMerkleProof bool) (Cou
 
 	// these counter collectors can be re-used for each new block in the batch as they don't rely on inputs
 	// from the block or transactions themselves
-	changeL2BlockCounter := NewCounterCollector(bcc.smtLevelsForTransaction)
+	changeL2BlockCounter := NewCounterCollector(bcc.smtLevelsForTransaction, bcc.forkId)
 	changeL2BlockCounter.processChangeL2Block(verifyMerkleProof)
-	changeBlockCounters := NewCounterCollector(bcc.smtLevelsForTransaction)
+	changeBlockCounters := NewCounterCollector(bcc.smtLevelsForTransaction, bcc.forkId)
 	changeBlockCounters.decodeChangeL2BlockTx()
 
 	// handling changeL2Block counters for each block in the batch - simulating a call to decodeChangeL2BlockTx from the js

@@ -10,8 +10,6 @@ import (
 	"github.com/ledgerwatch/erigon/zk/hermez_db"
 )
 
-var totalSteps = 1 << 23
-
 const (
 	MCPL    = 23
 	fnecHex = "0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFEBAAEDCE6AF48A03BBFD25E8CD0364141"
@@ -169,14 +167,14 @@ func calculateSmtLevels(smtMaxLevel int, minValue int, mcpReduction float64) int
 
 func NewUnlimitedCounterCollector() *CounterCollector {
 	return &CounterCollector{
-		counters:  unlimitedCounters(),
+		counters:  *createCountrsByLimits(unlimitedCounters),
 		smtLevels: 256,
 	}
 }
 
-func NewCounterCollector(smtLevels int) *CounterCollector {
+func NewCounterCollector(smtLevels int, forkId uint16) *CounterCollector {
 	return &CounterCollector{
-		counters:  defaultCounters(),
+		counters:  *getCounterLimits(forkId),
 		smtLevels: smtLevels,
 	}
 }
@@ -203,96 +201,6 @@ func (cc *CounterCollector) GetSmtLevels() int {
 func (cc *CounterCollector) Deduct(key CounterKey, amount int) {
 	cc.counters[key].used += amount
 	cc.counters[key].remaining -= amount
-}
-
-func defaultCounters() Counters {
-	return Counters{
-		S: {
-			remaining:     totalSteps,
-			name:          "totalSteps",
-			initialAmount: totalSteps,
-		},
-		A: {
-			remaining:     totalSteps >> 5,
-			name:          "arith",
-			initialAmount: totalSteps >> 5,
-		},
-		B: {
-			remaining:     totalSteps >> 4,
-			name:          "binary",
-			initialAmount: totalSteps >> 4,
-		},
-		M: {
-			remaining:     totalSteps >> 5,
-			name:          "memAlign",
-			initialAmount: totalSteps >> 5,
-		},
-		K: {
-			remaining:     totalSteps / 155286 * 44, //int(math.Floor(float64(totalSteps)/155286) * 44)
-			name:          "keccaks",
-			initialAmount: totalSteps / 155286 * 44, //int(math.Floor(float64(totalSteps)/155286) * 44)
-		},
-		D: {
-			remaining:     totalSteps / 56, //int(math.Floor(float64(totalSteps) / 56))
-			name:          "padding",
-			initialAmount: totalSteps / 56, //int(math.Floor(float64(totalSteps) / 56))
-		},
-		P: {
-			remaining:     totalSteps / 30, //int(math.Floor(float64(totalSteps) / 30))
-			name:          "poseidon",
-			initialAmount: totalSteps / 30, //int(math.Floor(float64(totalSteps) / 30))
-		},
-		SHA: {
-			remaining:     (totalSteps - 1) / 31488 * 7, //int(math.Floor(float64(totalSteps-1)/31488)) * 7
-			name:          "sha256",
-			initialAmount: (totalSteps - 1) / 31488 * 7, //int(math.Floor(float64(totalSteps-1)/31488)) * 7
-		},
-	}
-}
-
-func unlimitedCounters() Counters {
-	return Counters{
-		S: {
-			remaining:     math.MaxInt32,
-			name:          "totalSteps",
-			initialAmount: math.MaxInt32,
-		},
-		A: {
-			remaining:     math.MaxInt32,
-			name:          "arith",
-			initialAmount: math.MaxInt32,
-		},
-		B: {
-			remaining:     math.MaxInt32,
-			name:          "binary",
-			initialAmount: math.MaxInt32,
-		},
-		M: {
-			remaining:     math.MaxInt32,
-			name:          "memAlign",
-			initialAmount: math.MaxInt32,
-		},
-		K: {
-			remaining:     math.MaxInt32,
-			name:          "keccaks",
-			initialAmount: math.MaxInt32,
-		},
-		D: {
-			remaining:     math.MaxInt32,
-			name:          "padding",
-			initialAmount: math.MaxInt32,
-		},
-		P: {
-			remaining:     math.MaxInt32,
-			name:          "poseidon",
-			initialAmount: math.MaxInt32,
-		},
-		SHA: {
-			remaining:     math.MaxInt32,
-			name:          "sha256",
-			initialAmount: math.MaxInt32,
-		},
-	}
 }
 
 func (cc *CounterCollector) Counters() Counters {
