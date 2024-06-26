@@ -332,6 +332,8 @@ func (api *APIImpl) getLogsV3(ctx context.Context, tx kv.TemporalTx, begin, end 
 	if err != nil {
 		return logs, err
 	}
+
+	var baseBlockTxnID kv.TxnId
 	iter := rawdbv3.TxNums2BlockNums(tx, txNumbers, order.Asc)
 	defer iter.Close()
 	for iter.HasNext() {
@@ -356,6 +358,12 @@ func (api *APIImpl) getLogsV3(ctx context.Context, tx kv.TemporalTx, begin, end 
 				continue
 			}
 			blockHash = header.Hash()
+
+			rrrr := rawdb.NewCanonicalReader()
+			baseBlockTxnID, err = rrrr.BaseTxnID(tx, blockNum, blockHash)
+			if err != nil {
+				return nil, err
+			}
 			exec.ChangeBlock(header)
 		}
 
@@ -374,15 +382,8 @@ func (api *APIImpl) getLogsV3(ctx context.Context, tx kv.TemporalTx, begin, end 
 		}
 		rawLogs := exec.GetLogs(txIndex, txn)
 
-		//TODO: how to optimize conversion of txNum to txnID
-		rrrr := rawdb.NewCanonicalReader()
-		txnID, err := rrrr.TxNum2ID(tx, blockNum, blockHash, txNum, txnIdx)
-		if err != nil {
-			return nil, err
-		}
-
 		// `ReadReceipt` does fill `rawLogs` calulated fields. but we don't need it anymore.
-		if _, err = rawtemporaldb.ReadReceipt(tx, txnID, rawLogs, txIndex, blockHash, blockNum, txn); err != nil {
+		if _, err = rawtemporaldb.ReadReceipt(tx, baseBlockTxnID+kv.TxnId(txIndex), rawLogs, txIndex, blockHash, blockNum, txn); err != nil {
 			return nil, err
 		}
 		filtered := rawLogs.Filter(addrMap, crit.Topics)

@@ -79,7 +79,7 @@ func (*CanonicalReader) BaseTxnID(tx kv.Tx, blockNum uint64, blockHash common2.H
 		}
 		return kv.TxnId(_min), nil
 	}
-	return kv.TxnId(b.BaseTxId), nil
+	return kv.TxnId(b.BaseTxId + 1), nil
 
 }
 
