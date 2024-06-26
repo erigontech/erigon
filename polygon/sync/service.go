@@ -15,6 +15,7 @@ import (
 	"github.com/ledgerwatch/erigon/polygon/bridge"
 	"github.com/ledgerwatch/erigon/polygon/heimdall"
 	"github.com/ledgerwatch/erigon/polygon/p2p"
+	"github.com/ledgerwatch/erigon/polygon/polygoncommon"
 )
 
 type Service interface {
@@ -52,8 +53,10 @@ func NewService(
 	heimdallClient := heimdall.NewHeimdallClient(heimdallUrl, logger)
 	heimdallService := heimdall.NewHeimdall(heimdallClient, logger)
 	heimdallServiceV2 := heimdall.AssembleService(heimdallUrl, dataDir, tmpDir, logger)
+	polygonBridgeDB := polygoncommon.NewDatabase(dataDir, logger)
+	bridgeStore := bridge.NewStore(polygonBridgeDB)
+	polygonBridge := bridge.NewBridge(bridgeStore, logger, borConfig, heimdallClient.FetchStateSyncEvents, bor.GenesisContractStateReceiverABI())
 	execution := NewExecutionClient(executionClient)
-	polygonBridge := bridge.NewBridge(dataDir, logger, borConfig, heimdallClient.FetchStateSyncEvents, bor.GenesisContractStateReceiverABI())
 	store := NewStore(logger, execution, polygonBridge)
 
 	blockDownloader := NewBlockDownloader(
