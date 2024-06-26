@@ -1186,7 +1186,6 @@ func (sdc *SharedDomainsCommitmentContext) ComputeCommitment(ctx context.Context
 		}
 	case commitment.ModeUpdate:
 		touchedKeys, updates := sdc.updates.List(true)
-		fmt.Println("modeUpdate", touchedKeys)
 		rootHash, err = sdc.patriciaTrie.ProcessUpdates(ctx, touchedKeys, updates)
 		if err != nil {
 			return nil, err
