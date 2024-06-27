@@ -481,7 +481,7 @@ func (tx *AppendableRoTx) Close() {
 		//GC: last reader responsible to remove useles files: close it and delete
 		if refCnt == 0 && src.canDelete.Load() {
 			if tx.ap.filenameBase == traceFileLife {
-				tx.ap.logger.Warn(fmt.Sprintf("[agg] real remove at ctx close: %s", src.decompressor.FileName()))
+				tx.ap.logger.Warn("[agg.dbg] real remove at AppendableRoTx.Close", "file", src.decompressor.FileName())
 			}
 			src.closeFilesAndRemove()
 		}

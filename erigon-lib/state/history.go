@@ -1121,7 +1121,7 @@ func (ht *HistoryRoTx) Close() {
 		//GC: last reader responsible to remove useles files: close it and delete
 		if refCnt == 0 && src.canDelete.Load() {
 			if traceFileLife != "" && ht.h.filenameBase == traceFileLife {
-				ht.h.logger.Warn(fmt.Sprintf("[agg] real remove at ctx close: %s", src.decompressor.FileName()))
+				ht.h.logger.Warn("[agg.dbg] real remove at HistoryRoTx.Close", "file", src.decompressor.FileName())
 			}
 			src.closeFilesAndRemove()
 		}

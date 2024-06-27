@@ -1357,7 +1357,7 @@ func (dt *DomainRoTx) Close() {
 		//GC: last reader responsible to remove useles files: close it and delete
 		if refCnt == 0 && src.canDelete.Load() {
 			if traceFileLife != "" && dt.d.filenameBase == traceFileLife {
-				dt.d.logger.Warn(fmt.Sprintf("[agg] real remove at ctx close: %s", src.decompressor.FileName()))
+				dt.d.logger.Warn("[agg.dbg] real remove at DomainRoTx.Close", "file", src.decompressor.FileName())
 			}
 			src.closeFilesAndRemove()
 		}

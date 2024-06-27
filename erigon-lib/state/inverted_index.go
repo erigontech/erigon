@@ -474,7 +474,7 @@ func (iit *InvertedIndexRoTx) Close() {
 		//GC: last reader responsible to remove useles files: close it and delete
 		if refCnt == 0 && src.canDelete.Load() {
 			if traceFileLife != "" && iit.ii.filenameBase == traceFileLife {
-				iit.ii.logger.Warn(fmt.Sprintf("[agg] real remove at ctx close: %s", src.decompressor.FileName()))
+				iit.ii.logger.Warn("[agg.dbg] real remove at InvertedIndexRoTx.Close", "file", src.decompressor.FileName())
 			}
 			src.closeFilesAndRemove()
 		}
