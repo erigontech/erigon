@@ -34,7 +34,7 @@ const (
 )
 
 type ErigonDb interface {
-	WriteHeader(batchNo *big.Int, stateRoot, txHash, parentHash common.Hash, coinbase common.Address, ts, gasLimit uint64) (*ethTypes.Header, error)
+	WriteHeader(batchNo *big.Int, blockHash common.Hash, stateRoot, txHash, parentHash common.Hash, coinbase common.Address, ts, gasLimit uint64) (*ethTypes.Header, error)
 	WriteBody(batchNo *big.Int, headerHash common.Hash, txs []ethTypes.Transaction) error
 }
 
@@ -785,7 +785,7 @@ func writeL2Block(eriDb ErigonDb, hermezDb HermezDb, l2Block *types.FullL2Block,
 
 	gasLimit := utils.GetBlockGasLimitForFork(l2Block.ForkId)
 
-	h, err := eriDb.WriteHeader(bn, l2Block.StateRoot, txHash, l2Block.ParentHash, l2Block.Coinbase, uint64(l2Block.Timestamp), gasLimit)
+	_, err := eriDb.WriteHeader(bn, l2Block.L2Blockhash, l2Block.StateRoot, txHash, l2Block.ParentHash, l2Block.Coinbase, uint64(l2Block.Timestamp), gasLimit)
 	if err != nil {
 		return fmt.Errorf("write header error: %v", err)
 	}
@@ -867,7 +867,7 @@ func writeL2Block(eriDb ErigonDb, hermezDb HermezDb, l2Block *types.FullL2Block,
 		}
 	}
 
-	if err := eriDb.WriteBody(bn, h.Hash(), txs); err != nil {
+	if err := eriDb.WriteBody(bn, l2Block.L2Blockhash, txs); err != nil {
 		return fmt.Errorf("write body error: %v", err)
 	}
 
