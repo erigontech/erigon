@@ -21,6 +21,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"github.com/ledgerwatch/erigon/core/rawdb"
 	"os"
 	"path/filepath"
 
@@ -139,7 +140,8 @@ func aggregateResultsFromStateTests(
 		MustOpen()
 	defer _db.Close()
 
-	agg, err := libstate.NewAggregator(context.Background(), dirs, config3.HistoryV3AggregationStep, _db, log.New())
+	cr := rawdb.NewCanonicalReader()
+	agg, err := libstate.NewAggregator(context.Background(), dirs, config3.HistoryV3AggregationStep, _db, cr, log.New())
 	if err != nil {
 		return nil, err
 	}

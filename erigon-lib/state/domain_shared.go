@@ -64,8 +64,6 @@ type dataWithPrevStep struct {
 }
 
 type SharedDomains struct {
-	noFlush int
-
 	aggTx  *AggregatorRoTx
 	sdCtx  *SharedDomainsCommitmentContext
 	roTx   kv.Tx
@@ -111,10 +109,6 @@ func NewSharedDomains(tx kv.Tx, logger log.Logger) (*SharedDomains, error) {
 	for id, d := range sd.aggTx.d {
 		sd.domains[id] = map[string]dataWithPrevStep{}
 		sd.domainWriters[id] = d.NewWriter()
-	}
-
-	for id, a := range sd.aggTx.appendable {
-		sd.appendableWriter[id] = a.NewWriter()
 	}
 
 	for id, a := range sd.aggTx.appendable {
@@ -167,6 +161,10 @@ func (sd *SharedDomains) GetDiffset(tx kv.RwTx, blockHash common.Hash, blockNumb
 }
 
 func (sd *SharedDomains) AggTx() interface{} { return sd.aggTx }
+func (sd *SharedDomains) CanonicalReader() CanonicalsReader {
+	return nil
+	//return sd.aggTx.appendable[kv.ReceiptsAppendable].ap.cfg.iters
+}
 
 // aggregator context should call aggTx.Unwind before this one.
 func (sd *SharedDomains) Unwind(ctx context.Context, rwTx kv.RwTx, blockUnwindTo, txUnwindTo uint64, changeset *[kv.DomainLen][]DomainEntryDiff) error {
@@ -183,20 +181,19 @@ func (sd *SharedDomains) Unwind(ctx context.Context, rwTx kv.RwTx, blockUnwindTo
 		return err
 	}
 
-	withWarmup := false
 	for idx, d := range sd.aggTx.d {
 		if err := d.Unwind(ctx, rwTx, step, txUnwindTo, changeset[idx]); err != nil {
 			return err
 		}
 	}
 	for _, ii := range sd.aggTx.iis {
-		if err := ii.Unwind(ctx, rwTx, txUnwindTo, math.MaxUint64, math.MaxUint64, logEvery, true, withWarmup, nil); err != nil {
+		if err := ii.Unwind(ctx, rwTx, txUnwindTo, math.MaxUint64, math.MaxUint64, logEvery, true, nil); err != nil {
 			return err
 		}
 	}
 
 	for _, ap := range sd.aggTx.appendable {
-		if err := ap.Unwind(ctx, rwTx, txUnwindTo, math.MaxUint64, math.MaxUint64, logEvery, true, withWarmup, nil); err != nil {
+		if err := ap.Unwind(ctx, rwTx, txUnwindTo, math.MaxUint64, math.MaxUint64, logEvery, true, nil); err != nil {
 			return err
 		}
 	}
@@ -351,7 +348,10 @@ func (sd *SharedDomains) get(table kv.Domain, key []byte) (v []byte, prevStep ui
 func (sd *SharedDomains) SizeEstimate() uint64 {
 	//sd.muMaps.RLock()
 	//defer sd.muMaps.RUnlock()
-	return uint64(sd.estSize) * 2 // multiply 2 here, to cover data-structures overhead. more precise accounting - expensive.
+
+	// multiply 2: to cover data-structures overhead (and keep accounting cheap)
+	// and muliply 2 more: for Commitment calculation when batch is full
+	return uint64(sd.estSize) * 4
 }
 
 func (sd *SharedDomains) LatestCommitment(prefix []byte) ([]byte, uint64, error) {
@@ -814,10 +814,6 @@ func (sd *SharedDomains) Close() {
 }
 
 func (sd *SharedDomains) Flush(ctx context.Context, tx kv.RwTx) error {
-	if sd.noFlush > 0 {
-		sd.noFlush--
-	}
-
 	for key, changeset := range sd.pastChangesAccumulator {
 		blockNum := binary.BigEndian.Uint64([]byte(key[:8]))
 		blockHash := common.BytesToHash([]byte(key[8:]))
@@ -827,46 +823,44 @@ func (sd *SharedDomains) Flush(ctx context.Context, tx kv.RwTx) error {
 	}
 	sd.pastChangesAccumulator = make(map[string]*StateChangeSet)
 
-	if sd.noFlush == 0 {
-		defer mxFlushTook.ObserveDuration(time.Now())
-		fh, err := sd.ComputeCommitment(ctx, true, sd.BlockNum(), "flush-commitment")
+	defer mxFlushTook.ObserveDuration(time.Now())
+	fh, err := sd.ComputeCommitment(ctx, true, sd.BlockNum(), "flush-commitment")
+	if err != nil {
+		return err
+	}
+	if sd.trace {
+		_, f, l, _ := runtime.Caller(1)
+		fmt.Printf("[SD aggTx=%d] FLUSHING at tx %d [%x], caller %s:%d\n", sd.aggTx.id, sd.TxNum(), fh, filepath.Base(f), l)
+	}
+	for _, d := range sd.domainWriters {
+		if d != nil {
+			if err := d.Flush(ctx, tx); err != nil {
+				return err
+			}
+		}
+	}
+	for _, iiWriter := range sd.iiWriters {
+		if err := iiWriter.Flush(ctx, tx); err != nil {
+			return err
+		}
+	}
+	if dbg.PruneOnFlushTimeout != 0 {
+		_, err = sd.aggTx.PruneSmallBatches(ctx, dbg.PruneOnFlushTimeout, tx)
 		if err != nil {
 			return err
 		}
-		if sd.trace {
-			_, f, l, _ := runtime.Caller(1)
-			fmt.Printf("[SD aggTx=%d] FLUSHING at tx %d [%x], caller %s:%d\n", sd.aggTx.id, sd.TxNum(), fh, filepath.Base(f), l)
-		}
-		for _, d := range sd.domainWriters {
-			if d != nil {
-				if err := d.Flush(ctx, tx); err != nil {
-					return err
-				}
-			}
-		}
-		for _, iiWriter := range sd.iiWriters {
-			if err := iiWriter.Flush(ctx, tx); err != nil {
-				return err
-			}
-		}
-		if dbg.PruneOnFlushTimeout != 0 {
-			_, err = sd.aggTx.PruneSmallBatches(ctx, dbg.PruneOnFlushTimeout, tx)
-			if err != nil {
-				return err
-			}
-		}
+	}
 
-		for _, d := range sd.domainWriters {
-			if d != nil {
-				d.close()
-			}
+	for _, d := range sd.domainWriters {
+		if d != nil {
+			d.close()
 		}
-		for _, iiWriter := range sd.iiWriters {
-			iiWriter.close()
-		}
-		for _, a := range sd.appendableWriter {
-			a.close()
-		}
+	}
+	for _, iiWriter := range sd.iiWriters {
+		iiWriter.close()
+	}
+	for _, a := range sd.appendableWriter {
+		a.close()
 	}
 	return nil
 }
@@ -993,7 +987,7 @@ func (sd *SharedDomains) DomainDelPrefix(domain kv.Domain, prefix []byte) error 
 }
 func (sd *SharedDomains) Tx() kv.Tx { return sd.roTx }
 
-func (sd *SharedDomains) AppendablePut(name kv.Appendable, ts uint64, v []byte) error {
+func (sd *SharedDomains) AppendablePut(name kv.Appendable, ts kv.TxnId, v []byte) error {
 	return sd.appendableWriter[name].Append(ts, v)
 }
 

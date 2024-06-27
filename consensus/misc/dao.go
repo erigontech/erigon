@@ -25,6 +25,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/chain"
 
 	"github.com/ledgerwatch/erigon/core/state"
+	"github.com/ledgerwatch/erigon/core/tracing"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/params"
 )
@@ -76,7 +77,7 @@ func ApplyDAOHardFork(statedb *state.IntraBlockState) {
 
 	// Move every DAO account and extra-balance account funds into the refund contract
 	for _, addr := range params.DAODrainList() {
-		statedb.AddBalance(params.DAORefundContract, statedb.GetBalance(addr))
-		statedb.SetBalance(addr, new(uint256.Int))
+		statedb.AddBalance(params.DAORefundContract, statedb.GetBalance(addr), tracing.BalanceIncreaseDaoContract)
+		statedb.SetBalance(addr, new(uint256.Int), tracing.BalanceDecreaseDaoAccount)
 	}
 }

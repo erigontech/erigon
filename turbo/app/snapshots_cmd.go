@@ -7,7 +7,6 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
-
 	"io"
 	"math"
 	"net/http"
@@ -20,6 +19,7 @@ import (
 
 	"github.com/c2h5oh/datasize"
 	"github.com/urfave/cli/v2"
+
 	"golang.org/x/sync/semaphore"
 
 	"github.com/ledgerwatch/erigon-lib/common"
@@ -29,6 +29,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/common/disk"
 	"github.com/ledgerwatch/erigon-lib/common/mem"
 	"github.com/ledgerwatch/erigon-lib/config3"
+	"github.com/ledgerwatch/erigon-lib/downloader"
 	"github.com/ledgerwatch/erigon-lib/downloader/snaptype"
 	"github.com/ledgerwatch/erigon-lib/etl"
 	"github.com/ledgerwatch/erigon-lib/kv"
@@ -456,13 +457,21 @@ func doIntegrity(cliCtx *cli.Context) error {
 		}
 		switch chk {
 		case integrity.BlocksTxnID:
-			return blockReader.(*freezeblocks.BlockReader).IntegrityTxnID(failFast)
+			if err := blockReader.(*freezeblocks.BlockReader).IntegrityTxnID(failFast); err != nil {
+				return err
+			}
 		case integrity.Blocks:
-			return integrity.SnapBlocksRead(chainDB, blockReader, ctx, failFast)
+			if err := integrity.SnapBlocksRead(chainDB, blockReader, ctx, failFast); err != nil {
+				return err
+			}
 		case integrity.InvertedIndex:
-			return integrity.E3EfFiles(ctx, chainDB, agg, failFast, fromStep)
+			if err := integrity.E3EfFiles(ctx, chainDB, agg, failFast, fromStep); err != nil {
+				return err
+			}
 		case integrity.HistoryNoSystemTxs:
-			return integrity.E3HistoryNoSystemTxs(ctx, chainDB, agg)
+			if err := integrity.E3HistoryNoSystemTxs(ctx, chainDB, agg); err != nil {
+				return err
+			}
 		default:
 			return fmt.Errorf("unknown check: %s", chk)
 		}
@@ -638,7 +647,7 @@ func openSnaps(ctx context.Context, cfg ethconfig.BlocksFreezing, dirs datadir.D
 	if err = blockSnaps.ReopenFolder(); err != nil {
 		return
 	}
-	blockSnaps.LogStat("open")
+	blockSnaps.LogStat("block")
 
 	borSnaps = freezeblocks.NewBorRoSnapshots(cfg, dirs.Snap, 0, logger)
 	if err = borSnaps.ReopenFolder(); err != nil {
@@ -654,9 +663,10 @@ func openSnaps(ctx context.Context, cfg ethconfig.BlocksFreezing, dirs datadir.D
 		if err = csn.ReopenFolder(); err != nil {
 			return
 		}
+		csn.LogStat("caplin")
 	}
 
-	borSnaps.LogStat("bor:open")
+	borSnaps.LogStat("bor")
 	agg = openAgg(ctx, dirs, chainDB, logger)
 	err = chainDB.View(ctx, func(tx kv.Tx) error {
 		ac := agg.BeginFilesRo()
@@ -670,6 +680,13 @@ func openSnaps(ctx context.Context, cfg ethconfig.BlocksFreezing, dirs datadir.D
 	if err != nil {
 		return
 	}
+
+	ls, err := os.Stat(filepath.Join(dirs.Snap, downloader.ProhibitNewDownloadsFileName))
+	mtime := time.Time{}
+	if err == nil {
+		mtime = ls.ModTime()
+	}
+	logger.Info("[downloads]", "locked", err == nil, "at", mtime.Format("02 Jan 06 15:04 2006"))
 
 	blockReader := freezeblocks.NewBlockReader(blockSnaps, borSnaps)
 	blockWriter := blockio.NewBlockWriter()
@@ -923,7 +940,7 @@ func doRetireCommand(cliCtx *cli.Context, dirs datadir.Dirs) error {
 		logEvery := time.NewTicker(30 * time.Second)
 		defer logEvery.Stop()
 
-		stat, err := ac.Prune(ctx, tx, math.MaxUint64, true, logEvery)
+		stat, err := ac.Prune(ctx, tx, math.MaxUint64, logEvery)
 		if err != nil {
 			return err
 		}
@@ -1020,7 +1037,8 @@ func dbCfg(label kv.Label, path string) mdbx.MdbxOpts {
 	return opts
 }
 func openAgg(ctx context.Context, dirs datadir.Dirs, chainDB kv.RwDB, logger log.Logger) *libstate.Aggregator {
-	agg, err := libstate.NewAggregator(ctx, dirs, config3.HistoryV3AggregationStep, chainDB, logger)
+	cr := rawdb.NewCanonicalReader()
+	agg, err := libstate.NewAggregator(ctx, dirs, config3.HistoryV3AggregationStep, chainDB, cr, logger)
 	if err != nil {
 		panic(err)
 	}

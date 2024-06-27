@@ -49,6 +49,7 @@ import (
 	"github.com/ledgerwatch/erigon/consensus/merge"
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/state"
+	"github.com/ledgerwatch/erigon/core/tracing"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/crypto"
 	"github.com/ledgerwatch/erigon/params"
@@ -552,7 +553,8 @@ func GenesisToBlock(g *types.Genesis, tmpDir string, logger log.Logger) (*types.
 		genesisTmpDB := mdbx.NewMDBX(logger).InMem(tmpDir).MapSize(2 * datasize.GB).GrowthStep(1 * datasize.MB).MustOpen()
 		defer genesisTmpDB.Close()
 
-		agg, err := state2.NewAggregator(context.Background(), datadir.New(tmpDir), config3.HistoryV3AggregationStep, genesisTmpDB, logger)
+		cr := rawdb.NewCanonicalReader()
+		agg, err := state2.NewAggregator(context.Background(), datadir.New(tmpDir), config3.HistoryV3AggregationStep, genesisTmpDB, cr, logger)
 		if err != nil {
 			return err
 		}
@@ -602,7 +604,7 @@ func GenesisToBlock(g *types.Genesis, tmpDir string, logger log.Logger) (*types.
 			if overflow {
 				panic("overflow at genesis allocs")
 			}
-			statedb.AddBalance(addr, balance)
+			statedb.AddBalance(addr, balance, tracing.BalanceIncreaseGenesisBalance)
 			statedb.SetCode(addr, account.Code)
 			statedb.SetNonce(addr, account.Nonce)
 			for key, value := range account.Storage {
