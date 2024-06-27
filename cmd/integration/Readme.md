@@ -95,6 +95,26 @@ ONLY_CREATE_DB=true ./build/bin/erigon --datadir=/erigon-new/ --chain="$CHAIN" -
 7. start erigon in new datadir as usually
 ```
 
+## Recover db from some bad state
+
+If you face db-open error like `MDBX_PROBLEM: Unexpected internal error`. First: use tools
+like https://www.memtest86.com to test RAM and tools like https://www.smartmontools.org to test Disk. If hardware is
+fine: can try manually recover db (see `./build/bin/mdbx_chk -h` for more details):
+
+```
+make db-tools
+
+./build/bin/mdbx_chk -0 -d /erigon/chaindata
+./build/bin/mdbx_chk -1 -d /erigon/chaindata
+./build/bin/mdbx_chk -2 -d /erigon/chaindata
+
+# if all 3 commands return success - then remove `-d` parameter and run again
+# if all 1 command is fail but other success. choose successful number - for exmaple 2 - and switch db manually to it:  
+./build/bin/mdbx_chk -2 -d -t -w /erigon/chaindata  
+
+# if all 3 commands are fail - game over. use backups.
+```
+
 ## Clear bad blocks markers table in the case some block was marked as invalid after some error
 
 It allows to process this blocks again

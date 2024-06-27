@@ -56,7 +56,7 @@ func blockHeaderOverride(blockCtx *evmtypes.BlockContext, blockOverride BlockOve
 		blockCtx.Coinbase = *blockOverride.Coinbase
 	}
 	if blockOverride.Difficulty != nil {
-		blockCtx.Difficulty = big.NewInt(int64(*blockOverride.Difficulty))
+		blockCtx.Difficulty = new(big.Int).SetUint64(uint64(*blockOverride.Difficulty))
 	}
 	if blockOverride.Timestamp != nil {
 		blockCtx.Time = uint64(*blockOverride.Timestamp)
@@ -237,7 +237,7 @@ func (api *APIImpl) CallMany(ctx context.Context, bundles []Bundle, simulateCont
 			blockCtx.Coinbase = *bundle.BlockOverride.Coinbase
 		}
 		if bundle.BlockOverride.Difficulty != nil {
-			blockCtx.Difficulty = big.NewInt(int64(*bundle.BlockOverride.Difficulty))
+			blockCtx.Difficulty = new(big.Int).SetUint64(uint64(*bundle.BlockOverride.Difficulty))
 		}
 		if bundle.BlockOverride.Timestamp != nil {
 			blockCtx.Time = uint64(*bundle.BlockOverride.Timestamp)

@@ -527,7 +527,7 @@ func (pg *ProofGenerator) getRootBlockInfo(txBlockNumber uint64) (rootBlockNumbe
 		return 0, 0, 0, err
 	}
 
-	headerBlock, err := pg.heimdall.rootChainBinding.HeaderBlocks(&bind.CallOpts{}, big.NewInt(int64(rootBlockNumber)))
+	headerBlock, err := pg.heimdall.rootChainBinding.HeaderBlocks(&bind.CallOpts{}, new(big.Int).SetUint64(rootBlockNumber))
 
 	if err != nil {
 		return 0, 0, 0, err
@@ -560,7 +560,7 @@ func (pg *ProofGenerator) findRootBlockFromChild(childBlockNumber uint64) (uint6
 		}
 
 		mid := (start + end) / 2
-		headerBlock, err := pg.heimdall.rootChainBinding.HeaderBlocks(&bind.CallOpts{}, big.NewInt(int64(mid*checkPointInterval)))
+		headerBlock, err := pg.heimdall.rootChainBinding.HeaderBlocks(&bind.CallOpts{}, new(big.Int).SetUint64(mid*checkPointInterval))
 
 		if err != nil {
 			return 0, err
