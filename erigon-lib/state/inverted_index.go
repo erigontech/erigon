@@ -466,16 +466,17 @@ func (iit *InvertedIndexRoTx) Close() {
 	files := iit.files
 	iit.files = nil
 	for i := 0; i < len(files); i++ {
-		if files[i].src.frozen {
+		src := files[i].src
+		if src == nil || src.frozen {
 			continue
 		}
-		refCnt := files[i].src.refcount.Add(-1)
+		refCnt := src.refcount.Add(-1)
 		//GC: last reader responsible to remove useles files: close it and delete
-		if refCnt == 0 && files[i].src.canDelete.Load() {
-			if iit.ii.filenameBase == traceFileLife {
-				iit.ii.logger.Warn(fmt.Sprintf("[agg] real remove at ctx close: %s", files[i].src.decompressor.FileName()))
+		if refCnt == 0 && src.canDelete.Load() {
+			if traceFileLife != "" && iit.ii.filenameBase == traceFileLife {
+				iit.ii.logger.Warn("[agg.dbg] real remove at InvertedIndexRoTx.Close", "file", src.decompressor.FileName())
 			}
-			files[i].src.closeFilesAndRemove()
+			src.closeFilesAndRemove()
 		}
 	}
 
