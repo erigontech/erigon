@@ -5,11 +5,10 @@ import (
 
 	"golang.org/x/sync/errgroup"
 
-	"github.com/ledgerwatch/erigon-lib/log/v3"
-
 	"github.com/ledgerwatch/erigon-lib/chain"
 	"github.com/ledgerwatch/erigon-lib/direct"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/executionproto"
+	"github.com/ledgerwatch/erigon-lib/log/v3"
 	"github.com/ledgerwatch/erigon/p2p/sentry"
 	"github.com/ledgerwatch/erigon/polygon/bor/borcfg"
 	"github.com/ledgerwatch/erigon/polygon/bridge"
@@ -52,12 +51,7 @@ func NewService(
 	p2pService := p2p.NewService(maxPeers, logger, sentryClient, statusDataProvider.GetStatusData)
 	heimdallClient := heimdall.NewHeimdallClient(heimdallUrl, logger)
 	heimdallService := heimdall.NewHeimdall(heimdallClient, logger)
-	heimdallServiceV2 := heimdall.NewService(
-		heimdallUrl,
-		dataDir,
-		tmpDir,
-		logger,
-	)
+	heimdallServiceV2 := heimdall.AssembleService(heimdallUrl, dataDir, tmpDir, logger)
 	execution := NewExecutionClient(executionClient)
 	store := NewStore(logger, execution, polygonBridge)
 

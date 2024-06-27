@@ -355,7 +355,7 @@ func rlpHash(x interface{}) (h libcommon.Hash) {
 }
 
 func vmTestBlockHash(n uint64) libcommon.Hash {
-	return libcommon.BytesToHash(crypto.Keccak256([]byte(big.NewInt(int64(n)).String())))
+	return libcommon.BytesToHash(crypto.Keccak256([]byte(new(big.Int).SetUint64(n).String())))
 }
 
 func toMessage(tx stTransaction, ps stPostState, baseFee *big.Int) (core.Message, error) {
