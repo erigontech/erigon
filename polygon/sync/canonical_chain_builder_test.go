@@ -60,7 +60,7 @@ func (test *connectCCBTest) makeHeader(parent *types.Header, difficulty uint64) 
 	test.currentHeaderTime++
 	return &types.Header{
 		ParentHash: parent.Hash(),
-		Difficulty: big.NewInt(int64(difficulty)),
+		Difficulty: new(big.Int).SetUint64(difficulty),
 		Number:     big.NewInt(parent.Number.Int64() + 1),
 		Time:       test.currentHeaderTime,
 		Extra:      bytes.Repeat([]byte{0x00}, types.ExtraVanityLength+types.ExtraSealLength),

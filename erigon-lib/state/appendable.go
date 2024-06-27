@@ -390,7 +390,7 @@ func (ap *Appendable) getFromDB(k []byte, dbtx kv.Tx) ([]byte, bool, error) {
 	}
 	return v, v != nil, err
 }
-func (ap *Appendable) lastStepInDB(dbtx kv.Tx) (step uint64, err error) {
+func (ap *Appendable) maxTxNumInDB(dbtx kv.Tx) (txNum uint64, err error) {
 	first, err := kv.LastKey(dbtx, ap.table)
 	if err != nil {
 		return 0, err
@@ -398,15 +398,7 @@ func (ap *Appendable) lastStepInDB(dbtx kv.Tx) (step uint64, err error) {
 	if len(first) == 0 {
 		return 0, nil
 	}
-	return binary.BigEndian.Uint64(first) / ap.aggregationStep, nil
-}
-
-func (ap *Appendable) lastStepInDB2(db kv.RoDB) (step uint64, err error) {
-	err = db.View(context.Background(), func(tx kv.Tx) error {
-		step, err = ap.lastStepInDB(tx)
-		return err
-	})
-	return
+	return binary.BigEndian.Uint64(first), nil
 }
 
 // Add - !NotThreadSafe. Must use WalRLock/BatchHistoryWriteEnd
@@ -511,7 +503,7 @@ func (tx *AppendableRoTx) Close() {
 
 type AppendableRoTx struct {
 	ap      *Appendable
-	files   []ctxItem // have no garbage (overlaps, etc...)
+	files   visibleFiles // have no garbage (overlaps, etc...)
 	getters []ArchiveGetter
 	readers []*recsplit.IndexReader
 }
@@ -529,7 +521,7 @@ func (tx *AppendableRoTx) statelessGetter(i int) ArchiveGetter {
 	return r
 }
 
-func (tx *AppendableRoTx) smallestTxNum(dbtx kv.Tx) uint64 {
+func (tx *AppendableRoTx) mainTxNumInDB(dbtx kv.Tx) uint64 {
 	fst, _ := kv.FirstKey(dbtx, tx.ap.table)
 	if len(fst) > 0 {
 		fstInDb := binary.BigEndian.Uint64(fst)
@@ -539,23 +531,18 @@ func (tx *AppendableRoTx) smallestTxNum(dbtx kv.Tx) uint64 {
 }
 
 func (tx *AppendableRoTx) CanPrune(dbtx kv.Tx) bool {
-	return tx.smallestTxNum(dbtx) < tx.maxTxNumInFiles(false)
+	return tx.mainTxNumInDB(dbtx) < tx.files.EndTxNum()
 }
-
-func (tx *AppendableRoTx) maxTxNumInFiles(cold bool) uint64 {
-	if len(tx.files) == 0 {
-		return 0
+func (tx *AppendableRoTx) canBuild(dbtx kv.Tx) (bool, error) { //nolint
+	//TODO: support "keep in db" parameter
+	//TODO: what if all files are pruned?
+	maxTxNumInDB, err := tx.ap.maxTxNumInDB(dbtx)
+	if err != nil {
+		return false, err
 	}
-	if !cold {
-		return tx.files[len(tx.files)-1].endTxNum
-	}
-	for i := len(tx.files) - 1; i >= 0; i-- {
-		if !tx.files[i].src.frozen {
-			continue
-		}
-		return tx.files[i].endTxNum
-	}
-	return 0
+	maxStepInDB := maxTxNumInDB / tx.ap.aggregationStep
+	maxStepInFiles := tx.files.EndTxNum() / tx.ap.aggregationStep
+	return maxStepInDB > maxStepInFiles, nil
 }
 
 type AppendablePruneStat struct {

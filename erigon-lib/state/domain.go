@@ -148,12 +148,9 @@ func (d *Domain) kvBtFilePath(fromStep, toStep uint64) string {
 	return filepath.Join(d.dirs.SnapDomain, fmt.Sprintf("v1-%s.%d-%d.bt", d.filenameBase, fromStep, toStep))
 }
 
-// lastStepInDB - return the latest available step in db (at-least 1 value in such step)
-func (d *Domain) lastStepInDB(tx kv.Tx) (lstInDb uint64, err error) {
-	lstIdx, err := kv.LastKey(tx, d.History.indexKeysTable)
-	if err != nil {
-		return 0, err
-	}
+// maxStepInDB - return the latest available step in db (at-least 1 value in such step)
+func (d *Domain) maxStepInDB(tx kv.Tx) (lstInDb uint64) {
+	lstIdx, _ := kv.LastKey(tx, d.History.indexKeysTable)
 	if len(lstIdx) == 0 {
 		return 0, nil
 	}
@@ -638,7 +635,7 @@ func (ch *CursorHeap) Pop() interface{} {
 type DomainRoTx struct {
 	ht         *HistoryRoTx
 	d          *Domain
-	files      []ctxItem
+	files      visibleFiles
 	getters    []ArchiveGetter
 	readers    []*BtIndex
 	idxReaders []*recsplit.IndexReader
@@ -679,6 +676,7 @@ func (dt *DomainRoTx) getFromFile(i int, filekey []byte) ([]byte, bool, error) {
 	//fmt.Printf("getLatestFromBtreeColdFiles key %x shard %d %x\n", filekey, exactColdShard, v)
 	return v, true, nil
 }
+
 func (dt *DomainRoTx) DebugKVFilesWithKey(k []byte) (res []string, err error) {
 	for i := len(dt.files) - 1; i >= 0; i-- {
 		_, ok, err := dt.getFromFile(i, k)
@@ -1435,7 +1433,7 @@ func (dt *DomainRoTx) getLatestFromDb(key []byte, roTx kv.Tx) ([]byte, uint64, b
 
 	if foundInvStep != nil {
 		foundStep := ^binary.BigEndian.Uint64(foundInvStep)
-		if LastTxNumOfStep(foundStep, dt.d.aggregationStep) >= dt.maxTxNumInDomainFiles(false) {
+		if lastTxNumOfStep(foundStep, dt.d.aggregationStep) >= dt.files.EndTxNum() {
 			valsC, err := dt.valsCursor(roTx)
 			if err != nil {
 				return nil, foundStep, false, err
@@ -1483,7 +1481,7 @@ func (dt *DomainRoTx) GetLatest(key1, key2 []byte, roTx kv.Tx) ([]byte, uint64, 
 	if traceGetLatest == dt.d.filenameBase {
 		defer func() {
 			fmt.Printf("GetLatest(%s, '%x' -> '%x') (from db=%t; istep=%x stepInFiles=%d)\n",
-				dt.d.filenameBase, key, v, found, foundStep, dt.maxTxNumInDomainFiles(false)/dt.d.aggregationStep)
+				dt.d.filenameBase, key, v, found, foundStep, dt.files.EndTxNum()/dt.d.aggregationStep)
 		}()
 	}
 
@@ -1549,11 +1547,16 @@ func (dt *DomainRoTx) CanPruneUntil(tx kv.Tx, untilTx uint64) bool {
 	return canHistory || canDomain
 }
 
+func (dt *DomainRoTx) canBuild(dbtx kv.Tx) bool { //nolint
+	maxStepInFiles := dt.files.EndTxNum() / dt.d.aggregationStep
+	return dt.d.maxStepInDB(dbtx) > maxStepInFiles
+}
+
 // checks if there is anything to prune in DOMAIN tables.
 // everything that aggregated is prunable.
 // history.CanPrune should be called separately because it responsible for different tables
 func (dt *DomainRoTx) canPruneDomainTables(tx kv.Tx, untilTx uint64) (can bool, maxStepToPrune uint64) {
-	if m := dt.maxTxNumInDomainFiles(false); m > 0 {
+	if m := dt.files.EndTxNum(); m > 0 {
 		maxStepToPrune = (m - 1) / dt.d.aggregationStep
 	}
 	var untilStep uint64
@@ -1640,7 +1643,7 @@ func (dc *DomainPruneStat) String() (kvstr string) {
 		kvstr = fmt.Sprintf("kv: %d from steps %d-%d", dc.Values, dc.MinStep, dc.MaxStep)
 	}
 	if dc.History != nil {
-		kvstr += dc.History.String()
+		kvstr += ", " + dc.History.String()
 	}
 	return kvstr
 }
