@@ -17,7 +17,7 @@ var databaseTablesCfg = kv.TableCfg{
 	kv.BorSpans:       {},
 }
 
-type entityStore[TEntity Entity] interface {
+type EntityStore[TEntity Entity] interface {
 	Prepare(ctx context.Context) error
 	Close()
 	GetLastEntityId(ctx context.Context) (uint64, bool, error)
@@ -31,7 +31,7 @@ type entityStore[TEntity Entity] interface {
 
 type RangeIndexFactory func(ctx context.Context) (*RangeIndex, error)
 
-type entityStoreImpl[TEntity Entity] struct {
+type mdbxEntityStore[TEntity Entity] struct {
 	db    *polygoncommon.Database
 	label kv.Label
 	table string
@@ -43,14 +43,14 @@ type entityStoreImpl[TEntity Entity] struct {
 	prepareOnce              sync.Once
 }
 
-func newEntityStore[TEntity Entity](
+func newMdbxEntityStore[TEntity Entity](
 	db *polygoncommon.Database,
 	label kv.Label,
 	table string,
 	makeEntity func() TEntity,
 	blockNumToIdIndexFactory RangeIndexFactory,
-) entityStore[TEntity] {
-	return &entityStoreImpl[TEntity]{
+) *mdbxEntityStore[TEntity] {
+	return &mdbxEntityStore[TEntity]{
 		db:    db,
 		label: label,
 		table: table,
@@ -61,7 +61,7 @@ func newEntityStore[TEntity Entity](
 	}
 }
 
-func (s *entityStoreImpl[TEntity]) Prepare(ctx context.Context) error {
+func (s *mdbxEntityStore[TEntity]) Prepare(ctx context.Context) error {
 	var err error
 	s.prepareOnce.Do(func() {
 		err = s.db.OpenOnce(ctx, s.label, databaseTablesCfg)
@@ -78,11 +78,11 @@ func (s *entityStoreImpl[TEntity]) Prepare(ctx context.Context) error {
 	return err
 }
 
-func (s *entityStoreImpl[TEntity]) Close() {
+func (s *mdbxEntityStore[TEntity]) Close() {
 	s.blockNumToIdIndex.Close()
 }
 
-func (s *entityStoreImpl[TEntity]) GetLastEntityId(ctx context.Context) (uint64, bool, error) {
+func (s *mdbxEntityStore[TEntity]) GetLastEntityId(ctx context.Context) (uint64, bool, error) {
 	tx, err := s.db.BeginRo(ctx)
 	if err != nil {
 		return 0, false, err
@@ -115,7 +115,7 @@ func Zero[T any]() T {
 	return value
 }
 
-func (s *entityStoreImpl[TEntity]) GetLastEntity(ctx context.Context) (TEntity, error) {
+func (s *mdbxEntityStore[TEntity]) GetLastEntity(ctx context.Context) (TEntity, error) {
 	id, ok, err := s.GetLastEntityId(ctx)
 	if err != nil {
 		return Zero[TEntity](), err
@@ -137,7 +137,7 @@ func entityStoreKeyParse(key []byte) uint64 {
 	return binary.BigEndian.Uint64(key)
 }
 
-func (s *entityStoreImpl[TEntity]) entityUnmarshalJSON(jsonBytes []byte) (TEntity, error) {
+func (s *mdbxEntityStore[TEntity]) entityUnmarshalJSON(jsonBytes []byte) (TEntity, error) {
 	entity := s.makeEntity()
 	if err := json.Unmarshal(jsonBytes, entity); err != nil {
 		return Zero[TEntity](), err
@@ -145,7 +145,7 @@ func (s *entityStoreImpl[TEntity]) entityUnmarshalJSON(jsonBytes []byte) (TEntit
 	return entity, nil
 }
 
-func (s *entityStoreImpl[TEntity]) GetEntity(ctx context.Context, id uint64) (TEntity, error) {
+func (s *mdbxEntityStore[TEntity]) GetEntity(ctx context.Context, id uint64) (TEntity, error) {
 	tx, err := s.db.BeginRo(ctx)
 	if err != nil {
 		return Zero[TEntity](), err
@@ -165,7 +165,7 @@ func (s *entityStoreImpl[TEntity]) GetEntity(ctx context.Context, id uint64) (TE
 	return s.entityUnmarshalJSON(jsonBytes)
 }
 
-func (s *entityStoreImpl[TEntity]) PutEntity(ctx context.Context, id uint64, entity TEntity) error {
+func (s *mdbxEntityStore[TEntity]) PutEntity(ctx context.Context, id uint64, entity TEntity) error {
 	tx, err := s.db.BeginRw(ctx)
 	if err != nil {
 		return err
@@ -189,7 +189,7 @@ func (s *entityStoreImpl[TEntity]) PutEntity(ctx context.Context, id uint64, ent
 	return s.blockNumToIdIndex.Put(ctx, entity.BlockNumRange(), id)
 }
 
-func (s *entityStoreImpl[TEntity]) FindByBlockNum(ctx context.Context, blockNum uint64) (TEntity, error) {
+func (s *mdbxEntityStore[TEntity]) FindByBlockNum(ctx context.Context, blockNum uint64) (TEntity, error) {
 	id, err := s.blockNumToIdIndex.Lookup(ctx, blockNum)
 	if err != nil {
 		return Zero[TEntity](), err
@@ -202,7 +202,7 @@ func (s *entityStoreImpl[TEntity]) FindByBlockNum(ctx context.Context, blockNum 
 	return s.GetEntity(ctx, id)
 }
 
-func (s *entityStoreImpl[TEntity]) RangeFromId(ctx context.Context, startId uint64) ([]TEntity, error) {
+func (s *mdbxEntityStore[TEntity]) RangeFromId(ctx context.Context, startId uint64) ([]TEntity, error) {
 	tx, err := s.db.BeginRo(ctx)
 	if err != nil {
 		return nil, err
@@ -231,7 +231,7 @@ func (s *entityStoreImpl[TEntity]) RangeFromId(ctx context.Context, startId uint
 	return entities, nil
 }
 
-func (s *entityStoreImpl[TEntity]) RangeFromBlockNum(ctx context.Context, startBlockNum uint64) ([]TEntity, error) {
+func (s *mdbxEntityStore[TEntity]) RangeFromBlockNum(ctx context.Context, startBlockNum uint64) ([]TEntity, error) {
 	id, err := s.blockNumToIdIndex.Lookup(ctx, startBlockNum)
 	if err != nil {
 		return nil, err
