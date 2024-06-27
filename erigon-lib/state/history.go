@@ -939,7 +939,7 @@ type HistoryRoTx struct {
 	h   *History
 	iit *InvertedIndexRoTx
 
-	files   []ctxItem // have no garbage (canDelete=true, overlaps, etc...)
+	files   visibleFiles // have no garbage (canDelete=true, overlaps, etc...)
 	getters []ArchiveGetter
 	readers []*recsplit.IndexReader
 
@@ -1016,7 +1016,7 @@ func (ht *HistoryRoTx) canPruneUntil(tx kv.Tx, untilTx uint64) (can bool, txTo u
 		if !canPruneIdx {
 			return false, 0
 		}
-		txTo = min(ht.maxTxNumInFiles(), untilTx)
+		txTo = min(ht.files.MaxTxNum(), ht.iit.files.MaxTxNum(), untilTx)
 	}
 
 	switch ht.h.filenameBase {
