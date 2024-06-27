@@ -1963,12 +1963,7 @@ func (dt *DomainRoTx) Files() (res []string) {
 
 func (dt *DomainRoTx) canBuild(dbtx kv.Tx) bool {
 	//TODO: support "keep in db" parameter
-	inFiles := uint64(0)
-	if len(dt.files) > 0 {
-		inFiles = dt.files[len(dt.files)-1].endTxNum / dt.d.aggregationStep
-	}
-	lastInDB := dt.d.maxStepInDB(dbtx)
-	return lastInDB > inFiles
+	return dt.d.maxStepInDB(dbtx) > dt.maxTxNumInDomainFiles()
 }
 
 type SelectedStaticFiles struct {
