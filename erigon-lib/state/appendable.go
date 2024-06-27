@@ -390,7 +390,8 @@ func (ap *Appendable) getFromDB(k []byte, dbtx kv.Tx) ([]byte, bool, error) {
 	}
 	return v, v != nil, err
 }
-func (ap *Appendable) maxTxNumInDB(dbtx kv.Tx) (txNum uint64, err error) {
+
+func (ap *Appendable) maxTxNumInDB(dbtx kv.Tx) (txNum uint64, err error) { //nolint
 	first, err := kv.LastKey(dbtx, ap.table)
 	if err != nil {
 		return 0, err
