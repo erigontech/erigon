@@ -1470,7 +1470,7 @@ func (c *Bor) CommitStates(
 	blockNum := header.Number.Uint64()
 
 	if c.polygonBridge != nil {
-		events, err := c.polygonBridge.GetEvents(context.Background(), blockNum) // TODO: pass context
+		events, err := c.polygonBridge.GetEvents(c.execCtx, blockNum)
 		if err != nil {
 			return err
 		}
