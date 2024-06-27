@@ -1212,6 +1212,9 @@ func (s *Ethereum) StartMining(ctx context.Context, db kv.RwDB, stateDiffClient 
 			s.engine.(*clique.Clique).Authorize(eb, func(_ libcommon.Address, _ string, msg []byte) ([]byte, error) {
 				return crypto.Sign(crypto.Keccak256(msg), miner.MiningConfig.SigKey)
 			})
+		} else {
+			s.logger.Error("mining is not supported after the Merge")
+			return errors.New("mining is not supported after the Merge")
 		}
 	} else {
 		// for the bor dev network without heimdall we need the authorizer to be set otherwise there is no
