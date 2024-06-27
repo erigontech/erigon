@@ -45,11 +45,7 @@ func NewDiagnosticClient(ctx context.Context, metricsMux *http.ServeMux, dataDir
 		return nil, err
 	}
 
-	hInfo := ReadSysInfo(db)
-	ss := ReadSyncStages(db)
-	snpdwl := ReadSnapshotDownloadInfo(db)
-	snpidx := ReadSnapshotIndexingInfo(db)
-	snpfd := ReadSnapshotFillDBInfo(db)
+	hInfo, ss, snpdwl, snpidx, snpfd := ReadSavedData(db)
 
 	return &DiagnosticClient{
 		ctx:         ctx,
@@ -135,3 +131,67 @@ func interfaceToJSONString(i interface{}) string {
 	}
 	return string(b)
 }*/
+
+func ReadSavedData(db kv.RoDB) (hinfo HardwareInfo, ssinfo []SyncStage, snpdwl SnapshotDownloadStatistics, snpidx SnapshotIndexingStatistics, snpfd SnapshotFillDBStatistics) {
+	var ramBytes []byte
+	var cpuBytes []byte
+	var diskBytes []byte
+	var ssinfoData []byte
+	var snpdwlData []byte
+	var snpidxData []byte
+	var snpfdData []byte
+	var err error
+
+	if err := db.View(context.Background(), func(tx kv.Tx) error {
+		ramBytes, err = ReadRAMInfoFromTx(tx)
+		if err != nil {
+			return err
+		}
+
+		cpuBytes, err = ReadCPUInfoFromTx(tx)
+		if err != nil {
+			return err
+		}
+
+		diskBytes, err = ReadDiskInfoFromTx(tx)
+		if err != nil {
+			return err
+		}
+
+		ssinfoData, err = SyncStagesFromTX(tx)
+		if err != nil {
+			return err
+		}
+
+		snpdwlData, err = SnapshotDownloadInfoFromTx(tx)
+		if err != nil {
+			return err
+		}
+
+		snpidxData, err = SnapshotIndexingInfoFromTx(tx)
+		if err != nil {
+			return err
+		}
+
+		snpfdData, err = SnapshotFillDBInfoFromTx(tx)
+		if err != nil {
+			return err
+		}
+
+		return nil
+	}); err != nil {
+		return HardwareInfo{}, []SyncStage{}, SnapshotDownloadStatistics{}, SnapshotIndexingStatistics{}, SnapshotFillDBStatistics{}
+	}
+
+	hinfo = HardwareInfo{
+		RAM:  ParseRamInfo(ramBytes),
+		CPU:  ParseCPUInfo(cpuBytes),
+		Disk: ParseDiskInfo(diskBytes),
+	}
+	ssinfo = ParseStagesList(ssinfoData)
+	snpdwl = ParseSnapshotDownloadInfo(snpdwlData)
+	snpidx = ParseSnapshotIndexingInfo(snpidxData)
+	snpfd = ParseSnapshotFillDBInfo(snpfdData)
+
+	return hinfo, ssinfo, snpdwl, snpidx, snpfd
+}

@@ -1,6 +1,8 @@
 package stages
 
 import (
+	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -192,11 +194,17 @@ func createStageRowFromStage(stage diagnostics.SyncStage) table.Row {
 
 func createSubStageRowFromSubstageStage(substage diagnostics.SyncSubStage) table.Row {
 	progress := substage.Stats.Progress
-	if substage.ID == "E3 Indexing" {
-		if progress == "100%" {
-			progress = "> 50%"
-		} else {
-			progress = "< 50%"
+
+	if substage.State == diagnostics.Completed {
+		progress = "100%"
+	} else {
+		if substage.ID == "E3 Indexing" {
+			if progress == "100%" {
+				progress = "> 50%"
+			} else {
+				prgint := convertProgress(progress)
+				progress = strconv.Itoa(prgint/2) + "%"
+			}
 		}
 	}
 
@@ -207,4 +215,10 @@ func createSubStageRowFromSubstageStage(substage diagnostics.SyncSubStage) table
 		substage.Stats.TimeElapsed,
 		progress,
 	}
+}
+
+func convertProgress(progress string) int {
+	progress = strings.Replace(progress, "%", "", -1)
+	progressInt, _ := strconv.Atoi(progress)
+	return progressInt
 }

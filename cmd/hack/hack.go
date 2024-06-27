@@ -8,7 +8,6 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
-	"github.com/ledgerwatch/erigon-lib/kv/dbutils"
 	"math/big"
 	"net/http"
 	_ "net/http/pprof" //nolint:gosec
@@ -18,6 +17,8 @@ import (
 	"slices"
 	"sort"
 	"strings"
+
+	"github.com/ledgerwatch/erigon-lib/kv/dbutils"
 
 	"github.com/RoaringBitmap/roaring/roaring64"
 	"github.com/holiman/uint256"
@@ -40,9 +41,7 @@ import (
 	"github.com/ledgerwatch/erigon/core"
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/rawdb/blockio"
-	"github.com/ledgerwatch/erigon/core/state"
 	"github.com/ledgerwatch/erigon/core/types"
-	"github.com/ledgerwatch/erigon/crypto"
 	"github.com/ledgerwatch/erigon/eth/ethconfig"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 	"github.com/ledgerwatch/erigon/ethdb/cbor"
@@ -150,84 +149,6 @@ func printTxHashes(chaindata string, block uint64) error {
 	}); err != nil {
 		return err
 	}
-	return nil
-}
-
-func readAccount(chaindata string, account libcommon.Address) error {
-	db := mdbx.MustOpen(chaindata)
-	defer db.Close()
-
-	tx, txErr := db.BeginRo(context.Background())
-	if txErr != nil {
-		return txErr
-	}
-	defer tx.Rollback()
-
-	a, err := state.NewPlainStateReader(tx).ReadAccountData(account)
-	if err != nil {
-		return err
-	} else if a == nil {
-		return fmt.Errorf("acc not found")
-	}
-	fmt.Printf("CodeHash:%x\nIncarnation:%d\n", a.CodeHash, a.Incarnation)
-
-	c, err := tx.Cursor(kv.PlainState)
-	if err != nil {
-		return err
-	}
-	defer c.Close()
-	for k, v, e := c.Seek(account.Bytes()); k != nil; k, v, e = c.Next() {
-		if e != nil {
-			return e
-		}
-		if !bytes.HasPrefix(k, account.Bytes()) {
-			break
-		}
-		fmt.Printf("%x => %x\n", k, v)
-	}
-	cc, err := tx.Cursor(kv.PlainContractCode)
-	if err != nil {
-		return err
-	}
-	defer cc.Close()
-	fmt.Printf("code hashes\n")
-	for k, v, e := cc.Seek(account.Bytes()); k != nil; k, v, e = c.Next() {
-		if e != nil {
-			return e
-		}
-		if !bytes.HasPrefix(k, account.Bytes()) {
-			break
-		}
-		fmt.Printf("%x => %x\n", k, v)
-	}
-	return nil
-}
-
-func readAccountAtVersion(chaindata string, account string, block uint64) error {
-	db := mdbx.MustOpen(chaindata)
-	defer db.Close()
-
-	tx, txErr := db.BeginRo(context.Background())
-	if txErr != nil {
-		return txErr
-	}
-	defer tx.Rollback()
-
-	ps := state.NewPlainState(tx, block, nil)
-
-	addr := libcommon.HexToAddress(account)
-	acc, err := ps.ReadAccountData(addr)
-	if err != nil {
-		return err
-	}
-
-	asJson, err := json.Marshal(acc)
-	if err != nil {
-		return err
-	}
-
-	fmt.Printf("account: %s", asJson)
-
 	return nil
 }
 
@@ -875,46 +796,6 @@ func keybytesToHex(str []byte) []byte {
 	return nibbles
 }
 
-func findPrefix(chaindata string) error {
-	db := mdbx.MustOpen(chaindata)
-	defer db.Close()
-
-	tx, txErr := db.BeginRo(context.Background())
-	if txErr != nil {
-		return txErr
-	}
-	defer tx.Rollback()
-
-	c, err := tx.Cursor(kv.PlainState)
-	if err != nil {
-		return err
-	}
-	defer c.Close()
-	var k []byte
-	var e error
-	prefix := common.FromHex("0x0901050b0c03")
-	count := 0
-	for k, _, e = c.First(); k != nil && e == nil; k, _, e = c.Next() {
-		if len(k) != 20 {
-			continue
-		}
-		hash := crypto.Keccak256(k)
-		nibbles := keybytesToHex(hash)
-		if bytes.HasPrefix(nibbles, prefix) {
-			fmt.Printf("addr = [%x], hash = [%x]\n", k, hash)
-			break
-		}
-		count++
-		if count%1_000_000 == 0 {
-			fmt.Printf("Searched %d records\n", count)
-		}
-	}
-	if e != nil {
-		return e
-	}
-	return nil
-}
-
 func rmSnKey(chaindata string) error {
 	db := mdbx.MustOpen(chaindata)
 	defer db.Close()
@@ -1077,22 +958,6 @@ func readSeg(chaindata string) error {
 	return nil
 }
 
-func dumpState(chaindata string) error {
-	db := mdbx.MustOpen(chaindata)
-	defer db.Close()
-
-	if err := db.View(context.Background(), func(tx kv.Tx) error {
-		return tx.ForEach(kv.PlainState, nil, func(k, v []byte) error {
-			fmt.Printf("%x %x\n", k, v)
-			return nil
-		})
-	}); err != nil {
-		return err
-	}
-
-	return nil
-}
-
 func main() {
 	debug.RaiseFdLimit()
 	flag.Parse()
@@ -1124,11 +989,6 @@ func main() {
 
 	case "testBlockHashes":
 		testBlockHashes(*chaindata, *block, libcommon.HexToHash(*hash))
-
-	case "readAccount":
-		if err := readAccount(*chaindata, libcommon.HexToAddress(*account)); err != nil {
-			fmt.Printf("Error: %v\n", err)
-		}
 
 	case "dumpStorage":
 		dumpStorage()
@@ -1188,8 +1048,6 @@ func main() {
 		err = devTx(*chaindata)
 	case "chainConfig":
 		err = chainConfig(*name)
-	case "findPrefix":
-		err = findPrefix(*chaindata)
 	case "findLogs":
 		err = findLogs(*chaindata, uint64(*block), uint64(*blockTotal))
 	case "iterate":
@@ -1198,10 +1056,6 @@ func main() {
 		err = rmSnKey(*chaindata)
 	case "readSeg":
 		err = readSeg(*chaindata)
-	case "dumpState":
-		err = dumpState(*chaindata)
-	case "readAccountAtVersion":
-		err = readAccountAtVersion(*chaindata, *account, uint64(*block))
 	}
 
 	if err != nil {

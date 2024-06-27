@@ -341,25 +341,21 @@ func (I *impl) ProcessWithdrawals(
 }
 
 // ProcessExecutionPayload sets the latest payload header accordinly.
-func (I *impl) ProcessExecutionPayload(s abstract.BeaconState, payload *cltypes.Eth1Block) error {
+func (I *impl) ProcessExecutionPayload(s abstract.BeaconState, parentHash, prevRandao common.Hash, time uint64, payloadHeader *cltypes.Eth1Header) error {
 	if state.IsMergeTransitionComplete(s) {
-		if payload.ParentHash != s.LatestExecutionPayloadHeader().BlockHash {
+		if parentHash != s.LatestExecutionPayloadHeader().BlockHash {
 			return fmt.Errorf("ProcessExecutionPayload: invalid eth1 chain. mismatching parent")
 		}
 	}
-	if payload.PrevRandao != s.GetRandaoMixes(state.Epoch(s)) {
+	if prevRandao != s.GetRandaoMixes(state.Epoch(s)) {
 		return fmt.Errorf(
 			"ProcessExecutionPayload: randao mix mismatches with mix digest, expected %x, got %x",
 			s.GetRandaoMixes(state.Epoch(s)),
-			payload.PrevRandao,
+			prevRandao,
 		)
 	}
-	if payload.Time != state.ComputeTimestampAtSlot(s, s.Slot()) {
+	if time != state.ComputeTimestampAtSlot(s, s.Slot()) {
 		return fmt.Errorf("ProcessExecutionPayload: invalid Eth1 timestamp")
-	}
-	payloadHeader, err := payload.PayloadHeader()
-	if err != nil {
-		return err
 	}
 	s.SetLatestExecutionPayloadHeader(payloadHeader)
 	return nil
@@ -849,14 +845,14 @@ func batchVerifyAttestations(
 	return true, nil
 }
 
-func (I *impl) ProcessBlockHeader(s abstract.BeaconState, block *cltypes.BeaconBlock) error {
-	if block.Slot != s.Slot() {
-		return fmt.Errorf("state slot: %d, not equal to block slot: %d", s.Slot(), block.Slot)
+func (I *impl) ProcessBlockHeader(s abstract.BeaconState, slot, proposerIndex uint64, parentRoot common.Hash, bodyRoot [32]byte) error {
+	if slot != s.Slot() {
+		return fmt.Errorf("state slot: %d, not equal to block slot: %d", s.Slot(), slot)
 	}
-	if block.Slot <= s.LatestBlockHeader().Slot {
+	if slot <= s.LatestBlockHeader().Slot {
 		return fmt.Errorf(
 			"slock slot: %d, not greater than latest block slot: %d",
-			block.Slot,
+			slot,
 			s.LatestBlockHeader().Slot,
 		)
 	}
@@ -864,10 +860,10 @@ func (I *impl) ProcessBlockHeader(s abstract.BeaconState, block *cltypes.BeaconB
 	if err != nil {
 		return fmt.Errorf("error in GetBeaconProposerIndex: %v", err)
 	}
-	if block.ProposerIndex != propInd {
+	if proposerIndex != propInd {
 		return fmt.Errorf(
 			"block proposer index: %d, does not match beacon proposer index: %d",
-			block.ProposerIndex,
+			proposerIndex,
 			propInd,
 		)
 	}
@@ -876,31 +872,27 @@ func (I *impl) ProcessBlockHeader(s abstract.BeaconState, block *cltypes.BeaconB
 	if err != nil {
 		return fmt.Errorf("unable to hash tree root of latest block header: %v", err)
 	}
-	if block.ParentRoot != latestRoot {
+	if parentRoot != latestRoot {
 		return fmt.Errorf(
 			"block parent root: %x, does not match latest block root: %x",
-			block.ParentRoot,
+			parentRoot,
 			latestRoot,
 		)
 	}
 
-	bodyRoot, err := block.Body.HashSSZ()
-	if err != nil {
-		return fmt.Errorf("unable to hash tree root of block body: %v", err)
-	}
 	s.SetLatestBlockHeader(&cltypes.BeaconBlockHeader{
-		Slot:          block.Slot,
-		ProposerIndex: block.ProposerIndex,
-		ParentRoot:    block.ParentRoot,
+		Slot:          slot,
+		ProposerIndex: proposerIndex,
+		ParentRoot:    parentRoot,
 		BodyRoot:      bodyRoot,
 	})
 
-	proposer, err := s.ValidatorForValidatorIndex(int(block.ProposerIndex))
+	proposer, err := s.ValidatorForValidatorIndex(int(proposerIndex))
 	if err != nil {
 		return err
 	}
 	if proposer.Slashed() {
-		return fmt.Errorf("proposer: %d is slashed", block.ProposerIndex)
+		return fmt.Errorf("proposer: %d is slashed", proposerIndex)
 	}
 	return nil
 }

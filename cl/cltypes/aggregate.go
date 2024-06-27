@@ -69,6 +69,10 @@ type SyncAggregate struct {
 	SyncCommiteeSignature libcommon.Bytes96 `json:"sync_committee_signature"`
 }
 
+func NewSyncAggregate() *SyncAggregate {
+	return &SyncAggregate{}
+}
+
 // return sum of the committee bits
 func (agg *SyncAggregate) Sum() int {
 	ret := 0

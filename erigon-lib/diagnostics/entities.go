@@ -136,11 +136,15 @@ type SnapshotFillDBStatistics struct {
 }
 
 type SnapshotFillDBStage struct {
-	StageName       string `json:"stageName"`
-	ProcessedBlocks uint64 `json:"processedBlocks"`
-	AvailableBlocks uint64 `json:"availableBlocks"`
+	StageName string `json:"stageName"`
+	Current   uint64 `json:"current"`
+	Total     uint64 `json:"total"`
 }
 
+type SnapshotFillDBStageUpdate struct {
+	Stage       SnapshotFillDBStage `json:"stage"`
+	TimeElapsed float64             `json:"timeElapsed"`
+}
 type BlockExecutionStatistics struct {
 	From        uint64  `json:"from"`
 	To          uint64  `json:"to"`
@@ -336,5 +340,9 @@ func (ti HeaderCanonicalMarkerUpdate) Type() Type {
 }
 
 func (ti HeadersProcessedUpdate) Type() Type {
+	return TypeOf(ti)
+}
+
+func (ti SnapshotFillDBStageUpdate) Type() Type {
 	return TypeOf(ti)
 }
