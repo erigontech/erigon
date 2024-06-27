@@ -41,8 +41,8 @@ type Stage struct {
 }
 
 type CurrentSyncCycleInfo struct {
-	IsInitialCycle bool //deprecated. use IsFirstCycle and IsOnChainTip
-	IsFirstCycle   bool
+	IsInitialCycle bool // means: not-on-chain-tip. can be several sync cycle in this mode.
+	IsFirstCycle   bool // means: first cycle
 }
 
 // StageState is the state of the stage.
