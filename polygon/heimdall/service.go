@@ -121,30 +121,6 @@ func (s *service) FetchLatestSpan(ctx context.Context) (*Span, error) {
 	return s.store.Spans().GetLastEntity(ctx)
 }
 
-func (s *service) FetchSpanAt(ctx context.Context, blockNum uint64) (*Span, error) {
-	s.checkpointScraper.Synchronize(ctx)
-	id, ok, err := s.store.Spans().GetLastEntityId(ctx)
-	if err != nil || !ok {
-		return nil, err
-	}
-
-	for {
-		span, err := s.store.Spans().GetEntity(ctx, id)
-		if err != nil {
-			return nil, err
-		}
-
-		if blockNum >= span.StartBlock && blockNum <= span.EndBlock {
-			return span, nil
-		}
-
-		id--
-		if id == 0 {
-			return nil, errors.New("reached span 0 searching for block")
-		}
-	}
-}
-
 func (s *service) FetchLatestSpans(ctx context.Context, count uint) ([]*Span, error) {
 	if count == 0 {
 		return nil, errors.New("can't fetch 0 latest spans")
