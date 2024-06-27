@@ -575,6 +575,7 @@ func (a *Aggregator) buildFiles(ctx context.Context, step uint64) (hasMore bool,
 		}); err != nil {
 			return false, err
 		}
+		fmt.Printf("[dbg] can build: %s %t\n", d.filenameBase, canBuild)
 		if !canBuild {
 			continue
 		}
@@ -625,6 +626,7 @@ func (a *Aggregator) buildFiles(ctx context.Context, step uint64) (hasMore bool,
 		}); err != nil {
 			return false, err
 		}
+		fmt.Printf("[dbg] can build: %s %t\n", ii.filenameBase, canBuild)
 		if !canBuild {
 			continue
 		}
@@ -675,6 +677,7 @@ func (a *Aggregator) buildFiles(ctx context.Context, step uint64) (hasMore bool,
 		}); err != nil {
 			return false, err
 		}
+		fmt.Printf("[dbg] can build: %s %t\n", ap.filenameBase, canBuild)
 		if !canBuild {
 			continue
 		}
