@@ -10,7 +10,7 @@ import (
 	"github.com/ledgerwatch/erigon/rlp"
 )
 
-// EIP-7251 Withdrawal Request see https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7002.md
+// EIP-7002 Withdrawal Request see https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7002.md
 type WithdrawalRequest struct {
 	SourceAddress   libcommon.Address
 	ValidatorPubkey [BLSPubKeyLen]byte // bls
@@ -75,7 +75,7 @@ func (s WithdrawalRequests) EncodeIndex(i int, w *bytes.Buffer) {
 	s[i].EncodeRLP(w)
 }
 
-// Requests creates a deep copy of each WithdrawalRequest and returns of Requests object (as a slice).
+// Requests creates a deep copy of each WithdrawalRequest and returns a slice (as Requests).
 func (s WithdrawalRequests) Requests() (reqs Requests) {
 	for _, d := range s {
 		reqs = append(reqs, d)
