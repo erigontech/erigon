@@ -2,7 +2,6 @@ package eth1
 
 import (
 	"context"
-	"encoding/binary"
 	"errors"
 	"fmt"
 
@@ -11,7 +10,6 @@ import (
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces"
 	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon-lib/kv/rawdbv3"
 
 	execution "github.com/ledgerwatch/erigon-lib/gointerfaces/executionproto"
 	types2 "github.com/ledgerwatch/erigon-lib/gointerfaces/typesproto"
@@ -334,13 +332,12 @@ func (e *EthereumExecutionModule) FrozenBlocks(ctx context.Context, _ *emptypb.E
 	}
 	defer tx.Rollback()
 
-	firstNonGenesis, err := rawdbv3.SecondKey(tx, kv.Headers)
+	firstNonGenesisBlockNumber, ok, err := rawdb.ReadFirstNonGenesisHeaderNumber(tx)
 	if err != nil {
 		return nil, err
 	}
 	gap := false
-	if firstNonGenesis != nil {
-		firstNonGenesisBlockNumber := binary.BigEndian.Uint64(firstNonGenesis)
+	if ok {
 		gap = e.blockReader.Snapshots().SegmentsMax()+1 < firstNonGenesisBlockNumber
 	}
 	return &execution.FrozenBlocksResponse{
