@@ -357,15 +357,12 @@ func FinalizeBlockExecution(
 	syscall := func(contract libcommon.Address, data []byte) ([]byte, error) {
 		return SysCallContract(contract, data, cc, ibs, header, engine, false /* constCall */)
 	}
-	syscall2 := func(msg *types.Message) ([]byte, error) {
-		return SysCallContractMsg(msg, cc, ibs, header, engine, false /* constCall */)
-	}
 
 	if isMining {
-		newBlock, newTxs, newReceipt, err = engine.FinalizeAndAssemble(cc, header, ibs, txs, uncles, receipts, withdrawals, requests, chainReader, syscall, syscall2, nil, logger)
+		newBlock, newTxs, newReceipt, err = engine.FinalizeAndAssemble(cc, header, ibs, txs, uncles, receipts, withdrawals, requests, chainReader, syscall, nil, logger)
 	} else {
 		var rss types.Requests
-		_, _, _, err = engine.Finalize(cc, header, ibs, txs, uncles, receipts, withdrawals, requests, chainReader, syscall, syscall2, logger)
+		_, _, _, err = engine.Finalize(cc, header, ibs, txs, uncles, receipts, withdrawals, requests, chainReader, syscall, logger)
 
 		if !reflect.DeepEqual(rss, requests) {
 			return nil, nil, nil, fmt.Errorf("invalid requests for block %d", header.Number.Uint64())

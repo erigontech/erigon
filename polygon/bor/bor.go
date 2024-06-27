@@ -983,7 +983,7 @@ func (c *Bor) CalculateRewards(config *chain.Config, header *types.Header, uncle
 // rewards given.
 func (c *Bor) Finalize(config *chain.Config, header *types.Header, state *state.IntraBlockState,
 	txs types.Transactions, uncles []*types.Header, r types.Receipts, withdrawals []*types.Withdrawal, requests types.Requests,
-	chain consensus.ChainReader, syscall consensus.SystemCall, syscall2 consensus.SystemCall2, logger log.Logger,
+	chain consensus.ChainReader, syscall consensus.SystemCall, logger log.Logger,
 ) (types.Transactions, types.Receipts, types.Requests, error) {
 	headerNumber := header.Number.Uint64()
 
@@ -1009,7 +1009,7 @@ func (c *Bor) Finalize(config *chain.Config, header *types.Header, state *state.
 
 			fmt.Println("committing state")
 			// commit states
-			if err := c.CommitStates(state, header, cx, syscall, syscall2); err != nil {
+			if err := c.CommitStates(state, header, cx, syscall); err != nil {
 				err := fmt.Errorf("Finalize.CommitStates: %w", err)
 				c.logger.Error("[bor] Error while committing states", "err", err)
 				return nil, types.Receipts{}, nil, err
@@ -1054,7 +1054,7 @@ func (c *Bor) changeContractCodeIfNeeded(headerNumber uint64, state *state.Intra
 // nor block rewards given, and returns the final block.
 func (c *Bor) FinalizeAndAssemble(chainConfig *chain.Config, header *types.Header, state *state.IntraBlockState,
 	txs types.Transactions, uncles []*types.Header, receipts types.Receipts, withdrawals []*types.Withdrawal, requests types.Requests,
-	chain consensus.ChainReader, syscall consensus.SystemCall, syscall2 consensus.SystemCall2, call consensus.Call, logger log.Logger,
+	chain consensus.ChainReader, syscall consensus.SystemCall, call consensus.Call, logger log.Logger,
 ) (*types.Block, types.Transactions, types.Receipts, error) {
 	// stateSyncData := []*types.StateSyncData{}
 
@@ -1079,7 +1079,7 @@ func (c *Bor) FinalizeAndAssemble(chainConfig *chain.Config, header *types.Heade
 				return nil, nil, types.Receipts{}, err
 			}
 			// commit states
-			if err := c.CommitStates(state, header, cx, syscall, syscall2); err != nil {
+			if err := c.CommitStates(state, header, cx, syscall); err != nil {
 				err := fmt.Errorf("FinalizeAndAssemble.CommitStates: %w", err)
 				c.logger.Error("[bor] committing states", "err", err)
 				return nil, nil, types.Receipts{}, err
@@ -1468,7 +1468,6 @@ func (c *Bor) CommitStates(
 	header *types.Header,
 	chain statefull.ChainContext,
 	syscall consensus.SystemCall,
-	syscall2 consensus.SystemCall2,
 ) error {
 	blockNum := header.Number.Uint64()
 
@@ -1481,7 +1480,7 @@ func (c *Bor) CommitStates(
 		c.logger.Warn("using polygon bridge", "len(events)", len(events), "blockNum", blockNum)
 
 		for _, event := range events {
-			_, err := syscall2(event)
+			_, err := syscall(libcommon.HexToAddress(c.config.StateReceiverContract), event)
 			if err != nil {
 				return err
 			}

@@ -10,9 +10,6 @@ import (
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/accounts/abi"
-	"github.com/ledgerwatch/erigon/common/u256"
-	"github.com/ledgerwatch/erigon/core"
-	"github.com/ledgerwatch/erigon/core/state"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/polygon/bor/borcfg"
 	"github.com/ledgerwatch/erigon/polygon/heimdall"
@@ -27,11 +24,10 @@ type Bridge struct {
 	lastProcessedBlockNumber uint64
 	lastProcessedEventID     uint64
 
-	log                log.Logger
-	borConfig          *borcfg.BorConfig
-	stateClientAddress libcommon.Address
-	stateReceiverABI   abi.ABI
-	fetchSyncEvents    fetchSyncEventsType
+	log              log.Logger
+	borConfig        *borcfg.BorConfig
+	stateReceiverABI abi.ABI
+	fetchSyncEvents  fetchSyncEventsType
 }
 
 func NewBridge(dataDir string, logger log.Logger, borConfig *borcfg.BorConfig, fetchSyncEvents fetchSyncEventsType, stateReceiverABI abi.ABI) *Bridge {
@@ -45,7 +41,6 @@ func NewBridge(dataDir string, logger log.Logger, borConfig *borcfg.BorConfig, f
 		fetchSyncEvents:          fetchSyncEvents,
 		lastProcessedBlockNumber: 0,
 		lastProcessedEventID:     0,
-		stateClientAddress:       libcommon.HexToAddress(borConfig.StateReceiverContract),
 		stateReceiverABI:         stateReceiverABI,
 	}
 }
@@ -162,15 +157,13 @@ func (b *Bridge) Unwind(ctx context.Context, tip *types.Header) error {
 }
 
 // GetEvents returns all sync events at blockNum
-func (b *Bridge) GetEvents(ctx context.Context, blockNum uint64) ([]*types.Message, error) {
+func (b *Bridge) GetEvents(ctx context.Context, blockNum uint64) ([][]byte, error) {
 	start, end, err := GetEventIDRange(ctx, b.db, blockNum)
 	if err != nil {
 		return nil, err
 	}
 
 	b.log.Warn("got map", "blockNum", blockNum, "start", start, "end", end)
-
-	eventsRaw := make([]*types.Message, end-start+1)
 
 	// get events from DB
 	events, err := GetEvents(ctx, b.db, start, end)
@@ -180,24 +173,7 @@ func (b *Bridge) GetEvents(ctx context.Context, blockNum uint64) ([]*types.Messa
 
 	b.log.Warn(bridgeLogPrefix(fmt.Sprintf("got %v events for block %v", len(events), blockNum)))
 
-	// convert to message
-	for _, event := range events {
-		msg := types.NewMessage(
-			state.SystemAddress,
-			&b.stateClientAddress,
-			0, u256.Num0,
-			core.SysCallGasLimit,
-			u256.Num0,
-			nil, nil,
-			event, nil, false,
-			true,
-			nil,
-		)
-
-		eventsRaw = append(eventsRaw, &msg)
-	}
-
-	return eventsRaw, nil
+	return events, nil
 }
 
 // Helper functions
