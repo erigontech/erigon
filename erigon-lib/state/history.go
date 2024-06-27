@@ -1016,7 +1016,7 @@ func (ht *HistoryRoTx) canPruneUntil(tx kv.Tx, untilTx uint64) (can bool, txTo u
 		if !canPruneIdx {
 			return false, 0
 		}
-		txTo = min(ht.files.MaxTxNum(), ht.iit.files.MaxTxNum(), untilTx)
+		txTo = min(ht.files.EndTxNum(), ht.iit.files.EndTxNum(), untilTx)
 	}
 
 	switch ht.h.filenameBase {
@@ -1354,13 +1354,6 @@ func (ht *HistoryRoTx) WalkAsOf(startTxNum uint64, from, to []byte, roTx kv.Tx, 
 	return iter.UnionKV(hi, dbit, limit), nil
 }
 
-func (ht *HistoryRoTx) maxTxNumInFiles() uint64 {
-	if len(ht.files) == 0 {
-		return 0
-	}
-	return min(ht.files[len(ht.files)-1].endTxNum, ht.iit.maxTxNumInFiles())
-}
-
 // StateAsOfIter - returns state range at given time in history
 type StateAsOfIterF struct {
 	hc    *HistoryRoTx
@@ -1599,7 +1592,7 @@ func (ht *HistoryRoTx) iterateChangedFrozen(fromTxNum, toTxNum int, asc order.By
 		return iter.EmptyKV, nil
 	}
 
-	if fromTxNum >= 0 && ht.iit.maxTxNumInFiles() <= uint64(fromTxNum) {
+	if fromTxNum >= 0 && ht.iit.files.EndTxNum() <= uint64(fromTxNum) {
 		return iter.EmptyKV, nil
 	}
 

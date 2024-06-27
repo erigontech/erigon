@@ -437,7 +437,7 @@ func TestHistoryCanPrune(t *testing.T) {
 		hc := h.BeginFilesRo()
 		defer hc.Close()
 
-		maxTxInSnaps := hc.maxTxNumInFiles(false)
+		maxTxInSnaps := hc.files.EndTxNum()
 		require.Equal(t, (stepsTotal-stepKeepInDB)*16, maxTxInSnaps)
 
 		for i := uint64(0); i < stepsTotal; i++ {

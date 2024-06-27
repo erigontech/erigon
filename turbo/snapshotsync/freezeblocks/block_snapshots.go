@@ -1865,7 +1865,7 @@ func DumpBodies(ctx context.Context, db kv.RoDB, _ *chain.Config, blockFrom, blo
 		// But snapshots using canonical TxNum in field body.BaseTxID
 		// So, we manually calc this field here and serialize again.
 		//
-		// FYI: we also have other table to map canonical BlockNum->TxNum: kv.MaxTxNum
+		// FYI: we also have other table to map canonical BlockNum->TxNum: kv.EndTxNum
 		body, err := rawdb.ReadBodyForStorageByKey(tx, key)
 		if err != nil {
 			return false, err

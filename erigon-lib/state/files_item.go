@@ -242,7 +242,8 @@ func calcVisibleFiles(files *btree2.BTreeG[*filesItem], l idxList, trace bool) (
 // visibleFiles have no garbage (overlaps, unindexed, etc...)
 type visibleFiles []ctxItem
 
-func (files visibleFiles) MaxTxNum() uint64 {
+// EndTxNum return txNum which not included in file - it will be first txNum in future file
+func (files visibleFiles) EndTxNum() uint64 {
 	if len(files) == 0 {
 		return 0
 	}

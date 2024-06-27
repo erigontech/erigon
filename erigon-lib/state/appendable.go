@@ -531,7 +531,7 @@ func (tx *AppendableRoTx) mainTxNumInDB(dbtx kv.Tx) uint64 {
 }
 
 func (tx *AppendableRoTx) CanPrune(dbtx kv.Tx) bool {
-	return tx.mainTxNumInDB(dbtx) < tx.files.MaxTxNum()
+	return tx.mainTxNumInDB(dbtx) < tx.files.EndTxNum()
 }
 func (tx *AppendableRoTx) canBuild(dbtx kv.Tx) (bool, error) {
 	//TODO: support "keep in db" parameter
@@ -541,7 +541,7 @@ func (tx *AppendableRoTx) canBuild(dbtx kv.Tx) (bool, error) {
 		return false, err
 	}
 	maxStepInDB := maxTxNumInDB / tx.ap.aggregationStep
-	maxStepInFiles := tx.files.MaxTxNum() / tx.ap.aggregationStep
+	maxStepInFiles := tx.files.EndTxNum() / tx.ap.aggregationStep
 	return maxStepInDB > maxStepInFiles, nil
 }
 
