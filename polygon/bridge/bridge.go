@@ -40,17 +40,11 @@ func NewBridge(store Store, logger log.Logger, borConfig *borcfg.BorConfig, fetc
 	}
 }
 
-func (b *Bridge) Run(ctx context.Context, startTime uint64) error {
+func (b *Bridge) Run(ctx context.Context) error {
 	err := b.store.Prepare(ctx)
 	if err != nil {
 		return err
 	}
-
-	id, err := b.store.GetSprintLastEventID(ctx, b.lastProcessedEventID, time.Unix(int64(startTime), 0), b.stateReceiverABI)
-	if err != nil {
-		return err
-	}
-	b.lastProcessedEventID = id + 1
 
 	// get last known sync ID
 	lastEventID, err := b.store.GetLatestEventID(ctx)
