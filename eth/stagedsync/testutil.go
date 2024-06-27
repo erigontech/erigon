@@ -174,7 +174,7 @@ func generateBlocks2(t *testing.T, from uint64, numberOfBlocks uint64, blockWrit
 				var oldValue, newValue uint256.Int
 				newValue.SetOne()
 				var location libcommon.Hash
-				location.SetBytes(big.NewInt(int64(blockNumber)).Bytes())
+				location.SetBytes(new(big.Int).SetUint64(blockNumber).Bytes())
 				if blockNumber >= from {
 					if err := blockWriter.WriteAccountStorage(addr, newAcc.Incarnation, &location, &oldValue, &newValue); err != nil {
 						t.Fatal(err)
@@ -245,7 +245,7 @@ func generateBlocks(t *testing.T, from uint64, numberOfBlocks uint64, stateWrite
 				var oldValue, newValue uint256.Int
 				newValue.SetOne()
 				var location libcommon.Hash
-				location.SetBytes(big.NewInt(int64(blockNumber)).Bytes())
+				location.SetBytes(new(big.Int).SetUint64(blockNumber).Bytes())
 				if blockNumber >= from {
 					if err := blockWriter.WriteAccountStorage(addr, newAcc.Incarnation, &location, &oldValue, &newValue); err != nil {
 						t.Fatal(err)

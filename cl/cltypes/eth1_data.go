@@ -14,6 +14,10 @@ type Eth1Data struct {
 	BlockHash    libcommon.Hash `json:"block_hash"`
 }
 
+func NewEth1Data() *Eth1Data {
+	return &Eth1Data{}
+}
+
 func (e *Eth1Data) Copy() *Eth1Data {
 	copied := *e
 	return &copied

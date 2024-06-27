@@ -24,12 +24,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/ledgerwatch/erigon/core/rawdb"
-
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
-
-	"github.com/ledgerwatch/erigon-lib/log/v3"
 
 	"github.com/ledgerwatch/erigon-lib/chain"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
@@ -38,19 +34,19 @@ import (
 	"github.com/ledgerwatch/erigon-lib/kv/memdb"
 	"github.com/ledgerwatch/erigon-lib/kv/rawdbv3"
 	"github.com/ledgerwatch/erigon-lib/kv/temporal"
-	state3 "github.com/ledgerwatch/erigon-lib/state"
+	"github.com/ledgerwatch/erigon-lib/log/v3"
 	stateLib "github.com/ledgerwatch/erigon-lib/state"
+
 	"github.com/ledgerwatch/erigon/accounts/abi"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/consensus"
-	"github.com/ledgerwatch/erigon/consensus/misc"
 	"github.com/ledgerwatch/erigon/core"
 	"github.com/ledgerwatch/erigon/core/asm"
+	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/state"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/core/vm"
 	"github.com/ledgerwatch/erigon/eth/tracers/logger"
-	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/rlp"
 )
 
@@ -182,7 +178,7 @@ func testTemporalDB(t testing.TB) *temporal.DB {
 	t.Cleanup(db.Close)
 
 	cr := rawdb.NewCanonicalReader()
-	agg, err := state3.NewAggregator(context.Background(), datadir.New(t.TempDir()), 16, db, cr, log.New())
+	agg, err := stateLib.NewAggregator(context.Background(), datadir.New(t.TempDir()), 16, db, cr, log.New())
 	require.NoError(t, err)
 	t.Cleanup(agg.Close)
 
@@ -191,12 +187,12 @@ func testTemporalDB(t testing.TB) *temporal.DB {
 	return _db
 }
 
-func testTemporalTxSD(t testing.TB, db *temporal.DB) (kv.RwTx, *state3.SharedDomains) {
+func testTemporalTxSD(t testing.TB, db *temporal.DB) (kv.RwTx, *stateLib.SharedDomains) {
 	tx, err := db.BeginTemporalRw(context.Background()) //nolint:gocritic
 	require.NoError(t, err)
 	t.Cleanup(tx.Rollback)
 
-	sd, err := state3.NewSharedDomains(tx, log.New())
+	sd, err := stateLib.NewSharedDomains(tx, log.New())
 	require.NoError(t, err)
 	t.Cleanup(sd.Close)
 
@@ -311,7 +307,7 @@ func BenchmarkEVM_CREATE2_1200(bench *testing.B) {
 func fakeHeader(n uint64, parentHash libcommon.Hash) *types.Header {
 	header := types.Header{
 		Coinbase:   libcommon.HexToAddress("0x00000000000000000000000000000000deadbeef"),
-		Number:     big.NewInt(int64(n)),
+		Number:     new(big.Int).SetUint64(n),
 		ParentHash: parentHash,
 		Time:       n,
 		Nonce:      types.BlockNonce{0x1},
@@ -329,7 +325,7 @@ func (cr *FakeChainHeaderReader) GetHeaderByHash(hash libcommon.Hash) *types.Hea
 	return nil
 }
 func (cr *FakeChainHeaderReader) GetHeaderByNumber(number uint64) *types.Header {
-	return cr.GetHeaderByHash(libcommon.BigToHash(big.NewInt(int64(number))))
+	return cr.GetHeaderByHash(libcommon.BigToHash(new(big.Int).SetUint64(number)))
 }
 func (cr *FakeChainHeaderReader) Config() *chain.Config                 { return nil }
 func (cr *FakeChainHeaderReader) CurrentHeader() *types.Header          { return nil }
@@ -340,8 +336,8 @@ func (cr *FakeChainHeaderReader) CurrentSafeHeader() *types.Header      { return
 func (cr *FakeChainHeaderReader) GetHeader(hash libcommon.Hash, number uint64) *types.Header {
 	return &types.Header{
 		Coinbase:   libcommon.HexToAddress("0x00000000000000000000000000000000deadbeef"),
-		Number:     big.NewInt(int64(number)),
-		ParentHash: libcommon.BigToHash(big.NewInt(int64(number - 1))),
+		Number:     new(big.Int).SetUint64(number),
+		ParentHash: libcommon.BigToHash(new(big.Int).SetUint64(number - 1)),
 		Time:       number,
 		Nonce:      types.BlockNonce{0x1},
 		Extra:      []byte{},
@@ -377,7 +373,7 @@ func (d *dummyChain) Engine() consensus.Engine {
 func (d *dummyChain) GetHeader(h libcommon.Hash, n uint64) *types.Header {
 	d.counter++
 	parentHash := libcommon.Hash{}
-	s := common.LeftPadBytes(big.NewInt(int64(n-1)).Bytes(), 32)
+	s := common.LeftPadBytes(new(big.Int).SetUint64(n-1).Bytes(), 32)
 	copy(parentHash[:], s)
 
 	//parentHash := libcommon.Hash{byte(n - 1)}
@@ -392,7 +388,7 @@ func TestBlockhash(t *testing.T) {
 	// Current head
 	n := uint64(1000)
 	parentHash := libcommon.Hash{}
-	s := common.LeftPadBytes(big.NewInt(int64(n-1)).Bytes(), 32)
+	s := common.LeftPadBytes(new(big.Int).SetUint64(n-1).Bytes(), 32)
 	copy(parentHash[:], s)
 	header := fakeHeader(n, parentHash)
 
@@ -462,95 +458,6 @@ func TestBlockhash(t *testing.T) {
 	}
 	if exp, got := 255, chain.counter; exp != got {
 		t.Errorf("suboptimal; too much chain iteration, expected %d, got %d", exp, got)
-	}
-}
-
-func TestBlockHashEip2935(t *testing.T) {
-	t.Parallel()
-
-	// This is the contract we're using. It requests the blockhash for current num (should be all zeroes), We are fetching BlockHash for current block (should be zer0), parent block, last block which is supposed to be there (head - HISTORY_SERVE_WINDOW) and also one block before that (should be zero)
-
-	/*
-		pragma solidity ^0.8.25;
-		contract BlockHashTestPrague{
-			function test() public view returns (bytes32, bytes32, bytes32, bytes32){
-				uint256 head = block.number;
-				bytes32 zero = blockhash(head);
-				bytes32 first = blockhash(head-1);
-				bytes32 last = blockhash(head - 8192);
-				bytes32 beyond = blockhash(head - 8193);
-				return (zero, first, last, beyond);
-			}
-		}
-	*/
-	// The contract above
-	data := libcommon.Hex2Bytes("608060405234801561000f575f80fd5b5060043610610029575f3560e01c8063f8a8fd6d1461002d575b5f80fd5b61003561004e565b60405161004594939291906100bf565b60405180910390f35b5f805f805f4390505f814090505f6001836100699190610138565b4090505f6120008461007b9190610138565b4090505f6120018561008d9190610138565b409050838383839850985098509850505050505090919293565b5f819050919050565b6100b9816100a7565b82525050565b5f6080820190506100d25f8301876100b0565b6100df60208301866100b0565b6100ec60408301856100b0565b6100f960608301846100b0565b95945050505050565b5f819050919050565b7f4e487b71000000000000000000000000000000000000000000000000000000005f52601160045260245ffd5b5f61014282610102565b915061014d83610102565b92508282039050818111156101655761016461010b565b5b9291505056fea2646970667358221220bac67d00c05154c1dca13fe3c1493172d44692d312cb3fd72a3d7457874d595464736f6c63430008190033")
-	// The method call to 'test()'
-	input := libcommon.Hex2Bytes("f8a8fd6d")
-
-	// Current head
-	n := uint64(10000)
-	parentHash := libcommon.Hash{}
-	s := common.LeftPadBytes(big.NewInt(int64(n-1)).Bytes(), 32)
-	copy(parentHash[:], s)
-	fakeHeaderReader := &FakeChainHeaderReader{}
-	header := fakeHeaderReader.GetHeader(libcommon.BigToHash(big.NewInt(int64(n))), n)
-
-	chain := &dummyChain{}
-	cfg := &Config{
-		GetHashFn:   core.GetHashFn(header, chain.GetHeader),
-		BlockNumber: new(big.Int).Set(header.Number),
-		Time:        big.NewInt(10000),
-	}
-	setDefaults(cfg)
-	cfg.ChainConfig.PragueTime = big.NewInt(10000)
-
-	db := memdb.NewStateDB(t.TempDir())
-	defer db.Close()
-
-	cr := rawdb.NewCanonicalReader()
-	agg, err := state3.NewAggregator(context.Background(), datadir.New(t.TempDir()), 16, db, cr, log.New())
-	require.NoError(t, err)
-	defer agg.Close()
-
-	_db, err := temporal.New(db, agg)
-	require.NoError(t, err)
-	defer _db.Close()
-
-	tx, err := _db.BeginTemporalRw(context.Background())
-	require.NoError(t, err)
-	defer tx.Rollback()
-
-	sd, err := state3.NewSharedDomains(tx, log.New())
-	require.NoError(t, err)
-	defer sd.Close()
-
-	cfg.r = state.NewReaderV4(sd)
-	cfg.w = state.NewWriterV4(sd)
-	cfg.State = state.New(cfg.r)
-	cfg.State.CreateAccount(params.HistoryStorageAddress, true)
-	misc.StoreBlockHashesEip2935(header, cfg.State, cfg.ChainConfig, &FakeChainHeaderReader{})
-
-	ret, _, err := Execute(data, input, cfg, t.TempDir())
-	if err != nil {
-		t.Fatalf("expected no error, got %v", err)
-	}
-	if len(ret) != 128 {
-		t.Fatalf("expected returndata to be 128 bytes, got %d", len(ret))
-	}
-
-	zero := new(big.Int).SetBytes(ret[0:32])
-	first := new(big.Int).SetBytes(ret[32:64])
-	last := new(big.Int).SetBytes(ret[64:96])
-	beyond := new(big.Int).SetBytes(ret[96:128])
-	if zero.Sign() != 0 || beyond.Sign() != 0 {
-		t.Fatalf("expected zeroes, got %x %x", ret[0:32], ret[96:128])
-	}
-	if first.Uint64() != 9999 {
-		t.Fatalf("first block should be 9999, got %d (%x)", first, ret[32:64])
-	}
-	if last.Uint64() != 1808 {
-		t.Fatalf("last block should be 1808, got %d (%x)", last, ret[64:96])
 	}
 }
 

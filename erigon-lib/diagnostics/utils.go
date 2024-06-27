@@ -1,28 +1,20 @@
 package diagnostics
 
 import (
-	"context"
 	"encoding/json"
 	"fmt"
 
 	"github.com/ledgerwatch/erigon-lib/kv"
 )
 
-func ReadDataFromTable(db kv.RoDB, table string, key []byte) (data []byte) {
-	if err := db.View(context.Background(), func(tx kv.Tx) error {
-		bytes, err := tx.GetOne(table, key)
+func ReadDataFromTable(tx kv.Tx, table string, key []byte) ([]byte, error) {
+	bytes, err := tx.GetOne(table, key)
 
-		if err != nil {
-			return err
-		}
-
-		data = bytes
-
-		return nil
-	}); err != nil {
-		return []byte{}
+	if err != nil {
+		return nil, err
 	}
-	return data
+
+	return bytes, nil
 }
 
 func PutDataToTable(table string, key []byte, info any) func(tx kv.RwTx) error {
