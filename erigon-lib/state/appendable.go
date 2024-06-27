@@ -535,16 +535,13 @@ func (tx *AppendableRoTx) mainTxNumInDB(dbtx kv.Tx) uint64 {
 func (tx *AppendableRoTx) CanPrune(dbtx kv.Tx) bool {
 	return tx.mainTxNumInDB(dbtx) < tx.files.EndTxNum()
 }
-func (tx *AppendableRoTx) canBuild(dbtx kv.Tx) (bool, error) { //nolint
+func (tx *AppendableRoTx) canBuild(dbtx kv.Tx) bool { //nolint
 	//TODO: support "keep in db" parameter
 	//TODO: what if all files are pruned?
-	maxTxNumInDB, err := tx.ap.maxTxNumInDB(dbtx)
-	if err != nil {
-		return false, err
-	}
+	maxTxNumInDB, _ := tx.ap.maxTxNumInDB(dbtx)
 	maxStepInDB := maxTxNumInDB / tx.ap.aggregationStep
 	maxStepInFiles := tx.files.EndTxNum() / tx.ap.aggregationStep
-	return maxStepInFiles < maxStepInDB, nil
+	return maxStepInFiles < maxStepInDB
 }
 
 type AppendablePruneStat struct {
