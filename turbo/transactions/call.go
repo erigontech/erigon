@@ -128,7 +128,7 @@ func MakeHeaderGetter(requireCanonical bool, tx kv.Tx, headerReader services.Hea
 }
 
 type ReusableCaller struct {
-	evm             vm.EVM
+	evm             *vm.EVM
 	intraBlockState *state.IntraBlockState
 	gasCap          uint64
 	baseFee         *uint256.Int
@@ -168,7 +168,7 @@ func (r *ReusableCaller) DoCallWithNewGas(
 
 	gp := new(core.GasPool).AddGas(r.message.Gas()).AddBlobGas(r.message.BlobGas())
 
-	result, err := core.ApplyMessage(&r.evm, r.message, gp, true /* refunds */, false /* gasBailout */)
+	result, err := core.ApplyMessage(r.evm, r.message, gp, true /* refunds */, false /* gasBailout */)
 	if err != nil {
 		return nil, err
 	}
@@ -257,7 +257,7 @@ func NewReusableCaller(
 	evm := vm.NewZkEVM(blockCtx, txCtx, ibs, chainConfig, zkConfig)
 
 	return &ReusableCaller{
-		evm:             *evm,
+		evm:             evm,
 		intraBlockState: ibs,
 		baseFee:         baseFee,
 		gasCap:          gasCap,
