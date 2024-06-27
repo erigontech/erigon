@@ -1794,7 +1794,7 @@ func TestGolangBindings(t *testing.T) {
 	gocmd := "go"
 	exists, err := dir.FileExist(gocmd)
 	if err != nil {
-		t.Skip("failed to check if gocmd exists")
+		t.Skipf("failed to check if gocmd exists, err %v", err)
 	}
 	if !exists {
 		t.Skip("go sdk not found for testing")

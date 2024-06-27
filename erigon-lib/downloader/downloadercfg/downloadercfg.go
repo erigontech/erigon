@@ -210,7 +210,7 @@ func New(dirs datadir.Dirs, version string, verbosity lg.Level, downloadRate, up
 	localCfgFile := filepath.Join(dirs.DataDir, "webseed.toml") // datadir/webseed.toml allowed
 	exists, err := dir.FileExist(localCfgFile)
 	if err != nil {
-		//TODO: what to do here?
+		log.Error("[webseed] FileExist error", "err", err)
 		return nil, err
 	}
 	if exists {
