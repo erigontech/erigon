@@ -597,7 +597,7 @@ func NewHeader(env stEnv) *types.Header {
 	header.Coinbase = env.Coinbase
 	header.Difficulty = env.Difficulty
 	header.GasLimit = env.GasLimit
-	header.Number = big.NewInt(int64(env.Number))
+	header.Number = new(big.Int).SetUint64(env.Number)
 	header.Time = env.Timestamp
 	header.BaseFee = env.BaseFee
 	header.MixDigest = env.MixDigest
