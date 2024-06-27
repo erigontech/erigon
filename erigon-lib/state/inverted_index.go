@@ -708,7 +708,7 @@ func (iit *InvertedIndexRoTx) CanPrune(tx kv.Tx) bool {
 
 func (iit *InvertedIndexRoTx) canBuild(dbtx kv.Tx) (bool, error) { //nolint
 	maxStepInFiles := iit.files.EndTxNum() / iit.ii.aggregationStep
-	return maxStepInFiles, iit.ii.maxTxNumInDB(dbtx)
+	return maxStepInFiles < iit.ii.maxTxNumInDB(dbtx), nil
 }
 
 type InvertedIndexPruneStat struct {

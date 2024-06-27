@@ -2283,27 +2283,27 @@ func TestCanBuild(t *testing.T) {
 	writer := dc.NewWriter()
 	defer writer.close()
 
-	k := []byte{1}
+	k, v := []byte{1}, []byte{1}
 	// db has data which already in files
-	writer.SetTxNum(1)
-	_ = writer.PutWithPrev(k, nil, hexutility.EncodeTs(1), nil, 0)
+	writer.SetTxNum(0)
+	_ = writer.PutWithPrev(k, nil, v, nil, 0)
 	_ = writer.Flush(context.Background(), tx)
 	canBuild, err := dc.canBuild(tx)
 	require.NoError(t, err)
 	require.False(t, canBuild)
 
 	// db has data which already in files and next step. still not enough - we need full step in db.
-	writer.SetTxNum(d.aggregationStep + 1)
-	_ = writer.PutWithPrev(k, nil, hexutility.EncodeTs(d.aggregationStep+1), nil, 0)
+	writer.SetTxNum(d.aggregationStep)
+	_ = writer.PutWithPrev(k, nil, v, nil, 0)
 	_ = writer.Flush(context.Background(), tx)
 	canBuild, err = dc.canBuild(tx)
 	require.NoError(t, err)
 	require.False(t, canBuild)
-	_ = writer.PutWithPrev(k, nil, hexutility.EncodeTs(d.aggregationStep+1), nil, 0)
+	_ = writer.PutWithPrev(k, nil, v, nil, 0)
 
 	// db has: 1. data which already in files 2. full next step 3. a bit of next-next step. -> can build
-	writer.SetTxNum(d.aggregationStep*2 + 1)
-	_ = writer.PutWithPrev(k, nil, hexutility.EncodeTs(d.aggregationStep*2+1), nil, 0)
+	writer.SetTxNum(d.aggregationStep * 2)
+	_ = writer.PutWithPrev(k, nil, v, nil, 0)
 	_ = writer.Flush(context.Background(), tx)
 	canBuild, err = dc.canBuild(tx)
 	require.NoError(t, err)
