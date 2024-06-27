@@ -916,8 +916,8 @@ func (sf StaticFiles) CleanupOnError() {
 func (d *Domain) buildFiles(ctx context.Context, step uint64, collation Collation, ps *background.ProgressSet) (StaticFiles, error) {
 	mxRunningFilesBuilding.Inc()
 	defer mxRunningFilesBuilding.Dec()
-	if d.filenameBase == traceFileLife {
-		d.logger.Warn("[snapshots] buildFiles", "step", step, "domain", d.filenameBase)
+	if traceFileLife != "" && d.filenameBase == traceFileLife {
+		d.logger.Warn("[agg.dbg] buildFiles", "step", step, "domain", d.filenameBase)
 	}
 
 	start := time.Now()
