@@ -22,11 +22,12 @@ import (
 	"context"
 	"encoding/binary"
 	"fmt"
-	btree2 "github.com/tidwall/btree"
 	"math"
 	"path"
 	"path/filepath"
 	"strings"
+
+	btree2 "github.com/tidwall/btree"
 
 	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/background"
@@ -329,60 +330,6 @@ func (dt *DomainRoTx) BuildOptionalMissedIndices(ctx context.Context, ps *backgr
 
 func (iit *InvertedIndexRoTx) BuildOptionalMissedIndices(ctx context.Context, ps *background.ProgressSet) (err error) {
 	return nil
-}
-
-// endTxNum is always a multiply of aggregation step but this txnum is not available in file (it will be first tx of file to follow after that)
-func (dt *DomainRoTx) maxTxNumInDomainFiles(onlyFrozen bool) uint64 {
-	if len(dt.files) == 0 {
-		return 0
-	}
-	if !onlyFrozen {
-		return dt.files[len(dt.files)-1].endTxNum
-	}
-	for i := len(dt.files) - 1; i >= 0; i-- {
-		if !dt.files[i].src.frozen {
-			continue
-		}
-		return dt.files[i].endTxNum
-	}
-	return 0
-}
-
-func (ht *HistoryRoTx) maxTxNumInFiles(onlyFrozen bool) uint64 {
-	if len(ht.files) == 0 {
-		return 0
-	}
-	var _max uint64
-	if onlyFrozen {
-		for i := len(ht.files) - 1; i >= 0; i-- {
-			if !ht.files[i].src.frozen {
-				continue
-			}
-			_max = ht.files[i].endTxNum
-			break
-		}
-	} else {
-		_max = ht.files[len(ht.files)-1].endTxNum
-	}
-	return min(_max, ht.iit.maxTxNumInFiles(onlyFrozen))
-}
-
-func (iit *InvertedIndexRoTx) maxTxNumInFiles(onlyFrozen bool) uint64 {
-	if len(iit.files) == 0 {
-		return 0
-	}
-	if !onlyFrozen {
-		return iit.lastTxNumInFiles()
-	}
-
-	// files contains [frozen..., cold...] in that order
-	for i := len(iit.files) - 1; i >= 0; i-- {
-		if !iit.files[i].src.frozen {
-			continue
-		}
-		return iit.files[i].endTxNum
-	}
-	return 0
 }
 
 // staticFilesInRange returns list of static files with txNum in specified range [startTxNum; endTxNum)

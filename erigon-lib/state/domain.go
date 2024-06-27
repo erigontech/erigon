@@ -676,6 +676,15 @@ func (dt *DomainRoTx) getFromFile(i int, filekey []byte) ([]byte, bool, error) {
 	//fmt.Printf("getLatestFromBtreeColdFiles key %x shard %d %x\n", filekey, exactColdShard, v)
 	return v, true, nil
 }
+
+// maxTxNumInDomainFiles but this txnum is not available in file (it will be first tx of file to follow after that)
+func (dt *DomainRoTx) maxTxNumInDomainFiles() uint64 {
+	if len(dt.files) == 0 {
+		return 0
+	}
+	return dt.files[len(dt.files)-1].endTxNum
+}
+
 func (dt *DomainRoTx) DebugKVFilesWithKey(k []byte) (res []string, err error) {
 	for i := len(dt.files) - 1; i >= 0; i-- {
 		_, ok, err := dt.getFromFile(i, k)
@@ -1432,7 +1441,7 @@ func (dt *DomainRoTx) getLatestFromDb(key []byte, roTx kv.Tx) ([]byte, uint64, b
 
 	if foundInvStep != nil {
 		foundStep := ^binary.BigEndian.Uint64(foundInvStep)
-		if LastTxNumOfStep(foundStep, dt.d.aggregationStep) >= dt.maxTxNumInDomainFiles(false) {
+		if lastTxNumOfStep(foundStep, dt.d.aggregationStep) >= dt.maxTxNumInDomainFiles() {
 			valsC, err := dt.valsCursor(roTx)
 			if err != nil {
 				return nil, foundStep, false, err
@@ -1480,7 +1489,7 @@ func (dt *DomainRoTx) GetLatest(key1, key2 []byte, roTx kv.Tx) ([]byte, uint64, 
 	if traceGetLatest == dt.d.filenameBase {
 		defer func() {
 			fmt.Printf("GetLatest(%s, '%x' -> '%x') (from db=%t; istep=%x stepInFiles=%d)\n",
-				dt.d.filenameBase, key, v, found, foundStep, dt.maxTxNumInDomainFiles(false)/dt.d.aggregationStep)
+				dt.d.filenameBase, key, v, found, foundStep, dt.maxTxNumInDomainFiles()/dt.d.aggregationStep)
 		}()
 	}
 
@@ -1550,7 +1559,7 @@ func (dt *DomainRoTx) CanPruneUntil(tx kv.Tx, untilTx uint64) bool {
 // everything that aggregated is prunable.
 // history.CanPrune should be called separately because it responsible for different tables
 func (dt *DomainRoTx) canPruneDomainTables(tx kv.Tx, untilTx uint64) (can bool, maxStepToPrune uint64) {
-	if m := dt.maxTxNumInDomainFiles(false); m > 0 {
+	if m := dt.maxTxNumInDomainFiles(); m > 0 {
 		maxStepToPrune = (m - 1) / dt.d.aggregationStep
 	}
 	var untilStep uint64

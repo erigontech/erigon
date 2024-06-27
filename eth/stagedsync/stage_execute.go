@@ -327,7 +327,7 @@ func unwindExec3(u *UnwindState, s *StageState, txc wrap.TxContainer, ctx contex
 	//fmt.Printf("unwindv3: %d -> %d\n", u.CurrentBlockNumber, u.UnwindPoint)
 	//start := time.Now()
 
-	unwindToLimit, err := txc.Tx.(libstate.HasAggTx).AggTx().(*libstate.AggregatorRoTx).CanUnwindDomainsToBlockNum(txc.Tx)
+	unwindToLimit, err := txc.Tx.(libstate.HasAggTx).AggTx().(*libstate.AggregatorRoTx).CanUnwindToBlockNum(txc.Tx)
 	if err != nil {
 		return err
 	}

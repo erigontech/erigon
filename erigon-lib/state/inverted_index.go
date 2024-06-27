@@ -568,22 +568,17 @@ func (iit *InvertedIndexRoTx) seekInFiles(key []byte, txNum uint64) (found bool,
 	return false, 0
 }
 
-// it is assumed files are always sorted
-func (iit *InvertedInunwindv3dexRoTx) lastTxNumInFiles() uint64 {
+func (iit *InvertedIndexRoTx) canBuild(dbtx kv.Tx) bool {
+	lastInDB := iit.ii.maxTxNumInDB(dbtx)
+	inFiles := iit.maxTxNumInFiles() / iit.ii.aggregationStep
+	return lastInDB > inFiles
+}
+
+func (iit *InvertedIndexRoTx) maxTxNumInFiles() uint64 {
 	if len(iit.files) == 0 {
 		return 0
 	}
 	return iit.files[len(iit.files)-1].endTxNum
-}
-
-func (iit *InvertedIndexRoTx) canBuild(dbtx kv.Tx) (bool, error) {
-	lastInDB, err := iit.maxTxNumInDB(dbtx)
-	if err != nil {
-		return false, err
-	}
-
-	inFiles := iit.lastTxNumInFiles() / iit.ii.aggregationStep
-	return lastInDB > inFiles, nil
 }
 
 // IdxRange - return range of txNums for given `key`
@@ -607,12 +602,12 @@ func (iit *InvertedIndexRoTx) IdxRange(key []byte, startTxNum, endTxNum int, asc
 func (iit *InvertedIndexRoTx) recentIterateRange(key []byte, startTxNum, endTxNum int, asc order.By, limit int, roTx kv.Tx) (iter.U64, error) {
 	//optimization: return empty pre-allocated iterator if range is frozen
 	if asc {
-		isFrozenRange := len(iit.files) > 0 && endTxNum >= 0 && iit.lastTxNumInFiles() >= uint64(endTxNum)
+		isFrozenRange := len(iit.files) > 0 && endTxNum >= 0 && iit.maxTxNumInFiles() >= uint64(endTxNum)
 		if isFrozenRange {
 			return iter.EmptyU64, nil
 		}
 	} else {
-		isFrozenRange := len(iit.files) > 0 && startTxNum >= 0 && iit.lastTxNumInFiles() >= uint64(startTxNum)
+		isFrozenRange := len(iit.files) > 0 && startTxNum >= 0 && iit.maxTxNumInFiles() >= uint64(startTxNum)
 		if isFrozenRange {
 			return iter.EmptyU64, nil
 		}
@@ -720,7 +715,7 @@ func (ii *InvertedIndex) maxTxNumInDB(tx kv.Tx) uint64 {
 }
 
 func (iit *InvertedIndexRoTx) CanPrune(tx kv.Tx) bool {
-	return iit.ii.minTxNumInDB(tx) < iit.maxTxNumInFiles(false)
+	return iit.ii.minTxNumInDB(tx) < iit.maxTxNumInFiles()
 }
 
 type InvertedIndexPruneStat struct {
