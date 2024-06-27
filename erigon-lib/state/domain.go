@@ -156,7 +156,7 @@ func (d *Domain) maxStepInDB(tx kv.Tx) (lstInDb uint64) {
 	}
 	return binary.BigEndian.Uint64(lstIdx) / d.aggregationStep
 }
-func (d *Domain) FirstStepInDB(tx kv.Tx) (lstInDb uint64) {
+func (d *Domain) minStepInDB(tx kv.Tx) (lstInDb uint64) {
 	lstIdx, _ := kv.FirstKey(tx, d.History.indexKeysTable)
 	if len(lstIdx) == 0 {
 		return 0
