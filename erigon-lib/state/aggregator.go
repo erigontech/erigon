@@ -1996,7 +1996,7 @@ func (br *BackgroundResult) GetAndReset() (bool, error) {
 // Inverted index tables only
 func lastIdInDB(db kv.RoDB, domain *Domain) (lstInDb uint64) {
 	if err := db.View(context.Background(), func(tx kv.Tx) error {
-		lstInDb = domain.LastStepInDB(tx)
+		lstInDb = domain.maxStepInDB(tx)
 		return nil
 	}); err != nil {
 		log.Warn("[snapshots] lastIdInDB", "err", err)

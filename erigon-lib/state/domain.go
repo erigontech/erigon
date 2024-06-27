@@ -148,8 +148,8 @@ func (d *Domain) kvBtFilePath(fromStep, toStep uint64) string {
 	return filepath.Join(d.dirs.SnapDomain, fmt.Sprintf("v1-%s.%d-%d.bt", d.filenameBase, fromStep, toStep))
 }
 
-// LastStepInDB - return the latest available step in db (at-least 1 value in such step)
-func (d *Domain) LastStepInDB(tx kv.Tx) (lstInDb uint64) {
+// maxStepInDB - return the latest available step in db (at-least 1 value in such step)
+func (d *Domain) maxStepInDB(tx kv.Tx) (lstInDb uint64) {
 	lstIdx, _ := kv.LastKey(tx, d.History.indexKeysTable)
 	if len(lstIdx) == 0 {
 		return 0
@@ -1950,6 +1950,16 @@ func (dt *DomainRoTx) Files() (res []string) {
 		}
 	}
 	return append(res, dt.ht.Files()...)
+}
+
+func (dt *DomainRoTx) canBuild(dbtx kv.Tx) bool {
+	//TODO: support "keep in db" parameter
+	inFiles := uint64(0)
+	if len(dt.files) > 0 {
+		inFiles = dt.files[len(dt.files)-1].endTxNum / dt.d.aggregationStep
+	}
+	lastInDB := dt.d.maxStepInDB(dbtx)
+	return lastInDB > inFiles
 }
 
 type SelectedStaticFiles struct {

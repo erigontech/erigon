@@ -390,6 +390,24 @@ func (ap *Appendable) getFromDB(k []byte, dbtx kv.Tx) ([]byte, bool, error) {
 	}
 	return v, v != nil, err
 }
+func (ap *Appendable) lastStepInDB(dbtx kv.Tx) (step uint64, err error) {
+	first, err := kv.LastKey(dbtx, ap.table)
+	if err != nil {
+		return 0, err
+	}
+	if len(first) == 0 {
+		return 0, nil
+	}
+	return binary.BigEndian.Uint64(first) / ap.aggregationStep, nil
+}
+
+func (ap *Appendable) lastStepInDB2(db kv.RoDB) (step uint64, err error) {
+	err = db.View(context.Background(), func(tx kv.Tx) error {
+		step, err = ap.lastStepInDB(tx)
+		return err
+	})
+	return
+}
 
 // Add - !NotThreadSafe. Must use WalRLock/BatchHistoryWriteEnd
 func (w *appendableBufferedWriter) Append(ts kv.TxnId, v []byte) error {
@@ -792,4 +810,24 @@ func (ap *Appendable) integrateDirtyFiles(sf AppendableFiles, txNumFrom, txNumTo
 
 func (tx *AppendableRoTx) Unwind(ctx context.Context, rwTx kv.RwTx, txFrom, txTo, limit uint64, logEvery *time.Ticker, forced bool, fn func(key []byte, txnum []byte) error) error {
 	return nil //Appendable type is unwind-less. See docs of Appendable type.
+}
+
+func (tx *AppendableRoTx) lastTxNumInFiles() uint64 {
+	if len(tx.files) == 0 {
+		return 0
+	}
+	return tx.files[len(tx.files)-1].endTxNum
+}
+
+func (tx *AppendableRoTx) canBuild(dbtx kv.Tx) (bool, error) {
+	//TODO: support "keep in db" parameter
+	//TODO: what if all files are pruned?
+
+	lastInDB, err := tx.ap.lastStepInDB(dbtx)
+	if err != nil {
+		return false, err
+	}
+
+	inFiles := tx.lastTxNumInFiles() / tx.ap.aggregationStep
+	return lastInDB > inFiles, nil
 }
