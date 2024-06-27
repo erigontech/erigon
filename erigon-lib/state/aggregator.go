@@ -786,10 +786,10 @@ type flusher interface {
 
 func (ac *AggregatorRoTx) minimaxTxNumInDomainFiles() uint64 {
 	return min(
-		ac.d[kv.AccountsDomain].maxTxNumInDomainFiles(),
-		ac.d[kv.CodeDomain].maxTxNumInDomainFiles(),
-		ac.d[kv.StorageDomain].maxTxNumInDomainFiles(),
-		ac.d[kv.CommitmentDomain].maxTxNumInDomainFiles(),
+		ac.d[kv.AccountsDomain].files.EndTxNum(),
+		ac.d[kv.CodeDomain].files.EndTxNum(),
+		ac.d[kv.StorageDomain].files.EndTxNum(),
+		ac.d[kv.CommitmentDomain].files.EndTxNum(),
 	)
 }
 
@@ -1223,9 +1223,9 @@ func (ac *AggregatorRoTx) LogStats(tx kv.Tx, tx2block func(endTxNumMinimax uint6
 
 func (ac *AggregatorRoTx) EndTxNumNoCommitment() uint64 {
 	return min(
-		ac.d[kv.AccountsDomain].maxTxNumInDomainFiles(),
-		ac.d[kv.CodeDomain].maxTxNumInDomainFiles(),
-		ac.d[kv.StorageDomain].maxTxNumInDomainFiles(),
+		ac.d[kv.AccountsDomain].files.EndTxNum(),
+		ac.d[kv.CodeDomain].files.EndTxNum(),
+		ac.d[kv.StorageDomain].files.EndTxNum(),
 	)
 }
 
