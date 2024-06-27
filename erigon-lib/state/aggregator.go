@@ -814,7 +814,7 @@ func (ac *AggregatorRoTx) CanUnwindToBlockNum(tx kv.Tx) (uint64, error) {
 	return ReadLowestUnwindableBlock(tx)
 }
 
-func (ac *AggregatorRoTx) CanUnwindBeforeBlockNum(blockNum uint64, tx kv.Tx) (uint64, bool, error) {
+func (ac *AggregatorRoTx) CanUnwindBeforeBlockNum(blockNum uint64, tx kv.Tx) (allowedBlockNum uint64, ok bool, err error) {
 	if blockNum == 0 && ac.minimaxTxNumInDomainFiles(false) > 0 { // don't allow unwind beyond files progress
 		_minBlockNum, _ := ac.CanUnwindToBlockNum(tx)
 		return _minBlockNum, blockNum >= _minBlockNum, nil //nolint
