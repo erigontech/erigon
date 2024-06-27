@@ -570,8 +570,8 @@ func (iit *InvertedIndexRoTx) seekInFiles(key []byte, txNum uint64) (found bool,
 
 func (iit *InvertedIndexRoTx) canBuild(dbtx kv.Tx) bool {
 	lastInDB := iit.ii.maxTxNumInDB(dbtx)
-	inFiles := iit.files.EndTxNum() / iit.ii.aggregationStep
-	return lastInDB > inFiles
+	maxStepInFiles := iit.files.EndTxNum() / iit.ii.aggregationStep
+	return lastInDB > maxStepInFiles
 }
 
 // IdxRange - return range of txNums for given `key`
