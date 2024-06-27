@@ -25,6 +25,7 @@ func NewErigonDb(tx kv.RwTx) *ErigonDb {
 
 func (db ErigonDb) WriteHeader(
 	blockNo *big.Int,
+	blockHash common.Hash,
 	stateRoot, txHash, parentHash common.Hash,
 	coinbase common.Address,
 	ts, gasLimit uint64,
@@ -42,9 +43,11 @@ func (db ErigonDb) WriteHeader(
 		Extra:      make([]byte, 0),
 	}
 
-	rawdb.WriteHeader(db.tx, h)
-	err := rawdb.WriteCanonicalHash(db.tx, h.Hash(), blockNo.Uint64())
-	if err != nil {
+	if err := rawdb.WriteHeaderWithhash(db.tx, blockHash, h); err != nil {
+		return nil, fmt.Errorf("failed to write header: %w", err)
+
+	}
+	if err := rawdb.WriteCanonicalHash(db.tx, blockHash, blockNo.Uint64()); err != nil {
 		return nil, fmt.Errorf("failed to write canonical hash: %w", err)
 	}
 	return h, nil

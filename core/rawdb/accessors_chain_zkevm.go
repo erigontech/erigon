@@ -131,6 +131,28 @@ func WriteHeader_zkEvm(db kv.Putter, header *types.Header) error {
 	return nil
 }
 
+// WriteHeader stores a block header into the database and also stores the hash-
+// to-number mapping.
+func WriteHeaderWithhash(db kv.Putter, hash libcommon.Hash, header *types.Header) error {
+	var (
+		number  = header.Number.Uint64()
+		encoded = hexutility.EncodeTs(number)
+	)
+	if err := db.Put(kv.HeaderNumber, hash[:], encoded); err != nil {
+		return fmt.Errorf("failed to store hash to number mapping: %W", err)
+	}
+	// Write the encoded header
+	data, err := rlp.EncodeToBytes(header)
+	if err != nil {
+		return fmt.Errorf("failed to RLP encode header: %W", err)
+	}
+	if err := db.Put(kv.Headers, dbutils.HeaderKey(number, hash), data); err != nil {
+		return fmt.Errorf("failed to store header: %W", err)
+	}
+
+	return nil
+}
+
 // ReadReceipts retrieves all the transaction receipts belonging to a block, including
 // its corresponding metadata fields. If it is unable to populate these metadata
 // fields then nil is returned.
