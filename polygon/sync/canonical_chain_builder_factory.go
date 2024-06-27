@@ -1,21 +1,17 @@
 package sync
 
 import (
-	"context"
-
 	lru "github.com/hashicorp/golang-lru/arc/v2"
 
 	"github.com/ledgerwatch/erigon-lib/chain"
 	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/polygon/bor/borcfg"
-	"github.com/ledgerwatch/erigon/polygon/heimdall"
 )
 
 const InMemorySignatures = 4096 // Number of recent block signatures to keep in memory
 
 type CanonicalChainBuilderFactory func(root *types.Header) CanonicalChainBuilder
-type SpanFetcher func(ctx context.Context, blockNum uint64) (*heimdall.Span, error)
 
 func NewCanonicalChainBuilderFactory(
 	chainConfig *chain.Config,

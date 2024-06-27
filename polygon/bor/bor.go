@@ -259,14 +259,14 @@ func ValidateHeaderTime(
 		return err
 	}
 
-	_, err = validatorSet.GetSignerSuccessionNumber(signer, header.Number.Uint64())
+	succession, err := validatorSet.GetSignerSuccessionNumber(signer, header.Number.Uint64())
 	if err != nil {
 		return err
 	}
 
-	//if header.Time < MinNextBlockTime(parent, succession, config) {
-	//	return &BlockTooSoonError{header.Number.Uint64(), succession}
-	//}
+	if header.Time < MinNextBlockTime(parent, succession, config) {
+		return &BlockTooSoonError{header.Number.Uint64(), succession}
+	}
 
 	return nil
 }
@@ -999,7 +999,6 @@ func (c *Bor) Finalize(config *chain.Config, header *types.Header, state *state.
 		cx := statefull.ChainContext{Chain: chain, Bor: c}
 
 		if c.blockReader != nil {
-			fmt.Println("committing span")
 			// check and commit span
 			if err := c.checkAndCommitSpan(state, header, cx, syscall); err != nil {
 				err := fmt.Errorf("Finalize.checkAndCommitSpan: %w", err)
@@ -1007,7 +1006,6 @@ func (c *Bor) Finalize(config *chain.Config, header *types.Header, state *state.
 				return nil, types.Receipts{}, nil, err
 			}
 
-			fmt.Println("committing state")
 			// commit states
 			if err := c.CommitStates(state, header, cx, syscall); err != nil {
 				err := fmt.Errorf("Finalize.CommitStates: %w", err)
@@ -1477,10 +1475,11 @@ func (c *Bor) CommitStates(
 			return err
 		}
 
-		c.logger.Warn("using polygon bridge", "len(events)", len(events), "blockNum", blockNum)
+		c.logger.Debug("using polygon bridge", "len(events)", len(events), "blockNum", blockNum)
+		contractAddress := libcommon.HexToAddress(c.config.StateReceiverContract)
 
 		for _, event := range events {
-			_, err := syscall(libcommon.HexToAddress(c.config.StateReceiverContract), event)
+			_, err := syscall(contractAddress, event)
 			if err != nil {
 				return err
 			}

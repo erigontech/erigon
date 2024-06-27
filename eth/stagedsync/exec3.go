@@ -613,7 +613,7 @@ func ExecV3(ctx context.Context,
 		defer clean()
 	}
 
-	fmt.Printf("exec blocks: %d -> %d\n", blockNum, maxBlockNum)
+	//fmt.Printf("exec blocks: %d -> %d\n", blockNum, maxBlockNum)
 
 	var b *types.Block
 Loop:

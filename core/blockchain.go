@@ -285,36 +285,6 @@ func SysCallContract(contract libcommon.Address, data []byte, chainConfig *chain
 	return ret, err
 }
 
-func SysCallContractMsg(msg *types.Message, chainConfig *chain.Config, ibs *state.IntraBlockState, header *types.Header, engine consensus.EngineReader, constCall bool) (result []byte, err error) {
-	vmConfig := vm.Config{NoReceipts: true, RestoreState: constCall}
-	// Create a new context to be used in the EVM environment
-	isBor := chainConfig.Bor != nil
-	var txContext evmtypes.TxContext
-	var author *libcommon.Address
-	if isBor {
-		author = &header.Coinbase
-		txContext = evmtypes.TxContext{}
-	} else {
-		author = &state.SystemAddress
-		txContext = NewEVMTxContext(msg)
-	}
-	blockContext := NewEVMBlockContext(header, GetHashFn(header, nil), engine, author, chainConfig)
-	evm := vm.NewEVM(blockContext, txContext, ibs, chainConfig, vmConfig)
-
-	ret, _, err := evm.Call(
-		vm.AccountRef(msg.From()),
-		*msg.To(),
-		msg.Data(),
-		msg.Gas(),
-		msg.Value(),
-		false,
-	)
-	if isBor && err != nil {
-		return nil, nil
-	}
-	return ret, err
-}
-
 // SysCreate is a special (system) contract creation methods for genesis constructors.
 func SysCreate(contract libcommon.Address, data []byte, chainConfig *chain.Config, ibs *state.IntraBlockState, header *types.Header) (result []byte, err error) {
 	msg := types.NewMessage(
@@ -362,7 +332,7 @@ func FinalizeBlockExecution(
 		newBlock, newTxs, newReceipt, err = engine.FinalizeAndAssemble(cc, header, ibs, txs, uncles, receipts, withdrawals, requests, chainReader, syscall, nil, logger)
 	} else {
 		var rss types.Requests
-		_, _, _, err = engine.Finalize(cc, header, ibs, txs, uncles, receipts, withdrawals, requests, chainReader, syscall, logger)
+		_, _, rss, err = engine.Finalize(cc, header, ibs, txs, uncles, receipts, withdrawals, requests, chainReader, syscall, logger)
 
 		if !reflect.DeepEqual(rss, requests) {
 			return nil, nil, nil, fmt.Errorf("invalid requests for block %d", header.Number.Uint64())
