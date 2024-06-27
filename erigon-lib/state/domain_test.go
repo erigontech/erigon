@@ -2292,7 +2292,7 @@ func TestCanBuild(t *testing.T) {
 	require.NoError(t, err)
 	require.False(t, canBuild)
 
-	// db has data which already in files and next step
+	// db has data which already in files and next step. still not enough - we need full step in db.
 	writer.SetTxNum(d.aggregationStep + 1)
 	_ = writer.PutWithPrev(k, nil, hexutility.EncodeTs(d.aggregationStep+1), nil, 0)
 	_ = writer.Flush(context.Background(), tx)
@@ -2301,6 +2301,7 @@ func TestCanBuild(t *testing.T) {
 	require.False(t, canBuild)
 	_ = writer.PutWithPrev(k, nil, hexutility.EncodeTs(d.aggregationStep+1), nil, 0)
 
+	// db has: 1. data which already in files 2. full next step 3. a bit of next-next step. -> can build
 	writer.SetTxNum(d.aggregationStep*2 + 1)
 	_ = writer.PutWithPrev(k, nil, hexutility.EncodeTs(d.aggregationStep*2+1), nil, 0)
 	_ = writer.Flush(context.Background(), tx)
