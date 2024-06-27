@@ -910,15 +910,13 @@ func collateAndMergeHistory(tb testing.TB, db kv.RwDB, h *History, txs uint64, d
 	}
 
 	var r HistoryRanges
-	maxEndTxNum := h.endTxNumMinimax()
-
 	maxSpan := h.aggregationStep * StepsInColdFile
 
 	for {
 		if stop := func() bool {
 			hc := h.BeginFilesRo()
 			defer hc.Close()
-			r = hc.findMergeRange(maxEndTxNum, maxSpan)
+			r = hc.findMergeRange(hc.files.EndTxNum(), maxSpan)
 			if !r.any() {
 				return true
 			}

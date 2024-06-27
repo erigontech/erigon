@@ -1257,10 +1257,10 @@ func (a *Aggregator) FirstTxNumOfStep(step uint64) uint64 { // could have some s
 
 func (a *Aggregator) EndTxNumDomainsFrozen() uint64 {
 	return min(
-		a.d[kv.AccountsDomain].endIndexedTxNumMinimax(true),
-		a.d[kv.StorageDomain].endIndexedTxNumMinimax(true),
-		a.d[kv.CodeDomain].endIndexedTxNumMinimax(true),
-		a.d[kv.CommitmentDomain].endIndexedTxNumMinimax(true),
+		a.d[kv.AccountsDomain].dirtyFilesEndTxNumMinimax(),
+		a.d[kv.StorageDomain].dirtyFilesEndTxNumMinimax(),
+		a.d[kv.CodeDomain].dirtyFilesEndTxNumMinimax(),
+		a.d[kv.CommitmentDomain].dirtyFilesEndTxNumMinimax(),
 	)
 }
 

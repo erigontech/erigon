@@ -40,7 +40,7 @@ import (
 )
 
 func (d *Domain) dirtyFilesEndTxNumMinimax() uint64 {
-	minimax := d.History.endTxNumMinimax()
+	minimax := d.History.dirtyFilesEndTxNumMinimax()
 	if _max, ok := d.dirtyFiles.Max(); ok {
 		endTxNum := _max.endTxNum
 		if minimax == 0 || endTxNum < minimax {
@@ -50,7 +50,7 @@ func (d *Domain) dirtyFilesEndTxNumMinimax() uint64 {
 	return minimax
 }
 
-func (ii *InvertedIndex) endTxNumMinimax() uint64 {
+func (ii *InvertedIndex) dirtyFilesEndTxNumMinimax() uint64 {
 	var minimax uint64
 	if _max, ok := ii.dirtyFiles.Max(); ok {
 		endTxNum := _max.endTxNum
@@ -60,25 +60,11 @@ func (ii *InvertedIndex) endTxNumMinimax() uint64 {
 	}
 	return minimax
 }
-func (ii *InvertedIndex) endIndexedTxNumMinimax(needFrozen bool) uint64 {
-	var _max uint64
-	ii.dirtyFiles.Walk(func(items []*filesItem) bool {
-		for _, item := range items {
-			if item.index == nil || (needFrozen && !item.frozen) {
-				continue
-			}
-			_max = max(_max, item.endTxNum)
-		}
-		return true
-	})
-	return _max
-}
-
-func (h *History) endTxNumMinimax() uint64 {
+func (h *History) dirtyFilesEndTxNumMinimax() uint64 {
 	if h.snapshotsDisabled {
 		return math.MaxUint64
 	}
-	minimax := h.InvertedIndex.endTxNumMinimax()
+	minimax := h.InvertedIndex.dirtyFilesEndTxNumMinimax()
 	if _max, ok := h.dirtyFiles.Max(); ok {
 		endTxNum := _max.endTxNum
 		if minimax == 0 || endTxNum < minimax {
@@ -86,33 +72,6 @@ func (h *History) endTxNumMinimax() uint64 {
 		}
 	}
 	return minimax
-}
-
-func (ap *Appendable) endTxNumMinimax() uint64 {
-	var minimax uint64
-	if _max, ok := ap.dirtyFiles.Max(); ok {
-		endTxNum := _max.endTxNum
-		if minimax == 0 || endTxNum < minimax {
-			minimax = endTxNum
-		}
-	}
-	return minimax
-}
-func (h *History) endIndexedTxNumMinimax(needFrozen bool) uint64 {
-	var _max uint64
-	if h.snapshotsDisabled && h.dirtyFiles.Len() == 0 {
-		_max = math.MaxUint64
-	}
-	h.dirtyFiles.Walk(func(items []*filesItem) bool {
-		for _, item := range items {
-			if item.index == nil || (needFrozen && !item.frozen) {
-				continue
-			}
-			_max = max(_max, item.endTxNum)
-		}
-		return true
-	})
-	return min(_max, h.InvertedIndex.endIndexedTxNumMinimax(needFrozen))
 }
 
 type DomainRanges struct {
