@@ -152,9 +152,9 @@ func (d *Domain) kvBtFilePath(fromStep, toStep uint64) string {
 func (d *Domain) maxStepInDB(tx kv.Tx) (lstInDb uint64) {
 	lstIdx, _ := kv.LastKey(tx, d.History.indexKeysTable)
 	if len(lstIdx) == 0 {
-		return 0, nil
+		return 0
 	}
-	return binary.BigEndian.Uint64(lstIdx) / d.aggregationStep, nil
+	return binary.BigEndian.Uint64(lstIdx) / d.aggregationStep
 }
 func (d *Domain) FirstStepInDB(tx kv.Tx) (lstInDb uint64) {
 	lstIdx, _ := kv.FirstKey(tx, d.History.indexKeysTable)
@@ -1547,9 +1547,9 @@ func (dt *DomainRoTx) CanPruneUntil(tx kv.Tx, untilTx uint64) bool {
 	return canHistory || canDomain
 }
 
-func (dt *DomainRoTx) canBuild(dbtx kv.Tx) bool { //nolint
+func (dt *DomainRoTx) canBuild(dbtx kv.Tx) (bool, error) { //nolint
 	maxStepInFiles := dt.files.EndTxNum() / dt.d.aggregationStep
-	return dt.d.maxStepInDB(dbtx) > maxStepInFiles
+	return dt.d.maxStepInDB(dbtx) > maxStepInFiles, nil
 }
 
 // checks if there is anything to prune in DOMAIN tables.
@@ -1956,20 +1956,6 @@ func (dt *DomainRoTx) Files() (res []string) {
 		}
 	}
 	return append(res, dt.ht.Files()...)
-}
-
-func (dt *DomainRoTx) canBuild(dbtx kv.Tx) (bool, error) {
-	inFiles := uint64(0)
-	if len(dt.files) > 0 {
-		inFiles = dt.files[len(dt.files)-1].endTxNum / dt.d.aggregationStep
-	}
-	lastInDB, err := dt.d.lastStepInDB(dbtx)
-	if err != nil {
-		return false, err
-	}
-
-	//TODO: support "keep in db" parameter
-	return lastInDB > inFiles, nil
 }
 
 type SelectedStaticFiles struct {

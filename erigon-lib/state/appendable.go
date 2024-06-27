@@ -807,16 +807,3 @@ func (tx *AppendableRoTx) lastTxNumInFiles() uint64 {
 	}
 	return tx.files[len(tx.files)-1].endTxNum
 }
-
-func (tx *AppendableRoTx) canBuild(dbtx kv.Tx) (bool, error) {
-	//TODO: support "keep in db" parameter
-	//TODO: what if all files are pruned?
-
-	lastInDB, err := tx.ap.lastStepInDB(dbtx)
-	if err != nil {
-		return false, err
-	}
-
-	inFiles := tx.lastTxNumInFiles() / tx.ap.aggregationStep
-	return lastInDB > inFiles, nil
-}

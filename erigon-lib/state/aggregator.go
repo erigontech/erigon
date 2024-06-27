@@ -539,7 +539,6 @@ func (sf AggV3StaticFiles) CleanupOnError() {
 }
 
 func (a *Aggregator) buildFiles(ctx context.Context, step uint64) (hasMore bool, err error) {
-
 	a.logger.Debug("[agg] collate and build", "step", step, "collate_workers", a.collateAndBuildWorkers, "merge_workers", a.mergeWorkers, "compress_workers", a.d[kv.AccountsDomain].compressWorkers)
 
 	var (
@@ -579,6 +578,7 @@ func (a *Aggregator) buildFiles(ctx context.Context, step uint64) (hasMore bool,
 		if !canBuild {
 			continue
 		}
+		hasMore = true
 
 		d := d
 
@@ -628,6 +628,7 @@ func (a *Aggregator) buildFiles(ctx context.Context, step uint64) (hasMore bool,
 		if !canBuild {
 			continue
 		}
+		hasMore = true
 
 		ii := ii
 		a.wg.Add(1)
@@ -677,8 +678,8 @@ func (a *Aggregator) buildFiles(ctx context.Context, step uint64) (hasMore bool,
 		if !canBuild {
 			continue
 		}
+		hasMore = true
 
-		fmt.Printf("build0: %s\n", ap.filenameBase)
 		name := name
 		ap := ap
 		a.wg.Add(1)
@@ -705,13 +706,13 @@ func (a *Aggregator) buildFiles(ctx context.Context, step uint64) (hasMore bool,
 
 	if err := g.Wait(); err != nil {
 		static.CleanupOnError()
-		return fmt.Errorf("domain collate-build: %w", err)
+		return false, fmt.Errorf("domain collate-build: %w", err)
 	}
 	mxStepTook.ObserveDuration(stepStartedAt)
 	a.integrateDirtyFiles(static, txFrom, txTo)
 	a.logger.Info("[snapshots] aggregated", "step", step, "took", time.Since(stepStartedAt))
 
-	return nil
+	return hasMore, nil
 }
 
 func (a *Aggregator) BuildFiles(toTxNum uint64) (err error) {
@@ -1752,8 +1753,12 @@ func (a *Aggregator) BuildFilesInBackground(txNum uint64) chan struct{} {
 			}
 		}
 
-		for ; ; step++ {
-			if err := a.buildFiles(a.ctx, step); err != nil {
+		for {
+			apTx := a.ap[kv.ReceiptsAppendable].BeginFilesRo()
+			step := apTx.files.EndTxNum() / a.aggregationStep
+			apTx.Close()
+			hasMore, err := a.buildFiles(a.ctx, step)
+			if err != nil {
 				if errors.Is(err, context.Canceled) || errors.Is(err, common2.ErrStopped) {
 					close(fin)
 					return
@@ -1761,12 +1766,7 @@ func (a *Aggregator) BuildFilesInBackground(txNum uint64) chan struct{} {
 				a.logger.Warn("[snapshots] buildFilesInBackground", "err", err)
 				break
 			}
-			lastStepInDB, err := a.ap[kv.ReceiptsAppendable].lastStepInDB2(a.db)
-			if err != nil {
-				return
-			}
-			fmt.Printf("see: %d, %d\n", step, lastStepInDB)
-			if step >= lastStepInDB {
+			if !hasMore {
 				break
 			}
 		}
