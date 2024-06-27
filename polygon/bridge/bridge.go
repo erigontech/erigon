@@ -83,7 +83,7 @@ func (b *Bridge) Run(ctx context.Context) error {
 			}
 		}
 
-		b.log.Warn(bridgeLogPrefix(fmt.Sprintf("got %v new events, last event ID: %v, ready: %v", len(events), lastEventID, b.ready)))
+		b.log.Debug(bridgeLogPrefix(fmt.Sprintf("got %v new events, last event ID: %v, ready: %v", len(events), lastEventID, b.ready)))
 	}
 }
 
@@ -152,7 +152,7 @@ func (b *Bridge) GetEvents(ctx context.Context, blockNum uint64) ([][]byte, erro
 		return nil, err
 	}
 
-	b.log.Warn("got map", "blockNum", blockNum, "start", start, "end", end)
+	b.log.Debug("got map", "blockNum", blockNum, "start", start, "end", end)
 
 	// get events from DB
 	events, err := b.store.GetEvents(ctx, start, end)
@@ -160,7 +160,7 @@ func (b *Bridge) GetEvents(ctx context.Context, blockNum uint64) ([][]byte, erro
 		return nil, err
 	}
 
-	b.log.Warn(bridgeLogPrefix(fmt.Sprintf("got %v events for block %v", len(events), blockNum)))
+	b.log.Debug(bridgeLogPrefix(fmt.Sprintf("got %v events for block %v", len(events), blockNum)))
 
 	return events, nil
 }
