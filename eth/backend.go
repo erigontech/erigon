@@ -1285,14 +1285,14 @@ func (s *Ethereum) StartMining(ctx context.Context, db kv.RwDB, stateDiffClient 
 					s.logger.Debug("Start mining based on previous block", "block", block)
 					// TODO - can do mining clean up here as we have previous
 					// block info in the state channel
+					hasWork = true
+
+				case <-s.notifyMiningAboutNewTxs:
+					// Skip mining based on new txn notif for bor consensus
 					hasWork = s.chainConfig.Bor == nil
 					if hasWork {
 						s.logger.Debug("Start mining based on txpool notif")
 					}
-
-				case <-s.notifyMiningAboutNewTxs:
-					// Skip mining based on new txn notif for bor consensus
-					hasWork = true
 				case <-mineEvery.C:
 					if !(working || waiting.Load()) {
 						s.logger.Debug("Start mining based on miner.recommit", "duration", miner.MiningConfig.Recommit)
