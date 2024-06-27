@@ -635,7 +635,7 @@ func (ch *CursorHeap) Pop() interface{} {
 type DomainRoTx struct {
 	ht         *HistoryRoTx
 	d          *Domain
-	files      []ctxItem
+	files      visibleFiles
 	getters    []ArchiveGetter
 	readers    []*BtIndex
 	idxReaders []*recsplit.IndexReader
@@ -1962,7 +1962,6 @@ func (dt *DomainRoTx) Files() (res []string) {
 }
 
 func (dt *DomainRoTx) canBuild(dbtx kv.Tx) bool {
-	//TODO: support "keep in db" parameter
 	return dt.d.maxStepInDB(dbtx) > dt.maxTxNumInDomainFiles()
 }
 

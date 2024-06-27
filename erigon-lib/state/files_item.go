@@ -173,7 +173,7 @@ func (i *ctxItem) isSubSetOf(j *ctxItem) bool { return i.src.isSubsetOf(j.src) }
 func (i *ctxItem) isSubsetOf(j *ctxItem) bool { return i.src.isSubsetOf(j.src) } //nolint
 
 func calcVisibleFiles(files *btree2.BTreeG[*filesItem], l idxList, trace bool) (roItems []ctxItem) {
-	visibleFiles := make([]ctxItem, 0, files.Len())
+	newVisibleFiles := make([]ctxItem, 0, files.Len())
 	if trace {
 		log.Warn("[dbg] calcVisibleFiles", "amount", files.Len())
 	}
@@ -217,24 +217,34 @@ func calcVisibleFiles(files *btree2.BTreeG[*filesItem], l idxList, trace bool) (
 
 			// `kill -9` may leave small garbage files, but if big one already exists we assume it's good(fsynced) and no reason to merge again
 			// see super-set file, just drop sub-set files from list
-			for len(visibleFiles) > 0 && visibleFiles[len(visibleFiles)-1].src.isSubsetOf(item) {
+			for len(newVisibleFiles) > 0 && newVisibleFiles[len(newVisibleFiles)-1].src.isSubsetOf(item) {
 				if trace {
-					log.Warn("[dbg] calcVisibleFiles5", "f", visibleFiles[len(visibleFiles)-1].src.decompressor.FileName())
+					log.Warn("[dbg] calcVisibleFiles5", "f", newVisibleFiles[len(newVisibleFiles)-1].src.decompressor.FileName())
 				}
-				visibleFiles[len(visibleFiles)-1].src = nil
-				visibleFiles = visibleFiles[:len(visibleFiles)-1]
+				newVisibleFiles[len(newVisibleFiles)-1].src = nil
+				newVisibleFiles = newVisibleFiles[:len(newVisibleFiles)-1]
 			}
-			visibleFiles = append(visibleFiles, ctxItem{
+			newVisibleFiles = append(newVisibleFiles, ctxItem{
 				startTxNum: item.startTxNum,
 				endTxNum:   item.endTxNum,
-				i:          len(visibleFiles),
+				i:          len(newVisibleFiles),
 				src:        item,
 			})
 		}
 		return true
 	})
-	if visibleFiles == nil {
-		visibleFiles = []ctxItem{}
+	if newVisibleFiles == nil {
+		newVisibleFiles = []ctxItem{}
 	}
-	return visibleFiles
+	return newVisibleFiles
+}
+
+// visibleFiles have no garbage (overlaps, unindexed, etc...)
+type visibleFiles []ctxItem
+
+func (files visibleFiles) MaxTxNum() uint64 {
+	if len(files) == 0 {
+		return 0
+	}
+	return files[len(files)-1].endTxNum
 }
