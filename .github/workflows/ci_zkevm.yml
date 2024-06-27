@@ -57,10 +57,10 @@ jobs:
 
   kurtosis-cdk:
     runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        # TODO: Add "cdk-validium" once it's ready
-        da-mode: [ "rollup" ]
+    # TODO: Add "cdk-validium" once it's ready
+    # strategy:
+    #   matrix:
+    #     da-mode: [ "rollup" ]
     steps:
       - name: Checkout cdk-erigon
         uses: actions/checkout@v4
@@ -93,7 +93,7 @@ jobs:
       - name: Configure Kurtosis CDK
         working-directory: ./kurtosis-cdk
         run: |
-          /usr/local/bin/yq -i '.args.data_availability_mode = "${{ matrix.da-mode }}"' cdk-erigon-sequencer-params.yml
+          /usr/local/bin/yq -i '.args.data_availability_mode = "rollup"' cdk-erigon-sequencer-params.yml
           /usr/local/bin/yq -i '.args.cdk_erigon_node_image = "cdk-erigon:local"' cdk-erigon-sequencer-params.yml
           /usr/local/bin/yq -i '.args.zkevm_bridge_service_image = "hermeznetwork/zkevm-bridge-service:v0.5.0-RC8"' cdk-erigon-sequencer-params.yml
 
