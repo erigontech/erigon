@@ -1013,14 +1013,14 @@ func stageExec(db kv.RwDB, ctx context.Context, logger log.Logger) error {
 
 	if unwind > 0 {
 		if err := db.View(ctx, func(tx kv.Tx) error {
-			blockNumWithCommitment, ok, err := tx.(libstate.HasAggTx).AggTx().(*libstate.AggregatorRoTx).CanUnwindBeforeBlockNum(s.BlockNumber-unwind, tx)
+			minAllowedUnwind, err := tx.(libstate.HasAggTx).AggTx().(*libstate.AggregatorRoTx).CanUnwindToBlockNum(tx)
 			if err != nil {
 				return err
 			}
-			if !ok {
-				return fmt.Errorf("too deep unwind requested: %d, minimum alowed: %d\n", s.BlockNumber-unwind, blockNumWithCommitment)
+			if s.BlockNumber-unwind < minAllowedUnwind {
+				return fmt.Errorf("too deep unwind requested: %d, minimum alowed: %d\n", minAllowedUnwind)
 			}
-			unwind = s.BlockNumber - blockNumWithCommitment
+			unwind = s.BlockNumber - minAllowedUnwind
 			return nil
 		}); err != nil {
 			return err
@@ -1125,7 +1125,7 @@ func stageCustomTrace(db kv.RwDB, ctx context.Context, logger log.Logger) error 
 				return err
 			}
 			if !ok {
-				return fmt.Errorf("too deep unwind requested: %d, minimum alowed: %d\n", s.BlockNumber-unwind, blockNumWithCommitment)
+				return fmt.Errorf("too deep unwind requested: %d, minimum alowed: %d", s.BlockNumber-unwind, blockNumWithCommitment)
 			}
 			unwind = s.BlockNumber - blockNumWithCommitment
 			return nil

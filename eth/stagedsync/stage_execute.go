@@ -22,7 +22,6 @@ import (
 	"github.com/ledgerwatch/erigon-lib/config3"
 	"github.com/ledgerwatch/erigon-lib/diagnostics"
 	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon-lib/kv/dbutils"
 	"github.com/ledgerwatch/erigon-lib/kv/membatch"
 	"github.com/ledgerwatch/erigon-lib/kv/membatchwithdb"
 	"github.com/ledgerwatch/erigon-lib/kv/rawdbv3"
@@ -35,7 +34,6 @@ import (
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/state"
 	"github.com/ledgerwatch/erigon/core/types"
-	"github.com/ledgerwatch/erigon/core/types/accounts"
 	"github.com/ledgerwatch/erigon/core/vm"
 	"github.com/ledgerwatch/erigon/eth/calltracer"
 	"github.com/ledgerwatch/erigon/eth/consensuschain"
@@ -324,18 +322,7 @@ func reconstituteBlock(agg *libstate.Aggregator, db kv.RoDB, tx kv.Tx) (n uint64
 var ErrTooDeepUnwind = fmt.Errorf("too deep unwind")
 
 func unwindExec3(u *UnwindState, s *StageState, txc wrap.TxContainer, ctx context.Context, accumulator *shards.Accumulator, logger log.Logger) (err error) {
-	fmt.Printf("unwindv3: %d -> %d\n", u.CurrentBlockNumber, u.UnwindPoint)
-	//txTo, err := rawdbv3.TxNums.Min(tx, u.UnwindPoint+1)
-	//if err != nil {
-	//      return err
-	//}
-	//bn, _, ok, err := domains.SeekCommitment2(tx, 0, txTo)
-	//if ok && bn != u.UnwindPoint {
-	//	return fmt.Errorf("commitment can unwind only to block: %d, requested: %d. UnwindTo was called with wrong value", bn, u.UnwindPoint)
-	//}
-	start := time.Now()
-
-	unwindToLimit, err := txc.Tx.(libstate.HasAggTx).AggTx().(*libstate.AggregatorRoTx).CanUnwindDomainsToBlockNum(txc.Tx)
+	unwindToLimit, err := txc.Tx.(libstate.HasAggTx).AggTx().(*libstate.AggregatorRoTx).CanUnwindToBlockNum(txc.Tx)
 	if err != nil {
 		return err
 	}
@@ -386,16 +373,12 @@ func unwindExec3(u *UnwindState, s *StageState, txc wrap.TxContainer, ctx contex
 	if err := rs.Unwind(ctx, txc.Tx, u.UnwindPoint, txNum, accumulator, changeset); err != nil {
 		return fmt.Errorf("StateV3.Unwind(%d->%d): %w, took %s", s.BlockNumber, u.UnwindPoint, err, time.Since(t))
 	}
-	if err := rawdb.TruncateReceipts(txc.Tx, u.UnwindPoint+1); err != nil {
-		return fmt.Errorf("truncate receipts: %w", err)
-	}
 	if err := rawdb.TruncateBorReceipts(txc.Tx, u.UnwindPoint+1); err != nil {
 		return fmt.Errorf("truncate bor receipts: %w", err)
 	}
 	if err := rawdb.DeleteNewerEpochs(txc.Tx, u.UnwindPoint+1); err != nil {
 		return fmt.Errorf("delete newer epochs: %w", err)
 	}
-	fmt.Printf("unwindv3: %d -> %d done within %s\n", s.BlockNumber, u.UnwindPoint, time.Since(start))
 	return nil
 }
 
@@ -859,16 +842,6 @@ func unwindExecutionStage(u *UnwindState, s *StageState, txc wrap.TxContainer, c
 
 	//TODO: why we don't call accumulator.ChangeCode???
 	return unwindExec3(u, s, txc, ctx, accumulator, logger)
-}
-
-func recoverCodeHashPlain(acc *accounts.Account, db kv.Tx, key []byte) {
-	var address common.Address
-	copy(address[:], key)
-	if acc.Incarnation > 0 && acc.IsEmptyCodeHash() {
-		if codeHash, err2 := db.GetOne(kv.PlainContractCode, dbutils.PlainGenerateStoragePrefix(address[:], acc.Incarnation)); err2 == nil {
-			copy(acc.CodeHash[:], codeHash)
-		}
-	}
 }
 
 func PruneExecutionStage(s *PruneState, tx kv.RwTx, cfg ExecuteBlockCfg, ctx context.Context) (err error) {
