@@ -34,6 +34,7 @@ import (
 	"time"
 
 	datadir2 "github.com/ledgerwatch/erigon-lib/common/datadir"
+	"github.com/ledgerwatch/erigon-lib/common/hexutility"
 	"github.com/ledgerwatch/erigon-lib/kv/iter"
 	"github.com/ledgerwatch/erigon-lib/kv/order"
 	"github.com/ledgerwatch/erigon-lib/log/v3"
@@ -2265,4 +2266,46 @@ func TestDomainContext_findShortenedKey(t *testing.T) {
 		require.NotNil(t, shortenedKey)
 		ki++
 	}
+}
+
+func TestCanBuild(t *testing.T) {
+	db, d := testDbAndDomain(t, log.New())
+	tx, err := db.BeginRw(context.Background())
+	require.NoError(t, err)
+	defer tx.Rollback()
+
+	d.historyLargeValues = true
+	dc := d.BeginFilesRo()
+	defer dc.Close()
+
+	dc.files = append(dc.files, ctxItem{startTxNum: 0, endTxNum: d.aggregationStep})
+
+	writer := dc.NewWriter()
+	defer writer.close()
+
+	k := []byte{1}
+	// db has data which already in files
+	writer.SetTxNum(1)
+	_ = writer.PutWithPrev(k, nil, hexutility.EncodeTs(1), nil, 0)
+	_ = writer.Flush(context.Background(), tx)
+	canBuild, err := dc.canBuild(tx)
+	require.NoError(t, err)
+	require.False(t, canBuild)
+
+	// db has data which already in files and next step
+	writer.SetTxNum(d.aggregationStep + 1)
+	_ = writer.PutWithPrev(k, nil, hexutility.EncodeTs(d.aggregationStep+1), nil, 0)
+	_ = writer.Flush(context.Background(), tx)
+	canBuild, err = dc.canBuild(tx)
+	require.NoError(t, err)
+	require.False(t, canBuild)
+	_ = writer.PutWithPrev(k, nil, hexutility.EncodeTs(d.aggregationStep+1), nil, 0)
+
+	writer.SetTxNum(d.aggregationStep*2 + 1)
+	_ = writer.PutWithPrev(k, nil, hexutility.EncodeTs(d.aggregationStep*2+1), nil, 0)
+	_ = writer.Flush(context.Background(), tx)
+	canBuild, err = dc.canBuild(tx)
+	require.NoError(t, err)
+	require.True(t, canBuild)
+	_ = writer.PutWithPrev(k, nil, hexutility.EncodeTs(d.aggregationStep*2+1), nil, 0)
 }
