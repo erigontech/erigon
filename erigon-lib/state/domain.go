@@ -915,8 +915,8 @@ func (sf StaticFiles) CleanupOnError() {
 func (d *Domain) buildFiles(ctx context.Context, step uint64, collation Collation, ps *background.ProgressSet) (StaticFiles, error) {
 	mxRunningFilesBuilding.Inc()
 	defer mxRunningFilesBuilding.Dec()
-	if d.filenameBase == traceFileLife {
-		d.logger.Warn("[snapshots] buildFiles", "step", step, "domain", d.filenameBase)
+	if traceFileLife != "" && d.filenameBase == traceFileLife {
+		d.logger.Warn("[agg.dbg] buildFiles", "step", step, "domain", d.filenameBase)
 	}
 
 	start := time.Now()
@@ -1348,14 +1348,18 @@ func (dt *DomainRoTx) Close() {
 	}
 	files := dt.files
 	dt.files = nil
-	for i := 0; i < len(files); i++ {
-		if files[i].src.frozen {
+	for i := range files {
+		src := files[i].src
+		if src == nil || src.frozen {
 			continue
 		}
-		refCnt := files[i].src.refcount.Add(-1)
+		refCnt := src.refcount.Add(-1)
 		//GC: last reader responsible to remove useles files: close it and delete
-		if refCnt == 0 && files[i].src.canDelete.Load() {
-			files[i].src.closeFilesAndRemove()
+		if refCnt == 0 && src.canDelete.Load() {
+			if traceFileLife != "" && dt.d.filenameBase == traceFileLife {
+				dt.d.logger.Warn("[agg.dbg] real remove at DomainRoTx.Close", "file", src.decompressor.FileName())
+			}
+			src.closeFilesAndRemove()
 		}
 	}
 	dt.ht.Close()
