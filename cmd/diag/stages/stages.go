@@ -218,7 +218,7 @@ func createSubStageRowFromSubstageStage(substage diagnostics.SyncSubStage) table
 }
 
 func convertProgress(progress string) int {
-	progress = strings.Replace(progress, "%", "", -1)
+	progress = strings.ReplaceAll(progress, "%", "")
 	progressInt, _ := strconv.Atoi(progress)
 	return progressInt
 }
