@@ -533,7 +533,7 @@ func (tx *AppendableRoTx) mainTxNumInDB(dbtx kv.Tx) uint64 {
 func (tx *AppendableRoTx) CanPrune(dbtx kv.Tx) bool {
 	return tx.mainTxNumInDB(dbtx) < tx.files.EndTxNum()
 }
-func (tx *AppendableRoTx) canBuild(dbtx kv.Tx) (bool, error) {
+func (tx *AppendableRoTx) canBuild(dbtx kv.Tx) (bool, error) { //nolint
 	//TODO: support "keep in db" parameter
 	//TODO: what if all files are pruned?
 	maxTxNumInDB, err := tx.ap.maxTxNumInDB(dbtx)

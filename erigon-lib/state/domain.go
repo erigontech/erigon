@@ -1547,7 +1547,7 @@ func (dt *DomainRoTx) CanPruneUntil(tx kv.Tx, untilTx uint64) bool {
 	return canHistory || canDomain
 }
 
-func (dt *DomainRoTx) canBuild(dbtx kv.Tx) bool {
+func (dt *DomainRoTx) canBuild(dbtx kv.Tx) bool { //nolint
 	maxStepInFiles := dt.files.EndTxNum() / dt.d.aggregationStep
 	return dt.d.maxStepInDB(dbtx) > maxStepInFiles
 }
