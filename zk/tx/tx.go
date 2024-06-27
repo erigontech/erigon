@@ -382,7 +382,7 @@ func GetDecodedV(tx types.Transaction, v *uint256.Int) *uint256.Int {
 	return result
 }
 
-func GenerateBlockBatchL2Data(forkId uint16, deltaTimestamp uint32, l1InfoTreeIndex uint32, transactions []types.Transaction) ([]byte, error) {
+func GenerateBlockBatchL2Data(forkId uint16, deltaTimestamp uint32, l1InfoTreeIndex uint32, transactions []types.Transaction, egTx map[common.Hash]uint8) ([]byte, error) {
 	var result []byte
 
 	// add in the changeL2Block transaction
@@ -391,7 +391,7 @@ func GenerateBlockBatchL2Data(forkId uint16, deltaTimestamp uint32, l1InfoTreeIn
 	result = binary.BigEndian.AppendUint32(result, l1InfoTreeIndex)
 
 	for _, transaction := range transactions {
-		encoded, err := TransactionToL2Data(transaction, forkId, MaxEffectivePercentage)
+		encoded, err := TransactionToL2Data(transaction, forkId, egTx[transaction.Hash()])
 		if err != nil {
 			return nil, err
 		}
