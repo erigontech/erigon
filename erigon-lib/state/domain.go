@@ -1551,9 +1551,9 @@ func (dt *DomainRoTx) CanPruneUntil(tx kv.Tx, untilTx uint64) bool {
 	return canHistory || canDomain
 }
 
-func (dt *DomainRoTx) canBuild(dbtx kv.Tx) (bool, error) { //nolint
+func (dt *DomainRoTx) canBuild(dbtx kv.Tx) (bool, error) {
 	maxStepInFiles := dt.files.EndTxNum() / dt.d.aggregationStep
-	return dt.d.maxStepInDB(dbtx) > maxStepInFiles, nil
+	return maxStepInFiles < dt.d.maxStepInDB(dbtx), nil
 }
 
 // checks if there is anything to prune in DOMAIN tables.
