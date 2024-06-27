@@ -120,9 +120,9 @@ func (b *BpsTree) WarmUp(kv ArchiveGetter) error {
 	}
 	// Value cacheNodesPerM should be tuned along with M. For M=256, cacheNodesPerM=2 is optimal, while 8 could be already too much.
 	// `cacheNodesPerM = 1` means that we put only each parent node into cache, while `cacheNodesPerM = M` means that we put all nodes into cache.
-	cacheNodesPerM := uint64(2) // could increase to put more nodes into cache from one list of childs
-	// d := logBase(k, b.M)
-	mx := make([][]Node, 1) // usually d+1 but for experiments we put them all into flat list
+	cacheNodesPerM := uint64(2)
+	d := logBase(k, b.M)
+	mx := make([][]Node, d) // usually `d` but for experiments we put them all into flat list
 
 	l := int(0)
 	for ik := uint64(0); ik < k; ik += b.M / cacheNodesPerM {
