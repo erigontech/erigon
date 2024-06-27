@@ -322,14 +322,6 @@ func reconstituteBlock(agg *libstate.Aggregator, db kv.RoDB, tx kv.Tx) (n uint64
 var ErrTooDeepUnwind = fmt.Errorf("too deep unwind")
 
 func unwindExec3(u *UnwindState, s *StageState, txc wrap.TxContainer, ctx context.Context, accumulator *shards.Accumulator, logger log.Logger) (err error) {
-	unwindToLimit, err := txc.Tx.(libstate.HasAggTx).AggTx().(*libstate.AggregatorRoTx).CanUnwindToBlockNum(txc.Tx)
-	if err != nil {
-		return err
-	}
-	if u.UnwindPoint < unwindToLimit {
-		return fmt.Errorf("%w: %d < %d", ErrTooDeepUnwind, u.UnwindPoint, unwindToLimit)
-	}
-
 	var domains *libstate.SharedDomains
 	if txc.Doms == nil {
 		domains, err = libstate.NewSharedDomains(txc.Tx, logger)
@@ -838,6 +830,14 @@ func unwindExecutionStage(u *UnwindState, s *StageState, txc wrap.TxContainer, c
 			return err
 		}
 		accumulator.StartChange(u.UnwindPoint, hash, txs, true)
+	}
+
+	unwindToLimit, ok, err := txc.Tx.(libstate.HasAggTx).AggTx().(*libstate.AggregatorRoTx).CanUnwindBeforeBlockNum(u.UnwindPoint, txc.Tx)
+	if err != nil {
+		return err
+	}
+	if !ok {
+		return fmt.Errorf("%w: %d < %d", ErrTooDeepUnwind, u.UnwindPoint, unwindToLimit)
 	}
 
 	//TODO: why we don't call accumulator.ChangeCode???

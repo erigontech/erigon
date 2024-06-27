@@ -1013,14 +1013,11 @@ func stageExec(db kv.RwDB, ctx context.Context, logger log.Logger) error {
 
 	if unwind > 0 {
 		if err := db.View(ctx, func(tx kv.Tx) error {
-			minAllowedBlockNum, ok, err := tx.(libstate.HasAggTx).AggTx().(*libstate.AggregatorRoTx).CanUnwindBeforeBlockNum(s.BlockNumber-unwind, tx)
+			minUnwindableBlockNum, _, err := tx.(libstate.HasAggTx).AggTx().(*libstate.AggregatorRoTx).CanUnwindBeforeBlockNum(s.BlockNumber-unwind, tx)
 			if err != nil {
 				return err
 			}
-			if !ok {
-				return fmt.Errorf("too deep unwind requested: %d, minimum alowed: %d", s.BlockNumber-unwind, minAllowedBlockNum)
-			}
-			unwind = s.BlockNumber - minAllowedBlockNum
+			unwind = s.BlockNumber - minUnwindableBlockNum
 			return nil
 		}); err != nil {
 			return err
