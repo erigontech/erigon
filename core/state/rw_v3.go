@@ -233,6 +233,7 @@ func (rs *StateV3) Unwind(ctx context.Context, tx kv.RwTx, blockUnwindTo, txUnwi
 	defer mxState3Unwind.ObserveDuration(st)
 	var currentInc uint64
 
+	//TODO: why we don't call accumulator.ChangeCode???
 	handle := func(k, v []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) error {
 		if len(k) == length.Addr {
 			if len(v) > 0 {
