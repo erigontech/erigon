@@ -1000,7 +1000,7 @@ func (ht *HistoryRoTx) statelessIdxReader(i int) *recsplit.IndexReader {
 }
 
 func (ht *HistoryRoTx) canPruneUntil(tx kv.Tx, untilTx uint64) (can bool, txTo uint64) {
-	minIdxTx, maxIdxTx := ht.iit.smallestTxNum(tx), ht.iit.highestTxNum(tx)
+	minIdxTx, maxIdxTx := ht.iit.minTxNumInDB(tx), ht.iit.maxTxNumInDB(tx)
 	//defer func() {
 	//	fmt.Printf("CanPrune[%s]Until(%d) noFiles=%t txTo %d idxTx [%d-%d] keepRecentTxInDB=%d; result %t\n",
 	//		ht.h.filenameBase, untilTx, ht.h.dontProduceHistoryFiles, txTo, minIdxTx, maxIdxTx, ht.h.keepRecentTxInDB, minIdxTx < txTo)

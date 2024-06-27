@@ -538,7 +538,8 @@ func (sf AggV3StaticFiles) CleanupOnError() {
 	}
 }
 
-func (a *Aggregator) buildFiles(ctx context.Context, step uint64) error {
+func (a *Aggregator) buildFiles(ctx context.Context, step uint64) (hasMore bool, err error) {
+
 	a.logger.Debug("[agg] collate and build", "step", step, "collate_workers", a.collateAndBuildWorkers, "merge_workers", a.mergeWorkers, "compress_workers", a.d[kv.AccountsDomain].compressWorkers)
 
 	var (
@@ -566,6 +567,19 @@ func (a *Aggregator) buildFiles(ctx context.Context, step uint64) error {
 	g, ctx := errgroup.WithContext(ctx)
 	g.SetLimit(a.collateAndBuildWorkers)
 	for _, d := range a.d {
+		var canBuild bool
+		if err := a.db.View(ctx, func(tx kv.Tx) (err error) {
+			dTx := d.BeginFilesRo()
+			defer dTx.Close()
+			canBuild, err = dTx.canBuild(tx)
+			return err
+		}); err != nil {
+			return false, err
+		}
+		if !canBuild {
+			continue
+		}
+
 		d := d
 
 		a.wg.Add(1)
@@ -602,6 +616,19 @@ func (a *Aggregator) buildFiles(ctx context.Context, step uint64) error {
 
 	// indices are built concurrently
 	for _, ii := range a.iis {
+		var canBuild bool
+		if err := a.db.View(ctx, func(tx kv.Tx) (err error) {
+			iiTx := ii.BeginFilesRo()
+			defer iiTx.Close()
+			canBuild, err = iiTx.canBuild(tx)
+			return err
+		}); err != nil {
+			return false, err
+		}
+		if !canBuild {
+			continue
+		}
+
 		ii := ii
 		a.wg.Add(1)
 		g.Go(func() error {
@@ -638,6 +665,20 @@ func (a *Aggregator) buildFiles(ctx context.Context, step uint64) error {
 	}
 
 	for name, ap := range a.ap {
+		var canBuild bool
+		if err := a.db.View(ctx, func(tx kv.Tx) (err error) {
+			aTx := ap.BeginFilesRo()
+			defer aTx.Close()
+			canBuild, err = aTx.canBuild(tx)
+			return err
+		}); err != nil {
+			return false, err
+		}
+		if !canBuild {
+			continue
+		}
+
+		fmt.Printf("build0: %s\n", ap.filenameBase)
 		name := name
 		ap := ap
 		a.wg.Add(1)
@@ -1660,23 +1701,25 @@ func (a *Aggregator) SetProduceMod(produce bool) {
 // Returns channel which is closed when aggregation is done
 func (a *Aggregator) BuildFilesInBackground(txNum uint64) chan struct{} {
 	fin := make(chan struct{})
+	fmt.Printf("see3\n")
 
 	if !a.produce {
 		close(fin)
 		return fin
 	}
+	fmt.Printf("see4\n")
 
-	if (txNum + 1) <= a.visibleFilesMinimaxTxNum.Load()+a.aggregationStep {
-		close(fin)
-		return fin
-	}
+	//if (txNum + 1) <= a.visibleFilesMinimaxTxNum.Load()+a.aggregationStep {
+	//	close(fin)
+	//	return fin
+	//}
+	//fmt.Printf("see5\n")
 
 	if ok := a.buildingFiles.CompareAndSwap(false, true); !ok {
 		close(fin)
 		return fin
 	}
 
-	step := a.visibleFilesMinimaxTxNum.Load() / a.StepSize()
 	a.wg.Add(1)
 	go func() {
 		defer a.wg.Done()
@@ -1691,54 +1734,21 @@ func (a *Aggregator) BuildFilesInBackground(txNum uint64) chan struct{} {
 			defer a.snapshotBuildSema.Release(1)
 		}
 
-		hasData := false // TODO: can we remove this check and move it inside Build?
-		// check if db has enough data (maybe we didn't commit them yet or all keys are unique so history is empty)
-		if err := a.db.View(a.ctx, func(tx kv.Tx) error {
-			for _, d := range a.d {
-				lastInDB, err := d.lastStepInDB(tx)
-				if err != nil {
-					return err
-				}
-				hasData = lastInDB > step // `step` must be fully-written - means `step+1` records must be visible
-				if hasData {
-					break
-				}
-			}
-			if hasData {
-				return nil
-			}
-			for _, d := range a.ap {
-				lastInDB, err := d.lastStepInDB(tx)
-				if err != nil {
-					return err
-				}
-				hasData = lastInDB > step // `step` must be fully-written - means `step+1` records must be visible
-				if hasData {
-					break
-				}
-			}
-
-			return nil
-		}); err != nil && !errors.Is(err, context.Canceled) {
-			log.Warn("[agg] lastStepInDB check", "err", err)
-			return
-		}
-		if !hasData {
-			close(fin)
-			return
-		}
-
 		// trying to create as much small-step-files as possible:
 		// - to reduce amount of small merges
 		// - to remove old data from db as early as possible
 		// - during files build, may happen commit of new data. on each loop step getting latest id in db
-		for ; step < lastIdInDB(a.db, a.d[kv.AccountsDomain]); step++ { //`step` must be fully-written - means `step+1` records must be visible
-			if err := a.buildFiles(a.ctx, step); err != nil {
+		for step := a.visibleFilesMinimaxTxNum.Load() / a.StepSize(); ; step++ { //`step` must be fully-written - means `step+1` records must be visible
+			hasMore, err := a.buildFiles(a.ctx, step)
+			if err != nil {
 				if errors.Is(err, context.Canceled) || errors.Is(err, common2.ErrStopped) {
 					close(fin)
 					return
 				}
 				a.logger.Warn("[snapshots] buildFilesInBackground", "err", err)
+				break
+			}
+			if !hasMore {
 				break
 			}
 		}
@@ -1757,7 +1767,7 @@ func (a *Aggregator) BuildFilesInBackground(txNum uint64) chan struct{} {
 				return
 			}
 			fmt.Printf("see: %d, %d\n", step, lastStepInDB)
-			if step < lastStepInDB {
+			if step >= lastStepInDB {
 				break
 			}
 		}

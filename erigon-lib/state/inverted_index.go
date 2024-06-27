@@ -570,7 +570,20 @@ func (iit *InvertedIndexRoTx) seekInFiles(key []byte, txNum uint64) (found bool,
 
 // it is assumed files are always sorted
 func (iit *InvertedIndexRoTx) lastTxNumInFiles() uint64 {
+	if len(iit.files) == 0 {
+		return 0
+	}
 	return iit.files[len(iit.files)-1].endTxNum
+}
+
+func (iit *InvertedIndexRoTx) canBuild(dbtx kv.Tx) (bool, error) {
+	lastInDB, err := iit.maxTxNumInDB(dbtx)
+	if err != nil {
+		return false, err
+	}
+
+	inFiles := iit.lastTxNumInFiles() / iit.ii.aggregationStep
+	return lastInDB > inFiles, nil
 }
 
 // IdxRange - return range of txNums for given `key`
@@ -688,7 +701,7 @@ func (iit *InvertedIndexRoTx) iterateRangeFrozen(key []byte, startTxNum, endTxNu
 	return it, nil
 }
 
-func (iit *InvertedIndexRoTx) smallestTxNum(tx kv.Tx) uint64 {
+func (iit *InvertedIndexRoTx) minTxNumInDB(tx kv.Tx) uint64 {
 	fst, _ := kv.FirstKey(tx, iit.ii.indexKeysTable)
 	if len(fst) > 0 {
 		fstInDb := binary.BigEndian.Uint64(fst)
@@ -697,7 +710,7 @@ func (iit *InvertedIndexRoTx) smallestTxNum(tx kv.Tx) uint64 {
 	return math.MaxUint64
 }
 
-func (iit *InvertedIndexRoTx) highestTxNum(tx kv.Tx) uint64 {
+func (iit *InvertedIndexRoTx) maxTxNumInDB(tx kv.Tx) uint64 {
 	lst, _ := kv.LastKey(tx, iit.ii.indexKeysTable)
 	if len(lst) > 0 {
 		lstInDb := binary.BigEndian.Uint64(lst)
@@ -707,7 +720,7 @@ func (iit *InvertedIndexRoTx) highestTxNum(tx kv.Tx) uint64 {
 }
 
 func (iit *InvertedIndexRoTx) CanPrune(tx kv.Tx) bool {
-	return iit.smallestTxNum(tx) < iit.maxTxNumInFiles(false)
+	return iit.minTxNumInDB(tx) < iit.maxTxNumInFiles(false)
 }
 
 type InvertedIndexPruneStat struct {

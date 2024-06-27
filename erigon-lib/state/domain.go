@@ -1955,6 +1955,20 @@ func (dt *DomainRoTx) Files() (res []string) {
 	return append(res, dt.ht.Files()...)
 }
 
+func (dt *DomainRoTx) canBuild(dbtx kv.Tx) (bool, error) {
+	inFiles := uint64(0)
+	if len(dt.files) > 0 {
+		inFiles = dt.files[len(dt.files)-1].endTxNum / dt.d.aggregationStep
+	}
+	lastInDB, err := dt.d.lastStepInDB(dbtx)
+	if err != nil {
+		return false, err
+	}
+
+	//TODO: support "keep in db" parameter
+	return lastInDB > inFiles, nil
+}
+
 type SelectedStaticFiles struct {
 	accounts       []*filesItem
 	accountsIdx    []*filesItem
