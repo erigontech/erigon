@@ -19,27 +19,33 @@ package stagedsync
 import (
 	"bytes"
 	"context"
+	"encoding/binary"
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"slices"
 	"sync/atomic"
 
 	"github.com/erigontech/erigon-lib/common/datadir"
+	"github.com/erigontech/erigon-lib/kv/dbutils"
 	"github.com/erigontech/erigon-lib/kv/temporal"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/turbo/snapshotsync/freezeblocks"
 	"github.com/erigontech/erigon/turbo/stages/headerdownload"
 
 	"github.com/erigontech/erigon-lib/commitment"
+	"github.com/erigontech/erigon-lib/kv/order"
 	"github.com/erigontech/erigon-lib/kv/rawdbv3"
 	"github.com/erigontech/erigon/common/math"
 	"github.com/erigontech/erigon/turbo/services"
 
 	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common/length"
 	"github.com/erigontech/erigon-lib/etl"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/state"
 	"github.com/erigontech/erigon/core/types"
+	"github.com/erigontech/erigon/core/types/accounts"
 	"github.com/erigontech/erigon/turbo/trie"
 )
 
@@ -240,6 +246,47 @@ func StageHashStateCfg(db kv.RwDB, dirs datadir.Dirs) HashStateCfg {
 
 var ErrInvalidStateRootHash = errors.New("invalid state root hash")
 
+func UnwindHashStateStage(u *UnwindState, s *StageState, tx kv.RwTx, cfg HashStateCfg, ctx context.Context, logger log.Logger) (err error) {
+	useExternalTx := tx != nil
+	if !useExternalTx {
+		tx, err = cfg.db.BeginRw(ctx)
+		if err != nil {
+			return err
+		}
+		defer tx.Rollback()
+	}
+
+	logPrefix := u.LogPrefix()
+	if err = unwindHashStateStageImpl(logPrefix, u, s, tx, cfg, ctx, logger); err != nil {
+		return err
+	}
+	if err = u.Done(tx); err != nil {
+		return err
+	}
+	if !useExternalTx {
+		if err = tx.Commit(); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func unwindHashStateStageImpl(logPrefix string, u *UnwindState, s *StageState, tx kv.RwTx, cfg HashStateCfg, ctx context.Context, logger log.Logger) error {
+	// Currently it does not require unwinding because it does not create any Intermediate Hash records
+	// and recomputes the state root from scratch
+	prom := NewPromoter(tx, cfg.dirs, ctx, logger)
+	if err := prom.UnwindOnHistoryV3(logPrefix, s.BlockNumber, u.UnwindPoint, false, true); err != nil {
+		return err
+	}
+	if err := prom.UnwindOnHistoryV3(logPrefix, s.BlockNumber, u.UnwindPoint, false, false); err != nil {
+		return err
+	}
+	if err := prom.UnwindOnHistoryV3(logPrefix, s.BlockNumber, u.UnwindPoint, true, false); err != nil {
+		return err
+	}
+	return nil
+}
+
 func RebuildPatriciaTrieBasedOnFiles(rwTx kv.RwTx, cfg TrieCfg, ctx context.Context, logger log.Logger) (libcommon.Hash, error) {
 	useExternalTx := rwTx != nil
 	if !useExternalTx {
@@ -312,4 +359,511 @@ func RebuildPatriciaTrieBasedOnFiles(rwTx kv.RwTx, cfg TrieCfg, ctx context.Cont
 		}
 	}
 	return libcommon.BytesToHash(rh), err
+}
+
+func NewPromoter(db kv.RwTx, dirs datadir.Dirs, ctx context.Context, logger log.Logger) *Promoter {
+	return &Promoter{
+		tx:               db,
+		ChangeSetBufSize: 256 * 1024 * 1024,
+		dirs:             dirs,
+		ctx:              ctx,
+		logger:           logger,
+	}
+}
+
+type Promoter struct {
+	tx               kv.RwTx
+	ChangeSetBufSize uint64
+	dirs             datadir.Dirs
+	ctx              context.Context
+	logger           log.Logger
+}
+
+func (p *Promoter) PromoteOnHistoryV3(logPrefix string, from, to uint64, storage bool) error {
+	if to > from+16 {
+		p.logger.Info(fmt.Sprintf("[%s] Incremental promotion", logPrefix), "from", from, "to", to, "storage", storage)
+	}
+
+	txnFrom, err := rawdbv3.TxNums.Min(p.tx, from+1)
+	if err != nil {
+		return err
+	}
+	txnTo := uint64(math.MaxUint64)
+	collector := etl.NewCollector(logPrefix, p.dirs.Tmp, etl.NewSortableBuffer(etl.BufferOptimalSize), p.logger)
+	defer collector.Close()
+
+	if storage {
+		it, err := p.tx.(kv.TemporalTx).HistoryRange(kv.StorageHistory, int(txnFrom), int(txnTo), order.Asc, kv.Unlim)
+		if err != nil {
+			return err
+		}
+		for it.HasNext() {
+			k, _, err := it.Next()
+			if err != nil {
+				return err
+			}
+
+			accBytes, err := p.tx.GetOne(kv.PlainState, k[:20])
+			if err != nil {
+				return err
+			}
+			incarnation := uint64(1)
+			if len(accBytes) != 0 {
+				incarnation, err = accounts.DecodeIncarnationFromStorage(accBytes)
+				if err != nil {
+					return err
+				}
+				if incarnation == 0 {
+					continue
+				}
+			}
+			plainKey := dbutils.PlainGenerateCompositeStorageKey(k[:20], incarnation, k[20:])
+			newV, err := p.tx.GetOne(kv.PlainState, plainKey)
+			if err != nil {
+				return err
+			}
+			newK, err := transformPlainStateKey(plainKey)
+			if err != nil {
+				return err
+			}
+			if err := collector.Collect(newK, newV); err != nil {
+				return err
+			}
+		}
+		if err := collector.Load(p.tx, kv.HashedStorage, etl.IdentityLoadFunc, etl.TransformArgs{Quit: p.ctx.Done()}); err != nil {
+			return err
+		}
+		return nil
+	}
+
+	codeCollector := etl.NewCollector(logPrefix, p.dirs.Tmp, etl.NewSortableBuffer(etl.BufferOptimalSize), p.logger)
+	defer codeCollector.Close()
+
+	it, err := p.tx.(kv.TemporalTx).HistoryRange(kv.AccountsHistory, int(txnFrom), int(txnTo), order.Asc, kv.Unlim)
+	if err != nil {
+		return err
+	}
+	for it.HasNext() {
+		k, _, err := it.Next()
+		if err != nil {
+			return err
+		}
+		newV, err := p.tx.GetOne(kv.PlainState, k)
+		if err != nil {
+			return err
+		}
+		newK, err := transformPlainStateKey(k)
+		if err != nil {
+			return err
+		}
+
+		if err := collector.Collect(newK, newV); err != nil {
+			return err
+		}
+
+		//code
+		if len(newV) == 0 {
+			continue
+		}
+		incarnation, err := accounts.DecodeIncarnationFromStorage(newV)
+		if err != nil {
+			return err
+		}
+		if incarnation == 0 {
+			continue
+		}
+		plainKey := dbutils.PlainGenerateStoragePrefix(k, incarnation)
+		var codeHash []byte
+		codeHash, err = p.tx.GetOne(kv.PlainContractCode, plainKey)
+		if err != nil {
+			return fmt.Errorf("getFromPlainCodesAndLoad for %x, inc %d: %w", plainKey, incarnation, err)
+		}
+		if codeHash == nil {
+			continue
+		}
+		newCodeK, err := transformContractCodeKey(plainKey)
+		if err != nil {
+			return err
+		}
+		if err = codeCollector.Collect(newCodeK, newV); err != nil {
+			return err
+		}
+	}
+	if err := collector.Load(p.tx, kv.HashedAccounts, etl.IdentityLoadFunc, etl.TransformArgs{Quit: p.ctx.Done()}); err != nil {
+		return err
+	}
+	if err := codeCollector.Load(p.tx, kv.ContractCode, etl.IdentityLoadFunc, etl.TransformArgs{Quit: p.ctx.Done()}); err != nil {
+		return err
+	}
+	return nil
+}
+
+func (p *Promoter) UnwindOnHistoryV3(logPrefix string, unwindFrom, unwindTo uint64, storage, codes bool) error {
+	p.logger.Info(fmt.Sprintf("[%s] Unwinding started", logPrefix), "from", unwindFrom, "to", unwindTo, "storage", storage, "codes", codes)
+
+	txnFrom, err := rawdbv3.TxNums.Min(p.tx, unwindTo+1)
+	if err != nil {
+		return err
+	}
+	txnTo := uint64(math.MaxUint64)
+	collector := etl.NewCollector(logPrefix, p.dirs.Tmp, etl.NewOldestEntryBuffer(etl.BufferOptimalSize), p.logger)
+	defer collector.Close()
+
+	acc := accounts.NewAccount()
+	if codes {
+		it, err := p.tx.(kv.TemporalTx).HistoryRange(kv.AccountsHistory, int(txnFrom), int(txnTo), order.Asc, kv.Unlim)
+		if err != nil {
+			return err
+		}
+		for it.HasNext() {
+			k, v, err := it.Next()
+			if err != nil {
+				return err
+			}
+
+			if len(v) == 0 {
+				continue
+			}
+			if err := accounts.DeserialiseV3(&acc, v); err != nil {
+				return err
+			}
+
+			incarnation := acc.Incarnation
+			if incarnation == 0 {
+				continue
+			}
+			plainKey := dbutils.PlainGenerateStoragePrefix(k, incarnation)
+			codeHash, err := p.tx.GetOne(kv.PlainContractCode, plainKey)
+			if err != nil {
+				return fmt.Errorf("getCodeUnwindExtractFunc: %w, key=%x", err, plainKey)
+			}
+			newK, err := transformContractCodeKey(plainKey)
+			if err != nil {
+				return err
+			}
+			if err = collector.Collect(newK, codeHash); err != nil {
+				return err
+			}
+		}
+
+		return collector.Load(p.tx, kv.ContractCode, etl.IdentityLoadFunc, etl.TransformArgs{Quit: p.ctx.Done()})
+	}
+
+	if storage {
+		it, err := p.tx.(kv.TemporalTx).HistoryRange(kv.StorageHistory, int(txnFrom), int(txnTo), order.Asc, kv.Unlim)
+		if err != nil {
+			return err
+		}
+		for it.HasNext() {
+			k, v, err := it.Next()
+			if err != nil {
+				return err
+			}
+			val, err := p.tx.GetOne(kv.PlainState, k[:20])
+			if err != nil {
+				return err
+			}
+			incarnation := uint64(1)
+			if len(val) != 0 {
+				oldInc, _ := accounts.DecodeIncarnationFromStorage(val)
+				incarnation = oldInc
+			}
+			plainKey := dbutils.PlainGenerateCompositeStorageKey(k[:20], incarnation, k[20:])
+			newK, err := transformPlainStateKey(plainKey)
+			if err != nil {
+				return err
+			}
+			if err := collector.Collect(newK, v); err != nil {
+				return err
+			}
+		}
+		return collector.Load(p.tx, kv.HashedStorage, etl.IdentityLoadFunc, etl.TransformArgs{Quit: p.ctx.Done()})
+	}
+
+	it, err := p.tx.(kv.TemporalTx).HistoryRange(kv.AccountsHistory, int(txnFrom), int(txnTo), order.Asc, kv.Unlim)
+	if err != nil {
+		return err
+	}
+	for it.HasNext() {
+		k, v, err := it.Next()
+		if err != nil {
+			return err
+		}
+		newK, err := transformPlainStateKey(k)
+		if err != nil {
+			return err
+		}
+
+		if len(v) == 0 {
+			if err = collector.Collect(newK, nil); err != nil {
+				return err
+			}
+			continue
+		}
+		if err := accounts.DeserialiseV3(&acc, v); err != nil {
+			return err
+		}
+		if acc.Incarnation > 0 && acc.IsEmptyCodeHash() {
+			if codeHash, err := p.tx.GetOne(kv.ContractCode, dbutils.GenerateStoragePrefix(newK, acc.Incarnation)); err == nil {
+				copy(acc.CodeHash[:], codeHash)
+			} else {
+				return fmt.Errorf("adjusting codeHash for ks %x, inc %d: %w", newK, acc.Incarnation, err)
+			}
+		}
+
+		value := make([]byte, acc.EncodingLengthForStorage())
+		acc.EncodeForStorage(value)
+		if err := collector.Collect(newK, value); err != nil {
+			return err
+		}
+	}
+	return collector.Load(p.tx, kv.HashedAccounts, etl.IdentityLoadFunc, etl.TransformArgs{Quit: p.ctx.Done()})
+}
+
+func promoteHashedStateIncrementally(logPrefix string, from, to uint64, tx kv.RwTx, cfg HashStateCfg, ctx context.Context, logger log.Logger) error {
+	prom := NewPromoter(tx, cfg.dirs, ctx, logger)
+	if err := prom.PromoteOnHistoryV3(logPrefix, from, to, false); err != nil {
+		return err
+	}
+	if err := prom.PromoteOnHistoryV3(logPrefix, from, to, true); err != nil {
+		return err
+	}
+	return nil
+}
+
+func PruneHashStateStage(s *PruneState, tx kv.RwTx, cfg HashStateCfg, ctx context.Context) (err error) {
+	useExternalTx := tx != nil
+	if !useExternalTx {
+		tx, err = cfg.db.BeginRw(ctx)
+		if err != nil {
+			return err
+		}
+		defer tx.Rollback()
+	}
+
+	if !useExternalTx {
+		if err = tx.Commit(); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func transformPlainStateKey(key []byte) ([]byte, error) {
+	switch len(key) {
+	case length.Addr:
+		// account
+		hash, err := libcommon.HashData(key)
+		return hash[:], err
+	case length.Addr + length.Incarnation + length.Hash:
+		// storage
+		addrHash, err := libcommon.HashData(key[:length.Addr])
+		if err != nil {
+			return nil, err
+		}
+		inc := binary.BigEndian.Uint64(key[length.Addr:])
+		secKey, err := libcommon.HashData(key[length.Addr+length.Incarnation:])
+		if err != nil {
+			return nil, err
+		}
+		compositeKey := dbutils.GenerateCompositeStorageKey(addrHash, inc, secKey)
+		return compositeKey, nil
+	default:
+		// no other keys are supported
+		return nil, fmt.Errorf("could not convert key from plain to hashed, unexpected len: %d", len(key))
+	}
+}
+
+func transformContractCodeKey(key []byte) ([]byte, error) {
+	if len(key) != length.Addr+length.Incarnation {
+		return nil, fmt.Errorf("could not convert code key from plain to hashed, unexpected len: %d", len(key))
+	}
+	address, incarnation := dbutils.PlainParseStoragePrefix(key)
+
+	addrHash, err := libcommon.HashData(address[:])
+	if err != nil {
+		return nil, err
+	}
+
+	compositeKey := dbutils.GenerateStoragePrefix(addrHash[:], incarnation)
+	return compositeKey, nil
+}
+
+type HashPromoter struct {
+	tx               kv.RwTx
+	ChangeSetBufSize uint64
+	TempDir          string
+	logPrefix        string
+	quitCh           <-chan struct{}
+	logger           log.Logger
+}
+
+func NewHashPromoter(db kv.RwTx, tempDir string, quitCh <-chan struct{}, logPrefix string, logger log.Logger) *HashPromoter {
+	return &HashPromoter{
+		tx:               db,
+		ChangeSetBufSize: 256 * 1024 * 1024,
+		TempDir:          tempDir,
+		quitCh:           quitCh,
+		logPrefix:        logPrefix,
+		logger:           logger,
+	}
+}
+
+func (p *HashPromoter) PromoteOnHistoryV3(logPrefix string, from, to uint64, storage bool, load func(k []byte, v []byte) error) error {
+	nonEmptyMarker := []byte{1}
+
+	txnFrom, err := rawdbv3.TxNums.Min(p.tx, from+1)
+	if err != nil {
+		return err
+	}
+	txnTo := uint64(math.MaxUint64)
+
+	if storage {
+		compositeKey := make([]byte, length.Hash+length.Hash)
+		it, err := p.tx.(kv.TemporalTx).HistoryRange(kv.StorageHistory, int(txnFrom), int(txnTo), order.Asc, kv.Unlim)
+		if err != nil {
+			return err
+		}
+		for it.HasNext() {
+			k, v, err := it.Next()
+			if err != nil {
+				return err
+			}
+			addrHash, err := libcommon.HashData(k[:length.Addr])
+			if err != nil {
+				return err
+			}
+			secKey, err := libcommon.HashData(k[length.Addr:])
+			if err != nil {
+				return err
+			}
+			copy(compositeKey, addrHash[:])
+			copy(compositeKey[length.Hash:], secKey[:])
+			if len(v) != 0 {
+				v = nonEmptyMarker
+			}
+			if err := load(compositeKey, v); err != nil {
+				return err
+			}
+		}
+		return nil
+	}
+
+	it, err := p.tx.(kv.TemporalTx).HistoryRange(kv.AccountsHistory, int(txnFrom), int(txnTo), order.Asc, kv.Unlim)
+	if err != nil {
+		return err
+	}
+	for it.HasNext() {
+		k, v, err := it.Next()
+		if err != nil {
+			return err
+		}
+		newK, err := transformPlainStateKey(k)
+		if err != nil {
+			return err
+		}
+		if len(v) != 0 {
+			v = nonEmptyMarker
+		}
+		if err := load(newK, v); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (p *HashPromoter) UnwindOnHistoryV3(logPrefix string, unwindFrom, unwindTo uint64, storage bool, load func(k []byte, v []byte)) error {
+	txnFrom, err := rawdbv3.TxNums.Min(p.tx, unwindTo)
+	if err != nil {
+		return err
+	}
+	txnTo := uint64(math.MaxUint64)
+	var deletedAccounts [][]byte
+
+	if storage {
+		it, err := p.tx.(kv.TemporalTx).HistoryRange(kv.StorageHistory, int(txnFrom), int(txnTo), order.Asc, kv.Unlim)
+		if err != nil {
+			return err
+		}
+		for it.HasNext() {
+			k, _, err := it.Next()
+			if err != nil {
+				return err
+			}
+			// Plain state not unwind yet, it means - if key not-exists in PlainState but has value from ChangeSets - then need mark it as "created" in RetainList
+			enc, err := p.tx.GetOne(kv.PlainState, k[:20])
+			if err != nil {
+				return err
+			}
+			incarnation := uint64(1)
+			if len(enc) != 0 {
+				oldInc, _ := accounts.DecodeIncarnationFromStorage(enc)
+				incarnation = oldInc
+			}
+			plainKey := dbutils.PlainGenerateCompositeStorageKey(k[:20], incarnation, k[20:])
+			value, err := p.tx.GetOne(kv.PlainState, plainKey)
+			if err != nil {
+				return err
+			}
+			newK, err := transformPlainStateKey(plainKey)
+			if err != nil {
+				return err
+			}
+			load(newK, value)
+		}
+		return nil
+	}
+
+	it, err := p.tx.(kv.TemporalTx).HistoryRange(kv.AccountsHistory, int(txnFrom), int(txnTo), order.Asc, kv.Unlim)
+	if err != nil {
+		return err
+	}
+	for it.HasNext() {
+		k, v, err := it.Next()
+		if err != nil {
+			return err
+		}
+		newK, err := transformPlainStateKey(k)
+		if err != nil {
+			return err
+		}
+		// Plain state not unwind yet, it means - if key not-exists in PlainState but has value from ChangeSets - then need mark it as "created" in RetainList
+		value, err := p.tx.GetOne(kv.PlainState, k)
+		if err != nil {
+			return err
+		}
+
+		if len(value) > 0 {
+			oldInc, _ := accounts.DecodeIncarnationFromStorage(value)
+			if oldInc > 0 {
+				if len(v) == 0 { // self-destructed
+					deletedAccounts = append(deletedAccounts, newK)
+				} else {
+					var newAccount accounts.Account
+					if err = accounts.DeserialiseV3(&newAccount, v); err != nil {
+						return err
+					}
+					if newAccount.Incarnation > oldInc {
+						deletedAccounts = append(deletedAccounts, newK)
+					}
+				}
+			}
+		}
+
+		load(newK, value)
+	}
+
+	// delete Intermediate hashes of deleted accounts
+	slices.SortFunc(deletedAccounts, bytes.Compare)
+	for _, k := range deletedAccounts {
+		if err := p.tx.ForPrefix(kv.TrieOfStorage, k, func(k, v []byte) error {
+			if err := p.tx.Delete(kv.TrieOfStorage, k); err != nil {
+				return err
+			}
+			return nil
+		}); err != nil {
+			return err
+		}
+	}
+	return nil
 }

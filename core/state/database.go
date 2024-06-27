@@ -33,6 +33,8 @@ const (
 	FirstContractIncarnation = 1
 	//NonContractIncarnation incarnation for non contracts
 	NonContractIncarnation = 0
+	// MaxTrieCacheSize is the trie cache size limit after which to evict trie nodes from memory.
+	MaxTrieCacheSize = uint64(1024 * 1024)
 )
 
 type StateReader interface {

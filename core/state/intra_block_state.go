@@ -91,11 +91,12 @@ type IntraBlockState struct {
 
 	// Journal of state modifications. This is the backbone of
 	// Snapshot and RevertToSnapshot.
-	journal        *journal
-	validRevisions []revision
-	nextRevisionID int
-	trace          bool
-	balanceInc     map[libcommon.Address]*BalanceIncrease // Map of balance increases (without first reading the account)
+	journal           *journal
+	validRevisions    []revision
+	nextRevisionID    int
+	trace             bool
+	balanceInc        map[libcommon.Address]*BalanceIncrease // Map of balance increases (without first reading the account)
+	disableBalanceInc bool                                   // Disable balance increase tracking and eagerly read accounts
 }
 
 // Create a new state from a given trie
@@ -112,6 +113,10 @@ func New(stateReader StateReader) *IntraBlockState {
 		balanceInc:        map[libcommon.Address]*BalanceIncrease{},
 		//trace:             true,
 	}
+}
+
+func (sdb *IntraBlockState) SetDisableBalanceInc(disable bool) {
+	sdb.disableBalanceInc = disable
 }
 
 func (sdb *IntraBlockState) SetTrace(trace bool) {

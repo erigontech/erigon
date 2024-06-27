@@ -37,6 +37,23 @@ func (*HexStdOutWriter) Write(p []byte) (n int, err error) {
 	return len(p), nil
 }
 
+func (t *Trie) Print(w io.Writer) {
+	witness, err := t.ExtractWitness(false, nil)
+	if err != nil {
+		panic(err)
+	}
+	_, err = witness.WriteInto(w)
+	if err != nil {
+		panic(err)
+	}
+}
+
+func (t *Trie) PrintTrie() {
+	fmt.Printf("trie:0x")
+	t.Print(&HexStdOutWriter{})
+	fmt.Println("")
+}
+
 func (t *Trie) PrintDiff(t2 *Trie, w io.Writer) {
 	printDiff(t.root, t2.root, w, "", "0x")
 }

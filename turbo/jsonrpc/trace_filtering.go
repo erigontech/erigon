@@ -770,7 +770,11 @@ func (api *TraceAPIImpl) callManyTransactions(
 	engine := api.engine()
 	consensusHeaderReader := consensuschain.NewReader(cfg, dbtx, nil, nil)
 	logger := log.New("trace_filtering")
+<<<<<<< HEAD
 	err = core.InitializeBlockExecution(engine.(consensus.Engine), consensusHeaderReader, block.HeaderNoCopy(), cfg, initialState, logger, nil)
+=======
+	err = core.InitializeBlockExecution(engine.(consensus.Engine), consensusHeaderReader, block.HeaderNoCopy(), cfg, initialState, nil, logger)
+>>>>>>> 9d7ec68fea (add initial witness generation)
 	if err != nil {
 		return nil, nil, err
 	}
