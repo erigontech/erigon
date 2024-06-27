@@ -1113,16 +1113,17 @@ func (ht *HistoryRoTx) Close() {
 	files := ht.files
 	ht.files = nil
 	for i := 0; i < len(files); i++ {
-		if files[i].src.frozen {
+		src := files[i].src
+		if src == nil || src.frozen {
 			continue
 		}
-		refCnt := files[i].src.refcount.Add(-1)
-		//if ht.h.filenameBase == "accounts" && item.src.canDelete.Load() {
-		//	log.Warn("[history] HistoryRoTx.Close: check file to remove", "refCnt", refCnt, "name", item.src.decompressor.FileName())
-		//}
+		refCnt := src.refcount.Add(-1)
 		//GC: last reader responsible to remove useles files: close it and delete
-		if refCnt == 0 && files[i].src.canDelete.Load() {
-			files[i].src.closeFilesAndRemove()
+		if refCnt == 0 && src.canDelete.Load() {
+			if traceFileLife != "" && ht.h.filenameBase == traceFileLife {
+				ht.h.logger.Warn(fmt.Sprintf("[agg] real remove at ctx close: %s", src.decompressor.FileName()))
+			}
+			src.closeFilesAndRemove()
 		}
 	}
 	for _, r := range ht.readers {
