@@ -1547,6 +1547,11 @@ func (dt *DomainRoTx) CanPruneUntil(tx kv.Tx, untilTx uint64) bool {
 	return canHistory || canDomain
 }
 
+func (dt *DomainRoTx) canBuild(dbtx kv.Tx) bool {
+	maxStepInFiles := dt.files.EndTxNum() / dt.d.aggregationStep
+	return dt.d.maxStepInDB(dbtx) > maxStepInFiles
+}
+
 // checks if there is anything to prune in DOMAIN tables.
 // everything that aggregated is prunable.
 // history.CanPrune should be called separately because it responsible for different tables
@@ -1951,11 +1956,6 @@ func (dt *DomainRoTx) Files() (res []string) {
 		}
 	}
 	return append(res, dt.ht.Files()...)
-}
-
-func (dt *DomainRoTx) canBuild(dbtx kv.Tx) bool {
-	maxStepInFiles := dt.files.EndTxNum() / dt.d.aggregationStep
-	return dt.d.maxStepInDB(dbtx) > maxStepInFiles
 }
 
 type SelectedStaticFiles struct {

@@ -568,12 +568,6 @@ func (iit *InvertedIndexRoTx) seekInFiles(key []byte, txNum uint64) (found bool,
 	return false, 0
 }
 
-func (iit *InvertedIndexRoTx) canBuild(dbtx kv.Tx) bool {
-	lastInDB := iit.ii.maxTxNumInDB(dbtx)
-	maxStepInFiles := iit.files.EndTxNum() / iit.ii.aggregationStep
-	return lastInDB > maxStepInFiles
-}
-
 // IdxRange - return range of txNums for given `key`
 // is to be used in public API, therefore it relies on read-only transaction
 // so that iteration can be done even when the inverted index is being updated.
@@ -709,6 +703,11 @@ func (ii *InvertedIndex) maxTxNumInDB(tx kv.Tx) uint64 {
 
 func (iit *InvertedIndexRoTx) CanPrune(tx kv.Tx) bool {
 	return iit.ii.minTxNumInDB(tx) < iit.files.EndTxNum()
+}
+
+func (iit *InvertedIndexRoTx) canBuild(dbtx kv.Tx) bool {
+	maxStepInFiles := iit.files.EndTxNum() / iit.ii.aggregationStep
+	return iit.ii.maxTxNumInDB(dbtx) > maxStepInFiles
 }
 
 type InvertedIndexPruneStat struct {
