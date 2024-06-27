@@ -543,7 +543,7 @@ func (tx *AppendableRoTx) canBuild(dbtx kv.Tx) (bool, error) { //nolint
 	}
 	maxStepInDB := maxTxNumInDB / tx.ap.aggregationStep
 	maxStepInFiles := tx.files.EndTxNum() / tx.ap.aggregationStep
-	return maxStepInDB > maxStepInFiles, nil
+	return maxStepInFiles < maxStepInDB, nil
 }
 
 type AppendablePruneStat struct {
