@@ -161,11 +161,6 @@ func writeDbTables(w http.ResponseWriter, r *http.Request, dataDir string, dbnam
 			var count uint64
 
 			if e := db.View(context.Background(), func(tx kv.Tx) error {
-				c, e := tx.Cursor(bucket)
-				if e != nil {
-					return e
-				}
-				defer c.Close()
 				count, e = tx.Count(bucket)
 				if e != nil {
 					return e
