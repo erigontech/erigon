@@ -28,7 +28,11 @@ var ProhibitNewDownloadsLock = Migration{
 		}
 		if snapshotsStageProgress > 0 {
 			fPath := filepath.Join(dirs.Snap, downloader.ProhibitNewDownloadsFileName)
-			if !dir.FileExist(fPath) {
+			exists, err := dir.FileExist(fPath)
+			if err != nil {
+				return err
+			}
+			if !exists {
 				f, err := os.Create(fPath)
 				if err != nil {
 					return err
