@@ -841,7 +841,6 @@ type MdbxCursor struct {
 	tx         *MdbxTx
 	c          *mdbx.Cursor
 	bucketName string
-	bucketCfg  kv.TableCfgItem
 	dbi        mdbx.DBI
 	id         uint64
 }
@@ -1326,8 +1325,7 @@ func (tx *MdbxTx) Cursor(bucket string) (kv.Cursor, error) {
 }
 
 func (tx *MdbxTx) stdCursor(bucket string) (kv.RwCursor, error) {
-	b := tx.db.buckets[bucket]
-	c := &MdbxCursor{bucketName: bucket, tx: tx, bucketCfg: b, dbi: mdbx.DBI(tx.db.buckets[bucket].DBI), id: tx.ID}
+	c := &MdbxCursor{bucketName: bucket, tx: tx, dbi: mdbx.DBI(tx.db.buckets[bucket].DBI), id: tx.ID}
 	tx.ID++
 
 	var err error
@@ -1418,10 +1416,6 @@ func (c *MdbxCursor) Last() ([]byte, []byte, error) {
 }
 
 func (c *MdbxCursor) Seek(seek []byte) (k, v []byte, err error) {
-	if c.bucketCfg.AutoDupSortKeysConversion {
-		return c.seekDupSort(seek)
-	}
-
 	if len(seek) == 0 {
 		k, v, err = c.first()
 	} else {
@@ -1433,66 +1427,6 @@ func (c *MdbxCursor) Seek(seek []byte) (k, v []byte, err error) {
 		}
 		err = fmt.Errorf("failed MdbxKV cursor.seekInFiles(): %w, bucket: %s,  key: %x", err, c.bucketName, seek)
 		return []byte{}, nil, err
-	}
-
-	return k, v, nil
-}
-
-func (c *MdbxCursor) seekDupSort(seek []byte) (k, v []byte, err error) {
-	b := c.bucketCfg
-	from, to := b.DupFromLen, b.DupToLen
-	if len(seek) == 0 {
-		k, v, err = c.first()
-		if err != nil {
-			if mdbx.IsNotFound(err) {
-				return nil, nil, nil
-			}
-			return []byte{}, nil, err
-		}
-
-		if len(k) == to {
-			k2 := make([]byte, 0, len(k)+from-to)
-			k2 = append(append(k2, k...), v[:from-to]...)
-			v = v[from-to:]
-			k = k2
-		}
-		return k, v, nil
-	}
-
-	var seek1, seek2 []byte
-	if len(seek) > to {
-		seek1, seek2 = seek[:to], seek[to:]
-	} else {
-		seek1 = seek
-	}
-	k, v, err = c.setRange(seek1)
-	if err != nil {
-		if mdbx.IsNotFound(err) {
-			return nil, nil, nil
-		}
-
-		return []byte{}, nil, err
-	}
-
-	if seek2 != nil && bytes.Equal(seek1, k) {
-		v, err = c.getBothRange(seek1, seek2)
-		if err != nil && mdbx.IsNotFound(err) {
-			k, v, err = c.next()
-			if err != nil {
-				if mdbx.IsNotFound(err) {
-					return nil, nil, nil
-				}
-				return []byte{}, nil, err
-			}
-		} else if err != nil {
-			return []byte{}, nil, err
-		}
-	}
-	if len(k) == to {
-		k2 := make([]byte, 0, len(k)+from-to)
-		k2 = append(append(k2, k...), v[:from-to]...)
-		v = v[from-to:]
-		k = k2
 	}
 
 	return k, v, nil
@@ -1536,10 +1470,6 @@ func (c *MdbxCursor) Current() ([]byte, []byte, error) {
 }
 
 func (c *MdbxCursor) Delete(k []byte) error {
-	if c.bucketCfg.AutoDupSortKeysConversion {
-		return c.deleteDupSort(k)
-	}
-
 	_, _, err := c.set(k)
 	if err != nil {
 		if mdbx.IsNotFound(err) {
@@ -1548,9 +1478,6 @@ func (c *MdbxCursor) Delete(k []byte) error {
 		return err
 	}
 
-	if c.bucketCfg.Flags&mdbx.DupSort != 0 {
-		return c.delAllDupData()
-	}
 	return c.delCurrent()
 }
 
@@ -1563,118 +1490,18 @@ func (c *MdbxCursor) DeleteCurrent() error {
 	return c.delCurrent()
 }
 
-func (c *MdbxCursor) deleteDupSort(key []byte) error {
-	b := c.bucketCfg
-	from, to := b.DupFromLen, b.DupToLen
-	if len(key) != from && len(key) >= to {
-		return fmt.Errorf("delete from dupsort bucket: %s, can have keys of len==%d and len<%d. key: %x,%d", c.bucketName, from, to, key, len(key))
-	}
-
-	if len(key) == from {
-		v, err := c.getBothRange(key[:to], key[to:])
-		if err != nil { // if key not found, or found another one - then nothing to delete
-			if mdbx.IsNotFound(err) {
-				return nil
-			}
-			return err
-		}
-		if !bytes.Equal(v[:from-to], key[to:]) {
-			return nil
-		}
-		return c.delCurrent()
-	}
-
-	_, _, err := c.set(key)
-	if err != nil {
-		if mdbx.IsNotFound(err) {
-			return nil
-		}
-		return err
-	}
-
-	return c.delCurrent()
-}
-
 func (c *MdbxCursor) PutNoOverwrite(key []byte, value []byte) error {
-	if c.bucketCfg.AutoDupSortKeysConversion {
-		panic("not implemented")
-	}
-
 	return c.putNoOverwrite(key, value)
 }
 
 func (c *MdbxCursor) Put(key []byte, value []byte) error {
-	b := c.bucketCfg
-	if b.AutoDupSortKeysConversion {
-		if err := c.putDupSort(key, value); err != nil {
-			return fmt.Errorf("label: %s, table: %s, err: %w", c.tx.db.opts.label, c.bucketName, err)
-		}
-		return nil
-	}
 	if err := c.put(key, value); err != nil {
 		return fmt.Errorf("label: %s, table: %s, err: %w", c.tx.db.opts.label, c.bucketName, err)
 	}
 	return nil
 }
 
-func (c *MdbxCursor) putDupSort(key []byte, value []byte) error {
-	b := c.bucketCfg
-	from, to := b.DupFromLen, b.DupToLen
-	if len(key) != from && len(key) >= to {
-		return fmt.Errorf("label: %s, table: %s, can have keys of len==%d and len<%d. key: %x,%d", c.tx.db.opts.label, c.bucketName, from, to, key, len(key))
-	}
-
-	if len(key) != from {
-		err := c.putNoOverwrite(key, value)
-		if err != nil {
-			if mdbx.IsKeyExists(err) {
-				return c.putCurrent(key, value)
-			}
-			return fmt.Errorf("label: %s, putNoOverwrite, bucket: %s, key: %x, val: %x, err: %w", c.tx.db.opts.label, c.bucketName, key, value, err)
-		}
-		return nil
-	}
-
-	value = append(key[to:], value...)
-	key = key[:to]
-	v, err := c.getBothRange(key, value[:from-to])
-	if err != nil { // if key not found, or found another one - then just insert
-		if mdbx.IsNotFound(err) {
-			return c.put(key, value)
-		}
-		return err
-	}
-
-	if bytes.Equal(v[:from-to], value[:from-to]) {
-		if len(v) == len(value) { // in DupSort case mdbx.Current works only with values of same length
-			return c.putCurrent(key, value)
-		}
-		err = c.delCurrent()
-		if err != nil {
-			return err
-		}
-	}
-
-	return c.put(key, value)
-}
-
 func (c *MdbxCursor) SeekExact(key []byte) ([]byte, []byte, error) {
-	b := c.bucketCfg
-	if b.AutoDupSortKeysConversion && len(key) == b.DupFromLen {
-		from, to := b.DupFromLen, b.DupToLen
-		v, err := c.getBothRange(key[:to], key[to:])
-		if err != nil {
-			if mdbx.IsNotFound(err) {
-				return nil, nil, nil
-			}
-			return []byte{}, nil, err
-		}
-		if !bytes.Equal(key[to:], v[:from-to]) {
-			return nil, nil, nil
-		}
-		return key[:to], v[from-to:], nil
-	}
-
 	k, v, err := c.set(key)
 	if err != nil {
 		if mdbx.IsNotFound(err) {
@@ -1689,26 +1516,6 @@ func (c *MdbxCursor) SeekExact(key []byte) ([]byte, []byte, error) {
 // Cast your cursor to *MdbxCursor to use this method.
 // Return error - if provided data will not sorted (or bucket have old records which mess with new in sorting manner).
 func (c *MdbxCursor) Append(k []byte, v []byte) error {
-	if c.bucketCfg.AutoDupSortKeysConversion {
-		b := c.bucketCfg
-		from, to := b.DupFromLen, b.DupToLen
-		if len(k) != from && len(k) >= to {
-			return fmt.Errorf("label: %s, append dupsort bucket: %s, can have keys of len==%d and len<%d. key: %x,%d", c.tx.db.opts.label, c.bucketName, from, to, k, len(k))
-		}
-
-		if len(k) == from {
-			v = append(k[to:], v...)
-			k = k[:to]
-		}
-	}
-
-	if c.bucketCfg.Flags&mdbx.DupSort != 0 {
-		if err := c.c.Put(k, v, mdbx.AppendDup); err != nil {
-			return fmt.Errorf("label: %s, bucket: %s, %w", c.tx.db.opts.label, c.bucketName, err)
-		}
-		return nil
-	}
-
 	if err := c.c.Put(k, v, mdbx.Append); err != nil {
 		return fmt.Errorf("label: %s, bucket: %s, %w", c.tx.db.opts.label, c.bucketName, err)
 	}
