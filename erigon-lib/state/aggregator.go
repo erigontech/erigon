@@ -132,7 +132,11 @@ func NewAggregator(ctx context.Context, dirs datadir.Dirs, aggregationStep uint6
 	}
 	commitmentFileMustExist := func(fromStep, toStep uint64) bool {
 		fPath := filepath.Join(dirs.SnapDomain, fmt.Sprintf("v1-%s.%d-%d.kv", kv.CommitmentDomain, fromStep, toStep))
-		return dir.FileExist(fPath)
+		exists, err := dir.FileExist(fPath)
+		if err != nil {
+			panic(err)
+		}
+		return exists
 	}
 
 	integrityCheck := func(name kv.Domain, fromStep, toStep uint64) bool {
@@ -227,11 +231,25 @@ func NewAggregator(ctx context.Context, dirs datadir.Dirs, aggregationStep uint6
 // getStateIndicesSalt - try read salt for all indices from DB. Or fall-back to new salt creation.
 // if db is Read-Only (for example remote RPCDaemon or utilities) - we will not create new indices - and existing indices have salt in metadata.
 func getStateIndicesSalt(baseDir string) (salt *uint32, err error) {
-	if dir.FileExist(filepath.Join(baseDir, "salt.txt")) && !dir.FileExist(filepath.Join(baseDir, "salt-state.txt")) {
+	saltExists, err := dir.FileExist(filepath.Join(baseDir, "salt.txt"))
+	if err != nil {
+		return nil, err
+	}
+
+	saltStateExists, err := dir.FileExist(filepath.Join(baseDir, "salt-state.txt"))
+	if err != nil {
+		return nil, err
+	}
+
+	if saltExists && !saltStateExists {
 		_ = os.Rename(filepath.Join(baseDir, "salt.txt"), filepath.Join(baseDir, "salt-state.txt"))
 	}
 	fpath := filepath.Join(baseDir, "salt-state.txt")
-	if !dir.FileExist(fpath) {
+	fexists, err := dir.FileExist(fpath)
+	if err != nil {
+		return nil, err
+	}
+	if !fexists {
 		if salt == nil {
 			saltV := rand2.Uint32()
 			salt = &saltV

@@ -89,7 +89,12 @@ func GetIndexSalt(baseDir string) (uint32, error) {
 	}
 
 	fpath := filepath.Join(baseDir, "salt-blocks.txt")
-	if !dir.FileExist(fpath) {
+	exists, err := dir.FileExist(fpath)
+	if err != nil {
+		return 0, err
+	}
+
+	if !exists {
 		dir.MustExist(baseDir)
 
 		saltBytes := make([]byte, 4)

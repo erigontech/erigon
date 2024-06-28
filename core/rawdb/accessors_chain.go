@@ -307,17 +307,23 @@ func ReadCurrentHeaderHavingBody(db kv.Getter) *types.Header {
 	return ReadHeader(db, headHash, *headNumber)
 }
 
-func ReadHeadersByNumber(db kv.Getter, number uint64) (res []*types.Header, err error) {
+func ReadHeadersByNumber(db kv.Tx, number uint64) (res []*types.Header, err error) {
 	prefix := hexutility.EncodeTs(number)
-	if err = db.ForPrefix(kv.Headers, prefix, func(k, v []byte) error {
+	kvs, err := db.Prefix(kv.Headers, prefix)
+	if err != nil {
+		return nil, err
+	}
+	defer kvs.Close()
+	for kvs.HasNext() {
+		k, v, err := kvs.Next()
+		if err != nil {
+			return nil, err
+		}
 		header := new(types.Header)
 		if err := rlp.Decode(bytes.NewReader(v), header); err != nil {
-			return fmt.Errorf("invalid block header RLP: hash=%x, err=%w", k[8:], err)
+			return nil, fmt.Errorf("invalid block header RLP: hash=%x, err=%w", k[8:], err)
 		}
 		res = append(res, header)
-		return nil
-	}); err != nil {
-		return nil, err
 	}
 	return res, nil
 }
