@@ -322,8 +322,7 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 func FillDBFromSnapshots(logPrefix string, ctx context.Context, tx kv.RwTx, dirs datadir.Dirs, blockReader services.FullBlockReader, agg *state.Aggregator, logger log.Logger) error {
 	startTime := time.Now()
 	blocksAvailable := blockReader.FrozenBlocks()
-	ddd := 1 * time.Second
-	logEvery := time.NewTicker(ddd)
+	logEvery := time.NewTicker(logInterval)
 	defer logEvery.Stop()
 	// updating the progress of further stages (but only forward) that are contained inside of snapshots
 	for _, stage := range []stages.SyncStage{stages.Headers, stages.Bodies, stages.BlockHashes, stages.Senders} {
