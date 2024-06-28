@@ -132,11 +132,11 @@ func (s *Merge) CalculateRewards(config *chain.Config, header *types.Header, unc
 }
 
 func (s *Merge) Finalize(config *chain.Config, header *types.Header, state *state.IntraBlockState,
-	txs types.Transactions, uncles []*types.Header, receipts types.Receipts, withdrawals []*types.Withdrawal, requests types.Requests,
+	txs types.Transactions, uncles []*types.Header, receipts types.Receipts, withdrawals []*types.Withdrawal, requestsInBlock types.Requests,
 	chain consensus.ChainReader, syscall consensus.SystemCall, logger log.Logger,
 ) (types.Transactions, types.Receipts, types.Requests, error) {
 	if !misc.IsPoSHeader(header) {
-		return s.eth1Engine.Finalize(config, header, state, txs, uncles, receipts, withdrawals, requests, chain, syscall, logger)
+		return s.eth1Engine.Finalize(config, header, state, txs, uncles, receipts, withdrawals, requestsInBlock, chain, syscall, logger)
 	}
 
 	rewards, err := s.CalculateRewards(config, header, uncles, syscall)
@@ -167,23 +167,29 @@ func (s *Merge) Finalize(config *chain.Config, header *types.Header, state *stat
 		for _, rec := range receipts {
 			allLogs = append(allLogs, rec.Logs...)
 		}
-		ds, err := types.ParseDepositLogs(allLogs, config.DepositContract)
-		rs = append(rs, ds...)
+		depositReqs, err := types.ParseDepositLogs(allLogs, config.DepositContract)
 		if err != nil {
 			return nil, nil, nil, fmt.Errorf("error: could not parse requests logs: %v", err)
 		}
-
-		rs = append(rs, misc.DequeueWithdrawalRequests7002(syscall)...)
-		if requests != nil || header.RequestsRoot != nil {
+		rs = append(rs, depositReqs...)
+		withdrawalReqs := misc.DequeueWithdrawalRequests7002(syscall)
+		rs = append(rs, withdrawalReqs...)
+		consolidations := misc.DequeueConsolidationRequests7251(syscall)
+		rs = append(rs, consolidations...)
+		if requestsInBlock != nil || header.RequestsRoot != nil {
 			rh := types.DeriveSha(rs)
 			if *header.RequestsRoot != rh {
 				return nil, nil, nil, fmt.Errorf("error: invalid requests root hash in header, expected: %v, got :%v", header.RequestsRoot, rh)
 			}
-			sds := requests.Deposits()
-			if !reflect.DeepEqual(sds, ds.Deposits()) {
-				return nil, nil, nil, fmt.Errorf("error: invalid deposits in block")
+			if !reflect.DeepEqual(requestsInBlock.Deposits(), depositReqs.Deposits()) {
+				return nil, nil, nil, fmt.Errorf("error: invalid EIP-6110 Deposit Requests in block")
 			}
-			//TODO @somnathb1 add DeepEqual check for WithdrawaRequests too, because in future there could be other types of requests
+			if !reflect.DeepEqual(requestsInBlock.Withdrawals(), withdrawalReqs.Withdrawals()) {
+				return nil, nil, nil, fmt.Errorf("error: invalid EIP-7002 Withdrawal requests in block")
+			}
+			if !reflect.DeepEqual(requestsInBlock.Consolidations(), consolidations.Consolidations()) {
+				return nil, nil, nil, fmt.Errorf("error: invalid EIP-7251 Consolidation requests in block")
+			}
 		}
 	}
 
