@@ -205,9 +205,9 @@ func (a *ApiHandler) getFullState(w http.ResponseWriter, r *http.Request) (*beac
 }
 
 type finalityCheckpointsResponse struct {
-	FinalizedCheckpoint         solid.Checkpoint `json:"finalized_checkpoint"`
-	CurrentJustifiedCheckpoint  solid.Checkpoint `json:"current_justified_checkpoint"`
-	PreviousJustifiedCheckpoint solid.Checkpoint `json:"previous_justified_checkpoint"`
+	FinalizedCheckpoint         solid.Checkpoint `json:"finalized"`
+	CurrentJustifiedCheckpoint  solid.Checkpoint `json:"current_justified"`
+	PreviousJustifiedCheckpoint solid.Checkpoint `json:"previous_justified"`
 }
 
 func (a *ApiHandler) getFinalityCheckpoints(w http.ResponseWriter, r *http.Request) (*beaconhttp.BeaconResponse, error) {
