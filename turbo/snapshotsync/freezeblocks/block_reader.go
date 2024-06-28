@@ -798,7 +798,7 @@ func (r *BlockReader) bodyFromSnapshot(blockHeight uint64, sn *Segment, buf []by
 	if b.TxCount >= 2 {
 		txCount = b.TxCount - 2
 	}
-	return body, b.BaseTxId + 1, txCount, buf, nil // empty txs in the beginning and end of block
+	return body, b.BaseTxnID.First(), txCount, buf, nil // empty txs in the beginning and end of block
 }
 
 func (r *BlockReader) bodyForStorageFromSnapshot(blockHeight uint64, sn *Segment, buf []byte) (*types.BodyForStorage, []byte, error) {
@@ -985,7 +985,7 @@ func (r *BlockReader) TxnByIdxInBlock(ctx context.Context, tx kv.Getter, blockNu
 		return
 	}
 	// +1 because block has system-txn in the beginning of block
-	return r.txnByID(b.BaseTxId+1+uint64(txIdxInBlock), txnSeg, nil)
+	return r.txnByID(b.BaseTxnID.At(txIdxInBlock), txnSeg, nil)
 }
 
 // TxnLookup - find blockNumber and txnID by txnHash
@@ -1039,7 +1039,7 @@ func (r *BlockReader) IterateFrozenBodies(f func(blockNum, baseTxNum, txCount ui
 			if err := rlp.DecodeBytes(buf, &b); err != nil {
 				return err
 			}
-			if err := f(blockNum, b.BaseTxId, uint64(b.TxCount)); err != nil {
+			if err := f(blockNum, b.BaseTxnID.U64(), uint64(b.TxCount)); err != nil {
 				return err
 			}
 			blockNum++
@@ -1061,15 +1061,15 @@ func (r *BlockReader) IntegrityTxnID(failFast bool) error {
 		if err != nil {
 			return err
 		}
-		if b.BaseTxId != expectedFirstTxnID {
-			err := fmt.Errorf("[integrity] IntegrityTxnID: bn=%d, baseID=%d, cnt=%d, expectedFirstTxnID=%d", firstBlockNum, b.BaseTxId, sn.Count(), expectedFirstTxnID)
+		if b.BaseTxnID.U64() != expectedFirstTxnID {
+			err := fmt.Errorf("[integrity] IntegrityTxnID: bn=%d, baseID=%d, cnt=%d, expectedFirstTxnID=%d", firstBlockNum, b.BaseTxnID, sn.Count(), expectedFirstTxnID)
 			if failFast {
 				return err
 			} else {
 				log.Error(err.Error())
 			}
 		}
-		expectedFirstTxnID = b.BaseTxId + uint64(sn.Count())
+		expectedFirstTxnID = b.BaseTxnID.LastSystemTx(uint32(sn.Count())) + 1 // +1 to move to first baseTxId of next block aka its first system tx
 	}
 	return nil
 }

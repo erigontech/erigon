@@ -654,7 +654,8 @@ Loop:
 			defer getHashFnMute.Unlock()
 			return f(n)
 		}
-		blockContext := core.NewEVMBlockContext(header, getHashFn, engine, nil /* author */, chainConfig)
+		blockContext := core.NewEVMBlockContext(header, getHashFn, engine, cfg.author /* author */, chainConfig)
+		// print type of engine
 		if parallel {
 			select {
 			case err := <-rwLoopErrCh:
