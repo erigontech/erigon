@@ -288,23 +288,6 @@ func (tx *tx) ForEach(bucket string, fromPrefix []byte, walker func(k, v []byte)
 	return nil
 }
 
-func (tx *tx) ForPrefix(bucket string, prefix []byte, walker func(k, v []byte) error) error {
-	it, err := tx.Prefix(bucket, prefix)
-	if err != nil {
-		return err
-	}
-	for it.HasNext() {
-		k, v, err := it.Next()
-		if err != nil {
-			return err
-		}
-		if err := walker(k, v); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
 // TODO: this must be deprecated
 func (tx *tx) ForAmount(bucket string, fromPrefix []byte, amount uint32, walker func(k, v []byte) error) error {
 	if amount == 0 {

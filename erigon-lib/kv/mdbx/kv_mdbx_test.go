@@ -393,36 +393,39 @@ func TestForAmount(t *testing.T) {
 	require.Nil(t, keys3)
 }
 
-func TestForPrefix(t *testing.T) {
+func TestPrefix(t *testing.T) {
 	_, tx, _ := BaseCase(t)
 
 	table := "Table"
-
-	var keys []string
-
-	err := tx.ForPrefix(table, []byte("key"), func(k, v []byte) error {
-		keys = append(keys, string(k))
-		return nil
-	})
+	var keys, keys1, keys2 []string
+	kvs1, err := tx.Prefix(table, []byte("key"))
 	require.Nil(t, err)
+	defer kvs1.Close()
+	for kvs1.HasNext() {
+		k1, _, err := kvs1.Next()
+		require.Nil(t, err)
+		keys = append(keys, string(k1))
+	}
 	require.Equal(t, []string{"key1", "key1", "key3", "key3"}, keys)
 
-	var keys1 []string
-
-	err = tx.ForPrefix(table, []byte("key1"), func(k, v []byte) error {
-		keys1 = append(keys1, string(k))
-		return nil
-	})
+	kvs2, err := tx.Prefix(table, []byte("key1"))
 	require.Nil(t, err)
+	defer kvs2.Close()
+	for kvs2.HasNext() {
+		k1, _, err := kvs2.Next()
+		require.Nil(t, err)
+		keys1 = append(keys1, string(k1))
+	}
 	require.Equal(t, []string{"key1", "key1"}, keys1)
 
-	var keys2 []string
-
-	err = tx.ForPrefix(table, []byte("e"), func(k, v []byte) error {
-		keys2 = append(keys2, string(k))
-		return nil
-	})
+	kvs3, err := tx.Prefix(table, []byte("e"))
 	require.Nil(t, err)
+	defer kvs3.Close()
+	for kvs3.HasNext() {
+		k1, _, err := kvs3.Next()
+		require.Nil(t, err)
+		keys2 = append(keys2, string(k1))
+	}
 	require.Nil(t, keys2)
 }
 

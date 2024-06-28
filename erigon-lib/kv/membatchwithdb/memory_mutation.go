@@ -425,27 +425,6 @@ func (s *rangeDupSortIter) Next() (k, v []byte, err error) {
 	return
 }
 
-func (m *MemoryMutation) ForPrefix(bucket string, prefix []byte, walker func(k, v []byte) error) error {
-	c, err := m.Cursor(bucket)
-	if err != nil {
-		return err
-	}
-	defer c.Close()
-
-	for k, v, err := c.Seek(prefix); k != nil; k, v, err = c.Next() {
-		if err != nil {
-			return err
-		}
-		if !bytes.HasPrefix(k, prefix) {
-			break
-		}
-		if err := walker(k, v); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
 func (m *MemoryMutation) Delete(table string, k []byte) error {
 	t, ok := m.deletedEntries[table]
 	if !ok {
