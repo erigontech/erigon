@@ -265,8 +265,8 @@ func (dt *DomainRoTx) commitmentValTransformDomain(rng MergeRange, accounts, sto
 		if !dt.d.replaceKeysInValues || len(valBuf) == 0 || ((keyEndTxNum-keyFromTxNum)/dt.d.aggregationStep)%2 != 0 {
 			return valBuf, nil
 		}
-		sig := storageFileMap[fmt.Sprintf("%d-%d", keyFromTxNum, keyEndTxNum)]
-		aig := accountFileMap[fmt.Sprintf("%d-%d", keyFromTxNum, keyEndTxNum)]
+		storageG := storageFileMap[fmt.Sprintf("%d-%d", keyFromTxNum, keyEndTxNum)]
+		accountG := accountFileMap[fmt.Sprintf("%d-%d", keyFromTxNum, keyEndTxNum)]
 
 		replacer := func(key []byte, isStorage bool) ([]byte, error) {
 			var found bool
@@ -277,7 +277,7 @@ func (dt *DomainRoTx) commitmentValTransformDomain(rng MergeRange, accounts, sto
 					auxBuf = append(auxBuf[:0], key...)
 				} else {
 					// Optimised key referencing a state file record (file number and offset within the file)
-					auxBuf, found = storage.lookupByShortenedKey(key, sig)
+					auxBuf, found = storage.lookupByShortenedKey(key, storageG)
 					if !found {
 						dt.d.logger.Crit("valTransform: lost storage full key",
 							"shortened", fmt.Sprintf("%x", key),
@@ -307,7 +307,7 @@ func (dt *DomainRoTx) commitmentValTransformDomain(rng MergeRange, accounts, sto
 				// Non-optimised key originating from a database record
 				auxBuf = append(auxBuf[:0], key...)
 			} else {
-				auxBuf, found = accounts.lookupByShortenedKey(key, aig)
+				auxBuf, found = accounts.lookupByShortenedKey(key, accountG)
 				if !found {
 					dt.d.logger.Crit("valTransform: lost account full key",
 						"shortened", fmt.Sprintf("%x", key),
