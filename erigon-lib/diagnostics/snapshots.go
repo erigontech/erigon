@@ -14,6 +14,7 @@ import (
 var (
 	SnapshotDownloadStatisticsKey = []byte("diagSnapshotDownloadStatistics")
 	SnapshotIndexingStatisticsKey = []byte("diagSnapshotIndexingStatistics")
+	SnapshotFillDBStatisticsKey   = []byte("diagSnapshotFillDBStatistics")
 )
 
 func (d *DiagnosticClient) setupSnapshotDiagnostics(rootCtx context.Context) {
@@ -23,6 +24,7 @@ func (d *DiagnosticClient) setupSnapshotDiagnostics(rootCtx context.Context) {
 	d.runSegmentIndexingFinishedListener(rootCtx)
 	d.runSnapshotFilesListListener(rootCtx)
 	d.runFileDownloadedListener(rootCtx)
+	d.runFillDBListener(rootCtx)
 }
 
 func (d *DiagnosticClient) runSnapshotListener(rootCtx context.Context) {
@@ -365,6 +367,68 @@ func (d *DiagnosticClient) UpdateFileDownloadedStatistics(downloadedInfo *FileDo
 	}
 }
 
+func (d *DiagnosticClient) runFillDBListener(rootCtx context.Context) {
+	go func() {
+		ctx, ch, closeChannel := Context[SnapshotFillDBStageUpdate](rootCtx, 1)
+		defer closeChannel()
+
+		StartProviders(ctx, TypeOf(SnapshotFillDBStageUpdate{}), log.Root())
+		for {
+			select {
+			case <-rootCtx.Done():
+				return
+			case info := <-ch:
+				d.SetFillDBInfo(info.Stage)
+
+				totalTimeString := time.Duration(info.TimeElapsed) * time.Second
+
+				d.mu.Lock()
+				d.updateSnapshotStageStats(SyncStageStats{
+					TimeElapsed: totalTimeString.String(),
+					TimeLeft:    "unknown",
+					Progress:    fmt.Sprintf("%d%%", (info.Stage.Current*100)/info.Stage.Total),
+				}, "Fill DB from snapshots")
+
+				err := d.db.Update(d.ctx, func(tx kv.RwTx) error {
+					err := SnapshotFillDBUpdater(d.syncStats.SnapshotFillDB)(tx)
+					if err != nil {
+						return err
+					}
+
+					err = StagesListUpdater(d.syncStages)(tx)
+					if err != nil {
+						return err
+					}
+
+					return nil
+				})
+
+				if err != nil {
+					log.Warn("[Diagnostics] Failed to update snapshot download info", "err", err)
+				}
+				d.mu.Unlock()
+			}
+		}
+	}()
+}
+
+func (d *DiagnosticClient) SetFillDBInfo(info SnapshotFillDBStage) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+
+	if d.syncStats.SnapshotFillDB.Stages == nil {
+		d.syncStats.SnapshotFillDB.Stages = []SnapshotFillDBStage{info}
+	} else {
+
+		for idx, stg := range d.syncStats.SnapshotFillDB.Stages {
+			if stg.StageName == info.StageName {
+				d.syncStats.SnapshotFillDB.Stages[idx] = info
+				break
+			}
+		}
+	}
+}
+
 func (d *DiagnosticClient) SyncStatistics() SyncStatistics {
 	return d.syncStats
 }
@@ -413,10 +477,34 @@ func ParseSnapshotIndexingInfo(data []byte) (info SnapshotIndexingStatistics) {
 	}
 }
 
+func SnapshotFillDBInfoFromTx(tx kv.Tx) ([]byte, error) {
+	bytes, err := ReadDataFromTable(tx, kv.DiagSyncStages, SnapshotFillDBStatisticsKey)
+	if err != nil {
+		return nil, err
+	}
+
+	return common.CopyBytes(bytes), nil
+}
+
+func ParseSnapshotFillDBInfo(data []byte) (info SnapshotFillDBStatistics) {
+	err := json.Unmarshal(data, &info)
+
+	if err != nil {
+		log.Warn("[Diagnostics] Failed to parse snapshot fill db info", "err", err)
+		return SnapshotFillDBStatistics{}
+	} else {
+		return info
+	}
+}
+
 func SnapshotDownloadUpdater(info SnapshotDownloadStatistics) func(tx kv.RwTx) error {
 	return PutDataToTable(kv.DiagSyncStages, SnapshotDownloadStatisticsKey, info)
 }
 
 func SnapshotIndexingUpdater(info SnapshotIndexingStatistics) func(tx kv.RwTx) error {
 	return PutDataToTable(kv.DiagSyncStages, SnapshotIndexingStatisticsKey, info)
+}
+
+func SnapshotFillDBUpdater(info SnapshotFillDBStatistics) func(tx kv.RwTx) error {
+	return PutDataToTable(kv.DiagSyncStages, SnapshotFillDBStatisticsKey, info)
 }
