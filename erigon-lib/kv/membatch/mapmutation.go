@@ -273,11 +273,6 @@ func (m *Mapmutation) ForEach(bucket string, fromPrefix []byte, walker func(k, v
 	return m.db.ForEach(bucket, fromPrefix, walker)
 }
 
-func (m *Mapmutation) ForPrefix(bucket string, prefix []byte, walker func(k, v []byte) error) error {
-	m.panicOnEmptyDB()
-	return m.db.ForPrefix(bucket, prefix, walker)
-}
-
 func (m *Mapmutation) ForAmount(bucket string, prefix []byte, amount uint32, walker func(k, v []byte) error) error {
 	m.panicOnEmptyDB()
 	return m.db.ForAmount(bucket, prefix, amount, walker)

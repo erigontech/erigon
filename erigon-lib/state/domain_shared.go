@@ -64,8 +64,6 @@ type dataWithPrevStep struct {
 }
 
 type SharedDomains struct {
-	noFlush int
-
 	aggTx  *AggregatorRoTx
 	sdCtx  *SharedDomainsCommitmentContext
 	roTx   kv.Tx
@@ -397,7 +395,7 @@ func (sd *SharedDomains) replaceShortenedKeysInBranch(prefix []byte, branch comm
 
 	if !sd.aggTx.a.commitmentValuesTransform ||
 		len(branch) == 0 ||
-		sd.aggTx.minimaxTxNumInDomainFiles(false) == 0 ||
+		sd.aggTx.minimaxTxNumInDomainFiles() == 0 ||
 		bytes.Equal(prefix, keyCommitmentState) || ((fEndTxNum-fStartTxNum)/sd.aggTx.a.StepSize())%2 != 0 {
 
 		return branch, nil // do not transform, return as is
@@ -816,10 +814,6 @@ func (sd *SharedDomains) Close() {
 }
 
 func (sd *SharedDomains) Flush(ctx context.Context, tx kv.RwTx) error {
-	if sd.noFlush > 0 {
-		sd.noFlush--
-	}
-
 	for key, changeset := range sd.pastChangesAccumulator {
 		blockNum := binary.BigEndian.Uint64([]byte(key[:8]))
 		blockHash := common.BytesToHash([]byte(key[8:]))
@@ -829,46 +823,44 @@ func (sd *SharedDomains) Flush(ctx context.Context, tx kv.RwTx) error {
 	}
 	sd.pastChangesAccumulator = make(map[string]*StateChangeSet)
 
-	if sd.noFlush == 0 {
-		defer mxFlushTook.ObserveDuration(time.Now())
-		fh, err := sd.ComputeCommitment(ctx, true, sd.BlockNum(), "flush-commitment")
+	defer mxFlushTook.ObserveDuration(time.Now())
+	fh, err := sd.ComputeCommitment(ctx, true, sd.BlockNum(), "flush-commitment")
+	if err != nil {
+		return err
+	}
+	if sd.trace {
+		_, f, l, _ := runtime.Caller(1)
+		fmt.Printf("[SD aggTx=%d] FLUSHING at tx %d [%x], caller %s:%d\n", sd.aggTx.id, sd.TxNum(), fh, filepath.Base(f), l)
+	}
+	for _, d := range sd.domainWriters {
+		if d != nil {
+			if err := d.Flush(ctx, tx); err != nil {
+				return err
+			}
+		}
+	}
+	for _, iiWriter := range sd.iiWriters {
+		if err := iiWriter.Flush(ctx, tx); err != nil {
+			return err
+		}
+	}
+	if dbg.PruneOnFlushTimeout != 0 {
+		_, err = sd.aggTx.PruneSmallBatches(ctx, dbg.PruneOnFlushTimeout, tx)
 		if err != nil {
 			return err
 		}
-		if sd.trace {
-			_, f, l, _ := runtime.Caller(1)
-			fmt.Printf("[SD aggTx=%d] FLUSHING at tx %d [%x], caller %s:%d\n", sd.aggTx.id, sd.TxNum(), fh, filepath.Base(f), l)
-		}
-		for _, d := range sd.domainWriters {
-			if d != nil {
-				if err := d.Flush(ctx, tx); err != nil {
-					return err
-				}
-			}
-		}
-		for _, iiWriter := range sd.iiWriters {
-			if err := iiWriter.Flush(ctx, tx); err != nil {
-				return err
-			}
-		}
-		if dbg.PruneOnFlushTimeout != 0 {
-			_, err = sd.aggTx.PruneSmallBatches(ctx, dbg.PruneOnFlushTimeout, tx)
-			if err != nil {
-				return err
-			}
-		}
+	}
 
-		for _, d := range sd.domainWriters {
-			if d != nil {
-				d.close()
-			}
+	for _, d := range sd.domainWriters {
+		if d != nil {
+			d.close()
 		}
-		for _, iiWriter := range sd.iiWriters {
-			iiWriter.close()
-		}
-		for _, a := range sd.appendableWriter {
-			a.close()
-		}
+	}
+	for _, iiWriter := range sd.iiWriters {
+		iiWriter.close()
+	}
+	for _, a := range sd.appendableWriter {
+		a.close()
 	}
 	return nil
 }
