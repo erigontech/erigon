@@ -76,11 +76,12 @@ func TestCanonicalIter(t *testing.T) {
 	require.NoError(rawdb.WriteCanonicalHash(tx, libcommon.Hash{12}, 2))
 
 	txNumsOfBlock := func(bn uint64) (res []uint64) {
-		txns := uint64(len(b.Transactions)) + 2
-		s := uint64(2) // genesis block ends at
+		txns := uint64(types.TxCountToTxAmount(len(b.Transactions)))
+		s := uint64(1) // genesis block ends at
 		if bn > 0 {
 			s += bn * txns
 		}
+		s++ // system
 		for i := uint64(0); i < txns; i++ {
 			res = append(res, s+i)
 		}

@@ -766,7 +766,7 @@ func TestAggregatorV3_RestartOnFiles(t *testing.T) {
 	err = domains.Flush(context.Background(), tx)
 	require.NoError(t, err)
 
-	latestStepInDB := agg.d[kv.AccountsDomain].LastStepInDB(tx)
+	latestStepInDB := agg.d[kv.AccountsDomain].maxStepInDB(tx)
 	require.Equal(t, 5, int(latestStepInDB))
 
 	err = tx.Commit()
