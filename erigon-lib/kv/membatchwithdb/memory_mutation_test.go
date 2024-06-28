@@ -512,3 +512,51 @@ func TestSeekBothRange(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, "value3.3", string(v))
 }
+
+func initializeDbHeaders(rwTx kv.RwTx) {
+	rwTx.Put(kv.Headers, []byte("A"), []byte("0"))
+	rwTx.Put(kv.Headers, []byte("A..........................._______________________________A"), []byte("1"))
+	rwTx.Put(kv.Headers, []byte("A..........................._______________________________C"), []byte("2"))
+	rwTx.Put(kv.Headers, []byte("B"), []byte("8"))
+	rwTx.Put(kv.Headers, []byte("C"), []byte("9"))
+	rwTx.Put(kv.Headers, []byte("D..........................._______________________________A"), []byte("3"))
+	rwTx.Put(kv.Headers, []byte("D..........................._______________________________C"), []byte("4"))
+}
+
+func TestGetOne(t *testing.T) {
+	_, rwTx := memdb.NewTestTx(t)
+
+	initializeDbHeaders(rwTx)
+
+	require.NoError(t, rwTx.Put(kv.Headers, []byte("A..........................."), []byte("?")))
+
+	require.NoError(t, rwTx.Delete(kv.Headers, []byte("A..........................._______________________________A")))
+	require.NoError(t, rwTx.Put(kv.Headers, []byte("B"), []byte("7")))
+	require.NoError(t, rwTx.Delete(kv.Headers, []byte("C")))
+	require.NoError(t, rwTx.Put(kv.Headers, []byte("D..........................._______________________________C"), []byte("6")))
+	require.NoError(t, rwTx.Put(kv.Headers, []byte("D..........................._______________________________E"), []byte("5")))
+
+	v, err := rwTx.GetOne(kv.Headers, []byte("A"))
+	require.NoError(t, err)
+	assert.Equal(t, []byte("0"), v)
+
+	v, err = rwTx.GetOne(kv.Headers, []byte("A..........................._______________________________C"))
+	require.NoError(t, err)
+	assert.Equal(t, []byte("2"), v)
+
+	v, err = rwTx.GetOne(kv.Headers, []byte("B"))
+	require.NoError(t, err)
+	assert.Equal(t, []byte("7"), v)
+
+	v, err = rwTx.GetOne(kv.Headers, []byte("D..........................._______________________________A"))
+	require.NoError(t, err)
+	assert.Equal(t, []byte("3"), v)
+
+	v, err = rwTx.GetOne(kv.Headers, []byte("D..........................._______________________________C"))
+	require.NoError(t, err)
+	assert.Equal(t, []byte("6"), v)
+
+	v, err = rwTx.GetOne(kv.Headers, []byte("D..........................._______________________________E"))
+	require.NoError(t, err)
+	assert.Equal(t, []byte("5"), v)
+}
