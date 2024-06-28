@@ -28,6 +28,10 @@ type Mapmutation struct {
 	logger log.Logger
 }
 
+func (m *Mapmutation) Count(bucket string) (uint64, error) {
+	panic("not implemented")
+}
+
 func (m *Mapmutation) BucketSize(table string) (uint64, error) {
 	//TODO implement me
 	panic("implement me")

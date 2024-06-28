@@ -426,6 +426,7 @@ type Tx interface {
 	// Pointer to the underlying C transaction handle (e.g. *C.MDBX_txn)
 	CHandle() unsafe.Pointer
 	BucketSize(table string) (uint64, error)
+	Count(bucket string) (uint64, error)
 }
 
 // RwTx
@@ -481,8 +482,6 @@ type Cursor interface {
 	Prev() ([]byte, []byte, error)                // Prev - position at previous key
 	Last() ([]byte, []byte, error)                // Last - position at last key and last possible value
 	Current() ([]byte, []byte, error)             // Current - return key/data at current cursor position
-
-	Count() (uint64, error) // Count - fast way to calculate amount of keys in bucket. It counts all keys even if Prefix was set.
 
 	Close()
 }

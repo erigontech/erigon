@@ -98,7 +98,7 @@ func backupTable(ctx context.Context, src kv.RoDB, srcTx kv.Tx, dst kv.RwDB, tab
 	if err != nil {
 		return err
 	}
-	total, _ = srcC.Count()
+	total, _ = srcTx.Count(table)
 
 	if err := dst.Update(ctx, func(tx kv.RwTx) error {
 		return tx.ClearBucket(table)
@@ -168,8 +168,7 @@ func WarmupTable(ctx context.Context, db kv.RoDB, bucket string, lvl log.Lvl, re
 	var ThreadsLimit = readAheadThreads
 	var total uint64
 	db.View(ctx, func(tx kv.Tx) error {
-		c, _ := tx.Cursor(bucket)
-		total, _ = c.Count()
+		total, _ = tx.Count(bucket)
 		return nil
 	})
 	if total < 10_000 {

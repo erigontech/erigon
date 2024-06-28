@@ -1631,12 +1631,8 @@ func TestTxLookupUnwind(t *testing.T) {
 	}
 	var count uint64
 	if err = m.DB.View(context.Background(), func(tx kv.Tx) error {
-		c, e := tx.Cursor(kv.TxLookup)
-		if e != nil {
-			return e
-		}
-		defer c.Close()
-		if count, e = c.Count(); e != nil {
+		var e error
+		if count, e = tx.Count(kv.TxLookup); e != nil {
 			return e
 		}
 		return nil

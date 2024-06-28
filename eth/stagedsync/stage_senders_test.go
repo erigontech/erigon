@@ -157,8 +157,7 @@ func TestSenders(t *testing.T) {
 	}
 
 	{
-		c, _ := tx.Cursor(kv.EthTx)
-		cnt, _ := c.Count()
+		cnt, _ := tx.Count(kv.EthTx)
 		assert.Equal(t, 5, int(cnt))
 
 		txs, err := rawdb.CanonicalTransactions(tx, 1, 2)
