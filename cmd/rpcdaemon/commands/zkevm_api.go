@@ -378,10 +378,6 @@ func (api *ZkEvmAPIImpl) GetBatchByNumber(ctx context.Context, batchNumber rpc.B
 		batch.RollupExitRoot = infoTreeUpdate.RollupExitRoot
 	}
 
-	if infoTreeUpdate == nil {
-		return nil, errors.New("infoTreeUpdate is nil")
-	}
-
 	// batch l2 data - must build on the fly
 	forkId, err := hermezDb.GetForkId(bn)
 	if err != nil {
