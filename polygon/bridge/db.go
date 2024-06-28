@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"context"
 	"encoding/binary"
+	"errors"
+	"fmt"
 	"time"
 
 	"github.com/ledgerwatch/erigon-lib/kv"
@@ -28,6 +30,8 @@ type Store interface {
 	StoreEventID(ctx context.Context, eventMap map[uint64]uint64) error
 	GetEventIDRange(ctx context.Context, blockNum uint64) (uint64, uint64, error)
 	PruneEventIDs(ctx context.Context, blockNum uint64) error
+
+	DumpDB(ctx context.Context) error
 }
 
 type MdbxStore struct {
@@ -217,6 +221,9 @@ func (s *MdbxStore) StoreEventID(ctx context.Context, eventMap map[uint64]uint64
 	return tx.Commit()
 }
 
+// GetEventIDRange returns the state sync event ID range for the given block number.
+// An error is thrown if the block number is not found in the database. If the given block
+// number is the last in the database, then the second uint64 (representing end ID) is 0.
 func (s *MdbxStore) GetEventIDRange(ctx context.Context, blockNum uint64) (uint64, uint64, error) {
 	var start, end uint64
 
@@ -229,22 +236,31 @@ func (s *MdbxStore) GetEventIDRange(ctx context.Context, blockNum uint64) (uint6
 	kByte := make([]byte, 8)
 	binary.BigEndian.PutUint64(kByte, blockNum)
 
-	it, err := tx.RangeAscend(kv.BorEventNums, kByte, nil, 2)
+	cursor, err := tx.Cursor(kv.BorEventNums)
 	if err != nil {
 		return start, end, err
 	}
 
-	for it.HasNext() {
-		_, v, err := it.Next()
-		if err != nil {
-			return start, end, err
-		}
+	_, v, err := cursor.SeekExact(kByte)
+	if err != nil {
+		return start, end, err
+	}
+	if v == nil { // we don't have a map
+		return start, end, errors.New(fmt.Sprintf("map not available for block %d", blockNum))
+	}
 
-		if start == 0 {
-			err = binary.Read(bytes.NewReader(v), binary.BigEndian, &start)
-		} else {
-			err = binary.Read(bytes.NewReader(v), binary.BigEndian, &end)
-		}
+	err = binary.Read(bytes.NewReader(v), binary.BigEndian, &start)
+	if err != nil {
+		return start, end, err
+	}
+
+	_, v, err = cursor.Next()
+	if err != nil {
+		return start, end, err
+	}
+
+	if v != nil { // may be empty if blockNum is the last entry
+		err = binary.Read(bytes.NewReader(v), binary.BigEndian, &end)
 		if err != nil {
 			return start, end, err
 		}
@@ -278,6 +294,42 @@ func (s *MdbxStore) PruneEventIDs(ctx context.Context, blockNum uint64) error {
 		if err != nil {
 			return err
 		}
+	}
+
+	return nil
+}
+
+func (s *MdbxStore) DumpDB(ctx context.Context) error {
+	tx, err := s.db.BeginRo(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	it, err := tx.Range(kv.BorEventNums, nil, nil)
+	if err != nil {
+		return err
+	}
+
+	var kNum, vNum uint64
+
+	for it.HasNext() {
+		k, v, err := it.Next()
+		if err != nil {
+			return err
+		}
+
+		err = binary.Read(bytes.NewReader(k), binary.BigEndian, &kNum)
+		if err != nil {
+			return err
+		}
+
+		err = binary.Read(bytes.NewReader(v), binary.BigEndian, &vNum)
+		if err != nil {
+			return err
+		}
+
+		fmt.Println("k:", kNum, "v:", vNum)
 	}
 
 	return nil

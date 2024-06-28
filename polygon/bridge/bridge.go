@@ -39,7 +39,7 @@ func NewBridge(store Store, logger log.Logger, borConfig *borcfg.BorConfig, fetc
 		borConfig:                borConfig,
 		fetchSyncEvents:          fetchSyncEvents,
 		lastProcessedBlockNumber: 0,
-		lastProcessedEventID:     0,
+		lastProcessedEventID:     1,
 		stateClientAddress:       libcommon.HexToAddress(borConfig.StateReceiverContract),
 		stateReceiverABI:         stateReceiverABI,
 	}
@@ -131,6 +131,10 @@ func (b *Bridge) ProcessNewBlocks(ctx context.Context, blocks []*types.Block) er
 	return nil
 }
 
+func (b *Bridge) DumpDB(ctx context.Context) error {
+	return b.store.DumpDB(ctx)
+}
+
 // Synchronize blocks till bridge has map at tip
 func (b *Bridge) Synchronize(ctx context.Context, tip *types.Header) error {
 	for {
@@ -157,10 +161,14 @@ func (b *Bridge) GetEvents(ctx context.Context, blockNum uint64) ([]*types.Messa
 		return nil, err
 	}
 
-	eventsRaw := make([]*types.Message, end-start+1)
+	if end == 0 { // exception for tip processing
+		end = b.lastProcessedEventID
+	}
+
+	eventsRaw := make([]*types.Message, 0, end-start+1)
 
 	// get events from DB
-	events, err := b.store.GetEvents(ctx, start, end)
+	events, err := b.store.GetEvents(ctx, start, end+1)
 	if err != nil {
 		return nil, err
 	}
