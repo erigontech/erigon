@@ -166,7 +166,7 @@ func writeDbTables(w http.ResponseWriter, r *http.Request, dataDir string, dbnam
 					return e
 				}
 				defer c.Close()
-				count, e = c.Count()
+				count, e = tx.Count(bucket)
 				if e != nil {
 					return e
 				}
@@ -206,7 +206,7 @@ func writeDbRead(w http.ResponseWriter, r *http.Request, dataDir string, dbname 
 		}
 		defer c.Close()
 
-		count, e = c.Count()
+		count, e = tx.Count(table)
 
 		if e != nil {
 			return e

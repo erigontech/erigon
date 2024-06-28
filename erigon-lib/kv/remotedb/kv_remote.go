@@ -269,6 +269,10 @@ func (tx *tx) statelessCursor(bucket string) (kv.Cursor, error) {
 	return c, nil
 }
 
+func (tx *tx) Count(bucket string) (uint64, error) {
+	panic("not implemented")
+}
+
 func (tx *tx) BucketSize(name string) (uint64, error) { panic("not implemented") }
 
 func (tx *tx) ForEach(bucket string, fromPrefix []byte, walker func(k, v []byte) error) error {

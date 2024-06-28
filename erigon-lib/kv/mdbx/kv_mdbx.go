@@ -857,8 +857,8 @@ func (db *MdbxKV) AllDBI() map[string]kv.DBI {
 	return res
 }
 
-func (tx *MdbxTx) Count(dbi mdbx.DBI) (uint64, error) {
-	st, err := tx.tx.StatDBI(dbi)
+func (tx *MdbxTx) Count(bucket string) (uint64, error) {
+	st, err := tx.tx.StatDBI(mdbx.DBI(tx.db.buckets[bucket].DBI))
 	if err != nil {
 		return 0, err
 	}
@@ -1400,10 +1400,6 @@ func (c *MdbxCursor) firstDup() ([]byte, error) {
 func (c *MdbxCursor) lastDup() ([]byte, error) {
 	_, v, err := c.c.Get(nil, nil, mdbx.LastDup)
 	return v, err
-}
-
-func (c *MdbxCursor) Count() (uint64, error) {
-	return c.tx.Count(mdbx.DBI(c.tx.db.buckets[c.bucketName].DBI))
 }
 
 func (c *MdbxCursor) First() ([]byte, []byte, error) {
