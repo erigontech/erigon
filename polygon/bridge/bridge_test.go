@@ -12,6 +12,7 @@ import (
 
 	"github.com/ledgerwatch/erigon-lib/common/hexutil"
 	"github.com/ledgerwatch/erigon-lib/log/v3"
+	"github.com/ledgerwatch/erigon/accounts/abi"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/polygon/bor"
 	"github.com/ledgerwatch/erigon/polygon/bor/borcfg"
@@ -22,11 +23,13 @@ import (
 	"github.com/ledgerwatch/erigon/turbo/testlog"
 )
 
-func TestBridge(t *testing.T) {
+var (
+	event1, event2, event3 *heimdall.EventRecordWithTime
+)
+
+func setup(t *testing.T, abi abi.ABI) (*heimdall.MockHeimdallClient, *bridge.Bridge) {
 	ctrl := gomock.NewController(t)
-	ctx := context.Background()
 	logger := testlog.Logger(t, log.LvlDebug)
-	abi := bor.GenesisContractStateReceiverABI()
 	borConfig := borcfg.BorConfig{
 		Sprint:                map[string]uint64{"0": 2},
 		StateReceiverContract: "0x0000000000000000000000000000000000001001",
@@ -35,8 +38,13 @@ func TestBridge(t *testing.T) {
 	heimdallClient := heimdall.NewMockHeimdallClient(ctrl)
 	polygonBridgeDB := polygoncommon.NewDatabase(t.TempDir(), logger)
 	store := bridge.NewStore(polygonBridgeDB)
+	b := bridge.NewBridge(store, logger, &borConfig, heimdallClient.FetchStateSyncEvents, abi)
 
-	event1 := &heimdall.EventRecordWithTime{
+	return heimdallClient, b
+}
+
+func setupMockHeimdall(h *heimdall.MockHeimdallClient) {
+	event1 = &heimdall.EventRecordWithTime{
 		EventRecord: heimdall.EventRecord{
 			ID:      1,
 			ChainID: "80001",
@@ -44,7 +52,7 @@ func TestBridge(t *testing.T) {
 		},
 		Time: time.Unix(100, 0),
 	}
-	event2 := &heimdall.EventRecordWithTime{
+	event2 = &heimdall.EventRecordWithTime{
 		EventRecord: heimdall.EventRecord{
 			ID:      2,
 			ChainID: "80001",
@@ -52,42 +60,22 @@ func TestBridge(t *testing.T) {
 		},
 		Time: time.Unix(200, 0),
 	}
-
-	events := []*heimdall.EventRecordWithTime{
-		event1, event2,
-		{
-			EventRecord: heimdall.EventRecord{
-				ID:      3,
-				ChainID: "80001",
-				Data:    hexutil.MustDecode("0x03"),
-			},
-			Time: time.Unix(300, 0),
+	event3 = &heimdall.EventRecordWithTime{
+		EventRecord: heimdall.EventRecord{
+			ID:      3,
+			ChainID: "80001",
+			Data:    hexutil.MustDecode("0x03"),
 		},
+		Time: time.Unix(300, 0),
 	}
 
-	heimdallClient.EXPECT().FetchStateSyncEvents(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).Return(events, nil).Times(1)
-	heimdallClient.EXPECT().FetchStateSyncEvents(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).Return([]*heimdall.EventRecordWithTime{}, nil).AnyTimes()
+	events := []*heimdall.EventRecordWithTime{event1, event2, event3}
 
-	b := bridge.NewBridge(store, logger, &borConfig, heimdallClient.FetchStateSyncEvents, abi)
+	h.EXPECT().FetchStateSyncEvents(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).Return(events, nil).Times(1)
+	h.EXPECT().FetchStateSyncEvents(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).Return([]*heimdall.EventRecordWithTime{}, nil).AnyTimes()
+}
 
-	var wg sync.WaitGroup
-	wg.Add(1)
-
-	go func(bridge bridge.Service) {
-		defer wg.Done()
-
-		err := bridge.Run(ctx)
-		if err != nil {
-			t.Error(err)
-			return
-		}
-	}(b)
-
-	err := b.Synchronize(ctx, &types.Header{Number: big.NewInt(100)}) // hack to wait for b.ready
-	if err != nil {
-		t.Fatal(err)
-	}
-
+func getBlocks(t *testing.T) []*types.Block {
 	// Feed in new blocks
 	rawBlocks := []*types.RawBlock{
 		{
@@ -131,6 +119,36 @@ func TestBridge(t *testing.T) {
 		blocks[i] = b
 	}
 
+	return blocks
+}
+
+func TestBridge(t *testing.T) {
+	ctx := context.Background()
+	stateReceiverABI := bor.GenesisContractStateReceiverABI()
+	heimdallClient, b := setup(t, stateReceiverABI)
+
+	setupMockHeimdall(heimdallClient)
+
+	var wg sync.WaitGroup
+	wg.Add(1)
+
+	go func(bridge bridge.Service) {
+		defer wg.Done()
+
+		err := bridge.Run(ctx)
+		if err != nil {
+			t.Error(err)
+			return
+		}
+	}(b)
+
+	err := b.Synchronize(ctx, &types.Header{Number: big.NewInt(100)}) // hack to wait for b.ready
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	blocks := getBlocks(t)
+
 	err = b.ProcessNewBlocks(ctx, blocks)
 	if err != nil {
 		t.Fatal(err)
@@ -141,12 +159,12 @@ func TestBridge(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	event1Data, err := event1.Pack(abi)
+	event1Data, err := event1.Pack(stateReceiverABI)
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	event2Data, err := event2.Pack(abi)
+	event2Data, err := event2.Pack(stateReceiverABI)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -157,6 +175,13 @@ func TestBridge(t *testing.T) {
 
 	// get non-sprint block
 	res, err = b.GetEvents(ctx, 2)
+	require.Error(t, err)
+
+	res, err = b.GetEvents(ctx, 4)
+	require.Error(t, err)
+
+	// check block 0
+	res, err = b.GetEvents(ctx, 0)
 	require.Error(t, err)
 
 	wg.Done()
