@@ -47,7 +47,6 @@ import (
 	"github.com/ledgerwatch/erigon-lib/common/dir"
 	"github.com/ledgerwatch/erigon-lib/etl"
 	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon-lib/kv/backup"
 	"github.com/ledgerwatch/erigon-lib/kv/bitmapdb"
 	"github.com/ledgerwatch/erigon-lib/kv/iter"
 	"github.com/ledgerwatch/erigon-lib/kv/order"
@@ -467,16 +466,17 @@ func (iit *InvertedIndexRoTx) Close() {
 	files := iit.files
 	iit.files = nil
 	for i := 0; i < len(files); i++ {
-		if files[i].src.frozen {
+		src := files[i].src
+		if src == nil || src.frozen {
 			continue
 		}
-		refCnt := files[i].src.refcount.Add(-1)
+		refCnt := src.refcount.Add(-1)
 		//GC: last reader responsible to remove useles files: close it and delete
-		if refCnt == 0 && files[i].src.canDelete.Load() {
-			if iit.ii.filenameBase == traceFileLife {
-				iit.ii.logger.Warn(fmt.Sprintf("[agg] real remove at ctx close: %s", files[i].src.decompressor.FileName()))
+		if refCnt == 0 && src.canDelete.Load() {
+			if traceFileLife != "" && iit.ii.filenameBase == traceFileLife {
+				iit.ii.logger.Warn("[agg.dbg] real remove at InvertedIndexRoTx.Close", "file", src.decompressor.FileName())
 			}
-			files[i].src.closeFilesAndRemove()
+			src.closeFilesAndRemove()
 		}
 	}
 
@@ -497,7 +497,7 @@ func (mr *MergeRange) String(prefix string, aggStep uint64) string {
 
 type InvertedIndexRoTx struct {
 	ii      *InvertedIndex
-	files   []ctxItem // have no garbage (overlaps, etc...)
+	files   visibleFiles
 	getters []ArchiveGetter
 	readers []*recsplit.IndexReader
 
@@ -569,11 +569,6 @@ func (iit *InvertedIndexRoTx) seekInFiles(key []byte, txNum uint64) (found bool,
 	return false, 0
 }
 
-// it is assumed files are always sorted
-func (iit *InvertedIndexRoTx) lastTxNumInFiles() uint64 {
-	return iit.files[len(iit.files)-1].endTxNum
-}
-
 // IdxRange - return range of txNums for given `key`
 // is to be used in public API, therefore it relies on read-only transaction
 // so that iteration can be done even when the inverted index is being updated.
@@ -595,12 +590,12 @@ func (iit *InvertedIndexRoTx) IdxRange(key []byte, startTxNum, endTxNum int, asc
 func (iit *InvertedIndexRoTx) recentIterateRange(key []byte, startTxNum, endTxNum int, asc order.By, limit int, roTx kv.Tx) (iter.U64, error) {
 	//optimization: return empty pre-allocated iterator if range is frozen
 	if asc {
-		isFrozenRange := len(iit.files) > 0 && endTxNum >= 0 && iit.lastTxNumInFiles() >= uint64(endTxNum)
+		isFrozenRange := len(iit.files) > 0 && endTxNum >= 0 && iit.files.EndTxNum() >= uint64(endTxNum)
 		if isFrozenRange {
 			return iter.EmptyU64, nil
 		}
 	} else {
-		isFrozenRange := len(iit.files) > 0 && startTxNum >= 0 && iit.lastTxNumInFiles() >= uint64(startTxNum)
+		isFrozenRange := len(iit.files) > 0 && startTxNum >= 0 && iit.files.EndTxNum() >= uint64(startTxNum)
 		if isFrozenRange {
 			return iter.EmptyU64, nil
 		}
@@ -689,8 +684,8 @@ func (iit *InvertedIndexRoTx) iterateRangeFrozen(key []byte, startTxNum, endTxNu
 	return it, nil
 }
 
-func (iit *InvertedIndexRoTx) smallestTxNum(tx kv.Tx) uint64 {
-	fst, _ := kv.FirstKey(tx, iit.ii.indexKeysTable)
+func (ii *InvertedIndex) minTxNumInDB(tx kv.Tx) uint64 {
+	fst, _ := kv.FirstKey(tx, ii.indexKeysTable)
 	if len(fst) > 0 {
 		fstInDb := binary.BigEndian.Uint64(fst)
 		return min(fstInDb, math.MaxUint64)
@@ -698,8 +693,8 @@ func (iit *InvertedIndexRoTx) smallestTxNum(tx kv.Tx) uint64 {
 	return math.MaxUint64
 }
 
-func (iit *InvertedIndexRoTx) highestTxNum(tx kv.Tx) uint64 {
-	lst, _ := kv.LastKey(tx, iit.ii.indexKeysTable)
+func (ii *InvertedIndex) maxTxNumInDB(tx kv.Tx) uint64 {
+	lst, _ := kv.LastKey(tx, ii.indexKeysTable)
 	if len(lst) > 0 {
 		lstInDb := binary.BigEndian.Uint64(lst)
 		return max(lstInDb, 0)
@@ -708,7 +703,13 @@ func (iit *InvertedIndexRoTx) highestTxNum(tx kv.Tx) uint64 {
 }
 
 func (iit *InvertedIndexRoTx) CanPrune(tx kv.Tx) bool {
-	return iit.smallestTxNum(tx) < iit.maxTxNumInFiles(false)
+	return iit.ii.minTxNumInDB(tx) < iit.files.EndTxNum()
+}
+
+func (iit *InvertedIndexRoTx) canBuild(dbtx kv.Tx) bool { //nolint
+	maxStepInFiles := iit.files.EndTxNum() / iit.ii.aggregationStep
+	maxStepInDB := iit.ii.maxTxNumInDB(dbtx) / iit.ii.aggregationStep
+	return maxStepInFiles < maxStepInDB
 }
 
 type InvertedIndexPruneStat struct {
@@ -744,25 +745,8 @@ func (is *InvertedIndexPruneStat) Accumulate(other *InvertedIndexPruneStat) {
 	is.PruneCountValues += other.PruneCountValues
 }
 
-func (iit *InvertedIndexRoTx) Warmup(ctx context.Context) (cleanup func()) {
-	ctx, cancel := context.WithCancel(ctx)
-	wg := &errgroup.Group{}
-	wg.Go(func() error {
-		backup.WarmupTable(ctx, iit.ii.db, iit.ii.indexTable, log.LvlDebug, 4)
-		return nil
-	})
-	wg.Go(func() error {
-		backup.WarmupTable(ctx, iit.ii.db, iit.ii.indexKeysTable, log.LvlDebug, 4)
-		return nil
-	})
-	return func() {
-		cancel()
-		_ = wg.Wait()
-	}
-}
-
-func (iit *InvertedIndexRoTx) Unwind(ctx context.Context, rwTx kv.RwTx, txFrom, txTo, limit uint64, logEvery *time.Ticker, forced, withWarmup bool, fn func(key []byte, txnum []byte) error) error {
-	_, err := iit.Prune(ctx, rwTx, txFrom, txTo, limit, logEvery, forced, withWarmup, fn)
+func (iit *InvertedIndexRoTx) Unwind(ctx context.Context, rwTx kv.RwTx, txFrom, txTo, limit uint64, logEvery *time.Ticker, forced bool, fn func(key []byte, txnum []byte) error) error {
+	_, err := iit.Prune(ctx, rwTx, txFrom, txTo, limit, logEvery, forced, fn)
 	if err != nil {
 		return err
 	}
@@ -771,7 +755,7 @@ func (iit *InvertedIndexRoTx) Unwind(ctx context.Context, rwTx kv.RwTx, txFrom, 
 
 // [txFrom; txTo)
 // forced - prune even if CanPrune returns false, so its true only when we do Unwind.
-func (iit *InvertedIndexRoTx) Prune(ctx context.Context, rwTx kv.RwTx, txFrom, txTo, limit uint64, logEvery *time.Ticker, forced, withWarmup bool, fn func(key []byte, txnum []byte) error) (stat *InvertedIndexPruneStat, err error) {
+func (iit *InvertedIndexRoTx) Prune(ctx context.Context, rwTx kv.RwTx, txFrom, txTo, limit uint64, logEvery *time.Ticker, forced bool, fn func(key []byte, txnum []byte) error) (stat *InvertedIndexPruneStat, err error) {
 	stat = &InvertedIndexPruneStat{MinTxNum: math.MaxUint64}
 	if !forced && !iit.CanPrune(rwTx) {
 		return stat, nil
@@ -780,11 +764,6 @@ func (iit *InvertedIndexRoTx) Prune(ctx context.Context, rwTx kv.RwTx, txFrom, t
 	mxPruneInProgress.Inc()
 	defer mxPruneInProgress.Dec()
 	defer func(t time.Time) { mxPruneTookIndex.ObserveDuration(t) }(time.Now())
-
-	if withWarmup {
-		cleanup := iit.Warmup(ctx)
-		defer cleanup()
-	}
 
 	if limit == 0 { // limits amount of Tx to be pruned
 		limit = math.MaxUint64

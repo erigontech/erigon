@@ -93,7 +93,7 @@ func openDB(opts kv2.MdbxOpts, applyMigrations bool, logger log.Logger) (kv.RwDB
 	}
 
 	if opts.GetLabel() == kv.ChainDB {
-		_, _, agg := allSnapshots(context.Background(), db, logger)
+		_, _, agg, _ := allSnapshots(context.Background(), db, logger)
 		tdb, err := temporal.New(db, agg)
 		if err != nil {
 			return nil, err

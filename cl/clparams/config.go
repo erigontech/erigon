@@ -36,6 +36,13 @@ type CaplinConfig struct {
 	BlobBackfilling     bool
 	BlobPruningDisabled bool
 	Archive             bool
+	// CaplinMeVRelayUrl is optional and is used to connect to the external builder service.
+	// If it's set, the node will start in builder mode
+	MevRelayUrl string
+}
+
+func (c CaplinConfig) RelayUrlExist() bool {
+	return c.MevRelayUrl != ""
 }
 
 type NetworkType int

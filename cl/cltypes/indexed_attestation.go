@@ -13,7 +13,7 @@ import (
  * IndexedAttestation are attestantions sets to prove that someone misbehaved.
  */
 type IndexedAttestation struct {
-	AttestingIndices *solid.RawUint64List  `json:"attesting_indicies"`
+	AttestingIndices *solid.RawUint64List  `json:"attesting_indices"`
 	Data             solid.AttestationData `json:"data"`
 	Signature        libcommon.Bytes96     `json:"signature"`
 }
@@ -31,7 +31,7 @@ func (i *IndexedAttestation) Static() bool {
 
 func (i *IndexedAttestation) UnmarshalJSON(buf []byte) error {
 	var tmp struct {
-		AttestingIndices *solid.RawUint64List  `json:"attesting_indicies"`
+		AttestingIndices *solid.RawUint64List  `json:"attesting_indices"`
 		Data             solid.AttestationData `json:"data"`
 		Signature        libcommon.Bytes96     `json:"signature"`
 	}

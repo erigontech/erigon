@@ -82,3 +82,13 @@ func TestPercentDiownloaded(t *testing.T) {
 	progress = diagnostics.GetShanpshotsPercentDownloaded(total+1, total, files, files)
 	require.Equal(t, progress, "100.00%")
 }
+
+func TestFillDBFromSnapshots(t *testing.T) {
+	d, err := NewTestDiagnosticClient()
+	require.NoError(t, err)
+
+	d.SetFillDBInfo(diagnostics.SnapshotFillDBStage{StageName: "Headers", Current: 1, Total: 10})
+	stats := d.SyncStatistics()
+	require.NotEmpty(t, stats.SnapshotFillDB.Stages)
+	require.Equal(t, stats.SnapshotFillDB.Stages[0], diagnostics.SnapshotFillDBStage{StageName: "Headers", Current: 1, Total: 10})
+}

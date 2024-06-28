@@ -7,10 +7,8 @@ import (
 
 	"golang.org/x/sync/errgroup"
 
-	"github.com/ledgerwatch/erigon-lib/log/v3"
-
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/ledgerwatch/erigon-lib/log/v3"
 	"github.com/ledgerwatch/erigon/polygon/polygoncommon"
 )
 
@@ -20,71 +18,53 @@ type Service interface {
 }
 
 type service struct {
-	checkpointScraper *Scraper[*Checkpoint]
-	milestoneScraper  *Scraper[*Milestone]
-	spanScraper       *Scraper[*Span]
-
-	db              *polygoncommon.Database
-	checkpointStore entityStore[*Checkpoint]
-	milestoneStore  entityStore[*Milestone]
-	spanStore       entityStore[*Span]
+	store             ServiceStore
+	checkpointScraper *scraper[*Checkpoint]
+	milestoneScraper  *scraper[*Milestone]
+	spanScraper       *scraper[*Span]
 }
 
 func makeType[T any]() *T {
 	return new(T)
 }
 
-func NewService(
-	heimdallUrl string,
-	dataDir string,
-	tmpDir string,
-	logger log.Logger,
-) Service {
-	db := polygoncommon.NewDatabase(dataDir, logger)
-
-	blockNumToIdIndexFactory := func(ctx context.Context) (*RangeIndex, error) {
-		return NewRangeIndex(ctx, tmpDir, logger)
-	}
-
-	checkpointStore := newEntityStore(db, kv.HeimdallDB, kv.BorCheckpoints, makeType[Checkpoint], blockNumToIdIndexFactory)
-	milestoneStore := newEntityStore(db, kv.HeimdallDB, kv.BorMilestones, makeType[Milestone], blockNumToIdIndexFactory)
-	spanStore := newEntityStore(db, kv.HeimdallDB, kv.BorSpans, makeType[Span], blockNumToIdIndexFactory)
-
+func AssembleService(heimdallUrl string, dataDir string, tmpDir string, logger log.Logger) Service {
+	store := NewMdbxServiceStore(logger, dataDir, tmpDir)
 	client := NewHeimdallClient(heimdallUrl, logger)
+	return NewService(client, store, logger)
+}
+
+func NewService(client HeimdallClient, store ServiceStore, logger log.Logger) Service {
 	checkpointFetcher := newCheckpointFetcher(client, logger)
 	milestoneFetcher := newMilestoneFetcher(client, logger)
 	spanFetcher := newSpanFetcher(client, logger)
 
-	checkpointScraper := NewScraper(
-		checkpointStore,
+	checkpointScraper := newScrapper(
+		store.Checkpoints(),
 		checkpointFetcher,
 		1*time.Second,
 		logger,
 	)
 
-	milestoneScraper := NewScraper(
-		milestoneStore,
+	milestoneScraper := newScrapper(
+		store.Milestones(),
 		milestoneFetcher,
 		1*time.Second,
 		logger,
 	)
 
-	spanScraper := NewScraper(
-		spanStore,
+	spanScraper := newScrapper(
+		store.Spans(),
 		spanFetcher,
 		1*time.Second,
 		logger,
 	)
 
 	return &service{
+		store:             store,
 		checkpointScraper: checkpointScraper,
 		milestoneScraper:  milestoneScraper,
 		spanScraper:       spanScraper,
-
-		db:              db,
-		checkpointStore: checkpointStore,
-		milestoneStore:  milestoneStore,
-		spanStore:       spanStore,
 	}
 }
 
@@ -138,7 +118,7 @@ func newSpanFetcher(client HeimdallClient, logger log.Logger) entityFetcher[*Spa
 
 func (s *service) FetchLatestSpan(ctx context.Context) (*Span, error) {
 	s.checkpointScraper.Synchronize(ctx)
-	return s.spanStore.GetLastEntity(ctx)
+	return s.store.Spans().GetLastEntity(ctx)
 }
 
 func (s *service) FetchLatestSpans(ctx context.Context, count uint) ([]*Span, error) {
@@ -161,7 +141,7 @@ func (s *service) FetchLatestSpans(ctx context.Context, count uint) ([]*Span, er
 			break
 		}
 
-		span, err = s.spanStore.GetEntity(ctx, prevSpanRawId-1)
+		span, err = s.store.Spans().GetEntity(ctx, prevSpanRawId-1)
 		if err != nil {
 			return nil, err
 		}
@@ -186,13 +166,13 @@ func (s *service) synchronizeScrapers(ctx context.Context) {
 
 func (s *service) FetchCheckpointsFromBlock(ctx context.Context, startBlock uint64) (Waypoints, error) {
 	s.synchronizeScrapers(ctx)
-	entities, err := s.checkpointStore.RangeFromBlockNum(ctx, startBlock)
+	entities, err := s.store.Checkpoints().RangeFromBlockNum(ctx, startBlock)
 	return libcommon.SliceMap(entities, castEntityToWaypoint[*Checkpoint]), err
 }
 
 func (s *service) FetchMilestonesFromBlock(ctx context.Context, startBlock uint64) (Waypoints, error) {
 	s.synchronizeScrapers(ctx)
-	entities, err := s.milestoneStore.RangeFromBlockNum(ctx, startBlock)
+	entities, err := s.store.Milestones().RangeFromBlockNum(ctx, startBlock)
 	return libcommon.SliceMap(entities, castEntityToWaypoint[*Milestone]), err
 }
 
@@ -217,18 +197,10 @@ func (s *service) RegisterSpanObserver(callback func(*Span)) polygoncommon.Unreg
 }
 
 func (s *service) Run(ctx context.Context) error {
-	defer s.db.Close()
-	defer s.checkpointStore.Close()
-	defer s.milestoneStore.Close()
-	defer s.spanStore.Close()
+	defer s.store.Close()
 
-	prepareStoresGroup, prepareStoresGroupCtx := errgroup.WithContext(ctx)
-	prepareStoresGroup.Go(func() error { return s.checkpointStore.Prepare(prepareStoresGroupCtx) })
-	prepareStoresGroup.Go(func() error { return s.milestoneStore.Prepare(prepareStoresGroupCtx) })
-	prepareStoresGroup.Go(func() error { return s.spanStore.Prepare(prepareStoresGroupCtx) })
-	err := prepareStoresGroup.Wait()
-	if err != nil {
-		return err
+	if err := s.store.Prepare(ctx); err != nil {
+		return nil
 	}
 
 	scrapersGroup, scrapersGroupCtx := errgroup.WithContext(ctx)

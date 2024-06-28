@@ -38,7 +38,6 @@ import (
 	"github.com/ledgerwatch/erigon-lib/common/dir"
 	"github.com/ledgerwatch/erigon-lib/etl"
 	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon-lib/kv/backup"
 	"github.com/ledgerwatch/erigon-lib/kv/bitmapdb"
 	"github.com/ledgerwatch/erigon-lib/kv/iter"
 	"github.com/ledgerwatch/erigon-lib/kv/order"
@@ -940,7 +939,7 @@ type HistoryRoTx struct {
 	h   *History
 	iit *InvertedIndexRoTx
 
-	files   []ctxItem // have no garbage (canDelete=true, overlaps, etc...)
+	files   visibleFiles // have no garbage (canDelete=true, overlaps, etc...)
 	getters []ArchiveGetter
 	readers []*recsplit.IndexReader
 
@@ -1001,7 +1000,7 @@ func (ht *HistoryRoTx) statelessIdxReader(i int) *recsplit.IndexReader {
 }
 
 func (ht *HistoryRoTx) canPruneUntil(tx kv.Tx, untilTx uint64) (can bool, txTo uint64) {
-	minIdxTx, maxIdxTx := ht.iit.smallestTxNum(tx), ht.iit.highestTxNum(tx)
+	minIdxTx, maxIdxTx := ht.iit.ii.minTxNumInDB(tx), ht.iit.ii.maxTxNumInDB(tx)
 	//defer func() {
 	//	fmt.Printf("CanPrune[%s]Until(%d) noFiles=%t txTo %d idxTx [%d-%d] keepRecentTxInDB=%d; result %t\n",
 	//		ht.h.filenameBase, untilTx, ht.h.dontProduceHistoryFiles, txTo, minIdxTx, maxIdxTx, ht.h.keepRecentTxInDB, minIdxTx < txTo)
@@ -1017,7 +1016,7 @@ func (ht *HistoryRoTx) canPruneUntil(tx kv.Tx, untilTx uint64) (can bool, txTo u
 		if !canPruneIdx {
 			return false, 0
 		}
-		txTo = min(ht.maxTxNumInFiles(false), untilTx)
+		txTo = min(ht.files.EndTxNum(), ht.iit.files.EndTxNum(), untilTx)
 	}
 
 	switch ht.h.filenameBase {
@@ -1033,25 +1032,12 @@ func (ht *HistoryRoTx) canPruneUntil(tx kv.Tx, untilTx uint64) (can bool, txTo u
 	return minIdxTx < txTo, txTo
 }
 
-func (ht *HistoryRoTx) Warmup(ctx context.Context) (cleanup func()) {
-	ctx, cancel := context.WithCancel(ctx)
-	wg := &errgroup.Group{}
-	wg.Go(func() error {
-		backup.WarmupTable(ctx, ht.h.db, ht.h.historyValsTable, log.LvlDebug, 4)
-		return nil
-	})
-	return func() {
-		cancel()
-		_ = wg.Wait()
-	}
-}
-
 // Prune [txFrom; txTo)
 // `force` flag to prune even if canPruneUntil returns false (when Unwind is needed, canPruneUntil always returns false)
 // `useProgress` flag to restore and update prune progress.
 //   - E.g. Unwind can't use progress, because it's not linear
 //     and will wrongly update progress of steps cleaning and could end up with inconsistent history.
-func (ht *HistoryRoTx) Prune(ctx context.Context, rwTx kv.RwTx, txFrom, txTo, limit uint64, forced, withWarmup bool, logEvery *time.Ticker) (*InvertedIndexPruneStat, error) {
+func (ht *HistoryRoTx) Prune(ctx context.Context, rwTx kv.RwTx, txFrom, txTo, limit uint64, forced bool, logEvery *time.Ticker) (*InvertedIndexPruneStat, error) {
 	//fmt.Printf(" pruneH[%s] %t, %d-%d\n", ht.h.filenameBase, ht.CanPruneUntil(rwTx), txFrom, txTo)
 	if !forced {
 		var can bool
@@ -1117,12 +1103,7 @@ func (ht *HistoryRoTx) Prune(ctx context.Context, rwTx kv.RwTx, txFrom, txTo, li
 		forced = true // or index.CanPrune will return false cuz no snapshots made
 	}
 
-	if withWarmup {
-		cleanup := ht.Warmup(ctx)
-		defer cleanup()
-	}
-
-	return ht.iit.Prune(ctx, rwTx, txFrom, txTo, limit, logEvery, forced, withWarmup, pruneValue)
+	return ht.iit.Prune(ctx, rwTx, txFrom, txTo, limit, logEvery, forced, pruneValue)
 }
 
 func (ht *HistoryRoTx) Close() {
@@ -1132,16 +1113,17 @@ func (ht *HistoryRoTx) Close() {
 	files := ht.files
 	ht.files = nil
 	for i := 0; i < len(files); i++ {
-		if files[i].src.frozen {
+		src := files[i].src
+		if src == nil || src.frozen {
 			continue
 		}
-		refCnt := files[i].src.refcount.Add(-1)
-		//if ht.h.filenameBase == "accounts" && item.src.canDelete.Load() {
-		//	log.Warn("[history] HistoryRoTx.Close: check file to remove", "refCnt", refCnt, "name", item.src.decompressor.FileName())
-		//}
+		refCnt := src.refcount.Add(-1)
 		//GC: last reader responsible to remove useles files: close it and delete
-		if refCnt == 0 && files[i].src.canDelete.Load() {
-			files[i].src.closeFilesAndRemove()
+		if refCnt == 0 && src.canDelete.Load() {
+			if traceFileLife != "" && ht.h.filenameBase == traceFileLife {
+				ht.h.logger.Warn("[agg.dbg] real remove at HistoryRoTx.Close", "file", src.decompressor.FileName())
+			}
+			src.closeFilesAndRemove()
 		}
 	}
 	for _, r := range ht.readers {
@@ -1611,7 +1593,7 @@ func (ht *HistoryRoTx) iterateChangedFrozen(fromTxNum, toTxNum int, asc order.By
 		return iter.EmptyKV, nil
 	}
 
-	if fromTxNum >= 0 && ht.iit.lastTxNumInFiles() <= uint64(fromTxNum) {
+	if fromTxNum >= 0 && ht.iit.files.EndTxNum() <= uint64(fromTxNum) {
 		return iter.EmptyKV, nil
 	}
 
@@ -1649,7 +1631,7 @@ func (ht *HistoryRoTx) iterateChangedRecent(fromTxNum, toTxNum int, asc order.By
 	if asc == order.Desc {
 		panic("not supported yet")
 	}
-	rangeIsInFiles := toTxNum >= 0 && len(ht.iit.files) > 0 && ht.iit.lastTxNumInFiles() >= uint64(toTxNum)
+	rangeIsInFiles := toTxNum >= 0 && len(ht.iit.files) > 0 && ht.iit.files.EndTxNum() >= uint64(toTxNum)
 	if rangeIsInFiles {
 		return iter.EmptyKVS, nil
 	}
