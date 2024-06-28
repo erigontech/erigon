@@ -1341,7 +1341,7 @@ func (tx *MdbxTx) stdCursor(bucket string) (kv.RwCursor, error) {
 	tx.ID++
 
 	var err error
-	c.c, err = tx.tx.OpenCursor(mdbx.DBI(c.tx.db.buckets[c.bucketName].DBI))
+	c.c, err = tx.tx.OpenCursor(mdbx.DBI(tx.db.buckets[c.bucketName].DBI))
 	if err != nil {
 		return nil, fmt.Errorf("table: %s, %w, stack: %s", c.bucketName, err, dbg.Stack())
 	}
