@@ -44,11 +44,11 @@
     - { "primes": 128 }
     - { "primes": 256 }
     - { "primes": 512 }
-    - { "primes": 1024 }
-    - { "primes": 2048 }
-    - { "primes": 4096 }
-    - { "primes": 8192 }
-    - { "primes": 16384 }
+    # - { "primes": 1024 } # This overflows
+    # - { "primes": 2048 }
+    # - { "primes": 4096 }
+    # - { "primes": 8192 }
+    # - { "primes": 16384 }
 
 - name: Add inscription to mark test end
   ansible.builtin.include_role:

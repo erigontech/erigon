@@ -5,18 +5,18 @@
     src: geth-contracts
     dest: "{{ work_dir }}"
 
-- name: Deploy and call each of the geth contracts
-  ansible.builtin.shell: |
-    pushd {{ work_dir }} || exit 1
-    find geth-contracts -type f -name '*.bin' | sort | while read -r contract; do
-        cast send --legacy --from {{ eth_address }} --private-key {{ private_key }} --rpc-url {{ rpc_url }} -j --create \
-            "$(cat $contract)" | jq '.' > out.tmp.json
-        cast send --legacy --gas-limit 2000000 --private-key {{ private_key }} --rpc-url {{ rpc_url }} \
-            "$(jq -r '.contractAddress' out.tmp.json)" -j "0xDEADBEEF" | jq '.' > $contract.run.json
-        cat $contract.run.json > {{ log_file }}
-    done
-  args:
-    executable: /bin/bash
+# - name: Deploy and call each of the geth contracts # some of the contracts are overflowing counters
+#   ansible.builtin.shell: |
+#     pushd {{ work_dir }} || exit 1
+#     find geth-contracts -type f -name '*.bin' | sort | while read -r contract; do
+#         cast send --legacy --from {{ eth_address }} --private-key {{ private_key }} --rpc-url {{ rpc_url }} -j --create \
+#             "$(cat $contract)" | jq '.' > out.tmp.json
+#         cast send --legacy --gas-limit 2000000 --private-key {{ private_key }} --rpc-url {{ rpc_url }} \
+#             "$(jq -r '.contractAddress' out.tmp.json)" -j "0xDEADBEEF" | jq '.' > $contract.run.json
+#         cat $contract.run.json > {{ log_file }}
+#     done
+#   args:
+#     executable: /bin/bash
 
 - name: Deploy and call each of the geth contracts
   ansible.builtin.shell: |

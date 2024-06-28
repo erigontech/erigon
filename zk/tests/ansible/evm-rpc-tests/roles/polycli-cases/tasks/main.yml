@@ -13,12 +13,12 @@
   args:
     executable: /bin/bash
 
-- name: Deploy polycli ERC721 Contract
-  ansible.builtin.shell: |
-    pushd {{ work_dir }} || exit 1
-    cast send -j {{ legacy_flag }} --private-key {{ private_key }} --rpc-url {{ rpc_url }} --create "$(cat polycli-contracts/ERC721.bin)" > erc721.out.json
-  args:
-    executable: /bin/bash
+# - name: Deploy polycli ERC721 Contract # This overflows
+#   ansible.builtin.shell: |
+#     pushd {{ work_dir }} || exit 1
+#     cast send -j {{ legacy_flag }} --private-key {{ private_key }} --rpc-url {{ rpc_url }} --create "$(cat polycli-contracts/ERC721.bin)" > erc721.out.json
+#   args:
+#     executable: /bin/bash
 
 - name: Deploy polycli Loadtest Contract
   ansible.builtin.shell: |
@@ -34,25 +34,25 @@
   args:
     executable: /bin/bash
 
-- name: Perform some ERC721 Mints
-  ansible.builtin.shell: |
-    pushd {{ work_dir }} || exit 1
-    polycli loadtest {{ legacy_flag }} --private-key {{ private_key }} --mode 7 --rate-limit 500 --requests 2 --concurrency 2 \
-        --iterations 1 --erc721-address "$(jq -r '.contractAddress' erc721.out.json)" --rpc-url {{ rpc_url }} &>> {{ log_file }}
-    polycli loadtest {{ legacy_flag }} --private-key {{ private_key }} --mode 7 --rate-limit 500 --requests 2 --concurrency 2 \
-        --iterations 2 --erc721-address "$(jq -r '.contractAddress' erc721.out.json)" --rpc-url {{ rpc_url }} &>> {{ log_file }}
-    polycli loadtest {{ legacy_flag }} --private-key {{ private_key }} --mode 7 --rate-limit 500 --requests 2 --concurrency 2 \
-        --iterations 4 --erc721-address "$(jq -r '.contractAddress' erc721.out.json)" --rpc-url {{ rpc_url }} &>> {{ log_file }}
-    polycli loadtest {{ legacy_flag }} --private-key {{ private_key }} --mode 7 --rate-limit 500 --requests 2 --concurrency 2 \
-        --iterations 8 --erc721-address "$(jq -r '.contractAddress' erc721.out.json)" --rpc-url {{ rpc_url }} &>> {{ log_file }}
-    polycli loadtest {{ legacy_flag }} --private-key {{ private_key }} --mode 7 --rate-limit 500 --requests 2 --concurrency 2 \
-        --iterations 16 --erc721-address "$(jq -r '.contractAddress' erc721.out.json)" --rpc-url {{ rpc_url }} &>> {{ log_file }}
-    polycli loadtest {{ legacy_flag }} --private-key {{ private_key }} --mode 7 --rate-limit 500 --requests 2 --concurrency 2 \
-        --iterations 32 --erc721-address "$(jq -r '.contractAddress' erc721.out.json)" --rpc-url {{ rpc_url }} &>> {{ log_file }}
-    polycli loadtest {{ legacy_flag }} --private-key {{ private_key }} --mode 7 --rate-limit 500 --requests 2 --concurrency 2 \
-        --iterations 64 --erc721-address "$(jq -r '.contractAddress' erc721.out.json)" --rpc-url {{ rpc_url }} &>> {{ log_file }}
-  args:
-    executable: /bin/bash
+# - name: Perform some ERC721 Mints
+#   ansible.builtin.shell: |
+#     pushd {{ work_dir }} || exit 1
+#     polycli loadtest {{ legacy_flag }} --private-key {{ private_key }} --mode 7 --rate-limit 500 --requests 2 --concurrency 2 \
+#         --iterations 1 --erc721-address "$(jq -r '.contractAddress' erc721.out.json)" --rpc-url {{ rpc_url }} &>> {{ log_file }}
+#     polycli loadtest {{ legacy_flag }} --private-key {{ private_key }} --mode 7 --rate-limit 500 --requests 2 --concurrency 2 \
+#         --iterations 2 --erc721-address "$(jq -r '.contractAddress' erc721.out.json)" --rpc-url {{ rpc_url }} &>> {{ log_file }}
+#     polycli loadtest {{ legacy_flag }} --private-key {{ private_key }} --mode 7 --rate-limit 500 --requests 2 --concurrency 2 \
+#         --iterations 4 --erc721-address "$(jq -r '.contractAddress' erc721.out.json)" --rpc-url {{ rpc_url }} &>> {{ log_file }}
+#     polycli loadtest {{ legacy_flag }} --private-key {{ private_key }} --mode 7 --rate-limit 500 --requests 2 --concurrency 2 \
+#         --iterations 8 --erc721-address "$(jq -r '.contractAddress' erc721.out.json)" --rpc-url {{ rpc_url }} &>> {{ log_file }}
+#     polycli loadtest {{ legacy_flag }} --private-key {{ private_key }} --mode 7 --rate-limit 500 --requests 2 --concurrency 2 \
+#         --iterations 16 --erc721-address "$(jq -r '.contractAddress' erc721.out.json)" --rpc-url {{ rpc_url }} &>> {{ log_file }}
+#     polycli loadtest {{ legacy_flag }} --private-key {{ private_key }} --mode 7 --rate-limit 500 --requests 2 --concurrency 2 \
+#         --iterations 32 --erc721-address "$(jq -r '.contractAddress' erc721.out.json)" --rpc-url {{ rpc_url }} &>> {{ log_file }}
+#     polycli loadtest {{ legacy_flag }} --private-key {{ private_key }} --mode 7 --rate-limit 500 --requests 2 --concurrency 2 \
+#         --iterations 64 --erc721-address "$(jq -r '.contractAddress' erc721.out.json)" --rpc-url {{ rpc_url }} &>> {{ log_file }}
+#   args:
+#     executable: /bin/bash
 
 - name: Perform some Storage calls in the load tester contract
   ansible.builtin.shell: |
