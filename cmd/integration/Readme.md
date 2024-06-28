@@ -97,9 +97,9 @@ ONLY_CREATE_DB=true ./build/bin/erigon --datadir=/erigon-new/ --chain="$CHAIN" -
 
 ## Recover db from some bad state
 
-if you face some error like `MDBX_PROBLEM: Unexpected internal error`. First: use tools like https://www.memtest86.com
-to test RAM and tools like https://www.smartmontools.org to test Disk. If hardware is fine: can try
-manually recover db. see `./build/bin/mdbx_chk -h` for more details.
+If you face db-open error like `MDBX_PROBLEM: Unexpected internal error`. First: use tools
+like https://www.memtest86.com to test RAM and tools like https://www.smartmontools.org to test Disk. If hardware is
+fine: can try manually recover db (see `./build/bin/mdbx_chk -h` for more details):
 
 ```
 make db-tools
