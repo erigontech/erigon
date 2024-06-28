@@ -203,7 +203,7 @@ func TestBlobTxParsing(t *testing.T) {
 	ctx := NewTxParseContext(*uint256.NewInt(5))
 	ctx.withSender = false
 
-	var thinTx TxSlot // only tx body, no blobs
+	var thinTx TxSlot // only txn body, no blobs
 	txType, err := PeekTransactionType(bodyEnvelope)
 	require.NoError(t, err)
 	assert.Equal(t, BlobTxType, txType)
@@ -219,7 +219,7 @@ func TestBlobTxParsing(t *testing.T) {
 	assert.Equal(t, 0, len(thinTx.Commitments))
 	assert.Equal(t, 0, len(thinTx.Proofs))
 
-	// Now parse the same tx body, but wrapped with blobs/commitments/proofs
+	// Now parse the same txn body, but wrapped with blobs/commitments/proofs
 	wrappedWithBlobs = true
 	hasEnvelope = false
 

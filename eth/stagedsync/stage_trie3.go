@@ -7,8 +7,10 @@ import (
 	"fmt"
 	"sync/atomic"
 
+	"github.com/ledgerwatch/erigon-lib/common/datadir"
 	"github.com/ledgerwatch/erigon-lib/kv/temporal"
 	"github.com/ledgerwatch/erigon-lib/log/v3"
+	"github.com/ledgerwatch/erigon/turbo/stages/headerdownload"
 
 	"github.com/ledgerwatch/erigon-lib/commitment"
 	"github.com/ledgerwatch/erigon-lib/kv/rawdbv3"
@@ -150,7 +152,7 @@ func countBlockByTxnum(ctx context.Context, tx kv.Tx, blockReader services.FullB
 
 	for i := uint64(0); i < math.MaxUint64; i++ {
 		if i%1000000 == 0 {
-			fmt.Printf("\r [%s] Counting block for tx %d: cur block %dM cur tx %d\n", "restoreCommit", txnum, i/1_000_000, txCounter)
+			fmt.Printf("\r [%s] Counting block for txn %d: cur block %dM cur txn %d\n", "restoreCommit", txnum, i/1_000_000, txCounter)
 		}
 
 		h, err := blockReader.HeaderByNumber(ctx, tx, i)
@@ -174,8 +176,50 @@ func countBlockByTxnum(ctx context.Context, tx kv.Tx, blockReader services.FullB
 			return bb, nil
 		}
 	}
-	return blockBorders{}, fmt.Errorf("block with tx %x not found", txnum)
+	return blockBorders{}, fmt.Errorf("block with txn %x not found", txnum)
 }
+
+type TrieCfg struct {
+	db                kv.RwDB
+	checkRoot         bool
+	badBlockHalt      bool
+	tmpDir            string
+	saveNewHashesToDB bool // no reason to save changes when calculating root for mining
+	blockReader       services.FullBlockReader
+	hd                *headerdownload.HeaderDownload
+
+	historyV3 bool
+	agg       *state.Aggregator
+}
+
+func StageTrieCfg(db kv.RwDB, checkRoot, saveNewHashesToDB, badBlockHalt bool, tmpDir string, blockReader services.FullBlockReader, hd *headerdownload.HeaderDownload, historyV3 bool, agg *state.Aggregator) TrieCfg {
+	return TrieCfg{
+		db:                db,
+		checkRoot:         checkRoot,
+		tmpDir:            tmpDir,
+		saveNewHashesToDB: saveNewHashesToDB,
+		badBlockHalt:      badBlockHalt,
+		blockReader:       blockReader,
+		hd:                hd,
+
+		historyV3: historyV3,
+		agg:       agg,
+	}
+}
+
+type HashStateCfg struct {
+	db   kv.RwDB
+	dirs datadir.Dirs
+}
+
+func StageHashStateCfg(db kv.RwDB, dirs datadir.Dirs) HashStateCfg {
+	return HashStateCfg{
+		db:   db,
+		dirs: dirs,
+	}
+}
+
+var ErrInvalidStateRootHash = fmt.Errorf("invalid state root hash")
 
 func RebuildPatriciaTrieBasedOnFiles(rwTx kv.RwTx, cfg TrieCfg, ctx context.Context, logger log.Logger) (libcommon.Hash, error) {
 	useExternalTx := rwTx != nil

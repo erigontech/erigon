@@ -654,7 +654,8 @@ Loop:
 			defer getHashFnMute.Unlock()
 			return f(n)
 		}
-		blockContext := core.NewEVMBlockContext(header, getHashFn, engine, nil /* author */, chainConfig)
+		blockContext := core.NewEVMBlockContext(header, getHashFn, engine, cfg.author /* author */, chainConfig)
+		// print type of engine
 		if parallel {
 			select {
 			case err := <-rwLoopErrCh:
@@ -1085,7 +1086,7 @@ func flushAndCheckCommitmentV3(ctx context.Context, header *types.Header, applyT
 			if err := doms.Flush(ctx, applyTx); err != nil {
 				return false, err
 			}
-			if err = applyTx.(state2.HasAggTx).AggTx().(*state2.AggregatorRoTx).PruneCommitHistory(ctx, applyTx, false, nil); err != nil {
+			if err = applyTx.(state2.HasAggTx).AggTx().(*state2.AggregatorRoTx).PruneCommitHistory(ctx, applyTx, nil); err != nil {
 				return false, err
 			}
 		}
@@ -1122,7 +1123,7 @@ func flushAndCheckCommitmentV3(ctx context.Context, header *types.Header, applyT
 	}
 
 	aggTx := applyTx.(state2.HasAggTx).AggTx().(*state2.AggregatorRoTx)
-	unwindToLimit, err := aggTx.CanUnwindDomainsToBlockNum(applyTx)
+	unwindToLimit, err := aggTx.CanUnwindToBlockNum(applyTx)
 	if err != nil {
 		return false, err
 	}

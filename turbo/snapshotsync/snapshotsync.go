@@ -27,6 +27,7 @@ import (
 
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	coresnaptype "github.com/ledgerwatch/erigon/core/snaptype"
+	snaptype2 "github.com/ledgerwatch/erigon/core/snaptype"
 	"github.com/ledgerwatch/erigon/ethdb/prune"
 	"github.com/ledgerwatch/erigon/turbo/services"
 )
@@ -443,9 +444,9 @@ func WaitForDownloader(ctx context.Context, logPrefix string, headerchain, blobs
 			return err
 		}
 	}
-	for _, p := range snaptype.SeedableV3Extensions() {
+	for _, p := range snaptype2.E3StateTypes {
 		snapshotDownloader.ProhibitNewDownloads(ctx, &proto_downloader.ProhibitNewDownloadsRequest{
-			Type: p,
+			Type: p.Name(),
 		})
 	}
 

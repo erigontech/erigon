@@ -179,8 +179,8 @@ func (h *Heimdall) handleChildHeader(ctx context.Context, header *types.Header) 
 		h.pendingCheckpoint = &heimdall.Checkpoint{
 			Fields: heimdall.WaypointFields{
 				Timestamp:  timeStamp,
-				StartBlock: big.NewInt(int64(expectedCheckpointState.newStart)),
-				EndBlock:   big.NewInt(int64(expectedCheckpointState.newEnd)),
+				StartBlock: new(big.Int).SetUint64(expectedCheckpointState.newStart),
+				EndBlock:   new(big.Int).SetUint64(expectedCheckpointState.newEnd),
 			},
 		}
 	}
@@ -420,7 +420,7 @@ func (h *Heimdall) createAndSendCheckpointToRootchain(ctx context.Context, start
 		// proof
 		tx, err := helper.QueryTxWithProof(cp.cliCtx, txHash)
 		if err != nil {
-			h.logger.Error("Error querying checkpoint tx proof", "txHash", txHash)
+			h.logger.Error("Error querying checkpoint txn proof", "txHash", txHash)
 			return err
 		}
 

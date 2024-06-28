@@ -103,6 +103,11 @@ func (s *executionClientStore) insertBlocks(ctx context.Context, blocks []*types
 		return err
 	}
 
+	err = s.polygonBridge.Synchronize(ctx, blocks[len(blocks)-1].Header())
+	if err != nil {
+		return err
+	}
+
 	err = s.polygonBridge.ProcessNewBlocks(ctx, blocks)
 	if err != nil {
 		return err

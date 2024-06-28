@@ -17,7 +17,7 @@ func TransitionState(impl Interface, s abstract.BeaconState, block *cltypes.Sign
 	}
 
 	// Transition block
-	if err := ProcessBlock(impl, s, block); err != nil {
+	if err := ProcessBlock(impl, s, block.Block); err != nil {
 		return err
 	}
 

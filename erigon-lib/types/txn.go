@@ -220,7 +220,7 @@ func (ctx *TxParseContext) ParseTransaction(payload []byte, pos int, slot *TxSlo
 
 	if slot.Type == BlobTxType && wrappedWithBlobs {
 		if p != dataPos+dataLen {
-			return 0, fmt.Errorf("%w: unexpected leftover after blob tx body", ErrParseTxn)
+			return 0, fmt.Errorf("%w: unexpected leftover after blob txn body", ErrParseTxn)
 		}
 
 		dataPos, dataLen, err = rlp.List(payload, p)
@@ -985,7 +985,7 @@ func (al AccessList) StorageKeys() int {
 	return sum
 }
 
-// Removes everything but the payload body from blob tx and prepends 0x3 at the beginning - no copy
+// Removes everything but the payload body from blob txn and prepends 0x3 at the beginning - no copy
 // Doesn't change non-blob tx
 func UnwrapTxPlayloadRlp(blobTxRlp []byte) ([]byte, error) {
 	if blobTxRlp[0] != BlobTxType {
@@ -995,7 +995,7 @@ func UnwrapTxPlayloadRlp(blobTxRlp []byte) ([]byte, error) {
 	if err != nil || dataposPrev < 1 {
 		return nil, err
 	}
-	if !isList { // This is clearly not wrapped tx then
+	if !isList { // This is clearly not wrapped txn then
 		return blobTxRlp, nil
 	}
 
