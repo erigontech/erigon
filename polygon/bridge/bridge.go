@@ -63,6 +63,7 @@ func (b *Bridge) Run(ctx context.Context) error {
 	for {
 		select {
 		case <-ctx.Done():
+			b.Close()
 			return ctx.Err()
 		default:
 		}
@@ -103,7 +104,7 @@ func (b *Bridge) ProcessNewBlocks(ctx context.Context, blocks []*types.Block) er
 	eventMap := make(map[uint64]uint64)
 	for _, block := range blocks {
 		// check if block is start of span
-		if b.isSprintStart(block.NumberU64()) {
+		if !b.isSprintStart(block.NumberU64()) {
 			continue
 		}
 

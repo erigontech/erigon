@@ -23,10 +23,6 @@ import (
 	"github.com/ledgerwatch/erigon/turbo/testlog"
 )
 
-var (
-	event1, event2, event3 *heimdall.EventRecordWithTime
-)
-
 func setup(t *testing.T, abi abi.ABI) (*heimdall.MockHeimdallClient, *bridge.Bridge) {
 	ctrl := gomock.NewController(t)
 	logger := testlog.Logger(t, log.LvlDebug)
@@ -43,69 +39,18 @@ func setup(t *testing.T, abi abi.ABI) (*heimdall.MockHeimdallClient, *bridge.Bri
 	return heimdallClient, b
 }
 
-func setupMockHeimdall(h *heimdall.MockHeimdallClient) {
-	event1 = &heimdall.EventRecordWithTime{
-		EventRecord: heimdall.EventRecord{
-			ID:      1,
-			ChainID: "80001",
-			Data:    hexutil.MustDecode("0x01"),
-		},
-		Time: time.Unix(100, 0),
-	}
-	event2 = &heimdall.EventRecordWithTime{
-		EventRecord: heimdall.EventRecord{
-			ID:      2,
-			ChainID: "80001",
-			Data:    hexutil.MustDecode("0x02"),
-		},
-		Time: time.Unix(200, 0),
-	}
-	event3 = &heimdall.EventRecordWithTime{
-		EventRecord: heimdall.EventRecord{
-			ID:      3,
-			ChainID: "80001",
-			Data:    hexutil.MustDecode("0x03"),
-		},
-		Time: time.Unix(300, 0),
-	}
-
-	events := []*heimdall.EventRecordWithTime{event1, event2, event3}
-
-	h.EXPECT().FetchStateSyncEvents(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).Return(events, nil).Times(1)
-	h.EXPECT().FetchStateSyncEvents(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).Return([]*heimdall.EventRecordWithTime{}, nil).AnyTimes()
-}
-
-func getBlocks(t *testing.T) []*types.Block {
+func getBlocks(t *testing.T, numBlocks int) []*types.Block {
 	// Feed in new blocks
-	rawBlocks := []*types.RawBlock{
-		{
+	rawBlocks := make([]*types.RawBlock, 0, numBlocks)
+
+	for i := 0; i < numBlocks; i++ {
+		rawBlocks = append(rawBlocks, &types.RawBlock{
 			Header: &types.Header{
-				Number: big.NewInt(0),
-				Time:   100,
+				Number: big.NewInt(int64(i)),
+				Time:   uint64(50 * (i + 1)),
 			},
 			Body: &types.RawBody{},
-		},
-		{
-			Header: &types.Header{
-				Number: big.NewInt(1),
-				Time:   150,
-			},
-			Body: &types.RawBody{},
-		},
-		{
-			Header: &types.Header{
-				Number: big.NewInt(2),
-				Time:   200,
-			},
-			Body: &types.RawBody{},
-		},
-		{
-			Header: &types.Header{
-				Number: big.NewInt(3),
-				Time:   250,
-			},
-			Body: &types.RawBody{},
-		},
+		})
 	}
 
 	blocks := make([]*types.Block, len(rawBlocks))
@@ -127,7 +72,35 @@ func TestBridge(t *testing.T) {
 	stateReceiverABI := bor.GenesisContractStateReceiverABI()
 	heimdallClient, b := setup(t, stateReceiverABI)
 
-	setupMockHeimdall(heimdallClient)
+	event1 := &heimdall.EventRecordWithTime{
+		EventRecord: heimdall.EventRecord{
+			ID:      1,
+			ChainID: "80001",
+			Data:    hexutil.MustDecode("0x01"),
+		},
+		Time: time.Unix(50, 0),
+	}
+	event2 := &heimdall.EventRecordWithTime{
+		EventRecord: heimdall.EventRecord{
+			ID:      2,
+			ChainID: "80001",
+			Data:    hexutil.MustDecode("0x02"),
+		},
+		Time: time.Unix(100, 0),
+	}
+	event3 := &heimdall.EventRecordWithTime{
+		EventRecord: heimdall.EventRecord{
+			ID:      3,
+			ChainID: "80001",
+			Data:    hexutil.MustDecode("0x03"),
+		},
+		Time: time.Unix(200, 0),
+	}
+
+	events := []*heimdall.EventRecordWithTime{event1, event2, event3}
+
+	heimdallClient.EXPECT().FetchStateSyncEvents(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).Return(events, nil).Times(1)
+	heimdallClient.EXPECT().FetchStateSyncEvents(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).Return([]*heimdall.EventRecordWithTime{}, nil).AnyTimes()
 
 	var wg sync.WaitGroup
 	wg.Add(1)
@@ -147,14 +120,14 @@ func TestBridge(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	blocks := getBlocks(t)
+	blocks := getBlocks(t, 4)
 
 	err = b.ProcessNewBlocks(ctx, blocks)
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	res, err := b.GetEvents(ctx, 3)
+	res, err := b.GetEvents(ctx, 2)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -174,15 +147,102 @@ func TestBridge(t *testing.T) {
 	require.Equal(t, event2Data, rlp.RawValue(res[1].Data()))
 
 	// get non-sprint block
-	res, err = b.GetEvents(ctx, 2)
+	res, err = b.GetEvents(ctx, 1)
 	require.Error(t, err)
 
-	res, err = b.GetEvents(ctx, 4)
+	res, err = b.GetEvents(ctx, 3)
 	require.Error(t, err)
 
 	// check block 0
 	res, err = b.GetEvents(ctx, 0)
 	require.Error(t, err)
+
+	wg.Done()
+}
+
+func TestBridge_Unwind(t *testing.T) {
+	ctx := context.Background()
+	stateReceiverABI := bor.GenesisContractStateReceiverABI()
+	heimdallClient, b := setup(t, stateReceiverABI)
+
+	event1 := &heimdall.EventRecordWithTime{
+		EventRecord: heimdall.EventRecord{
+			ID:      1,
+			ChainID: "80001",
+			Data:    hexutil.MustDecode("0x01"),
+		},
+		Time: time.Unix(50, 0),
+	}
+	event2 := &heimdall.EventRecordWithTime{
+		EventRecord: heimdall.EventRecord{
+			ID:      2,
+			ChainID: "80001",
+			Data:    hexutil.MustDecode("0x02"),
+		},
+		Time: time.Unix(100, 0),
+	}
+	event3 := &heimdall.EventRecordWithTime{
+		EventRecord: heimdall.EventRecord{
+			ID:      3,
+			ChainID: "80001",
+			Data:    hexutil.MustDecode("0x03"),
+		},
+		Time: time.Unix(200, 0),
+	}
+	event4 := &heimdall.EventRecordWithTime{
+		EventRecord: heimdall.EventRecord{
+			ID:      4,
+			ChainID: "80001",
+			Data:    hexutil.MustDecode("0x03"),
+		},
+		Time: time.Unix(300, 0),
+	}
+
+	events := []*heimdall.EventRecordWithTime{event1, event2, event3, event4}
+
+	heimdallClient.EXPECT().FetchStateSyncEvents(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).Return(events, nil).Times(1)
+	heimdallClient.EXPECT().FetchStateSyncEvents(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).Return([]*heimdall.EventRecordWithTime{}, nil).AnyTimes()
+
+	var wg sync.WaitGroup
+	wg.Add(1)
+
+	go func(bridge bridge.Service) {
+		defer wg.Done()
+
+		err := bridge.Run(ctx)
+		if err != nil {
+			t.Error(err)
+			return
+		}
+	}(b)
+
+	err := b.Synchronize(ctx, &types.Header{Number: big.NewInt(100)}) // hack to wait for b.ready
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	blocks := getBlocks(t, 8)
+
+	err = b.ProcessNewBlocks(ctx, blocks)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	res, err := b.GetEvents(ctx, 5)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Log(res)
+	t.Log(err)
+
+	err = b.Unwind(ctx, &types.Header{Number: big.NewInt(4)})
+
+	res, err = b.GetEvents(ctx, 5)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Log(res)
+	t.Log(err)
 
 	wg.Done()
 }
