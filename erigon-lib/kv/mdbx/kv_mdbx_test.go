@@ -690,7 +690,7 @@ func baseAutoConversion(t *testing.T) (kv.RwDB, kv.RwTx, kv.RwCursor) {
 	tx, err := db.BeginRw(context.Background())
 	require.NoError(t, err)
 
-	c, err := tx.RwCursor(kv.PlainState)
+	c, err := tx.RwCursor(kv.Headers)
 	require.NoError(t, err)
 
 	// Insert some records
@@ -705,14 +705,12 @@ func baseAutoConversion(t *testing.T) (kv.RwDB, kv.RwTx, kv.RwCursor) {
 	return db, tx, c
 }
 
+// TODO: maybe eliminate it?
 func TestAutoConversion(t *testing.T) {
 	db, tx, c := baseAutoConversion(t)
 	defer db.Close()
 	defer tx.Rollback()
 	defer c.Close()
-
-	// key length conflict
-	require.Error(t, c.Put([]byte("A..........................."), []byte("?")))
 
 	require.NoError(t, c.Delete([]byte("A..........................._______________________________A")))
 	require.NoError(t, c.Put([]byte("B"), []byte("7")))

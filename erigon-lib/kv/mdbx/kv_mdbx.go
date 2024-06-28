@@ -1313,9 +1313,6 @@ func (tx *MdbxTx) DBSize() (uint64, error) {
 
 func (tx *MdbxTx) RwCursor(bucket string) (kv.RwCursor, error) {
 	b := tx.db.buckets[bucket]
-	if b.AutoDupSortKeysConversion {
-		return tx.stdCursor(bucket)
-	}
 
 	if b.Flags&kv.DupSort != 0 {
 		return tx.RwCursorDupSort(bucket)
@@ -1417,13 +1414,6 @@ func (c *MdbxCursor) Last() ([]byte, []byte, error) {
 		return []byte{}, nil, err
 	}
 
-	b := c.bucketCfg
-	if b.AutoDupSortKeysConversion && len(k) == b.DupToLen {
-		keyPart := b.DupFromLen - b.DupToLen
-		k = append(k, v[:keyPart]...)
-		v = v[keyPart:]
-	}
-
 	return k, v, nil
 }
 
@@ -1517,16 +1507,6 @@ func (c *MdbxCursor) Next() (k, v []byte, err error) {
 		return []byte{}, nil, fmt.Errorf("failed MdbxKV cursor.Next(): %w", err)
 	}
 
-	b := c.bucketCfg
-	if b.AutoDupSortKeysConversion && len(k) == b.DupToLen {
-		keyPart := b.DupFromLen - b.DupToLen
-		if len(v) == 0 {
-			return nil, nil, fmt.Errorf("key with empty value: k=%x, len(k)=%d, v=%x", k, len(k), v)
-		}
-		k = append(k, v[:keyPart]...)
-		v = v[keyPart:]
-	}
-
 	return k, v, nil
 }
 
@@ -1537,13 +1517,6 @@ func (c *MdbxCursor) Prev() (k, v []byte, err error) {
 			return nil, nil, nil
 		}
 		return []byte{}, nil, fmt.Errorf("failed MdbxKV cursor.Prev(): %w", err)
-	}
-
-	b := c.bucketCfg
-	if b.AutoDupSortKeysConversion && len(k) == b.DupToLen {
-		keyPart := b.DupFromLen - b.DupToLen
-		k = append(k, v[:keyPart]...)
-		v = v[keyPart:]
 	}
 
 	return k, v, nil
@@ -1557,13 +1530,6 @@ func (c *MdbxCursor) Current() ([]byte, []byte, error) {
 			return nil, nil, nil
 		}
 		return []byte{}, nil, err
-	}
-
-	b := c.bucketCfg
-	if b.AutoDupSortKeysConversion && len(k) == b.DupToLen {
-		keyPart := b.DupFromLen - b.DupToLen
-		k = append(k, v[:keyPart]...)
-		v = v[keyPart:]
 	}
 
 	return k, v, nil
