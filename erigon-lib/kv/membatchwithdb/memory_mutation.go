@@ -468,6 +468,10 @@ func (m *MemoryMutation) BucketSize(bucket string) (uint64, error) {
 	return m.memTx.BucketSize(bucket)
 }
 
+func (m *MemoryMutation) Count(bucket string) (uint64, error) {
+	panic("not implemented")
+}
+
 func (m *MemoryMutation) DropBucket(bucket string) error {
 	panic("Not implemented")
 }

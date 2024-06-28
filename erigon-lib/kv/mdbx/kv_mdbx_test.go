@@ -648,7 +648,7 @@ func TestCurrentDup(t *testing.T) {
 
 	count, err := c.CountDuplicates()
 	require.Nil(t, err)
-	require.Equal(t, count, uint64(2))
+	require.Equal(t, uint64(2), count)
 
 	require.Error(t, c.PutNoDupData([]byte("key3"), []byte("value3.3")))
 	require.NoError(t, c.DeleteCurrentDuplicates())
@@ -665,7 +665,7 @@ func TestCurrentDup(t *testing.T) {
 
 func TestDupDelete(t *testing.T) {
 	//TODO: don't fail only if delete key1 twice
-	_, _, c := BaseCase(t)
+	_, tx, c := BaseCase(t)
 
 	k, _, err := c.Current()
 	require.Nil(t, err)
@@ -677,7 +677,8 @@ func TestDupDelete(t *testing.T) {
 	err = c.Delete([]byte("key1"))
 	require.Nil(t, err)
 
-	count, err := c.Count()
+	//TODO: find better way
+	count, err := tx.Count("Table")
 	require.Nil(t, err)
 	assert.Zero(t, count)
 }
