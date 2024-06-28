@@ -44,7 +44,7 @@ func (*CanonicalReader) TxNum2ID(tx kv.Tx, blockNum uint64, blockHash common2.Ha
 		return 0, err
 	}
 	if b != nil {
-		return kv.TxnId(int(b.BaseTxId) + txnIdx + 1), nil
+		return kv.TxnId(int(b.BaseTxnID) + txnIdx + 1), nil
 	}
 
 	// body freezed and pruned. then TxNum and TxnIDX are identical
@@ -79,7 +79,7 @@ func (*CanonicalReader) BaseTxnID(tx kv.Tx, blockNum uint64, blockHash common2.H
 		}
 		return kv.TxnId(_min), nil
 	}
-	return kv.TxnId(b.BaseTxId + 1), nil
+	return kv.TxnId(b.BaseTxnID + 1), nil
 
 }
 
