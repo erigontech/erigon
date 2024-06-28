@@ -7,16 +7,9 @@ import (
 )
 
 var (
-	defaultTotalSteps    = 1 << 23
-	defaultCounterLimits = counterLimits{
-		totalSteps: defaultTotalSteps,
-		arith:      defaultTotalSteps >> 5,
-		binary:     defaultTotalSteps >> 4,
-		memAlign:   defaultTotalSteps >> 5,
-		keccaks:    int(math.Floor(float64(defaultTotalSteps)/155286) * 44),
-		padding:    int(math.Floor(float64(defaultTotalSteps) / 56)),
-		poseidon:   int(math.Floor(float64(defaultTotalSteps) / 30)),
-	}
+	defaultTotalSteps  = 1 << 23
+	forkId10TotalSteps = 1 << 24
+	forkId11TotalSteps = 1 << 25
 
 	unlimitedCounters = counterLimits{
 		totalSteps: math.MaxInt32,
@@ -26,6 +19,7 @@ var (
 		keccaks:    math.MaxInt32,
 		padding:    math.MaxInt32,
 		poseidon:   math.MaxInt32,
+		sha256:     math.MaxInt32,
 	}
 )
 
@@ -80,9 +74,33 @@ func createCountrsByLimits(c counterLimits) *Counters {
 
 // tp ne used on next forkid counters
 func getCounterLimits(forkId uint16) *Counters {
-	if forkId <= uint16(zk_consts.ForkID9Elderberry2) {
-		return createCountrsByLimits(defaultCounterLimits)
+	totalSteps := getTotalSteps(forkId)
+
+	counterLimits := counterLimits{
+		totalSteps: totalSteps,
+		arith:      totalSteps >> 5,
+		binary:     totalSteps >> 4,
+		memAlign:   totalSteps >> 5,
+		keccaks:    int(math.Floor(float64(totalSteps)/155286) * 44),
+		padding:    int(math.Floor(float64(totalSteps) / 56)),
+		poseidon:   int(math.Floor(float64(totalSteps) / 30)),
+		sha256:     int(math.Floor(float64(totalSteps-1)/31488)) * 7,
 	}
 
-	return createCountrsByLimits(defaultCounterLimits)
+	return createCountrsByLimits(counterLimits)
+}
+
+func getTotalSteps(forkId uint16) int {
+	var totalSteps int
+
+	switch forkId {
+	case uint16(zk_consts.ForkID10):
+		totalSteps = forkId10TotalSteps
+	case uint16(zk_consts.ForkID11):
+		totalSteps = forkId11TotalSteps
+	default:
+		totalSteps = defaultTotalSteps
+	}
+
+	return totalSteps
 }

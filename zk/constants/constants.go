@@ -9,4 +9,6 @@ const (
 	ForkID7Etrog       ForkId = 7
 	ForkID8Elderberry  ForkId = 8
 	ForkID9Elderberry2 ForkId = 9
+	ForkID10           ForkId = 10
+	ForkID11           ForkId = 11
 )
