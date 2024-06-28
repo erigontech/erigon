@@ -2,10 +2,7 @@ package stagedsync
 
 import (
 	"context"
-	"errors"
 	"fmt"
-	"os"
-	"runtime"
 	"time"
 
 	"github.com/c2h5oh/datasize"
@@ -18,13 +15,9 @@ import (
 	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/datadir"
 	"github.com/ledgerwatch/erigon-lib/common/dbg"
-	"github.com/ledgerwatch/erigon-lib/common/metrics"
 	"github.com/ledgerwatch/erigon-lib/config3"
-	"github.com/ledgerwatch/erigon-lib/diagnostics"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/dbutils"
-	"github.com/ledgerwatch/erigon-lib/kv/membatch"
-	"github.com/ledgerwatch/erigon-lib/kv/membatchwithdb"
 	"github.com/ledgerwatch/erigon-lib/kv/rawdbv3"
 	"github.com/ledgerwatch/erigon-lib/kv/temporal"
 	libstate "github.com/ledgerwatch/erigon-lib/state"
@@ -78,6 +71,7 @@ type ExecuteBlockCfg struct {
 	accumulator   *shards.Accumulator
 	blockReader   services.FullBlockReader
 	hd            headerDownloader
+	author        *common.Address
 	// last valid number of the stage
 
 	dirs      datadir.Dirs
@@ -264,23 +258,6 @@ func ExecBlockV3(s *StageState, u Unwinder, txc wrap.TxContainer, toBlock uint64
 		workersCount = 1
 	}
 
-	//if initialCycle {
-	//	reconstituteToBlock, found, err := reconstituteBlock(cfg.agg, cfg.db, txc.Tx)
-	//	if err != nil {
-	//		return err
-	//	}
-	//
-	//	if found && reconstituteToBlock > s.BlockNumber+1 {
-	//		reconWorkers := cfg.syncCfg.ReconWorkerCount
-	//		if err := ReconstituteState(ctx, s, cfg.dirs, reconWorkers, cfg.batchSize, cfg.db, cfg.blockReader, log.New(), cfg.agg, cfg.engine, cfg.chainConfig, cfg.genesis); err != nil {
-	//			return err
-	//		}
-	//		if dbg.StopAfterReconst() {
-	//			os.Exit(1)
-	//		}
-	//	}
-	//}
-
 	prevStageProgress, err := senderStageProgress(txc.Tx, cfg.db)
 	if err != nil {
 		return err
@@ -296,7 +273,7 @@ func ExecBlockV3(s *StageState, u Unwinder, txc wrap.TxContainer, toBlock uint64
 
 	parallel := txc.Tx == nil
 	if err := ExecV3(ctx, s, u, workersCount, cfg, txc, parallel, to, logger, initialCycle); err != nil {
-		return fmt.Errorf("ExecV3: %w", err)
+		return err
 	}
 	return nil
 }
@@ -324,18 +301,10 @@ func reconstituteBlock(agg *libstate.Aggregator, db kv.RoDB, tx kv.Tx) (n uint64
 var ErrTooDeepUnwind = fmt.Errorf("too deep unwind")
 
 func unwindExec3(u *UnwindState, s *StageState, txc wrap.TxContainer, ctx context.Context, accumulator *shards.Accumulator, logger log.Logger) (err error) {
-	fmt.Printf("unwindv3: %d -> %d\n", u.CurrentBlockNumber, u.UnwindPoint)
-	//txTo, err := rawdbv3.TxNums.Min(tx, u.UnwindPoint+1)
-	//if err != nil {
-	//      return err
-	//}
-	//bn, _, ok, err := domains.SeekCommitment2(tx, 0, txTo)
-	//if ok && bn != u.UnwindPoint {
-	//	return fmt.Errorf("commitment can unwind only to block: %d, requested: %d. UnwindTo was called with wrong value", bn, u.UnwindPoint)
-	//}
-	start := time.Now()
+	//fmt.Printf("unwindv3: %d -> %d\n", u.CurrentBlockNumber, u.UnwindPoint)
+	//start := time.Now()
 
-	unwindToLimit, err := txc.Tx.(libstate.HasAggTx).AggTx().(*libstate.AggregatorRoTx).CanUnwindDomainsToBlockNum(txc.Tx)
+	unwindToLimit, err := txc.Tx.(libstate.HasAggTx).AggTx().(*libstate.AggregatorRoTx).CanUnwindToBlockNum(txc.Tx)
 	if err != nil {
 		return err
 	}
@@ -395,7 +364,7 @@ func unwindExec3(u *UnwindState, s *StageState, txc wrap.TxContainer, ctx contex
 	if err := rawdb.DeleteNewerEpochs(txc.Tx, u.UnwindPoint+1); err != nil {
 		return fmt.Errorf("delete newer epochs: %w", err)
 	}
-	fmt.Printf("unwindv3: %d -> %d done within %s\n", s.BlockNumber, u.UnwindPoint, time.Since(start))
+	//fmt.Printf("unwindv3: %d -> %d done within %s\n", s.BlockNumber, u.UnwindPoint, time.Since(start))
 	return nil
 }
 
@@ -425,254 +394,10 @@ func SpawnExecuteBlocksStage(s *StageState, u Unwinder, txc wrap.TxContainer, to
 	if dbg.StagesOnlyBlocks {
 		return nil
 	}
-	if cfg.historyV3 {
-		if err = ExecBlockV3(s, u, txc, toBlock, ctx, cfg, s.CurrentSyncCycle.IsInitialCycle, logger); err != nil {
-			return err
-		}
-		return nil
-	}
-	if config3.EnableHistoryV4InTest {
-		panic("must use ExecBlockV3")
-	}
-
-	quit := ctx.Done()
-	useExternalTx := txc.Tx != nil
-	if !useExternalTx {
-		txc.Tx, err = cfg.db.BeginRw(context.Background())
-		if err != nil {
-			return err
-		}
-		defer txc.Tx.Rollback()
-	}
-
-	prevStageProgress, errStart := stages.GetStageProgress(txc.Tx, stages.Senders)
-	if errStart != nil {
-		return errStart
-	}
-	nextStageProgress, err := stages.GetStageProgress(txc.Tx, stages.HashState)
-	if err != nil {
+	if err = ExecBlockV3(s, u, txc, toBlock, ctx, cfg, s.CurrentSyncCycle.IsInitialCycle, logger); err != nil {
 		return err
 	}
-	nextStagesExpectData := nextStageProgress > 0 // Incremental move of next stages depend on fully written ChangeSets, Receipts, CallTraceSet
-
-	logPrefix := s.LogPrefix()
-	var to = prevStageProgress
-
-	if toBlock > 0 {
-		to = min(prevStageProgress, toBlock)
-	}
-
-	if cfg.syncCfg.LoopBlockLimit > 0 {
-		to = s.BlockNumber + uint64(cfg.syncCfg.LoopBlockLimit)
-	}
-
-	if to <= s.BlockNumber {
-		return nil
-	}
-
-	if to > s.BlockNumber+16 {
-		logger.Info(fmt.Sprintf("[%s] Blocks execution", logPrefix), "from", s.BlockNumber, "to", to)
-	}
-
-	stateStream := cfg.stateStream && to-s.BlockNumber < stateStreamLimit
-
-	// changes are stored through memory buffer
-	logEvery := time.NewTicker(logInterval)
-	defer logEvery.Stop()
-	stageProgress := s.BlockNumber
-	logBlock := stageProgress
-	logTx, lastLogTx := uint64(0), uint64(0)
-	logTime := time.Now()
-	startTime := time.Now()
-	var gas uint64             // used for logs
-	var currentStateGas uint64 // used for batch commits of state
-	var stoppedErr error
-	// Transform batch_size limit into Ggas
-	gasState := uint64(cfg.batchSize) * uint64(datasize.KB) * 2
-
-	//var batch kv.PendingMutations
-	// state is stored through ethdb batches
-	batch := membatch.NewHashBatch(txc.Tx, quit, cfg.dirs.Tmp, logger)
-	// avoids stacking defers within the loop
-	defer func() {
-		batch.Close()
-	}()
-
-	var readAhead chan uint64
-	if s.CurrentSyncCycle.IsInitialCycle && cfg.silkworm == nil { // block read-ahead is not compatible w/ Silkworm one-shot block execution
-		// snapshots are often stored on cheaper drives. don't expect low-read-latency and manually read-ahead.
-		// can't use OS-level ReadAhead - because Data >> RAM
-		// it also warmsup state a bit - by touching senders/coninbase accounts and code
-		var clean func()
-		readAhead, clean = blocksReadAhead(ctx, &cfg, 4, cfg.engine, false)
-		defer clean()
-	}
-	//fmt.Printf("exec blocks: %d -> %d\n", stageProgress+1, to)
-
-Loop:
-	for blockNum := stageProgress + 1; blockNum <= to; blockNum++ {
-		if stoppedErr = common.Stopped(quit); stoppedErr != nil {
-			log.Warn("Execution interrupted", "err", stoppedErr)
-			break
-		}
-		if s.CurrentSyncCycle.IsInitialCycle && cfg.silkworm == nil { // block read-ahead is not compatible w/ Silkworm one-shot block execution
-			select {
-			case readAhead <- blockNum:
-			default:
-			}
-		}
-
-		blockHash, err := cfg.blockReader.CanonicalHash(ctx, txc.Tx, blockNum)
-		if err != nil {
-			return err
-		}
-		block, _, err := cfg.blockReader.BlockWithSenders(ctx, txc.Tx, blockHash, blockNum)
-		if err != nil {
-			return err
-		}
-		if block == nil {
-			logger.Error(fmt.Sprintf("[%s] Empty block", logPrefix), "blocknum", blockNum)
-			break
-		}
-
-		lastLogTx += uint64(block.Transactions().Len())
-
-		// Incremental move of next stages depend on fully written ChangeSets, Receipts, CallTraceSet
-		writeChangeSets := nextStagesExpectData || blockNum > cfg.prune.History.PruneTo(to)
-		writeReceipts := nextStagesExpectData || blockNum > cfg.prune.Receipts.PruneTo(to)
-		writeCallTraces := nextStagesExpectData || blockNum > cfg.prune.CallTraces.PruneTo(to)
-
-		metrics.UpdateBlockConsumerPreExecutionDelay(block.Time(), blockNum, logger)
-
-		_, isMemoryMutation := txc.Tx.(*membatchwithdb.MemoryMutation)
-		if cfg.silkworm != nil && !isMemoryMutation {
-			if useExternalTx {
-				blockNum, err = silkworm.ExecuteBlocksEphemeral(cfg.silkworm, txc.Tx, cfg.chainConfig.ChainID, blockNum, to, uint64(cfg.batchSize), writeChangeSets, writeReceipts, writeCallTraces)
-			} else {
-				// In case of internal tx we close it (no changes, commit not needed): Silkworm will use its own internal tx
-				txc.Tx.Rollback()
-				txc.Tx = nil
-
-				log.Info("Using Silkworm to commit full range", "fromBlock", s.BlockNumber+1, "toBlock", to)
-				blockNum, err = silkworm.ExecuteBlocksPerpetual(cfg.silkworm, cfg.db, cfg.chainConfig.ChainID, blockNum, to, uint64(cfg.batchSize), writeChangeSets, writeReceipts, writeCallTraces)
-
-				var txErr error
-				if txc.Tx, txErr = cfg.db.BeginRw(context.Background()); txErr != nil {
-					return txErr
-				}
-				defer txc.Tx.Rollback()
-
-				// Recreate memory batch because underlying tx has changed
-				batch.Close()
-				batch = membatch.NewHashBatch(txc.Tx, quit, cfg.dirs.Tmp, logger)
-			}
-
-			// In case of any error we need to increment to have the failed block number
-			if err != nil {
-				blockNum++
-			}
-		} else {
-			err = executeBlock(block, txc.Tx, batch, cfg, *cfg.vmConfig, writeChangeSets, writeReceipts, writeCallTraces, stateStream, logger)
-		}
-
-		if err != nil {
-			if errors.Is(err, silkworm.ErrInterrupted) {
-				logger.Warn(fmt.Sprintf("[%s] Execution interrupted", logPrefix), "block", blockNum, "err", err)
-				// Remount the termination signal
-				p, err := os.FindProcess(os.Getpid())
-				if err != nil {
-					return err
-				}
-				p.Signal(os.Interrupt)
-				return nil
-			}
-			if !errors.Is(err, context.Canceled) {
-				if cfg.silkworm != nil {
-					logger.Warn(fmt.Sprintf("[%s] Execution failed", logPrefix), "block", blockNum, "err", err)
-				} else {
-					logger.Warn(fmt.Sprintf("[%s] Execution failed", logPrefix), "block", blockNum, "hash", blockHash.String(), "err", err)
-				}
-				if cfg.hd != nil && errors.Is(err, consensus.ErrInvalidBlock) {
-					cfg.hd.ReportBadHeaderPoS(blockHash, block.ParentHash() /* lastValidAncestor */)
-				}
-				if cfg.badBlockHalt {
-					return err
-				}
-			}
-			if errors.Is(err, consensus.ErrInvalidBlock) {
-				if err := u.UnwindTo(blockNum-1, BadBlock(blockHash, err), txc.Tx); err != nil {
-					return err
-				}
-			} else {
-				if err := u.UnwindTo(blockNum-1, ExecUnwind, txc.Tx); err != nil {
-					return err
-				}
-			}
-			break Loop
-		}
-		stageProgress = blockNum
-
-		metrics.UpdateBlockConsumerPostExecutionDelay(block.Time(), blockNum, logger)
-
-		shouldUpdateProgress := batch.BatchSize() >= int(cfg.batchSize)
-		if shouldUpdateProgress {
-			commitTime := time.Now()
-			if err = batch.Flush(ctx, txc.Tx); err != nil {
-				return err
-			}
-
-			if err = s.Update(txc.Tx, stageProgress); err != nil {
-				return err
-			}
-			if !useExternalTx {
-				if err = txc.Tx.Commit(); err != nil {
-					return err
-				}
-				txc.Tx, err = cfg.db.BeginRw(context.Background())
-				if err != nil {
-					return err
-				}
-				// TODO: This creates stacked up deferrals
-				defer txc.Tx.Rollback()
-			}
-			logger.Info("Committed State", "gas reached", currentStateGas, "gasTarget", gasState, "block", blockNum, "time", time.Since(commitTime), "committedToDb", !useExternalTx)
-			currentStateGas = 0
-			batch = membatch.NewHashBatch(txc.Tx, quit, cfg.dirs.Tmp, logger)
-		}
-
-		gas = gas + block.GasUsed()
-		currentStateGas = currentStateGas + block.GasUsed()
-		select {
-		default:
-		case <-logEvery.C:
-			logBlock, logTx, logTime = logProgress(logPrefix, logBlock, logTime, blockNum, logTx, lastLogTx, gas, float64(currentStateGas)/float64(gasState), batch, logger, s.BlockNumber, to, startTime)
-			gas = 0
-			txc.Tx.CollectMetrics()
-			stages.SyncMetrics[stages.Execution].SetUint64(blockNum)
-		}
-	}
-
-	if err = s.Update(txc.Tx, stageProgress); err != nil {
-		return err
-	}
-	if err = batch.Flush(ctx, txc.Tx); err != nil {
-		return fmt.Errorf("batch commit: %w", err)
-	}
-	_, err = rawdb.IncrementStateVersion(txc.Tx)
-	if err != nil {
-		return fmt.Errorf("writing plain state version: %w", err)
-	}
-
-	//dumpPlainStateDebug(tx, nil)
-
-	if !useExternalTx {
-		if err = txc.Tx.Commit(); err != nil {
-			return err
-		}
-	}
-
-	logger.Info(fmt.Sprintf("[%s] Completed on", logPrefix), "block", stageProgress)
-	return stoppedErr
+	return nil
 }
 
 func blocksReadAhead(ctx context.Context, cfg *ExecuteBlockCfg, workers int, engine consensus.Engine, histV3 bool) (chan uint64, context.CancelFunc) {
@@ -762,51 +487,6 @@ func blocksReadAheadFunc(ctx context.Context, tx kv.Tx, cfg *ExecuteBlockCfg, bl
 	_, _ = stateReader.ReadAccountData(block.Coinbase())
 	_, _ = block, senders
 	return nil
-}
-
-func logProgress(logPrefix string, prevBlock uint64, prevTime time.Time, currentBlock uint64, prevTx, currentTx uint64, gas uint64,
-	gasState float64, batch kv.PendingMutations, logger log.Logger, from uint64, to uint64, startTime time.Time) (uint64, uint64, time.Time) {
-	currentTime := time.Now()
-	interval := currentTime.Sub(prevTime)
-	speed := float64(currentBlock-prevBlock) / (float64(interval) / float64(time.Second))
-	speedTx := float64(currentTx-prevTx) / (float64(interval) / float64(time.Second))
-	speedMgas := float64(gas) / 1_000_000 / (float64(interval) / float64(time.Second))
-
-	var m runtime.MemStats
-	dbg.ReadMemStats(&m)
-	var logpairs = []interface{}{
-		"number", currentBlock,
-		"blk/s", fmt.Sprintf("%.1f", speed),
-		"tx/s", fmt.Sprintf("%.1f", speedTx),
-		"Mgas/s", fmt.Sprintf("%.1f", speedMgas),
-		"gasState", fmt.Sprintf("%.2f", gasState),
-	}
-
-	batchSize := 0
-
-	if batch != nil {
-		batchSize = batch.BatchSize()
-		logpairs = append(logpairs, "batch", common.ByteCount(uint64(batchSize)))
-	}
-	logpairs = append(logpairs, "alloc", common.ByteCount(m.Alloc), "sys", common.ByteCount(m.Sys))
-
-	diagnostics.Send(diagnostics.BlockExecutionStatistics{
-		From:        from,
-		To:          to,
-		BlockNumber: currentBlock,
-		BlkPerSec:   speed,
-		TxPerSec:    speedTx,
-		MgasPerSec:  speedMgas,
-		GasState:    gasState,
-		Batch:       uint64(batchSize),
-		Alloc:       m.Alloc,
-		Sys:         m.Sys,
-		TimeElapsed: time.Since(startTime).Round(time.Second).Seconds(),
-	})
-
-	logger.Info(fmt.Sprintf("[%s] Executed blocks", logPrefix), logpairs...)
-
-	return currentBlock, currentTx, currentTime
 }
 
 func UnwindExecutionStage(u *UnwindState, s *StageState, txc wrap.TxContainer, ctx context.Context, cfg ExecuteBlockCfg, logger log.Logger) (err error) {

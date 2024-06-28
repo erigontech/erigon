@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 
+	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/log/v3"
 )
@@ -122,12 +123,11 @@ func (d *DiagnosticClient) runCurrentSyncStageListener(rootCtx context.Context) 
 			case <-rootCtx.Done():
 				return
 			case info := <-ch:
-				d.mu.Lock()
+
 				err := d.SetCurrentSyncStage(info)
 				if err != nil {
-					log.Error("[Diagnostics] Failed to set current stage", "err", err)
+					log.Warn("[Diagnostics] Failed to set current stage", "err", err)
 				}
-				d.mu.Unlock()
 
 				d.saveSyncStagesToDB()
 			}
@@ -223,6 +223,8 @@ func (d *DiagnosticClient) SetSubStagesList(stageId string, subStages []SyncSubS
 }
 
 func (d *DiagnosticClient) SetCurrentSyncStage(css CurrentSyncStage) error {
+	d.mu.Lock()
+	defer d.mu.Unlock()
 	stageState, err := d.GetStageState(css.Stage)
 	if err != nil {
 		return err
@@ -297,18 +299,20 @@ func (d *DiagnosticClient) GetStageState(stageId string) (StageState, error) {
 	return 0, fmt.Errorf("stage %s not found in stages list %s", stageId, stagesIdsList)
 }
 
-func ReadSyncStages(db kv.RoDB) []SyncStage {
-	data := ReadDataFromTable(db, kv.DiagSyncStages, StagesListKey)
-
-	if len(data) == 0 {
-		return []SyncStage{}
+func SyncStagesFromTX(tx kv.Tx) ([]byte, error) {
+	bytes, err := ReadDataFromTable(tx, kv.DiagSyncStages, StagesListKey)
+	if err != nil {
+		return nil, err
 	}
 
-	var info []SyncStage
+	return common.CopyBytes(bytes), nil
+}
+
+func ParseStagesList(data []byte) (info []SyncStage) {
 	err := json.Unmarshal(data, &info)
 
 	if err != nil {
-		log.Error("[Diagnostics] Failed to read stages list", "err", err)
+		log.Warn("[Diagnostics] Failed to parse stages list", "err", err)
 		return []SyncStage{}
 	} else {
 		return info

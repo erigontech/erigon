@@ -34,7 +34,6 @@ import (
 	btree2 "github.com/tidwall/btree"
 	"golang.org/x/sync/errgroup"
 
-	"github.com/ledgerwatch/erigon-lib/kv/backup"
 	"github.com/ledgerwatch/erigon-lib/log/v3"
 	"github.com/ledgerwatch/erigon-lib/recsplit/eliasfano32"
 
@@ -87,6 +86,8 @@ type Domain struct {
 	// underlying array is immutable - means it's ready for zero-copy use
 	_visibleFiles []ctxItem
 
+	integrityCheck func(name kv.Domain, fromStep, toStep uint64) bool
+
 	// replaceKeysInValues allows to replace commitment branch values with shorter keys.
 	// for commitment domain only
 	replaceKeysInValues bool
@@ -108,7 +109,7 @@ type domainCfg struct {
 	restrictSubsetFileDeletions bool
 }
 
-func NewDomain(cfg domainCfg, aggregationStep uint64, filenameBase, keysTable, valsTable, indexKeysTable, historyValsTable, indexTable string, logger log.Logger) (*Domain, error) {
+func NewDomain(cfg domainCfg, aggregationStep uint64, filenameBase, keysTable, valsTable, indexKeysTable, historyValsTable, indexTable string, integrityCheck func(name kv.Domain, fromStep, toStep uint64) bool, logger log.Logger) (*Domain, error) {
 	if cfg.hist.iiCfg.dirs.SnapDomain == "" {
 		panic("empty `dirs` variable")
 	}
@@ -122,6 +123,7 @@ func NewDomain(cfg domainCfg, aggregationStep uint64, filenameBase, keysTable, v
 		indexList:                   withBTree | withExistence,
 		replaceKeysInValues:         cfg.replaceKeysInValues,         // for commitment domain only
 		restrictSubsetFileDeletions: cfg.restrictSubsetFileDeletions, // to prevent not merged 'garbage' to delete on start
+		integrityCheck:              integrityCheck,
 	}
 
 	d._visibleFiles = []ctxItem{}
@@ -146,15 +148,15 @@ func (d *Domain) kvBtFilePath(fromStep, toStep uint64) string {
 	return filepath.Join(d.dirs.SnapDomain, fmt.Sprintf("v1-%s.%d-%d.bt", d.filenameBase, fromStep, toStep))
 }
 
-// LastStepInDB - return the latest available step in db (at-least 1 value in such step)
-func (d *Domain) LastStepInDB(tx kv.Tx) (lstInDb uint64) {
+// maxStepInDB - return the latest available step in db (at-least 1 value in such step)
+func (d *Domain) maxStepInDB(tx kv.Tx) (lstInDb uint64) {
 	lstIdx, _ := kv.LastKey(tx, d.History.indexKeysTable)
 	if len(lstIdx) == 0 {
 		return 0
 	}
 	return binary.BigEndian.Uint64(lstIdx) / d.aggregationStep
 }
-func (d *Domain) FirstStepInDB(tx kv.Tx) (lstInDb uint64) {
+func (d *Domain) minStepInDB(tx kv.Tx) (lstInDb uint64) {
 	lstIdx, _ := kv.FirstKey(tx, d.History.indexKeysTable)
 	if len(lstIdx) == 0 {
 		return 0
@@ -226,7 +228,11 @@ func (d *Domain) closeFilesAfterStep(lowerBound uint64) {
 	})
 	for _, item := range toClose {
 		d.dirtyFiles.Delete(item)
-		log.Debug(fmt.Sprintf("[snapshots] closing %s, because step %d has not enough files (was not complete). stack: %s", item.decompressor.FileName(), lowerBound, dbg.Stack()))
+		fName := ""
+		if item.decompressor != nil {
+			fName = item.decompressor.FileName()
+		}
+		log.Debug(fmt.Sprintf("[snapshots] closing %s, because step %d was not complete", fName, lowerBound))
 		item.closeFiles()
 	}
 
@@ -239,7 +245,11 @@ func (d *Domain) closeFilesAfterStep(lowerBound uint64) {
 	})
 	for _, item := range toClose {
 		d.History.dirtyFiles.Delete(item)
-		log.Debug(fmt.Sprintf("[snapshots] closing some histor files - because step %d has not enough files (was not complete)", lowerBound))
+		fName := ""
+		if item.decompressor != nil {
+			fName = item.decompressor.FileName()
+		}
+		log.Debug(fmt.Sprintf("[snapshots] closing %s, because step %d was not complete", fName, lowerBound))
 		item.closeFiles()
 	}
 
@@ -252,7 +262,11 @@ func (d *Domain) closeFilesAfterStep(lowerBound uint64) {
 	})
 	for _, item := range toClose {
 		d.History.InvertedIndex.dirtyFiles.Delete(item)
-		log.Debug(fmt.Sprintf("[snapshots] closing %s, because step %d has not enough files (was not complete)", item.decompressor.FileName(), lowerBound))
+		fName := ""
+		if item.decompressor != nil {
+			fName = item.decompressor.FileName()
+		}
+		log.Debug(fmt.Sprintf("[snapshots] closing %s, because step %d was not complete", fName, lowerBound))
 		item.closeFiles()
 	}
 }
@@ -280,6 +294,12 @@ func (d *Domain) scanStateFiles(fileNames []string) (garbageFiles []*filesItem) 
 		}
 		if startStep > endStep {
 			d.logger.Warn("File ignored by domain scan, startTxNum > endTxNum", "name", name)
+			continue
+		}
+
+		domainName, _ := kv.String2Domain(d.filenameBase)
+		if d.integrityCheck != nil && !d.integrityCheck(domainName, startStep, endStep) {
+			d.logger.Debug("[agg] skip garbage file", "name", name)
 			continue
 		}
 
@@ -615,7 +635,7 @@ func (ch *CursorHeap) Pop() interface{} {
 type DomainRoTx struct {
 	ht         *HistoryRoTx
 	d          *Domain
-	files      []ctxItem
+	files      visibleFiles
 	getters    []ArchiveGetter
 	readers    []*BtIndex
 	idxReaders []*recsplit.IndexReader
@@ -656,6 +676,7 @@ func (dt *DomainRoTx) getFromFile(i int, filekey []byte) ([]byte, bool, error) {
 	//fmt.Printf("getLatestFromBtreeColdFiles key %x shard %d %x\n", filekey, exactColdShard, v)
 	return v, true, nil
 }
+
 func (dt *DomainRoTx) DebugKVFilesWithKey(k []byte) (res []string, err error) {
 	for i := len(dt.files) - 1; i >= 0; i-- {
 		_, ok, err := dt.getFromFile(i, k)
@@ -895,8 +916,8 @@ func (sf StaticFiles) CleanupOnError() {
 func (d *Domain) buildFiles(ctx context.Context, step uint64, collation Collation, ps *background.ProgressSet) (StaticFiles, error) {
 	mxRunningFilesBuilding.Inc()
 	defer mxRunningFilesBuilding.Dec()
-	if d.filenameBase == traceFileLife {
-		d.logger.Warn("[snapshots] buildFiles", "step", step, "domain", d.filenameBase)
+	if traceFileLife != "" && d.filenameBase == traceFileLife {
+		d.logger.Warn("[agg.dbg] buildFiles", "step", step, "domain", d.filenameBase)
 	}
 
 	start := time.Now()
@@ -1216,7 +1237,7 @@ func (dt *DomainRoTx) Unwind(ctx context.Context, rwTx kv.RwTx, step, txNumUnwin
 		}
 	}
 	// Compare valsKV with prevSeenKeys
-	if _, err := dt.ht.Prune(ctx, rwTx, txNumUnwindTo, math.MaxUint64, math.MaxUint64, true, false, logEvery); err != nil {
+	if _, err := dt.ht.Prune(ctx, rwTx, txNumUnwindTo, math.MaxUint64, math.MaxUint64, true, logEvery); err != nil {
 		return fmt.Errorf("[domain][%s] unwinding, prune history to txNum=%d, step %d: %w", dt.d.filenameBase, txNumUnwindTo, step, err)
 	}
 	return nil
@@ -1328,14 +1349,18 @@ func (dt *DomainRoTx) Close() {
 	}
 	files := dt.files
 	dt.files = nil
-	for i := 0; i < len(files); i++ {
-		if files[i].src.frozen {
+	for i := range files {
+		src := files[i].src
+		if src == nil || src.frozen {
 			continue
 		}
-		refCnt := files[i].src.refcount.Add(-1)
+		refCnt := src.refcount.Add(-1)
 		//GC: last reader responsible to remove useles files: close it and delete
-		if refCnt == 0 && files[i].src.canDelete.Load() {
-			files[i].src.closeFilesAndRemove()
+		if refCnt == 0 && src.canDelete.Load() {
+			if traceFileLife != "" && dt.d.filenameBase == traceFileLife {
+				dt.d.logger.Warn("[agg.dbg] real remove at DomainRoTx.Close", "file", src.decompressor.FileName())
+			}
+			src.closeFilesAndRemove()
 		}
 	}
 	dt.ht.Close()
@@ -1412,7 +1437,7 @@ func (dt *DomainRoTx) getLatestFromDb(key []byte, roTx kv.Tx) ([]byte, uint64, b
 
 	if foundInvStep != nil {
 		foundStep := ^binary.BigEndian.Uint64(foundInvStep)
-		if LastTxNumOfStep(foundStep, dt.d.aggregationStep) >= dt.maxTxNumInDomainFiles(false) {
+		if lastTxNumOfStep(foundStep, dt.d.aggregationStep) >= dt.files.EndTxNum() {
 			valsC, err := dt.valsCursor(roTx)
 			if err != nil {
 				return nil, foundStep, false, err
@@ -1460,7 +1485,7 @@ func (dt *DomainRoTx) GetLatest(key1, key2 []byte, roTx kv.Tx) ([]byte, uint64, 
 	if traceGetLatest == dt.d.filenameBase {
 		defer func() {
 			fmt.Printf("GetLatest(%s, '%x' -> '%x') (from db=%t; istep=%x stepInFiles=%d)\n",
-				dt.d.filenameBase, key, v, found, foundStep, dt.maxTxNumInDomainFiles(false)/dt.d.aggregationStep)
+				dt.d.filenameBase, key, v, found, foundStep, dt.files.EndTxNum()/dt.d.aggregationStep)
 		}()
 	}
 
@@ -1526,11 +1551,16 @@ func (dt *DomainRoTx) CanPruneUntil(tx kv.Tx, untilTx uint64) bool {
 	return canHistory || canDomain
 }
 
+func (dt *DomainRoTx) canBuild(dbtx kv.Tx) bool { //nolint
+	maxStepInFiles := dt.files.EndTxNum() / dt.d.aggregationStep
+	return maxStepInFiles < dt.d.maxStepInDB(dbtx)
+}
+
 // checks if there is anything to prune in DOMAIN tables.
 // everything that aggregated is prunable.
 // history.CanPrune should be called separately because it responsible for different tables
 func (dt *DomainRoTx) canPruneDomainTables(tx kv.Tx, untilTx uint64) (can bool, maxStepToPrune uint64) {
-	if m := dt.maxTxNumInDomainFiles(false); m > 0 {
+	if m := dt.files.EndTxNum(); m > 0 {
 		maxStepToPrune = (m - 1) / dt.d.aggregationStep
 	}
 	var untilStep uint64
@@ -1617,7 +1647,7 @@ func (dc *DomainPruneStat) String() (kvstr string) {
 		kvstr = fmt.Sprintf("kv: %d from steps %d-%d", dc.Values, dc.MinStep, dc.MaxStep)
 	}
 	if dc.History != nil {
-		kvstr += dc.History.String()
+		kvstr += ", " + dc.History.String()
 	}
 	return kvstr
 }
@@ -1638,35 +1668,13 @@ func (dc *DomainPruneStat) Accumulate(other *DomainPruneStat) {
 	}
 }
 
-// TODO test idea. Generate 4 keys with updates for several steps. Count commitment after each prune over 4 known keys.
-//   минус локалити - не умеет отсеивать несуществующие ключи, и это не шардед индекс а кросс шардед (1 файл на все кв или еф файлы)
-
-// history prunes keys in range [txFrom; txTo), domain prunes any records with rStep <= step.
-// In case of context cancellation pruning stops and returns error, but simply could be started again straight away.
-func (dt *DomainRoTx) Warmup(ctx context.Context) (cleanup func()) {
-	ctx, cancel := context.WithCancel(ctx)
-	wg := &errgroup.Group{}
-	wg.Go(func() error {
-		backup.WarmupTable(ctx, dt.d.db, dt.d.keysTable, log.LvlDebug, 4)
-		return nil
-	})
-	wg.Go(func() error {
-		backup.WarmupTable(ctx, dt.d.db, dt.d.valsTable, log.LvlDebug, 4)
-		return nil
-	})
-	return func() {
-		cancel()
-		_ = wg.Wait()
-	}
-}
-
-func (dt *DomainRoTx) Prune(ctx context.Context, rwTx kv.RwTx, step, txFrom, txTo, limit uint64, withWarmup bool, logEvery *time.Ticker) (stat *DomainPruneStat, err error) {
+func (dt *DomainRoTx) Prune(ctx context.Context, rwTx kv.RwTx, step, txFrom, txTo, limit uint64, logEvery *time.Ticker) (stat *DomainPruneStat, err error) {
 	if limit == 0 {
 		limit = math.MaxUint64
 	}
 
 	stat = &DomainPruneStat{MinStep: math.MaxUint64}
-	if stat.History, err = dt.ht.Prune(ctx, rwTx, txFrom, txTo, limit, false, withWarmup, logEvery); err != nil {
+	if stat.History, err = dt.ht.Prune(ctx, rwTx, txFrom, txTo, limit, false, logEvery); err != nil {
 		return nil, fmt.Errorf("prune history at step %d [%d, %d): %w", step, txFrom, txTo, err)
 	}
 	canPrune, maxPrunableStep := dt.canPruneDomainTables(rwTx, txTo)
@@ -1680,11 +1688,6 @@ func (dt *DomainRoTx) Prune(ctx context.Context, rwTx kv.RwTx, step, txFrom, txT
 	st := time.Now()
 	mxPruneInProgress.Inc()
 	defer mxPruneInProgress.Dec()
-
-	if withWarmup {
-		cleanup := dt.Warmup(ctx)
-		defer cleanup()
-	}
 
 	keysCursorForDeletes, err := rwTx.RwCursorDupSort(dt.d.keysTable)
 	if err != nil {
