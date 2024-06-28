@@ -9,9 +9,11 @@ import (
 	"time"
 
 	jsoniter "github.com/json-iterator/go"
+
 	"github.com/ledgerwatch/erigon-lib/chain"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/kv"
+
 	"github.com/ledgerwatch/erigon/consensus"
 	"github.com/ledgerwatch/erigon/core"
 	"github.com/ledgerwatch/erigon/core/state"
@@ -93,7 +95,7 @@ func TraceTx(
 
 	defer cancel()
 
-	execCb := func(evm *vm.EVM, refunds bool) (*core.ExecutionResult, error) {
+	execCb := func(evm *vm.EVM, refunds bool) (*evmtypes.ExecutionResult, error) {
 		gp := new(core.GasPool).AddGas(message.Gas()).AddBlobGas(message.BlobGas())
 		return core.ApplyMessage(evm, message, gp, refunds, false /* gasBailout */)
 	}
@@ -155,10 +157,10 @@ func ExecuteTraceTx(
 	stream *jsoniter.Stream,
 	tracer vm.EVMLogger,
 	streaming bool,
-	execCb func(evm *vm.EVM, refunds bool) (*core.ExecutionResult, error),
+	execCb func(evm *vm.EVM, refunds bool) (*evmtypes.ExecutionResult, error),
 ) error {
 	// Run the transaction with tracing enabled.
-	evm := vm.NewEVM(blockCtx, txCtx, ibs, chainConfig, vm.Config{Debug: true, Tracer: tracer})
+	evm := vm.NewEVM(blockCtx, txCtx, ibs, chainConfig, vm.Config{Debug: true, Tracer: tracer, NoBaseFee: true})
 
 	var refunds = true
 	if config != nil && config.NoRefunds != nil && *config.NoRefunds {

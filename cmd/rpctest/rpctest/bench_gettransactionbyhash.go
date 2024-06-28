@@ -94,14 +94,14 @@ func BenchEthGetTransactionByHash(erigonURL, gethURL string, needCompare bool, b
 			}
 		}
 
-		for _, tx := range b.Result.Transactions {
+		for _, txn := range b.Result.Transactions {
 
 			reqGen.reqID++
 			nTransactions = nTransactions + 1
 
 			var request string
-			request = reqGen.getTransactionByHash(tx.Hash)
-			errCtx := fmt.Sprintf(" bn=%d hash=%s", bn, tx.Hash)
+			request = reqGen.getTransactionByHash(txn.Hash)
+			errCtx := fmt.Sprintf(" bn=%d hash=%s", bn, txn.Hash)
 
 			if err := requestAndCompare(request, "eth_getTransactionByHash", errCtx, reqGen, needCompare, rec, errs, resultsCh,
 				/* insertOnlyIfSuccess */ false); err != nil {

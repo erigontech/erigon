@@ -488,7 +488,7 @@ func getTransaction(txJson jsonrpc.RPCTransaction) (types.Transaction, error) {
 // If the condition above is not met, then it's considered a signed transaction.
 //
 // To manage this, we read the transactions twice, first trying to read the secretKeys,
-// and secondly to read them with the standard tx json format
+// and secondly to read them with the standard txn json format
 func signUnsignedTransactions(txs []*txWithKey, signer types.Signer) (types.Transactions, error) {
 	var signedTxs []types.Transaction
 	for i, txWithKey := range txs {
@@ -597,7 +597,7 @@ func NewHeader(env stEnv) *types.Header {
 	header.Coinbase = env.Coinbase
 	header.Difficulty = env.Difficulty
 	header.GasLimit = env.GasLimit
-	header.Number = big.NewInt(int64(env.Number))
+	header.Number = new(big.Int).SetUint64(env.Number)
 	header.Time = env.Timestamp
 	header.BaseFee = env.BaseFee
 	header.MixDigest = env.MixDigest

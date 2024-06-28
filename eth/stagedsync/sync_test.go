@@ -36,7 +36,7 @@ func TestStagesSuccess(t *testing.T) {
 		},
 		{
 			ID:          stages.Senders,
-			Description: "Recovering senders from tx signatures",
+			Description: "Recovering senders from txn signatures",
 			Forward: func(badBlockUnwind bool, s *StageState, u Unwinder, txc wrap.TxContainer, logger log.Logger) error {
 				flow = append(flow, stages.Senders)
 				return nil
@@ -76,7 +76,7 @@ func TestDisabledStages(t *testing.T) {
 		},
 		{
 			ID:          stages.Senders,
-			Description: "Recovering senders from tx signatures",
+			Description: "Recovering senders from txn signatures",
 			Forward: func(badBlockUnwind bool, s *StageState, u Unwinder, txc wrap.TxContainer, logger log.Logger) error {
 				flow = append(flow, stages.Senders)
 				return nil
@@ -116,7 +116,7 @@ func TestErroredStage(t *testing.T) {
 		},
 		{
 			ID:          stages.Senders,
-			Description: "Recovering senders from tx signatures",
+			Description: "Recovering senders from txn signatures",
 			Forward: func(badBlockUnwind bool, s *StageState, u Unwinder, txc wrap.TxContainer, logger log.Logger) error {
 				flow = append(flow, stages.Senders)
 				return nil
@@ -170,7 +170,7 @@ func TestUnwindSomeStagesBehindUnwindPoint(t *testing.T) {
 		},
 		{
 			ID:          stages.Senders,
-			Description: "Recovering senders from tx signatures",
+			Description: "Recovering senders from txn signatures",
 			Forward: func(badBlockUnwind bool, s *StageState, u Unwinder, txc wrap.TxContainer, logger log.Logger) error {
 				if s.BlockNumber == 0 {
 					if err := s.Update(txc.Tx, 1700); err != nil {
@@ -268,7 +268,7 @@ func TestUnwind(t *testing.T) {
 		},
 		{
 			ID:          stages.Senders,
-			Description: "Recovering senders from tx signatures",
+			Description: "Recovering senders from txn signatures",
 			Forward: func(badBlockUnwind bool, s *StageState, u Unwinder, txc wrap.TxContainer, logger log.Logger) error {
 				flow = append(flow, stages.Senders)
 				if !unwound {
@@ -372,7 +372,7 @@ func TestUnwindEmptyUnwinder(t *testing.T) {
 		},
 		{
 			ID:          stages.Senders,
-			Description: "Recovering senders from tx signatures",
+			Description: "Recovering senders from txn signatures",
 			Forward: func(badBlockUnwind bool, s *StageState, u Unwinder, txc wrap.TxContainer, logger log.Logger) error {
 				flow = append(flow, stages.Senders)
 				if !unwound {
@@ -436,7 +436,7 @@ func TestSyncDoTwice(t *testing.T) {
 		},
 		{
 			ID:          stages.Senders,
-			Description: "Recovering senders from tx signatures",
+			Description: "Recovering senders from txn signatures",
 			Forward: func(badBlockUnwind bool, s *StageState, u Unwinder, txc wrap.TxContainer, logger log.Logger) error {
 				flow = append(flow, stages.Senders)
 				return s.Update(txc.Tx, s.BlockNumber+300)
@@ -494,7 +494,7 @@ func TestStateSyncInterruptRestart(t *testing.T) {
 		},
 		{
 			ID:          stages.Senders,
-			Description: "Recovering senders from tx signatures",
+			Description: "Recovering senders from txn signatures",
 			Forward: func(badBlockUnwind bool, s *StageState, u Unwinder, txc wrap.TxContainer, logger log.Logger) error {
 				flow = append(flow, stages.Senders)
 				return nil
@@ -560,7 +560,7 @@ func TestSyncInterruptLongUnwind(t *testing.T) {
 		},
 		{
 			ID:          stages.Senders,
-			Description: "Recovering senders from tx signatures",
+			Description: "Recovering senders from txn signatures",
 			Forward: func(badBlockUnwind bool, s *StageState, u Unwinder, txc wrap.TxContainer, logger log.Logger) error {
 				flow = append(flow, stages.Senders)
 				if !unwound {

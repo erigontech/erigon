@@ -7,19 +7,6 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
-	"github.com/c2h5oh/datasize"
-	"github.com/ledgerwatch/erigon-lib/config3"
-	"github.com/ledgerwatch/erigon-lib/downloader/snaptype"
-	"github.com/ledgerwatch/erigon-lib/etl"
-	"github.com/ledgerwatch/erigon-lib/kv/temporal"
-	"github.com/ledgerwatch/erigon-lib/metrics"
-	"github.com/ledgerwatch/erigon-lib/seg"
-	"github.com/ledgerwatch/erigon/core/rawdb"
-	coresnaptype "github.com/ledgerwatch/erigon/core/snaptype"
-	"github.com/ledgerwatch/erigon/diagnostics"
-	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
-	"github.com/ledgerwatch/erigon/params"
-	"github.com/ledgerwatch/erigon/turbo/node"
 	"io"
 	"math"
 	"net/http"
@@ -30,32 +17,45 @@ import (
 	"strings"
 	"time"
 
+	"github.com/c2h5oh/datasize"
 	"github.com/urfave/cli/v2"
+
 	"golang.org/x/sync/semaphore"
-
-	"github.com/ledgerwatch/erigon-lib/log/v3"
-
-	"github.com/ledgerwatch/erigon-lib/common/disk"
-	"github.com/ledgerwatch/erigon-lib/common/mem"
-	"github.com/ledgerwatch/erigon/cl/clparams"
 
 	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/datadir"
 	"github.com/ledgerwatch/erigon-lib/common/dbg"
 	"github.com/ledgerwatch/erigon-lib/common/dir"
+	"github.com/ledgerwatch/erigon-lib/common/disk"
+	"github.com/ledgerwatch/erigon-lib/common/mem"
+	"github.com/ledgerwatch/erigon-lib/config3"
+	"github.com/ledgerwatch/erigon-lib/downloader"
+	"github.com/ledgerwatch/erigon-lib/downloader/snaptype"
+	"github.com/ledgerwatch/erigon-lib/etl"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/mdbx"
 	"github.com/ledgerwatch/erigon-lib/kv/rawdbv3"
+	"github.com/ledgerwatch/erigon-lib/kv/temporal"
+	"github.com/ledgerwatch/erigon-lib/log/v3"
+	"github.com/ledgerwatch/erigon-lib/metrics"
+	"github.com/ledgerwatch/erigon-lib/seg"
 	libstate "github.com/ledgerwatch/erigon-lib/state"
+	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/cmd/hack/tool/fromdb"
 	"github.com/ledgerwatch/erigon/cmd/utils"
+	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/rawdb/blockio"
+	coresnaptype "github.com/ledgerwatch/erigon/core/snaptype"
+	"github.com/ledgerwatch/erigon/diagnostics"
 	"github.com/ledgerwatch/erigon/eth/ethconfig"
 	"github.com/ledgerwatch/erigon/eth/ethconfig/estimate"
 	"github.com/ledgerwatch/erigon/eth/integrity"
+	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
+	"github.com/ledgerwatch/erigon/params"
 	erigoncli "github.com/ledgerwatch/erigon/turbo/cli"
 	"github.com/ledgerwatch/erigon/turbo/debug"
 	"github.com/ledgerwatch/erigon/turbo/logging"
+	"github.com/ledgerwatch/erigon/turbo/node"
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync/freezeblocks"
 )
 
@@ -81,9 +81,17 @@ var snapshotCommand = cli.Command{
 	},
 	Subcommands: []*cli.Command{
 		{
-			Name:   "index",
-			Action: doIndicesCommand,
-			Usage:  "Create all missed indices for snapshots. It also removing unsupported versions of existing indices and re-build them",
+			Name: "index",
+			Action: func(c *cli.Context) error {
+				dirs, l, err := datadir.New(c.String(utils.DataDirFlag.Name)).MustFlock()
+				if err != nil {
+					return err
+				}
+				defer l.Unlock()
+
+				return doIndicesCommand(c, dirs)
+			},
+			Usage: "Create all missed indices for snapshots. It also removing unsupported versions of existing indices and re-build them",
 			Flags: joinFlags([]cli.Flag{
 				&utils.DataDirFlag,
 				&SnapshotFromFlag,
@@ -91,9 +99,17 @@ var snapshotCommand = cli.Command{
 			}),
 		},
 		{
-			Name:   "retire",
-			Action: doRetireCommand,
-			Usage:  "erigon snapshots uncompress a.seg | erigon snapshots compress b.seg",
+			Name: "retire",
+			Action: func(c *cli.Context) error {
+				dirs, l, err := datadir.New(c.String(utils.DataDirFlag.Name)).MustFlock()
+				if err != nil {
+					return err
+				}
+				defer l.Unlock()
+
+				return doRetireCommand(c, dirs)
+			},
+			Usage: "erigon snapshots uncompress a.seg | erigon snapshots compress b.seg",
 			Flags: joinFlags([]cli.Flag{
 				&utils.DataDirFlag,
 				&SnapshotFromFlag,
@@ -441,13 +457,21 @@ func doIntegrity(cliCtx *cli.Context) error {
 		}
 		switch chk {
 		case integrity.BlocksTxnID:
-			return blockReader.(*freezeblocks.BlockReader).IntegrityTxnID(failFast)
+			if err := blockReader.(*freezeblocks.BlockReader).IntegrityTxnID(failFast); err != nil {
+				return err
+			}
 		case integrity.Blocks:
-			return integrity.SnapBlocksRead(chainDB, blockReader, ctx, failFast)
+			if err := integrity.SnapBlocksRead(chainDB, blockReader, ctx, failFast); err != nil {
+				return err
+			}
 		case integrity.InvertedIndex:
-			return integrity.E3EfFiles(ctx, chainDB, agg, failFast, fromStep)
+			if err := integrity.E3EfFiles(ctx, chainDB, agg, failFast, fromStep); err != nil {
+				return err
+			}
 		case integrity.HistoryNoSystemTxs:
-			return integrity.E3HistoryNoSystemTxs(ctx, chainDB, agg)
+			if err := integrity.E3HistoryNoSystemTxs(ctx, chainDB, agg); err != nil {
+				return err
+			}
 		default:
 			return fmt.Errorf("unknown check: %s", chk)
 		}
@@ -570,7 +594,7 @@ func doDecompressSpeed(cliCtx *cli.Context) error {
 	return nil
 }
 
-func doIndicesCommand(cliCtx *cli.Context) error {
+func doIndicesCommand(cliCtx *cli.Context, dirs datadir.Dirs) error {
 	logger, _, _, err := debug.Setup(cliCtx, true /* rootLogger */)
 	if err != nil {
 		return err
@@ -578,7 +602,6 @@ func doIndicesCommand(cliCtx *cli.Context) error {
 	defer logger.Info("Done")
 	ctx := cliCtx.Context
 
-	dirs := datadir.New(cliCtx.String(utils.DataDirFlag.Name))
 	rebuild := cliCtx.Bool(SnapshotRebuildFlag.Name)
 	chainDB := dbCfg(kv.ChainDB, dirs.Chaindata).MustOpen()
 	defer chainDB.Close()
@@ -624,7 +647,7 @@ func openSnaps(ctx context.Context, cfg ethconfig.BlocksFreezing, dirs datadir.D
 	if err = blockSnaps.ReopenFolder(); err != nil {
 		return
 	}
-	blockSnaps.LogStat("open")
+	blockSnaps.LogStat("block")
 
 	borSnaps = freezeblocks.NewBorRoSnapshots(cfg, dirs.Snap, 0, logger)
 	if err = borSnaps.ReopenFolder(); err != nil {
@@ -640,9 +663,10 @@ func openSnaps(ctx context.Context, cfg ethconfig.BlocksFreezing, dirs datadir.D
 		if err = csn.ReopenFolder(); err != nil {
 			return
 		}
+		csn.LogStat("caplin")
 	}
 
-	borSnaps.LogStat("bor:open")
+	borSnaps.LogStat("bor")
 	agg = openAgg(ctx, dirs, chainDB, logger)
 	err = chainDB.View(ctx, func(tx kv.Tx) error {
 		ac := agg.BeginFilesRo()
@@ -656,6 +680,13 @@ func openSnaps(ctx context.Context, cfg ethconfig.BlocksFreezing, dirs datadir.D
 	if err != nil {
 		return
 	}
+
+	ls, er := os.Stat(filepath.Join(dirs.Snap, downloader.ProhibitNewDownloadsFileName))
+	mtime := time.Time{}
+	if er == nil {
+		mtime = ls.ModTime()
+	}
+	logger.Info("[downloads]", "locked", er == nil, "at", mtime.Format("02 Jan 06 15:04 2006"))
 
 	blockReader := freezeblocks.NewBlockReader(blockSnaps, borSnaps)
 	blockWriter := blockio.NewBlockWriter()
@@ -769,7 +800,7 @@ func doCompress(cliCtx *cli.Context) error {
 
 	return nil
 }
-func doRetireCommand(cliCtx *cli.Context) error {
+func doRetireCommand(cliCtx *cli.Context, dirs datadir.Dirs) error {
 	logger, _, _, err := debug.Setup(cliCtx, true /* rootLogger */)
 	if err != nil {
 		return err
@@ -777,7 +808,6 @@ func doRetireCommand(cliCtx *cli.Context) error {
 	defer logger.Info("Done")
 	ctx := cliCtx.Context
 
-	dirs := datadir.New(cliCtx.String(utils.DataDirFlag.Name))
 	from := cliCtx.Uint64(SnapshotFromFlag.Name)
 	to := cliCtx.Uint64(SnapshotToFlag.Name)
 	every := cliCtx.Uint64(SnapshotEveryFlag.Name)
@@ -910,7 +940,7 @@ func doRetireCommand(cliCtx *cli.Context) error {
 		logEvery := time.NewTicker(30 * time.Second)
 		defer logEvery.Stop()
 
-		stat, err := ac.Prune(ctx, tx, math.MaxUint64, true, logEvery)
+		stat, err := ac.Prune(ctx, tx, math.MaxUint64, logEvery)
 		if err != nil {
 			return err
 		}
@@ -986,6 +1016,7 @@ func doUploaderCommand(cliCtx *cli.Context) error {
 		log.Error("Erigon startup", "err", err)
 		return err
 	}
+	defer ethNode.Close()
 
 	diagnostics.Setup(cliCtx, ethNode, metricsMux, pprofMux)
 
@@ -1006,7 +1037,8 @@ func dbCfg(label kv.Label, path string) mdbx.MdbxOpts {
 	return opts
 }
 func openAgg(ctx context.Context, dirs datadir.Dirs, chainDB kv.RwDB, logger log.Logger) *libstate.Aggregator {
-	agg, err := libstate.NewAggregator(ctx, dirs, config3.HistoryV3AggregationStep, chainDB, logger)
+	cr := rawdb.NewCanonicalReader()
+	agg, err := libstate.NewAggregator(ctx, dirs, config3.HistoryV3AggregationStep, chainDB, cr, logger)
 	if err != nil {
 		panic(err)
 	}

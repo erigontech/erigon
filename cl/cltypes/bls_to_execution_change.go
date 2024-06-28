@@ -12,8 +12,8 @@ import (
 // Change to EL engine
 type BLSToExecutionChange struct {
 	ValidatorIndex uint64            `json:"validator_index,string"`
-	From           libcommon.Bytes48 `json:"from"`
-	To             libcommon.Address `json:"to"`
+	From           libcommon.Bytes48 `json:"from_bls_pubkey"`
+	To             libcommon.Address `json:"to_execution_address"`
 }
 
 func (b *BLSToExecutionChange) EncodeSSZ(buf []byte) ([]byte, error) {

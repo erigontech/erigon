@@ -12,7 +12,7 @@ import (
 
 // PruneBorBlocks - delete [1, to) old blocks after moving it to snapshots.
 // keeps genesis in db: [1, to)
-// doesn't change sequences of kv.EthTx and kv.NonCanonicalTxs
+// doesn't change sequences of kv.EthTx
 // doesn't delete Receipts, Senders, Canonical markers, TotalDifficulty
 func PruneBorBlocks(tx kv.RwTx, blockTo uint64, blocksDeleteLimit int, SpanIdAt func(number uint64) uint64) (deleted int, err error) {
 	c, err := tx.Cursor(kv.BorEventNums)

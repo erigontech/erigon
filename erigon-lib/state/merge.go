@@ -27,6 +27,8 @@ import (
 	"path/filepath"
 	"strings"
 
+	btree2 "github.com/tidwall/btree"
+
 	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/background"
 	"github.com/ledgerwatch/erigon-lib/common/dir"
@@ -38,7 +40,7 @@ import (
 )
 
 func (d *Domain) dirtyFilesEndTxNumMinimax() uint64 {
-	minimax := d.History.endTxNumMinimax()
+	minimax := d.History.dirtyFilesEndTxNumMinimax()
 	if _max, ok := d.dirtyFiles.Max(); ok {
 		endTxNum := _max.endTxNum
 		if minimax == 0 || endTxNum < minimax {
@@ -48,7 +50,7 @@ func (d *Domain) dirtyFilesEndTxNumMinimax() uint64 {
 	return minimax
 }
 
-func (ii *InvertedIndex) endTxNumMinimax() uint64 {
+func (ii *InvertedIndex) dirtyFilesEndTxNumMinimax() uint64 {
 	var minimax uint64
 	if _max, ok := ii.dirtyFiles.Max(); ok {
 		endTxNum := _max.endTxNum
@@ -58,25 +60,11 @@ func (ii *InvertedIndex) endTxNumMinimax() uint64 {
 	}
 	return minimax
 }
-func (ii *InvertedIndex) endIndexedTxNumMinimax(needFrozen bool) uint64 {
-	var _max uint64
-	ii.dirtyFiles.Walk(func(items []*filesItem) bool {
-		for _, item := range items {
-			if item.index == nil || (needFrozen && !item.frozen) {
-				continue
-			}
-			_max = max(_max, item.endTxNum)
-		}
-		return true
-	})
-	return _max
-}
-
-func (h *History) endTxNumMinimax() uint64 {
+func (h *History) dirtyFilesEndTxNumMinimax() uint64 {
 	if h.snapshotsDisabled {
 		return math.MaxUint64
 	}
-	minimax := h.InvertedIndex.endTxNumMinimax()
+	minimax := h.InvertedIndex.dirtyFilesEndTxNumMinimax()
 	if _max, ok := h.dirtyFiles.Max(); ok {
 		endTxNum := _max.endTxNum
 		if minimax == 0 || endTxNum < minimax {
@@ -84,33 +72,6 @@ func (h *History) endTxNumMinimax() uint64 {
 		}
 	}
 	return minimax
-}
-
-func (ap *Appendable) endTxNumMinimax() uint64 {
-	var minimax uint64
-	if _max, ok := ap.dirtyFiles.Max(); ok {
-		endTxNum := _max.endTxNum
-		if minimax == 0 || endTxNum < minimax {
-			minimax = endTxNum
-		}
-	}
-	return minimax
-}
-func (h *History) endIndexedTxNumMinimax(needFrozen bool) uint64 {
-	var _max uint64
-	if h.snapshotsDisabled && h.dirtyFiles.Len() == 0 {
-		_max = math.MaxUint64
-	}
-	h.dirtyFiles.Walk(func(items []*filesItem) bool {
-		for _, item := range items {
-			if item.index == nil || (needFrozen && !item.frozen) {
-				continue
-			}
-			_max = max(_max, item.endTxNum)
-		}
-		return true
-	})
-	return min(_max, h.InvertedIndex.endIndexedTxNumMinimax(needFrozen))
 }
 
 type DomainRanges struct {
@@ -269,7 +230,7 @@ func (iit *InvertedIndexRoTx) findMergeRange(maxEndTxNum, maxSpan uint64) *Merge
 	return &MergeRange{minFound, startTxNum, endTxNum}
 }
 
-func (tx *AppendableRoTx) findMergeRange(maxEndTxNum, maxSpan uint64) (bool, uint64, uint64) {
+func (tx *AppendableRoTx) findMergeRange(maxEndTxNum, maxSpan uint64) *MergeRange {
 	var minFound bool
 	var startTxNum, endTxNum uint64
 	for _, item := range tx.files {
@@ -293,7 +254,7 @@ func (tx *AppendableRoTx) findMergeRange(maxEndTxNum, maxSpan uint64) (bool, uin
 			}
 		}
 	}
-	return minFound, startTxNum, endTxNum
+	return &MergeRange{minFound, startTxNum, endTxNum}
 }
 
 type HistoryRanges struct {
@@ -328,60 +289,6 @@ func (dt *DomainRoTx) BuildOptionalMissedIndices(ctx context.Context, ps *backgr
 
 func (iit *InvertedIndexRoTx) BuildOptionalMissedIndices(ctx context.Context, ps *background.ProgressSet) (err error) {
 	return nil
-}
-
-// endTxNum is always a multiply of aggregation step but this txnum is not available in file (it will be first tx of file to follow after that)
-func (dt *DomainRoTx) maxTxNumInDomainFiles(onlyFrozen bool) uint64 {
-	if len(dt.files) == 0 {
-		return 0
-	}
-	if !onlyFrozen {
-		return dt.files[len(dt.files)-1].endTxNum
-	}
-	for i := len(dt.files) - 1; i >= 0; i-- {
-		if !dt.files[i].src.frozen {
-			continue
-		}
-		return dt.files[i].endTxNum
-	}
-	return 0
-}
-
-func (ht *HistoryRoTx) maxTxNumInFiles(onlyFrozen bool) uint64 {
-	if len(ht.files) == 0 {
-		return 0
-	}
-	var _max uint64
-	if onlyFrozen {
-		for i := len(ht.files) - 1; i >= 0; i-- {
-			if !ht.files[i].src.frozen {
-				continue
-			}
-			_max = ht.files[i].endTxNum
-			break
-		}
-	} else {
-		_max = ht.files[len(ht.files)-1].endTxNum
-	}
-	return min(_max, ht.iit.maxTxNumInFiles(onlyFrozen))
-}
-
-func (iit *InvertedIndexRoTx) maxTxNumInFiles(onlyFrozen bool) uint64 {
-	if len(iit.files) == 0 {
-		return 0
-	}
-	if !onlyFrozen {
-		return iit.lastTxNumInFiles()
-	}
-
-	// files contains [frozen..., cold...] in that order
-	for i := len(iit.files) - 1; i >= 0; i-- {
-		if !iit.files[i].src.frozen {
-			continue
-		}
-		return iit.files[i].endTxNum
-	}
-	return 0
 }
 
 // staticFilesInRange returns list of static files with txNum in specified range [startTxNum; endTxNum)
@@ -441,13 +348,11 @@ func (iit *InvertedIndexRoTx) staticFilesInRange(startTxNum, endTxNum uint64) []
 	return files
 }
 
-func (tx *AppendableRoTx) staticFilesInRange(startTxNum, endTxNum uint64) ([]*filesItem, int) {
+func (tx *AppendableRoTx) staticFilesInRange(startTxNum, endTxNum uint64) []*filesItem {
 	files := make([]*filesItem, 0, len(tx.files))
-	var startJ int
 
 	for _, item := range tx.files {
 		if item.startTxNum < startTxNum {
-			startJ++
 			continue
 		}
 		if item.endTxNum > endTxNum {
@@ -461,7 +366,7 @@ func (tx *AppendableRoTx) staticFilesInRange(startTxNum, endTxNum uint64) ([]*fi
 		}
 	}
 
-	return files, startJ
+	return files
 }
 
 func (ht *HistoryRoTx) staticFilesInRange(r HistoryRanges) (indexFiles, historyFiles []*filesItem, err error) {
@@ -1066,7 +971,7 @@ func (ht *HistoryRoTx) mergeFiles(ctx context.Context, indexFiles, historyFiles 
 }
 
 func (d *Domain) integrateMergedDirtyFiles(valuesOuts, indexOuts, historyOuts []*filesItem, valuesIn, indexIn, historyIn *filesItem) {
-	d.History.integrateMergedFiles(indexOuts, historyOuts, indexIn, historyIn)
+	d.History.integrateMergedDirtyFiles(indexOuts, historyOuts, indexIn, historyIn)
 	if valuesIn != nil {
 		d.dirtyFiles.Set(valuesIn)
 
@@ -1210,7 +1115,7 @@ func (ap *Appendable) integrateMergedDirtyFiles(outs []*filesItem, in *filesItem
 	deleteMergeFile(ap.dirtyFiles, outs, ap.filenameBase, ap.logger)
 }
 
-func (h *History) integrateMergedFiles(indexOuts, historyOuts []*filesItem, indexIn, historyIn *filesItem) {
+func (h *History) integrateMergedDirtyFiles(indexOuts, historyOuts []*filesItem, indexIn, historyIn *filesItem) {
 	h.InvertedIndex.integrateMergedDirtyFiles(indexOuts, indexIn)
 	//TODO: handle collision
 	if historyIn != nil {
@@ -1269,6 +1174,17 @@ func (iit *InvertedIndexRoTx) cleanAfterMerge(merged *filesItem) {
 	deleteMergeFile(iit.ii.dirtyFiles, outs, iit.ii.filenameBase, iit.ii.logger)
 }
 
+func (tx *AppendableRoTx) cleanAfterMerge(merged *filesItem) {
+	if merged == nil {
+		return
+	}
+	if merged.endTxNum == 0 {
+		return
+	}
+	outs := garbage(tx.ap.dirtyFiles, tx.files, merged)
+	deleteMergeFile(tx.ap.dirtyFiles, outs, tx.ap.filenameBase, tx.ap.logger)
+}
+
 // garbage - returns list of garbage files after merge step is done. at startup pass here last frozen file
 func (dt *DomainRoTx) garbage(merged *filesItem) (outs []*filesItem) {
 	if merged == nil {
@@ -1289,7 +1205,7 @@ func (dt *DomainRoTx) garbage(merged *filesItem) (outs []*filesItem) {
 				outs = append(outs, item)
 			}
 			// delete garbage file only if it's before merged range and it has bigger file (which indexed and visible for user now - using `DomainRoTx`)
-			if item.isBefore(merged) && dt.hasCoverFile(item) {
+			if item.isBefore(merged) && hasCoverVisibleFile(dt.files, item) {
 				outs = append(outs, item)
 			}
 		}
@@ -1300,36 +1216,20 @@ func (dt *DomainRoTx) garbage(merged *filesItem) (outs []*filesItem) {
 
 // garbage - returns list of garbage files after merge step is done. at startup pass here last frozen file
 func (ht *HistoryRoTx) garbage(merged *filesItem) (outs []*filesItem) {
-	if merged == nil {
-		return
-	}
-	// `kill -9` may leave some garbage
-	// AggContext doesn't have such files, only Agg.files does
-	ht.h.dirtyFiles.Walk(func(items []*filesItem) bool {
-		for _, item := range items {
-			if item.frozen {
-				continue
-			}
-			if item.isSubsetOf(merged) {
-				outs = append(outs, item)
-			}
-			// delete garbage file only if it's before merged range and it has bigger file (which indexed and visible for user now - using `DomainRoTx`)
-			if item.isBefore(merged) && ht.hasCoverFile(item) {
-				outs = append(outs, item)
-			}
-		}
-		return true
-	})
-	return outs
+	return garbage(ht.h.dirtyFiles, ht.files, merged)
 }
 
 func (iit *InvertedIndexRoTx) garbage(merged *filesItem) (outs []*filesItem) {
+	return garbage(iit.ii.dirtyFiles, iit.files, merged)
+}
+
+func garbage(dirtyFiles *btree2.BTreeG[*filesItem], visibleFiles []ctxItem, merged *filesItem) (outs []*filesItem) {
 	if merged == nil {
 		return
 	}
 	// `kill -9` may leave some garbage
 	// AggContext doesn't have such files, only Agg.files does
-	iit.ii.dirtyFiles.Walk(func(items []*filesItem) bool {
+	dirtyFiles.Walk(func(items []*filesItem) bool {
 		for _, item := range items {
 			if item.frozen {
 				continue
@@ -1338,7 +1238,7 @@ func (iit *InvertedIndexRoTx) garbage(merged *filesItem) (outs []*filesItem) {
 				outs = append(outs, item)
 			}
 			// delete garbage file only if it's before merged range and it has bigger file (which indexed and visible for user now - using `DomainRoTx`)
-			if item.isBefore(merged) && iit.hasCoverFile(item) {
+			if item.isBefore(merged) && hasCoverVisibleFile(visibleFiles, item) {
 				outs = append(outs, item)
 			}
 		}
@@ -1346,24 +1246,8 @@ func (iit *InvertedIndexRoTx) garbage(merged *filesItem) (outs []*filesItem) {
 	})
 	return outs
 }
-func (dt *DomainRoTx) hasCoverFile(item *filesItem) bool {
-	for _, f := range dt.files {
-		if item.isSubsetOf(f.src) {
-			return true
-		}
-	}
-	return false
-}
-func (ht *HistoryRoTx) hasCoverFile(item *filesItem) bool {
-	for _, f := range ht.files {
-		if item.isSubsetOf(f.src) {
-			return true
-		}
-	}
-	return false
-}
-func (iit *InvertedIndexRoTx) hasCoverFile(item *filesItem) bool {
-	for _, f := range iit.files {
+func hasCoverVisibleFile(visibleFiles []ctxItem, item *filesItem) bool {
+	for _, f := range visibleFiles {
 		if item.isSubsetOf(f.src) {
 			return true
 		}

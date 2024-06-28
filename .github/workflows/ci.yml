@@ -13,6 +13,7 @@ on:
       - reopened
       - synchronize
       - ready_for_review
+  workflow_dispatch:
 
 concurrency:
   group: ${{ github.ref }}
@@ -26,7 +27,7 @@ jobs:
         # list of os: https://github.com/actions/virtual-environments
         os:
           - ubuntu-22.04
-          - macos-13
+          - macos-14
     runs-on: ${{ matrix.os }}
 
     steps:
@@ -57,7 +58,7 @@ jobs:
         if: runner.os == 'Linux'
         uses: golangci/golangci-lint-action@v4
         with:
-          version: v1.57.2
+          version: v1.59.1
           skip-build-cache: true
           args: --help
 

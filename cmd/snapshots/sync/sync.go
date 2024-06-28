@@ -217,7 +217,7 @@ func NewTorrentClient(config CreateNewTorrentClientConfig) (*TorrentClient, erro
 
 	cfg, err := downloadercfg.New(dirs, version, logLevel, downloadRate, uploadRate,
 		config.TorrentPort,
-		config.ConnsPerFile, 0, nil, webseedsList, config.Chain, true)
+		config.ConnsPerFile, 0, nil, webseedsList, config.Chain, true, true)
 
 	if err != nil {
 		return nil, err
