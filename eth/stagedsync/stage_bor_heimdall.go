@@ -546,10 +546,7 @@ func persistValidatorSets(
 		case <-logEvery.C:
 			if dbsize == 0 {
 				_ = snapDb.View(context.Background(), func(tx kv.Tx) error {
-					if cursor, err := tx.Cursor(kv.BorSeparate); err == nil {
-						dbsize, _ = cursor.Count()
-						cursor.Close()
-					}
+					dbsize, _ = tx.Count(kv.BorSeparate)
 					return nil
 				})
 			}
