@@ -98,7 +98,7 @@ func (e *EngineBlockDownloader) download(ctx context.Context, hashToDownload lib
 	}
 	if status == execution.ExecutionStatus_TooFarAway || status == execution.ExecutionStatus_Busy {
 		e.logger.Info("[EngineBlockDownloader] block verification skipped")
-		e.status.Store(headerdownload.Synced)
+		e.status.Store(headerdownload.Idle)
 		return
 	}
 	if status == execution.ExecutionStatus_BadBlock {
