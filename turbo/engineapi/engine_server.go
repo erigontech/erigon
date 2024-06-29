@@ -840,7 +840,7 @@ func (e *EngineServer) HandleNewPayload(
 				return &engine_types.PayloadStatus{Status: engine_types.SyncingStatus}, nil
 			}
 
-			return &engine_types.PayloadStatus{Status: engine_types.ValidStatus, LatestValidHash: (*libcommon.Hash)(&headerHash)}, nil
+			return &engine_types.PayloadStatus{Status: engine_types.ValidStatus, LatestValidHash: &headerHash}, nil
 		} else {
 			return &engine_types.PayloadStatus{Status: engine_types.SyncingStatus}, nil
 		}
