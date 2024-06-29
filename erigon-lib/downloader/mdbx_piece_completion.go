@@ -19,6 +19,7 @@ package downloader
 import (
 	"context"
 	"encoding/binary"
+	"fmt"
 	"sync"
 
 	"github.com/RoaringBitmap/roaring"
@@ -178,6 +179,7 @@ func (m *mdbxPieceCompletion) putFlushed(tx kv.RwTx, infoHash infohash.T, flushe
 
 		if setters.GetCardinality() > 0 {
 			setters.Iterate(func(piece uint32) bool {
+				fmt.Println("PUT", infoHash, piece)
 				// TODO deal with error (? don't remove from bitset ?)
 				_ = putCompletion(tx, infoHash, piece, true)
 				return true
