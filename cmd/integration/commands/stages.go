@@ -1353,12 +1353,12 @@ func allSnapshots(ctx context.Context, db kv.RoDB, logger log.Logger) (*freezebl
 			})
 
 			g.Go(func() error {
-				ls, err := os.Stat(filepath.Join(dirs.Snap, downloader.ProhibitNewDownloadsFileName))
+				ls, er := os.Stat(filepath.Join(dirs.Snap, downloader.ProhibitNewDownloadsFileName))
 				mtime := time.Time{}
-				if err == nil {
+				if er == nil {
 					mtime = ls.ModTime()
 				}
-				logger.Info("[downloads]", "locked", err == nil, "at", mtime.Format("02 Jan 06 15:04 2006"))
+				logger.Info("[downloads]", "locked", er == nil, "at", mtime.Format("02 Jan 06 15:04 2006"))
 				return nil
 			})
 

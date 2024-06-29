@@ -252,7 +252,10 @@ func (opts MdbxOpts) Open(ctx context.Context) (kv.RwDB, error) {
 	}
 	if opts.flags&mdbx.Accede != 0 || opts.flags&mdbx.Readonly != 0 {
 		for retry := 0; ; retry++ {
-			exists := dir.FileExist(filepath.Join(opts.path, "mdbx.dat"))
+			exists, err := dir.FileExist(filepath.Join(opts.path, "mdbx.dat"))
+			if err != nil {
+				return nil, err
+			}
 			if exists {
 				break
 			}
@@ -839,7 +842,6 @@ type MdbxCursor struct {
 	c          *mdbx.Cursor
 	bucketName string
 	bucketCfg  kv.TableCfgItem
-	dbi        mdbx.DBI
 	id         uint64
 }
 
@@ -853,6 +855,14 @@ func (db *MdbxKV) AllDBI() map[string]kv.DBI {
 		res[name] = cfg.DBI
 	}
 	return res
+}
+
+func (tx *MdbxTx) Count(bucket string) (uint64, error) {
+	st, err := tx.tx.StatDBI(mdbx.DBI(tx.db.buckets[bucket].DBI))
+	if err != nil {
+		return 0, err
+	}
+	return st.Entries, nil
 }
 
 func (db *MdbxKV) AllTables() kv.TableCfg {
@@ -1188,19 +1198,16 @@ func (tx *MdbxTx) statelessCursor(bucket string) (kv.RwCursor, error) {
 }
 
 func (tx *MdbxTx) Put(table string, k, v []byte) error {
-	c, err := tx.statelessCursor(table)
-	if err != nil {
-		return err
-	}
-	return c.Put(k, v)
+	return tx.tx.Put(mdbx.DBI(tx.db.buckets[table].DBI), k, v, 0)
 }
 
 func (tx *MdbxTx) Delete(table string, k []byte) error {
-	c, err := tx.statelessCursor(table)
-	if err != nil {
-		return err
+	err := tx.tx.Del(mdbx.DBI(tx.db.buckets[table].DBI), k, nil)
+	//TODO: revise the logic, why we should drop not found err? maybe we need another function for get with key error
+	if mdbx.IsNotFound(err) {
+		return nil
 	}
-	return c.Delete(k)
+	return err
 }
 
 func (tx *MdbxTx) GetOne(bucket string, k []byte) ([]byte, error) {
@@ -1330,11 +1337,11 @@ func (tx *MdbxTx) Cursor(bucket string) (kv.Cursor, error) {
 
 func (tx *MdbxTx) stdCursor(bucket string) (kv.RwCursor, error) {
 	b := tx.db.buckets[bucket]
-	c := &MdbxCursor{bucketName: bucket, tx: tx, bucketCfg: b, dbi: mdbx.DBI(tx.db.buckets[bucket].DBI), id: tx.ID}
+	c := &MdbxCursor{bucketName: bucket, tx: tx, bucketCfg: b, id: tx.ID}
 	tx.ID++
 
 	var err error
-	c.c, err = tx.tx.OpenCursor(c.dbi)
+	c.c, err = tx.tx.OpenCursor(mdbx.DBI(tx.db.buckets[c.bucketName].DBI))
 	if err != nil {
 		return nil, fmt.Errorf("table: %s, %w, stack: %s", c.bucketName, err, dbg.Stack())
 	}
@@ -1393,14 +1400,6 @@ func (c *MdbxCursor) firstDup() ([]byte, error) {
 func (c *MdbxCursor) lastDup() ([]byte, error) {
 	_, v, err := c.c.Get(nil, nil, mdbx.LastDup)
 	return v, err
-}
-
-func (c *MdbxCursor) Count() (uint64, error) {
-	st, err := c.tx.tx.StatDBI(c.dbi)
-	if err != nil {
-		return 0, err
-	}
-	return st.Entries, nil
 }
 
 func (c *MdbxCursor) First() ([]byte, []byte, error) {
@@ -1927,27 +1926,6 @@ func (tx *MdbxTx) ForEach(bucket string, fromPrefix []byte, walker func(k, v []b
 	for k, v, err := c.Seek(fromPrefix); k != nil; k, v, err = c.Next() {
 		if err != nil {
 			return err
-		}
-		if err := walker(k, v); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
-func (tx *MdbxTx) ForPrefix(bucket string, prefix []byte, walker func(k, v []byte) error) error {
-	c, err := tx.Cursor(bucket)
-	if err != nil {
-		return err
-	}
-	defer c.Close()
-
-	for k, v, err := c.Seek(prefix); k != nil; k, v, err = c.Next() {
-		if err != nil {
-			return err
-		}
-		if !bytes.HasPrefix(k, prefix) {
-			break
 		}
 		if err := walker(k, v); err != nil {
 			return err
