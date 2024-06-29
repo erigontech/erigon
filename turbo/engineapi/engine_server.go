@@ -840,6 +840,10 @@ func (e *EngineServer) HandleNewPayload(
 				return &engine_types.PayloadStatus{Status: engine_types.SyncingStatus}, nil
 			}
 
+			if err := e.chainRW.InsertBlockAndWait(ctx, block); err != nil {
+				return nil, err
+			}
+
 			status, _, latestValidHash, err := e.chainRW.ValidateChain(ctx, headerHash, headerNumber)
 			if err != nil {
 				return nil, err
