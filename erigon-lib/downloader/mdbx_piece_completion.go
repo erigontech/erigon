@@ -173,11 +173,6 @@ func (m *mdbxPieceCompletion) Flushed(infoHash infohash.T, flushed *roaring.Bitm
 }
 
 func (m *mdbxPieceCompletion) putFlushed(tx kv.RwTx, infoHash infohash.T, flushed *roaring.Bitmap) {
-	flushed.Iterate(func(piece uint32) bool {
-		fmt.Println("FLUSH", infoHash, piece)
-		return true
-	})
-
 	if completed, ok := m.completed[infoHash]; ok {
 		setters := flushed.Clone()
 		setters.And(completed)
