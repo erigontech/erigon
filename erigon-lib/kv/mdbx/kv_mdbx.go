@@ -1535,8 +1535,7 @@ func (c *MdbxCursor) Prev() (k, v []byte, err error) {
 		if mdbx.IsNotFound(err) {
 			return nil, nil, nil
 		}
-		panic(err)
-		//return []byte{}, nil, fmt.Errorf("failed MdbxKV cursor.Prev(): %w", err)
+		return []byte{}, nil, fmt.Errorf("failed MdbxKV cursor.Prev(): %w", err)
 	}
 
 	b := c.bucketCfg
@@ -1829,9 +1828,7 @@ func (c *MdbxDupSortCursor) NextNoDup() ([]byte, []byte, error) {
 		if mdbx.IsNotFound(err) {
 			return nil, nil, nil
 		}
-
-		panic(err)
-		//return []byte{}, nil, fmt.Errorf("in NextNoDup: %w", err)
+		return []byte{}, nil, fmt.Errorf("in NextNoDup: %w", err)
 	}
 	return k, v, nil
 }

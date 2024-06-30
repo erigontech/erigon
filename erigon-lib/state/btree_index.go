@@ -15,12 +15,11 @@ import (
 	"strings"
 	"time"
 
-	"github.com/ledgerwatch/erigon-lib/common"
-
 	"github.com/c2h5oh/datasize"
 	"github.com/edsrzf/mmap-go"
 	"github.com/spaolacci/murmur3"
 
+	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/background"
 	"github.com/ledgerwatch/erigon-lib/common/dbg"
 	"github.com/ledgerwatch/erigon-lib/etl"
