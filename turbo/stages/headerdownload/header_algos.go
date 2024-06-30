@@ -130,7 +130,7 @@ func (hd *HeaderDownload) ReportBadHeader(headerHash libcommon.Hash) {
 func (hd *HeaderDownload) UnlinkHeader(headerHash libcommon.Hash) {
 	hd.lock.Lock()
 	defer hd.lock.Unlock()
-	// Find the link, remove it and all its descendands from all the queues
+	// Find the link, remove it and all its descendants from all the queues
 	if link, ok := hd.links[headerHash]; ok {
 		hd.removeUpwards(link)
 	}
@@ -427,7 +427,7 @@ func (hd *HeaderDownload) requestMoreHeadersForPOS(currentTime time.Time) (timeo
 		return
 	}
 
-	hd.logger.Debug("[downloader] Request header", "numer", anchor.blockHeight-1, "length", 192)
+	hd.logger.Debug("[downloader] Request header", "number", anchor.blockHeight-1, "length", 192)
 
 	// Request ancestors
 	request = &HeaderRequest{
@@ -686,7 +686,7 @@ func (hd *HeaderDownload) ProcessHeadersPOS(csHeaders []ChainSegmentHeader, tx k
 		headerHash := sh.Hash
 
 		if headerHash != hd.posAnchor.parentHash {
-			// Code below prevented syncing from Nethermind nodes who discregarded Reverse parameter to GetBlockHeaders messages
+			// Code below prevented syncing from Nethermind nodes who disregarded Reverse parameter to GetBlockHeaders messages
 			// With this code commented out, the sync proceeds but very slowly (getting 1 header from the response of 192 headers)
 			/*
 				if hd.posAnchor.blockHeight != 1 && sh.Number != hd.posAnchor.blockHeight-1 {
@@ -912,7 +912,7 @@ func (hi *HeaderInserter) FeedHeaderPoW(db kv.StatelessRwTx, headerReader servic
 	// Calculate total difficulty of this header using parent's total difficulty
 	td = new(big.Int).Add(parentTd, header.Difficulty)
 
-	// Now we can decide wether this header will create a change in the canonical head
+	// Now we can decide whether this header will create a change in the canonical head
 	if td.Cmp(hi.localTd) >= 0 {
 		reorg := true
 

@@ -77,7 +77,7 @@ func (a *Antiquary) Loop() error {
 	if a.downloader == nil || !a.blocks {
 		return nil // Just skip if we don't have a downloader
 	}
-	// Skip if we dont support backfilling for the current network
+	// Skip if we don't support backfilling for the current network
 	if !clparams.SupportBackfilling(a.cfg.DepositNetworkID) {
 		return nil
 	}
