@@ -1289,7 +1289,6 @@ func (dt *DomainRoTx) Unwind(ctx context.Context, rwTx kv.RwTx, step, txNumUnwin
 		return fmt.Errorf("[domain][%s] unwinding... history to txNum=%d, step %d: %w", dt.d.filenameBase, txNumUnwindTo, step, err)
 	}
 	return nil
-
 }
 
 func (d *Domain) isEmpty(tx kv.Tx) (bool, error) {
