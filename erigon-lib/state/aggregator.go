@@ -657,17 +657,17 @@ func (a *Aggregator) buildFiles(ctx context.Context, step uint64) error {
 				return err
 			}
 
-			switch ii.indexKeysTable {
-			case kv.TblLogTopicsKeys:
+			switch ii.indexTable {
+			case kv.TblLogTopicsIdx:
 				static.ivfs[kv.LogTopicIdxPos] = sf
-			case kv.TblLogAddressKeys:
+			case kv.TblLogAddressIdx:
 				static.ivfs[kv.LogAddrIdxPos] = sf
-			case kv.TblTracesFromKeys:
+			case kv.TblTracesFromIdx:
 				static.ivfs[kv.TracesFromIdxPos] = sf
-			case kv.TblTracesToKeys:
+			case kv.TblTracesToIdx:
 				static.ivfs[kv.TracesToIdxPos] = sf
 			default:
-				panic("unknown index " + ii.indexKeysTable)
+				panic("unknown index " + ii.indexTable)
 			}
 			return nil
 		})

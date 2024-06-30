@@ -482,11 +482,6 @@ func (w *historyBufferedWriter) AddPrevValue(key1, key2, original []byte, origin
 			return err
 		}
 
-		if !w.ii.discard {
-			if err := w.ii.indexKeys.Collect(w.ii.txNumBytes[:], historyKey[:lk]); err != nil {
-				return err
-			}
-		}
 		return nil
 	}
 
@@ -495,7 +490,6 @@ func (w *historyBufferedWriter) AddPrevValue(key1, key2, original []byte, origin
 	historyKey := w.historyKey[:lk+8+len(original)]
 	historyKey1 := historyKey[:lk]
 	historyVal := historyKey[lk:]
-	invIdxVal := historyKey[:lk]
 
 	if len(original) > 2048 {
 		log.Error("History value is too large while largeValues=false", "h", w.historyValsTable, "histo", string(w.historyKey[:lk]), "len", len(original), "max", len(w.historyKey)-8-len(key1)-len(key2))
@@ -504,11 +498,6 @@ func (w *historyBufferedWriter) AddPrevValue(key1, key2, original []byte, origin
 
 	if err := w.historyVals.Collect(historyKey1, historyVal); err != nil {
 		return err
-	}
-	if !w.ii.discard {
-		if err := w.ii.indexKeys.Collect(w.ii.txNumBytes[:], invIdxVal); err != nil {
-			return err
-		}
 	}
 	return nil
 }
@@ -937,21 +926,13 @@ func (h *History) isEmpty(tx kv.Tx) (bool, error) {
 		if err != nil {
 			return false, err
 		}
-		k2, err := kv.FirstKey(tx, h.indexKeysTable)
-		if err != nil {
-			return false, err
-		}
-		return k == nil && k2 == nil, nil
+		return k == nil, nil
 	}
 	k, err := kv.FirstKey(tx, h.historyValsTable)
 	if err != nil {
 		return false, err
 	}
-	k2, err := kv.FirstKey(tx, h.indexKeysTable)
-	if err != nil {
-		return false, err
-	}
-	return k == nil && k2 == nil, nil
+	return k == nil, nil
 }
 
 type HistoryRecord struct {
