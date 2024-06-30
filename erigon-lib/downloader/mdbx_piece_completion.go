@@ -50,7 +50,8 @@ func NewMdbxPieceCompletion(db kv.RwDB, logger log.Logger) (ret storage.PieceCom
 	ret = &mdbxPieceCompletion{
 		db:        db.(*mdbx.MdbxKV),
 		logger:    logger,
-		completed: map[infohash.T]*roaring.Bitmap{}}
+		completed: map[infohash.T]*roaring.Bitmap{},
+		flushed:   map[infohash.T]*roaring.Bitmap{}}
 	return
 }
 
