@@ -271,7 +271,7 @@ func (a *ApiHandler) computeAttestationsRewardsForAltair(validatorSet *solid.Val
 			idealReward.Target = int64(baseReward * rewardMultipliers[a.beaconChainCfg.TimelyTargetFlagIndex] / rewardDenominator)
 			idealReward.Source = int64(baseReward * rewardMultipliers[a.beaconChainCfg.TimelySourceFlagIndex] / rewardDenominator)
 		}
-		// Note: for altair, we dont have the inclusion delay, always 0.
+		// Note: for altair, we don't have the inclusion delay, always 0.
 		for flagIdx := range weights {
 			if flagsUnslashedIndiciesSet[flagIdx][index] {
 				if flagIdx == int(a.beaconChainCfg.TimelyHeadFlagIndex) {

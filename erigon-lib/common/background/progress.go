@@ -97,7 +97,7 @@ func (s *ProgressSet) String() string {
 	return sb.String()
 }
 
-func (s *ProgressSet) DiagnossticsData() map[string]int {
+func (s *ProgressSet) DiagnosticsData() map[string]int {
 	s.lock.RLock()
 	defer s.lock.RUnlock()
 	var arr = make(map[string]int, s.list.Len())
