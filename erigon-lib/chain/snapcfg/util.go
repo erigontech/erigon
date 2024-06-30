@@ -295,7 +295,7 @@ type Cfg struct {
 
 func (c Cfg) Seedable(info snaptype.FileInfo) bool {
 	mergeLimit := c.MergeLimit(info.Type.Enum(), info.From)
-	return info.To-info.From == mergeLimit || info.To-info.From == snaptype.Erigon2OldMergeLimit
+	return info.To-info.From == mergeLimit
 }
 
 func (c Cfg) MergeLimit(t snaptype.Enum, fromBlock uint64) uint64 {
