@@ -818,10 +818,3 @@ func (ap *Appendable) integrateDirtyFiles(sf AppendableFiles, txNumFrom, txNumTo
 func (tx *AppendableRoTx) Unwind(ctx context.Context, rwTx kv.RwTx, txFrom, txTo, limit uint64, logEvery *time.Ticker, forced bool, fn func(key []byte, txnum []byte) error) error {
 	return nil //Appendable type is unwind-less. See docs of Appendable type.
 }
-
-func (tx *AppendableRoTx) lastTxNumInFiles() uint64 {
-	if len(tx.files) == 0 {
-		return 0
-	}
-	return tx.files[len(tx.files)-1].endTxNum
-}
