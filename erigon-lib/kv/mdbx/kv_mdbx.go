@@ -842,7 +842,6 @@ type MdbxCursor struct {
 	c          *mdbx.Cursor
 	bucketName string
 	bucketCfg  kv.TableCfgItem
-	dbi        mdbx.DBI
 	id         uint64
 }
 
@@ -856,6 +855,14 @@ func (db *MdbxKV) AllDBI() map[string]kv.DBI {
 		res[name] = cfg.DBI
 	}
 	return res
+}
+
+func (tx *MdbxTx) Count(bucket string) (uint64, error) {
+	st, err := tx.tx.StatDBI(mdbx.DBI(tx.db.buckets[bucket].DBI))
+	if err != nil {
+		return 0, err
+	}
+	return st.Entries, nil
 }
 
 func (db *MdbxKV) AllTables() kv.TableCfg {
@@ -1330,11 +1337,11 @@ func (tx *MdbxTx) Cursor(bucket string) (kv.Cursor, error) {
 
 func (tx *MdbxTx) stdCursor(bucket string) (kv.RwCursor, error) {
 	b := tx.db.buckets[bucket]
-	c := &MdbxCursor{bucketName: bucket, tx: tx, bucketCfg: b, dbi: mdbx.DBI(tx.db.buckets[bucket].DBI), id: tx.ID}
+	c := &MdbxCursor{bucketName: bucket, tx: tx, bucketCfg: b, id: tx.ID}
 	tx.ID++
 
 	var err error
-	c.c, err = tx.tx.OpenCursor(c.dbi)
+	c.c, err = tx.tx.OpenCursor(mdbx.DBI(tx.db.buckets[c.bucketName].DBI))
 	if err != nil {
 		return nil, fmt.Errorf("table: %s, %w, stack: %s", c.bucketName, err, dbg.Stack())
 	}
@@ -1393,14 +1400,6 @@ func (c *MdbxCursor) firstDup() ([]byte, error) {
 func (c *MdbxCursor) lastDup() ([]byte, error) {
 	_, v, err := c.c.Get(nil, nil, mdbx.LastDup)
 	return v, err
-}
-
-func (c *MdbxCursor) Count() (uint64, error) {
-	st, err := c.tx.tx.StatDBI(c.dbi)
-	if err != nil {
-		return 0, err
-	}
-	return st.Entries, nil
 }
 
 func (c *MdbxCursor) First() ([]byte, []byte, error) {
