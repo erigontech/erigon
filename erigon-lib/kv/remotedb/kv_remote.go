@@ -19,7 +19,6 @@ package remotedb
 import (
 	"bytes"
 	"context"
-	"encoding/binary"
 	"fmt"
 	"runtime"
 	"unsafe"
@@ -269,6 +268,10 @@ func (tx *tx) statelessCursor(bucket string) (kv.Cursor, error) {
 	return c, nil
 }
 
+func (tx *tx) Count(bucket string) (uint64, error) {
+	panic("not implemented")
+}
+
 func (tx *tx) BucketSize(name string) (uint64, error) { panic("not implemented") }
 
 func (tx *tx) ForEach(bucket string, fromPrefix []byte, walker func(k, v []byte) error) error {
@@ -364,17 +367,6 @@ func (tx *tx) ListBuckets() ([]string, error) {
 // func (c *remoteCursor) Append(k []byte, v []byte) error         { panic("not supported") }
 // func (c *remoteCursor) Delete(k []byte) error                   { panic("not supported") }
 // func (c *remoteCursor) DeleteCurrent() error                    { panic("not supported") }
-func (c *remoteCursor) Count() (uint64, error) {
-	if err := c.stream.Send(&remote.Cursor{Cursor: c.id, Op: remote.Op_COUNT}); err != nil {
-		return 0, err
-	}
-	pair, err := c.stream.Recv()
-	if err != nil {
-		return 0, err
-	}
-	return binary.BigEndian.Uint64(pair.V), nil
-
-}
 
 func (c *remoteCursor) first() ([]byte, []byte, error) {
 	if err := c.stream.Send(&remote.Cursor{Cursor: c.id, Op: remote.Op_FIRST}); err != nil {
