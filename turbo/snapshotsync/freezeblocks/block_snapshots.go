@@ -1453,9 +1453,9 @@ func (br *BlockRetire) RetireBlocksInBackground(ctx context.Context, minBlockNum
 	}()
 }
 
-func (br *BlockRetire) RetireBlocks(ctx context.Context, minBlockNum uint64, maxBlockNum uint64, lvl log.Lvl, seedNewSnapshots func(downloadRequest []services.DownloadRequest) error, onDeleteSnapshots func(l []string) error, onFinish func() error) error {
-	if maxBlockNum > br.maxScheduledBlock.Load() {
-		br.maxScheduledBlock.Store(maxBlockNum)
+func (br *BlockRetire) RetireBlocks(ctx context.Context, requestedMinBlockNum uint64, requestedMaxBlockNum uint64, lvl log.Lvl, seedNewSnapshots func(downloadRequest []services.DownloadRequest) error, onDeleteSnapshots func(l []string) error, onFinish func() error) error {
+	if requestedMaxBlockNum > br.maxScheduledBlock.Load() {
+		br.maxScheduledBlock.Store(requestedMaxBlockNum)
 	}
 	includeBor := br.chainConfig.Bor != nil
 
@@ -1463,28 +1463,36 @@ func (br *BlockRetire) RetireBlocks(ctx context.Context, minBlockNum uint64, max
 		return err
 	}
 
-	var err error
-	for {
-		var ok, okBor bool
-
-		minBlockNum = max(br.blockReader.FrozenBlocks(), minBlockNum)
-		maxBlockNum = br.maxScheduledBlock.Load()
-
-		if includeBor {
-			// "bor snaps" can be behind "block snaps", it's ok: for example because of `kill -9` in the middle of merge
+	if includeBor {
+		// "bor snaps" can be behind "block snaps", it's ok:
+		//      - for example because of `kill -9` in the middle of merge
+		//      - or if manually delete bor files (for re-generation)
+		var err error
+		var okBor bool
+		for {
+			minBlockNum := max(br.blockReader.FrozenBlocks(), requestedMinBlockNum)
 			okBor, err = br.retireBorBlocks(ctx, br.blockReader.FrozenBorBlocks(), minBlockNum, lvl, seedNewSnapshots, onDeleteSnapshots)
 			if err != nil {
 				return err
 			}
+			if !okBor {
+				break
+			}
 		}
+	}
 
+	var err error
+	for {
+		var ok, okBor bool
+		minBlockNum := max(br.blockReader.FrozenBlocks(), requestedMinBlockNum)
+		maxBlockNum := br.maxScheduledBlock.Load()
 		ok, err = br.retireBlocks(ctx, minBlockNum, maxBlockNum, lvl, seedNewSnapshots, onDeleteSnapshots)
 		if err != nil {
 			return err
 		}
 
 		if includeBor {
-			minBorBlockNum := max(br.blockReader.FrozenBorBlocks(), minBlockNum)
+			minBorBlockNum := max(br.blockReader.FrozenBorBlocks(), requestedMinBlockNum)
 			okBor, err = br.retireBorBlocks(ctx, minBorBlockNum, maxBlockNum, lvl, seedNewSnapshots, onDeleteSnapshots)
 			if err != nil {
 				return err
