@@ -793,6 +793,7 @@ Supported networks: all (except Mumbai).
 - datadir/chaindata is small now - to prevent it's grow: we recommend set `--batchSize <= 2G`. And it's fine
   to `rm -rf chaindata`
 - can symlink/mount latest state to fast drive and history to cheap drive
+- ArchiveNode is default. FullNode same as in E2: --prune=hrtc
 
 ### E3 datadir structure
 
