@@ -346,10 +346,18 @@ func (api *APIImpl) getLogsV3(ctx context.Context, tx kv.TemporalTx, begin, end 
 		rawLogs := exec.GetLogs(txIndex, txn)
 
 		// `ReadReceipt` does fill `rawLogs` calulated fields. but we don't need it anymore.
-		if _, err = rawtemporaldb.ReadReceipt(tx, baseBlockTxnID+kv.TxnId(txIndex), rawLogs, txIndex, blockHash, blockNum, txn); err != nil {
+		r, err := rawtemporaldb.ReadReceipt(tx, baseBlockTxnID+kv.TxnId(txIndex), rawLogs, txIndex, blockHash, blockNum, txn)
+		if err != nil {
 			return nil, err
 		}
 		filtered := rawLogs.Filter(addrMap, crit.Topics)
+		if r == nil { // if receipt data is not released yet. fallback to manual field filling. can remove in future.
+			for _, log := range filtered {
+				log.BlockNumber = blockNum
+				log.BlockHash = blockHash
+				log.TxHash = txn.Hash()
+			}
+		}
 		logs = append(logs, filtered...)
 	}
 

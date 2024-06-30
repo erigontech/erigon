@@ -13,7 +13,8 @@ func ReadReceipt(tx kv.TemporalTx, txnID kv.TxnId, rawLogs types.Logs, txnIdx in
 		return nil, err
 	}
 	if !ok || v != nil {
-		return nil, err
+		// The transaction type and hash can be retrieved from the transaction itself
+		return nil, nil
 	}
 
 	r := &types.Receipt{}
