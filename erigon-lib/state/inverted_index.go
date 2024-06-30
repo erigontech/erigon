@@ -392,6 +392,8 @@ type invertedIndexBufferedWriter struct {
 	txNum           uint64
 	aggregationStep uint64
 	txNumBytes      [8]byte
+
+	diff *StateDiffInvertedIndex
 }
 
 // loadFunc - is analog of etl.Identity, but it signaling to etl - use .Put instead of .AppendDup - to allow duplicates
@@ -462,6 +464,9 @@ func (w *invertedIndexBufferedWriter) add(key, indexKey []byte) error {
 	}
 	if err := w.index.Collect(indexKey, w.txNumBytes[:]); err != nil {
 		return err
+	}
+	if w.diff != nil {
+		w.diff.InvertedIndexUpdate(indexKey, w.txNumBytes[:])
 	}
 	return nil
 }

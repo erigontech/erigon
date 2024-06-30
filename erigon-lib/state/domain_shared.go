@@ -133,6 +133,13 @@ func (sd *SharedDomains) SetChangesetAccumulator(acc *StateChangeSet) {
 			sd.domainWriters[idx].diff = &sd.currentChangesAccumulator.Diffs[idx]
 		}
 	}
+	for idx := range sd.iiWriters {
+		if sd.currentChangesAccumulator == nil {
+			sd.iiWriters[idx].diff = nil
+		} else {
+			sd.iiWriters[idx].diff = &sd.currentChangesAccumulator.InvertedIndiciesDiffs[idx]
+		}
+	}
 }
 
 func (sd *SharedDomains) SavePastChangesetAccumulator(blockHash common.Hash, blockNumber uint64, acc *StateChangeSet) {

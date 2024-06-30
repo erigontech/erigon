@@ -1,7 +1,6 @@
 package state
 
 import (
-	"fmt"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -10,15 +9,13 @@ import (
 func TestSerializeDeserializeDiff(t *testing.T) {
 	var d []DomainEntryDiff
 	step1, step2, step3 := [8]byte{1}, [8]byte{2}, [8]byte{3}
-	d = append(d, DomainEntryDiff{Key: []byte("key188888888"), Value: []byte("value1"), PrevStepBytes: step1[:]})
-	d = append(d, DomainEntryDiff{Key: []byte("key288888888"), Value: []byte("value2"), PrevStepBytes: step2[:]})
-	d = append(d, DomainEntryDiff{Key: []byte("key388888888"), Value: []byte("value3"), PrevStepBytes: step3[:]})
-	d = append(d, DomainEntryDiff{Key: []byte("key388888888"), Value: []byte("value3"), PrevStepBytes: step1[:]})
-
+	txNum1, txNum2, txNum3 := [8]byte{4}, [8]byte{5}, [8]byte{6}
+	d = append(d, DomainEntryDiff{Key: []byte("key188888888"), Value: []byte("value1"), PrevStepBytes: step1[:], TxNum: txNum1[:]})
+	d = append(d, DomainEntryDiff{Key: []byte("key288888888"), Value: []byte("value2"), PrevStepBytes: step2[:], TxNum: txNum2[:]})
+	d = append(d, DomainEntryDiff{Key: []byte("key388888888"), Value: []byte("value3"), PrevStepBytes: step3[:], TxNum: txNum3[:]})
+	d = append(d, DomainEntryDiff{Key: []byte("key388888888"), Value: []byte("value3"), PrevStepBytes: step1[:], TxNum: txNum1[:]})
 	serialized := SerializeDiffSet(d, nil)
-	fmt.Println(len(serialized))
 	deserialized := DeserializeDiffSet(serialized)
-
 	require.Equal(t, d, deserialized)
 }
 

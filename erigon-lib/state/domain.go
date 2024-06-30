@@ -459,7 +459,7 @@ func (w *domainBufferedWriter) PutWithPrev(key1, key2, val, preval []byte, prevS
 		return err
 	}
 	if w.diff != nil {
-		w.diff.DomainUpdate(key1, key2, preval, w.stepBytes[:], prevStep)
+		w.diff.DomainUpdate(key1, key2, preval, w.stepBytes[:], prevStep, w.txNumBytes[:])
 	}
 	return w.addValue(key1, key2, val)
 }
@@ -473,7 +473,7 @@ func (w *domainBufferedWriter) DeleteWithPrev(key1, key2, prev []byte, prevStep 
 		return err
 	}
 	if w.diff != nil {
-		w.diff.DomainUpdate(key1, key2, prev, w.stepBytes[:], prevStep)
+		w.diff.DomainUpdate(key1, key2, prev, w.stepBytes[:], prevStep, w.txNumBytes[:])
 	}
 	return w.addValue(key1, key2, nil)
 }
@@ -481,6 +481,7 @@ func (w *domainBufferedWriter) DeleteWithPrev(key1, key2, prev []byte, prevStep 
 func (w *domainBufferedWriter) SetTxNum(v uint64) {
 	w.setTxNumOnce = true
 	w.h.SetTxNum(v)
+	binary.BigEndian.PutUint64(w.txNumBytes[:], v)
 	binary.BigEndian.PutUint64(w.stepBytes[:], ^(v / w.h.ii.aggregationStep))
 }
 
@@ -510,9 +511,10 @@ type domainBufferedWriter struct {
 
 	keysTable, valsTable string
 
-	stepBytes [8]byte // current inverted step representation
-	aux       []byte
-	diff      *StateDiffDomain
+	stepBytes  [8]byte // current inverted step representation
+	txNumBytes [8]byte // current txNum representation
+	aux        []byte
+	diff       *StateDiffDomain
 
 	h *historyBufferedWriter
 }
@@ -1283,8 +1285,8 @@ func (dt *DomainRoTx) Unwind(ctx context.Context, rwTx kv.RwTx, step, txNumUnwin
 		}
 	}
 	// Compare valsKV with prevSeenKeys
-	if _, err := dt.ht.Prune(ctx, rwTx, txNumUnwindTo, math.MaxUint64, math.MaxUint64, true, logEvery); err != nil {
-		return fmt.Errorf("[domain][%s] unwinding, prune history to txNum=%d, step %d: %w", dt.d.filenameBase, txNumUnwindTo, step, err)
+	if err := dt.ht.h.Unwind(ctx, rwTx, domainDiffs); err != nil {
+		return fmt.Errorf("[domain][%s] unwinding... history to txNum=%d, step %d: %w", dt.d.filenameBase, txNumUnwindTo, step, err)
 	}
 	return nil
 
