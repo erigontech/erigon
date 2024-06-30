@@ -337,7 +337,7 @@ func RPCMarshalBlockExDeprecated(block *types.Block, inclTx bool, fullTx bool, b
 		transactions := make([]interface{}, len(txs), len(txs)+1)
 		var err error
 		for i, txn := range txs {
-			if transactions[i], err = formatTx(tx, i); err != nil {
+			if transactions[i], err = formatTx(txn, i); err != nil {
 				return nil, err
 			}
 		}
@@ -555,7 +555,7 @@ func newRPCTransactionFromBlockIndex(b *types.Block, index uint64) *RPCTransacti
 
 // newRPCTransactionFromBlockAndTxGivenIndex returns a transaction that will serialize to the RPC representation.
 func newRPCTransactionFromBlockAndTxGivenIndex(b *types.Block, txn types.Transaction, index uint64) *RPCTransaction {
-	return newRPCTransaction(tx, b.Hash(), b.NumberU64(), index, b.BaseFee())
+	return newRPCTransaction(txn, b.Hash(), b.NumberU64(), index, b.BaseFee())
 }
 
 /*

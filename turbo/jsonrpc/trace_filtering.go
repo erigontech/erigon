@@ -744,8 +744,8 @@ func (api *TraceAPIImpl) callManyTransactions(
 			txnHash = borStateSyncTxnHash
 			// we use an empty message for bor state sync txn since it gets handled differently
 		} else {
-			txnHash = tx.Hash()
-			msg, err = tx.AsMessage(*signer, header.BaseFee, rules)
+			txnHash = txn.Hash()
+			msg, err = txn.AsMessage(*signer, header.BaseFee, rules)
 			if err != nil {
 				return nil, nil, fmt.Errorf("convert txn into msg: %w", err)
 			}

@@ -593,12 +593,12 @@ func TestCopyTxs(t *testing.T) {
 
 	populateBlobTxs()
 	for _, txn := range dummyBlobTxs {
-		txs = append(txs, tx)
+		txs = append(txs, txn)
 	}
 
 	populateBlobWrapperTxs()
 	for _, txn := range dummyBlobWrapperTxs {
-		txs = append(txs, tx)
+		txs = append(txs, txn)
 	}
 
 	copies := CopyTxs(txs)

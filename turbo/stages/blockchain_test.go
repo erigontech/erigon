@@ -2169,9 +2169,9 @@ func TestEIP1559Transition(t *testing.T) {
 				Tip:        u256.Num2,
 				AccessList: accesses,
 			}
-			tx, _ = types.SignTx(tx, *signer, key1)
+			txn, _ = types.SignTx(txn, *signer, key1)
 
-			b.AddTx(tx)
+			b.AddTx(txn)
 		}
 	})
 	if err != nil {
@@ -2219,9 +2219,9 @@ func TestEIP1559Transition(t *testing.T) {
 		b.SetCoinbase(libcommon.Address{2})
 
 		var txn types.Transaction = types.NewTransaction(0, aa, u256.Num0, 30000, new(uint256.Int).Mul(new(uint256.Int).SetUint64(5), new(uint256.Int).SetUint64(params.GWei)), nil)
-		tx, _ = types.SignTx(tx, *signer, key2)
+		txn, _ = types.SignTx(txn, *signer, key2)
 
-		b.AddTx(tx)
+		b.AddTx(txn)
 	})
 	if err != nil {
 		t.Fatalf("generate chain: %v", err)
