@@ -74,7 +74,6 @@ type InvertedIndex struct {
 	// underlying array is immutable - means it's ready for zero-copy use
 	_visibleFiles []ctxItem
 
-	indexKeysTable  string // txnNum_u64 -> key (k+auto_increment)
 	indexTable      string // k -> txnNum_u64 , Needs to be table with DupSort
 	filenameBase    string
 	aggregationStep uint64
@@ -107,7 +106,6 @@ func NewInvertedIndex(cfg iiCfg, aggregationStep uint64, filenameBase, indexKeys
 		dirtyFiles:      btree2.NewBTreeGOptions[*filesItem](filesItemLess, btree2.Options{Degree: 128, NoLocks: false}),
 		aggregationStep: aggregationStep,
 		filenameBase:    filenameBase,
-		indexKeysTable:  indexKeysTable,
 		indexTable:      indexTable,
 		compressWorkers: 1,
 		integrityCheck:  integrityCheck,
@@ -382,12 +380,12 @@ func (iit *InvertedIndexRoTx) NewWriter() *invertedIndexBufferedWriter {
 }
 
 type invertedIndexBufferedWriter struct {
-	index, indexKeys *etl.Collector
-	tmpdir           string
-	discard          bool
-	filenameBase     string
+	index        *etl.Collector
+	tmpdir       string
+	discard      bool
+	filenameBase string
 
-	indexTable, indexKeysTable string
+	indexTable string
 
 	txNum           uint64
 	aggregationStep uint64
@@ -412,9 +410,6 @@ func (w *invertedIndexBufferedWriter) Flush(ctx context.Context, tx kv.RwTx) err
 	if err := w.index.Load(tx, w.indexTable, loadFunc, etl.TransformArgs{Quit: ctx.Done()}); err != nil {
 		return err
 	}
-	if err := w.indexKeys.Load(tx, w.indexKeysTable, loadFunc, etl.TransformArgs{Quit: ctx.Done()}); err != nil {
-		return err
-	}
 	w.close()
 	return nil
 }
@@ -425,9 +420,6 @@ func (w *invertedIndexBufferedWriter) close() {
 	}
 	if w.index != nil {
 		w.index.Close()
-	}
-	if w.indexKeys != nil {
-		w.indexKeys.Close()
 	}
 }
 
@@ -442,13 +434,10 @@ func (iit *InvertedIndexRoTx) newWriter(tmpdir string, discard bool) *invertedIn
 		filenameBase:    iit.ii.filenameBase,
 		aggregationStep: iit.ii.aggregationStep,
 
-		indexKeysTable: iit.ii.indexKeysTable,
-		indexTable:     iit.ii.indexTable,
+		indexTable: iit.ii.indexTable,
 		// etl collector doesn't fsync: means if have enough ram, all files produced by all collectors will be in ram
-		indexKeys: etl.NewCollector("flush "+iit.ii.indexKeysTable, tmpdir, etl.NewSortableBuffer(WALCollectorRAM), iit.ii.logger).LogLvl(log.LvlTrace),
-		index:     etl.NewCollector("flush "+iit.ii.indexTable, tmpdir, etl.NewSortableBuffer(WALCollectorRAM), iit.ii.logger).LogLvl(log.LvlTrace),
+		index: etl.NewCollector("flush "+iit.ii.indexTable, tmpdir, etl.NewSortableBuffer(WALCollectorRAM), iit.ii.logger).LogLvl(log.LvlTrace),
 	}
-	w.indexKeys.SortAndFlushInBackground(true)
 	w.index.SortAndFlushInBackground(true)
 	return w
 }
@@ -456,9 +445,6 @@ func (iit *InvertedIndexRoTx) newWriter(tmpdir string, discard bool) *invertedIn
 func (w *invertedIndexBufferedWriter) add(key, indexKey []byte) error {
 	if w.discard {
 		return nil
-	}
-	if err := w.indexKeys.Collect(w.txNumBytes[:], key); err != nil {
-		return err
 	}
 	if err := w.index.Collect(indexKey, w.txNumBytes[:]); err != nil {
 		return err
@@ -798,34 +784,55 @@ func (iit *InvertedIndexRoTx) Prune(ctx context.Context, rwTx kv.RwTx, txFrom, t
 	//		"tx until limit", limit)
 	//}()
 
-	keysCursor, err := rwTx.CursorDupSort(ii.indexKeysTable)
+	idxCursor, err := rwTx.CursorDupSort(ii.indexTable)
 	if err != nil {
 		return stat, fmt.Errorf("create %s keys cursor: %w", ii.filenameBase, err)
 	}
-	defer keysCursor.Close()
+	defer idxCursor.Close()
 	idxDelCursor, err := rwTx.RwCursorDupSort(ii.indexTable)
 	if err != nil {
 		return nil, err
 	}
 	defer idxDelCursor.Close()
+	// Attempt to move cursor to the first key
+	k, v, err := idxCursor.First()
+	if err != nil {
+		return nil, fmt.Errorf("iterate over %s index keys: %w", ii.filenameBase, err)
+	}
+
+	seekKey, err := GetExecV3PruneProgress(rwTx, ii.indexTable)
+	if err != nil {
+		return nil, err
+	}
+	// If there is progress to be restored, seek to it
+	if len(seekKey) > 0 {
+		if k, v, err = idxCursor.Seek(seekKey); err != nil {
+			return nil, fmt.Errorf("seek to %s index keys: %w", ii.filenameBase, err)
+		}
+	}
 
 	collector := etl.NewCollector("prune idx "+ii.filenameBase, ii.dirs.Tmp, etl.NewSortableBuffer(etl.BufferOptimalSize/8), ii.logger)
 	defer collector.Close()
 	collector.LogLvl(log.LvlDebug)
 	collector.SortAndFlushInBackground(true)
 
-	var txKey [8]byte
-	binary.BigEndian.PutUint64(txKey[:], txFrom)
+	// Prune [txFrom; txTo)
 
 	// Invariant: if some `txNum=N` pruned - it's pruned Fully
 	// Means: can use DeleteCurrentDuplicates all values of given `txNum`
-	for k, v, err := keysCursor.Seek(txKey[:]); k != nil; k, v, err = keysCursor.NextNoDup() {
+	for ; k != nil; k, v, err = idxCursor.Next() {
 		if err != nil {
 			return nil, fmt.Errorf("iterate over %s index keys: %w", ii.filenameBase, err)
 		}
 
-		txNum := binary.BigEndian.Uint64(k)
-		if txNum >= txTo || limit == 0 {
+		txNum := binary.BigEndian.Uint64(v)
+		if txNum >= txTo || txNum < txFrom {
+			continue
+		}
+		if limit == 0 {
+			if err := SaveExecV3PruneProgress(rwTx, ii.indexTable, k); err != nil {
+				return nil, err
+			}
 			break
 		}
 		if asserts && txNum < txFrom {
@@ -836,13 +843,8 @@ func (iit *InvertedIndexRoTx) Prune(ctx context.Context, rwTx kv.RwTx, txFrom, t
 		stat.MinTxNum = min(stat.MinTxNum, txNum)
 		stat.MaxTxNum = max(stat.MaxTxNum, txNum)
 
-		for ; v != nil; _, v, err = keysCursor.NextDup() {
-			if err != nil {
-				return nil, fmt.Errorf("iterate over %s index keys: %w", ii.filenameBase, err)
-			}
-			if err := collector.Collect(v, k); err != nil {
-				return nil, err
-			}
+		if err := collector.Collect(k, v); err != nil {
+			return nil, err
 		}
 
 		if ctx.Err() != nil {
@@ -872,21 +874,10 @@ func (iit *InvertedIndexRoTx) Prune(ctx context.Context, rwTx kv.RwTx, txFrom, t
 		}
 		return nil
 	}, etl.TransformArgs{Quit: ctx.Done()})
-
-	if stat.MinTxNum != math.MaxUint64 {
-		binary.BigEndian.PutUint64(txKey[:], stat.MinTxNum)
-		// This deletion iterator goes last to preserve invariant: if some `txNum=N` pruned - it's pruned Fully
-		for txnb, _, err := keysCursor.Seek(txKey[:]); txnb != nil; txnb, _, err = keysCursor.NextNoDup() {
-			if err != nil {
-				return nil, fmt.Errorf("iterate over %s index keys: %w", ii.filenameBase, err)
-			}
-			if binary.BigEndian.Uint64(txnb) > stat.MaxTxNum {
-				break
-			}
-			stat.PruneCountTx++
-			if err = rwTx.Delete(ii.indexKeysTable, txnb); err != nil {
-				return nil, err
-			}
+	// If we finished pruning (aka. limit was not exceeded), we can delete the progress.
+	if limit > 0 {
+		if err := SaveExecV3PruneProgress(rwTx, ii.indexTable, nil); err != nil {
+			return nil, err
 		}
 	}
 
@@ -1387,28 +1378,26 @@ func (ii *InvertedIndex) collate(ctx context.Context, step uint64, roTx kv.Tx) (
 	start := time.Now()
 	defer mxCollateTookIndex.ObserveDuration(start)
 
-	keysCursor, err := roTx.CursorDupSort(ii.indexKeysTable)
+	cursor, err := roTx.CursorDupSort(ii.indexTable)
 	if err != nil {
 		return InvertedIndexCollation{}, fmt.Errorf("create %s keys cursor: %w", ii.filenameBase, err)
 	}
-	defer keysCursor.Close()
+	defer cursor.Close()
 
 	collector := etl.NewCollector("collate idx "+ii.filenameBase, ii.iiCfg.dirs.Tmp, etl.NewSortableBuffer(CollateETLRAM), ii.logger)
 	defer collector.Close()
 	collector.LogLvl(log.LvlTrace)
 
-	var txKey [8]byte
-	binary.BigEndian.PutUint64(txKey[:], txFrom)
-
-	for k, v, err := keysCursor.Seek(txKey[:]); k != nil; k, v, err = keysCursor.Next() {
+	for k, v, err := cursor.First(); k != nil; k, v, err = cursor.Next() {
 		if err != nil {
 			return InvertedIndexCollation{}, fmt.Errorf("iterate over %s keys cursor: %w", ii.filenameBase, err)
 		}
 		txNum := binary.BigEndian.Uint64(k)
-		if txNum >= txTo { // [txFrom; txTo)
+		// [txFrom; txTo)
+		if txNum >= txTo || txNum < txFrom {
 			break
 		}
-		if err := collector.Collect(v, k); err != nil {
+		if err := collector.Collect(k, v); err != nil {
 			return InvertedIndexCollation{}, fmt.Errorf("collect %s history key [%x]=>txn %d [%x]: %w", ii.filenameBase, k, txNum, k, err)
 		}
 		select {
@@ -1626,16 +1615,14 @@ func (ii *InvertedIndex) stepsRangeInDBAsStr(tx kv.Tx) string {
 	return fmt.Sprintf("%s: %.1f", ii.filenameBase, a2-a1)
 }
 func (ii *InvertedIndex) stepsRangeInDB(tx kv.Tx) (from, to float64) {
-	fst, _ := kv.FirstKey(tx, ii.indexKeysTable)
-	if len(fst) > 0 {
-		from = float64(binary.BigEndian.Uint64(fst)) / float64(ii.aggregationStep)
-	}
-	lst, _ := kv.LastKey(tx, ii.indexKeysTable)
-	if len(lst) > 0 {
-		to = float64(binary.BigEndian.Uint64(lst)) / float64(ii.aggregationStep)
-	}
+	minTxNum := ii.minTxNumInDB(tx)
+	maxTxNum := ii.maxTxNumInDB(tx)
+
+	from = float64(minTxNum) / float64(ii.aggregationStep)
+	to = float64(maxTxNum) / float64(ii.aggregationStep)
 	if to == 0 {
 		to = from
 	}
+
 	return from, to
 }

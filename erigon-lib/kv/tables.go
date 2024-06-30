@@ -410,6 +410,11 @@ const (
 	// corresponding history tables `Tbl{Account,Storage,Code,Commitment}HistoryKeys` for history
 	// and `Tbl{Account,Storage,Code,Commitment}Idx` for inverted indices
 	TblPruningProgress = "PruningProgress"
+	// Keep track of the max and min key in the inverted indices tables
+	// Layout -----
+	// key: tableName
+	// value: [minTxNum, maxTxNum]
+	TblInvertedIndicesRanges = "InvertedIndicesRanges"
 
 	Snapshots = "Snapshots" // name -> hash
 
@@ -644,6 +649,7 @@ var ChaindataTables = []string{
 	TblTracesToIdx,
 
 	TblPruningProgress,
+	TblInvertedIndicesRanges,
 
 	Snapshots,
 	MaxTxNum,
