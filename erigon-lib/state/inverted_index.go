@@ -393,7 +393,7 @@ type invertedIndexBufferedWriter struct {
 	aggregationStep uint64
 	txNumBytes      [8]byte
 
-	diff *StateDiffInvertedIndex
+	diff *InvertedIndexChangesAccumulator
 }
 
 // loadFunc - is analog of etl.Identity, but it signaling to etl - use .Put instead of .AppendDup - to allow duplicates
@@ -897,6 +897,8 @@ func (iit *InvertedIndexRoTx) Prune(ctx context.Context, rwTx kv.RwTx, txFrom, t
 
 	return stat, err
 }
+
+//func (iit *InvertedIndexRoTx) Unwind(ctx context.Context, rwTx kv.RwTx, step, txNumUnwindTo uint64, domainDiffs []DomainEntryDiff) error {
 
 func (iit *InvertedIndexRoTx) DebugEFAllValuesAreInRange(ctx context.Context, failFast bool, fromStep uint64) error {
 	logEvery := time.NewTicker(30 * time.Second)

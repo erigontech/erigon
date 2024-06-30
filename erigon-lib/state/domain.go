@@ -514,7 +514,7 @@ type domainBufferedWriter struct {
 	stepBytes  [8]byte // current inverted step representation
 	txNumBytes [8]byte // current txNum representation
 	aux        []byte
-	diff       *StateDiffDomain
+	diff       *DomainChangesAccumulator
 
 	h *historyBufferedWriter
 }
@@ -1285,7 +1285,7 @@ func (dt *DomainRoTx) Unwind(ctx context.Context, rwTx kv.RwTx, step, txNumUnwin
 		}
 	}
 	// Compare valsKV with prevSeenKeys
-	if err := dt.ht.h.Unwind(ctx, rwTx, domainDiffs); err != nil {
+	if err := dt.ht.Unwind(ctx, rwTx, domainDiffs); err != nil {
 		return fmt.Errorf("[domain][%s] unwinding... history to txNum=%d, step %d: %w", dt.d.filenameBase, txNumUnwindTo, step, err)
 	}
 	return nil

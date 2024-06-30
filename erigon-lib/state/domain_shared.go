@@ -83,8 +83,8 @@ type SharedDomains struct {
 	iiWriters        [kv.StandaloneIdxLen]*invertedIndexBufferedWriter
 	appendableWriter [kv.AppendableLen]*appendableBufferedWriter
 
-	currentChangesAccumulator *StateChangeSet
-	pastChangesAccumulator    map[string]*StateChangeSet
+	currentChangesAccumulator *StateChangeSetAccumulator
+	pastChangesAccumulator    map[string]StateChangeset
 }
 
 type HasAggTx interface {
@@ -124,7 +124,7 @@ func NewSharedDomains(tx kv.Tx, logger log.Logger) (*SharedDomains, error) {
 	return sd, nil
 }
 
-func (sd *SharedDomains) SetChangesetAccumulator(acc *StateChangeSet) {
+func (sd *SharedDomains) SetChangesetAccumulator(acc *StateChangeSetAccumulator) {
 	sd.currentChangesAccumulator = acc
 	for idx := range sd.domainWriters {
 		if sd.currentChangesAccumulator == nil {
@@ -142,9 +142,9 @@ func (sd *SharedDomains) SetChangesetAccumulator(acc *StateChangeSet) {
 	}
 }
 
-func (sd *SharedDomains) SavePastChangesetAccumulator(blockHash common.Hash, blockNumber uint64, acc *StateChangeSet) {
+func (sd *SharedDomains) SavePastChangesetAccumulator(blockHash common.Hash, blockNumber uint64, acc StateChangeset) {
 	if sd.pastChangesAccumulator == nil {
-		sd.pastChangesAccumulator = make(map[string]*StateChangeSet)
+		sd.pastChangesAccumulator = make(map[string]StateChangeset)
 	}
 	var key [40]byte
 	binary.BigEndian.PutUint64(key[:8], blockNumber)
@@ -152,17 +152,12 @@ func (sd *SharedDomains) SavePastChangesetAccumulator(blockHash common.Hash, blo
 	sd.pastChangesAccumulator[string(key[:])] = acc
 }
 
-func (sd *SharedDomains) GetDiffset(tx kv.RwTx, blockHash common.Hash, blockNumber uint64) ([kv.DomainLen][]DomainEntryDiff, bool, error) {
+func (sd *SharedDomains) GetChangeset(tx kv.RwTx, blockHash common.Hash, blockNumber uint64) (StateChangeset, bool, error) {
 	var key [40]byte
 	binary.BigEndian.PutUint64(key[:8], blockNumber)
 	copy(key[8:], blockHash[:])
 	if changeset, ok := sd.pastChangesAccumulator[string(key[:])]; ok {
-		return [kv.DomainLen][]DomainEntryDiff{
-			changeset.Diffs[kv.AccountsDomain].GetDiffSet(),
-			changeset.Diffs[kv.StorageDomain].GetDiffSet(),
-			changeset.Diffs[kv.CodeDomain].GetDiffSet(),
-			changeset.Diffs[kv.CommitmentDomain].GetDiffSet(),
-		}, true, nil
+		return changeset, true, nil
 	}
 	return ReadDiffSet(tx, blockNumber, blockHash)
 }
@@ -828,7 +823,7 @@ func (sd *SharedDomains) Flush(ctx context.Context, tx kv.RwTx) error {
 			return err
 		}
 	}
-	sd.pastChangesAccumulator = make(map[string]*StateChangeSet)
+	sd.pastChangesAccumulator = make(map[string]StateChangeset)
 
 	defer mxFlushTook.ObserveDuration(time.Now())
 	fh, err := sd.ComputeCommitment(ctx, true, sd.BlockNum(), "flush-commitment")

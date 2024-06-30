@@ -108,7 +108,7 @@ func TestSharedDomain_Unwind(t *testing.T) {
 	require.NoError(t, err)
 	defer domains.Close()
 
-	stateChangeset := &StateChangeSet{}
+	stateChangeset := &StateChangeSetAccumulator{}
 	domains.SetChangesetAccumulator(stateChangeset)
 
 	maxTx := stepSize
@@ -164,11 +164,8 @@ Loop:
 	domains.currentChangesAccumulator = nil
 
 	acu := agg.BeginFilesRo()
-	var a [kv.DomainLen][]DomainEntryDiff
-	for idx, d := range stateChangeset.Diffs {
-		a[idx] = d.GetDiffSet()
-	}
-	err = domains.Unwind(ctx, rwTx, 0, unwindTo, &a)
+	changeset := stateChangeset.Changeset()
+	err = domains.Unwind(ctx, rwTx, 0, unwindTo, &changeset.DomainDiffs)
 	require.NoError(t, err)
 	acu.Close()
 

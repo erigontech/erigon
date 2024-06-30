@@ -1,42 +1,62 @@
 package state
 
 import (
+	"fmt"
+	"math/rand"
 	"testing"
 
+	"github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/kv/memdb"
 	"github.com/stretchr/testify/require"
 )
 
-func TestSerializeDeserializeDiff(t *testing.T) {
-	var d []DomainEntryDiff
-	step1, step2, step3 := [8]byte{1}, [8]byte{2}, [8]byte{3}
-	txNum1, txNum2, txNum3 := [8]byte{4}, [8]byte{5}, [8]byte{6}
-	d = append(d, DomainEntryDiff{Key: []byte("key188888888"), Value: []byte("value1"), PrevStepBytes: step1[:], TxNum: txNum1[:]})
-	d = append(d, DomainEntryDiff{Key: []byte("key288888888"), Value: []byte("value2"), PrevStepBytes: step2[:], TxNum: txNum2[:]})
-	d = append(d, DomainEntryDiff{Key: []byte("key388888888"), Value: []byte("value3"), PrevStepBytes: step3[:], TxNum: txNum3[:]})
-	d = append(d, DomainEntryDiff{Key: []byte("key388888888"), Value: []byte("value3"), PrevStepBytes: step1[:], TxNum: txNum1[:]})
-	serialized := SerializeDiffSet(d, nil)
-	deserialized := DeserializeDiffSet(serialized)
-	require.Equal(t, d, deserialized)
+func testAccumulator(t *testing.T) StateChangeSetAccumulator {
+	var stateChangeSetAccumulator StateChangeSetAccumulator
+	for i := 0; i < 10; i++ {
+		for idx := range stateChangeSetAccumulator.Diffs {
+			// select a random number from 1 to 10
+			prevStepBytes := [8]byte{byte(i)}
+			txNumBytes := [8]byte{byte(i % 4)}
+			randomInt := rand.Intn(99999999999)
+			key := []byte(fmt.Sprintf("key%d", randomInt))
+			value := []byte(fmt.Sprintf("value%d", randomInt))
+			stateChangeSetAccumulator.Diffs[idx].DomainUpdate(key, nil, value, prevStepBytes[:], uint64(randomInt), txNumBytes[:])
+		}
+	}
+	for i := 0; i < 10; i++ {
+		for idx := range stateChangeSetAccumulator.InvertedIndiciesDiffs {
+			// select a random number from 1 to 10
+			txNumBytes := [8]byte{byte(i % 4)}
+			randomInt := rand.Intn(99999999999)
+			key := []byte(fmt.Sprintf("key%d", randomInt))
+			stateChangeSetAccumulator.InvertedIndiciesDiffs[idx].InvertedIndexUpdate(key, txNumBytes[:])
+		}
+	}
+
+	return stateChangeSetAccumulator
+
 }
 
-func TestMergeDiffSet(t *testing.T) {
-	var d1 []DomainEntryDiff
-	step1, step2, step3 := [8]byte{1}, [8]byte{2}, [8]byte{3}
-	d1 = append(d1, DomainEntryDiff{Key: []byte("key188888888"), Value: []byte("value1"), PrevStepBytes: step1[:]})
-	d1 = append(d1, DomainEntryDiff{Key: []byte("key288888888"), Value: []byte("value2"), PrevStepBytes: step2[:]})
-	d1 = append(d1, DomainEntryDiff{Key: []byte("key388888888"), Value: []byte("value3"), PrevStepBytes: step3[:]})
+func TestChangesetAccumulator(t *testing.T) {
+	stateChangeSetAccumulator := testAccumulator(t)
+	changeset := stateChangeSetAccumulator.Changeset()
+	for idx := range changeset.DomainDiffs {
+		require.Equal(t, len(stateChangeSetAccumulator.Diffs[idx].prevValues), len(changeset.DomainDiffs[idx]))
+	}
+	for idx := range changeset.IdxDiffs {
+		require.Equal(t, len(stateChangeSetAccumulator.InvertedIndiciesDiffs[idx].keyToTxNum), len(changeset.IdxDiffs[idx]))
+	}
 
-	var d2 []DomainEntryDiff
-	step4, step5, step6 := [8]byte{4}, [8]byte{5}, [8]byte{6}
-	d2 = append(d2, DomainEntryDiff{Key: []byte("key188888888"), Value: []byte("value5"), PrevStepBytes: step5[:]})
-	d2 = append(d2, DomainEntryDiff{Key: []byte("key388888888"), Value: []byte("value6"), PrevStepBytes: step6[:]})
-	d2 = append(d2, DomainEntryDiff{Key: []byte("key488888888"), Value: []byte("value4"), PrevStepBytes: step4[:]})
+}
 
-	merged := MergeDiffSets(d1, d2)
-	require.Equal(t, 4, len(merged))
+func TestDbAndChangeset(t *testing.T) {
+	_, tx := memdb.NewTestTx(t)
 
-	require.Equal(t, d2[0], merged[0])
-	require.Equal(t, d1[1], merged[1])
-	require.Equal(t, d2[1], merged[2])
-	require.Equal(t, d2[2], merged[3])
+	stateChangeSetAccumulator := testAccumulator(t)
+
+	require.NoError(t, WriteDiffSet(tx, 0, common.Hash{}, stateChangeSetAccumulator.Changeset()))
+	gotChangeset, ok, err := ReadDiffSet(tx, 0, common.Hash{})
+	require.NoError(t, err)
+	require.True(t, ok)
+	require.Equal(t, stateChangeSetAccumulator.Changeset(), gotChangeset)
 }

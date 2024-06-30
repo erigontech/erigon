@@ -1761,7 +1761,7 @@ func TestDomain_Unwind(t *testing.T) {
 	//maxTx := uint64(float64(d.aggregationStep) * 1.5)
 	maxTx := d.aggregationStep - 2
 	currTx := maxTx - 1
-	diffSetMap := map[uint64][]DomainEntryDiff{}
+	diffSetMap := map[uint64]StateChangeset{}
 
 	writeKeys := func(t *testing.T, d *Domain, db kv.RwDB, maxTx uint64) {
 		t.Helper()
@@ -1774,21 +1774,22 @@ func TestDomain_Unwind(t *testing.T) {
 		defer writer.close()
 		var preval1, preval2, preval3, preval4 []byte
 		for i := uint64(0); i < maxTx; i++ {
-			writer.diff = &StateDiffDomain{}
+			changesetAccumulator := &StateChangeSetAccumulator{}
+			writer.diff = &changesetAccumulator.Diffs[0]
 			writer.SetTxNum(i)
 			if i%3 == 0 && i > 0 { // once in 3 tx put key3 -> value3.i and skip other keys update
 				if i%12 == 0 { // once in 12 tx delete key3 before update
 					err = writer.DeleteWithPrev([]byte("key3"), nil, preval3, 0)
 					require.NoError(t, err)
 					preval3 = nil
-					diffSetMap[i] = writer.diff.GetDiffSet()
+					diffSetMap[i] = changesetAccumulator.Changeset()
 					continue
 				}
 				v3 := []byte(fmt.Sprintf("value3.%d", i))
 				err = writer.PutWithPrev([]byte("key3"), nil, v3, preval3, 0)
 				require.NoError(t, err)
 				preval3 = v3
-				diffSetMap[i] = writer.diff.GetDiffSet()
+				diffSetMap[i] = changesetAccumulator.Changeset()
 				continue
 			}
 
@@ -1802,7 +1803,7 @@ func TestDomain_Unwind(t *testing.T) {
 			require.NoError(t, err)
 			err = writer.PutWithPrev([]byte("k4"), nil, nv3, preval4, 0)
 			require.NoError(t, err)
-			diffSetMap[i] = writer.diff.GetDiffSet()
+			diffSetMap[i] = changesetAccumulator.Changeset()
 
 			preval1, preval2, preval4 = v1, v2, nv3
 		}
@@ -1823,17 +1824,17 @@ func TestDomain_Unwind(t *testing.T) {
 		writer := dc.NewWriter()
 		defer writer.close()
 
-		totalDiff := []DomainEntryDiff{}
+		totalDiff := StateChangeset{}
 		if currTx > unwindTo {
 			totalDiff = diffSetMap[currTx]
 			fmt.Println(currTx)
 			for currentTxNum := currTx - 1; currentTxNum >= unwindTo; currentTxNum-- {
 				d := diffSetMap[currentTxNum]
-				totalDiff = MergeDiffSets(totalDiff, d)
+				totalDiff.MergeWithOlder(&d)
 			}
 		}
 
-		err = dc.Unwind(ctx, tx, unwindTo/d.aggregationStep, unwindTo, totalDiff)
+		err = dc.Unwind(ctx, tx, unwindTo/d.aggregationStep, unwindTo, totalDiff.DomainDiffs[0])
 		currTx = unwindTo
 		require.NoError(t, err)
 		dc.Close()
