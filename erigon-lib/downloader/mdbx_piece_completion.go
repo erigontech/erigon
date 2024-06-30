@@ -119,7 +119,7 @@ func (m *mdbxPieceCompletion) Set(pk metainfo.PieceKey, b bool) error {
 
 		completed.Add(uint32(pk.Index))
 
-		if flushed, ok := m.completed[pk.InfoHash]; !ok || !flushed.Contains(uint32(pk.Index)) {
+		if flushed, ok := m.flushed[pk.InfoHash]; !ok || !flushed.Contains(uint32(pk.Index)) {
 			return nil
 		}
 	}
