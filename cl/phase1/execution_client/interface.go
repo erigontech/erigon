@@ -32,6 +32,7 @@ type ExecutionEngine interface {
 	HasBlock(ctx context.Context, hash libcommon.Hash) (bool, error)
 	// Snapshots
 	FrozenBlocks(ctx context.Context) uint64
+	HasGapInSnapshots(ctx context.Context) bool
 	// Block production
 	GetAssembledBlock(ctx context.Context, id []byte) (*cltypes.Eth1Block, *engine_types.BlobsBundleV1, *big.Int, error)
 }
