@@ -68,7 +68,7 @@ type Receipt struct {
 	BlockNumber      *big.Int       `json:"blockNumber,omitempty"`
 	TransactionIndex uint           `json:"transactionIndex"`
 
-	firstLogIndex uint32 `json:"-"` // field which used to store in db and re-calc
+	FirstLogIndex uint32 `json:"-"` // field which used to store in db and re-calc
 }
 
 type receiptMarshaling struct {
@@ -330,7 +330,7 @@ func (r *ReceiptForStorage) DecodeRLP(s *rlp.Stream) error {
 		return err
 	}
 	r.CumulativeGasUsed = stored.CumulativeGasUsed
-	r.firstLogIndex = stored.FirstLogIndex
+	r.FirstLogIndex = stored.FirstLogIndex
 
 	//r.Logs = make([]*Log, len(stored.Logs))
 	//for i, log := range stored.Logs {
@@ -432,11 +432,23 @@ func (r Receipts) DeriveFields(hash libcommon.Hash, number uint64, txs Transacti
 // data and contextual infos like containing block and transactions.
 func (rl Receipts) DeriveFieldsV3ForSingleReceipt(i int, blockHash libcommon.Hash, blockNum uint64, txn Transaction) (*Receipt, error) {
 	r := rl[i]
-	logIndex := r.firstLogIndex // logIdx is unique within the block and starts from 0
+	var prevReceipt *Receipt
+	if i > 0 {
+		prevReceipt = rl[i-1]
+	}
+	err := r.DeriveFieldsV3ForSingleReceipt(i, blockHash, blockNum, txn, prevReceipt)
+	if err != nil {
+		return nil, err
+	}
+	return r, nil
+}
+
+func (r *Receipt) DeriveFieldsV3ForSingleReceipt(txnIdx int, blockHash libcommon.Hash, blockNum uint64, txn Transaction, prevReceipt *Receipt) error {
+	logIndex := r.FirstLogIndex // logIdx is unique within the block and starts from 0
 
 	sender, ok := txn.cashedSender()
 	if !ok {
-		return nil, fmt.Errorf("tx must have cached sender")
+		return fmt.Errorf("tx must have cached sender")
 	}
 
 	blockNumber := new(big.Int).SetUint64(blockNum)
@@ -447,7 +459,7 @@ func (rl Receipts) DeriveFieldsV3ForSingleReceipt(i int, blockHash libcommon.Has
 	// block location fields
 	r.BlockHash = blockHash
 	r.BlockNumber = blockNumber
-	r.TransactionIndex = uint(i)
+	r.TransactionIndex = uint(txnIdx)
 
 	// The contract address can be derived from the transaction itself
 	if txn.GetTo() == nil {
@@ -457,19 +469,20 @@ func (rl Receipts) DeriveFieldsV3ForSingleReceipt(i int, blockHash libcommon.Has
 		r.ContractAddress = crypto.CreateAddress(sender, txn.GetNonce())
 	}
 	// The used gas can be calculated based on previous r
-	if i == 0 {
+	if txnIdx == 0 {
 		r.GasUsed = r.CumulativeGasUsed
 	} else {
-		r.GasUsed = r.CumulativeGasUsed - rl[i-1].CumulativeGasUsed
+		r.GasUsed = r.CumulativeGasUsed - prevReceipt.CumulativeGasUsed
 	}
+
 	// The derived log fields can simply be set from the block and transaction
 	for j := 0; j < len(r.Logs); j++ {
 		r.Logs[j].BlockNumber = blockNum
 		r.Logs[j].BlockHash = blockHash
 		r.Logs[j].TxHash = r.TxHash
-		r.Logs[j].TxIndex = uint(i)
+		r.Logs[j].TxIndex = uint(txnIdx)
 		r.Logs[j].Index = uint(logIndex)
 		logIndex++
 	}
-	return r, nil
+	return nil
 }

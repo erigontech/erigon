@@ -5,8 +5,7 @@ import (
 	"fmt"
 
 	"github.com/RoaringBitmap/roaring"
-
-	"github.com/ledgerwatch/erigon-lib/log/v3"
+	"github.com/ledgerwatch/erigon/core/rawdb/rawtemporaldb"
 
 	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/kv"
@@ -14,6 +13,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/kv/iter"
 	"github.com/ledgerwatch/erigon-lib/kv/order"
 	"github.com/ledgerwatch/erigon-lib/kv/rawdbv3"
+	"github.com/ledgerwatch/erigon-lib/log/v3"
 
 	"github.com/ledgerwatch/erigon/cmd/state/exec3"
 	"github.com/ledgerwatch/erigon/core"
@@ -295,6 +295,8 @@ func (api *APIImpl) getLogsV3(ctx context.Context, tx kv.TemporalTx, begin, end 
 	if err != nil {
 		return logs, err
 	}
+
+	var baseBlockTxnID kv.TxnId
 	iter := rawdbv3.TxNums2BlockNums(tx, txNumbers, order.Asc)
 	defer iter.Close()
 	for iter.HasNext() {
@@ -319,6 +321,12 @@ func (api *APIImpl) getLogsV3(ctx context.Context, tx kv.TemporalTx, begin, end 
 				continue
 			}
 			blockHash = header.Hash()
+
+			rrrr := rawdb.NewCanonicalReader()
+			baseBlockTxnID, err = rrrr.BaseTxnID(tx, blockNum, blockHash)
+			if err != nil {
+				return nil, err
+			}
 			exec.ChangeBlock(header)
 		}
 
@@ -336,23 +344,23 @@ func (api *APIImpl) getLogsV3(ctx context.Context, tx kv.TemporalTx, begin, end 
 			return nil, err
 		}
 		rawLogs := exec.GetLogs(txIndex, txn)
-		//TODO: logIndex within the block! no way to calc it now
-		//logIndex := uint(0)
-		//for _, log := range rawLogs {
-		//	log.Index = logIndex
-		//	logIndex++
-		//}
+
+		// `ReadReceipt` does fill `rawLogs` calulated fields. but we don't need it anymore.
+		r, err := rawtemporaldb.ReadReceipt(tx, baseBlockTxnID+kv.TxnId(txIndex), rawLogs, txIndex, blockHash, blockNum, txn)
+		if err != nil {
+			return nil, err
+		}
 		filtered := rawLogs.Filter(addrMap, crit.Topics)
-		for _, log := range filtered {
-			log.BlockNumber = blockNum
-			log.BlockHash = blockHash
-			log.TxHash = txn.Hash()
+		if r == nil { // if receipt data is not released yet. fallback to manual field filling. can remove in future.
+			for _, log := range filtered {
+				log.BlockNumber = blockNum
+				log.BlockHash = blockHash
+				log.TxHash = txn.Hash()
+			}
 		}
 		logs = append(logs, filtered...)
 	}
 
-	//stats := api._agg.GetAndResetStats()
-	//log.Info("Finished", "duration", time.Since(start), "history queries", stats.FilesQueries, "ef search duration", stats.EfSearchTime)
 	return logs, nil
 }
 
