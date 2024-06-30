@@ -113,7 +113,7 @@ func TestMiningBenchmark(t *testing.T) {
 
 	start := time.Now()
 
-	for _, tx := range txs {
+	for _, txn := range txs {
 		buf := bytes.NewBuffer(nil)
 		txV := *tx
 		err := txV.MarshalBinary(buf)
@@ -144,7 +144,7 @@ func TestMiningBenchmark(t *testing.T) {
 
 // newRandomTxWithNonce creates a new transaction with the given nonce.
 func newRandomTxWithNonce(creation bool, nonce uint64, txPool txpool_proto.TxpoolServer) *types.Transaction {
-	var tx types.Transaction
+	var txn types.Transaction
 
 	gasPrice := uint256.NewInt(100 * params.InitialBaseFee)
 

@@ -554,7 +554,7 @@ func (s *Service) assembleBlockStats(block *types.Block, td *big.Int) *blockStat
 	}
 	// Gather the block infos from the local blockchain
 	txs := make([]txStats, 0, len(block.Transactions()))
-	for _, tx := range block.Transactions() {
+	for _, txn := range block.Transactions() {
 		txs = append(txs, txStats{tx.Hash()})
 	}
 

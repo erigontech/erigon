@@ -192,7 +192,7 @@ func (api *TraceAPIImpl) Block(ctx context.Context, blockNr rpc.BlockNumber, gas
 		return nil, err
 	}
 	signer := types.MakeSigner(cfg, blockNum, block.Time())
-	traces, syscall, err := api.callManyTransactions(ctx, tx, block, []string{TraceTypeTrace}, -1 /* all tx indices */, *gasBailOut /* gasBailOut */, signer, cfg)
+	traces, syscall, err := api.callManyTransactions(ctx, tx, block, []string{TraceTypeTrace}, -1 /* all txn indices */, *gasBailOut /* gasBailOut */, signer, cfg)
 	if err != nil {
 		return nil, err
 	}
@@ -735,8 +735,8 @@ func (api *TraceAPIImpl) callManyTransactions(
 	}
 
 	msgs := make([]types.Message, len(txs))
-	for i, tx := range txs {
-		isBorStateSyncTxn := tx == borStateSyncTxn
+	for i, txn := range txs {
+		isBorStateSyncTxn := txn == borStateSyncTxn
 		var txnHash common.Hash
 		var msg types.Message
 		var err error
@@ -747,7 +747,7 @@ func (api *TraceAPIImpl) callManyTransactions(
 			txnHash = tx.Hash()
 			msg, err = tx.AsMessage(*signer, header.BaseFee, rules)
 			if err != nil {
-				return nil, nil, fmt.Errorf("convert tx into msg: %w", err)
+				return nil, nil, fmt.Errorf("convert txn into msg: %w", err)
 			}
 
 			// gnosis might have a fee free account here

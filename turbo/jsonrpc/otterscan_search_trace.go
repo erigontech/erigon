@@ -81,7 +81,7 @@ func (api *OtterscanAPIImpl) traceBlock(dbtx kv.Tx, ctx context.Context, blockNu
 	header := block.Header()
 	rules := chainConfig.Rules(block.NumberU64(), header.Time)
 	found := false
-	for idx, tx := range block.Transactions() {
+	for idx, txn := range block.Transactions() {
 		select {
 		case <-ctx.Done():
 			return false, nil, ctx.Err()
