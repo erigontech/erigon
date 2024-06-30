@@ -19,7 +19,6 @@ package downloader
 import (
 	"context"
 	"encoding/binary"
-	"fmt"
 	"sync"
 
 	"github.com/RoaringBitmap/roaring"
@@ -142,7 +141,6 @@ func (m *mdbxPieceCompletion) Set(pk metainfo.PieceKey, b bool) error {
 }
 
 func putCompletion(tx kv.RwTx, infoHash infohash.T, index uint32, c bool) error {
-	fmt.Println("PUT", infoHash, index)
 	var key [infohash.Size + 4]byte
 	copy(key[:], infoHash[:])
 	binary.BigEndian.PutUint32(key[infohash.Size:], index)
@@ -178,11 +176,6 @@ func (m *mdbxPieceCompletion) Flushed(infoHash infohash.T, flushed *roaring.Bitm
 }
 
 func (m *mdbxPieceCompletion) putFlushed(tx kv.RwTx, infoHash infohash.T, flushed *roaring.Bitmap) {
-	flushed.Iterate(func(piece uint32) bool {
-		fmt.Println("FLSH", infoHash, piece)
-		return true
-	})
-
 	if completed, ok := m.completed[infoHash]; ok {
 		setters := flushed.Clone()
 		setters.And(completed)
