@@ -454,19 +454,6 @@ func (m *memoryMutationCursor) Close() {
 	}
 }
 
-// Count does not return accurate count, but overestimates
-func (m *memoryMutationCursor) Count() (uint64, error) {
-	cMem, err := m.memCursor.Count()
-	if err != nil {
-		return 0, err
-	}
-	cDb, err := m.cursor.Count()
-	if err != nil {
-		return 0, err
-	}
-	return cMem + cDb, nil
-}
-
 func (m *memoryMutationCursor) FirstDup() ([]byte, error) {
 	panic("Not implemented")
 }

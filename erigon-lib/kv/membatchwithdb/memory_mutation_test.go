@@ -20,8 +20,11 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/ledgerwatch/erigon-lib/common/datadir"
 	"github.com/ledgerwatch/erigon-lib/kv/memdb"
+	"github.com/ledgerwatch/erigon-lib/kv/temporal"
 	"github.com/ledgerwatch/erigon-lib/log/v3"
+	stateLib "github.com/ledgerwatch/erigon-lib/state"
 
 	"github.com/ledgerwatch/erigon-lib/kv"
 )
@@ -201,41 +204,65 @@ func TestForEach(t *testing.T) {
 	require.Equal(t, []string{"value", "value1", "value2", "value3", "value5"}, values1)
 }
 
-func TestForPrefix(t *testing.T) {
-	_, rwTx := memdb.NewTestTx(t)
+func NewTestTemporalDb(tb testing.TB) (kv.RwDB, kv.RwTx, *stateLib.Aggregator) {
+	tb.Helper()
+	db := memdb.NewStateDB(tb.TempDir())
+	tb.Cleanup(db.Close)
+
+	//cr := rawdb.NewCanonicalReader()
+	agg, err := stateLib.NewAggregator(context.Background(), datadir.New(tb.TempDir()), 16, db, nil, log.New())
+	if err != nil {
+		tb.Fatal(err)
+	}
+	tb.Cleanup(agg.Close)
+
+	_db, err := temporal.New(db, agg)
+	if err != nil {
+		tb.Fatal(err)
+	}
+	tx, err := _db.BeginTemporalRw(context.Background()) //nolint:gocritic
+	if err != nil {
+		tb.Fatal(err)
+	}
+	tb.Cleanup(tx.Rollback)
+	return _db, tx, agg
+}
+
+func TestPrefix(t *testing.T) {
+	_, rwTx, _ := NewTestTemporalDb(t)
 
 	initializeDbNonDupSort(rwTx)
 
-	batch := NewMemoryBatch(rwTx, "", log.Root())
+	kvs1, err := rwTx.Prefix(kv.HashedAccounts, []byte("AB"))
+	require.Nil(t, err)
+	defer kvs1.Close()
+	require.False(t, kvs1.HasNext())
+
 	var keys1 []string
 	var values1 []string
-
-	err := batch.ForPrefix(kv.HashedAccounts, []byte("AB"), func(k, v []byte) error {
-		keys1 = append(keys1, string(k))
-		values1 = append(values1, string(v))
-		return nil
-	})
+	kvs2, err := rwTx.Prefix(kv.HashedAccounts, []byte("AAAA"))
 	require.Nil(t, err)
-	require.Nil(t, keys1)
-	require.Nil(t, values1)
-
-	err = batch.ForPrefix(kv.HashedAccounts, []byte("AAAA"), func(k, v []byte) error {
-		keys1 = append(keys1, string(k))
-		values1 = append(values1, string(v))
-		return nil
-	})
-	require.Nil(t, err)
+	defer kvs2.Close()
+	for kvs2.HasNext() {
+		k1, v1, err := kvs2.Next()
+		require.Nil(t, err)
+		keys1 = append(keys1, string(k1))
+		values1 = append(values1, string(v1))
+	}
 	require.Equal(t, []string{"AAAA"}, keys1)
 	require.Equal(t, []string{"value"}, values1)
 
 	var keys []string
 	var values []string
-	err = batch.ForPrefix(kv.HashedAccounts, []byte("C"), func(k, v []byte) error {
-		keys = append(keys, string(k))
-		values = append(values, string(v))
-		return nil
-	})
+	kvs3, err := rwTx.Prefix(kv.HashedAccounts, []byte("C"))
 	require.Nil(t, err)
+	defer kvs3.Close()
+	for kvs3.HasNext() {
+		k1, v1, err := kvs3.Next()
+		require.Nil(t, err)
+		keys = append(keys, string(k1))
+		values = append(values, string(v1))
+	}
 	require.Equal(t, []string{"CAAA", "CBAA", "CCAA"}, keys)
 	require.Equal(t, []string{"value1", "value2", "value3"}, values)
 }
@@ -511,4 +538,52 @@ func TestSeekBothRange(t *testing.T) {
 	v, err = cursor.SeekBothRange([]byte("key3"), []byte("value3.2"))
 	require.NoError(t, err)
 	require.Equal(t, "value3.3", string(v))
+}
+
+func initializeDbHeaders(rwTx kv.RwTx) {
+	rwTx.Put(kv.Headers, []byte("A"), []byte("0"))
+	rwTx.Put(kv.Headers, []byte("A..........................._______________________________A"), []byte("1"))
+	rwTx.Put(kv.Headers, []byte("A..........................._______________________________C"), []byte("2"))
+	rwTx.Put(kv.Headers, []byte("B"), []byte("8"))
+	rwTx.Put(kv.Headers, []byte("C"), []byte("9"))
+	rwTx.Put(kv.Headers, []byte("D..........................._______________________________A"), []byte("3"))
+	rwTx.Put(kv.Headers, []byte("D..........................._______________________________C"), []byte("4"))
+}
+
+func TestGetOne(t *testing.T) {
+	_, rwTx := memdb.NewTestTx(t)
+
+	initializeDbHeaders(rwTx)
+
+	require.NoError(t, rwTx.Put(kv.Headers, []byte("A..........................."), []byte("?")))
+
+	require.NoError(t, rwTx.Delete(kv.Headers, []byte("A..........................._______________________________A")))
+	require.NoError(t, rwTx.Put(kv.Headers, []byte("B"), []byte("7")))
+	require.NoError(t, rwTx.Delete(kv.Headers, []byte("C")))
+	require.NoError(t, rwTx.Put(kv.Headers, []byte("D..........................._______________________________C"), []byte("6")))
+	require.NoError(t, rwTx.Put(kv.Headers, []byte("D..........................._______________________________E"), []byte("5")))
+
+	v, err := rwTx.GetOne(kv.Headers, []byte("A"))
+	require.NoError(t, err)
+	assert.Equal(t, []byte("0"), v)
+
+	v, err = rwTx.GetOne(kv.Headers, []byte("A..........................._______________________________C"))
+	require.NoError(t, err)
+	assert.Equal(t, []byte("2"), v)
+
+	v, err = rwTx.GetOne(kv.Headers, []byte("B"))
+	require.NoError(t, err)
+	assert.Equal(t, []byte("7"), v)
+
+	v, err = rwTx.GetOne(kv.Headers, []byte("D..........................._______________________________A"))
+	require.NoError(t, err)
+	assert.Equal(t, []byte("3"), v)
+
+	v, err = rwTx.GetOne(kv.Headers, []byte("D..........................._______________________________C"))
+	require.NoError(t, err)
+	assert.Equal(t, []byte("6"), v)
+
+	v, err = rwTx.GetOne(kv.Headers, []byte("D..........................._______________________________E"))
+	require.NoError(t, err)
+	assert.Equal(t, []byte("5"), v)
 }

@@ -229,7 +229,7 @@ type Getter interface {
 	//   - implementations of local db - stop
 	//   - implementations of remote db - do not handle this error and may finish (send all entries to client) before error happen.
 	ForEach(table string, fromPrefix []byte, walker func(k, v []byte) error) error
-	ForPrefix(table string, prefix []byte, walker func(k, v []byte) error) error
+
 	ForAmount(table string, prefix []byte, amount uint32, walker func(k, v []byte) error) error
 }
 
@@ -421,12 +421,12 @@ type Tx interface {
 	// --- High-Level deprecated methods ---
 
 	ForEach(table string, fromPrefix []byte, walker func(k, v []byte) error) error
-	ForPrefix(table string, prefix []byte, walker func(k, v []byte) error) error
 	ForAmount(table string, prefix []byte, amount uint32, walker func(k, v []byte) error) error
 
 	// Pointer to the underlying C transaction handle (e.g. *C.MDBX_txn)
 	CHandle() unsafe.Pointer
 	BucketSize(table string) (uint64, error)
+	Count(bucket string) (uint64, error)
 }
 
 // RwTx
@@ -482,8 +482,6 @@ type Cursor interface {
 	Prev() ([]byte, []byte, error)                // Prev - position at previous key
 	Last() ([]byte, []byte, error)                // Last - position at last key and last possible value
 	Current() ([]byte, []byte, error)             // Current - return key/data at current cursor position
-
-	Count() (uint64, error) // Count - fast way to calculate amount of keys in bucket. It counts all keys even if Prefix was set.
 
 	Close()
 }

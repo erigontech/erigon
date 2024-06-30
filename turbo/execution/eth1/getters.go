@@ -326,7 +326,22 @@ func (e *EthereumExecutionModule) GetForkChoice(ctx context.Context, _ *emptypb.
 }
 
 func (e *EthereumExecutionModule) FrozenBlocks(ctx context.Context, _ *emptypb.Empty) (*execution.FrozenBlocksResponse, error) {
+	tx, err := e.db.BeginRo(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("ethereumExecutionModule.GetForkChoice: could not begin database tx %w", err)
+	}
+	defer tx.Rollback()
+
+	firstNonGenesisBlockNumber, ok, err := rawdb.ReadFirstNonGenesisHeaderNumber(tx)
+	if err != nil {
+		return nil, err
+	}
+	gap := false
+	if ok {
+		gap = e.blockReader.Snapshots().SegmentsMax()+1 < firstNonGenesisBlockNumber
+	}
 	return &execution.FrozenBlocksResponse{
 		FrozenBlocks: e.blockReader.FrozenBlocks(),
+		HasGap:       gap,
 	}, nil
 }

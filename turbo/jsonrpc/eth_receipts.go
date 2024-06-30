@@ -235,43 +235,6 @@ func applyFilters(out *roaring.Bitmap, tx kv.Tx, begin, end uint64, crit filters
 	return nil
 }
 
-/*
-
-func applyFiltersV3(out *roaring64.Bitmap, tx kv.TemporalTx, begin, end uint64, crit filters.FilterCriteria) error {
-	//[from,to)
-	var fromTxNum, toTxNum uint64
-	var err error
-	if begin > 0 {
-		fromTxNum, err = rawdbv3.TxNums.Min(tx, begin)
-		if err != nil {
-			return err
-		}
-	}
-	toTxNum, err = rawdbv3.TxNums.Max(tx, end)
-	if err != nil {
-		return err
-	}
-	toTxNum++
-
-	out.AddRange(fromTxNum, toTxNum) // [from,to)
-	topicsBitmap, err := getTopicsBitmapV3(tx, crit.Topics, fromTxNum, toTxNum)
-	if err != nil {
-		return err
-	}
-	if topicsBitmap != nil {
-		out.And(topicsBitmap)
-	}
-	addrBitmap, err := getAddrsBitmapV3(tx, crit.Addresses, fromTxNum, toTxNum)
-	if err != nil {
-		return err
-	}
-	if addrBitmap != nil {
-		out.And(addrBitmap)
-	}
-	return nil
-}
-*/
-
 func applyFiltersV3(tx kv.TemporalTx, begin, end uint64, crit filters.FilterCriteria) (out iter.U64, err error) {
 	//[from,to)
 	var fromTxNum, toTxNum uint64

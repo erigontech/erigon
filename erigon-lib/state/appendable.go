@@ -195,7 +195,11 @@ func (ap *Appendable) missedAccessors() (l []*filesItem) {
 	ap.dirtyFiles.Walk(func(items []*filesItem) bool {
 		for _, item := range items {
 			fromStep, toStep := item.startTxNum/ap.aggregationStep, item.endTxNum/ap.aggregationStep
-			if !dir.FileExist(ap.accessorFilePath(fromStep, toStep)) {
+			exists, err := dir.FileExist(ap.accessorFilePath(fromStep, toStep))
+			if err != nil {
+				panic(err)
+			}
+			if !exists {
 				l = append(l, item)
 			}
 		}
@@ -253,13 +257,21 @@ func (ap *Appendable) openFiles() error {
 	var invalidFileItems []*filesItem
 	invalidFileItemsLock := sync.Mutex{}
 	ap.dirtyFiles.Walk(func(items []*filesItem) bool {
-		var err error
 		for _, item := range items {
 			item := item
 			fromStep, toStep := item.startTxNum/ap.aggregationStep, item.endTxNum/ap.aggregationStep
 			if item.decompressor == nil {
 				fPath := ap.apFilePath(fromStep, toStep)
-				if !dir.FileExist(fPath) {
+				exists, err := dir.FileExist(fPath)
+				if err != nil {
+					_, fName := filepath.Split(fPath)
+					ap.logger.Debug("[agg] Appendable.openFiles", "err", err, "f", fName)
+					invalidFileItemsLock.Lock()
+					invalidFileItems = append(invalidFileItems, item)
+					invalidFileItemsLock.Unlock()
+					continue
+				}
+				if !exists {
 					_, fName := filepath.Split(fPath)
 					ap.logger.Debug("[agg] Appendable.openFiles: file does not exists", "f", fName)
 					invalidFileItemsLock.Lock()
@@ -285,7 +297,12 @@ func (ap *Appendable) openFiles() error {
 
 			if item.index == nil {
 				fPath := ap.accessorFilePath(fromStep, toStep)
-				if dir.FileExist(fPath) {
+				exists, err := dir.FileExist(fPath)
+				if err != nil {
+					_, fName := filepath.Split(fPath)
+					ap.logger.Warn("[agg] Appendable.openFiles", "err", err, "f", fName)
+				}
+				if exists {
 					if item.index, err = recsplit.OpenIndex(fPath); err != nil {
 						_, fName := filepath.Split(fPath)
 						ap.logger.Warn("[agg] Appendable.openFiles", "err", err, "f", fName)
@@ -391,6 +408,17 @@ func (ap *Appendable) getFromDB(k []byte, dbtx kv.Tx) ([]byte, bool, error) {
 	return v, v != nil, err
 }
 
+func (ap *Appendable) maxTxNumInDB(dbtx kv.Tx) (txNum uint64, err error) { //nolint
+	first, err := kv.LastKey(dbtx, ap.table)
+	if err != nil {
+		return 0, err
+	}
+	if len(first) == 0 {
+		return 0, nil
+	}
+	return binary.BigEndian.Uint64(first), nil
+}
+
 // Add - !NotThreadSafe. Must use WalRLock/BatchHistoryWriteEnd
 func (w *appendableBufferedWriter) Append(ts kv.TxnId, v []byte) error {
 	if w.discard {
@@ -472,17 +500,18 @@ func (tx *AppendableRoTx) Close() {
 	}
 	files := tx.files
 	tx.files = nil
-	for i := 0; i < len(files); i++ {
-		if files[i].src.frozen {
+	for i := range files {
+		src := files[i].src
+		if src == nil || src.frozen {
 			continue
 		}
-		refCnt := files[i].src.refcount.Add(-1)
+		refCnt := src.refcount.Add(-1)
 		//GC: last reader responsible to remove useles files: close it and delete
-		if refCnt == 0 && files[i].src.canDelete.Load() {
-			if tx.ap.filenameBase == traceFileLife {
-				tx.ap.logger.Warn(fmt.Sprintf("[agg] real remove at ctx close: %s", files[i].src.decompressor.FileName()))
+		if refCnt == 0 && src.canDelete.Load() {
+			if traceFileLife != "" && tx.ap.filenameBase == traceFileLife {
+				tx.ap.logger.Warn("[agg.dbg] real remove at AppendableRoTx.Close", "file", src.decompressor.FileName())
 			}
-			files[i].src.closeFilesAndRemove()
+			src.closeFilesAndRemove()
 		}
 	}
 
@@ -493,7 +522,7 @@ func (tx *AppendableRoTx) Close() {
 
 type AppendableRoTx struct {
 	ap      *Appendable
-	files   []ctxItem // have no garbage (overlaps, etc...)
+	files   visibleFiles // have no garbage (overlaps, etc...)
 	getters []ArchiveGetter
 	readers []*recsplit.IndexReader
 }
@@ -511,7 +540,7 @@ func (tx *AppendableRoTx) statelessGetter(i int) ArchiveGetter {
 	return r
 }
 
-func (tx *AppendableRoTx) smallestTxNum(dbtx kv.Tx) uint64 {
+func (tx *AppendableRoTx) mainTxNumInDB(dbtx kv.Tx) uint64 {
 	fst, _ := kv.FirstKey(dbtx, tx.ap.table)
 	if len(fst) > 0 {
 		fstInDb := binary.BigEndian.Uint64(fst)
@@ -521,23 +550,18 @@ func (tx *AppendableRoTx) smallestTxNum(dbtx kv.Tx) uint64 {
 }
 
 func (tx *AppendableRoTx) CanPrune(dbtx kv.Tx) bool {
-	return tx.smallestTxNum(dbtx) < tx.maxTxNumInFiles(false)
+	return tx.mainTxNumInDB(dbtx) < tx.files.EndTxNum()
 }
-
-func (tx *AppendableRoTx) maxTxNumInFiles(cold bool) uint64 {
-	if len(tx.files) == 0 {
-		return 0
+func (tx *AppendableRoTx) canBuild(dbtx kv.Tx) (bool, error) { //nolint
+	//TODO: support "keep in db" parameter
+	//TODO: what if all files are pruned?
+	maxTxNumInDB, err := tx.ap.maxTxNumInDB(dbtx)
+	if err != nil {
+		return false, err
 	}
-	if !cold {
-		return tx.files[len(tx.files)-1].endTxNum
-	}
-	for i := len(tx.files) - 1; i >= 0; i-- {
-		if !tx.files[i].src.frozen {
-			continue
-		}
-		return tx.files[i].endTxNum
-	}
-	return 0
+	maxStepInDB := maxTxNumInDB / tx.ap.aggregationStep
+	maxStepInFiles := tx.files.EndTxNum() / tx.ap.aggregationStep
+	return maxStepInFiles < maxStepInDB, nil
 }
 
 type AppendablePruneStat struct {

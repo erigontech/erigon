@@ -471,7 +471,7 @@ func mergeInverted(tb testing.TB, db kv.RwDB, ii *InvertedIndex, txs uint64) {
 			require.NoError(tb, err)
 			var found bool
 			var startTxNum, endTxNum uint64
-			maxEndTxNum := ii.endTxNumMinimax()
+			maxEndTxNum := ii.dirtyFilesEndTxNumMinimax()
 			maxSpan := ii.aggregationStep * StepsInColdFile
 
 			for {

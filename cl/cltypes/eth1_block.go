@@ -319,7 +319,7 @@ func (b *Eth1Block) RlpHeader(parentRoot *libcommon.Hash) (*types.Header, error)
 		ReceiptHash:           b.ReceiptsRoot,
 		Bloom:                 b.LogsBloom,
 		Difficulty:            merge.ProofOfStakeDifficulty,
-		Number:                big.NewInt(int64(b.BlockNumber)),
+		Number:                new(big.Int).SetUint64(b.BlockNumber),
 		GasLimit:              b.GasLimit,
 		GasUsed:               b.GasUsed,
 		Time:                  b.Time,

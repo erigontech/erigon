@@ -993,7 +993,12 @@ MainLoop:
 		}
 		for _, t := range types {
 			p := filepath.Join(dir, snaptype.SegmentFileName(f.Version, f.From, f.To, t.Enum()))
-			if !dir2.FileExist(p) {
+			exists, err := dir2.FileExist(p)
+			if err != nil {
+				log.Debug("[snapshots] FileExist error", "err", err, "path", p)
+				continue MainLoop
+			}
+			if !exists {
 				continue MainLoop
 			}
 			res = append(res, f)
@@ -1628,8 +1633,8 @@ func DumpTxs(ctx context.Context, db kv.RoDB, chainConfig *chain.Config, blockFr
 		return valueBuf, nil
 	}
 
-	addSystemTx := func(ctx *types2.TxParseContext, tx kv.Tx, txId uint64) error {
-		binary.BigEndian.PutUint64(numBuf, txId)
+	addSystemTx := func(ctx *types2.TxParseContext, tx kv.Tx, txId types.BaseTxnID) error {
+		binary.BigEndian.PutUint64(numBuf, txId.U64())
 		tv, err := tx.GetOne(kv.EthTx, numBuf)
 		if err != nil {
 			return err
@@ -1682,7 +1687,7 @@ func DumpTxs(ctx context.Context, db kv.RoDB, chainConfig *chain.Config, blockFr
 			defer clean()
 		}
 		if doWarmup && !warmupTxs.Load() && blockNum%1_000 == 0 {
-			clean := kv.ReadAhead(warmupCtx, db, warmupTxs, kv.EthTx, hexutility.EncodeTs(body.BaseTxId), 100*10_000)
+			clean := kv.ReadAhead(warmupCtx, db, warmupTxs, kv.EthTx, body.BaseTxnID.Bytes(), 100*10_000)
 			defer clean()
 		}
 		senders, err := rawdb.ReadSenders(tx, h, blockNum)
@@ -1717,11 +1722,11 @@ func DumpTxs(ctx context.Context, db kv.RoDB, chainConfig *chain.Config, blockFr
 			parseCtxs[i] = types2.NewTxParseContext(*chainID)
 		}
 
-		if err := addSystemTx(parseCtxs[0], tx, body.BaseTxId); err != nil {
+		if err := addSystemTx(parseCtxs[0], tx, body.BaseTxnID); err != nil {
 			return false, err
 		}
 
-		binary.BigEndian.PutUint64(numBuf, body.BaseTxId+1)
+		binary.BigEndian.PutUint64(numBuf, body.BaseTxnID.First())
 
 		collected := -1
 		collectorLock := sync.Mutex{}
@@ -1772,7 +1777,7 @@ func DumpTxs(ctx context.Context, db kv.RoDB, chainConfig *chain.Config, blockFr
 			return false, fmt.Errorf("ForAmount parser: %w", err)
 		}
 
-		if err := addSystemTx(parseCtxs[0], tx, body.BaseTxId+uint64(body.TxCount)-1); err != nil {
+		if err := addSystemTx(parseCtxs[0], tx, types.BaseTxnID(body.BaseTxnID.LastSystemTx(body.TxCount))); err != nil {
 			return false, err
 		}
 
@@ -1869,8 +1874,8 @@ func DumpBodies(ctx context.Context, db kv.RoDB, _ *chain.Config, blockFrom, blo
 		copy(key, k)
 		copy(key[8:], v)
 
-		// Important: DB does store canonical and non-canonical txs in same table. And using same body.BaseTxID
-		// But snapshots using canonical TxNum in field body.BaseTxID
+		// Important: DB does store canonical and non-canonical txs in same table. And using same body.BaseTxnID
+		// But snapshots using canonical TxNum in field body.BaseTxnID
 		// So, we manually calc this field here and serialize again.
 		//
 		// FYI: we also have other table to map canonical BlockNum->TxNum: kv.MaxTxNum
@@ -1882,9 +1887,8 @@ func DumpBodies(ctx context.Context, db kv.RoDB, _ *chain.Config, blockFrom, blo
 			logger.Warn("body missed", "block_num", blockNum, "hash", hex.EncodeToString(v))
 			return true, nil
 		}
-
-		body.BaseTxId = lastTxNum
-		lastTxNum += uint64(body.TxCount)
+		body.BaseTxnID = types.BaseTxnID(lastTxNum)
+		lastTxNum = body.BaseTxnID.LastSystemTx(body.TxCount) + 1 // +1 to set it on first systemTxn of next block
 
 		dataRLP, err := rlp.EncodeToBytes(body)
 		if err != nil {
