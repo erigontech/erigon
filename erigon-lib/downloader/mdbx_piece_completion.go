@@ -205,7 +205,7 @@ func (m *mdbxPieceCompletion) putFlushed(tx kv.RwTx, infoHash infohash.T, flushe
 
 	if !ok {
 		allFlushed = &roaring.Bitmap{}
-		m.completed[infoHash] = allFlushed
+		m.flushed[infoHash] = allFlushed
 	}
 
 	allFlushed.Or(flushed)
