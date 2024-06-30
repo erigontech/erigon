@@ -402,7 +402,7 @@ func (api *OtterscanAPIImpl) GetBlockTransactions(ctx context.Context, number rp
 		prunedBlock[k] = getBlockRes[k]
 	}
 
-	// Crop tx input to 4bytes
+	// Crop txn input to 4bytes
 	var txs = getBlockRes["transactions"].([]interface{})
 	for _, rawTx := range txs {
 		rpcTx := rawTx.(*ethapi.RPCTransaction)
