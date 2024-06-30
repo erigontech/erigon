@@ -5,8 +5,6 @@ import (
 	"fmt"
 
 	"github.com/RoaringBitmap/roaring"
-	"github.com/ledgerwatch/erigon/core/rawdb/rawtemporaldb"
-
 	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/bitmapdb"
@@ -14,6 +12,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/kv/order"
 	"github.com/ledgerwatch/erigon-lib/kv/rawdbv3"
 	"github.com/ledgerwatch/erigon-lib/log/v3"
+	"github.com/ledgerwatch/erigon/core/rawdb/rawtemporaldb"
 
 	"github.com/ledgerwatch/erigon/cmd/state/exec3"
 	"github.com/ledgerwatch/erigon/core"
@@ -346,9 +345,12 @@ func (api *APIImpl) getLogsV3(ctx context.Context, tx kv.TemporalTx, begin, end 
 		rawLogs := exec.GetLogs(txIndex, txn)
 
 		// `ReadReceipt` does fill `rawLogs` calulated fields. but we don't need it anymore.
-		r, err := rawtemporaldb.ReadReceipt(tx, baseBlockTxnID+kv.TxnId(txIndex), rawLogs, txIndex, blockHash, blockNum, txn)
-		if err != nil {
-			return nil, err
+		var r *types.Receipt
+		if kv.ReceiptsAppendable > kv.AppendableLen {
+			r, err = rawtemporaldb.ReadReceipt(tx, baseBlockTxnID+kv.TxnId(txIndex), rawLogs, txIndex, blockHash, blockNum, txn)
+			if err != nil {
+				return nil, err
+			}
 		}
 		filtered := rawLogs.Filter(addrMap, crit.Topics)
 		if r == nil { // if receipt data is not released yet. fallback to manual field filling. can remove in future.
