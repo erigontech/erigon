@@ -40,6 +40,7 @@ type mdbxPieceCompletion struct {
 	db        *mdbx.MdbxKV
 	mu        sync.RWMutex
 	completed map[infohash.T]*roaring.Bitmap
+	flushed   map[infohash.T]*roaring.Bitmap
 	logger    log.Logger
 }
 
@@ -118,7 +119,9 @@ func (m *mdbxPieceCompletion) Set(pk metainfo.PieceKey, b bool) error {
 
 		completed.Add(uint32(pk.Index))
 
-		return nil
+		if flushed, ok := m.completed[pk.InfoHash]; !ok || !flushed.Contains(uint32(pk.Index)) {
+			return nil
+		}
 	}
 
 	tx, err = m.db.BeginRw(context.Background())
@@ -138,6 +141,7 @@ func (m *mdbxPieceCompletion) Set(pk metainfo.PieceKey, b bool) error {
 }
 
 func putCompletion(tx kv.RwTx, infoHash infohash.T, index uint32, c bool) error {
+	fmt.Println("PUT", infoHash, index)
 	var key [infohash.Size + 4]byte
 	copy(key[:], infoHash[:])
 	binary.BigEndian.PutUint32(key[infohash.Size:], index)
@@ -184,7 +188,6 @@ func (m *mdbxPieceCompletion) putFlushed(tx kv.RwTx, infoHash infohash.T, flushe
 
 		if setters.GetCardinality() > 0 {
 			setters.Iterate(func(piece uint32) bool {
-				fmt.Println("PUT", infoHash, piece)
 				// TODO deal with error (? don't remove from bitset ?)
 				_ = putCompletion(tx, infoHash, piece, true)
 				return true
@@ -197,6 +200,15 @@ func (m *mdbxPieceCompletion) putFlushed(tx kv.RwTx, infoHash infohash.T, flushe
 			delete(m.completed, infoHash)
 		}
 	}
+
+	allFlushed, ok := m.flushed[infoHash]
+
+	if !ok {
+		allFlushed = &roaring.Bitmap{}
+		m.completed[infoHash] = allFlushed
+	}
+
+	allFlushed.Or(flushed)
 }
 
 func (m *mdbxPieceCompletion) Close() error {
