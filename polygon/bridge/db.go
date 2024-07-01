@@ -88,19 +88,19 @@ func (s *MdbxStore) GetSprintLastEventID(ctx context.Context, lastID uint64, tim
 	}
 	defer tx.Rollback()
 
-	cursor, err := tx.Cursor(kv.BorEvents)
-	if err != nil {
-		return eventID, err
-	}
-	defer cursor.Close()
-
-	count, err := cursor.Count()
+	count, err := tx.Count(kv.BorEvents)
 	if err != nil {
 		return eventID, err
 	}
 	if count == 0 {
 		return eventID, nil
 	}
+
+	cursor, err := tx.Cursor(kv.BorEvents)
+	if err != nil {
+		return eventID, err
+	}
+	defer cursor.Close()
 
 	kDBLast, _, err := cursor.Last()
 	if err != nil {
