@@ -150,14 +150,14 @@ func TestBridge(t *testing.T) {
 	require.Equal(t, event3Data, rlp.RawValue(res[0].Data()))
 
 	// get non-sprint block
-	res, err = b.GetEvents(ctx, 1)
+	_, err = b.GetEvents(ctx, 1)
 	require.Error(t, err)
 
-	res, err = b.GetEvents(ctx, 3)
+	_, err = b.GetEvents(ctx, 3)
 	require.Error(t, err)
 
 	// check block 0
-	res, err = b.GetEvents(ctx, 0)
+	_, err = b.GetEvents(ctx, 0)
 	require.Error(t, err)
 
 	cancel()
