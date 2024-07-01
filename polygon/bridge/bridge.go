@@ -39,7 +39,7 @@ func NewBridge(store Store, logger log.Logger, borConfig *borcfg.BorConfig, fetc
 		borConfig:                borConfig,
 		fetchSyncEvents:          fetchSyncEvents,
 		lastProcessedBlockNumber: 0,
-		lastProcessedEventID:     1,
+		lastProcessedEventID:     0,
 		stateClientAddress:       libcommon.HexToAddress(borConfig.StateReceiverContract),
 		stateReceiverABI:         stateReceiverABI,
 	}
@@ -115,7 +115,7 @@ func (b *Bridge) ProcessNewBlocks(ctx context.Context, blocks []*types.Block) er
 		}
 
 		if lastDBID != 0 && lastDBID > b.lastProcessedEventID {
-			b.log.Debug(bridgeLogPrefix(fmt.Sprintf("Creating map for block %d, start ID %d, end ID %d", block.NumberU64(), b.lastProcessedEventID, lastDBID)))
+			b.log.Debug(bridgeLogPrefix(fmt.Sprintf("Creating map for block %d, start ID %d, end ID %d", block.NumberU64(), b.lastProcessedEventID+1, lastDBID)))
 			eventMap[block.NumberU64()] = b.lastProcessedEventID
 
 			b.lastProcessedEventID = lastDBID
@@ -169,7 +169,7 @@ func (b *Bridge) GetEvents(ctx context.Context, blockNum uint64) ([]*types.Messa
 	eventsRaw := make([]*types.Message, 0, end-start+1)
 
 	// get events from DB
-	events, err := b.store.GetEvents(ctx, start, end+1)
+	events, err := b.store.GetEvents(ctx, start+1, end+1)
 	if err != nil {
 		return nil, err
 	}
