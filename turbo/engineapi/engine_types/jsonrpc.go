@@ -69,9 +69,12 @@ type BlobsBundleV1 struct {
 	Blobs       []hexutility.Bytes `json:"blobs"       gencodec:"required"`
 }
 
-type ExecutionPayloadBodyV1 struct {
-	Transactions []hexutility.Bytes  `json:"transactions" gencodec:"required"`
-	Withdrawals  []*types.Withdrawal `json:"withdrawals"  gencodec:"required"`
+type ExecutionPayloadBody struct {
+	Transactions          []hexutility.Bytes          `json:"transactions" gencodec:"required"`
+	Withdrawals           []*types.Withdrawal         `json:"withdrawals"  gencodec:"required"`
+	DepositRequests       types.DepositRequests       `json:"depositRequests"`
+	WithdrawalRequests    types.WithdrawalRequests    `json:"withdrawalRequests"`
+	ConsolidationRequests types.ConsolidationRequests `json:"consolidationRequests"`
 }
 
 type PayloadStatus struct {
