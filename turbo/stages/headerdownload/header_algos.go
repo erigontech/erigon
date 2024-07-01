@@ -15,7 +15,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/ledgerwatch/erigon-lib/common/dbg"
 	"github.com/ledgerwatch/erigon-lib/common/metrics"
 	"github.com/ledgerwatch/erigon-lib/kv/dbutils"
 	"github.com/ledgerwatch/erigon-lib/log/v3"
@@ -1002,7 +1001,6 @@ func (hi *HeaderInserter) UnwindPoint() uint64 {
 }
 
 func (hi *HeaderInserter) SetUnwindPoint(v uint64) {
-	log.Warn("[dbg] HeaderInserter: set unwind point", "v", v, "stack", dbg.Stack())
 	hi.unwindPoint = v
 }
 
