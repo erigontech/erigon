@@ -534,6 +534,19 @@ func (srv *DataStreamServer) UnwindToBlock(blockNumber uint64) error {
 	return srv.stream.TruncateFile(entryNum + 1)
 }
 
+func (srv *DataStreamServer) UnwindToBatchStart(batchNumber uint64) error {
+	bookmark := types.NewBookmarkProto(batchNumber, datastream.BookmarkType_BOOKMARK_TYPE_BATCH)
+	marshalled, err := bookmark.Marshal()
+	if err != nil {
+		return err
+	}
+	entryNum, err := srv.stream.GetBookmark(marshalled)
+	if err != nil {
+		return err
+	}
+	return srv.stream.TruncateFile(entryNum)
+}
+
 const (
 	PACKET_TYPE_DATA = 2
 	// NOOP_ENTRY_NUMBER is used because we don't care about the entry number when feeding an atrificial

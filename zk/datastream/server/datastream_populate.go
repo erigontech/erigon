@@ -79,9 +79,24 @@ func WriteBlocksToStream(
 	}
 
 	if highestDatastreamBlock > from {
-		if err := srv.UnwindToBlock(from); err != nil {
+		// now we need to unwind the batch right back to the point of the start of the batch we are going to write again
+		batch, err := reader.GetBatchNoByL2Block(from)
+		if err != nil {
+
+		}
+		if err := srv.UnwindToBatchStart(batch); err != nil {
 			return err
 		}
+
+		// now find the first block in the batch we just unwound to
+		firstBlockInBatch, found, err := reader.GetLowestBlockInBatch(batch)
+		if err != nil {
+			return err
+		}
+		if !found {
+			return fmt.Errorf("could not find the first block in the batch %v", batch)
+		}
+		from = firstBlockInBatch
 	}
 
 	logTicker := time.NewTicker(10 * time.Second)
