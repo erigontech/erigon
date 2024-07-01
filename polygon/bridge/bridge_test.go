@@ -58,9 +58,7 @@ func getBlocks(t *testing.T, numBlocks int) []*types.Block {
 
 	for i, rawBlock := range rawBlocks {
 		b, err := rawBlock.AsBlock()
-		if err != nil {
-			t.Fatal(err)
-		}
+		require.NoError(t, err)
 
 		blocks[i] = b
 	}
@@ -228,9 +226,7 @@ func TestBridge_Unwind(t *testing.T) {
 	}(b)
 
 	err := b.Synchronize(ctx, &types.Header{Number: big.NewInt(100)}) // hack to wait for b.ready
-	if err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, err)
 
 	blocks := getBlocks(t, 8)
 
