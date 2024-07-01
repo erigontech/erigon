@@ -170,11 +170,11 @@ func (e *EthereumExecutionModule) GetAssembledBlock(ctx context.Context, req *ex
 	blockValue := blockValue(blockWithReceipts, baseFee)
 
 	blobsBundle := &types2.BlobsBundleV1{}
-	for i, tx := range block.Transactions() {
-		if tx.Type() != types.BlobTxType {
+	for i, txn := range block.Transactions() {
+		if txn.Type() != types.BlobTxType {
 			continue
 		}
-		blobTx, ok := tx.(*types.BlobTxWrapper)
+		blobTx, ok := txn.(*types.BlobTxWrapper)
 		if !ok {
 			return nil, fmt.Errorf("expected blob transaction to be type BlobTxWrapper, got: %T", blobTx)
 		}

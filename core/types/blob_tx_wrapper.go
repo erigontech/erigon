@@ -259,7 +259,7 @@ func (txw *BlobTxWrapper) ValidateBlobTransactionWrapper() error {
 	blobTx := txw.Tx
 	l1 := len(blobTx.BlobVersionedHashes)
 	if l1 == 0 {
-		return fmt.Errorf("a blob tx must contain at least one blob")
+		return fmt.Errorf("a blob txn must contain at least one blob")
 	}
 	l2 := len(txw.Commitments)
 	l3 := len(txw.Blobs)

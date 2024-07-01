@@ -239,9 +239,9 @@ func (m *MemoryMutation) ForEach(bucket string, fromPrefix []byte, walker func(k
 func (m *MemoryMutation) Prefix(table string, prefix []byte) (iter.KV, error) {
 	nextPrefix, ok := kv.NextSubtree(prefix)
 	if !ok {
-		return m.Stream(table, prefix, nil)
+		return m.Range(table, prefix, nil)
 	}
-	return m.Stream(table, prefix, nextPrefix)
+	return m.Range(table, prefix, nextPrefix)
 }
 func (m *MemoryMutation) Stream(table string, fromPrefix, toPrefix []byte) (iter.KV, error) {
 	panic("please implement me")
@@ -253,10 +253,22 @@ func (m *MemoryMutation) StreamDescend(table string, fromPrefix, toPrefix []byte
 	panic("please implement me")
 }
 func (m *MemoryMutation) Range(table string, fromPrefix, toPrefix []byte) (iter.KV, error) {
-	panic("please implement me")
+	return m.RangeAscend(table, fromPrefix, toPrefix, -1)
 }
 func (m *MemoryMutation) RangeAscend(table string, fromPrefix, toPrefix []byte, limit int) (iter.KV, error) {
-	panic("please implement me")
+	s := &rangeIter{orderAscend: true, limit: int64(limit)}
+	var err error
+	if s.iterDb, err = m.db.RangeAscend(table, fromPrefix, toPrefix, limit); err != nil {
+		return s, err
+	}
+	if s.iterMem, err = m.memTx.RangeAscend(table, fromPrefix, toPrefix, limit); err != nil {
+		return s, err
+	}
+	if _, err := s.init(); err != nil {
+		s.Close() //it's responsibility of constructor (our) to close resource on error
+		return nil, err
+	}
+	return s, nil
 }
 func (m *MemoryMutation) RangeDescend(table string, fromPrefix, toPrefix []byte, limit int) (iter.KV, error) {
 	s := &rangeIter{orderAscend: false, limit: int64(limit)}

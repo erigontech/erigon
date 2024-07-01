@@ -222,7 +222,7 @@ func (s *PublicTxPoolAPI) Inspect() map[string]map[string]map[string]string {
 	// Flatten the pending transactions
 	for account, txs := range pending {
 		dump := make(map[string]string)
-		for _, tx := range txs {
+		for _, txn := range txs {
 			dump[fmt.Sprintf("%d", tx.Nonce())] = format(tx)
 		}
 		content["pending"][account.Hex()] = dump
@@ -230,7 +230,7 @@ func (s *PublicTxPoolAPI) Inspect() map[string]map[string]map[string]string {
 	// Flatten the queued transactions
 	for account, txs := range queue {
 		dump := make(map[string]string)
-		for _, tx := range txs {
+		for _, txn := range txs {
 			dump[fmt.Sprintf("%d", tx.Nonce())] = format(tx)
 		}
 		content["queued"][account.Hex()] = dump
