@@ -197,12 +197,16 @@ func (dt *DomainRoTx) lookupByShortenedKey(shortKey []byte, getter ArchiveGetter
 	offset := decodeShorterKey(shortKey)
 	defer func() {
 		if r := recover(); r != nil {
+			fname := ""
+			if getter != nil {
+				fname = getter.FileName()
+			}
 			dt.d.logger.Crit("lookupByShortenedKey panics",
 				"err", r,
 				"domain", dt.d.keysTable,
 				"offset", offset, "short", fmt.Sprintf("%x", shortKey),
 				"cleanFilesCount", len(dt.files), "dirtyFilesCount", dt.d.dirtyFiles.Len(),
-				"file", getter.FileName())
+				"file", fname)
 		}
 	}()
 
@@ -262,7 +266,8 @@ func (dt *DomainRoTx) commitmentValTransformDomain(rng MergeRange, accounts, sto
 
 	// keyFromTxNum and keyEndTxNum is a range of txnums for dereference
 	return func(valBuf []byte, keyFromTxNum, keyEndTxNum uint64) (transValBuf []byte, err error) {
-		if !dt.d.replaceKeysInValues || len(valBuf) == 0 || ((keyEndTxNum-keyFromTxNum)/dt.d.aggregationStep)%2 != 0 {
+		fromFileWithPlainkeys := ((keyEndTxNum-keyFromTxNum)/dt.d.aggregationStep)%2 != 0
+		if !dt.d.replaceKeysInValues || len(valBuf) == 0 || fromFileWithPlainkeys {
 			return valBuf, nil
 		}
 		storageG := storageFileMap[fmt.Sprintf("%d-%d", keyFromTxNum, keyEndTxNum)]

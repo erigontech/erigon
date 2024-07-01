@@ -1327,6 +1327,30 @@ func (ac *AggregatorRoTx) findMergeRange(maxEndTxNum, maxSpan uint64) RangesV3 {
 	for id, d := range ac.d {
 		r.domain[id] = d.findMergeRange(maxEndTxNum, maxSpan)
 	}
+
+	if ac.a.commitmentValuesTransform {
+		cr := r.domain[kv.CommitmentDomain]
+		ar := r.domain[kv.AccountsDomain]
+		sr := r.domain[kv.StorageDomain]
+
+		if cr.values && ((ar.valuesStartTxNum != cr.valuesStartTxNum || ar.valuesEndTxNum != cr.valuesEndTxNum) ||
+			(sr.valuesStartTxNum != cr.valuesStartTxNum || sr.valuesEndTxNum != cr.valuesEndTxNum)) {
+			// commitment have values to merge but accounts or storage have different range? cancel merge
+			rngCom := MergeRange{from: cr.valuesStartTxNum, to: cr.valuesEndTxNum}
+			rngAcc := MergeRange{from: ar.valuesStartTxNum, to: ar.valuesEndTxNum}
+			rngSto := MergeRange{from: sr.valuesStartTxNum, to: sr.valuesEndTxNum}
+
+			for k := range r.domain {
+				r.domain[k].values, r.domain[k].valuesStartTxNum, r.domain[k].valuesEndTxNum = false, 0, 0
+			}
+			// TODO
+			ac.a.logger.Info("findMergeRange: commitment values range is different than accounts or storage, cancel kv merge",
+				"range", rngCom.String("commitment", ac.a.StepSize()),
+				"range", rngAcc.String("accounts", ac.a.StepSize()),
+				"range", rngSto.String("storage", ac.a.StepSize()),
+			)
+		}
+	}
 	for id, ii := range ac.iis {
 		r.invertedIndex[id] = ii.findMergeRange(maxEndTxNum, maxSpan)
 	}
