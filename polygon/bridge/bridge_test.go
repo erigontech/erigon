@@ -70,6 +70,8 @@ func getBlocks(t *testing.T, numBlocks int) []*types.Block {
 
 func TestBridge(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+
 	stateReceiverABI := bor.GenesisContractStateReceiverABI()
 	heimdallClient, b := setup(t, stateReceiverABI)
 
@@ -120,45 +122,31 @@ func TestBridge(t *testing.T) {
 	}(b)
 
 	err := b.Synchronize(ctx, &types.Header{Number: big.NewInt(100)}) // hack to wait for b.ready
-	if err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, err)
 
 	blocks := getBlocks(t, 5)
 
 	err = b.ProcessNewBlocks(ctx, blocks)
-	if err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, err)
 
 	res, err := b.GetEvents(ctx, 2)
-	if err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, err)
 
 	event1Data, err := event1.Pack(stateReceiverABI)
-	if err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, err)
 
 	event2Data, err := event2.Pack(stateReceiverABI)
-	if err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, err)
 
 	require.Equal(t, 2, len(res))                             // have first two events
 	require.Equal(t, event1Data, rlp.RawValue(res[0].Data())) // check data fields
 	require.Equal(t, event2Data, rlp.RawValue(res[1].Data()))
 
 	res, err = b.GetEvents(ctx, 4)
-	if err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, err)
 
 	event3Data, err := event3.Pack(stateReceiverABI)
-	if err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, err)
 
 	require.Equal(t, 1, len(res))
 	require.Equal(t, event3Data, rlp.RawValue(res[0].Data()))
@@ -174,12 +162,13 @@ func TestBridge(t *testing.T) {
 	res, err = b.GetEvents(ctx, 0)
 	require.Error(t, err)
 
-	cancel()
 	wg.Wait()
 }
 
 func TestBridge_Unwind(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+
 	stateReceiverABI := bor.GenesisContractStateReceiverABI()
 	heimdallClient, b := setup(t, stateReceiverABI)
 
@@ -245,14 +234,10 @@ func TestBridge_Unwind(t *testing.T) {
 	blocks := getBlocks(t, 8)
 
 	err = b.ProcessNewBlocks(ctx, blocks)
-	if err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, err)
 
 	event3Data, err := event3.Pack(stateReceiverABI)
-	if err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, err)
 
 	res, err := b.GetEvents(ctx, 4)
 	require.Equal(t, event3Data, rlp.RawValue(res[0].Data()))
@@ -263,6 +248,5 @@ func TestBridge_Unwind(t *testing.T) {
 	_, err = b.GetEvents(ctx, 4)
 	require.Error(t, err)
 
-	cancel()
 	wg.Wait()
 }

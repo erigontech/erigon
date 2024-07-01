@@ -43,8 +43,6 @@ type Store interface {
 	StoreEventID(ctx context.Context, eventMap map[uint64]uint64) error
 	GetEventIDRange(ctx context.Context, blockNum uint64) (uint64, uint64, error)
 	PruneEventIDs(ctx context.Context, blockNum uint64) error
-
-	DumpDB(ctx context.Context) error
 }
 
 type MdbxStore struct {
@@ -294,58 +292,15 @@ func (s *MdbxStore) PruneEventIDs(ctx context.Context, blockNum uint64) error {
 	}
 	defer cursor.Close()
 
-	k, _, err := cursor.Seek(kByte)
-	if err != nil {
-		return err
-	}
+	for k, _, err := cursor.Seek(kByte); k != nil; k, _, err = cursor.Next() {
+		if err != nil {
+			return err
+		}
 
-	for {
 		if err := tx.Delete(kv.BorEventNums, k); err != nil {
 			return err
 		}
-
-		k, _, err = cursor.Next()
-		if err != nil {
-			return err
-		}
-		if k == nil {
-			return tx.Commit()
-		}
-	}
-}
-
-func (s *MdbxStore) DumpDB(ctx context.Context) error {
-	tx, err := s.db.BeginRo(ctx)
-	if err != nil {
-		return err
-	}
-	defer tx.Rollback()
-
-	it, err := tx.Range(kv.BorEventNums, nil, nil)
-	if err != nil {
-		return err
 	}
 
-	var kNum, vNum uint64
-
-	for it.HasNext() {
-		k, v, err := it.Next()
-		if err != nil {
-			return err
-		}
-
-		err = binary.Read(bytes.NewReader(k), binary.BigEndian, &kNum)
-		if err != nil {
-			return err
-		}
-
-		err = binary.Read(bytes.NewReader(v), binary.BigEndian, &vNum)
-		if err != nil {
-			return err
-		}
-
-		fmt.Println("k:", kNum, "v:", vNum)
-	}
-
-	return nil
+	return tx.Commit()
 }

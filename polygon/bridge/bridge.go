@@ -50,6 +50,7 @@ func (b *Bridge) Run(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+	defer b.Close()
 
 	// get last known sync ID
 	lastEventID, err := b.store.GetLatestEventID(ctx)
@@ -63,7 +64,6 @@ func (b *Bridge) Run(ctx context.Context) error {
 	for {
 		select {
 		case <-ctx.Done():
-			b.Close()
 			return ctx.Err()
 		default:
 		}
@@ -72,14 +72,12 @@ func (b *Bridge) Run(ctx context.Context) error {
 		to := time.Now()
 		events, err := b.fetchSyncEvents(ctx, lastEventID+1, to, 0)
 		if err != nil {
-			b.Close()
 			return err
 		}
 
 		if len(events) != 0 {
 			b.ready = false
 			if err := b.store.AddEvents(ctx, events, b.stateReceiverABI); err != nil {
-				b.Close()
 				return err
 			}
 
@@ -87,7 +85,6 @@ func (b *Bridge) Run(ctx context.Context) error {
 		} else {
 			b.ready = true
 			if err := libcommon.Sleep(ctx, 30*time.Second); err != nil {
-				b.Close()
 				return err
 			}
 		}
@@ -133,10 +130,6 @@ func (b *Bridge) ProcessNewBlocks(ctx context.Context, blocks []*types.Block) er
 	}
 
 	return nil
-}
-
-func (b *Bridge) DumpDB(ctx context.Context) error {
-	return b.store.DumpDB(ctx)
 }
 
 // Synchronize blocks till bridge has map at tip
