@@ -38,7 +38,6 @@ var activators = map[int]func(*JumpTable){
 	3855: enable3855,
 	3529: enable3529,
 	3198: enable3198,
-	2935: enable2935,
 	2929: enable2929,
 	2200: enable2200,
 	1884: enable1884,
@@ -318,11 +317,6 @@ func enable7516(jt *JumpTable) {
 		numPop:      0,
 		numPush:     1,
 	}
-}
-
-// enable2935 applies EIP-2935 (Historical block hashes in state)
-func enable2935(jt *JumpTable) {
-	jt[BLOCKHASH].execute = opBlockhash2935
 }
 
 // enableEOF applies the EOF changes.

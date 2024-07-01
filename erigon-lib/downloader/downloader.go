@@ -239,8 +239,8 @@ func (r *requestHandler) RoundTrip(req *http.Request) (resp *http.Response, err 
 
 		// the first two statuses here have been observed from cloudflare
 		// during testing.  The remainder are generally understood to be
-		// retriable http responses, calcBackoff will use the Retry-After
-		// header if its availible
+		// retry-able http responses, calcBackoff will use the Retry-After
+		// header if its available
 		case http.StatusInternalServerError, http.StatusBadGateway,
 			http.StatusRequestTimeout, http.StatusTooEarly,
 			http.StatusTooManyRequests, http.StatusServiceUnavailable,
@@ -749,8 +749,11 @@ func localHashBytes(ctx context.Context, fileInfo snaptype.FileInfo, db kv.RoDB,
 }
 
 func fileHashBytes(ctx context.Context, fileInfo snaptype.FileInfo, stats *AggStats, statsLock *sync.RWMutex) ([]byte, error) {
-
-	if !dir.FileExist(fileInfo.Path) {
+	exists, err := dir.FileExist(fileInfo.Path)
+	if err != nil {
+		return nil, err
+	}
+	if !exists {
 		return nil, os.ErrNotExist
 	}
 
@@ -1635,8 +1638,11 @@ func (d *Downloader) webDownload(peerUrls []*url.URL, t *torrent.Torrent, i *web
 
 	go func() {
 		defer d.wg.Done()
-
-		if dir.FileExist(info.Path) {
+		exists, err := dir.FileExist(info.Path)
+		if err != nil {
+			d.logger.Warn("FileExist error", "file", name, "path", info.Path, "err", err)
+		}
+		if exists {
 			if err := os.Remove(info.Path); err != nil {
 				d.logger.Warn("Couldn't remove previous file before download", "file", name, "path", info.Path, "err", err)
 			}
@@ -1668,7 +1674,7 @@ func (d *Downloader) webDownload(peerUrls []*url.URL, t *torrent.Torrent, i *web
 			}()
 		}
 
-		err := session.Download(d.ctx, name)
+		err = session.Download(d.ctx, name)
 
 		if err != nil {
 			d.logger.Error("Web download failed", "file", name, "err", err)
@@ -2358,7 +2364,11 @@ func (d *Downloader) VerifyData(ctx context.Context, whiteList []string, failFas
 			continue
 		}
 
-		if !dir.FileExist(filepath.Join(d.SnapDir(), t.Name())) {
+		exists, err := dir.FileExist(filepath.Join(d.SnapDir(), t.Name()))
+		if err != nil {
+			return err
+		}
+		if !exists {
 			continue
 		}
 
@@ -2430,7 +2440,7 @@ func (d *Downloader) VerifyData(ctx context.Context, whiteList []string, failFas
 	return nil
 }
 
-// AddNewSeedableFile decides what we do depending on wether we have the .seg file or the .torrent file
+// AddNewSeedableFile decides what we do depending on whether we have the .seg file or the .torrent file
 // have .torrent no .seg => get .seg file from .torrent
 // have .seg no .torrent => get .torrent from .seg
 func (d *Downloader) AddNewSeedableFile(ctx context.Context, name string) error {
@@ -2486,7 +2496,12 @@ func (d *Downloader) AddMagnetLink(ctx context.Context, infoHash metainfo.Hash, 
 		return err
 	}
 
-	if isProhibited && !d.torrentFS.Exists(name) {
+	exists, err := d.torrentFS.Exists(name)
+	if err != nil {
+		return err
+	}
+
+	if isProhibited && !exists {
 		return nil
 	}
 

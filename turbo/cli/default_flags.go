@@ -207,6 +207,7 @@ var DefaultFlags = []cli.Flag{
 	&utils.CaplinBlobBackfillingFlag,
 	&utils.CaplinDisableBlobPruningFlag,
 	&utils.CaplinArchiveFlag,
+	&utils.CaplinMevRelayUrl,
 
 	&utils.TrustedSetupFile,
 	&utils.RPCSlowFlag,

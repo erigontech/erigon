@@ -103,9 +103,14 @@ func OpenCaplinDatabase(ctx context.Context,
 
 func RunCaplinPhase1(ctx context.Context, engine execution_client.ExecutionEngine, config *ethconfig.Config, networkConfig *clparams.NetworkConfig,
 	beaconConfig *clparams.BeaconChainConfig, ethClock eth_clock.EthereumClock, state *state.CachingBeaconState, dirs datadir.Dirs, eth1Getter snapshot_format.ExecutionBlockReaderByNumber,
-	snDownloader proto_downloader.DownloaderClient, backfilling, blobBackfilling bool, states bool, indexDB kv.RwDB, blobStorage blob_storage.BlobStorage, creds credentials.TransportCredentials, snBuildSema *semaphore.Weighted) error {
+	snDownloader proto_downloader.DownloaderClient, backfilling, blobBackfilling bool, states bool, indexDB kv.RwDB, blobStorage blob_storage.BlobStorage, creds credentials.TransportCredentials, snBuildSema *semaphore.Weighted, caplinOptions ...CaplinOption) error {
 	ctx, cn := context.WithCancel(ctx)
 	defer cn()
+
+	option := &option{}
+	for _, opt := range caplinOptions {
+		opt(option)
+	}
 
 	logger := log.New("app", "caplin")
 
@@ -293,6 +298,7 @@ func RunCaplinPhase1(ctx context.Context, engine execution_client.ExecutionEngin
 			voluntaryExitService,
 			blsToExecutionChangeService,
 			proposerSlashingService,
+			option.builderClient,
 		)
 		go beacon.ListenAndServe(&beacon.LayeredBeaconHandler{
 			ArchiveApi: apiHandler,

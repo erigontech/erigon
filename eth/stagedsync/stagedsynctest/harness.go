@@ -64,11 +64,7 @@ func InitHarness(ctx context.Context, t *testing.T, cfg HarnessCfg) Harness {
 		false,
 		nil,
 	)
-	stateSyncStages := stagedsync.DefaultStages(ctx,
-		stagedsync.SnapshotsCfg{}, stagedsync.HeadersCfg{}, bhCfg, stagedsync.BlockHashesCfg{},
-		stagedsync.BodiesCfg{}, stagedsync.SendersCfg{}, stagedsync.ExecuteBlockCfg{},
-		stagedsync.HistoryCfg{}, stagedsync.LogIndexCfg{}, stagedsync.CallTracesCfg{},
-		stagedsync.TxLookupCfg{}, stagedsync.FinishCfg{}, true)
+	stateSyncStages := stagedsync.DefaultStages(ctx, stagedsync.SnapshotsCfg{}, stagedsync.HeadersCfg{}, bhCfg, stagedsync.BlockHashesCfg{}, stagedsync.BodiesCfg{}, stagedsync.SendersCfg{}, stagedsync.ExecuteBlockCfg{}, stagedsync.TxLookupCfg{}, stagedsync.FinishCfg{}, true)
 	stateSync := stagedsync.New(
 		ethconfig.Defaults.Sync,
 		stateSyncStages,
@@ -495,6 +491,7 @@ func (h *Harness) consensusEngine(t *testing.T, cfg HarnessCfg) consensus.Engine
 			h.heimdallClient,
 			genesisContracts,
 			h.logger,
+			nil,
 		)
 
 		borConsensusEng.Authorize(h.validatorAddress, func(_ libcommon.Address, _ string, msg []byte) ([]byte, error) {

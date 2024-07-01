@@ -27,7 +27,11 @@ var ProhibitNewDownloadsLock2 = Migration{
 		}
 		defer tx.Rollback()
 		fPath := filepath.Join(dirs.Snap, downloader.ProhibitNewDownloadsFileName)
-		if !dir.FileExist(fPath) {
+		exists, err := dir.FileExist(fPath)
+		if err != nil {
+			return err
+		}
+		if !exists {
 			if err := BeforeCommit(tx, nil, true); err != nil {
 				return err
 			}
@@ -42,6 +46,10 @@ var ProhibitNewDownloadsLock2 = Migration{
 			locked := []string{}
 
 			for _, t := range coresnaptype.BlockSnapshotTypes {
+				locked = append(locked, t.Name())
+			}
+
+			for _, t := range coresnaptype.E3StateTypes {
 				locked = append(locked, t.Name())
 			}
 

@@ -31,7 +31,7 @@ func TestPendingBlock(t *testing.T) {
 	api := NewEthAPI(NewBaseApi(ff, stateCache, m.BlockReader, nil, false, rpccfg.DefaultEvmCallTimeout, engine,
 		m.Dirs), nil, nil, nil, mining, 5000000, 1e18, 100_000, false, 100_000, 128, log.New())
 	expect := uint64(12345)
-	b, err := rlp.EncodeToBytes(types.NewBlockWithHeader(&types.Header{Number: big.NewInt(int64(expect))}))
+	b, err := rlp.EncodeToBytes(types.NewBlockWithHeader(&types.Header{Number: new(big.Int).SetUint64(expect)}))
 	require.NoError(t, err)
 	ch, id := ff.SubscribePendingBlock(1)
 	defer ff.UnsubscribePendingBlock(id)

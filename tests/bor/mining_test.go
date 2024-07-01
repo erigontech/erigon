@@ -107,15 +107,15 @@ func TestMiningBenchmark(t *testing.T) {
 	initNonce := uint64(0)
 
 	for i := 0; i < txInTxpool; i++ {
-		tx := *newRandomTxWithNonce(false, initNonce+uint64(i), ethbackends[0].TxpoolServer())
-		txs = append(txs, &tx)
+		txn := *newRandomTxWithNonce(false, initNonce+uint64(i), ethbackends[0].TxpoolServer())
+		txs = append(txs, &txn)
 	}
 
 	start := time.Now()
 
-	for _, tx := range txs {
+	for _, txn := range txs {
 		buf := bytes.NewBuffer(nil)
-		txV := *tx
+		txV := *txn
 		err := txV.MarshalBinary(buf)
 		if err != nil {
 			panic(err)
@@ -144,16 +144,16 @@ func TestMiningBenchmark(t *testing.T) {
 
 // newRandomTxWithNonce creates a new transaction with the given nonce.
 func newRandomTxWithNonce(creation bool, nonce uint64, txPool txpool_proto.TxpoolServer) *types.Transaction {
-	var tx types.Transaction
+	var txn types.Transaction
 
 	gasPrice := uint256.NewInt(100 * params.InitialBaseFee)
 
 	if creation {
 		nonce, _ := txPool.Nonce(context.Background(), &txpool_proto.NonceRequest{Address: gointerfaces.ConvertAddressToH160(addr1)})
-		tx, _ = types.SignTx(types.NewContractCreation(nonce.Nonce, uint256.NewInt(0), testGas, gasPrice, common.FromHex(testCode)), *types.LatestSignerForChainID(nil), pkey1)
+		txn, _ = types.SignTx(types.NewContractCreation(nonce.Nonce, uint256.NewInt(0), testGas, gasPrice, common.FromHex(testCode)), *types.LatestSignerForChainID(nil), pkey1)
 	} else {
-		tx, _ = types.SignTx(types.NewTransaction(nonce, addr2, uint256.NewInt(1000), params.TxGas, gasPrice, nil), *types.LatestSignerForChainID(nil), pkey1)
+		txn, _ = types.SignTx(types.NewTransaction(nonce, addr2, uint256.NewInt(1000), params.TxGas, gasPrice, nil), *types.LatestSignerForChainID(nil), pkey1)
 	}
 
-	return &tx
+	return &txn
 }

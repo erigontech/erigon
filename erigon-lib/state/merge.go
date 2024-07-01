@@ -22,11 +22,12 @@ import (
 	"context"
 	"encoding/binary"
 	"fmt"
-	btree2 "github.com/tidwall/btree"
 	"math"
 	"path"
 	"path/filepath"
 	"strings"
+
+	btree2 "github.com/tidwall/btree"
 
 	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/background"
@@ -39,7 +40,7 @@ import (
 )
 
 func (d *Domain) dirtyFilesEndTxNumMinimax() uint64 {
-	minimax := d.History.endTxNumMinimax()
+	minimax := d.History.dirtyFilesEndTxNumMinimax()
 	if _max, ok := d.dirtyFiles.Max(); ok {
 		endTxNum := _max.endTxNum
 		if minimax == 0 || endTxNum < minimax {
@@ -49,7 +50,7 @@ func (d *Domain) dirtyFilesEndTxNumMinimax() uint64 {
 	return minimax
 }
 
-func (ii *InvertedIndex) endTxNumMinimax() uint64 {
+func (ii *InvertedIndex) dirtyFilesEndTxNumMinimax() uint64 {
 	var minimax uint64
 	if _max, ok := ii.dirtyFiles.Max(); ok {
 		endTxNum := _max.endTxNum
@@ -59,25 +60,11 @@ func (ii *InvertedIndex) endTxNumMinimax() uint64 {
 	}
 	return minimax
 }
-func (ii *InvertedIndex) endIndexedTxNumMinimax(needFrozen bool) uint64 {
-	var _max uint64
-	ii.dirtyFiles.Walk(func(items []*filesItem) bool {
-		for _, item := range items {
-			if item.index == nil || (needFrozen && !item.frozen) {
-				continue
-			}
-			_max = max(_max, item.endTxNum)
-		}
-		return true
-	})
-	return _max
-}
-
-func (h *History) endTxNumMinimax() uint64 {
+func (h *History) dirtyFilesEndTxNumMinimax() uint64 {
 	if h.snapshotsDisabled {
 		return math.MaxUint64
 	}
-	minimax := h.InvertedIndex.endTxNumMinimax()
+	minimax := h.InvertedIndex.dirtyFilesEndTxNumMinimax()
 	if _max, ok := h.dirtyFiles.Max(); ok {
 		endTxNum := _max.endTxNum
 		if minimax == 0 || endTxNum < minimax {
@@ -85,33 +72,6 @@ func (h *History) endTxNumMinimax() uint64 {
 		}
 	}
 	return minimax
-}
-
-func (ap *Appendable) endTxNumMinimax() uint64 {
-	var minimax uint64
-	if _max, ok := ap.dirtyFiles.Max(); ok {
-		endTxNum := _max.endTxNum
-		if minimax == 0 || endTxNum < minimax {
-			minimax = endTxNum
-		}
-	}
-	return minimax
-}
-func (h *History) endIndexedTxNumMinimax(needFrozen bool) uint64 {
-	var _max uint64
-	if h.snapshotsDisabled && h.dirtyFiles.Len() == 0 {
-		_max = math.MaxUint64
-	}
-	h.dirtyFiles.Walk(func(items []*filesItem) bool {
-		for _, item := range items {
-			if item.index == nil || (needFrozen && !item.frozen) {
-				continue
-			}
-			_max = max(_max, item.endTxNum)
-		}
-		return true
-	})
-	return min(_max, h.InvertedIndex.endIndexedTxNumMinimax(needFrozen))
 }
 
 type DomainRanges struct {
@@ -329,60 +289,6 @@ func (dt *DomainRoTx) BuildOptionalMissedIndices(ctx context.Context, ps *backgr
 
 func (iit *InvertedIndexRoTx) BuildOptionalMissedIndices(ctx context.Context, ps *background.ProgressSet) (err error) {
 	return nil
-}
-
-// endTxNum is always a multiply of aggregation step but this txnum is not available in file (it will be first tx of file to follow after that)
-func (dt *DomainRoTx) maxTxNumInDomainFiles(onlyFrozen bool) uint64 {
-	if len(dt.files) == 0 {
-		return 0
-	}
-	if !onlyFrozen {
-		return dt.files[len(dt.files)-1].endTxNum
-	}
-	for i := len(dt.files) - 1; i >= 0; i-- {
-		if !dt.files[i].src.frozen {
-			continue
-		}
-		return dt.files[i].endTxNum
-	}
-	return 0
-}
-
-func (ht *HistoryRoTx) maxTxNumInFiles(onlyFrozen bool) uint64 {
-	if len(ht.files) == 0 {
-		return 0
-	}
-	var _max uint64
-	if onlyFrozen {
-		for i := len(ht.files) - 1; i >= 0; i-- {
-			if !ht.files[i].src.frozen {
-				continue
-			}
-			_max = ht.files[i].endTxNum
-			break
-		}
-	} else {
-		_max = ht.files[len(ht.files)-1].endTxNum
-	}
-	return min(_max, ht.iit.maxTxNumInFiles(onlyFrozen))
-}
-
-func (iit *InvertedIndexRoTx) maxTxNumInFiles(onlyFrozen bool) uint64 {
-	if len(iit.files) == 0 {
-		return 0
-	}
-	if !onlyFrozen {
-		return iit.lastTxNumInFiles()
-	}
-
-	// files contains [frozen..., cold...] in that order
-	for i := len(iit.files) - 1; i >= 0; i-- {
-		if !iit.files[i].src.frozen {
-			continue
-		}
-		return iit.files[i].endTxNum
-	}
-	return 0
 }
 
 // staticFilesInRange returns list of static files with txNum in specified range [startTxNum; endTxNum)
@@ -708,7 +614,11 @@ func (dt *DomainRoTx) mergeFiles(ctx context.Context, domainFiles, indexFiles, h
 
 	{
 		bloomIndexPath := dt.d.kvExistenceIdxFilePath(fromStep, toStep)
-		if dir.FileExist(bloomIndexPath) {
+		exists, err := dir.FileExist(bloomIndexPath)
+		if err != nil {
+			return nil, nil, nil, fmt.Errorf("merge %s FileExist err [%d-%d]: %w", dt.d.filenameBase, r.valuesStartTxNum, r.valuesEndTxNum, err)
+		}
+		if exists {
 			valuesIn.existence, err = OpenExistenceFilter(bloomIndexPath)
 			if err != nil {
 				return nil, nil, nil, fmt.Errorf("merge %s existence [%d-%d]: %w", dt.d.filenameBase, r.valuesStartTxNum, r.valuesEndTxNum, err)

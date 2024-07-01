@@ -40,12 +40,18 @@ var Enums = struct {
 	snaptype.Enums
 	Headers,
 	Bodies,
-	Transactions snaptype.Enum
+	Transactions,
+	Domains,
+	Histories,
+	InvertedIndicies snaptype.Enum
 }{
-	Enums:        snaptype.Enums{},
-	Headers:      snaptype.MinCoreEnum,
-	Bodies:       snaptype.MinCoreEnum + 1,
-	Transactions: snaptype.MinCoreEnum + 2,
+	Enums:            snaptype.Enums{},
+	Headers:          snaptype.MinCoreEnum,
+	Bodies:           snaptype.MinCoreEnum + 1,
+	Transactions:     snaptype.MinCoreEnum + 2,
+	Domains:          snaptype.MinCoreEnum + 3,
+	Histories:        snaptype.MinCoreEnum + 4,
+	InvertedIndicies: snaptype.MinCoreEnum + 5,
 }
 
 var Indexes = struct {
@@ -148,7 +154,7 @@ var (
 				}
 				defer bodiesSegment.Close()
 
-				firstTxID, expectedCount, err := txsAmountBasedOnBodiesSnapshots(bodiesSegment, sn.Len()-1)
+				baseTxnID, expectedCount, err := txsAmountBasedOnBodiesSnapshots(bodiesSegment, sn.Len()-1)
 				if err != nil {
 					return err
 				}
@@ -178,7 +184,7 @@ var (
 					LeafSize:   8,
 					TmpDir:     tmpDir,
 					IndexFile:  filepath.Join(sn.Dir(), sn.Type.IdxFileName(sn.Version, sn.From, sn.To)),
-					BaseDataID: firstTxID,
+					BaseDataID: baseTxnID.U64(),
 				}, logger)
 				if err != nil {
 					return err
@@ -211,7 +217,7 @@ var (
 
 				for {
 					g, bodyGetter := d.MakeGetter(), bodiesSegment.MakeGetter()
-					var i, offset, nextPos uint64
+					var ti, offset, nextPos uint64
 					blockNum := firstBlockNum
 					body := &types.BodyForStorage{}
 
@@ -232,7 +238,8 @@ var (
 						default:
 						}
 
-						for body.BaseTxId+uint64(body.TxCount) <= firstTxID+i { // skip empty blocks
+						// TODO review this code, test pass with lhs+1 <= baseTxnID.U64()+ti
+						for body.BaseTxnID.LastSystemTx(body.TxCount) < baseTxnID.U64()+ti { // skip empty blocks; ti here is not transaction index in one block, but total transaction index counter
 							if !bodyGetter.HasNext() {
 								return fmt.Errorf("not enough bodies")
 							}
@@ -249,10 +256,10 @@ var (
 						isSystemTx := len(word) == 0
 						if isSystemTx { // system-txs hash:pad32(txnID)
 							slot.IDHash = common.Hash{}
-							binary.BigEndian.PutUint64(slot.IDHash[:], firstTxID+i)
+							binary.BigEndian.PutUint64(slot.IDHash[:], baseTxnID.U64()+ti)
 						} else {
 							if _, err = parseCtx.ParseTransaction(word[firstTxByteAndlengthOfAddress:], 0, &slot, nil, true /* hasEnvelope */, false /* wrappedWithBlobs */, nil /* validateHash */); err != nil {
-								return fmt.Errorf("ParseTransaction: %w, blockNum: %d, i: %d", err, blockNum, i)
+								return fmt.Errorf("ParseTransaction: %w, blockNum: %d, i: %d", err, blockNum, ti)
 							}
 						}
 
@@ -263,12 +270,12 @@ var (
 							return err
 						}
 
-						i++
+						ti++
 						offset = nextPos
 					}
 
-					if int(i) != expectedCount {
-						return fmt.Errorf("TransactionsIdx: at=%d-%d, post index building, expect: %d, got %d", sn.From, sn.To, expectedCount, i)
+					if int(ti) != expectedCount {
+						return fmt.Errorf("TransactionsIdx: at=%d-%d, post index building, expect: %d, got %d", sn.From, sn.To, expectedCount, ti)
 					}
 
 					if err := txnHashIdx.Build(ctx); err != nil {
@@ -294,18 +301,52 @@ var (
 				}
 			}),
 	)
+	Domains = snaptype.RegisterType(
+		Enums.Domains,
+		"domain",
+		snaptype.Versions{
+			Current:      1, //2,
+			MinSupported: 1,
+		},
+		nil,
+		nil,
+		nil,
+	)
+	Histories = snaptype.RegisterType(
+		Enums.Histories,
+		"history",
+		snaptype.Versions{
+			Current:      1, //2,
+			MinSupported: 1,
+		},
+		nil,
+		nil,
+		nil,
+	)
+	InvertedIndicies = snaptype.RegisterType(
+		Enums.InvertedIndicies,
+		"idx",
+		snaptype.Versions{
+			Current:      1, //2,
+			MinSupported: 1,
+		},
+		nil,
+		nil,
+		nil,
+	)
 
 	BlockSnapshotTypes = []snaptype.Type{Headers, Bodies, Transactions}
+	E3StateTypes       = []snaptype.Type{Domains, Histories, InvertedIndicies}
 )
 
-func txsAmountBasedOnBodiesSnapshots(bodiesSegment *seg.Decompressor, len uint64) (firstTxID uint64, expectedCount int, err error) {
+func txsAmountBasedOnBodiesSnapshots(bodiesSegment *seg.Decompressor, len uint64) (baseTxID types.BaseTxnID, expectedCount int, err error) {
 	gg := bodiesSegment.MakeGetter()
 	buf, _ := gg.Next(nil)
 	firstBody := &types.BodyForStorage{}
 	if err = rlp.DecodeBytes(buf, firstBody); err != nil {
 		return
 	}
-	firstTxID = firstBody.BaseTxId
+	baseTxID = firstBody.BaseTxnID
 
 	lastBody := new(types.BodyForStorage)
 	i := uint64(0)
@@ -324,10 +365,12 @@ func txsAmountBasedOnBodiesSnapshots(bodiesSegment *seg.Decompressor, len uint64
 		}
 	}
 
-	if lastBody.BaseTxId < firstBody.BaseTxId {
-		return 0, 0, fmt.Errorf("negative txs count %s: lastBody.BaseTxId=%d < firstBody.BaseTxId=%d", bodiesSegment.FileName(), lastBody.BaseTxId, firstBody.BaseTxId)
+	if lastBody.BaseTxnID < firstBody.BaseTxnID {
+		return 0, 0, fmt.Errorf("negative txs count %s: lastBody.BaseTxId=%d < firstBody.BaseTxId=%d", bodiesSegment.FileName(), lastBody.BaseTxnID, firstBody.BaseTxnID)
 	}
 
-	expectedCount = int(lastBody.BaseTxId+uint64(lastBody.TxCount)) - int(firstBody.BaseTxId)
+	// TODO: check if it is correct
+	magic := uint64(1)
+	expectedCount = int(lastBody.BaseTxnID.LastSystemTx(lastBody.TxCount) + magic - firstBody.BaseTxnID.U64())
 	return
 }

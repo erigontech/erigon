@@ -67,7 +67,7 @@ func TestFetch(t *testing.T) {
 	})
 	for i, err := range errs {
 		if err != nil {
-			t.Errorf("sending new pool tx hashes 66 (%d): %v", i, err)
+			t.Errorf("sending new pool txn hashes 66 (%d): %v", i, err)
 		}
 	}
 	wg.Wait()

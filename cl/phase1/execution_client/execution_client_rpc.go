@@ -250,3 +250,7 @@ func (cc *ExecutionClientRpc) HasBlock(ctx context.Context, hash libcommon.Hash)
 func (cc *ExecutionClientRpc) GetAssembledBlock(ctx context.Context, id []byte) (*cltypes.Eth1Block, *engine_types.BlobsBundleV1, *big.Int, error) {
 	panic("unimplemented")
 }
+
+func (cc *ExecutionClientRpc) HasGapInSnapshots(ctx context.Context) bool {
+	panic("unimplemented")
+}
