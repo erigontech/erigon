@@ -10,7 +10,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func testAccumulator(t *testing.T) StateChangeSetAccumulator {
+func getTestChangesetAccumulator() StateChangeSetAccumulator {
 	var stateChangeSetAccumulator StateChangeSetAccumulator
 	for i := 0; i < 10; i++ {
 		for idx := range stateChangeSetAccumulator.Diffs {
@@ -38,7 +38,7 @@ func testAccumulator(t *testing.T) StateChangeSetAccumulator {
 }
 
 func TestChangesetAccumulator(t *testing.T) {
-	stateChangeSetAccumulator := testAccumulator(t)
+	stateChangeSetAccumulator := getTestChangesetAccumulator()
 	changeset := stateChangeSetAccumulator.Changeset()
 	for idx := range changeset.DomainDiffs {
 		require.Equal(t, len(stateChangeSetAccumulator.Diffs[idx].prevValues), len(changeset.DomainDiffs[idx]))
@@ -52,7 +52,7 @@ func TestChangesetAccumulator(t *testing.T) {
 func TestDbAndChangeset(t *testing.T) {
 	_, tx := memdb.NewTestTx(t)
 
-	stateChangeSetAccumulator := testAccumulator(t)
+	stateChangeSetAccumulator := getTestChangesetAccumulator()
 
 	require.NoError(t, WriteDiffSet(tx, 0, common.Hash{}, stateChangeSetAccumulator.Changeset()))
 	gotChangeset, ok, err := ReadDiffSet(tx, 0, common.Hash{})

@@ -35,7 +35,6 @@ type DomainChangesAccumulator struct {
 
 type InvertedIndexChangesAccumulator struct {
 	keyToTxNum map[string][]byte
-	diffset    []InvertedIndexEntryDiff
 }
 
 type DomainEntryDiff struct {
