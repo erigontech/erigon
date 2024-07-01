@@ -602,21 +602,6 @@ func (a *Aggregator) buildFiles(ctx context.Context, step uint64) error {
 	g, ctx := errgroup.WithContext(ctx)
 	g.SetLimit(a.collateAndBuildWorkers)
 	for _, d := range a.d {
-		var canBuild bool
-		if err := a.db.View(ctx, func(tx kv.Tx) (err error) {
-			dTx := d.BeginFilesRo()
-			defer dTx.Close()
-			canBuild, err = dTx.canBuild(tx)
-			return err
-		}); err != nil {
-			return false, err
-		}
-		fmt.Printf("[dbg] can build: %s %t\n", d.filenameBase, canBuild)
-		if !canBuild {
-			continue
-		}
-		hasMore = true
-
 		d := d
 
 		a.wg.Add(1)
