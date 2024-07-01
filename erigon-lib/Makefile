@@ -104,16 +104,11 @@ lintci-deps:
 lintci:
 	@CGO_CXXFLAGS="$(CGO_CXXFLAGS)" ./tools/golangci_lint.sh
 
-lint-licenses-deps:
-	@./tools/licenses_check.sh --install-deps
-lint-licenses:
-	@./tools/licenses_check.sh
-
 lint-mod-tidy:
 	@./tools/mod_tidy_check.sh
 
-lint-deps: lintci-deps lint-licenses-deps
-lint: lintci lint-licenses lint-mod-tidy
+lint-deps: lintci-deps
+lint: lintci lint-mod-tidy
 
 test:
 	$(GOTEST) --count 1 -p 2 -coverprofile=coverage.out ./...
