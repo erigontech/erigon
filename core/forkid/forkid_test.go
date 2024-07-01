@@ -307,10 +307,10 @@ func TestEncoding(t *testing.T) {
 
 // TODO @somnathb1
 func TestMymy(t *testing.T) {
-	heightForks, timeForks := GatherForks(params.VerkleGenDevnet2Config, core.VerkleGenDevnet2GenesisBlock().Timestamp /* genesisTime */)
-	f := NewIDFromForks(heightForks, timeForks, params.VerkleGenDevnet2GenesisHash, 0, core.VerkleGenDevnet2GenesisBlock().Timestamp)
-	f2 := NewIDFromForks(nil, nil, params.VerkleGenDevnet2GenesisHash, 0, core.VerkleGenDevnet2GenesisBlock().Timestamp)
-	f3 := NewIDFromForks(nil, nil, params.VerkleGenDevnet2GenesisHash, 343555, core.VerkleGenDevnet2GenesisBlock().Timestamp+1)
+	heightForks, timeForks := GatherForks(params.VerkleGenDevnet6Config, core.VerkleGenDevnet6GenesisBlock().Timestamp /* genesisTime */)
+	f := NewIDFromForks(heightForks, timeForks, params.VerkleGenDevnet6GenesisHash, 0, core.VerkleGenDevnet6GenesisBlock().Timestamp)
+	f2 := NewIDFromForks(nil, nil, params.VerkleGenDevnet6GenesisHash, 0, core.VerkleGenDevnet6GenesisBlock().Timestamp)
+	f3 := NewIDFromForks(nil, nil, params.VerkleGenDevnet6GenesisHash, 343555, core.VerkleGenDevnet6GenesisBlock().Timestamp+1)
 	t.Errorf("yo  %v", f)
 	t.Errorf("yo  %v", f2)
 	t.Errorf("yo  %v", f3)

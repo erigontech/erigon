@@ -75,13 +75,13 @@ func TestGenesisBlockRoots(t *testing.T) {
 		t.Errorf("wrong Chiado genesis hash, got %v, want %v", block.Hash(), params.ChiadoGenesisHash)
 	}
 
-	block, _, err = core.GenesisToVerkleBlock(core.VerkleGenDevnet2GenesisBlock(), "")
+	block, _, err = core.GenesisToVerkleBlock(core.VerkleGenDevnet6GenesisBlock(), "")
 	require.NoError(err)
-	if block.Root() != params.VerkleGenDevnet2StateRoot {
-		t.Errorf("wrong Verkle-Gen-Devnet2 genesis state root, got %v, want %v", block.Root(), params.VerkleGenDevnet2StateRoot)
+	if block.Root() != params.VerkleGenDevnet6StateRoot {
+		t.Errorf("wrong Verkle-Gen-Devnet2 genesis state root, got %v, want %v", block.Root(), params.VerkleGenDevnet6StateRoot)
 	}
-	if block.Hash() != params.VerkleGenDevnet2GenesisHash {
-		t.Errorf("wrong verkle-gen-devnet2 genesis hash, got %v, want %v", block.Hash(), params.VerkleGenDevnet2GenesisHash)
+	if block.Hash() != params.VerkleGenDevnet6GenesisHash {
+		t.Errorf("wrong verkle-gen-devnet6 genesis hash, got %v, want %v", block.Hash(), params.VerkleGenDevnet6GenesisHash)
 	}
 }
 

@@ -72,13 +72,13 @@ var (
 	BorDevnetGenesisHash        = libcommon.HexToHash("0x5a06b25b0c6530708ea0b98a3409290e39dce6be7f558493aeb6e4b99a172a87")
 	GnosisGenesisHash           = libcommon.HexToHash("0x4f1dd23188aab3a76b463e4af801b52b1248ef073c648cbdc4c9333d3da79756")
 	ChiadoGenesisHash           = libcommon.HexToHash("0xada44fd8d2ecab8b08f256af07ad3e777f17fb434f8f8e678b312f576212ba9a")
-	VerkleGenDevnet2GenesisHash = libcommon.HexToHash("0x0884fa3d670543463f7e1d9ea007332e1f8a3564ecf891de95a76e751cde45d7")
+	VerkleGenDevnet6GenesisHash = libcommon.HexToHash("0x3fe165c03e7a77d1e3759362ebeeb16fd964cb411ce11fbe35c7032fab5b9a8a")
 )
 
 var (
 	GnosisGenesisStateRoot    = libcommon.HexToHash("0x40cf4430ecaa733787d1a65154a3b9efb560c95d9e324a23b97f0609b539133b")
 	ChiadoGenesisStateRoot    = libcommon.HexToHash("0x9ec3eaf4e6188dfbdd6ade76eaa88289b57c63c9a2cde8d35291d5a29e143d31")
-	VerkleGenDevnet2StateRoot = libcommon.HexToHash("0x5e8519756841faf0b2c28951c451b61a4b407b70a5ce5b57992f4bec973173ff")
+	VerkleGenDevnet6StateRoot = libcommon.HexToHash("0x1fbf85345a3cbba9a6d44f991b721e55620a22397c2a93ee8d5011136ac300ee")
 )
 
 var (
@@ -148,7 +148,7 @@ var (
 
 	ChiadoChainConfig = readChainSpec("chainspecs/chiado.json")
 
-	VerkleGenDevnet2Config = readChainSpec("chainspecs/verkle_gen_devnet2.json")
+	VerkleGenDevnet6Config = readChainSpec("chainspecs/verkle_gen_devnet6.json")
 
 	CliqueSnapshot = NewSnapshotConfig(10, 1024, 16384, true, "")
 
@@ -234,8 +234,8 @@ func ChainConfigByChainName(chain string) *chain.Config {
 		return GnosisChainConfig
 	case networkname.ChiadoChainName:
 		return ChiadoChainConfig
-	case networkname.VerkleGenDevnet2:
-		return VerkleGenDevnet2Config
+	case networkname.VerkleGenDevnet6:
+		return VerkleGenDevnet6Config
 	default:
 		return nil
 	}
@@ -263,8 +263,8 @@ func GenesisHashByChainName(chain string) *libcommon.Hash {
 		return &GnosisGenesisHash
 	case networkname.ChiadoChainName:
 		return &ChiadoGenesisHash
-	case networkname.VerkleGenDevnet2:
-		return &VerkleGenDevnet2GenesisHash
+	case networkname.VerkleGenDevnet6:
+		return &VerkleGenDevnet6GenesisHash
 	default:
 		return nil
 	}
@@ -292,8 +292,8 @@ func ChainConfigByGenesisHash(genesisHash libcommon.Hash) *chain.Config {
 		return GnosisChainConfig
 	case genesisHash == ChiadoGenesisHash:
 		return ChiadoChainConfig
-	case genesisHash == VerkleGenDevnet2GenesisHash:
-		return VerkleGenDevnet2Config
+	case genesisHash == VerkleGenDevnet6GenesisHash:
+		return VerkleGenDevnet6Config
 	default:
 		return nil
 	}
@@ -319,7 +319,7 @@ func isChainIDPoS(chainID *big.Int) bool {
 		SepoliaChainConfig.ChainID,
 		GnosisChainConfig.ChainID,
 		ChiadoChainConfig.ChainID,
-		VerkleGenDevnet2Config.ChainID,
+		VerkleGenDevnet6Config.ChainID,
 	}
 	for _, id := range ids {
 		if id.Cmp(chainID) == 0 {
