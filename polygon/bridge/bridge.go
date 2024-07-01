@@ -72,12 +72,14 @@ func (b *Bridge) Run(ctx context.Context) error {
 		to := time.Now()
 		events, err := b.fetchSyncEvents(ctx, lastEventID+1, to, 0)
 		if err != nil {
+			b.Close()
 			return err
 		}
 
 		if len(events) != 0 {
 			b.ready = false
 			if err := b.store.AddEvents(ctx, events, b.stateReceiverABI); err != nil {
+				b.Close()
 				return err
 			}
 
@@ -85,6 +87,7 @@ func (b *Bridge) Run(ctx context.Context) error {
 		} else {
 			b.ready = true
 			if err := libcommon.Sleep(ctx, 30*time.Second); err != nil {
+				b.Close()
 				return err
 			}
 		}
@@ -115,7 +118,7 @@ func (b *Bridge) ProcessNewBlocks(ctx context.Context, blocks []*types.Block) er
 		}
 
 		if lastDBID != 0 && lastDBID > b.lastProcessedEventID {
-			b.log.Debug(bridgeLogPrefix(fmt.Sprintf("Creating map for block %d, start ID %d, end ID %d", block.NumberU64(), b.lastProcessedEventID+1, lastDBID)))
+			b.log.Debug(bridgeLogPrefix(fmt.Sprintf("Creating map for block %d, start ID %d, end ID %d", block.NumberU64(), b.lastProcessedEventID, lastDBID)))
 			eventMap[block.NumberU64()] = b.lastProcessedEventID
 
 			b.lastProcessedEventID = lastDBID

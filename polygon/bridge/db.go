@@ -14,6 +14,19 @@ import (
 	"github.com/ledgerwatch/erigon/polygon/polygoncommon"
 )
 
+/*
+	BorEventNums stores the last event ID of the last sprint.
+
+	e.g. For block 10 with events [1,2,3], block 15 with events [4,5,6] and block 20 with events [7,8].
+	The DB will have the following.
+		10: 0 (initialized at zero, NOTE: Polygon does not have and event 0)
+		15: 3
+		20: 6
+
+	To get the events for block 15, we look up the map for 15 and 20 and get back 3 and 6. So our
+	ID range is [4,6].
+*/
+
 var databaseTablesCfg = kv.TableCfg{
 	kv.BorEvents:    {},
 	kv.BorEventNums: {},
@@ -105,10 +118,6 @@ func (s *MdbxStore) GetSprintLastEventID(ctx context.Context, lastID uint64, tim
 
 	kLastID := make([]byte, 8)
 	binary.BigEndian.PutUint64(kLastID, lastID)
-
-	if bytes.Equal(kLastID, kDBLast) {
-		return lastID, nil
-	}
 
 	_, _, err = cursor.Seek(kLastID)
 	if err != nil {

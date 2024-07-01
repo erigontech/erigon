@@ -79,7 +79,7 @@ func TestBridge(t *testing.T) {
 			ChainID: "80001",
 			Data:    hexutil.MustDecode("0x01"),
 		},
-		Time: time.Unix(50, 0),
+		Time: time.Unix(50, 0), // block 2
 	}
 	event2 := &heimdall.EventRecordWithTime{
 		EventRecord: heimdall.EventRecord{
@@ -87,7 +87,7 @@ func TestBridge(t *testing.T) {
 			ChainID: "80001",
 			Data:    hexutil.MustDecode("0x02"),
 		},
-		Time: time.Unix(100, 0),
+		Time: time.Unix(100, 0), // block 2
 	}
 	event3 := &heimdall.EventRecordWithTime{
 		EventRecord: heimdall.EventRecord{
@@ -95,7 +95,7 @@ func TestBridge(t *testing.T) {
 			ChainID: "80001",
 			Data:    hexutil.MustDecode("0x03"),
 		},
-		Time: time.Unix(200, 0),
+		Time: time.Unix(200, 0), // block 4
 	}
 
 	events := []*heimdall.EventRecordWithTime{event1, event2, event3}
@@ -124,7 +124,7 @@ func TestBridge(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	blocks := getBlocks(t, 4)
+	blocks := getBlocks(t, 5)
 
 	err = b.ProcessNewBlocks(ctx, blocks)
 	if err != nil {
@@ -150,6 +150,19 @@ func TestBridge(t *testing.T) {
 	require.Equal(t, event1Data, rlp.RawValue(res[0].Data())) // check data fields
 	require.Equal(t, event2Data, rlp.RawValue(res[1].Data()))
 
+	res, err = b.GetEvents(ctx, 4)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	event3Data, err := event3.Pack(stateReceiverABI)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	require.Equal(t, 1, len(res))
+	require.Equal(t, event3Data, rlp.RawValue(res[0].Data()))
+
 	// get non-sprint block
 	res, err = b.GetEvents(ctx, 1)
 	require.Error(t, err)
@@ -162,6 +175,7 @@ func TestBridge(t *testing.T) {
 	require.Error(t, err)
 
 	cancel()
+	wg.Wait()
 }
 
 func TestBridge_Unwind(t *testing.T) {
@@ -235,7 +249,13 @@ func TestBridge_Unwind(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	_, err = b.GetEvents(ctx, 4)
+	event3Data, err := event3.Pack(stateReceiverABI)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	res, err := b.GetEvents(ctx, 4)
+	require.Equal(t, event3Data, rlp.RawValue(res[0].Data()))
 	require.NoError(t, err)
 
 	err = b.Unwind(ctx, &types.Header{Number: big.NewInt(3)})
@@ -244,4 +264,5 @@ func TestBridge_Unwind(t *testing.T) {
 	require.Error(t, err)
 
 	cancel()
+	wg.Wait()
 }
