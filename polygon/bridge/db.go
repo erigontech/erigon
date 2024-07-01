@@ -300,14 +300,14 @@ func (s *MdbxStore) PruneEventIDs(ctx context.Context, blockNum uint64) error {
 	}
 	defer cursor.Close()
 
-	for k, _, err := cursor.Seek(kByte); k != nil; k, _, err = cursor.Next() {
-		if err != nil {
-			return err
-		}
-
+	var k []byte
+	for k, _, err = cursor.Seek(kByte); err == nil && k != nil; k, _, err = cursor.Next() {
 		if err := tx.Delete(kv.BorEventNums, k); err != nil {
 			return err
 		}
+	}
+	if err != nil {
+		return err
 	}
 
 	return tx.Commit()
