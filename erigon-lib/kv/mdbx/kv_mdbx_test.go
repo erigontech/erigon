@@ -664,13 +664,19 @@ func TestCurrentDup(t *testing.T) {
 }
 
 func TestDupDelete(t *testing.T) {
-	//TODO: don't fail only if delete key1 twice
+	//TODO: we remove this feature and tests are green. However, I'm not 100% sure that we don't rely on it.
 	_, tx, c := BaseCase(t)
 
 	k, _, err := c.Current()
 	require.Nil(t, err)
 	require.Equal(t, []byte("key3"), k)
 
+	err = c.DeleteCurrentDuplicates()
+	require.Nil(t, err)
+
+	k, _, err = c.Prev()
+	require.Nil(t, err)
+	require.Equal(t, []byte("key1"), k)
 	err = c.DeleteCurrentDuplicates()
 	require.Nil(t, err)
 
