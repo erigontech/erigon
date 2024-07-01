@@ -2,6 +2,7 @@ package bridge_test
 
 import (
 	"context"
+	"errors"
 	"math/big"
 	"sync"
 	"testing"
@@ -110,7 +111,10 @@ func TestBridge(t *testing.T) {
 
 		err := bridge.Run(ctx)
 		if err != nil {
-			t.Error(err)
+			if !errors.Is(err, ctx.Err()) {
+				t.Error(err)
+			}
+
 			return
 		}
 	}(b)
@@ -211,7 +215,10 @@ func TestBridge_Unwind(t *testing.T) {
 
 		err := bridge.Run(ctx)
 		if err != nil {
-			t.Error(err)
+			if !errors.Is(err, ctx.Err()) {
+				t.Error(err)
+			}
+
 			return
 		}
 	}(b)
