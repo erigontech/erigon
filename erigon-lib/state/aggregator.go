@@ -574,7 +574,7 @@ func (sf AggV3StaticFiles) CleanupOnError() {
 	}
 }
 
-func (a *Aggregator) buildFiles(ctx context.Context, step uint64) (hasMore bool, err error) {
+func (a *Aggregator) buildFiles(ctx context.Context, step uint64) error {
 	a.logger.Debug("[agg] collate and build", "step", step, "collate_workers", a.collateAndBuildWorkers, "merge_workers", a.mergeWorkers, "compress_workers", a.d[kv.AccountsDomain].compressWorkers)
 
 	var (
@@ -653,21 +653,6 @@ func (a *Aggregator) buildFiles(ctx context.Context, step uint64) (hasMore bool,
 
 	// indices are built concurrently
 	for _, ii := range a.iis {
-		var canBuild bool
-		if err := a.db.View(ctx, func(tx kv.Tx) (err error) {
-			iiTx := ii.BeginFilesRo()
-			defer iiTx.Close()
-			canBuild, err = iiTx.canBuild(tx)
-			return err
-		}); err != nil {
-			return false, err
-		}
-		fmt.Printf("[dbg] can build: %s %t\n", ii.filenameBase, canBuild)
-		if !canBuild {
-			continue
-		}
-		hasMore = true
-
 		ii := ii
 		a.wg.Add(1)
 		g.Go(func() error {
@@ -704,21 +689,6 @@ func (a *Aggregator) buildFiles(ctx context.Context, step uint64) (hasMore bool,
 	}
 
 	for name, ap := range a.ap {
-		var canBuild bool
-		if err := a.db.View(ctx, func(tx kv.Tx) (err error) {
-			aTx := ap.BeginFilesRo()
-			defer aTx.Close()
-			canBuild, err = aTx.canBuild(tx)
-			return err
-		}); err != nil {
-			return false, err
-		}
-		fmt.Printf("[dbg] can build: %s %t\n", ap.filenameBase, canBuild)
-		if !canBuild {
-			continue
-		}
-		hasMore = true
-
 		name := name
 		ap := ap
 		a.wg.Add(1)
@@ -745,13 +715,13 @@ func (a *Aggregator) buildFiles(ctx context.Context, step uint64) (hasMore bool,
 
 	if err := g.Wait(); err != nil {
 		static.CleanupOnError()
-		return false, fmt.Errorf("domain collate-build: %w", err)
+		return fmt.Errorf("domain collate-build: %w", err)
 	}
 	mxStepTook.ObserveDuration(stepStartedAt)
 	a.integrateDirtyFiles(static, txFrom, txTo)
 	a.logger.Info("[snapshots] aggregated", "step", step, "took", time.Since(stepStartedAt))
 
-	return hasMore, nil
+	return nil
 }
 
 func (a *Aggregator) BuildFiles(toTxNum uint64) (err error) {
@@ -1740,25 +1710,23 @@ func (a *Aggregator) SetProduceMod(produce bool) {
 // Returns channel which is closed when aggregation is done
 func (a *Aggregator) BuildFilesInBackground(txNum uint64) chan struct{} {
 	fin := make(chan struct{})
-	fmt.Printf("see3\n")
 
 	if !a.produce {
 		close(fin)
 		return fin
 	}
-	fmt.Printf("see4\n")
 
-	//if (txNum + 1) <= a.visibleFilesMinimaxTxNum.Load()+a.aggregationStep {
-	//	close(fin)
-	//	return fin
-	//}
-	//fmt.Printf("see5\n")
+	if (txNum + 1) <= a.visibleFilesMinimaxTxNum.Load()+a.aggregationStep {
+		close(fin)
+		return fin
+	}
 
 	if ok := a.buildingFiles.CompareAndSwap(false, true); !ok {
 		close(fin)
 		return fin
 	}
 
+	step := a.visibleFilesMinimaxTxNum.Load() / a.StepSize()
 	a.wg.Add(1)
 	go func() {
 		defer a.wg.Done()
@@ -1773,39 +1741,25 @@ func (a *Aggregator) BuildFilesInBackground(txNum uint64) chan struct{} {
 			defer a.snapshotBuildSema.Release(1)
 		}
 
+		// check if db has enough data (maybe we didn't commit them yet or all keys are unique so history is empty)
+		lastInDB := lastIdInDB(a.db, a.d[kv.AccountsDomain])
+		hasData := lastInDB > step // `step` must be fully-written - means `step+1` records must be visible
+		if !hasData {
+			close(fin)
+			return
+		}
+
 		// trying to create as much small-step-files as possible:
 		// - to reduce amount of small merges
 		// - to remove old data from db as early as possible
 		// - during files build, may happen commit of new data. on each loop step getting latest id in db
-		for step := a.visibleFilesMinimaxTxNum.Load() / a.StepSize(); ; step++ { //`step` must be fully-written - means `step+1` records must be visible
-			hasMore, err := a.buildFiles(a.ctx, step)
-			if err != nil {
+		for ; step < lastIdInDB(a.db, a.d[kv.AccountsDomain]); step++ { //`step` must be fully-written - means `step+1` records must be visible
+			if err := a.buildFiles(a.ctx, step); err != nil {
 				if errors.Is(err, context.Canceled) || errors.Is(err, common2.ErrStopped) {
 					close(fin)
 					return
 				}
 				a.logger.Warn("[snapshots] buildFilesInBackground", "err", err)
-				break
-			}
-			if !hasMore {
-				break
-			}
-		}
-
-		for {
-			apTx := a.ap[kv.ReceiptsAppendable].BeginFilesRo()
-			step := apTx.files.EndTxNum() / a.aggregationStep
-			apTx.Close()
-			hasMore, err := a.buildFiles(a.ctx, step)
-			if err != nil {
-				if errors.Is(err, context.Canceled) || errors.Is(err, common2.ErrStopped) {
-					close(fin)
-					return
-				}
-				a.logger.Warn("[snapshots] buildFilesInBackground", "err", err)
-				break
-			}
-			if !hasMore {
 				break
 			}
 		}
@@ -2049,9 +2003,6 @@ func (ac *AggregatorRoTx) DebugEFAllValuesAreInRange(ctx context.Context, name k
 func (ac *AggregatorRoTx) AppendableGet(name kv.Appendable, ts kv.TxnId, tx kv.Tx) (v []byte, ok bool, err error) {
 	return ac.appendable[name].Get(ts, tx)
 }
-func (ac *AggregatorRoTx) Appendable(name kv.Appendable) *AppendableRoTx {
-	return ac.appendable[name]
-}
 
 func (ac *AggregatorRoTx) AppendablePut(name kv.Appendable, txnID kv.TxnId, v []byte, tx kv.RwTx) (err error) {
 	return ac.appendable[name].Append(txnID, v, tx)
@@ -2098,7 +2049,7 @@ func lastIdInDB(db kv.RoDB, domain *Domain) (lstInDb uint64) {
 		lstInDb = domain.maxStepInDB(tx)
 		return nil
 	}); err != nil {
-		log.Warn("[snapshots] lastStepInDB", "err", err)
+		log.Warn("[snapshots] lastIdInDB", "err", err)
 	}
 	return lstInDb
 }

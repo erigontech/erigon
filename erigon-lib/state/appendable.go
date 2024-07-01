@@ -664,7 +664,6 @@ func (tx *AppendableRoTx) txNum2id(rwTx kv.RwTx, txFrom, txTo uint64) (fromID, t
 }
 
 func (ap *Appendable) collate(ctx context.Context, step uint64, roTx kv.Tx) (AppendableCollation, error) {
-	fmt.Printf("build1: %s\n", ap.filenameBase)
 	stepTo := step + 1
 	txFrom, txTo := step*ap.aggregationStep, stepTo*ap.aggregationStep
 	start := time.Now()
