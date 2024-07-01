@@ -213,6 +213,13 @@ func (c *Contract) CodeAt(section uint64) []byte {
 	return c.Container.Code[section]
 }
 
+func (c *Contract) SubContainerAt(containerIdx int) []byte {
+	if c.Container.SubContainer == nil {
+		return nil
+	}
+	return c.Container.SubContainer[containerIdx]
+}
+
 func (c *Contract) Data() []byte {
 	// if c.Container == nil {
 	// 	return nil

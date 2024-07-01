@@ -291,6 +291,8 @@ const (
 	// GasChangeCallFailedExecution is the burning of the remaining gas when the execution failed without a revert.
 	GasChangeCallFailedExecution GasChangeReason = 14
 
+	GasChangeCallContractEOFCreation GasChangeReason = 15
+
 	// GasChangeIgnored is a special value that can be used to indicate that the gas change should be ignored as
 	// it will be "manually" tracked by a direct emit of the gas change event.
 	GasChangeIgnored GasChangeReason = 0xFF

@@ -330,13 +330,25 @@ func enableEOF(jt *JumpTable) {
 		numPush:     0,
 		undefined:   true,
 	}
-	jt[CALLCODE] = undefined
-	jt[SELFDESTRUCT] = undefined
+
 	jt[JUMP] = undefined
 	jt[JUMPI] = undefined
 	jt[PC] = undefined
-	// JUPMDEST?
-	// 0x38, 0x39, 0x3b, 0x3c, 0x3f, 0x5a, 0xf1, 0xf2, 0xf4, 0xfa, 0xff - rejected opcodes
+
+	// 0x38, 0x39, 0x3b, 0x3c, 0x3f, 0x5a, 0xf0, 0xf1, 0xf2, 0xf4, 0xf5, 0xfa, 0xff - rejected opcodes
+	jt[CODESIZE] = undefined     // 0x38
+	jt[CODECOPY] = undefined     // 0x39
+	jt[EXTCODESIZE] = undefined  // 0x3b
+	jt[EXTCODECOPY] = undefined  // 0x3c
+	jt[EXTCODEHASH] = undefined  // 0x3f
+	jt[GAS] = undefined          // 0x5a
+	jt[CREATE] = undefined       // 0xf0
+	jt[CALL] = undefined         // 0xf1
+	jt[CALLCODE] = undefined     // 0xf2
+	jt[DELEGATECALL] = undefined // 0xf4
+	jt[CREATE2] = undefined      // 0xf5
+	jt[STATICCALL] = undefined   // 0xfa
+	jt[SELFDESTRUCT] = undefined // 0xff
 
 	jt[RJUMP] = &operation{
 		execute:       opRjump,
@@ -395,7 +407,8 @@ func enableEOF(jt *JumpTable) {
 		numPush:       0,
 		immediateSize: 1,
 	}
-	jt[EXCHANGE] = &operation{
+	jt[EXCHANGE] = &operation{ // TODO(racytech)
+		constantGas:   GasFastestStep,
 		immediateSize: 1,
 	}
 	jt[DATALOAD] = &operation{
@@ -427,6 +440,8 @@ func enableEOF(jt *JumpTable) {
 	}
 	// TODO(racytech): add EOFCREATE, TXCREATE and RETURNCONTRACT
 	jt[EOFCREATE] = &operation{
+		execute:       opEOFCreate,
+		constantGas:   params.CreateGas,
 		immediateSize: 1,
 	}
 	jt[TXCREATE] = &operation{}
@@ -610,34 +625,55 @@ func opDataCopy(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([
 	return nil, nil
 }
 
-func opCreate3(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]byte, error) {
-	if interpreter.readOnly {
-		return nil, ErrWriteProtection
-	}
+func opEOFCreate(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]byte, error) {
+	// + deduct TX_CREATE_COST gas (done in interpreter)
+	// + read immediate operand initcontainer_index, encoded as 8-bit unsigned value
+	// + pop value, salt, input_offset, input_size from the operand stack
+	// - perform (and charge for) memory expansion using [input_offset, input_size]
+	// load initcode EOF subcontainer at initcontainer_index in the container from which EOFCREATE is executed
+	// let initcontainer_size be the declared size of that EOF subcontainer in its parent container header
+	// deduct GAS_KECCAK256_WORD * ((initcontainer_size + 31) // 32) gas (hashing charge)
+	// check that current call depth is below STACK_DEPTH_LIMIT and that caller balance is enough to transfer value
+	// in case of failure return 0 on the stack, caller’s nonce is not updated and gas for initcode execution is not consumed.
+	// caller’s memory slice [input_offset:input_size] is used as calldata
+	// execute the container and deduct gas for execution. The 63/64th rule from EIP-150 applies.
+	// increment sender account’s nonce
+	// calculate new_address as keccak256(0xff || sender || salt || keccak256(initcontainer))[12:]
+	// an unsuccessful execution of initcode results in pushing 0 onto the stack
+	// can populate returndata if execution REVERTed
+	// a successful execution ends with initcode executing RETURNCONTRACT{deploy_container_index}(aux_data_offset, aux_data_size) instruction (see below). After that:
+	// load deploy EOF subcontainer at deploy_container_index in the container from which RETURNCONTRACT is executed
+	// concatenate data section with (aux_data_offset, aux_data_offset + aux_data_size) memory segment and update data size in the header
+	// if updated deploy container size exceeds MAX_CODE_SIZE instruction exceptionally aborts
+	// set state[new_address].code to the updated deploy container
+	// push new_address onto the stack
+	// deduct GAS_CODE_DEPOSIT * deployed_code_size gas
+
 	var (
 		code             = scope.Contract.CodeAt(scope.CodeSection)
-		initContainerIdx = int(code[*pc+1])
-		endowment        = scope.Stack.Pop()
-		salt             = scope.Stack.Pop()
-		offset, size     = scope.Stack.Pop(), scope.Stack.Pop()
-		inputOffset      = offset.Uint64()
-		inputSize        = size.Uint64()
-		gas              = scope.Contract.Gas
-		input            = []byte{}
-		initContainer    = scope.Contract.Container.SubContainer[initContainerIdx]
-	)
-	*pc += 2
+		initContainerIdx = code[*pc+1]
 
-	if inputSize > 0 {
-		input = scope.Memory.GetCopy(int64(inputOffset), int64(inputSize))
+		value  = scope.Stack.Pop()
+		salt   = scope.Stack.Pop()
+		offset = scope.Stack.Pop()
+		size   = scope.Stack.Pop()
+		input  = scope.Memory.GetCopy(int64(offset.Uint64()), int64(size.Uint64()))
+		gas    = scope.Contract.Gas
+	)
+	*pc = *pc + 2
+
+	// TODO(racytech): this should be done in `dynamicGas` func, leave it here for now
+	initContainer := scope.Contract.SubContainerAt(int(initContainerIdx))
+	hashingCharge := uint64(6 * (len(initContainer) + 31) / 32)
+	if !scope.Contract.UseGas(hashingCharge, tracing.GasChangeCallContractEOFCreation) {
+		return nil, ErrOutOfGas
 	}
-	// Apply EIP150
+
 	gas -= gas / 64
-	scope.Contract.UseGas(gas, tracing.GasChangeUnspecified) // TODO(racytech): what's the reason?
+	scope.Contract.UseGas(gas, tracing.GasChangeCallContractEOFCreation)
 
 	stackValue := size
-
-	res, addr, returnGas, suberr := interpreter.evm.Create3(scope.Contract, input, initContainer, gas, &endowment, &salt)
+	res, addr, returnGas, suberr := interpreter.evm.EOFCreate(scope.Contract, input, initContainer, gas, &value, &salt)
 
 	// Push item on the stack based on the returned error.
 	if suberr != nil {
@@ -647,39 +683,12 @@ func opCreate3(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]
 	}
 
 	scope.Stack.Push(&stackValue)
-	scope.Contract.Gas += returnGas
+	scope.Contract.RefundGas(returnGas, tracing.GasChangeCallLeftOverRefunded)
 
 	if suberr == ErrExecutionReverted {
 		interpreter.returnData = res // set REVERT data to return data buffer
 		return res, nil
 	}
 	interpreter.returnData = nil // clear dirty return data buffer
-	return nil, nil
-}
-
-func opCreate4(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]byte, error) {
-	// TODO(racytech): Add new TxType
-	// CREATE4 expects new transaction type = 4 which will carry initcodes
-	return nil, nil
-}
-
-func opReturnContract(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]byte, error) {
-	var (
-		code               = scope.Contract.CodeAt(scope.CodeSection)
-		deployContainerIdx = int(code[*pc+1])
-		auxDataOffset      = scope.Stack.Pop()
-		auxDataSize        = scope.Stack.Pop()
-		deployContainer    = scope.Contract.Container.SubContainer[deployContainerIdx]
-		auxData            = scope.Memory.GetPtr(int64(auxDataOffset.Uint64()), int64(auxDataSize.Uint64()))
-	)
-	var c Container
-	// NOTE(racytech): UnmarshalBinary checks for correct EOF format
-	// but it decodes entire container, which is a bit expensive. Do we need that?
-	// Can we do better?
-	if err := c.UnmarshalBinary(deployContainer); err != nil {
-		return nil, fmt.Errorf("%w: %v", ErrInvalidEOFInitcode, err)
-	}
-	// TODO(racytech): make sure this one refers to the same underlying slice as Container.SubContainer[deployContainerIdx]
-	deployContainer = append(deployContainer, auxData...)
 	return nil, nil
 }
