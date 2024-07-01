@@ -56,7 +56,7 @@ type VMContext struct {
 	BlockNumber uint64
 	Time        uint64
 	Random      *libcommon.Hash
-	// Effective tx gas price
+	// Effective txn gas price
 	GasPrice        *uint256.Int
 	ChainConfig     *chain.Config
 	IntraBlockState IntraBlockState
@@ -81,7 +81,7 @@ type (
 	// TxStartHook is called before the execution of a transaction starts.
 	// Call simulations don't come with a valid signature. `from` field
 	// to be used for address of the caller.
-	TxStartHook = func(vm *VMContext, tx types.Transaction, from libcommon.Address)
+	TxStartHook = func(vm *VMContext, txn types.Transaction, from libcommon.Address)
 
 	// TxEndHook is called after the execution of a transaction ends.
 	TxEndHook = func(receipt *types.Receipt, err error)
@@ -229,7 +229,7 @@ const (
 	// BalanceDecreaseSelfdestruct is deducted from a contract due to self-destruct.
 	BalanceDecreaseSelfdestruct BalanceChangeReason = 13
 	// BalanceDecreaseSelfdestructBurn is ether that is sent to an already self-destructed
-	// account within the same tx (captured at end of tx).
+	// account within the same txn (captured at end of tx).
 	// Note it doesn't account for a self-destruct which appoints itself as recipient.
 	BalanceDecreaseSelfdestructBurn BalanceChangeReason = 14
 )
@@ -255,7 +255,7 @@ const (
 	// GasChangeTxIntrinsicGas is the amount of gas that will be charged for the intrinsic cost of the transaction, there is
 	// always exactly one of those per transaction.
 	GasChangeTxIntrinsicGas GasChangeReason = 2
-	// GasChangeTxRefunds is the sum of all refunds which happened during the tx execution (e.g. storage slot being cleared)
+	// GasChangeTxRefunds is the sum of all refunds which happened during the txn execution (e.g. storage slot being cleared)
 	// this generates an increase in gas. There is at most one of such gas change per transaction.
 	GasChangeTxRefunds GasChangeReason = 3
 	// GasChangeTxLeftOverReturned is the amount of gas left over at the end of transaction's execution that will be returned
