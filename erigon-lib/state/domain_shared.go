@@ -188,8 +188,8 @@ func (sd *SharedDomains) Unwind(ctx context.Context, rwTx kv.RwTx, blockUnwindTo
 			return err
 		}
 	}
-	for _, ii := range sd.aggTx.iis {
-		if err := ii.Unwind(ctx, rwTx, txUnwindTo, math.MaxUint64, math.MaxUint64, logEvery, true, nil); err != nil {
+	for idx, ii := range sd.aggTx.iis {
+		if err := ii.Unwind(ctx, rwTx, changeset.IdxDiffs[idx]); err != nil {
 			return err
 		}
 	}

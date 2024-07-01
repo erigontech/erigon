@@ -769,12 +769,46 @@ func (is *InvertedIndexPruneStat) Accumulate(other *InvertedIndexPruneStat) {
 	is.PruneCountValues += other.PruneCountValues
 }
 
-func (iit *InvertedIndexRoTx) Unwind(ctx context.Context, rwTx kv.RwTx, txFrom, txTo, limit uint64, logEvery *time.Ticker, forced bool, fn func(key []byte, txnum []byte) error) error {
-	_, err := iit.Prune(ctx, rwTx, txFrom, txTo, limit, logEvery, forced, fn)
+func (iit *InvertedIndexRoTx) Unwind(ctx context.Context, rwTx kv.RwTx, idxDiffs []InvertedIndexEntryDiff) error {
+	minTxNumInDiffs := uint64(math.MaxUint64)
+	indexCursor, err := rwTx.RwCursorDupSort(iit.ii.indexTable)
 	if err != nil {
-		return err
+		return fmt.Errorf("create %s index cursor: %w", iit.ii.filenameBase, err)
+	}
+	defer indexCursor.Close()
+
+	indexKeysTableCursor, err := rwTx.RwCursorDupSort(iit.ii.indexKeysTable)
+	if err != nil {
+		return fmt.Errorf("create %s index cursor: %w", iit.ii.filenameBase, err)
+	}
+	defer indexKeysTableCursor.Close()
+
+	for _, diff := range idxDiffs {
+		for k, _, err := indexCursor.SeekBothExact(diff.Key, diff.TxNum); k != nil; k, _, err = indexCursor.NextNoDup() {
+			if err != nil {
+				return fmt.Errorf("iterate over %s index: %w", iit.ii.filenameBase, err)
+			}
+			if err := indexCursor.DeleteCurrent(); err != nil {
+				return fmt.Errorf("delete from %s index: %w", iit.ii.filenameBase, err)
+			}
+			minTxNumInDiffs = min(minTxNumInDiffs, binary.BigEndian.Uint64(diff.TxNum))
+		}
+	}
+
+	minTxNumBytes := make([]byte, 8)
+	binary.BigEndian.PutUint64(minTxNumBytes, minTxNumInDiffs)
+
+	// Truncate all keys with txNum higher or equal than minTxNum
+	for k, _, err := indexKeysTableCursor.SeekExact(minTxNumBytes); len(k) > 0; k, _, err = indexKeysTableCursor.Next() {
+		if err != nil {
+			return err
+		}
+		if err = indexKeysTableCursor.DeleteCurrent(); err != nil {
+			return err
+		}
 	}
 	return nil
+
 }
 
 // [txFrom; txTo)
