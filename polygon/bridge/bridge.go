@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/ledgerwatch/erigon-lib/log/v3"
+	"github.com/ledgerwatch/erigon/polygon/polygoncommon"
 
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon/accounts/abi"
@@ -26,6 +27,12 @@ type Bridge struct {
 	borConfig        *borcfg.BorConfig
 	stateReceiverABI abi.ABI
 	fetchSyncEvents  fetchSyncEventsType
+}
+
+func Assemble(dataDir string, logger log.Logger, borConfig *borcfg.BorConfig, fetchSyncEvents fetchSyncEventsType, stateReceiverABI abi.ABI) *Bridge {
+	bridgeDB := polygoncommon.NewDatabase(dataDir, logger)
+	bridgeStore := NewStore(bridgeDB)
+	return NewBridge(bridgeStore, logger, borConfig, fetchSyncEvents, stateReceiverABI)
 }
 
 func NewBridge(store Store, logger log.Logger, borConfig *borcfg.BorConfig, fetchSyncEvents fetchSyncEventsType, stateReceiverABI abi.ABI) *Bridge {
