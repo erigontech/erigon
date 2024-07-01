@@ -6,12 +6,13 @@ import (
 	"time"
 
 	"github.com/ledgerwatch/erigon-lib/log/v3"
-
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon/accounts/abi"
 	"github.com/ledgerwatch/erigon/common/u256"
 	"github.com/ledgerwatch/erigon/core"
 	"github.com/ledgerwatch/erigon/core/state"
+	"github.com/ledgerwatch/erigon/polygon/polygoncommon"
+
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon/accounts/abi"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/polygon/bor/borcfg"
 	"github.com/ledgerwatch/erigon/polygon/heimdall"
@@ -27,9 +28,15 @@ type Bridge struct {
 
 	log                log.Logger
 	borConfig          *borcfg.BorConfig
-	stateClientAddress libcommon.Address
 	stateReceiverABI   abi.ABI
+	stateClientAddress libcommon.Address
 	fetchSyncEvents    fetchSyncEventsType
+}
+
+func Assemble(dataDir string, logger log.Logger, borConfig *borcfg.BorConfig, fetchSyncEvents fetchSyncEventsType, stateReceiverABI abi.ABI) *Bridge {
+	bridgeDB := polygoncommon.NewDatabase(dataDir, logger)
+	bridgeStore := NewStore(bridgeDB)
+	return NewBridge(bridgeStore, logger, borConfig, fetchSyncEvents, stateReceiverABI)
 }
 
 func NewBridge(store Store, logger log.Logger, borConfig *borcfg.BorConfig, fetchSyncEvents fetchSyncEventsType, stateReceiverABI abi.ABI) *Bridge {
@@ -40,8 +47,8 @@ func NewBridge(store Store, logger log.Logger, borConfig *borcfg.BorConfig, fetc
 		fetchSyncEvents:          fetchSyncEvents,
 		lastProcessedBlockNumber: 0,
 		lastProcessedEventID:     0,
-		stateClientAddress:       libcommon.HexToAddress(borConfig.StateReceiverContract),
 		stateReceiverABI:         stateReceiverABI,
+		stateClientAddress:       libcommon.HexToAddress(borConfig.StateReceiverContract),
 	}
 }
 
@@ -162,7 +169,9 @@ func (b *Bridge) GetEvents(ctx context.Context, blockNum uint64) ([]*types.Messa
 		end = b.lastProcessedEventID
 	}
 
-	eventsRaw := make([]*types.Message, 0, end-start+1)
+	b.log.Debug("got map", "blockNum", blockNum, "start", start, "end", end)
+
+	eventsRaw := make([]*types.Message, end-start+1)
 
 	// get events from DB
 	events, err := b.store.GetEvents(ctx, start+1, end+1)

@@ -38,7 +38,7 @@ func (p *TestTxPool) Has(hash libcommon.Hash) bool {
 }
 
 // Get retrieves the transaction from local txpool with given
-// tx hash.
+// txn hash.
 func (p *TestTxPool) Get(hash libcommon.Hash) types.Transaction {
 	p.lock.Lock()
 	defer p.lock.Unlock()
@@ -50,8 +50,8 @@ func (p *TestTxPool) add(txs []types.Transaction) {
 	p.lock.Lock()
 	defer p.lock.Unlock()
 
-	for _, tx := range txs {
-		p.pool[tx.Hash()] = tx
+	for _, txn := range txs {
+		p.pool[txn.Hash()] = txn
 	}
 	p.txFeed.Send(core.NewTxsEvent{Txs: txs})
 }
@@ -74,9 +74,9 @@ func (p *TestTxPool) Pending() (types.TransactionsGroupedBySender, error) {
 	defer p.lock.RUnlock()
 
 	batches := make(map[libcommon.Address]types.Transactions)
-	for _, tx := range p.pool {
-		from, _ := tx.Sender(*types.LatestSignerForChainID(nil))
-		batches[from] = append(batches[from], tx)
+	for _, txn := range p.pool {
+		from, _ := txn.Sender(*types.LatestSignerForChainID(nil))
+		batches[from] = append(batches[from], txn)
 	}
 	groups := types.TransactionsGroupedBySender{}
 	for _, batch := range batches {
@@ -92,9 +92,9 @@ func (p *TestTxPool) Content() (map[libcommon.Address]types.Transactions, map[li
 	defer p.lock.RUnlock()
 
 	batches := make(map[libcommon.Address]types.Transactions)
-	for _, tx := range p.pool {
-		from, _ := tx.Sender(*types.LatestSignerForChainID(nil))
-		batches[from] = append(batches[from], tx)
+	for _, txn := range p.pool {
+		from, _ := txn.Sender(*types.LatestSignerForChainID(nil))
+		batches[from] = append(batches[from], txn)
 	}
 	return batches, nil
 }
