@@ -173,11 +173,6 @@ var snapshotCommand = cli.Command{
 			}),
 		},
 		{
-			Name:   "stats",
-			Action: doSnapStat,
-			Flags:  joinFlags([]cli.Flag{&utils.DataDirFlag, &utils.ChainFlag}),
-		},
-		{
 			Name: "rm-all-state-snapshots",
 			Action: func(cliCtx *cli.Context) error {
 				dirs := datadir.New(cliCtx.String(utils.DataDirFlag.Name))
@@ -427,38 +422,6 @@ func doDebugKey(cliCtx *cli.Context) error {
 	if err := view.DebugEFKey(domain, key); err != nil {
 		return err
 	}
-	return nil
-}
-
-func doSnapStat(cliCtx *cli.Context) error {
-	logger, _, _, err := debug.Setup(cliCtx, true /* root logger */)
-	if err != nil {
-		return err
-	}
-
-	ctx := cliCtx.Context
-	dirs := datadir.New(cliCtx.String(utils.DataDirFlag.Name))
-	chainDB := dbCfg(kv.ChainDB, dirs.Chaindata).MustOpen()
-	defer chainDB.Close()
-
-	cfg := ethconfig.NewSnapCfg(true, false, true, true)
-
-	blockSnaps, borSnaps, caplinSnaps, _, agg, err := openSnaps(ctx, cfg, dirs, chainDB, logger)
-	if err != nil {
-		return err
-	}
-	defer blockSnaps.Close()
-	defer borSnaps.Close()
-	defer caplinSnaps.Close()
-	defer agg.Close()
-
-	ls, err := os.Stat(filepath.Join(dirs.Snap, downloader.ProhibitNewDownloadsFileName))
-	mtime := time.Time{}
-	if err == nil {
-		mtime = ls.ModTime()
-	}
-	logger.Info("[downloads]", "locked", err == nil, "at", mtime.Format("02 Jan 06 15:04 2006"))
-
 	return nil
 }
 
@@ -717,6 +680,13 @@ func openSnaps(ctx context.Context, cfg ethconfig.BlocksFreezing, dirs datadir.D
 	if err != nil {
 		return
 	}
+
+	ls, er := os.Stat(filepath.Join(dirs.Snap, downloader.ProhibitNewDownloadsFileName))
+	mtime := time.Time{}
+	if er == nil {
+		mtime = ls.ModTime()
+	}
+	logger.Info("[downloads]", "locked", er == nil, "at", mtime.Format("02 Jan 06 15:04 2006"))
 
 	blockReader := freezeblocks.NewBlockReader(blockSnaps, borSnaps)
 	blockWriter := blockio.NewBlockWriter()

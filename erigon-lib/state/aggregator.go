@@ -43,6 +43,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/common/datadir"
 	"github.com/ledgerwatch/erigon-lib/common/dbg"
 	"github.com/ledgerwatch/erigon-lib/common/dir"
+	"github.com/ledgerwatch/erigon-lib/diagnostics"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/bitmapdb"
 	"github.com/ledgerwatch/erigon-lib/kv/iter"
@@ -448,6 +449,7 @@ func (a *Aggregator) BuildMissedIndices(ctx context.Context, workers int) error 
 				case <-logEvery.C:
 					var m runtime.MemStats
 					dbg.ReadMemStats(&m)
+					sendDiagnostics(startIndexingTime, ps.DiagnossticsData(), m.Alloc, m.Sys)
 					a.logger.Info("[snapshots] Indexing", "progress", ps.String(), "total-indexing-time", time.Since(startIndexingTime).Round(time.Second).String(), "alloc", common2.ByteCount(m.Alloc), "sys", common2.ByteCount(m.Sys))
 				}
 			}
@@ -470,6 +472,22 @@ func (a *Aggregator) BuildMissedIndices(ctx context.Context, workers int) error 
 		}
 	}
 	return nil
+}
+
+func sendDiagnostics(startIndexingTime time.Time, indexPercent map[string]int, alloc uint64, sys uint64) {
+	segmentsStats := make([]diagnostics.SnapshotSegmentIndexingStatistics, 0, len(indexPercent))
+	for k, v := range indexPercent {
+		segmentsStats = append(segmentsStats, diagnostics.SnapshotSegmentIndexingStatistics{
+			SegmentName: k,
+			Percent:     v,
+			Alloc:       alloc,
+			Sys:         sys,
+		})
+	}
+	diagnostics.Send(diagnostics.SnapshotIndexingStatistics{
+		Segments:    segmentsStats,
+		TimeElapsed: time.Since(startIndexingTime).Round(time.Second).Seconds(),
+	})
 }
 
 func (a *Aggregator) BuildMissedIndicesInBackground(ctx context.Context, workers int) {
@@ -784,12 +802,12 @@ type flusher interface {
 	Flush(ctx context.Context, tx kv.RwTx) error
 }
 
-func (ac *AggregatorRoTx) minimaxTxNumInDomainFiles(onlyFrozen bool) uint64 {
+func (ac *AggregatorRoTx) minimaxTxNumInDomainFiles() uint64 {
 	return min(
-		ac.d[kv.AccountsDomain].maxTxNumInDomainFiles(onlyFrozen),
-		ac.d[kv.CodeDomain].maxTxNumInDomainFiles(onlyFrozen),
-		ac.d[kv.StorageDomain].maxTxNumInDomainFiles(onlyFrozen),
-		ac.d[kv.CommitmentDomain].maxTxNumInDomainFiles(onlyFrozen),
+		ac.d[kv.AccountsDomain].files.EndTxNum(),
+		ac.d[kv.CodeDomain].files.EndTxNum(),
+		ac.d[kv.StorageDomain].files.EndTxNum(),
+		ac.d[kv.CommitmentDomain].files.EndTxNum(),
 	)
 }
 
@@ -810,17 +828,16 @@ func (ac *AggregatorRoTx) CanPrune(tx kv.Tx, untilTx uint64) bool {
 	return false
 }
 
-func (ac *AggregatorRoTx) CanUnwindDomainsToBlockNum(tx kv.Tx) (uint64, error) {
-	blockNum, err := ReadLowestUnwindableBlock(tx)
-	return blockNum, err
+func (ac *AggregatorRoTx) CanUnwindToBlockNum(tx kv.Tx) (uint64, error) {
+	return ReadLowestUnwindableBlock(tx)
 }
 func (ac *AggregatorRoTx) CanUnwindDomainsToTxNum() uint64 {
-	return ac.minimaxTxNumInDomainFiles(false)
+	return ac.minimaxTxNumInDomainFiles()
 }
 
 func (ac *AggregatorRoTx) CanUnwindBeforeBlockNum(blockNum uint64, tx kv.Tx) (uint64, bool, error) {
 	if blockNum == 0 && ac.CanUnwindDomainsToTxNum() > 0 { // don't allow unwind beyond files progress
-		_minBlockNum, _ := ac.CanUnwindDomainsToBlockNum(tx)
+		_minBlockNum, _ := ac.CanUnwindToBlockNum(tx)
 		return _minBlockNum, blockNum >= _minBlockNum, nil //nolint
 	}
 
@@ -893,7 +910,7 @@ func (ac *AggregatorRoTx) PruneSmallBatchesDb(ctx context.Context, timeout time.
 				ac.a.logger.Info("[snapshots] pruning state",
 					"until commit", time.Until(started.Add(timeout)).String(),
 					"pruneLimit", pruneLimit,
-					"aggregatedStep", (ac.minimaxTxNumInDomainFiles(false)-1)/ac.a.StepSize(),
+					"aggregatedStep", (ac.minimaxTxNumInDomainFiles()-1)/ac.a.StepSize(),
 					"stepsRangeInDB", ac.a.StepsRangeInDBAsStr(tx),
 					"pruned", fullStat.String(),
 				)
@@ -978,7 +995,7 @@ func (ac *AggregatorRoTx) PruneSmallBatches(ctx context.Context, timeout time.Du
 			ac.a.logger.Info("[snapshots] pruning state",
 				"until commit", time.Until(started.Add(timeout)).String(),
 				"pruneLimit", pruneLimit,
-				"aggregatedStep", (ac.minimaxTxNumInDomainFiles(false)-1)/ac.a.StepSize(),
+				"aggregatedStep", (ac.minimaxTxNumInDomainFiles()-1)/ac.a.StepSize(),
 				"stepsRangeInDB", ac.a.StepsRangeInDBAsStr(tx),
 				"pruned", fullStat.String(),
 			)
@@ -1038,7 +1055,7 @@ func (as *AggregatorPruneStat) String() string {
 	var sb strings.Builder
 	for _, d := range names {
 		v, ok := as.Domains[d]
-		if ok && v != nil {
+		if ok && v != nil && !v.PrunedNothing() {
 			sb.WriteString(fmt.Sprintf("%s| %s; ", d, v.String()))
 		}
 	}
@@ -1050,7 +1067,7 @@ func (as *AggregatorPruneStat) String() string {
 
 	for _, d := range names {
 		v, ok := as.Indices[d]
-		if ok && v != nil {
+		if ok && v != nil && !v.PrunedNothing() {
 			sb.WriteString(fmt.Sprintf("%s| %s; ", d, v.String()))
 		}
 	}
@@ -1165,7 +1182,7 @@ func (ac *AggregatorRoTx) Prune(ctx context.Context, tx kv.RwTx, limit uint64, l
 }
 
 func (ac *AggregatorRoTx) LogStats(tx kv.Tx, tx2block func(endTxNumMinimax uint64) (uint64, error)) {
-	maxTxNum := ac.minimaxTxNumInDomainFiles(false)
+	maxTxNum := ac.minimaxTxNumInDomainFiles()
 	if maxTxNum == 0 {
 		return
 	}
@@ -1201,7 +1218,7 @@ func (ac *AggregatorRoTx) LogStats(tx kv.Tx, tx2block func(endTxNumMinimax uint6
 			return
 		}
 	}
-	firstHistoryIndexBlockInDB, err := tx2block(ac.d[kv.AccountsDomain].d.FirstStepInDB(tx) * ac.a.StepSize())
+	firstHistoryIndexBlockInDB, err := tx2block(ac.d[kv.AccountsDomain].d.minStepInDB(tx) * ac.a.StepSize())
 	if err != nil {
 		ac.a.logger.Warn("[snapshots:history] Stat", "err", err)
 		return
@@ -1224,9 +1241,9 @@ func (ac *AggregatorRoTx) LogStats(tx kv.Tx, tx2block func(endTxNumMinimax uint6
 
 func (ac *AggregatorRoTx) EndTxNumNoCommitment() uint64 {
 	return min(
-		ac.d[kv.AccountsDomain].maxTxNumInDomainFiles(false),
-		ac.d[kv.CodeDomain].maxTxNumInDomainFiles(false),
-		ac.d[kv.StorageDomain].maxTxNumInDomainFiles(false),
+		ac.d[kv.AccountsDomain].files.EndTxNum(),
+		ac.d[kv.CodeDomain].files.EndTxNum(),
+		ac.d[kv.StorageDomain].files.EndTxNum(),
 	)
 }
 
@@ -1241,27 +1258,27 @@ func (a *Aggregator) FilesAmount() (res []int) {
 	return res
 }
 
-func FirstTxNumOfStep(step, size uint64) uint64 {
+func firstTxNumOfStep(step, size uint64) uint64 {
 	return step * size
 }
 
-func LastTxNumOfStep(step, size uint64) uint64 {
-	return FirstTxNumOfStep(step+1, size) - 1
+func lastTxNumOfStep(step, size uint64) uint64 {
+	return firstTxNumOfStep(step+1, size) - 1
 }
 
-// FirstTxNumOfStep returns txStepBeginning of given step.
+// firstTxNumOfStep returns txStepBeginning of given step.
 // Step 0 is a range [0, stepSize).
 // To prune step needed to fully Prune range [txStepBeginning, txNextStepBeginning)
 func (a *Aggregator) FirstTxNumOfStep(step uint64) uint64 { // could have some smaller steps to prune// could have some smaller steps to prune
-	return FirstTxNumOfStep(step, a.StepSize())
+	return firstTxNumOfStep(step, a.StepSize())
 }
 
 func (a *Aggregator) EndTxNumDomainsFrozen() uint64 {
 	return min(
-		a.d[kv.AccountsDomain].endIndexedTxNumMinimax(true),
-		a.d[kv.StorageDomain].endIndexedTxNumMinimax(true),
-		a.d[kv.CodeDomain].endIndexedTxNumMinimax(true),
-		a.d[kv.CommitmentDomain].endIndexedTxNumMinimax(true),
+		a.d[kv.AccountsDomain].dirtyFilesEndTxNumMinimax(),
+		a.d[kv.StorageDomain].dirtyFilesEndTxNumMinimax(),
+		a.d[kv.CodeDomain].dirtyFilesEndTxNumMinimax(),
+		a.d[kv.CommitmentDomain].dirtyFilesEndTxNumMinimax(),
 	)
 }
 
@@ -1282,7 +1299,7 @@ func (a *Aggregator) recalcVisibleFiles() {
 func (a *Aggregator) recalcVisibleFilesMinimaxTxNum() {
 	aggTx := a.BeginFilesRo()
 	defer aggTx.Close()
-	a.visibleFilesMinimaxTxNum.Store(aggTx.minimaxTxNumInDomainFiles(false))
+	a.visibleFilesMinimaxTxNum.Store(aggTx.minimaxTxNumInDomainFiles())
 }
 
 type RangesV3 struct {
@@ -2033,7 +2050,7 @@ func (br *BackgroundResult) GetAndReset() (bool, error) {
 // Inverted index tables only
 func lastIdInDB(db kv.RoDB, domain *Domain) (lstInDb uint64) {
 	if err := db.View(context.Background(), func(tx kv.Tx) error {
-		lstInDb = domain.LastStepInDB(tx)
+		lstInDb = domain.maxStepInDB(tx)
 		return nil
 	}); err != nil {
 		log.Warn("[snapshots] lastIdInDB", "err", err)
