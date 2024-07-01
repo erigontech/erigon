@@ -605,10 +605,6 @@ func ExecV3(ctx context.Context,
 	slowDownLimit := time.NewTicker(time.Second)
 	defer slowDownLimit.Stop()
 	canonicalReader := doms.CanonicalReader()
-	lastFrozenID, err := canonicalReader.LastFrozenTxNum(applyTx)
-	if err != nil {
-		return err
-	}
 
 	var readAhead chan uint64
 	if !parallel {
@@ -619,6 +615,7 @@ func ExecV3(ctx context.Context,
 		readAhead, clean = blocksReadAhead(ctx, &cfg, 4, engine, true)
 		defer clean()
 	}
+	var baseBlockTxnID kv.TxnId
 
 	//fmt.Printf("exec blocks: %d -> %d\n", blockNum, maxBlockNum)
 
@@ -652,6 +649,10 @@ Loop:
 		header := b.HeaderNoCopy()
 		skipAnalysis := core.SkipAnalysis(chainConfig, blockNum)
 		signer := *types.MakeSigner(chainConfig, blockNum, header.Time)
+		baseBlockTxnID, err = canonicalReader.BaseTxnID(applyTx, blockNum, b.Hash())
+		if err != nil {
+			return err
+		}
 
 		f := core.GetHashFn(header, getHeaderFunc)
 		getHashFnMute := &sync.Mutex{}
@@ -801,19 +802,8 @@ Loop:
 						receipts = receipts[:0]
 					} else {
 						if txTask.TxIndex >= 0 {
-							var baseBlockTxnID, txnID kv.TxnId
-							if txTask.TxNum < uint64(lastFrozenID) {
-								txnID = kv.TxnId(txTask.TxNum)
-							} else {
-								h, err := rawdb.ReadCanonicalHash(applyTx, txTask.BlockNum)
-								baseBlockTxnID, err = canonicalReader.BaseTxnID(applyTx, txTask.BlockNum, h)
-								if err != nil {
-									return err
-								}
-								txnID = baseBlockTxnID
-							}
-							// by the tx.
 							receipt := txTask.CreateReceipt(usedGas)
+							txnID := baseBlockTxnID + kv.TxnId(txTask.TxIndex)
 							if err := rawtemporaldb.AppendReceipts(doms, txnID, receipt); err != nil {
 								return err
 							}
