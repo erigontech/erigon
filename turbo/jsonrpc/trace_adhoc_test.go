@@ -3,13 +3,13 @@ package jsonrpc
 import (
 	"context"
 	"encoding/json"
-	"github.com/ledgerwatch/erigon-lib/common/hexutil"
 	"testing"
 
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/stretchr/testify/require"
 
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/common/hexutil"
+	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/cmd/rpcdaemon/cli/httpcfg"
 	"github.com/ledgerwatch/erigon/cmd/rpcdaemon/rpcdaemontest"
 	"github.com/ledgerwatch/erigon/rpc"
@@ -20,7 +20,7 @@ func TestEmptyQuery(t *testing.T) {
 	api := NewTraceAPI(newBaseApiForTest(m), m.DB, &httpcfg.HttpCfg{})
 	// Call GetTransactionReceipt for transaction which is not in the database
 	var latest = rpc.LatestBlockNumber
-	results, err := api.CallMany(context.Background(), json.RawMessage("[]"), &rpc.BlockNumberOrHash{BlockNumber: &latest})
+	results, err := api.CallMany(context.Background(), json.RawMessage("[]"), &rpc.BlockNumberOrHash{BlockNumber: &latest}, nil)
 	if err != nil {
 		t.Errorf("calling CallMany: %v", err)
 	}
@@ -41,7 +41,7 @@ func TestCoinbaseBalance(t *testing.T) {
 	[{"from":"0x71562b71999873db5b286df957af199ec94617f7","to":"0x0d3ab14bbad3d99f4203bd7a11acb94882050e7e","gas":"0x15f90","gasPrice":"0x4a817c800","value":"0x1"},["trace", "stateDiff"]],
 	[{"from":"0x71562b71999873db5b286df957af199ec94617f7","to":"0x0d3ab14bbad3d99f4203bd7a11acb94882050e7e","gas":"0x15f90","gasPrice":"0x4a817c800","value":"0x1"},["trace", "stateDiff"]]
 ]
-`), &rpc.BlockNumberOrHash{BlockNumber: &latest})
+`), &rpc.BlockNumberOrHash{BlockNumber: &latest}, nil)
 	if err != nil {
 		t.Errorf("calling CallMany: %v", err)
 	}
@@ -73,7 +73,7 @@ func TestReplayTransaction(t *testing.T) {
 	}
 
 	// Call GetTransactionReceipt for transaction which is not in the database
-	results, err := api.ReplayTransaction(context.Background(), txnHash, []string{"stateDiff"}, new(bool))
+	results, err := api.ReplayTransaction(context.Background(), txnHash, []string{"stateDiff"}, new(bool), nil)
 	if err != nil {
 		t.Errorf("calling ReplayTransaction: %v", err)
 	}
@@ -90,7 +90,7 @@ func TestReplayBlockTransactions(t *testing.T) {
 
 	// Call GetTransactionReceipt for transaction which is not in the database
 	n := rpc.BlockNumber(6)
-	results, err := api.ReplayBlockTransactions(m.Ctx, rpc.BlockNumberOrHash{BlockNumber: &n}, []string{"stateDiff"}, new(bool))
+	results, err := api.ReplayBlockTransactions(m.Ctx, rpc.BlockNumberOrHash{BlockNumber: &n}, []string{"stateDiff"}, new(bool), nil)
 	if err != nil {
 		t.Errorf("calling ReplayBlockTransactions: %v", err)
 	}
