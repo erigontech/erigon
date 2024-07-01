@@ -200,7 +200,14 @@ func (s *CanonicalTxnIds) advance() (err error) {
 		return err
 	}
 	if body == nil {
-		return fmt.Errorf("body not found: %d, %x", blockNum, blockHash)
+		if s.currentTxNum >= int(s.endOfCurrentBlock) {
+			s.endOfCurrentBlock, err = rawdbv3.TxNums.Max(s.tx, blockNum)
+			if err != nil {
+				return err
+			}
+		}
+		s.currentTxNum++
+		return nil
 	}
 
 	if s.orderAscend {
