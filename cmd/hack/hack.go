@@ -373,7 +373,7 @@ func extractBodies(datadir string) error {
 	}
 	defer c.Close()
 	i := 0
-	var txId uint64
+	var txnID uint64
 	for k, _, err := c.First(); k != nil; k, _, err = c.Next() {
 		if err != nil {
 			return err
@@ -384,19 +384,19 @@ func extractBodies(datadir string) error {
 		if hash, err = br.CanonicalHash(context.Background(), tx, blockNumber); err != nil {
 			return err
 		}
-		_, baseTxId, txCount := rawdb.ReadBody(tx, blockHash, blockNumber)
-		fmt.Printf("Body %d %x: baseTxId %d, txCount %d\n", blockNumber, blockHash, baseTxId, txCount)
+		_, baseTxnID, txCount := rawdb.ReadBody(tx, blockHash, blockNumber)
+		fmt.Printf("Body %d %x: baseTxnID %d, txCount %d\n", blockNumber, blockHash, baseTxnID, txCount)
 		if hash != blockHash {
 			fmt.Printf("Non-canonical\n")
 			continue
 		}
 		i++
-		if txId > 0 {
-			if txId != baseTxId {
-				fmt.Printf("Mismatch txId for block %d, txId = %d, baseTxId = %d\n", blockNumber, txId, baseTxId)
+		if txnID > 0 {
+			if txnID != baseTxnID {
+				fmt.Printf("Mismatch txnID for block %d, txnID = %d, baseTxnID = %d\n", blockNumber, txnID, baseTxnID)
 			}
 		}
-		txId = baseTxId + uint64(txCount) + 2
+		txnID = baseTxnID + uint64(txCount) + 2
 		if i == 50 {
 			break
 		}
@@ -645,7 +645,7 @@ func trimTxs(chaindata string) error {
 			return err
 		}
 		// Remove from the map
-		toDelete.RemoveRange(body.BaseTxId, body.BaseTxId+uint64(body.TxCount))
+		toDelete.RemoveRange(body.BaseTxnID.U64(), body.BaseTxnID.LastSystemTx(body.TxCount)+1) //+1 to include last system txn in block into delete range
 	}
 	fmt.Printf("Number of txn records to delete: %d\n", toDelete.GetCardinality())
 	// Takes 20min to iterate 1.4b

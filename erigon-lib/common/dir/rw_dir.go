@@ -27,7 +27,11 @@ import (
 func MustExist(path ...string) {
 	const perm = 0764 // user rwx, group rw, other r
 	for _, p := range path {
-		if Exist(p) {
+		exist, err := Exist(p)
+		if err != nil {
+			panic(err)
+		}
+		if exist {
 			continue
 		}
 		if err := os.MkdirAll(p, perm); err != nil {
@@ -36,26 +40,34 @@ func MustExist(path ...string) {
 	}
 }
 
-func Exist(path string) bool {
-	_, err := os.Stat(path)
-	if err != nil && os.IsNotExist(err) {
-		return false
+func Exist(path string) (exists bool, err error) {
+	_, err = os.Stat(path)
+	switch {
+	case err == nil:
+		return true, nil
+	case os.IsNotExist(err):
+		return false, nil
+	default:
+		return false, err
 	}
-	return true
 }
 
-func FileExist(path string) bool {
+func FileExist(path string) (exists bool, err error) {
 	fi, err := os.Stat(path)
-	if err != nil && os.IsNotExist(err) {
-		return false
+	switch {
+	case os.IsNotExist(err):
+		return false, nil
+	case err != nil:
+		return false, err
+	default:
 	}
 	if fi == nil {
-		return false
+		return false, nil
 	}
 	if !fi.Mode().IsRegular() {
-		return false
+		return false, nil
 	}
-	return true
+	return true, nil
 }
 
 func FileNonZero(path string) bool {
@@ -91,7 +103,11 @@ func WriteFileWithFsync(name string, data []byte, perm os.FileMode) error {
 }
 
 func Recreate(dir string) {
-	if Exist(dir) {
+	exist, err := Exist(dir)
+	if err != nil {
+		panic(err)
+	}
+	if exist {
 		_ = os.RemoveAll(dir)
 	}
 	MustExist(dir)
