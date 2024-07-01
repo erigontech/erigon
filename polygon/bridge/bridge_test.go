@@ -68,7 +68,7 @@ func getBlocks(t *testing.T, numBlocks int) []*types.Block {
 }
 
 func TestBridge(t *testing.T) {
-	ctx := context.Background()
+	ctx, cancel := context.WithCancel(context.Background())
 	stateReceiverABI := bor.GenesisContractStateReceiverABI()
 	heimdallClient, b := setup(t, stateReceiverABI)
 
@@ -157,11 +157,11 @@ func TestBridge(t *testing.T) {
 	res, err = b.GetEvents(ctx, 0)
 	require.Error(t, err)
 
-	wg.Done()
+	cancel()
 }
 
 func TestBridge_Unwind(t *testing.T) {
-	ctx := context.Background()
+	ctx, cancel := context.WithCancel(context.Background())
 	stateReceiverABI := bor.GenesisContractStateReceiverABI()
 	heimdallClient, b := setup(t, stateReceiverABI)
 
@@ -236,5 +236,5 @@ func TestBridge_Unwind(t *testing.T) {
 	_, err = b.GetEvents(ctx, 4)
 	require.Error(t, err)
 
-	wg.Done()
+	cancel()
 }
