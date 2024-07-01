@@ -1254,7 +1254,7 @@ func (dt *DomainRoTx) Unwind(ctx context.Context, rwTx kv.RwTx, step, txNumUnwin
 		return fmt.Errorf("create %s domain delete cursor: %w", d.filenameBase, err)
 	}
 	defer keysCursor.Close()
-
+	fmt.Println("A")
 	// First revert keys
 	for i := range domainDiffs {
 		key, value, prevStepBytes := domainDiffs[i].Key, domainDiffs[i].Value, domainDiffs[i].PrevStepBytes

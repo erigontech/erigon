@@ -137,7 +137,6 @@ func mergeSortedLists[T any](newer, older []T, cmpFunc func(i, j int) int) []T {
 
 func (d *StateChangeSetAccumulator) Changeset() StateChangeset {
 	var ret StateChangeset
-	totalSize := 0
 	for idx := range d.Diffs {
 		for k, v := range d.Diffs[idx].prevValues {
 			ret.DomainDiffs[idx] = append(ret.DomainDiffs[idx], DomainEntryDiff{
@@ -146,7 +145,6 @@ func (d *StateChangeSetAccumulator) Changeset() StateChangeset {
 				PrevStepBytes: d.Diffs[idx].keys[k[:len(k)-8]],
 				TxNum:         d.Diffs[idx].keyToTxNum[k[:len(k)-8]],
 			})
-			totalSize += len(k) + len(v) + len(d.Diffs[idx].keys[k]) + len(d.Diffs[idx].keyToTxNum[k])
 		}
 		sort.Slice(ret.DomainDiffs[idx], func(i, j int) bool {
 			return bytes.Compare(ret.DomainDiffs[idx][i].Key, ret.DomainDiffs[idx][j].Key) < 0
@@ -158,7 +156,6 @@ func (d *StateChangeSetAccumulator) Changeset() StateChangeset {
 				Key:   []byte(k),
 				TxNum: v,
 			})
-			totalSize += len(k) + len(v)
 		}
 		sort.Slice(ret.IdxDiffs[idx], func(i, j int) bool {
 			return bytes.Compare(ret.IdxDiffs[idx][i].Key, ret.IdxDiffs[idx][j].Key) < 0
