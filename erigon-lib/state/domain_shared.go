@@ -161,9 +161,6 @@ func (sd *SharedDomains) GetDiffset(tx kv.RwTx, blockHash common.Hash, blockNumb
 }
 
 func (sd *SharedDomains) AggTx() interface{} { return sd.aggTx }
-func (sd *SharedDomains) CanonicalReader() CanonicalsReader {
-	return sd.aggTx.appendable[kv.ReceiptsAppendable].ap.cfg.iters
-}
 
 // aggregator context should call aggTx.Unwind before this one.
 func (sd *SharedDomains) Unwind(ctx context.Context, rwTx kv.RwTx, blockUnwindTo, txUnwindTo uint64, changeset *[kv.DomainLen][]DomainEntryDiff) error {

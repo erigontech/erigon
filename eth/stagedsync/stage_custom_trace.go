@@ -106,7 +106,7 @@ func SpawnCustomTrace(s *StageState, txc wrap.TxContainer, cfg CustomTraceCfg, c
 	cumulative := uint256.NewInt(0)
 	var lastBlockNum uint64
 
-	canonicalReader := doms.CanonicalReader()
+	canonicalReader := rawdb.NewCanonicalReader()
 	lastFrozenID, err := canonicalReader.LastFrozenTxNum(tx)
 	if err != nil {
 		return err
