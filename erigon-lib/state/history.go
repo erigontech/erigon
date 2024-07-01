@@ -1151,7 +1151,7 @@ func (h *HistoryRoTx) Unwind(ctx context.Context, rwTx kv.RwTx, domainDiffs []Do
 	defer historyCursor.Close()
 
 	for _, diff := range domainDiffs {
-		if err := h.unwindKey(diff.Key, diff.TxNum, historyCursor); err != nil {
+		if err := h.unwindKey(diff.Key[:len(diff.Key)-8], diff.TxNum, historyCursor); err != nil {
 			return err
 		}
 		minTxNum = min(minTxNum, binary.BigEndian.Uint64(diff.TxNum))
@@ -1191,7 +1191,7 @@ func (h *HistoryRoTx) unwindKey(key, txNumBytes []byte, historyCursor kv.RwCurso
 				return err
 			}
 			txNumInDB := binary.BigEndian.Uint64(k[len(k)-8:])
-			if len(k) != len(key) && !bytes.Equal(k[:len(key)], key) {
+			if len(k)-8 != len(key) || !bytes.Equal(k[:len(key)], key) {
 				break
 			}
 			if txNumToUnwind > txNumInDB {
@@ -1201,6 +1201,7 @@ func (h *HistoryRoTx) unwindKey(key, txNumBytes []byte, historyCursor kv.RwCurso
 				return err
 			}
 		}
+		return nil
 	}
 
 	historyCursorDupSort, ok := historyCursor.(kv.RwCursorDupSort)
@@ -1209,9 +1210,12 @@ func (h *HistoryRoTx) unwindKey(key, txNumBytes []byte, historyCursor kv.RwCurso
 	}
 
 	k := key
-	for v, err := historyCursorDupSort.SeekBothRange(key, txNumBytes); err == nil && len(k) > 0; k, v, err = historyCursorDupSort.NextDup() {
+	for v, err := historyCursorDupSort.SeekBothRange(key, txNumBytes); len(k) > 0; k, v, err = historyCursorDupSort.NextDup() {
 		if err != nil {
 			return err
+		}
+		if len(v) == 0 {
+			break
 		}
 		txNumInDB := binary.BigEndian.Uint64(v[:8])
 		if txNumToUnwind > txNumInDB {

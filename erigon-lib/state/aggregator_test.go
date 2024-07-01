@@ -1191,7 +1191,7 @@ func TestAggregatorV3_SharedDomains(t *testing.T) {
 	require.NoError(t, err)
 	defer domains.Close()
 	diffs := changesetAt5.Changeset()
-	err = domains.Unwind(context.Background(), rwTx, 0, pruneFrom, &diffs.DomainDiffs)
+	err = domains.Unwind(context.Background(), rwTx, 0, pruneFrom, diffs)
 	require.NoError(t, err)
 
 	domains.SetChangesetAccumulator(changesetAt3)
@@ -1227,7 +1227,7 @@ func TestAggregatorV3_SharedDomains(t *testing.T) {
 	require.NoError(t, err)
 	defer domains.Close()
 	diffs = changesetAt3.Changeset()
-	err = domains.Unwind(context.Background(), rwTx, 0, pruneFrom, &diffs.DomainDiffs)
+	err = domains.Unwind(context.Background(), rwTx, 0, pruneFrom, diffs)
 	require.NoError(t, err)
 
 	for i = int(pruneFrom); i < len(vals); i++ {

@@ -15,12 +15,12 @@ func testAccumulator(t *testing.T) StateChangeSetAccumulator {
 	for i := 0; i < 10; i++ {
 		for idx := range stateChangeSetAccumulator.Diffs {
 			// select a random number from 1 to 10
-			prevStepBytes := [8]byte{byte(i)}
+			prevStepBytes := [8]byte{0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff}
 			txNumBytes := [8]byte{byte(i % 4)}
 			randomInt := rand.Intn(99999999999)
 			key := []byte(fmt.Sprintf("key%d", randomInt))
 			value := []byte(fmt.Sprintf("value%d", randomInt))
-			stateChangeSetAccumulator.Diffs[idx].DomainUpdate(key, nil, value, prevStepBytes[:], uint64(randomInt), txNumBytes[:])
+			stateChangeSetAccumulator.Diffs[idx].DomainUpdate(key, nil, value, prevStepBytes[:], 0, txNumBytes[:])
 		}
 	}
 	for i := 0; i < 10; i++ {

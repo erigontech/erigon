@@ -139,12 +139,12 @@ func (d *StateChangeSetAccumulator) Changeset() StateChangeset {
 	var ret StateChangeset
 	totalSize := 0
 	for idx := range d.Diffs {
-		for k, v := range d.Diffs[idx].keys {
+		for k, v := range d.Diffs[idx].prevValues {
 			ret.DomainDiffs[idx] = append(ret.DomainDiffs[idx], DomainEntryDiff{
 				Key:           []byte(k),
 				Value:         v,
-				PrevStepBytes: d.Diffs[idx].keys[k],
-				TxNum:         d.Diffs[idx].keyToTxNum[k],
+				PrevStepBytes: d.Diffs[idx].keys[k[:len(k)-8]],
+				TxNum:         d.Diffs[idx].keyToTxNum[k[:len(k)-8]],
 			})
 			totalSize += len(k) + len(v) + len(d.Diffs[idx].keys[k]) + len(d.Diffs[idx].keyToTxNum[k])
 		}

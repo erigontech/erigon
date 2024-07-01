@@ -1827,7 +1827,6 @@ func TestDomain_Unwind(t *testing.T) {
 		totalDiff := StateChangeset{}
 		if currTx > unwindTo {
 			totalDiff = diffSetMap[currTx]
-			fmt.Println(currTx)
 			for currentTxNum := currTx - 1; currentTxNum >= unwindTo; currentTxNum-- {
 				d := diffSetMap[currentTxNum]
 				totalDiff.MergeWithOlder(&d)
@@ -1985,6 +1984,8 @@ func compareIterators(t *testing.T, et, ut iter.KV) {
 		require.EqualValues(t, string(ek), string(uk))
 		require.EqualValues(t, string(ev), string(uv))
 		if !et.HasNext() {
+			k, v, _ := et.Next()
+			fmt.Println(string(k), string(v))
 			require.False(t, ut.HasNext(), "unwindedIter has more keys than expectedIter got\n")
 			break
 		}

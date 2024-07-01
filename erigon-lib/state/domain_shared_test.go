@@ -165,7 +165,7 @@ Loop:
 
 	acu := agg.BeginFilesRo()
 	changeset := stateChangeset.Changeset()
-	err = domains.Unwind(ctx, rwTx, 0, unwindTo, &changeset.DomainDiffs)
+	err = domains.Unwind(ctx, rwTx, 0, unwindTo, changeset)
 	require.NoError(t, err)
 	acu.Close()
 
