@@ -104,6 +104,7 @@ type Message interface {
 }
 
 // IntrinsicGas computes the 'intrinsic gas' for a message with the given data.
+// TODO: convert the input to a struct
 func IntrinsicGas(data []byte, accessList types2.AccessList, isContractCreation bool, isHomestead, isEIP2028, isEIP3860 bool, authorizationsLen uint64) (uint64, error) {
 	// Zero and non-zero bytes are priced differently
 	dataLen := uint64(len(data))
@@ -386,7 +387,7 @@ func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (*evmtype
 			defer st.state.SetCode(authority, nil) // reset code after execution
 
 			// 6. add authority account to accesses_addresses
-			if !accessTuples.IsPresent(authority) {
+			if !accessTuples.HasAddr(authority) {
 				accessTuples = append(accessTuples, types2.AccessTuple{Address: authority, StorageKeys: nil})
 			}
 

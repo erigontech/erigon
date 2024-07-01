@@ -75,7 +75,7 @@ type Transaction interface {
 	GetAuthorizations() []Authorization
 	AsMessage(s Signer, baseFee *big.Int, rules *chain.Rules) (Message, error)
 	WithSignature(signer Signer, sig []byte) (Transaction, error)
-	FakeSign(address libcommon.Address) (Transaction, error)
+	FakeSign(address libcommon.Address) Transaction
 	Hash() libcommon.Hash
 	SigningHash(chainID *big.Int) libcommon.Hash
 	GetData() []byte

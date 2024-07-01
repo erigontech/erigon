@@ -170,13 +170,13 @@ func (tx *DynamicFeeTransaction) WithSignature(signer Signer, sig []byte) (Trans
 	return cpy, nil
 }
 
-func (tx *DynamicFeeTransaction) FakeSign(address libcommon.Address) (Transaction, error) {
+func (tx *DynamicFeeTransaction) FakeSign(address libcommon.Address) Transaction {
 	cpy := tx.copy()
 	cpy.R.Set(u256.Num1)
 	cpy.S.Set(u256.Num1)
 	cpy.V.Set(u256.Num4)
 	cpy.from.Store(address)
-	return cpy, nil
+	return cpy
 }
 
 // MarshalBinary returns the canonical encoding of the transaction.
@@ -259,10 +259,10 @@ func (tx *DynamicFeeTransaction) encodePayload(w io.Writer, b []byte, payloadSiz
 func (tx *DynamicFeeTransaction) EncodeRLP(w io.Writer) error {
 	payloadSize, nonceLen, gasLen, accessListLen := tx.payloadSize()
 	// size of struct prefix and TxType
-	envelopSize := 1 + rlp2.ListPrefixLen(payloadSize) + payloadSize
+	envelopeSize := 1 + rlp2.ListPrefixLen(payloadSize) + payloadSize
 	var b [33]byte
 	// envelope
-	if err := rlp.EncodeStringSizePrefix(envelopSize, w, b[:]); err != nil {
+	if err := rlp.EncodeStringSizePrefix(envelopeSize, w, b[:]); err != nil {
 		return err
 	}
 	// encode TxType

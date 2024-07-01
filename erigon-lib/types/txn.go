@@ -986,7 +986,7 @@ func (al AccessList) StorageKeys() int {
 	return sum
 }
 
-func (al AccessList) IsPresent(addr common.Address) bool {
+func (al AccessList) HasAddr(addr common.Address) bool {
 	for _, tuple := range al {
 		if tuple.Address == addr {
 			return true

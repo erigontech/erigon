@@ -74,13 +74,13 @@ func (tx *SetCodeTransaction) WithSignature(signer Signer, sig []byte) (Transact
 	return cpy, nil
 }
 
-func (tx *SetCodeTransaction) FakeSign(address libcommon.Address) (Transaction, error) {
+func (tx *SetCodeTransaction) FakeSign(address libcommon.Address) Transaction {
 	cpy := tx.copy()
 	cpy.R.Set(u256.Num1)
 	cpy.S.Set(u256.Num1)
 	cpy.V.Set(u256.Num4)
 	cpy.from.Store(address)
-	return cpy, nil
+	return cpy
 }
 
 func (tx *SetCodeTransaction) MarshalBinary(w io.Writer) error {
