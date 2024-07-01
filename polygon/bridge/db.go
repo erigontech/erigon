@@ -279,24 +279,30 @@ func (s *MdbxStore) PruneEventIDs(ctx context.Context, blockNum uint64) error {
 	kByte := make([]byte, 8)
 	binary.BigEndian.PutUint64(kByte, blockNum)
 
-	it, err := tx.RangeDescend(kv.BorEvents, nil, kByte, 0)
+	cursor, err := tx.Cursor(kv.BorEventNums)
+	if err != nil {
+		return err
+	}
+	defer cursor.Close()
+
+	k, _, err := cursor.Seek(kByte)
 	if err != nil {
 		return err
 	}
 
-	for it.HasNext() {
-		k, _, err := it.Next()
-		if err != nil {
+	for {
+		if err := tx.Delete(kv.BorEventNums, k); err != nil {
 			return err
 		}
 
-		err = tx.Delete(kv.BorEventNums, k)
+		k, _, err = cursor.Next()
 		if err != nil {
 			return err
+		}
+		if k == nil {
+			return tx.Commit()
 		}
 	}
-
-	return nil
 }
 
 func (s *MdbxStore) DumpDB(ctx context.Context) error {
