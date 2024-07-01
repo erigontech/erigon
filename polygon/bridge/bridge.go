@@ -6,6 +6,9 @@ import (
 	"time"
 
 	"github.com/ledgerwatch/erigon-lib/log/v3"
+	"github.com/ledgerwatch/erigon/common/u256"
+	"github.com/ledgerwatch/erigon/core"
+	"github.com/ledgerwatch/erigon/core/state"
 	"github.com/ledgerwatch/erigon/polygon/polygoncommon"
 
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
@@ -23,10 +26,11 @@ type Bridge struct {
 	lastProcessedBlockNumber uint64
 	lastProcessedEventID     uint64
 
-	log              log.Logger
-	borConfig        *borcfg.BorConfig
-	stateReceiverABI abi.ABI
-	fetchSyncEvents  fetchSyncEventsType
+	log                log.Logger
+	borConfig          *borcfg.BorConfig
+	stateReceiverABI   abi.ABI
+	stateClientAddress libcommon.Address
+	fetchSyncEvents    fetchSyncEventsType
 }
 
 func Assemble(dataDir string, logger log.Logger, borConfig *borcfg.BorConfig, fetchSyncEvents fetchSyncEventsType, stateReceiverABI abi.ABI) *Bridge {
@@ -44,6 +48,7 @@ func NewBridge(store Store, logger log.Logger, borConfig *borcfg.BorConfig, fetc
 		lastProcessedBlockNumber: 0,
 		lastProcessedEventID:     0,
 		stateReceiverABI:         stateReceiverABI,
+		stateClientAddress:       libcommon.HexToAddress(borConfig.StateReceiverContract),
 	}
 }
 
@@ -153,13 +158,15 @@ func (b *Bridge) Unwind(ctx context.Context, tip *types.Header) error {
 }
 
 // GetEvents returns all sync events at blockNum
-func (b *Bridge) GetEvents(ctx context.Context, blockNum uint64) ([][]byte, error) {
+func (b *Bridge) GetEvents(ctx context.Context, blockNum uint64) ([]*types.Message, error) {
 	start, end, err := b.store.GetEventIDRange(ctx, blockNum)
 	if err != nil {
 		return nil, err
 	}
 
 	b.log.Debug("got map", "blockNum", blockNum, "start", start, "end", end)
+
+	eventsRaw := make([]*types.Message, end-start+1)
 
 	// get events from DB
 	events, err := b.store.GetEvents(ctx, start, end)
@@ -169,7 +176,23 @@ func (b *Bridge) GetEvents(ctx context.Context, blockNum uint64) ([][]byte, erro
 
 	b.log.Debug(bridgeLogPrefix(fmt.Sprintf("got %v events for block %v", len(events), blockNum)))
 
-	return events, nil
+	// convert to message
+	for _, event := range events {
+		msg := types.NewMessage(
+			state.SystemAddress,
+			&b.stateClientAddress,
+			0, u256.Num0,
+			core.SysCallGasLimit,
+			u256.Num0,
+			nil, nil,
+			event, nil, false,
+			true,
+			nil,
+		)
+
+		eventsRaw = append(eventsRaw, &msg)
+	}
+	return eventsRaw, nil
 }
 
 // Helper functions

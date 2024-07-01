@@ -1476,10 +1476,9 @@ func (c *Bor) CommitStates(
 		}
 
 		c.logger.Debug("using polygon bridge", "len(events)", len(events), "blockNum", blockNum)
-		contractAddress := libcommon.HexToAddress(c.config.StateReceiverContract)
 
 		for _, event := range events {
-			_, err := syscall(contractAddress, event)
+			_, err := syscall(*event.To(), event.Data())
 			if err != nil {
 				return err
 			}
