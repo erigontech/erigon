@@ -171,7 +171,7 @@ func (b *Bridge) GetEvents(ctx context.Context, blockNum uint64) ([]*types.Messa
 
 	b.log.Debug("got map", "blockNum", blockNum, "start", start, "end", end)
 
-	eventsRaw := make([]*types.Message, end-start+1)
+	eventsRaw := make([]*types.Message, 0, end-start+1)
 
 	// get events from DB
 	events, err := b.store.GetEvents(ctx, start+1, end+1)

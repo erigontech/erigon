@@ -162,6 +162,7 @@ func TestBridge(t *testing.T) {
 	res, err = b.GetEvents(ctx, 0)
 	require.Error(t, err)
 
+	cancel()
 	wg.Wait()
 }
 
@@ -244,9 +245,11 @@ func TestBridge_Unwind(t *testing.T) {
 	require.NoError(t, err)
 
 	err = b.Unwind(ctx, &types.Header{Number: big.NewInt(3)})
+	require.NoError(t, err)
 
 	_, err = b.GetEvents(ctx, 4)
 	require.Error(t, err)
 
+	cancel()
 	wg.Wait()
 }
