@@ -619,7 +619,7 @@ func ExecV3(ctx context.Context,
 	var b *types.Block
 Loop:
 	for ; blockNum <= maxBlockNum; blockNum++ {
-		changeset := &state2.StateChangeSet{}
+		changeset := &state2.StateChangeSetAccumulator{}
 		if shouldGenerateChangesets && blockNum > 0 {
 			doms.SetChangesetAccumulator(changeset)
 		}
@@ -860,9 +860,9 @@ Loop:
 			}
 			ts += time.Since(start)
 			aggTx.RestrictSubsetFileDeletions(false)
-			doms.SavePastChangesetAccumulator(b.Hash(), blockNum, changeset)
+			doms.SavePastChangesetAccumulator(b.Hash(), blockNum, changeset.Changeset())
 			if !inMemExec {
-				if err := state2.WriteDiffSet(applyTx, blockNum, b.Hash(), changeset); err != nil {
+				if err := state2.WriteDiffSet(applyTx, blockNum, b.Hash(), changeset.Changeset()); err != nil {
 					return err
 				}
 			}

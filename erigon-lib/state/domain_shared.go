@@ -169,7 +169,7 @@ func (sd *SharedDomains) CanonicalReader() CanonicalsReader {
 }
 
 // aggregator context should call aggTx.Unwind before this one.
-func (sd *SharedDomains) Unwind(ctx context.Context, rwTx kv.RwTx, blockUnwindTo, txUnwindTo uint64, changeset *[kv.DomainLen][]DomainEntryDiff) error {
+func (sd *SharedDomains) Unwind(ctx context.Context, rwTx kv.RwTx, blockUnwindTo, txUnwindTo uint64, changeset StateChangeset) error {
 	step := txUnwindTo / sd.aggTx.a.StepSize()
 	logEvery := time.NewTicker(30 * time.Second)
 	defer logEvery.Stop()
@@ -184,7 +184,7 @@ func (sd *SharedDomains) Unwind(ctx context.Context, rwTx kv.RwTx, blockUnwindTo
 	}
 
 	for idx, d := range sd.aggTx.d {
-		if err := d.Unwind(ctx, rwTx, step, txUnwindTo, changeset[idx]); err != nil {
+		if err := d.Unwind(ctx, rwTx, step, txUnwindTo, changeset.DomainDiffs[idx]); err != nil {
 			return err
 		}
 	}
