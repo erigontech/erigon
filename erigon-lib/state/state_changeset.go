@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/binary"
 	"encoding/gob"
+	"fmt"
 	"math"
 	"sort"
 	"sync"
@@ -167,12 +168,13 @@ func (d *StateChangeSetAccumulator) Changeset() StateChangeset {
 func (ch *StateChangeset) MergeWithOlder(older *StateChangeset) {
 	for idx := range ch.DomainDiffs {
 		ch.DomainDiffs[idx] = mergeSortedLists(ch.DomainDiffs[idx], older.DomainDiffs[idx], func(i, j int) int {
-			return bytes.Compare(ch.DomainDiffs[idx][i].Key, older.DomainDiffs[idx][j].Key)
+			return bytes.Compare(older.DomainDiffs[idx][j].Key, ch.DomainDiffs[idx][i].Key)
 		})
+
 	}
 	for idx := range ch.IdxDiffs {
 		ch.IdxDiffs[idx] = mergeSortedLists(ch.IdxDiffs[idx], older.IdxDiffs[idx], func(i, j int) int {
-			return bytes.Compare(ch.IdxDiffs[idx][i].Key, older.IdxDiffs[idx][j].Key)
+			return bytes.Compare(older.IdxDiffs[idx][j].Key, ch.IdxDiffs[idx][i].Key)
 		})
 	}
 }
@@ -184,6 +186,12 @@ func WriteDiffSet(tx kv.RwTx, blockNumber uint64, blockHash common.Hash, diffSet
 	buffer := bufPool.Get().(*bytes.Buffer)
 	defer bufPool.Put(buffer)
 	buffer.Reset()
+
+	if !sort.SliceIsSorted(diffSet.DomainDiffs[0], func(i, j int) bool {
+		return bytes.Compare(diffSet.DomainDiffs[0][i].Key, diffSet.DomainDiffs[0][j].Key) < 0
+	}) {
+		fmt.Println("AXY4")
+	}
 
 	gobEncoder := gob.NewEncoder(buffer)
 	if err := gobEncoder.Encode(diffSet); err != nil {
