@@ -233,7 +233,7 @@ func (a *ApiHandler) GetEthV3ValidatorBlock(
 	if block.IsBlinded() {
 		resp = newBeaconResponse(block.ToBlinded()).With("version", block.Version().String())
 	} else {
-		resp = newBeaconResponse(block.ToExecution())
+		resp = newBeaconResponse(block.ToExecution()).With("version", block.Version().String())
 	}
 	return resp.With("execution_payload_blinded", block.IsBlinded()).
 		With("execution_payload_value", strconv.FormatUint(block.GetExecutionValue().Uint64(), 10)).
