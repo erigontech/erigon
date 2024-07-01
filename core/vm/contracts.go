@@ -198,13 +198,20 @@ func init() {
 
 // ActivePrecompiles returns the precompiles enabled with the current configuration.
 func ActivePrecompiles(rules *chain.Rules) []libcommon.Address {
+	if !rules.IsNormalcy {
+		switch {
+		case rules.IsForkID8Elderberry:
+			return PrecompiledAddressesForkID88Elderberry
+		case rules.IsForkID7Etrog:
+			return PrecompiledAddressesEtrog
+		case rules.IsForkID5Dragonfruit:
+			return PrecompiledAddressesDragonfruit
+		default:
+			return PrecompiledAddressesHomestead
+		}
+	}
+
 	switch {
-	case rules.IsForkID8Elderberry:
-		return PrecompiledAddressesForkID88Elderberry
-	case rules.IsForkID7Etrog:
-		return PrecompiledAddressesEtrog
-	case rules.IsForkID5Dragonfruit:
-		return PrecompiledAddressesDragonfruit
 	case rules.IsPrague:
 		return PrecompiledAddressesPrague
 	case rules.IsNapoli:

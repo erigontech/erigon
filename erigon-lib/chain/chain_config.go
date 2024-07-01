@@ -109,6 +109,7 @@ type Config struct {
 	ForkID7EtrogBlock       *big.Int `json:"forkID7EtrogBlock,omitempty"`
 	ForkID88ElderberryBlock *big.Int `json:"forkID88ElderberryBlock,omitempty"`
 	ForkID9Elderberry2Block *big.Int `json:"forkID9FeijoaBlock,omitempty"`
+	NormalcyBlock           *big.Int `json:"normalcyBlock,omitempty"`
 
 	SupportGasless bool `json:"supportGasless,omitempty"`
 }
@@ -124,7 +125,7 @@ type BorConfig interface {
 func (c *Config) String() string {
 	engine := c.getEngine()
 
-	return fmt.Sprintf("{ChainID: %v, Homestead: %v, DAO: %v, Tangerine Whistle: %v, Spurious Dragon: %v, Byzantium: %v, Constantinople: %v, Petersburg: %v, Istanbul: %v, Muir Glacier: %v, Berlin: %v, London: %v, Arrow Glacier: %v, Gray Glacier: %v, Terminal Total Difficulty: %v, Merge Netsplit: %v, Shanghai: %v, Cancun: %v, Prague: %v, Osaka: %v, Engine: %v, NoPruneContracts: %v}",
+	return fmt.Sprintf("{ChainID: %v, Homestead: %v, DAO: %v, Tangerine Whistle: %v, Spurious Dragon: %v, Byzantium: %v, Constantinople: %v, Petersburg: %v, Istanbul: %v, Muir Glacier: %v, Berlin: %v, London: %v, Arrow Glacier: %v, Gray Glacier: %v, Terminal Total Difficulty: %v, Merge Netsplit: %v, Shanghai: %v, Cancun: %v, Prague: %v, Osaka: %v, Normalcy: %v, Engine: %v, NoPruneContracts: %v}",
 		c.ChainID,
 		c.HomesteadBlock,
 		c.DAOForkBlock,
@@ -145,6 +146,7 @@ func (c *Config) String() string {
 		c.CancunTime,
 		c.PragueTime,
 		c.OsakaTime,
+		c.NormalcyBlock,
 		engine,
 		c.NoPruneContracts,
 	)
@@ -326,6 +328,10 @@ func (c *Config) GetMaxBlobsPerBlock() uint64 {
 	return c.GetMaxBlobGasPerBlock() / fixedgas.BlobGasPerBlob
 }
 
+func (c *Config) IsNormalcy(num uint64) bool {
+	return isForked(c.NormalcyBlock, num)
+}
+
 func (c *Config) IsForkID4(num uint64) bool {
 	return isForked(c.ForkID4Block, num)
 }
@@ -493,6 +499,9 @@ func (c *Config) checkCompatible(newcfg *Config, head uint64) *ConfigCompatError
 	if incompatible(c.MergeNetsplitBlock, newcfg.MergeNetsplitBlock, head) {
 		return newCompatError("Merge netsplit block", c.MergeNetsplitBlock, newcfg.MergeNetsplitBlock)
 	}
+	if incompatible(c.NormalcyBlock, newcfg.NormalcyBlock, head) {
+		return newCompatError("London fork block", c.NormalcyBlock, newcfg.NormalcyBlock)
+	}
 
 	return nil
 }
@@ -591,6 +600,7 @@ type Rules struct {
 	IsCancun, IsNapoli                                                                       bool
 	IsPrague, isOsaka                                                                        bool
 	IsAura                                                                                   bool
+	IsNormalcy                                                                               bool
 	IsForkID4, IsForkID5Dragonfruit, IsForkID6IncaBerry, IsForkID7Etrog, IsForkID8Elderberry bool
 }
 
@@ -617,6 +627,7 @@ func (c *Config) Rules(num uint64, time uint64) *Rules {
 		IsNapoli:             c.IsNapoli(num),
 		IsPrague:             c.IsPrague(time),
 		isOsaka:              c.IsOsaka(time),
+		IsNormalcy:           c.IsNormalcy(num),
 		IsAura:               c.Aura != nil,
 		IsForkID4:            c.IsForkID4(num),
 		IsForkID5Dragonfruit: c.IsForkID5Dragonfruit(num),

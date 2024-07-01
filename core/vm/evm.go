@@ -34,7 +34,7 @@ import (
 // deployed contract addresses (relevant after the account abstraction).
 var emptyCodeHash = crypto.Keccak256Hash(nil)
 
-func (evm *EVM) precompile_disabled(addr libcommon.Address) (PrecompiledContract, bool) {
+func (evm *EVM) precompile(addr libcommon.Address) (PrecompiledContract, bool) {
 	var precompiles map[libcommon.Address]PrecompiledContract
 	switch {
 	case evm.chainRules.IsPrague:
@@ -117,7 +117,11 @@ func NewEVM(blockCtx evmtypes.BlockContext, txCtx evmtypes.TxContext, state evmt
 	}
 
 	// [zkevm] change
-	evm.interpreter = NewZKEVMInterpreter(evm, NewZkConfig(vmConfig, nil))
+	if evm.ChainRules().IsNormalcy {
+		evm.interpreter = NewEVMInterpreter(evm, vmConfig)
+	} else {
+		evm.interpreter = NewZKEVMInterpreter(evm, NewZkConfig(vmConfig, nil))
+	}
 
 	return evm
 }
@@ -190,7 +194,7 @@ func (evm *EVM) call(typ OpCode, caller ContractRef, addr libcommon.Address, inp
 			}
 		}
 	}
-	p, isPrecompile := evm.precompile(addr, 0)
+	p, isPrecompile := evm.precompile(addr)
 	var code []byte
 	if !isPrecompile {
 		code = evm.intraBlockState.GetCode(addr)
@@ -349,17 +353,16 @@ func (c *codeAndHash) Hash() libcommon.Hash {
 	return c.hash
 }
 
-func (evm *EVM) create(caller ContractRef, codeAndHash *codeAndHash, gas uint64, value *uint256.Int, address libcommon.Address, typ OpCode, incrementNonce bool, intrinsicGas uint64) ([]byte, libcommon.Address, uint64, error) {
-	// hack to support zkeVM
-	return evm.createZkEvm(caller, codeAndHash, gas, value, address, typ, incrementNonce, intrinsicGas, false)
-}
-
 func (evm *EVM) OverlayCreate(caller ContractRef, codeAndHash *codeAndHash, gas uint64, value *uint256.Int, address libcommon.Address, typ OpCode, incrementNonce bool) ([]byte, libcommon.Address, uint64, error) {
 	return evm.create(caller, codeAndHash, gas, value, address, typ, incrementNonce, 0)
 }
 
 // create creates a new contract using code as deployment code.
-func (evm *EVM) create_disabled(caller ContractRef, codeAndHash *codeAndHash, gasRemaining uint64, value *uint256.Int, address libcommon.Address, typ OpCode, incrementNonce bool) ([]byte, libcommon.Address, uint64, error) {
+func (evm *EVM) create(caller ContractRef, codeAndHash *codeAndHash, gasRemaining uint64, value *uint256.Int, address libcommon.Address, typ OpCode, incrementNonce bool, intrinsicGas uint64) ([]byte, libcommon.Address, uint64, error) {
+	if !evm.ChainRules().IsNormalcy {
+		return evm.createZkEvm(caller, codeAndHash, gasRemaining, value, address, typ, incrementNonce, intrinsicGas, false)
+	}
+
 	var ret []byte
 	var err error
 	var gasConsumption uint64
@@ -367,7 +370,7 @@ func (evm *EVM) create_disabled(caller ContractRef, codeAndHash *codeAndHash, ga
 
 	if evm.config.Debug {
 		if depth == 0 {
-			evm.config.Tracer.CaptureStart(evm, caller.Address(), address, false /* precompile */, true /* create */, codeAndHash.code, gasRemaining, value, nil)
+			evm.config.Tracer.CaptureStart(evm, caller.Address(), address, false /* precompile */, true /* create */, codeAndHash.code, gasRemaining+intrinsicGas, value, nil)
 			defer func() {
 				evm.config.Tracer.CaptureEnd(ret, gasConsumption, err)
 			}()
