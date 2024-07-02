@@ -203,7 +203,7 @@ func (sg Signer) SenderWithContext(context *secp256k1.Context, txn Transaction) 
 	var V uint256.Int
 	var R, S *uint256.Int
 	signChainID := sg.chainID.ToBig() // This is reset to nil if txn is unprotected
-	// recoverPlain below will subract 27 from V
+	// recoverPlain below will subtract 27 from V
 	switch t := txn.(type) {
 	case *LegacyTx:
 		if !t.Protected() {

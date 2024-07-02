@@ -661,17 +661,17 @@ func (b BaseTxnID) U64() uint64 { return uint64(b) }
 
 func (b BaseTxnID) Bytes() []byte { return hexutility.EncodeTs(uint64(b)) }
 
-// First non-system tx number in block
+// First non-system txn number in block
 // as if baseTxnID is first original transaction in block
 func (b BaseTxnID) First() uint64 { return uint64(b + 1) }
 
-// At returns tx number at block position `ti`.
+// At returns txn number at block position `ti`.
 func (b BaseTxnID) At(ti int) uint64 { return b.First() + uint64(ti) }
 
-// FirstSystemTx returns first system tx number in block
+// FirstSystemTx returns first system txn number in block
 func (b BaseTxnID) FirstSystemTx() BaseTxnID { return b }
 
-// LastSystemTx returns last system tx number in block. result+1 will be baseID of next block a.k.a. beginning system tx number
+// LastSystemTx returns last system txn number in block. result+1 will be baseID of next block a.k.a. beginning system txn number
 // Supposed that txAmount includes 2 system txns.
 func (b BaseTxnID) LastSystemTx(txAmount uint32) uint64 { return b.U64() + uint64(txAmount) - 1 }
 

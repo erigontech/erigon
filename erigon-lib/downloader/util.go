@@ -144,12 +144,20 @@ func BuildTorrentIfNeed(ctx context.Context, fName, root string, torrentFiles *A
 		return false, err
 	}
 
-	if torrentFiles.Exists(fName) {
+	exists, err := torrentFiles.Exists(fName)
+	if err != nil {
+		return false, err
+	}
+	if exists {
 		return false, nil
 	}
 
 	fPath := filepath.Join(root, fName)
-	if !dir2.FileExist(fPath) {
+	exists, err = dir2.FileExist(fPath)
+	if err != nil {
+		return false, err
+	}
+	if !exists {
 		return false, nil
 	}
 

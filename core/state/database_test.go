@@ -1152,7 +1152,7 @@ func TestWrongIncarnation2(t *testing.T) {
 	}
 
 	if knownContractAddress != contractAddress {
-		t.Errorf("Expexted contractAddress: %x, got %x", knownContractAddress, contractAddress)
+		t.Errorf("Expected contractAddress: %x, got %x", knownContractAddress, contractAddress)
 	}
 
 	// Create a longer chain, with 4 blocks (with higher total difficulty) that reverts the change of stroage self-destruction of the contract
@@ -1331,7 +1331,7 @@ func TestCacheCodeSizeSeparately(t *testing.T) {
 	assert.Equal(t, code, code2, "new code should be received")
 }
 
-// TestCacheCodeSizeInTrie makes sure that we dont just read from the DB all the time
+// TestCacheCodeSizeInTrie makes sure that we don't just read from the DB all the time
 func TestCacheCodeSizeInTrie(t *testing.T) {
 	t.Parallel()
 	//t.Skip("switch to TG state readers/writers")
@@ -1631,12 +1631,8 @@ func TestTxLookupUnwind(t *testing.T) {
 	}
 	var count uint64
 	if err = m.DB.View(context.Background(), func(tx kv.Tx) error {
-		c, e := tx.Cursor(kv.TxLookup)
-		if e != nil {
-			return e
-		}
-		defer c.Close()
-		if count, e = c.Count(); e != nil {
+		var e error
+		if count, e = tx.Count(kv.TxLookup); e != nil {
 			return e
 		}
 		return nil

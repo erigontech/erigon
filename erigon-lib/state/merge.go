@@ -614,7 +614,11 @@ func (dt *DomainRoTx) mergeFiles(ctx context.Context, domainFiles, indexFiles, h
 
 	{
 		bloomIndexPath := dt.d.kvExistenceIdxFilePath(fromStep, toStep)
-		if dir.FileExist(bloomIndexPath) {
+		exists, err := dir.FileExist(bloomIndexPath)
+		if err != nil {
+			return nil, nil, nil, fmt.Errorf("merge %s FileExist err [%d-%d]: %w", dt.d.filenameBase, r.valuesStartTxNum, r.valuesEndTxNum, err)
+		}
+		if exists {
 			valuesIn.existence, err = OpenExistenceFilter(bloomIndexPath)
 			if err != nil {
 				return nil, nil, nil, fmt.Errorf("merge %s existence [%d-%d]: %w", dt.d.filenameBase, r.valuesStartTxNum, r.valuesEndTxNum, err)

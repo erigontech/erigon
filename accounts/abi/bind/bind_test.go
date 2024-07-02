@@ -1792,7 +1792,11 @@ var bindTests = []struct {
 func TestGolangBindings(t *testing.T) {
 	// Skip the test if no Go command can be found
 	gocmd := "go"
-	if !dir.FileExist(gocmd) {
+	exists, err := dir.FileExist(gocmd)
+	if err != nil {
+		t.Skipf("failed to check if gocmd exists, err %v", err)
+	}
+	if !exists {
 		t.Skip("go sdk not found for testing")
 	}
 	// Create a temporary workspace for the test suite
