@@ -37,6 +37,7 @@ import (
 	"github.com/ledgerwatch/erigon/polygon/bor"
 	"github.com/ledgerwatch/erigon/polygon/bor/finality"
 	"github.com/ledgerwatch/erigon/polygon/bor/finality/flags"
+	"github.com/ledgerwatch/erigon/polygon/bridge"
 	"github.com/ledgerwatch/erigon/polygon/heimdall"
 	"github.com/ledgerwatch/erigon/turbo/engineapi/engine_helpers"
 	"github.com/ledgerwatch/erigon/turbo/services"
@@ -767,6 +768,7 @@ func NewPolygonSyncStages(
 	maxPeers int,
 	statusDataProvider *sentry.StatusDataProvider,
 	stopNode func() error,
+	polygonBridge bridge.Service,
 ) []*stagedsync.Stage {
 	loopBreakCheck := NewLoopBreakCheck(config, heimdallClient)
 	return stagedsync.PolygonSyncStages(
@@ -798,7 +800,7 @@ func NewPolygonSyncStages(
 			stopNode,
 			bor.GenesisContractStateReceiverABI(),
 			config.LoopBlockLimit,
-			config.Dirs.DataDir,
+			polygonBridge,
 		),
 		stagedsync.StageSendersCfg(
 			db,

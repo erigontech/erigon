@@ -108,7 +108,11 @@ func (b *ExistenceFilter) fsync(f *os.File) error {
 func OpenExistenceFilter(filePath string) (*ExistenceFilter, error) {
 	_, fileName := filepath.Split(filePath)
 	f := &ExistenceFilter{FilePath: filePath, FileName: fileName}
-	if !dir.FileExist(filePath) {
+	exists, err := dir.FileExist(filePath)
+	if err != nil {
+		return nil, err
+	}
+	if !exists {
 		return nil, fmt.Errorf("file doesn't exists: %s", fileName)
 	}
 	{

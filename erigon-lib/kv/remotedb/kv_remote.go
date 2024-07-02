@@ -1,25 +1,24 @@
-/*
-   Copyright 2021 Erigon contributors
-
-   Licensed under the Apache License, Version 2.0 (the "License");
-   you may not use this file except in compliance with the License.
-   You may obtain a copy of the License at
-
-       http://www.apache.org/licenses/LICENSE-2.0
-
-   Unless required by applicable law or agreed to in writing, software
-   distributed under the License is distributed on an "AS IS" BASIS,
-   WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-   See the License for the specific language governing permissions and
-   limitations under the License.
-*/
+// Copyright 2021 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
 package remotedb
 
 import (
 	"bytes"
 	"context"
-	"encoding/binary"
 	"fmt"
 	"runtime"
 	"unsafe"
@@ -269,27 +268,14 @@ func (tx *tx) statelessCursor(bucket string) (kv.Cursor, error) {
 	return c, nil
 }
 
+func (tx *tx) Count(bucket string) (uint64, error) {
+	panic("not implemented")
+}
+
 func (tx *tx) BucketSize(name string) (uint64, error) { panic("not implemented") }
 
 func (tx *tx) ForEach(bucket string, fromPrefix []byte, walker func(k, v []byte) error) error {
 	it, err := tx.Range(bucket, fromPrefix, nil)
-	if err != nil {
-		return err
-	}
-	for it.HasNext() {
-		k, v, err := it.Next()
-		if err != nil {
-			return err
-		}
-		if err := walker(k, v); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
-func (tx *tx) ForPrefix(bucket string, prefix []byte, walker func(k, v []byte) error) error {
-	it, err := tx.Prefix(bucket, prefix)
 	if err != nil {
 		return err
 	}
@@ -381,17 +367,6 @@ func (tx *tx) ListBuckets() ([]string, error) {
 // func (c *remoteCursor) Append(k []byte, v []byte) error         { panic("not supported") }
 // func (c *remoteCursor) Delete(k []byte) error                   { panic("not supported") }
 // func (c *remoteCursor) DeleteCurrent() error                    { panic("not supported") }
-func (c *remoteCursor) Count() (uint64, error) {
-	if err := c.stream.Send(&remote.Cursor{Cursor: c.id, Op: remote.Op_COUNT}); err != nil {
-		return 0, err
-	}
-	pair, err := c.stream.Recv()
-	if err != nil {
-		return 0, err
-	}
-	return binary.BigEndian.Uint64(pair.V), nil
-
-}
 
 func (c *remoteCursor) first() ([]byte, []byte, error) {
 	if err := c.stream.Send(&remote.Cursor{Cursor: c.id, Op: remote.Op_FIRST}); err != nil {

@@ -91,7 +91,7 @@ func HashByteSlice(out, in []byte) error {
 }
 
 func convertHeader(xs []byte) [][32]byte {
-	// i wont pretend to understand, but my solution for the problem is as so
+	// i won't pretend to understand, but my solution for the problem is as so
 
 	// first i grab the slice header of the input
 	header := (*reflect.SliceHeader)(unsafe.Pointer(&xs))

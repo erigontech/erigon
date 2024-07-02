@@ -1,18 +1,18 @@
-/*
-   Copyright 2022 Erigon contributors
-
-   Licensed under the Apache License, Version 2.0 (the "License");
-   you may not use this file except in compliance with the License.
-   You may obtain a copy of the License at
-
-       http://www.apache.org/licenses/LICENSE-2.0
-
-   Unless required by applicable law or agreed to in writing, software
-   distributed under the License is distributed on an "AS IS" BASIS,
-   WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-   See the License for the specific language governing permissions and
-   limitations under the License.
-*/
+// Copyright 2022 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
 package state
 
@@ -132,7 +132,11 @@ func NewAggregator(ctx context.Context, dirs datadir.Dirs, aggregationStep uint6
 	}
 	commitmentFileMustExist := func(fromStep, toStep uint64) bool {
 		fPath := filepath.Join(dirs.SnapDomain, fmt.Sprintf("v1-%s.%d-%d.kv", kv.CommitmentDomain, fromStep, toStep))
-		return dir.FileExist(fPath)
+		exists, err := dir.FileExist(fPath)
+		if err != nil {
+			panic(err)
+		}
+		return exists
 	}
 
 	integrityCheck := func(name kv.Domain, fromStep, toStep uint64) bool {
@@ -228,11 +232,25 @@ func NewAggregator(ctx context.Context, dirs datadir.Dirs, aggregationStep uint6
 // getStateIndicesSalt - try read salt for all indices from DB. Or fall-back to new salt creation.
 // if db is Read-Only (for example remote RPCDaemon or utilities) - we will not create new indices - and existing indices have salt in metadata.
 func getStateIndicesSalt(baseDir string) (salt *uint32, err error) {
-	if dir.FileExist(filepath.Join(baseDir, "salt.txt")) && !dir.FileExist(filepath.Join(baseDir, "salt-state.txt")) {
+	saltExists, err := dir.FileExist(filepath.Join(baseDir, "salt.txt"))
+	if err != nil {
+		return nil, err
+	}
+
+	saltStateExists, err := dir.FileExist(filepath.Join(baseDir, "salt-state.txt"))
+	if err != nil {
+		return nil, err
+	}
+
+	if saltExists && !saltStateExists {
 		_ = os.Rename(filepath.Join(baseDir, "salt.txt"), filepath.Join(baseDir, "salt-state.txt"))
 	}
 	fpath := filepath.Join(baseDir, "salt-state.txt")
-	if !dir.FileExist(fpath) {
+	fexists, err := dir.FileExist(fpath)
+	if err != nil {
+		return nil, err
+	}
+	if !fexists {
 		if salt == nil {
 			saltV := rand2.Uint32()
 			salt = &saltV
@@ -450,7 +468,7 @@ func (a *Aggregator) BuildMissedIndices(ctx context.Context, workers int) error 
 				case <-logEvery.C:
 					var m runtime.MemStats
 					dbg.ReadMemStats(&m)
-					sendDiagnostics(startIndexingTime, ps.DiagnossticsData(), m.Alloc, m.Sys)
+					sendDiagnostics(startIndexingTime, ps.DiagnosticsData(), m.Alloc, m.Sys)
 					a.logger.Info("[snapshots] Indexing", "progress", ps.String(), "total-indexing-time", time.Since(startIndexingTime).Round(time.Second).String(), "alloc", common2.ByteCount(m.Alloc), "sys", common2.ByteCount(m.Sys))
 				}
 			}

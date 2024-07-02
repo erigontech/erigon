@@ -1,15 +1,18 @@
-/*
-   Copyright 2022 Erigon contributors
-   Licensed under the Apache License, Version 2.0 (the "License");
-   you may not use this file except in compliance with the License.
-   You may obtain a copy of the License at
-       http://www.apache.org/licenses/LICENSE-2.0
-   Unless required by applicable law or agreed to in writing, software
-   distributed under the License is distributed on an "AS IS" BASIS,
-   WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-   See the License for the specific language governing permissions and
-   limitations under the License.
-*/
+// Copyright 2022 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
 package membatchwithdb
 
@@ -239,9 +242,9 @@ func (m *MemoryMutation) ForEach(bucket string, fromPrefix []byte, walker func(k
 func (m *MemoryMutation) Prefix(table string, prefix []byte) (iter.KV, error) {
 	nextPrefix, ok := kv.NextSubtree(prefix)
 	if !ok {
-		return m.Stream(table, prefix, nil)
+		return m.Range(table, prefix, nil)
 	}
-	return m.Stream(table, prefix, nextPrefix)
+	return m.Range(table, prefix, nextPrefix)
 }
 func (m *MemoryMutation) Stream(table string, fromPrefix, toPrefix []byte) (iter.KV, error) {
 	panic("please implement me")
@@ -253,10 +256,22 @@ func (m *MemoryMutation) StreamDescend(table string, fromPrefix, toPrefix []byte
 	panic("please implement me")
 }
 func (m *MemoryMutation) Range(table string, fromPrefix, toPrefix []byte) (iter.KV, error) {
-	panic("please implement me")
+	return m.RangeAscend(table, fromPrefix, toPrefix, -1)
 }
 func (m *MemoryMutation) RangeAscend(table string, fromPrefix, toPrefix []byte, limit int) (iter.KV, error) {
-	panic("please implement me")
+	s := &rangeIter{orderAscend: true, limit: int64(limit)}
+	var err error
+	if s.iterDb, err = m.db.RangeAscend(table, fromPrefix, toPrefix, limit); err != nil {
+		return s, err
+	}
+	if s.iterMem, err = m.memTx.RangeAscend(table, fromPrefix, toPrefix, limit); err != nil {
+		return s, err
+	}
+	if _, err := s.init(); err != nil {
+		s.Close() //it's responsibility of constructor (our) to close resource on error
+		return nil, err
+	}
+	return s, nil
 }
 func (m *MemoryMutation) RangeDescend(table string, fromPrefix, toPrefix []byte, limit int) (iter.KV, error) {
 	s := &rangeIter{orderAscend: false, limit: int64(limit)}
@@ -425,27 +440,6 @@ func (s *rangeDupSortIter) Next() (k, v []byte, err error) {
 	return
 }
 
-func (m *MemoryMutation) ForPrefix(bucket string, prefix []byte, walker func(k, v []byte) error) error {
-	c, err := m.Cursor(bucket)
-	if err != nil {
-		return err
-	}
-	defer c.Close()
-
-	for k, v, err := c.Seek(prefix); k != nil; k, v, err = c.Next() {
-		if err != nil {
-			return err
-		}
-		if !bytes.HasPrefix(k, prefix) {
-			break
-		}
-		if err := walker(k, v); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
 func (m *MemoryMutation) Delete(table string, k []byte) error {
 	t, ok := m.deletedEntries[table]
 	if !ok {
@@ -487,6 +481,10 @@ func (m *MemoryMutation) Close() {
 
 func (m *MemoryMutation) BucketSize(bucket string) (uint64, error) {
 	return m.memTx.BucketSize(bucket)
+}
+
+func (m *MemoryMutation) Count(bucket string) (uint64, error) {
+	panic("not implemented")
 }
 
 func (m *MemoryMutation) DropBucket(bucket string) error {

@@ -1,18 +1,18 @@
-/*
-   Copyright 2022 Erigon contributors
-
-   Licensed under the Apache License, Version 2.0 (the "License");
-   you may not use this file except in compliance with the License.
-   You may obtain a copy of the License at
-
-       http://www.apache.org/licenses/LICENSE-2.0
-
-   Unless required by applicable law or agreed to in writing, software
-   distributed under the License is distributed on an "AS IS" BASIS,
-   WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-   See the License for the specific language governing permissions and
-   limitations under the License.
-*/
+// Copyright 2022 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
 package state
 
@@ -195,7 +195,11 @@ func (ap *Appendable) missedAccessors() (l []*filesItem) {
 	ap.dirtyFiles.Walk(func(items []*filesItem) bool {
 		for _, item := range items {
 			fromStep, toStep := item.startTxNum/ap.aggregationStep, item.endTxNum/ap.aggregationStep
-			if !dir.FileExist(ap.accessorFilePath(fromStep, toStep)) {
+			exists, err := dir.FileExist(ap.accessorFilePath(fromStep, toStep))
+			if err != nil {
+				panic(err)
+			}
+			if !exists {
 				l = append(l, item)
 			}
 		}
@@ -253,13 +257,21 @@ func (ap *Appendable) openFiles() error {
 	var invalidFileItems []*filesItem
 	invalidFileItemsLock := sync.Mutex{}
 	ap.dirtyFiles.Walk(func(items []*filesItem) bool {
-		var err error
 		for _, item := range items {
 			item := item
 			fromStep, toStep := item.startTxNum/ap.aggregationStep, item.endTxNum/ap.aggregationStep
 			if item.decompressor == nil {
 				fPath := ap.apFilePath(fromStep, toStep)
-				if !dir.FileExist(fPath) {
+				exists, err := dir.FileExist(fPath)
+				if err != nil {
+					_, fName := filepath.Split(fPath)
+					ap.logger.Debug("[agg] Appendable.openFiles", "err", err, "f", fName)
+					invalidFileItemsLock.Lock()
+					invalidFileItems = append(invalidFileItems, item)
+					invalidFileItemsLock.Unlock()
+					continue
+				}
+				if !exists {
 					_, fName := filepath.Split(fPath)
 					ap.logger.Debug("[agg] Appendable.openFiles: file does not exists", "f", fName)
 					invalidFileItemsLock.Lock()
@@ -285,7 +297,12 @@ func (ap *Appendable) openFiles() error {
 
 			if item.index == nil {
 				fPath := ap.accessorFilePath(fromStep, toStep)
-				if dir.FileExist(fPath) {
+				exists, err := dir.FileExist(fPath)
+				if err != nil {
+					_, fName := filepath.Split(fPath)
+					ap.logger.Warn("[agg] Appendable.openFiles", "err", err, "f", fName)
+				}
+				if exists {
 					if item.index, err = recsplit.OpenIndex(fPath); err != nil {
 						_, fName := filepath.Split(fPath)
 						ap.logger.Warn("[agg] Appendable.openFiles", "err", err, "f", fName)

@@ -126,7 +126,11 @@ func doBackup(cliCtx *cli.Context) error {
 			panic(fmt.Sprintf("unexpected: %+v", label))
 		}
 
-		if !dir.Exist(from) {
+		exists, err := dir.Exist(from)
+		if err != nil {
+			return err
+		}
+		if !exists {
 			continue
 		}
 
