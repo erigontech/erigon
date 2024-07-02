@@ -6,6 +6,7 @@ import (
 
 	btree2 "github.com/tidwall/btree"
 
+	"github.com/ledgerwatch/erigon-lib/config3"
 	"github.com/ledgerwatch/erigon-lib/kv/bitmapdb"
 	"github.com/ledgerwatch/erigon-lib/log/v3"
 	"github.com/ledgerwatch/erigon-lib/recsplit"
@@ -248,4 +249,17 @@ func (files visibleFiles) EndTxNum() uint64 {
 		return 0
 	}
 	return files[len(files)-1].endTxNum
+}
+
+func (files visibleFiles) LatestMergedRange() MergeRange {
+	if len(files) == 0 {
+		return MergeRange{}
+	}
+	for i := len(files) - 1; i >= 0; i-- {
+		shardSize := (files[i].endTxNum - files[i].startTxNum) / config3.HistoryV3AggregationStep
+		if shardSize > 2 {
+			return MergeRange{from: files[i].startTxNum, to: files[i].endTxNum}
+		}
+	}
+	return MergeRange{}
 }

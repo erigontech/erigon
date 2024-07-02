@@ -514,6 +514,10 @@ func (mr *MergeRange) String(prefix string, aggStep uint64) string {
 	return fmt.Sprintf("%s=%d-%d", prefix, mr.from/aggStep, mr.to/aggStep)
 }
 
+func (mr *MergeRange) Equal(other *MergeRange) bool {
+	return mr.from == other.from && mr.to == other.to
+}
+
 type InvertedIndexRoTx struct {
 	ii      *InvertedIndex
 	files   visibleFiles
