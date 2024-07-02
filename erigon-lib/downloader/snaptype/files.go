@@ -236,7 +236,7 @@ type FileInfo struct {
 	Type            Type
 }
 
-func (f FileInfo) TorrentFileExists() bool { return dir.FileExist(f.Path + ".torrent") }
+func (f FileInfo) TorrentFileExists() (bool, error) { return dir.FileExist(f.Path + ".torrent") }
 
 func (f FileInfo) Name() string { return f.name }
 func (f FileInfo) Dir() string  { return filepath.Dir(f.Path) }

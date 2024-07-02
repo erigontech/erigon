@@ -187,8 +187,7 @@ func doWarmup(ctx context.Context, chaindata string, bucket string, logger log.L
 
 	var total uint64
 	db.View(ctx, func(tx kv.Tx) error {
-		c, _ := tx.Cursor(bucket)
-		total, _ = c.Count()
+		total, _ = tx.Count(bucket)
 		return nil
 	})
 	progress := atomic.Int64{}

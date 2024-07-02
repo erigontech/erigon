@@ -104,7 +104,7 @@ func (api *OverlayAPIImpl) CallConstructor(ctx context.Context, address common.A
 	}
 
 	if !ok {
-		return nil, fmt.Errorf("contract construction tx not found")
+		return nil, fmt.Errorf("contract construction txn not found")
 	}
 
 	err = api.BaseAPI.checkPruneHistory(tx, blockNum)
@@ -128,7 +128,7 @@ func (api *OverlayAPIImpl) CallConstructor(ctx context.Context, address common.A
 	}
 
 	if transactionIndex == -1 {
-		return nil, fmt.Errorf("could not find tx hash")
+		return nil, fmt.Errorf("could not find txn hash")
 	}
 
 	replayTransactions = block.Transactions()[:transactionIndex]
@@ -481,7 +481,7 @@ func (api *OverlayAPIImpl) replayBlock(ctx context.Context, blockNum uint64, sta
 
 		receipt := receipts[uint64(idx)]
 		log.Debug("[replayBlock]", "receipt.TransactionIndex", receipt.TransactionIndex, "receipt.TxHash", receipt.TxHash, "receipt.Status", receipt.Status)
-		// check if this tx has failed in the original context
+		// check if this txn has failed in the original context
 		if receipt.Status == types.ReceiptStatusFailed {
 			log.Debug("[replayBlock] skipping transaction because it has status=failed", "transactionHash", txn.Hash())
 
@@ -519,9 +519,9 @@ func (api *OverlayAPIImpl) replayBlock(ctx context.Context, blockNum uint64, sta
 
 		if res.Failed() {
 			log.Debug("[replayBlock] res result for transaction", "transactionHash", txn.Hash(), "failed", res.Failed(), "revert", res.Revert(), "error", res.Err)
-			log.Debug("[replayBlock] discarding txLogs because tx has status=failed", "transactionHash", txn.Hash())
+			log.Debug("[replayBlock] discarding txLogs because txn has status=failed", "transactionHash", txn.Hash())
 		} else {
-			//append logs only if tx has not reverted
+			//append logs only if txn has not reverted
 			txLogs := statedb.GetLogs(txn.Hash())
 			log.Debug("[replayBlock]", "len(txLogs)", len(txLogs), "transactionHash", txn.Hash())
 			blockLogs = append(blockLogs, txLogs...)
