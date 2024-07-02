@@ -239,8 +239,8 @@ func (r *requestHandler) RoundTrip(req *http.Request) (resp *http.Response, err 
 
 		// the first two statuses here have been observed from cloudflare
 		// during testing.  The remainder are generally understood to be
-		// retriable http responses, calcBackoff will use the Retry-After
-		// header if its availible
+		// retry-able http responses, calcBackoff will use the Retry-After
+		// header if its available
 		case http.StatusInternalServerError, http.StatusBadGateway,
 			http.StatusRequestTimeout, http.StatusTooEarly,
 			http.StatusTooManyRequests, http.StatusServiceUnavailable,
@@ -288,7 +288,7 @@ func New(ctx context.Context, cfg *downloadercfg.Cfg, logger log.Logger, verbosi
 
 	cfg.ClientConfig.WebTransport = requestHandler
 
-	db, c, m, torrentClient, err := openClient(ctx, cfg.Dirs.Downloader, cfg.Dirs.Snap, cfg.ClientConfig, cfg.MdbxWriteMap)
+	db, c, m, torrentClient, err := openClient(ctx, cfg.Dirs.Downloader, cfg.Dirs.Snap, cfg.ClientConfig, cfg.MdbxWriteMap, logger)
 	if err != nil {
 		return nil, fmt.Errorf("openClient: %w", err)
 	}
@@ -838,6 +838,7 @@ func (d *Downloader) mainLoop(silent bool) error {
 						if ok && err == nil {
 							_, _, err = addTorrentFile(d.ctx, ts, d.torrentClient, d.db, d.webseeds)
 							if err != nil {
+								d.logger.Warn("[snapshots] addTorrentFile from webseed", "err", err)
 								continue
 							}
 						}
@@ -1092,10 +1093,10 @@ func (d *Downloader) mainLoop(silent bool) error {
 				}
 			}
 
-			d.lock.RLock()
+			d.lock.Lock()
 			downloadingLen := len(d.downloading)
 			d.stats.Downloading = int32(downloadingLen)
-			d.lock.RUnlock()
+			d.lock.Unlock()
 
 			// the call interval of the loop (elapsed sec) used to get slots/sec for
 			// calculating the number of files to download based on the loop speed
@@ -2139,7 +2140,7 @@ func (d *Downloader) ReCalcStats(interval time.Duration) {
 	}
 
 	if !stats.Completed {
-		logger.Debug("[snapshots] info",
+		logger.Debug("[snapshots] download info",
 			"len", len(torrents),
 			"webTransfers", webTransfers,
 			"torrent", torrentInfo,
@@ -2440,7 +2441,7 @@ func (d *Downloader) VerifyData(ctx context.Context, whiteList []string, failFas
 	return nil
 }
 
-// AddNewSeedableFile decides what we do depending on wether we have the .seg file or the .torrent file
+// AddNewSeedableFile decides what we do depending on whether we have the .seg file or the .torrent file
 // have .torrent no .seg => get .seg file from .torrent
 // have .seg no .torrent => get .torrent from .seg
 func (d *Downloader) AddNewSeedableFile(ctx context.Context, name string) error {
@@ -2717,7 +2718,7 @@ func (d *Downloader) StopSeeding(hash metainfo.Hash) error {
 
 func (d *Downloader) TorrentClient() *torrent.Client { return d.torrentClient }
 
-func openClient(ctx context.Context, dbDir, snapDir string, cfg *torrent.ClientConfig, writeMap bool) (db kv.RwDB, c storage.PieceCompletion, m storage.ClientImplCloser, torrentClient *torrent.Client, err error) {
+func openClient(ctx context.Context, dbDir, snapDir string, cfg *torrent.ClientConfig, writeMap bool, logger log.Logger) (db kv.RwDB, c storage.PieceCompletion, m storage.ClientImplCloser, torrentClient *torrent.Client, err error) {
 	dbCfg := mdbx.NewMDBX(log.New()).
 		Label(kv.DownloaderDB).
 		WithTableCfg(func(defaultBuckets kv.TableCfg) kv.TableCfg { return kv.DownloaderTablesCfg }).
@@ -2735,7 +2736,7 @@ func openClient(ctx context.Context, dbDir, snapDir string, cfg *torrent.ClientC
 		return nil, nil, nil, nil, fmt.Errorf("torrentcfg.openClient: %w", err)
 	}
 	//c, err = NewMdbxPieceCompletion(db)
-	c, err = NewMdbxPieceCompletionBatch(db)
+	c, err = NewMdbxPieceCompletion(db, logger)
 	if err != nil {
 		return nil, nil, nil, nil, fmt.Errorf("torrentcfg.NewMdbxPieceCompletion: %w", err)
 	}

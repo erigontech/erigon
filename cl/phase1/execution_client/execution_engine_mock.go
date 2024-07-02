@@ -318,6 +318,44 @@ func (c *MockExecutionEngineHasBlockCall) DoAndReturn(f func(context.Context, co
 	return c
 }
 
+// HasGapInSnapshots mocks base method.
+func (m *MockExecutionEngine) HasGapInSnapshots(ctx context.Context) bool {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "HasGapInSnapshots", ctx)
+	ret0, _ := ret[0].(bool)
+	return ret0
+}
+
+// HasGapInSnapshots indicates an expected call of HasGapInSnapshots.
+func (mr *MockExecutionEngineMockRecorder) HasGapInSnapshots(ctx any) *MockExecutionEngineHasGapInSnapshotsCall {
+	mr.mock.ctrl.T.Helper()
+	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "HasGapInSnapshots", reflect.TypeOf((*MockExecutionEngine)(nil).HasGapInSnapshots), ctx)
+	return &MockExecutionEngineHasGapInSnapshotsCall{Call: call}
+}
+
+// MockExecutionEngineHasGapInSnapshotsCall wrap *gomock.Call
+type MockExecutionEngineHasGapInSnapshotsCall struct {
+	*gomock.Call
+}
+
+// Return rewrite *gomock.Call.Return
+func (c *MockExecutionEngineHasGapInSnapshotsCall) Return(arg0 bool) *MockExecutionEngineHasGapInSnapshotsCall {
+	c.Call = c.Call.Return(arg0)
+	return c
+}
+
+// Do rewrite *gomock.Call.Do
+func (c *MockExecutionEngineHasGapInSnapshotsCall) Do(f func(context.Context) bool) *MockExecutionEngineHasGapInSnapshotsCall {
+	c.Call = c.Call.Do(f)
+	return c
+}
+
+// DoAndReturn rewrite *gomock.Call.DoAndReturn
+func (c *MockExecutionEngineHasGapInSnapshotsCall) DoAndReturn(f func(context.Context) bool) *MockExecutionEngineHasGapInSnapshotsCall {
+	c.Call = c.Call.DoAndReturn(f)
+	return c
+}
+
 // InsertBlock mocks base method.
 func (m *MockExecutionEngine) InsertBlock(ctx context.Context, block *types.Block) error {
 	m.ctrl.T.Helper()

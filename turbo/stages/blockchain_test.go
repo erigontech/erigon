@@ -303,7 +303,7 @@ func testReorgShort(t *testing.T) {
 	t.Parallel()
 	// Create a long easy chain vs. a short heavy one. Due to difficulty adjustment
 	// we need a fairly long chain of blocks with different difficulties for a short
-	// one to become heavyer than a long one. The 96 is an empirical value.
+	// one to become heavier than a long one. The 96 is an empirical value.
 	easy := make([]int64, 96)
 	for i := 0; i < len(easy); i++ {
 		easy[i] = 60
@@ -1381,8 +1381,8 @@ func TestDeleteCreateRevert(t *testing.T) {
 // TestDeleteRecreateSlots tests a state-transition that contains both deletion
 // and recreation of contract state.
 // Contract A exists, has slots 1 and 2 set
-// Tx 1: Selfdestruct A
-// Tx 2: Re-create A, set slots 3 and 4
+// txn 1: Selfdestruct A
+// txn 2: Re-create A, set slots 3 and 4
 // Expected outcome is that _all_ slots are cleared from A, due to the selfdestruct,
 // and then the new slots exist
 func TestDeleteRecreateSlots(t *testing.T) {
@@ -1692,8 +1692,8 @@ func TestDeleteRecreateAccount(t *testing.T) {
 // TestDeleteRecreateSlotsAcrossManyBlocks tests multiple state-transition that contains both deletion
 // and recreation of contract state.
 // Contract A exists, has slots 1 and 2 set
-// Tx 1: Selfdestruct A
-// Tx 2: Re-create A, set slots 3 and 4
+// txn 1: Selfdestruct A
+// txn 2: Re-create A, set slots 3 and 4
 // Expected outcome is that _all_ slots are cleared from A, due to the selfdestruct,
 // and then the new slots exist
 func TestDeleteRecreateSlotsAcrossManyBlocks(t *testing.T) {
@@ -1896,7 +1896,7 @@ func TestDeleteRecreateSlotsAcrossManyBlocks(t *testing.T) {
 //   - Block 7338110: a CREATE2 is attempted. The CREATE2 would deploy code on
 //     the same address e771789f5cccac282f23bb7add5690e1f6ca467c. However, the
 //     deployment fails due to OOG during initcode execution
-//   - Block 7338115: another tx checks the balance of
+//   - Block 7338115: another txn checks the balance of
 //     e771789f5cccac282f23bb7add5690e1f6ca467c, and the snapshotter returned it as
 //     zero.
 //
@@ -2157,7 +2157,7 @@ func TestEIP1559Transition(t *testing.T) {
 
 			var chainID uint256.Int
 			chainID.SetFromBig(gspec.Config.ChainID)
-			var tx types.Transaction = &types.DynamicFeeTransaction{
+			var txn types.Transaction = &types.DynamicFeeTransaction{
 				CommonTx: types.CommonTx{
 					Nonce: 0,
 					To:    &aa,
@@ -2169,9 +2169,9 @@ func TestEIP1559Transition(t *testing.T) {
 				Tip:        u256.Num2,
 				AccessList: accesses,
 			}
-			tx, _ = types.SignTx(tx, *signer, key1)
+			txn, _ = types.SignTx(txn, *signer, key1)
 
-			b.AddTx(tx)
+			b.AddTx(txn)
 		}
 	})
 	if err != nil {
@@ -2204,7 +2204,7 @@ func TestEIP1559Transition(t *testing.T) {
 			t.Fatalf("miner balance incorrect: expected %d, got %d", expected, actual)
 		}
 
-		// 4: Ensure the tx sender paid for the gasUsed * (tip + block baseFee).
+		// 4: Ensure the txn sender paid for the gasUsed * (tip + block baseFee).
 		actual = new(uint256.Int).Sub(funds, statedb.GetBalance(addr1))
 		expected = new(uint256.Int).SetUint64(block.GasUsed() * (block.Transactions()[0].GetPrice().Uint64() + block.BaseFee().Uint64()))
 		if actual.Cmp(expected) != 0 {
@@ -2218,10 +2218,10 @@ func TestEIP1559Transition(t *testing.T) {
 	chain, err = core.GenerateChain(m.ChainConfig, block, m.Engine, m.DB, 1, func(i int, b *core.BlockGen) {
 		b.SetCoinbase(libcommon.Address{2})
 
-		var tx types.Transaction = types.NewTransaction(0, aa, u256.Num0, 30000, new(uint256.Int).Mul(new(uint256.Int).SetUint64(5), new(uint256.Int).SetUint64(params.GWei)), nil)
-		tx, _ = types.SignTx(tx, *signer, key2)
+		var txn types.Transaction = types.NewTransaction(0, aa, u256.Num0, 30000, new(uint256.Int).Mul(new(uint256.Int).SetUint64(5), new(uint256.Int).SetUint64(params.GWei)), nil)
+		txn, _ = types.SignTx(txn, *signer, key2)
 
-		b.AddTx(tx)
+		b.AddTx(txn)
 	})
 	if err != nil {
 		t.Fatalf("generate chain: %v", err)
@@ -2246,7 +2246,7 @@ func TestEIP1559Transition(t *testing.T) {
 			t.Fatalf("miner balance incorrect: expected %d, got %d", expected, actual)
 		}
 
-		// 4: Ensure the tx sender paid for the gasUsed * (effectiveTip + block baseFee).
+		// 4: Ensure the txn sender paid for the gasUsed * (effectiveTip + block baseFee).
 		actual = new(uint256.Int).Sub(funds, statedb.GetBalance(addr2))
 		expected = new(uint256.Int).SetUint64(block.GasUsed() * (effectiveTip + block.BaseFee().Uint64()))
 		if actual.Cmp(expected) != 0 {

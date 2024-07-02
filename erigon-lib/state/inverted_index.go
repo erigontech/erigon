@@ -823,7 +823,7 @@ func (iit *InvertedIndexRoTx) Prune(ctx context.Context, rwTx kv.RwTx, txFrom, t
 	defer mxPruneInProgress.Dec()
 	defer func(t time.Time) { mxPruneTookIndex.ObserveDuration(t) }(time.Now())
 
-	if limit == 0 { // limits amount of Tx to be pruned
+	if limit == 0 { // limits amount of txn to be pruned
 		limit = math.MaxUint64
 	}
 
@@ -994,7 +994,7 @@ func (iit *InvertedIndexRoTx) DebugEFAllValuesAreInRange(ctx context.Context, fa
 	return nil
 }
 
-// FrozenInvertedIdxIter allows iteration over range of tx numbers
+// FrozenInvertedIdxIter allows iteration over range of txn numbers
 // Iteration is not implmented via callback function, because there is often
 // a requirement for interators to be composable (for example, to implement AND and OR for indices)
 // FrozenInvertedIdxIter must be closed after use to prevent leaking of resources like cursor
@@ -1125,7 +1125,7 @@ func (it *FrozenInvertedIdxIter) advanceInFiles() {
 	}
 }
 
-// RecentInvertedIdxIter allows iteration over range of tx numbers
+// RecentInvertedIdxIter allows iteration over range of txn numbers
 // Iteration is not implmented via callback function, because there is often
 // a requirement for interators to be composable (for example, to implement AND and OR for indices)
 type RecentInvertedIdxIter struct {

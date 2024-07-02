@@ -124,7 +124,7 @@ func buildBlackListForPruning(pruneMode bool, stepPrune, minBlockToDownload, blo
 	snapshotKindToNames := make(map[string][]snapshotFileData)
 	for _, p := range preverified {
 		name := p.Name
-		// Dont prune unprunable files
+		// Don't prune unprunable files
 		if !canSnapshotBePruned(name) {
 			continue
 		}

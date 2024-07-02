@@ -88,7 +88,7 @@ type History struct {
 
 	snapshotsDisabled bool   // don't produce .v and .ef files, keep in db table. old data will be pruned anyway.
 	historyDisabled   bool   // skip all write operations to this History (even in DB)
-	keepRecentTxnInDB uint64 // When dontProduceHistoryFiles=true, keepRecentTxInDB is used to keep this amount of tx in db before pruning
+	keepRecentTxnInDB uint64 // When dontProduceHistoryFiles=true, keepRecentTxInDB is used to keep this amount of txn in db before pruning
 }
 
 type histCfg struct {
@@ -104,7 +104,7 @@ type histCfg struct {
 	withExistenceIndex bool // move to iiCfg
 
 	snapshotsDisabled bool   // don't produce .v and .ef files. old data will be pruned anyway.
-	keepTxInDB        uint64 // When dontProduceHistoryFiles=true, keepTxInDB is used to keep this amount of tx in db before pruning
+	keepTxInDB        uint64 // When dontProduceHistoryFiles=true, keepTxInDB is used to keep this amount of txn in db before pruning
 }
 
 func NewHistory(cfg histCfg, aggregationStep uint64, filenameBase, indexKeysTable, indexTable, historyValsTable string, integrityCheck func(fromStep, toStep uint64) bool, logger log.Logger) (*History, error) {
