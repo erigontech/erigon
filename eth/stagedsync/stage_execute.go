@@ -1,3 +1,19 @@
+// Copyright 2024 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+
 package stagedsync
 
 import (
@@ -8,27 +24,24 @@ import (
 	"github.com/c2h5oh/datasize"
 	"golang.org/x/sync/errgroup"
 
-	"github.com/ledgerwatch/erigon-lib/log/v3"
-	"github.com/ledgerwatch/erigon/core/rawdb/rawdbhelpers"
-
 	"github.com/ledgerwatch/erigon-lib/chain"
 	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/datadir"
 	"github.com/ledgerwatch/erigon-lib/common/dbg"
 	"github.com/ledgerwatch/erigon-lib/config3"
 	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon-lib/kv/dbutils"
 	"github.com/ledgerwatch/erigon-lib/kv/rawdbv3"
 	"github.com/ledgerwatch/erigon-lib/kv/temporal"
+	"github.com/ledgerwatch/erigon-lib/log/v3"
 	libstate "github.com/ledgerwatch/erigon-lib/state"
 	"github.com/ledgerwatch/erigon-lib/wrap"
 
 	"github.com/ledgerwatch/erigon/consensus"
 	"github.com/ledgerwatch/erigon/core"
 	"github.com/ledgerwatch/erigon/core/rawdb"
+	"github.com/ledgerwatch/erigon/core/rawdb/rawdbhelpers"
 	"github.com/ledgerwatch/erigon/core/state"
 	"github.com/ledgerwatch/erigon/core/types"
-	"github.com/ledgerwatch/erigon/core/types/accounts"
 	"github.com/ledgerwatch/erigon/core/vm"
 	"github.com/ledgerwatch/erigon/eth/calltracer"
 	"github.com/ledgerwatch/erigon/eth/consensuschain"
@@ -301,17 +314,6 @@ func reconstituteBlock(agg *libstate.Aggregator, db kv.RoDB, tx kv.Tx) (n uint64
 var ErrTooDeepUnwind = fmt.Errorf("too deep unwind")
 
 func unwindExec3(u *UnwindState, s *StageState, txc wrap.TxContainer, ctx context.Context, accumulator *shards.Accumulator, logger log.Logger) (err error) {
-	//fmt.Printf("unwindv3: %d -> %d\n", u.CurrentBlockNumber, u.UnwindPoint)
-	//start := time.Now()
-
-	unwindToLimit, err := txc.Tx.(libstate.HasAggTx).AggTx().(*libstate.AggregatorRoTx).CanUnwindToBlockNum(txc.Tx)
-	if err != nil {
-		return err
-	}
-	if u.UnwindPoint < unwindToLimit {
-		return fmt.Errorf("%w: %d < %d", ErrTooDeepUnwind, u.UnwindPoint, unwindToLimit)
-	}
-
 	var domains *libstate.SharedDomains
 	if txc.Doms == nil {
 		domains, err = libstate.NewSharedDomains(txc.Tx, logger)
@@ -355,16 +357,12 @@ func unwindExec3(u *UnwindState, s *StageState, txc wrap.TxContainer, ctx contex
 	if err := rs.Unwind(ctx, txc.Tx, u.UnwindPoint, txNum, accumulator, changeset); err != nil {
 		return fmt.Errorf("StateV3.Unwind(%d->%d): %w, took %s", s.BlockNumber, u.UnwindPoint, err, time.Since(t))
 	}
-	if err := rawdb.TruncateReceipts(txc.Tx, u.UnwindPoint+1); err != nil {
-		return fmt.Errorf("truncate receipts: %w", err)
-	}
 	if err := rawdb.TruncateBorReceipts(txc.Tx, u.UnwindPoint+1); err != nil {
 		return fmt.Errorf("truncate bor receipts: %w", err)
 	}
 	if err := rawdb.DeleteNewerEpochs(txc.Tx, u.UnwindPoint+1); err != nil {
 		return fmt.Errorf("delete newer epochs: %w", err)
 	}
-	//fmt.Printf("unwindv3: %d -> %d done within %s\n", s.BlockNumber, u.UnwindPoint, time.Since(start))
 	return nil
 }
 
@@ -505,6 +503,14 @@ func UnwindExecutionStage(u *UnwindState, s *StageState, txc wrap.TxContainer, c
 	logPrefix := u.LogPrefix()
 	logger.Info(fmt.Sprintf("[%s] Unwind Execution", logPrefix), "from", s.BlockNumber, "to", u.UnwindPoint)
 
+	unwindToLimit, ok, err := txc.Tx.(libstate.HasAggTx).AggTx().(*libstate.AggregatorRoTx).CanUnwindBeforeBlockNum(u.UnwindPoint, txc.Tx)
+	if err != nil {
+		return err
+	}
+	if !ok {
+		return fmt.Errorf("%w: %d < %d", ErrTooDeepUnwind, u.UnwindPoint, unwindToLimit)
+	}
+
 	if err = unwindExecutionStage(u, s, txc, ctx, cfg, logger); err != nil {
 		return err
 	}
@@ -537,18 +543,7 @@ func unwindExecutionStage(u *UnwindState, s *StageState, txc wrap.TxContainer, c
 		accumulator.StartChange(u.UnwindPoint, hash, txs, true)
 	}
 
-	//TODO: why we don't call accumulator.ChangeCode???
 	return unwindExec3(u, s, txc, ctx, accumulator, logger)
-}
-
-func recoverCodeHashPlain(acc *accounts.Account, db kv.Tx, key []byte) {
-	var address common.Address
-	copy(address[:], key)
-	if acc.Incarnation > 0 && acc.IsEmptyCodeHash() {
-		if codeHash, err2 := db.GetOne(kv.PlainContractCode, dbutils.PlainGenerateStoragePrefix(address[:], acc.Incarnation)); err2 == nil {
-			copy(acc.CodeHash[:], codeHash)
-		}
-	}
 }
 
 func PruneExecutionStage(s *PruneState, tx kv.RwTx, cfg ExecuteBlockCfg, ctx context.Context) (err error) {
