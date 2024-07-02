@@ -4,8 +4,6 @@ import (
 	"bytes"
 	"context"
 	"encoding/binary"
-	"errors"
-	"fmt"
 	"time"
 
 	"github.com/ledgerwatch/erigon-lib/kv"
@@ -13,19 +11,6 @@ import (
 	"github.com/ledgerwatch/erigon/polygon/heimdall"
 	"github.com/ledgerwatch/erigon/polygon/polygoncommon"
 )
-
-/*
-	BorEventNums stores the last event ID of the last sprint.
-
-	e.g. For block 10 with events [1,2,3], block 15 with events [4,5,6] and block 20 with events [7,8].
-	The DB will have the following.
-		10: 0 (initialized at zero, NOTE: Polygon does not have and event 0)
-		15: 3
-		20: 6
-
-	To get the events for block 15, we look up the map for 15 and 20 and get back 3 and 6. So our
-	ID range is [4,6].
-*/
 
 var databaseTablesCfg = kv.TableCfg{
 	kv.BorEvents:    {},
@@ -124,6 +109,10 @@ func (s *MdbxStore) GetSprintLastEventID(ctx context.Context, lastID uint64, tim
 
 	kLastID := make([]byte, 8)
 	binary.BigEndian.PutUint64(kLastID, lastID)
+
+	if bytes.Equal(kLastID, kDBLast) {
+		return lastID, nil
+	}
 
 	_, _, err = cursor.Seek(kLastID)
 	if err != nil {
@@ -236,9 +225,6 @@ func (s *MdbxStore) StoreEventID(ctx context.Context, eventMap map[uint64]uint64
 	return tx.Commit()
 }
 
-// GetEventIDRange returns the state sync event ID range for the given block number.
-// An error is thrown if the block number is not found in the database. If the given block
-// number is the last in the database, then the second uint64 (representing end ID) is 0.
 func (s *MdbxStore) GetEventIDRange(ctx context.Context, blockNum uint64) (uint64, uint64, error) {
 	var start, end uint64
 
@@ -251,31 +237,22 @@ func (s *MdbxStore) GetEventIDRange(ctx context.Context, blockNum uint64) (uint6
 	kByte := make([]byte, 8)
 	binary.BigEndian.PutUint64(kByte, blockNum)
 
-	cursor, err := tx.Cursor(kv.BorEventNums)
+	it, err := tx.RangeAscend(kv.BorEventNums, kByte, nil, 2)
 	if err != nil {
 		return start, end, err
 	}
 
-	_, v, err := cursor.SeekExact(kByte)
-	if err != nil {
-		return start, end, err
-	}
-	if v == nil { // we don't have a map
-		return start, end, errors.New(fmt.Sprintf("map not available for block %d", blockNum))
-	}
+	for it.HasNext() {
+		_, v, err := it.Next()
+		if err != nil {
+			return start, end, err
+		}
 
-	err = binary.Read(bytes.NewReader(v), binary.BigEndian, &start)
-	if err != nil {
-		return start, end, err
-	}
-
-	_, v, err = cursor.Next()
-	if err != nil {
-		return start, end, err
-	}
-
-	if v != nil { // may be empty if blockNum is the last entry
-		err = binary.Read(bytes.NewReader(v), binary.BigEndian, &end)
+		if start == 0 {
+			err = binary.Read(bytes.NewReader(v), binary.BigEndian, &start)
+		} else {
+			err = binary.Read(bytes.NewReader(v), binary.BigEndian, &end)
+		}
 		if err != nil {
 			return start, end, err
 		}
@@ -294,21 +271,22 @@ func (s *MdbxStore) PruneEventIDs(ctx context.Context, blockNum uint64) error {
 	kByte := make([]byte, 8)
 	binary.BigEndian.PutUint64(kByte, blockNum)
 
-	cursor, err := tx.Cursor(kv.BorEventNums)
+	it, err := tx.RangeDescend(kv.BorEvents, nil, kByte, 0)
 	if err != nil {
 		return err
 	}
-	defer cursor.Close()
 
-	var k []byte
-	for k, _, err = cursor.Seek(kByte); err == nil && k != nil; k, _, err = cursor.Next() {
-		if err := tx.Delete(kv.BorEventNums, k); err != nil {
+	for it.HasNext() {
+		k, _, err := it.Next()
+		if err != nil {
+			return err
+		}
+
+		err = tx.Delete(kv.BorEventNums, k)
+		if err != nil {
 			return err
 		}
 	}
-	if err != nil {
-		return err
-	}
 
-	return tx.Commit()
+	return nil
 }
