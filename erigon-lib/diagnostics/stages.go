@@ -103,8 +103,6 @@ func (d *DiagnosticClient) runSyncStagesListListener(rootCtx context.Context) {
 				d.mu.Lock()
 				d.SetStagesList(info.StagesList)
 				d.mu.Unlock()
-
-				d.saveSyncStagesToDB()
 			}
 		}
 	}()
@@ -124,8 +122,6 @@ func (d *DiagnosticClient) runCurrentSyncStageListener(rootCtx context.Context) 
 				d.mu.Lock()
 				d.SetCurrentSyncStage(info)
 				d.mu.Unlock()
-
-				d.saveSyncStagesToDB()
 			}
 		}
 	}()
@@ -145,8 +141,6 @@ func (d *DiagnosticClient) runCurrentSyncSubStageListener(rootCtx context.Contex
 				d.mu.Lock()
 				d.SetCurrentSyncSubStage(info)
 				d.mu.Unlock()
-
-				d.saveSyncStagesToDB()
 			}
 		}
 	}()
@@ -166,17 +160,9 @@ func (d *DiagnosticClient) runSubStageListener(rootCtx context.Context) {
 				d.mu.Lock()
 				d.SetSubStagesList(info.Stage, info.List)
 				d.mu.Unlock()
-
-				d.saveSyncStagesToDB()
 			}
 		}
 	}()
-}
-
-func (d *DiagnosticClient) saveSyncStagesToDB() {
-	if err := d.db.Update(d.ctx, StagesListUpdater(d.syncStages)); err != nil {
-		log.Error("[Diagnostics] Failed to update stages list", "err", err)
-	}
 }
 
 func (d *DiagnosticClient) getCurrentSyncIdxs() CurrentSyncStagesIdxs {

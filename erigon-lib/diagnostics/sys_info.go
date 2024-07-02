@@ -20,16 +20,27 @@ var (
 
 func (d *DiagnosticClient) setupSysInfoDiagnostics() {
 	sysInfo := GetSysInfo(d.dataDirPath)
-	if err := d.db.Update(d.ctx, RAMInfoUpdater(sysInfo.RAM)); err != nil {
-		log.Error("[Diagnostics] Failed to update RAM info", "err", err)
-	}
+	err := d.db.Update(d.ctx, func(tx kv.RwTx) error {
+		err := RAMInfoUpdater(d.hardwareInfo.RAM)(tx)
+		if err != nil {
+			return err
+		}
 
-	if err := d.db.Update(d.ctx, CPUInfoUpdater(sysInfo.CPU)); err != nil {
-		log.Error("[Diagnostics] Failed to update CPU info", "err", err)
-	}
+		err = CPUInfoUpdater(d.hardwareInfo.CPU)(tx)
+		if err != nil {
+			return err
+		}
 
-	if err := d.db.Update(d.ctx, DiskInfoUpdater(sysInfo.Disk)); err != nil {
-		log.Error("[Diagnostics] Failed to update Disk info", "err", err)
+		err = DiskInfoUpdater(d.hardwareInfo.Disk)(tx)
+		if err != nil {
+			return err
+		}
+
+		return nil
+	})
+
+	if err != nil {
+		log.Warn("[Diagnostics] Failed to update system info", "err", err)
 	}
 
 	d.mu.Lock()

@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"path/filepath"
 	"sync"
+	"time"
 
 	"github.com/c2h5oh/datasize"
 	"golang.org/x/sync/semaphore"
@@ -101,8 +102,51 @@ func (d *DiagnosticClient) Setup() {
 	d.setupBodiesDiagnostics(rootCtx)
 	d.setupResourcesUsageDiagnostics(rootCtx)
 	d.setupSpeedtestDiagnostics(rootCtx)
+	d.runSaveProcess(rootCtx)
 
 	//d.logDiagMsgs()
+
+}
+
+// Save diagnostic data by time interval to reduce save events
+func (d *DiagnosticClient) runSaveProcess(rootCtx context.Context) {
+	ticker := time.NewTicker(5 * time.Minute)
+	go func() {
+		for {
+			select {
+			case <-ticker.C:
+				d.SaveData()
+			case <-rootCtx.Done():
+				ticker.Stop()
+				return
+			}
+		}
+	}()
+}
+
+func (d *DiagnosticClient) SaveData() {
+	err := d.db.Update(d.ctx, func(tx kv.RwTx) error {
+		err := SnapshotDownloadUpdater(d.syncStats.SnapshotDownload)(tx)
+		if err != nil {
+			return err
+		}
+
+		err = StagesListUpdater(d.syncStages)(tx)
+		if err != nil {
+			return err
+		}
+
+		err = SnapshotIndexingUpdater(d.syncStats.SnapshotIndexing)(tx)
+		if err != nil {
+			return err
+		}
+
+		return nil
+	})
+
+	if err != nil {
+		log.Warn("Failed to save diagnostics data", "err", err)
+	}
 }
 
 /*func (d *DiagnosticClient) logDiagMsgs() {

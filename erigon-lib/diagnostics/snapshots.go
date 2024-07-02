@@ -61,12 +61,6 @@ func (d *DiagnosticClient) runSnapshotListener(rootCtx context.Context) {
 					Progress:    downloadedPercent,
 				}, "Downloading snapshots")
 
-				if err := d.db.Update(d.ctx, SnapshotDownloadUpdater(d.syncStats.SnapshotDownload)); err != nil {
-					log.Error("[Diagnostics] Failed to update snapshot download info", "err", err)
-				}
-
-				d.saveSyncStagesToDB()
-
 				d.mu.Unlock()
 
 				if d.snapshotStageFinished() {
@@ -133,10 +127,6 @@ func (d *DiagnosticClient) runSegmentDownloadingListener(rootCtx context.Context
 					d.syncStats.SnapshotDownload.SegmentsDownloading[info.Name] = info
 				}
 
-				if err := d.db.Update(d.ctx, SnapshotDownloadUpdater(d.syncStats.SnapshotDownload)); err != nil {
-					log.Error("[Diagnostics] Failed to update snapshot download info", "err", err)
-				}
-
 				d.mu.Unlock()
 			}
 		}
@@ -155,9 +145,6 @@ func (d *DiagnosticClient) runSegmentIndexingListener(rootCtx context.Context) {
 				return
 			case info := <-ch:
 				d.addOrUpdateSegmentIndexingState(info)
-				if err := d.db.Update(d.ctx, SnapshotIndexingUpdater(d.syncStats.SnapshotIndexing)); err != nil {
-					log.Error("[Diagnostics] Failed to update snapshot indexing info", "err", err)
-				}
 			}
 		}
 	}()
@@ -190,10 +177,6 @@ func (d *DiagnosticClient) runSegmentIndexingFinishedListener(rootCtx context.Co
 						Alloc:       0,
 						Sys:         0,
 					})
-				}
-
-				if err := d.db.Update(d.ctx, SnapshotIndexingUpdater(d.syncStats.SnapshotIndexing)); err != nil {
-					log.Error("[Diagnostics] Failed to update snapshot indexing info", "err", err)
 				}
 
 				d.mu.Unlock()
@@ -238,8 +221,6 @@ func (d *DiagnosticClient) addOrUpdateSegmentIndexingState(upd SnapshotIndexingS
 		TimeLeft:    "unknown",
 		Progress:    fmt.Sprintf("%d%%", totalProgress/len(d.syncStats.SnapshotIndexing.Segments)),
 	}, "Indexing snapshots")
-
-	d.saveSyncStagesToDB()
 }
 
 func (d *DiagnosticClient) runSnapshotFilesListListener(rootCtx context.Context) {
