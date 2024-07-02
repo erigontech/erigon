@@ -133,8 +133,8 @@ func main() {
 	for {
 		select {
 		case <-ctx.Done():
-			log.Println("Stopping block height checks.")
-			os.Exit(0)
+			log.Println("Block checking exceeded timeout.")
+			os.Exit(1)
 		case <-ticker.C:
 			erigonHeight, err := getBlockHeight(*erigonNodeURL)
 			if err != nil {
