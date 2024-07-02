@@ -53,17 +53,17 @@ func (r *ExecutionSnapshotReader) Transactions(number uint64, hash libcommon.Has
 
 func convertTxsToBytesSSZ(txs [][]byte) []byte {
 	sumLenTxs := 0
-	for _, tx := range txs {
-		sumLenTxs += len(tx)
+	for _, txn := range txs {
+		sumLenTxs += len(txn)
 	}
 	flat := make([]byte, 0, 4*len(txs)+sumLenTxs)
 	offset := len(txs) * 4
-	for _, tx := range txs {
+	for _, txn := range txs {
 		flat = append(flat, ssz.OffsetSSZ(uint32(offset))...)
-		offset += len(tx)
+		offset += len(txn)
 	}
-	for _, tx := range txs {
-		flat = append(flat, tx...)
+	for _, txn := range txs {
+		flat = append(flat, txn...)
 	}
 	return flat
 }

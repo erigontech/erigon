@@ -13,6 +13,7 @@ import (
 	"github.com/ledgerwatch/erigon/cl/beacon/synced_data"
 	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/cl/cltypes"
+	"github.com/ledgerwatch/erigon/cl/cltypes/solid"
 	"github.com/ledgerwatch/erigon/cl/phase1/core/state"
 	"github.com/ledgerwatch/erigon/cl/phase1/forkchoice/mock_services"
 	"github.com/ledgerwatch/erigon/cl/utils"
@@ -40,11 +41,12 @@ func getObjectsForBlobSidecarServiceTests(t *testing.T) (*state.CachingBeaconSta
 	proofBytes := common.Hex2Bytes(proofStr[2:])
 	copy(proof[:], proofBytes)
 	sidecar := &cltypes.BlobSidecar{
-		Index:             uint64(0),
-		SignedBlockHeader: block.SignedBeaconBlockHeader(),
-		Blob:              blob,
-		KzgCommitment:     common.Bytes48(*block.Block.Body.BlobKzgCommitments.Get(0)),
-		KzgProof:          proof,
+		Index:                    uint64(0),
+		SignedBlockHeader:        block.SignedBeaconBlockHeader(),
+		Blob:                     blob,
+		KzgCommitment:            common.Bytes48(*block.Block.Body.BlobKzgCommitments.Get(0)),
+		KzgProof:                 proof,
+		CommitmentInclusionProof: solid.NewHashVector(cltypes.CommitmentBranchSize),
 	}
 	return stateObj, block, sidecar
 }

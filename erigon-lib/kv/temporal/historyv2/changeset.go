@@ -162,17 +162,6 @@ func ForEach(db kv.Tx, bucket string, startkey []byte, walker func(blockN uint64
 		return walker(blockN, k, v)
 	})
 }
-func ForPrefix(db kv.Tx, bucket string, startkey []byte, walker func(blockN uint64, k, v []byte) error) error {
-	var blockN uint64
-	return db.ForPrefix(bucket, startkey, func(k, v []byte) error {
-		var err error
-		blockN, k, v, err = FromDBFormat(k, v)
-		if err != nil {
-			return err
-		}
-		return walker(blockN, k, v)
-	})
-}
 
 func Truncate(tx kv.RwTx, from uint64) error {
 	keyStart := hexutility.EncodeTs(from)

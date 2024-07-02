@@ -322,8 +322,7 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 func FillDBFromSnapshots(logPrefix string, ctx context.Context, tx kv.RwTx, dirs datadir.Dirs, blockReader services.FullBlockReader, agg *state.Aggregator, logger log.Logger) error {
 	startTime := time.Now()
 	blocksAvailable := blockReader.FrozenBlocks()
-	ddd := 1 * time.Second
-	logEvery := time.NewTicker(ddd)
+	logEvery := time.NewTicker(logInterval)
 	defer logEvery.Stop()
 	// updating the progress of further stages (but only forward) that are contained inside of snapshots
 	for _, stage := range []stages.SyncStage{stages.Headers, stages.Bodies, stages.BlockHashes, stages.Senders} {
@@ -1243,8 +1242,11 @@ func (u *snapshotUploader) upload(ctx context.Context, logger log.Logger) {
 							info:  &fi,
 							local: true,
 						}
-
-						if fi.TorrentFileExists() {
+						exists, err := fi.TorrentFileExists()
+						if err != nil {
+							logger.Debug("TorrentFileExists error", "err", err)
+						}
+						if exists {
 							state.torrent, _ = u.torrentFiles.LoadByName(f)
 						}
 
@@ -1258,8 +1260,11 @@ func (u *snapshotUploader) upload(ctx context.Context, logger log.Logger) {
 					defer state.Unlock()
 
 					state.local = true
-
-					if state.torrent == nil && state.info.TorrentFileExists() {
+					exists, err := state.info.TorrentFileExists()
+					if err != nil {
+						logger.Debug("TorrentFileExists error", "err", err)
+					}
+					if state.torrent == nil && exists {
 						state.torrent, _ = u.torrentFiles.LoadByName(f)
 						if state.torrent != nil {
 							state.localHash = state.torrent.InfoHash.String()

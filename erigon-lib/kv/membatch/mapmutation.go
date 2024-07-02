@@ -28,6 +28,10 @@ type Mapmutation struct {
 	logger log.Logger
 }
 
+func (m *Mapmutation) Count(bucket string) (uint64, error) {
+	panic("not implemented")
+}
+
 func (m *Mapmutation) BucketSize(table string) (uint64, error) {
 	//TODO implement me
 	panic("implement me")
@@ -271,11 +275,6 @@ func (m *Mapmutation) BatchSize() int {
 func (m *Mapmutation) ForEach(bucket string, fromPrefix []byte, walker func(k, v []byte) error) error {
 	m.panicOnEmptyDB()
 	return m.db.ForEach(bucket, fromPrefix, walker)
-}
-
-func (m *Mapmutation) ForPrefix(bucket string, prefix []byte, walker func(k, v []byte) error) error {
-	m.panicOnEmptyDB()
-	return m.db.ForPrefix(bucket, prefix, walker)
 }
 
 func (m *Mapmutation) ForAmount(bucket string, prefix []byte, amount uint32, walker func(k, v []byte) error) error {

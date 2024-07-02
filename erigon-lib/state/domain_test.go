@@ -493,14 +493,13 @@ func collateAndMerge(t *testing.T, db kv.RwDB, tx kv.RwTx, d *Domain, txs uint64
 		require.NoError(t, err)
 	}
 	var r DomainRanges
-	maxEndTxNum := d.dirtyFilesEndTxNumMinimax()
 	maxSpan := d.aggregationStep * StepsInColdFile
 
 	for {
 		if stop := func() bool {
 			dc := d.BeginFilesRo()
 			defer dc.Close()
-			r = dc.findMergeRange(maxEndTxNum, maxSpan)
+			r = dc.findMergeRange(dc.files.EndTxNum(), maxSpan)
 			if !r.any() {
 				return true
 			}
@@ -546,11 +545,10 @@ func collateAndMergeOnce(t *testing.T, d *Domain, tx kv.RwTx, step uint64, prune
 		dc.Close()
 	}
 
-	maxEndTxNum := d.dirtyFilesEndTxNumMinimax()
 	maxSpan := d.aggregationStep * StepsInColdFile
 	for {
 		dc := d.BeginFilesRo()
-		r := dc.findMergeRange(maxEndTxNum, maxSpan)
+		r := dc.findMergeRange(dc.files.EndTxNum(), maxSpan)
 		if !r.any() {
 			dc.Close()
 			break
@@ -1127,7 +1125,7 @@ func TestDomainContext_getFromFiles(t *testing.T) {
 			ks, _ := hex.DecodeString(key)
 			val, err := dc.GetAsOf(ks, beforeTx, tx)
 			require.NoError(t, err)
-			require.EqualValuesf(t, bufs[i], val, "key %s, tx %d", key, beforeTx)
+			require.EqualValuesf(t, bufs[i], val, "key %s, txn %d", key, beforeTx)
 			beforeTx += d.aggregationStep
 		}
 	}
@@ -1391,7 +1389,7 @@ func TestDomain_GetAfterAggregation(t *testing.T) {
 		for i := 1; i < len(updates); i++ {
 			v, err := dc.GetAsOf([]byte(key), updates[i].txNum, tx)
 			require.NoError(t, err)
-			require.EqualValuesf(t, updates[i-1].value, v, "(%d/%d) key %x, tx %d", kc, len(data), []byte(key), updates[i-1].txNum)
+			require.EqualValuesf(t, updates[i-1].value, v, "(%d/%d) key %x, txn %d", kc, len(data), []byte(key), updates[i-1].txNum)
 		}
 		if len(updates) == 0 {
 			continue
@@ -1555,7 +1553,7 @@ func TestDomain_PruneAfterAggregation(t *testing.T) {
 		for i := 1; i < len(updates); i++ {
 			v, err := dc.GetAsOf([]byte(key), updates[i].txNum, tx)
 			require.NoError(t, err)
-			require.EqualValuesf(t, updates[i-1].value, v, "(%d/%d) key %x, tx %d", kc, len(data), []byte(key), updates[i-1].txNum)
+			require.EqualValuesf(t, updates[i-1].value, v, "(%d/%d) key %x, txn %d", kc, len(data), []byte(key), updates[i-1].txNum)
 		}
 		if len(updates) == 0 {
 			continue
@@ -1778,8 +1776,8 @@ func TestDomain_Unwind(t *testing.T) {
 		for i := uint64(0); i < maxTx; i++ {
 			writer.diff = &StateDiffDomain{}
 			writer.SetTxNum(i)
-			if i%3 == 0 && i > 0 { // once in 3 tx put key3 -> value3.i and skip other keys update
-				if i%12 == 0 { // once in 12 tx delete key3 before update
+			if i%3 == 0 && i > 0 { // once in 3 txn put key3 -> value3.i and skip other keys update
+				if i%12 == 0 { // once in 12 txn delete key3 before update
 					err = writer.DeleteWithPrev([]byte("key3"), nil, preval3, 0)
 					require.NoError(t, err)
 					preval3 = nil

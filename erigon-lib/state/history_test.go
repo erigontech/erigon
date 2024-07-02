@@ -437,7 +437,7 @@ func TestHistoryCanPrune(t *testing.T) {
 		hc := h.BeginFilesRo()
 		defer hc.Close()
 
-		maxTxInSnaps := hc.maxTxNumInFiles(false)
+		maxTxInSnaps := hc.files.EndTxNum()
 		require.Equal(t, (stepsTotal-stepKeepInDB)*16, maxTxInSnaps)
 
 		for i := uint64(0); i < stepsTotal; i++ {
@@ -910,15 +910,13 @@ func collateAndMergeHistory(tb testing.TB, db kv.RwDB, h *History, txs uint64, d
 	}
 
 	var r HistoryRanges
-	maxEndTxNum := h.endTxNumMinimax()
-
 	maxSpan := h.aggregationStep * StepsInColdFile
 
 	for {
 		if stop := func() bool {
 			hc := h.BeginFilesRo()
 			defer hc.Close()
-			r = hc.findMergeRange(maxEndTxNum, maxSpan)
+			r = hc.findMergeRange(hc.files.EndTxNum(), maxSpan)
 			if !r.any() {
 				return true
 			}
