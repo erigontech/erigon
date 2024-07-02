@@ -637,7 +637,7 @@ func (c *AuRa) Prepare(chain consensus.ChainHeaderReader, header *types.Header, 
 }
 
 func (c *AuRa) Initialize(config *chain.Config, chain consensus.ChainHeaderReader, header *types.Header,
-	state *state.IntraBlockState, syscallCustom consensus.SysCallCustom, logger log.Logger,
+	state *state.IntraBlockState, syscallCustom consensus.SysCallCustom, logger log.Logger, tracer *tracing.Hooks,
 ) {
 	blockNum := header.Number.Uint64()
 
