@@ -32,11 +32,12 @@ import (
 	"github.com/ledgerwatch/erigon/turbo/shards"
 	"github.com/ledgerwatch/erigon/turbo/stages/headerdownload"
 	"github.com/ledgerwatch/erigon/zk/hermez_db"
+	"github.com/ledgerwatch/erigon/zk/tx"
 	zktx "github.com/ledgerwatch/erigon/zk/tx"
 	"github.com/ledgerwatch/erigon/zk/txpool"
 	zktypes "github.com/ledgerwatch/erigon/zk/types"
-	"github.com/ledgerwatch/log/v3"
 	"github.com/ledgerwatch/erigon/zk/utils"
+	"github.com/ledgerwatch/log/v3"
 )
 
 const (
@@ -419,5 +420,47 @@ func checkForBadBatch(
 		}
 	}
 
+	return false, nil
+}
+
+var (
+	LIMIT_128_KB = uint64(128 * 1024)
+)
+
+type BlockDataChecker struct {
+	limit uint64 // amount of bytes
+	bytes []byte
+}
+
+func NewBlockDataChecker() *BlockDataChecker {
+	return &BlockDataChecker{
+		limit: LIMIT_128_KB,
+		bytes: make([]byte, 0),
+	}
+}
+
+// adds bytes amounting to the block data and checks if the limit is reached
+// if the limit is reached, the data is not added, so this can be reused again for next check
+func (bdc *BlockDataChecker) AddBlockStartData(forkId uint16, deltaTimestamp, l1InfoTreeIndex uint32) bool {
+	newBytes := tx.GenerateStartBlockBatchL2Data(forkId, deltaTimestamp, l1InfoTreeIndex)
+
+	if uint64(len(bdc.bytes)+len(newBytes)) > bdc.limit {
+		return true
+	}
+
+	bdc.bytes = append(bdc.bytes, newBytes...)
+	return false
+}
+
+func (bdc *BlockDataChecker) AddTransactionData(transaction types.Transaction, forkId uint16, effectiveGasPrice uint8) (bool, error) {
+	encoded, err := tx.TransactionToL2Data(transaction, forkId, effectiveGasPrice)
+	if err != nil {
+		return false, err
+	}
+	if uint64(len(bdc.bytes)+len(encoded)) > bdc.limit {
+		return true, nil
+	}
+
+	bdc.bytes = append(bdc.bytes, encoded...)
 	return false, nil
 }

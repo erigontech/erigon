@@ -18,6 +18,7 @@ import (
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 	"github.com/ledgerwatch/erigon/zk/contracts"
 	"github.com/ledgerwatch/erigon/zk/hermez_db"
+	"github.com/ledgerwatch/erigon/zk/sequencer"
 	"github.com/ledgerwatch/erigon/zk/types"
 )
 
@@ -413,12 +414,13 @@ func verifyAgainstLocalBlocks(tx kv.RwTx, hermezDb *hermez_db.HermezDb, logPrefi
 		return nil
 	}
 
-	err = blockComparison(tx, hermezDb, blockToCheck, logPrefix)
-
-	if err == nil {
-		log.Info(fmt.Sprintf("[%s] State root verified in block %d", logPrefix, blockToCheck))
-		if err := stages.SaveStageProgress(tx, stages.VerificationsStateRootCheck, verifiedBlockNo); err != nil {
-			return fmt.Errorf("failed to save stage progress, %w", err)
+	if !sequencer.IsSequencer() {
+		err = blockComparison(tx, hermezDb, blockToCheck, logPrefix)
+		if err == nil {
+			log.Info(fmt.Sprintf("[%s] State root verified in block %d", logPrefix, blockToCheck))
+			if err := stages.SaveStageProgress(tx, stages.VerificationsStateRootCheck, verifiedBlockNo); err != nil {
+				return fmt.Errorf("failed to save stage progress, %w", err)
+			}
 		}
 	}
 

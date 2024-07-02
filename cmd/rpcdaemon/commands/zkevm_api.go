@@ -314,43 +314,59 @@ func (api *ZkEvmAPIImpl) GetBatchDataByNumbers(ctx context.Context, batchNumbers
 			return nil, err
 		}
 
-		// last batch last block for deltaTimestamp calc
-		lastBlockNoInPreviousBatch := batchBlocks[0].NumberU64() - 1
-		lastBlockInPreviousBatch, err := rawdb.ReadBlockByNumber(tx, lastBlockNoInPreviousBatch)
+		batchL2Data, err := generateBatchData(tx, hermezDb, batchBlocks, forkId)
 		if err != nil {
 			return nil, err
 		}
 
-		var batchL2Data []byte
-		for i := 0; i < len(batchBlocks); i++ {
-			var dTs uint32
-			if i == 0 {
-				dTs = uint32(batchBlocks[i].Time() - lastBlockInPreviousBatch.Time())
-			} else {
-				dTs = uint32(batchBlocks[i].Time() - batchBlocks[i-1].Time())
-			}
-			iti, err := hermezDb.GetBlockL1InfoTreeIndex(batchBlocks[i].NumberU64())
-
-			egTx := make(map[common.Hash]uint8)
-			for _, txn := range batchBlocks[i].Transactions() {
-				eg, err := hermezDb.GetEffectiveGasPricePercentage(txn.Hash())
-				if err != nil {
-					return nil, err
-				}
-				egTx[txn.Hash()] = eg
-			}
-
-			bl2d, err := zktx.GenerateBlockBatchL2Data(uint16(forkId), dTs, uint32(iti), batchBlocks[i].Transactions(), egTx)
-			if err != nil {
-				return nil, err
-			}
-			batchL2Data = append(batchL2Data, bl2d...)
-		}
 		bd.BatchL2Data = batchL2Data
 		bds = append(bds, bd)
 	}
 
 	return populateBatchDataSlimDetails(bds)
+}
+
+func generateBatchData(
+	tx kv.Tx,
+	hermezDb *hermez_db.HermezDbReader,
+	batchBlocks []*eritypes.Block,
+	forkId uint64,
+) (batchL2Data []byte, err error) {
+	lastBlockNoInPreviousBatch := batchBlocks[0].NumberU64() - 1
+	lastBlockInPreviousBatch, err := rawdb.ReadBlockByNumber(tx, lastBlockNoInPreviousBatch)
+	if err != nil {
+		return nil, err
+	}
+
+	batchL2Data = []byte{}
+	for i := 0; i < len(batchBlocks); i++ {
+		var dTs uint32
+		if i == 0 {
+			dTs = uint32(batchBlocks[i].Time() - lastBlockInPreviousBatch.Time())
+		} else {
+			dTs = uint32(batchBlocks[i].Time() - batchBlocks[i-1].Time())
+		}
+		iti, err := hermezDb.GetBlockL1InfoTreeIndex(batchBlocks[i].NumberU64())
+		if err != nil {
+			return nil, err
+		}
+		egTx := make(map[common.Hash]uint8)
+		for _, txn := range batchBlocks[i].Transactions() {
+			eg, err := hermezDb.GetEffectiveGasPricePercentage(txn.Hash())
+			if err != nil {
+				return nil, err
+			}
+			egTx[txn.Hash()] = eg
+		}
+
+		bl2d, err := zktx.GenerateBlockBatchL2Data(uint16(forkId), dTs, uint32(iti), batchBlocks[i].Transactions(), egTx)
+		if err != nil {
+			return nil, err
+		}
+		batchL2Data = append(batchL2Data, bl2d...)
+	}
+
+	return batchL2Data, err
 }
 
 // GetBatchByNumber returns a batch from the current canonical chain. If number is nil, the
@@ -529,37 +545,9 @@ func (api *ZkEvmAPIImpl) GetBatchByNumber(ctx context.Context, batchNumber rpc.B
 		return nil, err
 	}
 
-	// last batch last block for deltaTimestamp calc
-	lastBlockNoInPreviousBatch := batchBlocks[0].NumberU64() - 1
-	lastBlockInPreviousBatch, err := rawdb.ReadBlockByNumber(tx, lastBlockNoInPreviousBatch)
+	batchL2Data, err := generateBatchData(tx, hermezDb, batchBlocks, forkId)
 	if err != nil {
 		return nil, err
-	}
-
-	var batchL2Data []byte
-	for i := 0; i < len(batchBlocks); i++ {
-		var dTs uint32
-		if i == 0 {
-			dTs = uint32(batchBlocks[i].Time() - lastBlockInPreviousBatch.Time())
-		} else {
-			dTs = uint32(batchBlocks[i].Time() - batchBlocks[i-1].Time())
-		}
-		iti, err := hermezDb.GetBlockL1InfoTreeIndex(batchBlocks[i].NumberU64())
-
-		egTx := make(map[common.Hash]uint8)
-		for _, txn := range batchBlocks[i].Transactions() {
-			eg, err := hermezDb.GetEffectiveGasPricePercentage(txn.Hash())
-			if err != nil {
-				return nil, err
-			}
-			egTx[txn.Hash()] = eg
-		}
-
-		bl2d, err := zktx.GenerateBlockBatchL2Data(uint16(forkId), dTs, uint32(iti), batchBlocks[i].Transactions(), egTx)
-		if err != nil {
-			return nil, err
-		}
-		batchL2Data = append(batchL2Data, bl2d...)
 	}
 	batch.BatchL2Data = batchL2Data
 
