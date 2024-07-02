@@ -1,4 +1,7 @@
-// Copyright 2018 The go-ethereum and Erigon Authors
+// Copyright 2018 The go-ethereum Authors
+// (original work)
+// Copyright 2024 The Erigon Authors
+// (modifications)
 // This file is part of Erigon.
 //
 // Erigon is free software: you can redistribute it and/or modify
@@ -16,22 +19,22 @@
 
 {
     // hist is the map of opcodes to counters
-    hist: {},
+    hist: { },
     // nops counts number of ops
     nops: 0,
-    // step is invoked for every opcode that the VM executes.
-    step: function(log, db) {
-        var op = log.op.toString();
-        if (this.hist[op]){
-            this.hist[op]++;
-        }
-        else {
-            this.hist[op] = 1;
-        }
-        this.nops++;
-    },
+        // step is invoked for every opcode that the VM executes.
+        step: function(log, db) {
+            var op = log.op.toString();
+            if (this.hist[op]) {
+                this.hist[op]++;
+            }
+            else {
+                this.hist[op] = 1;
+            }
+            this.nops++;
+        },
     // fault is invoked when the actual execution of an opcode fails.
-    fault: function(log, db) {},
+    fault: function(log, db) { },
 
     // result is invoked when all the opcodes have been iterated over and returns
     // the final result of the tracing.
