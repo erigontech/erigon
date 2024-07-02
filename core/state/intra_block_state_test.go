@@ -34,8 +34,6 @@ import (
 	"testing"
 	"testing/quick"
 
-	"github.com/ledgerwatch/erigon/core/rawdb"
-
 	"github.com/holiman/uint256"
 
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
