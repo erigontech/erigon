@@ -151,7 +151,7 @@ func CreateHistoryStateReader(tx kv.Tx, blockNumber uint64, txnIndex int, chainN
 	if err != nil {
 		return nil, err
 	}
-	r.SetTxNum(uint64(int(minTxNum) + txnIndex + /* 1 system txNum in begining of block */ 1))
+	r.SetTxNum(uint64(int(minTxNum) + txnIndex + /* 1 system txNum in beginning of block */ 1))
 	return r, nil
 }
 
@@ -164,7 +164,7 @@ func NewLatestStateWriter(txc wrap.TxContainer, blockNum uint64) state.StateWrit
 	if err != nil {
 		panic(err)
 	}
-	domains.SetTxNum(uint64(int(minTxNum) + /* 1 system txNum in begining of block */ 1))
+	domains.SetTxNum(uint64(int(minTxNum) + /* 1 system txNum in beginning of block */ 1))
 	return state.NewWriterV4(domains)
 }
 

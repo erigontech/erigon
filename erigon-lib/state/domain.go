@@ -1258,7 +1258,7 @@ func (dt *DomainRoTx) Unwind(ctx context.Context, rwTx kv.RwTx, step, txNumUnwin
 		key, value, prevStepBytes := domainDiffs[i].Key, domainDiffs[i].Value, domainDiffs[i].PrevStepBytes
 		// First, we need to evict from the keysCursor all keys that have a too high step
 		fullKey := key[:len(key)-8]
-		// so stepBytes is ^step so we need to iterate from the begining down until we find the stepBytes
+		// so stepBytes is ^step so we need to iterate from the beginning down until we find the stepBytes
 		for k, v, err := keysCursor.SeekExact(fullKey); k != nil; k, v, err = keysCursor.NextDup() {
 			if err != nil {
 				return fmt.Errorf("iterate over %s domain keys: %w", d.filenameBase, err)

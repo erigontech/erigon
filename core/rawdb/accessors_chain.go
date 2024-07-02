@@ -606,7 +606,7 @@ func ReadBody(db kv.Getter, hash common.Hash, number uint64) (*types.Body, uint6
 	if bodyForStorage.TxCount < 2 {
 		panic(fmt.Sprintf("block body hash too few txs amount: %d, %d", number, bodyForStorage.TxCount))
 	}
-	return body, bodyForStorage.BaseTxnID.First(), bodyForStorage.TxCount - 2 // 1 system txn in the begining of block, and 1 at the end
+	return body, bodyForStorage.BaseTxnID.First(), bodyForStorage.TxCount - 2 // 1 system txn in the beginning of block, and 1 at the end
 }
 
 func HasSenders(db kv.Getter, hash common.Hash, number uint64) (bool, error) {
