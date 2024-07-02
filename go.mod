@@ -36,13 +36,13 @@ require (
 	github.com/docker/docker v26.1.0+incompatible
 	github.com/dop251/goja v0.0.0-20220405120441-9037c2b61cbf
 	github.com/edsrzf/mmap-go v1.1.0
-	github.com/emicklei/dot v1.6.1
+	github.com/emicklei/dot v1.6.2
 	github.com/fjl/gencodec v0.0.0-20220412091415-8bb9e558978c
 	github.com/gballet/go-verkle v0.0.0-20221121182333-31427a1f2d35
 	github.com/gfx-labs/sse v0.0.0-20231226060816-f747e26a9baa
-	github.com/go-chi/chi/v5 v5.0.12
+	github.com/go-chi/chi/v5 v5.1.0
 	github.com/go-chi/cors v1.2.1
-	github.com/go-echarts/go-echarts/v2 v2.3.3
+	github.com/go-echarts/go-echarts/v2 v2.4.0
 	github.com/goccy/go-json v0.9.11
 	github.com/gofrs/flock v0.11.0
 	github.com/golang-jwt/jwt/v4 v4.5.0
