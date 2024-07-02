@@ -241,7 +241,7 @@ var (
 	mxState3Unwind        = metrics.GetOrCreateSummary("state3_unwind")
 )
 
-func (rs *StateV3) Unwind(ctx context.Context, tx kv.RwTx, blockUnwindTo, txUnwindTo uint64, accumulator *shards.Accumulator, changeset libstate.StateChangese) error {
+func (rs *StateV3) Unwind(ctx context.Context, tx kv.RwTx, blockUnwindTo, txUnwindTo uint64, accumulator *shards.Accumulator, changeset libstate.StateChangeset) error {
 	mxState3UnwindRunning.Inc()
 	defer mxState3UnwindRunning.Dec()
 	st := time.Now()
@@ -287,13 +287,13 @@ func (rs *StateV3) Unwind(ctx context.Context, tx kv.RwTx, blockUnwindTo, txUnwi
 	defer stateChanges.Close()
 	stateChanges.SortAndFlushInBackground(true)
 
-	accountDiffs := changeset[kv.AccountsDomain]
+	accountDiffs := changeset.DomainDiffs[kv.AccountsDomain]
 	for _, kv := range accountDiffs {
 		if err := stateChanges.Collect(kv.Key[:length.Addr], kv.Value); err != nil {
 			return err
 		}
 	}
-	storageDiffs := changeset[kv.StorageDomain]
+	storageDiffs := changeset.DomainDiffs[kv.StorageDomain]
 	for _, kv := range storageDiffs {
 		if err := stateChanges.Collect(kv.Key, kv.Value); err != nil {
 			return err

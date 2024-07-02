@@ -459,7 +459,7 @@ func (w *domainBufferedWriter) PutWithPrev(key1, key2, val, preval []byte, prevS
 		return err
 	}
 	if w.diff != nil {
-		w.diff.DomainUpdate(key1, key2, preval, w.stepBytes[:], prevStep, w.txNumBytes[:])
+		w.diff.DomainUpdate(key1, key2, preval, w.stepBytes[:], prevStep, w.h.ii.txNumBytes[:])
 	}
 	return w.addValue(key1, key2, val)
 }
@@ -473,7 +473,7 @@ func (w *domainBufferedWriter) DeleteWithPrev(key1, key2, prev []byte, prevStep 
 		return err
 	}
 	if w.diff != nil {
-		w.diff.DomainUpdate(key1, key2, prev, w.stepBytes[:], prevStep, w.txNumBytes[:])
+		w.diff.DomainUpdate(key1, key2, prev, w.stepBytes[:], prevStep, w.h.ii.txNumBytes[:])
 	}
 	return w.addValue(key1, key2, nil)
 }
@@ -481,7 +481,6 @@ func (w *domainBufferedWriter) DeleteWithPrev(key1, key2, prev []byte, prevStep 
 func (w *domainBufferedWriter) SetTxNum(v uint64) {
 	w.setTxNumOnce = true
 	w.h.SetTxNum(v)
-	binary.BigEndian.PutUint64(w.txNumBytes[:], v)
 	binary.BigEndian.PutUint64(w.stepBytes[:], ^(v / w.h.ii.aggregationStep))
 }
 
@@ -511,10 +510,9 @@ type domainBufferedWriter struct {
 
 	keysTable, valsTable string
 
-	stepBytes  [8]byte // current inverted step representation
-	txNumBytes [8]byte // current txNum representation
-	aux        []byte
-	diff       *DomainChangesAccumulator
+	stepBytes [8]byte // current inverted step representation
+	aux       []byte
+	diff      *DomainChangesAccumulator
 
 	h *historyBufferedWriter
 }

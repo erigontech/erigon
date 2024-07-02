@@ -1168,7 +1168,7 @@ func (h *HistoryRoTx) Unwind(ctx context.Context, rwTx kv.RwTx, domainDiffs []Do
 	binary.BigEndian.PutUint64(minTxNumBytes, minTxNum)
 
 	// Truncate all keys with txNum higher or equal than minTxNum
-	for k, _, err := idxCursor.SeekExact(minTxNumBytes); len(k) > 0; k, _, err = idxCursor.Next() {
+	for k, _, err := idxCursor.Seek(minTxNumBytes); len(k) > 0; k, _, err = idxCursor.Next() {
 		if err != nil {
 			return err
 		}
@@ -1186,12 +1186,12 @@ func (h *HistoryRoTx) unwindKey(key, txNumBytes []byte, historyCursor kv.RwCurso
 
 	if h.h.historyLargeValues {
 		seekKey := append(append([]byte{}, key...), txNumBytes...)
-		for k, _, err := historyCursor.Seek(seekKey); err == nil && len(k) > 0; k, _, err = historyCursor.Next() {
+		for k, _, err := historyCursor.Seek(seekKey); k != nil; k, _, err = historyCursor.Next() {
 			if err != nil {
 				return err
 			}
-			txNumInDB := binary.BigEndian.Uint64(k[len(k)-8:])
-			if len(k)-8 != len(key) || !bytes.Equal(k[:len(key)], key) {
+			keyInDB, txNumInDB := k[:len(k)-8], binary.BigEndian.Uint64(k[len(k)-8:])
+			if !bytes.Equal(keyInDB, key) {
 				break
 			}
 			if txNumToUnwind > txNumInDB {
@@ -1209,8 +1209,7 @@ func (h *HistoryRoTx) unwindKey(key, txNumBytes []byte, historyCursor kv.RwCurso
 		return fmt.Errorf("expected DupSort cursor, got %T", historyCursor)
 	}
 
-	k := key
-	for v, err := historyCursorDupSort.SeekBothRange(key, txNumBytes); len(k) > 0; k, v, err = historyCursorDupSort.NextDup() {
+	for v, err := historyCursorDupSort.SeekBothRange(key, txNumBytes); v != nil; _, v, err = historyCursorDupSort.NextDup() {
 		if err != nil {
 			return err
 		}

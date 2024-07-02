@@ -784,7 +784,7 @@ func (iit *InvertedIndexRoTx) Unwind(ctx context.Context, rwTx kv.RwTx, idxDiffs
 	defer indexKeysTableCursor.Close()
 
 	for _, diff := range idxDiffs {
-		for k, _, err := indexCursor.SeekBothExact(diff.Key, diff.TxNum); k != nil; k, _, err = indexCursor.NextNoDup() {
+		for v, err := indexCursor.SeekBothRange(diff.Key, diff.TxNum); v != nil; _, v, err = indexCursor.NextNoDup() {
 			if err != nil {
 				return fmt.Errorf("iterate over %s index: %w", iit.ii.filenameBase, err)
 			}
