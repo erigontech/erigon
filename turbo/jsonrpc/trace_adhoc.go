@@ -226,11 +226,7 @@ func (args *TraceCallParam) ToMessage(globalGasCap uint64, baseFee *uint256.Int)
 }
 
 func parseOeTracerConfig(traceConfig *tracers.TraceConfig) (OeTracerConfig, error) {
-	if traceConfig == nil {
-		return OeTracerConfig{}, nil
-	}
-
-	if traceConfig.TracerConfig == nil {
+	if traceConfig == nil || traceConfig.TracerConfig == nil || *traceConfig.TracerConfig == nil {
 		return OeTracerConfig{}, nil
 	}
 
@@ -243,10 +239,10 @@ func parseOeTracerConfig(traceConfig *tracers.TraceConfig) (OeTracerConfig, erro
 }
 
 type OeTracerConfig struct {
-	IncludePrecompiles bool `json:"includePrecompiles"`
+	IncludePrecompiles bool `json:"includePrecompiles"` // by default Parity/OpenEthereum format does not include precompiles
 }
 
-// OpenEthereum-style tracer
+// OeTracer is an OpenEthereum-style tracer
 type OeTracer struct {
 	r            *TraceCallResult
 	traceAddr    []int
@@ -302,7 +298,9 @@ func (ot *OeTracer) captureStartOrEnter(deep bool, typ vm.OpCode, from libcommon
 	}
 	if precompile && deep && (value == nil || value.IsZero()) {
 		ot.precompile = true
-		return
+		if !ot.config.IncludePrecompiles {
+			return
+		}
 	}
 	if gas > 500000000 {
 		gas = 500000001 - (0x8000000000000000 - gas)
@@ -401,7 +399,9 @@ func (ot *OeTracer) captureEndOrExit(deep bool, output []byte, usedGas uint64, e
 	}
 	if ot.precompile {
 		ot.precompile = false
-		return
+		if !ot.config.IncludePrecompiles {
+			return
+		}
 	}
 	if !deep {
 		ot.r.Output = libcommon.CopyBytes(output)

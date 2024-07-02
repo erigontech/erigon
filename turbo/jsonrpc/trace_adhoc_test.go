@@ -24,6 +24,7 @@ import (
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/core/vm"
 	"github.com/ledgerwatch/erigon/core/vm/evmtypes"
+	"github.com/ledgerwatch/erigon/eth/tracers"
 	"github.com/ledgerwatch/erigon/rpc"
 	"github.com/ledgerwatch/erigon/tests"
 	"github.com/ledgerwatch/erigon/turbo/stages/mock"
@@ -184,6 +185,8 @@ func TestOeTracer(t *testing.T) {
 			traceResult := &TraceCallResult{Trace: []*ParityTrace{}}
 			tracer := OeTracer{}
 			tracer.r = traceResult
+			tracer.config, err = parseOeTracerConfig(&tracers.TraceConfig{TracerConfig: &test.TracerConfig})
+			require.NoError(t, err)
 			evm := vm.NewEVM(context, txContext, statedb, test.Genesis.Config, vm.Config{Debug: true, Tracer: &tracer})
 
 			st := core.NewStateTransition(evm, msg, new(core.GasPool).AddGas(tx.GetGas()).AddBlobGas(tx.GetBlobGas()))
@@ -201,12 +204,18 @@ func TestOeTracer(t *testing.T) {
 
 			// normalize result by marshalling and unmarshalling again
 			// to be able to do equality comparison with expected output
+			// (this exists just to ensure ordering of json attributes is the same)
 			tracesJsonBytes, err := json.Marshal(traceResult.Trace)
 			require.NoError(t, err)
 			var normalizedResult []*ParityTrace
 			err = json.Unmarshal(tracesJsonBytes, &normalizedResult)
 			require.NoError(t, err)
-			require.Equal(t, test.Result, normalizedResult)
+
+			want, err := json.Marshal(test.Result)
+			require.NoError(t, err)
+			have, err := json.Marshal(normalizedResult)
+			require.NoError(t, err)
+			require.Equal(t, string(want), string(have))
 		})
 	}
 }
