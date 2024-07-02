@@ -1,3 +1,19 @@
+// Copyright 2024 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+
 package getters
 
 import (
@@ -53,17 +69,17 @@ func (r *ExecutionSnapshotReader) Transactions(number uint64, hash libcommon.Has
 
 func convertTxsToBytesSSZ(txs [][]byte) []byte {
 	sumLenTxs := 0
-	for _, tx := range txs {
-		sumLenTxs += len(tx)
+	for _, txn := range txs {
+		sumLenTxs += len(txn)
 	}
 	flat := make([]byte, 0, 4*len(txs)+sumLenTxs)
 	offset := len(txs) * 4
-	for _, tx := range txs {
+	for _, txn := range txs {
 		flat = append(flat, ssz.OffsetSSZ(uint32(offset))...)
-		offset += len(tx)
+		offset += len(txn)
 	}
-	for _, tx := range txs {
-		flat = append(flat, tx...)
+	for _, txn := range txs {
+		flat = append(flat, txn...)
 	}
 	return flat
 }
