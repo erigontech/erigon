@@ -264,12 +264,12 @@ func (c ChainReaderWriterEth1) IsCanonicalHash(ctx context.Context, hash libcomm
 	return resp.Canonical, nil
 }
 
-func (c ChainReaderWriterEth1) FrozenBlocks(ctx context.Context) uint64 {
+func (c ChainReaderWriterEth1) FrozenBlocks(ctx context.Context) (uint64, bool) {
 	ret, err := c.executionModule.FrozenBlocks(ctx, &emptypb.Empty{})
 	if err != nil {
 		panic(err)
 	}
-	return ret.FrozenBlocks
+	return ret.FrozenBlocks, ret.HasGap
 }
 
 func (c ChainReaderWriterEth1) InsertBlocksAndWait(ctx context.Context, blocks []*types.Block) error {

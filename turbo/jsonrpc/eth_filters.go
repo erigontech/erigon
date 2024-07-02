@@ -92,8 +92,8 @@ func (api *APIImpl) GetFilterChanges(_ context.Context, index string) ([]any, er
 	}
 	if txs, ok := api.filters.ReadPendingTxs(rpchelper.PendingTxsSubID(cutIndex)); ok {
 		if len(txs) > 0 {
-			for _, tx := range txs[0] {
-				stub = append(stub, tx.Hash())
+			for _, txn := range txs[0] {
+				stub = append(stub, txn.Hash())
 			}
 			return stub, nil
 		}

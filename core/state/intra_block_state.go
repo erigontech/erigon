@@ -685,8 +685,8 @@ func (sdb *IntraBlockState) FinalizeTx(chainRules *chain.Rules, stateWriter Stat
 	for addr := range sdb.journal.dirties {
 		so, exist := sdb.stateObjects[addr]
 		if !exist {
-			// ripeMD is 'touched' at block 1714175, in tx 0x1237f737031e40bcde4a8b7e717b2d15e3ecadfe49bb1bbc71ee9deb09c6fcf2
-			// That tx goes out of gas, and although the notion of 'touched' does not exist there, the
+			// ripeMD is 'touched' at block 1714175, in txn 0x1237f737031e40bcde4a8b7e717b2d15e3ecadfe49bb1bbc71ee9deb09c6fcf2
+			// That txn goes out of gas, and although the notion of 'touched' does not exist there, the
 			// touch-event will still be recorded in the journal. Since ripeMD is a special snowflake,
 			// it will persist in the journal even though the journal is reverted. In this special circumstance,
 			// it may exist in `sdb.journal.dirties` but not in `sdb.stateObjects`.
@@ -710,8 +710,8 @@ func (sdb *IntraBlockState) SoftFinalise() {
 	for addr := range sdb.journal.dirties {
 		_, exist := sdb.stateObjects[addr]
 		if !exist {
-			// ripeMD is 'touched' at block 1714175, in tx 0x1237f737031e40bcde4a8b7e717b2d15e3ecadfe49bb1bbc71ee9deb09c6fcf2
-			// That tx goes out of gas, and although the notion of 'touched' does not exist there, the
+			// ripeMD is 'touched' at block 1714175, in txn 0x1237f737031e40bcde4a8b7e717b2d15e3ecadfe49bb1bbc71ee9deb09c6fcf2
+			// That txn goes out of gas, and although the notion of 'touched' does not exist there, the
 			// touch-event will still be recorded in the journal. Since ripeMD is a special snowflake,
 			// it will persist in the journal even though the journal is reverted. In this special circumstance,
 			// it may exist in `sdb.journal.dirties` but not in `sdb.stateObjects`.
@@ -792,7 +792,7 @@ func (sdb *IntraBlockState) clearJournalAndRefund() {
 // - Add sender to access list (EIP-2929)
 // - Add destination to access list (EIP-2929)
 // - Add precompiles to access list (EIP-2929)
-// - Add the contents of the optional tx access list (EIP-2930)
+// - Add the contents of the optional txn access list (EIP-2930)
 //
 // Shanghai fork:
 // - Add coinbase to access list (EIP-3651)

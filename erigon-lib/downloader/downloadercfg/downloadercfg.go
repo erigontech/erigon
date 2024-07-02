@@ -17,6 +17,7 @@
 package downloadercfg
 
 import (
+	"github.com/ledgerwatch/erigon-lib/common/dbg"
 	"net"
 	"net/url"
 	"os"
@@ -68,7 +69,7 @@ func Default() *torrent.ClientConfig {
 	// better don't increase because erigon periodically producing "new seedable files" - and adding them to downloader.
 	// it must not impact chain tip sync - so, limit resources to minimum by default.
 	// but when downloader is started as a separated process - rise it to max
-	//torrentConfig.PieceHashersPerTorrent = max(1, runtime.NumCPU()-1)
+	torrentConfig.PieceHashersPerTorrent = dbg.EnvInt("DL_HASHERS", min(16, max(2, runtime.NumCPU()-2)))
 
 	torrentConfig.MinDialTimeout = 6 * time.Second    //default: 3s
 	torrentConfig.HandshakesTimeout = 8 * time.Second //default: 4s
@@ -178,7 +179,12 @@ func New(dirs datadir.Dirs, version string, verbosity lg.Level, downloadRate, up
 		if !strings.HasPrefix(webseed, "v") { // has marker v1/v2/...
 			uri, err := url.ParseRequestURI(webseed)
 			if err != nil {
-				if strings.HasSuffix(webseed, ".toml") && dir.FileExist(webseed) {
+				exists, err := dir.FileExist(webseed)
+				if err != nil {
+					log.Warn("[webseed] FileExist error", "err", err)
+					continue
+				}
+				if strings.HasSuffix(webseed, ".toml") && exists {
 					webseedFileProviders = append(webseedFileProviders, webseed)
 				}
 				continue
@@ -203,7 +209,12 @@ func New(dirs datadir.Dirs, version string, verbosity lg.Level, downloadRate, up
 		}
 	}
 	localCfgFile := filepath.Join(dirs.DataDir, "webseed.toml") // datadir/webseed.toml allowed
-	if dir.FileExist(localCfgFile) {
+	exists, err := dir.FileExist(localCfgFile)
+	if err != nil {
+		log.Error("[webseed] FileExist error", "err", err)
+		return nil, err
+	}
+	if exists {
 		webseedFileProviders = append(webseedFileProviders, localCfgFile)
 	}
 

@@ -88,7 +88,7 @@ type History struct {
 
 	snapshotsDisabled bool   // don't produce .v and .ef files, keep in db table. old data will be pruned anyway.
 	historyDisabled   bool   // skip all write operations to this History (even in DB)
-	keepRecentTxnInDB uint64 // When dontProduceHistoryFiles=true, keepRecentTxInDB is used to keep this amount of tx in db before pruning
+	keepRecentTxnInDB uint64 // When dontProduceHistoryFiles=true, keepRecentTxInDB is used to keep this amount of txn in db before pruning
 }
 
 type histCfg struct {
@@ -104,7 +104,7 @@ type histCfg struct {
 	withExistenceIndex bool // move to iiCfg
 
 	snapshotsDisabled bool   // don't produce .v and .ef files. old data will be pruned anyway.
-	keepTxInDB        uint64 // When dontProduceHistoryFiles=true, keepTxInDB is used to keep this amount of tx in db before pruning
+	keepTxInDB        uint64 // When dontProduceHistoryFiles=true, keepTxInDB is used to keep this amount of txn in db before pruning
 }
 
 func NewHistory(cfg histCfg, aggregationStep uint64, filenameBase, indexKeysTable, indexTable, historyValsTable string, integrityCheck func(fromStep, toStep uint64) bool, logger log.Logger) (*History, error) {
@@ -121,7 +121,13 @@ func NewHistory(cfg histCfg, aggregationStep uint64, filenameBase, indexKeysTabl
 	}
 	h._visibleFiles = []ctxItem{}
 	var err error
-	h.InvertedIndex, err = NewInvertedIndex(cfg.iiCfg, aggregationStep, filenameBase, indexKeysTable, indexTable, func(fromStep, toStep uint64) bool { return dir.FileExist(h.vFilePath(fromStep, toStep)) }, logger)
+	h.InvertedIndex, err = NewInvertedIndex(cfg.iiCfg, aggregationStep, filenameBase, indexKeysTable, indexTable, func(fromStep, toStep uint64) bool {
+		exists, err := dir.FileExist(h.vFilePath(fromStep, toStep))
+		if err != nil {
+			panic(err)
+		}
+		return exists
+	}, logger)
 	if err != nil {
 		return nil, fmt.Errorf("NewHistory: %s, %w", filenameBase, err)
 	}
@@ -211,12 +217,20 @@ func (h *History) openFiles() error {
 	invalidFilesMu := sync.Mutex{}
 	invalidFileItems := make([]*filesItem, 0)
 	h.dirtyFiles.Walk(func(items []*filesItem) bool {
-		var err error
 		for _, item := range items {
 			fromStep, toStep := item.startTxNum/h.aggregationStep, item.endTxNum/h.aggregationStep
 			if item.decompressor == nil {
 				fPath := h.vFilePath(fromStep, toStep)
-				if !dir.FileExist(fPath) {
+				exists, err := dir.FileExist(fPath)
+				if err != nil {
+					_, fName := filepath.Split(fPath)
+					h.logger.Debug("[agg] History.openFiles: FileExist", "f", fName, "err", err)
+					invalidFilesMu.Lock()
+					invalidFileItems = append(invalidFileItems, item)
+					invalidFilesMu.Unlock()
+					continue
+				}
+				if !exists {
 					_, fName := filepath.Split(fPath)
 					h.logger.Debug("[agg] History.openFiles: file does not exists", "f", fName)
 					invalidFilesMu.Lock()
@@ -254,7 +268,12 @@ func (h *History) openFiles() error {
 
 			if item.index == nil {
 				fPath := h.vAccessorFilePath(fromStep, toStep)
-				if dir.FileExist(fPath) {
+				exists, err := dir.FileExist(fPath)
+				if err != nil {
+					_, fName := filepath.Split(fPath)
+					h.logger.Warn("[agg] History.openFiles", "err", err, "f", fName)
+				}
+				if exists {
 					if item.index, err = recsplit.OpenIndex(fPath); err != nil {
 						_, fName := filepath.Split(fPath)
 						h.logger.Warn("[agg] History.openFiles", "err", err, "f", fName)
@@ -311,7 +330,12 @@ func (h *History) missedAccessors() (l []*filesItem) {
 	h.dirtyFiles.Walk(func(items []*filesItem) bool { // don't run slow logic while iterating on btree
 		for _, item := range items {
 			fromStep, toStep := item.startTxNum/h.aggregationStep, item.endTxNum/h.aggregationStep
-			if !dir.FileExist(h.vAccessorFilePath(fromStep, toStep)) {
+			exists, err := dir.FileExist(h.vAccessorFilePath(fromStep, toStep))
+			if err != nil {
+				_, fName := filepath.Split(h.vAccessorFilePath(fromStep, toStep))
+				h.logger.Warn("[agg] History.missedAccessors", "err", err, "f", fName)
+			}
+			if !exists {
 				l = append(l, item)
 			}
 		}

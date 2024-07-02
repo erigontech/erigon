@@ -25,13 +25,13 @@ func NewAtomicTorrentFS(dir string) *AtomicTorrentFS {
 	return &AtomicTorrentFS{dir: dir}
 }
 
-func (tf *AtomicTorrentFS) Exists(name string) bool {
+func (tf *AtomicTorrentFS) Exists(name string) (bool, error) {
 	tf.lock.Lock()
 	defer tf.lock.Unlock()
 	return tf.exists(name)
 }
 
-func (tf *AtomicTorrentFS) exists(name string) bool {
+func (tf *AtomicTorrentFS) exists(name string) (bool, error) {
 	if !strings.HasSuffix(name, ".torrent") {
 		name += ".torrent"
 	}
@@ -54,7 +54,11 @@ func (tf *AtomicTorrentFS) Create(name string, res []byte) (ts *torrent.TorrentS
 	tf.lock.Lock()
 	defer tf.lock.Unlock()
 
-	if !tf.exists(name) {
+	exists, err := tf.exists(name)
+	if err != nil {
+		return nil, false, err
+	}
+	if !exists {
 		err = tf.create(name, res)
 		if err != nil {
 			return nil, false, err
@@ -132,7 +136,11 @@ func (tf *AtomicTorrentFS) CreateWithMetaInfo(info *metainfo.Info, additionalMet
 	tf.lock.Lock()
 	defer tf.lock.Unlock()
 
-	if tf.exists(name) {
+	exists, err := tf.exists(name)
+	if err != nil {
+		return false, err
+	}
+	if exists {
 		return false, nil
 	}
 	if err = tf.createFromMetaInfo(filepath.Join(tf.dir, name), mi); err != nil {
