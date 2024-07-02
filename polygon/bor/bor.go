@@ -329,7 +329,7 @@ type Bor struct {
 	frozenSnapshotsInit sync.Once
 	rootHashCache       *lru.ARCCache[string, string]
 	headerProgress      HeaderProgress
-	polygonBridge       bridge.PolygonBridge
+	polygonBridge       bridge.Service
 }
 
 type signer struct {
@@ -1485,7 +1485,7 @@ func (c *Bor) CommitStates(
 ) error {
 	blockNum := header.Number.Uint64()
 
-	if c.polygonBridge.(*bridge.Bridge) != nil {
+	if c.polygonBridge != nil {
 		events, err := c.polygonBridge.GetEvents(c.execCtx, blockNum)
 		if err != nil {
 			return err
