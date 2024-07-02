@@ -10,10 +10,12 @@ import (
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/executionproto"
 	"github.com/ledgerwatch/erigon-lib/log/v3"
 	"github.com/ledgerwatch/erigon/p2p/sentry"
+	"github.com/ledgerwatch/erigon/polygon/bor"
 	"github.com/ledgerwatch/erigon/polygon/bor/borcfg"
 	"github.com/ledgerwatch/erigon/polygon/bridge"
 	"github.com/ledgerwatch/erigon/polygon/heimdall"
 	"github.com/ledgerwatch/erigon/polygon/p2p"
+	"github.com/ledgerwatch/erigon/polygon/polygoncommon"
 )
 
 type Service interface {
@@ -42,7 +44,6 @@ func NewService(
 	heimdallUrl string,
 	executionClient executionproto.ExecutionClient,
 	blockLimit uint,
-	polygonBridge bridge.Service,
 ) Service {
 	borConfig := chainConfig.Bor.(*borcfg.BorConfig)
 	checkpointVerifier := VerifyCheckpointHeaders
@@ -52,6 +53,9 @@ func NewService(
 	heimdallClient := heimdall.NewHeimdallClient(heimdallUrl, logger)
 	heimdallService := heimdall.NewHeimdall(heimdallClient, logger)
 	heimdallServiceV2 := heimdall.AssembleService(heimdallUrl, dataDir, tmpDir, logger)
+	polygonBridgeDB := polygoncommon.NewDatabase(dataDir, logger)
+	bridgeStore := bridge.NewStore(polygonBridgeDB)
+	polygonBridge := bridge.NewBridge(bridgeStore, logger, borConfig, heimdallClient.FetchStateSyncEvents, bor.GenesisContractStateReceiverABI())
 	execution := NewExecutionClient(executionClient)
 	store := NewStore(logger, execution, polygonBridge)
 

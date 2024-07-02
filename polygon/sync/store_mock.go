@@ -41,17 +41,17 @@ func (m *MockStore) EXPECT() *MockStoreMockRecorder {
 }
 
 // Flush mocks base method.
-func (m *MockStore) Flush(arg0 context.Context, arg1 *types.Header) error {
+func (m *MockStore) Flush(arg0 context.Context) error {
 	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "Flush", arg0, arg1)
+	ret := m.ctrl.Call(m, "Flush", arg0)
 	ret0, _ := ret[0].(error)
 	return ret0
 }
 
 // Flush indicates an expected call of Flush.
-func (mr *MockStoreMockRecorder) Flush(arg0, arg1 any) *MockStoreFlushCall {
+func (mr *MockStoreMockRecorder) Flush(arg0 any) *MockStoreFlushCall {
 	mr.mock.ctrl.T.Helper()
-	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Flush", reflect.TypeOf((*MockStore)(nil).Flush), arg0, arg1)
+	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Flush", reflect.TypeOf((*MockStore)(nil).Flush), arg0)
 	return &MockStoreFlushCall{Call: call}
 }
 
@@ -67,13 +67,13 @@ func (c *MockStoreFlushCall) Return(arg0 error) *MockStoreFlushCall {
 }
 
 // Do rewrite *gomock.Call.Do
-func (c *MockStoreFlushCall) Do(f func(context.Context, *types.Header) error) *MockStoreFlushCall {
+func (c *MockStoreFlushCall) Do(f func(context.Context) error) *MockStoreFlushCall {
 	c.Call = c.Call.Do(f)
 	return c
 }
 
 // DoAndReturn rewrite *gomock.Call.DoAndReturn
-func (c *MockStoreFlushCall) DoAndReturn(f func(context.Context, *types.Header) error) *MockStoreFlushCall {
+func (c *MockStoreFlushCall) DoAndReturn(f func(context.Context) error) *MockStoreFlushCall {
 	c.Call = c.Call.DoAndReturn(f)
 	return c
 }

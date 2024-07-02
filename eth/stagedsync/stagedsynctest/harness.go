@@ -491,7 +491,6 @@ func (h *Harness) consensusEngine(t *testing.T, cfg HarnessCfg) consensus.Engine
 			h.heimdallClient,
 			genesisContracts,
 			h.logger,
-			nil,
 		)
 
 		borConsensusEng.Authorize(h.validatorAddress, func(_ libcommon.Address, _ string, msg []byte) ([]byte, error) {

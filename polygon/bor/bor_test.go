@@ -307,7 +307,6 @@ func newValidator(t *testing.T, heimdall *test_heimdall, blocks map[uint64]*type
 		heimdall,
 		test_genesisContract{},
 		logger,
-		nil,
 	)
 
 	/*fmt.Printf("Private: 0x%s\nPublic: 0x%s\nAddress: %s\n",
