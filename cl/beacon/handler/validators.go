@@ -154,7 +154,7 @@ func (s validatorStatus) String() string {
 	}
 }
 
-const maxValidatorsLookupFilter = 32
+const maxValidatorsLookupFilter = 128
 
 func parseStatuses(s []string) ([]validatorStatus, error) {
 	seenAlready := make(map[validatorStatus]struct{})
