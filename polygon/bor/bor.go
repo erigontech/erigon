@@ -1469,7 +1469,7 @@ func (c *Bor) CommitStates(
 ) error {
 	blockNum := header.Number.Uint64()
 
-	if c.polygonBridge != nil {
+	if c.polygonBridge.(*bridge.Bridge) != nil {
 		events, err := c.polygonBridge.GetEvents(c.execCtx, blockNum)
 		if err != nil {
 			return err
