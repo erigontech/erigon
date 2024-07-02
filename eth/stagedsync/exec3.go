@@ -1107,24 +1107,6 @@ func flushAndCheckCommitmentV3(ctx context.Context, header *types.Header, applyT
 		}
 		return true, nil
 	}
-	/* uncomment it when need to debug state-root mismatch
-	if err := doms.Flush(context.Background(), applyTx); err != nil {
-		panic(err)
-	}
-	oldAlogNonIncrementalHahs, err := core.CalcHashRootForTests(applyTx, header, true, false)
-	if err != nil {
-		panic(err)
-	}
-	if common.BytesToHash(rh) != oldAlogNonIncrementalHahs {
-		if oldAlogNonIncrementalHahs != header.Root {
-			log.Error(fmt.Sprintf("block hash mismatch - both algorithm hashes are bad! (means latest state is NOT correct AND new commitment issue): %x != %x != %x bn =%d", common.BytesToHash(rh), oldAlogNonIncrementalHahs, header.Root, header.Number))
-		} else {
-			log.Error(fmt.Sprintf("block hash mismatch - and new-algorithm hash is bad! (means latest state is CORRECT): %x != %x == %x bn =%d", common.BytesToHash(rh), oldAlogNonIncrementalHahs, header.Root, header.Number))
-		}
-	} else {
-		log.Error(fmt.Sprintf("block hash mismatch - and new-algorithm hash is good! (means latest state is NOT correct): %x == %x != %x bn =%d", common.BytesToHash(rh), oldAlogNonIncrementalHahs, header.Root, header.Number))
-	}
-	//*/
 	logger.Error(fmt.Sprintf("[%s] Wrong trie root of block %d: %x, expected (from header): %x. Block hash: %x", e.LogPrefix(), header.Number.Uint64(), rh, header.Root.Bytes(), header.Hash()))
 	if cfg.badBlockHalt {
 		return false, fmt.Errorf("wrong trie root")
@@ -1154,7 +1136,7 @@ func flushAndCheckCommitmentV3(ctx context.Context, header *types.Header, applyT
 		return false, err
 	}
 	if !ok {
-		return false, fmt.Errorf("too far unwind. requested=%d, minAllowed=%d", unwindTo, allowedUnwindTo)
+		return false, fmt.Errorf("%w: requested=%d, minAllowed=%d", ErrTooDeepUnwind, unwindTo, allowedUnwindTo)
 	}
 	logger.Warn("Unwinding due to incorrect root hash", "to", unwindTo)
 	if err := u.UnwindTo(allowedUnwindTo, BadBlock(header.Hash(), ErrInvalidStateRootHash), applyTx); err != nil {

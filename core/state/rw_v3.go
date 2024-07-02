@@ -32,7 +32,6 @@ import (
 	"github.com/ledgerwatch/erigon-lib/common/length"
 	"github.com/ledgerwatch/erigon-lib/etl"
 	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon-lib/kv/order"
 	"github.com/ledgerwatch/erigon-lib/metrics"
 	"github.com/ledgerwatch/erigon-lib/state"
 	libstate "github.com/ledgerwatch/erigon-lib/state"
@@ -244,17 +243,13 @@ var (
 )
 
 func (rs *StateV3) Unwind(ctx context.Context, tx kv.RwTx, blockUnwindTo, txUnwindTo uint64, accumulator *shards.Accumulator, changeset *[kv.DomainLen][]state.DomainEntryDiff) error {
-	unwindToLimit := tx.(libstate.HasAggTx).AggTx().(*libstate.AggregatorRoTx).CanUnwindDomainsToTxNum()
-	if txUnwindTo < unwindToLimit {
-		return fmt.Errorf("can't unwind to txNum=%d, limit is %d", txUnwindTo, unwindToLimit)
-	}
-
 	mxState3UnwindRunning.Inc()
 	defer mxState3UnwindRunning.Dec()
 	st := time.Now()
 	defer mxState3Unwind.ObserveDuration(st)
 	var currentInc uint64
 
+	//TODO: why we don't call accumulator.ChangeCode???
 	handle := func(k, v []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) error {
 		if len(k) == length.Addr {
 			if len(v) > 0 {
@@ -292,42 +287,8 @@ func (rs *StateV3) Unwind(ctx context.Context, tx kv.RwTx, blockUnwindTo, txUnwi
 	stateChanges := etl.NewCollector("", "", etl.NewOldestEntryBuffer(etl.BufferOptimalSize), rs.logger)
 	defer stateChanges.Close()
 	stateChanges.SortAndFlushInBackground(true)
-	if changeset == nil {
-		ttx := tx.(kv.TemporalTx)
-		// todo these updates could be collected during rs.domains.Unwind (as passed collect function eg)
-		{
-			iter, err := ttx.HistoryRange(kv.AccountsHistory, int(txUnwindTo), -1, order.Asc, -1)
-			if err != nil {
-				return err
-			}
-			defer iter.Close()
-			for iter.HasNext() {
-				k, v, err := iter.Next()
-				if err != nil {
-					return err
-				}
-				if err := stateChanges.Collect(k, v); err != nil {
-					return err
-				}
-			}
-		}
-		{
-			iter, err := ttx.HistoryRange(kv.StorageHistory, int(txUnwindTo), -1, order.Asc, -1)
-			if err != nil {
-				return err
-			}
-			defer iter.Close()
-			for iter.HasNext() {
-				k, v, err := iter.Next()
-				if err != nil {
-					return err
-				}
-				if err := stateChanges.Collect(k, v); err != nil {
-					return err
-				}
-			}
-		}
-	} else {
+
+	if changeset != nil {
 		accountDiffs := changeset[kv.AccountsDomain]
 		for _, kv := range accountDiffs {
 			if err := stateChanges.Collect(kv.Key[:length.Addr], kv.Value); err != nil {
