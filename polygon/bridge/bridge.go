@@ -57,6 +57,7 @@ func (b *Bridge) Run(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+	defer b.Close()
 
 	// get last known sync ID
 	lastEventID, err := b.store.GetLatestEventID(ctx)
@@ -110,7 +111,7 @@ func (b *Bridge) ProcessNewBlocks(ctx context.Context, blocks []*types.Block) er
 	eventMap := make(map[uint64]uint64)
 	for _, block := range blocks {
 		// check if block is start of span
-		if b.isSprintStart(block.NumberU64()) {
+		if !b.isSprintStart(block.NumberU64()) {
 			continue
 		}
 
@@ -164,12 +165,16 @@ func (b *Bridge) GetEvents(ctx context.Context, blockNum uint64) ([]*types.Messa
 		return nil, err
 	}
 
+	if end == 0 { // exception for tip processing
+		end = b.lastProcessedEventID
+	}
+
 	b.log.Debug("got map", "blockNum", blockNum, "start", start, "end", end)
 
-	eventsRaw := make([]*types.Message, end-start+1)
+	eventsRaw := make([]*types.Message, 0, end-start+1)
 
 	// get events from DB
-	events, err := b.store.GetEvents(ctx, start, end)
+	events, err := b.store.GetEvents(ctx, start+1, end+1)
 	if err != nil {
 		return nil, err
 	}
@@ -192,6 +197,7 @@ func (b *Bridge) GetEvents(ctx context.Context, blockNum uint64) ([]*types.Messa
 
 		eventsRaw = append(eventsRaw, &msg)
 	}
+
 	return eventsRaw, nil
 }
 
