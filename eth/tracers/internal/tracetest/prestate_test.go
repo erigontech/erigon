@@ -29,7 +29,6 @@ import (
 
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/dir"
-
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/consensus"
 	"github.com/ledgerwatch/erigon/core"
@@ -99,41 +98,36 @@ func testPrestateDiffTracer(tracerName string, dirPath string, t *testing.T) {
 				t.Fatalf("failed to parse testcase input: %v", err)
 			}
 			// Configure a blockchain with the given prestate
-			var (
-				signer    = types.MakeSigner(test.Genesis.Config, uint64(test.Context.Number), uint64(test.Context.Time))
-				origin, _ = signer.Sender(tx)
-				txContext = evmtypes.TxContext{
-					Origin:   origin,
-					GasPrice: tx.GetFeeCap(),
-				}
-				context = evmtypes.BlockContext{
-					CanTransfer: core.CanTransfer,
-					Transfer:    consensus.Transfer,
-					Coinbase:    test.Context.Miner,
-					BlockNumber: uint64(test.Context.Number),
-					Time:        uint64(test.Context.Time),
-					Difficulty:  (*big.Int)(test.Context.Difficulty),
-					GasLimit:    uint64(test.Context.GasLimit),
-				}
-				rules = test.Genesis.Config.Rules(context.BlockNumber, context.Time)
-			)
+			signer := types.MakeSigner(test.Genesis.Config, uint64(test.Context.Number), uint64(test.Context.Time))
+			context := evmtypes.BlockContext{
+				CanTransfer: core.CanTransfer,
+				Transfer:    consensus.Transfer,
+				Coinbase:    test.Context.Miner,
+				BlockNumber: uint64(test.Context.Number),
+				Time:        uint64(test.Context.Time),
+				Difficulty:  (*big.Int)(test.Context.Difficulty),
+				GasLimit:    uint64(test.Context.GasLimit),
+			}
+			if test.Context.BaseFee != nil {
+				context.BaseFee, _ = uint256.FromBig((*big.Int)(test.Context.BaseFee))
+			}
+			rules := test.Genesis.Config.Rules(context.BlockNumber, context.Time)
 			m := mock.Mock(t)
 			dbTx, err := m.DB.BeginRw(m.Ctx)
 			require.NoError(t, err)
 			defer dbTx.Rollback()
-			statedb, _ := tests.MakePreState(rules, dbTx, test.Genesis.Alloc, context.BlockNumber, m.HistoryV3)
-			if test.Genesis.BaseFee != nil {
-				context.BaseFee, _ = uint256.FromBig(test.Genesis.BaseFee)
-			}
+			statedb, err := tests.MakePreState(rules, dbTx, test.Genesis.Alloc, context.BlockNumber, m.HistoryV3)
+			require.NoError(t, err)
 			tracer, err := tracers.New(tracerName, new(tracers.Context), test.TracerConfig)
 			if err != nil {
 				t.Fatalf("failed to create call tracer: %v", err)
 			}
-			evm := vm.NewEVM(context, txContext, statedb, test.Genesis.Config, vm.Config{Debug: true, Tracer: tracer})
-			msg, err := tx.AsMessage(*signer, nil, rules) // BaseFee is set to nil and not to contet.BaseFee, to match the output to go-ethereum tests
+			msg, err := tx.AsMessage(*signer, (*big.Int)(test.Context.BaseFee), rules)
 			if err != nil {
 				t.Fatalf("failed to prepare transaction for tracing: %v", err)
 			}
+			txContext := core.NewEVMTxContext(msg)
+			evm := vm.NewEVM(context, txContext, statedb, test.Genesis.Config, vm.Config{Debug: true, Tracer: tracer})
 			st := core.NewStateTransition(evm, msg, new(core.GasPool).AddGas(tx.GetGas()).AddBlobGas(tx.GetBlobGas()))
 			if _, err = st.TransitionDb(true /* refunds */, false /* gasBailout */); err != nil {
 				t.Fatalf("failed to execute transaction: %v", err)
