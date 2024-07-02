@@ -3,6 +3,7 @@ package rawdb
 import (
 	"encoding/binary"
 	"fmt"
+
 	common2 "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/hexutility"
 	"github.com/ledgerwatch/erigon-lib/kv"
@@ -47,7 +48,7 @@ func (*CanonicalReader) TxNum2ID(tx kv.Tx, blockNum uint64, blockHash common2.Ha
 		if err != nil {
 			return 0, err
 		}
-		_max, err := rawdbv3.TxNums.Min(tx, blockNum)
+		_max, err := rawdbv3.TxNums.Max(tx, blockNum)
 		if err != nil {
 			return 0, err
 		}
@@ -56,7 +57,7 @@ func (*CanonicalReader) TxNum2ID(tx kv.Tx, blockNum uint64, blockHash common2.Ha
 		}
 		return kv.TxnId(txNum), nil
 	}
-	return kv.TxnId(b.BaseTxId), nil
+	return kv.TxnId(b.BaseTxnID), nil
 }
 
 func (*CanonicalReader) BaseTxnID(tx kv.Tx, blockNum uint64, blockHash common2.Hash) (kv.TxnId, error) {
@@ -76,8 +77,7 @@ func (*CanonicalReader) BaseTxnID(tx kv.Tx, blockNum uint64, blockHash common2.H
 		}
 		return kv.TxnId(_min), nil
 	}
-	return kv.TxnId(b.BaseTxId), nil
-
+	return kv.TxnId(b.BaseTxnID), nil
 }
 
 func (*CanonicalReader) LastFrozenTxNum(tx kv.Tx) (kv.TxnId, error) {
@@ -86,7 +86,11 @@ func (*CanonicalReader) LastFrozenTxNum(tx kv.Tx) (kv.TxnId, error) {
 		return 0, err
 	}
 	if !ok {
-		panic(1)
+		//seq, err := tx.ReadSequence(kv.EthTx)
+		//seq-1
+		_, _lastTxNumInFiles, err := rawdbv3.TxNums.Last(tx)
+		return kv.TxnId(_lastTxNumInFiles), err
+
 	}
 	_max, err := rawdbv3.TxNums.Max(tx, n)
 	if err != nil {
@@ -173,7 +177,7 @@ func (s *CanonicalTxnIds) advance() (err error) {
 		}
 	}
 
-	if !endOfBlock {
+	if !endOfBlock || s.currentTxNum == int(s.endOfCurrentBlock) {
 		return nil
 	}
 
@@ -197,11 +201,11 @@ func (s *CanonicalTxnIds) advance() (err error) {
 	}
 
 	if s.orderAscend {
-		s.currentTxNum = int(body.BaseTxId)
-		s.endOfCurrentBlock = body.BaseTxId + uint64(body.TxCount) // 2 system txs already included in TxAmount
+		s.currentTxNum = int(body.BaseTxnID)
+		s.endOfCurrentBlock = body.BaseTxnID.LastSystemTx(body.TxCount)
 	} else {
-		s.currentTxNum = int(body.BaseTxId) + int(body.TxCount) - 1 // 2 system txs already included in TxAmount
-		s.endOfCurrentBlock = body.BaseTxId - 1                     // and one of them is baseTxId
+		s.currentTxNum = int(body.BaseTxnID.LastSystemTx(body.TxCount))
+		s.endOfCurrentBlock = body.BaseTxnID.U64()
 	}
 	return nil
 }

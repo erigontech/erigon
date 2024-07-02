@@ -23,7 +23,6 @@ import (
 	"context"
 	"encoding/binary"
 	"fmt"
-	"github.com/ledgerwatch/erigon/core/rawdb"
 	"math"
 	"math/big"
 	"math/rand"
@@ -31,6 +30,8 @@ import (
 	"strings"
 	"testing"
 	"testing/quick"
+
+	"github.com/ledgerwatch/erigon/core/rawdb"
 
 	"github.com/holiman/uint256"
 
@@ -41,6 +42,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/kv/memdb"
 	"github.com/ledgerwatch/erigon-lib/kv/temporal"
 	stateLib "github.com/ledgerwatch/erigon-lib/state"
+	"github.com/ledgerwatch/erigon/core/tracing"
 	"github.com/ledgerwatch/erigon/core/types"
 
 	"github.com/ledgerwatch/erigon-lib/kv/rawdbv3"
@@ -89,14 +91,14 @@ func newTestAction(addr libcommon.Address, r *rand.Rand) testAction {
 		{
 			name: "SetBalance",
 			fn: func(a testAction, s *IntraBlockState) {
-				s.SetBalance(addr, uint256.NewInt(uint64(a.args[0])))
+				s.SetBalance(addr, uint256.NewInt(uint64(a.args[0])), tracing.BalanceChangeUnspecified)
 			},
 			args: make([]int64, 1),
 		},
 		{
 			name: "AddBalance",
 			fn: func(a testAction, s *IntraBlockState) {
-				s.AddBalance(addr, uint256.NewInt(uint64(a.args[0])))
+				s.AddBalance(addr, uint256.NewInt(uint64(a.args[0])), tracing.BalanceChangeUnspecified)
 			},
 			args: make([]int64, 1),
 		},

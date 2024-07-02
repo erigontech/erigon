@@ -9,13 +9,12 @@ import (
 
 	"golang.org/x/sync/errgroup"
 
-	"github.com/ledgerwatch/erigon-lib/log/v3"
-
 	"github.com/ledgerwatch/erigon-lib/chain"
 	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/metrics"
 	"github.com/ledgerwatch/erigon-lib/direct"
 	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/ledgerwatch/erigon-lib/log/v3"
 	"github.com/ledgerwatch/erigon/accounts/abi"
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/types"
@@ -41,7 +40,7 @@ func NewPolygonSyncStageCfg(
 	stopNode func() error,
 	stateReceiverABI abi.ABI,
 	blockLimit uint,
-	dataDir string,
+	polygonBridge bridge.Service,
 ) PolygonSyncStageCfg {
 	dataStream := make(chan polygonSyncStageDataItem)
 	storage := &polygonSyncStageStorage{
@@ -60,7 +59,6 @@ func NewPolygonSyncStageCfg(
 	blocksVerifier := polygonsync.VerifyBlocks
 	heimdallService := heimdall.NewHeimdall(heimdallClient, logger, heimdall.WithStore(storage))
 	borConfig := chainConfig.Bor.(*borcfg.BorConfig)
-	polygonBridge := bridge.NewBridge(dataDir, logger, borConfig, heimdallClient.FetchStateSyncEvents, stateReceiverABI)
 	blockDownloader := polygonsync.NewBlockDownloader(
 		logger,
 		p2pService,
@@ -188,6 +186,7 @@ func (s *polygonSyncStageService) Run(ctx context.Context, tx kv.RwTx, stageStat
 	s.stageState = stageState
 	s.unwinder = unwinder
 	s.logger.Info(s.appendLogPrefix("begin..."), "progress", stageState.BlockNumber)
+
 	s.runBgComponentsOnce(ctx)
 
 	if s.cachedForkChoice != nil {
@@ -255,9 +254,11 @@ func (s *polygonSyncStageService) runBgComponentsOnce(ctx context.Context) {
 			return s.events.Run(ctx)
 		})
 
-		eg.Go(func() error {
-			return s.bridge.Run(ctx)
-		})
+		if s.bridge != nil {
+			eg.Go(func() error {
+				return s.bridge.Run(ctx)
+			})
+		}
 
 		eg.Go(func() error {
 			s.p2p.Run(ctx)
@@ -326,9 +327,11 @@ func (s *polygonSyncStageService) handleInsertBlocks(ctx context.Context, tx kv.
 		}
 	}
 
-	err := s.bridge.ProcessNewBlocks(ctx, blocks)
-	if err != nil {
-		return err
+	if s.bridge != nil {
+		err := s.bridge.ProcessNewBlocks(ctx, blocks)
+		if err != nil {
+			return err
+		}
 	}
 
 	return nil
@@ -536,7 +539,7 @@ func (s *polygonSyncStageStorage) InsertBlocks(_ context.Context, blocks []*type
 	return nil
 }
 
-func (s *polygonSyncStageStorage) Flush(context.Context) error {
+func (s *polygonSyncStageStorage) Flush(context.Context, *types.Header) error {
 	return nil
 }
 

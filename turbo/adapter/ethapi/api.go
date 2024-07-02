@@ -111,7 +111,7 @@ func (args *CallArgs) ToMessage(globalGasCap uint64, baseFee *uint256.Int) (type
 			gasFeeCap, gasTipCap = gasPrice, gasPrice
 		} else {
 			// User specified 1559 gas fields (or none), use those
-			gasFeeCap = new(uint256.Int).Set(baseFee)
+			gasFeeCap = new(uint256.Int)
 			if args.MaxFeePerGas != nil {
 				overflow := gasFeeCap.SetFromBig(args.MaxFeePerGas.ToInt())
 				if overflow {
@@ -336,8 +336,8 @@ func RPCMarshalBlockExDeprecated(block *types.Block, inclTx bool, fullTx bool, b
 		txs := block.Transactions()
 		transactions := make([]interface{}, len(txs), len(txs)+1)
 		var err error
-		for i, tx := range txs {
-			if transactions[i], err = formatTx(tx, i); err != nil {
+		for i, txn := range txs {
+			if transactions[i], err = formatTx(txn, i); err != nil {
 				return nil, err
 			}
 		}
@@ -554,8 +554,8 @@ func newRPCTransactionFromBlockIndex(b *types.Block, index uint64) *RPCTransacti
 */
 
 // newRPCTransactionFromBlockAndTxGivenIndex returns a transaction that will serialize to the RPC representation.
-func newRPCTransactionFromBlockAndTxGivenIndex(b *types.Block, tx types.Transaction, index uint64) *RPCTransaction {
-	return newRPCTransaction(tx, b.Hash(), b.NumberU64(), index, b.BaseFee())
+func newRPCTransactionFromBlockAndTxGivenIndex(b *types.Block, txn types.Transaction, index uint64) *RPCTransaction {
+	return newRPCTransaction(txn, b.Hash(), b.NumberU64(), index, b.BaseFee())
 }
 
 /*
@@ -581,7 +581,7 @@ func newRPCRawTransactionFromBlockIndex(b *types.Block, index uint64) hexutil.By
 /*
 // newRPCTransactionFromBlockHash returns a transaction that will serialize to the RPC representation.
 func newRPCTransactionFromBlockHash(b *types.Block, hash libcommon.Hash) *RPCTransaction {
-	for idx, tx := range b.Transactions() {
+	for idx, txn := range b.Transactions() {
 		if tx.Hash() == hash {
 			return newRPCTransactionFromBlockIndex(b, uint64(idx))
 		}
@@ -682,11 +682,11 @@ func (s *PublicTransactionPoolAPI) GetTransactionByHash(ctx context.Context, has
 	if err != nil {
 		return nil, err
 	}
-	if tx != nil {
+	if txn != nil {
 		return newRPCTransaction(tx, blockHash, blockNumber, index), nil
 	}
 	// No finalized transaction, try to retrieve it from the pool
-	if tx := s.b.GetPoolTransaction(hash); tx != nil {
+	if txn := s.b.GetPoolTransaction(hash); txn != nil {
 		return newRPCPendingTransaction(tx), nil
 	}
 
@@ -701,8 +701,8 @@ func (s *PublicTransactionPoolAPI) GetRawTransactionByHash(ctx context.Context, 
 	if err != nil {
 		return nil, err
 	}
-	if tx == nil {
-		if tx = s.b.GetPoolTransaction(hash); tx == nil {
+	if txn == nil {
+		if txn = s.b.GetPoolTransaction(hash); txn == nil {
 			// Transaction not found anywhere, abort
 			return nil, nil
 		}
@@ -770,7 +770,7 @@ func (s *PublicTransactionPoolAPI) GetTransactionReceipt(ctx context.Context, ha
 	return fields, nil
 }
 
-// SendTxArgs represents the arguments to sumbit a new transaction into the transaction pool.
+// SendTxArgs represents the arguments to submit a new transaction into the transaction pool.
 type SendTxArgs struct {
 	From     libcommon.Address  `json:"from"`
 	To       *libcommon.Address `json:"to"`
@@ -790,7 +790,7 @@ type SendTxArgs struct {
 	ChainID    *hexutil.Big      `json:"chainId,omitempty"`
 }
 
-// setDefaults fills in default values for unspecified tx fields.
+// setDefaults fills in default values for unspecified txn fields.
 func (args *SendTxArgs) setDefaults(ctx context.Context, b Backend) error {
 	if args.GasPrice == nil {
 		price, err := b.SuggestPrice(ctx)
@@ -866,7 +866,7 @@ func (args *SendTxArgs) toTransaction() types.Transaction {
 		input = *args.Data
 	}
 
-	var tx types.Transaction
+	var txn types.Transaction
 	gasPrice, _ := uint256.FromBig((*big.Int)(args.GasPrice))
 	value, _ := uint256.FromBig((*big.Int)(args.Value))
 	if args.AccessList == nil {
@@ -918,8 +918,8 @@ func (args *SendTxArgs) toTransaction() types.Transaction {
 	return tx
 }
 
-// SubmitTransaction is a helper function that submits tx to txPool and logs a message.
-func SubmitTransaction(ctx context.Context, b Backend, tx types.Transaction) (libcommon.Hash, error) {
+// SubmitTransaction is a helper function that submits txn to txPool and logs a message.
+func SubmitTransaction(ctx context.Context, b Backend, txn types.Transaction) (libcommon.Hash, error) {
 	// If the transaction fee cap is already specified, ensure the
 	// fee of the given transaction is _reasonable_.
 	if err := checkTxFee(tx.GetPrice().ToBig(), tx.GetGas(), b.RPCTxFeeCap()); err != nil {
@@ -932,7 +932,7 @@ func SubmitTransaction(ctx context.Context, b Backend, tx types.Transaction) (li
 	if err := b.SendTx(ctx, tx); err != nil {
 		return libcommon.Hash{}, err
 	}
-	// Print a log with full tx details for manual investigations and interventions
+	// Print a log with full txn details for manual investigations and interventions
 	signer := types.MakeSigner(b.ChainConfig(), b.CurrentBlock().Number().Uint64())
 	from, err := tx.Sender(*signer)
 	if err != nil {

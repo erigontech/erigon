@@ -787,13 +787,13 @@ Supported networks: all (except Mumbai).
 - E3 can execute 1 historical transaction - without executing it's block - because history/indices have
   transaction-granularity, instead of block-granularity.
 - E3 doesn't store Logs (aka Receipts) - it always re-executing historical txn (but it's cheaper then in E2 - see point
-  above). Also Logs LRU added in E2 (release/2.60) and E3: https://github.com/ledgerwatch/erigon/pull/10112
-  here. Likely later we will add optional flag "to persist receipts".
+  above). Known perf issues: https://github.com/ledgerwatch/erigon/issues/10747
 - `--sync.loop.block.limit` is enabled by default. (Default: `5_000`.
   Set `--sync.loop.block.limit=10_000 --batchSize=1g` to increase sync speed on good hardware).
-- datadir/chaindata is small now - to prevent it's grow: we recommend set `--batchSize <= 1G`. And it's fine
+- datadir/chaindata is small now - to prevent it's grow: we recommend set `--batchSize <= 2G`. And it's fine
   to `rm -rf chaindata`
 - can symlink/mount latest state to fast drive and history to cheap drive
+- ArchiveNode is default. FullNode same as in E2: --prune=hrtc
 
 ### E3 datadir structure
 
@@ -839,44 +839,40 @@ datadir
 
 du -hsc /erigon/* 
 6G  	/erigon/caplin
-80G 	/erigon/chaindata
-1.7T	/erigon/snapshots
-1.8T	total
+50G 	/erigon/chaindata
+1.8T	/erigon/snapshots
+1.9T	total
 
 du -hsc /erigon/snapshots/* 
 100G 	/erigon/snapshots/accessor
-230G	/erigon/snapshots/domain
-250G	/erigon/snapshots/history
-400G	/erigon/snapshots/idx
+240G	/erigon/snapshots/domain
+260G	/erigon/snapshots/history
+410G	/erigon/snapshots/idx
 1.7T	/erigon/snapshots
 ```
 
 ```
-# bor-mainnet - archive - April 2024
+# bor-mainnet - archive - Jun 2024
 
 du -hsc /erigon/* 
+
 160M	/erigon/bor
-60G 	/erigon/chaindata
+50G 	/erigon/chaindata
 3.7T	/erigon/snapshots
 3.8T	total
 
 du -hsc /erigon/snapshots/* 
-24G	/erigon/snapshots/accessor
-680G	/erigon/snapshots/domain
-580G	/erigon/snapshots/history
-1.3T	/erigon/snapshots/idx
-3.7T	/erigon/snapshots
+260G	/erigon-data/snapshots/accessor
+850G	/erigon-data/snapshots/domain
+650G	/erigon-data/snapshots/history
+1.4T	/erigon-data/snapshots/idx
+4.1T	/erigon/snapshots
 ```
 
 ### E3 other perf trics
 
-- `--sync.loop.block.limit=10_000_000 --batchSize=1g` - likely will help for sync speed.
-- on cloud-drives (good throughput, bad latency) - can enable OS's brain to pre-fetch some data (`madv_normal` instead
-  of `madv_random`). For `snapshots/domain` folder (latest
-  state) `KV_MADV_NORMAL_NO_LAST_LVL=accounts,storage,commitment` (or if have enough
-  RAM:  `KV_MADV_NORMAL=accounts,storage,commitment`). For `chaindata` folder (latest updates) `MDBX_READAHEAD=true`.
-  For all files - `SNAPSHOT_MADV_RND=false`
-
+- `--sync.loop.block.limit=10_000 --batchSize=2g` - likely will help for sync speed.
+- on cloud-drives (good throughput, bad latency) - can enable OS's brain to pre-fetch: `SNAPSHOT_MADV_RND=false`
 - can lock latest state in RAM - to prevent from eviction (node may face high historical RPC traffic without impacting
   Chain-Tip perf):
 

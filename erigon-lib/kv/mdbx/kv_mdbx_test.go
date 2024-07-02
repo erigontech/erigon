@@ -20,6 +20,7 @@ import (
 	"context"
 	"encoding/binary"
 	"errors"
+	"math/rand"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -392,36 +393,39 @@ func TestForAmount(t *testing.T) {
 	require.Nil(t, keys3)
 }
 
-func TestForPrefix(t *testing.T) {
+func TestPrefix(t *testing.T) {
 	_, tx, _ := BaseCase(t)
 
 	table := "Table"
-
-	var keys []string
-
-	err := tx.ForPrefix(table, []byte("key"), func(k, v []byte) error {
-		keys = append(keys, string(k))
-		return nil
-	})
+	var keys, keys1, keys2 []string
+	kvs1, err := tx.Prefix(table, []byte("key"))
 	require.Nil(t, err)
+	defer kvs1.Close()
+	for kvs1.HasNext() {
+		k1, _, err := kvs1.Next()
+		require.Nil(t, err)
+		keys = append(keys, string(k1))
+	}
 	require.Equal(t, []string{"key1", "key1", "key3", "key3"}, keys)
 
-	var keys1 []string
-
-	err = tx.ForPrefix(table, []byte("key1"), func(k, v []byte) error {
-		keys1 = append(keys1, string(k))
-		return nil
-	})
+	kvs2, err := tx.Prefix(table, []byte("key1"))
 	require.Nil(t, err)
+	defer kvs2.Close()
+	for kvs2.HasNext() {
+		k1, _, err := kvs2.Next()
+		require.Nil(t, err)
+		keys1 = append(keys1, string(k1))
+	}
 	require.Equal(t, []string{"key1", "key1"}, keys1)
 
-	var keys2 []string
-
-	err = tx.ForPrefix(table, []byte("e"), func(k, v []byte) error {
-		keys2 = append(keys2, string(k))
-		return nil
-	})
+	kvs3, err := tx.Prefix(table, []byte("e"))
 	require.Nil(t, err)
+	defer kvs3.Close()
+	for kvs3.HasNext() {
+		k1, _, err := kvs3.Next()
+		require.Nil(t, err)
+		keys2 = append(keys2, string(k1))
+	}
 	require.Nil(t, keys2)
 }
 
@@ -644,7 +648,7 @@ func TestCurrentDup(t *testing.T) {
 
 	count, err := c.CountDuplicates()
 	require.Nil(t, err)
-	require.Equal(t, count, uint64(2))
+	require.Equal(t, uint64(2), count)
 
 	require.Error(t, c.PutNoDupData([]byte("key3"), []byte("value3.3")))
 	require.NoError(t, c.DeleteCurrentDuplicates())
@@ -660,7 +664,7 @@ func TestCurrentDup(t *testing.T) {
 }
 
 func TestDupDelete(t *testing.T) {
-	_, _, c := BaseCase(t)
+	_, tx, c := BaseCase(t)
 
 	k, _, err := c.Current()
 	require.Nil(t, err)
@@ -672,7 +676,8 @@ func TestDupDelete(t *testing.T) {
 	err = c.Delete([]byte("key1"))
 	require.Nil(t, err)
 
-	count, err := c.Count()
+	//TODO: find better way
+	count, err := tx.Count("Table")
 	require.Nil(t, err)
 	assert.Zero(t, count)
 }
@@ -1132,6 +1137,91 @@ func BenchmarkDB_Get(b *testing.B) {
 			}
 			if v == nil {
 				b.Errorf("key not found: %d", 1)
+			}
+		}
+		return nil
+	}); err != nil {
+		b.Fatal(err)
+	}
+}
+
+func BenchmarkDB_Put(b *testing.B) {
+	_db := BaseCaseDBForBenchmark(b)
+	table := "Table"
+	db := _db.(*MdbxKV)
+
+	// Ensure data is correct.
+	if err := db.Update(context.Background(), func(tx kv.RwTx) error {
+		keys := make([][]byte, b.N)
+		for i := 1; i <= b.N; i++ {
+			keys[i-1] = u64tob(uint64(i))
+		}
+		b.ResetTimer()
+		for i := 0; i < b.N; i++ {
+			err := tx.Put(table, keys[i], keys[i])
+			if err != nil {
+				return err
+			}
+		}
+		return nil
+	}); err != nil {
+		b.Fatal(err)
+	}
+}
+
+func BenchmarkDB_PutRandom(b *testing.B) {
+	_db := BaseCaseDBForBenchmark(b)
+	table := "Table"
+	db := _db.(*MdbxKV)
+
+	// Ensure data is correct.
+	if err := db.Update(context.Background(), func(tx kv.RwTx) error {
+		keys := make(map[string]struct{}, b.N)
+		for len(keys) < b.N {
+			keys[string(u64tob(uint64(rand.Intn(1e10))))] = struct{}{}
+		}
+		b.ResetTimer()
+		for key := range keys {
+			err := tx.Put(table, []byte(key), []byte(key))
+			if err != nil {
+				return err
+			}
+		}
+		return nil
+	}); err != nil {
+		b.Fatal(err)
+	}
+}
+
+func BenchmarkDB_Delete(b *testing.B) {
+	_db := BaseCaseDBForBenchmark(b)
+	table := "Table"
+	db := _db.(*MdbxKV)
+
+	keys := make([][]byte, b.N)
+	for i := 1; i <= b.N; i++ {
+		keys[i-1] = u64tob(uint64(i))
+	}
+
+	if err := db.Update(context.Background(), func(tx kv.RwTx) error {
+		for i := 0; i < b.N; i++ {
+			err := tx.Put(table, keys[i], keys[i])
+			if err != nil {
+				return err
+			}
+		}
+		return nil
+	}); err != nil {
+		b.Fatal(err)
+	}
+
+	// Ensure data is correct.
+	if err := db.Update(context.Background(), func(tx kv.RwTx) error {
+		b.ResetTimer()
+		for i := 0; i < b.N; i++ {
+			err := tx.Delete(table, keys[i])
+			if err != nil {
+				return err
 			}
 		}
 		return nil

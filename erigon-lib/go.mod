@@ -4,8 +4,8 @@ go 1.21
 
 require (
 	github.com/erigontech/mdbx-go v0.38.4
-	github.com/ledgerwatch/erigon-snapshot v1.3.1-0.20240621134121-8602e942c6e3
-	github.com/ledgerwatch/interfaces v0.0.0-20240517122128-635f85ab7b28
+	github.com/ledgerwatch/erigon-snapshot v1.3.1-0.20240630180403-d58546cfe1e8
+	github.com/ledgerwatch/interfaces v0.0.0-20240621204041-2092c22b6ef6
 	github.com/ledgerwatch/secp256k1 v1.0.0
 	github.com/rs/dnscache v0.0.0-20211102005908-e0241e321417
 )
@@ -55,8 +55,9 @@ require (
 	github.com/ianlancetaylor/cgosymbolizer v0.0.0-20240503222823-736c933a666d // indirect
 	github.com/opencontainers/runtime-spec v1.2.0 // indirect
 	github.com/pion/udp v0.1.4 // indirect
-	golang.org/x/mod v0.18.0 // indirect
-	golang.org/x/tools v0.22.0 // indirect
+	golang.org/x/mod v0.17.0 // indirect
+	golang.org/x/tools v0.21.1-0.20240508182429-e35e4ccd0d2d // indirect
+	google.golang.org/genproto/googleapis/rpc v0.0.0-20240515191416-fc5f0ca64291 // indirect
 	modernc.org/libc v1.50.4 // indirect
 	modernc.org/memory v1.8.0 // indirect
 	modernc.org/sqlite v1.29.8 // indirect
@@ -142,7 +143,6 @@ require (
 	go.uber.org/goleak v1.3.0 // indirect
 	golang.org/x/net v0.26.0
 	golang.org/x/text v0.16.0 // indirect
-	google.golang.org/genproto/googleapis/rpc v0.0.0-20240318140521-94a12d6c2237 // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 	modernc.org/mathutil v1.6.0 // indirect
 	rsc.io/tmplfunc v0.0.3 // indirect
@@ -150,7 +150,7 @@ require (
 )
 
 replace (
-	github.com/anacrolix/torrent => github.com/erigontech/torrent v1.54.2-alpha-10
+	github.com/anacrolix/torrent => github.com/erigontech/torrent v1.54.2-alpha-24
 	github.com/holiman/bloomfilter/v2 => github.com/AskAlexSharov/bloomfilter/v2 v2.0.8
 	github.com/tidwall/btree => github.com/AskAlexSharov/btree v1.6.2
 )

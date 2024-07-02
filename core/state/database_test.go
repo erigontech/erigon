@@ -39,6 +39,7 @@ import (
 	"github.com/ledgerwatch/erigon/core"
 	"github.com/ledgerwatch/erigon/core/state"
 	"github.com/ledgerwatch/erigon/core/state/contracts"
+	"github.com/ledgerwatch/erigon/core/tracing"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/crypto"
 	"github.com/ledgerwatch/erigon/params"
@@ -868,13 +869,13 @@ func TestReproduceCrash(t *testing.T) {
 		t.Errorf("error finalising 1st tx: %v", err)
 	}
 	// Start the 3rd transaction
-	intraBlockState.AddBalance(contract, uint256.NewInt(1000000000))
+	intraBlockState.AddBalance(contract, uint256.NewInt(1000000000), tracing.BalanceChangeUnspecified)
 	intraBlockState.SetState(contract, &storageKey2, *value2)
 	if err := intraBlockState.FinalizeTx(&chain.Rules{}, tsw); err != nil {
 		t.Errorf("error finalising 1st tx: %v", err)
 	}
 	// Start the 4th transaction - clearing both storage cells
-	intraBlockState.SubBalance(contract, uint256.NewInt(1000000000))
+	intraBlockState.SubBalance(contract, uint256.NewInt(1000000000), tracing.BalanceChangeUnspecified)
 	intraBlockState.SetState(contract, &storageKey1, *value0)
 	intraBlockState.SetState(contract, &storageKey2, *value0)
 	if err := intraBlockState.FinalizeTx(&chain.Rules{}, tsw); err != nil {
@@ -1151,7 +1152,7 @@ func TestWrongIncarnation2(t *testing.T) {
 	}
 
 	if knownContractAddress != contractAddress {
-		t.Errorf("Expexted contractAddress: %x, got %x", knownContractAddress, contractAddress)
+		t.Errorf("Expected contractAddress: %x, got %x", knownContractAddress, contractAddress)
 	}
 
 	// Create a longer chain, with 4 blocks (with higher total difficulty) that reverts the change of stroage self-destruction of the contract
@@ -1259,7 +1260,7 @@ func TestChangeAccountCodeBetweenBlocks(t *testing.T) {
 	oldCode := []byte{0x01, 0x02, 0x03, 0x04}
 
 	intraBlockState.SetCode(contract, oldCode)
-	intraBlockState.AddBalance(contract, uint256.NewInt(1000000000))
+	intraBlockState.AddBalance(contract, uint256.NewInt(1000000000), tracing.BalanceChangeUnspecified)
 	if err := intraBlockState.FinalizeTx(&chain.Rules{}, tsw); err != nil {
 		t.Errorf("error finalising 1st tx: %v", err)
 	}
@@ -1312,7 +1313,7 @@ func TestCacheCodeSizeSeparately(t *testing.T) {
 	code := []byte{0x01, 0x02, 0x03, 0x04}
 
 	intraBlockState.SetCode(contract, code)
-	intraBlockState.AddBalance(contract, uint256.NewInt(1000000000))
+	intraBlockState.AddBalance(contract, uint256.NewInt(1000000000), tracing.BalanceChangeUnspecified)
 	if err := intraBlockState.FinalizeTx(&chain.Rules{}, w); err != nil {
 		t.Errorf("error finalising 1st tx: %v", err)
 	}
@@ -1330,7 +1331,7 @@ func TestCacheCodeSizeSeparately(t *testing.T) {
 	assert.Equal(t, code, code2, "new code should be received")
 }
 
-// TestCacheCodeSizeInTrie makes sure that we dont just read from the DB all the time
+// TestCacheCodeSizeInTrie makes sure that we don't just read from the DB all the time
 func TestCacheCodeSizeInTrie(t *testing.T) {
 	t.Parallel()
 	//t.Skip("switch to TG state readers/writers")
@@ -1351,7 +1352,7 @@ func TestCacheCodeSizeInTrie(t *testing.T) {
 	code := []byte{0x01, 0x02, 0x03, 0x04}
 
 	intraBlockState.SetCode(contract, code)
-	intraBlockState.AddBalance(contract, uint256.NewInt(1000000000))
+	intraBlockState.AddBalance(contract, uint256.NewInt(1000000000), tracing.BalanceChangeUnspecified)
 	if err := intraBlockState.FinalizeTx(&chain.Rules{}, w); err != nil {
 		t.Errorf("error finalising 1st tx: %v", err)
 	}
@@ -1630,12 +1631,8 @@ func TestTxLookupUnwind(t *testing.T) {
 	}
 	var count uint64
 	if err = m.DB.View(context.Background(), func(tx kv.Tx) error {
-		c, e := tx.Cursor(kv.TxLookup)
-		if e != nil {
-			return e
-		}
-		defer c.Close()
-		if count, e = c.Count(); e != nil {
+		var e error
+		if count, e = tx.Count(kv.TxLookup); e != nil {
 			return e
 		}
 		return nil

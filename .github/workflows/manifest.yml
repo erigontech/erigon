@@ -17,68 +17,39 @@ on:
       - reopened
       - synchronize
       - ready_for_review
+  workflow_dispatch:
 
 jobs:
-  check-snap-modifications:
-    runs-on: ubuntu-22.04
-    outputs:
-      modified: ${{ steps.check-modified.outputs.modified }}
+  #  check-snap-modifications:
+  #    runs-on: ubuntu-24.04
+  #    outputs:
+  #      modified: ${{ steps.check-modified.outputs.modified }}
+  #
+  #    steps:
+  #      - uses: actions/checkout@v4
+  #        with:
+  #          fetch-depth: 2 # Ensures we fetch enough history to compare
+  #
+  #      - name: Is ledgerwatch/erigon-snapshot updated in go.mod # if not, pipeline should exit beacuse grep exit code >0 when no match
+  #        run: |
+  #          git diff HEAD~1 HEAD -- go.mod | grep 'github.com/ledgerwatch/erigon-snapshot'
+
+  ManifestCheck:
+    #    needs: check-snap-modifications
+    if: github.event.pull_request.draft == false
+    runs-on: ubuntu-24.04
 
     steps:
       - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
         with:
-          fetch-depth: 2 # Ensures we fetch enough history to compare
-
-      - name: Is ledgerwatch/erigon-snapshot updated in go.mod # if not, pipeline should exit beacuse grep exit code >0 when no match
-        run: |
-          git diff HEAD~1 HEAD -- go.mod | grep 'github.com/ledgerwatch/erigon-snapshot'
-
-#  ManifestCheck:
-#    needs: check-snap-modifications
-#    if: ${{ github.event_name == 'push' || !github.event.pull_request.draft }}
-#    strategy:
-#      matrix:
-#        os:
-#          - ubuntu-22.04
-#    runs-on: ${{ matrix.os }}
-#
-#    steps:
-#      - uses: actions/checkout@v4
-#      - uses: actions/setup-go@v4
-#        with:
-#          go-version: '1.21'
-#      - name: Install dependencies on Linux
-#        if: runner.os == 'Linux'
-#        run: sudo apt update && sudo apt install build-essential
-#
-#      - name: Build
-#        run: make downloader
-#
-#      - name: mainnet webseeds
-#        run: |
-#          echo $ModModified
-#          ./build/bin/downloader manifest-verify --chain mainnet
-#
-#      - name: bor-mainnet webseeds
-#        run: |
-#          ./build/bin/downloader manifest-verify --chain bor-mainnet
-#
-#      - name: gnosis webseeds
-#        run: |
-#          ./build/bin/downloader manifest-verify --chain gnosis
-#
-#      - name: mumbai webseeds
-#        run: |
-#          ./build/bin/downloader manifest-verify --chain mumbai
-#
-#      - name: sepolia webseeds
-#        run: |
-#          ./build/bin/downloader manifest-verify --chain sepolia
-#
-#      - name: chiado webseeds
-#        run: |
-#          ./build/bin/downloader manifest-verify --chain chiado
-#
-#      - name: amoy webseeds
-#        run: |
-#          ./build/bin/downloader manifest-verify --chain amoy
+          go-version: '1.22'
+      - run: sudo apt update && sudo apt install build-essential
+      - run: make downloader
+      - run: echo $ModModified
+      - run: ./build/bin/downloader manifest-verify --chain mainnet
+      - run: ./build/bin/downloader manifest-verify --chain bor-mainnet
+      - run: ./build/bin/downloader manifest-verify --chain gnosis
+      - run: ./build/bin/downloader manifest-verify --chain chiado
+      - run: ./build/bin/downloader manifest-verify --chain sepolia
+      - run: ./build/bin/downloader manifest-verify --chain amoy

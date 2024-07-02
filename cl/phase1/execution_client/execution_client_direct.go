@@ -129,7 +129,8 @@ func (cc *ExecutionClientDirect) GetBodiesByHashes(ctx context.Context, hashes [
 }
 
 func (cc *ExecutionClientDirect) FrozenBlocks(ctx context.Context) uint64 {
-	return cc.chainRW.FrozenBlocks(ctx)
+	frozenBlocks, _ := cc.chainRW.FrozenBlocks(ctx)
+	return frozenBlocks
 }
 
 func (cc *ExecutionClientDirect) HasBlock(ctx context.Context, hash libcommon.Hash) (bool, error) {
@@ -138,4 +139,9 @@ func (cc *ExecutionClientDirect) HasBlock(ctx context.Context, hash libcommon.Ha
 
 func (cc *ExecutionClientDirect) GetAssembledBlock(_ context.Context, idBytes []byte) (*cltypes.Eth1Block, *engine_types.BlobsBundleV1, *big.Int, error) {
 	return cc.chainRW.GetAssembledBlock(binary.LittleEndian.Uint64(idBytes))
+}
+
+func (cc *ExecutionClientDirect) HasGapInSnapshots(ctx context.Context) bool {
+	_, hasGap := cc.chainRW.FrozenBlocks(ctx)
+	return hasGap
 }

@@ -262,16 +262,15 @@ func mergeAppendable(tb testing.TB, db kv.RwDB, ii *Appendable, txs uint64) {
 			ii.reCalcVisibleFiles()
 			ic := ii.BeginFilesRo()
 			defer ic.Close()
-			_, err = ic.Prune(ctx, tx, step*ii.aggregationStep, (step+1)*ii.aggregationStep, math.MaxUint64, logEvery, false, false, nil)
+			_, err = ic.Prune(ctx, tx, step*ii.aggregationStep, (step+1)*ii.aggregationStep, math.MaxUint64, logEvery, false, nil)
 			require.NoError(tb, err)
-			maxEndTxNum := ii.endTxNumMinimax()
 			maxSpan := ii.aggregationStep * StepsInColdFile
 
 			for {
 				if stop := func() bool {
 					ic := ii.BeginFilesRo()
 					defer ic.Close()
-					r := ic.findMergeRange(maxEndTxNum, maxSpan)
+					r := ic.findMergeRange(ic.files.EndTxNum(), maxSpan)
 					if !r.needMerge {
 						return true
 					}

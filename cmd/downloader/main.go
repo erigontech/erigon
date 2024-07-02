@@ -84,6 +84,7 @@ var (
 	disableIPV6                    bool
 	disableIPV4                    bool
 	seedbox                        bool
+	dbWritemap                     bool
 )
 
 func init() {
@@ -106,6 +107,7 @@ func init() {
 	rootCmd.Flags().BoolVar(&disableIPV6, "downloader.disable.ipv6", utils.DisableIPV6.Value, utils.DisableIPV6.Usage)
 	rootCmd.Flags().BoolVar(&disableIPV4, "downloader.disable.ipv4", utils.DisableIPV4.Value, utils.DisableIPV6.Usage)
 	rootCmd.Flags().BoolVar(&seedbox, "seedbox", false, "Turns downloader into independent (doesn't need Erigon) software which discover/download/seed new files - useful for Erigon network, and can work on very cheap hardware. It will: 1) download .torrent from webseed 2) download new files after upgrade 3) we planing add discovery of new files soon")
+	rootCmd.Flags().BoolVar(&dbWritemap, utils.DbWriteMapFlag.Name, utils.DbWriteMapFlag.Value, utils.DbWriteMapFlag.Usage)
 	rootCmd.PersistentFlags().BoolVar(&verify, "verify", false, utils.DownloaderVerifyFlag.Usage)
 	rootCmd.PersistentFlags().StringVar(&_verifyFiles, "verify.files", "", "Limit list of files to verify")
 	rootCmd.PersistentFlags().BoolVar(&verifyFailfast, "verify.failfast", false, "Stop on first found error. Report it and exit")
@@ -217,7 +219,7 @@ func Downloader(ctx context.Context, logger log.Logger) error {
 	if known, ok := snapcfg.KnownWebseeds[chain]; ok {
 		webseedsList = append(webseedsList, known...)
 	}
-	cfg, err := downloadercfg.New(dirs, version, torrentLogLevel, downloadRate, uploadRate, torrentPort, torrentConnsPerFile, torrentDownloadSlots, staticPeers, webseedsList, chain, true)
+	cfg, err := downloadercfg.New(dirs, version, torrentLogLevel, downloadRate, uploadRate, torrentPort, torrentConnsPerFile, torrentDownloadSlots, staticPeers, webseedsList, chain, true, dbWritemap)
 	if err != nil {
 		return err
 	}
@@ -422,7 +424,12 @@ func manifestVerify(ctx context.Context, logger log.Logger) error {
 		if !strings.HasPrefix(webseed, "v") { // has marker v1/v2/...
 			uri, err := url.ParseRequestURI(webseed)
 			if err != nil {
-				if strings.HasSuffix(webseed, ".toml") && dir.FileExist(webseed) {
+				exists, existsErr := dir.FileExist(webseed)
+				if existsErr != nil {
+					log.Warn("[webseed] FileExist error", "err", err)
+					continue
+				}
+				if strings.HasSuffix(webseed, ".toml") && exists {
 					webseedFileProviders = append(webseedFileProviders, webseed)
 				}
 				continue
@@ -630,7 +637,11 @@ func StartGrpc(snServer *downloader.GrpcServer, addr string, creds *credentials.
 }
 
 func checkChainName(ctx context.Context, dirs datadir.Dirs, chainName string) error {
-	if !dir.FileExist(filepath.Join(dirs.Chaindata, "mdbx.dat")) {
+	exists, err := dir.FileExist(filepath.Join(dirs.Chaindata, "mdbx.dat"))
+	if err != nil {
+		return err
+	}
+	if !exists {
 		return nil
 	}
 	db, err := mdbx.NewMDBX(log.New()).
@@ -641,14 +652,11 @@ func checkChainName(ctx context.Context, dirs datadir.Dirs, chainName string) er
 		return err
 	}
 	defer db.Close()
-	if err := db.View(context.Background(), func(tx kv.Tx) error {
-		cc := tool.ChainConfig(tx)
-		if cc != nil && cc.ChainName != chainName {
+
+	if cc := tool.ChainConfigFromDB(db); cc != nil {
+		if params.ChainConfigByChainName(chainName).ChainID.Uint64() != cc.ChainID.Uint64() {
 			return fmt.Errorf("datadir already was configured with --chain=%s. can't change to '%s'", cc.ChainName, chainName)
 		}
-		return nil
-	}); err != nil {
-		return err
 	}
 	return nil
 }

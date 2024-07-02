@@ -6,11 +6,13 @@ import (
 
 	"github.com/holiman/uint256"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/common/hexutility"
 	"github.com/ledgerwatch/erigon-lib/types/ssz"
 	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/cl/cltypes/solid"
 	"github.com/ledgerwatch/erigon/cl/merkle_tree"
 	ssz2 "github.com/ledgerwatch/erigon/cl/ssz"
+	"github.com/ledgerwatch/erigon/cl/utils"
 	"github.com/ledgerwatch/erigon/core/types"
 )
 
@@ -31,9 +33,9 @@ type Eth1Header struct {
 	// Extra fields
 	BlockHash        libcommon.Hash `json:"block_hash"`
 	TransactionsRoot libcommon.Hash `json:"transactions_root"`
-	WithdrawalsRoot  libcommon.Hash `json:"withdrawals_root,omitempty"`
-	BlobGasUsed      uint64         `json:"blob_gas_used,omitempty,string"`
-	ExcessBlobGas    uint64         `json:"excess_blob_gas,omitempty,string"`
+	WithdrawalsRoot  libcommon.Hash `json:"withdrawals_root"`
+	BlobGasUsed      uint64         `json:"blob_gas_used,string"`
+	ExcessBlobGas    uint64         `json:"excess_blob_gas,string"`
 	// internals
 	version clparams.StateVersion
 }
@@ -44,6 +46,10 @@ func NewEth1Header(version clparams.StateVersion) *Eth1Header {
 		version: version,
 		Extra:   solid.NewExtraData(),
 	}
+}
+
+func (e *Eth1Header) SetVersion(v clparams.StateVersion) {
+	e.version = v
 }
 
 func (e *Eth1Header) Copy() *Eth1Header {
@@ -148,9 +154,9 @@ func (h *Eth1Header) MarshalJSON() ([]byte, error) {
 		BaseFeePerGas    string            `json:"base_fee_per_gas"`
 		BlockHash        libcommon.Hash    `json:"block_hash"`
 		TransactionsRoot libcommon.Hash    `json:"transactions_root"`
-		WithdrawalsRoot  libcommon.Hash    `json:"withdrawals_root,omitempty"`
-		BlobGasUsed      uint64            `json:"blob_gas_used,omitempty,string"`
-		ExcessBlobGas    uint64            `json:"excess_blob_gas,omitempty,string"`
+		WithdrawalsRoot  libcommon.Hash    `json:"withdrawals_root"`
+		BlobGasUsed      uint64            `json:"blob_gas_used,string"`
+		ExcessBlobGas    uint64            `json:"excess_blob_gas,string"`
 	}{
 		ParentHash:       h.ParentHash,
 		FeeRecipient:     h.FeeRecipient,
@@ -163,7 +169,7 @@ func (h *Eth1Header) MarshalJSON() ([]byte, error) {
 		GasUsed:          h.GasUsed,
 		Time:             h.Time,
 		Extra:            h.Extra,
-		BaseFeePerGas:    uint256.NewInt(0).SetBytes32(h.BaseFeePerGas[:]).Dec(),
+		BaseFeePerGas:    uint256.NewInt(0).SetBytes32(utils.ReverseOfByteSlice(h.BaseFeePerGas[:])).Dec(),
 		BlockHash:        h.BlockHash,
 		TransactionsRoot: h.TransactionsRoot,
 		WithdrawalsRoot:  h.WithdrawalsRoot,
@@ -178,39 +184,42 @@ func (h *Eth1Header) UnmarshalJSON(data []byte) error {
 		FeeRecipient     libcommon.Address `json:"fee_recipient"`
 		StateRoot        libcommon.Hash    `json:"state_root"`
 		ReceiptsRoot     libcommon.Hash    `json:"receipts_root"`
-		LogsBloom        types.Bloom       `json:"logs_bloom"`
+		LogsBloom        hexutility.Bytes  `json:"logs_bloom"`
 		PrevRandao       libcommon.Hash    `json:"prev_randao"`
 		BlockNumber      uint64            `json:"block_number,string"`
 		GasLimit         uint64            `json:"gas_limit,string"`
 		GasUsed          uint64            `json:"gas_used,string"`
 		Time             uint64            `json:"timestamp,string"`
-		Extra            *solid.ExtraData  `json:"extra_data"`
+		Extra            hexutility.Bytes  `json:"extra_data"`
 		BaseFeePerGas    string            `json:"base_fee_per_gas"`
 		BlockHash        libcommon.Hash    `json:"block_hash"`
 		TransactionsRoot libcommon.Hash    `json:"transactions_root"`
-		WithdrawalsRoot  libcommon.Hash    `json:"withdrawals_root,omitempty"`
-		BlobGasUsed      uint64            `json:"blob_gas_used,omitempty,string"`
-		ExcessBlobGas    uint64            `json:"excess_blob_gas,omitempty,string"`
+		WithdrawalsRoot  libcommon.Hash    `json:"withdrawals_root"`
+		BlobGasUsed      uint64            `json:"blob_gas_used,string"`
+		ExcessBlobGas    uint64            `json:"excess_blob_gas,string"`
 	}
 	if err := json.Unmarshal(data, &aux); err != nil {
 		return err
 	}
+	extra := solid.NewExtraData()
+	extra.SetBytes(aux.Extra)
 	h.ParentHash = aux.ParentHash
 	h.FeeRecipient = aux.FeeRecipient
 	h.StateRoot = aux.StateRoot
 	h.ReceiptsRoot = aux.ReceiptsRoot
-	h.LogsBloom = aux.LogsBloom
+	h.LogsBloom = types.BytesToBloom(aux.LogsBloom)
 	h.PrevRandao = aux.PrevRandao
 	h.BlockNumber = aux.BlockNumber
 	h.GasLimit = aux.GasLimit
 	h.GasUsed = aux.GasUsed
 	h.Time = aux.Time
-	h.Extra = aux.Extra
+	h.Extra = extra
 	tmp := uint256.NewInt(0)
 	if err := tmp.SetFromDecimal(aux.BaseFeePerGas); err != nil {
 		return err
 	}
-	h.BaseFeePerGas = tmp.Bytes32()
+	tmpBaseFee := tmp.Bytes32()
+	copy(h.BaseFeePerGas[:], utils.ReverseOfByteSlice(tmpBaseFee[:]))
 	h.BlockHash = aux.BlockHash
 	h.TransactionsRoot = aux.TransactionsRoot
 	h.WithdrawalsRoot = aux.WithdrawalsRoot

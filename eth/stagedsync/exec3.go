@@ -21,15 +21,14 @@ import (
 
 	"github.com/ledgerwatch/erigon-lib/log/v3"
 
-	metrics2 "github.com/ledgerwatch/erigon-lib/common/metrics"
-	"github.com/ledgerwatch/erigon-lib/config3"
-
 	"github.com/ledgerwatch/erigon-lib/chain"
 	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/cmp"
 	"github.com/ledgerwatch/erigon-lib/common/datadir"
 	"github.com/ledgerwatch/erigon-lib/common/dbg"
 	"github.com/ledgerwatch/erigon-lib/common/dir"
+	metrics2 "github.com/ledgerwatch/erigon-lib/common/metrics"
+	"github.com/ledgerwatch/erigon-lib/config3"
 	"github.com/ledgerwatch/erigon-lib/etl"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	kv2 "github.com/ledgerwatch/erigon-lib/kv/mdbx"
@@ -654,7 +653,8 @@ Loop:
 			defer getHashFnMute.Unlock()
 			return f(n)
 		}
-		blockContext := core.NewEVMBlockContext(header, getHashFn, engine, nil /* author */, chainConfig)
+		blockContext := core.NewEVMBlockContext(header, getHashFn, engine, cfg.author /* author */, chainConfig)
+		// print type of engine
 		if parallel {
 			select {
 			case err := <-rwLoopErrCh:
@@ -1085,7 +1085,7 @@ func flushAndCheckCommitmentV3(ctx context.Context, header *types.Header, applyT
 			if err := doms.Flush(ctx, applyTx); err != nil {
 				return false, err
 			}
-			if err = applyTx.(state2.HasAggTx).AggTx().(*state2.AggregatorRoTx).PruneCommitHistory(ctx, applyTx, false, nil); err != nil {
+			if err = applyTx.(state2.HasAggTx).AggTx().(*state2.AggregatorRoTx).PruneCommitHistory(ctx, applyTx, nil); err != nil {
 				return false, err
 			}
 		}
@@ -1122,7 +1122,7 @@ func flushAndCheckCommitmentV3(ctx context.Context, header *types.Header, applyT
 	}
 
 	aggTx := applyTx.(state2.HasAggTx).AggTx().(*state2.AggregatorRoTx)
-	unwindToLimit, err := aggTx.CanUnwindDomainsToBlockNum(applyTx)
+	unwindToLimit, err := aggTx.CanUnwindToBlockNum(applyTx)
 	if err != nil {
 		return false, err
 	}

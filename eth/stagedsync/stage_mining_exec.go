@@ -93,6 +93,10 @@ func SpawnMiningExecStage(s *StageState, txc wrap.TxContainer, cfg MiningExecCfg
 	)
 	stateReader = state.NewReaderV4(txc.Doms)
 	ibs := state.New(stateReader)
+	// Clique consensus needs forced author in the evm context
+	if cfg.chainConfig.Consensus == chain.CliqueConsensus {
+		execCfg.author = &cfg.miningState.MiningConfig.Etherbase
+	}
 
 	// Create an empty block based on temporary copied state for
 	// sealing in advance without waiting block execution finished.
@@ -100,7 +104,6 @@ func SpawnMiningExecStage(s *StageState, txc wrap.TxContainer, cfg MiningExecCfg
 		logger.Info("Commit an empty block", "number", current.Header.Number)
 		return nil
 	}
-
 	getHeader := func(hash libcommon.Hash, number uint64) *types.Header { return rawdb.ReadHeader(txc.Tx, hash, number) }
 
 	// Short circuit if there is no available pending transactions.
@@ -174,10 +177,15 @@ func SpawnMiningExecStage(s *StageState, txc wrap.TxContainer, cfg MiningExecCfg
 	if current.Receipts == nil {
 		current.Receipts = types.Receipts{}
 	}
+	chainReader := ChainReaderImpl{config: &cfg.chainConfig, tx: txc.Tx, blockReader: cfg.blockReader, logger: logger}
+
+	if err := cfg.engine.Prepare(chainReader, current.Header, ibs); err != nil {
+		return err
+	}
 
 	var err error
 	var block *types.Block
-	block, current.Txs, current.Receipts, err = core.FinalizeBlockExecution(cfg.engine, stateReader, current.Header, current.Txs, current.Uncles, &state.NoopWriter{}, &cfg.chainConfig, ibs, current.Receipts, current.Withdrawals, current.Requests, ChainReaderImpl{config: &cfg.chainConfig, tx: txc.Tx, blockReader: cfg.blockReader, logger: logger}, true, logger)
+	block, current.Txs, current.Receipts, err = core.FinalizeBlockExecution(cfg.engine, stateReader, current.Header, current.Txs, current.Uncles, &state.NoopWriter{}, &cfg.chainConfig, ibs, current.Receipts, current.Withdrawals, current.Requests, chainReader, true, logger)
 	if err != nil {
 		return fmt.Errorf("cannot finalize block execution: %s", err)
 	}
@@ -277,7 +285,7 @@ func getNextTransactions(
 		var sender libcommon.Address
 		copy(sender[:], txSlots.Senders.At(i))
 
-		// Check if tx nonce is too low
+		// Check if txn nonce is too low
 		txs = append(txs, transaction)
 		txs[len(txs)-1].SetSender(sender)
 	}

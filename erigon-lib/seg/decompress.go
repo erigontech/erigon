@@ -148,7 +148,7 @@ const (
 
 // Tables with bitlen greater than threshold will be condensed.
 // Condensing reduces size of decompression table but leads to slower reads.
-// To disable condesning at all set to 9 (we dont use tables larger than 2^9)
+// To disable condesning at all set to 9 (we don't use tables larger than 2^9)
 // To enable condensing for tables of size larger 64 = 6
 // for all tables                                    = 0
 // There is no sense to condense tables of size [1 - 64] in terms of performance
@@ -535,7 +535,7 @@ func (d *Decompressor) EnableMadvWillNeed() *Decompressor {
 	return d
 }
 
-// Getter represent "reader" or "interator" that can move accross the data of the decompressor
+// Getter represent "reader" or "iterator" that can move across the data of the decompressor
 // The full state of the getter can be captured by saving dataP, and dataBit
 type Getter struct {
 	patternDict *patternTable
