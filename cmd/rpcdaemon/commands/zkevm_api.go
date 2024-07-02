@@ -28,10 +28,11 @@ import (
 	types "github.com/ledgerwatch/erigon/zk/rpcdaemon"
 	"github.com/ledgerwatch/erigon/zk/sequencer"
 	"github.com/ledgerwatch/erigon/zk/syncer"
+	zktx "github.com/ledgerwatch/erigon/zk/tx"
+	"github.com/ledgerwatch/erigon/zk/utils"
 	"github.com/ledgerwatch/erigon/zk/witness"
 	"github.com/ledgerwatch/erigon/zkevm/hex"
 	"github.com/ledgerwatch/erigon/zkevm/jsonrpc/client"
-	zktx "github.com/ledgerwatch/erigon/zk/tx"
 )
 
 var sha3UncleHash = common.HexToHash("0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347")
@@ -229,6 +230,125 @@ func (api *ZkEvmAPIImpl) VerifiedBatchNumber(ctx context.Context) (hexutil.Uint6
 	return hexutil.Uint64(highestVerifiedBatchNo), nil
 }
 
+// GetBatchDataByNumbers returns the batch data for the given batch numbers
+func (api *ZkEvmAPIImpl) GetBatchDataByNumbers(ctx context.Context, batchNumbers []rpc.BlockNumber) (json.RawMessage, error) {
+	tx, err := api.db.BeginRo(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback()
+
+	hermezDb := hermez_db.NewHermezDbReader(tx)
+
+	bds := make([]*types.BatchDataSlim, 0, len(batchNumbers))
+
+	for _, batchNumber := range batchNumbers {
+		bd := &types.BatchDataSlim{
+			Number: uint64(batchNumber.Int64()),
+			Empty:  false,
+		}
+
+		// looks weird but we're using the rpc.BlockNumber type to represent the batch number, LatestBlockNumber represents latest batch
+		if batchNumber == rpc.LatestBlockNumber {
+			highestBlock, err := rawdb.ReadLastBlockSynced(tx)
+			if err != nil {
+				return nil, err
+			}
+			highestBatchNo, err := hermezDb.GetBatchNoByL2Block(highestBlock.NumberU64())
+			if err != nil {
+				return nil, err
+			}
+			batchNumber = rpc.BlockNumber(highestBatchNo)
+		}
+
+		batchNo := uint64(batchNumber.Int64())
+
+		_, found, err := hermezDb.GetLowestBlockInBatch(batchNo)
+		if err != nil {
+			return nil, err
+		}
+		if !found {
+			// not found - set to empty and append
+			bd.Empty = true
+			bds = append(bds, bd)
+			continue
+		}
+
+		// block numbers in batch
+		blocksInBatch, err := hermezDb.GetL2BlockNosByBatch(batchNo)
+		if err != nil {
+			return nil, err
+		}
+
+		// todo: max - take out shared logic with getBatchByNumber
+		// collect blocks in batch
+		var batchBlocks []*eritypes.Block
+		var batchTxs []eritypes.Transaction
+		// handle genesis - not in the hermez tables so requires special treament
+		if batchNumber == 0 {
+			blk, err := api.ethApi.BaseAPI.blockByNumberWithSenders(tx, 0)
+			if err != nil {
+				return nil, err
+			}
+			batchBlocks = append(batchBlocks, blk)
+			// no txs in genesis
+		}
+		for _, blkNo := range blocksInBatch {
+			blk, err := api.ethApi.BaseAPI.blockByNumberWithSenders(tx, blkNo)
+			if err != nil {
+				return nil, err
+			}
+			batchBlocks = append(batchBlocks, blk)
+			for _, btx := range blk.Transactions() {
+				batchTxs = append(batchTxs, btx)
+			}
+		}
+
+		// batch l2 data - must build on the fly
+		forkId, err := hermezDb.GetForkId(batchNo)
+		if err != nil {
+			return nil, err
+		}
+
+		// last batch last block for deltaTimestamp calc
+		lastBlockNoInPreviousBatch := batchBlocks[0].NumberU64() - 1
+		lastBlockInPreviousBatch, err := rawdb.ReadBlockByNumber(tx, lastBlockNoInPreviousBatch)
+		if err != nil {
+			return nil, err
+		}
+
+		var batchL2Data []byte
+		for i := 0; i < len(batchBlocks); i++ {
+			var dTs uint32
+			if i == 0 {
+				dTs = uint32(batchBlocks[i].Time() - lastBlockInPreviousBatch.Time())
+			} else {
+				dTs = uint32(batchBlocks[i].Time() - batchBlocks[i-1].Time())
+			}
+			iti, err := hermezDb.GetBlockL1InfoTreeIndex(batchBlocks[i].NumberU64())
+
+			egTx := make(map[common.Hash]uint8)
+			for _, txn := range batchBlocks[i].Transactions() {
+				eg, err := hermezDb.GetEffectiveGasPricePercentage(txn.Hash())
+				if err != nil {
+					return nil, err
+				}
+				egTx[txn.Hash()] = eg
+			}
+
+			bl2d, err := zktx.GenerateBlockBatchL2Data(uint16(forkId), dTs, uint32(iti), batchBlocks[i].Transactions(), egTx)
+			if err != nil {
+				return nil, err
+			}
+			batchL2Data = append(batchL2Data, bl2d...)
+		}
+		bd.BatchL2Data = batchL2Data
+		bds = append(bds, bd)
+	}
+
+	return populateBatchDataSlimDetails(bds)
+}
+
 // GetBatchByNumber returns a batch from the current canonical chain. If number is nil, the
 // latest known batch is returned.
 func (api *ZkEvmAPIImpl) GetBatchByNumber(ctx context.Context, batchNumber rpc.BlockNumber, fullTx *bool) (json.RawMessage, error) {
@@ -252,14 +372,23 @@ func (api *ZkEvmAPIImpl) GetBatchByNumber(ctx context.Context, batchNumber rpc.B
 		batchNumber = rpc.BlockNumber(highestBatchNo)
 	}
 
-	bn := uint64(batchNumber.Int64())
+	batchNo := uint64(batchNumber.Int64())
 
 	batch := &types.Batch{
-		Number: types.ArgUint64(bn),
+		Number: types.ArgUint64(batchNo),
+	}
+
+	// mimic zkevm node null response if we don't have the batch
+	_, found, err := hermezDb.GetLowestBlockInBatch(batchNo)
+	if err != nil {
+		return nil, err
+	}
+	if !found {
+		return nil, nil
 	}
 
 	// highest block in batch
-	blockNo, err := hermezDb.GetHighestBlockInBatch(bn)
+	blockNo, err := hermezDb.GetHighestBlockInBatch(batchNo)
 	if err != nil {
 		return nil, err
 	}
@@ -275,7 +404,7 @@ func (api *ZkEvmAPIImpl) GetBatchByNumber(ctx context.Context, batchNumber rpc.B
 	batch.Timestamp = types.ArgUint64(block.Time())
 
 	// block numbers in batch
-	blocksInBatch, err := hermezDb.GetL2BlockNosByBatch(bn)
+	blocksInBatch, err := hermezDb.GetL2BlockNosByBatch(batchNo)
 	if err != nil {
 		return nil, err
 	}
@@ -308,19 +437,19 @@ func (api *ZkEvmAPIImpl) GetBatchByNumber(ctx context.Context, batchNumber rpc.B
 		}
 	}
 
-	//for consistency with leagacy node, return nil if no transactions
+	// for consistency with legacy node, return nil if no transactions
 	if len(batch.Transactions) == 0 {
 		batch.Transactions = nil
 	}
 
 	// global exit root of batch
-	batchGer, foundBatchGerNumber, err := hermezDb.GetLastBatchGlobalExitRoot(bn)
+	batchGer, foundBatchGerNumber, err := hermezDb.GetLastBatchGlobalExitRoot(batchNo)
 	if err != nil {
 		return nil, err
 	}
 
 	// get last block in batch
-	lastBlockInbatch, err := hermezDb.GetHighestBlockInBatch(bn)
+	lastBlockInbatch, err := hermezDb.GetHighestBlockInBatch(batchNo)
 	if err != nil {
 		return nil, err
 	}
@@ -350,17 +479,22 @@ func (api *ZkEvmAPIImpl) GetBatchByNumber(ctx context.Context, batchNumber rpc.B
 	}
 
 	// sequence
-	seq, err := hermezDb.GetSequenceByBatchNo(bn)
+	seq, err := hermezDb.GetSequenceByBatchNo(batchNo)
 	if err != nil {
 		return nil, err
 	}
 	if seq != nil {
 		batch.SendSequencesTxHash = &seq.L1TxHash
 	}
-	batch.Closed = seq != nil || bn == 0 || bn == 1 // sequenced, genesis or injected batch 1 - special batches 0,1 will always be closed
+	_, found, err = hermezDb.GetLowestBlockInBatch(batchNo + 1)
+	if err != nil {
+		return nil, err
+	}
+	// sequenced, genesis or injected batch 1 - special batches 0,1 will always be closed, if next batch has blocks, bn must be closed
+	batch.Closed = seq != nil || batchNo == 0 || batchNo == 1 || found
 
 	// verification
-	ver, err := hermezDb.GetVerificationByBatchNo(bn)
+	ver, err := hermezDb.GetVerificationByBatchNo(batchNo)
 	if err != nil {
 		return nil, err
 	}
@@ -368,7 +502,7 @@ func (api *ZkEvmAPIImpl) GetBatchByNumber(ctx context.Context, batchNumber rpc.B
 		batch.VerifyBatchTxHash = &ver.L1TxHash
 	}
 
-	// exit roots
+	// exit roots (MainnetExitRoot, RollupExitRoot)
 	infoTreeUpdate, err := hermezDb.GetL1InfoTreeUpdateByGer(batch.GlobalExitRoot)
 	if err != nil {
 		return nil, err
@@ -378,8 +512,15 @@ func (api *ZkEvmAPIImpl) GetBatchByNumber(ctx context.Context, batchNumber rpc.B
 		batch.RollupExitRoot = infoTreeUpdate.RollupExitRoot
 	}
 
+	// local exit root
+	localExitRoot, err := utils.GetBatchLocalExitRoot(batchNo, hermezDb, tx)
+	if err != nil {
+		return nil, err
+	}
+	batch.LocalExitRoot = localExitRoot
+
 	// batch l2 data - must build on the fly
-	forkId, err := hermezDb.GetForkId(bn)
+	forkId, err := hermezDb.GetForkId(batchNo)
 	if err != nil {
 		return nil, err
 	}
@@ -424,8 +565,6 @@ func (api *ZkEvmAPIImpl) GetBatchByNumber(ctx context.Context, batchNumber rpc.B
 	//	return nil, err
 	//}
 	//batch.AccInputHash = oaih
-
-	//batch.LocalExitRoot = ver.LocalExitRoot
 
 	return populateBatchDetails(batch)
 }
@@ -984,4 +1123,19 @@ func populateBatchDetails(batch *types.Batch) (json.RawMessage, error) {
 	}
 
 	return json.Marshal(jBatch)
+}
+
+func populateBatchDataSlimDetails(batches []*types.BatchDataSlim) (json.RawMessage, error) {
+	jBatches := make([]map[string]interface{}, 0, len(batches))
+	for _, b := range batches {
+		jBatch := map[string]interface{}{}
+		jBatch["number"] = b.Number
+		jBatch["empty"] = b.Empty
+		if !b.Empty {
+			jBatch["batchL2Data"] = b.BatchL2Data
+		}
+		jBatches = append(jBatches, jBatch)
+	}
+
+	return json.Marshal(jBatches)
 }

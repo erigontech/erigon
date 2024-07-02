@@ -69,6 +69,7 @@ type HermezDb interface {
 	WriteIntermediateTxStateRoot(l2BlockNumber uint64, txHash common.Hash, rpcRoot common.Hash) error
 	WriteBlockL1InfoTreeIndex(blockNumber uint64, l1Index uint64) error
 	WriteLatestUsedGer(batchNo uint64, ger common.Hash) error
+	WriteLocalExitRootForBatchNo(batchNo uint64, localExitRoot common.Hash) error
 }
 
 type DatastreamClient interface {
@@ -829,6 +830,13 @@ func writeL2Block(eriDb ErigonDb, hermezDb HermezDb, l2Block *types.FullL2Block,
 			if l2Block.GlobalExitRoot != emptyHash {
 				if err := hermezDb.WriteGerForL1BlockHash(l2Block.L1BlockHash, l2Block.GlobalExitRoot); err != nil {
 					return fmt.Errorf("write ger for l1 block hash error: %v", err)
+				}
+			}
+
+			// LER per batch - write the ler of the last block in the batch
+			if l2Block.BatchEnd && l2Block.LocalExitRoot != emptyHash {
+				if err := hermezDb.WriteLocalExitRootForBatchNo(l2Block.BatchNumber, l2Block.LocalExitRoot); err != nil {
+					return fmt.Errorf("write local exit root for l1 block hash error: %v", err)
 				}
 			}
 		}

@@ -45,6 +45,7 @@ const SMT_DEPTHS = "smt_depths"                                        // block 
 const L1_INFO_LEAVES = "l1_info_leaves"                                // l1 info tree index -> l1 info tree leaf
 const L1_INFO_ROOTS = "l1_info_roots"                                  // root hash -> l1 info tree index
 const INVALID_BATCHES = "invalid_batches"                              // batch number -> true
+const LOCAL_EXIT_ROOTS = "local_exit_roots"                            // l2 block number -> local exit root
 
 type HermezDb struct {
 	tx kv.RwTx
@@ -100,6 +101,7 @@ func CreateHermezBuckets(tx kv.RwTx) error {
 		L1_INFO_LEAVES,
 		L1_INFO_ROOTS,
 		INVALID_BATCHES,
+		LOCAL_EXIT_ROOTS,
 	}
 	for _, t := range tables {
 		if err := tx.CreateBucket(t); err != nil {
@@ -1497,4 +1499,16 @@ func (db *HermezDbReader) GetInvalidBatch(batchNo uint64) (bool, error) {
 		return false, err
 	}
 	return len(v) > 0, nil
+}
+
+func (db *HermezDb) WriteLocalExitRootForBatchNo(batchNo uint64, root common.Hash) error {
+	return db.tx.Put(LOCAL_EXIT_ROOTS, Uint64ToBytes(batchNo), root.Bytes())
+}
+
+func (db *HermezDbReader) GetLocalExitRootForBatchNo(batchNo uint64) (common.Hash, error) {
+	v, err := db.tx.GetOne(LOCAL_EXIT_ROOTS, Uint64ToBytes(batchNo))
+	if err != nil {
+		return common.Hash{}, err
+	}
+	return common.BytesToHash(v), nil
 }

@@ -9,6 +9,8 @@ import (
 	"github.com/ledgerwatch/erigon/zk/constants"
 	"github.com/ledgerwatch/erigon/zk/hermez_db"
 	"github.com/ledgerwatch/log/v3"
+	libcommon "github.com/gateway-fm/cdk-erigon-lib/common"
+	"github.com/ledgerwatch/erigon/core/state"
 )
 
 // if current sync is before verified batch - short circuit to verified batch, otherwise to enx of next batch
@@ -122,4 +124,45 @@ func RecoverySetBlockConfigForks(blockNum uint64, forkId uint64, cfg ForkConfigW
 	}
 
 	return nil
+}
+
+func GetBatchLocalExitRoot(batchNo uint64, db *hermez_db.HermezDbReader, tx kv.Tx) (libcommon.Hash, error) {
+	// check db first
+	localExitRoot, err := db.GetLocalExitRootForBatchNo(batchNo)
+	if err != nil {
+		return libcommon.Hash{}, err
+	}
+
+	if localExitRoot != (libcommon.Hash{}) {
+		return localExitRoot, nil
+	}
+
+	return GetBatchLocalExitRootFromSCStorage(batchNo, db, tx)
+}
+
+func GetBatchLocalExitRootFromSCStorage(batchNo uint64, db *hermez_db.HermezDbReader, tx kv.Tx) (libcommon.Hash, error) {
+	var localExitRoot libcommon.Hash
+
+	if batchNo > 0 {
+		checkBatch := batchNo
+		for ; checkBatch > 0; checkBatch-- {
+			blockNo, err := db.GetHighestBlockInBatch(checkBatch)
+			if err != nil {
+				return libcommon.Hash{}, err
+			}
+			stateReader := state.NewPlainState(tx, blockNo, nil)
+			rawLer, err := stateReader.ReadAccountStorage(state.GER_MANAGER_ADDRESS, 1, &state.GLOBAL_EXIT_ROOT_POS_1)
+			if err != nil {
+				stateReader.Close()
+				return libcommon.Hash{}, err
+			}
+			stateReader.Close()
+			localExitRoot = libcommon.BytesToHash(rawLer)
+			if localExitRoot != (libcommon.Hash{}) {
+				break
+			}
+		}
+	}
+
+	return localExitRoot, nil
 }

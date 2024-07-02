@@ -21,3 +21,9 @@ type Batch struct {
 	Transactions        []interface{}  `json:"transactions"`
 	BatchL2Data         ArgBytes       `json:"batchL2Data"`
 }
+
+type BatchDataSlim struct {
+	Number      uint64   `json:"number"`
+	BatchL2Data ArgBytes `json:"batchL2Data,omitempty"`
+	Empty       bool     `json:"empty"`
+}

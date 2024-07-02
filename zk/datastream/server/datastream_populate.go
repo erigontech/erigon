@@ -13,6 +13,7 @@ import (
 	"github.com/ledgerwatch/erigon/zk/datastream/types"
 	"github.com/ledgerwatch/erigon/zk/hermez_db"
 	"github.com/ledgerwatch/log/v3"
+	"github.com/ledgerwatch/erigon/zk/utils"
 )
 
 const GenesisForkId = 0 // genesis fork is always 0 in the datastream
@@ -217,7 +218,7 @@ func WriteGenesisToStream(
 	l2Block := srv.CreateL2BlockProto(genesis, genesis.Hash().Bytes(), batchNo, ger, 0, 0, common.Hash{}, 0, common.Hash{})
 	batchStart := srv.CreateBatchStartProto(batchNo, chainId, GenesisForkId, datastream.BatchType_BATCH_TYPE_REGULAR)
 
-	ler, err := srv.getLocalExitRoot(0, reader, tx)
+	ler, err := utils.GetBatchLocalExitRoot(0, reader, tx)
 	if err != nil {
 		return err
 	}

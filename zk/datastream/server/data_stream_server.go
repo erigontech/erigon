@@ -6,11 +6,11 @@ import (
 	"github.com/0xPolygonHermez/zkevm-data-streamer/datastreamer"
 	libcommon "github.com/gateway-fm/cdk-erigon-lib/common"
 	"github.com/gateway-fm/cdk-erigon-lib/kv"
-	"github.com/ledgerwatch/erigon/core/state"
 	eritypes "github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/zk/datastream/proto/github.com/0xPolygonHermez/zkevm-node/state/datastream"
 	"github.com/ledgerwatch/erigon/zk/datastream/types"
 	"github.com/ledgerwatch/erigon/zk/hermez_db"
+	"github.com/ledgerwatch/erigon/zk/utils"
 )
 
 type BookmarkType byte
@@ -274,7 +274,7 @@ func (srv *DataStreamServer) CreateStreamEntriesProto(
 				}
 
 				// seal off the last batch
-				localExitRoot, err := srv.getLocalExitRoot(workingBatch, reader, tx)
+				localExitRoot, err := utils.GetBatchLocalExitRoot(workingBatch, reader, tx)
 				if err != nil {
 					return nil, err
 				}
@@ -372,7 +372,7 @@ func (srv *DataStreamServer) CreateStreamEntriesProto(
 			}
 		}
 
-		localExitRoot, err := srv.getLocalExitRoot(batchNumber, reader, tx)
+		localExitRoot, err := utils.GetBatchLocalExitRoot(batchNumber, reader, tx)
 		if err != nil {
 			return nil, err
 		}
@@ -412,31 +412,6 @@ func (srv *DataStreamServer) addBatchStartEntries(reader *hermez_db.HermezDbRead
 	batchStart := srv.CreateBatchStartProto(batchNum, srv.chainId, fork, batchType)
 	entries.Add(batchStart)
 	return nil
-}
-
-func (srv *DataStreamServer) getLocalExitRoot(batch uint64, reader *hermez_db.HermezDbReader, tx kv.Tx) (libcommon.Hash, error) {
-	// now to fetch the LER for the batch - based on the last block of the batch
-	var localExitRoot libcommon.Hash
-	if batch > 0 {
-		checkBatch := batch
-		for ; checkBatch > 0; checkBatch-- {
-			lastBlockNumber, err := reader.GetHighestBlockInBatch(checkBatch)
-			if err != nil {
-				return libcommon.Hash{}, err
-			}
-			stateReader := state.NewPlainState(tx, lastBlockNumber, nil)
-			rawLer, err := stateReader.ReadAccountStorage(state.GER_MANAGER_ADDRESS, 1, &state.GLOBAL_EXIT_ROOT_POS_1)
-			if err != nil {
-				return libcommon.Hash{}, err
-			}
-			stateReader.Close()
-			localExitRoot = libcommon.BytesToHash(rawLer)
-			if localExitRoot != (libcommon.Hash{}) {
-				break
-			}
-		}
-	}
-	return localExitRoot, nil
 }
 
 func (srv *DataStreamServer) CreateAndBuildStreamEntryBytesProto(
@@ -525,7 +500,7 @@ func (srv *DataStreamServer) UnwindToBlock(blockNumber uint64) error {
 		if err != nil {
 			return err
 		}
-		if entry.Type == datastreamer.EntryType(3) {
+		if entry.Type == datastreamer.EntryType(datastream.EntryType_ENTRY_TYPE_L2_BLOCK) {
 			break
 		}
 		entryNum -= 1

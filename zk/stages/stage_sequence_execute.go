@@ -494,6 +494,16 @@ func SpawnSequencingStage(
 		return err
 	}
 
+	// Local Exit Root (ler): read s/c storage every batch to store the LER for the highest block in the batch
+	ler, err := utils.GetBatchLocalExitRootFromSCStorage(thisBatch, sdb.hermezDb.HermezDbReader, tx)
+	if err != nil {
+		return err
+	}
+	// write ler to hermezdb
+	if err = sdb.hermezDb.WriteLocalExitRootForBatchNo(thisBatch, ler); err != nil {
+		return err
+	}
+
 	log.Info(fmt.Sprintf("[%s] Finish batch %d...", logPrefix, thisBatch))
 
 	if freshTx {
