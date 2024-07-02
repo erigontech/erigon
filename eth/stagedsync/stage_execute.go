@@ -24,17 +24,13 @@ import (
 	"github.com/ledgerwatch/erigon-lib/wrap"
 
 	"github.com/ledgerwatch/erigon/consensus"
-	"github.com/ledgerwatch/erigon/core"
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/state"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/core/types/accounts"
 	"github.com/ledgerwatch/erigon/core/vm"
-	"github.com/ledgerwatch/erigon/eth/calltracer"
-	"github.com/ledgerwatch/erigon/eth/consensuschain"
 	"github.com/ledgerwatch/erigon/eth/ethconfig"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
-	tracelogger "github.com/ledgerwatch/erigon/eth/tracers/logger"
 	"github.com/ledgerwatch/erigon/ethdb/prune"
 	"github.com/ledgerwatch/erigon/turbo/services"
 	"github.com/ledgerwatch/erigon/turbo/shards"
@@ -124,130 +120,6 @@ func StageExecuteBlocksCfg(
 		agg:           agg,
 		silkworm:      silkworm,
 	}
-}
-
-func executeBlock(
-	block *types.Block,
-	tx kv.RwTx,
-	batch kv.StatelessRwTx,
-	cfg ExecuteBlockCfg,
-	vmConfig vm.Config, // emit copy, because will modify it
-	writeChangesets bool,
-	writeReceipts bool,
-	writeCallTraces bool,
-	stateStream bool,
-	logger log.Logger,
-) (err error) {
-	blockNum := block.NumberU64()
-	stateReader, stateWriter, err := newStateReaderWriter(batch, tx, block, writeChangesets, cfg.accumulator, cfg.blockReader, stateStream)
-	if err != nil {
-		return err
-	}
-
-	// where the magic happens
-	getHeader := func(hash common.Hash, number uint64) *types.Header {
-		h, _ := cfg.blockReader.Header(context.Background(), tx, hash, number)
-		return h
-	}
-
-	getTracer := func(txIndex int, txHash common.Hash) (vm.EVMLogger, error) {
-		return tracelogger.NewStructLogger(&tracelogger.LogConfig{}), nil
-	}
-
-	callTracer := calltracer.NewCallTracer()
-	vmConfig.Debug = true
-	vmConfig.Tracer = callTracer
-
-	var receipts types.Receipts
-	var stateSyncReceipt *types.Receipt
-	var execRs *core.EphemeralExecResult
-	getHashFn := core.GetHashFn(block.Header(), getHeader)
-
-	execRs, err = core.ExecuteBlockEphemerally(cfg.chainConfig, &vmConfig, getHashFn, cfg.engine, block, stateReader, stateWriter, consensuschain.NewReader(cfg.chainConfig, tx, cfg.blockReader, logger), getTracer, logger)
-	if err != nil {
-		return fmt.Errorf("%w: %v", consensus.ErrInvalidBlock, err)
-	}
-	receipts = execRs.Receipts
-	stateSyncReceipt = execRs.StateSyncReceipt
-
-	// If writeReceipts is false here, append the not to be pruned receipts anyways
-	if writeReceipts || gatherNoPruneReceipts(&receipts, cfg.chainConfig) {
-		if err = rawdb.AppendReceipts(tx, blockNum, receipts); err != nil {
-			return err
-		}
-
-		if stateSyncReceipt != nil && stateSyncReceipt.Status == types.ReceiptStatusSuccessful {
-			if err := rawdb.WriteBorReceipt(tx, block.NumberU64(), stateSyncReceipt); err != nil {
-				return err
-			}
-		}
-	}
-
-	if cfg.changeSetHook != nil {
-		if hasChangeSet, ok := stateWriter.(HasChangeSetWriter); ok {
-			cfg.changeSetHook(blockNum, hasChangeSet.ChangeSetWriter())
-		}
-	}
-	if writeCallTraces {
-		return callTracer.WriteToDb(tx, block, *cfg.vmConfig)
-	}
-	return nil
-}
-
-// Filters out and keeps receipts of the contracts that may be needed by CL, namely of the deposit contract.
-func gatherNoPruneReceipts(receipts *types.Receipts, chainCfg *chain.Config) bool {
-	cr := types.Receipts{}
-	for _, r := range *receipts {
-		toStore := false
-		if chainCfg.DepositContract == r.ContractAddress {
-			toStore = true
-		} else {
-			for _, l := range r.Logs {
-				if chainCfg.DepositContract == l.Address {
-					toStore = true
-					break
-				}
-			}
-		}
-
-		if toStore {
-			cr = append(cr, r)
-		}
-	}
-	receipts = &cr
-	return receipts.Len() > 0
-}
-
-func newStateReaderWriter(
-	batch kv.StatelessRwTx,
-	tx kv.RwTx,
-	block *types.Block,
-	writeChangesets bool,
-	accumulator *shards.Accumulator,
-	br services.FullBlockReader,
-	stateStream bool,
-) (state.StateReader, state.WriterWithChangeSets, error) {
-	var stateReader state.StateReader
-	var stateWriter state.WriterWithChangeSets
-
-	stateReader = state.NewPlainStateReader(batch)
-
-	if stateStream {
-		txs, err := br.RawTransactions(context.Background(), tx, block.NumberU64(), block.NumberU64())
-		if err != nil {
-			return nil, nil, err
-		}
-		accumulator.StartChange(block.NumberU64(), block.Hash(), txs, false)
-	} else {
-		accumulator = nil
-	}
-	if writeChangesets {
-		stateWriter = state.NewPlainStateWriter(batch, tx, block.NumberU64()).SetAccumulator(accumulator)
-	} else {
-		stateWriter = state.NewPlainStateWriterNoHistory(batch).SetAccumulator(accumulator)
-	}
-
-	return stateReader, stateWriter, nil
 }
 
 // ================ Erigon3 ================
