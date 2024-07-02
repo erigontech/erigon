@@ -841,6 +841,7 @@ type MdbxCursor struct {
 	tx         *MdbxTx
 	c          *mdbx.Cursor
 	bucketName string
+	bucketCfg  kv.TableCfgItem
 	id         uint64
 }
 
@@ -1332,7 +1333,8 @@ func (tx *MdbxTx) Cursor(bucket string) (kv.Cursor, error) {
 }
 
 func (tx *MdbxTx) stdCursor(bucket string) (kv.RwCursor, error) {
-	c := &MdbxCursor{bucketName: bucket, tx: tx, id: tx.ID}
+	b := tx.db.buckets[bucket]
+	c := &MdbxCursor{bucketName: bucket, tx: tx, id: tx.ID, bucketCfg: b}
 	tx.ID++
 
 	var err error
@@ -1475,6 +1477,10 @@ func (c *MdbxCursor) Delete(k []byte) error {
 			return nil
 		}
 		return err
+	}
+
+	if c.bucketCfg.Flags&mdbx.DupSort != 0 {
+		return c.delAllDupData()
 	}
 
 	return c.delCurrent()
