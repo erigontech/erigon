@@ -135,7 +135,7 @@ func (api *OtterscanAPIImpl) GetTransactionBySenderAndNonce(ctx context.Context,
 		return nil, err
 	}
 	if txn == nil {
-		log.Warn("[rpc] tx is nil", "blockNum", bn, "txIndex", txIndex)
+		log.Warn("[rpc] txn is nil", "blockNum", bn, "txIndex", txIndex)
 		return nil, nil
 	}
 	found := txn.GetNonce() == nonce

@@ -47,6 +47,7 @@ import (
 	"github.com/ledgerwatch/erigon/polygon/bor/finality/whitelist"
 	"github.com/ledgerwatch/erigon/polygon/bor/statefull"
 	"github.com/ledgerwatch/erigon/polygon/bor/valset"
+	"github.com/ledgerwatch/erigon/polygon/bridge"
 	"github.com/ledgerwatch/erigon/polygon/heimdall"
 	"github.com/ledgerwatch/erigon/rlp"
 	"github.com/ledgerwatch/erigon/rpc"
@@ -312,6 +313,7 @@ type Bor struct {
 	frozenSnapshotsInit sync.Once
 	rootHashCache       *lru.ARCCache[string, string]
 	headerProgress      HeaderProgress
+	polygonBridge       bridge.PolygonBridge
 }
 
 type signer struct {
@@ -328,6 +330,7 @@ func New(
 	heimdallClient heimdall.HeimdallClient,
 	genesisContracts GenesisContracts,
 	logger log.Logger,
+	polygonBridge bridge.Service,
 ) *Bor {
 	// get bor config
 	borConfig := chainConfig.Bor.(*borcfg.BorConfig)
@@ -354,6 +357,7 @@ func New(
 		execCtx:                context.Background(),
 		logger:                 logger,
 		closeCh:                make(chan struct{}),
+		polygonBridge:          polygonBridge,
 	}
 
 	c.authorizedSigner.Store(&signer{
@@ -1001,6 +1005,7 @@ func (c *Bor) Finalize(config *chain.Config, header *types.Header, state *state.
 				c.logger.Error("[bor] committing span", "err", err)
 				return nil, types.Receipts{}, nil, err
 			}
+
 			// commit states
 			if err := c.CommitStates(state, header, cx, syscall); err != nil {
 				err := fmt.Errorf("Finalize.CommitStates: %w", err)
@@ -1463,6 +1468,24 @@ func (c *Bor) CommitStates(
 	syscall consensus.SystemCall,
 ) error {
 	blockNum := header.Number.Uint64()
+
+	if c.polygonBridge != nil {
+		events, err := c.polygonBridge.GetEvents(c.execCtx, blockNum)
+		if err != nil {
+			return err
+		}
+
+		c.logger.Debug("using polygon bridge", "len(events)", len(events), "blockNum", blockNum)
+
+		for _, event := range events {
+			_, err := syscall(*event.To(), event.Data())
+			if err != nil {
+				return err
+			}
+		}
+		return nil
+	}
+
 	events := chain.Chain.BorEventsByBlock(header.Hash(), blockNum)
 
 	//if len(events) == 50 || len(events) == 0 { // we still sometime could get 0 events from borevent file

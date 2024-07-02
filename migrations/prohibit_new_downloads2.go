@@ -27,7 +27,11 @@ var ProhibitNewDownloadsLock2 = Migration{
 		}
 		defer tx.Rollback()
 		fPath := filepath.Join(dirs.Snap, downloader.ProhibitNewDownloadsFileName)
-		if !dir.FileExist(fPath) {
+		exists, err := dir.FileExist(fPath)
+		if err != nil {
+			return err
+		}
+		if !exists {
 			if err := BeforeCommit(tx, nil, true); err != nil {
 				return err
 			}

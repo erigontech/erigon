@@ -7,7 +7,7 @@ on:
 
 jobs:
   snap-download-test:
-    runs-on: [self-hosted, Erigon3]
+    runs-on: self-hosted
     timeout-minutes: 800
     env:
       ERIGON_DATA_DIR: ${{ github.workspace }}/erigon_data

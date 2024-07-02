@@ -164,7 +164,7 @@ func (api *OtterscanAPIImpl) GetContractCreator(ctx context.Context, addr common
 		txIndex = (idx + int(prevTxnID)) - int(minTxNum) - 1
 	}
 
-	// Trace block, find tx and contract creator
+	// Trace block, find txn and contract creator
 	tracer := NewCreateTracer(ctx, addr)
 	if err := api.genericTracer(tx, ctx, bn, creationTxnID, txIndex, chainConfig, tracer); err != nil {
 		return nil, err

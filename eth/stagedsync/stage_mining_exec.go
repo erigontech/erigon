@@ -285,7 +285,7 @@ func getNextTransactions(
 		var sender libcommon.Address
 		copy(sender[:], txSlots.Senders.At(i))
 
-		// Check if tx nonce is too low
+		// Check if txn nonce is too low
 		txs = append(txs, transaction)
 		txs[len(txs)-1].SetSender(sender)
 	}
