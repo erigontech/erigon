@@ -209,6 +209,10 @@ func (api *ZkEvmAPIImpl) VirtualBatchNumber(ctx context.Context) (hexutil.Uint64
 		return hexutil.Uint64(0), err
 	}
 
+	if latestSequencedBatch == nil {
+		return hexutil.Uint64(0), nil
+	}
+
 	// todo: what if this number is the same as the last verified batch number?  do we return 0?
 
 	return hexutil.Uint64(latestSequencedBatch.BatchNo), nil

@@ -12,6 +12,7 @@ import (
 func SequencerZkStages(
 	ctx context.Context,
 	cumulativeIndex stages.CumulativeIndexCfg,
+	l1SyncerCfg L1SyncerCfg,
 	l1SequencerSyncCfg L1SequencerSyncCfg,
 	l1InfoTreeCfg L1InfoTreeCfg,
 	sequencerL1BlockSyncCfg SequencerL1BlockSyncCfg,
@@ -48,6 +49,22 @@ func SequencerZkStages(
 		*/
 		{
 			ID:          stages2.L1Syncer,
+			Description: "Download L1 Verifications",
+			Forward: func(firstCycle bool, badBlockUnwind bool, s *stages.StageState, u stages.Unwinder, tx kv.RwTx, quiet bool) error {
+				if badBlockUnwind {
+					return nil
+				}
+				return SpawnStageL1Syncer(s, u, ctx, tx, l1SyncerCfg, firstCycle, test)
+			},
+			Unwind: func(firstCycle bool, u *stages.UnwindState, s *stages.StageState, tx kv.RwTx) error {
+				return UnwindL1SyncerStage(u, tx, l1SyncerCfg, ctx)
+			},
+			Prune: func(firstCycle bool, p *stages.PruneState, tx kv.RwTx) error {
+				return PruneL1SyncerStage(p, tx, l1SyncerCfg, ctx)
+			},
+		},
+		{
+			ID:          stages2.L1SequencerSyncer,
 			Description: "L1 Sequencer Sync Updates",
 			Forward: func(firstCycle bool, badBlockUnwind bool, s *stages.StageState, u stages.Unwinder, tx kv.RwTx, quiet bool) error {
 				return SpawnL1SequencerSyncStage(s, u, tx, l1SequencerSyncCfg, ctx, firstCycle, quiet)

@@ -383,6 +383,10 @@ func (db *HermezDbReader) getLatest(table string) (*types.L1BatchInfo, error) {
 		}
 	}
 
+	if len(value) == 0 {
+		return nil, nil
+	}
+
 	if len(value) != 96 && len(value) != 64 {
 		return nil, fmt.Errorf("invalid hash length")
 	}

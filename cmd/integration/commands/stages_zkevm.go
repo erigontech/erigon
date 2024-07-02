@@ -1,23 +1,24 @@
 package commands
 
 import (
-	stages2 "github.com/ledgerwatch/erigon/turbo/stages"
-	"github.com/ledgerwatch/erigon/eth/stagedsync"
-	"github.com/gateway-fm/cdk-erigon-lib/common/datadir"
-	"github.com/ledgerwatch/erigon/core"
-	"github.com/gateway-fm/cdk-erigon-lib/kv"
+	"context"
+
 	"github.com/c2h5oh/datasize"
 	chain3 "github.com/gateway-fm/cdk-erigon-lib/chain"
+	"github.com/gateway-fm/cdk-erigon-lib/common/datadir"
+	"github.com/gateway-fm/cdk-erigon-lib/kv"
 	"github.com/gateway-fm/cdk-erigon-lib/kv/kvcfg"
 	"github.com/ledgerwatch/erigon/cmd/hack/tool/fromdb"
-	"github.com/ledgerwatch/erigon/turbo/shards"
 	"github.com/ledgerwatch/erigon/cmd/sentry/sentry"
-	"context"
-	"github.com/ledgerwatch/erigon/core/vm"
 	"github.com/ledgerwatch/erigon/consensus"
+	"github.com/ledgerwatch/erigon/core"
+	"github.com/ledgerwatch/erigon/core/vm"
 	"github.com/ledgerwatch/erigon/eth/ethconfig"
-	stages3 "github.com/ledgerwatch/erigon/zk/stages"
+	"github.com/ledgerwatch/erigon/eth/stagedsync"
+	"github.com/ledgerwatch/erigon/turbo/shards"
+	stages2 "github.com/ledgerwatch/erigon/turbo/stages"
 	"github.com/ledgerwatch/erigon/zk/sequencer"
+	stages3 "github.com/ledgerwatch/erigon/zk/stages"
 )
 
 func newSyncZk(ctx context.Context, db kv.RwDB) (consensus.Engine, *vm.Config, *stagedsync.Sync) {
@@ -82,6 +83,7 @@ func newSyncZk(ctx context.Context, db kv.RwDB) (consensus.Engine, *vm.Config, *
 			agg,
 			nil,
 			engine,
+			nil,
 			nil,
 			nil,
 			nil,
