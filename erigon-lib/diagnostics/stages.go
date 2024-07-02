@@ -102,11 +102,12 @@ func (d *DiagnosticClient) runSyncStagesListListener(rootCtx context.Context) {
 			case <-rootCtx.Done():
 				return
 			case info := <-ch:
-				d.mu.Lock()
-				d.SetStagesList(info.StagesList)
-				d.mu.Unlock()
-
-				d.saveSyncStagesToDB()
+				func() {
+					d.mu.Lock()
+					defer d.mu.Unlock()
+					d.SetStagesList(info.StagesList)
+					d.saveSyncStagesToDB()
+				}()
 			}
 		}
 	}()

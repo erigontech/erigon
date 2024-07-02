@@ -141,6 +141,9 @@ func VerifyCommitmentInclusionProof(commitment libcommon.Bytes48, commitmentIncl
 	commitmentsDepth := uint64(13) // log2(4096) + 1 = 13
 	bIndex := uint64(11)
 
+	if commitmentInclusionProof == nil || commitmentInclusionProof.Length() < bodyDepth+int(commitmentsDepth) {
+		return false
+	}
 	// Start by constructing the commitments subtree
 	for i := uint64(0); i < commitmentsDepth; i++ {
 		curr := commitmentInclusionProof.Get(int(i))
