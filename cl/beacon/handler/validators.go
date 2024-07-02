@@ -523,6 +523,7 @@ func (d directString) MarshalJSON() ([]byte, error) {
 }
 
 func responseValidators(w http.ResponseWriter, filterIndicies []uint64, filterStatuses []validatorStatus, stateEpoch uint64, balances solid.Uint64ListSSZ, validators *solid.ValidatorSet, finalized bool, optimistic bool) {
+	// todo: refactor this function
 	b := stringsBuilderPool.Get().(*strings.Builder)
 	defer stringsBuilderPool.Put(b)
 	b.Reset()
@@ -576,14 +577,12 @@ func responseValidators(w http.ResponseWriter, filterIndicies []uint64, filterSt
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-
 	_, err = b.WriteString("]}\n")
 
+	w.Header().Set("Content-Type", "application/json")
 	if _, err := w.Write([]byte(b.String())); err != nil {
 		log.Error("failed to write response", "err", err)
 	}
-	return
-
 }
 
 func responseValidator(idx uint64, stateEpoch uint64, balances solid.Uint64ListSSZ, validators *solid.ValidatorSet, finalized bool, optimistic bool) (*beaconhttp.BeaconResponse, error) {
@@ -646,8 +645,9 @@ func responseValidatorsBalances(w http.ResponseWriter, filterIndicies []uint64, 
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-
 	_, err = b.WriteString("]}\n")
+
+	w.Header().Set("Content-Type", "application/json")
 	if _, err := w.Write([]byte(b.String())); err != nil {
 		log.Error("failed to write response", "err", err)
 	}
