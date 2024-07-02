@@ -259,8 +259,6 @@ func (dt *DomainRoTx) commitmentValTransformDomain(rng MergeRange, accounts, sto
 
 	ms := NewArchiveGetter(mergedStorage.decompressor.MakeGetter(), storage.d.compression)
 	ma := NewArchiveGetter(mergedAccount.decompressor.MakeGetter(), accounts.d.compression)
-	accMerged := fmt.Sprintf("%d-%d", mergedAccount.startTxNum/dt.d.aggregationStep, mergedAccount.endTxNum/dt.d.aggregationStep)
-	stoMerged := fmt.Sprintf("%d-%d", mergedStorage.startTxNum/dt.d.aggregationStep, mergedStorage.endTxNum/dt.d.aggregationStep)
 	dt.d.logger.Debug("prepare commitmentValTransformDomain", "merge", rng.String("range", dt.d.aggregationStep), "Mstorage", hadToLookupStorage, "Maccount", hadToLookupAccount)
 
 	vt := func(valBuf []byte, keyFromTxNum, keyEndTxNum uint64) (transValBuf []byte, err error) {
@@ -283,7 +281,7 @@ func (dt *DomainRoTx) commitmentValTransformDomain(rng MergeRange, accounts, sto
 					if !found {
 						dt.d.logger.Crit("valTransform: lost storage full key",
 							"shortened", fmt.Sprintf("%x", key),
-							"merging", stoMerged,
+							"merging", rng.String("", dt.d.aggregationStep),
 							"valBuf", fmt.Sprintf("l=%d %x", len(valBuf), valBuf),
 						)
 						return nil, fmt.Errorf("lookup lost storage full key %x", key)
@@ -313,7 +311,7 @@ func (dt *DomainRoTx) commitmentValTransformDomain(rng MergeRange, accounts, sto
 				if !found {
 					dt.d.logger.Crit("valTransform: lost account full key",
 						"shortened", fmt.Sprintf("%x", key),
-						"merging", accMerged,
+						"merging", rng.String("", dt.d.aggregationStep),
 						"valBuf", fmt.Sprintf("l=%d %x", len(valBuf), valBuf),
 					)
 					return nil, fmt.Errorf("lookup account full key: %x", key)
