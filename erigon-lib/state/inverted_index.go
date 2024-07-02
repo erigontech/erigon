@@ -511,10 +511,7 @@ type MergeRange struct {
 }
 
 func (mr *MergeRange) String(prefix string, aggStep uint64) string {
-	if prefix != "" {
-		prefix += "="
-	}
-	return fmt.Sprintf("%s%d-%d", prefix, mr.from/aggStep, mr.to/aggStep)
+	return fmt.Sprintf("%s=%d-%d", prefix, mr.from/aggStep, mr.to/aggStep)
 }
 
 type InvertedIndexRoTx struct {
