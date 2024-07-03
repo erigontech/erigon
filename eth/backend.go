@@ -553,7 +553,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 	}
 
 	var heimdallClient heimdall.HeimdallClient
-	var polygonBridge *bridge.Bridge
+	var polygonBridge bridge.Service
 
 	if chainConfig.Bor != nil {
 		if !config.WithoutHeimdall {
