@@ -1,3 +1,19 @@
+// Copyright 2024 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+
 package jsonrpc
 
 import (
@@ -234,43 +250,6 @@ func applyFilters(out *roaring.Bitmap, tx kv.Tx, begin, end uint64, crit filters
 	}
 	return nil
 }
-
-/*
-
-func applyFiltersV3(out *roaring64.Bitmap, tx kv.TemporalTx, begin, end uint64, crit filters.FilterCriteria) error {
-	//[from,to)
-	var fromTxNum, toTxNum uint64
-	var err error
-	if begin > 0 {
-		fromTxNum, err = rawdbv3.TxNums.Min(tx, begin)
-		if err != nil {
-			return err
-		}
-	}
-	toTxNum, err = rawdbv3.TxNums.Max(tx, end)
-	if err != nil {
-		return err
-	}
-	toTxNum++
-
-	out.AddRange(fromTxNum, toTxNum) // [from,to)
-	topicsBitmap, err := getTopicsBitmapV3(tx, crit.Topics, fromTxNum, toTxNum)
-	if err != nil {
-		return err
-	}
-	if topicsBitmap != nil {
-		out.And(topicsBitmap)
-	}
-	addrBitmap, err := getAddrsBitmapV3(tx, crit.Addresses, fromTxNum, toTxNum)
-	if err != nil {
-		return err
-	}
-	if addrBitmap != nil {
-		out.And(addrBitmap)
-	}
-	return nil
-}
-*/
 
 func applyFiltersV3(tx kv.TemporalTx, begin, end uint64, crit filters.FilterCriteria) (out iter.U64, err error) {
 	//[from,to)

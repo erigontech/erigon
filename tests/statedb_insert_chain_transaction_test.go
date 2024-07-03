@@ -1,3 +1,19 @@
+// Copyright 2024 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+
 package tests
 
 import (
@@ -744,28 +760,28 @@ func GenerateBlocks(t *testing.T, gspec *types.Genesis, txs map[int]txn) (*mock.
 	contractBackend := backends.NewTestSimulatedBackendWithConfig(t, gspec.Alloc, gspec.Config, gspec.GasLimit)
 
 	chain, err := core.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, len(txs), func(i int, block *core.BlockGen) {
-		var tx types.Transaction
+		var txn types.Transaction
 		var isContractCall bool
 		signer := types.LatestSignerForChainID(nil)
 
 		if txToSend, ok := txs[i]; ok {
-			tx, isContractCall = txToSend.txFn(block, contractBackend)
+			txn, isContractCall = txToSend.txFn(block, contractBackend)
 			var err error
-			tx, err = types.SignTx(tx, *signer, txToSend.key)
+			txn, err = types.SignTx(txn, *signer, txToSend.key)
 			if err != nil {
 				return
 			}
 		}
 
-		if tx != nil {
+		if txn != nil {
 			if !isContractCall {
-				err := contractBackend.SendTransaction(context.Background(), tx)
+				err := contractBackend.SendTransaction(context.Background(), txn)
 				if err != nil {
 					return
 				}
 			}
 
-			block.AddTx(tx)
+			block.AddTx(txn)
 		}
 
 		contractBackend.Commit()

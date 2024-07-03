@@ -1,18 +1,21 @@
 // Copyright 2018 The go-ethereum Authors
-// This file is part of the go-ethereum library.
+// (original work)
+// Copyright 2024 The Erigon Authors
+// (modifications)
+// This file is part of Erigon.
 //
-// The go-ethereum library is free software: you can redistribute it and/or modify
+// Erigon is free software: you can redistribute it and/or modify
 // it under the terms of the GNU Lesser General Public License as published by
 // the Free Software Foundation, either version 3 of the License, or
 // (at your option) any later version.
 //
-// The go-ethereum library is distributed in the hope that it will be useful,
+// Erigon is distributed in the hope that it will be useful,
 // but WITHOUT ANY WARRANTY; without even the implied warranty of
 // MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
 // GNU Lesser General Public License for more details.
 //
 // You should have received a copy of the GNU Lesser General Public License
-// along with the go-ethereum library. If not, see <http://www.gnu.org/licenses/>.
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
 package rawdb_test
 
@@ -76,11 +79,12 @@ func TestCanonicalIter(t *testing.T) {
 	require.NoError(rawdb.WriteCanonicalHash(tx, libcommon.Hash{12}, 2))
 
 	txNumsOfBlock := func(bn uint64) (res []uint64) {
-		txns := uint64(len(b.Transactions)) + 2
-		s := uint64(2) // genesis block ends at
+		txns := uint64(types.TxCountToTxAmount(len(b.Transactions)))
+		s := uint64(1) // genesis block ends at
 		if bn > 0 {
 			s += bn * txns
 		}
+		s++ // system
 		for i := uint64(0); i < txns; i++ {
 			res = append(res, s+i)
 		}

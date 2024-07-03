@@ -1,18 +1,18 @@
-/*
-   Copyright 2022 Erigon contributors
-
-   Licensed under the Apache License, Version 2.0 (the "License");
-   you may not use this file except in compliance with the License.
-   You may obtain a copy of the License at
-
-       http://www.apache.org/licenses/LICENSE-2.0
-
-   Unless required by applicable law or agreed to in writing, software
-   distributed under the License is distributed on an "AS IS" BASIS,
-   WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-   See the License for the specific language governing permissions and
-   limitations under the License.
-*/
+// Copyright 2022 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
 package state
 
@@ -99,20 +99,20 @@ func TestInvIndexPruningCorrectness(t *testing.T) {
 	require.EqualValues(t, count, pruneIters*int(pruneLimit))
 
 	// this one should not prune anything due to forced=false but no files built
-	stat, err := ic.Prune(context.Background(), rwTx, 0, 10, pruneLimit, logEvery, false, false, nil)
+	stat, err := ic.Prune(context.Background(), rwTx, 0, 10, pruneLimit, logEvery, false, nil)
 	require.NoError(t, err)
 	require.Zero(t, stat.PruneCountTx)
 	require.Zero(t, stat.PruneCountValues)
 
 	// this one should not prune anything as well due to given range [0,1) even it is forced
-	stat, err = ic.Prune(context.Background(), rwTx, 0, 1, pruneLimit, logEvery, true, false, nil)
+	stat, err = ic.Prune(context.Background(), rwTx, 0, 1, pruneLimit, logEvery, true, nil)
 	require.NoError(t, err)
 	require.Zero(t, stat.PruneCountTx)
 	require.Zero(t, stat.PruneCountValues)
 
 	// this should prune exactly pruneLimit*pruneIter transactions
 	for i := 0; i < pruneIters; i++ {
-		stat, err = ic.Prune(context.Background(), rwTx, 0, 1000, pruneLimit, logEvery, true, false, nil)
+		stat, err = ic.Prune(context.Background(), rwTx, 0, 1000, pruneLimit, logEvery, true, nil)
 		require.NoError(t, err)
 		t.Logf("[%d] stats: %v", i, stat)
 	}
@@ -286,7 +286,7 @@ func TestInvIndexAfterPrune(t *testing.T) {
 		ic = ii.BeginFilesRo()
 		defer ic.Close()
 
-		_, err = ic.Prune(ctx, tx, 0, 16, math.MaxUint64, logEvery, false, false, nil)
+		_, err = ic.Prune(ctx, tx, 0, 16, math.MaxUint64, logEvery, false, nil)
 		require.NoError(t, err)
 		return nil
 	})
@@ -467,11 +467,11 @@ func mergeInverted(tb testing.TB, db kv.RwDB, ii *InvertedIndex, txs uint64) {
 			ii.reCalcVisibleFiles()
 			ic := ii.BeginFilesRo()
 			defer ic.Close()
-			_, err = ic.Prune(ctx, tx, step*ii.aggregationStep, (step+1)*ii.aggregationStep, math.MaxUint64, logEvery, false, false, nil)
+			_, err = ic.Prune(ctx, tx, step*ii.aggregationStep, (step+1)*ii.aggregationStep, math.MaxUint64, logEvery, false, nil)
 			require.NoError(tb, err)
 			var found bool
 			var startTxNum, endTxNum uint64
-			maxEndTxNum := ii.endTxNumMinimax()
+			maxEndTxNum := ii.dirtyFilesEndTxNumMinimax()
 			maxSpan := ii.aggregationStep * StepsInColdFile
 
 			for {
@@ -520,7 +520,7 @@ func TestInvIndexRanges(t *testing.T) {
 			ii.reCalcVisibleFiles()
 			ic := ii.BeginFilesRo()
 			defer ic.Close()
-			_, err = ic.Prune(ctx, tx, step*ii.aggregationStep, (step+1)*ii.aggregationStep, math.MaxUint64, logEvery, false, false, nil)
+			_, err = ic.Prune(ctx, tx, step*ii.aggregationStep, (step+1)*ii.aggregationStep, math.MaxUint64, logEvery, false, nil)
 			require.NoError(t, err)
 		}()
 	}

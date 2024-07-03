@@ -1,3 +1,19 @@
+// Copyright 2024 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+
 package diagnostics
 
 import (
@@ -5,6 +21,7 @@ import (
 	"encoding/json"
 	"fmt"
 
+	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/log/v3"
 )
@@ -101,11 +118,12 @@ func (d *DiagnosticClient) runSyncStagesListListener(rootCtx context.Context) {
 			case <-rootCtx.Done():
 				return
 			case info := <-ch:
-				d.mu.Lock()
-				d.SetStagesList(info.StagesList)
-				d.mu.Unlock()
-
-				d.saveSyncStagesToDB()
+				func() {
+					d.mu.Lock()
+					defer d.mu.Unlock()
+					d.SetStagesList(info.StagesList)
+					d.saveSyncStagesToDB()
+				}()
 			}
 		}
 	}()
@@ -298,18 +316,20 @@ func (d *DiagnosticClient) GetStageState(stageId string) (StageState, error) {
 	return 0, fmt.Errorf("stage %s not found in stages list %s", stageId, stagesIdsList)
 }
 
-func ReadSyncStages(db kv.RoDB) []SyncStage {
-	data := ReadDataFromTable(db, kv.DiagSyncStages, StagesListKey)
-
-	if len(data) == 0 {
-		return []SyncStage{}
+func SyncStagesFromTX(tx kv.Tx) ([]byte, error) {
+	bytes, err := ReadDataFromTable(tx, kv.DiagSyncStages, StagesListKey)
+	if err != nil {
+		return nil, err
 	}
 
-	var info []SyncStage
+	return common.CopyBytes(bytes), nil
+}
+
+func ParseStagesList(data []byte) (info []SyncStage) {
 	err := json.Unmarshal(data, &info)
 
 	if err != nil {
-		log.Error("[Diagnostics] Failed to read stages list", "err", err)
+		log.Warn("[Diagnostics] Failed to parse stages list", "err", err)
 		return []SyncStage{}
 	} else {
 		return info

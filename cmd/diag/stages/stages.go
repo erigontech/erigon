@@ -1,6 +1,24 @@
+// Copyright 2024 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+
 package stages
 
 import (
+	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -191,11 +209,32 @@ func createStageRowFromStage(stage diagnostics.SyncStage) table.Row {
 }
 
 func createSubStageRowFromSubstageStage(substage diagnostics.SyncSubStage) table.Row {
+	progress := substage.Stats.Progress
+
+	if substage.State == diagnostics.Completed {
+		progress = "100%"
+	} else {
+		if substage.ID == "E3 Indexing" {
+			if progress == "100%" {
+				progress = "> 50%"
+			} else {
+				prgint := convertProgress(progress)
+				progress = strconv.Itoa(prgint/2) + "%"
+			}
+		}
+	}
+
 	return table.Row{
 		"",
 		substage.ID,
 		substage.State.String(),
 		substage.Stats.TimeElapsed,
-		substage.Stats.Progress,
+		progress,
 	}
+}
+
+func convertProgress(progress string) int {
+	progress = strings.ReplaceAll(progress, "%", "")
+	progressInt, _ := strconv.Atoi(progress)
+	return progressInt
 }

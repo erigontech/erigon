@@ -1,3 +1,19 @@
+// Copyright 2024 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+
 package misc
 
 import (
@@ -18,20 +34,6 @@ func StoreBlockHashesEip2935(header *types.Header, state *state.IntraBlockState,
 		return
 	}
 	storeHash(headerNum-1, header.ParentHash, state)
-	// If this is the fork block, add the parent's direct `HISTORY_SERVE_WINDOW - 1` ancestors as well
-	parent := headerReader.GetHeader(header.ParentHash, headerNum-1)
-	if parent.Time < config.PragueTime.Uint64() {
-		p := headerNum - 1
-		window := params.BlockHashHistoryServeWindow - 1
-		if p < window {
-			window = p
-		}
-		for i := window; i > 0; i-- {
-			p = p - 1
-			storeHash(p, parent.ParentHash, state)
-			parent = headerReader.GetHeader(parent.ParentHash, p)
-		}
-	}
 }
 
 func storeHash(num uint64, hash libcommon.Hash, state *state.IntraBlockState) {

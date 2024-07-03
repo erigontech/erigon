@@ -1,3 +1,19 @@
+// Copyright 2024 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+
 package cltypes
 
 import (
@@ -13,7 +29,7 @@ import (
  * IndexedAttestation are attestantions sets to prove that someone misbehaved.
  */
 type IndexedAttestation struct {
-	AttestingIndices *solid.RawUint64List  `json:"attesting_indicies"`
+	AttestingIndices *solid.RawUint64List  `json:"attesting_indices"`
 	Data             solid.AttestationData `json:"data"`
 	Signature        libcommon.Bytes96     `json:"signature"`
 }
@@ -31,7 +47,7 @@ func (i *IndexedAttestation) Static() bool {
 
 func (i *IndexedAttestation) UnmarshalJSON(buf []byte) error {
 	var tmp struct {
-		AttestingIndices *solid.RawUint64List  `json:"attesting_indicies"`
+		AttestingIndices *solid.RawUint64List  `json:"attesting_indices"`
 		Data             solid.AttestationData `json:"data"`
 		Signature        libcommon.Bytes96     `json:"signature"`
 	}

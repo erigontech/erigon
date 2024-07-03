@@ -1,3 +1,19 @@
+// Copyright 2024 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+
 package main
 
 import (
@@ -337,9 +353,10 @@ func (c *CheckSnapshots) Run(ctx *Context) error {
 	}
 	c.withProfile()
 	log.Root().SetHandler(log.LvlFilterHandler(log.LvlDebug, log.StderrHandler))
-	log.Info("Started the checking process", "chain", c.Chain)
-	dirs := datadir.New(c.Datadir)
+	log.Info("Started the checking process", "chain", c.Chain, "datadir", c.Datadir)
 	log.Root().SetHandler(log.LvlFilterHandler(log.LvlInfo, log.StderrHandler))
+
+	dirs := datadir.New(c.Datadir)
 
 	db, _, err := caplin1.OpenCaplinDatabase(ctx, beaconConfig, nil, dirs.CaplinIndexing, dirs.CaplinBlobs, nil, false, 0)
 	if err != nil {
@@ -367,6 +384,11 @@ func (c *CheckSnapshots) Run(ctx *Context) error {
 	genesisHeader, _, _, err := csn.ReadHeader(0)
 	if err != nil {
 		return err
+	}
+
+	if genesisHeader == nil {
+		log.Warn("beaconIndices up to", "block", to, "caplinSnapIndexMax", csn.IndicesMax())
+		return fmt.Errorf("genesis header is nil")
 	}
 	previousBlockRoot, err := genesisHeader.Header.HashSSZ()
 	if err != nil {

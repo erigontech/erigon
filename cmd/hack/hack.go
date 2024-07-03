@@ -1,3 +1,19 @@
+// Copyright 2024 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+
 package main
 
 import (
@@ -373,7 +389,7 @@ func extractBodies(datadir string) error {
 	}
 	defer c.Close()
 	i := 0
-	var txId uint64
+	var txnID uint64
 	for k, _, err := c.First(); k != nil; k, _, err = c.Next() {
 		if err != nil {
 			return err
@@ -384,19 +400,19 @@ func extractBodies(datadir string) error {
 		if hash, err = br.CanonicalHash(context.Background(), tx, blockNumber); err != nil {
 			return err
 		}
-		_, baseTxId, txCount := rawdb.ReadBody(tx, blockHash, blockNumber)
-		fmt.Printf("Body %d %x: baseTxId %d, txCount %d\n", blockNumber, blockHash, baseTxId, txCount)
+		_, baseTxnID, txCount := rawdb.ReadBody(tx, blockHash, blockNumber)
+		fmt.Printf("Body %d %x: baseTxnID %d, txCount %d\n", blockNumber, blockHash, baseTxnID, txCount)
 		if hash != blockHash {
 			fmt.Printf("Non-canonical\n")
 			continue
 		}
 		i++
-		if txId > 0 {
-			if txId != baseTxId {
-				fmt.Printf("Mismatch txId for block %d, txId = %d, baseTxId = %d\n", blockNumber, txId, baseTxId)
+		if txnID > 0 {
+			if txnID != baseTxnID {
+				fmt.Printf("Mismatch txnID for block %d, txnID = %d, baseTxnID = %d\n", blockNumber, txnID, baseTxnID)
 			}
 		}
-		txId = baseTxId + uint64(txCount) + 2
+		txnID = baseTxnID + uint64(txCount) + 2
 		if i == 50 {
 			break
 		}
@@ -645,7 +661,7 @@ func trimTxs(chaindata string) error {
 			return err
 		}
 		// Remove from the map
-		toDelete.RemoveRange(body.BaseTxId, body.BaseTxId+uint64(body.TxCount))
+		toDelete.RemoveRange(body.BaseTxnID.U64(), body.BaseTxnID.LastSystemTx(body.TxCount)+1) //+1 to include last system txn in block into delete range
 	}
 	fmt.Printf("Number of txn records to delete: %d\n", toDelete.GetCardinality())
 	// Takes 20min to iterate 1.4b

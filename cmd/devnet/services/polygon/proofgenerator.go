@@ -1,3 +1,19 @@
+// Copyright 2024 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+
 package polygon
 
 import (
@@ -527,7 +543,7 @@ func (pg *ProofGenerator) getRootBlockInfo(txBlockNumber uint64) (rootBlockNumbe
 		return 0, 0, 0, err
 	}
 
-	headerBlock, err := pg.heimdall.rootChainBinding.HeaderBlocks(&bind.CallOpts{}, big.NewInt(int64(rootBlockNumber)))
+	headerBlock, err := pg.heimdall.rootChainBinding.HeaderBlocks(&bind.CallOpts{}, new(big.Int).SetUint64(rootBlockNumber))
 
 	if err != nil {
 		return 0, 0, 0, err
@@ -560,7 +576,7 @@ func (pg *ProofGenerator) findRootBlockFromChild(childBlockNumber uint64) (uint6
 		}
 
 		mid := (start + end) / 2
-		headerBlock, err := pg.heimdall.rootChainBinding.HeaderBlocks(&bind.CallOpts{}, big.NewInt(int64(mid*checkPointInterval)))
+		headerBlock, err := pg.heimdall.rootChainBinding.HeaderBlocks(&bind.CallOpts{}, new(big.Int).SetUint64(mid*checkPointInterval))
 
 		if err != nil {
 			return 0, err

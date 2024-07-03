@@ -1,3 +1,19 @@
+// Copyright 2024 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+
 package snapshotsync
 
 import (
@@ -27,6 +43,7 @@ import (
 
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	coresnaptype "github.com/ledgerwatch/erigon/core/snaptype"
+	snaptype2 "github.com/ledgerwatch/erigon/core/snaptype"
 	"github.com/ledgerwatch/erigon/ethdb/prune"
 	"github.com/ledgerwatch/erigon/turbo/services"
 )
@@ -123,7 +140,7 @@ func buildBlackListForPruning(pruneMode bool, stepPrune, minBlockToDownload, blo
 	snapshotKindToNames := make(map[string][]snapshotFileData)
 	for _, p := range preverified {
 		name := p.Name
-		// Dont prune unprunable files
+		// Don't prune unprunable files
 		if !canSnapshotBePruned(name) {
 			continue
 		}
@@ -443,9 +460,9 @@ func WaitForDownloader(ctx context.Context, logPrefix string, headerchain, blobs
 			return err
 		}
 	}
-	for _, p := range snaptype.SeedableV3Extensions() {
+	for _, p := range snaptype2.E3StateTypes {
 		snapshotDownloader.ProhibitNewDownloads(ctx, &proto_downloader.ProhibitNewDownloadsRequest{
-			Type: p,
+			Type: p.Name(),
 		})
 	}
 

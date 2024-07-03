@@ -1,3 +1,19 @@
+// Copyright 2024 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+
 package types
 
 import (
@@ -77,7 +93,7 @@ func (tr *TRand) RandWithdrawalRequest() *WithdrawalRequest {
 	}
 }
 
-func (tr *TRand) RandDeposit() *DepositRequest {
+func (tr *TRand) RandDepositRequest() *DepositRequest {
 	return &DepositRequest{
 		Pubkey:                [48]byte(tr.RandBytes(48)),
 		WithdrawalCredentials: tr.RandHash(),
@@ -87,12 +103,24 @@ func (tr *TRand) RandDeposit() *DepositRequest {
 	}
 }
 
+func (tr *TRand) RandConsolidationRequest() *ConsolidationRequest {
+	return &ConsolidationRequest{
+		SourceAddress: [20]byte(tr.RandBytes(20)),
+		SourcePubKey:  [48]byte(tr.RandBytes(48)),
+		TargetPubKey:  [48]byte(tr.RandBytes(48)),
+	}
+}
+
 func (tr *TRand) RandRequest() Request {
-	switch tr.rnd.Intn(2) {
+	switch tr.rnd.Intn(3) {
+	case 0:
+		return tr.RandDepositRequest()
 	case 1:
 		return tr.RandWithdrawalRequest()
+	case 2:
+		return tr.RandConsolidationRequest()
 	default:
-		return tr.RandDeposit()
+		return nil // unreachable code
 	}
 }
 
@@ -358,9 +386,15 @@ func compareDeposits(t *testing.T, a, b *DepositRequest) {
 }
 
 func compareWithdrawalRequests(t *testing.T, a, b *WithdrawalRequest) {
-	check(t, "Deposit.SourceAddress", a.SourceAddress, b.SourceAddress)
+	check(t, "WithdrawalRequest.SourceAddress", a.SourceAddress, b.SourceAddress)
 	check(t, "WithdrawalRequest.ValidatorPubkey", a.ValidatorPubkey, b.ValidatorPubkey)
-	check(t, "Deposit.Amount", a.Amount, b.Amount)
+	check(t, "WithdrawalRequest.Amount", a.Amount, b.Amount)
+}
+
+func compareConsolidationRequests(t *testing.T, a, b *ConsolidationRequest) {
+	check(t, "ConsolidationRequest.SourceAddress", a.SourceAddress, b.SourceAddress)
+	check(t, "ConsolidationRequest.SourcePubKey", a.SourcePubKey, b.SourcePubKey)
+	check(t, "ConsolidationRequest.TargetPubKey", a.TargetPubKey, b.TargetPubKey)
 }
 
 func checkRequests(t *testing.T, a, b Request) {
@@ -382,6 +416,14 @@ func checkRequests(t *testing.T, a, b Request) {
 		b, bok := b.(*WithdrawalRequest)
 		if aok && bok {
 			compareWithdrawalRequests(t, a, b)
+		} else {
+			t.Errorf("type assertion failed: %v %v %v %v", a.RequestType(), aok, b.RequestType(), bok)
+		}
+	case ConsolidationRequestType:
+		a, aok := a.(*ConsolidationRequest)
+		b, bok := b.(*ConsolidationRequest)
+		if aok && bok {
+			compareConsolidationRequests(t, a, b)
 		} else {
 			t.Errorf("type assertion failed: %v %v %v %v", a.RequestType(), aok, b.RequestType(), bok)
 		}
@@ -515,7 +557,7 @@ func TestDepositEncodeDecode(t *testing.T) {
 	tr := NewTRand()
 	var buf bytes.Buffer
 	for i := 0; i < RUNS; i++ {
-		a := tr.RandDeposit()
+		a := tr.RandDepositRequest()
 		buf.Reset()
 		if err := a.EncodeRLP(&buf); err != nil {
 			t.Errorf("error: deposit.EncodeRLP(): %v", err)
@@ -525,6 +567,23 @@ func TestDepositEncodeDecode(t *testing.T) {
 			t.Errorf("error: Deposit.DecodeRLP(): %v", err)
 		}
 		compareDeposits(t, a, b)
+	}
+}
+
+func TestConsolidationReqsEncodeDecode(t *testing.T) {
+	tr := NewTRand()
+	var buf bytes.Buffer
+	for i := 0; i < RUNS; i++ {
+		a := tr.RandConsolidationRequest()
+		buf.Reset()
+		if err := a.EncodeRLP(&buf); err != nil {
+			t.Errorf("error: deposit.EncodeRLP(): %v", err)
+		}
+		b := new(ConsolidationRequest)
+		if err := b.DecodeRLP(buf.Bytes()); err != nil {
+			t.Errorf("error: Deposit.DecodeRLP(): %v", err)
+		}
+		compareConsolidationRequests(t, a, b)
 	}
 }
 

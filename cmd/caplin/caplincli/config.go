@@ -1,3 +1,19 @@
+// Copyright 2024 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+
 package caplincli
 
 import (
@@ -37,6 +53,7 @@ type CaplinCliCfg struct {
 	RunEngineAPI          bool          `json:"run_engine_api"`
 	EngineAPIAddr         string        `json:"engine_api_addr"`
 	EngineAPIPort         int           `json:"engine_api_port"`
+	MevRelayUrl           string        `json:"mev_relay_url"`
 	JwtSecret             []byte
 
 	AllowedMethods   []string `json:"allowed_methods"`
@@ -107,6 +124,7 @@ func SetupCaplinCli(ctx *cli.Context) (cfg *CaplinCliCfg, err error) {
 
 	cfg.TransitionChain = ctx.Bool(caplinflags.TransitionChainFlag.Name)
 	cfg.InitialSync = ctx.Bool(caplinflags.InitSyncFlag.Name)
+	cfg.MevRelayUrl = ctx.String(caplinflags.MevRelayUrl.Name)
 
 	return cfg, err
 }

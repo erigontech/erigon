@@ -1,13 +1,18 @@
-// Copyright 2022 Erigon-Lightclient contributors
-// Licensed under the Apache License, Version 2.0 (the "License");
-// you may not use this file except in compliance with the License.
-// You may obtain a copy of the License at
-//     http://www.apache.org/licenses/LICENSE-2.0
-// Unless required by applicable law or agreed to in writing, software
-// distributed under the License is distributed on an "AS IS" BASIS,
-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-// See the License for the specific language governing permissions and
-// limitations under the License.
+// Copyright 2022 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
 package main
 
@@ -137,10 +142,23 @@ func runCaplinNode(cliCtx *cli.Context) error {
 	}
 
 	blockSnapBuildSema := semaphore.NewWeighted(int64(dbg.BuildSnapshotAllowance))
+
+	var options []caplin1.CaplinOption
+	// builder option
+	if rcfg.Builder {
+		if cfg.MevRelayUrl == "" {
+			log.Warn("builder mode requires mev_relay_url, but it is not set. Skipping builder mode")
+			rcfg.Builder = false
+		} else {
+			log.Info("Starting with builder mode")
+			options = append(options, caplin1.WithBuilder(cfg.MevRelayUrl, cfg.BeaconCfg))
+		}
+	}
+
 	return caplin1.RunCaplinPhase1(ctx, executionEngine, &ethconfig.Config{
 		CaplinDiscoveryAddr:    cfg.Addr,
 		CaplinDiscoveryPort:    uint64(cfg.Port),
 		CaplinDiscoveryTCPPort: uint64(cfg.ServerTcpPort),
 		BeaconRouter:           rcfg,
-	}, cfg.NetworkCfg, cfg.BeaconCfg, ethClock, state, cfg.Dirs, nil, nil, false, false, false, indiciesDB, blobStorage, nil, blockSnapBuildSema)
+	}, cfg.NetworkCfg, cfg.BeaconCfg, ethClock, state, cfg.Dirs, nil, nil, false, false, false, indiciesDB, blobStorage, nil, blockSnapBuildSema, options...)
 }

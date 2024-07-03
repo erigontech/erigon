@@ -1,3 +1,19 @@
+// Copyright 2024 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+
 package commands
 
 import (
@@ -7,10 +23,8 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"sort"
 	"time"
 
-	"github.com/ledgerwatch/erigon-lib/kv/dbutils"
 	"github.com/ledgerwatch/erigon-lib/wrap"
 
 	"github.com/c2h5oh/datasize"
@@ -21,9 +35,7 @@ import (
 	chain2 "github.com/ledgerwatch/erigon-lib/chain"
 	common2 "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/datadir"
-	"github.com/ledgerwatch/erigon-lib/common/hexutility"
 	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon-lib/kv/bitmapdb"
 	"github.com/ledgerwatch/erigon-lib/kv/temporal/historyv2"
 
 	"github.com/ledgerwatch/erigon/cmd/hack/tool/fromdb"
@@ -33,7 +45,6 @@ import (
 	"github.com/ledgerwatch/erigon/core/state"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/eth/ethconfig"
-	"github.com/ledgerwatch/erigon/eth/integrity"
 	"github.com/ledgerwatch/erigon/eth/stagedsync"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 	"github.com/ledgerwatch/erigon/eth/tracers/logger"
@@ -144,7 +155,7 @@ func syncBySmallSteps(db kv.RwDB, miningConfig params.MiningConfig, ctx context.
 		return err
 	}
 
-	sn, borSn, agg := allSnapshots(ctx, db, logger1)
+	sn, borSn, agg, _ := allSnapshots(ctx, db, logger1)
 	defer sn.Close()
 	defer borSn.Close()
 	defer agg.Close()
@@ -288,12 +299,6 @@ func syncBySmallSteps(db kv.RwDB, miningConfig params.MiningConfig, ctx context.
 			return err
 		}
 
-		if integrityFast {
-			if err := checkChanges(expectedAccountChanges, tx, expectedStorageChanges, execAtBlock, pm.History.PruneTo(execToBlock)); err != nil {
-				return err
-			}
-			integrity.Trie(db, tx, integritySlow, ctx)
-		}
 		//receiptsInDB := rawdb.ReadReceiptsByNumber(tx, progress(tx, stages.Execution)+1)
 
 		if err := tx.Commit(); err != nil {
@@ -383,31 +388,6 @@ func syncBySmallSteps(db kv.RwDB, miningConfig params.MiningConfig, ctx context.
 	return nil
 }
 
-func checkChanges(expectedAccountChanges map[uint64]*historyv2.ChangeSet, tx kv.Tx, expectedStorageChanges map[uint64]*historyv2.ChangeSet, execAtBlock, prunedTo uint64) error {
-	checkHistoryFrom := execAtBlock
-	if prunedTo > checkHistoryFrom {
-		checkHistoryFrom = prunedTo
-	}
-	for blockN := range expectedAccountChanges {
-		if blockN <= checkHistoryFrom {
-			continue
-		}
-		if err := checkChangeSet(tx, blockN, expectedAccountChanges[blockN], expectedStorageChanges[blockN]); err != nil {
-			return err
-		}
-		delete(expectedAccountChanges, blockN)
-		delete(expectedStorageChanges, blockN)
-	}
-
-	if err := checkHistory(tx, kv.AccountChangeSet, checkHistoryFrom); err != nil {
-		return err
-	}
-	if err := checkHistory(tx, kv.StorageChangeSet, checkHistoryFrom); err != nil {
-		return err
-	}
-	return nil
-}
-
 func checkMinedBlock(b1, b2 *types.Block, chainConfig *chain2.Config) {
 	if b1.Root() != b2.Root() ||
 		(chainConfig.IsByzantium(b1.NumberU64()) && b1.ReceiptHash() != b2.ReceiptHash()) ||
@@ -425,7 +405,7 @@ func checkMinedBlock(b1, b2 *types.Block, chainConfig *chain2.Config) {
 func loopExec(db kv.RwDB, ctx context.Context, unwind uint64, logger log.Logger) error {
 	chainConfig := fromdb.ChainConfig(db)
 	dirs, pm := datadir.New(datadirCli), fromdb.PruneMode(db)
-	sn, borSn, agg := allSnapshots(ctx, db, logger)
+	sn, borSn, agg, _ := allSnapshots(ctx, db, logger)
 	defer sn.Close()
 	defer borSn.Close()
 	defer agg.Close()
@@ -487,81 +467,4 @@ func loopExec(db kv.RwDB, ctx context.Context, unwind uint64, logger log.Logger)
 		}
 		defer tx.Rollback()
 	}
-}
-
-func checkChangeSet(db kv.Tx, blockNum uint64, expectedAccountChanges *historyv2.ChangeSet, expectedStorageChanges *historyv2.ChangeSet) error {
-	i := 0
-	sort.Sort(expectedAccountChanges)
-	err := historyv2.ForPrefix(db, kv.AccountChangeSet, hexutility.EncodeTs(blockNum), func(blockN uint64, k, v []byte) error {
-		c := expectedAccountChanges.Changes[i]
-		i++
-		if bytes.Equal(c.Key, k) && bytes.Equal(c.Value, v) {
-			return nil
-		}
-
-		fmt.Printf("Unexpected account changes in block %d\n", blockNum)
-		fmt.Printf("In the database: ======================\n")
-		fmt.Printf("0x%x: %x\n", k, v)
-		fmt.Printf("Expected: ==========================\n")
-		fmt.Printf("0x%x %x\n", c.Key, c.Value)
-		return fmt.Errorf("check change set failed")
-	})
-	if err != nil {
-		return err
-	}
-	if expectedAccountChanges.Len() != i {
-		return fmt.Errorf("db has less changesets")
-	}
-	if expectedStorageChanges == nil {
-		expectedStorageChanges = historyv2.NewChangeSet()
-	}
-
-	i = 0
-	sort.Sort(expectedStorageChanges)
-	err = historyv2.ForPrefix(db, kv.StorageChangeSet, hexutility.EncodeTs(blockNum), func(blockN uint64, k, v []byte) error {
-		c := expectedStorageChanges.Changes[i]
-		i++
-		if bytes.Equal(c.Key, k) && bytes.Equal(c.Value, v) {
-			return nil
-		}
-
-		fmt.Printf("Unexpected storage changes in block %d\n", blockNum)
-		fmt.Printf("In the database: ======================\n")
-		fmt.Printf("0x%x: %x\n", k, v)
-		fmt.Printf("Expected: ==========================\n")
-		fmt.Printf("0x%x %x\n", c.Key, c.Value)
-		return fmt.Errorf("check change set failed")
-	})
-	if err != nil {
-		return err
-	}
-	if expectedStorageChanges.Len() != i {
-		return fmt.Errorf("db has less changesets")
-	}
-
-	return nil
-}
-
-func checkHistory(tx kv.Tx, changeSetBucket string, blockNum uint64) error {
-	indexBucket := historyv2.Mapper[changeSetBucket].IndexBucket
-	blockNumBytes := hexutility.EncodeTs(blockNum)
-	if err := historyv2.ForEach(tx, changeSetBucket, blockNumBytes, func(blockN uint64, address, v []byte) error {
-		k := dbutils.CompositeKeyWithoutIncarnation(address)
-		from := blockN
-		if from > 0 {
-			from--
-		}
-		bm, innerErr := bitmapdb.Get64(tx, indexBucket, k, from, blockN+1)
-		if innerErr != nil {
-			return innerErr
-		}
-		if !bm.Contains(blockN) {
-			return fmt.Errorf("checkHistory failed: bucket=%s,block=%d,addr=%x", changeSetBucket, blockN, k)
-		}
-		return nil
-	}); err != nil {
-		return err
-	}
-
-	return nil
 }

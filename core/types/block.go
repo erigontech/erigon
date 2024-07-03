@@ -1,18 +1,21 @@
 // Copyright 2014 The go-ethereum Authors
-// This file is part of the go-ethereum library.
+// (original work)
+// Copyright 2024 The Erigon Authors
+// (modifications)
+// This file is part of Erigon.
 //
-// The go-ethereum library is free software: you can redistribute it and/or modify
+// Erigon is free software: you can redistribute it and/or modify
 // it under the terms of the GNU Lesser General Public License as published by
 // the Free Software Foundation, either version 3 of the License, or
 // (at your option) any later version.
 //
-// The go-ethereum library is distributed in the hope that it will be useful,
+// Erigon is distributed in the hope that it will be useful,
 // but WITHOUT ANY WARRANTY; without even the implied warranty of
 // MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
 // GNU Lesser General Public License for more details.
 //
 // You should have received a copy of the GNU Lesser General Public License
-// along with the go-ethereum library. If not, see <http://www.gnu.org/licenses/>.
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
 // Package types contains data types related to Ethereum consensus.
 package types
@@ -640,8 +643,43 @@ type RawBody struct {
 	Requests     Requests
 }
 
+// BaseTxnID represents internal auto-incremented transaction number in block, may be different across the nodes
+// e.g. block has 3 transactions, then txAmount = 3+2/*systemTx*/ = 5 therefore:
+//
+//	0 - base tx/systemBegin
+//	1 - tx0
+//	2 - tx1
+//	3 - tx2
+//	4 - systemEnd
+//
+//	System transactions are used to write history of state changes done by consensus (not by eth-transactions) - for example "miner rewards"
+type BaseTxnID uint64
+
+// TxCountToTxAmount converts number of transactions in block to TxAmount
+func TxCountToTxAmount(txsLen int) uint32 {
+	return uint32(txsLen + 2)
+}
+
+func (b BaseTxnID) U64() uint64 { return uint64(b) }
+
+func (b BaseTxnID) Bytes() []byte { return hexutility.EncodeTs(uint64(b)) }
+
+// First non-system txn number in block
+// as if baseTxnID is first original transaction in block
+func (b BaseTxnID) First() uint64 { return uint64(b + 1) }
+
+// At returns txn number at block position `ti`.
+func (b BaseTxnID) At(ti int) uint64 { return b.First() + uint64(ti) }
+
+// FirstSystemTx returns first system txn number in block
+func (b BaseTxnID) FirstSystemTx() BaseTxnID { return b }
+
+// LastSystemTx returns last system txn number in block. result+1 will be baseID of next block a.k.a. beginning system txn number
+// Supposed that txAmount includes 2 system txns.
+func (b BaseTxnID) LastSystemTx(txAmount uint32) uint64 { return b.U64() + uint64(txAmount) - 1 }
+
 type BodyForStorage struct {
-	BaseTxId    uint64
+	BaseTxnID   BaseTxnID
 	TxCount     uint32
 	Uncles      []*Header
 	Withdrawals []*Withdrawal
@@ -811,10 +849,10 @@ func (rb *RawBody) DecodeRLP(s *rlp.Stream) error {
 }
 
 func (bfs BodyForStorage) payloadSize() (payloadSize, unclesLen, withdrawalsLen, requestsLen int) {
-	baseTxIdLen := 1 + rlp.IntLenExcludingHead(bfs.BaseTxId)
+	baseTxnIDLen := 1 + rlp.IntLenExcludingHead(bfs.BaseTxnID.U64())
 	txCountLen := 1 + rlp.IntLenExcludingHead(uint64(bfs.TxCount))
 
-	payloadSize += baseTxIdLen
+	payloadSize += baseTxnIDLen
 	payloadSize += txCountLen
 
 	// size of Uncles
@@ -846,7 +884,7 @@ func (bfs BodyForStorage) EncodeRLP(w io.Writer) error {
 	}
 
 	// encode BaseTxId
-	if err := rlp.Encode(w, bfs.BaseTxId); err != nil {
+	if err := rlp.Encode(w, bfs.BaseTxnID); err != nil {
 		return err
 	}
 
@@ -880,7 +918,7 @@ func (bfs *BodyForStorage) DecodeRLP(s *rlp.Stream) error {
 	}
 
 	// decode BaseTxId
-	if err = s.Decode(&bfs.BaseTxId); err != nil {
+	if err = s.Decode(&bfs.BaseTxnID); err != nil {
 		return err
 	}
 	// decode TxCount
@@ -1496,18 +1534,21 @@ func (b *Block) Hash() libcommon.Hash {
 
 type Blocks []*Block
 
-func DecodeOnlyTxMetadataFromBody(payload []byte) (baseTxId uint64, txCount uint32, err error) {
+func DecodeOnlyTxMetadataFromBody(payload []byte) (baseTxnID BaseTxnID, txCount uint32, err error) {
 	pos, _, err := rlp2.List(payload, 0)
 	if err != nil {
-		return baseTxId, txCount, err
+		return baseTxnID, txCount, err
 	}
-	pos, baseTxId, err = rlp2.U64(payload, pos)
+	var btID uint64
+	pos, btID, err = rlp2.U64(payload, pos)
 	if err != nil {
-		return baseTxId, txCount, err
+		return baseTxnID, txCount, err
 	}
+	baseTxnID = BaseTxnID(btID)
+
 	_, txCount, err = rlp2.U32(payload, pos)
 	if err != nil {
-		return baseTxId, txCount, err
+		return baseTxnID, txCount, err
 	}
 	return
 }

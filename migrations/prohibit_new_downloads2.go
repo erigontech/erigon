@@ -1,3 +1,19 @@
+// Copyright 2024 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+
 package migrations
 
 import (
@@ -27,7 +43,11 @@ var ProhibitNewDownloadsLock2 = Migration{
 		}
 		defer tx.Rollback()
 		fPath := filepath.Join(dirs.Snap, downloader.ProhibitNewDownloadsFileName)
-		if !dir.FileExist(fPath) {
+		exists, err := dir.FileExist(fPath)
+		if err != nil {
+			return err
+		}
+		if !exists {
 			if err := BeforeCommit(tx, nil, true); err != nil {
 				return err
 			}
@@ -42,6 +62,10 @@ var ProhibitNewDownloadsLock2 = Migration{
 			locked := []string{}
 
 			for _, t := range coresnaptype.BlockSnapshotTypes {
+				locked = append(locked, t.Name())
+			}
+
+			for _, t := range coresnaptype.E3StateTypes {
 				locked = append(locked, t.Name())
 			}
 

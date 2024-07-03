@@ -1,3 +1,19 @@
+// Copyright 2024 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+
 package freezeblocks_test
 
 import (
@@ -196,13 +212,13 @@ func TestDump(t *testing.T) {
 					body := &types.BodyForStorage{}
 					require.NoError(rlp.DecodeBytes(v, body))
 					txsAmount += uint64(body.TxCount)
-					baseIdList = append(baseIdList, body.BaseTxId)
+					baseIdList = append(baseIdList, body.BaseTxnID.U64())
 					return nil
 				}, 1, log.LvlInfo, log.New())
 			require.NoError(err)
 			require.Equal(test.chainSize-3, i)
 			require.Equal(3*(test.chainSize-3)-1, int(txsAmount))
-			require.Equal(append([]uint64{0}, baseIdRange(2, 3, test.chainSize-4)...), baseIdList)
+			require.EqualValues(append([]uint64{0}, baseIdRange(2, 3, test.chainSize-4)...), baseIdList)
 
 			firstTxNum += txsAmount
 			i = 0
@@ -212,13 +228,13 @@ func TestDump(t *testing.T) {
 				body := &types.BodyForStorage{}
 				require.NoError(rlp.DecodeBytes(v, body))
 				txsAmount += uint64(body.TxCount)
-				baseIdList = append(baseIdList, body.BaseTxId)
+				baseIdList = append(baseIdList, body.BaseTxnID.U64())
 				return nil
 			}, 1, log.LvlInfo, log.New())
 			require.NoError(err)
 			require.Equal(test.chainSize-1, i)
 			require.Equal(firstTxNum+uint64(3*(test.chainSize-1)), txsAmount)
-			require.Equal(baseIdRange(int(firstTxNum), 3, test.chainSize-1), baseIdList)
+			require.EqualValues(baseIdRange(int(firstTxNum), 3, test.chainSize-1), baseIdList)
 		})
 		t.Run("body_not_from_zero", func(t *testing.T) {
 			require := require.New(t)
@@ -229,12 +245,12 @@ func TestDump(t *testing.T) {
 				i++
 				body := &types.BodyForStorage{}
 				require.NoError(rlp.DecodeBytes(v, body))
-				baseIdList = append(baseIdList, body.BaseTxId)
+				baseIdList = append(baseIdList, body.BaseTxnID.U64())
 				return nil
 			}, 1, log.LvlInfo, log.New())
 			require.NoError(err)
 			require.Equal(test.chainSize-2, i)
-			require.Equal(baseIdRange(int(firstTxNum), 3, test.chainSize-2), baseIdList)
+			require.EqualValues(baseIdRange(int(firstTxNum), 3, test.chainSize-2), baseIdList)
 			require.Equal(lastTxNum, baseIdList[len(baseIdList)-1]+3)
 			require.Equal(lastTxNum, firstTxNum+uint64(i*3))
 		})
