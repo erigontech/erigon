@@ -179,6 +179,7 @@ func (bt *BlockTest) genesis(config *chain.Config) *types.Genesis {
 		BlobGasUsed:           bt.json.Genesis.BlobGasUsed,
 		ExcessBlobGas:         bt.json.Genesis.ExcessBlobGas,
 		ParentBeaconBlockRoot: bt.json.Genesis.ParentBeaconBlockRoot,
+		RequestsRoot:          bt.json.Genesis.RequestsRoot,
 	}
 }
 
