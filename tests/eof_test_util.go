@@ -118,6 +118,8 @@ var errorsMap = map[string][]error{
 	"EOFException.JUMPF_DESTINATION_INCOMPATIBLE_OUTPUTS": []error{vm.ErrJUMPFOutputs},
 	"EOFException.INVALID_NON_RETURNING_FLAG":             []error{vm.ErrEOFStackOverflow}, // TODO(racytech): comment this out and test on jumpf, there supposed to be another error from our side, compare it to EVMone
 	"EOFException.STACK_HIGHER_THAN_OUTPUTS":              []error{vm.ErrStackHeightHigher},
+	"EOFException.CONTAINER_SIZE_ABOVE_LIMIT":             []error{vm.ErrInvalidMagic}, // TODO(racytech): change this when tests get updated
+	"EOFException.INVALID_CONTAINER_SECTION_INDEX":        []error{vm.ErrInvalidContainerArgument},
 }
 
 func mapError(exception string, cmp error) bool {

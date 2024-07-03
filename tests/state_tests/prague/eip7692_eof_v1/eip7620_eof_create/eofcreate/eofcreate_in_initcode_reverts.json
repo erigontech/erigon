@@ -1,5 +1,5 @@
 {
-    "tests/prague/eip7692_eof_v1/eip7620_eof_create/test_eofcreate.py::test_eofcreate_in_initcode_reverts[fork_CancunEIP7692-state_test]": {
+    "tests/prague/eip7692_eof_v1/eip7620_eof_create/test_eofcreate.py::test_eofcreate_in_initcode_reverts[fork_PragueEIP7692-state_test]": {
         "env": {
             "currentCoinbase": "0x2adc25665018aa1fe0e6bc666dac8fc2697ff9ba",
             "currentGasLimit": "0x016345785d8a0000",
@@ -20,7 +20,7 @@
             "0x0000000000000000000000000000000000001000": {
                 "nonce": "0x01",
                 "balance": "0x00",
-                "code": "0xef00010100040200010014030001007804000000008000046000600060006000ec0060035561201560015500ef000101000402000100180300020032001404000000008000046000600060006000ec0060035561201560015560006000fdef000101000402000100060300010014040000000080000260006000ee00ef00010100040200010001040000000080000000ef00010100040200010001040000000080000000",
+                "code": "0xef00010100040200010014030001006204000000008000046000600060006000ec0060035561201560015500ef00010100040200010018030001003204000000008000046000600060006000ec0060035561201560015560006000fdef000101000402000100060300010014040000000080000260006000ee00ef00010100040200010001040000000080000000",
                 "storage": {
                     "0x03": "0x2009"
                 }
@@ -45,7 +45,7 @@
         "post": {
             "Prague": [
                 {
-                    "hash": "0xd94e901ffb45c34b1c9f65d4ea801852e0b3c8ef38dc567f3799d68865eada88",
+                    "hash": "0xe3b70714e6e087fb1c5488347e704d03f98bf070eb3293dee191e400cec3c0b8",
                     "logs": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
                     "txbytes": "0xf860800a8398968094000000000000000000000000000000000000100080801ba00a827f57dab1e27137696202f240cb95cfc25acf2f077f6b32a7ca3ac039baf0a055fdd3269172368d880a16fa4192049edd5211d8cbb1d5222a0a77b11174d574",
                     "indexes": {
@@ -57,11 +57,11 @@
             ]
         },
         "_info": {
-            "hash": "0xc4f6291790557df77e37764b95fe6f0a84e088cadadcf3c69f36c0ff2d54fd8a",
+            "hash": "0x19c114780894eb7bd2ec778dbc3d8e9bf465e2946616f0671a2a6bb252d4ef98",
             "comment": "`execution-spec-tests` generated test",
-            "filling-transition-tool": "evmone-t8n 0.12.0-dev+commit.85a89e56",
+            "filling-transition-tool": "Hyperledger Besu evm 24.7-develop-8ca7129",
             "description": "Test function documentation:\n\n    Verifies an EOFCREATE occuring in an initcode is rolled back when the initcode reverts",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.0.4/tests/prague/eip7692_eof_v1/eip7620_eof_create/test_eofcreate.py#L333",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692-prague@v1.0.5/tests/prague/eip7692_eof_v1/eip7620_eof_create/test_eofcreate.py#L333",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7620.md",
             "reference-spec-version": "52ddbcdddcf72dd72427c319f2beddeb468e1737"
         }

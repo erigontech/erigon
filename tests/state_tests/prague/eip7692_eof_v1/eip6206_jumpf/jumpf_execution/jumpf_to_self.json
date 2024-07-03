@@ -1,5 +1,5 @@
 {
-    "tests/prague/eip7692_eof_v1/eip6206_jumpf/test_jumpf_execution.py::test_jumpf_to_self[fork_CancunEIP7692-state_test]": {
+    "tests/prague/eip7692_eof_v1/eip6206_jumpf/test_jumpf_execution.py::test_jumpf_to_self[fork_PragueEIP7692-state_test]": {
         "env": {
             "currentCoinbase": "0x2adc25665018aa1fe0e6bc666dac8fc2697ff9ba",
             "currentGasLimit": "0x016345785d8a0000",
@@ -11,16 +11,16 @@
             "currentExcessBlobGas": "0x00"
         },
         "pre": {
-            "0x0000000000000000000000000000000000001000": {
-                "nonce": "0x01",
-                "balance": "0x00",
-                "code": "0xef00010100040200010011040000000080000260015415e1000100612015600155e50000",
-                "storage": {}
-            },
             "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b": {
                 "nonce": "0x00",
                 "balance": "0x3635c9adc5dea00000",
                 "code": "0x",
+                "storage": {}
+            },
+            "0x0000000000000000000000000000000000001000": {
+                "nonce": "0x01",
+                "balance": "0x00",
+                "code": "0xef00010100040200010011040000000080000260015415e1000100612015600155e50000",
                 "storage": {}
             }
         },
@@ -45,7 +45,7 @@
                 {
                     "hash": "0x5f5ca342f30384de27b257d7eab36b0457a9d12e3a67c34150e368990931b942",
                     "logs": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
-                    "txbytes": "0xf860800a8398968094000000000000000000000000000000000000100080011ba036e2a736f4d7a9ccf9861e08ee4390e50c4933a4678cd5836840525f648d498da06f9aee13849dae6ad31abce2527033fc96d62c8a5b530c1a1a2c98aac7abf242",
+                    "txbytes": "0xf860800a83989680940000000000000000000000000000000000001000800126a076933327afe88231567c45fb664b764a9f4cac68e6e36a88153f52e4cb8b7087a023feae97723bfc8fac1a432b65b88e300278233f83347344b296d0f6c4f17852",
                     "indexes": {
                         "data": 0,
                         "gas": 0,
@@ -55,11 +55,11 @@
             ]
         },
         "_info": {
-            "hash": "0xa0a0ada235d6c4c4e4ccff717ccc73dfca984a11b00805bb44cc89515c64ca90",
+            "hash": "0x009a24aaa4721ed970203c4544447a99fc827fae47129368d536ea617675f524",
             "comment": "`execution-spec-tests` generated test",
-            "filling-transition-tool": "evmone-t8n 0.12.0-dev+commit.85a89e56",
+            "filling-transition-tool": "Hyperledger Besu evm 24.7-develop-8ca7129",
             "description": "Test function documentation:\nTests JUMPF jumping to self",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.0.4/tests/prague/eip7692_eof_v1/eip6206_jumpf/test_jumpf_execution.py#L64",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692-prague@v1.0.5/tests/prague/eip7692_eof_v1/eip6206_jumpf/test_jumpf_execution.py#L64",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-6206.md",
             "reference-spec-version": "2f365ea0cd58faa6e26013ea77ce6d538175f7d0"
         }

@@ -1,5 +1,5 @@
 {
-    "tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_calls.py::test_eof_calls_legacy_mstore[fork_CancunEIP7692-state_test-extcall]": {
+    "tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_calls.py::test_eof_calls_legacy_mstore[fork_PragueEIP7692-state_test-extcall]": {
         "env": {
             "currentCoinbase": "0x2adc25665018aa1fe0e6bc666dac8fc2697ff9ba",
             "currentGasLimit": "0x016345785d8a0000",
@@ -63,14 +63,14 @@
         "_info": {
             "hash": "0x499e265d571aad1bd4fab13f4f4f126a0b9fa5d9eac9807ca1721a2c41064b96",
             "comment": "`execution-spec-tests` generated test",
-            "filling-transition-tool": "evmone-t8n 0.12.0-dev+commit.85a89e56",
+            "filling-transition-tool": "Hyperledger Besu evm 24.7-develop-8ca7129",
             "description": "Test function documentation:\nTest EOF contracts calling Legacy contracts that return data",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.0.4/tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_calls.py#L403",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692-prague@v1.0.5/tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_calls.py#L403",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-3540.md",
             "reference-spec-version": "2f013de4065babde7c02f84a2ce9864a3c5bfbd3"
         }
     },
-    "tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_calls.py::test_eof_calls_legacy_mstore[fork_CancunEIP7692-state_test-extdelegatecall]": {
+    "tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_calls.py::test_eof_calls_legacy_mstore[fork_PragueEIP7692-state_test-extdelegatecall]": {
         "env": {
             "currentCoinbase": "0x2adc25665018aa1fe0e6bc666dac8fc2697ff9ba",
             "currentGasLimit": "0x016345785d8a0000",
@@ -134,14 +134,14 @@
         "_info": {
             "hash": "0xfe075a2418f5a7429c2677a3ee8346411a20dc311016e4268c84edc66080d9aa",
             "comment": "`execution-spec-tests` generated test",
-            "filling-transition-tool": "evmone-t8n 0.12.0-dev+commit.85a89e56",
+            "filling-transition-tool": "Hyperledger Besu evm 24.7-develop-8ca7129",
             "description": "Test function documentation:\nTest EOF contracts calling Legacy contracts that return data",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.0.4/tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_calls.py#L403",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692-prague@v1.0.5/tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_calls.py#L403",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-3540.md",
             "reference-spec-version": "2f013de4065babde7c02f84a2ce9864a3c5bfbd3"
         }
     },
-    "tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_calls.py::test_eof_calls_legacy_mstore[fork_CancunEIP7692-state_test-extstaticall]": {
+    "tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_calls.py::test_eof_calls_legacy_mstore[fork_PragueEIP7692-state_test-extstaticall]": {
         "env": {
             "currentCoinbase": "0x2adc25665018aa1fe0e6bc666dac8fc2697ff9ba",
             "currentGasLimit": "0x016345785d8a0000",
@@ -205,9 +205,9 @@
         "_info": {
             "hash": "0xc388ad4dc98afd233d1b1ed30144b0feca16cb7097720b38dc82aaec4c0984c6",
             "comment": "`execution-spec-tests` generated test",
-            "filling-transition-tool": "evmone-t8n 0.12.0-dev+commit.85a89e56",
+            "filling-transition-tool": "Hyperledger Besu evm 24.7-develop-8ca7129",
             "description": "Test function documentation:\nTest EOF contracts calling Legacy contracts that return data",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.0.4/tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_calls.py#L403",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692-prague@v1.0.5/tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_calls.py#L403",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-3540.md",
             "reference-spec-version": "2f013de4065babde7c02f84a2ce9864a3c5bfbd3"
         }

@@ -1,5 +1,5 @@
 {
-    "tests/prague/eip7692_eof_v1/eip7069_extcall/test_returndataload.py::test_returndatacopy_oob[fork_CancunEIP7692-state_test-CallerIsLegacy]": {
+    "tests/prague/eip7692_eof_v1/eip7069_extcall/test_returndataload.py::test_returndatacopy_oob[fork_PragueEIP7692-state_test-CallerIsLegacy]": {
         "env": {
             "currentCoinbase": "0x2adc25665018aa1fe0e6bc666dac8fc2697ff9ba",
             "currentGasLimit": "0x016345785d8a0000",
@@ -75,14 +75,14 @@
         "_info": {
             "hash": "0x4e43cc076e863edff8e2d623d54a8ae54c1784e0d629e4a202610d52b6b24abf",
             "comment": "`execution-spec-tests` generated test",
-            "filling-transition-tool": "evmone-t8n 0.12.0-dev+commit.85a89e56",
+            "filling-transition-tool": "Hyperledger Besu evm 24.7-develop-8ca7129",
             "description": "Test function documentation:\n\n    Extends the RETURNDATACOPY test for correct out-of-bounds behavior, by checking if the\n    caller frame's context being EOF or legacy doesn't impact the execution logic of the\n    RETURNDATACOPY instance under test.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.0.4/tests/prague/eip7692_eof_v1/eip7069_extcall/test_returndataload.py#L278",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692-prague@v1.0.5/tests/prague/eip7692_eof_v1/eip7069_extcall/test_returndataload.py#L278",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7069.md",
             "reference-spec-version": "1795943aeacc86131d5ab6bb3d65824b3b1d4cad"
         }
     },
-    "tests/prague/eip7692_eof_v1/eip7069_extcall/test_returndataload.py::test_returndatacopy_oob[fork_CancunEIP7692-state_test-CallerIsEOF]": {
+    "tests/prague/eip7692_eof_v1/eip7069_extcall/test_returndataload.py::test_returndatacopy_oob[fork_PragueEIP7692-state_test-CallerIsEOF]": {
         "env": {
             "currentCoinbase": "0x2adc25665018aa1fe0e6bc666dac8fc2697ff9ba",
             "currentGasLimit": "0x016345785d8a0000",
@@ -152,9 +152,9 @@
         "_info": {
             "hash": "0x8fb6391236bc9e7a16ceaea108a5ceddd126a35b83bc2acc0961d171c35b0ce2",
             "comment": "`execution-spec-tests` generated test",
-            "filling-transition-tool": "evmone-t8n 0.12.0-dev+commit.85a89e56",
+            "filling-transition-tool": "Hyperledger Besu evm 24.7-develop-8ca7129",
             "description": "Test function documentation:\n\n    Extends the RETURNDATACOPY test for correct out-of-bounds behavior, by checking if the\n    caller frame's context being EOF or legacy doesn't impact the execution logic of the\n    RETURNDATACOPY instance under test.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.0.4/tests/prague/eip7692_eof_v1/eip7069_extcall/test_returndataload.py#L278",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692-prague@v1.0.5/tests/prague/eip7692_eof_v1/eip7069_extcall/test_returndataload.py#L278",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7069.md",
             "reference-spec-version": "1795943aeacc86131d5ab6bb3d65824b3b1d4cad"
         }

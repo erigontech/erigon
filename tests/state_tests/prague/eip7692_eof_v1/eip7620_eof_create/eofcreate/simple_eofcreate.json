@@ -1,5 +1,5 @@
 {
-    "tests/prague/eip7692_eof_v1/eip7620_eof_create/test_eofcreate.py::test_simple_eofcreate[fork_CancunEIP7692-state_test]": {
+    "tests/prague/eip7692_eof_v1/eip7620_eof_create/test_eofcreate.py::test_simple_eofcreate[fork_PragueEIP7692-state_test]": {
         "env": {
             "currentCoinbase": "0x2adc25665018aa1fe0e6bc666dac8fc2697ff9ba",
             "currentGasLimit": "0x016345785d8a0000",
@@ -59,9 +59,9 @@
         "_info": {
             "hash": "0x05cdf83ec52c899baca86fdc254597067f754456024da51a4267f0e7f7826a28",
             "comment": "`execution-spec-tests` generated test",
-            "filling-transition-tool": "evmone-t8n 0.12.0-dev+commit.85a89e56",
+            "filling-transition-tool": "Hyperledger Besu evm 24.7-develop-8ca7129",
             "description": "Test function documentation:\n\n    Verifies a simple EOFCREATE case",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.0.4/tests/prague/eip7692_eof_v1/eip7620_eof_create/test_eofcreate.py#L40",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692-prague@v1.0.5/tests/prague/eip7692_eof_v1/eip7620_eof_create/test_eofcreate.py#L40",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7620.md",
             "reference-spec-version": "52ddbcdddcf72dd72427c319f2beddeb468e1737"
         }
