@@ -19,10 +19,11 @@ package eth
 import (
 	"context"
 	"fmt"
-
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/ledgerwatch/erigon-lib/kv/rawdbv3"
 	"github.com/ledgerwatch/erigon-lib/log/v3"
+	"github.com/ledgerwatch/erigon/cmd/state/exec3"
 
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/core/rawdb"
@@ -157,7 +158,7 @@ func AnswerGetBlockBodiesQuery(db kv.Tx, query GetBlockBodiesPacket, blockReader
 	return bodies
 }
 
-func AnswerGetReceiptsQuery(br services.FullBlockReader, db kv.Tx, query GetReceiptsPacket) ([]rlp.RawValue, error) { //nolint:unparam
+func AnswerGetReceiptsQuery(br services.FullBlockReader, db kv.Tx, query GetReceiptsPacket, exec *exec3.TraceWorker) ([]rlp.RawValue, error) { //nolint:unparam
 	// Gather state data until the fetch or network limits is reached
 	var (
 		bytes    int
@@ -190,6 +191,11 @@ func AnswerGetReceiptsQuery(br services.FullBlockReader, db kv.Tx, query GetRece
 				continue
 			}
 		}
+		err = AddLogsToReceipts(db, results, b, exec)
+		if err != nil {
+			return nil, err
+		}
+
 		// If known, encode and queue for response packet
 		if encoded, err := rlp.EncodeToBytes(results); err != nil {
 			return nil, fmt.Errorf("failed to encode receipt: %w", err)
@@ -199,4 +205,21 @@ func AnswerGetReceiptsQuery(br services.FullBlockReader, db kv.Tx, query GetRece
 		}
 	}
 	return receipts, nil
+}
+
+func AddLogsToReceipts(db kv.Tx, receipts types.Receipts, block *types.Block, exec *exec3.TraceWorker) error {
+	txs := block.Transactions()
+	txNum, err := rawdbv3.TxNums.Min(db, block.NumberU64())
+	if err != nil {
+		return err
+	}
+	for i := range receipts {
+		_, err = exec.ExecTxn(txNum, i, txs[i])
+		if err != nil {
+			return err
+		}
+		logs := exec.GetLogs(i, txs[i])
+		receipts[i].Logs = logs
+	}
+	return nil
 }
