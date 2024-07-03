@@ -329,7 +329,7 @@ type Bor struct {
 	frozenSnapshotsInit sync.Once
 	rootHashCache       *lru.ARCCache[string, string]
 	headerProgress      HeaderProgress
-	polygonBridge       bridge.Service
+	polygonBridge       bridge.PolygonBridge
 }
 
 type signer struct {
