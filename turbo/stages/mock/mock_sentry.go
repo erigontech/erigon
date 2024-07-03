@@ -371,6 +371,7 @@ func MockWithEverything(tb testing.TB, gspec *types.Genesis, key *ecdsa.PrivateK
 		mock.ChainConfig,
 		mock.Genesis,
 		mock.ChainConfig.ChainID.Uint64(),
+		logger,
 	)
 
 	maxBlockBroadcastPeers := func(header *types.Header) uint { return 0 }

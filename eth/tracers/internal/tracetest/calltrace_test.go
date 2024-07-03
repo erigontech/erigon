@@ -32,7 +32,6 @@ import (
 	"github.com/ledgerwatch/erigon-lib/common/dir"
 	"github.com/ledgerwatch/erigon-lib/common/hexutil"
 	"github.com/ledgerwatch/erigon-lib/common/hexutility"
-
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/math"
 	"github.com/ledgerwatch/erigon/core"
@@ -53,6 +52,7 @@ type callContext struct {
 	Difficulty *math.HexOrDecimal256 `json:"difficulty"`
 	Time       math.HexOrDecimal64   `json:"timestamp"`
 	GasLimit   math.HexOrDecimal64   `json:"gasLimit"`
+	BaseFee    *math.HexOrDecimal256 `json:"baseFeePerGas"`
 	Miner      libcommon.Address     `json:"miner"`
 }
 
@@ -132,41 +132,37 @@ func testCallTracer(tracerName string, dirPath string, t *testing.T) {
 				t.Fatalf("failed to parse testcase input: %v", err)
 			}
 			// Configure a blockchain with the given prestate
-			var (
-				signer    = types.MakeSigner(test.Genesis.Config, uint64(test.Context.Number), uint64(test.Context.Time))
-				origin, _ = signer.Sender(tx)
-				txContext = evmtypes.TxContext{
-					Origin:   origin,
-					GasPrice: tx.GetPrice(),
-				}
-				context = evmtypes.BlockContext{
-					CanTransfer: core.CanTransfer,
-					Transfer:    core.Transfer,
-					Coinbase:    test.Context.Miner,
-					BlockNumber: uint64(test.Context.Number),
-					Time:        uint64(test.Context.Time),
-					Difficulty:  (*big.Int)(test.Context.Difficulty),
-					GasLimit:    uint64(test.Context.GasLimit),
-				}
-				rules = test.Genesis.Config.Rules(context.BlockNumber, context.Time)
-			)
+			signer := types.MakeSigner(test.Genesis.Config, uint64(test.Context.Number), uint64(test.Context.Time))
+			context := evmtypes.BlockContext{
+				CanTransfer: core.CanTransfer,
+				Transfer:    core.Transfer,
+				Coinbase:    test.Context.Miner,
+				BlockNumber: uint64(test.Context.Number),
+				Time:        uint64(test.Context.Time),
+				Difficulty:  (*big.Int)(test.Context.Difficulty),
+				GasLimit:    uint64(test.Context.GasLimit),
+			}
+			if test.Context.BaseFee != nil {
+				context.BaseFee, _ = uint256.FromBig((*big.Int)(test.Context.BaseFee))
+			}
+			rules := test.Genesis.Config.Rules(context.BlockNumber, context.Time)
+
 			m := mock.Mock(t)
 			dbTx, err := m.DB.BeginRw(m.Ctx)
 			require.NoError(t, err)
 			defer dbTx.Rollback()
-			statedb, _ := tests.MakePreState(rules, dbTx, test.Genesis.Alloc, uint64(test.Context.Number))
-			if test.Genesis.BaseFee != nil {
-				context.BaseFee, _ = uint256.FromBig(test.Genesis.BaseFee)
-			}
+			statedb, err := tests.MakePreState(rules, dbTx, test.Genesis.Alloc, uint64(test.Context.Number))
+			require.NoError(t, err)
 			tracer, err := tracers.New(tracerName, new(tracers.Context), test.TracerConfig)
 			if err != nil {
 				t.Fatalf("failed to create call tracer: %v", err)
 			}
-			evm := vm.NewEVM(context, txContext, statedb, test.Genesis.Config, vm.Config{Debug: true, Tracer: tracer})
-			msg, err := tx.AsMessage(*signer, test.Genesis.BaseFee, rules)
+			msg, err := tx.AsMessage(*signer, (*big.Int)(test.Context.BaseFee), rules)
 			if err != nil {
 				t.Fatalf("failed to prepare transaction for tracing: %v", err)
 			}
+			txContext := core.NewEVMTxContext(msg)
+			evm := vm.NewEVM(context, txContext, statedb, test.Genesis.Config, vm.Config{Debug: true, Tracer: tracer})
 			vmRet, err := core.ApplyMessage(evm, msg, new(core.GasPool).AddGas(tx.GetGas()).AddBlobGas(tx.GetBlobGas()), true /* refunds */, false /* gasBailout */)
 			if err != nil {
 				t.Fatalf("failed to execute transaction: %v", err)
@@ -182,8 +178,10 @@ func testCallTracer(tracerName string, dirPath string, t *testing.T) {
 				// This is a tweak to make it deterministic. Can be removed when
 				// we remove the legacy tracer.
 				var x callTrace
-				json.Unmarshal(res, &x)
-				res, _ = json.Marshal(x)
+				err = json.Unmarshal(res, &x)
+				require.NoError(t, err)
+				res, err = json.Marshal(x)
+				require.NoError(t, err)
 			}
 			want, err := json.Marshal(test.Result)
 			if err != nil {

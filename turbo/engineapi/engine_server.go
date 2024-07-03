@@ -89,7 +89,7 @@ func (e *EngineServer) Start(
 ) {
 	base := jsonrpc.NewBaseApi(filters, stateCache, blockReader, agg, httpConfig.WithDatadir, httpConfig.EvmCallTimeout, engineReader, httpConfig.Dirs)
 
-	ethImpl := jsonrpc.NewEthAPI(base, db, eth, txPool, mining, httpConfig.Gascap, httpConfig.ReturnDataLimit, httpConfig.AllowUnprotectedTxs, httpConfig.MaxGetProofRewindBlockCount, httpConfig.WebsocketSubscribeLogsChannelSize, e.logger)
+	ethImpl := jsonrpc.NewEthAPI(base, db, eth, txPool, mining, httpConfig.Gascap, httpConfig.Feecap, httpConfig.ReturnDataLimit, httpConfig.AllowUnprotectedTxs, httpConfig.MaxGetProofRewindBlockCount, httpConfig.WebsocketSubscribeLogsChannelSize, e.logger)
 
 	// engineImpl := NewEngineAPI(base, db, engineBackend)
 	// e.startEngineMessageHandler()
@@ -768,7 +768,18 @@ func (e *EngineServer) HandleNewPayload(
 			if !success {
 				return &engine_types.PayloadStatus{Status: engine_types.SyncingStatus}, nil
 			}
-			return &engine_types.PayloadStatus{Status: engine_types.ValidStatus, LatestValidHash: &headerHash}, nil
+
+			status, _, latestValidHash, err := e.chainRW.ValidateChain(ctx, headerHash, headerNumber)
+			if err != nil {
+				return nil, err
+			}
+
+			if status == execution.ExecutionStatus_Busy || status == execution.ExecutionStatus_TooFarAway {
+				e.logger.Debug(fmt.Sprintf("[%s] New payload: Client is still syncing", logPrefix))
+				return &engine_types.PayloadStatus{Status: engine_types.SyncingStatus}, nil
+			} else {
+				return &engine_types.PayloadStatus{Status: engine_types.ValidStatus, LatestValidHash: &latestValidHash}, nil
+			}
 		} else {
 			return &engine_types.PayloadStatus{Status: engine_types.SyncingStatus}, nil
 		}

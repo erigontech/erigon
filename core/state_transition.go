@@ -305,7 +305,8 @@ func (st *StateTransition) preCheck(gasBailout bool) error {
 	// Make sure the transaction gasFeeCap is greater than the block's baseFee.
 	if st.evm.ChainRules().IsLondon {
 		// Skip the checks if gas fields are zero and baseFee was explicitly disabled (eth_call)
-		if !st.evm.Config().NoBaseFee || !st.gasFeeCap.IsZero() || !st.tip.IsZero() {
+		skipCheck := st.evm.Config().NoBaseFee && st.gasFeeCap.IsZero() && st.tip.IsZero()
+		if !skipCheck {
 			if err := CheckEip1559TxGasFeeCap(st.msg.From(), st.gasFeeCap, st.tip, st.evm.Context.BaseFee, st.msg.IsFree()); err != nil {
 				return err
 			}
@@ -320,7 +321,7 @@ func (st *StateTransition) preCheck(gasBailout bool) error {
 			return err
 		}
 		maxFeePerBlobGas := st.msg.MaxFeePerBlobGas()
-		if blobGasPrice.Cmp(maxFeePerBlobGas) > 0 {
+		if !st.evm.Config().NoBaseFee && blobGasPrice.Cmp(maxFeePerBlobGas) > 0 {
 			return fmt.Errorf("%w: address %v, maxFeePerBlobGas: %v blobGasPrice: %v, excessBlobGas: %v",
 				ErrMaxFeePerBlobGas,
 				st.msg.From().Hex(), st.msg.MaxFeePerBlobGas(), blobGasPrice, st.evm.Context.ExcessBlobGas)

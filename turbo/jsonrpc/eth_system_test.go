@@ -7,14 +7,16 @@ import (
 	"testing"
 
 	"github.com/holiman/uint256"
+
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
+
+	"github.com/ledgerwatch/log/v3"
 
 	"github.com/ledgerwatch/erigon/core"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/crypto"
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/turbo/stages/mock"
-	"github.com/ledgerwatch/log/v3"
 )
 
 func TestGasPrice(t *testing.T) {
@@ -40,7 +42,7 @@ func TestGasPrice(t *testing.T) {
 		t.Run(testCase.description, func(t *testing.T) {
 			m := createGasPriceTestKV(t, testCase.chainSize)
 			defer m.DB.Close()
-			eth := NewEthAPI(newBaseApiForTest(m), m.DB, nil, nil, nil, 5000000, 100_000, false, 100_000, 128, log.New())
+			eth := NewEthAPI(newBaseApiForTest(m), m.DB, nil, nil, nil, 5000000, 1e18, 100_000, false, 100_000, 128, log.New())
 
 			ctx := context.Background()
 			result, err := eth.GasPrice(ctx)

@@ -41,6 +41,12 @@ func SetupStagesAccess(metricsMux *http.ServeMux, diag *diaglib.DiagnosticClient
 		w.Header().Set("Content-Type", "application/json")
 		writeNetworkSpeed(w, diag)
 	})
+
+	metricsMux.HandleFunc("/sync-stages", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Access-Control-Allow-Origin", "*")
+		w.Header().Set("Content-Type", "application/json")
+		writeSyncStages(w, diag)
+	})
 }
 
 func writeNetworkSpeed(w http.ResponseWriter, diag *diaglib.DiagnosticClient) {
@@ -61,4 +67,8 @@ func writeFilesList(w http.ResponseWriter, diag *diaglib.DiagnosticClient) {
 
 func writeHardwareInfo(w http.ResponseWriter, diag *diaglib.DiagnosticClient) {
 	json.NewEncoder(w).Encode(diag.HardwareInfo())
+}
+
+func writeSyncStages(w http.ResponseWriter, diag *diaglib.DiagnosticClient) {
+	json.NewEncoder(w).Encode(diag.GetSyncStages())
 }

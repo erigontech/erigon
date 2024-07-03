@@ -15,6 +15,7 @@ package clparams
 
 import (
 	"crypto/rand"
+	"encoding/binary"
 	"fmt"
 	"math"
 	"math/big"
@@ -315,7 +316,9 @@ func (b ConfigByte) MarshalJSON() ([]byte, error) {
 type ConfigForkVersion uint32
 
 func (v ConfigForkVersion) MarshalJSON() ([]byte, error) {
-	return []byte(fmt.Sprintf("\"0x%x\"", v)), nil
+	tmp := make([]byte, 4)
+	binary.BigEndian.PutUint32(tmp, uint32(v))
+	return []byte(fmt.Sprintf("\"0x%x\"", tmp)), nil
 }
 
 // BeaconChainConfig contains constant configs for node to participate in beacon chain.

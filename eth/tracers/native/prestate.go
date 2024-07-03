@@ -101,19 +101,28 @@ func (t *prestateTracer) CaptureStart(env *vm.EVM, from libcommon.Address, to li
 	t.lookupAccount(to)
 	t.lookupAccount(env.Context.Coinbase)
 
-	// The recipient balance includes the value transferred.
-	toBal := new(big.Int).Sub(t.pre[to].Balance, value.ToBig())
-	t.pre[to].Balance = toBal
+	// The sender balance is after reducing: gasLimit.
+	// We need to re-add it to get the pre-tx balance.
+	consumedGas := new(big.Int).Mul(env.GasPrice.ToBig(), new(big.Int).SetUint64(t.gasLimit))
+	fromBal := t.pre[from].Balance
+	fromBal.Add(fromBal, consumedGas)
 
-	// The sender balance is after reducing: value and gasLimit.
-	// We need to re-add them to get the pre-tx balance.
-	fromBal := new(big.Int).Set(t.pre[from].Balance)
-	gasPrice := env.GasPrice
-	consumedGas := new(big.Int).Mul(gasPrice.ToBig(), new(big.Int).SetUint64(t.gasLimit))
-	fromBal.Add(fromBal, new(big.Int).Add(value.ToBig(), consumedGas))
-	t.pre[from].Balance = fromBal
-	if t.pre[from].Nonce > 0 {
-		t.pre[from].Nonce--
+	if !create {
+		valueBig := value.ToBig()
+		// The recipient balance includes the value transferred.
+		toBal := t.pre[to].Balance
+		toBal.Sub(toBal, valueBig)
+
+		// The sender balance is after reducing: value.
+		// We need to re-add it to get the pre-tx balance.
+		fromBal.Add(fromBal, valueBig)
+
+		// Nonce has been incremented before reaching here
+		// when txn is not a "create".
+		// We need to decrement it to get the pre-tx nonce.
+		if t.pre[from].Nonce > 0 {
+			t.pre[from].Nonce--
+		}
 	}
 
 	if create && t.config.DiffMode {

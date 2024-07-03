@@ -156,9 +156,7 @@ func SentryReconnectAndPumpStreamLoop[TMessage interface{}](
 		statusData, err := statusDataFactory(ctx)
 
 		if err != nil {
-			if !errors.Is(err, sentry.ErrNoHead) {
-				logger.Error("SentryReconnectAndPumpStreamLoop: statusDataFactory error", "stream", streamName, "err", err)
-			}
+			logger.Error("SentryReconnectAndPumpStreamLoop: statusDataFactory error", "stream", streamName, "err", err)
 			time.Sleep(time.Second)
 			continue
 		}

@@ -96,7 +96,8 @@ func (s *SentinelServer) PublishGossip(_ context.Context, msg *sentinelrpc.Gossi
 		gossip.TopicNameVoluntaryExit,
 		gossip.TopicNameProposerSlashing,
 		gossip.TopicNameSyncCommitteeContributionAndProof,
-		gossip.TopicNameAttesterSlashing:
+		gossip.TopicNameAttesterSlashing,
+		gossip.TopicNameBlsToExecutionChange:
 		subscription = manager.GetMatchingSubscription(msg.Name)
 	default:
 		// check subnets

@@ -217,7 +217,7 @@ func logReceipts(receipts types.Receipts, txns types.Transactions, cc *chain.Con
 		return
 	}
 
-	marshalled := make([]map[string]interface{}, len(receipts))
+	marshalled := make([]map[string]interface{}, 0, len(receipts))
 	for i, receipt := range receipts {
 		txn := txns[i]
 		marshalled = append(marshalled, ethutils.MarshalReceipt(receipt, txn, cc, header, txn.Hash(), true))

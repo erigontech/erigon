@@ -31,7 +31,11 @@ import (
 )
 
 func init() {
-	borTypes := append(coresnaptype.BlockSnapshotTypes, BorSnapshotTypes...)
+	initTypes()
+}
+
+func initTypes() {
+	borTypes := append(coresnaptype.BlockSnapshotTypes, BorSnapshotTypes()...)
 
 	snapcfg.RegisterKnownTypes(networkname.MumbaiChainName, borTypes)
 	snapcfg.RegisterKnownTypes(networkname.AmoyChainName, borTypes)
@@ -402,9 +406,42 @@ var (
 				return buildValueIndex(ctx, sn, salt, d, firstMilestoneId, tmpDir, p, lvl, logger)
 			}),
 	)
-
-	BorSnapshotTypes = []snaptype.Type{BorEvents, BorSpans, BorCheckpoints, BorMilestones}
 )
+
+var recordWaypoints bool
+
+func RecordWayPoints(value bool) {
+	recordWaypoints = value
+	initTypes()
+}
+
+func BorSnapshotTypes() []snaptype.Type {
+	if recordWaypoints {
+		return []snaptype.Type{BorEvents, BorSpans, BorCheckpoints, BorMilestones}
+	}
+
+	return []snaptype.Type{BorEvents, BorSpans}
+}
+
+func CheckpointsEnabled() bool {
+	for _, snapType := range BorSnapshotTypes() {
+		if snapType.Enum() == BorCheckpoints.Enum() {
+			return true
+		}
+	}
+
+	return false
+}
+
+func MilestonesEnabled() bool {
+	for _, snapType := range BorSnapshotTypes() {
+		if snapType.Enum() == BorMilestones.Enum() {
+			return true
+		}
+	}
+
+	return false
+}
 
 func extractValueRange(ctx context.Context, table string, valueFrom, valueTo uint64, db kv.RoDB, collect func([]byte) error, workers int, lvl log.Lvl, logger log.Logger) (uint64, error) {
 	logEvery := time.NewTicker(20 * time.Second)

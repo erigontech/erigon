@@ -52,7 +52,9 @@ var (
 		Name: "metrics",
 	}
 	metricsAddrFlag = cli.StringFlag{
-		Name: "metrics.addr",
+		Name:  "metrics.addr",
+		Usage: "Prometheus HTTP server listening interface",
+		Value: "0.0.0.0",
 	}
 	metricsPortFlag = cli.UintFlag{
 		Name:  "metrics.port",
@@ -182,7 +184,7 @@ func SetupCobra(cmd *cobra.Command, filePrefix string) log.Logger {
 
 // Setup initializes profiling and logging based on the CLI flags.
 // It should be called as early as possible in the program.
-func Setup(ctx *cli.Context, rootLogger bool) (log.Logger, *http.ServeMux, error) {
+func Setup(ctx *cli.Context, rootLogger bool) (log.Logger, *http.ServeMux, *http.ServeMux, error) {
 	// ensure we've read in config file details before setting up metrics etc.
 	if err := SetFlagsFromConfigFile(ctx); err != nil {
 		log.Warn("failed setting config flags from yaml/toml file", "err", err)
@@ -194,13 +196,13 @@ func Setup(ctx *cli.Context, rootLogger bool) (log.Logger, *http.ServeMux, error
 
 	if traceFile := ctx.String(traceFlag.Name); traceFile != "" {
 		if err := Handler.StartGoTrace(traceFile); err != nil {
-			return logger, nil, err
+			return logger, nil, nil, err
 		}
 	}
 
 	if cpuFile := ctx.String(cpuprofileFlag.Name); cpuFile != "" {
 		if err := Handler.StartCPUProfile(cpuFile); err != nil {
-			return logger, nil, err
+			return logger, nil, nil, err
 		}
 	}
 	pprofEnabled := ctx.Bool(pprofFlag.Name)
@@ -210,25 +212,25 @@ func Setup(ctx *cli.Context, rootLogger bool) (log.Logger, *http.ServeMux, error
 	var metricsMux *http.ServeMux
 	var metricsAddress string
 
-	if metricsEnabled && (!pprofEnabled || metricsAddr != "") {
+	if metricsEnabled {
 		metricsPort := ctx.Int(metricsPortFlag.Name)
 		metricsAddress = fmt.Sprintf("%s:%d", metricsAddr, metricsPort)
 		metricsMux = metrics.Setup(metricsAddress, logger)
 	}
 
-	// pprof server
 	if pprofEnabled {
 		pprofHost := ctx.String(pprofAddrFlag.Name)
 		pprofPort := ctx.Int(pprofPortFlag.Name)
 		address := fmt.Sprintf("%s:%d", pprofHost, pprofPort)
-		if address == metricsAddress {
+		if (address == metricsAddress) && metricsEnabled {
 			metricsMux = StartPProf(address, metricsMux)
 		} else {
-			metricsMux = StartPProf(address, nil)
+			pprofMux := StartPProf(address, nil)
+			return logger, metricsMux, pprofMux, nil
 		}
 	}
 
-	return logger, metricsMux, nil
+	return logger, metricsMux, nil, nil
 }
 
 func StartPProf(address string, metricsMux *http.ServeMux) *http.ServeMux {
