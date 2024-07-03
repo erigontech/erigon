@@ -387,5 +387,10 @@ func BlockPostValidation(gasUsed, blobGasUsed uint64, checkReceipts bool, receip
 				receiptHash, h.ReceiptHash, h.Number.Uint64(), h.Hash())
 		}
 	}
+
+	lbloom := types.CreateBloom(receipts)
+	if lbloom != h.Bloom {
+		return fmt.Errorf("invalid bloom (remote: %x  local: %x)", h.Bloom, lbloom)
+	}
 	return nil
 }
