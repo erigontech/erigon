@@ -85,7 +85,12 @@ func ComputeTxEnv(ctx context.Context, engine consensus.EngineReader, block *typ
 		msg.SetIsFree(engine.IsServiceTransaction(msg.From(), syscall))
 	}
 
-	TxContext := core.NewEVMTxContext(msg)
+	TxContext := evmtypes.TxContext{
+		TxHash:     txn.Hash(),
+		Origin:     msg.From(),
+		GasPrice:   msg.GasPrice(),
+		BlobHashes: msg.BlobHashes(),
+	}
 	return msg, blockContext, TxContext, statedb, reader, nil
 }
 
