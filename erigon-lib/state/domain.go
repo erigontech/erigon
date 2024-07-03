@@ -1693,7 +1693,10 @@ func (dc *DomainPruneStat) String() (kvstr string) {
 		kvstr = fmt.Sprintf("kv: %d from steps %d-%d", dc.Values, dc.MinStep, dc.MaxStep)
 	}
 	if dc.History != nil {
-		kvstr += ", " + dc.History.String()
+		if kvstr != "" {
+			kvstr += ", "
+		}
+		kvstr += dc.History.String()
 	}
 	return kvstr
 }
