@@ -13,6 +13,12 @@ import (
 	ssz2 "github.com/ledgerwatch/erigon/cl/ssz"
 )
 
+var (
+	_ ssz2.SizedObjectSSZ = (*BeaconBody)(nil)
+	_ ssz2.SizedObjectSSZ = (*BeaconBlock)(nil)
+	_ ssz2.SizedObjectSSZ = (*SignedBeaconBlock)(nil)
+)
+
 const (
 	MaxAttesterSlashings         = 2
 	MaxProposerSlashings         = 16
@@ -302,6 +308,10 @@ func (b *SignedBeaconBlock) DecodeSSZ(buf []byte, s int) error {
 
 func (b *SignedBeaconBlock) HashSSZ() ([32]byte, error) {
 	return merkle_tree.HashTreeRoot(b.Block, b.Signature[:])
+}
+
+func (b *SignedBeaconBlock) Static() bool {
+	return false
 }
 
 func (*BeaconBody) Static() bool {

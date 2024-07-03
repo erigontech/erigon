@@ -13,6 +13,7 @@ import (
 
 var (
 	_ ssz2.SizedObjectSSZ = (*DenebBeaconBlock)(nil)
+	_ ssz2.SizedObjectSSZ = (*DenebSignedBeaconBlock)(nil)
 )
 
 type DenebBeaconBlock struct {
