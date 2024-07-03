@@ -256,10 +256,29 @@ func (a *ApiHandler) produceBlock(
 		beaconBody     *cltypes.BeaconBody
 		localExecValue uint64
 		localErr       error
+		blobs          []*cltypes.Blob
+		kzgProofs      []libcommon.Bytes48
 	)
 	go func() {
 		defer wg.Done()
 		beaconBody, localExecValue, localErr = a.produceBeaconBody(ctx, 3, baseBlock, baseState, targetSlot, randaoReveal, graffiti)
+		// collect blobs
+		if beaconBody != nil {
+			for i := 0; i < beaconBody.BlobKzgCommitments.Len(); i++ {
+				c := beaconBody.BlobKzgCommitments.Get(i)
+				if c == nil {
+					log.Warn("Nil commitment", "slot", targetSlot, "index", i)
+					continue
+				}
+				blobBundle, ok := a.blobBundles.Get(libcommon.Bytes48(*c))
+				if !ok {
+					log.Warn("Blob not found", "slot", targetSlot, "commitment", c)
+					continue
+				}
+				blobs = append(blobs, blobBundle.Blob)
+				kzgProofs = append(kzgProofs, blobBundle.KzgProof)
+			}
+		}
 	}()
 
 	// get the builder payload
@@ -304,6 +323,8 @@ func (a *ApiHandler) produceBlock(
 		// 1. builder is not enabled
 		// 2. failed to get builder payload
 		block.BeaconBody = beaconBody
+		block.Blobs = blobs
+		block.KzgProofs = kzgProofs
 		block.ExecutionValue = new(big.Int).SetUint64(localExecValue)
 		return block, nil
 	}
@@ -319,6 +340,8 @@ func (a *ApiHandler) produceBlock(
 
 	if useLocalExec {
 		block.BeaconBody = beaconBody
+		block.Blobs = blobs
+		block.KzgProofs = kzgProofs
 		block.ExecutionValue = execValue
 	} else {
 		// prepare blinded block
@@ -743,7 +766,7 @@ func (a *ApiHandler) postBeaconBlocks(w http.ResponseWriter, r *http.Request, ap
 	}
 	_ = validation
 
-	if err := a.broadcastBlock(ctx, block); err != nil {
+	if err := a.broadcastBlock(ctx, block.SignedBlock); err != nil {
 		return nil, beaconhttp.NewEndpointError(http.StatusInternalServerError, err)
 	}
 	return newBeaconResponse(nil), nil
@@ -878,21 +901,23 @@ func (a *ApiHandler) parseBlockPublishingValidation(
 func (a *ApiHandler) parseRequestBeaconBlock(
 	version clparams.StateVersion,
 	r *http.Request,
-) (*cltypes.SignedBeaconBlock, error) {
-	block := cltypes.NewSignedBeaconBlock(a.beaconChainCfg)
-	block.Block.Body.Version = version
+) (*cltypes.DenebSignedBeaconBlock, error) {
+	block := cltypes.NewDenebSignedBeaconBlock(int(a.beaconChainCfg.MaxBlobGasPerBlock), version)
 	// check content type
-	if r.Header.Get("Content-Type") == "application/json" {
+	switch r.Header.Get("Content-Type") {
+	case "application/json":
 		return block, json.NewDecoder(r.Body).Decode(block)
+	case "application/octet-stream":
+		octect, err := io.ReadAll(r.Body)
+		if err != nil {
+			return nil, err
+		}
+		if err := block.DecodeSSZ(octect, int(version)); err != nil {
+			return nil, err
+		}
+		return block, nil
 	}
-	octect, err := io.ReadAll(r.Body)
-	if err != nil {
-		return nil, err
-	}
-	if err := block.DecodeSSZ(octect, int(version)); err != nil {
-		return nil, err
-	}
-	return block, nil
+	return nil, fmt.Errorf("invalid content type")
 }
 
 func (a *ApiHandler) broadcastBlock(ctx context.Context, blk *cltypes.SignedBeaconBlock) error {

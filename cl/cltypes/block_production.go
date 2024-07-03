@@ -21,11 +21,13 @@ type DenebBeaconBlock struct {
 	Blobs     *solid.ListSSZ[*Blob]     `json:"blobs"`
 }
 
-func NewDenebBeaconBlock(maxBlobsPerBlock int) *DenebBeaconBlock {
-	return &DenebBeaconBlock{
+func NewDenebBeaconBlock(maxBlobsPerBlock int, version clparams.StateVersion) *DenebBeaconBlock {
+	b := &DenebBeaconBlock{
 		KZGProofs: solid.NewStaticListSSZ[*KZGProof](maxBlobsPerBlock, BYTES_KZG_PROOF),
 		Blobs:     solid.NewStaticListSSZ[*Blob](maxBlobsPerBlock, int(BYTES_PER_BLOB)),
 	}
+	b.Block.SetVersion(version)
+	return b
 }
 
 func (b *DenebBeaconBlock) EncodeSSZ(buf []byte) ([]byte, error) {
@@ -49,6 +51,42 @@ func (b *DenebBeaconBlock) Static() bool {
 	return false
 }
 
+type DenebSignedBeaconBlock struct {
+	SignedBlock *SignedBeaconBlock        `json:"signed_block"`
+	KZGProofs   *solid.ListSSZ[*KZGProof] `json:"kzg_proofs"`
+	Blobs       *solid.ListSSZ[*Blob]     `json:"blobs"`
+}
+
+func NewDenebSignedBeaconBlock(maxBlobsPerBlock int, version clparams.StateVersion) *DenebSignedBeaconBlock {
+	b := &DenebSignedBeaconBlock{
+		KZGProofs: solid.NewStaticListSSZ[*KZGProof](maxBlobsPerBlock, BYTES_KZG_PROOF),
+		Blobs:     solid.NewStaticListSSZ[*Blob](maxBlobsPerBlock, int(BYTES_PER_BLOB)),
+	}
+	b.SignedBlock.Block.SetVersion(version)
+	return b
+}
+
+func (b *DenebSignedBeaconBlock) EncodeSSZ(buf []byte) ([]byte, error) {
+	return ssz2.MarshalSSZ(buf, b.SignedBlock, b.KZGProofs, b.Blobs)
+}
+
+func (b *DenebSignedBeaconBlock) DecodeSSZ(buf []byte, version int) error {
+	return ssz2.UnmarshalSSZ(buf, version, b.SignedBlock, b.KZGProofs, b.Blobs)
+}
+
+func (b *DenebSignedBeaconBlock) EncodingSizeSSZ() int {
+	return b.SignedBlock.EncodingSizeSSZ() + b.KZGProofs.EncodingSizeSSZ() + b.Blobs.EncodingSizeSSZ()
+}
+
+func (b *DenebSignedBeaconBlock) Clone() clonable.Clonable {
+	return &DenebSignedBeaconBlock{}
+}
+
+func (b *DenebSignedBeaconBlock) Static() bool {
+	// it's variable size
+	return false
+}
+
 // BlindOrExecutionBeaconBlock is a union type that can be either a BlindedBeaconBlock or a BeaconBlock, depending on the context.
 // It's a intermediate type used in the block production process.
 type BlindOrExecutionBeaconBlock struct {
@@ -56,11 +94,15 @@ type BlindOrExecutionBeaconBlock struct {
 	ProposerIndex uint64         `json:"-"`
 	ParentRoot    libcommon.Hash `json:"-"`
 	StateRoot     libcommon.Hash `json:"-"`
-	// BeaconBody or BlindedBeaconBody with json tag "body"
-	BeaconBody        *BeaconBody        `json:"-"`
+	// Full body
+	BeaconBody *BeaconBody         `json:"-"`
+	KzgProofs  []libcommon.Bytes48 `json:"-"`
+	Blobs      []*Blob             `json:"-"`
+	// Blinded body
 	BlindedBeaconBody *BlindedBeaconBody `json:"-"`
-	ExecutionValue    *big.Int           `json:"-"`
-	Cfg               *clparams.BeaconChainConfig
+
+	ExecutionValue *big.Int `json:"-"`
+	Cfg            *clparams.BeaconChainConfig
 }
 
 func (b *BlindOrExecutionBeaconBlock) ToBlinded() *BlindedBeaconBlock {
@@ -81,8 +123,17 @@ func (b *BlindOrExecutionBeaconBlock) ToExecution() *DenebBeaconBlock {
 		StateRoot:     b.StateRoot,
 		Body:          b.BeaconBody,
 	}
-	DenebBeaconBlock := NewDenebBeaconBlock(int(b.Cfg.MaxBlobsPerBlock))
+	DenebBeaconBlock := NewDenebBeaconBlock(int(b.Cfg.MaxBlobsPerBlock), b.Version())
 	DenebBeaconBlock.Block = beaconBlock
+	for _, kzgProof := range b.KzgProofs {
+		proof := KZGProof{}
+		copy(proof[:], kzgProof[:])
+		DenebBeaconBlock.KZGProofs.Append(&proof)
+	}
+	for _, blob := range b.Blobs {
+		DenebBeaconBlock.Blobs.Append(blob)
+	}
+
 	return DenebBeaconBlock
 }
 
