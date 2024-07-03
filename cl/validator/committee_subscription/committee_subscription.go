@@ -123,9 +123,9 @@ func (c *CommitteeSubscribeMgmt) CheckAggregateAttestation(att *solid.Attestatio
 		log.Warn("[aggr] failed to hash attestation data", "err", err)
 		return err
 	}
+	log.Info("[aggr] check attestation", "committeeIndex", committeeIndex, "attRoot", common.Hash(hashRoot).String())
 	if sub, ok := c.validatorSubs[committeeIndex]; ok && sub.aggregate {
 		// aggregate attestation
-		log.Info("[aggr] check attestation", "committeeIndex", committeeIndex, "attRoot", common.Hash(hashRoot).String())
 		if err := c.aggregationPool.AddAttestation(att); err != nil {
 			return err
 		}
