@@ -693,7 +693,8 @@ func (cs *MultiClient) getReceipts66(ctx context.Context, inreq *proto_sentry.In
 		return err
 	}
 	defer tx.Rollback()
-	exec := exec3.NewTraceWorker(tx, cs.ChainConfig, cs.Engine, cs.blockReader, nil)
+	ttx := tx.(kv.TemporalTx)
+	exec := exec3.NewTraceWorker(ttx, cs.ChainConfig, cs.Engine, cs.blockReader, nil)
 	receipts, err := eth.AnswerGetReceiptsQuery(cs.blockReader, tx, query.GetReceiptsPacket, exec)
 	if err != nil {
 		return err
