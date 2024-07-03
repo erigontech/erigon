@@ -41,7 +41,7 @@ type CommitteeSubscribeMgmt struct {
 	// subscriptions
 	aggregationPool    aggregation.AggregationPool
 	validatorSubsMutex sync.RWMutex
-	validatorSubs      map[uint64]*validatorSub // slot -> committeeIndex -> validatorSub
+	validatorSubs      map[uint64]*validatorSub // committeeIndex -> validatorSub
 }
 
 func NewCommitteeSubscribeManagement(
@@ -147,9 +147,9 @@ func (c *CommitteeSubscribeMgmt) sweepByStaleSlots(ctx context.Context) {
 		case <-ticker.C:
 			curSlot := c.ethClock.GetCurrentSlot()
 			c.validatorSubsMutex.Lock()
-			for _, sub := range c.validatorSubs {
+			for committeeIdx, sub := range c.validatorSubs {
 				if slotIsStale(curSlot, sub.latestTargetSlot) {
-					delete(c.validatorSubs, sub.latestTargetSlot)
+					delete(c.validatorSubs, committeeIdx)
 				}
 			}
 			c.validatorSubsMutex.Unlock()
