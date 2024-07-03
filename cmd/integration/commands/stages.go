@@ -31,6 +31,9 @@ import (
 	"github.com/c2h5oh/datasize"
 	"github.com/erigontech/mdbx-go/mdbx"
 	lru "github.com/hashicorp/golang-lru/arc/v2"
+	"github.com/ledgerwatch/erigon/polygon/bor/borcfg"
+	"github.com/ledgerwatch/erigon/polygon/bor/finality/flags"
+	"github.com/ledgerwatch/erigon/polygon/bridge"
 	"github.com/ledgerwatch/secp256k1"
 	"github.com/spf13/cobra"
 	"golang.org/x/sync/errgroup"
@@ -1582,6 +1585,20 @@ func initConsensusEngine(ctx context.Context, cc *chain2.Config, dir string, db 
 	} else {
 		consensusConfig = &config.Ethash
 	}
+
+	var polygonBridge *bridge.Bridge
+	if cc.Bor != nil {
+		if !config.WithoutHeimdall {
+			heimdallClient = heimdall.NewHeimdallClient(config.HeimdallURL, logger)
+		}
+
+		if config.PolygonSync || config.PolygonSyncStage {
+			polygonBridge = bridge.Assemble(config.Dirs.DataDir, logger, consensusConfig.(*borcfg.BorConfig), heimdallClient.FetchStateSyncEvents, bor.GenesisContractStateReceiverABI())
+		}
+
+		flags.Milestone = config.WithHeimdallMilestones
+	}
+
 	return ethconsensusconfig.CreateConsensusEngine(ctx, &nodecfg.Config{Dirs: datadir.New(dir)}, cc, consensusConfig, config.Miner.Notify, config.Miner.Noverify,
-		heimdallClient, config.WithoutHeimdall, blockReader, db.ReadOnly(), logger, nil), heimdallClient
+		heimdallClient, config.WithoutHeimdall, blockReader, db.ReadOnly(), logger, polygonBridge), heimdallClient
 }
