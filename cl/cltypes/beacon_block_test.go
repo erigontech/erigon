@@ -120,3 +120,21 @@ func TestBeaconBlockJson(t *testing.T) {
 	assert.Equal(t, map1, map2)
 	assert.Equal(t, libcommon.Hash(r), libcommon.HexToHash("0x1a9b89eb12282543a5fa0b0f251d8ec0c5c432121d7cb2a8d78461ea9d10c294"))
 }
+
+func TestMarshalDenebBeaconBlock(t *testing.T) {
+	block := NewDenebBeaconBlock(&clparams.MainnetBeaconConfig)
+	data, err := json.Marshal(block)
+	if err != nil {
+		t.Fatalf("MarshalJSON failed: %v", err)
+	}
+	t.Logf("MarshalJSON: %s", data)
+	// unmarshal
+	block2 := NewDenebBeaconBlock(&clparams.MainnetBeaconConfig)
+	err = json.Unmarshal(data, block2)
+	if err != nil {
+		t.Fatalf("UnmarshalJSON failed: %v", err)
+	}
+	if block.Block != block2.Block {
+		t.Fatalf("Block mismatch: %v != %v", block.Block, block2.Block)
+	}
+}
