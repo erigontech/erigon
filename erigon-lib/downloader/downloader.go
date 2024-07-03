@@ -1,18 +1,18 @@
-// Copyright 2021 The Erigon Authors
-// This file is part of Erigon.
-//
-// Erigon is free software: you can redistribute it and/or modify
-// it under the terms of the GNU Lesser General Public License as published by
-// the Free Software Foundation, either version 3 of the License, or
-// (at your option) any later version.
-//
-// Erigon is distributed in the hope that it will be useful,
-// but WITHOUT ANY WARRANTY; without even the implied warranty of
-// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
-// GNU Lesser General Public License for more details.
-//
-// You should have received a copy of the GNU Lesser General Public License
-// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+/*
+   Copyright 2021 Erigon contributors
+
+   Licensed under the Apache License, Version 2.0 (the "License");
+   you may not use this file except in compliance with the License.
+   You may obtain a copy of the License at
+
+       http://www.apache.org/licenses/LICENSE-2.0
+
+   Unless required by applicable law or agreed to in writing, software
+   distributed under the License is distributed on an "AS IS" BASIS,
+   WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+   See the License for the specific language governing permissions and
+   limitations under the License.
+*/
 
 package downloader
 
@@ -94,6 +94,8 @@ type Downloader struct {
 	webDownloadInfo map[string]webDownloadInfo
 	downloading     map[string]*downloadInfo
 	downloadLimit   *rate.Limit
+
+	stuckFileDetailedLogs bool
 }
 
 type downloadInfo struct {
@@ -239,8 +241,8 @@ func (r *requestHandler) RoundTrip(req *http.Request) (resp *http.Response, err 
 
 		// the first two statuses here have been observed from cloudflare
 		// during testing.  The remainder are generally understood to be
-		// retry-able http responses, calcBackoff will use the Retry-After
-		// header if its available
+		// retriable http responses, calcBackoff will use the Retry-After
+		// header if its availible
 		case http.StatusInternalServerError, http.StatusBadGateway,
 			http.StatusRequestTimeout, http.StatusTooEarly,
 			http.StatusTooManyRequests, http.StatusServiceUnavailable,
@@ -288,7 +290,7 @@ func New(ctx context.Context, cfg *downloadercfg.Cfg, logger log.Logger, verbosi
 
 	cfg.ClientConfig.WebTransport = requestHandler
 
-	db, c, m, torrentClient, err := openClient(ctx, cfg.Dirs.Downloader, cfg.Dirs.Snap, cfg.ClientConfig, cfg.MdbxWriteMap, logger)
+	db, c, m, torrentClient, err := openClient(ctx, cfg.Dirs.Downloader, cfg.Dirs.Snap, cfg.ClientConfig, cfg.MdbxWriteMap)
 	if err != nil {
 		return nil, fmt.Errorf("openClient: %w", err)
 	}
@@ -838,7 +840,6 @@ func (d *Downloader) mainLoop(silent bool) error {
 						if ok && err == nil {
 							_, _, err = addTorrentFile(d.ctx, ts, d.torrentClient, d.db, d.webseeds)
 							if err != nil {
-								d.logger.Warn("[snapshots] addTorrentFile from webseed", "err", err)
 								continue
 							}
 						}
@@ -1093,10 +1094,10 @@ func (d *Downloader) mainLoop(silent bool) error {
 				}
 			}
 
-			d.lock.Lock()
+			d.lock.RLock()
 			downloadingLen := len(d.downloading)
 			d.stats.Downloading = int32(downloadingLen)
-			d.lock.Unlock()
+			d.lock.RUnlock()
 
 			// the call interval of the loop (elapsed sec) used to get slots/sec for
 			// calculating the number of files to download based on the loop speed
@@ -2140,7 +2141,7 @@ func (d *Downloader) ReCalcStats(interval time.Duration) {
 	}
 
 	if !stats.Completed {
-		logger.Debug("[snapshots] download info",
+		logger.Debug("[snapshots] info",
 			"len", len(torrents),
 			"webTransfers", webTransfers,
 			"torrent", torrentInfo,
@@ -2204,17 +2205,17 @@ func (d *Downloader) ReCalcStats(interval time.Duration) {
 		logger.Log(verbosity, "[snapshots] downloading", "files", amount, "list", strings.Join(files, ", "))
 	}
 
-	//if time.Since(stats.lastTorrentStatus) > 5*time.Minute {
-	//	stats.lastTorrentStatus = time.Now()
-	//
-	//	if len(noDownloadProgress) > 0 {
-	//		progressStatus := getProgressStatus(torrentClient, noDownloadProgress)
-	//		for file, status := range progressStatus {
-	//			logger.Debug(fmt.Sprintf("[snapshots] torrent status: %s\n    %s", file,
-	//				string(bytes.TrimRight(bytes.ReplaceAll(status, []byte("\n"), []byte("\n    ")), "\n "))))
-	//		}
-	//	}
-	//}
+	if d.stuckFileDetailedLogs && time.Since(stats.lastTorrentStatus) > 5*time.Minute {
+		stats.lastTorrentStatus = time.Now()
+
+		if len(noDownloadProgress) > 0 {
+			progressStatus := getProgressStatus(torrentClient, noDownloadProgress)
+			for file, status := range progressStatus {
+				logger.Debug(fmt.Sprintf("[snapshots] torrent status: %s\n    %s", file,
+					string(bytes.TrimRight(bytes.ReplaceAll(status, []byte("\n"), []byte("\n    ")), "\n "))))
+			}
+		}
+	}
 
 	if stats.BytesDownload > prevStats.BytesDownload {
 		stats.DownloadRate = (stats.BytesDownload - prevStats.BytesDownload) / uint64(interval.Seconds())
@@ -2441,7 +2442,7 @@ func (d *Downloader) VerifyData(ctx context.Context, whiteList []string, failFas
 	return nil
 }
 
-// AddNewSeedableFile decides what we do depending on whether we have the .seg file or the .torrent file
+// AddNewSeedableFile decides what we do depending on wether we have the .seg file or the .torrent file
 // have .torrent no .seg => get .seg file from .torrent
 // have .seg no .torrent => get .torrent from .seg
 func (d *Downloader) AddNewSeedableFile(ctx context.Context, name string) error {
@@ -2718,7 +2719,7 @@ func (d *Downloader) StopSeeding(hash metainfo.Hash) error {
 
 func (d *Downloader) TorrentClient() *torrent.Client { return d.torrentClient }
 
-func openClient(ctx context.Context, dbDir, snapDir string, cfg *torrent.ClientConfig, writeMap bool, logger log.Logger) (db kv.RwDB, c storage.PieceCompletion, m storage.ClientImplCloser, torrentClient *torrent.Client, err error) {
+func openClient(ctx context.Context, dbDir, snapDir string, cfg *torrent.ClientConfig, writeMap bool) (db kv.RwDB, c storage.PieceCompletion, m storage.ClientImplCloser, torrentClient *torrent.Client, err error) {
 	dbCfg := mdbx.NewMDBX(log.New()).
 		Label(kv.DownloaderDB).
 		WithTableCfg(func(defaultBuckets kv.TableCfg) kv.TableCfg { return kv.DownloaderTablesCfg }).
@@ -2736,7 +2737,7 @@ func openClient(ctx context.Context, dbDir, snapDir string, cfg *torrent.ClientC
 		return nil, nil, nil, nil, fmt.Errorf("torrentcfg.openClient: %w", err)
 	}
 	//c, err = NewMdbxPieceCompletion(db)
-	c, err = NewMdbxPieceCompletion(db, logger)
+	c, err = NewMdbxPieceCompletionBatch(db)
 	if err != nil {
 		return nil, nil, nil, nil, fmt.Errorf("torrentcfg.NewMdbxPieceCompletion: %w", err)
 	}
