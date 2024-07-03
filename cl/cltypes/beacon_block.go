@@ -150,6 +150,7 @@ func (b *BeaconBlock) SetVersion(version clparams.StateVersion) {
 
 func (b *BeaconBody) SetVersion(version clparams.StateVersion) {
 	b.Version = version
+	b.ExecutionPayload.SetVersion(version)
 }
 
 func (b *BeaconBody) EncodeSSZ(dst []byte) ([]byte, error) {
