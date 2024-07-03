@@ -713,36 +713,40 @@ func (a *ApiHandler) setupHeaderReponseForBlockProduction(
 	w.Header().Set("Eth-Execution-Payload-Blinded", strconv.FormatBool(blinded))
 }
 
-func (a *ApiHandler) PostEthV1BeaconBlocks(w http.ResponseWriter, r *http.Request) {
-	a.postBeaconBlocks(w, r, 1)
+func (a *ApiHandler) PostEthV1BeaconBlocks(w http.ResponseWriter, r *http.Request) (*beaconhttp.BeaconResponse, error) {
+	resp, err := a.postBeaconBlocks(w, r, 1)
+	if err != nil {
+		log.Warn("Failed to post beacon block in v1 path", "err", err)
+	}
+	return resp, err
 }
 
-func (a *ApiHandler) PostEthV2BeaconBlocks(w http.ResponseWriter, r *http.Request) {
-	a.postBeaconBlocks(w, r, 2)
+func (a *ApiHandler) PostEthV2BeaconBlocks(w http.ResponseWriter, r *http.Request) (*beaconhttp.BeaconResponse, error) {
+	resp, err := a.postBeaconBlocks(w, r, 2)
+	if err != nil {
+		log.Warn("Failed to post beacon block in v2 path", "err", err)
+	}
+	return resp, err
 }
 
-func (a *ApiHandler) postBeaconBlocks(w http.ResponseWriter, r *http.Request, apiVersion int) {
+func (a *ApiHandler) postBeaconBlocks(w http.ResponseWriter, r *http.Request, apiVersion int) (*beaconhttp.BeaconResponse, error) {
 	ctx := r.Context()
 	version, err := a.parseEthConsensusVersion(r.Header.Get("Eth-Consensus-Version"), apiVersion)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
-		return
+		return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, err)
 	}
 	validation := a.parseBlockPublishingValidation(w, r, apiVersion)
 	// Decode the block
 	block, err := a.parseRequestBeaconBlock(version, r)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
-		return
+		return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, err)
 	}
 	_ = validation
 
 	if err := a.broadcastBlock(ctx, block); err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
+		return nil, beaconhttp.NewEndpointError(http.StatusInternalServerError, err)
 	}
-	w.WriteHeader(http.StatusOK)
-
+	return newBeaconResponse(nil), nil
 }
 
 func (a *ApiHandler) PostEthV1BlindedBlocks(w http.ResponseWriter, r *http.Request) (*beaconhttp.BeaconResponse, error) {
