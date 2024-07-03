@@ -8,6 +8,7 @@ import (
 
 	sentinel "github.com/ledgerwatch/erigon-lib/gointerfaces/sentinelproto"
 	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/ledgerwatch/erigon-lib/log/v3"
 	"github.com/ledgerwatch/erigon/cl/aggregation"
 	"github.com/ledgerwatch/erigon/cl/beacon/synced_data"
 	"github.com/ledgerwatch/erigon/cl/clparams"
@@ -84,6 +85,7 @@ func (c *CommitteeSubscribeMgmt) AddAttestationSubscription(ctx context.Context,
 		return fmt.Errorf("head state not available")
 	}
 
+	log.Info("[aggr] add attestation subscription", "slot", slot, "committeeIndex", cIndex, "isAggregator", p.IsAggregator, "validatorIndex", p.ValidatorIndex)
 	commiteePerSlot := headState.CommitteeCount(p.Slot / c.beaconConfig.SlotsPerEpoch)
 	subnetId := subnets.ComputeSubnetForAttestation(commiteePerSlot, slot, cIndex, c.beaconConfig.SlotsPerEpoch, c.netConfig.AttestationSubnetCount)
 	// add validator to subscription
@@ -115,6 +117,7 @@ func (c *CommitteeSubscribeMgmt) CheckAggregateAttestation(att *solid.Attestatio
 	committeeIndex := att.AttestantionData().CommitteeIndex()
 	c.validatorSubsMutex.RLock()
 	defer c.validatorSubsMutex.RUnlock()
+	log.Info("[aggr] check attestation", "committeeIndex", committeeIndex)
 	if sub, ok := c.validatorSubs[committeeIndex]; ok && sub.aggregate {
 		// aggregate attestation
 		if err := c.aggregationPool.AddAttestation(att); err != nil {

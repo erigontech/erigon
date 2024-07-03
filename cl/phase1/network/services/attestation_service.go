@@ -66,6 +66,11 @@ func NewAttestationService(
 }
 
 func (s *attestationService) ProcessMessage(ctx context.Context, subnet *uint64, att *solid.Attestation) error {
+	hashRoot, err := att.HashSSZ()
+	if err != nil {
+		return err
+	}
+	log.Info("[aggr] processing attestation", "attestation", hashRoot)
 	var (
 		root           = att.AttestantionData().BeaconBlockRoot()
 		slot           = att.AttestantionData().Slot()

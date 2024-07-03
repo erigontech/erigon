@@ -685,7 +685,7 @@ func (a *ApiHandler) GetEthV1ValidatorAggregateAttestation(w http.ResponseWriter
 	attDataRootHash := libcommon.HexToHash(attDataRoot)
 	att := a.aggregatePool.GetAggregatationByRoot(attDataRootHash)
 	if att == nil {
-		return nil, beaconhttp.NewEndpointError(http.StatusNotFound, fmt.Errorf("attestation %s not found.", attDataRoot))
+		return nil, beaconhttp.NewEndpointError(http.StatusNotFound, fmt.Errorf("attestation %s not found", attDataRoot))
 	}
 	if slotNum != att.AttestantionData().Slot() {
 		log.Debug("attestation slot does not match", "attestation_data_root", attDataRoot, "slot_inquire", slot)

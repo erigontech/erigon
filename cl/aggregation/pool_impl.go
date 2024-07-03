@@ -8,6 +8,7 @@ import (
 
 	"github.com/Giulio2002/bls"
 	"github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/log/v3"
 	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/cl/cltypes/solid"
 	"github.com/ledgerwatch/erigon/cl/utils"
@@ -52,7 +53,7 @@ func (p *aggregationPoolImpl) AddAttestation(inAtt *solid.Attestation) error {
 	if err != nil {
 		return err
 	}
-
+	log.Info("[aggr] add attestation", "hashRoot", common.Hash(hashRoot).String())
 	p.aggregatesLock.Lock()
 	defer p.aggregatesLock.Unlock()
 	att, ok := p.aggregates[hashRoot]
