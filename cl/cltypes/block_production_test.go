@@ -8,14 +8,14 @@ import (
 )
 
 func TestMarshalDenebBeaconBlock(t *testing.T) {
-	block := NewDenebBeaconBlock(10, clparams.DenebVersion)
+	block := NewDenebBeaconBlock(&clparams.MainnetBeaconConfig)
 	data, err := json.Marshal(block)
 	if err != nil {
 		t.Fatalf("MarshalJSON failed: %v", err)
 	}
 	t.Logf("MarshalJSON: %s", data)
 	// unmarshal
-	block2 := NewDenebBeaconBlock(10, clparams.DenebVersion)
+	block2 := NewDenebBeaconBlock(&clparams.MainnetBeaconConfig)
 	err = json.Unmarshal(data, block2)
 	if err != nil {
 		t.Fatalf("UnmarshalJSON failed: %v", err)

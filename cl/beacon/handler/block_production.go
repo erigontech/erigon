@@ -902,7 +902,7 @@ func (a *ApiHandler) parseRequestBeaconBlock(
 	version clparams.StateVersion,
 	r *http.Request,
 ) (*cltypes.DenebSignedBeaconBlock, error) {
-	block := cltypes.NewDenebSignedBeaconBlock(int(a.beaconChainCfg.MaxBlobGasPerBlock), version)
+	block := cltypes.NewDenebSignedBeaconBlock(a.beaconChainCfg)
 	// check content type
 	switch r.Header.Get("Content-Type") {
 	case "application/json":
