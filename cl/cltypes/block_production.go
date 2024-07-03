@@ -96,14 +96,11 @@ func (b *BlindOrExecutionBeaconBlock) ToExecution() *DenebBeaconBlock {
 }
 
 func (b *BlindOrExecutionBeaconBlock) MarshalJSON() ([]byte, error) {
-	return errors.New("json marshal unsupported for BlindOrExecutionBeaconBlock")
+	return []byte{}, errors.New("json marshal unsupported for BlindOrExecutionBeaconBlock")
 }
 
 func (b *BlindOrExecutionBeaconBlock) UnmarshalJSON(data []byte) error {
-	if err := json.Unmarshal(data, b); err != nil {
-		return err
-	}
-	return nil
+	return errors.New("json unmarshal unsupported for BlindOrExecutionBeaconBlock")
 }
 
 func (b *BlindOrExecutionBeaconBlock) IsBlinded() bool {
