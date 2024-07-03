@@ -368,7 +368,7 @@ const (
 	BittorrentCompletion = "BittorrentCompletion"
 	BittorrentInfo       = "BittorrentInfo"
 
-	// Domains/Histry/InvertedIndices
+	// Domains/History/InvertedIndices
 	// Contants have "Tbl" prefix, to avoid collision with actual Domain names
 	// This constants is very rarely used in APP, but Domain/History/Idx names are widely used
 	TblAccountKeys        = "AccountKeys"

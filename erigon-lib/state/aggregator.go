@@ -849,16 +849,16 @@ func (ac *AggregatorRoTx) CanPrune(tx kv.Tx, untilTx uint64) bool {
 func (ac *AggregatorRoTx) CanUnwindToBlockNum(tx kv.Tx) (uint64, error) {
 	return ReadLowestUnwindableBlock(tx)
 }
-func (ac *AggregatorRoTx) CanUnwindDomainsToTxNum() uint64 {
-	return ac.minimaxTxNumInDomainFiles()
-}
 
-func (ac *AggregatorRoTx) CanUnwindBeforeBlockNum(blockNum uint64, tx kv.Tx) (uint64, bool, error) {
-	if blockNum == 0 && ac.CanUnwindDomainsToTxNum() > 0 { // don't allow unwind beyond files progress
-		_minBlockNum, _ := ac.CanUnwindToBlockNum(tx)
-		return _minBlockNum, blockNum >= _minBlockNum, nil //nolint
+// CanUnwindBeforeBlockNum - returns `true` if can unwind to requested `blockNum`, otherwise returns nearest `unwindableBlockNum`
+func (ac *AggregatorRoTx) CanUnwindBeforeBlockNum(blockNum uint64, tx kv.Tx) (unwindableBlockNum uint64, ok bool, err error) {
+	_minUnwindableBlockNum, err := ac.CanUnwindToBlockNum(tx)
+	if err != nil {
+		return 0, false, err
 	}
-
+	if blockNum < _minUnwindableBlockNum {
+		return _minUnwindableBlockNum, false, nil
+	}
 	return blockNum, true, nil
 }
 
@@ -1359,8 +1359,52 @@ func (r RangesV3) any() bool {
 
 func (ac *AggregatorRoTx) findMergeRange(maxEndTxNum, maxSpan uint64) RangesV3 {
 	var r RangesV3
+	if ac.a.commitmentValuesTransform {
+		lmrAcc := ac.d[kv.AccountsDomain].files.LatestMergedRange()
+		lmrSto := ac.d[kv.StorageDomain].files.LatestMergedRange()
+		lmrCom := ac.d[kv.CommitmentDomain].files.LatestMergedRange()
+
+		if !lmrCom.Equal(&lmrAcc) || !lmrCom.Equal(&lmrSto) {
+			// ensure that we do not make further merge progress until ranges are not equal
+			maxEndTxNum = min(maxEndTxNum, max(lmrAcc.to, lmrSto.to, lmrCom.to))
+			ac.a.logger.Warn("findMergeRange: hold further merge", "to", maxEndTxNum/ac.a.StepSize(),
+				"acc", lmrAcc.String("", ac.a.StepSize()), "sto", lmrSto.String("", ac.a.StepSize()), "com", lmrCom.String("", ac.a.StepSize()))
+		}
+	}
 	for id, d := range ac.d {
 		r.domain[id] = d.findMergeRange(maxEndTxNum, maxSpan)
+	}
+
+	if ac.a.commitmentValuesTransform && r.domain[kv.CommitmentDomain].values {
+		cr := r.domain[kv.CommitmentDomain]
+
+		restorePrevRange := false
+		for k, dr := range r.domain {
+			kd := kv.Domain(k)
+			if kd == kv.CommitmentDomain || (dr.valuesStartTxNum == cr.valuesStartTxNum && dr.valuesEndTxNum == cr.valuesEndTxNum) {
+				continue
+			}
+			// commitment waits until storage and account are merged so it may be a bit behind (if merge was interrupted before)
+			if !dr.values || cr.valuesEndTxNum < dr.valuesStartTxNum {
+				if mf := ac.d[kd].lookupFileByItsRange(cr.valuesStartTxNum, cr.valuesEndTxNum); mf != nil {
+					// file for required range exists, hold this domain from merge but allow to merge comitemnt
+					r.domain[k].values, r.domain[k].valuesStartTxNum, r.domain[k].valuesEndTxNum = false, 0, 0
+					rng := MergeRange{from: dr.valuesStartTxNum, to: dr.valuesEndTxNum}
+					ac.a.logger.Debug("findMergeRange: commitment range is different but file exists in domain, hold further merge",
+						ac.d[k].d.filenameBase, rng.String("", ac.a.StepSize()), "vals", dr.values)
+					continue
+				}
+				restorePrevRange = true
+			}
+		}
+		if restorePrevRange {
+			for k, d := range r.domain {
+				r.domain[k].values, r.domain[k].valuesStartTxNum, r.domain[k].valuesEndTxNum = false, 0, 0
+				rng := MergeRange{from: d.valuesStartTxNum, to: d.valuesEndTxNum}
+				ac.a.logger.Debug("findMergeRange: commitment range is different than accounts or storage, cancel kv merge",
+					ac.d[k].d.filenameBase, rng.String("", ac.a.StepSize()))
+			}
+		}
 	}
 	for id, ii := range ac.iis {
 		r.invertedIndex[id] = ii.findMergeRange(maxEndTxNum, maxSpan)
@@ -1449,7 +1493,11 @@ func (ac *AggregatorRoTx) SqueezeCommitmentFiles() error {
 			reader.Reset(0)
 
 			writer := NewArchiveWriter(squeezedCompr, commitment.d.compression)
-			vt := commitment.commitmentValTransformDomain(accounts, storage, af, sf)
+			rng := MergeRange{needMerge: true, from: af.startTxNum, to: af.endTxNum}
+			vt, err := commitment.commitmentValTransformDomain(rng, accounts, storage, af, sf)
+			if err != nil {
+				return fmt.Errorf("failed to create commitment value transformer: %w", err)
+			}
 
 			i := 0
 			for reader.HasNext() {
@@ -1579,8 +1627,18 @@ func (ac *AggregatorRoTx) mergeFiles(ctx context.Context, files SelectedStaticFi
 				ac.RestrictSubsetFileDeletions(true)
 				accStorageMerged.Wait()
 
-				vt = ac.d[kv.CommitmentDomain].commitmentValTransformDomain(ac.d[kv.AccountsDomain], ac.d[kv.StorageDomain],
+				rng := MergeRange{
+					needMerge: true,
+					from:      r.domain[kid].valuesStartTxNum,
+					to:        r.domain[kid].valuesEndTxNum,
+				}
+
+				vt, err = ac.d[kv.CommitmentDomain].commitmentValTransformDomain(rng, ac.d[kv.AccountsDomain], ac.d[kv.StorageDomain],
 					mf.d[kv.AccountsDomain], mf.d[kv.StorageDomain])
+
+				if err != nil {
+					return fmt.Errorf("failed to create commitment value transformer: %w", err)
+				}
 			}
 
 			mf.d[id], mf.dIdx[id], mf.dHist[id], err = ac.d[id].mergeFiles(ctx, files.d[id], files.dIdx[id], files.dHist[id], r.domain[id], vt, ac.a.ps)

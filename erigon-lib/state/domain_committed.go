@@ -182,7 +182,7 @@ func (dt *DomainRoTx) lookupFileByItsRange(txFrom uint64, txTo uint64) *filesIte
 		}
 		dt.d.logger.Warn("lookupFileByItsRange: file not found",
 			"stepFrom", txFrom/dt.d.aggregationStep, "stepTo", txTo/dt.d.aggregationStep,
-			"domain", dt.d.keysTable, "files", fileStepsss, "_visibleFiles", visibleFiles,
+			"domain", dt.d.filenameBase, "files", fileStepsss, "_visibleFiles", visibleFiles,
 			"visibleFilesCount", len(dt.files), "filesCount", dt.d.dirtyFiles.Len())
 		return nil
 	}
@@ -221,40 +221,52 @@ func (dt *DomainRoTx) lookupByShortenedKey(shortKey []byte, getter ArchiveGetter
 // commitmentValTransform parses the value of the commitment record to extract references
 // to accounts and storage items, then looks them up in the new, merged files, and replaces them with
 // the updated references
-func (dt *DomainRoTx) commitmentValTransformDomain(accounts, storage *DomainRoTx, mergedAccount, mergedStorage *filesItem) valueTransformer {
-
-	var accMerged, stoMerged string
-	if mergedAccount != nil {
-		accMerged = fmt.Sprintf("%d-%d", mergedAccount.startTxNum/dt.d.aggregationStep, mergedAccount.endTxNum/dt.d.aggregationStep)
+func (dt *DomainRoTx) commitmentValTransformDomain(rng MergeRange, accounts, storage *DomainRoTx, mergedAccount, mergedStorage *filesItem) (valueTransformer, error) {
+	hadToLookupStorage := mergedStorage == nil
+	if mergedStorage == nil {
+		// mergedStorage = storage.lookupFileByItsRange(rng.from, rng.to)
+		// if mergedStorage == nil {
+		// TODO may allow to merge, but storage keys will be stored as plainkeys
+		return nil, fmt.Errorf("merged v1-account.%d-%d.kv file not found", rng.from, rng.to)
+		// }
 	}
-	if mergedStorage != nil {
-		stoMerged = fmt.Sprintf("%d-%d", mergedStorage.startTxNum/dt.d.aggregationStep, mergedStorage.endTxNum/dt.d.aggregationStep)
+	hadToLookupAccount := mergedAccount == nil
+	if mergedAccount == nil {
+		// mergedAccount = accounts.lookupFileByItsRange(rng.from, rng.to)
+		// if mergedAccount == nil {
+		return nil, fmt.Errorf("merged v1-account.%d-%d.kv file not found", rng.from, rng.to)
+		// }
 	}
 
-	return func(valBuf []byte, keyFromTxNum, keyEndTxNum uint64) (transValBuf []byte, err error) {
+	dr := DomainRanges{
+		valuesStartTxNum: rng.from,
+		valuesEndTxNum:   rng.to,
+		values:           true,
+	}
+
+	accountFileMap := make(map[string]ArchiveGetter)
+	if accountList, _, _ := accounts.staticFilesInRange(dr); accountList != nil {
+		for _, f := range accountList {
+			accountFileMap[fmt.Sprintf("%d-%d", f.startTxNum, f.endTxNum)] = NewArchiveGetter(f.decompressor.MakeGetter(), accounts.d.compression)
+		}
+	}
+	storageFileMap := make(map[string]ArchiveGetter)
+	if storageList, _, _ := storage.staticFilesInRange(dr); storageList != nil {
+		for _, f := range storageList {
+			storageFileMap[fmt.Sprintf("%d-%d", f.startTxNum, f.endTxNum)] = NewArchiveGetter(f.decompressor.MakeGetter(), storage.d.compression)
+		}
+	}
+
+	ms := NewArchiveGetter(mergedStorage.decompressor.MakeGetter(), storage.d.compression)
+	ma := NewArchiveGetter(mergedAccount.decompressor.MakeGetter(), accounts.d.compression)
+	dt.d.logger.Debug("prepare commitmentValTransformDomain", "merge", rng.String("range", dt.d.aggregationStep), "Mstorage", hadToLookupStorage, "Maccount", hadToLookupAccount)
+
+	vt := func(valBuf []byte, keyFromTxNum, keyEndTxNum uint64) (transValBuf []byte, err error) {
 		if !dt.d.replaceKeysInValues || len(valBuf) == 0 || ((keyEndTxNum-keyFromTxNum)/dt.d.aggregationStep)%2 != 0 {
 			return valBuf, nil
 		}
-		si := storage.lookupFileByItsRange(keyFromTxNum, keyEndTxNum)
-		if si == nil {
-			return nil, fmt.Errorf("storage file not found for %d-%d", keyFromTxNum, keyEndTxNum)
-		}
-		ai := accounts.lookupFileByItsRange(keyFromTxNum, keyEndTxNum)
-		if ai == nil {
-			return nil, fmt.Errorf("account file not found for %d-%d", keyFromTxNum, keyEndTxNum)
-		}
-
-		if si.decompressor == nil || ai.decompressor == nil {
-			return nil, fmt.Errorf("decompressor is nil for existing storage or account")
-		}
-		if mergedStorage == nil || mergedAccount == nil {
-			return nil, fmt.Errorf("mergedStorage or mergedAccount is nil")
-		}
-
-		sig := NewArchiveGetter(si.decompressor.MakeGetter(), storage.d.compression)
-		aig := NewArchiveGetter(ai.decompressor.MakeGetter(), accounts.d.compression)
-		ms := NewArchiveGetter(mergedStorage.decompressor.MakeGetter(), storage.d.compression)
-		ma := NewArchiveGetter(mergedAccount.decompressor.MakeGetter(), accounts.d.compression)
+		sig := storageFileMap[fmt.Sprintf("%d-%d", keyFromTxNum, keyEndTxNum)]
+		aig := accountFileMap[fmt.Sprintf("%d-%d", keyFromTxNum, keyEndTxNum)]
 
 		replacer := func(key []byte, isStorage bool) ([]byte, error) {
 			var found bool
@@ -269,7 +281,7 @@ func (dt *DomainRoTx) commitmentValTransformDomain(accounts, storage *DomainRoTx
 					if !found {
 						dt.d.logger.Crit("valTransform: lost storage full key",
 							"shortened", fmt.Sprintf("%x", key),
-							"merging", stoMerged,
+							"merging", rng.String("", dt.d.aggregationStep),
 							"valBuf", fmt.Sprintf("l=%d %x", len(valBuf), valBuf),
 						)
 						return nil, fmt.Errorf("lookup lost storage full key %x", key)
@@ -299,7 +311,7 @@ func (dt *DomainRoTx) commitmentValTransformDomain(accounts, storage *DomainRoTx
 				if !found {
 					dt.d.logger.Crit("valTransform: lost account full key",
 						"shortened", fmt.Sprintf("%x", key),
-						"merging", accMerged,
+						"merging", rng.String("", dt.d.aggregationStep),
 						"valBuf", fmt.Sprintf("l=%d %x", len(valBuf), valBuf),
 					)
 					return nil, fmt.Errorf("lookup account full key: %x", key)
@@ -321,4 +333,6 @@ func (dt *DomainRoTx) commitmentValTransformDomain(accounts, storage *DomainRoTx
 
 		return commitment.BranchData(valBuf).ReplacePlainKeys(dt.comBuf[:0], replacer)
 	}
+
+	return vt, nil
 }
