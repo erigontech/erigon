@@ -26,7 +26,6 @@ func NewDenebBeaconBlock(maxBlobsPerBlock int, version clparams.StateVersion) *D
 		KZGProofs: solid.NewStaticListSSZ[*KZGProof](maxBlobsPerBlock, BYTES_KZG_PROOF),
 		Blobs:     solid.NewStaticListSSZ[*Blob](maxBlobsPerBlock, int(BYTES_PER_BLOB)),
 	}
-	b.Block.SetVersion(version)
 	return b
 }
 
@@ -62,7 +61,6 @@ func NewDenebSignedBeaconBlock(maxBlobsPerBlock int, version clparams.StateVersi
 		KZGProofs: solid.NewStaticListSSZ[*KZGProof](maxBlobsPerBlock, BYTES_KZG_PROOF),
 		Blobs:     solid.NewStaticListSSZ[*Blob](maxBlobsPerBlock, int(BYTES_PER_BLOB)),
 	}
-	b.SignedBlock.Block.SetVersion(version)
 	return b
 }
 
@@ -125,6 +123,7 @@ func (b *BlindOrExecutionBeaconBlock) ToExecution() *DenebBeaconBlock {
 	}
 	DenebBeaconBlock := NewDenebBeaconBlock(int(b.Cfg.MaxBlobsPerBlock), b.Version())
 	DenebBeaconBlock.Block = beaconBlock
+	DenebBeaconBlock.Block.SetVersion(b.Version())
 	for _, kzgProof := range b.KzgProofs {
 		proof := KZGProof{}
 		copy(proof[:], kzgProof[:])
