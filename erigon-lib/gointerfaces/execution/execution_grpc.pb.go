@@ -4,7 +4,7 @@
 // - protoc             v4.24.2
 // source: execution/execution.proto
 
-package execution
+package executionproto
 
 import (
 	context "context"
