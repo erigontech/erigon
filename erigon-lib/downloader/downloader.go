@@ -2204,17 +2204,17 @@ func (d *Downloader) ReCalcStats(interval time.Duration) {
 		logger.Log(verbosity, "[snapshots] downloading", "files", amount, "list", strings.Join(files, ", "))
 	}
 
-	if time.Since(stats.lastTorrentStatus) > 5*time.Minute {
-		stats.lastTorrentStatus = time.Now()
-
-		if len(noDownloadProgress) > 0 {
-			progressStatus := getProgressStatus(torrentClient, noDownloadProgress)
-			for file, status := range progressStatus {
-				logger.Debug(fmt.Sprintf("[snapshots] torrent status: %s\n    %s", file,
-					string(bytes.TrimRight(bytes.ReplaceAll(status, []byte("\n"), []byte("\n    ")), "\n "))))
-			}
-		}
-	}
+	//if time.Since(stats.lastTorrentStatus) > 5*time.Minute {
+	//	stats.lastTorrentStatus = time.Now()
+	//
+	//	if len(noDownloadProgress) > 0 {
+	//		progressStatus := getProgressStatus(torrentClient, noDownloadProgress)
+	//		for file, status := range progressStatus {
+	//			logger.Debug(fmt.Sprintf("[snapshots] torrent status: %s\n    %s", file,
+	//				string(bytes.TrimRight(bytes.ReplaceAll(status, []byte("\n"), []byte("\n    ")), "\n "))))
+	//		}
+	//	}
+	//}
 
 	if stats.BytesDownload > prevStats.BytesDownload {
 		stats.DownloadRate = (stats.BytesDownload - prevStats.BytesDownload) / uint64(interval.Seconds())
