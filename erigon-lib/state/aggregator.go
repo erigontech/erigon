@@ -1359,8 +1359,52 @@ func (r RangesV3) any() bool {
 
 func (ac *AggregatorRoTx) findMergeRange(maxEndTxNum, maxSpan uint64) RangesV3 {
 	var r RangesV3
+	if ac.a.commitmentValuesTransform {
+		lmrAcc := ac.d[kv.AccountsDomain].files.LatestMergedRange()
+		lmrSto := ac.d[kv.StorageDomain].files.LatestMergedRange()
+		lmrCom := ac.d[kv.CommitmentDomain].files.LatestMergedRange()
+
+		if !lmrCom.Equal(&lmrAcc) || !lmrCom.Equal(&lmrSto) {
+			// ensure that we do not make further merge progress until ranges are not equal
+			maxEndTxNum = min(maxEndTxNum, max(lmrAcc.to, lmrSto.to, lmrCom.to))
+			ac.a.logger.Warn("findMergeRange: hold further merge", "to", maxEndTxNum/ac.a.StepSize(),
+				"acc", lmrAcc.String("", ac.a.StepSize()), "sto", lmrSto.String("", ac.a.StepSize()), "com", lmrCom.String("", ac.a.StepSize()))
+		}
+	}
 	for id, d := range ac.d {
 		r.domain[id] = d.findMergeRange(maxEndTxNum, maxSpan)
+	}
+
+	if ac.a.commitmentValuesTransform && r.domain[kv.CommitmentDomain].values {
+		cr := r.domain[kv.CommitmentDomain]
+
+		restorePrevRange := false
+		for k, dr := range r.domain {
+			kd := kv.Domain(k)
+			if kd == kv.CommitmentDomain || (dr.valuesStartTxNum == cr.valuesStartTxNum && dr.valuesEndTxNum == cr.valuesEndTxNum) {
+				continue
+			}
+			// commitment waits until storage and account are merged so it may be a bit behind (if merge was interrupted before)
+			if !dr.values || cr.valuesEndTxNum < dr.valuesStartTxNum {
+				if mf := ac.d[kd].lookupFileByItsRange(cr.valuesStartTxNum, cr.valuesEndTxNum); mf != nil {
+					// file for required range exists, hold this domain from merge but allow to merge comitemnt
+					r.domain[k].values, r.domain[k].valuesStartTxNum, r.domain[k].valuesEndTxNum = false, 0, 0
+					rng := MergeRange{from: dr.valuesStartTxNum, to: dr.valuesEndTxNum}
+					ac.a.logger.Debug("findMergeRange: commitment range is different but file exists in domain, hold further merge",
+						ac.d[k].d.filenameBase, rng.String("", ac.a.StepSize()), "vals", dr.values)
+					continue
+				}
+				restorePrevRange = true
+			}
+		}
+		if restorePrevRange {
+			for k, d := range r.domain {
+				r.domain[k].values, r.domain[k].valuesStartTxNum, r.domain[k].valuesEndTxNum = false, 0, 0
+				rng := MergeRange{from: d.valuesStartTxNum, to: d.valuesEndTxNum}
+				ac.a.logger.Debug("findMergeRange: commitment range is different than accounts or storage, cancel kv merge",
+					ac.d[k].d.filenameBase, rng.String("", ac.a.StepSize()))
+			}
+		}
 	}
 	for id, ii := range ac.iis {
 		r.invertedIndex[id] = ii.findMergeRange(maxEndTxNum, maxSpan)

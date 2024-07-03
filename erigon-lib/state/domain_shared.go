@@ -421,12 +421,12 @@ func (sd *SharedDomains) replaceShortenedKeysInBranch(prefix []byte, branch comm
 	acc := sd.aggTx.d[kv.AccountsDomain]
 	storageItem := sto.lookupFileByItsRange(fStartTxNum, fEndTxNum)
 	if storageItem == nil {
-		sd.logger.Crit("storage file of steps %d-%d not found\n", fStartTxNum/sd.aggTx.a.aggregationStep, fEndTxNum/sd.aggTx.a.aggregationStep)
+		sd.logger.Crit(fmt.Sprintf("storage file of steps %d-%d not found\n", fStartTxNum/sd.aggTx.a.aggregationStep, fEndTxNum/sd.aggTx.a.aggregationStep))
 		return nil, fmt.Errorf("storage file not found")
 	}
 	accountItem := acc.lookupFileByItsRange(fStartTxNum, fEndTxNum)
 	if accountItem == nil {
-		sd.logger.Crit("storage file of steps %d-%d not found\n", fStartTxNum/sd.aggTx.a.aggregationStep, fEndTxNum/sd.aggTx.a.aggregationStep)
+		sd.logger.Crit(fmt.Sprintf("storage file of steps %d-%d not found\n", fStartTxNum/sd.aggTx.a.aggregationStep, fEndTxNum/sd.aggTx.a.aggregationStep))
 		return nil, fmt.Errorf("account file not found")
 	}
 	storageGetter := NewArchiveGetter(storageItem.decompressor.MakeGetter(), sto.d.compression)
