@@ -198,7 +198,7 @@ func (a *ApiHandler) GetEthV3ValidatorBlock(
 			return nil, err
 		}
 	} else {
-		if err := machine.ProcessBlock(transition.DefaultMachine, baseState, block.ToExecution()); err != nil {
+		if err := machine.ProcessBlock(transition.DefaultMachine, baseState, block.ToExecution().Block); err != nil {
 			log.Warn("Failed to process execution block", "err", err, "slot", targetSlot)
 			return nil, err
 		}
@@ -231,11 +231,11 @@ func (a *ApiHandler) GetEthV3ValidatorBlock(
 
 	var resp *beaconhttp.BeaconResponse
 	if block.IsBlinded() {
-		resp = newBeaconResponse(block.ToBlinded()).With("version", block.Version().String())
+		resp = newBeaconResponse(block.ToBlinded())
 	} else {
-		resp = newBeaconResponse(block.ToExecution()).With("version", block.Version().String())
+		resp = newBeaconResponse(block.ToExecution())
 	}
-	return resp.With("execution_payload_blinded", block.IsBlinded()).
+	return resp.WithVersion(block.Version()).With("execution_payload_blinded", block.IsBlinded()).
 		With("execution_payload_value", strconv.FormatUint(block.GetExecutionValue().Uint64(), 10)).
 		With("consensus_block_value", strconv.FormatUint(consensusValue, 10)), nil
 }
@@ -297,6 +297,7 @@ func (a *ApiHandler) produceBlock(
 		Slot:          targetSlot,
 		ProposerIndex: proposerIndex,
 		ParentRoot:    baseBlockRoot,
+		Cfg:           a.beaconChainCfg,
 	}
 	if !a.routerCfg.Builder || builderErr != nil {
 		// directly return the block if:
@@ -521,7 +522,7 @@ func (a *ApiHandler) produceBeaconBody(
 						log.Error("BlockProduction: Invalid commitment length")
 						return
 					}
-					if len(bundles.Blobs[i]) != int(cltypes.BYTES_PER_BLOB) {
+					if len(bundles.Blobs[i]) != cltypes.BYTES_PER_BLOB {
 						log.Error("BlockProduction: Invalid blob length")
 						return
 					}

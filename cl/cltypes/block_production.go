@@ -2,21 +2,74 @@ package cltypes
 
 import (
 	"encoding/json"
+	"errors"
 	"math/big"
 
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/types/clonable"
 	"github.com/ledgerwatch/erigon/cl/clparams"
+	"github.com/ledgerwatch/erigon/cl/cltypes/solid"
+	ssz2 "github.com/ledgerwatch/erigon/cl/ssz"
 )
 
+var (
+	_ ssz2.SizedObjectSSZ = (*DenebBeaconBlock)(nil)
+)
+
+type DenebBeaconBlock struct {
+	Block     *BeaconBlock              `json:"block"`
+	KZGProofs *solid.ListSSZ[*KZGProof] `json:"kzg_proofs"`
+	Blobs     *solid.ListSSZ[*Blob]     `json:"blobs"`
+}
+
+func NewDenebBeaconBlock(maxBlobsPerBlock int) *DenebBeaconBlock {
+	return &DenebBeaconBlock{
+		KZGProofs: solid.NewStaticListSSZ[*KZGProof](maxBlobsPerBlock, BYTES_KZG_PROOF),
+		Blobs:     solid.NewStaticListSSZ[*Blob](maxBlobsPerBlock, int(BYTES_PER_BLOB)),
+	}
+}
+
+func (b *DenebBeaconBlock) MarshalJSON() ([]byte, error) {
+	return json.Marshal(b)
+}
+
+func (b *DenebBeaconBlock) UnmarshalJSON(data []byte) error {
+	return json.Unmarshal(data, b)
+}
+
+func (b *DenebBeaconBlock) EncodeSSZ(buf []byte) ([]byte, error) {
+	return ssz2.MarshalSSZ(buf, b.Block, b.KZGProofs, b.Blobs)
+}
+
+func (b *DenebBeaconBlock) DecodeSSZ(buf []byte, version int) error {
+	return ssz2.UnmarshalSSZ(buf, version, b.Block, b.KZGProofs, b.Blobs)
+}
+
+func (b *DenebBeaconBlock) EncodingSizeSSZ() int {
+	return b.Block.EncodingSizeSSZ() + b.KZGProofs.EncodingSizeSSZ() + b.Blobs.EncodingSizeSSZ()
+}
+
+func (b *DenebBeaconBlock) Clone() clonable.Clonable {
+	return &DenebBeaconBlock{}
+}
+
+func (b *DenebBeaconBlock) Static() bool {
+	// it's variable size
+	return false
+}
+
+// BlindOrExecutionBeaconBlock is a union type that can be either a BlindedBeaconBlock or a BeaconBlock, depending on the context.
+// It's a intermediate type used in the block production process.
 type BlindOrExecutionBeaconBlock struct {
-	Slot          uint64         `json:"slot,string"`
-	ProposerIndex uint64         `json:"proposer_index,string"`
-	ParentRoot    libcommon.Hash `json:"parent_root"`
-	StateRoot     libcommon.Hash `json:"state_root"`
+	Slot          uint64         `json:"-"`
+	ProposerIndex uint64         `json:"-"`
+	ParentRoot    libcommon.Hash `json:"-"`
+	StateRoot     libcommon.Hash `json:"-"`
 	// BeaconBody or BlindedBeaconBody with json tag "body"
 	BeaconBody        *BeaconBody        `json:"-"`
 	BlindedBeaconBody *BlindedBeaconBody `json:"-"`
 	ExecutionValue    *big.Int           `json:"-"`
+	Cfg               *clparams.BeaconChainConfig
 }
 
 func (b *BlindOrExecutionBeaconBlock) ToBlinded() *BlindedBeaconBlock {
@@ -29,37 +82,21 @@ func (b *BlindOrExecutionBeaconBlock) ToBlinded() *BlindedBeaconBlock {
 	}
 }
 
-func (b *BlindOrExecutionBeaconBlock) ToExecution() *BeaconBlock {
-	return &BeaconBlock{
+func (b *BlindOrExecutionBeaconBlock) ToExecution() *DenebBeaconBlock {
+	beaconBlock := &BeaconBlock{
 		Slot:          b.Slot,
 		ProposerIndex: b.ProposerIndex,
 		ParentRoot:    b.ParentRoot,
 		StateRoot:     b.StateRoot,
 		Body:          b.BeaconBody,
 	}
+	DenebBeaconBlock := NewDenebBeaconBlock(int(b.Cfg.MaxBlobsPerBlock))
+	DenebBeaconBlock.Block = beaconBlock
+	return DenebBeaconBlock
 }
 
 func (b *BlindOrExecutionBeaconBlock) MarshalJSON() ([]byte, error) {
-	// if b.BeaconBody != nil, then marshal BeaconBody
-	// if b.BlindedBeaconBody != nil, then marshal BlindedBeaconBody
-	temp := struct {
-		Slot          uint64         `json:"slot,string"`
-		ProposerIndex uint64         `json:"proposer_index,string"`
-		ParentRoot    libcommon.Hash `json:"parent_root"`
-		StateRoot     libcommon.Hash `json:"state_root"`
-		Body          any            `json:"body"`
-	}{
-		Slot:          b.Slot,
-		ProposerIndex: b.ProposerIndex,
-		ParentRoot:    b.ParentRoot,
-		StateRoot:     b.StateRoot,
-	}
-	if b.BeaconBody != nil {
-		temp.Body = b.BeaconBody
-	} else if b.BlindedBeaconBody != nil {
-		temp.Body = b.BlindedBeaconBody
-	}
-	return json.Marshal(temp)
+	return errors.New("json marshal unsupported for BlindOrExecutionBeaconBlock")
 }
 
 func (b *BlindOrExecutionBeaconBlock) UnmarshalJSON(data []byte) error {
