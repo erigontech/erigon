@@ -135,6 +135,10 @@ func (c *CommitteeSubscribeMgmt) CheckAggregateAttestation(att *solid.Attestatio
 
 func (c *CommitteeSubscribeMgmt) sweepByStaleSlots(ctx context.Context) {
 	slotIsStale := func(curSlot, targetSlot uint64) bool {
+		if curSlot <= targetSlot {
+			// Avoid subtracting unsigned integers
+			return false
+		}
 		return curSlot-targetSlot > c.netConfig.AttestationPropagationSlotRange
 	}
 	// sweep every minute
@@ -149,7 +153,6 @@ func (c *CommitteeSubscribeMgmt) sweepByStaleSlots(ctx context.Context) {
 			c.validatorSubsMutex.Lock()
 			for committeeIdx, sub := range c.validatorSubs {
 				if slotIsStale(curSlot, sub.latestTargetSlot) {
-					log.Info("Remove stale subscription", "committeeIndex", committeeIdx, "latestTargetSlot", sub.latestTargetSlot, "currentSlot", curSlot, "slotRange", c.netConfig.AttestationPropagationSlotRange)
 					delete(c.validatorSubs, committeeIdx)
 				}
 			}
