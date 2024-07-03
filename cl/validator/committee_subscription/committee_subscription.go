@@ -6,6 +6,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/ledgerwatch/erigon-lib/common"
 	sentinel "github.com/ledgerwatch/erigon-lib/gointerfaces/sentinelproto"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/log/v3"
@@ -117,9 +118,14 @@ func (c *CommitteeSubscribeMgmt) CheckAggregateAttestation(att *solid.Attestatio
 	committeeIndex := att.AttestantionData().CommitteeIndex()
 	c.validatorSubsMutex.RLock()
 	defer c.validatorSubsMutex.RUnlock()
-	log.Info("[aggr] check attestation", "committeeIndex", committeeIndex)
+	hashRoot, err := att.AttestantionData().HashSSZ()
+	if err != nil {
+		log.Warn("[aggr] failed to hash attestation data", "err", err)
+		return err
+	}
 	if sub, ok := c.validatorSubs[committeeIndex]; ok && sub.aggregate {
 		// aggregate attestation
+		log.Info("[aggr] check attestation", "committeeIndex", committeeIndex, "attRoot", common.Hash(hashRoot).String())
 		if err := c.aggregationPool.AddAttestation(att); err != nil {
 			return err
 		}
