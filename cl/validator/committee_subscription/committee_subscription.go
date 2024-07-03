@@ -149,6 +149,7 @@ func (c *CommitteeSubscribeMgmt) sweepByStaleSlots(ctx context.Context) {
 			c.validatorSubsMutex.Lock()
 			for committeeIdx, sub := range c.validatorSubs {
 				if slotIsStale(curSlot, sub.latestTargetSlot) {
+					log.Info("Remove stale subscription", "committeeIndex", committeeIdx, "latestTargetSlot", sub.latestTargetSlot, "currentSlot", curSlot)
 					delete(c.validatorSubs, committeeIdx)
 				}
 			}
