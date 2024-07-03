@@ -122,7 +122,7 @@ func (b *BpsTree) WarmUp(kv ArchiveGetter) error {
 	// `cacheNodesPerM = 1` means that we put only each parent node into cache, while `cacheNodesPerM = M` means that we put all nodes into cache.
 	cacheNodesPerM := uint64(2)
 	d := logBase(k, b.M)
-	mx := make([][]Node, d) // usually `d` but for experiments we put them all into flat list
+	mx := make([][]Node, d+1) // usually `d` but for experiments we put them all into flat list
 
 	l := int(0)
 	for ik := uint64(0); ik < k; ik += b.M / cacheNodesPerM {
