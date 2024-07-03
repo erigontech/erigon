@@ -94,7 +94,7 @@ func E3HistoryNoSystemTxs(ctx context.Context, chainDB kv.RwDB, agg *state.Aggre
 
 						select {
 						case <-logEvery.C:
-							log.Warn(fmt.Sprintf("[dbg] checked=%dK", count.Load()/1_000))
+							log.Warn(fmt.Sprintf("[dbg] checked=%dK keys", count.Load()/1_000))
 						default:
 						}
 					}

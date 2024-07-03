@@ -94,6 +94,8 @@ type Downloader struct {
 	webDownloadInfo map[string]webDownloadInfo
 	downloading     map[string]*downloadInfo
 	downloadLimit   *rate.Limit
+
+	stuckFileDetailedLogs bool
 }
 
 type downloadInfo struct {
@@ -2204,7 +2206,7 @@ func (d *Downloader) ReCalcStats(interval time.Duration) {
 		logger.Log(verbosity, "[snapshots] downloading", "files", amount, "list", strings.Join(files, ", "))
 	}
 
-	if time.Since(stats.lastTorrentStatus) > 5*time.Minute {
+	if d.stuckFileDetailedLogs && time.Since(stats.lastTorrentStatus) > 5*time.Minute {
 		stats.lastTorrentStatus = time.Now()
 
 		if len(noDownloadProgress) > 0 {

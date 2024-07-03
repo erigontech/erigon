@@ -346,15 +346,15 @@ func (s *Merge) IsServiceTransaction(sender libcommon.Address, syscall consensus
 }
 
 func (s *Merge) Initialize(config *chain.Config, chain consensus.ChainHeaderReader, header *types.Header,
-	state *state.IntraBlockState, syscall consensus.SysCallCustom, logger log.Logger,
+	state *state.IntraBlockState, syscall consensus.SysCallCustom, logger log.Logger, tracer *tracing.Hooks,
 ) {
 	if !misc.IsPoSHeader(header) {
-		s.eth1Engine.Initialize(config, chain, header, state, syscall, logger)
+		s.eth1Engine.Initialize(config, chain, header, state, syscall, logger, tracer)
 	}
 	if chain.Config().IsCancun(header.Time) {
 		misc.ApplyBeaconRootEip4788(header.ParentBeaconBlockRoot, func(addr libcommon.Address, data []byte) ([]byte, error) {
 			return syscall(addr, data, state, header, false /* constCall */)
-		})
+		}, tracer)
 	}
 	if chain.Config().IsPrague(header.Time) {
 		misc.StoreBlockHashesEip2935(header, state, config, chain)

@@ -27,7 +27,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	btree2 "github.com/tidwall/btree"
+	"github.com/tidwall/btree"
 
 	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/background"
@@ -452,10 +452,10 @@ func (dt *DomainRoTx) mergeFiles(ctx context.Context, domainFiles, indexFiles, h
 		return
 	}
 
-	closeItem := true
+	closeFiles := true
 	var kvWriter ArchiveWriter
 	defer func() {
-		if closeItem {
+		if closeFiles {
 			if kvWriter != nil {
 				kvWriter.Close()
 			}
@@ -481,7 +481,7 @@ func (dt *DomainRoTx) mergeFiles(ctx context.Context, domainFiles, indexFiles, h
 	}
 
 	if !r.values {
-		closeItem = false
+		closeFiles = false
 		return
 	}
 
@@ -626,7 +626,7 @@ func (dt *DomainRoTx) mergeFiles(ctx context.Context, domainFiles, indexFiles, h
 		}
 	}
 
-	closeItem = false
+	closeFiles = false
 	dt.d.stats.MergesCount++
 	return
 }
@@ -1227,7 +1227,7 @@ func (iit *InvertedIndexRoTx) garbage(merged *filesItem) (outs []*filesItem) {
 	return garbage(iit.ii.dirtyFiles, iit.files, merged)
 }
 
-func garbage(dirtyFiles *btree2.BTreeG[*filesItem], visibleFiles []ctxItem, merged *filesItem) (outs []*filesItem) {
+func garbage(dirtyFiles *btree.BTreeG[*filesItem], visibleFiles []ctxItem, merged *filesItem) (outs []*filesItem) {
 	if merged == nil {
 		return
 	}
