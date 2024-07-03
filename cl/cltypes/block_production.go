@@ -1,7 +1,6 @@
 package cltypes
 
 import (
-	"encoding/json"
 	"errors"
 	"math/big"
 
@@ -27,14 +26,6 @@ func NewDenebBeaconBlock(maxBlobsPerBlock int) *DenebBeaconBlock {
 		KZGProofs: solid.NewStaticListSSZ[*KZGProof](maxBlobsPerBlock, BYTES_KZG_PROOF),
 		Blobs:     solid.NewStaticListSSZ[*Blob](maxBlobsPerBlock, int(BYTES_PER_BLOB)),
 	}
-}
-
-func (b *DenebBeaconBlock) MarshalJSON() ([]byte, error) {
-	return json.Marshal(b)
-}
-
-func (b *DenebBeaconBlock) UnmarshalJSON(data []byte) error {
-	return json.Unmarshal(data, b)
 }
 
 func (b *DenebBeaconBlock) EncodeSSZ(buf []byte) ([]byte, error) {
