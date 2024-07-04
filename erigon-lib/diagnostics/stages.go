@@ -100,11 +100,7 @@ func (d *DiagnosticClient) runSyncStagesListListener(rootCtx context.Context) {
 			case <-rootCtx.Done():
 				return
 			case info := <-ch:
-				d.mu.Lock()
 				d.SetStagesList(info.StagesList)
-				d.mu.Unlock()
-
-				d.saveSyncStagesToDB()
 			}
 		}
 	}()
@@ -121,11 +117,7 @@ func (d *DiagnosticClient) runCurrentSyncStageListener(rootCtx context.Context) 
 			case <-rootCtx.Done():
 				return
 			case info := <-ch:
-				d.mu.Lock()
 				d.SetCurrentSyncStage(info)
-				d.mu.Unlock()
-
-				d.saveSyncStagesToDB()
 			}
 		}
 	}()
@@ -142,11 +134,7 @@ func (d *DiagnosticClient) runCurrentSyncSubStageListener(rootCtx context.Contex
 			case <-rootCtx.Done():
 				return
 			case info := <-ch:
-				d.mu.Lock()
 				d.SetCurrentSyncSubStage(info)
-				d.mu.Unlock()
-
-				d.saveSyncStagesToDB()
 			}
 		}
 	}()
@@ -163,20 +151,10 @@ func (d *DiagnosticClient) runSubStageListener(rootCtx context.Context) {
 			case <-rootCtx.Done():
 				return
 			case info := <-ch:
-				d.mu.Lock()
 				d.SetSubStagesList(info.Stage, info.List)
-				d.mu.Unlock()
-
-				d.saveSyncStagesToDB()
 			}
 		}
 	}()
-}
-
-func (d *DiagnosticClient) saveSyncStagesToDB() {
-	if err := d.db.Update(d.ctx, StagesListUpdater(d.syncStages)); err != nil {
-		log.Error("[Diagnostics] Failed to update stages list", "err", err)
-	}
 }
 
 func (d *DiagnosticClient) getCurrentSyncIdxs() CurrentSyncStagesIdxs {
@@ -202,12 +180,17 @@ func (d *DiagnosticClient) getCurrentSyncIdxs() CurrentSyncStagesIdxs {
 }
 
 func (d *DiagnosticClient) SetStagesList(stages []SyncStage) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+
 	if len(d.syncStages) != len(stages) {
 		d.syncStages = stages
 	}
 }
 
 func (d *DiagnosticClient) SetSubStagesList(stageId string, subStages []SyncSubStage) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
 	for idx, stage := range d.syncStages {
 		if stage.ID == stageId {
 			if len(d.syncStages[idx].SubStages) != len(subStages) {
@@ -219,6 +202,8 @@ func (d *DiagnosticClient) SetSubStagesList(stageId string, subStages []SyncSubS
 }
 
 func (d *DiagnosticClient) SetCurrentSyncStage(css CurrentSyncStage) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
 	isSet := false
 	for idx, stage := range d.syncStages {
 		if !isSet {
@@ -246,6 +231,9 @@ func (d *DiagnosticClient) setSubStagesState(stadeIdx int, state StageState) {
 }
 
 func (d *DiagnosticClient) SetCurrentSyncSubStage(css CurrentSyncSubStage) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+
 	for idx, stage := range d.syncStages {
 		if stage.State == Running {
 			for subIdx, subStage := range stage.SubStages {
