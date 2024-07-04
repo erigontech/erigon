@@ -499,7 +499,25 @@ func (api *ZkEvmAPIImpl) GetBatchByNumber(ctx context.Context, batchNumber rpc.B
 			// txs
 			hashes := make([]types.TransactionOrHash, len(bbj.Transactions))
 			for i, txn := range bbj.Transactions {
-				// TODO: add transactionl2hash
+
+				blkTx := blk.Transactions()[i]
+				l2TxHash, err := zktx.ComputeL2TxHash(
+					blkTx.GetChainID().ToBig(),
+					blkTx.GetValue(),
+					blkTx.GetPrice(),
+					blkTx.GetNonce(),
+					blkTx.GetGas(),
+					blkTx.GetTo(),
+					&txn.Tx.From,
+					blkTx.GetData(),
+				)
+				if err != nil {
+					return nil, err
+				}
+
+				txn.Tx.L2Hash = l2TxHash
+				txn.Tx.Receipt.TransactionL2Hash = l2TxHash
+
 				batchTransactionsJson = append(batchTransactionsJson, txn)
 				txn.Hash = &txn.Tx.Hash
 				txn.Tx = nil
@@ -508,8 +526,6 @@ func (api *ZkEvmAPIImpl) GetBatchByNumber(ctx context.Context, batchNumber rpc.B
 
 			// after collecting transactions, reduce them to them hash only on the block
 			bbj.Transactions = hashes
-
-			// TODO: add l2hash
 
 			batchBlocksJson = append(batchBlocksJson, batchBlockExtra)
 		}
@@ -612,12 +628,11 @@ func (api *ZkEvmAPIImpl) GetBatchByNumber(ctx context.Context, batchNumber rpc.B
 	}
 	batch.BatchL2Data = batchL2Data
 
-	// currently gives 'error execution reverted' when calling the L1
-	//oaih, err := api.l1Syncer.GetOldAccInputHash(ctx, &api.config.AddressRollup, ApiRollupId, bn+1)
-	//if err != nil {
-	//	return nil, err
-	//}
-	//batch.AccInputHash = oaih
+	oldAccInputHash, err := api.l1Syncer.GetOldAccInputHash(ctx, &api.config.AddressRollup, ApiRollupId, batchNo)
+	if err != nil {
+		return nil, err
+	}
+	batch.AccInputHash = oldAccInputHash
 
 	return populateBatchDetails(batch)
 }
