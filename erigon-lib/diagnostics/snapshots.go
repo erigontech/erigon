@@ -93,15 +93,6 @@ func (d *DiagnosticClient) updateSnapshotStageStats(stats SyncStageStats, subSta
 	d.syncStages[idxs.Stage].SubStages[idxs.SubStage].Stats = stats
 }
 
-func (d *DiagnosticClient) snapshotStageFinished() bool {
-	idx := d.getCurrentSyncIdxs()
-	if idx.Stage > 0 {
-		return true
-	} else {
-		return false
-	}
-}
-
 func (d *DiagnosticClient) runSegmentDownloadingListener(rootCtx context.Context) {
 	go func() {
 		ctx, ch, closeChannel := Context[SegmentDownloadStatistics](rootCtx, 1)
