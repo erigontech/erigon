@@ -68,7 +68,6 @@ var (
 	MainnetGenesisHash    = libcommon.HexToHash("0xd4e56740f876aef8c010b86a40d5f56745a118d0906a34e69aec8c0db1cb8fa3")
 	HoleskyGenesisHash    = libcommon.HexToHash("0xb5f7f912443c940f21fd611f12828d75b534364ed9e95ca4e307729a4661bde4")
 	SepoliaGenesisHash    = libcommon.HexToHash("0x25a5cc106eea7138acab33231d7160d69cb777ee0c2c553fcddf5138993e6dd9")
-	GoerliGenesisHash     = libcommon.HexToHash("0xbf7e331f7f7c1dd2e05159666b3bf8bc7a8a3a9eb1d518969eab529dd9b88c1a")
 	MumbaiGenesisHash     = libcommon.HexToHash("0x7b66506a9ebdbf30d32b43c5f15a3b1216269a1ec3a75aa3182b86176a2b1ca7")
 	AmoyGenesisHash       = libcommon.HexToHash("0x7202b2b53c5a0836e773e319d18922cc756dd67432f9a1f65352b61f4406c697")
 	BorMainnetGenesisHash = libcommon.HexToHash("0xa9c28ce2141b56c474f1dc504bee9b01eb1bd7d1a507580d5519d4437a97de1b")
@@ -93,9 +92,6 @@ var (
 
 	// SepoliaChainConfig contains the chain parameters to run a node on the Sepolia test network.
 	SepoliaChainConfig = readChainSpec("chainspecs/sepolia.json")
-
-	// GoerliChainConfig contains the chain parameters to run a node on the Görli test network.
-	GoerliChainConfig = readChainSpec("chainspecs/goerli.json")
 
 	// AllProtocolChanges contains every protocol change (EIPs) introduced
 	// and accepted by the Ethereum core developers into the main net protocol.
@@ -221,8 +217,6 @@ func ChainConfigByChainName(chain string) *chain.Config {
 		return HoleskyChainConfig
 	case networkname.SepoliaChainName:
 		return SepoliaChainConfig
-	case networkname.GoerliChainName:
-		return GoerliChainConfig
 	case networkname.MumbaiChainName:
 		return MumbaiChainConfig
 	case networkname.AmoyChainName:
@@ -250,8 +244,6 @@ func GenesisHashByChainName(chain string) *libcommon.Hash {
 		return &HoleskyGenesisHash
 	case networkname.SepoliaChainName:
 		return &SepoliaGenesisHash
-	case networkname.GoerliChainName:
-		return &GoerliGenesisHash
 	case networkname.MumbaiChainName:
 		return &MumbaiGenesisHash
 	case networkname.AmoyChainName:
@@ -279,8 +271,6 @@ func ChainConfigByGenesisHash(genesisHash libcommon.Hash) *chain.Config {
 		return HoleskyChainConfig
 	case genesisHash == SepoliaGenesisHash:
 		return SepoliaChainConfig
-	case genesisHash == GoerliGenesisHash:
-		return GoerliChainConfig
 	case genesisHash == MumbaiGenesisHash:
 		return MumbaiChainConfig
 	case genesisHash == AmoyGenesisHash:
@@ -314,7 +304,6 @@ func isChainIDPoS(chainID *big.Int) bool {
 	ids := []*big.Int{
 		MainnetChainConfig.ChainID,
 		HoleskyChainConfig.ChainID,
-		GoerliChainConfig.ChainID,
 		SepoliaChainConfig.ChainID,
 		GnosisChainConfig.ChainID,
 		ChiadoChainConfig.ChainID,
