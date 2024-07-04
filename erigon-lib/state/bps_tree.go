@@ -163,7 +163,7 @@ func (b *BpsTree) WarmUp(kv ArchiveGetter) error {
 		mx = append(mx, nextLevel)
 	}
 	// turn around mx
-	for i, j := 0, len(mx)-1; i != j; i, j = i+1, j-1 {
+	for i, j := 0, len(mx)-1; i < j; i, j = i+1, j-1 {
 		mx[i], mx[j] = mx[j], mx[i]
 	}
 
