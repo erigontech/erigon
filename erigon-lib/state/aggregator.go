@@ -847,7 +847,21 @@ func (ac *AggregatorRoTx) CanPrune(tx kv.Tx, untilTx uint64) bool {
 }
 
 func (ac *AggregatorRoTx) CanUnwindToBlockNum(tx kv.Tx) (uint64, error) {
-	return ReadLowestUnwindableBlock(tx)
+	minUnwindale, err := ReadLowestUnwindableBlock(tx)
+	if err != nil {
+		return 0, err
+	}
+	if minUnwindale == math.MaxUint64 { // no unwindable block found
+		stateVal, _, _, err := ac.d[kv.CommitmentDomain].GetLatest(keyCommitmentState, nil, tx)
+		if err != nil {
+			return 0, err
+		}
+		if len(stateVal) == 0 {
+			return 0, nil
+		}
+		_, minUnwindale = _decodeTxBlockNums(stateVal)
+	}
+	return minUnwindale, nil
 }
 
 // CanUnwindBeforeBlockNum - returns `true` if can unwind to requested `blockNum`, otherwise returns nearest `unwindableBlockNum`
