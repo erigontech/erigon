@@ -1,4 +1,7 @@
-// Copyright 2017 The go-ethereum and Erigon Authors
+// Copyright 2017 The go-ethereum Authors
+// (original work)
+// Copyright 2024 The Erigon Authors
+// (modifications)
 // This file is part of Erigon.
 //
 // Erigon is free software: you can redistribute it and/or modify
@@ -29,25 +32,25 @@
 //   }
 {
 	// ids aggregates the 4byte ids found.
-	ids : {},
+	ids: { },
 
 	// callType returns 'false' for non-calls, or the peek-index for the first param
 	// after 'value', i.e. meminstart.
-	callType: function(opstr){
-		switch(opstr){
-		case "CALL": case "CALLCODE":
-			// gas, addr, val, memin, meminsz, memout, memoutsz
-			return 3; // stack ptr to memin
+	callType: function(opstr) {
+		switch (opstr) {
+			case "CALL": case "CALLCODE":
+				// gas, addr, val, memin, meminsz, memout, memoutsz
+				return 3; // stack ptr to memin
 
-		case "DELEGATECALL": case "STATICCALL":
-			// gas, addr, memin, meminsz, memout, memoutsz
-			return 2; // stack ptr to memin
+			case "DELEGATECALL": case "STATICCALL":
+				// gas, addr, memin, meminsz, memout, memoutsz
+				return 2; // stack ptr to memin
 		}
 		return false;
 	},
 
 	// store save the given identifier and datasize.
-	store: function(id, size){
+	store: function(id, size) {
 		var key = "" + toHex(id) + "-" + size;
 		this.ids[key] = this.ids[key] + 1 || 1;
 	},
@@ -67,7 +70,7 @@
 		var inSz = log.stack.peek(ct + 1).valueOf();
 		if (inSz >= 4) {
 			var inOff = log.stack.peek(ct).valueOf();
-			this.store(log.memory.slice(inOff, inOff + 4), inSz-4);
+			this.store(log.memory.slice(inOff, inOff + 4), inSz - 4);
 		}
 	},
 
@@ -79,7 +82,7 @@
 	result: function(ctx) {
 		// Save the outer calldata also
 		if (ctx.input.length >= 4) {
-			this.store(slice(ctx.input, 0, 4), ctx.input.length-4)
+			this.store(slice(ctx.input, 0, 4), ctx.input.length - 4)
 		}
 		return this.ids;
 	},

@@ -1,4 +1,7 @@
-// Copyright 2017 The go-ethereum and Erigon Authors
+// Copyright 2017 The go-ethereum Authors
+// (original work)
+// Copyright 2024 The Erigon Authors
+// (modifications)
 // This file is part of Erigon.
 //
 // Erigon is free software: you can redistribute it and/or modify
@@ -160,7 +163,7 @@ type EngineWriter interface {
 
 	// Initialize runs any pre-transaction state modifications (e.g. epoch start)
 	Initialize(config *chain.Config, chain ChainHeaderReader, header *types.Header,
-		state *state.IntraBlockState, syscall SysCallCustom, logger log.Logger)
+		state *state.IntraBlockState, syscall SysCallCustom, logger log.Logger, tracer *tracing.Hooks)
 
 	// Finalize runs any post-transaction state modifications (e.g. block rewards)
 	// but does not assemble the block.
