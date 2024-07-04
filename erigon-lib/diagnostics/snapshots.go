@@ -145,6 +145,7 @@ func (d *DiagnosticClient) runSegmentIndexingListener(rootCtx context.Context) {
 				return
 			case info := <-ch:
 				d.addOrUpdateSegmentIndexingState(info)
+				d.updateIndexingStatus()
 
 				if d.syncStats.SnapshotIndexing.IndexingFinished {
 					d.SaveData()
@@ -185,9 +186,31 @@ func (d *DiagnosticClient) runSegmentIndexingFinishedListener(rootCtx context.Co
 				}
 
 				d.mu.Unlock()
+
+				d.updateIndexingStatus()
 			}
 		}
 	}()
+}
+
+func (d *DiagnosticClient) updateIndexingStatus() {
+	totalProgress := 0
+	totalProgressPercent := 0
+	for _, seg := range d.syncStats.SnapshotIndexing.Segments {
+		totalProgressPercent += seg.Percent
+	}
+
+	totalProgress = totalProgressPercent / len(d.syncStats.SnapshotIndexing.Segments)
+
+	d.updateSnapshotStageStats(SyncStageStats{
+		TimeElapsed: SecondsToHHMMString(uint64(d.syncStats.SnapshotIndexing.TimeElapsed)),
+		TimeLeft:    "unknown",
+		Progress:    fmt.Sprintf("%d%%", totalProgress),
+	}, "Indexing snapshots")
+
+	if totalProgress >= 100 {
+		d.syncStats.SnapshotIndexing.IndexingFinished = true
+	}
 }
 
 func (d *DiagnosticClient) addOrUpdateSegmentIndexingState(upd SnapshotIndexingStatistics) {
@@ -215,24 +238,6 @@ func (d *DiagnosticClient) addOrUpdateSegmentIndexingState(upd SnapshotIndexingS
 	}
 
 	d.syncStats.SnapshotIndexing.TimeElapsed = upd.TimeElapsed
-
-	totalProgress := 0
-	totalProgressPercent := 0
-	for _, seg := range d.syncStats.SnapshotIndexing.Segments {
-		totalProgressPercent += seg.Percent
-	}
-
-	totalProgress = totalProgressPercent / len(d.syncStats.SnapshotIndexing.Segments)
-
-	d.updateSnapshotStageStats(SyncStageStats{
-		TimeElapsed: SecondsToHHMMString(uint64(upd.TimeElapsed)),
-		TimeLeft:    "unknown",
-		Progress:    fmt.Sprintf("%d%%", totalProgress),
-	}, "Indexing snapshots")
-
-	if totalProgress >= 100 {
-		d.syncStats.SnapshotIndexing.IndexingFinished = true
-	}
 }
 
 func (d *DiagnosticClient) runSnapshotFilesListListener(rootCtx context.Context) {
