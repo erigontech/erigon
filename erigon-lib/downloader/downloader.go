@@ -811,6 +811,19 @@ func (d *Downloader) mainLoop(silent bool) error {
 
 			for _, t := range d.torrentClient.Torrents() {
 				if urls, ok := d.webseeds.ByFileName(t.Name()); ok {
+					// if we have created a torrent, but it has no info, assume that the
+					// webseed download either has not been called yet or has failed and
+					// try again here - otherwise the torrent will be left with no info
+					if t.Info() == nil {
+						ts, ok, err := d.webseeds.DownloadAndSaveTorrentFile(d.ctx, t.Name())
+						if ok && err == nil {
+							_, _, err = addTorrentFile(d.ctx, ts, d.torrentClient, d.db, d.webseeds)
+							if err != nil {
+								continue
+							}
+						}
+					}
+
 					t.AddWebSeeds(urls)
 				}
 			}
