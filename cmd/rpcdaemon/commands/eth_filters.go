@@ -4,6 +4,7 @@ import (
 	"context"
 	"strings"
 
+	"github.com/gateway-fm/cdk-erigon-lib/common"
 	"github.com/ledgerwatch/log/v3"
 
 	"github.com/ledgerwatch/erigon/common/debug"
@@ -267,6 +268,9 @@ func (api *APIImpl) Logs(ctx context.Context, crit filters.FilterCriteria) (*rpc
 			select {
 			case h, ok := <-logs:
 				if h != nil {
+					if h.Topics == nil {
+						h.Topics = make([]common.Hash, 0)
+					}
 					err := notifier.Notify(rpcSub.ID, h)
 					if err != nil {
 						log.Warn("error while notifying subscription", "err", err)
