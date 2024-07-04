@@ -145,6 +145,11 @@ func (d *DiagnosticClient) runSegmentIndexingListener(rootCtx context.Context) {
 				return
 			case info := <-ch:
 				d.addOrUpdateSegmentIndexingState(info)
+
+				if d.syncStats.SnapshotIndexing.IndexingFinished {
+					d.SaveData()
+					return
+				}
 			}
 		}
 	}()
@@ -226,7 +231,7 @@ func (d *DiagnosticClient) addOrUpdateSegmentIndexingState(upd SnapshotIndexingS
 	}, "Indexing snapshots")
 
 	if totalProgress >= 100 {
-		d.SaveData()
+		d.syncStats.SnapshotIndexing.IndexingFinished = true
 	}
 }
 

@@ -115,8 +115,9 @@ type SegmentPeer struct {
 }
 
 type SnapshotIndexingStatistics struct {
-	Segments    []SnapshotSegmentIndexingStatistics `json:"segments"`
-	TimeElapsed float64                             `json:"timeElapsed"`
+	Segments         []SnapshotSegmentIndexingStatistics `json:"segments"`
+	TimeElapsed      float64                             `json:"timeElapsed"`
+	IndexingFinished bool                                `json:"indexingFinished"`
 }
 
 type SnapshotSegmentIndexingStatistics struct {
