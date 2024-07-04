@@ -22,9 +22,7 @@ func (d *DiagnosticClient) setupSysInfoDiagnostics() {
 	sysInfo := GetSysInfo(d.dataDirPath)
 
 	var funcs []func(tx kv.RwTx) error
-	funcs = append(funcs, RAMInfoUpdater(sysInfo.RAM))
-	funcs = append(funcs, CPUInfoUpdater(sysInfo.CPU))
-	funcs = append(funcs, DiskInfoUpdater(sysInfo.Disk))
+	funcs = append(funcs, RAMInfoUpdater(sysInfo.RAM), CPUInfoUpdater(sysInfo.CPU), DiskInfoUpdater(sysInfo.Disk))
 
 	err := d.db.Update(d.ctx, func(tx kv.RwTx) error {
 		for _, updater := range funcs {

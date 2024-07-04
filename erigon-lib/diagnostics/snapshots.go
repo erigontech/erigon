@@ -186,13 +186,12 @@ func (d *DiagnosticClient) runSegmentIndexingFinishedListener(rootCtx context.Co
 }
 
 func (d *DiagnosticClient) updateIndexingStatus() {
-	totalProgress := 0
 	totalProgressPercent := 0
 	for _, seg := range d.syncStats.SnapshotIndexing.Segments {
 		totalProgressPercent += seg.Percent
 	}
 
-	totalProgress = totalProgressPercent / len(d.syncStats.SnapshotIndexing.Segments)
+	totalProgress := totalProgressPercent / len(d.syncStats.SnapshotIndexing.Segments)
 
 	d.updateSnapshotStageStats(SyncStageStats{
 		TimeElapsed: SecondsToHHMMString(uint64(d.syncStats.SnapshotIndexing.TimeElapsed)),
