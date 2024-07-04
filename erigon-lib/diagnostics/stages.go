@@ -82,6 +82,14 @@ func (ti CurrentSyncSubStage) Type() Type {
 	return TypeOf(ti)
 }
 
+type StopNodeEvent struct {
+	Stop bool
+}
+
+func (ti StopNodeEvent) Type() Type {
+	return TypeOf(ti)
+}
+
 func (d *DiagnosticClient) setupStagesDiagnostics(rootCtx context.Context) {
 	d.runSyncStagesListListener(rootCtx)
 	d.runCurrentSyncStageListener(rootCtx)
