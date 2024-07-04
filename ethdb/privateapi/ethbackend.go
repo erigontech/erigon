@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"math/big"
 	"reflect"
+	"strings"
 	"sync"
 	"time"
 
@@ -195,7 +196,17 @@ func (s *EthBackendServer) ProtocolVersion(_ context.Context, _ *remote.Protocol
 }
 
 func (s *EthBackendServer) ClientVersion(_ context.Context, _ *remote.ClientVersionRequest) (*remote.ClientVersionReply, error) {
-	return &remote.ClientVersionReply{NodeName: common.MakeName("erigon", params.Version)}, nil
+	var version string
+	if strings.Contains(params.GitTag, "tags") || strings.Contains(params.GitTag, "release") {
+		version = params.GitTag[strings.LastIndex(params.GitTag, "/")+1:]
+	} else {
+		if params.GitBranch != "" {
+			version = fmt.Sprintf("2.0-%s-%s", params.GitBranch, params.GitCommit)
+		} else {
+			version = "2.0-dev"
+		}
+	}
+	return &remote.ClientVersionReply{NodeName: common.MakeName("cdk-erigon", version)}, nil
 }
 
 func (s *EthBackendServer) TxnLookup(ctx context.Context, req *remote.TxnLookupRequest) (*remote.TxnLookupReply, error) {
