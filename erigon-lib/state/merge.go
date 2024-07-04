@@ -75,43 +75,27 @@ func (h *History) dirtyFilesEndTxNumMinimax() uint64 {
 }
 
 type DomainRanges struct {
-	name              kv.Domain
-	valuesStartTxNum  uint64
-	valuesEndTxNum    uint64
-	historyStartTxNum uint64
-	historyEndTxNum   uint64
-	indexStartTxNum   uint64
-	indexEndTxNum     uint64
-	values            bool
-	history           bool
-	index             bool
-
+	name    kv.Domain
+	values  MergeRange
+	history HistoryRanges
 	aggStep uint64
 }
 
 func (r DomainRanges) String() string {
 	var b strings.Builder
-	if r.values {
-		b.WriteString(fmt.Sprintf("val:%d-%d", r.valuesStartTxNum/r.aggStep, r.valuesEndTxNum/r.aggStep))
+	if r.values.needMerge {
+		b.WriteString(r.values.String("val", r.aggStep))
 	}
-	if r.history {
+	if r.history.any() {
 		if b.Len() > 0 {
 			b.WriteString(", ")
 		}
-		b.WriteString(fmt.Sprintf("hist:%d-%d", r.historyStartTxNum/r.aggStep, r.historyEndTxNum/r.aggStep))
-	}
-	if r.index {
-		if b.Len() > 0 {
-			b.WriteString(", ")
-		}
-		b.WriteString(fmt.Sprintf("idx:%d-%d", r.indexStartTxNum/r.aggStep, r.indexEndTxNum/r.aggStep))
+		b.WriteString(r.history.String(r.aggStep))
 	}
 	return b.String()
 }
 
-func (r DomainRanges) any() bool {
-	return r.values || r.history || r.index
-}
+func (r DomainRanges) any() bool { return r.values.needMerge || r.history.any() }
 
 // findMergeRange
 // assumes that all fTypes in d.files have items at least as far as maxEndTxNum
@@ -124,15 +108,11 @@ func (dt *DomainRoTx) findMergeRange(maxEndTxNum, maxSpan uint64) DomainRanges {
 	if err != nil {
 		panic(err)
 	}
+
 	r := DomainRanges{
-		name:              domainName,
-		historyStartTxNum: hr.historyStartTxNum,
-		historyEndTxNum:   hr.historyEndTxNum,
-		history:           hr.history,
-		indexStartTxNum:   hr.indexStartTxNum,
-		indexEndTxNum:     hr.indexEndTxNum,
-		index:             hr.index,
-		aggStep:           dt.d.aggregationStep,
+		name:    domainName,
+		history: hr,
+		aggStep: dt.d.aggregationStep,
 	}
 	for _, item := range dt.files {
 		if item.endTxNum > maxEndTxNum {
@@ -141,12 +121,10 @@ func (dt *DomainRoTx) findMergeRange(maxEndTxNum, maxSpan uint64) DomainRanges {
 		endStep := item.endTxNum / dt.d.aggregationStep
 		spanStep := endStep & -endStep // Extract rightmost bit in the binary representation of endStep, this corresponds to size of maximally possible merge ending at endStep
 		span := spanStep * dt.d.aggregationStep
-		start := item.endTxNum - span
-		if start < item.startTxNum {
-			if !r.values || start < r.valuesStartTxNum {
-				r.values = true
-				r.valuesStartTxNum = start
-				r.valuesEndTxNum = item.endTxNum
+		fromTxNum := item.endTxNum - span
+		if fromTxNum < item.startTxNum {
+			if !r.values.needMerge || fromTxNum < r.values.from {
+				r.values = MergeRange{true, fromTxNum, item.endTxNum}
 			}
 		}
 	}
@@ -156,7 +134,8 @@ func (dt *DomainRoTx) findMergeRange(maxEndTxNum, maxSpan uint64) DomainRanges {
 func (ht *HistoryRoTx) findMergeRange(maxEndTxNum, maxSpan uint64) HistoryRanges {
 	var r HistoryRanges
 	mr := ht.iit.findMergeRange(maxEndTxNum, maxSpan)
-	r.index, r.indexStartTxNum, r.indexEndTxNum = mr.needMerge, mr.from, mr.to
+	r.index = *mr
+
 	for _, item := range ht.files {
 		if item.endTxNum > maxEndTxNum {
 			continue
@@ -164,32 +143,29 @@ func (ht *HistoryRoTx) findMergeRange(maxEndTxNum, maxSpan uint64) HistoryRanges
 		endStep := item.endTxNum / ht.h.aggregationStep
 		spanStep := endStep & -endStep // Extract rightmost bit in the binary representation of endStep, this corresponds to size of maximally possible merge ending at endStep
 		span := min(spanStep*ht.h.aggregationStep, maxSpan)
-		start := item.endTxNum - span
-		foundSuperSet := r.indexStartTxNum == item.startTxNum && item.endTxNum >= r.historyEndTxNum
+		startTxNum := item.endTxNum - span
+
+		foundSuperSet := r.history.from == item.startTxNum && item.endTxNum >= r.history.to
 		if foundSuperSet {
-			r.history = false
-			r.historyStartTxNum = start
-			r.historyEndTxNum = item.endTxNum
-		} else if start < item.startTxNum {
-			if !r.history || start < r.historyStartTxNum {
-				r.history = true
-				r.historyStartTxNum = start
-				r.historyEndTxNum = item.endTxNum
+			r.history = MergeRange{false, startTxNum, item.endTxNum}
+		} else if startTxNum < item.startTxNum {
+			if !r.history.needMerge || startTxNum < r.history.from {
+				r.history = MergeRange{true, startTxNum, item.endTxNum}
 			}
 		}
 	}
 
-	if r.history && r.index {
+	if r.history.needMerge && r.index.needMerge {
 		// history is behind idx: then merge only history
-		historyIsAgead := r.historyEndTxNum > r.indexEndTxNum
-		if historyIsAgead {
-			r.history, r.historyStartTxNum, r.historyEndTxNum = false, 0, 0
+		historyIsAhead := r.history.to > r.index.to
+		if historyIsAhead {
+			r.history = MergeRange{}
 			return r
 		}
 
-		historyIsBehind := r.historyEndTxNum < r.indexEndTxNum
+		historyIsBehind := r.history.to < r.index.to
 		if historyIsBehind {
-			r.index, r.indexStartTxNum, r.indexEndTxNum = false, 0, 0
+			r.index = MergeRange{}
 			return r
 		}
 	}
@@ -258,26 +234,25 @@ func (tx *AppendableRoTx) findMergeRange(maxEndTxNum, maxSpan uint64) *MergeRang
 }
 
 type HistoryRanges struct {
-	historyStartTxNum uint64
-	historyEndTxNum   uint64
-	indexStartTxNum   uint64
-	indexEndTxNum     uint64
-	history           bool
-	index             bool
+	history MergeRange
+	index   MergeRange
 }
 
 func (r HistoryRanges) String(aggStep uint64) string {
 	var str string
-	if r.history {
-		str += fmt.Sprintf("hist: %d-%d, ", r.historyStartTxNum/aggStep, r.historyEndTxNum/aggStep)
+	if r.history.needMerge {
+		str += r.history.String("hist", aggStep)
 	}
-	if r.index {
-		str += fmt.Sprintf("idx: %d-%d", r.indexStartTxNum/aggStep, r.indexEndTxNum/aggStep)
+	if r.index.needMerge {
+		if str != "" {
+			str += ", "
+		}
+		str += r.index.String("idx", aggStep)
 	}
 	return str
 }
 func (r HistoryRanges) any() bool {
-	return r.history || r.index
+	return r.history.needMerge || r.index.needMerge
 }
 
 func (dt *DomainRoTx) BuildOptionalMissedIndices(ctx context.Context, ps *background.ProgressSet) (err error) {
@@ -294,26 +269,19 @@ func (iit *InvertedIndexRoTx) BuildOptionalMissedIndices(ctx context.Context, ps
 // staticFilesInRange returns list of static files with txNum in specified range [startTxNum; endTxNum)
 // files are in the descending order of endTxNum
 func (dt *DomainRoTx) staticFilesInRange(r DomainRanges) (valuesFiles, indexFiles, historyFiles []*filesItem) {
-	if r.index || r.history {
+	if r.history.any() {
 		var err error
-		indexFiles, historyFiles, err = dt.ht.staticFilesInRange(HistoryRanges{
-			historyStartTxNum: r.historyStartTxNum,
-			historyEndTxNum:   r.historyEndTxNum,
-			history:           r.history,
-			indexStartTxNum:   r.indexStartTxNum,
-			indexEndTxNum:     r.indexEndTxNum,
-			index:             r.index,
-		})
+		indexFiles, historyFiles, err = dt.ht.staticFilesInRange(r.history)
 		if err != nil {
 			panic(err)
 		}
 	}
-	if r.values {
+	if r.values.needMerge {
 		for _, item := range dt.files {
-			if item.startTxNum < r.valuesStartTxNum {
+			if item.startTxNum < r.values.from {
 				continue
 			}
-			if item.endTxNum > r.valuesEndTxNum {
+			if item.endTxNum > r.values.to {
 				break
 			}
 			valuesFiles = append(valuesFiles, item.src)
@@ -370,19 +338,19 @@ func (tx *AppendableRoTx) staticFilesInRange(startTxNum, endTxNum uint64) []*fil
 }
 
 func (ht *HistoryRoTx) staticFilesInRange(r HistoryRanges) (indexFiles, historyFiles []*filesItem, err error) {
-	if !r.history && r.index {
-		indexFiles = ht.iit.staticFilesInRange(r.indexStartTxNum, r.indexEndTxNum)
+	if !r.history.needMerge && r.index.needMerge {
+		indexFiles = ht.iit.staticFilesInRange(r.index.from, r.index.to)
 		return indexFiles, historyFiles, nil
 	}
 
-	if r.history {
+	if r.history.needMerge {
 		// Get history files from HistoryRoTx (no "garbage/overalps"), but index files not from InvertedIndexRoTx
 		// because index files may already be merged (before `kill -9`) and it means not visible in InvertedIndexRoTx
 		for _, item := range ht.files {
-			if item.startTxNum < r.historyStartTxNum {
+			if item.startTxNum < r.history.from {
 				continue
 			}
-			if item.endTxNum > r.historyEndTxNum {
+			if item.endTxNum > r.history.to {
 				break
 			}
 
@@ -401,7 +369,7 @@ func (ht *HistoryRoTx) staticFilesInRange(r HistoryRanges) (indexFiles, historyF
 				panic("must not happen")
 			}
 		}
-		if r.index && len(indexFiles) != len(historyFiles) {
+		if r.index.needMerge && len(indexFiles) != len(historyFiles) {
 			var sIdx, sHist []string
 			for _, f := range indexFiles {
 				if f.index != nil {
@@ -470,17 +438,11 @@ func (dt *DomainRoTx) mergeFiles(ctx context.Context, domainFiles, indexFiles, h
 			}
 		}
 	}()
-	if indexIn, historyIn, err = dt.ht.mergeFiles(ctx, indexFiles, historyFiles, HistoryRanges{
-		historyStartTxNum: r.historyStartTxNum,
-		historyEndTxNum:   r.historyEndTxNum,
-		history:           r.history,
-		indexStartTxNum:   r.indexStartTxNum,
-		indexEndTxNum:     r.indexEndTxNum,
-		index:             r.index}, ps); err != nil {
+	if indexIn, historyIn, err = dt.ht.mergeFiles(ctx, indexFiles, historyFiles, r.history, ps); err != nil {
 		return nil, nil, nil, err
 	}
 
-	if !r.values {
+	if !r.values.needMerge {
 		closeFiles = false
 		return
 	}
@@ -490,7 +452,7 @@ func (dt *DomainRoTx) mergeFiles(ctx context.Context, domainFiles, indexFiles, h
 		defer f.decompressor.EnableReadAhead().DisableReadAhead()
 	}
 
-	fromStep, toStep := r.valuesStartTxNum/dt.d.aggregationStep, r.valuesEndTxNum/dt.d.aggregationStep
+	fromStep, toStep := r.values.from/r.aggStep, r.values.to/r.aggStep
 	kvFilePath := dt.d.kvFilePath(fromStep, toStep)
 	kvFile, err := seg.NewCompressor(ctx, "merge domain "+dt.d.filenameBase, kvFilePath, dt.d.dirs.Tmp, seg.MinPatternScore, dt.d.compressWorkers, log.LvlTrace, dt.d.logger)
 	if err != nil {
@@ -545,7 +507,7 @@ func (dt *DomainRoTx) mergeFiles(ctx context.Context, domainFiles, indexFiles, h
 		}
 
 		// For the rest of types, empty value means deletion
-		deleted := r.valuesStartTxNum == 0 && len(lastVal) == 0
+		deleted := r.values.from == 0 && len(lastVal) == 0
 		if !deleted {
 			if keyBuf != nil {
 				if vt != nil {
@@ -591,24 +553,24 @@ func (dt *DomainRoTx) mergeFiles(ctx context.Context, domainFiles, indexFiles, h
 	kvWriter = nil
 	ps.Delete(p)
 
-	valuesIn = newFilesItem(r.valuesStartTxNum, r.valuesEndTxNum, dt.d.aggregationStep)
+	valuesIn = newFilesItem(r.values.from, r.values.to, dt.d.aggregationStep)
 	valuesIn.frozen = false
 	if valuesIn.decompressor, err = seg.NewDecompressor(kvFilePath); err != nil {
-		return nil, nil, nil, fmt.Errorf("merge %s decompressor [%d-%d]: %w", dt.d.filenameBase, r.valuesStartTxNum, r.valuesEndTxNum, err)
+		return nil, nil, nil, fmt.Errorf("merge %s decompressor [%d-%d]: %w", dt.d.filenameBase, r.values.from, r.values.to, err)
 	}
 
 	if UseBpsTree {
 		btPath := dt.d.kvBtFilePath(fromStep, toStep)
 		valuesIn.bindex, err = CreateBtreeIndexWithDecompressor(btPath, DefaultBtreeM, valuesIn.decompressor, dt.d.compression, *dt.d.salt, ps, dt.d.dirs.Tmp, dt.d.logger, dt.d.noFsync)
 		if err != nil {
-			return nil, nil, nil, fmt.Errorf("merge %s btindex [%d-%d]: %w", dt.d.filenameBase, r.valuesStartTxNum, r.valuesEndTxNum, err)
+			return nil, nil, nil, fmt.Errorf("merge %s btindex [%d-%d]: %w", dt.d.filenameBase, r.values.from, r.values.to, err)
 		}
 	} else {
 		if err = dt.d.buildAccessor(ctx, fromStep, toStep, valuesIn.decompressor, ps); err != nil {
-			return nil, nil, nil, fmt.Errorf("merge %s buildAccessor [%d-%d]: %w", dt.d.filenameBase, r.valuesStartTxNum, r.valuesEndTxNum, err)
+			return nil, nil, nil, fmt.Errorf("merge %s buildAccessor [%d-%d]: %w", dt.d.filenameBase, r.values.from, r.values.to, err)
 		}
 		if valuesIn.index, err = recsplit.OpenIndex(dt.d.kvAccessorFilePath(fromStep, toStep)); err != nil {
-			return nil, nil, nil, fmt.Errorf("merge %s buildAccessor [%d-%d]: %w", dt.d.filenameBase, r.valuesStartTxNum, r.valuesEndTxNum, err)
+			return nil, nil, nil, fmt.Errorf("merge %s buildAccessor [%d-%d]: %w", dt.d.filenameBase, r.values.from, r.values.to, err)
 		}
 	}
 
@@ -616,12 +578,12 @@ func (dt *DomainRoTx) mergeFiles(ctx context.Context, domainFiles, indexFiles, h
 		bloomIndexPath := dt.d.kvExistenceIdxFilePath(fromStep, toStep)
 		exists, err := dir.FileExist(bloomIndexPath)
 		if err != nil {
-			return nil, nil, nil, fmt.Errorf("merge %s FileExist err [%d-%d]: %w", dt.d.filenameBase, r.valuesStartTxNum, r.valuesEndTxNum, err)
+			return nil, nil, nil, fmt.Errorf("merge %s FileExist err [%d-%d]: %w", dt.d.filenameBase, r.values.from, r.values.to, err)
 		}
 		if exists {
 			valuesIn.existence, err = OpenExistenceFilter(bloomIndexPath)
 			if err != nil {
-				return nil, nil, nil, fmt.Errorf("merge %s existence [%d-%d]: %w", dt.d.filenameBase, r.valuesStartTxNum, r.valuesEndTxNum, err)
+				return nil, nil, nil, fmt.Errorf("merge %s existence [%d-%d]: %w", dt.d.filenameBase, r.values.from, r.values.to, err)
 			}
 		}
 	}
@@ -779,10 +741,10 @@ func (ht *HistoryRoTx) mergeFiles(ctx context.Context, indexFiles, historyFiles 
 			}
 		}
 	}()
-	if indexIn, err = ht.iit.mergeFiles(ctx, indexFiles, r.indexStartTxNum, r.indexEndTxNum, ps); err != nil {
+	if indexIn, err = ht.iit.mergeFiles(ctx, indexFiles, r.index.from, r.index.to, ps); err != nil {
 		return nil, nil, err
 	}
-	if r.history {
+	if r.history.needMerge {
 		for _, f := range indexFiles {
 			defer f.decompressor.EnableReadAhead().DisableReadAhead()
 		}
@@ -814,7 +776,7 @@ func (ht *HistoryRoTx) mergeFiles(ctx context.Context, indexFiles, historyFiles 
 				}
 			}
 		}()
-		fromStep, toStep := r.historyStartTxNum/ht.h.aggregationStep, r.historyEndTxNum/ht.h.aggregationStep
+		fromStep, toStep := r.history.from/ht.h.aggregationStep, r.history.to/ht.h.aggregationStep
 		datPath := ht.h.vFilePath(fromStep, toStep)
 		idxPath := ht.h.vAccessorFilePath(fromStep, toStep)
 		if comp, err = seg.NewCompressor(ctx, "merge hist "+ht.h.filenameBase, datPath, ht.h.dirs.Tmp, seg.MinPatternScore, ht.h.compressWorkers, log.LvlTrace, ht.h.logger); err != nil {
@@ -963,7 +925,7 @@ func (ht *HistoryRoTx) mergeFiles(ctx context.Context, indexFiles, historyFiles 
 		if index, err = recsplit.OpenIndex(idxPath); err != nil {
 			return nil, nil, fmt.Errorf("open %s idx: %w", ht.h.filenameBase, err)
 		}
-		historyIn = newFilesItem(r.historyStartTxNum, r.historyEndTxNum, ht.h.aggregationStep)
+		historyIn = newFilesItem(r.history.from, r.history.to, ht.h.aggregationStep)
 		historyIn.decompressor = decomp
 		historyIn.index = index
 

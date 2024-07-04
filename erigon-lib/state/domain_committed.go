@@ -238,12 +238,7 @@ func (dt *DomainRoTx) commitmentValTransformDomain(rng MergeRange, accounts, sto
 		}
 	}
 
-	dr := DomainRanges{
-		valuesStartTxNum: rng.from,
-		valuesEndTxNum:   rng.to,
-		values:           true,
-	}
-
+	dr := DomainRanges{values: rng}
 	accountFileMap := make(map[string]ArchiveGetter)
 	if accountList, _, _ := accounts.staticFilesInRange(dr); accountList != nil {
 		for _, f := range accountList {
