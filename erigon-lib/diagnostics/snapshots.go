@@ -49,6 +49,7 @@ func (d *DiagnosticClient) runSnapshotListener(rootCtx context.Context) {
 				d.syncStats.SnapshotDownload.Sys = info.Sys
 				d.syncStats.SnapshotDownload.DownloadFinished = info.DownloadFinished
 				d.syncStats.SnapshotDownload.TorrentMetadataReady = info.TorrentMetadataReady
+				d.mu.Unlock()
 
 				downloadedPercent := getPercentDownloaded(info.Downloaded, info.Total)
 				remainingBytes := info.Total - info.Downloaded
@@ -61,9 +62,7 @@ func (d *DiagnosticClient) runSnapshotListener(rootCtx context.Context) {
 					Progress:    downloadedPercent,
 				}, "Downloading snapshots")
 
-				d.mu.Unlock()
-
-				if d.snapshotStageFinished() {
+				if info.DownloadFinished {
 					d.SaveData()
 					return
 				}
@@ -83,6 +82,8 @@ func getPercentDownloaded(downloaded, total uint64) string {
 }
 
 func (d *DiagnosticClient) updateSnapshotStageStats(stats SyncStageStats, subStageInfo string) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
 	idxs := d.getCurrentSyncIdxs()
 	if idxs.Stage == -1 || idxs.SubStage == -1 {
 		log.Debug("[Diagnostics] Can't find running stage or substage while updating Snapshots stage stats.", "stages:", d.syncStages, "stats:", stats, "subStageInfo:", subStageInfo)
