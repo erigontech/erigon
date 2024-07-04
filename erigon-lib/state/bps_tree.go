@@ -140,7 +140,7 @@ func (b *BpsTree) WarmUp(kv ArchiveGetter) error {
 	d := logBase(k, b.M)
 	mx := make([][]Node, d+1) // usually `d` but for experiments we put them all into flat list
 
-	l := int(0)
+	l := len(mx) - 1
 	for ik := uint64(0); ik < k; ik += b.M / cacheNodesPerM {
 		_, key, err := b.keyCmpFunc(nil, ik, kv)
 		if err != nil {
@@ -148,10 +148,15 @@ func (b *BpsTree) WarmUp(kv ArchiveGetter) error {
 		}
 		if key != nil {
 			mx[l] = append(mx[l], Node{off: b.offt.Get(ik), prefix: common.Copy(key), di: ik})
-			l++
-			if l == len(mx) {
-				l = 0
+			if l == 0 {
+				l = len(mx)
 			}
+			l--
+
+			// l++
+			// if l == len(mx) {
+			// 	l = 0
+			// }
 		}
 	}
 
