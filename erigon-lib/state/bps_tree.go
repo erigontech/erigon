@@ -136,40 +136,48 @@ func (b *BpsTree) WarmUp(kv ArchiveGetter) error {
 	}
 	// Value cacheNodesPerM should be tuned along with M. For M=256, cacheNodesPerM=2 is optimal, while 8 could be already too much.
 	// `cacheNodesPerM = 1` means that we put only each parent node into cache, while `cacheNodesPerM = M` means that we put all nodes into cache.
-	cacheNodesPerM := uint64(2)
-	d := logBase(k, b.M)
-	mx := make([][]Node, d+1) // usually `d` but for experiments we put them all into flat list
+	var (
+		cacheNodesPerM   = uint64(1)
+		currentLevelSize = k
 
-	l := len(mx) - 1
-	for ik := uint64(0); ik < k; ik += b.M / cacheNodesPerM {
-		_, key, err := b.keyCmpFunc(nil, ik, kv)
-		if err != nil {
-			return err
-		}
-		if key != nil {
-			mx[l] = append(mx[l], Node{off: b.offt.Get(ik), prefix: common.Copy(key), di: ik})
-			if l == 0 {
-				l = len(mx)
+		mx = make([][]Node, 0) // usually `d` but for experiments we put them all into flat list
+		l  = -1
+	)
+
+	for currentLevelSize > 1 {
+		var nextLevel []Node
+		for i := b.M / cacheNodesPerM; i < currentLevelSize; i += b.M / cacheNodesPerM {
+			di := i - 1
+			if l >= 0 {
+				di = mx[l][di].di - 1
 			}
-			l--
-
-			// l++
-			// if l == len(mx) {
-			// 	l = 0
-			// }
+			_, key, err := b.keyCmpFunc(nil, di, kv)
+			if err != nil {
+				panic(err)
+				return err
+			}
+			nextLevel = append(nextLevel, Node{off: b.offt.Get(di), prefix: common.Copy(key), di: di})
 		}
+		l++
+		currentLevelSize = uint64(len(nextLevel))
+		mx = append(mx, nextLevel)
+	}
+	// turn around mx
+	for i, j := 0, len(mx)-1; i != j; i, j = i+1, j-1 {
+		mx[i], mx[j] = mx[j], mx[i]
 	}
 
+	//b.trace = true
 	c := 0
 	for i := 0; i < len(mx); i++ {
 		c += len(mx[i])
 		if b.trace {
-			ll := make([]uint64, len(mx[i]))
+			fmt.Printf("WarmUp %d: ", i)
 			for j := 0; j < len(mx[i]); j++ {
-				ll[j] = mx[i][j].di
-				// fmt.Printf("mx[%d][%d] %x %d %d\n", i, j, mx[i][j].prefix, mx[i][j].off, mx[i][j].di)
+				//fmt.Printf("mx[%d][%d] %x %d %d\n", i, j, mx[i][j].prefix, mx[i][j].off, mx[i][j].di)
+				fmt.Printf("%d ", mx[i][j].di)
 			}
-			log.Root().Debug("WarmUp", "file", kv.FileName(), "depth", i, "offsets", len(mx[i]), "v", fmt.Sprintf("%v", ll))
+			fmt.Printf("\n")
 		}
 	}
 	log.Root().Debug("WarmUp finished", "file", kv.FileName(), "M", b.M, "depth", len(mx), "total offsets", k, "cached", c, "cached %", float64(c)/float64(k)*100)
