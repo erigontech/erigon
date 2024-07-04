@@ -1,6 +1,8 @@
 package types
 
-import "github.com/gateway-fm/cdk-erigon-lib/common"
+import (
+	"github.com/gateway-fm/cdk-erigon-lib/common"
+)
 
 // Batch structure
 type Batch struct {
@@ -26,4 +28,10 @@ type BatchDataSlim struct {
 	Number      uint64   `json:"number"`
 	BatchL2Data ArgBytes `json:"batchL2Data,omitempty"`
 	Empty       bool     `json:"empty"`
+}
+
+type BlockWithInfoRootAndGer struct {
+	*Block
+	BlockInfoRoot  common.Hash `json:"blockInfoRoot"`
+	GlobalExitRoot common.Hash `json:"globalExitRoot"`
 }

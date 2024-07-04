@@ -252,16 +252,24 @@ func (api *ZkEvmAPIImpl) GetBatchDataByNumbers(ctx context.Context, batchNumbers
 			Empty:  false,
 		}
 
+		highestBlock, err := rawdb.ReadLastBlockSynced(tx)
+		if err != nil {
+			return nil, err
+		}
+		highestBatchNo, err := hermezDb.GetBatchNoByL2Block(highestBlock.NumberU64())
+		if err != nil {
+			return nil, err
+		}
+
+		// return null if we're not at this block height yet
+		if batchNumber > rpc.BlockNumber(highestBatchNo) {
+			bd.Empty = true
+			bds = append(bds, bd)
+			continue
+		}
+
 		// looks weird but we're using the rpc.BlockNumber type to represent the batch number, LatestBlockNumber represents latest batch
 		if batchNumber == rpc.LatestBlockNumber {
-			highestBlock, err := rawdb.ReadLastBlockSynced(tx)
-			if err != nil {
-				return nil, err
-			}
-			highestBatchNo, err := hermezDb.GetBatchNoByL2Block(highestBlock.NumberU64())
-			if err != nil {
-				return nil, err
-			}
 			batchNumber = rpc.BlockNumber(highestBatchNo)
 		}
 
@@ -379,16 +387,22 @@ func (api *ZkEvmAPIImpl) GetBatchByNumber(ctx context.Context, batchNumber rpc.B
 	defer tx.Rollback()
 	hermezDb := hermez_db.NewHermezDbReader(tx)
 
+	highestBlock, err := rawdb.ReadLastBlockSynced(tx)
+	if err != nil {
+		return nil, err
+	}
+	highestBatchNo, err := hermezDb.GetBatchNoByL2Block(highestBlock.NumberU64())
+	if err != nil {
+		return nil, err
+	}
+
+	// return null if we're not at this block height yet
+	if batchNumber > rpc.BlockNumber(highestBatchNo) {
+		return nil, nil
+	}
+
 	// looks weird but we're using the rpc.BlockNumber type to represent the batch number, LatestBlockNumber represents latest batch
 	if batchNumber == rpc.LatestBlockNumber {
-		highestBlock, err := rawdb.ReadLastBlockSynced(tx)
-		if err != nil {
-			return nil, err
-		}
-		highestBatchNo, err := hermezDb.GetBatchNoByL2Block(highestBlock.NumberU64())
-		if err != nil {
-			return nil, err
-		}
 		batchNumber = rpc.BlockNumber(highestBatchNo)
 	}
 
@@ -455,6 +469,53 @@ func (api *ZkEvmAPIImpl) GetBatchByNumber(ctx context.Context, batchNumber rpc.B
 			batchTxs = append(batchTxs, btx)
 			batch.Transactions = append(batch.Transactions, btx.Hash())
 		}
+	}
+
+	if fullTx != nil && *fullTx {
+		batchBlocksJson := make([]interface{}, 0, len(blocksInBatch))
+		batchTransactionsJson := make([]interface{}, 0, len(batchTxs))
+		for _, blk := range batchBlocks {
+			bbj, err := api.populateBlockDetail(tx, ctx, blk, true)
+			if err != nil {
+				return nil, err
+			}
+
+			bir, err := hermezDb.GetBlockInfoRoot(blk.NumberU64())
+			if err != nil {
+				return nil, err
+			}
+
+			ger, err := hermezDb.GetBlockGlobalExitRoot(blk.NumberU64())
+			if err != nil {
+				return nil, err
+			}
+
+			batchBlockExtra := &types.BlockWithInfoRootAndGer{
+				Block:          &bbj,
+				BlockInfoRoot:  bir,
+				GlobalExitRoot: ger,
+			}
+
+			// txs
+			hashes := make([]types.TransactionOrHash, len(bbj.Transactions))
+			for i, txn := range bbj.Transactions {
+				// TODO: add transactionl2hash
+				batchTransactionsJson = append(batchTransactionsJson, txn)
+				txn.Hash = &txn.Tx.Hash
+				txn.Tx = nil
+				hashes[i] = txn
+			}
+
+			// after collecting transactions, reduce them to them hash only on the block
+			bbj.Transactions = hashes
+
+			// TODO: add l2hash
+
+			batchBlocksJson = append(batchBlocksJson, batchBlockExtra)
+		}
+
+		batch.Blocks = batchBlocksJson
+		batch.Transactions = batchTransactionsJson
 	}
 
 	// for consistency with legacy node, return nil if no transactions
@@ -645,16 +706,25 @@ func (api *ZkEvmAPIImpl) populateBlockDetail(
 	number := baseBlock.NumberU64()
 	hermezReader := hermez_db.NewHermezDbReader(tx)
 
-	signer := eritypes.MakeSigner(cc, number)
+	sendersFixed := false
 	var senders []common.Address
+	var signer *eritypes.Signer
+	if sendersFixed {
+		senders = baseBlock.Body().SendersFromTxs()
+	} else {
+		signer = eritypes.MakeSigner(cc, number)
+	}
+
 	var effectiveGasPricePercentages []uint8
 	if fullTx {
 		for _, txn := range baseBlock.Transactions() {
-			sender, err := txn.Sender(*signer)
-			if err != nil {
-				return types.Block{}, err
+			if signer != nil {
+				sender, err := txn.Sender(*signer)
+				if err != nil {
+					return types.Block{}, err
+				}
+				senders = append(senders, sender)
 			}
-			senders = append(senders, sender)
 			effectiveGasPricePercentage, err := hermezReader.GetEffectiveGasPricePercentage(txn.Hash())
 			if err != nil {
 				return types.Block{}, err
@@ -949,6 +1019,61 @@ func getLatestBatchNumber(tx kv.Tx) (uint64, error) {
 func getBatchNoByL2Block(tx kv.Tx, l2BlockNo uint64) (uint64, error) {
 	reader := hermez_db.NewHermezDbReader(tx)
 	return reader.GetBatchNoByL2Block(l2BlockNo)
+}
+
+func convertTransactionsReceipts(
+	txs []eritypes.Transaction,
+	receipts eritypes.Receipts,
+	hermezReader hermez_db.HermezDbReader,
+	block eritypes.Block) ([]types.Transaction, error) {
+	if len(txs) != len(receipts) {
+		return nil, errors.New("transactions and receipts length mismatch")
+	}
+
+	result := make([]types.Transaction, 0, len(txs))
+
+	for idx, tx := range txs {
+		effectiveGasPricePercentage, err := hermezReader.GetEffectiveGasPricePercentage(tx.Hash())
+		if err != nil {
+			return nil, err
+		}
+		gasPrice := tx.GetPrice()
+		v, r, s := tx.RawSignatureValues()
+		var sender common.Address
+
+		// TODO: senders!
+
+		var receipt *types.Receipt
+		if len(receipts) > idx {
+			receipt = convertReceipt(receipts[idx], sender, tx.GetTo(), gasPrice, effectiveGasPricePercentage)
+		}
+
+		bh := block.Hash()
+		blockNumber := block.NumberU64()
+
+		tran := types.Transaction{
+			Nonce:       types.ArgUint64(tx.GetNonce()),
+			GasPrice:    types.ArgBig(*gasPrice.ToBig()),
+			Gas:         types.ArgUint64(tx.GetGas()),
+			To:          tx.GetTo(),
+			Value:       types.ArgBig(*tx.GetValue().ToBig()),
+			Input:       tx.GetData(),
+			V:           types.ArgBig(*v.ToBig()),
+			R:           types.ArgBig(*r.ToBig()),
+			S:           types.ArgBig(*s.ToBig()),
+			Hash:        tx.Hash(),
+			From:        sender,
+			BlockHash:   &bh,
+			BlockNumber: types.ArgUint64Ptr(types.ArgUint64(blockNumber)),
+			TxIndex:     types.ArgUint64Ptr(types.ArgUint64(idx)),
+			ChainID:     types.ArgBig(*tx.GetChainID().ToBig()),
+			Type:        types.ArgUint64(tx.Type()),
+			Receipt:     receipt,
+		}
+		result = append(result, tran)
+	}
+
+	return result, nil
 }
 
 func convertBlockToRpcBlock(
