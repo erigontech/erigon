@@ -51,6 +51,8 @@ func SpawnSequencingStage(
 
 	sdb := newStageDb(tx)
 
+	l1Recovery := cfg.zk.L1SyncStartBlock > 0
+
 	executionAt, err := s.ExecutionAt(tx)
 	if err != nil {
 		return err
@@ -61,7 +63,7 @@ func SpawnSequencingStage(
 		return err
 	}
 
-	forkId, err := prepareForkId(cfg, lastBatch, executionAt, sdb.hermezDb)
+	forkId, err := prepareForkId(lastBatch, executionAt, sdb.hermezDb)
 	if err != nil {
 		return err
 	}
@@ -123,7 +125,6 @@ func SpawnSequencingStage(
 	nonEmptyBatchTimer := time.NewTicker(cfg.zk.SequencerNonEmptyBatchSealTime)
 	defer nonEmptyBatchTimer.Stop()
 
-	l1Recovery := cfg.zk.L1SyncStartBlock > 0
 	hasAnyTransactionsInThisBatch := false
 	thisBatch := lastBatch + 1
 	batchCounters := vm.NewBatchCounterCollector(sdb.smt.GetDepth(), uint16(forkId), cfg.zk.VirtualCountersSmtReduction, cfg.zk.ShouldCountersBeUnlimited(l1Recovery))

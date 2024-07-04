@@ -778,8 +778,13 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 		var l1Topics [][]libcommon.Hash
 		var l1Contracts []libcommon.Address
 		if isSequencer {
-			l1Topics = [][]libcommon.Hash{{contracts.InitialSequenceBatchesTopic}}
-			l1Contracts = []libcommon.Address{cfg.AddressZkevm}
+			l1Topics = [][]libcommon.Hash{{
+				contracts.InitialSequenceBatchesTopic,
+				contracts.AddNewRollupTypeTopic,
+				contracts.CreateNewRollupTopic,
+				contracts.UpdateRollupTopic,
+			}}
+			l1Contracts = []libcommon.Address{cfg.AddressZkevm, cfg.AddressRollup}
 		} else {
 			l1Topics = seqAndVerifTopics
 			l1Contracts = seqAndVerifL1Contracts
@@ -863,8 +868,10 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 
 			l1BlockSyncer := syncer.NewL1Syncer(
 				ethermanClients,
-				[]libcommon.Address{cfg.AddressZkevm},
-				[][]libcommon.Hash{{contracts.SequenceBatchesTopic}},
+				[]libcommon.Address{cfg.AddressZkevm, cfg.AddressRollup},
+				[][]libcommon.Hash{{
+					contracts.SequenceBatchesTopic,
+				}},
 				cfg.L1BlockRange,
 				cfg.L1QueryDelay,
 				cfg.L1HighestBlockType,

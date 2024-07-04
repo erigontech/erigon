@@ -20,7 +20,7 @@ jobs:
   tests:
     strategy:
       matrix:
-        os: [ ubuntu-20.04, macos-14 ] # list of os: https://github.com/actions/virtual-environments
+        os: [ ubuntu-20.04, macos-13 ] # list of os: https://github.com/actions/virtual-environments
     runs-on: ${{ matrix.os }}
     timeout-minutes: ${{ matrix.os == 'macos-14' && 40 || 30 }}
 
@@ -96,6 +96,7 @@ jobs:
           /usr/local/bin/yq -i '.args.data_availability_mode = "rollup"' cdk-erigon-sequencer-params.yml
           /usr/local/bin/yq -i '.args.cdk_erigon_node_image = "cdk-erigon:local"' cdk-erigon-sequencer-params.yml
           /usr/local/bin/yq -i '.args.zkevm_bridge_service_image = "hermeznetwork/zkevm-bridge-service:v0.5.0-RC8"' cdk-erigon-sequencer-params.yml
+          sed -i '/zkevm\.sequencer-initial-fork-id/d' ./templates/cdk-erigon/config-sequencer.yaml
 
       - name: Deploy Kurtosis CDK package
         working-directory: ./kurtosis-cdk

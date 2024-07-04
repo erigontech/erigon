@@ -123,7 +123,6 @@ func ApplyFlagsForZkConfig(ctx *cli.Context, cfg *ethconfig.Config) {
 		RebuildTreeAfter:                       ctx.Uint64(utils.RebuildTreeAfterFlag.Name),
 		IncrementTreeAlways:                    ctx.Bool(utils.IncrementTreeAlways.Name),
 		SmtRegenerateInMemory:                  ctx.Bool(utils.SmtRegenerateInMemory.Name),
-		SequencerInitialForkId:                 ctx.Uint64(utils.SequencerInitialForkId.Name),
 		SequencerBlockSealTime:                 sequencerBlockSealTime,
 		SequencerBatchSealTime:                 sequencerBatchSealTime,
 		SequencerNonEmptyBatchSealTime:         sequencerNonEmptyBatchSealTime,
@@ -162,7 +161,6 @@ func ApplyFlagsForZkConfig(ctx *cli.Context, cfg *ethconfig.Config) {
 		checkFlag(utils.L2RpcUrlFlag.Name, cfg.L2RpcUrl)
 		checkFlag(utils.L2DataStreamerUrlFlag.Name, cfg.L2DataStreamerUrl)
 	} else {
-		checkFlag(utils.SequencerInitialForkId.Name, cfg.SequencerInitialForkId)
 		checkFlag(utils.ExecutorUrls.Name, cfg.ExecutorUrls)
 		checkFlag(utils.ExecutorStrictMode.Name, cfg.ExecutorStrictMode)
 		checkFlag(utils.DataStreamHost.Name, cfg.DataStreamHost)

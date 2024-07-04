@@ -461,11 +461,6 @@ var (
 		Usage: "Regenerate the SMT in memory (requires a lot of RAM for most chains)",
 		Value: false,
 	}
-	SequencerInitialForkId = cli.Uint64Flag{
-		Name:  "zkevm.sequencer-initial-fork-id",
-		Usage: "The initial fork id to launch the sequencer with",
-		Value: 8,
-	}
 	SequencerBlockSealTime = cli.StringFlag{
 		Name:  "zkevm.sequencer-block-seal-time",
 		Usage: "Block seal time. Defaults to 6s",

@@ -15,7 +15,6 @@ import (
 	"github.com/ledgerwatch/erigon/zk/hermez_db"
 	"github.com/ledgerwatch/erigon/zk/l1_data"
 	"github.com/ledgerwatch/erigon/zk/syncer"
-	zktx "github.com/ledgerwatch/erigon/zk/tx"
 	"github.com/ledgerwatch/log/v3"
 	"encoding/binary"
 )
@@ -192,10 +191,6 @@ LOOP:
 						return err
 					}
 
-					// disabled for now as it adds extra work into the process
-					// todo: find a way to only call this if debug logging is enabled
-					// debugLogProgress(batch, cfg, totalBlocks, logPrefix, b)
-
 					// check if we need to stop here based on config
 					if cfg.zkCfg.L1SyncStopBatch > 0 {
 						stopBlockMap[b] = struct{}{}
@@ -233,15 +228,6 @@ LOOP:
 	}
 
 	return nil
-}
-
-func debugLogProgress(batch []byte, cfg SequencerL1BlockSyncCfg, totalBlocks int, logPrefix string, b uint64) {
-	decoded, err := zktx.DecodeBatchL2Blocks(batch, cfg.zkCfg.SequencerInitialForkId)
-	if err != nil {
-		log.Error("Error decoding L1 batch", "batch", b, "err", err)
-	}
-	totalBlocks += len(decoded)
-	log.Debug(fmt.Sprintf("[%s] Wrote L1 batch", logPrefix), "batch", b, "blocks", len(decoded), "totalBlocks", totalBlocks)
 }
 
 func haveAllBatchesInDb(highestBatch uint64, cfg SequencerL1BlockSyncCfg, hermezDb *hermez_db.HermezDb) (bool, error) {

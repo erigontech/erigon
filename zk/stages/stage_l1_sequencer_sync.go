@@ -15,6 +15,7 @@ import (
 	"github.com/ledgerwatch/erigon/zk/hermez_db"
 	"github.com/ledgerwatch/erigon/zk/types"
 	"github.com/ledgerwatch/log/v3"
+	"math/big"
 )
 
 type L1SequencerSyncCfg struct {
@@ -90,9 +91,50 @@ Loop:
 					if err := HandleInitialSequenceBatches(cfg.syncer, hermezDb, l, header); err != nil {
 						return err
 					}
-					// we only ever handle a single injected batch as a sequencer currently so we can just
-					// exit early here
-					break Loop
+				case contracts.AddNewRollupTypeTopic:
+					rollupType := l.Topics[1].Big().Uint64()
+					forkIdBytes := l.Data[64:96] // 3rd positioned item in the log data
+					forkId := new(big.Int).SetBytes(forkIdBytes).Uint64()
+					if err := hermezDb.WriteRollupType(rollupType, forkId); err != nil {
+						return err
+					}
+				case contracts.CreateNewRollupTopic:
+					rollupId := l.Topics[1].Big().Uint64()
+					if rollupId != cfg.zkCfg.L1RollupId {
+						return fmt.Errorf("received CreateNewRollupTopic for unknown rollup id: %v", rollupId)
+					}
+					rollupTypeBytes := l.Data[0:32]
+					rollupType := new(big.Int).SetBytes(rollupTypeBytes).Uint64()
+					fork, err := hermezDb.GetForkFromRollupType(rollupType)
+					if err != nil {
+						return err
+					}
+					if fork == 0 {
+						log.Error("received CreateNewRollupTopic for unknown rollup type", "rollupType", rollupType)
+					}
+					if err := hermezDb.WriteNewForkHistory(fork, 0); err != nil {
+						return err
+					}
+				case contracts.UpdateRollupTopic:
+					rollupId := l.Topics[1].Big().Uint64()
+					if rollupId != cfg.zkCfg.L1RollupId {
+						log.Warn("received UpdateRollupTopic for unknown rollup id", "rollupId", rollupId)
+						continue
+					}
+					newRollupBytes := l.Data[0:32]
+					newRollup := new(big.Int).SetBytes(newRollupBytes).Uint64()
+					fork, err := hermezDb.GetForkFromRollupType(newRollup)
+					if err != nil {
+						return err
+					}
+					if fork == 0 {
+						return fmt.Errorf("received UpdateRollupTopic for unknown rollup type: %v", newRollup)
+					}
+					latestVerifiedBytes := l.Data[32:64]
+					latestVerified := new(big.Int).SetBytes(latestVerifiedBytes).Uint64()
+					if err := hermezDb.WriteNewForkHistory(fork, latestVerified); err != nil {
+						return err
+					}
 				default:
 					log.Warn("received unexpected topic from l1 sequencer sync stage", "topic", l.Topics[0])
 				}
