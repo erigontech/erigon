@@ -64,6 +64,7 @@ func (d *DiagnosticClient) runSnapshotListener(rootCtx context.Context) {
 				d.mu.Unlock()
 
 				if d.snapshotStageFinished() {
+					d.SaveData()
 					return
 				}
 			}
@@ -126,7 +127,6 @@ func (d *DiagnosticClient) runSegmentDownloadingListener(rootCtx context.Context
 				} else {
 					d.syncStats.SnapshotDownload.SegmentsDownloading[info.Name] = info
 				}
-
 				d.mu.Unlock()
 			}
 		}
@@ -212,15 +212,22 @@ func (d *DiagnosticClient) addOrUpdateSegmentIndexingState(upd SnapshotIndexingS
 	d.syncStats.SnapshotIndexing.TimeElapsed = upd.TimeElapsed
 
 	totalProgress := 0
+	totalProgressPercent := 0
 	for _, seg := range d.syncStats.SnapshotIndexing.Segments {
-		totalProgress += seg.Percent
+		totalProgressPercent += seg.Percent
 	}
+
+	totalProgress = totalProgressPercent / len(d.syncStats.SnapshotIndexing.Segments)
 
 	d.updateSnapshotStageStats(SyncStageStats{
 		TimeElapsed: SecondsToHHMMString(uint64(upd.TimeElapsed)),
 		TimeLeft:    "unknown",
-		Progress:    fmt.Sprintf("%d%%", totalProgress/len(d.syncStats.SnapshotIndexing.Segments)),
+		Progress:    fmt.Sprintf("%d%%", totalProgress),
 	}, "Indexing snapshots")
+
+	if totalProgress >= 100 {
+		d.SaveData()
+	}
 }
 
 func (d *DiagnosticClient) runSnapshotFilesListListener(rootCtx context.Context) {

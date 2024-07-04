@@ -141,20 +141,17 @@ func (d *DiagnosticClient) runSaveProcess(rootCtx context.Context) {
 }
 
 func (d *DiagnosticClient) SaveData() {
+	var funcs []func(tx kv.RwTx) error
+	funcs = append(funcs, SnapshotDownloadUpdater(d.syncStats.SnapshotDownload))
+	funcs = append(funcs, StagesListUpdater(d.syncStages))
+	funcs = append(funcs, SnapshotIndexingUpdater(d.syncStats.SnapshotIndexing))
+
 	err := d.db.Update(d.ctx, func(tx kv.RwTx) error {
-		err := SnapshotDownloadUpdater(d.syncStats.SnapshotDownload)(tx)
-		if err != nil {
-			return err
-		}
-
-		err = StagesListUpdater(d.syncStages)(tx)
-		if err != nil {
-			return err
-		}
-
-		err = SnapshotIndexingUpdater(d.syncStats.SnapshotIndexing)(tx)
-		if err != nil {
-			return err
+		for _, updater := range funcs {
+			updErr := updater(tx)
+			if updErr != nil {
+				return updErr
+			}
 		}
 
 		return nil

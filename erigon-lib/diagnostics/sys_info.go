@@ -20,20 +20,18 @@ var (
 
 func (d *DiagnosticClient) setupSysInfoDiagnostics() {
 	sysInfo := GetSysInfo(d.dataDirPath)
+
+	var funcs []func(tx kv.RwTx) error
+	funcs = append(funcs, RAMInfoUpdater(sysInfo.RAM))
+	funcs = append(funcs, CPUInfoUpdater(sysInfo.CPU))
+	funcs = append(funcs, DiskInfoUpdater(sysInfo.Disk))
+
 	err := d.db.Update(d.ctx, func(tx kv.RwTx) error {
-		err := RAMInfoUpdater(d.hardwareInfo.RAM)(tx)
-		if err != nil {
-			return err
-		}
-
-		err = CPUInfoUpdater(d.hardwareInfo.CPU)(tx)
-		if err != nil {
-			return err
-		}
-
-		err = DiskInfoUpdater(d.hardwareInfo.Disk)(tx)
-		if err != nil {
-			return err
+		for _, updater := range funcs {
+			updErr := updater(tx)
+			if updErr != nil {
+				return updErr
+			}
 		}
 
 		return nil
