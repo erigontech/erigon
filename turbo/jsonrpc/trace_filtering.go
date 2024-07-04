@@ -31,8 +31,6 @@ import (
 	"github.com/ledgerwatch/erigon-lib/kv/order"
 	"github.com/ledgerwatch/erigon-lib/kv/rawdbv3"
 	"github.com/ledgerwatch/erigon-lib/log/v3"
-	"github.com/ledgerwatch/erigon/eth/consensuschain"
-
 	"github.com/ledgerwatch/erigon/consensus"
 	"github.com/ledgerwatch/erigon/consensus/ethash"
 	"github.com/ledgerwatch/erigon/core"
@@ -41,6 +39,8 @@ import (
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/core/vm"
 	"github.com/ledgerwatch/erigon/core/vm/evmtypes"
+	"github.com/ledgerwatch/erigon/eth/consensuschain"
+	"github.com/ledgerwatch/erigon/eth/tracers/config"
 	"github.com/ledgerwatch/erigon/ethdb"
 	bortypes "github.com/ledgerwatch/erigon/polygon/bor/types"
 	"github.com/ledgerwatch/erigon/rpc"
@@ -49,7 +49,7 @@ import (
 )
 
 // Transaction implements trace_transaction
-func (api *TraceAPIImpl) Transaction(ctx context.Context, txHash common.Hash, gasBailOut *bool) (ParityTraces, error) {
+func (api *TraceAPIImpl) Transaction(ctx context.Context, txHash common.Hash, gasBailOut *bool, traceConfig *config.TraceConfig) (ParityTraces, error) {
 	if gasBailOut == nil {
 		gasBailOut = new(bool) // false by default
 	}
@@ -115,7 +115,7 @@ func (api *TraceAPIImpl) Transaction(ctx context.Context, txHash common.Hash, ga
 	hash := block.Hash()
 	signer := types.MakeSigner(chainConfig, blockNumber, block.Time())
 	// Returns an array of trace arrays, one trace array for each transaction
-	traces, _, err := api.callManyTransactions(ctx, tx, block, []string{TraceTypeTrace}, txIndex, *gasBailOut, signer, chainConfig)
+	traces, _, err := api.callManyTransactions(ctx, tx, block, []string{TraceTypeTrace}, txIndex, *gasBailOut, signer, chainConfig, traceConfig)
 	if err != nil {
 		return nil, err
 	}
@@ -140,12 +140,12 @@ func (api *TraceAPIImpl) Transaction(ctx context.Context, txHash common.Hash, ga
 }
 
 // Get implements trace_get
-func (api *TraceAPIImpl) Get(ctx context.Context, txHash common.Hash, indicies []hexutil.Uint64, gasBailOut *bool) (*ParityTrace, error) {
+func (api *TraceAPIImpl) Get(ctx context.Context, txHash common.Hash, indicies []hexutil.Uint64, gasBailOut *bool, traceConfig *config.TraceConfig) (*ParityTrace, error) {
 	// Parity fails if it gets more than a single index. It returns nothing in this case. Must we?
 	if len(indicies) > 1 {
 		return nil, nil
 	}
-	traces, err := api.Transaction(ctx, txHash, gasBailOut)
+	traces, err := api.Transaction(ctx, txHash, gasBailOut, traceConfig)
 	if err != nil {
 		return nil, err
 	}
@@ -176,7 +176,7 @@ func rewardKindToString(kind consensus.RewardKind) string {
 }
 
 // Block implements trace_block
-func (api *TraceAPIImpl) Block(ctx context.Context, blockNr rpc.BlockNumber, gasBailOut *bool) (ParityTraces, error) {
+func (api *TraceAPIImpl) Block(ctx context.Context, blockNr rpc.BlockNumber, gasBailOut *bool, traceConfig *config.TraceConfig) (ParityTraces, error) {
 	if gasBailOut == nil {
 		gasBailOut = new(bool) // false by default
 	}
@@ -208,7 +208,7 @@ func (api *TraceAPIImpl) Block(ctx context.Context, blockNr rpc.BlockNumber, gas
 		return nil, err
 	}
 	signer := types.MakeSigner(cfg, blockNum, block.Time())
-	traces, syscall, err := api.callManyTransactions(ctx, tx, block, []string{TraceTypeTrace}, -1 /* all txn indices */, *gasBailOut /* gasBailOut */, signer, cfg)
+	traces, syscall, err := api.callManyTransactions(ctx, tx, block, []string{TraceTypeTrace}, -1 /* all txn indices */, *gasBailOut /* gasBailOut */, signer, cfg, traceConfig)
 	if err != nil {
 		return nil, err
 	}
@@ -299,7 +299,7 @@ func traceFilterBitmapsV3(tx kv.TemporalTx, req TraceFilterRequest, from, to uin
 // Filter implements trace_filter
 // NOTE: We do not store full traces - we just store index for each address
 // Pull blocks which have txs with matching address
-func (api *TraceAPIImpl) Filter(ctx context.Context, req TraceFilterRequest, gasBailOut *bool, stream *jsoniter.Stream) error {
+func (api *TraceAPIImpl) Filter(ctx context.Context, req TraceFilterRequest, gasBailOut *bool, traceConfig *config.TraceConfig, stream *jsoniter.Stream) error {
 	if gasBailOut == nil {
 		//nolint
 		gasBailOut = new(bool) // false by default
@@ -328,10 +328,10 @@ func (api *TraceAPIImpl) Filter(ctx context.Context, req TraceFilterRequest, gas
 		return fmt.Errorf("invalid parameters: fromBlock cannot be greater than toBlock")
 	}
 
-	return api.filterV3(ctx, dbtx.(kv.TemporalTx), fromBlock, toBlock, req, stream, *gasBailOut)
+	return api.filterV3(ctx, dbtx.(kv.TemporalTx), fromBlock, toBlock, req, stream, *gasBailOut, traceConfig)
 }
 
-func (api *TraceAPIImpl) filterV3(ctx context.Context, dbtx kv.TemporalTx, fromBlock, toBlock uint64, req TraceFilterRequest, stream *jsoniter.Stream, gasBailOut bool) error {
+func (api *TraceAPIImpl) filterV3(ctx context.Context, dbtx kv.TemporalTx, fromBlock, toBlock uint64, req TraceFilterRequest, stream *jsoniter.Stream, gasBailOut bool, traceConfig *config.TraceConfig) error {
 	var fromTxNum, toTxNum uint64
 	var err error
 	if fromBlock > 0 {
@@ -581,6 +581,10 @@ func (api *TraceAPIImpl) filterV3(ctx context.Context, dbtx kv.TemporalTx, fromB
 		vmConfig.SkipAnalysis = core.SkipAnalysis(chainConfig, blockNum)
 		traceResult := &TraceCallResult{Trace: []*ParityTrace{}}
 		var ot OeTracer
+		ot.config, err = parseOeTracerConfig(traceConfig)
+		if err != nil {
+			return err
+		}
 		ot.compat = api.compatibility
 		ot.r = traceResult
 		ot.idx = []string{fmt.Sprintf("%d-", txIndex)}
@@ -704,6 +708,7 @@ func (api *TraceAPIImpl) callManyTransactions(
 	gasBailOut bool,
 	signer *types.Signer,
 	cfg *chain.Config,
+	traceConfig *config.TraceConfig,
 ) ([]*TraceCallResult, consensus.SystemCall, error) {
 	blockNumber := block.NumberU64()
 	pNo := blockNumber
@@ -790,7 +795,7 @@ func (api *TraceAPIImpl) callManyTransactions(
 		BlockNumber:      &parentNo,
 		BlockHash:        &parentHash,
 		RequireCanonical: true,
-	}, header, gasBailOut /* gasBailout */, txIndex)
+	}, header, gasBailOut /* gasBailout */, txIndex, traceConfig)
 
 	if cmErr != nil {
 		return nil, nil, cmErr
