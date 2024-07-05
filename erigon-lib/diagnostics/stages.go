@@ -326,10 +326,6 @@ func SyncStagesFromTX(tx kv.Tx) ([]byte, error) {
 }
 
 func ParseStagesList(data []byte) (info []SyncStage) {
-	if len(data) == 0 {
-		return []SyncStage{}
-	}
-
 	err := json.Unmarshal(data, &info)
 
 	if err != nil {

@@ -156,10 +156,6 @@ func ReadRAMInfoFromTx(tx kv.Tx) ([]byte, error) {
 }
 
 func ParseRamInfo(data []byte) (info RAMInfo) {
-	if len(data) == 0 {
-		return RAMInfo{}
-	}
-
 	err := json.Unmarshal(data, &info)
 
 	if err != nil {
@@ -180,10 +176,6 @@ func ReadCPUInfoFromTx(tx kv.Tx) ([]byte, error) {
 }
 
 func ParseCPUInfo(data []byte) (info CPUInfo) {
-	if len(data) == 0 {
-		return CPUInfo{}
-	}
-
 	err := json.Unmarshal(data, &info)
 
 	if err != nil {
@@ -204,10 +196,6 @@ func ReadDiskInfoFromTx(tx kv.Tx) ([]byte, error) {
 }
 
 func ParseDiskInfo(data []byte) (info DiskInfo) {
-	if len(data) == 0 {
-		return DiskInfo{}
-	}
-
 	err := json.Unmarshal(data, &info)
 
 	if err != nil {
