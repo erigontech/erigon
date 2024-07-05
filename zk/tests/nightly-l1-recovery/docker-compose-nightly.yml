@@ -1,5 +1,3 @@
-version: '3.8'
-
 services:
   cache:
     image: golang:1.19
