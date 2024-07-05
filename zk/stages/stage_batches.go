@@ -105,7 +105,6 @@ func SpawnStageBatches(
 	ctx context.Context,
 	tx kv.RwTx,
 	cfg BatchesCfg,
-	firstCycle bool,
 	quiet bool,
 ) error {
 	logPrefix := s.LogPrefix()

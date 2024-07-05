@@ -45,6 +45,7 @@ const SMT_DEPTHS = "smt_depths"                                        // block 
 const L1_INFO_LEAVES = "l1_info_leaves"                                // l1 info tree index -> l1 info tree leaf
 const L1_INFO_ROOTS = "l1_info_roots"                                  // root hash -> l1 info tree index
 const INVALID_BATCHES = "invalid_batches"                              // batch number -> true
+const BATCH_FULLY_PROCESSED = "batch_fully_processed"                  // batch number -> true
 const LOCAL_EXIT_ROOTS = "local_exit_roots"                            // l2 block number -> local exit root
 const ROllUP_TYPES_FORKS = "rollup_types_forks"                        // rollup type id -> fork id
 const FORK_HISTORY = "fork_history"                                    // index -> fork id + last verified batch
@@ -103,6 +104,7 @@ func CreateHermezBuckets(tx kv.RwTx) error {
 		L1_INFO_LEAVES,
 		L1_INFO_ROOTS,
 		INVALID_BATCHES,
+		BATCH_FULLY_PROCESSED,
 		LOCAL_EXIT_ROOTS,
 		ROllUP_TYPES_FORKS,
 		FORK_HISTORY,
@@ -1273,18 +1275,20 @@ func (db *HermezDb) WriteBatchCounters(batchNumber uint64, counters map[string]i
 	return db.tx.Put(BATCH_COUNTERS, Uint64ToBytes(batchNumber), countersJson)
 }
 
-func (db *HermezDbReader) GetBatchCounters(batchNumber uint64) (map[string]int, error) {
+func (db *HermezDbReader) GetBatchCounters(batchNumber uint64) (countersMap map[string]int, found bool, err error) {
 	v, err := db.tx.GetOne(BATCH_COUNTERS, Uint64ToBytes(batchNumber))
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
-	var countersMap map[string]int
-	err = json.Unmarshal(v, &countersMap)
-	if err != nil {
-		return nil, err
+	found = len(v) > 0
+
+	if found {
+		if err = json.Unmarshal(v, &countersMap); err != nil {
+			return nil, false, err
+		}
 	}
 
-	return countersMap, nil
+	return countersMap, found, nil
 }
 
 // WriteL1BatchData stores the data for a given L1 batch number
@@ -1493,6 +1497,18 @@ func (db *HermezDb) WriteInvalidBatch(batchNo uint64) error {
 
 func (db *HermezDbReader) GetInvalidBatch(batchNo uint64) (bool, error) {
 	v, err := db.tx.GetOne(INVALID_BATCHES, Uint64ToBytes(batchNo))
+	if err != nil {
+		return false, err
+	}
+	return len(v) > 0, nil
+}
+
+func (db *HermezDb) WriteIsBatchFullyProcessed(batchNo uint64) error {
+	return db.tx.Put(BATCH_FULLY_PROCESSED, Uint64ToBytes(batchNo), []byte{1})
+}
+
+func (db *HermezDbReader) GetIsBatchFullyProcessed(batchNo uint64) (bool, error) {
+	v, err := db.tx.GetOne(BATCH_FULLY_PROCESSED, Uint64ToBytes(batchNo))
 	if err != nil {
 		return false, err
 	}

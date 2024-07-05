@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 
+	"math/big"
+
 	"github.com/gateway-fm/cdk-erigon-lib/common"
 	"github.com/gateway-fm/cdk-erigon-lib/kv"
 	"github.com/iden3/go-iden3-crypto/keccak256"
@@ -15,7 +17,6 @@ import (
 	"github.com/ledgerwatch/erigon/zk/hermez_db"
 	"github.com/ledgerwatch/erigon/zk/types"
 	"github.com/ledgerwatch/log/v3"
-	"math/big"
 )
 
 type L1SequencerSyncCfg struct {
@@ -38,7 +39,6 @@ func SpawnL1SequencerSyncStage(
 	tx kv.RwTx,
 	cfg L1SequencerSyncCfg,
 	ctx context.Context,
-	initialCycle bool,
 	quiet bool,
 ) (err error) {
 	logPrefix := s.LogPrefix()

@@ -63,7 +63,6 @@ func SpawnStageL1Syncer(
 	ctx context.Context,
 	tx kv.RwTx,
 	cfg L1SyncerCfg,
-	firstCycle bool,
 	quiet bool,
 ) error {
 
@@ -81,7 +80,9 @@ func SpawnStageL1Syncer(
 	// }
 	defer log.Info(fmt.Sprintf("[%s] Finished L1 sync stage ", logPrefix))
 
+	var internalTxOpened bool
 	if tx == nil {
+		internalTxOpened = true
 		log.Debug("l1 sync: no tx provided, creating a new one")
 		var err error
 		tx, err = cfg.db.BeginRw(ctx)
@@ -190,7 +191,7 @@ Loop:
 		log.Info(fmt.Sprintf("[%s] No new L1 blocks to sync", logPrefix))
 	}
 
-	if firstCycle {
+	if internalTxOpened {
 		log.Debug("l1 sync: first cycle, committing tx")
 		if err := tx.Commit(); err != nil {
 			return fmt.Errorf("failed to commit tx, %w", err)

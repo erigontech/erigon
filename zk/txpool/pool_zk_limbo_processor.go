@@ -77,7 +77,7 @@ func (_this *LimboSubPoolProcessor) run() {
 	defer tx.Rollback()
 
 	// we just need some counter variable with large used values in order verify not to complain
-	batchCounters := vm.NewBatchCounterCollector(256, 1, _this.zkCfg.VirtualCountersSmtReduction, true)
+	batchCounters := vm.NewBatchCounterCollector(256, 1, _this.zkCfg.VirtualCountersSmtReduction, true, nil)
 	unlimitedCounters := batchCounters.NewCounters().UsedAsMap()
 	for k := range unlimitedCounters {
 		unlimitedCounters[k] = math.MaxInt32

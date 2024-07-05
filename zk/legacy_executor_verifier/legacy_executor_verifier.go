@@ -377,7 +377,7 @@ func (v *LegacyExecutorVerifier) WriteBatchToStream(batchNumber uint64, hdb *her
 		return err
 	}
 
-	if err := server.WriteBlocksToStream(roTx, hdb, v.streamServer, v.stream, blks[0], blks[len(blks)-1], "verifier"); err != nil {
+	if err := v.streamServer.WriteBlocksToStream(roTx, hdb, blks[0], blks[len(blks)-1], "verifier"); err != nil {
 		return err
 	}
 	return nil
@@ -463,7 +463,7 @@ func (v *LegacyExecutorVerifier) GetStreamBytes(
 		if transactionsToIncludeByIndex != nil {
 			transactionsToIncludeByIndexInBlock = transactionsToIncludeByIndex[idx]
 		}
-		sBytes, err = v.streamServer.CreateAndBuildStreamEntryBytesProto(block, hermezDb, tx, lastBlock, batchNumber, previousBatch, l1InfoTreeMinTimestamps, isBatchEnd, transactionsToIncludeByIndexInBlock)
+		sBytes, err = server.CreateAndBuildStreamEntryBytesProto(v.streamServer.GetChainId(), block, hermezDb, tx, lastBlock, batchNumber, previousBatch, l1InfoTreeMinTimestamps, isBatchEnd, transactionsToIncludeByIndexInBlock)
 		if err != nil {
 			return nil, err
 		}

@@ -54,7 +54,7 @@ func SequencerZkStages(
 				if badBlockUnwind {
 					return nil
 				}
-				return SpawnStageL1Syncer(s, u, ctx, tx, l1SyncerCfg, firstCycle, test)
+				return SpawnStageL1Syncer(s, u, ctx, tx, l1SyncerCfg, test)
 			},
 			Unwind: func(firstCycle bool, u *stages.UnwindState, s *stages.StageState, tx kv.RwTx) error {
 				return UnwindL1SyncerStage(u, tx, l1SyncerCfg, ctx)
@@ -67,7 +67,7 @@ func SequencerZkStages(
 			ID:          stages2.L1SequencerSyncer,
 			Description: "L1 Sequencer Sync Updates",
 			Forward: func(firstCycle bool, badBlockUnwind bool, s *stages.StageState, u stages.Unwinder, tx kv.RwTx, quiet bool) error {
-				return SpawnL1SequencerSyncStage(s, u, tx, l1SequencerSyncCfg, ctx, firstCycle, quiet)
+				return SpawnL1SequencerSyncStage(s, u, tx, l1SequencerSyncCfg, ctx, quiet)
 			},
 			Unwind: func(firstCycle bool, u *stages.UnwindState, s *stages.StageState, tx kv.RwTx) error {
 				return UnwindL1SequencerSyncStage(u, tx, l1SequencerSyncCfg, ctx)
@@ -80,7 +80,7 @@ func SequencerZkStages(
 			ID:          stages2.L1InfoTree,
 			Description: "L1 Info tree index updates sync",
 			Forward: func(firstCycle bool, badBlockUnwind bool, s *stages.StageState, u stages.Unwinder, tx kv.RwTx, quiet bool) error {
-				return SpawnL1InfoTreeStage(s, u, tx, l1InfoTreeCfg, ctx, firstCycle, quiet)
+				return SpawnL1InfoTreeStage(s, u, tx, l1InfoTreeCfg, ctx, quiet)
 			},
 			Unwind: func(firstCycle bool, u *stages.UnwindState, s *stages.StageState, tx kv.RwTx) error {
 				return UnwindL1InfoTreeStage(u, tx, l1InfoTreeCfg, ctx)
@@ -93,7 +93,7 @@ func SequencerZkStages(
 			ID:          stages2.L1BlockSync,
 			Description: "L1 Sequencer L1 Block Sync",
 			Forward: func(firstCycle bool, badBlockUnwind bool, s *stages.StageState, unwinder stages.Unwinder, tx kv.RwTx, quiet bool) error {
-				return SpawnSequencerL1BlockSyncStage(s, unwinder, ctx, tx, sequencerL1BlockSyncCfg, firstCycle, quiet)
+				return SpawnSequencerL1BlockSyncStage(s, unwinder, ctx, tx, sequencerL1BlockSyncCfg, quiet)
 			},
 			Unwind: func(firstCycle bool, u *stages.UnwindState, s *stages.StageState, tx kv.RwTx) error {
 				return UnwindSequencerL1BlockSyncStage(u, tx, sequencerL1BlockSyncCfg, ctx)
@@ -106,7 +106,7 @@ func SequencerZkStages(
 			ID:          stages2.Execution,
 			Description: "Sequence transactions",
 			Forward: func(firstCycle bool, badBlockUnwind bool, s *stages.StageState, u stages.Unwinder, tx kv.RwTx, quiet bool) error {
-				return SpawnSequencingStage(s, u, tx, ctx, exec, firstCycle, quiet)
+				return SpawnSequencingStage(s, u, tx, ctx, exec, quiet)
 			},
 			Unwind: func(firstCycle bool, u *stages.UnwindState, s *stages.StageState, tx kv.RwTx) error {
 				return UnwindSequenceExecutionStage(u, s, tx, ctx, exec, firstCycle)
@@ -119,26 +119,26 @@ func SequencerZkStages(
 			ID:          stages2.IntermediateHashes,
 			Description: "Sequencer Intermediate Hashes",
 			Forward: func(firstCycle bool, badBlockUnwind bool, s *stages.StageState, u stages.Unwinder, tx kv.RwTx, quiet bool) error {
-				return SpawnSequencerInterhashesStage(s, u, tx, ctx, sequencerInterhashesCfg, firstCycle, quiet)
+				return SpawnSequencerInterhashesStage(s, u, tx, ctx, sequencerInterhashesCfg, quiet)
 			},
 			Unwind: func(firstCycle bool, u *stages.UnwindState, s *stages.StageState, tx kv.RwTx) error {
-				return UnwindSequencerInterhashsStage(u, s, tx, ctx, sequencerInterhashesCfg, firstCycle)
+				return UnwindSequencerInterhashsStage(u, s, tx, ctx, sequencerInterhashesCfg)
 			},
 			Prune: func(firstCycle bool, p *stages.PruneState, tx kv.RwTx) error {
-				return PruneSequencerInterhashesStage(p, tx, sequencerInterhashesCfg, ctx, firstCycle)
+				return PruneSequencerInterhashesStage(p, tx, sequencerInterhashesCfg, ctx)
 			},
 		},
 		{
 			ID:          stages2.SequenceExecutorVerify,
 			Description: "Sequencer, check batch with legacy executor",
 			Forward: func(firstCycle bool, badBlockUnwind bool, s *stages.StageState, u stages.Unwinder, tx kv.RwTx, quiet bool) error {
-				return SpawnSequencerExecutorVerifyStage(s, u, tx, ctx, sequencerExecutorVerifyCfg, firstCycle, quiet)
+				return SpawnSequencerExecutorVerifyStage(s, u, tx, ctx, sequencerExecutorVerifyCfg, quiet)
 			},
 			Unwind: func(firstCycle bool, u *stages.UnwindState, s *stages.StageState, tx kv.RwTx) error {
-				return UnwindSequencerExecutorVerifyStage(u, s, tx, ctx, sequencerExecutorVerifyCfg, firstCycle)
+				return UnwindSequencerExecutorVerifyStage(u, s, tx, ctx, sequencerExecutorVerifyCfg)
 			},
 			Prune: func(firstCycle bool, p *stages.PruneState, tx kv.RwTx) error {
-				return PruneSequencerExecutorVerifyStage(p, tx, sequencerExecutorVerifyCfg, ctx, firstCycle)
+				return PruneSequencerExecutorVerifyStage(p, tx, sequencerExecutorVerifyCfg, ctx)
 			},
 		},
 		{
@@ -268,7 +268,7 @@ func DefaultZkStages(
 				if badBlockUnwind {
 					return nil
 				}
-				return SpawnStageL1Syncer(s, u, ctx, tx, l1SyncerCfg, firstCycle, test)
+				return SpawnStageL1Syncer(s, u, ctx, tx, l1SyncerCfg, test)
 			},
 			Unwind: func(firstCycle bool, u *stages.UnwindState, s *stages.StageState, tx kv.RwTx) error {
 				return UnwindL1SyncerStage(u, tx, l1SyncerCfg, ctx)
@@ -281,7 +281,7 @@ func DefaultZkStages(
 			ID:          stages2.L1InfoTree,
 			Description: "L1 Info tree index updates sync",
 			Forward: func(firstCycle bool, badBlockUnwind bool, s *stages.StageState, u stages.Unwinder, tx kv.RwTx, quiet bool) error {
-				return SpawnL1InfoTreeStage(s, u, tx, l1InfoTreeCfg, ctx, firstCycle, quiet)
+				return SpawnL1InfoTreeStage(s, u, tx, l1InfoTreeCfg, ctx, quiet)
 			},
 			Unwind: func(firstCycle bool, u *stages.UnwindState, s *stages.StageState, tx kv.RwTx) error {
 				return UnwindL1InfoTreeStage(u, tx, l1InfoTreeCfg, ctx)
@@ -297,7 +297,7 @@ func DefaultZkStages(
 				if badBlockUnwind {
 					return nil
 				}
-				return SpawnStageBatches(s, u, ctx, tx, batchesCfg, firstCycle, test)
+				return SpawnStageBatches(s, u, ctx, tx, batchesCfg, test)
 			},
 			Unwind: func(firstCycle bool, u *stages.UnwindState, s *stages.StageState, tx kv.RwTx) error {
 				return UnwindBatchesStage(u, tx, batchesCfg, ctx)

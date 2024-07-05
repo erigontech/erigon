@@ -18,9 +18,10 @@ type BatchCounterCollector struct {
 	blockCount              int
 	forkId                  uint16
 	unlimitedCounters       bool
+	addonCounters           *Counters
 }
 
-func NewBatchCounterCollector(smtMaxLevel int, forkId uint16, mcpReduction float64, unlimitedCounters bool) *BatchCounterCollector {
+func NewBatchCounterCollector(smtMaxLevel int, forkId uint16, mcpReduction float64, unlimitedCounters bool, addonCounters *Counters) *BatchCounterCollector {
 	smtLevels := calculateSmtLevels(smtMaxLevel, 0, mcpReduction)
 	smtLevelsForTransaction := calculateSmtLevels(smtMaxLevel, 32, mcpReduction)
 	return &BatchCounterCollector{
@@ -30,6 +31,7 @@ func NewBatchCounterCollector(smtMaxLevel int, forkId uint16, mcpReduction float
 		blockCount:              0,
 		forkId:                  forkId,
 		unlimitedCounters:       unlimitedCounters,
+		addonCounters:           addonCounters,
 	}
 }
 
@@ -158,7 +160,16 @@ func (bcc *BatchCounterCollector) NewCounters() Counters {
 // rlp level counters and execution level counters
 func (bcc *BatchCounterCollector) CombineCollectors(verifyMerkleProof bool) (Counters, error) {
 	// combine all the counters we have so far
+
+	// if we have external coutners use them, otherwise create new
+	// this is used when sequencer starts mid batch and we need the already comulated counters
 	combined := bcc.NewCounters()
+	if bcc.addonCounters != nil {
+		for k, v := range *bcc.addonCounters {
+			combined[k].used = v.used
+			combined[k].remaining -= v.used
+		}
+	}
 
 	if err := bcc.processBatchLevelData(); err != nil {
 		return nil, err
@@ -207,4 +218,45 @@ func (bcc *BatchCounterCollector) CombineCollectors(verifyMerkleProof bool) (Cou
 	}
 
 	return combined, nil
+}
+
+// CombineCollectors takes the batch level data from all transactions and combines these counters with each transactions'
+// rlp level counters and execution level counters
+// this one returns the counters as they are so far, without adding processBatchLevelData, processChangeL2Block and decodeChangeL2BlockTx
+// used to save batch counter progress without adding the said counters twice
+func (bcc *BatchCounterCollector) CombineCollectorsNoChanges(verifyMerkleProof bool) Counters {
+	// combine all the counters we have so far
+
+	// if we have external coutners use them, otherwise create new
+	// this is used when sequencer starts mid batch and we need the already comulated counters
+	combined := bcc.NewCounters()
+	if bcc.addonCounters != nil {
+		for k, v := range *bcc.addonCounters {
+			combined[k].used = v.used
+			combined[k].remaining -= v.used
+		}
+	}
+	if bcc.l2DataCollector != nil {
+		for k, v := range bcc.l2DataCollector.Counters() {
+			combined[k].used += v.used
+			combined[k].remaining -= v.used
+		}
+	}
+
+	for _, tx := range bcc.transactions {
+		for k, v := range tx.rlpCounters.counters {
+			combined[k].used += v.used
+			combined[k].remaining -= v.used
+		}
+		for k, v := range tx.executionCounters.counters {
+			combined[k].used += v.used
+			combined[k].remaining -= v.used
+		}
+		for k, v := range tx.processingCounters.counters {
+			combined[k].used += v.used
+			combined[k].remaining -= v.used
+		}
+	}
+
+	return combined
 }

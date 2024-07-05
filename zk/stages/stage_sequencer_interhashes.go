@@ -30,7 +30,6 @@ func SpawnSequencerInterhashesStage(
 	tx kv.RwTx,
 	ctx context.Context,
 	cfg SequencerInterhashesCfg,
-	initialCycle bool,
 	quiet bool,
 ) error {
 	var err error
@@ -70,7 +69,6 @@ func UnwindSequencerInterhashsStage(
 	tx kv.RwTx,
 	ctx context.Context,
 	cfg SequencerInterhashesCfg,
-	initialCycle bool,
 ) error {
 	return UnwindZkIntermediateHashesStage(u, s, tx, ZkInterHashesCfg{}, ctx)
 }
@@ -80,7 +78,6 @@ func PruneSequencerInterhashesStage(
 	tx kv.RwTx,
 	cfg SequencerInterhashesCfg,
 	ctx context.Context,
-	initialCycle bool,
 ) error {
 	return nil
 }

@@ -69,6 +69,14 @@ func (c *Counter) AsMap() map[string]int {
 
 type Counters map[CounterKey]*Counter
 
+func NewCountersFromUsedMap(used map[string]int) *Counters {
+	res := Counters{}
+	for k, v := range used {
+		res[CounterKey(k)] = &Counter{used: v}
+	}
+	return &res
+}
+
 func (c Counters) UsedAsString() string {
 	res := fmt.Sprintf("[SHA: %v]", c[SHA].used)
 	res += fmt.Sprintf("[A: %v]", c[A].used)

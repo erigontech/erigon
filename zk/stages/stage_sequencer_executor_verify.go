@@ -54,7 +54,6 @@ func SpawnSequencerExecutorVerifyStage(
 	tx kv.RwTx,
 	ctx context.Context,
 	cfg SequencerExecutorVerifyCfg,
-	initialCycle bool,
 	quiet bool,
 ) error {
 	logPrefix := s.LogPrefix()
@@ -93,18 +92,28 @@ func SpawnSequencerExecutorVerifyStage(
 		return err
 	}
 
+	isBatchFinished, err := hermezDb.GetIsBatchFullyProcessed(latestBatch)
+	if err != nil {
+		return err
+	}
 	// we could be running in a state with no executors so we need instant response that we are in an
 	// ok state to save lag in the data stream !!Dragons: there will be no witnesses stored running in
 	// this mode of operation
 	canVerify := cfg.verifier.HasExecutorsUnsafe()
+
+	// if batch was stopped intermediate and is not finished - we need to finish it first
+	// this shouldn't occur since exec stage is before that and should finish the batch
+	// but just in case something unexpected happens
+	if !isBatchFinished {
+		log.Error(fmt.Sprintf("[%s] batch %d is not fully processed in stage_execute", logPrefix, latestBatch))
+		canVerify = false
+	}
+
 	if !canVerify {
 		if latestBatch == injectedBatchNumber {
 			return nil
 		}
-		hermezDbReader := hermez_db.NewHermezDbReader(tx)
-		if err = cfg.verifier.WriteBatchToStream(latestBatch, hermezDbReader, tx); err != nil {
-			return err
-		}
+
 		if err = stages.SaveStageProgress(tx, stages.SequenceExecutorVerify, latestBatch); err != nil {
 			return err
 		}
@@ -128,6 +137,11 @@ func SpawnSequencerExecutorVerifyStage(
 		// ensure that the first response is the next batch based on the current stage progress
 		// otherwise just return early until we get it
 		if response.BatchNumber != progress+1 {
+			if freshTx {
+				if err = tx.Commit(); err != nil {
+					return err
+				}
+			}
 			return nil
 		}
 
@@ -289,9 +303,12 @@ func SpawnSequencerExecutorVerifyStage(
 				return err
 			}
 
-			counters, err := hermezDb.GetBatchCounters(batch)
+			counters, found, err := hermezDb.GetBatchCounters(batch)
 			if err != nil {
 				return err
+			}
+			if !found {
+				return errors.New("batch counters not found")
 			}
 
 			forkId, err := hermezDb.GetForkId(batch)
@@ -322,7 +339,6 @@ func UnwindSequencerExecutorVerifyStage(
 	tx kv.RwTx,
 	ctx context.Context,
 	cfg SequencerExecutorVerifyCfg,
-	initialCycle bool,
 ) (err error) {
 	/*
 		The "Unwinder" keeps stage's progress in blocks.
@@ -361,7 +377,6 @@ func PruneSequencerExecutorVerifyStage(
 	tx kv.RwTx,
 	cfg SequencerExecutorVerifyCfg,
 	ctx context.Context,
-	initialCycle bool,
 ) error {
 	return nil
 }

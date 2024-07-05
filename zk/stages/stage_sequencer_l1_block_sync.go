@@ -7,6 +7,8 @@ import (
 
 	"errors"
 
+	"encoding/binary"
+
 	"github.com/gateway-fm/cdk-erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/eth/ethconfig"
@@ -16,7 +18,6 @@ import (
 	"github.com/ledgerwatch/erigon/zk/l1_data"
 	"github.com/ledgerwatch/erigon/zk/syncer"
 	"github.com/ledgerwatch/log/v3"
-	"encoding/binary"
 )
 
 type SequencerL1BlockSyncCfg struct {
@@ -42,7 +43,6 @@ func SpawnSequencerL1BlockSyncStage(
 	ctx context.Context,
 	tx kv.RwTx,
 	cfg SequencerL1BlockSyncCfg,
-	firstCycle bool,
 	quiet bool,
 ) error {
 	logPrefix := s.LogPrefix()

@@ -160,6 +160,9 @@ jobs:
           cd ci_logs
           kurtosis service logs cdk-v1 cdk-erigon-node-001 --all > cdk-erigon-node-001.log
           kurtosis service logs cdk-v1 cdk-erigon-sequencer-001 --all > cdk-erigon-sequencer-001.log
+          kurtosis service logs cdk-v1 zkevm-agglayer-001 --all > zkevm-agglayer-001.log
+          kurtosis service logs cdk-v1 zkevm-prover-001 --all > zkevm-prover-001.log
+          kurtosis service logs cdk-v1 zkevm-executor-pless-001 --all > zkevm-executor-pless-001.log
 
       - name: Upload logs
         if: failure()

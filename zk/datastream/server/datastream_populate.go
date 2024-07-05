@@ -4,105 +4,29 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/0xPolygonHermez/zkevm-data-streamer/datastreamer"
 	"github.com/gateway-fm/cdk-erigon-lib/common"
 	"github.com/gateway-fm/cdk-erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	eritypes "github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/zk/datastream/proto/github.com/0xPolygonHermez/zkevm-node/state/datastream"
-	"github.com/ledgerwatch/erigon/zk/datastream/types"
 	"github.com/ledgerwatch/erigon/zk/hermez_db"
-	"github.com/ledgerwatch/log/v3"
 	"github.com/ledgerwatch/erigon/zk/utils"
+	"github.com/ledgerwatch/log/v3"
 )
 
 const GenesisForkId = 0 // genesis fork is always 0 in the datastream
 
-func getLatestBlockNumberWritten(stream *datastreamer.StreamServer, header *datastreamer.HeaderEntry) (uint64, error) {
-	total := header.TotalEntries
-	if total == 0 {
-		return 0, nil
-	}
-
-	var blockNumber uint64
-	var entry datastreamer.FileEntry
-
-	for ; total > 0 && entry.Type != datastreamer.EntryType(1); total-- {
-		entry, err := stream.GetEntry(total)
-		if err != nil {
-			return 0, err
-		}
-		if entry.Type == datastreamer.EntryType(2) {
-			l2Block, err := types.UnmarshalL2Block(entry.Data)
-			if err != nil {
-				return 0, err
-			}
-			blockNumber = l2Block.L2BlockNumber
-			break
-		}
-	}
-
-	return blockNumber, nil
-}
-
-func ConsecutiveWriteBlocksToStream(
+func (srv *DataStreamServer) WriteBlocksToStream(
 	tx kv.Tx,
-	reader *hermez_db.HermezDbReader,
-	srv *DataStreamServer,
-	stream *datastreamer.StreamServer,
-	to uint64,
-	logPrefix string,
-) error {
-	lastWrittenBlockNum, dserr := srv.GetHighestBlockNumber()
-	if dserr != nil {
-		return dserr
-	}
-
-	from := lastWrittenBlockNum + 1
-
-	return WriteBlocksToStream(tx, reader, srv, stream, from, to, logPrefix)
-}
-
-func WriteBlocksToStream(
-	tx kv.Tx,
-	reader *hermez_db.HermezDbReader,
-	srv *DataStreamServer,
-	stream *datastreamer.StreamServer,
+	reader DbReader,
 	from, to uint64,
 	logPrefix string,
 ) error {
 	var err error
 
-	// if from is higher than the last datastream block number - unwind the stream
-	highestDatastreamBlock, err := srv.GetHighestBlockNumber()
-	if err != nil {
-		return err
-	}
-
-	if highestDatastreamBlock > from {
-		// now we need to unwind the batch right back to the point of the start of the batch we are going to write again
-		batch, err := reader.GetBatchNoByL2Block(from)
-		if err != nil {
-
-		}
-		if err := srv.UnwindToBatchStart(batch); err != nil {
-			return err
-		}
-
-		// now find the first block in the batch we just unwound to
-		firstBlockInBatch, found, err := reader.GetLowestBlockInBatch(batch)
-		if err != nil {
-			return err
-		}
-		if !found {
-			return fmt.Errorf("could not find the first block in the batch %v", batch)
-		}
-		from = firstBlockInBatch
-	}
-
 	logTicker := time.NewTicker(10 * time.Second)
 	var lastBlock *eritypes.Block
-	if err = stream.StartAtomicOp(); err != nil {
+	if err = srv.stream.StartAtomicOp(); err != nil {
 		return err
 	}
 	totalToWrite := to - (from - 1)
@@ -126,35 +50,7 @@ func WriteBlocksToStream(
 			}
 		}
 
-		block, err := rawdb.ReadBlockByNumber(tx, currentBlockNumber)
-		if err != nil {
-			return err
-		}
-
-		batchNum, err := reader.GetBatchNoByL2Block(currentBlockNumber)
-		if err != nil {
-			return err
-		}
-
-		prevBatchNum, err := reader.GetBatchNoByL2Block(currentBlockNumber - 1)
-		if err != nil {
-			return err
-		}
-
-		nextBatchNum, nextBatchExists, err := reader.CheckBatchNoByL2Block(currentBlockNumber + 1)
-		if err != nil {
-			return err
-		}
-
-		// a 0 next batch num here would mean we don't know about the next batch so must be at the end of the batch
-		isBatchEnd := !nextBatchExists || nextBatchNum > batchNum
-
-		gersInBetween, err := reader.GetBatchGlobalExitRootsProto(prevBatchNum, batchNum)
-		if err != nil {
-			return err
-		}
-
-		blockEntries, err := srv.CreateStreamEntriesProto(block, reader, tx, lastBlock, batchNum, prevBatchNum, gersInBetween, make(map[uint64]uint64), isBatchEnd, nil)
+		block, blockEntries, err := srv.createBlockStreamEntriesWithBatchCheck(logPrefix, tx, reader, lastBlock, currentBlockNumber)
 		if err != nil {
 			return err
 		}
@@ -181,22 +77,173 @@ func WriteBlocksToStream(
 		return err
 	}
 
-	if err = stream.CommitAtomicOp(); err != nil {
+	if err = srv.stream.CommitAtomicOp(); err != nil {
 		return err
 	}
 
 	return nil
 }
 
-func WriteGenesisToStream(
+func (srv *DataStreamServer) WriteBlockToStream(
+	logPrefix string,
+	tx kv.Tx,
+	reader DbReader,
+	batchNum, prevBatchNum,
+	blockNum uint64,
+) error {
+	var err error
+
+	if err = srv.UnwindIfNecessary(logPrefix, reader, blockNum, prevBatchNum, batchNum); err != nil {
+		return err
+	}
+
+	if err = srv.stream.StartAtomicOp(); err != nil {
+		return err
+	}
+
+	lastBlock, err := rawdb.ReadBlockByNumber(tx, blockNum-1)
+	if err != nil {
+		return err
+	}
+	block, err := rawdb.ReadBlockByNumber(tx, blockNum)
+	if err != nil {
+		return err
+	}
+
+	entries, err := createBlockWithBatchCheckStreamEntriesProto(srv.chainId, reader, tx, block, lastBlock, batchNum, prevBatchNum, make(map[uint64]uint64), false, nil)
+	if err != nil {
+		return err
+	}
+
+	if err = srv.CommitEntriesToStreamProto(entries); err != nil {
+		return err
+	}
+
+	if err = srv.stream.CommitAtomicOp(); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func (srv *DataStreamServer) UnwindIfNecessary(logPrefix string, reader DbReader, blockNum, prevBatchNum, batchNum uint64) error {
+	// if from is higher than the last datastream block number - unwind the stream
+	highestDatastreamBlock, err := srv.GetHighestBlockNumber()
+	if err != nil {
+		return err
+	}
+
+	//if this is a new batch case, we must unwind to previous batch's batch end
+	// otherwise it would corrupt the datastream with batch bookmark after a batch start or something similar
+	if highestDatastreamBlock >= blockNum {
+		if prevBatchNum != batchNum {
+			log.Warn(fmt.Sprintf("[%s] Datastream must unwind to batch", logPrefix), "prevBatchNum", prevBatchNum, "batchNum", batchNum)
+
+			//get latest block in prev batch
+			lastBlockInPrevbatch, err := reader.GetHighestBlockInBatch(prevBatchNum)
+			if err != nil {
+				return err
+			}
+
+			// this represents a case where the block we must unwind to is part of a previous batch
+			// this should never happen since previous batch in this use must be already completed
+			if lastBlockInPrevbatch != blockNum-1 {
+				return fmt.Errorf("datastream must unwind to prev batch, but it would corrupt the datastream: prevBatchNum: %d, abtchNum: %d, blockNum: %d", prevBatchNum, batchNum, blockNum)
+			}
+
+			if err := srv.UnwindToBatchStart(batchNum); err != nil {
+				return err
+			}
+		} else {
+			if err := srv.UnwindToBlock(blockNum); err != nil {
+				return err
+			}
+		}
+	}
+
+	return nil
+}
+
+func (srv *DataStreamServer) WriteBatchEnd(
+	logPrefix string,
+	tx kv.Tx,
+	reader DbReader,
+	batchNumber,
+	lastBatchNumber uint64,
+	stateRoot common.Hash,
+) (err error) {
+	gers, err := reader.GetBatchGlobalExitRootsProto(lastBatchNumber, batchNumber)
+	if err != nil {
+		return err
+	}
+
+	if err = srv.stream.StartAtomicOp(); err != nil {
+		return err
+	}
+
+	batchEndEntries, err := addBatchEndEntriesProto(reader, tx, batchNumber, lastBatchNumber, stateRoot, gers)
+	if err != nil {
+		return err
+	}
+
+	if err = srv.CommitEntriesToStreamProto(batchEndEntries); err != nil {
+		return err
+	}
+
+	if err = srv.stream.CommitAtomicOp(); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func (srv *DataStreamServer) createBlockStreamEntriesWithBatchCheck(
+	logPrefix string,
+	tx kv.Tx,
+	reader DbReader,
+	lastBlock *eritypes.Block,
+	blockNumber uint64,
+) (*eritypes.Block, []DataStreamEntryProto, error) {
+	block, err := rawdb.ReadBlockByNumber(tx, blockNumber)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	batchNum, err := reader.GetBatchNoByL2Block(blockNumber)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	prevBatchNum, err := reader.GetBatchNoByL2Block(blockNumber - 1)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	if err = srv.UnwindIfNecessary(logPrefix, reader, blockNumber, prevBatchNum, batchNum); err != nil {
+		return nil, nil, err
+	}
+
+	nextBatchNum, nextBatchExists, err := reader.CheckBatchNoByL2Block(blockNumber + 1)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	// a 0 next batch num here would mean we don't know about the next batch so must be at the end of the batch
+	isBatchEnd := !nextBatchExists || nextBatchNum > batchNum
+
+	entries, err := createBlockWithBatchCheckStreamEntriesProto(srv.chainId, reader, tx, block, lastBlock, batchNum, prevBatchNum, make(map[uint64]uint64), isBatchEnd, nil)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	return block, entries, nil
+}
+
+func (srv *DataStreamServer) WriteGenesisToStream(
 	genesis *eritypes.Block,
 	reader *hermez_db.HermezDbReader,
 	tx kv.Tx,
-	stream *datastreamer.StreamServer,
-	srv *DataStreamServer,
-	chainId uint64,
 ) error {
-
 	batchNo, err := reader.GetBatchNoByL2Block(0)
 	if err != nil {
 		return err
@@ -207,28 +254,28 @@ func WriteGenesisToStream(
 		return err
 	}
 
-	err = stream.StartAtomicOp()
+	err = srv.stream.StartAtomicOp()
 	if err != nil {
 		return err
 	}
 
-	batchBookmark := srv.CreateBatchBookmarkEntryProto(genesis.NumberU64())
-	l2BlockBookmark := srv.CreateL2BlockBookmarkEntryProto(genesis.NumberU64())
+	batchBookmark := newBatchBookmarkEntryProto(genesis.NumberU64())
+	l2BlockBookmark := newL2BlockBookmarkEntryProto(genesis.NumberU64())
 
-	l2Block := srv.CreateL2BlockProto(genesis, genesis.Hash().Bytes(), batchNo, ger, 0, 0, common.Hash{}, 0, common.Hash{})
-	batchStart := srv.CreateBatchStartProto(batchNo, chainId, GenesisForkId, datastream.BatchType_BATCH_TYPE_REGULAR)
+	l2Block := newL2BlockProto(genesis, genesis.Hash().Bytes(), batchNo, ger, 0, 0, common.Hash{}, 0, common.Hash{})
+	batchStart := newBatchStartProto(batchNo, srv.chainId, GenesisForkId, datastream.BatchType_BATCH_TYPE_REGULAR)
 
 	ler, err := utils.GetBatchLocalExitRoot(0, reader, tx)
 	if err != nil {
 		return err
 	}
-	batchEnd := srv.CreateBatchEndProto(ler, genesis.Root(), 0)
+	batchEnd := newBatchEndProto(ler, genesis.Root(), 0)
 
 	if err = srv.CommitEntriesToStreamProto([]DataStreamEntryProto{batchBookmark, batchStart, l2BlockBookmark, l2Block, batchEnd}); err != nil {
 		return err
 	}
 
-	err = stream.CommitAtomicOp()
+	err = srv.stream.CommitAtomicOp()
 	if err != nil {
 		return err
 	}

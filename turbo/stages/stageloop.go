@@ -20,6 +20,7 @@ import (
 
 	"github.com/ledgerwatch/erigon/chain"
 	"github.com/ledgerwatch/erigon/zk"
+	"github.com/ledgerwatch/erigon/zk/sequencer"
 
 	"github.com/ledgerwatch/erigon/consensus"
 
@@ -150,6 +151,10 @@ func StageLoopStep(ctx context.Context, chainConfig *chain.Config, db kv.RwDB, s
 		return headBlockHash, err
 	}
 	canRunCycleInOneTransaction := !initialCycle
+
+	if sequencer.IsSequencer() {
+		canRunCycleInOneTransaction = false // we need to commit when sequencer each run
+	}
 
 	var tx kv.RwTx // on this variable will run sync cycle.
 	if canRunCycleInOneTransaction {

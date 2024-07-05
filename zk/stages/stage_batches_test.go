@@ -14,8 +14,8 @@ import (
 	"github.com/ledgerwatch/erigon/zk/datastream/types"
 	"github.com/ledgerwatch/erigon/zk/hermez_db"
 
-	"github.com/stretchr/testify/require"
 	"github.com/ledgerwatch/erigon/eth/ethconfig"
+	"github.com/stretchr/testify/require"
 )
 
 func TestUnwindBatches(t *testing.T) {
@@ -93,7 +93,7 @@ func TestUnwindBatches(t *testing.T) {
 	/////////
 	// ACT //
 	/////////
-	err = SpawnStageBatches(s, u, ctx, tx, cfg, true, true)
+	err = SpawnStageBatches(s, u, ctx, tx, cfg, true)
 	require.NoError(t, err)
 	tx.Commit()
 

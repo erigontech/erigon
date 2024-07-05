@@ -12,6 +12,8 @@ import (
 
 	"math/big"
 
+	"fmt"
+
 	"github.com/0xPolygonHermez/zkevm-data-streamer/datastreamer"
 	"github.com/ledgerwatch/erigon/chain"
 	"github.com/ledgerwatch/erigon/common/math"
@@ -36,7 +38,6 @@ import (
 	zktypes "github.com/ledgerwatch/erigon/zk/types"
 	"github.com/ledgerwatch/erigon/zk/utils"
 	"github.com/ledgerwatch/log/v3"
-	"fmt"
 )
 
 const (
@@ -164,16 +165,17 @@ type stageDb struct {
 }
 
 func newStageDb(tx kv.RwTx) *stageDb {
-	sdb := &stageDb{
-		tx:          tx,
-		hermezDb:    hermez_db.NewHermezDb(tx),
-		eridb:       db2.NewEriDb(tx),
-		stateReader: state.NewPlainStateReader(tx),
-		smt:         nil,
-	}
-	sdb.smt = smtNs.NewSMT(sdb.eridb)
-
+	sdb := &stageDb{}
+	sdb.SetTx(tx)
 	return sdb
+}
+
+func (sdb *stageDb) SetTx(tx kv.RwTx) {
+	sdb.tx = tx
+	sdb.hermezDb = hermez_db.NewHermezDb(tx)
+	sdb.eridb = db2.NewEriDb(tx)
+	sdb.stateReader = state.NewPlainStateReader(tx)
+	sdb.smt = smtNs.NewSMT(sdb.eridb)
 }
 
 type nextBatchL1Data struct {
