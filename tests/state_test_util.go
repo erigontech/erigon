@@ -46,6 +46,7 @@ import (
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/math"
+	"github.com/erigontech/erigon/consensus/misc"
 	"github.com/erigontech/erigon/core"
 	"github.com/erigontech/erigon/core/state"
 	"github.com/erigontech/erigon/core/tracing"
@@ -109,23 +110,25 @@ type stTransaction struct {
 //go:generate gencodec -type stEnv -field-override stEnvMarshaling -out gen_stenv.go
 
 type stEnv struct {
-	Coinbase   libcommon.Address `json:"currentCoinbase"   gencodec:"required"`
-	Difficulty *big.Int          `json:"currentDifficulty" gencodec:"required"`
-	Random     *big.Int          `json:"currentRandom"     gencodec:"optional"`
-	GasLimit   uint64            `json:"currentGasLimit"   gencodec:"required"`
-	Number     uint64            `json:"currentNumber"     gencodec:"required"`
-	Timestamp  uint64            `json:"currentTimestamp"  gencodec:"required"`
-	BaseFee    *big.Int          `json:"currentBaseFee"    gencodec:"optional"`
+	Coinbase      libcommon.Address `json:"currentCoinbase"   gencodec:"required"`
+	Difficulty    *big.Int          `json:"currentDifficulty" gencodec:"required"`
+	Random        *big.Int          `json:"currentRandom"     gencodec:"optional"`
+	GasLimit      uint64            `json:"currentGasLimit"   gencodec:"required"`
+	Number        uint64            `json:"currentNumber"     gencodec:"required"`
+	Timestamp     uint64            `json:"currentTimestamp"  gencodec:"required"`
+	BaseFee       *big.Int          `json:"currentBaseFee"    gencodec:"optional"`
+	ExcessBlobGas *uint64           `json:"currentExcessBlobGas" gencodec:"optional"`
 }
 
 type stEnvMarshaling struct {
-	Coinbase   common.UnprefixedAddress
-	Difficulty *math.HexOrDecimal256
-	Random     *math.HexOrDecimal256
-	GasLimit   math.HexOrDecimal64
-	Number     math.HexOrDecimal64
-	Timestamp  math.HexOrDecimal64
-	BaseFee    *math.HexOrDecimal256
+	Coinbase      common.UnprefixedAddress
+	Difficulty    *math.HexOrDecimal256
+	Random        *math.HexOrDecimal256
+	GasLimit      math.HexOrDecimal64
+	Number        math.HexOrDecimal64
+	Timestamp     math.HexOrDecimal64
+	BaseFee       *math.HexOrDecimal256
+	ExcessBlobGas *math.HexOrDecimal64
 }
 
 // GetChainConfig takes a fork definition and returns a chain config.
@@ -249,19 +252,31 @@ func (t *StateTest) RunNoVerify(tx kv.RwTx, subtest StateSubtest, vmconfig vm.Co
 		context.BaseFee = new(uint256.Int)
 		context.BaseFee.SetFromBig(baseFee)
 	}
-	if t.json.Env.Random != nil {
+	if t.json.Env.Difficulty != nil {
+		context.Difficulty = new(big.Int).Set(t.json.Env.Difficulty)
+	}
+	if config.IsLondon(0) && t.json.Env.Random != nil {
 		rnd := libcommon.BigToHash(t.json.Env.Random)
 		context.PrevRanDao = &rnd
+		context.Difficulty = big.NewInt(0)
+	}
+	if config.IsCancun(0) && t.json.Env.ExcessBlobGas != nil {
+		context.BlobBaseFee, err = misc.GetBlobGasPrice(config, *t.json.Env.ExcessBlobGas)
+		if err != nil {
+			return nil, libcommon.Hash{}, err
+		}
 	}
 	evm := vm.NewEVM(context, txContext, statedb, config, vmconfig)
 
 	// Execute the message.
 	snapshot := statedb.Snapshot()
 	gaspool := new(core.GasPool)
-	gaspool.AddGas(block.GasLimit()).AddBlobGas(config.GetMaxBlobGasPerBlock())
+	gaspool.AddGas(block.GasLimit()) //.AddBlobGas(config.GetMaxBlobGasPerBlock())
 	if _, err = core.ApplyMessage(evm, msg, gaspool, true /* refunds */, false /* gasBailout */); err != nil {
 		statedb.RevertToSnapshot(snapshot)
 	}
+
+	//statedb.AddBalance(t.json.Env.Coinbase, new(uint256.Int), tracing.BalanceChangeUnspecified)
 
 	if err = statedb.FinalizeTx(evm.ChainRules(), w); err != nil {
 		return nil, libcommon.Hash{}, err
@@ -330,7 +345,7 @@ func MakePreState(rules *chain.Rules, tx kv.RwTx, accounts types.GenesisAlloc, b
 }
 
 func (t *StateTest) genesis(config *chain.Config) *types.Genesis {
-	return &types.Genesis{
+	genesis := &types.Genesis{
 		Config:     config,
 		Coinbase:   t.json.Env.Coinbase,
 		Difficulty: t.json.Env.Difficulty,
@@ -339,6 +354,12 @@ func (t *StateTest) genesis(config *chain.Config) *types.Genesis {
 		Timestamp:  t.json.Env.Timestamp,
 		Alloc:      t.json.Pre,
 	}
+	if t.json.Env.Random != nil {
+		// Post-Merge
+		genesis.Mixhash = libcommon.BigToHash(t.json.Env.Random)
+		genesis.Difficulty = big.NewInt(0)
+	}
+	return genesis
 }
 
 func rlpHash(x interface{}) (h libcommon.Hash) {

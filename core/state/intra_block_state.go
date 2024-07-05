@@ -36,7 +36,6 @@ import (
 	"github.com/erigontech/erigon/core/types/accounts"
 	"github.com/erigontech/erigon/core/vm/evmtypes"
 	"github.com/erigontech/erigon/crypto"
-	"github.com/erigontech/erigon/turbo/trie"
 )
 
 var _ evmtypes.IntraBlockState = new(IntraBlockState) // compile-time interface-check
@@ -233,6 +232,14 @@ func (sdb *IntraBlockState) GetNonce(addr libcommon.Address) uint64 {
 	}
 
 	return 0
+}
+
+func (sdb *IntraBlockState) GetStorageRoot(addr libcommon.Address) libcommon.Hash {
+	stateObject := sdb.getStateObject(addr)
+	if stateObject != nil && !stateObject.deleted {
+		return stateObject.originRootHash
+	}
+	return libcommon.Hash{}
 }
 
 // TxIndex returns the current transaction index set by Prepare.
@@ -543,8 +550,9 @@ func (sdb *IntraBlockState) createObject(addr libcommon.Address, previous *state
 	} else {
 		original = &previous.original
 	}
-	account.Root.SetBytes(trie.EmptyRoot[:]) // old storage should be ignored
-	newobj = newObject(sdb, addr, account, original)
+	rootHash := account.Root.Bytes()
+	//account.Root.SetBytes(trie.EmptyRoot[:]) // old storage should be ignored
+	newobj = newObject(sdb, addr, account, original).OriginRootHash(libcommon.BytesToHash(rootHash))
 	newobj.setNonce(0) // sets the object to dirty
 	if previous == nil {
 		sdb.journal.append(createObjectChange{account: &addr})
