@@ -58,8 +58,6 @@ System Requirements
   mount folder `<datadir>/temp` to another disk).
   Ethereum Mainnet Full node (see [Pruned Node][pruned_node]): 1.1TiB not including temp files (June 2024).
 
-* Goerli Full node (see [Pruned Node][pruned_node]): 189GB on Beta, 114GB on Alpha (April 2022).
-
 * Gnosis Chain Archive: 1.7TiB (March 2024).
   Gnosis Chain Full node (see [Pruned Node][pruned_node]): 300GiB (June 2024).
 
@@ -105,7 +103,7 @@ make erigon
 ./build/bin/erigon
 ```
 
-Default `--snapshots` for `mainnet`, `goerli`, `gnosis`, `chiado`. Other networks now have default `--snapshots=false`.
+Default `--snapshots` for `mainnet`, `gnosis`, `chiado`. Other networks now have default `--snapshots=false`.
 Increase
 download speed by flag `--torrent.download.rate=20mb`. <code>🔬 See [Downloader docs](./cmd/downloader/readme.md)</code>
 
@@ -171,7 +169,7 @@ How to start Erigon's services as separated processes, see in [docker-compose.ym
 
 ### Embedded Consensus Layer
 
-On Ethereum Mainnet, Görli, and Sepolia, the Engine API can be disabled in favour of the Erigon native Embedded
+On Ethereum Mainnet and Sepolia, the Engine API can be disabled in favour of the Erigon native Embedded
 Consensus Layer.
 If you want to use the internal Consensus Layer, run Erigon with flag `--internalcl`.
 _Warning:_ Staking (block production) is not possible with the embedded CL.
@@ -179,17 +177,17 @@ _Warning:_ Staking (block production) is not possible with the embedded CL.
 ### Testnets
 
 If you would like to give Erigon a try, but do not have spare 2TB on your drive, a good option is to start syncing one
-of the public testnets, Görli. It syncs much quicker, and does not take so much disk space:
+of the public testnets, Sepolia. It syncs much quicker, and does not take so much disk space:
 
 ```sh
 git clone --recurse-submodules -j8 https://github.com/ledgerwatch/erigon.git
 cd erigon
 make erigon
-./build/bin/erigon --datadir=<your_datadir> --chain=goerli
+./build/bin/erigon --datadir=<your_datadir> --chain=sepolia
 ```
 
 Please note the `--datadir` option that allows you to store Erigon files in a non-default location, in this example,
-in `goerli` subdirectory of the current directory. Name of the directory `--datadir` does not have to match the name of
+in `sepolia` subdirectory of the current directory. Name of the directory `--datadir` does not have to match the name of
 the chain in `--chain`.
 
 ### Block Production (PoW Miner or PoS Validator)
@@ -255,11 +253,11 @@ file can be overwritten by writing the flags directly on Erigon command line
 
 ### Example
 
-`./build/bin/erigon --config ./config.yaml --chain=goerli`
+`./build/bin/erigon --config ./config.yaml --chain=sepolia`
 
-Assuming we have `chain : "mainnet"` in our configuration file, by adding `--chain=goerli` allows the overwrite of the
+Assuming we have `chain : "mainnet"` in our configuration file, by adding `--chain=sepolia` allows the overwrite of the
 flag inside
-of the yaml configuration file and sets the chain to goerli
+of the yaml configuration file and sets the chain to sepolia
 
 ### TOML
 
