@@ -18,7 +18,6 @@ package diagnostics
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"time"
 
@@ -462,17 +461,6 @@ func SnapshotDownloadInfoFromTx(tx kv.Tx) ([]byte, error) {
 	return common.CopyBytes(bytes), nil
 }
 
-func ParseSnapshotDownloadInfo(data []byte) (info SnapshotDownloadStatistics) {
-	err := json.Unmarshal(data, &info)
-
-	if err != nil {
-		log.Warn("[Diagnostics] Failed to parse snapshot download info", "err", err)
-		return SnapshotDownloadStatistics{}
-	} else {
-		return info
-	}
-}
-
 func SnapshotIndexingInfoFromTx(tx kv.Tx) ([]byte, error) {
 	bytes, err := ReadDataFromTable(tx, kv.DiagSyncStages, SnapshotIndexingStatisticsKey)
 	if err != nil {
@@ -482,17 +470,6 @@ func SnapshotIndexingInfoFromTx(tx kv.Tx) ([]byte, error) {
 	return common.CopyBytes(bytes), nil
 }
 
-func ParseSnapshotIndexingInfo(data []byte) (info SnapshotIndexingStatistics) {
-	err := json.Unmarshal(data, &info)
-
-	if err != nil {
-		log.Warn("[Diagnostics] Failed to parse snapshot indexing info", "err", err)
-		return SnapshotIndexingStatistics{}
-	} else {
-		return info
-	}
-}
-
 func SnapshotFillDBInfoFromTx(tx kv.Tx) ([]byte, error) {
 	bytes, err := ReadDataFromTable(tx, kv.DiagSyncStages, SnapshotFillDBStatisticsKey)
 	if err != nil {
@@ -500,17 +477,6 @@ func SnapshotFillDBInfoFromTx(tx kv.Tx) ([]byte, error) {
 	}
 
 	return common.CopyBytes(bytes), nil
-}
-
-func ParseSnapshotFillDBInfo(data []byte) (info SnapshotFillDBStatistics) {
-	err := json.Unmarshal(data, &info)
-
-	if err != nil {
-		log.Warn("[Diagnostics] Failed to parse snapshot fill db info", "err", err)
-		return SnapshotFillDBStatistics{}
-	} else {
-		return info
-	}
 }
 
 func SnapshotDownloadUpdater(info SnapshotDownloadStatistics) func(tx kv.RwTx) error {

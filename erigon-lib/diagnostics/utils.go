@@ -19,8 +19,10 @@ package diagnostics
 import (
 	"encoding/json"
 	"fmt"
+	"reflect"
 
 	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/ledgerwatch/erigon-lib/log/v3"
 )
 
 func ReadDataFromTable(tx kv.Tx, table string, key []byte) ([]byte, error) {
@@ -96,4 +98,15 @@ func SecondsToHHMMString(seconds uint64) string {
 	minutes := (seconds / 60) % 60
 
 	return fmt.Sprintf("%dhrs:%dm", hours, minutes)
+}
+
+func ParseData(data []byte, v interface{}) {
+	if len(data) == 0 {
+		return
+	}
+
+	err := json.Unmarshal(data, &v)
+	if err != nil {
+		log.Warn("[Diagnostics] Failed to parse data", "data", string(data), "type", reflect.TypeOf(v))
+	}
 }
