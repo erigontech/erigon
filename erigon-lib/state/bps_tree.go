@@ -137,7 +137,7 @@ func (b *BpsTree) WarmUp(kv ArchiveGetter) error {
 	// Value cacheNodesPerM should be tuned along with M. For M=256, cacheNodesPerM=2 is optimal, while 8 could be already too much.
 	// `cacheNodesPerM = 1` means that we put only each parent node into cache, while `cacheNodesPerM = M` means that we put all nodes into cache.
 	var (
-		cacheNodesPerM   = uint64(1)
+		cacheNodesPerM   = uint64(2)
 		currentLevelSize = k
 
 		mx = make([][]Node, 0) // usually `d` but for experiments we put them all into flat list
@@ -153,7 +153,6 @@ func (b *BpsTree) WarmUp(kv ArchiveGetter) error {
 			}
 			_, key, err := b.keyCmpFunc(nil, di, kv)
 			if err != nil {
-				panic(err)
 				return err
 			}
 			nextLevel = append(nextLevel, Node{off: b.offt.Get(di), prefix: common.Copy(key), di: di})

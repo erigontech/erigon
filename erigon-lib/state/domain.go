@@ -673,6 +673,9 @@ type DomainRoTx struct {
 }
 
 func (dt *DomainRoTx) getFromFile(i int, filekey []byte) ([]byte, bool, error) {
+	s := time.Now()
+	defer mxFileReadTime.ObserveDuration(s)
+
 	g := dt.statelessGetter(i)
 	if !(UseBtree || UseBpsTree) {
 		reader := dt.statelessIdxReader(i)
