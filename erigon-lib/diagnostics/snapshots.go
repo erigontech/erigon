@@ -463,6 +463,10 @@ func SnapshotDownloadInfoFromTx(tx kv.Tx) ([]byte, error) {
 }
 
 func ParseSnapshotDownloadInfo(data []byte) (info SnapshotDownloadStatistics) {
+	if len(data) == 0 {
+		return SnapshotDownloadStatistics{}
+	}
+
 	err := json.Unmarshal(data, &info)
 
 	if err != nil {
@@ -483,6 +487,10 @@ func SnapshotIndexingInfoFromTx(tx kv.Tx) ([]byte, error) {
 }
 
 func ParseSnapshotIndexingInfo(data []byte) (info SnapshotIndexingStatistics) {
+	if len(data) == 0 {
+		return SnapshotIndexingStatistics{}
+	}
+
 	err := json.Unmarshal(data, &info)
 
 	if err != nil {
@@ -503,6 +511,10 @@ func SnapshotFillDBInfoFromTx(tx kv.Tx) ([]byte, error) {
 }
 
 func ParseSnapshotFillDBInfo(data []byte) (info SnapshotFillDBStatistics) {
+	if len(data) == 0 {
+		return SnapshotFillDBStatistics{}
+	}
+
 	err := json.Unmarshal(data, &info)
 
 	if err != nil {
