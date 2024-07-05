@@ -60,6 +60,7 @@ type TxContext struct {
 	TxHash     common.Hash
 	Origin     common.Address // Provides information for ORIGIN
 	GasPrice   *uint256.Int   // Provides information for GASPRICE
+	BlobFeeCap *uint256.Int   // Is used to zero the blobbasefee if NoBaseFee is set
 	BlobHashes []common.Hash  // Provides versioned blob hashes for BLOBHASH
 }
 
@@ -141,6 +142,8 @@ type IntraBlockState interface {
 	GetCommittedState(common.Address, *common.Hash, *uint256.Int)
 	GetState(address common.Address, slot *common.Hash, outValue *uint256.Int)
 	SetState(common.Address, *common.Hash, uint256.Int)
+
+	GetStorageRoot(addr common.Address) common.Hash
 
 	GetTransientState(addr common.Address, key common.Hash) uint256.Int
 	SetTransientState(addr common.Address, key common.Hash, value uint256.Int)
