@@ -18,7 +18,6 @@ package diagnostics
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 
 	"github.com/ledgerwatch/erigon-lib/common"
@@ -323,21 +322,6 @@ func SyncStagesFromTX(tx kv.Tx) ([]byte, error) {
 	}
 
 	return common.CopyBytes(bytes), nil
-}
-
-func ParseStagesList(data []byte) (info []SyncStage) {
-	if len(data) == 0 {
-		return []SyncStage{}
-	}
-
-	err := json.Unmarshal(data, &info)
-
-	if err != nil {
-		log.Warn("[Diagnostics] Failed to parse stages list", "err", err)
-		return []SyncStage{}
-	} else {
-		return info
-	}
 }
 
 func StagesListUpdater(info []SyncStage) func(tx kv.RwTx) error {

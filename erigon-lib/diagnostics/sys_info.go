@@ -17,8 +17,6 @@
 package diagnostics
 
 import (
-	"encoding/json"
-
 	"github.com/shirou/gopsutil/v3/cpu"
 	"github.com/shirou/gopsutil/v3/disk"
 	"github.com/shirou/gopsutil/v3/mem"
@@ -155,21 +153,6 @@ func ReadRAMInfoFromTx(tx kv.Tx) ([]byte, error) {
 	return common.CopyBytes(bytes), nil
 }
 
-func ParseRamInfo(data []byte) (info RAMInfo) {
-	if len(data) == 0 {
-		return RAMInfo{}
-	}
-
-	err := json.Unmarshal(data, &info)
-
-	if err != nil {
-		log.Warn("[Diagnostics] Failed to parse RAM info", "err", err)
-		return RAMInfo{}
-	} else {
-		return info
-	}
-}
-
 func ReadCPUInfoFromTx(tx kv.Tx) ([]byte, error) {
 	bytes, err := ReadDataFromTable(tx, kv.DiagSystemInfo, SystemCpuInfoKey)
 	if err != nil {
@@ -179,21 +162,6 @@ func ReadCPUInfoFromTx(tx kv.Tx) ([]byte, error) {
 	return common.CopyBytes(bytes), nil
 }
 
-func ParseCPUInfo(data []byte) (info CPUInfo) {
-	if len(data) == 0 {
-		return CPUInfo{}
-	}
-
-	err := json.Unmarshal(data, &info)
-
-	if err != nil {
-		log.Warn("[Diagnostics] Failed to parse CPU info", "err", err)
-		return CPUInfo{}
-	} else {
-		return info
-	}
-}
-
 func ReadDiskInfoFromTx(tx kv.Tx) ([]byte, error) {
 	bytes, err := ReadDataFromTable(tx, kv.DiagSystemInfo, SystemDiskInfoKey)
 	if err != nil {
@@ -201,21 +169,6 @@ func ReadDiskInfoFromTx(tx kv.Tx) ([]byte, error) {
 	}
 
 	return common.CopyBytes(bytes), nil
-}
-
-func ParseDiskInfo(data []byte) (info DiskInfo) {
-	if len(data) == 0 {
-		return DiskInfo{}
-	}
-
-	err := json.Unmarshal(data, &info)
-
-	if err != nil {
-		log.Warn("[Diagnostics] Failed to parse Disk info", "err", err)
-		return DiskInfo{}
-	} else {
-		return info
-	}
 }
 
 func RAMInfoUpdater(info RAMInfo) func(tx kv.RwTx) error {

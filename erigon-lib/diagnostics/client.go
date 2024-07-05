@@ -199,15 +199,23 @@ func ReadSavedData(db kv.RoDB) (hinfo HardwareInfo, ssinfo []SyncStage, snpdwl S
 		return HardwareInfo{}, []SyncStage{}, SnapshotDownloadStatistics{}, SnapshotIndexingStatistics{}, SnapshotFillDBStatistics{}
 	}
 
+	var ramInfo RAMInfo
+	var cpuInfo CPUInfo
+	var diskInfo DiskInfo
+	ParseData(ramBytes, &ramInfo)
+	ParseData(cpuBytes, &cpuInfo)
+	ParseData(diskBytes, &diskInfo)
+
 	hinfo = HardwareInfo{
-		RAM:  ParseRamInfo(ramBytes),
-		CPU:  ParseCPUInfo(cpuBytes),
-		Disk: ParseDiskInfo(diskBytes),
+		RAM:  ramInfo,
+		CPU:  cpuInfo,
+		Disk: diskInfo,
 	}
-	ssinfo = ParseStagesList(ssinfoData)
-	snpdwl = ParseSnapshotDownloadInfo(snpdwlData)
-	snpidx = ParseSnapshotIndexingInfo(snpidxData)
-	snpfd = ParseSnapshotFillDBInfo(snpfdData)
+
+	ParseData(ssinfoData, &ssinfo)
+	ParseData(snpdwlData, &snpdwl)
+	ParseData(snpidxData, &snpidx)
+	ParseData(snpfdData, &snpfd)
 
 	return hinfo, ssinfo, snpdwl, snpidx, snpfd
 }
