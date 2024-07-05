@@ -386,6 +386,7 @@ func testReorg(t *testing.T, first, second []int64, td int64) {
 			t.Fatal(err)
 		}
 	}
+
 	m.ReceiveWg.Wait()
 
 	// Make sure the chain total difficulty is the correct one
