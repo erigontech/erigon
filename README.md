@@ -793,6 +793,10 @@ Supported networks: all (except Mumbai).
 - can symlink/mount latest state to fast drive and history to cheap drive
 - ArchiveNode is default. FullNode same as in E2: --prune=hrtc
 
+### Known Problems of E3: 
+
+- don't `rm -rf downloader` - it will cause re-downloading of files: https://github.com/ledgerwatch/erigon/issues/10976
+
 ### E3 datadir structure
 
 ```sh
