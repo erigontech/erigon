@@ -348,18 +348,6 @@ func SepoliaGenesisBlock() *types.Genesis {
 	}
 }
 
-// GoerliGenesisBlock returns the Görli network genesis block.
-func GoerliGenesisBlock() *types.Genesis {
-	return &types.Genesis{
-		Config:     params.GoerliChainConfig,
-		Timestamp:  1548854791,
-		ExtraData:  hexutil.MustDecode("0x22466c6578692069732061207468696e6722202d204166726900000000000000e0a2bd4258d2768837baa26a28fe71dc079f84c70000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000"),
-		GasLimit:   10485760,
-		Difficulty: big.NewInt(1),
-		Alloc:      readPrealloc("allocs/goerli.json"),
-	}
-}
-
 // MumbaiGenesisBlock returns the Amoy network genesis block.
 func MumbaiGenesisBlock() *types.Genesis {
 	return &types.Genesis{
@@ -681,8 +669,6 @@ func GenesisBlockByChainName(chain string) *types.Genesis {
 		return HoleskyGenesisBlock()
 	case networkname.SepoliaChainName:
 		return SepoliaGenesisBlock()
-	case networkname.GoerliChainName:
-		return GoerliGenesisBlock()
 	case networkname.MumbaiChainName:
 		return MumbaiGenesisBlock()
 	case networkname.AmoyChainName:

@@ -55,7 +55,7 @@ const (
 // NodeInfo represents a short summary of the `eth` sub-protocol metadata
 // known about the host peer.
 type NodeInfo struct {
-	Network    uint64         `json:"network"`    // Ethereum network ID (1=mainnet, 5=Görli, 11155111=Sepolia)
+	Network    uint64         `json:"network"`    // Ethereum network ID (1=mainnet, 11155111=Sepolia)
 	Difficulty *big.Int       `json:"difficulty"` // Total difficulty of the host's blockchain
 	Genesis    libcommon.Hash `json:"genesis"`    // SHA3 hash of the host's genesis block
 	Config     *chain.Config  `json:"config"`     // ChainDB configuration for the fork rules
