@@ -223,6 +223,7 @@ func AddLogsToReceipts(db kv.Tx, receipts types.Receipts, block *types.Block, ex
 		}
 		logs := exec.GetLogs(i, txs[i])
 		receipts[i].Logs = logs
+		txNum++
 	}
 	return nil
 }
