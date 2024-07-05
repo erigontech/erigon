@@ -83,7 +83,7 @@ jobs:
           --repo erigon \
           --commit $(git rev-parse HEAD) \
           --branch ${{ github.ref_name }} \
-          --test_name sync-from-scratch \
+          --test_name sync-from-scratch-minimal-node \
           --chain $CHAIN \
           --runner ${{ runner.name }} \
           --outcome $TEST_RESULT \
