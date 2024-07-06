@@ -61,7 +61,7 @@ jobs:
         id: test_step
         run: |
           set +e # Disable exit on error
-          commit=$(git -C ${{runner.workspace}}/silkworm rev-parse --short HEAD)
+          commit=$(git -C ${{runner.workspace}}/erigon rev-parse --short HEAD)
 
           cd ${{ runner.workspace }}/rpc-tests/integration
           rm -rf ./mainnet/results/
