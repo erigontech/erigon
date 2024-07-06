@@ -504,9 +504,6 @@ func (g *GossipManager) Start(ctx context.Context) {
 			case <-checkingInterval.C:
 				g.subscriptions.Range(func(key, value any) bool {
 					sub := value.(*GossipSubscription)
-					if sub.sub == nil {
-						return true
-					}
 					sub.checkIfTopicNeedsToEnabledOrDisabled()
 					return true
 				})
