@@ -22,7 +22,6 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
-	"github.com/ledgerwatch/erigon/cmd/state/exec3"
 	"golang.org/x/sync/semaphore"
 	"math/rand"
 	"sort"
@@ -716,9 +715,7 @@ func (cs *MultiClient) getReceipts66(ctx context.Context, inreq *proto_sentry.In
 		return err
 	}
 	defer tx.Rollback()
-	ttx := tx.(kv.TemporalTx)
-	exec := exec3.NewTraceWorker(ttx, cs.ChainConfig, cs.Engine, cs.blockReader, nil)
-	receipts, err := eth.AnswerGetReceiptsQuery(cs.blockReader, tx, query.GetReceiptsPacket, exec)
+	receipts, err := eth.AnswerGetReceiptsQuery(ctx, cs.blockReader, tx, query.GetReceiptsPacket, cs.ChainConfig, cs.Engine)
 	if err != nil {
 		return err
 	}

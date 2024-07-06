@@ -22,11 +22,15 @@ package eth
 import (
 	"context"
 	"fmt"
+	"github.com/ledgerwatch/erigon-lib/chain"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon-lib/kv/rawdbv3"
 	"github.com/ledgerwatch/erigon-lib/log/v3"
-	"github.com/ledgerwatch/erigon/cmd/state/exec3"
+	"github.com/ledgerwatch/erigon/consensus"
+	"github.com/ledgerwatch/erigon/core"
+	"github.com/ledgerwatch/erigon/core/state"
+	"github.com/ledgerwatch/erigon/core/vm"
+	"github.com/ledgerwatch/erigon/turbo/transactions"
 
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/core/rawdb"
@@ -161,12 +165,13 @@ func AnswerGetBlockBodiesQuery(db kv.Tx, query GetBlockBodiesPacket, blockReader
 	return bodies
 }
 
-func AnswerGetReceiptsQuery(br services.FullBlockReader, db kv.Tx, query GetReceiptsPacket, exec *exec3.TraceWorker) ([]rlp.RawValue, error) { //nolint:unparam
+func AnswerGetReceiptsQuery(ctx context.Context, br services.FullBlockReader, db kv.Tx, query GetReceiptsPacket, chainConfing *chain.Config, engine consensus.Engine) ([]rlp.RawValue, error) { //nolint:unparam
 	// Gather state data until the fetch or network limits is reached
 	var (
 		bytes    int
 		receipts []rlp.RawValue
 	)
+
 	for lookups, hash := range query {
 		if bytes >= softResponseLimit || len(receipts) >= maxReceiptsServe ||
 			lookups >= 2*maxReceiptsServe {
@@ -177,24 +182,15 @@ func AnswerGetReceiptsQuery(br services.FullBlockReader, db kv.Tx, query GetRece
 			return nil, nil
 		}
 		// Retrieve the requested block's receipts
-		b, s, err := br.BlockWithSenders(context.Background(), db, hash, *number)
+		b, _, err := br.BlockWithSenders(context.Background(), db, hash, *number)
 		if err != nil {
 			return nil, err
 		}
 		if b == nil {
 			return nil, nil
 		}
-		results := rawdb.ReadReceipts(db, b, s)
-		if results == nil {
-			header, err := rawdb.ReadHeaderByHash(db, hash)
-			if err != nil {
-				return nil, err
-			}
-			if header == nil || header.ReceiptHash != types.EmptyRootHash {
-				continue
-			}
-		}
-		err = AddLogsToReceipts(db, results, b, exec)
+
+		results, err := MakeReceipts(ctx, db, b, br, chainConfing, engine)
 		if err != nil {
 			return nil, err
 		}
@@ -210,20 +206,37 @@ func AnswerGetReceiptsQuery(br services.FullBlockReader, db kv.Tx, query GetRece
 	return receipts, nil
 }
 
-func AddLogsToReceipts(db kv.Tx, receipts types.Receipts, block *types.Block, exec *exec3.TraceWorker) error {
-	txs := block.Transactions()
-	txNum, err := rawdbv3.TxNums.Min(db, block.NumberU64())
+func MakeReceipts(ctx context.Context, db kv.Tx, block *types.Block,
+	br services.FullBlockReader, chainConfig *chain.Config, engine consensus.Engine) (receipts types.Receipts, err error) {
+	_, _, _, ibs, _, err := transactions.ComputeTxEnv(ctx, engine, block, chainConfig, br, db, 0)
 	if err != nil {
-		return err
+		return nil, err
 	}
-	for i := range receipts {
-		_, err = exec.ExecTxn(txNum, i, txs[i])
-		if err != nil {
-			return err
+	txs := block.Transactions()
+	getHeader := func(hash libcommon.Hash, number uint64) *types.Header {
+		h, e := br.Header(ctx, db, hash, number)
+		if e != nil {
+			log.Error("getHeader error", "number", number, "hash", hash, "err", e)
 		}
-		logs := exec.GetLogs(i, txs[i])
-		receipts[i].Logs = logs
-		txNum++
+		return h
 	}
-	return nil
+	header := block.Header()
+	usedGas := new(uint64)
+	usedBlobGas := new(uint64)
+	gp := new(core.GasPool).AddGas(block.GasLimit()).AddBlobGas(chainConfig.GetMaxBlobGasPerBlock())
+
+	noopWriter := state.NewNoopWriter()
+
+	receipts = make(types.Receipts, len(block.Transactions()))
+
+	for i := range txs {
+		ibs.SetTxContext(txs[i].Hash(), block.Hash(), i)
+		receipt, _, err := core.ApplyTransaction(chainConfig, core.GetHashFn(header, getHeader), engine, nil, gp, ibs, noopWriter, header, txs[i], usedGas, usedBlobGas, vm.Config{})
+		if err != nil {
+			return nil, err
+		}
+		receipt.BlockHash = block.Hash()
+		receipts[i] = receipt
+	}
+	return receipts, nil
 }
