@@ -519,7 +519,7 @@ type GossipSubscription struct {
 func (sub *GossipSubscription) Listen() {
 	go func() {
 		var err error
-		checkingInterval := time.NewTicker(100 * time.Millisecond)
+		checkingInterval := time.NewTicker(5 * time.Millisecond)
 		for {
 			select {
 			case <-sub.ctx.Done():
