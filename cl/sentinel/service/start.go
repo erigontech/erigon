@@ -136,8 +136,6 @@ func createSentinel(
 			logger.Error("[Sentinel] failed to start sentinel", "err", err)
 		}
 	}
-	// Start the gossip manager
-	sent.GossipManager().Start(sent.Context())
 	return sent, nil
 }
 

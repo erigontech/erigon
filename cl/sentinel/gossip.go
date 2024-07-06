@@ -249,10 +249,6 @@ func (s *Sentinel) SubscribeGossip(topic GossipTopic, expiration time.Time, opts
 	return sub, nil
 }
 
-func (s *Sentinel) Context() context.Context {
-	return s.ctx
-}
-
 func (s *Sentinel) Unsubscribe(topic GossipTopic, opts ...pubsub.TopicOpt) (err error) {
 	digest, err := s.ethClock.CurrentForkDigest()
 	if err != nil {
