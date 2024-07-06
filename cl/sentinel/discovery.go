@@ -118,11 +118,10 @@ func (s *Sentinel) listenForPeers() {
 			continue
 		}
 
-		go func(peerInfo *peer.AddrInfo) {
-			if err := s.ConnectWithPeer(s.ctx, *peerInfo); err != nil {
-				log.Trace("[Sentinel] Could not connect with peer", "err", err)
-			}
-		}(peerInfo)
+		if err := s.ConnectWithPeer(s.ctx, *peerInfo); err != nil {
+			log.Trace("[Sentinel] Could not connect with peer", "err", err)
+		}
+
 	}
 }
 
