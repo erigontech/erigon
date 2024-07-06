@@ -39,7 +39,7 @@ const (
 
 const (
 	validatorSetCapacityMultiplier = 1.01 // allocate 20% to the validator set when re-allocation is needed.
-	validatorTreeCacheGroupLayer   = 4    // It will cache group validatorTreeCacheGroupLayer^2 accordingly
+	validatorTreeCacheGroupLayer   = 3    // It will cache group validatorTreeCacheGroupLayer^2 accordingly
 )
 
 // This is all stuff used by phase0 state transition. It makes many operations faster.
