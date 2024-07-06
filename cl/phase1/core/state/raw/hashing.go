@@ -199,7 +199,7 @@ func (b *BeaconState) computeDirtyLeaves() error {
 		}
 		b.updateLeaf(BalancesLeafIndex, root)
 	}
-	log.Trace("Balances hashing", "elapsed", time.Since(begin))
+	log.Debug("Balances hashing", "elapsed", time.Since(begin))
 
 	begin = time.Now()
 	// Field(13): RandaoMixes

@@ -20,7 +20,6 @@ import (
 	"context"
 	"fmt"
 	"net"
-	"strings"
 	"time"
 
 	"github.com/ledgerwatch/erigon/cl/gossip"
@@ -61,10 +60,10 @@ func generateSubnetsTopics(template string, maxIds int) []sentinel.GossipTopic {
 }
 
 func getExpirationForTopic(topic string) time.Time {
-	if strings.Contains(topic, "beacon_attestation") ||
-		(strings.Contains(topic, "sync_committee_") && !strings.Contains(topic, gossip.TopicNameSyncCommitteeContributionAndProof)) {
-		return time.Unix(0, 0)
-	}
+	// if strings.Contains(topic, "beacon_attestation") ||
+	// 	(strings.Contains(topic, "sync_committee_") && !strings.Contains(topic, gossip.TopicNameSyncCommitteeContributionAndProof)) {
+	// 	return time.Unix(0, 0)
+	// }
 
 	return time.Unix(0, math.MaxInt64)
 }
