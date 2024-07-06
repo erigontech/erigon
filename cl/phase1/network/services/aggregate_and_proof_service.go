@@ -69,7 +69,7 @@ func NewAggregateAndProofService(
 		opPool:            opPool,
 		test:              test,
 	}
-	go a.loop(ctx)
+	//go a.loop(ctx)
 	return a
 }
 

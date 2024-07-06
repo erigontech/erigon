@@ -131,13 +131,13 @@ func createSentinel(
 		}
 
 		// now lets separately connect to the gossip topics. this joins the room
-		subscriber, err := sent.SubscribeGossip(v, getExpirationForTopic(v.Name)) // Listen forever.
+		_, err := sent.SubscribeGossip(v, getExpirationForTopic(v.Name)) // Listen forever.
 		if err != nil {
 			logger.Error("[Sentinel] failed to start sentinel", "err", err)
 		}
-		// actually start the subscription, aka listening and sending packets to the sentinel recv channel
-		subscriber.Listen()
 	}
+	// Start the gossip manager
+	sent.GossipManager().Start(sent.Context())
 	return sent, nil
 }
 

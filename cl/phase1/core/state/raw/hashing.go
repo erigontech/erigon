@@ -17,9 +17,7 @@
 package raw
 
 import (
-	"fmt"
 	"sync"
-	"time"
 
 	"github.com/ledgerwatch/erigon-lib/common"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
@@ -70,11 +68,9 @@ func (b *BeaconState) HashSSZ() (out [32]byte, err error) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 
-	start := time.Now()
 	if err = b.computeDirtyLeaves(); err != nil {
 		return [32]byte{}, err
 	}
-	fmt.Println(time.Since(start))
 
 	// for i := 0; i < len(b.leaves); i += 32 {
 	// 	fmt.Println(i/32, libcommon.BytesToHash(b.leaves[i:i+32]))
@@ -171,29 +167,17 @@ func (b *BeaconState) computeDirtyLeaves() error {
 
 	// Field(5): BlockRoots
 	if b.isLeafDirty(BlockRootsLeafIndex) {
-		root, err := b.blockRoots.HashSSZ()
-		if err != nil {
-			return err
-		}
-		b.updateLeaf(BlockRootsLeafIndex, root)
+		parallelHasher.add(BlockRootsLeafIndex, b.blockRoots)
 	}
 
 	// Field(6): StateRoots
 	if b.isLeafDirty(StateRootsLeafIndex) {
-		root, err := b.stateRoots.HashSSZ()
-		if err != nil {
-			return err
-		}
-		b.updateLeaf(StateRootsLeafIndex, root)
+		parallelHasher.add(StateRootsLeafIndex, b.stateRoots)
 	}
 
 	// Field(7): HistoricalRoots
 	if b.isLeafDirty(HistoricalRootsLeafIndex) {
-		root, err := b.historicalRoots.HashSSZ()
-		if err != nil {
-			return err
-		}
-		b.updateLeaf(HistoricalRootsLeafIndex, root)
+		parallelHasher.add(HistoricalRootsLeafIndex, b.historicalRoots)
 	}
 
 	// Field(8): Eth1Data
@@ -230,7 +214,6 @@ func (b *BeaconState) computeDirtyLeaves() error {
 	}
 
 	// Field(13): RandaoMixes
-
 	if b.isLeafDirty(RandaoMixesLeafIndex) {
 		parallelHasher.add(RandaoMixesLeafIndex, b.randaoMixes)
 	}
@@ -319,8 +302,8 @@ func (b *BeaconState) computeDirtyLeaves() error {
 		b.updateLeaf(NextSyncCommitteeLeafIndex, committeeRoot)
 	}
 
-	parallelHasher.run(b)
 	if b.version < clparams.BellatrixVersion {
+		parallelHasher.run(b)
 		return nil
 	}
 	// Field(24): LatestExecutionPayloadHeader
@@ -333,6 +316,7 @@ func (b *BeaconState) computeDirtyLeaves() error {
 	}
 
 	if b.version < clparams.CapellaVersion {
+		parallelHasher.run(b)
 		return nil
 	}
 
@@ -348,12 +332,9 @@ func (b *BeaconState) computeDirtyLeaves() error {
 
 	// Field(27): HistoricalSummaries
 	if b.isLeafDirty(HistoricalSummariesLeafIndex) {
-		root, err := b.historicalSummaries.HashSSZ()
-		if err != nil {
-			return err
-		}
-		b.updateLeaf(HistoricalSummariesLeafIndex, root)
+		parallelHasher.add(HistoricalSummariesLeafIndex, b.historicalSummaries)
 	}
+	parallelHasher.run(b)
 
 	return nil
 }
