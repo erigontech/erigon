@@ -29,7 +29,7 @@ import (
 	"github.com/ledgerwatch/erigon/cl/utils"
 )
 
-const treeCacheDepthUint64Slice = 0
+const treeCacheDepthUint64Slice = 3
 
 func convertDepthToChunkSize(d int) int {
 	return (1 << d) // just power of 2
