@@ -27,6 +27,7 @@ import (
 )
 
 type hashVector struct {
+	*merkle_tree.MerkleTree
 	u *hashList
 }
 
@@ -102,11 +103,20 @@ func (h *hashVector) Get(index int) (out libcommon.Hash) {
 }
 
 func (h *hashVector) Set(index int, newValue libcommon.Hash) {
+	if h.MerkleTree != nil {
+		h.MerkleTree.MarkLeafAsDirty(index)
+	}
 	h.u.Set(index, newValue)
 }
 
 func (h *hashVector) HashSSZ() ([32]byte, error) {
-	return h.u.hashVectorSSZ()
+	if h.MerkleTree == nil {
+		h.MerkleTree = &merkle_tree.MerkleTree{}
+		h.MerkleTree.Initialize(h.u.l, 6, func(idx int, out []byte) {
+			copy(out, h.u.u[idx*length.Hash:(idx+1)*length.Hash])
+		})
+	}
+	return h.ComputeRoot(), nil
 }
 
 func (h *hashVector) Range(fn func(int, libcommon.Hash, int) bool) {
