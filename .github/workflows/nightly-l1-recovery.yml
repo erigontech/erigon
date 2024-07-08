@@ -23,4 +23,4 @@ jobs:
 
       - name: Run Docker Compose
         working-directory: ./zk/tests/nightly-l1-recovery
-        run: docker compose -f docker-compose-nightly.yml up --build --quiet --exit-code-from=block-checker
+        run: docker compose build --quiet && docker compose up --exit-code-from=block-checker

@@ -1,0 +1,33 @@
+name: Nightly - RPC Batch Compare
+
+on:
+  schedule:
+    - cron: '0 23 * * *'
+  workflow_dispatch:
+
+
+jobs:
+  run-rpc-batch-compare:
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    strategy:
+      matrix:
+        include:
+          - name: bali
+            legacy: "https://rpc.zkevm-internal.com"
+            erigon: "https://rpc.internal.zkevm-rpc.com"
+          - name: integration5
+            legacy: "http://34.175.214.161:8505"
+            erigon: "http://34.175.214.161:8500"
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v3
+
+      - name: Set up Go
+        uses: actions/setup-go@v3
+        with:
+          go-version: '1.20'
+
+      - name: Run RPC Batch Compare
+        run: go run ./zk/debug_tools/rpc-batch-compare -erigon="${{ matrix.erigon }}" -legacy="${{ matrix.legacy }}" -skip=100 -offset=1
