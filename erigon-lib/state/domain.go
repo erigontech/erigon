@@ -181,13 +181,11 @@ func (d *Domain) OpenList(idxFiles, histFiles, domainFiles []string) error {
 }
 
 func (d *Domain) openList(names []string) error {
-	defer d.reCalcVisibleFiles()
 	d.closeWhatNotInList(names)
 	d.scanStateFiles(names)
 	if err := d.openFiles(); err != nil {
 		return fmt.Errorf("Domain.openList: %w, %s", err, d.filenameBase)
 	}
-	d.reCalcVisibleFiles()
 	d.protectFromHistoryFilesAheadOfDomainFiles()
 	return nil
 }

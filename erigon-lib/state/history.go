@@ -154,7 +154,6 @@ func (h *History) OpenList(idxFiles, histNames []string) error {
 
 }
 func (h *History) openList(fNames []string) error {
-	defer h.reCalcVisibleFiles()
 	h.closeWhatNotInList(fNames)
 	h.scanStateFiles(fNames)
 	if err := h.openFiles(); err != nil {
