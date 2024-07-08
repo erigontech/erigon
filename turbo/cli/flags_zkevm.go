@@ -174,6 +174,14 @@ func ApplyFlagsForZkConfig(ctx *cli.Context, cfg *ethconfig.Config) {
 		if cfg.ExecutorStrictMode && !cfg.HasExecutors() {
 			panic("You must set executor urls when running in executor strict mode (zkevm.executor-strict)")
 		}
+
+		if cfg.ExecutorStrictMode && cfg.DisableVirtualCounters {
+			panic("You cannot disable virtual counters when running in strict mode")
+		}
+
+		if len(cfg.ExecutorUrls) > 0 && cfg.ExecutorUrls[0] != "" && cfg.DisableVirtualCounters {
+			panic("You cannot disable virtual counters when running with executors")
+		}
 	}
 
 	checkFlag(utils.AddressSequencerFlag.Name, cfg.AddressSequencer)

@@ -581,7 +581,7 @@ func SpawnSequencingStage(
 		return err
 	}
 
-	log.Info("counters consumed", "counts", counters.UsedAsString())
+	log.Info(fmt.Sprintf("[%s] counters consumed", logPrefix), "batch", thisBatch, "counts", counters.UsedAsString())
 	if err = sdb.hermezDb.WriteBatchCounters(thisBatch, counters.UsedAsMap()); err != nil {
 		return err
 	}
