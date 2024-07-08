@@ -22,6 +22,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"maps"
 	"math/big"
 	"os"
 	"strings"
@@ -44,11 +45,7 @@ type Storage map[libcommon.Hash]libcommon.Hash
 
 // Copy duplicates the current storage.
 func (s Storage) Copy() Storage {
-	cpy := make(Storage)
-	for key, value := range s {
-		cpy[key] = value
-	}
-	return cpy
+	return maps.Clone(s)
 }
 
 // LogConfig are the configuration options for structured logger the EVM
