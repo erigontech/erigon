@@ -1,3 +1,19 @@
+// Copyright 2024 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+
 package state
 
 import (
@@ -87,9 +103,9 @@ func TestFindMergeRangeCornerCases(t *testing.T) {
 		hc := h.BeginFilesRo()
 		defer hc.Close()
 		r := hc.findMergeRange(4, 32)
-		assert.True(t, r.history)
-		assert.Equal(t, 2, int(r.historyEndTxNum))
-		assert.Equal(t, 2, int(r.indexEndTxNum))
+		assert.True(t, r.history.needMerge)
+		assert.Equal(t, 2, int(r.history.to))
+		assert.Equal(t, 2, int(r.index.to))
 	})
 	t.Run("not equal amount of files", func(t *testing.T) {
 		ii := emptyTestInvertedIndex(1)
@@ -122,11 +138,11 @@ func TestFindMergeRangeCornerCases(t *testing.T) {
 		defer hc.Close()
 
 		r := hc.findMergeRange(4, 32)
-		assert.True(t, r.index)
-		assert.True(t, r.history)
-		assert.Equal(t, 0, int(r.historyStartTxNum))
-		assert.Equal(t, 2, int(r.historyEndTxNum))
-		assert.Equal(t, 2, int(r.indexEndTxNum))
+		assert.True(t, r.index.needMerge)
+		assert.True(t, r.history.needMerge)
+		assert.Equal(t, 0, int(r.history.from))
+		assert.Equal(t, 2, int(r.history.to))
+		assert.Equal(t, 2, int(r.index.to))
 	})
 	t.Run("idx merged, history not yet", func(t *testing.T) {
 		ii := emptyTestInvertedIndex(1)
@@ -158,10 +174,10 @@ func TestFindMergeRangeCornerCases(t *testing.T) {
 		defer hc.Close()
 
 		r := hc.findMergeRange(4, 32)
-		assert.True(t, r.history)
-		assert.False(t, r.index)
-		assert.Equal(t, 0, int(r.historyStartTxNum))
-		assert.Equal(t, 2, int(r.historyEndTxNum))
+		assert.True(t, r.history.needMerge)
+		assert.False(t, r.index.needMerge)
+		assert.Equal(t, 0, int(r.history.from))
+		assert.Equal(t, 2, int(r.history.to))
 	})
 	t.Run("idx merged, history not yet, 2", func(t *testing.T) {
 		ii := emptyTestInvertedIndex(1)
@@ -197,9 +213,9 @@ func TestFindMergeRangeCornerCases(t *testing.T) {
 		defer hc.Close()
 
 		r := hc.findMergeRange(4, 32)
-		assert.False(t, r.index)
-		assert.True(t, r.history)
-		assert.Equal(t, 2, int(r.historyEndTxNum))
+		assert.False(t, r.index.needMerge)
+		assert.True(t, r.history.needMerge)
+		assert.Equal(t, 2, int(r.history.to))
 		idxFiles, histFiles, err := hc.staticFilesInRange(r)
 		require.NoError(t, err)
 		require.Equal(t, 2, len(idxFiles))
@@ -235,9 +251,9 @@ func TestFindMergeRangeCornerCases(t *testing.T) {
 		defer hc.Close()
 
 		r := hc.findMergeRange(4, 32)
-		assert.False(t, r.index)
-		assert.True(t, r.history)
-		assert.Equal(t, 2, int(r.historyEndTxNum))
+		assert.False(t, r.index.needMerge)
+		assert.True(t, r.history.needMerge)
+		assert.Equal(t, 2, int(r.history.to))
 		_, _, err := hc.staticFilesInRange(r)
 		require.Error(t, err)
 	})
@@ -273,9 +289,9 @@ func TestFindMergeRangeCornerCases(t *testing.T) {
 		defer hc.Close()
 
 		r := hc.findMergeRange(4, 32)
-		assert.True(t, r.index)
-		assert.False(t, r.history)
-		assert.Equal(t, uint64(2), r.indexEndTxNum)
+		assert.True(t, r.index.needMerge)
+		assert.False(t, r.history.needMerge)
+		assert.Equal(t, uint64(2), r.index.to)
 		idxFiles, histFiles, err := hc.staticFilesInRange(r)
 		require.NoError(t, err)
 		require.Equal(t, 2, len(idxFiles))
@@ -316,9 +332,9 @@ func TestFindMergeRangeCornerCases(t *testing.T) {
 		defer hc.Close()
 
 		r := hc.findMergeRange(4, 32)
-		assert.True(t, r.index)
-		assert.True(t, r.history)
-		assert.Equal(t, 4, int(r.indexEndTxNum))
+		assert.True(t, r.index.needMerge)
+		assert.True(t, r.history.needMerge)
+		assert.Equal(t, 4, int(r.index.to))
 		idxFiles, histFiles, err := hc.staticFilesInRange(r)
 		require.NoError(t, err)
 		require.Equal(t, 3, len(idxFiles))
@@ -356,9 +372,9 @@ func TestFindMergeRangeCornerCases(t *testing.T) {
 		defer hc.Close()
 
 		r := hc.findMergeRange(4, 32)
-		assert.False(t, r.index)
-		assert.True(t, r.history)
-		assert.Equal(t, 2, int(r.historyEndTxNum))
+		assert.False(t, r.index.needMerge)
+		assert.True(t, r.history.needMerge)
+		assert.Equal(t, 2, int(r.history.to))
 		idxFiles, histFiles, err := hc.staticFilesInRange(r)
 		require.NoError(t, err)
 		require.Equal(t, 2, len(idxFiles))
@@ -395,8 +411,8 @@ func TestFindMergeRangeCornerCases(t *testing.T) {
 		hc := h.BeginFilesRo()
 		defer hc.Close()
 		r := hc.findMergeRange(4, 32)
-		assert.False(t, r.index)
-		assert.False(t, r.history)
+		assert.False(t, r.index.needMerge)
+		assert.False(t, r.history.needMerge)
 	})
 	t.Run("idx merged, but garbage left2", func(t *testing.T) {
 		ii := emptyTestInvertedIndex(1)

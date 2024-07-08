@@ -62,10 +62,6 @@ jobs:
           skip-build-cache: true
           args: --help
 
-      - name: Install go-licenses
-        if: runner.os == 'Linux'
-        run: cd erigon-lib && make lint-licenses-deps
-
       - name: Lint
         if: runner.os == 'Linux'
         run: make lint

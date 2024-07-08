@@ -1,3 +1,19 @@
+// Copyright 2024 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+
 package handler
 
 import (
@@ -154,7 +170,7 @@ func (s validatorStatus) String() string {
 	}
 }
 
-const maxValidatorsLookupFilter = 32
+const maxValidatorsLookupFilter = 128
 
 func parseStatuses(s []string) ([]validatorStatus, error) {
 	seenAlready := make(map[validatorStatus]struct{})
@@ -523,6 +539,7 @@ func (d directString) MarshalJSON() ([]byte, error) {
 }
 
 func responseValidators(w http.ResponseWriter, filterIndicies []uint64, filterStatuses []validatorStatus, stateEpoch uint64, balances solid.Uint64ListSSZ, validators *solid.ValidatorSet, finalized bool, optimistic bool) {
+	// todo: refactor this function
 	b := stringsBuilderPool.Get().(*strings.Builder)
 	defer stringsBuilderPool.Put(b)
 	b.Reset()
@@ -576,14 +593,12 @@ func responseValidators(w http.ResponseWriter, filterIndicies []uint64, filterSt
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-
 	_, err = b.WriteString("]}\n")
 
+	w.Header().Set("Content-Type", "application/json")
 	if _, err := w.Write([]byte(b.String())); err != nil {
 		log.Error("failed to write response", "err", err)
 	}
-	return
-
 }
 
 func responseValidator(idx uint64, stateEpoch uint64, balances solid.Uint64ListSSZ, validators *solid.ValidatorSet, finalized bool, optimistic bool) (*beaconhttp.BeaconResponse, error) {
@@ -646,8 +661,9 @@ func responseValidatorsBalances(w http.ResponseWriter, filterIndicies []uint64, 
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-
 	_, err = b.WriteString("]}\n")
+
+	w.Header().Set("Content-Type", "application/json")
 	if _, err := w.Write([]byte(b.String())); err != nil {
 		log.Error("failed to write response", "err", err)
 	}
@@ -685,7 +701,7 @@ func (a *ApiHandler) GetEthV1ValidatorAggregateAttestation(w http.ResponseWriter
 	attDataRootHash := libcommon.HexToHash(attDataRoot)
 	att := a.aggregatePool.GetAggregatationByRoot(attDataRootHash)
 	if att == nil {
-		return nil, beaconhttp.NewEndpointError(http.StatusNotFound, fmt.Errorf("attestation not found. attestation_data_root"))
+		return nil, beaconhttp.NewEndpointError(http.StatusNotFound, fmt.Errorf("attestation %s not found", attDataRoot))
 	}
 	if slotNum != att.AttestantionData().Slot() {
 		log.Debug("attestation slot does not match", "attestation_data_root", attDataRoot, "slot_inquire", slot)

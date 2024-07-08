@@ -1,3 +1,19 @@
+// Copyright 2024 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+
 package bor
 
 import (
@@ -47,6 +63,7 @@ import (
 	"github.com/ledgerwatch/erigon/polygon/bor/finality/whitelist"
 	"github.com/ledgerwatch/erigon/polygon/bor/statefull"
 	"github.com/ledgerwatch/erigon/polygon/bor/valset"
+	"github.com/ledgerwatch/erigon/polygon/bridge"
 	"github.com/ledgerwatch/erigon/polygon/heimdall"
 	"github.com/ledgerwatch/erigon/rlp"
 	"github.com/ledgerwatch/erigon/rpc"
@@ -312,6 +329,7 @@ type Bor struct {
 	frozenSnapshotsInit sync.Once
 	rootHashCache       *lru.ARCCache[string, string]
 	headerProgress      HeaderProgress
+	polygonBridge       bridge.PolygonBridge
 }
 
 type signer struct {
@@ -328,6 +346,7 @@ func New(
 	heimdallClient heimdall.HeimdallClient,
 	genesisContracts GenesisContracts,
 	logger log.Logger,
+	polygonBridge bridge.Service,
 ) *Bor {
 	// get bor config
 	borConfig := chainConfig.Bor.(*borcfg.BorConfig)
@@ -354,6 +373,7 @@ func New(
 		execCtx:                context.Background(),
 		logger:                 logger,
 		closeCh:                make(chan struct{}),
+		polygonBridge:          polygonBridge,
 	}
 
 	c.authorizedSigner.Store(&signer{
@@ -1001,6 +1021,7 @@ func (c *Bor) Finalize(config *chain.Config, header *types.Header, state *state.
 				c.logger.Error("[bor] committing span", "err", err)
 				return nil, types.Receipts{}, nil, err
 			}
+
 			// commit states
 			if err := c.CommitStates(state, header, cx, syscall); err != nil {
 				err := fmt.Errorf("Finalize.CommitStates: %w", err)
@@ -1105,7 +1126,7 @@ func (c *Bor) GenerateSeal(chain consensus.ChainHeaderReader, currnt, parent *ty
 }
 
 func (c *Bor) Initialize(config *chain.Config, chain consensus.ChainHeaderReader, header *types.Header,
-	state *state.IntraBlockState, syscall consensus.SysCallCustom, logger log.Logger) {
+	state *state.IntraBlockState, syscall consensus.SysCallCustom, logger log.Logger, tracer *tracing.Hooks) {
 }
 
 // Authorize injects a private key into the consensus engine to mint new blocks
@@ -1463,6 +1484,24 @@ func (c *Bor) CommitStates(
 	syscall consensus.SystemCall,
 ) error {
 	blockNum := header.Number.Uint64()
+
+	if c.polygonBridge != nil {
+		events, err := c.polygonBridge.GetEvents(c.execCtx, blockNum)
+		if err != nil {
+			return err
+		}
+
+		c.logger.Debug("using polygon bridge", "len(events)", len(events), "blockNum", blockNum)
+
+		for _, event := range events {
+			_, err := syscall(*event.To(), event.Data())
+			if err != nil {
+				return err
+			}
+		}
+		return nil
+	}
+
 	events := chain.Chain.BorEventsByBlock(header.Hash(), blockNum)
 
 	//if len(events) == 50 || len(events) == 0 { // we still sometime could get 0 events from borevent file

@@ -1,18 +1,18 @@
-/*
-   Copyright 2022 Erigon contributors
-
-   Licensed under the Apache License, Version 2.0 (the "License");
-   you may not use this file except in compliance with the License.
-   You may obtain a copy of the License at
-
-       http://www.apache.org/licenses/LICENSE-2.0
-
-   Unless required by applicable law or agreed to in writing, software
-   distributed under the License is distributed on an "AS IS" BASIS,
-   WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-   See the License for the specific language governing permissions and
-   limitations under the License.
-*/
+// Copyright 2022 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
 package state
 
@@ -847,18 +847,32 @@ func (ac *AggregatorRoTx) CanPrune(tx kv.Tx, untilTx uint64) bool {
 }
 
 func (ac *AggregatorRoTx) CanUnwindToBlockNum(tx kv.Tx) (uint64, error) {
-	return ReadLowestUnwindableBlock(tx)
-}
-func (ac *AggregatorRoTx) CanUnwindDomainsToTxNum() uint64 {
-	return ac.minimaxTxNumInDomainFiles()
-}
-
-func (ac *AggregatorRoTx) CanUnwindBeforeBlockNum(blockNum uint64, tx kv.Tx) (uint64, bool, error) {
-	if blockNum == 0 && ac.CanUnwindDomainsToTxNum() > 0 { // don't allow unwind beyond files progress
-		_minBlockNum, _ := ac.CanUnwindToBlockNum(tx)
-		return _minBlockNum, blockNum >= _minBlockNum, nil //nolint
+	minUnwindale, err := ReadLowestUnwindableBlock(tx)
+	if err != nil {
+		return 0, err
 	}
+	if minUnwindale == math.MaxUint64 { // no unwindable block found
+		stateVal, _, _, err := ac.d[kv.CommitmentDomain].GetLatest(keyCommitmentState, nil, tx)
+		if err != nil {
+			return 0, err
+		}
+		if len(stateVal) == 0 {
+			return 0, nil
+		}
+		_, minUnwindale = _decodeTxBlockNums(stateVal)
+	}
+	return minUnwindale, nil
+}
 
+// CanUnwindBeforeBlockNum - returns `true` if can unwind to requested `blockNum`, otherwise returns nearest `unwindableBlockNum`
+func (ac *AggregatorRoTx) CanUnwindBeforeBlockNum(blockNum uint64, tx kv.Tx) (unwindableBlockNum uint64, ok bool, err error) {
+	_minUnwindableBlockNum, err := ac.CanUnwindToBlockNum(tx)
+	if err != nil {
+		return 0, false, err
+	}
+	if blockNum < _minUnwindableBlockNum {
+		return _minUnwindableBlockNum, false, nil
+	}
 	return blockNum, true, nil
 }
 
@@ -1359,8 +1373,51 @@ func (r RangesV3) any() bool {
 
 func (ac *AggregatorRoTx) findMergeRange(maxEndTxNum, maxSpan uint64) RangesV3 {
 	var r RangesV3
+	if ac.a.commitmentValuesTransform {
+		lmrAcc := ac.d[kv.AccountsDomain].files.LatestMergedRange()
+		lmrSto := ac.d[kv.StorageDomain].files.LatestMergedRange()
+		lmrCom := ac.d[kv.CommitmentDomain].files.LatestMergedRange()
+
+		if !lmrCom.Equal(&lmrAcc) || !lmrCom.Equal(&lmrSto) {
+			// ensure that we do not make further merge progress until ranges are not equal
+			maxEndTxNum = min(maxEndTxNum, max(lmrAcc.to, lmrSto.to, lmrCom.to))
+			ac.a.logger.Warn("findMergeRange: hold further merge", "to", maxEndTxNum/ac.a.StepSize(),
+				"acc", lmrAcc.String("", ac.a.StepSize()), "sto", lmrSto.String("", ac.a.StepSize()), "com", lmrCom.String("", ac.a.StepSize()))
+		}
+	}
 	for id, d := range ac.d {
 		r.domain[id] = d.findMergeRange(maxEndTxNum, maxSpan)
+	}
+
+	if ac.a.commitmentValuesTransform && r.domain[kv.CommitmentDomain].values.needMerge {
+		cr := r.domain[kv.CommitmentDomain]
+
+		restorePrevRange := false
+		for k, dr := range r.domain {
+			kd := kv.Domain(k)
+			if kd == kv.CommitmentDomain || cr.values.Equal(&dr.values) {
+				continue
+			}
+			// commitment waits until storage and account are merged so it may be a bit behind (if merge was interrupted before)
+			if !dr.values.needMerge || cr.values.to < dr.values.from {
+				if mf := ac.d[kd].lookupFileByItsRange(cr.values.from, cr.values.to); mf != nil {
+					// file for required range exists, hold this domain from merge but allow to merge comitemnt
+					r.domain[k].values = MergeRange{}
+					ac.a.logger.Debug("findMergeRange: commitment range is different but file exists in domain, hold further merge",
+						ac.d[k].d.filenameBase, dr.values.String("vals", ac.a.StepSize()),
+						"commitment", cr.values.String("vals", ac.a.StepSize()))
+					continue
+				}
+				restorePrevRange = true
+			}
+		}
+		if restorePrevRange {
+			for k, dr := range r.domain {
+				r.domain[k].values = MergeRange{}
+				ac.a.logger.Debug("findMergeRange: commitment range is different than accounts or storage, cancel kv merge",
+					ac.d[k].d.filenameBase, dr.values.String("", ac.a.StepSize()))
+			}
+		}
 	}
 	for id, ii := range ac.iis {
 		r.invertedIndex[id] = ii.findMergeRange(maxEndTxNum, maxSpan)
@@ -1449,7 +1506,11 @@ func (ac *AggregatorRoTx) SqueezeCommitmentFiles() error {
 			reader.Reset(0)
 
 			writer := NewArchiveWriter(squeezedCompr, commitment.d.compression)
-			vt := commitment.commitmentValTransformDomain(accounts, storage, af, sf)
+			rng := MergeRange{needMerge: true, from: af.startTxNum, to: af.endTxNum}
+			vt, err := commitment.commitmentValTransformDomain(rng, accounts, storage, af, sf)
+			if err != nil {
+				return fmt.Errorf("failed to create commitment value transformer: %w", err)
+			}
 
 			i := 0
 			for reader.HasNext() {
@@ -1579,8 +1640,12 @@ func (ac *AggregatorRoTx) mergeFiles(ctx context.Context, files SelectedStaticFi
 				ac.RestrictSubsetFileDeletions(true)
 				accStorageMerged.Wait()
 
-				vt = ac.d[kv.CommitmentDomain].commitmentValTransformDomain(ac.d[kv.AccountsDomain], ac.d[kv.StorageDomain],
+				vt, err = ac.d[kv.CommitmentDomain].commitmentValTransformDomain(r.domain[kid].values, ac.d[kv.AccountsDomain], ac.d[kv.StorageDomain],
 					mf.d[kv.AccountsDomain], mf.d[kv.StorageDomain])
+
+				if err != nil {
+					return fmt.Errorf("failed to create commitment value transformer: %w", err)
+				}
 			}
 
 			mf.d[id], mf.dIdx[id], mf.dHist[id], err = ac.d[id].mergeFiles(ctx, files.d[id], files.dIdx[id], files.dHist[id], r.domain[id], vt, ac.a.ps)
