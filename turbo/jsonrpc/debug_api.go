@@ -21,7 +21,6 @@ import (
 	"fmt"
 
 	"github.com/ledgerwatch/erigon-lib/common/hexutil"
-	"github.com/ledgerwatch/erigon-lib/log/v3"
 
 	jsoniter "github.com/json-iterator/go"
 	"github.com/ledgerwatch/erigon-lib/common"
@@ -148,7 +147,6 @@ func (api *PrivateDebugAPIImpl) AccountRange(ctx context.Context, blockNrOrHash 
 		}
 	}
 
-	log.Warn("[dbg] max results", "maxResults", maxResults)
 	dumper := state.NewDumper(tx, blockNumber)
 	res, err := dumper.IteratorDump(excludeCode, excludeStorage, common.BytesToAddress(startKey), maxResults)
 	if err != nil {
