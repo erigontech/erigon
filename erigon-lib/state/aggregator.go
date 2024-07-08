@@ -1965,8 +1965,8 @@ func (ac *AggregatorRoTx) ViewID() uint64 { return ac.id }
 
 // --- Domain part START ---
 
-func (ac *AggregatorRoTx) DomainRange(tx kv.Tx, domain kv.Domain, fromKey, toKey []byte, ts uint64, asc order.By, limit int) (it iter.KV, err error) {
-	return ac.d[domain].DomainRange(tx, fromKey, toKey, ts, asc, limit)
+func (ac *AggregatorRoTx) DomainRange(ctx context.Context, tx kv.Tx, domain kv.Domain, fromKey, toKey []byte, ts uint64, asc order.By, limit int) (it iter.KV, err error) {
+	return ac.d[domain].DomainRange(ctx, tx, fromKey, toKey, ts, asc, limit)
 }
 func (ac *AggregatorRoTx) DomainRangeLatest(tx kv.Tx, domain kv.Domain, from, to []byte, limit int) (iter.KV, error) {
 	return ac.d[domain].DomainRangeLatest(tx, from, to, limit)
