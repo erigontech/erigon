@@ -142,37 +142,34 @@ func (h *History) vAccessorFilePath(fromStep, toStep uint64) string {
 	return filepath.Join(h.dirs.SnapAccessors, fmt.Sprintf("v1-%s.%d-%d.vi", h.filenameBase, fromStep, toStep))
 }
 
-// OpenList - main method to open list of files.
+// openList - main method to open list of files.
 // It's ok if some files was open earlier.
 // If some file already open: noop.
 // If some file already open but not in provided list: close and remove from `files` field.
-func (h *History) OpenList(idxFiles, histNames []string) error {
-	if err := h.InvertedIndex.OpenList(idxFiles); err != nil {
+func (h *History) openList(idxFiles, histNames []string) error {
+	if err := h.InvertedIndex.openList(idxFiles); err != nil {
 		return err
 	}
-	return h.openList(histNames)
 
-}
-func (h *History) openList(fNames []string) error {
-	h.closeWhatNotInList(fNames)
-	h.scanStateFiles(fNames)
-	if err := h.openFiles(); err != nil {
-		return fmt.Errorf("History.OpenList: %w, %s", err, h.filenameBase)
+	h.closeWhatNotInList(histNames)
+	h.scanDirtyFiles(histNames)
+	if err := h.openDirtyFiles(); err != nil {
+		return fmt.Errorf("History(%s).openList: %w", h.filenameBase, err)
 	}
 	return nil
 }
 
-func (h *History) OpenFolder(readonly bool) error {
+func (h *History) openFolder() error {
 	idxFiles, histFiles, _, err := h.fileNamesOnDisk()
 	if err != nil {
 		return err
 	}
-	return h.OpenList(idxFiles, histFiles)
+	return h.openList(idxFiles, histFiles)
 }
 
-// scanStateFiles
+// scanDirtyFiles
 // returns `uselessFiles` where file "is useless" means: it's subset of frozen file. such files can be safely deleted. subset of non-frozen file may be useful
-func (h *History) scanStateFiles(fNames []string) (garbageFiles []*filesItem) {
+func (h *History) scanDirtyFiles(fNames []string) (garbageFiles []*filesItem) {
 	re := regexp.MustCompile("^v([0-9]+)-" + h.filenameBase + ".([0-9]+)-([0-9]+).v$")
 	var err error
 	for _, name := range fNames {
@@ -212,7 +209,7 @@ func (h *History) scanStateFiles(fNames []string) (garbageFiles []*filesItem) {
 	return garbageFiles
 }
 
-func (h *History) openFiles() error {
+func (h *History) openDirtyFiles() error {
 	invalidFilesMu := sync.Mutex{}
 	invalidFileItems := make([]*filesItem, 0)
 	h.dirtyFiles.Walk(func(items []*filesItem) bool {
@@ -223,7 +220,7 @@ func (h *History) openFiles() error {
 				exists, err := dir.FileExist(fPath)
 				if err != nil {
 					_, fName := filepath.Split(fPath)
-					h.logger.Debug("[agg] History.openFiles: FileExist", "f", fName, "err", err)
+					h.logger.Debug("[agg] History.openDirtyFiles: FileExist", "f", fName, "err", err)
 					invalidFilesMu.Lock()
 					invalidFileItems = append(invalidFileItems, item)
 					invalidFilesMu.Unlock()
@@ -231,7 +228,7 @@ func (h *History) openFiles() error {
 				}
 				if !exists {
 					_, fName := filepath.Split(fPath)
-					h.logger.Debug("[agg] History.openFiles: file does not exists", "f", fName)
+					h.logger.Debug("[agg] History.openDirtyFiles: file does not exists", "f", fName)
 					invalidFilesMu.Lock()
 					invalidFileItems = append(invalidFileItems, item)
 					invalidFilesMu.Unlock()
@@ -240,7 +237,7 @@ func (h *History) openFiles() error {
 				if item.decompressor, err = seg.NewDecompressor(fPath); err != nil {
 					_, fName := filepath.Split(fPath)
 					if errors.Is(err, &seg.ErrCompressedFileCorrupted{}) {
-						h.logger.Debug("[agg] History.openFiles", "err", err, "f", fName)
+						h.logger.Debug("[agg] History.openDirtyFiles", "err", err, "f", fName)
 						// TODO we do not restore those files so we could just remove them along with indices. Same for domains/indices.
 						//      Those files will keep space on disk and closed automatically as corrupted. So better to remove them, and maybe remove downloading prohibiter to allow downloading them again?
 						//
@@ -251,11 +248,11 @@ func (h *History) openFiles() error {
 						// for _, fp := range itemPaths {
 						// 	err = os.Remove(fp)
 						// 	if err != nil {
-						// 		h.logger.Warn("[agg] History.openFiles cannot remove corrupted file", "err", err, "f", fp)
+						// 		h.logger.Warn("[agg] History.openDirtyFiles cannot remove corrupted file", "err", err, "f", fp)
 						// 	}
 						// }
 					} else {
-						h.logger.Warn("[agg] History.openFiles", "err", err, "f", fName)
+						h.logger.Warn("[agg] History.openDirtyFiles", "err", err, "f", fName)
 					}
 					invalidFilesMu.Lock()
 					invalidFileItems = append(invalidFileItems, item)
@@ -270,12 +267,12 @@ func (h *History) openFiles() error {
 				exists, err := dir.FileExist(fPath)
 				if err != nil {
 					_, fName := filepath.Split(fPath)
-					h.logger.Warn("[agg] History.openFiles", "err", err, "f", fName)
+					h.logger.Warn("[agg] History.openDirtyFiles", "err", err, "f", fName)
 				}
 				if exists {
 					if item.index, err = recsplit.OpenIndex(fPath); err != nil {
 						_, fName := filepath.Split(fPath)
-						h.logger.Warn("[agg] History.openFiles", "err", err, "f", fName)
+						h.logger.Warn("[agg] History.openDirtyFiles", "err", err, "f", fName)
 						// don't interrupt on error. other files may be good
 					}
 				}
