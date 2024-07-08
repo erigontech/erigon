@@ -40,7 +40,7 @@ func NewPromise[T any](task func() (T, error)) *Promise[T] {
 	return p
 }
 
-func (p *Promise[T]) Get(f func(r T) error) (T, error) {
+func (p *Promise[T]) Get() (T, error) {
 	p.wg.Wait() // .Wait ensures that all memory operations before .Done are visible after .Wait => no need to lock/unlock the mutex
 	return p.result, p.err
 }

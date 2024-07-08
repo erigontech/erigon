@@ -24,16 +24,17 @@ import (
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/eth/ethconfig"
 	"github.com/ledgerwatch/erigon/zk/datastream/proto/github.com/0xPolygonHermez/zkevm-node/state/datastream"
-	"github.com/ledgerwatch/log/v3"
 	"github.com/ledgerwatch/erigon/zk/utils"
+	"github.com/ledgerwatch/log/v3"
 )
 
 const (
-	HIGHEST_KNOWN_FORK = 9
+	HIGHEST_KNOWN_FORK  = 9
+	STAGE_PROGRESS_SAVE = 3000000
 )
 
 type ErigonDb interface {
-	WriteHeader(batchNo *big.Int, stateRoot, txHash, parentHash common.Hash, coinbase common.Address, ts, gasLimit uint64) (*ethTypes.Header, error)
+	WriteHeader(batchNo *big.Int, blockHash common.Hash, stateRoot, txHash, parentHash common.Hash, coinbase common.Address, ts, gasLimit uint64) (*ethTypes.Header, error)
 	WriteBody(batchNo *big.Int, headerHash common.Hash, txs []ethTypes.Transaction) error
 }
 
@@ -113,8 +114,6 @@ func SpawnStageBatches(
 		return nil
 	}
 	defer log.Info(fmt.Sprintf("[%s] Finished Batches stage", logPrefix))
-
-	useExternalTx := tx != nil
 
 	freshTx := false
 	if tx == nil {
@@ -221,6 +220,7 @@ func SpawnStageBatches(
 	lastWrittenTimeAtomic := cfg.dsClient.GetLastWrittenTimeAtomic()
 	streamingAtomic := cfg.dsClient.GetStreamingAtomic()
 
+	prevAmountBlocksWritten := blocksWritten
 LOOP:
 	for {
 		// get batch start and use to update forkid
@@ -408,6 +408,24 @@ LOOP:
 			}
 		}
 
+		if blocksWritten != prevAmountBlocksWritten && blocksWritten%STAGE_PROGRESS_SAVE == 0 {
+			if err = saveStageProgress(tx, logPrefix, highestHashableL2BlockNo, highestSeenBatchNo, highestL1InfoTreeIndex, lastBlockHeight, lastForkId); err != nil {
+				return err
+			}
+
+			if err := tx.Commit(); err != nil {
+				return fmt.Errorf("failed to commit tx, %w", err)
+			}
+
+			tx, err = cfg.db.BeginRw(ctx)
+			if err != nil {
+				return fmt.Errorf("failed to open tx, %w", err)
+			}
+			hermezDb = hermez_db.NewHermezDb(tx)
+			eriDb = erigon_db.NewErigonDb(tx)
+			prevAmountBlocksWritten = blocksWritten
+		}
+
 		if endLoop {
 			log.Info(fmt.Sprintf("[%s] Total blocks read: %d", logPrefix, blocksWritten))
 			break
@@ -418,6 +436,25 @@ LOOP:
 		return nil
 	}
 
+	if err = saveStageProgress(tx, logPrefix, highestHashableL2BlockNo, highestSeenBatchNo, highestL1InfoTreeIndex, lastBlockHeight, lastForkId); err != nil {
+		return err
+	}
+
+	// stop printing blocks written progress routine
+	elapsed := time.Since(startSyncTime)
+	log.Info(fmt.Sprintf("[%s] Finished writing blocks", logPrefix), "blocksWritten", blocksWritten, "elapsed", elapsed)
+
+	if freshTx {
+		if err := tx.Commit(); err != nil {
+			return fmt.Errorf("failed to commit tx, %w", err)
+		}
+	}
+
+	return nil
+}
+
+func saveStageProgress(tx kv.RwTx, logPrefix string, highestHashableL2BlockNo, highestSeenBatchNo, highestL1InfoTreeIndex, lastBlockHeight, lastForkId uint64) error {
+	var err error
 	// store the highest hashable block number
 	if err := stages.SaveStageProgress(tx, stages.HighestHashableL2BlockNo, highestHashableL2BlockNo); err != nil {
 		return fmt.Errorf("save stage progress error: %v", err)
@@ -428,7 +465,7 @@ LOOP:
 	}
 
 	// store the highest seen forkid
-	if err := stages.SaveStageProgress(tx, stages.ForkId, uint64(lastForkId)); err != nil {
+	if err := stages.SaveStageProgress(tx, stages.ForkId, lastForkId); err != nil {
 		return fmt.Errorf("save stage progress error: %v", err)
 	}
 
@@ -442,23 +479,9 @@ LOOP:
 		return fmt.Errorf("save stage progress error: %w", err)
 	}
 
-	// stop printing blocks written progress routine
-	elapsed := time.Since(startSyncTime)
-	log.Info(fmt.Sprintf("[%s] Finished writing blocks", logPrefix), "blocksWritten", blocksWritten, "elapsed", elapsed)
-
 	log.Info(fmt.Sprintf("[%s] Saving stage progress", logPrefix), "lastBlockHeight", lastBlockHeight)
 	if err := stages.SaveStageProgress(tx, stages.Batches, lastBlockHeight); err != nil {
 		return fmt.Errorf("save stage progress error: %v", err)
-	}
-
-	if firstCycle && !useExternalTx {
-		log.Debug(fmt.Sprintf("[%s] batches: first cycle, committing tx", logPrefix))
-	}
-
-	if freshTx {
-		if err := tx.Commit(); err != nil {
-			return fmt.Errorf("failed to commit tx, %w", err)
-		}
 	}
 
 	return nil
@@ -762,7 +785,7 @@ func writeL2Block(eriDb ErigonDb, hermezDb HermezDb, l2Block *types.FullL2Block,
 
 	gasLimit := utils.GetBlockGasLimitForFork(l2Block.ForkId)
 
-	h, err := eriDb.WriteHeader(bn, l2Block.StateRoot, txHash, l2Block.ParentHash, l2Block.Coinbase, uint64(l2Block.Timestamp), gasLimit)
+	_, err := eriDb.WriteHeader(bn, l2Block.L2Blockhash, l2Block.StateRoot, txHash, l2Block.ParentHash, l2Block.Coinbase, uint64(l2Block.Timestamp), gasLimit)
 	if err != nil {
 		return fmt.Errorf("write header error: %v", err)
 	}
@@ -844,7 +867,7 @@ func writeL2Block(eriDb ErigonDb, hermezDb HermezDb, l2Block *types.FullL2Block,
 		}
 	}
 
-	if err := eriDb.WriteBody(bn, h.Hash(), txs); err != nil {
+	if err := eriDb.WriteBody(bn, l2Block.L2Blockhash, txs); err != nil {
 		return fmt.Errorf("write body error: %v", err)
 	}
 

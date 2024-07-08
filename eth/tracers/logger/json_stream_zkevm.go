@@ -199,14 +199,26 @@ func (l *JsonStreamLogger_ZkEvm) writeStorage(contract *vm.Contract) {
 func (l *JsonStreamLogger_ZkEvm) writeMemory(memory *vm.Memory) {
 	if !l.cfg.DisableMemory {
 		memData := memory.Data()
+
+		//[zkevm] don't print empty bytes in memory array
+		isMemoryEmpty := true
+		for i := 0; i < len(memData); i++ {
+			if memData[i] != 0 {
+				isMemoryEmpty = false
+				break
+			}
+		}
+
 		l.stream.WriteMore()
 		l.stream.WriteObjectField("memory")
 		l.stream.WriteArrayStart()
-		for i := 0; i+32 <= len(memData); i += 32 {
-			if i > 0 {
-				l.stream.WriteMore()
+		if !isMemoryEmpty {
+			for i := 0; i+32 <= len(memData); i += 32 {
+				if i > 0 {
+					l.stream.WriteMore()
+				}
+				l.stream.WriteString(string(l.hexEncodeBuf[0:hex.Encode(l.hexEncodeBuf[:], memData[i:i+32])]))
 			}
-			l.stream.WriteString(string(l.hexEncodeBuf[0:hex.Encode(l.hexEncodeBuf[:], memData[i:i+32])]))
 		}
 		l.stream.WriteArrayEnd()
 	}

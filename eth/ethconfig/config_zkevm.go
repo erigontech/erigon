@@ -51,20 +51,22 @@ type Zk struct {
 	DataStreamHost                         string
 	DataStreamPort                         uint
 
-	RebuildTreeAfter    uint64
-	IncrementTreeAlways bool
-	WitnessFull         bool
-	SyncLimit           uint64
-	Gasless             bool
+	RebuildTreeAfter      uint64
+	IncrementTreeAlways   bool
+	SmtRegenerateInMemory bool
+	WitnessFull           bool
+	SyncLimit             uint64
+	Gasless               bool
 
 	DebugNoSync    bool
 	DebugLimit     uint64
 	DebugStep      uint64
 	DebugStepAfter uint64
 
-	PoolManagerUrl         string
-	DisableVirtualCounters bool
-	ExecutorPayloadOutput  string
+	PoolManagerUrl              string
+	DisableVirtualCounters      bool
+	VirtualCountersSmtReduction float64
+	ExecutorPayloadOutput       string
 }
 
 var DefaultZkConfig = &Zk{}

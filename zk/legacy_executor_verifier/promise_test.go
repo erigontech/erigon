@@ -1,9 +1,9 @@
 package legacy_executor_verifier
 
 import (
+	"fmt"
 	"testing"
 	"time"
-	"fmt"
 )
 
 type TestStruct struct {
@@ -45,7 +45,7 @@ func TestPromiseConcurrentExecution(t *testing.T) {
 
 	// get the results (waiting on each 'promise')
 	for _, c := range cases {
-		result, err := promises[c.id].Get(nil)
+		result, err := promises[c.id].Get()
 		if (err != nil) != c.expectErr {
 			t.Errorf("Test failed for Id %d: expected error: %v, got: %v", c.id, c.expectErr, err)
 		} else if err == nil {
@@ -61,7 +61,7 @@ func TestSpecificIdFail(t *testing.T) {
 	promise := NewPromise(func() (TestStruct, error) {
 		return mightFail2(id)
 	})
-	result, err := promise.Get(nil)
+	result, err := promise.Get()
 
 	if err == nil {
 		t.Error("Expected an error for specificId but got nil")
@@ -97,7 +97,7 @@ func TestHighConcurrencyAndOrder(t *testing.T) {
 	// start resolving them
 	results := make([]TestStruct, numTests)
 	for i := 0; i < numTests; i++ {
-		res, _ := promises[i].Get(nil)
+		res, _ := promises[i].Get()
 		results[i] = res
 	}
 

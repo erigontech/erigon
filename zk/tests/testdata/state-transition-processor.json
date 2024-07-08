@@ -85,13 +85,13 @@
     "oldAccInputHash": "0x0000000000000000000000000000000000000000000000000000000000000000",
     "expectedNewAccInputHash": "0xe50b49f540b950cad5526ef669ff2d5bd8c81c86d9daeeb26d72a7a82920d25c",
     "virtualCounters": {
-      "steps": 11112,
+      "steps": 10312,
       "arith": 581,
-      "binary": 728,
+      "binary": 726,
       "memAlign": 0,
-      "keccaks": 41,
+      "keccaks": 8,
       "padding": 13,
-      "poseidon": 1263,
+      "poseidon": 911,
       "sha256": 0
     },
     "smtDepths": [1, 2]
@@ -273,13 +273,13 @@
     "timestampLimit": 1944498031,
     "expectedNewAccInputHash": "0x859b29ae0420e27a8173546e32bb633f71a3c62208fa885cf051d5ffb45e28f8",
     "virtualCounters": {
-      "steps": 49727,
+      "steps": 46917,
       "arith": 2880,
-      "binary": 3405,
+      "binary": 3395,
       "memAlign": 0,
-      "keccaks": 54,
+      "keccaks": 21,
       "padding": 43,
-      "poseidon": 2089,
+      "poseidon": 1477,
       "sha256": 0
     },
     "smtDepths": [2, 2, 6, 6, 6, 6]
@@ -366,13 +366,13 @@
     "timestampLimit": 1944498031,
     "expectedNewAccInputHash": "0x19961a80fba75819a6d101e1ad34e8cc0dfc1c0797203346681584642aa8aaee",
     "virtualCounters": {
-      "steps": 10451,
+      "steps": 9661,
       "arith": 578,
-      "binary": 695,
+      "binary": 693,
       "memAlign": 0,
-      "keccaks": 40,
+      "keccaks": 7,
       "padding": 6,
-      "poseidon": 460,
+      "poseidon": 368,
       "sha256": 0
     },
     "smtDepths": [1, 2]
@@ -494,13 +494,13 @@
     "timestampLimit": 1944498031,
     "expectedNewAccInputHash": "0x7bc052c46dfaddab1850da6f68e2208ad916e1a1f1dde82a942c52dbf57d267c",
     "virtualCounters": {
-      "steps": 19779,
+      "steps": 18519,
       "arith": 1149,
-      "binary": 1347,
+      "binary": 1343,
       "memAlign": 0,
-      "keccaks": 43,
+      "keccaks": 10,
       "padding": 12,
-      "poseidon": 466,
+      "poseidon": 374,
       "sha256": 0
     },
     "smtDepths": [1, 2, 2]
@@ -591,13 +591,13 @@
     "timestampLimit": 1944498031,
     "expectedNewAccInputHash": "0xafa8496606132bbdd0862547b33692f81764876ad430f154336cf3fdc0a3f8a6",
     "virtualCounters": {
-      "steps": 11112,
+      "steps": 10312,
       "arith": 581,
-      "binary": 728,
+      "binary": 726,
       "memAlign": 0,
-      "keccaks": 41,
+      "keccaks": 8,
       "padding": 13,
-      "poseidon": 1263,
+      "poseidon": 911,
       "sha256": 0
     },
     "smtDepths": [1, 2]
@@ -727,13 +727,13 @@
     "timestampLimit": 1944498031,
     "expectedNewAccInputHash": "0x10cfc7acca37bc9a34943e1a2f69bec6aa09ca01df920d80a956e820e9317721",
     "virtualCounters": {
-      "steps": 39417,
+      "steps": 37147,
       "arith": 2300,
-      "binary": 2702,
+      "binary": 2694,
       "memAlign": 0,
-      "keccaks": 50,
+      "keccaks": 17,
       "padding": 30,
-      "poseidon": 1280,
+      "poseidon": 928,
       "sha256": 0
     },
     "smtDepths": [1, 2, 2, 6, 6]
@@ -824,13 +824,13 @@
     "timestampLimit": 1944498031,
     "expectedNewAccInputHash": "0x37b81ad3f97adee04e680313e1f7069ef7eb18697d681b6fb1b7d99cf94be255",
     "virtualCounters": {
-      "steps": 11112,
+      "steps": 10312,
       "arith": 581,
-      "binary": 728,
+      "binary": 726,
       "memAlign": 0,
-      "keccaks": 41,
+      "keccaks": 8,
       "padding": 13,
-      "poseidon": 1263,
+      "poseidon": 911,
       "sha256": 0
     },
     "smtDepths": [1, 2]
@@ -934,13 +934,13 @@
     "timestampLimit": 1944498031,
     "expectedNewAccInputHash": "0xebff781dbd080a70dddf4335bf826081192545e7e3dfa77323378ca5e50415e0",
     "virtualCounters": {
-      "steps": 21636,
+      "steps": 20256,
       "arith": 1165,
-      "binary": 1443,
+      "binary": 1439,
       "memAlign": 0,
-      "keccaks": 45,
+      "keccaks": 12,
       "padding": 26,
-      "poseidon": 2072,
+      "poseidon": 1460,
       "sha256": 0
     },
     "smtDepths": [0, 2, 6]
@@ -1070,13 +1070,13 @@
     "timestampLimit": 1944498031,
     "expectedNewAccInputHash": "0xd6a4221c6a3c34a1e7da3831ff3f2222646c03e3d2274e404c1bc308ffdaa27c",
     "virtualCounters": {
-      "steps": 42042,
+      "steps": 39622,
       "arith": 2321,
-      "binary": 2837,
+      "binary": 2829,
       "memAlign": 0,
-      "keccaks": 53,
+      "keccaks": 20,
       "padding": 52,
-      "poseidon": 3690,
+      "poseidon": 2558,
       "sha256": 0
     },
     "smtDepths": [1, 2, 6, 6, 7]
@@ -1208,13 +1208,13 @@
     "timestampLimit": 1944498031,
     "expectedNewAccInputHash": "0x26f8c6f05b23b5509e9a259d4917816eefea291032849fc038635437490bc0f8",
     "virtualCounters": {
-      "steps": 29150,
+      "steps": 27010,
       "arith": 1231,
-      "binary": 1690,
+      "binary": 1682,
       "memAlign": 3,
-      "keccaks": 46,
+      "keccaks": 13,
       "padding": 37,
-      "poseidon": 2225,
+      "poseidon": 1574,
       "sha256": 0
     },
     "smtDepths": [3, 4, 6]
@@ -1341,13 +1341,13 @@
     "timestampLimit": 1944498031,
     "expectedNewAccInputHash": "0x8e0d519685f1c350541fd016fb8d49360167d82ff2b40536f02dce5cc9f2e7ab",
     "virtualCounters": {
-      "steps": 44656,
+      "steps": 40186,
       "arith": 1451,
-      "binary": 2397,
+      "binary": 2383,
       "memAlign": 7,
-      "keccaks": 47,
+      "keccaks": 14,
       "padding": 47,
-      "poseidon": 2491,
+      "poseidon": 1698,
       "sha256": 0
     },
     "smtDepths": [1, 3, 6]
@@ -1485,13 +1485,13 @@
     "timestampLimit": 1944498031,
     "expectedNewAccInputHash": "0x01f59765efafa465ca2e8c049a8b0996750b02f076c8a78a75baf7f4492768c6",
     "virtualCounters": {
-      "steps": 31719,
+      "steps": 29339,
       "arith": 1247,
-      "binary": 1776,
+      "binary": 1764,
       "memAlign": 6,
-      "keccaks": 46,
+      "keccaks": 13,
       "padding": 48,
-      "poseidon": 2570,
+      "poseidon": 1764,
       "sha256": 0
     },
     "smtDepths": [2, 3, 6]
@@ -1629,13 +1629,13 @@
     "timestampLimit": 1944498031,
     "expectedNewAccInputHash": "0x8dc5830f519013db61a65260335637ff848d9713706a01a19be6008615c0b0da",
     "virtualCounters": {
-      "steps": 296371,
-      "arith": 5976,
-      "binary": 14787,
-      "memAlign": 189,
-      "keccaks": 62,
-      "padding": 84,
-      "poseidon": 3640,
+      "steps": 252402,
+      "arith": 6185,
+      "binary": 15022,
+      "memAlign": 248,
+      "keccaks": 29,
+      "padding": 95,
+      "poseidon": 2545,
       "sha256": 0
     },
     "smtDepths": [0, 2, 6, 6]
@@ -1752,13 +1752,13 @@
     "oldAccInputHash": "0x0000000000000000000000000000000000000000000000000000000000000000",
     "expectedNewAccInputHash": "0xe370dc3c8565d2a86a77705ef263cf48715964f133cc738d8795dfc6362be687",
     "virtualCounters": {
-      "steps": 31732,
+      "steps": 29852,
       "arith": 1741,
-      "binary": 2134,
+      "binary": 2128,
       "memAlign": 0,
-      "keccaks": 49,
+      "keccaks": 16,
       "padding": 39,
-      "poseidon": 2881,
+      "poseidon": 2009,
       "sha256": 0
     },
     "smtDepths": [1, 2, 6, 6]

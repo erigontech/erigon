@@ -16,10 +16,11 @@ type TransactionCounter struct {
 	executionCounters  *CounterCollector
 	processingCounters *CounterCollector
 	smtLevels          int
+	forkId             uint16
 }
 
-func NewTransactionCounter(transaction types.Transaction, smtMaxLevel int, shouldCountersBeUnlimited bool) *TransactionCounter {
-	totalLevel := calculateSmtLevels(smtMaxLevel, 32)
+func NewTransactionCounter(transaction types.Transaction, smtMaxLevel int, forkId uint16, mcpReduction float64, shouldCountersBeUnlimited bool) *TransactionCounter {
+	totalLevel := calculateSmtLevels(smtMaxLevel, 32, mcpReduction)
 
 	var tc *TransactionCounter
 
@@ -30,14 +31,16 @@ func NewTransactionCounter(transaction types.Transaction, smtMaxLevel int, shoul
 			executionCounters:  NewUnlimitedCounterCollector(),
 			processingCounters: NewUnlimitedCounterCollector(),
 			smtLevels:          1, // max depth of the tree anyways
+			forkId:             forkId,
 		}
 	} else {
 		tc = &TransactionCounter{
 			transaction:        transaction,
-			rlpCounters:        NewCounterCollector(totalLevel),
-			executionCounters:  NewCounterCollector(totalLevel),
-			processingCounters: NewCounterCollector(totalLevel),
+			rlpCounters:        NewCounterCollector(totalLevel, forkId),
+			executionCounters:  NewCounterCollector(totalLevel, forkId),
+			processingCounters: NewCounterCollector(totalLevel, forkId),
 			smtLevels:          totalLevel,
+			forkId:             forkId,
 		}
 	}
 	tc.executionCounters.SetTransaction(transaction)
@@ -83,7 +86,7 @@ func (tc *TransactionCounter) CalculateRlp() error {
 	chainIdLength := len(chainIdHex) / 2
 	nonceLength := len(nonceHex) / 2
 
-	collector := NewCounterCollector(tc.smtLevels)
+	collector := NewCounterCollector(tc.smtLevels, tc.forkId)
 	collector.Deduct(S, 250)
 	collector.Deduct(B, 1+1)
 	collector.Deduct(K, int(math.Ceil(float64(txRlpLength+1)/136)))
@@ -146,7 +149,7 @@ func (tc *TransactionCounter) ProcessTx(ibs *state.IntraBlockState, returnData [
 		byteCodeLength = ibs.GetCodeSize(*toAddress)
 	}
 
-	cc := NewCounterCollector(tc.smtLevels)
+	cc := NewCounterCollector(tc.smtLevels, tc.forkId)
 	cc.Deduct(S, 300)
 	cc.Deduct(B, 11+7)
 	cc.Deduct(P, 14*tc.smtLevels)

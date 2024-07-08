@@ -2,7 +2,7 @@ name: Nightly - Compare Blocks
 
 on:
   schedule:
-    - cron: '0 2 * * *'  # run at 2am to give time for other suites to run first
+    - cron: '30 3 * * *'  # run at 3:30am to give time for other suites to run first
   workflow_dispatch:
 
 jobs:

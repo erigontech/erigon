@@ -56,7 +56,7 @@ func UnmarshalL2Block(data []byte) (*FullL2Block, error) {
 		GlobalExitRoot:  libcommon.BytesToHash(block.GlobalExitRoot),
 		Coinbase:        libcommon.BytesToAddress(block.Coinbase),
 		L1BlockHash:     libcommon.BytesToHash(block.L1Blockhash),
-		L2Blockhash:     libcommon.Hash{},
+		L2Blockhash:     libcommon.BytesToHash(block.Hash),
 		StateRoot:       libcommon.BytesToHash(block.StateRoot),
 		BlockGasLimit:   block.BlockGasLimit,
 		BlockInfoRoot:   libcommon.BytesToHash(block.BlockInfoRoot),

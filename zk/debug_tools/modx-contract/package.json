@@ -4,8 +4,12 @@
   "description": "",
   "main": "index.js",
   "scripts": {
-    "mulmod": "npx hardhat compile && npx hardhat run scripts/mulmod.js --network testnet",
-    "bigloop": "npx hardhat compile && npx hardhat run scripts/bigloop.js --network testnet"
+    "mulmod:local": "npx hardhat compile && npx hardhat run scripts/mulmod.js --network local",
+    "bigloop:local": "npx hardhat compile && npx hardhat run scripts/bigloop.js --network local",
+    "counter:local": "npx hardhat compile && npx hardhat run scripts/counter.js --network local",
+    "counter:bali": "npx hardhat compile && npx hardhat run scripts/counter.js --network bali",
+    "counter:cardona": "npx hardhat compile && npx hardhat run scripts/counter.js --network cardona",
+    "counter:mainnet": "npx hardhat compile && npx hardhat run scripts/counter.js --network mainnet"
   },
   "keywords": [],
   "author": "",

@@ -73,9 +73,10 @@ type vector struct {
 	ExpectedNewRoot  string `json:"expectedNewRoot"`
 	SmtDepths        []int  `json:"smtDepths"`
 	Txs              [2]struct {
-		Type           int    `json:"type"`
-		DeltaTimestamp string `json:"deltaTimestamp"`
-		L1Info         *struct {
+		Type            int    `json:"type"`
+		DeltaTimestamp  string `json:"deltaTimestamp"`
+		IndexL1InfoTree int    `json:"indexL1InfoTree"`
+		L1Info          *struct {
 			GlobalExitRoot string `json:"globalExitRoot"`
 			BlockHash      string `json:"blockHash"`
 			Timestamp      string `json:"timestamp"`
@@ -257,8 +258,12 @@ func runTest(t *testing.T, blockReader services.FullBlockReader, test vector, er
 
 	stateReader := state.NewPlainStateReader(tx)
 	ibs := state.New(stateReader)
+	verifyMerkleProof := false
 
 	if test.Txs[0].Type == 11 {
+		if test.Txs[0].IndexL1InfoTree != 0 {
+			verifyMerkleProof = true
+		}
 		parentRoot := common.Hash{}
 		deltaTimestamp, _ := strconv.ParseUint(test.Txs[0].DeltaTimestamp, 10, 64)
 		ibs.PreExecuteStateSet(chainConfig, 1, deltaTimestamp, &parentRoot)
@@ -286,7 +291,7 @@ func runTest(t *testing.T, blockReader services.FullBlockReader, test vector, er
 		}
 	}
 
-	batchCollector := vm.NewBatchCounterCollector(test.SmtDepths[0], uint16(test.ForkId), false)
+	batchCollector := vm.NewBatchCounterCollector(test.SmtDepths[0], uint16(test.ForkId), 0.6, false)
 
 	blockStarted := false
 	for i, block := range decodedBlocks {
@@ -296,7 +301,7 @@ func runTest(t *testing.T, blockReader services.FullBlockReader, test vector, er
 			blockContext := core.NewEVMBlockContext(header, blockHashFunc, engine, &sequencer)
 
 			if !blockStarted {
-				overflow, err := batchCollector.StartNewBlock()
+				overflow, err := batchCollector.StartNewBlock(false)
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -305,7 +310,7 @@ func runTest(t *testing.T, blockReader services.FullBlockReader, test vector, er
 				}
 				blockStarted = true
 			}
-			txCounters := vm.NewTransactionCounter(transaction, test.SmtDepths[i], false)
+			txCounters := vm.NewTransactionCounter(transaction, test.SmtDepths[i], uint16(test.ForkId), 0.6, false)
 			overflow, err := batchCollector.AddNewTransactionCounters(txCounters)
 			if err != nil {
 				t.Fatal(err)
@@ -345,7 +350,7 @@ func runTest(t *testing.T, blockReader services.FullBlockReader, test vector, er
 		}
 	}
 
-	combined, err := batchCollector.CombineCollectors()
+	combined, err := batchCollector.CombineCollectors(verifyMerkleProof)
 	if err != nil {
 		t.Fatal(err)
 	}

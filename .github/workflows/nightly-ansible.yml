@@ -2,7 +2,7 @@ name: Nightly - Ansible
 
 on:
   schedule:
-    - cron: '30 1 * * *' # run at 1:30am to stagger tests
+    - cron: '0 0 * * *' # run at midnight to stagger tests (take around 15m to pass)
   workflow_dispatch:
 
 jobs:

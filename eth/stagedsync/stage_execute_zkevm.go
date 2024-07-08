@@ -121,7 +121,7 @@ Loop:
 		}
 
 		//fetch values pre execute
-		preExecuteHeaderHash, block, senders, err := getPreexecuteValues(cfg, ctx, tx, blockNum, prevBlockHash)
+		datastreamBlockHash, block, senders, err := getPreexecuteValues(cfg, ctx, tx, blockNum, prevBlockHash)
 		if err != nil {
 			stoppedErr = err
 			break
@@ -135,16 +135,15 @@ Loop:
 		execRs, err := executeBlockZk(block, &prevBlockRoot, tx, batch, cfg, *cfg.vmConfig, writeChangeSets, writeReceipts, writeCallTraces, initialCycle, stateStream, hermezDb)
 		if err != nil {
 			if !errors.Is(err, context.Canceled) {
-				log.Warn(fmt.Sprintf("[%s] Execution failed", s.LogPrefix()), "block", blockNum, "hash", block.Hash().String(), "err", err)
+				log.Warn(fmt.Sprintf("[%s] Execution failed", s.LogPrefix()), "block", blockNum, "hash", datastreamBlockHash.Hex(), "err", err)
 				if cfg.hd != nil {
-					cfg.hd.ReportBadHeaderPoS(preExecuteHeaderHash, block.ParentHash())
+					cfg.hd.ReportBadHeaderPoS(datastreamBlockHash, block.ParentHash())
 				}
 				if cfg.badBlockHalt {
 					return err
 				}
 			}
-			blockHash := block.Hash()
-			u.UnwindTo(blockNum-1, UnwindReason{Block: &blockHash})
+			u.UnwindTo(blockNum-1, UnwindReason{Block: &datastreamBlockHash})
 			break Loop
 		}
 
@@ -195,7 +194,7 @@ Loop:
 		}
 
 		//commit values post execute
-		if err := postExecuteCommitValues(cfg, tx, eridb, batch, preExecuteHeaderHash, block, senders); err != nil {
+		if err := postExecuteCommitValues(s.LogPrefix(), cfg, tx, eridb, batch, datastreamBlockHash, block, senders); err != nil {
 			return err
 		}
 	}
@@ -307,24 +306,38 @@ func getPreexecuteValues(cfg ExecuteBlockCfg, ctx context.Context, tx kv.RwTx, b
 }
 
 func postExecuteCommitValues(
+	logPrefix string,
 	cfg ExecuteBlockCfg,
 	tx kv.RwTx,
 	eridb *erigon_db.ErigonDb,
 	batch kv.PendingMutations,
-	preExecuteHeaderHash common.Hash,
+	datastreamBlockHash common.Hash,
 	block *types.Block,
 	senders []common.Address,
 ) error {
 	header := block.Header()
-	headerHash := header.Hash()
+	blockHash := header.Hash()
 	blockNum := block.NumberU64()
 
-	if err := rawdbZk.DeleteSenders(tx, preExecuteHeaderHash, blockNum); err != nil {
-		return fmt.Errorf("failed to delete senders: %v", err)
-	}
+	// if datastream hash was wrong, remove old data
+	if blockHash != datastreamBlockHash {
+		if cfg.chainConfig.IsForkId9Elderberry2(blockNum) {
+			log.Warn(fmt.Sprintf("[%s] Blockhash mismatch", logPrefix), "blockNumber", blockNum, "datastreamBlockHash", datastreamBlockHash, "calculatedBlockHash", blockHash)
+		}
+		if err := rawdbZk.DeleteSenders(tx, datastreamBlockHash, blockNum); err != nil {
+			return fmt.Errorf("failed to delete senders: %v", err)
+		}
 
-	if err := rawdbZk.DeleteHeader(tx, preExecuteHeaderHash, blockNum); err != nil {
-		return fmt.Errorf("failed to delete header: %v", err)
+		if err := rawdbZk.DeleteHeader(tx, datastreamBlockHash, blockNum); err != nil {
+			return fmt.Errorf("failed to delete header: %v", err)
+		}
+
+		// [zkevm] senders were saved in stage_senders for headerHashes based on incomplete headers
+		// in stage execute we complete the headers and senders should be moved to the correct headerHash
+		// also we should delete other data based on the old hash, since it is unaccessable now
+		if err := rawdb.WriteSenders(tx, blockHash, blockNum, senders); err != nil {
+			return fmt.Errorf("failed to write senders: %v", err)
+		}
 	}
 
 	// TODO: how can we store this data right first time?  Or mop up old data as we're currently duping storage
@@ -350,22 +363,14 @@ func postExecuteCommitValues(
 	if err := rawdb.WriteHeader_zkEvm(tx, header); err != nil {
 		return fmt.Errorf("failed to write header: %v", err)
 	}
-	if err := rawdb.WriteHeadHeaderHash(tx, headerHash); err != nil {
+	if err := rawdb.WriteHeadHeaderHash(tx, blockHash); err != nil {
 		return err
 	}
-	if err := rawdb.WriteCanonicalHash(tx, headerHash, blockNum); err != nil {
+	if err := rawdb.WriteCanonicalHash(tx, blockHash, blockNum); err != nil {
 		return fmt.Errorf("failed to write header: %v", err)
 	}
-
-	if err := eridb.WriteBody(block.Number(), headerHash, block.Transactions()); err != nil {
+	if err := eridb.WriteBody(block.Number(), blockHash, block.Transactions()); err != nil {
 		return fmt.Errorf("failed to write body: %v", err)
-	}
-
-	// [zkevm] senders were saved in stage_senders for headerHashes based on incomplete headers
-	// in stage execute we complete the headers and senders should be moved to the correct headerHash
-	// also we should delete other ata based on the old hash, since it is unaccessable now
-	if err := rawdb.WriteSenders(tx, headerHash, blockNum, senders); err != nil {
-		return fmt.Errorf("failed to write senders: %v", err)
 	}
 
 	// write the new block lookup entries

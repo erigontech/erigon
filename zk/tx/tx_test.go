@@ -423,7 +423,7 @@ func Test_BlockBatchL2DataEncode(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	batchL2Data, err := GenerateBlockBatchL2Data(7, 1, 2, []types.Transaction{tx})
+	batchL2Data, err := GenerateBlockBatchL2Data(7, 1, 2, []types.Transaction{tx}, map[common.Hash]uint8{tx.Hash(): 255})
 	if err != nil {
 		t.Fatal(err)
 	}

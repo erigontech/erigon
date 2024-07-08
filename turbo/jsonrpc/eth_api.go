@@ -375,6 +375,7 @@ type APIImpl struct {
 	L1GasPrice                  L1GasPrice
 	SubscribeLogsChannelSize    int
 	logger                      log.Logger
+	VirtualCountersSmtReduction float64
 }
 
 // NewEthAPI returns APIImpl instance
@@ -406,6 +407,7 @@ func NewEthAPI(base *BaseAPI, db kv.RoDB, eth rpchelper.ApiBackend, txPool txpoo
 		L1GasPrice:                  L1GasPrice{},
 		SubscribeLogsChannelSize:    subscribeLogsChannelSize,
 		logger:                      logger,
+		VirtualCountersSmtReduction: ethCfg.VirtualCountersSmtReduction,
 	}
 }
 
