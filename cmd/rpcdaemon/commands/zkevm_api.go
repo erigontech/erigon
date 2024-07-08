@@ -634,6 +634,29 @@ func (api *ZkEvmAPIImpl) GetBatchByNumber(ctx context.Context, batchNumber rpc.B
 	}
 	batch.AccInputHash = oldAccInputHash
 
+	// forkid exit roots logic
+	// if forkid < 12 then we should only set the exit roots if they have changed, otherwise 0x00..00
+	// if forkid >= 12 then we should always set the exit roots
+	if forkId < 12 {
+		// get the previous batches exit roots
+		prevBatchNo := batchNo - 1
+		prevBatchGer, _, err := hermezDb.GetLastBatchGlobalExitRoot(prevBatchNo)
+		if err != nil {
+			return nil, err
+		}
+
+		itu, err := hermezDb.GetL1InfoTreeUpdateByGer(prevBatchGer.GlobalExitRoot)
+		if err != nil {
+			return nil, err
+		}
+
+		if itu == nil || batch.MainnetExitRoot == itu.MainnetExitRoot {
+			batch.MainnetExitRoot = common.Hash{}
+			batch.RollupExitRoot = common.Hash{}
+			batch.GlobalExitRoot = common.Hash{}
+		}
+	}
+
 	return populateBatchDetails(batch)
 }
 
