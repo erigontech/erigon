@@ -212,7 +212,6 @@ func (e *EthereumExecutionModule) ValidateChain(ctx context.Context, req *execut
 		}
 	}
 	if isInvalidChain {
-		e.logger.Warn("ethereumExecutionModule.ValidateChain: chain is invalid", "hash", libcommon.Hash(blockHash))
 		validationStatus = execution.ExecutionStatus_BadBlock
 	}
 	validationReceipt := &execution.ValidationReceipt{

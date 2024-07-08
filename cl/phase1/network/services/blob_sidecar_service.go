@@ -78,8 +78,12 @@ func (b *blobSidecarService) ProcessMessage(ctx context.Context, subnetId *uint6
 	currentSlot := b.ethClock.GetCurrentSlot()
 	sidecarSlot := msg.SignedBlockHeader.Header.Slot
 	// [IGNORE] The block is not from a future slot (with a MAXIMUM_GOSSIP_CLOCK_DISPARITY allowance) -- i.e. validate that
-	//signed_beacon_block.message.slot <= current_slot (a client MAY queue future blocks for processing at the appropriate slot).
+	// signed_beacon_block.message.slot <= current_slot (a client MAY queue future blocks for processing at the appropriate slot).
 	if currentSlot < sidecarSlot && !b.ethClock.IsSlotCurrentSlotWithMaximumClockDisparity(sidecarSlot) {
+		return ErrIgnore
+	}
+
+	if b.forkchoiceStore.FinalizedSlot() >= sidecarSlot {
 		return ErrIgnore
 	}
 

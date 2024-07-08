@@ -252,7 +252,7 @@ func ConsensusClStages(ctx context.Context,
 					}
 					// This stage is special so use context.Background() TODO(Giulio2002): make the context be passed in
 					startingSlot := cfg.state.LatestBlockHeader().Slot
-					downloader := network2.NewBackwardBeaconDownloader(context.Background(), cfg.rpc, cfg.executionClient, cfg.indiciesDB)
+					downloader := network2.NewBackwardBeaconDownloader(ctx, cfg.rpc, cfg.executionClient, cfg.indiciesDB)
 
 					if err := SpawnStageHistoryDownload(StageHistoryReconstruction(downloader, cfg.antiquary, cfg.sn, cfg.indiciesDB, cfg.executionClient, cfg.beaconCfg, cfg.backfilling, cfg.blobBackfilling, false, startingRoot, startingSlot, cfg.tmpdir, 600*time.Millisecond, cfg.blockCollector, cfg.blockReader, cfg.blobStore, logger), context.Background(), logger); err != nil {
 						cfg.hasDownloaded = false
