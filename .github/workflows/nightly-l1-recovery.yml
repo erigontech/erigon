@@ -21,9 +21,6 @@ jobs:
       - name: Set up QEMU
         uses: docker/setup-qemu-action@v2
 
-      - name: Build Docker Images
-        run: docker compose -f docker-compose-nightly.yml build
-
       - name: Run Docker Compose
         working-directory: ./zk/tests/nightly-l1-recovery
-        run: docker compose -f docker-compose-nightly.yml up --exit-code-from=block-checker
+        run: docker compose -f docker-compose-nightly.yml up --build --quiet --exit-code-from=block-checker
