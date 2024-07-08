@@ -62,6 +62,10 @@ func (evm *testVM) Run(_ *Contract, _ []byte, readOnly bool) (ret []byte, err er
 	return
 }
 
+func (evm *testVM) RunZk(_ *Contract, _ []byte, readOnly bool) (ret []byte, err error) {
+	return evm.Run(nil, nil, readOnly)
+}
+
 func (evm *testVM) Depth() int {
 	return 0
 }

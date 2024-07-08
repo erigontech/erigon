@@ -45,6 +45,10 @@ const SMT_DEPTHS = "smt_depths"                                        // block 
 const L1_INFO_LEAVES = "l1_info_leaves"                                // l1 info tree index -> l1 info tree leaf
 const L1_INFO_ROOTS = "l1_info_roots"                                  // root hash -> l1 info tree index
 const INVALID_BATCHES = "invalid_batches"                              // batch number -> true
+const BATCH_FULLY_PROCESSED = "batch_fully_processed"                  // batch number -> true
+const LOCAL_EXIT_ROOTS = "local_exit_roots"                            // l2 block number -> local exit root
+const ROllUP_TYPES_FORKS = "rollup_types_forks"                        // rollup type id -> fork id
+const FORK_HISTORY = "fork_history"                                    // index -> fork id + last verified batch
 
 type HermezDb struct {
 	tx kv.RwTx
@@ -100,6 +104,10 @@ func CreateHermezBuckets(tx kv.RwTx) error {
 		L1_INFO_LEAVES,
 		L1_INFO_ROOTS,
 		INVALID_BATCHES,
+		BATCH_FULLY_PROCESSED,
+		LOCAL_EXIT_ROOTS,
+		ROllUP_TYPES_FORKS,
+		FORK_HISTORY,
 	}
 	for _, t := range tables {
 		if err := tx.CreateBucket(t); err != nil {
@@ -379,6 +387,10 @@ func (db *HermezDbReader) getLatest(table string) (*types.L1BatchInfo, error) {
 			batchNo = tmpBatchNo
 			value = v
 		}
+	}
+
+	if len(value) == 0 {
+		return nil, nil
 	}
 
 	if len(value) != 96 && len(value) != 64 {
@@ -920,27 +932,17 @@ func (db *HermezDb) WriteForkId(batchNo, forkId uint64) error {
 }
 
 func (db *HermezDbReader) GetLowestBatchByFork(forkId uint64) (uint64, error) {
-	c, err := db.tx.Cursor(FORKIDS)
+	forkIdBlock, err := db.tx.GetOne(FORKID_BLOCK, Uint64ToBytes(forkId))
 	if err != nil {
 		return 0, err
 	}
-	defer c.Close()
 
-	var batchNo uint64 = 0
-	var k, v []byte
-
-	for k, v, err = c.First(); k != nil; k, v, err = c.Next() {
-		if err != nil {
-			break
-		}
-		currentForkId := BytesToUint64(v)
-		if currentForkId == forkId {
-			batchNo = BytesToUint64(k)
-			break
-		}
+	batchNo, err := db.tx.GetOne(BLOCKBATCHES, forkIdBlock)
+	if err != nil {
+		return 0, err
 	}
 
-	return batchNo, err
+	return BytesToUint64(batchNo), err
 
 }
 
@@ -1273,18 +1275,20 @@ func (db *HermezDb) WriteBatchCounters(batchNumber uint64, counters map[string]i
 	return db.tx.Put(BATCH_COUNTERS, Uint64ToBytes(batchNumber), countersJson)
 }
 
-func (db *HermezDbReader) GetBatchCounters(batchNumber uint64) (map[string]int, error) {
+func (db *HermezDbReader) GetBatchCounters(batchNumber uint64) (countersMap map[string]int, found bool, err error) {
 	v, err := db.tx.GetOne(BATCH_COUNTERS, Uint64ToBytes(batchNumber))
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
-	var countersMap map[string]int
-	err = json.Unmarshal(v, &countersMap)
-	if err != nil {
-		return nil, err
+	found = len(v) > 0
+
+	if found {
+		if err = json.Unmarshal(v, &countersMap); err != nil {
+			return nil, false, err
+		}
 	}
 
-	return countersMap, nil
+	return countersMap, found, nil
 }
 
 // WriteL1BatchData stores the data for a given L1 batch number
@@ -1497,4 +1501,97 @@ func (db *HermezDbReader) GetInvalidBatch(batchNo uint64) (bool, error) {
 		return false, err
 	}
 	return len(v) > 0, nil
+}
+
+func (db *HermezDb) WriteIsBatchFullyProcessed(batchNo uint64) error {
+	return db.tx.Put(BATCH_FULLY_PROCESSED, Uint64ToBytes(batchNo), []byte{1})
+}
+
+func (db *HermezDbReader) GetIsBatchFullyProcessed(batchNo uint64) (bool, error) {
+	v, err := db.tx.GetOne(BATCH_FULLY_PROCESSED, Uint64ToBytes(batchNo))
+	if err != nil {
+		return false, err
+	}
+	return len(v) > 0, nil
+}
+
+func (db *HermezDb) WriteLocalExitRootForBatchNo(batchNo uint64, root common.Hash) error {
+	return db.tx.Put(LOCAL_EXIT_ROOTS, Uint64ToBytes(batchNo), root.Bytes())
+}
+
+func (db *HermezDbReader) GetLocalExitRootForBatchNo(batchNo uint64) (common.Hash, error) {
+	v, err := db.tx.GetOne(LOCAL_EXIT_ROOTS, Uint64ToBytes(batchNo))
+	if err != nil {
+		return common.Hash{}, err
+	}
+	return common.BytesToHash(v), nil
+}
+
+func (db *HermezDb) WriteRollupType(rollupType, forkId uint64) error {
+	return db.tx.Put(ROllUP_TYPES_FORKS, Uint64ToBytes(rollupType), Uint64ToBytes(forkId))
+}
+
+func (db *HermezDbReader) GetForkFromRollupType(rollupType uint64) (uint64, error) {
+	v, err := db.tx.GetOne(ROllUP_TYPES_FORKS, Uint64ToBytes(rollupType))
+	if err != nil {
+		return 0, err
+	}
+	return BytesToUint64(v), nil
+}
+
+func (db *HermezDb) WriteNewForkHistory(forkId, lastVerifiedBatch uint64) error {
+	cursor, err := db.tx.Cursor(FORK_HISTORY)
+	if err != nil {
+		return err
+	}
+	defer cursor.Close()
+	lastIndex, _, err := cursor.Last()
+	if err != nil {
+		return err
+	}
+	nextIndex := BytesToUint64(lastIndex) + 1
+	k := Uint64ToBytes(nextIndex)
+	forkBytes := Uint64ToBytes(forkId)
+	batchBytes := Uint64ToBytes(lastVerifiedBatch)
+	v := append(forkBytes, batchBytes...)
+	return db.tx.Put(FORK_HISTORY, k, v)
+}
+
+func (db *HermezDbReader) GetLatestForkHistory() (uint64, uint64, error) {
+	cursor, err := db.tx.Cursor(FORK_HISTORY)
+	if err != nil {
+		return 0, 0, err
+	}
+	defer cursor.Close()
+	_, v, err := cursor.Last()
+	if err != nil {
+		return 0, 0, err
+	}
+	if len(v) == 0 {
+		return 0, 0, nil
+	}
+	forkId := BytesToUint64(v[:8])
+	lastVerifiedBatch := BytesToUint64(v[8:])
+
+	return forkId, lastVerifiedBatch, nil
+}
+
+func (db *HermezDbReader) GetAllForkHistory() ([]uint64, []uint64, error) {
+	var forks, batches []uint64
+	cursor, err := db.tx.Cursor(FORK_HISTORY)
+	if err != nil {
+		return nil, nil, err
+	}
+	defer cursor.Close()
+	for k, v, err := cursor.First(); k != nil; k, v, err = cursor.Next() {
+		if err != nil {
+			return nil, nil, err
+		}
+		forkId := BytesToUint64(v[:8])
+		lastVerifiedBatch := BytesToUint64(v[8:])
+		forks = append(forks, forkId)
+		batches = append(batches, lastVerifiedBatch)
+	}
+
+	return forks, batches, nil
 }

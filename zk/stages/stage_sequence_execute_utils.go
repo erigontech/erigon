@@ -12,7 +12,7 @@ import (
 
 	"math/big"
 
-	"errors"
+	"fmt"
 
 	"github.com/0xPolygonHermez/zkevm-data-streamer/datastreamer"
 	"github.com/ledgerwatch/erigon-lib/chain"
@@ -32,11 +32,12 @@ import (
 	"github.com/ledgerwatch/erigon/turbo/shards"
 	"github.com/ledgerwatch/erigon/turbo/stages/headerdownload"
 	"github.com/ledgerwatch/erigon/zk/hermez_db"
+	"github.com/ledgerwatch/erigon/zk/tx"
 	zktx "github.com/ledgerwatch/erigon/zk/tx"
 	"github.com/ledgerwatch/erigon/zk/txpool"
 	zktypes "github.com/ledgerwatch/erigon/zk/types"
-	"github.com/ledgerwatch/log/v3"
 	"github.com/ledgerwatch/erigon/zk/utils"
+	"github.com/ledgerwatch/log/v3"
 )
 
 const (
@@ -165,16 +166,17 @@ type stageDb struct {
 }
 
 func newStageDb(tx kv.RwTx) *stageDb {
-	sdb := &stageDb{
-		tx:          tx,
-		hermezDb:    hermez_db.NewHermezDb(tx),
-		eridb:       db2.NewEriDb(tx),
-		stateReader: state.NewPlainStateReader(tx),
-		smt:         nil,
-	}
-	sdb.smt = smtNs.NewSMT(sdb.eridb)
-
+	sdb := &stageDb{}
+	sdb.SetTx(tx)
 	return sdb
+}
+
+func (sdb *stageDb) SetTx(tx kv.RwTx) {
+	sdb.tx = tx
+	sdb.hermezDb = hermez_db.NewHermezDb(tx)
+	sdb.eridb = db2.NewEriDb(tx)
+	sdb.stateReader = state.NewPlainStateReader(tx)
+	sdb.smt = smtNs.NewSMT(sdb.eridb)
 }
 
 type nextBatchL1Data struct {
@@ -185,30 +187,52 @@ type nextBatchL1Data struct {
 	LimitTimestamp  uint64
 }
 
-func prepareForkId(cfg SequenceBlockCfg, lastBatch, executionAt uint64, hermezDb *hermez_db.HermezDb) (uint64, error) {
-	var forkId uint64 = 0
-	var err error
+type forkDb interface {
+	GetAllForkHistory() ([]uint64, []uint64, error)
+	GetLatestForkHistory() (uint64, uint64, error)
+	GetForkId(batch uint64) (uint64, error)
+	WriteForkIdBlockOnce(forkId, block uint64) error
+	WriteForkId(batch, forkId uint64) error
+}
 
-	if executionAt == 0 {
-		// capture the initial sequencer fork id for the first batch
-		forkId = cfg.zk.SequencerInitialForkId
-		if err := hermezDb.WriteForkId(1, forkId); err != nil {
-			return forkId, err
-		}
-		if err := hermezDb.WriteForkIdBlockOnce(uint64(forkId), 1); err != nil {
-			return forkId, err
-		}
-	} else {
-		forkId, err = hermezDb.GetForkId(lastBatch)
-		if err != nil {
-			return forkId, err
-		}
-		if forkId == 0 {
-			return forkId, errors.New("the network cannot have a 0 fork id")
+func prepareForkId(lastBatch, executionAt uint64, hermezDb forkDb) (uint64, error) {
+	var err error
+	var latest uint64
+
+	// get all history and find the fork appropriate for the batch we're processing now
+	allForks, allBatches, err := hermezDb.GetAllForkHistory()
+	if err != nil {
+		return 0, err
+	}
+
+	nextBatch := lastBatch + 1
+
+	// iterate over the batch boundaries and find the latest fork that applies
+	for idx, batch := range allBatches {
+		if nextBatch > batch {
+			latest = allForks[idx]
 		}
 	}
 
-	return forkId, nil
+	if latest == 0 {
+		return 0, fmt.Errorf("could not find a suitable fork for batch %v, cannot start sequencer, check contract configuration", lastBatch+1)
+	}
+
+	// now we need to check the last batch to see if we need to update the fork id
+	lastBatchFork, err := hermezDb.GetForkId(lastBatch)
+	if err != nil {
+		return 0, err
+	}
+
+	// write the fork height once for the next block at the point of fork upgrade
+	if lastBatchFork < latest {
+		log.Info("Upgrading fork id", "from", lastBatchFork, "to", latest, "batch", nextBatch)
+		if err := hermezDb.WriteForkIdBlockOnce(latest, executionAt+1); err != nil {
+			return latest, err
+		}
+	}
+
+	return latest, nil
 }
 
 func prepareHeader(tx kv.RwTx, previousBlockNumber, deltaTimestamp, forcedTimestamp, forkId uint64, coinbase common.Address) (*types.Header, *types.Block, error) {
@@ -420,5 +444,47 @@ func checkForBadBatch(
 		}
 	}
 
+	return false, nil
+}
+
+var (
+	LIMIT_128_KB = uint64(128 * 1024)
+)
+
+type BlockDataChecker struct {
+	limit uint64 // amount of bytes
+	bytes []byte
+}
+
+func NewBlockDataChecker() *BlockDataChecker {
+	return &BlockDataChecker{
+		limit: LIMIT_128_KB,
+		bytes: make([]byte, 0),
+	}
+}
+
+// adds bytes amounting to the block data and checks if the limit is reached
+// if the limit is reached, the data is not added, so this can be reused again for next check
+func (bdc *BlockDataChecker) AddBlockStartData(forkId uint16, deltaTimestamp, l1InfoTreeIndex uint32) bool {
+	newBytes := tx.GenerateStartBlockBatchL2Data(forkId, deltaTimestamp, l1InfoTreeIndex)
+
+	if uint64(len(bdc.bytes)+len(newBytes)) > bdc.limit {
+		return true
+	}
+
+	bdc.bytes = append(bdc.bytes, newBytes...)
+	return false
+}
+
+func (bdc *BlockDataChecker) AddTransactionData(transaction types.Transaction, forkId uint16, effectiveGasPrice uint8) (bool, error) {
+	encoded, err := tx.TransactionToL2Data(transaction, forkId, effectiveGasPrice)
+	if err != nil {
+		return false, err
+	}
+	if uint64(len(bdc.bytes)+len(encoded)) > bdc.limit {
+		return true, nil
+	}
+
+	bdc.bytes = append(bdc.bytes, encoded...)
 	return false, nil
 }

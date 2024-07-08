@@ -155,7 +155,7 @@ func (evm *EVM) createZkEvm(caller ContractRef, codeAndHash *codeAndHash, gas ui
 		return nil, address, gas, nil
 	}
 
-	ret, err = run(evm, contract, nil, false)
+	ret, err = runZk(evm, contract, nil, false)
 
 	// EIP-170: Contract code size limit
 	if err == nil && evm.chainRules.IsSpuriousDragon && len(ret) > params.MaxCodeSize {
@@ -336,7 +336,7 @@ func (evm *EVM) call_zkevm(typ OpCode, caller ContractRef, addr libcommon.Addres
 		if typ == STATICCALL {
 			readOnly = true
 		}
-		ret, err = run(evm, contract, input, readOnly)
+		ret, err = runZk(evm, contract, input, readOnly)
 		gas = contract.Gas
 	}
 	// When an error was returned by the EVM or when setting the creation code

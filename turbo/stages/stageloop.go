@@ -21,6 +21,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/wrap"
 	"github.com/ledgerwatch/erigon/polygon/bor/finality"
 	"github.com/ledgerwatch/erigon/zk"
+	"github.com/ledgerwatch/erigon/zk/sequencer"
 
 	"github.com/ledgerwatch/erigon/consensus"
 	"github.com/ledgerwatch/erigon/consensus/misc"
@@ -136,18 +137,23 @@ func StageLoopIteration(ctx context.Context, db kv.RwDB, txc wrap.TxContainer, s
 	// - Send Notifications: about new blocks, new receipts, state changes, etc...
 	// - Prune(limited time)+Commit(sync). Write to disk happening here.
 
+	if hook != nil {
+		if err = hook.BeforeRun(txc.Tx, isSynced); err != nil {
+			return err
+		}
+	}
+
+	if sequencer.IsSequencer() {
+		canRunCycleInOneTransaction = false // we need to commit when sequencer each run
+	}
+
 	if canRunCycleInOneTransaction && !externalTx {
+		// -- Process new blocks + commit(no_sync)
 		txc.Tx, err = db.BeginRwNosync(ctx)
 		if err != nil {
 			return err
 		}
 		defer txc.Tx.Rollback()
-	}
-
-	if hook != nil {
-		if err = hook.BeforeRun(txc.Tx, isSynced); err != nil {
-			return err
-		}
 	}
 	_, err = sync.Run(db, txc, initialCycle)
 	if err != nil {

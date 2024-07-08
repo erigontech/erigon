@@ -205,7 +205,7 @@ func postBlockStateHandling(
 ) error {
 	blockNumber := header.Number.Uint64()
 
-	blokInfoRootHash, err := blockinfo.BuildBlockInfoTree(
+	blockInfoRootHash, err := blockinfo.BuildBlockInfoTree(
 		&header.Coinbase,
 		blockNumber,
 		header.Time,
@@ -220,10 +220,10 @@ func postBlockStateHandling(
 		return err
 	}
 
-	ibs.PostExecuteStateSet(cfg.chainConfig, header.Number.Uint64(), blokInfoRootHash)
+	ibs.PostExecuteStateSet(cfg.chainConfig, header.Number.Uint64(), blockInfoRootHash)
 
 	// store a reference to this block info root against the block number
-	return hermezDb.WriteBlockInfoRoot(header.Number.Uint64(), *blokInfoRootHash)
+	return hermezDb.WriteBlockInfoRoot(header.Number.Uint64(), *blockInfoRootHash)
 }
 
 func addSenders(

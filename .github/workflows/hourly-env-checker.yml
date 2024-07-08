@@ -1,0 +1,37 @@
+name: Hourly - Envs Checker
+
+on:
+  schedule:
+    - cron: '0 * * * *' # hourly
+  workflow_dispatch:
+
+jobs:
+  test-node:
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    strategy:
+      matrix:
+        include:
+          - name: "Integration 5 - Legacy"
+            network: "integration-5"
+            rpc: "http://34.175.214.161:8505"
+          - name: "Integration 5 - Erigon RPC"
+            network: "integration-5"
+            rpc: "http://34.175.214.161:8500"
+          - name: "Integration 5 - Erigon Sequencer"
+            network: "integration-5"
+            rpc: "http://34.175.214.161:8005"
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Set up Go
+        uses: actions/setup-go@v3
+        with:
+          go-version: '1.20'
+
+      - name: Build Go application
+        run: go build -o check_node
+
+      - name: Run tests
+        run: ./check_node -rpcURL=${{ matrix.rpc }} -nodeName=${{ matrix.name }}

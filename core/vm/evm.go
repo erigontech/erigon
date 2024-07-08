@@ -61,6 +61,10 @@ func run(evm *EVM, contract *Contract, input []byte, readOnly bool) ([]byte, err
 	return evm.interpreter.Run(contract, input, readOnly)
 }
 
+func runZk(evm *EVM, contract *Contract, input []byte, readOnly bool) ([]byte, error) {
+	return evm.interpreter.RunZk(contract, input, readOnly)
+}
+
 // EVM is the Ethereum Virtual Machine base object and provides
 // the necessary tools to run a contract on the given state with
 // the provided context. It should be noted that any error

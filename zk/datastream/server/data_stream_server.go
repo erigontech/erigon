@@ -1,18 +1,32 @@
 package server
 
 import (
-	"bytes"
-	"encoding/binary"
-
 	"github.com/0xPolygonHermez/zkevm-data-streamer/datastreamer"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon/core/state"
 	eritypes "github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/zk/datastream/proto/github.com/0xPolygonHermez/zkevm-node/state/datastream"
 	"github.com/ledgerwatch/erigon/zk/datastream/types"
+	zktypes "github.com/ledgerwatch/erigon/zk/types"
+
 	"github.com/ledgerwatch/erigon/zk/hermez_db"
 )
+
+type DbReader interface {
+	GetBatchGlobalExitRootsProto(lastBatchNumber, batchNumber uint64) ([]types.GerUpdateProto, error)
+	GetForkId(batchNumber uint64) (uint64, error)
+	GetBlockGlobalExitRoot(blockNumber uint64) (libcommon.Hash, error)
+	GetBlockL1BlockHash(blockNumber uint64) (libcommon.Hash, error)
+	GetBlockL1InfoTreeIndex(blockNumber uint64) (uint64, error)
+	GetL1InfoTreeUpdate(index uint64) (*zktypes.L1InfoTreeUpdate, error)
+	GetBlockInfoRoot(blockNumber uint64) (libcommon.Hash, error)
+	GetIntermediateTxStateRoot(blockNumber uint64, txHash libcommon.Hash) (libcommon.Hash, error)
+	GetEffectiveGasPricePercentage(txHash libcommon.Hash) (uint8, error)
+	GetHighestBlockInBatch(batchNumber uint64) (uint64, error)
+	GetInvalidBatch(batchNumber uint64) (bool, error)
+	GetBatchNoByL2Block(blockNumber uint64) (uint64, error)
+	CheckBatchNoByL2Block(l2BlockNo uint64) (uint64, bool, error)
+}
 
 type BookmarkType byte
 
@@ -42,6 +56,10 @@ func NewDataStreamServer(stream *datastreamer.StreamServer, chainId uint64) *Dat
 	}
 }
 
+func (srv *DataStreamServer) GetChainId() uint64 {
+	return srv.chainId
+}
+
 type DataStreamEntries struct {
 	index   int
 	entries []DataStreamEntryProto
@@ -50,6 +68,12 @@ type DataStreamEntries struct {
 func (d *DataStreamEntries) Add(entry DataStreamEntryProto) {
 	d.entries[d.index] = entry
 	d.index++
+}
+
+func (d *DataStreamEntries) AddMany(entries []DataStreamEntryProto) {
+	for _, e := range entries {
+		d.Add(e)
+	}
 }
 
 func (d *DataStreamEntries) Entries() []DataStreamEntryProto {
@@ -86,143 +110,31 @@ func (srv *DataStreamServer) CommitEntriesToStreamProto(entries []DataStreamEntr
 	return nil
 }
 
-func (srv *DataStreamServer) CreateBatchBookmarkEntryProto(batchNo uint64) *types.BookmarkProto {
-	return &types.BookmarkProto{
-		BookMark: &datastream.BookMark{
-			Type:  datastream.BookmarkType_BOOKMARK_TYPE_BATCH,
-			Value: batchNo,
-		},
-	}
-}
-
-func (srv *DataStreamServer) CreateL2BlockBookmarkEntryProto(blockNo uint64) *types.BookmarkProto {
-	return &types.BookmarkProto{
-		BookMark: &datastream.BookMark{
-			Type:  datastream.BookmarkType_BOOKMARK_TYPE_L2_BLOCK,
-			Value: blockNo,
-		},
-	}
-}
-
-func (srv *DataStreamServer) CreateL2BlockProto(
-	block *eritypes.Block,
-	blockHash []byte,
-	batchNumber uint64,
-	ger libcommon.Hash,
-	deltaTimestamp uint32,
-	l1InfoIndex uint32,
-	l1BlockHash libcommon.Hash,
-	minTimestamp uint64,
-	blockInfoRoot libcommon.Hash,
-) *types.L2BlockProto {
-	return &types.L2BlockProto{
-		L2Block: &datastream.L2Block{
-			Number:          block.NumberU64(),
-			BatchNumber:     batchNumber,
-			Timestamp:       block.Time(),
-			DeltaTimestamp:  deltaTimestamp,
-			MinTimestamp:    minTimestamp,
-			L1Blockhash:     l1BlockHash.Bytes(),
-			L1InfotreeIndex: l1InfoIndex,
-			Hash:            blockHash,
-			StateRoot:       block.Root().Bytes(),
-			GlobalExitRoot:  ger.Bytes(),
-			Coinbase:        block.Coinbase().Bytes(),
-			BlockInfoRoot:   blockInfoRoot.Bytes(),
-		},
-	}
-}
-
-func (srv *DataStreamServer) CreateTransactionProto(
-	effectiveGasPricePercentage uint8,
-	stateRoot libcommon.Hash,
-	tx eritypes.Transaction,
-	blockNumber uint64,
-) (*types.TxProto, error) {
-	buf := make([]byte, 0)
-	writer := bytes.NewBuffer(buf)
-	err := tx.EncodeRLP(writer)
-	if err != nil {
-		return nil, err
-	}
-
-	encoded := writer.Bytes()
-
-	return &types.TxProto{
-		Transaction: &datastream.Transaction{
-			EffectiveGasPricePercentage: uint32(effectiveGasPricePercentage),
-			IsValid:                     true, // TODO: SEQ: we don't store this value anywhere currently as a sync node
-			ImStateRoot:                 stateRoot.Bytes(),
-			Encoded:                     encoded,
-			L2BlockNumber:               blockNumber,
-		},
-	}, nil
-}
-
-func (srv *DataStreamServer) CreateBatchStartProto(batchNo, chainId, forkId uint64, batchType datastream.BatchType) *types.BatchStartProto {
-	return &types.BatchStartProto{
-		BatchStart: &datastream.BatchStart{
-			Number:  batchNo,
-			ForkId:  forkId,
-			ChainId: chainId,
-			Type:    batchType,
-		},
-	}
-}
-
-func (srv *DataStreamServer) CreateBatchEndProto(localExitRoot, stateRoot libcommon.Hash, batchNumber uint64) *types.BatchEndProto {
-	return &types.BatchEndProto{
-		BatchEnd: &datastream.BatchEnd{
-			LocalExitRoot: localExitRoot.Bytes(),
-			StateRoot:     stateRoot.Bytes(),
-			Number:        batchNumber,
-		},
-	}
-}
-
-func (srv *DataStreamServer) CreateGerUpdateProto(
-	batchNumber, timestamp uint64,
-	ger libcommon.Hash,
-	coinbase libcommon.Address,
-	forkId uint64,
+func createBlockWithBatchCheckStreamEntriesProto(
 	chainId uint64,
-	stateRoot libcommon.Hash,
-) *types.GerUpdateProto {
-	return &types.GerUpdateProto{
-		UpdateGER: &datastream.UpdateGER{
-			BatchNumber:    batchNumber,
-			Timestamp:      timestamp,
-			GlobalExitRoot: ger.Bytes(),
-			Coinbase:       coinbase.Bytes(),
-			ForkId:         forkId,
-			ChainId:        chainId,
-			StateRoot:      stateRoot.Bytes(),
-			Debug:          nil,
-		},
-	}
-}
-
-func (srv *DataStreamServer) CreateStreamEntriesProto(
-	block *eritypes.Block,
-	reader *hermez_db.HermezDbReader,
+	reader DbReader,
 	tx kv.Tx,
+	block,
 	lastBlock *eritypes.Block,
-	batchNumber uint64,
+	batchNumber,
 	lastBatchNumber uint64,
-	gers []types.GerUpdateProto,
 	l1InfoTreeMinTimestamps map[uint64]uint64,
 	isBatchEnd bool,
 	transactionsToIncludeByIndex []int, // passing nil here will include all transactions in the blocks
 ) ([]DataStreamEntryProto, error) {
-	filteredTransactions := block.Transactions()
-	if transactionsToIncludeByIndex != nil {
-		filteredTransactionsBuilder := make(eritypes.Transactions, len(transactionsToIncludeByIndex))
-		for i, txIndexInBlock := range transactionsToIncludeByIndex {
-			filteredTransactionsBuilder[i] = filteredTransactions[txIndexInBlock]
-		}
+	var err error
 
-		filteredTransactions = filteredTransactionsBuilder
+	gers, err := reader.GetBatchGlobalExitRootsProto(lastBatchNumber, batchNumber)
+	if err != nil {
+		return nil, err
 	}
+
+	// we might have a series of empty batches to account for, so we need to know the gap
+	batchGap := batchNumber - lastBatchNumber
+	isBatchStart := batchGap > 0
+
+	// filter transactions by indexes that should be included
+	filteredTransactions := filterTransactionByIndexes(block.Transactions(), transactionsToIncludeByIndex)
 
 	blockNum := block.NumberU64()
 
@@ -230,14 +142,7 @@ func (srv *DataStreamServer) CreateStreamEntriesProto(
 	entryCount += len(filteredTransactions) // transactions
 	entryCount += len(gers)
 
-	var err error
-
-	batchStart := batchNumber != lastBatchNumber
-
-	// we might have a series of empty batches to account for, so we need to know the gap
-	batchGap := batchNumber - lastBatchNumber
-
-	if batchNumber != lastBatchNumber {
+	if isBatchStart {
 		// we will add in a batch bookmark and a batch start entry
 		entryCount += 2
 
@@ -252,56 +157,58 @@ func (srv *DataStreamServer) CreateStreamEntriesProto(
 
 	entries := NewDataStreamEntries(entryCount)
 
+	// batch start
 	// BATCH BOOKMARK
-	if batchStart {
-		// if we have a gap of more than 1 batch then we need to write in the batch start and ends for these empty batches
-		if batchGap > 1 {
-			for i := 1; i < int(batchGap); i++ {
-				workingBatch := lastBatchNumber + uint64(i)
-
-				// bookmark for new batch
-				err = srv.addBatchStartEntries(reader, workingBatch, entries)
-				if err != nil {
-					return nil, err
-				}
-
-				// see if we have any gers to handle
-				for _, ger := range gers {
-					upd := ger.UpdateGER
-					if upd.BatchNumber == workingBatch {
-						gerUpdate := srv.CreateGerUpdateProto(upd.BatchNumber, upd.Timestamp, libcommon.BytesToHash(upd.GlobalExitRoot), libcommon.BytesToAddress(upd.Coinbase), upd.ForkId, upd.ChainId, libcommon.BytesToHash(upd.StateRoot))
-						entries.Add(gerUpdate)
-					}
-				}
-
-				// seal off the last batch
-				localExitRoot, err := srv.getLocalExitRoot(workingBatch, reader, tx)
-				if err != nil {
-					return nil, err
-				}
-				root := lastBlock.Root()
-				end := srv.CreateBatchEndProto(localExitRoot, root, workingBatch)
-				entries.Add(end)
-			}
-		}
-
-		// now write in the batch start for this batch
-		err = srv.addBatchStartEntries(reader, batchNumber, entries)
-		if err != nil {
+	if isBatchStart {
+		var entriesProto []DataStreamEntryProto
+		if entriesProto, err = createBatchStartEntriesProto(reader, tx, batchNumber, lastBatchNumber, batchGap, chainId, block.Root(), gers); err != nil {
 			return nil, err
 		}
+		entries.AddMany(entriesProto)
+	}
+
+	forkId, err := reader.GetForkId(batchNumber)
+	if err != nil {
+		return nil, err
 	}
 
 	deltaTimestamp := block.Time() - lastBlock.Time()
-
 	if blockNum == 1 {
 		deltaTimestamp = block.Time()
 		l1InfoTreeMinTimestamps[0] = 0
 	}
 
+	blockEntries, err := createFullBlockStreamEntriesProto(reader, tx, block, filteredTransactions, forkId, deltaTimestamp, batchNumber, l1InfoTreeMinTimestamps)
+	if err != nil {
+		return nil, err
+	}
+	entries.AddMany(blockEntries.Entries())
+
+	if isBatchEnd {
+		var batchEndEntries []DataStreamEntryProto
+		if batchEndEntries, err = addBatchEndEntriesProto(reader, tx, batchNumber, lastBatchNumber, block.Root(), gers); err != nil {
+			return nil, err
+		}
+		entries.AddMany(batchEndEntries)
+	}
+
+	return entries.Entries(), nil
+}
+
+func createFullBlockStreamEntriesProto(
+	reader DbReader,
+	tx kv.Tx,
+	block *eritypes.Block,
+	filteredTransactions eritypes.Transactions,
+	forkId,
+	deltaTimestamp,
+	batchNumber uint64,
+	l1InfoTreeMinTimestamps map[uint64]uint64,
+) (*DataStreamEntries, error) {
+	entries := NewDataStreamEntries(len(filteredTransactions) + 2)
+	blockNum := block.NumberU64()
 	// L2 BLOCK BOOKMARK
-	l2blockBookmark := srv.CreateL2BlockBookmarkEntryProto(blockNum)
-	entries.Add(l2blockBookmark)
+	entries.Add(newL2BlockBookmarkEntryProto(blockNum))
 
 	ger, err := reader.GetBlockGlobalExitRoot(blockNum)
 	if err != nil {
@@ -333,114 +240,52 @@ func (srv *DataStreamServer) CreateStreamEntriesProto(
 		return nil, err
 	}
 
-	forkId, err := reader.GetForkId(batchNumber)
+	// L2 BLOCK
+	entries.Add(newL2BlockProto(block, block.Hash().Bytes(), batchNumber, ger, uint32(deltaTimestamp), uint32(l1InfoIndex), l1BlockHash, l1InfoTreeMinTimestamps[l1InfoIndex], blockInfoRoot))
+
+	var transaction DataStreamEntryProto
+	isEtrog := forkId <= EtrogBatchNumber
+	for _, tx := range filteredTransactions {
+		if transaction, err = createTransactionEntryProto(reader, tx, blockNum, isEtrog); err != nil {
+			return nil, err
+		}
+		entries.Add(transaction)
+	}
+
+	return entries, nil
+}
+
+func createTransactionEntryProto(
+	reader DbReader,
+	tx eritypes.Transaction,
+	blockNum uint64,
+	isEtrog bool,
+) (DataStreamEntryProto, error) {
+	effectiveGasPricePercentage, err := reader.GetEffectiveGasPricePercentage(tx.Hash())
 	if err != nil {
 		return nil, err
 	}
 
-	blockHash := block.Hash().Bytes()
-
-	// L2 BLOCK
-	l2Block := srv.CreateL2BlockProto(block, blockHash, batchNumber, ger, uint32(deltaTimestamp), uint32(l1InfoIndex), l1BlockHash, l1InfoTreeMinTimestamps[l1InfoIndex], blockInfoRoot)
-	entries.Add(l2Block)
-
-	for _, tx := range filteredTransactions {
-		effectiveGasPricePercentage, err := reader.GetEffectiveGasPricePercentage(tx.Hash())
+	var intermediateRoot libcommon.Hash
+	if isEtrog {
+		intermediateRoot, err = reader.GetIntermediateTxStateRoot(blockNum, tx.Hash())
 		if err != nil {
 			return nil, err
 		}
-
-		var intermediateRoot libcommon.Hash
-		if forkId <= EtrogBatchNumber {
-			intermediateRoot, err = reader.GetIntermediateTxStateRoot(blockNum, tx.Hash())
-			if err != nil {
-				return nil, err
-			}
-		}
-
-		// TRANSACTION
-		transaction, err := srv.CreateTransactionProto(effectiveGasPricePercentage, intermediateRoot, tx, blockNum)
-		entries.Add(transaction)
 	}
 
-	if isBatchEnd {
-		// see if we have any gers to handle
-		for _, ger := range gers {
-			upd := ger.UpdateGER
-			if upd.BatchNumber == batchNumber {
-				gerUpdate := srv.CreateGerUpdateProto(upd.BatchNumber, upd.Timestamp, libcommon.BytesToHash(upd.GlobalExitRoot), libcommon.BytesToAddress(upd.Coinbase), upd.ForkId, upd.ChainId, libcommon.BytesToHash(upd.StateRoot))
-				entries.Add(gerUpdate)
-			}
-		}
+	// TRANSACTION
 
-		localExitRoot, err := srv.getLocalExitRoot(batchNumber, reader, tx)
-		if err != nil {
-			return nil, err
-		}
-		// seal off the last batch
-		root := block.Root()
-		end := srv.CreateBatchEndProto(localExitRoot, root, batchNumber)
-		entries.Add(end)
-	}
-
-	return entries.Entries(), nil
-}
-
-func (srv *DataStreamServer) getBatchTypeAndFork(batchNumber uint64, reader *hermez_db.HermezDbReader) (datastream.BatchType, uint64, error) {
-	var batchType datastream.BatchType
-	invalidBatch, err := reader.GetInvalidBatch(batchNumber)
+	txProto, err := newTransactionProto(effectiveGasPricePercentage, intermediateRoot, tx, blockNum)
 	if err != nil {
-		return datastream.BatchType_BATCH_TYPE_UNSPECIFIED, 0, err
+		return nil, err
 	}
-	if invalidBatch {
-		batchType = datastream.BatchType_BATCH_TYPE_INVALID
-	} else if batchNumber == 1 {
-		batchType = datastream.BatchType_BATCH_TYPE_INJECTED
-	} else {
-		batchType = datastream.BatchType_BATCH_TYPE_REGULAR
-	}
-	fork, err := reader.GetForkId(batchNumber)
-	return batchType, fork, err
+
+	return txProto, nil
 }
 
-func (srv *DataStreamServer) addBatchStartEntries(reader *hermez_db.HermezDbReader, batchNum uint64, entries *DataStreamEntries) error {
-	batchBookmark := srv.CreateBatchBookmarkEntryProto(batchNum)
-	entries.Add(batchBookmark)
-	batchType, fork, err := srv.getBatchTypeAndFork(batchNum, reader)
-	if err != nil {
-		return err
-	}
-	batchStart := srv.CreateBatchStartProto(batchNum, srv.chainId, fork, batchType)
-	entries.Add(batchStart)
-	return nil
-}
-
-func (srv *DataStreamServer) getLocalExitRoot(batch uint64, reader *hermez_db.HermezDbReader, tx kv.Tx) (libcommon.Hash, error) {
-	// now to fetch the LER for the batch - based on the last block of the batch
-	var localExitRoot libcommon.Hash
-	if batch > 0 {
-		checkBatch := batch
-		for ; checkBatch > 0; checkBatch-- {
-			lastBlockNumber, err := reader.GetHighestBlockInBatch(checkBatch)
-			if err != nil {
-				return libcommon.Hash{}, err
-			}
-			stateReader := state.NewPlainState(tx, lastBlockNumber, nil)
-			rawLer, err := stateReader.ReadAccountStorage(state.GER_MANAGER_ADDRESS, 1, &state.GLOBAL_EXIT_ROOT_POS_1)
-			if err != nil {
-				return libcommon.Hash{}, err
-			}
-			stateReader.Close()
-			localExitRoot = libcommon.BytesToHash(rawLer)
-			if localExitRoot != (libcommon.Hash{}) {
-				break
-			}
-		}
-	}
-	return localExitRoot, nil
-}
-
-func (srv *DataStreamServer) CreateAndBuildStreamEntryBytesProto(
+func CreateAndBuildStreamEntryBytesProto(
+	chainId uint64,
 	block *eritypes.Block,
 	reader *hermez_db.HermezDbReader,
 	tx kv.Tx,
@@ -451,12 +296,7 @@ func (srv *DataStreamServer) CreateAndBuildStreamEntryBytesProto(
 	isBatchEnd bool,
 	transactionsToIncludeByIndex []int, // passing nil here will include all transactions in the blocks
 ) ([]byte, error) {
-	gersInBetween, err := reader.GetBatchGlobalExitRootsProto(lastBatchNumber, batchNumber)
-	if err != nil {
-		return nil, err
-	}
-
-	entries, err := srv.CreateStreamEntriesProto(block, reader, tx, lastBlock, batchNumber, lastBatchNumber, gersInBetween, l1InfoTreeMinTimestamps, isBatchEnd, transactionsToIncludeByIndex)
+	entries, err := createBlockWithBatchCheckStreamEntriesProto(chainId, reader, tx, block, lastBlock, batchNumber, lastBatchNumber, l1InfoTreeMinTimestamps, isBatchEnd, transactionsToIncludeByIndex)
 	if err != nil {
 		return nil, err
 	}
@@ -504,8 +344,8 @@ func (srv *DataStreamServer) GetHighestBlockNumber() (uint64, error) {
 }
 
 // must be done on offline server
-// finds the position of the endBlock entry for the given number
-// and unwinds the datastream file to it
+// finds the position of the block bookmark entry and deletes from it onward
+// blockNumber 10 would return the stream to before block 10 bookmark
 func (srv *DataStreamServer) UnwindToBlock(blockNumber uint64) error {
 	// check if server is online
 
@@ -520,39 +360,25 @@ func (srv *DataStreamServer) UnwindToBlock(blockNumber uint64) error {
 		return err
 	}
 
-	//find end block entry to delete from it onward
-	for {
-		entry, err := srv.stream.GetEntry(entryNum)
-		if err != nil {
-			return err
-		}
-		if entry.Type == datastreamer.EntryType(3) {
-			break
-		}
-		entryNum -= 1
-	}
-
-	return srv.stream.TruncateFile(entryNum + 1)
+	return srv.stream.TruncateFile(entryNum)
 }
 
-const (
-	PACKET_TYPE_DATA = 2
-	// NOOP_ENTRY_NUMBER is used because we don't care about the entry number when feeding an atrificial
-	// stream to the executor, if this ever changes then we'll need to populate an actual number
-	NOOP_ENTRY_NUMBER = 0
-)
+// must be done on offline server
+// finds the position of the endBlock entry for the given number
+// and unwinds the datastream file to it
+func (srv *DataStreamServer) UnwindToBatchStart(batchNumber uint64) error {
+	// check if server is online
 
-func encodeEntryToBytesProto(entry DataStreamEntryProto) ([]byte, error) {
-	data, err := entry.Marshal()
+	// find blockend entry
+	bookmark := types.NewBookmarkProto(batchNumber, datastream.BookmarkType_BOOKMARK_TYPE_BATCH)
+	marshalled, err := bookmark.Marshal()
 	if err != nil {
-		return nil, err
+		return err
 	}
-	var totalLength = 1 + 4 + 4 + 8 + uint32(len(data))
-	buf := make([]byte, 1)
-	buf[0] = PACKET_TYPE_DATA
-	buf = binary.BigEndian.AppendUint32(buf, totalLength)
-	buf = binary.BigEndian.AppendUint32(buf, uint32(entry.Type()))
-	buf = binary.BigEndian.AppendUint64(buf, uint64(NOOP_ENTRY_NUMBER))
-	buf = append(buf, data...)
-	return buf, nil
+	entryNum, err := srv.stream.GetBookmark(marshalled)
+	if err != nil {
+		return err
+	}
+
+	return srv.stream.TruncateFile(entryNum)
 }

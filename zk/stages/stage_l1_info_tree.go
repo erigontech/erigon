@@ -38,7 +38,6 @@ func SpawnL1InfoTreeStage(
 	tx kv.RwTx,
 	cfg L1InfoTreeCfg,
 	ctx context.Context,
-	initialCycle bool,
 	logger log.Logger,
 ) (err error) {
 	logPrefix := s.LogPrefix()

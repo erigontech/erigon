@@ -1,4 +1,4 @@
-name: Nightly - Bridge ERC20 L2->L1
+name: Nightly - BridgeMessage
 
 on:
   schedule:
@@ -44,5 +44,5 @@ jobs:
           L1BridgeAddr="${{ matrix.bridge_addr }}"
           L2BridgeAddr="${{ matrix.bridge_addr }}"
           EOF
-          docker run  --volume "./tmp/:/config/" --env BRIDGE_TEST_CONFIG_FILE=/config/test.toml bridge-e2e-realnetwork-erc20
+          docker run  --volume "./tmp/:/config/" --env BRIDGE_TEST_CONFIG_FILE=/config/test.toml bridge-e2e-realnetwork-msg
         

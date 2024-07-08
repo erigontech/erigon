@@ -13,4 +13,7 @@ var (
 	UpdateL1InfoTreeTopic          = common.HexToHash("0xda61aa7823fcd807e37b95aabcbe17f03a6f3efd514176444dae191d27fd66b3")
 	InitialSequenceBatchesTopic    = common.HexToHash("0x060116213bcbf54ca19fd649dc84b59ab2bbd200ab199770e4d923e222a28e7f")
 	SequenceBatchesTopic           = common.HexToHash("0x3e54d0825ed78523037d00a81759237eb436ce774bd546993ee67a1b67b6e766")
+	AddNewRollupTypeTopic          = common.HexToHash("0xa2970448b3bd66ba7e524e7b2a5b9cf94fa29e32488fb942afdfe70dd4b77b52")
+	CreateNewRollupTopic           = common.HexToHash("0x194c983456df6701c6a50830b90fe80e72b823411d0d524970c9590dc277a641")
+	UpdateRollupTopic              = common.HexToHash("0xf585e04c05d396901170247783d3e5f0ee9c1df23072985b50af089f5e48b19d")
 )

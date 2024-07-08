@@ -8,18 +8,18 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
+    continue-on-error: true
     strategy:
       matrix:
-          include:
-            - name: "Integration 5"
-              rpc_url: "http://34.175.214.161:8500"
-              eth_address: "0x41BB6960a5156aC29d6e9E04273837AD19d6691A"
-              secret_name: "NETWORK5_PRIVATE_KEY"
-              log_file: "/tmp/rpc-tests.d/evm-rpc-tests.log"
-              work_dir: "/tmp/rpc-tests.d"
-              max_block_size: "25000000"
-              legacy_flag: "--legacy"
-              block_interval: "12"
+        include:
+          - name: "integration-5"
+            rpc_url: "http://34.175.214.161:8500"
+            eth_address: "0x41BB6960a5156aC29d6e9E04273837AD19d6691A"
+            secret_name: "NETWORK5_PRIVATE_KEY"
+          - name: "cdk-1"
+            rpc_url: "http://34.175.214.161:8020"
+            eth_address: "0x673df8221611aD1f714053b82c4F9E2b0867CcC6"
+            secret_name: "CDK_1_PRIVATE_KEY"
 
     steps:
       - name: Checkout repository
@@ -33,13 +33,8 @@ jobs:
           RPC_URL: ${{ matrix.rpc_url }}
           PRIVATE_KEY: ${{ secrets[matrix.secret_name] }}
           ETH_ADDRESS: ${{ matrix.eth_address }}
-          LOG_FILE: ${{ matrix.log_file }}
-          WORK_DIR: ${{ matrix.work_dir }}
-          MAX_BLOCK_SIZE: ${{ matrix.max_block_size }}
-          LEGACY_FLAG: ${{ matrix.legacy_flag }}
-          BLOCK_INTERVAL: ${{ matrix.block_interval }}
         run: |
-          cd zk/tests/ansible/evm-rpc-tests && docker-compose up --build
+          cd zk/tests/ansible/evm-rpc-tests && docker compose build --quiet && docker compose up --exit-code-from ansible
 
       - name: Upload logs
         uses: actions/upload-artifact@v3

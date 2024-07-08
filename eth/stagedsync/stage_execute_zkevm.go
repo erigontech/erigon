@@ -113,6 +113,7 @@ func SpawnExecuteBlocksStageZk(s *StageState, u Unwinder, tx kv.RwTx, toBlock ui
 Loop:
 	for blockNum := s.BlockNumber + 1; blockNum <= to; blockNum++ {
 		if cfg.zk.SyncLimit > 0 && blockNum > cfg.zk.SyncLimit {
+			log.Info(fmt.Sprintf("[%s] Sync limit reached", s.LogPrefix()), "block", blockNum)
 			break
 		}
 

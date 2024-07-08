@@ -38,6 +38,22 @@ func ApplyFlagsForZkConfig(ctx *cli.Context, cfg *ethconfig.Config) {
 			if v == 0 {
 				panic(fmt.Sprintf("Flag not set: %s", flagName))
 			}
+		case []string:
+			if len(v) == 0 {
+				panic(fmt.Sprintf("Flag not set: %s", flagName))
+			}
+		case libcommon.Address:
+			if v == (libcommon.Address{}) {
+				panic(fmt.Sprintf("Flag not set: %s", flagName))
+			}
+		case time.Duration:
+			if v == 0 {
+				panic(fmt.Sprintf("Flag not set: %s", flagName))
+			}
+		case bool:
+			// nothing to check
+		default:
+			panic(fmt.Sprintf("Unsupported type for flag check: %T", value))
 		}
 	}
 
@@ -107,7 +123,6 @@ func ApplyFlagsForZkConfig(ctx *cli.Context, cfg *ethconfig.Config) {
 		RebuildTreeAfter:                       ctx.Uint64(utils.RebuildTreeAfterFlag.Name),
 		IncrementTreeAlways:                    ctx.Bool(utils.IncrementTreeAlways.Name),
 		SmtRegenerateInMemory:                  ctx.Bool(utils.SmtRegenerateInMemory.Name),
-		SequencerInitialForkId:                 ctx.Uint64(utils.SequencerInitialForkId.Name),
 		SequencerBlockSealTime:                 sequencerBlockSealTime,
 		SequencerBatchSealTime:                 sequencerBatchSealTime,
 		SequencerNonEmptyBatchSealTime:         sequencerNonEmptyBatchSealTime,
@@ -145,9 +160,7 @@ func ApplyFlagsForZkConfig(ctx *cli.Context, cfg *ethconfig.Config) {
 	if !sequencer.IsSequencer() {
 		checkFlag(utils.L2RpcUrlFlag.Name, cfg.Zk.L2RpcUrl)
 		checkFlag(utils.L2DataStreamerUrlFlag.Name, cfg.L2DataStreamerUrl)
-		checkFlag(utils.L2DataStreamerTimeout.Name, cfg.L2DataStreamerTimeout)
 	} else {
-		checkFlag(utils.SequencerInitialForkId.Name, cfg.SequencerInitialForkId)
 		checkFlag(utils.ExecutorUrls.Name, cfg.ExecutorUrls)
 		checkFlag(utils.ExecutorStrictMode.Name, cfg.ExecutorStrictMode)
 		checkFlag(utils.DataStreamHost.Name, cfg.DataStreamHost)
@@ -160,6 +173,14 @@ func ApplyFlagsForZkConfig(ctx *cli.Context, cfg *ethconfig.Config) {
 		// if we are running in strict mode, the default, and we have no executor URLs then we panic
 		if cfg.ExecutorStrictMode && !cfg.HasExecutors() {
 			panic("You must set executor urls when running in executor strict mode (zkevm.executor-strict)")
+		}
+
+		if cfg.ExecutorStrictMode && cfg.DisableVirtualCounters {
+			panic("You cannot disable virtual counters when running in strict mode")
+		}
+
+		if len(cfg.ExecutorUrls) > 0 && cfg.ExecutorUrls[0] != "" && cfg.DisableVirtualCounters {
+			panic("You cannot disable virtual counters when running with executors")
 		}
 	}
 

@@ -28,10 +28,11 @@ import (
 	types "github.com/ledgerwatch/erigon/zk/rpcdaemon"
 	"github.com/ledgerwatch/erigon/zk/sequencer"
 	"github.com/ledgerwatch/erigon/zk/syncer"
+	zktx "github.com/ledgerwatch/erigon/zk/tx"
+	"github.com/ledgerwatch/erigon/zk/utils"
 	"github.com/ledgerwatch/erigon/zk/witness"
 	"github.com/ledgerwatch/erigon/zkevm/hex"
 	"github.com/ledgerwatch/erigon/zkevm/jsonrpc/client"
-	zktx "github.com/ledgerwatch/erigon/zk/tx"
 )
 
 var sha3UncleHash = common.HexToHash("0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347")
@@ -208,6 +209,10 @@ func (api *ZkEvmAPIImpl) VirtualBatchNumber(ctx context.Context) (hexutil.Uint64
 		return hexutil.Uint64(0), err
 	}
 
+	if latestSequencedBatch == nil {
+		return hexutil.Uint64(0), nil
+	}
+
 	// todo: what if this number is the same as the last verified batch number?  do we return 0?
 
 	return hexutil.Uint64(latestSequencedBatch.BatchNo), nil
@@ -229,6 +234,149 @@ func (api *ZkEvmAPIImpl) VerifiedBatchNumber(ctx context.Context) (hexutil.Uint6
 	return hexutil.Uint64(highestVerifiedBatchNo), nil
 }
 
+// GetBatchDataByNumbers returns the batch data for the given batch numbers
+func (api *ZkEvmAPIImpl) GetBatchDataByNumbers(ctx context.Context, batchNumbers []rpc.BlockNumber) (json.RawMessage, error) {
+	tx, err := api.db.BeginRo(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback()
+
+	hermezDb := hermez_db.NewHermezDbReader(tx)
+
+	bds := make([]*types.BatchDataSlim, 0, len(batchNumbers))
+
+	for _, batchNumber := range batchNumbers {
+		bd := &types.BatchDataSlim{
+			Number: uint64(batchNumber.Int64()),
+			Empty:  false,
+		}
+
+		highestBlock, err := rawdb.ReadLastBlockSynced(tx)
+		if err != nil {
+			return nil, err
+		}
+		highestBatchNo, err := hermezDb.GetBatchNoByL2Block(highestBlock.NumberU64())
+		if err != nil {
+			return nil, err
+		}
+
+		// return null if we're not at this block height yet
+		if batchNumber > rpc.BlockNumber(highestBatchNo) {
+			bd.Empty = true
+			bds = append(bds, bd)
+			continue
+		}
+
+		// looks weird but we're using the rpc.BlockNumber type to represent the batch number, LatestBlockNumber represents latest batch
+		if batchNumber == rpc.LatestBlockNumber {
+			batchNumber = rpc.BlockNumber(highestBatchNo)
+		}
+
+		batchNo := uint64(batchNumber.Int64())
+
+		_, found, err := hermezDb.GetLowestBlockInBatch(batchNo)
+		if err != nil {
+			return nil, err
+		}
+		if !found {
+			// not found - set to empty and append
+			bd.Empty = true
+			bds = append(bds, bd)
+			continue
+		}
+
+		// block numbers in batch
+		blocksInBatch, err := hermezDb.GetL2BlockNosByBatch(batchNo)
+		if err != nil {
+			return nil, err
+		}
+
+		// todo: max - take out shared logic with getBatchByNumber
+		// collect blocks in batch
+		var batchBlocks []*eritypes.Block
+		var batchTxs []eritypes.Transaction
+		// handle genesis - not in the hermez tables so requires special treament
+		if batchNumber == 0 {
+			blk, err := api.ethApi.BaseAPI.blockByNumberWithSenders(ctx, tx, 0)
+			if err != nil {
+				return nil, err
+			}
+			batchBlocks = append(batchBlocks, blk)
+			// no txs in genesis
+		}
+		for _, blkNo := range blocksInBatch {
+			blk, err := api.ethApi.BaseAPI.blockByNumberWithSenders(ctx, tx, blkNo)
+			if err != nil {
+				return nil, err
+			}
+			batchBlocks = append(batchBlocks, blk)
+			for _, btx := range blk.Transactions() {
+				batchTxs = append(batchTxs, btx)
+			}
+		}
+
+		// batch l2 data - must build on the fly
+		forkId, err := hermezDb.GetForkId(batchNo)
+		if err != nil {
+			return nil, err
+		}
+
+		batchL2Data, err := generateBatchData(tx, hermezDb, batchBlocks, forkId)
+		if err != nil {
+			return nil, err
+		}
+
+		bd.BatchL2Data = batchL2Data
+		bds = append(bds, bd)
+	}
+
+	return populateBatchDataSlimDetails(bds)
+}
+
+func generateBatchData(
+	tx kv.Tx,
+	hermezDb *hermez_db.HermezDbReader,
+	batchBlocks []*eritypes.Block,
+	forkId uint64,
+) (batchL2Data []byte, err error) {
+	lastBlockNoInPreviousBatch := batchBlocks[0].NumberU64() - 1
+	lastBlockInPreviousBatch, err := rawdb.ReadBlockByNumber(tx, lastBlockNoInPreviousBatch)
+	if err != nil {
+		return nil, err
+	}
+
+	batchL2Data = []byte{}
+	for i := 0; i < len(batchBlocks); i++ {
+		var dTs uint32
+		if i == 0 {
+			dTs = uint32(batchBlocks[i].Time() - lastBlockInPreviousBatch.Time())
+		} else {
+			dTs = uint32(batchBlocks[i].Time() - batchBlocks[i-1].Time())
+		}
+		iti, err := hermezDb.GetBlockL1InfoTreeIndex(batchBlocks[i].NumberU64())
+		if err != nil {
+			return nil, err
+		}
+		egTx := make(map[common.Hash]uint8)
+		for _, txn := range batchBlocks[i].Transactions() {
+			eg, err := hermezDb.GetEffectiveGasPricePercentage(txn.Hash())
+			if err != nil {
+				return nil, err
+			}
+			egTx[txn.Hash()] = eg
+		}
+
+		bl2d, err := zktx.GenerateBlockBatchL2Data(uint16(forkId), dTs, uint32(iti), batchBlocks[i].Transactions(), egTx)
+		if err != nil {
+			return nil, err
+		}
+		batchL2Data = append(batchL2Data, bl2d...)
+	}
+
+	return batchL2Data, err
+}
+
 // GetBatchByNumber returns a batch from the current canonical chain. If number is nil, the
 // latest known batch is returned.
 func (api *ZkEvmAPIImpl) GetBatchByNumber(ctx context.Context, batchNumber rpc.BlockNumber, fullTx *bool) (json.RawMessage, error) {
@@ -239,27 +387,42 @@ func (api *ZkEvmAPIImpl) GetBatchByNumber(ctx context.Context, batchNumber rpc.B
 	defer tx.Rollback()
 	hermezDb := hermez_db.NewHermezDbReader(tx)
 
+	highestBlock, err := rawdb.ReadLastBlockSynced(tx)
+	if err != nil {
+		return nil, err
+	}
+	highestBatchNo, err := hermezDb.GetBatchNoByL2Block(highestBlock.NumberU64())
+	if err != nil {
+		return nil, err
+	}
+
+	// return null if we're not at this block height yet
+	if batchNumber > rpc.BlockNumber(highestBatchNo) {
+		return nil, nil
+	}
+
 	// looks weird but we're using the rpc.BlockNumber type to represent the batch number, LatestBlockNumber represents latest batch
 	if batchNumber == rpc.LatestBlockNumber {
-		highestBlock, err := rawdb.ReadLastBlockSynced(tx)
-		if err != nil {
-			return nil, err
-		}
-		highestBatchNo, err := hermezDb.GetBatchNoByL2Block(highestBlock.NumberU64())
-		if err != nil {
-			return nil, err
-		}
 		batchNumber = rpc.BlockNumber(highestBatchNo)
 	}
 
-	bn := uint64(batchNumber.Int64())
+	batchNo := uint64(batchNumber.Int64())
 
 	batch := &types.Batch{
-		Number: types.ArgUint64(bn),
+		Number: types.ArgUint64(batchNo),
+	}
+
+	// mimic zkevm node null response if we don't have the batch
+	_, found, err := hermezDb.GetLowestBlockInBatch(batchNo)
+	if err != nil {
+		return nil, err
+	}
+	if !found {
+		return nil, nil
 	}
 
 	// highest block in batch
-	blockNo, err := hermezDb.GetHighestBlockInBatch(bn)
+	blockNo, err := hermezDb.GetHighestBlockInBatch(batchNo)
 	if err != nil {
 		return nil, err
 	}
@@ -275,7 +438,7 @@ func (api *ZkEvmAPIImpl) GetBatchByNumber(ctx context.Context, batchNumber rpc.B
 	batch.Timestamp = types.ArgUint64(block.Time())
 
 	// block numbers in batch
-	blocksInBatch, err := hermezDb.GetL2BlockNosByBatch(bn)
+	blocksInBatch, err := hermezDb.GetL2BlockNosByBatch(batchNo)
 	if err != nil {
 		return nil, err
 	}
@@ -308,19 +471,82 @@ func (api *ZkEvmAPIImpl) GetBatchByNumber(ctx context.Context, batchNumber rpc.B
 		}
 	}
 
-	//for consistency with leagacy node, return nil if no transactions
+	if fullTx != nil && *fullTx {
+		batchBlocksJson := make([]interface{}, 0, len(blocksInBatch))
+		batchTransactionsJson := make([]interface{}, 0, len(batchTxs))
+		for _, blk := range batchBlocks {
+			bbj, err := api.populateBlockDetail(tx, ctx, blk, true)
+			if err != nil {
+				return nil, err
+			}
+
+			bir, err := hermezDb.GetBlockInfoRoot(blk.NumberU64())
+			if err != nil {
+				return nil, err
+			}
+
+			ger, err := hermezDb.GetBlockGlobalExitRoot(blk.NumberU64())
+			if err != nil {
+				return nil, err
+			}
+
+			batchBlockExtra := &types.BlockWithInfoRootAndGer{
+				Block:          &bbj,
+				BlockInfoRoot:  bir,
+				GlobalExitRoot: ger,
+			}
+
+			// txs
+			hashes := make([]types.TransactionOrHash, len(bbj.Transactions))
+			for i, txn := range bbj.Transactions {
+
+				blkTx := blk.Transactions()[i]
+				l2TxHash, err := zktx.ComputeL2TxHash(
+					blkTx.GetChainID().ToBig(),
+					blkTx.GetValue(),
+					blkTx.GetPrice(),
+					blkTx.GetNonce(),
+					blkTx.GetGas(),
+					blkTx.GetTo(),
+					&txn.Tx.From,
+					blkTx.GetData(),
+				)
+				if err != nil {
+					return nil, err
+				}
+
+				txn.Tx.L2Hash = l2TxHash
+				txn.Tx.Receipt.TransactionL2Hash = l2TxHash
+
+				batchTransactionsJson = append(batchTransactionsJson, txn)
+				txn.Hash = &txn.Tx.Hash
+				txn.Tx = nil
+				hashes[i] = txn
+			}
+
+			// after collecting transactions, reduce them to them hash only on the block
+			bbj.Transactions = hashes
+
+			batchBlocksJson = append(batchBlocksJson, batchBlockExtra)
+		}
+
+		batch.Blocks = batchBlocksJson
+		batch.Transactions = batchTransactionsJson
+	}
+
+	// for consistency with legacy node, return nil if no transactions
 	if len(batch.Transactions) == 0 {
 		batch.Transactions = nil
 	}
 
 	// global exit root of batch
-	batchGer, foundBatchGerNumber, err := hermezDb.GetLastBatchGlobalExitRoot(bn)
+	batchGer, foundBatchGerNumber, err := hermezDb.GetLastBatchGlobalExitRoot(batchNo)
 	if err != nil {
 		return nil, err
 	}
 
 	// get last block in batch
-	lastBlockInbatch, err := hermezDb.GetHighestBlockInBatch(bn)
+	lastBlockInbatch, err := hermezDb.GetHighestBlockInBatch(batchNo)
 	if err != nil {
 		return nil, err
 	}
@@ -350,17 +576,22 @@ func (api *ZkEvmAPIImpl) GetBatchByNumber(ctx context.Context, batchNumber rpc.B
 	}
 
 	// sequence
-	seq, err := hermezDb.GetSequenceByBatchNo(bn)
+	seq, err := hermezDb.GetSequenceByBatchNo(batchNo)
 	if err != nil {
 		return nil, err
 	}
 	if seq != nil {
 		batch.SendSequencesTxHash = &seq.L1TxHash
 	}
-	batch.Closed = seq != nil || bn == 0 || bn == 1 // sequenced, genesis or injected batch 1 - special batches 0,1 will always be closed
+	_, found, err = hermezDb.GetLowestBlockInBatch(batchNo + 1)
+	if err != nil {
+		return nil, err
+	}
+	// sequenced, genesis or injected batch 1 - special batches 0,1 will always be closed, if next batch has blocks, bn must be closed
+	batch.Closed = seq != nil || batchNo == 0 || batchNo == 1 || found
 
 	// verification
-	ver, err := hermezDb.GetVerificationByBatchNo(bn)
+	ver, err := hermezDb.GetVerificationByBatchNo(batchNo)
 	if err != nil {
 		return nil, err
 	}
@@ -368,7 +599,7 @@ func (api *ZkEvmAPIImpl) GetBatchByNumber(ctx context.Context, batchNumber rpc.B
 		batch.VerifyBatchTxHash = &ver.L1TxHash
 	}
 
-	// exit roots
+	// exit roots (MainnetExitRoot, RollupExitRoot)
 	infoTreeUpdate, err := hermezDb.GetL1InfoTreeUpdateByGer(batch.GlobalExitRoot)
 	if err != nil {
 		return nil, err
@@ -378,58 +609,53 @@ func (api *ZkEvmAPIImpl) GetBatchByNumber(ctx context.Context, batchNumber rpc.B
 		batch.RollupExitRoot = infoTreeUpdate.RollupExitRoot
 	}
 
-	if infoTreeUpdate == nil {
-		return nil, errors.New("infoTreeUpdate is nil")
+	// local exit root
+	localExitRoot, err := utils.GetBatchLocalExitRoot(batchNo, hermezDb, tx)
+	if err != nil {
+		return nil, err
 	}
+	batch.LocalExitRoot = localExitRoot
 
 	// batch l2 data - must build on the fly
-	forkId, err := hermezDb.GetForkId(bn)
+	forkId, err := hermezDb.GetForkId(batchNo)
 	if err != nil {
 		return nil, err
 	}
 
-	// last batch last block for deltaTimestamp calc
-	lastBlockNoInPreviousBatch := batchBlocks[0].NumberU64() - 1
-	lastBlockInPreviousBatch, err := rawdb.ReadBlockByNumber(tx, lastBlockNoInPreviousBatch)
+	batchL2Data, err := generateBatchData(tx, hermezDb, batchBlocks, forkId)
 	if err != nil {
 		return nil, err
-	}
-
-	var batchL2Data []byte
-	for i := 0; i < len(batchBlocks); i++ {
-		var dTs uint32
-		if i == 0 {
-			dTs = uint32(batchBlocks[i].Time() - lastBlockInPreviousBatch.Time())
-		} else {
-			dTs = uint32(batchBlocks[i].Time() - batchBlocks[i-1].Time())
-		}
-		iti, err := hermezDb.GetBlockL1InfoTreeIndex(batchBlocks[i].NumberU64())
-
-		egTx := make(map[common.Hash]uint8)
-		for _, txn := range batchBlocks[i].Transactions() {
-			eg, err := hermezDb.GetEffectiveGasPricePercentage(txn.Hash())
-			if err != nil {
-				return nil, err
-			}
-			egTx[txn.Hash()] = eg
-		}
-
-		bl2d, err := zktx.GenerateBlockBatchL2Data(uint16(forkId), dTs, uint32(iti), batchBlocks[i].Transactions(), egTx)
-		if err != nil {
-			return nil, err
-		}
-		batchL2Data = append(batchL2Data, bl2d...)
 	}
 	batch.BatchL2Data = batchL2Data
 
-	// currently gives 'error execution reverted' when calling the L1
-	//oaih, err := api.l1Syncer.GetOldAccInputHash(ctx, &api.config.AddressRollup, ApiRollupId, bn+1)
-	//if err != nil {
-	//	return nil, err
-	//}
-	//batch.AccInputHash = oaih
+	oldAccInputHash, err := api.l1Syncer.GetOldAccInputHash(ctx, &api.config.AddressRollup, ApiRollupId, batchNo)
+	if err != nil {
+		return nil, err
+	}
+	batch.AccInputHash = oldAccInputHash
 
-	//batch.LocalExitRoot = ver.LocalExitRoot
+	// forkid exit roots logic
+	// if forkid < 12 then we should only set the exit roots if they have changed, otherwise 0x00..00
+	// if forkid >= 12 then we should always set the exit roots
+	if forkId < 12 {
+		// get the previous batches exit roots
+		prevBatchNo := batchNo - 1
+		prevBatchGer, _, err := hermezDb.GetLastBatchGlobalExitRoot(prevBatchNo)
+		if err != nil {
+			return nil, err
+		}
+
+		itu, err := hermezDb.GetL1InfoTreeUpdateByGer(prevBatchGer.GlobalExitRoot)
+		if err != nil {
+			return nil, err
+		}
+
+		if itu == nil || batch.MainnetExitRoot == itu.MainnetExitRoot {
+			batch.MainnetExitRoot = common.Hash{}
+			batch.RollupExitRoot = common.Hash{}
+			batch.GlobalExitRoot = common.Hash{}
+		}
+	}
 
 	return populateBatchDetails(batch)
 }
@@ -518,16 +744,25 @@ func (api *ZkEvmAPIImpl) populateBlockDetail(
 	number := baseBlock.NumberU64()
 	hermezReader := hermez_db.NewHermezDbReader(tx)
 
-	signer := eritypes.MakeSigner(cc, number, baseBlock.Time())
+	sendersFixed := false
 	var senders []common.Address
+	var signer *eritypes.Signer
+	if sendersFixed {
+		senders = baseBlock.Body().SendersFromTxs()
+	} else {
+		signer = eritypes.MakeSigner(cc, number, baseBlock.Time())
+	}
+
 	var effectiveGasPricePercentages []uint8
 	if fullTx {
 		for _, txn := range baseBlock.Transactions() {
-			sender, err := txn.Sender(*signer)
-			if err != nil {
-				return types.Block{}, err
+			if signer != nil {
+				sender, err := txn.Sender(*signer)
+				if err != nil {
+					return types.Block{}, err
+				}
+				senders = append(senders, sender)
 			}
-			senders = append(senders, sender)
 			effectiveGasPricePercentage, err := hermezReader.GetEffectiveGasPricePercentage(txn.Hash())
 			if err != nil {
 				return types.Block{}, err
@@ -788,6 +1023,11 @@ func (api *ZkEvmAPIImpl) sendGetBatchWitness(rpcUrl string, batchNumber uint64, 
 
 func getLastBlockInBatchNumber(tx kv.Tx, batchNumber uint64) (uint64, error) {
 	reader := hermez_db.NewHermezDbReader(tx)
+
+	if batchNumber == 0 {
+		return 0, nil
+	}
+
 	blocks, err := reader.GetL2BlockNosByBatch(batchNumber)
 	if err != nil {
 		return 0, err
@@ -822,6 +1062,61 @@ func getLatestBatchNumber(tx kv.Tx) (uint64, error) {
 func getBatchNoByL2Block(tx kv.Tx, l2BlockNo uint64) (uint64, error) {
 	reader := hermez_db.NewHermezDbReader(tx)
 	return reader.GetBatchNoByL2Block(l2BlockNo)
+}
+
+func convertTransactionsReceipts(
+	txs []eritypes.Transaction,
+	receipts eritypes.Receipts,
+	hermezReader hermez_db.HermezDbReader,
+	block eritypes.Block) ([]types.Transaction, error) {
+	if len(txs) != len(receipts) {
+		return nil, errors.New("transactions and receipts length mismatch")
+	}
+
+	result := make([]types.Transaction, 0, len(txs))
+
+	for idx, tx := range txs {
+		effectiveGasPricePercentage, err := hermezReader.GetEffectiveGasPricePercentage(tx.Hash())
+		if err != nil {
+			return nil, err
+		}
+		gasPrice := tx.GetPrice()
+		v, r, s := tx.RawSignatureValues()
+		var sender common.Address
+
+		// TODO: senders!
+
+		var receipt *types.Receipt
+		if len(receipts) > idx {
+			receipt = convertReceipt(receipts[idx], sender, tx.GetTo(), gasPrice, effectiveGasPricePercentage)
+		}
+
+		bh := block.Hash()
+		blockNumber := block.NumberU64()
+
+		tran := types.Transaction{
+			Nonce:       types.ArgUint64(tx.GetNonce()),
+			GasPrice:    types.ArgBig(*gasPrice.ToBig()),
+			Gas:         types.ArgUint64(tx.GetGas()),
+			To:          tx.GetTo(),
+			Value:       types.ArgBig(*tx.GetValue().ToBig()),
+			Input:       tx.GetData(),
+			V:           types.ArgBig(*v.ToBig()),
+			R:           types.ArgBig(*r.ToBig()),
+			S:           types.ArgBig(*s.ToBig()),
+			Hash:        tx.Hash(),
+			From:        sender,
+			BlockHash:   &bh,
+			BlockNumber: types.ArgUint64Ptr(types.ArgUint64(blockNumber)),
+			TxIndex:     types.ArgUint64Ptr(types.ArgUint64(idx)),
+			ChainID:     types.ArgBig(*tx.GetChainID().ToBig()),
+			Type:        types.ArgUint64(tx.Type()),
+			Receipt:     receipt,
+		}
+		result = append(result, tran)
+	}
+
+	return result, nil
 }
 
 func convertBlockToRpcBlock(
@@ -988,4 +1283,19 @@ func populateBatchDetails(batch *types.Batch) (json.RawMessage, error) {
 	}
 
 	return json.Marshal(jBatch)
+}
+
+func populateBatchDataSlimDetails(batches []*types.BatchDataSlim) (json.RawMessage, error) {
+	jBatches := make([]map[string]interface{}, 0, len(batches))
+	for _, b := range batches {
+		jBatch := map[string]interface{}{}
+		jBatch["number"] = b.Number
+		jBatch["empty"] = b.Empty
+		if !b.Empty {
+			jBatch["batchL2Data"] = b.BatchL2Data
+		}
+		jBatches = append(jBatches, jBatch)
+	}
+
+	return json.Marshal(jBatches)
 }

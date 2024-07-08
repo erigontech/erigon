@@ -63,7 +63,6 @@ func SpawnStageL1Syncer(
 	ctx context.Context,
 	tx kv.RwTx,
 	cfg L1SyncerCfg,
-	firstCycle bool,
 	quiet bool,
 ) error {
 
@@ -75,15 +74,15 @@ func SpawnStageL1Syncer(
 
 	logPrefix := s.LogPrefix()
 	log.Info(fmt.Sprintf("[%s] Starting L1 sync stage", logPrefix))
-	if sequencer.IsSequencer() {
-		log.Info(fmt.Sprintf("[%s] skipping -- sequencer", logPrefix))
-		return nil
-	}
+	// if sequencer.IsSequencer() {
+	// 	log.Info(fmt.Sprintf("[%s] skipping -- sequencer", logPrefix))
+	// 	return nil
+	// }
 	defer log.Info(fmt.Sprintf("[%s] Finished L1 sync stage ", logPrefix))
 
-	useExternalTx := tx != nil
-
+	var internalTxOpened bool
 	if tx == nil {
+		internalTxOpened = true
 		log.Debug("l1 sync: no tx provided, creating a new one")
 		var err error
 		tx, err = cfg.db.BeginRw(ctx)
@@ -192,7 +191,7 @@ Loop:
 		log.Info(fmt.Sprintf("[%s] No new L1 blocks to sync", logPrefix))
 	}
 
-	if firstCycle && !useExternalTx {
+	if internalTxOpened {
 		log.Debug("l1 sync: first cycle, committing tx")
 		if err := tx.Commit(); err != nil {
 			return fmt.Errorf("failed to commit tx, %w", err)
@@ -416,12 +415,13 @@ func verifyAgainstLocalBlocks(tx kv.RwTx, hermezDb *hermez_db.HermezDb, logPrefi
 		return nil
 	}
 
-	err = blockComparison(tx, hermezDb, blockToCheck, logPrefix)
-
-	if err == nil {
-		log.Info(fmt.Sprintf("[%s] State root verified in block %d", logPrefix, blockToCheck))
-		if err := stages.SaveStageProgress(tx, stages.VerificationsStateRootCheck, verifiedBlockNo); err != nil {
-			return fmt.Errorf("failed to save stage progress, %w", err)
+	if !sequencer.IsSequencer() {
+		err = blockComparison(tx, hermezDb, blockToCheck, logPrefix)
+		if err == nil {
+			log.Info(fmt.Sprintf("[%s] State root verified in block %d", logPrefix, blockToCheck))
+			if err := stages.SaveStageProgress(tx, stages.VerificationsStateRootCheck, verifiedBlockNo); err != nil {
+				return fmt.Errorf("failed to save stage progress, %w", err)
+			}
 		}
 	}
 

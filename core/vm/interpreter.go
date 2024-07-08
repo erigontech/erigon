@@ -83,6 +83,8 @@ type Interpreter interface {
 	// the return byte-slice and an error if one occurred.
 	Run(contract *Contract, input []byte, static bool) ([]byte, error)
 
+	RunZk(contract *Contract, input []byte, static bool) ([]byte, error)
+
 	// `Depth` returns the current call stack's depth.
 	Depth() int
 }

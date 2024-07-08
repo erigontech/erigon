@@ -147,7 +147,7 @@ func (zkapi *ZkEvmAPIImpl) EstimateCounters(ctx context.Context, rpcTx *zkevmRPC
 	smtDepth := smt.GetDepth()
 
 	txCounters := vm.NewTransactionCounter(tx, int(smtDepth), uint16(forkId), zkapi.config.Zk.VirtualCountersSmtReduction, false)
-	batchCounters := vm.NewBatchCounterCollector(int(smtDepth), uint16(forkId), zkapi.config.Zk.VirtualCountersSmtReduction, false)
+	batchCounters := vm.NewBatchCounterCollector(int(smtDepth), uint16(forkId), zkapi.config.Zk.VirtualCountersSmtReduction, false, nil)
 
 	_, err = batchCounters.AddNewTransactionCounters(txCounters)
 	if err != nil {
@@ -351,7 +351,7 @@ func (api *ZkEvmAPIImpl) TraceTransactionCounters(ctx context.Context, hash comm
 	}
 
 	txCounters := vm.NewTransactionCounter(txn, int(smtDepth), uint16(forkId), api.config.Zk.VirtualCountersSmtReduction, false)
-	batchCounters := vm.NewBatchCounterCollector(int(smtDepth), uint16(forkId), api.config.Zk.VirtualCountersSmtReduction, false)
+	batchCounters := vm.NewBatchCounterCollector(int(smtDepth), uint16(forkId), api.config.Zk.VirtualCountersSmtReduction, false, nil)
 
 	if _, err = batchCounters.AddNewTransactionCounters(txCounters); err != nil {
 		stream.WriteNil()
@@ -451,7 +451,7 @@ func (api *ZkEvmAPIImpl) GetBatchCountersByNumber(ctx context.Context, batchNumR
 		return nil, err
 	}
 
-	batchCounters := vm.NewBatchCounterCollector(smtDepth, uint16(forkId), api.config.Zk.VirtualCountersSmtReduction, false)
+	batchCounters := vm.NewBatchCounterCollector(smtDepth, uint16(forkId), api.config.Zk.VirtualCountersSmtReduction, false, nil)
 
 	var (
 		block                                   *types.Block

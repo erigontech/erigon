@@ -84,7 +84,7 @@ func handleInjectedBatch(
 	parentBlock *types.Block,
 	forkId uint64,
 ) (*types.Transaction, *types.Receipt, uint8, error) {
-	decodedBlocks, err := zktx.DecodeBatchL2Blocks(injected.Transaction, cfg.zk.SequencerInitialForkId)
+	decodedBlocks, err := zktx.DecodeBatchL2Blocks(injected.Transaction, forkId)
 	if err != nil {
 		return nil, nil, 0, err
 	}
@@ -95,7 +95,7 @@ func handleInjectedBatch(
 		return nil, nil, 0, errors.New("expected 1 transaction in the injected batch")
 	}
 
-	batchCounters := vm.NewBatchCounterCollector(sdb.smt.GetDepth(), uint16(forkId), cfg.zk.VirtualCountersSmtReduction, cfg.zk.ShouldCountersBeUnlimited(false))
+	batchCounters := vm.NewBatchCounterCollector(sdb.smt.GetDepth(), uint16(forkId), cfg.zk.VirtualCountersSmtReduction, cfg.zk.ShouldCountersBeUnlimited(false), nil)
 
 	// process the tx and we can ignore the counters as an overflow at this stage means no network anyway
 	effectiveGas := DeriveEffectiveGasPrice(cfg, decodedBlocks[0].Transactions[0])

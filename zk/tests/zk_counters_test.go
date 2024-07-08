@@ -291,7 +291,7 @@ func runTest(t *testing.T, blockReader services.FullBlockReader, test vector, er
 		}
 	}
 
-	batchCollector := vm.NewBatchCounterCollector(test.SmtDepths[0], uint16(test.ForkId), 0.6, false)
+	batchCollector := vm.NewBatchCounterCollector(test.SmtDepths[0], uint16(test.ForkId), 0.6, false, nil)
 
 	blockStarted := false
 	for i, block := range decodedBlocks {

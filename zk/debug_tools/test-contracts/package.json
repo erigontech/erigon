@@ -9,7 +9,10 @@
     "counter:local": "npx hardhat compile && npx hardhat run scripts/counter.js --network local",
     "counter:bali": "npx hardhat compile && npx hardhat run scripts/counter.js --network bali",
     "counter:cardona": "npx hardhat compile && npx hardhat run scripts/counter.js --network cardona",
-    "counter:mainnet": "npx hardhat compile && npx hardhat run scripts/counter.js --network mainnet"
+    "counter:mainnet": "npx hardhat compile && npx hardhat run scripts/counter.js --network mainnet",
+    "emitlog:bali": "npx hardhat compile && npx hardhat run scripts/emitlog.js --network bali",
+    "emitlog:cardona": "npx hardhat compile && npx hardhat run scripts/emitlog.js --network cardona",
+    "emitlog:mainnet": "npx hardhat compile && npx hardhat run scripts/emitlog.js --network mainnet"
   },
   "keywords": [],
   "author": "",

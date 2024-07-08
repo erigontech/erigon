@@ -407,6 +407,7 @@ type Transaction struct {
 	ChainID     ArgBig          `json:"chainId"`
 	Type        ArgUint64       `json:"type"`
 	Receipt     *Receipt        `json:"receipt,omitempty"`
+	L2Hash      common.Hash     `json:"l2Hash,omitempty"`
 }
 
 // GetSender gets the sender from the transaction's signature
@@ -482,6 +483,7 @@ type Receipt struct {
 	ContractAddress   *common.Address `json:"contractAddress"`
 	Type              ArgUint64       `json:"type"`
 	EffectiveGasPrice *ArgBig         `json:"effectiveGasPrice,omitempty"`
+	TransactionL2Hash common.Hash     `json:"transactionL2Hash,omitempty"`
 }
 
 // NewReceipt creates a new Receipt instance

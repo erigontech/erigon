@@ -11,8 +11,8 @@ import (
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 	"github.com/ledgerwatch/erigon/zk/datastream/server"
 	"github.com/ledgerwatch/erigon/zk/hermez_db"
-	"github.com/ledgerwatch/log/v3"
 	"github.com/ledgerwatch/erigon/zk/sequencer"
+	"github.com/ledgerwatch/log/v3"
 )
 
 type DataStreamCatchupCfg struct {
@@ -120,13 +120,13 @@ func CatchupDatastream(logPrefix string, tx kv.RwTx, stream *datastreamer.Stream
 			if err != nil {
 				return 0, err
 			}
-			if err = server.WriteGenesisToStream(genesis, reader, tx, stream, srv, chainId); err != nil {
+			if err = srv.WriteGenesisToStream(genesis, reader, tx); err != nil {
 				return 0, err
 			}
 		}
 	}
 
-	if err = server.WriteBlocksToStream(tx, reader, srv, stream, previousProgress+1, finalBlockNumber, logPrefix); err != nil {
+	if err = srv.WriteBlocksToStream(tx, reader, previousProgress+1, finalBlockNumber, logPrefix); err != nil {
 		return 0, err
 	}
 
