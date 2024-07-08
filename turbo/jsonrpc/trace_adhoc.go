@@ -492,7 +492,7 @@ func (ot *OeTracer) CaptureState(pc uint64, op vm.OpCode, gas, cost uint64, scop
 			}
 			for i := showStack - 1; i >= 0; i-- {
 				if st.Len() > i {
-					ot.lastVmOp.Ex.Push = append(ot.lastVmOp.Ex.Push, st.Back(i).String())
+					ot.lastVmOp.Ex.Push = append(ot.lastVmOp.Ex.Push, st.Back(i).Hex())
 				}
 			}
 			// Set the "mem" of the last operation
@@ -512,7 +512,7 @@ func (ot *OeTracer) CaptureState(pc uint64, op vm.OpCode, gas, cost uint64, scop
 		if ot.lastOffStack != nil {
 			ot.lastOffStack.Ex.Used = int(gas)
 			if st.Len() > 0 {
-				ot.lastOffStack.Ex.Push = []string{st.Back(0).String()}
+				ot.lastOffStack.Ex.Push = []string{st.Back(0).Hex()}
 			} else {
 				ot.lastOffStack.Ex.Push = []string{}
 			}
@@ -584,7 +584,7 @@ func (ot *OeTracer) CaptureState(pc uint64, op vm.OpCode, gas, cost uint64, scop
 			ot.memLenStack = append(ot.memLenStack, 0)
 		case vm.SSTORE:
 			if st.Len() > 1 {
-				ot.lastVmOp.Ex.Store = &VmTraceStore{Key: st.Back(0).String(), Val: st.Back(1).String()}
+				ot.lastVmOp.Ex.Store = &VmTraceStore{Key: st.Back(0).Hex(), Val: st.Back(1).Hex()}
 			}
 		}
 		if ot.lastVmOp.Ex.Used < 0 {
