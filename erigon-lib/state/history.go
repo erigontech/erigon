@@ -1338,12 +1338,14 @@ func (ht *HistoryRoTx) historySeekInDB(key []byte, txNum uint64, tx kv.Tx) ([]by
 	// `val == []byte{}` means key was created in this txNum and doesn't exist before.
 	return val[8:], true, nil
 }
-func (ht *HistoryRoTx) WalkAsOf(startTxNum uint64, from, to []byte, roTx kv.Tx, limit int) (iter.KV, error) {
+func (ht *HistoryRoTx) WalkAsOf(ctx context.Context, startTxNum uint64, from, to []byte, roTx kv.Tx, limit int) (iter.KV, error) {
 	hi := &StateAsOfIterF{
 		from: from, to: to, limit: limit,
 
 		hc:         ht,
 		startTxNum: startTxNum,
+
+		ctx: ctx,
 	}
 	for _, item := range ht.iit.files {
 		if item.endTxNum <= startTxNum {
@@ -1370,6 +1372,8 @@ func (ht *HistoryRoTx) WalkAsOf(startTxNum uint64, from, to []byte, roTx kv.Tx, 
 		from:        from, to: to, limit: limit,
 
 		startTxNum: startTxNum,
+
+		ctx: ctx,
 	}
 	binary.BigEndian.PutUint64(dbit.startTxKey[:], startTxNum)
 	if err := dbit.advance(); err != nil {
@@ -1394,6 +1398,8 @@ type StateAsOfIterF struct {
 	txnKey     [8]byte
 
 	k, v, kBackup, vBackup []byte
+
+	ctx context.Context
 }
 
 func (hi *StateAsOfIterF) Close() {
@@ -1457,6 +1463,12 @@ func (hi *StateAsOfIterF) HasNext() bool {
 }
 
 func (hi *StateAsOfIterF) Next() ([]byte, []byte, error) {
+	select {
+	case <-hi.ctx.Done():
+		return nil, nil, hi.ctx.Err()
+	default:
+	}
+
 	hi.limit--
 	hi.k, hi.v = append(hi.k[:0], hi.nextKey...), append(hi.v[:0], hi.nextVal...)
 
@@ -1486,6 +1498,8 @@ type StateAsOfIterDB struct {
 
 	k, v, kBackup, vBackup []byte
 	err                    error
+
+	ctx context.Context
 }
 
 func (hi *StateAsOfIterDB) Close() {
@@ -1595,6 +1609,12 @@ func (hi *StateAsOfIterDB) HasNext() bool {
 }
 
 func (hi *StateAsOfIterDB) Next() ([]byte, []byte, error) {
+	select {
+	case <-hi.ctx.Done():
+		return nil, nil, hi.ctx.Err()
+	default:
+	}
+
 	if hi.err != nil {
 		return nil, nil, hi.err
 	}
