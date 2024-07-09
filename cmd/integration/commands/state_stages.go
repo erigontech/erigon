@@ -36,13 +36,10 @@ import (
 	common2 "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/datadir"
 	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon-lib/kv/temporal/historyv2"
-
 	"github.com/ledgerwatch/erigon/cmd/hack/tool/fromdb"
 	"github.com/ledgerwatch/erigon/cmd/utils"
 	"github.com/ledgerwatch/erigon/common/debugprint"
 	"github.com/ledgerwatch/erigon/core"
-	"github.com/ledgerwatch/erigon/core/state"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/eth/ethconfig"
 	"github.com/ledgerwatch/erigon/eth/stagedsync"
@@ -172,27 +169,6 @@ func syncBySmallSteps(db kv.RwDB, miningConfig params.MiningConfig, ctx context.
 
 	var batchSize datasize.ByteSize
 	must(batchSize.UnmarshalText([]byte(batchSizeStr)))
-
-	expectedAccountChanges := make(map[uint64]*historyv2.ChangeSet)
-	expectedStorageChanges := make(map[uint64]*historyv2.ChangeSet)
-	changeSetHook := func(blockNum uint64, csw *state.ChangeSetWriter) {
-		if csw == nil {
-			return
-		}
-		accountChanges, err := csw.GetAccountChanges()
-		if err != nil {
-			panic(err)
-		}
-		expectedAccountChanges[blockNum] = accountChanges
-
-		storageChanges, err := csw.GetStorageChanges()
-		if err != nil {
-			panic(err)
-		}
-		if storageChanges.Len() > 0 {
-			expectedStorageChanges[blockNum] = storageChanges
-		}
-	}
 
 	stateStages.DisableStages(stages.Snapshots, stages.Headers, stages.BlockHashes, stages.Bodies, stages.Senders)
 	changesAcc := shards.NewAccumulator()
