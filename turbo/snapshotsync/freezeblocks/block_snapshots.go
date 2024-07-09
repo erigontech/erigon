@@ -445,6 +445,21 @@ func (s *RoSnapshots) OptimisticReopenWithDB(db kv.RoDB) {
 	})
 }
 
+func (s *RoSnapshots) LS() {
+	s.segments.Scan(func(segtype snaptype.Enum, value *segments) bool {
+		value.lock.RLock()
+		defer value.lock.RUnlock()
+
+		for _, seg := range value.segments {
+			if seg.Decompressor == nil {
+				continue
+			}
+			log.Info("[agg] ", "f", seg.Decompressor.FileName(), "words", seg.Decompressor.Count())
+		}
+		return true
+	})
+}
+
 func (s *RoSnapshots) Files() (list []string) {
 	maxBlockNumInFiles := s.BlocksAvailable()
 

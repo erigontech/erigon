@@ -97,6 +97,17 @@ var snapshotCommand = cli.Command{
 	},
 	Subcommands: []*cli.Command{
 		{
+			Name: "ls",
+			Action: func(c *cli.Context) error {
+				dirs := datadir.New(c.String(utils.DataDirFlag.Name))
+				return doLS(c, dirs)
+			},
+			Usage: "List all files with their words count",
+			Flags: joinFlags([]cli.Flag{
+				&utils.DataDirFlag,
+			}),
+		},
+		{
 			Name: "index",
 			Action: func(c *cli.Context) error {
 				dirs, l, err := datadir.New(c.String(utils.DataDirFlag.Name)).MustFlock()
@@ -651,6 +662,35 @@ func doIndicesCommand(cliCtx *cli.Context, dirs datadir.Dirs) error {
 	if err != nil {
 		return err
 	}
+
+	return nil
+}
+func doLS(cliCtx *cli.Context, dirs datadir.Dirs) error {
+	logger, _, _, err := debug.Setup(cliCtx, true /* rootLogger */)
+	if err != nil {
+		return err
+	}
+	defer logger.Info("Done")
+	ctx := cliCtx.Context
+
+	chainDB := dbCfg(kv.ChainDB, dirs.Chaindata).MustOpen()
+	defer chainDB.Close()
+	cfg := ethconfig.NewSnapCfg(true, false, true, true)
+	blockSnaps, borSnaps, caplinSnaps, _, agg, err := openSnaps(ctx, cfg, dirs, chainDB, logger)
+	if err != nil {
+		return err
+	}
+	defer blockSnaps.Close()
+	defer borSnaps.Close()
+	defer caplinSnaps.Close()
+	defer agg.Close()
+
+	agg.Close()
+
+	blockSnaps.LS()
+	borSnaps.LS()
+	caplinSnaps.LS()
+	agg.LS()
 
 	return nil
 }
