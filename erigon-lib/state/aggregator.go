@@ -301,19 +301,19 @@ func (a *Aggregator) OpenFolder() error {
 				return a.ctx.Err()
 			default:
 			}
-			return d.OpenFolder()
+			return d.openFolder()
 		})
 	}
 	for _, ii := range a.iis {
 		ii := ii
-		eg.Go(func() error { return ii.OpenFolder() })
+		eg.Go(func() error { return ii.openFolder() })
 	}
 	for _, ap := range a.ap {
 		ap := ap
-		eg.Go(func() error { return ap.OpenFolder() })
+		eg.Go(func() error { return ap.openFolder() })
 	}
 	if err := eg.Wait(); err != nil {
-		return fmt.Errorf("OpenFolder: %w", err)
+		return fmt.Errorf("openFolder: %w", err)
 	}
 	return nil
 }
@@ -354,6 +354,9 @@ func (a *Aggregator) SetCompressWorkers(i int) {
 	for _, ii := range a.iis {
 		ii.compressWorkers = i
 	}
+	for _, ap := range a.ap {
+		ap.compressWorkers = i
+	}
 }
 
 func (a *Aggregator) DiscardHistory(name kv.Domain) *Aggregator {
@@ -378,6 +381,9 @@ func (ac *AggregatorRoTx) Files() []string {
 	}
 	for _, ii := range ac.iis {
 		res = append(res, ii.Files()...)
+	}
+	for _, ap := range ac.appendable {
+		res = append(res, ap.Files()...)
 	}
 	return res
 }
@@ -1369,7 +1375,12 @@ func (r RangesV3) any() bool {
 		}
 	}
 	for _, ii := range r.invertedIndex {
-		if ii.needMerge {
+		if ii != nil && ii.needMerge {
+			return true
+		}
+	}
+	for _, ap := range r.appendable {
+		if ap != nil && ap.needMerge {
 			return true
 		}
 	}

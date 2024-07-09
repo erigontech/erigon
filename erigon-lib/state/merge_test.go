@@ -41,7 +41,7 @@ func emptyTestInvertedIndex(aggStep uint64) *InvertedIndex {
 func TestFindMergeRangeCornerCases(t *testing.T) {
 	t.Run("> 2 unmerged files", func(t *testing.T) {
 		ii := emptyTestInvertedIndex(1)
-		ii.scanStateFiles([]string{
+		ii.scanDirtyFiles([]string{
 			"v1-test.0-2.ef",
 			"v1-test.2-3.ef",
 			"v1-test.3-4.ef",
@@ -65,7 +65,7 @@ func TestFindMergeRangeCornerCases(t *testing.T) {
 		assert.Equal(t, 3, len(idxF))
 
 		ii = emptyTestInvertedIndex(1)
-		ii.scanStateFiles([]string{
+		ii.scanDirtyFiles([]string{
 			"v1-test.0-1.ef",
 			"v1-test.1-2.ef",
 			"v1-test.2-3.ef",
@@ -86,7 +86,7 @@ func TestFindMergeRangeCornerCases(t *testing.T) {
 		assert.Equal(t, 2, int(mr.to))
 
 		h := &History{InvertedIndex: ii, dirtyFiles: btree2.NewBTreeG[*filesItem](filesItemLess)}
-		h.scanStateFiles([]string{
+		h.scanDirtyFiles([]string{
 			"v1-test.0-1.v",
 			"v1-test.1-2.v",
 			"v1-test.2-3.v",
@@ -109,7 +109,7 @@ func TestFindMergeRangeCornerCases(t *testing.T) {
 	})
 	t.Run("not equal amount of files", func(t *testing.T) {
 		ii := emptyTestInvertedIndex(1)
-		ii.scanStateFiles([]string{
+		ii.scanDirtyFiles([]string{
 			"v1-test.0-1.ef",
 			"v1-test.1-2.ef",
 			"v1-test.2-3.ef",
@@ -123,7 +123,7 @@ func TestFindMergeRangeCornerCases(t *testing.T) {
 		ii.reCalcVisibleFiles()
 
 		h := &History{InvertedIndex: ii, dirtyFiles: btree2.NewBTreeG[*filesItem](filesItemLess)}
-		h.scanStateFiles([]string{
+		h.scanDirtyFiles([]string{
 			"v1-test.0-1.v",
 			"v1-test.1-2.v",
 		})
@@ -146,7 +146,7 @@ func TestFindMergeRangeCornerCases(t *testing.T) {
 	})
 	t.Run("idx merged, history not yet", func(t *testing.T) {
 		ii := emptyTestInvertedIndex(1)
-		ii.scanStateFiles([]string{
+		ii.scanDirtyFiles([]string{
 			"v1-test.0-2.ef",
 			"v1-test.2-3.ef",
 			"v1-test.3-4.ef",
@@ -159,7 +159,7 @@ func TestFindMergeRangeCornerCases(t *testing.T) {
 		ii.reCalcVisibleFiles()
 
 		h := &History{InvertedIndex: ii, dirtyFiles: btree2.NewBTreeG[*filesItem](filesItemLess)}
-		h.scanStateFiles([]string{
+		h.scanDirtyFiles([]string{
 			"v1-test.0-1.v",
 			"v1-test.1-2.v",
 		})
@@ -181,7 +181,7 @@ func TestFindMergeRangeCornerCases(t *testing.T) {
 	})
 	t.Run("idx merged, history not yet, 2", func(t *testing.T) {
 		ii := emptyTestInvertedIndex(1)
-		ii.scanStateFiles([]string{
+		ii.scanDirtyFiles([]string{
 			"v1-test.0-1.ef",
 			"v1-test.1-2.ef",
 			"v1-test.2-3.ef",
@@ -196,7 +196,7 @@ func TestFindMergeRangeCornerCases(t *testing.T) {
 		ii.reCalcVisibleFiles()
 
 		h := &History{InvertedIndex: ii, dirtyFiles: btree2.NewBTreeG[*filesItem](filesItemLess)}
-		h.scanStateFiles([]string{
+		h.scanDirtyFiles([]string{
 			"v1-test.0-1.v",
 			"v1-test.1-2.v",
 			"v1-test.2-3.v",
@@ -223,7 +223,7 @@ func TestFindMergeRangeCornerCases(t *testing.T) {
 	})
 	t.Run("idx merged and small files lost", func(t *testing.T) {
 		ii := emptyTestInvertedIndex(1)
-		ii.scanStateFiles([]string{
+		ii.scanDirtyFiles([]string{
 			"v1-test.0-4.ef",
 		})
 		ii.dirtyFiles.Scan(func(item *filesItem) bool {
@@ -234,7 +234,7 @@ func TestFindMergeRangeCornerCases(t *testing.T) {
 		ii.reCalcVisibleFiles()
 
 		h := &History{InvertedIndex: ii, dirtyFiles: btree2.NewBTreeG[*filesItem](filesItemLess)}
-		h.scanStateFiles([]string{
+		h.scanDirtyFiles([]string{
 			"v1-test.0-1.v",
 			"v1-test.1-2.v",
 			"v1-test.2-3.v",
@@ -260,7 +260,7 @@ func TestFindMergeRangeCornerCases(t *testing.T) {
 
 	t.Run("history merged, but index not and history garbage left", func(t *testing.T) {
 		ii := emptyTestInvertedIndex(1)
-		ii.scanStateFiles([]string{
+		ii.scanDirtyFiles([]string{
 			"v1-test.0-1.ef",
 			"v1-test.1-2.ef",
 		})
@@ -273,7 +273,7 @@ func TestFindMergeRangeCornerCases(t *testing.T) {
 
 		// `kill -9` may leave small garbage files, but if big one already exists we assume it's good(fsynced) and no reason to merge again
 		h := &History{InvertedIndex: ii, dirtyFiles: btree2.NewBTreeG[*filesItem](filesItemLess)}
-		h.scanStateFiles([]string{
+		h.scanDirtyFiles([]string{
 			"v1-test.0-1.v",
 			"v1-test.1-2.v",
 			"v1-test.0-2.v",
@@ -299,7 +299,7 @@ func TestFindMergeRangeCornerCases(t *testing.T) {
 	})
 	t.Run("history merge progress ahead of idx", func(t *testing.T) {
 		ii := emptyTestInvertedIndex(1)
-		ii.scanStateFiles([]string{
+		ii.scanDirtyFiles([]string{
 			"v1-test.0-1.ef",
 			"v1-test.1-2.ef",
 			"v1-test.0-2.ef",
@@ -314,7 +314,7 @@ func TestFindMergeRangeCornerCases(t *testing.T) {
 		ii.reCalcVisibleFiles()
 
 		h := &History{InvertedIndex: ii, dirtyFiles: btree2.NewBTreeG[*filesItem](filesItemLess)}
-		h.scanStateFiles([]string{
+		h.scanDirtyFiles([]string{
 			"v1-test.0-1.v",
 			"v1-test.1-2.v",
 			"v1-test.0-2.v",
@@ -342,7 +342,7 @@ func TestFindMergeRangeCornerCases(t *testing.T) {
 	})
 	t.Run("idx merge progress ahead of history", func(t *testing.T) {
 		ii := emptyTestInvertedIndex(1)
-		ii.scanStateFiles([]string{
+		ii.scanDirtyFiles([]string{
 			"v1-test.0-1.ef",
 			"v1-test.1-2.ef",
 			"v1-test.0-2.ef",
@@ -356,7 +356,7 @@ func TestFindMergeRangeCornerCases(t *testing.T) {
 		ii.reCalcVisibleFiles()
 
 		h := &History{InvertedIndex: ii, dirtyFiles: btree2.NewBTreeG[*filesItem](filesItemLess)}
-		h.scanStateFiles([]string{
+		h.scanDirtyFiles([]string{
 			"v1-test.0-1.v",
 			"v1-test.1-2.v",
 			"v1-test.2-3.v",
@@ -382,7 +382,7 @@ func TestFindMergeRangeCornerCases(t *testing.T) {
 	})
 	t.Run("idx merged, but garbage left", func(t *testing.T) {
 		ii := emptyTestInvertedIndex(1)
-		ii.scanStateFiles([]string{
+		ii.scanDirtyFiles([]string{
 			"v1-test.0-1.ef",
 			"v1-test.1-2.ef",
 			"v1-test.0-2.ef",
@@ -395,7 +395,7 @@ func TestFindMergeRangeCornerCases(t *testing.T) {
 		ii.reCalcVisibleFiles()
 
 		h := &History{InvertedIndex: ii, dirtyFiles: btree2.NewBTreeG[*filesItem](filesItemLess)}
-		h.scanStateFiles([]string{
+		h.scanDirtyFiles([]string{
 			"v1-test.0-1.v",
 			"v1-test.1-2.v",
 			"v1-test.0-2.v",
@@ -416,7 +416,7 @@ func TestFindMergeRangeCornerCases(t *testing.T) {
 	})
 	t.Run("idx merged, but garbage left2", func(t *testing.T) {
 		ii := emptyTestInvertedIndex(1)
-		ii.scanStateFiles([]string{
+		ii.scanDirtyFiles([]string{
 			"v1-test.0-1.ef",
 			"v1-test.1-2.ef",
 			"v1-test.0-2.ef",
