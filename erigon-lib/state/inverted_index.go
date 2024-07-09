@@ -357,6 +357,9 @@ func (ii *InvertedIndex) closeWhatNotInList(fNames []string) {
 }
 
 func (ii *InvertedIndex) Close() {
+	if ii == nil {
+		return
+	}
 	ii.closeWhatNotInList([]string{})
 }
 

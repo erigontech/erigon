@@ -343,6 +343,9 @@ func (ap *Appendable) closeWhatNotInList(fNames []string) {
 }
 
 func (ap *Appendable) Close() {
+	if ap == nil {
+		return
+	}
 	ap.closeWhatNotInList([]string{})
 }
 
