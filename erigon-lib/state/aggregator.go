@@ -34,7 +34,7 @@ import (
 
 	"github.com/RoaringBitmap/roaring/roaring64"
 	"github.com/c2h5oh/datasize"
-	btree2 "github.com/tidwall/btree"
+	"github.com/tidwall/btree"
 	rand2 "golang.org/x/exp/rand"
 	"golang.org/x/sync/errgroup"
 	"golang.org/x/sync/semaphore"
@@ -393,7 +393,7 @@ func (a *Aggregator) Files() []string {
 	return ac.Files()
 }
 func (a *Aggregator) LS() {
-	doLS := func(dirtyFiles *btree2.BTreeG[*filesItem]) {
+	doLS := func(dirtyFiles *btree.BTreeG[*filesItem]) {
 		dirtyFiles.Walk(func(items []*filesItem) bool {
 			for _, item := range items {
 				if item.decompressor == nil {
@@ -404,8 +404,13 @@ func (a *Aggregator) LS() {
 			return true
 		})
 	}
+
+	a.dirtyFilesLock.Lock()
+	defer a.dirtyFilesLock.Unlock()
 	for _, d := range a.d {
 		doLS(d.dirtyFiles)
+		doLS(d.History.dirtyFiles)
+		doLS(d.History.InvertedIndex.dirtyFiles)
 	}
 	for _, d := range a.iis {
 		doLS(d.dirtyFiles)
