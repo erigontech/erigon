@@ -114,8 +114,10 @@ func (s *CaplinSnapshots) LogStat(str string) {
 }
 
 func (s *CaplinSnapshots) LS() {
-	if s.BeaconBlocks == nil {
-
+	if s == nil {
+		return
+	}
+	if s.BeaconBlocks != nil {
 		for _, seg := range s.BeaconBlocks.segments {
 			if seg.Decompressor == nil {
 				continue
