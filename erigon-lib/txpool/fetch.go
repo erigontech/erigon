@@ -146,7 +146,6 @@ func (f *Fetch) receiveMessageLoop(sentryClient sentry.SentryClient) {
 			f.logger.Warn("[txpool.recvMessage] sentry not ready yet", "err", err)
 			continue
 		}
-
 		if err := f.receiveMessage(f.ctx, sentryClient); err != nil {
 			if grpcutil.IsRetryLater(err) || grpcutil.IsEndOfStream(err) {
 				time.Sleep(3 * time.Second)
@@ -175,10 +174,11 @@ func (f *Fetch) receiveMessage(ctx context.Context, sentryClient sentry.SentryCl
 		}
 		return err
 	}
-
+	println("receive message")
 	var req *sentry.InboundMessage
 	for req, err = stream.Recv(); ; req, err = stream.Recv() {
 		if err != nil {
+			f.logger.Error("[txpool.receiveMessage]", "err", err)
 			select {
 			case <-f.ctx.Done():
 				return ctx.Err()
@@ -187,8 +187,10 @@ func (f *Fetch) receiveMessage(ctx context.Context, sentryClient sentry.SentryCl
 			return err
 		}
 		if req == nil {
+			f.logger.Warn("[txpool.receiveMessage]", "req nil")
 			return nil
 		}
+		f.logger.Info("[txpool.receiveMessage]", "req", req)
 		if err := f.handleInboundMessage(streamCtx, req, sentryClient); err != nil {
 			if grpcutil.IsRetryLater(err) || grpcutil.IsEndOfStream(err) {
 				time.Sleep(3 * time.Second)
@@ -199,6 +201,7 @@ func (f *Fetch) receiveMessage(ctx context.Context, sentryClient sentry.SentryCl
 		if f.wg != nil {
 			f.wg.Done()
 		}
+		f.logger.Info("[txpool.fetch] Handling incoming message", "msg", string(req.Data), "reqID", req.Id.String(), "err", err)
 	}
 }
 

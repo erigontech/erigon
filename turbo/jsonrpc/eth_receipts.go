@@ -606,3 +606,8 @@ func (i *MapTxNum2BlockNumIter) Next() (txNum, blockNum uint64, txIndex int, isF
 	isFinalTxn = txNum == i.maxTxNumInBlock
 	return
 }
+
+// GetReceipts Made getReceipts method public to use in sentry multi client
+func (api *BaseAPI) GetReceipts(ctx context.Context, tx kv.Tx, block *types.Block, senders []common.Address) (types.Receipts, error) {
+	return api.getReceipts(ctx, tx, block, senders)
+}

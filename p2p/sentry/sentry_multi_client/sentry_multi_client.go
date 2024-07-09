@@ -22,6 +22,9 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"github.com/ledgerwatch/erigon-lib/common/datadir"
+	"github.com/ledgerwatch/erigon-lib/kv/kvcache"
+	"github.com/ledgerwatch/erigon/turbo/jsonrpc"
 	"golang.org/x/sync/semaphore"
 	"math/rand"
 	"sort"
@@ -699,7 +702,7 @@ func (cs *MultiClient) getBlockBodies66(ctx context.Context, inreq *proto_sentry
 	return nil
 }
 
-func (cs *MultiClient) getReceipts66(ctx context.Context, inreq *proto_sentry.InboundMessage, sentry direct.SentryClient) error {
+func (cs *MultiClient) getReceipts66(ctx context.Context, inreq *proto_sentry.InboundMessage, sentryClient direct.SentryClient) error {
 	err := cs.onlyOneGoroutineController.Acquire(ctx, 1)
 	if err != nil {
 		return err
@@ -715,11 +718,12 @@ func (cs *MultiClient) getReceipts66(ctx context.Context, inreq *proto_sentry.In
 		return err
 	}
 	defer tx.Rollback()
-	receipts, err := eth.AnswerGetReceiptsQuery(ctx, cs.blockReader, tx, query.GetReceiptsPacket, cs.ChainConfig, cs.Engine)
+	cache := kvcache.NewDummy()
+	baseApi := jsonrpc.NewBaseApi(nil, cache, cs.blockReader, nil, true, time.Second, cs.Engine, datadir.New(""))
+	receipts, err := eth.AnswerGetReceiptsQuery(ctx, baseApi, cs.blockReader, tx, query.GetReceiptsPacket)
 	if err != nil {
 		return err
 	}
-	tx.Rollback()
 	b, err := rlp.EncodeToBytes(&eth.ReceiptsRLPPacket66{
 		RequestId:         query.RequestId,
 		ReceiptsRLPPacket: receipts,
@@ -734,14 +738,14 @@ func (cs *MultiClient) getReceipts66(ctx context.Context, inreq *proto_sentry.In
 			Data: b,
 		},
 	}
-	_, err = sentry.SendMessageById(ctx, &outreq, &grpc.EmptyCallOption{})
+	_, err = sentryClient.SendMessageById(ctx, &outreq, &grpc.EmptyCallOption{})
 	if err != nil {
 		if isPeerNotFoundErr(err) {
 			return nil
 		}
-		return fmt.Errorf("send bodies response: %w", err)
+		return fmt.Errorf("send receipts response: %w", err)
 	}
-	//cs.logger.Info(fmt.Sprintf("[%s] GetReceipts responseLen %d", ConvertH512ToPeerID(inreq.PeerId), len(b)))
+	cs.logger.Info(fmt.Sprintf("[%s] GetReceipts responseLen %d", sentry.ConvertH512ToPeerID(inreq.PeerId), len(b)))
 	return nil
 }
 
