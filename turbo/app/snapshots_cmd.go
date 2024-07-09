@@ -744,7 +744,6 @@ func openSnaps(ctx context.Context, cfg ethconfig.BlocksFreezing, dirs datadir.D
 		defer borSnaps.Close()
 		defer csn.Close()
 		defer agg.Close()
-
 	}
 	return
 }
