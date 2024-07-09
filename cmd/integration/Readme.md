@@ -109,7 +109,7 @@ make db-tools
 ./build/bin/mdbx_chk -2 -d /erigon/chaindata
 
 # if all 3 commands return success - then remove `-d` parameter and run again
-# if all 1 command is fail but other success. choose successful number - for exmaple 2 - and switch db manually to it:  
+# if all 1 command is fail but other success. choose successful number - for example 2 - and switch db manually to it:  
 ./build/bin/mdbx_chk -2 -d -t -w /erigon/chaindata  
 
 # if all 3 commands are fail - game over. use backups.

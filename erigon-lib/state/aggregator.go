@@ -34,7 +34,6 @@ import (
 
 	"github.com/RoaringBitmap/roaring/roaring64"
 	"github.com/c2h5oh/datasize"
-	btree2 "github.com/tidwall/btree"
 	rand2 "golang.org/x/exp/rand"
 	"golang.org/x/sync/errgroup"
 	"golang.org/x/sync/semaphore"
@@ -318,7 +317,6 @@ func (a *Aggregator) OpenFolder() error {
 	}
 	return nil
 }
-
 func (a *Aggregator) Close() {
 	if a.ctxCancel == nil { // invariant: it's safe to call Close multiple times
 		return
@@ -394,8 +392,8 @@ func (a *Aggregator) Files() []string {
 	return ac.Files()
 }
 func (a *Aggregator) LS() {
-	doLS := func(dirtyFiles *btree2.BTreeG[*filesItem]) {
-		dirtyFiles.Walk(func(items []*filesItem) bool {
+	for _, d := range a.d {
+		d.dirtyFiles.Walk(func(items []*filesItem) bool {
 			for _, item := range items {
 				if item.decompressor == nil {
 					continue
@@ -405,14 +403,27 @@ func (a *Aggregator) LS() {
 			return true
 		})
 	}
-	for _, d := range a.d {
-		doLS(d.dirtyFiles)
+	for _, d := range a.iis {
+		d.dirtyFiles.Walk(func(items []*filesItem) bool {
+			for _, item := range items {
+				if item.decompressor == nil {
+					continue
+				}
+				log.Info("[agg] ", "f", item.decompressor.FileName(), "words", item.decompressor.Count())
+			}
+			return true
+		})
 	}
-	for _, ii := range a.iis {
-		doLS(ii.dirtyFiles)
-	}
-	for _, ap := range a.ap {
-		doLS(ap.dirtyFiles)
+	for _, d := range a.ap {
+		d.dirtyFiles.Walk(func(items []*filesItem) bool {
+			for _, item := range items {
+				if item.decompressor == nil {
+					continue
+				}
+				log.Info("[agg] ", "f", item.decompressor.FileName(), "words", item.decompressor.Count())
+			}
+			return true
+		})
 	}
 }
 
@@ -1404,11 +1415,6 @@ func (r RangesV3) any() bool {
 	}
 	for _, ap := range r.appendable {
 		if ap != nil && ap.needMerge {
-			return true
-		}
-	}
-	for _, ap := range r.appendable {
-		if ap.needMerge {
 			return true
 		}
 	}
