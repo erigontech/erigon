@@ -332,6 +332,16 @@ func (evm *EVM) StaticCall(caller ContractRef, addr libcommon.Address, input []b
 	return evm.call(STATICCALL, caller, addr, input, gas, new(uint256.Int), false)
 }
 
+func (evm *EVM) ExtCall(caller ContractRef, addr libcommon.Address, input []byte, gas uint64) (ret []byte, leftOverGas uint64, err error) {
+	return evm.call(EXTCALL, caller, addr, input, gas, nil, false)
+}
+func (evm *EVM) ExtDelegateCall(caller ContractRef, addr libcommon.Address, input []byte, gas uint64) (ret []byte, leftOverGas uint64, err error) {
+	return evm.call(EXTDELEGATECALL, caller, addr, input, gas, nil, false)
+}
+func (evm *EVM) ExtStaticCall(caller ContractRef, addr libcommon.Address, input []byte, gas uint64) (ret []byte, leftOverGas uint64, err error) {
+	return evm.call(EXTSTATICCALL, caller, addr, input, gas, nil, false)
+}
+
 type codeAndHash struct {
 	code []byte
 	hash libcommon.Hash
@@ -527,13 +537,14 @@ func (evm *EVM) Create(caller ContractRef, code []byte, gas uint64, endowment *u
 func (evm *EVM) Create2(caller ContractRef, code []byte, gas uint64, endowment *uint256.Int, salt *uint256.Int) (ret []byte, contractAddr libcommon.Address, leftOverGas uint64, err error) {
 	codeAndHash := &codeAndHash{code: code}
 	contractAddr = crypto.CreateAddress2(caller.Address(), salt.Bytes32(), codeAndHash.Hash().Bytes())
-	isCallerEOF := hasEOFMagic(evm.intraBlockState.GetCode(caller.Address()))
+	isCallerEOF := hasEOFMagic(evm.intraBlockState.GetCode(caller.Address())) // TODO(racytech): do we need this?
 	return evm.create(caller, codeAndHash, gas, endowment, contractAddr, CREATE2, true /* incrementNonce */, isCallerEOF)
 }
 
 func (evm *EVM) EOFCreate(caller ContractRef, code, initContainer []byte, gas uint64, endowment *uint256.Int, salt *uint256.Int) (ret []byte, contractAddr libcommon.Address, leftOverGas uint64, err error) {
-	// TODO
-	return nil, libcommon.Address{}, 0, nil
+	codeAndHash := &codeAndHash{code: initContainer}
+	contractAddr = crypto.EOFCreateAddress(caller.Address(), salt.Bytes32(), initContainer)
+	return evm.create(caller, codeAndHash, gas, endowment, contractAddr, EOFCREATE, true /* incrementNonce */, true /* IsCallerEOF */)
 }
 
 func (evm *EVM) TxCreate(caller ContractRef, code []byte, gas uint64, endowment *uint256.Int, salt *uint256.Int) (ret []byte, contractAddr libcommon.Address, leftOverGas uint64, err error) {

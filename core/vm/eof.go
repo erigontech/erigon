@@ -85,10 +85,10 @@ func isEOFVersion1(code []byte) bool {
 
 // Container is an EOF container object.
 type Container struct {
-	Types        []*FunctionMetadata
-	Code         [][]byte
-	SubContainer [][]byte
-	Data         []byte
+	Types         []*FunctionMetadata
+	Code          [][]byte
+	SubContainers [][]byte
+	Data          []byte
 	// OffsetData   int // TODO(racytech): consider adding this for DATALOADN check, find out if offset starts from the beginning of the code or from the start of data section
 }
 
@@ -287,7 +287,7 @@ func (c *Container) UnmarshalBinary(b []byte) error {
 			containers[i] = b[idx : idx+size]
 			idx += size
 		}
-		c.SubContainer = containers
+		c.SubContainers = containers
 	}
 
 	// Parse data section.
@@ -300,7 +300,7 @@ func (c *Container) UnmarshalBinary(b []byte) error {
 // rule set.
 func (c *Container) ValidateCode(jt *JumpTable) error {
 	for i, code := range c.Code {
-		if err := validateCode(code, i, c.Types, jt, len(c.Data), len(c.SubContainer)); err != nil {
+		if err := validateCode(code, i, c.Types, jt, len(c.Data), len(c.SubContainers)); err != nil {
 			return err
 		}
 	}
