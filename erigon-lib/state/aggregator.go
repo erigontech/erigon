@@ -1385,8 +1385,8 @@ func (r RangesV3) any() bool {
 			return true
 		}
 	}
-	for _, ii := range r.appendable {
-		if ii.needMerge {
+	for _, ap := range r.appendable {
+		if ap.needMerge {
 			return true
 		}
 	}
