@@ -6,6 +6,9 @@ import (
 	zk_consts "github.com/ledgerwatch/erigon/zk/constants"
 )
 
+const stepDeduction = 200
+const baseSafetyPercentage float64 = 0.05
+
 var (
 	defaultTotalSteps  = 1 << 23
 	forkId10TotalSteps = 1 << 24
@@ -20,6 +23,11 @@ var (
 		padding:    math.MaxInt32,
 		poseidon:   math.MaxInt32,
 		sha256:     math.MaxInt32,
+	}
+
+	safetyPercentages = map[uint16]float64{
+		uint16(zk_consts.ForkID10): 0.025,
+		uint16(zk_consts.ForkID11): 0.0125,
 	}
 )
 
@@ -77,14 +85,14 @@ func getCounterLimits(forkId uint16) *Counters {
 	totalSteps := getTotalSteps(forkId)
 
 	counterLimits := counterLimits{
-		totalSteps: totalSteps,
-		arith:      totalSteps >> 5,
-		binary:     totalSteps >> 4,
-		memAlign:   totalSteps >> 5,
-		keccaks:    int(math.Floor(float64(totalSteps)/155286) * 44),
-		padding:    int(math.Floor(float64(totalSteps) / 56)),
-		poseidon:   int(math.Floor(float64(totalSteps) / 30)),
-		sha256:     int(math.Floor(float64(totalSteps-1)/31488)) * 7,
+		totalSteps: applyDeduction(forkId, totalSteps),
+		arith:      applyDeduction(forkId, totalSteps>>5),
+		binary:     applyDeduction(forkId, totalSteps>>4),
+		memAlign:   applyDeduction(forkId, totalSteps>>5),
+		keccaks:    applyDeduction(forkId, int(math.Floor(float64(totalSteps)/155286)*44)),
+		padding:    applyDeduction(forkId, int(math.Floor(float64(totalSteps)/56))),
+		poseidon:   applyDeduction(forkId, int(math.Floor(float64(totalSteps)/30))),
+		sha256:     applyDeduction(forkId, int(math.Floor(float64(totalSteps-1)/31488))*7),
 	}
 
 	return createCountrsByLimits(counterLimits)
@@ -102,5 +110,19 @@ func getTotalSteps(forkId uint16) int {
 		totalSteps = defaultTotalSteps
 	}
 
+	// we need to remove some steps as these will always be used during batch execution
+	totalSteps -= stepDeduction
+
 	return totalSteps
+}
+
+func applyDeduction(fork uint16, input int) int {
+	deduction, found := safetyPercentages[fork]
+	if !found {
+		deduction = baseSafetyPercentage
+	}
+	asFloat := float64(input)
+	reduction := asFloat * deduction
+	newValue := asFloat - reduction
+	return int(math.Ceil(newValue))
 }
