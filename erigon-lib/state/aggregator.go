@@ -570,6 +570,9 @@ func (sf AggV3StaticFiles) CleanupOnError() {
 	for _, ivf := range sf.ivfs {
 		ivf.CleanupOnError()
 	}
+	for _, ap := range sf.appendable {
+		ap.CleanupOnError()
+	}
 }
 
 func (a *Aggregator) buildFiles(ctx context.Context, step uint64) error {
