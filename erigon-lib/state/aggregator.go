@@ -351,10 +351,22 @@ func (a *Aggregator) closeDirtyFiles() {
 	defer a.dirtyFilesLock.Unlock()
 
 	for _, d := range a.d {
+		if d == nil {
+			continue
+		}
 		d.Close()
 	}
 	for _, ii := range a.iis {
+		if d == nil {
+			continue
+		}
 		ii.Close()
+	}
+	for _, ap := range a.ap {
+		if d == nil {
+			continue
+		}
+		ap.Close()
 	}
 }
 
