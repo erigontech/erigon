@@ -446,6 +446,9 @@ func (d *Domain) reCalcVisibleFiles() {
 }
 
 func (d *Domain) Close() {
+	if d == nil {
+		return
+	}
 	d.History.Close()
 	d.closeWhatNotInList([]string{})
 }
