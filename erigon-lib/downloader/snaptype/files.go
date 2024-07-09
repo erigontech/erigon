@@ -202,7 +202,7 @@ func SeedableV2Extensions() []string {
 }
 
 func SeedableV3Extensions() []string {
-	return []string{".kv", ".v", ".ef"}
+	return []string{".kv", ".v", ".ef", ".ap"}
 }
 
 func IsSeedableExtension(name string) bool {
