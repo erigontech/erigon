@@ -1027,9 +1027,7 @@ func stageExec(db kv.RwDB, ctx context.Context, logger log.Logger) error {
 
 	genesis := core.GenesisBlockByChainName(chain)
 	br, _ := blocksIO(db, logger)
-	cfg := stagedsync.StageExecuteBlocksCfg(db, pm, batchSize, nil, chainConfig, engine, vmConfig, nil,
-		/*stateStream=*/ false,
-		/*badBlockHalt=*/ true, dirs, br, nil, genesis, syncCfg, agg, nil)
+	cfg := stagedsync.StageExecuteBlocksCfg(db, pm, batchSize, chainConfig, engine, vmConfig, nil, false, true, dirs, br, nil, genesis, syncCfg, agg, nil)
 
 	if unwind > 0 {
 		if err := db.View(ctx, func(tx kv.Tx) error {
@@ -1498,25 +1496,7 @@ func newSync(ctx context.Context, db kv.RwDB, miningConfig *params.MiningConfig,
 		stagedsync.MiningStages(ctx,
 			stagedsync.StageMiningCreateBlockCfg(db, miner, *chainConfig, engine, nil, nil, dirs.Tmp, blockReader),
 			stagedsync.StageBorHeimdallCfg(db, snapDb, miner, *chainConfig, heimdallClient, blockReader, nil, nil, nil, recents, signatures, false, unwindTypes),
-			stagedsync.StageExecuteBlocksCfg(
-				db,
-				cfg.Prune,
-				cfg.BatchSize,
-				nil,
-				sentryControlServer.ChainConfig,
-				sentryControlServer.Engine,
-				&vm.Config{},
-				notifications.Accumulator,
-				cfg.StateStream,
-				/*stateStream=*/ false,
-				dirs,
-				blockReader,
-				sentryControlServer.Hd,
-				cfg.Genesis,
-				cfg.Sync,
-				agg,
-				nil,
-			),
+			stagedsync.StageExecuteBlocksCfg(db, cfg.Prune, cfg.BatchSize, sentryControlServer.ChainConfig, sentryControlServer.Engine, &vm.Config{}, notifications.Accumulator, cfg.StateStream, false, dirs, blockReader, sentryControlServer.Hd, cfg.Genesis, cfg.Sync, agg, nil),
 			stagedsync.StageSendersCfg(db, sentryControlServer.ChainConfig, cfg.Sync, false, dirs.Tmp, cfg.Prune, blockReader, sentryControlServer.Hd, nil),
 			stagedsync.StageMiningExecCfg(db, miner, events, *chainConfig, engine, &vm.Config{}, dirs.Tmp, nil, 0, nil, nil, blockReader),
 			stagedsync.StageMiningFinishCfg(db, *chainConfig, engine, miner, miningCancel, blockReader, builder.NewLatestBlockBuiltStore()),

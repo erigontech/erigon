@@ -57,30 +57,23 @@ const (
 	stateStreamLimit uint64 = 1_000
 )
 
-type HasChangeSetWriter interface {
-	ChangeSetWriter() *state.ChangeSetWriter
-}
-
-type ChangeSetHook func(blockNum uint64, wr *state.ChangeSetWriter)
-
 type headerDownloader interface {
 	ReportBadHeaderPoS(badHeader, lastValidAncestor common.Hash)
 }
 
 type ExecuteBlockCfg struct {
-	db            kv.RwDB
-	batchSize     datasize.ByteSize
-	prune         prune.Mode
-	changeSetHook ChangeSetHook
-	chainConfig   *chain.Config
-	engine        consensus.Engine
-	vmConfig      *vm.Config
-	badBlockHalt  bool
-	stateStream   bool
-	accumulator   *shards.Accumulator
-	blockReader   services.FullBlockReader
-	hd            headerDownloader
-	author        *common.Address
+	db           kv.RwDB
+	batchSize    datasize.ByteSize
+	prune        prune.Mode
+	chainConfig  *chain.Config
+	engine       consensus.Engine
+	vmConfig     *vm.Config
+	badBlockHalt bool
+	stateStream  bool
+	accumulator  *shards.Accumulator
+	blockReader  services.FullBlockReader
+	hd           headerDownloader
+	author       *common.Address
 	// last valid number of the stage
 
 	dirs      datadir.Dirs
@@ -97,7 +90,6 @@ func StageExecuteBlocksCfg(
 	db kv.RwDB,
 	pm prune.Mode,
 	batchSize datasize.ByteSize,
-	changeSetHook ChangeSetHook,
 	chainConfig *chain.Config,
 	engine consensus.Engine,
 	vmConfig *vm.Config,
@@ -114,24 +106,23 @@ func StageExecuteBlocksCfg(
 	silkworm *silkworm.Silkworm,
 ) ExecuteBlockCfg {
 	return ExecuteBlockCfg{
-		db:            db,
-		prune:         pm,
-		batchSize:     batchSize,
-		changeSetHook: changeSetHook,
-		chainConfig:   chainConfig,
-		engine:        engine,
-		vmConfig:      vmConfig,
-		dirs:          dirs,
-		accumulator:   accumulator,
-		stateStream:   stateStream,
-		badBlockHalt:  badBlockHalt,
-		blockReader:   blockReader,
-		hd:            hd,
-		genesis:       genesis,
-		historyV3:     true,
-		syncCfg:       syncCfg,
-		agg:           agg,
-		silkworm:      silkworm,
+		db:           db,
+		prune:        pm,
+		batchSize:    batchSize,
+		chainConfig:  chainConfig,
+		engine:       engine,
+		vmConfig:     vmConfig,
+		dirs:         dirs,
+		accumulator:  accumulator,
+		stateStream:  stateStream,
+		badBlockHalt: badBlockHalt,
+		blockReader:  blockReader,
+		hd:           hd,
+		genesis:      genesis,
+		historyV3:    true,
+		syncCfg:      syncCfg,
+		agg:          agg,
+		silkworm:     silkworm,
 	}
 }
 
