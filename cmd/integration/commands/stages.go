@@ -1142,7 +1142,7 @@ func stageCustomTrace(db kv.RwDB, ctx context.Context, logger log.Logger) error 
 				return err
 			}
 			if !ok {
-				return fmt.Errorf("too deep unwind requested: %d, minimum alowed: %d", s.BlockNumber-unwind, blockNumWithCommitment)
+				return fmt.Errorf("too deep unwind requested: %d, minimum allowed: %d", s.BlockNumber-unwind, blockNumWithCommitment)
 			}
 			unwind = s.BlockNumber - blockNumWithCommitment
 			return nil
