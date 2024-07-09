@@ -1320,11 +1320,23 @@ func (a *Aggregator) recalcVisibleFiles() {
 	a.visibleFilesLock.Lock()
 	defer a.visibleFilesLock.Unlock()
 
-	for _, domain := range a.d {
-		domain.reCalcVisibleFiles()
+	for _, d := range a.d {
+		if d == nil {
+			continue
+		}
+		d.reCalcVisibleFiles()
 	}
 	for _, ii := range a.iis {
+		if ii == nil {
+			continue
+		}
 		ii.reCalcVisibleFiles()
+	}
+	for _, ap := range a.ap {
+		if ap == nil {
+			continue
+		}
+		ap.reCalcVisibleFiles()
 	}
 }
 
@@ -1354,6 +1366,11 @@ func (r RangesV3) String() string {
 			ss = append(ss, mr.String(kv.InvertedIdxPos(p).String(), aggStep))
 		}
 	}
+	for p, mr := range r.appendable {
+		if mr != nil && mr.needMerge {
+			ss = append(ss, mr.String(kv.Appendable(p).String(), aggStep))
+		}
+	}
 	return strings.Join(ss, ", ")
 }
 
@@ -1364,6 +1381,11 @@ func (r RangesV3) any() bool {
 		}
 	}
 	for _, ii := range r.invertedIndex {
+		if ii.needMerge {
+			return true
+		}
+	}
+	for _, ii := range r.appendable {
 		if ii.needMerge {
 			return true
 		}
