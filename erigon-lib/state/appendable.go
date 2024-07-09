@@ -361,10 +361,19 @@ func (tx *AppendableRoTx) Files() (res []string) {
 
 func (tx *AppendableRoTx) Get(txnID kv.TxnId, dbtx kv.Tx) (v []byte, ok bool, err error) {
 	v, ok = tx.getFromFiles(uint64(txnID))
+	fmt.Printf("[dbg] f: %d -> %t\n", txnID, ok)
 	if ok {
 		return v, true, nil
 	}
-	return tx.ap.getFromDBByTs(uint64(txnID), dbtx)
+	v, ok, err = tx.ap.getFromDBByTs(uint64(txnID), dbtx)
+	fmt.Printf("[dbg] db: %d -> %t\n", txnID, ok)
+	if err != nil {
+		return nil, false, err
+	}
+	if ok {
+		return v, true, nil
+	}
+	return nil, false, nil
 }
 func (tx *AppendableRoTx) Append(txnID kv.TxnId, v []byte, dbtx kv.RwTx) error {
 	return dbtx.Put(tx.ap.table, hexutility.EncodeTs(uint64(txnID)), v)
@@ -710,7 +719,9 @@ func (ap *Appendable) collate(ctx context.Context, step uint64, roTx kv.Tx) (App
 			return coll, fmt.Errorf("collate %s: %w", ap.filenameBase, err)
 		}
 	}
-
+	if coll.writer.Count() != int(ap.aggregationStep) {
+		panic(fmt.Errorf("expected: %d, got: %d\n", coll.writer.Count(), ap.aggregationStep))
+	}
 	closeComp = false
 	return coll, nil
 }
