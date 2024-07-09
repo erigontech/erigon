@@ -401,6 +401,41 @@ func (a *Aggregator) Files() []string {
 	defer ac.Close()
 	return ac.Files()
 }
+func (a *Aggregator) LS() {
+	for _, d := range a.d {
+		d.dirtyFiles.Walk(func(items []*filesItem) bool {
+			for _, item := range items {
+				if item.decompressor == nil {
+					continue
+				}
+				log.Info("[agg] ", "f", item.decompressor.FileName(), "words", item.decompressor.Count())
+			}
+			return true
+		})
+	}
+	for _, d := range a.iis {
+		d.dirtyFiles.Walk(func(items []*filesItem) bool {
+			for _, item := range items {
+				if item.decompressor == nil {
+					continue
+				}
+				log.Info("[agg] ", "f", item.decompressor.FileName(), "words", item.decompressor.Count())
+			}
+			return true
+		})
+	}
+	for _, d := range a.ap {
+		d.dirtyFiles.Walk(func(items []*filesItem) bool {
+			for _, item := range items {
+				if item.decompressor == nil {
+					continue
+				}
+				log.Info("[agg] ", "f", item.decompressor.FileName(), "words", item.decompressor.Count())
+			}
+			return true
+		})
+	}
+}
 
 func (a *Aggregator) BuildOptionalMissedIndicesInBackground(ctx context.Context, workers int) {
 	if ok := a.buildingOptionalIndices.CompareAndSwap(false, true); !ok {
