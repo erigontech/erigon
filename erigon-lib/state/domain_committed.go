@@ -223,26 +223,21 @@ func (dt *DomainRoTx) lookupByShortenedKey(shortKey []byte, getter ArchiveGetter
 func (dt *DomainRoTx) commitmentValTransformDomain(rng MergeRange, accounts, storage *DomainRoTx, mergedAccount, mergedStorage *filesItem) (valueTransformer, error) {
 	hadToLookupStorage := mergedStorage == nil
 	if mergedStorage == nil {
-		// mergedStorage = storage.lookupFileByItsRange(rng.from, rng.to)
-		// if mergedStorage == nil {
-		// TODO may allow to merge, but storage keys will be stored as plainkeys
-		return nil, fmt.Errorf("merged v1-account.%d-%d.kv file not found", rng.from, rng.to)
-		// }
+		mergedStorage = storage.lookupFileByItsRange(rng.from, rng.to)
+		if mergedStorage == nil {
+			// TODO may allow to merge, but storage keys will be stored as plainkeys
+			return nil, fmt.Errorf("merged v1-account.%d-%d.kv file not found", rng.from/dt.d.aggregationStep, rng.to/dt.d.aggregationStep)
+		}
 	}
 	hadToLookupAccount := mergedAccount == nil
 	if mergedAccount == nil {
-		// mergedAccount = accounts.lookupFileByItsRange(rng.from, rng.to)
-		// if mergedAccount == nil {
-		return nil, fmt.Errorf("merged v1-account.%d-%d.kv file not found", rng.from, rng.to)
-		// }
+		mergedAccount = accounts.lookupFileByItsRange(rng.from, rng.to)
+		if mergedAccount == nil {
+			return nil, fmt.Errorf("merged v1-account.%d-%d.kv file not found", rng.from/dt.d.aggregationStep, rng.to/dt.d.aggregationStep)
+		}
 	}
 
-	dr := DomainRanges{
-		valuesStartTxNum: rng.from,
-		valuesEndTxNum:   rng.to,
-		values:           true,
-	}
-
+	dr := DomainRanges{values: rng}
 	accountFileMap := make(map[string]ArchiveGetter)
 	if accountList, _, _ := accounts.staticFilesInRange(dr); accountList != nil {
 		for _, f := range accountList {
@@ -264,8 +259,25 @@ func (dt *DomainRoTx) commitmentValTransformDomain(rng MergeRange, accounts, sto
 		if !dt.d.replaceKeysInValues || len(valBuf) == 0 || ((keyEndTxNum-keyFromTxNum)/dt.d.aggregationStep)%2 != 0 {
 			return valBuf, nil
 		}
-		sig := storageFileMap[fmt.Sprintf("%d-%d", keyFromTxNum, keyEndTxNum)]
-		aig := accountFileMap[fmt.Sprintf("%d-%d", keyFromTxNum, keyEndTxNum)]
+		sig, ok := storageFileMap[fmt.Sprintf("%d-%d", keyFromTxNum, keyEndTxNum)]
+		if !ok {
+			dirty := storage.lookupFileByItsRange(keyFromTxNum, keyEndTxNum)
+			if dirty == nil {
+				return nil, fmt.Errorf("dirty storage file not found %d-%d", keyFromTxNum/dt.d.aggregationStep, keyEndTxNum/dt.d.aggregationStep)
+			}
+			sig = NewArchiveGetter(dirty.decompressor.MakeGetter(), storage.d.compression)
+			storageFileMap[fmt.Sprintf("%d-%d", keyFromTxNum, keyEndTxNum)] = sig
+		}
+
+		aig, ok := accountFileMap[fmt.Sprintf("%d-%d", keyFromTxNum, keyEndTxNum)]
+		if !ok {
+			dirty := accounts.lookupFileByItsRange(keyFromTxNum, keyEndTxNum)
+			if dirty == nil {
+				return nil, fmt.Errorf("dirty account file not found %d-%d", keyFromTxNum/dt.d.aggregationStep, keyEndTxNum/dt.d.aggregationStep)
+			}
+			aig = NewArchiveGetter(dirty.decompressor.MakeGetter(), accounts.d.compression)
+			accountFileMap[fmt.Sprintf("%d-%d", keyFromTxNum, keyEndTxNum)] = aig
+		}
 
 		replacer := func(key []byte, isStorage bool) ([]byte, error) {
 			var found bool

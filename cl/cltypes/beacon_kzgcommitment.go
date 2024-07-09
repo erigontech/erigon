@@ -30,15 +30,21 @@ import (
 
 var (
 	blobT = reflect.TypeOf(Blob{})
+
+	_ ssz2.SizedObjectSSZ = (*Blob)(nil)
+	_ ssz2.SizedObjectSSZ = (*KZGProof)(nil)
 )
 
 type Blob gokzg4844.Blob
 type KZGProof gokzg4844.KZGProof // [48]byte
 
-// https://github.com/ethereum/consensus-specs/blob/3a2304981a3b820a22b518fe4859f4bba0ebc83b/specs/deneb/polynomial-commitments.md#custom-types
-const BYTES_PER_FIELD_ELEMENT = 32
-const FIELD_ELEMENTS_PER_BLOB = 4096
-const BYTES_PER_BLOB = uint64(BYTES_PER_FIELD_ELEMENT * FIELD_ELEMENTS_PER_BLOB)
+const (
+	// https://github.com/ethereum/consensus-specs/blob/3a2304981a3b820a22b518fe4859f4bba0ebc83b/specs/deneb/polynomial-commitments.md#custom-types
+	BYTES_PER_FIELD_ELEMENT = 32
+	FIELD_ELEMENTS_PER_BLOB = 4096
+	BYTES_KZG_PROOF         = 48
+	BYTES_PER_BLOB          = BYTES_PER_FIELD_ELEMENT * FIELD_ELEMENTS_PER_BLOB
+)
 
 type KZGCommitment gokzg4844.KZGCommitment
 
@@ -96,6 +102,42 @@ func (b *Blob) EncodingSizeSSZ() int {
 	return len(b[:])
 }
 
+func (b *Blob) Static() bool {
+	return true
+}
+
 func (b *Blob) HashSSZ() ([32]byte, error) {
 	return merkle_tree.BytesRoot(b[:])
+}
+
+func (b *KZGProof) MarshalJSON() ([]byte, error) {
+	return json.Marshal(libcommon.Bytes48(*b))
+}
+
+func (b *KZGProof) UnmarshalJSON(data []byte) error {
+	return json.Unmarshal(data, (*libcommon.Bytes48)(b))
+}
+
+func (b *KZGProof) DecodeSSZ(buf []byte, version int) error {
+	return ssz2.UnmarshalSSZ(buf, version, b[:])
+}
+
+func (b *KZGProof) EncodeSSZ(buf []byte) ([]byte, error) {
+	return append(buf, b[:]...), nil
+}
+
+func (b *KZGProof) EncodingSizeSSZ() int {
+	return 48
+}
+
+func (b *KZGProof) HashSSZ() ([32]byte, error) {
+	return merkle_tree.BytesRoot(b[:])
+}
+
+func (b *KZGProof) Clone() clonable.Clonable {
+	return &KZGProof{}
+}
+
+func (b *KZGProof) Static() bool {
+	return true
 }

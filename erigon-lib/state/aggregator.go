@@ -848,7 +848,21 @@ func (ac *AggregatorRoTx) CanPrune(tx kv.Tx, untilTx uint64) bool {
 }
 
 func (ac *AggregatorRoTx) CanUnwindToBlockNum(tx kv.Tx) (uint64, error) {
-	return ReadLowestUnwindableBlock(tx)
+	minUnwindale, err := ReadLowestUnwindableBlock(tx)
+	if err != nil {
+		return 0, err
+	}
+	if minUnwindale == math.MaxUint64 { // no unwindable block found
+		stateVal, _, _, err := ac.d[kv.CommitmentDomain].GetLatest(keyCommitmentState, nil, tx)
+		if err != nil {
+			return 0, err
+		}
+		if len(stateVal) == 0 {
+			return 0, nil
+		}
+		_, minUnwindale = _decodeTxBlockNums(stateVal)
+	}
+	return minUnwindale, nil
 }
 
 // CanUnwindBeforeBlockNum - returns `true` if can unwind to requested `blockNum`, otherwise returns nearest `unwindableBlockNum`
@@ -1376,34 +1390,33 @@ func (ac *AggregatorRoTx) findMergeRange(maxEndTxNum, maxSpan uint64) RangesV3 {
 		r.domain[id] = d.findMergeRange(maxEndTxNum, maxSpan)
 	}
 
-	if ac.a.commitmentValuesTransform && r.domain[kv.CommitmentDomain].values {
+	if ac.a.commitmentValuesTransform && r.domain[kv.CommitmentDomain].values.needMerge {
 		cr := r.domain[kv.CommitmentDomain]
 
 		restorePrevRange := false
 		for k, dr := range r.domain {
 			kd := kv.Domain(k)
-			if kd == kv.CommitmentDomain || (dr.valuesStartTxNum == cr.valuesStartTxNum && dr.valuesEndTxNum == cr.valuesEndTxNum) {
+			if kd == kv.CommitmentDomain || cr.values.Equal(&dr.values) {
 				continue
 			}
 			// commitment waits until storage and account are merged so it may be a bit behind (if merge was interrupted before)
-			if !dr.values || cr.valuesEndTxNum < dr.valuesStartTxNum {
-				if mf := ac.d[kd].lookupFileByItsRange(cr.valuesStartTxNum, cr.valuesEndTxNum); mf != nil {
+			if !dr.values.needMerge || cr.values.to < dr.values.from {
+				if mf := ac.d[kd].lookupFileByItsRange(cr.values.from, cr.values.to); mf != nil {
 					// file for required range exists, hold this domain from merge but allow to merge comitemnt
-					r.domain[k].values, r.domain[k].valuesStartTxNum, r.domain[k].valuesEndTxNum = false, 0, 0
-					rng := MergeRange{from: dr.valuesStartTxNum, to: dr.valuesEndTxNum}
+					r.domain[k].values = MergeRange{}
 					ac.a.logger.Debug("findMergeRange: commitment range is different but file exists in domain, hold further merge",
-						ac.d[k].d.filenameBase, rng.String("", ac.a.StepSize()), "vals", dr.values)
+						ac.d[k].d.filenameBase, dr.values.String("vals", ac.a.StepSize()),
+						"commitment", cr.values.String("vals", ac.a.StepSize()))
 					continue
 				}
 				restorePrevRange = true
 			}
 		}
 		if restorePrevRange {
-			for k, d := range r.domain {
-				r.domain[k].values, r.domain[k].valuesStartTxNum, r.domain[k].valuesEndTxNum = false, 0, 0
-				rng := MergeRange{from: d.valuesStartTxNum, to: d.valuesEndTxNum}
+			for k, dr := range r.domain {
+				r.domain[k].values = MergeRange{}
 				ac.a.logger.Debug("findMergeRange: commitment range is different than accounts or storage, cancel kv merge",
-					ac.d[k].d.filenameBase, rng.String("", ac.a.StepSize()))
+					ac.d[k].d.filenameBase, dr.values.String("", ac.a.StepSize()))
 			}
 		}
 	}
@@ -1628,13 +1641,7 @@ func (ac *AggregatorRoTx) mergeFiles(ctx context.Context, files SelectedStaticFi
 				ac.RestrictSubsetFileDeletions(true)
 				accStorageMerged.Wait()
 
-				rng := MergeRange{
-					needMerge: true,
-					from:      r.domain[kid].valuesStartTxNum,
-					to:        r.domain[kid].valuesEndTxNum,
-				}
-
-				vt, err = ac.d[kv.CommitmentDomain].commitmentValTransformDomain(rng, ac.d[kv.AccountsDomain], ac.d[kv.StorageDomain],
+				vt, err = ac.d[kv.CommitmentDomain].commitmentValTransformDomain(r.domain[kid].values, ac.d[kv.AccountsDomain], ac.d[kv.StorageDomain],
 					mf.d[kv.AccountsDomain], mf.d[kv.StorageDomain])
 
 				if err != nil {
@@ -1959,8 +1966,8 @@ func (ac *AggregatorRoTx) ViewID() uint64 { return ac.id }
 
 // --- Domain part START ---
 
-func (ac *AggregatorRoTx) DomainRange(tx kv.Tx, domain kv.Domain, fromKey, toKey []byte, ts uint64, asc order.By, limit int) (it iter.KV, err error) {
-	return ac.d[domain].DomainRange(tx, fromKey, toKey, ts, asc, limit)
+func (ac *AggregatorRoTx) DomainRange(ctx context.Context, tx kv.Tx, domain kv.Domain, fromKey, toKey []byte, ts uint64, asc order.By, limit int) (it iter.KV, err error) {
+	return ac.d[domain].DomainRange(ctx, tx, fromKey, toKey, ts, asc, limit)
 }
 func (ac *AggregatorRoTx) DomainRangeLatest(tx kv.Tx, domain kv.Domain, from, to []byte, limit int) (iter.KV, error) {
 	return ac.d[domain].DomainRangeLatest(tx, from, to, limit)

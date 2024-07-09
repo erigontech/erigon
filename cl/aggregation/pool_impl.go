@@ -68,7 +68,6 @@ func (p *aggregationPoolImpl) AddAttestation(inAtt *solid.Attestation) error {
 	if err != nil {
 		return err
 	}
-
 	p.aggregatesLock.Lock()
 	defer p.aggregatesLock.Unlock()
 	att, ok := p.aggregates[hashRoot]

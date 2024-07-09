@@ -1611,7 +1611,7 @@ func (dt *DomainRoTx) GetLatestFromFiles(key []byte) (v []byte, found bool, file
 	return dt.getFromFiles(key)
 }
 
-func (dt *DomainRoTx) DomainRange(tx kv.Tx, fromKey, toKey []byte, ts uint64, asc order.By, limit int) (it iter.KV, err error) {
+func (dt *DomainRoTx) DomainRange(ctx context.Context, tx kv.Tx, fromKey, toKey []byte, ts uint64, asc order.By, limit int) (it iter.KV, err error) {
 	if !asc {
 		panic("implement me")
 	}
@@ -1623,7 +1623,7 @@ func (dt *DomainRoTx) DomainRange(tx kv.Tx, fromKey, toKey []byte, ts uint64, as
 	//if err != nil {
 	//	return nil, err
 	//}
-	histStateIt, err := dt.ht.WalkAsOf(ts, fromKey, toKey, tx, limit)
+	histStateIt, err := dt.ht.WalkAsOf(ctx, ts, fromKey, toKey, tx, limit)
 	if err != nil {
 		return nil, err
 	}

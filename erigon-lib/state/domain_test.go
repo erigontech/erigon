@@ -1889,10 +1889,10 @@ func TestDomain_Unwind(t *testing.T) {
 			defer ectx.Close()
 			uc := d.BeginFilesRo()
 			defer uc.Close()
-			et, err := ectx.DomainRange(etx, nil, nil, unwindTo, order.Asc, -1)
+			et, err := ectx.DomainRange(context.Background(), etx, nil, nil, unwindTo, order.Asc, -1)
 			require.NoError(t, err)
 
-			ut, err := uc.DomainRange(etx, nil, nil, unwindTo, order.Asc, -1)
+			ut, err := uc.DomainRange(context.Background(), etx, nil, nil, unwindTo, order.Asc, -1)
 			require.NoError(t, err)
 
 			compareIterators(t, et, ut)
@@ -1913,10 +1913,10 @@ func TestDomain_Unwind(t *testing.T) {
 			uc := d.BeginFilesRo()
 			defer uc.Close()
 
-			et, err := ectx.ht.WalkAsOf(unwindTo-1, nil, nil, etx, -1)
+			et, err := ectx.ht.WalkAsOf(context.Background(), unwindTo-1, nil, nil, etx, -1)
 			require.NoError(t, err)
 
-			ut, err := uc.ht.WalkAsOf(unwindTo-1, nil, nil, utx, -1)
+			ut, err := uc.ht.WalkAsOf(context.Background(), unwindTo-1, nil, nil, utx, -1)
 			require.NoError(t, err)
 
 			compareIterators(t, et, ut)
