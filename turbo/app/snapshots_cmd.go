@@ -468,14 +468,11 @@ func doIntegrity(cliCtx *cli.Context) error {
 
 	cfg := ethconfig.NewSnapCfg(true, false, true, true)
 
-	blockSnaps, borSnaps, caplinSnaps, blockRetire, agg, err := openSnaps(ctx, cfg, dirs, chainDB, logger)
+	_, _, _, blockRetire, agg, clean, err := openSnaps(ctx, cfg, dirs, chainDB, logger)
 	if err != nil {
 		return err
 	}
-	defer blockSnaps.Close()
-	defer borSnaps.Close()
-	defer caplinSnaps.Close()
-	defer agg.Close()
+	defer clean()
 
 	blockReader, _ := blockRetire.IO()
 	for _, chk := range integrity.AllChecks {
@@ -643,14 +640,11 @@ func doIndicesCommand(cliCtx *cli.Context, dirs datadir.Dirs) error {
 
 	cfg := ethconfig.NewSnapCfg(true, false, true, true)
 	chainConfig := fromdb.ChainConfig(chainDB)
-	blockSnaps, borSnaps, caplinSnaps, br, agg, err := openSnaps(ctx, cfg, dirs, chainDB, logger)
+	_, _, caplinSnaps, br, agg, clean, err := openSnaps(ctx, cfg, dirs, chainDB, logger)
 	if err != nil {
 		return err
 	}
-	defer blockSnaps.Close()
-	defer borSnaps.Close()
-	defer caplinSnaps.Close()
-	defer agg.Close()
+	defer clean()
 
 	if err := br.BuildMissedIndicesIfNeed(ctx, "Indexing", nil, chainConfig); err != nil {
 		return err
@@ -676,16 +670,11 @@ func doLS(cliCtx *cli.Context, dirs datadir.Dirs) error {
 	chainDB := dbCfg(kv.ChainDB, dirs.Chaindata).MustOpen()
 	defer chainDB.Close()
 	cfg := ethconfig.NewSnapCfg(true, false, true, true)
-	blockSnaps, borSnaps, caplinSnaps, _, agg, err := openSnaps(ctx, cfg, dirs, chainDB, logger)
+	blockSnaps, borSnaps, caplinSnaps, _, agg, clean, err := openSnaps(ctx, cfg, dirs, chainDB, logger)
 	if err != nil {
 		return err
 	}
-	defer blockSnaps.Close()
-	defer borSnaps.Close()
-	defer caplinSnaps.Close()
-	defer agg.Close()
-
-	agg.Close()
+	defer clean()
 
 	blockSnaps.LS()
 	borSnaps.LS()
@@ -697,7 +686,7 @@ func doLS(cliCtx *cli.Context, dirs datadir.Dirs) error {
 
 func openSnaps(ctx context.Context, cfg ethconfig.BlocksFreezing, dirs datadir.Dirs, chainDB kv.RwDB, logger log.Logger) (
 	blockSnaps *freezeblocks.RoSnapshots, borSnaps *freezeblocks.BorRoSnapshots, csn *freezeblocks.CaplinSnapshots,
-	br *freezeblocks.BlockRetire, agg *libstate.Aggregator, err error,
+	br *freezeblocks.BlockRetire, agg *libstate.Aggregator, clean func(), err error,
 ) {
 	blockSnaps = freezeblocks.NewRoSnapshots(cfg, dirs.Snap, 0, logger)
 	if err = blockSnaps.ReopenFolder(); err != nil {
@@ -750,6 +739,13 @@ func openSnaps(ctx context.Context, cfg ethconfig.BlocksFreezing, dirs datadir.D
 	blockSnapBuildSema := semaphore.NewWeighted(int64(dbg.BuildSnapshotAllowance))
 	agg.SetSnapshotBuildSema(blockSnapBuildSema)
 	br = freezeblocks.NewBlockRetire(estimate.CompressSnapshot.Workers(), dirs, blockReader, blockWriter, chainDB, chainConfig, nil, blockSnapBuildSema, logger)
+	clean = func() {
+		defer blockSnaps.Close()
+		defer borSnaps.Close()
+		defer csn.Close()
+		defer agg.Close()
+
+	}
 	return
 }
 
@@ -872,20 +868,16 @@ func doRetireCommand(cliCtx *cli.Context, dirs datadir.Dirs) error {
 	defer db.Close()
 
 	cfg := ethconfig.NewSnapCfg(true, false, true, true)
-	blockSnaps, borSnaps, caplinSnaps, br, agg, err := openSnaps(ctx, cfg, dirs, db, logger)
+	blockSnaps, _, caplinSnaps, br, agg, clean, err := openSnaps(ctx, cfg, dirs, db, logger)
 	if err != nil {
 		return err
 	}
+	defer clean()
 
 	// `erigon retire` command is designed to maximize resouces utilization. But `Erigon itself` does minimize background impact (because not in rush).
 	agg.SetCollateAndBuildWorkers(estimate.StateV3Collate.Workers())
 	agg.SetMergeWorkers(estimate.AlmostAllCPUs())
 	agg.SetCompressWorkers(estimate.CompressSnapshot.Workers())
-
-	defer blockSnaps.Close()
-	defer borSnaps.Close()
-	defer caplinSnaps.Close()
-	defer agg.Close()
 
 	chainConfig := fromdb.ChainConfig(db)
 	if err := br.BuildMissedIndicesIfNeed(ctx, "retire", nil, chainConfig); err != nil {
