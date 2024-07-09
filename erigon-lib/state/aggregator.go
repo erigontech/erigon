@@ -357,13 +357,13 @@ func (a *Aggregator) closeDirtyFiles() {
 		d.Close()
 	}
 	for _, ii := range a.iis {
-		if d == nil {
+		if ii == nil {
 			continue
 		}
 		ii.Close()
 	}
 	for _, ap := range a.ap {
-		if d == nil {
+		if ap == nil {
 			continue
 		}
 		ap.Close()
