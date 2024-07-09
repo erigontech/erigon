@@ -484,7 +484,6 @@ func (tx *AppendableRoTx) newWriter(tmpdir string, discard bool) *appendableBuff
 
 func (ap *Appendable) BeginFilesRo() *AppendableRoTx {
 	files := ap._visibleFiles
-	fmt.Printf("[dbg] ap.BeginFilesRo: files %#v\n", files)
 	for i := 0; i < len(files); i++ {
 		if !files[i].src.frozen {
 			files[i].src.refcount.Add(1)
