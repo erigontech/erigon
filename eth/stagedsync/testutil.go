@@ -22,13 +22,7 @@ import (
 	"testing"
 
 	"github.com/holiman/uint256"
-	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
-
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/config3"
-	"github.com/ledgerwatch/erigon-lib/kv"
-	state2 "github.com/ledgerwatch/erigon-lib/state"
 	"github.com/ledgerwatch/erigon/core/state"
 	"github.com/ledgerwatch/erigon/core/types/accounts"
 )
@@ -38,88 +32,6 @@ const (
 	changeCodeWithIncarnations                  // code changes with incarnation
 	changeCodeIndepenentlyOfIncarnations        // code changes with and without incarnation
 )
-
-func compareCurrentState(
-	t *testing.T,
-	agg *state2.Aggregator,
-	db1 kv.Tx,
-	db2 kv.Tx,
-	buckets ...string,
-) {
-	for _, bucket := range buckets {
-		if config3.EnableHistoryV4InTest {
-			compareDomain(t, agg, db1, db2, bucket)
-			continue
-		}
-		compareBucket(t, db1, db2, bucket)
-	}
-}
-
-func compareDomain(t *testing.T, agg *state2.Aggregator, db1, db2 kv.Tx, bucketName string) {
-	ac := agg.BeginFilesRo()
-	defer ac.Close()
-
-	var domain kv.Domain
-	bucket1 := make(map[string][]byte)
-	bucket2 := make(map[string][]byte)
-	assertions := func(t *testing.T) {}
-
-	switch bucketName {
-	case kv.PlainState, kv.HashedAccounts:
-		domain = kv.AccountsDomain
-		assertions = func(t *testing.T) { require.True(t, len(bucket1) > 0) }
-
-	case kv.PlainContractCode, kv.ContractCode:
-		domain = kv.CodeDomain
-
-	case kv.HashedStorage:
-		domain = kv.StorageDomain
-
-	default:
-		panic(bucketName)
-	}
-
-	it, err := ac.DomainRangeLatest(db1.(kv.RwTx), domain, nil, nil, -1)
-	require.NoError(t, err)
-	if it.HasNext() {
-		k, v, err := it.Next()
-		require.NoError(t, err)
-
-		bucket1[string(k)] = v
-	}
-
-	it2, err := ac.DomainRangeLatest(db2.(kv.RwTx), domain, nil, nil, -1)
-	require.NoError(t, err)
-	if it2.HasNext() {
-		k, v, err := it2.Next()
-		require.NoError(t, err)
-
-		bucket2[string(k)] = v
-	}
-
-	assertions(t)
-	assert.Equalf(t, bucket1, bucket2, "bucket %q", bucketName)
-}
-
-func compareBucket(t *testing.T, db1, db2 kv.Tx, bucketName string) {
-	var err error
-
-	bucket1 := make(map[string][]byte)
-	err = db1.ForEach(bucketName, nil, func(k, v []byte) error {
-		bucket1[string(k)] = v
-		return nil
-	})
-	assert.NoError(t, err)
-
-	bucket2 := make(map[string][]byte)
-	err = db2.ForEach(bucketName, nil, func(k, v []byte) error {
-		bucket2[string(k)] = v
-		return nil
-	})
-	assert.NoError(t, err)
-
-	assert.Equalf(t, bucket1 /*expected*/, bucket2 /*actual*/, "bucket %q", bucketName)
-}
 
 type testGenHook func(n, from, numberOfBlocks uint64)
 
