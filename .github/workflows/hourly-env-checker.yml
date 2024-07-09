@@ -30,8 +30,18 @@ jobs:
         with:
           go-version: '1.20'
 
-      - name: Build Go application
-        run: go build -o check_node
-
       - name: Run tests
-        run: ./check_node -rpcURL=${{ matrix.rpc }} -nodeName=${{ matrix.name }}
+        run: go run ./zk/debug_tools/env-checker -rpcURL=${{ matrix.rpc }} -nodeName=${{ matrix.name }}
+
+  check-results:
+    needs: test-node
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check results
+        run: |
+          for job in ${{ matrix.include }}; do
+            if [[ ${{ job.outcome }} == 'failure' ]]; then
+              echo "Job failed: $job"
+              exit 1
+            fi
+          done
