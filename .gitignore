@@ -73,8 +73,6 @@ tests/testdata/*
 
 go.work*
 
-/goerli
-
 docker-compose.*.yml
 .env
 coverage.out

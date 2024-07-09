@@ -17,8 +17,6 @@
 package diagnostics
 
 import (
-	"encoding/json"
-
 	"github.com/shirou/gopsutil/v3/cpu"
 	"github.com/shirou/gopsutil/v3/disk"
 	"github.com/shirou/gopsutil/v3/mem"
@@ -37,16 +35,23 @@ var (
 
 func (d *DiagnosticClient) setupSysInfoDiagnostics() {
 	sysInfo := GetSysInfo(d.dataDirPath)
-	if err := d.db.Update(d.ctx, RAMInfoUpdater(sysInfo.RAM)); err != nil {
-		log.Warn("[Diagnostics] Failed to update RAM info", "err", err)
-	}
 
-	if err := d.db.Update(d.ctx, CPUInfoUpdater(sysInfo.CPU)); err != nil {
-		log.Warn("[Diagnostics] Failed to update CPU info", "err", err)
-	}
+	var funcs []func(tx kv.RwTx) error
+	funcs = append(funcs, RAMInfoUpdater(sysInfo.RAM), CPUInfoUpdater(sysInfo.CPU), DiskInfoUpdater(sysInfo.Disk))
 
-	if err := d.db.Update(d.ctx, DiskInfoUpdater(sysInfo.Disk)); err != nil {
-		log.Warn("[Diagnostics] Failed to update Disk info", "err", err)
+	err := d.db.Update(d.ctx, func(tx kv.RwTx) error {
+		for _, updater := range funcs {
+			updErr := updater(tx)
+			if updErr != nil {
+				return updErr
+			}
+		}
+
+		return nil
+	})
+
+	if err != nil {
+		log.Warn("[Diagnostics] Failed to update system info", "err", err)
 	}
 
 	d.mu.Lock()
@@ -155,17 +160,6 @@ func ReadRAMInfoFromTx(tx kv.Tx) ([]byte, error) {
 	return common.CopyBytes(bytes), nil
 }
 
-func ParseRamInfo(data []byte) (info RAMInfo) {
-	err := json.Unmarshal(data, &info)
-
-	if err != nil {
-		log.Warn("[Diagnostics] Failed to parse RAM info", "err", err)
-		return RAMInfo{}
-	} else {
-		return info
-	}
-}
-
 func ReadCPUInfoFromTx(tx kv.Tx) ([]byte, error) {
 	bytes, err := ReadDataFromTable(tx, kv.DiagSystemInfo, SystemCpuInfoKey)
 	if err != nil {
@@ -175,17 +169,6 @@ func ReadCPUInfoFromTx(tx kv.Tx) ([]byte, error) {
 	return common.CopyBytes(bytes), nil
 }
 
-func ParseCPUInfo(data []byte) (info CPUInfo) {
-	err := json.Unmarshal(data, &info)
-
-	if err != nil {
-		log.Warn("[Diagnostics] Failed to parse CPU info", "err", err)
-		return CPUInfo{}
-	} else {
-		return info
-	}
-}
-
 func ReadDiskInfoFromTx(tx kv.Tx) ([]byte, error) {
 	bytes, err := ReadDataFromTable(tx, kv.DiagSystemInfo, SystemDiskInfoKey)
 	if err != nil {
@@ -193,17 +176,6 @@ func ReadDiskInfoFromTx(tx kv.Tx) ([]byte, error) {
 	}
 
 	return common.CopyBytes(bytes), nil
-}
-
-func ParseDiskInfo(data []byte) (info DiskInfo) {
-	err := json.Unmarshal(data, &info)
-
-	if err != nil {
-		log.Warn("[Diagnostics] Failed to parse Disk info", "err", err)
-		return DiskInfo{}
-	} else {
-		return info
-	}
 }
 
 func RAMInfoUpdater(info RAMInfo) func(tx kv.RwTx) error {

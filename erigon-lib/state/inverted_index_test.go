@@ -549,7 +549,7 @@ func TestInvIndexScanFiles(t *testing.T) {
 	ii, err = NewInvertedIndex(cfg, ii.aggregationStep, ii.filenameBase, ii.indexKeysTable, ii.indexTable, nil, logger)
 	require.NoError(err)
 	defer ii.Close()
-	err = ii.OpenFolder()
+	err = ii.openFolder()
 	require.NoError(err)
 
 	mergeInverted(t, db, ii, txs)
@@ -628,13 +628,13 @@ func TestScanStaticFiles(t *testing.T) {
 		"v1-test.3-4.ef",
 		"v1-test.4-5.ef",
 	}
-	ii.scanStateFiles(files)
+	ii.scanDirtyFiles(files)
 	require.Equal(t, 6, ii.dirtyFiles.Len())
 
 	//integrity extension case
 	ii.dirtyFiles.Clear()
 	ii.integrityCheck = func(fromStep, toStep uint64) bool { return false }
-	ii.scanStateFiles(files)
+	ii.scanDirtyFiles(files)
 	require.Equal(t, 0, ii.dirtyFiles.Len())
 }
 
@@ -652,7 +652,7 @@ func TestCtxFiles(t *testing.T) {
 		"v1-test.480-496.ef",
 		"v1-test.480-512.ef",
 	}
-	ii.scanStateFiles(files)
+	ii.scanDirtyFiles(files)
 	require.Equal(t, 10, ii.dirtyFiles.Len())
 	ii.dirtyFiles.Scan(func(item *filesItem) bool {
 		fName := ii.efFilePath(item.startTxNum/ii.aggregationStep, item.endTxNum/ii.aggregationStep)
@@ -724,7 +724,7 @@ func TestInvIndex_OpenFolder(t *testing.T) {
 	err = os.WriteFile(fn, make([]byte, 33), 0644)
 	require.NoError(t, err)
 
-	err = ii.OpenFolder()
+	err = ii.openFolder()
 	require.NoError(t, err)
 	ii.Close()
 }
