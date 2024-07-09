@@ -21,9 +21,48 @@ import (
 	"math/big"
 
 	"github.com/gateway-fm/cdk-erigon-lib/common"
+	libcommon "github.com/gateway-fm/cdk-erigon-lib/common"
 
 	"github.com/ledgerwatch/erigon/crypto"
 )
+
+func (_this *Receipt) Clone() *Receipt {
+	postState := make([]byte, len(_this.PostState))
+	copy(postState, _this.PostState)
+
+	bloom := Bloom{}
+	copy(bloom[:], _this.Bloom[:])
+
+	logs := make(Logs, len(_this.Logs))
+	for i, l := range _this.Logs {
+		logs[i] = l.Clone()
+	}
+
+	txHash := libcommon.Hash{}
+	copy(txHash[:], _this.TxHash[:])
+
+	contractAddress := libcommon.Address{}
+	copy(contractAddress[:], _this.ContractAddress[:])
+
+	blockHash := libcommon.Hash{}
+	copy(blockHash[:], _this.BlockHash[:])
+
+	BlockNumber := big.NewInt(0).Set(_this.BlockNumber)
+
+	return &Receipt{
+		Type:              _this.Type,
+		PostState:         postState,
+		Status:            _this.Status,
+		CumulativeGasUsed: _this.CumulativeGasUsed,
+		Bloom:             bloom,
+		Logs:              logs,
+		TxHash:            txHash,
+		ContractAddress:   contractAddress,
+		BlockHash:         blockHash,
+		BlockNumber:       BlockNumber,
+		TransactionIndex:  _this.TransactionIndex,
+	}
+}
 
 // DeriveFields fills the receipts with their computed fields based on consensus
 // data and contextual infos like containing block and transactions.

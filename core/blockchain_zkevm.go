@@ -117,7 +117,7 @@ func ExecuteBlockEphemerallyZk(
 		}
 
 		//[hack]TODO: remove this after bug is fixed
-		localReceipt := *receipt
+		localReceipt := receipt.Clone()
 		if !chainConfig.IsForkID8Elderberry(blockNum) && errors.Is(execResult.Err, vm.ErrUnsupportedPrecompile) {
 			localReceipt.Status = 1
 		}
@@ -152,6 +152,10 @@ func ExecuteBlockEphemerallyZk(
 			receipt.CumulativeGasUsed = receipt.GasUsed
 		}
 
+		for _, l := range receipt.Logs {
+			l.ApplyPaddingToLogsData(chainConfig.IsForkID8Elderberry(blockNum), chainConfig.IsForkId9Elderberry2(blockNum))
+		}
+
 		if err != nil {
 			if !vmConfig.StatelessExec {
 				return nil, fmt.Errorf("could not apply tx %d from block %d [%v]: %w", txIndex, block.NumberU64(), tx.Hash().Hex(), err)
@@ -180,7 +184,7 @@ func ExecuteBlockEphemerallyZk(
 
 		txInfos = append(txInfos, blockinfo.ExecutedTxInfo{
 			Tx:                tx,
-			Receipt:           &localReceipt,
+			Receipt:           localReceipt,
 			EffectiveGasPrice: effectiveGasPricePercentage,
 			Signer:            &txSender,
 		})

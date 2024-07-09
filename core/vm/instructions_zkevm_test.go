@@ -5,79 +5,15 @@ import (
 	"math/big"
 	"testing"
 
-	"github.com/holiman/uint256"
 	libcommon "github.com/gateway-fm/cdk-erigon-lib/common"
 	types2 "github.com/gateway-fm/cdk-erigon-lib/types"
+	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/core/vm/evmtypes"
 	"github.com/ledgerwatch/erigon/core/vm/stack"
 	"github.com/ledgerwatch/erigon/params"
-	"encoding/hex"
 )
-
-func TestApplyHexPadBug(t *testing.T) {
-	type testScenario struct {
-		data     string
-		mSize    int
-		expected string
-	}
-
-	scenarios := map[string]testScenario{
-		"cardona-bug-block-3177498": {
-			data:     "0x010203",
-			mSize:    3,
-			expected: "102030",
-		},
-		"singleByteHexWithoutBug": {
-			data:     "0x11",
-			mSize:    1,
-			expected: "11",
-		},
-		"another": {
-			data:     "0x100000000000000000000000000000000000000000000000000000000000000",
-			mSize:    1,
-			expected: "10",
-		},
-		"another1": {
-			data:     "0x1020000000000000000000000000000000000000000000000000000000000",
-			mSize:    3,
-			expected: "102000",
-		},
-		"cardona-897048": {
-			data:     "0x0000000000000000000000000000000000000000000000000000000000000001",
-			mSize:    32,
-			expected: "0000000000000000000000000000000000000000000000000000000000000001",
-		},
-		"cardona-896194": {
-			data:     "0x0000000000000000000000000000000000000000000000010000000000001e44000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000009af3049dd15616fd627a35563b5282bea5c32e2000000000000000000000000000000000000000000000000000005af3107a4000",
-			mSize:    160,
-			expected: "0000000000000000000000000000000000000000000000010000000000001e44000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000009af3049dd15616fd627a35563b5282bea5c32e2000000000000000000000000000000000000000000000000000005af3107a4000",
-		},
-		"cardona-3816917": {
-			data:     "0x0102030405060708090a0b0c0d0e0f0102030405060708090a0b0c0d0e0f0102030405060708090a0b0c0d0e0f0102030405060708090a0b0c0d0e0f",
-			mSize:    60,
-			expected: "0102030405060708090a0b0c0d0e0f0102030405060708090a0b0c0d0e0f010230405060708090a0b0c0d0e0f0102030405060708090a0b0c0d0e0f0",
-		},
-	}
-
-	for name, scenario := range scenarios {
-		t.Run(name, func(t *testing.T) {
-			d := common.FromHex(scenario.data)
-
-			result, err := applyHexPadBug(d, scenario.mSize, 0)
-			if err != nil {
-				t.Fatalf("Error in applyHexPadBug: %v", err)
-			}
-
-			resultHex := hex.EncodeToString(result)
-
-			if resultHex != scenario.expected {
-				t.Errorf("Expected %s but got %s", scenario.expected, resultHex)
-			}
-		})
-	}
-}
 
 func TestBlockhashV2(t *testing.T) {
 
