@@ -114,17 +114,22 @@ func (s *CaplinSnapshots) LogStat(str string) {
 }
 
 func (s *CaplinSnapshots) LS() {
-	for _, seg := range s.BeaconBlocks.segments {
-		if seg.Decompressor == nil {
-			continue
+	if s.BeaconBlocks == nil {
+
+		for _, seg := range s.BeaconBlocks.segments {
+			if seg.Decompressor == nil {
+				continue
+			}
+			log.Info("[agg] ", "f", seg.Decompressor.FileName(), "words", seg.Decompressor.Count())
 		}
-		log.Info("[agg] ", "f", seg.Decompressor.FileName(), "words", seg.Decompressor.Count())
 	}
-	for _, seg := range s.BlobSidecars.segments {
-		if seg.Decompressor == nil {
-			continue
+	if s.BlobSidecars != nil {
+		for _, seg := range s.BlobSidecars.segments {
+			if seg.Decompressor == nil {
+				continue
+			}
+			log.Info("[agg] ", "f", seg.Decompressor.FileName(), "words", seg.Decompressor.Count())
 		}
-		log.Info("[agg] ", "f", seg.Decompressor.FileName(), "words", seg.Decompressor.Count())
 	}
 }
 
