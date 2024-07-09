@@ -301,15 +301,15 @@ func (a *Aggregator) OpenFolder() error {
 				return a.ctx.Err()
 			default:
 			}
-			return d.OpenFolder()
+			return d.openFolder()
 		})
 	}
 	for _, ii := range a.iis {
 		ii := ii
-		eg.Go(func() error { return ii.OpenFolder() })
+		eg.Go(func() error { return ii.openFolder() })
 	}
 	if err := eg.Wait(); err != nil {
-		return fmt.Errorf("OpenFolder: %w", err)
+		return fmt.Errorf("openFolder: %w", err)
 	}
 	return nil
 }
@@ -322,14 +322,14 @@ func (a *Aggregator) OpenList(files []string, readonly bool) error {
 	eg := &errgroup.Group{}
 	for _, d := range a.d {
 		d := d
-		eg.Go(func() error { return d.OpenFolder() })
+		eg.Go(func() error { return d.openFolder() })
 	}
 	for _, ii := range a.iis {
 		ii := ii
-		eg.Go(func() error { return ii.OpenFolder() })
+		eg.Go(func() error { return ii.openFolder() })
 	}
 	if err := eg.Wait(); err != nil {
-		return fmt.Errorf("OpenList: %w", err)
+		return fmt.Errorf("openList: %w", err)
 	}
 	return nil
 }
@@ -370,6 +370,9 @@ func (a *Aggregator) SetCompressWorkers(i int) {
 	for _, ii := range a.iis {
 		ii.compressWorkers = i
 	}
+	for _, ap := range a.ap {
+		ap.compressWorkers = i
+	}
 }
 
 func (a *Aggregator) DiscardHistory(name kv.Domain) *Aggregator {
@@ -394,6 +397,9 @@ func (ac *AggregatorRoTx) Files() []string {
 	}
 	for _, ii := range ac.iis {
 		res = append(res, ii.Files()...)
+	}
+	for _, ap := range ac.appendable {
+		res = append(res, ap.Files()...)
 	}
 	return res
 }
@@ -1359,11 +1365,23 @@ func (a *Aggregator) recalcVisibleFiles() {
 	a.visibleFilesLock.Lock()
 	defer a.visibleFilesLock.Unlock()
 
-	for _, domain := range a.d {
-		domain.reCalcVisibleFiles()
+	for _, d := range a.d {
+		if d == nil {
+			continue
+		}
+		d.reCalcVisibleFiles()
 	}
 	for _, ii := range a.iis {
+		if ii == nil {
+			continue
+		}
 		ii.reCalcVisibleFiles()
+	}
+	for _, ap := range a.ap {
+		if ap == nil {
+			continue
+		}
+		ap.reCalcVisibleFiles()
 	}
 }
 
@@ -1393,6 +1411,11 @@ func (r RangesV3) String() string {
 			ss = append(ss, mr.String(kv.InvertedIdxPos(p).String(), aggStep))
 		}
 	}
+	for p, mr := range r.appendable {
+		if mr != nil && mr.needMerge {
+			ss = append(ss, mr.String(kv.Appendable(p).String(), aggStep))
+		}
+	}
 	return strings.Join(ss, ", ")
 }
 
@@ -1403,7 +1426,12 @@ func (r RangesV3) any() bool {
 		}
 	}
 	for _, ii := range r.invertedIndex {
-		if ii.needMerge {
+		if ii != nil && ii.needMerge {
+			return true
+		}
+	}
+	for _, ap := range r.appendable {
+		if ap != nil && ap.needMerge {
 			return true
 		}
 	}

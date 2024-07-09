@@ -971,7 +971,7 @@ func TestHistoryScanFiles(t *testing.T) {
 		hc := h.BeginFilesRo()
 		defer hc.Close()
 		// Recreate domain and re-scan the files
-		require.NoError(h.OpenFolder(false))
+		require.NoError(h.openFolder())
 		// Check the history
 		checkHistoryHistory(t, h, txs)
 	}
@@ -1380,12 +1380,12 @@ func TestScanStaticFilesH(t *testing.T) {
 		"v1-test.3-4.v",
 		"v1-test.4-5.v",
 	}
-	h.scanStateFiles(files)
+	h.scanDirtyFiles(files)
 	require.Equal(t, 6, h.dirtyFiles.Len())
 
 	h.dirtyFiles.Clear()
 	h.integrityCheck = func(fromStep, toStep uint64) bool { return false }
-	h.scanStateFiles(files)
+	h.scanDirtyFiles(files)
 	require.Equal(t, 0, h.dirtyFiles.Len())
 
 }
@@ -1524,7 +1524,7 @@ func TestHistory_OpenFolder(t *testing.T) {
 	err = os.WriteFile(fn, make([]byte, 33), 0644)
 	require.NoError(t, err)
 
-	err = h.OpenFolder(true)
+	err = h.openFolder()
 	require.NoError(t, err)
 	h.Close()
 }

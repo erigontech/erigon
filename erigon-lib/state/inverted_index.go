@@ -158,24 +158,24 @@ func (ii *InvertedIndex) fileNamesOnDisk() (idx, hist, domain []string, err erro
 	return
 }
 
-func (ii *InvertedIndex) OpenList(fNames []string) error {
+func (ii *InvertedIndex) openList(fNames []string) error {
 	ii.closeWhatNotInList(fNames)
-	ii.scanStateFiles(fNames)
-	if err := ii.openFiles(); err != nil {
-		return fmt.Errorf("NewHistory.openFiles: %w, %s", err, ii.filenameBase)
+	ii.scanDirtyFiles(fNames)
+	if err := ii.openDirtyFiles(); err != nil {
+		return fmt.Errorf("InvertedIndex(%s).openDirtyFiles: %w", ii.filenameBase, err)
 	}
 	return nil
 }
 
-func (ii *InvertedIndex) OpenFolder() error {
+func (ii *InvertedIndex) openFolder() error {
 	idxFiles, _, _, err := ii.fileNamesOnDisk()
 	if err != nil {
 		return err
 	}
-	return ii.OpenList(idxFiles)
+	return ii.openList(idxFiles)
 }
 
-func (ii *InvertedIndex) scanStateFiles(fileNames []string) (garbageFiles []*filesItem) {
+func (ii *InvertedIndex) scanDirtyFiles(fileNames []string) (garbageFiles []*filesItem) {
 	re := regexp.MustCompile("^v([0-9]+)-" + ii.filenameBase + ".([0-9]+)-([0-9]+).ef$")
 	var err error
 	for _, name := range fileNames {
@@ -266,7 +266,7 @@ func (ii *InvertedIndex) BuildMissedAccessors(ctx context.Context, g *errgroup.G
 
 }
 
-func (ii *InvertedIndex) openFiles() error {
+func (ii *InvertedIndex) openDirtyFiles() error {
 	var invalidFileItems []*filesItem
 	invalidFileItemsLock := sync.Mutex{}
 	ii.dirtyFiles.Walk(func(items []*filesItem) bool {
@@ -278,7 +278,7 @@ func (ii *InvertedIndex) openFiles() error {
 				exists, err := dir.FileExist(fPath)
 				if err != nil {
 					_, fName := filepath.Split(fPath)
-					ii.logger.Debug("[agg] InvertedIndex.openFiles: FileExists error", "f", fName, "err", err)
+					ii.logger.Debug("[agg] InvertedIndex.openDirtyFiles: FileExists error", "f", fName, "err", err)
 					invalidFileItemsLock.Lock()
 					invalidFileItems = append(invalidFileItems, item)
 					invalidFileItemsLock.Unlock()
@@ -286,7 +286,7 @@ func (ii *InvertedIndex) openFiles() error {
 				}
 				if !exists {
 					_, fName := filepath.Split(fPath)
-					ii.logger.Debug("[agg] InvertedIndex.openFiles: file does not exists", "f", fName)
+					ii.logger.Debug("[agg] InvertedIndex.openDirtyFiles: file does not exists", "f", fName)
 					invalidFileItemsLock.Lock()
 					invalidFileItems = append(invalidFileItems, item)
 					invalidFileItemsLock.Unlock()
@@ -296,9 +296,9 @@ func (ii *InvertedIndex) openFiles() error {
 				if item.decompressor, err = seg.NewDecompressor(fPath); err != nil {
 					_, fName := filepath.Split(fPath)
 					if errors.Is(err, &seg.ErrCompressedFileCorrupted{}) {
-						ii.logger.Debug("[agg] InvertedIndex.openFiles", "err", err, "f", fName)
+						ii.logger.Debug("[agg] InvertedIndex.openDirtyFiles", "err", err, "f", fName)
 					} else {
-						ii.logger.Warn("[agg] InvertedIndex.openFiles", "err", err, "f", fName)
+						ii.logger.Warn("[agg] InvertedIndex.openDirtyFiles", "err", err, "f", fName)
 					}
 					invalidFileItemsLock.Lock()
 					invalidFileItems = append(invalidFileItems, item)
@@ -313,13 +313,13 @@ func (ii *InvertedIndex) openFiles() error {
 				exists, err := dir.FileExist(fPath)
 				if err != nil {
 					_, fName := filepath.Split(fPath)
-					ii.logger.Warn("[agg] InvertedIndex.openFiles", "err", err, "f", fName)
+					ii.logger.Warn("[agg] InvertedIndex.openDirtyFiles", "err", err, "f", fName)
 					// don't interrupt on error. other files may be good
 				}
 				if exists {
 					if item.index, err = recsplit.OpenIndex(fPath); err != nil {
 						_, fName := filepath.Split(fPath)
-						ii.logger.Warn("[agg] InvertedIndex.openFiles", "err", err, "f", fName)
+						ii.logger.Warn("[agg] InvertedIndex.openDirtyFiles", "err", err, "f", fName)
 						// don't interrupt on error. other files may be good
 					}
 				}
