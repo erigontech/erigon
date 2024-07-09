@@ -24,14 +24,20 @@ import (
 	"os"
 	"time"
 
+	"github.com/ledgerwatch/erigon/cl/utils"
+
 	"github.com/c2h5oh/datasize"
+	"go.uber.org/zap/buffer"
+
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/etl"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/mdbx"
 	"github.com/ledgerwatch/erigon-lib/log/v3"
 
 	"github.com/ledgerwatch/erigon/cmd/verkle/verkletrie"
 	"github.com/ledgerwatch/erigon/common"
+	"github.com/ledgerwatch/erigon/core/types/accounts"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 )
 
@@ -297,6 +303,141 @@ func dump(ctx context.Context, cfg optionsCfg) error {
 	return nil
 }
 
+func dump_acc_preimages(ctx context.Context, cfg optionsCfg) error {
+	db, err := openDB(ctx, cfg.stateDb, log.Root(), false)
+	if err != nil {
+		return err
+	}
+	defer db.Close()
+
+	tx, err := db.BeginRw(cfg.ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	logInterval := time.NewTicker(30 * time.Second)
+	file, err := os.Create("dump_accounts")
+	if err != nil {
+		return err
+	}
+
+	stateCursor, err := tx.Cursor(kv.PlainState)
+	if err != nil {
+		return err
+	}
+	num, err := stages.GetStageProgress(tx, stages.Execution)
+	if err != nil {
+		return err
+	}
+	log.Info("Current Block Number", "num", num)
+	for k, _, err := stateCursor.First(); k != nil; k, _, err = stateCursor.Next() {
+		if err != nil {
+			return err
+		}
+		if len(k) != 20 {
+			continue
+		}
+		// Address
+		if _, err := file.Write(k); err != nil {
+			return err
+		}
+		addressHash := utils.Sha256(k)
+
+		if _, err := file.Write(addressHash[:]); err != nil {
+			return err
+		}
+
+		select {
+		case <-logInterval.C:
+			log.Info("Dumping preimages to plain text", "key", common.Bytes2Hex(k))
+		default:
+		}
+	}
+	file.Close()
+	return nil
+}
+
+func dump_storage_preimages(ctx context.Context, cfg optionsCfg, logger log.Logger) error {
+	db, err := openDB(ctx, cfg.stateDb, logger, false)
+	if err != nil {
+		return err
+	}
+	defer db.Close()
+
+	tx, err := db.BeginRw(cfg.ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	logInterval := time.NewTicker(30 * time.Second)
+	file, err := os.Create("dump_storage")
+	if err != nil {
+		return err
+	}
+	collector := etl.NewCollector(".", "/tmp", etl.NewSortableBuffer(etl.BufferOptimalSize), logger)
+	defer collector.Close()
+	stateCursor, err := tx.Cursor(kv.PlainState)
+	if err != nil {
+		return err
+	}
+	num, err := stages.GetStageProgress(tx, stages.Execution)
+	if err != nil {
+		return err
+	}
+	logger.Info("Current Block Number", "num", num)
+	var currentIncarnation uint64
+	var currentAddress libcommon.Address
+	var addressHash libcommon.Hash
+	var buf buffer.Buffer
+	for k, v, err := stateCursor.First(); k != nil; k, v, err = stateCursor.Next() {
+		if err != nil {
+			return err
+		}
+		if len(k) == 20 {
+			if currentAddress != (libcommon.Address{}) {
+				if err := collector.Collect(addressHash[:], buf.Bytes()); err != nil {
+					return err
+				}
+			}
+			buf.Reset()
+			var acc accounts.Account
+			if err := acc.DecodeForStorage(v); err != nil {
+				return err
+			}
+			currentAddress = libcommon.BytesToAddress(k)
+			currentIncarnation = acc.Incarnation
+			addressHash = utils.Sha256(currentAddress[:])
+		} else {
+			address := libcommon.BytesToAddress(k[:20])
+			if address != currentAddress {
+				continue
+			}
+			if binary.BigEndian.Uint64(k[20:]) != currentIncarnation {
+				continue
+			}
+			storageHash := utils.Sha256(k[28:])
+			buf.Write(k[28:])
+			buf.Write(storageHash[:])
+		}
+
+		select {
+		case <-logInterval.C:
+			logger.Info("Computing preimages to plain text", "key", common.Bytes2Hex(k))
+		default:
+		}
+	}
+	if err := collector.Collect(addressHash[:], buf.Bytes()); err != nil {
+		return err
+	}
+	collector.Load(tx, "", func(k, v []byte, _ etl.CurrentTableReader, next etl.LoadNextFunc) error {
+		_, err := file.Write(v)
+		return err
+	}, etl.TransformArgs{})
+	file.Close()
+	return nil
+}
+
 func main() {
 	ctx := context.Background()
 	mainDb := flag.String("state-chaindata", "chaindata", "path to the chaindata database file")
@@ -339,6 +480,14 @@ func main() {
 		log.Info("Dumping in dump.txt")
 		if err := dump(ctx, opt); err != nil {
 			log.Error("Error", "err", err.Error())
+		}
+	case "acc_preimages":
+		if err := dump_acc_preimages(ctx, opt); err != nil {
+			logger.Error("Error", "err", err.Error())
+		}
+	case "storage_preimages":
+		if err := dump_storage_preimages(ctx, opt, logger); err != nil {
+			logger.Error("Error", "err", err.Error())
 		}
 	default:
 		log.Warn("No valid --action specified, aborting")
