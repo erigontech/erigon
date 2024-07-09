@@ -8,10 +8,10 @@ zkevm.l2-datastreamer-url: teststream.xlayer.tech:8800
 zkevm.l1-chain-id: 11155111
 zkevm.l1-rpc-url: https://rpc.ankr.com/eth_sepolia/xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
 
-zkevm.address-sequencer: ""
-zkevm.address-zkevm: ""
-zkevm.address-admin: "0x6662621411A8DACC3cA7049C8BddABaa9a999ce3"
-zkevm.address-rollup: "0x01469dACfDDA885D68Ff0f8628F2629c14F95a20"
+zkevm.address-sequencer: "0xD6DdA5AA7749142B7fDa3Fe4662C9f346101B8A6"
+zkevm.address-zkevm: "0x01469dACfDDA885D68Ff0f8628F2629c14F95a20"
+zkevm.address-admin: "0x14509f825e550745CFF827a9bDCCB4C3ad3FFd36"
+zkevm.address-rollup: "0x6662621411A8DACC3cA7049C8BddABaa9a999ce3"
 zkevm.address-ger-manager: "0x66E61bA00F58b857A9DD2C500F3aBc424A46BD20"
 
 zkevm.l1-rollup-id: 1
@@ -19,7 +19,7 @@ zkevm.l1-first-block: 4648290
 zkevm.l1-block-range: 2000
 zkevm.l1-query-delay: 1000
 zkevm.rpc-ratelimit: 250
-zkevm.datastream-version: 2
+zkevm.datastream-version: 3
 
 externalcl: true
 http.api: [eth, debug, net, trace, web3, erigon, zkevm]
