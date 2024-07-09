@@ -295,8 +295,8 @@ type MultiClient struct {
 	// decouple sentry multi client from header and body downloading logic is done
 	disableBlockDownload bool
 
-	logger                     log.Logger
-	onlyOneGoroutineController *semaphore.Weighted
+	logger                                     log.Logger
+	getReceiptsActiveGoroutineNumberController *semaphore.Weighted
 }
 
 func NewMultiClient(
@@ -361,7 +361,7 @@ func NewMultiClient(
 		maxBlockBroadcastPeers:            maxBlockBroadcastPeers,
 		disableBlockDownload:              disableBlockDownload,
 		logger:                            logger,
-		onlyOneGoroutineController:        semaphore.NewWeighted(1),
+		getReceiptsActiveGoroutineNumberController: semaphore.NewWeighted(1),
 	}
 
 	return cs, nil
@@ -703,11 +703,11 @@ func (cs *MultiClient) getBlockBodies66(ctx context.Context, inreq *proto_sentry
 }
 
 func (cs *MultiClient) getReceipts66(ctx context.Context, inreq *proto_sentry.InboundMessage, sentryClient direct.SentryClient) error {
-	err := cs.onlyOneGoroutineController.Acquire(ctx, 1)
+	err := cs.getReceiptsActiveGoroutineNumberController.Acquire(ctx, 1)
 	if err != nil {
 		return err
 	}
-	defer cs.onlyOneGoroutineController.Release(1)
+	defer cs.getReceiptsActiveGoroutineNumberController.Release(1)
 	var query eth.GetReceiptsPacket66
 	if err := rlp.DecodeBytes(inreq.Data, &query); err != nil {
 		return fmt.Errorf("decoding getReceipts66: %w, data: %x", err, inreq.Data)
