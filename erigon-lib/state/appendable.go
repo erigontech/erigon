@@ -34,17 +34,16 @@ import (
 	"golang.org/x/sync/errgroup"
 
 	"github.com/ledgerwatch/erigon-lib/common/assert"
-	"github.com/ledgerwatch/erigon-lib/common/hexutility"
-	"github.com/ledgerwatch/erigon-lib/kv/order"
-	"github.com/ledgerwatch/erigon-lib/log/v3"
-	"github.com/ledgerwatch/erigon-lib/seg"
-
 	"github.com/ledgerwatch/erigon-lib/common/background"
 	"github.com/ledgerwatch/erigon-lib/common/datadir"
 	"github.com/ledgerwatch/erigon-lib/common/dir"
+	"github.com/ledgerwatch/erigon-lib/common/hexutility"
 	"github.com/ledgerwatch/erigon-lib/etl"
 	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/ledgerwatch/erigon-lib/kv/order"
+	"github.com/ledgerwatch/erigon-lib/log/v3"
 	"github.com/ledgerwatch/erigon-lib/recsplit"
+	"github.com/ledgerwatch/erigon-lib/seg"
 )
 
 // Appendable - data type allows store data for different blockchain forks.
@@ -128,22 +127,22 @@ func (ap *Appendable) fileNamesOnDisk() ([]string, error) {
 	return filesFromDir(ap.cfg.Dirs.SnapHistory)
 }
 
-func (ap *Appendable) OpenList(fNames []string, readonly bool) error {
+func (ap *Appendable) OpenList(fNames []string) error {
 	ap.closeWhatNotInList(fNames)
 	ap.scanStateFiles(fNames)
 	if err := ap.openFiles(); err != nil {
 		return fmt.Errorf("NewHistory.openFiles: %w, %s", err, ap.filenameBase)
 	}
-	_ = readonly // for future safety features. RPCDaemon must not delte files
 	return nil
 }
 
-func (ap *Appendable) OpenFolder(readonly bool) error {
+func (ap *Appendable) OpenFolder() error {
 	files, err := ap.fileNamesOnDisk()
 	if err != nil {
 		return err
 	}
-	return ap.OpenList(files, readonly)
+	fmt.Printf("[dbg] see1: %s\n", files)
+	return ap.OpenList(files)
 }
 
 func (ap *Appendable) scanStateFiles(fileNames []string) (garbageFiles []*filesItem) {
@@ -486,11 +485,13 @@ func (tx *AppendableRoTx) newWriter(tmpdir string, discard bool) *appendableBuff
 
 func (ap *Appendable) BeginFilesRo() *AppendableRoTx {
 	files := ap._visibleFiles
+	fmt.Printf("[dbg] ap.BeginFilesRo: files %#v\n", files)
 	for i := 0; i < len(files); i++ {
 		if !files[i].src.frozen {
 			files[i].src.refcount.Add(1)
 		}
 	}
+
 	return &AppendableRoTx{
 		ap:    ap,
 		files: files,

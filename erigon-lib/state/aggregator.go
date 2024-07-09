@@ -1321,6 +1321,7 @@ func (a *Aggregator) EndTxNumDomainsFrozen() uint64 {
 func (a *Aggregator) recalcVisibleFiles() {
 	defer a.recalcVisibleFilesMinimaxTxNum()
 
+	fmt.Printf("[dbg] ap.recalcVisibleFiles %d\n", a.ap[0].dirtyFiles.Len())
 	a.visibleFilesLock.Lock()
 	defer a.visibleFilesLock.Unlock()
 
@@ -1451,6 +1452,9 @@ func (ac *AggregatorRoTx) findMergeRange(maxEndTxNum, maxSpan uint64) RangesV3 {
 	for id, ap := range ac.appendable {
 		r.appendable[id] = ap.findMergeRange(maxEndTxNum, maxSpan)
 	}
+
+	fmt.Printf("[dbg] alex1: %d, %d, %#v, %s, %t\n", maxEndTxNum, maxSpan, r.appendable[0].String("a", ac.a.aggregationStep), r.String(), r.any())
+
 	//log.Info(fmt.Sprintf("findMergeRange(%d, %d)=%s\n", maxEndTxNum/ac.a.aggregationStep, maxSpan/ac.a.aggregationStep, r))
 	return r
 }

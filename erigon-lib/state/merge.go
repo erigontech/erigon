@@ -209,6 +209,7 @@ func (iit *InvertedIndexRoTx) findMergeRange(maxEndTxNum, maxSpan uint64) *Merge
 func (tx *AppendableRoTx) findMergeRange(maxEndTxNum, maxSpan uint64) *MergeRange {
 	var minFound bool
 	var startTxNum, endTxNum uint64
+	fmt.Printf("[dbg] alex3: files %#v\n", tx.files)
 	for _, item := range tx.files {
 		if item.endTxNum > maxEndTxNum {
 			continue
