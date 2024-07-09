@@ -141,7 +141,6 @@ func (ap *Appendable) OpenFolder() error {
 	if err != nil {
 		return err
 	}
-	fmt.Printf("[dbg] see1: %s\n", files)
 	return ap.OpenList(files)
 }
 

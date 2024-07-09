@@ -308,28 +308,12 @@ func (a *Aggregator) OpenFolder() error {
 		ii := ii
 		eg.Go(func() error { return ii.OpenFolder() })
 	}
+	for _, ap := range a.ap {
+		ap := ap
+		eg.Go(func() error { return ap.OpenFolder() })
+	}
 	if err := eg.Wait(); err != nil {
 		return fmt.Errorf("OpenFolder: %w", err)
-	}
-	return nil
-}
-
-func (a *Aggregator) OpenList(files []string, readonly bool) error {
-	defer a.recalcVisibleFiles()
-
-	a.dirtyFilesLock.Lock()
-	defer a.dirtyFilesLock.Unlock()
-	eg := &errgroup.Group{}
-	for _, d := range a.d {
-		d := d
-		eg.Go(func() error { return d.OpenFolder() })
-	}
-	for _, ii := range a.iis {
-		ii := ii
-		eg.Go(func() error { return ii.OpenFolder() })
-	}
-	if err := eg.Wait(); err != nil {
-		return fmt.Errorf("OpenList: %w", err)
 	}
 	return nil
 }
