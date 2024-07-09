@@ -24,7 +24,9 @@ import (
 	"fmt"
 
 	"github.com/holiman/uint256"
+	"github.com/ledgerwatch/erigon-lib/log/v3"
 
+	"github.com/ledgerwatch/erigon-lib/common"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/txpool/txpoolcfg"
 	types2 "github.com/ledgerwatch/erigon-lib/types"
@@ -350,50 +352,59 @@ func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (*evmtype
 
 	// set code tx
 	auths := msg.Authorizations()
+	verifiedAuthorities := make([]common.Address, 0)
 	if len(auths) > 0 {
 		var b [33]byte
 		data := bytes.NewBuffer(nil)
-		for _, auth := range auths {
-
-			// 2. chainId check
-			if auth.ChainID != 0 && auth.ChainID != st.evm.ChainRules().ChainID.Uint64() {
-				continue
-				//TODO: should these errors be recorded somewhere? perhaps tracer or logs
-				//return nil, fmt.Errorf("invalid chainID %d", auth.ChainID)
-			}
+		for i, auth := range auths {
+			data.Reset()
 
 			// 1. authority recover
 			authorityPtr, err := auth.RecoverSigner(data, b[:])
 			if err != nil {
+				log.Debug("authority recover failed, skipping", "err", err, "auth index", i)
 				continue
-				//return nil, fmt.Errorf("authority recover failed")
 			}
 			authority := *authorityPtr
 
+			// 2. chainId check
+			if auth.ChainID != nil && auth.ChainID.Uint64() != 0 && auth.ChainID.Uint64() != st.evm.ChainRules().ChainID.Uint64() {
+				log.Debug("invalid chainID, skipping", "chainId", auth.ChainID, "auth index", i)
+				continue
+			}
+
 			// 3. authority code should be empty
 			if codeHash := st.state.GetCodeHash(authority); codeHash != emptyCodeHash && codeHash != (libcommon.Hash{}) {
+				log.Debug("authority code is not empty, skipping", "auth index", i)
 				continue
-				//return nil, fmt.Errorf("authority code is not empty")
 			}
 
 			// 4. nonce check
-			if auth.Nonce != nil && st.state.GetNonce(authority) != auth.Nonce.Uint64() {
+			if len(auth.Nonce) > 0 && st.state.GetNonce(authority) != auth.Nonce[0] {
+				log.Debug("invalid nonce, skipping", "auth index", i)
 				continue
-				//return nil, fmt.Errorf("invalid nonce")
 			}
 
 			// 5. set code of authority to code associated with address
 			st.state.SetCode(authority, st.state.GetCode(auth.Address))
-			defer st.state.SetCode(authority, nil) // reset code after execution
 
 			// 6. add authority account to accesses_addresses
-			if !accessTuples.HasAddr(authority) {
-				accessTuples = append(accessTuples, types2.AccessTuple{Address: authority, StorageKeys: nil})
+			verifiedAuthorities = append(verifiedAuthorities, authority)
+			// authority is added to acceessed_address in prepare step
+		}
+	}
+
+	if len(verifiedAuthorities) > 0 {
+		oldPostApplyMessage := st.evm.Context.PostApplyMessage
+		st.evm.Context.PostApplyMessage = func(ibs evmtypes.IntraBlockState, sender common.Address, coinbase common.Address, result *evmtypes.ExecutionResult) {
+			for _, authority := range verifiedAuthorities {
+				ibs.SetCode(authority, nil)
 			}
 
-			data.Reset()
+			if oldPostApplyMessage != nil {
+				oldPostApplyMessage(ibs, sender, coinbase, result)
+			}
 		}
-
 	}
 
 	// Check clauses 4-5, subtract intrinsic gas if everything is correct
@@ -422,7 +433,7 @@ func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (*evmtype
 	// Execute the preparatory steps for state transition which includes:
 	// - prepare accessList(post-berlin)
 	// - reset transient storage(eip 1153)
-	st.state.Prepare(rules, msg.From(), coinbase, msg.To(), vm.ActivePrecompiles(rules), accessTuples)
+	st.state.Prepare(rules, msg.From(), coinbase, msg.To(), vm.ActivePrecompiles(rules), accessTuples, verifiedAuthorities)
 
 	var (
 		ret   []byte

@@ -180,7 +180,7 @@ const (
 	BlockHashOldWindow          uint64 = 256
 
 	// EIP-7702
-	SetCodeMagicPrefix = byte(0x04)
+	SetCodeMagicPrefix = byte(0x05)
 )
 
 // EIP-4788: Beacon block root in the EVM

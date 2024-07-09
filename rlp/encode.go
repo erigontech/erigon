@@ -30,7 +30,6 @@ import (
 
 	"github.com/holiman/uint256"
 
-	"github.com/ledgerwatch/erigon-lib/common"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 )
 
@@ -861,7 +860,7 @@ func EncodeStringSizePrefix(size int, w io.Writer, buffer []byte) error {
 	return nil
 }
 
-func EncodeAddress(addr *common.Address, w io.Writer, buffer []byte) error {
+func EncodeOptionalAddress(addr *libcommon.Address, w io.Writer, buffer []byte) error {
 	if addr == nil {
 		buffer[0] = 128
 	} else {
