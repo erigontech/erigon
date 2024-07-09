@@ -22,7 +22,6 @@ zkevm.rpc-ratelimit: 250
 zkevm.data-stream-port: 6900
 zkevm.datastream-version: 2
 zkevm.data-stream-host: "127.0.0.1"
-zkevm.sequencer-initial-fork-id: 9
 zkevm.executor-strict: false
 # zkevm.executor-urls: "zkevm2-stateless-executor:50071"
 zkevm.witness-full: false
