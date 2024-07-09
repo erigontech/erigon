@@ -21,12 +21,21 @@ import (
 	"fmt"
 
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/types/clonable"
 	"github.com/ledgerwatch/erigon-lib/types/ssz"
 
 	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/cl/cltypes/solid"
 	"github.com/ledgerwatch/erigon/cl/merkle_tree"
 	ssz2 "github.com/ledgerwatch/erigon/cl/ssz"
+)
+
+var (
+	_ ssz2.SizedObjectSSZ = (*BeaconBody)(nil)
+	_ ssz2.SizedObjectSSZ = (*BeaconBlock)(nil)
+	_ ssz2.SizedObjectSSZ = (*SignedBeaconBlock)(nil)
+	_ ssz2.SizedObjectSSZ = (*DenebBeaconBlock)(nil)
+	_ ssz2.SizedObjectSSZ = (*DenebSignedBeaconBlock)(nil)
 )
 
 const (
@@ -166,6 +175,7 @@ func (b *BeaconBlock) SetVersion(version clparams.StateVersion) {
 
 func (b *BeaconBody) SetVersion(version clparams.StateVersion) {
 	b.Version = version
+	b.ExecutionPayload.SetVersion(version)
 }
 
 func (b *BeaconBody) EncodeSSZ(dst []byte) ([]byte, error) {
@@ -319,6 +329,10 @@ func (b *SignedBeaconBlock) HashSSZ() ([32]byte, error) {
 	return merkle_tree.HashTreeRoot(b.Block, b.Signature[:])
 }
 
+func (b *SignedBeaconBlock) Static() bool {
+	return false
+}
+
 func (*BeaconBody) Static() bool {
 	return false
 }
@@ -383,4 +397,78 @@ func (b *BeaconBody) UnmarshalJSON(buf []byte) error {
 	b.ExecutionChanges = tmp.ExecutionChanges
 	b.BlobKzgCommitments = tmp.BlobKzgCommitments
 	return nil
+}
+
+type DenebBeaconBlock struct {
+	Block     *BeaconBlock              `json:"block"`
+	KZGProofs *solid.ListSSZ[*KZGProof] `json:"kzg_proofs"`
+	Blobs     *solid.ListSSZ[*Blob]     `json:"blobs"`
+}
+
+func NewDenebBeaconBlock(beaconCfg *clparams.BeaconChainConfig) *DenebBeaconBlock {
+	maxBlobsPerBlock := int(beaconCfg.MaxBlobsPerBlock)
+	b := &DenebBeaconBlock{
+		Block:     NewBeaconBlock(beaconCfg),
+		KZGProofs: solid.NewStaticListSSZ[*KZGProof](maxBlobsPerBlock, BYTES_KZG_PROOF),
+		Blobs:     solid.NewStaticListSSZ[*Blob](maxBlobsPerBlock, int(BYTES_PER_BLOB)),
+	}
+	return b
+}
+
+func (b *DenebBeaconBlock) EncodeSSZ(buf []byte) ([]byte, error) {
+	return ssz2.MarshalSSZ(buf, b.Block, b.KZGProofs, b.Blobs)
+}
+
+func (b *DenebBeaconBlock) DecodeSSZ(buf []byte, version int) error {
+	return ssz2.UnmarshalSSZ(buf, version, b.Block, b.KZGProofs, b.Blobs)
+}
+
+func (b *DenebBeaconBlock) EncodingSizeSSZ() int {
+	return b.Block.EncodingSizeSSZ() + b.KZGProofs.EncodingSizeSSZ() + b.Blobs.EncodingSizeSSZ()
+}
+
+func (b *DenebBeaconBlock) Clone() clonable.Clonable {
+	return &DenebBeaconBlock{}
+}
+
+func (b *DenebBeaconBlock) Static() bool {
+	// it's variable size
+	return false
+}
+
+type DenebSignedBeaconBlock struct {
+	SignedBlock *SignedBeaconBlock        `json:"signed_block"`
+	KZGProofs   *solid.ListSSZ[*KZGProof] `json:"kzg_proofs"`
+	Blobs       *solid.ListSSZ[*Blob]     `json:"blobs"`
+}
+
+func NewDenebSignedBeaconBlock(beaconCfg *clparams.BeaconChainConfig) *DenebSignedBeaconBlock {
+	maxBlobsPerBlock := int(beaconCfg.MaxBlobsPerBlock)
+	b := &DenebSignedBeaconBlock{
+		SignedBlock: NewSignedBeaconBlock(beaconCfg),
+		KZGProofs:   solid.NewStaticListSSZ[*KZGProof](maxBlobsPerBlock, BYTES_KZG_PROOF),
+		Blobs:       solid.NewStaticListSSZ[*Blob](maxBlobsPerBlock, int(BYTES_PER_BLOB)),
+	}
+	return b
+}
+
+func (b *DenebSignedBeaconBlock) EncodeSSZ(buf []byte) ([]byte, error) {
+	return ssz2.MarshalSSZ(buf, b.SignedBlock, b.KZGProofs, b.Blobs)
+}
+
+func (b *DenebSignedBeaconBlock) DecodeSSZ(buf []byte, version int) error {
+	return ssz2.UnmarshalSSZ(buf, version, b.SignedBlock, b.KZGProofs, b.Blobs)
+}
+
+func (b *DenebSignedBeaconBlock) EncodingSizeSSZ() int {
+	return b.SignedBlock.EncodingSizeSSZ() + b.KZGProofs.EncodingSizeSSZ() + b.Blobs.EncodingSizeSSZ()
+}
+
+func (b *DenebSignedBeaconBlock) Clone() clonable.Clonable {
+	return &DenebSignedBeaconBlock{}
+}
+
+func (b *DenebSignedBeaconBlock) Static() bool {
+	// it's variable size
+	return false
 }

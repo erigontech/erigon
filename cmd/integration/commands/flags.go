@@ -48,7 +48,7 @@ var (
 	pruneTBefore, pruneCBefore               uint64
 	experiments                              []string
 	unwindTypes                              []string
-	chain                                    string // Which chain to use (mainnet, goerli, sepolia, etc.)
+	chain                                    string // Which chain to use (mainnet, sepolia, etc.)
 	outputCsvFile                            string
 
 	commitmentMode string

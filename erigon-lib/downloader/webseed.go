@@ -366,14 +366,6 @@ func (d *WebSeeds) constructListsOfFiles(ctx context.Context, httpProviders []*u
 			d.logger.Debug("[snapshots.webseed] get from HTTP provider", "err", err, "url", webSeedProviderURL.String())
 			continue
 		}
-		// check if we need to prohibit new downloads for some files
-		for name := range manifestResponse {
-			prohibited, err := d.torrentFiles.NewDownloadsAreProhibited(name)
-			if prohibited || err != nil {
-				delete(manifestResponse, name)
-			}
-		}
-
 		listsOfFiles = append(listsOfFiles, manifestResponse)
 	}
 
@@ -383,13 +375,6 @@ func (d *WebSeeds) constructListsOfFiles(ctx context.Context, httpProviders []*u
 		if err != nil { // don't fail on error
 			d.logger.Debug("[snapshots.webseed] get from File provider", "err", err)
 			continue
-		}
-		// check if we need to prohibit new downloads for some files
-		for name := range response {
-			prohibited, err := d.torrentFiles.NewDownloadsAreProhibited(name)
-			if prohibited || err != nil {
-				delete(response, name)
-			}
 		}
 		listsOfFiles = append(listsOfFiles, response)
 	}
