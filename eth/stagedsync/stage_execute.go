@@ -328,34 +328,6 @@ func blocksReadAheadFunc(ctx context.Context, tx kv.Tx, cfg *ExecuteBlockCfg, bl
 	if histV3 {
 		return nil
 	}
-
-	senders := block.Body().SendersFromTxs()     //TODO: BlockByNumber can return senders
-	stateReader := state.NewPlainStateReader(tx) //TODO: can do on batch! if make batch thread-safe
-	for _, sender := range senders {
-		a, _ := stateReader.ReadAccountData(sender)
-		if a == nil || a.Incarnation == 0 {
-			continue
-		}
-		if code, _ := stateReader.ReadAccountCode(sender, a.Incarnation, a.CodeHash); len(code) > 0 {
-			_, _ = code[0], code[len(code)-1]
-		}
-	}
-
-	for _, txn := range block.Transactions() {
-		to := txn.GetTo()
-		if to == nil {
-			continue
-		}
-		a, _ := stateReader.ReadAccountData(*to)
-		if a == nil || a.Incarnation == 0 {
-			continue
-		}
-		if code, _ := stateReader.ReadAccountCode(*to, a.Incarnation, a.CodeHash); len(code) > 0 {
-			_, _ = code[0], code[len(code)-1]
-		}
-	}
-	_, _ = stateReader.ReadAccountData(block.Coinbase())
-	_, _ = block, senders
 	return nil
 }
 

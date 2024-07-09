@@ -338,12 +338,7 @@ func GenerateChain(config *chain.Config, parent *types.Block, engine consensus.E
 	}
 	txNum := -1
 	setBlockNum := func(blockNum uint64) {
-		if histV3 {
-			domains.SetBlockNum(blockNum)
-		} else {
-			stateReader = state.NewPlainStateReader(tx)
-			stateWriter = state.NewPlainStateWriter(tx, nil, parent.NumberU64()+blockNum+1)
-		}
+		domains.SetBlockNum(blockNum)
 	}
 	txNumIncrement := func() {
 		txNum++
