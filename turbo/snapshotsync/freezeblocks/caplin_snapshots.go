@@ -117,7 +117,7 @@ func (s *CaplinSnapshots) LS() {
 	if s == nil {
 		return
 	}
-	if s.BeaconBlocks == nil {
+	if s.BeaconBlocks != nil {
 		for _, seg := range s.BeaconBlocks.segments {
 			if seg.Decompressor == nil {
 				continue
