@@ -313,6 +313,9 @@ func (h *History) closeWhatNotInList(fNames []string) {
 }
 
 func (h *History) Close() {
+	if h == nil {
+		return
+	}
 	h.InvertedIndex.Close()
 	h.closeWhatNotInList([]string{})
 }
