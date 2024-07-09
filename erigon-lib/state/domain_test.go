@@ -117,7 +117,7 @@ func TestDomain_OpenFolder(t *testing.T) {
 	err = os.WriteFile(fn, make([]byte, 33), 0644)
 	require.NoError(t, err)
 
-	err = d.OpenFolder()
+	err = d.openFolder()
 	require.NoError(t, err)
 	d.Close()
 }
@@ -585,7 +585,7 @@ func TestDomain_ScanFiles(t *testing.T) {
 	dc := d.BeginFilesRo()
 	defer dc.Close()
 	d.closeWhatNotInList([]string{})
-	require.NoError(t, d.OpenFolder())
+	require.NoError(t, d.openFolder())
 
 	// Check the history
 	checkHistory(t, db, d, txs)
@@ -873,7 +873,8 @@ func TestDomain_OpenFilesWithDeletions(t *testing.T) {
 	}
 	dom.Close()
 
-	err = dom.OpenFolder()
+	err = dom.openFolder()
+	dom.reCalcVisibleFiles()
 	require.NoError(t, err)
 
 	// domain files for same range should not be available so lengths should match
@@ -935,7 +936,7 @@ func TestScanStaticFilesD(t *testing.T) {
 		"v1-test.3-4.kv",
 		"v1-test.4-5.kv",
 	}
-	ii.scanStateFiles(files)
+	ii.scanDirtyFiles(files)
 	var found []string
 	ii.dirtyFiles.Walk(func(items []*filesItem) bool {
 		for _, item := range items {
@@ -1884,10 +1885,10 @@ func TestDomain_Unwind(t *testing.T) {
 			defer ectx.Close()
 			uc := d.BeginFilesRo()
 			defer uc.Close()
-			et, err := ectx.DomainRange(etx, nil, nil, unwindTo, order.Asc, -1)
+			et, err := ectx.DomainRange(context.Background(), etx, nil, nil, unwindTo, order.Asc, -1)
 			require.NoError(t, err)
 
-			ut, err := uc.DomainRange(etx, nil, nil, unwindTo, order.Asc, -1)
+			ut, err := uc.DomainRange(context.Background(), etx, nil, nil, unwindTo, order.Asc, -1)
 			require.NoError(t, err)
 
 			compareIterators(t, et, ut)
@@ -1908,10 +1909,10 @@ func TestDomain_Unwind(t *testing.T) {
 			uc := d.BeginFilesRo()
 			defer uc.Close()
 
-			et, err := ectx.ht.WalkAsOf(unwindTo-1, nil, nil, etx, -1)
+			et, err := ectx.ht.WalkAsOf(context.Background(), unwindTo-1, nil, nil, etx, -1)
 			require.NoError(t, err)
 
-			ut, err := uc.ht.WalkAsOf(unwindTo-1, nil, nil, utx, -1)
+			ut, err := uc.ht.WalkAsOf(context.Background(), unwindTo-1, nil, nil, utx, -1)
 			require.NoError(t, err)
 
 			compareIterators(t, et, ut)
