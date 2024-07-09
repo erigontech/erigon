@@ -226,6 +226,12 @@ func SpawnSequencingStage(
 			if err = sdb.hermezDb.WriteInvalidBatch(thisBatch); err != nil {
 				return err
 			}
+			if err = sdb.hermezDb.WriteBatchCounters(thisBatch, map[string]int{}); err != nil {
+				return err
+			}
+			if err = sdb.hermezDb.WriteIsBatchFullyProcessed(thisBatch); err != nil {
+				return err
+			}
 			if err = stages.SaveStageProgress(tx, stages.HighestSeenBatchNumber, thisBatch); err != nil {
 				return err
 			}
