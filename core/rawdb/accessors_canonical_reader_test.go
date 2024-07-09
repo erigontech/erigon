@@ -21,10 +21,10 @@ package rawdb_test
 
 import (
 	"bytes"
-	"sort"
+	"slices"
 	"testing"
 
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/u256"
 	"github.com/ledgerwatch/erigon-lib/kv/iter"
 	"github.com/ledgerwatch/erigon-lib/kv/order"
@@ -51,19 +51,19 @@ func TestCanonicalIter(t *testing.T) {
 	defer tx.Rollback()
 
 	// write 2 forks - 3 blocks in each fork
-	_, err = rawdb.WriteRawBodyIfNotExists(tx, libcommon.Hash{10}, 0, b)
+	_, err = rawdb.WriteRawBodyIfNotExists(tx, common.Hash{10}, 0, b)
 	require.NoError(err)
-	_, err = rawdb.WriteRawBodyIfNotExists(tx, libcommon.Hash{20}, 0, b)
-	require.NoError(err)
-
-	_, err = rawdb.WriteRawBodyIfNotExists(tx, libcommon.Hash{11}, 1, b)
-	require.NoError(err)
-	_, err = rawdb.WriteRawBodyIfNotExists(tx, libcommon.Hash{21}, 1, b)
+	_, err = rawdb.WriteRawBodyIfNotExists(tx, common.Hash{20}, 0, b)
 	require.NoError(err)
 
-	_, err = rawdb.WriteRawBodyIfNotExists(tx, libcommon.Hash{12}, 2, b)
+	_, err = rawdb.WriteRawBodyIfNotExists(tx, common.Hash{11}, 1, b)
 	require.NoError(err)
-	_, err = rawdb.WriteRawBodyIfNotExists(tx, libcommon.Hash{22}, 2, b)
+	_, err = rawdb.WriteRawBodyIfNotExists(tx, common.Hash{21}, 1, b)
+	require.NoError(err)
+
+	_, err = rawdb.WriteRawBodyIfNotExists(tx, common.Hash{12}, 2, b)
+	require.NoError(err)
+	_, err = rawdb.WriteRawBodyIfNotExists(tx, common.Hash{22}, 2, b)
 	require.NoError(err)
 
 	it, err := rawdb.TxnIdsOfCanonicalBlocks(tx, 0, -1, order.Asc, -1)
@@ -74,9 +74,9 @@ func TestCanonicalIter(t *testing.T) {
 	t.Logf("genesis: %v", iter.ToArrU64Must(it))
 
 	//mark 3 blocks as canonical
-	require.NoError(rawdb.WriteCanonicalHash(tx, libcommon.Hash{10}, 0))
-	require.NoError(rawdb.WriteCanonicalHash(tx, libcommon.Hash{11}, 1))
-	require.NoError(rawdb.WriteCanonicalHash(tx, libcommon.Hash{12}, 2))
+	require.NoError(rawdb.WriteCanonicalHash(tx, common.Hash{10}, 0))
+	require.NoError(rawdb.WriteCanonicalHash(tx, common.Hash{11}, 1))
+	require.NoError(rawdb.WriteCanonicalHash(tx, common.Hash{12}, 2))
 
 	txNumsOfBlock := func(bn uint64) (res []uint64) {
 		txns := uint64(types.TxCountToTxAmount(len(b.Transactions)))
@@ -105,10 +105,22 @@ func TestCanonicalIter(t *testing.T) {
 	t.Logf("expected %v", exp)
 	require.Equal(exp, iter.ToArrU64Must(it))
 
+	{ //start from middle of block
+		it, err = rawdb.TxnIdsOfCanonicalBlocks(tx, 3, -1, order.Asc, -1)
+		require.NoError(err)
+		require.Equal(true, it.HasNext())
+		t.Logf("reverse expected %v", exp)
+		require.Equal(exp[1:], iter.ToArrU64Must(it))
+	}
+
+	//reverse
 	rit, err := rawdb.TxnIdsOfCanonicalBlocks(tx, -1, -1, order.Desc, -1)
 	require.NoError(err)
 	require.Equal(true, rit.HasNext())
-	sort.Slice(exp, func(i, j int) bool { return exp[i] > exp[j] })
+	slices.Reverse(exp)
 	t.Logf("reverse expected %v", exp)
 	require.Equal(exp, iter.ToArrU64Must(rit))
+	{ //start from middle of block
+	}
+
 }

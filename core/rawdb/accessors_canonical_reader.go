@@ -38,9 +38,10 @@ type CanonicalTxnIds struct {
 	limit              int
 
 	// private fields
-	currentTxNum      int
-	hasNext           bool
-	endOfCurrentBlock uint64
+	fromTxnID, toTxnID kv.TxnId
+	currentTxnID       kv.TxnId
+	hasNext            bool
+	endOfCurrentBlock  kv.TxnId
 }
 type CanonicalReader struct {
 }
@@ -130,7 +131,7 @@ func TxnIdsOfCanonicalBlocks(tx kv.Tx, fromTxNum, toTxNum int, asc order.By, lim
 		return nil, fmt.Errorf("fromTxNum <= toTxNum: %d, %d", fromTxNum, toTxNum)
 	}
 
-	it := &CanonicalTxnIds{tx: tx, fromTxNum: fromTxNum, toTxNum: toTxNum, orderAscend: asc, limit: limit, currentTxNum: -1}
+	it := &CanonicalTxnIds{tx: tx, fromTxNum: fromTxNum, toTxNum: toTxNum, orderAscend: asc, limit: limit}
 	if err := it.init(); err != nil {
 		it.Close() //it's responsibility of constructor (our) to close resource on error
 		return nil, err
@@ -152,6 +153,29 @@ func (s *CanonicalTxnIds) init() (err error) {
 		}
 		if ok {
 			from = hexutility.EncodeTs(blockFrom)
+		}
+
+		if s.orderAscend {
+			_minTxNum, err := rawdbv3.TxNums.Min(tx, blockFrom)
+			if err != nil {
+				return err
+			}
+			offset := uint64(s.fromTxNum) - _minTxNum
+
+			var _minTxnID kv.TxnId
+			blockHash, _ := tx.GetOne(kv.HeaderCanonical, hexutility.EncodeTs(blockFrom))
+			body, err := readBodyForStorage(s.tx, common2.BytesToHash(blockHash), blockFrom)
+			if err != nil {
+				return err
+			}
+			if body != nil {
+				_minTxnID = kv.TxnId(body.BaseTxnID.FirstSystemTx())
+			} else {
+				_minTxnID = kv.TxnId(_minTxNum) + kv.TxnId(offset)
+			}
+			s.currentTxnID = _minTxnID + kv.TxnId(offset)
+		} else {
+			panic("todo")
 		}
 	}
 
@@ -184,24 +208,25 @@ func (s *CanonicalTxnIds) init() (err error) {
 
 func (s *CanonicalTxnIds) advance() (err error) {
 	var endOfBlock bool
-	if s.currentTxNum < 0 {
-		endOfBlock = true
+
+	if s.orderAscend {
+		s.currentTxnID++
+		endOfBlock = s.currentTxnID >= s.endOfCurrentBlock
 	} else {
-		if s.orderAscend {
-			s.currentTxNum++
-			endOfBlock = s.currentTxNum >= int(s.endOfCurrentBlock)
-		} else {
-			s.currentTxNum--
-			endOfBlock = s.currentTxNum <= int(s.endOfCurrentBlock)
+		if s.currentTxnID == 0 {
+			s.hasNext = false
+			return nil
 		}
+		s.currentTxnID--
+		endOfBlock = s.currentTxnID <= s.endOfCurrentBlock
 	}
 
-	if !endOfBlock || s.currentTxNum == int(s.endOfCurrentBlock) {
+	if !endOfBlock || s.currentTxnID == s.endOfCurrentBlock {
 		return nil
 	}
 
 	if !s.canonicalMarkers.HasNext() {
-		s.currentTxNum = -1
+		s.hasNext = false
 		return nil
 	}
 
@@ -215,23 +240,24 @@ func (s *CanonicalTxnIds) advance() (err error) {
 	if err != nil {
 		return err
 	}
-	if body == nil {
-		if s.currentTxNum >= int(s.endOfCurrentBlock) {
-			s.endOfCurrentBlock, err = rawdbv3.TxNums.Max(s.tx, blockNum)
+	if body == nil { // TxnID is equal to TxNum
+		if s.currentTxnID >= s.endOfCurrentBlock {
+			_maxTxNum, err := rawdbv3.TxNums.Max(s.tx, blockNum)
 			if err != nil {
 				return err
 			}
+			s.endOfCurrentBlock = kv.TxnId(_maxTxNum)
 		}
-		s.currentTxNum++
+		s.currentTxnID++
 		return nil
 	}
 
 	if s.orderAscend {
-		s.currentTxNum = int(body.BaseTxnID)
-		s.endOfCurrentBlock = body.BaseTxnID.LastSystemTx(body.TxCount)
+		s.currentTxnID = kv.TxnId(body.BaseTxnID)
+		s.endOfCurrentBlock = kv.TxnId(body.BaseTxnID.LastSystemTx(body.TxCount))
 	} else {
-		s.currentTxNum = int(body.BaseTxnID.LastSystemTx(body.TxCount))
-		s.endOfCurrentBlock = body.BaseTxnID.U64()
+		s.currentTxnID = kv.TxnId(body.BaseTxnID.LastSystemTx(body.TxCount))
+		s.endOfCurrentBlock = kv.TxnId(body.BaseTxnID)
 	}
 	return nil
 }
@@ -240,7 +266,7 @@ func (s *CanonicalTxnIds) HasNext() bool {
 	if s.limit == 0 { // limit reached
 		return false
 	}
-	if s.currentTxNum < 0 { // EndOfTable
+	if s.hasNext { // EndOfTable
 		return false
 	}
 	if s.toTxNum < 0 { //no boundaries
@@ -249,13 +275,13 @@ func (s *CanonicalTxnIds) HasNext() bool {
 
 	//Asc:  [from, to) AND from < to
 	//Desc: [from, to) AND from > to
-	return (bool(s.orderAscend) && s.currentTxNum < s.toTxNum) ||
-		(!bool(s.orderAscend) && s.currentTxNum > s.toTxNum)
+	return (bool(s.orderAscend) && s.currentTxnID < s.toTxnID) ||
+		(!bool(s.orderAscend) && s.currentTxnID > s.toTxnID)
 }
 
 func (s *CanonicalTxnIds) Next() (uint64, error) {
 	s.limit--
-	v := uint64(s.currentTxNum)
+	v := uint64(s.currentTxnID)
 	if err := s.advance(); err != nil {
 		return 0, err
 	}
