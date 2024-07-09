@@ -369,6 +369,9 @@ func (a *Aggregator) SetCompressWorkers(i int) {
 	for _, ii := range a.iis {
 		ii.compressWorkers = i
 	}
+	for _, ap := range a.ap {
+		ap.compressWorkers = i
+	}
 }
 
 func (a *Aggregator) DiscardHistory(name kv.Domain) *Aggregator {
@@ -393,6 +396,9 @@ func (ac *AggregatorRoTx) Files() []string {
 	}
 	for _, ii := range ac.iis {
 		res = append(res, ii.Files()...)
+	}
+	for _, ap := range ac.appendable {
+		res = append(res, ap.Files()...)
 	}
 	return res
 }
