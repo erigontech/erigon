@@ -834,15 +834,27 @@ func (sd *SharedDomains) Flush(ctx context.Context, tx kv.RwTx) error {
 		_, f, l, _ := runtime.Caller(1)
 		fmt.Printf("[SD aggTx=%d] FLUSHING at tx %d [%x], caller %s:%d\n", sd.aggTx.id, sd.TxNum(), fh, filepath.Base(f), l)
 	}
-	for _, d := range sd.domainWriters {
-		if d != nil {
-			if err := d.Flush(ctx, tx); err != nil {
-				return err
-			}
+	for _, w := range sd.domainWriters {
+		if w == nil {
+			continue
+		}
+		if err := w.Flush(ctx, tx); err != nil {
+			return err
 		}
 	}
-	for _, iiWriter := range sd.iiWriters {
-		if err := iiWriter.Flush(ctx, tx); err != nil {
+	for _, w := range sd.iiWriters {
+		if w == nil {
+			continue
+		}
+		if err := w.Flush(ctx, tx); err != nil {
+			return err
+		}
+	}
+	for _, w := range sd.appendableWriter {
+		if w == nil {
+			continue
+		}
+		if err := w.Flush(ctx, tx); err != nil {
 			return err
 		}
 	}
@@ -853,16 +865,23 @@ func (sd *SharedDomains) Flush(ctx context.Context, tx kv.RwTx) error {
 		}
 	}
 
-	for _, d := range sd.domainWriters {
-		if d != nil {
-			d.close()
+	for _, w := range sd.domainWriters {
+		if w == nil {
+			continue
 		}
+		w.close()
 	}
-	for _, iiWriter := range sd.iiWriters {
-		iiWriter.close()
+	for _, w := range sd.iiWriters {
+		if w == nil {
+			continue
+		}
+		w.close()
 	}
-	for _, a := range sd.appendableWriter {
-		a.close()
+	for _, w := range sd.appendableWriter {
+		if w == nil {
+			continue
+		}
+		w.close()
 	}
 	return nil
 }

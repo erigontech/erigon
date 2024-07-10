@@ -35,22 +35,10 @@ import (
 
 func ResetState(db kv.RwDB, ctx context.Context, chain string, tmpDir string, logger log.Logger) error {
 	// don't reset senders here
-	if err := Reset(ctx, db, stages.HashState); err != nil {
-		return err
-	}
-	if err := Reset(ctx, db, stages.IntermediateHashes); err != nil {
-		return err
-	}
-	if err := Reset(ctx, db, stages.AccountHistoryIndex, stages.StorageHistoryIndex); err != nil {
-		return err
-	}
-	if err := Reset(ctx, db, stages.LogIndex); err != nil {
-		return err
-	}
-	if err := Reset(ctx, db, stages.CallTraces); err != nil {
-		return err
-	}
 	if err := db.Update(ctx, ResetTxLookup); err != nil {
+		return err
+	}
+	if err := Reset(ctx, db, stages.CustomTrace); err != nil {
 		return err
 	}
 	if err := Reset(ctx, db, stages.Finish); err != nil {
@@ -160,25 +148,6 @@ func ResetExec(ctx context.Context, db kv.RwDB, chain string, tmpDir string, log
 	})
 }
 
-func ResetExecWithTx(ctx context.Context, tx kv.RwTx, chain string, tmpDir string, logger log.Logger) (err error) {
-	cleanupList := make([]string, 0)
-	cleanupList = append(cleanupList, stateBuckets...)
-	cleanupList = append(cleanupList, stateHistoryBuckets...)
-	cleanupList = append(cleanupList, stateHistoryV3Buckets...)
-	cleanupList = append(cleanupList, stateV3Buckets...)
-
-	if err := clearStageProgress(tx, stages.Execution, stages.HashState, stages.IntermediateHashes); err != nil {
-		return err
-	}
-	for _, tbl := range cleanupList {
-		if err := tx.ClearBucket(tbl); err != nil {
-			return err
-		}
-	}
-	// corner case: state files may be ahead of block files - so, can't use SharedDomains here. juts leave progress as 0.
-	return nil
-}
-
 func ResetTxLookup(tx kv.RwTx) error {
 	if err := tx.ClearBucket(kv.TxLookup); err != nil {
 		return err
@@ -193,26 +162,17 @@ func ResetTxLookup(tx kv.RwTx) error {
 }
 
 var Tables = map[stages.SyncStage][]string{
-	stages.HashState:           {kv.HashedAccounts, kv.HashedStorage, kv.ContractCode},
-	stages.IntermediateHashes:  {kv.TrieOfAccounts, kv.TrieOfStorage},
-	stages.CallTraces:          {kv.CallFromIndex, kv.CallToIndex},
-	stages.LogIndex:            {kv.LogAddressIndex, kv.LogTopicIndex},
-	stages.AccountHistoryIndex: {kv.E2AccountsHistory},
-	stages.StorageHistoryIndex: {kv.E2StorageHistory},
-	stages.CustomTrace:         {},
-	stages.Finish:              {},
+	stages.HashState:          {kv.HashedAccounts, kv.HashedStorage, kv.ContractCode},
+	stages.IntermediateHashes: {kv.TrieOfAccounts, kv.TrieOfStorage},
+	stages.CustomTrace:        {},
+	stages.Finish:             {},
 }
 var stateBuckets = []string{
-	kv.PlainState, kv.HashedAccounts, kv.HashedStorage, kv.TrieOfAccounts, kv.TrieOfStorage,
 	kv.Epoch, kv.PendingEpoch, kv.BorReceipts,
 	kv.Code, kv.PlainContractCode, kv.ContractCode, kv.IncarnationMap,
 }
 var stateHistoryBuckets = []string{
-	kv.AccountChangeSet,
-	kv.StorageChangeSet,
 	kv.Receipts,
-	kv.Log,
-	kv.CallTraceSet,
 }
 var stateHistoryV3Buckets = []string{
 	kv.TblAccountHistoryKeys, kv.TblAccountHistoryVals, kv.TblAccountIdx,
@@ -227,7 +187,6 @@ var stateV3Buckets = []string{
 	kv.TblAccountKeys, kv.TblStorageKeys, kv.TblCodeKeys, kv.TblCommitmentKeys,
 	kv.TblAccountVals, kv.TblStorageVals, kv.TblCodeVals, kv.TblCommitmentVals,
 	kv.TblCommitmentHistoryKeys, kv.TblCommitmentHistoryVals, kv.TblCommitmentIdx,
-	//kv.TblGasUsedHistoryKeys, kv.TblGasUsedHistoryVals, kv.TblGasUsedIdx,
 	kv.TblPruningProgress,
 	kv.ChangeSets3,
 }
