@@ -101,8 +101,6 @@ func (t *TxTask) CreateReceipt(cumulativeGasUsed uint64) *types.Receipt {
 	//if msg.To() == nil {
 	//	receipt.ContractAddress = crypto.CreateAddress(evm.Origin, tx.GetNonce())
 	//}
-	// Set the receipt logs and create a bloom for filtering
-	//receipt.Bloom = types.CreateBloom(types.Receipts{receipt})
 	return receipt
 }
 func (t *TxTask) Reset() {
