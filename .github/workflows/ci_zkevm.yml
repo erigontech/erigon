@@ -136,7 +136,8 @@ jobs:
           cd bridge
           mkdir tmp
           cat <<EOF > ./tmp/test.toml
-          TestAddrPrivate= "0x12d7de8621a77640c9241b2595ba78ce443d05e94090365ab3bb5e19df82c625"
+          TestL1AddrPrivate="0x12d7de8621a77640c9241b2595ba78ce443d05e94090365ab3bb5e19df82c625"
+          TestL2AddrPrivate="0x12d7de8621a77640c9241b2595ba78ce443d05e94090365ab3bb5e19df82c625"
           [ConnectionConfig]
           L1NodeURL="${ETH_RPC_URL}"
           L2NodeURL="${L2_RPC_URL}"
