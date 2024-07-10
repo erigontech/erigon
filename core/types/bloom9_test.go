@@ -164,3 +164,15 @@ func BenchmarkCreateBloom(b *testing.B) {
 		}
 	})
 }
+
+func TestIsEmpty(t *testing.T) {
+	t.Parallel()
+	var b Bloom
+	if !b.IsEmpty() {
+		t.Error("expected empty")
+	}
+	b.Add([]byte("test"))
+	if b.IsEmpty() {
+		t.Error("expected not empty")
+	}
+}
