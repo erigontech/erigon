@@ -205,7 +205,7 @@ func doWarmup(ctx context.Context, chaindata string, bucket string, logger log.L
 	dbOpts := mdbx2.NewMDBX(log.New()).Path(chaindata).Accede().RoTxsLimiter(semaphore.NewWeighted(ThreadsLimit))
 
 	if dbWriteMap {
-		dbOpts.WriteMap()
+		dbOpts = dbOpts.WriteMap()
 	}
 
 	db := dbOpts.MustOpen()
@@ -265,7 +265,7 @@ func mdbxTopDup(ctx context.Context, chaindata string, bucket string, logger log
 	dbOpts := mdbx2.NewMDBX(log.New()).Path(chaindata).Accede().RoTxsLimiter(semaphore.NewWeighted(ThreadsLimit))
 
 	if dbWriteMap {
-		dbOpts.WriteMap()
+		dbOpts = dbOpts.WriteMap()
 	}
 
 	db := dbOpts.MustOpen()
@@ -433,7 +433,7 @@ func fToMdbx(ctx context.Context, logger log.Logger, to string) error {
 
 	dstOpts := mdbx2.NewMDBX(logger).Path(to)
 	if dbWriteMap {
-		dstOpts.WriteMap()
+		dstOpts = dstOpts.WriteMap()
 	}
 	dst := dstOpts.MustOpen()
 	dstTx, err1 := dst.BeginRw(ctx)

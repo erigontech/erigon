@@ -79,7 +79,7 @@ func dbCfg(label kv.Label, path string) kv2.MdbxOpts {
 	opts := kv2.NewMDBX(log.New()).Path(path).Label(label).RoTxsLimiter(limiterB)
 
 	if dbWriteMap {
-		opts.WriteMap()
+		opts = opts.WriteMap()
 	}
 
 	// integration tool don't intent to create db, then easiest way to open db - it's pass mdbx.Accede flag, which allow
