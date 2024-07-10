@@ -176,24 +176,3 @@ func TestIsEmpty(t *testing.T) {
 		t.Error("expected not empty")
 	}
 }
-
-func BenchmarkIsEmpty(b *testing.B) {
-	b.Run("1", func(b *testing.B) {
-		var bl Bloom
-		for i := 0; i < b.N; i++ {
-			bl.IsEmpty()
-		}
-	})
-	//b.Run("3", func(b *testing.B) {
-	//	var bl Bloom
-	//	for i := 0; i < b.N; i++ {
-	//		bl.IsEmpty3()
-	//	}
-	//})
-	//b.Run("4", func(b *testing.B) {
-	//	var bl Bloom
-	//	for i := 0; i < b.N; i++ {
-	//		bl.IsEmpty4()
-	//	}
-	//})
-}
