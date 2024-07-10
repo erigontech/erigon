@@ -154,26 +154,6 @@ func ExecBlockV3(s *StageState, u Unwinder, txc wrap.TxContainer, toBlock uint64
 	return nil
 }
 
-// reconstituteBlock - First block which is not covered by the history snapshot files
-func reconstituteBlock(agg *libstate.Aggregator, db kv.RoDB, tx kv.Tx) (n uint64, ok bool, err error) {
-	sendersProgress, err := senderStageProgress(tx, db)
-	if err != nil {
-		return 0, false, err
-	}
-	reconToBlock := min(sendersProgress, agg.EndTxNumDomainsFrozen())
-	if tx == nil {
-		if err = db.View(context.Background(), func(tx kv.Tx) error {
-			ok, n, err = rawdbv3.TxNums.FindBlockNum(tx, reconToBlock)
-			return err
-		}); err != nil {
-			return
-		}
-	} else {
-		ok, n, err = rawdbv3.TxNums.FindBlockNum(tx, reconToBlock)
-	}
-	return
-}
-
 var ErrTooDeepUnwind = fmt.Errorf("too deep unwind")
 
 func unwindExec3(u *UnwindState, s *StageState, txc wrap.TxContainer, ctx context.Context, accumulator *shards.Accumulator, logger log.Logger) (err error) {
@@ -296,7 +276,7 @@ func blocksReadAhead(ctx context.Context, cfg *ExecuteBlockCfg, workers int, eng
 					}
 				}
 
-				if err := blocksReadAheadFunc(gCtx, tx, cfg, bn+readAheadBlocks, engine, histV3); err != nil {
+				if err := blocksReadAheadFunc(gCtx, tx, cfg, bn+readAheadBlocks, histV3); err != nil {
 					return err
 				}
 			}
@@ -307,7 +287,7 @@ func blocksReadAhead(ctx context.Context, cfg *ExecuteBlockCfg, workers int, eng
 		_ = g.Wait()
 	}
 }
-func blocksReadAheadFunc(ctx context.Context, tx kv.Tx, cfg *ExecuteBlockCfg, blockNum uint64, engine consensus.Engine, histV3 bool) error {
+func blocksReadAheadFunc(ctx context.Context, tx kv.Tx, cfg *ExecuteBlockCfg, blockNum uint64, histV3 bool) error {
 	block, err := cfg.blockReader.BlockByNumber(ctx, tx, blockNum)
 	if err != nil {
 		return err
