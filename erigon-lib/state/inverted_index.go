@@ -48,8 +48,8 @@ import (
 	"github.com/ledgerwatch/erigon-lib/etl"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/bitmapdb"
-	"github.com/ledgerwatch/erigon-lib/kv/iter"
 	"github.com/ledgerwatch/erigon-lib/kv/order"
+	"github.com/ledgerwatch/erigon-lib/kv/stream"
 	"github.com/ledgerwatch/erigon-lib/log/v3"
 	"github.com/ledgerwatch/erigon-lib/recsplit"
 	"github.com/ledgerwatch/erigon-lib/recsplit/eliasfano32"
@@ -604,7 +604,7 @@ func (iit *InvertedIndexRoTx) seekInFiles(key []byte, txNum uint64) (found bool,
 // [startTxNum; endNumTx)
 
 // todo IdxRange operates over ii.indexTable . Passing `nil` as a key will not return all keys
-func (iit *InvertedIndexRoTx) IdxRange(key []byte, startTxNum, endTxNum int, asc order.By, limit int, roTx kv.Tx) (iter.U64, error) {
+func (iit *InvertedIndexRoTx) IdxRange(key []byte, startTxNum, endTxNum int, asc order.By, limit int, roTx kv.Tx) (stream.U64, error) {
 	frozenIt, err := iit.iterateRangeFrozen(key, startTxNum, endTxNum, asc, limit)
 	if err != nil {
 		return nil, err
@@ -613,20 +613,20 @@ func (iit *InvertedIndexRoTx) IdxRange(key []byte, startTxNum, endTxNum int, asc
 	if err != nil {
 		return nil, err
 	}
-	return iter.Union[uint64](frozenIt, recentIt, asc, limit), nil
+	return stream.Union[uint64](frozenIt, recentIt, asc, limit), nil
 }
 
-func (iit *InvertedIndexRoTx) recentIterateRange(key []byte, startTxNum, endTxNum int, asc order.By, limit int, roTx kv.Tx) (iter.U64, error) {
+func (iit *InvertedIndexRoTx) recentIterateRange(key []byte, startTxNum, endTxNum int, asc order.By, limit int, roTx kv.Tx) (stream.U64, error) {
 	//optimization: return empty pre-allocated iterator if range is frozen
 	if asc {
 		isFrozenRange := len(iit.files) > 0 && endTxNum >= 0 && iit.files.EndTxNum() >= uint64(endTxNum)
 		if isFrozenRange {
-			return iter.EmptyU64, nil
+			return stream.EmptyU64, nil
 		}
 	} else {
 		isFrozenRange := len(iit.files) > 0 && startTxNum >= 0 && iit.files.EndTxNum() >= uint64(startTxNum)
 		if isFrozenRange {
-			return iter.EmptyU64, nil
+			return stream.EmptyU64, nil
 		}
 	}
 
@@ -645,7 +645,7 @@ func (iit *InvertedIndexRoTx) recentIterateRange(key []byte, startTxNum, endTxNu
 	if err != nil {
 		return nil, err
 	}
-	return iter.TransformKV2U64(it, func(_, v []byte) (uint64, error) {
+	return stream.TransformKV2U64(it, func(_, v []byte) (uint64, error) {
 		return binary.BigEndian.Uint64(v), nil
 	}), nil
 }
@@ -973,7 +973,7 @@ type FrozenInvertedIdxIter struct {
 	limit                int
 	orderAscend          order.By
 
-	efIt       iter.Uno[uint64]
+	efIt       stream.Uno[uint64]
 	indexTable string
 	stack      []ctxItem
 

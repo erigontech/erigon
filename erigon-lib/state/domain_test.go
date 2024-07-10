@@ -34,8 +34,8 @@ import (
 	"time"
 
 	datadir2 "github.com/ledgerwatch/erigon-lib/common/datadir"
-	"github.com/ledgerwatch/erigon-lib/kv/iter"
 	"github.com/ledgerwatch/erigon-lib/kv/order"
+	"github.com/ledgerwatch/erigon-lib/kv/stream"
 	"github.com/ledgerwatch/erigon-lib/log/v3"
 	"github.com/ledgerwatch/erigon-lib/types"
 
@@ -1955,7 +1955,7 @@ func TestDomain_Unwind(t *testing.T) {
 	return
 }
 
-func compareIterators(t *testing.T, et, ut iter.KV) {
+func compareIterators(t *testing.T, et, ut stream.KV) {
 	t.Helper()
 
 	/* uncomment when mismatches amount of keys in expectedIter and unwindedIter*/
@@ -1990,7 +1990,7 @@ func compareIterators(t *testing.T, et, ut iter.KV) {
 		}
 	}
 }
-func compareIteratorsS(t *testing.T, et, ut iter.KVS) {
+func compareIteratorsS(t *testing.T, et, ut stream.KVS) {
 	t.Helper()
 	for {
 		ek, ev, estep, err1 := et.Next()

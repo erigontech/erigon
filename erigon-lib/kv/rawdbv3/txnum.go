@@ -24,8 +24,8 @@ import (
 
 	"github.com/ledgerwatch/erigon-lib/common/dbg"
 	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon-lib/kv/iter"
 	"github.com/ledgerwatch/erigon-lib/kv/order"
+	"github.com/ledgerwatch/erigon-lib/kv/stream"
 )
 
 type ErrTxNumsAppendWithGap struct {
@@ -290,7 +290,7 @@ func SecondKey(tx kv.Tx, table string) ([]byte, error) {
 //
 //	it allow certain optimizations.
 type MapTxNum2BlockNumIter struct {
-	it          iter.U64
+	it          stream.U64
 	tx          kv.Tx
 	orderAscend bool
 
@@ -298,7 +298,7 @@ type MapTxNum2BlockNumIter struct {
 	minTxNumInBlock, maxTxNumInBlock uint64
 }
 
-func TxNums2BlockNums(tx kv.Tx, it iter.U64, by order.By) *MapTxNum2BlockNumIter {
+func TxNums2BlockNums(tx kv.Tx, it stream.U64, by order.By) *MapTxNum2BlockNumIter {
 	return &MapTxNum2BlockNumIter{tx: tx, it: it, orderAscend: bool(by)}
 }
 func (i *MapTxNum2BlockNumIter) Close() {

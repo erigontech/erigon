@@ -27,9 +27,9 @@ import (
 	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/hexutil"
 	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon-lib/kv/iter"
 	"github.com/ledgerwatch/erigon-lib/kv/order"
 	"github.com/ledgerwatch/erigon-lib/kv/rawdbv3"
+	"github.com/ledgerwatch/erigon-lib/kv/stream"
 	"github.com/ledgerwatch/erigon-lib/log/v3"
 	"github.com/ledgerwatch/erigon/consensus"
 	"github.com/ledgerwatch/erigon/consensus/ethash"
@@ -249,10 +249,10 @@ func (api *TraceAPIImpl) Block(ctx context.Context, blockNr rpc.BlockNumber, gas
 	return out, err
 }
 
-func traceFilterBitmapsV3(tx kv.TemporalTx, req TraceFilterRequest, from, to uint64) (fromAddresses, toAddresses map[common.Address]struct{}, allBlocks iter.U64, err error) {
+func traceFilterBitmapsV3(tx kv.TemporalTx, req TraceFilterRequest, from, to uint64) (fromAddresses, toAddresses map[common.Address]struct{}, allBlocks stream.U64, err error) {
 	fromAddresses = make(map[common.Address]struct{}, len(req.FromAddress))
 	toAddresses = make(map[common.Address]struct{}, len(req.ToAddress))
-	var blocksTo iter.U64
+	var blocksTo stream.U64
 
 	for _, addr := range req.FromAddress {
 		if addr != nil {
@@ -260,7 +260,7 @@ func traceFilterBitmapsV3(tx kv.TemporalTx, req TraceFilterRequest, from, to uin
 			if errors.Is(err, ethdb.ErrKeyNotFound) {
 				continue
 			}
-			allBlocks = iter.Union[uint64](allBlocks, it, order.Asc, -1)
+			allBlocks = stream.Union[uint64](allBlocks, it, order.Asc, -1)
 			fromAddresses[*addr] = struct{}{}
 		}
 	}
@@ -271,23 +271,23 @@ func traceFilterBitmapsV3(tx kv.TemporalTx, req TraceFilterRequest, from, to uin
 			if errors.Is(err, ethdb.ErrKeyNotFound) {
 				continue
 			}
-			blocksTo = iter.Union[uint64](blocksTo, it, order.Asc, -1)
+			blocksTo = stream.Union[uint64](blocksTo, it, order.Asc, -1)
 			toAddresses[*addr] = struct{}{}
 		}
 	}
 
 	switch req.Mode {
 	case TraceFilterModeIntersection:
-		allBlocks = iter.Intersect[uint64](allBlocks, blocksTo, -1)
+		allBlocks = stream.Intersect[uint64](allBlocks, blocksTo, -1)
 	case TraceFilterModeUnion:
 		fallthrough
 	default:
-		allBlocks = iter.Union[uint64](allBlocks, blocksTo, order.Asc, -1)
+		allBlocks = stream.Union[uint64](allBlocks, blocksTo, order.Asc, -1)
 	}
 
 	// Special case - if no addresses specified, take all traces
 	if len(req.FromAddress) == 0 && len(req.ToAddress) == 0 {
-		allBlocks = iter.Range[uint64](from, to)
+		allBlocks = stream.Range[uint64](from, to)
 		//} else {
 		//allBlocks.RemoveRange(0, from)
 		//allBlocks.RemoveRange(to, uint64(0x100000000))

@@ -40,9 +40,9 @@ import (
 	"github.com/ledgerwatch/erigon-lib/common/background"
 	"github.com/ledgerwatch/erigon-lib/common/hexutility"
 	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon-lib/kv/iter"
 	"github.com/ledgerwatch/erigon-lib/kv/mdbx"
 	"github.com/ledgerwatch/erigon-lib/kv/order"
+	"github.com/ledgerwatch/erigon-lib/kv/stream"
 	"github.com/ledgerwatch/erigon-lib/recsplit"
 	"github.com/ledgerwatch/erigon-lib/recsplit/eliasfano32"
 )
@@ -251,7 +251,7 @@ func TestHistoryCollationBuild(t *testing.T) {
 			keyWords = append(keyWords, string(w))
 			w, _ = g.Next(w[:0])
 			ef, _ := eliasfano32.ReadEliasFano(w)
-			ints, err := iter.ToArrayU64(ef.Iterator())
+			ints, err := stream.ToArrayU64(ef.Iterator())
 			require.NoError(err)
 			intArrs = append(intArrs, ints)
 		}
@@ -1184,7 +1184,7 @@ func TestIterateChanged2(t *testing.T) {
 			{ //check IdxRange
 				idxIt, err := hc.IdxRange(firstKey[:], -1, -1, order.Asc, -1, roTx)
 				require.NoError(err)
-				cnt, err := iter.CountU64(idxIt)
+				cnt, err := stream.CountU64(idxIt)
 				require.NoError(err)
 				require.Equal(1000, cnt)
 
@@ -1192,9 +1192,9 @@ func TestIterateChanged2(t *testing.T) {
 				require.NoError(err)
 				idxItDesc, err := hc.IdxRange(firstKey[:], 19, 1, order.Desc, -1, roTx)
 				require.NoError(err)
-				descArr, err := iter.ToArrayU64(idxItDesc)
+				descArr, err := stream.ToArrayU64(idxItDesc)
 				require.NoError(err)
-				iter.ExpectEqualU64(t, idxIt, iter.ReverseArray(descArr))
+				stream.ExpectEqualU64(t, idxIt, stream.ReverseArray(descArr))
 			}
 
 			it, err := hc.HistoryRange(2, 20, order.Asc, -1, roTx)
