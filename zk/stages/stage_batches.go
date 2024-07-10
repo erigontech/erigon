@@ -29,7 +29,7 @@ import (
 )
 
 const (
-	HIGHEST_KNOWN_FORK  = 9
+	HIGHEST_KNOWN_FORK  = 11
 	STAGE_PROGRESS_SAVE = 3000000
 )
 
