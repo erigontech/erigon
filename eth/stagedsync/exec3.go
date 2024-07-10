@@ -777,66 +777,70 @@ Loop:
 				} else {
 					rs.AddWork(ctx, txTask, in)
 				}
-			} else {
-				count++
-				if txTask.Error != nil {
-					break Loop
-				}
-				applyWorker.RunTxTaskNoLock(txTask)
-				if err := func() error {
-					if errors.Is(txTask.Error, context.Canceled) {
-						return err
-					}
-					if txTask.Error != nil {
-						return fmt.Errorf("%w, txnIdx=%d, %v", consensus.ErrInvalidBlock, txTask.TxIndex, txTask.Error) //same as in stage_exec.go
-					}
-					usedGas += txTask.UsedGas
-					if txTask.Tx != nil {
-						blobGasUsed += txTask.Tx.GetBlobGas()
-					}
-					if txTask.Final {
-						checkReceipts := !cfg.vmConfig.StatelessExec && chainConfig.IsByzantium(txTask.BlockNum) && !cfg.vmConfig.NoReceipts
-						if txTask.BlockNum > 0 && !skipPostEvaluation { //Disable check for genesis. Maybe need somehow improve it in future - to satisfy TestExecutionSpec
-							if err := core.BlockPostValidation(usedGas, blobGasUsed, checkReceipts, receipts, txTask.Header); err != nil {
-								return fmt.Errorf("%w, txnIdx=%d, %v", consensus.ErrInvalidBlock, txTask.TxIndex, err) //same as in stage_exec.go
-							}
-						}
-						usedGas, blobGasUsed = 0, 0
-						receipts = receipts[:0]
-					} else if txTask.TxIndex >= 0 {
-						receipts = append(receipts, txTask.CreateReceipt(usedGas))
-					}
-					return nil
-				}(); err != nil {
-					if errors.Is(err, context.Canceled) {
-						return err
-					}
-					logger.Warn(fmt.Sprintf("[%s] Execution failed", execStage.LogPrefix()), "block", blockNum, "txNum", txTask.TxNum, "hash", header.Hash().String(), "err", err)
-					if cfg.hd != nil && errors.Is(err, consensus.ErrInvalidBlock) {
-						cfg.hd.ReportBadHeaderPoS(header.Hash(), header.ParentHash)
-					}
-					if cfg.badBlockHalt {
-						return err
-					}
-					if errors.Is(err, consensus.ErrInvalidBlock) {
-						if err := u.UnwindTo(blockNum-1, BadBlock(header.Hash(), err), applyTx); err != nil {
-							return err
-						}
-					} else {
-						if err := u.UnwindTo(blockNum-1, ExecUnwind, applyTx); err != nil {
-							return err
-						}
-					}
-					break Loop
-				}
+				stageProgress = blockNum
+				inputTxNum++
+				continue
+			}
 
-				// MA applystate
-				if err := rs.ApplyState4(ctx, txTask); err != nil {
+			count++
+			if txTask.Error != nil {
+				break Loop
+			}
+			applyWorker.RunTxTaskNoLock(txTask)
+			if err := func() error {
+				if errors.Is(txTask.Error, context.Canceled) {
 					return err
 				}
-
-				outputTxNum.Add(1)
+				if txTask.Error != nil {
+					return fmt.Errorf("%w, txnIdx=%d, %v", consensus.ErrInvalidBlock, txTask.TxIndex, txTask.Error) //same as in stage_exec.go
+				}
+				usedGas += txTask.UsedGas
+				if txTask.Tx != nil {
+					blobGasUsed += txTask.Tx.GetBlobGas()
+				}
+				if txTask.Final {
+					checkReceipts := !cfg.vmConfig.StatelessExec && chainConfig.IsByzantium(txTask.BlockNum) && !cfg.vmConfig.NoReceipts
+					if txTask.BlockNum > 0 && !skipPostEvaluation { //Disable check for genesis. Maybe need somehow improve it in future - to satisfy TestExecutionSpec
+						if err := core.BlockPostValidation(usedGas, blobGasUsed, checkReceipts, receipts, txTask.Header); err != nil {
+							return fmt.Errorf("%w, txnIdx=%d, %v", consensus.ErrInvalidBlock, txTask.TxIndex, err) //same as in stage_exec.go
+						}
+					}
+					usedGas, blobGasUsed = 0, 0
+					receipts = receipts[:0]
+				} else if txTask.TxIndex >= 0 {
+					receipts = append(receipts, txTask.CreateReceipt(usedGas))
+				}
+				return nil
+			}(); err != nil {
+				if errors.Is(err, context.Canceled) {
+					return err
+				}
+				logger.Warn(fmt.Sprintf("[%s] Execution failed", execStage.LogPrefix()), "block", blockNum, "txNum", txTask.TxNum, "hash", header.Hash().String(), "err", err)
+				if cfg.hd != nil && errors.Is(err, consensus.ErrInvalidBlock) {
+					cfg.hd.ReportBadHeaderPoS(header.Hash(), header.ParentHash)
+				}
+				if cfg.badBlockHalt {
+					return err
+				}
+				if errors.Is(err, consensus.ErrInvalidBlock) {
+					if err := u.UnwindTo(blockNum-1, BadBlock(header.Hash(), err), applyTx); err != nil {
+						return err
+					}
+				} else {
+					if err := u.UnwindTo(blockNum-1, ExecUnwind, applyTx); err != nil {
+						return err
+					}
+				}
+				break Loop
 			}
+
+			// MA applystate
+			if err := rs.ApplyState4(ctx, txTask); err != nil {
+				return err
+			}
+
+			outputTxNum.Add(1)
+
 			stageProgress = blockNum
 			inputTxNum++
 		}
