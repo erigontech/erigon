@@ -33,6 +33,7 @@ import (
 	"time"
 
 	"github.com/holiman/uint256"
+	state2 "github.com/ledgerwatch/erigon-lib/state"
 	"github.com/urfave/cli/v2"
 
 	"github.com/ledgerwatch/erigon-lib/chain"
@@ -169,7 +170,13 @@ func runCmd(ctx *cli.Context) error {
 	}
 	defer tx.Rollback()
 
-	statedb = state.New(state.NewPlainStateReader(tx))
+	sd, err := state2.NewSharedDomains(tx, log.Root())
+	if err != nil {
+		return err
+	}
+	defer sd.Close()
+	stateReader := state.NewStateReaderV3(sd)
+	statedb = state.New(stateReader)
 	if ctx.String(SenderFlag.Name) != "" {
 		sender = libcommon.HexToAddress(ctx.String(SenderFlag.Name))
 	}

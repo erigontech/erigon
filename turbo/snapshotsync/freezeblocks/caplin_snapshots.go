@@ -113,6 +113,28 @@ func (s *CaplinSnapshots) LogStat(str string) {
 		"indices", fmt.Sprintf("%dk", (s.IndicesMax()+1)/1000))
 }
 
+func (s *CaplinSnapshots) LS() {
+	if s == nil {
+		return
+	}
+	if s.BeaconBlocks != nil {
+		for _, seg := range s.BeaconBlocks.segments {
+			if seg.Decompressor == nil {
+				continue
+			}
+			log.Info("[agg] ", "f", seg.Decompressor.FileName(), "words", seg.Decompressor.Count())
+		}
+	}
+	if s.BlobSidecars != nil {
+		for _, seg := range s.BlobSidecars.segments {
+			if seg.Decompressor == nil {
+				continue
+			}
+			log.Info("[agg] ", "f", seg.Decompressor.FileName(), "words", seg.Decompressor.Count())
+		}
+	}
+}
+
 func (s *CaplinSnapshots) SegFilePaths(from, to uint64) []string {
 	var res []string
 	for _, seg := range s.BeaconBlocks.segments {
