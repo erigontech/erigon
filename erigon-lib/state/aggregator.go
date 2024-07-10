@@ -164,7 +164,7 @@ func NewAggregator(ctx context.Context, dirs datadir.Dirs, aggregationStep uint6
 		},
 		restrictSubsetFileDeletions: a.commitmentValuesTransform,
 	}
-	if a.d[kv.AccountsDomain], err = NewDomain(cfg, aggregationStep, kv.FileAccountDomain, kv.TblAccountKeys, kv.TblAccountVals, kv.TblAccountHistoryKeys, kv.TblAccountHistoryVals, kv.TblAccountIdx, integrityCheck, logger); err != nil {
+	if a.d[kv.AccountsDomain], err = NewDomain(cfg, aggregationStep, kv.FileAccountDomain, kv.TblAccountVals, kv.TblAccountHistoryKeys, kv.TblAccountHistoryVals, kv.TblAccountIdx, integrityCheck, logger); err != nil {
 		return nil, err
 	}
 	cfg = domainCfg{
@@ -174,7 +174,7 @@ func NewAggregator(ctx context.Context, dirs datadir.Dirs, aggregationStep uint6
 		},
 		restrictSubsetFileDeletions: a.commitmentValuesTransform,
 	}
-	if a.d[kv.StorageDomain], err = NewDomain(cfg, aggregationStep, kv.FileStorageDomain, kv.TblStorageKeys, kv.TblStorageVals, kv.TblStorageHistoryKeys, kv.TblStorageHistoryVals, kv.TblStorageIdx, integrityCheck, logger); err != nil {
+	if a.d[kv.StorageDomain], err = NewDomain(cfg, aggregationStep, kv.FileStorageDomain, kv.TblStorageVals, kv.TblStorageHistoryKeys, kv.TblStorageHistoryVals, kv.TblStorageIdx, integrityCheck, logger); err != nil {
 		return nil, err
 	}
 	cfg = domainCfg{
@@ -182,8 +182,9 @@ func NewAggregator(ctx context.Context, dirs datadir.Dirs, aggregationStep uint6
 			iiCfg:             iiCfg{salt: salt, dirs: dirs, db: db},
 			withLocalityIndex: false, withExistenceIndex: false, compression: CompressKeys | CompressVals, historyLargeValues: true,
 		},
+		largeVals: true,
 	}
-	if a.d[kv.CodeDomain], err = NewDomain(cfg, aggregationStep, kv.FileCodeDomain, kv.TblCodeKeys, kv.TblCodeVals, kv.TblCodeHistoryKeys, kv.TblCodeHistoryVals, kv.TblCodeIdx, integrityCheck, logger); err != nil {
+	if a.d[kv.CodeDomain], err = NewDomain(cfg, aggregationStep, kv.FileCodeDomain, kv.TblCodeVals, kv.TblCodeHistoryKeys, kv.TblCodeHistoryVals, kv.TblCodeIdx, integrityCheck, logger); err != nil {
 		return nil, err
 	}
 	cfg = domainCfg{
@@ -196,7 +197,7 @@ func NewAggregator(ctx context.Context, dirs datadir.Dirs, aggregationStep uint6
 		restrictSubsetFileDeletions: a.commitmentValuesTransform,
 		compress:                    CompressNone,
 	}
-	if a.d[kv.CommitmentDomain], err = NewDomain(cfg, aggregationStep, kv.FileCommitmentDomain, kv.TblCommitmentKeys, kv.TblCommitmentVals, kv.TblCommitmentHistoryKeys, kv.TblCommitmentHistoryVals, kv.TblCommitmentIdx, integrityCheck, logger); err != nil {
+	if a.d[kv.CommitmentDomain], err = NewDomain(cfg, aggregationStep, kv.FileCommitmentDomain, kv.TblCommitmentVals, kv.TblCommitmentHistoryKeys, kv.TblCommitmentHistoryVals, kv.TblCommitmentIdx, integrityCheck, logger); err != nil {
 		return nil, err
 	}
 	//aCfg := AppendableCfg{

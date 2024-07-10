@@ -412,6 +412,7 @@ func (w *invertedIndexBufferedWriter) Flush(ctx context.Context, tx kv.RwTx) err
 	if w.discard {
 		return nil
 	}
+
 	if err := w.index.Load(tx, w.indexTable, loadFunc, etl.TransformArgs{Quit: ctx.Done()}); err != nil {
 		return err
 	}
