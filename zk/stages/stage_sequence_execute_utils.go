@@ -446,9 +446,9 @@ func checkForBadBatch(
 	return false, nil
 }
 
-var (
-	LIMIT_128_KB = uint64(128 * 1024)
-)
+// hard coded to match in with the smart contract
+// https://github.com/0xPolygonHermez/zkevm-contracts/blob/73758334f8568b74e9493fcc530b442bd73325dc/contracts/PolygonZkEVM.sol#L119C63-L119C69
+const LIMIT_120_KB = 120_000
 
 type BlockDataChecker struct {
 	limit uint64 // amount of bytes
@@ -457,7 +457,7 @@ type BlockDataChecker struct {
 
 func NewBlockDataChecker() *BlockDataChecker {
 	return &BlockDataChecker{
-		limit: LIMIT_128_KB,
+		limit: LIMIT_120_KB,
 		bytes: make([]byte, 0),
 	}
 }
