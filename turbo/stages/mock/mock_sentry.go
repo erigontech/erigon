@@ -313,8 +313,10 @@ func MockWithEverything(tb testing.TB, gspec *types.Genesis, key *ecdsa.PrivateK
 	propagateNewBlockHashes := func(context.Context, []headerdownload.Announce) {}
 	penalize := func(context.Context, []headerdownload.PenaltyItem) {}
 
-	mock.SentryClient = direct.NewSentryClientDirect(direct.ETH68, mock)
-	sentries := []direct.SentryClient{mock.SentryClient}
+	//mock.SentryClient = direct.NewSentryClientDirect(direct.ETH68, mock)
+	sentry68 := direct.NewSentryClientDirect(direct.ETH68, mock)
+	mock.SentryClient = direct.NewSentryClientDirect(direct.ETH66, mock)
+	sentries := []direct.SentryClient{mock.SentryClient, sentry68}
 
 	sendBodyRequest := func(context.Context, *bodydownload.BodyRequest) ([64]byte, bool) { return [64]byte{}, false }
 	blockPropagator := func(Ctx context.Context, header *types.Header, body *types.RawBody, td *big.Int) {}
@@ -410,6 +412,7 @@ func MockWithEverything(tb testing.TB, gspec *types.Genesis, key *ecdsa.PrivateK
 		maxBlockBroadcastPeers,
 		false, /* disableBlockDownload */
 		logger,
+		dirs,
 	)
 	if err != nil {
 		if tb != nil {

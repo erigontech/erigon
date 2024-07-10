@@ -295,8 +295,9 @@ type MultiClient struct {
 	// decouple sentry multi client from header and body downloading logic is done
 	disableBlockDownload bool
 
-	logger                                     log.Logger
-	getReceiptsActiveGoroutineNumberController *semaphore.Weighted
+	logger                           log.Logger
+	getReceiptsActiveGoroutineNumber *semaphore.Weighted
+	baseApi                          *jsonrpc.BaseAPI
 }
 
 func NewMultiClient(
@@ -312,6 +313,7 @@ func NewMultiClient(
 	maxBlockBroadcastPeers func(*types.Header) uint,
 	disableBlockDownload bool,
 	logger log.Logger,
+	dirs datadir.Dirs,
 ) (*MultiClient, error) {
 	// header downloader
 	var hd *headerdownload.HeaderDownload
@@ -347,6 +349,9 @@ func NewMultiClient(
 		bd = &bodydownload.BodyDownload{}
 	}
 
+	cache := kvcache.NewDummy()
+	baseApi := jsonrpc.NewBaseApi(nil, cache, blockReader, nil, true, time.Second, engine, dirs)
+
 	cs := &MultiClient{
 		Hd:                                hd,
 		Bd:                                bd,
@@ -361,7 +366,8 @@ func NewMultiClient(
 		maxBlockBroadcastPeers:            maxBlockBroadcastPeers,
 		disableBlockDownload:              disableBlockDownload,
 		logger:                            logger,
-		getReceiptsActiveGoroutineNumberController: semaphore.NewWeighted(1),
+		getReceiptsActiveGoroutineNumber:  semaphore.NewWeighted(1),
+		baseApi:                           baseApi,
 	}
 
 	return cs, nil
@@ -703,11 +709,11 @@ func (cs *MultiClient) getBlockBodies66(ctx context.Context, inreq *proto_sentry
 }
 
 func (cs *MultiClient) getReceipts66(ctx context.Context, inreq *proto_sentry.InboundMessage, sentryClient direct.SentryClient) error {
-	err := cs.getReceiptsActiveGoroutineNumberController.Acquire(ctx, 1)
+	err := cs.getReceiptsActiveGoroutineNumber.Acquire(ctx, 1)
 	if err != nil {
 		return err
 	}
-	defer cs.getReceiptsActiveGoroutineNumberController.Release(1)
+	defer cs.getReceiptsActiveGoroutineNumber.Release(1)
 	var query eth.GetReceiptsPacket66
 	if err := rlp.DecodeBytes(inreq.Data, &query); err != nil {
 		return fmt.Errorf("decoding getReceipts66: %w, data: %x", err, inreq.Data)
@@ -718,9 +724,8 @@ func (cs *MultiClient) getReceipts66(ctx context.Context, inreq *proto_sentry.In
 		return err
 	}
 	defer tx.Rollback()
-	cache := kvcache.NewDummy()
-	baseApi := jsonrpc.NewBaseApi(nil, cache, cs.blockReader, nil, true, time.Second, cs.Engine, datadir.New(""))
-	receipts, err := eth.AnswerGetReceiptsQuery(ctx, baseApi, cs.blockReader, tx, query.GetReceiptsPacket)
+
+	receipts, err := eth.AnswerGetReceiptsQuery(ctx, cs.baseApi, cs.blockReader, tx, query.GetReceiptsPacket)
 	if err != nil {
 		return err
 	}

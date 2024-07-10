@@ -1461,6 +1461,7 @@ func newSync(ctx context.Context, db kv.RwDB, miningConfig *params.MiningConfig,
 		maxBlockBroadcastPeers,
 		false, /* disableBlockDownload */
 		logger,
+		cfg.Dirs,
 	)
 	if err != nil {
 		panic(err)

@@ -24,7 +24,7 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
-	proto_sentry "github.com/ledgerwatch/erigon-lib/gointerfaces/sentryproto"
+	protosentry "github.com/ledgerwatch/erigon-lib/gointerfaces/sentryproto"
 	"github.com/ledgerwatch/erigon/eth/protocols/eth"
 	"github.com/ledgerwatch/erigon/rlp"
 	"math"
@@ -381,7 +381,7 @@ func testReorg(t *testing.T, first, second []int64, td int64) {
 	}
 
 	m.ReceiveWg.Add(1)
-	for _, err = range m.Send(&proto_sentry.InboundMessage{Id: proto_sentry.MessageId_GET_RECEIPTS_66, Data: b, PeerId: m.PeerId}) {
+	for _, err = range m.Send(&protosentry.InboundMessage{Id: protosentry.MessageId_GET_RECEIPTS_66, Data: b, PeerId: m.PeerId}) {
 		if err != nil {
 			t.Fatal(err)
 		}
