@@ -790,6 +790,7 @@ Loop:
 					break Loop
 				}
 				applyWorker.RunTxTaskNoLock(txTask)
+
 				if err := func() error {
 					if errors.Is(txTask.Error, context.Canceled) {
 						return err
@@ -801,10 +802,16 @@ Loop:
 					if txTask.Tx != nil {
 						blobGasUsed += txTask.Tx.GetBlobGas()
 					}
-					switch true {
-					case txTask.Final:
+
+					if !(txTask.Final || txTask.TxIndex < 0) {
+						receipts = append(receipts, txTask.CreateReceipt(usedGas))
+					}
+
+					if txTask.Final {
 						checkReceipts := !cfg.vmConfig.StatelessExec && chainConfig.IsByzantium(txTask.BlockNum) && !cfg.vmConfig.NoReceipts
 						if txTask.BlockNum > 0 && !skipPostEvaluation { //Disable check for genesis. Maybe need somehow improve it in future - to satisfy TestExecutionSpec
+							fmt.Printf("[dbg] alex1: %t, %t\n", cfg.vmConfig.StatelessExec, cfg.vmConfig.NoReceipts)
+							panic(1)
 							// Set the receipt logs and create a bloom for filtering
 							for _, r := range receipts {
 								r.Bloom = types.CreateBloom(types.Receipts{r})
@@ -813,38 +820,9 @@ Loop:
 								return fmt.Errorf("%w, txnIdx=%d, %v", consensus.ErrInvalidBlock, txTask.TxIndex, err) //same as in stage_exec.go
 							}
 						}
-
-						txnID := baseBlockTxnID + kv.TxnId(txTask.TxIndex)
-						//write for system txn also, but don't add it to `receipts` array (consensus doesn't expect it)
-						if err := rawtemporaldb.AppendReceipts(doms, txnID, &types.Receipt{
-							TransactionIndex:  uint(txTask.TxIndex),
-							CumulativeGasUsed: usedGas,
-							Status:            types.ReceiptStatusSuccessful,
-						}); err != nil {
-							return err
-						}
-
 						usedGas, blobGasUsed = 0, 0
 						receipts = receipts[:0]
-					case txTask.TxIndex < 0:
-						txnID := baseBlockTxnID + kv.TxnId(txTask.TxIndex)
-						//write for system txn also, but don't add it to `receipts` array (consensus doesn't expect it)
-						if err := rawtemporaldb.AppendReceipts(doms, txnID, &types.Receipt{
-							TransactionIndex:  uint(txTask.TxIndex),
-							CumulativeGasUsed: usedGas,
-							Status:            types.ReceiptStatusSuccessful,
-						}); err != nil {
-							return err
-						}
-					default:
-						receipt := txTask.CreateReceipt(usedGas)
-						txnID := baseBlockTxnID + kv.TxnId(txTask.TxIndex)
-						if err := rawtemporaldb.AppendReceipts(doms, txnID, receipt); err != nil {
-							return err
-						}
-						receipts = append(receipts, receipt)
 					}
-
 					return nil
 				}(); err != nil {
 					if errors.Is(err, context.Canceled) {
@@ -867,6 +845,23 @@ Loop:
 						}
 					}
 					break Loop
+				}
+
+				if txTask.Final || txTask.TxIndex < 0 {
+					txnID := baseBlockTxnID + kv.TxnId(txTask.TxIndex)
+					//write for system txn also, but don't add it to `receipts` array (consensus doesn't expect it)
+					if err := rawtemporaldb.AppendReceipts(doms, txnID, &types.Receipt{
+						TransactionIndex:  uint(txTask.TxIndex),
+						CumulativeGasUsed: usedGas,
+						Status:            types.ReceiptStatusSuccessful,
+					}); err != nil {
+						return err
+					}
+				} else {
+					txnID := baseBlockTxnID + kv.TxnId(txTask.TxIndex)
+					if err := rawtemporaldb.AppendReceipts(doms, txnID, receipts[txTask.TxIndex]); err != nil {
+						return err
+					}
 				}
 
 				// MA applystate
