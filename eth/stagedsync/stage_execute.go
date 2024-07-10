@@ -241,7 +241,7 @@ func SpawnExecuteBlocksStage(s *StageState, u Unwinder, txc wrap.TxContainer, to
 	return nil
 }
 
-func blocksReadAhead(ctx context.Context, cfg *ExecuteBlockCfg, workers int, engine consensus.Engine, histV3 bool) (chan uint64, context.CancelFunc) {
+func blocksReadAhead(ctx context.Context, cfg *ExecuteBlockCfg, workers int, histV3 bool) (chan uint64, context.CancelFunc) {
 	const readAheadBlocks = 100
 	readAhead := make(chan uint64, readAheadBlocks)
 	g, gCtx := errgroup.WithContext(ctx)

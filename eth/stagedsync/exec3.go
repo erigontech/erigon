@@ -625,7 +625,7 @@ func ExecV3(ctx context.Context,
 		// can't use OS-level ReadAhead - because Data >> RAM
 		// it also warmsup state a bit - by touching senders/coninbase accounts and code
 		var clean func()
-		readAhead, clean = blocksReadAhead(ctx, &cfg, 4, engine, true)
+		readAhead, clean = blocksReadAhead(ctx, &cfg, 4, true)
 		defer clean()
 	}
 
