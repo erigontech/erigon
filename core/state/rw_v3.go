@@ -284,22 +284,21 @@ func (rs *StateV3) Unwind(ctx context.Context, tx kv.RwTx, blockUnwindTo, txUnwi
 		}
 		return nil
 	}
+
 	stateChanges := etl.NewCollector("", "", etl.NewOldestEntryBuffer(etl.BufferOptimalSize), rs.logger)
 	defer stateChanges.Close()
 	stateChanges.SortAndFlushInBackground(true)
 
-	if changeset != nil {
-		accountDiffs := changeset[kv.AccountsDomain]
-		for _, kv := range accountDiffs {
-			if err := stateChanges.Collect(kv.Key[:length.Addr], kv.Value); err != nil {
-				return err
-			}
+	accountDiffs := changeset[kv.AccountsDomain]
+	for _, kv := range accountDiffs {
+		if err := stateChanges.Collect(kv.Key[:length.Addr], kv.Value); err != nil {
+			return err
 		}
-		storageDiffs := changeset[kv.StorageDomain]
-		for _, kv := range storageDiffs {
-			if err := stateChanges.Collect(kv.Key, kv.Value); err != nil {
-				return err
-			}
+	}
+	storageDiffs := changeset[kv.StorageDomain]
+	for _, kv := range storageDiffs {
+		if err := stateChanges.Collect(kv.Key, kv.Value); err != nil {
+			return err
 		}
 	}
 

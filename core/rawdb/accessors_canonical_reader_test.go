@@ -26,8 +26,8 @@ import (
 
 	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/u256"
-	"github.com/ledgerwatch/erigon-lib/kv/iter"
 	"github.com/ledgerwatch/erigon-lib/kv/order"
+	"github.com/ledgerwatch/erigon-lib/kv/stream"
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/turbo/stages/mock"
@@ -77,9 +77,8 @@ func TestCanonicalIter(t *testing.T) {
 	//it, err := rawdb.TxnIdsOfCanonicalBlocks(tx, 0, -1, order.Asc, -1)
 	//require.NoError(err)
 	//require.Equal(true, it.HasNext())
-
 	// tx already contains genesis block of 2 transactions
-	t.Logf("genesis: %v", iter.ToArrU64Must(it))
+	//t.Logf("genesis: %v", stream.ToArrU64Must(it))
 
 	//mark 3 blocks as canonical
 	require.NoError(rawdb.WriteCanonicalHash(tx, common.Hash{11}, 1))
@@ -91,7 +90,7 @@ func TestCanonicalIter(t *testing.T) {
 	//require.Equal(true, it.HasNext())
 	//exp := txNumsOfBlock(0, b)
 	//t.Logf("expected full block 0: %v", exp)
-	//require.Equal(exp, iter.ToArrU64Must(it))
+	//require.Equal(exp, stream.ToArrU64Must(it))
 	//
 	//it, err = rawdb.TxnIdsOfCanonicalBlocks(tx, 0, -1, order.Asc, -1)
 	//require.NoError(err)
@@ -114,8 +113,7 @@ func TestCanonicalIter(t *testing.T) {
 	require.Equal(true, rit.HasNext())
 	slices.Reverse(exp)
 	t.Logf("reverse expected %v", exp)
-	require.Equal(exp, iter.ToArrU64Must(rit))
+	require.Equal(exp, stream.ToArrU64Must(rit))
 	{ //start from middle of block
 	}
-
 }

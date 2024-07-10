@@ -885,6 +885,7 @@ func TestReproduceCrash(t *testing.T) {
 		t.Errorf("error finalising 1st tx: %v", err)
 	}
 }
+
 func TestEip2200Gas(t *testing.T) {
 	t.Parallel()
 	// Configure and generate a sample block chain
