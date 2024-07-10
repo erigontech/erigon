@@ -23,6 +23,7 @@ import (
 	"encoding/binary"
 	"fmt"
 	"math/big"
+	"unsafe"
 
 	"github.com/ledgerwatch/erigon-lib/common/hexutility"
 
@@ -54,8 +55,9 @@ func BytesToBloom(b []byte) Bloom {
 }
 
 func (b Bloom) IsEmpty() bool {
-	for i := 0; i < BloomByteLength; i++ {
-		if b[i] != 0 {
+	var bb []uint64 = unsafe.Slice((*uint64)(unsafe.Pointer(&b[0])), BloomByteLength/8)
+	for i := 0; i < BloomByteLength/8; i++ {
+		if bb[i] != 0 {
 			return false
 		}
 	}
