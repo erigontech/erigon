@@ -801,7 +801,8 @@ Loop:
 					if txTask.Tx != nil {
 						blobGasUsed += txTask.Tx.GetBlobGas()
 					}
-					if txTask.Final {
+					switch true {
+					case txTask.Final:
 						checkReceipts := !cfg.vmConfig.StatelessExec && chainConfig.IsByzantium(txTask.BlockNum) && !cfg.vmConfig.NoReceipts
 						if txTask.BlockNum > 0 && !skipPostEvaluation { //Disable check for genesis. Maybe need somehow improve it in future - to satisfy TestExecutionSpec
 							// Set the receipt logs and create a bloom for filtering
@@ -814,16 +815,25 @@ Loop:
 						}
 						usedGas, blobGasUsed = 0, 0
 						receipts = receipts[:0]
-					} else {
-						if txTask.TxIndex >= 0 {
-							receipt := txTask.CreateReceipt(usedGas)
-							txnID := baseBlockTxnID + kv.TxnId(txTask.TxIndex)
-							if err := rawtemporaldb.AppendReceipts(doms, txnID, receipt); err != nil {
-								return err
-							}
-							receipts = append(receipts, receipt)
+					case txTask.TxIndex < 0:
+						txnID := baseBlockTxnID + kv.TxnId(txTask.TxIndex)
+						//write for system txn also, but don't write for
+						if err := rawtemporaldb.AppendReceipts(doms, txnID, &types.Receipt{
+							TransactionIndex:  uint(txTask.TxIndex),
+							CumulativeGasUsed: usedGas,
+							Status:            types.ReceiptStatusSuccessful,
+						}); err != nil {
+							return err
 						}
+					default:
+						receipt := txTask.CreateReceipt(usedGas)
+						txnID := baseBlockTxnID + kv.TxnId(txTask.TxIndex)
+						if err := rawtemporaldb.AppendReceipts(doms, txnID, receipt); err != nil {
+							return err
+						}
+						receipts = append(receipts, receipt)
 					}
+
 					return nil
 				}(); err != nil {
 					if errors.Is(err, context.Canceled) {

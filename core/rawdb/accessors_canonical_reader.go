@@ -159,9 +159,6 @@ func TxNum2TxnID(tx kv.Tx, txNum uint64) (blockNum uint64, txnID kv.TxnId, ok bo
 // To get all canonical blocks, use fromTxNum=0, toTxNum=-1
 // For reverse iteration use order.Desc and fromTxNum=-1, toTxNum=-1
 func TxnIdsOfCanonicalBlocks(tx kv.Tx, fromTxNum, toTxNum int, asc order.By, limit int) (stream.U64, error) {
-	if !asc {
-		panic("TODO")
-	}
 	if asc && fromTxNum > 0 && toTxNum > 0 && fromTxNum >= toTxNum {
 		return nil, fmt.Errorf("fromTxNum >= toTxNum: %d, %d", fromTxNum, toTxNum)
 	}
@@ -247,6 +244,7 @@ func (s *CanonicalTxnIds) init() (err error) {
 	if err := s.advanceBlockNum(); err != nil {
 		return err
 	}
+
 	return nil
 }
 
