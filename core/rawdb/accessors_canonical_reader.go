@@ -26,6 +26,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/kv/iter"
 	"github.com/ledgerwatch/erigon-lib/kv/order"
 	"github.com/ledgerwatch/erigon-lib/kv/rawdbv3"
+	"github.com/ledgerwatch/erigon/core/types"
 )
 
 type CanonicalTxnIds struct {
@@ -40,8 +41,10 @@ type CanonicalTxnIds struct {
 	// private fields
 	fromTxnID, toTxnID kv.TxnId
 	currentTxnID       kv.TxnId
-	hasNext            bool
-	endOfCurrentBlock  kv.TxnId
+
+	//current block info
+	currentBody       *types.BodyForStorage
+	endOfCurrentBlock kv.TxnId
 }
 type CanonicalReader struct {
 }
@@ -163,7 +166,7 @@ func TxnIdsOfCanonicalBlocks(tx kv.Tx, fromTxNum, toTxNum int, asc order.By, lim
 		return nil, fmt.Errorf("fromTxNum <= toTxNum: %d, %d", fromTxNum, toTxNum)
 	}
 
-	it := &CanonicalTxnIds{tx: tx, fromTxNum: fromTxNum, toTxNum: toTxNum, orderAscend: asc, limit: limit, hasNext: false}
+	it := &CanonicalTxnIds{tx: tx, fromTxNum: fromTxNum, toTxNum: toTxNum, orderAscend: asc, limit: limit}
 	if err := it.init(); err != nil {
 		it.Close() //it's responsibility of constructor (our) to close resource on error
 		return nil, err
@@ -234,6 +237,10 @@ func (s *CanonicalTxnIds) init() (err error) {
 	}
 
 	s.currentTxnID = s.fromTxnID
+
+	if !s.canonicalMarkers.HasNext() {
+		return nil
+	}
 	if err := s.advanceBlockNum(); err != nil {
 		return err
 	}
@@ -241,44 +248,37 @@ func (s *CanonicalTxnIds) init() (err error) {
 }
 
 func (s *CanonicalTxnIds) advanceBlockNum() (err error) {
-	if !s.canonicalMarkers.HasNext() {
-		return nil
-	}
 	k, v, err := s.canonicalMarkers.Next()
 	if err != nil {
 		return err
 	}
 	blockNum := binary.BigEndian.Uint64(k)
 	blockHash := common2.BytesToHash(v)
-	body, err := readBodyForStorage(s.tx, blockHash, blockNum)
+	s.currentBody, err = readBodyForStorage(s.tx, blockHash, blockNum)
 	if err != nil {
 		return err
 	}
-	if body == nil { // TxnID is equal to TxNum
+	if s.currentBody == nil { // TxnID is equal to TxNum
 		if s.orderAscend {
 			_maxTxNum, err := rawdbv3.TxNums.Max(s.tx, blockNum)
 			if err != nil {
 				return err
 			}
 			s.endOfCurrentBlock = kv.TxnId(_maxTxNum)
-			s.currentTxnID++
 		} else {
 			_minTxNum, err := rawdbv3.TxNums.Min(s.tx, blockNum)
 			if err != nil {
 				return err
 			}
 			s.endOfCurrentBlock = kv.TxnId(_minTxNum)
-			s.currentTxnID--
 		}
 		return nil
 	}
 
 	if s.orderAscend {
-		s.currentTxnID = kv.TxnId(body.BaseTxnID)
-		s.endOfCurrentBlock = kv.TxnId(body.BaseTxnID.LastSystemTx(body.TxCount))
+		s.endOfCurrentBlock = kv.TxnId(s.currentBody.BaseTxnID.LastSystemTx(s.currentBody.TxCount))
 	} else {
-		s.currentTxnID = kv.TxnId(body.BaseTxnID.LastSystemTx(body.TxCount))
-		s.endOfCurrentBlock = kv.TxnId(body.BaseTxnID)
+		s.endOfCurrentBlock = kv.TxnId(s.currentBody.BaseTxnID)
 	}
 	return nil
 }
@@ -291,7 +291,6 @@ func (s *CanonicalTxnIds) advance() (err error) {
 		endOfBlock = s.currentTxnID >= s.endOfCurrentBlock
 	} else {
 		if s.currentTxnID == 0 {
-			s.hasNext = false
 			return nil
 		}
 		s.currentTxnID--
@@ -302,7 +301,27 @@ func (s *CanonicalTxnIds) advance() (err error) {
 		return nil
 	}
 
-	return s.advanceBlockNum()
+	if !s.canonicalMarkers.HasNext() {
+		s.currentBody = nil
+		return nil
+	}
+	if err := s.advanceBlockNum(); err != nil {
+		return err
+	}
+	if s.currentBody != nil {
+		if s.orderAscend {
+			s.currentTxnID = kv.TxnId(s.currentBody.BaseTxnID)
+		} else {
+			s.currentTxnID = kv.TxnId(s.currentBody.BaseTxnID.LastSystemTx(s.currentBody.TxCount))
+		}
+	} else {
+		if s.orderAscend {
+			s.currentTxnID++
+		} else {
+			s.currentTxnID--
+		}
+	}
+	return nil
 }
 
 func (s *CanonicalTxnIds) HasNext() bool {
