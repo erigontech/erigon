@@ -645,15 +645,17 @@ func (api *ZkEvmAPIImpl) GetBatchByNumber(ctx context.Context, batchNumber rpc.B
 			return nil, err
 		}
 
-		itu, err := hermezDb.GetL1InfoTreeUpdateByGer(prevBatchGer.GlobalExitRoot)
-		if err != nil {
-			return nil, err
-		}
+		if prevBatchGer != nil {
+			itu, err := hermezDb.GetL1InfoTreeUpdateByGer(prevBatchGer.GlobalExitRoot)
+			if err != nil {
+				return nil, err
+			}
 
-		if itu == nil || batch.MainnetExitRoot == itu.MainnetExitRoot {
-			batch.MainnetExitRoot = common.Hash{}
-			batch.RollupExitRoot = common.Hash{}
-			batch.GlobalExitRoot = common.Hash{}
+			if itu == nil || batch.MainnetExitRoot == itu.MainnetExitRoot {
+				batch.MainnetExitRoot = common.Hash{}
+				batch.RollupExitRoot = common.Hash{}
+				batch.GlobalExitRoot = common.Hash{}
+			}
 		}
 	}
 
