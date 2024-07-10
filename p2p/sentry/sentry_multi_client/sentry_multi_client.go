@@ -22,9 +22,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
-	"github.com/ledgerwatch/erigon-lib/common/datadir"
-	"github.com/ledgerwatch/erigon-lib/kv/kvcache"
-	"github.com/ledgerwatch/erigon/turbo/jsonrpc"
+	"github.com/ledgerwatch/erigon-lib/common"
 	"golang.org/x/sync/semaphore"
 	"math/rand"
 	"sort"
@@ -297,7 +295,11 @@ type MultiClient struct {
 
 	logger                           log.Logger
 	getReceiptsActiveGoroutineNumber *semaphore.Weighted
-	baseApi                          *jsonrpc.BaseAPI
+	ethApiWrapper                    EthAPI
+}
+
+type EthAPI interface {
+	GetReceipts(ctx context.Context, tx kv.Tx, block *types.Block, senders []common.Address) (types.Receipts, error)
 }
 
 func NewMultiClient(
@@ -313,7 +315,7 @@ func NewMultiClient(
 	maxBlockBroadcastPeers func(*types.Header) uint,
 	disableBlockDownload bool,
 	logger log.Logger,
-	dirs datadir.Dirs,
+	ethApiWrapper EthAPI,
 ) (*MultiClient, error) {
 	// header downloader
 	var hd *headerdownload.HeaderDownload
@@ -349,9 +351,6 @@ func NewMultiClient(
 		bd = &bodydownload.BodyDownload{}
 	}
 
-	cache := kvcache.NewDummy()
-	baseApi := jsonrpc.NewBaseApi(nil, cache, blockReader, nil, true, time.Second, engine, dirs)
-
 	cs := &MultiClient{
 		Hd:                                hd,
 		Bd:                                bd,
@@ -367,7 +366,7 @@ func NewMultiClient(
 		disableBlockDownload:              disableBlockDownload,
 		logger:                            logger,
 		getReceiptsActiveGoroutineNumber:  semaphore.NewWeighted(1),
-		baseApi:                           baseApi,
+		ethApiWrapper:                     ethApiWrapper,
 	}
 
 	return cs, nil
@@ -725,7 +724,7 @@ func (cs *MultiClient) getReceipts66(ctx context.Context, inreq *proto_sentry.In
 	}
 	defer tx.Rollback()
 
-	receipts, err := eth.AnswerGetReceiptsQuery(ctx, cs.baseApi, cs.blockReader, tx, query.GetReceiptsPacket)
+	receipts, err := eth.AnswerGetReceiptsQuery(ctx, cs.ethApiWrapper.GetReceipts, cs.blockReader, tx, query.GetReceiptsPacket)
 	if err != nil {
 		return err
 	}

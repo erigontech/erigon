@@ -21,6 +21,7 @@ import (
 	"crypto/ecdsa"
 	"errors"
 	"fmt"
+	"github.com/ledgerwatch/erigon/turbo/jsonrpc"
 	"math/big"
 	"os"
 	"sync"
@@ -398,7 +399,8 @@ func MockWithEverything(tb testing.TB, gspec *types.Genesis, key *ecdsa.PrivateK
 	)
 
 	maxBlockBroadcastPeers := func(header *types.Header) uint { return 0 }
-
+	cache := kvcache.NewDummy()
+	ethApi := jsonrpc.NewBaseApi(nil, cache, mock.BlockReader, true, time.Second, engine)
 	mock.sentriesClient, err = sentry_multi_client.NewMultiClient(
 		mock.DB,
 		mock.ChainConfig,
@@ -412,7 +414,7 @@ func MockWithEverything(tb testing.TB, gspec *types.Genesis, key *ecdsa.PrivateK
 		maxBlockBroadcastPeers,
 		false, /* disableBlockDownload */
 		logger,
-		dirs,
+		ethApi,
 	)
 	if err != nil {
 		if tb != nil {

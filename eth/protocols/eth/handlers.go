@@ -29,7 +29,6 @@ import (
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/rlp"
-	"github.com/ledgerwatch/erigon/turbo/jsonrpc"
 	"github.com/ledgerwatch/erigon/turbo/services"
 )
 
@@ -159,7 +158,9 @@ func AnswerGetBlockBodiesQuery(db kv.Tx, query GetBlockBodiesPacket, blockReader
 	return bodies
 }
 
-func AnswerGetReceiptsQuery(ctx context.Context, baseApi *jsonrpc.BaseAPI, br services.FullBlockReader, db kv.Tx, query GetReceiptsPacket) ([]rlp.RawValue, error) { //nolint:unparam
+type getReceiptsFunc func(context.Context, kv.Tx, *types.Block, []libcommon.Address) (types.Receipts, error)
+
+func AnswerGetReceiptsQuery(ctx context.Context, getReceipts getReceiptsFunc, br services.FullBlockReader, db kv.Tx, query GetReceiptsPacket) ([]rlp.RawValue, error) { //nolint:unparam
 	// Gather state data until the fetch or network limits is reached
 	var (
 		bytes    int
@@ -184,7 +185,7 @@ func AnswerGetReceiptsQuery(ctx context.Context, baseApi *jsonrpc.BaseAPI, br se
 			return nil, nil
 		}
 
-		results, err := baseApi.GetReceipts(ctx, db, b, s)
+		results, err := getReceipts(ctx, db, b, s)
 		if err != nil {
 			return nil, err
 		}
