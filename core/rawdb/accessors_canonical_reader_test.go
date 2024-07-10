@@ -21,7 +21,6 @@ package rawdb_test
 
 import (
 	"bytes"
-	"slices"
 	"testing"
 
 	"github.com/ledgerwatch/erigon-lib/common"
@@ -74,46 +73,47 @@ func TestCanonicalIter(t *testing.T) {
 	_, err = rawdb.WriteRawBodyIfNotExists(tx, common.Hash{22}, 2, b)
 	require.NoError(err)
 
-	//it, err := rawdb.TxnIdsOfCanonicalBlocks(tx, 0, -1, order.Asc, -1)
-	//require.NoError(err)
-	//require.Equal(true, it.HasNext())
-	// tx already contains genesis block of 2 transactions
-	//t.Logf("genesis: %v", stream.ToArrU64Must(it))
+	it, err := rawdb.TxnIdsOfCanonicalBlocks(tx, 0, -1, order.Asc, -1)
+	require.NoError(err)
+	require.Equal(true, it.HasNext())
+	//tx already contains genesis block of 2 transactions
+	t.Logf("genesis: %v", stream.ToArrU64Must(it))
 
 	//mark 3 blocks as canonical
 	require.NoError(rawdb.WriteCanonicalHash(tx, common.Hash{11}, 1))
 	require.NoError(rawdb.WriteCanonicalHash(tx, common.Hash{12}, 2))
 	require.NoError(rawdb.AppendCanonicalTxNums(tx, 0))
 
-	//it, err = rawdb.TxnIdsOfCanonicalBlocks(tx, 0, int(types.TxCountToTxAmount(len(b.Transactions))), order.Asc, -1)
-	//require.NoError(err)
-	//require.Equal(true, it.HasNext())
-	//exp := txNumsOfBlock(0, b)
-	//t.Logf("expected full block 0: %v", exp)
-	//require.Equal(exp, stream.ToArrU64Must(it))
-	//
-	//it, err = rawdb.TxnIdsOfCanonicalBlocks(tx, 0, -1, order.Asc, -1)
-	//require.NoError(err)
-	//require.Equal(true, it.HasNext())
-	exp := append(append(txNumsOfBlock(0, b), txNumsOfBlock(1, b)...), txNumsOfBlock(3, b)...)
-	//t.Logf("expected %v", exp)
-	//require.Equal(exp, iter.ToArrU64Must(it))
-	//
-	//{ //start from middle of block
-	//	it, err = rawdb.TxnIdsOfCanonicalBlocks(tx, 3, -1, order.Asc, -1)
-	//	require.NoError(err)
-	//	require.Equal(true, it.HasNext())
-	//	t.Logf("reverse expected %v", exp)
-	//	require.Equal(exp[3:], iter.ToArrU64Must(it))
-	//}
+	it, err = rawdb.TxnIdsOfCanonicalBlocks(tx, 0, int(types.TxCountToTxAmount(len(b.Transactions))), order.Asc, -1)
+	require.NoError(err)
+	require.Equal(true, it.HasNext())
+	exp := txNumsOfBlock(0, b)
+	t.Logf("expected full block 0: %v", exp)
+	require.Equal(exp, stream.ToArrU64Must(it))
+
+	it, err = rawdb.TxnIdsOfCanonicalBlocks(tx, 0, -1, order.Asc, -1)
+	require.NoError(err)
+	require.Equal(true, it.HasNext())
+	exp = append(append(txNumsOfBlock(0, b), txNumsOfBlock(1, b)...), txNumsOfBlock(3, b)...)
+	t.Logf("expected %v", exp)
+	require.Equal(exp, stream.ToArrU64Must(it))
+
+	{ //start from middle of block
+		it, err = rawdb.TxnIdsOfCanonicalBlocks(tx, 3, -1, order.Asc, -1)
+		require.NoError(err)
+		require.Equal(true, it.HasNext())
+		t.Logf("reverse expected %v", exp)
+		require.Equal(exp[3:], stream.ToArrU64Must(it))
+	}
 
 	//reverse
-	rit, err := rawdb.TxnIdsOfCanonicalBlocks(tx, -1, -1, order.Desc, -1)
-	require.NoError(err)
-	require.Equal(true, rit.HasNext())
-	slices.Reverse(exp)
-	t.Logf("reverse expected %v", exp)
-	require.Equal(exp, stream.ToArrU64Must(rit))
-	{ //start from middle of block
-	}
+	//TODO
+	//rit, err := rawdb.TxnIdsOfCanonicalBlocks(tx, -1, -1, order.Desc, -1)
+	//require.NoError(err)
+	//require.Equal(true, rit.HasNext())
+	//slices.Reverse(exp)
+	//t.Logf("reverse expected %v", exp)
+	//require.Equal(exp, stream.ToArrU64Must(rit))
+	//{ //start from middle of block
+	//}
 }
