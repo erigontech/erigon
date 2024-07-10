@@ -810,8 +810,6 @@ Loop:
 					if txTask.Final {
 						checkReceipts := !cfg.vmConfig.StatelessExec && chainConfig.IsByzantium(txTask.BlockNum) && !cfg.vmConfig.NoReceipts
 						if txTask.BlockNum > 0 && !skipPostEvaluation { //Disable check for genesis. Maybe need somehow improve it in future - to satisfy TestExecutionSpec
-							fmt.Printf("[dbg] alex1: %t, %t\n", cfg.vmConfig.StatelessExec, cfg.vmConfig.NoReceipts)
-							panic(1)
 							// Set the receipt logs and create a bloom for filtering
 							for _, r := range receipts {
 								r.Bloom = types.CreateBloom(types.Receipts{r})
