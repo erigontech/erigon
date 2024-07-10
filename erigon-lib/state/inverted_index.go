@@ -449,8 +449,8 @@ func (iit *InvertedIndexRoTx) newWriter(tmpdir string, discard bool) *invertedIn
 		indexKeysTable: iit.ii.indexKeysTable,
 		indexTable:     iit.ii.indexTable,
 		// etl collector doesn't fsync: means if have enough ram, all files produced by all collectors will be in ram
-		indexKeys: etl.NewCollector("flush "+iit.ii.indexKeysTable, tmpdir, etl.NewSortableBuffer(WALCollectorRAM), iit.ii.logger).LogLvl(log.LvlTrace),
-		index:     etl.NewCollector("flush "+iit.ii.indexTable, tmpdir, etl.NewSortableBuffer(WALCollectorRAM), iit.ii.logger).LogLvl(log.LvlTrace),
+		indexKeys: etl.NewCollector(iit.ii.filenameBase+".flush.ii.keys", tmpdir, etl.NewSortableBuffer(WALCollectorRAM), iit.ii.logger).LogLvl(log.LvlTrace),
+		index:     etl.NewCollector(iit.ii.filenameBase+".flush.ii.vals", tmpdir, etl.NewSortableBuffer(WALCollectorRAM), iit.ii.logger).LogLvl(log.LvlTrace),
 	}
 	w.indexKeys.SortAndFlushInBackground(true)
 	w.index.SortAndFlushInBackground(true)
@@ -820,7 +820,7 @@ func (iit *InvertedIndexRoTx) Prune(ctx context.Context, rwTx kv.RwTx, txFrom, t
 	}
 	defer idxDelCursor.Close()
 
-	collector := etl.NewCollector("prune idx "+ii.filenameBase, ii.dirs.Tmp, etl.NewSortableBuffer(etl.BufferOptimalSize/8), ii.logger)
+	collector := etl.NewCollector(ii.filenameBase+".prune.ii", ii.dirs.Tmp, etl.NewSortableBuffer(etl.BufferOptimalSize/8), ii.logger)
 	defer collector.Close()
 	collector.LogLvl(log.LvlDebug)
 	collector.SortAndFlushInBackground(true)
@@ -1404,7 +1404,7 @@ func (ii *InvertedIndex) collate(ctx context.Context, step uint64, roTx kv.Tx) (
 	}
 	defer keysCursor.Close()
 
-	collector := etl.NewCollector("collate idx "+ii.filenameBase, ii.iiCfg.dirs.Tmp, etl.NewSortableBuffer(CollateETLRAM), ii.logger)
+	collector := etl.NewCollector(ii.filenameBase+".collate.ii", ii.iiCfg.dirs.Tmp, etl.NewSortableBuffer(CollateETLRAM), ii.logger)
 	defer collector.Close()
 	collector.LogLvl(log.LvlTrace)
 
