@@ -21,7 +21,7 @@ jobs:
       ERIGON_QA_PATH: /home/qarunner/erigon-qa
       TRACKING_TIME_SECONDS: 14400 # 4 hours
       TOTAL_TIME_SECONDS: 28800 # 8 hours
-      CHAIN: mainnet
+      CHAIN: gnosis
 
     steps:
     - name: Check out repository
