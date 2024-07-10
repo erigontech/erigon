@@ -101,6 +101,7 @@ func (arr *byteBasedUint64Slice) UnmarshalJSON(buf []byte) error {
 	for _, elem := range list {
 		arr.Append(elem)
 	}
+	arr.MerkleTree = nil
 	return nil
 }
 
@@ -128,14 +129,14 @@ func (arr *byteBasedUint64Slice) Pop() uint64 {
 func (arr *byteBasedUint64Slice) Append(v uint64) {
 	if len(arr.u) <= arr.l*8 {
 		arr.u = append(arr.u, make([]byte, 32)...)
+		if arr.MerkleTree != nil {
+			arr.MerkleTree.AppendLeaf()
+		}
 	}
-
 	offset := arr.l * 8
 	binary.LittleEndian.PutUint64(arr.u[offset:offset+8], v)
-	arr.l = arr.l + 1
-	if arr.MerkleTree != nil && arr.l%4 == 1 {
-		arr.MerkleTree.AppendLeaf()
-	}
+
+	arr.l++
 }
 
 // Get returns the element at the given index.

@@ -200,7 +200,6 @@ func (v *ValidatorSet) HashSSZ() ([32]byte, error) {
 	}
 	lengthRoot := merkle_tree.Uint64Root(uint64(v.l))
 	coreRoot := v.MerkleTree.ComputeRoot()
-
 	return utils.Sha256(coreRoot[:], lengthRoot[:]), nil
 }
 

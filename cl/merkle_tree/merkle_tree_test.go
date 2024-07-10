@@ -131,7 +131,7 @@ func TestMerkleTreeAppendLeafWithLowMaxDepthAndLimit(t *testing.T) {
 	testBuffer[32] = 2
 	testBuffer[64] = 3
 	testBuffer[96] = 9
-	lm := 1 << 12
+	lm := uint64(1 << 12)
 	mt.Initialize(4, 2, func(idx int, out []byte) {
 		copy(out, testBuffer[idx*length.Hash:(idx+1)*length.Hash])
 	}, &lm)

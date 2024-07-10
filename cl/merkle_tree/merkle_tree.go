@@ -42,16 +42,21 @@ func (m *MerkleTree) Initialize(leavesCount, maxTreeCacheDepth int, computeLeaf 
 func (m *MerkleTree) MarkLeafAsDirty(idx int) {
 	for i := 0; i < len(m.layers); i++ {
 		currDivisor := 1 << i
-		layerSize := int(m.leavesCount) / currDivisor
+		layerSize := (int(m.leavesCount) + (currDivisor - 1)) / currDivisor
 		if layerSize == 0 {
 			break
 		}
 		if m.layers[i] == nil {
 			capacity := (layerSize / 2) * 3
+			if capacity == 0 {
+				capacity = 1024
+			}
 			m.layers[i] = make([]byte, layerSize, capacity)
 		}
 		copy(m.layers[i][(idx/currDivisor)*length.Hash:], ZeroHashes[0][:])
-
+		if layerSize == 1 {
+			break
+		}
 	}
 }
 
@@ -107,7 +112,10 @@ func (m *MerkleTree) ComputeRoot() libcommon.Hash {
 		return ZeroHashes[0]
 	}
 	if len(m.layers[0]) == 0 {
-		return ZeroHashes[0]
+		if m.limit == nil {
+			return ZeroHashes[0]
+		}
+		return ZeroHashes[GetDepth(*m.limit)]
 	}
 
 	// Compute the root
