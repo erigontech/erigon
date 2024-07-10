@@ -1,6 +1,7 @@
 package blockinfo
 
 import (
+	"context"
 	"fmt"
 	"math/big"
 
@@ -47,6 +48,8 @@ func BuildBlockInfoTree(
 	)
 	var err error
 	var logIndex int64 = 0
+	var keys []*utils.NodeKey
+	var vals []*utils.NodeValue8
 	for i, txInfo := range *transactionInfos {
 		receipt := txInfo.Receipt
 		t := txInfo.Tx
@@ -67,19 +70,28 @@ func BuildBlockInfoTree(
 
 		log.Trace("info-tree-tx", "block", blockNumber, "idx", i, "hash", l2TxHash.String())
 
-		_, err = infoTree.SetBlockTx(&l2TxHash, i, receipt, logIndex, receipt.CumulativeGasUsed, txInfo.EffectiveGasPrice)
+		genKeys, genVals, err := infoTree.GenerateBlockTxKeysVals(&l2TxHash, i, receipt, logIndex, receipt.CumulativeGasUsed, txInfo.EffectiveGasPrice)
 		if err != nil {
 			return nil, err
 		}
+		keys = append(keys, genKeys...)
+		vals = append(vals, genVals...)
+
 		logIndex += int64(len(receipt.Logs))
 	}
 
-	root, err := infoTree.SetBlockGasUsed(blockGasUsed)
+	key, val, err := generateBlockGasUsed(blockGasUsed)
 	if err != nil {
 		return nil, err
 	}
+	keys = append(keys, key)
+	vals = append(vals, val)
 
-	rootHash := common.BigToHash(root)
+	root, err := infoTree.smt.InsertBatch(context.Background(), "", keys, vals, nil, nil)
+	if err != nil {
+		return nil, err
+	}
+	rootHash := common.BigToHash(root.NewRootScalar.ToBigInt())
 
 	log.Trace("info-tree-root", "block", blockNumber, "root", rootHash.String())
 
@@ -380,4 +392,176 @@ func setL1BlockHash(smt *smt.SMT, blockHash *common.Hash) (*big.Int, error) {
 	}
 
 	return resp.NewRootScalar.ToBigInt(), nil
+}
+
+func bigInt2NodeVal8(val *big.Int) (*utils.NodeValue8, error) {
+	x := utils.ScalarToArrayBig(val)
+	v, err := utils.NodeValue8FromBigIntArray(x)
+	if err != nil {
+		return nil, err
+	}
+
+	return v, nil
+}
+
+func generateL2TxHash(txIndex *big.Int, l2TxHash *big.Int) (*utils.NodeKey, *utils.NodeValue8, error) {
+	key, err := KeyTxHash(txIndex)
+	if err != nil {
+		return nil, nil, err
+	}
+	val, err := bigInt2NodeVal8(l2TxHash)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	return &key, val, nil
+}
+
+func generateTxStatus(txIndex *big.Int, status *big.Int) (*utils.NodeKey, *utils.NodeValue8, error) {
+	key, err := KeyTxStatus(txIndex)
+	if err != nil {
+		return nil, nil, err
+	}
+	val, err := bigInt2NodeVal8(status)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	return &key, val, nil
+}
+
+func generateCumulativeGasUsed(txIndex, cumulativeGasUsed *big.Int) (*utils.NodeKey, *utils.NodeValue8, error) {
+	key, err := KeyCumulativeGasUsed(txIndex)
+	if err != nil {
+		return nil, nil, err
+	}
+	val, err := bigInt2NodeVal8(cumulativeGasUsed)
+	if err != nil {
+		return nil, nil, err
+	}
+	return &key, val, nil
+}
+
+func generateTxLog(txIndex *big.Int, logIndex *big.Int, log *big.Int) (*utils.NodeKey, *utils.NodeValue8, error) {
+	key, err := KeyTxLogs(txIndex, logIndex)
+	if err != nil {
+		return nil, nil, err
+	}
+	val, err := bigInt2NodeVal8(log)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	return &key, val, nil
+}
+
+func generateTxEffectivePercentage(txIndex, effectivePercentage *big.Int) (*utils.NodeKey, *utils.NodeValue8, error) {
+	key, err := KeyEffectivePercentage(txIndex)
+	if err != nil {
+		return nil, nil, err
+	}
+	val, err := bigInt2NodeVal8(effectivePercentage)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	return &key, val, nil
+}
+
+func generateBlockGasUsed(gasUsed uint64) (*utils.NodeKey, *utils.NodeValue8, error) {
+	key, err := KeyBlockHeaderParams(big.NewInt(IndexBlockHeaderParamGasUsed))
+	if err != nil {
+		return nil, nil, err
+	}
+	gasUsedBig := big.NewInt(0).SetUint64(gasUsed)
+	val, err := bigInt2NodeVal8(gasUsedBig)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	return &key, val, nil
+}
+
+func (b *BlockInfoTree) GenerateBlockTxKeysVals(
+	l2TxHash *common.Hash,
+	txIndex int,
+	receipt *ethTypes.Receipt,
+	logIndex int64,
+	cumulativeGasUsed uint64,
+	effectivePercentage uint8,
+) ([]*utils.NodeKey, []*utils.NodeValue8, error) {
+	var keys []*utils.NodeKey
+	var vals []*utils.NodeValue8
+	txIndexBig := big.NewInt(int64(txIndex))
+
+	key, val, err := generateL2TxHash(txIndexBig, l2TxHash.Big())
+	if err != nil {
+		return nil, nil, err
+	}
+	keys = append(keys, key)
+	vals = append(vals, val)
+
+	bigStatus := big.NewInt(0).SetUint64(receipt.Status)
+	key, val, err = generateTxStatus(txIndexBig, bigStatus)
+	if err != nil {
+		return nil, nil, err
+	}
+	keys = append(keys, key)
+	vals = append(vals, val)
+
+	bigCumulativeGasUsed := big.NewInt(0).SetUint64(cumulativeGasUsed)
+	key, val, err = generateCumulativeGasUsed(txIndexBig, bigCumulativeGasUsed)
+	if err != nil {
+		return nil, nil, err
+	}
+	keys = append(keys, key)
+	vals = append(vals, val)
+
+	log.Trace("info-tree-tx-inner",
+		"tx-index", txIndex,
+		"log-index", logIndex,
+		"cumulativeGasUsed", cumulativeGasUsed,
+		"effective-percentage", effectivePercentage,
+		"receipt-status", receipt.Status,
+	)
+
+	// now encode the logs
+	for _, rLog := range receipt.Logs {
+		reducedTopics := ""
+		for _, topic := range rLog.Topics {
+			reducedTopics += fmt.Sprintf("%x", topic)
+		}
+
+		logToEncode := fmt.Sprintf("0x%x%s", rLog.Data, reducedTopics)
+
+		hash, err := utils.HashContractBytecode(logToEncode)
+		if err != nil {
+			return nil, nil, err
+		}
+
+		logEncodedBig := utils.ConvertHexToBigInt(hash)
+		key, val, err = generateTxLog(txIndexBig, big.NewInt(logIndex), logEncodedBig)
+		keys = append(keys, key)
+		vals = append(vals, val)
+
+		log.Trace("info-tree-tx-receipt-log",
+			"topics", reducedTopics,
+			"to-encode", logToEncode,
+			"log-index", logIndex,
+		)
+
+		// increment log index
+		logIndex += 1
+	}
+
+	// setTxEffectivePercentage
+	bigEffectivePercentage := big.NewInt(0).SetUint64(uint64(effectivePercentage))
+	key, val, err = generateTxEffectivePercentage(txIndexBig, bigEffectivePercentage)
+	if err != nil {
+		return nil, nil, err
+	}
+	keys = append(keys, key)
+	vals = append(vals, val)
+
+	return keys, vals, nil
 }
