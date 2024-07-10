@@ -171,6 +171,7 @@ func TestIsEmpty(t *testing.T) {
 	if !b.IsEmpty() {
 		t.Error("expected empty")
 	}
+
 	b[0] = 1
 	if b.IsEmpty() {
 		t.Error("expected not empty")
