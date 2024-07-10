@@ -21,6 +21,7 @@ import (
 	"github.com/ledgerwatch/erigon/zk/legacy_executor_verifier/proto/github.com/0xPolygonHermez/zkevm-node/state/runtime/executor"
 	"github.com/ledgerwatch/erigon/zk/syncer"
 	"github.com/ledgerwatch/log/v3"
+	"sync"
 )
 
 var ErrNoExecutorAvailable = fmt.Errorf("no executor available")
@@ -95,6 +96,13 @@ type LegacyExecutorVerifier struct {
 
 	promises     []*Promise[*VerifierBundle]
 	addedBatches map[uint64]struct{}
+
+	// these three items are used to keep track of where the datastream is at
+	// compared with the executor checks.  It allows for data to arrive in strange
+	// orders and will backfill the stream as needed.
+	lowestWrittenBatch uint64
+	responsesToWrite   map[uint64]struct{}
+	responsesMtx       *sync.Mutex
 }
 
 func NewLegacyExecutorVerifier(
@@ -120,6 +128,8 @@ func NewLegacyExecutorVerifier(
 		l1Syncer:               l1Syncer,
 		promises:               make([]*Promise[*VerifierBundle], 0),
 		addedBatches:           make(map[uint64]struct{}),
+		responsesToWrite:       map[uint64]struct{}{},
+		responsesMtx:           &sync.Mutex{},
 	}
 }
 
@@ -262,6 +272,10 @@ func (v *LegacyExecutorVerifier) AddRequestUnsafe(request *VerifierRequest, sequ
 			}
 		}
 
+		if err = v.checkAndWriteToStream(tx, hermezDb, request.BatchNumber); err != nil {
+			log.Error("error writing data to stream", "err", err)
+		}
+
 		verifierBundle.response = &VerifierResponse{
 			BatchNumber:      request.BatchNumber,
 			Valid:            ok,
@@ -280,10 +294,54 @@ func (v *LegacyExecutorVerifier) AddRequestUnsafe(request *VerifierRequest, sequ
 	return promise
 }
 
+func (v *LegacyExecutorVerifier) checkAndWriteToStream(tx kv.Tx, hdb *hermez_db.HermezDbReader, newBatch uint64) error {
+	v.responsesMtx.Lock()
+	defer v.responsesMtx.Unlock()
+
+	v.responsesToWrite[newBatch] = struct{}{}
+
+	// if we haven't written anything yet - cold start of the node
+	if v.lowestWrittenBatch == 0 {
+		// we haven't written anything yet so lets make sure there is no gap
+		// in the stream for this batch
+		latestBatch, err := v.streamServer.GetHighestBatchNumber()
+		if err != nil {
+			return err
+		}
+		log.Info("[Verifier] Initialising on cold start", "latestBatch", latestBatch, "newBatch", newBatch)
+
+		v.lowestWrittenBatch = latestBatch
+
+		// check if we have the next batch we're waiting for
+		if latestBatch == newBatch-1 {
+			v.lowestWrittenBatch = newBatch
+			if err := v.WriteBatchToStream(newBatch, hdb, tx); err != nil {
+				return err
+			}
+			delete(v.responsesToWrite, newBatch)
+		}
+	}
+
+	// now check if the batch we want next is good
+	for {
+		// check if we have the next batch to write
+		nextBatch := v.lowestWrittenBatch + 1
+		if _, ok := v.responsesToWrite[nextBatch]; !ok {
+			break
+		}
+
+		if err := v.WriteBatchToStream(nextBatch, hdb, tx); err != nil {
+			return err
+		}
+		delete(v.responsesToWrite, nextBatch)
+		v.lowestWrittenBatch = nextBatch
+	}
+
+	return nil
+}
+
 // Unsafe is not thread-safe so it MUST be invoked only from a single thread
 func (v *LegacyExecutorVerifier) ProcessResultsSequentiallyUnsafe(tx kv.RwTx) ([]*VerifierResponse, error) {
-	hdb := hermez_db.NewHermezDbReader(tx)
-
 	results := make([]*VerifierResponse, 0, len(v.promises))
 	for i := 0; i < len(v.promises); i++ {
 		verifierBundle, err := v.promises[i].TryGet()
@@ -309,12 +367,6 @@ func (v *LegacyExecutorVerifier) ProcessResultsSequentiallyUnsafe(tx kv.RwTx) ([
 		}
 
 		verifierResponse := verifierBundle.response
-		if verifierResponse.Valid {
-			if err = v.WriteBatchToStream(verifierResponse.BatchNumber, hdb, tx); err != nil {
-				log.Error("error getting verifier result", "err", err)
-			}
-		}
-
 		results = append(results, verifierResponse)
 		delete(v.addedBatches, verifierResponse.BatchNumber)
 
@@ -348,7 +400,7 @@ func (v *LegacyExecutorVerifier) CancelAllRequestsUnsafe() {
 	v.cancelAllVerifications.Store(true)
 
 	for _, e := range v.executors {
-		// lets wait for all threads that are waiting to add to v.openRequests to finish
+		// let's wait for all threads that are waiting to add to v.openRequests to finish
 		for e.QueueLength() > 0 {
 			time.Sleep(1 * time.Millisecond)
 		}
@@ -372,6 +424,7 @@ func (v *LegacyExecutorVerifier) IsRequestAddedUnsafe(batch uint64) bool {
 }
 
 func (v *LegacyExecutorVerifier) WriteBatchToStream(batchNumber uint64, hdb *hermez_db.HermezDbReader, roTx kv.Tx) error {
+	log.Info("[Verifier] Writing batch to stream", "batch", batchNumber)
 	blks, err := hdb.GetL2BlockNosByBatch(batchNumber)
 	if err != nil {
 		return err

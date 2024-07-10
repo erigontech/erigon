@@ -344,6 +344,35 @@ func (srv *DataStreamServer) GetHighestBlockNumber() (uint64, error) {
 	return l2Block.L2BlockNumber, nil
 }
 
+func (srv *DataStreamServer) GetHighestBatchNumber() (uint64, error) {
+	header := srv.stream.GetHeader()
+
+	if header.TotalEntries == 0 {
+		return 0, nil
+	}
+
+	entryNum := header.TotalEntries - 1
+	var err error
+	var entry datastreamer.FileEntry
+	for {
+		entry, err = srv.stream.GetEntry(entryNum)
+		if err != nil {
+			return 0, err
+		}
+		if entry.Type == datastreamer.EntryType(1) {
+			break
+		}
+		entryNum -= 1
+	}
+
+	batch, err := types.UnmarshalBatchStart(entry.Data)
+	if err != nil {
+		return 0, err
+	}
+
+	return batch.Number, nil
+}
+
 // must be done on offline server
 // finds the position of the block bookmark entry and deletes from it onward
 // blockNumber 10 would return the stream to before block 10 bookmark
