@@ -172,7 +172,7 @@ func withTxTrace(cmd *cobra.Command) {
 }
 
 func withWriteMap(cmd *cobra.Command) {
-	cmd.Flags().BoolVar(&dbWriteMap, "db.writemap", true, "Enable WRITE_MAP feauture for fast database writes and fast commit times")
+	cmd.Flags().BoolVar(&dbWriteMap, utils.DbWriteMapFlag.Name, utils.DbWriteMapFlag.Value, utils.DbWriteMapFlag.Usage)
 }
 
 func withChain(cmd *cobra.Command) {
