@@ -275,7 +275,7 @@ func SpawnSequencingStage(
 			return err
 		}
 
-		log.Info(fmt.Sprintf("[%s] Starting block %d...", logPrefix, blockNumber+1))
+		log.Info(fmt.Sprintf("[%s] Starting block %d (forkid %v)...", logPrefix, blockNumber+1, forkId))
 
 		reRunBlockAfterOverflow := blockNumber == lastStartedBn
 		lastStartedBn = blockNumber
