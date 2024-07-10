@@ -126,7 +126,7 @@ func (arr *RawUint64List) SetReusableHashBuffer(buf []byte) {
 }
 
 func (arr *RawUint64List) hashBufLength() int {
-	return (((len(arr.u) * 4) + 3) / 4) * length.Hash
+	return ((len(arr.u) + 3) / 4) * length.Hash
 }
 
 func (arr *RawUint64List) HashSSZ() ([32]byte, error) {

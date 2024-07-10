@@ -138,6 +138,10 @@ func MerkleRootFromFlatFromIntermediateLevel(nodes []byte, out []byte, leavesLen
 	return globalHasher.merkleizeTrieLeavesFlatWithStart(nodes, out, NextPowerOfTwo(uint64((leavesLen+31)/32)), uint64(intermediateLevel))
 }
 
+func MerkleRootFromFlatFromIntermediateLevelWithLimit(nodes []byte, out []byte, limit, intermediateLevel int) (err error) {
+	return globalHasher.merkleizeTrieLeavesFlatWithStart(nodes, out, uint64(limit), uint64(intermediateLevel))
+}
+
 func MerkleRootFromFlatLeavesWithLimit(leaves []byte, out []byte, limit uint64) (err error) {
 	return globalHasher.merkleizeTrieLeavesFlat(leaves, out, limit)
 }

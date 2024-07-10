@@ -7,12 +7,15 @@ import (
 	"github.com/ledgerwatch/erigon-lib/common/length"
 )
 
+const OptimalMaxTreeCacheDepth = 12
+
 type MerkleTree struct {
 	computeLeaf func(idx int, out []byte)
 	layers      [][]byte // Flat hash-layers
 	leavesCount int
 
 	hashBuf [64]byte // buffer to store the input for hash(hash1, hash2)
+	limit   *uint64  // Optional limit for the number of leaves (this will enable limit-oriented hashing)
 }
 
 // Layout of the layers:
@@ -22,13 +25,17 @@ type MerkleTree struct {
 // Root is not stored in the layers, rootrecomputed on demand
 
 // Initialize initializes the Merkle tree with the given number of leaves and the maximum depth of the tree cache.
-func (m *MerkleTree) Initialize(leavesCount, maxTreeCacheDepth int, computeLeaf func(idx int, out []byte)) {
+func (m *MerkleTree) Initialize(leavesCount, maxTreeCacheDepth int, computeLeaf func(idx int, out []byte), limitOptional *uint64) {
 	m.computeLeaf = computeLeaf
 	m.layers = make([][]byte, maxTreeCacheDepth)
 	m.leavesCount = leavesCount
 	firstLayerSize := leavesCount * length.Hash
 	capacity := (firstLayerSize / 2) * 3
 	m.layers[0] = make([]byte, firstLayerSize, capacity)
+	if limitOptional != nil {
+		m.limit = new(uint64)
+		*m.limit = *limitOptional
+	}
 }
 
 // MarkLeafAsDirty resets the leaf at the given index, so that it will be recomputed on the next call to ComputeRoot.
@@ -110,24 +117,43 @@ func (m *MerkleTree) ComputeRoot() libcommon.Hash {
 	// Find last layer with more than 0 elements
 	for i := 0; i < len(m.layers); i++ {
 		if len(m.layers[i]) == 0 {
-			if err := MerkleRootFromFlatLeaves(m.layers[i-1], root[:]); err != nil {
-				panic(err)
-			}
+			m.finishHashing(i-1, root[:])
 			return root
 		}
 	}
-	if err := MerkleRootFromFlatFromIntermediateLevel(m.layers[len(m.layers)-1], root[:], len(m.layers[0]), len(m.layers)-1); err != nil {
+	m.finishHashing(len(m.layers)-1, root[:])
+	return root
+}
+
+func (m *MerkleTree) finishHashing(lastLayerIdx int, root []byte) {
+	if m.limit == nil {
+		if err := MerkleRootFromFlatFromIntermediateLevel(m.layers[lastLayerIdx], root[:], len(m.layers[0]), lastLayerIdx); err != nil {
+			panic(err)
+		}
+		return
+	}
+
+	if err := MerkleRootFromFlatFromIntermediateLevelWithLimit(m.layers[lastLayerIdx], root[:], int(*m.limit), lastLayerIdx); err != nil {
 		panic(err)
 	}
-	return root
 }
 
 func (m *MerkleTree) computeLayer(layerIdx int) {
 	currentDivisor := 1 << uint(layerIdx)
 	if m.layers[layerIdx] == nil {
-		layerSize := (m.leavesCount / currentDivisor) * length.Hash
-		capacity := (layerSize / 2) * 3
-		m.layers[layerIdx] = make([]byte, layerSize, capacity)
+		// find previous layer nodes count and round  to the next power of 2
+		prevLayerNodeCount := len(m.layers[layerIdx-1]) / length.Hash
+		newExpectendLayerNodeCount := prevLayerNodeCount / 2
+		if newExpectendLayerNodeCount == 0 {
+			m.layers[layerIdx] = m.layers[layerIdx][:0]
+			return
+		}
+		if prevLayerNodeCount%2 != 0 {
+			newExpectendLayerNodeCount++
+		}
+		newLayerSize := newExpectendLayerNodeCount * length.Hash
+		capacity := (newLayerSize / 2) * 3
+		m.layers[layerIdx] = make([]byte, newLayerSize, capacity)
 	}
 	if len(m.layers[layerIdx]) == 0 {
 		return

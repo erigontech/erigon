@@ -188,7 +188,7 @@ func (b *BeaconState) computeDirtyLeaves() error {
 		b.updateLeaf(ValidatorsLeafIndex, root)
 
 	}
-	log.Trace("ValidatorSet hashing", "elapsed", time.Since(begin))
+	log.Debug("ValidatorSet hashing", "elapsed", time.Since(begin))
 
 	begin = time.Now()
 	// Field(12): Balances
@@ -199,7 +199,7 @@ func (b *BeaconState) computeDirtyLeaves() error {
 		}
 		b.updateLeaf(BalancesLeafIndex, root)
 	}
-	log.Trace("Balances hashing", "elapsed", time.Since(begin))
+	log.Debug("Balances hashing", "elapsed", time.Since(begin))
 
 	begin = time.Now()
 	// Field(13): RandaoMixes
@@ -210,7 +210,7 @@ func (b *BeaconState) computeDirtyLeaves() error {
 		}
 		b.updateLeaf(RandaoMixesLeafIndex, root)
 	}
-	log.Trace("RandaoMixes hashing", "elapsed", time.Since(begin))
+	log.Debug("RandaoMixes hashing", "elapsed", time.Since(begin))
 
 	begin = time.Now()
 	// Field(14): Slashings
@@ -221,7 +221,7 @@ func (b *BeaconState) computeDirtyLeaves() error {
 		}
 		b.updateLeaf(SlashingsLeafIndex, root)
 	}
-	log.Trace("Slashings hashing", "elapsed", time.Since(begin))
+	log.Debug("Slashings hashing", "elapsed", time.Since(begin))
 	// Field(15) and Field(16) are special due to the fact that they have different format in Phase0.
 
 	begin = time.Now()
@@ -240,7 +240,7 @@ func (b *BeaconState) computeDirtyLeaves() error {
 
 		b.updateLeaf(PreviousEpochParticipationLeafIndex, root)
 	}
-	log.Trace("PreviousEpochParticipation hashing", "elapsed", time.Since(begin))
+	log.Debug("PreviousEpochParticipation hashing", "elapsed", time.Since(begin))
 
 	begin = time.Now()
 
@@ -258,7 +258,7 @@ func (b *BeaconState) computeDirtyLeaves() error {
 		}
 		b.updateLeaf(CurrentEpochParticipationLeafIndex, root)
 	}
-	log.Trace("CurrentEpochParticipation hashing", "elapsed", time.Since(begin))
+	log.Debug("CurrentEpochParticipation hashing", "elapsed", time.Since(begin))
 
 	// Field(17): JustificationBits
 	if b.isLeafDirty(JustificationBitsLeafIndex) {

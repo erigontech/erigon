@@ -38,6 +38,7 @@ func TestUint64SliceBasic(t *testing.T) {
 
 	out, err := slice.HashListSSZ()
 	require.NoError(t, err)
+
 	require.EqualValues(t, common.HexToHash("eb8cec5eaec74a32e8b9b56cc42f7627cef722f81081ead786c97a4df1c8be5d"), out)
 
 }

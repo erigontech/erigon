@@ -114,7 +114,7 @@ func (h *hashVector) HashSSZ() ([32]byte, error) {
 		h.MerkleTree = &merkle_tree.MerkleTree{}
 		h.MerkleTree.Initialize(h.u.l, 6, func(idx int, out []byte) {
 			copy(out, h.u.u[idx*length.Hash:(idx+1)*length.Hash])
-		})
+		}, /*limit=*/ nil)
 	}
 	return h.ComputeRoot(), nil
 }
