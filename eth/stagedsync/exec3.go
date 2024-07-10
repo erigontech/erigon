@@ -813,11 +813,22 @@ Loop:
 								return fmt.Errorf("%w, txnIdx=%d, %v", consensus.ErrInvalidBlock, txTask.TxIndex, err) //same as in stage_exec.go
 							}
 						}
+
+						txnID := baseBlockTxnID + kv.TxnId(txTask.TxIndex)
+						//write for system txn also, but don't add it to `receipts` array (consensus doesn't expect it)
+						if err := rawtemporaldb.AppendReceipts(doms, txnID, &types.Receipt{
+							TransactionIndex:  uint(txTask.TxIndex),
+							CumulativeGasUsed: usedGas,
+							Status:            types.ReceiptStatusSuccessful,
+						}); err != nil {
+							return err
+						}
+
 						usedGas, blobGasUsed = 0, 0
 						receipts = receipts[:0]
 					case txTask.TxIndex < 0:
 						txnID := baseBlockTxnID + kv.TxnId(txTask.TxIndex)
-						//write for system txn also, but don't write for
+						//write for system txn also, but don't add it to `receipts` array (consensus doesn't expect it)
 						if err := rawtemporaldb.AppendReceipts(doms, txnID, &types.Receipt{
 							TransactionIndex:  uint(txTask.TxIndex),
 							CumulativeGasUsed: usedGas,
