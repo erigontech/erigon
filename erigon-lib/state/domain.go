@@ -1752,8 +1752,9 @@ func (dt *DomainRoTx) Prune(ctx context.Context, rwTx kv.RwTx, step, txFrom, txT
 
 	var valsCursor kv.RwCursor
 
-	ancientDomainValsCollector := etl.NewCollector("DomainAncientVals", dt.d.dirs.Tmp, etl.NewSortableBuffer(etl.BufferOptimalSize), dt.d.logger)
+	ancientDomainValsCollector := etl.NewCollector("domain.collate "+dt.d.filenameBase, dt.d.dirs.Tmp, etl.NewSortableBuffer(etl.BufferOptimalSize), dt.d.logger)
 	defer ancientDomainValsCollector.Close()
+	ancientDomainValsCollector.LogLvl(log.LvlDebug)
 
 	if dt.d.largeVals {
 		valsCursor, err = rwTx.RwCursor(dt.d.valsTable)
