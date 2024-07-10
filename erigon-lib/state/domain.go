@@ -1823,7 +1823,9 @@ func (dt *DomainRoTx) Prune(ctx context.Context, rwTx kv.RwTx, step, txFrom, txT
 			return stat, nil
 		}
 		limit--
-		ancientDomainValsCollector.Collect(k, v)
+		if err := ancientDomainValsCollector.Collect(k, v); err != nil {
+			return nil, err
+		}
 
 		select {
 		case <-ctx.Done():
