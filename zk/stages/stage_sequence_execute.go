@@ -62,7 +62,7 @@ func SpawnSequencingStage(
 		return err
 	}
 
-	isLastBatchFinished, err := sdb.hermezDb.GetIsBatchFullyProcessed(lastBatch)
+	isLastBatchPariallyProcessed, err := sdb.hermezDb.GetIsBatchPartiallyProcessed(lastBatch)
 	if err != nil {
 		return err
 	}
@@ -73,7 +73,7 @@ func SpawnSequencingStage(
 	}
 
 	getHeader := func(hash common.Hash, number uint64) *types.Header { return rawdb.ReadHeader(sdb.tx, hash, number) }
-	hasExecutorForThisBatch := isLastBatchFinished && cfg.zk.HasExecutors()
+	hasExecutorForThisBatch := !isLastBatchPariallyProcessed && cfg.zk.HasExecutors()
 	datastreamServer := server.NewDataStreamServer(cfg.stream, cfg.chainConfig.ChainID.Uint64())
 
 	// injected batch
@@ -97,10 +97,6 @@ func SpawnSequencingStage(
 
 		// write the batch directly to the stream
 		if err = datastreamServer.WriteBlocksToStream(tx, sdb.hermezDb.HermezDbReader, injectedBatchBlockNumber, injectedBatchBlockNumber, logPrefix); err != nil {
-			return err
-		}
-
-		if err = sdb.hermezDb.WriteIsBatchFullyProcessed(injectedBatchBatchNumber); err != nil {
 			return err
 		}
 
@@ -138,12 +134,12 @@ func SpawnSequencingStage(
 
 	thisBatch := lastBatch
 	// if last batch finished - start a new one
-	if isLastBatchFinished {
+	if !isLastBatchPariallyProcessed {
 		thisBatch++
 	}
 
 	var intermediateUsedCounters *vm.Counters
-	if !isLastBatchFinished {
+	if isLastBatchPariallyProcessed {
 		intermediateCountersMap, found, err := sdb.hermezDb.GetBatchCounters(lastBatch)
 		if err != nil {
 			return err
@@ -229,7 +225,7 @@ func SpawnSequencingStage(
 			if err = sdb.hermezDb.WriteBatchCounters(thisBatch, map[string]int{}); err != nil {
 				return err
 			}
-			if err = sdb.hermezDb.WriteIsBatchFullyProcessed(thisBatch); err != nil {
+			if err = sdb.hermezDb.DeleteIsBatchPartiallyProcessed(thisBatch); err != nil {
 				return err
 			}
 			if err = stages.SaveStageProgress(tx, stages.HighestSeenBatchNumber, thisBatch); err != nil {
@@ -247,7 +243,7 @@ func SpawnSequencingStage(
 		}
 	}
 
-	if isLastBatchFinished {
+	if !isLastBatchPariallyProcessed {
 		log.Info(fmt.Sprintf("[%s] Starting batch %d...", logPrefix, thisBatch))
 	} else {
 		log.Info(fmt.Sprintf("[%s] Continuing unfinished batch %d from block %d", logPrefix, thisBatch, executionAt))
@@ -558,6 +554,11 @@ func SpawnSequencingStage(
 				return err
 			}
 
+			err = sdb.hermezDb.WriteIsBatchPartiallyProcessed(thisBatch)
+			if err != nil {
+				return err
+			}
+
 			if err = datastreamServer.WriteBlockToStream(logPrefix, tx, sdb.hermezDb, thisBatch, lastBatch, thisBlockNumber); err != nil {
 				return err
 			}
@@ -592,7 +593,7 @@ func SpawnSequencingStage(
 		return err
 	}
 
-	if err = sdb.hermezDb.WriteIsBatchFullyProcessed(thisBatch); err != nil {
+	if err = sdb.hermezDb.DeleteIsBatchPartiallyProcessed(thisBatch); err != nil {
 		return err
 	}
 
