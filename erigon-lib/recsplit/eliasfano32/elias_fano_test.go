@@ -25,7 +25,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/ledgerwatch/erigon-lib/kv/iter"
+	"github.com/ledgerwatch/erigon-lib/kv/stream"
 )
 
 func TestEliasFanoSeek(t *testing.T) {
@@ -228,7 +228,7 @@ func TestIterator(t *testing.T) {
 			assert.Equal(t, offsets[i], v, "iter")
 			i++
 		}
-		iter.ExpectEqualU64(t, iter.ReverseArray(values), ef.ReverseIterator())
+		stream.ExpectEqualU64(t, stream.ReverseArray(values), ef.ReverseIterator())
 	})
 
 	t.Run("seek", func(t *testing.T) {
@@ -314,8 +314,8 @@ func TestIterator(t *testing.T) {
 		}
 		ef.Build()
 
-		iter.ExpectEqualU64(t, iter.Array(offsets), ef.Iterator())
-		iter.ExpectEqualU64(t, iter.ReverseArray(offsets), ef.ReverseIterator())
+		stream.ExpectEqualU64(t, stream.Array(offsets), ef.Iterator())
+		stream.ExpectEqualU64(t, stream.ReverseArray(offsets), ef.ReverseIterator())
 	})
 
 	t.Run("article-example2", func(t *testing.T) {
@@ -330,8 +330,8 @@ func TestIterator(t *testing.T) {
 		}
 		ef.Build()
 
-		iter.ExpectEqualU64(t, iter.Array(offsets), ef.Iterator())
-		iter.ExpectEqualU64(t, iter.ReverseArray(offsets), ef.ReverseIterator())
+		stream.ExpectEqualU64(t, stream.Array(offsets), ef.Iterator())
+		stream.ExpectEqualU64(t, stream.ReverseArray(offsets), ef.ReverseIterator())
 	})
 
 	t.Run("1 element", func(t *testing.T) {
@@ -339,8 +339,8 @@ func TestIterator(t *testing.T) {
 		ef.AddOffset(7)
 		ef.Build()
 
-		iter.ExpectEqualU64(t, iter.Array([]uint64{7}), ef.Iterator())
-		iter.ExpectEqualU64(t, iter.ReverseArray([]uint64{7}), ef.ReverseIterator())
+		stream.ExpectEqualU64(t, stream.Array([]uint64{7}), ef.Iterator())
+		stream.ExpectEqualU64(t, stream.ReverseArray([]uint64{7}), ef.ReverseIterator())
 	})
 }
 
@@ -471,7 +471,7 @@ func BenchmarkName(b *testing.B) {
 	})
 }
 
-func naiveReverseIterator(ef *EliasFano) *iter.ArrStream[uint64] {
+func naiveReverseIterator(ef *EliasFano) *stream.ArrStream[uint64] {
 	it := ef.Iterator()
 	var values []uint64
 	for it.HasNext() {
@@ -481,5 +481,5 @@ func naiveReverseIterator(ef *EliasFano) *iter.ArrStream[uint64] {
 		}
 		values = append(values, v)
 	}
-	return iter.ReverseArray[uint64](values)
+	return stream.ReverseArray[uint64](values)
 }

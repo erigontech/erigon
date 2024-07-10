@@ -35,8 +35,8 @@ import (
 	remote "github.com/ledgerwatch/erigon-lib/gointerfaces/remoteproto"
 	types "github.com/ledgerwatch/erigon-lib/gointerfaces/typesproto"
 	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon-lib/kv/iter"
 	"github.com/ledgerwatch/erigon-lib/kv/order"
+	"github.com/ledgerwatch/erigon-lib/kv/stream"
 	"github.com/ledgerwatch/erigon-lib/log/v3"
 )
 
@@ -639,7 +639,7 @@ func (s *KvServer) Range(_ context.Context, req *remote.RangeReq) (*remote.Pairs
 	reply := &remote.Pairs{}
 	var err error
 	if err = s.with(req.TxId, func(tx kv.Tx) error {
-		var it iter.KV
+		var it stream.KV
 		if req.OrderAscend {
 			it, err = tx.RangeAscend(req.Table, from, req.ToPrefix, limit)
 			if err != nil {

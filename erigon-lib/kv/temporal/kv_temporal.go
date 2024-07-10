@@ -21,9 +21,9 @@ import (
 
 	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon-lib/kv/iter"
 	"github.com/ledgerwatch/erigon-lib/kv/mdbx"
 	"github.com/ledgerwatch/erigon-lib/kv/order"
+	"github.com/ledgerwatch/erigon-lib/kv/stream"
 	"github.com/ledgerwatch/erigon-lib/state"
 )
 
@@ -195,7 +195,7 @@ func (tx *Tx) Commit() error {
 	return mdbxTx.Commit()
 }
 
-func (tx *Tx) DomainRange(name kv.Domain, fromKey, toKey []byte, asOfTs uint64, asc order.By, limit int) (iter.KV, error) {
+func (tx *Tx) DomainRange(name kv.Domain, fromKey, toKey []byte, asOfTs uint64, asc order.By, limit int) (stream.KV, error) {
 	it, err := tx.filesTx.DomainRange(tx.ctx, tx.MdbxTx, name, fromKey, toKey, asOfTs, asc, limit)
 	if err != nil {
 		return nil, err
@@ -225,7 +225,7 @@ func (tx *Tx) HistorySeek(name kv.History, key []byte, ts uint64) (v []byte, ok 
 	return tx.filesTx.HistorySeek(name, key, ts, tx.MdbxTx)
 }
 
-func (tx *Tx) IndexRange(name kv.InvertedIdx, k []byte, fromTs, toTs int, asc order.By, limit int) (timestamps iter.U64, err error) {
+func (tx *Tx) IndexRange(name kv.InvertedIdx, k []byte, fromTs, toTs int, asc order.By, limit int) (timestamps stream.U64, err error) {
 	timestamps, err = tx.filesTx.IndexRange(name, k, fromTs, toTs, asc, limit, tx.MdbxTx)
 	if err != nil {
 		return nil, err
@@ -234,7 +234,7 @@ func (tx *Tx) IndexRange(name kv.InvertedIdx, k []byte, fromTs, toTs int, asc or
 	return timestamps, nil
 }
 
-func (tx *Tx) HistoryRange(name kv.History, fromTs, toTs int, asc order.By, limit int) (iter.KV, error) {
+func (tx *Tx) HistoryRange(name kv.History, fromTs, toTs int, asc order.By, limit int) (stream.KV, error) {
 	it, err := tx.filesTx.HistoryRange(name, fromTs, toTs, asc, limit, tx.MdbxTx)
 	if err != nil {
 		return nil, err
