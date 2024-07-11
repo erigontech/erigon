@@ -133,6 +133,17 @@ func (m *MerkleTree) ComputeRoot() libcommon.Hash {
 	return root
 }
 
+func (m *MerkleTree) CopyInto(other *MerkleTree) {
+	other.computeLeaf = m.computeLeaf
+	other.layers = make([][]byte, len(m.layers))
+	for i := 0; i < len(m.layers); i++ {
+		other.layers[i] = make([]byte, len(m.layers[i]))
+		copy(other.layers[i], m.layers[i])
+	}
+	other.leavesCount = m.leavesCount
+	other.limit = m.limit
+}
+
 func (m *MerkleTree) finishHashing(lastLayerIdx int, root []byte) {
 	if m.limit == nil {
 		if err := MerkleRootFromFlatFromIntermediateLevel(m.layers[lastLayerIdx], root[:], len(m.layers[0]), lastLayerIdx); err != nil {

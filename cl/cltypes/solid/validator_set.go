@@ -138,6 +138,12 @@ func (v *ValidatorSet) CopyTo(t *ValidatorSet) {
 		t.expandBuffer(v.l)
 		t.attesterBits = make([]byte, len(v.attesterBits))
 	}
+	if v.MerkleTree != nil {
+		if t.MerkleTree == nil {
+			t.MerkleTree = &merkle_tree.MerkleTree{}
+		}
+		v.MerkleTree.CopyInto(t.MerkleTree)
+	}
 	// skip copying (unsupported for phase0)
 	t.phase0Data = make([]Phase0Data, t.l)
 	copy(t.buffer, v.buffer)
@@ -183,11 +189,11 @@ func (v *ValidatorSet) Get(idx int) Validator {
 
 func (v *ValidatorSet) HashSSZ() ([32]byte, error) {
 	// generate root list
-	hashBuffer := make([]byte, 8*32)
 	if v.MerkleTree == nil {
 		v.MerkleTree = &merkle_tree.MerkleTree{}
 		cap := uint64(v.c)
 		v.MerkleTree.Initialize(v.l, merkle_tree.OptimalMaxTreeCacheDepth, func(idx int, out []byte) {
+			hashBuffer := make([]byte, 8*32)
 			validator := v.Get(idx)
 			if err := validator.CopyHashBufferTo(hashBuffer); err != nil {
 				panic(err)
