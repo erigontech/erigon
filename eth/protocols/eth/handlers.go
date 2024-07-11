@@ -22,12 +22,14 @@ package eth
 import (
 	"context"
 	"fmt"
+	"github.com/ledgerwatch/erigon-lib/chain"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/log/v3"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/types"
+	"github.com/ledgerwatch/erigon/p2p/sentry/sentry_multi_client"
 	"github.com/ledgerwatch/erigon/rlp"
 	"github.com/ledgerwatch/erigon/turbo/services"
 )
@@ -160,7 +162,7 @@ func AnswerGetBlockBodiesQuery(db kv.Tx, query GetBlockBodiesPacket, blockReader
 
 type getReceiptsFunc func(context.Context, kv.Tx, *types.Block, []libcommon.Address) (types.Receipts, error)
 
-func AnswerGetReceiptsQuery(ctx context.Context, getReceipts getReceiptsFunc, br services.FullBlockReader, db kv.Tx, query GetReceiptsPacket) ([]rlp.RawValue, error) { //nolint:unparam
+func AnswerGetReceiptsQuery(ctx context.Context, cfg *chain.Config, ethApi sentry_multi_client.EthAPI, br services.FullBlockReader, db kv.Tx, query GetReceiptsPacket) ([]rlp.RawValue, error) { //nolint:unparam
 	// Gather state data until the fetch or network limits is reached
 	var (
 		bytes    int
@@ -185,7 +187,7 @@ func AnswerGetReceiptsQuery(ctx context.Context, getReceipts getReceiptsFunc, br
 			return nil, nil
 		}
 
-		results, err := getReceipts(ctx, db, b, s)
+		results, err := ethApi.GetReceipts(ctx, cfg, db, b, s)
 		if err != nil {
 			return nil, err
 		}

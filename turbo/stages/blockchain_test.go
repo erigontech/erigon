@@ -381,11 +381,13 @@ func testReorg(t *testing.T, first, second []int64, td int64) {
 	}
 
 	m.ReceiveWg.Add(1)
+	println("sending")
 	for _, err = range m.Send(&protosentry.InboundMessage{Id: protosentry.MessageId_GET_RECEIPTS_66, Data: b, PeerId: m.PeerId}) {
 		if err != nil {
 			t.Fatal(err)
 		}
 	}
+	println("sent")
 
 	m.ReceiveWg.Wait()
 

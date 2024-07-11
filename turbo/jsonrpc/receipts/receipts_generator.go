@@ -21,7 +21,6 @@ type Generator struct {
 	receiptsCache *lru.Cache[common.Hash, []*types.Receipt]
 	blockReader   services.FullBlockReader
 	engine        consensus.EngineReader
-	cfg           *chain.Config
 }
 
 func NewGenerator(receiptsCache *lru.Cache[common.Hash, []*types.Receipt], blockReader services.FullBlockReader,
@@ -33,7 +32,7 @@ func NewGenerator(receiptsCache *lru.Cache[common.Hash, []*types.Receipt], block
 	}
 }
 
-func (g *Generator) GetReceipts(ctx context.Context, tx kv.Tx, block *types.Block, senders []common.Address) (types.Receipts, error) {
+func (g *Generator) GetReceipts(ctx context.Context, cfg *chain.Config, tx kv.Tx, block *types.Block, senders []common.Address) (types.Receipts, error) {
 	if receipts, ok := g.receiptsCache.Get(block.Hash()); ok {
 		return receipts, nil
 	}
@@ -45,14 +44,14 @@ func (g *Generator) GetReceipts(ctx context.Context, tx kv.Tx, block *types.Bloc
 
 	engine := g.engine
 
-	_, _, _, ibs, _, err := transactions.ComputeTxEnv(ctx, engine, block, g.cfg, g.blockReader, tx, 0)
+	_, _, _, ibs, _, err := transactions.ComputeTxEnv(ctx, engine, block, cfg, g.blockReader, tx, 0)
 	if err != nil {
 		return nil, err
 	}
 
 	usedGas := new(uint64)
 	usedBlobGas := new(uint64)
-	gp := new(core.GasPool).AddGas(block.GasLimit()).AddBlobGas(g.cfg.GetMaxBlobGasPerBlock())
+	gp := new(core.GasPool).AddGas(block.GasLimit()).AddBlobGas(cfg.GetMaxBlobGasPerBlock())
 
 	noopWriter := state.NewNoopWriter()
 
@@ -68,7 +67,7 @@ func (g *Generator) GetReceipts(ctx context.Context, tx kv.Tx, block *types.Bloc
 	header := block.Header()
 	for i, txn := range block.Transactions() {
 		ibs.SetTxContext(txn.Hash(), block.Hash(), i)
-		receipt, _, err := core.ApplyTransaction(g.cfg, core.GetHashFn(header, getHeader), engine, nil, gp, ibs, noopWriter, header, txn, usedGas, usedBlobGas, vm.Config{})
+		receipt, _, err := core.ApplyTransaction(cfg, core.GetHashFn(header, getHeader), engine, nil, gp, ibs, noopWriter, header, txn, usedGas, usedBlobGas, vm.Config{})
 		if err != nil {
 			return nil, err
 		}
@@ -78,8 +77,4 @@ func (g *Generator) GetReceipts(ctx context.Context, tx kv.Tx, block *types.Bloc
 
 	g.receiptsCache.Add(block.Hash(), receipts)
 	return receipts, nil
-}
-
-func (g *Generator) SetChainConfig(config *chain.Config) {
-	g.cfg = config
 }

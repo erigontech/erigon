@@ -47,9 +47,8 @@ func (api *BaseAPI) getReceipts(ctx context.Context, tx kv.Tx, block *types.Bloc
 	if err != nil {
 		return nil, err
 	}
-	api.receiptsGenerator.SetChainConfig(chainConfig)
 
-	return api.receiptsGenerator.GetReceipts(ctx, tx, block, senders)
+	return api.receiptsGenerator.GetReceipts(ctx, chainConfig, tx, block, senders)
 }
 
 // GetLogs implements eth_getLogs. Returns an array of logs matching a given filter object.

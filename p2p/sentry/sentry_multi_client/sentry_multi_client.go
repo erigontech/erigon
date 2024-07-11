@@ -244,6 +244,7 @@ func pumpStreamLoop[TMessage interface{}](
 			case <-ctx.Done():
 				return
 			case req := <-reqs:
+				println("received")
 				if err := handleInboundMessage(ctx, req, sentry); err != nil {
 					logger.Debug("Handling incoming message", "stream", streamName, "err", err)
 				}
@@ -301,7 +302,7 @@ type MultiClient struct {
 }
 
 type EthAPI interface {
-	GetReceipts(ctx context.Context, tx kv.Tx, block *types.Block, senders []common.Address) (types.Receipts, error)
+	GetReceipts(ctx context.Context, cfg *chain.Config, tx kv.Tx, block *types.Block, senders []common.Address) (types.Receipts, error)
 }
 
 func NewMultiClient(
@@ -733,14 +734,15 @@ func (cs *MultiClient) getReceipts66(ctx context.Context, inreq *proto_sentry.In
 	}
 	defer tx.Rollback()
 
-	receipts, err := eth.AnswerGetReceiptsQuery(ctx, cs.ethApiWrapper.GetReceipts, cs.blockReader, tx, query.GetReceiptsPacket)
+	receiptsList, err := eth.AnswerGetReceiptsQuery(ctx, cs.ChainConfig, cs.ethApiWrapper, cs.blockReader, tx, query.GetReceiptsPacket)
 	if err != nil {
 		return err
 	}
 	b, err := rlp.EncodeToBytes(&eth.ReceiptsRLPPacket66{
 		RequestId:         query.RequestId,
-		ReceiptsRLPPacket: receipts,
+		ReceiptsRLPPacket: receiptsList,
 	})
+	println("getReceipts66", len(receiptsList))
 	if err != nil {
 		return fmt.Errorf("encode header response: %w", err)
 	}
@@ -772,8 +774,9 @@ func (cs *MultiClient) HandleInboundMessage(ctx context.Context, message *proto_
 			err = fmt.Errorf("%+v, msgID=%s, trace: %s", rec, message.Id.String(), dbg.Stack())
 		}
 	}() // avoid crash because Erigon's core does many things
-
+	println("entered handleInboundMessage")
 	err = cs.handleInboundMessage(ctx, message, sentry)
+	println(message.Id.String())
 
 	if (err != nil) && rlp.IsInvalidRLPError(err) {
 		cs.logger.Debug("Kick peer for invalid RLP", "err", err)
