@@ -137,7 +137,7 @@ func SpawnWitnessStage(s *StageState, rootTx kv.RwTx, cfg WitnessCfg, ctx contex
 		}
 
 		// Update the tx to operate on the in-memory batch
-		tx = batch
+		tx = batch.MemTx()
 
 		store, err := PrepareForWitness(tx, block, prevHeader.Root, rl, &cfg, ctx, logger)
 		if err != nil {
@@ -253,15 +253,14 @@ func RewindStagesForWitness(batch *membatchwithdb.MemoryMutation, blockNr uint64
 	rl := trie.NewRetainList(0)
 
 	// Rewind the 'HashState' and 'IntermediateHashes' stages to previous block
-	unwindState := &UnwindState{ID: stages.HashState, UnwindPoint: blockNr - 1}
+	unwindState := &UnwindState{ID: stages.HashState, UnwindPoint: blockNr - 1, CurrentBlockNumber: blockNr}
 	stageState := &StageState{ID: stages.HashState, BlockNumber: blockNr}
 
-	hashStageCfg := StageHashStateCfg(nil, cfg.dirs)
-	if err := UnwindHashStateStage(unwindState, stageState, batch, hashStageCfg, ctx, logger); err != nil {
+	if err := UnwindHashStateStage(unwindState, stageState, batch, *cfg, ctx, logger); err != nil {
 		return nil, nil, err
 	}
 
-	unwindState = &UnwindState{ID: stages.IntermediateHashes, UnwindPoint: blockNr - 1}
+	unwindState = &UnwindState{ID: stages.IntermediateHashes, UnwindPoint: blockNr - 1, CurrentBlockNumber: blockNr}
 	stageState = &StageState{ID: stages.IntermediateHashes, BlockNumber: blockNr}
 
 	if !regenerateHash {
