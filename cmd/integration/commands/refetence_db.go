@@ -169,13 +169,11 @@ func init() {
 
 	withDataDir(cmdWarmup)
 	withBucket(cmdWarmup)
-	withWriteMap(cmdWarmup)
 
 	rootCmd.AddCommand(cmdWarmup)
 
 	withDataDir(cmdMdbxTopDup)
 	withBucket(cmdMdbxTopDup)
-	withWriteMap(cmdMdbxToMdbx)
 
 	rootCmd.AddCommand(cmdMdbxTopDup)
 
@@ -188,14 +186,12 @@ func init() {
 	withDataDir(cmdMdbxToMdbx)
 	withToChaindata(cmdMdbxToMdbx)
 	withBucket(cmdMdbxToMdbx)
-	withWriteMap(cmdMdbxToMdbx)
 
 	rootCmd.AddCommand(cmdMdbxToMdbx)
 
 	withToChaindata(cmdFToMdbx)
 	withFile(cmdFToMdbx)
 	withBucket(cmdFToMdbx)
-	withWriteMap(cmdFToMdbx)
 
 	rootCmd.AddCommand(cmdFToMdbx)
 }
