@@ -182,7 +182,7 @@ func (dt *DomainRoTx) lookupFileByItsRange(txFrom uint64, txTo uint64) *filesIte
 		}
 		dt.d.logger.Warn("lookupFileByItsRange: file not found",
 			"stepFrom", txFrom/dt.d.aggregationStep, "stepTo", txTo/dt.d.aggregationStep,
-			"domain", dt.d.filenameBase, "files", fileStepsss, "_visibleFiles", visibleFiles,
+			"files", fileStepsss, "_visibleFiles", visibleFiles,
 			"visibleFilesCount", len(dt.files), "filesCount", dt.d.dirtyFiles.Len())
 		return nil
 	}
@@ -199,7 +199,6 @@ func (dt *DomainRoTx) lookupByShortenedKey(shortKey []byte, getter ArchiveGetter
 		if r := recover(); r != nil {
 			dt.d.logger.Crit("lookupByShortenedKey panics",
 				"err", r,
-				"domain", dt.d.keysTable,
 				"offset", offset, "short", fmt.Sprintf("%x", shortKey),
 				"cleanFilesCount", len(dt.files), "dirtyFilesCount", dt.d.dirtyFiles.Len(),
 				"file", getter.FileName())

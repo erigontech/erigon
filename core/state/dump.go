@@ -210,7 +210,8 @@ func (d *Dumper) DumpToCollector(c DumpCollector, excludeCode, excludeStorage bo
 
 		if !excludeStorage {
 			t := trie.New(libcommon.Hash{})
-			r, err := ttx.DomainRange(kv.StorageDomain, addr[:], nil, txNumForStorage, order.Asc, kv.Unlim)
+			nextAcc, _ := kv.NextSubtree(addr[:])
+			r, err := ttx.DomainRange(kv.StorageDomain, addr[:], nextAcc, txNumForStorage, order.Asc, kv.Unlim)
 			if err != nil {
 				return nil, fmt.Errorf("walking over storage for %x: %w", addr, err)
 			}
