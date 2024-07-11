@@ -16,7 +16,12 @@
 
 package stream
 
-// Iterators - composable high-level abstraction to iterate over. It's more high-level than kv.Cursor and provides less controll, less features, but enough to build an app.
+// Streams - it's iterator-like composable high-level abstraction - which designed for inter-process communication and between processes:
+//  - cancelable
+//  - return errors
+//  - batch-friendly
+//  - server-side-streaming-friendly: no cliend-side granular managemnent. all required data described by construtor (query) then only iterate over results.
+//  - more high-level than kv.Cursor
 //
 //	for s.HasNext() {
 //		k, v, err := s.Next()
@@ -26,8 +31,8 @@ package stream
 //	}
 //  Invariants:
 //   1. HasNext() is Idempotent
-//   2. K, V are valid at-least 2 .Next() calls! It allows zero-copy composition of iterators. Example: iter.Union
-//		- 1 value used by User and 1 value used internally by iter.Union
+//   2. K, V are valid at-least 2 .Next() calls! It allows zero-copy composition of streams. Example: stream.Union
+//		- 1 value used by User and 1 value used internally by stream.Union
 //   3. No `Close` method: all streams produced by TemporalTx will be closed inside `tx.Rollback()` (by casting to `kv.Closer`)
 //   4. automatically checks cancelation of `ctx` passed to `db.Begin(ctx)`, can skip this
 //     check in loops on stream. Duo has very limited API - user has no way to

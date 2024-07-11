@@ -311,15 +311,13 @@ func (api *APIImpl) getLogsV3(ctx context.Context, tx kv.TemporalTx, begin, end 
 	if err != nil {
 		return logs, err
 	}
-
-	var baseBlockTxnID kv.TxnId
-	iter := rawdbv3.TxNums2BlockNums(tx, txNumbers, order.Asc)
-	defer iter.Close()
-	for iter.HasNext() {
+	it := rawdbv3.TxNums2BlockNums(tx, txNumbers, order.Asc)
+	defer it.Close()
+	for it.HasNext() {
 		if err = ctx.Err(); err != nil {
 			return nil, err
 		}
-		txNum, blockNum, txIndex, isFinalTxn, blockNumChanged, err := iter.Next()
+		txNum, blockNum, txIndex, isFinalTxn, blockNumChanged, err := it.Next()
 		if err != nil {
 			return nil, err
 		}

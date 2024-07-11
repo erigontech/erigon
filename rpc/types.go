@@ -28,9 +28,8 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/hexutil"
-
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
 )
 
 // API describes the set of methods offered over the RPC interface
@@ -224,9 +223,9 @@ func AsBlockNumber(no interface{}) BlockNumber {
 }
 
 type BlockNumberOrHash struct {
-	BlockNumber      *BlockNumber    `json:"blockNumber,omitempty"`
-	BlockHash        *libcommon.Hash `json:"blockHash,omitempty"`
-	RequireCanonical bool            `json:"requireCanonical,omitempty"`
+	BlockNumber      *BlockNumber `json:"blockNumber,omitempty"`
+	BlockHash        *common.Hash `json:"blockHash,omitempty"`
+	RequireCanonical bool         `json:"requireCanonical,omitempty"`
 }
 
 func (bnh *BlockNumberOrHash) UnmarshalJSON(data []byte) error {
@@ -272,17 +271,17 @@ func (bnh *BlockNumberOrHash) UnmarshalJSON(data []byte) error {
 		bn := PendingBlockNumber
 		bnh.BlockNumber = &bn
 		return nil
-	case "safe":
-		bn := SafeBlockNumber
-		bnh.BlockNumber = &bn
-		return nil
 	case "finalized":
 		bn := FinalizedBlockNumber
 		bnh.BlockNumber = &bn
 		return nil
+	case "safe":
+		bn := SafeBlockNumber
+		bnh.BlockNumber = &bn
+		return nil
 	default:
 		if len(input) == 66 {
-			hash := libcommon.Hash{}
+			hash := common.Hash{}
 			err := hash.UnmarshalText([]byte(input))
 			if err != nil {
 				return err
@@ -310,11 +309,21 @@ func (bnh *BlockNumberOrHash) Number() (BlockNumber, bool) {
 	return BlockNumber(0), false
 }
 
-func (bnh *BlockNumberOrHash) Hash() (libcommon.Hash, bool) {
+func (bnh *BlockNumberOrHash) Hash() (common.Hash, bool) {
 	if bnh.BlockHash != nil {
 		return *bnh.BlockHash, true
 	}
-	return libcommon.Hash{}, false
+	return common.Hash{}, false
+}
+
+func (bnh *BlockNumberOrHash) String() string {
+	if bnh.BlockNumber != nil {
+		return bnh.BlockNumber.String()
+	}
+	if bnh.BlockHash != nil {
+		return bnh.BlockHash.String()
+	}
+	return "nil"
 }
 
 func BlockNumberOrHashWithNumber(blockNr BlockNumber) BlockNumberOrHash {
@@ -325,7 +334,7 @@ func BlockNumberOrHashWithNumber(blockNr BlockNumber) BlockNumberOrHash {
 	}
 }
 
-func BlockNumberOrHashWithHash(hash libcommon.Hash, canonical bool) BlockNumberOrHash {
+func BlockNumberOrHashWithHash(hash common.Hash, canonical bool) BlockNumberOrHash {
 	return BlockNumberOrHash{
 		BlockNumber:      nil,
 		BlockHash:        &hash,
@@ -343,7 +352,7 @@ func (br BlockReference) Number() (BlockNumber, bool) {
 	return ((*BlockNumberOrHash)(&br)).Number()
 }
 
-func (br BlockReference) Hash() (libcommon.Hash, bool) {
+func (br BlockReference) Hash() (common.Hash, bool) {
 	return ((*BlockNumberOrHash)(&br)).Hash()
 }
 
@@ -372,9 +381,9 @@ func AsBlockReference(ref interface{}) BlockReference {
 		return BlockReference{BlockNumber: &bn}
 	case uint64:
 		return Uint64BlockReference(ref)
-	case libcommon.Hash:
+	case common.Hash:
 		return HashBlockReference(ref)
-	case *libcommon.Hash:
+	case *common.Hash:
 		return HashBlockReference(*ref)
 	}
 
@@ -403,7 +412,7 @@ func Uint64BlockReference(blockNr uint64) BlockReference {
 	}
 }
 
-func HashBlockReference(hash libcommon.Hash, canonical ...bool) BlockReference {
+func HashBlockReference(hash common.Hash, canonical ...bool) BlockReference {
 	if len(canonical) == 0 {
 		canonical = []bool{false}
 	}
