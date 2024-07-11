@@ -1,9 +1,10 @@
 services:
   cache:
     image: golang:1.19
-    command: ["go", "run", "cmd/hack/rpc_cache/main.go", "-file", "zk/tests/nightly-l1-recovery/network5-cache.db"]
+    command: ["go", "run", "cmd/hack/rpc_cache/main.go", "-file", "/cache/network5-cache.db"]
     volumes:
       - ../../../:/repo
+      - l1-cache:/cache
     working_dir: /repo
     networks:
       - erigon-net
@@ -23,9 +24,22 @@ services:
     depends_on:
       - cache
 
+  erigon-sync:
+    build:
+        context: ../../../
+        dockerfile: Dockerfile
+    command: [ "--config", "/config/network5-sync-config.yaml" ]
+    volumes:
+      - ./:/config
+      - datadir-syncer:/datadir
+    networks:
+      - erigon-net
+    depends_on:
+      - cache
+
   block-checker:
     image: golang:1.19
-    command: ["go", "run", "/repo/zk/debug_tools/nightly-block-compare-wait/main.go", "--compare=http://34.175.214.161:8505"]
+    command: ["go", "run", "/repo/zk/debug_tools/nightly-block-compare-wait/main.go", "--compare=http://34.175.214.161:8505", "--compare2=http://erigon-sync:8123", "--duration=2h"]
     volumes:
       - ../../../:/repo
     working_dir: /repo
@@ -40,3 +54,5 @@ networks:
 
 volumes:
   datadir:
+  datadir-syncer:
+  l1-cache:

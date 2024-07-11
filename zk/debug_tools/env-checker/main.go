@@ -3,12 +3,12 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"flag"
 	"fmt"
+	"io"
 	"log"
 	"net/http"
-	"flag"
 	"os"
-	"io"
 )
 
 type JSONRPCRequest struct {
@@ -24,37 +24,86 @@ type JSONRPCResponse struct {
 	Result  interface{} `json:"result"`
 }
 
+type Node struct {
+	NodeName string `json:"nodeName"`
+	RPCURL   string `json:"rpcURL"`
+}
+
+type NodeGroup struct {
+	GroupName string `json:"groupName"`
+	Nodes     []Node `json:"nodes"`
+}
+
+type EnvConfig struct {
+	Groups []NodeGroup `json:"groups"`
+}
+
 func main() {
-	rpcURL := flag.String("rpcURL", "", "RPC URL")
-	nodeName := flag.String("nodeName", "", "Node name")
+	envFile := flag.String("envFile", "", "JSON file containing environments")
 	flag.Parse()
 
-	if *rpcURL == "" {
-		log.Fatal("rpcURL flag not set")
-	}
-	if *nodeName == "" {
-		log.Fatal("nodeName flag not set")
+	if *envFile == "" {
+		log.Fatal("envFile flag not set")
 	}
 
-	fmt.Printf("Checking node: %s\n", *nodeName)
-	err := checkClientVersion(*rpcURL)
+	file, err := os.Open(*envFile)
 	if err != nil {
-		fmt.Printf("Node is down: %s\n", *nodeName)
-		os.Exit(1)
+		log.Fatalf("Failed to open environment file: %v", err)
 	}
-	err = checkBlockHeight(*rpcURL)
+	defer file.Close()
+
+	var config EnvConfig
+	decoder := json.NewDecoder(file)
+	err = decoder.Decode(&config)
 	if err != nil {
-		fmt.Printf("Node is down: %s\n", *nodeName)
-		os.Exit(1)
-	}
-	err = checkBatchNumber(*rpcURL)
-	if err != nil {
-		fmt.Printf("Node is down: %s\n", *nodeName)
-		os.Exit(1)
+		log.Fatalf("Failed to parse environment file: %v", err)
 	}
 
-	fmt.Printf("Node is up: %s\n", *nodeName)
-	os.Exit(0)
+	allSuccess := true
+	for _, group := range config.Groups {
+		fmt.Printf("\n========== Checking group: %s ==========\n", group.GroupName)
+		groupSuccess := true
+		for _, node := range group.Nodes {
+			fmt.Printf("\n--- Checking node: %s ---\n", node.NodeName)
+			if !checkNode(node) {
+				groupSuccess = false
+				allSuccess = false
+			}
+		}
+		if groupSuccess {
+			fmt.Printf("\n***** Group is up: %s *****\n", group.GroupName)
+		} else {
+			fmt.Printf("\n***** Group is down: %s *****\n", group.GroupName)
+		}
+	}
+
+	if allSuccess {
+		fmt.Println("\n===== All groups are up =====")
+		os.Exit(0)
+	} else {
+		fmt.Println("\n===== One or more groups are down =====")
+		os.Exit(1)
+	}
+}
+
+func checkNode(node Node) bool {
+	err := checkClientVersion(node.RPCURL)
+	if err != nil {
+		fmt.Printf("Node is down: %s\n", node.NodeName)
+		return false
+	}
+	err = checkBlockHeight(node.RPCURL)
+	if err != nil {
+		fmt.Printf("Node is down: %s\n", node.NodeName)
+		return false
+	}
+	err = checkBatchNumber(node.RPCURL)
+	if err != nil {
+		fmt.Printf("Node is down: %s\n", node.NodeName)
+		return false
+	}
+	fmt.Printf("Node is up: %s\n", node.NodeName)
+	return true
 }
 
 func makeRequest(rpcURL, method string) (*JSONRPCResponse, error) {
@@ -104,6 +153,7 @@ func checkBlockHeight(rpcURL string) error {
 	resp, err := makeRequest(rpcURL, "eth_blockNumber")
 	if err != nil {
 		fmt.Println("Block height retrieval failed")
+		return err
 	}
 	fmt.Printf("Block height: %v\n", resp.Result)
 	return nil

@@ -6,21 +6,8 @@ on:
   workflow_dispatch:
 
 jobs:
-  test-node:
+  run-checks:
     runs-on: ubuntu-latest
-    continue-on-error: true
-    strategy:
-      matrix:
-        include:
-          - name: "Integration 5 - Legacy"
-            network: "integration-5"
-            rpc: "http://34.175.214.161:8505"
-          - name: "Integration 5 - Erigon RPC"
-            network: "integration-5"
-            rpc: "http://34.175.214.161:8500"
-          - name: "Integration 5 - Erigon Sequencer"
-            network: "integration-5"
-            rpc: "http://34.175.214.161:8005"
     steps:
       - name: Checkout code
         uses: actions/checkout@v3
@@ -30,18 +17,6 @@ jobs:
         with:
           go-version: '1.20'
 
-      - name: Run tests
-        run: go run ./zk/debug_tools/env-checker -rpcURL=${{ matrix.rpc }} -nodeName=${{ matrix.name }}
-
-  check-results:
-    needs: test-node
-    runs-on: ubuntu-latest
-    steps:
-      - name: Check results
-        run: |
-          for job in ${{ matrix.include }}; do
-            if [[ ${{ job.outcome }} == 'failure' ]]; then
-              echo "Job failed: $job"
-              exit 1
-            fi
-          done
+      - name: Run checks
+        working-directory: ./zk/debug_tools/env-checker
+        run: go run main.go -envFile envs.json

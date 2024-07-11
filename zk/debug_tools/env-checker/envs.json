@@ -1,0 +1,21 @@
+{
+  "groups": [
+    {
+      "groupName": "Integration 5",
+      "nodes": [
+        {
+          "nodeName": "Integration 5 - Legacy",
+          "rpcURL": "http://34.175.214.161:8505"
+        },
+        {
+          "nodeName": "Integration 5 - Erigon RPC",
+          "rpcURL": "http://34.175.214.161:8500"
+        },
+        {
+          "nodeName": "Integration 5 - Erigon Sequencer",
+          "rpcURL": "http://34.175.214.161:8005"
+        }
+      ]
+    }
+  ]
+}
