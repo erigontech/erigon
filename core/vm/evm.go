@@ -332,8 +332,8 @@ func (evm *EVM) StaticCall(caller ContractRef, addr libcommon.Address, input []b
 	return evm.call(STATICCALL, caller, addr, input, gas, new(uint256.Int), false)
 }
 
-func (evm *EVM) ExtCall(caller ContractRef, addr libcommon.Address, input []byte, gas uint64) (ret []byte, leftOverGas uint64, err error) {
-	return evm.call(EXTCALL, caller, addr, input, gas, nil, false)
+func (evm *EVM) ExtCall(caller ContractRef, addr libcommon.Address, input []byte, gas uint64, value *uint256.Int) (ret []byte, leftOverGas uint64, err error) {
+	return evm.call(EXTCALL, caller, addr, input, gas, value, false)
 }
 func (evm *EVM) ExtDelegateCall(caller ContractRef, addr libcommon.Address, input []byte, gas uint64) (ret []byte, leftOverGas uint64, err error) {
 	return evm.call(EXTDELEGATECALL, caller, addr, input, gas, nil, false)

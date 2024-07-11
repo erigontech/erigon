@@ -12,11 +12,11 @@ func TestEOFValidation(t *testing.T) {
 	defer log.Root().SetHandler(log.Root().GetHandler())
 	log.Root().SetHandler(log.LvlFilterHandler(log.LvlError, log.StderrHandler))
 
-	bt := new(testMatcher)
+	et := new(testMatcher)
 
 	dir := filepath.Join(".", "eof_tests/prague/eip7692_eof_v1")
 
-	bt.walk(t, dir, func(t *testing.T, name string, test *EOFTest) {
+	et.walk(t, dir, func(t *testing.T, name string, test *EOFTest) {
 		// import pre accounts & construct test genesis block & state root
 		if err := et.checkFailure(t, test.Run(t)); err != nil {
 			t.Error(err)

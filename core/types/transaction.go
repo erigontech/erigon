@@ -52,6 +52,7 @@ const (
 	AccessListTxType
 	DynamicFeeTxType
 	BlobTxType
+	InitcodeTxType
 )
 
 // Transaction is an Ethereum transaction.
@@ -408,6 +409,7 @@ type Message struct {
 	checkNonce       bool
 	isFree           bool
 	blobHashes       []libcommon.Hash
+	initcodes        map[[32]byte][]byte
 }
 
 func NewMessage(from libcommon.Address, to *libcommon.Address, nonce uint64, amount *uint256.Int, gasLimit uint64,
@@ -482,6 +484,8 @@ func (m Message) MaxFeePerBlobGas() *uint256.Int {
 }
 
 func (m Message) BlobHashes() []libcommon.Hash { return m.blobHashes }
+
+func (m Message) Initcodes() map[[32]byte][]byte { return m.initcodes }
 
 func DecodeSSZ(data []byte, dest codec.Deserializable) error {
 	err := dest.Deserialize(codec.NewDecodingReader(bytes.NewReader(data), uint64(len(data))))

@@ -697,7 +697,7 @@ func opEOFCreate(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) (
 		input  = scope.Memory.GetCopy(int64(offset.Uint64()), int64(size.Uint64())) // TODO(racytech): figure out why it's needed?
 		gas    = scope.Contract.Gas
 	)
-	*pc = *pc + 2
+	*pc += 2
 
 	initContainer := scope.Contract.SubContainerAt(int(initContainerIdx))
 	// TODO(racytech): this should be done in `dynamicGas` func, leave it here for now
@@ -732,33 +732,38 @@ func opEOFCreate(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) (
 
 func opTxCreate(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]byte, error) {
 
-	// var (
-	// 	code = scope.Contract.CodeAt(scope.CodeSection)
+	var (
+		code = scope.Contract.CodeAt(scope.CodeSection)
 
-	// 	initcodeHash = scope.Stack.Pop()
-	// 	value        = scope.Stack.Pop()
-	// 	salt         = scope.Stack.Pop()
-	// 	offset       = scope.Stack.Pop()
-	// 	size         = scope.Stack.Pop()
-	// 	input        = scope.Memory.GetCopy(int64(offset.Uint64()), int64(size.Uint64()))
-	// 	gas          = scope.Contract.Gas
-	// )
-	// *pc += 1
+		initcodeHash = scope.Stack.Pop()
+		value        = scope.Stack.Pop()
+		salt         = scope.Stack.Pop()
+		offset       = scope.Stack.Pop()
+		size         = scope.Stack.Pop()
+		input        = scope.Memory.GetCopy(int64(offset.Uint64()), int64(size.Uint64()))
+		gas          = scope.Contract.Gas
+	)
+	*pc += 1
 
-	// // initcontainer = state.get_tx_initcode_by_hash(initcode_hash);
-	// // // In case initcode was not found, empty bytes_view was returned.
-	// // // Transaction initcodes are not allowed to be empty.
-	// // if (initcontainer.empty())
-	// // 	return {EVMC_SUCCESS, gas_left};  // "Light" failure
+	initcontainer := interpreter.evm.TxContext.Initcodes[initcodeHash.Bytes32()]
 
-	// // // Charge for initcode validation.
-	// // constexpr auto initcode_word_cost_validation = 2;
-	// // const auto initcode_cost_validation =
-	// // 	num_words(initcontainer.size()) * initcode_word_cost_validation;
-	// // if ((gas_left -= initcode_cost_validation) < 0)
-	// // 	return {EVMC_OUT_OF_GAS, gas_left};
+	// initcontainer = state.get_tx_initcode_by_hash(initcode_hash);
+	// // In case initcode was not found, empty bytes_view was returned.
+	// // Transaction initcodes are not allowed to be empty.
+	// if (initcontainer.empty())
+	// 	return {EVMC_SUCCESS, gas_left};  // "Light" failure
 
-	// interpreter.evm.IntraBlockState().GetCodeHash(initcodeHash.Bytes20())
+	// // Charge for initcode validation.
+	// constexpr auto initcode_word_cost_validation = 2;
+	// const auto initcode_cost_validation =
+	// 	num_words(initcontainer.size()) * initcode_word_cost_validation;
+	// if ((gas_left -= initcode_cost_validation) < 0)
+	// 	return {EVMC_OUT_OF_GAS, gas_left};
+
+	// TODO(racytech): we need to check data field in the message, since it contains initcodes, as well as adding initcodes into the execution env
+
+	// 1. get the initcontainer -> get the coresponding initcode using hash (initcode_hash poped from stack)
+	// 2. we need to run validation and unmarshalling on initcontainer again?
 
 	return nil, nil
 }
@@ -835,52 +840,111 @@ func opReturnDataLoad(pc *uint64, interpreter *EVMInterpreter, scope *ScopeConte
 // 2 if the call has failed.
 // Gas not used by the callee is returned to the caller.
 func opExtCall(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]byte, error) {
-	// var (
-	// 	addr256   = scope.Stack.Pop()
-	// 	offset256 = scope.Stack.Pop()
-	// 	size256   = scope.Stack.Pop()
-	// 	value     = scope.Stack.Pop()
+	var (
+		addr256   = scope.Stack.Pop()
+		offset256 = scope.Stack.Pop()
+		size256   = scope.Stack.Pop()
+		value     = scope.Stack.Pop()
 
-	// 	toAddr = addr256.Bytes20()
-	// 	offset = int64(offset256.Uint64())
-	// 	size   = int64(size256.Uint64())
-	// )
+		toAddr = addr256.Bytes20()
+		offset = int64(offset256.Uint64())
+		size   = int64(size256.Uint64())
 
-	// // Get the arguments from the memory.
-	// args := scope.Memory.GetPtr(offset, size)
-	// // ret, returnGas, err := interpreter.evm.ExtCall(scope.Contract, toAddr, args, gas, &value, false /* bailout */)
+		gas = interpreter.evm.CallGasTemp()
+	)
+
+	// Get the arguments from the memory.
+	args := scope.Memory.GetPtr(offset, size)
+
+	if !value.IsZero() {
+		if interpreter.readOnly {
+			return nil, ErrWriteProtection
+		}
+		gas += params.CallStipend
+	}
+
+	ret, returnGas, err := interpreter.evm.ExtCall(scope.Contract, toAddr, args, gas, &value)
+
+	if err != nil {
+		addr256.Clear()
+	} else {
+		addr256.SetOne()
+	}
+	scope.Stack.Push(&addr256)
+	if err == nil || err == ErrExecutionReverted {
+		ret = libcommon.CopyBytes(ret)
+		scope.Memory.Set(offset256.Uint64(), size256.Uint64(), ret)
+	}
+
+	scope.Contract.RefundGas(returnGas, tracing.GasChangeCallLeftOverRefunded)
+
+	interpreter.returnData = ret
+
 	return nil, nil
 }
 func opExtDelegateCall(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]byte, error) {
-	// var (
-	// 	addr256   = scope.Stack.Pop()
-	// 	offset256 = scope.Stack.Pop()
-	// 	size256   = scope.Stack.Pop()
+	var (
+		addr256   = scope.Stack.Pop()
+		offset256 = scope.Stack.Pop()
+		size256   = scope.Stack.Pop()
 
-	// 	toAddr = addr256.Bytes20()
-	// 	offset = int(offset256.Uint64())
-	// 	size   = int(size256.Uint64())
-	// )
+		toAddr = addr256.Bytes20()
+		offset = int64(offset256.Uint64())
+		size   = int64(size256.Uint64())
 
-	// // Get the arguments from the memory.
-	// args := scope.Memory.GetPtr(offset, size)
+		gas = interpreter.evm.CallGasTemp()
+	)
 
-	// // ret, returnGas, err := interpreter.evm.ExtDelegateCall(scope.Contract, toAddr, args, gas, &value, false /* bailout */)
+	// Get the arguments from the memory.
+	args := scope.Memory.GetPtr(offset, size)
+
+	ret, returnGas, err := interpreter.evm.ExtDelegateCall(scope.Contract, toAddr, args, gas)
+	if err != nil {
+		addr256.Clear()
+	} else {
+		addr256.SetOne()
+	}
+	scope.Stack.Push(&addr256)
+	if err == nil || err == ErrExecutionReverted {
+		ret = libcommon.CopyBytes(ret)
+		scope.Memory.Set(offset256.Uint64(), size256.Uint64(), ret)
+	}
+
+	scope.Contract.RefundGas(returnGas, tracing.GasChangeCallLeftOverRefunded)
+
+	interpreter.returnData = ret
 	return nil, nil
 }
 func opExtStaticCall(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]byte, error) {
-	// var (
-	// 	addr256   = scope.Stack.Pop()
-	// 	offset256 = scope.Stack.Pop()
-	// 	size256   = scope.Stack.Pop()
+	var (
+		addr256   = scope.Stack.Pop()
+		offset256 = scope.Stack.Pop()
+		size256   = scope.Stack.Pop()
 
-	// 	toAddr = addr256.Bytes20()
-	// 	offset = int(offset256.Uint64())
-	// 	size   = int(size256.Uint64())
-	// )
+		toAddr = addr256.Bytes20()
+		offset = int64(offset256.Uint64())
+		size   = int64(size256.Uint64())
 
-	// // Get the arguments from the memory.
-	// args := scope.Memory.GetPtr(offset, size)
-	// // ret, returnGas, err := interpreter.evm.ExtStaticCall(scope.Contract, toAddr, args, gas, &value, false /* bailout */)
+		gas = interpreter.evm.CallGasTemp()
+	)
+
+	// Get the arguments from the memory.
+	args := scope.Memory.GetPtr(offset, size)
+	ret, returnGas, err := interpreter.evm.ExtStaticCall(scope.Contract, toAddr, args, gas)
+
+	if err != nil {
+		addr256.Clear()
+	} else {
+		addr256.SetOne()
+	}
+	scope.Stack.Push(&addr256)
+	if err == nil || err == ErrExecutionReverted {
+		ret = libcommon.CopyBytes(ret)
+		scope.Memory.Set(offset256.Uint64(), size256.Uint64(), ret)
+	}
+
+	scope.Contract.RefundGas(returnGas, tracing.GasChangeCallLeftOverRefunded)
+
+	interpreter.returnData = ret
 	return nil, nil
 }
