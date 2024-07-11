@@ -141,6 +141,8 @@ func withDataDir2(cmd *cobra.Command) {
 	must(cmd.MarkFlagDirname(utils.DataDirFlag.Name))
 	must(cmd.MarkFlagRequired(utils.DataDirFlag.Name))
 	cmd.Flags().IntVar(&databaseVerbosity, "database.verbosity", 2, "Enabling internal db logs. Very high verbosity levels may require recompile db. Default: 2, means warning.")
+
+	cmd.Flags().BoolVar(&dbWriteMap, utils.DbWriteMapFlag.Name, utils.DbWriteMapFlag.Value, utils.DbWriteMapFlag.Usage)
 }
 
 func withDataDir(cmd *cobra.Command) {
@@ -152,6 +154,8 @@ func withDataDir(cmd *cobra.Command) {
 	must(cmd.MarkFlagDirname("chaindata"))
 
 	cmd.Flags().IntVar(&databaseVerbosity, "database.verbosity", 2, "Enabling internal db logs. Very high verbosity levels may require recompile db. Default: 2, means warning")
+
+	cmd.Flags().BoolVar(&dbWriteMap, utils.DbWriteMapFlag.Name, utils.DbWriteMapFlag.Value, utils.DbWriteMapFlag.Usage)
 }
 
 func withBatchSize(cmd *cobra.Command) {
@@ -169,10 +173,6 @@ func withMigration(cmd *cobra.Command) {
 
 func withTxTrace(cmd *cobra.Command) {
 	cmd.Flags().BoolVar(&txtrace, "txtrace", false, "enable tracing of transactions")
-}
-
-func withWriteMap(cmd *cobra.Command) {
-	cmd.Flags().BoolVar(&dbWriteMap, utils.DbWriteMapFlag.Name, utils.DbWriteMapFlag.Value, utils.DbWriteMapFlag.Usage)
 }
 
 func withChain(cmd *cobra.Command) {
