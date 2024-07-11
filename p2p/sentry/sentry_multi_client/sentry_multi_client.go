@@ -734,7 +734,7 @@ func (cs *MultiClient) getReceipts66(ctx context.Context, inreq *proto_sentry.In
 	}
 	defer tx.Rollback()
 
-	receiptsList, err := eth.AnswerGetReceiptsQuery(ctx, cs.ChainConfig, cs.ethApiWrapper, cs.blockReader, tx, query.GetReceiptsPacket)
+	receiptsList, err := eth.AnswerGetReceiptsQuery(ctx, cs.ChainConfig, cs.ethApiWrapper.GetReceipts, cs.blockReader, tx, query.GetReceiptsPacket)
 	if err != nil {
 		return err
 	}
