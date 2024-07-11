@@ -29,6 +29,8 @@ zkevm.sequencer-block-seal-time: "5s"
 zkevm.sequencer-batch-seal-time: "15m"
 zkevm.allow-pre-eip155-transactions: true
 
+log.console.verbosity: warn
+
 zkevm.l1-sync-start-block: 6032365
 
 externalcl: true

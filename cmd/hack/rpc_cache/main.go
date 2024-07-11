@@ -180,7 +180,6 @@ func handleRequest(w http.ResponseWriter, r *http.Request) {
 	}
 
 	url, _ := url2.Parse(endpoint)
-	fmt.Println("Fetching from upstream", url.Host)
 
 	resp, err := http.Post(endpoint, "application/json", bytes.NewBuffer(body))
 	if err != nil {
