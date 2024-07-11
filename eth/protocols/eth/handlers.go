@@ -159,9 +159,11 @@ func AnswerGetBlockBodiesQuery(db kv.Tx, query GetBlockBodiesPacket, blockReader
 	return bodies
 }
 
-type getReceiptsFunc func(context.Context, *chain.Config, kv.Tx, *types.Block, []libcommon.Address) (types.Receipts, error)
+type ReceiptsGetter interface {
+	GetReceipts(ctx context.Context, cfg *chain.Config, tx kv.Tx, block *types.Block, senders []libcommon.Address) (types.Receipts, error)
+}
 
-func AnswerGetReceiptsQuery(ctx context.Context, cfg *chain.Config, getReceipts getReceiptsFunc, br services.FullBlockReader, db kv.Tx, query GetReceiptsPacket) ([]rlp.RawValue, error) { //nolint:unparam
+func AnswerGetReceiptsQuery(ctx context.Context, cfg *chain.Config, receiptsGetter ReceiptsGetter, br services.FullBlockReader, db kv.Tx, query GetReceiptsPacket) ([]rlp.RawValue, error) { //nolint:unparam
 	// Gather state data until the fetch or network limits is reached
 	var (
 		bytes    int
@@ -186,7 +188,7 @@ func AnswerGetReceiptsQuery(ctx context.Context, cfg *chain.Config, getReceipts 
 			return nil, nil
 		}
 
-		results, err := getReceipts(ctx, cfg, db, b, s)
+		results, err := receiptsGetter.GetReceipts(ctx, cfg, db, b, s)
 		if err != nil {
 			return nil, err
 		}
