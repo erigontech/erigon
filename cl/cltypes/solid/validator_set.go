@@ -192,8 +192,8 @@ func (v *ValidatorSet) HashSSZ() ([32]byte, error) {
 	if v.MerkleTree == nil {
 		v.MerkleTree = &merkle_tree.MerkleTree{}
 		cap := uint64(v.c)
+		hashBuffer := make([]byte, 8*32)
 		v.MerkleTree.Initialize(v.l, merkle_tree.OptimalMaxTreeCacheDepth, func(idx int, out []byte) {
-			hashBuffer := make([]byte, 8*32)
 			validator := v.Get(idx)
 			if err := validator.CopyHashBufferTo(hashBuffer); err != nil {
 				panic(err)
