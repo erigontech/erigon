@@ -46,7 +46,6 @@ import (
 
 func init() {
 	withDataDir(readDomains)
-	withWriteMap(readDomains)
 	withChain(readDomains)
 	withHeimdall(readDomains)
 	withWorkers(readDomains)

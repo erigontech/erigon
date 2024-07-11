@@ -134,7 +134,6 @@ func init() {
 	withChain(stateStages)
 	withHeimdall(stateStages)
 	withWorkers(stateStages)
-	withWriteMap(stateStages)
 	rootCmd.AddCommand(stateStages)
 
 	withConfig(loopExecCmd)
@@ -144,7 +143,6 @@ func init() {
 	withChain(loopExecCmd)
 	withHeimdall(loopExecCmd)
 	withWorkers(loopExecCmd)
-	withWriteMap(loopExecCmd)
 	rootCmd.AddCommand(loopExecCmd)
 }
 
