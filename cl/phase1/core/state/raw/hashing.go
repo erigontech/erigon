@@ -17,9 +17,7 @@
 package raw
 
 import (
-	"fmt"
 	"sync"
-	"time"
 
 	"github.com/ledgerwatch/erigon-lib/common"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
@@ -31,11 +29,9 @@ import (
 func (b *BeaconState) HashSSZ() (out [32]byte, err error) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	a := time.Now()
 	if err = b.computeDirtyLeaves(); err != nil {
 		return [32]byte{}, err
 	}
-	fmt.Println("cmp", time.Since(a))
 	// for i := 0; i < len(b.leaves); i += 32 {
 	// 	fmt.Println(i/32, libcommon.BytesToHash(b.leaves[i:i+32]))
 	// }
