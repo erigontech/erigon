@@ -20,6 +20,7 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"github.com/ledgerwatch/erigon/turbo/jsonrpc/receipts"
 	"math/big"
 	"sync"
 	"sync/atomic"
@@ -137,7 +138,8 @@ type BaseAPI struct {
 	_txnReader   services.TxnReader
 	_engine      consensus.EngineReader
 
-	evmCallTimeout time.Duration
+	evmCallTimeout    time.Duration
+	receiptsGenerator *receipts.Generator
 }
 
 func NewBaseApi(f *rpchelper.Filters, stateCache kvcache.Cache, blockReader services.FullBlockReader, singleNodeMode bool, evmCallTimeout time.Duration, engine consensus.EngineReader) *BaseAPI {
@@ -159,15 +161,18 @@ func NewBaseApi(f *rpchelper.Filters, stateCache kvcache.Cache, blockReader serv
 		panic(err)
 	}
 
+	receiptsGenerator := receipts.NewGenerator(receiptsCache, blockReader, engine)
+
 	return &BaseAPI{
-		filters:        f,
-		stateCache:     stateCache,
-		blocksLRU:      blocksLRU,
-		receiptsCache:  receiptsCache,
-		_blockReader:   blockReader,
-		_txnReader:     blockReader,
-		evmCallTimeout: evmCallTimeout,
-		_engine:        engine,
+		filters:           f,
+		stateCache:        stateCache,
+		blocksLRU:         blocksLRU,
+		receiptsCache:     receiptsCache,
+		_blockReader:      blockReader,
+		_txnReader:        blockReader,
+		evmCallTimeout:    evmCallTimeout,
+		_engine:           engine,
+		receiptsGenerator: receiptsGenerator,
 	}
 }
 

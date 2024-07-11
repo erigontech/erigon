@@ -22,7 +22,9 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	lru "github.com/hashicorp/golang-lru/v2"
 	"github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon/turbo/jsonrpc/receipts"
 	"golang.org/x/sync/semaphore"
 	"math/rand"
 	"sort"
@@ -315,7 +317,6 @@ func NewMultiClient(
 	maxBlockBroadcastPeers func(*types.Header) uint,
 	disableBlockDownload bool,
 	logger log.Logger,
-	ethApiWrapper EthAPI,
 ) (*MultiClient, error) {
 	// header downloader
 	var hd *headerdownload.HeaderDownload
@@ -351,6 +352,14 @@ func NewMultiClient(
 		bd = &bodydownload.BodyDownload{}
 	}
 
+	receiptsCacheLimit := 32
+	receiptsCache, err := lru.New[common.Hash, []*types.Receipt](receiptsCacheLimit)
+	if err != nil {
+		return nil, err
+	}
+
+	receiptsGenerator := receipts.NewGenerator(receiptsCache, blockReader, engine)
+
 	cs := &MultiClient{
 		Hd:                                hd,
 		Bd:                                bd,
@@ -366,7 +375,7 @@ func NewMultiClient(
 		disableBlockDownload:              disableBlockDownload,
 		logger:                            logger,
 		getReceiptsActiveGoroutineNumber:  semaphore.NewWeighted(1),
-		ethApiWrapper:                     ethApiWrapper,
+		ethApiWrapper:                     receiptsGenerator,
 	}
 
 	return cs, nil

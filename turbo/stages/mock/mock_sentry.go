@@ -21,7 +21,6 @@ import (
 	"crypto/ecdsa"
 	"errors"
 	"fmt"
-	"github.com/ledgerwatch/erigon/turbo/jsonrpc"
 	"math/big"
 	"os"
 	"sync"
@@ -314,10 +313,8 @@ func MockWithEverything(tb testing.TB, gspec *types.Genesis, key *ecdsa.PrivateK
 	propagateNewBlockHashes := func(context.Context, []headerdownload.Announce) {}
 	penalize := func(context.Context, []headerdownload.PenaltyItem) {}
 
-	//mock.SentryClient = direct.NewSentryClientDirect(direct.ETH68, mock)
-	sentry68 := direct.NewSentryClientDirect(direct.ETH68, mock)
-	mock.SentryClient = direct.NewSentryClientDirect(direct.ETH66, mock)
-	sentries := []direct.SentryClient{mock.SentryClient, sentry68}
+	mock.SentryClient = direct.NewSentryClientDirect(direct.ETH68, mock)
+	sentries := []direct.SentryClient{mock.SentryClient}
 
 	sendBodyRequest := func(context.Context, *bodydownload.BodyRequest) ([64]byte, bool) { return [64]byte{}, false }
 	blockPropagator := func(Ctx context.Context, header *types.Header, body *types.RawBody, td *big.Int) {}
@@ -399,8 +396,7 @@ func MockWithEverything(tb testing.TB, gspec *types.Genesis, key *ecdsa.PrivateK
 	)
 
 	maxBlockBroadcastPeers := func(header *types.Header) uint { return 0 }
-	cache := kvcache.NewDummy()
-	ethApi := jsonrpc.NewBaseApi(nil, cache, mock.BlockReader, true, time.Second, engine)
+
 	mock.sentriesClient, err = sentry_multi_client.NewMultiClient(
 		mock.DB,
 		mock.ChainConfig,
@@ -414,7 +410,6 @@ func MockWithEverything(tb testing.TB, gspec *types.Genesis, key *ecdsa.PrivateK
 		maxBlockBroadcastPeers,
 		false, /* disableBlockDownload */
 		logger,
-		ethApi,
 	)
 	if err != nil {
 		if tb != nil {

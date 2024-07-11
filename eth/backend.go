@@ -636,7 +636,6 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 		maxBlockBroadcastPeers,
 		sentryMcDisableBlockDownload,
 		logger,
-		dirs,
 	)
 	if err != nil {
 		return nil, err
