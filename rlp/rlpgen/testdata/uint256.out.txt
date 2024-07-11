@@ -1,7 +1,7 @@
 package test
 
-import "github.com/ledgerwatch/erigon/rlp"
 import "github.com/holiman/uint256"
+import "github.com/ledgerwatch/erigon/rlp"
 import "io"
 
 func (obj *Test) EncodeRLP(_w io.Writer) error {
