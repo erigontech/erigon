@@ -37,6 +37,7 @@ type StreamClient struct {
 	// atomic
 	lastWrittenTime atomic.Int64
 	streaming       atomic.Bool
+	progress        atomic.Uint64
 
 	// Channels
 	batchStartChan chan types.BatchStart
@@ -91,6 +92,9 @@ func (c *StreamClient) GetLastWrittenTimeAtomic() *atomic.Int64 {
 }
 func (c *StreamClient) GetStreamingAtomic() *atomic.Bool {
 	return &c.streaming
+}
+func (c *StreamClient) GetProgressAtomic() *atomic.Uint64 {
+	return &c.progress
 }
 
 // Opens a TCP connection to the server
@@ -179,7 +183,7 @@ func (c *StreamClient) ReadEntries(bookmark *types.BookmarkProto, l2BlocksAmount
 
 // reads entries to the end of the stream
 // at end will wait for new entries to arrive
-func (c *StreamClient) ReadAllEntriesToChannel(bookmark *types.BookmarkProto) error {
+func (c *StreamClient) ReadAllEntriesToChannel() error {
 	c.streaming.Store(true)
 	defer c.streaming.Store(false)
 
@@ -189,6 +193,15 @@ func (c *StreamClient) ReadAllEntriesToChannel(bookmark *types.BookmarkProto) er
 		if err := c.tryReConnect(); err != nil {
 			return fmt.Errorf("failed to reconnect the datastream client: %W", err)
 		}
+		log.Info("[datastream_client] Datastream client connected.")
+	}
+
+	var bookmark *types.BookmarkProto
+	progress := c.progress.Load()
+	if progress == 0 {
+		bookmark = types.NewBookmarkProto(0, datastream.BookmarkType_BOOKMARK_TYPE_BATCH)
+	} else {
+		bookmark = types.NewBookmarkProto(progress, datastream.BookmarkType_BOOKMARK_TYPE_L2_BLOCK)
 	}
 
 	protoBookmark, err := bookmark.Marshal()
@@ -442,8 +455,6 @@ func (c *StreamClient) readFullBlockProto() (*types.FullL2Block, *types.BatchSta
 		entriesRead++
 	}
 
-	var l2Block *types.FullL2Block
-
 	// If starting with a batch, return so it can be held whilst blocks are added to it
 	if file.IsBatchStart() {
 		batchStart, err = types.UnmarshalBatchStart(file.Data)
@@ -461,13 +472,11 @@ func (c *StreamClient) readFullBlockProto() (*types.FullL2Block, *types.BatchSta
 		}
 		log.Trace("batch end", "batchEnd", batchEnd)
 		// we might not have a block here if the batch end was immediately after the batch start
-		if l2Block == nil {
-			l2Block = &types.FullL2Block{}
-		}
-		return l2Block, nil, batchEnd, &gerUpdates, nil, nil, fromEntry, entriesRead, nil
+		return nil, nil, batchEnd, &gerUpdates, nil, nil, fromEntry, entriesRead, nil
 	}
 
 	// Now handle the L2 block
+	var l2Block *types.FullL2Block
 	if file.IsL2Block() {
 		l2Block, err = types.UnmarshalL2Block(file.Data)
 		if err != nil {
@@ -592,8 +601,7 @@ func (c *StreamClient) readHeaderEntry() (*types.HeaderEntry, error) {
 		return &types.HeaderEntry{}, fmt.Errorf("failed to read header bytes %v", err)
 	}
 
-	var headLength uint32
-	headLength = binary.BigEndian.Uint32(binaryHeader[1:5])
+	headLength := binary.BigEndian.Uint32(binaryHeader[1:5])
 	if headLength == types.HeaderSize {
 		// Read the rest of fixed size fields
 		buffer, err := readBuffer(c.conn, types.HeaderSize-types.HeaderSizePreEtrog)

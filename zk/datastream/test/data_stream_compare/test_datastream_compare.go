@@ -8,8 +8,6 @@ import (
 	"reflect"
 
 	"github.com/ledgerwatch/erigon/zk/datastream/client"
-	"github.com/ledgerwatch/erigon/zk/datastream/proto/github.com/0xPolygonHermez/zkevm-node/state/datastream"
-	"github.com/ledgerwatch/erigon/zk/datastream/types"
 	"github.com/nsf/jsondiff"
 )
 
@@ -41,14 +39,14 @@ func main() {
 		return
 	}
 
-	initialBookmark := types.NewBookmarkProto(0, datastream.BookmarkType_BOOKMARK_TYPE_L2_BLOCK)
+	client1.GetProgressAtomic().Store(0)
 
-	data1, err := readFromClient(client1, initialBookmark, 5000)
+	data1, err := readFromClient(client1, 5000)
 	if err != nil {
 		fmt.Printf("error: %v", err)
 	}
 
-	data2, err := readFromClient(client2, initialBookmark, 5000)
+	data2, err := readFromClient(client2, 5000)
 	if err != nil {
 		fmt.Printf("error: %v", err)
 	}
@@ -68,9 +66,9 @@ func main() {
 	fmt.Println("test complete...")
 }
 
-func readFromClient(client *client.StreamClient, bookmark *types.BookmarkProto, total int) ([]interface{}, error) {
+func readFromClient(client *client.StreamClient, total int) ([]interface{}, error) {
 	go func() {
-		err := client.ReadAllEntriesToChannel(bookmark)
+		err := client.ReadAllEntriesToChannel()
 		if err != nil {
 			fmt.Printf("error: %v", err)
 			return

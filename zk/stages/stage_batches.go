@@ -23,7 +23,6 @@ import (
 
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/eth/ethconfig"
-	"github.com/ledgerwatch/erigon/zk/datastream/proto/github.com/0xPolygonHermez/zkevm-node/state/datastream"
 	"github.com/ledgerwatch/erigon/zk/utils"
 	"github.com/ledgerwatch/log/v3"
 )
@@ -73,12 +72,13 @@ type HermezDb interface {
 }
 
 type DatastreamClient interface {
-	ReadAllEntriesToChannel(bookmark *types.BookmarkProto) error
+	ReadAllEntriesToChannel() error
 	GetL2BlockChan() chan types.FullL2Block
 	GetBatchStartChan() chan types.BatchStart
 	GetGerUpdatesChan() chan types.GerUpdate
 	GetLastWrittenTimeAtomic() *atomic.Int64
 	GetStreamingAtomic() *atomic.Bool
+	GetProgressAtomic() *atomic.Uint64
 }
 
 type BatchesCfg struct {
@@ -152,27 +152,26 @@ func SpawnStageBatches(
 	}
 
 	startSyncTime := time.Now()
-	stopChan := make(chan struct{}, 1)
+	dsClientProgress := cfg.dsClient.GetProgressAtomic()
+	dsClientProgress.Store(stageProgressBlockNo)
 	// start routine to download blocks and push them in a channel
 	if !cfg.dsClient.GetStreamingAtomic().Load() {
 		log.Info(fmt.Sprintf("[%s] Starting stream", logPrefix), "startBlock", stageProgressBlockNo)
 		// this will download all blocks from datastream and push them in a channel
 		// if no error, break, else continue trying to get them
 		// Create bookmark
-		var bookmark *types.BookmarkProto
-		if stageProgressBlockNo == 0 {
-			bookmark = types.NewBookmarkProto(0, datastream.BookmarkType_BOOKMARK_TYPE_BATCH)
-		} else {
-			bookmark = types.NewBookmarkProto(stageProgressBlockNo, datastream.BookmarkType_BOOKMARK_TYPE_L2_BLOCK)
-		}
 
 		go func() {
 			log.Info(fmt.Sprintf("[%s] Started downloading L2Blocks routine", logPrefix))
 			defer log.Info(fmt.Sprintf("[%s] Finished downloading L2Blocks routine", logPrefix))
 
-			if err := cfg.dsClient.ReadAllEntriesToChannel(bookmark); err != nil {
-				log.Error(fmt.Sprintf("[%s] Error downloading blocks from datastream", logPrefix), "error", err)
-				stopChan <- struct{}{}
+			for i := 0; i < 5; i++ {
+				if err := cfg.dsClient.ReadAllEntriesToChannel(); err != nil {
+					log.Error("[datastream_client] Error downloading blocks from datastream", "error", err)
+					continue
+				}
+				// if it was overnot because of an error, don't try to reconnect
+				break
 			}
 		}()
 	}
@@ -229,8 +228,6 @@ LOOP:
 		// if download routine finished, should continue to read from channel until it's empty
 		// if both download routine stopped and channel empty - stop loop
 		select {
-		case <-stopChan:
-			break LOOP
 		case batchStart := <-batchStartChan:
 			// check if the batch is invalid so that we can replicate this over in the stream
 			// when we re-populate it
@@ -346,6 +343,7 @@ LOOP:
 			if err := writeL2Block(eriDb, hermezDb, &l2Block, highestL1InfoTreeIndex); err != nil {
 				return fmt.Errorf("writeL2Block error: %v", err)
 			}
+			dsClientProgress.Store(l2Block.L2BlockNumber)
 
 			// make sure to capture the l1 info tree index changes so we can store progress
 			if uint64(l2Block.L1InfoTreeIndex) > highestL1InfoTreeIndex {
@@ -383,7 +381,7 @@ LOOP:
 				// stop the current iteration of the stage
 				lastWrittenTs := lastWrittenTimeAtomic.Load()
 				timePassedAfterlastBlock := time.Since(time.Unix(0, lastWrittenTs))
-				if streamingAtomic.Load() && timePassedAfterlastBlock > cfg.zkCfg.DatastreamNewBlockTimeout {
+				if timePassedAfterlastBlock > cfg.zkCfg.DatastreamNewBlockTimeout {
 					log.Info(fmt.Sprintf("[%s] No new blocks in %d miliseconds. Ending the stage.", logPrefix, timePassedAfterlastBlock.Milliseconds()), "lastBlockHeight", lastBlockHeight)
 					endLoop = true
 				}
@@ -397,7 +395,7 @@ LOOP:
 					// 	break
 					// }
 
-					if !cfg.dsClient.GetStreamingAtomic().Load() {
+					if !streamingAtomic.Load() {
 						log.Info(fmt.Sprintf("[%s] Datastream disconnected. Ending the stage.", logPrefix))
 						break LOOP
 					}
