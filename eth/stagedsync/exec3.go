@@ -784,92 +784,90 @@ Loop:
 				} else {
 					rs.AddWork(ctx, txTask, in)
 				}
-			} else {
-				count++
+				stageProgress = blockNum
+				inputTxNum++
+				continue
+			}
+
+			count++
+			if txTask.Error != nil {
+				break Loop
+			}
+			applyWorker.RunTxTaskNoLock(txTask)
+			if err := func() error {
+				if errors.Is(txTask.Error, context.Canceled) {
+					return err
+				}
 				if txTask.Error != nil {
-					break Loop
+					return fmt.Errorf("%w, txnIdx=%d, %v", consensus.ErrInvalidBlock, txTask.TxIndex, txTask.Error) //same as in stage_exec.go
 				}
-				applyWorker.RunTxTaskNoLock(txTask)
-
-				if err := func() error {
-					if errors.Is(txTask.Error, context.Canceled) {
-						return err
-					}
-					if txTask.Error != nil {
-						return fmt.Errorf("%w, txnIdx=%d, %v", consensus.ErrInvalidBlock, txTask.TxIndex, txTask.Error) //same as in stage_exec.go
-					}
-					usedGas += txTask.UsedGas
-					if txTask.Tx != nil {
-						blobGasUsed += txTask.Tx.GetBlobGas()
-					}
-
-					if !(txTask.Final || txTask.TxIndex < 0) {
-						receipts = append(receipts, txTask.CreateReceipt(usedGas))
-					}
-
-					if txTask.Final {
-						checkReceipts := !cfg.vmConfig.StatelessExec && chainConfig.IsByzantium(txTask.BlockNum) && !cfg.vmConfig.NoReceipts
-						if txTask.BlockNum > 0 && !skipPostEvaluation { //Disable check for genesis. Maybe need somehow improve it in future - to satisfy TestExecutionSpec
-							// Set the receipt logs and create a bloom for filtering
-							for _, r := range receipts {
-								r.Bloom = types.CreateBloom(types.Receipts{r})
-							}
-							if err := core.BlockPostValidation(usedGas, blobGasUsed, checkReceipts, types.DeriveSha(receipts), txTask.Header); err != nil {
-								return fmt.Errorf("%w, txnIdx=%d, %v", consensus.ErrInvalidBlock, txTask.TxIndex, err) //same as in stage_exec.go
-							}
-						}
-						usedGas, blobGasUsed = 0, 0
-						receipts = receipts[:0]
-					}
-					return nil
-				}(); err != nil {
-					if errors.Is(err, context.Canceled) {
-						return err
-					}
-					logger.Warn(fmt.Sprintf("[%s] Execution failed", execStage.LogPrefix()), "block", blockNum, "txNum", txTask.TxNum, "hash", header.Hash().String(), "err", err)
-					if cfg.hd != nil && errors.Is(err, consensus.ErrInvalidBlock) {
-						cfg.hd.ReportBadHeaderPoS(header.Hash(), header.ParentHash)
-					}
-					if cfg.badBlockHalt {
-						return err
-					}
-					if errors.Is(err, consensus.ErrInvalidBlock) {
-						if err := u.UnwindTo(blockNum-1, BadBlock(header.Hash(), err), applyTx); err != nil {
-							return err
-						}
-					} else {
-						if err := u.UnwindTo(blockNum-1, ExecUnwind, applyTx); err != nil {
-							return err
-						}
-					}
-					break Loop
+				usedGas += txTask.UsedGas
+				if txTask.Tx != nil {
+					blobGasUsed += txTask.Tx.GetBlobGas()
 				}
 
-				if txTask.Final || txTask.TxIndex < 0 {
-					txnID := baseBlockTxnID + kv.TxnId(txTask.TxIndex)
-					//write for system txn also, but don't add it to `receipts` array (consensus doesn't expect it)
-					if err := rawtemporaldb.AppendReceipts(doms, txnID, &types.Receipt{
-						TransactionIndex:  uint(txTask.TxIndex),
-						CumulativeGasUsed: usedGas,
-						Status:            types.ReceiptStatusSuccessful,
-					}); err != nil {
+				if !(txTask.Final || txTask.TxIndex < 0) {
+					receipts = append(receipts, txTask.CreateReceipt(usedGas))
+				}
+
+				if txTask.Final {
+					checkReceipts := !cfg.vmConfig.StatelessExec && chainConfig.IsByzantium(txTask.BlockNum) && !cfg.vmConfig.NoReceipts
+					if txTask.BlockNum > 0 && !skipPostEvaluation { //Disable check for genesis. Maybe need somehow improve it in future - to satisfy TestExecutionSpec
+						if err := core.BlockPostValidation(usedGas, blobGasUsed, checkReceipts, receipts, txTask.Header); err != nil {
+							return fmt.Errorf("%w, txnIdx=%d, %v", consensus.ErrInvalidBlock, txTask.TxIndex, err) //same as in stage_exec.go
+						}
+					}
+					usedGas, blobGasUsed = 0, 0
+					receipts = receipts[:0]
+				}
+				return nil
+			}(); err != nil {
+				if errors.Is(err, context.Canceled) {
+					return err
+				}
+				logger.Warn(fmt.Sprintf("[%s] Execution failed", execStage.LogPrefix()), "block", blockNum, "txNum", txTask.TxNum, "hash", header.Hash().String(), "err", err)
+				if cfg.hd != nil && errors.Is(err, consensus.ErrInvalidBlock) {
+					cfg.hd.ReportBadHeaderPoS(header.Hash(), header.ParentHash)
+				}
+				if cfg.badBlockHalt {
+					return err
+				}
+				if errors.Is(err, consensus.ErrInvalidBlock) {
+					if err := u.UnwindTo(blockNum-1, BadBlock(header.Hash(), err), applyTx); err != nil {
 						return err
 					}
 				} else {
-					txnID := baseBlockTxnID + kv.TxnId(txTask.TxIndex)
-					if err := rawtemporaldb.AppendReceipts(doms, txnID, receipts[txTask.TxIndex]); err != nil {
+					if err := u.UnwindTo(blockNum-1, ExecUnwind, applyTx); err != nil {
 						return err
 					}
 				}
+				break Loop
+			}
 
-				// MA applystate
-				if err := rs.ApplyState4(ctx, txTask); err != nil {
+			if txTask.Final || txTask.TxIndex < 0 {
+				txnID := baseBlockTxnID + kv.TxnId(txTask.TxIndex)
+				//write for system txn also, but don't add it to `receipts` array (consensus doesn't expect it)
+				if err := rawtemporaldb.AppendReceipts(doms, txnID, &types.Receipt{
+					TransactionIndex:  uint(txTask.TxIndex),
+					CumulativeGasUsed: usedGas,
+					Status:            types.ReceiptStatusSuccessful,
+				}); err != nil {
 					return err
 				}
-
-				execTriggers.AddInt(rs.CommitTxNum(txTask.Sender, txTask.TxNum, in))
-				outputTxNum.Add(1)
+			} else {
+				txnID := baseBlockTxnID + kv.TxnId(txTask.TxIndex)
+				if err := rawtemporaldb.AppendReceipts(doms, txnID, receipts[txTask.TxIndex]); err != nil {
+					return err
+				}
 			}
+
+			// MA applystate
+			if err := rs.ApplyState4(ctx, txTask); err != nil {
+				return err
+			}
+
+			outputTxNum.Add(1)
+
 			stageProgress = blockNum
 			inputTxNum++
 		}

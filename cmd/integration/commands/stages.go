@@ -485,10 +485,12 @@ func init() {
 	withDataDir(cmdPrintStages)
 	withChain(cmdPrintStages)
 	withHeimdall(cmdPrintStages)
+	withWriteMap(cmdPrintStages)
 	rootCmd.AddCommand(cmdPrintStages)
 
 	withDataDir(cmdPrintTableSizes)
 	withOutputCsvFile(cmdPrintTableSizes)
+	withWriteMap(cmdPrintTableSizes)
 	rootCmd.AddCommand(cmdPrintTableSizes)
 
 	withConfig(cmdStageSenders)
@@ -499,12 +501,14 @@ func init() {
 	withDataDir(cmdStageSenders)
 	withChain(cmdStageSenders)
 	withHeimdall(cmdStageSenders)
+	withWriteMap(cmdStageSenders)
 	rootCmd.AddCommand(cmdStageSenders)
 
 	withConfig(cmdStageSnapshots)
 	withDataDir(cmdStageSnapshots)
 	withChain(cmdStageSnapshots)
 	withReset(cmdStageSnapshots)
+	withWriteMap(cmdStageSnapshots)
 	rootCmd.AddCommand(cmdStageSnapshots)
 
 	withConfig(cmdStageHeaders)
@@ -514,6 +518,7 @@ func init() {
 	withReset(cmdStageHeaders)
 	withChain(cmdStageHeaders)
 	withHeimdall(cmdStageHeaders)
+	withWriteMap(cmdStageHeaders)
 	rootCmd.AddCommand(cmdStageHeaders)
 
 	withConfig(cmdStageBorHeimdall)
@@ -522,6 +527,7 @@ func init() {
 	withUnwind(cmdStageBorHeimdall)
 	withChain(cmdStageBorHeimdall)
 	withHeimdall(cmdStageBorHeimdall)
+	withWriteMap(cmdStageBorHeimdall)
 	rootCmd.AddCommand(cmdStageBorHeimdall)
 
 	withConfig(cmdStageBodies)
@@ -529,6 +535,7 @@ func init() {
 	withUnwind(cmdStageBodies)
 	withChain(cmdStageBodies)
 	withHeimdall(cmdStageBodies)
+	withWriteMap(cmdStageBodies)
 	rootCmd.AddCommand(cmdStageBodies)
 
 	withConfig(cmdStageExec)
@@ -543,6 +550,7 @@ func init() {
 	withChain(cmdStageExec)
 	withHeimdall(cmdStageExec)
 	withWorkers(cmdStageExec)
+	withWriteMap(cmdStageExec)
 	rootCmd.AddCommand(cmdStageExec)
 
 	withConfig(cmdStageCustomTrace)
@@ -557,6 +565,7 @@ func init() {
 	withChain(cmdStageCustomTrace)
 	withHeimdall(cmdStageCustomTrace)
 	withWorkers(cmdStageCustomTrace)
+	withWriteMap(cmdStageCustomTrace)
 	rootCmd.AddCommand(cmdStageCustomTrace)
 
 	withConfig(cmdStagePatriciaTrie)
@@ -568,6 +577,7 @@ func init() {
 	withIntegrityChecks(cmdStagePatriciaTrie)
 	withChain(cmdStagePatriciaTrie)
 	withHeimdall(cmdStagePatriciaTrie)
+	withWriteMap(cmdStagePatriciaTrie)
 	rootCmd.AddCommand(cmdStagePatriciaTrie)
 
 	withConfig(cmdStageTxLookup)
@@ -578,10 +588,12 @@ func init() {
 	withPruneTo(cmdStageTxLookup)
 	withChain(cmdStageTxLookup)
 	withHeimdall(cmdStageTxLookup)
+	withWriteMap(cmdStageTxLookup)
 	rootCmd.AddCommand(cmdStageTxLookup)
 
 	withConfig(cmdPrintMigrations)
 	withDataDir(cmdPrintMigrations)
+	withWriteMap(cmdPrintMigrations)
 	rootCmd.AddCommand(cmdPrintMigrations)
 
 	withConfig(cmdRemoveMigration)
@@ -589,6 +601,7 @@ func init() {
 	withMigration(cmdRemoveMigration)
 	withChain(cmdRemoveMigration)
 	withHeimdall(cmdRemoveMigration)
+	withWriteMap(cmdRemoveMigration)
 	rootCmd.AddCommand(cmdRemoveMigration)
 
 	withConfig(cmdRunMigrations)
@@ -596,11 +609,13 @@ func init() {
 	withSqueezeCommitmentFiles(cmdRunMigrations)
 	withChain(cmdRunMigrations)
 	withHeimdall(cmdRunMigrations)
+	withWriteMap(cmdRunMigrations)
 	rootCmd.AddCommand(cmdRunMigrations)
 
 	withConfig(cmdSetSnap)
 	withDataDir2(cmdSetSnap)
 	withChain(cmdSetSnap)
+	withWriteMap(cmdSetSnap)
 	cmdSetSnap.Flags().Bool("snapshots", false, "")
 	must(cmdSetSnap.MarkFlagRequired("snapshots"))
 	rootCmd.AddCommand(cmdSetSnap)
@@ -608,6 +623,7 @@ func init() {
 	withConfig(cmdSetPrune)
 	withDataDir(cmdSetPrune)
 	withChain(cmdSetPrune)
+	withWriteMap(cmdSetPrune)
 	cmdSetPrune.Flags().StringVar(&pruneFlag, "prune", "hrtc", "")
 	cmdSetPrune.Flags().Uint64Var(&pruneB, "prune.b.older", 0, "")
 	cmdSetPrune.Flags().Uint64Var(&pruneH, "prune.h.older", 0, "")

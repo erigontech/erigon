@@ -87,6 +87,7 @@ func (t *TxTask) CreateReceipt(cumulativeGasUsed uint64) *types.Receipt {
 		BlockHash:         t.BlockHash,
 		TransactionIndex:  uint(t.TxIndex),
 		Type:              t.Tx.Type(),
+		GasUsed:           t.UsedGas,
 		CumulativeGasUsed: cumulativeGasUsed,
 		TxHash:            t.Tx.Hash(),
 		Logs:              t.Logs,

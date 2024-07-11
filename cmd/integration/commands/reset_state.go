@@ -107,9 +107,11 @@ func init() {
 	withConfig(cmdResetState)
 	withDataDir(cmdResetState)
 	withChain(cmdResetState)
+	withWriteMap(cmdResetState)
 	rootCmd.AddCommand(cmdResetState)
 
 	withDataDir(cmdClearBadBlocks)
+	withWriteMap(cmdClearBadBlocks)
 	rootCmd.AddCommand(cmdClearBadBlocks)
 }
 

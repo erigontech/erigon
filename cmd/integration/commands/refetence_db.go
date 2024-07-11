@@ -169,11 +169,13 @@ func init() {
 
 	withDataDir(cmdWarmup)
 	withBucket(cmdWarmup)
+	withWriteMap(cmdWarmup)
 
 	rootCmd.AddCommand(cmdWarmup)
 
 	withDataDir(cmdMdbxTopDup)
 	withBucket(cmdMdbxTopDup)
+	withWriteMap(cmdMdbxToMdbx)
 
 	rootCmd.AddCommand(cmdMdbxTopDup)
 
@@ -186,19 +188,27 @@ func init() {
 	withDataDir(cmdMdbxToMdbx)
 	withToChaindata(cmdMdbxToMdbx)
 	withBucket(cmdMdbxToMdbx)
+	withWriteMap(cmdMdbxToMdbx)
 
 	rootCmd.AddCommand(cmdMdbxToMdbx)
 
 	withToChaindata(cmdFToMdbx)
 	withFile(cmdFToMdbx)
 	withBucket(cmdFToMdbx)
+	withWriteMap(cmdFToMdbx)
 
 	rootCmd.AddCommand(cmdFToMdbx)
 }
 
 func doWarmup(ctx context.Context, chaindata string, bucket string, logger log.Logger) error {
 	const ThreadsLimit = 5_000
-	db := mdbx2.NewMDBX(log.New()).Path(chaindata).Accede().RoTxsLimiter(semaphore.NewWeighted(ThreadsLimit)).MustOpen()
+	dbOpts := mdbx2.NewMDBX(log.New()).Path(chaindata).Accede().RoTxsLimiter(semaphore.NewWeighted(ThreadsLimit))
+
+	if dbWriteMap {
+		dbOpts = dbOpts.WriteMap()
+	}
+
+	db := dbOpts.MustOpen()
 	defer db.Close()
 
 	var total uint64
@@ -252,7 +262,13 @@ func doWarmup(ctx context.Context, chaindata string, bucket string, logger log.L
 
 func mdbxTopDup(ctx context.Context, chaindata string, bucket string, logger log.Logger) error {
 	const ThreadsLimit = 5_000
-	db := mdbx2.NewMDBX(log.New()).Accede().Path(chaindata).RoTxsLimiter(semaphore.NewWeighted(ThreadsLimit)).MustOpen()
+	dbOpts := mdbx2.NewMDBX(log.New()).Path(chaindata).Accede().RoTxsLimiter(semaphore.NewWeighted(ThreadsLimit))
+
+	if dbWriteMap {
+		dbOpts = dbOpts.WriteMap()
+	}
+
+	db := dbOpts.MustOpen()
 	defer db.Close()
 
 	cnt := map[string]int{}
@@ -415,7 +431,11 @@ func fToMdbx(ctx context.Context, logger log.Logger, to string) error {
 	}
 	defer file.Close()
 
-	dst := mdbx2.NewMDBX(logger).Path(to).MustOpen()
+	dstOpts := mdbx2.NewMDBX(logger).Path(to)
+	if dbWriteMap {
+		dstOpts = dstOpts.WriteMap()
+	}
+	dst := dstOpts.MustOpen()
 	dstTx, err1 := dst.BeginRw(ctx)
 	if err1 != nil {
 		return err1
