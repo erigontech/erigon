@@ -123,7 +123,6 @@ func (s *Sentinel) listenForPeers() {
 				log.Trace("[Sentinel] Could not connect with peer", "err", err)
 			}
 		}(peerInfo)
-
 	}
 }
 
