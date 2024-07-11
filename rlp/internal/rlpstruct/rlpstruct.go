@@ -105,8 +105,8 @@ func ProcessFields(allFields []Field) ([]Field, []Tags, error) {
 	lastPublic := lastPublicField(allFields)
 
 	// Gather all exported fields and their tags.
-	var fields []Field
-	var tags []Tags
+	var fields []Field //nolint:prealloc
+	var tags []Tags    //nolint:prealloc
 	for _, field := range allFields {
 		if !field.Exported {
 			continue
