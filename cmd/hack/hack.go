@@ -682,11 +682,11 @@ func trimTxs(chaindata string) error {
 	fmt.Printf("Number of txn records to delete: %d\n", toDelete.GetCardinality())
 	fmt.Printf("Roaring size: %d\n", toDelete.GetSizeInBytes())
 
-	iter := toDelete.Iterator()
+	it := toDelete.Iterator()
 	for {
 		var deleted int
-		for iter.HasNext() {
-			txId := iter.Next()
+		for it.HasNext() {
+			txId := it.Next()
 			var key [8]byte
 			binary.BigEndian.PutUint64(key[:], txId)
 			if err = txs.Delete(key[:]); err != nil {
