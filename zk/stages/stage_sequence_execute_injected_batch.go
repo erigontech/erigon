@@ -5,6 +5,7 @@ import (
 
 	"errors"
 
+	"github.com/ledgerwatch/erigon/core"
 	"github.com/ledgerwatch/erigon/core/state"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/core/vm"
@@ -29,6 +30,7 @@ func processInjectedInitialBatch(
 	header *types.Header,
 	parentBlock *types.Block,
 	blockContext *evmtypes.BlockContext,
+	l1Recovery bool,
 ) error {
 	injected, err := sdb.hermezDb.GetL1InjectedBatch(0)
 	if err != nil {
@@ -61,16 +63,17 @@ func processInjectedInitialBatch(
 		return err
 	}
 
-	txn, receipt, effectiveGas, err := handleInjectedBatch(cfg, sdb, ibs, blockContext, injected, header, parentBlock, forkId)
+	txn, receipt, execResult, effectiveGas, err := handleInjectedBatch(cfg, sdb, ibs, blockContext, injected, header, parentBlock, forkId)
 	if err != nil {
 		return err
 	}
 
 	txns := types.Transactions{*txn}
 	receipts := types.Receipts{receipt}
+	execResults := []*core.ExecutionResult{execResult}
 	effectiveGases := []uint8{effectiveGas}
 
-	_, err = doFinishBlockAndUpdateState(ctx, cfg, s, sdb, ibs, header, parentBlock, forkId, injectedBatchNumber, injected.LastGlobalExitRoot, injected.L1ParentHash, txns, receipts, effectiveGases, 0)
+	_, err = doFinishBlockAndUpdateState(ctx, cfg, s, sdb, ibs, header, parentBlock, forkId, injectedBatchNumber, injected.LastGlobalExitRoot, injected.L1ParentHash, txns, receipts, execResults, effectiveGases, 0, l1Recovery)
 	return err
 }
 
@@ -83,26 +86,26 @@ func handleInjectedBatch(
 	header *types.Header,
 	parentBlock *types.Block,
 	forkId uint64,
-) (*types.Transaction, *types.Receipt, uint8, error) {
+) (*types.Transaction, *types.Receipt, *core.ExecutionResult, uint8, error) {
 	decodedBlocks, err := zktx.DecodeBatchL2Blocks(injected.Transaction, forkId)
 	if err != nil {
-		return nil, nil, 0, err
+		return nil, nil, nil, 0, err
 	}
 	if len(decodedBlocks) == 0 || len(decodedBlocks) > 1 {
-		return nil, nil, 0, errors.New("expected 1 block for the injected batch")
+		return nil, nil, nil, 0, errors.New("expected 1 block for the injected batch")
 	}
 	if len(decodedBlocks[0].Transactions) == 0 {
-		return nil, nil, 0, errors.New("expected 1 transaction in the injected batch")
+		return nil, nil, nil, 0, errors.New("expected 1 transaction in the injected batch")
 	}
 
 	batchCounters := vm.NewBatchCounterCollector(sdb.smt.GetDepth(), uint16(forkId), cfg.zk.VirtualCountersSmtReduction, cfg.zk.ShouldCountersBeUnlimited(false), nil)
 
 	// process the tx and we can ignore the counters as an overflow at this stage means no network anyway
 	effectiveGas := DeriveEffectiveGasPrice(cfg, decodedBlocks[0].Transactions[0])
-	receipt, _, err := attemptAddTransaction(cfg, sdb, ibs, batchCounters, blockContext, header, decodedBlocks[0].Transactions[0], effectiveGas, false, forkId, 0 /* use 0 for l1InfoIndex in injected batch */)
+	receipt, execResult, _, err := attemptAddTransaction(cfg, sdb, ibs, batchCounters, blockContext, header, decodedBlocks[0].Transactions[0], effectiveGas, false, forkId, 0 /* use 0 for l1InfoIndex in injected batch */)
 	if err != nil {
-		return nil, nil, 0, err
+		return nil, nil, nil, 0, err
 	}
 
-	return &decodedBlocks[0].Transactions[0], receipt, effectiveGas, nil
+	return &decodedBlocks[0].Transactions[0], receipt, execResult, effectiveGas, nil
 }

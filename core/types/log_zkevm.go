@@ -37,11 +37,11 @@ func (_this *Log) Clone() *Log {
 	}
 }
 
-func (_this *Log) ApplyPaddingToLogsData(isForkId8, isForkId9 bool) {
+func (_this *Log) ApplyPaddingToLogsData(isForkId8, isForkId12 bool) {
 	d := _this.Data
 	mSize := len(d)
 
-	if isForkId8 || isForkId9 {
+	if isForkId8 && !isForkId12 {
 		d = applyHexPadBug(d, mSize)
 	} else {
 		// [zkEvm] fill 0 at the end

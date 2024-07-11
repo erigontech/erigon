@@ -11,8 +11,6 @@ import (
 	"bytes"
 	"io"
 
-	"errors"
-
 	mapset "github.com/deckarep/golang-set/v2"
 	"github.com/gateway-fm/cdk-erigon-lib/common/length"
 	types2 "github.com/gateway-fm/cdk-erigon-lib/types"
@@ -22,7 +20,6 @@ import (
 	"github.com/ledgerwatch/erigon/core/vm"
 	"github.com/ledgerwatch/erigon/core/vm/evmtypes"
 	"github.com/ledgerwatch/erigon/rlp"
-	"github.com/ledgerwatch/erigon/zk/constants"
 	"github.com/ledgerwatch/erigon/zk/hermez_db"
 	zktx "github.com/ledgerwatch/erigon/zk/tx"
 	"github.com/ledgerwatch/erigon/zk/utils"
@@ -185,14 +182,14 @@ func attemptAddTransaction(
 	effectiveGasPrice uint8,
 	l1Recovery bool,
 	forkId, l1InfoIndex uint64,
-) (*types.Receipt, bool, error) {
+) (*types.Receipt, *core.ExecutionResult, bool, error) {
 	txCounters := vm.NewTransactionCounter(transaction, sdb.smt.GetDepth(), uint16(forkId), cfg.zk.VirtualCountersSmtReduction, cfg.zk.ShouldCountersBeUnlimited(l1Recovery))
 	overflow, err := batchCounters.AddNewTransactionCounters(txCounters)
 	if err != nil {
-		return nil, false, err
+		return nil, nil, false, err
 	}
 	if overflow && !l1Recovery {
-		return nil, true, nil
+		return nil, nil, true, nil
 	}
 
 	gasPool := new(core.GasPool).AddGas(transactionGasLimit)
@@ -219,26 +216,22 @@ func attemptAddTransaction(
 	)
 
 	if err != nil {
-		return nil, false, err
-	}
-
-	if forkId <= uint64(constants.ForkID7Etrog) && errors.Is(execResult.Err, vm.ErrUnsupportedPrecompile) {
-		receipt.Status = 1
+		return nil, nil, false, err
 	}
 
 	// we need to keep hold of the effective percentage used
 	// todo [zkevm] for now we're hard coding to the max value but we need to calc this properly
 	if err = sdb.hermezDb.WriteEffectiveGasPricePercentage(transaction.Hash(), effectiveGasPrice); err != nil {
-		return nil, false, err
+		return nil, nil, false, err
 	}
 
 	err = txCounters.ProcessTx(ibs, execResult.ReturnData)
 	if err != nil {
-		return nil, false, err
+		return nil, nil, false, err
 	}
 
 	// now that we have executed we can check again for an overflow
 	overflow, err = batchCounters.CheckForOverflow(l1InfoIndex != 0)
 
-	return receipt, overflow, err
+	return receipt, execResult, overflow, err
 }

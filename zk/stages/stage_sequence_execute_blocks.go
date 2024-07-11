@@ -20,8 +20,8 @@ import (
 	"github.com/ledgerwatch/erigon/zk/erigon_db"
 	"github.com/ledgerwatch/erigon/zk/hermez_db"
 	zktypes "github.com/ledgerwatch/erigon/zk/types"
-	"github.com/ledgerwatch/secp256k1"
 	"github.com/ledgerwatch/erigon/zk/utils"
+	"github.com/ledgerwatch/secp256k1"
 )
 
 func handleStateForNewBlockStarting(
@@ -81,7 +81,9 @@ func finaliseBlock(
 	l1BlockHash common.Hash,
 	transactions []types.Transaction,
 	receipts types.Receipts,
+	execResults []*core.ExecutionResult,
 	effectiveGases []uint8,
+	l1Recovery bool,
 ) (*types.Block, error) {
 	stateWriter := state.NewPlainStateWriter(sdb.tx, sdb.tx, newHeader.Number.Uint64()).SetAccumulator(accumulator)
 	chainReader := stagedsync.ChainReader{
@@ -108,15 +110,23 @@ func finaliseBlock(
 				return nil, err
 			}
 		}
+		localReceipt := core.CreateReceiptForBlockInfoTree(receipts[i], cfg.chainConfig, newHeader.Number.Uint64(), execResults[i])
 		txInfos = append(txInfos, blockinfo.ExecutedTxInfo{
 			Tx:                tx,
 			EffectiveGasPrice: effectiveGases[i],
-			Receipt:           receipts[i],
+			Receipt:           localReceipt,
 			Signer:            &from,
 		})
 	}
+
 	if err := postBlockStateHandling(cfg, ibs, sdb.hermezDb, newHeader, ger, l1BlockHash, parentBlock.Root(), txInfos); err != nil {
 		return nil, err
+	}
+
+	if l1Recovery {
+		for i, receipt := range receipts {
+			core.ProcessReceiptForBlockExecution(receipt, sdb.hermezDb.HermezDbReader, cfg.chainConfig, newHeader.Number.Uint64(), newHeader, transactions[i])
+		}
 	}
 
 	finalBlock, finalTransactions, finalReceipts, err := core.FinalizeBlockExecutionWithHistoryWrite(

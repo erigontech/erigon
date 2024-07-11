@@ -91,7 +91,7 @@ func SpawnSequencingStage(
 		getHashFn := core.GetHashFn(header, getHeader)
 		blockContext := core.NewEVMBlockContext(header, getHashFn, cfg.engine, &cfg.zk.AddressSequencer, parentBlock.ExcessDataGas())
 
-		if err = processInjectedInitialBatch(ctx, cfg, s, sdb, forkId, header, parentBlock, &blockContext); err != nil {
+		if err = processInjectedInitialBatch(ctx, cfg, s, sdb, forkId, header, parentBlock, &blockContext, l1Recovery); err != nil {
 			return err
 		}
 
@@ -118,6 +118,7 @@ func SpawnSequencingStage(
 
 	var addedTransactions []types.Transaction
 	var addedReceipts []*types.Receipt
+	var addedExecutionResults []*core.ExecutionResult
 	var clonedBatchCounters *vm.BatchCounterCollector
 
 	var decodedBlock zktx.DecodedBatchL2Data
@@ -284,6 +285,7 @@ func SpawnSequencingStage(
 			clonedBatchCounters = batchCounters.Clone()
 			addedTransactions = []types.Transaction{}
 			addedReceipts = []*types.Receipt{}
+			addedExecutionResults = []*core.ExecutionResult{}
 			effectiveGases = []uint8{}
 			header, parentBlock, err = prepareHeader(tx, blockNumber, deltaTimestamp, limboHeaderTimestamp, forkId, nextBatchData.Coinbase)
 			if err != nil {
@@ -401,6 +403,7 @@ func SpawnSequencingStage(
 					}
 
 					var receipt *types.Receipt
+					var execResult *core.ExecutionResult
 					for i, transaction := range blockTransactions {
 						var effectiveGas uint8
 
@@ -416,7 +419,7 @@ func SpawnSequencingStage(
 						}
 
 						if !batchDataOverflow {
-							receipt, overflow, err = attemptAddTransaction(cfg, sdb, ibs, batchCounters, &blockContext, header, transaction, effectiveGas, l1Recovery, forkId, l1InfoIndex)
+							receipt, execResult, overflow, err = attemptAddTransaction(cfg, sdb, ibs, batchCounters, &blockContext, header, transaction, effectiveGas, l1Recovery, forkId, l1InfoIndex)
 							if err != nil {
 								if limboRecovery {
 									panic("limbo transaction has already been executed once so they must not fail while re-executing")
@@ -478,6 +481,7 @@ func SpawnSequencingStage(
 
 						addedTransactions = append(addedTransactions, transaction)
 						addedReceipts = append(addedReceipts, receipt)
+						addedExecutionResults = append(addedExecutionResults, execResult)
 						effectiveGases = append(effectiveGases, effectiveGas)
 
 						hasAnyTransactionsInThisBatch = true
@@ -507,7 +511,7 @@ func SpawnSequencingStage(
 		} else {
 			for idx, transaction := range addedTransactions {
 				effectiveGas := effectiveGases[idx]
-				receipt, innerOverflow, err := attemptAddTransaction(cfg, sdb, ibs, batchCounters, &blockContext, header, transaction, effectiveGas, false, forkId, l1InfoIndex)
+				receipt, execResult, innerOverflow, err := attemptAddTransaction(cfg, sdb, ibs, batchCounters, &blockContext, header, transaction, effectiveGas, false, forkId, l1InfoIndex)
 				if err != nil {
 					return err
 				}
@@ -516,6 +520,7 @@ func SpawnSequencingStage(
 					panic(fmt.Sprintf("overflowed twice during execution while adding tx with index %d", idx))
 				}
 				addedReceipts[idx] = receipt
+				addedExecutionResults[idx] = execResult
 			}
 			runLoopBlocks = false // close the batch because there are no counters left
 		}
@@ -524,7 +529,7 @@ func SpawnSequencingStage(
 			return err
 		}
 
-		block, err = doFinishBlockAndUpdateState(ctx, cfg, s, sdb, ibs, header, parentBlock, forkId, thisBatch, ger, l1BlockHash, addedTransactions, addedReceipts, effectiveGases, infoTreeIndexProgress)
+		block, err = doFinishBlockAndUpdateState(ctx, cfg, s, sdb, ibs, header, parentBlock, forkId, thisBatch, ger, l1BlockHash, addedTransactions, addedReceipts, addedExecutionResults, effectiveGases, infoTreeIndexProgress, l1Recovery)
 		if err != nil {
 			return err
 		}

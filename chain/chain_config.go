@@ -95,6 +95,7 @@ type Config struct {
 	ForkID7EtrogBlock       *big.Int `json:"forkID7EtrogBlock,omitempty"`
 	ForkID88ElderberryBlock *big.Int `json:"forkID88ElderberryBlock,omitempty"`
 	ForkID9Elderberry2Block *big.Int `json:"forkID9FeijoaBlock,omitempty"`
+	ForkID12BananaBlock     *big.Int `json:"forkID12BananaBlock,omitempty"`
 
 	SupportGasless bool `json:"supportGasless,omitempty"`
 }
@@ -140,6 +141,8 @@ func (c *Config) SetForkIdBlock(forkIdNumber constants.ForkId, blockNum uint64) 
 		c.ForkID88ElderberryBlock = new(big.Int).SetUint64(blockNum)
 	case constants.ForkID9Elderberry2:
 		c.ForkID9Elderberry2Block = new(big.Int).SetUint64(blockNum)
+	case constants.ForkID12Banana:
+		c.ForkID12BananaBlock = new(big.Int).SetUint64(blockNum)
 	default:
 		return fmt.Errorf("unknown fork id number %d", forkIdNumber)
 	}
@@ -270,6 +273,10 @@ func (c *Config) IsForkID8Elderberry(num uint64) bool {
 
 func (c *Config) IsForkId9Elderberry2(num uint64) bool {
 	return isForked(c.ForkID9Elderberry2Block, num)
+}
+
+func (c *Config) IsForkID12Banana(num uint64) bool {
+	return isForked(c.ForkID12BananaBlock, num)
 }
 
 // CheckCompatible checks whether scheduled fork transitions have been imported
