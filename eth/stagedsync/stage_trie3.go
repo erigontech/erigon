@@ -23,7 +23,6 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
-	"slices"
 	"sync/atomic"
 
 	"github.com/erigontech/erigon-lib/common/datadir"
@@ -766,102 +765,6 @@ func (p *HashPromoter) PromoteOnHistoryV3(logPrefix string, from, to uint64, sto
 			v = nonEmptyMarker
 		}
 		if err := load(newK, v); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
-func (p *HashPromoter) UnwindOnHistoryV3(logPrefix string, unwindFrom, unwindTo uint64, storage bool, load func(k []byte, v []byte)) error {
-	txnFrom, err := rawdbv3.TxNums.Min(p.tx, unwindTo)
-	if err != nil {
-		return err
-	}
-	txnTo := uint64(math.MaxUint64)
-	var deletedAccounts [][]byte
-
-	if storage {
-		it, err := p.tx.(kv.TemporalTx).HistoryRange(kv.StorageHistory, int(txnFrom), int(txnTo), order.Asc, kv.Unlim)
-		if err != nil {
-			return err
-		}
-		for it.HasNext() {
-			k, _, err := it.Next()
-			if err != nil {
-				return err
-			}
-			// Plain state not unwind yet, it means - if key not-exists in PlainState but has value from ChangeSets - then need mark it as "created" in RetainList
-			enc, err := p.tx.GetOne(kv.PlainState, k[:20])
-			if err != nil {
-				return err
-			}
-			incarnation := uint64(1)
-			if len(enc) != 0 {
-				oldInc, _ := accounts.DecodeIncarnationFromStorage(enc)
-				incarnation = oldInc
-			}
-			plainKey := dbutils.PlainGenerateCompositeStorageKey(k[:20], incarnation, k[20:])
-			value, err := p.tx.GetOne(kv.PlainState, plainKey)
-			if err != nil {
-				return err
-			}
-			newK, err := transformPlainStateKey(plainKey)
-			if err != nil {
-				return err
-			}
-			load(newK, value)
-		}
-		return nil
-	}
-
-	it, err := p.tx.(kv.TemporalTx).HistoryRange(kv.AccountsHistory, int(txnFrom), int(txnTo), order.Asc, kv.Unlim)
-	if err != nil {
-		return err
-	}
-	for it.HasNext() {
-		k, v, err := it.Next()
-		if err != nil {
-			return err
-		}
-		newK, err := transformPlainStateKey(k)
-		if err != nil {
-			return err
-		}
-		// Plain state not unwind yet, it means - if key not-exists in PlainState but has value from ChangeSets - then need mark it as "created" in RetainList
-		value, err := p.tx.GetOne(kv.PlainState, k)
-		if err != nil {
-			return err
-		}
-
-		if len(value) > 0 {
-			oldInc, _ := accounts.DecodeIncarnationFromStorage(value)
-			if oldInc > 0 {
-				if len(v) == 0 { // self-destructed
-					deletedAccounts = append(deletedAccounts, newK)
-				} else {
-					var newAccount accounts.Account
-					if err = accounts.DeserialiseV3(&newAccount, v); err != nil {
-						return err
-					}
-					if newAccount.Incarnation > oldInc {
-						deletedAccounts = append(deletedAccounts, newK)
-					}
-				}
-			}
-		}
-
-		load(newK, value)
-	}
-
-	// delete Intermediate hashes of deleted accounts
-	slices.SortFunc(deletedAccounts, bytes.Compare)
-	for _, k := range deletedAccounts {
-		if err := p.tx.ForPrefix(kv.TrieOfStorage, k, func(k, v []byte) error {
-			if err := p.tx.Delete(kv.TrieOfStorage, k); err != nil {
-				return err
-			}
-			return nil
-		}); err != nil {
 			return err
 		}
 	}

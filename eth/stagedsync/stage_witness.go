@@ -226,7 +226,7 @@ func PrepareForWitness(tx kv.Tx, block *types.Block, prevRoot libcommon.Hash, rl
 	statedb.SetDisableBalanceInc(true)
 
 	chainReader := NewChainReaderImpl(cfg.chainConfig, tx, cfg.blockReader, logger)
-	if err := core.InitializeBlockExecution(cfg.engine, chainReader, block.Header(), cfg.chainConfig, statedb, trieStateWriter, logger); err != nil {
+	if err := core.InitializeBlockExecution(cfg.engine, chainReader, block.Header(), cfg.chainConfig, statedb, trieStateWriter, logger, nil); err != nil {
 		return nil, err
 	}
 
@@ -409,7 +409,7 @@ func VerifyWitness(tx kv.Tx, block *types.Block, prevHeader *types.Header, fullB
 	receipts := types.Receipts{}
 	vmConfig := vm.Config{}
 
-	if err := core.InitializeBlockExecution(cfg.engine, chainReader, block.Header(), cfg.chainConfig, ibs, s, logger); err != nil {
+	if err := core.InitializeBlockExecution(cfg.engine, chainReader, block.Header(), cfg.chainConfig, ibs, s, logger, nil); err != nil {
 		return nil, err
 	}
 	header := block.Header()
@@ -519,15 +519,15 @@ func PruneWitnessStage() error {
 }
 
 func UnwindIntermediateHashes(logPrefix string, rl *trie.RetainList, u *UnwindState, s *StageState, db kv.RwTx, cfg TrieCfg, quit <-chan struct{}, logger log.Logger) error {
-	p := NewHashPromoter(db, cfg.tmpDir, quit, logPrefix, logger)
-	collect := func(k, v []byte) {
-		rl.AddKeyWithMarker(k, len(v) == 0)
-	}
-	if err := p.UnwindOnHistoryV3(logPrefix, s.BlockNumber, u.UnwindPoint, false, collect); err != nil {
-		return err
-	}
-	if err := p.UnwindOnHistoryV3(logPrefix, s.BlockNumber, u.UnwindPoint, true, collect); err != nil {
-		return err
-	}
+	// p := NewHashPromoter(db, cfg.tmpDir, quit, logPrefix, logger)
+	// collect := func(k, v []byte) {
+	// 	rl.AddKeyWithMarker(k, len(v) == 0)
+	// }
+	// if err := p.UnwindOnHistoryV3(logPrefix, s.BlockNumber, u.UnwindPoint, false, collect); err != nil {
+	// 	return err
+	// }
+	// if err := p.UnwindOnHistoryV3(logPrefix, s.BlockNumber, u.UnwindPoint, true, collect); err != nil {
+	// 	return err
+	// }
 	return nil
 }

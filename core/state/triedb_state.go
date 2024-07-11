@@ -1137,16 +1137,16 @@ func (tds *TrieDbState) TrieStateWriter() *TrieStateWriter {
 	return &TrieStateWriter{tds: tds}
 }
 
-// DbStateWriter creates a writer that is designed to write changes into the database batch
-func (tds *TrieDbState) DbStateWriter() *DbStateWriter {
-	db, ok := tds.db.(putDel)
+// // DbStateWriter creates a writer that is designed to write changes into the database batch
+// func (tds *TrieDbState) DbStateWriter() *DbStateWriter {
+// 	db, ok := tds.db.(putDel)
 
-	if !ok {
-		panic("DbStateWriter can only be used with a putDel database")
-	}
+// 	if !ok {
+// 		panic("DbStateWriter can only be used with a putDel database")
+// 	}
 
-	return &DbStateWriter{blockNr: tds.blockNr, db: db, csw: NewChangeSetWriter()}
-}
+// 	return &DbStateWriter{blockNr: tds.blockNr, db: db, csw: NewChangeSetWriter()}
+// }
 
 func (tsw *TrieStateWriter) UpdateAccountData(address common.Address, original, account *accounts.Account) error {
 	addrHash, err := tsw.tds.pw.HashAddress(address, false /*save*/)
