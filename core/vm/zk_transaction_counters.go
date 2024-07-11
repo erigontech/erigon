@@ -17,6 +17,7 @@ type TransactionCounter struct {
 	processingCounters *CounterCollector
 	smtLevels          int
 	forkId             uint16
+	l2DataCache        []byte
 }
 
 func NewTransactionCounter(transaction types.Transaction, smtMaxLevel int, forkId uint16, mcpReduction float64, shouldCountersBeUnlimited bool) *TransactionCounter {
@@ -49,19 +50,40 @@ func NewTransactionCounter(transaction types.Transaction, smtMaxLevel int, forkI
 }
 
 func (tc *TransactionCounter) Clone() *TransactionCounter {
+	var l2DataCacheCopy []byte
+	if tc.l2DataCache != nil {
+		l2DataCacheCopy = make([]byte, len(tc.l2DataCache))
+		copy(l2DataCacheCopy, tc.l2DataCache)
+	}
+
 	return &TransactionCounter{
 		transaction:        tc.transaction,
 		rlpCounters:        tc.rlpCounters.Clone(),
 		executionCounters:  tc.executionCounters.Clone(),
 		processingCounters: tc.processingCounters.Clone(),
 		smtLevels:          tc.smtLevels,
+		l2DataCache:        l2DataCacheCopy,
 	}
 }
 
+func (tc *TransactionCounter) GetL2DataCache() []byte {
+	return tc.l2DataCache
+}
+
+func (tc *TransactionCounter) SetL2DataCache(data []byte) {
+	tc.l2DataCache = data
+}
+
 func (tc *TransactionCounter) CalculateRlp() error {
-	raw, err := tx.TransactionToL2Data(tc.transaction, 8, tx.MaxEffectivePercentage)
-	if err != nil {
-		return err
+	raw := tc.GetL2DataCache()
+	if raw == nil {
+		data, err := tx.TransactionToL2Data(tc.transaction, 8, tx.MaxEffectivePercentage)
+		if err != nil {
+			return err
+		}
+		raw = data
+
+		tc.SetL2DataCache(data)
 	}
 
 	gasLimitHex := fmt.Sprintf("%x", tc.transaction.GetGas())
@@ -128,7 +150,7 @@ func (tc *TransactionCounter) CalculateRlp() error {
 
 	v, r, s := tc.transaction.RawSignatureValues()
 	v = tx.GetDecodedV(tc.transaction, v)
-	err = collector.ecRecover(v, r, s, false)
+	err := collector.ecRecover(v, r, s, false)
 	if err != nil {
 		return err
 	}

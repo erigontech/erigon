@@ -89,11 +89,18 @@ func (bcc *BatchCounterCollector) StartNewBlock(verifyMerkleProof bool) (bool, e
 func (bcc *BatchCounterCollector) processBatchLevelData() error {
 	totalEncodedTxLength := 0
 	for _, t := range bcc.transactions {
-		encoded, err := tx.TransactionToL2Data(t.transaction, bcc.forkId, tx.MaxEffectivePercentage)
-		if err != nil {
-			return err
+		l2Data := t.GetL2DataCache()
+		if l2Data == nil {
+			encoded, err := tx.TransactionToL2Data(t.transaction, bcc.forkId, tx.MaxEffectivePercentage)
+			if err != nil {
+				return err
+			}
+			t.SetL2DataCache(encoded)
+
+			totalEncodedTxLength += len(encoded)
+		} else {
+			totalEncodedTxLength += len(l2Data)
 		}
-		totalEncodedTxLength += len(encoded)
 	}
 
 	// simulate adding in the changeL2Block transactions
