@@ -42,7 +42,7 @@ func (m *MerkleTree) Initialize(leavesCount, maxTreeCacheDepth int, computeLeaf 
 func (m *MerkleTree) MarkLeafAsDirty(idx int) {
 	for i := 0; i < len(m.layers); i++ {
 		currDivisor := 1 << i
-		layerSize := (int(m.leavesCount) + (currDivisor - 1)) / currDivisor
+		layerSize := (m.leavesCount + (currDivisor - 1)) / currDivisor
 		if layerSize == 0 {
 			break
 		}
@@ -146,13 +146,13 @@ func (m *MerkleTree) CopyInto(other *MerkleTree) {
 
 func (m *MerkleTree) finishHashing(lastLayerIdx int, root []byte) {
 	if m.limit == nil {
-		if err := MerkleRootFromFlatFromIntermediateLevel(m.layers[lastLayerIdx], root[:], len(m.layers[0]), lastLayerIdx); err != nil {
+		if err := MerkleRootFromFlatFromIntermediateLevel(m.layers[lastLayerIdx], root, len(m.layers[0]), lastLayerIdx); err != nil {
 			panic(err)
 		}
 		return
 	}
 
-	if err := MerkleRootFromFlatFromIntermediateLevelWithLimit(m.layers[lastLayerIdx], root[:], int(*m.limit), lastLayerIdx); err != nil {
+	if err := MerkleRootFromFlatFromIntermediateLevelWithLimit(m.layers[lastLayerIdx], root, int(*m.limit), lastLayerIdx); err != nil {
 		panic(err)
 	}
 }
