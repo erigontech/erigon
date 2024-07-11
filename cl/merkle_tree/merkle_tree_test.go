@@ -139,7 +139,7 @@ func TestMerkleTreeAppendLeafWithLowMaxDepthAndLimit(t *testing.T) {
 	mt.AppendLeaf()
 	testBuffer = append(testBuffer, make([]byte, 4*length.Hash)...)
 	testBuffer[128] = 5
-	expectedRoot := getExpectedRootWithLimit(testBuffer, lm)
+	expectedRoot := getExpectedRootWithLimit(testBuffer, int(lm))
 	require.Equal(t, mt.ComputeRoot(), expectedRoot)
 	// adding 3 more empty leaves should not change the root
 	mt.AppendLeaf()

@@ -36,9 +36,9 @@ func (b *BeaconState) HashSSZ() (out [32]byte, err error) {
 		return [32]byte{}, err
 	}
 	fmt.Println("cmp", time.Since(a))
-	for i := 0; i < len(b.leaves); i += 32 {
-		fmt.Println(i/32, libcommon.BytesToHash(b.leaves[i:i+32]))
-	}
+	// for i := 0; i < len(b.leaves); i += 32 {
+	// 	fmt.Println(i/32, libcommon.BytesToHash(b.leaves[i:i+32]))
+	// }
 	// Pad to 32 of length
 	err = merkle_tree.MerkleRootFromFlatLeaves(b.leaves, out[:])
 	return
@@ -143,10 +143,8 @@ func (p *beaconStateHasher) add(idx StateLeafIndex, job any) {
 }
 
 func (b *BeaconState) computeDirtyLeaves() error {
-	// Update all dirty leafs
-	// ----
 	beaconStateHasher := &beaconStateHasher{b: b}
-	// Field(0): GenesisTime
+	// Update all dirty leafs.
 	beaconStateHasher.add(GenesisTimeLeafIndex, b.genesisTime)
 	beaconStateHasher.add(GenesisValidatorsRootLeafIndex, b.genesisValidatorsRoot)
 	beaconStateHasher.add(SlotLeafIndex, b.slot)
@@ -171,7 +169,10 @@ func (b *BeaconState) computeDirtyLeaves() error {
 		beaconStateHasher.add(CurrentEpochParticipationLeafIndex, b.currentEpochParticipation)
 	}
 
-	beaconStateHasher.add(JustificationBitsLeafIndex, b.justificationBits)
+	// Field(17): JustificationBits
+	root, _ := b.justificationBits.HashSSZ()
+	b.updateLeaf(JustificationBitsLeafIndex, root)
+
 	beaconStateHasher.add(PreviousJustifiedCheckpointLeafIndex, b.previousJustifiedCheckpoint)
 	beaconStateHasher.add(CurrentJustifiedCheckpointLeafIndex, b.currentJustifiedCheckpoint)
 	beaconStateHasher.add(FinalizedCheckpointLeafIndex, b.finalizedCheckpoint)
@@ -179,7 +180,7 @@ func (b *BeaconState) computeDirtyLeaves() error {
 		beaconStateHasher.run()
 		return nil
 	}
-	// Altair
+	// Altair fields
 	beaconStateHasher.add(InactivityScoresLeafIndex, b.inactivityScores)
 	beaconStateHasher.add(CurrentSyncCommitteeLeafIndex, b.currentSyncCommittee)
 	beaconStateHasher.add(NextSyncCommitteeLeafIndex, b.nextSyncCommittee)
@@ -187,13 +188,13 @@ func (b *BeaconState) computeDirtyLeaves() error {
 		beaconStateHasher.run()
 		return nil
 	}
-	// Bellatrix
+	// Bellatrix fields
 	beaconStateHasher.add(LatestExecutionPayloadHeaderLeafIndex, b.latestExecutionPayloadHeader)
 	if b.version < clparams.CapellaVersion {
 		beaconStateHasher.run()
 		return nil
 	}
-	// Capella
+	// Capella fields
 	beaconStateHasher.add(NextWithdrawalIndexLeafIndex, b.nextWithdrawalIndex)
 	beaconStateHasher.add(NextWithdrawalValidatorIndexLeafIndex, b.nextWithdrawalValidatorIndex)
 	beaconStateHasher.add(HistoricalSummariesLeafIndex, b.historicalSummaries)
