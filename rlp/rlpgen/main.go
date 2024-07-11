@@ -27,7 +27,7 @@ import (
 	"golang.org/x/tools/go/packages"
 )
 
-const pathOfPackageRLP = "github.com/ethereum/go-ethereum/rlp"
+const pathOfPackageRLP = "github.com/ledgerwatch/erigon/rlp"
 
 func main() {
 	var (
