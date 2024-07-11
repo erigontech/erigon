@@ -39,7 +39,7 @@ func main() {
 	cmd.RunE = func(cmd *cobra.Command, args []string) error {
 		ctx := cmd.Context()
 		logger := debug.SetupCobra(cmd, "sentry")
-		db, backend, txPool, mining, stateCache, blockReader, engine, ff, _, err := cli.RemoteServices(ctx, cfg, logger, rootCancel)
+		db, backend, txPool, mining, stateCache, blockReader, engine, ff, err := cli.RemoteServices(ctx, cfg, logger, rootCancel)
 		if err != nil {
 			if !errors.Is(err, context.Canceled) {
 				logger.Error("Could not connect to DB", "err", err)
