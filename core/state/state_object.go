@@ -82,7 +82,6 @@ type stateObject struct {
 	blockOriginStorage Storage
 	dirtyStorage       Storage        // Storage entries that need to be flushed to disk
 	fakeStorage        Storage        // Fake storage which constructed by caller for debugging purpose.
-	originRootHash     libcommon.Hash // root hash of storage at time of object creation
 
 	// Cache flags.
 	// When an object is marked selfdestructed it will be delete from the trie
@@ -107,7 +106,6 @@ func newObject(db *IntraBlockState, address libcommon.Address, data, original *a
 		originStorage:      make(Storage),
 		blockOriginStorage: make(Storage),
 		dirtyStorage:       make(Storage),
-		originRootHash:    trie.EmptyRoot,
 	}
 	so.data.Copy(data)
 	if !so.data.Initialised {
@@ -123,11 +121,6 @@ func newObject(db *IntraBlockState, address libcommon.Address, data, original *a
 	so.original.Copy(original)
 
 	return &so
-}
-
-func (so *stateObject) OriginRootHash(hash libcommon.Hash) *stateObject{
-	so.originRootHash = hash
-	return so
 }
 
 // EncodeRLP implements rlp.Encoder.
