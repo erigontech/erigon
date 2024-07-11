@@ -78,6 +78,10 @@ func dbCfg(label kv.Label, path string) kv2.MdbxOpts {
 	limiterB := semaphore.NewWeighted(ThreadsLimit)
 	opts := kv2.NewMDBX(log.New()).Path(path).Label(label).RoTxsLimiter(limiterB)
 
+	if dbWriteMap {
+		opts = opts.WriteMap()
+	}
+
 	// integration tool don't intent to create db, then easiest way to open db - it's pass mdbx.Accede flag, which allow
 	// to read all options from DB, instead of overriding them
 	opts = opts.Accede()

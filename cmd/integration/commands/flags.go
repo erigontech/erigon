@@ -59,6 +59,7 @@ var (
 
 	_forceSetHistoryV3    bool
 	workers, reconWorkers uint64
+	dbWriteMap            bool
 )
 
 func must(err error) {
@@ -168,6 +169,10 @@ func withMigration(cmd *cobra.Command) {
 
 func withTxTrace(cmd *cobra.Command) {
 	cmd.Flags().BoolVar(&txtrace, "txtrace", false, "enable tracing of transactions")
+}
+
+func withWriteMap(cmd *cobra.Command) {
+	cmd.Flags().BoolVar(&dbWriteMap, utils.DbWriteMapFlag.Name, utils.DbWriteMapFlag.Value, utils.DbWriteMapFlag.Usage)
 }
 
 func withChain(cmd *cobra.Command) {
