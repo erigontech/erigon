@@ -527,12 +527,10 @@ func NewGasPriceCache() *GasPriceCache {
 }
 
 func (c *GasPriceCache) GetLatest() (common.Hash, *big.Int) {
-	var hash common.Hash
-	var price *big.Int
 	c.mtx.Lock()
-	hash = c.latestHash
-	price = c.latestPrice
-	c.mtx.Unlock()
+	defer c.mtx.Unlock()
+	hash := c.latestHash
+	price := new(big.Int).Set(c.latestPrice) // deep copy
 	return hash, price
 }
 
