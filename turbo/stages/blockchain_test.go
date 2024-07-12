@@ -359,9 +359,11 @@ func testReorg(t *testing.T, first, second []int64, td int64) {
 	}
 
 	hashPacket := make([]libcommon.Hash, 0)
+	queryNum := 0
 
 	for block.NumberU64() != 0 {
 		hashPacket = append(hashPacket, block.Hash())
+		queryNum++
 		if prev.ParentHash() != block.Hash() {
 			t.Errorf("parent block hash mismatch: have %x, want %x", prev.ParentHash(), block.Hash())
 		}
@@ -393,6 +395,19 @@ func testReorg(t *testing.T, first, second []int64, td int64) {
 
 	require.Equal(protosentry.MessageId_RECEIPTS_66, msg.Id)
 	println(string(msg.GetData()))
+	encoded, err := rlp.EncodeToBytes(types.Receipts{})
+	res := make([]rlp.RawValue, 0, queryNum)
+	for i := 0; i < queryNum; i++ {
+		res = append(res, encoded)
+	}
+
+	require.NoError(err)
+	b, err = rlp.EncodeToBytes(&eth.ReceiptsRLPPacket66{
+		RequestId:         1,
+		ReceiptsRLPPacket: res,
+	})
+	require.NoError(err)
+	require.Equal(b, msg.GetData())
 
 	// Make sure the chain total difficulty is the correct one
 	want := new(big.Int).Add(m.Genesis.Difficulty(), big.NewInt(td))
