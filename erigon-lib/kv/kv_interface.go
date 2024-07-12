@@ -36,7 +36,7 @@ import (
 //  k, v - key, value
 //  ts - TimeStamp. Usually it's Ethereum's TransactionNumber (auto-increment ID). Or BlockNumber.
 //  Cursor - low-level mdbx-tide api to navigate over Table
-//  Iter - high-level iterator-like api over Table/InvertedIndex/History/Domain. Has less features than Cursor. See package `iter`.
+//  Stream - high-level iterator-like api over Table/InvertedIndex/History/Domain. Server-side-streaming-friendly. See package `stream`.
 
 //Methods Naming:
 //  Prune: delete old data
@@ -61,7 +61,7 @@ import (
 // MediumLevel:
 //    1. TemporalDB - abstracting DB+Snapshots. Target is:
 //         - provide 'time-travel' API for data: consistent snapshot of data as of given Timestamp.
-//         - auto-close iterators on Commit/Rollback
+//         - auto-close streams on Commit/Rollback
 //         - auto-open/close agg.BeginRo() on Begin/Commit/Rollback
 //         - to keep DB small - only for Hot/Recent data (can be update/delete by re-org).
 //         - And TemporalRoTx/TemporalRwTx actually open Read-Only files view (BeginRo) - no concept of "Read-Write view of snapshot files".
