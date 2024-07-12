@@ -11,6 +11,7 @@ type TestDatastreamClient struct {
 	gerUpdates            []types.GerUpdate
 	lastWrittenTimeAtomic atomic.Int64
 	streamingAtomic       atomic.Bool
+	progress              atomic.Uint64
 	l2BlockChan           chan types.FullL2Block
 	gerUpdatesChan        chan types.GerUpdate
 	errChan               chan error
@@ -30,7 +31,7 @@ func NewTestDatastreamClient(fullL2Blocks []types.FullL2Block, gerUpdates []type
 	return client
 }
 
-func (c *TestDatastreamClient) ReadAllEntriesToChannel(bookmark *types.BookmarkProto) error {
+func (c *TestDatastreamClient) ReadAllEntriesToChannel() error {
 	c.streamingAtomic.Store(true)
 
 	for _, block := range c.fullL2Blocks {
@@ -64,4 +65,7 @@ func (c *TestDatastreamClient) GetLastWrittenTimeAtomic() *atomic.Int64 {
 }
 func (c *TestDatastreamClient) GetStreamingAtomic() *atomic.Bool {
 	return &c.streamingAtomic
+}
+func (c *TestDatastreamClient) GetProgressAtomic() *atomic.Uint64 {
+	return &c.progress
 }

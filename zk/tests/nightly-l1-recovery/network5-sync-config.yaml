@@ -3,11 +3,10 @@ chain : "dynamic-integration"
 http : true
 private.api.addr : "localhost:9096"
 zkevm.l2-chain-id: 8282
-zkevm.l2-sequencer-rpc-url: "http://34.175.214.161:8123"
-zkevm.l2-datastreamer-url: "34.175.214.161:6915"
+zkevm.l2-sequencer-rpc-url: "http://erigon:8545"
+zkevm.l2-datastreamer-url: "erigon:6900"
 zkevm.l1-chain-id: 11155111
 zkevm.l1-rpc-url: "http://cache:6969?endpoint=https://rpc.sepolia.org&chainid=8282"
-
 
 zkevm.address-sequencer: "0xC9c0DDBAD778A58ac078975Cc7847dD1DEaF2B0A"
 zkevm.address-zkevm: "0x1FAC2D008A7987ED9Eb3eBCd2d95791cC341AB6f"
@@ -20,9 +19,6 @@ zkevm.l1-block-range: 20000
 zkevm.l1-query-delay: 6000
 zkevm.l1-first-block: 6032365
 zkevm.rpc-ratelimit: 250
-zkevm.data-stream-port: 6900
-zkevm.datastream-version: 2
-zkevm.data-stream-host: "127.0.0.1"
 zkevm.executor-strict: false
 # zkevm.executor-urls: "zkevm2-stateless-executor:50071"
 zkevm.witness-full: false
@@ -34,9 +30,7 @@ zkevm.default-gas-price: 1000000000
 zkevm.max-gas-price: 0
 zkevm.gas-price-factor: 0.12
 
-log.console.verbosity: warn
-
-zkevm.l1-sync-start-block: 6032365
+txpool.disable: true
 
 externalcl: true
 http.api : ["eth","debug","net","trace","web3","erigon","txpool","zkevm"]

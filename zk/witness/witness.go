@@ -70,6 +70,9 @@ func NewGenerator(
 }
 
 func (g *Generator) GetWitnessByBatch(tx kv.Tx, ctx context.Context, batchNum uint64, debug, witnessFull bool) ([]byte, error) {
+	t := zkUtils.StartTimer("witness", "getwitnessbybatch")
+	defer t.LogTimer()
+
 	reader := hermez_db.NewHermezDbReader(tx)
 	badBatch, err := reader.GetInvalidBatch(batchNum)
 	if err != nil {
@@ -144,6 +147,9 @@ func (g *Generator) GetWitnessByBatch(tx kv.Tx, ctx context.Context, batchNum ui
 }
 
 func (g *Generator) GetWitnessByBlockRange(tx kv.Tx, ctx context.Context, startBlock, endBlock uint64, debug, witnessFull bool) ([]byte, error) {
+	t := zkUtils.StartTimer("witness", "getwitnessbyblockrange")
+	defer t.LogTimer()
+
 	if startBlock > endBlock {
 		return nil, ErrEndBeforeStart
 	}
@@ -166,6 +172,9 @@ func (g *Generator) GetWitnessByBlockRange(tx kv.Tx, ctx context.Context, startB
 }
 
 func (g *Generator) generateWitness(tx kv.Tx, ctx context.Context, blocks []*eritypes.Block, debug, witnessFull bool) ([]byte, error) {
+	t := zkUtils.StartTimer("witness", "generatewitness")
+	defer t.LogTimer()
+
 	endBlock := blocks[len(blocks)-1].NumberU64()
 	startBlock := blocks[0].NumberU64()
 

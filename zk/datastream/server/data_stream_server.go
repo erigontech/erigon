@@ -37,6 +37,8 @@ const (
 type DataStreamServer struct {
 	stream  *datastreamer.StreamServer
 	chainId uint64
+	highestBlockWritten,
+	highestBatchWritten *uint64
 }
 
 type DataStreamEntry interface {
@@ -51,8 +53,10 @@ type DataStreamEntryProto interface {
 
 func NewDataStreamServer(stream *datastreamer.StreamServer, chainId uint64) *DataStreamServer {
 	return &DataStreamServer{
-		stream:  stream,
-		chainId: chainId,
+		stream:              stream,
+		chainId:             chainId,
+		highestBlockWritten: nil,
+		highestBatchWritten: nil,
 	}
 }
 
@@ -86,7 +90,7 @@ func NewDataStreamEntries(size int) *DataStreamEntries {
 	}
 }
 
-func (srv *DataStreamServer) CommitEntriesToStreamProto(entries []DataStreamEntryProto) error {
+func (srv *DataStreamServer) CommitEntriesToStreamProto(entries []DataStreamEntryProto, latestBlockNum, latestBatchNum *uint64) error {
 	for _, entry := range entries {
 		entryType := entry.Type()
 
@@ -96,16 +100,22 @@ func (srv *DataStreamServer) CommitEntriesToStreamProto(entries []DataStreamEntr
 		}
 
 		if entryType == types.BookmarkEntryType {
-			_, err = srv.stream.AddStreamBookmark(em)
-			if err != nil {
+			if _, err = srv.stream.AddStreamBookmark(em); err != nil {
 				return err
 			}
 		} else {
-			_, err = srv.stream.AddStreamEntry(datastreamer.EntryType(entryType), em)
-			if err != nil {
+			if _, err = srv.stream.AddStreamEntry(datastreamer.EntryType(entryType), em); err != nil {
 				return err
 			}
 		}
+	}
+
+	if latestBlockNum != nil {
+		srv.highestBlockWritten = latestBlockNum
+	}
+
+	if latestBatchNum != nil {
+		srv.highestBatchWritten = latestBatchNum
 	}
 	return nil
 }
@@ -123,6 +133,7 @@ func createBlockWithBatchCheckStreamEntriesProto(
 	transactionsToIncludeByIndex []int, // passing nil here will include all transactions in the blocks
 ) ([]DataStreamEntryProto, error) {
 	var err error
+	var startEntriesProto, blockEntriesProto, endEntriesProto []DataStreamEntryProto
 
 	gers, err := reader.GetBatchGlobalExitRootsProto(lastBatchNumber, batchNumber)
 	if err != nil {
@@ -138,33 +149,12 @@ func createBlockWithBatchCheckStreamEntriesProto(
 
 	blockNum := block.NumberU64()
 
-	entryCount := 2                         // l2 block bookmark + l2 block
-	entryCount += len(filteredTransactions) // transactions
-	entryCount += len(gers)
-
-	if isBatchStart {
-		// we will add in a batch bookmark and a batch start entry
-		entryCount += 2
-
-		// a gap of 1 is normal but if greater than we need to account for the empty batches which will each
-		// have a batch bookmark, batch start and batch end
-		entryCount += int(3 * (batchGap - 1))
-	}
-
-	if isBatchEnd {
-		entryCount++
-	}
-
-	entries := NewDataStreamEntries(entryCount)
-
 	// batch start
 	// BATCH BOOKMARK
 	if isBatchStart {
-		var entriesProto []DataStreamEntryProto
-		if entriesProto, err = createBatchStartEntriesProto(reader, tx, batchNumber, lastBatchNumber, batchGap, chainId, block.Root(), gers); err != nil {
+		if startEntriesProto, err = createBatchStartEntriesProto(reader, tx, batchNumber, lastBatchNumber, batchGap, chainId, block.Root(), gers); err != nil {
 			return nil, err
 		}
-		entries.AddMany(entriesProto)
 	}
 
 	forkId, err := reader.GetForkId(batchNumber)
@@ -182,15 +172,18 @@ func createBlockWithBatchCheckStreamEntriesProto(
 	if err != nil {
 		return nil, err
 	}
-	entries.AddMany(blockEntries.Entries())
+	blockEntriesProto = blockEntries.Entries()
 
 	if isBatchEnd {
-		var batchEndEntries []DataStreamEntryProto
-		if batchEndEntries, err = addBatchEndEntriesProto(reader, tx, batchNumber, lastBatchNumber, block.Root(), gers); err != nil {
+		if endEntriesProto, err = addBatchEndEntriesProto(reader, tx, batchNumber, lastBatchNumber, block.Root(), gers); err != nil {
 			return nil, err
 		}
-		entries.AddMany(batchEndEntries)
 	}
+
+	entries := NewDataStreamEntries(len(startEntriesProto) + len(blockEntriesProto) + len(endEntriesProto))
+	entries.AddMany(startEntriesProto)
+	entries.AddMany(blockEntriesProto)
+	entries.AddMany(endEntriesProto)
 
 	return entries.Entries(), nil
 }
@@ -260,7 +253,7 @@ func createTransactionEntryProto(
 	tx eritypes.Transaction,
 	blockNum uint64,
 	isEtrog bool,
-) (DataStreamEntryProto, error) {
+) (txProto DataStreamEntryProto, err error) {
 	effectiveGasPricePercentage, err := reader.GetEffectiveGasPricePercentage(tx.Hash())
 	if err != nil {
 		return nil, err
@@ -268,16 +261,14 @@ func createTransactionEntryProto(
 
 	var intermediateRoot libcommon.Hash
 	if isEtrog {
-		intermediateRoot, err = reader.GetIntermediateTxStateRoot(blockNum, tx.Hash())
-		if err != nil {
+		if intermediateRoot, err = reader.GetIntermediateTxStateRoot(blockNum, tx.Hash()); err != nil {
 			return nil, err
 		}
 	}
 
 	// TRANSACTION
 
-	txProto, err := newTransactionProto(effectiveGasPricePercentage, intermediateRoot, tx, blockNum)
-	if err != nil {
+	if txProto, err = newTransactionProto(effectiveGasPricePercentage, intermediateRoot, tx, blockNum); err != nil {
 		return nil, err
 	}
 
@@ -295,13 +286,12 @@ func CreateAndBuildStreamEntryBytesProto(
 	l1InfoTreeMinTimestamps map[uint64]uint64,
 	isBatchEnd bool,
 	transactionsToIncludeByIndex []int, // passing nil here will include all transactions in the blocks
-) ([]byte, error) {
+) (result []byte, err error) {
 	entries, err := createBlockWithBatchCheckStreamEntriesProto(chainId, reader, tx, block, lastBlock, batchNumber, lastBatchNumber, l1InfoTreeMinTimestamps, isBatchEnd, transactionsToIncludeByIndex)
 	if err != nil {
 		return nil, err
 	}
 
-	var result []byte
 	for _, entry := range entries {
 		b, err := encodeEntryToBytesProto(entry)
 		if err != nil {
@@ -314,6 +304,10 @@ func CreateAndBuildStreamEntryBytesProto(
 }
 
 func (srv *DataStreamServer) GetHighestBlockNumber() (uint64, error) {
+	if srv.highestBlockWritten != nil {
+		return *srv.highestBlockWritten, nil
+	}
+
 	header := srv.stream.GetHeader()
 
 	if header.TotalEntries == 0 {
@@ -340,7 +334,44 @@ func (srv *DataStreamServer) GetHighestBlockNumber() (uint64, error) {
 		return 0, err
 	}
 
+	srv.highestBlockWritten = &l2Block.L2BlockNumber
+
 	return l2Block.L2BlockNumber, nil
+}
+
+func (srv *DataStreamServer) GetHighestBatchNumber() (uint64, error) {
+	if srv.highestBatchWritten != nil {
+		return *srv.highestBatchWritten, nil
+	}
+
+	header := srv.stream.GetHeader()
+
+	if header.TotalEntries == 0 {
+		return 0, nil
+	}
+
+	entryNum := header.TotalEntries - 1
+	var err error
+	var entry datastreamer.FileEntry
+	for {
+		entry, err = srv.stream.GetEntry(entryNum)
+		if err != nil {
+			return 0, err
+		}
+		if entry.Type == datastreamer.EntryType(1) {
+			break
+		}
+		entryNum -= 1
+	}
+
+	batch, err := types.UnmarshalBatchStart(entry.Data)
+	if err != nil {
+		return 0, err
+	}
+
+	srv.highestBatchWritten = &batch.Number
+
+	return batch.Number, nil
 }
 
 // must be done on offline server

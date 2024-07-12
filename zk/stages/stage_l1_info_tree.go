@@ -95,12 +95,14 @@ LOOP:
 	sort.Slice(allLogs, func(i, j int) bool {
 		l1 := allLogs[i]
 		l2 := allLogs[j]
-		if l1.BlockNumber == l2.BlockNumber {
-			// sort by index in the case of a matching block number
+		// first sort by block number and if equal then by tx index
+		if l1.BlockNumber != l2.BlockNumber {
+			return l1.BlockNumber < l2.BlockNumber
+		}
+		if l1.TxIndex != l2.TxIndex {
 			return l1.TxIndex < l2.TxIndex
 		}
-		// otherwise sort by block number
-		return l1.BlockNumber < l2.BlockNumber
+		return l1.Index < l2.Index
 	})
 
 	// chunk the logs into batches, so we don't overload the RPC endpoints too much at once
@@ -155,7 +157,14 @@ LOOP:
 				if err != nil {
 					return err
 				}
-				log.Trace("New L1 Index", "index", latestUpdate.Index, "root", newRoot.String())
+				log.Debug("New L1 Index",
+					"index", latestUpdate.Index,
+					"root", newRoot.String(),
+					"mainnet", latestUpdate.MainnetExitRoot.String(),
+					"rollup", latestUpdate.RollupExitRoot.String(),
+					"ger", latestUpdate.GER.String(),
+					"parent", latestUpdate.ParentHash.String(),
+				)
 
 				err = hermezDb.WriteL1InfoTreeRoot(common.BytesToHash(newRoot[:]), latestUpdate.Index)
 				if err != nil {

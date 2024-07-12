@@ -90,7 +90,7 @@ func SpawnSequencerExecutorVerifyStage(
 		return err
 	}
 
-	isBatchFinished, err := hermezDb.GetIsBatchFullyProcessed(latestBatch)
+	isBatchPartial, err := hermezDb.GetIsBatchPartiallyProcessed(latestBatch)
 	if err != nil {
 		return err
 	}
@@ -102,7 +102,7 @@ func SpawnSequencerExecutorVerifyStage(
 	// if batch was stopped intermediate and is not finished - we need to finish it first
 	// this shouldn't occur since exec stage is before that and should finish the batch
 	// but just in case something unexpected happens
-	if !isBatchFinished {
+	if isBatchPartial {
 		log.Error(fmt.Sprintf("[%s] batch %d is not fully processed in stage_execute", logPrefix, latestBatch))
 		canVerify = false
 	}

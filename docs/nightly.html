@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Nightly GitHub Actions Status</title>
+    <title>Actions Status</title>
     <style>
         body {
             font-family: 'Arial', sans-serif;
@@ -15,96 +15,249 @@
             text-align: center;
             color: #333;
         }
-        .status-container {
-            display: flex;
-            flex-wrap: wrap;
-            gap: 20px;
-            justify-content: center;
+        button {
+            display: block;
+            margin: 20px auto;
+            padding: 10px 20px;
+            font-size: 16px;
+            cursor: pointer;
         }
-        .status {
-            background: rgba(255, 255, 255, 0.7);
-            border-radius: 10px;
-            box-shadow: 0 4px 8px rgba(0,0,0,0.1);
-            width: 300px;
-            padding: 20px;
-            position: relative;
-            backdrop-filter: blur(10px);
+        .banner {
+            background-color: #ffcc00;
+            color: #333;
+            padding: 10px;
+            text-align: center;
+            display: none;
+            margin-bottom: 20px;
         }
-        .status h2 {
-            margin-top: 0;
+        .data-age {
+            text-align: center;
             margin-bottom: 10px;
-            font-size: 1.5em;
-            color: #555;
         }
-        .status p {
-            margin: 5px 0;
-            color: #666;
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 20px;
         }
-        .status a {
-            text-decoration: none;
-            color: #007bff;
+        th, td {
+            padding: 12px;
+            border: 1px solid #ccc;
+            text-align: left;
+            cursor: pointer;
         }
-        .status.success {
-            background: rgba(144, 238, 144, 0.7); /* Light green */
+        th {
+            background-color: #f9f9f9;
+            position: relative;
         }
-        .status.failure {
-            background: rgba(255, 99, 71, 0.7); /* Light red */
+        th.sort-asc::after {
+            content: '▲';
+            position: absolute;
+            right: 8px;
         }
-        .status.in_progress {
-            background: rgba(173, 216, 230, 0.7); /* Light blue */
+        th.sort-desc::after {
+            content: '▼';
+            position: absolute;
+            right: 8px;
+        }
+        .success {
+            background-color: rgba(144, 238, 144, 0.3);
+        }
+        .failure {
+            background-color: rgba(255, 99, 71, 0.3);
+        }
+        .in_progress {
+            background-color: rgba(173, 216, 230, 0.3);
         }
         .conclusion {
             font-weight: bold;
         }
+        .spinner {
+            border: 4px solid rgba(0, 0, 0, 0.1);
+            width: 36px;
+            height: 36px;
+            border-radius: 50%;
+            border-left-color: #333;
+            animation: spin 1s ease infinite;
+            margin: 20px auto;
+        }
+        @keyframes spin {
+            0% {
+                transform: rotate(0deg);
+            }
+            100% {
+                transform: rotate(360deg);
+            }
+        }
     </style>
 </head>
 <body>
-<h1>Nightly GitHub Actions Status</h1>
-<div id="status-container" class="status-container"></div>
+<h1>Actions Status</h1>
+<div id="rate-limit-banner" class="banner">You have been rate limited. Please try again later.</div>
+<button id="refresh-button">Refresh</button>
+<div class="data-age" id="data-age">Data Age: Calculating...</div>
+<div class="spinner" id="spinner"></div>
+<table style="display:none;">
+    <thead>
+    <tr>
+        <th data-column="workflow" data-order="desc">Workflow</th>
+        <th data-column="status" data-order="desc">Status</th>
+        <th data-column="conclusion" data-order="desc">Conclusion</th>
+        <th data-column="runTime" data-order="desc">Run Time (min)</th>
+        <th data-column="startedAt" data-order="desc">Started At</th>
+        <th data-column="updatedAt" data-order="desc">Updated At</th>
+        <th data-column="link" data-order="desc">Link</th>
+    </tr>
+    </thead>
+    <tbody id="status-container"></tbody>
+</table>
 
 <script>
     const workflows = [
+        'hourly-env-checker.yml',
         'nightly_zkevm.yml',
         'nightly-ansible.yml',
         'nightly-bridge-erc20.yml',
         'nightly-eth-bench.yml',
         'nightly-node-compare.yml',
-        'nightly-l1-recovery.yml'
+        'nightly-l1-recovery.yml',
+        'nightly-rpc-batch-compare.yml'
     ];
 
     const owner = '0xPolygonHermez';
     const repo = 'cdk-erigon';
 
     async function fetchWorkflowRun(workflow) {
-        const response = await fetch(`https://api.github.com/repos/${owner}/${repo}/actions/workflows/${workflow}/runs`);
-        const data = await response.json();
-        return data.workflow_runs[0];
+        try {
+            const response = await fetch(`https://api.github.com/repos/${owner}/${repo}/actions/workflows/${workflow}/runs`);
+            if (response.status === 403 && response.headers.get('X-RateLimit-Remaining') === '0') {
+                document.getElementById('rate-limit-banner').style.display = 'block';
+                throw new Error(`Rate limit exceeded for workflow: ${workflow}`);
+            }
+            if (!response.ok) {
+                throw new Error(`Error fetching workflow: ${workflow}`);
+            }
+            const data = await response.json();
+            return data.workflow_runs[0];
+        } catch (error) {
+            console.error(error);
+            return null;
+        }
     }
 
     function displayWorkflowRun(run, workflowName) {
         const container = document.getElementById('status-container');
-        const div = document.createElement('div');
-        div.className = 'status ' + (run.conclusion || 'in_progress');
-        const runTime = (new Date(run.updated_at) - new Date(run.created_at)) / 1000 / 60;
-        div.innerHTML = `
-                <h2>${run.name}</h2>
-                <p><strong>Workflow:</strong> ${workflowName}</p>
-                <p><strong>Status:</strong> ${run.status}</p>
-                <p><strong>Conclusion:</strong> <span class="conclusion">${run.conclusion || 'in progress'}</span></p>
-                <p><strong>Run Time:</strong> ${runTime.toFixed(2)} minutes</p>
-                <p><strong>Started At:</strong> ${new Date(run.created_at).toLocaleString()}</p>
-                <p><strong>Updated At:</strong> ${new Date(run.updated_at).toLocaleString()}</p>
-                <p><a href="${run.html_url}" target="_blank">View Job Run</a></p>
+        const row = document.createElement('tr');
+        if (run) {
+            row.className = run.conclusion || 'in_progress';
+            const runTime = (new Date(run.updated_at) - new Date(run.created_at)) / 1000 / 60;
+            row.innerHTML = `
+                <td>${workflowName}</td>
+                <td>${run.status}</td>
+                <td><span class="conclusion">${run.conclusion || 'in progress'}</span></td>
+                <td>${runTime.toFixed(2)}</td>
+                <td>${new Date(run.created_at).toLocaleString()}</td>
+                <td>${new Date(run.updated_at).toLocaleString()}</td>
+                <td><a href="${run.html_url}" target="_blank">View Job Run</a></td>
             `;
-        container.appendChild(div);
+        } else {
+            row.innerHTML = `
+                <td>${workflowName}</td>
+                <td>N/A</td>
+                <td><span class="conclusion">No runs found</span></td>
+                <td>N/A</td>
+                <td>N/A</td>
+                <td>N/A</td>
+                <td>N/A</td>
+            `;
+        }
+        container.appendChild(row);
     }
 
-    async function main() {
+    function sortTable(columnIndex, order) {
+        const container = document.getElementById('status-container');
+        const rows = Array.from(container.querySelectorAll('tr'));
+        const getValue = (row, index) => row.querySelector(`td:nth-child(${index + 1})`).innerText;
+
+        rows.sort((a, b) => {
+            const aValue = getValue(a, columnIndex);
+            const bValue = getValue(b, columnIndex);
+            if (aValue < bValue) {
+                return order === 'asc' ? -1 : 1;
+            }
+            if (aValue > bValue) {
+                return order === 'asc' ? 1 : -1;
+            }
+            return 0;
+        });
+
+        container.innerHTML = '';
+        rows.forEach(row => container.appendChild(row));
+    }
+
+    function attachSortHandlers() {
+        const headers = document.querySelectorAll('th');
+        headers.forEach((header, index) => {
+            header.addEventListener('click', () => {
+                const order = header.getAttribute('data-order') === 'desc' ? 'asc' : 'desc';
+                headers.forEach(h => h.classList.remove('sort-asc', 'sort-desc'));
+                header.classList.add(order === 'asc' ? 'sort-asc' : 'sort-desc');
+                header.setAttribute('data-order', order);
+                sortTable(index, order);
+            });
+        });
+    }
+
+    async function fetchData() {
+        const runs = [];
         for (const workflow of workflows) {
             const run = await fetchWorkflowRun(workflow);
-            if (run) {
-                displayWorkflowRun(run, workflow);
-            }
+            runs.push({ run, workflow });
+        }
+        const lastRequestTime = new Date().toISOString();
+        localStorage.setItem('workflowRuns', JSON.stringify(runs));
+        localStorage.setItem('lastRequestTime', lastRequestTime);
+        displayData(runs, lastRequestTime);
+    }
+
+    function displayData(runs, lastRequestTime) {
+        const container = document.getElementById('status-container');
+        container.innerHTML = '';
+        runs.sort((a, b) => new Date(b.run?.updated_at || 0) - new Date(a.run?.updated_at || 0));
+        runs.forEach(({ run, workflow }) => displayWorkflowRun(run, workflow));
+
+        const updatedAtHeader = document.querySelector('th[data-column="updatedAt"]');
+        updatedAtHeader.setAttribute('data-order', 'desc');
+        updatedAtHeader.classList.add('sort-desc');
+
+        document.querySelector('table').style.display = 'table';
+        document.getElementById('spinner').style.display = 'none';
+        attachSortHandlers();
+
+        updateDataAge(lastRequestTime);
+    }
+
+    function updateDataAge(lastRequestTime) {
+        const dataAgeElement = document.getElementById('data-age');
+        const lastRequestDate = new Date(lastRequestTime);
+        const now = new Date();
+        const ageInMinutes = Math.floor((now - lastRequestDate) / 1000 / 60);
+        dataAgeElement.textContent = `Data Age: ${ageInMinutes} minute(s) ago`;
+    }
+
+    document.getElementById('refresh-button').addEventListener('click', () => {
+        document.getElementById('spinner').style.display = 'block';
+        document.querySelector('table').style.display = 'none';
+        document.getElementById('rate-limit-banner').style.display = 'none';
+        fetchData();
+    });
+
+    function main() {
+        const savedRuns = localStorage.getItem('workflowRuns');
+        const lastRequestTime = localStorage.getItem('lastRequestTime');
+        if (savedRuns && lastRequestTime) {
+            displayData(JSON.parse(savedRuns), lastRequestTime);
+        } else {
+            fetchData();
         }
     }
 

@@ -1,6 +1,7 @@
 package blockinfo
 
 import (
+	"context"
 	"math/big"
 	"testing"
 
@@ -209,6 +210,29 @@ func TestSetBlockTx(t *testing.T) {
 			t.Fatal(err)
 		}
 		rootHex := common.BigToHash(root).Hex()
+
+		infoTree2 := NewBlockInfoTree()
+		keys, vals, err := infoTree2.GenerateBlockTxKeysVals(
+			&test.l2TxHash,
+			test.txIndex,
+			&test.receipt,
+			test.logIndex,
+			test.cumulativeGasUsed,
+			test.effectivePercentage,
+		)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		root2, err2 := infoTree2.smt.InsertBatch(context.Background(), "", keys, vals, nil, nil)
+		if err2 != nil {
+			t.Fatal(err2)
+		}
+
+		rootHex2 := common.BigToHash(root2.NewRootScalar.ToBigInt()).Hex()
+		if rootHex != rootHex2 {
+			t.Fatalf("generate different root, raw method root is %s, new method root %s", rootHex, rootHex2)
+		}
 
 		if rootHex != test.finalBlockInfoRoot {
 			t.Fatalf("expected root %s, got %s", test.finalBlockInfoRoot, rootHex)

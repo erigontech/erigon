@@ -645,15 +645,17 @@ func (api *ZkEvmAPIImpl) GetBatchByNumber(ctx context.Context, batchNumber rpc.B
 			return nil, err
 		}
 
-		itu, err := hermezDb.GetL1InfoTreeUpdateByGer(prevBatchGer.GlobalExitRoot)
-		if err != nil {
-			return nil, err
-		}
+		if prevBatchGer != nil {
+			itu, err := hermezDb.GetL1InfoTreeUpdateByGer(prevBatchGer.GlobalExitRoot)
+			if err != nil {
+				return nil, err
+			}
 
-		if itu == nil || batch.MainnetExitRoot == itu.MainnetExitRoot {
-			batch.MainnetExitRoot = common.Hash{}
-			batch.RollupExitRoot = common.Hash{}
-			batch.GlobalExitRoot = common.Hash{}
+			if itu == nil || batch.MainnetExitRoot == itu.MainnetExitRoot {
+				batch.MainnetExitRoot = common.Hash{}
+				batch.RollupExitRoot = common.Hash{}
+				batch.GlobalExitRoot = common.Hash{}
+			}
 		}
 	}
 
@@ -1109,10 +1111,17 @@ func convertTransactionsReceipts(
 			BlockHash:   &bh,
 			BlockNumber: types.ArgUint64Ptr(types.ArgUint64(blockNumber)),
 			TxIndex:     types.ArgUint64Ptr(types.ArgUint64(idx)),
-			ChainID:     types.ArgBig(*tx.GetChainID().ToBig()),
 			Type:        types.ArgUint64(tx.Type()),
 			Receipt:     receipt,
 		}
+
+		cid := tx.GetChainID()
+		var cidAB *types.ArgBig
+		if cid.Cmp(uint256.NewInt(0)) != 0 {
+			cidAB = (*types.ArgBig)(cid.ToBig())
+			tran.ChainID = cidAB
+		}
+
 		result = append(result, tran)
 	}
 
@@ -1195,10 +1204,15 @@ func convertBlockToRpcBlock(
 				BlockHash:   &blockHash,
 				BlockNumber: types.ArgUint64Ptr(types.ArgUint64(blockNumber)),
 				TxIndex:     types.ArgUint64Ptr(types.ArgUint64(idx)),
-				ChainID:     types.ArgBig(*tx.GetChainID().ToBig()),
 				Type:        types.ArgUint64(tx.Type()),
 				Receipt:     receipt,
 			}
+
+			cid := tx.GetChainID()
+			if cid.Cmp(uint256.NewInt(0)) != 0 {
+				tran.ChainID = (*types.ArgBig)(cid.ToBig())
+			}
+
 			t := types.TransactionOrHash{Tx: &tran}
 			result.Transactions = append(result.Transactions, t)
 		}

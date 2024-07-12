@@ -11,4 +11,5 @@ const (
 	ForkID9Elderberry2 ForkId = 9
 	ForkID10           ForkId = 10
 	ForkID11           ForkId = 11
+	ForkID12Banana     ForkId = 12
 )

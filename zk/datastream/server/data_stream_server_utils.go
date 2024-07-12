@@ -134,8 +134,11 @@ func createBatchStartEntriesProto(
 	batchNumber, lastBatchNumber, batchGap, chainId uint64,
 	root libcommon.Hash,
 	gers []types.GerUpdateProto,
-) (entries []DataStreamEntryProto, err error) {
+) ([]DataStreamEntryProto, error) {
+	var err error
 	var batchStartEntries []DataStreamEntryProto
+
+	entries := make([]DataStreamEntryProto, 0, 2+int(3*(batchGap-1))+len(gers))
 
 	// if we have a gap of more than 1 batch then we need to write in the batch start and ends for these empty batches
 	if batchGap > 1 {
@@ -183,13 +186,13 @@ func addBatchEndEntriesProto(
 	root libcommon.Hash,
 	gers []types.GerUpdateProto,
 ) ([]DataStreamEntryProto, error) {
-	entries := make([]DataStreamEntryProto, len(gers)+1)
+	entries := make([]DataStreamEntryProto, 0, len(gers)+1)
 
 	// see if we have any gers to handle
-	for i, ger := range gers {
+	for _, ger := range gers {
 		upd := ger.UpdateGER
 		if upd.BatchNumber == batchNumber {
-			entries[i] = newGerUpdateProto(upd.BatchNumber, upd.Timestamp, libcommon.BytesToHash(upd.GlobalExitRoot), libcommon.BytesToAddress(upd.Coinbase), upd.ForkId, upd.ChainId, libcommon.BytesToHash(upd.StateRoot))
+			entries = append(entries, newGerUpdateProto(upd.BatchNumber, upd.Timestamp, libcommon.BytesToHash(upd.GlobalExitRoot), libcommon.BytesToAddress(upd.Coinbase), upd.ForkId, upd.ChainId, libcommon.BytesToHash(upd.StateRoot)))
 		}
 	}
 
@@ -198,7 +201,7 @@ func addBatchEndEntriesProto(
 		return nil, err
 	}
 	// seal off the last batch
-	entries[len(gers)] = newBatchEndProto(localExitRoot, root, batchNumber)
+	entries = append(entries, newBatchEndProto(localExitRoot, root, batchNumber))
 
 	return entries, nil
 }

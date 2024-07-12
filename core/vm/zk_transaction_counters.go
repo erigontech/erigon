@@ -17,6 +17,7 @@ type TransactionCounter struct {
 	processingCounters *CounterCollector
 	smtLevels          int
 	forkId             uint16
+	l2DataCache        []byte
 }
 
 func NewTransactionCounter(transaction types.Transaction, smtMaxLevel int, forkId uint16, mcpReduction float64, shouldCountersBeUnlimited bool) *TransactionCounter {
@@ -49,17 +50,36 @@ func NewTransactionCounter(transaction types.Transaction, smtMaxLevel int, forkI
 }
 
 func (tc *TransactionCounter) Clone() *TransactionCounter {
+	var l2DataCacheCopy []byte
+	if tc.l2DataCache != nil {
+		l2DataCacheCopy = make([]byte, len(tc.l2DataCache))
+		copy(l2DataCacheCopy, tc.l2DataCache)
+	}
+
 	return &TransactionCounter{
 		transaction:        tc.transaction,
 		rlpCounters:        tc.rlpCounters.Clone(),
 		executionCounters:  tc.executionCounters.Clone(),
 		processingCounters: tc.processingCounters.Clone(),
 		smtLevels:          tc.smtLevels,
+		l2DataCache:        l2DataCacheCopy,
 	}
 }
 
+func (tc *TransactionCounter) GetL2DataCache() ([]byte, error) {
+	if tc.l2DataCache == nil {
+		data, err := tx.TransactionToL2Data(tc.transaction, 8, tx.MaxEffectivePercentage)
+		if err != nil {
+			return data, err
+		}
+
+		tc.l2DataCache = data
+	}
+	return tc.l2DataCache, nil
+}
+
 func (tc *TransactionCounter) CalculateRlp() error {
-	raw, err := tx.TransactionToL2Data(tc.transaction, 8, tx.MaxEffectivePercentage)
+	raw, err := tc.GetL2DataCache()
 	if err != nil {
 		return err
 	}
@@ -128,8 +148,7 @@ func (tc *TransactionCounter) CalculateRlp() error {
 
 	v, r, s := tc.transaction.RawSignatureValues()
 	v = tx.GetDecodedV(tc.transaction, v)
-	err = collector.ecRecover(v, r, s, false)
-	if err != nil {
+	if err := collector.ecRecover(v, r, s, false); err != nil {
 		return err
 	}
 

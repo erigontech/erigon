@@ -18,6 +18,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/chain"
 	"github.com/ledgerwatch/erigon/common/math"
 	"github.com/ledgerwatch/erigon/consensus"
+	"github.com/ledgerwatch/erigon/core"
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/state"
 	"github.com/ledgerwatch/erigon/core/types"
@@ -31,6 +32,7 @@ import (
 	"github.com/ledgerwatch/erigon/turbo/services"
 	"github.com/ledgerwatch/erigon/turbo/shards"
 	"github.com/ledgerwatch/erigon/turbo/stages/headerdownload"
+	"github.com/ledgerwatch/erigon/zk/datastream/server"
 	"github.com/ledgerwatch/erigon/zk/hermez_db"
 	"github.com/ledgerwatch/erigon/zk/tx"
 	zktx "github.com/ledgerwatch/erigon/zk/tx"
@@ -73,13 +75,14 @@ type SequenceBlockCfg struct {
 	accumulator   *shards.Accumulator
 	blockReader   services.FullBlockReader
 
-	dirs      datadir.Dirs
-	historyV3 bool
-	syncCfg   ethconfig.Sync
-	genesis   *types.Genesis
-	agg       *libstate.Aggregator
-	stream    *datastreamer.StreamServer
-	zk        *ethconfig.Zk
+	dirs             datadir.Dirs
+	historyV3        bool
+	syncCfg          ethconfig.Sync
+	genesis          *types.Genesis
+	agg              *libstate.Aggregator
+	stream           *datastreamer.StreamServer
+	datastreamServer *server.DataStreamServer
+	zk               *ethconfig.Zk
 
 	txPool   *txpool.TxPool
 	txPoolDb kv.RwDB
@@ -109,27 +112,29 @@ func StageSequenceBlocksCfg(
 	txPool *txpool.TxPool,
 	txPoolDb kv.RwDB,
 ) SequenceBlockCfg {
+
 	return SequenceBlockCfg{
-		db:            db,
-		prune:         pm,
-		batchSize:     batchSize,
-		changeSetHook: changeSetHook,
-		chainConfig:   chainConfig,
-		engine:        engine,
-		zkVmConfig:    vmConfig,
-		dirs:          dirs,
-		accumulator:   accumulator,
-		stateStream:   stateStream,
-		badBlockHalt:  badBlockHalt,
-		blockReader:   blockReader,
-		genesis:       genesis,
-		historyV3:     historyV3,
-		syncCfg:       syncCfg,
-		agg:           agg,
-		stream:        stream,
-		zk:            zk,
-		txPool:        txPool,
-		txPoolDb:      txPoolDb,
+		db:               db,
+		prune:            pm,
+		batchSize:        batchSize,
+		changeSetHook:    changeSetHook,
+		chainConfig:      chainConfig,
+		engine:           engine,
+		zkVmConfig:       vmConfig,
+		dirs:             dirs,
+		accumulator:      accumulator,
+		stateStream:      stateStream,
+		badBlockHalt:     badBlockHalt,
+		blockReader:      blockReader,
+		genesis:          genesis,
+		historyV3:        historyV3,
+		syncCfg:          syncCfg,
+		agg:              agg,
+		stream:           stream,
+		datastreamServer: server.NewDataStreamServer(stream, chainConfig.ChainID.Uint64()),
+		zk:               zk,
+		txPool:           txPool,
+		txPoolDb:         txPoolDb,
 	}
 }
 
@@ -366,8 +371,10 @@ func doFinishBlockAndUpdateState(
 	l1BlockHash common.Hash,
 	transactions []types.Transaction,
 	receipts types.Receipts,
+	execResults []*core.ExecutionResult,
 	effectiveGases []uint8,
 	l1InfoIndex uint64,
+	l1Recovery bool,
 ) (*types.Block, error) {
 	thisBlockNumber := header.Number.Uint64()
 
@@ -375,7 +382,7 @@ func doFinishBlockAndUpdateState(
 		cfg.accumulator.StartChange(thisBlockNumber, header.Hash(), nil, false)
 	}
 
-	block, err := finaliseBlock(ctx, cfg, s, sdb, ibs, header, parentBlock, forkId, thisBatch, cfg.accumulator, ger, l1BlockHash, transactions, receipts, effectiveGases)
+	block, err := finaliseBlock(ctx, cfg, s, sdb, ibs, header, parentBlock, forkId, thisBatch, cfg.accumulator, ger, l1BlockHash, transactions, receipts, execResults, effectiveGases, l1Recovery)
 	if err != nil {
 		return nil, err
 	}
@@ -447,44 +454,43 @@ func checkForBadBatch(
 	return false, nil
 }
 
-var (
-	LIMIT_128_KB = uint64(128 * 1024)
-)
+// hard coded to match in with the smart contract
+// https://github.com/0xPolygonHermez/zkevm-contracts/blob/73758334f8568b74e9493fcc530b442bd73325dc/contracts/PolygonZkEVM.sol#L119C63-L119C69
+const LIMIT_120_KB = 120_000
 
 type BlockDataChecker struct {
-	limit uint64 // amount of bytes
-	bytes []byte
+	limit   uint64 // limit amount of bytes
+	counter uint64 // counter amount of bytes
 }
 
 func NewBlockDataChecker() *BlockDataChecker {
 	return &BlockDataChecker{
-		limit: LIMIT_128_KB,
-		bytes: make([]byte, 0),
+		limit:   LIMIT_120_KB,
+		counter: 0,
 	}
 }
 
 // adds bytes amounting to the block data and checks if the limit is reached
 // if the limit is reached, the data is not added, so this can be reused again for next check
-func (bdc *BlockDataChecker) AddBlockStartData(forkId uint16, deltaTimestamp, l1InfoTreeIndex uint32) bool {
-	newBytes := tx.GenerateStartBlockBatchL2Data(forkId, deltaTimestamp, l1InfoTreeIndex)
-
-	if uint64(len(bdc.bytes)+len(newBytes)) > bdc.limit {
+func (bdc *BlockDataChecker) AddBlockStartData(deltaTimestamp, l1InfoTreeIndex uint32) bool {
+	blockStartBytesAmount := tx.START_BLOCK_BATCH_L2_DATA_SIZE // tx.GenerateStartBlockBatchL2Data(deltaTimestamp, l1InfoTreeIndex) returns 65 long byte array
+	// add in the changeL2Block transaction
+	if bdc.counter+blockStartBytesAmount > bdc.limit {
 		return true
 	}
 
-	bdc.bytes = append(bdc.bytes, newBytes...)
+	bdc.counter += blockStartBytesAmount
+
 	return false
 }
 
-func (bdc *BlockDataChecker) AddTransactionData(transaction types.Transaction, forkId uint16, effectiveGasPrice uint8) (bool, error) {
-	encoded, err := tx.TransactionToL2Data(transaction, forkId, effectiveGasPrice)
-	if err != nil {
-		return false, err
-	}
-	if uint64(len(bdc.bytes)+len(encoded)) > bdc.limit {
-		return true, nil
+func (bdc *BlockDataChecker) AddTransactionData(txL2Data []byte) bool {
+	encodedLen := uint64(len(txL2Data))
+	if bdc.counter+uint64(encodedLen) > bdc.limit {
+		return true
 	}
 
-	bdc.bytes = append(bdc.bytes, encoded...)
-	return false, nil
+	bdc.counter += encodedLen
+
+	return false
 }

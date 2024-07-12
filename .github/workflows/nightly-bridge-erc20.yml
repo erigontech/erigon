@@ -21,7 +21,7 @@ jobs:
             
     steps:
       - name: Clone bridge repository
-        run:  git clone --recurse-submodules -j8 https://github.com/0xPolygonHermez/zkevm-bridge-service.git -b feature/test_bridge_messages_real_netowrk  bridge
+        run:  git clone --recurse-submodules -j8 https://github.com/0xPolygonHermez/zkevm-bridge-service.git -b feature/test_bridge_messages_real_network-v2  bridge
         
       - name: Build docker image
         run: |

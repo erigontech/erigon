@@ -10,11 +10,9 @@ import (
 	"github.com/ledgerwatch/erigon-lib/kv"
 
 	"bytes"
-	"errors"
 	"io"
 
 	mapset "github.com/deckarep/golang-set/v2"
-	"github.com/ledgerwatch/erigon-lib/chain"
 	types2 "github.com/ledgerwatch/erigon-lib/types"
 	"github.com/ledgerwatch/erigon/core"
 	"github.com/ledgerwatch/erigon/core/state"
@@ -25,6 +23,7 @@ import (
 	"github.com/ledgerwatch/erigon/zk/hermez_db"
 	zktx "github.com/ledgerwatch/erigon/zk/tx"
 	"github.com/ledgerwatch/erigon/zk/utils"
+	"github.com/ledgerwatch/log/v3"
 )
 
 func getNextPoolTransactions(cfg SequenceBlockCfg, executionAt, forkId uint64, alreadyYielded mapset.Set[[32]byte]) ([]types.Transaction, error) {
@@ -184,14 +183,29 @@ func attemptAddTransaction(
 	effectiveGasPrice uint8,
 	l1Recovery bool,
 	forkId, l1InfoIndex uint64,
-) (*types.Receipt, bool, error) {
+	blockDataSizeChecker *BlockDataChecker,
+) (*types.Receipt, *core.ExecutionResult, bool, error) {
 	txCounters := vm.NewTransactionCounter(transaction, sdb.smt.GetDepth(), uint16(forkId), cfg.zk.VirtualCountersSmtReduction, cfg.zk.ShouldCountersBeUnlimited(l1Recovery))
 	overflow, err := batchCounters.AddNewTransactionCounters(txCounters)
-	if err != nil {
-		return nil, false, err
+
+	// run this only once the first time, do not add it on rerun
+	var batchDataOverflow bool
+	if blockDataSizeChecker != nil {
+		txL2Data, err := txCounters.GetL2DataCache()
+		if err != nil {
+			return nil, nil, false, err
+		}
+		batchDataOverflow = blockDataSizeChecker.AddTransactionData(txL2Data)
+		if batchDataOverflow {
+			log.Info("BatchL2Data limit reached. Not adding last transaction", "txHash", transaction.Hash())
+		}
 	}
-	if overflow && !l1Recovery {
-		return nil, true, nil
+	if err != nil {
+		return nil, nil, false, err
+	}
+	anyOverflow := overflow || batchDataOverflow
+	if anyOverflow && !l1Recovery {
+		return nil, nil, true, nil
 	}
 
 	gasPool := new(core.GasPool).AddGas(transactionGasLimit)
@@ -218,26 +232,22 @@ func attemptAddTransaction(
 	)
 
 	if err != nil {
-		return nil, false, err
-	}
-
-	if forkId <= uint64(chain.ForkID7Etrog) && errors.Is(execResult.Err, vm.ErrUnsupportedPrecompile) {
-		receipt.Status = 1
+		return nil, nil, false, err
 	}
 
 	// we need to keep hold of the effective percentage used
 	// todo [zkevm] for now we're hard coding to the max value but we need to calc this properly
 	if err = sdb.hermezDb.WriteEffectiveGasPricePercentage(transaction.Hash(), effectiveGasPrice); err != nil {
-		return nil, false, err
+		return nil, nil, false, err
 	}
 
 	err = txCounters.ProcessTx(ibs, execResult.ReturnData)
 	if err != nil {
-		return nil, false, err
+		return nil, nil, false, err
 	}
 
 	// now that we have executed we can check again for an overflow
 	overflow, err = batchCounters.CheckForOverflow(l1InfoIndex != 0)
 
-	return receipt, overflow, err
+	return receipt, execResult, overflow, err
 }

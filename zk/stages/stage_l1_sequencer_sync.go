@@ -100,7 +100,7 @@ Loop:
 				case contracts.CreateNewRollupTopic:
 					rollupId := l.Topics[1].Big().Uint64()
 					if rollupId != cfg.zkCfg.L1RollupId {
-						return fmt.Errorf("received CreateNewRollupTopic for unknown rollup id: %v", rollupId)
+						continue
 					}
 					rollupTypeBytes := l.Data[0:32]
 					rollupType := new(big.Int).SetBytes(rollupTypeBytes).Uint64()
@@ -117,7 +117,6 @@ Loop:
 				case contracts.UpdateRollupTopic:
 					rollupId := l.Topics[1].Big().Uint64()
 					if rollupId != cfg.zkCfg.L1RollupId {
-						log.Warn("received UpdateRollupTopic for unknown rollup id", "rollupId", rollupId)
 						continue
 					}
 					newRollupBytes := l.Data[0:32]
