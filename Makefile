@@ -25,6 +25,7 @@ CGO_CFLAGS += -DMDBX_FORCE_ASSERTIONS=0 # Enable MDBX's asserts by default in 'm
 CGO_CFLAGS += -DMDBX_ENV_CHECKPID=0 # Erigon doesn't do fork() syscall
 #CGO_CFLAGS += -DMDBX_DEBUG=2 # to enable more logs
 CGO_CFLAGS += -D__BLST_PORTABLE__
+CGO_CFLAGS += -Og
 CGO_CFLAGS += -Wno-unknown-warning-option -Wno-enum-int-mismatch -Wno-strict-prototypes -Wno-unused-but-set-variable
 
 CGO_LDFLAGS := $(shell $(GO) env CGO_LDFLAGS 2> /dev/null)
@@ -35,7 +36,7 @@ ifeq ($(shell uname -s), Darwin)
 endif
 
 # about netgo see: https://github.com/golang/go/issues/30310#issuecomment-471669125 and https://github.com/golang/go/issues/57757
-BUILD_TAGS = nosqlite,noboltdb
+BUILD_TAGS = nosqlite,noboltdb,debug
 
 ifneq ($(shell "$(CURDIR)/turbo/silkworm/silkworm_compat_check.sh"),)
 	BUILD_TAGS := $(BUILD_TAGS),nosilkworm
