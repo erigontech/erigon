@@ -22,6 +22,7 @@ package core
 import (
 	"bytes"
 	"fmt"
+	"slices"
 
 	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/erigon-lib/log/v3"
@@ -345,10 +346,7 @@ func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (*evmtype
 	rules := st.evm.ChainRules()
 	vmConfig := st.evm.Config()
 	isEIP3860 := vmConfig.HasEip3860(rules)
-	accessTuples := make(types2.AccessList, 0)
-	if msg.AccessList() != nil {
-		accessTuples = append(accessTuples, msg.AccessList()...)
-	}
+	accessTuples := slices.Clone[types2.AccessList](msg.AccessList())
 
 	// set code tx
 	auths := msg.Authorizations()
