@@ -633,6 +633,7 @@ func ExecV3(ctx context.Context,
 	var baseBlockTxnID kv.TxnId
 
 	//fmt.Printf("exec blocks: %d -> %d\n", blockNum, maxBlockNum)
+	var receiptsForStorage types.ReceiptsForStorage
 
 	var b *types.Block
 Loop:
@@ -715,7 +716,7 @@ Loop:
 		}
 
 		rules := chainConfig.Rules(blockNum, b.Time())
-		var receipts types.Receipts
+		var receiptsForConsensus types.Receipts
 		// During the first block execution, we may have half-block data in the snapshots.
 		// Thus, we need to skip the first txs in the block, however, this causes the GasUsed to be incorrect.
 		// So we skip that check for the first block, if we find half-executed data.
@@ -744,7 +745,7 @@ Loop:
 				// use history reader instead of state reader to catch up to the tx where we left off
 				HistoryExecution: offsetFromBlockBeginning > 0 && txIndex < int(offsetFromBlockBeginning),
 
-				BlockReceipts: receipts,
+				BlockReceipts: receiptsForConsensus,
 			}
 			if txTask.TxNum <= txNumInDB && txTask.TxNum > 0 {
 				inputTxNum++
@@ -807,18 +808,22 @@ Loop:
 				}
 
 				if !(txTask.Final || txTask.TxIndex < 0) {
-					receipts = append(receipts, txTask.CreateReceipt(usedGas)) // for consensus check at Final
+					receipt := txTask.CreateReceipt(usedGas)
+					receiptsForConsensus = append(receiptsForConsensus, receipt) // for consensus check at Final
+					if receipt.GasUsed > 0 || len(receipt.Logs) > 0 {
+						receiptsForStorage = append(receiptsForStorage, (*types.ReceiptForStorage)(receipt))
+					}
 				}
 
 				if txTask.Final {
 					checkReceipts := !cfg.vmConfig.StatelessExec && chainConfig.IsByzantium(txTask.BlockNum) && !cfg.vmConfig.NoReceipts
 					if txTask.BlockNum > 0 && !skipPostEvaluation { //Disable check for genesis. Maybe need somehow improve it in future - to satisfy TestExecutionSpec
-						if err := core.BlockPostValidation(usedGas, blobGasUsed, checkReceipts, receipts, txTask.Header); err != nil {
+						if err := core.BlockPostValidation(usedGas, blobGasUsed, checkReceipts, receiptsForConsensus, txTask.Header); err != nil {
 							return fmt.Errorf("%w, txnIdx=%d, %v", consensus.ErrInvalidBlock, txTask.TxIndex, err) //same as in stage_exec.go
 						}
 					}
 					usedGas, blobGasUsed = 0, 0
-					receipts = receipts[:0]
+					receiptsForConsensus = receiptsForConsensus[:0]
 				}
 				return nil
 			}(); err != nil {
@@ -844,21 +849,56 @@ Loop:
 				break Loop
 			}
 
-			if txTask.Final || txTask.TxIndex < 0 {
+			if txTask.Final && len(receiptsForStorage) > 0 {
 				txnID := baseBlockTxnID + kv.TxnId(txTask.TxIndex)
 				//write for system txn also, but don't add it to `receipts` array (consensus doesn't expect it)
-				if err := rawtemporaldb.AppendReceipts(doms, txnID, &types.Receipt{
-					TransactionIndex:  uint(txTask.TxIndex),
-					CumulativeGasUsed: usedGas,
-					Status:            types.ReceiptStatusSuccessful,
-				}); err != nil {
+				if err := rawtemporaldb.AppendReceipts2(doms, txnID, receiptsForStorage); err != nil {
 					return err
 				}
+				receiptsForStorage = receiptsForStorage[:0]
+			}
+
+			//if len(receiptsForStorage) == 10 {
+			//	txnID := baseBlockTxnID + kv.TxnId(txTask.TxIndex)
+			//	//write for system txn also, but don't add it to `receipts` array (consensus doesn't expect it)
+			//	if err := rawtemporaldb.AppendReceipts2(doms, txnID, receiptsForStorage); err != nil {
+			//		return err
+			//	}
+			//	receiptsForStorage = receiptsForStorage[:0]
+			//}
+
+			if txTask.Final {
+				//if len(receiptsForStorage) == 0 {
+				//	receiptsForStorage = types.Receipts{
+				//		&types.Receipt{
+				//			TransactionIndex:  uint(txTask.TxIndex),
+				//			CumulativeGasUsed: usedGas,
+				//			Status:            types.ReceiptStatusSuccessful,
+				//		},
+				//	}
+				//}
+				//txnID := baseBlockTxnID + kv.TxnId(txTask.TxIndex)
+				//if err := rawtemporaldb.AppendReceipts2(doms, txnID, receiptsForStorage); err != nil {
+				//	return err
+				//}
+				//receiptsForStorage = receiptsForStorage[:0]
+
+				/*
+					txnID := baseBlockTxnID + kv.TxnId(txTask.TxIndex)
+					//write for system txn also, but don't add it to `receipts` array (consensus doesn't expect it)
+					if err := rawtemporaldb.AppendReceipts(doms, txnID, &types.Receipt{
+						TransactionIndex:  uint(txTask.TxIndex),
+						CumulativeGasUsed: usedGas,
+						Status:            types.ReceiptStatusSuccessful,
+					}); err != nil {
+						return err
+					}
+				*/
 			} else {
-				txnID := baseBlockTxnID + kv.TxnId(txTask.TxIndex)
-				if err := rawtemporaldb.AppendReceipts(doms, txnID, receipts[txTask.TxIndex]); err != nil {
-					return err
-				}
+				//txnID := baseBlockTxnID + kv.TxnId(txTask.TxIndex)
+				//if err := rawtemporaldb.AppendReceipts(doms, txnID, receiptsForConsensus[txTask.TxIndex]); err != nil {
+				//	return err
+				//}
 			}
 
 			// MA applystate

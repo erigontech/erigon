@@ -64,3 +64,16 @@ func AppendReceipts(tx kv.TemporalPutDel, txnID kv.TxnId, r *types.Receipt) erro
 	}
 	return nil
 }
+
+func AppendReceipts2(tx kv.TemporalPutDel, txnID kv.TxnId, r types.ReceiptsForStorage) error {
+	v, err := rlp.EncodeToBytes(r)
+	if err != nil {
+		return err
+	}
+
+	err = tx.AppendablePut(kv.ReceiptsAppendable, txnID, v)
+	if err != nil {
+		return err
+	}
+	return nil
+}

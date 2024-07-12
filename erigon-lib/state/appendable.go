@@ -710,9 +710,6 @@ func (ap *Appendable) collate(ctx context.Context, step uint64, roTx kv.Tx) (App
 
 	for it.HasNext() {
 		k, err := it.Next()
-		if coll.writer.Count() == 0 || coll.writer.Count() > int(ap.aggregationStep)-5 {
-			fmt.Printf("[dbg] alex: %d, %T\n", k, it)
-		}
 		if err != nil {
 			return coll, fmt.Errorf("collate %s: %w", ap.filenameBase, err)
 		}
@@ -721,8 +718,6 @@ func (ap *Appendable) collate(ctx context.Context, step uint64, roTx kv.Tx) (App
 			return coll, fmt.Errorf("collate %s: %w", ap.filenameBase, err)
 		}
 		if !ok {
-			fmt.Printf("[dbg] k: %x\n", k)
-			panic(1)
 			continue
 		}
 		if err = coll.writer.AddWord(v); err != nil {
@@ -730,7 +725,9 @@ func (ap *Appendable) collate(ctx context.Context, step uint64, roTx kv.Tx) (App
 		}
 	}
 	if coll.writer.Count() != int(ap.aggregationStep) {
-		panic(fmt.Errorf("expected: %d, got: %d\n", coll.writer.Count(), ap.aggregationStep))
+		err := fmt.Errorf("expected: %d, got: %d\n", coll.writer.Count(), ap.aggregationStep)
+		log.Warn(err.Error())
+		//panic(err)
 	}
 	closeComp = false
 	return coll, nil
