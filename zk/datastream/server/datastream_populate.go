@@ -34,6 +34,7 @@ func (srv *DataStreamServer) WriteBlocksToStream(
 	entries := make([]DataStreamEntryProto, insertEntryCount)
 	index := 0
 	copyFrom := from
+	var latestbatchNum uint64
 	for currentBlockNumber := from; currentBlockNumber <= to; currentBlockNumber++ {
 		select {
 		case <-logTicker.C:
@@ -50,20 +51,21 @@ func (srv *DataStreamServer) WriteBlocksToStream(
 			}
 		}
 
-		block, blockEntries, err := srv.createBlockStreamEntriesWithBatchCheck(logPrefix, tx, reader, lastBlock, currentBlockNumber)
+		block, blockEntries, batchNum, err := srv.createBlockStreamEntriesWithBatchCheck(logPrefix, tx, reader, lastBlock, currentBlockNumber)
 		if err != nil {
 			return err
 		}
+		latestbatchNum = batchNum
 
 		for _, entry := range blockEntries {
 			entries[index] = entry
 			index++
 		}
 
-		// basically commit onece 80% of the entries array is filled
+		// basically commit once 80% of the entries array is filled
 		if index+1 >= insertEntryCount*4/5 {
 			log.Info(fmt.Sprintf("[%s] Commit count reached, committing entries", logPrefix), "block", currentBlockNumber)
-			if err = srv.CommitEntriesToStreamProto(entries[:index]); err != nil {
+			if err = srv.CommitEntriesToStreamProto(entries[:index], &currentBlockNumber, &batchNum); err != nil {
 				return err
 			}
 			entries = make([]DataStreamEntryProto, insertEntryCount)
@@ -73,7 +75,7 @@ func (srv *DataStreamServer) WriteBlocksToStream(
 		lastBlock = block
 	}
 
-	if err = srv.CommitEntriesToStreamProto(entries[:index]); err != nil {
+	if err = srv.CommitEntriesToStreamProto(entries[:index], &to, &latestbatchNum); err != nil {
 		return err
 	}
 
@@ -115,7 +117,7 @@ func (srv *DataStreamServer) WriteBlockToStream(
 		return err
 	}
 
-	if err = srv.CommitEntriesToStreamProto(entries); err != nil {
+	if err = srv.CommitEntriesToStreamProto(entries, &blockNum, &batchNum); err != nil {
 		return err
 	}
 
@@ -186,7 +188,7 @@ func (srv *DataStreamServer) WriteBatchEnd(
 		return err
 	}
 
-	if err = srv.CommitEntriesToStreamProto(batchEndEntries); err != nil {
+	if err = srv.CommitEntriesToStreamProto(batchEndEntries, nil, nil); err != nil {
 		return err
 	}
 
@@ -203,29 +205,29 @@ func (srv *DataStreamServer) createBlockStreamEntriesWithBatchCheck(
 	reader DbReader,
 	lastBlock *eritypes.Block,
 	blockNumber uint64,
-) (*eritypes.Block, []DataStreamEntryProto, error) {
+) (*eritypes.Block, []DataStreamEntryProto, uint64, error) {
 	block, err := rawdb.ReadBlockByNumber(tx, blockNumber)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, 0, err
 	}
 
 	batchNum, err := reader.GetBatchNoByL2Block(blockNumber)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, 0, err
 	}
 
 	prevBatchNum, err := reader.GetBatchNoByL2Block(blockNumber - 1)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, 0, err
 	}
 
 	if err = srv.UnwindIfNecessary(logPrefix, reader, blockNumber, prevBatchNum, batchNum); err != nil {
-		return nil, nil, err
+		return nil, nil, 0, err
 	}
 
 	nextBatchNum, nextBatchExists, err := reader.CheckBatchNoByL2Block(blockNumber + 1)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, 0, err
 	}
 
 	// a 0 next batch num here would mean we don't know about the next batch so must be at the end of the batch
@@ -233,10 +235,10 @@ func (srv *DataStreamServer) createBlockStreamEntriesWithBatchCheck(
 
 	entries, err := createBlockWithBatchCheckStreamEntriesProto(srv.chainId, reader, tx, block, lastBlock, batchNum, prevBatchNum, make(map[uint64]uint64), isBatchEnd, nil)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, 0, err
 	}
 
-	return block, entries, nil
+	return block, entries, batchNum, nil
 }
 
 func (srv *DataStreamServer) WriteGenesisToStream(
@@ -271,7 +273,8 @@ func (srv *DataStreamServer) WriteGenesisToStream(
 	}
 	batchEnd := newBatchEndProto(ler, genesis.Root(), 0)
 
-	if err = srv.CommitEntriesToStreamProto([]DataStreamEntryProto{batchBookmark, batchStart, l2BlockBookmark, l2Block, batchEnd}); err != nil {
+	blockNum := uint64(0)
+	if err = srv.CommitEntriesToStreamProto([]DataStreamEntryProto{batchBookmark, batchStart, l2BlockBookmark, l2Block, batchEnd}, &blockNum, &batchNo); err != nil {
 		return err
 	}
 
