@@ -66,24 +66,22 @@ func (tc *TransactionCounter) Clone() *TransactionCounter {
 	}
 }
 
-func (tc *TransactionCounter) GetL2DataCache() []byte {
-	return tc.l2DataCache
-}
+func (tc *TransactionCounter) GetL2DataCache() ([]byte, error) {
+	if tc.l2DataCache == nil {
+		data, err := tx.TransactionToL2Data(tc.transaction, 8, tx.MaxEffectivePercentage)
+		if err != nil {
+			return data, err
+		}
 
-func (tc *TransactionCounter) SetL2DataCache(data []byte) {
-	tc.l2DataCache = data
+		tc.l2DataCache = data
+	}
+	return tc.l2DataCache, nil
 }
 
 func (tc *TransactionCounter) CalculateRlp() error {
-	raw := tc.GetL2DataCache()
-	if raw == nil {
-		data, err := tx.TransactionToL2Data(tc.transaction, 8, tx.MaxEffectivePercentage)
-		if err != nil {
-			return err
-		}
-		raw = data
-
-		tc.SetL2DataCache(data)
+	raw, err := tc.GetL2DataCache()
+	if err != nil {
+		return err
 	}
 
 	gasLimitHex := fmt.Sprintf("%x", tc.transaction.GetGas())
@@ -150,8 +148,7 @@ func (tc *TransactionCounter) CalculateRlp() error {
 
 	v, r, s := tc.transaction.RawSignatureValues()
 	v = tx.GetDecodedV(tc.transaction, v)
-	err := collector.ecRecover(v, r, s, false)
-	if err != nil {
+	if err := collector.ecRecover(v, r, s, false); err != nil {
 		return err
 	}
 

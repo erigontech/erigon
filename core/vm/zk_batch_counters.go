@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"math"
 
-	"github.com/ledgerwatch/erigon/zk/tx"
 	"github.com/ledgerwatch/log/v3"
 )
 
@@ -89,18 +88,12 @@ func (bcc *BatchCounterCollector) StartNewBlock(verifyMerkleProof bool) (bool, e
 func (bcc *BatchCounterCollector) processBatchLevelData() error {
 	totalEncodedTxLength := 0
 	for _, t := range bcc.transactions {
-		l2Data := t.GetL2DataCache()
-		if l2Data == nil {
-			encoded, err := tx.TransactionToL2Data(t.transaction, bcc.forkId, tx.MaxEffectivePercentage)
-			if err != nil {
-				return err
-			}
-			t.SetL2DataCache(encoded)
-
-			totalEncodedTxLength += len(encoded)
-		} else {
-			totalEncodedTxLength += len(l2Data)
+		l2Data, err := t.GetL2DataCache()
+		if err != nil {
+			return err
 		}
+
+		totalEncodedTxLength += len(l2Data)
 	}
 
 	// simulate adding in the changeL2Block transactions

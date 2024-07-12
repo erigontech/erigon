@@ -23,6 +23,7 @@ import (
 	"github.com/ledgerwatch/erigon/zk/hermez_db"
 	zktx "github.com/ledgerwatch/erigon/zk/tx"
 	"github.com/ledgerwatch/erigon/zk/utils"
+	"github.com/ledgerwatch/log/v3"
 )
 
 func getNextPoolTransactions(cfg SequenceBlockCfg, executionAt, forkId uint64, alreadyYielded mapset.Set[[32]byte]) ([]types.Transaction, error) {
@@ -182,13 +183,28 @@ func attemptAddTransaction(
 	effectiveGasPrice uint8,
 	l1Recovery bool,
 	forkId, l1InfoIndex uint64,
+	blockDataSizeChecker *BlockDataChecker,
 ) (*types.Receipt, *core.ExecutionResult, bool, error) {
 	txCounters := vm.NewTransactionCounter(transaction, sdb.smt.GetDepth(), uint16(forkId), cfg.zk.VirtualCountersSmtReduction, cfg.zk.ShouldCountersBeUnlimited(l1Recovery))
 	overflow, err := batchCounters.AddNewTransactionCounters(txCounters)
+
+	// run this only once the first time, do not add it on rerun
+	var batchDataOverflow bool
+	if blockDataSizeChecker != nil {
+		txL2Data, err := txCounters.GetL2DataCache()
+		if err != nil {
+			return nil, nil, false, err
+		}
+		batchDataOverflow = blockDataSizeChecker.AddTransactionData(txL2Data)
+		if batchDataOverflow {
+			log.Info("BatchL2Data limit reached. Not adding last transaction", "txHash", transaction.Hash())
+		}
+	}
 	if err != nil {
 		return nil, nil, false, err
 	}
-	if overflow && !l1Recovery {
+	anyOverflow := overflow || batchDataOverflow
+	if anyOverflow && !l1Recovery {
 		return nil, nil, true, nil
 	}
 
