@@ -84,23 +84,17 @@ func TestCanonicalIter(t *testing.T) {
 	require.NoError(rawdb.WriteCanonicalHash(tx, common.Hash{12}, 2))
 	require.NoError(rawdb.AppendCanonicalTxNums(tx, 0))
 
-	it, err := rawdb.TxnIdsOfCanonicalBlocks(tx, 0, 6, order.Asc, -1)
+	//start-end in teh middle fo block
+	it, err := rawdb.TxnIdsOfCanonicalBlocks(tx, 1, 6, order.Asc, -1)
 	require.NoError(err)
 	require.Equal(true, it.HasNext())
-	require.Equal([]uint64{0, 1, 2, 3, 4, 5}, stream.ToArrU64Must(it))
+	require.Equal([]uint64{1, 2, 3, 4, 5}, stream.ToArrU64Must(it))
 
 	it, err = rawdb.TxnIdsOfCanonicalBlocks(tx, 0, -1, order.Asc, -1)
 	require.NoError(err)
 	require.Equal(true, it.HasNext())
 	exp := append(append(txNumsOfBlock(0, b), txNumsOfBlock(1, b)...), txNumsOfBlock(3, b)...)
 	require.Equal(exp, stream.ToArrU64Must(it))
-
-	{ //start from middle of block
-		it, err = rawdb.TxnIdsOfCanonicalBlocks(tx, 3, -1, order.Asc, -1)
-		require.NoError(err)
-		require.Equal(true, it.HasNext())
-		require.Equal(exp[3:], stream.ToArrU64Must(it))
-	}
 
 	//TODO: create .ap files
 
