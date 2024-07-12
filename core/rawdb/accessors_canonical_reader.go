@@ -1,3 +1,19 @@
+// Copyright 2024 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+
 package rawdb
 
 import (
@@ -7,13 +23,13 @@ import (
 	common2 "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/hexutility"
 	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon-lib/kv/iter"
 	"github.com/ledgerwatch/erigon-lib/kv/order"
 	"github.com/ledgerwatch/erigon-lib/kv/rawdbv3"
+	"github.com/ledgerwatch/erigon-lib/kv/stream"
 )
 
 type CanonicalTxnIds struct {
-	canonicalMarkers iter.KV
+	canonicalMarkers stream.KV
 	tx               kv.Tx
 
 	// input params
@@ -32,7 +48,7 @@ type CanonicalReader struct {
 func NewCanonicalReader() *CanonicalReader {
 	return &CanonicalReader{}
 }
-func (*CanonicalReader) TxnIdsOfCanonicalBlocks(tx kv.Tx, fromTxNum, toTxNum int, asc order.By, limit int) (iter.U64, error) {
+func (*CanonicalReader) TxnIdsOfCanonicalBlocks(tx kv.Tx, fromTxNum, toTxNum int, asc order.By, limit int) (stream.U64, error) {
 	return TxnIdsOfCanonicalBlocks(tx, fromTxNum, toTxNum, asc, limit)
 }
 func (*CanonicalReader) TxNum2ID(tx kv.Tx, blockNum uint64, blockHash common2.Hash, txNum uint64) (kv.TxnId, error) {
@@ -103,7 +119,7 @@ func (*CanonicalReader) LastFrozenTxNum(tx kv.Tx) (kv.TxnId, error) {
 // [fromTxNum, toTxNum)
 // To get all canonical blocks, use fromTxNum=0, toTxNum=-1
 // For reverse iteration use order.Desc and fromTxNum=-1, toTxNum=-1
-func TxnIdsOfCanonicalBlocks(tx kv.Tx, fromTxNum, toTxNum int, asc order.By, limit int) (iter.U64, error) {
+func TxnIdsOfCanonicalBlocks(tx kv.Tx, fromTxNum, toTxNum int, asc order.By, limit int) (stream.U64, error) {
 	if asc && fromTxNum > 0 && toTxNum > 0 && fromTxNum >= toTxNum {
 		return nil, fmt.Errorf("fromTxNum >= toTxNum: %d, %d", fromTxNum, toTxNum)
 	}
@@ -118,7 +134,7 @@ func TxnIdsOfCanonicalBlocks(tx kv.Tx, fromTxNum, toTxNum int, asc order.By, lim
 	}
 	if !it.HasNext() {
 		it.Close()
-		return iter.EmptyU64, nil
+		return stream.EmptyU64, nil
 	}
 	return it, nil
 }

@@ -1,3 +1,19 @@
+// Copyright 2024 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+
 package freezeblocks
 
 import (
@@ -426,6 +442,21 @@ func (s *RoSnapshots) OptimisticReopenWithDB(db kv.RoDB) {
 			return err
 		}
 		return s.ReopenList(snList, true)
+	})
+}
+
+func (s *RoSnapshots) LS() {
+	s.segments.Scan(func(segtype snaptype.Enum, value *segments) bool {
+		value.lock.RLock()
+		defer value.lock.RUnlock()
+
+		for _, seg := range value.segments {
+			if seg.Decompressor == nil {
+				continue
+			}
+			log.Info("[agg] ", "f", seg.Decompressor.FileName(), "words", seg.Decompressor.Count())
+		}
+		return true
 	})
 }
 

@@ -1,3 +1,19 @@
+// Copyright 2024 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+
 package main
 
 import (
@@ -666,11 +682,11 @@ func trimTxs(chaindata string) error {
 	fmt.Printf("Number of txn records to delete: %d\n", toDelete.GetCardinality())
 	fmt.Printf("Roaring size: %d\n", toDelete.GetSizeInBytes())
 
-	iter := toDelete.Iterator()
+	it := toDelete.Iterator()
 	for {
 		var deleted int
-		for iter.HasNext() {
-			txId := iter.Next()
+		for it.HasNext() {
+			txId := it.Next()
 			var key [8]byte
 			binary.BigEndian.PutUint64(key[:], txId)
 			if err = txs.Delete(key[:]); err != nil {

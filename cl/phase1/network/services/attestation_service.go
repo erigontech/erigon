@@ -1,3 +1,19 @@
+// Copyright 2024 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+
 package services
 
 import (
@@ -8,6 +24,7 @@ import (
 	"time"
 
 	"github.com/Giulio2002/bls"
+	"github.com/ledgerwatch/erigon-lib/log/v3"
 	"github.com/ledgerwatch/erigon/cl/aggregation"
 	"github.com/ledgerwatch/erigon/cl/beacon/synced_data"
 	"github.com/ledgerwatch/erigon/cl/clparams"
@@ -19,6 +36,7 @@ import (
 	"github.com/ledgerwatch/erigon/cl/utils"
 	"github.com/ledgerwatch/erigon/cl/utils/eth_clock"
 	"github.com/ledgerwatch/erigon/cl/validator/committee_subscription"
+	"github.com/ledgerwatch/erigon/common"
 )
 
 var (
@@ -160,6 +178,7 @@ func (s *attestationService) ProcessMessage(ctx context.Context, subnet *uint64,
 	if valid, err := blsVerify(signature[:], signingRoot[:], pubKey[:]); err != nil {
 		return err
 	} else if !valid {
+		log.Warn("lodestar: invalid signature", "signature", common.Bytes2Hex(signature[:]), "signningRoot", common.Bytes2Hex(signingRoot[:]), "pubKey", common.Bytes2Hex(pubKey[:]))
 		return fmt.Errorf("invalid signature")
 	}
 

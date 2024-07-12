@@ -1,3 +1,19 @@
+// Copyright 2024 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+
 package heimdall
 
 import (
@@ -7,7 +23,7 @@ import (
 	"sync"
 
 	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon-lib/kv/iter"
+	"github.com/ledgerwatch/erigon-lib/kv/stream"
 	"github.com/ledgerwatch/erigon/polygon/polygoncommon"
 )
 
@@ -72,7 +88,7 @@ func (s *mdbxEntityStore[TEntity]) Prepare(ctx context.Context) error {
 		if err != nil {
 			return
 		}
-		iteratorFactory := func(tx kv.Tx) (iter.KV, error) { return tx.Range(s.table, nil, nil) }
+		iteratorFactory := func(tx kv.Tx) (stream.KV, error) { return tx.Range(s.table, nil, nil) }
 		err = buildBlockNumToIdIndex(ctx, s.blockNumToIdIndex, s.db.BeginRo, iteratorFactory, s.entityUnmarshalJSON)
 	})
 	return err
@@ -248,7 +264,7 @@ func buildBlockNumToIdIndex[TEntity Entity](
 	ctx context.Context,
 	index *RangeIndex,
 	txFactory func(context.Context) (kv.Tx, error),
-	iteratorFactory func(tx kv.Tx) (iter.KV, error),
+	iteratorFactory func(tx kv.Tx) (stream.KV, error),
 	entityUnmarshalJSON func([]byte) (TEntity, error),
 ) error {
 	tx, err := txFactory(ctx)

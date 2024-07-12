@@ -1,3 +1,19 @@
+// Copyright 2024 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+
 package types
 
 import (
@@ -155,8 +171,28 @@ func (tr *TRand) RandAccessList(size int) types2.AccessList {
 	return al
 }
 
+func (tr *TRand) RandAuthorizations(size int) []Authorization {
+	auths := make([]Authorization, size)
+	for i := 0; i < size; i++ {
+		auths[i] = Authorization{
+			ChainID: uint256.NewInt(*tr.RandUint64()),
+			Address: tr.RandAddress(),
+			V:       *uint256.NewInt(*tr.RandUint64()),
+			R:       *uint256.NewInt(*tr.RandUint64()),
+			S:       *uint256.NewInt(*tr.RandUint64()),
+		}
+
+		if *tr.RandUint64()%2 == 0 {
+			auths[i].Nonce = []uint64{*tr.RandUint64()}
+		} else {
+			auths[i].Nonce = []uint64{}
+		}
+	}
+	return auths
+}
+
 func (tr *TRand) RandTransaction() Transaction {
-	txType := tr.RandIntInRange(0, 4) // LegacyTxType, AccessListTxType, DynamicFeeTxType, BlobTxType
+	txType := tr.RandIntInRange(0, 5) // LegacyTxType, AccessListTxType, DynamicFeeTxType, BlobTxType, SetCodeTxType
 	to := tr.RandAddress()
 	commonTx := CommonTx{
 		Nonce: *tr.RandUint64(),
@@ -203,6 +239,17 @@ func (tr *TRand) RandTransaction() Transaction {
 			},
 			MaxFeePerBlobGas:    uint256.NewInt(r),
 			BlobVersionedHashes: tr.RandHashes(tr.RandIntInRange(1, 2)),
+		}
+	case SetCodeTxType:
+		return &SetCodeTransaction{
+			DynamicFeeTransaction: DynamicFeeTransaction{
+				CommonTx:   commonTx,
+				ChainID:    uint256.NewInt(*tr.RandUint64()),
+				Tip:        uint256.NewInt(*tr.RandUint64()),
+				FeeCap:     uint256.NewInt(*tr.RandUint64()),
+				AccessList: tr.RandAccessList(tr.RandIntInRange(1, 5)),
+			},
+			Authorizations: tr.RandAuthorizations(tr.RandIntInRange(1, 5)),
 		}
 	default:
 		fmt.Printf("unexpected txType %v", txType)

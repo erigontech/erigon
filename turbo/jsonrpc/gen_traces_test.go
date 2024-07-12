@@ -1,3 +1,19 @@
+// Copyright 2024 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+
 package jsonrpc
 
 import (
@@ -120,7 +136,7 @@ func TestGeneratedTraceApi(t *testing.T) {
 	stateCache := kvcache.New(kvcache.DefaultCoherentConfig)
 	baseApi := NewBaseApi(nil, stateCache, m.BlockReader, agg, false, rpccfg.DefaultEvmCallTimeout, m.Engine, m.Dirs)
 	api := NewTraceAPI(baseApi, m.DB, &httpcfg.HttpCfg{})
-	traces, err := api.Block(context.Background(), rpc.BlockNumber(1), new(bool))
+	traces, err := api.Block(context.Background(), rpc.BlockNumber(1), new(bool), nil)
 	if err != nil {
 		t.Errorf("trace_block %d: %v", 0, err)
 	}
@@ -275,7 +291,7 @@ func TestGeneratedTraceApi(t *testing.T) {
 func TestGeneratedTraceApiCollision(t *testing.T) {
 	m := rpcdaemontest.CreateTestSentryForTracesCollision(t)
 	api := NewTraceAPI(newBaseApiForTest(m), m.DB, &httpcfg.HttpCfg{})
-	traces, err := api.Transaction(context.Background(), common.HexToHash("0xb2b9fa4c999c1c8370ce1fbd1c4315a9ce7f8421fe2ebed8a9051ff2e4e7e3da"), new(bool))
+	traces, err := api.Transaction(context.Background(), common.HexToHash("0xb2b9fa4c999c1c8370ce1fbd1c4315a9ce7f8421fe2ebed8a9051ff2e4e7e3da"), new(bool), nil)
 	if err != nil {
 		t.Errorf("trace_block %d: %v", 0, err)
 	}

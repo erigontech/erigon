@@ -1,3 +1,19 @@
+// Copyright 2024 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+
 package stagedsync
 
 import (
@@ -609,7 +625,7 @@ func ExecV3(ctx context.Context,
 		// can't use OS-level ReadAhead - because Data >> RAM
 		// it also warmsup state a bit - by touching senders/coninbase accounts and code
 		var clean func()
-		readAhead, clean = blocksReadAhead(ctx, &cfg, 4, engine, true)
+		readAhead, clean = blocksReadAhead(ctx, &cfg, 4, true)
 		defer clean()
 	}
 
@@ -622,7 +638,6 @@ Loop:
 		if shouldGenerateChangesets && blockNum > 0 {
 			doms.SetChangesetAccumulator(changeset)
 		}
-		//time.Sleep(50 * time.Microsecond)
 		if !parallel {
 			select {
 			case readAhead <- blockNum:
@@ -762,91 +777,70 @@ Loop:
 				} else {
 					rs.AddWork(ctx, txTask, in)
 				}
-			} else {
-				count++
-				if txTask.Error != nil {
-					break Loop
-				}
-				applyWorker.RunTxTaskNoLock(txTask)
-				if err := func() error {
-					if errors.Is(txTask.Error, context.Canceled) {
-						return err
-					}
-					if txTask.Error != nil {
-						return fmt.Errorf("%w, txnIdx=%d, %v", consensus.ErrInvalidBlock, txTask.TxIndex, txTask.Error) //same as in stage_exec.go
-					}
-					usedGas += txTask.UsedGas
-					if txTask.Tx != nil {
-						blobGasUsed += txTask.Tx.GetBlobGas()
-					}
-					if txTask.Final {
-						checkReceipts := !cfg.vmConfig.StatelessExec && chainConfig.IsByzantium(txTask.BlockNum) && !cfg.vmConfig.NoReceipts
-						if txTask.BlockNum > 0 && !skipPostEvaluation { //Disable check for genesis. Maybe need somehow improve it in future - to satisfy TestExecutionSpec
-							if err := core.BlockPostValidation(usedGas, blobGasUsed, checkReceipts, types.DeriveSha(receipts), txTask.Header); err != nil {
-								return fmt.Errorf("%w, txnIdx=%d, %v", consensus.ErrInvalidBlock, txTask.TxIndex, err) //same as in stage_exec.go
-							}
-						}
-						usedGas, blobGasUsed = 0, 0
-						receipts = receipts[:0]
-					} else {
-						if txTask.TxIndex >= 0 {
-							// by the tx.
-							receipt := &types.Receipt{
-								BlockNumber:       header.Number,
-								TransactionIndex:  uint(txTask.TxIndex),
-								Type:              txTask.Tx.Type(),
-								CumulativeGasUsed: usedGas,
-								GasUsed:           txTask.UsedGas,
-								TxHash:            txTask.Tx.Hash(),
-								Logs:              txTask.Logs,
-							}
-							receipt.Bloom = types.CreateBloom(types.Receipts{receipt})
-							if txTask.Failed {
-								receipt.Status = types.ReceiptStatusFailed
-							} else {
-								receipt.Status = types.ReceiptStatusSuccessful
-							}
-							// if the transaction created a contract, store the creation address in the receipt.
-							//if msg.To() == nil {
-							//	receipt.ContractAddress = crypto.CreateAddress(evm.Origin, tx.GetNonce())
-							//}
-							// Set the receipt logs and create a bloom for filtering
-							//receipt.Bloom = types.CreateBloom(types.Receipts{receipt})
-							receipts = append(receipts, receipt)
-						}
-					}
-					return nil
-				}(); err != nil {
-					if errors.Is(err, context.Canceled) {
-						return err
-					}
-					logger.Warn(fmt.Sprintf("[%s] Execution failed", execStage.LogPrefix()), "block", blockNum, "txNum", txTask.TxNum, "hash", header.Hash().String(), "err", err)
-					if cfg.hd != nil && errors.Is(err, consensus.ErrInvalidBlock) {
-						cfg.hd.ReportBadHeaderPoS(header.Hash(), header.ParentHash)
-					}
-					if cfg.badBlockHalt {
-						return err
-					}
-					if errors.Is(err, consensus.ErrInvalidBlock) {
-						if err := u.UnwindTo(blockNum-1, BadBlock(header.Hash(), err), applyTx); err != nil {
-							return err
-						}
-					} else {
-						if err := u.UnwindTo(blockNum-1, ExecUnwind, applyTx); err != nil {
-							return err
-						}
-					}
-					break Loop
-				}
+				stageProgress = blockNum
+				inputTxNum++
+				continue
+			}
 
-				// MA applystate
-				if err := rs.ApplyState4(ctx, txTask); err != nil {
+			count++
+			if txTask.Error != nil {
+				break Loop
+			}
+			applyWorker.RunTxTaskNoLock(txTask)
+			if err := func() error {
+				if errors.Is(txTask.Error, context.Canceled) {
 					return err
 				}
-
-				execTriggers.AddInt(rs.CommitTxNum(txTask.Sender, txTask.TxNum, in))
-				outputTxNum.Add(1)
+				if txTask.Error != nil {
+					return fmt.Errorf("%w, txnIdx=%d, %v", consensus.ErrInvalidBlock, txTask.TxIndex, txTask.Error) //same as in stage_exec.go
+				}
+				usedGas += txTask.UsedGas
+				if txTask.Tx != nil {
+					blobGasUsed += txTask.Tx.GetBlobGas()
+				}
+				if txTask.Final {
+					checkReceipts := !cfg.vmConfig.StatelessExec && chainConfig.IsByzantium(txTask.BlockNum) && !cfg.vmConfig.NoReceipts
+					if txTask.BlockNum > 0 && !skipPostEvaluation { //Disable check for genesis. Maybe need somehow improve it in future - to satisfy TestExecutionSpec
+						if err := core.BlockPostValidation(usedGas, blobGasUsed, checkReceipts, receipts, txTask.Header); err != nil {
+							return fmt.Errorf("%w, txnIdx=%d, %v", consensus.ErrInvalidBlock, txTask.TxIndex, err) //same as in stage_exec.go
+						}
+					}
+					usedGas, blobGasUsed = 0, 0
+					receipts = receipts[:0]
+				} else if txTask.TxIndex >= 0 {
+					receipts = append(receipts, txTask.CreateReceipt(usedGas))
+				}
+				return nil
+			}(); err != nil {
+				if errors.Is(err, context.Canceled) {
+					return err
+				}
+				logger.Warn(fmt.Sprintf("[%s] Execution failed", execStage.LogPrefix()), "block", blockNum, "txNum", txTask.TxNum, "hash", header.Hash().String(), "err", err)
+				if cfg.hd != nil && errors.Is(err, consensus.ErrInvalidBlock) {
+					cfg.hd.ReportBadHeaderPoS(header.Hash(), header.ParentHash)
+				}
+				if cfg.badBlockHalt {
+					return err
+				}
+				if errors.Is(err, consensus.ErrInvalidBlock) {
+					if err := u.UnwindTo(blockNum-1, BadBlock(header.Hash(), err), applyTx); err != nil {
+						return err
+					}
+				} else {
+					if err := u.UnwindTo(blockNum-1, ExecUnwind, applyTx); err != nil {
+						return err
+					}
+				}
+				break Loop
 			}
+
+			// MA applystate
+			if err := rs.ApplyState4(ctx, txTask); err != nil {
+				return err
+			}
+
+			outputTxNum.Add(1)
+
 			stageProgress = blockNum
 			inputTxNum++
 		}
@@ -1091,24 +1085,6 @@ func flushAndCheckCommitmentV3(ctx context.Context, header *types.Header, applyT
 		}
 		return true, nil
 	}
-	/* uncomment it when need to debug state-root mismatch
-	if err := doms.Flush(context.Background(), applyTx); err != nil {
-		panic(err)
-	}
-	oldAlogNonIncrementalHahs, err := core.CalcHashRootForTests(applyTx, header, true, false)
-	if err != nil {
-		panic(err)
-	}
-	if common.BytesToHash(rh) != oldAlogNonIncrementalHahs {
-		if oldAlogNonIncrementalHahs != header.Root {
-			log.Error(fmt.Sprintf("block hash mismatch - both algorithm hashes are bad! (means latest state is NOT correct AND new commitment issue): %x != %x != %x bn =%d", common.BytesToHash(rh), oldAlogNonIncrementalHahs, header.Root, header.Number))
-		} else {
-			log.Error(fmt.Sprintf("block hash mismatch - and new-algorithm hash is bad! (means latest state is CORRECT): %x != %x == %x bn =%d", common.BytesToHash(rh), oldAlogNonIncrementalHahs, header.Root, header.Number))
-		}
-	} else {
-		log.Error(fmt.Sprintf("block hash mismatch - and new-algorithm hash is good! (means latest state is NOT correct): %x == %x != %x bn =%d", common.BytesToHash(rh), oldAlogNonIncrementalHahs, header.Root, header.Number))
-	}
-	//*/
 	logger.Error(fmt.Sprintf("[%s] Wrong trie root of block %d: %x, expected (from header): %x. Block hash: %x", e.LogPrefix(), header.Number.Uint64(), rh, header.Root.Bytes(), header.Hash()))
 	if cfg.badBlockHalt {
 		return false, fmt.Errorf("wrong trie root")
@@ -1138,7 +1114,7 @@ func flushAndCheckCommitmentV3(ctx context.Context, header *types.Header, applyT
 		return false, err
 	}
 	if !ok {
-		return false, fmt.Errorf("too far unwind. requested=%d, minAllowed=%d", unwindTo, allowedUnwindTo)
+		return false, fmt.Errorf("%w: requested=%d, minAllowed=%d", ErrTooDeepUnwind, unwindTo, allowedUnwindTo)
 	}
 	logger.Warn("Unwinding due to incorrect root hash", "to", unwindTo)
 	if err := u.UnwindTo(allowedUnwindTo, BadBlock(header.Hash(), ErrInvalidStateRootHash), applyTx); err != nil {
