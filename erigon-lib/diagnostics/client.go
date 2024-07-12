@@ -56,7 +56,6 @@ type DiagnosticClient struct {
 	resourcesUsageMutex sync.Mutex
 	networkSpeed        NetworkSpeedTestResult
 	networkSpeedMutex   sync.Mutex
-	rwMutex             sync.Mutex
 }
 
 func NewDiagnosticClient(ctx context.Context, metricsMux *http.ServeMux, dataDirPath string, speedTest bool) (*DiagnosticClient, error) {
