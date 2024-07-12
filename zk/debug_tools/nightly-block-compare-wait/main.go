@@ -9,11 +9,12 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"strconv"
 	"time"
 )
 
 const (
-	defaultCheckInterval = 30 * time.Second
+	defaultCheckInterval = 2 * time.Minute
 	defaultRunDuration   = 20 * time.Minute
 	defaultMaxBlockDiff  = 1000
 )
@@ -60,7 +61,7 @@ func getBlockHeight(url string) (*BlockNumberResponse, error) {
 	return &jsonResp, nil
 }
 
-func getBlockByNumber(url, blockNumber string) (*BlockResponse, error) {
+func getBlockByNumber(url string, blockNumber string) (*BlockResponse, error) {
 	reqBody := []byte(fmt.Sprintf(`{"jsonrpc":"2.0","method":"eth_getBlockByNumber","params":["%s", true],"id":1}`, blockNumber))
 	req, err := http.NewRequest("POST", url, bytes.NewBuffer(reqBody))
 	if err != nil {
@@ -89,21 +90,28 @@ func getBlockByNumber(url, blockNumber string) (*BlockResponse, error) {
 	return &jsonResp, nil
 }
 
-func compareBlocks(erigonBlock, compareBlock *BlockResponse) bool {
-	if erigonBlock.Error != nil || compareBlock.Error != nil {
+func compareBlocks(block1, block2 *BlockResponse) bool {
+	if block1.Error != nil || block2.Error != nil {
 		log.Println("Error in block responses:")
-		if erigonBlock.Error != nil {
-			log.Println("Erigon error:", erigonBlock.Error)
+		if block1.Error != nil {
+			log.Println("Erigon error:", block1.Error)
 			return false
 		}
-		if compareBlock.Error != nil {
-			log.Println("Compare node error:", compareBlock.Error)
+		if block2.Error != nil {
+			log.Println("Compare node error:", block2.Error)
 			return false
 		}
 	}
 
-	erigonJSON, _ := json.MarshalIndent(erigonBlock.Result, "", "  ")
-	compareJSON, _ := json.MarshalIndent(compareBlock.Result, "", "  ")
+	for _, tx := range block1.Result.(map[string]interface{})["transactions"].([]interface{}) {
+		tx.(map[string]interface{})["chainId"] = "0x00"
+	}
+	for _, tx := range block2.Result.(map[string]interface{})["transactions"].([]interface{}) {
+		tx.(map[string]interface{})["chainId"] = "0x00"
+	}
+
+	erigonJSON, _ := json.MarshalIndent(block1.Result, "", "  ")
+	compareJSON, _ := json.MarshalIndent(block2.Result, "", "  ")
 
 	if bytes.Equal(erigonJSON, compareJSON) {
 		log.Println("Blocks match:", string(erigonJSON))
@@ -116,6 +124,73 @@ func compareBlocks(erigonBlock, compareBlock *BlockResponse) bool {
 	}
 }
 
+func checkBlocks(erigonNodeURL, compareNodeURL string, maxBlockDiff int) (int64, bool) {
+	erigonHeight, err := getBlockHeight(erigonNodeURL)
+	if err != nil {
+		log.Println("Error fetching block height from Erigon:", err)
+		return 0, false
+	}
+
+	compareHeight, err := getBlockHeight(compareNodeURL)
+	if err != nil {
+		log.Println("Error fetching block height from compare node:", err)
+		return 0, false
+	}
+
+	erigonBlockNumber, err := strconv.ParseInt(erigonHeight.Result[2:], 16, 64)
+	if err != nil {
+		log.Println("Error converting Erigon block number:", err)
+		return 0, false
+	}
+	compareBlockNumber, err := strconv.ParseInt(compareHeight.Result[2:], 16, 64)
+	if err != nil {
+		log.Println("Error converting compare block number:", err)
+		return 0, false
+	}
+
+	if erigonBlockNumber > 0 && compareBlockNumber > 0 {
+		if abs(erigonBlockNumber-compareBlockNumber) > int64(maxBlockDiff) {
+			log.Println("Block heights are not within the allowed difference (erigon, compare):", erigonBlockNumber, compareBlockNumber)
+		}
+
+		log.Println("Erigon height:", erigonBlockNumber, "Compare height:", compareBlockNumber)
+
+		lowestBlockNumber := erigonBlockNumber
+		if erigonBlockNumber > compareBlockNumber {
+			lowestBlockNumber = compareBlockNumber
+		}
+		log.Println("Lowest block number:", lowestBlockNumber)
+
+		if lowestBlockNumber == 0 {
+			return 0, false
+		}
+
+		lowestBlockHex := fmt.Sprintf("0x%x", lowestBlockNumber)
+
+		erigonBlock, err := getBlockByNumber(erigonNodeURL, lowestBlockHex)
+		if err != nil {
+			log.Println("Error fetching block from Erigon:", err)
+			return 0, false
+		}
+
+		compareBlock, err := getBlockByNumber(compareNodeURL, lowestBlockHex)
+		if err != nil {
+			log.Println("Error fetching block from compare node:", err)
+			return 0, false
+		}
+
+		ok := compareBlocks(erigonBlock, compareBlock)
+		if !ok {
+			log.Println("Block mismatch detected at height:", erigonBlock.Result.(map[string]interface{})["number"])
+			return 0, false
+		}
+
+		return lowestBlockNumber, true
+	}
+
+	return 0, false
+}
+
 func main() {
 	erigonNodeURL := flag.String("erigon", "http://erigon:8123", "URL for the Erigon node")
 	compareNodeURL := flag.String("compare", "http://other-node:8545", "URL for the compare node")
@@ -123,6 +198,7 @@ func main() {
 	checkInterval := flag.Duration("interval", defaultCheckInterval, "Interval to check the block height")
 	runDuration := flag.Duration("duration", defaultRunDuration, "Total duration to run the checks")
 	maxBlockDiff := flag.Int("max-block-diff", defaultMaxBlockDiff, "Maximum allowed block difference")
+	exitOnFirstCheck := flag.Bool("exit-on-first-check", true, "Exit after the first check")
 	flag.Parse()
 
 	log.Println("Starting block comparison")
@@ -130,103 +206,41 @@ func main() {
 	ctx, cancel := context.WithTimeout(context.Background(), *runDuration)
 	defer cancel()
 
-	ticker := time.NewTicker(*checkInterval)
-	defer ticker.Stop()
+	ticker1 := time.NewTicker(*checkInterval)
+	defer ticker1.Stop()
+
+	ticker2 := time.NewTicker(*checkInterval)
+	defer ticker2.Stop()
 
 	for {
 		select {
 		case <-ctx.Done():
 			log.Println("Block checking exceeded timeout.")
 			os.Exit(1)
-		case <-ticker.C:
-			erigonHeight, err := getBlockHeight(*erigonNodeURL)
-			if err != nil {
-				log.Println("Error fetching block height from Erigon:", err)
-				continue
-			}
-
-			compareHeight, err := getBlockHeight(*compareNodeURL)
-			if err != nil {
-				log.Println("Error fetching block height from compare node:", err)
-				continue
-			}
-
-			compare2Height, err := getBlockHeight(*compareNode2URL)
-			if err != nil {
-				log.Println("Error fetching block height from compare2 node:", err)
-				continue
-			}
-
-			erigonBlockNumber := erigonHeight.Result
-			compareBlockNumber := compareHeight.Result
-			compare2BlockNumber := compare2Height.Result
-
-			if absDiff(erigonBlockNumber, compareBlockNumber) > *maxBlockDiff {
-				log.Println("Block heights are not within the allowed difference.")
-				continue
-			}
-
-			if absDiff(erigonBlockNumber, compare2BlockNumber) > *maxBlockDiff {
-				log.Println("Block heights are not within the allowed difference.")
-				continue
-			}
-
-			log.Println("Erigon height:", erigonBlockNumber)
-			log.Println("Compare height:", compareBlockNumber)
-			log.Println("Compare2 height:", compare2BlockNumber)
-
-			// use the lowest block number to compare
-			lowestBlockNumber := erigonBlockNumber
-			if erigonBlockNumber > compareBlockNumber {
-				lowestBlockNumber = compareBlockNumber
-			}
-			if lowestBlockNumber > compare2BlockNumber {
-				lowestBlockNumber = compare2BlockNumber
-			}
-
-			erigonBlock, err := getBlockByNumber(*erigonNodeURL, lowestBlockNumber)
-			if err != nil {
-				log.Println("Error fetching block from Erigon:", err)
-				continue
-			}
-
-			compareBlock, err := getBlockByNumber(*compareNodeURL, lowestBlockNumber)
-			if err != nil {
-				log.Println("Error fetching block from compare node:", err)
-				continue
-			}
-
-			compare2Block, err := getBlockByNumber(*compareNode2URL, lowestBlockNumber)
-			if err != nil {
-				log.Println("Error fetching block from compare2 node:", err)
-				continue
-			}
-
-			ok := compareBlocks(erigonBlock, compareBlock)
-			if !ok {
-				// terminate on mismatch
-				log.Println("Block mismatch detected at height:", erigonBlock.Result.(map[string]interface{})["number"])
-				os.Exit(1)
-			}
-
-			ok = compareBlocks(erigonBlock, compare2Block)
-			if !ok {
-				// terminate on mismatch
-				log.Println("Block mismatch detected at height:", erigonBlock.Result.(map[string]interface{})["number"])
-				os.Exit(1)
+		case <-ticker1.C:
+			blockNumber, ok := checkBlocks(*erigonNodeURL, *compareNodeURL, *maxBlockDiff)
+			if ok {
+				log.Println("Waiting for second node to match the block height:", blockNumber)
+				for {
+					select {
+					case <-ctx.Done():
+						log.Println("Block checking exceeded timeout.")
+						os.Exit(1)
+					case <-ticker2.C:
+						_, compare2Ok := checkBlocks(*erigonNodeURL, *compareNode2URL, *maxBlockDiff)
+						if compare2Ok {
+							if *exitOnFirstCheck {
+								os.Exit(0)
+							}
+						}
+					}
+				}
 			}
 		}
 	}
 }
 
-func absDiff(a, b string) int {
-	var ia, ib int
-	fmt.Sscanf(a, "0x%x", &ia)
-	fmt.Sscanf(b, "0x%x", &ib)
-	return abs(ia - ib)
-}
-
-func abs(x int) int {
+func abs(x int64) int64 {
 	if x < 0 {
 		return -x
 	}

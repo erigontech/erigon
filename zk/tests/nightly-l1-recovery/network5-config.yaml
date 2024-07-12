@@ -8,6 +8,7 @@ zkevm.l2-datastreamer-url: "34.175.214.161:6915"
 zkevm.l1-chain-id: 11155111
 zkevm.l1-rpc-url: "http://cache:6969?endpoint=https://rpc.sepolia.org&chainid=8282"
 
+
 zkevm.address-sequencer: "0xC9c0DDBAD778A58ac078975Cc7847dD1DEaF2B0A"
 zkevm.address-zkevm: "0x1FAC2D008A7987ED9Eb3eBCd2d95791cC341AB6f"
 zkevm.address-admin: "0x406C6e412895f32573442365d0BA5027ae369cC7"
@@ -28,6 +29,10 @@ zkevm.witness-full: false
 zkevm.sequencer-block-seal-time: "5s"
 zkevm.sequencer-batch-seal-time: "15m"
 zkevm.allow-pre-eip155-transactions: true
+
+zkevm.default-gas-price: 1000000000
+zkevm.max-gas-price: 0
+zkevm.gas-price-factor: 0.12
 
 log.console.verbosity: warn
 

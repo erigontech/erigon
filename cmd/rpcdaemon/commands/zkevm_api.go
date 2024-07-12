@@ -1111,10 +1111,17 @@ func convertTransactionsReceipts(
 			BlockHash:   &bh,
 			BlockNumber: types.ArgUint64Ptr(types.ArgUint64(blockNumber)),
 			TxIndex:     types.ArgUint64Ptr(types.ArgUint64(idx)),
-			ChainID:     types.ArgBig(*tx.GetChainID().ToBig()),
 			Type:        types.ArgUint64(tx.Type()),
 			Receipt:     receipt,
 		}
+
+		cid := tx.GetChainID()
+		var cidAB *types.ArgBig
+		if cid.Cmp(uint256.NewInt(0)) != 0 {
+			cidAB = (*types.ArgBig)(cid.ToBig())
+			tran.ChainID = cidAB
+		}
+
 		result = append(result, tran)
 	}
 
@@ -1197,10 +1204,15 @@ func convertBlockToRpcBlock(
 				BlockHash:   &blockHash,
 				BlockNumber: types.ArgUint64Ptr(types.ArgUint64(blockNumber)),
 				TxIndex:     types.ArgUint64Ptr(types.ArgUint64(idx)),
-				ChainID:     types.ArgBig(*tx.GetChainID().ToBig()),
 				Type:        types.ArgUint64(tx.Type()),
 				Receipt:     receipt,
 			}
+
+			cid := tx.GetChainID()
+			if cid.Cmp(uint256.NewInt(0)) != 0 {
+				tran.ChainID = (*types.ArgBig)(cid.ToBig())
+			}
+
 			t := types.TransactionOrHash{Tx: &tran}
 			result.Transactions = append(result.Transactions, t)
 		}

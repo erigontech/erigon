@@ -12,6 +12,7 @@ import (
 	"github.com/ledgerwatch/erigon/zkevm/hex"
 
 	"github.com/gateway-fm/cdk-erigon-lib/common"
+	"github.com/holiman/uint256"
 )
 
 var (
@@ -404,7 +405,7 @@ type Transaction struct {
 	BlockHash   *common.Hash    `json:"blockHash"`
 	BlockNumber *ArgUint64      `json:"blockNumber"`
 	TxIndex     *ArgUint64      `json:"transactionIndex"`
-	ChainID     ArgBig          `json:"chainId"`
+	ChainID     *ArgBig         `json:"chainId,omitempty"`
 	Type        ArgUint64       `json:"type"`
 	Receipt     *Receipt        `json:"receipt,omitempty"`
 	L2Hash      common.Hash     `json:"l2Hash,omitempty"`
@@ -432,6 +433,11 @@ func NewTransaction(
 
 	from, _ := GetSender(tx)
 	hash := common.HexToHash(tx.Hash().Hex())
+	cid := tx.GetChainID()
+	var cidAB *ArgBig
+	if cid.Cmp(uint256.NewInt(0)) != 0 {
+		cidAB = (*ArgBig)(cid.ToBig())
+	}
 	res := &Transaction{
 		Nonce:    ArgUint64(tx.GetNonce()),
 		GasPrice: ArgBig(*tx.GetPrice().ToBig()),
@@ -444,7 +450,7 @@ func NewTransaction(
 		S:        ArgBig(*s.ToBig()),
 		Hash:     hash,
 		From:     from,
-		ChainID:  ArgBig(*tx.GetChainID().ToBig()),
+		ChainID:  cidAB,
 		Type:     ArgUint64(tx.Type()),
 	}
 

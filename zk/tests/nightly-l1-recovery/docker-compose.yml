@@ -13,7 +13,7 @@ services:
     build:
       context: ../../../
       dockerfile: Dockerfile
-    command: ["--config", "/config/network5-config.yaml"]
+    command: ["--config", "/config/network5-config.yaml", "--zkevm.l1-sync-stop-batch", "100"]
     environment:
       - CDK_ERIGON_SEQUENCER=1
     volumes:
@@ -36,10 +36,11 @@ services:
       - erigon-net
     depends_on:
       - cache
+      - erigon
 
   block-checker:
     image: golang:1.19
-    command: ["go", "run", "/repo/zk/debug_tools/nightly-block-compare-wait/main.go", "--compare=http://34.175.214.161:8505", "--compare2=http://erigon-sync:8123", "--duration=2h"]
+    command: ["go", "run", "/repo/zk/debug_tools/nightly-block-compare-wait/main.go", "--compare=http://34.175.214.161:8505", "--compare2=http://erigon-sync:8123", "--duration=1h", "--interval=10s"]
     volumes:
       - ../../../:/repo
     working_dir: /repo
@@ -47,6 +48,8 @@ services:
       - erigon-net
     depends_on:
       - erigon
+      - cache
+      - erigon-sync
 
 networks:
   erigon-net:

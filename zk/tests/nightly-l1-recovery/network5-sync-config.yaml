@@ -26,6 +26,12 @@ zkevm.sequencer-block-seal-time: "5s"
 zkevm.sequencer-batch-seal-time: "15m"
 zkevm.allow-pre-eip155-transactions: true
 
+zkevm.default-gas-price: 1000000000
+zkevm.max-gas-price: 0
+zkevm.gas-price-factor: 0.12
+
+txpool.disable: true
+
 externalcl: true
 http.api : ["eth","debug","net","trace","web3","erigon","txpool","zkevm"]
 http.addr: "0.0.0.0"
