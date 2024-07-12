@@ -25,6 +25,7 @@ import (
 	"go/types"
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -51,6 +52,9 @@ func init() {
 var tests = []string{"uints", "nil", "rawvalue", "optional", "bigint", "uint256"}
 
 func TestOutput(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("no reason to test, but \r\n handle will make tests more complex")
+	}
 	for _, test := range tests {
 		test := test
 		t.Run(test, func(t *testing.T) {
