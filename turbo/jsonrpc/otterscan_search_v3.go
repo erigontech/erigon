@@ -1,3 +1,19 @@
+// Copyright 2024 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+
 package jsonrpc
 
 import (
@@ -6,9 +22,9 @@ import (
 
 	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon-lib/kv/iter"
 	"github.com/ledgerwatch/erigon-lib/kv/order"
 	"github.com/ledgerwatch/erigon-lib/kv/rawdbv3"
+	"github.com/ledgerwatch/erigon-lib/kv/stream"
 	"github.com/ledgerwatch/erigon-lib/log/v3"
 	"github.com/ledgerwatch/erigon/cmd/state/exec3"
 	"github.com/ledgerwatch/erigon/core/types"
@@ -127,7 +143,7 @@ func createBackwardTxNumIter(tx kv.TemporalTx, addr common.Address, fromTxNum in
 	if err != nil {
 		return nil, err
 	}
-	txNums := iter.Union[uint64](itFrom, itTo, order.Desc, kv.Unlim)
+	txNums := stream.Union[uint64](itFrom, itTo, order.Desc, kv.Unlim)
 	return rawdbv3.TxNums2BlockNums(tx, txNums, order.Desc), nil
 }
 
@@ -169,7 +185,7 @@ func createForwardTxNumIter(tx kv.TemporalTx, addr common.Address, fromTxNum int
 	if err != nil {
 		return nil, err
 	}
-	txNums := iter.Union[uint64](itFrom, itTo, order.Asc, kv.Unlim)
+	txNums := stream.Union[uint64](itFrom, itTo, order.Asc, kv.Unlim)
 	return rawdbv3.TxNums2BlockNums(tx, txNums, order.Asc), nil
 }
 

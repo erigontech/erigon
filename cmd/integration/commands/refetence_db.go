@@ -1,3 +1,19 @@
+// Copyright 2024 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+
 package commands
 
 import (
@@ -182,7 +198,13 @@ func init() {
 
 func doWarmup(ctx context.Context, chaindata string, bucket string, logger log.Logger) error {
 	const ThreadsLimit = 5_000
-	db := mdbx2.NewMDBX(log.New()).Path(chaindata).Accede().RoTxsLimiter(semaphore.NewWeighted(ThreadsLimit)).MustOpen()
+	dbOpts := mdbx2.NewMDBX(log.New()).Path(chaindata).Accede().RoTxsLimiter(semaphore.NewWeighted(ThreadsLimit))
+
+	if dbWriteMap {
+		dbOpts = dbOpts.WriteMap()
+	}
+
+	db := dbOpts.MustOpen()
 	defer db.Close()
 
 	var total uint64
@@ -236,7 +258,13 @@ func doWarmup(ctx context.Context, chaindata string, bucket string, logger log.L
 
 func mdbxTopDup(ctx context.Context, chaindata string, bucket string, logger log.Logger) error {
 	const ThreadsLimit = 5_000
-	db := mdbx2.NewMDBX(log.New()).Accede().Path(chaindata).RoTxsLimiter(semaphore.NewWeighted(ThreadsLimit)).MustOpen()
+	dbOpts := mdbx2.NewMDBX(log.New()).Path(chaindata).Accede().RoTxsLimiter(semaphore.NewWeighted(ThreadsLimit))
+
+	if dbWriteMap {
+		dbOpts = dbOpts.WriteMap()
+	}
+
+	db := dbOpts.MustOpen()
 	defer db.Close()
 
 	cnt := map[string]int{}
@@ -399,7 +427,11 @@ func fToMdbx(ctx context.Context, logger log.Logger, to string) error {
 	}
 	defer file.Close()
 
-	dst := mdbx2.NewMDBX(logger).Path(to).MustOpen()
+	dstOpts := mdbx2.NewMDBX(logger).Path(to)
+	if dbWriteMap {
+		dstOpts = dstOpts.WriteMap()
+	}
+	dst := dstOpts.MustOpen()
 	dstTx, err1 := dst.BeginRw(ctx)
 	if err1 != nil {
 		return err1

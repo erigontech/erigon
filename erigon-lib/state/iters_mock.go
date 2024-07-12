@@ -14,8 +14,8 @@ import (
 
 	common "github.com/ledgerwatch/erigon-lib/common"
 	kv "github.com/ledgerwatch/erigon-lib/kv"
-	iter "github.com/ledgerwatch/erigon-lib/kv/iter"
 	order "github.com/ledgerwatch/erigon-lib/kv/order"
+	iter "github.com/ledgerwatch/erigon-lib/kv/stream"
 	gomock "go.uber.org/mock/gomock"
 )
 

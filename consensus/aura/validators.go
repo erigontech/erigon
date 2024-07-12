@@ -1,3 +1,19 @@
+// Copyright 2024 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+
 package aura
 
 import (
@@ -699,6 +715,11 @@ func (s *ValidatorSafeContract) signalEpochEnd(firstInEpoch bool, header *types.
 			fmt.Printf("signalEpochEnd: no-no-no %d,%d\n", header.Number.Uint64(), len(r))
 		}
 		return nil, nil
+	}
+	if len(r) > 0 && r[0].Bloom.IsEmpty() {
+		for _, receipt := range r {
+			receipt.Bloom = types.CreateBloom(types.Receipts{receipt})
+		}
 	}
 	proof, err := rlp.EncodeToBytes(ValidatorSetProof{Header: header, Receipts: r})
 	if err != nil {

@@ -1,22 +1,27 @@
-/*
-   Copyright 2021 Erigon contributors
+// Copyright 2021 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
-   Licensed under the Apache License, Version 2.0 (the "License");
-   you may not use this file except in compliance with the License.
-   You may obtain a copy of the License at
+package stream
 
-       http://www.apache.org/licenses/LICENSE-2.0
-
-   Unless required by applicable law or agreed to in writing, software
-   distributed under the License is distributed on an "AS IS" BASIS,
-   WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-   See the License for the specific language governing permissions and
-   limitations under the License.
-*/
-
-package iter
-
-// Iterators - composable high-level abstraction to iterate over. It's more high-level than kv.Cursor and provides less controll, less features, but enough to build an app.
+// Streams - it's iterator-like composable high-level abstraction - which designed for inter-process communication and between processes:
+//  - cancelable
+//  - return errors
+//  - batch-friendly
+//  - server-side-streaming-friendly: no cliend-side granular managemnent. all required data described by construtor (query) then only iterate over results.
+//  - more high-level than kv.Cursor
 //
 //	for s.HasNext() {
 //		k, v, err := s.Next()
@@ -26,8 +31,8 @@ package iter
 //	}
 //  Invariants:
 //   1. HasNext() is Idempotent
-//   2. K, V are valid at-least 2 .Next() calls! It allows zero-copy composition of iterators. Example: iter.Union
-//		- 1 value used by User and 1 value used internally by iter.Union
+//   2. K, V are valid at-least 2 .Next() calls! It allows zero-copy composition of streams. Example: stream.Union
+//		- 1 value used by User and 1 value used internally by stream.Union
 //   3. No `Close` method: all streams produced by TemporalTx will be closed inside `tx.Rollback()` (by casting to `kv.Closer`)
 //   4. automatically checks cancelation of `ctx` passed to `db.Begin(ctx)`, can skip this
 //     check in loops on stream. Duo has very limited API - user has no way to

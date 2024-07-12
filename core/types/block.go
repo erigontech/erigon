@@ -1,18 +1,21 @@
 // Copyright 2014 The go-ethereum Authors
-// This file is part of the go-ethereum library.
+// (original work)
+// Copyright 2024 The Erigon Authors
+// (modifications)
+// This file is part of Erigon.
 //
-// The go-ethereum library is free software: you can redistribute it and/or modify
+// Erigon is free software: you can redistribute it and/or modify
 // it under the terms of the GNU Lesser General Public License as published by
 // the Free Software Foundation, either version 3 of the License, or
 // (at your option) any later version.
 //
-// The go-ethereum library is distributed in the hope that it will be useful,
+// Erigon is distributed in the hope that it will be useful,
 // but WITHOUT ANY WARRANTY; without even the implied warranty of
 // MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
 // GNU Lesser General Public License for more details.
 //
 // You should have received a copy of the GNU Lesser General Public License
-// along with the go-ethereum library. If not, see <http://www.gnu.org/licenses/>.
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
 // Package types contains data types related to Ethereum consensus.
 package types
@@ -661,17 +664,17 @@ func (b BaseTxnID) U64() uint64 { return uint64(b) }
 
 func (b BaseTxnID) Bytes() []byte { return hexutility.EncodeTs(uint64(b)) }
 
-// First non-system tx number in block
+// First non-system txn number in block
 // as if baseTxnID is first original transaction in block
 func (b BaseTxnID) First() uint64 { return uint64(b + 1) }
 
-// At returns tx number at block position `ti`.
+// At returns txn number at block position `ti`.
 func (b BaseTxnID) At(ti int) uint64 { return b.First() + uint64(ti) }
 
-// FirstSystemTx returns first system tx number in block
+// FirstSystemTx returns first system txn number in block
 func (b BaseTxnID) FirstSystemTx() BaseTxnID { return b }
 
-// LastSystemTx returns last system tx number in block. result+1 will be baseID of next block a.k.a. beginning system tx number
+// LastSystemTx returns last system txn number in block. result+1 will be baseID of next block a.k.a. beginning system txn number
 // Supposed that txAmount includes 2 system txns.
 func (b BaseTxnID) LastSystemTx(txAmount uint32) uint64 { return b.U64() + uint64(txAmount) - 1 }
 

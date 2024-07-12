@@ -1,18 +1,21 @@
 // Copyright 2019 The go-ethereum Authors
-// This file is part of the go-ethereum library.
+// (original work)
+// Copyright 2024 The Erigon Authors
+// (modifications)
+// This file is part of Erigon.
 //
-// The go-ethereum library is free software: you can redistribute it and/or modify
+// Erigon is free software: you can redistribute it and/or modify
 // it under the terms of the GNU Lesser General Public License as published by
 // the Free Software Foundation, either version 3 of the License, or
 // (at your option) any later version.
 //
-// The go-ethereum library is distributed in the hope that it will be useful,
+// Erigon is distributed in the hope that it will be useful,
 // but WITHOUT ANY WARRANTY; without even the implied warranty of
 // MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
 // GNU Lesser General Public License for more details.
 //
 // You should have received a copy of the GNU Lesser General Public License
-// along with the go-ethereum library. If not, see <http://www.gnu.org/licenses/>.
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
 package state_test
 
@@ -882,6 +885,7 @@ func TestReproduceCrash(t *testing.T) {
 		t.Errorf("error finalising 1st tx: %v", err)
 	}
 }
+
 func TestEip2200Gas(t *testing.T) {
 	t.Parallel()
 	// Configure and generate a sample block chain
@@ -1152,7 +1156,7 @@ func TestWrongIncarnation2(t *testing.T) {
 	}
 
 	if knownContractAddress != contractAddress {
-		t.Errorf("Expexted contractAddress: %x, got %x", knownContractAddress, contractAddress)
+		t.Errorf("Expected contractAddress: %x, got %x", knownContractAddress, contractAddress)
 	}
 
 	// Create a longer chain, with 4 blocks (with higher total difficulty) that reverts the change of stroage self-destruction of the contract
@@ -1331,7 +1335,7 @@ func TestCacheCodeSizeSeparately(t *testing.T) {
 	assert.Equal(t, code, code2, "new code should be received")
 }
 
-// TestCacheCodeSizeInTrie makes sure that we dont just read from the DB all the time
+// TestCacheCodeSizeInTrie makes sure that we don't just read from the DB all the time
 func TestCacheCodeSizeInTrie(t *testing.T) {
 	t.Parallel()
 	//t.Skip("switch to TG state readers/writers")

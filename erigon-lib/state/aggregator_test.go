@@ -1,3 +1,19 @@
+// Copyright 2024 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+
 package state
 
 import (
@@ -24,10 +40,10 @@ import (
 	"github.com/ledgerwatch/erigon-lib/common/length"
 	"github.com/ledgerwatch/erigon-lib/etl"
 	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon-lib/kv/iter"
 	"github.com/ledgerwatch/erigon-lib/kv/mdbx"
 	"github.com/ledgerwatch/erigon-lib/kv/order"
 	"github.com/ledgerwatch/erigon-lib/kv/rawdbv3"
+	"github.com/ledgerwatch/erigon-lib/kv/stream"
 	"github.com/ledgerwatch/erigon-lib/log/v3"
 	"github.com/ledgerwatch/erigon-lib/seg"
 	"github.com/ledgerwatch/erigon-lib/types"
@@ -345,7 +361,7 @@ func aggregatorV3_RestartOnDatadir(t *testing.T, rc runCfg) {
 	defer ctrl.Finish()
 	canonicalsReader := NewMockCanonicalsReader(ctrl)
 	canonicalsReader.EXPECT().TxnIdsOfCanonicalBlocks(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).
-		Return(iter.EmptyU64, nil).
+		Return(stream.EmptyU64, nil).
 		AnyTimes()
 
 	// Start another aggregator on same datadir
@@ -563,7 +579,7 @@ type vs struct {
 	s uint64
 }
 
-func extractKVSErrIterator(t *testing.T, it iter.KVS) map[string]vs {
+func extractKVSErrIterator(t *testing.T, it stream.KVS) map[string]vs {
 	t.Helper()
 
 	accounts := make(map[string]vs)
@@ -576,7 +592,7 @@ func extractKVSErrIterator(t *testing.T, it iter.KVS) map[string]vs {
 	return accounts
 }
 
-func extractKVErrIterator(t *testing.T, it iter.KV) map[string][]byte {
+func extractKVErrIterator(t *testing.T, it stream.KV) map[string][]byte {
 	t.Helper()
 
 	accounts := make(map[string][]byte)
@@ -792,10 +808,10 @@ func TestAggregatorV3_RestartOnFiles(t *testing.T) {
 	defer ctrl.Finish()
 	canonicalsReader := NewMockCanonicalsReader(ctrl)
 	canonicalsReader.EXPECT().TxnIdsOfCanonicalBlocks(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).
-		DoAndReturn(func(tx kv.Tx, txFrom, txTo int, by order.By, i3 int) (iter.U64, error) {
+		DoAndReturn(func(tx kv.Tx, txFrom, txTo int, by order.By, i3 int) (stream.U64, error) {
 			currentStep := uint64(txFrom) / aggStep
 			canonicalBlockTxNum := aggStep*currentStep + 1
-			it := iter.Array[uint64]([]uint64{canonicalBlockTxNum})
+			it := stream.Array[uint64]([]uint64{canonicalBlockTxNum})
 			return it, nil
 		}).
 		AnyTimes()
@@ -1095,7 +1111,7 @@ func testDbAndAggregatorv3(t *testing.T, aggStep uint64) (kv.RwDB, *Aggregator) 
 	defer ctrl.Finish()
 	canonicalsReader := NewMockCanonicalsReader(ctrl)
 	canonicalsReader.EXPECT().TxnIdsOfCanonicalBlocks(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).
-		Return(iter.EmptyU64, nil).
+		Return(stream.EmptyU64, nil).
 		AnyTimes()
 
 	agg, err := NewAggregator(context.Background(), dirs, aggStep, db, canonicalsReader, logger)

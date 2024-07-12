@@ -1,3 +1,19 @@
+// Copyright 2024 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+
 package state
 
 import (
@@ -39,7 +55,7 @@ type TxTask struct {
 	TxAsMessage     types.Message
 	EvmBlockContext evmtypes.BlockContext
 
-	HistoryExecution bool // use history reader for that tx instead of state reader
+	HistoryExecution bool // use history reader for that txn instead of state reader
 
 	BalanceIncreaseSet map[libcommon.Address]uint256.Int
 	ReadLists          map[string]*state.KvList
@@ -71,6 +87,7 @@ func (t *TxTask) CreateReceipt(cumulativeGasUsed uint64) *types.Receipt {
 		BlockHash:         t.BlockHash,
 		TransactionIndex:  uint(t.TxIndex),
 		Type:              t.Tx.Type(),
+		GasUsed:           t.UsedGas,
 		CumulativeGasUsed: cumulativeGasUsed,
 		TxHash:            t.Tx.Hash(),
 		Logs:              t.Logs,
@@ -80,6 +97,10 @@ func (t *TxTask) CreateReceipt(cumulativeGasUsed uint64) *types.Receipt {
 	} else {
 		receipt.Status = types.ReceiptStatusSuccessful
 	}
+	// if the transaction created a contract, store the creation address in the receipt.
+	//if msg.To() == nil {
+	//	receipt.ContractAddress = crypto.CreateAddress(evm.Origin, tx.GetNonce())
+	//}
 	return receipt
 }
 func (t *TxTask) Reset() {
