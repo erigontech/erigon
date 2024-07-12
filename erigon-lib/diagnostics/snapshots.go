@@ -160,11 +160,12 @@ func (d *DiagnosticClient) runSegmentIndexingListener(rootCtx context.Context) {
 			case info := <-ch:
 				d.addOrUpdateSegmentIndexingState(info)
 				d.updateIndexingStatus()
-
+				d.mu.Lock()
 				if d.syncStats.SnapshotIndexing.IndexingFinished {
 					d.SaveData()
 					return
 				}
+				d.mu.Unlock()
 			}
 		}
 	}()
@@ -209,6 +210,9 @@ func (d *DiagnosticClient) runSegmentIndexingFinishedListener(rootCtx context.Co
 
 func (d *DiagnosticClient) updateIndexingStatus() {
 	totalProgressPercent := 0
+	d.mu.Lock()
+	defer d.mu.Unlock()
+
 	for _, seg := range d.syncStats.SnapshotIndexing.Segments {
 		totalProgressPercent += seg.Percent
 	}
@@ -321,6 +325,8 @@ func (d *DiagnosticClient) runFileDownloadedListener(rootCtx context.Context) {
 }
 
 func (d *DiagnosticClient) UpdateFileDownloadedStatistics(downloadedInfo *FileDownloadedStatisticsUpdate, downloadingInfo *SegmentDownloadStatistics) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
 	if d.syncStats.SnapshotDownload.SegmentsDownloading == nil {
 		d.syncStats.SnapshotDownload.SegmentsDownloading = map[string]SegmentDownloadStatistics{}
 	}

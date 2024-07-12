@@ -56,6 +56,7 @@ type DiagnosticClient struct {
 	resourcesUsageMutex sync.Mutex
 	networkSpeed        NetworkSpeedTestResult
 	networkSpeedMutex   sync.Mutex
+	rwMutex             sync.Mutex
 }
 
 func NewDiagnosticClient(ctx context.Context, metricsMux *http.ServeMux, dataDirPath string, speedTest bool) (*DiagnosticClient, error) {
@@ -154,6 +155,9 @@ func (d *DiagnosticClient) runSaveProcess(rootCtx context.Context) {
 }
 
 func (d *DiagnosticClient) SaveData() {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+
 	var funcs []func(tx kv.RwTx) error
 	funcs = append(funcs, SnapshotDownloadUpdater(d.syncStats.SnapshotDownload), StagesListUpdater(d.syncStages), SnapshotIndexingUpdater(d.syncStats.SnapshotIndexing))
 
