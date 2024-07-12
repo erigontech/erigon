@@ -197,7 +197,14 @@ func unwindExec3(u *UnwindState, s *StageState, txc wrap.TxContainer, ctx contex
 			}
 		}
 	}
-	if err := rs.Unwind(ctx, txc.Tx, u.UnwindPoint, txNum, accumulator, changeset); err != nil {
+
+	// if the changeset is nil here, no unwinding took place due to the loop above being empty
+	if changeset == nil { // nothing to unwind, exit function prematurely
+		logger.Warn("unwindExec3: nothing to unwind")
+		return nil
+	}
+
+	if err := rs.Unwind(ctx, txc.Tx, u.UnwindPoint, txNum, accumulator, *changeset); err != nil {
 		return fmt.Errorf("StateV3.Unwind(%d->%d): %w, took %s", s.BlockNumber, u.UnwindPoint, err, time.Since(t))
 	}
 	if err := rawdb.TruncateBorReceipts(txc.Tx, u.UnwindPoint+1); err != nil {
