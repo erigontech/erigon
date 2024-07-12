@@ -210,6 +210,7 @@ func (s *CanonicalTxnIds) init() (err error) {
 		if ok {
 			fromBlockNumBytes = hexutility.EncodeTs(fromBlockNum)
 		}
+		fmt.Printf("[dbg] fromBlockNum %d\n", fromBlockNum)
 	}
 
 	if s.toTxNum >= 0 {
@@ -220,8 +221,9 @@ func (s *CanonicalTxnIds) init() (err error) {
 			return err
 		}
 		if ok {
-			toBlockNumBytes = hexutility.EncodeTs(blockTo)
+			toBlockNumBytes = hexutility.EncodeTs(blockTo + 1) // [from, to)
 		}
+		fmt.Printf("[dbg] fromBlockNum %d\n", blockTo)
 	}
 
 	if s.orderAscend {
@@ -315,12 +317,6 @@ func (s *CanonicalTxnIds) advance() (err error) {
 		} else {
 			s.currentTxnID = kv.TxnId(s.currentBody.BaseTxnID.LastSystemTx(s.currentBody.TxCount))
 		}
-	} else {
-		//if s.orderAscend {
-		//	s.currentTxnID++
-		//} else {
-		//	s.currentTxnID--
-		//}
 	}
 	return nil
 }

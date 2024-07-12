@@ -709,6 +709,9 @@ func (ap *Appendable) collate(ctx context.Context, step uint64, roTx kv.Tx) (App
 
 	for it.HasNext() {
 		k, err := it.Next()
+		if coll.writer.Count() == 0 || coll.writer.Count() > int(ap.aggregationStep)-5 {
+			fmt.Printf("[dbg] alex: %d, %T\n", k, it)
+		}
 		if err != nil {
 			return coll, fmt.Errorf("collate %s: %w", ap.filenameBase, err)
 		}
