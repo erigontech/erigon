@@ -275,7 +275,8 @@ func MockWithEverything(tb testing.TB, gspec *types.Genesis, key *ecdsa.PrivateK
 	cfg.DeprecatedTxPool.Disable = !withTxPool
 	cfg.DeprecatedTxPool.StartOnInit = true
 
-	logger := log.New()
+	logger := log.Root()
+	logger.SetHandler(log.LvlFilterHandler(log.LvlError, log.StderrHandler))
 
 	ctx, ctxCancel := context.WithCancel(context.Background())
 	db, agg := temporaltest.NewTestDB(nil, dirs)
