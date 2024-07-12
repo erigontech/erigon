@@ -20,16 +20,16 @@ type MerkleTree struct {
 
 // Layout of the layers:
 
-// 0: leaves
-// ... intermediate layers
-// Root is not stored in the layers, rootrecomputed on demand
+// 0-n: intermediate layers
+// Root is not stored in the layers, root is recomputed on demand
+// The first layer is not the leaf layer, but the first intermediate layer, the leaf layer is not stored in the layers.
 
 // Initialize initializes the Merkle tree with the given number of leaves and the maximum depth of the tree cache.
 func (m *MerkleTree) Initialize(leavesCount, maxTreeCacheDepth int, computeLeaf func(idx int, out []byte), limitOptional *uint64) {
 	m.computeLeaf = computeLeaf
 	m.layers = make([][]byte, maxTreeCacheDepth)
 	m.leavesCount = leavesCount
-	firstLayerSize := leavesCount * length.Hash
+	firstLayerSize := ((leavesCount + 1) / 2) * length.Hash
 	capacity := (firstLayerSize / 2) * 3
 	m.layers[0] = make([]byte, firstLayerSize, capacity)
 	if limitOptional != nil {
@@ -41,7 +41,7 @@ func (m *MerkleTree) Initialize(leavesCount, maxTreeCacheDepth int, computeLeaf 
 // MarkLeafAsDirty resets the leaf at the given index, so that it will be recomputed on the next call to ComputeRoot.
 func (m *MerkleTree) MarkLeafAsDirty(idx int) {
 	for i := 0; i < len(m.layers); i++ {
-		currDivisor := 1 << i
+		currDivisor := 1 << (i + 1) // i+1 because the first layer is not the leaf layer
 		layerSize := (m.leavesCount + (currDivisor - 1)) / currDivisor
 		if layerSize == 0 {
 			break
@@ -73,12 +73,13 @@ func (m *MerkleTree) AppendLeaf() {
 
 // extendLayer extends the layer with the given index by 1.5x, by marking the new leaf as dirty.
 func (m *MerkleTree) extendLayer(layerIdx int) {
+	var prevLayerNodeCount int
 	if layerIdx == 0 {
-		m.layers[0] = append(m.layers[0], ZeroHashes[0][:]...)
-		return
+		prevLayerNodeCount = m.leavesCount + 1
+	} else {
+		prevLayerNodeCount = len(m.layers[layerIdx-1]) / length.Hash
 	}
 	// find previous layer nodes count and round  to the next power of 2
-	prevLayerNodeCount := len(m.layers[layerIdx-1]) / length.Hash
 	newExpectendLayerNodeCount := prevLayerNodeCount / 2
 	if newExpectendLayerNodeCount == 0 {
 		m.layers[layerIdx] = m.layers[layerIdx][:0]
@@ -117,6 +118,17 @@ func (m *MerkleTree) ComputeRoot() libcommon.Hash {
 		}
 		return ZeroHashes[GetDepth(*m.limit)]
 	}
+	if len(m.layers[0]) == length.Hash {
+		var node libcommon.Hash
+		m.computeLeaf(0, node[:])
+		if m.limit != nil {
+			if err := MerkleRootFromFlatFromIntermediateLevelWithLimit(node[:], root[:], int(*m.limit), 0); err != nil {
+				panic(err)
+			}
+			return root
+		}
+		return node
+	}
 
 	// Compute the root
 	for i := 0; i < len(m.layers); i++ {
@@ -146,19 +158,19 @@ func (m *MerkleTree) CopyInto(other *MerkleTree) {
 
 func (m *MerkleTree) finishHashing(lastLayerIdx int, root []byte) {
 	if m.limit == nil {
-		if err := MerkleRootFromFlatFromIntermediateLevel(m.layers[lastLayerIdx], root, len(m.layers[0]), lastLayerIdx); err != nil {
+		if err := MerkleRootFromFlatFromIntermediateLevel(m.layers[lastLayerIdx], root, m.leavesCount*length.Hash, lastLayerIdx+1); err != nil {
 			panic(err)
 		}
 		return
 	}
 
-	if err := MerkleRootFromFlatFromIntermediateLevelWithLimit(m.layers[lastLayerIdx], root, int(*m.limit), lastLayerIdx); err != nil {
+	if err := MerkleRootFromFlatFromIntermediateLevelWithLimit(m.layers[lastLayerIdx], root, int(*m.limit), lastLayerIdx+1); err != nil {
 		panic(err)
 	}
 }
 
 func (m *MerkleTree) computeLayer(layerIdx int) {
-	currentDivisor := 1 << uint(layerIdx)
+	currentDivisor := 1 << uint(layerIdx+1)
 	if m.layers[layerIdx] == nil {
 		// find previous layer nodes count and round  to the next power of 2
 		prevLayerNodeCount := len(m.layers[layerIdx-1]) / length.Hash
@@ -189,14 +201,24 @@ func (m *MerkleTree) computeLayer(layerIdx int) {
 			continue
 		}
 		if layerIdx == 0 {
-			m.computeLeaf(i, m.layers[layerIdx][fromOffset:toOffset])
+			// leaf layer is always dirty
+			leafIndexBegin := i * 2
+			m.computeLeaf(leafIndexBegin, m.hashBuf[:length.Hash])
+			if leafIndexBegin == m.leavesCount-1 {
+				copy(m.hashBuf[length.Hash:], ZeroHashes[0][:])
+			} else {
+				m.computeLeaf(leafIndexBegin+1, m.hashBuf[length.Hash:])
+			}
+			if err := HashByteSlice(m.layers[layerIdx][fromOffset:toOffset], m.hashBuf[:]); err != nil {
+				panic(err)
+			}
 			continue
 		}
 		childFromOffset := (i * 2) * length.Hash
 		childToOffset := (i*2 + 2) * length.Hash
 		if childToOffset > len(m.layers[layerIdx-1]) {
 			copy(m.hashBuf[:length.Hash], m.layers[layerIdx-1][childFromOffset:])
-			copy(m.hashBuf[length.Hash:], ZeroHashes[layerIdx-1][:])
+			copy(m.hashBuf[length.Hash:], ZeroHashes[layerIdx][:])
 		} else {
 			copy(m.hashBuf[:], m.layers[layerIdx-1][childFromOffset:childToOffset])
 		}
