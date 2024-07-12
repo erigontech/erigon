@@ -752,3 +752,7 @@ func (m *MemoryMutation) HistoryRange(name kv.History, fromTs, toTs int, asc ord
 func (m *MemoryMutation) DomainRange(name kv.Domain, fromKey, toKey []byte, ts uint64, asc order.By, limit int) (it stream.KV, err error) {
 	return m.db.(kv.TemporalTx).DomainRange(name, fromKey, toKey, ts, asc, limit)
 }
+
+func (m *MemoryMutation) AppendableGet(name kv.Appendable, ts kv.TxnId) ([]byte, bool, error) {
+	return m.db.(kv.TemporalTx).AppendableGet(name, ts)
+}
