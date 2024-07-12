@@ -677,8 +677,9 @@ func (tx *AppendableRoTx) txNum2id(rwTx kv.RwTx, txFrom, txTo uint64) (fromID, t
 }
 
 func (ap *Appendable) collate(ctx context.Context, step uint64, roTx kv.Tx) (AppendableCollation, error) {
+	defer func(t time.Time) { fmt.Printf("appendable.go:680: %s\n", time.Since(t)) }(time.Now())
 	stepTo := step + 1
-	txFrom, txTo := step*ap.aggregationStep, stepTo*ap.aggregationStep
+	fromTxNum, toTxNum := step*ap.aggregationStep, stepTo*ap.aggregationStep
 	start := time.Now()
 	defer mxCollateTookIndex.ObserveDuration(start)
 
@@ -699,7 +700,8 @@ func (ap *Appendable) collate(ctx context.Context, step uint64, roTx kv.Tx) (App
 	}
 	coll.writer = NewArchiveWriter(comp, ap.compression)
 
-	it, err := ap.cfg.iters.TxnIdsOfCanonicalBlocks(roTx, int(txFrom), int(txTo), order.Asc, -1)
+	fmt.Printf("[dbg] collate: %d-%d\n", fromTxNum, toTxNum)
+	it, err := ap.cfg.iters.TxnIdsOfCanonicalBlocks(roTx, int(fromTxNum), int(toTxNum), order.Asc, -1)
 	if err != nil {
 		return coll, fmt.Errorf("collate %s: %w", ap.filenameBase, err)
 	}
@@ -715,6 +717,8 @@ func (ap *Appendable) collate(ctx context.Context, step uint64, roTx kv.Tx) (App
 			return coll, fmt.Errorf("collate %s: %w", ap.filenameBase, err)
 		}
 		if !ok {
+			fmt.Printf("[dbg] k: %x\n", k)
+			panic(1)
 			continue
 		}
 		if err = coll.writer.AddWord(v); err != nil {

@@ -807,7 +807,7 @@ Loop:
 				}
 
 				if !(txTask.Final || txTask.TxIndex < 0) {
-					receipts = append(receipts, txTask.CreateReceipt(usedGas))
+					receipts = append(receipts, txTask.CreateReceipt(usedGas)) // for consensus check at Final
 				}
 
 				if txTask.Final {

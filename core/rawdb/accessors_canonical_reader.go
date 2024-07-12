@@ -285,20 +285,20 @@ func (s *CanonicalTxnIds) advanceBlockNum() (err error) {
 }
 
 func (s *CanonicalTxnIds) advance() (err error) {
-	var endOfBlock bool
+	var blockIsOver bool
 
 	if s.orderAscend {
 		s.currentTxnID++
-		endOfBlock = s.currentTxnID >= s.endOfCurrentBlock
+		blockIsOver = s.currentTxnID > s.endOfCurrentBlock
 	} else {
 		if s.currentTxnID == 0 {
+			s.currentBody = nil
 			return nil
 		}
 		s.currentTxnID--
-		endOfBlock = s.currentTxnID <= s.endOfCurrentBlock
+		blockIsOver = s.currentTxnID < s.endOfCurrentBlock
 	}
-
-	if !endOfBlock || s.currentTxnID == s.endOfCurrentBlock {
+	if !blockIsOver {
 		return nil
 	}
 
@@ -316,11 +316,11 @@ func (s *CanonicalTxnIds) advance() (err error) {
 			s.currentTxnID = kv.TxnId(s.currentBody.BaseTxnID.LastSystemTx(s.currentBody.TxCount))
 		}
 	} else {
-		if s.orderAscend {
-			s.currentTxnID++
-		} else {
-			s.currentTxnID--
-		}
+		//if s.orderAscend {
+		//	s.currentTxnID++
+		//} else {
+		//	s.currentTxnID--
+		//}
 	}
 	return nil
 }
