@@ -32,6 +32,7 @@ import (
 	"github.com/ledgerwatch/erigon/turbo/services"
 	"github.com/ledgerwatch/erigon/turbo/shards"
 	"github.com/ledgerwatch/erigon/turbo/stages/headerdownload"
+	"github.com/ledgerwatch/erigon/zk/datastream/server"
 	"github.com/ledgerwatch/erigon/zk/hermez_db"
 	"github.com/ledgerwatch/erigon/zk/tx"
 	zktx "github.com/ledgerwatch/erigon/zk/tx"
@@ -74,13 +75,14 @@ type SequenceBlockCfg struct {
 	accumulator   *shards.Accumulator
 	blockReader   services.FullBlockReader
 
-	dirs      datadir.Dirs
-	historyV3 bool
-	syncCfg   ethconfig.Sync
-	genesis   *types.Genesis
-	agg       *libstate.AggregatorV3
-	stream    *datastreamer.StreamServer
-	zk        *ethconfig.Zk
+	dirs             datadir.Dirs
+	historyV3        bool
+	syncCfg          ethconfig.Sync
+	genesis          *types.Genesis
+	agg              *libstate.AggregatorV3
+	stream           *datastreamer.StreamServer
+	datastreamServer *server.DataStreamServer
+	zk               *ethconfig.Zk
 
 	txPool   *txpool.TxPool
 	txPoolDb kv.RwDB
@@ -110,27 +112,29 @@ func StageSequenceBlocksCfg(
 	txPool *txpool.TxPool,
 	txPoolDb kv.RwDB,
 ) SequenceBlockCfg {
+
 	return SequenceBlockCfg{
-		db:            db,
-		prune:         pm,
-		batchSize:     batchSize,
-		changeSetHook: changeSetHook,
-		chainConfig:   chainConfig,
-		engine:        engine,
-		zkVmConfig:    vmConfig,
-		dirs:          dirs,
-		accumulator:   accumulator,
-		stateStream:   stateStream,
-		badBlockHalt:  badBlockHalt,
-		blockReader:   blockReader,
-		genesis:       genesis,
-		historyV3:     historyV3,
-		syncCfg:       syncCfg,
-		agg:           agg,
-		stream:        stream,
-		zk:            zk,
-		txPool:        txPool,
-		txPoolDb:      txPoolDb,
+		db:               db,
+		prune:            pm,
+		batchSize:        batchSize,
+		changeSetHook:    changeSetHook,
+		chainConfig:      chainConfig,
+		engine:           engine,
+		zkVmConfig:       vmConfig,
+		dirs:             dirs,
+		accumulator:      accumulator,
+		stateStream:      stateStream,
+		badBlockHalt:     badBlockHalt,
+		blockReader:      blockReader,
+		genesis:          genesis,
+		historyV3:        historyV3,
+		syncCfg:          syncCfg,
+		agg:              agg,
+		stream:           stream,
+		datastreamServer: server.NewDataStreamServer(stream, chainConfig.ChainID.Uint64()),
+		zk:               zk,
+		txPool:           txPool,
+		txPoolDb:         txPoolDb,
 	}
 }
 

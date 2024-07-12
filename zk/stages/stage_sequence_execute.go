@@ -19,7 +19,6 @@ import (
 	"github.com/ledgerwatch/erigon/eth/stagedsync"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 	"github.com/ledgerwatch/erigon/zk"
-	"github.com/ledgerwatch/erigon/zk/datastream/server"
 	"github.com/ledgerwatch/erigon/zk/l1_data"
 	zktx "github.com/ledgerwatch/erigon/zk/tx"
 	"github.com/ledgerwatch/erigon/zk/utils"
@@ -74,7 +73,6 @@ func SpawnSequencingStage(
 
 	getHeader := func(hash common.Hash, number uint64) *types.Header { return rawdb.ReadHeader(sdb.tx, hash, number) }
 	hasExecutorForThisBatch := !isLastBatchPariallyProcessed && cfg.zk.HasExecutors()
-	datastreamServer := server.NewDataStreamServer(cfg.stream, cfg.chainConfig.ChainID.Uint64())
 
 	// injected batch
 	if executionAt == 0 {
@@ -96,7 +94,7 @@ func SpawnSequencingStage(
 		}
 
 		// write the batch directly to the stream
-		if err = datastreamServer.WriteBlocksToStream(tx, sdb.hermezDb.HermezDbReader, injectedBatchBlockNumber, injectedBatchBlockNumber, logPrefix); err != nil {
+		if err = cfg.datastreamServer.WriteBlocksToStream(tx, sdb.hermezDb.HermezDbReader, injectedBatchBlockNumber, injectedBatchBlockNumber, logPrefix); err != nil {
 			return err
 		}
 
@@ -559,7 +557,7 @@ func SpawnSequencingStage(
 				return err
 			}
 
-			if err = datastreamServer.WriteBlockToStream(logPrefix, tx, sdb.hermezDb, thisBatch, lastBatch, thisBlockNumber); err != nil {
+			if err = cfg.datastreamServer.WriteBlockToStream(logPrefix, tx, sdb.hermezDb, thisBatch, lastBatch, thisBlockNumber); err != nil {
 				return err
 			}
 
@@ -610,7 +608,7 @@ func SpawnSequencingStage(
 	log.Info(fmt.Sprintf("[%s] Finish batch %d...", logPrefix, thisBatch))
 
 	if !hasExecutorForThisBatch {
-		if err = datastreamServer.WriteBatchEnd(logPrefix, tx, sdb.hermezDb, thisBatch, lastBatch, block.Root()); err != nil {
+		if err = cfg.datastreamServer.WriteBatchEnd(logPrefix, tx, sdb.hermezDb, thisBatch, lastBatch, block.Root()); err != nil {
 			return err
 		}
 	}
