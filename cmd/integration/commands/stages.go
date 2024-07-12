@@ -1334,10 +1334,6 @@ func allSnapshots(ctx context.Context, db kv.RoDB, logger log.Logger) (*freezebl
 				return nil
 			})
 			g.Go(func() error { return _aggSingleton.OpenFolder() }) //TODO: open in read-only if erigon running?
-			err := g.Wait()
-			if err != nil {
-				panic(err)
-			}
 			g.Go(func() error {
 				chainConfig := fromdb.ChainConfig(db)
 				var beaconConfig *clparams.BeaconChainConfig
@@ -1361,6 +1357,10 @@ func allSnapshots(ctx context.Context, db kv.RoDB, logger log.Logger) (*freezebl
 				logger.Info("[downloads]", "locked", er == nil, "at", mtime.Format("02 Jan 06 15:04 2006"))
 				return nil
 			})
+			err := g.Wait()
+			if err != nil {
+				panic(err)
+			}
 
 			_allSnapshotsSingleton.LogStat("blocks")
 			_allBorSnapshotsSingleton.LogStat("bor")
