@@ -221,8 +221,8 @@ Content-Type: application/json
   "method": "eth_getLogs",
   "params": [
     {
-      "fromBlock": "0x14ADC0",
-      "toBlock": "0x14AEC0"
+      "fromBlock": "0x118b5",
+      "toBlock": "0x118b5"
     }
   ],
   "id": 537758

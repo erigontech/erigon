@@ -553,8 +553,9 @@ func (tx *AppendableRoTx) statelessGetter(i int) ArchiveGetter {
 	return r
 }
 
-func (tx *AppendableRoTx) mainTxNumInDB(dbtx kv.Tx) uint64 {
-	fst, _ := kv.FirstKey(dbtx, tx.ap.table)
+func (tx *AppendableRoTx) maxTxNumInDB(dbtx kv.Tx) uint64 {
+	panic("todo: convert TxnID to TxNum")
+	fst, _ := kv.LastKey(dbtx, tx.ap.table)
 	if len(fst) > 0 {
 		fstInDb := binary.BigEndian.Uint64(fst)
 		return min(fstInDb, math.MaxUint64)
@@ -563,7 +564,7 @@ func (tx *AppendableRoTx) mainTxNumInDB(dbtx kv.Tx) uint64 {
 }
 
 func (tx *AppendableRoTx) CanPrune(dbtx kv.Tx) bool {
-	return tx.mainTxNumInDB(dbtx) < tx.files.EndTxNum()
+	return tx.maxTxNumInDB(dbtx) < tx.files.EndTxNum()
 }
 func (tx *AppendableRoTx) canBuild(dbtx kv.Tx) (bool, error) { //nolint
 	//TODO: support "keep in db" parameter
