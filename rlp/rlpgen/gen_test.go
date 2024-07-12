@@ -17,7 +17,6 @@
 package main
 
 import (
-	"bytes"
 	"fmt"
 	"go/ast"
 	"go/importer"
@@ -27,6 +26,8 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	"github.com/stretchr/testify/assert"
 )
 
 // Package RLP is loaded only once and reused for all tests.
@@ -74,9 +75,7 @@ func TestOutput(t *testing.T) {
 			if err != nil {
 				t.Fatal("error loading expected test output:", err)
 			}
-			if !bytes.Equal(output, wantOutput) {
-				t.Fatalf("output mismatch, want: %v got %v", string(wantOutput), string(output))
-			}
+			assert.Equal(t, string(wantOutput), string(output))
 		})
 	}
 }
