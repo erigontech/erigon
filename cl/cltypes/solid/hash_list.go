@@ -67,6 +67,9 @@ func (arr *hashList) UnmarshalJSON(buf []byte) error {
 
 func (h *hashList) Append(val libcommon.Hash) {
 	offset := h.l * length.Hash
+	if h.MerkleTree != nil {
+		h.MerkleTree.AppendLeaf()
+	}
 	if offset == len(h.u) {
 		h.u = append(h.u, val[:]...)
 		h.l++
@@ -86,6 +89,7 @@ func (h *hashList) Length() int {
 
 func (h *hashList) Clear() {
 	h.l = 0
+	h.MerkleTree = nil
 }
 
 func (h *hashList) Clone() clonable.Clonable {
@@ -116,6 +120,7 @@ func (h *hashList) DecodeSSZ(buf []byte, _ int) error {
 	if len(buf)%length.Hash > 0 {
 		return ssz.ErrBadDynamicLength
 	}
+	h.MerkleTree = nil
 	h.u = libcommon.Copy(buf)
 	h.l = len(h.u) / length.Hash
 	return nil

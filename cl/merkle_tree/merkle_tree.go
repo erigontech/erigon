@@ -112,12 +112,32 @@ func (m *MerkleTree) ComputeRoot() libcommon.Hash {
 	if len(m.layers) == 0 {
 		return ZeroHashes[0]
 	}
-	if len(m.layers[0]) == 0 {
+
+	if m.leavesCount == 0 {
 		if m.limit == nil {
 			return ZeroHashes[0]
 		}
 		return ZeroHashes[GetDepth(*m.limit)]
 	}
+
+	if m.leavesCount <= 3 {
+		buf := make([]byte, 0, 3*length.Hash)
+		for i := 0; i < m.leavesCount; i++ {
+			m.computeLeaf(i, m.hashBuf[:length.Hash])
+			buf = append(buf, m.hashBuf[:length.Hash]...)
+		}
+		if m.limit != nil {
+			if err := MerkleRootFromFlatFromIntermediateLevelWithLimit(buf, root[:], int(*m.limit), 0); err != nil {
+				panic(err)
+			}
+			return root
+		}
+		if err := MerkleRootFromFlatFromIntermediateLevel(buf, root[:], m.leavesCount*length.Hash, 0); err != nil {
+			panic(err)
+		}
+		return root
+	}
+
 	if len(m.layers[0]) == length.Hash {
 		var node libcommon.Hash
 		m.computeLeaf(0, node[:])
