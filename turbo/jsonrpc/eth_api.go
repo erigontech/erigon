@@ -461,8 +461,9 @@ func NewRPCTransaction(txn types.Transaction, blockHash common.Hash, blockNumber
 			result.MaxFeePerBlobGas = (*hexutil.Big)(blobTx.MaxFeePerBlobGas.ToBig())
 			result.BlobVersionedHashes = blobTx.BlobVersionedHashes
 		} else if txn.Type() == types.SetCodeTxType {
-			ats := make([]types.JsonAuthorization, len(txn.GetAuthorizations()))
-			for i, a := range txn.GetAuthorizations() {
+			setCodeTx := txn.(*types.SetCodeTransaction)
+			ats := make([]types.JsonAuthorization, len(setCodeTx.GetAuthorizations()))
+			for i, a := range setCodeTx.GetAuthorizations() {
 				ats[i] = types.JsonAuthorization{}.FromAuthorization(a)
 			}
 			result.Authorizations = &ats

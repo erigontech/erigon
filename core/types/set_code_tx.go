@@ -32,6 +32,10 @@ func (tx *SetCodeTransaction) GetBlobHashes() []libcommon.Hash {
 	return []libcommon.Hash{}
 }
 
+func (tx *SetCodeTransaction) GetAuthorizations() []Authorization {
+	return tx.Authorizations
+}
+
 func (tx *SetCodeTransaction) copy() *SetCodeTransaction {
 	cpy := &SetCodeTransaction{}
 	cpy.DynamicFeeTransaction = *tx.DynamicFeeTransaction.copy()

@@ -390,7 +390,7 @@ func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (*evmtype
 
 			// 6. add authority account to accesses_addresses
 			verifiedAuthorities = append(verifiedAuthorities, authority)
-			// authority is added to acceessed_address in prepare step
+			// authority is added to accessed_address in prepare step
 		}
 	}
 

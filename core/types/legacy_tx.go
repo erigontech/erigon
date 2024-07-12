@@ -94,10 +94,6 @@ func (ct *CommonTx) GetBlobHashes() []libcommon.Hash {
 	return []libcommon.Hash{}
 }
 
-func (ct *CommonTx) GetAuthorizations() []Authorization {
-	return nil
-}
-
 // LegacyTx is the transaction data of regular Ethereum transactions.
 type LegacyTx struct {
 	CommonTx
