@@ -160,12 +160,10 @@ func (d *DiagnosticClient) runSegmentIndexingListener(rootCtx context.Context) {
 			case info := <-ch:
 				d.addOrUpdateSegmentIndexingState(info)
 				d.updateIndexingStatus()
-				d.mu.Lock()
 				if d.syncStats.SnapshotIndexing.IndexingFinished {
 					d.SaveData()
 					return
 				}
-				d.mu.Unlock()
 			}
 		}
 	}()
@@ -211,11 +209,11 @@ func (d *DiagnosticClient) runSegmentIndexingFinishedListener(rootCtx context.Co
 func (d *DiagnosticClient) updateIndexingStatus() {
 	totalProgressPercent := 0
 	d.mu.Lock()
-	defer d.mu.Unlock()
 
 	for _, seg := range d.syncStats.SnapshotIndexing.Segments {
 		totalProgressPercent += seg.Percent
 	}
+	d.mu.Unlock()
 
 	totalProgress := totalProgressPercent / len(d.syncStats.SnapshotIndexing.Segments)
 
@@ -379,13 +377,13 @@ func (d *DiagnosticClient) runFillDBListener(rootCtx context.Context) {
 
 				totalTimeString := time.Duration(info.TimeElapsed) * time.Second
 
-				d.mu.Lock()
 				d.updateSnapshotStageStats(SyncStageStats{
 					TimeElapsed: totalTimeString.String(),
 					TimeLeft:    "unknown",
 					Progress:    fmt.Sprintf("%d%%", (info.Stage.Current*100)/info.Stage.Total),
 				}, "Fill DB from snapshots")
 
+				d.mu.Lock()
 				err := d.db.Update(d.ctx, func(tx kv.RwTx) error {
 					err := SnapshotFillDBUpdater(d.syncStats.SnapshotFillDB)(tx)
 					if err != nil {
