@@ -316,6 +316,10 @@ LOOP:
 		}
 
 		if batchEnd != nil {
+			// this check was inside c.readFullBlockProto() but it is better to move it here
+			if fullBlock == nil {
+				fullBlock = &types.FullL2Block{}
+			}
 			fullBlock.BatchEnd = true
 			fullBlock.LocalExitRoot = batchEnd.LocalExitRoot
 		}
