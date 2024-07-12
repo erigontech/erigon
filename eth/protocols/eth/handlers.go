@@ -193,6 +193,11 @@ func AnswerGetReceiptsQuery(ctx context.Context, cfg *chain.Config, receiptsGett
 			return nil, err
 		}
 
+		println("receipts:")
+		for _, result := range results {
+			println(result.String())
+		}
+
 		// If known, encode and queue for response packet
 		if encoded, err := rlp.EncodeToBytes(results); err != nil {
 			return nil, fmt.Errorf("failed to encode receipt: %w", err)

@@ -244,7 +244,6 @@ func pumpStreamLoop[TMessage interface{}](
 			case <-ctx.Done():
 				return
 			case req := <-reqs:
-				println("received")
 				if err := handleInboundMessage(ctx, req, sentry); err != nil {
 					logger.Debug("Handling incoming message", "stream", streamName, "err", err)
 				}
@@ -742,7 +741,6 @@ func (cs *MultiClient) getReceipts66(ctx context.Context, inreq *proto_sentry.In
 		RequestId:         query.RequestId,
 		ReceiptsRLPPacket: receiptsList,
 	})
-	println("getReceipts66", len(receiptsList))
 	if err != nil {
 		return fmt.Errorf("encode header response: %w", err)
 	}
@@ -753,14 +751,14 @@ func (cs *MultiClient) getReceipts66(ctx context.Context, inreq *proto_sentry.In
 			Data: b,
 		},
 	}
-	_, err = sentryClient.SendMessageById(ctx, &outreq, &grpc.EmptyCallOption{})
+	_, err = sentryClient.SendMessageById(ctx, &outreq, &grpc.OnFinishCallOption{})
 	if err != nil {
 		if isPeerNotFoundErr(err) {
 			return nil
 		}
 		return fmt.Errorf("send receipts response: %w", err)
 	}
-	cs.logger.Info(fmt.Sprintf("[%s] GetReceipts responseLen %d", sentry.ConvertH512ToPeerID(inreq.PeerId), len(b)))
+	//println(fmt.Sprintf("[%s] GetReceipts responseLen %d", sentry.ConvertH512ToPeerID(inreq.PeerId), len(b)))
 	return nil
 }
 
@@ -774,9 +772,7 @@ func (cs *MultiClient) HandleInboundMessage(ctx context.Context, message *proto_
 			err = fmt.Errorf("%+v, msgID=%s, trace: %s", rec, message.Id.String(), dbg.Stack())
 		}
 	}() // avoid crash because Erigon's core does many things
-	println("entered handleInboundMessage")
 	err = cs.handleInboundMessage(ctx, message, sentry)
-	println(message.Id.String())
 
 	if (err != nil) && rlp.IsInvalidRLPError(err) {
 		cs.logger.Debug("Kick peer for invalid RLP", "err", err)
