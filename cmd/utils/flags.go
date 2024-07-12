@@ -606,6 +606,11 @@ var (
 		Usage: "The URL of the data availability service",
 		Value: "",
 	}
+	DebugTimers = cli.BoolFlag{
+		Name:  "debug.timers",
+		Usage: "Enable debug timers",
+		Value: false,
+	}
 	DebugNoSync = cli.BoolFlag{
 		Name:  "debug.no-sync",
 		Usage: "Disable syncing",

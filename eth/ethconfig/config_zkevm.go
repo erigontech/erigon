@@ -57,6 +57,7 @@ type Zk struct {
 	SyncLimit             uint64
 	Gasless               bool
 
+	DebugTimers    bool
 	DebugNoSync    bool
 	DebugLimit     uint64
 	DebugStep      uint64

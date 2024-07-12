@@ -22,6 +22,9 @@ func (srv *DataStreamServer) WriteBlocksToStream(
 	from, to uint64,
 	logPrefix string,
 ) error {
+	t := utils.StartTimer("write-stream", "writeblockstostream")
+	defer t.LogTimer()
+
 	var err error
 
 	logTicker := time.NewTicker(10 * time.Second)
@@ -93,6 +96,9 @@ func (srv *DataStreamServer) WriteBlockToStream(
 	batchNum, prevBatchNum,
 	blockNum uint64,
 ) error {
+	t := utils.StartTimer("write-stream", "writeblockstostream")
+	defer t.LogTimer()
+
 	var err error
 
 	if err = srv.UnwindIfNecessary(logPrefix, reader, blockNum, prevBatchNum, batchNum); err != nil {

@@ -13,6 +13,7 @@ import (
 	"github.com/ledgerwatch/erigon/eth/ethconfig"
 	"github.com/ledgerwatch/erigon/zk/sequencer"
 	"github.com/urfave/cli/v2"
+	utils2 "github.com/ledgerwatch/erigon/zk/utils"
 )
 
 func ApplyFlagsForZkConfig(ctx *cli.Context, cfg *ethconfig.Config) {
@@ -144,6 +145,7 @@ func ApplyFlagsForZkConfig(ctx *cli.Context, cfg *ethconfig.Config) {
 		WitnessFull:                            ctx.Bool(utils.WitnessFullFlag.Name),
 		SyncLimit:                              ctx.Uint64(utils.SyncLimit.Name),
 		Gasless:                                ctx.Bool(utils.SupportGasless.Name),
+		DebugTimers:                            ctx.Bool(utils.DebugTimers.Name),
 		DebugNoSync:                            ctx.Bool(utils.DebugNoSync.Name),
 		DebugLimit:                             ctx.Uint64(utils.DebugLimit.Name),
 		DebugStep:                              ctx.Uint64(utils.DebugStep.Name),
@@ -155,6 +157,8 @@ func ApplyFlagsForZkConfig(ctx *cli.Context, cfg *ethconfig.Config) {
 		DataStreamHost:                         ctx.String(utils.DataStreamHost.Name),
 		DataStreamPort:                         ctx.Uint(utils.DataStreamPort.Name),
 	}
+
+	utils2.EnableTimer(cfg.DebugTimers)
 
 	checkFlag(utils.L2ChainIdFlag.Name, cfg.L2ChainId)
 	if !sequencer.IsSequencer() {
