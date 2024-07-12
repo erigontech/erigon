@@ -31,6 +31,6 @@ type CanonicalsReader interface {
 	// For reverse iteration use order.Desc and fromTxNum=-1, toTxNum=-1
 	TxnIdsOfCanonicalBlocks(tx kv.Tx, fromTxNum, toTxNum int, asc order.By, limit int) (stream.U64, error)
 	BaseTxnID(tx kv.Tx, blockNum uint64, blockHash common.Hash) (kv.TxnId, error)
-	TxNum2ID(tx kv.Tx, blockNum uint64, blockHash common.Hash, txnIdx int, txNum uint64) (kv.TxnId, error)
+	TxNum2ID(tx kv.Tx, txNum uint64) (blockNum uint64, txnID kv.TxnId, ok bool, err error)
 	LastFrozenTxNum(tx kv.Tx) (kv.TxnId, error)
 }

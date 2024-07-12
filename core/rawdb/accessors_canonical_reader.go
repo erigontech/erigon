@@ -55,31 +55,32 @@ func NewCanonicalReader() *CanonicalReader {
 func (*CanonicalReader) TxnIdsOfCanonicalBlocks(tx kv.Tx, fromTxNum, toTxNum int, asc order.By, limit int) (stream.U64, error) {
 	return TxnIdsOfCanonicalBlocks(tx, fromTxNum, toTxNum, asc, limit)
 }
-func (*CanonicalReader) TxNum2ID(tx kv.Tx, blockNum uint64, blockHash common2.Hash, txnIdx int, txNum uint64) (kv.TxnId, error) {
-	if blockNum == 0 {
-		return kv.TxnId(txNum), nil
-	}
-	b, err := readBodyForStorage(tx, blockHash, blockNum)
-	if err != nil {
-		return 0, err
-	}
-	if b != nil {
-		return kv.TxnId(int(b.BaseTxnID) + txnIdx + 1), nil
-	}
-
-	// body freezed and pruned. then TxNum and TxnIDX are identical
-	_min, err := rawdbv3.TxNums.Min(tx, blockNum)
-	if err != nil {
-		return 0, err
-	}
-	_max, err := rawdbv3.TxNums.Max(tx, blockNum)
-	if err != nil {
-		return 0, err
-	}
-	if txNum < _min || txNum > _max {
-		return 0, fmt.Errorf("TxNum2ID: txNum=%d out of range: %d, %d", txNum, _min, _max)
-	}
-	return kv.TxnId(txNum), nil
+func (*CanonicalReader) TxNum2ID(tx kv.Tx, txNum uint64) (blockNum uint64, txnID kv.TxnId, ok bool, err error) {
+	return TxNum2TxnID(tx, txNum)
+	//if blockNum == 0 {
+	//	return kv.TxnId(txNum), nil
+	//}
+	//b, err := readBodyForStorage(tx, blockHash, blockNum)
+	//if err != nil {
+	//	return 0, err
+	//}
+	//if b != nil {
+	//	return kv.TxnId(int(b.BaseTxnID) + txnIdx + 1), nil
+	//}
+	//
+	//// body freezed and pruned. then TxNum and TxnIDX are identical
+	//_min, err := rawdbv3.TxNums.Min(tx, blockNum)
+	//if err != nil {
+	//	return 0, err
+	//}
+	//_max, err := rawdbv3.TxNums.Max(tx, blockNum)
+	//if err != nil {
+	//	return 0, err
+	//}
+	//if txNum < _min || txNum > _max {
+	//	return 0, fmt.Errorf("TxNum2ID: txNum=%d out of range: %d, %d", txNum, _min, _max)
+	//}
+	//return kv.TxnId(txNum), nil
 }
 
 func (*CanonicalReader) BaseTxnID(tx kv.Tx, blockNum uint64, blockHash common2.Hash) (kv.TxnId, error) {
