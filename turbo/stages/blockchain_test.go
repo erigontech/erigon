@@ -394,14 +394,15 @@ func testReorg(t *testing.T, first, second []int64, td int64) {
 	msg := m.SentMessage(0)
 
 	require.Equal(protosentry.MessageId_RECEIPTS_66, msg.Id)
-	println(string(msg.GetData()))
+
 	encoded, err := rlp.EncodeToBytes(types.Receipts{})
+	require.NoError(err)
+
 	res := make([]rlp.RawValue, 0, queryNum)
 	for i := 0; i < queryNum; i++ {
 		res = append(res, encoded)
 	}
 
-	require.NoError(err)
 	b, err = rlp.EncodeToBytes(&eth.ReceiptsRLPPacket66{
 		RequestId:         1,
 		ReceiptsRLPPacket: res,

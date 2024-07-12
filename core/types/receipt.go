@@ -477,11 +477,8 @@ func (rl Receipts) DeriveFieldsV3ForSingleReceipt(i int, blockHash libcommon.Has
 	return r, nil
 }
 
+// TODO: maybe make it more prettier (only for debug purposes)
 func (r *Receipt) String() string {
-	firstLog := []byte("none")
-	if len(r.Logs) > 0 {
-		firstLog, _ = r.Logs[0].MarshalJSON()
-	}
-	str := fmt.Sprintf("Receipt of tx %s status %d gas used %d log 1st data %s", r.TxHash.String(), r.Status, r.GasUsed, string(firstLog))
+	str := fmt.Sprintf("Receipt of tx %+v", *r)
 	return str
 }
