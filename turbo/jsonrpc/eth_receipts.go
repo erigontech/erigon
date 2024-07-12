@@ -311,6 +311,8 @@ func (api *APIImpl) getLogsV3(ctx context.Context, tx kv.TemporalTx, begin, end 
 	if err != nil {
 		return logs, err
 	}
+
+	var baseBlockTxnID kv.TxnId
 	it := rawdbv3.TxNums2BlockNums(tx, txNumbers, order.Asc)
 	defer it.Close()
 	for it.HasNext() {
