@@ -125,12 +125,13 @@ func (d *DiagnosticClient) Setup() {
 func (d *DiagnosticClient) runSaveProcess(rootCtx context.Context) {
 	ticker := time.NewTicker(5 * time.Minute)
 	go func() {
+		defer ticker.Stop()
 		for {
 			select {
 			case <-ticker.C:
 				d.SaveData()
 			case <-rootCtx.Done():
-				ticker.Stop()
+				d.SaveData()
 				return
 			}
 		}
