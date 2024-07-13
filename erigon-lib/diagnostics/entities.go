@@ -91,7 +91,6 @@ type SyncStatistics struct {
 	SnapshotDownload SnapshotDownloadStatistics `json:"snapshotDownload"`
 	SnapshotIndexing SnapshotIndexingStatistics `json:"snapshotIndexing"`
 	SnapshotFillDB   SnapshotFillDBStatistics   `json:"snapshotFillDB"`
-	BlockExecution   BlockEexcStatsData         `json:"blockExecution"`
 	SyncFinished     bool                       `json:"syncFinished"`
 }
 

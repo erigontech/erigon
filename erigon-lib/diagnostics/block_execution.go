@@ -72,7 +72,7 @@ func (d *DiagnosticClient) runBlockExecutionListener(rootCtx context.Context) {
 			case <-rootCtx.Done():
 				return
 			case info := <-ch:
-				d.syncStats.BlockExecution.SetData(info)
+				d.BlockExecution.SetData(info)
 				if d.syncStats.SyncFinished {
 					return
 				}
@@ -82,7 +82,7 @@ func (d *DiagnosticClient) runBlockExecutionListener(rootCtx context.Context) {
 }
 
 func (d *DiagnosticClient) BlockExecutionInfoJson(w io.Writer) {
-	if err := json.NewEncoder(w).Encode(d.syncStats.BlockExecution.Data()); err != nil {
+	if err := json.NewEncoder(w).Encode(d.BlockExecution.Data()); err != nil {
 		log.Debug("[diagnostics] BlockExecutionInfoJson", "err", err)
 	}
 }
