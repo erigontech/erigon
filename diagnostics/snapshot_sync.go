@@ -17,7 +17,6 @@
 package diagnostics
 
 import (
-	"encoding/json"
 	"net/http"
 
 	diaglib "github.com/ledgerwatch/erigon-lib/diagnostics"
@@ -66,25 +65,25 @@ func SetupStagesAccess(metricsMux *http.ServeMux, diag *diaglib.DiagnosticClient
 }
 
 func writeNetworkSpeed(w http.ResponseWriter, diag *diaglib.DiagnosticClient) {
-	json.NewEncoder(w).Encode(diag.GetNetworkSpeed())
+	diag.NetworkSpeedJson(w)
 }
 
 func writeResourcesUsage(w http.ResponseWriter, diag *diaglib.DiagnosticClient) {
-	json.NewEncoder(w).Encode(diag.GetResourcesUsage())
+	diag.ResourcesUsageJson(w)
 }
 
 func writeStages(w http.ResponseWriter, diag *diaglib.DiagnosticClient) {
-	json.NewEncoder(w).Encode(diag.SyncStatistics())
+	diag.SyncStatsJson(w)
 }
 
 func writeFilesList(w http.ResponseWriter, diag *diaglib.DiagnosticClient) {
-	json.NewEncoder(w).Encode(diag.SnapshotFilesList())
+	diag.SnapshotFilesListJson(w)
 }
 
 func writeHardwareInfo(w http.ResponseWriter, diag *diaglib.DiagnosticClient) {
-	json.NewEncoder(w).Encode(diag.HardwareInfo())
+	diag.HardwareInfoJson(w)
 }
 
 func writeSyncStages(w http.ResponseWriter, diag *diaglib.DiagnosticClient) {
-	json.NewEncoder(w).Encode(diag.GetSyncStages())
+	diag.SyncStagesJson(w)
 }

@@ -18,7 +18,9 @@ package diagnostics
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
+	"io"
 	"time"
 
 	"github.com/ledgerwatch/erigon-lib/common"
@@ -424,12 +426,25 @@ func (d *DiagnosticClient) SetFillDBInfo(info SnapshotFillDBStage) {
 	}
 }
 
+// Deprecated - it's not thread-safe and used only in tests. Need introduce another method or add special methods for Tests.
 func (d *DiagnosticClient) SyncStatistics() SyncStatistics {
 	return d.syncStats
 }
 
-func (d *DiagnosticClient) SnapshotFilesList() SnapshoFilesList {
-	return d.snapshotFileList
+func (d *DiagnosticClient) SyncStatsJson(w io.Writer) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	if err := json.NewEncoder(w).Encode(d.syncStats); err != nil {
+		log.Debug("[diagnostics] SyncStatsJson", "err", err)
+	}
+}
+
+func (d *DiagnosticClient) SnapshotFilesListJson(w io.Writer) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	if err := json.NewEncoder(w).Encode(d.snapshotFileList); err != nil {
+		log.Debug("[diagnostics] SnapshotFilesListJson", "err", err)
+	}
 }
 
 func SnapshotDownloadInfoFromTx(tx kv.Tx) ([]byte, error) {
