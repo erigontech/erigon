@@ -57,6 +57,8 @@ func (p *PeerStats) AddOrUpdatePeer(peerID string, peerInfo PeerStatisticMsgUpda
 
 // Deprecated - used in tests. non-thread-safe
 func (p *PeerStats) AddPeer(peerID string, peerInfo PeerStatisticMsgUpdate) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
 	p.addPeer(peerID, peerInfo)
 }
 
