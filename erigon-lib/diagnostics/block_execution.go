@@ -18,6 +18,8 @@ package diagnostics
 
 import (
 	"context"
+	"encoding/json"
+	"io"
 	"sync"
 
 	"github.com/ledgerwatch/erigon-lib/log/v3"
@@ -77,4 +79,10 @@ func (d *DiagnosticClient) runBlockExecutionListener(rootCtx context.Context) {
 			}
 		}
 	}()
+}
+
+func (d *DiagnosticClient) BlockExecutionInfoJson(w io.Writer) {
+	if err := json.NewEncoder(w).Encode(d.syncStats.BlockExecution.Data()); err != nil {
+		log.Debug("[diagnostics] BlockExecutionInfoJson", "err", err)
+	}
 }
