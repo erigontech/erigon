@@ -64,7 +64,7 @@ func (g *Generator) GetReceipts(ctx context.Context, cfg *chain.Config, tx kv.Tx
 		}
 		return h
 	}
-	header := block.Header()
+	header := block.HeaderNoCopy()
 	for i, txn := range block.Transactions() {
 		ibs.SetTxContext(txn.Hash(), block.Hash(), i)
 		receipt, _, err := core.ApplyTransaction(cfg, core.GetHashFn(header, getHeader), engine, nil, gp, ibs, noopWriter, header, txn, usedGas, usedBlobGas, vm.Config{})
