@@ -123,10 +123,12 @@ func (d *DiagnosticClient) Setup() {
 
 // Save diagnostic data by time interval to reduce save events
 func (d *DiagnosticClient) runSaveProcess(rootCtx context.Context) {
+	ticker := time.NewTicker(5 * time.Minute)
 	go func() {
+		defer ticker.Stop()
 		for {
 			select {
-			case <-time.Tick(5 * time.Minute):
+			case <-ticker.C:
 				d.SaveData()
 			case <-rootCtx.Done():
 				d.SaveData()
