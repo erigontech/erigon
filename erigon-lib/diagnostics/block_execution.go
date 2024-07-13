@@ -37,9 +37,7 @@ func (d *DiagnosticClient) runBlockExecutionListener(rootCtx context.Context) {
 			case <-rootCtx.Done():
 				return
 			case info := <-ch:
-				d.mu.Lock()
-				d.syncStats.BlockExecution = info
-				d.mu.Unlock()
+				d.SetBlockExecutionStats(info)
 
 				if d.syncStats.SyncFinished {
 					return
@@ -47,4 +45,14 @@ func (d *DiagnosticClient) runBlockExecutionListener(rootCtx context.Context) {
 			}
 		}
 	}()
+}
+
+func (d *DiagnosticClient) SetBlockExecutionStats(stats BlockExecutionStatistics) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	d.setBlockExecutionStats(stats)
+}
+
+func (d *DiagnosticClient) setBlockExecutionStats(stats BlockExecutionStatistics) {
+	d.syncStats.BlockExecution = stats
 }
