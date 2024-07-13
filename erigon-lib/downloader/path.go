@@ -12,7 +12,6 @@
 package downloader
 
 import (
-	"io/fs"
 	"os"
 	"runtime"
 	"strings"
@@ -171,28 +170,6 @@ func Clean(path string) string {
 	return FromSlash(out.string())
 }
 
-func unixIsLocal(path string) bool { //nolint
-	if IsAbs(path) || path == "" {
-		return false
-	}
-	hasDots := false
-	for p := path; p != ""; {
-		var part string
-		part, p, _ = strings.Cut(p, "/")
-		if part == "." || part == ".." {
-			hasDots = true
-			break
-		}
-	}
-	if hasDots {
-		path = Clean(path)
-	}
-	if path == ".." || strings.HasPrefix(path, "../") {
-		return false
-	}
-	return true
-}
-
 // FromSlash returns the result of replacing each slash ('/') character
 // in path with a separator character. Multiple slashes are replaced
 // by multiple separators.
@@ -202,71 +179,3 @@ func FromSlash(path string) string {
 	}
 	return strings.ReplaceAll(path, "/", string(Separator))
 }
-
-// Join joins any number of path elements into a single path,
-// separating them with an OS specific Separator. Empty elements
-// are ignored. The result is Cleaned. However, if the argument
-// list is empty or all its elements are empty, Join returns
-// an empty string.
-// On Windows, the result will only be a UNC path if the first
-// non-empty element is a UNC path.
-func Join(elem ...string) string {
-	return join(elem)
-}
-
-// nolint
-func unixAbs(path string) (string, error) {
-	if IsAbs(path) {
-		return Clean(path), nil
-	}
-	wd, err := os.Getwd()
-	if err != nil {
-		return "", err
-	}
-	return Join(wd, path), nil
-}
-
-// SkipDir is used as a return value from WalkFuncs to indicate that
-// the directory named in the call is to be skipped. It is not returned
-// as an error by any function.
-var SkipDir error = fs.SkipDir
-
-// WalkFunc is the type of the function called by Walk to visit each
-// file or directory.
-//
-// The path argument contains the argument to Walk as a prefix.
-// That is, if Walk is called with root argument "dir" and finds a file
-// named "a" in that directory, the walk function will be called with
-// argument "dir/a".
-//
-// The directory and file are joined with Join, which may clean the
-// directory name: if Walk is called with the root argument "x/../dir"
-// and finds a file named "a" in that directory, the walk function will
-// be called with argument "dir/a", not "x/../dir/a".
-//
-// The info argument is the fs.FileInfo for the named path.
-//
-// The error result returned by the function controls how Walk continues.
-// If the function returns the special value SkipDir, Walk skips the
-// current directory (path if info.IsDir() is true, otherwise path's
-// parent directory). If the function returns the special value SkipAll,
-// Walk skips all remaining files and directories. Otherwise, if the function
-// returns a non-nil error, Walk stops entirely and returns that error.
-//
-// The err argument reports an error related to path, signaling that Walk
-// will not walk into that directory. The function can decide how to
-// handle that error; as described earlier, returning the error will
-// cause Walk to stop walking the entire tree.
-//
-// Walk calls the function with a non-nil err argument in two cases.
-//
-// First, if an os.Lstat on the root directory or any directory or file
-// in the tree fails, Walk calls the function with path set to that
-// directory or file's path, info set to nil, and err set to the error
-// from os.Lstat.
-//
-// Second, if a directory's Readdirnames method fails, Walk calls the
-// function with path set to the directory's path, info, set to an
-// fs.FileInfo describing the directory, and err set to the error from
-// Readdirnames.
-type WalkFunc func(path string, info fs.FileInfo, err error) error
