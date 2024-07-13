@@ -18,8 +18,11 @@ package diagnostics
 
 import (
 	"context"
+	"encoding/json"
+	"io"
 	"time"
 
+	"github.com/ledgerwatch/erigon-lib/log/v3"
 	"github.com/showwin/speedtest-go/speedtest"
 	"github.com/showwin/speedtest-go/speedtest/transport"
 )
@@ -86,6 +89,10 @@ func (d *DiagnosticClient) runSpeedTest(rootCtx context.Context) NetworkSpeedTes
 	}
 }
 
-func (d *DiagnosticClient) GetNetworkSpeed() NetworkSpeedTestResult {
-	return d.networkSpeed
+func (d *DiagnosticClient) NetworkSpeedJson(w io.Writer) {
+	d.networkSpeedMutex.Lock()
+	defer d.networkSpeedMutex.Unlock()
+	if err := json.NewEncoder(w).Encode(d.networkSpeed); err != nil {
+		log.Debug("[diagnostics] ResourcesUsageJson", "err", err)
+	}
 }
