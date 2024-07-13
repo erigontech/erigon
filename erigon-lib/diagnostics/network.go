@@ -46,11 +46,11 @@ func (p *PeerStats) AddOrUpdatePeer(peerID string, peerInfo PeerStatisticMsgUpda
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	if value, ok := p.peersInfo.Load(peerID); ok {
-		p.UpdatePeer(peerID, peerInfo, value)
+		p.updatePeer(peerID, peerInfo, value)
 	} else {
 		p.addPeer(peerID, peerInfo)
 		if p.getPeersCount() > p.limit {
-			p.RemovePeersWhichExceedLimit(p.limit)
+			p.removePeersWhichExceedLimit(p.limit)
 		}
 	}
 }
@@ -70,7 +70,10 @@ func (p *PeerStats) addPeer(peerID string, peerInfo PeerStatisticMsgUpdate) {
 func (p *PeerStats) UpdatePeer(peerID string, peerInfo PeerStatisticMsgUpdate, prevValue any) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
+	p.updatePeer(peerID, peerInfo, prevValue)
+}
 
+func (p *PeerStats) updatePeer(peerID string, peerInfo PeerStatisticMsgUpdate, prevValue any) {
 	pv := PeerStatisticsFromMsgUpdate(peerInfo, prevValue)
 
 	p.peersInfo.Store(peerID, pv)
@@ -210,7 +213,10 @@ func (p *PeerStats) GetOldestUpdatedPeersWithSize(size int) []PeerUpdTime {
 func (p *PeerStats) RemovePeersWhichExceedLimit(limit int) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
+	p.removePeersWhichExceedLimit(limit)
+}
 
+func (p *PeerStats) removePeersWhichExceedLimit(limit int) {
 	peersToRemove := p.getPeersCount() - limit
 	if peersToRemove > 0 {
 		peers := p.GetOldestUpdatedPeersWithSize(peersToRemove)
