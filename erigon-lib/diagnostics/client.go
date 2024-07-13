@@ -41,6 +41,7 @@ type DiagnosticClient struct {
 
 	syncStages          []SyncStage
 	syncStats           SyncStatistics
+	BlockExecution      BlockEexcStatsData
 	snapshotFileList    SnapshoFilesList
 	mu                  sync.Mutex
 	headerMutex         sync.Mutex
