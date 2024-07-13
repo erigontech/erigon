@@ -18,6 +18,8 @@ package diagnostics
 
 import (
 	"time"
+
+	"golang.org/x/exp/maps"
 )
 
 type SyncStageType string
@@ -45,6 +47,25 @@ type PeerStatistics struct {
 	CapBytesOut  map[string]uint64
 	TypeBytesIn  map[string]uint64
 	TypeBytesOut map[string]uint64
+}
+
+func (p PeerStatistics) Clone() PeerStatistics {
+	p1 := p
+	p1.CapBytesIn = maps.Clone(p.CapBytesIn)
+	p1.CapBytesOut = maps.Clone(p.CapBytesOut)
+	p1.TypeBytesIn = maps.Clone(p.TypeBytesIn)
+	p1.TypeBytesOut = maps.Clone(p.TypeBytesOut)
+	return p1
+}
+
+func (p PeerStatistics) Equal(p2 PeerStatistics) bool {
+	return p.PeerType == p2.PeerType &&
+		p.BytesIn == p2.BytesIn &&
+		p.BytesOut == p2.BytesOut &&
+		maps.Equal(p.CapBytesIn, p2.CapBytesIn) &&
+		maps.Equal(p.CapBytesOut, p2.CapBytesOut) &&
+		maps.Equal(p.TypeBytesIn, p2.TypeBytesIn) &&
+		maps.Equal(p.TypeBytesOut, p2.TypeBytesOut)
 }
 
 type PeerDataUpdate struct {
