@@ -58,6 +58,16 @@ func (p PeerStatistics) Clone() PeerStatistics {
 	return p1
 }
 
+func (p PeerStatistics) Equal(p2 PeerStatistics) bool {
+	return p.PeerType == p2.PeerType &&
+		p.BytesIn == p2.BytesIn &&
+		p.BytesOut == p2.BytesOut &&
+		maps.Equal(p.CapBytesIn, p2.CapBytesIn) &&
+		maps.Equal(p.CapBytesOut, p2.CapBytesOut) &&
+		maps.Equal(p.TypeBytesIn, p2.TypeBytesIn) &&
+		maps.Equal(p.TypeBytesOut, p2.TypeBytesOut)
+}
+
 type PeerDataUpdate struct {
 	PeerID string
 	ENR    string
