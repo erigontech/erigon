@@ -18,9 +18,42 @@ package diagnostics
 
 import (
 	"context"
+	"sync"
 
 	"github.com/ledgerwatch/erigon-lib/log/v3"
 )
+
+type BlockEexcStatsData struct {
+	data BlockExecutionStatistics
+	mu   sync.Mutex
+}
+
+type BlockExecutionStatistics struct {
+	From        uint64  `json:"from"`
+	To          uint64  `json:"to"`
+	BlockNumber uint64  `json:"blockNumber"`
+	BlkPerSec   float64 `json:"blkPerSec"`
+	TxPerSec    float64 `json:"txPerSec"`
+	MgasPerSec  float64 `json:"mgasPerSec"`
+	GasState    float64 `json:"gasState"`
+	Batch       uint64  `json:"batch"`
+	Alloc       uint64  `json:"alloc"`
+	Sys         uint64  `json:"sys"`
+	TimeElapsed float64 `json:"timeElapsed"`
+}
+
+func (b *BlockEexcStatsData) SetData(d BlockExecutionStatistics) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	b.data = d
+}
+
+func (b *BlockEexcStatsData) Data() (d BlockExecutionStatistics) {
+	b.mu.Lock()
+	d = b.data
+	b.mu.Unlock()
+	return
+}
 
 func (d *DiagnosticClient) setupBlockExecutionDiagnostics(rootCtx context.Context) {
 	d.runBlockExecutionListener(rootCtx)
@@ -37,22 +70,11 @@ func (d *DiagnosticClient) runBlockExecutionListener(rootCtx context.Context) {
 			case <-rootCtx.Done():
 				return
 			case info := <-ch:
-				d.SetBlockExecutionStats(info)
-
+				d.syncStats.BlockExecution.SetData(info)
 				if d.syncStats.SyncFinished {
 					return
 				}
 			}
 		}
 	}()
-}
-
-func (d *DiagnosticClient) SetBlockExecutionStats(stats BlockExecutionStatistics) {
-	d.mu.Lock()
-	defer d.mu.Unlock()
-	d.setBlockExecutionStats(stats)
-}
-
-func (d *DiagnosticClient) setBlockExecutionStats(stats BlockExecutionStatistics) {
-	d.syncStats.BlockExecution = stats
 }

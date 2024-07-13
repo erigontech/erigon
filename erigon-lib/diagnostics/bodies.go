@@ -42,9 +42,7 @@ func (d *DiagnosticClient) runBodiesBlockDownloadListener(rootCtx context.Contex
 			case <-rootCtx.Done():
 				return
 			case info := <-ch:
-				d.bodiesMutex.Lock()
-				d.bodies.BlockDownload = info
-				d.bodiesMutex.Unlock()
+				d.setBodiesDownloadBlockUpdate(info)
 			}
 		}
 
@@ -62,9 +60,7 @@ func (d *DiagnosticClient) runBodiesBlockWriteListener(rootCtx context.Context) 
 			case <-rootCtx.Done():
 				return
 			case info := <-ch:
-				d.bodiesMutex.Lock()
-				d.bodies.BlockWrite = info
-				d.bodiesMutex.Unlock()
+				d.setBodiesWriteBlockUpdate(info)
 			}
 		}
 
@@ -82,9 +78,7 @@ func (d *DiagnosticClient) runBodiesProcessedListener(rootCtx context.Context) {
 			case <-rootCtx.Done():
 				return
 			case info := <-ch:
-				d.bodiesMutex.Lock()
-				d.bodies.Processed = info
-				d.bodiesMutex.Unlock()
+				d.setBodiesProcessedUpdate(info)
 			}
 		}
 
@@ -102,13 +96,51 @@ func (d *DiagnosticClient) runBodiesProcessingListener(rootCtx context.Context) 
 			case <-rootCtx.Done():
 				return
 			case info := <-ch:
-				d.bodiesMutex.Lock()
-				d.bodies.Processing = info
-				d.bodiesMutex.Unlock()
+				d.setBodiesProcessingUpdate(info)
 			}
 		}
 
 	}()
+}
+
+func (d *DiagnosticClient) SetBodiesDownloadBlockUpdate(info BodiesDownloadBlockUpdate) {
+	d.bodiesMutex.Lock()
+	defer d.bodiesMutex.Unlock()
+	d.setBodiesDownloadBlockUpdate(info)
+}
+
+func (d *DiagnosticClient) setBodiesDownloadBlockUpdate(info BodiesDownloadBlockUpdate) {
+	d.bodies.BlockDownload = info
+}
+
+func (d *DiagnosticClient) SetBodiesWriteBlockUpdate(info BodiesWriteBlockUpdate) {
+	d.bodiesMutex.Lock()
+	defer d.bodiesMutex.Unlock()
+	d.setBodiesWriteBlockUpdate(info)
+}
+
+func (d *DiagnosticClient) setBodiesWriteBlockUpdate(info BodiesWriteBlockUpdate) {
+	d.bodies.BlockWrite = info
+}
+
+func (d *DiagnosticClient) SetBodiesProcessingUpdate(info BodiesProcessingUpdate) {
+	d.bodiesMutex.Lock()
+	defer d.bodiesMutex.Unlock()
+	d.setBodiesProcessingUpdate(info)
+}
+
+func (d *DiagnosticClient) setBodiesProcessingUpdate(info BodiesProcessingUpdate) {
+	d.bodies.Processing = info
+}
+
+func (d *DiagnosticClient) SetBodiesProcessedUpdate(info BodiesProcessedUpdate) {
+	d.bodiesMutex.Lock()
+	defer d.bodiesMutex.Unlock()
+	d.setBodiesProcessedUpdate(info)
+}
+
+func (d *DiagnosticClient) setBodiesProcessedUpdate(info BodiesProcessedUpdate) {
+	d.bodies.Processed = info
 }
 
 func (d *DiagnosticClient) BodiesInfoJson(w io.Writer) {
