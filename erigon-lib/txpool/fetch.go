@@ -174,7 +174,6 @@ func (f *Fetch) receiveMessage(ctx context.Context, sentryClient sentry.SentryCl
 		}
 		return err
 	}
-	println("receive message")
 	var req *sentry.InboundMessage
 	for req, err = stream.Recv(); ; req, err = stream.Recv() {
 		if err != nil {

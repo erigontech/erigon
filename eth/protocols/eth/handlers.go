@@ -193,6 +193,15 @@ func AnswerGetReceiptsQuery(ctx context.Context, cfg *chain.Config, receiptsGett
 			return nil, err
 		}
 
+		if results == nil {
+			header, err := rawdb.ReadHeaderByHash(db, hash)
+			if err != nil {
+				return nil, err
+			}
+			if header == nil || header.ReceiptHash != types.EmptyRootHash {
+				continue
+			}
+		}
 		// For debug
 		//println("receipts:")
 		//for _, result := range results {
