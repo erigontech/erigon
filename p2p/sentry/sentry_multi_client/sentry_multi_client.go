@@ -297,12 +297,10 @@ type MultiClient struct {
 
 	logger                           log.Logger
 	getReceiptsActiveGoroutineNumber *semaphore.Weighted
-	ethApiWrapper                    EthAPI
+	ethApiWrapper                    eth.ReceiptsGetter
 }
 
-type EthAPI interface {
-	GetReceipts(ctx context.Context, cfg *chain.Config, tx kv.Tx, block *types.Block, senders []common.Address) (types.Receipts, error)
-}
+var _ eth.ReceiptsGetter = new(receipts.Generator) // compile-time interface-check
 
 func NewMultiClient(
 	db kv.RwDB,
