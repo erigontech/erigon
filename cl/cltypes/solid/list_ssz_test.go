@@ -17,9 +17,7 @@
 package solid
 
 import (
-	"encoding/binary"
 	"testing"
-	"unsafe"
 
 	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/stretchr/testify/assert"
@@ -147,43 +145,4 @@ func TestUint64VectorSSZ(t *testing.T) {
 	expectedEncodingSize := arr.Length() * 8
 	encodingSize := arr.EncodingSizeSSZ()
 	assert.Equal(t, expectedEncodingSize, encodingSize)
-}
-
-func addLittleEndianBytesInPlace(a, b []byte) {
-	*(*uint64)(unsafe.Pointer(&a[0])) += *(*uint64)(unsafe.Pointer(&b[0]))
-}
-
-func addLittleEndianBytesInPlaceWithBinLib(a, b []byte) {
-	sum := binary.LittleEndian.Uint64(a) + binary.LittleEndian.Uint64(b)
-	binary.LittleEndian.PutUint64(a, sum)
-}
-
-func BenchmarkXXX(b *testing.B) {
-	for i := 0; i < b.N; i++ {
-		a := make([]byte, 8)
-		bb := make([]byte, 8)
-		a = []byte{byte(i), byte(i + 1), byte(i + 2), byte(i + 3), byte(i + 4), byte(i + 5), byte(i + 6), byte(i + 7)}
-		bb = []byte{byte(i + 8), byte(i + 9), byte(i + 10), byte(i + 11), byte(i + 12), byte(i + 13), byte(i + 14), byte(i + 15)}
-		addLittleEndianBytesInPlace(a, bb)
-	}
-}
-
-func BenchmarkXXX2(b *testing.B) {
-
-	for i := 0; i < b.N; i++ {
-		// randomize
-		a := make([]byte, 8)
-		bb := make([]byte, 8)
-		a = []byte{byte(i), byte(i + 1), byte(i + 2), byte(i + 3), byte(i + 4), byte(i + 5), byte(i + 6), byte(i + 7)}
-		bb = []byte{byte(i + 8), byte(i + 9), byte(i + 10), byte(i + 11), byte(i + 12), byte(i + 13), byte(i + 14), byte(i + 15)}
-		addLittleEndianBytesInPlaceWithBinLib(a, bb)
-	}
-}
-
-func BenchmarkXXX3(b *testing.B) {
-
-	for i := 0; i < b.N; i++ {
-		// randomize
-		_ = i + (i + 23)
-	}
 }
