@@ -34,6 +34,9 @@ var (
 )
 
 func (d *DiagnosticClient) setupSysInfoDiagnostics() {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+
 	sysInfo := GetSysInfo(d.dataDirPath)
 
 	var funcs []func(tx kv.RwTx) error
@@ -49,14 +52,10 @@ func (d *DiagnosticClient) setupSysInfoDiagnostics() {
 
 		return nil
 	})
-
 	if err != nil {
 		log.Warn("[Diagnostics] Failed to update system info", "err", err)
 	}
-
-	d.mu.Lock()
 	d.hardwareInfo = sysInfo
-	d.mu.Unlock()
 }
 
 func (d *DiagnosticClient) HardwareInfo() HardwareInfo {
