@@ -43,8 +43,6 @@ func NewPeerStats(peerLimit int) *PeerStats {
 }
 
 func (p *PeerStats) AddOrUpdatePeer(peerID string, peerInfo PeerStatisticMsgUpdate) {
-	p.mu.Lock()
-	defer p.mu.Unlock()
 	if value, ok := p.peersInfo.Load(peerID); ok {
 		p.updatePeer(peerID, peerInfo, value)
 	} else {
@@ -195,7 +193,10 @@ type PeerUpdTime struct {
 func (p *PeerStats) GetOldestUpdatedPeersWithSize(size int) []PeerUpdTime {
 	p.mu.Lock()
 	defer p.mu.Unlock()
+	return p.getOldestUpdatedPeersWithSize(size)
+}
 
+func (p *PeerStats) getOldestUpdatedPeersWithSize(size int) []PeerUpdTime {
 	timeArray := make([]PeerUpdTime, 0, p.getPeersCount())
 	for k, v := range p.lastUpdateMap {
 		timeArray = append(timeArray, PeerUpdTime{k, v})
@@ -221,7 +222,7 @@ func (p *PeerStats) RemovePeersWhichExceedLimit(limit int) {
 func (p *PeerStats) removePeersWhichExceedLimit(limit int) {
 	peersToRemove := p.getPeersCount() - limit
 	if peersToRemove > 0 {
-		peers := p.GetOldestUpdatedPeersWithSize(peersToRemove)
+		peers := p.getOldestUpdatedPeersWithSize(peersToRemove)
 		for _, peer := range peers {
 			p.RemovePeer(peer.PeerID)
 		}

@@ -200,13 +200,14 @@ func TestRemovePeersWhichExceedLimit(t *testing.T) {
 		pid := "test" + strconv.Itoa(i)
 		peerStats.AddOrUpdatePeer(pid, mockInboundUpdMsg)
 	}
+	require.Equal(t, 100, peerStats.GetPeersCount())
 
-	//peerStats.RemovePeersWhichExceedLimit(limit)
+	peerStats.RemovePeersWhichExceedLimit(limit)
 
 	require.Equal(t, limit, peerStats.GetPeersCount())
 
 	limit = 1000
-	//peerStats.RemovePeersWhichExceedLimit(limit)
+	peerStats.RemovePeersWhichExceedLimit(limit)
 
 	require.Equal(t, 100, peerStats.GetPeersCount())
 }
