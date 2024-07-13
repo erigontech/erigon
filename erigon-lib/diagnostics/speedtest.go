@@ -31,8 +31,8 @@ func (d *DiagnosticClient) setupSpeedtestDiagnostics(rootCtx context.Context) {
 	go func() {
 		if d.speedTest {
 			d.networkSpeedMutex.Lock()
+			defer d.networkSpeedMutex.Unlock()
 			d.networkSpeed = d.runSpeedTest(rootCtx)
-			d.networkSpeedMutex.Unlock()
 		}
 	}()
 }

@@ -116,6 +116,26 @@ func (d *DiagnosticClient) updateSnapshotStageStats(stats SyncStageStats, subSta
 
 	d.syncStages[idxs.Stage].SubStages[idxs.SubStage].Stats = stats
 }
+func (d *DiagnosticClient) saveSnapshotStageStatsToDB() {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	err := d.db.Update(d.ctx, func(tx kv.RwTx) error {
+		err := SnapshotFillDBUpdater(d.syncStats.SnapshotFillDB)(tx)
+		if err != nil {
+			return err
+		}
+
+		err = StagesListUpdater(d.syncStages)(tx)
+		if err != nil {
+			return err
+		}
+
+		return nil
+	})
+	if err != nil {
+		log.Debug("[Diagnostics] Failed to update snapshot download info", "err", err)
+	}
+}
 
 func (d *DiagnosticClient) runSegmentDownloadingListener(rootCtx context.Context) {
 	go func() {
@@ -384,26 +404,7 @@ func (d *DiagnosticClient) runFillDBListener(rootCtx context.Context) {
 					TimeLeft:    "unknown",
 					Progress:    fmt.Sprintf("%d%%", (info.Stage.Current*100)/info.Stage.Total),
 				}, "Fill DB from snapshots")
-
-				d.mu.Lock()
-				err := d.db.Update(d.ctx, func(tx kv.RwTx) error {
-					err := SnapshotFillDBUpdater(d.syncStats.SnapshotFillDB)(tx)
-					if err != nil {
-						return err
-					}
-
-					err = StagesListUpdater(d.syncStages)(tx)
-					if err != nil {
-						return err
-					}
-
-					return nil
-				})
-
-				if err != nil {
-					log.Warn("[Diagnostics] Failed to update snapshot download info", "err", err)
-				}
-				d.mu.Unlock()
+				d.saveSnapshotStageStatsToDB()
 			}
 		}
 	}()
