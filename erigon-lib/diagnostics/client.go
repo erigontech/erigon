@@ -19,11 +19,8 @@ package diagnostics
 import (
 	"context"
 	"net/http"
-	"os"
-	"os/signal"
 	"path/filepath"
 	"sync"
-	"syscall"
 	"time"
 
 	"github.com/c2h5oh/datasize"
@@ -120,33 +117,21 @@ func (d *DiagnosticClient) Setup() {
 	d.setupResourcesUsageDiagnostics(rootCtx)
 	d.setupSpeedtestDiagnostics(rootCtx)
 	d.runSaveProcess(rootCtx)
-	d.runStopNodeListener(rootCtx)
 
 	//d.logDiagMsgs()
-}
-
-func (d *DiagnosticClient) runStopNodeListener(rootCtx context.Context) {
-	go func() {
-		ch := make(chan os.Signal, 1)
-		signal.Notify(ch, os.Interrupt, syscall.SIGTERM)
-		select {
-		case <-ch:
-			d.SaveData()
-		case <-rootCtx.Done():
-		}
-	}()
 }
 
 // Save diagnostic data by time interval to reduce save events
 func (d *DiagnosticClient) runSaveProcess(rootCtx context.Context) {
 	ticker := time.NewTicker(5 * time.Minute)
 	go func() {
+		defer ticker.Stop()
 		for {
 			select {
 			case <-ticker.C:
 				d.SaveData()
 			case <-rootCtx.Done():
-				ticker.Stop()
+				d.SaveData()
 				return
 			}
 		}
