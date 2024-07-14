@@ -168,8 +168,8 @@ func (m *milestone) UnlockSprint(endBlockNum uint64) {
 		return
 	}
 
-	if m.TryLock() {
-		defer m.Unlock()
+	if m.finality.TryLock() {
+		defer m.finality.Unlock()
 	}
 
 	m.Locked = false
