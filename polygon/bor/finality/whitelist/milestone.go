@@ -267,6 +267,9 @@ func (m *milestone) IsFutureMilestoneCompatible(chain []*types.Header) bool {
 }
 
 func (m *milestone) ProcessFutureMilestone(num uint64, hash common.Hash) {
+	m.finality.Lock()
+	defer m.finality.Unlock()
+
 	if len(m.FutureMilestoneOrder) < m.MaxCapacity {
 		m.enqueueFutureMilestone(num, hash)
 	}
@@ -275,8 +278,6 @@ func (m *milestone) ProcessFutureMilestone(num uint64, hash common.Hash) {
 		return
 	}
 
-	m.finality.Lock()
-	defer m.finality.Unlock()
 	m.Locked = false
 	m.purgeMilestoneIDsList()
 	purgedMilestoneIDs := map[string]struct{}{}
