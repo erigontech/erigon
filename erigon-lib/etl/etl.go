@@ -72,6 +72,7 @@ type TransformArgs struct {
 	ExtractEndKey   []byte
 	BufferType      int
 	BufferSize      int
+	EmptyVals       bool
 }
 
 func Transform(

@@ -473,7 +473,6 @@ func MockWithEverything(tb testing.TB, gspec *types.Genesis, key *ecdsa.PrivateK
 					mock.DB,
 					prune,
 					cfg.BatchSize,
-					nil,
 					mock.ChainConfig,
 					mock.Engine,
 					&vm.Config{},
@@ -512,7 +511,6 @@ func MockWithEverything(tb testing.TB, gspec *types.Genesis, key *ecdsa.PrivateK
 			mock.DB,
 			prune,
 			cfg.BatchSize,
-			nil,
 			mock.ChainConfig,
 			mock.Engine,
 			&vm.Config{},
@@ -550,7 +548,6 @@ func MockWithEverything(tb testing.TB, gspec *types.Genesis, key *ecdsa.PrivateK
 				mock.DB,
 				prune,
 				cfg.BatchSize,
-				nil,
 				mock.ChainConfig,
 				mock.Engine,
 				&vm.Config{},
@@ -850,10 +847,7 @@ func (ms *MockSentry) NewHistoryStateReader(blockNum uint64, tx kv.Tx) state.Sta
 }
 
 func (ms *MockSentry) NewStateReader(tx kv.Tx) state.StateReader {
-	if ms.HistoryV3 {
-		return state.NewReaderV4(tx.(kv.TemporalGetter))
-	}
-	return state.NewPlainStateReader(tx)
+	return state.NewReaderV4(tx.(kv.TemporalGetter))
 }
 func (ms *MockSentry) HistoryV3Components() *libstate.Aggregator {
 	return ms.agg

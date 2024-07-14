@@ -27,8 +27,8 @@ import (
 	"go.uber.org/mock/gomock"
 
 	"github.com/ledgerwatch/erigon-lib/common/hexutility"
-	"github.com/ledgerwatch/erigon-lib/kv/iter"
 	"github.com/ledgerwatch/erigon-lib/kv/order"
+	"github.com/ledgerwatch/erigon-lib/kv/stream"
 	"github.com/ledgerwatch/erigon-lib/log/v3"
 
 	"github.com/stretchr/testify/require"
@@ -105,10 +105,10 @@ func TestAppendableCollationBuild(t *testing.T) {
 	//see only canonical records in files
 	iters := NewMockCanonicalsReader(ctrl)
 	iters.EXPECT().TxnIdsOfCanonicalBlocks(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).
-		DoAndReturn(func(tx kv.Tx, txFrom, txTo int, by order.By, i3 int) (iter.U64, error) {
+		DoAndReturn(func(tx kv.Tx, txFrom, txTo int, by order.By, i3 int) (stream.U64, error) {
 			currentStep := uint64(txFrom) / aggStep
 			canonicalBlockTxNum := aggStep*currentStep + 1
-			it := iter.Array[uint64]([]uint64{canonicalBlockTxNum})
+			it := stream.Array[uint64]([]uint64{canonicalBlockTxNum})
 			return it, nil
 		}).
 		AnyTimes()

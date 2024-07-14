@@ -17,6 +17,9 @@
 package diagnostics
 
 import (
+	"encoding/json"
+	"io"
+
 	"github.com/shirou/gopsutil/v3/cpu"
 	"github.com/shirou/gopsutil/v3/disk"
 	"github.com/shirou/gopsutil/v3/mem"
@@ -34,6 +37,9 @@ var (
 )
 
 func (d *DiagnosticClient) setupSysInfoDiagnostics() {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+
 	sysInfo := GetSysInfo(d.dataDirPath)
 
 	var funcs []func(tx kv.RwTx) error
@@ -49,18 +55,18 @@ func (d *DiagnosticClient) setupSysInfoDiagnostics() {
 
 		return nil
 	})
-
 	if err != nil {
 		log.Warn("[Diagnostics] Failed to update system info", "err", err)
 	}
-
-	d.mu.Lock()
 	d.hardwareInfo = sysInfo
-	d.mu.Unlock()
 }
 
-func (d *DiagnosticClient) HardwareInfo() HardwareInfo {
-	return d.hardwareInfo
+func (d *DiagnosticClient) HardwareInfoJson(w io.Writer) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	if err := json.NewEncoder(w).Encode(d.hardwareInfo); err != nil {
+		log.Debug("[diagnostics] HardwareInfoJson", "err", err)
+	}
 }
 
 func findNodeDisk(dirPath string) string {

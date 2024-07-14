@@ -30,8 +30,8 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon-lib/kv/iter"
 	"github.com/ledgerwatch/erigon-lib/kv/order"
+	"github.com/ledgerwatch/erigon-lib/kv/stream"
 	"github.com/ledgerwatch/erigon-lib/log/v3"
 )
 
@@ -211,13 +211,13 @@ func TestRangeDupSort(t *testing.T) {
 		// [from, nil) means [from, INF)
 		it, err = tx.RangeDupSort("Table", []byte("key1"), []byte("value1"), nil, order.Asc, -1)
 		require.NoError(t, err)
-		_, vals, err := iter.ToArrayKV(it)
+		_, vals, err := stream.ToArrayKV(it)
 		require.NoError(t, err)
 		require.Equal(t, 2, len(vals))
 
 		it, err = tx.RangeDupSort("Table", []byte("key1"), []byte("value1"), []byte("value1.3"), order.Asc, -1)
 		require.NoError(t, err)
-		_, vals, err = iter.ToArrayKV(it)
+		_, vals, err = stream.ToArrayKV(it)
 		require.NoError(t, err)
 		require.Equal(t, 1, len(vals))
 	})
@@ -243,13 +243,13 @@ func TestRangeDupSort(t *testing.T) {
 
 		it, err = tx.RangeDupSort("Table", []byte("key1"), []byte("value1"), []byte("value0"), order.Desc, -1)
 		require.NoError(t, err)
-		_, vals, err := iter.ToArrayKV(it)
+		_, vals, err := stream.ToArrayKV(it)
 		require.NoError(t, err)
 		require.Equal(t, 2, len(vals))
 
 		it, err = tx.RangeDupSort("Table", []byte("key1"), []byte("value1.3"), []byte("value1.1"), order.Desc, -1)
 		require.NoError(t, err)
-		_, vals, err = iter.ToArrayKV(it)
+		_, vals, err = stream.ToArrayKV(it)
 		require.NoError(t, err)
 		require.Equal(t, 1, len(vals))
 	})
