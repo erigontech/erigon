@@ -17,9 +17,8 @@
 package whitelist
 
 import (
-	"github.com/ledgerwatch/erigon-lib/log/v3"
-
 	"github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/log/v3"
 	"github.com/ledgerwatch/erigon-lib/metrics"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/polygon/bor/finality/flags"
@@ -172,8 +171,8 @@ func (m *milestone) UnlockSprint(endBlockNum uint64) {
 	m.Locked = false
 
 	m.purgeMilestoneIDsList()
-
-	err := rawdb.WriteLockField(m.db, m.Locked, m.LockedMilestoneNumber, m.LockedMilestoneHash, m.LockedMilestoneIDs)
+	purgedMilestoneIDs := map[string]struct{}{}
+	err := rawdb.WriteLockField(m.db, m.Locked, m.LockedMilestoneNumber, m.LockedMilestoneHash, purgedMilestoneIDs)
 
 	if err != nil {
 		log.Error("[bor] Error in writing lock data of milestone to db", "err", err)
@@ -274,8 +273,8 @@ func (m *milestone) ProcessFutureMilestone(num uint64, hash common.Hash) {
 
 	m.Locked = false
 	m.purgeMilestoneIDsList()
-
-	err := rawdb.WriteLockField(m.db, m.Locked, m.LockedMilestoneNumber, m.LockedMilestoneHash, m.LockedMilestoneIDs)
+	purgedMilestoneIDs := map[string]struct{}{}
+	err := rawdb.WriteLockField(m.db, m.Locked, m.LockedMilestoneNumber, m.LockedMilestoneHash, purgedMilestoneIDs)
 
 	if err != nil {
 		log.Error("[bor] Error in writing lock data of milestone to db", "err", err)

@@ -159,7 +159,7 @@ func TestGetPeers(t *testing.T) {
 
 	peers := peerStats.GetPeers()
 	require.Equal(t, 3, len(peers))
-	require.Equal(t, &mockInboundPeerStats, peers["test1"])
+	require.True(t, peers["test1"].Equal(mockInboundPeerStats))
 }
 
 func TestLastUpdated(t *testing.T) {
@@ -200,6 +200,7 @@ func TestRemovePeersWhichExceedLimit(t *testing.T) {
 		pid := "test" + strconv.Itoa(i)
 		peerStats.AddOrUpdatePeer(pid, mockInboundUpdMsg)
 	}
+	require.Equal(t, 100, peerStats.GetPeersCount())
 
 	peerStats.RemovePeersWhichExceedLimit(limit)
 
