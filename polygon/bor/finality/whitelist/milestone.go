@@ -275,8 +275,8 @@ func (m *milestone) ProcessFutureMilestone(num uint64, hash common.Hash) {
 		return
 	}
 
-	m.Lock()
-	defer m.Unlock()
+	m.finality.Lock()
+	defer m.finality.Unlock()
 	m.Locked = false
 	m.purgeMilestoneIDsList()
 	purgedMilestoneIDs := map[string]struct{}{}
