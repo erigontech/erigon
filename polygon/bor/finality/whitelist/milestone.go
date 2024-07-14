@@ -168,6 +168,10 @@ func (m *milestone) UnlockSprint(endBlockNum uint64) {
 		return
 	}
 
+	if m.TryLock() {
+		defer m.Unlock()
+	}
+
 	m.Locked = false
 
 	m.purgeMilestoneIDsList()
