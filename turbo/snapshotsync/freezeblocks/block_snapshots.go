@@ -525,19 +525,6 @@ func (s *RoSnapshots) unlockSegments() {
 		return true
 	})
 }
-func (s *RoSnapshots) rLockSegments() {
-	s.segments.Scan(func(segtype snaptype.Enum, value *segments) bool {
-		value.lock.RLock()
-		return true
-	})
-}
-
-func (s *RoSnapshots) rUnlockSegments() {
-	s.segments.Scan(func(segtype snaptype.Enum, value *segments) bool {
-		value.lock.RUnlock()
-		return true
-	})
-}
 
 func (s *RoSnapshots) rebuildSegments(fileNames []string, open bool, optimistic bool) error {
 	s.lockSegments()
@@ -2226,7 +2213,10 @@ type View struct {
 
 func (s *RoSnapshots) View() *View {
 	v := &View{s: s, baseSegType: coresnaptype.Headers}
-	s.rLockSegments()
+	s.segments.Scan(func(segtype snaptype.Enum, value *segments) bool {
+		value.lock.RLock()
+		return true
+	})
 	return v
 }
 
@@ -2235,7 +2225,10 @@ func (v *View) Close() {
 		return
 	}
 	v.closed = true
-	v.s.rUnlockSegments()
+	v.s.segments.Scan(func(segtype snaptype.Enum, value *segments) bool {
+		value.lock.RUnlock()
+		return true
+	})
 }
 
 func (v *View) Segments(t snaptype.Type) []*Segment {
