@@ -199,9 +199,8 @@ func unwindExec3(u *UnwindState, s *StageState, txc wrap.TxContainer, ctx contex
 	}
 
 	// if the changeset is nil here, no unwinding took place due to the loop above being empty
-	if changeset == nil { // nothing to unwind, exit function prematurely
-		logger.Warn("unwindExec3: nothing to unwind")
-		return nil
+	if changeset == nil {
+		return fmt.Errorf("unwindExec3: changeset is nil, nothing to unwind")
 	}
 
 	if err := rs.Unwind(ctx, txc.Tx, u.UnwindPoint, txNum, accumulator, *changeset); err != nil {
