@@ -2234,8 +2234,7 @@ func (v *View) Close() {
 var noop = func() {}
 
 func (s *RoSnapshots) ViewType(t snaptype.Type) (segments []*Segment, release func()) {
-	v := &View{s: s, baseSegType: coresnaptype.Headers, lockSingleType: &t}
-	segs, ok := v.s.segments.Get(t.Enum())
+	segs, ok := s.segments.Get(t.Enum())
 	if !ok {
 		return nil, noop
 	}
@@ -2252,8 +2251,7 @@ func (s *RoSnapshots) ViewType(t snaptype.Type) (segments []*Segment, release fu
 }
 
 func (s *RoSnapshots) ViewSingleFile(t snaptype.Type, blockNum uint64) (segment *Segment, ok bool, release func()) {
-	v := &View{s: s, baseSegType: coresnaptype.Headers, lockSingleType: &t}
-	segs, ok := v.s.segments.Get(t.Enum())
+	segs, ok := s.segments.Get(t.Enum())
 	if !ok {
 		return nil, false, noop
 	}
