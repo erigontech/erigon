@@ -525,19 +525,6 @@ func (s *RoSnapshots) unlockSegments() {
 		return true
 	})
 }
-func (s *RoSnapshots) rLockSegments() {
-	s.segments.Scan(func(segtype snaptype.Enum, value *segments) bool {
-		value.lock.RLock()
-		return true
-	})
-}
-
-func (s *RoSnapshots) rUnlockSegments() {
-	s.segments.Scan(func(segtype snaptype.Enum, value *segments) bool {
-		value.lock.RUnlock()
-		return true
-	})
-}
 
 func (s *RoSnapshots) rebuildSegments(fileNames []string, open bool, optimistic bool) error {
 	s.lockSegments()
@@ -2222,12 +2209,62 @@ type View struct {
 	s           *RoSnapshots
 	baseSegType snaptype.Type
 	closed      bool
+
+	lockSingleType *snaptype.Type
 }
 
 func (s *RoSnapshots) View() *View {
 	v := &View{s: s, baseSegType: coresnaptype.Headers}
-	s.rLockSegments()
+	s.segments.Scan(func(segtype snaptype.Enum, value *segments) bool {
+		value.lock.RLock()
+		return true
+	})
 	return v
+}
+
+var noop = func() {}
+
+func (s *RoSnapshots) ViewType(t snaptype.Type) (segments []*Segment, release func()) {
+	v := &View{s: s, baseSegType: coresnaptype.Headers, lockSingleType: &t}
+	segs, ok := v.s.segments.Get(t.Enum())
+	if !ok {
+		return nil, noop
+	}
+
+	segs.lock.RLock()
+	var released = false
+	return segs.segments, func() {
+		if released {
+			return
+		}
+		segs.lock.Unlock()
+		released = true
+	}
+}
+
+func (s *RoSnapshots) ViewSingleFile(t snaptype.Type, blockNum uint64) (segment *Segment, ok bool, release func()) {
+	v := &View{s: s, baseSegType: coresnaptype.Headers, lockSingleType: &t}
+	segs, ok := v.s.segments.Get(t.Enum())
+	if !ok {
+		return nil, false, noop
+	}
+
+	segs.lock.RLock()
+	var released = false
+	for _, seg := range segs.segments {
+		if !(blockNum >= seg.from && blockNum < seg.to) {
+			continue
+		}
+		return seg, true, func() {
+			if released {
+				return
+			}
+			segs.lock.Unlock()
+			released = true
+		}
+	}
+	segs.lock.RUnlock()
+	return nil, false, noop
 }
 
 func (v *View) Close() {
@@ -2235,7 +2272,18 @@ func (v *View) Close() {
 		return
 	}
 	v.closed = true
-	v.s.rUnlockSegments()
+	if v.lockSingleType != nil {
+		s, ok := v.s.segments.Get((*v.lockSingleType).Enum())
+		if ok {
+			s.lock.RUnlock()
+		}
+	} else {
+		v.s.segments.Scan(func(segtype snaptype.Enum, value *segments) bool {
+			value.lock.RUnlock()
+			return true
+		})
+	}
+
 }
 
 func (v *View) Segments(t snaptype.Type) []*Segment {

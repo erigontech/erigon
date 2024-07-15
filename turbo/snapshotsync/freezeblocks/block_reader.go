@@ -655,15 +655,14 @@ func (r *BlockReader) blockWithSenders(ctx context.Context, tx kv.Getter, hash c
 		return
 	}
 
-	view := r.sn.View()
-	defer view.Close()
-	seg, ok := view.HeadersSegment(blockHeight)
+	seg, ok, release := r.sn.ViewSingleFile(coresnaptype.Headers, blockHeight)
 	if !ok {
 		if dbgLogs {
 			log.Info(dbgPrefix + "no header files for this block num")
 		}
 		return
 	}
+	defer release()
 
 	var buf []byte
 	h, buf, err := r.headerFromSnapshot(blockHeight, seg, buf)
@@ -676,21 +675,26 @@ func (r *BlockReader) blockWithSenders(ctx context.Context, tx kv.Getter, hash c
 		}
 		return
 	}
+	release()
 
 	var b *types.Body
 	var baseTxnId uint64
 	var txCount uint32
-	bodySeg, ok := view.BodiesSegment(blockHeight)
+	bodySeg, ok, release := r.sn.ViewSingleFile(coresnaptype.Bodies, blockHeight)
 	if !ok {
 		if dbgLogs {
 			log.Info(dbgPrefix + "no bodies file for this block num")
 		}
 		return
 	}
+	defer release()
+
 	b, baseTxnId, txCount, buf, err = r.bodyFromSnapshot(blockHeight, bodySeg, buf)
 	if err != nil {
 		return nil, nil, err
 	}
+	release()
+
 	if b == nil {
 		if dbgLogs {
 			log.Info(dbgPrefix + "got nil body from file")
@@ -709,18 +713,21 @@ func (r *BlockReader) blockWithSenders(ctx context.Context, tx kv.Getter, hash c
 		return block, senders, nil
 	}
 
-	txnSeg, ok := view.TxsSegment(blockHeight)
+	txnSeg, ok, release := r.sn.ViewSingleFile(coresnaptype.Transactions, blockHeight)
 	if !ok {
 		if dbgLogs {
 			log.Info(dbgPrefix+"no transactions file for this block num", "r.sn.BlocksAvailable()", r.sn.BlocksAvailable(), "r.sn.indicesReady", r.sn.indicesReady.Load())
 		}
 		return
 	}
+	defer release()
 	var txs []types.Transaction
 	txs, senders, err = r.txsFromSnapshot(baseTxnId, txCount, txnSeg, buf)
 	if err != nil {
 		return nil, nil, err
 	}
+	release()
+
 	block = types.NewBlockFromStorage(hash, h, txs, b.Uncles, b.Withdrawals, b.Requests)
 	if len(senders) != block.Transactions().Len() {
 		if dbgLogs {
@@ -1015,10 +1022,9 @@ func (r *BlockReader) TxnLookup(_ context.Context, tx kv.Getter, txnHash common.
 		return *n, true, nil
 	}
 
-	view := r.sn.View()
-	defer view.Close()
-
-	_, blockNum, ok, err := r.txnByHash(txnHash, view.Txs(), nil)
+	txns, release := r.sn.ViewType(coresnaptype.Transactions)
+	defer release()
+	_, blockNum, ok, err := r.txnByHash(txnHash, txns, nil)
 	if err != nil {
 		return 0, false, err
 	}
