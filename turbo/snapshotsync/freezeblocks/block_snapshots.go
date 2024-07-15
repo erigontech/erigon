@@ -2040,6 +2040,7 @@ type View struct {
 	closed      bool
 }
 
+// ViewSingleFile - RLock files of all types
 func (s *RoSnapshots) View() *View {
 	v := &View{s: s, baseSegType: coresnaptype.Headers}
 	s.segments.Scan(func(segtype snaptype.Enum, value *segments) bool {
@@ -2062,6 +2063,7 @@ func (v *View) Close() {
 
 var noop = func() {}
 
+// ViewSingleFile - RLock all files of given type
 func (s *RoSnapshots) ViewType(t snaptype.Type) (segments []*Segment, release func()) {
 	segs, ok := s.segments.Get(t.Enum())
 	if !ok {
@@ -2079,6 +2081,7 @@ func (s *RoSnapshots) ViewType(t snaptype.Type) (segments []*Segment, release fu
 	}
 }
 
+// ViewSingleFile - RLock all files of given type if has file with `blockNum`
 func (s *RoSnapshots) ViewSingleFile(t snaptype.Type, blockNum uint64) (segment *Segment, ok bool, release func()) {
 	segs, ok := s.segments.Get(t.Enum())
 	if !ok {
