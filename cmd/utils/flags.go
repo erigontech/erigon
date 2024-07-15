@@ -521,6 +521,11 @@ var (
 		Usage: "Define the host used for the zkevm data stream",
 		Value: "",
 	}
+	DataStreamWriteTimeout = cli.DurationFlag{
+		Name:  "zkevm.data-stream-writeTimeout",
+		Usage: "Define the TCP write timeout when sending data to a datastream client",
+		Value: 5 * time.Second,
+	}
 	Limbo = cli.BoolFlag{
 		Name:  "zkevm.limbo",
 		Usage: "Enable limbo processing on batches that failed verification",

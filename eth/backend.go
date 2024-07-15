@@ -728,7 +728,7 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 				Outputs:     nil,
 			}
 			// todo [zkevm] read the stream version from config and figure out what system id is used for
-			backend.dataStream, err = datastreamer.NewServer(uint16(httpCfg.DataStreamPort), uint8(backend.config.DatastreamVersion), 1, datastreamer.StreamType(1), file, logConfig)
+			backend.dataStream, err = datastreamer.NewServer(uint16(httpCfg.DataStreamPort), uint8(backend.config.DatastreamVersion), 1, datastreamer.StreamType(1), file, httpCfg.DataStreamWriteTimeout, logConfig)
 			if err != nil {
 				return nil, err
 			}

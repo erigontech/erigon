@@ -156,6 +156,7 @@ func ApplyFlagsForZkConfig(ctx *cli.Context, cfg *ethconfig.Config) {
 		DAUrl:                                  ctx.String(utils.DAUrl.Name),
 		DataStreamHost:                         ctx.String(utils.DataStreamHost.Name),
 		DataStreamPort:                         ctx.Uint(utils.DataStreamPort.Name),
+		DataStreamWriteTimeout:                 ctx.Duration(utils.DataStreamWriteTimeout.Name),
 	}
 
 	utils2.EnableTimer(cfg.DebugTimers)
@@ -169,6 +170,7 @@ func ApplyFlagsForZkConfig(ctx *cli.Context, cfg *ethconfig.Config) {
 		checkFlag(utils.ExecutorStrictMode.Name, cfg.ExecutorStrictMode)
 		checkFlag(utils.DataStreamHost.Name, cfg.DataStreamHost)
 		checkFlag(utils.DataStreamPort.Name, cfg.DataStreamPort)
+		checkFlag(utils.DataStreamWriteTimeout.Name, cfg.DataStreamWriteTimeout)
 
 		if cfg.DeprecatedTxPool.Disable {
 			panic("You need tx-pool in order to run a sequencer. Enable it using txpool.disable: false")

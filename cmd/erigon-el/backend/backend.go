@@ -667,7 +667,7 @@ func NewBackend(stack *node.Node, config *ethconfig.Config, logger log.Logger) (
 			Level:       "warn",
 			Outputs:     nil,
 		}
-		backend.dataStream, err = datastreamer.NewServer(uint16(httpRpcCfg.DataStreamPort), uint8(2), 1, datastreamer.StreamType(1), file, logConfig)
+		backend.dataStream, err = datastreamer.NewServer(uint16(httpRpcCfg.DataStreamPort), uint8(2), 1, datastreamer.StreamType(1), file, httpRpcCfg.DataStreamWriteTimeout, logConfig)
 		if err != nil {
 			return nil, err
 		}

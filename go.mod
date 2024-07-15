@@ -11,7 +11,7 @@ require (
 )
 
 require (
-	github.com/0xPolygonHermez/zkevm-data-streamer v0.2.2
+	github.com/0xPolygonHermez/zkevm-data-streamer v0.2.3-RC4
 	github.com/99designs/gqlgen v0.17.29
 	github.com/Giulio2002/bls v0.0.0-20230217173148-c87a29266b6c
 	github.com/RoaringBitmap/roaring v1.2.3
@@ -158,7 +158,6 @@ require (
 	github.com/go-task/slim-sprig v0.0.0-20210107165309-348f09dbbbc0 // indirect
 	github.com/godbus/dbus/v5 v5.1.0 // indirect
 	github.com/gogo/protobuf v1.3.2 // indirect
-	github.com/golang-collections/collections v0.0.0-20130729185459-604e922904d3 // indirect
 	github.com/golang/protobuf v1.5.4 // indirect
 	github.com/google/gopacket v1.1.19 // indirect
 	github.com/google/pprof v0.0.0-20230207041349-798e818bf904 // indirect
