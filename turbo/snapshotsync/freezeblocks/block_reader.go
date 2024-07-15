@@ -10,6 +10,7 @@ import (
 	"sort"
 	"time"
 
+	borsnaptype "github.com/ledgerwatch/erigon/polygon/bor/snaptype"
 	"github.com/ledgerwatch/log/v3"
 
 	"github.com/ledgerwatch/erigon-lib/common/hexutility"
@@ -1256,10 +1257,10 @@ func (r *BlockReader) BorStartEventID(ctx context.Context, tx kv.Tx, hash common
 	}
 
 	borTxHash := bortypes.ComputeBorTxHash(blockHeight, hash)
-	view := r.borSn.View()
-	defer view.Close()
 
-	segments := view.Events()
+	segments, release := r.borSn.ViewType(borsnaptype.BorEvents)
+	defer release()
+
 	for i := len(segments) - 1; i >= 0; i-- {
 		sn := segments[i]
 		if sn.from > blockHeight {
@@ -1337,9 +1338,10 @@ func (r *BlockReader) EventsByBlock(ctx context.Context, tx kv.Tx, hash common.H
 		return result, nil
 	}
 	borTxHash := bortypes.ComputeBorTxHash(blockHeight, hash)
-	view := r.borSn.View()
-	defer view.Close()
-	segments := view.Events()
+
+	segments, release := r.borSn.ViewType(borsnaptype.BorEvents)
+	defer release()
+
 	var buf []byte
 	result := []rlp.RawValue{}
 	for i := len(segments) - 1; i >= 0; i-- {
@@ -1377,10 +1379,9 @@ func (r *BlockReader) EventsByBlock(ctx context.Context, tx kv.Tx, hash common.H
 
 // EventsByIdFromSnapshot returns the list of records limited by time, or the number of records along with a bool value to signify if the records were limited by time
 func (r *BlockReader) EventsByIdFromSnapshot(from uint64, to time.Time, limit int) ([]*heimdall.EventRecordWithTime, bool, error) {
-	view := r.borSn.View()
-	defer view.Close()
+	segments, release := r.borSn.ViewType(borsnaptype.BorEvents)
+	defer release()
 
-	segments := view.Events()
 	var buf []byte
 	var result []*heimdall.EventRecordWithTime
 	stateContract := bor.GenesisContractStateReceiverABI()
@@ -1457,9 +1458,9 @@ func (r *BlockReader) LastFrozenEventId() uint64 {
 		return 0
 	}
 
-	view := r.borSn.View()
-	defer view.Close()
-	segments := view.Events()
+	segments, release := r.borSn.ViewType(borsnaptype.BorEvents)
+	defer release()
+
 	if len(segments) == 0 {
 		return 0
 	}
@@ -1514,9 +1515,9 @@ func (r *BlockReader) LastFrozenSpanId() uint64 {
 		return 0
 	}
 
-	view := r.borSn.View()
-	defer view.Close()
-	segments := view.Spans()
+	segments, release := r.borSn.ViewType(borsnaptype.BorSpans)
+	defer release()
+
 	if len(segments) == 0 {
 		return 0
 	}
@@ -1558,9 +1559,9 @@ func (r *BlockReader) Span(ctx context.Context, tx kv.Getter, spanId uint64) ([]
 		}
 		return common.Copy(v), nil
 	}
-	view := r.borSn.View()
-	defer view.Close()
-	segments := view.Spans()
+	segments, release := r.borSn.ViewType(borsnaptype.BorSpans)
+	defer release()
+
 	for i := len(segments) - 1; i >= 0; i-- {
 		sn := segments[i]
 		idx := sn.Index()
@@ -1662,9 +1663,9 @@ func (r *BlockReader) Checkpoint(ctx context.Context, tx kv.Getter, checkpointId
 		return common.Copy(v), nil
 	}
 
-	view := r.borSn.View()
-	defer view.Close()
-	segments := view.Checkpoints()
+	segments, release := r.borSn.ViewType(borsnaptype.BorCheckpoints)
+	defer release()
+
 	for i := len(segments) - 1; i >= 0; i-- {
 		sn := segments[i]
 		index := sn.Index()
@@ -1688,9 +1689,8 @@ func (r *BlockReader) LastFrozenCheckpointId() uint64 {
 		return 0
 	}
 
-	view := r.borSn.View()
-	defer view.Close()
-	segments := view.Checkpoints()
+	segments, release := r.borSn.ViewType(borsnaptype.BorCheckpoints)
+	defer release()
 	if len(segments) == 0 {
 		return 0
 	}
