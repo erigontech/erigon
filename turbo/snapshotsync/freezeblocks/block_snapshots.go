@@ -2209,8 +2209,6 @@ type View struct {
 	s           *RoSnapshots
 	baseSegType snaptype.Type
 	closed      bool
-
-	lockSingleType *snaptype.Type
 }
 
 func (s *RoSnapshots) View() *View {
@@ -2227,17 +2225,10 @@ func (v *View) Close() {
 		return
 	}
 	v.closed = true
-	if v.lockSingleType != nil {
-		s, ok := v.s.segments.Get((*v.lockSingleType).Enum())
-		if ok {
-			s.lock.RUnlock()
-		}
-	} else {
-		v.s.segments.Scan(func(segtype snaptype.Enum, value *segments) bool {
-			value.lock.RUnlock()
-			return true
-		})
-	}
+	v.s.segments.Scan(func(segtype snaptype.Enum, value *segments) bool {
+		value.lock.RUnlock()
+		return true
+	})
 }
 
 var noop = func() {}
