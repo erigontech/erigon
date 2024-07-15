@@ -122,6 +122,10 @@ func (m *mdbxPieceCompletion) Set(pk metainfo.PieceKey, b bool) error {
 		if flushed, ok := m.flushed[pk.InfoHash]; !ok || !flushed.Contains(uint32(pk.Index)) {
 			return nil
 		}
+	} else {
+		if completed, ok := m.completed[pk.InfoHash]; ok {
+			completed.Remove(uint32(pk.Index))
+		}
 	}
 
 	tx, err = m.db.BeginRw(context.Background())
