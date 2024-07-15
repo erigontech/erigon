@@ -6,10 +6,10 @@ import (
 
 	libcommon "github.com/gateway-fm/cdk-erigon-lib/common"
 	"github.com/gateway-fm/cdk-erigon-lib/kv"
-	"github.com/ledgerwatch/erigon/core/state"
 	eritypes "github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/zk/datastream/proto/github.com/0xPolygonHermez/zkevm-node/state/datastream"
 	"github.com/ledgerwatch/erigon/zk/datastream/types"
+	"github.com/ledgerwatch/erigon/zk/utils"
 )
 
 func newBatchBookmarkEntryProto(batchNo uint64) *types.BookmarkProto {
@@ -164,7 +164,7 @@ func createBatchStartEntriesProto(
 			}
 
 			// seal off the last batch
-			if localExitRoot, err = getLocalExitRoot(workingBatch, reader, tx); err != nil {
+			if localExitRoot, err = utils.GetBatchLocalExitRootFromSCStorage(workingBatch, reader, tx); err != nil {
 				return nil, err
 			}
 			entries = append(entries, newBatchEndProto(localExitRoot, root, workingBatch))
@@ -196,7 +196,7 @@ func addBatchEndEntriesProto(
 		}
 	}
 
-	localExitRoot, err := getLocalExitRoot(batchNumber, reader, tx)
+	localExitRoot, err := utils.GetBatchLocalExitRootFromSCStorage(batchNumber, reader, tx)
 	if err != nil {
 		return nil, err
 	}
@@ -233,31 +233,6 @@ func addBatchStartEntries(reader DbReader, batchNum, chainId uint64) ([]DataStre
 
 	entries[1] = newBatchStartProto(batchNum, chainId, fork, batchType)
 	return entries, nil
-}
-
-func getLocalExitRoot(batch uint64, reader DbReader, tx kv.Tx) (libcommon.Hash, error) {
-	// now to fetch the LER for the batch - based on the last block of the batch
-	var localExitRoot libcommon.Hash
-	if batch > 0 {
-		checkBatch := batch
-		for ; checkBatch > 0; checkBatch-- {
-			lastBlockNumber, err := reader.GetHighestBlockInBatch(checkBatch)
-			if err != nil {
-				return libcommon.Hash{}, err
-			}
-			stateReader := state.NewPlainState(tx, lastBlockNumber, nil)
-			rawLer, err := stateReader.ReadAccountStorage(state.GER_MANAGER_ADDRESS, 1, &state.GLOBAL_EXIT_ROOT_POS_1)
-			if err != nil {
-				return libcommon.Hash{}, err
-			}
-			stateReader.Close()
-			localExitRoot = libcommon.BytesToHash(rawLer)
-			if localExitRoot != (libcommon.Hash{}) {
-				break
-			}
-		}
-	}
-	return localExitRoot, nil
 }
 
 func filterTransactionByIndexes(

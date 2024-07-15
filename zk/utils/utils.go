@@ -3,14 +3,15 @@ package utils
 import (
 	"fmt"
 
+	"github.com/gateway-fm/cdk-erigon-lib/common"
+	libcommon "github.com/gateway-fm/cdk-erigon-lib/common"
 	"github.com/gateway-fm/cdk-erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/chain"
+	"github.com/ledgerwatch/erigon/core/state"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 	"github.com/ledgerwatch/erigon/zk/constants"
 	"github.com/ledgerwatch/erigon/zk/hermez_db"
 	"github.com/ledgerwatch/log/v3"
-	libcommon "github.com/gateway-fm/cdk-erigon-lib/common"
-	"github.com/ledgerwatch/erigon/core/state"
 )
 
 // if current sync is before verified batch - short circuit to verified batch, otherwise to enx of next batch
@@ -80,6 +81,11 @@ type ForkConfigWriter interface {
 	SetForkIdBlock(forkId constants.ForkId, blockNum uint64) error
 }
 
+type DbReader interface {
+	GetLocalExitRootForBatchNo(batchNo uint64) (common.Hash, error)
+	GetHighestBlockInBatch(batchNo uint64) (uint64, error)
+}
+
 func UpdateZkEVMBlockCfg(cfg ForkConfigWriter, hermezDb ForkReader, logPrefix string) error {
 	var lastSetBlockNum uint64 = 0
 	var foundAny bool = false
@@ -126,7 +132,7 @@ func RecoverySetBlockConfigForks(blockNum uint64, forkId uint64, cfg ForkConfigW
 	return nil
 }
 
-func GetBatchLocalExitRoot(batchNo uint64, db *hermez_db.HermezDbReader, tx kv.Tx) (libcommon.Hash, error) {
+func GetBatchLocalExitRoot(batchNo uint64, db DbReader, tx kv.Tx) (libcommon.Hash, error) {
 	// check db first
 	localExitRoot, err := db.GetLocalExitRootForBatchNo(batchNo)
 	if err != nil {
@@ -140,23 +146,28 @@ func GetBatchLocalExitRoot(batchNo uint64, db *hermez_db.HermezDbReader, tx kv.T
 	return GetBatchLocalExitRootFromSCStorage(batchNo, db, tx)
 }
 
-func GetBatchLocalExitRootFromSCStorage(batchNo uint64, db *hermez_db.HermezDbReader, tx kv.Tx) (libcommon.Hash, error) {
+func GetBatchLocalExitRootFromSCStorage(batchNo uint64, db DbReader, tx kv.Tx) (libcommon.Hash, error) {
 	var localExitRoot libcommon.Hash
 
 	if batchNo > 0 {
 		checkBatch := batchNo
+
+		stateReader := state.NewPlainStateReadAccountStorage(tx, 0)
+		defer stateReader.Close()
+
 		for ; checkBatch > 0; checkBatch-- {
 			blockNo, err := db.GetHighestBlockInBatch(checkBatch)
 			if err != nil {
 				return libcommon.Hash{}, err
 			}
-			stateReader := state.NewPlainState(tx, blockNo, nil)
+
+			// stateReader := state.NewPlainStateReadAccountStorage(tx, blockNo)
+			// defer stateReader.Close()
+			stateReader.SetBlockNr(blockNo)
 			rawLer, err := stateReader.ReadAccountStorage(state.GER_MANAGER_ADDRESS, 1, &state.GLOBAL_EXIT_ROOT_POS_1)
 			if err != nil {
-				stateReader.Close()
 				return libcommon.Hash{}, err
 			}
-			stateReader.Close()
 			localExitRoot = libcommon.BytesToHash(rawLer)
 			if localExitRoot != (libcommon.Hash{}) {
 				break
