@@ -525,6 +525,19 @@ func (s *RoSnapshots) unlockSegments() {
 		return true
 	})
 }
+func (s *RoSnapshots) rLockSegments() {
+	s.segments.Scan(func(segtype snaptype.Enum, value *segments) bool {
+		value.lock.Lock()
+		return true
+	})
+}
+
+func (s *RoSnapshots) rUnlockSegments() {
+	s.segments.Scan(func(segtype snaptype.Enum, value *segments) bool {
+		value.lock.Unlock()
+		return true
+	})
+}
 
 func (s *RoSnapshots) rebuildSegments(fileNames []string, open bool, optimistic bool) error {
 	s.lockSegments()
@@ -888,9 +901,8 @@ func (s *RoSnapshots) buildMissedIndices(logPrefix string, ctx context.Context, 
 }
 
 func (s *RoSnapshots) PrintDebug() {
-	s.lockSegments()
-	defer s.unlockSegments()
-
+	v := s.View()
+	defer v.Close()
 	s.segments.Scan(func(key snaptype.Enum, value *segments) bool {
 		fmt.Println("    == [dbg] Snapshots,", key.String())
 		for _, sn := range value.segments {
@@ -2214,7 +2226,7 @@ type View struct {
 
 func (s *RoSnapshots) View() *View {
 	v := &View{s: s, baseSegType: coresnaptype.Headers}
-	s.lockSegments()
+	s.rLockSegments()
 	return v
 }
 
@@ -2223,7 +2235,7 @@ func (v *View) Close() {
 		return
 	}
 	v.closed = true
-	v.s.unlockSegments()
+	v.s.rUnlockSegments()
 }
 
 func (v *View) Segments(t snaptype.Type) []*Segment {
