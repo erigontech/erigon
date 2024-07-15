@@ -2245,7 +2245,7 @@ func (s *RoSnapshots) ViewType(t snaptype.Type) (segments []*Segment, release fu
 		if released {
 			return
 		}
-		segs.lock.Unlock()
+		segs.lock.RUnlock()
 		released = true
 	}
 }
@@ -2266,7 +2266,7 @@ func (s *RoSnapshots) ViewSingleFile(t snaptype.Type, blockNum uint64) (segment 
 			if released {
 				return
 			}
-			segs.lock.Unlock()
+			segs.lock.RUnlock()
 			released = true
 		}
 	}
