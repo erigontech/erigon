@@ -50,6 +50,9 @@ func NewTestDB(tb testing.TB, dirs datadir.Dirs) (db kv.RwDB, agg *state.Aggrega
 	if err := agg.OpenFolder(); err != nil {
 		panic(err)
 	}
+	if tb != nil {
+		tb.Cleanup(agg.Close)
+	}
 
 	db, err = temporal.New(db, agg)
 	if err != nil {
