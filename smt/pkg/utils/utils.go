@@ -10,9 +10,9 @@ import (
 
 	"sort"
 
-	poseidon "github.com/gateway-fm/vectorized-poseidon-gold/src/vectorizedposeidongold"
 	"github.com/gateway-fm/cdk-erigon-lib/common"
 	"github.com/gateway-fm/cdk-erigon-lib/common/length"
+	poseidon "github.com/gateway-fm/vectorized-poseidon-gold/src/vectorizedposeidongold"
 )
 
 const (
@@ -365,7 +365,7 @@ func ScalarToNodeValue8(scalarIn *big.Int) NodeValue8 {
 }
 
 func (nk *NodeKey) GetPath() []int {
-	res := make([]int, 0)
+	res := make([]int, 0, 256)
 	auxk := [4]uint64{nk[0], nk[1], nk[2], nk[3]}
 
 	for j := 0; j < 64; j++ {
