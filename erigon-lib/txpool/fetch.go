@@ -177,7 +177,7 @@ func (f *Fetch) receiveMessage(ctx context.Context, sentryClient sentry.SentryCl
 	var req *sentry.InboundMessage
 	for req, err = stream.Recv(); ; req, err = stream.Recv() {
 		if err != nil {
-			f.logger.Error("[txpool.receiveMessage]", "err", err)
+			f.logger.Debug("[txpool.receiveMessage]", "err", err)
 			select {
 			case <-f.ctx.Done():
 				return ctx.Err()
@@ -189,7 +189,6 @@ func (f *Fetch) receiveMessage(ctx context.Context, sentryClient sentry.SentryCl
 			f.logger.Warn("[txpool.receiveMessage]", "req nil")
 			return nil
 		}
-		f.logger.Info("[txpool.receiveMessage]", "req", req)
 		if err := f.handleInboundMessage(streamCtx, req, sentryClient); err != nil {
 			if grpcutil.IsRetryLater(err) || grpcutil.IsEndOfStream(err) {
 				time.Sleep(3 * time.Second)
@@ -200,7 +199,6 @@ func (f *Fetch) receiveMessage(ctx context.Context, sentryClient sentry.SentryCl
 		if f.wg != nil {
 			f.wg.Done()
 		}
-		f.logger.Info("[txpool.fetch] Handling incoming message", "msg", string(req.Data), "reqID", req.Id.String(), "err", err)
 	}
 }
 
