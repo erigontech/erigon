@@ -2060,6 +2060,49 @@ func (v *View) Close() {
 	})
 }
 
+var noop = func() {}
+
+func (s *RoSnapshots) ViewType(t snaptype.Type) (segments []*Segment, release func()) {
+	segs, ok := s.segments.Get(t.Enum())
+	if !ok {
+		return nil, noop
+	}
+
+	segs.lock.RLock()
+	var released = false
+	return segs.segments, func() {
+		if released {
+			return
+		}
+		segs.lock.Unlock()
+		released = true
+	}
+}
+
+func (s *RoSnapshots) ViewSingleFile(t snaptype.Type, blockNum uint64) (segment *Segment, ok bool, release func()) {
+	segs, ok := s.segments.Get(t.Enum())
+	if !ok {
+		return nil, false, noop
+	}
+
+	segs.lock.RLock()
+	var released = false
+	for _, seg := range segs.segments {
+		if !(blockNum >= seg.from && blockNum < seg.to) {
+			continue
+		}
+		return seg, true, func() {
+			if released {
+				return
+			}
+			segs.lock.Unlock()
+			released = true
+		}
+	}
+	segs.lock.RUnlock()
+	return nil, false, noop
+}
+
 func (v *View) Segments(t snaptype.Type) []*Segment {
 	if s, ok := v.s.segments.Get(t.Enum()); ok {
 		return s.segments
