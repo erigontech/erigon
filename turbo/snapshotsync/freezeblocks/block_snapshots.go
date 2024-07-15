@@ -2222,6 +2222,24 @@ func (s *RoSnapshots) View() *View {
 	return v
 }
 
+func (v *View) Close() {
+	if v.closed {
+		return
+	}
+	v.closed = true
+	if v.lockSingleType != nil {
+		s, ok := v.s.segments.Get((*v.lockSingleType).Enum())
+		if ok {
+			s.lock.RUnlock()
+		}
+	} else {
+		v.s.segments.Scan(func(segtype snaptype.Enum, value *segments) bool {
+			value.lock.RUnlock()
+			return true
+		})
+	}
+}
+
 var noop = func() {}
 
 func (s *RoSnapshots) ViewType(t snaptype.Type) (segments []*Segment, release func()) {
@@ -2265,25 +2283,6 @@ func (s *RoSnapshots) ViewSingleFile(t snaptype.Type, blockNum uint64) (segment 
 	}
 	segs.lock.RUnlock()
 	return nil, false, noop
-}
-
-func (v *View) Close() {
-	if v.closed {
-		return
-	}
-	v.closed = true
-	if v.lockSingleType != nil {
-		s, ok := v.s.segments.Get((*v.lockSingleType).Enum())
-		if ok {
-			s.lock.RUnlock()
-		}
-	} else {
-		v.s.segments.Scan(func(segtype snaptype.Enum, value *segments) bool {
-			value.lock.RUnlock()
-			return true
-		})
-	}
-
 }
 
 func (v *View) Segments(t snaptype.Type) []*Segment {
