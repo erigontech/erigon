@@ -120,7 +120,7 @@
             "comment": "`execution-spec-tests` generated test",
             "filling-transition-tool": "evm version 1.14.6-unstable-7e5dd44a-20240705",
             "description": "Test function documentation:\n\n    Test the DUP1-DUP16 opcodes.\n\n    note: Test case ported from:\n\n        - [ethereum/tests/GeneralStateTests/VMTests/vmTests/dup.json](https://github.com/ethereum/tests/blob/develop/GeneralStateTests/VMTests/vmTests/dup.json)\n        by Ori Pomerantz.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/devnet-1@v1.2.0/tests/frontier/opcodes/test_dup.py#L14"
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/devnet-1@v1.3.0/tests/frontier/opcodes/test_dup.py#L14"
         }
     },
     "tests/frontier/opcodes/test_dup.py::test_dup[fork_Frontier-blockchain_test-DUP2]": {
@@ -244,7 +244,7 @@
             "comment": "`execution-spec-tests` generated test",
             "filling-transition-tool": "evm version 1.14.6-unstable-7e5dd44a-20240705",
             "description": "Test function documentation:\n\n    Test the DUP1-DUP16 opcodes.\n\n    note: Test case ported from:\n\n        - [ethereum/tests/GeneralStateTests/VMTests/vmTests/dup.json](https://github.com/ethereum/tests/blob/develop/GeneralStateTests/VMTests/vmTests/dup.json)\n        by Ori Pomerantz.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/devnet-1@v1.2.0/tests/frontier/opcodes/test_dup.py#L14"
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/devnet-1@v1.3.0/tests/frontier/opcodes/test_dup.py#L14"
         }
     },
     "tests/frontier/opcodes/test_dup.py::test_dup[fork_Frontier-blockchain_test-DUP3]": {
@@ -368,7 +368,7 @@
             "comment": "`execution-spec-tests` generated test",
             "filling-transition-tool": "evm version 1.14.6-unstable-7e5dd44a-20240705",
             "description": "Test function documentation:\n\n    Test the DUP1-DUP16 opcodes.\n\n    note: Test case ported from:\n\n        - [ethereum/tests/GeneralStateTests/VMTests/vmTests/dup.json](https://github.com/ethereum/tests/blob/develop/GeneralStateTests/VMTests/vmTests/dup.json)\n        by Ori Pomerantz.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/devnet-1@v1.2.0/tests/frontier/opcodes/test_dup.py#L14"
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/devnet-1@v1.3.0/tests/frontier/opcodes/test_dup.py#L14"
         }
     },
     "tests/frontier/opcodes/test_dup.py::test_dup[fork_Frontier-blockchain_test-DUP4]": {
@@ -492,7 +492,7 @@
             "comment": "`execution-spec-tests` generated test",
             "filling-transition-tool": "evm version 1.14.6-unstable-7e5dd44a-20240705",
             "description": "Test function documentation:\n\n    Test the DUP1-DUP16 opcodes.\n\n    note: Test case ported from:\n\n        - [ethereum/tests/GeneralStateTests/VMTests/vmTests/dup.json](https://github.com/ethereum/tests/blob/develop/GeneralStateTests/VMTests/vmTests/dup.json)\n        by Ori Pomerantz.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/devnet-1@v1.2.0/tests/frontier/opcodes/test_dup.py#L14"
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/devnet-1@v1.3.0/tests/frontier/opcodes/test_dup.py#L14"
         }
     },
     "tests/frontier/opcodes/test_dup.py::test_dup[fork_Frontier-blockchain_test-DUP5]": {
@@ -616,7 +616,7 @@
             "comment": "`execution-spec-tests` generated test",
             "filling-transition-tool": "evm version 1.14.6-unstable-7e5dd44a-20240705",
             "description": "Test function documentation:\n\n    Test the DUP1-DUP16 opcodes.\n\n    note: Test case ported from:\n\n        - [ethereum/tests/GeneralStateTests/VMTests/vmTests/dup.json](https://github.com/ethereum/tests/blob/develop/GeneralStateTests/VMTests/vmTests/dup.json)\n        by Ori Pomerantz.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/devnet-1@v1.2.0/tests/frontier/opcodes/test_dup.py#L14"
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/devnet-1@v1.3.0/tests/frontier/opcodes/test_dup.py#L14"
         }
     },
     "tests/frontier/opcodes/test_dup.py::test_dup[fork_Frontier-blockchain_test-DUP6]": {
@@ -740,7 +740,7 @@
             "comment": "`execution-spec-tests` generated test",
             "filling-transition-tool": "evm version 1.14.6-unstable-7e5dd44a-20240705",
             "description": "Test function documentation:\n\n    Test the DUP1-DUP16 opcodes.\n\n    note: Test case ported from:\n\n        - [ethereum/tests/GeneralStateTests/VMTests/vmTests/dup.json](https://github.com/ethereum/tests/blob/develop/GeneralStateTests/VMTests/vmTests/dup.json)\n        by Ori Pomerantz.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/devnet-1@v1.2.0/tests/frontier/opcodes/test_dup.py#L14"
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/devnet-1@v1.3.0/tests/frontier/opcodes/test_dup.py#L14"
         }
     },
     "tests/frontier/opcodes/test_dup.py::test_dup[fork_Frontier-blockchain_test-DUP7]": {
@@ -864,7 +864,7 @@
             "comment": "`execution-spec-tests` generated test",
             "filling-transition-tool": "evm version 1.14.6-unstable-7e5dd44a-20240705",
             "description": "Test function documentation:\n\n    Test the DUP1-DUP16 opcodes.\n\n    note: Test case ported from:\n\n        - [ethereum/tests/GeneralStateTests/VMTests/vmTests/dup.json](https://github.com/ethereum/tests/blob/develop/GeneralStateTests/VMTests/vmTests/dup.json)\n        by Ori Pomerantz.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/devnet-1@v1.2.0/tests/frontier/opcodes/test_dup.py#L14"
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/devnet-1@v1.3.0/tests/frontier/opcodes/test_dup.py#L14"
         }
     },
     "tests/frontier/opcodes/test_dup.py::test_dup[fork_Frontier-blockchain_test-DUP8]": {
@@ -988,7 +988,7 @@
             "comment": "`execution-spec-tests` generated test",
             "filling-transition-tool": "evm version 1.14.6-unstable-7e5dd44a-20240705",
             "description": "Test function documentation:\n\n    Test the DUP1-DUP16 opcodes.\n\n    note: Test case ported from:\n\n        - [ethereum/tests/GeneralStateTests/VMTests/vmTests/dup.json](https://github.com/ethereum/tests/blob/develop/GeneralStateTests/VMTests/vmTests/dup.json)\n        by Ori Pomerantz.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/devnet-1@v1.2.0/tests/frontier/opcodes/test_dup.py#L14"
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/devnet-1@v1.3.0/tests/frontier/opcodes/test_dup.py#L14"
         }
     },
     "tests/frontier/opcodes/test_dup.py::test_dup[fork_Frontier-blockchain_test-DUP9]": {
@@ -1112,7 +1112,7 @@
             "comment": "`execution-spec-tests` generated test",
             "filling-transition-tool": "evm version 1.14.6-unstable-7e5dd44a-20240705",
             "description": "Test function documentation:\n\n    Test the DUP1-DUP16 opcodes.\n\n    note: Test case ported from:\n\n        - [ethereum/tests/GeneralStateTests/VMTests/vmTests/dup.json](https://github.com/ethereum/tests/blob/develop/GeneralStateTests/VMTests/vmTests/dup.json)\n        by Ori Pomerantz.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/devnet-1@v1.2.0/tests/frontier/opcodes/test_dup.py#L14"
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/devnet-1@v1.3.0/tests/frontier/opcodes/test_dup.py#L14"
         }
     },
     "tests/frontier/opcodes/test_dup.py::test_dup[fork_Frontier-blockchain_test-DUP10]": {
@@ -1236,7 +1236,7 @@
             "comment": "`execution-spec-tests` generated test",
             "filling-transition-tool": "evm version 1.14.6-unstable-7e5dd44a-20240705",
             "description": "Test function documentation:\n\n    Test the DUP1-DUP16 opcodes.\n\n    note: Test case ported from:\n\n        - [ethereum/tests/GeneralStateTests/VMTests/vmTests/dup.json](https://github.com/ethereum/tests/blob/develop/GeneralStateTests/VMTests/vmTests/dup.json)\n        by Ori Pomerantz.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/devnet-1@v1.2.0/tests/frontier/opcodes/test_dup.py#L14"
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/devnet-1@v1.3.0/tests/frontier/opcodes/test_dup.py#L14"
         }
     },
     "tests/frontier/opcodes/test_dup.py::test_dup[fork_Frontier-blockchain_test-DUP11]": {
@@ -1360,7 +1360,7 @@
             "comment": "`execution-spec-tests` generated test",
             "filling-transition-tool": "evm version 1.14.6-unstable-7e5dd44a-20240705",
             "description": "Test function documentation:\n\n    Test the DUP1-DUP16 opcodes.\n\n    note: Test case ported from:\n\n        - [ethereum/tests/GeneralStateTests/VMTests/vmTests/dup.json](https://github.com/ethereum/tests/blob/develop/GeneralStateTests/VMTests/vmTests/dup.json)\n        by Ori Pomerantz.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/devnet-1@v1.2.0/tests/frontier/opcodes/test_dup.py#L14"
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/devnet-1@v1.3.0/tests/frontier/opcodes/test_dup.py#L14"
         }
     },
     "tests/frontier/opcodes/test_dup.py::test_dup[fork_Frontier-blockchain_test-DUP12]": {
@@ -1484,7 +1484,7 @@
             "comment": "`execution-spec-tests` generated test",
             "filling-transition-tool": "evm version 1.14.6-unstable-7e5dd44a-20240705",
             "description": "Test function documentation:\n\n    Test the DUP1-DUP16 opcodes.\n\n    note: Test case ported from:\n\n        - [ethereum/tests/GeneralStateTests/VMTests/vmTests/dup.json](https://github.com/ethereum/tests/blob/develop/GeneralStateTests/VMTests/vmTests/dup.json)\n        by Ori Pomerantz.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/devnet-1@v1.2.0/tests/frontier/opcodes/test_dup.py#L14"
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/devnet-1@v1.3.0/tests/frontier/opcodes/test_dup.py#L14"
         }
     },
     "tests/frontier/opcodes/test_dup.py::test_dup[fork_Frontier-blockchain_test-DUP13]": {
@@ -1608,7 +1608,7 @@
             "comment": "`execution-spec-tests` generated test",
             "filling-transition-tool": "evm version 1.14.6-unstable-7e5dd44a-20240705",
             "description": "Test function documentation:\n\n    Test the DUP1-DUP16 opcodes.\n\n    note: Test case ported from:\n\n        - [ethereum/tests/GeneralStateTests/VMTests/vmTests/dup.json](https://github.com/ethereum/tests/blob/develop/GeneralStateTests/VMTests/vmTests/dup.json)\n        by Ori Pomerantz.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/devnet-1@v1.2.0/tests/frontier/opcodes/test_dup.py#L14"
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/devnet-1@v1.3.0/tests/frontier/opcodes/test_dup.py#L14"
         }
     },
     "tests/frontier/opcodes/test_dup.py::test_dup[fork_Frontier-blockchain_test-DUP14]": {
@@ -1732,7 +1732,7 @@
             "comment": "`execution-spec-tests` generated test",
             "filling-transition-tool": "evm version 1.14.6-unstable-7e5dd44a-20240705",
             "description": "Test function documentation:\n\n    Test the DUP1-DUP16 opcodes.\n\n    note: Test case ported from:\n\n        - [ethereum/tests/GeneralStateTests/VMTests/vmTests/dup.json](https://github.com/ethereum/tests/blob/develop/GeneralStateTests/VMTests/vmTests/dup.json)\n        by Ori Pomerantz.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/devnet-1@v1.2.0/tests/frontier/opcodes/test_dup.py#L14"
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/devnet-1@v1.3.0/tests/frontier/opcodes/test_dup.py#L14"
         }
     },
     "tests/frontier/opcodes/test_dup.py::test_dup[fork_Frontier-blockchain_test-DUP15]": {
@@ -1856,7 +1856,7 @@
             "comment": "`execution-spec-tests` generated test",
             "filling-transition-tool": "evm version 1.14.6-unstable-7e5dd44a-20240705",
             "description": "Test function documentation:\n\n    Test the DUP1-DUP16 opcodes.\n\n    note: Test case ported from:\n\n        - [ethereum/tests/GeneralStateTests/VMTests/vmTests/dup.json](https://github.com/ethereum/tests/blob/develop/GeneralStateTests/VMTests/vmTests/dup.json)\n        by Ori Pomerantz.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/devnet-1@v1.2.0/tests/frontier/opcodes/test_dup.py#L14"
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/devnet-1@v1.3.0/tests/frontier/opcodes/test_dup.py#L14"
         }
     },
     "tests/frontier/opcodes/test_dup.py::test_dup[fork_Frontier-blockchain_test-DUP16]": {
@@ -1980,7 +1980,7 @@
             "comment": "`execution-spec-tests` generated test",
             "filling-transition-tool": "evm version 1.14.6-unstable-7e5dd44a-20240705",
             "description": "Test function documentation:\n\n    Test the DUP1-DUP16 opcodes.\n\n    note: Test case ported from:\n\n        - [ethereum/tests/GeneralStateTests/VMTests/vmTests/dup.json](https://github.com/ethereum/tests/blob/develop/GeneralStateTests/VMTests/vmTests/dup.json)\n        by Ori Pomerantz.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/devnet-1@v1.2.0/tests/frontier/opcodes/test_dup.py#L14"
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/devnet-1@v1.3.0/tests/frontier/opcodes/test_dup.py#L14"
         }
     },
     "tests/frontier/opcodes/test_dup.py::test_dup[fork_Homestead-blockchain_test-DUP1]": {
@@ -2104,7 +2104,7 @@
             "comment": "`execution-spec-tests` generated test",
             "filling-transition-tool": "evm version 1.14.6-unstable-7e5dd44a-20240705",
             "description": "Test function documentation:\n\n    Test the DUP1-DUP16 opcodes.\n\n    note: Test case ported from:\n\n        - [ethereum/tests/GeneralStateTests/VMTests/vmTests/dup.json](https://github.com/ethereum/tests/blob/develop/GeneralStateTests/VMTests/vmTests/dup.json)\n        by Ori Pomerantz.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/devnet-1@v1.2.0/tests/frontier/opcodes/test_dup.py#L14"
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/devnet-1@v1.3.0/tests/frontier/opcodes/test_dup.py#L14"
         }
     },
     "tests/frontier/opcodes/test_dup.py::test_dup[fork_Homestead-blockchain_test-DUP2]": {
@@ -2228,7 +2228,7 @@
             "comment": "`execution-spec-tests` generated test",
             "filling-transition-tool": "evm version 1.14.6-unstable-7e5dd44a-20240705",
             "description": "Test function documentation:\n\n    Test the DUP1-DUP16 opcodes.\n\n    note: Test case ported from:\n\n        - [ethereum/tests/GeneralStateTests/VMTests/vmTests/dup.json](https://github.com/ethereum/tests/blob/develop/GeneralStateTests/VMTests/vmTests/dup.json)\n        by Ori Pomerantz.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/devnet-1@v1.2.0/tests/frontier/opcodes/test_dup.py#L14"
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/devnet-1@v1.3.0/tests/frontier/opcodes/test_dup.py#L14"
         }
     },
     "tests/frontier/opcodes/test_dup.py::test_dup[fork_Homestead-blockchain_test-DUP3]": {
@@ -2352,7 +2352,7 @@
             "comment": "`execution-spec-tests` generated test",
             "filling-transition-tool": "evm version 1.14.6-unstable-7e5dd44a-20240705",
             "description": "Test function documentation:\n\n    Test the DUP1-DUP16 opcodes.\n\n    note: Test case ported from:\n\n        - [ethereum/tests/GeneralStateTests/VMTests/vmTests/dup.json](https://github.com/ethereum/tests/blob/develop/GeneralStateTests/VMTests/vmTests/dup.json)\n        by Ori Pomerantz.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/devnet-1@v1.2.0/tests/frontier/opcodes/test_dup.py#L14"
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/devnet-1@v1.3.0/tests/frontier/opcodes/test_dup.py#L14"
         }
     },
     "tests/frontier/opcodes/test_dup.py::test_dup[fork_Homestead-blockchain_test-DUP4]": {
@@ -2476,7 +2476,7 @@
             "comment": "`execution-spec-tests` generated test",
             "filling-transition-tool": "evm version 1.14.6-unstable-7e5dd44a-20240705",
             "description": "Test function documentation:\n\n    Test the DUP1-DUP16 opcodes.\n\n    note: Test case ported from:\n\n        - [ethereum/tests/GeneralStateTests/VMTests/vmTests/dup.json](https://github.com/ethereum/tests/blob/develop/GeneralStateTests/VMTests/vmTests/dup.json)\n        by Ori Pomerantz.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/devnet-1@v1.2.0/tests/frontier/opcodes/test_dup.py#L14"
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/devnet-1@v1.3.0/tests/frontier/opcodes/test_dup.py#L14"
         }
     },
     "tests/frontier/opcodes/test_dup.py::test_dup[fork_Homestead-blockchain_test-DUP5]": {
@@ -2600,7 +2600,7 @@
             "comment": "`execution-spec-tests` generated test",
             "filling-transition-tool": "evm version 1.14.6-unstable-7e5dd44a-20240705",
             "description": "Test function documentation:\n\n    Test the DUP1-DUP16 opcodes.\n\n    note: Test case ported from:\n\n        - [ethereum/tests/GeneralStateTests/VMTests/vmTests/dup.json](https://github.com/ethereum/tests/blob/develop/GeneralStateTests/VMTests/vmTests/dup.json)\n        by Ori Pomerantz.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/devnet-1@v1.2.0/tests/frontier/opcodes/test_dup.py#L14"
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/devnet-1@v1.3.0/tests/frontier/opcodes/test_dup.py#L14"
         }
     },
     "tests/frontier/opcodes/test_dup.py::test_dup[fork_Homestead-blockchain_test-DUP6]": {
@@ -2724,7 +2724,7 @@
             "comment": "`execution-spec-tests` generated test",
             "filling-transition-tool": "evm version 1.14.6-unstable-7e5dd44a-20240705",
             "description": "Test function documentation:\n\n    Test the DUP1-DUP16 opcodes.\n\n    note: Test case ported from:\n\n        - [ethereum/tests/GeneralStateTests/VMTests/vmTests/dup.json](https://github.com/ethereum/tests/blob/develop/GeneralStateTests/VMTests/vmTests/dup.json)\n        by Ori Pomerantz.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/devnet-1@v1.2.0/tests/frontier/opcodes/test_dup.py#L14"
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/devnet-1@v1.3.0/tests/frontier/opcodes/test_dup.py#L14"
         }
     },
     "tests/frontier/opcodes/test_dup.py::test_dup[fork_Homestead-blockchain_test-DUP7]": {
@@ -2848,7 +2848,7 @@
             "comment": "`execution-spec-tests` generated test",
             "filling-transition-tool": "evm version 1.14.6-unstable-7e5dd44a-20240705",
             "description": "Test function documentation:\n\n    Test the DUP1-DUP16 opcodes.\n\n    note: Test case ported from:\n\n        - [ethereum/tests/GeneralStateTests/VMTests/vmTests/dup.json](https://github.com/ethereum/tests/blob/develop/GeneralStateTests/VMTests/vmTests/dup.json)\n        by Ori Pomerantz.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/devnet-1@v1.2.0/tests/frontier/opcodes/test_dup.py#L14"
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/devnet-1@v1.3.0/tests/frontier/opcodes/test_dup.py#L14"
         }
     },
     "tests/frontier/opcodes/test_dup.py::test_dup[fork_Homestead-blockchain_test-DUP8]": {
@@ -2972,7 +2972,7 @@
             "comment": "`execution-spec-tests` generated test",
             "filling-transition-tool": "evm version 1.14.6-unstable-7e5dd44a-20240705",
             "description": "Test function documentation:\n\n    Test the DUP1-DUP16 opcodes.\n\n    note: Test case ported from:\n\n        - [ethereum/tests/GeneralStateTests/VMTests/vmTests/dup.json](https://github.com/ethereum/tests/blob/develop/GeneralStateTests/VMTests/vmTests/dup.json)\n        by Ori Pomerantz.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/devnet-1@v1.2.0/tests/frontier/opcodes/test_dup.py#L14"
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/devnet-1@v1.3.0/tests/frontier/opcodes/test_dup.py#L14"
         }
     },
     "tests/frontier/opcodes/test_dup.py::test_dup[fork_Homestead-blockchain_test-DUP9]": {
@@ -3096,7 +3096,7 @@
             "comment": "`execution-spec-tests` generated test",
             "filling-transition-tool": "evm version 1.14.6-unstable-7e5dd44a-20240705",
             "description": "Test function documentation:\n\n    Test the DUP1-DUP16 opcodes.\n\n    note: Test case ported from:\n\n        - [ethereum/tests/GeneralStateTests/VMTests/vmTests/dup.json](https://github.com/ethereum/tests/blob/develop/GeneralStateTests/VMTests/vmTests/dup.json)\n        by Ori Pomerantz.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/devnet-1@v1.2.0/tests/frontier/opcodes/test_dup.py#L14"
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/devnet-1@v1.3.0/tests/frontier/opcodes/test_dup.py#L14"
         }
     },
     "tests/frontier/opcodes/test_dup.py::test_dup[fork_Homestead-blockchain_test-DUP10]": {
@@ -3220,7 +3220,7 @@
             "comment": "`execution-spec-tests` generated test",
             "filling-transition-tool": "evm version 1.14.6-unstable-7e5dd44a-20240705",
             "description": "Test function documentation:\n\n    Test the DUP1-DUP16 opcodes.\n\n    note: Test case ported from:\n\n        - [ethereum/tests/GeneralStateTests/VMTests/vmTests/dup.json](https://github.com/ethereum/tests/blob/develop/GeneralStateTests/VMTests/vmTests/dup.json)\n        by Ori Pomerantz.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/devnet-1@v1.2.0/tests/frontier/opcodes/test_dup.py#L14"
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/devnet-1@v1.3.0/tests/frontier/opcodes/test_dup.py#L14"
         }
     },
     "tests/frontier/opcodes/test_dup.py::test_dup[fork_Homestead-blockchain_test-DUP11]": {
@@ -3344,7 +3344,7 @@
             "comment": "`execution-spec-tests` generated test",
             "filling-transition-tool": "evm version 1.14.6-unstable-7e5dd44a-20240705",
             "description": "Test function documentation:\n\n    Test the DUP1-DUP16 opcodes.\n\n    note: Test case ported from:\n\n        - [ethereum/tests/GeneralStateTests/VMTests/vmTests/dup.json](https://github.com/ethereum/tests/blob/develop/GeneralStateTests/VMTests/vmTests/dup.json)\n        by Ori Pomerantz.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/devnet-1@v1.2.0/tests/frontier/opcodes/test_dup.py#L14"
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/devnet-1@v1.3.0/tests/frontier/opcodes/test_dup.py#L14"
         }
     },
     "tests/frontier/opcodes/test_dup.py::test_dup[fork_Homestead-blockchain_test-DUP12]": {
@@ -3468,7 +3468,7 @@
             "comment": "`execution-spec-tests` generated test",
             "filling-transition-tool": "evm version 1.14.6-unstable-7e5dd44a-20240705",
             "description": "Test function documentation:\n\n    Test the DUP1-DUP16 opcodes.\n\n    note: Test case ported from:\n\n        - [ethereum/tests/GeneralStateTests/VMTests/vmTests/dup.json](https://github.com/ethereum/tests/blob/develop/GeneralStateTests/VMTests/vmTests/dup.json)\n        by Ori Pomerantz.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/devnet-1@v1.2.0/tests/frontier/opcodes/test_dup.py#L14"
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/devnet-1@v1.3.0/tests/frontier/opcodes/test_dup.py#L14"
         }
     },
     "tests/frontier/opcodes/test_dup.py::test_dup[fork_Homestead-blockchain_test-DUP13]": {
@@ -3592,7 +3592,7 @@
             "comment": "`execution-spec-tests` generated test",
             "filling-transition-tool": "evm version 1.14.6-unstable-7e5dd44a-20240705",
             "description": "Test function documentation:\n\n    Test the DUP1-DUP16 opcodes.\n\n    note: Test case ported from:\n\n        - [ethereum/tests/GeneralStateTests/VMTests/vmTests/dup.json](https://github.com/ethereum/tests/blob/develop/GeneralStateTests/VMTests/vmTests/dup.json)\n        by Ori Pomerantz.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/devnet-1@v1.2.0/tests/frontier/opcodes/test_dup.py#L14"
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/devnet-1@v1.3.0/tests/frontier/opcodes/test_dup.py#L14"
         }
     },
     "tests/frontier/opcodes/test_dup.py::test_dup[fork_Homestead-blockchain_test-DUP14]": {
@@ -3716,7 +3716,7 @@
             "comment": "`execution-spec-tests` generated test",
             "filling-transition-tool": "evm version 1.14.6-unstable-7e5dd44a-20240705",
             "description": "Test function documentation:\n\n    Test the DUP1-DUP16 opcodes.\n\n    note: Test case ported from:\n\n        - [ethereum/tests/GeneralStateTests/VMTests/vmTests/dup.json](https://github.com/ethereum/tests/blob/develop/GeneralStateTests/VMTests/vmTests/dup.json)\n        by Ori Pomerantz.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/devnet-1@v1.2.0/tests/frontier/opcodes/test_dup.py#L14"
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/devnet-1@v1.3.0/tests/frontier/opcodes/test_dup.py#L14"
         }
     },
     "tests/frontier/opcodes/test_dup.py::test_dup[fork_Homestead-blockchain_test-DUP15]": {
@@ -3840,7 +3840,7 @@
             "comment": "`execution-spec-tests` generated test",
             "filling-transition-tool": "evm version 1.14.6-unstable-7e5dd44a-20240705",
             "description": "Test function documentation:\n\n    Test the DUP1-DUP16 opcodes.\n\n    note: Test case ported from:\n\n        - [ethereum/tests/GeneralStateTests/VMTests/vmTests/dup.json](https://github.com/ethereum/tests/blob/develop/GeneralStateTests/VMTests/vmTests/dup.json)\n        by Ori Pomerantz.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/devnet-1@v1.2.0/tests/frontier/opcodes/test_dup.py#L14"
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/devnet-1@v1.3.0/tests/frontier/opcodes/test_dup.py#L14"
         }
     },
     "tests/frontier/opcodes/test_dup.py::test_dup[fork_Homestead-blockchain_test-DUP16]": {
@@ -3964,7 +3964,7 @@
             "comment": "`execution-spec-tests` generated test",
             "filling-transition-tool": "evm version 1.14.6-unstable-7e5dd44a-20240705",
             "description": "Test function documentation:\n\n    Test the DUP1-DUP16 opcodes.\n\n    note: Test case ported from:\n\n        - [ethereum/tests/GeneralStateTests/VMTests/vmTests/dup.json](https://github.com/ethereum/tests/blob/develop/GeneralStateTests/VMTests/vmTests/dup.json)\n        by Ori Pomerantz.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/devnet-1@v1.2.0/tests/frontier/opcodes/test_dup.py#L14"
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/devnet-1@v1.3.0/tests/frontier/opcodes/test_dup.py#L14"
         }
     },
     "tests/frontier/opcodes/test_dup.py::test_dup[fork_Byzantium-blockchain_test-DUP1]": {
@@ -4088,7 +4088,7 @@
             "comment": "`execution-spec-tests` generated test",
             "filling-transition-tool": "evm version 1.14.6-unstable-7e5dd44a-20240705",
             "description": "Test function documentation:\n\n    Test the DUP1-DUP16 opcodes.\n\n    note: Test case ported from:\n\n        - [ethereum/tests/GeneralStateTests/VMTests/vmTests/dup.json](https://github.com/ethereum/tests/blob/develop/GeneralStateTests/VMTests/vmTests/dup.json)\n        by Ori Pomerantz.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/devnet-1@v1.2.0/tests/frontier/opcodes/test_dup.py#L14"
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/devnet-1@v1.3.0/tests/frontier/opcodes/test_dup.py#L14"
         }
     },
     "tests/frontier/opcodes/test_dup.py::test_dup[fork_Byzantium-blockchain_test-DUP2]": {
@@ -4212,7 +4212,7 @@
             "comment": "`execution-spec-tests` generated test",
             "filling-transition-tool": "evm version 1.14.6-unstable-7e5dd44a-20240705",
             "description": "Test function documentation:\n\n    Test the DUP1-DUP16 opcodes.\n\n    note: Test case ported from:\n\n        - [ethereum/tests/GeneralStateTests/VMTests/vmTests/dup.json](https://github.com/ethereum/tests/blob/develop/GeneralStateTests/VMTests/vmTests/dup.json)\n        by Ori Pomerantz.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/devnet-1@v1.2.0/tests/frontier/opcodes/test_dup.py#L14"
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/devnet-1@v1.3.0/tests/frontier/opcodes/test_dup.py#L14"
         }
     },
     "tests/frontier/opcodes/test_dup.py::test_dup[fork_Byzantium-blockchain_test-DUP3]": {
@@ -4336,7 +4336,7 @@
             "comment": "`execution-spec-tests` generated test",
             "filling-transition-tool": "evm version 1.14.6-unstable-7e5dd44a-20240705",
             "description": "Test function documentation:\n\n    Test the DUP1-DUP16 opcodes.\n\n    note: Test case ported from:\n\n        - [ethereum/tests/GeneralStateTests/VMTests/vmTests/dup.json](https://github.com/ethereum/tests/blob/develop/GeneralStateTests/VMTests/vmTests/dup.json)\n        by Ori Pomerantz.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/devnet-1@v1.2.0/tests/frontier/opcodes/test_dup.py#L14"
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/devnet-1@v1.3.0/tests/frontier/opcodes/test_dup.py#L14"
         }
     },
     "tests/frontier/opcodes/test_dup.py::test_dup[fork_Byzantium-blockchain_test-DUP4]": {
@@ -4460,7 +4460,7 @@
             "comment": "`execution-spec-tests` generated test",
             "filling-transition-tool": "evm version 1.14.6-unstable-7e5dd44a-20240705",
             "description": "Test function documentation:\n\n    Test the DUP1-DUP16 opcodes.\n\n    note: Test case ported from:\n\n        - [ethereum/tests/GeneralStateTests/VMTests/vmTests/dup.json](https://github.com/ethereum/tests/blob/develop/GeneralStateTests/VMTests/vmTests/dup.json)\n        by Ori Pomerantz.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/devnet-1@v1.2.0/tests/frontier/opcodes/test_dup.py#L14"
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/devnet-1@v1.3.0/tests/frontier/opcodes/test_dup.py#L14"
         }
     },
     "tests/frontier/opcodes/test_dup.py::test_dup[fork_Byzantium-blockchain_test-DUP5]": {
@@ -4584,7 +4584,7 @@
             "comment": "`execution-spec-tests` generated test",
             "filling-transition-tool": "evm version 1.14.6-unstable-7e5dd44a-20240705",
             "description": "Test function documentation:\n\n    Test the DUP1-DUP16 opcodes.\n\n    note: Test case ported from:\n\n        - [ethereum/tests/GeneralStateTests/VMTests/vmTests/dup.json](https://github.com/ethereum/tests/blob/develop/GeneralStateTests/VMTests/vmTests/dup.json)\n        by Ori Pomerantz.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/devnet-1@v1.2.0/tests/frontier/opcodes/test_dup.py#L14"
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/devnet-1@v1.3.0/tests/frontier/opcodes/test_dup.py#L14"
         }
     },
     "tests/frontier/opcodes/test_dup.py::test_dup[fork_Byzantium-blockchain_test-DUP6]": {
@@ -4708,7 +4708,7 @@
             "comment": "`execution-spec-tests` generated test",
             "filling-transition-tool": "evm version 1.14.6-unstable-7e5dd44a-20240705",
             "description": "Test function documentation:\n\n    Test the DUP1-DUP16 opcodes.\n\n    note: Test case ported from:\n\n        - [ethereum/tests/GeneralStateTests/VMTests/vmTests/dup.json](https://github.com/ethereum/tests/blob/develop/GeneralStateTests/VMTests/vmTests/dup.json)\n        by Ori Pomerantz.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/devnet-1@v1.2.0/tests/frontier/opcodes/test_dup.py#L14"
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/devnet-1@v1.3.0/tests/frontier/opcodes/test_dup.py#L14"
         }
     },
     "tests/frontier/opcodes/test_dup.py::test_dup[fork_Byzantium-blockchain_test-DUP7]": {
@@ -4832,7 +4832,7 @@
             "comment": "`execution-spec-tests` generated test",
             "filling-transition-tool": "evm version 1.14.6-unstable-7e5dd44a-20240705",
             "description": "Test function documentation:\n\n    Test the DUP1-DUP16 opcodes.\n\n    note: Test case ported from:\n\n        - [ethereum/tests/GeneralStateTests/VMTests/vmTests/dup.json](https://github.com/ethereum/tests/blob/develop/GeneralStateTests/VMTests/vmTests/dup.json)\n        by Ori Pomerantz.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/devnet-1@v1.2.0/tests/frontier/opcodes/test_dup.py#L14"
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/devnet-1@v1.3.0/tests/frontier/opcodes/test_dup.py#L14"
         }
     },
     "tests/frontier/opcodes/test_dup.py::test_dup[fork_Byzantium-blockchain_test-DUP8]": {
@@ -4956,7 +4956,7 @@
             "comment": "`execution-spec-tests` generated test",
             "filling-transition-tool": "evm version 1.14.6-unstable-7e5dd44a-20240705",
             "description": "Test function documentation:\n\n    Test the DUP1-DUP16 opcodes.\n\n    note: Test case ported from:\n\n        - [ethereum/tests/GeneralStateTests/VMTests/vmTests/dup.json](https://github.com/ethereum/tests/blob/develop/GeneralStateTests/VMTests/vmTests/dup.json)\n        by Ori Pomerantz.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/devnet-1@v1.2.0/tests/frontier/opcodes/test_dup.py#L14"
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/devnet-1@v1.3.0/tests/frontier/opcodes/test_dup.py#L14"
         }
     },
     "tests/frontier/opcodes/test_dup.py::test_dup[fork_Byzantium-blockchain_test-DUP9]": {
@@ -5080,7 +5080,7 @@
             "comment": "`execution-spec-tests` generated test",
             "filling-transition-tool": "evm version 1.14.6-unstable-7e5dd44a-20240705",
             "description": "Test function documentation:\n\n    Test the DUP1-DUP16 opcodes.\n\n    note: Test case ported from:\n\n        - [ethereum/tests/GeneralStateTests/VMTests/vmTests/dup.json](https://github.com/ethereum/tests/blob/develop/GeneralStateTests/VMTests/vmTests/dup.json)\n        by Ori Pomerantz.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/devnet-1@v1.2.0/tests/frontier/opcodes/test_dup.py#L14"
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/devnet-1@v1.3.0/tests/frontier/opcodes/test_dup.py#L14"
         }
     },
     "tests/frontier/opcodes/test_dup.py::test_dup[fork_Byzantium-blockchain_test-DUP10]": {
@@ -5204,7 +5204,7 @@
             "comment": "`execution-spec-tests` generated test",
             "filling-transition-tool": "evm version 1.14.6-unstable-7e5dd44a-20240705",
             "description": "Test function documentation:\n\n    Test the DUP1-DUP16 opcodes.\n\n    note: Test case ported from:\n\n        - [ethereum/tests/GeneralStateTests/VMTests/vmTests/dup.json](https://github.com/ethereum/tests/blob/develop/GeneralStateTests/VMTests/vmTests/dup.json)\n        by Ori Pomerantz.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/devnet-1@v1.2.0/tests/frontier/opcodes/test_dup.py#L14"
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/devnet-1@v1.3.0/tests/frontier/opcodes/test_dup.py#L14"
         }
     },
     "tests/frontier/opcodes/test_dup.py::test_dup[fork_Byzantium-blockchain_test-DUP11]": {
@@ -5328,7 +5328,7 @@
             "comment": "`execution-spec-tests` generated test",
             "filling-transition-tool": "evm version 1.14.6-unstable-7e5dd44a-20240705",
             "description": "Test function documentation:\n\n    Test the DUP1-DUP16 opcodes.\n\n    note: Test case ported from:\n\n        - [ethereum/tests/GeneralStateTests/VMTests/vmTests/dup.json](https://github.com/ethereum/tests/blob/develop/GeneralStateTests/VMTests/vmTests/dup.json)\n        by Ori Pomerantz.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/devnet-1@v1.2.0/tests/frontier/opcodes/test_dup.py#L14"
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/devnet-1@v1.3.0/tests/frontier/opcodes/test_dup.py#L14"
         }
     },
     "tests/frontier/opcodes/test_dup.py::test_dup[fork_Byzantium-blockchain_test-DUP12]": {
@@ -5452,7 +5452,7 @@
             "comment": "`execution-spec-tests` generated test",
             "filling-transition-tool": "evm version 1.14.6-unstable-7e5dd44a-20240705",
             "description": "Test function documentation:\n\n    Test the DUP1-DUP16 opcodes.\n\n    note: Test case ported from:\n\n        - [ethereum/tests/GeneralStateTests/VMTests/vmTests/dup.json](https://github.com/ethereum/tests/blob/develop/GeneralStateTests/VMTests/vmTests/dup.json)\n        by Ori Pomerantz.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/devnet-1@v1.2.0/tests/frontier/opcodes/test_dup.py#L14"
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/devnet-1@v1.3.0/tests/frontier/opcodes/test_dup.py#L14"
         }
     },
     "tests/frontier/opcodes/test_dup.py::test_dup[fork_Byzantium-blockchain_test-DUP13]": {
@@ -5576,7 +5576,7 @@
             "comment": "`execution-spec-tests` generated test",
             "filling-transition-tool": "evm version 1.14.6-unstable-7e5dd44a-20240705",
             "description": "Test function documentation:\n\n    Test the DUP1-DUP16 opcodes.\n\n    note: Test case ported from:\n\n        - [ethereum/tests/GeneralStateTests/VMTests/vmTests/dup.json](https://github.com/ethereum/tests/blob/develop/GeneralStateTests/VMTests/vmTests/dup.json)\n        by Ori Pomerantz.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/devnet-1@v1.2.0/tests/frontier/opcodes/test_dup.py#L14"
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/devnet-1@v1.3.0/tests/frontier/opcodes/test_dup.py#L14"
         }
     },
     "tests/frontier/opcodes/test_dup.py::test_dup[fork_Byzantium-blockchain_test-DUP14]": {
@@ -5700,7 +5700,7 @@
             "comment": "`execution-spec-tests` generated test",
             "filling-transition-tool": "evm version 1.14.6-unstable-7e5dd44a-20240705",
             "description": "Test function documentation:\n\n    Test the DUP1-DUP16 opcodes.\n\n    note: Test case ported from:\n\n        - [ethereum/tests/GeneralStateTests/VMTests/vmTests/dup.json](https://github.com/ethereum/tests/blob/develop/GeneralStateTests/VMTests/vmTests/dup.json)\n        by Ori Pomerantz.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/devnet-1@v1.2.0/tests/frontier/opcodes/test_dup.py#L14"
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/devnet-1@v1.3.0/tests/frontier/opcodes/test_dup.py#L14"
         }
     },
     "tests/frontier/opcodes/test_dup.py::test_dup[fork_Byzantium-blockchain_test-DUP15]": {
@@ -5824,7 +5824,7 @@
             "comment": "`execution-spec-tests` generated test",
             "filling-transition-tool": "evm version 1.14.6-unstable-7e5dd44a-20240705",
             "description": "Test function documentation:\n\n    Test the DUP1-DUP16 opcodes.\n\n    note: Test case ported from:\n\n        - [ethereum/tests/GeneralStateTests/VMTests/vmTests/dup.json](https://github.com/ethereum/tests/blob/develop/GeneralStateTests/VMTests/vmTests/dup.json)\n        by Ori Pomerantz.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/devnet-1@v1.2.0/tests/frontier/opcodes/test_dup.py#L14"
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/devnet-1@v1.3.0/tests/frontier/opcodes/test_dup.py#L14"
         }
     },
     "tests/frontier/opcodes/test_dup.py::test_dup[fork_Byzantium-blockchain_test-DUP16]": {
@@ -5948,7 +5948,7 @@
             "comment": "`execution-spec-tests` generated test",
             "filling-transition-tool": "evm version 1.14.6-unstable-7e5dd44a-20240705",
             "description": "Test function documentation:\n\n    Test the DUP1-DUP16 opcodes.\n\n    note: Test case ported from:\n\n        - [ethereum/tests/GeneralStateTests/VMTests/vmTests/dup.json](https://github.com/ethereum/tests/blob/develop/GeneralStateTests/VMTests/vmTests/dup.json)\n        by Ori Pomerantz.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/devnet-1@v1.2.0/tests/frontier/opcodes/test_dup.py#L14"
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/devnet-1@v1.3.0/tests/frontier/opcodes/test_dup.py#L14"
         }
     },
     "tests/frontier/opcodes/test_dup.py::test_dup[fork_Constantinople-blockchain_test-DUP1]": {
@@ -6072,7 +6072,7 @@
             "comment": "`execution-spec-tests` generated test",
             "filling-transition-tool": "evm version 1.14.6-unstable-7e5dd44a-20240705",
             "description": "Test function documentation:\n\n    Test the DUP1-DUP16 opcodes.\n\n    note: Test case ported from:\n\n        - [ethereum/tests/GeneralStateTests/VMTests/vmTests/dup.json](https://github.com/ethereum/tests/blob/develop/GeneralStateTests/VMTests/vmTests/dup.json)\n        by Ori Pomerantz.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/devnet-1@v1.2.0/tests/frontier/opcodes/test_dup.py#L14"
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/devnet-1@v1.3.0/tests/frontier/opcodes/test_dup.py#L14"
         }
     },
     "tests/frontier/opcodes/test_dup.py::test_dup[fork_Constantinople-blockchain_test-DUP2]": {
@@ -6196,7 +6196,7 @@
             "comment": "`execution-spec-tests` generated test",
             "filling-transition-tool": "evm version 1.14.6-unstable-7e5dd44a-20240705",
             "description": "Test function documentation:\n\n    Test the DUP1-DUP16 opcodes.\n\n    note: Test case ported from:\n\n        - [ethereum/tests/GeneralStateTests/VMTests/vmTests/dup.json](https://github.com/ethereum/tests/blob/develop/GeneralStateTests/VMTests/vmTests/dup.json)\n        by Ori Pomerantz.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/devnet-1@v1.2.0/tests/frontier/opcodes/test_dup.py#L14"
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/devnet-1@v1.3.0/tests/frontier/opcodes/test_dup.py#L14"
         }
     },
     "tests/frontier/opcodes/test_dup.py::test_dup[fork_Constantinople-blockchain_test-DUP3]": {
@@ -6320,7 +6320,7 @@
             "comment": "`execution-spec-tests` generated test",
             "filling-transition-tool": "evm version 1.14.6-unstable-7e5dd44a-20240705",
             "description": "Test function documentation:\n\n    Test the DUP1-DUP16 opcodes.\n\n    note: Test case ported from:\n\n        - [ethereum/tests/GeneralStateTests/VMTests/vmTests/dup.json](https://github.com/ethereum/tests/blob/develop/GeneralStateTests/VMTests/vmTests/dup.json)\n        by Ori Pomerantz.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/devnet-1@v1.2.0/tests/frontier/opcodes/test_dup.py#L14"
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/devnet-1@v1.3.0/tests/frontier/opcodes/test_dup.py#L14"
         }
     },
     "tests/frontier/opcodes/test_dup.py::test_dup[fork_Constantinople-blockchain_test-DUP4]": {
@@ -6444,7 +6444,7 @@
             "comment": "`execution-spec-tests` generated test",
             "filling-transition-tool": "evm version 1.14.6-unstable-7e5dd44a-20240705",
             "description": "Test function documentation:\n\n    Test the DUP1-DUP16 opcodes.\n\n    note: Test case ported from:\n\n        - [ethereum/tests/GeneralStateTests/VMTests/vmTests/dup.json](https://github.com/ethereum/tests/blob/develop/GeneralStateTests/VMTests/vmTests/dup.json)\n        by Ori Pomerantz.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/devnet-1@v1.2.0/tests/frontier/opcodes/test_dup.py#L14"
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/devnet-1@v1.3.0/tests/frontier/opcodes/test_dup.py#L14"
         }
     },
     "tests/frontier/opcodes/test_dup.py::test_dup[fork_Constantinople-blockchain_test-DUP5]": {
@@ -6568,7 +6568,7 @@
             "comment": "`execution-spec-tests` generated test",
             "filling-transition-tool": "evm version 1.14.6-unstable-7e5dd44a-20240705",
             "description": "Test function documentation:\n\n    Test the DUP1-DUP16 opcodes.\n\n    note: Test case ported from:\n\n        - [ethereum/tests/GeneralStateTests/VMTests/vmTests/dup.json](https://github.com/ethereum/tests/blob/develop/GeneralStateTests/VMTests/vmTests/dup.json)\n        by Ori Pomerantz.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/devnet-1@v1.2.0/tests/frontier/opcodes/test_dup.py#L14"
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/devnet-1@v1.3.0/tests/frontier/opcodes/test_dup.py#L14"
         }
     },
     "tests/frontier/opcodes/test_dup.py::test_dup[fork_Constantinople-blockchain_test-DUP6]": {
@@ -6692,7 +6692,7 @@
             "comment": "`execution-spec-tests` generated test",
             "filling-transition-tool": "evm version 1.14.6-unstable-7e5dd44a-20240705",
             "description": "Test function documentation:\n\n    Test the DUP1-DUP16 opcodes.\n\n    note: Test case ported from:\n\n        - [ethereum/tests/GeneralStateTests/VMTests/vmTests/dup.json](https://github.com/ethereum/tests/blob/develop/GeneralStateTests/VMTests/vmTests/dup.json)\n        by Ori Pomerantz.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/devnet-1@v1.2.0/tests/frontier/opcodes/test_dup.py#L14"
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/devnet-1@v1.3.0/tests/frontier/opcodes/test_dup.py#L14"
         }
     },
     "tests/frontier/opcodes/test_dup.py::test_dup[fork_Constantinople-blockchain_test-DUP7]": {
@@ -6816,7 +6816,7 @@
             "comment": "`execution-spec-tests` generated test",
             "filling-transition-tool": "evm version 1.14.6-unstable-7e5dd44a-20240705",
             "description": "Test function documentation:\n\n    Test the DUP1-DUP16 opcodes.\n\n    note: Test case ported from:\n\n        - [ethereum/tests/GeneralStateTests/VMTests/vmTests/dup.json](https://github.com/ethereum/tests/blob/develop/GeneralStateTests/VMTests/vmTests/dup.json)\n        by Ori Pomerantz.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/devnet-1@v1.2.0/tests/frontier/opcodes/test_dup.py#L14"
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/devnet-1@v1.3.0/tests/frontier/opcodes/test_dup.py#L14"
         }
     },
     "tests/frontier/opcodes/test_dup.py::test_dup[fork_Constantinople-blockchain_test-DUP8]": {
@@ -6940,7 +6940,7 @@
             "comment": "`execution-spec-tests` generated test",
             "filling-transition-tool": "evm version 1.14.6-unstable-7e5dd44a-20240705",
             "description": "Test function documentation:\n\n    Test the DUP1-DUP16 opcodes.\n\n    note: Test case ported from:\n\n        - [ethereum/tests/GeneralStateTests/VMTests/vmTests/dup.json](https://github.com/ethereum/tests/blob/develop/GeneralStateTests/VMTests/vmTests/dup.json)\n        by Ori Pomerantz.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/devnet-1@v1.2.0/tests/frontier/opcodes/test_dup.py#L14"
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/devnet-1@v1.3.0/tests/frontier/opcodes/test_dup.py#L14"
         }
     },
     "tests/frontier/opcodes/test_dup.py::test_dup[fork_Constantinople-blockchain_test-DUP9]": {
@@ -7064,7 +7064,7 @@
             "comment": "`execution-spec-tests` generated test",
             "filling-transition-tool": "evm version 1.14.6-unstable-7e5dd44a-20240705",
             "description": "Test function documentation:\n\n    Test the DUP1-DUP16 opcodes.\n\n    note: Test case ported from:\n\n        - [ethereum/tests/GeneralStateTests/VMTests/vmTests/dup.json](https://github.com/ethereum/tests/blob/develop/GeneralStateTests/VMTests/vmTests/dup.json)\n        by Ori Pomerantz.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/devnet-1@v1.2.0/tests/frontier/opcodes/test_dup.py#L14"
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/devnet-1@v1.3.0/tests/frontier/opcodes/test_dup.py#L14"
         }
     },
     "tests/frontier/opcodes/test_dup.py::test_dup[fork_Constantinople-blockchain_test-DUP10]": {
@@ -7188,7 +7188,7 @@
             "comment": "`execution-spec-tests` generated test",
             "filling-transition-tool": "evm version 1.14.6-unstable-7e5dd44a-20240705",
             "description": "Test function documentation:\n\n    Test the DUP1-DUP16 opcodes.\n\n    note: Test case ported from:\n\n        - [ethereum/tests/GeneralStateTests/VMTests/vmTests/dup.json](https://github.com/ethereum/tests/blob/develop/GeneralStateTests/VMTests/vmTests/dup.json)\n        by Ori Pomerantz.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/devnet-1@v1.2.0/tests/frontier/opcodes/test_dup.py#L14"
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/devnet-1@v1.3.0/tests/frontier/opcodes/test_dup.py#L14"
         }
     },
     "tests/frontier/opcodes/test_dup.py::test_dup[fork_Constantinople-blockchain_test-DUP11]": {
@@ -7312,7 +7312,7 @@
             "comment": "`execution-spec-tests` generated test",
             "filling-transition-tool": "evm version 1.14.6-unstable-7e5dd44a-20240705",
             "description": "Test function documentation:\n\n    Test the DUP1-DUP16 opcodes.\n\n    note: Test case ported from:\n\n        - [ethereum/tests/GeneralStateTests/VMTests/vmTests/dup.json](https://github.com/ethereum/tests/blob/develop/GeneralStateTests/VMTests/vmTests/dup.json)\n        by Ori Pomerantz.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/devnet-1@v1.2.0/tests/frontier/opcodes/test_dup.py#L14"
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/devnet-1@v1.3.0/tests/frontier/opcodes/test_dup.py#L14"
         }
     },
     "tests/frontier/opcodes/test_dup.py::test_dup[fork_Constantinople-blockchain_test-DUP12]": {
@@ -7436,7 +7436,7 @@
             "comment": "`execution-spec-tests` generated test",
             "filling-transition-tool": "evm version 1.14.6-unstable-7e5dd44a-20240705",
             "description": "Test function documentation:\n\n    Test the DUP1-DUP16 opcodes.\n\n    note: Test case ported from:\n\n        - [ethereum/tests/GeneralStateTests/VMTests/vmTests/dup.json](https://github.com/ethereum/tests/blob/develop/GeneralStateTests/VMTests/vmTests/dup.json)\n        by Ori Pomerantz.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/devnet-1@v1.2.0/tests/frontier/opcodes/test_dup.py#L14"
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/devnet-1@v1.3.0/tests/frontier/opcodes/test_dup.py#L14"
         }
     },
     "tests/frontier/opcodes/test_dup.py::test_dup[fork_Constantinople-blockchain_test-DUP13]": {
@@ -7560,7 +7560,7 @@
             "comment": "`execution-spec-tests` generated test",
             "filling-transition-tool": "evm version 1.14.6-unstable-7e5dd44a-20240705",
             "description": "Test function documentation:\n\n    Test the DUP1-DUP16 opcodes.\n\n    note: Test case ported from:\n\n        - [ethereum/tests/GeneralStateTests/VMTests/vmTests/dup.json](https://github.com/ethereum/tests/blob/develop/GeneralStateTests/VMTests/vmTests/dup.json)\n        by Ori Pomerantz.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/devnet-1@v1.2.0/tests/frontier/opcodes/test_dup.py#L14"
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/devnet-1@v1.3.0/tests/frontier/opcodes/test_dup.py#L14"
         }
     },
     "tests/frontier/opcodes/test_dup.py::test_dup[fork_Constantinople-blockchain_test-DUP14]": {
@@ -7684,7 +7684,7 @@
             "comment": "`execution-spec-tests` generated test",
             "filling-transition-tool": "evm version 1.14.6-unstable-7e5dd44a-20240705",
             "description": "Test function documentation:\n\n    Test the DUP1-DUP16 opcodes.\n\n    note: Test case ported from:\n\n        - [ethereum/tests/GeneralStateTests/VMTests/vmTests/dup.json](https://github.com/ethereum/tests/blob/develop/GeneralStateTests/VMTests/vmTests/dup.json)\n        by Ori Pomerantz.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/devnet-1@v1.2.0/tests/frontier/opcodes/test_dup.py#L14"
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/devnet-1@v1.3.0/tests/frontier/opcodes/test_dup.py#L14"
         }
     },
     "tests/frontier/opcodes/test_dup.py::test_dup[fork_Constantinople-blockchain_test-DUP15]": {
@@ -7808,7 +7808,7 @@
             "comment": "`execution-spec-tests` generated test",
             "filling-transition-tool": "evm version 1.14.6-unstable-7e5dd44a-20240705",
             "description": "Test function documentation:\n\n    Test the DUP1-DUP16 opcodes.\n\n    note: Test case ported from:\n\n        - [ethereum/tests/GeneralStateTests/VMTests/vmTests/dup.json](https://github.com/ethereum/tests/blob/develop/GeneralStateTests/VMTests/vmTests/dup.json)\n        by Ori Pomerantz.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/devnet-1@v1.2.0/tests/frontier/opcodes/test_dup.py#L14"
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/devnet-1@v1.3.0/tests/frontier/opcodes/test_dup.py#L14"
         }
     },
     "tests/frontier/opcodes/test_dup.py::test_dup[fork_Constantinople-blockchain_test-DUP16]": {
@@ -7932,7 +7932,7 @@
             "comment": "`execution-spec-tests` generated test",
             "filling-transition-tool": "evm version 1.14.6-unstable-7e5dd44a-20240705",
             "description": "Test function documentation:\n\n    Test the DUP1-DUP16 opcodes.\n\n    note: Test case ported from:\n\n        - [ethereum/tests/GeneralStateTests/VMTests/vmTests/dup.json](https://github.com/ethereum/tests/blob/develop/GeneralStateTests/VMTests/vmTests/dup.json)\n        by Ori Pomerantz.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/devnet-1@v1.2.0/tests/frontier/opcodes/test_dup.py#L14"
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/devnet-1@v1.3.0/tests/frontier/opcodes/test_dup.py#L14"
         }
     },
     "tests/frontier/opcodes/test_dup.py::test_dup[fork_ConstantinopleFix-blockchain_test-DUP1]": {
@@ -8056,7 +8056,7 @@
             "comment": "`execution-spec-tests` generated test",
             "filling-transition-tool": "evm version 1.14.6-unstable-7e5dd44a-20240705",
             "description": "Test function documentation:\n\n    Test the DUP1-DUP16 opcodes.\n\n    note: Test case ported from:\n\n        - [ethereum/tests/GeneralStateTests/VMTests/vmTests/dup.json](https://github.com/ethereum/tests/blob/develop/GeneralStateTests/VMTests/vmTests/dup.json)\n        by Ori Pomerantz.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/devnet-1@v1.2.0/tests/frontier/opcodes/test_dup.py#L14"
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/devnet-1@v1.3.0/tests/frontier/opcodes/test_dup.py#L14"
         }
     },
     "tests/frontier/opcodes/test_dup.py::test_dup[fork_ConstantinopleFix-blockchain_test-DUP2]": {
@@ -8180,7 +8180,7 @@
             "comment": "`execution-spec-tests` generated test",
             "filling-transition-tool": "evm version 1.14.6-unstable-7e5dd44a-20240705",
             "description": "Test function documentation:\n\n    Test the DUP1-DUP16 opcodes.\n\n    note: Test case ported from:\n\n        - [ethereum/tests/GeneralStateTests/VMTests/vmTests/dup.json](https://github.com/ethereum/tests/blob/develop/GeneralStateTests/VMTests/vmTests/dup.json)\n        by Ori Pomerantz.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/devnet-1@v1.2.0/tests/frontier/opcodes/test_dup.py#L14"
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/devnet-1@v1.3.0/tests/frontier/opcodes/test_dup.py#L14"
         }
     },
     "tests/frontier/opcodes/test_dup.py::test_dup[fork_ConstantinopleFix-blockchain_test-DUP3]": {
@@ -8304,7 +8304,7 @@
             "comment": "`execution-spec-tests` generated test",
             "filling-transition-tool": "evm version 1.14.6-unstable-7e5dd44a-20240705",
             "description": "Test function documentation:\n\n    Test the DUP1-DUP16 opcodes.\n\n    note: Test case ported from:\n\n        - [ethereum/tests/GeneralStateTests/VMTests/vmTests/dup.json](https://github.com/ethereum/tests/blob/develop/GeneralStateTests/VMTests/vmTests/dup.json)\n        by Ori Pomerantz.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/devnet-1@v1.2.0/tests/frontier/opcodes/test_dup.py#L14"
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/devnet-1@v1.3.0/tests/frontier/opcodes/test_dup.py#L14"
         }
     },
     "tests/frontier/opcodes/test_dup.py::test_dup[fork_ConstantinopleFix-blockchain_test-DUP4]": {
@@ -8428,7 +8428,7 @@
             "comment": "`execution-spec-tests` generated test",
             "filling-transition-tool": "evm version 1.14.6-unstable-7e5dd44a-20240705",
             "description": "Test function documentation:\n\n    Test the DUP1-DUP16 opcodes.\n\n    note: Test case ported from:\n\n        - [ethereum/tests/GeneralStateTests/VMTests/vmTests/dup.json](https://github.com/ethereum/tests/blob/develop/GeneralStateTests/VMTests/vmTests/dup.json)\n        by Ori Pomerantz.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/devnet-1@v1.2.0/tests/frontier/opcodes/test_dup.py#L14"
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/devnet-1@v1.3.0/tests/frontier/opcodes/test_dup.py#L14"
         }
     },
     "tests/frontier/opcodes/test_dup.py::test_dup[fork_ConstantinopleFix-blockchain_test-DUP5]": {
@@ -8552,7 +8552,7 @@
             "comment": "`execution-spec-tests` generated test",
             "filling-transition-tool": "evm version 1.14.6-unstable-7e5dd44a-20240705",
             "description": "Test function documentation:\n\n    Test the DUP1-DUP16 opcodes.\n\n    note: Test case ported from:\n\n        - [ethereum/tests/GeneralStateTests/VMTests/vmTests/dup.json](https://github.com/ethereum/tests/blob/develop/GeneralStateTests/VMTests/vmTests/dup.json)\n        by Ori Pomerantz.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/devnet-1@v1.2.0/tests/frontier/opcodes/test_dup.py#L14"
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/devnet-1@v1.3.0/tests/frontier/opcodes/test_dup.py#L14"
         }
     },
     "tests/frontier/opcodes/test_dup.py::test_dup[fork_ConstantinopleFix-blockchain_test-DUP6]": {
@@ -8676,7 +8676,7 @@
             "comment": "`execution-spec-tests` generated test",
             "filling-transition-tool": "evm version 1.14.6-unstable-7e5dd44a-20240705",
             "description": "Test function documentation:\n\n    Test the DUP1-DUP16 opcodes.\n\n    note: Test case ported from:\n\n        - [ethereum/tests/GeneralStateTests/VMTests/vmTests/dup.json](https://github.com/ethereum/tests/blob/develop/GeneralStateTests/VMTests/vmTests/dup.json)\n        by Ori Pomerantz.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/devnet-1@v1.2.0/tests/frontier/opcodes/test_dup.py#L14"
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/devnet-1@v1.3.0/tests/frontier/opcodes/test_dup.py#L14"
         }
     },
     "tests/frontier/opcodes/test_dup.py::test_dup[fork_ConstantinopleFix-blockchain_test-DUP7]": {
@@ -8800,7 +8800,7 @@
             "comment": "`execution-spec-tests` generated test",
             "filling-transition-tool": "evm version 1.14.6-unstable-7e5dd44a-20240705",
             "description": "Test function documentation:\n\n    Test the DUP1-DUP16 opcodes.\n\n    note: Test case ported from:\n\n        - [ethereum/tests/GeneralStateTests/VMTests/vmTests/dup.json](https://github.com/ethereum/tests/blob/develop/GeneralStateTests/VMTests/vmTests/dup.json)\n        by Ori Pomerantz.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/devnet-1@v1.2.0/tests/frontier/opcodes/test_dup.py#L14"
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/devnet-1@v1.3.0/tests/frontier/opcodes/test_dup.py#L14"
         }
     },
     "tests/frontier/opcodes/test_dup.py::test_dup[fork_ConstantinopleFix-blockchain_test-DUP8]": {
@@ -8924,7 +8924,7 @@
             "comment": "`execution-spec-tests` generated test",
             "filling-transition-tool": "evm version 1.14.6-unstable-7e5dd44a-20240705",
             "description": "Test function documentation:\n\n    Test the DUP1-DUP16 opcodes.\n\n    note: Test case ported from:\n\n        - [ethereum/tests/GeneralStateTests/VMTests/vmTests/dup.json](https://github.com/ethereum/tests/blob/develop/GeneralStateTests/VMTests/vmTests/dup.json)\n        by Ori Pomerantz.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/devnet-1@v1.2.0/tests/frontier/opcodes/test_dup.py#L14"
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/devnet-1@v1.3.0/tests/frontier/opcodes/test_dup.py#L14"
         }
     },
     "tests/frontier/opcodes/test_dup.py::test_dup[fork_ConstantinopleFix-blockchain_test-DUP9]": {
@@ -9048,7 +9048,7 @@
             "comment": "`execution-spec-tests` generated test",
             "filling-transition-tool": "evm version 1.14.6-unstable-7e5dd44a-20240705",
             "description": "Test function documentation:\n\n    Test the DUP1-DUP16 opcodes.\n\n    note: Test case ported from:\n\n        - [ethereum/tests/GeneralStateTests/VMTests/vmTests/dup.json](https://github.com/ethereum/tests/blob/develop/GeneralStateTests/VMTests/vmTests/dup.json)\n        by Ori Pomerantz.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/devnet-1@v1.2.0/tests/frontier/opcodes/test_dup.py#L14"
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/devnet-1@v1.3.0/tests/frontier/opcodes/test_dup.py#L14"
         }
     },
     "tests/frontier/opcodes/test_dup.py::test_dup[fork_ConstantinopleFix-blockchain_test-DUP10]": {
@@ -9172,7 +9172,7 @@
             "comment": "`execution-spec-tests` generated test",
             "filling-transition-tool": "evm version 1.14.6-unstable-7e5dd44a-20240705",
             "description": "Test function documentation:\n\n    Test the DUP1-DUP16 opcodes.\n\n    note: Test case ported from:\n\n        - [ethereum/tests/GeneralStateTests/VMTests/vmTests/dup.json](https://github.com/ethereum/tests/blob/develop/GeneralStateTests/VMTests/vmTests/dup.json)\n        by Ori Pomerantz.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/devnet-1@v1.2.0/tests/frontier/opcodes/test_dup.py#L14"
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/devnet-1@v1.3.0/tests/frontier/opcodes/test_dup.py#L14"
         }
     },
     "tests/frontier/opcodes/test_dup.py::test_dup[fork_ConstantinopleFix-blockchain_test-DUP11]": {
@@ -9296,7 +9296,7 @@
             "comment": "`execution-spec-tests` generated test",
             "filling-transition-tool": "evm version 1.14.6-unstable-7e5dd44a-20240705",
             "description": "Test function documentation:\n\n    Test the DUP1-DUP16 opcodes.\n\n    note: Test case ported from:\n\n        - [ethereum/tests/GeneralStateTests/VMTests/vmTests/dup.json](https://github.com/ethereum/tests/blob/develop/GeneralStateTests/VMTests/vmTests/dup.json)\n        by Ori Pomerantz.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/devnet-1@v1.2.0/tests/frontier/opcodes/test_dup.py#L14"
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/devnet-1@v1.3.0/tests/frontier/opcodes/test_dup.py#L14"
         }
     },
     "tests/frontier/opcodes/test_dup.py::test_dup[fork_ConstantinopleFix-blockchain_test-DUP12]": {
@@ -9420,7 +9420,7 @@
             "comment": "`execution-spec-tests` generated test",
             "filling-transition-tool": "evm version 1.14.6-unstable-7e5dd44a-20240705",
             "description": "Test function documentation:\n\n    Test the DUP1-DUP16 opcodes.\n\n    note: Test case ported from:\n\n        - [ethereum/tests/GeneralStateTests/VMTests/vmTests/dup.json](https://github.com/ethereum/tests/blob/develop/GeneralStateTests/VMTests/vmTests/dup.json)\n        by Ori Pomerantz.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/devnet-1@v1.2.0/tests/frontier/opcodes/test_dup.py#L14"
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/devnet-1@v1.3.0/tests/frontier/opcodes/test_dup.py#L14"
         }
     },
     "tests/frontier/opcodes/test_dup.py::test_dup[fork_ConstantinopleFix-blockchain_test-DUP13]": {
@@ -9544,7 +9544,7 @@
             "comment": "`execution-spec-tests` generated test",
             "filling-transition-tool": "evm version 1.14.6-unstable-7e5dd44a-20240705",
             "description": "Test function documentation:\n\n    Test the DUP1-DUP16 opcodes.\n\n    note: Test case ported from:\n\n        - [ethereum/tests/GeneralStateTests/VMTests/vmTests/dup.json](https://github.com/ethereum/tests/blob/develop/GeneralStateTests/VMTests/vmTests/dup.json)\n        by Ori Pomerantz.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/devnet-1@v1.2.0/tests/frontier/opcodes/test_dup.py#L14"
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/devnet-1@v1.3.0/tests/frontier/opcodes/test_dup.py#L14"
         }
     },
     "tests/frontier/opcodes/test_dup.py::test_dup[fork_ConstantinopleFix-blockchain_test-DUP14]": {
@@ -9668,7 +9668,7 @@
             "comment": "`execution-spec-tests` generated test",
             "filling-transition-tool": "evm version 1.14.6-unstable-7e5dd44a-20240705",
             "description": "Test function documentation:\n\n    Test the DUP1-DUP16 opcodes.\n\n    note: Test case ported from:\n\n        - [ethereum/tests/GeneralStateTests/VMTests/vmTests/dup.json](https://github.com/ethereum/tests/blob/develop/GeneralStateTests/VMTests/vmTests/dup.json)\n        by Ori Pomerantz.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/devnet-1@v1.2.0/tests/frontier/opcodes/test_dup.py#L14"
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/devnet-1@v1.3.0/tests/frontier/opcodes/test_dup.py#L14"
         }
     },
     "tests/frontier/opcodes/test_dup.py::test_dup[fork_ConstantinopleFix-blockchain_test-DUP15]": {
@@ -9792,7 +9792,7 @@
             "comment": "`execution-spec-tests` generated test",
             "filling-transition-tool": "evm version 1.14.6-unstable-7e5dd44a-20240705",
             "description": "Test function documentation:\n\n    Test the DUP1-DUP16 opcodes.\n\n    note: Test case ported from:\n\n        - [ethereum/tests/GeneralStateTests/VMTests/vmTests/dup.json](https://github.com/ethereum/tests/blob/develop/GeneralStateTests/VMTests/vmTests/dup.json)\n        by Ori Pomerantz.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/devnet-1@v1.2.0/tests/frontier/opcodes/test_dup.py#L14"
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/devnet-1@v1.3.0/tests/frontier/opcodes/test_dup.py#L14"
         }
     },
     "tests/frontier/opcodes/test_dup.py::test_dup[fork_ConstantinopleFix-blockchain_test-DUP16]": {
@@ -9916,7 +9916,7 @@
             "comment": "`execution-spec-tests` generated test",
             "filling-transition-tool": "evm version 1.14.6-unstable-7e5dd44a-20240705",
             "description": "Test function documentation:\n\n    Test the DUP1-DUP16 opcodes.\n\n    note: Test case ported from:\n\n        - [ethereum/tests/GeneralStateTests/VMTests/vmTests/dup.json](https://github.com/ethereum/tests/blob/develop/GeneralStateTests/VMTests/vmTests/dup.json)\n        by Ori Pomerantz.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/devnet-1@v1.2.0/tests/frontier/opcodes/test_dup.py#L14"
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/devnet-1@v1.3.0/tests/frontier/opcodes/test_dup.py#L14"
         }
     },
     "tests/frontier/opcodes/test_dup.py::test_dup[fork_Istanbul-blockchain_test-DUP1]": {
@@ -10040,7 +10040,7 @@
             "comment": "`execution-spec-tests` generated test",
             "filling-transition-tool": "evm version 1.14.6-unstable-7e5dd44a-20240705",
             "description": "Test function documentation:\n\n    Test the DUP1-DUP16 opcodes.\n\n    note: Test case ported from:\n\n        - [ethereum/tests/GeneralStateTests/VMTests/vmTests/dup.json](https://github.com/ethereum/tests/blob/develop/GeneralStateTests/VMTests/vmTests/dup.json)\n        by Ori Pomerantz.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/devnet-1@v1.2.0/tests/frontier/opcodes/test_dup.py#L14"
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/devnet-1@v1.3.0/tests/frontier/opcodes/test_dup.py#L14"
         }
     },
     "tests/frontier/opcodes/test_dup.py::test_dup[fork_Istanbul-blockchain_test-DUP2]": {
@@ -10164,7 +10164,7 @@
             "comment": "`execution-spec-tests` generated test",
             "filling-transition-tool": "evm version 1.14.6-unstable-7e5dd44a-20240705",
             "description": "Test function documentation:\n\n    Test the DUP1-DUP16 opcodes.\n\n    note: Test case ported from:\n\n        - [ethereum/tests/GeneralStateTests/VMTests/vmTests/dup.json](https://github.com/ethereum/tests/blob/develop/GeneralStateTests/VMTests/vmTests/dup.json)\n        by Ori Pomerantz.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/devnet-1@v1.2.0/tests/frontier/opcodes/test_dup.py#L14"
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/devnet-1@v1.3.0/tests/frontier/opcodes/test_dup.py#L14"
         }
     },
     "tests/frontier/opcodes/test_dup.py::test_dup[fork_Istanbul-blockchain_test-DUP3]": {
@@ -10288,7 +10288,7 @@
             "comment": "`execution-spec-tests` generated test",
             "filling-transition-tool": "evm version 1.14.6-unstable-7e5dd44a-20240705",
             "description": "Test function documentation:\n\n    Test the DUP1-DUP16 opcodes.\n\n    note: Test case ported from:\n\n        - [ethereum/tests/GeneralStateTests/VMTests/vmTests/dup.json](https://github.com/ethereum/tests/blob/develop/GeneralStateTests/VMTests/vmTests/dup.json)\n        by Ori Pomerantz.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/devnet-1@v1.2.0/tests/frontier/opcodes/test_dup.py#L14"
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/devnet-1@v1.3.0/tests/frontier/opcodes/test_dup.py#L14"
         }
     },
     "tests/frontier/opcodes/test_dup.py::test_dup[fork_Istanbul-blockchain_test-DUP4]": {
@@ -10412,7 +10412,7 @@
             "comment": "`execution-spec-tests` generated test",
             "filling-transition-tool": "evm version 1.14.6-unstable-7e5dd44a-20240705",
             "description": "Test function documentation:\n\n    Test the DUP1-DUP16 opcodes.\n\n    note: Test case ported from:\n\n        - [ethereum/tests/GeneralStateTests/VMTests/vmTests/dup.json](https://github.com/ethereum/tests/blob/develop/GeneralStateTests/VMTests/vmTests/dup.json)\n        by Ori Pomerantz.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/devnet-1@v1.2.0/tests/frontier/opcodes/test_dup.py#L14"
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/devnet-1@v1.3.0/tests/frontier/opcodes/test_dup.py#L14"
         }
     },
     "tests/frontier/opcodes/test_dup.py::test_dup[fork_Istanbul-blockchain_test-DUP5]": {
@@ -10536,7 +10536,7 @@
             "comment": "`execution-spec-tests` generated test",
             "filling-transition-tool": "evm version 1.14.6-unstable-7e5dd44a-20240705",
             "description": "Test function documentation:\n\n    Test the DUP1-DUP16 opcodes.\n\n    note: Test case ported from:\n\n        - [ethereum/tests/GeneralStateTests/VMTests/vmTests/dup.json](https://github.com/ethereum/tests/blob/develop/GeneralStateTests/VMTests/vmTests/dup.json)\n        by Ori Pomerantz.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/devnet-1@v1.2.0/tests/frontier/opcodes/test_dup.py#L14"
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/devnet-1@v1.3.0/tests/frontier/opcodes/test_dup.py#L14"
         }
     },
     "tests/frontier/opcodes/test_dup.py::test_dup[fork_Istanbul-blockchain_test-DUP6]": {
@@ -10660,7 +10660,7 @@
             "comment": "`execution-spec-tests` generated test",
             "filling-transition-tool": "evm version 1.14.6-unstable-7e5dd44a-20240705",
             "description": "Test function documentation:\n\n    Test the DUP1-DUP16 opcodes.\n\n    note: Test case ported from:\n\n        - [ethereum/tests/GeneralStateTests/VMTests/vmTests/dup.json](https://github.com/ethereum/tests/blob/develop/GeneralStateTests/VMTests/vmTests/dup.json)\n        by Ori Pomerantz.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/devnet-1@v1.2.0/tests/frontier/opcodes/test_dup.py#L14"
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/devnet-1@v1.3.0/tests/frontier/opcodes/test_dup.py#L14"
         }
     },
     "tests/frontier/opcodes/test_dup.py::test_dup[fork_Istanbul-blockchain_test-DUP7]": {
@@ -10784,7 +10784,7 @@
             "comment": "`execution-spec-tests` generated test",
             "filling-transition-tool": "evm version 1.14.6-unstable-7e5dd44a-20240705",
             "description": "Test function documentation:\n\n    Test the DUP1-DUP16 opcodes.\n\n    note: Test case ported from:\n\n        - [ethereum/tests/GeneralStateTests/VMTests/vmTests/dup.json](https://github.com/ethereum/tests/blob/develop/GeneralStateTests/VMTests/vmTests/dup.json)\n        by Ori Pomerantz.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/devnet-1@v1.2.0/tests/frontier/opcodes/test_dup.py#L14"
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/devnet-1@v1.3.0/tests/frontier/opcodes/test_dup.py#L14"
         }
     },
     "tests/frontier/opcodes/test_dup.py::test_dup[fork_Istanbul-blockchain_test-DUP8]": {
@@ -10908,7 +10908,7 @@
             "comment": "`execution-spec-tests` generated test",
             "filling-transition-tool": "evm version 1.14.6-unstable-7e5dd44a-20240705",
             "description": "Test function documentation:\n\n    Test the DUP1-DUP16 opcodes.\n\n    note: Test case ported from:\n\n        - [ethereum/tests/GeneralStateTests/VMTests/vmTests/dup.json](https://github.com/ethereum/tests/blob/develop/GeneralStateTests/VMTests/vmTests/dup.json)\n        by Ori Pomerantz.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/devnet-1@v1.2.0/tests/frontier/opcodes/test_dup.py#L14"
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/devnet-1@v1.3.0/tests/frontier/opcodes/test_dup.py#L14"
         }
     },
     "tests/frontier/opcodes/test_dup.py::test_dup[fork_Istanbul-blockchain_test-DUP9]": {
@@ -11032,7 +11032,7 @@
             "comment": "`execution-spec-tests` generated test",
             "filling-transition-tool": "evm version 1.14.6-unstable-7e5dd44a-20240705",
             "description": "Test function documentation:\n\n    Test the DUP1-DUP16 opcodes.\n\n    note: Test case ported from:\n\n        - [ethereum/tests/GeneralStateTests/VMTests/vmTests/dup.json](https://github.com/ethereum/tests/blob/develop/GeneralStateTests/VMTests/vmTests/dup.json)\n        by Ori Pomerantz.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/devnet-1@v1.2.0/tests/frontier/opcodes/test_dup.py#L14"
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/devnet-1@v1.3.0/tests/frontier/opcodes/test_dup.py#L14"
         }
     },
     "tests/frontier/opcodes/test_dup.py::test_dup[fork_Istanbul-blockchain_test-DUP10]": {
@@ -11156,7 +11156,7 @@
             "comment": "`execution-spec-tests` generated test",
             "filling-transition-tool": "evm version 1.14.6-unstable-7e5dd44a-20240705",
             "description": "Test function documentation:\n\n    Test the DUP1-DUP16 opcodes.\n\n    note: Test case ported from:\n\n        - [ethereum/tests/GeneralStateTests/VMTests/vmTests/dup.json](https://github.com/ethereum/tests/blob/develop/GeneralStateTests/VMTests/vmTests/dup.json)\n        by Ori Pomerantz.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/devnet-1@v1.2.0/tests/frontier/opcodes/test_dup.py#L14"
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/devnet-1@v1.3.0/tests/frontier/opcodes/test_dup.py#L14"
         }
     },
     "tests/frontier/opcodes/test_dup.py::test_dup[fork_Istanbul-blockchain_test-DUP11]": {
@@ -11280,7 +11280,7 @@
             "comment": "`execution-spec-tests` generated test",
             "filling-transition-tool": "evm version 1.14.6-unstable-7e5dd44a-20240705",
             "description": "Test function documentation:\n\n    Test the DUP1-DUP16 opcodes.\n\n    note: Test case ported from:\n\n        - [ethereum/tests/GeneralStateTests/VMTests/vmTests/dup.json](https://github.com/ethereum/tests/blob/develop/GeneralStateTests/VMTests/vmTests/dup.json)\n        by Ori Pomerantz.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/devnet-1@v1.2.0/tests/frontier/opcodes/test_dup.py#L14"
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/devnet-1@v1.3.0/tests/frontier/opcodes/test_dup.py#L14"
         }
     },
     "tests/frontier/opcodes/test_dup.py::test_dup[fork_Istanbul-blockchain_test-DUP12]": {
@@ -11404,7 +11404,7 @@
             "comment": "`execution-spec-tests` generated test",
             "filling-transition-tool": "evm version 1.14.6-unstable-7e5dd44a-20240705",
             "description": "Test function documentation:\n\n    Test the DUP1-DUP16 opcodes.\n\n    note: Test case ported from:\n\n        - [ethereum/tests/GeneralStateTests/VMTests/vmTests/dup.json](https://github.com/ethereum/tests/blob/develop/GeneralStateTests/VMTests/vmTests/dup.json)\n        by Ori Pomerantz.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/devnet-1@v1.2.0/tests/frontier/opcodes/test_dup.py#L14"
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/devnet-1@v1.3.0/tests/frontier/opcodes/test_dup.py#L14"
         }
     },
     "tests/frontier/opcodes/test_dup.py::test_dup[fork_Istanbul-blockchain_test-DUP13]": {
@@ -11528,7 +11528,7 @@
             "comment": "`execution-spec-tests` generated test",
             "filling-transition-tool": "evm version 1.14.6-unstable-7e5dd44a-20240705",
             "description": "Test function documentation:\n\n    Test the DUP1-DUP16 opcodes.\n\n    note: Test case ported from:\n\n        - [ethereum/tests/GeneralStateTests/VMTests/vmTests/dup.json](https://github.com/ethereum/tests/blob/develop/GeneralStateTests/VMTests/vmTests/dup.json)\n        by Ori Pomerantz.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/devnet-1@v1.2.0/tests/frontier/opcodes/test_dup.py#L14"
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/devnet-1@v1.3.0/tests/frontier/opcodes/test_dup.py#L14"
         }
     },
     "tests/frontier/opcodes/test_dup.py::test_dup[fork_Istanbul-blockchain_test-DUP14]": {
@@ -11652,7 +11652,7 @@
             "comment": "`execution-spec-tests` generated test",
             "filling-transition-tool": "evm version 1.14.6-unstable-7e5dd44a-20240705",
             "description": "Test function documentation:\n\n    Test the DUP1-DUP16 opcodes.\n\n    note: Test case ported from:\n\n        - [ethereum/tests/GeneralStateTests/VMTests/vmTests/dup.json](https://github.com/ethereum/tests/blob/develop/GeneralStateTests/VMTests/vmTests/dup.json)\n        by Ori Pomerantz.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/devnet-1@v1.2.0/tests/frontier/opcodes/test_dup.py#L14"
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/devnet-1@v1.3.0/tests/frontier/opcodes/test_dup.py#L14"
         }
     },
     "tests/frontier/opcodes/test_dup.py::test_dup[fork_Istanbul-blockchain_test-DUP15]": {
@@ -11776,7 +11776,7 @@
             "comment": "`execution-spec-tests` generated test",
             "filling-transition-tool": "evm version 1.14.6-unstable-7e5dd44a-20240705",
             "description": "Test function documentation:\n\n    Test the DUP1-DUP16 opcodes.\n\n    note: Test case ported from:\n\n        - [ethereum/tests/GeneralStateTests/VMTests/vmTests/dup.json](https://github.com/ethereum/tests/blob/develop/GeneralStateTests/VMTests/vmTests/dup.json)\n        by Ori Pomerantz.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/devnet-1@v1.2.0/tests/frontier/opcodes/test_dup.py#L14"
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/devnet-1@v1.3.0/tests/frontier/opcodes/test_dup.py#L14"
         }
     },
     "tests/frontier/opcodes/test_dup.py::test_dup[fork_Istanbul-blockchain_test-DUP16]": {
@@ -11900,7 +11900,7 @@
             "comment": "`execution-spec-tests` generated test",
             "filling-transition-tool": "evm version 1.14.6-unstable-7e5dd44a-20240705",
             "description": "Test function documentation:\n\n    Test the DUP1-DUP16 opcodes.\n\n    note: Test case ported from:\n\n        - [ethereum/tests/GeneralStateTests/VMTests/vmTests/dup.json](https://github.com/ethereum/tests/blob/develop/GeneralStateTests/VMTests/vmTests/dup.json)\n        by Ori Pomerantz.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/devnet-1@v1.2.0/tests/frontier/opcodes/test_dup.py#L14"
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/devnet-1@v1.3.0/tests/frontier/opcodes/test_dup.py#L14"
         }
     },
     "tests/frontier/opcodes/test_dup.py::test_dup[fork_Berlin-blockchain_test-DUP1]": {
@@ -12024,7 +12024,7 @@
             "comment": "`execution-spec-tests` generated test",
             "filling-transition-tool": "evm version 1.14.6-unstable-7e5dd44a-20240705",
             "description": "Test function documentation:\n\n    Test the DUP1-DUP16 opcodes.\n\n    note: Test case ported from:\n\n        - [ethereum/tests/GeneralStateTests/VMTests/vmTests/dup.json](https://github.com/ethereum/tests/blob/develop/GeneralStateTests/VMTests/vmTests/dup.json)\n        by Ori Pomerantz.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/devnet-1@v1.2.0/tests/frontier/opcodes/test_dup.py#L14"
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/devnet-1@v1.3.0/tests/frontier/opcodes/test_dup.py#L14"
         }
     },
     "tests/frontier/opcodes/test_dup.py::test_dup[fork_Berlin-blockchain_test-DUP2]": {
@@ -12148,7 +12148,7 @@
             "comment": "`execution-spec-tests` generated test",
             "filling-transition-tool": "evm version 1.14.6-unstable-7e5dd44a-20240705",
             "description": "Test function documentation:\n\n    Test the DUP1-DUP16 opcodes.\n\n    note: Test case ported from:\n\n        - [ethereum/tests/GeneralStateTests/VMTests/vmTests/dup.json](https://github.com/ethereum/tests/blob/develop/GeneralStateTests/VMTests/vmTests/dup.json)\n        by Ori Pomerantz.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/devnet-1@v1.2.0/tests/frontier/opcodes/test_dup.py#L14"
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/devnet-1@v1.3.0/tests/frontier/opcodes/test_dup.py#L14"
         }
     },
     "tests/frontier/opcodes/test_dup.py::test_dup[fork_Berlin-blockchain_test-DUP3]": {
@@ -12272,7 +12272,7 @@
             "comment": "`execution-spec-tests` generated test",
             "filling-transition-tool": "evm version 1.14.6-unstable-7e5dd44a-20240705",
             "description": "Test function documentation:\n\n    Test the DUP1-DUP16 opcodes.\n\n    note: Test case ported from:\n\n        - [ethereum/tests/GeneralStateTests/VMTests/vmTests/dup.json](https://github.com/ethereum/tests/blob/develop/GeneralStateTests/VMTests/vmTests/dup.json)\n        by Ori Pomerantz.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/devnet-1@v1.2.0/tests/frontier/opcodes/test_dup.py#L14"
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/devnet-1@v1.3.0/tests/frontier/opcodes/test_dup.py#L14"
         }
     },
     "tests/frontier/opcodes/test_dup.py::test_dup[fork_Berlin-blockchain_test-DUP4]": {
@@ -12396,7 +12396,7 @@
             "comment": "`execution-spec-tests` generated test",
             "filling-transition-tool": "evm version 1.14.6-unstable-7e5dd44a-20240705",
             "description": "Test function documentation:\n\n    Test the DUP1-DUP16 opcodes.\n\n    note: Test case ported from:\n\n        - [ethereum/tests/GeneralStateTests/VMTests/vmTests/dup.json](https://github.com/ethereum/tests/blob/develop/GeneralStateTests/VMTests/vmTests/dup.json)\n        by Ori Pomerantz.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/devnet-1@v1.2.0/tests/frontier/opcodes/test_dup.py#L14"
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/devnet-1@v1.3.0/tests/frontier/opcodes/test_dup.py#L14"
         }
     },
     "tests/frontier/opcodes/test_dup.py::test_dup[fork_Berlin-blockchain_test-DUP5]": {
@@ -12520,7 +12520,7 @@
             "comment": "`execution-spec-tests` generated test",
             "filling-transition-tool": "evm version 1.14.6-unstable-7e5dd44a-20240705",
             "description": "Test function documentation:\n\n    Test the DUP1-DUP16 opcodes.\n\n    note: Test case ported from:\n\n        - [ethereum/tests/GeneralStateTests/VMTests/vmTests/dup.json](https://github.com/ethereum/tests/blob/develop/GeneralStateTests/VMTests/vmTests/dup.json)\n        by Ori Pomerantz.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/devnet-1@v1.2.0/tests/frontier/opcodes/test_dup.py#L14"
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/devnet-1@v1.3.0/tests/frontier/opcodes/test_dup.py#L14"
         }
     },
     "tests/frontier/opcodes/test_dup.py::test_dup[fork_Berlin-blockchain_test-DUP6]": {
@@ -12644,7 +12644,7 @@
             "comment": "`execution-spec-tests` generated test",
             "filling-transition-tool": "evm version 1.14.6-unstable-7e5dd44a-20240705",
             "description": "Test function documentation:\n\n    Test the DUP1-DUP16 opcodes.\n\n    note: Test case ported from:\n\n        - [ethereum/tests/GeneralStateTests/VMTests/vmTests/dup.json](https://github.com/ethereum/tests/blob/develop/GeneralStateTests/VMTests/vmTests/dup.json)\n        by Ori Pomerantz.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/devnet-1@v1.2.0/tests/frontier/opcodes/test_dup.py#L14"
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/devnet-1@v1.3.0/tests/frontier/opcodes/test_dup.py#L14"
         }
     },
     "tests/frontier/opcodes/test_dup.py::test_dup[fork_Berlin-blockchain_test-DUP7]": {
@@ -12768,7 +12768,7 @@
             "comment": "`execution-spec-tests` generated test",
             "filling-transition-tool": "evm version 1.14.6-unstable-7e5dd44a-20240705",
             "description": "Test function documentation:\n\n    Test the DUP1-DUP16 opcodes.\n\n    note: Test case ported from:\n\n        - [ethereum/tests/GeneralStateTests/VMTests/vmTests/dup.json](https://github.com/ethereum/tests/blob/develop/GeneralStateTests/VMTests/vmTests/dup.json)\n        by Ori Pomerantz.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/devnet-1@v1.2.0/tests/frontier/opcodes/test_dup.py#L14"
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/devnet-1@v1.3.0/tests/frontier/opcodes/test_dup.py#L14"
         }
     },
     "tests/frontier/opcodes/test_dup.py::test_dup[fork_Berlin-blockchain_test-DUP8]": {
@@ -12892,7 +12892,7 @@
             "comment": "`execution-spec-tests` generated test",
             "filling-transition-tool": "evm version 1.14.6-unstable-7e5dd44a-20240705",
             "description": "Test function documentation:\n\n    Test the DUP1-DUP16 opcodes.\n\n    note: Test case ported from:\n\n        - [ethereum/tests/GeneralStateTests/VMTests/vmTests/dup.json](https://github.com/ethereum/tests/blob/develop/GeneralStateTests/VMTests/vmTests/dup.json)\n        by Ori Pomerantz.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/devnet-1@v1.2.0/tests/frontier/opcodes/test_dup.py#L14"
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/devnet-1@v1.3.0/tests/frontier/opcodes/test_dup.py#L14"
         }
     },
     "tests/frontier/opcodes/test_dup.py::test_dup[fork_Berlin-blockchain_test-DUP9]": {
@@ -13016,7 +13016,7 @@
             "comment": "`execution-spec-tests` generated test",
             "filling-transition-tool": "evm version 1.14.6-unstable-7e5dd44a-20240705",
             "description": "Test function documentation:\n\n    Test the DUP1-DUP16 opcodes.\n\n    note: Test case ported from:\n\n        - [ethereum/tests/GeneralStateTests/VMTests/vmTests/dup.json](https://github.com/ethereum/tests/blob/develop/GeneralStateTests/VMTests/vmTests/dup.json)\n        by Ori Pomerantz.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/devnet-1@v1.2.0/tests/frontier/opcodes/test_dup.py#L14"
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/devnet-1@v1.3.0/tests/frontier/opcodes/test_dup.py#L14"
         }
     },
     "tests/frontier/opcodes/test_dup.py::test_dup[fork_Berlin-blockchain_test-DUP10]": {
@@ -13140,7 +13140,7 @@
             "comment": "`execution-spec-tests` generated test",
             "filling-transition-tool": "evm version 1.14.6-unstable-7e5dd44a-20240705",
             "description": "Test function documentation:\n\n    Test the DUP1-DUP16 opcodes.\n\n    note: Test case ported from:\n\n        - [ethereum/tests/GeneralStateTests/VMTests/vmTests/dup.json](https://github.com/ethereum/tests/blob/develop/GeneralStateTests/VMTests/vmTests/dup.json)\n        by Ori Pomerantz.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/devnet-1@v1.2.0/tests/frontier/opcodes/test_dup.py#L14"
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/devnet-1@v1.3.0/tests/frontier/opcodes/test_dup.py#L14"
         }
     },
     "tests/frontier/opcodes/test_dup.py::test_dup[fork_Berlin-blockchain_test-DUP11]": {
@@ -13264,7 +13264,7 @@
             "comment": "`execution-spec-tests` generated test",
             "filling-transition-tool": "evm version 1.14.6-unstable-7e5dd44a-20240705",
             "description": "Test function documentation:\n\n    Test the DUP1-DUP16 opcodes.\n\n    note: Test case ported from:\n\n        - [ethereum/tests/GeneralStateTests/VMTests/vmTests/dup.json](https://github.com/ethereum/tests/blob/develop/GeneralStateTests/VMTests/vmTests/dup.json)\n        by Ori Pomerantz.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/devnet-1@v1.2.0/tests/frontier/opcodes/test_dup.py#L14"
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/devnet-1@v1.3.0/tests/frontier/opcodes/test_dup.py#L14"
         }
     },
     "tests/frontier/opcodes/test_dup.py::test_dup[fork_Berlin-blockchain_test-DUP12]": {
@@ -13388,7 +13388,7 @@
             "comment": "`execution-spec-tests` generated test",
             "filling-transition-tool": "evm version 1.14.6-unstable-7e5dd44a-20240705",
             "description": "Test function documentation:\n\n    Test the DUP1-DUP16 opcodes.\n\n    note: Test case ported from:\n\n        - [ethereum/tests/GeneralStateTests/VMTests/vmTests/dup.json](https://github.com/ethereum/tests/blob/develop/GeneralStateTests/VMTests/vmTests/dup.json)\n        by Ori Pomerantz.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/devnet-1@v1.2.0/tests/frontier/opcodes/test_dup.py#L14"
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/devnet-1@v1.3.0/tests/frontier/opcodes/test_dup.py#L14"
         }
     },
     "tests/frontier/opcodes/test_dup.py::test_dup[fork_Berlin-blockchain_test-DUP13]": {
@@ -13512,7 +13512,7 @@
             "comment": "`execution-spec-tests` generated test",
             "filling-transition-tool": "evm version 1.14.6-unstable-7e5dd44a-20240705",
             "description": "Test function documentation:\n\n    Test the DUP1-DUP16 opcodes.\n\n    note: Test case ported from:\n\n        - [ethereum/tests/GeneralStateTests/VMTests/vmTests/dup.json](https://github.com/ethereum/tests/blob/develop/GeneralStateTests/VMTests/vmTests/dup.json)\n        by Ori Pomerantz.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/devnet-1@v1.2.0/tests/frontier/opcodes/test_dup.py#L14"
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/devnet-1@v1.3.0/tests/frontier/opcodes/test_dup.py#L14"
         }
     },
     "tests/frontier/opcodes/test_dup.py::test_dup[fork_Berlin-blockchain_test-DUP14]": {
@@ -13636,7 +13636,7 @@
             "comment": "`execution-spec-tests` generated test",
             "filling-transition-tool": "evm version 1.14.6-unstable-7e5dd44a-20240705",
             "description": "Test function documentation:\n\n    Test the DUP1-DUP16 opcodes.\n\n    note: Test case ported from:\n\n        - [ethereum/tests/GeneralStateTests/VMTests/vmTests/dup.json](https://github.com/ethereum/tests/blob/develop/GeneralStateTests/VMTests/vmTests/dup.json)\n        by Ori Pomerantz.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/devnet-1@v1.2.0/tests/frontier/opcodes/test_dup.py#L14"
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/devnet-1@v1.3.0/tests/frontier/opcodes/test_dup.py#L14"
         }
     },
     "tests/frontier/opcodes/test_dup.py::test_dup[fork_Berlin-blockchain_test-DUP15]": {
@@ -13760,7 +13760,7 @@
             "comment": "`execution-spec-tests` generated test",
             "filling-transition-tool": "evm version 1.14.6-unstable-7e5dd44a-20240705",
             "description": "Test function documentation:\n\n    Test the DUP1-DUP16 opcodes.\n\n    note: Test case ported from:\n\n        - [ethereum/tests/GeneralStateTests/VMTests/vmTests/dup.json](https://github.com/ethereum/tests/blob/develop/GeneralStateTests/VMTests/vmTests/dup.json)\n        by Ori Pomerantz.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/devnet-1@v1.2.0/tests/frontier/opcodes/test_dup.py#L14"
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/devnet-1@v1.3.0/tests/frontier/opcodes/test_dup.py#L14"
         }
     },
     "tests/frontier/opcodes/test_dup.py::test_dup[fork_Berlin-blockchain_test-DUP16]": {
@@ -13884,7 +13884,7 @@
             "comment": "`execution-spec-tests` generated test",
             "filling-transition-tool": "evm version 1.14.6-unstable-7e5dd44a-20240705",
             "description": "Test function documentation:\n\n    Test the DUP1-DUP16 opcodes.\n\n    note: Test case ported from:\n\n        - [ethereum/tests/GeneralStateTests/VMTests/vmTests/dup.json](https://github.com/ethereum/tests/blob/develop/GeneralStateTests/VMTests/vmTests/dup.json)\n        by Ori Pomerantz.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/devnet-1@v1.2.0/tests/frontier/opcodes/test_dup.py#L14"
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/devnet-1@v1.3.0/tests/frontier/opcodes/test_dup.py#L14"
         }
     },
     "tests/frontier/opcodes/test_dup.py::test_dup[fork_London-blockchain_test-DUP1]": {
@@ -14010,7 +14010,7 @@
             "comment": "`execution-spec-tests` generated test",
             "filling-transition-tool": "evm version 1.14.6-unstable-7e5dd44a-20240705",
             "description": "Test function documentation:\n\n    Test the DUP1-DUP16 opcodes.\n\n    note: Test case ported from:\n\n        - [ethereum/tests/GeneralStateTests/VMTests/vmTests/dup.json](https://github.com/ethereum/tests/blob/develop/GeneralStateTests/VMTests/vmTests/dup.json)\n        by Ori Pomerantz.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/devnet-1@v1.2.0/tests/frontier/opcodes/test_dup.py#L14"
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/devnet-1@v1.3.0/tests/frontier/opcodes/test_dup.py#L14"
         }
     },
     "tests/frontier/opcodes/test_dup.py::test_dup[fork_London-blockchain_test-DUP2]": {
@@ -14136,7 +14136,7 @@
             "comment": "`execution-spec-tests` generated test",
             "filling-transition-tool": "evm version 1.14.6-unstable-7e5dd44a-20240705",
             "description": "Test function documentation:\n\n    Test the DUP1-DUP16 opcodes.\n\n    note: Test case ported from:\n\n        - [ethereum/tests/GeneralStateTests/VMTests/vmTests/dup.json](https://github.com/ethereum/tests/blob/develop/GeneralStateTests/VMTests/vmTests/dup.json)\n        by Ori Pomerantz.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/devnet-1@v1.2.0/tests/frontier/opcodes/test_dup.py#L14"
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/devnet-1@v1.3.0/tests/frontier/opcodes/test_dup.py#L14"
         }
     },
     "tests/frontier/opcodes/test_dup.py::test_dup[fork_London-blockchain_test-DUP3]": {
@@ -14262,7 +14262,7 @@
             "comment": "`execution-spec-tests` generated test",
             "filling-transition-tool": "evm version 1.14.6-unstable-7e5dd44a-20240705",
             "description": "Test function documentation:\n\n    Test the DUP1-DUP16 opcodes.\n\n    note: Test case ported from:\n\n        - [ethereum/tests/GeneralStateTests/VMTests/vmTests/dup.json](https://github.com/ethereum/tests/blob/develop/GeneralStateTests/VMTests/vmTests/dup.json)\n        by Ori Pomerantz.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/devnet-1@v1.2.0/tests/frontier/opcodes/test_dup.py#L14"
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/devnet-1@v1.3.0/tests/frontier/opcodes/test_dup.py#L14"
         }
     },
     "tests/frontier/opcodes/test_dup.py::test_dup[fork_London-blockchain_test-DUP4]": {
@@ -14388,7 +14388,7 @@
             "comment": "`execution-spec-tests` generated test",
             "filling-transition-tool": "evm version 1.14.6-unstable-7e5dd44a-20240705",
             "description": "Test function documentation:\n\n    Test the DUP1-DUP16 opcodes.\n\n    note: Test case ported from:\n\n        - [ethereum/tests/GeneralStateTests/VMTests/vmTests/dup.json](https://github.com/ethereum/tests/blob/develop/GeneralStateTests/VMTests/vmTests/dup.json)\n        by Ori Pomerantz.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/devnet-1@v1.2.0/tests/frontier/opcodes/test_dup.py#L14"
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/devnet-1@v1.3.0/tests/frontier/opcodes/test_dup.py#L14"
         }
     },
     "tests/frontier/opcodes/test_dup.py::test_dup[fork_London-blockchain_test-DUP5]": {
@@ -14514,7 +14514,7 @@
             "comment": "`execution-spec-tests` generated test",
             "filling-transition-tool": "evm version 1.14.6-unstable-7e5dd44a-20240705",
             "description": "Test function documentation:\n\n    Test the DUP1-DUP16 opcodes.\n\n    note: Test case ported from:\n\n        - [ethereum/tests/GeneralStateTests/VMTests/vmTests/dup.json](https://github.com/ethereum/tests/blob/develop/GeneralStateTests/VMTests/vmTests/dup.json)\n        by Ori Pomerantz.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/devnet-1@v1.2.0/tests/frontier/opcodes/test_dup.py#L14"
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/devnet-1@v1.3.0/tests/frontier/opcodes/test_dup.py#L14"
         }
     },
     "tests/frontier/opcodes/test_dup.py::test_dup[fork_London-blockchain_test-DUP6]": {
@@ -14640,7 +14640,7 @@
             "comment": "`execution-spec-tests` generated test",
             "filling-transition-tool": "evm version 1.14.6-unstable-7e5dd44a-20240705",
             "description": "Test function documentation:\n\n    Test the DUP1-DUP16 opcodes.\n\n    note: Test case ported from:\n\n        - [ethereum/tests/GeneralStateTests/VMTests/vmTests/dup.json](https://github.com/ethereum/tests/blob/develop/GeneralStateTests/VMTests/vmTests/dup.json)\n        by Ori Pomerantz.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/devnet-1@v1.2.0/tests/frontier/opcodes/test_dup.py#L14"
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/devnet-1@v1.3.0/tests/frontier/opcodes/test_dup.py#L14"
         }
     },
     "tests/frontier/opcodes/test_dup.py::test_dup[fork_London-blockchain_test-DUP7]": {
@@ -14766,7 +14766,7 @@
             "comment": "`execution-spec-tests` generated test",
             "filling-transition-tool": "evm version 1.14.6-unstable-7e5dd44a-20240705",
             "description": "Test function documentation:\n\n    Test the DUP1-DUP16 opcodes.\n\n    note: Test case ported from:\n\n        - [ethereum/tests/GeneralStateTests/VMTests/vmTests/dup.json](https://github.com/ethereum/tests/blob/develop/GeneralStateTests/VMTests/vmTests/dup.json)\n        by Ori Pomerantz.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/devnet-1@v1.2.0/tests/frontier/opcodes/test_dup.py#L14"
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/devnet-1@v1.3.0/tests/frontier/opcodes/test_dup.py#L14"
         }
     },
     "tests/frontier/opcodes/test_dup.py::test_dup[fork_London-blockchain_test-DUP8]": {
@@ -14892,7 +14892,7 @@
             "comment": "`execution-spec-tests` generated test",
             "filling-transition-tool": "evm version 1.14.6-unstable-7e5dd44a-20240705",
             "description": "Test function documentation:\n\n    Test the DUP1-DUP16 opcodes.\n\n    note: Test case ported from:\n\n        - [ethereum/tests/GeneralStateTests/VMTests/vmTests/dup.json](https://github.com/ethereum/tests/blob/develop/GeneralStateTests/VMTests/vmTests/dup.json)\n        by Ori Pomerantz.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/devnet-1@v1.2.0/tests/frontier/opcodes/test_dup.py#L14"
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/devnet-1@v1.3.0/tests/frontier/opcodes/test_dup.py#L14"
         }
     },
     "tests/frontier/opcodes/test_dup.py::test_dup[fork_London-blockchain_test-DUP9]": {
@@ -15018,7 +15018,7 @@
             "comment": "`execution-spec-tests` generated test",
             "filling-transition-tool": "evm version 1.14.6-unstable-7e5dd44a-20240705",
             "description": "Test function documentation:\n\n    Test the DUP1-DUP16 opcodes.\n\n    note: Test case ported from:\n\n        - [ethereum/tests/GeneralStateTests/VMTests/vmTests/dup.json](https://github.com/ethereum/tests/blob/develop/GeneralStateTests/VMTests/vmTests/dup.json)\n        by Ori Pomerantz.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/devnet-1@v1.2.0/tests/frontier/opcodes/test_dup.py#L14"
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/devnet-1@v1.3.0/tests/frontier/opcodes/test_dup.py#L14"
         }
     },
     "tests/frontier/opcodes/test_dup.py::test_dup[fork_London-blockchain_test-DUP10]": {
@@ -15144,7 +15144,7 @@
             "comment": "`execution-spec-tests` generated test",
             "filling-transition-tool": "evm version 1.14.6-unstable-7e5dd44a-20240705",
             "description": "Test function documentation:\n\n    Test the DUP1-DUP16 opcodes.\n\n    note: Test case ported from:\n\n        - [ethereum/tests/GeneralStateTests/VMTests/vmTests/dup.json](https://github.com/ethereum/tests/blob/develop/GeneralStateTests/VMTests/vmTests/dup.json)\n        by Ori Pomerantz.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/devnet-1@v1.2.0/tests/frontier/opcodes/test_dup.py#L14"
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/devnet-1@v1.3.0/tests/frontier/opcodes/test_dup.py#L14"
         }
     },
     "tests/frontier/opcodes/test_dup.py::test_dup[fork_London-blockchain_test-DUP11]": {
@@ -15270,7 +15270,7 @@
             "comment": "`execution-spec-tests` generated test",
             "filling-transition-tool": "evm version 1.14.6-unstable-7e5dd44a-20240705",
             "description": "Test function documentation:\n\n    Test the DUP1-DUP16 opcodes.\n\n    note: Test case ported from:\n\n        - [ethereum/tests/GeneralStateTests/VMTests/vmTests/dup.json](https://github.com/ethereum/tests/blob/develop/GeneralStateTests/VMTests/vmTests/dup.json)\n        by Ori Pomerantz.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/devnet-1@v1.2.0/tests/frontier/opcodes/test_dup.py#L14"
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/devnet-1@v1.3.0/tests/frontier/opcodes/test_dup.py#L14"
         }
     },
     "tests/frontier/opcodes/test_dup.py::test_dup[fork_London-blockchain_test-DUP12]": {
@@ -15396,7 +15396,7 @@
             "comment": "`execution-spec-tests` generated test",
             "filling-transition-tool": "evm version 1.14.6-unstable-7e5dd44a-20240705",
             "description": "Test function documentation:\n\n    Test the DUP1-DUP16 opcodes.\n\n    note: Test case ported from:\n\n        - [ethereum/tests/GeneralStateTests/VMTests/vmTests/dup.json](https://github.com/ethereum/tests/blob/develop/GeneralStateTests/VMTests/vmTests/dup.json)\n        by Ori Pomerantz.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/devnet-1@v1.2.0/tests/frontier/opcodes/test_dup.py#L14"
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/devnet-1@v1.3.0/tests/frontier/opcodes/test_dup.py#L14"
         }
     },
     "tests/frontier/opcodes/test_dup.py::test_dup[fork_London-blockchain_test-DUP13]": {
@@ -15522,7 +15522,7 @@
             "comment": "`execution-spec-tests` generated test",
             "filling-transition-tool": "evm version 1.14.6-unstable-7e5dd44a-20240705",
             "description": "Test function documentation:\n\n    Test the DUP1-DUP16 opcodes.\n\n    note: Test case ported from:\n\n        - [ethereum/tests/GeneralStateTests/VMTests/vmTests/dup.json](https://github.com/ethereum/tests/blob/develop/GeneralStateTests/VMTests/vmTests/dup.json)\n        by Ori Pomerantz.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/devnet-1@v1.2.0/tests/frontier/opcodes/test_dup.py#L14"
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/devnet-1@v1.3.0/tests/frontier/opcodes/test_dup.py#L14"
         }
     },
     "tests/frontier/opcodes/test_dup.py::test_dup[fork_London-blockchain_test-DUP14]": {
@@ -15648,7 +15648,7 @@
             "comment": "`execution-spec-tests` generated test",
             "filling-transition-tool": "evm version 1.14.6-unstable-7e5dd44a-20240705",
             "description": "Test function documentation:\n\n    Test the DUP1-DUP16 opcodes.\n\n    note: Test case ported from:\n\n        - [ethereum/tests/GeneralStateTests/VMTests/vmTests/dup.json](https://github.com/ethereum/tests/blob/develop/GeneralStateTests/VMTests/vmTests/dup.json)\n        by Ori Pomerantz.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/devnet-1@v1.2.0/tests/frontier/opcodes/test_dup.py#L14"
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/devnet-1@v1.3.0/tests/frontier/opcodes/test_dup.py#L14"
         }
     },
     "tests/frontier/opcodes/test_dup.py::test_dup[fork_London-blockchain_test-DUP15]": {
@@ -15774,7 +15774,7 @@
             "comment": "`execution-spec-tests` generated test",
             "filling-transition-tool": "evm version 1.14.6-unstable-7e5dd44a-20240705",
             "description": "Test function documentation:\n\n    Test the DUP1-DUP16 opcodes.\n\n    note: Test case ported from:\n\n        - [ethereum/tests/GeneralStateTests/VMTests/vmTests/dup.json](https://github.com/ethereum/tests/blob/develop/GeneralStateTests/VMTests/vmTests/dup.json)\n        by Ori Pomerantz.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/devnet-1@v1.2.0/tests/frontier/opcodes/test_dup.py#L14"
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/devnet-1@v1.3.0/tests/frontier/opcodes/test_dup.py#L14"
         }
     },
     "tests/frontier/opcodes/test_dup.py::test_dup[fork_London-blockchain_test-DUP16]": {
@@ -15900,7 +15900,7 @@
             "comment": "`execution-spec-tests` generated test",
             "filling-transition-tool": "evm version 1.14.6-unstable-7e5dd44a-20240705",
             "description": "Test function documentation:\n\n    Test the DUP1-DUP16 opcodes.\n\n    note: Test case ported from:\n\n        - [ethereum/tests/GeneralStateTests/VMTests/vmTests/dup.json](https://github.com/ethereum/tests/blob/develop/GeneralStateTests/VMTests/vmTests/dup.json)\n        by Ori Pomerantz.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/devnet-1@v1.2.0/tests/frontier/opcodes/test_dup.py#L14"
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/devnet-1@v1.3.0/tests/frontier/opcodes/test_dup.py#L14"
         }
     },
     "tests/frontier/opcodes/test_dup.py::test_dup[fork_Paris-blockchain_test-DUP1]": {
@@ -16026,7 +16026,7 @@
             "comment": "`execution-spec-tests` generated test",
             "filling-transition-tool": "evm version 1.14.6-unstable-7e5dd44a-20240705",
             "description": "Test function documentation:\n\n    Test the DUP1-DUP16 opcodes.\n\n    note: Test case ported from:\n\n        - [ethereum/tests/GeneralStateTests/VMTests/vmTests/dup.json](https://github.com/ethereum/tests/blob/develop/GeneralStateTests/VMTests/vmTests/dup.json)\n        by Ori Pomerantz.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/devnet-1@v1.2.0/tests/frontier/opcodes/test_dup.py#L14"
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/devnet-1@v1.3.0/tests/frontier/opcodes/test_dup.py#L14"
         }
     },
     "tests/frontier/opcodes/test_dup.py::test_dup[fork_Paris-blockchain_test-DUP2]": {
@@ -16152,7 +16152,7 @@
             "comment": "`execution-spec-tests` generated test",
             "filling-transition-tool": "evm version 1.14.6-unstable-7e5dd44a-20240705",
             "description": "Test function documentation:\n\n    Test the DUP1-DUP16 opcodes.\n\n    note: Test case ported from:\n\n        - [ethereum/tests/GeneralStateTests/VMTests/vmTests/dup.json](https://github.com/ethereum/tests/blob/develop/GeneralStateTests/VMTests/vmTests/dup.json)\n        by Ori Pomerantz.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/devnet-1@v1.2.0/tests/frontier/opcodes/test_dup.py#L14"
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/devnet-1@v1.3.0/tests/frontier/opcodes/test_dup.py#L14"
         }
     },
     "tests/frontier/opcodes/test_dup.py::test_dup[fork_Paris-blockchain_test-DUP3]": {
@@ -16278,7 +16278,7 @@
             "comment": "`execution-spec-tests` generated test",
             "filling-transition-tool": "evm version 1.14.6-unstable-7e5dd44a-20240705",
             "description": "Test function documentation:\n\n    Test the DUP1-DUP16 opcodes.\n\n    note: Test case ported from:\n\n        - [ethereum/tests/GeneralStateTests/VMTests/vmTests/dup.json](https://github.com/ethereum/tests/blob/develop/GeneralStateTests/VMTests/vmTests/dup.json)\n        by Ori Pomerantz.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/devnet-1@v1.2.0/tests/frontier/opcodes/test_dup.py#L14"
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/devnet-1@v1.3.0/tests/frontier/opcodes/test_dup.py#L14"
         }
     },
     "tests/frontier/opcodes/test_dup.py::test_dup[fork_Paris-blockchain_test-DUP4]": {
@@ -16404,7 +16404,7 @@
             "comment": "`execution-spec-tests` generated test",
             "filling-transition-tool": "evm version 1.14.6-unstable-7e5dd44a-20240705",
             "description": "Test function documentation:\n\n    Test the DUP1-DUP16 opcodes.\n\n    note: Test case ported from:\n\n        - [ethereum/tests/GeneralStateTests/VMTests/vmTests/dup.json](https://github.com/ethereum/tests/blob/develop/GeneralStateTests/VMTests/vmTests/dup.json)\n        by Ori Pomerantz.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/devnet-1@v1.2.0/tests/frontier/opcodes/test_dup.py#L14"
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/devnet-1@v1.3.0/tests/frontier/opcodes/test_dup.py#L14"
         }
     },
     "tests/frontier/opcodes/test_dup.py::test_dup[fork_Paris-blockchain_test-DUP5]": {
@@ -16530,7 +16530,7 @@
             "comment": "`execution-spec-tests` generated test",
             "filling-transition-tool": "evm version 1.14.6-unstable-7e5dd44a-20240705",
             "description": "Test function documentation:\n\n    Test the DUP1-DUP16 opcodes.\n\n    note: Test case ported from:\n\n        - [ethereum/tests/GeneralStateTests/VMTests/vmTests/dup.json](https://github.com/ethereum/tests/blob/develop/GeneralStateTests/VMTests/vmTests/dup.json)\n        by Ori Pomerantz.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/devnet-1@v1.2.0/tests/frontier/opcodes/test_dup.py#L14"
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/devnet-1@v1.3.0/tests/frontier/opcodes/test_dup.py#L14"
         }
     },
     "tests/frontier/opcodes/test_dup.py::test_dup[fork_Paris-blockchain_test-DUP6]": {
@@ -16656,7 +16656,7 @@
             "comment": "`execution-spec-tests` generated test",
             "filling-transition-tool": "evm version 1.14.6-unstable-7e5dd44a-20240705",
             "description": "Test function documentation:\n\n    Test the DUP1-DUP16 opcodes.\n\n    note: Test case ported from:\n\n        - [ethereum/tests/GeneralStateTests/VMTests/vmTests/dup.json](https://github.com/ethereum/tests/blob/develop/GeneralStateTests/VMTests/vmTests/dup.json)\n        by Ori Pomerantz.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/devnet-1@v1.2.0/tests/frontier/opcodes/test_dup.py#L14"
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/devnet-1@v1.3.0/tests/frontier/opcodes/test_dup.py#L14"
         }
     },
     "tests/frontier/opcodes/test_dup.py::test_dup[fork_Paris-blockchain_test-DUP7]": {
@@ -16782,7 +16782,7 @@
             "comment": "`execution-spec-tests` generated test",
             "filling-transition-tool": "evm version 1.14.6-unstable-7e5dd44a-20240705",
             "description": "Test function documentation:\n\n    Test the DUP1-DUP16 opcodes.\n\n    note: Test case ported from:\n\n        - [ethereum/tests/GeneralStateTests/VMTests/vmTests/dup.json](https://github.com/ethereum/tests/blob/develop/GeneralStateTests/VMTests/vmTests/dup.json)\n        by Ori Pomerantz.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/devnet-1@v1.2.0/tests/frontier/opcodes/test_dup.py#L14"
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/devnet-1@v1.3.0/tests/frontier/opcodes/test_dup.py#L14"
         }
     },
     "tests/frontier/opcodes/test_dup.py::test_dup[fork_Paris-blockchain_test-DUP8]": {
@@ -16908,7 +16908,7 @@
             "comment": "`execution-spec-tests` generated test",
             "filling-transition-tool": "evm version 1.14.6-unstable-7e5dd44a-20240705",
             "description": "Test function documentation:\n\n    Test the DUP1-DUP16 opcodes.\n\n    note: Test case ported from:\n\n        - [ethereum/tests/GeneralStateTests/VMTests/vmTests/dup.json](https://github.com/ethereum/tests/blob/develop/GeneralStateTests/VMTests/vmTests/dup.json)\n        by Ori Pomerantz.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/devnet-1@v1.2.0/tests/frontier/opcodes/test_dup.py#L14"
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/devnet-1@v1.3.0/tests/frontier/opcodes/test_dup.py#L14"
         }
     },
     "tests/frontier/opcodes/test_dup.py::test_dup[fork_Paris-blockchain_test-DUP9]": {
@@ -17034,7 +17034,7 @@
             "comment": "`execution-spec-tests` generated test",
             "filling-transition-tool": "evm version 1.14.6-unstable-7e5dd44a-20240705",
             "description": "Test function documentation:\n\n    Test the DUP1-DUP16 opcodes.\n\n    note: Test case ported from:\n\n        - [ethereum/tests/GeneralStateTests/VMTests/vmTests/dup.json](https://github.com/ethereum/tests/blob/develop/GeneralStateTests/VMTests/vmTests/dup.json)\n        by Ori Pomerantz.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/devnet-1@v1.2.0/tests/frontier/opcodes/test_dup.py#L14"
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/devnet-1@v1.3.0/tests/frontier/opcodes/test_dup.py#L14"
         }
     },
     "tests/frontier/opcodes/test_dup.py::test_dup[fork_Paris-blockchain_test-DUP10]": {
@@ -17160,7 +17160,7 @@
             "comment": "`execution-spec-tests` generated test",
             "filling-transition-tool": "evm version 1.14.6-unstable-7e5dd44a-20240705",
             "description": "Test function documentation:\n\n    Test the DUP1-DUP16 opcodes.\n\n    note: Test case ported from:\n\n        - [ethereum/tests/GeneralStateTests/VMTests/vmTests/dup.json](https://github.com/ethereum/tests/blob/develop/GeneralStateTests/VMTests/vmTests/dup.json)\n        by Ori Pomerantz.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/devnet-1@v1.2.0/tests/frontier/opcodes/test_dup.py#L14"
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/devnet-1@v1.3.0/tests/frontier/opcodes/test_dup.py#L14"
         }
     },
     "tests/frontier/opcodes/test_dup.py::test_dup[fork_Paris-blockchain_test-DUP11]": {
@@ -17286,7 +17286,7 @@
             "comment": "`execution-spec-tests` generated test",
             "filling-transition-tool": "evm version 1.14.6-unstable-7e5dd44a-20240705",
             "description": "Test function documentation:\n\n    Test the DUP1-DUP16 opcodes.\n\n    note: Test case ported from:\n\n        - [ethereum/tests/GeneralStateTests/VMTests/vmTests/dup.json](https://github.com/ethereum/tests/blob/develop/GeneralStateTests/VMTests/vmTests/dup.json)\n        by Ori Pomerantz.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/devnet-1@v1.2.0/tests/frontier/opcodes/test_dup.py#L14"
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/devnet-1@v1.3.0/tests/frontier/opcodes/test_dup.py#L14"
         }
     },
     "tests/frontier/opcodes/test_dup.py::test_dup[fork_Paris-blockchain_test-DUP12]": {
@@ -17412,7 +17412,7 @@
             "comment": "`execution-spec-tests` generated test",
             "filling-transition-tool": "evm version 1.14.6-unstable-7e5dd44a-20240705",
             "description": "Test function documentation:\n\n    Test the DUP1-DUP16 opcodes.\n\n    note: Test case ported from:\n\n        - [ethereum/tests/GeneralStateTests/VMTests/vmTests/dup.json](https://github.com/ethereum/tests/blob/develop/GeneralStateTests/VMTests/vmTests/dup.json)\n        by Ori Pomerantz.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/devnet-1@v1.2.0/tests/frontier/opcodes/test_dup.py#L14"
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/devnet-1@v1.3.0/tests/frontier/opcodes/test_dup.py#L14"
         }
     },
     "tests/frontier/opcodes/test_dup.py::test_dup[fork_Paris-blockchain_test-DUP13]": {
@@ -17538,7 +17538,7 @@
             "comment": "`execution-spec-tests` generated test",
             "filling-transition-tool": "evm version 1.14.6-unstable-7e5dd44a-20240705",
             "description": "Test function documentation:\n\n    Test the DUP1-DUP16 opcodes.\n\n    note: Test case ported from:\n\n        - [ethereum/tests/GeneralStateTests/VMTests/vmTests/dup.json](https://github.com/ethereum/tests/blob/develop/GeneralStateTests/VMTests/vmTests/dup.json)\n        by Ori Pomerantz.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/devnet-1@v1.2.0/tests/frontier/opcodes/test_dup.py#L14"
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/devnet-1@v1.3.0/tests/frontier/opcodes/test_dup.py#L14"
         }
     },
     "tests/frontier/opcodes/test_dup.py::test_dup[fork_Paris-blockchain_test-DUP14]": {
@@ -17664,7 +17664,7 @@
             "comment": "`execution-spec-tests` generated test",
             "filling-transition-tool": "evm version 1.14.6-unstable-7e5dd44a-20240705",
             "description": "Test function documentation:\n\n    Test the DUP1-DUP16 opcodes.\n\n    note: Test case ported from:\n\n        - [ethereum/tests/GeneralStateTests/VMTests/vmTests/dup.json](https://github.com/ethereum/tests/blob/develop/GeneralStateTests/VMTests/vmTests/dup.json)\n        by Ori Pomerantz.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/devnet-1@v1.2.0/tests/frontier/opcodes/test_dup.py#L14"
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/devnet-1@v1.3.0/tests/frontier/opcodes/test_dup.py#L14"
         }
     },
     "tests/frontier/opcodes/test_dup.py::test_dup[fork_Paris-blockchain_test-DUP15]": {
@@ -17790,7 +17790,7 @@
             "comment": "`execution-spec-tests` generated test",
             "filling-transition-tool": "evm version 1.14.6-unstable-7e5dd44a-20240705",
             "description": "Test function documentation:\n\n    Test the DUP1-DUP16 opcodes.\n\n    note: Test case ported from:\n\n        - [ethereum/tests/GeneralStateTests/VMTests/vmTests/dup.json](https://github.com/ethereum/tests/blob/develop/GeneralStateTests/VMTests/vmTests/dup.json)\n        by Ori Pomerantz.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/devnet-1@v1.2.0/tests/frontier/opcodes/test_dup.py#L14"
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/devnet-1@v1.3.0/tests/frontier/opcodes/test_dup.py#L14"
         }
     },
     "tests/frontier/opcodes/test_dup.py::test_dup[fork_Paris-blockchain_test-DUP16]": {
@@ -17916,7 +17916,7 @@
             "comment": "`execution-spec-tests` generated test",
             "filling-transition-tool": "evm version 1.14.6-unstable-7e5dd44a-20240705",
             "description": "Test function documentation:\n\n    Test the DUP1-DUP16 opcodes.\n\n    note: Test case ported from:\n\n        - [ethereum/tests/GeneralStateTests/VMTests/vmTests/dup.json](https://github.com/ethereum/tests/blob/develop/GeneralStateTests/VMTests/vmTests/dup.json)\n        by Ori Pomerantz.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/devnet-1@v1.2.0/tests/frontier/opcodes/test_dup.py#L14"
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/devnet-1@v1.3.0/tests/frontier/opcodes/test_dup.py#L14"
         }
     },
     "tests/frontier/opcodes/test_dup.py::test_dup[fork_Shanghai-blockchain_test-DUP1]": {
@@ -18045,7 +18045,7 @@
             "comment": "`execution-spec-tests` generated test",
             "filling-transition-tool": "evm version 1.14.6-unstable-7e5dd44a-20240705",
             "description": "Test function documentation:\n\n    Test the DUP1-DUP16 opcodes.\n\n    note: Test case ported from:\n\n        - [ethereum/tests/GeneralStateTests/VMTests/vmTests/dup.json](https://github.com/ethereum/tests/blob/develop/GeneralStateTests/VMTests/vmTests/dup.json)\n        by Ori Pomerantz.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/devnet-1@v1.2.0/tests/frontier/opcodes/test_dup.py#L14"
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/devnet-1@v1.3.0/tests/frontier/opcodes/test_dup.py#L14"
         }
     },
     "tests/frontier/opcodes/test_dup.py::test_dup[fork_Shanghai-blockchain_test-DUP2]": {
@@ -18174,7 +18174,7 @@
             "comment": "`execution-spec-tests` generated test",
             "filling-transition-tool": "evm version 1.14.6-unstable-7e5dd44a-20240705",
             "description": "Test function documentation:\n\n    Test the DUP1-DUP16 opcodes.\n\n    note: Test case ported from:\n\n        - [ethereum/tests/GeneralStateTests/VMTests/vmTests/dup.json](https://github.com/ethereum/tests/blob/develop/GeneralStateTests/VMTests/vmTests/dup.json)\n        by Ori Pomerantz.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/devnet-1@v1.2.0/tests/frontier/opcodes/test_dup.py#L14"
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/devnet-1@v1.3.0/tests/frontier/opcodes/test_dup.py#L14"
         }
     },
     "tests/frontier/opcodes/test_dup.py::test_dup[fork_Shanghai-blockchain_test-DUP3]": {
@@ -18303,7 +18303,7 @@
             "comment": "`execution-spec-tests` generated test",
             "filling-transition-tool": "evm version 1.14.6-unstable-7e5dd44a-20240705",
             "description": "Test function documentation:\n\n    Test the DUP1-DUP16 opcodes.\n\n    note: Test case ported from:\n\n        - [ethereum/tests/GeneralStateTests/VMTests/vmTests/dup.json](https://github.com/ethereum/tests/blob/develop/GeneralStateTests/VMTests/vmTests/dup.json)\n        by Ori Pomerantz.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/devnet-1@v1.2.0/tests/frontier/opcodes/test_dup.py#L14"
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/devnet-1@v1.3.0/tests/frontier/opcodes/test_dup.py#L14"
         }
     },
     "tests/frontier/opcodes/test_dup.py::test_dup[fork_Shanghai-blockchain_test-DUP4]": {
@@ -18432,7 +18432,7 @@
             "comment": "`execution-spec-tests` generated test",
             "filling-transition-tool": "evm version 1.14.6-unstable-7e5dd44a-20240705",
             "description": "Test function documentation:\n\n    Test the DUP1-DUP16 opcodes.\n\n    note: Test case ported from:\n\n        - [ethereum/tests/GeneralStateTests/VMTests/vmTests/dup.json](https://github.com/ethereum/tests/blob/develop/GeneralStateTests/VMTests/vmTests/dup.json)\n        by Ori Pomerantz.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/devnet-1@v1.2.0/tests/frontier/opcodes/test_dup.py#L14"
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/devnet-1@v1.3.0/tests/frontier/opcodes/test_dup.py#L14"
         }
     },
     "tests/frontier/opcodes/test_dup.py::test_dup[fork_Shanghai-blockchain_test-DUP5]": {
@@ -18561,7 +18561,7 @@
             "comment": "`execution-spec-tests` generated test",
             "filling-transition-tool": "evm version 1.14.6-unstable-7e5dd44a-20240705",
             "description": "Test function documentation:\n\n    Test the DUP1-DUP16 opcodes.\n\n    note: Test case ported from:\n\n        - [ethereum/tests/GeneralStateTests/VMTests/vmTests/dup.json](https://github.com/ethereum/tests/blob/develop/GeneralStateTests/VMTests/vmTests/dup.json)\n        by Ori Pomerantz.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/devnet-1@v1.2.0/tests/frontier/opcodes/test_dup.py#L14"
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/devnet-1@v1.3.0/tests/frontier/opcodes/test_dup.py#L14"
         }
     },
     "tests/frontier/opcodes/test_dup.py::test_dup[fork_Shanghai-blockchain_test-DUP6]": {
@@ -18690,7 +18690,7 @@
             "comment": "`execution-spec-tests` generated test",
             "filling-transition-tool": "evm version 1.14.6-unstable-7e5dd44a-20240705",
             "description": "Test function documentation:\n\n    Test the DUP1-DUP16 opcodes.\n\n    note: Test case ported from:\n\n        - [ethereum/tests/GeneralStateTests/VMTests/vmTests/dup.json](https://github.com/ethereum/tests/blob/develop/GeneralStateTests/VMTests/vmTests/dup.json)\n        by Ori Pomerantz.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/devnet-1@v1.2.0/tests/frontier/opcodes/test_dup.py#L14"
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/devnet-1@v1.3.0/tests/frontier/opcodes/test_dup.py#L14"
         }
     },
     "tests/frontier/opcodes/test_dup.py::test_dup[fork_Shanghai-blockchain_test-DUP7]": {
@@ -18819,7 +18819,7 @@
             "comment": "`execution-spec-tests` generated test",
             "filling-transition-tool": "evm version 1.14.6-unstable-7e5dd44a-20240705",
             "description": "Test function documentation:\n\n    Test the DUP1-DUP16 opcodes.\n\n    note: Test case ported from:\n\n        - [ethereum/tests/GeneralStateTests/VMTests/vmTests/dup.json](https://github.com/ethereum/tests/blob/develop/GeneralStateTests/VMTests/vmTests/dup.json)\n        by Ori Pomerantz.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/devnet-1@v1.2.0/tests/frontier/opcodes/test_dup.py#L14"
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/devnet-1@v1.3.0/tests/frontier/opcodes/test_dup.py#L14"
         }
     },
     "tests/frontier/opcodes/test_dup.py::test_dup[fork_Shanghai-blockchain_test-DUP8]": {
@@ -18948,7 +18948,7 @@
             "comment": "`execution-spec-tests` generated test",
             "filling-transition-tool": "evm version 1.14.6-unstable-7e5dd44a-20240705",
             "description": "Test function documentation:\n\n    Test the DUP1-DUP16 opcodes.\n\n    note: Test case ported from:\n\n        - [ethereum/tests/GeneralStateTests/VMTests/vmTests/dup.json](https://github.com/ethereum/tests/blob/develop/GeneralStateTests/VMTests/vmTests/dup.json)\n        by Ori Pomerantz.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/devnet-1@v1.2.0/tests/frontier/opcodes/test_dup.py#L14"
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/devnet-1@v1.3.0/tests/frontier/opcodes/test_dup.py#L14"
         }
     },
     "tests/frontier/opcodes/test_dup.py::test_dup[fork_Shanghai-blockchain_test-DUP9]": {
@@ -19077,7 +19077,7 @@
             "comment": "`execution-spec-tests` generated test",
             "filling-transition-tool": "evm version 1.14.6-unstable-7e5dd44a-20240705",
             "description": "Test function documentation:\n\n    Test the DUP1-DUP16 opcodes.\n\n    note: Test case ported from:\n\n        - [ethereum/tests/GeneralStateTests/VMTests/vmTests/dup.json](https://github.com/ethereum/tests/blob/develop/GeneralStateTests/VMTests/vmTests/dup.json)\n        by Ori Pomerantz.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/devnet-1@v1.2.0/tests/frontier/opcodes/test_dup.py#L14"
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/devnet-1@v1.3.0/tests/frontier/opcodes/test_dup.py#L14"
         }
     },
     "tests/frontier/opcodes/test_dup.py::test_dup[fork_Shanghai-blockchain_test-DUP10]": {
@@ -19206,7 +19206,7 @@
             "comment": "`execution-spec-tests` generated test",
             "filling-transition-tool": "evm version 1.14.6-unstable-7e5dd44a-20240705",
             "description": "Test function documentation:\n\n    Test the DUP1-DUP16 opcodes.\n\n    note: Test case ported from:\n\n        - [ethereum/tests/GeneralStateTests/VMTests/vmTests/dup.json](https://github.com/ethereum/tests/blob/develop/GeneralStateTests/VMTests/vmTests/dup.json)\n        by Ori Pomerantz.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/devnet-1@v1.2.0/tests/frontier/opcodes/test_dup.py#L14"
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/devnet-1@v1.3.0/tests/frontier/opcodes/test_dup.py#L14"
         }
     },
     "tests/frontier/opcodes/test_dup.py::test_dup[fork_Shanghai-blockchain_test-DUP11]": {
@@ -19335,7 +19335,7 @@
             "comment": "`execution-spec-tests` generated test",
             "filling-transition-tool": "evm version 1.14.6-unstable-7e5dd44a-20240705",
             "description": "Test function documentation:\n\n    Test the DUP1-DUP16 opcodes.\n\n    note: Test case ported from:\n\n        - [ethereum/tests/GeneralStateTests/VMTests/vmTests/dup.json](https://github.com/ethereum/tests/blob/develop/GeneralStateTests/VMTests/vmTests/dup.json)\n        by Ori Pomerantz.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/devnet-1@v1.2.0/tests/frontier/opcodes/test_dup.py#L14"
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/devnet-1@v1.3.0/tests/frontier/opcodes/test_dup.py#L14"
         }
     },
     "tests/frontier/opcodes/test_dup.py::test_dup[fork_Shanghai-blockchain_test-DUP12]": {
@@ -19464,7 +19464,7 @@
             "comment": "`execution-spec-tests` generated test",
             "filling-transition-tool": "evm version 1.14.6-unstable-7e5dd44a-20240705",
             "description": "Test function documentation:\n\n    Test the DUP1-DUP16 opcodes.\n\n    note: Test case ported from:\n\n        - [ethereum/tests/GeneralStateTests/VMTests/vmTests/dup.json](https://github.com/ethereum/tests/blob/develop/GeneralStateTests/VMTests/vmTests/dup.json)\n        by Ori Pomerantz.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/devnet-1@v1.2.0/tests/frontier/opcodes/test_dup.py#L14"
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/devnet-1@v1.3.0/tests/frontier/opcodes/test_dup.py#L14"
         }
     },
     "tests/frontier/opcodes/test_dup.py::test_dup[fork_Shanghai-blockchain_test-DUP13]": {
@@ -19593,7 +19593,7 @@
             "comment": "`execution-spec-tests` generated test",
             "filling-transition-tool": "evm version 1.14.6-unstable-7e5dd44a-20240705",
             "description": "Test function documentation:\n\n    Test the DUP1-DUP16 opcodes.\n\n    note: Test case ported from:\n\n        - [ethereum/tests/GeneralStateTests/VMTests/vmTests/dup.json](https://github.com/ethereum/tests/blob/develop/GeneralStateTests/VMTests/vmTests/dup.json)\n        by Ori Pomerantz.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/devnet-1@v1.2.0/tests/frontier/opcodes/test_dup.py#L14"
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/devnet-1@v1.3.0/tests/frontier/opcodes/test_dup.py#L14"
         }
     },
     "tests/frontier/opcodes/test_dup.py::test_dup[fork_Shanghai-blockchain_test-DUP14]": {
@@ -19722,7 +19722,7 @@
             "comment": "`execution-spec-tests` generated test",
             "filling-transition-tool": "evm version 1.14.6-unstable-7e5dd44a-20240705",
             "description": "Test function documentation:\n\n    Test the DUP1-DUP16 opcodes.\n\n    note: Test case ported from:\n\n        - [ethereum/tests/GeneralStateTests/VMTests/vmTests/dup.json](https://github.com/ethereum/tests/blob/develop/GeneralStateTests/VMTests/vmTests/dup.json)\n        by Ori Pomerantz.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/devnet-1@v1.2.0/tests/frontier/opcodes/test_dup.py#L14"
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/devnet-1@v1.3.0/tests/frontier/opcodes/test_dup.py#L14"
         }
     },
     "tests/frontier/opcodes/test_dup.py::test_dup[fork_Shanghai-blockchain_test-DUP15]": {
@@ -19851,7 +19851,7 @@
             "comment": "`execution-spec-tests` generated test",
             "filling-transition-tool": "evm version 1.14.6-unstable-7e5dd44a-20240705",
             "description": "Test function documentation:\n\n    Test the DUP1-DUP16 opcodes.\n\n    note: Test case ported from:\n\n        - [ethereum/tests/GeneralStateTests/VMTests/vmTests/dup.json](https://github.com/ethereum/tests/blob/develop/GeneralStateTests/VMTests/vmTests/dup.json)\n        by Ori Pomerantz.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/devnet-1@v1.2.0/tests/frontier/opcodes/test_dup.py#L14"
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/devnet-1@v1.3.0/tests/frontier/opcodes/test_dup.py#L14"
         }
     },
     "tests/frontier/opcodes/test_dup.py::test_dup[fork_Shanghai-blockchain_test-DUP16]": {
@@ -19980,7 +19980,7 @@
             "comment": "`execution-spec-tests` generated test",
             "filling-transition-tool": "evm version 1.14.6-unstable-7e5dd44a-20240705",
             "description": "Test function documentation:\n\n    Test the DUP1-DUP16 opcodes.\n\n    note: Test case ported from:\n\n        - [ethereum/tests/GeneralStateTests/VMTests/vmTests/dup.json](https://github.com/ethereum/tests/blob/develop/GeneralStateTests/VMTests/vmTests/dup.json)\n        by Ori Pomerantz.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/devnet-1@v1.2.0/tests/frontier/opcodes/test_dup.py#L14"
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/devnet-1@v1.3.0/tests/frontier/opcodes/test_dup.py#L14"
         }
     },
     "tests/frontier/opcodes/test_dup.py::test_dup[fork_Cancun-blockchain_test-DUP1]": {
@@ -20129,7 +20129,7 @@
             "comment": "`execution-spec-tests` generated test",
             "filling-transition-tool": "evm version 1.14.6-unstable-7e5dd44a-20240705",
             "description": "Test function documentation:\n\n    Test the DUP1-DUP16 opcodes.\n\n    note: Test case ported from:\n\n        - [ethereum/tests/GeneralStateTests/VMTests/vmTests/dup.json](https://github.com/ethereum/tests/blob/develop/GeneralStateTests/VMTests/vmTests/dup.json)\n        by Ori Pomerantz.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/devnet-1@v1.2.0/tests/frontier/opcodes/test_dup.py#L14"
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/devnet-1@v1.3.0/tests/frontier/opcodes/test_dup.py#L14"
         }
     },
     "tests/frontier/opcodes/test_dup.py::test_dup[fork_Cancun-blockchain_test-DUP2]": {
@@ -20278,7 +20278,7 @@
             "comment": "`execution-spec-tests` generated test",
             "filling-transition-tool": "evm version 1.14.6-unstable-7e5dd44a-20240705",
             "description": "Test function documentation:\n\n    Test the DUP1-DUP16 opcodes.\n\n    note: Test case ported from:\n\n        - [ethereum/tests/GeneralStateTests/VMTests/vmTests/dup.json](https://github.com/ethereum/tests/blob/develop/GeneralStateTests/VMTests/vmTests/dup.json)\n        by Ori Pomerantz.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/devnet-1@v1.2.0/tests/frontier/opcodes/test_dup.py#L14"
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/devnet-1@v1.3.0/tests/frontier/opcodes/test_dup.py#L14"
         }
     },
     "tests/frontier/opcodes/test_dup.py::test_dup[fork_Cancun-blockchain_test-DUP3]": {
@@ -20427,7 +20427,7 @@
             "comment": "`execution-spec-tests` generated test",
             "filling-transition-tool": "evm version 1.14.6-unstable-7e5dd44a-20240705",
             "description": "Test function documentation:\n\n    Test the DUP1-DUP16 opcodes.\n\n    note: Test case ported from:\n\n        - [ethereum/tests/GeneralStateTests/VMTests/vmTests/dup.json](https://github.com/ethereum/tests/blob/develop/GeneralStateTests/VMTests/vmTests/dup.json)\n        by Ori Pomerantz.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/devnet-1@v1.2.0/tests/frontier/opcodes/test_dup.py#L14"
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/devnet-1@v1.3.0/tests/frontier/opcodes/test_dup.py#L14"
         }
     },
     "tests/frontier/opcodes/test_dup.py::test_dup[fork_Cancun-blockchain_test-DUP4]": {
@@ -20576,7 +20576,7 @@
             "comment": "`execution-spec-tests` generated test",
             "filling-transition-tool": "evm version 1.14.6-unstable-7e5dd44a-20240705",
             "description": "Test function documentation:\n\n    Test the DUP1-DUP16 opcodes.\n\n    note: Test case ported from:\n\n        - [ethereum/tests/GeneralStateTests/VMTests/vmTests/dup.json](https://github.com/ethereum/tests/blob/develop/GeneralStateTests/VMTests/vmTests/dup.json)\n        by Ori Pomerantz.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/devnet-1@v1.2.0/tests/frontier/opcodes/test_dup.py#L14"
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/devnet-1@v1.3.0/tests/frontier/opcodes/test_dup.py#L14"
         }
     },
     "tests/frontier/opcodes/test_dup.py::test_dup[fork_Cancun-blockchain_test-DUP5]": {
@@ -20725,7 +20725,7 @@
             "comment": "`execution-spec-tests` generated test",
             "filling-transition-tool": "evm version 1.14.6-unstable-7e5dd44a-20240705",
             "description": "Test function documentation:\n\n    Test the DUP1-DUP16 opcodes.\n\n    note: Test case ported from:\n\n        - [ethereum/tests/GeneralStateTests/VMTests/vmTests/dup.json](https://github.com/ethereum/tests/blob/develop/GeneralStateTests/VMTests/vmTests/dup.json)\n        by Ori Pomerantz.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/devnet-1@v1.2.0/tests/frontier/opcodes/test_dup.py#L14"
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/devnet-1@v1.3.0/tests/frontier/opcodes/test_dup.py#L14"
         }
     },
     "tests/frontier/opcodes/test_dup.py::test_dup[fork_Cancun-blockchain_test-DUP6]": {
@@ -20874,7 +20874,7 @@
             "comment": "`execution-spec-tests` generated test",
             "filling-transition-tool": "evm version 1.14.6-unstable-7e5dd44a-20240705",
             "description": "Test function documentation:\n\n    Test the DUP1-DUP16 opcodes.\n\n    note: Test case ported from:\n\n        - [ethereum/tests/GeneralStateTests/VMTests/vmTests/dup.json](https://github.com/ethereum/tests/blob/develop/GeneralStateTests/VMTests/vmTests/dup.json)\n        by Ori Pomerantz.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/devnet-1@v1.2.0/tests/frontier/opcodes/test_dup.py#L14"
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/devnet-1@v1.3.0/tests/frontier/opcodes/test_dup.py#L14"
         }
     },
     "tests/frontier/opcodes/test_dup.py::test_dup[fork_Cancun-blockchain_test-DUP7]": {
@@ -21023,7 +21023,7 @@
             "comment": "`execution-spec-tests` generated test",
             "filling-transition-tool": "evm version 1.14.6-unstable-7e5dd44a-20240705",
             "description": "Test function documentation:\n\n    Test the DUP1-DUP16 opcodes.\n\n    note: Test case ported from:\n\n        - [ethereum/tests/GeneralStateTests/VMTests/vmTests/dup.json](https://github.com/ethereum/tests/blob/develop/GeneralStateTests/VMTests/vmTests/dup.json)\n        by Ori Pomerantz.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/devnet-1@v1.2.0/tests/frontier/opcodes/test_dup.py#L14"
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/devnet-1@v1.3.0/tests/frontier/opcodes/test_dup.py#L14"
         }
     },
     "tests/frontier/opcodes/test_dup.py::test_dup[fork_Cancun-blockchain_test-DUP8]": {
@@ -21172,7 +21172,7 @@
             "comment": "`execution-spec-tests` generated test",
             "filling-transition-tool": "evm version 1.14.6-unstable-7e5dd44a-20240705",
             "description": "Test function documentation:\n\n    Test the DUP1-DUP16 opcodes.\n\n    note: Test case ported from:\n\n        - [ethereum/tests/GeneralStateTests/VMTests/vmTests/dup.json](https://github.com/ethereum/tests/blob/develop/GeneralStateTests/VMTests/vmTests/dup.json)\n        by Ori Pomerantz.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/devnet-1@v1.2.0/tests/frontier/opcodes/test_dup.py#L14"
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/devnet-1@v1.3.0/tests/frontier/opcodes/test_dup.py#L14"
         }
     },
     "tests/frontier/opcodes/test_dup.py::test_dup[fork_Cancun-blockchain_test-DUP9]": {
@@ -21321,7 +21321,7 @@
             "comment": "`execution-spec-tests` generated test",
             "filling-transition-tool": "evm version 1.14.6-unstable-7e5dd44a-20240705",
             "description": "Test function documentation:\n\n    Test the DUP1-DUP16 opcodes.\n\n    note: Test case ported from:\n\n        - [ethereum/tests/GeneralStateTests/VMTests/vmTests/dup.json](https://github.com/ethereum/tests/blob/develop/GeneralStateTests/VMTests/vmTests/dup.json)\n        by Ori Pomerantz.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/devnet-1@v1.2.0/tests/frontier/opcodes/test_dup.py#L14"
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/devnet-1@v1.3.0/tests/frontier/opcodes/test_dup.py#L14"
         }
     },
     "tests/frontier/opcodes/test_dup.py::test_dup[fork_Cancun-blockchain_test-DUP10]": {
@@ -21470,7 +21470,7 @@
             "comment": "`execution-spec-tests` generated test",
             "filling-transition-tool": "evm version 1.14.6-unstable-7e5dd44a-20240705",
             "description": "Test function documentation:\n\n    Test the DUP1-DUP16 opcodes.\n\n    note: Test case ported from:\n\n        - [ethereum/tests/GeneralStateTests/VMTests/vmTests/dup.json](https://github.com/ethereum/tests/blob/develop/GeneralStateTests/VMTests/vmTests/dup.json)\n        by Ori Pomerantz.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/devnet-1@v1.2.0/tests/frontier/opcodes/test_dup.py#L14"
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/devnet-1@v1.3.0/tests/frontier/opcodes/test_dup.py#L14"
         }
     },
     "tests/frontier/opcodes/test_dup.py::test_dup[fork_Cancun-blockchain_test-DUP11]": {
@@ -21619,7 +21619,7 @@
             "comment": "`execution-spec-tests` generated test",
             "filling-transition-tool": "evm version 1.14.6-unstable-7e5dd44a-20240705",
             "description": "Test function documentation:\n\n    Test the DUP1-DUP16 opcodes.\n\n    note: Test case ported from:\n\n        - [ethereum/tests/GeneralStateTests/VMTests/vmTests/dup.json](https://github.com/ethereum/tests/blob/develop/GeneralStateTests/VMTests/vmTests/dup.json)\n        by Ori Pomerantz.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/devnet-1@v1.2.0/tests/frontier/opcodes/test_dup.py#L14"
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/devnet-1@v1.3.0/tests/frontier/opcodes/test_dup.py#L14"
         }
     },
     "tests/frontier/opcodes/test_dup.py::test_dup[fork_Cancun-blockchain_test-DUP12]": {
@@ -21768,7 +21768,7 @@
             "comment": "`execution-spec-tests` generated test",
             "filling-transition-tool": "evm version 1.14.6-unstable-7e5dd44a-20240705",
             "description": "Test function documentation:\n\n    Test the DUP1-DUP16 opcodes.\n\n    note: Test case ported from:\n\n        - [ethereum/tests/GeneralStateTests/VMTests/vmTests/dup.json](https://github.com/ethereum/tests/blob/develop/GeneralStateTests/VMTests/vmTests/dup.json)\n        by Ori Pomerantz.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/devnet-1@v1.2.0/tests/frontier/opcodes/test_dup.py#L14"
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/devnet-1@v1.3.0/tests/frontier/opcodes/test_dup.py#L14"
         }
     },
     "tests/frontier/opcodes/test_dup.py::test_dup[fork_Cancun-blockchain_test-DUP13]": {
@@ -21917,7 +21917,7 @@
             "comment": "`execution-spec-tests` generated test",
             "filling-transition-tool": "evm version 1.14.6-unstable-7e5dd44a-20240705",
             "description": "Test function documentation:\n\n    Test the DUP1-DUP16 opcodes.\n\n    note: Test case ported from:\n\n        - [ethereum/tests/GeneralStateTests/VMTests/vmTests/dup.json](https://github.com/ethereum/tests/blob/develop/GeneralStateTests/VMTests/vmTests/dup.json)\n        by Ori Pomerantz.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/devnet-1@v1.2.0/tests/frontier/opcodes/test_dup.py#L14"
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/devnet-1@v1.3.0/tests/frontier/opcodes/test_dup.py#L14"
         }
     },
     "tests/frontier/opcodes/test_dup.py::test_dup[fork_Cancun-blockchain_test-DUP14]": {
@@ -22066,7 +22066,7 @@
             "comment": "`execution-spec-tests` generated test",
             "filling-transition-tool": "evm version 1.14.6-unstable-7e5dd44a-20240705",
             "description": "Test function documentation:\n\n    Test the DUP1-DUP16 opcodes.\n\n    note: Test case ported from:\n\n        - [ethereum/tests/GeneralStateTests/VMTests/vmTests/dup.json](https://github.com/ethereum/tests/blob/develop/GeneralStateTests/VMTests/vmTests/dup.json)\n        by Ori Pomerantz.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/devnet-1@v1.2.0/tests/frontier/opcodes/test_dup.py#L14"
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/devnet-1@v1.3.0/tests/frontier/opcodes/test_dup.py#L14"
         }
     },
     "tests/frontier/opcodes/test_dup.py::test_dup[fork_Cancun-blockchain_test-DUP15]": {
@@ -22215,7 +22215,7 @@
             "comment": "`execution-spec-tests` generated test",
             "filling-transition-tool": "evm version 1.14.6-unstable-7e5dd44a-20240705",
             "description": "Test function documentation:\n\n    Test the DUP1-DUP16 opcodes.\n\n    note: Test case ported from:\n\n        - [ethereum/tests/GeneralStateTests/VMTests/vmTests/dup.json](https://github.com/ethereum/tests/blob/develop/GeneralStateTests/VMTests/vmTests/dup.json)\n        by Ori Pomerantz.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/devnet-1@v1.2.0/tests/frontier/opcodes/test_dup.py#L14"
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/devnet-1@v1.3.0/tests/frontier/opcodes/test_dup.py#L14"
         }
     },
     "tests/frontier/opcodes/test_dup.py::test_dup[fork_Cancun-blockchain_test-DUP16]": {
@@ -22364,7 +22364,7 @@
             "comment": "`execution-spec-tests` generated test",
             "filling-transition-tool": "evm version 1.14.6-unstable-7e5dd44a-20240705",
             "description": "Test function documentation:\n\n    Test the DUP1-DUP16 opcodes.\n\n    note: Test case ported from:\n\n        - [ethereum/tests/GeneralStateTests/VMTests/vmTests/dup.json](https://github.com/ethereum/tests/blob/develop/GeneralStateTests/VMTests/vmTests/dup.json)\n        by Ori Pomerantz.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/devnet-1@v1.2.0/tests/frontier/opcodes/test_dup.py#L14"
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/devnet-1@v1.3.0/tests/frontier/opcodes/test_dup.py#L14"
         }
     },
     "tests/frontier/opcodes/test_dup.py::test_dup[fork_Prague-blockchain_test-DUP1]": {
@@ -22632,7 +22632,7 @@
             "comment": "`execution-spec-tests` generated test",
             "filling-transition-tool": "evm version 1.14.6-unstable-7e5dd44a-20240705",
             "description": "Test function documentation:\n\n    Test the DUP1-DUP16 opcodes.\n\n    note: Test case ported from:\n\n        - [ethereum/tests/GeneralStateTests/VMTests/vmTests/dup.json](https://github.com/ethereum/tests/blob/develop/GeneralStateTests/VMTests/vmTests/dup.json)\n        by Ori Pomerantz.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/devnet-1@v1.2.0/tests/frontier/opcodes/test_dup.py#L14"
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/devnet-1@v1.3.0/tests/frontier/opcodes/test_dup.py#L14"
         }
     },
     "tests/frontier/opcodes/test_dup.py::test_dup[fork_Prague-blockchain_test-DUP2]": {
@@ -22900,7 +22900,7 @@
             "comment": "`execution-spec-tests` generated test",
             "filling-transition-tool": "evm version 1.14.6-unstable-7e5dd44a-20240705",
             "description": "Test function documentation:\n\n    Test the DUP1-DUP16 opcodes.\n\n    note: Test case ported from:\n\n        - [ethereum/tests/GeneralStateTests/VMTests/vmTests/dup.json](https://github.com/ethereum/tests/blob/develop/GeneralStateTests/VMTests/vmTests/dup.json)\n        by Ori Pomerantz.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/devnet-1@v1.2.0/tests/frontier/opcodes/test_dup.py#L14"
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/devnet-1@v1.3.0/tests/frontier/opcodes/test_dup.py#L14"
         }
     },
     "tests/frontier/opcodes/test_dup.py::test_dup[fork_Prague-blockchain_test-DUP3]": {
@@ -23168,7 +23168,7 @@
             "comment": "`execution-spec-tests` generated test",
             "filling-transition-tool": "evm version 1.14.6-unstable-7e5dd44a-20240705",
             "description": "Test function documentation:\n\n    Test the DUP1-DUP16 opcodes.\n\n    note: Test case ported from:\n\n        - [ethereum/tests/GeneralStateTests/VMTests/vmTests/dup.json](https://github.com/ethereum/tests/blob/develop/GeneralStateTests/VMTests/vmTests/dup.json)\n        by Ori Pomerantz.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/devnet-1@v1.2.0/tests/frontier/opcodes/test_dup.py#L14"
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/devnet-1@v1.3.0/tests/frontier/opcodes/test_dup.py#L14"
         }
     },
     "tests/frontier/opcodes/test_dup.py::test_dup[fork_Prague-blockchain_test-DUP4]": {
@@ -23436,7 +23436,7 @@
             "comment": "`execution-spec-tests` generated test",
             "filling-transition-tool": "evm version 1.14.6-unstable-7e5dd44a-20240705",
             "description": "Test function documentation:\n\n    Test the DUP1-DUP16 opcodes.\n\n    note: Test case ported from:\n\n        - [ethereum/tests/GeneralStateTests/VMTests/vmTests/dup.json](https://github.com/ethereum/tests/blob/develop/GeneralStateTests/VMTests/vmTests/dup.json)\n        by Ori Pomerantz.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/devnet-1@v1.2.0/tests/frontier/opcodes/test_dup.py#L14"
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/devnet-1@v1.3.0/tests/frontier/opcodes/test_dup.py#L14"
         }
     },
     "tests/frontier/opcodes/test_dup.py::test_dup[fork_Prague-blockchain_test-DUP5]": {
@@ -23704,7 +23704,7 @@
             "comment": "`execution-spec-tests` generated test",
             "filling-transition-tool": "evm version 1.14.6-unstable-7e5dd44a-20240705",
             "description": "Test function documentation:\n\n    Test the DUP1-DUP16 opcodes.\n\n    note: Test case ported from:\n\n        - [ethereum/tests/GeneralStateTests/VMTests/vmTests/dup.json](https://github.com/ethereum/tests/blob/develop/GeneralStateTests/VMTests/vmTests/dup.json)\n        by Ori Pomerantz.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/devnet-1@v1.2.0/tests/frontier/opcodes/test_dup.py#L14"
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/devnet-1@v1.3.0/tests/frontier/opcodes/test_dup.py#L14"
         }
     },
     "tests/frontier/opcodes/test_dup.py::test_dup[fork_Prague-blockchain_test-DUP6]": {
@@ -23972,7 +23972,7 @@
             "comment": "`execution-spec-tests` generated test",
             "filling-transition-tool": "evm version 1.14.6-unstable-7e5dd44a-20240705",
             "description": "Test function documentation:\n\n    Test the DUP1-DUP16 opcodes.\n\n    note: Test case ported from:\n\n        - [ethereum/tests/GeneralStateTests/VMTests/vmTests/dup.json](https://github.com/ethereum/tests/blob/develop/GeneralStateTests/VMTests/vmTests/dup.json)\n        by Ori Pomerantz.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/devnet-1@v1.2.0/tests/frontier/opcodes/test_dup.py#L14"
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/devnet-1@v1.3.0/tests/frontier/opcodes/test_dup.py#L14"
         }
     },
     "tests/frontier/opcodes/test_dup.py::test_dup[fork_Prague-blockchain_test-DUP7]": {
@@ -24240,7 +24240,7 @@
             "comment": "`execution-spec-tests` generated test",
             "filling-transition-tool": "evm version 1.14.6-unstable-7e5dd44a-20240705",
             "description": "Test function documentation:\n\n    Test the DUP1-DUP16 opcodes.\n\n    note: Test case ported from:\n\n        - [ethereum/tests/GeneralStateTests/VMTests/vmTests/dup.json](https://github.com/ethereum/tests/blob/develop/GeneralStateTests/VMTests/vmTests/dup.json)\n        by Ori Pomerantz.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/devnet-1@v1.2.0/tests/frontier/opcodes/test_dup.py#L14"
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/devnet-1@v1.3.0/tests/frontier/opcodes/test_dup.py#L14"
         }
     },
     "tests/frontier/opcodes/test_dup.py::test_dup[fork_Prague-blockchain_test-DUP8]": {
@@ -24508,7 +24508,7 @@
             "comment": "`execution-spec-tests` generated test",
             "filling-transition-tool": "evm version 1.14.6-unstable-7e5dd44a-20240705",
             "description": "Test function documentation:\n\n    Test the DUP1-DUP16 opcodes.\n\n    note: Test case ported from:\n\n        - [ethereum/tests/GeneralStateTests/VMTests/vmTests/dup.json](https://github.com/ethereum/tests/blob/develop/GeneralStateTests/VMTests/vmTests/dup.json)\n        by Ori Pomerantz.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/devnet-1@v1.2.0/tests/frontier/opcodes/test_dup.py#L14"
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/devnet-1@v1.3.0/tests/frontier/opcodes/test_dup.py#L14"
         }
     },
     "tests/frontier/opcodes/test_dup.py::test_dup[fork_Prague-blockchain_test-DUP9]": {
@@ -24776,7 +24776,7 @@
             "comment": "`execution-spec-tests` generated test",
             "filling-transition-tool": "evm version 1.14.6-unstable-7e5dd44a-20240705",
             "description": "Test function documentation:\n\n    Test the DUP1-DUP16 opcodes.\n\n    note: Test case ported from:\n\n        - [ethereum/tests/GeneralStateTests/VMTests/vmTests/dup.json](https://github.com/ethereum/tests/blob/develop/GeneralStateTests/VMTests/vmTests/dup.json)\n        by Ori Pomerantz.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/devnet-1@v1.2.0/tests/frontier/opcodes/test_dup.py#L14"
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/devnet-1@v1.3.0/tests/frontier/opcodes/test_dup.py#L14"
         }
     },
     "tests/frontier/opcodes/test_dup.py::test_dup[fork_Prague-blockchain_test-DUP10]": {
@@ -25044,7 +25044,7 @@
             "comment": "`execution-spec-tests` generated test",
             "filling-transition-tool": "evm version 1.14.6-unstable-7e5dd44a-20240705",
             "description": "Test function documentation:\n\n    Test the DUP1-DUP16 opcodes.\n\n    note: Test case ported from:\n\n        - [ethereum/tests/GeneralStateTests/VMTests/vmTests/dup.json](https://github.com/ethereum/tests/blob/develop/GeneralStateTests/VMTests/vmTests/dup.json)\n        by Ori Pomerantz.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/devnet-1@v1.2.0/tests/frontier/opcodes/test_dup.py#L14"
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/devnet-1@v1.3.0/tests/frontier/opcodes/test_dup.py#L14"
         }
     },
     "tests/frontier/opcodes/test_dup.py::test_dup[fork_Prague-blockchain_test-DUP11]": {
@@ -25312,7 +25312,7 @@
             "comment": "`execution-spec-tests` generated test",
             "filling-transition-tool": "evm version 1.14.6-unstable-7e5dd44a-20240705",
             "description": "Test function documentation:\n\n    Test the DUP1-DUP16 opcodes.\n\n    note: Test case ported from:\n\n        - [ethereum/tests/GeneralStateTests/VMTests/vmTests/dup.json](https://github.com/ethereum/tests/blob/develop/GeneralStateTests/VMTests/vmTests/dup.json)\n        by Ori Pomerantz.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/devnet-1@v1.2.0/tests/frontier/opcodes/test_dup.py#L14"
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/devnet-1@v1.3.0/tests/frontier/opcodes/test_dup.py#L14"
         }
     },
     "tests/frontier/opcodes/test_dup.py::test_dup[fork_Prague-blockchain_test-DUP12]": {
@@ -25580,7 +25580,7 @@
             "comment": "`execution-spec-tests` generated test",
             "filling-transition-tool": "evm version 1.14.6-unstable-7e5dd44a-20240705",
             "description": "Test function documentation:\n\n    Test the DUP1-DUP16 opcodes.\n\n    note: Test case ported from:\n\n        - [ethereum/tests/GeneralStateTests/VMTests/vmTests/dup.json](https://github.com/ethereum/tests/blob/develop/GeneralStateTests/VMTests/vmTests/dup.json)\n        by Ori Pomerantz.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/devnet-1@v1.2.0/tests/frontier/opcodes/test_dup.py#L14"
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/devnet-1@v1.3.0/tests/frontier/opcodes/test_dup.py#L14"
         }
     },
     "tests/frontier/opcodes/test_dup.py::test_dup[fork_Prague-blockchain_test-DUP13]": {
@@ -25848,7 +25848,7 @@
             "comment": "`execution-spec-tests` generated test",
             "filling-transition-tool": "evm version 1.14.6-unstable-7e5dd44a-20240705",
             "description": "Test function documentation:\n\n    Test the DUP1-DUP16 opcodes.\n\n    note: Test case ported from:\n\n        - [ethereum/tests/GeneralStateTests/VMTests/vmTests/dup.json](https://github.com/ethereum/tests/blob/develop/GeneralStateTests/VMTests/vmTests/dup.json)\n        by Ori Pomerantz.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/devnet-1@v1.2.0/tests/frontier/opcodes/test_dup.py#L14"
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/devnet-1@v1.3.0/tests/frontier/opcodes/test_dup.py#L14"
         }
     },
     "tests/frontier/opcodes/test_dup.py::test_dup[fork_Prague-blockchain_test-DUP14]": {
@@ -26116,7 +26116,7 @@
             "comment": "`execution-spec-tests` generated test",
             "filling-transition-tool": "evm version 1.14.6-unstable-7e5dd44a-20240705",
             "description": "Test function documentation:\n\n    Test the DUP1-DUP16 opcodes.\n\n    note: Test case ported from:\n\n        - [ethereum/tests/GeneralStateTests/VMTests/vmTests/dup.json](https://github.com/ethereum/tests/blob/develop/GeneralStateTests/VMTests/vmTests/dup.json)\n        by Ori Pomerantz.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/devnet-1@v1.2.0/tests/frontier/opcodes/test_dup.py#L14"
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/devnet-1@v1.3.0/tests/frontier/opcodes/test_dup.py#L14"
         }
     },
     "tests/frontier/opcodes/test_dup.py::test_dup[fork_Prague-blockchain_test-DUP15]": {
@@ -26384,7 +26384,7 @@
             "comment": "`execution-spec-tests` generated test",
             "filling-transition-tool": "evm version 1.14.6-unstable-7e5dd44a-20240705",
             "description": "Test function documentation:\n\n    Test the DUP1-DUP16 opcodes.\n\n    note: Test case ported from:\n\n        - [ethereum/tests/GeneralStateTests/VMTests/vmTests/dup.json](https://github.com/ethereum/tests/blob/develop/GeneralStateTests/VMTests/vmTests/dup.json)\n        by Ori Pomerantz.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/devnet-1@v1.2.0/tests/frontier/opcodes/test_dup.py#L14"
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/devnet-1@v1.3.0/tests/frontier/opcodes/test_dup.py#L14"
         }
     },
     "tests/frontier/opcodes/test_dup.py::test_dup[fork_Prague-blockchain_test-DUP16]": {
@@ -26652,7 +26652,7 @@
             "comment": "`execution-spec-tests` generated test",
             "filling-transition-tool": "evm version 1.14.6-unstable-7e5dd44a-20240705",
             "description": "Test function documentation:\n\n    Test the DUP1-DUP16 opcodes.\n\n    note: Test case ported from:\n\n        - [ethereum/tests/GeneralStateTests/VMTests/vmTests/dup.json](https://github.com/ethereum/tests/blob/develop/GeneralStateTests/VMTests/vmTests/dup.json)\n        by Ori Pomerantz.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/devnet-1@v1.2.0/tests/frontier/opcodes/test_dup.py#L14"
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/devnet-1@v1.3.0/tests/frontier/opcodes/test_dup.py#L14"
         }
     }
 }

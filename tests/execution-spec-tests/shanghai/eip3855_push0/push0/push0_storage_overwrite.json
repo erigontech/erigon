@@ -112,7 +112,7 @@
             "comment": "`execution-spec-tests` generated test",
             "filling-transition-tool": "evm version 1.14.6-unstable-7e5dd44a-20240705",
             "description": "Test function documentation:\n\n    Update an already existing storage value.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/devnet-1@v1.2.0/tests/shanghai/eip3855_push0/test_push0.py#L116",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/devnet-1@v1.3.0/tests/shanghai/eip3855_push0/test_push0.py#L116",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-3855.md",
             "reference-spec-version": "42034250ae8dd4b21fdc6795773893c6f1e74d3a"
         }
@@ -250,7 +250,7 @@
             "comment": "`execution-spec-tests` generated test",
             "filling-transition-tool": "evm version 1.14.6-unstable-7e5dd44a-20240705",
             "description": "Test function documentation:\n\n    Update an already existing storage value.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/devnet-1@v1.2.0/tests/shanghai/eip3855_push0/test_push0.py#L116",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/devnet-1@v1.3.0/tests/shanghai/eip3855_push0/test_push0.py#L116",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-3855.md",
             "reference-spec-version": "42034250ae8dd4b21fdc6795773893c6f1e74d3a"
         }
@@ -507,7 +507,7 @@
             "comment": "`execution-spec-tests` generated test",
             "filling-transition-tool": "evm version 1.14.6-unstable-7e5dd44a-20240705",
             "description": "Test function documentation:\n\n    Update an already existing storage value.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/devnet-1@v1.2.0/tests/shanghai/eip3855_push0/test_push0.py#L116",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/devnet-1@v1.3.0/tests/shanghai/eip3855_push0/test_push0.py#L116",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-3855.md",
             "reference-spec-version": "42034250ae8dd4b21fdc6795773893c6f1e74d3a"
         }

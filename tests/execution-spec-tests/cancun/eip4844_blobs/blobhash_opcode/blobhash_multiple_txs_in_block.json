@@ -350,7 +350,7 @@
             "comment": "`execution-spec-tests` generated test",
             "filling-transition-tool": "evm version 1.14.6-unstable-7e5dd44a-20240705",
             "description": "Test function documentation:\n\n    Tests that the `BLOBHASH` opcode returns the appropriate values when there\n    is more than 1 blob tx type within a block (for tx types 2 and 3).\n\n    Scenarios involve tx type 3 followed by tx type 2 running the same code\n    within a block, including the opposite.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/devnet-1@v1.2.0/tests/cancun/eip4844_blobs/test_blobhash_opcode.py#L272",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/devnet-1@v1.3.0/tests/cancun/eip4844_blobs/test_blobhash_opcode.py#L272",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-4844.md",
             "reference-spec-version": "f0eb6a364aaf5ccb43516fa2c269a54fb881ecfd"
         }
@@ -835,7 +835,7 @@
             "comment": "`execution-spec-tests` generated test",
             "filling-transition-tool": "evm version 1.14.6-unstable-7e5dd44a-20240705",
             "description": "Test function documentation:\n\n    Tests that the `BLOBHASH` opcode returns the appropriate values when there\n    is more than 1 blob tx type within a block (for tx types 2 and 3).\n\n    Scenarios involve tx type 3 followed by tx type 2 running the same code\n    within a block, including the opposite.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/devnet-1@v1.2.0/tests/cancun/eip4844_blobs/test_blobhash_opcode.py#L272",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/devnet-1@v1.3.0/tests/cancun/eip4844_blobs/test_blobhash_opcode.py#L272",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-4844.md",
             "reference-spec-version": "f0eb6a364aaf5ccb43516fa2c269a54fb881ecfd"
         }

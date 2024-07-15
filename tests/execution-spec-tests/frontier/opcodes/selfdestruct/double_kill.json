@@ -149,7 +149,7 @@
             "comment": "`execution-spec-tests` generated test",
             "filling-transition-tool": "evm version 1.14.6-unstable-7e5dd44a-20240705",
             "description": "Test function documentation:\n\n    Test that when two transactions attempt to destruct a contract,\n    the second transaction actually resurrects the contract as an empty account (prior to Spurious\n    Dragon).",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/devnet-1@v1.2.0/tests/frontier/opcodes/test_selfdestruct.py#L12"
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/devnet-1@v1.3.0/tests/frontier/opcodes/test_selfdestruct.py#L12"
         }
     },
     "tests/frontier/opcodes/test_selfdestruct.py::test_double_kill[fork_Homestead-blockchain_test]": {
@@ -302,7 +302,7 @@
             "comment": "`execution-spec-tests` generated test",
             "filling-transition-tool": "evm version 1.14.6-unstable-7e5dd44a-20240705",
             "description": "Test function documentation:\n\n    Test that when two transactions attempt to destruct a contract,\n    the second transaction actually resurrects the contract as an empty account (prior to Spurious\n    Dragon).",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/devnet-1@v1.2.0/tests/frontier/opcodes/test_selfdestruct.py#L12"
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/devnet-1@v1.3.0/tests/frontier/opcodes/test_selfdestruct.py#L12"
         }
     }
 }

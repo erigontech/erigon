@@ -130,7 +130,7 @@
             "comment": "`execution-spec-tests` generated test",
             "filling-transition-tool": "evm version 1.14.6-unstable-7e5dd44a-20240705",
             "description": "Test function documentation:\n\n    Test valid sanity precompile calls that are expected to succeed.\n\n    - `kzg_commitment` and `kzg_proof` are set to values such that `p(z)==0` for all values of `z`,\n    hence `y` is tested to be zero, and call to be successful.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/devnet-1@v1.2.0/tests/cancun/eip4844_blobs/test_point_evaluation_precompile.py#L242",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/devnet-1@v1.3.0/tests/cancun/eip4844_blobs/test_point_evaluation_precompile.py#L242",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-4844.md",
             "reference-spec-version": "f0eb6a364aaf5ccb43516fa2c269a54fb881ecfd"
         }
@@ -385,7 +385,7 @@
             "comment": "`execution-spec-tests` generated test",
             "filling-transition-tool": "evm version 1.14.6-unstable-7e5dd44a-20240705",
             "description": "Test function documentation:\n\n    Test valid sanity precompile calls that are expected to succeed.\n\n    - `kzg_commitment` and `kzg_proof` are set to values such that `p(z)==0` for all values of `z`,\n    hence `y` is tested to be zero, and call to be successful.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/devnet-1@v1.2.0/tests/cancun/eip4844_blobs/test_point_evaluation_precompile.py#L242",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/devnet-1@v1.3.0/tests/cancun/eip4844_blobs/test_point_evaluation_precompile.py#L242",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-4844.md",
             "reference-spec-version": "f0eb6a364aaf5ccb43516fa2c269a54fb881ecfd"
         }
