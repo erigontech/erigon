@@ -27,8 +27,8 @@ import (
 	"go.uber.org/mock/gomock"
 
 	"github.com/ledgerwatch/erigon-lib/common/hexutility"
-	"github.com/ledgerwatch/erigon-lib/kv/iter"
 	"github.com/ledgerwatch/erigon-lib/kv/order"
+	"github.com/ledgerwatch/erigon-lib/kv/stream"
 	"github.com/ledgerwatch/erigon-lib/log/v3"
 
 	"github.com/stretchr/testify/require"
@@ -105,10 +105,10 @@ func TestAppendableCollationBuild(t *testing.T) {
 	//see only canonical records in files
 	iters := NewMockCanonicalsReader(ctrl)
 	iters.EXPECT().TxnIdsOfCanonicalBlocks(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).
-		DoAndReturn(func(tx kv.Tx, txFrom, txTo int, by order.By, i3 int) (iter.U64, error) {
+		DoAndReturn(func(tx kv.Tx, txFrom, txTo int, by order.By, i3 int) (stream.U64, error) {
 			currentStep := uint64(txFrom) / aggStep
 			canonicalBlockTxNum := aggStep*currentStep + 1
-			it := iter.Array[uint64]([]uint64{canonicalBlockTxNum})
+			it := stream.Array[uint64]([]uint64{canonicalBlockTxNum})
 			return it, nil
 		}).
 		AnyTimes()
@@ -139,7 +139,7 @@ func TestAppendableCollationBuild(t *testing.T) {
 		ii, err := NewAppendable(ii.cfg, ii.aggregationStep, ii.filenameBase, ii.table, nil, log.New())
 		require.NoError(err)
 		defer ii.Close()
-		err = ii.OpenFolder(true)
+		err = ii.openFolder(true)
 		require.NoError(err)
 		require.Equal(5, ii.dirtyFiles.Len())
 		require.Equal(0, len(ii._visibleFiles))
@@ -172,7 +172,7 @@ func TestAppendableCollationBuild(t *testing.T) {
 		err = os.WriteFile(fn, make([]byte, 33), 0644)
 		require.NoError(err)
 
-		err = ii.OpenFolder(true)
+		err = ii.openFolder(true)
 		require.NoError(err)
 		ii.Close()
 	})
@@ -309,13 +309,13 @@ func TestAppendableScanStaticFiles(t *testing.T) {
 		"v1-test.3-4.ap",
 		"v1-test.4-5.ap",
 	}
-	ii.scanStateFiles(files)
+	ii.scanDirtyFiles(files)
 	require.Equal(t, 6, ii.dirtyFiles.Len())
 
 	//integrity extension case
 	ii.dirtyFiles.Clear()
 	ii.integrityCheck = func(fromStep, toStep uint64) bool { return false }
-	ii.scanStateFiles(files)
+	ii.scanDirtyFiles(files)
 	require.Equal(t, 0, ii.dirtyFiles.Len())
 }
 
@@ -333,7 +333,7 @@ func TestAppendableCtxFiles(t *testing.T) {
 		"v1-test.480-496.ap",
 		"v1-test.480-512.ap",
 	}
-	ii.scanStateFiles(files)
+	ii.scanDirtyFiles(files)
 	require.Equal(t, 10, ii.dirtyFiles.Len())
 	ii.dirtyFiles.Scan(func(item *filesItem) bool {
 		fName := ii.apFilePath(item.startTxNum/ii.aggregationStep, item.endTxNum/ii.aggregationStep)

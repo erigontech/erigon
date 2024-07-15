@@ -25,9 +25,9 @@ import (
 
 	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon-lib/kv/iter"
 	"github.com/ledgerwatch/erigon-lib/kv/mdbx"
 	"github.com/ledgerwatch/erigon-lib/kv/order"
+	"github.com/ledgerwatch/erigon-lib/kv/stream"
 	"github.com/ledgerwatch/erigon-lib/log/v3"
 )
 
@@ -239,26 +239,26 @@ func (m *MemoryMutation) ForEach(bucket string, fromPrefix []byte, walker func(k
 	return nil
 }
 
-func (m *MemoryMutation) Prefix(table string, prefix []byte) (iter.KV, error) {
+func (m *MemoryMutation) Prefix(table string, prefix []byte) (stream.KV, error) {
 	nextPrefix, ok := kv.NextSubtree(prefix)
 	if !ok {
 		return m.Range(table, prefix, nil)
 	}
 	return m.Range(table, prefix, nextPrefix)
 }
-func (m *MemoryMutation) Stream(table string, fromPrefix, toPrefix []byte) (iter.KV, error) {
+func (m *MemoryMutation) Stream(table string, fromPrefix, toPrefix []byte) (stream.KV, error) {
 	panic("please implement me")
 }
-func (m *MemoryMutation) StreamAscend(table string, fromPrefix, toPrefix []byte, limit int) (iter.KV, error) {
+func (m *MemoryMutation) StreamAscend(table string, fromPrefix, toPrefix []byte, limit int) (stream.KV, error) {
 	panic("please implement me")
 }
-func (m *MemoryMutation) StreamDescend(table string, fromPrefix, toPrefix []byte, limit int) (iter.KV, error) {
+func (m *MemoryMutation) StreamDescend(table string, fromPrefix, toPrefix []byte, limit int) (stream.KV, error) {
 	panic("please implement me")
 }
-func (m *MemoryMutation) Range(table string, fromPrefix, toPrefix []byte) (iter.KV, error) {
+func (m *MemoryMutation) Range(table string, fromPrefix, toPrefix []byte) (stream.KV, error) {
 	return m.RangeAscend(table, fromPrefix, toPrefix, -1)
 }
-func (m *MemoryMutation) RangeAscend(table string, fromPrefix, toPrefix []byte, limit int) (iter.KV, error) {
+func (m *MemoryMutation) RangeAscend(table string, fromPrefix, toPrefix []byte, limit int) (stream.KV, error) {
 	s := &rangeIter{orderAscend: true, limit: int64(limit)}
 	var err error
 	if s.iterDb, err = m.db.RangeAscend(table, fromPrefix, toPrefix, limit); err != nil {
@@ -273,7 +273,7 @@ func (m *MemoryMutation) RangeAscend(table string, fromPrefix, toPrefix []byte, 
 	}
 	return s, nil
 }
-func (m *MemoryMutation) RangeDescend(table string, fromPrefix, toPrefix []byte, limit int) (iter.KV, error) {
+func (m *MemoryMutation) RangeDescend(table string, fromPrefix, toPrefix []byte, limit int) (stream.KV, error) {
 	s := &rangeIter{orderAscend: false, limit: int64(limit)}
 	var err error
 	if s.iterDb, err = m.db.RangeDescend(table, fromPrefix, toPrefix, limit); err != nil {
@@ -290,7 +290,7 @@ func (m *MemoryMutation) RangeDescend(table string, fromPrefix, toPrefix []byte,
 }
 
 type rangeIter struct {
-	iterDb, iterMem                      iter.KV
+	iterDb, iterMem                      stream.KV
 	hasNextDb, hasNextMem                bool
 	nextKdb, nextVdb, nextKmem, nextVmem []byte
 	orderAscend                          bool
@@ -356,7 +356,7 @@ func (s *rangeIter) Next() (k, v []byte, err error) {
 	return
 }
 
-func (m *MemoryMutation) RangeDupSort(table string, key []byte, fromPrefix, toPrefix []byte, asc order.By, limit int) (iter.KV, error) {
+func (m *MemoryMutation) RangeDupSort(table string, key []byte, fromPrefix, toPrefix []byte, asc order.By, limit int) (stream.KV, error) {
 	s := &rangeDupSortIter{key: key, orderAscend: bool(asc), limit: int64(limit)}
 	var err error
 	if s.iterDb, err = m.db.RangeDupSort(table, key, fromPrefix, toPrefix, asc, limit); err != nil {
@@ -373,7 +373,7 @@ func (m *MemoryMutation) RangeDupSort(table string, key []byte, fromPrefix, toPr
 }
 
 type rangeDupSortIter struct {
-	iterDb, iterMem       iter.KV
+	iterDb, iterMem       stream.KV
 	hasNextDb, hasNextMem bool
 	key                   []byte
 	nextVdb, nextVmem     []byte
@@ -741,14 +741,18 @@ func (m *MemoryMutation) HistorySeek(name kv.History, k []byte, ts uint64) (v []
 	return m.db.(kv.TemporalTx).HistorySeek(name, k, ts)
 }
 
-func (m *MemoryMutation) IndexRange(name kv.InvertedIdx, k []byte, fromTs, toTs int, asc order.By, limit int) (timestamps iter.U64, err error) {
+func (m *MemoryMutation) IndexRange(name kv.InvertedIdx, k []byte, fromTs, toTs int, asc order.By, limit int) (timestamps stream.U64, err error) {
 	return m.db.(kv.TemporalTx).IndexRange(name, k, fromTs, toTs, asc, limit)
 }
 
-func (m *MemoryMutation) HistoryRange(name kv.History, fromTs, toTs int, asc order.By, limit int) (it iter.KV, err error) {
+func (m *MemoryMutation) HistoryRange(name kv.History, fromTs, toTs int, asc order.By, limit int) (it stream.KV, err error) {
 	return m.db.(kv.TemporalTx).HistoryRange(name, fromTs, toTs, asc, limit)
 }
 
-func (m *MemoryMutation) DomainRange(name kv.Domain, fromKey, toKey []byte, ts uint64, asc order.By, limit int) (it iter.KV, err error) {
+func (m *MemoryMutation) DomainRange(name kv.Domain, fromKey, toKey []byte, ts uint64, asc order.By, limit int) (it stream.KV, err error) {
 	return m.db.(kv.TemporalTx).DomainRange(name, fromKey, toKey, ts, asc, limit)
+}
+
+func (m *MemoryMutation) AppendableGet(name kv.Appendable, ts kv.TxnId) ([]byte, bool, error) {
+	return m.db.(kv.TemporalTx).AppendableGet(name, ts)
 }

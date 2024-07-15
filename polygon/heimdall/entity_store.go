@@ -23,7 +23,7 @@ import (
 	"sync"
 
 	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon-lib/kv/iter"
+	"github.com/ledgerwatch/erigon-lib/kv/stream"
 	"github.com/ledgerwatch/erigon/polygon/polygoncommon"
 )
 
@@ -88,7 +88,7 @@ func (s *mdbxEntityStore[TEntity]) Prepare(ctx context.Context) error {
 		if err != nil {
 			return
 		}
-		iteratorFactory := func(tx kv.Tx) (iter.KV, error) { return tx.Range(s.table, nil, nil) }
+		iteratorFactory := func(tx kv.Tx) (stream.KV, error) { return tx.Range(s.table, nil, nil) }
 		err = buildBlockNumToIdIndex(ctx, s.blockNumToIdIndex, s.db.BeginRo, iteratorFactory, s.entityUnmarshalJSON)
 	})
 	return err
@@ -264,7 +264,7 @@ func buildBlockNumToIdIndex[TEntity Entity](
 	ctx context.Context,
 	index *RangeIndex,
 	txFactory func(context.Context) (kv.Tx, error),
-	iteratorFactory func(tx kv.Tx) (iter.KV, error),
+	iteratorFactory func(tx kv.Tx) (stream.KV, error),
 	entityUnmarshalJSON func([]byte) (TEntity, error),
 ) error {
 	tx, err := txFactory(ctx)

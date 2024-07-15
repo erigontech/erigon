@@ -716,6 +716,11 @@ func (s *ValidatorSafeContract) signalEpochEnd(firstInEpoch bool, header *types.
 		}
 		return nil, nil
 	}
+	if len(r) > 0 && r[0].Bloom.IsEmpty() {
+		for _, receipt := range r {
+			receipt.Bloom = types.CreateBloom(types.Receipts{receipt})
+		}
+	}
 	proof, err := rlp.EncodeToBytes(ValidatorSetProof{Header: header, Receipts: r})
 	if err != nil {
 		return nil, err

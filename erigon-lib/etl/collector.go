@@ -226,7 +226,7 @@ func (c *Collector) Load(db kv.RwTx, toBucket string, loadFunc LoadFunc, args Tr
 		isNil := (c.bufType == SortableSliceBuffer && v == nil) ||
 			(c.bufType == SortableAppendBuffer && len(v) == 0) || //backward compatibility
 			(c.bufType == SortableOldestAppearedBuffer && len(v) == 0)
-		if isNil {
+		if isNil && !args.EmptyVals {
 			if canUseAppend {
 				return nil // nothing to delete after end of bucket
 			}
@@ -234,6 +234,9 @@ func (c *Collector) Load(db kv.RwTx, toBucket string, loadFunc LoadFunc, args Tr
 				return err
 			}
 			return nil
+		}
+		if len(v) == 0 && args.EmptyVals {
+			v = []byte{} // Append empty value
 		}
 		if canUseAppend {
 			if isDupSort {

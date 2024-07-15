@@ -27,9 +27,9 @@ import (
 	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/bitmapdb"
-	"github.com/ledgerwatch/erigon-lib/kv/iter"
 	"github.com/ledgerwatch/erigon-lib/kv/order"
 	"github.com/ledgerwatch/erigon-lib/kv/rawdbv3"
+	"github.com/ledgerwatch/erigon-lib/kv/stream"
 
 	"github.com/ledgerwatch/erigon/cmd/state/exec3"
 	"github.com/ledgerwatch/erigon/core"
@@ -251,7 +251,7 @@ func applyFilters(out *roaring.Bitmap, tx kv.Tx, begin, end uint64, crit filters
 	return nil
 }
 
-func applyFiltersV3(tx kv.TemporalTx, begin, end uint64, crit filters.FilterCriteria) (out iter.U64, err error) {
+func applyFiltersV3(tx kv.TemporalTx, begin, end uint64, crit filters.FilterCriteria) (out stream.U64, err error) {
 	//[from,to)
 	var fromTxNum, toTxNum uint64
 	if begin > 0 {
@@ -281,11 +281,11 @@ func applyFiltersV3(tx kv.TemporalTx, begin, end uint64, crit filters.FilterCrit
 		if out == nil {
 			out = addrBitmap
 		} else {
-			out = iter.Intersect[uint64](out, addrBitmap, -1)
+			out = stream.Intersect[uint64](out, addrBitmap, -1)
 		}
 	}
 	if out == nil {
-		out = iter.Range[uint64](fromTxNum, toTxNum)
+		out = stream.Range[uint64](fromTxNum, toTxNum)
 	}
 	return out, nil
 }
@@ -311,13 +311,13 @@ func (api *APIImpl) getLogsV3(ctx context.Context, tx kv.TemporalTx, begin, end 
 	if err != nil {
 		return logs, err
 	}
-	iter := rawdbv3.TxNums2BlockNums(tx, txNumbers, order.Asc)
-	defer iter.Close()
-	for iter.HasNext() {
+	it := rawdbv3.TxNums2BlockNums(tx, txNumbers, order.Asc)
+	defer it.Close()
+	for it.HasNext() {
 		if err = ctx.Err(); err != nil {
 			return nil, err
 		}
-		txNum, blockNum, txIndex, isFinalTxn, blockNumChanged, err := iter.Next()
+		txNum, blockNum, txIndex, isFinalTxn, blockNumChanged, err := it.Next()
 		if err != nil {
 			return nil, err
 		}
@@ -383,34 +383,34 @@ func (api *APIImpl) getLogsV3(ctx context.Context, tx kv.TemporalTx, begin, end 
 // {{}, {B}}          matches any topic in first position AND B in second position
 // {{A}, {B}}         matches topic A in first position AND B in second position
 // {{A, B}, {C, D}}   matches topic (A OR B) in first position AND (C OR D) in second position
-func getTopicsBitmapV3(tx kv.TemporalTx, topics [][]common.Hash, from, to uint64) (res iter.U64, err error) {
+func getTopicsBitmapV3(tx kv.TemporalTx, topics [][]common.Hash, from, to uint64) (res stream.U64, err error) {
 	for _, sub := range topics {
 
-		var topicsUnion iter.U64
+		var topicsUnion stream.U64
 		for _, topic := range sub {
 			it, err := tx.IndexRange(kv.LogTopicIdx, topic.Bytes(), int(from), int(to), order.Asc, kv.Unlim)
 			if err != nil {
 				return nil, err
 			}
-			topicsUnion = iter.Union[uint64](topicsUnion, it, order.Asc, -1)
+			topicsUnion = stream.Union[uint64](topicsUnion, it, order.Asc, -1)
 		}
 
 		if res == nil {
 			res = topicsUnion
 			continue
 		}
-		res = iter.Intersect[uint64](res, topicsUnion, -1)
+		res = stream.Intersect[uint64](res, topicsUnion, -1)
 	}
 	return res, nil
 }
 
-func getAddrsBitmapV3(tx kv.TemporalTx, addrs []common.Address, from, to uint64) (res iter.U64, err error) {
+func getAddrsBitmapV3(tx kv.TemporalTx, addrs []common.Address, from, to uint64) (res stream.U64, err error) {
 	for _, addr := range addrs {
 		it, err := tx.IndexRange(kv.LogAddrIdx, addr[:], int(from), int(to), true, kv.Unlim)
 		if err != nil {
 			return nil, err
 		}
-		res = iter.Union[uint64](res, it, order.Asc, -1)
+		res = stream.Union[uint64](res, it, order.Asc, -1)
 	}
 	return res, nil
 }
@@ -554,7 +554,7 @@ func (api *APIImpl) GetBlockReceipts(ctx context.Context, numberOrHash rpc.Block
 //
 //	it allow certain optimizations.
 type MapTxNum2BlockNumIter struct {
-	it          iter.U64
+	it          stream.U64
 	tx          kv.Tx
 	orderAscend bool
 
@@ -562,10 +562,10 @@ type MapTxNum2BlockNumIter struct {
 	minTxNumInBlock, maxTxNumInBlock uint64
 }
 
-func MapTxNum2BlockNum(tx kv.Tx, it iter.U64) *MapTxNum2BlockNumIter {
+func MapTxNum2BlockNum(tx kv.Tx, it stream.U64) *MapTxNum2BlockNumIter {
 	return &MapTxNum2BlockNumIter{tx: tx, it: it, orderAscend: true}
 }
-func MapDescendTxNum2BlockNum(tx kv.Tx, it iter.U64) *MapTxNum2BlockNumIter {
+func MapDescendTxNum2BlockNum(tx kv.Tx, it stream.U64) *MapTxNum2BlockNumIter {
 	return &MapTxNum2BlockNumIter{tx: tx, it: it, orderAscend: false}
 }
 func (i *MapTxNum2BlockNumIter) HasNext() bool { return i.it.HasNext() }

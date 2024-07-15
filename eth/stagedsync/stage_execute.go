@@ -57,30 +57,23 @@ const (
 	stateStreamLimit uint64 = 1_000
 )
 
-type HasChangeSetWriter interface {
-	ChangeSetWriter() *state.ChangeSetWriter
-}
-
-type ChangeSetHook func(blockNum uint64, wr *state.ChangeSetWriter)
-
 type headerDownloader interface {
 	ReportBadHeaderPoS(badHeader, lastValidAncestor common.Hash)
 }
 
 type ExecuteBlockCfg struct {
-	db            kv.RwDB
-	batchSize     datasize.ByteSize
-	prune         prune.Mode
-	changeSetHook ChangeSetHook
-	chainConfig   *chain.Config
-	engine        consensus.Engine
-	vmConfig      *vm.Config
-	badBlockHalt  bool
-	stateStream   bool
-	accumulator   *shards.Accumulator
-	blockReader   services.FullBlockReader
-	hd            headerDownloader
-	author        *common.Address
+	db           kv.RwDB
+	batchSize    datasize.ByteSize
+	prune        prune.Mode
+	chainConfig  *chain.Config
+	engine       consensus.Engine
+	vmConfig     *vm.Config
+	badBlockHalt bool
+	stateStream  bool
+	accumulator  *shards.Accumulator
+	blockReader  services.FullBlockReader
+	hd           headerDownloader
+	author       *common.Address
 	// last valid number of the stage
 
 	dirs      datadir.Dirs
@@ -97,7 +90,6 @@ func StageExecuteBlocksCfg(
 	db kv.RwDB,
 	pm prune.Mode,
 	batchSize datasize.ByteSize,
-	changeSetHook ChangeSetHook,
 	chainConfig *chain.Config,
 	engine consensus.Engine,
 	vmConfig *vm.Config,
@@ -114,24 +106,23 @@ func StageExecuteBlocksCfg(
 	silkworm *silkworm.Silkworm,
 ) ExecuteBlockCfg {
 	return ExecuteBlockCfg{
-		db:            db,
-		prune:         pm,
-		batchSize:     batchSize,
-		changeSetHook: changeSetHook,
-		chainConfig:   chainConfig,
-		engine:        engine,
-		vmConfig:      vmConfig,
-		dirs:          dirs,
-		accumulator:   accumulator,
-		stateStream:   stateStream,
-		badBlockHalt:  badBlockHalt,
-		blockReader:   blockReader,
-		hd:            hd,
-		genesis:       genesis,
-		historyV3:     true,
-		syncCfg:       syncCfg,
-		agg:           agg,
-		silkworm:      silkworm,
+		db:           db,
+		prune:        pm,
+		batchSize:    batchSize,
+		chainConfig:  chainConfig,
+		engine:       engine,
+		vmConfig:     vmConfig,
+		dirs:         dirs,
+		accumulator:  accumulator,
+		stateStream:  stateStream,
+		badBlockHalt: badBlockHalt,
+		blockReader:  blockReader,
+		hd:           hd,
+		genesis:      genesis,
+		historyV3:    true,
+		syncCfg:      syncCfg,
+		agg:          agg,
+		silkworm:     silkworm,
 	}
 }
 
@@ -161,26 +152,6 @@ func ExecBlockV3(s *StageState, u Unwinder, txc wrap.TxContainer, toBlock uint64
 		return err
 	}
 	return nil
-}
-
-// reconstituteBlock - First block which is not covered by the history snapshot files
-func reconstituteBlock(agg *libstate.Aggregator, db kv.RoDB, tx kv.Tx) (n uint64, ok bool, err error) {
-	sendersProgress, err := senderStageProgress(tx, db)
-	if err != nil {
-		return 0, false, err
-	}
-	reconToBlock := min(sendersProgress, agg.EndTxNumDomainsFrozen())
-	if tx == nil {
-		if err = db.View(context.Background(), func(tx kv.Tx) error {
-			ok, n, err = rawdbv3.TxNums.FindBlockNum(tx, reconToBlock)
-			return err
-		}); err != nil {
-			return
-		}
-	} else {
-		ok, n, err = rawdbv3.TxNums.FindBlockNum(tx, reconToBlock)
-	}
-	return
 }
 
 var ErrTooDeepUnwind = fmt.Errorf("too deep unwind")
@@ -270,7 +241,7 @@ func SpawnExecuteBlocksStage(s *StageState, u Unwinder, txc wrap.TxContainer, to
 	return nil
 }
 
-func blocksReadAhead(ctx context.Context, cfg *ExecuteBlockCfg, workers int, engine consensus.Engine, histV3 bool) (chan uint64, context.CancelFunc) {
+func blocksReadAhead(ctx context.Context, cfg *ExecuteBlockCfg, workers int, histV3 bool) (chan uint64, context.CancelFunc) {
 	const readAheadBlocks = 100
 	readAhead := make(chan uint64, readAheadBlocks)
 	g, gCtx := errgroup.WithContext(ctx)
@@ -305,7 +276,7 @@ func blocksReadAhead(ctx context.Context, cfg *ExecuteBlockCfg, workers int, eng
 					}
 				}
 
-				if err := blocksReadAheadFunc(gCtx, tx, cfg, bn+readAheadBlocks, engine, histV3); err != nil {
+				if err := blocksReadAheadFunc(gCtx, tx, cfg, bn+readAheadBlocks, histV3); err != nil {
 					return err
 				}
 			}
@@ -316,7 +287,7 @@ func blocksReadAhead(ctx context.Context, cfg *ExecuteBlockCfg, workers int, eng
 		_ = g.Wait()
 	}
 }
-func blocksReadAheadFunc(ctx context.Context, tx kv.Tx, cfg *ExecuteBlockCfg, blockNum uint64, engine consensus.Engine, histV3 bool) error {
+func blocksReadAheadFunc(ctx context.Context, tx kv.Tx, cfg *ExecuteBlockCfg, blockNum uint64, histV3 bool) error {
 	block, err := cfg.blockReader.BlockByNumber(ctx, tx, blockNum)
 	if err != nil {
 		return err
@@ -328,34 +299,6 @@ func blocksReadAheadFunc(ctx context.Context, tx kv.Tx, cfg *ExecuteBlockCfg, bl
 	if histV3 {
 		return nil
 	}
-
-	senders := block.Body().SendersFromTxs()     //TODO: BlockByNumber can return senders
-	stateReader := state.NewPlainStateReader(tx) //TODO: can do on batch! if make batch thread-safe
-	for _, sender := range senders {
-		a, _ := stateReader.ReadAccountData(sender)
-		if a == nil || a.Incarnation == 0 {
-			continue
-		}
-		if code, _ := stateReader.ReadAccountCode(sender, a.Incarnation, a.CodeHash); len(code) > 0 {
-			_, _ = code[0], code[len(code)-1]
-		}
-	}
-
-	for _, txn := range block.Transactions() {
-		to := txn.GetTo()
-		if to == nil {
-			continue
-		}
-		a, _ := stateReader.ReadAccountData(*to)
-		if a == nil || a.Incarnation == 0 {
-			continue
-		}
-		if code, _ := stateReader.ReadAccountCode(*to, a.Incarnation, a.CodeHash); len(code) > 0 {
-			_, _ = code[0], code[len(code)-1]
-		}
-	}
-	_, _ = stateReader.ReadAccountData(block.Coinbase())
-	_, _ = block, senders
 	return nil
 }
 

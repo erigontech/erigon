@@ -493,20 +493,6 @@ func (s *Sync) PrintTimings() []interface{} {
 	return logCtx
 }
 
-func CollectDBMetrics(db kv.RoDB, tx kv.RwTx) []interface{} {
-	res := CollectTableSizes(db, tx, []string{
-		kv.PlainState,
-		kv.AccountChangeSet,
-		kv.StorageChangeSet,
-		kv.EthTx,
-		kv.Log,
-	})
-
-	tx.CollectMetrics()
-
-	return res
-}
-
 func CollectTableSizes(db kv.RoDB, tx kv.Tx, buckets []string) []interface{} {
 	if tx == nil {
 		return nil
