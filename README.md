@@ -192,6 +192,7 @@ Resource Utilisation config:
 
 Useful config entries:
 - `zkevm.sync-limit`: This will ensure the network only syncs to a given block height.
+- `debug.timers`: This will enable debug timers in the logs to help with performance tuning. Recording timings of witness generation, etc. at INFO level.
 
 ***
 

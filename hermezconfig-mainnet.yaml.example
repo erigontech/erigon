@@ -25,6 +25,8 @@ zkevm.l1-first-block: 16896700
 zkevm.rpc-ratelimit: 250
 zkevm.datastream-version: 2
 
+# debug.timers: true # Uncomment to enable timers
+
 externalcl: true
 http.api: [eth, debug, net, trace, web3, erigon, zkevm]
 http.addr: 0.0.0.0

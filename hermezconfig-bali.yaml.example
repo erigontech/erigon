@@ -25,6 +25,8 @@ txpool.disable: true
 torrent.port: 42070
 zkevm.datastream-version: 2
 
+# debug.timers: true # Uncomment to enable timers
+
 externalcl: true
 http.api: [eth, debug, net, trace, web3, erigon, zkevm]
 http.addr: 0.0.0.0
