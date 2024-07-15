@@ -527,14 +527,14 @@ func (s *RoSnapshots) unlockSegments() {
 }
 func (s *RoSnapshots) rLockSegments() {
 	s.segments.Scan(func(segtype snaptype.Enum, value *segments) bool {
-		value.lock.Lock()
+		value.lock.RLock()
 		return true
 	})
 }
 
 func (s *RoSnapshots) rUnlockSegments() {
 	s.segments.Scan(func(segtype snaptype.Enum, value *segments) bool {
-		value.lock.Unlock()
+		value.lock.RUnlock()
 		return true
 	})
 }
