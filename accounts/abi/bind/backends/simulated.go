@@ -114,9 +114,6 @@ func NewSimulatedBackendWithConfig(t *testing.T, alloc types.GenesisAlloc, confi
 		},
 	}
 	backend.emptyPendingBlock()
-	if t != nil {
-		t.Cleanup(m.Close)
-	}
 	return backend
 }
 
