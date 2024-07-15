@@ -102,7 +102,7 @@ func (a *ApiHandler) PostEthV1BuilderRegisterValidator(w http.ResponseWriter, r 
 		return nil, beaconhttp.NewEndpointError(http.StatusInternalServerError, err)
 	}
 	for _, v := range registerReq {
-		a.logger.Debug("[Caplin] Registred new validator", "fee_recipient", v.Message.FeeRecipient)
+		a.logger.Debug("[Caplin] Registered new validator", "fee_recipient", v.Message.FeeRecipient)
 	}
 	log.Info("Registered new validator", "count", len(registerReq))
 	return newBeaconResponse(nil), nil
