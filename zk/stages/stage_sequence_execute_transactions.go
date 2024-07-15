@@ -185,11 +185,13 @@ func attemptAddTransaction(
 	forkId, l1InfoIndex uint64,
 	blockDataSizeChecker *BlockDataChecker,
 ) (*types.Receipt, *core.ExecutionResult, bool, error) {
+	var batchDataOverflow, overflow bool
+	var err error
+
 	txCounters := vm.NewTransactionCounter(transaction, sdb.smt.GetDepth(), uint16(forkId), cfg.zk.VirtualCountersSmtReduction, cfg.zk.ShouldCountersBeUnlimited(l1Recovery))
-	overflow, err := batchCounters.AddNewTransactionCounters(txCounters)
+	overflow, err = batchCounters.AddNewTransactionCounters(txCounters)
 
 	// run this only once the first time, do not add it on rerun
-	var batchDataOverflow bool
 	if blockDataSizeChecker != nil {
 		txL2Data, err := txCounters.GetL2DataCache()
 		if err != nil {
@@ -215,8 +217,11 @@ func attemptAddTransaction(
 
 	// TODO: possibly inject zero tracer here!
 
+	snapshot := ibs.Snapshot()
 	ibs.Prepare(transaction.Hash(), common.Hash{}, 0)
 	evm := vm.NewZkEVM(*blockContext, evmtypes.TxContext{}, ibs, cfg.chainConfig, *cfg.zkVmConfig)
+
+	gasUsed := header.GasUsed
 
 	receipt, execResult, err := core.ApplyTransaction_zkevm(
 		cfg.chainConfig,
@@ -227,13 +232,31 @@ func attemptAddTransaction(
 		noop,
 		header,
 		transaction,
-		&header.GasUsed,
+		&gasUsed,
 		effectiveGasPrice,
+		false,
 	)
 
 	if err != nil {
 		return nil, nil, false, err
 	}
+
+	if err = txCounters.ProcessTx(ibs, execResult.ReturnData); err != nil {
+		return nil, nil, false, err
+	}
+
+	// now that we have executed we can check again for an overflow
+	if overflow, err = batchCounters.CheckForOverflow(l1InfoIndex != 0); err != nil {
+		return nil, nil, false, err
+	}
+
+	if overflow {
+		ibs.RevertToSnapshot(snapshot)
+		return nil, nil, true, err
+	}
+
+	// add the gas only if not reverted. This should not be moved above the overflow check
+	header.GasUsed = gasUsed
 
 	// we need to keep hold of the effective percentage used
 	// todo [zkevm] for now we're hard coding to the max value but we need to calc this properly
@@ -241,13 +264,7 @@ func attemptAddTransaction(
 		return nil, nil, false, err
 	}
 
-	err = txCounters.ProcessTx(ibs, execResult.ReturnData)
-	if err != nil {
-		return nil, nil, false, err
-	}
-
-	// now that we have executed we can check again for an overflow
-	overflow, err = batchCounters.CheckForOverflow(l1InfoIndex != 0)
+	ibs.FinalizeTx(evm.ChainRules(), noop)
 
 	return receipt, execResult, overflow, err
 }

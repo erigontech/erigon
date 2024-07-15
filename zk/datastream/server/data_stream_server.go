@@ -326,20 +326,29 @@ func (srv *DataStreamServer) GetHighestBlockNumber() (uint64, error) {
 		if err != nil {
 			return 0, err
 		}
-		if entry.Type == datastreamer.EntryType(2) {
+		if uint32(entry.Type) == uint32(types.EntryTypeL2Block) || uint32(entry.Type) == uint32(types.EntryTypeL2Tx) {
 			break
 		}
 		entryNum -= 1
 	}
 
-	l2Block, err := types.UnmarshalL2Block(entry.Data)
-	if err != nil {
-		return 0, err
+	if uint32(entry.Type) == uint32(types.EntryTypeL2Block) {
+		l2Block, err := types.UnmarshalL2Block(entry.Data)
+		if err != nil {
+			return 0, err
+		}
+
+		return l2Block.L2BlockNumber, nil
+	} else if uint32(entry.Type) == uint32(types.EntryTypeL2Tx) {
+		tx, err := types.UnmarshalTx(entry.Data)
+		if err != nil {
+			return 0, err
+		}
+
+		return tx.L2BlockNumber, nil
 	}
 
-	srv.highestBlockWritten = &l2Block.L2BlockNumber
-
-	return l2Block.L2BlockNumber, nil
+	return 0, nil
 }
 
 func (srv *DataStreamServer) GetHighestBatchNumber() (uint64, error) {

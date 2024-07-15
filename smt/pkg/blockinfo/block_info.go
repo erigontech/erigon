@@ -42,6 +42,7 @@ func BuildBlockInfoTree(
 		"previousStateRoot", previousStateRoot.String(),
 		"coinbase", coinbase.String(),
 		"blockGasLimit", blockGasLimit,
+		"blockGasUsed", blockGasUsed,
 		"blockTime", blockTime,
 		"ger", ger.String(),
 		"l1BlockHash", l1BlockHash.String(),

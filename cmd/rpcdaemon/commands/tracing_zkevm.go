@@ -301,7 +301,7 @@ func (api *PrivateDebugAPIImpl) TraceCallMany(ctx context.Context, bundles []Bun
 			return err
 		}
 
-		if _, _, err := core.ApplyTransaction_zkevm(chainConfig, api.engine(), evm, gp, st, state.NewNoopWriter(), parent, txn, nil, effectiveGasPricePercentage); err != nil {
+		if _, _, err := core.ApplyTransaction_zkevm(chainConfig, api.engine(), evm, gp, st, state.NewNoopWriter(), parent, txn, nil, effectiveGasPricePercentage, true); err != nil {
 			stream.WriteNil()
 			return err
 		}

@@ -104,7 +104,7 @@ func ExecuteBlockEphemerallyZk(
 			return nil, err
 		}
 
-		receipt, execResult, err := ApplyTransaction_zkevm(chainConfig, engine, evm, gp, ibs, state.NewNoopWriter(), header, tx, usedGas, effectiveGasPricePercentage)
+		receipt, execResult, err := ApplyTransaction_zkevm(chainConfig, engine, evm, gp, ibs, state.NewNoopWriter(), header, tx, usedGas, effectiveGasPricePercentage, true)
 		if err != nil {
 			return nil, err
 		}

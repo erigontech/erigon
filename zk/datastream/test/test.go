@@ -17,12 +17,12 @@ const dataStreamCardona = "datastream.cardona.zkevm-rpc.com:6900"
 const dataStreamBali = "datastream.internal.zkevm-rpc.com:6900"
 const datastreamMainnet = "stream.zkevm-rpc.com:6900"
 const estest = "34.175.214.161:6900"
-const local = "localhost:6910"
+const localhost = "localhost:6910"
 
 // This code downloads headers and blocks from a datastream server.
 func main() {
 	// Create client
-	c := client.NewClient(context.Background(), local, 0, 0, 0)
+	c := client.NewClient(context.Background(), localhost, 0, 0, 0)
 
 	// Start client (connect to the server)
 	defer c.Stop()
@@ -31,10 +31,10 @@ func main() {
 	}
 
 	// create bookmark
-	bookmark := types.NewBookmarkProto(9756, datastream.BookmarkType_BOOKMARK_TYPE_BATCH)
+	bookmark := types.NewBookmarkProto(188312, datastream.BookmarkType_BOOKMARK_TYPE_L2_BLOCK)
 
 	// Read all entries from server
-	blocksRead, _, _, entriesReadAmount, _, err := c.ReadEntries(bookmark, 100)
+	blocksRead, _, _, entriesReadAmount, _, err := c.ReadEntries(bookmark, 1)
 	if err != nil {
 		panic(err)
 	}
@@ -43,7 +43,7 @@ func main() {
 
 	// forkId := uint16(0)
 	for _, dsBlock := range *blocksRead {
-		fmt.Println(dsBlock.BatchNumber)
+		fmt.Println(len(dsBlock.L2Txs))
 	}
 }
 

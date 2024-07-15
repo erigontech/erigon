@@ -322,6 +322,7 @@ func runTest(t *testing.T, test vector, err error, fileName string, idx int) {
 				transaction,
 				&header.GasUsed,
 				zktypes.EFFECTIVE_GAS_PRICE_PERCENTAGE_MAXIMUM,
+				true,
 			)
 
 			if err != nil {

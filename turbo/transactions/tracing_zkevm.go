@@ -128,7 +128,7 @@ func ComputeTxEnv_ZkEvm(ctx context.Context, engine consensus.EngineReader, bloc
 			return txEnv, nil
 		}
 
-		if _, _, err := core.ApplyMessageWithTxContext(msg, txContext, gp, statedb, reader.(*state.PlainState), header.Number, txn, nil, vmenv); err != nil {
+		if _, _, err := core.ApplyMessageWithTxContext(msg, txContext, gp, statedb, reader.(*state.PlainState), header.Number, txn, nil, vmenv, true); err != nil {
 			return TxEnv{}, err
 		}
 

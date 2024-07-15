@@ -65,7 +65,7 @@ func GetTxContext(config *chain.Config, engine consensus.EngineReader, ibs *stat
 // and uses the input parameters for its environment. It returns the receipt
 // for the transaction, gas used and an error if the transaction failed,
 // indicating the block was invalid.
-func ApplyMessageWithTxContext(msg types.Message, txContext evmtypes.TxContext, gp *GasPool, ibs *state.IntraBlockState, stateWriter state.StateWriter, blockNumber *big.Int, tx types.Transaction, usedGas *uint64, evm vm.VMInterface) (*types.Receipt, *ExecutionResult, error) {
+func ApplyMessageWithTxContext(msg types.Message, txContext evmtypes.TxContext, gp *GasPool, ibs *state.IntraBlockState, stateWriter state.StateWriter, blockNumber *big.Int, tx types.Transaction, usedGas *uint64, evm vm.VMInterface, shouldFinalizeIbs bool) (*types.Receipt, *ExecutionResult, error) {
 	rules := evm.ChainRules()
 
 	if evm.Config().TraceJumpDest {
@@ -81,10 +81,11 @@ func ApplyMessageWithTxContext(msg types.Message, txContext evmtypes.TxContext, 
 	}
 
 	// Update the state with pending changes
-	if err = ibs.FinalizeTx(rules, stateWriter); err != nil {
-		return nil, nil, err
+	if shouldFinalizeIbs {
+		if err = ibs.FinalizeTx(rules, stateWriter); err != nil {
+			return nil, nil, err
+		}
 	}
-
 	if usedGas != nil {
 		*usedGas += result.UsedGas
 	}
@@ -167,11 +168,12 @@ func ApplyTransaction_zkevm(
 	tx types.Transaction,
 	usedGas *uint64,
 	effectiveGasPricePercentage uint8,
+	shouldFinalizeIbs bool,
 ) (*types.Receipt, *ExecutionResult, error) {
 	// Create a new context to be used in the EVM environment
 	msg, txContext, err := GetTxContext(config, engine, ibs, header, tx, evm, effectiveGasPricePercentage)
 	if err != nil {
 		return nil, nil, err
 	}
-	return ApplyMessageWithTxContext(msg, txContext, gp, ibs, stateWriter, header.Number, tx, usedGas, evm)
+	return ApplyMessageWithTxContext(msg, txContext, gp, ibs, stateWriter, header.Number, tx, usedGas, evm, shouldFinalizeIbs)
 }

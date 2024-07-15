@@ -114,11 +114,6 @@ func SpawnSequencingStage(
 	var header *types.Header
 	var parentBlock *types.Block
 
-	var addedTransactions []types.Transaction
-	var addedReceipts []*types.Receipt
-	var addedExecutionResults []*core.ExecutionResult
-	var clonedBatchCounters *vm.BatchCounterCollector
-
 	var decodedBlock zktx.DecodedBatchL2Data
 	var deltaTimestamp uint64 = math.MaxUint64
 	var blockTransactions []types.Transaction
@@ -254,10 +249,9 @@ func SpawnSequencingStage(
 	batchDataOverflow := false
 
 	var block *types.Block
-	var thisBlockNumber uint64
-	for blockNumber := executionAt; runLoopBlocks; blockNumber++ {
+	for blockNumber := executionAt + 1; runLoopBlocks; blockNumber++ {
 		if l1Recovery {
-			decodedBlocksIndex := blockNumber - executionAt
+			decodedBlocksIndex := blockNumber - (executionAt + 1)
 			if decodedBlocksIndex == decodedBlocksSize {
 				runLoopBlocks = false
 				break
@@ -276,37 +270,22 @@ func SpawnSequencingStage(
 
 		log.Info(fmt.Sprintf("[%s] Starting block %d (forkid %v)...", logPrefix, blockNumber+1, forkId))
 
-		reRunBlockAfterOverflow := blockNumber == lastStartedBn
 		lastStartedBn = blockNumber
 
-		if !reRunBlockAfterOverflow {
-			clonedBatchCounters = batchCounters.Clone()
-			addedTransactions = []types.Transaction{}
-			addedReceipts = []*types.Receipt{}
-			addedExecutionResults = []*core.ExecutionResult{}
-			effectiveGases = []uint8{}
-			header, parentBlock, err = prepareHeader(tx, blockNumber, deltaTimestamp, limboHeaderTimestamp, forkId, nextBatchData.Coinbase)
-			if err != nil {
-				return err
-			}
+		addedTransactions := []types.Transaction{}
+		addedReceipts := []*types.Receipt{}
+		effectiveGases = []uint8{}
+		addedExecutionResults := []*core.ExecutionResult{}
 
-			// run this only once the first time, do not add it on rerun
-			if batchDataOverflow = blockDataSizeChecker.AddBlockStartData(uint32(prevHeader.Time-header.Time), uint32(l1InfoIndex)); batchDataOverflow {
-				log.Info(fmt.Sprintf("[%s] BatchL2Data limit reached. Stopping.", logPrefix), "blockNumber", blockNumber)
-				break
-			}
-		} else {
-			batchCounters = clonedBatchCounters
+		header, parentBlock, err = prepareHeader(tx, blockNumber-1, deltaTimestamp, limboHeaderTimestamp, forkId, nextBatchData.Coinbase)
+		if err != nil {
+			return err
+		}
 
-			// create a copy of the header otherwise the executor will return "state root mismatch error"
-			header = &types.Header{
-				ParentHash: header.ParentHash,
-				Coinbase:   header.Coinbase,
-				Difficulty: header.Difficulty,
-				Number:     header.Number,
-				GasLimit:   header.GasLimit,
-				Time:       header.Time,
-			}
+		// run this only once the first time, do not add it on rerun
+		if batchDataOverflow = blockDataSizeChecker.AddBlockStartData(uint32(prevHeader.Time-header.Time), uint32(l1InfoIndex)); batchDataOverflow {
+			log.Info(fmt.Sprintf("[%s] BatchL2Data limit reached. Stopping.", logPrefix), "blockNumber", blockNumber)
+			break
 		}
 
 		overflowOnNewBlock, err := batchCounters.StartNewBlock(l1InfoIndex != 0)
@@ -316,8 +295,6 @@ func SpawnSequencingStage(
 		if !isAnyRecovery && overflowOnNewBlock {
 			break
 		}
-
-		thisBlockNumber = header.Number.Uint64()
 
 		infoTreeIndexProgress, l1TreeUpdate, l1TreeUpdateIndex, l1BlockHash, ger, shouldWriteGerToContract, err := prepareL1AndInfoTreeRelatedStuff(sdb, &decodedBlock, l1Recovery, header.Time)
 		if err != nil {
@@ -333,7 +310,7 @@ func SpawnSequencingStage(
 			cfg.chainConfig,
 			sdb.hermezDb,
 			ibs,
-			thisBlockNumber,
+			blockNumber,
 			thisBatch,
 			header.Time,
 			&parentRoot,
@@ -343,135 +320,120 @@ func SpawnSequencingStage(
 			return err
 		}
 
-		if !reRunBlockAfterOverflow {
-			// start waiting for a new transaction to arrive
-			if !isAnyRecovery {
-				log.Info(fmt.Sprintf("[%s] Waiting for txs from the pool...", logPrefix))
-			}
+		// start waiting for a new transaction to arrive
+		if !isAnyRecovery {
+			log.Info(fmt.Sprintf("[%s] Waiting for txs from the pool...", logPrefix))
+		}
 
-			// we don't care about defer order here we just need to make sure the tickers are stopped to
-			// avoid a leak
-			logTicker := time.NewTicker(10 * time.Second)
-			defer logTicker.Stop()
-			blockTicker := time.NewTicker(cfg.zk.SequencerBlockSealTime)
-			defer blockTicker.Stop()
-			reRunBlock := false
-			overflow := false
-			// start to wait for transactions to come in from the pool and attempt to add them to the current batch.  Once we detect a counter
-			// overflow we revert the IBS back to the previous snapshot and don't add the transaction/receipt to the collection that will
-			// end up in the finalised block
-		LOOP_TRANSACTIONS:
-			for {
-				select {
-				case <-logTicker.C:
-					if !isAnyRecovery {
-						log.Info(fmt.Sprintf("[%s] Waiting some more for txs from the pool...", logPrefix))
-					}
-				case <-blockTicker.C:
-					if !isAnyRecovery {
-						break LOOP_TRANSACTIONS
-					}
-				case <-batchTicker.C:
-					if !isAnyRecovery {
-						runLoopBlocks = false
-						break LOOP_TRANSACTIONS
-					}
-				case <-nonEmptyBatchTimer.C:
-					if !isAnyRecovery && hasAnyTransactionsInThisBatch {
-						runLoopBlocks = false
-						break LOOP_TRANSACTIONS
-					}
-				default:
-					if limboRecovery {
-						cfg.txPool.LockFlusher()
-						blockTransactions, err = getLimboTransaction(cfg, limboTxHash)
-						if err != nil {
-							cfg.txPool.UnlockFlusher()
-							return err
-						}
+		// we don't care about defer order here we just need to make sure the tickers are stopped to
+		// avoid a leak
+		logTicker := time.NewTicker(10 * time.Second)
+		defer logTicker.Stop()
+		blockTicker := time.NewTicker(cfg.zk.SequencerBlockSealTime)
+		defer blockTicker.Stop()
+		var anyOverflow bool
+		// start to wait for transactions to come in from the pool and attempt to add them to the current batch.  Once we detect a counter
+		// overflow we revert the IBS back to the previous snapshot and don't add the transaction/receipt to the collection that will
+		// end up in the finalised block
+	LOOP_TRANSACTIONS:
+		for {
+			select {
+			case <-logTicker.C:
+				if !isAnyRecovery {
+					log.Info(fmt.Sprintf("[%s] Waiting some more for txs from the pool...", logPrefix))
+				}
+			case <-blockTicker.C:
+				if !isAnyRecovery {
+					break LOOP_TRANSACTIONS
+				}
+			case <-batchTicker.C:
+				if !isAnyRecovery {
+					runLoopBlocks = false
+					break LOOP_TRANSACTIONS
+				}
+			case <-nonEmptyBatchTimer.C:
+				if !isAnyRecovery && hasAnyTransactionsInThisBatch {
+					runLoopBlocks = false
+					break LOOP_TRANSACTIONS
+				}
+			default:
+				if limboRecovery {
+					cfg.txPool.LockFlusher()
+					blockTransactions, err = getLimboTransaction(cfg, limboTxHash)
+					if err != nil {
 						cfg.txPool.UnlockFlusher()
-					} else if !l1Recovery {
-						cfg.txPool.LockFlusher()
-						blockTransactions, err = getNextPoolTransactions(cfg, executionAt, forkId, yielded)
-						if err != nil {
-							cfg.txPool.UnlockFlusher()
-							return err
-						}
+						return err
+					}
+					cfg.txPool.UnlockFlusher()
+				} else if !l1Recovery {
+					cfg.txPool.LockFlusher()
+					blockTransactions, err = getNextPoolTransactions(cfg, executionAt, forkId, yielded)
+					if err != nil {
 						cfg.txPool.UnlockFlusher()
+						return err
+					}
+					cfg.txPool.UnlockFlusher()
+				}
+
+				var receipt *types.Receipt
+				var execResult *core.ExecutionResult
+				for i, transaction := range blockTransactions {
+					txHash := transaction.Hash()
+
+					var effectiveGas uint8
+
+					if l1Recovery {
+						effectiveGas = l1EffectiveGases[i]
+					} else {
+						effectiveGas = DeriveEffectiveGasPrice(cfg, transaction)
 					}
 
-					var receipt *types.Receipt
-					var execResult *core.ExecutionResult
-					for i, transaction := range blockTransactions {
-						var effectiveGas uint8
+					backupDataSizeChecker := *blockDataSizeChecker
+					if receipt, execResult, anyOverflow, err = attemptAddTransaction(cfg, sdb, ibs, batchCounters, &blockContext, header, transaction, effectiveGas, l1Recovery, forkId, l1InfoIndex, &backupDataSizeChecker); err != nil {
+						if limboRecovery {
+							panic("limbo transaction has already been executed once so they must not fail while re-executing")
+						}
 
+						// if we are in recovery just log the error as a warning.  If the data is on the L1 then we should consider it as confirmed.
+						// The executor/prover would simply skip a TX with an invalid nonce for example so we don't need to worry about that here.
 						if l1Recovery {
-							effectiveGas = l1EffectiveGases[i]
-						} else {
-							effectiveGas = DeriveEffectiveGasPrice(cfg, transaction)
+							log.Warn(fmt.Sprintf("[%s] error adding transaction to batch during recovery: %v", logPrefix, err),
+								"hash", txHash,
+								"to", transaction.GetTo(),
+							)
+							continue
+						}
+					}
+
+					if anyOverflow {
+						if limboRecovery {
+							panic("limbo transaction has already been executed once so they must not overflow counters while re-executing")
 						}
 
-						if !batchDataOverflow {
-							receipt, execResult, overflow, err = attemptAddTransaction(cfg, sdb, ibs, batchCounters, &blockContext, header, transaction, effectiveGas, l1Recovery, forkId, l1InfoIndex, blockDataSizeChecker)
-							if err != nil {
-								if limboRecovery {
-									panic("limbo transaction has already been executed once so they must not fail while re-executing")
-								}
-
-								// if we are in recovery just log the error as a warning.  If the data is on the L1 then we should consider it as confirmed.
-								// The executor/prover would simply skip a TX with an invalid nonce for example so we don't need to worry about that here.
-								if l1Recovery {
-									log.Warn(fmt.Sprintf("[%s] error adding transaction to batch during recovery: %v", logPrefix, err),
-										"hash", transaction.Hash(),
-										"to", transaction.GetTo(),
-									)
-									continue
-								}
-
-								i++ // leave current tx in yielded set
-								reRunBlock = true
-							}
-						} else {
-							log.Info(fmt.Sprintf("[%s] BatchL2Data limit reached. Not adding last transaction", logPrefix), "txHash", transaction.Hash())
-						}
-
-						anyOverflow := overflow || batchDataOverflow
-
-						if !reRunBlock && anyOverflow {
-							if limboRecovery {
-								panic("limbo transaction has already been executed once so they must not overflow counters while re-executing")
-							}
-
-							if !l1Recovery {
-								log.Info(fmt.Sprintf("[%s] overflowed adding transaction to batch", logPrefix), "batch", thisBatch, "tx-hash", transaction.Hash(), "has any transactions in this batch", hasAnyTransactionsInThisBatch)
-								/*
-									There are two cases when overflow could occur.
-									1. The block DOES not contains any transactions.
-										In this case it means that a single tx overflow entire zk-counters.
-										In this case we mark it so. Once marked it will be discarded from the tx-pool async (once the tx-pool process the creation of a new batch)
-										NB: The tx SHOULD not be removed from yielded set, because if removed, it will be picked again on next block. That's why there is i++. It ensures that removing from yielded will start after the problematic tx
-									2. The block contains transactions.
-										In this case, we just have to remove the transaction that overflowed the zk-counters and all transactions after it, from the yielded set.
-										This removal will ensure that these transaction could be added in the next block(s)
-								*/
-								if !hasAnyTransactionsInThisBatch {
-									i++ // leave current tx in yielded set
-									cfg.txPool.MarkForDiscardFromPendingBest(transaction.Hash())
-									log.Trace(fmt.Sprintf("single transaction %s overflow counters", transaction.Hash()))
-								}
-
-								reRunBlock = true
+						if !l1Recovery {
+							log.Info(fmt.Sprintf("[%s] overflowed adding transaction to batch", logPrefix), "batch", thisBatch, "tx-hash", txHash, "has any transactions in this batch", hasAnyTransactionsInThisBatch)
+							/*
+								There are two cases when overflow could occur.
+								1. The block DOES not contains any transactions.
+									In this case it means that a single tx overflow entire zk-counters.
+									In this case we mark it so. Once marked it will be discarded from the tx-pool async (once the tx-pool process the creation of a new batch)
+									NB: The tx SHOULD not be removed from yielded set, because if removed, it will be picked again on next block. That's why there is i++. It ensures that removing from yielded will start after the problematic tx
+								2. The block contains transactions.
+									In this case, we just have to remove the transaction that overflowed the zk-counters and all transactions after it, from the yielded set.
+									This removal will ensure that these transaction could be added in the next block(s)
+							*/
+							if !hasAnyTransactionsInThisBatch {
+								cfg.txPool.MarkForDiscardFromPendingBest(txHash)
+								log.Trace(fmt.Sprintf("single transaction %s overflow counters", txHash))
 							}
 						}
 
-						if reRunBlock {
-							txSize := len(blockTransactions)
-							for ; i < txSize; i++ {
-								yielded.Remove(transaction.Hash())
-							}
-							break LOOP_TRANSACTIONS
-						}
+						break LOOP_TRANSACTIONS
+					}
 
+					if err == nil {
+						blockDataSizeChecker = &backupDataSizeChecker
+						yielded.Remove(txHash)
 						addedTransactions = append(addedTransactions, transaction)
 						addedReceipts = append(addedReceipts, receipt)
 						addedExecutionResults = append(addedExecutionResults, execResult)
@@ -479,46 +441,28 @@ func SpawnSequencingStage(
 
 						hasAnyTransactionsInThisBatch = true
 						nonEmptyBatchTimer.Reset(cfg.zk.SequencerNonEmptyBatchSealTime)
-					}
-
-					if l1Recovery {
-						// just go into the normal loop waiting for new transactions to signal that the recovery
-						// has finished as far as it can go
-						if len(blockTransactions) == 0 && !nextBatchData.IsWorkRemaining {
-							log.Info(fmt.Sprintf("[%s] L1 recovery no more transactions to recover", logPrefix))
-						}
-
-						break LOOP_TRANSACTIONS
-					}
-
-					if limboRecovery {
-						runLoopBlocks = false
-						break LOOP_TRANSACTIONS
+						log.Debug(fmt.Sprintf("[%s] Finish block %d with %s transaction", logPrefix, blockNumber, txHash.Hex()))
 					}
 				}
-			}
-			if reRunBlock {
-				blockNumber-- // in order to trigger reRunBlockAfterOverflow check
-				continue      // lets execute the same block again
-			}
-		} else {
-			for idx, transaction := range addedTransactions {
-				effectiveGas := effectiveGases[idx]
-				receipt, execResult, innerOverflow, err := attemptAddTransaction(cfg, sdb, ibs, batchCounters, &blockContext, header, transaction, effectiveGas, false, forkId, l1InfoIndex, blockDataSizeChecker)
-				if err != nil {
-					return err
+
+				if l1Recovery {
+					// just go into the normal loop waiting for new transactions to signal that the recovery
+					// has finished as far as it can go
+					if len(blockTransactions) == 0 && !nextBatchData.IsWorkRemaining {
+						log.Info(fmt.Sprintf("[%s] L1 recovery no more transactions to recover", logPrefix))
+					}
+
+					break LOOP_TRANSACTIONS
 				}
-				if innerOverflow {
-					// kill the node at this stage to prevent a batch being created that can't be proven
-					panic(fmt.Sprintf("overflowed twice during execution while adding tx with index %d", idx))
+
+				if limboRecovery {
+					runLoopBlocks = false
+					break LOOP_TRANSACTIONS
 				}
-				addedReceipts[idx] = receipt
-				addedExecutionResults[idx] = execResult
 			}
-			runLoopBlocks = false // close the batch because there are no counters left
 		}
 
-		if err = sdb.hermezDb.WriteBlockL1InfoTreeIndex(thisBlockNumber, l1TreeUpdateIndex); err != nil {
+		if err = sdb.hermezDb.WriteBlockL1InfoTreeIndex(blockNumber, l1TreeUpdateIndex); err != nil {
 			return err
 		}
 
@@ -532,14 +476,10 @@ func SpawnSequencingStage(
 			cfg.txPool.UpdateLimboRootByTxHash(limboTxHash, &stateRoot)
 			return fmt.Errorf("[%s] %w: %s = %s", s.LogPrefix(), zk.ErrLimboState, limboTxHash.Hex(), stateRoot.Hex())
 		} else {
-			log.Debug(fmt.Sprintf("[%s] state root at block %d = %s", s.LogPrefix(), thisBlockNumber, block.Root().Hex()))
+			log.Debug(fmt.Sprintf("[%s] state root at block %d = %s", s.LogPrefix(), blockNumber, block.Root().Hex()))
 		}
 
-		for _, tx := range addedTransactions {
-			log.Debug(fmt.Sprintf("[%s] Finish block %d with %s transaction", logPrefix, thisBlockNumber, tx.Hash().Hex()))
-		}
-
-		log.Info(fmt.Sprintf("[%s] Finish block %d with %d transactions...", logPrefix, thisBlockNumber, len(addedTransactions)))
+		log.Info(fmt.Sprintf("[%s] Finish block %d with %d transactions...", logPrefix, blockNumber, len(addedTransactions)))
 
 		if !hasExecutorForThisBatch {
 			// save counters midbatch
@@ -557,7 +497,7 @@ func SpawnSequencingStage(
 				return err
 			}
 
-			if err = cfg.datastreamServer.WriteBlockToStream(logPrefix, tx, sdb.hermezDb, thisBatch, lastBatch, thisBlockNumber); err != nil {
+			if err = cfg.datastreamServer.WriteBlockToStream(logPrefix, tx, sdb.hermezDb, thisBatch, lastBatch, blockNumber); err != nil {
 				return err
 			}
 
