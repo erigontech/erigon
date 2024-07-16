@@ -1030,10 +1030,6 @@ func (d *Downloader) mainLoop(silent bool) error {
 				plist = append(plist, t.Name())
 			}
 
-			if len(clist) != len(torrents) {
-				d.logger.Debug("[snapshot] download status", "pending", plist, "downloading", dlist, "complete", clist, "failed", flist)
-			}
-
 			select {
 			case <-d.ctx.Done():
 				return
@@ -1164,6 +1160,20 @@ func (d *Downloader) mainLoop(silent bool) error {
 				}
 			}
 			d.lock.RUnlock()
+
+			d.lock.RLock()
+			completed := d.stats.Completed
+			d.lock.RUnlock()
+
+			if !completed {
+				var alist []string
+
+				for _, t := range available {
+					alist = append(alist, t.Name())
+				}
+
+				d.logger.Debug("[snapshot] download status", "pending", plist, "availible", alist, "downloading", dlist, "complete", clist, "failed", flist)
+			}
 
 			for _, t := range available {
 
