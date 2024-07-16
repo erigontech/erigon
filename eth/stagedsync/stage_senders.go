@@ -416,8 +416,8 @@ func PruneSendersStage(s *PruneState, tx kv.RwTx, cfg SendersCfg, ctx context.Co
 	}
 	if cfg.blockReader.FreezingCfg().Enabled {
 		// noop. in this case senders will be deleted by BlockRetire.PruneAncientBlocks after data-freezing.
-	} else if cfg.prune.TxIndex.Enabled() {
-		to := cfg.prune.TxIndex.PruneTo(s.ForwardProgress)
+	} else if cfg.prune.History.Enabled() {
+		to := cfg.prune.History.PruneTo(s.ForwardProgress)
 		if err = rawdb.PruneTable(tx, kv.Senders, to, ctx, 100); err != nil {
 			return err
 		}
