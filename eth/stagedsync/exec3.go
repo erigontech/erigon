@@ -192,13 +192,16 @@ func ExecV3(ctx context.Context,
 	if initialCycle {
 		agg.SetCollateAndBuildWorkers(min(2, estimate.StateV3Collate.Workers()))
 		agg.SetCompressWorkers(estimate.CompressSnapshot.Workers())
-		//if blockNum < cfg.blockReader.FrozenBlocks() {
-		//defer agg.DiscardHistory(kv.CommitmentDomain).EnableHistory(kv.CommitmentDomain)
-		//defer agg.LimitRecentHistoryWithoutFiles(0).LimitRecentHistoryWithoutFiles(agg.StepSize() / 10)
-		//}
 	} else {
 		agg.SetCompressWorkers(1)
 		agg.SetCollateAndBuildWorkers(1)
+	}
+	// Disable all inverted indexes if we do max pruning
+	if cfg.prune.History.Enabled() && cfg.prune.History.PruneTo(execStage.BlockNumber) == execStage.BlockNumber {
+		agg.DiscardInveredIndex(kv.LogAddrIdxPos)
+		agg.DiscardInveredIndex(kv.LogTopicIdxPos)
+		agg.DiscardInveredIndex(kv.TracesFromIdxPos)
+		agg.DiscardInveredIndex(kv.TracesToIdxPos)
 	}
 
 	var err error

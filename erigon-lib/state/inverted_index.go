@@ -85,7 +85,8 @@ type InvertedIndex struct {
 	// fields for history write
 	logger log.Logger
 
-	noFsync bool // fsync is enabled by default, but tests can manually disable
+	noFsync    bool // fsync is enabled by default, but tests can manually disable
+	discardIdx bool
 
 	compression     FileCompression
 	compressWorkers int
@@ -381,7 +382,7 @@ func (w *invertedIndexBufferedWriter) Add(key []byte) error {
 }
 
 func (iit *InvertedIndexRoTx) NewWriter() *invertedIndexBufferedWriter {
-	return iit.newWriter(iit.ii.dirs.Tmp, false)
+	return iit.newWriter(iit.ii.dirs.Tmp, iit.ii.discardIdx)
 }
 
 type invertedIndexBufferedWriter struct {
