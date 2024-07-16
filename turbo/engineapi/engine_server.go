@@ -209,7 +209,7 @@ func (s *EngineServer) newPayload(ctx context.Context, req *engine_types.Executi
 	if err := s.checkRequestsPresence(header.Time, req); err != nil {
 		return nil, err
 	}
-	if version >= clparams.ElectraVersion && req.DepositRequests != nil || req.WithdrawalRequests != nil || req.ConsolidationRequests != nil {
+	if version >= clparams.ElectraVersion {
 		requests = append(requests, req.DepositRequests.Requests()...)
 		requests = append(requests, req.WithdrawalRequests.Requests()...)
 		requests = append(requests, req.ConsolidationRequests.Requests()...)
