@@ -111,8 +111,7 @@ func adjustBlockPrune(blocks, minBlocksToDownload uint64) uint64 {
 	if blocks%snaptype.Erigon2MergeLimit == 0 {
 		return blocks
 	}
-	ret := blocks + snaptype.Erigon2MergeLimit
-	return ret - ret%snaptype.Erigon2MergeLimit
+	return blocks - blocks%snaptype.Erigon2MergeLimit
 }
 
 func shouldUseStepsForPruning(name string) bool {
