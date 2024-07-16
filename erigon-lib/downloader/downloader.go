@@ -891,8 +891,14 @@ func (d *Downloader) mainLoop(silent bool) error {
 
 			var pending []*torrent.Torrent
 
+			var plist []string
+			var clist []string
+			var flist []string
+			var dlist []string
+
 			for _, t := range torrents {
 				if _, ok := complete[t.Name()]; ok {
+					clist = append(clist, t.Name())
 					continue
 				}
 
@@ -944,6 +950,7 @@ func (d *Downloader) mainLoop(silent bool) error {
 								}(fileInfo, t.InfoHash(), length, *completionTime)
 
 							} else {
+								clist = append(clist, t.Name())
 								complete[t.Name()] = struct{}{}
 								continue
 							}
@@ -954,6 +961,7 @@ func (d *Downloader) mainLoop(silent bool) error {
 				}
 
 				if _, ok := failed[t.Name()]; ok {
+					flist = append(flist, t.Name())
 					continue
 				}
 
@@ -1009,15 +1017,20 @@ func (d *Downloader) mainLoop(silent bool) error {
 					delete(d.downloading, t.Name())
 					d.lock.Unlock()
 					complete[t.Name()] = struct{}{}
+					clist = append(clist, t.Name())
 					continue
 				}
 
 				if downloading {
+					dlist = append(dlist, t.Name())
 					continue
 				}
 
 				pending = append(pending, t)
+				plist = append(plist, t.Name())
 			}
+
+			d.logger.Debug("[snapshot] download status", "pending", plist, "downloading", dlist, "complete", clist, "failed", flist)
 
 			select {
 			case <-d.ctx.Done():
