@@ -423,15 +423,16 @@ func ApplyFlagsForEthConfigCobra(f *pflag.FlagSet, cfg *ethconfig.Config) {
 	if err != nil {
 		utils.Fatalf(fmt.Sprintf("error while parsing mode: %v", err))
 	}
-	// Full mode prunes all but the latest state
-	if *pruneMode == "full" {
+	switch *pruneMode {
+	case "archive":
+	case "full":
 		mode.Blocks = prune.Distance(math.MaxUint64)
 		mode.History = prune.Distance(0)
-	}
-	// Minimal mode prunes all but the latest state including blocks
-	if *pruneMode == "minimal" {
+	case "minimal":
 		mode.Blocks = prune.Distance(2048) // 2048 is just some blocks to allow reorgs
 		mode.History = prune.Distance(0)
+	default:
+		utils.Fatalf(fmt.Sprintf("error: --prune.mode must be one of archive, full, minimal"))
 	}
 	cfg.Prune = mode
 
