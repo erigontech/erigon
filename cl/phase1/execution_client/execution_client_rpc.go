@@ -1,3 +1,19 @@
+// Copyright 2024 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+
 package execution_client
 
 import (
@@ -200,7 +216,7 @@ func (cc *ExecutionClientRpc) Ready(ctx context.Context) (bool, error) {
 
 // GetBodiesByRange gets block bodies in given block range
 func (cc *ExecutionClientRpc) GetBodiesByRange(ctx context.Context, start, count uint64) ([]*types.RawBody, error) {
-	result := []*engine_types.ExecutionPayloadBodyV1{}
+	result := []*engine_types.ExecutionPayloadBody{}
 
 	if err := cc.client.CallContext(ctx, &result, rpc_helper.GetPayloadBodiesByRangeV1, hexutil.Uint64(start), hexutil.Uint64(count)); err != nil {
 		return nil, err
@@ -219,7 +235,7 @@ func (cc *ExecutionClientRpc) GetBodiesByRange(ctx context.Context, start, count
 
 // GetBodiesByHashes gets block bodies with given hashes
 func (cc *ExecutionClientRpc) GetBodiesByHashes(ctx context.Context, hashes []libcommon.Hash) ([]*types.RawBody, error) {
-	result := []*engine_types.ExecutionPayloadBodyV1{}
+	result := []*engine_types.ExecutionPayloadBody{}
 
 	if err := cc.client.CallContext(ctx, &result, rpc_helper.GetPayloadBodiesByHashV1, hashes); err != nil {
 		return nil, err

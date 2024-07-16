@@ -1,18 +1,21 @@
 // Copyright 2015 The go-ethereum Authors
-// This file is part of the go-ethereum library.
+// (original work)
+// Copyright 2024 The Erigon Authors
+// (modifications)
+// This file is part of Erigon.
 //
-// The go-ethereum library is free software: you can redistribute it and/or modify
+// Erigon is free software: you can redistribute it and/or modify
 // it under the terms of the GNU Lesser General Public License as published by
 // the Free Software Foundation, either version 3 of the License, or
 // (at your option) any later version.
 //
-// The go-ethereum library is distributed in the hope that it will be useful,
+// Erigon is distributed in the hope that it will be useful,
 // but WITHOUT ANY WARRANTY; without even the implied warranty of
 // MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
 // GNU Lesser General Public License for more details.
 //
 // You should have received a copy of the GNU Lesser General Public License
-// along with the go-ethereum library. If not, see <http://www.gnu.org/licenses/>.
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
 // Package discover implements the Node Discovery Protocol.
 //
@@ -259,6 +262,7 @@ func (tab *Table) loop() {
 	go tab.doRefresh(refreshDone)
 
 	var minRefreshTimer *time.Timer
+	var minRefreshTimerActive atomic.Bool
 
 	defer func() {
 		if minRefreshTimer != nil {
@@ -293,9 +297,9 @@ loop:
 			}
 		case <-revalidateDone:
 			revalidate.Reset(tab.revalidateInterval)
-			if tab.live() == 0 && len(waiting) == 0 && minRefreshTimer == nil {
+			if tab.live() == 0 && len(waiting) == 0 && minRefreshTimerActive.CompareAndSwap(false, true) {
 				minRefreshTimer = time.AfterFunc(minRefreshInterval, func() {
-					minRefreshTimer = nil
+					defer minRefreshTimerActive.Store(false)
 					tab.net.lookupRandom()
 					tab.refresh()
 				})

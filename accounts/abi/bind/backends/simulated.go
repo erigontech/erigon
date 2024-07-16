@@ -1,18 +1,21 @@
 // Copyright 2015 The go-ethereum Authors
-// This file is part of the go-ethereum library.
+// (original work)
+// Copyright 2024 The Erigon Authors
+// (modifications)
+// This file is part of Erigon.
 //
-// The go-ethereum library is free software: you can redistribute it and/or modify
+// Erigon is free software: you can redistribute it and/or modify
 // it under the terms of the GNU Lesser General Public License as published by
 // the Free Software Foundation, either version 3 of the License, or
 // (at your option) any later version.
 //
-// The go-ethereum library is distributed in the hope that it will be useful,
+// Erigon is distributed in the hope that it will be useful,
 // but WITHOUT ANY WARRANTY; without even the implied warranty of
 // MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
 // GNU Lesser General Public License for more details.
 //
 // You should have received a copy of the GNU Lesser General Public License
-// along with the go-ethereum library. If not, see <http://www.gnu.org/licenses/>.
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
 package backends
 
@@ -91,11 +94,11 @@ type SimulatedBackend struct {
 
 // NewSimulatedBackend creates a new binding backend using a simulated blockchain
 // for testing purposes.
-func NewSimulatedBackendWithConfig(alloc types.GenesisAlloc, config *chain.Config, gasLimit uint64) *SimulatedBackend {
+func NewSimulatedBackendWithConfig(t *testing.T, alloc types.GenesisAlloc, config *chain.Config, gasLimit uint64) *SimulatedBackend {
 	genesis := types.Genesis{Config: config, GasLimit: gasLimit, Alloc: alloc}
 	engine := ethash.NewFaker()
 	checkStateRoot := true
-	m := mock.MockWithGenesisEngine(nil, &genesis, engine, false, checkStateRoot)
+	m := mock.MockWithGenesisEngine(t, &genesis, engine, false, checkStateRoot)
 	backend := &SimulatedBackend{
 		m:            m,
 		prependBlock: m.Genesis,
@@ -116,13 +119,12 @@ func NewSimulatedBackendWithConfig(alloc types.GenesisAlloc, config *chain.Confi
 
 // A simulated backend always uses chainID 1337.
 func NewSimulatedBackend(t *testing.T, alloc types.GenesisAlloc, gasLimit uint64) *SimulatedBackend {
-	b := NewSimulatedBackendWithConfig(alloc, params.TestChainConfig, gasLimit)
-	t.Cleanup(b.Close)
+	b := NewTestSimulatedBackendWithConfig(t, alloc, params.TestChainConfig, gasLimit)
 	return b
 }
 
 func NewTestSimulatedBackendWithConfig(t *testing.T, alloc types.GenesisAlloc, config *chain.Config, gasLimit uint64) *SimulatedBackend {
-	b := NewSimulatedBackendWithConfig(alloc, config, gasLimit)
+	b := NewSimulatedBackendWithConfig(t, alloc, config, gasLimit)
 	t.Cleanup(b.Close)
 	return b
 }
@@ -825,18 +827,20 @@ type callMsg struct {
 	ethereum.CallMsg
 }
 
-func (m callMsg) From() libcommon.Address       { return m.CallMsg.From }
-func (m callMsg) Nonce() uint64                 { return 0 }
-func (m callMsg) CheckNonce() bool              { return false }
-func (m callMsg) To() *libcommon.Address        { return m.CallMsg.To }
-func (m callMsg) GasPrice() *uint256.Int        { return m.CallMsg.GasPrice }
-func (m callMsg) FeeCap() *uint256.Int          { return m.CallMsg.FeeCap }
-func (m callMsg) Tip() *uint256.Int             { return m.CallMsg.Tip }
-func (m callMsg) Gas() uint64                   { return m.CallMsg.Gas }
-func (m callMsg) Value() *uint256.Int           { return m.CallMsg.Value }
-func (m callMsg) Data() []byte                  { return m.CallMsg.Data }
-func (m callMsg) AccessList() types2.AccessList { return m.CallMsg.AccessList }
-func (m callMsg) IsFree() bool                  { return false }
+func (m callMsg) From() libcommon.Address               { return m.CallMsg.From }
+func (m callMsg) Nonce() uint64                         { return 0 }
+func (m callMsg) CheckNonce() bool                      { return false }
+func (m callMsg) To() *libcommon.Address                { return m.CallMsg.To }
+func (m callMsg) GasPrice() *uint256.Int                { return m.CallMsg.GasPrice }
+func (m callMsg) FeeCap() *uint256.Int                  { return m.CallMsg.FeeCap }
+func (m callMsg) Tip() *uint256.Int                     { return m.CallMsg.Tip }
+func (m callMsg) Gas() uint64                           { return m.CallMsg.Gas }
+func (m callMsg) Value() *uint256.Int                   { return m.CallMsg.Value }
+func (m callMsg) Data() []byte                          { return m.CallMsg.Data }
+func (m callMsg) AccessList() types2.AccessList         { return m.CallMsg.AccessList }
+func (m callMsg) Authorizations() []types.Authorization { return m.CallMsg.Authorizations }
+func (m callMsg) Initcodes() map[[32]byte][]byte        { return m.CallMsg.Initcodes }
+func (m callMsg) IsFree() bool                          { return false }
 
 func (m callMsg) BlobGas() uint64                { return misc.GetBlobGasUsed(len(m.CallMsg.BlobHashes)) }
 func (m callMsg) MaxFeePerBlobGas() *uint256.Int { return m.CallMsg.MaxFeePerBlobGas }

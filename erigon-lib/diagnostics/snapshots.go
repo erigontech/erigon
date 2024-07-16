@@ -1,9 +1,26 @@
+// Copyright 2024 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+
 package diagnostics
 
 import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"time"
 
 	"github.com/ledgerwatch/erigon-lib/common"
@@ -52,6 +69,7 @@ func (d *DiagnosticClient) runSnapshotListener(rootCtx context.Context) {
 				d.syncStats.SnapshotDownload.Sys = info.Sys
 				d.syncStats.SnapshotDownload.DownloadFinished = info.DownloadFinished
 				d.syncStats.SnapshotDownload.TorrentMetadataReady = info.TorrentMetadataReady
+				d.mu.Unlock()
 
 				downloadedPercent := GetShanpshotsPercentDownloaded(info.Downloaded, info.Total, info.TorrentMetadataReady, info.Files)
 				remainingBytes := info.Total - info.Downloaded
@@ -64,27 +82,8 @@ func (d *DiagnosticClient) runSnapshotListener(rootCtx context.Context) {
 					Progress:    downloadedPercent,
 				}, "Downloading snapshots")
 
-				err := d.db.Update(d.ctx, func(tx kv.RwTx) error {
-					err := SnapshotDownloadUpdater(d.syncStats.SnapshotDownload)(tx)
-					if err != nil {
-						return err
-					}
-
-					err = StagesListUpdater(d.syncStages)(tx)
-					if err != nil {
-						return err
-					}
-
-					return nil
-				})
-
-				if err != nil {
-					log.Warn("[Diagnostics] Failed to update snapshot download info", "err", err)
-				}
-
-				d.mu.Unlock()
-
-				if d.snapshotStageFinished() {
+				if info.DownloadFinished {
+					d.SaveData()
 					return
 				}
 			}
@@ -107,23 +106,35 @@ func GetShanpshotsPercentDownloaded(downloaded uint64, total uint64, torrentMeta
 }
 
 func (d *DiagnosticClient) updateSnapshotStageStats(stats SyncStageStats, subStageInfo string) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
 	idxs := d.GetCurrentSyncIdxs()
 	if idxs.Stage == -1 || idxs.SubStage == -1 {
-		log.Warn("[Diagnostics] Can't find running stage or substage while updating Snapshots stage stats.", "stages:", d.syncStages, "stats:", stats, "subStageInfo:", subStageInfo)
+		log.Debug("[Diagnostics] Can't find running stage or substage while updating Snapshots stage stats.", "stages:", d.syncStages, "stats:", stats, "subStageInfo:", subStageInfo)
 		return
 	}
 
 	d.syncStages[idxs.Stage].SubStages[idxs.SubStage].Stats = stats
 }
+func (d *DiagnosticClient) saveSnapshotStageStatsToDB() {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	err := d.db.Update(d.ctx, func(tx kv.RwTx) error {
+		err := SnapshotFillDBUpdater(d.syncStats.SnapshotFillDB)(tx)
+		if err != nil {
+			return err
+		}
 
-func (d *DiagnosticClient) snapshotStageFinished() bool {
-	state, err := d.GetStageState("Snapshots")
+		err = StagesListUpdater(d.syncStages)(tx)
+		if err != nil {
+			return err
+		}
+
+		return nil
+	})
 	if err != nil {
-		log.Error("[Diagnostics] Failed to get Snapshots stage state", "err", err)
-		return true
+		log.Debug("[Diagnostics] Failed to update snapshot download info", "err", err)
 	}
-
-	return state == Completed
 }
 
 func (d *DiagnosticClient) runSegmentDownloadingListener(rootCtx context.Context) {
@@ -152,11 +163,6 @@ func (d *DiagnosticClient) runSegmentDownloadingListener(rootCtx context.Context
 				} else {
 					d.syncStats.SnapshotDownload.SegmentsDownloading[info.Name] = info
 				}
-
-				if err := d.db.Update(d.ctx, SnapshotDownloadUpdater(d.syncStats.SnapshotDownload)); err != nil {
-					log.Warn("[Diagnostics] Failed to update snapshot download info", "err", err)
-				}
-
 				d.mu.Unlock()
 			}
 		}
@@ -175,8 +181,10 @@ func (d *DiagnosticClient) runSegmentIndexingListener(rootCtx context.Context) {
 				return
 			case info := <-ch:
 				d.addOrUpdateSegmentIndexingState(info)
-				if err := d.db.Update(d.ctx, SnapshotIndexingUpdater(d.syncStats.SnapshotIndexing)); err != nil {
-					log.Error("[Diagnostics] Failed to update snapshot indexing info", "err", err)
+				d.updateIndexingStatus()
+				if d.syncStats.SnapshotIndexing.IndexingFinished {
+					d.SaveData()
+					return
 				}
 			}
 		}
@@ -212,14 +220,34 @@ func (d *DiagnosticClient) runSegmentIndexingFinishedListener(rootCtx context.Co
 					})
 				}
 
-				if err := d.db.Update(d.ctx, SnapshotIndexingUpdater(d.syncStats.SnapshotIndexing)); err != nil {
-					log.Error("[Diagnostics] Failed to update snapshot indexing info", "err", err)
-				}
-
 				d.mu.Unlock()
+
+				d.updateIndexingStatus()
 			}
 		}
 	}()
+}
+
+func (d *DiagnosticClient) updateIndexingStatus() {
+	totalProgressPercent := 0
+	d.mu.Lock()
+
+	for _, seg := range d.syncStats.SnapshotIndexing.Segments {
+		totalProgressPercent += seg.Percent
+	}
+	d.mu.Unlock()
+
+	totalProgress := totalProgressPercent / len(d.syncStats.SnapshotIndexing.Segments)
+
+	d.updateSnapshotStageStats(SyncStageStats{
+		TimeElapsed: SecondsToHHMMString(uint64(d.syncStats.SnapshotIndexing.TimeElapsed)),
+		TimeLeft:    "unknown",
+		Progress:    fmt.Sprintf("%d%%", totalProgress),
+	}, "Indexing snapshots")
+
+	if totalProgress >= 100 {
+		d.syncStats.SnapshotIndexing.IndexingFinished = true
+	}
 }
 
 func (d *DiagnosticClient) addOrUpdateSegmentIndexingState(upd SnapshotIndexingStatistics) {
@@ -247,19 +275,6 @@ func (d *DiagnosticClient) addOrUpdateSegmentIndexingState(upd SnapshotIndexingS
 	}
 
 	d.syncStats.SnapshotIndexing.TimeElapsed = upd.TimeElapsed
-
-	totalProgress := 0
-	for _, seg := range d.syncStats.SnapshotIndexing.Segments {
-		totalProgress += seg.Percent
-	}
-
-	d.updateSnapshotStageStats(SyncStageStats{
-		TimeElapsed: SecondsToHHMMString(uint64(upd.TimeElapsed)),
-		TimeLeft:    "unknown",
-		Progress:    fmt.Sprintf("%d%%", totalProgress/len(d.syncStats.SnapshotIndexing.Segments)),
-	}, "Indexing snapshots")
-
-	d.saveSyncStagesToDB()
 }
 
 func (d *DiagnosticClient) runSnapshotFilesListListener(rootCtx context.Context) {
@@ -330,6 +345,8 @@ func (d *DiagnosticClient) runFileDownloadedListener(rootCtx context.Context) {
 }
 
 func (d *DiagnosticClient) UpdateFileDownloadedStatistics(downloadedInfo *FileDownloadedStatisticsUpdate, downloadingInfo *SegmentDownloadStatistics) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
 	if d.syncStats.SnapshotDownload.SegmentsDownloading == nil {
 		d.syncStats.SnapshotDownload.SegmentsDownloading = map[string]SegmentDownloadStatistics{}
 	}
@@ -382,31 +399,12 @@ func (d *DiagnosticClient) runFillDBListener(rootCtx context.Context) {
 
 				totalTimeString := time.Duration(info.TimeElapsed) * time.Second
 
-				d.mu.Lock()
 				d.updateSnapshotStageStats(SyncStageStats{
 					TimeElapsed: totalTimeString.String(),
 					TimeLeft:    "unknown",
 					Progress:    fmt.Sprintf("%d%%", (info.Stage.Current*100)/info.Stage.Total),
 				}, "Fill DB from snapshots")
-
-				err := d.db.Update(d.ctx, func(tx kv.RwTx) error {
-					err := SnapshotFillDBUpdater(d.syncStats.SnapshotFillDB)(tx)
-					if err != nil {
-						return err
-					}
-
-					err = StagesListUpdater(d.syncStages)(tx)
-					if err != nil {
-						return err
-					}
-
-					return nil
-				})
-
-				if err != nil {
-					log.Warn("[Diagnostics] Failed to update snapshot download info", "err", err)
-				}
-				d.mu.Unlock()
+				d.saveSnapshotStageStatsToDB()
 			}
 		}
 	}()
@@ -429,12 +427,25 @@ func (d *DiagnosticClient) SetFillDBInfo(info SnapshotFillDBStage) {
 	}
 }
 
+// Deprecated - it's not thread-safe and used only in tests. Need introduce another method or add special methods for Tests.
 func (d *DiagnosticClient) SyncStatistics() SyncStatistics {
 	return d.syncStats
 }
 
-func (d *DiagnosticClient) SnapshotFilesList() SnapshoFilesList {
-	return d.snapshotFileList
+func (d *DiagnosticClient) SyncStatsJson(w io.Writer) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	if err := json.NewEncoder(w).Encode(d.syncStats); err != nil {
+		log.Debug("[diagnostics] SyncStatsJson", "err", err)
+	}
+}
+
+func (d *DiagnosticClient) SnapshotFilesListJson(w io.Writer) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	if err := json.NewEncoder(w).Encode(d.snapshotFileList); err != nil {
+		log.Debug("[diagnostics] SnapshotFilesListJson", "err", err)
+	}
 }
 
 func SnapshotDownloadInfoFromTx(tx kv.Tx) ([]byte, error) {
@@ -446,17 +457,6 @@ func SnapshotDownloadInfoFromTx(tx kv.Tx) ([]byte, error) {
 	return common.CopyBytes(bytes), nil
 }
 
-func ParseSnapshotDownloadInfo(data []byte) (info SnapshotDownloadStatistics) {
-	err := json.Unmarshal(data, &info)
-
-	if err != nil {
-		log.Warn("[Diagnostics] Failed to parse snapshot download info", "err", err)
-		return SnapshotDownloadStatistics{}
-	} else {
-		return info
-	}
-}
-
 func SnapshotIndexingInfoFromTx(tx kv.Tx) ([]byte, error) {
 	bytes, err := ReadDataFromTable(tx, kv.DiagSyncStages, SnapshotIndexingStatisticsKey)
 	if err != nil {
@@ -466,17 +466,6 @@ func SnapshotIndexingInfoFromTx(tx kv.Tx) ([]byte, error) {
 	return common.CopyBytes(bytes), nil
 }
 
-func ParseSnapshotIndexingInfo(data []byte) (info SnapshotIndexingStatistics) {
-	err := json.Unmarshal(data, &info)
-
-	if err != nil {
-		log.Warn("[Diagnostics] Failed to parse snapshot indexing info", "err", err)
-		return SnapshotIndexingStatistics{}
-	} else {
-		return info
-	}
-}
-
 func SnapshotFillDBInfoFromTx(tx kv.Tx) ([]byte, error) {
 	bytes, err := ReadDataFromTable(tx, kv.DiagSyncStages, SnapshotFillDBStatisticsKey)
 	if err != nil {
@@ -484,17 +473,6 @@ func SnapshotFillDBInfoFromTx(tx kv.Tx) ([]byte, error) {
 	}
 
 	return common.CopyBytes(bytes), nil
-}
-
-func ParseSnapshotFillDBInfo(data []byte) (info SnapshotFillDBStatistics) {
-	err := json.Unmarshal(data, &info)
-
-	if err != nil {
-		log.Warn("[Diagnostics] Failed to parse snapshot fill db info", "err", err)
-		return SnapshotFillDBStatistics{}
-	} else {
-		return info
-	}
 }
 
 func SnapshotDownloadUpdater(info SnapshotDownloadStatistics) func(tx kv.RwTx) error {

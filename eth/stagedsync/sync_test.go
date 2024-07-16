@@ -1,3 +1,19 @@
+// Copyright 2024 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+
 package stagedsync
 
 import (
@@ -180,7 +196,7 @@ func TestUnwindSomeStagesBehindUnwindPoint(t *testing.T) {
 				flow = append(flow, stages.Senders)
 				if !unwound {
 					unwound = true
-					_ = u.UnwindTo(1500, UnwindReason{}, nil)
+					_ = u.UnwindTo(1500, UnwindReason{}, txc.Tx)
 					return nil
 				}
 				return nil
@@ -273,7 +289,7 @@ func TestUnwind(t *testing.T) {
 				flow = append(flow, stages.Senders)
 				if !unwound {
 					unwound = true
-					_ = u.UnwindTo(500, UnwindReason{}, nil)
+					_ = u.UnwindTo(500, UnwindReason{}, txc.Tx)
 					return s.Update(txc.Tx, 3000)
 				}
 				return nil
@@ -327,7 +343,7 @@ func TestUnwind(t *testing.T) {
 	//check that at unwind disabled stage not appear
 	flow = flow[:0]
 	state.unwindOrder = []*Stage{s[3], s[2], s[1], s[0]}
-	_ = state.UnwindTo(100, UnwindReason{}, nil)
+	_ = state.UnwindTo(100, UnwindReason{}, tx)
 	_, err = state.Run(db, wrap.TxContainer{Tx: tx}, true /* initialCycle */, false)
 	assert.NoError(t, err)
 
@@ -377,7 +393,7 @@ func TestUnwindEmptyUnwinder(t *testing.T) {
 				flow = append(flow, stages.Senders)
 				if !unwound {
 					unwound = true
-					_ = u.UnwindTo(500, UnwindReason{}, nil)
+					_ = u.UnwindTo(500, UnwindReason{}, txc.Tx)
 					return s.Update(txc.Tx, 3000)
 				}
 				return nil
@@ -565,7 +581,7 @@ func TestSyncInterruptLongUnwind(t *testing.T) {
 				flow = append(flow, stages.Senders)
 				if !unwound {
 					unwound = true
-					_ = u.UnwindTo(500, UnwindReason{}, nil)
+					_ = u.UnwindTo(500, UnwindReason{}, txc.Tx)
 					return s.Update(txc.Tx, 3000)
 				}
 				return nil

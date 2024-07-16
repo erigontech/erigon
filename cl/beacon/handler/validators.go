@@ -1,7 +1,24 @@
+// Copyright 2024 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+
 package handler
 
 import (
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"math"
 	"net/http"
@@ -12,6 +29,7 @@ import (
 
 	"github.com/pkg/errors"
 
+	"github.com/ledgerwatch/erigon-lib/common"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/log/v3"
@@ -154,7 +172,7 @@ func (s validatorStatus) String() string {
 	}
 }
 
-const maxValidatorsLookupFilter = 32
+const maxValidatorsLookupFilter = 128
 
 func parseStatuses(s []string) ([]validatorStatus, error) {
 	seenAlready := make(map[validatorStatus]struct{})
@@ -216,7 +234,6 @@ func (a *ApiHandler) GetEthV1BeaconStatesValidators(w http.ResponseWriter, r *ht
 		return
 	}
 
-	isOptimistic := a.forkchoiceStore.IsRootOptimistic(blockRoot)
 	queryFilters, err := beaconhttp.StringListFromQueryParams(r, "status")
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
@@ -233,6 +250,60 @@ func (a *ApiHandler) GetEthV1BeaconStatesValidators(w http.ResponseWriter, r *ht
 		http.Error(w, fmt.Errorf("too many validators requested").Error(), http.StatusBadRequest)
 		return
 	}
+	a.writeValidatorsResponse(w, r, tx, blockId, blockRoot, validatorIds, queryFilters)
+}
+
+type validatorsRequest struct {
+	Ids      []string `json:"ids"`
+	Statuses []string `json:"statuses"`
+}
+
+func (a *ApiHandler) PostEthV1BeaconStatesValidators(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+
+	tx, err := a.indiciesDB.BeginRo(ctx)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	defer tx.Rollback()
+
+	blockId, err := beaconhttp.StateIdFromRequest(r)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	blockRoot, httpStatus, err := a.blockRootFromStateId(ctx, tx, blockId)
+	if err != nil {
+		http.Error(w, err.Error(), httpStatus)
+		return
+	}
+
+	var req validatorsRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	if len(req.Ids) > maxValidatorsLookupFilter {
+		http.Error(w, fmt.Errorf("too many validators requested").Error(), http.StatusBadRequest)
+		return
+	}
+
+	a.writeValidatorsResponse(w, r, tx, blockId, blockRoot, req.Ids, req.Statuses)
+}
+
+func (a *ApiHandler) writeValidatorsResponse(
+	w http.ResponseWriter,
+	r *http.Request,
+	tx kv.Tx,
+	blockId *beaconhttp.SegmentID,
+	blockRoot common.Hash,
+	validatorIds,
+	queryFilters []string,
+) {
+	isOptimistic := a.forkchoiceStore.IsRootOptimistic(blockRoot)
 	filterIndicies, err := parseQueryValidatorIndicies(tx, validatorIds)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
@@ -299,6 +370,7 @@ func (a *ApiHandler) GetEthV1BeaconStatesValidators(w http.ResponseWriter, r *ht
 		return
 	}
 	responseValidators(w, filterIndicies, statusFilters, stateEpoch, balances, validators, *slot <= a.forkchoiceStore.FinalizedSlot(), isOptimistic)
+
 }
 
 func parseQueryValidatorIndex(tx kv.Tx, id string) (uint64, error) {
@@ -523,6 +595,7 @@ func (d directString) MarshalJSON() ([]byte, error) {
 }
 
 func responseValidators(w http.ResponseWriter, filterIndicies []uint64, filterStatuses []validatorStatus, stateEpoch uint64, balances solid.Uint64ListSSZ, validators *solid.ValidatorSet, finalized bool, optimistic bool) {
+	// todo: refactor this function
 	b := stringsBuilderPool.Get().(*strings.Builder)
 	defer stringsBuilderPool.Put(b)
 	b.Reset()
@@ -576,14 +649,12 @@ func responseValidators(w http.ResponseWriter, filterIndicies []uint64, filterSt
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-
 	_, err = b.WriteString("]}\n")
 
+	w.Header().Set("Content-Type", "application/json")
 	if _, err := w.Write([]byte(b.String())); err != nil {
 		log.Error("failed to write response", "err", err)
 	}
-	return
-
 }
 
 func responseValidator(idx uint64, stateEpoch uint64, balances solid.Uint64ListSSZ, validators *solid.ValidatorSet, finalized bool, optimistic bool) (*beaconhttp.BeaconResponse, error) {
@@ -646,8 +717,9 @@ func responseValidatorsBalances(w http.ResponseWriter, filterIndicies []uint64, 
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-
 	_, err = b.WriteString("]}\n")
+
+	w.Header().Set("Content-Type", "application/json")
 	if _, err := w.Write([]byte(b.String())); err != nil {
 		log.Error("failed to write response", "err", err)
 	}
@@ -685,7 +757,7 @@ func (a *ApiHandler) GetEthV1ValidatorAggregateAttestation(w http.ResponseWriter
 	attDataRootHash := libcommon.HexToHash(attDataRoot)
 	att := a.aggregatePool.GetAggregatationByRoot(attDataRootHash)
 	if att == nil {
-		return nil, beaconhttp.NewEndpointError(http.StatusNotFound, fmt.Errorf("attestation not found. attestation_data_root"))
+		return nil, beaconhttp.NewEndpointError(http.StatusNotFound, fmt.Errorf("attestation %s not found", attDataRoot))
 	}
 	if slotNum != att.AttestantionData().Slot() {
 		log.Debug("attestation slot does not match", "attestation_data_root", attDataRoot, "slot_inquire", slot)

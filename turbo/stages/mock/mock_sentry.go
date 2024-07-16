@@ -1,3 +1,19 @@
+// Copyright 2024 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+
 package mock
 
 import (
@@ -248,6 +264,9 @@ func MockWithEverything(tb testing.TB, gspec *types.Genesis, key *ecdsa.PrivateK
 	engine consensus.Engine, blockBufferSize int, withTxPool, withPosDownloader, checkStateRoot bool,
 ) *MockSentry {
 	tmpdir := os.TempDir()
+	if tb != nil {
+		tmpdir = tb.TempDir()
+	}
 	ctrl := gomock.NewController(tb)
 	dirs := datadir.New(tmpdir)
 	var err error
@@ -259,10 +278,11 @@ func MockWithEverything(tb testing.TB, gspec *types.Genesis, key *ecdsa.PrivateK
 	cfg.DeprecatedTxPool.Disable = !withTxPool
 	cfg.DeprecatedTxPool.StartOnInit = true
 
-	logger := log.New()
+	logger := log.Root()
+	logger.SetHandler(log.LvlFilterHandler(log.LvlError, log.StderrHandler))
 
 	ctx, ctxCancel := context.WithCancel(context.Background())
-	db, agg := temporaltest.NewTestDB(nil, dirs)
+	db, agg := temporaltest.NewTestDB(tb, dirs)
 
 	erigonGrpcServeer := remotedbserver.NewKvServer(ctx, db, nil, nil, nil, logger)
 	allSnapshots := freezeblocks.NewRoSnapshots(ethconfig.Defaults.Snapshot, dirs.Snap, 0, logger)
@@ -457,7 +477,6 @@ func MockWithEverything(tb testing.TB, gspec *types.Genesis, key *ecdsa.PrivateK
 					mock.DB,
 					prune,
 					cfg.BatchSize,
-					nil,
 					mock.ChainConfig,
 					mock.Engine,
 					&vm.Config{},
@@ -496,7 +515,6 @@ func MockWithEverything(tb testing.TB, gspec *types.Genesis, key *ecdsa.PrivateK
 			mock.DB,
 			prune,
 			cfg.BatchSize,
-			nil,
 			mock.ChainConfig,
 			mock.Engine,
 			&vm.Config{},
@@ -534,7 +552,6 @@ func MockWithEverything(tb testing.TB, gspec *types.Genesis, key *ecdsa.PrivateK
 				mock.DB,
 				prune,
 				cfg.BatchSize,
-				nil,
 				mock.ChainConfig,
 				mock.Engine,
 				&vm.Config{},
@@ -834,10 +851,7 @@ func (ms *MockSentry) NewHistoryStateReader(blockNum uint64, tx kv.Tx) state.Sta
 }
 
 func (ms *MockSentry) NewStateReader(tx kv.Tx) state.StateReader {
-	if ms.HistoryV3 {
-		return state.NewReaderV4(tx.(kv.TemporalGetter))
-	}
-	return state.NewPlainStateReader(tx)
+	return state.NewReaderV4(tx.(kv.TemporalGetter))
 }
 func (ms *MockSentry) HistoryV3Components() *libstate.Aggregator {
 	return ms.agg

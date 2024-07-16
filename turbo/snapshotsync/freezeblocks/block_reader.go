@@ -1,3 +1,19 @@
+// Copyright 2024 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+
 package freezeblocks
 
 import (
@@ -11,6 +27,7 @@ import (
 	"time"
 
 	"github.com/ledgerwatch/erigon-lib/log/v3"
+	borsnaptype "github.com/ledgerwatch/erigon/polygon/bor/snaptype"
 
 	"github.com/ledgerwatch/erigon-lib/common/hexutility"
 	"github.com/ledgerwatch/erigon/polygon/bor"
@@ -370,12 +387,11 @@ func (r *BlockReader) HeaderByNumber(ctx context.Context, tx kv.Getter, blockHei
 		}
 	}
 
-	view := r.sn.View()
-	defer view.Close()
-	seg, ok := view.HeadersSegment(blockHeight)
+	seg, ok, release := r.sn.ViewSingleFile(coresnaptype.Headers, blockHeight)
 	if !ok {
 		return
 	}
+	defer release()
 
 	h, _, err = r.headerFromSnapshot(blockHeight, seg, nil)
 	if err != nil {
@@ -394,9 +410,8 @@ func (r *BlockReader) HeaderByHash(ctx context.Context, tx kv.Getter, hash commo
 		return h, nil
 	}
 
-	view := r.sn.View()
-	defer view.Close()
-	segments := view.Headers()
+	segments, release := r.sn.ViewType(coresnaptype.Headers)
+	defer release()
 
 	buf := make([]byte, 128)
 	for i := len(segments) - 1; i >= 0; i-- {
@@ -426,12 +441,11 @@ func (r *BlockReader) CanonicalHash(ctx context.Context, tx kv.Getter, blockHeig
 		return h, nil
 	}
 
-	view := r.sn.View()
-	defer view.Close()
-	seg, ok := view.HeadersSegment(blockHeight)
+	seg, ok, release := r.sn.ViewSingleFile(coresnaptype.Headers, blockHeight)
 	if !ok {
 		return
 	}
+	defer release()
 
 	header, _, err := r.headerFromSnapshot(blockHeight, seg, nil)
 	if err != nil {
@@ -461,12 +475,12 @@ func (r *BlockReader) Header(ctx context.Context, tx kv.Getter, hash common.Hash
 		}
 	}
 
-	view := r.sn.View()
-	defer view.Close()
-	seg, ok := view.HeadersSegment(blockHeight)
+	seg, ok, release := r.sn.ViewSingleFile(coresnaptype.Headers, blockHeight)
 	if !ok {
 		return
 	}
+	defer release()
+
 	h, _, err = r.headerFromSnapshot(blockHeight, seg, nil)
 	if err != nil {
 		return h, err
@@ -500,40 +514,47 @@ func (r *BlockReader) BodyWithTransactions(ctx context.Context, tx kv.Getter, ha
 			log.Info(dbgPrefix + "found in db=false")
 		}
 	}
-	view := r.sn.View()
-	defer view.Close()
 
-	var baseTxnID uint64
-	var txCount uint32
-	var buf []byte
-	seg, ok := view.BodiesSegment(blockHeight)
+	seg, ok, release := r.sn.ViewSingleFile(coresnaptype.Bodies, blockHeight)
 	if !ok {
 		if dbgLogs {
 			log.Info(dbgPrefix + "no bodies file for this block num")
 		}
 		return nil, nil
 	}
+	defer release()
+
+	var baseTxnID uint64
+	var txCount uint32
+	var buf []byte
 	body, baseTxnID, txCount, buf, err = r.bodyFromSnapshot(blockHeight, seg, buf)
 	if err != nil {
 		return nil, err
 	}
+	release()
+
 	if body == nil {
 		if dbgLogs {
 			log.Info(dbgPrefix + "got nil body from file")
 		}
 		return nil, nil
 	}
-	txnSeg, ok := view.TxsSegment(blockHeight)
+
+	txnSeg, ok, release := r.sn.ViewSingleFile(coresnaptype.Transactions, blockHeight)
 	if !ok {
 		if dbgLogs {
 			log.Info(dbgPrefix+"no transactions file for this block num", "r.sn.BlocksAvailable()", r.sn.BlocksAvailable(), "r.sn.idxMax", r.sn.idxMax.Load(), "r.sn.segmetntsMax", r.sn.segmentsMax.Load())
 		}
 		return nil, nil
 	}
+	defer release()
+
 	txs, senders, err := r.txsFromSnapshot(baseTxnID, txCount, txnSeg, buf)
 	if err != nil {
 		return nil, err
 	}
+	release()
+
 	if txs == nil {
 		if dbgLogs {
 			log.Info(dbgPrefix + "got nil txs from file")
@@ -569,13 +590,13 @@ func (r *BlockReader) Body(ctx context.Context, tx kv.Getter, hash common.Hash, 
 		body, _, txCount = rawdb.ReadBody(tx, hash, blockHeight)
 		return body, txCount, nil
 	}
-	view := r.sn.View()
-	defer view.Close()
 
-	seg, ok := view.BodiesSegment(blockHeight)
+	seg, ok, release := r.sn.ViewSingleFile(coresnaptype.Bodies, blockHeight)
 	if !ok {
 		return
 	}
+	defer release()
+
 	body, _, txCount, _, err = r.bodyFromSnapshot(blockHeight, seg, nil)
 	if err != nil {
 		return nil, 0, err
@@ -639,15 +660,14 @@ func (r *BlockReader) blockWithSenders(ctx context.Context, tx kv.Getter, hash c
 		return
 	}
 
-	view := r.sn.View()
-	defer view.Close()
-	seg, ok := view.HeadersSegment(blockHeight)
+	seg, ok, release := r.sn.ViewSingleFile(coresnaptype.Headers, blockHeight)
 	if !ok {
 		if dbgLogs {
 			log.Info(dbgPrefix + "no header files for this block num")
 		}
 		return
 	}
+	defer release()
 
 	var buf []byte
 	h, buf, err := r.headerFromSnapshot(blockHeight, seg, buf)
@@ -660,21 +680,26 @@ func (r *BlockReader) blockWithSenders(ctx context.Context, tx kv.Getter, hash c
 		}
 		return
 	}
+	release()
 
 	var b *types.Body
 	var baseTxnId uint64
 	var txCount uint32
-	bodySeg, ok := view.BodiesSegment(blockHeight)
+	bodySeg, ok, release := r.sn.ViewSingleFile(coresnaptype.Bodies, blockHeight)
 	if !ok {
 		if dbgLogs {
 			log.Info(dbgPrefix + "no bodies file for this block num")
 		}
 		return
 	}
+	defer release()
+
 	b, baseTxnId, txCount, buf, err = r.bodyFromSnapshot(blockHeight, bodySeg, buf)
 	if err != nil {
 		return nil, nil, err
 	}
+	release()
+
 	if b == nil {
 		if dbgLogs {
 			log.Info(dbgPrefix + "got nil body from file")
@@ -693,18 +718,21 @@ func (r *BlockReader) blockWithSenders(ctx context.Context, tx kv.Getter, hash c
 		return block, senders, nil
 	}
 
-	txnSeg, ok := view.TxsSegment(blockHeight)
+	txnSeg, ok, release := r.sn.ViewSingleFile(coresnaptype.Transactions, blockHeight)
 	if !ok {
 		if dbgLogs {
 			log.Info(dbgPrefix+"no transactions file for this block num", "r.sn.BlocksAvailable()", r.sn.BlocksAvailable(), "r.sn.indicesReady", r.sn.indicesReady.Load())
 		}
 		return
 	}
+	defer release()
 	var txs []types.Transaction
 	txs, senders, err = r.txsFromSnapshot(baseTxnId, txCount, txnSeg, buf)
 	if err != nil {
 		return nil, nil, err
 	}
+	release()
+
 	block = types.NewBlockFromStorage(hash, h, txs, b.Uncles, b.Withdrawals, b.Requests)
 	if len(senders) != block.Transactions().Len() {
 		if dbgLogs {
@@ -959,18 +987,18 @@ func (r *BlockReader) TxnByIdxInBlock(ctx context.Context, tx kv.Getter, blockNu
 		return rawdb.TxnByIdxInBlock(tx, canonicalHash, blockNum, txIdxInBlock)
 	}
 
-	view := r.sn.View()
-	defer view.Close()
-	seg, ok := view.BodiesSegment(blockNum)
+	seg, ok, release := r.sn.ViewSingleFile(coresnaptype.Bodies, blockNum)
 	if !ok {
 		return
 	}
+	defer release()
 
 	var b *types.BodyForStorage
 	b, _, err = r.bodyForStorageFromSnapshot(blockNum, seg, nil)
 	if err != nil {
 		return nil, err
 	}
+	release()
 	if b == nil {
 		return
 	}
@@ -980,10 +1008,12 @@ func (r *BlockReader) TxnByIdxInBlock(ctx context.Context, tx kv.Getter, blockNu
 		return nil, nil
 	}
 
-	txnSeg, ok := view.TxsSegment(blockNum)
+	txnSeg, ok, release := r.sn.ViewSingleFile(coresnaptype.Transactions, blockNum)
 	if !ok {
 		return
 	}
+	defer release()
+
 	// +1 because block has system-txn in the beginning of block
 	return r.txnByID(b.BaseTxnID.At(txIdxInBlock), txnSeg, nil)
 }
@@ -999,10 +1029,9 @@ func (r *BlockReader) TxnLookup(_ context.Context, tx kv.Getter, txnHash common.
 		return *n, true, nil
 	}
 
-	view := r.sn.View()
-	defer view.Close()
-
-	_, blockNum, ok, err := r.txnByHash(txnHash, view.Txs(), nil)
+	txns, release := r.sn.ViewType(coresnaptype.Transactions)
+	defer release()
+	_, blockNum, ok, err := r.txnByHash(txnHash, txns, nil)
 	if err != nil {
 		return 0, false, err
 	}
@@ -1011,13 +1040,11 @@ func (r *BlockReader) TxnLookup(_ context.Context, tx kv.Getter, txnHash common.
 }
 
 func (r *BlockReader) FirstTxnNumNotInSnapshots() uint64 {
-	view := r.sn.View()
-	defer view.Close()
-
-	sn, ok := view.TxsSegment(r.sn.BlocksAvailable())
+	sn, ok, release := r.sn.ViewSingleFile(coresnaptype.Transactions, r.sn.BlocksAvailable())
 	if !ok {
 		return 0
 	}
+	defer release()
 
 	lastTxnID := sn.Index(coresnaptype.Indexes.TxnHash).BaseDataID() + uint64(sn.Count())
 	return lastTxnID
@@ -1172,10 +1199,10 @@ func (r *BlockReader) EventLookup(ctx context.Context, tx kv.Getter, txnHash com
 		return 0, false, nil
 	}
 
-	view := r.borSn.View()
-	defer view.Close()
+	segs, release := r.borSn.ViewType(borsnaptype.BorEvents)
+	defer release()
 
-	blockNum, ok, err := r.borBlockByEventHash(txnHash, view.Events(), nil)
+	blockNum, ok, err := r.borBlockByEventHash(txnHash, segs, nil)
 	if err != nil {
 		return 0, false, err
 	}
@@ -1230,10 +1257,10 @@ func (r *BlockReader) BorStartEventID(ctx context.Context, tx kv.Tx, hash common
 	}
 
 	borTxHash := bortypes.ComputeBorTxHash(blockHeight, hash)
-	view := r.borSn.View()
-	defer view.Close()
 
-	segments := view.Events()
+	segments, release := r.borSn.ViewType(borsnaptype.BorEvents)
+	defer release()
+
 	for i := len(segments) - 1; i >= 0; i-- {
 		sn := segments[i]
 		if sn.from > blockHeight {
@@ -1308,9 +1335,10 @@ func (r *BlockReader) EventsByBlock(ctx context.Context, tx kv.Tx, hash common.H
 		return result, nil
 	}
 	borTxHash := bortypes.ComputeBorTxHash(blockHeight, hash)
-	view := r.borSn.View()
-	defer view.Close()
-	segments := view.Events()
+
+	segments, release := r.borSn.ViewType(borsnaptype.BorEvents)
+	defer release()
+
 	var buf []byte
 	result := []rlp.RawValue{}
 	for i := len(segments) - 1; i >= 0; i-- {
@@ -1348,10 +1376,9 @@ func (r *BlockReader) EventsByBlock(ctx context.Context, tx kv.Tx, hash common.H
 
 // EventsByIdFromSnapshot returns the list of records limited by time, or the number of records along with a bool value to signify if the records were limited by time
 func (r *BlockReader) EventsByIdFromSnapshot(from uint64, to time.Time, limit int) ([]*heimdall.EventRecordWithTime, bool, error) {
-	view := r.borSn.View()
-	defer view.Close()
+	segments, release := r.borSn.ViewType(borsnaptype.BorEvents)
+	defer release()
 
-	segments := view.Events()
 	var buf []byte
 	var result []*heimdall.EventRecordWithTime
 	stateContract := bor.GenesisContractStateReceiverABI()
@@ -1428,9 +1455,9 @@ func (r *BlockReader) LastFrozenEventId() uint64 {
 		return 0
 	}
 
-	view := r.borSn.View()
-	defer view.Close()
-	segments := view.Events()
+	segments, release := r.borSn.ViewType(borsnaptype.BorEvents)
+	defer release()
+
 	if len(segments) == 0 {
 		return 0
 	}
@@ -1485,9 +1512,9 @@ func (r *BlockReader) LastFrozenSpanId() uint64 {
 		return 0
 	}
 
-	view := r.borSn.View()
-	defer view.Close()
-	segments := view.Spans()
+	segments, release := r.borSn.ViewType(borsnaptype.BorSpans)
+	defer release()
+
 	if len(segments) == 0 {
 		return 0
 	}
@@ -1529,9 +1556,9 @@ func (r *BlockReader) Span(ctx context.Context, tx kv.Getter, spanId uint64) ([]
 		}
 		return common.Copy(v), nil
 	}
-	view := r.borSn.View()
-	defer view.Close()
-	segments := view.Spans()
+	segments, release := r.borSn.ViewType(borsnaptype.BorSpans)
+	defer release()
+
 	for i := len(segments) - 1; i >= 0; i-- {
 		sn := segments[i]
 		idx := sn.Index()
@@ -1633,9 +1660,9 @@ func (r *BlockReader) Checkpoint(ctx context.Context, tx kv.Getter, checkpointId
 		return common.Copy(v), nil
 	}
 
-	view := r.borSn.View()
-	defer view.Close()
-	segments := view.Checkpoints()
+	segments, release := r.borSn.ViewType(borsnaptype.BorCheckpoints)
+	defer release()
+
 	for i := len(segments) - 1; i >= 0; i-- {
 		sn := segments[i]
 		index := sn.Index()
@@ -1659,9 +1686,8 @@ func (r *BlockReader) LastFrozenCheckpointId() uint64 {
 		return 0
 	}
 
-	view := r.borSn.View()
-	defer view.Close()
-	segments := view.Checkpoints()
+	segments, release := r.borSn.ViewType(borsnaptype.BorCheckpoints)
+	defer release()
 	if len(segments) == 0 {
 		return 0
 	}
