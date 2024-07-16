@@ -17,7 +17,7 @@
 package vkutils
 
 import (
-	"encoding/binary"
+	// "encoding/binary"
 	"sync"
 
 	"github.com/crate-crypto/go-ipa/bandersnatch/fr"
@@ -229,13 +229,9 @@ func GetTreeKeyWithEvaluatedAddess(evaluated *verkle.Point, treeIndex *uint256.I
 	poly[1].SetZero()
 	poly[2].SetZero()
 
-	// little-endian, 32-byte aligned treeIndex
-	var index [32]byte
-	for i := 0; i < len(treeIndex); i++ {
-		binary.LittleEndian.PutUint64(index[i*8:(i+1)*8], treeIndex[i])
-	}
-	verkle.FromLEBytes(&poly[3], index[:16])
-	verkle.FromLEBytes(&poly[4], index[16:])
+	trieIndexBytes := treeIndex.Bytes32()
+	verkle.FromBytes(&poly[3], trieIndexBytes[16:])
+	verkle.FromBytes(&poly[4], trieIndexBytes[:16])
 
 	cfg := verkle.GetConfig()
 	ret := cfg.CommitToPoly(poly[:], 0)
