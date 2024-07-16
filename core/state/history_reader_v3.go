@@ -56,6 +56,26 @@ func (hr *HistoryReaderV3) ReadAccountData(address common.Address) (*accounts.Ac
 	return &a, nil
 }
 
+// ReadAccountDataForDebug - is like ReadAccountData, but without adding key to `readList`.
+// Used to get `prev` account balance
+func (hr *HistoryReaderV3) ReadAccountDataForDebug(address common.Address) (*accounts.Account, error) {
+	enc, ok, err := hr.ttx.DomainGetAsOf(kv.AccountsDomain, address[:], nil, hr.txNum)
+	if err != nil || !ok || len(enc) == 0 {
+		if hr.trace {
+			fmt.Printf("ReadAccountDataForDebug [%x] => []\n", address)
+		}
+		return nil, err
+	}
+	var a accounts.Account
+	if err := accounts.DeserialiseV3(&a, enc); err != nil {
+		return nil, fmt.Errorf("ReadAccountDataForDebug(%x): %w", address, err)
+	}
+	if hr.trace {
+		fmt.Printf("ReadAccountDataForDebug [%x] => [nonce: %d, balance: %d, codeHash: %x]\n", address, a.Nonce, &a.Balance, a.CodeHash)
+	}
+	return &a, nil
+}
+
 func (hr *HistoryReaderV3) ReadAccountStorage(address common.Address, incarnation uint64, key *common.Hash) ([]byte, error) {
 	k := append(address[:], key.Bytes()...)
 	enc, _, err := hr.ttx.DomainGetAsOf(kv.StorageDomain, k, nil, hr.txNum)

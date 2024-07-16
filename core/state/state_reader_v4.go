@@ -31,6 +31,23 @@ func (r *ReaderV4) ReadAccountData(address libcommon.Address) (*accounts.Account
 	return &a, nil
 }
 
+// ReadAccountDataForDebug - is like ReadAccountData, but without adding key to `readList`.
+// Used to get `prev` account balance
+func (r *ReaderV4) ReadAccountDataForDebug(address libcommon.Address) (*accounts.Account, error) {
+	enc, _, err := r.tx.DomainGet(kv.AccountsDomain, address.Bytes(), nil)
+	if err != nil {
+		return nil, err
+	}
+	if len(enc) == 0 {
+		return nil, nil
+	}
+	var a accounts.Account
+	if err = accounts.DeserialiseV3(&a, enc); err != nil {
+		return nil, err
+	}
+	return &a, nil
+}
+
 func (r *ReaderV4) ReadAccountStorage(address libcommon.Address, incarnation uint64, key *libcommon.Hash) (enc []byte, err error) {
 	enc, _, err = r.tx.DomainGet(kv.StorageDomain, address.Bytes(), key.Bytes())
 	if err != nil {

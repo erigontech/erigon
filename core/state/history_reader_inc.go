@@ -116,6 +116,73 @@ func (hr *HistoryReaderInc) ReadAccountData(address common.Address) (*accounts.A
 	return &a, nil
 }
 
+// ReadAccountDataForDebug - is like ReadAccountData, but without adding key to `readList`.
+// Used to get `prev` account balance
+func (hr *HistoryReaderInc) ReadAccountDataForDebug(address common.Address) (*accounts.Account, error) {
+	addr := address.Bytes()
+	enc, noState, stateTxNum := hr.as.ReadAccountDataNoState(addr, hr.txNum)
+	if hr.trace {
+		fmt.Printf("ReadAccountDataForDebug [%x]=> hr.txNum=%d, noState=%t\n", address, hr.txNum, noState)
+	}
+	var err error
+	if !noState {
+		if stateTxNum == hr.txNum {
+			enc, err = hr.chainTx.GetOne(kv.PlainState, addr)
+			if err != nil {
+				return nil, err
+			}
+		} else {
+			if !hr.rs.Done(stateTxNum) {
+				hr.readError = true
+				hr.stateTxNum = stateTxNum
+				return nil, &RequiredStateError{StateTxNum: stateTxNum}
+			}
+			enc = hr.rs.Get(kv.PlainStateR, addr, nil, stateTxNum)
+			if hr.trace {
+				fmt.Printf("ReadAccountDataForDebug [%x]=> hr.txNum=%d, enc=%x\n", address, hr.txNum, enc)
+			}
+			if enc == nil {
+				if cap(hr.composite) < 8+20 {
+					hr.composite = make([]byte, 8+20)
+				} else if len(hr.composite) != 8+20 {
+					hr.composite = hr.composite[:8+20]
+				}
+				binary.BigEndian.PutUint64(hr.composite, stateTxNum)
+				copy(hr.composite[8:], addr)
+				enc, err = hr.tx.GetOne(kv.PlainStateR, hr.composite)
+				if err != nil {
+					return nil, err
+				}
+			}
+		}
+		if enc == nil {
+			return nil, nil
+		}
+		var a accounts.Account
+		if err = a.DecodeForStorage(enc); err != nil {
+			return nil, err
+		}
+		if hr.trace {
+			fmt.Printf("ReadAccountDataForDebug [%x] => [nonce: %d, balance: %d, codeHash: %x], noState=%t, stateTxNum=%d, txNum: %d\n", address, a.Nonce, &a.Balance, a.CodeHash, noState, stateTxNum, hr.txNum)
+		}
+		return &a, nil
+	}
+	if len(enc) == 0 {
+		if hr.trace {
+			fmt.Printf("ReadAccountDataForDebug [%x] => [], noState=%t, txNum: %d\n", address, noState, hr.txNum)
+		}
+		return nil, nil
+	}
+	var a accounts.Account
+	if err = accounts.DeserialiseV3(&a, enc); err != nil {
+		return nil, err
+	}
+	if hr.trace {
+		fmt.Printf("ReadAccountDataForDebug [%x] => [nonce: %d, balance: %d, codeHash: %x], noState=%t, txNum: %d\n", address, a.Nonce, &a.Balance, a.CodeHash, noState, hr.txNum)
+	}
+	return &a, nil
+}
+
 func (hr *HistoryReaderInc) ReadAccountStorage(address common.Address, incarnation uint64, key *common.Hash) ([]byte, error) {
 	addr, k := address.Bytes(), key.Bytes()
 	var err error

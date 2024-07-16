@@ -42,6 +42,23 @@ func (r *PlainStateReader) ReadAccountData(address libcommon.Address) (*accounts
 	return &a, nil
 }
 
+// ReadAccountDataForDebug - is like ReadAccountData, but without adding key to `readList`.
+// Used to get `prev` account balance
+func (r *PlainStateReader) ReadAccountDataForDebug(address libcommon.Address) (*accounts.Account, error) {
+	enc, err := r.db.GetOne(kv.PlainState, address.Bytes())
+	if err != nil {
+		return nil, err
+	}
+	if len(enc) == 0 {
+		return nil, nil
+	}
+	var a accounts.Account
+	if err = a.DecodeForStorage(enc); err != nil {
+		return nil, err
+	}
+	return &a, nil
+}
+
 func (r *PlainStateReader) ReadAccountStorage(address libcommon.Address, incarnation uint64, key *libcommon.Hash) ([]byte, error) {
 	compositeKey := dbutils.PlainGenerateCompositeStorageKey(address.Bytes(), incarnation, key.Bytes())
 	enc, err := r.db.GetOne(kv.PlainState, compositeKey)

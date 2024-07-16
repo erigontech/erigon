@@ -330,26 +330,39 @@ func (sdb *IntraBlockState) AddBalance(addr libcommon.Address, amount *uint256.I
 		fmt.Printf("AddBalance %x, %d\n", addr, amount)
 	}
 
-	if sdb.logger == nil {
-		// If this account has not been read, add to the balance increment map
-		_, needAccount := sdb.stateObjects[addr]
-		if !needAccount && addr == ripemd && amount.IsZero() {
-			needAccount = true
+	// If this account has not been read, add to the balance increment map
+	_, needAccount := sdb.stateObjects[addr]
+	if !needAccount && addr == ripemd && amount.IsZero() {
+		needAccount = true
+	}
+	if !needAccount {
+		sdb.journal.append(balanceIncrease{
+			account:  &addr,
+			increase: *amount,
+		})
+
+		bi, ok := sdb.balanceInc[addr]
+		if !ok {
+			bi = &BalanceIncrease{}
+			sdb.balanceInc[addr] = bi
 		}
-		if !needAccount {
-			sdb.journal.append(balanceIncrease{
-				account:  &addr,
-				increase: *amount,
-			})
-			bi, ok := sdb.balanceInc[addr]
-			if !ok {
-				bi = &BalanceIncrease{}
-				sdb.balanceInc[addr] = bi
+
+		if sdb.logger != nil && sdb.logger.OnBalanceChange != nil {
+			// TODO: discuss if we should ignore error
+			prev := new(uint256.Int)
+			account, _ := sdb.stateReader.ReadAccountDataForDebug(addr)
+			if account != nil {
+				prev.Add(&account.Balance, &bi.increase)
+			} else {
+				prev.Add(prev, &bi.increase)
 			}
-			bi.increase.Add(&bi.increase, amount)
-			bi.count++
-			return
+
+			sdb.logger.OnBalanceChange(addr, prev, new(uint256.Int).Add(prev, amount), reason)
 		}
+
+		bi.increase.Add(&bi.increase, amount)
+		bi.count++
+		return
 	}
 
 	stateObject := sdb.GetOrNewStateObject(addr)
