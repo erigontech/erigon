@@ -315,6 +315,7 @@ func WaitForDownloader(ctx context.Context, logPrefix string, headerchain, blobs
 		if err != nil {
 			return err
 		}
+		fmt.Println("minBlockAmountToDownload", minBlockAmountToDownload, "minStepToDownload", minStepToDownload)
 		blackListForPruning, err = buildBlackListForPruning(wantToPrune, minStepToDownload, minBlockAmountToDownload, blockPrune, preverifiedBlockSnapshots)
 		if err != nil {
 			return err
