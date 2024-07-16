@@ -105,7 +105,7 @@ func adjustBlockPrune(blocks, minBlocksToDownload uint64) uint64 {
 	if minBlocksToDownload < snaptype.Erigon2MergeLimit {
 		minBlocksToDownload = snaptype.Erigon2MergeLimit
 	}
-	if blocks < minBlocksToDownload {
+	if blocks > minBlocksToDownload {
 		blocks = minBlocksToDownload
 	}
 	if blocks%snaptype.Erigon2MergeLimit == 0 {
