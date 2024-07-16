@@ -367,6 +367,7 @@ func (f *forkGraphDisk) GetState(blockRoot libcommon.Hash, alwaysCopy bool) (*st
 				copyReferencedState, err = f.readBeaconStateFromDisk(currentIteratorRoot)
 				if err != nil {
 					log.Trace("Could not retrieve state: Missing header", "missing", currentIteratorRoot, "err", err)
+					copyReferencedState = nil
 				}
 				continue
 			}
