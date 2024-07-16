@@ -213,7 +213,9 @@ func getMinimumBlocksToDownload(tx kv.Tx, blockReader services.FullBlockReader, 
 	minToDownload := uint64(math.MaxUint64)
 	minStepToDownload := minStep
 	stateTxNum := minStep * config3.HistoryV3AggregationStep
+	lastStep := uint64(0)
 	if err := blockReader.IterateFrozenBodies(func(blockNum, baseTxNum, txAmount uint64) error {
+		lastStep = baseTxNum / config3.HistoryV3AggregationStep
 		if blockNum == frozenBlocks-expectedPruneHistoryAmount {
 			minStepToDownload = (baseTxNum / config3.HistoryV3AggregationStep) - 1
 		}
@@ -230,6 +232,10 @@ func getMinimumBlocksToDownload(tx kv.Tx, blockReader services.FullBlockReader, 
 		return nil
 	}); err != nil {
 		return 0, 0, err
+	}
+	// If we are near the last step, we may also not bother downloading the last steps.
+	if minStepToDownload+3 > lastStep {
+		minStepToDownload = math.MaxUint64
 	}
 	if expectedPruneBlockAmount == 0 {
 		return minToDownload, 0, nil
