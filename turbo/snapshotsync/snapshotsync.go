@@ -173,10 +173,8 @@ func getMinimumBlocksToDownload(tx kv.Tx, blockReader services.FullBlockReader, 
 	minToDownload := uint64(math.MaxUint64)
 	minStepToDownload := uint64(math.MaxUint32)
 	stateTxNum := minStep * config3.HistoryV3AggregationStep
-	fmt.Println("historyPruneTo", historyPruneTo)
 	if err := blockReader.IterateFrozenBodies(func(blockNum, baseTxNum, txAmount uint64) error {
 		if blockNum == historyPruneTo {
-			fmt.Println("blockNum", blockNum, "historyPruneTo", historyPruneTo)
 			minStepToDownload = (baseTxNum - (config3.HistoryV3AggregationStep - 1)) / config3.HistoryV3AggregationStep
 			if baseTxNum < (config3.HistoryV3AggregationStep - 1) {
 				minStepToDownload = 0
