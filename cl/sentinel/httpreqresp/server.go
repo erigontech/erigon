@@ -77,7 +77,7 @@ func NewRequestHandler(host host.Host) http.HandlerFunc {
 		if chunks < 1 {
 			chunks = 1
 		}
-		// idk why this would happen, so lets make sure it doesnt. future-proofing from bad input
+		// idk why this would happen, so lets make sure it doesn't. future-proofing from bad input
 		if chunks > 512 {
 			chunks = 512
 		}
@@ -116,7 +116,7 @@ func NewRequestHandler(host host.Host) http.HandlerFunc {
 			http.Error(w, "Read Code: "+err.Error(), http.StatusBadRequest)
 			return
 		}
-		// this is not neccesary, but seems like the right thing to do
+		// this is not necessary, but seems like the right thing to do
 		w.Header().Set("CONTENT-TYPE", "application/octet-stream")
 		w.Header().Set("CONTENT-ENCODING", "snappy/stream")
 		// add the response code & headers
