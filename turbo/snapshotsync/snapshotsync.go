@@ -261,15 +261,7 @@ func getMaxStepRangeInSnapshots(preverified snapcfg.Preverified) (uint64, error)
 
 func computeBlocksToPrune(blockReader services.FullBlockReader, p prune.Mode) (blocksToPrune uint64, historyToPrune uint64) {
 	frozenBlocks := blockReader.Snapshots().SegmentsMax()
-	blocksPruneTo := p.Blocks.PruneTo(frozenBlocks)
-	historyPruneTo := p.History.PruneTo(frozenBlocks)
-	if blocksPruneTo <= frozenBlocks {
-		blocksToPrune = frozenBlocks - blocksPruneTo
-	}
-	if historyPruneTo <= frozenBlocks {
-		historyToPrune = frozenBlocks - historyPruneTo
-	}
-	return blocksToPrune, historyToPrune
+	return p.Blocks.PruneTo(frozenBlocks), p.History.PruneTo(frozenBlocks)
 }
 
 // WaitForDownloader - wait for Downloader service to download all expected snapshots
