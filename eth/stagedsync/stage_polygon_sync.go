@@ -18,9 +18,11 @@ package stagedsync
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"math/big"
+	"slices"
 	"time"
 
 	"golang.org/x/sync/errgroup"
@@ -59,22 +61,39 @@ func NewPolygonSyncStageCfg(
 	polygonBridge bridge.Service,
 ) PolygonSyncStageCfg {
 	dataStream := make(chan polygonSyncStageDataItem)
-	storage := &polygonSyncStageStorage{
-		db:          db,
-		blockReader: blockReader,
-		dataStream:  dataStream,
-	}
 	executionEngine := &polygonSyncStageExecutionEngine{
 		db:          db,
 		blockReader: blockReader,
 		dataStream:  dataStream,
 	}
+	heimdallStore := &polygonSyncStageHeimdallStore{
+		checkpoints: &polygonSyncStageCheckpointStore{
+			db:               db,
+			checkpointReader: blockReader,
+			dataStream:       dataStream,
+		},
+		milestones: &polygonSyncStageMilestoneStore{
+			db:              db,
+			milestoneReader: blockReader,
+			dataStream:      dataStream,
+		},
+		spans: &polygonSyncStageSpanStore{
+			db:         db,
+			spanReader: blockReader,
+			dataStream: dataStream,
+		},
+	}
+	heimdallService := heimdall.NewService(heimdallClient, heimdallStore, logger)
+	borConfig := chainConfig.Bor.(*borcfg.BorConfig)
 	p2pService := p2p.NewService(maxPeers, logger, sentry, statusDataProvider.GetStatusData)
 	checkpointVerifier := polygonsync.VerifyCheckpointHeaders
 	milestoneVerifier := polygonsync.VerifyMilestoneHeaders
 	blocksVerifier := polygonsync.VerifyBlocks
-	heimdallService := heimdall.NewHeimdall(heimdallClient, logger, heimdall.WithStore(storage))
-	borConfig := chainConfig.Bor.(*borcfg.BorConfig)
+	syncStore := &polygonSyncStageSyncStore{
+		db:          db,
+		blockReader: blockReader,
+		dataStream:  dataStream,
+	}
 	blockDownloader := polygonsync.NewBlockDownloader(
 		logger,
 		p2pService,
@@ -82,13 +101,13 @@ func NewPolygonSyncStageCfg(
 		checkpointVerifier,
 		milestoneVerifier,
 		blocksVerifier,
-		storage,
+		syncStore,
 		blockLimit,
 	)
 	spansCache := polygonsync.NewSpansCache()
 	events := polygonsync.NewTipEvents(logger, p2pService, heimdallService)
 	sync := polygonsync.NewSync(
-		storage,
+		syncStore,
 		executionEngine,
 		milestoneVerifier,
 		blocksVerifier,
@@ -108,6 +127,7 @@ func NewPolygonSyncStageCfg(
 		sync:             sync,
 		events:           events,
 		p2p:              p2pService,
+		heimdall:         heimdallService,
 		heimdallClient:   heimdallClient,
 		stateReceiverABI: stateReceiverABI,
 		dataStream:       dataStream,
@@ -182,6 +202,7 @@ type polygonSyncStageService struct {
 	sync             *polygonsync.Sync
 	events           *polygonsync.TipEvents
 	p2p              p2p.Service
+	heimdall         heimdall.Service
 	heimdallClient   heimdall.HeimdallClient
 	stateReceiverABI abi.ABI
 	dataStream       <-chan polygonSyncStageDataItem
@@ -268,6 +289,10 @@ func (s *polygonSyncStageService) runBgComponentsOnce(ctx context.Context) {
 
 		eg.Go(func() error {
 			return s.events.Run(ctx)
+		})
+
+		eg.Go(func() error {
+			return s.heimdall.Run(ctx)
 		})
 
 		if s.bridge != nil {
@@ -469,85 +494,13 @@ func (s *polygonSyncStageService) handleMilestone(ctx context.Context, tx kv.RwT
 	return heimdall.NewTxStore(s.blockReader, tx).PutMilestone(ctx, ms.Id, ms)
 }
 
-type polygonSyncStageStorage struct {
+type polygonSyncStageSyncStore struct {
 	db          kv.RoDB
 	blockReader services.FullBlockReader
 	dataStream  chan<- polygonSyncStageDataItem
 }
 
-func (s *polygonSyncStageStorage) LastSpanId(ctx context.Context) (id heimdall.SpanId, ok bool, err error) {
-	err = s.db.View(ctx, func(tx kv.Tx) error {
-		id, ok, err = heimdall.NewTxReadStore(s.blockReader, tx).LastSpanId(ctx)
-		return err
-	})
-	return
-}
-
-func (s *polygonSyncStageStorage) GetSpan(ctx context.Context, id heimdall.SpanId) (sp *heimdall.Span, err error) {
-	err = s.db.View(ctx, func(tx kv.Tx) error {
-		sp, err = heimdall.NewTxReadStore(s.blockReader, tx).GetSpan(ctx, id)
-		return err
-	})
-	return
-}
-
-func (s *polygonSyncStageStorage) PutSpan(_ context.Context, span *heimdall.Span) error {
-	s.dataStream <- polygonSyncStageDataItem{
-		span: span,
-	}
-
-	return nil
-}
-
-func (s *polygonSyncStageStorage) LastMilestoneId(ctx context.Context) (id heimdall.MilestoneId, ok bool, err error) {
-	err = s.db.View(ctx, func(tx kv.Tx) error {
-		id, ok, err = heimdall.NewTxReadStore(s.blockReader, tx).LastMilestoneId(ctx)
-		return err
-	})
-	return
-}
-
-func (s *polygonSyncStageStorage) GetMilestone(ctx context.Context, id heimdall.MilestoneId) (ms *heimdall.Milestone, err error) {
-	err = s.db.View(ctx, func(tx kv.Tx) error {
-		ms, err = heimdall.NewTxReadStore(s.blockReader, tx).GetMilestone(ctx, id)
-		return err
-	})
-	return
-}
-
-func (s *polygonSyncStageStorage) PutMilestone(_ context.Context, _ heimdall.MilestoneId, ms *heimdall.Milestone) error {
-	s.dataStream <- polygonSyncStageDataItem{
-		milestone: ms,
-	}
-
-	return nil
-}
-
-func (s *polygonSyncStageStorage) LastCheckpointId(ctx context.Context) (id heimdall.CheckpointId, ok bool, err error) {
-	err = s.db.View(ctx, func(tx kv.Tx) error {
-		id, ok, err = heimdall.NewTxReadStore(s.blockReader, tx).LastCheckpointId(ctx)
-		return err
-	})
-	return
-}
-
-func (s *polygonSyncStageStorage) GetCheckpoint(ctx context.Context, id heimdall.CheckpointId) (cp *heimdall.Checkpoint, err error) {
-	err = s.db.View(ctx, func(tx kv.Tx) error {
-		cp, err = heimdall.NewTxReadStore(s.blockReader, tx).GetCheckpoint(ctx, id)
-		return err
-	})
-	return
-}
-
-func (s *polygonSyncStageStorage) PutCheckpoint(_ context.Context, _ heimdall.CheckpointId, cp *heimdall.Checkpoint) error {
-	s.dataStream <- polygonSyncStageDataItem{
-		checkpoint: cp,
-	}
-
-	return nil
-}
-
-func (s *polygonSyncStageStorage) InsertBlocks(_ context.Context, blocks []*types.Block) error {
+func (s *polygonSyncStageSyncStore) InsertBlocks(_ context.Context, blocks []*types.Block) error {
 	s.dataStream <- polygonSyncStageDataItem{
 		insertBlocks: blocks,
 	}
@@ -555,12 +508,266 @@ func (s *polygonSyncStageStorage) InsertBlocks(_ context.Context, blocks []*type
 	return nil
 }
 
-func (s *polygonSyncStageStorage) Flush(context.Context, *types.Header) error {
+func (s *polygonSyncStageSyncStore) Flush(context.Context, *types.Header) error {
 	return nil
 }
 
-func (s *polygonSyncStageStorage) Run(context.Context) error {
+func (s *polygonSyncStageSyncStore) Run(context.Context) error {
 	return nil
+}
+
+type polygonSyncStageHeimdallStore struct {
+	checkpoints *polygonSyncStageCheckpointStore
+	milestones  *polygonSyncStageMilestoneStore
+	spans       *polygonSyncStageSpanStore
+}
+
+func (s polygonSyncStageHeimdallStore) Checkpoints() heimdall.EntityStore[*heimdall.Checkpoint] {
+	return s.checkpoints
+}
+
+func (s polygonSyncStageHeimdallStore) Milestones() heimdall.EntityStore[*heimdall.Milestone] {
+	return s.milestones
+}
+
+func (s polygonSyncStageHeimdallStore) Spans() heimdall.EntityStore[*heimdall.Span] {
+	return s.spans
+}
+
+func (s polygonSyncStageHeimdallStore) Prepare(_ context.Context) error {
+	return nil
+}
+
+func (s polygonSyncStageHeimdallStore) Close() {
+	// no-op
+}
+
+type polygonSyncStageCheckpointStore struct {
+	db               kv.RoDB
+	checkpointReader services.BorCheckpointReader
+	dataStream       chan<- polygonSyncStageDataItem
+}
+
+func (s polygonSyncStageCheckpointStore) GetLastEntityId(ctx context.Context) (id uint64, ok bool, err error) {
+	err = s.db.View(ctx, func(tx kv.Tx) error {
+		id, ok, err = s.checkpointReader.LastCheckpointId(ctx, tx)
+		return err
+	})
+	return id, ok, err
+}
+
+func (s polygonSyncStageCheckpointStore) GetLastEntity(ctx context.Context) (cp *heimdall.Checkpoint, err error) {
+	id, ok, err := s.GetLastEntityId(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if !ok {
+		return nil, errors.New("last checkpoint not found")
+	}
+
+	return s.GetEntity(ctx, id)
+}
+
+func (s polygonSyncStageCheckpointStore) GetEntity(ctx context.Context, id uint64) (cp *heimdall.Checkpoint, err error) {
+	err = s.db.View(ctx, func(tx kv.Tx) error {
+		var cpBytes []byte
+		cpBytes, err = s.checkpointReader.Checkpoint(ctx, tx, id)
+		if err != nil {
+			return err
+		}
+
+		return json.Unmarshal(cpBytes, &cp)
+	})
+
+	return cp, err
+}
+
+func (s polygonSyncStageCheckpointStore) PutEntity(_ context.Context, id uint64, entity *heimdall.Checkpoint) error {
+	entity.Id = heimdall.CheckpointId(id)
+	s.dataStream <- polygonSyncStageDataItem{
+		checkpoint: entity,
+	}
+
+	return nil
+}
+
+func (s polygonSyncStageCheckpointStore) RangeFromBlockNum(ctx context.Context, blockNum uint64) ([]*heimdall.Checkpoint, error) {
+	makeCheckpoint := func() *heimdall.Checkpoint { return &heimdall.Checkpoint{} }
+	return blockRangeEntitiesFromBlockNum[*heimdall.Checkpoint](ctx, s.db, kv.BorCheckpoints, makeCheckpoint, blockNum)
+}
+
+func (s polygonSyncStageCheckpointStore) Prepare(_ context.Context) error {
+	return nil
+}
+
+func (s polygonSyncStageCheckpointStore) Close() {
+	// no-op
+}
+
+type polygonSyncStageMilestoneStore struct {
+	db              kv.RoDB
+	milestoneReader services.BorMilestoneReader
+	dataStream      chan<- polygonSyncStageDataItem
+}
+
+func (s polygonSyncStageMilestoneStore) GetLastEntityId(ctx context.Context) (id uint64, ok bool, err error) {
+	err = s.db.View(ctx, func(tx kv.Tx) error {
+		id, ok, err = s.milestoneReader.LastMilestoneId(ctx, tx)
+		return err
+	})
+	return id, ok, err
+}
+
+func (s polygonSyncStageMilestoneStore) GetLastEntity(ctx context.Context) (*heimdall.Milestone, error) {
+	id, ok, err := s.GetLastEntityId(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if !ok {
+		return nil, errors.New("last milestone not found")
+	}
+
+	return s.GetEntity(ctx, id)
+}
+
+func (s polygonSyncStageMilestoneStore) GetEntity(ctx context.Context, id uint64) (ms *heimdall.Milestone, err error) {
+	err = s.db.View(ctx, func(tx kv.Tx) error {
+		var msBytes []byte
+		msBytes, err = s.milestoneReader.Milestone(ctx, tx, id)
+		if err != nil {
+			return err
+		}
+
+		return json.Unmarshal(msBytes, &ms)
+	})
+
+	return ms, err
+}
+
+func (s polygonSyncStageMilestoneStore) PutEntity(_ context.Context, _ uint64, entity *heimdall.Milestone) error {
+	s.dataStream <- polygonSyncStageDataItem{
+		milestone: entity,
+	}
+
+	return nil
+}
+
+func (s polygonSyncStageMilestoneStore) RangeFromBlockNum(ctx context.Context, blockNum uint64) ([]*heimdall.Milestone, error) {
+	makeMilestone := func() *heimdall.Milestone { return &heimdall.Milestone{} }
+	return blockRangeEntitiesFromBlockNum(ctx, s.db, kv.BorMilestones, makeMilestone, blockNum)
+}
+
+func (s polygonSyncStageMilestoneStore) Prepare(_ context.Context) error {
+	return nil
+}
+
+func (s polygonSyncStageMilestoneStore) Close() {
+	// no-op
+}
+
+type polygonSyncStageSpanStore struct {
+	db         kv.RoDB
+	spanReader services.BorSpanReader
+	dataStream chan<- polygonSyncStageDataItem
+}
+
+func (s polygonSyncStageSpanStore) GetLastEntityId(ctx context.Context) (id uint64, ok bool, err error) {
+	err = s.db.View(ctx, func(tx kv.Tx) error {
+		id, ok, err = s.spanReader.LastSpanId(ctx, tx)
+		return err
+	})
+	return id, ok, err
+}
+
+func (s polygonSyncStageSpanStore) GetLastEntity(ctx context.Context) (*heimdall.Span, error) {
+	id, ok, err := s.GetLastEntityId(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if !ok {
+		return nil, errors.New("last span not found")
+	}
+
+	return s.GetEntity(ctx, id)
+}
+
+func (s polygonSyncStageSpanStore) GetEntity(ctx context.Context, id uint64) (span *heimdall.Span, err error) {
+	err = s.db.View(ctx, func(tx kv.Tx) error {
+		var spanBytes []byte
+		spanBytes, err = s.spanReader.Span(ctx, tx, id)
+		if err != nil {
+			return err
+		}
+
+		return json.Unmarshal(spanBytes, &span)
+	})
+
+	return span, err
+}
+
+func (s polygonSyncStageSpanStore) PutEntity(_ context.Context, _ uint64, entity *heimdall.Span) error {
+	s.dataStream <- polygonSyncStageDataItem{
+		span: entity,
+	}
+
+	return nil
+}
+
+func (s polygonSyncStageSpanStore) RangeFromBlockNum(ctx context.Context, blockNum uint64) ([]*heimdall.Span, error) {
+	makeSpan := func() *heimdall.Span { return &heimdall.Span{} }
+	return blockRangeEntitiesFromBlockNum[*heimdall.Span](ctx, s.db, kv.BorSpans, makeSpan, blockNum)
+}
+
+func (s polygonSyncStageSpanStore) Prepare(_ context.Context) error {
+	return nil
+}
+
+func (s polygonSyncStageSpanStore) Close() {
+	// no-op
+}
+
+type blockRangeComparator interface {
+	CmpRange(blockNum uint64) int
+}
+
+func blockRangeEntitiesFromBlockNum[T blockRangeComparator](
+	ctx context.Context,
+	db kv.RoDB,
+	table string,
+	makeEntity func() T,
+	blockNum uint64,
+) ([]T, error) {
+	tx, err := db.BeginRo(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	defer tx.Rollback()
+	cur, err := tx.Cursor(table)
+	if err != nil {
+		return nil, err
+	}
+
+	defer cur.Close()
+	var k, v []byte
+	var entities []T
+	for k, v, err = cur.Last(); err != nil && k != nil; _, v, err = cur.Prev() {
+		entity := makeEntity()
+		err = json.Unmarshal(v, entity)
+		if err != nil {
+			return nil, err
+		}
+		if entity.CmpRange(blockNum) == 1 {
+			break
+		}
+		entities = append(entities, entity)
+	}
+	if err != nil {
+		return nil, err
+	}
+
+	slices.Reverse(entities)
+	return entities, nil
 }
 
 type polygonSyncStageExecutionEngine struct {
