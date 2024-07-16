@@ -1030,7 +1030,9 @@ func (d *Downloader) mainLoop(silent bool) error {
 				plist = append(plist, t.Name())
 			}
 
-			d.logger.Debug("[snapshot] download status", "pending", plist, "downloading", dlist, "complete", clist, "failed", flist)
+			if len(clist) != len(torrents) {
+				d.logger.Debug("[snapshot] download status", "pending", plist, "downloading", dlist, "complete", clist, "failed", flist)
+			}
 
 			select {
 			case <-d.ctx.Done():
