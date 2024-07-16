@@ -25,13 +25,13 @@ const IndexBlockHeaderCumulativeGasUsed = 10
 const IndexBlockHeaderLogs = 11
 const IndexBlockHeaderEffectivePercentage = 12
 
-func KeyBlockHeaderParams(paramKey *big.Int) (utils.NodeKey, error) {
+func KeyBlockHeaderParams(paramKey *big.Int) (*utils.NodeKey, error) {
 	return utils.KeyBig(paramKey, IndexBlockHeaderParam)
 }
 
-func KeyTxLogs(txIndex, logIndex *big.Int) (utils.NodeKey, error) {
+func KeyTxLogs(txIndex, logIndex *big.Int) (*utils.NodeKey, error) {
 	if txIndex == nil || logIndex == nil {
-		return [4]uint64{}, errors.New("nil key")
+		return nil, errors.New("nil key")
 	}
 
 	txIndexKey := utils.ScalarToArrayBig(txIndex)
@@ -40,29 +40,33 @@ func KeyTxLogs(txIndex, logIndex *big.Int) (utils.NodeKey, error) {
 	logIndexArray := utils.ScalarToArrayBig(logIndex)
 	lia, err := utils.NodeValue8FromBigIntArray(logIndexArray)
 	if err != nil {
-		return [4]uint64{}, err
+		return nil, err
 	}
 
 	hk0, err := utils.Hash(lia.ToUintArray(), utils.BranchCapacity)
 	if err != nil {
-		return [4]uint64{}, err
+		return nil, err
+	}
+	hkRes, err := utils.Hash(key1.ToUintArray(), hk0)
+	if err != nil {
+		return nil, err
 	}
 
-	return utils.Hash(key1.ToUintArray(), hk0)
+	return &utils.NodeKey{hkRes[0], hkRes[1], hkRes[2], hkRes[3]}, nil
 }
 
-func KeyTxStatus(paramKey *big.Int) (utils.NodeKey, error) {
+func KeyTxStatus(paramKey *big.Int) (*utils.NodeKey, error) {
 	return utils.KeyBig(paramKey, IndexBlockHeaderStatus)
 }
 
-func KeyCumulativeGasUsed(paramKey *big.Int) (utils.NodeKey, error) {
+func KeyCumulativeGasUsed(paramKey *big.Int) (*utils.NodeKey, error) {
 	return utils.KeyBig(paramKey, IndexBlockHeaderCumulativeGasUsed)
 }
 
-func KeyTxHash(paramKey *big.Int) (utils.NodeKey, error) {
+func KeyTxHash(paramKey *big.Int) (*utils.NodeKey, error) {
 	return utils.KeyBig(paramKey, IndexBlockHeaderTransactionHash)
 }
 
-func KeyEffectivePercentage(paramKey *big.Int) (utils.NodeKey, error) {
+func KeyEffectivePercentage(paramKey *big.Int) (*utils.NodeKey, error) {
 	return utils.KeyBig(paramKey, IndexBlockHeaderEffectivePercentage)
 }

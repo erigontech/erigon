@@ -180,11 +180,11 @@ func createBatchStartEntriesProto(
 }
 
 func addBatchEndEntriesProto(
-	reader DbReader,
 	tx kv.Tx,
 	batchNumber, lastBatchNumber uint64,
-	root libcommon.Hash,
+	root *libcommon.Hash,
 	gers []types.GerUpdateProto,
+	localExitRoot *libcommon.Hash,
 ) ([]DataStreamEntryProto, error) {
 	entries := make([]DataStreamEntryProto, 0, len(gers)+1)
 
@@ -196,12 +196,8 @@ func addBatchEndEntriesProto(
 		}
 	}
 
-	localExitRoot, err := utils.GetBatchLocalExitRootFromSCStorage(batchNumber, reader, tx)
-	if err != nil {
-		return nil, err
-	}
 	// seal off the last batch
-	entries = append(entries, newBatchEndProto(localExitRoot, root, batchNumber))
+	entries = append(entries, newBatchEndProto(*localExitRoot, *root, batchNumber))
 
 	return entries, nil
 }

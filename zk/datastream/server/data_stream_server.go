@@ -3,6 +3,7 @@ package server
 import (
 	"github.com/0xPolygonHermez/zkevm-data-streamer/datastreamer"
 	zktypes "github.com/ledgerwatch/erigon/zk/types"
+	"github.com/ledgerwatch/erigon/zk/utils"
 
 	"github.com/gateway-fm/cdk-erigon-lib/common"
 	libcommon "github.com/gateway-fm/cdk-erigon-lib/common"
@@ -151,7 +152,6 @@ func createBlockWithBatchCheckStreamEntriesProto(
 	filteredTransactions := filterTransactionByIndexes(block.Transactions(), transactionsToIncludeByIndex)
 
 	blockNum := block.NumberU64()
-
 	// batch start
 	// BATCH BOOKMARK
 	if isBatchStart {
@@ -178,7 +178,12 @@ func createBlockWithBatchCheckStreamEntriesProto(
 	blockEntriesProto = blockEntries.Entries()
 
 	if isBatchEnd {
-		if endEntriesProto, err = addBatchEndEntriesProto(reader, tx, batchNumber, lastBatchNumber, block.Root(), gers); err != nil {
+		localExitRoot, err := utils.GetBatchLocalExitRootFromSCStorage(batchNumber, reader, tx)
+		if err != nil {
+			return nil, err
+		}
+		blockRoot := block.Root()
+		if endEntriesProto, err = addBatchEndEntriesProto(tx, batchNumber, lastBatchNumber, &blockRoot, gers, &localExitRoot); err != nil {
 			return nil, err
 		}
 	}

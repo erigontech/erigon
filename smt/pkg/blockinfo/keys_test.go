@@ -1,10 +1,11 @@
 package blockinfo
 
 import (
-	"github.com/ledgerwatch/erigon/smt/pkg/utils"
-	"github.com/stretchr/testify/assert"
 	"math/big"
 	"testing"
+
+	"github.com/ledgerwatch/erigon/smt/pkg/utils"
+	"github.com/stretchr/testify/assert"
 )
 
 func TestKeyBlockHeaderParams(t *testing.T) {
@@ -62,7 +63,7 @@ func TestKeyBlockHeaderParams(t *testing.T) {
 				assert.Error(t, err)
 			} else {
 				assert.NoError(t, err)
-				assert.Equal(t, scenario.expected, val)
+				assert.Equal(t, scenario.expected, *val)
 			}
 		})
 	}
@@ -90,7 +91,7 @@ func TestKeyTxLogs(t *testing.T) {
 				assert.Error(t, err)
 			} else {
 				assert.NoError(t, err)
-				assert.Equal(t, scenario.expected, val)
+				assert.Equal(t, scenario.expected, *val)
 			}
 		})
 	}
