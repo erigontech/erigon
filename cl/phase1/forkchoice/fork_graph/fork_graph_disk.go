@@ -369,7 +369,7 @@ func (f *forkGraphDisk) GetState(blockRoot libcommon.Hash, alwaysCopy bool) (*st
 					log.Trace("Could not retrieve state: Missing header", "missing", currentIteratorRoot, "err", err)
 					copyReferencedState = nil
 				}
-				break
+				continue
 			}
 			log.Trace("Could not retrieve state: Missing header", "missing", currentIteratorRoot)
 			return nil, nil
@@ -380,7 +380,7 @@ func (f *forkGraphDisk) GetState(blockRoot libcommon.Hash, alwaysCopy bool) (*st
 				log.Trace("Could not retrieve state: Missing header", "missing", currentIteratorRoot, "err", err)
 			}
 			if copyReferencedState != nil {
-				continue
+				break
 			}
 		}
 		blocksInTheWay = append(blocksInTheWay, block)
