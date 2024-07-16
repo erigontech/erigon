@@ -234,8 +234,8 @@ func getMinimumBlocksToDownload(tx kv.Tx, blockReader services.FullBlockReader, 
 		return 0, 0, err
 	}
 	// If we are near the last step, we may also not bother downloading the last steps.
-	if minStepToDownload+3 > lastStep {
-		minStepToDownload = math.MaxUint64
+	if minStepToDownload+16 > lastStep {
+		minStepToDownload = minStep
 	}
 	if expectedPruneBlockAmount == 0 {
 		return minToDownload, 0, nil
