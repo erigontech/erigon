@@ -41,8 +41,8 @@ type Experiments struct {
 func FromCli(chainId uint64, distanceHistory, distanceBlocks uint64, experiments []string) (Mode, error) {
 	mode := DefaultMode
 
-	mode.History = Distance(distanceBlocks)
-	mode.Blocks = Distance(distanceHistory)
+	mode.History = Distance(distanceHistory)
+	mode.Blocks = Distance(distanceBlocks)
 
 	for _, ex := range experiments {
 		switch ex {
