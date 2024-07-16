@@ -22,7 +22,6 @@ import (
 	"fmt"
 	"math"
 	"runtime"
-	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -113,7 +112,6 @@ func adjustBlockPrune(blocks, minBlocksToDownload uint64) uint64 {
 		return blocks
 	}
 	ret := blocks + snaptype.Erigon2MergeLimit
-	// round to nearest multiple of 64. if less than 64, round to 64
 	return ret - ret%snaptype.Erigon2MergeLimit
 }
 
@@ -126,84 +124,51 @@ func canSnapshotBePruned(name string) bool {
 }
 
 func buildBlackListForPruning(pruneMode bool, stepPrune, minBlockToDownload, blockPrune uint64, preverified snapcfg.Preverified) (map[string]struct{}, error) {
-	type snapshotFileData struct {
-		from, to  uint64
-		stepBased bool
-		name      string
-	}
+
 	blackList := make(map[string]struct{})
 	if !pruneMode {
 		return blackList, nil
 	}
 	stepPrune = adjustStepPrune(stepPrune)
 	blockPrune = adjustBlockPrune(blockPrune, minBlockToDownload)
-	snapshotKindToNames := make(map[string][]snapshotFileData)
+	fmt.Println("stepPrune", stepPrune, "blockPrune", blockPrune, "minBlockToDownload", minBlockToDownload)
 	for _, p := range preverified {
 		name := p.Name
 		// Don't prune unprunable files
 		if !canSnapshotBePruned(name) {
 			continue
 		}
-		var from, to uint64
+		var _, to uint64
 		var err error
-		var kind string
 		if shouldUseStepsForPruning(name) {
 			// parse "from" (0) and "to" (64) from the name
 			// parse the snapshot "kind". e.g kind of 'idx/v1-accounts.0-64.ef' is "idx/v1-accounts"
 			rangeString := strings.Split(name, ".")[1]
 			rangeNums := strings.Split(rangeString, "-")
 			// convert the range to uint64
-			from, err = strconv.ParseUint(rangeNums[0], 10, 64)
-			if err != nil {
-				return nil, err
-			}
 			to, err = strconv.ParseUint(rangeNums[1], 10, 64)
 			if err != nil {
 				return nil, err
 			}
-			kind = strings.Split(name, ".")[0]
+			if stepPrune < to {
+				continue
+			}
+			blackList[name] = struct{}{}
 		} else {
 			// e.g 'v1-000000-000100-beaconblocks.seg'
 			// parse "from" (000000) and "to" (000100) from the name. 100 is 100'000 blocks
-			minusSplit := strings.Split(name, "-")
 			s, _, ok := snaptype.ParseFileName("", name)
 			if !ok {
 				continue
 			}
-			from = s.From
 			to = s.To
-			kind = minusSplit[3]
-		}
-		blackList[p.Name] = struct{}{} // Add all of them to the blacklist and remove the ones that are not blacklisted later.
-		snapshotKindToNames[kind] = append(snapshotKindToNames[kind], snapshotFileData{
-			from:      from,
-			to:        to,
-			stepBased: shouldUseStepsForPruning(name),
-			name:      name,
-		})
-	}
-	// sort the snapshots by "from" and "to" in ascending order
-	for _, snapshots := range snapshotKindToNames {
-		prunedDistance := uint64(0) // keep track of pruned distance for snapshots
-		// sort the snapshots by "from" and "to" in descending order
-		sort.Slice(snapshots, func(i, j int) bool {
-			if snapshots[i].from == snapshots[j].from {
-				return snapshots[i].to > snapshots[j].to
+			if blockPrune < to {
+				continue
 			}
-			return snapshots[i].from > snapshots[j].from
-		})
-		for _, snapshot := range snapshots {
-			if snapshot.stepBased {
-				if prunedDistance >= stepPrune {
-					break
-				}
-			} else if prunedDistance >= blockPrune {
-				break
-			}
-			delete(blackList, snapshot.name)
-			prunedDistance += snapshot.to - snapshot.from
+			blackList[name] = struct{}{}
 		}
 	}
+
 	return blackList, nil
 }
 
@@ -235,7 +200,7 @@ func getMinimumBlocksToDownload(tx kv.Tx, blockReader services.FullBlockReader, 
 	}
 	// If we are near the last step, we may also not bother downloading the last steps.
 	if minStepToDownload+16 > lastStep {
-		minStepToDownload = minStep
+		minStep = math.MaxUint64
 	}
 	// return the minimum number of blocks to download and the minimum step.
 	return frozenBlocks - minToDownload, minStep - minStepToDownload, nil
