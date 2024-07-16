@@ -108,9 +108,6 @@ func adjustBlockPrune(blocks, minBlocksToDownload uint64) uint64 {
 	if blocks > minBlocksToDownload {
 		blocks = minBlocksToDownload
 	}
-	if blocks%snaptype.Erigon2MergeLimit == 0 {
-		return blocks
-	}
 	return blocks - blocks%snaptype.Erigon2MergeLimit
 }
 
@@ -268,12 +265,12 @@ func WaitForDownloader(ctx context.Context, logPrefix string, headerchain, blobs
 		if err != nil {
 			return err
 		}
-		minBlockAmountToDownload, minStepToDownload, err := getMinimumBlocksToDownload(tx, blockReader, minStep, blockPrune, historyPrune)
+		minBlockToDownload, minStepToDownload, err := getMinimumBlocksToDownload(tx, blockReader, minStep, blockPrune, historyPrune)
 		if err != nil {
 			return err
 		}
-		fmt.Println("minBlockAmountToDownload", minBlockAmountToDownload, "minStepToDownload", minStepToDownload)
-		blackListForPruning, err = buildBlackListForPruning(wantToPrune, minStepToDownload, minBlockAmountToDownload, blockPrune, preverifiedBlockSnapshots)
+		fmt.Println("minBlockToDownload", minBlockToDownload, "minStepToDownload", minStepToDownload, "blockPrune", blockPrune)
+		blackListForPruning, err = buildBlackListForPruning(wantToPrune, minStepToDownload, minBlockToDownload, blockPrune, preverifiedBlockSnapshots)
 		if err != nil {
 			return err
 		}
