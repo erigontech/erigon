@@ -18,7 +18,9 @@ package diagnostics
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
+	"io"
 
 	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/kv"
@@ -283,7 +285,12 @@ func (d *DiagnosticClient) SetCurrentSyncSubStage(css CurrentSyncSubStage) {
 	}
 }
 
+// Deprecated - used only in tests. Non-thread-safe.
 func (d *DiagnosticClient) GetStageState(stageId string) (StageState, error) {
+	return d.getStageState(stageId)
+}
+
+func (d *DiagnosticClient) getStageState(stageId string) (StageState, error) {
 	for _, stage := range d.syncStages {
 		if stage.ID == stageId {
 			return stage.State, nil
@@ -311,6 +318,15 @@ func StagesListUpdater(info []SyncStage) func(tx kv.RwTx) error {
 	return PutDataToTable(kv.DiagSyncStages, StagesListKey, info)
 }
 
+// Deprecated - not thread-safe method. Used only in tests. Need introduce more thread-safe method or something special for tests.
 func (d *DiagnosticClient) GetSyncStages() []SyncStage {
 	return d.syncStages
+}
+
+func (d *DiagnosticClient) SyncStagesJson(w io.Writer) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	if err := json.NewEncoder(w).Encode(d.syncStages); err != nil {
+		log.Debug("[diagnostics] HardwareInfoJson", "err", err)
+	}
 }

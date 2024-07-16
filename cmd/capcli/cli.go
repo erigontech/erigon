@@ -210,7 +210,7 @@ func (c *ChainEndpoint) Run(ctx *Context) error {
 	// Let's fetch the head first
 	currentBlock, err := core.RetrieveBlock(ctx, beaconConfig, fmt.Sprintf("%s/head", baseUri), nil)
 	if err != nil {
-		return err
+		return fmt.Errorf("failed to retrieve head: %w, uri: %s", err, fmt.Sprintf("%s/head", baseUri))
 	}
 	currentRoot, err := currentBlock.Block.HashSSZ()
 	if err != nil {
@@ -246,7 +246,7 @@ func (c *ChainEndpoint) Run(ctx *Context) error {
 		// Let's fetch the head first
 		currentBlock, err := core.RetrieveBlock(ctx, beaconConfig, fmt.Sprintf("%s/0x%s", baseUri, stringifiedRoot), (*libcommon.Hash)(&currentRoot))
 		if err != nil {
-			return false, err
+			return false, fmt.Errorf("failed to retrieve block: %w, uri: %s", err, fmt.Sprintf("%s/0x%s", baseUri, stringifiedRoot))
 		}
 		currentRoot, err = currentBlock.Block.HashSSZ()
 		if err != nil {

@@ -133,7 +133,9 @@ func (a *Antiquary) Loop() error {
 		return err
 	}
 	defer logInterval.Stop()
-	log.Info("[Antiquary] Stopping Caplin to process historical indicies", "from", from, "to", a.sn.BlocksAvailable())
+	if from != a.sn.BlocksAvailable() {
+		log.Info("[Antiquary] Stopping Caplin to process historical indicies", "from", from, "to", a.sn.BlocksAvailable())
+	}
 
 	// Now write the snapshots as indicies
 	for i := from; i < a.sn.BlocksAvailable(); i++ {
