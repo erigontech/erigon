@@ -178,6 +178,9 @@ func getMinimumBlocksToDownload(tx kv.Tx, blockReader services.FullBlockReader, 
 		if blockNum == historyPruneTo {
 			fmt.Println("blockNum", blockNum, "historyPruneTo", historyPruneTo)
 			minStepToDownload = (baseTxNum - (config3.HistoryV3AggregationStep - 1)) / config3.HistoryV3AggregationStep
+			if baseTxNum < (config3.HistoryV3AggregationStep - 1) {
+				minStepToDownload = 0
+			}
 		}
 		if stateTxNum <= baseTxNum { // only cosnider the block if it
 			return nil
