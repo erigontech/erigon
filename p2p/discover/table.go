@@ -262,6 +262,7 @@ func (tab *Table) loop() {
 	go tab.doRefresh(refreshDone)
 
 	var minRefreshTimer *time.Timer
+	var minRefreshTimerActive atomic.Bool
 
 	defer func() {
 		if minRefreshTimer != nil {
@@ -296,9 +297,9 @@ loop:
 			}
 		case <-revalidateDone:
 			revalidate.Reset(tab.revalidateInterval)
-			if tab.live() == 0 && len(waiting) == 0 && minRefreshTimer == nil {
+			if tab.live() == 0 && len(waiting) == 0 && minRefreshTimerActive.CompareAndSwap(false, true) {
 				minRefreshTimer = time.AfterFunc(minRefreshInterval, func() {
-					minRefreshTimer = nil
+					defer minRefreshTimerActive.Store(false)
 					tab.net.lookupRandom()
 					tab.refresh()
 				})

@@ -168,6 +168,10 @@ func (m *milestone) UnlockSprint(endBlockNum uint64) {
 		return
 	}
 
+	if m.finality.TryLock() {
+		defer m.finality.Unlock()
+	}
+
 	m.Locked = false
 
 	m.purgeMilestoneIDsList()
@@ -263,6 +267,9 @@ func (m *milestone) IsFutureMilestoneCompatible(chain []*types.Header) bool {
 }
 
 func (m *milestone) ProcessFutureMilestone(num uint64, hash common.Hash) {
+	m.finality.Lock()
+	defer m.finality.Unlock()
+
 	if len(m.FutureMilestoneOrder) < m.MaxCapacity {
 		m.enqueueFutureMilestone(num, hash)
 	}

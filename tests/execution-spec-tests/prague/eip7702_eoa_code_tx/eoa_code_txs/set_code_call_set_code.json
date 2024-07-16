@@ -264,7 +264,31 @@
                         "v": "0x00",
                         "r": "0x3c077f088f6f9bf9d8d47fb338e083273f895126fa8739cfcddc71dba49d0d7e",
                         "s": "0x4d923ffe3cc3367170d4dad34c123a92bbfd5552f1c1c241fdb38e90a3a289c7",
-                        "sender": "0x6389e7f33ce3b1e94e4325ef02829cd12297ef71"
+                        "sender": "0x6389e7f33ce3b1e94e4325ef02829cd12297ef71",
+                        "authorizationList": [
+                            {
+                                "chainId": "0x01",
+                                "address": "0x0000000000000000000000000000000000001000",
+                                "nonce": [
+                                    "0x00"
+                                ],
+                                "v": "0x01",
+                                "r": "0x8171c0ded912d4f458b8115618c18f3f430f414919c73b4daa693c47fd325414",
+                                "s": "0x787741e1621bcb9cb58ece039ad73f41d9422aa259ed53c2b0bd30dc7ff09be7",
+                                "signer": "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b"
+                            },
+                            {
+                                "chainId": "0x01",
+                                "address": "0x0000000000000000000000000000000000001100",
+                                "nonce": [
+                                    "0x00"
+                                ],
+                                "v": "0x01",
+                                "r": "0x5d452c97a64cef6604cadf6b57b2e2a5816a7d85033a4c5f333767f98e7a513b",
+                                "s": "0x77481a7f09c2f529de5a801ea8968b1903b26f4ae1bbf7cfc424533770b7bce9",
+                                "signer": "0x8a0a19589531694250d570040a0c4b74576919b8"
+                            }
+                        ]
                     }
                 ],
                 "uncleHeaders": [],
@@ -279,11 +303,11 @@
         "lastblockhash": "0x7b3bf3d5901f3a8be06f1fefdf9844ae3406ad48542fd8ecd61465ad097f2d74",
         "sealEngine": "NoProof",
         "_info": {
-            "hash": "0xb0c4b8b6a327557968674a05591a5a15fa62b9441da74ad554c94bc6fc28b204",
+            "hash": "0xa13e2ff0f6742e32dc0ff8655131189e4c3266890f20cedec35316d36cc436df",
             "comment": "`execution-spec-tests` generated test",
             "filling-transition-tool": "evm version 1.14.6-unstable-7e5dd44a-20240705",
             "description": "Test function documentation:\n\n    Test the calling a set-code account from another set-code account.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/devnet-1@v1.1.1/tests/prague/eip7702_eoa_code_tx/test_eoa_code_txs.py#L283",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/devnet-1@v1.3.0/tests/prague/eip7702_eoa_code_tx/test_eoa_code_txs.py#L416",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7702.md",
             "reference-spec-version": "7357ff1f3f176aada6d350d6e42a292a3dec27f4"
         }
@@ -552,7 +576,31 @@
                         "v": "0x00",
                         "r": "0x3c077f088f6f9bf9d8d47fb338e083273f895126fa8739cfcddc71dba49d0d7e",
                         "s": "0x4d923ffe3cc3367170d4dad34c123a92bbfd5552f1c1c241fdb38e90a3a289c7",
-                        "sender": "0x6389e7f33ce3b1e94e4325ef02829cd12297ef71"
+                        "sender": "0x6389e7f33ce3b1e94e4325ef02829cd12297ef71",
+                        "authorizationList": [
+                            {
+                                "chainId": "0x01",
+                                "address": "0x0000000000000000000000000000000000001000",
+                                "nonce": [
+                                    "0x00"
+                                ],
+                                "v": "0x01",
+                                "r": "0x8171c0ded912d4f458b8115618c18f3f430f414919c73b4daa693c47fd325414",
+                                "s": "0x787741e1621bcb9cb58ece039ad73f41d9422aa259ed53c2b0bd30dc7ff09be7",
+                                "signer": "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b"
+                            },
+                            {
+                                "chainId": "0x01",
+                                "address": "0x0000000000000000000000000000000000001100",
+                                "nonce": [
+                                    "0x00"
+                                ],
+                                "v": "0x01",
+                                "r": "0x5d452c97a64cef6604cadf6b57b2e2a5816a7d85033a4c5f333767f98e7a513b",
+                                "s": "0x77481a7f09c2f529de5a801ea8968b1903b26f4ae1bbf7cfc424533770b7bce9",
+                                "signer": "0x8a0a19589531694250d570040a0c4b74576919b8"
+                            }
+                        ]
                     }
                 ],
                 "uncleHeaders": [],
@@ -567,11 +615,11 @@
         "lastblockhash": "0xc255d78cc8acfdeefcf80191e9f21301459d8520f384e50f3285ab2375b1d3fa",
         "sealEngine": "NoProof",
         "_info": {
-            "hash": "0xa9d54f1f89d1d04b914094c1931bbe3cd9084f6bd2cebb80d3a1694abd78598f",
+            "hash": "0xd103550c61cf564c75781c4a9271aef36fa68b05fa2601d7839f3c2abfdec3a0",
             "comment": "`execution-spec-tests` generated test",
             "filling-transition-tool": "evm version 1.14.6-unstable-7e5dd44a-20240705",
             "description": "Test function documentation:\n\n    Test the calling a set-code account from another set-code account.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/devnet-1@v1.1.1/tests/prague/eip7702_eoa_code_tx/test_eoa_code_txs.py#L283",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/devnet-1@v1.3.0/tests/prague/eip7702_eoa_code_tx/test_eoa_code_txs.py#L416",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7702.md",
             "reference-spec-version": "7357ff1f3f176aada6d350d6e42a292a3dec27f4"
         }
@@ -838,7 +886,31 @@
                         "v": "0x00",
                         "r": "0x3c077f088f6f9bf9d8d47fb338e083273f895126fa8739cfcddc71dba49d0d7e",
                         "s": "0x4d923ffe3cc3367170d4dad34c123a92bbfd5552f1c1c241fdb38e90a3a289c7",
-                        "sender": "0x6389e7f33ce3b1e94e4325ef02829cd12297ef71"
+                        "sender": "0x6389e7f33ce3b1e94e4325ef02829cd12297ef71",
+                        "authorizationList": [
+                            {
+                                "chainId": "0x01",
+                                "address": "0x0000000000000000000000000000000000001000",
+                                "nonce": [
+                                    "0x00"
+                                ],
+                                "v": "0x01",
+                                "r": "0x8171c0ded912d4f458b8115618c18f3f430f414919c73b4daa693c47fd325414",
+                                "s": "0x787741e1621bcb9cb58ece039ad73f41d9422aa259ed53c2b0bd30dc7ff09be7",
+                                "signer": "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b"
+                            },
+                            {
+                                "chainId": "0x01",
+                                "address": "0x0000000000000000000000000000000000001100",
+                                "nonce": [
+                                    "0x00"
+                                ],
+                                "v": "0x01",
+                                "r": "0x5d452c97a64cef6604cadf6b57b2e2a5816a7d85033a4c5f333767f98e7a513b",
+                                "s": "0x77481a7f09c2f529de5a801ea8968b1903b26f4ae1bbf7cfc424533770b7bce9",
+                                "signer": "0x8a0a19589531694250d570040a0c4b74576919b8"
+                            }
+                        ]
                     }
                 ],
                 "uncleHeaders": [],
@@ -853,11 +925,11 @@
         "lastblockhash": "0x47e822188b714f06aefcb052e102b3b6860125f5c1ad07f82891529161ac6e21",
         "sealEngine": "NoProof",
         "_info": {
-            "hash": "0x59e315b6502f0d3279ba6318cbbb0375bae3a646fa9337443d1179382b54e714",
+            "hash": "0x212668cc5424633616defdfe4d0f6c4872d22d9d54a6473f204de3f75cffefec",
             "comment": "`execution-spec-tests` generated test",
             "filling-transition-tool": "evm version 1.14.6-unstable-7e5dd44a-20240705",
             "description": "Test function documentation:\n\n    Test the calling a set-code account from another set-code account.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/devnet-1@v1.1.1/tests/prague/eip7702_eoa_code_tx/test_eoa_code_txs.py#L283",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/devnet-1@v1.3.0/tests/prague/eip7702_eoa_code_tx/test_eoa_code_txs.py#L416",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7702.md",
             "reference-spec-version": "7357ff1f3f176aada6d350d6e42a292a3dec27f4"
         }
@@ -1126,7 +1198,31 @@
                         "v": "0x00",
                         "r": "0x3c077f088f6f9bf9d8d47fb338e083273f895126fa8739cfcddc71dba49d0d7e",
                         "s": "0x4d923ffe3cc3367170d4dad34c123a92bbfd5552f1c1c241fdb38e90a3a289c7",
-                        "sender": "0x6389e7f33ce3b1e94e4325ef02829cd12297ef71"
+                        "sender": "0x6389e7f33ce3b1e94e4325ef02829cd12297ef71",
+                        "authorizationList": [
+                            {
+                                "chainId": "0x01",
+                                "address": "0x0000000000000000000000000000000000001000",
+                                "nonce": [
+                                    "0x00"
+                                ],
+                                "v": "0x01",
+                                "r": "0x8171c0ded912d4f458b8115618c18f3f430f414919c73b4daa693c47fd325414",
+                                "s": "0x787741e1621bcb9cb58ece039ad73f41d9422aa259ed53c2b0bd30dc7ff09be7",
+                                "signer": "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b"
+                            },
+                            {
+                                "chainId": "0x01",
+                                "address": "0x0000000000000000000000000000000000001100",
+                                "nonce": [
+                                    "0x00"
+                                ],
+                                "v": "0x01",
+                                "r": "0x5d452c97a64cef6604cadf6b57b2e2a5816a7d85033a4c5f333767f98e7a513b",
+                                "s": "0x77481a7f09c2f529de5a801ea8968b1903b26f4ae1bbf7cfc424533770b7bce9",
+                                "signer": "0x8a0a19589531694250d570040a0c4b74576919b8"
+                            }
+                        ]
                     }
                 ],
                 "uncleHeaders": [],
@@ -1141,11 +1237,11 @@
         "lastblockhash": "0xeb6e62931280565c153ec5795992c154c5be23d0220d53f4cb1d15c980f9ec94",
         "sealEngine": "NoProof",
         "_info": {
-            "hash": "0xfb883638a30f182be439021b396c5eea7f8db65d642bae8633f64acaf38af16b",
+            "hash": "0x5c0dd1b12c29795daf029aaa978daae5fe37c36d58033c50d24735d92729a015",
             "comment": "`execution-spec-tests` generated test",
             "filling-transition-tool": "evm version 1.14.6-unstable-7e5dd44a-20240705",
             "description": "Test function documentation:\n\n    Test the calling a set-code account from another set-code account.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/devnet-1@v1.1.1/tests/prague/eip7702_eoa_code_tx/test_eoa_code_txs.py#L283",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/devnet-1@v1.3.0/tests/prague/eip7702_eoa_code_tx/test_eoa_code_txs.py#L416",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7702.md",
             "reference-spec-version": "7357ff1f3f176aada6d350d6e42a292a3dec27f4"
         }
@@ -1415,7 +1511,31 @@
                         "v": "0x01",
                         "r": "0x7d76228770f461dd6d5c628e315a679bae06bf025edfda262f7dc98573430c52",
                         "s": "0x0710569c81043f9d89650e82f9920b53624702a7b4d8160ce8c9ab01c9d30de9",
-                        "sender": "0x6389e7f33ce3b1e94e4325ef02829cd12297ef71"
+                        "sender": "0x6389e7f33ce3b1e94e4325ef02829cd12297ef71",
+                        "authorizationList": [
+                            {
+                                "chainId": "0x01",
+                                "address": "0x0000000000000000000000000000000000001000",
+                                "nonce": [
+                                    "0x00"
+                                ],
+                                "v": "0x01",
+                                "r": "0x8171c0ded912d4f458b8115618c18f3f430f414919c73b4daa693c47fd325414",
+                                "s": "0x787741e1621bcb9cb58ece039ad73f41d9422aa259ed53c2b0bd30dc7ff09be7",
+                                "signer": "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b"
+                            },
+                            {
+                                "chainId": "0x01",
+                                "address": "0x0000000000000000000000000000000000001100",
+                                "nonce": [
+                                    "0x00"
+                                ],
+                                "v": "0x01",
+                                "r": "0x5d452c97a64cef6604cadf6b57b2e2a5816a7d85033a4c5f333767f98e7a513b",
+                                "s": "0x77481a7f09c2f529de5a801ea8968b1903b26f4ae1bbf7cfc424533770b7bce9",
+                                "signer": "0x8a0a19589531694250d570040a0c4b74576919b8"
+                            }
+                        ]
                     }
                 ],
                 "uncleHeaders": [],
@@ -1430,11 +1550,11 @@
         "lastblockhash": "0xc15f2994b5f8c372407132539da593e80b7eb64903fc44089a4a194a2507c537",
         "sealEngine": "NoProof",
         "_info": {
-            "hash": "0x6ffb3560aec47b69d8ee414b0a3d8fa0bf7dc3fc344e4bcfc29e34e89c6f2008",
+            "hash": "0xebebc8b481601cbc03592d6a5883401264be920a1799aa25a295e5d7a2bf6353",
             "comment": "`execution-spec-tests` generated test",
             "filling-transition-tool": "evm version 1.14.6-unstable-7e5dd44a-20240705",
             "description": "Test function documentation:\n\n    Test the calling a set-code account from another set-code account.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/devnet-1@v1.1.1/tests/prague/eip7702_eoa_code_tx/test_eoa_code_txs.py#L283",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/devnet-1@v1.3.0/tests/prague/eip7702_eoa_code_tx/test_eoa_code_txs.py#L416",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7702.md",
             "reference-spec-version": "7357ff1f3f176aada6d350d6e42a292a3dec27f4"
         }
@@ -1703,7 +1823,31 @@
                         "v": "0x01",
                         "r": "0x7d76228770f461dd6d5c628e315a679bae06bf025edfda262f7dc98573430c52",
                         "s": "0x0710569c81043f9d89650e82f9920b53624702a7b4d8160ce8c9ab01c9d30de9",
-                        "sender": "0x6389e7f33ce3b1e94e4325ef02829cd12297ef71"
+                        "sender": "0x6389e7f33ce3b1e94e4325ef02829cd12297ef71",
+                        "authorizationList": [
+                            {
+                                "chainId": "0x01",
+                                "address": "0x0000000000000000000000000000000000001000",
+                                "nonce": [
+                                    "0x00"
+                                ],
+                                "v": "0x01",
+                                "r": "0x8171c0ded912d4f458b8115618c18f3f430f414919c73b4daa693c47fd325414",
+                                "s": "0x787741e1621bcb9cb58ece039ad73f41d9422aa259ed53c2b0bd30dc7ff09be7",
+                                "signer": "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b"
+                            },
+                            {
+                                "chainId": "0x01",
+                                "address": "0x0000000000000000000000000000000000001100",
+                                "nonce": [
+                                    "0x00"
+                                ],
+                                "v": "0x01",
+                                "r": "0x5d452c97a64cef6604cadf6b57b2e2a5816a7d85033a4c5f333767f98e7a513b",
+                                "s": "0x77481a7f09c2f529de5a801ea8968b1903b26f4ae1bbf7cfc424533770b7bce9",
+                                "signer": "0x8a0a19589531694250d570040a0c4b74576919b8"
+                            }
+                        ]
                     }
                 ],
                 "uncleHeaders": [],
@@ -1718,11 +1862,11 @@
         "lastblockhash": "0xa38e8fc6766fb7c5c9604fb6b373d15051e6a2542690ca4f907547954ad693aa",
         "sealEngine": "NoProof",
         "_info": {
-            "hash": "0x69a44692f3660d9bc10d7d09c2de8bb5be9040e1f019ff494be568ae455ddad6",
+            "hash": "0x8ff2158098a57a47398999d4c5aeb78cbd718721da03d8faf53c9e1a25f08574",
             "comment": "`execution-spec-tests` generated test",
             "filling-transition-tool": "evm version 1.14.6-unstable-7e5dd44a-20240705",
             "description": "Test function documentation:\n\n    Test the calling a set-code account from another set-code account.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/devnet-1@v1.1.1/tests/prague/eip7702_eoa_code_tx/test_eoa_code_txs.py#L283",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/devnet-1@v1.3.0/tests/prague/eip7702_eoa_code_tx/test_eoa_code_txs.py#L416",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7702.md",
             "reference-spec-version": "7357ff1f3f176aada6d350d6e42a292a3dec27f4"
         }
@@ -1989,7 +2133,31 @@
                         "v": "0x01",
                         "r": "0x7d76228770f461dd6d5c628e315a679bae06bf025edfda262f7dc98573430c52",
                         "s": "0x0710569c81043f9d89650e82f9920b53624702a7b4d8160ce8c9ab01c9d30de9",
-                        "sender": "0x6389e7f33ce3b1e94e4325ef02829cd12297ef71"
+                        "sender": "0x6389e7f33ce3b1e94e4325ef02829cd12297ef71",
+                        "authorizationList": [
+                            {
+                                "chainId": "0x01",
+                                "address": "0x0000000000000000000000000000000000001000",
+                                "nonce": [
+                                    "0x00"
+                                ],
+                                "v": "0x01",
+                                "r": "0x8171c0ded912d4f458b8115618c18f3f430f414919c73b4daa693c47fd325414",
+                                "s": "0x787741e1621bcb9cb58ece039ad73f41d9422aa259ed53c2b0bd30dc7ff09be7",
+                                "signer": "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b"
+                            },
+                            {
+                                "chainId": "0x01",
+                                "address": "0x0000000000000000000000000000000000001100",
+                                "nonce": [
+                                    "0x00"
+                                ],
+                                "v": "0x01",
+                                "r": "0x5d452c97a64cef6604cadf6b57b2e2a5816a7d85033a4c5f333767f98e7a513b",
+                                "s": "0x77481a7f09c2f529de5a801ea8968b1903b26f4ae1bbf7cfc424533770b7bce9",
+                                "signer": "0x8a0a19589531694250d570040a0c4b74576919b8"
+                            }
+                        ]
                     }
                 ],
                 "uncleHeaders": [],
@@ -2004,11 +2172,11 @@
         "lastblockhash": "0x0271478951ac6f3e9fa093044936ac2d116267ef8a7950408cb333822ecba603",
         "sealEngine": "NoProof",
         "_info": {
-            "hash": "0x9448d071f8ecc8a3637998f3021cffbf9f1d3b92b4198e78bdc796b6e906e5bf",
+            "hash": "0x449b448e876831dc77a015406e6570bb13d30392c0ce72a711bf140a6d65b9ec",
             "comment": "`execution-spec-tests` generated test",
             "filling-transition-tool": "evm version 1.14.6-unstable-7e5dd44a-20240705",
             "description": "Test function documentation:\n\n    Test the calling a set-code account from another set-code account.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/devnet-1@v1.1.1/tests/prague/eip7702_eoa_code_tx/test_eoa_code_txs.py#L283",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/devnet-1@v1.3.0/tests/prague/eip7702_eoa_code_tx/test_eoa_code_txs.py#L416",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7702.md",
             "reference-spec-version": "7357ff1f3f176aada6d350d6e42a292a3dec27f4"
         }
@@ -2277,7 +2445,31 @@
                         "v": "0x01",
                         "r": "0x7d76228770f461dd6d5c628e315a679bae06bf025edfda262f7dc98573430c52",
                         "s": "0x0710569c81043f9d89650e82f9920b53624702a7b4d8160ce8c9ab01c9d30de9",
-                        "sender": "0x6389e7f33ce3b1e94e4325ef02829cd12297ef71"
+                        "sender": "0x6389e7f33ce3b1e94e4325ef02829cd12297ef71",
+                        "authorizationList": [
+                            {
+                                "chainId": "0x01",
+                                "address": "0x0000000000000000000000000000000000001000",
+                                "nonce": [
+                                    "0x00"
+                                ],
+                                "v": "0x01",
+                                "r": "0x8171c0ded912d4f458b8115618c18f3f430f414919c73b4daa693c47fd325414",
+                                "s": "0x787741e1621bcb9cb58ece039ad73f41d9422aa259ed53c2b0bd30dc7ff09be7",
+                                "signer": "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b"
+                            },
+                            {
+                                "chainId": "0x01",
+                                "address": "0x0000000000000000000000000000000000001100",
+                                "nonce": [
+                                    "0x00"
+                                ],
+                                "v": "0x01",
+                                "r": "0x5d452c97a64cef6604cadf6b57b2e2a5816a7d85033a4c5f333767f98e7a513b",
+                                "s": "0x77481a7f09c2f529de5a801ea8968b1903b26f4ae1bbf7cfc424533770b7bce9",
+                                "signer": "0x8a0a19589531694250d570040a0c4b74576919b8"
+                            }
+                        ]
                     }
                 ],
                 "uncleHeaders": [],
@@ -2292,11 +2484,11 @@
         "lastblockhash": "0x7d0136e91aef92df4d4adc162b19b1eeae757984d5cf96c23c909d99d0c84d80",
         "sealEngine": "NoProof",
         "_info": {
-            "hash": "0x2aede8dad1511a2d3796c11b2f48ca72fe9f67b8b68db85cfbc24219ae704643",
+            "hash": "0x3341e8f3fff5e47151e86b63ecdf7720ee4434319b33576e48538ebcca5fb980",
             "comment": "`execution-spec-tests` generated test",
             "filling-transition-tool": "evm version 1.14.6-unstable-7e5dd44a-20240705",
             "description": "Test function documentation:\n\n    Test the calling a set-code account from another set-code account.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/devnet-1@v1.1.1/tests/prague/eip7702_eoa_code_tx/test_eoa_code_txs.py#L283",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/devnet-1@v1.3.0/tests/prague/eip7702_eoa_code_tx/test_eoa_code_txs.py#L416",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7702.md",
             "reference-spec-version": "7357ff1f3f176aada6d350d6e42a292a3dec27f4"
         }

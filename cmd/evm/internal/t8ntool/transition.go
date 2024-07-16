@@ -301,8 +301,9 @@ func Main(ctx *cli.Context) error {
 		return h
 	}
 
-	db, _ := temporaltest.NewTestDB(nil, datadir.New(""))
+	db, agg := temporaltest.NewTestDB(nil, datadir.New(""))
 	defer db.Close()
+	defer agg.Close()
 
 	tx, err := db.BeginRw(context.Background())
 	if err != nil {

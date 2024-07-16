@@ -58,7 +58,7 @@ func ListenAndServe(beaconHandler *LayeredBeaconHandler, routerCfg beacon_router
 			beaconHandler.ArchiveApi.ServeHTTP(w, r)
 			log.Debug("[Beacon API] Request", "uri", r.URL.String(), "path", r.URL.Path, "time", time.Since(start))
 		} else {
-			log.Warn("[Beacon API] Request to unavaiable endpoint, check --beacon.api flag", "uri", r.URL.String(), "path", r.URL.Path)
+			log.Warn("[Beacon API] Request to unavailable endpoint, check --beacon.api flag", "uri", r.URL.String(), "path", r.URL.Path)
 		}
 	})
 	mux.NotFound(func(w http.ResponseWriter, r *http.Request) {

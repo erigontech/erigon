@@ -122,12 +122,12 @@ func ensureCantLeaveDir(fName, root string) (string, error) {
 		if err != nil {
 			return fName, err
 		}
-		if !IsLocal(newFName) {
+		if !filepath.IsLocal(newFName) {
 			return fName, fmt.Errorf("file=%s, is outside of snapshots dir", fName)
 		}
 		fName = newFName
 	}
-	if !IsLocal(fName) {
+	if !filepath.IsLocal(fName) {
 		return fName, fmt.Errorf("relative paths are not allowed: %s", fName)
 	}
 	return fName, nil
@@ -461,11 +461,6 @@ func readPeerID(db kv.RoDB) (peerID []byte, err error) {
 		return nil, err
 	}
 	return peerID, nil
-}
-
-// Deprecated: use `filepath.IsLocal` after drop go1.19 support
-func IsLocal(path string) bool {
-	return isLocal(path)
 }
 
 func ScheduleVerifyFile(ctx context.Context, t *torrent.Torrent, completePieces *atomic.Uint64) error {

@@ -239,7 +239,20 @@
                         "v": "0x00",
                         "r": "0x0e6c8f4d73b175887e1f21cc00bf0f8243af18aed208ec0a4562ee60e7f85736",
                         "s": "0x3f8e8f1b01fcd6d3a988877e80dc17fad16274447f4211ed74b41e8789ae70cd",
-                        "sender": "0x8a0a19589531694250d570040a0c4b74576919b8"
+                        "sender": "0x8a0a19589531694250d570040a0c4b74576919b8",
+                        "authorizationList": [
+                            {
+                                "chainId": "0x01",
+                                "address": "0x0000000000000000000000000000000000001000",
+                                "nonce": [
+                                    "0x00"
+                                ],
+                                "v": "0x01",
+                                "r": "0x8171c0ded912d4f458b8115618c18f3f430f414919c73b4daa693c47fd325414",
+                                "s": "0x787741e1621bcb9cb58ece039ad73f41d9422aa259ed53c2b0bd30dc7ff09be7",
+                                "signer": "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b"
+                            }
+                        ]
                     }
                 ],
                 "uncleHeaders": [],
@@ -254,11 +267,11 @@
         "lastblockhash": "0xa0101967e52f6a6b4cb4c8f098dcc2d08b5e40c9d6dd5edd07b421a3bff6f187",
         "sealEngine": "NoProof",
         "_info": {
-            "hash": "0x45f8f45fee14095aaab267c8687768eec622af93bd2141112d773f86b859bcfc",
+            "hash": "0xff0288e6409c67d829e1763fccb295acfbf6e7bdaf3e50c9949e7368093e7b17",
             "comment": "`execution-spec-tests` generated test",
             "filling-transition-tool": "evm version 1.14.6-unstable-7e5dd44a-20240705",
             "description": "Test function documentation:\n\n    Test the executing a self-call in a set-code transaction.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/devnet-1@v1.1.1/tests/prague/eip7702_eoa_code_tx/test_eoa_code_txs.py#L213",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/devnet-1@v1.3.0/tests/prague/eip7702_eoa_code_tx/test_eoa_code_txs.py#L346",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7702.md",
             "reference-spec-version": "7357ff1f3f176aada6d350d6e42a292a3dec27f4"
         }
@@ -503,7 +516,20 @@
                         "v": "0x00",
                         "r": "0x0e6c8f4d73b175887e1f21cc00bf0f8243af18aed208ec0a4562ee60e7f85736",
                         "s": "0x3f8e8f1b01fcd6d3a988877e80dc17fad16274447f4211ed74b41e8789ae70cd",
-                        "sender": "0x8a0a19589531694250d570040a0c4b74576919b8"
+                        "sender": "0x8a0a19589531694250d570040a0c4b74576919b8",
+                        "authorizationList": [
+                            {
+                                "chainId": "0x01",
+                                "address": "0x0000000000000000000000000000000000001000",
+                                "nonce": [
+                                    "0x00"
+                                ],
+                                "v": "0x01",
+                                "r": "0x8171c0ded912d4f458b8115618c18f3f430f414919c73b4daa693c47fd325414",
+                                "s": "0x787741e1621bcb9cb58ece039ad73f41d9422aa259ed53c2b0bd30dc7ff09be7",
+                                "signer": "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b"
+                            }
+                        ]
                     }
                 ],
                 "uncleHeaders": [],
@@ -518,11 +544,11 @@
         "lastblockhash": "0x2691df20988c350ef81a2a5f306259a1eec612ad85880506f7ecdc4848c7451c",
         "sealEngine": "NoProof",
         "_info": {
-            "hash": "0x780f0e38328fff3c0cec8f11e3f3f7723d8ba30d20fe4be79d5ae267254045ec",
+            "hash": "0x83d88f1e942e1126c4c0c81fb147c78bffc6e0a50a1ac132d5b573fda0fdcc93",
             "comment": "`execution-spec-tests` generated test",
             "filling-transition-tool": "evm version 1.14.6-unstable-7e5dd44a-20240705",
             "description": "Test function documentation:\n\n    Test the executing a self-call in a set-code transaction.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/devnet-1@v1.1.1/tests/prague/eip7702_eoa_code_tx/test_eoa_code_txs.py#L213",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/devnet-1@v1.3.0/tests/prague/eip7702_eoa_code_tx/test_eoa_code_txs.py#L346",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7702.md",
             "reference-spec-version": "7357ff1f3f176aada6d350d6e42a292a3dec27f4"
         }
@@ -765,7 +791,20 @@
                         "v": "0x00",
                         "r": "0x0e6c8f4d73b175887e1f21cc00bf0f8243af18aed208ec0a4562ee60e7f85736",
                         "s": "0x3f8e8f1b01fcd6d3a988877e80dc17fad16274447f4211ed74b41e8789ae70cd",
-                        "sender": "0x8a0a19589531694250d570040a0c4b74576919b8"
+                        "sender": "0x8a0a19589531694250d570040a0c4b74576919b8",
+                        "authorizationList": [
+                            {
+                                "chainId": "0x01",
+                                "address": "0x0000000000000000000000000000000000001000",
+                                "nonce": [
+                                    "0x00"
+                                ],
+                                "v": "0x01",
+                                "r": "0x8171c0ded912d4f458b8115618c18f3f430f414919c73b4daa693c47fd325414",
+                                "s": "0x787741e1621bcb9cb58ece039ad73f41d9422aa259ed53c2b0bd30dc7ff09be7",
+                                "signer": "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b"
+                            }
+                        ]
                     }
                 ],
                 "uncleHeaders": [],
@@ -780,11 +819,11 @@
         "lastblockhash": "0xeea21b8723ba6f86e3c3d57edfeb3c97844207063d5fc834a0a198ad78793072",
         "sealEngine": "NoProof",
         "_info": {
-            "hash": "0x8ba0c1a46f0bf2551dd9b9ce3217852f0c76a1fc9a6ab7fbdecf64cb482651d9",
+            "hash": "0x87cd93d608d36cba161cbcd5ffa37c994b1c39bdf8fa77ef6281e6fb971b579e",
             "comment": "`execution-spec-tests` generated test",
             "filling-transition-tool": "evm version 1.14.6-unstable-7e5dd44a-20240705",
             "description": "Test function documentation:\n\n    Test the executing a self-call in a set-code transaction.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/devnet-1@v1.1.1/tests/prague/eip7702_eoa_code_tx/test_eoa_code_txs.py#L213",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/devnet-1@v1.3.0/tests/prague/eip7702_eoa_code_tx/test_eoa_code_txs.py#L346",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7702.md",
             "reference-spec-version": "7357ff1f3f176aada6d350d6e42a292a3dec27f4"
         }
@@ -1029,7 +1068,20 @@
                         "v": "0x00",
                         "r": "0x0e6c8f4d73b175887e1f21cc00bf0f8243af18aed208ec0a4562ee60e7f85736",
                         "s": "0x3f8e8f1b01fcd6d3a988877e80dc17fad16274447f4211ed74b41e8789ae70cd",
-                        "sender": "0x8a0a19589531694250d570040a0c4b74576919b8"
+                        "sender": "0x8a0a19589531694250d570040a0c4b74576919b8",
+                        "authorizationList": [
+                            {
+                                "chainId": "0x01",
+                                "address": "0x0000000000000000000000000000000000001000",
+                                "nonce": [
+                                    "0x00"
+                                ],
+                                "v": "0x01",
+                                "r": "0x8171c0ded912d4f458b8115618c18f3f430f414919c73b4daa693c47fd325414",
+                                "s": "0x787741e1621bcb9cb58ece039ad73f41d9422aa259ed53c2b0bd30dc7ff09be7",
+                                "signer": "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b"
+                            }
+                        ]
                     }
                 ],
                 "uncleHeaders": [],
@@ -1044,11 +1096,11 @@
         "lastblockhash": "0x5c7a481315c122959b9249680b41cee76281fe20fbe00596d343e07eee5abb5a",
         "sealEngine": "NoProof",
         "_info": {
-            "hash": "0x190380f99e6a43b02bedfac0048f247dcb107bb6148be7ac959fb4802cda68af",
+            "hash": "0x3367e3be3cfbd06f4e6acb23991ba6f54800f2b6246e7c549730d494966e8f77",
             "comment": "`execution-spec-tests` generated test",
             "filling-transition-tool": "evm version 1.14.6-unstable-7e5dd44a-20240705",
             "description": "Test function documentation:\n\n    Test the executing a self-call in a set-code transaction.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/devnet-1@v1.1.1/tests/prague/eip7702_eoa_code_tx/test_eoa_code_txs.py#L213",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/devnet-1@v1.3.0/tests/prague/eip7702_eoa_code_tx/test_eoa_code_txs.py#L346",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7702.md",
             "reference-spec-version": "7357ff1f3f176aada6d350d6e42a292a3dec27f4"
         }
@@ -1293,7 +1345,20 @@
                         "v": "0x00",
                         "r": "0x807814c2b5e080ebb46b385d0188b694bc9609526970eb9093605bdd406f1b77",
                         "s": "0x46f52a0a05a427ef652652f03de8e1426fea1ad4a540ff8d29bdee8393cb12d0",
-                        "sender": "0x8a0a19589531694250d570040a0c4b74576919b8"
+                        "sender": "0x8a0a19589531694250d570040a0c4b74576919b8",
+                        "authorizationList": [
+                            {
+                                "chainId": "0x01",
+                                "address": "0x0000000000000000000000000000000000001000",
+                                "nonce": [
+                                    "0x00"
+                                ],
+                                "v": "0x01",
+                                "r": "0x8171c0ded912d4f458b8115618c18f3f430f414919c73b4daa693c47fd325414",
+                                "s": "0x787741e1621bcb9cb58ece039ad73f41d9422aa259ed53c2b0bd30dc7ff09be7",
+                                "signer": "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b"
+                            }
+                        ]
                     }
                 ],
                 "uncleHeaders": [],
@@ -1308,11 +1373,11 @@
         "lastblockhash": "0x9435cab917e80bf36613be2bdcc00bea2218090631d5f5473d63db5a8d22a7be",
         "sealEngine": "NoProof",
         "_info": {
-            "hash": "0xad317fef75e5fda79163535a6e4888273a968795634156cdaa65a25e0672fb3f",
+            "hash": "0x5dedcfb6c4eedf33844664b0bcae672b6e4e9d86bd07a8a3fc6402ecd840d17a",
             "comment": "`execution-spec-tests` generated test",
             "filling-transition-tool": "evm version 1.14.6-unstable-7e5dd44a-20240705",
             "description": "Test function documentation:\n\n    Test the executing a self-call in a set-code transaction.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/devnet-1@v1.1.1/tests/prague/eip7702_eoa_code_tx/test_eoa_code_txs.py#L213",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/devnet-1@v1.3.0/tests/prague/eip7702_eoa_code_tx/test_eoa_code_txs.py#L346",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7702.md",
             "reference-spec-version": "7357ff1f3f176aada6d350d6e42a292a3dec27f4"
         }
@@ -1557,7 +1622,20 @@
                         "v": "0x00",
                         "r": "0x807814c2b5e080ebb46b385d0188b694bc9609526970eb9093605bdd406f1b77",
                         "s": "0x46f52a0a05a427ef652652f03de8e1426fea1ad4a540ff8d29bdee8393cb12d0",
-                        "sender": "0x8a0a19589531694250d570040a0c4b74576919b8"
+                        "sender": "0x8a0a19589531694250d570040a0c4b74576919b8",
+                        "authorizationList": [
+                            {
+                                "chainId": "0x01",
+                                "address": "0x0000000000000000000000000000000000001000",
+                                "nonce": [
+                                    "0x00"
+                                ],
+                                "v": "0x01",
+                                "r": "0x8171c0ded912d4f458b8115618c18f3f430f414919c73b4daa693c47fd325414",
+                                "s": "0x787741e1621bcb9cb58ece039ad73f41d9422aa259ed53c2b0bd30dc7ff09be7",
+                                "signer": "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b"
+                            }
+                        ]
                     }
                 ],
                 "uncleHeaders": [],
@@ -1572,11 +1650,11 @@
         "lastblockhash": "0xb301ec3a89c4359e7b43fb8d3c9a716f86e485d3b1efe8dc2705b7fb1ab3585f",
         "sealEngine": "NoProof",
         "_info": {
-            "hash": "0x9d8d699a3172a03fc23e0c5c6d50c4fc696179dbab1e3248c39366ef5858820d",
+            "hash": "0x288e5104dc9b38f01459a5a174b438d0cd4c7481114769c87a4761eb0210a1bf",
             "comment": "`execution-spec-tests` generated test",
             "filling-transition-tool": "evm version 1.14.6-unstable-7e5dd44a-20240705",
             "description": "Test function documentation:\n\n    Test the executing a self-call in a set-code transaction.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/devnet-1@v1.1.1/tests/prague/eip7702_eoa_code_tx/test_eoa_code_txs.py#L213",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/devnet-1@v1.3.0/tests/prague/eip7702_eoa_code_tx/test_eoa_code_txs.py#L346",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7702.md",
             "reference-spec-version": "7357ff1f3f176aada6d350d6e42a292a3dec27f4"
         }
@@ -1819,7 +1897,20 @@
                         "v": "0x00",
                         "r": "0x807814c2b5e080ebb46b385d0188b694bc9609526970eb9093605bdd406f1b77",
                         "s": "0x46f52a0a05a427ef652652f03de8e1426fea1ad4a540ff8d29bdee8393cb12d0",
-                        "sender": "0x8a0a19589531694250d570040a0c4b74576919b8"
+                        "sender": "0x8a0a19589531694250d570040a0c4b74576919b8",
+                        "authorizationList": [
+                            {
+                                "chainId": "0x01",
+                                "address": "0x0000000000000000000000000000000000001000",
+                                "nonce": [
+                                    "0x00"
+                                ],
+                                "v": "0x01",
+                                "r": "0x8171c0ded912d4f458b8115618c18f3f430f414919c73b4daa693c47fd325414",
+                                "s": "0x787741e1621bcb9cb58ece039ad73f41d9422aa259ed53c2b0bd30dc7ff09be7",
+                                "signer": "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b"
+                            }
+                        ]
                     }
                 ],
                 "uncleHeaders": [],
@@ -1834,11 +1925,11 @@
         "lastblockhash": "0xf88b816ac939b27e3db5a0d98a60dbcef8177b14ac0e49b57d5f4bf6caef6863",
         "sealEngine": "NoProof",
         "_info": {
-            "hash": "0x16d27a7ba4991ed952589d3005795be2b6c320a9c7dd5097b34e412d3e4fbdd0",
+            "hash": "0x889136c4401fd8454a23dbcf6a30458b92952effd22e9206a997eb072b7f7e8a",
             "comment": "`execution-spec-tests` generated test",
             "filling-transition-tool": "evm version 1.14.6-unstable-7e5dd44a-20240705",
             "description": "Test function documentation:\n\n    Test the executing a self-call in a set-code transaction.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/devnet-1@v1.1.1/tests/prague/eip7702_eoa_code_tx/test_eoa_code_txs.py#L213",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/devnet-1@v1.3.0/tests/prague/eip7702_eoa_code_tx/test_eoa_code_txs.py#L346",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7702.md",
             "reference-spec-version": "7357ff1f3f176aada6d350d6e42a292a3dec27f4"
         }
@@ -2083,7 +2174,20 @@
                         "v": "0x00",
                         "r": "0x807814c2b5e080ebb46b385d0188b694bc9609526970eb9093605bdd406f1b77",
                         "s": "0x46f52a0a05a427ef652652f03de8e1426fea1ad4a540ff8d29bdee8393cb12d0",
-                        "sender": "0x8a0a19589531694250d570040a0c4b74576919b8"
+                        "sender": "0x8a0a19589531694250d570040a0c4b74576919b8",
+                        "authorizationList": [
+                            {
+                                "chainId": "0x01",
+                                "address": "0x0000000000000000000000000000000000001000",
+                                "nonce": [
+                                    "0x00"
+                                ],
+                                "v": "0x01",
+                                "r": "0x8171c0ded912d4f458b8115618c18f3f430f414919c73b4daa693c47fd325414",
+                                "s": "0x787741e1621bcb9cb58ece039ad73f41d9422aa259ed53c2b0bd30dc7ff09be7",
+                                "signer": "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b"
+                            }
+                        ]
                     }
                 ],
                 "uncleHeaders": [],
@@ -2098,11 +2202,11 @@
         "lastblockhash": "0x970fb9883f8da655b2f787d5a9b205e38628e37c926790d981c9f97a5eb358de",
         "sealEngine": "NoProof",
         "_info": {
-            "hash": "0xd815c5b6a70733d89f9028bdb8c143392f67e72448dd1f2d9d681cd48629482c",
+            "hash": "0x496522f6af568f5c0e68480f26ef1cf08f44c18fc95ddf159fb25aa37a9b966c",
             "comment": "`execution-spec-tests` generated test",
             "filling-transition-tool": "evm version 1.14.6-unstable-7e5dd44a-20240705",
             "description": "Test function documentation:\n\n    Test the executing a self-call in a set-code transaction.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/devnet-1@v1.1.1/tests/prague/eip7702_eoa_code_tx/test_eoa_code_txs.py#L213",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/devnet-1@v1.3.0/tests/prague/eip7702_eoa_code_tx/test_eoa_code_txs.py#L346",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7702.md",
             "reference-spec-version": "7357ff1f3f176aada6d350d6e42a292a3dec27f4"
         }
