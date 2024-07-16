@@ -263,5 +263,7 @@ func (d *DiagnosticClient) runCollectPeersStatistics(rootCtx context.Context) {
 }
 
 func (d *DiagnosticClient) Peers() map[string]PeerStatistics {
+	d.mu.Lock()
+	defer d.mu.Unlock()
 	return d.peersStats.getPeers()
 }
