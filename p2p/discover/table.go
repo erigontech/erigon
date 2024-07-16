@@ -300,7 +300,6 @@ loop:
 			if tab.live() == 0 && len(waiting) == 0 && minRefreshTimerActive.CompareAndSwap(false, true) {
 				minRefreshTimer = time.AfterFunc(minRefreshInterval, func() {
 					defer minRefreshTimerActive.Store(false)
-					minRefreshTimer = nil
 					tab.net.lookupRandom()
 					tab.refresh()
 				})
