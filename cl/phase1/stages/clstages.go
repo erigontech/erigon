@@ -663,6 +663,7 @@ func ConsensusClStages(ctx context.Context,
 					if _, err = cfg.attestationDataProducer.ProduceAndCacheAttestationData(copiedHeadState, copiedHeadState.Slot(), 0); err != nil {
 						logger.Warn("failed to produce and cache attestation data", "err", err)
 					}
+
 					// Incement some stuff here
 					preverifiedValidators := cfg.forkChoice.PreverifiedValidator(headState.FinalizedCheckpoint().BlockRoot())
 					preverifiedHistoricalSummary := cfg.forkChoice.PreverifiedHistoricalSummaries(headState.FinalizedCheckpoint().BlockRoot())
@@ -681,6 +682,10 @@ func ConsensusClStages(ctx context.Context,
 					stateRoot, err := headState.HashSSZ()
 					if err != nil {
 						return fmt.Errorf("failed to hash ssz: %w", err)
+					}
+
+					if err := cfg.forkChoice.DumpBeaconStateOnDisk(headState); err != nil {
+						return fmt.Errorf("failed to dump beacon state on disk: %w", err)
 					}
 
 					headEpoch := headSlot / cfg.beaconCfg.SlotsPerEpoch

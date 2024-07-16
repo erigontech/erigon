@@ -540,3 +540,11 @@ func (f *ForkChoiceStore) IsHeadOptimistic() bool {
 	latestRoot := headState.LatestBlockHeader().Root
 	return f.optimisticStore.IsOptimistic(latestRoot)
 }
+
+func (f *ForkChoiceStore) DumpBeaconStateOnDisk(bs *state.CachingBeaconState) error {
+	anchorRoot, err := bs.BlockRoot()
+	if err != nil {
+		return err
+	}
+	return f.forkGraph.DumpBeaconStateOnDisk(anchorRoot, bs, false)
+}
