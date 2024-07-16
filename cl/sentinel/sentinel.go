@@ -406,7 +406,6 @@ func (s *Sentinel) isPeerUsefulForSyncNet(sub *GossipSubscription, nodeSyncnets 
 	}
 	// check if syncnetIdth bit is set in nodeSyncnets
 	if nodeSyncnets.BitAt(uint64(syncnetId)) {
-		fmt.Println("syncnet", syncnetId)
 		return true
 	}
 	return false
