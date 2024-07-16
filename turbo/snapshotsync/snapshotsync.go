@@ -238,7 +238,7 @@ func getMinimumBlocksToDownload(tx kv.Tx, blockReader services.FullBlockReader, 
 		minStepToDownload = minStep
 	}
 	// return the minimum number of blocks to download and the minimum step.
-	return minToDownload, minStep - minStepToDownload, nil
+	return frozenBlocks - minToDownload, minStep - minStepToDownload, nil
 }
 
 func getMaxStepRangeInSnapshots(preverified snapcfg.Preverified) (uint64, error) {
