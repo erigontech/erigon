@@ -870,6 +870,8 @@ func (d *Downloader) mainLoop(silent bool) error {
 	go func() {
 		defer d.wg.Done()
 
+		fmt.Println("DL_LOOP")
+		defer fmt.Println("DL_LOOP")
 		complete := map[string]struct{}{}
 		checking := map[string]struct{}{}
 		failed := map[string]struct{}{}
