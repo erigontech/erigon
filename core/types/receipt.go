@@ -494,3 +494,9 @@ func (r *Receipt) DeriveFieldsV3ForSingleReceipt(txnIdx int, blockHash libcommon
 	}
 	return nil
 }
+
+// TODO: maybe make it more prettier (only for debug purposes)
+func (r *Receipt) String() string {
+	str := fmt.Sprintf("Receipt of tx %+v", *r)
+	return str
+}
