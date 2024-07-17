@@ -17,11 +17,27 @@
 package heimdall
 
 import (
+	"math/big"
 	"testing"
+	"time"
 
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon/crypto"
 	"github.com/ledgerwatch/erigon/polygon/heimdall/heimdalltest"
 )
 
 func TestMilestoneJsonMarshall(t *testing.T) {
 	heimdalltest.AssertJsonMarshalUnmarshal(t, makeMilestone(10, 100))
+}
+
+func makeMilestone(start uint64, len uint) *Milestone {
+	m := Milestone{
+		Fields: WaypointFields{
+			StartBlock: new(big.Int).SetUint64(start),
+			EndBlock:   new(big.Int).SetUint64(start + uint64(len) - 1),
+			RootHash:   libcommon.BytesToHash(crypto.Keccak256([]byte("ROOT"))),
+			Timestamp:  uint64(time.Now().Unix()),
+		},
+	}
+	return &m
 }
