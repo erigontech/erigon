@@ -249,7 +249,6 @@ func (s *EngineServer) newPayload(ctx context.Context, req *engine_types.Executi
 	blockHash := req.BlockHash
 	if header.Hash() != blockHash {
 		s.logger.Error("[NewPayload] invalid block hash", "stated", blockHash, "actual", header.Hash())
-		s.logger.Error("[SPIDERMAN]", "Header", header, "req", req)
 		return &engine_types.PayloadStatus{
 			Status:          engine_types.InvalidStatus,
 			ValidationError: engine_types.NewStringifiedErrorFromString("invalid block hash"),
