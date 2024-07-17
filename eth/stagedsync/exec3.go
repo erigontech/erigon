@@ -96,21 +96,21 @@ func (p *Progress) Log(rs *state.StateV3, in *state.QueueWithRetry, rws *state.R
 	interval := currentTime.Sub(p.prevTime)
 	speedTx := float64(doneCount-p.prevCount) / (float64(interval) / float64(time.Second))
 	//var repeatRatio float64
-	//if doneCount > p.prevCount {
-	//	repeatRatio = 100.0 * float64(repeatCount-p.prevRepeatCount) / float64(doneCount-p.prevCount)
-	//}
-	p.logger.Info(fmt.Sprintf("[%s] Transaction replay", p.logPrefix),
-		//"workers", workerCount,
+	logArgs := []interface{}{
 		"blk", outputBlockNum,
 		"tx/s", fmt.Sprintf("%.1f", speedTx),
 		//"pipe", fmt.Sprintf("(%d+%d)->%d/%d->%d/%d", in.NewTasksLen(), in.RetriesLen(), rws.ResultChLen(), rws.ResultChCap(), rws.Len(), rws.Limit()),
 		//"repeatRatio", fmt.Sprintf("%.2f%%", repeatRatio),
 		//"workers", p.workersCount,
 		"buffer", fmt.Sprintf("%s/%s", common.ByteCount(sizeEstimate), common.ByteCount(p.commitThreshold)),
-		"stepsInDB", fmt.Sprintf("%.2f", idxStepsAmountInDB),
 		"step", fmt.Sprintf("%.1f", float64(outTxNum)/float64(config3.HistoryV3AggregationStep)),
 		"alloc", common.ByteCount(m.Alloc), "sys", common.ByteCount(m.Sys),
-	)
+	}
+	if idxStepsAmountInDB > 0.01 {
+		logArgs = append(logArgs, "stepsInDB", fmt.Sprintf("%.2f", idxStepsAmountInDB))
+	}
+
+	p.logger.Info(fmt.Sprintf("[%s] Transaction replay", p.logPrefix), logArgs...)
 
 	p.prevTime = currentTime
 	p.prevCount = doneCount
@@ -192,13 +192,19 @@ func ExecV3(ctx context.Context,
 	if initialCycle {
 		agg.SetCollateAndBuildWorkers(min(2, estimate.StateV3Collate.Workers()))
 		agg.SetCompressWorkers(estimate.CompressSnapshot.Workers())
-		//if blockNum < cfg.blockReader.FrozenBlocks() {
-		//defer agg.DiscardHistory(kv.CommitmentDomain).EnableHistory(kv.CommitmentDomain)
-		//defer agg.LimitRecentHistoryWithoutFiles(0).LimitRecentHistoryWithoutFiles(agg.StepSize() / 10)
-		//}
 	} else {
 		agg.SetCompressWorkers(1)
 		agg.SetCollateAndBuildWorkers(1)
+	}
+	// Disable all inverted indexes if we do max pruning
+	if cfg.prune.History.Enabled() && cfg.prune.History.PruneTo(execStage.BlockNumber) == execStage.BlockNumber {
+		agg.DiscardInvertedIndex(kv.LogAddrIdxPos)
+		agg.DiscardInvertedIndex(kv.LogTopicIdxPos)
+		agg.DiscardInvertedIndex(kv.TracesFromIdxPos)
+		agg.DiscardInvertedIndex(kv.TracesToIdxPos)
+		agg.DiscardHistory(kv.AccountsDomain)
+		agg.DiscardHistory(kv.StorageDomain)
+		agg.DiscardHistory(kv.CodeDomain)
 	}
 
 	var err error

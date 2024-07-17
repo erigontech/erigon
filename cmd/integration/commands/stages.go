@@ -1017,9 +1017,6 @@ func stageExec(db kv.RwDB, ctx context.Context, logger log.Logger) error {
 	chainConfig, pm := fromdb.ChainConfig(db), fromdb.PruneMode(db)
 	if pruneTo > 0 {
 		pm.History = prune.Distance(s.BlockNumber - pruneTo)
-		pm.Receipts = prune.Distance(s.BlockNumber - pruneTo)
-		pm.CallTraces = prune.Distance(s.BlockNumber - pruneTo)
-		pm.TxIndex = prune.Distance(s.BlockNumber - pruneTo)
 	}
 
 	syncCfg := ethconfig.Defaults.Sync
@@ -1123,9 +1120,6 @@ func stageCustomTrace(db kv.RwDB, ctx context.Context, logger log.Logger) error 
 	chainConfig, pm := fromdb.ChainConfig(db), fromdb.PruneMode(db)
 	if pruneTo > 0 {
 		pm.History = prune.Distance(s.BlockNumber - pruneTo)
-		pm.Receipts = prune.Distance(s.BlockNumber - pruneTo)
-		pm.CallTraces = prune.Distance(s.BlockNumber - pruneTo)
-		pm.TxIndex = prune.Distance(s.BlockNumber - pruneTo)
 	}
 
 	syncCfg := ethconfig.Defaults.Sync
@@ -1244,9 +1238,6 @@ func stageTxLookup(db kv.RwDB, ctx context.Context, logger log.Logger) error {
 	s := stage(sync, tx, nil, stages.TxLookup)
 	if pruneTo > 0 {
 		pm.History = prune.Distance(s.BlockNumber - pruneTo)
-		pm.Receipts = prune.Distance(s.BlockNumber - pruneTo)
-		pm.CallTraces = prune.Distance(s.BlockNumber - pruneTo)
-		pm.TxIndex = prune.Distance(s.BlockNumber - pruneTo)
 	}
 	logger.Info("Stage", "name", s.ID, "progress", s.BlockNumber)
 
@@ -1547,8 +1538,7 @@ func stage(st *stagedsync.Sync, tx kv.Tx, db kv.RoDB, stage stages.SyncStage) *s
 
 func overrideStorageMode(db kv.RwDB, logger log.Logger) error {
 	chainConfig := fromdb.ChainConfig(db)
-	pm, err := prune.FromCli(chainConfig.ChainID.Uint64(), pruneFlag, pruneB, pruneH, pruneR, pruneT, pruneC,
-		pruneHBefore, pruneRBefore, pruneTBefore, pruneCBefore, pruneBBefore, experiments)
+	pm, err := prune.FromCli(chainConfig.ChainID.Uint64(), pruneB, pruneH, experiments)
 	if err != nil {
 		return err
 	}
