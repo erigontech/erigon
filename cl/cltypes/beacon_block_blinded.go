@@ -29,11 +29,97 @@ import (
 	ssz2 "github.com/ledgerwatch/erigon/cl/ssz"
 )
 
+// make sure that the type implements the interface ssz2.ObjectSSZ
+var (
+	_ ssz2.ObjectSSZ = (*BlindedBeaconBody)(nil)
+	_ ssz2.ObjectSSZ = (*BlindedBeaconBlock)(nil)
+	_ ssz2.ObjectSSZ = (*SignedBlindedBeaconBlock)(nil)
+
+	_ GenericBeaconBlock = (*BlindedBeaconBlock)(nil)
+	_ GenericBeaconBody  = (*BlindedBeaconBody)(nil)
+)
+
+// Definitions of SignedBlindedBeaconBlock
+// SignedBlindedBeaconBlock contains a signature and a BlindedBeaconBlock.
 type SignedBlindedBeaconBlock struct {
 	Signature libcommon.Bytes96   `json:"signature"`
 	Block     *BlindedBeaconBlock `json:"message"`
 }
 
+func NewSignedBlindedBeaconBlock(beaconCfg *clparams.BeaconChainConfig) *SignedBlindedBeaconBlock {
+	return &SignedBlindedBeaconBlock{
+		Signature: libcommon.Bytes96{},
+		Block:     NewBlindedBeaconBlock(beaconCfg),
+	}
+}
+
+func (s *SignedBlindedBeaconBlock) SignedBeaconBlockHeader() *SignedBeaconBlockHeader {
+	bodyRoot, err := s.Block.Body.HashSSZ()
+	if err != nil {
+		panic(err)
+	}
+	return &SignedBeaconBlockHeader{
+		Signature: s.Signature,
+		Header: &BeaconBlockHeader{
+			Slot:          s.Block.Slot,
+			ProposerIndex: s.Block.ProposerIndex,
+			ParentRoot:    s.Block.ParentRoot,
+			Root:          s.Block.StateRoot,
+			BodyRoot:      bodyRoot,
+		},
+	}
+}
+
+func (b *SignedBlindedBeaconBlock) Clone() clonable.Clonable {
+	return NewSignedBlindedBeaconBlock(b.Block.Body.beaconCfg)
+}
+
+func (b *SignedBlindedBeaconBlock) Unblind(blockPayload *Eth1Block) (*SignedBeaconBlock, error) {
+	if b == nil {
+		return nil, fmt.Errorf("nil block")
+	}
+	// check root
+	blindedRoot := b.Block.Body.ExecutionPayload.StateRoot
+	payloadRoot := blockPayload.StateRoot
+	if blindedRoot != payloadRoot {
+		return nil, fmt.Errorf("root mismatch: %s != %s", blindedRoot, payloadRoot)
+	}
+
+	signedBeaconBlock := b.Full(blockPayload.Transactions, blockPayload.Withdrawals)
+	return signedBeaconBlock, nil
+}
+
+func (b *SignedBlindedBeaconBlock) EncodeSSZ(buf []byte) ([]byte, error) {
+	return ssz2.MarshalSSZ(buf, b.Block, b.Signature[:])
+}
+
+func (b *SignedBlindedBeaconBlock) EncodingSizeSSZ() int {
+	if b.Block == nil {
+		return 100
+	}
+	return 100 + b.Block.EncodingSizeSSZ()
+}
+
+func (b *SignedBlindedBeaconBlock) DecodeSSZ(buf []byte, s int) error {
+	return ssz2.UnmarshalSSZ(buf, s, b.Block, b.Signature[:])
+}
+
+func (b *SignedBlindedBeaconBlock) HashSSZ() ([32]byte, error) {
+	return merkle_tree.HashTreeRoot(b.Block, b.Signature[:])
+}
+
+func (b *SignedBlindedBeaconBlock) Version() clparams.StateVersion {
+	return b.Block.Body.Version
+}
+
+func (b *SignedBlindedBeaconBlock) Full(txs *solid.TransactionsSSZ, withdrawals *solid.ListSSZ[*Withdrawal]) *SignedBeaconBlock {
+	return &SignedBeaconBlock{
+		Signature: b.Signature,
+		Block:     b.Block.Full(txs, withdrawals),
+	}
+}
+
+// Definitions of BlindedBeaconBlock
 type BlindedBeaconBlock struct {
 	Slot          uint64             `json:"slot,string"`
 	ProposerIndex uint64             `json:"proposer_index,string"`
@@ -42,6 +128,75 @@ type BlindedBeaconBlock struct {
 	Body          *BlindedBeaconBody `json:"body"`
 }
 
+func NewBlindedBeaconBlock(beaconCfg *clparams.BeaconChainConfig) *BlindedBeaconBlock {
+	return &BlindedBeaconBlock{
+		Body: NewBlindedBeaconBody(beaconCfg),
+	}
+}
+
+func (b *BlindedBeaconBlock) Full(txs *solid.TransactionsSSZ, withdrawals *solid.ListSSZ[*Withdrawal]) *BeaconBlock {
+	return &BeaconBlock{
+		Slot:          b.Slot,
+		ProposerIndex: b.ProposerIndex,
+		ParentRoot:    b.ParentRoot,
+		StateRoot:     b.StateRoot,
+		Body:          b.Body.Full(txs, withdrawals),
+	}
+}
+
+func (b *BlindedBeaconBlock) SetVersion(version clparams.StateVersion) *BlindedBeaconBlock {
+	b.Body.SetVersion(version)
+	return b
+}
+
+func (b *BlindedBeaconBlock) EncodeSSZ(buf []byte) (dst []byte, err error) {
+	return ssz2.MarshalSSZ(buf, b.Slot, b.ProposerIndex, b.ParentRoot[:], b.StateRoot[:], b.Body)
+}
+
+func (b *BlindedBeaconBlock) EncodingSizeSSZ() int {
+	if b.Body == nil {
+		return 80
+	}
+	return 80 + b.Body.EncodingSizeSSZ()
+}
+
+func (b *BlindedBeaconBlock) DecodeSSZ(buf []byte, version int) error {
+	return ssz2.UnmarshalSSZ(buf, version, &b.Slot, &b.ProposerIndex, b.ParentRoot[:], b.StateRoot[:], b.Body)
+}
+
+func (b *BlindedBeaconBlock) HashSSZ() ([32]byte, error) {
+	return merkle_tree.HashTreeRoot(b.Slot, b.ProposerIndex, b.ParentRoot[:], b.StateRoot[:], b.Body)
+}
+
+func (*BlindedBeaconBlock) Static() bool {
+	return false
+}
+
+func (b *BlindedBeaconBlock) Clone() clonable.Clonable {
+	return NewBlindedBeaconBlock(b.Body.beaconCfg)
+}
+
+func (b *BlindedBeaconBlock) Version() clparams.StateVersion {
+	return b.Body.Version
+}
+
+func (b *BlindedBeaconBlock) GetProposerIndex() uint64 {
+	return b.ProposerIndex
+}
+
+func (b *BlindedBeaconBlock) GetSlot() uint64 {
+	return b.Slot
+}
+
+func (b *BlindedBeaconBlock) GetParentRoot() libcommon.Hash {
+	return b.ParentRoot
+}
+
+func (b *BlindedBeaconBlock) GetBody() GenericBeaconBody {
+	return b.Body
+}
+
+// Definitions of BlindedBeaconBody
 type BlindedBeaconBody struct {
 	// A byte array used for randomness in the beacon chain
 	RandaoReveal libcommon.Bytes96 `json:"randao_reveal"`
@@ -73,38 +228,6 @@ type BlindedBeaconBody struct {
 	beaconCfg *clparams.BeaconChainConfig
 }
 
-// Getters
-
-func NewSignedBlindedBeaconBlock(beaconCfg *clparams.BeaconChainConfig) *SignedBlindedBeaconBlock {
-	return &SignedBlindedBeaconBlock{
-		Signature: libcommon.Bytes96{},
-		Block:     NewBlindedBeaconBlock(beaconCfg),
-	}
-}
-
-func (s *SignedBlindedBeaconBlock) SignedBeaconBlockHeader() *SignedBeaconBlockHeader {
-	bodyRoot, err := s.Block.Body.HashSSZ()
-	if err != nil {
-		panic(err)
-	}
-	return &SignedBeaconBlockHeader{
-		Signature: s.Signature,
-		Header: &BeaconBlockHeader{
-			Slot:          s.Block.Slot,
-			ProposerIndex: s.Block.ProposerIndex,
-			ParentRoot:    s.Block.ParentRoot,
-			Root:          s.Block.StateRoot,
-			BodyRoot:      bodyRoot,
-		},
-	}
-}
-
-func NewBlindedBeaconBlock(beaconCfg *clparams.BeaconChainConfig) *BlindedBeaconBlock {
-	return &BlindedBeaconBlock{
-		Body: NewBlindedBeaconBody(beaconCfg),
-	}
-}
-
 func NewBlindedBeaconBody(beaconCfg *clparams.BeaconChainConfig) *BlindedBeaconBody {
 	return &BlindedBeaconBody{
 		RandaoReveal:       libcommon.Bytes96{},
@@ -123,39 +246,6 @@ func NewBlindedBeaconBody(beaconCfg *clparams.BeaconChainConfig) *BlindedBeaconB
 		beaconCfg:          beaconCfg,
 	}
 }
-
-// Version returns beacon block version.
-func (b *SignedBlindedBeaconBlock) Version() clparams.StateVersion {
-	return b.Block.Body.Version
-}
-
-func (b *SignedBlindedBeaconBlock) Full(txs *solid.TransactionsSSZ, withdrawals *solid.ListSSZ[*Withdrawal]) *SignedBeaconBlock {
-	return &SignedBeaconBlock{
-		Signature: b.Signature,
-		Block:     b.Block.Full(txs, withdrawals),
-	}
-}
-
-// Version returns beacon block version.
-func (b *BlindedBeaconBlock) Version() clparams.StateVersion {
-	return b.Body.Version
-}
-
-func (b *BlindedBeaconBlock) Full(txs *solid.TransactionsSSZ, withdrawals *solid.ListSSZ[*Withdrawal]) *BeaconBlock {
-	return &BeaconBlock{
-		Slot:          b.Slot,
-		ProposerIndex: b.ProposerIndex,
-		ParentRoot:    b.ParentRoot,
-		StateRoot:     b.StateRoot,
-		Body:          b.Body.Full(txs, withdrawals),
-	}
-}
-
-func (b *BlindedBeaconBlock) SetVersion(version clparams.StateVersion) *BlindedBeaconBlock {
-	b.Body.SetVersion(version)
-	return b
-}
-
 func (b *BlindedBeaconBody) SetVersion(version clparams.StateVersion) *BlindedBeaconBody {
 	b.Version = version
 	if b.ExecutionPayload == nil {
@@ -310,84 +400,57 @@ func (b *BlindedBeaconBody) Full(txs *solid.TransactionsSSZ, withdrawals *solid.
 	}
 }
 
-func (b *BlindedBeaconBlock) EncodeSSZ(buf []byte) (dst []byte, err error) {
-	return ssz2.MarshalSSZ(buf, b.Slot, b.ProposerIndex, b.ParentRoot[:], b.StateRoot[:], b.Body)
-}
-
-func (b *BlindedBeaconBlock) EncodingSizeSSZ() int {
-	if b.Body == nil {
-		return 80
-	}
-	return 80 + b.Body.EncodingSizeSSZ()
-}
-
-func (b *BlindedBeaconBlock) DecodeSSZ(buf []byte, version int) error {
-	return ssz2.UnmarshalSSZ(buf, version, &b.Slot, &b.ProposerIndex, b.ParentRoot[:], b.StateRoot[:], b.Body)
-}
-
-func (b *BlindedBeaconBlock) HashSSZ() ([32]byte, error) {
-	return merkle_tree.HashTreeRoot(b.Slot, b.ProposerIndex, b.ParentRoot[:], b.StateRoot[:], b.Body)
-}
-
-func (b *SignedBlindedBeaconBlock) EncodeSSZ(buf []byte) ([]byte, error) {
-	return ssz2.MarshalSSZ(buf, b.Block, b.Signature[:])
-}
-
-func (b *SignedBlindedBeaconBlock) EncodingSizeSSZ() int {
-	if b.Block == nil {
-		return 100
-	}
-	return 100 + b.Block.EncodingSizeSSZ()
-}
-
-func (b *SignedBlindedBeaconBlock) DecodeSSZ(buf []byte, s int) error {
-	return ssz2.UnmarshalSSZ(buf, s, b.Block, b.Signature[:])
-}
-
-func (b *SignedBlindedBeaconBlock) HashSSZ() ([32]byte, error) {
-	return merkle_tree.HashTreeRoot(b.Block, b.Signature[:])
-}
-
 func (*BlindedBeaconBody) Static() bool {
 	return false
 }
-
-func (*BlindedBeaconBlock) Static() bool {
-	return false
-}
-
 func (b *BlindedBeaconBody) Clone() clonable.Clonable {
 	return NewBlindedBeaconBody(b.beaconCfg)
-}
-
-func (b *BlindedBeaconBlock) Clone() clonable.Clonable {
-	return NewBlindedBeaconBlock(b.Body.beaconCfg)
-}
-
-func (b *SignedBlindedBeaconBlock) Clone() clonable.Clonable {
-	return NewSignedBlindedBeaconBlock(b.Block.Body.beaconCfg)
 }
 
 func (b *BlindedBeaconBody) ExecutionPayloadMerkleProof() ([][32]byte, error) {
 	return merkle_tree.MerkleProof(4, 9, b.getSchema(false)...)
 }
 
-func (b *SignedBlindedBeaconBlock) Unblind(blockPayload *Eth1Block) (*SignedBeaconBlock, error) {
-	if b == nil {
-		return nil, fmt.Errorf("nil block")
-	}
-	// check root
-	blindedRoot := b.Block.Body.ExecutionPayload.StateRoot
-	payloadRoot := blockPayload.StateRoot
-	if blindedRoot != payloadRoot {
-		return nil, fmt.Errorf("root mismatch: %s != %s", blindedRoot, payloadRoot)
-	}
-
-	signedBeaconBlock := b.Full(blockPayload.Transactions, blockPayload.Withdrawals)
-	return signedBeaconBlock, nil
+func (b *BlindedBeaconBody) GetPayloadHeader() (*Eth1Header, error) {
+	return b.ExecutionPayload, nil
 }
 
-// make sure that the type implements the interface ssz2.ObjectSSZ
-var _ ssz2.ObjectSSZ = (*BlindedBeaconBody)(nil)
-var _ ssz2.ObjectSSZ = (*BlindedBeaconBlock)(nil)
-var _ ssz2.ObjectSSZ = (*SignedBlindedBeaconBlock)(nil)
+func (b *BlindedBeaconBody) GetRandaoReveal() libcommon.Bytes96 {
+	return b.RandaoReveal
+}
+
+func (b *BlindedBeaconBody) GetEth1Data() *Eth1Data {
+	return b.Eth1Data
+}
+
+func (b *BlindedBeaconBody) GetSyncAggregate() *SyncAggregate {
+	return b.SyncAggregate
+}
+
+func (b *BlindedBeaconBody) GetProposerSlashings() *solid.ListSSZ[*ProposerSlashing] {
+	return b.ProposerSlashings
+}
+
+func (b *BlindedBeaconBody) GetAttesterSlashings() *solid.ListSSZ[*AttesterSlashing] {
+	return b.AttesterSlashings
+}
+
+func (b *BlindedBeaconBody) GetAttestations() *solid.ListSSZ[*solid.Attestation] {
+	return b.Attestations
+}
+
+func (b *BlindedBeaconBody) GetDeposits() *solid.ListSSZ[*Deposit] {
+	return b.Deposits
+}
+
+func (b *BlindedBeaconBody) GetVoluntaryExits() *solid.ListSSZ[*SignedVoluntaryExit] {
+	return b.VoluntaryExits
+}
+
+func (b *BlindedBeaconBody) GetBlobKzgCommitments() *solid.ListSSZ[*KZGCommitment] {
+	return b.BlobKzgCommitments
+}
+
+func (b *BlindedBeaconBody) GetExecutionChanges() *solid.ListSSZ[*SignedBLSToExecutionChange] {
+	return b.ExecutionChanges
+}

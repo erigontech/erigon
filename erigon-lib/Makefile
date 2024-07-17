@@ -27,7 +27,7 @@ PROTOC_OS = linux
 endif
 
 PROTOC_INCLUDE = build/include/google
-PROTO_PATH = vendor/github.com/ledgerwatch/interfaces
+PROTO_PATH = vendor/github.com/erigontech/interfaces
 
 
 default: gen

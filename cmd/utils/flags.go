@@ -701,7 +701,7 @@ var (
 	}
 	TorrentDownloadRateFlag = cli.StringFlag{
 		Name:  "torrent.download.rate",
-		Value: "16mb",
+		Value: "128mb",
 		Usage: "Bytes per second, example: 32mb",
 	}
 	TorrentUploadRateFlag = cli.StringFlag{
@@ -711,7 +711,7 @@ var (
 	}
 	TorrentDownloadSlotsFlag = cli.IntFlag{
 		Name:  "torrent.download.slots",
-		Value: 6,
+		Value: 128,
 		Usage: "Amount of files to download in parallel. If network has enough seeders 1-3 slot enough, if network has lack of seeders increase to 5-7 (too big value will slow down everything).",
 	}
 	TorrentStaticPeersFlag = cli.StringFlag{
