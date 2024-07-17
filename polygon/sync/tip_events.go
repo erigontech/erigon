@@ -102,7 +102,7 @@ type TipEvents struct {
 
 func NewTipEvents(
 	logger log.Logger,
-	p2pService p2pObserverRegistrar,
+	p2pObserverRegistrar p2pObserverRegistrar,
 	heimdallObserverRegistrar heimdallObserverRegistrar,
 ) *TipEvents {
 	eventsCapacity := uint(1000) // more than 3 milestones
@@ -110,7 +110,7 @@ func NewTipEvents(
 	return &TipEvents{
 		logger:                    logger,
 		events:                    NewEventChannel[Event](eventsCapacity),
-		p2pObserverRegistrar:      p2pService,
+		p2pObserverRegistrar:      p2pObserverRegistrar,
 		heimdallObserverRegistrar: heimdallObserverRegistrar,
 	}
 }
