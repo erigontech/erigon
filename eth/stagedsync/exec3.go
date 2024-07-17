@@ -198,10 +198,13 @@ func ExecV3(ctx context.Context,
 	}
 	// Disable all inverted indexes if we do max pruning
 	if cfg.prune.History.Enabled() && cfg.prune.History.PruneTo(execStage.BlockNumber) == execStage.BlockNumber {
-		agg.DiscardInveredIndex(kv.LogAddrIdxPos)
-		agg.DiscardInveredIndex(kv.LogTopicIdxPos)
-		agg.DiscardInveredIndex(kv.TracesFromIdxPos)
-		agg.DiscardInveredIndex(kv.TracesToIdxPos)
+		agg.DiscardInvertedIndex(kv.LogAddrIdxPos)
+		agg.DiscardInvertedIndex(kv.LogTopicIdxPos)
+		agg.DiscardInvertedIndex(kv.TracesFromIdxPos)
+		agg.DiscardInvertedIndex(kv.TracesToIdxPos)
+		agg.DiscardHistory(kv.AccountsDomain)
+		agg.DiscardHistory(kv.StorageDomain)
+		agg.DiscardHistory(kv.CodeDomain)
 	}
 
 	var err error

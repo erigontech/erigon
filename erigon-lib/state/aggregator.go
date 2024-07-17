@@ -382,7 +382,7 @@ func (a *Aggregator) DiscardHistory(name kv.Domain) *Aggregator {
 	return a
 }
 
-func (a *Aggregator) DiscardInveredIndex(name kv.InvertedIdxPos) *Aggregator {
+func (a *Aggregator) DiscardInvertedIndex(name kv.InvertedIdxPos) *Aggregator {
 	a.iis[name].discardIdx = true
 	return a
 }
