@@ -189,7 +189,7 @@ func (f *Fetch) receiveMessage(ctx context.Context, sentryClient sentry.SentryCl
 				time.Sleep(3 * time.Second)
 				continue
 			}
-			f.logger.Debug("[txpool.fetch] Handling incoming message", "msg", string(req.Data), "reqID", req.Id.String(), "err", err)
+			f.logger.Debug("[txpool.fetch] Handling incoming message", "reqID", req.Id.String(), "err", err)
 		}
 		if f.wg != nil {
 			f.wg.Done()
