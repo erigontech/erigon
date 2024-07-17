@@ -539,8 +539,8 @@ github.com/ledgerwatch/erigon-snapshot v1.3.1-0.20240705135436-5d6d882b41f7 h1:N
 github.com/ledgerwatch/erigon-snapshot v1.3.1-0.20240705135436-5d6d882b41f7/go.mod h1:3AuPxZc85jkehh/HA9h8gabv5MSi3kb/ddtzBsTVJFo=
 github.com/ledgerwatch/erigonwatch v0.1.0 h1:TrCjklOu9ZI9/uiMigo1Jnknnk1I/dXUxXymA3xHfzo=
 github.com/ledgerwatch/erigonwatch v0.1.0/go.mod h1:uYq4hs3RL1OtIYRXAxYq02tpdGkx6rtXlpzdazDDbWI=
-github.com/ledgerwatch/secp256k1 v1.0.0 h1:Usvz87YoTG0uePIV8woOof5cQnLXGYa162rFf3YnwaQ=
-github.com/ledgerwatch/secp256k1 v1.0.0/go.mod h1:SPmqJFciiF/Q0mPt2jVs2dTr/1TZBTIA+kPMmKgBAak=
+github.com/erigontech/secp256k1 v1.1.0 h1:mO3YJMUSoASE15Ya//SoHiisptUhdXExuMUN1M0X9qY=
+github.com/erigontech/secp256k1 v1.1.0/go.mod h1:GokhPepsMB+EYDs7I5JZCprxHW6+yfOcJKaKtoZ+Fls=
 github.com/libp2p/go-buffer-pool v0.1.0 h1:oK4mSFcQz7cTQIfqbe4MIj9gLW+mnanjyFtc6cdF0Y8=
 github.com/libp2p/go-buffer-pool v0.1.0/go.mod h1:N+vh8gMqimBzdKkSMVuydVDq+UV5QTWy5HSiZacSbPg=
 github.com/libp2p/go-flow-metrics v0.1.0 h1:0iPhMI8PskQwzh57jB9WxIuIOQ0r+15PChFGkx3Q3WM=
