@@ -1646,6 +1646,7 @@ func (dt *DomainRoTx) DomainRangeLatest(roTx kv.Tx, fromKey, toKey []byte, limit
 func (dt *DomainRoTx) CanPruneUntil(tx kv.Tx, untilTx uint64) bool {
 	canDomain, _ := dt.canPruneDomainTables(tx, untilTx)
 	canHistory, _ := dt.ht.canPruneUntil(tx, untilTx)
+	fmt.Println("CanPruneUntil", canDomain, canHistory)
 	return canHistory || canDomain
 }
 
@@ -1739,6 +1740,7 @@ func (dt *DomainRoTx) Prune(ctx context.Context, rwTx kv.RwTx, step, txFrom, txT
 		return nil, fmt.Errorf("prune history at step %d [%d, %d): %w", step, txFrom, txTo, err)
 	}
 	canPrune, maxPrunableStep := dt.canPruneDomainTables(rwTx, txTo)
+	fmt.Println("dt.canPruneDomainTables", canPrune, maxPrunableStep)
 	if !canPrune {
 		return stat, nil
 	}
