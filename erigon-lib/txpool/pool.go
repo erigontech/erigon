@@ -1977,7 +1977,6 @@ func (p *TxPool) flush(ctx context.Context, db kv.RwDB) (written uint64, err err
 		}
 		version++
 		return tx.Put(kv.PoolInfo, PoolStateVersion, hexutility.EncodeTs(version))
-		return nil
 	}); err != nil {
 		return 0, err
 	}
