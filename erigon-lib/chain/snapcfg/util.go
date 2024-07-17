@@ -25,12 +25,14 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/ledgerwatch/erigon-lib/chain/networkname"
-	"github.com/ledgerwatch/erigon-lib/downloader/snaptype"
-	snapshothashes "github.com/ledgerwatch/erigon-snapshot"
-	"github.com/ledgerwatch/erigon-snapshot/webseed"
 	"github.com/pelletier/go-toml/v2"
 	"github.com/tidwall/btree"
+
+	snapshothashes "github.com/erigontech/erigon-snapshot"
+	"github.com/erigontech/erigon-snapshot/webseed"
+
+	"github.com/ledgerwatch/erigon-lib/chain/networkname"
+	"github.com/ledgerwatch/erigon-lib/downloader/snaptype"
 )
 
 var (
