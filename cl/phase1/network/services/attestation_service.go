@@ -24,6 +24,7 @@ import (
 	"time"
 
 	"github.com/Giulio2002/bls"
+	"github.com/ledgerwatch/erigon-lib/log/v3"
 	"github.com/ledgerwatch/erigon/cl/aggregation"
 	"github.com/ledgerwatch/erigon/cl/beacon/synced_data"
 	"github.com/ledgerwatch/erigon/cl/clparams"
@@ -35,6 +36,7 @@ import (
 	"github.com/ledgerwatch/erigon/cl/utils"
 	"github.com/ledgerwatch/erigon/cl/utils/eth_clock"
 	"github.com/ledgerwatch/erigon/cl/validator/committee_subscription"
+	"github.com/ledgerwatch/erigon/common"
 )
 
 var (
@@ -176,6 +178,7 @@ func (s *attestationService) ProcessMessage(ctx context.Context, subnet *uint64,
 	if valid, err := blsVerify(signature[:], signingRoot[:], pubKey[:]); err != nil {
 		return err
 	} else if !valid {
+		log.Warn("lodestar: invalid signature", "signature", common.Bytes2Hex(signature[:]), "signningRoot", common.Bytes2Hex(signingRoot[:]), "pubKey", common.Bytes2Hex(pubKey[:]))
 		return fmt.Errorf("invalid signature")
 	}
 

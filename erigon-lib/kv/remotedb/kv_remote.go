@@ -27,8 +27,8 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/protobuf/types/known/emptypb"
 
-	"github.com/ledgerwatch/erigon-lib/kv/iter"
 	"github.com/ledgerwatch/erigon-lib/kv/order"
+	"github.com/ledgerwatch/erigon-lib/kv/stream"
 	"github.com/ledgerwatch/erigon-lib/log/v3"
 
 	"github.com/ledgerwatch/erigon-lib/gointerfaces"
@@ -640,8 +640,8 @@ func (tx *tx) DomainGet(name kv.Domain, k, k2 []byte) (v []byte, step uint64, er
 	return reply.V, 0, nil
 }
 
-func (tx *tx) DomainRange(name kv.Domain, fromKey, toKey []byte, ts uint64, asc order.By, limit int) (it iter.KV, err error) {
-	return iter.PaginateKV(func(pageToken string) (keys, vals [][]byte, nextPageToken string, err error) {
+func (tx *tx) DomainRange(name kv.Domain, fromKey, toKey []byte, ts uint64, asc order.By, limit int) (it stream.KV, err error) {
+	return stream.PaginateKV(func(pageToken string) (keys, vals [][]byte, nextPageToken string, err error) {
 		reply, err := tx.db.remoteKV.DomainRange(tx.ctx, &remote.DomainRangeReq{TxId: tx.id, Table: name.String(), FromKey: fromKey, ToKey: toKey, Ts: ts, OrderAscend: bool(asc), Limit: int64(limit)})
 		if err != nil {
 			return nil, nil, "", err
@@ -656,8 +656,8 @@ func (tx *tx) HistorySeek(name kv.History, k []byte, ts uint64) (v []byte, ok bo
 	}
 	return reply.V, reply.Ok, nil
 }
-func (tx *tx) HistoryRange(name kv.History, fromTs, toTs int, asc order.By, limit int) (it iter.KV, err error) {
-	return iter.PaginateKV(func(pageToken string) (keys, vals [][]byte, nextPageToken string, err error) {
+func (tx *tx) HistoryRange(name kv.History, fromTs, toTs int, asc order.By, limit int) (it stream.KV, err error) {
+	return stream.PaginateKV(func(pageToken string) (keys, vals [][]byte, nextPageToken string, err error) {
 		reply, err := tx.db.remoteKV.HistoryRange(tx.ctx, &remote.HistoryRangeReq{TxId: tx.id, Table: string(name), FromTs: int64(fromTs), ToTs: int64(toTs), OrderAscend: bool(asc), Limit: int64(limit)})
 		if err != nil {
 			return nil, nil, "", err
@@ -666,8 +666,8 @@ func (tx *tx) HistoryRange(name kv.History, fromTs, toTs int, asc order.By, limi
 	}), nil
 }
 
-func (tx *tx) IndexRange(name kv.InvertedIdx, k []byte, fromTs, toTs int, asc order.By, limit int) (timestamps iter.U64, err error) {
-	return iter.PaginateU64(func(pageToken string) (arr []uint64, nextPageToken string, err error) {
+func (tx *tx) IndexRange(name kv.InvertedIdx, k []byte, fromTs, toTs int, asc order.By, limit int) (timestamps stream.U64, err error) {
+	return stream.PaginateU64(func(pageToken string) (arr []uint64, nextPageToken string, err error) {
 		req := &remote.IndexRangeReq{TxId: tx.id, Table: string(name), K: k, FromTs: int64(fromTs), ToTs: int64(toTs), OrderAscend: bool(asc), Limit: int64(limit)}
 		reply, err := tx.db.remoteKV.IndexRange(tx.ctx, req)
 		if err != nil {
@@ -680,7 +680,7 @@ func (tx *tx) AppendableGet(name kv.Appendable, ts kv.TxnId) ([]byte, bool, erro
 	panic("not implemented yet")
 }
 
-func (tx *tx) Prefix(table string, prefix []byte) (iter.KV, error) {
+func (tx *tx) Prefix(table string, prefix []byte) (stream.KV, error) {
 	nextPrefix, ok := kv.NextSubtree(prefix)
 	if !ok {
 		return tx.Range(table, prefix, nil)
@@ -688,8 +688,8 @@ func (tx *tx) Prefix(table string, prefix []byte) (iter.KV, error) {
 	return tx.Range(table, prefix, nextPrefix)
 }
 
-func (tx *tx) rangeOrderLimit(table string, fromPrefix, toPrefix []byte, asc order.By, limit int) (iter.KV, error) {
-	return iter.PaginateKV(func(pageToken string) (keys [][]byte, values [][]byte, nextPageToken string, err error) {
+func (tx *tx) rangeOrderLimit(table string, fromPrefix, toPrefix []byte, asc order.By, limit int) (stream.KV, error) {
+	return stream.PaginateKV(func(pageToken string) (keys [][]byte, values [][]byte, nextPageToken string, err error) {
 		req := &remote.RangeReq{TxId: tx.id, Table: table, FromPrefix: fromPrefix, ToPrefix: toPrefix, OrderAscend: bool(asc), Limit: int64(limit)}
 		reply, err := tx.db.remoteKV.Range(tx.ctx, req)
 		if err != nil {
@@ -698,16 +698,16 @@ func (tx *tx) rangeOrderLimit(table string, fromPrefix, toPrefix []byte, asc ord
 		return reply.Keys, reply.Values, reply.NextPageToken, nil
 	}), nil
 }
-func (tx *tx) Range(table string, fromPrefix, toPrefix []byte) (iter.KV, error) {
+func (tx *tx) Range(table string, fromPrefix, toPrefix []byte) (stream.KV, error) {
 	return tx.rangeOrderLimit(table, fromPrefix, toPrefix, order.Asc, -1)
 }
-func (tx *tx) RangeAscend(table string, fromPrefix, toPrefix []byte, limit int) (iter.KV, error) {
+func (tx *tx) RangeAscend(table string, fromPrefix, toPrefix []byte, limit int) (stream.KV, error) {
 	return tx.rangeOrderLimit(table, fromPrefix, toPrefix, order.Asc, limit)
 }
-func (tx *tx) RangeDescend(table string, fromPrefix, toPrefix []byte, limit int) (iter.KV, error) {
+func (tx *tx) RangeDescend(table string, fromPrefix, toPrefix []byte, limit int) (stream.KV, error) {
 	return tx.rangeOrderLimit(table, fromPrefix, toPrefix, order.Desc, limit)
 }
-func (tx *tx) RangeDupSort(table string, key []byte, fromPrefix, toPrefix []byte, asc order.By, limit int) (iter.KV, error) {
+func (tx *tx) RangeDupSort(table string, key []byte, fromPrefix, toPrefix []byte, asc order.By, limit int) (stream.KV, error) {
 	panic("not implemented yet")
 }
 

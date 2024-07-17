@@ -23,6 +23,7 @@ import (
 	"encoding/binary"
 	"fmt"
 	"math/big"
+	"unsafe"
 
 	"github.com/ledgerwatch/erigon-lib/common/hexutility"
 
@@ -51,6 +52,16 @@ func BytesToBloom(b []byte) Bloom {
 	var bloom Bloom
 	bloom.SetBytes(b)
 	return bloom
+}
+
+func (b Bloom) IsEmpty() bool {
+	var bb []uint64 = unsafe.Slice((*uint64)(unsafe.Pointer(&b[0])), BloomByteLength/8)
+	for i := 0; i < BloomByteLength/8; i++ {
+		if bb[i] != 0 {
+			return false
+		}
+	}
+	return true
 }
 
 // SetBytes sets the content of b to the given bytes.

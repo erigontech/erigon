@@ -106,7 +106,7 @@ func (e *EngineServer) Start(
 	txPool txpool.TxpoolClient,
 	mining txpool.MiningClient,
 ) {
-	base := jsonrpc.NewBaseApi(filters, stateCache, blockReader, agg, httpConfig.WithDatadir, httpConfig.EvmCallTimeout, engineReader, httpConfig.Dirs)
+	base := jsonrpc.NewBaseApi(filters, stateCache, blockReader, httpConfig.WithDatadir, httpConfig.EvmCallTimeout, engineReader)
 
 	ethImpl := jsonrpc.NewEthAPI(base, db, eth, txPool, mining, httpConfig.Gascap, httpConfig.Feecap, httpConfig.ReturnDataLimit, httpConfig.AllowUnprotectedTxs, httpConfig.MaxGetProofRewindBlockCount, httpConfig.WebsocketSubscribeLogsChannelSize, e.logger)
 
@@ -140,12 +140,16 @@ func (s *EngineServer) checkWithdrawalsPresence(time uint64, withdrawals types.W
 	return nil
 }
 
-func (s *EngineServer) checkRequestsPresence(time uint64, requests types.Requests) error {
-	if !s.config.IsPrague(time) && requests != nil {
-		return &rpc.InvalidParamsError{Message: "requests before Prague"}
+func (s *EngineServer) checkRequestsPresence(time uint64, payload *engine_types.ExecutionPayload) error {
+	if !s.config.IsPrague(time) {
+		if payload.DepositRequests != nil || payload.WithdrawalRequests != nil || payload.ConsolidationRequests != nil {
+			return &rpc.InvalidParamsError{Message: "requests before Prague"}
+		}
 	}
-	if s.config.IsPrague(time) && requests == nil {
-		return &rpc.InvalidParamsError{Message: "missing requests list"}
+	if s.config.IsPrague(time) {
+		if payload.DepositRequests == nil || payload.WithdrawalRequests == nil || payload.ConsolidationRequests == nil {
+			return &rpc.InvalidParamsError{Message: "missing requests list"}
+		}
 	}
 	return nil
 }
@@ -202,14 +206,16 @@ func (s *EngineServer) newPayload(ctx context.Context, req *engine_types.Executi
 	}
 
 	var requests types.Requests
-	if version >= clparams.ElectraVersion && req.DepositRequests != nil {
+	if err := s.checkRequestsPresence(header.Time, req); err != nil {
+		return nil, err
+	}
+	if version >= clparams.ElectraVersion {
+		requests = make(types.Requests, 0)
 		requests = append(requests, req.DepositRequests.Requests()...)
 		requests = append(requests, req.WithdrawalRequests.Requests()...)
 		requests = append(requests, req.ConsolidationRequests.Requests()...)
 	}
-	if err := s.checkRequestsPresence(header.Time, requests); err != nil {
-		return nil, err
-	}
+
 	if requests != nil {
 		rh := types.DeriveSha(requests)
 		header.RequestsRoot = &rh

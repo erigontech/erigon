@@ -27,8 +27,8 @@ import (
 
 	"github.com/ledgerwatch/erigon-lib/etl"
 	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon-lib/kv/iter"
 	"github.com/ledgerwatch/erigon-lib/kv/order"
+	"github.com/ledgerwatch/erigon-lib/kv/stream"
 	"github.com/ledgerwatch/erigon-lib/log/v3"
 )
 
@@ -78,27 +78,27 @@ func (m *Mapmutation) DBSize() (uint64, error) {
 	panic("implement me")
 }
 
-func (m *Mapmutation) Range(table string, fromPrefix, toPrefix []byte) (iter.KV, error) {
+func (m *Mapmutation) Range(table string, fromPrefix, toPrefix []byte) (stream.KV, error) {
 	//TODO implement me
 	panic("implement me")
 }
 
-func (m *Mapmutation) RangeAscend(table string, fromPrefix, toPrefix []byte, limit int) (iter.KV, error) {
+func (m *Mapmutation) RangeAscend(table string, fromPrefix, toPrefix []byte, limit int) (stream.KV, error) {
 	//TODO implement me
 	panic("implement me")
 }
 
-func (m *Mapmutation) RangeDescend(table string, fromPrefix, toPrefix []byte, limit int) (iter.KV, error) {
+func (m *Mapmutation) RangeDescend(table string, fromPrefix, toPrefix []byte, limit int) (stream.KV, error) {
 	//TODO implement me
 	panic("implement me")
 }
 
-func (m *Mapmutation) Prefix(table string, prefix []byte) (iter.KV, error) {
+func (m *Mapmutation) Prefix(table string, prefix []byte) (stream.KV, error) {
 	//TODO implement me
 	panic("implement me")
 }
 
-func (m *Mapmutation) RangeDupSort(table string, key []byte, fromPrefix, toPrefix []byte, asc order.By, limit int) (iter.KV, error) {
+func (m *Mapmutation) RangeDupSort(table string, key []byte, fromPrefix, toPrefix []byte, asc order.By, limit int) (stream.KV, error) {
 	//TODO implement me
 	panic("implement me")
 }

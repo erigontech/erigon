@@ -161,11 +161,7 @@ func encodeAccessList(al types2.AccessList, w io.Writer, b []byte) error {
 		if err := EncodeStructSizePrefix(tupleLen, w, b); err != nil {
 			return err
 		}
-		b[0] = 128 + 20
-		if _, err := w.Write(b[:1]); err != nil {
-			return err
-		}
-		if _, err := w.Write(tuple.Address.Bytes()); err != nil {
+		if err := rlp.EncodeOptionalAddress(&tuple.Address, w, b); err != nil {
 			return err
 		}
 		if err := EncodeStructSizePrefix(storageLen, w, b); err != nil {
@@ -453,13 +449,13 @@ func (tx *AccessListTx) WithSignature(signer Signer, sig []byte) (Transaction, e
 	cpy.ChainID = signer.ChainID()
 	return cpy, nil
 }
-func (tx *AccessListTx) FakeSign(address libcommon.Address) (Transaction, error) {
+func (tx *AccessListTx) FakeSign(address libcommon.Address) Transaction {
 	cpy := tx.copy()
 	cpy.R.Set(u256.Num1)
 	cpy.S.Set(u256.Num1)
 	cpy.V.Set(u256.Num4)
 	cpy.from.Store(address)
-	return cpy, nil
+	return cpy
 }
 
 // Hash computes the hash (but not for signatures!)
@@ -507,7 +503,7 @@ func (tx *AccessListTx) GetChainID() *uint256.Int {
 	return tx.ChainID
 }
 
-func (tx *AccessListTx) cashedSender() (sender libcommon.Address, ok bool) {
+func (tx *AccessListTx) cachedSender() (sender libcommon.Address, ok bool) {
 	s := tx.from.Load()
 	if s == nil {
 		return sender, false
@@ -516,7 +512,10 @@ func (tx *AccessListTx) cashedSender() (sender libcommon.Address, ok bool) {
 }
 func (tx *AccessListTx) Sender(signer Signer) (libcommon.Address, error) {
 	if sc := tx.from.Load(); sc != nil {
-		return sc.(libcommon.Address), nil
+		zeroAddr := libcommon.Address{}
+		if sc.(libcommon.Address) != zeroAddr { // Sender address can never be zero in a transaction with a valid signer
+			return sc.(libcommon.Address), nil
+		}
 	}
 	addr, err := signer.Sender(tx)
 	if err != nil {

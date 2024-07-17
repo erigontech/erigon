@@ -37,7 +37,7 @@ func TestMiningBorHeimdallForwardPersistsSpans(t *testing.T) {
 	testHarness := stagedsynctest.InitHarness(ctx, t, stagedsynctest.HarnessCfg{
 		ChainConfig:            stagedsynctest.BorDevnetChainConfigWithNoBlockSealDelays(),
 		GenerateChainNumBlocks: numBlocks,
-		LogLvl:                 log.LvlInfo,
+		LogLvl:                 log.LvlError,
 	})
 	// pretend-update previous stage progress
 	testHarness.SetMiningBlockEmptyHeader(ctx, t, uint64(numBlocks))
@@ -69,7 +69,7 @@ func TestMiningBorHeimdallForwardPersistsStateSyncEvents(t *testing.T) {
 	testHarness := stagedsynctest.InitHarness(ctx, t, stagedsynctest.HarnessCfg{
 		ChainConfig:            stagedsynctest.BorDevnetChainConfigWithNoBlockSealDelays(),
 		GenerateChainNumBlocks: numBlocks,
-		LogLvl:                 log.LvlInfo,
+		LogLvl:                 log.LvlError,
 	})
 	// pretend-update previous stage progress
 	testHarness.SetMiningBlockEmptyHeader(ctx, t, uint64(numBlocks))

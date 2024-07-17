@@ -34,6 +34,7 @@ import (
 
 	"github.com/RoaringBitmap/roaring/roaring64"
 	"github.com/c2h5oh/datasize"
+	"github.com/tidwall/btree"
 	rand2 "golang.org/x/exp/rand"
 	"golang.org/x/sync/errgroup"
 	"golang.org/x/sync/semaphore"
@@ -46,21 +47,20 @@ import (
 	"github.com/ledgerwatch/erigon-lib/diagnostics"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/bitmapdb"
-	"github.com/ledgerwatch/erigon-lib/kv/iter"
 	"github.com/ledgerwatch/erigon-lib/kv/order"
+	"github.com/ledgerwatch/erigon-lib/kv/stream"
 	"github.com/ledgerwatch/erigon-lib/log/v3"
 	"github.com/ledgerwatch/erigon-lib/seg"
 )
 
 type Aggregator struct {
-	db               kv.RoDB
-	d                [kv.DomainLen]*Domain
-	iis              [kv.StandaloneIdxLen]*InvertedIndex
-	ap               [kv.AppendableLen]*Appendable //nolint
-	backgroundResult *BackgroundResult
-	dirs             datadir.Dirs
-	tmpdir           string
-	aggregationStep  uint64
+	db              kv.RoDB
+	d               [kv.DomainLen]*Domain
+	iis             [kv.StandaloneIdxLen]*InvertedIndex
+	ap              [kv.AppendableLen]*Appendable //nolint
+	dirs            datadir.Dirs
+	tmpdir          string
+	aggregationStep uint64
 
 	dirtyFilesLock           sync.Mutex
 	visibleFilesLock         sync.RWMutex
@@ -121,7 +121,6 @@ func NewAggregator(ctx context.Context, dirs datadir.Dirs, aggregationStep uint6
 		db:                     db,
 		leakDetector:           dbg.NewLeakDetector("agg", dbg.SlowTx()),
 		ps:                     background.NewProgressSet(),
-		backgroundResult:       &BackgroundResult{},
 		logger:                 logger,
 		collateAndBuildWorkers: 1,
 		mergeWorkers:           1,
@@ -165,7 +164,7 @@ func NewAggregator(ctx context.Context, dirs datadir.Dirs, aggregationStep uint6
 		},
 		restrictSubsetFileDeletions: a.commitmentValuesTransform,
 	}
-	if a.d[kv.AccountsDomain], err = NewDomain(cfg, aggregationStep, kv.FileAccountDomain, kv.TblAccountKeys, kv.TblAccountVals, kv.TblAccountHistoryKeys, kv.TblAccountHistoryVals, kv.TblAccountIdx, integrityCheck, logger); err != nil {
+	if a.d[kv.AccountsDomain], err = NewDomain(cfg, aggregationStep, kv.FileAccountDomain, kv.TblAccountVals, kv.TblAccountHistoryKeys, kv.TblAccountHistoryVals, kv.TblAccountIdx, integrityCheck, logger); err != nil {
 		return nil, err
 	}
 	cfg = domainCfg{
@@ -175,7 +174,7 @@ func NewAggregator(ctx context.Context, dirs datadir.Dirs, aggregationStep uint6
 		},
 		restrictSubsetFileDeletions: a.commitmentValuesTransform,
 	}
-	if a.d[kv.StorageDomain], err = NewDomain(cfg, aggregationStep, kv.FileStorageDomain, kv.TblStorageKeys, kv.TblStorageVals, kv.TblStorageHistoryKeys, kv.TblStorageHistoryVals, kv.TblStorageIdx, integrityCheck, logger); err != nil {
+	if a.d[kv.StorageDomain], err = NewDomain(cfg, aggregationStep, kv.FileStorageDomain, kv.TblStorageVals, kv.TblStorageHistoryKeys, kv.TblStorageHistoryVals, kv.TblStorageIdx, integrityCheck, logger); err != nil {
 		return nil, err
 	}
 	cfg = domainCfg{
@@ -183,8 +182,9 @@ func NewAggregator(ctx context.Context, dirs datadir.Dirs, aggregationStep uint6
 			iiCfg:             iiCfg{salt: salt, dirs: dirs, db: db},
 			withLocalityIndex: false, withExistenceIndex: false, compression: CompressKeys | CompressVals, historyLargeValues: true,
 		},
+		largeVals: true,
 	}
-	if a.d[kv.CodeDomain], err = NewDomain(cfg, aggregationStep, kv.FileCodeDomain, kv.TblCodeKeys, kv.TblCodeVals, kv.TblCodeHistoryKeys, kv.TblCodeHistoryVals, kv.TblCodeIdx, integrityCheck, logger); err != nil {
+	if a.d[kv.CodeDomain], err = NewDomain(cfg, aggregationStep, kv.FileCodeDomain, kv.TblCodeVals, kv.TblCodeHistoryKeys, kv.TblCodeHistoryVals, kv.TblCodeIdx, integrityCheck, logger); err != nil {
 		return nil, err
 	}
 	cfg = domainCfg{
@@ -197,7 +197,7 @@ func NewAggregator(ctx context.Context, dirs datadir.Dirs, aggregationStep uint6
 		restrictSubsetFileDeletions: a.commitmentValuesTransform,
 		compress:                    CompressNone,
 	}
-	if a.d[kv.CommitmentDomain], err = NewDomain(cfg, aggregationStep, kv.FileCommitmentDomain, kv.TblCommitmentKeys, kv.TblCommitmentVals, kv.TblCommitmentHistoryKeys, kv.TblCommitmentHistoryVals, kv.TblCommitmentIdx, integrityCheck, logger); err != nil {
+	if a.d[kv.CommitmentDomain], err = NewDomain(cfg, aggregationStep, kv.FileCommitmentDomain, kv.TblCommitmentVals, kv.TblCommitmentHistoryKeys, kv.TblCommitmentHistoryVals, kv.TblCommitmentIdx, integrityCheck, logger); err != nil {
 		return nil, err
 	}
 	//aCfg := AppendableCfg{
@@ -303,15 +303,15 @@ func (a *Aggregator) OpenFolder() error {
 				return a.ctx.Err()
 			default:
 			}
-			return d.OpenFolder()
+			return d.openFolder()
 		})
 	}
 	for _, ii := range a.iis {
 		ii := ii
-		eg.Go(func() error { return ii.OpenFolder() })
+		eg.Go(func() error { return ii.openFolder() })
 	}
 	if err := eg.Wait(); err != nil {
-		return fmt.Errorf("OpenFolder: %w", err)
+		return fmt.Errorf("openFolder: %w", err)
 	}
 	return nil
 }
@@ -324,14 +324,14 @@ func (a *Aggregator) OpenList(files []string, readonly bool) error {
 	eg := &errgroup.Group{}
 	for _, d := range a.d {
 		d := d
-		eg.Go(func() error { return d.OpenFolder() })
+		eg.Go(func() error { return d.openFolder() })
 	}
 	for _, ii := range a.iis {
 		ii := ii
-		eg.Go(func() error { return ii.OpenFolder() })
+		eg.Go(func() error { return ii.openFolder() })
 	}
 	if err := eg.Wait(); err != nil {
-		return fmt.Errorf("OpenList: %w", err)
+		return fmt.Errorf("openList: %w", err)
 	}
 	return nil
 }
@@ -358,6 +358,9 @@ func (a *Aggregator) closeDirtyFiles() {
 	for _, ii := range a.iis {
 		ii.Close()
 	}
+	for _, ap := range a.ap {
+		ap.Close()
+	}
 }
 
 func (a *Aggregator) SetCollateAndBuildWorkers(i int) { a.collateAndBuildWorkers = i }
@@ -368,6 +371,9 @@ func (a *Aggregator) SetCompressWorkers(i int) {
 	}
 	for _, ii := range a.iis {
 		ii.compressWorkers = i
+	}
+	for _, ap := range a.ap {
+		ap.compressWorkers = i
 	}
 }
 
@@ -394,12 +400,42 @@ func (ac *AggregatorRoTx) Files() []string {
 	for _, ii := range ac.iis {
 		res = append(res, ii.Files()...)
 	}
+	for _, ap := range ac.appendable {
+		res = append(res, ap.Files()...)
+	}
 	return res
 }
 func (a *Aggregator) Files() []string {
 	ac := a.BeginFilesRo()
 	defer ac.Close()
 	return ac.Files()
+}
+func (a *Aggregator) LS() {
+	doLS := func(dirtyFiles *btree.BTreeG[*filesItem]) {
+		dirtyFiles.Walk(func(items []*filesItem) bool {
+			for _, item := range items {
+				if item.decompressor == nil {
+					continue
+				}
+				log.Info("[agg] ", "f", item.decompressor.FileName(), "words", item.decompressor.Count())
+			}
+			return true
+		})
+	}
+
+	a.dirtyFilesLock.Lock()
+	defer a.dirtyFilesLock.Unlock()
+	for _, d := range a.d {
+		doLS(d.dirtyFiles)
+		doLS(d.History.dirtyFiles)
+		doLS(d.History.InvertedIndex.dirtyFiles)
+	}
+	for _, d := range a.iis {
+		doLS(d.dirtyFiles)
+	}
+	for _, d := range a.ap {
+		doLS(d.dirtyFiles)
+	}
 }
 
 func (a *Aggregator) BuildOptionalMissedIndicesInBackground(ctx context.Context, workers int) {
@@ -571,6 +607,9 @@ func (sf AggV3StaticFiles) CleanupOnError() {
 	}
 	for _, ivf := range sf.ivfs {
 		ivf.CleanupOnError()
+	}
+	for _, ap := range sf.appendable {
+		ap.CleanupOnError()
 	}
 }
 
@@ -1320,11 +1359,23 @@ func (a *Aggregator) recalcVisibleFiles() {
 	a.visibleFilesLock.Lock()
 	defer a.visibleFilesLock.Unlock()
 
-	for _, domain := range a.d {
-		domain.reCalcVisibleFiles()
+	for _, d := range a.d {
+		if d == nil {
+			continue
+		}
+		d.reCalcVisibleFiles()
 	}
 	for _, ii := range a.iis {
+		if ii == nil {
+			continue
+		}
 		ii.reCalcVisibleFiles()
+	}
+	for _, ap := range a.ap {
+		if ap == nil {
+			continue
+		}
+		ap.reCalcVisibleFiles()
 	}
 }
 
@@ -1354,6 +1405,11 @@ func (r RangesV3) String() string {
 			ss = append(ss, mr.String(kv.InvertedIdxPos(p).String(), aggStep))
 		}
 	}
+	for p, mr := range r.appendable {
+		if mr != nil && mr.needMerge {
+			ss = append(ss, mr.String(kv.Appendable(p).String(), aggStep))
+		}
+	}
 	return strings.Join(ss, ", ")
 }
 
@@ -1364,7 +1420,12 @@ func (r RangesV3) any() bool {
 		}
 	}
 	for _, ii := range r.invertedIndex {
-		if ii.needMerge {
+		if ii != nil && ii.needMerge {
+			return true
+		}
+	}
+	for _, ap := range r.appendable {
+		if ap != nil && ap.needMerge {
 			return true
 		}
 	}
@@ -1844,7 +1905,7 @@ func (a *Aggregator) BuildFilesInBackground(txNum uint64) chan struct{} {
 	return fin
 }
 
-func (ac *AggregatorRoTx) IndexRange(name kv.InvertedIdx, k []byte, fromTs, toTs int, asc order.By, limit int, tx kv.Tx) (timestamps iter.U64, err error) {
+func (ac *AggregatorRoTx) IndexRange(name kv.InvertedIdx, k []byte, fromTs, toTs int, asc order.By, limit int, tx kv.Tx) (timestamps stream.U64, err error) {
 	switch name {
 	case kv.AccountsHistoryIdx:
 		return ac.d[kv.AccountsDomain].ht.IdxRange(k, fromTs, toTs, asc, limit, tx)
@@ -1895,7 +1956,7 @@ func (ac *AggregatorRoTx) HistorySeek(name kv.History, key []byte, ts uint64, tx
 	}
 }
 
-func (ac *AggregatorRoTx) HistoryRange(name kv.History, fromTs, toTs int, asc order.By, limit int, tx kv.Tx) (it iter.KV, err error) {
+func (ac *AggregatorRoTx) HistoryRange(name kv.History, fromTs, toTs int, asc order.By, limit int, tx kv.Tx) (it stream.KV, err error) {
 	//TODO: aggTx to store array of histories
 	var domainName kv.Domain
 
@@ -1914,14 +1975,7 @@ func (ac *AggregatorRoTx) HistoryRange(name kv.History, fromTs, toTs int, asc or
 	if err != nil {
 		return nil, err
 	}
-	return iter.WrapKV(hr), nil
-}
-
-type FilesStats22 struct{}
-
-func (a *Aggregator) Stats() FilesStats22 {
-	var fs FilesStats22
-	return fs
+	return stream.WrapKV(hr), nil
 }
 
 // AggregatorRoTx guarantee consistent View of files ("snapshots isolation" level https://en.wikipedia.org/wiki/Snapshot_isolation):
@@ -1965,10 +2019,10 @@ func (ac *AggregatorRoTx) ViewID() uint64 { return ac.id }
 
 // --- Domain part START ---
 
-func (ac *AggregatorRoTx) DomainRange(tx kv.Tx, domain kv.Domain, fromKey, toKey []byte, ts uint64, asc order.By, limit int) (it iter.KV, err error) {
-	return ac.d[domain].DomainRange(tx, fromKey, toKey, ts, asc, limit)
+func (ac *AggregatorRoTx) DomainRange(ctx context.Context, tx kv.Tx, domain kv.Domain, fromKey, toKey []byte, ts uint64, asc order.By, limit int) (it stream.KV, err error) {
+	return ac.d[domain].DomainRange(ctx, tx, fromKey, toKey, ts, asc, limit)
 }
-func (ac *AggregatorRoTx) DomainRangeLatest(tx kv.Tx, domain kv.Domain, from, to []byte, limit int) (iter.KV, error) {
+func (ac *AggregatorRoTx) DomainRangeLatest(tx kv.Tx, domain kv.Domain, from, to []byte, limit int) (stream.KV, error) {
 	return ac.d[domain].DomainRangeLatest(tx, from, to, limit)
 }
 
@@ -2078,21 +2132,6 @@ func (ac *AggregatorRoTx) Close() {
 	}
 }
 
-// BackgroundResult - used only indicate that some work is done
-// no much reason to pass exact results by this object, just get latest state when need
-type BackgroundResult struct {
-	err error
-	has bool
-}
-
-func (br *BackgroundResult) Has() bool     { return br.has }
-func (br *BackgroundResult) Set(err error) { br.has, br.err = true, err }
-func (br *BackgroundResult) GetAndReset() (bool, error) {
-	has, err := br.has, br.err
-	br.has, br.err = false, nil
-	return has, err
-}
-
 // Inverted index tables only
 func lastIdInDB(db kv.RoDB, domain *Domain) (lstInDb uint64) {
 	if err := db.View(context.Background(), func(tx kv.Tx) error {
@@ -2102,118 +2141,4 @@ func lastIdInDB(db kv.RoDB, domain *Domain) (lstInDb uint64) {
 		log.Warn("[snapshots] lastIdInDB", "err", err)
 	}
 	return lstInDb
-}
-
-// AggregatorStep is used for incremental reconstitution, it allows
-// accessing history in isolated way for each step
-type AggregatorStep struct {
-	a          *Aggregator
-	accounts   *HistoryStep
-	storage    *HistoryStep
-	code       *HistoryStep
-	commitment *HistoryStep
-	keyBuf     []byte
-}
-
-func (a *Aggregator) StepSize() uint64 { return a.aggregationStep }
-func (a *Aggregator) MakeSteps() ([]*AggregatorStep, error) {
-	frozenAndIndexed := a.EndTxNumDomainsFrozen()
-	accountSteps := a.d[kv.AccountsDomain].MakeSteps(frozenAndIndexed)
-	codeSteps := a.d[kv.CodeDomain].MakeSteps(frozenAndIndexed)
-	storageSteps := a.d[kv.StorageDomain].MakeSteps(frozenAndIndexed)
-	commitmentSteps := a.d[kv.CommitmentDomain].MakeSteps(frozenAndIndexed)
-	if len(accountSteps) != len(storageSteps) || len(storageSteps) != len(codeSteps) {
-		return nil, fmt.Errorf("different limit of steps (try merge snapshots): accountSteps=%d, storageSteps=%d, codeSteps=%d", len(accountSteps), len(storageSteps), len(codeSteps))
-	}
-	steps := make([]*AggregatorStep, len(accountSteps))
-	for i, accountStep := range accountSteps {
-		steps[i] = &AggregatorStep{
-			a:          a,
-			accounts:   accountStep,
-			storage:    storageSteps[i],
-			code:       codeSteps[i],
-			commitment: commitmentSteps[i],
-		}
-	}
-	return steps, nil
-}
-
-func (as *AggregatorStep) TxNumRange() (uint64, uint64) {
-	return as.accounts.indexFile.startTxNum, as.accounts.indexFile.endTxNum
-}
-
-func (as *AggregatorStep) IterateAccountsTxs() *ScanIteratorInc {
-	return as.accounts.iterateTxs()
-}
-
-func (as *AggregatorStep) IterateStorageTxs() *ScanIteratorInc {
-	return as.storage.iterateTxs()
-}
-
-func (as *AggregatorStep) IterateCodeTxs() *ScanIteratorInc {
-	return as.code.iterateTxs()
-}
-
-func (as *AggregatorStep) ReadAccountDataNoState(addr []byte, txNum uint64) ([]byte, bool, uint64) {
-	return as.accounts.GetNoState(addr, txNum)
-}
-
-func (as *AggregatorStep) ReadAccountStorageNoState(addr []byte, loc []byte, txNum uint64) ([]byte, bool, uint64) {
-	if cap(as.keyBuf) < len(addr)+len(loc) {
-		as.keyBuf = make([]byte, len(addr)+len(loc))
-	} else if len(as.keyBuf) != len(addr)+len(loc) {
-		as.keyBuf = as.keyBuf[:len(addr)+len(loc)]
-	}
-	copy(as.keyBuf, addr)
-	copy(as.keyBuf[len(addr):], loc)
-	return as.storage.GetNoState(as.keyBuf, txNum)
-}
-
-func (as *AggregatorStep) ReadAccountCodeNoState(addr []byte, txNum uint64) ([]byte, bool, uint64) {
-	return as.code.GetNoState(addr, txNum)
-}
-
-func (as *AggregatorStep) ReadAccountCodeSizeNoState(addr []byte, txNum uint64) (int, bool, uint64) {
-	code, noState, stateTxNum := as.code.GetNoState(addr, txNum)
-	return len(code), noState, stateTxNum
-}
-
-func (as *AggregatorStep) MaxTxNumAccounts(addr []byte) (bool, uint64) {
-	return as.accounts.MaxTxNum(addr)
-}
-
-func (as *AggregatorStep) MaxTxNumStorage(addr []byte, loc []byte) (bool, uint64) {
-	if cap(as.keyBuf) < len(addr)+len(loc) {
-		as.keyBuf = make([]byte, len(addr)+len(loc))
-	} else if len(as.keyBuf) != len(addr)+len(loc) {
-		as.keyBuf = as.keyBuf[:len(addr)+len(loc)]
-	}
-	copy(as.keyBuf, addr)
-	copy(as.keyBuf[len(addr):], loc)
-	return as.storage.MaxTxNum(as.keyBuf)
-}
-
-func (as *AggregatorStep) MaxTxNumCode(addr []byte) (bool, uint64) {
-	return as.code.MaxTxNum(addr)
-}
-
-func (as *AggregatorStep) IterateAccountsHistory(txNum uint64) *HistoryIteratorInc {
-	return as.accounts.interateHistoryBeforeTxNum(txNum)
-}
-
-func (as *AggregatorStep) IterateStorageHistory(txNum uint64) *HistoryIteratorInc {
-	return as.storage.interateHistoryBeforeTxNum(txNum)
-}
-
-func (as *AggregatorStep) IterateCodeHistory(txNum uint64) *HistoryIteratorInc {
-	return as.code.interateHistoryBeforeTxNum(txNum)
-}
-
-func (as *AggregatorStep) Clone() *AggregatorStep {
-	return &AggregatorStep{
-		a:        as.a,
-		accounts: as.accounts.Clone(),
-		storage:  as.storage.Clone(),
-		code:     as.code.Clone(),
-	}
 }

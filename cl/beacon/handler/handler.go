@@ -244,7 +244,7 @@ func (a *ApiHandler) init() {
 						r.Get("/{block_id}", beaconhttp.HandleEndpointFunc(a.getHeader))
 					})
 					r.Route("/blocks", func(r chi.Router) {
-						r.Post("/", a.PostEthV1BeaconBlocks)
+						r.Post("/", beaconhttp.HandleEndpointFunc(a.PostEthV1BeaconBlocks))
 						r.Get("/{block_id}", beaconhttp.HandleEndpointFunc(a.GetEthV1BeaconBlock))
 						r.Get("/{block_id}/attestations", beaconhttp.HandleEndpointFunc(a.GetEthV1BeaconBlockAttestations))
 						r.Get("/{block_id}/root", beaconhttp.HandleEndpointFunc(a.GetEthV1BeaconBlockRoot))
@@ -280,6 +280,7 @@ func (a *ApiHandler) init() {
 							r.Get("/root", beaconhttp.HandleEndpointFunc(a.getStateRoot))
 							r.Get("/fork", beaconhttp.HandleEndpointFunc(a.getStateFork))
 							r.Get("/validators", a.GetEthV1BeaconStatesValidators)
+							r.Post("/validators", a.PostEthV1BeaconStatesValidators)
 							r.Get("/validator_balances", a.GetEthV1BeaconValidatorsBalances)
 							r.Get("/validators/{validator_id}", beaconhttp.HandleEndpointFunc(a.GetEthV1BeaconStatesValidator))
 						})
@@ -322,7 +323,7 @@ func (a *ApiHandler) init() {
 			if a.routerCfg.Beacon {
 				r.Route("/beacon", func(r chi.Router) {
 					r.Get("/blocks/{block_id}", beaconhttp.HandleEndpointFunc(a.GetEthV1BeaconBlock))
-					r.Post("/blocks", a.PostEthV2BeaconBlocks)
+					r.Post("/blocks", beaconhttp.HandleEndpointFunc(a.PostEthV2BeaconBlocks))
 					if a.routerCfg.Builder {
 						r.Post("/blinded_blocks", beaconhttp.HandleEndpointFunc(a.PostEthV2BlindedBlocks))
 					}

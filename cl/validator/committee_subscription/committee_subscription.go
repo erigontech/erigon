@@ -24,6 +24,7 @@ import (
 
 	sentinel "github.com/ledgerwatch/erigon-lib/gointerfaces/sentinelproto"
 	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/ledgerwatch/erigon-lib/log/v3"
 	"github.com/ledgerwatch/erigon/cl/aggregation"
 	"github.com/ledgerwatch/erigon/cl/beacon/synced_data"
 	"github.com/ledgerwatch/erigon/cl/clparams"
@@ -56,7 +57,7 @@ type CommitteeSubscribeMgmt struct {
 	// subscriptions
 	aggregationPool    aggregation.AggregationPool
 	validatorSubsMutex sync.RWMutex
-	validatorSubs      map[uint64]*validatorSub // slot -> committeeIndex -> validatorSub
+	validatorSubs      map[uint64]*validatorSub // committeeIndex -> validatorSub
 }
 
 func NewCommitteeSubscribeManagement(
@@ -86,8 +87,9 @@ func NewCommitteeSubscribeManagement(
 }
 
 type validatorSub struct {
-	subnetId  uint64
-	aggregate bool
+	subnetId         uint64
+	aggregate        bool
+	latestTargetSlot uint64
 }
 
 func (c *CommitteeSubscribeMgmt) AddAttestationSubscription(ctx context.Context, p *cltypes.BeaconCommitteeSubscription) error {
@@ -100,6 +102,7 @@ func (c *CommitteeSubscribeMgmt) AddAttestationSubscription(ctx context.Context,
 		return fmt.Errorf("head state not available")
 	}
 
+	log.Debug("Add attestation subscription", "slot", slot, "committeeIndex", cIndex, "isAggregator", p.IsAggregator, "validatorIndex", p.ValidatorIndex)
 	commiteePerSlot := headState.CommitteeCount(p.Slot / c.beaconConfig.SlotsPerEpoch)
 	subnetId := subnets.ComputeSubnetForAttestation(commiteePerSlot, slot, cIndex, c.beaconConfig.SlotsPerEpoch, c.netConfig.AttestationSubnetCount)
 	// add validator to subscription
@@ -107,11 +110,17 @@ func (c *CommitteeSubscribeMgmt) AddAttestationSubscription(ctx context.Context,
 
 	if _, ok := c.validatorSubs[cIndex]; !ok {
 		c.validatorSubs[cIndex] = &validatorSub{
-			subnetId:  subnetId,
-			aggregate: p.IsAggregator,
+			subnetId:         subnetId,
+			aggregate:        p.IsAggregator,
+			latestTargetSlot: slot,
 		}
-	} else if p.IsAggregator {
-		c.validatorSubs[cIndex].aggregate = true
+	} else {
+		// set aggregator to true if any validator in the committee is an aggregator
+		c.validatorSubs[cIndex].aggregate = (c.validatorSubs[cIndex].aggregate || p.IsAggregator)
+		// update latest target slot
+		if c.validatorSubs[cIndex].latestTargetSlot < slot {
+			c.validatorSubs[cIndex].latestTargetSlot = slot
+		}
 	}
 
 	c.validatorSubsMutex.Unlock()
@@ -142,6 +151,10 @@ func (c *CommitteeSubscribeMgmt) CheckAggregateAttestation(att *solid.Attestatio
 
 func (c *CommitteeSubscribeMgmt) sweepByStaleSlots(ctx context.Context) {
 	slotIsStale := func(curSlot, targetSlot uint64) bool {
+		if curSlot <= targetSlot {
+			// Avoid subtracting unsigned integers
+			return false
+		}
 		return curSlot-targetSlot > c.netConfig.AttestationPropagationSlotRange
 	}
 	// sweep every minute
@@ -154,9 +167,9 @@ func (c *CommitteeSubscribeMgmt) sweepByStaleSlots(ctx context.Context) {
 		case <-ticker.C:
 			curSlot := c.ethClock.GetCurrentSlot()
 			c.validatorSubsMutex.Lock()
-			for slot := range c.validatorSubs {
-				if slotIsStale(curSlot, slot) {
-					delete(c.validatorSubs, slot)
+			for committeeIdx, sub := range c.validatorSubs {
+				if slotIsStale(curSlot, sub.latestTargetSlot) {
+					delete(c.validatorSubs, committeeIdx)
 				}
 			}
 			c.validatorSubsMutex.Unlock()

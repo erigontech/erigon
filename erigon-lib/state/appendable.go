@@ -128,25 +128,25 @@ func (ap *Appendable) fileNamesOnDisk() ([]string, error) {
 	return filesFromDir(ap.cfg.Dirs.SnapHistory)
 }
 
-func (ap *Appendable) OpenList(fNames []string, readonly bool) error {
+func (ap *Appendable) openList(fNames []string, readonly bool) error {
 	ap.closeWhatNotInList(fNames)
-	ap.scanStateFiles(fNames)
-	if err := ap.openFiles(); err != nil {
-		return fmt.Errorf("NewHistory.openFiles: %w, %s", err, ap.filenameBase)
+	ap.scanDirtyFiles(fNames)
+	if err := ap.openDirtyFiles(); err != nil {
+		return fmt.Errorf("NewHistory.openDirtyFiles: %w, %s", err, ap.filenameBase)
 	}
 	_ = readonly // for future safety features. RPCDaemon must not delte files
 	return nil
 }
 
-func (ap *Appendable) OpenFolder(readonly bool) error {
+func (ap *Appendable) openFolder(readonly bool) error {
 	files, err := ap.fileNamesOnDisk()
 	if err != nil {
 		return err
 	}
-	return ap.OpenList(files, readonly)
+	return ap.openList(files, readonly)
 }
 
-func (ap *Appendable) scanStateFiles(fileNames []string) (garbageFiles []*filesItem) {
+func (ap *Appendable) scanDirtyFiles(fileNames []string) (garbageFiles []*filesItem) {
 	re := regexp.MustCompile("^v([0-9]+)-" + ap.filenameBase + ".([0-9]+)-([0-9]+).ap$")
 	var err error
 	for _, name := range fileNames {
@@ -253,7 +253,9 @@ func (ap *Appendable) BuildMissedAccessors(ctx context.Context, g *errgroup.Grou
 	}
 }
 
-func (ap *Appendable) openFiles() error {
+func (ap *Appendable) openDirtyFiles() error {
+	fmt.Printf("[dbg] dirtyFiles.Len() %d\n", ap.dirtyFiles.Len())
+
 	var invalidFileItems []*filesItem
 	invalidFileItemsLock := sync.Mutex{}
 	ap.dirtyFiles.Walk(func(items []*filesItem) bool {
@@ -265,7 +267,7 @@ func (ap *Appendable) openFiles() error {
 				exists, err := dir.FileExist(fPath)
 				if err != nil {
 					_, fName := filepath.Split(fPath)
-					ap.logger.Debug("[agg] Appendable.openFiles", "err", err, "f", fName)
+					ap.logger.Debug("[agg] Appendable.openDirtyFiles", "err", err, "f", fName)
 					invalidFileItemsLock.Lock()
 					invalidFileItems = append(invalidFileItems, item)
 					invalidFileItemsLock.Unlock()
@@ -273,7 +275,7 @@ func (ap *Appendable) openFiles() error {
 				}
 				if !exists {
 					_, fName := filepath.Split(fPath)
-					ap.logger.Debug("[agg] Appendable.openFiles: file does not exists", "f", fName)
+					ap.logger.Debug("[agg] Appendable.openDirtyFiles: file does not exists", "f", fName)
 					invalidFileItemsLock.Lock()
 					invalidFileItems = append(invalidFileItems, item)
 					invalidFileItemsLock.Unlock()
@@ -283,9 +285,9 @@ func (ap *Appendable) openFiles() error {
 				if item.decompressor, err = seg.NewDecompressor(fPath); err != nil {
 					_, fName := filepath.Split(fPath)
 					if errors.Is(err, &seg.ErrCompressedFileCorrupted{}) {
-						ap.logger.Debug("[agg] Appendable.openFiles", "err", err, "f", fName)
+						ap.logger.Debug("[agg] Appendable.openDirtyFiles", "err", err, "f", fName)
 					} else {
-						ap.logger.Warn("[agg] Appendable.openFiles", "err", err, "f", fName)
+						ap.logger.Warn("[agg] Appendable.openDirtyFiles", "err", err, "f", fName)
 					}
 					invalidFileItemsLock.Lock()
 					invalidFileItems = append(invalidFileItems, item)
@@ -300,12 +302,12 @@ func (ap *Appendable) openFiles() error {
 				exists, err := dir.FileExist(fPath)
 				if err != nil {
 					_, fName := filepath.Split(fPath)
-					ap.logger.Warn("[agg] Appendable.openFiles", "err", err, "f", fName)
+					ap.logger.Warn("[agg] Appendable.openDirtyFiles", "err", err, "f", fName)
 				}
 				if exists {
 					if item.index, err = recsplit.OpenIndex(fPath); err != nil {
 						_, fName := filepath.Split(fPath)
-						ap.logger.Warn("[agg] Appendable.openFiles", "err", err, "f", fName)
+						ap.logger.Warn("[agg] Appendable.openDirtyFiles", "err", err, "f", fName)
 						// don't interrupt on error. other files may be good
 					}
 				}
@@ -343,6 +345,9 @@ func (ap *Appendable) closeWhatNotInList(fNames []string) {
 }
 
 func (ap *Appendable) Close() {
+	if ap == nil {
+		return
+	}
 	ap.closeWhatNotInList([]string{})
 }
 

@@ -96,7 +96,7 @@ func (stx *BlobTx) AsMessage(s Signer, baseFee *big.Int, rules *chain.Rules) (Me
 	return msg, err
 }
 
-func (stx *BlobTx) cashedSender() (sender libcommon.Address, ok bool) {
+func (stx *BlobTx) cachedSender() (sender libcommon.Address, ok bool) {
 	s := stx.from.Load()
 	if s == nil {
 		return sender, false
@@ -106,7 +106,10 @@ func (stx *BlobTx) cashedSender() (sender libcommon.Address, ok bool) {
 
 func (stx *BlobTx) Sender(signer Signer) (libcommon.Address, error) {
 	if sc := stx.from.Load(); sc != nil {
-		return sc.(libcommon.Address), nil
+		zeroAddr := libcommon.Address{}
+		if sc.(libcommon.Address) != zeroAddr { // Sender address can never be zero in a transaction with a valid signer
+			return sc.(libcommon.Address), nil
+		}
 	}
 	addr, err := signer.Sender(stx)
 	if err != nil {

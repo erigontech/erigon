@@ -76,15 +76,6 @@ func NewDynamicListSSZFromList[T encodableHashableSSZ](list []T, limit int) *Lis
 	}
 }
 
-func NewStatucListSSZFromList[T encodableHashableSSZ](list []T, limit int, bytesPerElement int) *ListSSZ[T] {
-	return &ListSSZ[T]{
-		list:            list,
-		limit:           limit,
-		static:          true,
-		bytesPerElement: bytesPerElement,
-	}
-}
-
 func NewStaticListSSZFromList[T encodableHashableSSZ](list []T, limit int, bytesPerElement int) *ListSSZ[T] {
 	return &ListSSZ[T]{
 		list:            list,

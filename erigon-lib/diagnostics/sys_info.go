@@ -17,6 +17,9 @@
 package diagnostics
 
 import (
+	"encoding/json"
+	"io"
+
 	"github.com/shirou/gopsutil/v3/cpu"
 	"github.com/shirou/gopsutil/v3/disk"
 	"github.com/shirou/gopsutil/v3/mem"
@@ -34,26 +37,36 @@ var (
 )
 
 func (d *DiagnosticClient) setupSysInfoDiagnostics() {
-	sysInfo := GetSysInfo(d.dataDirPath)
-	if err := d.db.Update(d.ctx, RAMInfoUpdater(sysInfo.RAM)); err != nil {
-		log.Warn("[Diagnostics] Failed to update RAM info", "err", err)
-	}
-
-	if err := d.db.Update(d.ctx, CPUInfoUpdater(sysInfo.CPU)); err != nil {
-		log.Warn("[Diagnostics] Failed to update CPU info", "err", err)
-	}
-
-	if err := d.db.Update(d.ctx, DiskInfoUpdater(sysInfo.Disk)); err != nil {
-		log.Warn("[Diagnostics] Failed to update Disk info", "err", err)
-	}
-
 	d.mu.Lock()
+	defer d.mu.Unlock()
+
+	sysInfo := GetSysInfo(d.dataDirPath)
+
+	var funcs []func(tx kv.RwTx) error
+	funcs = append(funcs, RAMInfoUpdater(sysInfo.RAM), CPUInfoUpdater(sysInfo.CPU), DiskInfoUpdater(sysInfo.Disk))
+
+	err := d.db.Update(d.ctx, func(tx kv.RwTx) error {
+		for _, updater := range funcs {
+			updErr := updater(tx)
+			if updErr != nil {
+				return updErr
+			}
+		}
+
+		return nil
+	})
+	if err != nil {
+		log.Warn("[Diagnostics] Failed to update system info", "err", err)
+	}
 	d.hardwareInfo = sysInfo
-	d.mu.Unlock()
 }
 
-func (d *DiagnosticClient) HardwareInfo() HardwareInfo {
-	return d.hardwareInfo
+func (d *DiagnosticClient) HardwareInfoJson(w io.Writer) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	if err := json.NewEncoder(w).Encode(d.hardwareInfo); err != nil {
+		log.Debug("[diagnostics] HardwareInfoJson", "err", err)
+	}
 }
 
 func findNodeDisk(dirPath string) string {

@@ -22,9 +22,9 @@ import (
 
 	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon-lib/kv/iter"
 	"github.com/ledgerwatch/erigon-lib/kv/order"
 	"github.com/ledgerwatch/erigon-lib/kv/rawdbv3"
+	"github.com/ledgerwatch/erigon-lib/kv/stream"
 	"github.com/ledgerwatch/erigon-lib/log/v3"
 	"github.com/ledgerwatch/erigon/cmd/state/exec3"
 	"github.com/ledgerwatch/erigon/core/types"
@@ -143,7 +143,7 @@ func createBackwardTxNumIter(tx kv.TemporalTx, addr common.Address, fromTxNum in
 	if err != nil {
 		return nil, err
 	}
-	txNums := iter.Union[uint64](itFrom, itTo, order.Desc, kv.Unlim)
+	txNums := stream.Union[uint64](itFrom, itTo, order.Desc, kv.Unlim)
 	return rawdbv3.TxNums2BlockNums(tx, txNums, order.Desc), nil
 }
 
@@ -185,7 +185,7 @@ func createForwardTxNumIter(tx kv.TemporalTx, addr common.Address, fromTxNum int
 	if err != nil {
 		return nil, err
 	}
-	txNums := iter.Union[uint64](itFrom, itTo, order.Asc, kv.Unlim)
+	txNums := stream.Union[uint64](itFrom, itTo, order.Asc, kv.Unlim)
 	return rawdbv3.TxNums2BlockNums(tx, txNums, order.Asc), nil
 }
 

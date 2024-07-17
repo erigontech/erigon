@@ -190,7 +190,7 @@ func NewForkGraphDisk(anchorState *state.CachingBeaconState, aferoFs afero.Fs, r
 	f.lowestAvaiableBlock.Store(anchorState.Slot())
 	f.headers.Store(libcommon.Hash(anchorRoot), &anchorHeader)
 
-	f.dumpBeaconStateOnDisk(anchorState, anchorRoot)
+	f.DumpBeaconStateOnDisk(anchorRoot, anchorState, true)
 	return f
 }
 
@@ -313,12 +313,6 @@ func (f *forkGraphDisk) AddChainSegment(signedBlock *cltypes.SignedBeaconBlock, 
 		BodyRoot:      bodyRoot,
 	})
 
-	if newState.Slot()%dumpSlotFrequency == 0 {
-		if err := f.dumpBeaconStateOnDisk(newState, blockRoot); err != nil {
-			return nil, LogisticError, err
-		}
-	}
-
 	// Lastly add checkpoints to caches as well.
 	f.currentJustifiedCheckpoints.Store(libcommon.Hash(blockRoot), newState.CurrentJustifiedCheckpoint().Copy())
 	f.finalizedCheckpoints.Store(libcommon.Hash(blockRoot), newState.FinalizedCheckpoint().Copy())
@@ -361,30 +355,36 @@ func (f *forkGraphDisk) GetState(blockRoot libcommon.Hash, alwaysCopy bool) (*st
 	blocksInTheWay := []*cltypes.SignedBeaconBlock{}
 	// Use the parent root as a reverse iterator.
 	currentIteratorRoot := blockRoot
+	var copyReferencedState *state.CachingBeaconState
+	var err error
 	// try and find the point of recconection
-	for {
+	for copyReferencedState == nil {
 		block, isSegmentPresent := f.getBlock(currentIteratorRoot)
 		if !isSegmentPresent {
 			// check if it is in the header
 			bHeader, ok := f.GetHeader(currentIteratorRoot)
 			if ok && bHeader.Slot%dumpSlotFrequency == 0 {
-				break
+				copyReferencedState, err = f.readBeaconStateFromDisk(currentIteratorRoot)
+				if err != nil {
+					log.Trace("Could not retrieve state: Missing header", "missing", currentIteratorRoot, "err", err)
+					copyReferencedState = nil
+				}
+				continue
 			}
 			log.Trace("Could not retrieve state: Missing header", "missing", currentIteratorRoot)
 			return nil, nil
 		}
 		if block.Block.Slot%dumpSlotFrequency == 0 {
-			break
+			copyReferencedState, err = f.readBeaconStateFromDisk(currentIteratorRoot)
+			if err != nil {
+				log.Trace("Could not retrieve state: Missing header", "missing", currentIteratorRoot, "err", err)
+			}
+			if copyReferencedState != nil {
+				break
+			}
 		}
 		blocksInTheWay = append(blocksInTheWay, block)
 		currentIteratorRoot = block.Block.ParentRoot
-	}
-	copyReferencedState, err := f.readBeaconStateFromDisk(currentIteratorRoot)
-	if err != nil {
-		return nil, err
-	}
-	if copyReferencedState == nil {
-		return nil, ErrStateNotFound
 	}
 
 	// Traverse the blocks from top to bottom.
