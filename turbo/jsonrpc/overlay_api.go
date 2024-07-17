@@ -401,7 +401,7 @@ func filterLogs(logs types.Logs, addresses []common.Address, topics [][]common.H
 	for _, v := range addresses {
 		addrMap[v] = struct{}{}
 	}
-	return logs.Filter(addrMap, topics)
+	return logs.Filter(addrMap, topics, 0)
 }
 
 func (api *OverlayAPIImpl) replayBlock(ctx context.Context, blockNum uint64, statedb *state.IntraBlockState, chainConfig *chain.Config, tx kv.Tx) ([]*types.Log, error) {

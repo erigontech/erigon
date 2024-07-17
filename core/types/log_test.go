@@ -231,7 +231,7 @@ func TestFilterLogsTopics(t *testing.T) {
 		},
 	}
 	for name, v := range filterLogTests {
-		ares := testFLExtractAddress(v.input.Filter(map[libcommon.Address]struct{}{}, v.filter))
+		ares := testFLExtractAddress(v.input.Filter(map[libcommon.Address]struct{}{}, v.filter, 0))
 		if !reflect.DeepEqual(ares, v.want) {
 			t.Errorf("Fail %s, got %v want %v", name, ares, v.want)
 		}
