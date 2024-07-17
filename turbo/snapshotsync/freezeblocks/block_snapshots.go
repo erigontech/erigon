@@ -18,6 +18,7 @@ package freezeblocks
 
 import (
 	"bytes"
+	"cmp"
 	"context"
 	"encoding/binary"
 	"encoding/hex"
@@ -44,7 +45,6 @@ import (
 	"github.com/ledgerwatch/erigon-lib/chain/snapcfg"
 	common2 "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/background"
-	"github.com/ledgerwatch/erigon-lib/common/cmp"
 	"github.com/ledgerwatch/erigon-lib/common/datadir"
 	"github.com/ledgerwatch/erigon-lib/common/dbg"
 	dir2 "github.com/ledgerwatch/erigon-lib/common/dir"

@@ -30,6 +30,7 @@ import (
 
 	"github.com/ledgerwatch/erigon-lib/chain"
 	"github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/common/generics"
 	"github.com/ledgerwatch/erigon-lib/common/metrics"
 	"github.com/ledgerwatch/erigon-lib/direct"
 	"github.com/ledgerwatch/erigon-lib/kv"
@@ -951,16 +952,14 @@ func awaitTxAction[T any](
 
 	select {
 	case <-ctx.Done():
-		var nilValue T
-		return nilValue, ctx.Err()
+		return generics.Zero[T](), ctx.Err()
 	case txActionStream <- txAction:
 		// no-op
 	}
 
 	select {
 	case <-ctx.Done():
-		var nilValue T
-		return nilValue, ctx.Err()
+		return generics.Zero[T](), ctx.Err()
 	case resp := <-responseStream:
 		return resp, nil
 	}

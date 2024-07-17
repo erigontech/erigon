@@ -30,6 +30,7 @@ import (
 	"google.golang.org/grpc/metadata"
 	"google.golang.org/protobuf/types/known/emptypb"
 
+	"github.com/ledgerwatch/erigon-lib/common/generics"
 	"github.com/ledgerwatch/erigon-lib/log/v3"
 
 	"github.com/ledgerwatch/erigon-lib/common"
@@ -335,8 +336,7 @@ type mockSentryMessagesStream[M any] struct {
 }
 
 func (s *mockSentryMessagesStream[M]) Recv() (M, error) {
-	var nilValue M
-	return nilValue, nil
+	return generics.Zero[M](), nil
 }
 
 func (s *mockSentryMessagesStream[M]) Header() (metadata.MD, error) {

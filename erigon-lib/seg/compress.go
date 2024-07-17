@@ -19,6 +19,7 @@ package seg
 import (
 	"bufio"
 	"bytes"
+	"cmp"
 	"container/heap"
 	"context"
 	"encoding/binary"
@@ -35,7 +36,6 @@ import (
 	"github.com/c2h5oh/datasize"
 
 	"github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/common/cmp"
 	dir2 "github.com/ledgerwatch/erigon-lib/common/dir"
 	"github.com/ledgerwatch/erigon-lib/etl"
 	"github.com/ledgerwatch/erigon-lib/log/v3"

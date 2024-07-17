@@ -21,6 +21,7 @@
 package core
 
 import (
+	"cmp"
 	"encoding/json"
 	"fmt"
 	"reflect"
@@ -33,7 +34,6 @@ import (
 
 	"github.com/ledgerwatch/erigon-lib/chain"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/common/cmp"
 	"github.com/ledgerwatch/erigon-lib/common/dbg"
 	"github.com/ledgerwatch/erigon-lib/metrics"
 	"github.com/ledgerwatch/erigon/common/math"
