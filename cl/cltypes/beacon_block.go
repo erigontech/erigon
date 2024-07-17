@@ -50,7 +50,9 @@ const (
 
 var (
 	_ GenericBeaconBlock = (*BeaconBlock)(nil)
-	_ GenericBeaconBody  = (*BeaconBody)(nil)
+	_ GenericBeaconBlock = (*DenebBeaconBlock)(nil)
+
+	_ GenericBeaconBody = (*BeaconBody)(nil)
 )
 
 // Definition of SignedBeaconBlock
@@ -498,6 +500,26 @@ func (b *DenebBeaconBlock) Clone() clonable.Clonable {
 func (b *DenebBeaconBlock) Static() bool {
 	// it's variable size
 	return false
+}
+
+func (b *DenebBeaconBlock) Version() clparams.StateVersion {
+	return b.Block.Version()
+}
+
+func (b *DenebBeaconBlock) GetSlot() uint64 {
+	return b.Block.GetSlot()
+}
+
+func (b *DenebBeaconBlock) GetProposerIndex() uint64 {
+	return b.Block.GetProposerIndex()
+}
+
+func (b *DenebBeaconBlock) GetParentRoot() libcommon.Hash {
+	return b.Block.GetParentRoot()
+}
+
+func (b *DenebBeaconBlock) GetBody() GenericBeaconBody {
+	return b.Block.GetBody()
 }
 
 type DenebSignedBeaconBlock struct {
