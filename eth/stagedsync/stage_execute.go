@@ -200,10 +200,10 @@ func unwindExec3(u *UnwindState, s *StageState, txc wrap.TxContainer, ctx contex
 
 	if changeset == nil {
 		if u.CurrentBlockNumber < u.UnwindPoint {
-		   return fmt.Errorf("can't unwind(%d -> %d) because forward-unwind requested", u.CurrentBlockNumber, u.UnwindPoint)
+			return fmt.Errorf("can't unwind(%d -> %d) because forward-unwind requested", u.CurrentBlockNumber, u.UnwindPoint)
 		}
 		if u.CurrentBlockNumber == u.UnwindPoint {
-		   return fmt.Errorf("can't unwind(%d -> %d) because 0 blocks unwind requested", u.CurrentBlockNumber, u.UnwindPoint)
+			return fmt.Errorf("can't unwind(%d -> %d) because 0 blocks unwind requested", u.CurrentBlockNumber, u.UnwindPoint)
 		}
 		return fmt.Errorf("can't unwind(%d -> %d) because no changesets in db", u.CurrentBlockNumber, u.UnwindPoint)
 	}
