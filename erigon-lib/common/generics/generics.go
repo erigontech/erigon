@@ -1,6 +1,5 @@
 package generics
 
-// Zero value of any type T
 func Zero[T any]() T {
 	var value T
 	return value
