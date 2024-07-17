@@ -210,6 +210,7 @@ func (s *EngineServer) newPayload(ctx context.Context, req *engine_types.Executi
 		return nil, err
 	}
 	if version >= clparams.ElectraVersion {
+		requests = make(types.Requests, 0)
 		requests = append(requests, req.DepositRequests.Requests()...)
 		requests = append(requests, req.WithdrawalRequests.Requests()...)
 		requests = append(requests, req.ConsolidationRequests.Requests()...)
@@ -248,6 +249,7 @@ func (s *EngineServer) newPayload(ctx context.Context, req *engine_types.Executi
 	blockHash := req.BlockHash
 	if header.Hash() != blockHash {
 		s.logger.Error("[NewPayload] invalid block hash", "stated", blockHash, "actual", header.Hash())
+		s.logger.Error("[SPIDERMAN]", "Header", header, "req", req)
 		return &engine_types.PayloadStatus{
 			Status:          engine_types.InvalidStatus,
 			ValidationError: engine_types.NewStringifiedErrorFromString("invalid block hash"),
