@@ -32,69 +32,23 @@ import (
 	"github.com/ledgerwatch/erigon-lib/kv/stream"
 
 	"github.com/ledgerwatch/erigon/cmd/state/exec3"
-	"github.com/ledgerwatch/erigon/core"
 	"github.com/ledgerwatch/erigon/core/rawdb"
-	"github.com/ledgerwatch/erigon/core/state"
 	"github.com/ledgerwatch/erigon/core/types"
-	"github.com/ledgerwatch/erigon/core/vm"
 	"github.com/ledgerwatch/erigon/eth/ethutils"
 	"github.com/ledgerwatch/erigon/eth/filters"
 	bortypes "github.com/ledgerwatch/erigon/polygon/bor/types"
 	"github.com/ledgerwatch/erigon/rpc"
 	"github.com/ledgerwatch/erigon/turbo/rpchelper"
-	"github.com/ledgerwatch/erigon/turbo/transactions"
 )
 
 // getReceipts - checking in-mem cache, or else fallback to db, or else fallback to re-exec of block to re-gen receipts
 func (api *BaseAPI) getReceipts(ctx context.Context, tx kv.Tx, block *types.Block, senders []common.Address) (types.Receipts, error) {
-	if receipts, ok := api.receiptsCache.Get(block.Hash()); ok {
-		return receipts, nil
-	}
-
-	if receipts := rawdb.ReadReceipts(tx, block, senders); receipts != nil {
-		api.receiptsCache.Add(block.Hash(), receipts)
-		return receipts, nil
-	}
-
-	engine := api.engine()
 	chainConfig, err := api.chainConfig(ctx, tx)
 	if err != nil {
 		return nil, err
 	}
 
-	_, _, _, ibs, _, err := transactions.ComputeTxEnv(ctx, engine, block, chainConfig, api._blockReader, tx, 0)
-	if err != nil {
-		return nil, err
-	}
-
-	usedGas := new(uint64)
-	usedBlobGas := new(uint64)
-	gp := new(core.GasPool).AddGas(block.GasLimit()).AddBlobGas(chainConfig.GetMaxBlobGasPerBlock())
-
-	noopWriter := state.NewNoopWriter()
-
-	receipts := make(types.Receipts, len(block.Transactions()))
-
-	getHeader := func(hash common.Hash, number uint64) *types.Header {
-		h, e := api._blockReader.Header(ctx, tx, hash, number)
-		if e != nil {
-			log.Error("getHeader error", "number", number, "hash", hash, "err", e)
-		}
-		return h
-	}
-	header := block.Header()
-	for i, txn := range block.Transactions() {
-		ibs.SetTxContext(txn.Hash(), block.Hash(), i)
-		receipt, _, err := core.ApplyTransaction(chainConfig, core.GetHashFn(header, getHeader), engine, nil, gp, ibs, noopWriter, header, txn, usedGas, usedBlobGas, vm.Config{})
-		if err != nil {
-			return nil, err
-		}
-		receipt.BlockHash = block.Hash()
-		receipts[i] = receipt
-	}
-
-	api.receiptsCache.Add(block.Hash(), receipts)
-	return receipts, nil
+	return api.receiptsGenerator.GetReceipts(ctx, chainConfig, tx, block, senders)
 }
 
 // GetLogs implements eth_getLogs. Returns an array of logs matching a given filter object.
@@ -358,7 +312,7 @@ func (api *APIImpl) getLogsV3(ctx context.Context, tx kv.TemporalTx, begin, end 
 		//	log.Index = logIndex
 		//	logIndex++
 		//}
-		filtered := rawLogs.Filter(addrMap, crit.Topics)
+		filtered := rawLogs.Filter(addrMap, crit.Topics, 0)
 		for _, log := range filtered {
 			log.BlockNumber = blockNum
 			log.BlockHash = blockHash

@@ -43,6 +43,13 @@ func NewPeerStats(peerLimit int) *PeerStats {
 }
 
 func (p *PeerStats) AddOrUpdatePeer(peerID string, peerInfo PeerStatisticMsgUpdate) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+
+	p.addOrUpdatePeer(peerID, peerInfo)
+}
+
+func (p *PeerStats) addOrUpdatePeer(peerID string, peerInfo PeerStatisticMsgUpdate) {
 	if value, ok := p.peersInfo.Load(peerID); ok {
 		p.updatePeer(peerID, peerInfo, value)
 	} else {
@@ -61,7 +68,7 @@ func (p *PeerStats) AddPeer(peerID string, peerInfo PeerStatisticMsgUpdate) {
 }
 
 func (p *PeerStats) addPeer(peerID string, peerInfo PeerStatisticMsgUpdate) {
-	pv := PeerStatisticsFromMsgUpdate(peerInfo, nil)
+	pv := peerStatisticsFromMsgUpdate(peerInfo, nil)
 	p.peersInfo.Store(peerID, pv)
 	p.recordsCount++
 	p.lastUpdateMap[peerID] = time.Now()
@@ -74,13 +81,17 @@ func (p *PeerStats) UpdatePeer(peerID string, peerInfo PeerStatisticMsgUpdate, p
 }
 
 func (p *PeerStats) updatePeer(peerID string, peerInfo PeerStatisticMsgUpdate, prevValue any) {
-	pv := PeerStatisticsFromMsgUpdate(peerInfo, prevValue)
+	pv := peerStatisticsFromMsgUpdate(peerInfo, prevValue)
 
 	p.peersInfo.Store(peerID, pv)
 	p.lastUpdateMap[peerID] = time.Now()
 }
 
 func PeerStatisticsFromMsgUpdate(msg PeerStatisticMsgUpdate, prevValue any) PeerStatistics {
+	return peerStatisticsFromMsgUpdate(msg, prevValue)
+}
+
+func peerStatisticsFromMsgUpdate(msg PeerStatisticMsgUpdate, prevValue any) PeerStatistics {
 	ps := PeerStatistics{
 		PeerType:     msg.PeerType,
 		BytesIn:      0,
@@ -131,6 +142,10 @@ func (p *PeerStats) GetPeers() map[string]PeerStatistics {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 
+	return p.getPeers()
+}
+
+func (p *PeerStats) getPeers() map[string]PeerStatistics {
 	stats := make(map[string]PeerStatistics)
 	p.peersInfo.Range(func(key, value interface{}) bool {
 		loadedKey, ok := key.(string)
@@ -156,6 +171,10 @@ func (p *PeerStats) GetPeerStatistics(peerID string) PeerStatistics {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 
+	return p.getPeerStatistics(peerID)
+}
+
+func (p *PeerStats) getPeerStatistics(peerID string) PeerStatistics {
 	if value, ok := p.peersInfo.Load(peerID); ok {
 		if peerStats, ok := value.(PeerStatistics); ok {
 			return peerStats.Clone()
@@ -165,21 +184,14 @@ func (p *PeerStats) GetPeerStatistics(peerID string) PeerStatistics {
 	return PeerStatistics{}
 }
 
-func (p *PeerStats) GetLastUpdate(peerID string) time.Time {
-	p.mu.Lock()
-	defer p.mu.Unlock()
-
-	if lastUpdate, ok := p.lastUpdateMap[peerID]; ok {
-		return lastUpdate
-	}
-
-	return time.Time{}
-}
-
 func (p *PeerStats) RemovePeer(peerID string) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 
+	p.removePeer(peerID)
+}
+
+func (p *PeerStats) removePeer(peerID string) {
 	p.peersInfo.Delete(peerID)
 	p.recordsCount--
 	delete(p.lastUpdateMap, peerID)
@@ -224,7 +236,7 @@ func (p *PeerStats) removePeersWhichExceedLimit(limit int) {
 	if peersToRemove > 0 {
 		peers := p.getOldestUpdatedPeersWithSize(peersToRemove)
 		for _, peer := range peers {
-			p.RemovePeer(peer.PeerID)
+			p.removePeer(peer.PeerID)
 		}
 	}
 }

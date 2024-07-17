@@ -6,8 +6,8 @@ toolchain go1.22.2
 
 require (
 	github.com/erigontech/mdbx-go v0.38.4
+	github.com/erigontech/secp256k1 v1.1.0
 	github.com/erigontech/silkworm-go v0.18.0
-	github.com/ledgerwatch/secp256k1 v1.0.0
 )
 
 replace github.com/ledgerwatch/erigon-lib => ./erigon-lib

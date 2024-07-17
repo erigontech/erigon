@@ -15,7 +15,7 @@ import (
 	common "github.com/ledgerwatch/erigon-lib/common"
 	kv "github.com/ledgerwatch/erigon-lib/kv"
 	order "github.com/ledgerwatch/erigon-lib/kv/order"
-	iter "github.com/ledgerwatch/erigon-lib/kv/stream"
+	stream "github.com/ledgerwatch/erigon-lib/kv/stream"
 	gomock "go.uber.org/mock/gomock"
 )
 
@@ -160,10 +160,10 @@ func (c *MockCanonicalsReaderTxNum2IDCall) DoAndReturn(f func(kv.Tx, uint64, com
 }
 
 // TxnIdsOfCanonicalBlocks mocks base method.
-func (m *MockCanonicalsReader) TxnIdsOfCanonicalBlocks(arg0 kv.Tx, arg1, arg2 int, arg3 order.By, arg4 int) (iter.U64, error) {
+func (m *MockCanonicalsReader) TxnIdsOfCanonicalBlocks(arg0 kv.Tx, arg1, arg2 int, arg3 order.By, arg4 int) (stream.U64, error) {
 	m.ctrl.T.Helper()
 	ret := m.ctrl.Call(m, "TxnIdsOfCanonicalBlocks", arg0, arg1, arg2, arg3, arg4)
-	ret0, _ := ret[0].(iter.U64)
+	ret0, _ := ret[0].(stream.U64)
 	ret1, _ := ret[1].(error)
 	return ret0, ret1
 }
@@ -181,19 +181,19 @@ type MockCanonicalsReaderTxnIdsOfCanonicalBlocksCall struct {
 }
 
 // Return rewrite *gomock.Call.Return
-func (c *MockCanonicalsReaderTxnIdsOfCanonicalBlocksCall) Return(arg0 iter.U64, arg1 error) *MockCanonicalsReaderTxnIdsOfCanonicalBlocksCall {
+func (c *MockCanonicalsReaderTxnIdsOfCanonicalBlocksCall) Return(arg0 stream.U64, arg1 error) *MockCanonicalsReaderTxnIdsOfCanonicalBlocksCall {
 	c.Call = c.Call.Return(arg0, arg1)
 	return c
 }
 
 // Do rewrite *gomock.Call.Do
-func (c *MockCanonicalsReaderTxnIdsOfCanonicalBlocksCall) Do(f func(kv.Tx, int, int, order.By, int) (iter.U64, error)) *MockCanonicalsReaderTxnIdsOfCanonicalBlocksCall {
+func (c *MockCanonicalsReaderTxnIdsOfCanonicalBlocksCall) Do(f func(kv.Tx, int, int, order.By, int) (stream.U64, error)) *MockCanonicalsReaderTxnIdsOfCanonicalBlocksCall {
 	c.Call = c.Call.Do(f)
 	return c
 }
 
 // DoAndReturn rewrite *gomock.Call.DoAndReturn
-func (c *MockCanonicalsReaderTxnIdsOfCanonicalBlocksCall) DoAndReturn(f func(kv.Tx, int, int, order.By, int) (iter.U64, error)) *MockCanonicalsReaderTxnIdsOfCanonicalBlocksCall {
+func (c *MockCanonicalsReaderTxnIdsOfCanonicalBlocksCall) DoAndReturn(f func(kv.Tx, int, int, order.By, int) (stream.U64, error)) *MockCanonicalsReaderTxnIdsOfCanonicalBlocksCall {
 	c.Call = c.Call.DoAndReturn(f)
 	return c
 }
