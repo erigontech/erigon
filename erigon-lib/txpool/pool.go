@@ -39,12 +39,12 @@ import (
 	"github.com/google/btree"
 	"github.com/hashicorp/golang-lru/v2/simplelru"
 	"github.com/holiman/uint256"
-
 	"github.com/ledgerwatch/erigon-lib/chain"
 	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/assert"
 	"github.com/ledgerwatch/erigon-lib/common/dbg"
 	"github.com/ledgerwatch/erigon-lib/common/fixedgas"
+	"github.com/ledgerwatch/erigon-lib/common/hexutility"
 	"github.com/ledgerwatch/erigon-lib/common/u256"
 	libkzg "github.com/ledgerwatch/erigon-lib/crypto/kzg"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces"
@@ -1965,8 +1965,19 @@ func (p *TxPool) flush(ctx context.Context, db kv.RwDB) (written uint64, err err
 		return 0, err
 	}
 
-	// fsync
-	if err := db.Update(ctx, func(tx kv.RwTx) error { return nil }); err != nil {
+	// fsync. increase state version - just to make RwTx non-empty (mdbx skips empty RwTx)
+	if err := db.Update(ctx, func(tx kv.RwTx) error {
+		v, err := tx.GetOne(kv.PoolInfo, PoolStateVersion)
+		if err != nil {
+			return err
+		}
+		var version uint64
+		if len(v) == 8 {
+			version = binary.BigEndian.Uint64(v)
+		}
+		version++
+		return tx.Put(kv.PoolInfo, PoolStateVersion, hexutility.EncodeTs(version))
+	}); err != nil {
 		return 0, err
 	}
 	return written, nil
@@ -2328,6 +2339,7 @@ var PoolChainConfigKey = []byte("chain_config")
 var PoolLastSeenBlockKey = []byte("last_seen_block")
 var PoolPendingBaseFeeKey = []byte("pending_base_fee")
 var PoolPendingBlobFeeKey = []byte("pending_blob_fee")
+var PoolStateVersion = []byte("state_version")
 
 // recentlyConnectedPeers does buffer IDs of recently connected good peers
 // then sync of pooled Transaction can happen to all of then at once
