@@ -214,7 +214,7 @@ func (e *EthereumExecutionModule) ValidateChain(ctx context.Context, req *execut
 
 	// Update the last new block seen.
 	// This is used by eth_syncing as an heuristic to determine if the node is syncing or not.
-	if err := e.db.Update(ctx, func(tx kv.RwTx) error {
+	if err := e.db.UpdateNosync(ctx, func(tx kv.RwTx) error {
 		return rawdb.WriteLastNewBlockSeen(tx, req.Number)
 	}); err != nil {
 		return nil, err
