@@ -44,6 +44,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/common/assert"
 	"github.com/ledgerwatch/erigon-lib/common/dbg"
 	"github.com/ledgerwatch/erigon-lib/common/fixedgas"
+	"github.com/ledgerwatch/erigon-lib/common/hexutility"
 	"github.com/ledgerwatch/erigon-lib/common/u256"
 	libkzg "github.com/ledgerwatch/erigon-lib/crypto/kzg"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces"
@@ -1964,19 +1965,18 @@ func (p *TxPool) flush(ctx context.Context, db kv.RwDB) (written uint64, err err
 		return 0, err
 	}
 
-	defer func(t time.Time) { fmt.Printf("pool.go:1969: %s\n", time.Since(t)) }(time.Now())
 	// fsync. increase state version - just to make RwTx non-empty (mdbx skips empty RwTx)
 	if err := db.Update(ctx, func(tx kv.RwTx) error {
-		//v, err := tx.GetOne(kv.PoolInfo, PoolStateVersion)
-		//if err != nil {
-		//	return err
-		//}
-		//var version uint64
-		//if len(v) == 8 {
-		//	version = binary.BigEndian.Uint64(v)
-		//}
-		//version++
-		//return tx.Put(kv.PoolInfo, PoolStateVersion, hexutility.EncodeTs(version))
+		v, err := tx.GetOne(kv.PoolInfo, PoolStateVersion)
+		if err != nil {
+			return err
+		}
+		var version uint64
+		if len(v) == 8 {
+			version = binary.BigEndian.Uint64(v)
+		}
+		version++
+		return tx.Put(kv.PoolInfo, PoolStateVersion, hexutility.EncodeTs(version))
 		return nil
 	}); err != nil {
 		return 0, err
