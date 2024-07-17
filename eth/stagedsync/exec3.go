@@ -204,6 +204,9 @@ func ExecV3(ctx context.Context,
 		agg.DiscardInvertedIndex(kv.LogTopicIdxPos)
 		agg.DiscardInvertedIndex(kv.TracesFromIdxPos)
 		agg.DiscardInvertedIndex(kv.TracesToIdxPos)
+		// We do not discard account because it's used in snapshot generation.
+		agg.DiscardHistory(kv.StorageDomain)
+		agg.DiscardHistory(kv.CodeDomain)
 	}
 
 	var err error
