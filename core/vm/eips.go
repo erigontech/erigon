@@ -436,7 +436,7 @@ func enableEOF(jt *JumpTable) {
 		immediateSize: 1,
 	}
 	jt[TXCREATE] = &operation{
-		execute:     opTxCreate,
+		execute:     opTxnCreate,
 		constantGas: params.CreateGas,
 		numPop:      5,
 		numPush:     1,
@@ -733,10 +733,10 @@ func opEOFCreate(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) (
 	return nil, nil
 }
 
-func opTxCreate(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]byte, error) {
+func opTxnCreate(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]byte, error) {
 
 	var (
-		code = scope.Contract.CodeAt(scope.CodeSection)
+		// code = scope.Contract.CodeAt(scope.CodeSection)
 
 		initcodeHash = scope.Stack.Pop()
 		value        = scope.Stack.Pop()
@@ -748,7 +748,7 @@ func opTxCreate(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([
 	)
 	*pc += 1
 
-	initcontainer := interpreter.evm.TxContext.Initcodes[initcodeHash.Bytes32()]
+	initContainer := interpreter.evm.TxContext.Initcodes[initcodeHash.Bytes32()]
 
 	// initcontainer = state.get_tx_initcode_by_hash(initcode_hash);
 	// // In case initcode was not found, empty bytes_view was returned.
@@ -756,6 +756,7 @@ func opTxCreate(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([
 	// if (initcontainer.empty())
 	// 	return {EVMC_SUCCESS, gas_left};  // "Light" failure
 
+	// TODO(racytech): do the gas calculations!
 	// // Charge for initcode validation.
 	// constexpr auto initcode_word_cost_validation = 2;
 	// const auto initcode_cost_validation =
@@ -764,10 +765,26 @@ func opTxCreate(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([
 	// 	return {EVMC_OUT_OF_GAS, gas_left};
 
 	// TODO(racytech): we need to check data field in the message, since it contains initcodes, as well as adding initcodes into the execution env
-
 	// 1. get the initcontainer -> get the coresponding initcode using hash (initcode_hash poped from stack)
 	// 2. we need to run validation and unmarshalling on initcontainer again?
 
+	stackValue := size
+	res, addr, returnGas, suberr := interpreter.evm.TxnCreate(scope.Contract, input, initContainer, gas, &value, &salt)
+	// Push item on the stack based on the returned error.
+	if suberr != nil {
+		stackValue.Clear()
+	} else {
+		stackValue.SetBytes(addr.Bytes())
+	}
+
+	scope.Stack.Push(&stackValue)
+	scope.Contract.RefundGas(returnGas, tracing.GasChangeCallLeftOverRefunded)
+
+	if suberr == ErrExecutionReverted {
+		interpreter.returnData = res // set REVERT data to return data buffer
+		return res, nil
+	}
+	interpreter.returnData = nil // clear dirty return data buffer
 	return nil, nil
 }
 

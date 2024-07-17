@@ -547,12 +547,15 @@ func (evm *EVM) Create2(caller ContractRef, code []byte, gas uint64, endowment *
 func (evm *EVM) EOFCreate(caller ContractRef, code, initContainer []byte, gas uint64, endowment *uint256.Int, salt *uint256.Int) (ret []byte, contractAddr libcommon.Address, leftOverGas uint64, err error) {
 	codeAndHash := &codeAndHash{code: initContainer}
 	contractAddr = crypto.EOFCreateAddress(caller.Address(), salt.Bytes32(), initContainer)
-	return evm.create(caller, codeAndHash, gas, endowment, contractAddr, EOFCREATE, true /* incrementNonce */, true /* IsCallerEOF */)
+	isCallerEOF := hasEOFMagic(evm.intraBlockState.GetCode(caller.Address()))
+	return evm.create(caller, codeAndHash, gas, endowment, contractAddr, EOFCREATE, true /* incrementNonce */, isCallerEOF)
 }
 
-func (evm *EVM) TxCreate(caller ContractRef, code []byte, gas uint64, endowment *uint256.Int, salt *uint256.Int) (ret []byte, contractAddr libcommon.Address, leftOverGas uint64, err error) {
-	// TODO
-	return nil, libcommon.Address{}, 0, nil
+func (evm *EVM) TxnCreate(caller ContractRef, code, initContainer []byte, gas uint64, endowment *uint256.Int, salt *uint256.Int) (ret []byte, contractAddr libcommon.Address, leftOverGas uint64, err error) {
+	codeAndHash := &codeAndHash{code: initContainer}
+	contractAddr = crypto.CreateAddress(caller.Address(), evm.intraBlockState.GetNonce(caller.Address()))
+	isCallerEOF := hasEOFMagic(evm.intraBlockState.GetCode(caller.Address()))
+	return evm.create(caller, codeAndHash, gas, endowment, contractAddr, EOFCREATE, true /* incrementNonce */, isCallerEOF)
 }
 
 // SysCreate is a special (system) contract creation methods for genesis constructors.
