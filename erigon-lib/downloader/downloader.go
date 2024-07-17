@@ -1549,7 +1549,7 @@ func (d *Downloader) torrentDownload(t *torrent.Torrent, statusChan chan downloa
 
 	d.wg.Add(1)
 
-	fmt.Println("TD", t.Complete.Bool())
+	fmt.Println("TD0", t.Complete.Bool())
 
 	go func(t *torrent.Torrent) {
 		defer d.wg.Done()
@@ -1568,6 +1568,8 @@ func (d *Downloader) torrentDownload(t *torrent.Torrent, statusChan chan downloa
 
 		idleCount := 0
 		var lastRead int64
+
+		fmt.Println("TD1", t.Complete.Bool())
 
 		for {
 			select {
