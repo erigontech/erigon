@@ -416,15 +416,23 @@ func (f *forkGraphDisk) MarkHeaderAsInvalid(blockRoot libcommon.Hash) {
 	f.badBlocks.Store(blockRoot, struct{}{})
 }
 
+func (f *forkGraphDisk) hasBeaconState(blockRoot libcommon.Hash) bool {
+	_, err := f.fs.Stat(getBeaconStateFilename(blockRoot))
+	return err == nil
+}
+
 func (f *forkGraphDisk) Prune(pruneSlot uint64) (err error) {
 	pruneSlot -= f.beaconCfg.SlotsPerEpoch * 2
 	oldRoots := make([]libcommon.Hash, 0, f.beaconCfg.SlotsPerEpoch)
-	highestCrossedEpochSlot := uint64(0)
+	highestStoredBeaconStateSlot := uint64(0)
 	f.blocks.Range(func(key, value interface{}) bool {
 		hash := key.(libcommon.Hash)
 		signedBlock := value.(*cltypes.SignedBeaconBlock)
-		if signedBlock.Block.Slot%f.beaconCfg.SlotsPerEpoch == 0 && highestCrossedEpochSlot < signedBlock.Block.Slot {
-			highestCrossedEpochSlot = signedBlock.Block.Slot
+		if signedBlock.Block.Slot < highestStoredBeaconStateSlot {
+			return true
+		}
+		if f.hasBeaconState(hash) {
+			highestStoredBeaconStateSlot = signedBlock.Block.Slot
 		}
 		if signedBlock.Block.Slot >= pruneSlot {
 			return true
@@ -433,7 +441,7 @@ func (f *forkGraphDisk) Prune(pruneSlot uint64) (err error) {
 
 		return true
 	})
-	if pruneSlot >= highestCrossedEpochSlot {
+	if pruneSlot >= highestStoredBeaconStateSlot {
 		return
 	}
 
