@@ -5,9 +5,9 @@ go 1.21.0
 toolchain go1.22.4
 
 require (
+	github.com/erigontech/interfaces v0.0.0-20240716134413-fc4152088ee6
 	github.com/erigontech/mdbx-go v0.38.4
 	github.com/ledgerwatch/erigon-snapshot v1.3.1-0.20240705135436-5d6d882b41f7
-	github.com/ledgerwatch/interfaces v0.0.0-20240621204041-2092c22b6ef6
 	github.com/ledgerwatch/secp256k1 v1.0.0
 	github.com/rs/dnscache v0.0.0-20211102005908-e0241e321417
 )
@@ -152,7 +152,7 @@ require (
 )
 
 replace (
-	github.com/anacrolix/torrent => github.com/erigontech/torrent v1.54.2-alpha-28
+	github.com/anacrolix/torrent => github.com/erigontech/torrent v1.54.2-alpha-30
 	github.com/holiman/bloomfilter/v2 => github.com/AskAlexSharov/bloomfilter/v2 v2.0.8
 	github.com/tidwall/btree => github.com/AskAlexSharov/btree v1.6.2
 )

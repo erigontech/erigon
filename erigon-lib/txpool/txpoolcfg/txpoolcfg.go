@@ -183,7 +183,8 @@ func (r DiscardReason) String() string {
 }
 
 // CalcIntrinsicGas computes the 'intrinsic gas' for a message with the given data.
-func CalcIntrinsicGas(dataLen, dataNonZeroLen uint64, accessList types.AccessList, isContractCreation, isHomestead, isEIP2028, isShanghai bool) (uint64, DiscardReason) {
+// TODO: move input data to a struct
+func CalcIntrinsicGas(dataLen, dataNonZeroLen, authorizationsLen uint64, accessList types.AccessList, isContractCreation, isHomestead, isEIP2028, isShanghai bool) (uint64, DiscardReason) {
 	// Set the starting gas for the raw transaction
 	var gas uint64
 	if isContractCreation && isHomestead {
@@ -252,6 +253,18 @@ func CalcIntrinsicGas(dataLen, dataNonZeroLen uint64, accessList types.AccessLis
 			return 0, GasUintOverflow
 		}
 	}
+
+	// Add the cost of authorizations
+	product, overflow := emath.SafeMul(authorizationsLen, fixedgas.PerAuthBaseCost)
+	if overflow {
+		return 0, GasUintOverflow
+	}
+
+	gas, overflow = emath.SafeAdd(gas, product)
+	if overflow {
+		return 0, GasUintOverflow
+	}
+
 	return gas, Success
 }
 

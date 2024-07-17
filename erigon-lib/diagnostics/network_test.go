@@ -19,7 +19,6 @@ package diagnostics_test
 import (
 	"strconv"
 	"testing"
-	"time"
 
 	"github.com/ledgerwatch/erigon-lib/diagnostics"
 	"github.com/stretchr/testify/require"
@@ -159,37 +158,7 @@ func TestGetPeers(t *testing.T) {
 
 	peers := peerStats.GetPeers()
 	require.Equal(t, 3, len(peers))
-	require.Equal(t, &mockInboundPeerStats, peers["test1"])
-}
-
-func TestLastUpdated(t *testing.T) {
-	peerStats := diagnostics.NewPeerStats(1000)
-
-	peerStats.AddOrUpdatePeer("test1", mockInboundUpdMsg)
-	require.NotEmpty(t, peerStats.GetLastUpdate("test1"))
-
-	for i := 1; i < 20; i++ {
-		pid := "test" + strconv.Itoa(i)
-		peerStats.AddOrUpdatePeer(pid, mockInboundUpdMsg)
-		//wait for 1 milisecond to make sure that the last update time is different
-		time.Sleep(10 * time.Millisecond)
-	}
-
-	require.True(t, peerStats.GetLastUpdate("test2").After(peerStats.GetLastUpdate("test1")))
-
-	oldestPeers := peerStats.GetOldestUpdatedPeersWithSize(10)
-
-	// we have 100 peers, but we should get only 10 oldest
-	require.Equal(t, len(oldestPeers), 10)
-	// the oldest peer should be test1
-	require.Equal(t, "test1", oldestPeers[0].PeerID)
-
-	// update test1 to
-	peerStats.AddOrUpdatePeer("test1", mockInboundUpdMsg)
-	oldestPeers = peerStats.GetOldestUpdatedPeersWithSize(10)
-
-	// the oldest peer should not be test1
-	require.NotEqual(t, "test1", oldestPeers[0].PeerID)
+	require.True(t, peers["test1"].Equal(mockInboundPeerStats))
 }
 
 func TestRemovePeersWhichExceedLimit(t *testing.T) {
@@ -200,6 +169,7 @@ func TestRemovePeersWhichExceedLimit(t *testing.T) {
 		pid := "test" + strconv.Itoa(i)
 		peerStats.AddOrUpdatePeer(pid, mockInboundUpdMsg)
 	}
+	require.Equal(t, 100, peerStats.GetPeersCount())
 
 	peerStats.RemovePeersWhichExceedLimit(limit)
 
@@ -209,6 +179,24 @@ func TestRemovePeersWhichExceedLimit(t *testing.T) {
 	peerStats.RemovePeersWhichExceedLimit(limit)
 
 	require.Equal(t, 100, peerStats.GetPeersCount())
+}
+
+func TestRemovePeer(t *testing.T) {
+	limit := 10
+	peerStats := diagnostics.NewPeerStats(limit)
+
+	for i := 1; i < 11; i++ {
+		pid := "test" + strconv.Itoa(i)
+		peerStats.AddOrUpdatePeer(pid, mockInboundUpdMsg)
+	}
+	require.Equal(t, 10, peerStats.GetPeersCount())
+
+	peerStats.RemovePeer("test1")
+
+	require.Equal(t, limit-1, peerStats.GetPeersCount())
+
+	firstPeerStats := peerStats.GetPeerStatistics("test1")
+	require.True(t, firstPeerStats.Equal(diagnostics.PeerStatistics{}))
 }
 
 func TestAddingPeersAboveTheLimit(t *testing.T) {
