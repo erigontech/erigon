@@ -198,9 +198,11 @@ func unwindExec3(u *UnwindState, s *StageState, txc wrap.TxContainer, ctx contex
 		}
 	}
 
-	// if the changeset is nil here, no unwinding took place due to the loop above being empty
 	if changeset == nil {
-		return fmt.Errorf("unwindExec3: changeset is nil, nothing to unwind")
+		if u.CurrentBlockNumber == u.UnwindPoint {
+		   return fmt.Errorf("can't unwind(%d -> %d) because 0 blocks unwind requested", u.CurrentBlockNumber, u.UnwindPoint)
+		}
+		return fmt.Errorf("can't unwind(%d -> %d) because no changesets in db", u.CurrentBlockNumber, u.UnwindPoint)
 	}
 
 	if err := rs.Unwind(ctx, txc.Tx, u.UnwindPoint, txNum, accumulator, *changeset); err != nil {
