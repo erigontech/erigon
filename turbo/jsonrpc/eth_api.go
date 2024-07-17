@@ -20,6 +20,7 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"github.com/ledgerwatch/erigon/turbo/jsonrpc/receipts"
 	"math/big"
 	"sync"
 	"sync/atomic"
@@ -34,12 +35,10 @@ import (
 
 	"github.com/ledgerwatch/erigon-lib/chain"
 	"github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/common/datadir"
 	"github.com/ledgerwatch/erigon-lib/common/hexutility"
 	txpool "github.com/ledgerwatch/erigon-lib/gointerfaces/txpoolproto"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/kvcache"
-	libstate "github.com/ledgerwatch/erigon-lib/state"
 	types2 "github.com/ledgerwatch/erigon-lib/types"
 
 	"github.com/ledgerwatch/erigon/common/math"
@@ -137,14 +136,13 @@ type BaseAPI struct {
 
 	_blockReader services.FullBlockReader
 	_txnReader   services.TxnReader
-	_agg         *libstate.Aggregator
 	_engine      consensus.EngineReader
 
-	evmCallTimeout time.Duration
-	dirs           datadir.Dirs
+	evmCallTimeout    time.Duration
+	receiptsGenerator *receipts.Generator
 }
 
-func NewBaseApi(f *rpchelper.Filters, stateCache kvcache.Cache, blockReader services.FullBlockReader, agg *libstate.Aggregator, singleNodeMode bool, evmCallTimeout time.Duration, engine consensus.EngineReader, dirs datadir.Dirs) *BaseAPI {
+func NewBaseApi(f *rpchelper.Filters, stateCache kvcache.Cache, blockReader services.FullBlockReader, singleNodeMode bool, evmCallTimeout time.Duration, engine consensus.EngineReader) *BaseAPI {
 	var (
 		blocksLRUSize      = 128 // ~32Mb
 		receiptsCacheLimit = 32
@@ -163,17 +161,18 @@ func NewBaseApi(f *rpchelper.Filters, stateCache kvcache.Cache, blockReader serv
 		panic(err)
 	}
 
+	receiptsGenerator := receipts.NewGenerator(receiptsCache, blockReader, engine)
+
 	return &BaseAPI{
-		filters:        f,
-		stateCache:     stateCache,
-		blocksLRU:      blocksLRU,
-		receiptsCache:  receiptsCache,
-		_blockReader:   blockReader,
-		_txnReader:     blockReader,
-		_agg:           agg,
-		evmCallTimeout: evmCallTimeout,
-		_engine:        engine,
-		dirs:           dirs,
+		filters:           f,
+		stateCache:        stateCache,
+		blocksLRU:         blocksLRU,
+		receiptsCache:     receiptsCache,
+		_blockReader:      blockReader,
+		_txnReader:        blockReader,
+		evmCallTimeout:    evmCallTimeout,
+		_engine:           engine,
+		receiptsGenerator: receiptsGenerator,
 	}
 }
 

@@ -17,7 +17,6 @@
 package diagnostics
 
 import (
-	"encoding/json"
 	"net/http"
 
 	diaglib "github.com/ledgerwatch/erigon-lib/diagnostics"
@@ -37,5 +36,5 @@ func SetupBodiesAccess(metricsMux *http.ServeMux, diag *diaglib.DiagnosticClient
 }
 
 func writeBodies(w http.ResponseWriter, diag *diaglib.DiagnosticClient) {
-	json.NewEncoder(w).Encode(diag.GetBodiesInfo())
+	diag.BodiesInfoJson(w)
 }

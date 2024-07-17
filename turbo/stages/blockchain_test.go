@@ -24,12 +24,14 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
+	protosentry "github.com/ledgerwatch/erigon-lib/gointerfaces/sentryproto"
+	"github.com/ledgerwatch/erigon/eth/protocols/eth"
+	"github.com/ledgerwatch/erigon/rlp"
 	"math"
 	"math/big"
 	"testing"
 
 	"github.com/ledgerwatch/erigon-lib/common/hexutil"
-	"github.com/ledgerwatch/erigon-lib/config3"
 	"github.com/ledgerwatch/erigon-lib/log/v3"
 
 	"github.com/holiman/uint256"
@@ -319,10 +321,6 @@ func testReorgShort(t *testing.T) {
 }
 
 func testReorg(t *testing.T, first, second []int64, td int64) {
-	if config3.EnableHistoryV4InTest {
-		t.Skip("TODO: [e4] implement me")
-	}
-
 	require := require.New(t)
 	// Create a pristine chain and database
 	m := newCanonical(t, 0)
@@ -359,7 +357,13 @@ func testReorg(t *testing.T, first, second []int64, td int64) {
 	if err != nil {
 		t.Fatal(err)
 	}
+
+	hashPacket := make([]libcommon.Hash, 0)
+	queryNum := 0
+
 	for block.NumberU64() != 0 {
+		hashPacket = append(hashPacket, block.Hash())
+		queryNum++
 		if prev.ParentHash() != block.Hash() {
 			t.Errorf("parent block hash mismatch: have %x, want %x", prev.ParentHash(), block.Hash())
 		}
@@ -369,6 +373,43 @@ func testReorg(t *testing.T, first, second []int64, td int64) {
 			t.Fatal(err)
 		}
 	}
+
+	b, err := rlp.EncodeToBytes(&eth.GetReceiptsPacket66{
+		RequestId:         1,
+		GetReceiptsPacket: hashPacket,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	m.ReceiveWg.Add(1)
+	for _, err = range m.Send(&protosentry.InboundMessage{Id: protosentry.MessageId_GET_RECEIPTS_66, Data: b, PeerId: m.PeerId}) {
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	m.ReceiveWg.Wait()
+
+	msg := m.SentMessage(0)
+
+	require.Equal(protosentry.MessageId_RECEIPTS_66, msg.Id)
+
+	encoded, err := rlp.EncodeToBytes(types.Receipts{})
+	require.NoError(err)
+
+	res := make([]rlp.RawValue, 0, queryNum)
+	for i := 0; i < queryNum; i++ {
+		res = append(res, encoded)
+	}
+
+	b, err = rlp.EncodeToBytes(&eth.ReceiptsRLPPacket66{
+		RequestId:         1,
+		ReceiptsRLPPacket: res,
+	})
+	require.NoError(err)
+	require.Equal(b, msg.GetData())
+
 	// Make sure the chain total difficulty is the correct one
 	want := new(big.Int).Add(m.Genesis.Difficulty(), big.NewInt(td))
 	have, err := rawdb.ReadTdByHash(tx, rawdb.ReadCurrentHeader(tx).Hash())

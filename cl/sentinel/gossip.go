@@ -208,11 +208,10 @@ func (s *Sentinel) forkWatcher() {
 				s.subManager.subscriptions.Range(func(key, value interface{}) bool {
 					sub := value.(*GossipSubscription)
 					s.subManager.unsubscribe(key.(string))
-					newSub, err := s.SubscribeGossip(sub.gossip_topic, sub.expiration.Load().(time.Time))
+					_, err := s.SubscribeGossip(sub.gossip_topic, sub.expiration.Load().(time.Time))
 					if err != nil {
 						log.Warn("[Gossip] Failed to resubscribe to topic", "err", err)
 					}
-					newSub.Listen()
 					return true
 				})
 				prevDigest = digest
@@ -495,6 +494,24 @@ func (g *GossipManager) Close() {
 	})
 }
 
+func (g *GossipManager) Start(ctx context.Context) {
+	go func() {
+		checkingInterval := time.NewTicker(time.Second)
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-checkingInterval.C:
+				g.subscriptions.Range(func(key, value any) bool {
+					sub := value.(*GossipSubscription)
+					sub.checkIfTopicNeedsToEnabledOrDisabled()
+					return true
+				})
+			}
+		}
+	}()
+}
+
 // GossipSubscription abstracts a gossip subscription to write decoded structs.
 type GossipSubscription struct {
 	gossip_topic GossipTopic
@@ -516,42 +533,32 @@ type GossipSubscription struct {
 	closeOnce sync.Once
 }
 
-func (sub *GossipSubscription) Listen() {
-	go func() {
-		var err error
-		checkingInterval := time.NewTicker(100 * time.Millisecond)
-		for {
-			select {
-			case <-sub.ctx.Done():
-				return
-			case <-checkingInterval.C:
-				expirationTime := sub.expiration.Load().(time.Time)
-				if sub.subscribed.Load() && time.Now().After(expirationTime) {
-					sub.stopCh <- struct{}{}
-					sub.topic.Close()
-					sub.subscribed.Store(false)
-					log.Info("[Gossip] Unsubscribed from topic", "topic", sub.sub.Topic())
-					sub.s.updateENROnSubscription(sub.sub.Topic(), false)
-					continue
-				}
-				if !sub.subscribed.Load() && time.Now().Before(expirationTime) {
-					sub.stopCh = make(chan struct{}, 3)
-					sub.sub, err = sub.topic.Subscribe()
-					if err != nil {
-						log.Warn("[Gossip] failed to begin topic subscription", "err", err)
-						time.Sleep(30 * time.Second)
-						continue
-					}
-					var sctx context.Context
-					sctx, sub.cf = context.WithCancel(sub.ctx)
-					go sub.run(sctx, sub.sub, sub.sub.Topic())
-					sub.subscribed.Store(true)
-					sub.s.updateENROnSubscription(sub.sub.Topic(), true)
-					log.Info("[Gossip] Subscribed to topic", "topic", sub.sub.Topic())
-				}
-			}
+func (sub *GossipSubscription) checkIfTopicNeedsToEnabledOrDisabled() {
+	var err error
+	expirationTime := sub.expiration.Load().(time.Time)
+	if sub.subscribed.Load() && time.Now().After(expirationTime) {
+		sub.stopCh <- struct{}{}
+		sub.topic.Close()
+		sub.subscribed.Store(false)
+		log.Info("[Gossip] Unsubscribed from topic", "topic", sub.sub.Topic())
+		sub.s.updateENROnSubscription(sub.sub.Topic(), false)
+		return
+	}
+	if !sub.subscribed.Load() && time.Now().Before(expirationTime) {
+		sub.stopCh = make(chan struct{}, 3)
+		sub.sub, err = sub.topic.Subscribe()
+		if err != nil {
+			log.Warn("[Gossip] failed to begin topic subscription", "err", err)
+			return
 		}
-	}()
+		var sctx context.Context
+		sctx, sub.cf = context.WithCancel(sub.ctx)
+		go sub.run(sctx, sub.sub, sub.sub.Topic())
+		sub.subscribed.Store(true)
+		sub.s.updateENROnSubscription(sub.sub.Topic(), true)
+		log.Info("[Gossip] Subscribed to topic", "topic", sub.sub.Topic())
+	}
+
 }
 
 func (sub *GossipSubscription) OverwriteSubscriptionExpiry(expiry time.Time) {

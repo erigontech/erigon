@@ -25,9 +25,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/ledgerwatch/secp256k1"
-
-	"github.com/ledgerwatch/erigon-lib/log/v3"
+	"github.com/erigontech/secp256k1"
 
 	"github.com/ledgerwatch/erigon-lib/chain"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
@@ -36,6 +34,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/etl"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/dbutils"
+	"github.com/ledgerwatch/erigon-lib/log/v3"
 
 	"github.com/ledgerwatch/erigon/common/debug"
 	"github.com/ledgerwatch/erigon/consensus"

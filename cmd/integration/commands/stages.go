@@ -29,16 +29,13 @@ import (
 	"time"
 
 	"github.com/c2h5oh/datasize"
-	"github.com/erigontech/mdbx-go/mdbx"
 	lru "github.com/hashicorp/golang-lru/arc/v2"
-	"github.com/ledgerwatch/secp256k1"
 	"github.com/spf13/cobra"
 	"golang.org/x/sync/errgroup"
 	"golang.org/x/sync/semaphore"
 
-	"github.com/ledgerwatch/erigon-lib/log/v3"
-	"github.com/ledgerwatch/erigon/cl/clparams"
-	"github.com/ledgerwatch/erigon/turbo/logging"
+	"github.com/erigontech/mdbx-go/mdbx"
+	"github.com/erigontech/secp256k1"
 
 	chain2 "github.com/ledgerwatch/erigon-lib/chain"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
@@ -48,8 +45,11 @@ import (
 	"github.com/ledgerwatch/erigon-lib/downloader"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/rawdbv3"
+	"github.com/ledgerwatch/erigon-lib/log/v3"
 	libstate "github.com/ledgerwatch/erigon-lib/state"
 	"github.com/ledgerwatch/erigon-lib/wrap"
+
+	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/cmd/hack/tool/fromdb"
 	"github.com/ledgerwatch/erigon/consensus"
 	"github.com/ledgerwatch/erigon/core"
@@ -74,6 +74,7 @@ import (
 	"github.com/ledgerwatch/erigon/polygon/heimdall"
 	"github.com/ledgerwatch/erigon/turbo/builder"
 	"github.com/ledgerwatch/erigon/turbo/debug"
+	"github.com/ledgerwatch/erigon/turbo/logging"
 	"github.com/ledgerwatch/erigon/turbo/services"
 	"github.com/ledgerwatch/erigon/turbo/shards"
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync/freezeblocks"
@@ -1337,11 +1338,7 @@ func allSnapshots(ctx context.Context, db kv.RoDB, logger log.Logger) (*freezebl
 				_allBorSnapshotsSingleton.OptimisticalyReopenFolder()
 				return nil
 			})
-			g.Go(func() error { return _aggSingleton.OpenFolder() }) //TODO: open in read-only if erigon running?
-			err := g.Wait()
-			if err != nil {
-				panic(err)
-			}
+			g.Go(func() error { return _aggSingleton.OpenFolder() })
 			g.Go(func() error {
 				chainConfig := fromdb.ChainConfig(db)
 				var beaconConfig *clparams.BeaconChainConfig
@@ -1365,6 +1362,10 @@ func allSnapshots(ctx context.Context, db kv.RoDB, logger log.Logger) (*freezebl
 				logger.Info("[downloads]", "locked", er == nil, "at", mtime.Format("02 Jan 06 15:04 2006"))
 				return nil
 			})
+			err := g.Wait()
+			if err != nil {
+				panic(err)
+			}
 
 			_allSnapshotsSingleton.LogStat("blocks")
 			_allBorSnapshotsSingleton.LogStat("bor")
