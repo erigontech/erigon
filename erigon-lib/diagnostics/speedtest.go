@@ -20,12 +20,16 @@ import (
 	"context"
 	"encoding/json"
 	"io"
+	"net/http"
 	"time"
 
+	"github.com/erigontech/speedtest/speedtest"
 	"github.com/ledgerwatch/erigon-lib/log/v3"
-	"github.com/showwin/speedtest-go/speedtest"
-	"github.com/showwin/speedtest-go/speedtest/transport"
 )
+
+var cloudflareHeaders = http.Header{
+	"lsjdjwcush6jbnjj3jnjscoscisoc5s": []string{"I%OSJDNFKE783DDHHJD873EFSIVNI7384R78SSJBJBCCJBC32JABBJCBJK45"},
+}
 
 func (d *DiagnosticClient) setupSpeedtestDiagnostics(rootCtx context.Context) {
 	go func() {
@@ -37,56 +41,37 @@ func (d *DiagnosticClient) setupSpeedtestDiagnostics(rootCtx context.Context) {
 	}()
 }
 
-var cacheServerList speedtest.Servers
-
 func (d *DiagnosticClient) runSpeedTest(rootCtx context.Context) NetworkSpeedTestResult {
-	var speedtestClient = speedtest.New()
+	result := NetworkSpeedTestResult{
+		Latency:       time.Duration(0),
+		DownloadSpeed: float64(0),
+		UploadSpeed:   float64(0),
+		PacketLoss:    float64(-1),
+	}
 
-	serverList, err := speedtestClient.FetchServers()
-	// Ensure that the server list can rolled back to the previous cache.
+	urlstr, err := speedtest.SelectSegmentFromWebseeds(d.webseedsList, cloudflareHeaders)
+	if err != nil {
+		log.Debug("[diagnostics] runSpeedTest", "err", err)
+		return result
+	}
+
+	s, err := speedtest.CustomServer(urlstr)
+	if err != nil {
+		log.Debug("[diagnostics] runSpeedTest", "err", err)
+		return result
+	}
+
+	err = s.PingTestContext(rootCtx, nil)
 	if err == nil {
-		cacheServerList = serverList
-	}
-	targets, _ := cacheServerList.FindServer([]int{})
-
-	latency := time.Duration(0)
-	downloadSpeed := float64(0)
-	uploadSpeed := float64(0)
-	packetLoss := float64(-1)
-
-	analyzer := speedtest.NewPacketLossAnalyzer(nil)
-
-	if len(targets) > 0 {
-		s := targets[0]
-		err = s.PingTestContext(rootCtx, nil)
-		if err == nil {
-			latency = s.Latency
-		}
-
-		err = s.DownloadTestContext(rootCtx)
-		if err == nil {
-			downloadSpeed = s.DLSpeed.Mbps()
-		}
-
-		err = s.UploadTestContext(rootCtx)
-		if err == nil {
-			uploadSpeed = s.ULSpeed.Mbps()
-		}
-
-		ctx, cancel := context.WithTimeout(rootCtx, time.Second*15)
-
-		defer cancel()
-		_ = analyzer.RunWithContext(ctx, s.Host, func(pl *transport.PLoss) {
-			packetLoss = pl.Loss()
-		})
+		result.Latency = s.Latency
 	}
 
-	return NetworkSpeedTestResult{
-		Latency:       latency,
-		DownloadSpeed: downloadSpeed,
-		UploadSpeed:   uploadSpeed,
-		PacketLoss:    packetLoss,
+	err = s.DownloadTestContext(rootCtx)
+	if err == nil {
+		result.DownloadSpeed = s.DLSpeed.Mbps()
 	}
+
+	return result
 }
 
 func (d *DiagnosticClient) NetworkSpeedJson(w io.Writer) {

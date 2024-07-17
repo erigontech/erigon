@@ -23,6 +23,8 @@ import (
 
 	"github.com/urfave/cli/v2"
 
+	"github.com/ledgerwatch/erigon-lib/chain/snapcfg"
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	diaglib "github.com/ledgerwatch/erigon-lib/diagnostics"
 	"github.com/ledgerwatch/erigon-lib/log/v3"
 	"github.com/ledgerwatch/erigon/turbo/node"
@@ -37,6 +39,8 @@ var (
 	pprofPortFlag           = "pprof.port"
 	pprofAddrFlag           = "pprof.addr"
 	diagnoticsSpeedTestFlag = "diagnostics.speedtest"
+	webSeedsFlag            = "webseed"
+	chainFlag               = "chain"
 )
 
 func Setup(ctx *cli.Context, node *node.ErigonNode, metricsMux *http.ServeMux, pprofMux *http.ServeMux) {
@@ -65,8 +69,14 @@ func Setup(ctx *cli.Context, node *node.ErigonNode, metricsMux *http.ServeMux, p
 		diagMux = SetupDiagnosticsEndpoint(nil, diagAddress)
 	}
 
+	chain := ctx.String(chainFlag)
+	webseedsList := libcommon.CliString2Array(ctx.String(webSeedsFlag))
+	if known, ok := snapcfg.KnownWebseeds[chain]; ok {
+		webseedsList = append(webseedsList, known...)
+	}
+
 	speedTest := ctx.Bool(diagnoticsSpeedTestFlag)
-	diagnostic, err := diaglib.NewDiagnosticClient(ctx.Context, diagMux, node.Backend().DataDir(), speedTest)
+	diagnostic, err := diaglib.NewDiagnosticClient(ctx.Context, diagMux, node.Backend().DataDir(), speedTest, webseedsList)
 	if err == nil {
 		diagnostic.Setup()
 		SetupEndpoints(ctx, node, diagMux, diagnostic)
