@@ -115,6 +115,7 @@ const (
 	AccessListTxType byte = 1 // EIP-2930
 	DynamicFeeTxType byte = 2 // EIP-1559
 	BlobTxType       byte = 3 // EIP-4844
+	SetCodeTxType    byte = 4 // EIP-7702
 )
 
 var ErrParseTxn = fmt.Errorf("%w transaction", rlp.ErrParse)
@@ -985,7 +986,16 @@ func (al AccessList) StorageKeys() int {
 	return sum
 }
 
-// Removes everything but the payload body from blob txn and prepends 0x3 at the beginning - no copy
+func (al AccessList) HasAddr(addr common.Address) bool {
+	for _, tuple := range al {
+		if tuple.Address == addr {
+			return true
+		}
+	}
+	return false
+}
+
+// Removes everything but the payload body from blob tx and prepends 0x3 at the beginning - no copy
 // Doesn't change non-blob tx
 func UnwrapTxPlayloadRlp(blobTxRlp []byte) ([]byte, error) {
 	if blobTxRlp[0] != BlobTxType {

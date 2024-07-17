@@ -32,6 +32,8 @@ import (
 	"github.com/ledgerwatch/erigon/p2p/enr"
 )
 
+const peerSubnetTarget = 4
+
 // ConnectWithPeer is used to attempt to connect and add the peer to our pool
 // it errors when if fail to connect with the peer, for instance, if it fails the handshake
 // if it does not return an error, the peer is attempted to be added to the pool
@@ -96,16 +98,18 @@ func (s *Sentinel) listenForPeers() {
 			break
 		}
 
-		if s.HasTooManyPeers() {
-			log.Trace("[Sentinel] Not looking for peers, at peer limit")
-			time.Sleep(100 * time.Millisecond)
-			continue
-		}
 		exists := iterator.Next()
 		if !exists {
 			continue
 		}
 		node := iterator.Node()
+
+		needsPeersForSubnets := s.isPeerUsefulForAnySubnet(node)
+		if s.HasTooManyPeers() && !needsPeersForSubnets {
+			log.Trace("[Sentinel] Not looking for peers, at peer limit")
+			time.Sleep(100 * time.Millisecond)
+			continue
+		}
 		peerInfo, _, err := convertToAddrInfo(node)
 		if err != nil {
 			log.Error("[Sentinel] Could not convert to peer info", "err", err)
@@ -118,11 +122,9 @@ func (s *Sentinel) listenForPeers() {
 			continue
 		}
 
-		go func(peerInfo *peer.AddrInfo) {
-			if err := s.ConnectWithPeer(s.ctx, *peerInfo); err != nil {
-				log.Trace("[Sentinel] Could not connect with peer", "err", err)
-			}
-		}(peerInfo)
+		if err := s.ConnectWithPeer(s.ctx, *peerInfo); err != nil {
+			log.Trace("[Sentinel] Could not connect with peer", "err", err)
+		}
 	}
 }
 

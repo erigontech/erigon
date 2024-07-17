@@ -625,7 +625,7 @@ func ExecV3(ctx context.Context,
 		// can't use OS-level ReadAhead - because Data >> RAM
 		// it also warmsup state a bit - by touching senders/coninbase accounts and code
 		var clean func()
-		readAhead, clean = blocksReadAhead(ctx, &cfg, 4, engine, true)
+		readAhead, clean = blocksReadAhead(ctx, &cfg, 4, true)
 		defer clean()
 	}
 
@@ -638,7 +638,6 @@ Loop:
 		if shouldGenerateChangesets && blockNum > 0 {
 			doms.SetChangesetAccumulator(changeset)
 		}
-		//time.Sleep(50 * time.Microsecond)
 		if !parallel {
 			select {
 			case readAhead <- blockNum:
@@ -778,91 +777,70 @@ Loop:
 				} else {
 					rs.AddWork(ctx, txTask, in)
 				}
-			} else {
-				count++
-				if txTask.Error != nil {
-					break Loop
-				}
-				applyWorker.RunTxTaskNoLock(txTask)
-				if err := func() error {
-					if errors.Is(txTask.Error, context.Canceled) {
-						return err
-					}
-					if txTask.Error != nil {
-						return fmt.Errorf("%w, txnIdx=%d, %v", consensus.ErrInvalidBlock, txTask.TxIndex, txTask.Error) //same as in stage_exec.go
-					}
-					usedGas += txTask.UsedGas
-					if txTask.Tx != nil {
-						blobGasUsed += txTask.Tx.GetBlobGas()
-					}
-					if txTask.Final {
-						checkReceipts := !cfg.vmConfig.StatelessExec && chainConfig.IsByzantium(txTask.BlockNum) && !cfg.vmConfig.NoReceipts
-						if txTask.BlockNum > 0 && !skipPostEvaluation { //Disable check for genesis. Maybe need somehow improve it in future - to satisfy TestExecutionSpec
-							if err := core.BlockPostValidation(usedGas, blobGasUsed, checkReceipts, types.DeriveSha(receipts), txTask.Header); err != nil {
-								return fmt.Errorf("%w, txnIdx=%d, %v", consensus.ErrInvalidBlock, txTask.TxIndex, err) //same as in stage_exec.go
-							}
-						}
-						usedGas, blobGasUsed = 0, 0
-						receipts = receipts[:0]
-					} else {
-						if txTask.TxIndex >= 0 {
-							// by the tx.
-							receipt := &types.Receipt{
-								BlockNumber:       header.Number,
-								TransactionIndex:  uint(txTask.TxIndex),
-								Type:              txTask.Tx.Type(),
-								CumulativeGasUsed: usedGas,
-								GasUsed:           txTask.UsedGas,
-								TxHash:            txTask.Tx.Hash(),
-								Logs:              txTask.Logs,
-							}
-							receipt.Bloom = types.CreateBloom(types.Receipts{receipt})
-							if txTask.Failed {
-								receipt.Status = types.ReceiptStatusFailed
-							} else {
-								receipt.Status = types.ReceiptStatusSuccessful
-							}
-							// if the transaction created a contract, store the creation address in the receipt.
-							//if msg.To() == nil {
-							//	receipt.ContractAddress = crypto.CreateAddress(evm.Origin, tx.GetNonce())
-							//}
-							// Set the receipt logs and create a bloom for filtering
-							//receipt.Bloom = types.CreateBloom(types.Receipts{receipt})
-							receipts = append(receipts, receipt)
-						}
-					}
-					return nil
-				}(); err != nil {
-					if errors.Is(err, context.Canceled) {
-						return err
-					}
-					logger.Warn(fmt.Sprintf("[%s] Execution failed", execStage.LogPrefix()), "block", blockNum, "txNum", txTask.TxNum, "hash", header.Hash().String(), "err", err)
-					if cfg.hd != nil && errors.Is(err, consensus.ErrInvalidBlock) {
-						cfg.hd.ReportBadHeaderPoS(header.Hash(), header.ParentHash)
-					}
-					if cfg.badBlockHalt {
-						return err
-					}
-					if errors.Is(err, consensus.ErrInvalidBlock) {
-						if err := u.UnwindTo(blockNum-1, BadBlock(header.Hash(), err), applyTx); err != nil {
-							return err
-						}
-					} else {
-						if err := u.UnwindTo(blockNum-1, ExecUnwind, applyTx); err != nil {
-							return err
-						}
-					}
-					break Loop
-				}
+				stageProgress = blockNum
+				inputTxNum++
+				continue
+			}
 
-				// MA applystate
-				if err := rs.ApplyState4(ctx, txTask); err != nil {
+			count++
+			if txTask.Error != nil {
+				break Loop
+			}
+			applyWorker.RunTxTaskNoLock(txTask)
+			if err := func() error {
+				if errors.Is(txTask.Error, context.Canceled) {
 					return err
 				}
-
-				execTriggers.AddInt(rs.CommitTxNum(txTask.Sender, txTask.TxNum, in))
-				outputTxNum.Add(1)
+				if txTask.Error != nil {
+					return fmt.Errorf("%w, txnIdx=%d, %v", consensus.ErrInvalidBlock, txTask.TxIndex, txTask.Error) //same as in stage_exec.go
+				}
+				usedGas += txTask.UsedGas
+				if txTask.Tx != nil {
+					blobGasUsed += txTask.Tx.GetBlobGas()
+				}
+				if txTask.Final {
+					checkReceipts := !cfg.vmConfig.StatelessExec && chainConfig.IsByzantium(txTask.BlockNum) && !cfg.vmConfig.NoReceipts
+					if txTask.BlockNum > 0 && !skipPostEvaluation { //Disable check for genesis. Maybe need somehow improve it in future - to satisfy TestExecutionSpec
+						if err := core.BlockPostValidation(usedGas, blobGasUsed, checkReceipts, receipts, txTask.Header); err != nil {
+							return fmt.Errorf("%w, txnIdx=%d, %v", consensus.ErrInvalidBlock, txTask.TxIndex, err) //same as in stage_exec.go
+						}
+					}
+					usedGas, blobGasUsed = 0, 0
+					receipts = receipts[:0]
+				} else if txTask.TxIndex >= 0 {
+					receipts = append(receipts, txTask.CreateReceipt(usedGas))
+				}
+				return nil
+			}(); err != nil {
+				if errors.Is(err, context.Canceled) {
+					return err
+				}
+				logger.Warn(fmt.Sprintf("[%s] Execution failed", execStage.LogPrefix()), "block", blockNum, "txNum", txTask.TxNum, "hash", header.Hash().String(), "err", err)
+				if cfg.hd != nil && errors.Is(err, consensus.ErrInvalidBlock) {
+					cfg.hd.ReportBadHeaderPoS(header.Hash(), header.ParentHash)
+				}
+				if cfg.badBlockHalt {
+					return err
+				}
+				if errors.Is(err, consensus.ErrInvalidBlock) {
+					if err := u.UnwindTo(blockNum-1, BadBlock(header.Hash(), err), applyTx); err != nil {
+						return err
+					}
+				} else {
+					if err := u.UnwindTo(blockNum-1, ExecUnwind, applyTx); err != nil {
+						return err
+					}
+				}
+				break Loop
 			}
+
+			// MA applystate
+			if err := rs.ApplyState4(ctx, txTask); err != nil {
+				return err
+			}
+
+			outputTxNum.Add(1)
+
 			stageProgress = blockNum
 			inputTxNum++
 		}

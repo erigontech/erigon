@@ -1027,7 +1027,7 @@ func stageExec(db kv.RwDB, ctx context.Context, logger log.Logger) error {
 
 	genesis := core.GenesisBlockByChainName(chain)
 	br, _ := blocksIO(db, logger)
-	cfg := stagedsync.StageExecuteBlocksCfg(db, pm, batchSize, nil, chainConfig, engine, vmConfig, nil,
+	cfg := stagedsync.StageExecuteBlocksCfg(db, pm, batchSize, chainConfig, engine, vmConfig, nil,
 		/*stateStream=*/ false,
 		/*badBlockHalt=*/ true, dirs, br, nil, genesis, syncCfg, agg, nil)
 
@@ -1346,11 +1346,7 @@ func allSnapshots(ctx context.Context, db kv.RoDB, logger log.Logger) (*freezebl
 				_allBorSnapshotsSingleton.OptimisticalyReopenFolder()
 				return nil
 			})
-			g.Go(func() error { return _aggSingleton.OpenFolder() }) //TODO: open in read-only if erigon running?
-			err := g.Wait()
-			if err != nil {
-				panic(err)
-			}
+			g.Go(func() error { return _aggSingleton.OpenFolder() })
 			g.Go(func() error {
 				chainConfig := fromdb.ChainConfig(db)
 				var beaconConfig *clparams.BeaconChainConfig
@@ -1374,6 +1370,10 @@ func allSnapshots(ctx context.Context, db kv.RoDB, logger log.Logger) (*freezebl
 				logger.Info("[downloads]", "locked", er == nil, "at", mtime.Format("02 Jan 06 15:04 2006"))
 				return nil
 			})
+			err := g.Wait()
+			if err != nil {
+				panic(err)
+			}
 
 			_allSnapshotsSingleton.LogStat("blocks")
 			_allBorSnapshotsSingleton.LogStat("bor")
@@ -1502,7 +1502,6 @@ func newSync(ctx context.Context, db kv.RwDB, miningConfig *params.MiningConfig,
 				db,
 				cfg.Prune,
 				cfg.BatchSize,
-				nil,
 				sentryControlServer.ChainConfig,
 				sentryControlServer.Engine,
 				&vm.Config{},

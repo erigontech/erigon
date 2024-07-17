@@ -126,7 +126,7 @@ func ParseLocator(value string) (*Locator, error) {
 
 		default:
 			loc.LType = LocalFs
-			loc.Root = downloader.Clean(matches[2])
+			loc.Root = filepath.Clean(matches[2])
 		}
 
 		return &loc, nil

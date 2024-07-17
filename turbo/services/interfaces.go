@@ -48,7 +48,7 @@ type HeaderReader interface {
 	HeaderByHash(ctx context.Context, tx kv.Getter, hash common.Hash) (*types.Header, error)
 	ReadAncestor(db kv.Getter, hash common.Hash, number, ancestor uint64, maxNonCanonical *uint64) (common.Hash, uint64)
 
-	// HeadersRange - TODO: change it to `iter`
+	// HeadersRange - TODO: change it to `stream`
 	HeadersRange(ctx context.Context, walker func(header *types.Header) error) error
 	Integrity(ctx context.Context) error
 }

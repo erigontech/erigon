@@ -139,7 +139,7 @@ func (m *Migrator) PendingMigrations(tx kv.Tx) ([]Migration, error) {
 	return pending, nil
 }
 
-func (m *Migrator) VerifyVersion(db kv.RwDB) error {
+func (m *Migrator) VerifyVersion(db kv.RwDB, chaindata string) error {
 	if err := db.View(context.Background(), func(tx kv.Tx) error {
 		major, minor, _, ok, err := rawdb.ReadDBSchemaVersion(tx)
 		if err != nil {
@@ -153,9 +153,8 @@ func (m *Migrator) VerifyVersion(db kv.RwDB) error {
 					return fmt.Errorf("cannot downgrade minor DB version from %d.%d to %d.%d", major, minor, kv.DBSchemaVersion.Major, kv.DBSchemaVersion.Major)
 				}
 			} else {
-				// major < kv.DBSchemaVersion.Major
-				if kv.DBSchemaVersion.Major-major > 1 {
-					return fmt.Errorf("cannot upgrade major DB version for more than 1 version from %d to %d, use integration tool if you know what you are doing", major, kv.DBSchemaVersion.Major)
+				if kv.DBSchemaVersion.Major != major {
+					return fmt.Errorf("cannot switch major DB version, db: %d, erigon: %d, try \"rm -rf %s\"", major, kv.DBSchemaVersion.Major, chaindata)
 				}
 			}
 		}
@@ -167,7 +166,7 @@ func (m *Migrator) VerifyVersion(db kv.RwDB) error {
 	return nil
 }
 
-func (m *Migrator) Apply(db kv.RwDB, dataDir string, logger log.Logger) error {
+func (m *Migrator) Apply(db kv.RwDB, dataDir, chaindata string, logger log.Logger) error {
 	if len(m.Migrations) == 0 {
 		return nil
 	}
@@ -184,7 +183,7 @@ func (m *Migrator) Apply(db kv.RwDB, dataDir string, logger log.Logger) error {
 	}); err != nil {
 		return err
 	}
-	if err := m.VerifyVersion(db); err != nil {
+	if err := m.VerifyVersion(db, chaindata); err != nil {
 		return fmt.Errorf("migrator.Apply: %w", err)
 	}
 

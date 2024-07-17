@@ -30,10 +30,10 @@ import (
 
 	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon-lib/kv/iter"
 	"github.com/ledgerwatch/erigon-lib/kv/kvcache"
 	"github.com/ledgerwatch/erigon-lib/kv/order"
 	"github.com/ledgerwatch/erigon-lib/kv/rawdbv3"
+	"github.com/ledgerwatch/erigon-lib/kv/stream"
 	"github.com/ledgerwatch/erigon/cmd/rpcdaemon/rpcdaemontest"
 	"github.com/ledgerwatch/erigon/core/types"
 	tracersConfig "github.com/ledgerwatch/erigon/eth/tracers/config"
@@ -68,9 +68,8 @@ var debugTraceTransactionNoRefundTests = []struct {
 
 func TestTraceBlockByNumber(t *testing.T) {
 	m, _, _ := rpcdaemontest.CreateTestSentry(t)
-	agg := m.HistoryV3Components()
 	stateCache := kvcache.New(kvcache.DefaultCoherentConfig)
-	baseApi := NewBaseApi(nil, stateCache, m.BlockReader, agg, false, rpccfg.DefaultEvmCallTimeout, m.Engine, m.Dirs)
+	baseApi := NewBaseApi(nil, stateCache, m.BlockReader, false, rpccfg.DefaultEvmCallTimeout, m.Engine)
 	ethApi := NewEthAPI(baseApi, m.DB, nil, nil, nil, 5000000, 1e18, 100_000, false, 100_000, 128, log.New())
 	api := NewPrivateDebugAPI(baseApi, m.DB, 0)
 	for _, tt := range debugTraceTransactionTests {
@@ -411,7 +410,7 @@ func TestMapTxNum2BlockNum(t *testing.T) {
 	}
 
 	addr := common.HexToAddress("0x537e697c7ab75a26f9ecf0ce810e3154dfcaaf44")
-	checkIter := func(t *testing.T, expectTxNums iter.U64, txNumsIter *rawdbv3.MapTxNum2BlockNumIter) {
+	checkIter := func(t *testing.T, expectTxNums stream.U64, txNumsIter *rawdbv3.MapTxNum2BlockNumIter) {
 		for expectTxNums.HasNext() {
 			require.True(t, txNumsIter.HasNext())
 			expectTxNum, _ := expectTxNums.Next()

@@ -544,7 +544,7 @@ func Test_Cell_EncodeDecode(t *testing.T) {
 	require.EqualValues(t, first.spk[:], second.spk[:])
 	require.EqualValues(t, first.h[:], second.h[:])
 	require.EqualValues(t, first.extension[:first.extLen], second.extension[:second.extLen])
-	// encode doesnt code Nonce, Balance, CodeHash and Storage
+	// encode doesn't code Nonce, Balance, CodeHash and Storage
 	require.EqualValues(t, first.Delete, second.Delete)
 }
 

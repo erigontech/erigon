@@ -208,16 +208,9 @@ func (a *ApiHandler) GetEthV3ValidatorBlock(
 	}
 
 	// do state transition
-	if block.IsBlinded() {
-		if err := machine.ProcessBlindedBlock(transition.DefaultMachine, baseState, block.ToBlinded()); err != nil {
-			log.Warn("Failed to process blinded block", "err", err, "slot", targetSlot)
-			return nil, err
-		}
-	} else {
-		if err := machine.ProcessBlock(transition.DefaultMachine, baseState, block.ToExecution().Block); err != nil {
-			log.Warn("Failed to process execution block", "err", err, "slot", targetSlot)
-			return nil, err
-		}
+	if err := machine.ProcessBlock(transition.DefaultMachine, baseState, block.ToGeneric()); err != nil {
+		log.Warn("Failed to process execution block", "err", err, "slot", targetSlot)
+		return nil, err
 	}
 	block.StateRoot, err = baseState.HashSSZ()
 	if err != nil {
