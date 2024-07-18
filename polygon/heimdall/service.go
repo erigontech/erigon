@@ -19,6 +19,7 @@ package heimdall
 import (
 	"context"
 	"errors"
+	"slices"
 	"time"
 
 	"golang.org/x/sync/errgroup"
@@ -42,10 +43,6 @@ type service struct {
 	checkpointScraper *scraper[*Checkpoint]
 	milestoneScraper  *scraper[*Milestone]
 	spanScraper       *scraper[*Span]
-}
-
-func makeType[T any]() *T {
-	return new(T)
 }
 
 func AssembleService(heimdallUrl string, dataDir string, tmpDir string, logger log.Logger) Service {
@@ -170,7 +167,7 @@ func (s *service) FetchLatestSpans(ctx context.Context, count uint) ([]*Span, er
 		count--
 	}
 
-	libcommon.SliceReverse(latestSpans)
+	slices.Reverse(latestSpans)
 	return latestSpans, nil
 }
 

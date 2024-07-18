@@ -16,16 +16,11 @@
 
 package generics
 
-import (
-	libcommon "github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon/core/types"
-)
-
-func Empty[T any]() (t T) {
-	return
+func Zero[T any]() T {
+	var value T
+	return value
 }
 
-type Response struct {
-	Headers []*types.Header
-	Hashes  []libcommon.Hash
+func New[T any]() *T {
+	return new(T)
 }
