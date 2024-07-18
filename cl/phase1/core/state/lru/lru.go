@@ -22,6 +22,7 @@ import (
 
 	lru "github.com/hashicorp/golang-lru/v2"
 	"github.com/hashicorp/golang-lru/v2/expirable"
+
 	"github.com/erigontech/erigon-lib/metrics"
 )
 

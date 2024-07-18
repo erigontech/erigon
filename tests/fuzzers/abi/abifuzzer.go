@@ -25,6 +25,7 @@ import (
 	"strings"
 
 	fuzz "github.com/google/gofuzz"
+
 	"github.com/erigontech/erigon/accounts/abi"
 )
 

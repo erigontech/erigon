@@ -33,7 +33,6 @@ import (
 	"time"
 
 	"github.com/holiman/uint256"
-	state2 "github.com/erigontech/erigon-lib/state"
 	"github.com/urfave/cli/v2"
 
 	"github.com/erigontech/erigon-lib/chain"
@@ -42,13 +41,14 @@ import (
 	"github.com/erigontech/erigon-lib/common/hexutility"
 	"github.com/erigontech/erigon-lib/kv/memdb"
 	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon/cmd/utils/flags"
-	"github.com/erigontech/erigon/core/types"
+	state2 "github.com/erigontech/erigon-lib/state"
 
 	"github.com/erigontech/erigon/cmd/evm/internal/compiler"
 	"github.com/erigontech/erigon/cmd/utils"
+	"github.com/erigontech/erigon/cmd/utils/flags"
 	"github.com/erigontech/erigon/core"
 	"github.com/erigontech/erigon/core/state"
+	"github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/core/vm"
 	"github.com/erigontech/erigon/core/vm/runtime"
 	"github.com/erigontech/erigon/eth/tracers/logger"

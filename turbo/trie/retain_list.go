@@ -26,11 +26,12 @@ import (
 	"math/big"
 	"sort"
 
-	"github.com/erigontech/erigon-lib/common/hexutil"
-
 	"github.com/holiman/uint256"
+
 	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common/hexutil"
 	"github.com/erigontech/erigon-lib/common/length"
+
 	"github.com/erigontech/erigon/core/types/accounts"
 )
 

@@ -19,11 +19,11 @@ package state
 import (
 	"bytes"
 
-	"github.com/erigontech/erigon-lib/kv/dbutils"
-
 	"github.com/holiman/uint256"
+
 	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/kv"
+	"github.com/erigontech/erigon-lib/kv/dbutils"
 	libstate "github.com/erigontech/erigon-lib/state"
 
 	"github.com/erigontech/erigon/core/types/accounts"

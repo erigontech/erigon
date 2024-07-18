@@ -7,6 +7,7 @@ import (
 	"io"
 
 	"github.com/holiman/uint256"
+
 	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/length"
 	rlp2 "github.com/erigontech/erigon-lib/rlp"

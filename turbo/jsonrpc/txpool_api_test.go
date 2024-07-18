@@ -22,13 +22,13 @@ import (
 	"testing"
 
 	"github.com/holiman/uint256"
+	"github.com/stretchr/testify/require"
+
 	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/hexutil"
 	"github.com/erigontech/erigon-lib/config3"
-	txPoolProto "github.com/erigontech/erigon-lib/gointerfaces/txpoolproto"
 	txpool "github.com/erigontech/erigon-lib/gointerfaces/txpoolproto"
 	"github.com/erigontech/erigon-lib/kv/kvcache"
-	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/cmd/rpcdaemon/rpcdaemontest"
 	"github.com/erigontech/erigon/core"
@@ -68,7 +68,7 @@ func TestTxPoolContent(t *testing.T) {
 	reply, err := txPool.Add(ctx, &txpool.AddRequest{RlpTxs: [][]byte{buf.Bytes()}})
 	require.NoError(err)
 	for _, res := range reply.Imported {
-		require.Equal(res, txPoolProto.ImportResult_SUCCESS, fmt.Sprintf("%s", reply.Errors))
+		require.Equal(res, txpool.ImportResult_SUCCESS, fmt.Sprintf("%s", reply.Errors))
 	}
 
 	content, err := api.Content(ctx)

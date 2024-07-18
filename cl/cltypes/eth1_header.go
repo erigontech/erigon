@@ -21,6 +21,7 @@ import (
 	"fmt"
 
 	"github.com/holiman/uint256"
+
 	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/hexutility"
 	"github.com/erigontech/erigon-lib/types/ssz"

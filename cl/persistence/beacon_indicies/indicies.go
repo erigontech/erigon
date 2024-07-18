@@ -23,6 +23,7 @@ import (
 	"sync"
 
 	"github.com/klauspost/compress/zstd"
+
 	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/kv/dbutils"
@@ -30,6 +31,7 @@ import (
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/persistence/base_encoding"
 	"github.com/erigontech/erigon/cl/persistence/format/snapshot_format"
+
 	_ "modernc.org/sqlite"
 )
 

@@ -23,6 +23,7 @@ import (
 	"math/big"
 
 	"github.com/holiman/uint256"
+
 	"github.com/erigontech/erigon/core/types"
 )
 

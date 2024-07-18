@@ -20,12 +20,13 @@ import (
 	"testing"
 
 	"github.com/holiman/uint256"
+	"github.com/stretchr/testify/require"
+
 	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon/common/math"
 	"github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/crypto"
 	"github.com/erigontech/erigon/params"
-	"github.com/stretchr/testify/require"
 )
 
 func makeBlock(txCount, uncleCount, withdrawalCount int) *types.Block {

@@ -28,6 +28,7 @@ import (
 	"testing"
 
 	"github.com/goccy/go-json"
+
 	"github.com/erigontech/erigon-lib/chain"
 	libcommon "github.com/erigontech/erigon-lib/common"
 

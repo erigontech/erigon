@@ -26,6 +26,7 @@ import (
 	"math/big"
 
 	"github.com/holiman/uint256"
+
 	libcommon "github.com/erigontech/erigon-lib/common"
 	types2 "github.com/erigontech/erigon-lib/types"
 

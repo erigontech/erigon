@@ -22,12 +22,13 @@ import (
 	"fmt"
 	"unsafe"
 
-	"github.com/erigontech/erigon-lib/metrics"
-
 	"github.com/c2h5oh/datasize"
 	"github.com/google/btree"
 	"github.com/holiman/uint256"
+
 	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/metrics"
+
 	"github.com/erigontech/erigon/core/types/accounts"
 )
 

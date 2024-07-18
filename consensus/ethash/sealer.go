@@ -31,10 +31,10 @@ import (
 	"sync"
 	"time"
 
-	"github.com/erigontech/erigon-lib/common/hexutil"
-
 	"github.com/goccy/go-json"
+
 	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common/hexutil"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/consensus"

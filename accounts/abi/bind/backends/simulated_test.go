@@ -31,6 +31,8 @@ import (
 	"time"
 
 	"github.com/holiman/uint256"
+	"github.com/stretchr/testify/require"
+
 	ethereum "github.com/erigontech/erigon"
 	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/kv"
@@ -42,7 +44,6 @@ import (
 	"github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/crypto"
 	"github.com/erigontech/erigon/params"
-	"github.com/stretchr/testify/require"
 )
 
 func TestSimulatedBackend(t *testing.T) {

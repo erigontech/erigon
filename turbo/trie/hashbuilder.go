@@ -23,9 +23,10 @@ import (
 	"math/bits"
 
 	"github.com/holiman/uint256"
+	"golang.org/x/crypto/sha3"
+
 	libcommon "github.com/erigontech/erigon-lib/common"
 	length2 "github.com/erigontech/erigon-lib/common/length"
-	"golang.org/x/crypto/sha3"
 
 	"github.com/erigontech/erigon/core/types/accounts"
 	"github.com/erigontech/erigon/crypto"

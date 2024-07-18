@@ -27,9 +27,9 @@ import (
 	"reflect"
 	"testing"
 
+	"github.com/holiman/uint256"
 	"golang.org/x/crypto/sha3"
 
-	"github.com/holiman/uint256"
 	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/hexutil"
 

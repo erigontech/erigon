@@ -19,8 +19,8 @@ package verkletrie
 import (
 	"context"
 
-	"github.com/holiman/uint256"
 	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon/core/types/accounts"
 	"github.com/erigontech/erigon/turbo/trie/vtree"

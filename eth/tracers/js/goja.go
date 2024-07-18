@@ -27,6 +27,7 @@ import (
 
 	"github.com/dop251/goja"
 	"github.com/holiman/uint256"
+
 	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/hexutility"
 
