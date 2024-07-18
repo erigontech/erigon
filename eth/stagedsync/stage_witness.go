@@ -253,13 +253,13 @@ func PrepareForWitness(tx kv.Tx, block *types.Block, prevRoot libcommon.Hash, rl
 	}, nil
 }
 
-// RewindStagesForWitness rewinds the 'HashState' and 'IntermediateHashes' stages to previous block.
+// RewindStagesForWitness rewinds the Execution stage to previous block.
 func RewindStagesForWitness(batch *membatchwithdb.MemoryMutation, blockNr uint64, cfg *WitnessCfg, regenerateHash bool, ctx context.Context, logger log.Logger) (*membatchwithdb.MemoryMutation, *trie.RetainList, error) {
 	rl := trie.NewRetainList(0)
 
-	// Rewind the 'HashState' and 'IntermediateHashes' stages to previous block
-	unwindState := &UnwindState{ID: stages.HashState, UnwindPoint: blockNr - 1, CurrentBlockNumber: blockNr}
-	stageState := &StageState{ID: stages.HashState, BlockNumber: blockNr}
+	// Rewind the Execution stage to previous block
+	unwindState := &UnwindState{ID: stages.Execution, UnwindPoint: blockNr - 1, CurrentBlockNumber: blockNr}
+	stageState := &StageState{ID: stages.Execution, BlockNumber: blockNr}
 
 	txc := wrap.TxContainer{Tx: batch}
 	batchSizeStr := "512M"
