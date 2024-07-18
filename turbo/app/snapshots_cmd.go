@@ -826,5 +826,6 @@ func openAgg(ctx context.Context, dirs datadir.Dirs, chainDB kv.RwDB, logger log
 		panic(err)
 	}
 	agg.SetWorkers(estimate.CompressSnapshot.Workers())
+
 	return agg
 }
