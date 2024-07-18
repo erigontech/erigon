@@ -85,8 +85,7 @@ type InvertedIndex struct {
 	// fields for history write
 	logger log.Logger
 
-	noFsync    bool // fsync is enabled by default, but tests can manually disable
-	discardIdx bool
+	noFsync bool // fsync is enabled by default, but tests can manually disable
 
 	compression     FileCompression
 	compressWorkers int

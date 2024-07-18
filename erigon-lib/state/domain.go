@@ -1670,7 +1670,6 @@ func (dt *DomainRoTx) canPruneDomainTables(tx kv.Tx, untilTx uint64) (can bool, 
 		dt.d.logger.Error("get domain pruning progress", "name", dt.d.filenameBase, "error", err)
 		return false, maxStepToPrune
 	}
-	fmt.Println(sm, maxStepToPrune, untilStep)
 
 	delta := float64(max(maxStepToPrune, sm) - min(maxStepToPrune, sm)) // maxStep could be 0
 	switch dt.d.filenameBase {
@@ -1740,7 +1739,6 @@ func (dt *DomainRoTx) Prune(ctx context.Context, rwTx kv.RwTx, step, txFrom, txT
 		return nil, fmt.Errorf("prune history at step %d [%d, %d): %w", step, txFrom, txTo, err)
 	}
 	canPrune, maxPrunableStep := dt.canPruneDomainTables(rwTx, txTo)
-	fmt.Println("dt.canPruneDomainTables", canPrune, maxPrunableStep)
 	if !canPrune {
 		return stat, nil
 	}
