@@ -22,9 +22,9 @@ import (
 	"fmt"
 
 	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common/generics"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon/polygon/bor/finality/generics"
 )
 
 var (
@@ -130,7 +130,7 @@ type BlockFinality[T any] interface {
 }
 
 func getKey[T BlockFinality[T]]() (T, []byte) {
-	lastT := generics.Empty[T]().clone()
+	lastT := generics.Zero[T]().clone()
 
 	var key []byte
 

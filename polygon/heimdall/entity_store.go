@@ -22,6 +22,7 @@ import (
 	"encoding/json"
 	"sync"
 
+	"github.com/erigontech/erigon-lib/common/generics"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/kv/stream"
 	"github.com/erigontech/erigon/polygon/polygoncommon"
@@ -121,22 +122,14 @@ func (s *mdbxEntityStore[TEntity]) GetLastEntityId(ctx context.Context) (uint64,
 	return entityStoreKeyParse(lastKey), true, nil
 }
 
-// Zero value of any type T
-// https://stackoverflow.com/questions/70585852/return-default-value-for-generic-type)
-// https://go.dev/ref/spec#The_zero_value
-func Zero[T any]() T {
-	var value T
-	return value
-}
-
 func (s *mdbxEntityStore[TEntity]) GetLastEntity(ctx context.Context) (TEntity, error) {
 	id, ok, err := s.GetLastEntityId(ctx)
 	if err != nil {
-		return Zero[TEntity](), err
+		return generics.Zero[TEntity](), err
 	}
 	// not found
 	if !ok {
-		return Zero[TEntity](), nil
+		return generics.Zero[TEntity](), nil
 	}
 	return s.GetEntity(ctx, id)
 }
@@ -154,7 +147,7 @@ func entityStoreKeyParse(key []byte) uint64 {
 func (s *mdbxEntityStore[TEntity]) entityUnmarshalJSON(jsonBytes []byte) (TEntity, error) {
 	entity := s.makeEntity()
 	if err := json.Unmarshal(jsonBytes, entity); err != nil {
-		return Zero[TEntity](), err
+		return generics.Zero[TEntity](), err
 	}
 	return entity, nil
 }
@@ -162,18 +155,18 @@ func (s *mdbxEntityStore[TEntity]) entityUnmarshalJSON(jsonBytes []byte) (TEntit
 func (s *mdbxEntityStore[TEntity]) GetEntity(ctx context.Context, id uint64) (TEntity, error) {
 	tx, err := s.db.BeginRo(ctx)
 	if err != nil {
-		return Zero[TEntity](), err
+		return generics.Zero[TEntity](), err
 	}
 	defer tx.Rollback()
 
 	key := entityStoreKey(id)
 	jsonBytes, err := tx.GetOne(s.table, key[:])
 	if err != nil {
-		return Zero[TEntity](), err
+		return generics.Zero[TEntity](), err
 	}
 	// not found
 	if jsonBytes == nil {
-		return Zero[TEntity](), nil
+		return generics.Zero[TEntity](), nil
 	}
 
 	return s.entityUnmarshalJSON(jsonBytes)

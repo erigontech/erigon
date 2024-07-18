@@ -17,12 +17,12 @@
 package patricia
 
 import (
+	"cmp"
 	"fmt"
 	"math/bits"
 	"slices"
 	"strings"
 
-	"github.com/erigontech/erigon-lib/common/cmp"
 	"github.com/erigontech/erigon-lib/seg/sais"
 )
 

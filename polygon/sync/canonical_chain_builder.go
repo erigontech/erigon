@@ -20,6 +20,7 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
+	"slices"
 	"time"
 
 	libcommon "github.com/erigontech/erigon-lib/common"
@@ -133,7 +134,7 @@ func (ccb *canonicalChainBuilder) Headers() []*types.Header {
 		headers = append(headers, node.header)
 		node = node.parent
 	}
-	libcommon.SliceReverse(headers)
+	slices.Reverse(headers)
 	return headers
 }
 
