@@ -322,7 +322,7 @@ func TransactionToL2Data(tx types.Transaction, forkId uint16, efficiencyPercenta
 		removeLeadingZeroesFromBytes(gas),
 		to, // don't remove leading 0s from addr
 		removeLeadingZeroesFromBytes(valueBytes),
-		removeLeadingZeroesFromBytes(tx.GetData()),
+		tx.GetData(),
 	}
 
 	if !tx.GetChainID().Eq(uint256.NewInt(0)) || !(v.Eq(uint256.NewInt(27)) || v.Eq(uint256.NewInt(28))) {

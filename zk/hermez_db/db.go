@@ -757,6 +757,7 @@ func (db *HermezDb) WriteBatchGlobalExitRoot(batchNumber uint64, ger dstypes.Ger
 	return db.tx.Put(GLOBAL_EXIT_ROOTS_BATCHES, Uint64ToBytes(batchNumber), ger.EncodeToBytes())
 }
 
+// deprecated: post etrog this will not work
 func (db *HermezDbReader) GetBatchGlobalExitRoots(fromBatchNum, toBatchNum uint64) (*[]dstypes.GerUpdate, error) {
 	c, err := db.tx.Cursor(GLOBAL_EXIT_ROOTS_BATCHES)
 	if err != nil {
@@ -784,6 +785,7 @@ func (db *HermezDbReader) GetBatchGlobalExitRoots(fromBatchNum, toBatchNum uint6
 	return &gers, err
 }
 
+// GetLastBatchGlobalExitRoot deprecated: post etrog this will not work
 func (db *HermezDbReader) GetLastBatchGlobalExitRoot(batchNum uint64) (*dstypes.GerUpdate, uint64, error) {
 	c, err := db.tx.Cursor(GLOBAL_EXIT_ROOTS_BATCHES)
 	if err != nil {
@@ -829,6 +831,7 @@ func (db *HermezDbReader) GetBatchGlobalExitRootsProto(fromBatchNum, toBatchNum 
 	return gersProto, nil
 }
 
+// GetBatchGlobalExitRoot deprecated: post etrog this will not work
 func (db *HermezDbReader) GetBatchGlobalExitRoot(batchNum uint64) (*dstypes.GerUpdate, error) {
 	gerUpdateBytes, err := db.tx.GetOne(GLOBAL_EXIT_ROOTS_BATCHES, Uint64ToBytes(batchNum))
 	if err != nil {
