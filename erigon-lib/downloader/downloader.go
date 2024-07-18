@@ -870,8 +870,6 @@ func (d *Downloader) mainLoop(silent bool) error {
 	go func() {
 		defer d.wg.Done()
 
-		fmt.Println("DL_LOOP")
-		defer fmt.Println("DL_LOOP")
 		complete := map[string]struct{}{}
 		checking := map[string]struct{}{}
 		failed := map[string]struct{}{}
@@ -1549,8 +1547,6 @@ func (d *Downloader) torrentDownload(t *torrent.Torrent, statusChan chan downloa
 
 	d.wg.Add(1)
 
-	fmt.Println("TD0", t.Complete.Bool())
-
 	go func(t *torrent.Torrent) {
 		defer d.wg.Done()
 
@@ -1568,8 +1564,6 @@ func (d *Downloader) torrentDownload(t *torrent.Torrent, statusChan chan downloa
 
 		idleCount := 0
 		var lastRead int64
-
-		fmt.Println("TD1", t.Complete.Bool())
 
 		for {
 			select {
@@ -2790,10 +2784,10 @@ func openClient(ctx context.Context, dbDir, snapDir string, cfg *torrent.ClientC
 	dnsResolver := &downloadercfg.DnsCacheResolver{RefreshTimeout: 24 * time.Hour}
 	cfg.TrackerDialContext = dnsResolver.DialContext
 
-	err = func() error {
+	err = func() (err error) {
 		defer func() {
-			if err := recover(); err != nil {
-				fmt.Printf("openTorrentClient: %v\n", err)
+			if e := recover(); e != nil {
+				err = fmt.Errorf("openTorrentClient: %v", e)
 			}
 		}()
 
