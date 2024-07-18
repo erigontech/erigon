@@ -23,6 +23,11 @@ import (
 	"fmt"
 	"math/big"
 
+	"github.com/c2h5oh/datasize"
+	"github.com/erigontech/erigon-lib/wrap"
+	"github.com/holiman/uint256"
+	"google.golang.org/grpc"
+
 	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/hexutil"
 	"github.com/erigontech/erigon-lib/common/hexutility"
@@ -32,43 +37,29 @@ import (
 	"github.com/erigontech/erigon-lib/kv/rawdbv3"
 	"github.com/erigontech/erigon-lib/log/v3"
 	types2 "github.com/erigontech/erigon-lib/types"
-	"github.com/holiman/uint256"
-	"google.golang.org/grpc"
 
-<<<<<<< HEAD
+	"github.com/erigontech/erigon-lib/kv/membatchwithdb"
+	"github.com/erigontech/erigon/consensus"
 	"github.com/erigontech/erigon/core"
+	"github.com/erigontech/erigon/core/rawdb"
 	"github.com/erigontech/erigon/core/state"
 	"github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/core/types/accounts"
 	"github.com/erigontech/erigon/core/vm"
 	"github.com/erigontech/erigon/core/vm/evmtypes"
 	"github.com/erigontech/erigon/crypto"
+	"github.com/erigontech/erigon/eth/ethconfig"
+	"github.com/erigontech/erigon/eth/stagedsync"
+	"github.com/erigontech/erigon/eth/stagedsync/stages"
 	"github.com/erigontech/erigon/eth/tracers/logger"
+	"github.com/erigontech/erigon/ethdb/prune"
 	"github.com/erigontech/erigon/params"
 	"github.com/erigontech/erigon/rpc"
 	ethapi2 "github.com/erigontech/erigon/turbo/adapter/ethapi"
 	"github.com/erigontech/erigon/turbo/rpchelper"
 	"github.com/erigontech/erigon/turbo/snapshotsync/freezeblocks"
 	"github.com/erigontech/erigon/turbo/transactions"
-=======
-	"github.com/erigontech/erigon-lib/kv/membatchwithdb"
-	"github.com/erigontech/erigon/consensus"
-	"github.com/erigontech/erigon/core"
-	"github.com/erigontech/erigon/core/state"
-	"github.com/erigontech/erigon/core/types"
-	"github.com/erigontech/erigon/core/types/accounts"
-	"github.com/erigontech/erigon/core/vm"
-	"github.com/erigontech/erigon/core/vm/evmtypes"
-	"github.com/erigontech/erigon/crypto"
-	"github.com/erigontech/erigon/eth/stagedsync"
-	"github.com/erigontech/erigon/eth/tracers/logger"
-	"github.com/erigontech/erigon/params"
-	"github.com/erigontech/erigon/rpc"
-	ethapi2 "github.com/erigontech/erigon/turbo/adapter/ethapi"
-	"github.com/erigontech/erigon/turbo/rpchelper"
-	"github.com/erigontech/erigon/turbo/transactions"
 	"github.com/erigontech/erigon/turbo/trie"
->>>>>>> 339eb2586a (add initial witness generation)
 )
 
 var latestNumOrHash = rpc.BlockNumberOrHashWithNumber(rpc.LatestBlockNumber)
@@ -541,6 +532,48 @@ func (api *BaseAPI) getWitness(ctx context.Context, db kv.RoDB, blockNrOrHash rp
 	tx = batch
 
 	store, err := stagedsync.PrepareForWitness(tx, block, prevHeader.Root, rl, &cfg, ctx, logger)
+	if err != nil {
+		return nil, err
+	}
+
+	txc := wrap.TxContainer{Tx: batch}
+	batchSizeStr := "512M"
+	var batchSize datasize.ByteSize
+	err = batchSize.UnmarshalText([]byte(batchSizeStr))
+	if err != nil {
+		return nil, err
+	}
+
+	pruneMode := prune.Mode{
+		Initialised: false,
+	}
+	vmConfig := &vm.Config{}
+	syncCfg := ethconfig.Defaults.Sync
+	cr := rawdb.NewCanonicalReader()
+	agg, err := libstate.NewAggregator(ctx, api.dirs, config3.HistoryV3AggregationStep, db, cr, logger)
+	if err != nil {
+		return nil, err
+	}
+	rwDb, ok := db.(kv.RwDB)
+	if !ok {
+		return nil, errors.New("could not type convert from kv.RoDB to kv.RwDB")
+	}
+	execCfg := stagedsync.StageExecuteBlocksCfg(rwDb, pruneMode, batchSize, chainConfig, engine, vmConfig, nil,
+		/*stateStream=*/ false,
+		/*badBlockHalt=*/ true, api.dirs, api._blockReader, nil, nil, syncCfg, agg, nil)
+
+	stateSyncStages := stagedsync.DefaultStages(ctx, stagedsync.SnapshotsCfg{}, stagedsync.HeadersCfg{}, stagedsync.BorHeimdallCfg{}, stagedsync.BlockHashesCfg{}, stagedsync.BodiesCfg{}, stagedsync.SendersCfg{}, stagedsync.ExecuteBlockCfg{}, stagedsync.TxLookupCfg{}, stagedsync.FinishCfg{}, true)
+	stateSync := stagedsync.New(
+		ethconfig.Defaults.Sync,
+		stateSyncStages,
+		stagedsync.DefaultUnwindOrder,
+		stagedsync.DefaultPruneOrder,
+		logger,
+	)
+	stageState := &stagedsync.StageState{ID: stages.Execution, BlockNumber: blockNr}
+	// Re-execute block
+	err = stagedsync.ExecBlockV3(stageState, stateSync, txc, stageState.BlockNumber, ctx, execCfg, false, logger)
+
 	if err != nil {
 		return nil, err
 	}
