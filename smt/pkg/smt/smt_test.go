@@ -44,7 +44,7 @@ func TestSMT_SingleInsert(t *testing.T) {
 
 	for _, scenario := range scenarios {
 		t.Run(scenario.name, func(t *testing.T) {
-			s := NewSMT(nil)
+			s := NewSMT(nil, false)
 			// set scenario old root if fail
 			newRoot, err := s.InsertBI(scenario.k, scenario.v)
 			if err != nil {
@@ -60,7 +60,7 @@ func TestSMT_SingleInsert(t *testing.T) {
 }
 
 func TestSMT_MultipleInsert(t *testing.T) {
-	s := NewSMT(nil)
+	s := NewSMT(nil, false)
 	testCases := []struct {
 		root  *big.Int
 		key   *big.Int
@@ -122,7 +122,7 @@ func TestSMT_MultipleInsert(t *testing.T) {
 }
 
 func TestSMT_MultipleInsert3(t *testing.T) {
-	s := NewSMT(nil)
+	s := NewSMT(nil, false)
 	testCases := []struct {
 		root  *big.Int
 		key   *big.Int
@@ -170,7 +170,7 @@ func TestSMT_MultipleInsert3(t *testing.T) {
 }
 
 func TestSMT_UpdateElement1(t *testing.T) {
-	s := NewSMT(nil)
+	s := NewSMT(nil, false)
 	testCases := []struct {
 		root  *big.Int
 		key   *big.Int
@@ -224,7 +224,7 @@ func TestSMT_UpdateElement1(t *testing.T) {
 }
 
 func TestSMT_AddSharedElement2(t *testing.T) {
-	s := NewSMT(nil)
+	s := NewSMT(nil, false)
 
 	r1, err := s.InsertBI(big.NewInt(8), big.NewInt(2))
 	if err != nil {
@@ -249,7 +249,7 @@ func TestSMT_AddSharedElement2(t *testing.T) {
 }
 
 func TestSMT_AddRemove128Elements(t *testing.T) {
-	s := NewSMT(nil)
+	s := NewSMT(nil, false)
 	N := 128
 	var r *SMTResponse
 
@@ -272,7 +272,7 @@ func TestSMT_AddRemove128Elements(t *testing.T) {
 }
 
 func TestSMT_MultipleInsert2(t *testing.T) {
-	s := NewSMT(nil)
+	s := NewSMT(nil, false)
 	testCases := []struct {
 		root  *big.Int
 		key   utils.NodeKey

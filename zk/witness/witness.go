@@ -6,6 +6,8 @@ import (
 	"errors"
 	"fmt"
 
+	"math/big"
+
 	libcommon "github.com/gateway-fm/cdk-erigon-lib/common"
 	"github.com/gateway-fm/cdk-erigon-lib/common/datadir"
 	"github.com/gateway-fm/cdk-erigon-lib/kv"
@@ -27,11 +29,10 @@ import (
 	"github.com/ledgerwatch/erigon/turbo/trie"
 	dstypes "github.com/ledgerwatch/erigon/zk/datastream/types"
 	"github.com/ledgerwatch/erigon/zk/hermez_db"
+	"github.com/ledgerwatch/erigon/zk/l1_data"
 	zkStages "github.com/ledgerwatch/erigon/zk/stages"
 	zkUtils "github.com/ledgerwatch/erigon/zk/utils"
 	"github.com/ledgerwatch/log/v3"
-	"github.com/ledgerwatch/erigon/zk/l1_data"
-	"math/big"
 )
 
 var (
@@ -327,7 +328,7 @@ func (g *Generator) generateWitness(tx kv.Tx, ctx context.Context, blocks []*eri
 	}
 
 	eridb := db2.NewEriDb(batch)
-	smtTrie := smt.NewSMT(eridb)
+	smtTrie := smt.NewSMT(eridb, false)
 
 	witness, err := smt.BuildWitness(smtTrie, rl, ctx)
 	if err != nil {

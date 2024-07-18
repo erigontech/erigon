@@ -104,7 +104,7 @@ type BlockInfoTree struct {
 
 func NewBlockInfoTree() *BlockInfoTree {
 	return &BlockInfoTree{
-		smt: smt.NewSMT(nil),
+		smt: smt.NewSMT(nil, true),
 	}
 }
 func (b *BlockInfoTree) GetRoot() *big.Int {
@@ -147,83 +147,56 @@ func (b *BlockInfoTree) GenerateBlockHeader(oldBlockHash *common.Hash, coinbase 
 }
 
 func generateL2BlockHash(blockHash *common.Hash) (key *utils.NodeKey, value *utils.NodeValue8, err error) {
-	if key, err = KeyBlockHeaderParams(big.NewInt(IndexBlockHeaderParamBlockHash)); err != nil {
-		return nil, nil, err
-	}
 	if value, err = bigInt2NodeVal8(blockHash.Big()); err != nil {
 		return nil, nil, err
 	}
-	return key, value, nil
+	return &BlockHeaderBlockHashKey, value, nil
 }
 
 func generateCoinbase(coinbase *common.Address) (key *utils.NodeKey, value *utils.NodeValue8, err error) {
-	if key, err = KeyBlockHeaderParams(big.NewInt(IndexBlockHeaderParamCoinbase)); err != nil {
-		return nil, nil, err
-	}
-
 	if value, err = bigInt2NodeVal8(coinbase.Hash().Big()); err != nil {
 		return nil, nil, err
 	}
 
-	return key, value, nil
+	return &BlockHeaderCoinbaseKey, value, nil
 }
 
 func generateGasLimit(gasLimit uint64) (key *utils.NodeKey, value *utils.NodeValue8, err error) {
-	if key, err = KeyBlockHeaderParams(big.NewInt(IndexBlockHeaderParamGasLimit)); err != nil {
-		return nil, nil, err
-	}
-
 	if value, err = bigInt2NodeVal8(big.NewInt(0).SetUint64(gasLimit)); err != nil {
 		return nil, nil, err
 	}
-	return key, value, nil
+	return &BlockHeaderGasLimitKey, value, nil
 }
 
 func generateBlockNumber(blockNumber uint64) (key *utils.NodeKey, value *utils.NodeValue8, err error) {
-	if key, err = KeyBlockHeaderParams(big.NewInt(IndexBlockHeaderParamNumber)); err != nil {
-		return nil, nil, err
-	}
-
 	if value, err = bigInt2NodeVal8(big.NewInt(0).SetUint64(blockNumber)); err != nil {
 		return nil, nil, err
 	}
-	return key, value, nil
+	return &BlockHeaderNumberKey, value, nil
 }
 
 func generateTimestamp(timestamp uint64) (key *utils.NodeKey, value *utils.NodeValue8, err error) {
-	if key, err = KeyBlockHeaderParams(big.NewInt(IndexBlockHeaderParamTimestamp)); err != nil {
-		return nil, nil, err
-	}
-
 	if value, err = bigInt2NodeVal8(big.NewInt(0).SetUint64(timestamp)); err != nil {
 		return nil, nil, err
 	}
 
-	return key, value, nil
+	return &BlockHeaderTimestampKey, value, nil
 }
 
 func generateGer(ger *common.Hash) (key *utils.NodeKey, value *utils.NodeValue8, err error) {
-	if key, err = KeyBlockHeaderParams(big.NewInt(IndexBlockHeaderParamGer)); err != nil {
-		return nil, nil, err
-	}
-
 	if value, err = bigInt2NodeVal8(ger.Big()); err != nil {
 		return nil, nil, err
 	}
 
-	return key, value, nil
+	return &BlockHeaderGerKey, value, nil
 }
 
 func generateL1BlockHash(blockHash *common.Hash) (key *utils.NodeKey, value *utils.NodeValue8, err error) {
-	if key, err = KeyBlockHeaderParams(big.NewInt(IndexBlockHeaderParamBlockHashL1)); err != nil {
-		return nil, nil, err
-	}
-
 	if value, err = bigInt2NodeVal8(blockHash.Big()); err != nil {
 		return nil, nil, err
 	}
 
-	return key, value, nil
+	return &BlockHeaderBlockHashL1Key, value, nil
 }
 
 func bigInt2NodeVal8(val *big.Int) (*utils.NodeValue8, error) {
@@ -291,15 +264,12 @@ func generateTxEffectivePercentage(txIndex, effectivePercentage *big.Int) (key *
 }
 
 func generateBlockGasUsed(gasUsed uint64) (key *utils.NodeKey, value *utils.NodeValue8, err error) {
-	if key, err = KeyBlockHeaderParams(big.NewInt(IndexBlockHeaderParamGasUsed)); err != nil {
-		return nil, nil, err
-	}
 	gasUsedBig := big.NewInt(0).SetUint64(gasUsed)
 	if value, err = bigInt2NodeVal8(gasUsedBig); err != nil {
 		return nil, nil, err
 	}
 
-	return key, value, nil
+	return &BlockHeaderGasUsedKey, value, nil
 }
 
 func (b *BlockInfoTree) GenerateBlockTxKeysVals(

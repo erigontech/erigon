@@ -72,7 +72,7 @@ func runGenesisTest(tb testing.TB, filename string) {
 		tb.Fatal("Failed to parse json: ", err)
 	}
 
-	smt := NewSMT(nil)
+	smt := NewSMT(nil, false)
 
 	for _, addr := range genesis.Genesis {
 		fmt.Println(addr.ContractName)
@@ -130,7 +130,7 @@ func runTestVectors(t *testing.T, filename string) {
 
 	for k, tc := range testCases {
 		t.Run(strconv.Itoa(k), func(t *testing.T) {
-			smt := NewSMT(nil)
+			smt := NewSMT(nil, false)
 			for _, addr := range tc.Addresses {
 
 				bal, _ := new(big.Int).SetString(addr.Balance, 10)
@@ -163,7 +163,7 @@ func runTestVectors(t *testing.T, filename string) {
 }
 
 func Test_FullGenesisTest_Deprecated(t *testing.T) {
-	s := NewSMT(nil)
+	s := NewSMT(nil, false)
 
 	e := utils.NodeKey{
 		13946701032480821596,

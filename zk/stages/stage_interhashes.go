@@ -127,7 +127,7 @@ func SpawnZkIntermediateHashesStage(s *stagedsync.StageState, u stagedsync.Unwin
 
 	shouldRegenerate := to > s.BlockNumber && to-s.BlockNumber > cfg.zk.RebuildTreeAfter
 	eridb := db2.NewEriDb(tx)
-	smt := smt.NewSMT(eridb)
+	smt := smt.NewSMT(eridb, false)
 
 	if cfg.zk.IncrementTreeAlways {
 		// increment only behaviour
@@ -475,7 +475,7 @@ func unwindZkSMT(ctx context.Context, logPrefix string, from, to uint64, db kv.R
 	defer log.Info(fmt.Sprintf("[%s] Unwind ended", logPrefix))
 
 	eridb := db2.NewEriDb(db)
-	dbSmt := smt.NewSMT(eridb)
+	dbSmt := smt.NewSMT(eridb, false)
 
 	log.Info(fmt.Sprintf("[%s]", logPrefix), "last root", common.BigToHash(dbSmt.LastRoot()))
 

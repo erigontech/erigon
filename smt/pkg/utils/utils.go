@@ -480,33 +480,31 @@ func ScalarToArrayBig12(scalar *big.Int) []*big.Int {
 	return []*big.Int{r0, r1, r2, r3, r4, r5, r6, r7, r8, r9, r10, r11}
 }
 
-func ScalarToArrayBig(scalar *big.Int) []*big.Int {
-	scalar = new(big.Int).Set(scalar)
-	mask := new(big.Int)
-	mask.SetString("FFFFFFFF", 16)
+var mask = big.NewInt(4294967295)
 
+func ScalarToArrayBig(scalar *big.Int) []*big.Int {
 	r0 := new(big.Int).And(scalar, mask)
 
 	r1 := new(big.Int).Rsh(scalar, 32)
-	r1 = new(big.Int).And(r1, mask)
+	r1.And(r1, mask)
 
 	r2 := new(big.Int).Rsh(scalar, 64)
-	r2 = new(big.Int).And(r2, mask)
+	r2.And(r2, mask)
 
 	r3 := new(big.Int).Rsh(scalar, 96)
-	r3 = new(big.Int).And(r3, mask)
+	r3.And(r3, mask)
 
 	r4 := new(big.Int).Rsh(scalar, 128)
-	r4 = new(big.Int).And(r4, mask)
+	r4.And(r4, mask)
 
 	r5 := new(big.Int).Rsh(scalar, 160)
-	r5 = new(big.Int).And(r5, mask)
+	r5.And(r5, mask)
 
 	r6 := new(big.Int).Rsh(scalar, 192)
-	r6 = new(big.Int).And(r6, mask)
+	r6.And(r6, mask)
 
 	r7 := new(big.Int).Rsh(scalar, 224)
-	r7 = new(big.Int).And(r7, mask)
+	r7.And(r7, mask)
 
 	return []*big.Int{r0, r1, r2, r3, r4, r5, r6, r7}
 }

@@ -288,7 +288,7 @@ func TestSetL2BlockHash(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		smt := smt.NewSMT(nil)
+		smt := smt.NewSMT(nil, true)
 
 		root, err2 := smt.InsertKA(*key, smtutils.NodeValue8ToBigInt(val))
 		if err2 != nil {
@@ -314,7 +314,7 @@ func TestSetCoinbase(t *testing.T) {
 	}
 
 	for i, test := range tests {
-		smt := smt.NewSMT(nil)
+		smt := smt.NewSMT(nil, true)
 		coinbaseAddress := common.HexToAddress(test.coinbaseAddress)
 
 		key, val, err := generateCoinbase(&coinbaseAddress)
@@ -348,7 +348,7 @@ func TestSetBlockNumber(t *testing.T) {
 	}
 
 	for i, test := range tests {
-		smt := smt.NewSMT(nil)
+		smt := smt.NewSMT(nil, true)
 
 		key, val, err := generateBlockNumber(test.blockNum)
 		if err != nil {
@@ -379,7 +379,7 @@ func TestSetGasLimit(t *testing.T) {
 	}
 
 	for i, test := range tests {
-		smt := smt.NewSMT(nil)
+		smt := smt.NewSMT(nil, true)
 
 		key, val, err := generateGasLimit(test.gasLimit)
 		if err != nil {
@@ -410,7 +410,7 @@ func TestSetTimestamp(t *testing.T) {
 	}
 
 	for i, test := range tests {
-		smt := smt.NewSMT(nil)
+		smt := smt.NewSMT(nil, true)
 
 		key, val, err := generateTimestamp(test.timestamp)
 		if err != nil {
@@ -447,7 +447,7 @@ func TestSetGer(t *testing.T) {
 	}
 
 	for i, test := range tests {
-		smt := smt.NewSMT(nil)
+		smt := smt.NewSMT(nil, true)
 		ger := common.HexToHash(test.ger)
 
 		key, val, err := generateGer(&ger)
@@ -485,7 +485,7 @@ func TestSetL1BlockHash(t *testing.T) {
 	}
 
 	for i, test := range tests {
-		smt := smt.NewSMT(nil)
+		smt := smt.NewSMT(nil, true)
 		l1BlockHash := common.HexToHash(test.l1BlockHash)
 
 		key, val, err := generateL1BlockHash(&l1BlockHash)
@@ -506,7 +506,7 @@ func TestSetL1BlockHash(t *testing.T) {
 }
 
 func TestSetL2TxHash(t *testing.T) {
-	smt := smt.NewSMT(nil)
+	smt := smt.NewSMT(nil, true)
 	txIndex := big.NewInt(1)
 	l2TxHash := common.HexToHash("0x000000000000000000000000000000005Ca1aB1E").Big()
 
@@ -529,7 +529,7 @@ func TestSetL2TxHash(t *testing.T) {
 }
 
 func TestSetTxStatus(t *testing.T) {
-	smt := smt.NewSMT(nil)
+	smt := smt.NewSMT(nil, true)
 	txIndex := big.NewInt(1)
 	status := common.HexToHash("0x000000000000000000000000000000005Ca1aB1E").Big()
 
@@ -552,7 +552,7 @@ func TestSetTxStatus(t *testing.T) {
 }
 
 func TestSetCumulativeGasUsed(t *testing.T) {
-	smt := smt.NewSMT(nil)
+	smt := smt.NewSMT(nil, true)
 	txIndex := big.NewInt(1)
 	cgu := common.HexToHash("0x000000000000000000000000000000005Ca1aB1E").Big()
 
@@ -576,7 +576,7 @@ func TestSetCumulativeGasUsed(t *testing.T) {
 }
 
 func TestSetTxEffectivePercentage(t *testing.T) {
-	smt := smt.NewSMT(nil)
+	smt := smt.NewSMT(nil, true)
 	txIndex := big.NewInt(1)
 	egp := common.HexToHash("0x000000000000000000000000000000005Ca1aB1E").Big()
 
@@ -600,7 +600,7 @@ func TestSetTxEffectivePercentage(t *testing.T) {
 }
 
 func TestSetTxLogs(t *testing.T) {
-	smt := smt.NewSMT(nil)
+	smt := smt.NewSMT(nil, true)
 	txIndex := big.NewInt(1)
 	logIndex := big.NewInt(1)
 	log := common.HexToHash("0x000000000000000000000000000000005Ca1aB1E").Big()

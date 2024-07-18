@@ -7,9 +7,9 @@ import (
 	"fmt"
 	"testing"
 
-	"github.com/holiman/uint256"
 	libcommon "github.com/gateway-fm/cdk-erigon-lib/common"
 	"github.com/gateway-fm/cdk-erigon-lib/kv/memdb"
+	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/erigon/chain"
 	"github.com/ledgerwatch/erigon/core/state"
 	"github.com/ledgerwatch/erigon/smt/pkg/db"
@@ -58,7 +58,7 @@ func prepareSMT(t *testing.T) (*smt.SMT, *trie.RetainList) {
 
 	memdb := db.NewMemDb()
 
-	smtTrie := smt.NewSMT(memdb)
+	smtTrie := smt.NewSMT(memdb, false)
 
 	smtTrie.SetAccountState(contract.String(), balance.ToBig(), uint256.NewInt(1).ToBig())
 	smtTrie.SetContractBytecode(contract.String(), hex.EncodeToString(code))

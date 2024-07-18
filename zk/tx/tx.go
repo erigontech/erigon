@@ -504,6 +504,8 @@ func ComputeL2TxHash(
 	return common.HexToHash(hashed), nil
 }
 
+var re = regexp.MustCompile("^[0-9a-fA-F]*$")
+
 func formatL2TxHashParam(param interface{}, paramLength int) (string, error) {
 	var paramStr string
 
@@ -560,11 +562,7 @@ func formatL2TxHashParam(param interface{}, paramLength int) (string, error) {
 		paramStr = "0" + paramStr
 	}
 
-	matched, err := regexp.MatchString("^[0-9a-fA-F]+$", paramStr)
-	if err != nil {
-		return "", err
-	}
-	if !matched {
+	if !re.MatchString(paramStr) {
 		return "", fmt.Errorf("invalid hex string")
 	}
 

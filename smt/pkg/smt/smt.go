@@ -51,7 +51,8 @@ type DebuggableDB interface {
 }
 
 type SMT struct {
-	Db DB
+	noSaveOnInsert bool
+	Db             DB
 	*RoSMT
 }
 
@@ -65,14 +66,15 @@ type SMTResponse struct {
 	Mode          string
 }
 
-func NewSMT(database DB) *SMT {
+func NewSMT(database DB, noSaveOnInsert bool) *SMT {
 	if database == nil {
 		database = db.NewMemDb()
 	}
 
 	return &SMT{
-		Db:    database,
-		RoSMT: NewRoSMT(database),
+		noSaveOnInsert: noSaveOnInsert,
+		Db:             database,
+		RoSMT:          NewRoSMT(database),
 	}
 }
 
@@ -536,19 +538,23 @@ func (s *SMT) insert(k utils.NodeKey, v utils.NodeValue8, newValH [4]uint64, old
 }
 
 func (s *SMT) hashSave(in [8]uint64, capacity, h [4]uint64) ([4]uint64, error) {
-	var sl []uint64
-	sl = append(sl, in[:]...)
-	sl = append(sl, capacity[:]...)
+	if !s.noSaveOnInsert {
+		var sl []uint64
+		sl = append(sl, in[:]...)
+		sl = append(sl, capacity[:]...)
 
-	v := utils.NodeValue12{}
-	for i, val := range sl {
-		b := new(big.Int)
-		v[i] = b.SetUint64(val)
+		v := utils.NodeValue12{}
+		for i, val := range sl {
+			b := new(big.Int)
+			v[i] = b.SetUint64(val)
+		}
+
+		err := s.Db.Insert(h, v)
+		if err != nil {
+			return [4]uint64{}, err
+		}
 	}
-
-	err := s.Db.Insert(h, v)
-
-	return h, err
+	return h, nil
 }
 
 func (s *SMT) hashcalcAndSave(in [8]uint64, capacity [4]uint64) ([4]uint64, error) {
