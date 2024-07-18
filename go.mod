@@ -1,8 +1,6 @@
 module github.com/ledgerwatch/erigon
 
-go 1.22
-
-toolchain go1.22.2
+go 1.21.5
 
 require (
 	github.com/erigontech/mdbx-go v0.38.4
@@ -277,7 +275,7 @@ require (
 	go.uber.org/multierr v1.11.0 // indirect
 	golang.org/x/mod v0.19.0 // indirect
 	golang.org/x/text v0.16.0 // indirect
-	golang.org/x/tools v0.23.0
+	golang.org/x/tools v0.23.0 // indirect
 	gopkg.in/cenkalti/backoff.v1 v1.1.0 // indirect
 	gopkg.in/tomb.v1 v1.0.0-20141024135613-dd632973f1e7 // indirect
 	gotest.tools/v3 v3.5.1 // indirect

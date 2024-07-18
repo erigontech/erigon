@@ -1,8 +1,6 @@
 module github.com/ledgerwatch/erigon-lib
 
-go 1.21.0
-
-toolchain go1.22.4
+go 1.21.5
 
 require (
 	github.com/erigontech/erigon-snapshot v1.3.1-0.20240717150728-8e0fa991b894
