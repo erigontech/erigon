@@ -530,7 +530,7 @@ func (a *ApiHandler) PostEthV1BeaconValidatorsBalances(w http.ResponseWriter, r 
 func (a *ApiHandler) GetEthV1BeaconValidatorsBalances(w http.ResponseWriter, r *http.Request) {
 	blockId, err := beaconhttp.StateIdFromRequest(r)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
+		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
 
