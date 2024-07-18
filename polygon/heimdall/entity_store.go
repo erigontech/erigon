@@ -40,8 +40,6 @@ type EntityStore[TEntity Entity] interface {
 	GetLastEntity(ctx context.Context) (TEntity, error)
 	GetEntity(ctx context.Context, id uint64) (TEntity, error)
 	PutEntity(ctx context.Context, id uint64, entity TEntity) error
-	FindByBlockNum(ctx context.Context, blockNum uint64) (TEntity, error)
-	RangeFromId(ctx context.Context, startId uint64) ([]TEntity, error)
 	RangeFromBlockNum(ctx context.Context, startBlockNum uint64) ([]TEntity, error)
 }
 
@@ -203,19 +201,6 @@ func (s *mdbxEntityStore[TEntity]) PutEntity(ctx context.Context, id uint64, ent
 
 	// update blockNumToIdIndex
 	return s.blockNumToIdIndex.Put(ctx, entity.BlockNumRange(), id)
-}
-
-func (s *mdbxEntityStore[TEntity]) FindByBlockNum(ctx context.Context, blockNum uint64) (TEntity, error) {
-	id, err := s.blockNumToIdIndex.Lookup(ctx, blockNum)
-	if err != nil {
-		return Zero[TEntity](), err
-	}
-	// not found
-	if id == 0 {
-		return Zero[TEntity](), nil
-	}
-
-	return s.GetEntity(ctx, id)
 }
 
 func (s *mdbxEntityStore[TEntity]) RangeFromId(ctx context.Context, startId uint64) ([]TEntity, error) {
