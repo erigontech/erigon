@@ -19,6 +19,7 @@ package jsonrpc
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"math/big"
 	"testing"
 
@@ -80,7 +81,7 @@ func TestErigonGetLatestLogs(t *testing.T) {
 	api := NewErigonAPI(newBaseApiForTest(m), db, nil)
 	expectedLogs, _ := api.GetLogs(m.Ctx, filters.FilterCriteria{FromBlock: big.NewInt(0), ToBlock: big.NewInt(rpc.LatestBlockNumber.Int64())})
 
-	expectedErigonLogs := make([]*types.ErigonLog, 0)
+	expectedErigonLogs := make(types.ErigonLogs, 0)
 	for i := len(expectedLogs) - 1; i >= 0; i-- {
 		expectedErigonLogs = append(expectedErigonLogs, &types.ErigonLog{
 			Address:     expectedLogs[i].Address,
@@ -95,7 +96,7 @@ func TestErigonGetLatestLogs(t *testing.T) {
 			Timestamp:   expectedLogs[i].Timestamp,
 		})
 	}
-	actual, err := api.GetLatestLogs(m.Ctx, filters.FilterCriteria{}, filters.LogFilterOptions{
+	actual, err := api.GetLatestLogs(m.Ctx, filters.FilterCriteria{FromBlock: big.NewInt(0), ToBlock: big.NewInt(rpc.LatestBlockNumber.Int64())}, filters.LogFilterOptions{
 		LogCount: uint64(len(expectedLogs)),
 	})
 	if err != nil {
@@ -116,7 +117,8 @@ func TestErigonGetLatestLogs(t *testing.T) {
 		Removed:     false,
 		Timestamp:   100,
 	}
-	assert.EqualValues(expectedLog, actual[0])
+	assert.Equal(expectedLog, actual[0])
+	println(fmt.Sprintf("%+v\n%+v\n", expectedLog, actual[0]))
 }
 
 func TestErigonGetLatestLogsIgnoreTopics(t *testing.T) {

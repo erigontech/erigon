@@ -52,11 +52,11 @@ func (api *BaseAPI) getReceipts(ctx context.Context, tx kv.Tx, block *types.Bloc
 }
 
 // GetLogs implements eth_getLogs. Returns an array of logs matching a given filter object.
-func (api *APIImpl) GetLogs(ctx context.Context, crit filters.FilterCriteria, db kv.RoDB) (types.Logs, error) {
+func (api *APIImpl) GetLogs(ctx context.Context, crit filters.FilterCriteria) (types.Logs, error) {
 	var begin, end uint64
 	logs := types.Logs{}
 
-	tx, beginErr := db.BeginRo(ctx)
+	tx, beginErr := api.db.BeginRo(ctx)
 	if beginErr != nil {
 		return logs, beginErr
 	}
@@ -285,6 +285,7 @@ func (api *BaseAPI) getLogsV3(ctx context.Context, tx kv.TemporalTx, begin, end 
 	}
 	it := rawdbv3.TxNums2BlockNums(tx, txNumbers, order.Asc)
 	defer it.Close()
+	var timestamp uint64
 	for it.HasNext() {
 		if err = ctx.Err(); err != nil {
 			return nil, err
@@ -298,7 +299,7 @@ func (api *BaseAPI) getLogsV3(ctx context.Context, tx kv.TemporalTx, begin, end 
 		}
 
 		// if block number changed, calculate all related field
-		var timestamp uint64
+
 		if blockNumChanged {
 			if header, err = api._blockReader.HeaderByNumber(ctx, tx, blockNum); err != nil {
 				return nil, err
