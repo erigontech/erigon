@@ -1596,13 +1596,16 @@ func dumpRange(ctx context.Context, f snaptype.FileInfo, dumper dumpFunc, firstK
 	var lastKeyValue uint64
 
 	sn, err := seg.NewCompressor(ctx, "Snapshot "+f.Type.Name(), f.Path, tmpDir, seg.MinPatternScore, workers, log.LvlTrace, logger)
-
 	if err != nil {
 		return lastKeyValue, err
 	}
 	defer sn.Close()
 
+	noCompress := (f.To - f.From) < (snaptype.Erigon2MergeLimit - 1) // compress only large files
 	lastKeyValue, err = dumper(ctx, chainDB, chainConfig, f.From, f.To, firstKey, func(v []byte) error {
+		if noCompress {
+			return sn.AddUncompressedWord(v)
+		}
 		return sn.AddWord(v)
 	}, workers, lvl, logger)
 
