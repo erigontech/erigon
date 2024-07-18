@@ -282,6 +282,7 @@ func (a *ApiHandler) init() {
 							r.Get("/validators", a.GetEthV1BeaconStatesValidators)
 							r.Post("/validators", a.PostEthV1BeaconStatesValidators)
 							r.Get("/validator_balances", a.GetEthV1BeaconValidatorsBalances)
+							r.Post("/validator_balances", a.PostEthV1BeaconValidatorsBalances)
 							r.Get("/validators/{validator_id}", beaconhttp.HandleEndpointFunc(a.GetEthV1BeaconStatesValidator))
 						})
 					})
