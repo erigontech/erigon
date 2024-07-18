@@ -17,8 +17,8 @@
 package sync
 
 import (
-	"github.com/ledgerwatch/erigon/core/types"
-	"github.com/ledgerwatch/erigon/polygon/bor"
+	"github.com/erigontech/erigon/core/types"
+	"github.com/erigontech/erigon/polygon/bor"
 )
 
 type BlocksVerifier func(blocks []*types.Block) error

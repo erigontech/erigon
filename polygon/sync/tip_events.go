@@ -19,12 +19,12 @@ package sync
 import (
 	"context"
 
-	"github.com/ledgerwatch/erigon-lib/log/v3"
-
-	"github.com/ledgerwatch/erigon/core/types"
-	"github.com/ledgerwatch/erigon/eth/protocols/eth"
-	"github.com/ledgerwatch/erigon/polygon/heimdall"
-	"github.com/ledgerwatch/erigon/polygon/p2p"
+	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/core/types"
+	"github.com/erigontech/erigon/eth/protocols/eth"
+	"github.com/erigontech/erigon/polygon/heimdall"
+	"github.com/erigontech/erigon/polygon/p2p"
+	"github.com/erigontech/erigon/polygon/polygoncommon"
 )
 
 const EventTypeNewBlock = "new-block"
@@ -83,25 +83,35 @@ func (e Event) AsNewSpan() EventNewSpan {
 	return e.newSpan
 }
 
+type p2pObserverRegistrar interface {
+	RegisterNewBlockObserver(polygoncommon.Observer[*p2p.DecodedInboundMessage[*eth.NewBlockPacket]]) polygoncommon.UnregisterFunc
+	RegisterNewBlockHashesObserver(polygoncommon.Observer[*p2p.DecodedInboundMessage[*eth.NewBlockHashesPacket]]) polygoncommon.UnregisterFunc
+}
+
+type heimdallObserverRegistrar interface {
+	RegisterMilestoneObserver(func(*heimdall.Milestone)) polygoncommon.UnregisterFunc
+	RegisterSpanObserver(func(*heimdall.Span)) polygoncommon.UnregisterFunc
+}
+
 type TipEvents struct {
-	logger          log.Logger
-	events          *EventChannel[Event]
-	p2pService      p2p.Service
-	heimdallService heimdall.Heimdall
+	logger                    log.Logger
+	events                    *EventChannel[Event]
+	p2pObserverRegistrar      p2pObserverRegistrar
+	heimdallObserverRegistrar heimdallObserverRegistrar
 }
 
 func NewTipEvents(
 	logger log.Logger,
-	p2pService p2p.Service,
-	heimdallService heimdall.Heimdall,
+	p2pObserverRegistrar p2pObserverRegistrar,
+	heimdallObserverRegistrar heimdallObserverRegistrar,
 ) *TipEvents {
 	eventsCapacity := uint(1000) // more than 3 milestones
 
 	return &TipEvents{
-		logger:          logger,
-		events:          NewEventChannel[Event](eventsCapacity),
-		p2pService:      p2pService,
-		heimdallService: heimdallService,
+		logger:                    logger,
+		events:                    NewEventChannel[Event](eventsCapacity),
+		p2pObserverRegistrar:      p2pObserverRegistrar,
+		heimdallObserverRegistrar: heimdallObserverRegistrar,
 	}
 }
 
@@ -112,7 +122,7 @@ func (te *TipEvents) Events() <-chan Event {
 func (te *TipEvents) Run(ctx context.Context) error {
 	te.logger.Debug(syncLogPrefix("running tip events component"))
 
-	newBlockObserverCancel := te.p2pService.RegisterNewBlockObserver(func(message *p2p.DecodedInboundMessage[*eth.NewBlockPacket]) {
+	newBlockObserverCancel := te.p2pObserverRegistrar.RegisterNewBlockObserver(func(message *p2p.DecodedInboundMessage[*eth.NewBlockPacket]) {
 		te.events.PushEvent(Event{
 			Type: EventTypeNewBlock,
 			newBlock: EventNewBlock{
@@ -123,7 +133,7 @@ func (te *TipEvents) Run(ctx context.Context) error {
 	})
 	defer newBlockObserverCancel()
 
-	newBlockHashesObserverCancel := te.p2pService.RegisterNewBlockHashesObserver(func(message *p2p.DecodedInboundMessage[*eth.NewBlockHashesPacket]) {
+	newBlockHashesObserverCancel := te.p2pObserverRegistrar.RegisterNewBlockHashesObserver(func(message *p2p.DecodedInboundMessage[*eth.NewBlockHashesPacket]) {
 		te.events.PushEvent(Event{
 			Type: EventTypeNewBlockHashes,
 			newBlockHashes: EventNewBlockHashes{
@@ -134,7 +144,7 @@ func (te *TipEvents) Run(ctx context.Context) error {
 	})
 	defer newBlockHashesObserverCancel()
 
-	milestoneObserverCancel := te.heimdallService.RegisterMilestoneObserver(func(milestone *heimdall.Milestone) {
+	milestoneObserverCancel := te.heimdallObserverRegistrar.RegisterMilestoneObserver(func(milestone *heimdall.Milestone) {
 		te.events.PushEvent(Event{
 			Type:         EventTypeNewMilestone,
 			newMilestone: milestone,
@@ -142,7 +152,7 @@ func (te *TipEvents) Run(ctx context.Context) error {
 	})
 	defer milestoneObserverCancel()
 
-	spanObserverCancel := te.heimdallService.RegisterSpanObserver(func(span *heimdall.Span) {
+	spanObserverCancel := te.heimdallObserverRegistrar.RegisterSpanObserver(func(span *heimdall.Span) {
 		te.events.PushEvent(Event{
 			Type:    EventTypeNewSpan,
 			newSpan: span,

@@ -20,7 +20,7 @@ import (
 	"context"
 	"sync"
 
-	"github.com/ledgerwatch/erigon/cmd/devnet/devnet"
+	"github.com/erigontech/erigon/cmd/devnet/devnet"
 )
 
 type ctxKey int

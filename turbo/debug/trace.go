@@ -26,7 +26,7 @@ import (
 	"os"
 	"runtime/trace"
 
-	"github.com/ledgerwatch/erigon-lib/log/v3"
+	"github.com/erigontech/erigon-lib/log/v3"
 )
 
 // StartGoTrace turns on tracing, writing to the given file.

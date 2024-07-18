@@ -26,11 +26,11 @@ import (
 	bloomfilter "github.com/holiman/bloomfilter/v2"
 	"github.com/stretchr/testify/require"
 
-	"github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/common/background"
-	"github.com/ledgerwatch/erigon-lib/log/v3"
-	"github.com/ledgerwatch/erigon-lib/recsplit/eliasfano32"
-	"github.com/ledgerwatch/erigon-lib/seg"
+	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common/background"
+	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon-lib/recsplit/eliasfano32"
+	"github.com/erigontech/erigon-lib/seg"
 )
 
 func Test_BtreeIndex_Init2(t *testing.T) {
@@ -370,7 +370,7 @@ func (b *mockIndexReader) keyCmp(k []byte, di uint64, g ArchiveGetter) (int, []b
 	var res []byte
 	res, _ = g.Next(res[:0])
 
-	//TODO: use `b.getter.Match` after https://github.com/ledgerwatch/erigon/issues/7855
+	//TODO: use `b.getter.Match` after https://github.com/erigontech/erigon/issues/7855
 	return bytes.Compare(res, k), res, nil
 	//return b.getter.Match(k), result, nil
 }

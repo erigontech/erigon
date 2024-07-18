@@ -170,7 +170,7 @@ This should return something along the lines of this (depending on how far your 
 ```
 
 Also, there
-are [extensive instructions for using Postman](https://github.com/ledgerwatch/erigon/wiki/Using-Postman-to-Test-TurboGeth-RPC)
+are [extensive instructions for using Postman](https://github.com/erigontech/erigon/wiki/Using-Postman-to-Test-TurboGeth-RPC)
 to test the RPC.
 
 ### Debugging

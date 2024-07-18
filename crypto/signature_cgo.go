@@ -28,7 +28,7 @@ import (
 
 	"github.com/erigontech/secp256k1"
 
-	"github.com/ledgerwatch/erigon/common/math"
+	"github.com/erigontech/erigon/common/math"
 )
 
 // Ecrecover returns the uncompressed public key that created the given signature.
