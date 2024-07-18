@@ -5,18 +5,23 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/c2h5oh/datasize"
 	"github.com/erigontech/erigon-lib/chain"
 	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/datadir"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/kv/membatchwithdb"
 	"github.com/erigontech/erigon-lib/log/v3"
+	libstate "github.com/erigontech/erigon-lib/state"
+	"github.com/erigontech/erigon-lib/wrap"
 	"github.com/erigontech/erigon/consensus"
 	"github.com/erigontech/erigon/core"
 	"github.com/erigontech/erigon/core/state"
 	"github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/core/vm"
+	"github.com/erigontech/erigon/eth/ethconfig"
 	"github.com/erigontech/erigon/eth/stagedsync/stages"
+	"github.com/erigontech/erigon/ethdb/prune"
 	"github.com/erigontech/erigon/turbo/rpchelper"
 	"github.com/erigontech/erigon/turbo/services"
 	"github.com/erigontech/erigon/turbo/trie"
@@ -256,22 +261,29 @@ func RewindStagesForWitness(batch *membatchwithdb.MemoryMutation, blockNr uint64
 	unwindState := &UnwindState{ID: stages.HashState, UnwindPoint: blockNr - 1, CurrentBlockNumber: blockNr}
 	stageState := &StageState{ID: stages.HashState, BlockNumber: blockNr}
 
-	if err := UnwindHashStateStage(unwindState, stageState, batch, *cfg, ctx, logger); err != nil {
+	txc := wrap.TxContainer{Tx: batch}
+	batchSizeStr := "512M"
+	var batchSize datasize.ByteSize
+	err := batchSize.UnmarshalText([]byte(batchSizeStr))
+	if err != nil {
 		return nil, nil, err
 	}
 
-	unwindState = &UnwindState{ID: stages.IntermediateHashes, UnwindPoint: blockNr - 1, CurrentBlockNumber: blockNr}
-	stageState = &StageState{ID: stages.IntermediateHashes, BlockNumber: blockNr}
+	pruneMode := prune.Mode{
+		Initialised: false,
+	}
+	var engine consensus.Engine = nil
+	vmConfig := &vm.Config{}
+	dirs := cfg.dirs
+	blockReader := cfg.blockReader
+	syncCfg := ethconfig.Defaults.Sync
+	var agg *libstate.Aggregator = nil
+	execCfg := StageExecuteBlocksCfg(cfg.db, pruneMode, batchSize, nil, engine, vmConfig, nil,
+		/*stateStream=*/ false,
+		/*badBlockHalt=*/ true, dirs, blockReader, nil, nil, syncCfg, agg, nil)
 
-	if !regenerateHash {
-		interHashStageCfg := StageTrieCfg(nil, false, false, false, "", cfg.blockReader, nil, false, nil)
-		err := UnwindIntermediateHashes("eth_getWitness", rl, unwindState, stageState, batch, interHashStageCfg, ctx.Done(), logger)
-		if err != nil {
-			return nil, nil, err
-		}
-	} else {
-		_ = batch.ClearBucket(kv.TrieOfAccounts)
-		_ = batch.ClearBucket(kv.TrieOfStorage)
+	if err := UnwindExecutionStage(unwindState, stageState, txc, ctx, execCfg, logger); err != nil {
+		return nil, nil, err
 	}
 
 	return batch, rl, nil
