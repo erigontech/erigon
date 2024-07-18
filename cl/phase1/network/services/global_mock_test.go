@@ -17,7 +17,7 @@
 package services
 
 import (
-	"github.com/ledgerwatch/erigon-lib/types/ssz"
+	"github.com/erigontech/erigon-lib/types/ssz"
 	"go.uber.org/mock/gomock"
 )
 

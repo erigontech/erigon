@@ -27,8 +27,8 @@ import (
 	"github.com/c2h5oh/datasize"
 	"github.com/spf13/cobra"
 
-	"github.com/ledgerwatch/erigon-lib/seg"
-	"github.com/ledgerwatch/erigon-lib/state"
+	"github.com/erigontech/erigon-lib/seg"
+	"github.com/erigontech/erigon-lib/state"
 )
 
 func init() {

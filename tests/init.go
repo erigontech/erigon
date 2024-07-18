@@ -24,8 +24,8 @@ import (
 	"math/big"
 	"sort"
 
-	"github.com/ledgerwatch/erigon-lib/chain"
-	"github.com/ledgerwatch/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/chain"
+	"github.com/erigontech/erigon-lib/common"
 )
 
 // Forks table defines supported forks and their chain config.

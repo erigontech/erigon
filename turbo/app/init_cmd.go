@@ -22,14 +22,14 @@ import (
 
 	"github.com/urfave/cli/v2"
 
-	"github.com/ledgerwatch/erigon-lib/log/v3"
-	"github.com/ledgerwatch/erigon/core/types"
-	"github.com/ledgerwatch/erigon/turbo/debug"
+	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/core/types"
+	"github.com/erigontech/erigon/turbo/debug"
 
-	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon/cmd/utils"
-	"github.com/ledgerwatch/erigon/core"
-	"github.com/ledgerwatch/erigon/node"
+	"github.com/erigontech/erigon-lib/kv"
+	"github.com/erigontech/erigon/cmd/utils"
+	"github.com/erigontech/erigon/core"
+	"github.com/erigontech/erigon/node"
 )
 
 var initCommand = cli.Command{

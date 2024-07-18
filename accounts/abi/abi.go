@@ -27,9 +27,9 @@ import (
 	"fmt"
 	"io"
 
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	libcommon "github.com/erigontech/erigon-lib/common"
 
-	"github.com/ledgerwatch/erigon/crypto"
+	"github.com/erigontech/erigon/crypto"
 )
 
 // The ABI holds information about a contract's context and available

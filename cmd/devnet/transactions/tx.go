@@ -22,21 +22,21 @@ import (
 	"strings"
 	"time"
 
-	"github.com/ledgerwatch/erigon-lib/log/v3"
+	"github.com/erigontech/erigon-lib/log/v3"
 
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	libcommon "github.com/erigontech/erigon-lib/common"
 
-	"github.com/ledgerwatch/erigon/cmd/devnet/accounts"
-	"github.com/ledgerwatch/erigon/cmd/devnet/blocks"
-	"github.com/ledgerwatch/erigon/cmd/devnet/devnet"
-	"github.com/ledgerwatch/erigon/cmd/devnet/devnetutils"
-	"github.com/ledgerwatch/erigon/cmd/devnet/scenarios"
-	"github.com/ledgerwatch/erigon/rpc"
+	"github.com/erigontech/erigon/cmd/devnet/accounts"
+	"github.com/erigontech/erigon/cmd/devnet/blocks"
+	"github.com/erigontech/erigon/cmd/devnet/devnet"
+	"github.com/erigontech/erigon/cmd/devnet/devnetutils"
+	"github.com/erigontech/erigon/cmd/devnet/scenarios"
+	"github.com/erigontech/erigon/rpc"
 
 	"github.com/holiman/uint256"
 
-	"github.com/ledgerwatch/erigon/core/types"
-	"github.com/ledgerwatch/erigon/params"
+	"github.com/erigontech/erigon/core/types"
+	"github.com/erigontech/erigon/params"
 )
 
 func init() {

@@ -35,13 +35,13 @@ import (
 	"github.com/holiman/uint256"
 	"golang.org/x/crypto/sha3"
 
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/common/hexutil"
+	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common/hexutil"
 
-	"github.com/ledgerwatch/erigon/common/math"
-	"github.com/ledgerwatch/erigon/common/u256"
-	"github.com/ledgerwatch/erigon/crypto/cryptopool"
-	"github.com/ledgerwatch/erigon/rlp"
+	"github.com/erigontech/erigon/common/math"
+	"github.com/erigontech/erigon/common/u256"
+	"github.com/erigontech/erigon/crypto/cryptopool"
+	"github.com/erigontech/erigon/rlp"
 )
 
 // SignatureLength indicates the byte length required to carry a signature with recovery id.

@@ -23,7 +23,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/ledgerwatch/erigon/common/mclock"
+	"github.com/erigontech/erigon/common/mclock"
 )
 
 func TestExpHeap(t *testing.T) {

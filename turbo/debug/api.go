@@ -37,8 +37,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/ledgerwatch/erigon-lib/common/dbg"
-	"github.com/ledgerwatch/erigon-lib/log/v3"
+	"github.com/erigontech/erigon-lib/common/dbg"
+	"github.com/erigontech/erigon-lib/log/v3"
 )
 
 // Handler is the global debugging handler.

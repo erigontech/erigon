@@ -20,9 +20,9 @@ import (
 	"context"
 	"strconv"
 
-	"github.com/ledgerwatch/erigon-lib/chain"
-	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon/core/rawdb"
+	"github.com/erigontech/erigon-lib/chain"
+	"github.com/erigontech/erigon-lib/kv"
+	"github.com/erigontech/erigon/core/rawdb"
 )
 
 func Check(e error) {

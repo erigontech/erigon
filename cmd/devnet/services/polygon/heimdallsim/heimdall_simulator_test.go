@@ -27,10 +27,10 @@ import (
 
 	"github.com/stretchr/testify/assert"
 
-	"github.com/ledgerwatch/erigon-lib/log/v3"
+	"github.com/erigontech/erigon-lib/log/v3"
 
-	"github.com/ledgerwatch/erigon/cmd/devnet/services/polygon/heimdallsim"
-	"github.com/ledgerwatch/erigon/polygon/heimdall"
+	"github.com/erigontech/erigon/cmd/devnet/services/polygon/heimdallsim"
+	"github.com/erigontech/erigon/polygon/heimdall"
 )
 
 //go:embed testdata/v1-000000-000500-borevents.seg

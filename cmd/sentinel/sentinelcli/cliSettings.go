@@ -19,17 +19,17 @@ package sentinelcli
 import (
 	"fmt"
 
-	"github.com/ledgerwatch/erigon/cl/clparams"
-	"github.com/ledgerwatch/erigon/cmd/sentinel/sentinelflags"
-	"github.com/ledgerwatch/erigon/cmd/utils"
+	"github.com/erigontech/erigon/cl/clparams"
+	"github.com/erigontech/erigon/cmd/sentinel/sentinelflags"
+	"github.com/erigontech/erigon/cmd/utils"
 
-	"github.com/ledgerwatch/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common"
 
 	"github.com/urfave/cli/v2"
 
-	"github.com/ledgerwatch/erigon/turbo/logging"
+	"github.com/erigontech/erigon/turbo/logging"
 
-	"github.com/ledgerwatch/erigon-lib/log/v3"
+	"github.com/erigontech/erigon-lib/log/v3"
 )
 
 type SentinelCliCfg struct {

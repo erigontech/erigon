@@ -24,10 +24,10 @@ import (
 	"errors"
 	"math/big"
 
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	libcommon "github.com/erigontech/erigon-lib/common"
 
-	ethereum "github.com/ledgerwatch/erigon"
-	"github.com/ledgerwatch/erigon/core/types"
+	ethereum "github.com/erigontech/erigon"
+	"github.com/erigontech/erigon/core/types"
 )
 
 var (

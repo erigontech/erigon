@@ -23,16 +23,16 @@ import (
 
 	"google.golang.org/protobuf/types/known/emptypb"
 
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/gointerfaces"
-	"github.com/ledgerwatch/erigon-lib/kv"
+	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/gointerfaces"
+	"github.com/erigontech/erigon-lib/kv"
 
-	execution "github.com/ledgerwatch/erigon-lib/gointerfaces/executionproto"
-	types2 "github.com/ledgerwatch/erigon-lib/gointerfaces/typesproto"
+	execution "github.com/erigontech/erigon-lib/gointerfaces/executionproto"
+	types2 "github.com/erigontech/erigon-lib/gointerfaces/typesproto"
 
-	"github.com/ledgerwatch/erigon/core/rawdb"
-	"github.com/ledgerwatch/erigon/core/types"
-	"github.com/ledgerwatch/erigon/turbo/execution/eth1/eth1_utils"
+	"github.com/erigontech/erigon/core/rawdb"
+	"github.com/erigontech/erigon/core/types"
+	"github.com/erigontech/erigon/turbo/execution/eth1/eth1_utils"
 )
 
 var errNotFound = errors.New("notfound")

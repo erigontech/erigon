@@ -20,13 +20,13 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/ledgerwatch/erigon-lib/log/v3"
+	"github.com/erigontech/erigon-lib/log/v3"
 
-	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon/core/types"
-	"github.com/ledgerwatch/erigon/dataflow"
-	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
-	"github.com/ledgerwatch/erigon/polygon/bor/finality/whitelist"
+	"github.com/erigontech/erigon-lib/kv"
+	"github.com/erigontech/erigon/core/types"
+	"github.com/erigontech/erigon/dataflow"
+	"github.com/erigontech/erigon/eth/stagedsync/stages"
+	"github.com/erigontech/erigon/polygon/bor/finality/whitelist"
 )
 
 func MiningBorHeimdallForward(

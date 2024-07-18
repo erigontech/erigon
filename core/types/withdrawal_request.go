@@ -21,9 +21,9 @@ import (
 	// "fmt"
 	"io"
 
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	rlp2 "github.com/ledgerwatch/erigon-lib/rlp"
-	"github.com/ledgerwatch/erigon/rlp"
+	libcommon "github.com/erigontech/erigon-lib/common"
+	rlp2 "github.com/erigontech/erigon-lib/rlp"
+	"github.com/erigontech/erigon/rlp"
 )
 
 // EIP-7002 Withdrawal Request see https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7002.md

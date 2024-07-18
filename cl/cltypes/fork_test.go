@@ -19,9 +19,9 @@ package cltypes_test
 import (
 	"testing"
 
-	"github.com/ledgerwatch/erigon/cl/cltypes"
-	"github.com/ledgerwatch/erigon/cl/merkle_tree"
-	ssz2 "github.com/ledgerwatch/erigon/cl/ssz"
+	"github.com/erigontech/erigon/cl/cltypes"
+	"github.com/erigontech/erigon/cl/merkle_tree"
+	ssz2 "github.com/erigontech/erigon/cl/ssz"
 	"github.com/stretchr/testify/require"
 )
 

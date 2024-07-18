@@ -34,14 +34,14 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/ledgerwatch/erigon-lib/common/hexutil"
+	"github.com/erigontech/erigon-lib/common/hexutil"
 
 	"github.com/davecgh/go-spew/spew"
 
-	"github.com/ledgerwatch/erigon-lib/log/v3"
-	"github.com/ledgerwatch/erigon/common/mclock"
-	"github.com/ledgerwatch/erigon/crypto"
-	"github.com/ledgerwatch/erigon/p2p/enode"
+	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/common/mclock"
+	"github.com/erigontech/erigon/crypto"
+	"github.com/erigontech/erigon/p2p/enode"
 )
 
 // To regenerate discv5 test vectors, run

@@ -20,8 +20,8 @@ import (
 	"context"
 	"io"
 
-	remote "github.com/ledgerwatch/erigon-lib/gointerfaces/remoteproto"
-	types "github.com/ledgerwatch/erigon-lib/gointerfaces/typesproto"
+	remote "github.com/erigontech/erigon-lib/gointerfaces/remoteproto"
+	types "github.com/erigontech/erigon-lib/gointerfaces/typesproto"
 	"google.golang.org/grpc"
 	"google.golang.org/protobuf/types/known/emptypb"
 )

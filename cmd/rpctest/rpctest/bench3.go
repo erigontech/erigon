@@ -22,9 +22,9 @@ import (
 	"net/http"
 	"time"
 
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	libcommon "github.com/erigontech/erigon-lib/common"
 
-	"github.com/ledgerwatch/erigon/core/state"
+	"github.com/erigontech/erigon/core/state"
 )
 
 func Bench3(erigon_url, geth_url string) error {

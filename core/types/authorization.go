@@ -7,13 +7,14 @@ import (
 	"io"
 
 	"github.com/holiman/uint256"
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/common/length"
-	rlp2 "github.com/ledgerwatch/erigon-lib/rlp"
-	"github.com/ledgerwatch/erigon/common/u256"
-	"github.com/ledgerwatch/erigon/crypto"
-	"github.com/ledgerwatch/erigon/params"
-	"github.com/ledgerwatch/erigon/rlp"
+
+	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common/length"
+	rlp2 "github.com/erigontech/erigon-lib/rlp"
+	"github.com/erigontech/erigon/common/u256"
+	"github.com/erigontech/erigon/crypto"
+	"github.com/erigontech/erigon/params"
+	"github.com/erigontech/erigon/rlp"
 )
 
 type Authorization struct {

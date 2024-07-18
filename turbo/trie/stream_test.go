@@ -24,11 +24,11 @@ import (
 	"sort"
 	"testing"
 
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	libcommon "github.com/erigontech/erigon-lib/common"
 
-	"github.com/ledgerwatch/erigon/common"
-	"github.com/ledgerwatch/erigon/core/types/accounts"
-	"github.com/ledgerwatch/erigon/crypto"
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/core/types/accounts"
+	"github.com/erigontech/erigon/crypto"
 )
 
 func TestHashWithModificationsEmpty(t *testing.T) {
