@@ -288,6 +288,9 @@ func SpawnSequencingStage(
 			break
 		}
 
+		// timer: evm + smt
+		t := utils.StartTimer("stage_sequence_execute", "evm", "smt")
+
 		overflowOnNewBlock, err := batchCounters.StartNewBlock(l1InfoIndex != 0)
 		if err != nil {
 			return err
@@ -471,6 +474,13 @@ func SpawnSequencingStage(
 			return err
 		}
 
+		t.LogTimer()
+		gasPerSecond := float64(0)
+		elapsedSeconds := t.Elapsed().Seconds()
+		if elapsedSeconds != 0 {
+			gasPerSecond = float64(block.GasUsed()) / elapsedSeconds
+		}
+
 		if limboRecovery {
 			stateRoot := block.Root()
 			cfg.txPool.UpdateLimboRootByTxHash(limboTxHash, &stateRoot)
@@ -479,7 +489,11 @@ func SpawnSequencingStage(
 			log.Debug(fmt.Sprintf("[%s] state root at block %d = %s", s.LogPrefix(), blockNumber, block.Root().Hex()))
 		}
 
-		log.Info(fmt.Sprintf("[%s] Finish block %d with %d transactions...", logPrefix, blockNumber, len(addedTransactions)))
+		if gasPerSecond != 0 {
+			log.Info(fmt.Sprintf("[%s] Finish block %d with %d transactions... (%d gas/s)", logPrefix, blockNumber, len(addedTransactions), int(gasPerSecond)))
+		} else {
+			log.Info(fmt.Sprintf("[%s] Finish block %d with %d transactions...", logPrefix, blockNumber, len(addedTransactions)))
+		}
 
 		if !hasExecutorForThisBatch {
 			// save counters midbatch

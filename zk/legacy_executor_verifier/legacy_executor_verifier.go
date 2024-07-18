@@ -22,6 +22,7 @@ import (
 	"github.com/ledgerwatch/erigon/zk/syncer"
 	"github.com/ledgerwatch/log/v3"
 	"sync"
+	"github.com/ledgerwatch/erigon/zk/utils"
 )
 
 var ErrNoExecutorAvailable = fmt.Errorf("no executor available")
@@ -152,6 +153,9 @@ func (v *LegacyExecutorVerifier) VerifySync(tx kv.Tx, request *VerifierRequest, 
 		return ErrNoExecutorAvailable
 	}
 
+	t := utils.StartTimer("legacy-executor-verifier", "verify-sync")
+	defer t.LogTimer()
+
 	e.AquireAccess()
 	defer e.ReleaseAccess()
 
@@ -175,6 +179,8 @@ func (v *LegacyExecutorVerifier) AddRequestUnsafe(request *VerifierRequest, sequ
 		if e == nil {
 			return verifierBundle, ErrNoExecutorAvailable
 		}
+
+		t := utils.StartTimer("legacy-executor-verifier", "add-request-unsafe")
 
 		e.AquireAccess()
 		defer e.ReleaseAccess()
@@ -272,6 +278,9 @@ func (v *LegacyExecutorVerifier) AddRequestUnsafe(request *VerifierRequest, sequ
 			}
 		}
 
+		// log timing w/o stream write
+		t.LogTimer()
+
 		if err = v.checkAndWriteToStream(tx, hermezDb, request.BatchNumber); err != nil {
 			log.Error("error writing data to stream", "err", err)
 		}
@@ -295,6 +304,9 @@ func (v *LegacyExecutorVerifier) AddRequestUnsafe(request *VerifierRequest, sequ
 }
 
 func (v *LegacyExecutorVerifier) checkAndWriteToStream(tx kv.Tx, hdb *hermez_db.HermezDbReader, newBatch uint64) error {
+	t := utils.StartTimer("legacy-executor-verifier", "check-and-write-to-stream")
+	defer t.LogTimer()
+
 	v.responsesMtx.Lock()
 	defer v.responsesMtx.Unlock()
 
