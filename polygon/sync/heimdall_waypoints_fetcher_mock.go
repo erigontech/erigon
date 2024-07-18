@@ -12,9 +12,10 @@ package sync
 import (
 	context "context"
 	reflect "reflect"
-
-	heimdall "github.com/ledgerwatch/erigon/polygon/heimdall"
+	
 	gomock "go.uber.org/mock/gomock"
+
+	heimdall "github.com/erigontech/erigon/polygon/heimdall"
 )
 
 // MockheimdallWaypointsFetcher is a mock of heimdallWaypointsFetcher interface.
