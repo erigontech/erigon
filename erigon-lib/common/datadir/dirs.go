@@ -24,6 +24,7 @@ import (
 	"syscall"
 
 	"github.com/gofrs/flock"
+
 	"github.com/erigontech/erigon-lib/common/dir"
 )
 

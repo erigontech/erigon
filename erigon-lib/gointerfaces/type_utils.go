@@ -20,6 +20,7 @@ import (
 	"encoding/binary"
 
 	"github.com/holiman/uint256"
+
 	types "github.com/erigontech/erigon-lib/gointerfaces/typesproto"
 )
 
