@@ -1601,7 +1601,12 @@ func dumpRange(ctx context.Context, f snaptype.FileInfo, dumper dumpFunc, firstK
 	}
 	defer sn.Close()
 
-	noCompress := (f.To - f.From) < (snaptype.Erigon2MergeLimit - 1) // compress only large files
+	// E3 need to keep db smaller: earlier retire -> earlier prune.
+	// Means:
+	//  - build must be fast
+	//  - merge can be slow and expensive
+	noCompress := (f.To - f.From) < (snaptype.Erigon2MergeLimit - 1)
+
 	lastKeyValue, err = dumper(ctx, chainDB, chainConfig, f.From, f.To, firstKey, func(v []byte) error {
 		if noCompress {
 			return sn.AddUncompressedWord(v)
