@@ -1810,6 +1810,7 @@ func (dt *DomainRoTx) Prune(ctx context.Context, rwTx kv.RwTx, step, txFrom, txT
 			if err := ancientDomainValsCollector.Load(rwTx, dt.d.valsTable, loadFunc, etl.TransformArgs{Quit: ctx.Done()}); err != nil {
 				return stat, fmt.Errorf("load domain values: %w", err)
 			}
+			fmt.Println("pruned keys", a)
 			if err := SaveExecV3PruneProgress(rwTx, dt.d.valsTable, k); err != nil {
 				return stat, fmt.Errorf("save domain pruning progress: %s, %w", dt.d.filenameBase, err)
 			}
@@ -1817,6 +1818,7 @@ func (dt *DomainRoTx) Prune(ctx context.Context, rwTx kv.RwTx, step, txFrom, txT
 		}
 		a++
 		limit--
+		stat.Values++
 		if err := ancientDomainValsCollector.Collect(k, v); err != nil {
 			return nil, err
 		}
