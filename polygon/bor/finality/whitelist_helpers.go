@@ -20,12 +20,12 @@ import (
 	"context"
 	"errors"
 
-	"github.com/ledgerwatch/erigon-lib/log/v3"
+	"github.com/erigontech/erigon-lib/log/v3"
 
-	"github.com/ledgerwatch/erigon/polygon/heimdall"
+	"github.com/erigontech/erigon/polygon/heimdall"
 
-	"github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon/polygon/bor/finality/whitelist"
+	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon/polygon/bor/finality/whitelist"
 )
 
 var (

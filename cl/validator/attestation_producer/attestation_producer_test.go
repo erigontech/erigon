@@ -19,9 +19,9 @@ package attestation_producer_test
 import (
 	"testing"
 
-	"github.com/ledgerwatch/erigon/cl/antiquary/tests"
-	"github.com/ledgerwatch/erigon/cl/clparams"
-	"github.com/ledgerwatch/erigon/cl/validator/attestation_producer"
+	"github.com/erigontech/erigon/cl/antiquary/tests"
+	"github.com/erigontech/erigon/cl/clparams"
+	"github.com/erigontech/erigon/cl/validator/attestation_producer"
 	"github.com/stretchr/testify/require"
 )
 

@@ -19,10 +19,10 @@ package commands
 import (
 	"github.com/spf13/cobra"
 
-	"github.com/ledgerwatch/erigon/turbo/cli"
+	"github.com/erigontech/erigon/turbo/cli"
 
-	"github.com/ledgerwatch/erigon/cmd/utils"
-	"github.com/ledgerwatch/erigon/eth/ethconfig"
+	"github.com/erigontech/erigon/cmd/utils"
+	"github.com/erigontech/erigon/eth/ethconfig"
 )
 
 var (

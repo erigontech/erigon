@@ -20,7 +20,7 @@ import (
 	"fmt"
 	"runtime"
 
-	"github.com/ledgerwatch/erigon-lib/common/dbg"
+	"github.com/erigontech/erigon-lib/common/dbg"
 )
 
 func PrintMemStats(short bool) {

@@ -26,18 +26,18 @@ import (
 	"github.com/klauspost/compress/zstd"
 	"github.com/spf13/afero"
 
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/log/v3"
-	"github.com/ledgerwatch/erigon/cl/beacon/beacon_router_configuration"
-	"github.com/ledgerwatch/erigon/cl/clparams"
-	"github.com/ledgerwatch/erigon/cl/cltypes"
-	"github.com/ledgerwatch/erigon/cl/cltypes/lightclient_utils"
-	"github.com/ledgerwatch/erigon/cl/cltypes/solid"
-	"github.com/ledgerwatch/erigon/cl/persistence/base_encoding"
-	"github.com/ledgerwatch/erigon/cl/phase1/core/state"
-	diffstorage "github.com/ledgerwatch/erigon/cl/phase1/forkchoice/fork_graph/diff_storage"
-	"github.com/ledgerwatch/erigon/cl/transition"
-	"github.com/ledgerwatch/erigon/cl/transition/impl/eth2"
+	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/cl/beacon/beacon_router_configuration"
+	"github.com/erigontech/erigon/cl/clparams"
+	"github.com/erigontech/erigon/cl/cltypes"
+	"github.com/erigontech/erigon/cl/cltypes/lightclient_utils"
+	"github.com/erigontech/erigon/cl/cltypes/solid"
+	"github.com/erigontech/erigon/cl/persistence/base_encoding"
+	"github.com/erigontech/erigon/cl/phase1/core/state"
+	diffstorage "github.com/erigontech/erigon/cl/phase1/forkchoice/fork_graph/diff_storage"
+	"github.com/erigontech/erigon/cl/transition"
+	"github.com/erigontech/erigon/cl/transition/impl/eth2"
 )
 
 const dumpSlotFrequency = 4
@@ -416,15 +416,23 @@ func (f *forkGraphDisk) MarkHeaderAsInvalid(blockRoot libcommon.Hash) {
 	f.badBlocks.Store(blockRoot, struct{}{})
 }
 
+func (f *forkGraphDisk) hasBeaconState(blockRoot libcommon.Hash) bool {
+	_, err := f.fs.Stat(getBeaconStateFilename(blockRoot))
+	return err == nil
+}
+
 func (f *forkGraphDisk) Prune(pruneSlot uint64) (err error) {
 	pruneSlot -= f.beaconCfg.SlotsPerEpoch * 2
 	oldRoots := make([]libcommon.Hash, 0, f.beaconCfg.SlotsPerEpoch)
-	highestCrossedEpochSlot := uint64(0)
+	highestStoredBeaconStateSlot := uint64(0)
 	f.blocks.Range(func(key, value interface{}) bool {
 		hash := key.(libcommon.Hash)
 		signedBlock := value.(*cltypes.SignedBeaconBlock)
-		if signedBlock.Block.Slot%f.beaconCfg.SlotsPerEpoch == 0 && highestCrossedEpochSlot < signedBlock.Block.Slot {
-			highestCrossedEpochSlot = signedBlock.Block.Slot
+		if signedBlock.Block.Slot < highestStoredBeaconStateSlot {
+			return true
+		}
+		if f.hasBeaconState(hash) {
+			highestStoredBeaconStateSlot = signedBlock.Block.Slot
 		}
 		if signedBlock.Block.Slot >= pruneSlot {
 			return true
@@ -433,7 +441,7 @@ func (f *forkGraphDisk) Prune(pruneSlot uint64) (err error) {
 
 		return true
 	})
-	if pruneSlot >= highestCrossedEpochSlot {
+	if pruneSlot >= highestStoredBeaconStateSlot {
 		return
 	}
 
