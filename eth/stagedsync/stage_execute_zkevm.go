@@ -269,6 +269,11 @@ func getExecRange(cfg ExecuteBlockCfg, tx kv.RwTx, stageProgress, toBlock uint64
 		return to, total, nil
 	}
 
+	// skip if no progress
+	if toBlock == 0 {
+		return 0, 0, nil
+	}
+
 	shouldShortCircuit, noProgressTo, err := utils.ShouldShortCircuitExecution(tx, logPrefix)
 	if err != nil {
 		return 0, 0, err
