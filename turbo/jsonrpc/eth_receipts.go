@@ -52,11 +52,11 @@ func (api *BaseAPI) getReceipts(ctx context.Context, tx kv.Tx, block *types.Bloc
 }
 
 // GetLogs implements eth_getLogs. Returns an array of logs matching a given filter object.
-func (api *APIImpl) GetLogs(ctx context.Context, crit filters.FilterCriteria) (types.Logs, error) {
+func (api *APIImpl) GetLogs(ctx context.Context, crit filters.FilterCriteria, db kv.RoDB) (types.Logs, error) {
 	var begin, end uint64
 	logs := types.Logs{}
 
-	tx, beginErr := api.db.BeginRo(ctx)
+	tx, beginErr := db.BeginRo(ctx)
 	if beginErr != nil {
 		return logs, beginErr
 	}
@@ -124,7 +124,25 @@ func (api *APIImpl) GetLogs(ctx context.Context, crit filters.FilterCriteria) (t
 		end = latest
 	}
 
-	return api.getLogsV3(ctx, tx.(kv.TemporalTx), begin, end, crit)
+	erigonLogs, err := api.getLogsV3(ctx, tx.(kv.TemporalTx), begin, end, crit)
+	if err != nil {
+		return nil, err
+	}
+	logs = make(types.Logs, len(erigonLogs))
+	for i, log := range erigonLogs {
+		logs[i] = &types.Log{
+			Address:     log.Address,
+			Topics:      log.Topics,
+			Data:        log.Data,
+			BlockNumber: log.BlockNumber,
+			TxHash:      log.TxHash,
+			TxIndex:     log.TxIndex,
+			BlockHash:   log.BlockHash,
+			Index:       log.Index,
+			Removed:     log.Removed,
+		}
+	}
+	return logs, nil
 }
 
 // The Topic list restricts matches to particular event topics. Each event has a list
@@ -244,8 +262,8 @@ func applyFiltersV3(tx kv.TemporalTx, begin, end uint64, crit filters.FilterCrit
 	return out, nil
 }
 
-func (api *APIImpl) getLogsV3(ctx context.Context, tx kv.TemporalTx, begin, end uint64, crit filters.FilterCriteria) ([]*types.Log, error) {
-	logs := []*types.Log{}
+func (api *BaseAPI) getLogsV3(ctx context.Context, tx kv.TemporalTx, begin, end uint64, crit filters.FilterCriteria) ([]*types.ErigonLog, error) {
+	logs := []*types.ErigonLog{}
 
 	addrMap := make(map[common.Address]struct{}, len(crit.Addresses))
 	for _, v := range crit.Addresses {
@@ -280,6 +298,7 @@ func (api *APIImpl) getLogsV3(ctx context.Context, tx kv.TemporalTx, begin, end 
 		}
 
 		// if block number changed, calculate all related field
+		var timestamp uint64
 		if blockNumChanged {
 			if header, err = api._blockReader.HeaderByNumber(ctx, tx, blockNum); err != nil {
 				return nil, err
@@ -290,6 +309,7 @@ func (api *APIImpl) getLogsV3(ctx context.Context, tx kv.TemporalTx, begin, end 
 			}
 			blockHash = header.Hash()
 			exec.ChangeBlock(header)
+			timestamp = header.Time
 		}
 
 		//fmt.Printf("txNum=%d, blockNum=%d, txIndex=%d, maxTxNumInBlock=%d,mixTxNumInBlock=%d\n", txNum, blockNum, txIndex, maxTxNumInBlock, minTxNumInBlock)
@@ -318,7 +338,23 @@ func (api *APIImpl) getLogsV3(ctx context.Context, tx kv.TemporalTx, begin, end 
 			log.BlockHash = blockHash
 			log.TxHash = txn.Hash()
 		}
-		logs = append(logs, filtered...)
+		filteredErigonLogs := make(types.ErigonLogs, len(rawLogs))
+		//TODO: maybe Logs by default and enreach them with
+		for i, filteredLog := range filtered {
+			filteredErigonLogs[i] = &types.ErigonLog{
+				Address:     filteredLog.Address,
+				Topics:      filteredLog.Topics,
+				Data:        filteredLog.Data,
+				BlockNumber: filteredLog.BlockNumber,
+				TxHash:      filteredLog.TxHash,
+				TxIndex:     filteredLog.TxIndex,
+				BlockHash:   filteredLog.BlockHash,
+				Index:       filteredLog.Index,
+				Removed:     filteredLog.Removed,
+				Timestamp:   timestamp,
+			}
+		}
+		logs = append(logs, filteredErigonLogs...)
 	}
 
 	//stats := api._agg.GetAndResetStats()
