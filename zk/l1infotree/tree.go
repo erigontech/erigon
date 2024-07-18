@@ -3,8 +3,8 @@ package l1infotree
 import (
 	"fmt"
 
-	"github.com/ledgerwatch/log/v3"
 	"github.com/gateway-fm/cdk-erigon-lib/common"
+	"github.com/ledgerwatch/log/v3"
 )
 
 // L1InfoTree provides methods to compute L1InfoTree
@@ -14,6 +14,7 @@ type L1InfoTree struct {
 	count       uint32
 	siblings    [][32]byte
 	currentRoot common.Hash
+	allLeaves   map[[32]byte]struct{}
 }
 
 // NewL1InfoTree creates new L1InfoTree.
@@ -29,6 +30,12 @@ func NewL1InfoTree(height uint8, initialLeaves [][32]byte) (*L1InfoTree, error) 
 		log.Error("error initializing siblings. Error: ", err)
 		return nil, err
 	}
+
+	mt.allLeaves = make(map[[32]byte]struct{})
+	for _, leaf := range initialLeaves {
+		mt.allLeaves[leaf] = struct{}{}
+	}
+
 	log.Debug("Initial count: ", mt.count)
 	log.Debug("Initial root: ", mt.currentRoot)
 	return mt, nil
@@ -48,6 +55,12 @@ func (mt *L1InfoTree) ResetL1InfoTree(initialLeaves [][32]byte) (*L1InfoTree, er
 		log.Error("error initializing siblings. Error: ", err)
 		return nil, err
 	}
+
+	newMT.allLeaves = make(map[[32]byte]struct{})
+	for _, leaf := range initialLeaves {
+		newMT.allLeaves[leaf] = struct{}{}
+	}
+
 	log.Debug("Reset initial count: ", newMT.count)
 	log.Debug("Reset initial root: ", newMT.currentRoot)
 	return newMT, nil
@@ -163,9 +176,17 @@ func (mt *L1InfoTree) AddLeaf(index uint32, leaf [32]byte) (common.Hash, error) 
 			// the sibling of 0 bit should be the zero hash, since we are in the last node of the tree
 		}
 	}
+
+	mt.allLeaves[leaf] = struct{}{}
+
 	mt.currentRoot = cur
 	mt.count++
 	return cur, nil
+}
+
+func (mt *L1InfoTree) LeafExists(leaf [32]byte) bool {
+	_, ok := mt.allLeaves[leaf]
+	return ok
 }
 
 // initSiblings returns the siblings of the node at the given index.

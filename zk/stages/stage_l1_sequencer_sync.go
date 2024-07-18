@@ -168,19 +168,14 @@ Loop:
 	return nil
 }
 
-func HandleL1InfoTreeUpdate(
-	syncer IL1Syncer,
-	hermezDb *hermez_db.HermezDb,
-	l ethTypes.Log,
-	latestUpdate *types.L1InfoTreeUpdate,
-	found bool,
-	header *ethTypes.Header,
-) (*types.L1InfoTreeUpdate, error) {
+func CreateL1InfoTreeUpdate(l ethTypes.Log, header *ethTypes.Header) (*types.L1InfoTreeUpdate, error) {
 	if len(l.Topics) != 3 {
-		log.Warn("Received log for info tree that did not have 3 topics")
-		return nil, nil
+		return nil, fmt.Errorf("received log for info tree that did not have 3 topics")
 	}
-	var err error
+
+	if l.BlockNumber != header.Number.Uint64() {
+		return nil, fmt.Errorf("received log for info tree that did not match the block number")
+	}
 
 	mainnetExitRoot := l.Topics[1]
 	rollupExitRoot := l.Topics[2]
@@ -190,35 +185,26 @@ func HandleL1InfoTreeUpdate(
 		GER:             common.BytesToHash(ger),
 		MainnetExitRoot: mainnetExitRoot,
 		RollupExitRoot:  rollupExitRoot,
+		BlockNumber:     l.BlockNumber,
+		Timestamp:       header.Time,
+		ParentHash:      header.ParentHash,
 	}
 
-	if !found {
-		// this is a special case, so we need to start at index 0
-		update.Index = 0
-	} else {
-		// increment the index from the previous entry
-		update.Index = latestUpdate.Index + 1
-	}
+	return update, nil
+}
 
-	// now we need the block timestamp and the parent hash information for the block tied
-	// to this event
-	if header == nil {
-		header, err = syncer.GetHeader(l.BlockNumber)
-		if err != nil {
-			return nil, err
-		}
-	}
-	update.ParentHash = header.ParentHash
-	update.Timestamp = header.Time
-	update.BlockNumber = l.BlockNumber
-
+func HandleL1InfoTreeUpdate(
+	hermezDb *hermez_db.HermezDb,
+	update *types.L1InfoTreeUpdate,
+) error {
+	var err error
 	if err = hermezDb.WriteL1InfoTreeUpdate(update); err != nil {
-		return nil, err
+		return err
 	}
 	if err = hermezDb.WriteL1InfoTreeUpdateToGer(update); err != nil {
-		return nil, err
+		return err
 	}
-	return update, nil
+	return nil
 }
 
 const (

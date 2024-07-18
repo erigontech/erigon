@@ -140,13 +140,39 @@ LOOP:
 					treeInitialised = true
 				}
 
-				latestUpdate, err = HandleL1InfoTreeUpdate(cfg.syncer, hermezDb, l, latestUpdate, found, header)
+				if header == nil {
+					header, err = cfg.syncer.GetHeader(l.BlockNumber)
+					if err != nil {
+						return err
+					}
+				}
+
+				tmpUpdate, err := CreateL1InfoTreeUpdate(l, header)
+
 				if err != nil {
 					return err
 				}
-				found = true
 
-				leafHash := l1infotree.HashLeafData(latestUpdate.GER, latestUpdate.ParentHash, latestUpdate.Timestamp)
+				leafHash := l1infotree.HashLeafData(tmpUpdate.GER, tmpUpdate.ParentHash, tmpUpdate.Timestamp)
+
+				if tree.LeafExists(leafHash) {
+					log.Warn("Skipping log as L1 Info Tree leaf already exists", "hash", leafHash)
+					continue
+				}
+
+				if found {
+					tmpUpdate.Index = latestUpdate.Index + 1
+				} else {
+					tmpUpdate.Index = 0
+				}
+
+				found = true
+				latestUpdate = tmpUpdate
+
+				err = HandleL1InfoTreeUpdate(hermezDb, latestUpdate)
+				if err != nil {
+					return err
+				}
 
 				leafFoundInDb, err := hermezDb.IsL1InfoTreeLeafSaves(leafHash)
 				if err != nil {
