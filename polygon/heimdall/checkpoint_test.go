@@ -21,9 +21,9 @@ import (
 	"testing"
 	"time"
 
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon/crypto"
-	"github.com/ledgerwatch/erigon/polygon/heimdall/heimdalltest"
+	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon/crypto"
+	"github.com/erigontech/erigon/polygon/heimdall/heimdalltest"
 )
 
 func TestCheckpointJsonMarshall(t *testing.T) {

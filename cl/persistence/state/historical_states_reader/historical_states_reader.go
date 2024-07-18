@@ -25,18 +25,17 @@ import (
 	"sync"
 
 	"github.com/klauspost/compress/zstd"
-	"github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon/cl/clparams"
-	"github.com/ledgerwatch/erigon/cl/cltypes"
-	"github.com/ledgerwatch/erigon/cl/cltypes/solid"
-	"github.com/ledgerwatch/erigon/cl/persistence/base_encoding"
-	state_accessors "github.com/ledgerwatch/erigon/cl/persistence/state"
-	"github.com/ledgerwatch/erigon/cl/phase1/core/state"
-	"github.com/ledgerwatch/erigon/cl/phase1/core/state/lru"
-	"github.com/ledgerwatch/erigon/turbo/snapshotsync/freezeblocks"
 
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/kv"
+	"github.com/erigontech/erigon/cl/clparams"
+	"github.com/erigontech/erigon/cl/cltypes"
+	"github.com/erigontech/erigon/cl/cltypes/solid"
+	"github.com/erigontech/erigon/cl/persistence/base_encoding"
+	state_accessors "github.com/erigontech/erigon/cl/persistence/state"
+	"github.com/erigontech/erigon/cl/phase1/core/state"
+	"github.com/erigontech/erigon/cl/phase1/core/state/lru"
+	"github.com/erigontech/erigon/turbo/snapshotsync/freezeblocks"
 )
 
 var buffersPool = sync.Pool{
@@ -841,7 +840,7 @@ func (r *HistoricalStatesReader) tryCachingEpochsInParallell(tx kv.Tx, activeIdx
 			return err
 		}
 
-		go func(mix libcommon.Hash, epoch uint64, idxs []uint64) {
+		go func(mix common.Hash, epoch uint64, idxs []uint64) {
 			defer wg.Done()
 
 			_, _ = r.ComputeCommittee(mix, idxs, epoch*r.cfg.SlotsPerEpoch, r.cfg.TargetCommitteeSize, 0)
@@ -870,18 +869,18 @@ func (r *HistoricalStatesReader) ReadValidatorsBalances(tx kv.Tx, slot uint64) (
 	return balancesList, balancesList.DecodeSSZ(balances, 0)
 }
 
-func (r *HistoricalStatesReader) ReadRandaoMixBySlotAndIndex(tx kv.Tx, slot, index uint64) (libcommon.Hash, error) {
+func (r *HistoricalStatesReader) ReadRandaoMixBySlotAndIndex(tx kv.Tx, slot, index uint64) (common.Hash, error) {
 	epoch := slot / r.cfg.SlotsPerEpoch
 	epochSubIndex := epoch % r.cfg.EpochsPerHistoricalVector
 	if index == epochSubIndex {
 		intraRandaoMix, err := tx.GetOne(kv.IntraRandaoMixes, base_encoding.Encode64ToBytes4(slot))
 		if err != nil {
-			return libcommon.Hash{}, err
+			return common.Hash{}, err
 		}
 		if len(intraRandaoMix) != 32 {
-			return libcommon.Hash{}, fmt.Errorf("invalid intra randao mix length %d", len(intraRandaoMix))
+			return common.Hash{}, fmt.Errorf("invalid intra randao mix length %d", len(intraRandaoMix))
 		}
-		return libcommon.BytesToHash(intraRandaoMix), nil
+		return common.BytesToHash(intraRandaoMix), nil
 	}
 	needFromGenesis := true
 	var epochLookup uint64
@@ -905,10 +904,10 @@ func (r *HistoricalStatesReader) ReadRandaoMixBySlotAndIndex(tx kv.Tx, slot, ind
 	}
 	mixBytes, err := tx.GetOne(kv.RandaoMixes, base_encoding.Encode64ToBytes4(epochLookup*r.cfg.SlotsPerEpoch))
 	if err != nil {
-		return libcommon.Hash{}, err
+		return common.Hash{}, err
 	}
 	if len(mixBytes) != 32 {
-		return libcommon.Hash{}, fmt.Errorf("invalid mix length %d", len(mixBytes))
+		return common.Hash{}, fmt.Errorf("invalid mix length %d", len(mixBytes))
 	}
-	return libcommon.BytesToHash(mixBytes), nil
+	return common.BytesToHash(mixBytes), nil
 }

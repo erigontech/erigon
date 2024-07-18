@@ -24,16 +24,16 @@ import (
 	"math/bits"
 	"time"
 
-	"github.com/ledgerwatch/erigon-lib/log/v3"
+	"github.com/erigontech/erigon-lib/log/v3"
 
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/common/hexutil"
-	length2 "github.com/ledgerwatch/erigon-lib/common/length"
-	"github.com/ledgerwatch/erigon-lib/kv"
-	dbutils2 "github.com/ledgerwatch/erigon-lib/kv/dbutils"
+	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common/hexutil"
+	length2 "github.com/erigontech/erigon-lib/common/length"
+	"github.com/erigontech/erigon-lib/kv"
+	dbutils2 "github.com/erigontech/erigon-lib/kv/dbutils"
 
-	"github.com/ledgerwatch/erigon/core/types/accounts"
-	"github.com/ledgerwatch/erigon/turbo/rlphacks"
+	"github.com/erigontech/erigon/core/types/accounts"
+	"github.com/erigontech/erigon/turbo/rlphacks"
 )
 
 /*

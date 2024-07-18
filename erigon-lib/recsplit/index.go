@@ -30,12 +30,12 @@ import (
 	"time"
 	"unsafe"
 
-	"github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/common/dbg"
-	"github.com/ledgerwatch/erigon-lib/log/v3"
-	"github.com/ledgerwatch/erigon-lib/mmap"
-	"github.com/ledgerwatch/erigon-lib/recsplit/eliasfano16"
-	"github.com/ledgerwatch/erigon-lib/recsplit/eliasfano32"
+	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common/dbg"
+	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon-lib/mmap"
+	"github.com/erigontech/erigon-lib/recsplit/eliasfano16"
+	"github.com/erigontech/erigon-lib/recsplit/eliasfano32"
 )
 
 type Features byte
@@ -60,7 +60,7 @@ const (
 	//      general-purpose-filter: 9bits/key, 0.3% false-positives, 3 mem access
 	//      first-bytes-array: 8bits/key, 1/256=0.4% false-positives, 1 mem access
 	//
-	// See also: https://github.com/ledgerwatch/erigon/issues/9486
+	// See also: https://github.com/erigontech/erigon/issues/9486
 	LessFalsePositives Features = 0b10 //
 )
 

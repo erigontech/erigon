@@ -24,8 +24,8 @@ import (
 	"os/exec"
 	"testing"
 
-	"github.com/ledgerwatch/erigon-lib/downloader"
-	"github.com/ledgerwatch/erigon-lib/log/v3"
+	"github.com/erigontech/erigon-lib/downloader"
+	"github.com/erigontech/erigon-lib/log/v3"
 )
 
 func hasRClone() bool {

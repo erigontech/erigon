@@ -21,10 +21,10 @@ import (
 
 	"golang.org/x/sync/errgroup"
 
-	"github.com/ledgerwatch/erigon-lib/common/generics"
-	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon-lib/log/v3"
-	"github.com/ledgerwatch/erigon/polygon/polygoncommon"
+	"github.com/erigontech/erigon-lib/common/generics"
+	"github.com/erigontech/erigon-lib/kv"
+	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/polygon/polygoncommon"
 )
 
 type ServiceStore interface {

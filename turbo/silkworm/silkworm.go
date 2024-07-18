@@ -23,9 +23,9 @@ import (
 
 	silkworm_go "github.com/erigontech/silkworm-go"
 
-	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon-lib/log/v3"
-	"github.com/ledgerwatch/erigon/consensus"
+	"github.com/erigontech/erigon-lib/kv"
+	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/consensus"
 )
 
 type Silkworm = silkworm_go.Silkworm

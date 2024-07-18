@@ -24,9 +24,9 @@ import (
 	"fmt"
 	"testing"
 
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	libcommon "github.com/erigontech/erigon-lib/common"
 
-	"github.com/ledgerwatch/erigon/rpc"
+	"github.com/erigontech/erigon/rpc"
 )
 
 func TestUnmarshalJSONNewFilterArgs(t *testing.T) {

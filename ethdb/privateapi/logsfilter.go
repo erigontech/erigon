@@ -21,12 +21,12 @@ import (
 	"io"
 	"sync"
 
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/gointerfaces"
-	remote "github.com/ledgerwatch/erigon-lib/gointerfaces/remoteproto"
-	types "github.com/ledgerwatch/erigon-lib/gointerfaces/typesproto"
+	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/gointerfaces"
+	remote "github.com/erigontech/erigon-lib/gointerfaces/remoteproto"
+	types "github.com/erigontech/erigon-lib/gointerfaces/typesproto"
 
-	"github.com/ledgerwatch/erigon/turbo/shards"
+	"github.com/erigontech/erigon/turbo/shards"
 )
 
 type LogsFilterAggregator struct {

@@ -22,10 +22,10 @@ import (
 	"encoding/json"
 	"sync"
 
-	"github.com/ledgerwatch/erigon-lib/common/generics"
-	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon-lib/kv/stream"
-	"github.com/ledgerwatch/erigon/polygon/polygoncommon"
+	"github.com/erigontech/erigon-lib/common/generics"
+	"github.com/erigontech/erigon-lib/kv"
+	"github.com/erigontech/erigon-lib/kv/stream"
+	"github.com/erigontech/erigon/polygon/polygoncommon"
 )
 
 var databaseTablesCfg = kv.TableCfg{

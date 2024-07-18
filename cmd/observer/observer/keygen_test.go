@@ -24,8 +24,8 @@ import (
 
 	"github.com/stretchr/testify/assert"
 
-	"github.com/ledgerwatch/erigon-lib/log/v3"
-	"github.com/ledgerwatch/erigon/crypto"
+	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/crypto"
 )
 
 func TestKeygen(t *testing.T) {

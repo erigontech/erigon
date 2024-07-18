@@ -22,9 +22,10 @@ package state
 
 import (
 	"github.com/holiman/uint256"
-	"github.com/ledgerwatch/erigon-lib/common"
 
-	"github.com/ledgerwatch/erigon/core/types/accounts"
+	"github.com/erigontech/erigon-lib/common"
+
+	"github.com/erigontech/erigon/core/types/accounts"
 )
 
 const (
