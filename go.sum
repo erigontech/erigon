@@ -270,10 +270,12 @@ github.com/envoyproxy/go-control-plane v0.9.9-0.20201210154907-fd9021fe5dad/go.m
 github.com/envoyproxy/protoc-gen-validate v0.1.0/go.mod h1:iSmxcyjqTsJpI2R4NaDN7+kN2VEUnK/pcBlmesArF7c=
 github.com/erigontech/mdbx-go v0.38.4 h1:S9T7mTe9KPcFe4dOoOtVdI6gPzht9y7wMnYfUBgrQLo=
 github.com/erigontech/mdbx-go v0.38.4/go.mod h1:IcOLQDPw3VM/asP6T5JVPPN4FHHgJtY16XfYjzWKVNI=
+github.com/erigontech/secp256k1 v1.1.0 h1:mO3YJMUSoASE15Ya//SoHiisptUhdXExuMUN1M0X9qY=
+github.com/erigontech/secp256k1 v1.1.0/go.mod h1:GokhPepsMB+EYDs7I5JZCprxHW6+yfOcJKaKtoZ+Fls=
 github.com/erigontech/silkworm-go v0.18.0 h1:j56p61xZHBFhZGH1OixlGU8KcfjHzcw9pjAfjmVsOZA=
 github.com/erigontech/silkworm-go v0.18.0/go.mod h1:O50ux0apICEVEGyRWiE488K8qz8lc3PA/SXbQQAc8SU=
-github.com/erigontech/torrent v1.54.2-alpha-31 h1:0SNfuCwE5I+q1iInoz3NxdHFpsjQrArb85z2CL4flGI=
-github.com/erigontech/torrent v1.54.2-alpha-31/go.mod h1:QtK2WLdEz1Iy1Dh/325UltdHU0nA1xujh2rN6aov6y0=
+github.com/erigontech/torrent v1.54.2-alpha-32 h1:Ly8W2JvD7r1o5TklXxKEV9D9Tr664tSrgj5OPpOrlWg=
+github.com/erigontech/torrent v1.54.2-alpha-32/go.mod h1:QtK2WLdEz1Iy1Dh/325UltdHU0nA1xujh2rN6aov6y0=
 github.com/fatih/color v1.16.0 h1:zmkK9Ngbjj+K0yRhTVONQh1p/HknKYSlNT+vZCzyokM=
 github.com/fatih/color v1.16.0/go.mod h1:fL2Sau1YI5c0pdGEVCbKQbLXB6edEj1ZgiY4NijnWvE=
 github.com/fjl/gencodec v0.0.0-20220412091415-8bb9e558978c h1:CndMRAH4JIwxbW8KYq6Q+cGWcGHz0FjGR3QqcInWcW0=
@@ -539,8 +541,6 @@ github.com/ledgerwatch/erigon-snapshot v1.3.1-0.20240705135436-5d6d882b41f7 h1:N
 github.com/ledgerwatch/erigon-snapshot v1.3.1-0.20240705135436-5d6d882b41f7/go.mod h1:3AuPxZc85jkehh/HA9h8gabv5MSi3kb/ddtzBsTVJFo=
 github.com/ledgerwatch/erigonwatch v0.1.0 h1:TrCjklOu9ZI9/uiMigo1Jnknnk1I/dXUxXymA3xHfzo=
 github.com/ledgerwatch/erigonwatch v0.1.0/go.mod h1:uYq4hs3RL1OtIYRXAxYq02tpdGkx6rtXlpzdazDDbWI=
-github.com/erigontech/secp256k1 v1.1.0 h1:mO3YJMUSoASE15Ya//SoHiisptUhdXExuMUN1M0X9qY=
-github.com/erigontech/secp256k1 v1.1.0/go.mod h1:GokhPepsMB+EYDs7I5JZCprxHW6+yfOcJKaKtoZ+Fls=
 github.com/libp2p/go-buffer-pool v0.1.0 h1:oK4mSFcQz7cTQIfqbe4MIj9gLW+mnanjyFtc6cdF0Y8=
 github.com/libp2p/go-buffer-pool v0.1.0/go.mod h1:N+vh8gMqimBzdKkSMVuydVDq+UV5QTWy5HSiZacSbPg=
 github.com/libp2p/go-flow-metrics v0.1.0 h1:0iPhMI8PskQwzh57jB9WxIuIOQ0r+15PChFGkx3Q3WM=
