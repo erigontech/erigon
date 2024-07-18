@@ -1340,4 +1340,5 @@ func (u *snapshotUploader) upload(ctx context.Context, logger log.Logger) {
 			u.removeBefore(maxUploaded - u.cfg.syncConfig.FrozenBlockLimit)
 		}
 	}
+
 }
