@@ -29,7 +29,11 @@ import (
 )
 
 type Service interface {
-	Heimdall
+	FetchLatestSpans(ctx context.Context, count uint) ([]*Span, error)
+	FetchCheckpointsFromBlock(ctx context.Context, startBlock uint64) (Waypoints, error)
+	FetchMilestonesFromBlock(ctx context.Context, startBlock uint64) (Waypoints, error)
+	RegisterMilestoneObserver(callback func(*Milestone)) polygoncommon.UnregisterFunc
+	RegisterSpanObserver(callback func(*Span)) polygoncommon.UnregisterFunc
 	Run(ctx context.Context) error
 }
 
