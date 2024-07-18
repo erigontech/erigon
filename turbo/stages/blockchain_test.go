@@ -1,18 +1,21 @@
 // Copyright 2014 The go-ethereum Authors
-// This file is part of the go-ethereum library.
+// (original work)
+// Copyright 2024 The Erigon Authors
+// (modifications)
+// This file is part of Erigon.
 //
-// The go-ethereum library is free software: you can redistribute it and/or modify
+// Erigon is free software: you can redistribute it and/or modify
 // it under the terms of the GNU Lesser General Public License as published by
 // the Free Software Foundation, either version 3 of the License, or
 // (at your option) any later version.
 //
-// The go-ethereum library is distributed in the hope that it will be useful,
+// Erigon is distributed in the hope that it will be useful,
 // but WITHOUT ANY WARRANTY; without even the implied warranty of
 // MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
 // GNU Lesser General Public License for more details.
 //
 // You should have received a copy of the GNU Lesser General Public License
-// along with the go-ethereum library. If not, see <http://www.gnu.org/licenses/>.
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
 package stages_test
 
@@ -21,37 +24,39 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
+	protosentry "github.com/erigontech/erigon-lib/gointerfaces/sentryproto"
+	"github.com/erigontech/erigon/eth/protocols/eth"
+	"github.com/erigontech/erigon/rlp"
 	"math"
 	"math/big"
 	"testing"
 
-	"github.com/ledgerwatch/erigon-lib/common/hexutil"
-	"github.com/ledgerwatch/erigon-lib/config3"
-	"github.com/ledgerwatch/erigon-lib/log/v3"
+	"github.com/erigontech/erigon-lib/common/hexutil"
+	"github.com/erigontech/erigon-lib/log/v3"
 
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	libchain "github.com/ledgerwatch/erigon-lib/chain"
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/common/length"
-	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon-lib/kv/bitmapdb"
-	types2 "github.com/ledgerwatch/erigon-lib/types"
+	libchain "github.com/erigontech/erigon-lib/chain"
+	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common/length"
+	"github.com/erigontech/erigon-lib/kv"
+	"github.com/erigontech/erigon-lib/kv/bitmapdb"
+	types2 "github.com/erigontech/erigon-lib/types"
 
-	"github.com/ledgerwatch/erigon/common/u256"
-	"github.com/ledgerwatch/erigon/consensus/ethash"
-	"github.com/ledgerwatch/erigon/core"
-	"github.com/ledgerwatch/erigon/core/rawdb"
-	"github.com/ledgerwatch/erigon/core/state"
-	"github.com/ledgerwatch/erigon/core/types"
-	"github.com/ledgerwatch/erigon/core/vm"
-	"github.com/ledgerwatch/erigon/crypto"
-	"github.com/ledgerwatch/erigon/ethdb/prune"
-	"github.com/ledgerwatch/erigon/params"
-	"github.com/ledgerwatch/erigon/turbo/services"
-	"github.com/ledgerwatch/erigon/turbo/stages/mock"
+	"github.com/erigontech/erigon/common/u256"
+	"github.com/erigontech/erigon/consensus/ethash"
+	"github.com/erigontech/erigon/core"
+	"github.com/erigontech/erigon/core/rawdb"
+	"github.com/erigontech/erigon/core/state"
+	"github.com/erigontech/erigon/core/types"
+	"github.com/erigontech/erigon/core/vm"
+	"github.com/erigontech/erigon/crypto"
+	"github.com/erigontech/erigon/ethdb/prune"
+	"github.com/erigontech/erigon/params"
+	"github.com/erigontech/erigon/turbo/services"
+	"github.com/erigontech/erigon/turbo/stages/mock"
 )
 
 // So we can deterministically seed different blockchains
@@ -303,7 +308,7 @@ func testReorgShort(t *testing.T) {
 	t.Parallel()
 	// Create a long easy chain vs. a short heavy one. Due to difficulty adjustment
 	// we need a fairly long chain of blocks with different difficulties for a short
-	// one to become heavyer than a long one. The 96 is an empirical value.
+	// one to become heavier than a long one. The 96 is an empirical value.
 	easy := make([]int64, 96)
 	for i := 0; i < len(easy); i++ {
 		easy[i] = 60
@@ -316,10 +321,6 @@ func testReorgShort(t *testing.T) {
 }
 
 func testReorg(t *testing.T, first, second []int64, td int64) {
-	if config3.EnableHistoryV4InTest {
-		t.Skip("TODO: [e4] implement me")
-	}
-
 	require := require.New(t)
 	// Create a pristine chain and database
 	m := newCanonical(t, 0)
@@ -356,7 +357,13 @@ func testReorg(t *testing.T, first, second []int64, td int64) {
 	if err != nil {
 		t.Fatal(err)
 	}
+
+	hashPacket := make([]libcommon.Hash, 0)
+	queryNum := 0
+
 	for block.NumberU64() != 0 {
+		hashPacket = append(hashPacket, block.Hash())
+		queryNum++
 		if prev.ParentHash() != block.Hash() {
 			t.Errorf("parent block hash mismatch: have %x, want %x", prev.ParentHash(), block.Hash())
 		}
@@ -366,6 +373,43 @@ func testReorg(t *testing.T, first, second []int64, td int64) {
 			t.Fatal(err)
 		}
 	}
+
+	b, err := rlp.EncodeToBytes(&eth.GetReceiptsPacket66{
+		RequestId:         1,
+		GetReceiptsPacket: hashPacket,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	m.ReceiveWg.Add(1)
+	for _, err = range m.Send(&protosentry.InboundMessage{Id: protosentry.MessageId_GET_RECEIPTS_66, Data: b, PeerId: m.PeerId}) {
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	m.ReceiveWg.Wait()
+
+	msg := m.SentMessage(0)
+
+	require.Equal(protosentry.MessageId_RECEIPTS_66, msg.Id)
+
+	encoded, err := rlp.EncodeToBytes(types.Receipts{})
+	require.NoError(err)
+
+	res := make([]rlp.RawValue, 0, queryNum)
+	for i := 0; i < queryNum; i++ {
+		res = append(res, encoded)
+	}
+
+	b, err = rlp.EncodeToBytes(&eth.ReceiptsRLPPacket66{
+		RequestId:         1,
+		ReceiptsRLPPacket: res,
+	})
+	require.NoError(err)
+	require.Equal(b, msg.GetData())
+
 	// Make sure the chain total difficulty is the correct one
 	want := new(big.Int).Add(m.Genesis.Difficulty(), big.NewInt(td))
 	have, err := rawdb.ReadTdByHash(tx, rawdb.ReadCurrentHeader(tx).Hash())
@@ -1381,8 +1425,8 @@ func TestDeleteCreateRevert(t *testing.T) {
 // TestDeleteRecreateSlots tests a state-transition that contains both deletion
 // and recreation of contract state.
 // Contract A exists, has slots 1 and 2 set
-// Tx 1: Selfdestruct A
-// Tx 2: Re-create A, set slots 3 and 4
+// txn 1: Selfdestruct A
+// txn 2: Re-create A, set slots 3 and 4
 // Expected outcome is that _all_ slots are cleared from A, due to the selfdestruct,
 // and then the new slots exist
 func TestDeleteRecreateSlots(t *testing.T) {
@@ -1692,8 +1736,8 @@ func TestDeleteRecreateAccount(t *testing.T) {
 // TestDeleteRecreateSlotsAcrossManyBlocks tests multiple state-transition that contains both deletion
 // and recreation of contract state.
 // Contract A exists, has slots 1 and 2 set
-// Tx 1: Selfdestruct A
-// Tx 2: Re-create A, set slots 3 and 4
+// txn 1: Selfdestruct A
+// txn 2: Re-create A, set slots 3 and 4
 // Expected outcome is that _all_ slots are cleared from A, due to the selfdestruct,
 // and then the new slots exist
 func TestDeleteRecreateSlotsAcrossManyBlocks(t *testing.T) {
@@ -1896,7 +1940,7 @@ func TestDeleteRecreateSlotsAcrossManyBlocks(t *testing.T) {
 //   - Block 7338110: a CREATE2 is attempted. The CREATE2 would deploy code on
 //     the same address e771789f5cccac282f23bb7add5690e1f6ca467c. However, the
 //     deployment fails due to OOG during initcode execution
-//   - Block 7338115: another tx checks the balance of
+//   - Block 7338115: another txn checks the balance of
 //     e771789f5cccac282f23bb7add5690e1f6ca467c, and the snapshotter returned it as
 //     zero.
 //
@@ -2121,7 +2165,7 @@ func TestEIP1559Transition(t *testing.T) {
 		addr2   = crypto.PubkeyToAddress(key2.PublicKey)
 		funds   = new(uint256.Int).Mul(u256.Num1, new(uint256.Int).SetUint64(params.Ether))
 		gspec   = &types.Genesis{
-			Config: params.GoerliChainConfig,
+			Config: params.SepoliaChainConfig,
 			Alloc: types.GenesisAlloc{
 				addr1: {Balance: funds.ToBig()},
 				addr2: {Balance: funds.ToBig()},
@@ -2157,7 +2201,7 @@ func TestEIP1559Transition(t *testing.T) {
 
 			var chainID uint256.Int
 			chainID.SetFromBig(gspec.Config.ChainID)
-			var tx types.Transaction = &types.DynamicFeeTransaction{
+			var txn types.Transaction = &types.DynamicFeeTransaction{
 				CommonTx: types.CommonTx{
 					Nonce: 0,
 					To:    &aa,
@@ -2169,9 +2213,9 @@ func TestEIP1559Transition(t *testing.T) {
 				Tip:        u256.Num2,
 				AccessList: accesses,
 			}
-			tx, _ = types.SignTx(tx, *signer, key1)
+			txn, _ = types.SignTx(txn, *signer, key1)
 
-			b.AddTx(tx)
+			b.AddTx(txn)
 		}
 	})
 	if err != nil {
@@ -2204,7 +2248,7 @@ func TestEIP1559Transition(t *testing.T) {
 			t.Fatalf("miner balance incorrect: expected %d, got %d", expected, actual)
 		}
 
-		// 4: Ensure the tx sender paid for the gasUsed * (tip + block baseFee).
+		// 4: Ensure the txn sender paid for the gasUsed * (tip + block baseFee).
 		actual = new(uint256.Int).Sub(funds, statedb.GetBalance(addr1))
 		expected = new(uint256.Int).SetUint64(block.GasUsed() * (block.Transactions()[0].GetPrice().Uint64() + block.BaseFee().Uint64()))
 		if actual.Cmp(expected) != 0 {
@@ -2218,10 +2262,10 @@ func TestEIP1559Transition(t *testing.T) {
 	chain, err = core.GenerateChain(m.ChainConfig, block, m.Engine, m.DB, 1, func(i int, b *core.BlockGen) {
 		b.SetCoinbase(libcommon.Address{2})
 
-		var tx types.Transaction = types.NewTransaction(0, aa, u256.Num0, 30000, new(uint256.Int).Mul(new(uint256.Int).SetUint64(5), new(uint256.Int).SetUint64(params.GWei)), nil)
-		tx, _ = types.SignTx(tx, *signer, key2)
+		var txn types.Transaction = types.NewTransaction(0, aa, u256.Num0, 30000, new(uint256.Int).Mul(new(uint256.Int).SetUint64(5), new(uint256.Int).SetUint64(params.GWei)), nil)
+		txn, _ = types.SignTx(txn, *signer, key2)
 
-		b.AddTx(tx)
+		b.AddTx(txn)
 	})
 	if err != nil {
 		t.Fatalf("generate chain: %v", err)
@@ -2246,7 +2290,7 @@ func TestEIP1559Transition(t *testing.T) {
 			t.Fatalf("miner balance incorrect: expected %d, got %d", expected, actual)
 		}
 
-		// 4: Ensure the tx sender paid for the gasUsed * (effectiveTip + block baseFee).
+		// 4: Ensure the txn sender paid for the gasUsed * (effectiveTip + block baseFee).
 		actual = new(uint256.Int).Sub(funds, statedb.GetBalance(addr2))
 		expected = new(uint256.Int).SetUint64(block.GasUsed() * (effectiveTip + block.BaseFee().Uint64()))
 		if actual.Cmp(expected) != 0 {

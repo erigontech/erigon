@@ -1,3 +1,19 @@
+// Copyright 2024 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+
 package jsonrpc
 
 import (
@@ -5,19 +21,19 @@ import (
 	"context"
 	"math/big"
 
-	"github.com/ledgerwatch/erigon-lib/common/hexutil"
+	"github.com/erigontech/erigon-lib/common/hexutil"
 
-	"github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/common/hexutility"
-	"github.com/ledgerwatch/erigon-lib/gointerfaces"
-	txpool "github.com/ledgerwatch/erigon-lib/gointerfaces/txpoolproto"
-	types "github.com/ledgerwatch/erigon-lib/gointerfaces/typesproto"
-	bortypes "github.com/ledgerwatch/erigon/polygon/bor/types"
+	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common/hexutility"
+	"github.com/erigontech/erigon-lib/gointerfaces"
+	txpool "github.com/erigontech/erigon-lib/gointerfaces/txpoolproto"
+	types "github.com/erigontech/erigon-lib/gointerfaces/typesproto"
+	bortypes "github.com/erigontech/erigon/polygon/bor/types"
 
-	"github.com/ledgerwatch/erigon/core/rawdb"
-	types2 "github.com/ledgerwatch/erigon/core/types"
-	"github.com/ledgerwatch/erigon/rpc"
-	"github.com/ledgerwatch/erigon/turbo/rpchelper"
+	"github.com/erigontech/erigon/core/rawdb"
+	types2 "github.com/erigontech/erigon/core/types"
+	"github.com/erigontech/erigon/rpc"
+	"github.com/erigontech/erigon/turbo/rpchelper"
 )
 
 // GetTransactionByHash implements eth_getTransactionByHash. Returns information about a transaction given the transaction's hash.
@@ -175,7 +191,7 @@ func (api *APIImpl) GetTransactionByBlockHashAndIndex(ctx context.Context, block
 		return nil, err
 	}
 	if block == nil {
-		return nil, nil // not error, see https://github.com/ledgerwatch/erigon/issues/1645
+		return nil, nil // not error, see https://github.com/erigontech/erigon/issues/1645
 	}
 
 	txs := block.Transactions()
@@ -210,7 +226,7 @@ func (api *APIImpl) GetRawTransactionByBlockHashAndIndex(ctx context.Context, bl
 		return nil, err
 	}
 	if block == nil {
-		return nil, nil // not error, see https://github.com/ledgerwatch/erigon/issues/1645
+		return nil, nil // not error, see https://github.com/erigontech/erigon/issues/1645
 	}
 
 	return newRPCRawTransactionFromBlockIndex(block, uint64(index))
@@ -239,7 +255,7 @@ func (api *APIImpl) GetTransactionByBlockNumberAndIndex(ctx context.Context, blo
 		return nil, err
 	}
 	if block == nil {
-		return nil, nil // not error, see https://github.com/ledgerwatch/erigon/issues/1645
+		return nil, nil // not error, see https://github.com/erigontech/erigon/issues/1645
 	}
 
 	txs := block.Transactions()
@@ -274,7 +290,7 @@ func (api *APIImpl) GetRawTransactionByBlockNumberAndIndex(ctx context.Context, 
 		return nil, err
 	}
 	if block == nil {
-		return nil, nil // not error, see https://github.com/ledgerwatch/erigon/issues/1645
+		return nil, nil // not error, see https://github.com/erigontech/erigon/issues/1645
 	}
 
 	return newRPCRawTransactionFromBlockIndex(block, uint64(index))

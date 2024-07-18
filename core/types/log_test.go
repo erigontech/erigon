@@ -1,18 +1,21 @@
 // Copyright 2016 The go-ethereum Authors
-// This file is part of the go-ethereum library.
+// (original work)
+// Copyright 2024 The Erigon Authors
+// (modifications)
+// This file is part of Erigon.
 //
-// The go-ethereum library is free software: you can redistribute it and/or modify
+// Erigon is free software: you can redistribute it and/or modify
 // it under the terms of the GNU Lesser General Public License as published by
 // the Free Software Foundation, either version 3 of the License, or
 // (at your option) any later version.
 //
-// The go-ethereum library is distributed in the hope that it will be useful,
+// Erigon is distributed in the hope that it will be useful,
 // but WITHOUT ANY WARRANTY; without even the implied warranty of
 // MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
 // GNU Lesser General Public License for more details.
 //
 // You should have received a copy of the GNU Lesser General Public License
-// along with the go-ethereum library. If not, see <http://www.gnu.org/licenses/>.
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
 package types
 
@@ -22,10 +25,10 @@ import (
 	"reflect"
 	"testing"
 
-	"github.com/ledgerwatch/erigon-lib/common/hexutil"
+	"github.com/erigontech/erigon-lib/common/hexutil"
 
 	"github.com/davecgh/go-spew/spew"
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	libcommon "github.com/erigontech/erigon-lib/common"
 )
 
 var unmarshalLogTests = map[string]struct {
@@ -231,7 +234,7 @@ func TestFilterLogsTopics(t *testing.T) {
 		},
 	}
 	for name, v := range filterLogTests {
-		ares := testFLExtractAddress(v.input.Filter(map[libcommon.Address]struct{}{}, v.filter))
+		ares := testFLExtractAddress(v.input.Filter(map[libcommon.Address]struct{}{}, v.filter, 0))
 		if !reflect.DeepEqual(ares, v.want) {
 			t.Errorf("Fail %s, got %v want %v", name, ares, v.want)
 		}

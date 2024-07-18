@@ -1,3 +1,19 @@
+// Copyright 2024 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+
 package state
 
 import (
@@ -16,20 +32,20 @@ import (
 	"github.com/pkg/errors"
 	"golang.org/x/crypto/sha3"
 
-	"github.com/ledgerwatch/erigon-lib/common/cryptozerocopy"
-	"github.com/ledgerwatch/erigon-lib/log/v3"
+	"github.com/erigontech/erigon-lib/common/cryptozerocopy"
+	"github.com/erigontech/erigon-lib/log/v3"
 
 	btree2 "github.com/tidwall/btree"
 
-	"github.com/ledgerwatch/erigon-lib/commitment"
-	"github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/common/assert"
-	"github.com/ledgerwatch/erigon-lib/common/dbg"
-	"github.com/ledgerwatch/erigon-lib/common/length"
-	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon-lib/kv/order"
-	"github.com/ledgerwatch/erigon-lib/kv/rawdbv3"
-	"github.com/ledgerwatch/erigon-lib/types"
+	"github.com/erigontech/erigon-lib/commitment"
+	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common/assert"
+	"github.com/erigontech/erigon-lib/common/dbg"
+	"github.com/erigontech/erigon-lib/common/length"
+	"github.com/erigontech/erigon-lib/kv"
+	"github.com/erigontech/erigon-lib/kv/order"
+	"github.com/erigontech/erigon-lib/kv/rawdbv3"
+	"github.com/erigontech/erigon-lib/types"
 )
 
 var ErrBehindCommitment = fmt.Errorf("behind commitment")
@@ -64,8 +80,6 @@ type dataWithPrevStep struct {
 }
 
 type SharedDomains struct {
-	noFlush int
-
 	aggTx  *AggregatorRoTx
 	sdCtx  *SharedDomainsCommitmentContext
 	roTx   kv.Tx
@@ -397,7 +411,7 @@ func (sd *SharedDomains) replaceShortenedKeysInBranch(prefix []byte, branch comm
 
 	if !sd.aggTx.a.commitmentValuesTransform ||
 		len(branch) == 0 ||
-		sd.aggTx.minimaxTxNumInDomainFiles(false) == 0 ||
+		sd.aggTx.minimaxTxNumInDomainFiles() == 0 ||
 		bytes.Equal(prefix, keyCommitmentState) || ((fEndTxNum-fStartTxNum)/sd.aggTx.a.StepSize())%2 != 0 {
 
 		return branch, nil // do not transform, return as is
@@ -405,17 +419,14 @@ func (sd *SharedDomains) replaceShortenedKeysInBranch(prefix []byte, branch comm
 
 	sto := sd.aggTx.d[kv.StorageDomain]
 	acc := sd.aggTx.d[kv.AccountsDomain]
-	com := sd.aggTx.d[kv.CommitmentDomain]
-	commItem := com.lookupFileByItsRange(fStartTxNum, fEndTxNum)
-	_ = commItem
 	storageItem := sto.lookupFileByItsRange(fStartTxNum, fEndTxNum)
 	if storageItem == nil {
-		sd.logger.Crit("storage file of steps %d-%d not found\n", fStartTxNum/sd.aggTx.a.aggregationStep, fEndTxNum/sd.aggTx.a.aggregationStep)
+		sd.logger.Crit(fmt.Sprintf("storage file of steps %d-%d not found\n", fStartTxNum/sd.aggTx.a.aggregationStep, fEndTxNum/sd.aggTx.a.aggregationStep))
 		return nil, fmt.Errorf("storage file not found")
 	}
 	accountItem := acc.lookupFileByItsRange(fStartTxNum, fEndTxNum)
 	if accountItem == nil {
-		sd.logger.Crit("storage file of steps %d-%d not found\n", fStartTxNum/sd.aggTx.a.aggregationStep, fEndTxNum/sd.aggTx.a.aggregationStep)
+		sd.logger.Crit(fmt.Sprintf("storage file of steps %d-%d not found\n", fStartTxNum/sd.aggTx.a.aggregationStep, fEndTxNum/sd.aggTx.a.aggregationStep))
 		return nil, fmt.Errorf("account file not found")
 	}
 	storageGetter := NewArchiveGetter(storageItem.decompressor.MakeGetter(), sto.d.compression)
@@ -558,6 +569,7 @@ func (sd *SharedDomains) writeAccountStorage(addr, loc []byte, value, preVal []b
 	sd.put(kv.StorageDomain, compositeS, value)
 	return sd.domainWriters[kv.StorageDomain].PutWithPrev(composite, nil, value, preVal, prevStep)
 }
+
 func (sd *SharedDomains) delAccountStorage(addr, loc []byte, preVal []byte, prevStep uint64) error {
 	composite := addr
 	if loc != nil { // if caller passed already `composite` key, then just use it. otherwise join parts
@@ -676,28 +688,23 @@ func (sd *SharedDomains) IterateStoragePrefix(prefix []byte, it func(k []byte, v
 	}
 
 	roTx := sd.roTx
-	keysCursor, err := roTx.CursorDupSort(sd.aggTx.a.d[kv.StorageDomain].keysTable)
+	valsCursor, err := roTx.CursorDupSort(sd.aggTx.a.d[kv.StorageDomain].valsTable)
 	if err != nil {
 		return err
 	}
-	defer keysCursor.Close()
-	if k, v, err = keysCursor.Seek(prefix); err != nil {
+	defer valsCursor.Close()
+	if k, v, err = valsCursor.Seek(prefix); err != nil {
 		return err
 	}
-	if k != nil && bytes.HasPrefix(k, prefix) {
-		step := ^binary.BigEndian.Uint64(v)
+	if len(k) > 0 && bytes.HasPrefix(k, prefix) {
+		step := ^binary.BigEndian.Uint64(v[:8])
+		val := v[8:]
 		endTxNum := step * sd.StepSize() // DB can store not-finished step, it means - then set first txn in step - it anyway will be ahead of files
 		if haveRamUpdates && endTxNum >= sd.txNum {
 			return fmt.Errorf("probably you didn't set SharedDomains.SetTxNum(). ram must be ahead of db: %d, %d", sd.txNum, endTxNum)
 		}
 
-		keySuffix := make([]byte, len(k)+8)
-		copy(keySuffix, k)
-		copy(keySuffix[len(k):], v)
-		if v, err = roTx.GetOne(sd.aggTx.a.d[kv.StorageDomain].valsTable, keySuffix); err != nil {
-			return err
-		}
-		heap.Push(cpPtr, &CursorItem{t: DB_CURSOR, key: common.Copy(k), val: common.Copy(v), step: step, c: keysCursor, endTxNum: endTxNum, reverse: true})
+		heap.Push(cpPtr, &CursorItem{t: DB_CURSOR, key: common.Copy(k), val: common.Copy(val), step: step, cDup: valsCursor, endTxNum: endTxNum, reverse: true})
 	}
 
 	sctx := sd.aggTx.d[kv.StorageDomain]
@@ -757,27 +764,20 @@ func (sd *SharedDomains) IterateStoragePrefix(prefix []byte, it func(k []byte, v
 					}
 				}
 			case DB_CURSOR:
-				k, v, err = ci1.c.NextNoDup()
+				k, v, err := ci1.cDup.NextNoDup()
 				if err != nil {
 					return err
 				}
 
-				if k != nil && bytes.HasPrefix(k, prefix) {
+				if len(k) > 0 && bytes.HasPrefix(k, prefix) {
 					ci1.key = common.Copy(k)
-					step := ^binary.BigEndian.Uint64(v)
+					step := ^binary.BigEndian.Uint64(v[:8])
 					endTxNum := step * sd.StepSize() // DB can store not-finished step, it means - then set first txn in step - it anyway will be ahead of files
 					if haveRamUpdates && endTxNum >= sd.txNum {
 						return fmt.Errorf("probably you didn't set SharedDomains.SetTxNum(). ram must be ahead of db: %d, %d", sd.txNum, endTxNum)
 					}
 					ci1.endTxNum = endTxNum
-
-					keySuffix := make([]byte, len(k)+8)
-					copy(keySuffix, k)
-					copy(keySuffix[len(k):], v)
-					if v, err = roTx.GetOne(sd.aggTx.a.d[kv.StorageDomain].valsTable, keySuffix); err != nil {
-						return err
-					}
-					ci1.val = common.Copy(v)
+					ci1.val = common.Copy(v[8:])
 					ci1.step = step
 					heap.Push(cpPtr, ci1)
 				}
@@ -816,10 +816,6 @@ func (sd *SharedDomains) Close() {
 }
 
 func (sd *SharedDomains) Flush(ctx context.Context, tx kv.RwTx) error {
-	if sd.noFlush > 0 {
-		sd.noFlush--
-	}
-
 	for key, changeset := range sd.pastChangesAccumulator {
 		blockNum := binary.BigEndian.Uint64([]byte(key[:8]))
 		blockHash := common.BytesToHash([]byte(key[8:]))
@@ -829,46 +825,63 @@ func (sd *SharedDomains) Flush(ctx context.Context, tx kv.RwTx) error {
 	}
 	sd.pastChangesAccumulator = make(map[string]*StateChangeSet)
 
-	if sd.noFlush == 0 {
-		defer mxFlushTook.ObserveDuration(time.Now())
-		fh, err := sd.ComputeCommitment(ctx, true, sd.BlockNum(), "flush-commitment")
+	defer mxFlushTook.ObserveDuration(time.Now())
+	fh, err := sd.ComputeCommitment(ctx, true, sd.BlockNum(), "flush-commitment")
+	if err != nil {
+		return err
+	}
+	if sd.trace {
+		_, f, l, _ := runtime.Caller(1)
+		fmt.Printf("[SD aggTx=%d] FLUSHING at tx %d [%x], caller %s:%d\n", sd.aggTx.id, sd.TxNum(), fh, filepath.Base(f), l)
+	}
+	for _, w := range sd.domainWriters {
+		if w == nil {
+			continue
+		}
+		if err := w.Flush(ctx, tx); err != nil {
+			return err
+		}
+	}
+	for _, w := range sd.iiWriters {
+		if w == nil {
+			continue
+		}
+		if err := w.Flush(ctx, tx); err != nil {
+			return err
+		}
+	}
+	for _, w := range sd.appendableWriter {
+		if w == nil {
+			continue
+		}
+		if err := w.Flush(ctx, tx); err != nil {
+			return err
+		}
+	}
+	if dbg.PruneOnFlushTimeout != 0 {
+		_, err = sd.aggTx.PruneSmallBatches(ctx, dbg.PruneOnFlushTimeout, tx)
 		if err != nil {
 			return err
 		}
-		if sd.trace {
-			_, f, l, _ := runtime.Caller(1)
-			fmt.Printf("[SD aggTx=%d] FLUSHING at tx %d [%x], caller %s:%d\n", sd.aggTx.id, sd.TxNum(), fh, filepath.Base(f), l)
-		}
-		for _, d := range sd.domainWriters {
-			if d != nil {
-				if err := d.Flush(ctx, tx); err != nil {
-					return err
-				}
-			}
-		}
-		for _, iiWriter := range sd.iiWriters {
-			if err := iiWriter.Flush(ctx, tx); err != nil {
-				return err
-			}
-		}
-		if dbg.PruneOnFlushTimeout != 0 {
-			_, err = sd.aggTx.PruneSmallBatches(ctx, dbg.PruneOnFlushTimeout, tx)
-			if err != nil {
-				return err
-			}
-		}
+	}
 
-		for _, d := range sd.domainWriters {
-			if d != nil {
-				d.close()
-			}
+	for _, w := range sd.domainWriters {
+		if w == nil {
+			continue
 		}
-		for _, iiWriter := range sd.iiWriters {
-			iiWriter.close()
+		w.close()
+	}
+	for _, w := range sd.iiWriters {
+		if w == nil {
+			continue
 		}
-		for _, a := range sd.appendableWriter {
-			a.close()
+		w.close()
+	}
+	for _, w := range sd.appendableWriter {
+		if w == nil {
+			continue
 		}
+		w.close()
 	}
 	return nil
 }

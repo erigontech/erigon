@@ -1,3 +1,19 @@
+// Copyright 2024 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+
 package types
 
 import (
@@ -8,13 +24,13 @@ import (
 
 	"github.com/holiman/uint256"
 
-	"github.com/ledgerwatch/erigon-lib/chain"
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/common/fixedgas"
-	rlp2 "github.com/ledgerwatch/erigon-lib/rlp"
-	types2 "github.com/ledgerwatch/erigon-lib/types"
+	"github.com/erigontech/erigon-lib/chain"
+	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common/fixedgas"
+	rlp2 "github.com/erigontech/erigon-lib/rlp"
+	types2 "github.com/erigontech/erigon-lib/types"
 
-	"github.com/ledgerwatch/erigon/rlp"
+	"github.com/erigontech/erigon/rlp"
 )
 
 type BlobTx struct {
@@ -80,7 +96,7 @@ func (stx *BlobTx) AsMessage(s Signer, baseFee *big.Int, rules *chain.Rules) (Me
 	return msg, err
 }
 
-func (stx *BlobTx) cashedSender() (sender libcommon.Address, ok bool) {
+func (stx *BlobTx) cachedSender() (sender libcommon.Address, ok bool) {
 	s := stx.from.Load()
 	if s == nil {
 		return sender, false
@@ -90,7 +106,10 @@ func (stx *BlobTx) cashedSender() (sender libcommon.Address, ok bool) {
 
 func (stx *BlobTx) Sender(signer Signer) (libcommon.Address, error) {
 	if sc := stx.from.Load(); sc != nil {
-		return sc.(libcommon.Address), nil
+		zeroAddr := libcommon.Address{}
+		if sc.(libcommon.Address) != zeroAddr { // Sender address can never be zero in a transaction with a valid signer
+			return sc.(libcommon.Address), nil
+		}
 	}
 	addr, err := signer.Sender(stx)
 	if err != nil {

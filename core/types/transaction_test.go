@@ -1,18 +1,21 @@
 // Copyright 2014 The go-ethereum Authors
-// This file is part of the go-ethereum library.
+// (original work)
+// Copyright 2024 The Erigon Authors
+// (modifications)
+// This file is part of Erigon.
 //
-// The go-ethereum library is free software: you can redistribute it and/or modify
+// Erigon is free software: you can redistribute it and/or modify
 // it under the terms of the GNU Lesser General Public License as published by
 // the Free Software Foundation, either version 3 of the License, or
 // (at your option) any later version.
 //
-// The go-ethereum library is distributed in the hope that it will be useful,
+// Erigon is distributed in the hope that it will be useful,
 // but WITHOUT ANY WARRANTY; without even the implied warranty of
 // MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
 // GNU Lesser General Public License for more details.
 //
 // You should have received a copy of the GNU Lesser General Public License
-// along with the go-ethereum library. If not, see <http://www.gnu.org/licenses/>.
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
 package types
 
@@ -33,18 +36,17 @@ import (
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/assert"
 
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/common/fixedgas"
-	"github.com/ledgerwatch/erigon-lib/common/hexutility"
-	"github.com/ledgerwatch/erigon-lib/crypto/kzg"
-	"github.com/ledgerwatch/erigon-lib/txpool"
-	libtypes "github.com/ledgerwatch/erigon-lib/types"
-	types2 "github.com/ledgerwatch/erigon-lib/types"
+	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common/fixedgas"
+	"github.com/erigontech/erigon-lib/common/hexutility"
+	"github.com/erigontech/erigon-lib/crypto/kzg"
+	"github.com/erigontech/erigon-lib/txpool"
+	libtypes "github.com/erigontech/erigon-lib/types"
 
-	"github.com/ledgerwatch/erigon/common"
-	"github.com/ledgerwatch/erigon/common/u256"
-	"github.com/ledgerwatch/erigon/crypto"
-	"github.com/ledgerwatch/erigon/rlp"
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/u256"
+	"github.com/erigontech/erigon/crypto"
+	"github.com/erigontech/erigon/rlp"
 )
 
 // The values in those tests are from the Transaction Tests
@@ -377,7 +379,7 @@ func TestTransactionCoding(t *testing.T) {
 		signer    = LatestSignerForChainID(libcommon.Big1)
 		addr      = libcommon.HexToAddress("0x0000000000000000000000000000000000000001")
 		recipient = libcommon.HexToAddress("095e7baea6a6c7c4c2dfeb977efac326af552d87")
-		accesses  = types2.AccessList{{Address: addr, StorageKeys: []libcommon.Hash{{0}}}}
+		accesses  = libtypes.AccessList{{Address: addr, StorageKeys: []libcommon.Hash{{0}}}}
 	)
 	for i := uint64(0); i < 500; i++ {
 		var txdata Transaction
@@ -576,11 +578,11 @@ func randHashes(n int) []libcommon.Hash {
 	return h
 }
 
-func randAccessList() types2.AccessList {
+func randAccessList() libtypes.AccessList {
 	size := randIntInRange(4, 10)
-	var result types2.AccessList
+	var result libtypes.AccessList
 	for i := 0; i < size; i++ {
-		var tup types2.AccessTuple
+		var tup libtypes.AccessTuple
 
 		tup.Address = *randAddr()
 		tup.StorageKeys = append(tup.StorageKeys, randHash())

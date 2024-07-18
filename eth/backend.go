@@ -1,18 +1,21 @@
 // Copyright 2014 The go-ethereum Authors
-// This file is part of the go-ethereum library.
+// (original work)
+// Copyright 2024 The Erigon Authors
+// (modifications)
+// This file is part of Erigon.
 //
-// The go-ethereum library is free software: you can redistribute it and/or modify
+// Erigon is free software: you can redistribute it and/or modify
 // it under the terms of the GNU Lesser General Public License as published by
 // the Free Software Foundation, either version 3 of the License, or
 // (at your option) any later version.
 //
-// The go-ethereum library is distributed in the hope that it will be useful,
+// Erigon is distributed in the hope that it will be useful,
 // but WITHOUT ANY WARRANTY; without even the implied warranty of
 // MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
 // GNU Lesser General Public License for more details.
 //
 // You should have received a copy of the GNU Lesser General Public License
-// along with the go-ethereum library. If not, see <http://www.gnu.org/licenses/>.
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
 // Package eth implements the Ethereum protocol.
 package eth
@@ -43,97 +46,99 @@ import (
 	"google.golang.org/grpc/credentials"
 	"google.golang.org/protobuf/types/known/emptypb"
 
-	"github.com/ledgerwatch/erigon-lib/log/v3"
-
-	"github.com/ledgerwatch/erigon-lib/chain"
-	"github.com/ledgerwatch/erigon-lib/chain/networkname"
-	"github.com/ledgerwatch/erigon-lib/chain/snapcfg"
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/common/datadir"
-	"github.com/ledgerwatch/erigon-lib/common/dbg"
-	"github.com/ledgerwatch/erigon-lib/common/dir"
-	"github.com/ledgerwatch/erigon-lib/common/disk"
-	"github.com/ledgerwatch/erigon-lib/common/mem"
-	"github.com/ledgerwatch/erigon-lib/config3"
-	"github.com/ledgerwatch/erigon-lib/diagnostics"
-	"github.com/ledgerwatch/erigon-lib/direct"
-	"github.com/ledgerwatch/erigon-lib/downloader"
-	"github.com/ledgerwatch/erigon-lib/downloader/downloadercfg"
-	"github.com/ledgerwatch/erigon-lib/downloader/downloadergrpc"
-	"github.com/ledgerwatch/erigon-lib/downloader/snaptype"
-	protodownloader "github.com/ledgerwatch/erigon-lib/gointerfaces/downloaderproto"
-	"github.com/ledgerwatch/erigon-lib/gointerfaces/grpcutil"
-	remote "github.com/ledgerwatch/erigon-lib/gointerfaces/remoteproto"
-	rpcsentinel "github.com/ledgerwatch/erigon-lib/gointerfaces/sentinelproto"
-	protosentry "github.com/ledgerwatch/erigon-lib/gointerfaces/sentryproto"
-	"github.com/ledgerwatch/erigon-lib/gointerfaces/txpoolproto"
-	prototypes "github.com/ledgerwatch/erigon-lib/gointerfaces/typesproto"
-	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon-lib/kv/kvcache"
-	"github.com/ledgerwatch/erigon-lib/kv/remotedbserver"
-	"github.com/ledgerwatch/erigon-lib/kv/temporal"
-	libstate "github.com/ledgerwatch/erigon-lib/state"
-	"github.com/ledgerwatch/erigon-lib/txpool"
-	"github.com/ledgerwatch/erigon-lib/txpool/txpoolcfg"
-	"github.com/ledgerwatch/erigon-lib/txpool/txpooluitl"
-	libtypes "github.com/ledgerwatch/erigon-lib/types"
-	"github.com/ledgerwatch/erigon-lib/wrap"
-	"github.com/ledgerwatch/erigon/cl/clparams"
-	"github.com/ledgerwatch/erigon/cl/persistence/format/snapshot_format/getters"
-	clcore "github.com/ledgerwatch/erigon/cl/phase1/core"
-	executionclient "github.com/ledgerwatch/erigon/cl/phase1/execution_client"
-	"github.com/ledgerwatch/erigon/cl/utils/eth_clock"
-	"github.com/ledgerwatch/erigon/cmd/caplin/caplin1"
-	"github.com/ledgerwatch/erigon/cmd/rpcdaemon/cli"
-	"github.com/ledgerwatch/erigon/common/debug"
-	"github.com/ledgerwatch/erigon/consensus"
-	"github.com/ledgerwatch/erigon/consensus/clique"
-	"github.com/ledgerwatch/erigon/consensus/ethash"
-	"github.com/ledgerwatch/erigon/consensus/merge"
-	"github.com/ledgerwatch/erigon/consensus/misc"
-	"github.com/ledgerwatch/erigon/core"
-	"github.com/ledgerwatch/erigon/core/rawdb"
-	"github.com/ledgerwatch/erigon/core/rawdb/blockio"
-	"github.com/ledgerwatch/erigon/core/types"
-	"github.com/ledgerwatch/erigon/core/vm"
-	"github.com/ledgerwatch/erigon/crypto"
-	"github.com/ledgerwatch/erigon/eth/consensuschain"
-	"github.com/ledgerwatch/erigon/eth/ethconfig"
-	"github.com/ledgerwatch/erigon/eth/ethconsensusconfig"
-	"github.com/ledgerwatch/erigon/eth/ethutils"
-	"github.com/ledgerwatch/erigon/eth/protocols/eth"
-	"github.com/ledgerwatch/erigon/eth/stagedsync"
-	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
-	"github.com/ledgerwatch/erigon/eth/tracers"
-	"github.com/ledgerwatch/erigon/ethdb/privateapi"
-	"github.com/ledgerwatch/erigon/ethdb/prune"
-	"github.com/ledgerwatch/erigon/ethstats"
-	"github.com/ledgerwatch/erigon/node"
-	"github.com/ledgerwatch/erigon/p2p"
-	"github.com/ledgerwatch/erigon/p2p/enode"
-	"github.com/ledgerwatch/erigon/p2p/sentry"
-	"github.com/ledgerwatch/erigon/p2p/sentry/sentry_multi_client"
-	"github.com/ledgerwatch/erigon/params"
-	"github.com/ledgerwatch/erigon/polygon/bor"
-	"github.com/ledgerwatch/erigon/polygon/bor/finality/flags"
-	"github.com/ledgerwatch/erigon/polygon/bor/valset"
-	"github.com/ledgerwatch/erigon/polygon/heimdall"
-	polygonsync "github.com/ledgerwatch/erigon/polygon/sync"
-	"github.com/ledgerwatch/erigon/rpc"
-	"github.com/ledgerwatch/erigon/turbo/builder"
-	"github.com/ledgerwatch/erigon/turbo/engineapi"
-	"github.com/ledgerwatch/erigon/turbo/engineapi/engine_block_downloader"
-	"github.com/ledgerwatch/erigon/turbo/engineapi/engine_helpers"
-	"github.com/ledgerwatch/erigon/turbo/execution/eth1"
-	"github.com/ledgerwatch/erigon/turbo/execution/eth1/eth1_chain_reader.go"
-	"github.com/ledgerwatch/erigon/turbo/jsonrpc"
-	"github.com/ledgerwatch/erigon/turbo/services"
-	"github.com/ledgerwatch/erigon/turbo/shards"
-	"github.com/ledgerwatch/erigon/turbo/silkworm"
-	"github.com/ledgerwatch/erigon/turbo/snapshotsync/freezeblocks"
-	"github.com/ledgerwatch/erigon/turbo/snapshotsync/snap"
-	stages2 "github.com/ledgerwatch/erigon/turbo/stages"
-	"github.com/ledgerwatch/erigon/turbo/stages/headerdownload"
+	"github.com/erigontech/erigon-lib/chain"
+	"github.com/erigontech/erigon-lib/chain/networkname"
+	"github.com/erigontech/erigon-lib/chain/snapcfg"
+	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common/datadir"
+	"github.com/erigontech/erigon-lib/common/dbg"
+	"github.com/erigontech/erigon-lib/common/dir"
+	"github.com/erigontech/erigon-lib/common/disk"
+	"github.com/erigontech/erigon-lib/common/mem"
+	"github.com/erigontech/erigon-lib/config3"
+	"github.com/erigontech/erigon-lib/diagnostics"
+	"github.com/erigontech/erigon-lib/direct"
+	"github.com/erigontech/erigon-lib/downloader"
+	"github.com/erigontech/erigon-lib/downloader/downloadercfg"
+	"github.com/erigontech/erigon-lib/downloader/downloadergrpc"
+	"github.com/erigontech/erigon-lib/downloader/snaptype"
+	protodownloader "github.com/erigontech/erigon-lib/gointerfaces/downloaderproto"
+	"github.com/erigontech/erigon-lib/gointerfaces/grpcutil"
+	remote "github.com/erigontech/erigon-lib/gointerfaces/remoteproto"
+	rpcsentinel "github.com/erigontech/erigon-lib/gointerfaces/sentinelproto"
+	protosentry "github.com/erigontech/erigon-lib/gointerfaces/sentryproto"
+	"github.com/erigontech/erigon-lib/gointerfaces/txpoolproto"
+	prototypes "github.com/erigontech/erigon-lib/gointerfaces/typesproto"
+	"github.com/erigontech/erigon-lib/kv"
+	"github.com/erigontech/erigon-lib/kv/kvcache"
+	"github.com/erigontech/erigon-lib/kv/remotedbserver"
+	"github.com/erigontech/erigon-lib/kv/temporal"
+	"github.com/erigontech/erigon-lib/log/v3"
+	libstate "github.com/erigontech/erigon-lib/state"
+	"github.com/erigontech/erigon-lib/txpool"
+	"github.com/erigontech/erigon-lib/txpool/txpoolcfg"
+	"github.com/erigontech/erigon-lib/txpool/txpooluitl"
+	libtypes "github.com/erigontech/erigon-lib/types"
+	"github.com/erigontech/erigon-lib/wrap"
+	"github.com/erigontech/erigon/cl/clparams"
+	"github.com/erigontech/erigon/cl/persistence/format/snapshot_format/getters"
+	clcore "github.com/erigontech/erigon/cl/phase1/core"
+	executionclient "github.com/erigontech/erigon/cl/phase1/execution_client"
+	"github.com/erigontech/erigon/cl/utils/eth_clock"
+	"github.com/erigontech/erigon/cmd/caplin/caplin1"
+	"github.com/erigontech/erigon/cmd/rpcdaemon/cli"
+	"github.com/erigontech/erigon/common/debug"
+	"github.com/erigontech/erigon/consensus"
+	"github.com/erigontech/erigon/consensus/clique"
+	"github.com/erigontech/erigon/consensus/ethash"
+	"github.com/erigontech/erigon/consensus/merge"
+	"github.com/erigontech/erigon/consensus/misc"
+	"github.com/erigontech/erigon/core"
+	"github.com/erigontech/erigon/core/rawdb"
+	"github.com/erigontech/erigon/core/rawdb/blockio"
+	snaptype2 "github.com/erigontech/erigon/core/snaptype"
+	"github.com/erigontech/erigon/core/types"
+	"github.com/erigontech/erigon/core/vm"
+	"github.com/erigontech/erigon/crypto"
+	"github.com/erigontech/erigon/eth/consensuschain"
+	"github.com/erigontech/erigon/eth/ethconfig"
+	"github.com/erigontech/erigon/eth/ethconsensusconfig"
+	"github.com/erigontech/erigon/eth/ethutils"
+	"github.com/erigontech/erigon/eth/protocols/eth"
+	"github.com/erigontech/erigon/eth/stagedsync"
+	"github.com/erigontech/erigon/eth/stagedsync/stages"
+	"github.com/erigontech/erigon/eth/tracers"
+	"github.com/erigontech/erigon/ethdb/privateapi"
+	"github.com/erigontech/erigon/ethdb/prune"
+	"github.com/erigontech/erigon/ethstats"
+	"github.com/erigontech/erigon/node"
+	"github.com/erigontech/erigon/p2p"
+	"github.com/erigontech/erigon/p2p/enode"
+	"github.com/erigontech/erigon/p2p/sentry"
+	"github.com/erigontech/erigon/p2p/sentry/sentry_multi_client"
+	"github.com/erigontech/erigon/params"
+	"github.com/erigontech/erigon/polygon/bor"
+	"github.com/erigontech/erigon/polygon/bor/borcfg"
+	"github.com/erigontech/erigon/polygon/bor/finality/flags"
+	"github.com/erigontech/erigon/polygon/bor/valset"
+	"github.com/erigontech/erigon/polygon/bridge"
+	"github.com/erigontech/erigon/polygon/heimdall"
+	polygonsync "github.com/erigontech/erigon/polygon/sync"
+	"github.com/erigontech/erigon/rpc"
+	"github.com/erigontech/erigon/turbo/builder"
+	"github.com/erigontech/erigon/turbo/engineapi"
+	"github.com/erigontech/erigon/turbo/engineapi/engine_block_downloader"
+	"github.com/erigontech/erigon/turbo/engineapi/engine_helpers"
+	"github.com/erigontech/erigon/turbo/execution/eth1"
+	"github.com/erigontech/erigon/turbo/execution/eth1/eth1_chain_reader.go"
+	"github.com/erigontech/erigon/turbo/jsonrpc"
+	"github.com/erigontech/erigon/turbo/services"
+	"github.com/erigontech/erigon/turbo/shards"
+	"github.com/erigontech/erigon/turbo/silkworm"
+	"github.com/erigontech/erigon/turbo/snapshotsync/freezeblocks"
+	"github.com/erigontech/erigon/turbo/snapshotsync/snap"
+	stages2 "github.com/erigontech/erigon/turbo/stages"
+	"github.com/erigontech/erigon/turbo/stages/headerdownload"
 )
 
 // Config contains the configuration options of the ETH protocol.
@@ -553,16 +558,21 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 	}
 
 	var heimdallClient heimdall.HeimdallClient
+	var polygonBridge bridge.Service
 
 	if chainConfig.Bor != nil {
 		if !config.WithoutHeimdall {
 			heimdallClient = heimdall.NewHeimdallClient(config.HeimdallURL, logger)
 		}
 
+		if config.PolygonSync {
+			polygonBridge = bridge.Assemble(config.Dirs.DataDir, logger, consensusConfig.(*borcfg.BorConfig), heimdallClient.FetchStateSyncEvents, bor.GenesisContractStateReceiverABI())
+		}
+
 		flags.Milestone = config.WithHeimdallMilestones
 	}
 
-	backend.engine = ethconsensusconfig.CreateConsensusEngine(ctx, stack.Config(), chainConfig, consensusConfig, config.Miner.Notify, config.Miner.Noverify, heimdallClient, config.WithoutHeimdall, blockReader, false /* readonly */, logger)
+	backend.engine = ethconsensusconfig.CreateConsensusEngine(ctx, stack.Config(), chainConfig, consensusConfig, config.Miner.Notify, config.Miner.Noverify, heimdallClient, config.WithoutHeimdall, blockReader, false /* readonly */, logger, polygonBridge)
 
 	inMemoryExecution := func(txc wrap.TxContainer, header *types.Header, body *types.RawBody, unwindPoint uint64, headersChain []*types.Header, bodiesChain []*types.RawBody,
 		notifications *shards.Notifications) error {
@@ -684,7 +694,6 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 				backend.chainDB,
 				config.Prune,
 				config.BatchSize,
-				nil,
 				chainConfig,
 				backend.engine,
 				&vm.Config{},
@@ -723,7 +732,6 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 					backend.chainDB,
 					config.Prune,
 					config.BatchSize,
-					nil,
 					chainConfig,
 					backend.engine,
 					&vm.Config{},
@@ -846,7 +854,16 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 		}
 	}()
 
-	if err := backend.StartMining(context.Background(), backend.chainDB, stateDiffClient, mining, miner, backend.gasPrice, backend.sentriesClient.Hd.QuitPoWMining, tmpdir, logger); err != nil {
+	if err := backend.StartMining(
+		context.Background(),
+		backend.chainDB,
+		stateDiffClient,
+		mining,
+		miner,
+		backend.gasPrice,
+		backend.sentriesClient.Hd.QuitPoWMining,
+		tmpdir,
+		logger); err != nil {
 		return nil, err
 	}
 
@@ -900,9 +917,9 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 			})
 		}
 
-		for _, p := range snaptype.SeedableV3Extensions() {
+		for _, p := range snaptype2.E3StateTypes {
 			backend.downloaderClient.ProhibitNewDownloads(ctx, &protodownloader.ProhibitNewDownloadsRequest{
-				Type: p,
+				Type: p.Name(),
 			})
 		}
 
@@ -915,7 +932,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 	executionRpc := direct.NewExecutionClientDirect(backend.eth1ExecutionServer)
 
 	var executionEngine executionclient.ExecutionEngine
-	caplinUseEngineAPI := config.NetworkID == uint64(clparams.HoleskyNetwork) || config.NetworkID == uint64(clparams.GoerliNetwork)
+	caplinUseEngineAPI := config.NetworkID == uint64(clparams.HoleskyNetwork)
 	// Gnosis has too few blocks on his network for phase2 to work. Once we have proper snapshot automation, it can go back to normal.
 	if caplinUseEngineAPI {
 		// Read the jwt secret
@@ -1003,6 +1020,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 			config.HeimdallURL,
 			executionRpc,
 			config.LoopBlockLimit,
+			polygonBridge,
 		)
 	}
 
@@ -1058,7 +1076,7 @@ func (s *Ethereum) Init(stack *node.Node, config *ethconfig.Config, chainConfig 
 		}
 	}
 
-	s.apiList = jsonrpc.APIList(chainKv, ethRpcClient, txPoolRpcClient, miningRpcClient, ff, stateCache, blockReader, s.agg, &httpRpcCfg, s.engine, s.logger)
+	s.apiList = jsonrpc.APIList(chainKv, ethRpcClient, txPoolRpcClient, miningRpcClient, ff, stateCache, blockReader, &httpRpcCfg, s.engine, s.logger)
 
 	if config.SilkwormRpcDaemon && httpRpcCfg.Enabled {
 		interface_log_settings := silkworm.RpcInterfaceLogSettings{
@@ -1180,32 +1198,38 @@ func (s *Ethereum) StartMining(ctx context.Context, db kv.RwDB, stateDiffClient 
 		return fmt.Errorf("etherbase missing: %w", err)
 	}
 
-	if borcfg == nil {
-		s.logger.Error("mining is not supported after the Merge")
-		return errors.New("mining is not supported after the Merge")
-	}
-
 	if miner.MiningConfig.Enabled {
+		if s.chainConfig.ChainName == networkname.DevChainName {
+			miner.MiningConfig.SigKey = core.DevnetSignPrivateKey
+		}
 		if miner.MiningConfig.SigKey == nil {
 			s.logger.Error("Etherbase account unavailable locally", "err", err)
 			return fmt.Errorf("signer missing: %w", err)
 		}
+		if borcfg != nil {
+			borcfg.Authorize(eb, func(_ libcommon.Address, mimeType string, message []byte) ([]byte, error) {
+				return crypto.Sign(crypto.Keccak256(message), miner.MiningConfig.SigKey)
+			})
 
-		borcfg.Authorize(eb, func(_ libcommon.Address, mimeType string, message []byte) ([]byte, error) {
-			return crypto.Sign(crypto.Keccak256(message), miner.MiningConfig.SigKey)
-		})
-
-		if !s.config.WithoutHeimdall {
-			err := stagedsync.FetchSpanZeroForMiningIfNeeded(
-				ctx,
-				s.chainDB,
-				s.blockReader,
-				borcfg.HeimdallClient,
-				logger,
-			)
-			if err != nil {
-				return err
+			if !s.config.WithoutHeimdall {
+				err := stagedsync.FetchSpanZeroForMiningIfNeeded(
+					ctx,
+					s.chainDB,
+					s.blockReader,
+					borcfg.HeimdallClient,
+					logger,
+				)
+				if err != nil {
+					return err
+				}
 			}
+		} else if s.chainConfig.Consensus == chain.CliqueConsensus {
+			s.engine.(*clique.Clique).Authorize(eb, func(_ libcommon.Address, _ string, msg []byte) ([]byte, error) {
+				return crypto.Sign(crypto.Keccak256(msg), miner.MiningConfig.SigKey)
+			})
+		} else {
+			s.logger.Error("mining is not supported after the Merge")
+			return errors.New("mining is not supported after the Merge")
 		}
 	} else {
 		// for the bor dev network without heimdall we need the authorizer to be set otherwise there is no
@@ -1731,17 +1755,19 @@ func (s *Ethereum) DataDir() string {
 	return s.config.Dirs.DataDir
 }
 
-// setBorDefaultMinerGasPrice enforces Miner.GasPrice to be equal to BorDefaultMinerGasPrice (30gwei by default)
+// setBorDefaultMinerGasPrice enforces Miner.GasPrice to be equal to BorDefaultMinerGasPrice (25gwei by default)
+// only for polygon amoy network.
 func setBorDefaultMinerGasPrice(chainConfig *chain.Config, config *ethconfig.Config, logger log.Logger) {
-	if chainConfig.Bor != nil && (config.Miner.GasPrice == nil || config.Miner.GasPrice.Cmp(ethconfig.BorDefaultMinerGasPrice) != 0) {
+	if chainConfig.Bor != nil && chainConfig.ChainID.Cmp(params.AmoyChainConfig.ChainID) == 0 && (config.Miner.GasPrice == nil || config.Miner.GasPrice.Cmp(ethconfig.BorDefaultMinerGasPrice) != 0) {
 		logger.Warn("Sanitizing invalid bor miner gas price", "provided", config.Miner.GasPrice, "updated", ethconfig.BorDefaultMinerGasPrice)
 		config.Miner.GasPrice = ethconfig.BorDefaultMinerGasPrice
 	}
 }
 
-// setBorDefaultTxPoolPriceLimit enforces MinFeeCap to be equal to BorDefaultTxPoolPriceLimit  (30gwei by default)
+// setBorDefaultTxPoolPriceLimit enforces MinFeeCap to be equal to BorDefaultTxPoolPriceLimit (25gwei by default)
+// only for polygon amoy network.
 func setBorDefaultTxPoolPriceLimit(chainConfig *chain.Config, config txpoolcfg.Config, logger log.Logger) {
-	if chainConfig.Bor != nil && config.MinFeeCap != txpoolcfg.BorDefaultTxPoolPriceLimit {
+	if chainConfig.Bor != nil && chainConfig.ChainID.Cmp(params.AmoyChainConfig.ChainID) == 0 && config.MinFeeCap != txpoolcfg.BorDefaultTxPoolPriceLimit {
 		logger.Warn("Sanitizing invalid bor min fee cap", "provided", config.MinFeeCap, "updated", txpoolcfg.BorDefaultTxPoolPriceLimit)
 		config.MinFeeCap = txpoolcfg.BorDefaultTxPoolPriceLimit
 	}

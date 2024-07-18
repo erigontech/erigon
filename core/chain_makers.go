@@ -1,18 +1,21 @@
 // Copyright 2015 The go-ethereum Authors
-// This file is part of the go-ethereum library.
+// (original work)
+// Copyright 2024 The Erigon Authors
+// (modifications)
+// This file is part of Erigon.
 //
-// The go-ethereum library is free software: you can redistribute it and/or modify
+// Erigon is free software: you can redistribute it and/or modify
 // it under the terms of the GNU Lesser General Public License as published by
 // the Free Software Foundation, either version 3 of the License, or
 // (at your option) any later version.
 //
-// The go-ethereum library is distributed in the hope that it will be useful,
+// Erigon is distributed in the hope that it will be useful,
 // but WITHOUT ANY WARRANTY; without even the implied warranty of
 // MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
 // GNU Lesser General Public License for more details.
 //
 // You should have received a copy of the GNU Lesser General Public License
-// along with the go-ethereum library. If not, see <http://www.gnu.org/licenses/>.
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
 package core
 
@@ -22,23 +25,23 @@ import (
 	"fmt"
 	"math/big"
 
-	"github.com/ledgerwatch/erigon-lib/log/v3"
+	"github.com/erigontech/erigon-lib/log/v3"
 
-	"github.com/ledgerwatch/erigon-lib/chain"
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/common/length"
-	"github.com/ledgerwatch/erigon-lib/config3"
-	"github.com/ledgerwatch/erigon-lib/kv"
-	libstate "github.com/ledgerwatch/erigon-lib/state"
-	"github.com/ledgerwatch/erigon/consensus"
-	"github.com/ledgerwatch/erigon/consensus/merge"
-	"github.com/ledgerwatch/erigon/consensus/misc"
-	"github.com/ledgerwatch/erigon/core/state"
-	"github.com/ledgerwatch/erigon/core/types"
-	"github.com/ledgerwatch/erigon/core/types/accounts"
-	"github.com/ledgerwatch/erigon/core/vm"
-	"github.com/ledgerwatch/erigon/params"
-	"github.com/ledgerwatch/erigon/rlp"
+	"github.com/erigontech/erigon-lib/chain"
+	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common/length"
+	"github.com/erigontech/erigon-lib/config3"
+	"github.com/erigontech/erigon-lib/kv"
+	libstate "github.com/erigontech/erigon-lib/state"
+	"github.com/erigontech/erigon/consensus"
+	"github.com/erigontech/erigon/consensus/merge"
+	"github.com/erigontech/erigon/consensus/misc"
+	"github.com/erigontech/erigon/core/state"
+	"github.com/erigontech/erigon/core/types"
+	"github.com/erigontech/erigon/core/types/accounts"
+	"github.com/erigontech/erigon/core/vm"
+	"github.com/erigontech/erigon/params"
+	"github.com/erigontech/erigon/rlp"
 )
 
 // BlockGen creates blocks for testing.
@@ -335,12 +338,7 @@ func GenerateChain(config *chain.Config, parent *types.Block, engine consensus.E
 	}
 	txNum := -1
 	setBlockNum := func(blockNum uint64) {
-		if histV3 {
-			domains.SetBlockNum(blockNum)
-		} else {
-			stateReader = state.NewPlainStateReader(tx)
-			stateWriter = state.NewPlainStateWriter(tx, nil, parent.NumberU64()+blockNum+1)
-		}
+		domains.SetBlockNum(blockNum)
 	}
 	txNumIncrement := func() {
 		txNum++
@@ -478,89 +476,81 @@ func CalcHashRootForTests(tx kv.RwTx, header *types.Header, histV4, trace bool) 
 		return hashRoot, fmt.Errorf("clear TrieOfStorage bucket: %w", err)
 	}
 
-	if histV4 {
-		h := libcommon.NewHasher()
-		defer libcommon.ReturnHasherToPool(h)
+	h := libcommon.NewHasher()
+	defer libcommon.ReturnHasherToPool(h)
 
-		it, err := tx.(libstate.HasAggTx).AggTx().(*libstate.AggregatorRoTx).DomainRangeLatest(tx, kv.AccountsDomain, nil, nil, -1)
+	it, err := tx.(libstate.HasAggTx).AggTx().(*libstate.AggregatorRoTx).DomainRangeLatest(tx, kv.AccountsDomain, nil, nil, -1)
+	if err != nil {
+		return libcommon.Hash{}, err
+	}
+
+	for it.HasNext() {
+		k, v, err := it.Next()
 		if err != nil {
-			return libcommon.Hash{}, err
+			return hashRoot, fmt.Errorf("interate over plain state: %w", err)
 		}
-
-		for it.HasNext() {
-			k, v, err := it.Next()
+		if len(v) > 0 {
+			v, err = accounts.ConvertV3toV2(v)
 			if err != nil {
 				return hashRoot, fmt.Errorf("interate over plain state: %w", err)
 			}
-			if len(v) > 0 {
-				v, err = accounts.ConvertV3toV2(v)
-				if err != nil {
-					return hashRoot, fmt.Errorf("interate over plain state: %w", err)
-				}
-			}
-			newK, err := hashKeyAndAddIncarnation(k, h)
-			if err != nil {
-				return hashRoot, fmt.Errorf("clear HashedAccounts bucket: %w", err)
-			}
-			if err := tx.Put(kv.HashedAccounts, newK, v); err != nil {
-				return hashRoot, fmt.Errorf("clear HashedAccounts bucket: %w", err)
-			}
 		}
-
-		it, err = tx.(libstate.HasAggTx).AggTx().(*libstate.AggregatorRoTx).DomainRangeLatest(tx, kv.StorageDomain, nil, nil, -1)
+		newK, err := hashKeyAndAddIncarnation(k, h)
 		if err != nil {
-			return libcommon.Hash{}, err
+			return hashRoot, fmt.Errorf("clear HashedAccounts bucket: %w", err)
 		}
-		for it.HasNext() {
-			k, v, err := it.Next()
-			if err != nil {
-				return hashRoot, fmt.Errorf("interate over plain state: %w", err)
-			}
-			newK, err := hashKeyAndAddIncarnation(k, h)
-			if err != nil {
-				return hashRoot, fmt.Errorf("clear HashedStorage bucket: %w", err)
-			}
-			fmt.Printf("storage %x -> %x\n", k, newK)
-			if err := tx.Put(kv.HashedStorage, newK, v); err != nil {
-				return hashRoot, fmt.Errorf("clear HashedStorage bucket: %w", err)
-			}
+		if err := tx.Put(kv.HashedAccounts, newK, v); err != nil {
+			return hashRoot, fmt.Errorf("clear HashedAccounts bucket: %w", err)
+		}
+	}
 
+	it, err = tx.(libstate.HasAggTx).AggTx().(*libstate.AggregatorRoTx).DomainRangeLatest(tx, kv.StorageDomain, nil, nil, -1)
+	if err != nil {
+		return libcommon.Hash{}, err
+	}
+	for it.HasNext() {
+		k, v, err := it.Next()
+		if err != nil {
+			return hashRoot, fmt.Errorf("interate over plain state: %w", err)
+		}
+		newK, err := hashKeyAndAddIncarnation(k, h)
+		if err != nil {
+			return hashRoot, fmt.Errorf("clear HashedStorage bucket: %w", err)
+		}
+		fmt.Printf("storage %x -> %x\n", k, newK)
+		if err := tx.Put(kv.HashedStorage, newK, v); err != nil {
+			return hashRoot, fmt.Errorf("clear HashedStorage bucket: %w", err)
 		}
 
-		if trace {
-			if GenerateTrace {
-				fmt.Printf("State after %d================\n", header.Number)
-				it, err := tx.Range(kv.HashedAccounts, nil, nil)
-				if err != nil {
-					return hashRoot, err
-				}
-				for it.HasNext() {
-					k, v, err := it.Next()
-					if err != nil {
-						return hashRoot, err
-					}
-					fmt.Printf("%x: %x\n", k, v)
-				}
-				fmt.Printf("..................\n")
-				it, err = tx.Range(kv.HashedStorage, nil, nil)
-				if err != nil {
-					return hashRoot, err
-				}
-				for it.HasNext() {
-					k, v, err := it.Next()
-					if err != nil {
-						return hashRoot, err
-					}
-					fmt.Printf("%x: %x\n", k, v)
-				}
-				fmt.Printf("===============================\n")
-			}
-			root, err := domains.ComputeCommitment(context.Background(), true, domains.BlockNum(), "")
+	}
+
+	if trace {
+		if GenerateTrace {
+			fmt.Printf("State after %d================\n", header.Number)
+			it, err := tx.Range(kv.HashedAccounts, nil, nil)
 			if err != nil {
 				return hashRoot, err
 			}
-			hashRoot.SetBytes(root)
-			return hashRoot, nil
+			for it.HasNext() {
+				k, v, err := it.Next()
+				if err != nil {
+					return hashRoot, err
+				}
+				fmt.Printf("%x: %x\n", k, v)
+			}
+			fmt.Printf("..................\n")
+			it, err = tx.Range(kv.HashedStorage, nil, nil)
+			if err != nil {
+				return hashRoot, err
+			}
+			for it.HasNext() {
+				k, v, err := it.Next()
+				if err != nil {
+					return hashRoot, err
+				}
+				fmt.Printf("%x: %x\n", k, v)
+			}
+			fmt.Printf("===============================\n")
 		}
 		root, err := domains.ComputeCommitment(context.Background(), true, domains.BlockNum(), "")
 		if err != nil {
@@ -568,77 +558,21 @@ func CalcHashRootForTests(tx kv.RwTx, header *types.Header, histV4, trace bool) 
 		}
 		hashRoot.SetBytes(root)
 		return hashRoot, nil
-
-		//var root libcommon.Hash
-		//rootB, err := tx.(*temporal.Tx).Agg().ComputeCommitment(false, false)
-		//if err != nil {
-		//	return root, err
-		//}
-		//root = libcommon.BytesToHash(rootB)
-		//return root, err
 	}
-
-	c, err := tx.Cursor(kv.PlainState)
+	root, err := domains.ComputeCommitment(context.Background(), true, domains.BlockNum(), "")
 	if err != nil {
 		return hashRoot, err
 	}
-	h := libcommon.NewHasher()
-	defer libcommon.ReturnHasherToPool(h)
-	for k, v, err := c.First(); k != nil; k, v, err = c.Next() {
-		if err != nil {
-			return hashRoot, fmt.Errorf("interate over plain state: %w", err)
-		}
-		newK, err := hashKeyAndAddIncarnation(k, h)
-		if err != nil {
-			return hashRoot, fmt.Errorf("insert hashed key: %w", err)
-		}
-		if len(k) > length.Addr {
-			if err = tx.Put(kv.HashedStorage, newK, libcommon.CopyBytes(v)); err != nil {
-				return hashRoot, fmt.Errorf("insert hashed key: %w", err)
-			}
-		} else {
-			if err = tx.Put(kv.HashedAccounts, newK, libcommon.CopyBytes(v)); err != nil {
-				return hashRoot, fmt.Errorf("insert hashed key: %w", err)
-			}
-		}
+	hashRoot.SetBytes(root)
+	return hashRoot, nil
 
-	}
-	c.Close()
-
-	if GenerateTrace {
-		fmt.Printf("State after %d================\n", header.Number)
-		it, err := tx.Range(kv.HashedAccounts, nil, nil)
-		if err != nil {
-			return hashRoot, err
-		}
-		for it.HasNext() {
-			k, v, err := it.Next()
-			if err != nil {
-				return hashRoot, err
-			}
-			fmt.Printf("%x: %x\n", k, v)
-		}
-		fmt.Printf("..................\n")
-		it, err = tx.Range(kv.HashedStorage, nil, nil)
-		if err != nil {
-			return hashRoot, err
-		}
-		for it.HasNext() {
-			k, v, err := it.Next()
-			if err != nil {
-				return hashRoot, err
-			}
-			fmt.Printf("%x: %x\n", k, v)
-		}
-		fmt.Printf("===============================\n")
-	}
-
-	if root, err := domains.ComputeCommitment(context.Background(), true, domains.BlockNum(), ""); err == nil {
-		hashRoot.SetBytes(root)
-		return hashRoot, nil
-	} else {
-		return libcommon.Hash{}, fmt.Errorf("call to CalcTrieRoot: %w", err)
-	}
+	//var root libcommon.Hash
+	//rootB, err := tx.(*temporal.Tx).Agg().ComputeCommitment(false, false)
+	//if err != nil {
+	//	return root, err
+	//}
+	//root = libcommon.BytesToHash(rootB)
+	//return root, err
 }
 
 func MakeEmptyHeader(parent *types.Header, chainConfig *chain.Config, timestamp uint64, targetGasLimit *uint64) *types.Header {

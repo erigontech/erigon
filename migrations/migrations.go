@@ -1,3 +1,19 @@
+// Copyright 2024 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+
 package migrations
 
 import (
@@ -7,13 +23,13 @@ import (
 	"fmt"
 	"path/filepath"
 
-	"github.com/ledgerwatch/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common"
 
-	"github.com/ledgerwatch/erigon-lib/common/datadir"
-	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon-lib/log/v3"
-	"github.com/ledgerwatch/erigon/core/rawdb"
-	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
+	"github.com/erigontech/erigon-lib/common/datadir"
+	"github.com/erigontech/erigon-lib/kv"
+	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/core/rawdb"
+	"github.com/erigontech/erigon/eth/stagedsync/stages"
 )
 
 // migrations apply sequentially in order of this array, skips applied migrations
@@ -123,7 +139,7 @@ func (m *Migrator) PendingMigrations(tx kv.Tx) ([]Migration, error) {
 	return pending, nil
 }
 
-func (m *Migrator) VerifyVersion(db kv.RwDB) error {
+func (m *Migrator) VerifyVersion(db kv.RwDB, chaindata string) error {
 	if err := db.View(context.Background(), func(tx kv.Tx) error {
 		major, minor, _, ok, err := rawdb.ReadDBSchemaVersion(tx)
 		if err != nil {
@@ -137,9 +153,8 @@ func (m *Migrator) VerifyVersion(db kv.RwDB) error {
 					return fmt.Errorf("cannot downgrade minor DB version from %d.%d to %d.%d", major, minor, kv.DBSchemaVersion.Major, kv.DBSchemaVersion.Major)
 				}
 			} else {
-				// major < kv.DBSchemaVersion.Major
-				if kv.DBSchemaVersion.Major-major > 1 {
-					return fmt.Errorf("cannot upgrade major DB version for more than 1 version from %d to %d, use integration tool if you know what you are doing", major, kv.DBSchemaVersion.Major)
+				if kv.DBSchemaVersion.Major != major {
+					return fmt.Errorf("cannot switch major DB version, db: %d, erigon: %d, try \"rm -rf %s\"", major, kv.DBSchemaVersion.Major, chaindata)
 				}
 			}
 		}
@@ -151,7 +166,7 @@ func (m *Migrator) VerifyVersion(db kv.RwDB) error {
 	return nil
 }
 
-func (m *Migrator) Apply(db kv.RwDB, dataDir string, logger log.Logger) error {
+func (m *Migrator) Apply(db kv.RwDB, dataDir, chaindata string, logger log.Logger) error {
 	if len(m.Migrations) == 0 {
 		return nil
 	}
@@ -168,7 +183,7 @@ func (m *Migrator) Apply(db kv.RwDB, dataDir string, logger log.Logger) error {
 	}); err != nil {
 		return err
 	}
-	if err := m.VerifyVersion(db); err != nil {
+	if err := m.VerifyVersion(db, chaindata); err != nil {
 		return fmt.Errorf("migrator.Apply: %w", err)
 	}
 

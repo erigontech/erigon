@@ -1,18 +1,18 @@
-/*
-   Copyright 2021 Erigon contributors
-
-   Licensed under the Apache License, Version 2.0 (the "License");
-   you may not use this file except in compliance with the License.
-   You may obtain a copy of the License at
-
-       http://www.apache.org/licenses/LICENSE-2.0
-
-   Unless required by applicable law or agreed to in writing, software
-   distributed under the License is distributed on an "AS IS" BASIS,
-   WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-   See the License for the specific language governing permissions and
-   limitations under the License.
-*/
+// Copyright 2021 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
 package downloader
 
@@ -35,15 +35,15 @@ import (
 	"github.com/anacrolix/torrent/metainfo"
 	"golang.org/x/sync/errgroup"
 
-	"github.com/ledgerwatch/erigon-lib/chain/snapcfg"
-	common2 "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/common/datadir"
-	"github.com/ledgerwatch/erigon-lib/common/dbg"
-	dir2 "github.com/ledgerwatch/erigon-lib/common/dir"
-	"github.com/ledgerwatch/erigon-lib/downloader/downloadercfg"
-	"github.com/ledgerwatch/erigon-lib/downloader/snaptype"
-	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon-lib/log/v3"
+	"github.com/erigontech/erigon-lib/chain/snapcfg"
+	common2 "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common/datadir"
+	"github.com/erigontech/erigon-lib/common/dbg"
+	dir2 "github.com/erigontech/erigon-lib/common/dir"
+	"github.com/erigontech/erigon-lib/downloader/downloadercfg"
+	"github.com/erigontech/erigon-lib/downloader/snaptype"
+	"github.com/erigontech/erigon-lib/kv"
+	"github.com/erigontech/erigon-lib/log/v3"
 )
 
 // udpOrHttpTrackers - torrent library spawning several goroutines and producing many requests for each tracker. So we limit amout of trackers by 8
@@ -122,12 +122,12 @@ func ensureCantLeaveDir(fName, root string) (string, error) {
 		if err != nil {
 			return fName, err
 		}
-		if !IsLocal(newFName) {
+		if !filepath.IsLocal(newFName) {
 			return fName, fmt.Errorf("file=%s, is outside of snapshots dir", fName)
 		}
 		fName = newFName
 	}
-	if !IsLocal(fName) {
+	if !filepath.IsLocal(fName) {
 		return fName, fmt.Errorf("relative paths are not allowed: %s", fName)
 	}
 	return fName, nil
@@ -144,12 +144,20 @@ func BuildTorrentIfNeed(ctx context.Context, fName, root string, torrentFiles *A
 		return false, err
 	}
 
-	if torrentFiles.Exists(fName) {
+	exists, err := torrentFiles.Exists(fName)
+	if err != nil {
+		return false, err
+	}
+	if exists {
 		return false, nil
 	}
 
 	fPath := filepath.Join(root, fName)
-	if !dir2.FileExist(fPath) {
+	exists, err = dir2.FileExist(fPath)
+	if err != nil {
+		return false, err
+	}
+	if !exists {
 		return false, nil
 	}
 
@@ -453,11 +461,6 @@ func readPeerID(db kv.RoDB) (peerID []byte, err error) {
 		return nil, err
 	}
 	return peerID, nil
-}
-
-// Deprecated: use `filepath.IsLocal` after drop go1.19 support
-func IsLocal(path string) bool {
-	return isLocal(path)
 }
 
 func ScheduleVerifyFile(ctx context.Context, t *torrent.Torrent, completePieces *atomic.Uint64) error {

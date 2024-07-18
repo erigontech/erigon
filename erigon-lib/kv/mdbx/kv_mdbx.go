@@ -1,18 +1,18 @@
-/*
-   Copyright 2021 Erigon contributors
-
-   Licensed under the Apache License, Version 2.0 (the "License");
-   you may not use this file except in compliance with the License.
-   You may obtain a copy of the License at
-
-       http://www.apache.org/licenses/LICENSE-2.0
-
-   Unless required by applicable law or agreed to in writing, software
-   distributed under the License is distributed on an "AS IS" BASIS,
-   WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-   See the License for the specific language governing permissions and
-   limitations under the License.
-*/
+// Copyright 2021 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
 package mdbx
 
@@ -38,13 +38,13 @@ import (
 	"golang.org/x/exp/maps"
 	"golang.org/x/sync/semaphore"
 
-	"github.com/ledgerwatch/erigon-lib/common/dbg"
-	"github.com/ledgerwatch/erigon-lib/common/dir"
-	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon-lib/kv/iter"
-	"github.com/ledgerwatch/erigon-lib/kv/order"
-	"github.com/ledgerwatch/erigon-lib/log/v3"
-	"github.com/ledgerwatch/erigon-lib/mmap"
+	"github.com/erigontech/erigon-lib/common/dbg"
+	"github.com/erigontech/erigon-lib/common/dir"
+	"github.com/erigontech/erigon-lib/kv"
+	"github.com/erigontech/erigon-lib/kv/order"
+	"github.com/erigontech/erigon-lib/kv/stream"
+	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon-lib/mmap"
 )
 
 const NonExistingDBI kv.DBI = 999_999_999
@@ -252,7 +252,10 @@ func (opts MdbxOpts) Open(ctx context.Context) (kv.RwDB, error) {
 	}
 	if opts.flags&mdbx.Accede != 0 || opts.flags&mdbx.Readonly != 0 {
 		for retry := 0; ; retry++ {
-			exists := dir.FileExist(filepath.Join(opts.path, "mdbx.dat"))
+			exists, err := dir.FileExist(filepath.Join(opts.path, "mdbx.dat"))
+			if err != nil {
+				return nil, err
+			}
 			if exists {
 				break
 			}
@@ -839,7 +842,6 @@ type MdbxCursor struct {
 	c          *mdbx.Cursor
 	bucketName string
 	bucketCfg  kv.TableCfgItem
-	dbi        mdbx.DBI
 	id         uint64
 }
 
@@ -853,6 +855,14 @@ func (db *MdbxKV) AllDBI() map[string]kv.DBI {
 		res[name] = cfg.DBI
 	}
 	return res
+}
+
+func (tx *MdbxTx) Count(bucket string) (uint64, error) {
+	st, err := tx.tx.StatDBI(mdbx.DBI(tx.db.buckets[bucket].DBI))
+	if err != nil {
+		return 0, err
+	}
+	return st.Entries, nil
 }
 
 func (db *MdbxKV) AllTables() kv.TableCfg {
@@ -1188,19 +1198,16 @@ func (tx *MdbxTx) statelessCursor(bucket string) (kv.RwCursor, error) {
 }
 
 func (tx *MdbxTx) Put(table string, k, v []byte) error {
-	c, err := tx.statelessCursor(table)
-	if err != nil {
-		return err
-	}
-	return c.Put(k, v)
+	return tx.tx.Put(mdbx.DBI(tx.db.buckets[table].DBI), k, v, 0)
 }
 
 func (tx *MdbxTx) Delete(table string, k []byte) error {
-	c, err := tx.statelessCursor(table)
-	if err != nil {
-		return err
+	err := tx.tx.Del(mdbx.DBI(tx.db.buckets[table].DBI), k, nil)
+	//TODO: revise the logic, why we should drop not found err? maybe we need another function for get with key error
+	if mdbx.IsNotFound(err) {
+		return nil
 	}
-	return c.Delete(k)
+	return err
 }
 
 func (tx *MdbxTx) GetOne(bucket string, k []byte) ([]byte, error) {
@@ -1330,11 +1337,11 @@ func (tx *MdbxTx) Cursor(bucket string) (kv.Cursor, error) {
 
 func (tx *MdbxTx) stdCursor(bucket string) (kv.RwCursor, error) {
 	b := tx.db.buckets[bucket]
-	c := &MdbxCursor{bucketName: bucket, tx: tx, bucketCfg: b, dbi: mdbx.DBI(tx.db.buckets[bucket].DBI), id: tx.ID}
+	c := &MdbxCursor{bucketName: bucket, tx: tx, bucketCfg: b, id: tx.ID}
 	tx.ID++
 
 	var err error
-	c.c, err = tx.tx.OpenCursor(c.dbi)
+	c.c, err = tx.tx.OpenCursor(mdbx.DBI(tx.db.buckets[c.bucketName].DBI))
 	if err != nil {
 		return nil, fmt.Errorf("table: %s, %w, stack: %s", c.bucketName, err, dbg.Stack())
 	}
@@ -1393,14 +1400,6 @@ func (c *MdbxCursor) firstDup() ([]byte, error) {
 func (c *MdbxCursor) lastDup() ([]byte, error) {
 	_, v, err := c.c.Get(nil, nil, mdbx.LastDup)
 	return v, err
-}
-
-func (c *MdbxCursor) Count() (uint64, error) {
-	st, err := c.tx.tx.StatDBI(c.dbi)
-	if err != nil {
-		return 0, err
-	}
-	return st.Entries, nil
 }
 
 func (c *MdbxCursor) First() ([]byte, []byte, error) {
@@ -1935,28 +1934,7 @@ func (tx *MdbxTx) ForEach(bucket string, fromPrefix []byte, walker func(k, v []b
 	return nil
 }
 
-func (tx *MdbxTx) ForPrefix(bucket string, prefix []byte, walker func(k, v []byte) error) error {
-	c, err := tx.Cursor(bucket)
-	if err != nil {
-		return err
-	}
-	defer c.Close()
-
-	for k, v, err := c.Seek(prefix); k != nil; k, v, err = c.Next() {
-		if err != nil {
-			return err
-		}
-		if !bytes.HasPrefix(k, prefix) {
-			break
-		}
-		if err := walker(k, v); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
-func (tx *MdbxTx) Prefix(table string, prefix []byte) (iter.KV, error) {
+func (tx *MdbxTx) Prefix(table string, prefix []byte) (stream.KV, error) {
 	nextPrefix, ok := kv.NextSubtree(prefix)
 	if !ok {
 		return tx.Range(table, prefix, nil)
@@ -1964,13 +1942,13 @@ func (tx *MdbxTx) Prefix(table string, prefix []byte) (iter.KV, error) {
 	return tx.Range(table, prefix, nextPrefix)
 }
 
-func (tx *MdbxTx) Range(table string, fromPrefix, toPrefix []byte) (iter.KV, error) {
+func (tx *MdbxTx) Range(table string, fromPrefix, toPrefix []byte) (stream.KV, error) {
 	return tx.RangeAscend(table, fromPrefix, toPrefix, -1)
 }
-func (tx *MdbxTx) RangeAscend(table string, fromPrefix, toPrefix []byte, limit int) (iter.KV, error) {
+func (tx *MdbxTx) RangeAscend(table string, fromPrefix, toPrefix []byte, limit int) (stream.KV, error) {
 	return tx.rangeOrderLimit(table, fromPrefix, toPrefix, order.Asc, limit)
 }
-func (tx *MdbxTx) RangeDescend(table string, fromPrefix, toPrefix []byte, limit int) (iter.KV, error) {
+func (tx *MdbxTx) RangeDescend(table string, fromPrefix, toPrefix []byte, limit int) (stream.KV, error) {
 	return tx.rangeOrderLimit(table, fromPrefix, toPrefix, order.Desc, limit)
 }
 
@@ -2136,7 +2114,7 @@ func (s *cursor2iter) Next() (k, v []byte, err error) {
 	return k, v, nil
 }
 
-func (tx *MdbxTx) RangeDupSort(table string, key []byte, fromPrefix, toPrefix []byte, asc order.By, limit int) (iter.KV, error) {
+func (tx *MdbxTx) RangeDupSort(table string, key []byte, fromPrefix, toPrefix []byte, asc order.By, limit int) (stream.KV, error) {
 	s := &cursorDup2iter{ctx: tx.ctx, tx: tx, key: key, fromPrefix: fromPrefix, toPrefix: toPrefix, orderAscend: bool(asc), limit: int64(limit), id: tx.ID}
 	tx.ID++
 	if tx.toCloseMap == nil {

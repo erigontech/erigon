@@ -1,18 +1,21 @@
 // Copyright 2015 The go-ethereum Authors
-// This file is part of the go-ethereum library.
+// (original work)
+// Copyright 2024 The Erigon Authors
+// (modifications)
+// This file is part of Erigon.
 //
-// The go-ethereum library is free software: you can redistribute it and/or modify
+// Erigon is free software: you can redistribute it and/or modify
 // it under the terms of the GNU Lesser General Public License as published by
 // the Free Software Foundation, either version 3 of the License, or
 // (at your option) any later version.
 //
-// The go-ethereum library is distributed in the hope that it will be useful,
+// Erigon is distributed in the hope that it will be useful,
 // but WITHOUT ANY WARRANTY; without even the implied warranty of
 // MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
 // GNU Lesser General Public License for more details.
 //
 // You should have received a copy of the GNU Lesser General Public License
-// along with the go-ethereum library. If not, see <http://www.gnu.org/licenses/>.
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
 package ethapi
 
@@ -23,17 +26,17 @@ import (
 
 	"github.com/holiman/uint256"
 
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/common/hexutil"
-	"github.com/ledgerwatch/erigon-lib/common/hexutility"
-	"github.com/ledgerwatch/erigon-lib/log/v3"
-	types2 "github.com/ledgerwatch/erigon-lib/types"
+	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common/hexutil"
+	"github.com/erigontech/erigon-lib/common/hexutility"
+	"github.com/erigontech/erigon-lib/log/v3"
+	types2 "github.com/erigontech/erigon-lib/types"
 
-	"github.com/ledgerwatch/erigon/accounts/abi"
-	"github.com/ledgerwatch/erigon/common/math"
-	"github.com/ledgerwatch/erigon/core/types"
-	"github.com/ledgerwatch/erigon/core/vm/evmtypes"
-	"github.com/ledgerwatch/erigon/eth/tracers/logger"
+	"github.com/erigontech/erigon/accounts/abi"
+	"github.com/erigontech/erigon/common/math"
+	"github.com/erigontech/erigon/core/types"
+	"github.com/erigontech/erigon/core/vm/evmtypes"
+	"github.com/erigontech/erigon/eth/tracers/logger"
 )
 
 // CallArgs represents the arguments for a call.
@@ -398,8 +401,8 @@ func RPCMarshalBlockExDeprecated(block *types.Block, inclTx bool, fullTx bool, b
 		txs := block.Transactions()
 		transactions := make([]interface{}, len(txs), len(txs)+1)
 		var err error
-		for i, tx := range txs {
-			if transactions[i], err = formatTx(tx, i); err != nil {
+		for i, txn := range txs {
+			if transactions[i], err = formatTx(txn, i); err != nil {
 				return nil, err
 			}
 		}
@@ -616,8 +619,8 @@ func newRPCTransactionFromBlockIndex(b *types.Block, index uint64) *RPCTransacti
 */
 
 // newRPCTransactionFromBlockAndTxGivenIndex returns a transaction that will serialize to the RPC representation.
-func newRPCTransactionFromBlockAndTxGivenIndex(b *types.Block, tx types.Transaction, index uint64) *RPCTransaction {
-	return newRPCTransaction(tx, b.Hash(), b.NumberU64(), index, b.BaseFee())
+func newRPCTransactionFromBlockAndTxGivenIndex(b *types.Block, txn types.Transaction, index uint64) *RPCTransaction {
+	return newRPCTransaction(txn, b.Hash(), b.NumberU64(), index, b.BaseFee())
 }
 
 /*
@@ -643,7 +646,7 @@ func newRPCRawTransactionFromBlockIndex(b *types.Block, index uint64) hexutil.By
 /*
 // newRPCTransactionFromBlockHash returns a transaction that will serialize to the RPC representation.
 func newRPCTransactionFromBlockHash(b *types.Block, hash libcommon.Hash) *RPCTransaction {
-	for idx, tx := range b.Transactions() {
+	for idx, txn := range b.Transactions() {
 		if tx.Hash() == hash {
 			return newRPCTransactionFromBlockIndex(b, uint64(idx))
 		}
@@ -744,11 +747,11 @@ func (s *PublicTransactionPoolAPI) GetTransactionByHash(ctx context.Context, has
 	if err != nil {
 		return nil, err
 	}
-	if tx != nil {
+	if txn != nil {
 		return newRPCTransaction(tx, blockHash, blockNumber, index), nil
 	}
 	// No finalized transaction, try to retrieve it from the pool
-	if tx := s.b.GetPoolTransaction(hash); tx != nil {
+	if txn := s.b.GetPoolTransaction(hash); txn != nil {
 		return newRPCPendingTransaction(tx), nil
 	}
 
@@ -763,8 +766,8 @@ func (s *PublicTransactionPoolAPI) GetRawTransactionByHash(ctx context.Context, 
 	if err != nil {
 		return nil, err
 	}
-	if tx == nil {
-		if tx = s.b.GetPoolTransaction(hash); tx == nil {
+	if txn == nil {
+		if txn = s.b.GetPoolTransaction(hash); txn == nil {
 			// Transaction not found anywhere, abort
 			return nil, nil
 		}
@@ -832,7 +835,7 @@ func (s *PublicTransactionPoolAPI) GetTransactionReceipt(ctx context.Context, ha
 	return fields, nil
 }
 
-// SendTxArgs represents the arguments to sumbit a new transaction into the transaction pool.
+// SendTxArgs represents the arguments to submit a new transaction into the transaction pool.
 type SendTxArgs struct {
 	From     libcommon.Address  `json:"from"`
 	To       *libcommon.Address `json:"to"`
@@ -852,7 +855,7 @@ type SendTxArgs struct {
 	ChainID    *hexutil.Big      `json:"chainId,omitempty"`
 }
 
-// setDefaults fills in default values for unspecified tx fields.
+// setDefaults fills in default values for unspecified txn fields.
 func (args *SendTxArgs) setDefaults(ctx context.Context, b Backend) error {
 	if args.GasPrice == nil {
 		price, err := b.SuggestPrice(ctx)
@@ -928,7 +931,7 @@ func (args *SendTxArgs) toTransaction() types.Transaction {
 		input = *args.Data
 	}
 
-	var tx types.Transaction
+	var txn types.Transaction
 	gasPrice, _ := uint256.FromBig((*big.Int)(args.GasPrice))
 	value, _ := uint256.FromBig((*big.Int)(args.Value))
 	if args.AccessList == nil {
@@ -980,8 +983,8 @@ func (args *SendTxArgs) toTransaction() types.Transaction {
 	return tx
 }
 
-// SubmitTransaction is a helper function that submits tx to txPool and logs a message.
-func SubmitTransaction(ctx context.Context, b Backend, tx types.Transaction) (libcommon.Hash, error) {
+// SubmitTransaction is a helper function that submits txn to txPool and logs a message.
+func SubmitTransaction(ctx context.Context, b Backend, txn types.Transaction) (libcommon.Hash, error) {
 	// If the transaction fee cap is already specified, ensure the
 	// fee of the given transaction is _reasonable_.
 	if err := checkTxFee(tx.GetPrice().ToBig(), tx.GetGas(), b.RPCTxFeeCap()); err != nil {
@@ -994,7 +997,7 @@ func SubmitTransaction(ctx context.Context, b Backend, tx types.Transaction) (li
 	if err := b.SendTx(ctx, tx); err != nil {
 		return libcommon.Hash{}, err
 	}
-	// Print a log with full tx details for manual investigations and interventions
+	// Print a log with full txn details for manual investigations and interventions
 	signer := types.MakeSigner(b.ChainConfig(), b.CurrentBlock().Number().Uint64())
 	from, err := tx.Sender(*signer)
 	if err != nil {

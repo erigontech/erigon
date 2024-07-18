@@ -1,3 +1,19 @@
+// Copyright 2024 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+
 package main
 
 import (
@@ -18,39 +34,39 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/ledgerwatch/erigon-lib/kv/dbutils"
+	"github.com/erigontech/erigon-lib/kv/dbutils"
 
 	"github.com/RoaringBitmap/roaring/roaring64"
 	"github.com/holiman/uint256"
 
-	"github.com/ledgerwatch/erigon-lib/log/v3"
+	"github.com/erigontech/erigon-lib/log/v3"
 
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/common/hexutility"
-	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon-lib/kv/mdbx"
-	"github.com/ledgerwatch/erigon-lib/recsplit"
-	"github.com/ledgerwatch/erigon-lib/recsplit/eliasfano32"
-	"github.com/ledgerwatch/erigon-lib/seg"
+	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common/hexutility"
+	"github.com/erigontech/erigon-lib/kv"
+	"github.com/erigontech/erigon-lib/kv/mdbx"
+	"github.com/erigontech/erigon-lib/recsplit"
+	"github.com/erigontech/erigon-lib/recsplit/eliasfano32"
+	"github.com/erigontech/erigon-lib/seg"
 
-	hackdb "github.com/ledgerwatch/erigon/cmd/hack/db"
-	"github.com/ledgerwatch/erigon/cmd/hack/flow"
-	"github.com/ledgerwatch/erigon/cmd/hack/tool"
-	"github.com/ledgerwatch/erigon/common"
-	"github.com/ledgerwatch/erigon/common/paths"
-	"github.com/ledgerwatch/erigon/core"
-	"github.com/ledgerwatch/erigon/core/rawdb"
-	"github.com/ledgerwatch/erigon/core/rawdb/blockio"
-	"github.com/ledgerwatch/erigon/core/types"
-	"github.com/ledgerwatch/erigon/eth/ethconfig"
-	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
-	"github.com/ledgerwatch/erigon/ethdb/cbor"
-	"github.com/ledgerwatch/erigon/params"
-	"github.com/ledgerwatch/erigon/rlp"
-	"github.com/ledgerwatch/erigon/turbo/debug"
-	"github.com/ledgerwatch/erigon/turbo/logging"
-	"github.com/ledgerwatch/erigon/turbo/services"
-	"github.com/ledgerwatch/erigon/turbo/snapshotsync/freezeblocks"
+	hackdb "github.com/erigontech/erigon/cmd/hack/db"
+	"github.com/erigontech/erigon/cmd/hack/flow"
+	"github.com/erigontech/erigon/cmd/hack/tool"
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/paths"
+	"github.com/erigontech/erigon/core"
+	"github.com/erigontech/erigon/core/rawdb"
+	"github.com/erigontech/erigon/core/rawdb/blockio"
+	"github.com/erigontech/erigon/core/types"
+	"github.com/erigontech/erigon/eth/ethconfig"
+	"github.com/erigontech/erigon/eth/stagedsync/stages"
+	"github.com/erigontech/erigon/ethdb/cbor"
+	"github.com/erigontech/erigon/params"
+	"github.com/erigontech/erigon/rlp"
+	"github.com/erigontech/erigon/turbo/debug"
+	"github.com/erigontech/erigon/turbo/logging"
+	"github.com/erigontech/erigon/turbo/services"
+	"github.com/erigontech/erigon/turbo/snapshotsync/freezeblocks"
 )
 
 var (
@@ -373,7 +389,7 @@ func extractBodies(datadir string) error {
 	}
 	defer c.Close()
 	i := 0
-	var txId uint64
+	var txnID uint64
 	for k, _, err := c.First(); k != nil; k, _, err = c.Next() {
 		if err != nil {
 			return err
@@ -384,19 +400,19 @@ func extractBodies(datadir string) error {
 		if hash, err = br.CanonicalHash(context.Background(), tx, blockNumber); err != nil {
 			return err
 		}
-		_, baseTxId, txCount := rawdb.ReadBody(tx, blockHash, blockNumber)
-		fmt.Printf("Body %d %x: baseTxId %d, txCount %d\n", blockNumber, blockHash, baseTxId, txCount)
+		_, baseTxnID, txCount := rawdb.ReadBody(tx, blockHash, blockNumber)
+		fmt.Printf("Body %d %x: baseTxnID %d, txCount %d\n", blockNumber, blockHash, baseTxnID, txCount)
 		if hash != blockHash {
 			fmt.Printf("Non-canonical\n")
 			continue
 		}
 		i++
-		if txId > 0 {
-			if txId != baseTxId {
-				fmt.Printf("Mismatch txId for block %d, txId = %d, baseTxId = %d\n", blockNumber, txId, baseTxId)
+		if txnID > 0 {
+			if txnID != baseTxnID {
+				fmt.Printf("Mismatch txnID for block %d, txnID = %d, baseTxnID = %d\n", blockNumber, txnID, baseTxnID)
 			}
 		}
-		txId = baseTxId + uint64(txCount) + 2
+		txnID = baseTxnID + uint64(txCount) + 2
 		if i == 50 {
 			break
 		}
@@ -645,7 +661,7 @@ func trimTxs(chaindata string) error {
 			return err
 		}
 		// Remove from the map
-		toDelete.RemoveRange(body.BaseTxId, body.BaseTxId+uint64(body.TxCount))
+		toDelete.RemoveRange(body.BaseTxnID.U64(), body.BaseTxnID.LastSystemTx(body.TxCount)+1) //+1 to include last system txn in block into delete range
 	}
 	fmt.Printf("Number of txn records to delete: %d\n", toDelete.GetCardinality())
 	// Takes 20min to iterate 1.4b
@@ -666,11 +682,11 @@ func trimTxs(chaindata string) error {
 	fmt.Printf("Number of txn records to delete: %d\n", toDelete.GetCardinality())
 	fmt.Printf("Roaring size: %d\n", toDelete.GetSizeInBytes())
 
-	iter := toDelete.Iterator()
+	it := toDelete.Iterator()
 	for {
 		var deleted int
-		for iter.HasNext() {
-			txId := iter.Next()
+		for it.HasNext() {
+			txId := it.Next()
 			var key [8]byte
 			binary.BigEndian.PutUint64(key[:], txId)
 			if err = txs.Delete(key[:]); err != nil {

@@ -1,3 +1,19 @@
+// Copyright 2024 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+
 package eth1_utils
 
 import (
@@ -6,11 +22,12 @@ import (
 	"math/big"
 
 	"github.com/holiman/uint256"
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/gointerfaces"
-	execution "github.com/ledgerwatch/erigon-lib/gointerfaces/executionproto"
-	types2 "github.com/ledgerwatch/erigon-lib/gointerfaces/typesproto"
-	"github.com/ledgerwatch/erigon/core/types"
+
+	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/gointerfaces"
+	execution "github.com/erigontech/erigon-lib/gointerfaces/executionproto"
+	types2 "github.com/erigontech/erigon-lib/gointerfaces/typesproto"
+	"github.com/erigontech/erigon/core/types"
 )
 
 func HeaderToHeaderRPC(header *types.Header) *execution.Header {
@@ -110,7 +127,7 @@ func HeaderRpcToHeader(header *execution.Header) (*types.Header, error) {
 		ReceiptHash:   gointerfaces.ConvertH256ToHash(header.ReceiptRoot),
 		Bloom:         gointerfaces.ConvertH2048ToBloom(header.LogsBloom),
 		Difficulty:    gointerfaces.ConvertH256ToUint256Int(header.Difficulty).ToBig(),
-		Number:        big.NewInt(int64(header.BlockNumber)),
+		Number:        new(big.Int).SetUint64(header.BlockNumber),
 		GasLimit:      header.GasLimit,
 		GasUsed:       header.GasUsed,
 		Time:          header.Timestamp,

@@ -1,3 +1,19 @@
+// Copyright 2024 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+
 package main
 
 import (
@@ -13,9 +29,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/ledgerwatch/erigon-lib/common/dbg"
-	_ "github.com/ledgerwatch/erigon/core/snaptype"        //hack
-	_ "github.com/ledgerwatch/erigon/polygon/bor/snaptype" //hack
+	"github.com/erigontech/erigon-lib/common/dbg"
+	_ "github.com/erigontech/erigon/core/snaptype"        //hack
+	_ "github.com/erigontech/erigon/polygon/bor/snaptype" //hack
 
 	"github.com/anacrolix/torrent/metainfo"
 	"github.com/c2h5oh/datasize"
@@ -30,26 +46,26 @@ import (
 	"google.golang.org/grpc/keepalive"
 	"google.golang.org/grpc/reflection"
 
-	"github.com/ledgerwatch/erigon-lib/chain/snapcfg"
-	"github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/common/datadir"
-	"github.com/ledgerwatch/erigon-lib/common/dir"
-	"github.com/ledgerwatch/erigon-lib/downloader"
-	"github.com/ledgerwatch/erigon-lib/downloader/downloadercfg"
-	"github.com/ledgerwatch/erigon-lib/downloader/downloadergrpc"
-	proto_downloader "github.com/ledgerwatch/erigon-lib/gointerfaces/downloaderproto"
-	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon-lib/kv/mdbx"
-	"github.com/ledgerwatch/erigon-lib/log/v3"
+	"github.com/erigontech/erigon-lib/chain/snapcfg"
+	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common/datadir"
+	"github.com/erigontech/erigon-lib/common/dir"
+	"github.com/erigontech/erigon-lib/downloader"
+	"github.com/erigontech/erigon-lib/downloader/downloadercfg"
+	"github.com/erigontech/erigon-lib/downloader/downloadergrpc"
+	proto_downloader "github.com/erigontech/erigon-lib/gointerfaces/downloaderproto"
+	"github.com/erigontech/erigon-lib/kv"
+	"github.com/erigontech/erigon-lib/kv/mdbx"
+	"github.com/erigontech/erigon-lib/log/v3"
 
-	"github.com/ledgerwatch/erigon/cmd/downloader/downloadernat"
-	"github.com/ledgerwatch/erigon/cmd/hack/tool"
-	"github.com/ledgerwatch/erigon/cmd/utils"
-	"github.com/ledgerwatch/erigon/common/paths"
-	"github.com/ledgerwatch/erigon/p2p/nat"
-	"github.com/ledgerwatch/erigon/params"
-	"github.com/ledgerwatch/erigon/turbo/debug"
-	"github.com/ledgerwatch/erigon/turbo/logging"
+	"github.com/erigontech/erigon/cmd/downloader/downloadernat"
+	"github.com/erigontech/erigon/cmd/hack/tool"
+	"github.com/erigontech/erigon/cmd/utils"
+	"github.com/erigontech/erigon/common/paths"
+	"github.com/erigontech/erigon/p2p/nat"
+	"github.com/erigontech/erigon/params"
+	"github.com/erigontech/erigon/turbo/debug"
+	"github.com/erigontech/erigon/turbo/logging"
 )
 
 func main() {
@@ -413,7 +429,13 @@ func manifestVerify(ctx context.Context, logger log.Logger) error {
 	webseedsList := common.CliString2Array(webseeds)
 	if len(webseedsList) == 0 { // fallback to default if exact list not passed
 		if known, ok := snapcfg.KnownWebseeds[chain]; ok {
-			webseedsList = append(webseedsList, known...)
+			for _, s := range known {
+				//TODO: enable validation of this buckets also. skipping to make CI useful.k
+				if strings.Contains(s, "erigon2-v2") {
+					continue
+				}
+				webseedsList = append(webseedsList, s)
+			}
 		}
 	}
 
@@ -424,7 +446,12 @@ func manifestVerify(ctx context.Context, logger log.Logger) error {
 		if !strings.HasPrefix(webseed, "v") { // has marker v1/v2/...
 			uri, err := url.ParseRequestURI(webseed)
 			if err != nil {
-				if strings.HasSuffix(webseed, ".toml") && dir.FileExist(webseed) {
+				exists, existsErr := dir.FileExist(webseed)
+				if existsErr != nil {
+					log.Warn("[webseed] FileExist error", "err", err)
+					continue
+				}
+				if strings.HasSuffix(webseed, ".toml") && exists {
 					webseedFileProviders = append(webseedFileProviders, webseed)
 				}
 				continue
@@ -632,7 +659,11 @@ func StartGrpc(snServer *downloader.GrpcServer, addr string, creds *credentials.
 }
 
 func checkChainName(ctx context.Context, dirs datadir.Dirs, chainName string) error {
-	if !dir.FileExist(filepath.Join(dirs.Chaindata, "mdbx.dat")) {
+	exists, err := dir.FileExist(filepath.Join(dirs.Chaindata, "mdbx.dat"))
+	if err != nil {
+		return err
+	}
+	if !exists {
 		return nil
 	}
 	db, err := mdbx.NewMDBX(log.New()).

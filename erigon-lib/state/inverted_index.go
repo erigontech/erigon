@@ -1,18 +1,18 @@
-/*
-   Copyright 2022 Erigon contributors
-
-   Licensed under the Apache License, Version 2.0 (the "License");
-   you may not use this file except in compliance with the License.
-   You may obtain a copy of the License at
-
-       http://www.apache.org/licenses/LICENSE-2.0
-
-   Unless required by applicable law or agreed to in writing, software
-   distributed under the License is distributed on an "AS IS" BASIS,
-   WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-   See the License for the specific language governing permissions and
-   limitations under the License.
-*/
+// Copyright 2022 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
 package state
 
@@ -33,27 +33,27 @@ import (
 	"sync"
 	"time"
 
-	"github.com/ledgerwatch/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common"
 
 	"github.com/RoaringBitmap/roaring/roaring64"
 	"github.com/spaolacci/murmur3"
 	btree2 "github.com/tidwall/btree"
 	"golang.org/x/sync/errgroup"
 
-	"github.com/ledgerwatch/erigon-lib/common/assert"
-	"github.com/ledgerwatch/erigon-lib/common/background"
-	"github.com/ledgerwatch/erigon-lib/common/datadir"
-	"github.com/ledgerwatch/erigon-lib/common/dbg"
-	"github.com/ledgerwatch/erigon-lib/common/dir"
-	"github.com/ledgerwatch/erigon-lib/etl"
-	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon-lib/kv/bitmapdb"
-	"github.com/ledgerwatch/erigon-lib/kv/iter"
-	"github.com/ledgerwatch/erigon-lib/kv/order"
-	"github.com/ledgerwatch/erigon-lib/log/v3"
-	"github.com/ledgerwatch/erigon-lib/recsplit"
-	"github.com/ledgerwatch/erigon-lib/recsplit/eliasfano32"
-	"github.com/ledgerwatch/erigon-lib/seg"
+	"github.com/erigontech/erigon-lib/common/assert"
+	"github.com/erigontech/erigon-lib/common/background"
+	"github.com/erigontech/erigon-lib/common/datadir"
+	"github.com/erigontech/erigon-lib/common/dbg"
+	"github.com/erigontech/erigon-lib/common/dir"
+	"github.com/erigontech/erigon-lib/etl"
+	"github.com/erigontech/erigon-lib/kv"
+	"github.com/erigontech/erigon-lib/kv/bitmapdb"
+	"github.com/erigontech/erigon-lib/kv/order"
+	"github.com/erigontech/erigon-lib/kv/stream"
+	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon-lib/recsplit"
+	"github.com/erigontech/erigon-lib/recsplit/eliasfano32"
+	"github.com/erigontech/erigon-lib/seg"
 )
 
 type InvertedIndex struct {
@@ -158,24 +158,24 @@ func (ii *InvertedIndex) fileNamesOnDisk() (idx, hist, domain []string, err erro
 	return
 }
 
-func (ii *InvertedIndex) OpenList(fNames []string) error {
+func (ii *InvertedIndex) openList(fNames []string) error {
 	ii.closeWhatNotInList(fNames)
-	ii.scanStateFiles(fNames)
-	if err := ii.openFiles(); err != nil {
-		return fmt.Errorf("NewHistory.openFiles: %w, %s", err, ii.filenameBase)
+	ii.scanDirtyFiles(fNames)
+	if err := ii.openDirtyFiles(); err != nil {
+		return fmt.Errorf("InvertedIndex(%s).openDirtyFiles: %w", ii.filenameBase, err)
 	}
 	return nil
 }
 
-func (ii *InvertedIndex) OpenFolder() error {
+func (ii *InvertedIndex) openFolder() error {
 	idxFiles, _, _, err := ii.fileNamesOnDisk()
 	if err != nil {
 		return err
 	}
-	return ii.OpenList(idxFiles)
+	return ii.openList(idxFiles)
 }
 
-func (ii *InvertedIndex) scanStateFiles(fileNames []string) (garbageFiles []*filesItem) {
+func (ii *InvertedIndex) scanDirtyFiles(fileNames []string) (garbageFiles []*filesItem) {
 	re := regexp.MustCompile("^v([0-9]+)-" + ii.filenameBase + ".([0-9]+)-([0-9]+).ef$")
 	var err error
 	for _, name := range fileNames {
@@ -233,7 +233,12 @@ func (ii *InvertedIndex) missedAccessors() (l []*filesItem) {
 	ii.dirtyFiles.Walk(func(items []*filesItem) bool {
 		for _, item := range items {
 			fromStep, toStep := item.startTxNum/ii.aggregationStep, item.endTxNum/ii.aggregationStep
-			if !dir.FileExist(ii.efAccessorFilePath(fromStep, toStep)) {
+			exists, err := dir.FileExist(ii.efAccessorFilePath(fromStep, toStep))
+			if err != nil {
+				_, fName := filepath.Split(ii.efAccessorFilePath(fromStep, toStep))
+				ii.logger.Warn("[agg] InvertedIndex missedAccessors", "err", err, "f", fName)
+			}
+			if !exists {
 				l = append(l, item)
 			}
 		}
@@ -261,19 +266,27 @@ func (ii *InvertedIndex) BuildMissedAccessors(ctx context.Context, g *errgroup.G
 
 }
 
-func (ii *InvertedIndex) openFiles() error {
+func (ii *InvertedIndex) openDirtyFiles() error {
 	var invalidFileItems []*filesItem
 	invalidFileItemsLock := sync.Mutex{}
 	ii.dirtyFiles.Walk(func(items []*filesItem) bool {
-		var err error
 		for _, item := range items {
 			item := item
 			fromStep, toStep := item.startTxNum/ii.aggregationStep, item.endTxNum/ii.aggregationStep
 			if item.decompressor == nil {
 				fPath := ii.efFilePath(fromStep, toStep)
-				if !dir.FileExist(fPath) {
+				exists, err := dir.FileExist(fPath)
+				if err != nil {
 					_, fName := filepath.Split(fPath)
-					ii.logger.Debug("[agg] InvertedIndex.openFiles: file does not exists", "f", fName)
+					ii.logger.Debug("[agg] InvertedIndex.openDirtyFiles: FileExists error", "f", fName, "err", err)
+					invalidFileItemsLock.Lock()
+					invalidFileItems = append(invalidFileItems, item)
+					invalidFileItemsLock.Unlock()
+					continue
+				}
+				if !exists {
+					_, fName := filepath.Split(fPath)
+					ii.logger.Debug("[agg] InvertedIndex.openDirtyFiles: file does not exists", "f", fName)
 					invalidFileItemsLock.Lock()
 					invalidFileItems = append(invalidFileItems, item)
 					invalidFileItemsLock.Unlock()
@@ -283,9 +296,9 @@ func (ii *InvertedIndex) openFiles() error {
 				if item.decompressor, err = seg.NewDecompressor(fPath); err != nil {
 					_, fName := filepath.Split(fPath)
 					if errors.Is(err, &seg.ErrCompressedFileCorrupted{}) {
-						ii.logger.Debug("[agg] InvertedIndex.openFiles", "err", err, "f", fName)
+						ii.logger.Debug("[agg] InvertedIndex.openDirtyFiles", "err", err, "f", fName)
 					} else {
-						ii.logger.Warn("[agg] InvertedIndex.openFiles", "err", err, "f", fName)
+						ii.logger.Warn("[agg] InvertedIndex.openDirtyFiles", "err", err, "f", fName)
 					}
 					invalidFileItemsLock.Lock()
 					invalidFileItems = append(invalidFileItems, item)
@@ -297,10 +310,16 @@ func (ii *InvertedIndex) openFiles() error {
 
 			if item.index == nil {
 				fPath := ii.efAccessorFilePath(fromStep, toStep)
-				if dir.FileExist(fPath) {
+				exists, err := dir.FileExist(fPath)
+				if err != nil {
+					_, fName := filepath.Split(fPath)
+					ii.logger.Warn("[agg] InvertedIndex.openDirtyFiles", "err", err, "f", fName)
+					// don't interrupt on error. other files may be good
+				}
+				if exists {
 					if item.index, err = recsplit.OpenIndex(fPath); err != nil {
 						_, fName := filepath.Split(fPath)
-						ii.logger.Warn("[agg] InvertedIndex.openFiles", "err", err, "f", fName)
+						ii.logger.Warn("[agg] InvertedIndex.openDirtyFiles", "err", err, "f", fName)
 						// don't interrupt on error. other files may be good
 					}
 				}
@@ -338,6 +357,9 @@ func (ii *InvertedIndex) closeWhatNotInList(fNames []string) {
 }
 
 func (ii *InvertedIndex) Close() {
+	if ii == nil {
+		return
+	}
 	ii.closeWhatNotInList([]string{})
 }
 
@@ -390,6 +412,7 @@ func (w *invertedIndexBufferedWriter) Flush(ctx context.Context, tx kv.RwTx) err
 	if w.discard {
 		return nil
 	}
+
 	if err := w.index.Load(tx, w.indexTable, loadFunc, etl.TransformArgs{Quit: ctx.Done()}); err != nil {
 		return err
 	}
@@ -426,8 +449,8 @@ func (iit *InvertedIndexRoTx) newWriter(tmpdir string, discard bool) *invertedIn
 		indexKeysTable: iit.ii.indexKeysTable,
 		indexTable:     iit.ii.indexTable,
 		// etl collector doesn't fsync: means if have enough ram, all files produced by all collectors will be in ram
-		indexKeys: etl.NewCollector("flush "+iit.ii.indexKeysTable, tmpdir, etl.NewSortableBuffer(WALCollectorRAM), iit.ii.logger).LogLvl(log.LvlTrace),
-		index:     etl.NewCollector("flush "+iit.ii.indexTable, tmpdir, etl.NewSortableBuffer(WALCollectorRAM), iit.ii.logger).LogLvl(log.LvlTrace),
+		indexKeys: etl.NewCollector(iit.ii.filenameBase+".flush.ii.keys", tmpdir, etl.NewSortableBuffer(WALCollectorRAM), iit.ii.logger).LogLvl(log.LvlTrace),
+		index:     etl.NewCollector(iit.ii.filenameBase+".flush.ii.vals", tmpdir, etl.NewSortableBuffer(WALCollectorRAM), iit.ii.logger).LogLvl(log.LvlTrace),
 	}
 	w.indexKeys.SortAndFlushInBackground(true)
 	w.index.SortAndFlushInBackground(true)
@@ -466,16 +489,17 @@ func (iit *InvertedIndexRoTx) Close() {
 	files := iit.files
 	iit.files = nil
 	for i := 0; i < len(files); i++ {
-		if files[i].src.frozen {
+		src := files[i].src
+		if src == nil || src.frozen {
 			continue
 		}
-		refCnt := files[i].src.refcount.Add(-1)
+		refCnt := src.refcount.Add(-1)
 		//GC: last reader responsible to remove useles files: close it and delete
-		if refCnt == 0 && files[i].src.canDelete.Load() {
-			if iit.ii.filenameBase == traceFileLife {
-				iit.ii.logger.Warn(fmt.Sprintf("[agg] real remove at ctx close: %s", files[i].src.decompressor.FileName()))
+		if refCnt == 0 && src.canDelete.Load() {
+			if traceFileLife != "" && iit.ii.filenameBase == traceFileLife {
+				iit.ii.logger.Warn("[agg.dbg] real remove at InvertedIndexRoTx.Close", "file", src.decompressor.FileName())
 			}
-			files[i].src.closeFilesAndRemove()
+			src.closeFilesAndRemove()
 		}
 	}
 
@@ -491,12 +515,19 @@ type MergeRange struct {
 }
 
 func (mr *MergeRange) String(prefix string, aggStep uint64) string {
-	return fmt.Sprintf("%s=%d-%d", prefix, mr.from/aggStep, mr.to/aggStep)
+	if prefix != "" {
+		prefix += "="
+	}
+	return fmt.Sprintf("%s%d-%d", prefix, mr.from/aggStep, mr.to/aggStep)
+}
+
+func (mr *MergeRange) Equal(other *MergeRange) bool {
+	return mr.from == other.from && mr.to == other.to
 }
 
 type InvertedIndexRoTx struct {
 	ii      *InvertedIndex
-	files   []ctxItem // have no garbage (overlaps, etc...)
+	files   visibleFiles
 	getters []ArchiveGetter
 	readers []*recsplit.IndexReader
 
@@ -568,18 +599,13 @@ func (iit *InvertedIndexRoTx) seekInFiles(key []byte, txNum uint64) (found bool,
 	return false, 0
 }
 
-// it is assumed files are always sorted
-func (iit *InvertedIndexRoTx) lastTxNumInFiles() uint64 {
-	return iit.files[len(iit.files)-1].endTxNum
-}
-
 // IdxRange - return range of txNums for given `key`
 // is to be used in public API, therefore it relies on read-only transaction
 // so that iteration can be done even when the inverted index is being updated.
 // [startTxNum; endNumTx)
 
 // todo IdxRange operates over ii.indexTable . Passing `nil` as a key will not return all keys
-func (iit *InvertedIndexRoTx) IdxRange(key []byte, startTxNum, endTxNum int, asc order.By, limit int, roTx kv.Tx) (iter.U64, error) {
+func (iit *InvertedIndexRoTx) IdxRange(key []byte, startTxNum, endTxNum int, asc order.By, limit int, roTx kv.Tx) (stream.U64, error) {
 	frozenIt, err := iit.iterateRangeFrozen(key, startTxNum, endTxNum, asc, limit)
 	if err != nil {
 		return nil, err
@@ -588,20 +614,20 @@ func (iit *InvertedIndexRoTx) IdxRange(key []byte, startTxNum, endTxNum int, asc
 	if err != nil {
 		return nil, err
 	}
-	return iter.Union[uint64](frozenIt, recentIt, asc, limit), nil
+	return stream.Union[uint64](frozenIt, recentIt, asc, limit), nil
 }
 
-func (iit *InvertedIndexRoTx) recentIterateRange(key []byte, startTxNum, endTxNum int, asc order.By, limit int, roTx kv.Tx) (iter.U64, error) {
+func (iit *InvertedIndexRoTx) recentIterateRange(key []byte, startTxNum, endTxNum int, asc order.By, limit int, roTx kv.Tx) (stream.U64, error) {
 	//optimization: return empty pre-allocated iterator if range is frozen
 	if asc {
-		isFrozenRange := len(iit.files) > 0 && endTxNum >= 0 && iit.lastTxNumInFiles() >= uint64(endTxNum)
+		isFrozenRange := len(iit.files) > 0 && endTxNum >= 0 && iit.files.EndTxNum() >= uint64(endTxNum)
 		if isFrozenRange {
-			return iter.EmptyU64, nil
+			return stream.EmptyU64, nil
 		}
 	} else {
-		isFrozenRange := len(iit.files) > 0 && startTxNum >= 0 && iit.lastTxNumInFiles() >= uint64(startTxNum)
+		isFrozenRange := len(iit.files) > 0 && startTxNum >= 0 && iit.files.EndTxNum() >= uint64(startTxNum)
 		if isFrozenRange {
-			return iter.EmptyU64, nil
+			return stream.EmptyU64, nil
 		}
 	}
 
@@ -620,7 +646,7 @@ func (iit *InvertedIndexRoTx) recentIterateRange(key []byte, startTxNum, endTxNu
 	if err != nil {
 		return nil, err
 	}
-	return iter.TransformKV2U64(it, func(_, v []byte) (uint64, error) {
+	return stream.TransformKV2U64(it, func(_, v []byte) (uint64, error) {
 		return binary.BigEndian.Uint64(v), nil
 	}), nil
 }
@@ -688,8 +714,8 @@ func (iit *InvertedIndexRoTx) iterateRangeFrozen(key []byte, startTxNum, endTxNu
 	return it, nil
 }
 
-func (iit *InvertedIndexRoTx) smallestTxNum(tx kv.Tx) uint64 {
-	fst, _ := kv.FirstKey(tx, iit.ii.indexKeysTable)
+func (ii *InvertedIndex) minTxNumInDB(tx kv.Tx) uint64 {
+	fst, _ := kv.FirstKey(tx, ii.indexKeysTable)
 	if len(fst) > 0 {
 		fstInDb := binary.BigEndian.Uint64(fst)
 		return min(fstInDb, math.MaxUint64)
@@ -697,8 +723,8 @@ func (iit *InvertedIndexRoTx) smallestTxNum(tx kv.Tx) uint64 {
 	return math.MaxUint64
 }
 
-func (iit *InvertedIndexRoTx) highestTxNum(tx kv.Tx) uint64 {
-	lst, _ := kv.LastKey(tx, iit.ii.indexKeysTable)
+func (ii *InvertedIndex) maxTxNumInDB(tx kv.Tx) uint64 {
+	lst, _ := kv.LastKey(tx, ii.indexKeysTable)
 	if len(lst) > 0 {
 		lstInDb := binary.BigEndian.Uint64(lst)
 		return max(lstInDb, 0)
@@ -707,7 +733,13 @@ func (iit *InvertedIndexRoTx) highestTxNum(tx kv.Tx) uint64 {
 }
 
 func (iit *InvertedIndexRoTx) CanPrune(tx kv.Tx) bool {
-	return iit.smallestTxNum(tx) < iit.maxTxNumInFiles(false)
+	return iit.ii.minTxNumInDB(tx) < iit.files.EndTxNum()
+}
+
+func (iit *InvertedIndexRoTx) canBuild(dbtx kv.Tx) bool { //nolint
+	maxStepInFiles := iit.files.EndTxNum() / iit.ii.aggregationStep
+	maxStepInDB := iit.ii.maxTxNumInDB(dbtx) / iit.ii.aggregationStep
+	return maxStepInFiles < maxStepInDB
 }
 
 type InvertedIndexPruneStat struct {
@@ -763,7 +795,7 @@ func (iit *InvertedIndexRoTx) Prune(ctx context.Context, rwTx kv.RwTx, txFrom, t
 	defer mxPruneInProgress.Dec()
 	defer func(t time.Time) { mxPruneTookIndex.ObserveDuration(t) }(time.Now())
 
-	if limit == 0 { // limits amount of Tx to be pruned
+	if limit == 0 { // limits amount of txn to be pruned
 		limit = math.MaxUint64
 	}
 
@@ -788,7 +820,7 @@ func (iit *InvertedIndexRoTx) Prune(ctx context.Context, rwTx kv.RwTx, txFrom, t
 	}
 	defer idxDelCursor.Close()
 
-	collector := etl.NewCollector("prune idx "+ii.filenameBase, ii.dirs.Tmp, etl.NewSortableBuffer(etl.BufferOptimalSize/8), ii.logger)
+	collector := etl.NewCollector(ii.filenameBase+".prune.ii", ii.dirs.Tmp, etl.NewSortableBuffer(etl.BufferOptimalSize/8), ii.logger)
 	defer collector.Close()
 	collector.LogLvl(log.LvlDebug)
 	collector.SortAndFlushInBackground(true)
@@ -927,12 +959,12 @@ func (iit *InvertedIndexRoTx) DebugEFAllValuesAreInRange(ctx context.Context, fa
 		if err := iterStep(item); err != nil {
 			return err
 		}
-		//log.Warn(fmt.Sprintf("[dbg] see1: %s, min=%d,max=%d, before_max=%d, all: %d\n", item.src.decompressor.FileName(), ef.Min(), ef.Max(), last2, iter.ToArrU64Must(ef.Iterator())))
+		//log.Warn(fmt.Sprintf("[dbg] see1: %s, min=%d,max=%d, before_max=%d, all: %d\n", item.src.decompressor.FileName(), ef.Min(), ef.Max(), last2, stream.ToArrU64Must(ef.Iterator())))
 	}
 	return nil
 }
 
-// FrozenInvertedIdxIter allows iteration over range of tx numbers
+// FrozenInvertedIdxIter allows iteration over range of txn numbers
 // Iteration is not implmented via callback function, because there is often
 // a requirement for interators to be composable (for example, to implement AND and OR for indices)
 // FrozenInvertedIdxIter must be closed after use to prevent leaking of resources like cursor
@@ -942,7 +974,7 @@ type FrozenInvertedIdxIter struct {
 	limit                int
 	orderAscend          order.By
 
-	efIt       iter.Uno[uint64]
+	efIt       stream.Uno[uint64]
 	indexTable string
 	stack      []ctxItem
 
@@ -1063,7 +1095,7 @@ func (it *FrozenInvertedIdxIter) advanceInFiles() {
 	}
 }
 
-// RecentInvertedIdxIter allows iteration over range of tx numbers
+// RecentInvertedIdxIter allows iteration over range of txn numbers
 // Iteration is not implmented via callback function, because there is often
 // a requirement for interators to be composable (for example, to implement AND and OR for indices)
 type RecentInvertedIdxIter struct {
@@ -1372,7 +1404,7 @@ func (ii *InvertedIndex) collate(ctx context.Context, step uint64, roTx kv.Tx) (
 	}
 	defer keysCursor.Close()
 
-	collector := etl.NewCollector("collate idx "+ii.filenameBase, ii.iiCfg.dirs.Tmp, etl.NewSortableBuffer(CollateETLRAM), ii.logger)
+	collector := etl.NewCollector(ii.filenameBase+".collate.ii", ii.iiCfg.dirs.Tmp, etl.NewSortableBuffer(CollateETLRAM), ii.logger)
 	defer collector.Close()
 	collector.LogLvl(log.LvlTrace)
 

@@ -1,9 +1,25 @@
+// Copyright 2024 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+
 package diagnostics_test
 
 import (
 	"testing"
 
-	"github.com/ledgerwatch/erigon-lib/diagnostics"
+	"github.com/erigontech/erigon-lib/diagnostics"
 	"github.com/stretchr/testify/require"
 )
 
@@ -81,4 +97,14 @@ func TestPercentDiownloaded(t *testing.T) {
 	//Test more than 100 %
 	progress = diagnostics.GetShanpshotsPercentDownloaded(total+1, total, files, files)
 	require.Equal(t, progress, "100.00%")
+}
+
+func TestFillDBFromSnapshots(t *testing.T) {
+	d, err := NewTestDiagnosticClient()
+	require.NoError(t, err)
+
+	d.SetFillDBInfo(diagnostics.SnapshotFillDBStage{StageName: "Headers", Current: 1, Total: 10})
+	stats := d.SyncStatistics()
+	require.NotEmpty(t, stats.SnapshotFillDB.Stages)
+	require.Equal(t, stats.SnapshotFillDB.Stages[0], diagnostics.SnapshotFillDBStage{StageName: "Headers", Current: 1, Total: 10})
 }

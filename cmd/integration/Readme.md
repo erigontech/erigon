@@ -41,8 +41,8 @@ integration stage_exec --no-commit
 ...
 
 # Run txn replay with domains [requires 6th stage to be done before run]
-integration state_domains --chain goerli --last-step=4 # stop replay when 4th step is merged
-integration read_domains --chain goerli account <addr> <addr> ... # read values for given accounts
+integration state_domains --chain sepolia --last-step=4 # stop replay when 4th step is merged
+integration read_domains --chain sepolia account <addr> <addr> ... # read values for given accounts
 
 # hack which allows to force clear unwind stack of all stages
 clear_unwind_stack
@@ -93,6 +93,26 @@ ONLY_CREATE_DB=true ./build/bin/erigon --datadir=/erigon-new/ --chain="$CHAIN" -
 5. Run: ./build/bin/integration mdbx_to_mdbx --chaindata /existing/erigon/path/chaindata/ --chaindata.to /erigon-new/chaindata/
 6. cp -R /existing/erigon/path/snapshots /erigon-new/snapshots
 7. start erigon in new datadir as usually
+```
+
+## Recover db from some bad state
+
+If you face db-open error like `MDBX_PROBLEM: Unexpected internal error`. First: use tools
+like https://www.memtest86.com to test RAM and tools like https://www.smartmontools.org to test Disk. If hardware is
+fine: can try manually recover db (see `./build/bin/mdbx_chk -h` for more details):
+
+```
+make db-tools
+
+./build/bin/mdbx_chk -0 -d /erigon/chaindata
+./build/bin/mdbx_chk -1 -d /erigon/chaindata
+./build/bin/mdbx_chk -2 -d /erigon/chaindata
+
+# if all 3 commands return success - then remove `-d` parameter and run again
+# if all 1 command is fail but other success. choose successful number - for example 2 - and switch db manually to it:  
+./build/bin/mdbx_chk -2 -d -t -w /erigon/chaindata  
+
+# if all 3 commands are fail - game over. use backups.
 ```
 
 ## Clear bad blocks markers table in the case some block was marked as invalid after some error

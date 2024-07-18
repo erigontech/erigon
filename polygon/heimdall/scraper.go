@@ -1,17 +1,33 @@
+// Copyright 2024 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+
 package heimdall
 
 import (
 	"context"
 	"time"
 
-	"github.com/ledgerwatch/erigon-lib/log/v3"
+	"github.com/erigontech/erigon-lib/log/v3"
 
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon/polygon/polygoncommon"
+	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon/polygon/polygoncommon"
 )
 
-type Scraper[TEntity Entity] struct {
-	store entityStore[TEntity]
+type scraper[TEntity Entity] struct {
+	store EntityStore[TEntity]
 
 	fetcher   entityFetcher[TEntity]
 	pollDelay time.Duration
@@ -22,13 +38,13 @@ type Scraper[TEntity Entity] struct {
 	logger log.Logger
 }
 
-func NewScraper[TEntity Entity](
-	store entityStore[TEntity],
+func newScrapper[TEntity Entity](
+	store EntityStore[TEntity],
 	fetcher entityFetcher[TEntity],
 	pollDelay time.Duration,
 	logger log.Logger,
-) *Scraper[TEntity] {
-	return &Scraper[TEntity]{
+) *scraper[TEntity] {
+	return &scraper[TEntity]{
 		store: store,
 
 		fetcher:   fetcher,
@@ -41,7 +57,7 @@ func NewScraper[TEntity Entity](
 	}
 }
 
-func (s *Scraper[TEntity]) Run(ctx context.Context) error {
+func (s *scraper[TEntity]) Run(ctx context.Context) error {
 	defer s.store.Close()
 	if err := s.store.Prepare(ctx); err != nil {
 		return err
@@ -86,10 +102,10 @@ func (s *Scraper[TEntity]) Run(ctx context.Context) error {
 	return ctx.Err()
 }
 
-func (s *Scraper[TEntity]) RegisterObserver(observer func([]TEntity)) polygoncommon.UnregisterFunc {
+func (s *scraper[TEntity]) RegisterObserver(observer func([]TEntity)) polygoncommon.UnregisterFunc {
 	return s.observers.Register(observer)
 }
 
-func (s *Scraper[TEntity]) Synchronize(ctx context.Context) {
+func (s *scraper[TEntity]) Synchronize(ctx context.Context) {
 	s.syncEvent.Wait(ctx)
 }

@@ -7,7 +7,7 @@ There are three files here:
 - Overlay_Testing.json
 
 You can import them into Postman using these
-instructions: https://github.com/ledgerwatch/erigon/wiki/Using-Postman-to-Test-TurboGeth-RPC
+instructions: https://github.com/erigontech/erigon/wiki/Using-Postman-to-Test-TurboGeth-RPC
 
 The first one is used to generate help text and other documentation as well as running a sanity check against a new
 release. There is basically one test for each of the 81 RPC endpoints.

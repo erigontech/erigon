@@ -1,3 +1,19 @@
+// Copyright 2024 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+
 package rpchelper
 
 import (
@@ -6,16 +22,16 @@ import (
 
 	"github.com/holiman/uint256"
 
-	"github.com/ledgerwatch/erigon/core/types"
+	"github.com/erigontech/erigon/core/types"
 
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/gointerfaces"
-	remote "github.com/ledgerwatch/erigon-lib/gointerfaces/remoteproto"
+	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/gointerfaces"
+	remote "github.com/erigontech/erigon-lib/gointerfaces/remoteproto"
 
-	types2 "github.com/ledgerwatch/erigon-lib/gointerfaces/typesproto"
+	types2 "github.com/erigontech/erigon-lib/gointerfaces/typesproto"
 
-	"github.com/ledgerwatch/erigon-lib/log/v3"
-	"github.com/ledgerwatch/erigon/eth/filters"
+	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/eth/filters"
 )
 
 func createLog() *remote.SubscribeLogsReply {
@@ -443,8 +459,8 @@ func TestFilters_AddPendingTxs(t *testing.T) {
 			config := FiltersConfig{RpcSubscriptionFiltersMaxTxs: tt.maxTxs}
 			f := New(context.TODO(), config, nil, nil, nil, func() {}, log.New())
 			txID := PendingTxsSubID("test-tx")
-			var tx types.Transaction = types.NewTransaction(0, libcommon.HexToAddress("095e7baea6a6c7c4c2dfeb977efac326af552d87"), uint256.NewInt(10), 50000, uint256.NewInt(10), nil)
-			tx, _ = tx.WithSignature(*types.LatestSignerForChainID(nil), libcommon.Hex2Bytes("9bea4c4daac7c7c52e093e6a4c35dbbcf8856f1af7b059ba20253e70848d094f8a8fae537ce25ed8cb5af9adac3f141af69bd515bd2ba031522df09b97dd72b100"))
+			var txn types.Transaction = types.NewTransaction(0, libcommon.HexToAddress("095e7baea6a6c7c4c2dfeb977efac326af552d87"), uint256.NewInt(10), 50000, uint256.NewInt(10), nil)
+			txn, _ = txn.WithSignature(*types.LatestSignerForChainID(nil), libcommon.Hex2Bytes("9bea4c4daac7c7c52e093e6a4c35dbbcf8856f1af7b059ba20253e70848d094f8a8fae537ce25ed8cb5af9adac3f141af69bd515bd2ba031522df09b97dd72b100"))
 
 			// Testing for panic
 			if tt.name == "TriggerPanic" {
@@ -457,23 +473,23 @@ func TestFilters_AddPendingTxs(t *testing.T) {
 				// Add transactions to trigger panic
 				// Initial batch to set the stage
 				for i := 0; i < 4; i++ {
-					f.AddPendingTxs(txID, []types.Transaction{tx})
+					f.AddPendingTxs(txID, []types.Transaction{txn})
 				}
 
 				// Adding more transactions in smaller increments to ensure the panic
 				for i := 0; i < 2; i++ {
-					f.AddPendingTxs(txID, []types.Transaction{tx})
+					f.AddPendingTxs(txID, []types.Transaction{txn})
 				}
 
 				// Adding another large batch to ensure it exceeds the limit and triggers the panic
 				largeBatch := make([]types.Transaction, 10)
 				for i := range largeBatch {
-					largeBatch[i] = tx
+					largeBatch[i] = txn
 				}
 				f.AddPendingTxs(txID, largeBatch)
 			} else {
 				for i := 0; i < tt.numToAdd; i++ {
-					f.AddPendingTxs(txID, []types.Transaction{tx})
+					f.AddPendingTxs(txID, []types.Transaction{txn})
 				}
 
 				txs, found := f.ReadPendingTxs(txID)

@@ -1,18 +1,18 @@
-/*
-   Copyright 2021 The Erigon contributors
-
-   Licensed under the Apache License, Version 2.0 (the "License");
-   you may not use this file except in compliance with the License.
-   You may obtain a copy of the License at
-
-       http://www.apache.org/licenses/LICENSE-2.0
-
-   Unless required by applicable law or agreed to in writing, software
-   distributed under the License is distributed on an "AS IS" BASIS,
-   WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-   See the License for the specific language governing permissions and
-   limitations under the License.
-*/
+// Copyright 2021 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
 package types
 
@@ -28,16 +28,17 @@ import (
 
 	gokzg4844 "github.com/crate-crypto/go-kzg-4844"
 	"github.com/holiman/uint256"
-	"github.com/ledgerwatch/secp256k1"
 	"golang.org/x/crypto/sha3"
 
-	"github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/common/fixedgas"
-	"github.com/ledgerwatch/erigon-lib/common/length"
-	"github.com/ledgerwatch/erigon-lib/common/u256"
-	"github.com/ledgerwatch/erigon-lib/crypto"
-	types "github.com/ledgerwatch/erigon-lib/gointerfaces/typesproto"
-	"github.com/ledgerwatch/erigon-lib/rlp"
+	"github.com/erigontech/secp256k1"
+
+	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common/fixedgas"
+	"github.com/erigontech/erigon-lib/common/length"
+	"github.com/erigontech/erigon-lib/common/u256"
+	"github.com/erigontech/erigon-lib/crypto"
+	types "github.com/erigontech/erigon-lib/gointerfaces/typesproto"
+	"github.com/erigontech/erigon-lib/rlp"
 )
 
 type TxParseConfig struct {
@@ -115,6 +116,7 @@ const (
 	AccessListTxType byte = 1 // EIP-2930
 	DynamicFeeTxType byte = 2 // EIP-1559
 	BlobTxType       byte = 3 // EIP-4844
+	SetCodeTxType    byte = 4 // EIP-7702
 )
 
 var ErrParseTxn = fmt.Errorf("%w transaction", rlp.ErrParse)
@@ -985,7 +987,16 @@ func (al AccessList) StorageKeys() int {
 	return sum
 }
 
-// Removes everything but the payload body from blob txn and prepends 0x3 at the beginning - no copy
+func (al AccessList) HasAddr(addr common.Address) bool {
+	for _, tuple := range al {
+		if tuple.Address == addr {
+			return true
+		}
+	}
+	return false
+}
+
+// Removes everything but the payload body from blob tx and prepends 0x3 at the beginning - no copy
 // Doesn't change non-blob tx
 func UnwrapTxPlayloadRlp(blobTxRlp []byte) ([]byte, error) {
 	if blobTxRlp[0] != BlobTxType {

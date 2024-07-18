@@ -1,18 +1,21 @@
 // Copyright 2015 The go-ethereum Authors
-// This file is part of the go-ethereum library.
+// (original work)
+// Copyright 2024 The Erigon Authors
+// (modifications)
+// This file is part of Erigon.
 //
-// The go-ethereum library is free software: you can redistribute it and/or modify
+// Erigon is free software: you can redistribute it and/or modify
 // it under the terms of the GNU Lesser General Public License as published by
 // the Free Software Foundation, either version 3 of the License, or
 // (at your option) any later version.
 //
-// The go-ethereum library is distributed in the hope that it will be useful,
+// Erigon is distributed in the hope that it will be useful,
 // but WITHOUT ANY WARRANTY; without even the implied warranty of
 // MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
 // GNU Lesser General Public License for more details.
 //
 // You should have received a copy of the GNU Lesser General Public License
-// along with the go-ethereum library. If not, see <http://www.gnu.org/licenses/>.
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
 package vm
 
@@ -23,14 +26,14 @@ import (
 	"github.com/holiman/uint256"
 	"golang.org/x/crypto/sha3"
 
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	libcommon "github.com/erigontech/erigon-lib/common"
 
-	"github.com/ledgerwatch/erigon-lib/log/v3"
+	"github.com/erigontech/erigon-lib/log/v3"
 
-	"github.com/ledgerwatch/erigon/common"
-	"github.com/ledgerwatch/erigon/core/tracing"
-	"github.com/ledgerwatch/erigon/core/types"
-	"github.com/ledgerwatch/erigon/params"
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/core/tracing"
+	"github.com/erigontech/erigon/core/types"
+	"github.com/erigontech/erigon/params"
 )
 
 func opAdd(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]byte, error) {
@@ -466,7 +469,7 @@ func opGasprice(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([
 	return nil, nil
 }
 
-// opBlockhash executes the BLOCKHASH opcode pre-EIP-2935
+// opBlockhash executes the BLOCKHASH opcode
 func opBlockhash(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]byte, error) {
 	arg := scope.Stack.Peek()
 	arg64, overflow := arg.Uint64WithOverflow()
@@ -486,37 +489,6 @@ func opBlockhash(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) (
 	} else {
 		arg.Clear()
 	}
-	return nil, nil
-}
-
-// opBlockhash2935 executes for the BLOCKHASH opcode post EIP-2935 by returning the
-// corresponding hash for the blocknumber from the state, if within range.
-// The range is defined by [head - params.BlockHashHistoryServeWindow - 1, head - 1]
-// This should not be used without activating EIP-2935
-func opBlockhash2935(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]byte, error) {
-	arg := scope.Stack.Peek()
-	arg64, overflow := arg.Uint64WithOverflow()
-	if overflow {
-		arg.Clear()
-		return nil, nil
-	}
-
-	// Check if arg is within allowed window
-	var upper uint64
-	upper = interpreter.evm.Context.BlockNumber
-	if arg64 >= upper || arg64+params.BlockHashHistoryServeWindow < upper {
-		arg.Clear()
-		return nil, nil
-	}
-
-	// Return state read value from the slot
-	storageSlot := libcommon.BytesToHash(uint256.NewInt(arg64 % params.BlockHashHistoryServeWindow).Bytes())
-	interpreter.evm.intraBlockState.GetState(
-		params.HistoryStorageAddress,
-		&storageSlot,
-		arg,
-	)
-
 	return nil, nil
 }
 

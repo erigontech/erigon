@@ -3,7 +3,7 @@ StagedSync
 ==========
 We tried to maximally decompose the sync process into stages, and perform them sequentially. From the first sight, it might sound like a bad idea - why not use concurrency? However, we noticed that running many things concurrently obscured our ability to profile and optimise code - there is simply too much going on. Decomposition allowed us to optimise each stage in separation, which is much more tractable. We also noticed the benefit of improved code structure.
 
-All of the stages are declared in https://github.com/ledgerwatch/erigon/blob/master/eth/stagedsync/stagebuilder.go
+All of the stages are declared in https://github.com/erigontech/erigon/blob/master/eth/stagedsync/stagebuilder.go
 
 Stage 1 : Download Block Headers
 ================================
