@@ -14,30 +14,16 @@
 // You should have received a copy of the GNU Lesser General Public License
 // along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
-package heimdall
+package sync
 
 import (
-	"math/big"
-	"testing"
-	"time"
+	"context"
 
-	libcommon "github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon/crypto"
-	"github.com/erigontech/erigon/polygon/heimdall/heimdalltest"
+	"github.com/ledgerwatch/erigon/polygon/heimdall"
 )
 
-func TestMilestoneJsonMarshall(t *testing.T) {
-	heimdalltest.AssertJsonMarshalUnmarshal(t, makeMilestone(10, 100))
-}
-
-func makeMilestone(start uint64, len uint) *Milestone {
-	m := Milestone{
-		Fields: WaypointFields{
-			StartBlock: new(big.Int).SetUint64(start),
-			EndBlock:   new(big.Int).SetUint64(start + uint64(len) - 1),
-			RootHash:   libcommon.BytesToHash(crypto.Keccak256([]byte("ROOT"))),
-			Timestamp:  uint64(time.Now().Unix()),
-		},
-	}
-	return &m
+//go:generate mockgen -typed=true -source=./heimdall_waypoints_fetcher.go -destination=./heimdall_waypoints_fetcher_mock.go -package=sync
+type heimdallWaypointsFetcher interface {
+	FetchCheckpointsFromBlock(ctx context.Context, startBlock uint64) (heimdall.Waypoints, error)
+	FetchMilestonesFromBlock(ctx context.Context, startBlock uint64) (heimdall.Waypoints, error)
 }
