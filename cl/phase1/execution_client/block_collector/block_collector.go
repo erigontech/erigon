@@ -94,7 +94,7 @@ func (b *blockCollector) Flush(ctx context.Context) error {
 	var err error
 	inserted := uint64(0)
 
-	if err := b.collector.Load(nil, kv.Headers, func(k, v []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) error {
+	if err := b.collector.Load(nil, "", func(k, v []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) error {
 		if len(v) == 0 {
 			return nil
 		}
