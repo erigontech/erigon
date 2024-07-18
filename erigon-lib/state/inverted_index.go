@@ -382,7 +382,7 @@ func (w *invertedIndexBufferedWriter) Add(key []byte) error {
 }
 
 func (iit *InvertedIndexRoTx) NewWriter() *invertedIndexBufferedWriter {
-	return iit.newWriter(iit.ii.dirs.Tmp, iit.ii.discardIdx)
+	return iit.newWriter(iit.ii.dirs.Tmp, false)
 }
 
 type invertedIndexBufferedWriter struct {

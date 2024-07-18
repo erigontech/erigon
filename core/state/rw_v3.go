@@ -213,18 +213,30 @@ func (rs *StateV3) ApplyLogsAndTraces4(txTask *TxTask, domains *libstate.SharedD
 	if dbg.DiscardHistory() {
 		return nil
 	}
+	shouldPruneNonEssentials := txTask.PruneNonEssentials && txTask.Config != nil
 
 	for addr := range txTask.TraceFroms {
+		if shouldPruneNonEssentials && addr != txTask.Config.DepositContract {
+			continue
+		}
 		if err := domains.IndexAdd(kv.TblTracesFromIdx, addr[:]); err != nil {
 			return err
 		}
 	}
+
 	for addr := range txTask.TraceTos {
+		if shouldPruneNonEssentials && addr != txTask.Config.DepositContract {
+			continue
+		}
 		if err := domains.IndexAdd(kv.TblTracesToIdx, addr[:]); err != nil {
 			return err
 		}
 	}
+
 	for _, lg := range txTask.Logs {
+		if shouldPruneNonEssentials && lg.Address != txTask.Config.DepositContract {
+			continue
+		}
 		if err := domains.IndexAdd(kv.TblLogAddressIdx, lg.Address[:]); err != nil {
 			return err
 		}
