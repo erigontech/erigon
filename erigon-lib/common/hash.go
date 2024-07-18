@@ -194,37 +194,3 @@ type CodeRecord struct {
 	TxNumber    uint64
 	CodeHash    Hash
 }
-
-// Hashes is a slice of common.Hash, implementing sort.Interface
-type Hashes []Hash
-
-func (hashes Hashes) Len() int {
-	return len(hashes)
-}
-func (hashes Hashes) Less(i, j int) bool {
-	return bytes.Compare(hashes[i][:], hashes[j][:]) == -1
-}
-func (hashes Hashes) Swap(i, j int) {
-	hashes[i], hashes[j] = hashes[j], hashes[i]
-}
-
-const StorageKeyLen = 2*length.Hash + length.Incarnation
-
-// StorageKey is representation of address of a contract storage item
-// It consists of two parts, each of which are 32-byte hashes:
-// 1. Hash of the contract's address
-// 2. Hash of the item's key
-type StorageKey [StorageKeyLen]byte
-
-// StorageKeys is a slice of StorageKey, implementing sort.Interface
-type StorageKeys []StorageKey
-
-func (keys StorageKeys) Len() int {
-	return len(keys)
-}
-func (keys StorageKeys) Less(i, j int) bool {
-	return bytes.Compare(keys[i][:], keys[j][:]) == -1
-}
-func (keys StorageKeys) Swap(i, j int) {
-	keys[i], keys[j] = keys[j], keys[i]
-}

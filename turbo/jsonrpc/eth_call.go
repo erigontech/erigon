@@ -36,6 +36,7 @@ import (
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/kv/rawdbv3"
 	"github.com/erigontech/erigon-lib/log/v3"
+	libstate "github.com/erigontech/erigon-lib/state"
 	types2 "github.com/erigontech/erigon-lib/types"
 
 	"github.com/erigontech/erigon-lib/kv/membatchwithdb"
