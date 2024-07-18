@@ -257,6 +257,10 @@ func (c *Collector) Load(db kv.RwTx, toBucket string, loadFunc LoadFunc, args Tr
 		return nil
 	}
 
+	if bucket == "" {
+		loadNextFunc = func(_, k, v []byte) error { return nil }
+	}
+
 	currentTable := &currentTableReader{db, bucket}
 	simpleLoad := func(k, v []byte) error {
 		return loadFunc(k, v, currentTable, loadNextFunc)
