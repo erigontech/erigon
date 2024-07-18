@@ -1,6 +1,7 @@
 package hermez_db
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
 	"math"
@@ -1445,6 +1446,28 @@ func (db *HermezDb) TruncateSmtDepths(fromBlock uint64) error {
 
 func (db *HermezDb) WriteL1InfoTreeLeaf(l1Index uint64, leaf common.Hash) error {
 	return db.tx.Put(L1_INFO_LEAVES, Uint64ToBytes(l1Index), leaf.Bytes())
+}
+
+func (db *HermezDbReader) IsL1InfoTreeLeafSaves(leaf common.Hash) (bool, error) {
+	c, err := db.tx.Cursor(L1_INFO_LEAVES)
+	if err != nil {
+		return false, err
+	}
+	defer c.Close()
+
+	leafBytes := leaf.Bytes()
+
+	for k, v, err := c.First(); k != nil; k, v, err = c.Next() {
+		if err != nil {
+			return false, err
+		}
+
+		if bytes.Equal(v, leafBytes) {
+			return true, nil
+		}
+	}
+
+	return false, nil
 }
 
 func (db *HermezDbReader) GetAllL1InfoTreeLeaves() ([]common.Hash, error) {
