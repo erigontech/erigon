@@ -89,7 +89,7 @@ func (m *mdbxPieceCompletion) Get(pk metainfo.PieceKey) (cn storage.Completion, 
 	return
 }
 
-func (m *mdbxPieceCompletion) Set(pk metainfo.PieceKey, b bool) error {
+func (m *mdbxPieceCompletion) Set(pk metainfo.PieceKey, b bool, awaitFlush bool) error {
 	if c, err := m.Get(pk); err == nil && c.Ok && c.Complete == b {
 		return nil
 	}
@@ -119,8 +119,13 @@ func (m *mdbxPieceCompletion) Set(pk metainfo.PieceKey, b bool) error {
 
 		completed.Add(uint32(pk.Index))
 
-		if flushed, ok := m.flushed[pk.InfoHash]; !ok || !flushed.Contains(uint32(pk.Index)) {
-			return nil
+		// when files are being downloaded flushing is asynchronous so we want to wait for
+		// the confirm before committing to the DB.  This means that if the program is
+		// abnormally terminated the piece will be re-downloaded
+		if awaitFlush {
+			if flushed, ok := m.flushed[pk.InfoHash]; !ok || !flushed.Contains(uint32(pk.Index)) {
+				return nil
+			}
 		}
 	} else {
 		if completed, ok := m.completed[pk.InfoHash]; ok {
