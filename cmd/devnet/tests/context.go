@@ -23,14 +23,14 @@ import (
 	"strconv"
 	"testing"
 
-	"github.com/ledgerwatch/erigon-lib/log/v3"
+	"github.com/erigontech/erigon-lib/log/v3"
 
-	"github.com/ledgerwatch/erigon-lib/chain/networkname"
-	"github.com/ledgerwatch/erigon/cmd/devnet/devnet"
-	"github.com/ledgerwatch/erigon/cmd/devnet/networks"
-	"github.com/ledgerwatch/erigon/cmd/devnet/services"
-	"github.com/ledgerwatch/erigon/cmd/devnet/services/polygon"
-	"github.com/ledgerwatch/erigon/turbo/debug"
+	"github.com/erigontech/erigon-lib/chain/networkname"
+	"github.com/erigontech/erigon/cmd/devnet/devnet"
+	"github.com/erigontech/erigon/cmd/devnet/networks"
+	"github.com/erigontech/erigon/cmd/devnet/services"
+	"github.com/erigontech/erigon/cmd/devnet/services/polygon"
+	"github.com/erigontech/erigon/turbo/debug"
 )
 
 func initDevnet(chainName string, dataDir string, producerCount int, gasLimit uint64, logger log.Logger, consoleLogLevel log.Lvl, dirLogLevel log.Lvl) (devnet.Devnet, error) {

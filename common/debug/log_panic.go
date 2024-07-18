@@ -21,8 +21,8 @@ import (
 	"sync/atomic"
 	"syscall"
 
-	"github.com/ledgerwatch/erigon-lib/common/dbg"
-	"github.com/ledgerwatch/erigon-lib/log/v3"
+	"github.com/erigontech/erigon-lib/common/dbg"
+	"github.com/erigontech/erigon-lib/log/v3"
 )
 
 var sigc atomic.Value

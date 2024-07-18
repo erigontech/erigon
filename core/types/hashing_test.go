@@ -22,10 +22,10 @@ import (
 	"testing"
 
 	"github.com/holiman/uint256"
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	libcommon "github.com/erigontech/erigon-lib/common"
 
-	"github.com/ledgerwatch/erigon/rlp"
-	"github.com/ledgerwatch/erigon/turbo/trie"
+	"github.com/erigontech/erigon/rlp"
+	"github.com/erigontech/erigon/turbo/trie"
 )
 
 func genTransactions(n uint64) Transactions {

@@ -23,11 +23,11 @@ import (
 	"os/exec"
 	"sort"
 
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	libcommon "github.com/erigontech/erigon-lib/common"
 
-	"github.com/ledgerwatch/erigon/crypto"
-	"github.com/ledgerwatch/erigon/turbo/trie"
-	"github.com/ledgerwatch/erigon/visual"
+	"github.com/erigontech/erigon/crypto"
+	"github.com/erigontech/erigon/turbo/trie"
+	"github.com/erigontech/erigon/visual"
 )
 
 var pic = flag.String("pic", "", "specifies picture to regenerate")

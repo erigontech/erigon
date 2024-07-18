@@ -20,10 +20,10 @@ import (
 	"context"
 
 	"github.com/holiman/uint256"
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	libcommon "github.com/erigontech/erigon-lib/common"
 
-	"github.com/ledgerwatch/erigon/core/types/accounts"
-	"github.com/ledgerwatch/erigon/turbo/trie/vtree"
+	"github.com/erigontech/erigon/core/types/accounts"
+	"github.com/erigontech/erigon/turbo/trie/vtree"
 )
 
 type regeneratePedersenAccountsJob struct {

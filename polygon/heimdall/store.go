@@ -21,8 +21,8 @@ import (
 	"encoding/binary"
 	"encoding/json"
 
-	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon/turbo/services"
+	"github.com/erigontech/erigon-lib/kv"
+	"github.com/erigontech/erigon/turbo/services"
 )
 
 // Generate all mocks in file

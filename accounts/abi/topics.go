@@ -26,10 +26,10 @@ import (
 	"math/big"
 	"reflect"
 
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/common/length"
+	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common/length"
 
-	"github.com/ledgerwatch/erigon/crypto"
+	"github.com/erigontech/erigon/crypto"
 )
 
 // MakeTopics converts a filter query argument list into a filter topic set.

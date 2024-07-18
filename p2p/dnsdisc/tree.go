@@ -29,10 +29,10 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/ledgerwatch/erigon/crypto"
-	"github.com/ledgerwatch/erigon/p2p/enode"
-	"github.com/ledgerwatch/erigon/p2p/enr"
-	"github.com/ledgerwatch/erigon/rlp"
+	"github.com/erigontech/erigon/crypto"
+	"github.com/erigontech/erigon/p2p/enode"
+	"github.com/erigontech/erigon/p2p/enr"
+	"github.com/erigontech/erigon/rlp"
 	"golang.org/x/crypto/sha3"
 )
 

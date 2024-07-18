@@ -26,9 +26,9 @@ import (
 	"time"
 
 	"github.com/holiman/uint256"
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	types2 "github.com/ledgerwatch/erigon-lib/types"
-	"github.com/ledgerwatch/erigon/rlp"
+	libcommon "github.com/erigontech/erigon-lib/common"
+	types2 "github.com/erigontech/erigon-lib/types"
+	"github.com/erigontech/erigon/rlp"
 )
 
 const RUNS = 100 // for local tests increase this number

@@ -17,8 +17,8 @@
 package state
 
 import (
-	"github.com/ledgerwatch/erigon/cl/clparams"
-	"github.com/ledgerwatch/erigon/cl/phase1/core/state/raw"
+	"github.com/erigontech/erigon/cl/clparams"
+	"github.com/erigontech/erigon/cl/phase1/core/state/raw"
 )
 
 func (b *CachingBeaconState) CopyInto(bs *CachingBeaconState) (err error) {

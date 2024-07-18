@@ -4,7 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 
-	"github.com/ledgerwatch/erigon/cl/beacon/builder"
+	"github.com/erigontech/erigon/cl/beacon/builder"
 )
 
 func main() {

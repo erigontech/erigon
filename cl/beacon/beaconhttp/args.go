@@ -24,7 +24,7 @@ import (
 	"strings"
 
 	"github.com/go-chi/chi/v5"
-	"github.com/ledgerwatch/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common"
 )
 
 type chainTag int

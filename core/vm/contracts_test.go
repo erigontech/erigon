@@ -27,9 +27,9 @@ import (
 	"testing"
 	"time"
 
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	libcommon "github.com/erigontech/erigon-lib/common"
 
-	"github.com/ledgerwatch/erigon/common"
+	"github.com/erigontech/erigon/common"
 )
 
 // precompiledTest defines the input/output pairs for precompiled contract tests.

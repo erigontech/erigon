@@ -23,9 +23,9 @@ import (
 	"bytes"
 	"fmt"
 
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	libcommon "github.com/erigontech/erigon-lib/common"
 
-	"github.com/ledgerwatch/erigon/core/vm"
+	"github.com/erigontech/erigon/core/vm"
 )
 
 const (

@@ -19,7 +19,7 @@ package stream
 import (
 	"slices"
 
-	"github.com/ledgerwatch/erigon-lib/kv/order"
+	"github.com/erigontech/erigon-lib/kv/order"
 	"golang.org/x/exp/constraints"
 )
 

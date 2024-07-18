@@ -23,9 +23,9 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon/core/types"
-	"github.com/ledgerwatch/erigon/polygon/bor/borcfg"
+	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon/core/types"
+	"github.com/erigontech/erigon/polygon/bor/borcfg"
 )
 
 type testValidatorSetInterface struct {

@@ -1,4 +1,4 @@
-module github.com/ledgerwatch/erigon
+module github.com/erigontech/erigon
 
 go 1.21.5
 
@@ -8,7 +8,7 @@ require (
 	github.com/erigontech/silkworm-go v0.18.0
 )
 
-replace github.com/ledgerwatch/erigon-lib => ./erigon-lib
+replace github.com/erigontech/erigon-lib => ./erigon-lib
 
 require (
 	gfx.cafe/util/go/generic v0.0.0-20230721185457-c559e86c829c
@@ -60,7 +60,7 @@ require (
 	github.com/json-iterator/go v1.1.12
 	github.com/julienschmidt/httprouter v1.3.0
 	github.com/klauspost/compress v1.17.8
-	github.com/ledgerwatch/erigon-lib v0.0.0-00010101000000-000000000000
+	github.com/erigontech/erigon-lib v0.0.0-00010101000000-000000000000
 	github.com/libp2p/go-libp2p v0.34.0
 	github.com/libp2p/go-libp2p-mplex v0.9.0
 	github.com/libp2p/go-libp2p-pubsub v0.11.0

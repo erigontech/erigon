@@ -26,16 +26,16 @@ import (
 
 	"github.com/urfave/cli/v2"
 
-	"github.com/ledgerwatch/erigon-lib/log/v3"
+	"github.com/erigontech/erigon-lib/log/v3"
 
-	"github.com/ledgerwatch/erigon/cmd/diag/db"
-	"github.com/ledgerwatch/erigon/cmd/diag/downloader"
-	"github.com/ledgerwatch/erigon/cmd/diag/stages"
-	"github.com/ledgerwatch/erigon/cmd/diag/ui"
-	"github.com/ledgerwatch/erigon/cmd/snapshots/sync"
-	"github.com/ledgerwatch/erigon/cmd/utils"
-	"github.com/ledgerwatch/erigon/params"
-	"github.com/ledgerwatch/erigon/turbo/logging"
+	"github.com/erigontech/erigon/cmd/diag/db"
+	"github.com/erigontech/erigon/cmd/diag/downloader"
+	"github.com/erigontech/erigon/cmd/diag/stages"
+	"github.com/erigontech/erigon/cmd/diag/ui"
+	"github.com/erigontech/erigon/cmd/snapshots/sync"
+	"github.com/erigontech/erigon/cmd/utils"
+	"github.com/erigontech/erigon/params"
+	"github.com/erigontech/erigon/turbo/logging"
 )
 
 func main() {

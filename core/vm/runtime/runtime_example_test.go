@@ -22,9 +22,9 @@ package runtime_test
 import (
 	"fmt"
 
-	"github.com/ledgerwatch/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common"
 
-	"github.com/ledgerwatch/erigon/core/vm/runtime"
+	"github.com/erigontech/erigon/core/vm/runtime"
 )
 
 func ExampleExecute() {

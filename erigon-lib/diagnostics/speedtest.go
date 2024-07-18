@@ -24,7 +24,7 @@ import (
 	"time"
 
 	"github.com/erigontech/speedtest/speedtest"
-	"github.com/ledgerwatch/erigon-lib/log/v3"
+	"github.com/erigontech/erigon-lib/log/v3"
 )
 
 var cloudflareHeaders = http.Header{

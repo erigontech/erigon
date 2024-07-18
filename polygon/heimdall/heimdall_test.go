@@ -26,10 +26,10 @@ import (
 	"github.com/stretchr/testify/require"
 	"go.uber.org/mock/gomock"
 
-	"github.com/ledgerwatch/erigon-lib/log/v3"
+	"github.com/erigontech/erigon-lib/log/v3"
 
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon/crypto"
+	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon/crypto"
 )
 
 func makeCheckpoint(start uint64, len uint) *Checkpoint {

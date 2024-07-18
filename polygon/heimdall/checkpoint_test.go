@@ -19,7 +19,7 @@ package heimdall
 import (
 	"testing"
 
-	"github.com/ledgerwatch/erigon/polygon/heimdall/heimdalltest"
+	"github.com/erigontech/erigon/polygon/heimdall/heimdalltest"
 )
 
 func TestCheckpointJsonMarshall(t *testing.T) {

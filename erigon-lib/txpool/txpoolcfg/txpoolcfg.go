@@ -23,10 +23,10 @@ import (
 
 	"github.com/c2h5oh/datasize"
 
-	"github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/common/fixedgas"
-	emath "github.com/ledgerwatch/erigon-lib/common/math"
-	"github.com/ledgerwatch/erigon-lib/types"
+	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common/fixedgas"
+	emath "github.com/erigontech/erigon-lib/common/math"
+	"github.com/erigontech/erigon-lib/types"
 )
 
 // BorDefaultTxPoolPriceLimit defines the minimum gas price limit for bor to enforce txs acceptance into the pool.

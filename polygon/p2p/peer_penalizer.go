@@ -19,8 +19,8 @@ package p2p
 import (
 	"context"
 
-	"github.com/ledgerwatch/erigon-lib/direct"
-	sentry "github.com/ledgerwatch/erigon-lib/gointerfaces/sentryproto"
+	"github.com/erigontech/erigon-lib/direct"
+	sentry "github.com/erigontech/erigon-lib/gointerfaces/sentryproto"
 )
 
 type PeerPenalizer interface {

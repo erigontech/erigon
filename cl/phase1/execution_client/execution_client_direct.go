@@ -22,12 +22,12 @@ import (
 	"fmt"
 	"math/big"
 
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	execution "github.com/ledgerwatch/erigon-lib/gointerfaces/executionproto"
-	"github.com/ledgerwatch/erigon/cl/cltypes"
-	"github.com/ledgerwatch/erigon/core/types"
-	"github.com/ledgerwatch/erigon/turbo/engineapi/engine_types"
-	"github.com/ledgerwatch/erigon/turbo/execution/eth1/eth1_chain_reader.go"
+	libcommon "github.com/erigontech/erigon-lib/common"
+	execution "github.com/erigontech/erigon-lib/gointerfaces/executionproto"
+	"github.com/erigontech/erigon/cl/cltypes"
+	"github.com/erigontech/erigon/core/types"
+	"github.com/erigontech/erigon/turbo/engineapi/engine_types"
+	"github.com/erigontech/erigon/turbo/execution/eth1/eth1_chain_reader.go"
 )
 
 type ExecutionClientDirect struct {
