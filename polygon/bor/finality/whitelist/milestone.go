@@ -17,12 +17,12 @@
 package whitelist
 
 import (
-	"github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/log/v3"
-	"github.com/ledgerwatch/erigon-lib/metrics"
-	"github.com/ledgerwatch/erigon/core/types"
-	"github.com/ledgerwatch/erigon/polygon/bor/finality/flags"
-	"github.com/ledgerwatch/erigon/polygon/bor/finality/rawdb"
+	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon-lib/metrics"
+	"github.com/erigontech/erigon/core/types"
+	"github.com/erigontech/erigon/polygon/bor/finality/flags"
+	"github.com/erigontech/erigon/polygon/bor/finality/rawdb"
 )
 
 type milestone struct {

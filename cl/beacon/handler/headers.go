@@ -20,9 +20,9 @@ import (
 	"fmt"
 	"net/http"
 
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon/cl/beacon/beaconhttp"
-	"github.com/ledgerwatch/erigon/cl/persistence/beacon_indicies"
+	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon/cl/beacon/beaconhttp"
+	"github.com/erigontech/erigon/cl/persistence/beacon_indicies"
 )
 
 func (a *ApiHandler) getHeaders(w http.ResponseWriter, r *http.Request) (*beaconhttp.BeaconResponse, error) {

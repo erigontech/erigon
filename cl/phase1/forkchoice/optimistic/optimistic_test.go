@@ -19,8 +19,8 @@ package optimistic
 import (
 	"testing"
 
-	"github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon/cl/cltypes"
+	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/stretchr/testify/suite"
 )
 

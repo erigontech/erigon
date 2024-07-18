@@ -19,8 +19,8 @@ package solid
 import (
 	"encoding/json"
 
-	"github.com/ledgerwatch/erigon-lib/common/length"
-	"github.com/ledgerwatch/erigon-lib/types/clonable"
+	"github.com/erigontech/erigon-lib/common/length"
+	"github.com/erigontech/erigon-lib/types/clonable"
 )
 
 type uint64VectorSSZ struct {

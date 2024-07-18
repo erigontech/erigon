@@ -33,18 +33,18 @@ import (
 	btree2 "github.com/tidwall/btree"
 	"golang.org/x/sync/errgroup"
 
-	"github.com/ledgerwatch/erigon-lib/common/assert"
-	"github.com/ledgerwatch/erigon-lib/common/hexutility"
-	"github.com/ledgerwatch/erigon-lib/kv/order"
-	"github.com/ledgerwatch/erigon-lib/log/v3"
-	"github.com/ledgerwatch/erigon-lib/seg"
+	"github.com/erigontech/erigon-lib/common/assert"
+	"github.com/erigontech/erigon-lib/common/hexutility"
+	"github.com/erigontech/erigon-lib/kv/order"
+	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon-lib/seg"
 
-	"github.com/ledgerwatch/erigon-lib/common/background"
-	"github.com/ledgerwatch/erigon-lib/common/datadir"
-	"github.com/ledgerwatch/erigon-lib/common/dir"
-	"github.com/ledgerwatch/erigon-lib/etl"
-	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon-lib/recsplit"
+	"github.com/erigontech/erigon-lib/common/background"
+	"github.com/erigontech/erigon-lib/common/datadir"
+	"github.com/erigontech/erigon-lib/common/dir"
+	"github.com/erigontech/erigon-lib/etl"
+	"github.com/erigontech/erigon-lib/kv"
+	"github.com/erigontech/erigon-lib/recsplit"
 )
 
 // Appendable - data type allows store data for different blockchain forks.

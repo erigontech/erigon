@@ -23,14 +23,15 @@ import (
 	"math/bits"
 
 	"github.com/holiman/uint256"
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	length2 "github.com/ledgerwatch/erigon-lib/common/length"
 	"golang.org/x/crypto/sha3"
 
-	"github.com/ledgerwatch/erigon/core/types/accounts"
-	"github.com/ledgerwatch/erigon/crypto"
-	"github.com/ledgerwatch/erigon/rlp"
-	"github.com/ledgerwatch/erigon/turbo/rlphacks"
+	libcommon "github.com/erigontech/erigon-lib/common"
+	length2 "github.com/erigontech/erigon-lib/common/length"
+
+	"github.com/erigontech/erigon/core/types/accounts"
+	"github.com/erigontech/erigon/crypto"
+	"github.com/erigontech/erigon/rlp"
+	"github.com/erigontech/erigon/turbo/rlphacks"
 )
 
 const hashStackStride = length2.Hash + 1 // + 1 byte for RLP encoding

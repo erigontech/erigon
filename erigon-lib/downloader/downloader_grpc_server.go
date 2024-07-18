@@ -26,10 +26,10 @@ import (
 	"github.com/anacrolix/torrent/metainfo"
 	"google.golang.org/protobuf/types/known/emptypb"
 
-	"github.com/ledgerwatch/erigon-lib/gointerfaces"
-	proto_downloader "github.com/ledgerwatch/erigon-lib/gointerfaces/downloaderproto"
-	prototypes "github.com/ledgerwatch/erigon-lib/gointerfaces/typesproto"
-	"github.com/ledgerwatch/erigon-lib/log/v3"
+	"github.com/erigontech/erigon-lib/gointerfaces"
+	proto_downloader "github.com/erigontech/erigon-lib/gointerfaces/downloaderproto"
+	prototypes "github.com/erigontech/erigon-lib/gointerfaces/typesproto"
+	"github.com/erigontech/erigon-lib/log/v3"
 )
 
 var (

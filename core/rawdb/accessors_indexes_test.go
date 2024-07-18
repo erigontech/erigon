@@ -27,13 +27,13 @@ import (
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
 
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon-lib/log/v3"
-	"github.com/ledgerwatch/erigon/core/rawdb"
-	"github.com/ledgerwatch/erigon/core/types"
-	"github.com/ledgerwatch/erigon/turbo/services"
-	"github.com/ledgerwatch/erigon/turbo/stages/mock"
+	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/kv"
+	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/core/rawdb"
+	"github.com/erigontech/erigon/core/types"
+	"github.com/erigontech/erigon/turbo/services"
+	"github.com/erigontech/erigon/turbo/stages/mock"
 )
 
 // Tests that positional lookup metadata can be stored and retrieved.

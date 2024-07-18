@@ -25,7 +25,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/ledgerwatch/erigon-lib/kv/stream"
+	"github.com/erigontech/erigon-lib/kv/stream"
 )
 
 func TestEliasFanoSeek(t *testing.T) {

@@ -22,11 +22,11 @@ import (
 
 	btree2 "github.com/tidwall/btree"
 
-	"github.com/ledgerwatch/erigon-lib/config3"
-	"github.com/ledgerwatch/erigon-lib/kv/bitmapdb"
-	"github.com/ledgerwatch/erigon-lib/log/v3"
-	"github.com/ledgerwatch/erigon-lib/recsplit"
-	"github.com/ledgerwatch/erigon-lib/seg"
+	"github.com/erigontech/erigon-lib/config3"
+	"github.com/erigontech/erigon-lib/kv/bitmapdb"
+	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon-lib/recsplit"
+	"github.com/erigontech/erigon-lib/seg"
 )
 
 // filesItem is "dirty" file - means file which can be:

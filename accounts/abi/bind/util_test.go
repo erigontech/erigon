@@ -27,14 +27,14 @@ import (
 	"testing"
 	"time"
 
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon/accounts/abi/bind"
-	"github.com/ledgerwatch/erigon/accounts/abi/bind/backends"
-	"github.com/ledgerwatch/erigon/common"
-	"github.com/ledgerwatch/erigon/common/u256"
-	"github.com/ledgerwatch/erigon/core/types"
-	"github.com/ledgerwatch/erigon/crypto"
-	"github.com/ledgerwatch/erigon/params"
+	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon/accounts/abi/bind"
+	"github.com/erigontech/erigon/accounts/abi/bind/backends"
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/u256"
+	"github.com/erigontech/erigon/core/types"
+	"github.com/erigontech/erigon/crypto"
+	"github.com/erigontech/erigon/params"
 )
 
 var testKey, _ = crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")

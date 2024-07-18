@@ -28,8 +28,8 @@ import (
 	"github.com/libp2p/go-libp2p/p2p/transport/tcp"
 	"github.com/multiformats/go-multiaddr"
 
-	"github.com/ledgerwatch/erigon-lib/log/v3"
-	"github.com/ledgerwatch/erigon/cl/clparams"
+	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/cl/clparams"
 )
 
 type SentinelConfig struct {

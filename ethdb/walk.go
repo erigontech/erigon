@@ -22,7 +22,7 @@ package ethdb
 import (
 	"bytes"
 
-	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/erigontech/erigon-lib/kv"
 )
 
 // splitCursor implements cursor with two keys

@@ -17,8 +17,8 @@
 package statechange
 
 import (
-	"github.com/ledgerwatch/erigon/cl/abstract"
-	"github.com/ledgerwatch/erigon/cl/phase1/core/state"
+	"github.com/erigontech/erigon/cl/abstract"
+	"github.com/erigontech/erigon/cl/phase1/core/state"
 )
 
 func ProcessEth1DataReset(s abstract.BeaconState) {

@@ -25,11 +25,11 @@ import (
 	"encoding/binary"
 	"fmt"
 
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	libcommon "github.com/erigontech/erigon-lib/common"
 
-	"github.com/ledgerwatch/erigon/core/types/accounts"
-	"github.com/ledgerwatch/erigon/crypto"
-	"github.com/ledgerwatch/erigon/ethdb"
+	"github.com/erigontech/erigon/core/types/accounts"
+	"github.com/erigontech/erigon/crypto"
+	"github.com/erigontech/erigon/ethdb"
 )
 
 var (

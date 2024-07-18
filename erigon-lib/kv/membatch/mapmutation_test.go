@@ -24,9 +24,9 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon-lib/kv/memdb"
-	"github.com/ledgerwatch/erigon-lib/log/v3"
+	"github.com/erigontech/erigon-lib/kv"
+	"github.com/erigontech/erigon-lib/kv/memdb"
+	"github.com/erigontech/erigon-lib/log/v3"
 )
 
 func TestMapmutation_Flush_Close(t *testing.T) {

@@ -24,11 +24,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/ledgerwatch/erigon-lib/common/hexutil"
+	"github.com/erigontech/erigon-lib/common/hexutil"
 
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	libcommon "github.com/erigontech/erigon-lib/common"
 
-	"github.com/ledgerwatch/erigon/core/types"
+	"github.com/erigontech/erigon/core/types"
 )
 
 func TestRemoteSealer(t *testing.T) {

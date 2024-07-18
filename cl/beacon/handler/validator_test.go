@@ -23,12 +23,12 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	mockaggregation "github.com/ledgerwatch/erigon/cl/aggregation/mock_services"
-	"github.com/ledgerwatch/erigon/cl/beacon/beacon_router_configuration"
-	"github.com/ledgerwatch/erigon/cl/cltypes/solid"
-	"github.com/ledgerwatch/erigon/cl/pool"
-	"github.com/ledgerwatch/erigon/common"
+	libcommon "github.com/erigontech/erigon-lib/common"
+	mockaggregation "github.com/erigontech/erigon/cl/aggregation/mock_services"
+	"github.com/erigontech/erigon/cl/beacon/beacon_router_configuration"
+	"github.com/erigontech/erigon/cl/cltypes/solid"
+	"github.com/erigontech/erigon/cl/pool"
+	"github.com/erigontech/erigon/common"
 	"github.com/stretchr/testify/suite"
 	"go.uber.org/mock/gomock"
 )

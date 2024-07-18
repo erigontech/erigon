@@ -26,21 +26,21 @@ import (
 	"sort"
 	"testing"
 
-	"github.com/ledgerwatch/erigon-lib/log/v3"
+	"github.com/erigontech/erigon-lib/log/v3"
 
-	"github.com/ledgerwatch/erigon-lib/chain"
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/common/length"
-	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon-lib/kv/memdb"
-	"github.com/ledgerwatch/erigon/consensus/clique"
-	"github.com/ledgerwatch/erigon/core"
-	"github.com/ledgerwatch/erigon/core/types"
-	"github.com/ledgerwatch/erigon/crypto"
-	"github.com/ledgerwatch/erigon/eth/stagedsync"
-	"github.com/ledgerwatch/erigon/params"
-	"github.com/ledgerwatch/erigon/turbo/stages/mock"
-	"github.com/ledgerwatch/erigon/turbo/testlog"
+	"github.com/erigontech/erigon-lib/chain"
+	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common/length"
+	"github.com/erigontech/erigon-lib/kv"
+	"github.com/erigontech/erigon-lib/kv/memdb"
+	"github.com/erigontech/erigon/consensus/clique"
+	"github.com/erigontech/erigon/core"
+	"github.com/erigontech/erigon/core/types"
+	"github.com/erigontech/erigon/crypto"
+	"github.com/erigontech/erigon/eth/stagedsync"
+	"github.com/erigontech/erigon/params"
+	"github.com/erigontech/erigon/turbo/stages/mock"
+	"github.com/erigontech/erigon/turbo/testlog"
 )
 
 // testerAccountPool is a pool to maintain currently active tester accounts,
@@ -377,7 +377,7 @@ func TestClique(t *testing.T) {
 			failure: clique.ErrRecentlySigned,
 		}, {
 			// Recent signatures should not reset on checkpoint blocks imported in a new
-			// batch (https://github.com/ledgerwatch/erigon/issues/17593). Whilst this
+			// batch (https://github.com/erigontech/erigon/issues/17593). Whilst this
 			// seems overly specific and weird, it was a Rinkeby consensus split.
 			name:    "Recent signatures should not reset on checkpoint blocks imported in a new batch",
 			epoch:   3,

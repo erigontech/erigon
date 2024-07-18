@@ -20,8 +20,8 @@ import (
 	"strconv"
 	"testing"
 
-	"github.com/ledgerwatch/erigon-lib/kv/memdb"
-	"github.com/ledgerwatch/erigon/common/math"
+	"github.com/erigontech/erigon-lib/kv/memdb"
+	"github.com/erigontech/erigon/common/math"
 	"github.com/stretchr/testify/assert"
 )
 

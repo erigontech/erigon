@@ -26,10 +26,10 @@ import (
 	"github.com/c2h5oh/datasize"
 	"golang.org/x/sync/semaphore"
 
-	"github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon-lib/kv/mdbx"
-	"github.com/ledgerwatch/erigon-lib/log/v3"
+	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/kv"
+	"github.com/erigontech/erigon-lib/kv/mdbx"
+	"github.com/erigontech/erigon-lib/log/v3"
 )
 
 type DiagnosticClient struct {
@@ -54,9 +54,10 @@ type DiagnosticClient struct {
 	resourcesUsageMutex sync.Mutex
 	networkSpeed        NetworkSpeedTestResult
 	networkSpeedMutex   sync.Mutex
+	webseedsList        []string
 }
 
-func NewDiagnosticClient(ctx context.Context, metricsMux *http.ServeMux, dataDirPath string, speedTest bool) (*DiagnosticClient, error) {
+func NewDiagnosticClient(ctx context.Context, metricsMux *http.ServeMux, dataDirPath string, speedTest bool, webseedsList []string) (*DiagnosticClient, error) {
 	dirPath := filepath.Join(dataDirPath, "diagnostics")
 	db, err := createDb(ctx, dirPath)
 	if err != nil {
@@ -83,7 +84,8 @@ func NewDiagnosticClient(ctx context.Context, metricsMux *http.ServeMux, dataDir
 		resourcesUsage: ResourcesUsage{
 			MemoryUsage: []MemoryStats{},
 		},
-		peersStats: NewPeerStats(1000), // 1000 is the limit of peers; TODO: make it configurable through a flag
+		peersStats:   NewPeerStats(1000), // 1000 is the limit of peers; TODO: make it configurable through a flag
+		webseedsList: webseedsList,
 	}, nil
 }
 

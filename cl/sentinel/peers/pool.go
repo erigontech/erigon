@@ -21,7 +21,7 @@ import (
 	"sync"
 	"sync/atomic"
 
-	"github.com/ledgerwatch/erigon-lib/common/ring"
+	"github.com/erigontech/erigon-lib/common/ring"
 	"github.com/libp2p/go-libp2p/core/peer"
 )
 

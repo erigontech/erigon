@@ -22,7 +22,7 @@ package core
 import (
 	"errors"
 
-	"github.com/ledgerwatch/erigon/core/types"
+	"github.com/erigontech/erigon/core/types"
 )
 
 var (

@@ -47,19 +47,19 @@ import (
 	"strings"
 	"text/tabwriter"
 
-	"github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/log/v3"
+	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/log/v3"
 
 	"github.com/urfave/cli/v2"
 
-	"github.com/ledgerwatch/erigon/turbo/logging"
+	"github.com/erigontech/erigon/turbo/logging"
 
-	"github.com/ledgerwatch/erigon/crypto"
-	"github.com/ledgerwatch/erigon/p2p"
-	"github.com/ledgerwatch/erigon/p2p/enode"
-	"github.com/ledgerwatch/erigon/p2p/simulations"
-	"github.com/ledgerwatch/erigon/p2p/simulations/adapters"
-	"github.com/ledgerwatch/erigon/rpc"
+	"github.com/erigontech/erigon/crypto"
+	"github.com/erigontech/erigon/p2p"
+	"github.com/erigontech/erigon/p2p/enode"
+	"github.com/erigontech/erigon/p2p/simulations"
+	"github.com/erigontech/erigon/p2p/simulations/adapters"
+	"github.com/erigontech/erigon/rpc"
 )
 
 var client *simulations.Client

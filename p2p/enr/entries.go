@@ -24,7 +24,7 @@ import (
 	"io"
 	"net"
 
-	"github.com/ledgerwatch/erigon/rlp"
+	"github.com/erigontech/erigon/rlp"
 )
 
 // Entry is implemented by known node record entry types.

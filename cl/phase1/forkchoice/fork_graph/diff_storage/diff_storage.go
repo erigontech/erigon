@@ -22,7 +22,7 @@ import (
 	"sync"
 
 	"github.com/alecthomas/atomic"
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	libcommon "github.com/erigontech/erigon-lib/common"
 )
 
 const maxDumps = 8 // max number of dumps to keep in memory	to prevent from memory leak during long non-finality.
