@@ -1,17 +1,19 @@
 package main
 
 import (
-	"flag"
-	"net/http"
-	"strings"
 	"encoding/json"
-	"io"
+	"flag"
 	"fmt"
+	"io"
 	"math/big"
+	"net/http"
 	"sort"
-	"github.com/ledgerwatch/erigon/zk/l1infotree"
-	"github.com/iden3/go-iden3-crypto/keccak256"
+	"strconv"
+	"strings"
+
 	libcommon "github.com/gateway-fm/cdk-erigon-lib/common"
+	"github.com/iden3/go-iden3-crypto/keccak256"
+	"github.com/ledgerwatch/erigon/zk/l1infotree"
 )
 
 type BlockNumberResponse struct {
@@ -119,8 +121,8 @@ func main() {
 			stop = true
 		}
 		fmt.Println("Requesting logs from", from, "to", end)
-		fromAsHex := fmt.Sprintf("0x%x", from)
-		endAsHex := fmt.Sprintf("0x%x", end)
+		fromAsHex := "0x" + strconv.FormatUint(from, 16)
+		endAsHex := "0x" + strconv.FormatUint(end, 16)
 		reqBody := fmt.Sprintf(logReq, fromAsHex, endAsHex, address)
 		req, err := http.NewRequest("POST", endpoint, strings.NewReader(reqBody))
 		if err != nil {

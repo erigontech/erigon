@@ -181,9 +181,7 @@ func IsArrayUint64Empty(arr []uint64) bool {
 
 func Value8FromBigIntArray(arr []*big.Int) NodeValue8 {
 	nv := [8]*big.Int{}
-	for i, v := range arr {
-		nv[i] = v
-	}
+	copy(nv[:], arr)
 	return nv
 }
 
@@ -192,9 +190,7 @@ func NodeValue12FromBigIntArray(arr []*big.Int) (*NodeValue12, error) {
 		return &NodeValue12{}, fmt.Errorf("invalid array length")
 	}
 	nv := NodeValue12{}
-	for i, v := range arr {
-		nv[i] = v
-	}
+	copy(nv[:], arr)
 	return &nv, nil
 }
 
@@ -213,17 +209,15 @@ func NodeValue8FromBigIntArray(arr []*big.Int) (*NodeValue8, error) {
 		return &NodeValue8{}, fmt.Errorf("invalid array length")
 	}
 	nv := NodeValue8{}
-	for i, v := range arr {
-		nv[i] = v
-	}
+	copy(nv[:], arr)
 	return &nv, nil
 }
 
 func BigIntArrayFromNodeValue8(nv *NodeValue8) []*big.Int {
 	arr := make([]*big.Int, 8)
-	for i, v := range nv {
-		arr[i] = v
-	}
+
+	copy(arr, nv[:])
+
 	return arr
 }
 
@@ -248,8 +242,7 @@ func (nv *NodeValue12) IsFinalNode() bool {
 }
 
 func ConvertBigIntToHex(n *big.Int) string {
-	hex := fmt.Sprintf("0x%0x", n)
-	return hex
+	return "0x" + n.Text(16)
 }
 
 func ConvertHexToBigInt(hex string) *big.Int {
@@ -407,9 +400,7 @@ func BinaryKey(key NodeKey) string {
 func ConcatArrays4(a, b [4]uint64) [8]uint64 {
 	result := [8]uint64{}
 
-	for i, v := range a {
-		result[i] = v
-	}
+	copy(result[:], a[:])
 
 	for i, v := range b {
 		result[i+4] = v
@@ -705,14 +696,10 @@ func HashContractBytecode(bc string) (string, error) {
 		}
 
 		var in [8]uint64
-		for i, value := range elementsToHash[4:12] {
-			in[i] = value
-		}
+		copy(in[:], elementsToHash[4:12])
 
 		var capacity [4]uint64
-		for i, value := range elementsToHash[:4] {
-			capacity[i] = value
-		}
+		copy(capacity[:], elementsToHash[:4])
 
 		tmpHash, err = Hash(in, capacity)
 		if err != nil {

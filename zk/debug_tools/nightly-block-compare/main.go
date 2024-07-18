@@ -10,8 +10,9 @@ import (
 	"net/http"
 	"os"
 
-	"github.com/google/go-cmp/cmp"
 	"io"
+
+	"github.com/google/go-cmp/cmp"
 )
 
 func getLatestBlockNumber(url string) (*big.Int, error) {
@@ -58,7 +59,7 @@ func getBlockByNumber(url string, number *big.Int) (map[string]interface{}, erro
 	requestBody, _ := json.Marshal(map[string]interface{}{
 		"jsonrpc": "2.0",
 		"method":  "eth_getBlockByNumber",
-		"params":  []interface{}{fmt.Sprintf("0x%x", number), false},
+		"params":  []interface{}{"0x" + number.Text(16), false},
 		"id":      1,
 	})
 

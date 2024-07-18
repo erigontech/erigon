@@ -9,6 +9,7 @@ import (
 	"io/ioutil"
 	"log"
 	"net/http"
+	"strconv"
 	"sync"
 )
 
@@ -65,7 +66,7 @@ func getBlockHash(nodeURL string, blockNumber int, wg *sync.WaitGroup, resultCha
 	request := JSONRPCRequest{
 		Jsonrpc: "2.0",
 		Method:  "eth_getBlockByNumber",
-		Params:  []interface{}{fmt.Sprintf("0x%x", blockNumber), true},
+		Params:  []interface{}{"0x" + strconv.FormatInt(int64(blockNumber), 16), true},
 		ID:      1,
 	}
 
@@ -183,7 +184,9 @@ func compareReceipts(nodeURL1, nodeURL2 string, txHashes []string) (bool, error)
 	return true, nil
 }
 
-/* EXAMPLE USAGE:
+/*
+	EXAMPLE USAGE:
+
 go run cmd/hack/rpc_checker/main.go -node1=http://your-node1-url -node2=http://your-node2-url -fromBlock=3000000 -step=1000 -compare-receipts=true
 */
 func main() {

@@ -2,7 +2,7 @@ package blockinfo
 
 import (
 	"context"
-	"fmt"
+	"encoding/hex"
 	"math/big"
 
 	ethTypes "github.com/ledgerwatch/erigon/core/types"
@@ -349,10 +349,10 @@ func (b *BlockInfoTree) GenerateBlockTxKeysVals(
 	for _, rLog := range receipt.Logs {
 		reducedTopics := ""
 		for _, topic := range rLog.Topics {
-			reducedTopics += fmt.Sprintf("%x", topic)
+			reducedTopics += topic.Hex()[2:]
 		}
 
-		logToEncode := fmt.Sprintf("0x%x%s", rLog.Data, reducedTopics)
+		logToEncode := "0x" + hex.EncodeToString(rLog.Data) + reducedTopics
 
 		hash, err := utils.HashContractBytecode(logToEncode)
 		if err != nil {
