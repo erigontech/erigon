@@ -200,13 +200,8 @@ func ExecV3(ctx context.Context,
 	pruneNonEssentials := cfg.prune.History.Enabled() && cfg.prune.History.PruneTo(execStage.BlockNumber) == execStage.BlockNumber
 	// Disable all inverted indexes if we do max pruning
 	if pruneNonEssentials {
-		agg.DiscardInvertedIndex(kv.LogAddrIdxPos)
-		agg.DiscardInvertedIndex(kv.LogTopicIdxPos)
 		agg.DiscardInvertedIndex(kv.TracesFromIdxPos)
 		agg.DiscardInvertedIndex(kv.TracesToIdxPos)
-		// We do not discard account because it's used in snapshot generation.
-		agg.DiscardHistory(kv.StorageDomain)
-		agg.DiscardHistory(kv.CodeDomain)
 	}
 
 	var err error
