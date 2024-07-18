@@ -382,11 +382,6 @@ func (a *Aggregator) DiscardHistory(name kv.Domain) *Aggregator {
 	return a
 }
 
-func (a *Aggregator) DiscardInvertedIndex(name kv.InvertedIdxPos) *Aggregator {
-	a.iis[name].discardIdx = true
-	return a
-}
-
 func (a *Aggregator) EnableHistory(name kv.Domain) *Aggregator {
 	a.d[name].historyDisabled = false
 	return a
