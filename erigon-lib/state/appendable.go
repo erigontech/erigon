@@ -685,6 +685,7 @@ func (ap *Appendable) collate(ctx context.Context, step uint64, roTx kv.Tx) (App
 			coll.Close()
 		}
 	}()
+
 	comp, err := seg.NewCompressor(ctx, "collate "+ap.filenameBase, coll.iiPath, ap.cfg.Dirs.Tmp, seg.MinPatternScore, ap.compressWorkers, log.LvlTrace, ap.logger)
 	if err != nil {
 		return coll, fmt.Errorf("create %s compressor: %w", ap.filenameBase, err)
