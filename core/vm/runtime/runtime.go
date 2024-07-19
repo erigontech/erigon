@@ -233,6 +233,7 @@ func Create(input []byte, cfg *Config, blockNr uint64) ([]byte, libcommon.Addres
 		input,
 		cfg.GasLimit,
 		cfg.Value,
+                false,
 	)
 	return code, address, leftOverGas, err
 }
