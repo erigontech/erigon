@@ -19,7 +19,6 @@ import (
 	"time"
 
 	"github.com/RoaringBitmap/roaring/roaring64"
-	"github.com/holiman/uint256"
 	libcommon "github.com/gateway-fm/cdk-erigon-lib/common"
 	"github.com/gateway-fm/cdk-erigon-lib/common/hexutility"
 	"github.com/gateway-fm/cdk-erigon-lib/common/length"
@@ -30,6 +29,7 @@ import (
 	"github.com/gateway-fm/cdk-erigon-lib/recsplit"
 	"github.com/gateway-fm/cdk-erigon-lib/recsplit/eliasfano32"
 	librlp "github.com/gateway-fm/cdk-erigon-lib/rlp"
+	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/log/v3"
 	"golang.org/x/exp/slices"
 
@@ -216,6 +216,7 @@ func readAccountAtVersion(chaindata string, account string, block uint64) error 
 	defer tx.Rollback()
 
 	ps := state.NewPlainState(tx, block, nil)
+	defer ps.Close()
 
 	addr := libcommon.HexToAddress(account)
 	acc, err := ps.ReadAccountData(addr)

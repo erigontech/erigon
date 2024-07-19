@@ -242,9 +242,12 @@ func (g *Generator) generateWitness(tx kv.Tx, ctx context.Context, blocks []*eri
 
 	prevStateRoot := prevHeader.Root
 
+	reader := state.NewPlainState(tx, blocks[0].NumberU64(), systemcontracts.SystemContractCodeLookup[g.chainCfg.ChainName])
+	defer reader.Close()
+
 	for _, block := range blocks {
 		blockNum := block.NumberU64()
-		reader := state.NewPlainState(tx, blockNum, systemcontracts.SystemContractCodeLookup[g.chainCfg.ChainName])
+		reader.SetBlockNr(blockNum)
 
 		tds.SetStateReader(reader)
 
@@ -313,7 +316,6 @@ func (g *Generator) generateWitness(tx kv.Tx, ctx context.Context, blocks []*eri
 		}
 
 		prevStateRoot = block.Root()
-		reader.Close() // close the cursors created by the plainstate
 	}
 
 	var rl trie.RetainDecider

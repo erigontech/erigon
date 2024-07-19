@@ -268,7 +268,7 @@ func SpawnSequencingStage(
 			return err
 		}
 
-		log.Info(fmt.Sprintf("[%s] Starting block %d (forkid %v)...", logPrefix, blockNumber+1, forkId))
+		log.Info(fmt.Sprintf("[%s] Starting block %d (forkid %v)...", logPrefix, blockNumber, forkId))
 
 		lastStartedBn = blockNumber
 
