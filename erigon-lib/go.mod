@@ -1,8 +1,6 @@
-module github.com/ledgerwatch/erigon-lib
+module github.com/erigontech/erigon-lib
 
-go 1.21.0
-
-toolchain go1.22.4
+go 1.21.5
 
 require (
 	github.com/erigontech/erigon-snapshot v1.3.1-0.20240717150728-8e0fa991b894
@@ -152,7 +150,7 @@ require (
 )
 
 replace (
-	github.com/anacrolix/torrent => github.com/erigontech/torrent v1.54.2-alpha-30
+	github.com/anacrolix/torrent => github.com/erigontech/torrent v1.54.2-alpha-32
 	github.com/holiman/bloomfilter/v2 => github.com/AskAlexSharov/bloomfilter/v2 v2.0.8
 	github.com/tidwall/btree => github.com/AskAlexSharov/btree v1.6.2
 )

@@ -31,9 +31,9 @@ import (
 
 	jsoniter "github.com/json-iterator/go"
 
-	"github.com/ledgerwatch/erigon-lib/log/v3"
+	"github.com/erigontech/erigon-lib/log/v3"
 
-	"github.com/ledgerwatch/erigon/rpc/rpccfg"
+	"github.com/erigontech/erigon/rpc/rpccfg"
 )
 
 // handler handles JSON-RPC messages. There is one handler per connection. Note that

@@ -26,12 +26,12 @@ import (
 
 	"golang.org/x/sync/semaphore"
 
-	"github.com/ledgerwatch/erigon-lib/log/v3"
+	"github.com/erigontech/erigon-lib/log/v3"
 
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon/cmd/observer/database"
-	"github.com/ledgerwatch/erigon/cmd/observer/observer/node_utils"
-	"github.com/ledgerwatch/erigon/cmd/observer/utils"
+	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon/cmd/observer/database"
+	"github.com/erigontech/erigon/cmd/observer/observer/node_utils"
+	"github.com/erigontech/erigon/cmd/observer/utils"
 )
 
 type Diplomacy struct {

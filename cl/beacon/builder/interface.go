@@ -19,9 +19,9 @@ package builder
 import (
 	"context"
 
-	"github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon/cl/cltypes"
-	"github.com/ledgerwatch/erigon/turbo/engineapi/engine_types"
+	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon/cl/cltypes"
+	"github.com/erigontech/erigon/turbo/engineapi/engine_types"
 )
 
 //go:generate mockgen -typed=true -destination=./mock_services/builder_client_mock.go -package=mock_services . BuilderClient

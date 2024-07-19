@@ -17,6 +17,7 @@
 package snaptype
 
 import (
+	"cmp"
 	"encoding/hex"
 	"errors"
 	"fmt"
@@ -29,8 +30,7 @@ import (
 
 	"github.com/anacrolix/torrent/metainfo"
 
-	"github.com/ledgerwatch/erigon-lib/common/cmp"
-	"github.com/ledgerwatch/erigon-lib/common/dir"
+	"github.com/erigontech/erigon-lib/common/dir"
 )
 
 var (

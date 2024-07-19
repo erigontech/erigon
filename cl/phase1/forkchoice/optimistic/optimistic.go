@@ -17,8 +17,8 @@
 package optimistic
 
 import (
-	"github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon/cl/cltypes"
+	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon/cl/cltypes"
 )
 
 type OptimisticStore interface {

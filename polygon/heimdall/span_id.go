@@ -17,7 +17,7 @@
 package heimdall
 
 import (
-	"github.com/ledgerwatch/erigon/polygon/bor/borcfg"
+	"github.com/erigontech/erigon/polygon/bor/borcfg"
 )
 
 type SpanId uint64

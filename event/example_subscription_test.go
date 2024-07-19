@@ -22,7 +22,7 @@ package event_test
 import (
 	"fmt"
 
-	"github.com/ledgerwatch/erigon/event"
+	"github.com/erigontech/erigon/event"
 )
 
 func ExampleNewSubscription() {

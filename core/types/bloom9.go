@@ -25,10 +25,10 @@ import (
 	"math/big"
 	"unsafe"
 
-	"github.com/ledgerwatch/erigon-lib/common/hexutility"
+	"github.com/erigontech/erigon-lib/common/hexutility"
 
-	"github.com/ledgerwatch/erigon/crypto"
-	"github.com/ledgerwatch/erigon/crypto/cryptopool"
+	"github.com/erigontech/erigon/crypto"
+	"github.com/erigontech/erigon/crypto/cryptopool"
 )
 
 type bytesBacked interface {

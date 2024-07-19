@@ -19,9 +19,9 @@ package persistence
 import (
 	"context"
 
-	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon/cl/cltypes"
-	"github.com/ledgerwatch/erigon/cl/sentinel/peers"
+	"github.com/erigontech/erigon-lib/kv"
+	"github.com/erigontech/erigon/cl/cltypes"
+	"github.com/erigontech/erigon/cl/sentinel/peers"
 )
 
 type BlockSource interface {

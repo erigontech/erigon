@@ -26,7 +26,7 @@ import (
 
 	"github.com/erigontech/mdbx-go/mdbx"
 
-	"github.com/ledgerwatch/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common"
 )
 
 func DefaultPageSize() uint64 {

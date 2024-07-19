@@ -20,7 +20,7 @@ import (
 	"context"
 	"time"
 
-	"github.com/ledgerwatch/erigon-lib/metrics"
+	"github.com/erigontech/erigon-lib/metrics"
 )
 
 type (

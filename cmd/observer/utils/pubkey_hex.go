@@ -21,8 +21,8 @@ import (
 	"encoding/hex"
 	"fmt"
 
-	"github.com/ledgerwatch/erigon/crypto"
-	"github.com/ledgerwatch/erigon/p2p/enode"
+	"github.com/erigontech/erigon/crypto"
+	"github.com/erigontech/erigon/p2p/enode"
 )
 
 func ParseHexPublicKey(keyStr string) (*ecdsa.PublicKey, error) {
