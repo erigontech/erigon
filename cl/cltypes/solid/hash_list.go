@@ -156,7 +156,7 @@ func (h *hashList) hashVectorSSZ() ([32]byte, error) {
 	if h.MerkleTree == nil {
 		cap := uint64(h.c)
 		h.MerkleTree = &merkle_tree.MerkleTree{}
-		h.MerkleTree.Initialize(h.l, 6, func(idx int, out []byte) {
+		h.MerkleTree.Initialize(h.l, merkle_tree.OptimalMaxTreeCacheDepth, func(idx int, out []byte) {
 			copy(out, h.u[idx*length.Hash:(idx+1)*length.Hash])
 		}, /*limit=*/ &cap)
 	}
