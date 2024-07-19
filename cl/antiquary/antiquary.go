@@ -238,6 +238,7 @@ func (a *Antiquary) Loop() error {
 				continue
 			}
 			if err := a.antiquate(from, to); err != nil {
+				log.Error("[Antiquary] Failed to antiquate", "from", from, "to", to, "err", err)
 				return err
 			}
 		case <-a.ctx.Done():
@@ -259,6 +260,10 @@ func (a *Antiquary) antiquate(from, to uint64) error {
 			return nil
 		}
 		defer a.snBuildSema.TryAcquire(caplinSnapshotBuildSemaWeight)
+	}
+
+	if err := freezeblocks.SanityCheckBeaconBlocks(a.ctx, a.sn, a.mainDB, from, to, a.logger); err != nil {
+		return err
 	}
 
 	log.Info("[Antiquary] Antiquating", "from", from, "to", to)

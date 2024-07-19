@@ -523,6 +523,53 @@ func dumpBlobSidecarsRange(ctx context.Context, db kv.RoDB, storage blob_storage
 	return BeaconSimpleIdx(ctx, f, salt, tmpDir, p, lvl, logger)
 }
 
+func SanityCheckBeaconBlocks(ctx context.Context, csn *CaplinSnapshots, db kv.RoDB, from, to uint64, logger log.Logger) error {
+	tx, err := db.BeginRo(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	genesisHeader, _, _, err := csn.ReadHeader(from)
+	if err != nil {
+		return err
+	}
+
+	if genesisHeader == nil {
+		log.Warn("beaconIndices up to", "block", to, "caplinSnapIndexMax", csn.IndicesMax())
+		return fmt.Errorf("genesis header is nil")
+	}
+	previousBlockRoot, err := genesisHeader.Header.HashSSZ()
+	if err != nil {
+		return err
+	}
+	previousBlockSlot := genesisHeader.Header.Slot
+	for i := uint64(from + 1); i < to; i++ {
+		if min(0, i-2000) > previousBlockSlot {
+			return fmt.Errorf("snapshot %d has invalid slot", i)
+		}
+		// Checking of snapshots is a chain contiguity problem
+		currentHeader, _, _, err := csn.ReadHeader(i)
+		if err != nil {
+			return err
+		}
+		if currentHeader == nil {
+			continue
+		}
+		if currentHeader.Header.ParentRoot != previousBlockRoot {
+			return fmt.Errorf("snapshot %d has invalid parent root", i)
+		}
+		previousBlockRoot, err = currentHeader.Header.HashSSZ()
+		if err != nil {
+			return err
+		}
+		previousBlockSlot = currentHeader.Header.Slot
+		if i%2000 == 0 {
+			log.Debug("freezeblocks.SanityCheckBeaconBlocks: Successfully checked", "slot", i)
+		}
+	}
+	return nil
+}
+
 func DumpBeaconBlocks(ctx context.Context, db kv.RoDB, fromSlot, toSlot uint64, salt uint32, dirs datadir.Dirs, workers int, lvl log.Lvl, logger log.Logger) error {
 
 	for i := fromSlot; i < toSlot; i = chooseSegmentEnd(i, toSlot, snaptype.CaplinEnums.BeaconBlocks, nil) {
