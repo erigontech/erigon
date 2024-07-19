@@ -7,6 +7,10 @@ import (
 	"github.com/erigontech/erigon-lib/common/length"
 )
 
+func ceil(num, divisor int) int {
+	return (num + (divisor - 1)) / divisor
+}
+
 const OptimalMaxTreeCacheDepth = 12
 
 type MerkleTree struct {
@@ -209,10 +213,8 @@ func (m *MerkleTree) computeLayer(layerIdx int) {
 	if len(m.layers[layerIdx]) == 0 {
 		return
 	}
-	iterations := m.leavesCount / currentDivisor
-	if m.leavesCount%currentDivisor != 0 {
-		iterations++
-	}
+
+	iterations := ceil(m.leavesCount, currentDivisor)
 
 	for i := 0; i < iterations; i++ {
 		fromOffset := i * length.Hash

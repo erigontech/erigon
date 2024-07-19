@@ -3,9 +3,9 @@ package merkle_tree_test
 import (
 	"testing"
 
-	"github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/common/length"
-	"github.com/ledgerwatch/erigon/cl/merkle_tree"
+	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common/length"
+	"github.com/erigontech/erigon/cl/merkle_tree"
 	"github.com/stretchr/testify/require"
 )
 
