@@ -20,11 +20,13 @@ import (
 	"bytes"
 	"context"
 	"fmt"
-	"github.com/erigontech/erigon/turbo/jsonrpc/receipts"
 	"math/big"
 	"sync"
 	"sync/atomic"
 	"time"
+
+	"github.com/erigontech/erigon-lib/common/datadir"
+	"github.com/erigontech/erigon/turbo/jsonrpc/receipts"
 
 	"github.com/erigontech/erigon-lib/common/hexutil"
 
@@ -139,10 +141,11 @@ type BaseAPI struct {
 	_engine      consensus.EngineReader
 
 	evmCallTimeout    time.Duration
+	dirs              datadir.Dirs
 	receiptsGenerator *receipts.Generator
 }
 
-func NewBaseApi(f *rpchelper.Filters, stateCache kvcache.Cache, blockReader services.FullBlockReader, singleNodeMode bool, evmCallTimeout time.Duration, engine consensus.EngineReader) *BaseAPI {
+func NewBaseApi(f *rpchelper.Filters, stateCache kvcache.Cache, blockReader services.FullBlockReader, singleNodeMode bool, evmCallTimeout time.Duration, engine consensus.EngineReader, dirs datadir.Dirs) *BaseAPI {
 	var (
 		blocksLRUSize      = 128 // ~32Mb
 		receiptsCacheLimit = 32
@@ -173,6 +176,7 @@ func NewBaseApi(f *rpchelper.Filters, stateCache kvcache.Cache, blockReader serv
 		evmCallTimeout:    evmCallTimeout,
 		_engine:           engine,
 		receiptsGenerator: receiptsGenerator,
+		dirs:              dirs,
 	}
 }
 

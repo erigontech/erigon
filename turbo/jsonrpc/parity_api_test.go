@@ -37,7 +37,7 @@ var latestBlock = rpc.BlockNumberOrHashWithNumber(rpc.LatestBlockNumber)
 func TestParityAPIImpl_ListStorageKeys_NoOffset(t *testing.T) {
 	assert := assert.New(t)
 	m, _, _ := rpcdaemontest.CreateTestSentry(t)
-	baseApi := NewBaseApi(nil, nil, m.BlockReader, false, rpccfg.DefaultEvmCallTimeout, m.Engine)
+	baseApi := NewBaseApi(nil, nil, m.BlockReader, false, rpccfg.DefaultEvmCallTimeout, m.Engine, m.Dirs)
 	api := NewParityAPIImpl(baseApi, m.DB)
 	answers := []string{
 		"0000000000000000000000000000000000000000000000000000000000000000",
