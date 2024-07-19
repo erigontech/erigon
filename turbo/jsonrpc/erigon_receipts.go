@@ -19,20 +19,20 @@ package jsonrpc
 import (
 	"context"
 	"fmt"
+
+	"github.com/RoaringBitmap/roaring"
+
+	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/kv/order"
 	"github.com/erigontech/erigon-lib/kv/rawdbv3"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/cmd/state/exec3"
-
-	"github.com/RoaringBitmap/roaring"
-	bortypes "github.com/erigontech/erigon/polygon/bor/types"
-
-	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon/core/rawdb"
 	"github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/eth/ethutils"
 	"github.com/erigontech/erigon/eth/filters"
+	bortypes "github.com/erigontech/erigon/polygon/bor/types"
 	"github.com/erigontech/erigon/rpc"
 	"github.com/erigontech/erigon/turbo/rpchelper"
 )
@@ -136,13 +136,13 @@ func (api *ErigonImpl) GetLatestLogs(ctx context.Context, crit filters.FilterCri
 		logOptions = filters.DefaultLogFilterOptions()
 	}
 	erigonLogs := types.ErigonLogs{}
-	db, beginErr := api.db.BeginRo(ctx)
+	dbTx, beginErr := api.db.BeginRo(ctx)
 	if beginErr != nil {
 		return erigonLogs, beginErr
 	}
-	defer db.Rollback()
+	defer dbTx.Rollback()
 
-	tx := db.(kv.TemporalTx)
+	tx := dbTx.(kv.TemporalTx)
 
 	var err error
 	var begin, end uint64 // Filter range: begin-end(from-to). Two limits are included in the filter
@@ -293,7 +293,6 @@ func (api *ErigonImpl) GetLatestLogs(ctx context.Context, crit filters.FilterCri
 			return nil, fmt.Errorf("block not found %d", blockNum)
 		}
 		for _, log := range filtered {
-			println("append to blocklogs")
 			erigonLog := &types.ErigonLog{}
 			erigonLog.BlockNumber = blockNum
 			erigonLog.BlockHash = blockHash
