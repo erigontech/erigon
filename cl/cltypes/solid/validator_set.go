@@ -147,7 +147,6 @@ func (v *ValidatorSet) CopyTo(t *ValidatorSet) {
 	// skip copying (unsupported for phase0)
 	t.phase0Data = make([]Phase0Data, t.l)
 	copy(t.buffer, v.buffer)
-	// copy(t.treeCacheBuffer, v.treeCacheBuffer) TODO: Implement CopyTo in MerkleTree
 	copy(t.attesterBits, v.attesterBits)
 	t.attesterBits = t.attesterBits[:v.l]
 }
