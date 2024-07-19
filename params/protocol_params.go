@@ -22,7 +22,7 @@ package params
 import (
 	"math/big"
 
-	"github.com/ledgerwatch/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common"
 )
 
 const (
@@ -178,6 +178,9 @@ const (
 	// EIP-2935: Historical block hashes in state
 	BlockHashHistoryServeWindow uint64 = 8192
 	BlockHashOldWindow          uint64 = 256
+
+	// EIP-7702
+	SetCodeMagicPrefix = byte(0x05)
 )
 
 // EIP-4788: Beacon block root in the EVM

@@ -26,13 +26,14 @@ import (
 	"math/big"
 
 	"github.com/holiman/uint256"
-	"github.com/ledgerwatch/erigon-lib/chain"
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	rlp2 "github.com/ledgerwatch/erigon-lib/rlp"
-	types2 "github.com/ledgerwatch/erigon-lib/types"
 
-	"github.com/ledgerwatch/erigon/common/u256"
-	"github.com/ledgerwatch/erigon/rlp"
+	"github.com/erigontech/erigon-lib/chain"
+	libcommon "github.com/erigontech/erigon-lib/common"
+	rlp2 "github.com/erigontech/erigon-lib/rlp"
+	types2 "github.com/erigontech/erigon-lib/types"
+
+	"github.com/erigontech/erigon/common/u256"
+	"github.com/erigontech/erigon/rlp"
 )
 
 type CommonTx struct {
@@ -375,13 +376,13 @@ func (tx *LegacyTx) WithSignature(signer Signer, sig []byte) (Transaction, error
 	return cpy, nil
 }
 
-func (tx *LegacyTx) FakeSign(address libcommon.Address) (Transaction, error) {
+func (tx *LegacyTx) FakeSign(address libcommon.Address) Transaction {
 	cpy := tx.copy()
 	cpy.R.Set(u256.Num1)
 	cpy.S.Set(u256.Num1)
 	cpy.V.Set(u256.Num4)
 	cpy.from.Store(address)
-	return cpy, nil
+	return cpy
 }
 
 // Hash computes the hash (but not for signatures!)
@@ -434,7 +435,7 @@ func (tx *LegacyTx) GetChainID() *uint256.Int {
 	return DeriveChainId(&tx.V)
 }
 
-func (tx *LegacyTx) cashedSender() (sender libcommon.Address, ok bool) {
+func (tx *LegacyTx) cachedSender() (sender libcommon.Address, ok bool) {
 	s := tx.from.Load()
 	if s == nil {
 		return sender, false

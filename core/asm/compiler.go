@@ -26,8 +26,8 @@ import (
 	"os"
 	"strings"
 
-	"github.com/ledgerwatch/erigon/common/math"
-	"github.com/ledgerwatch/erigon/core/vm"
+	"github.com/erigontech/erigon/common/math"
+	"github.com/erigontech/erigon/core/vm"
 )
 
 // Compiler contains information about the parsed source

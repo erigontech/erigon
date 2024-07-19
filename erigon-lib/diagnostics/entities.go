@@ -18,6 +18,8 @@ package diagnostics
 
 import (
 	"time"
+
+	"golang.org/x/exp/maps"
 )
 
 type SyncStageType string
@@ -47,6 +49,25 @@ type PeerStatistics struct {
 	TypeBytesOut map[string]uint64
 }
 
+func (p PeerStatistics) Clone() PeerStatistics {
+	p1 := p
+	p1.CapBytesIn = maps.Clone(p.CapBytesIn)
+	p1.CapBytesOut = maps.Clone(p.CapBytesOut)
+	p1.TypeBytesIn = maps.Clone(p.TypeBytesIn)
+	p1.TypeBytesOut = maps.Clone(p.TypeBytesOut)
+	return p1
+}
+
+func (p PeerStatistics) Equal(p2 PeerStatistics) bool {
+	return p.PeerType == p2.PeerType &&
+		p.BytesIn == p2.BytesIn &&
+		p.BytesOut == p2.BytesOut &&
+		maps.Equal(p.CapBytesIn, p2.CapBytesIn) &&
+		maps.Equal(p.CapBytesOut, p2.CapBytesOut) &&
+		maps.Equal(p.TypeBytesIn, p2.TypeBytesIn) &&
+		maps.Equal(p.TypeBytesOut, p2.TypeBytesOut)
+}
+
 type PeerDataUpdate struct {
 	PeerID string
 	ENR    string
@@ -70,7 +91,6 @@ type SyncStatistics struct {
 	SnapshotDownload SnapshotDownloadStatistics `json:"snapshotDownload"`
 	SnapshotIndexing SnapshotIndexingStatistics `json:"snapshotIndexing"`
 	SnapshotFillDB   SnapshotFillDBStatistics   `json:"snapshotFillDB"`
-	BlockExecution   BlockExecutionStatistics   `json:"blockExecution"`
 	SyncFinished     bool                       `json:"syncFinished"`
 }
 
@@ -145,19 +165,6 @@ type SnapshotFillDBStage struct {
 type SnapshotFillDBStageUpdate struct {
 	Stage       SnapshotFillDBStage `json:"stage"`
 	TimeElapsed float64             `json:"timeElapsed"`
-}
-type BlockExecutionStatistics struct {
-	From        uint64  `json:"from"`
-	To          uint64  `json:"to"`
-	BlockNumber uint64  `json:"blockNumber"`
-	BlkPerSec   float64 `json:"blkPerSec"`
-	TxPerSec    float64 `json:"txPerSec"`
-	MgasPerSec  float64 `json:"mgasPerSec"`
-	GasState    float64 `json:"gasState"`
-	Batch       uint64  `json:"batch"`
-	Alloc       uint64  `json:"alloc"`
-	Sys         uint64  `json:"sys"`
-	TimeElapsed float64 `json:"timeElapsed"`
 }
 
 type SnapshoFilesList struct {

@@ -36,4 +36,7 @@ const (
 	BlobSize                       = FieldElementsPerBlob * 32
 	BlobGasPerBlob          uint64 = 0x20000
 	DefaultMaxBlobsPerBlock uint64 = 6 // lower for Gnosis
+
+	// EIP-7702: set code tx
+	PerAuthBaseCost = 2500
 )

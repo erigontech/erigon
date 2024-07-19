@@ -22,18 +22,18 @@ import (
 	"fmt"
 	"math/big"
 
-	"github.com/ledgerwatch/erigon-lib/log/v3"
+	"github.com/erigontech/erigon-lib/log/v3"
 
-	"github.com/ledgerwatch/erigon-lib/chain"
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/common/hexutility"
-	"github.com/ledgerwatch/erigon-lib/etl"
-	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon/core/rawdb"
-	"github.com/ledgerwatch/erigon/ethdb/prune"
-	"github.com/ledgerwatch/erigon/polygon/bor/borcfg"
-	bortypes "github.com/ledgerwatch/erigon/polygon/bor/types"
-	"github.com/ledgerwatch/erigon/turbo/services"
+	"github.com/erigontech/erigon-lib/chain"
+	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common/hexutility"
+	"github.com/erigontech/erigon-lib/etl"
+	"github.com/erigontech/erigon-lib/kv"
+	"github.com/erigontech/erigon/core/rawdb"
+	"github.com/erigontech/erigon/ethdb/prune"
+	"github.com/erigontech/erigon/polygon/bor/borcfg"
+	bortypes "github.com/erigontech/erigon/polygon/bor/types"
+	"github.com/erigontech/erigon/turbo/services"
 )
 
 type TxLookupCfg struct {
@@ -87,8 +87,8 @@ func SpawnTxLookup(s *StageState, tx kv.RwTx, toBlock uint64, cfg TxLookupCfg, c
 	}
 
 	startBlock := s.BlockNumber
-	if cfg.prune.TxIndex.Enabled() {
-		pruneTo := cfg.prune.TxIndex.PruneTo(endBlock)
+	if cfg.prune.History.Enabled() {
+		pruneTo := cfg.prune.History.PruneTo(endBlock)
 		if startBlock < pruneTo {
 			startBlock = pruneTo
 			if err = s.UpdatePrune(tx, pruneTo); err != nil { // prune func of this stage will use this value to prevent all ancient blocks traversal
@@ -248,8 +248,8 @@ func PruneTxLookup(s *PruneState, tx kv.RwTx, cfg TxLookupCfg, ctx context.Conte
 	var pruneBor bool
 
 	// Forward stage doesn't write anything before PruneTo point
-	if cfg.prune.TxIndex.Enabled() {
-		blockTo = cfg.prune.TxIndex.PruneTo(s.ForwardProgress)
+	if cfg.prune.History.Enabled() {
+		blockTo = cfg.prune.History.PruneTo(s.ForwardProgress)
 		pruneBor = true
 	} else if cfg.blockReader.FreezingCfg().Enabled {
 		blockTo = cfg.blockReader.CanPruneTo(s.ForwardProgress)

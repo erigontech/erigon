@@ -26,13 +26,13 @@ import (
 
 	"github.com/holiman/uint256"
 
-	"github.com/ledgerwatch/erigon-lib/chain"
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/common/hexutility"
+	"github.com/erigontech/erigon-lib/chain"
+	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common/hexutility"
 
-	"github.com/ledgerwatch/erigon/common/math"
-	"github.com/ledgerwatch/erigon/core"
-	"github.com/ledgerwatch/erigon/core/types"
+	"github.com/erigontech/erigon/common/math"
+	"github.com/erigontech/erigon/core"
+	"github.com/erigontech/erigon/core/types"
 )
 
 // TransactionTest checks RLP decoding and sender derivation of transactions.
@@ -74,7 +74,11 @@ func (tt *TransactionTest) Run(chainID *big.Int) error {
 		sender := msg.From()
 
 		// Intrinsic gas
-		requiredGas, err := core.IntrinsicGas(msg.Data(), msg.AccessList(), msg.To() == nil, rules.IsHomestead, rules.IsIstanbul, rules.IsShanghai)
+		authorizationsLen := uint64(0)
+		if stx, ok := tx.(*types.SetCodeTransaction); ok {
+			authorizationsLen = uint64(len(stx.GetAuthorizations()))
+		}
+		requiredGas, err := core.IntrinsicGas(msg.Data(), msg.AccessList(), msg.To() == nil, rules.IsHomestead, rules.IsIstanbul, rules.IsShanghai, authorizationsLen)
 		if err != nil {
 			return nil, nil, 0, err
 		}

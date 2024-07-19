@@ -22,7 +22,8 @@ import (
 
 	lru "github.com/hashicorp/golang-lru/v2"
 	"github.com/hashicorp/golang-lru/v2/expirable"
-	"github.com/ledgerwatch/erigon-lib/metrics"
+
+	"github.com/erigontech/erigon-lib/metrics"
 )
 
 // Cache is a wrapper around hashicorp lru but with metric for Get

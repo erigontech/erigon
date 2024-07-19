@@ -31,16 +31,16 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/ledgerwatch/erigon/event"
-	"github.com/ledgerwatch/erigon/p2p"
-	"github.com/ledgerwatch/erigon/p2p/enode"
-	"github.com/ledgerwatch/erigon/p2p/simulations/adapters"
-	"github.com/ledgerwatch/erigon/rpc"
+	"github.com/erigontech/erigon/event"
+	"github.com/erigontech/erigon/p2p"
+	"github.com/erigontech/erigon/p2p/enode"
+	"github.com/erigontech/erigon/p2p/simulations/adapters"
+	"github.com/erigontech/erigon/rpc"
 
 	"github.com/gorilla/websocket"
 	"github.com/julienschmidt/httprouter"
 
-	"github.com/ledgerwatch/erigon-lib/log/v3"
+	"github.com/erigontech/erigon-lib/log/v3"
 )
 
 // DefaultClient is the default simulation API client which expects the API

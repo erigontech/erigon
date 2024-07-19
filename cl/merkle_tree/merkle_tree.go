@@ -3,8 +3,8 @@ package merkle_tree
 import (
 	"bytes"
 
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/common/length"
+	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common/length"
 )
 
 const OptimalMaxTreeCacheDepth = 12

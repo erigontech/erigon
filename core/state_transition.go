@@ -20,21 +20,26 @@
 package core
 
 import (
+	"bytes"
 	"fmt"
+	"slices"
 
 	"github.com/holiman/uint256"
 
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/txpool/txpoolcfg"
-	types2 "github.com/ledgerwatch/erigon-lib/types"
+	"github.com/erigontech/erigon-lib/common"
+	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon-lib/txpool/txpoolcfg"
+	types2 "github.com/erigontech/erigon-lib/types"
 
-	cmath "github.com/ledgerwatch/erigon/common/math"
-	"github.com/ledgerwatch/erigon/common/u256"
-	"github.com/ledgerwatch/erigon/core/tracing"
-	"github.com/ledgerwatch/erigon/core/vm"
-	"github.com/ledgerwatch/erigon/core/vm/evmtypes"
-	"github.com/ledgerwatch/erigon/crypto"
-	"github.com/ledgerwatch/erigon/params"
+	cmath "github.com/erigontech/erigon/common/math"
+	"github.com/erigontech/erigon/common/u256"
+	"github.com/erigontech/erigon/core/tracing"
+	"github.com/erigontech/erigon/core/types"
+	"github.com/erigontech/erigon/core/vm"
+	"github.com/erigontech/erigon/core/vm/evmtypes"
+	"github.com/erigontech/erigon/crypto"
+	"github.com/erigontech/erigon/params"
 )
 
 var emptyCodeHash = crypto.Keccak256Hash(nil)
@@ -96,12 +101,14 @@ type Message interface {
 	Data() []byte
 	AccessList() types2.AccessList
 	BlobHashes() []libcommon.Hash
+	Authorizations() []types.Authorization
 
 	IsFree() bool
 }
 
 // IntrinsicGas computes the 'intrinsic gas' for a message with the given data.
-func IntrinsicGas(data []byte, accessList types2.AccessList, isContractCreation bool, isHomestead, isEIP2028, isEIP3860 bool) (uint64, error) {
+// TODO: convert the input to a struct
+func IntrinsicGas(data []byte, accessList types2.AccessList, isContractCreation bool, isHomestead, isEIP2028, isEIP3860 bool, authorizationsLen uint64) (uint64, error) {
 	// Zero and non-zero bytes are priced differently
 	dataLen := uint64(len(data))
 	dataNonZeroLen := uint64(0)
@@ -111,7 +118,7 @@ func IntrinsicGas(data []byte, accessList types2.AccessList, isContractCreation 
 		}
 	}
 
-	gas, status := txpoolcfg.CalcIntrinsicGas(dataLen, dataNonZeroLen, accessList, isContractCreation, isHomestead, isEIP2028, isEIP3860)
+	gas, status := txpoolcfg.CalcIntrinsicGas(dataLen, dataNonZeroLen, authorizationsLen, accessList, isContractCreation, isHomestead, isEIP2028, isEIP3860)
 	if status != txpoolcfg.Success {
 		return 0, ErrGasUintOverflow
 	}
@@ -339,9 +346,67 @@ func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (*evmtype
 	rules := st.evm.ChainRules()
 	vmConfig := st.evm.Config()
 	isEIP3860 := vmConfig.HasEip3860(rules)
+	accessTuples := slices.Clone[types2.AccessList](msg.AccessList())
+
+	// set code tx
+	auths := msg.Authorizations()
+	verifiedAuthorities := make([]common.Address, 0)
+	if len(auths) > 0 {
+		var b [33]byte
+		data := bytes.NewBuffer(nil)
+		for i, auth := range auths {
+			data.Reset()
+
+			// 1. authority recover
+			authorityPtr, err := auth.RecoverSigner(data, b[:])
+			if err != nil {
+				log.Debug("authority recover failed, skipping", "err", err, "auth index", i)
+				continue
+			}
+			authority := *authorityPtr
+
+			// 2. chainId check
+			if auth.ChainID != nil && auth.ChainID.Uint64() != 0 && auth.ChainID.Uint64() != st.evm.ChainRules().ChainID.Uint64() {
+				log.Debug("invalid chainID, skipping", "chainId", auth.ChainID, "auth index", i)
+				continue
+			}
+
+			// 3. authority code should be empty
+			if codeHash := st.state.GetCodeHash(authority); codeHash != emptyCodeHash && codeHash != (libcommon.Hash{}) {
+				log.Debug("authority code is not empty, skipping", "auth index", i)
+				continue
+			}
+
+			// 4. nonce check
+			if len(auth.Nonce) > 0 && st.state.GetNonce(authority) != auth.Nonce[0] {
+				log.Debug("invalid nonce, skipping", "auth index", i)
+				continue
+			}
+
+			// 5. set code of authority to code associated with address
+			st.state.SetCode(authority, st.state.GetCode(auth.Address))
+
+			// 6. add authority account to accesses_addresses
+			verifiedAuthorities = append(verifiedAuthorities, authority)
+			// authority is added to accessed_address in prepare step
+		}
+	}
+
+	if len(verifiedAuthorities) > 0 {
+		oldPostApplyMessage := st.evm.Context.PostApplyMessage
+		st.evm.Context.PostApplyMessage = func(ibs evmtypes.IntraBlockState, sender common.Address, coinbase common.Address, result *evmtypes.ExecutionResult) {
+			for _, authority := range verifiedAuthorities {
+				ibs.SetCode(authority, nil)
+			}
+
+			if oldPostApplyMessage != nil {
+				oldPostApplyMessage(ibs, sender, coinbase, result)
+			}
+		}
+	}
 
 	// Check clauses 4-5, subtract intrinsic gas if everything is correct
-	gas, err := IntrinsicGas(st.data, st.msg.AccessList(), contractCreation, rules.IsHomestead, rules.IsIstanbul, isEIP3860)
+	gas, err := IntrinsicGas(st.data, accessTuples, contractCreation, rules.IsHomestead, rules.IsIstanbul, isEIP3860, uint64(len(auths)))
 	if err != nil {
 		return nil, err
 	}
@@ -366,7 +431,7 @@ func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (*evmtype
 	// Execute the preparatory steps for state transition which includes:
 	// - prepare accessList(post-berlin)
 	// - reset transient storage(eip 1153)
-	st.state.Prepare(rules, msg.From(), coinbase, msg.To(), vm.ActivePrecompiles(rules), msg.AccessList())
+	st.state.Prepare(rules, msg.From(), coinbase, msg.To(), vm.ActivePrecompiles(rules), accessTuples, verifiedAuthorities)
 
 	var (
 		ret   []byte

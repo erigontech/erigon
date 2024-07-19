@@ -19,20 +19,17 @@ package diagnostics
 import (
 	"context"
 	"net/http"
-	"os"
-	"os/signal"
 	"path/filepath"
 	"sync"
-	"syscall"
 	"time"
 
 	"github.com/c2h5oh/datasize"
 	"golang.org/x/sync/semaphore"
 
-	"github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon-lib/kv/mdbx"
-	"github.com/ledgerwatch/erigon-lib/log/v3"
+	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/kv"
+	"github.com/erigontech/erigon-lib/kv/mdbx"
+	"github.com/erigontech/erigon-lib/log/v3"
 )
 
 type DiagnosticClient struct {
@@ -44,6 +41,7 @@ type DiagnosticClient struct {
 
 	syncStages          []SyncStage
 	syncStats           SyncStatistics
+	BlockExecution      BlockEexcStatsData
 	snapshotFileList    SnapshoFilesList
 	mu                  sync.Mutex
 	headerMutex         sync.Mutex
@@ -56,9 +54,10 @@ type DiagnosticClient struct {
 	resourcesUsageMutex sync.Mutex
 	networkSpeed        NetworkSpeedTestResult
 	networkSpeedMutex   sync.Mutex
+	webseedsList        []string
 }
 
-func NewDiagnosticClient(ctx context.Context, metricsMux *http.ServeMux, dataDirPath string, speedTest bool) (*DiagnosticClient, error) {
+func NewDiagnosticClient(ctx context.Context, metricsMux *http.ServeMux, dataDirPath string, speedTest bool, webseedsList []string) (*DiagnosticClient, error) {
 	dirPath := filepath.Join(dataDirPath, "diagnostics")
 	db, err := createDb(ctx, dirPath)
 	if err != nil {
@@ -85,7 +84,8 @@ func NewDiagnosticClient(ctx context.Context, metricsMux *http.ServeMux, dataDir
 		resourcesUsage: ResourcesUsage{
 			MemoryUsage: []MemoryStats{},
 		},
-		peersStats: NewPeerStats(1000), // 1000 is the limit of peers; TODO: make it configurable through a flag
+		peersStats:   NewPeerStats(1000), // 1000 is the limit of peers; TODO: make it configurable through a flag
+		webseedsList: webseedsList,
 	}, nil
 }
 
@@ -120,33 +120,21 @@ func (d *DiagnosticClient) Setup() {
 	d.setupResourcesUsageDiagnostics(rootCtx)
 	d.setupSpeedtestDiagnostics(rootCtx)
 	d.runSaveProcess(rootCtx)
-	d.runStopNodeListener(rootCtx)
 
 	//d.logDiagMsgs()
-}
-
-func (d *DiagnosticClient) runStopNodeListener(rootCtx context.Context) {
-	go func() {
-		ch := make(chan os.Signal, 1)
-		signal.Notify(ch, os.Interrupt, syscall.SIGTERM)
-		select {
-		case <-ch:
-			d.SaveData()
-		case <-rootCtx.Done():
-		}
-	}()
 }
 
 // Save diagnostic data by time interval to reduce save events
 func (d *DiagnosticClient) runSaveProcess(rootCtx context.Context) {
 	ticker := time.NewTicker(5 * time.Minute)
 	go func() {
+		defer ticker.Stop()
 		for {
 			select {
 			case <-ticker.C:
 				d.SaveData()
 			case <-rootCtx.Done():
-				ticker.Stop()
+				d.SaveData()
 				return
 			}
 		}
@@ -154,6 +142,9 @@ func (d *DiagnosticClient) runSaveProcess(rootCtx context.Context) {
 }
 
 func (d *DiagnosticClient) SaveData() {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+
 	var funcs []func(tx kv.RwTx) error
 	funcs = append(funcs, SnapshotDownloadUpdater(d.syncStats.SnapshotDownload), StagesListUpdater(d.syncStages), SnapshotIndexingUpdater(d.syncStats.SnapshotIndexing))
 

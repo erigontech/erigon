@@ -17,10 +17,9 @@
 package diagnostics
 
 import (
-	"encoding/json"
 	"net/http"
 
-	diaglib "github.com/ledgerwatch/erigon-lib/diagnostics"
+	diaglib "github.com/erigontech/erigon-lib/diagnostics"
 )
 
 func SetupHeadersAccess(metricsMux *http.ServeMux, diag *diaglib.DiagnosticClient) {
@@ -36,5 +35,5 @@ func SetupHeadersAccess(metricsMux *http.ServeMux, diag *diaglib.DiagnosticClien
 }
 
 func writeHeaders(w http.ResponseWriter, diag *diaglib.DiagnosticClient) {
-	json.NewEncoder(w).Encode(diag.GetHeaders())
+	diag.HeadersJson(w)
 }

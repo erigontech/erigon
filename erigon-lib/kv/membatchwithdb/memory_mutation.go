@@ -23,12 +23,12 @@ import (
 
 	"github.com/c2h5oh/datasize"
 
-	"github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon-lib/kv/mdbx"
-	"github.com/ledgerwatch/erigon-lib/kv/order"
-	"github.com/ledgerwatch/erigon-lib/kv/stream"
-	"github.com/ledgerwatch/erigon-lib/log/v3"
+	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/kv"
+	"github.com/erigontech/erigon-lib/kv/mdbx"
+	"github.com/erigontech/erigon-lib/kv/order"
+	"github.com/erigontech/erigon-lib/kv/stream"
+	"github.com/erigontech/erigon-lib/log/v3"
 )
 
 type MemoryMutation struct {
@@ -751,4 +751,8 @@ func (m *MemoryMutation) HistoryRange(name kv.History, fromTs, toTs int, asc ord
 
 func (m *MemoryMutation) DomainRange(name kv.Domain, fromKey, toKey []byte, ts uint64, asc order.By, limit int) (it stream.KV, err error) {
 	return m.db.(kv.TemporalTx).DomainRange(name, fromKey, toKey, ts, asc, limit)
+}
+
+func (m *MemoryMutation) AppendableGet(name kv.Appendable, ts kv.TxnId) ([]byte, bool, error) {
+	return m.db.(kv.TemporalTx).AppendableGet(name, ts)
 }

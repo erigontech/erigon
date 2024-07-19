@@ -40,24 +40,25 @@ import (
 	"github.com/hashicorp/golang-lru/v2/simplelru"
 	"github.com/holiman/uint256"
 
-	"github.com/ledgerwatch/erigon-lib/chain"
-	"github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/common/assert"
-	"github.com/ledgerwatch/erigon-lib/common/dbg"
-	"github.com/ledgerwatch/erigon-lib/common/fixedgas"
-	"github.com/ledgerwatch/erigon-lib/common/u256"
-	libkzg "github.com/ledgerwatch/erigon-lib/crypto/kzg"
-	"github.com/ledgerwatch/erigon-lib/gointerfaces"
-	"github.com/ledgerwatch/erigon-lib/gointerfaces/grpcutil"
-	remote "github.com/ledgerwatch/erigon-lib/gointerfaces/remoteproto"
-	"github.com/ledgerwatch/erigon-lib/gointerfaces/txpoolproto"
-	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon-lib/kv/kvcache"
-	"github.com/ledgerwatch/erigon-lib/kv/mdbx"
-	"github.com/ledgerwatch/erigon-lib/log/v3"
-	"github.com/ledgerwatch/erigon-lib/metrics"
-	"github.com/ledgerwatch/erigon-lib/txpool/txpoolcfg"
-	"github.com/ledgerwatch/erigon-lib/types"
+	"github.com/erigontech/erigon-lib/chain"
+	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common/assert"
+	"github.com/erigontech/erigon-lib/common/dbg"
+	"github.com/erigontech/erigon-lib/common/fixedgas"
+	"github.com/erigontech/erigon-lib/common/hexutility"
+	"github.com/erigontech/erigon-lib/common/u256"
+	libkzg "github.com/erigontech/erigon-lib/crypto/kzg"
+	"github.com/erigontech/erigon-lib/gointerfaces"
+	"github.com/erigontech/erigon-lib/gointerfaces/grpcutil"
+	remote "github.com/erigontech/erigon-lib/gointerfaces/remoteproto"
+	"github.com/erigontech/erigon-lib/gointerfaces/txpoolproto"
+	"github.com/erigontech/erigon-lib/kv"
+	"github.com/erigontech/erigon-lib/kv/kvcache"
+	"github.com/erigontech/erigon-lib/kv/mdbx"
+	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon-lib/metrics"
+	"github.com/erigontech/erigon-lib/txpool/txpoolcfg"
+	"github.com/erigontech/erigon-lib/types"
 )
 
 const DefaultBlockGasLimit = uint64(30000000)
@@ -227,6 +228,8 @@ type TxPool struct {
 	isPostAgra              atomic.Bool
 	cancunTime              *uint64
 	isPostCancun            atomic.Bool
+	pragueTime              *uint64
+	isPostPrague            atomic.Bool
 	maxBlobsPerBlock        uint64
 	feeCalculator           FeeCalculator
 	logger                  log.Logger
@@ -237,7 +240,7 @@ type FeeCalculator interface {
 }
 
 func New(newTxs chan types.Announcements, coreDB kv.RoDB, cfg txpoolcfg.Config, cache kvcache.Cache,
-	chainID uint256.Int, shanghaiTime, agraBlock, cancunTime *big.Int, maxBlobsPerBlock uint64,
+	chainID uint256.Int, shanghaiTime, agraBlock, cancunTime, pragueTime *big.Int, maxBlobsPerBlock uint64,
 	feeCalculator FeeCalculator, logger log.Logger,
 ) (*TxPool, error) {
 	localsHistory, err := simplelru.NewLRU[string, struct{}](10_000, nil)
@@ -308,6 +311,13 @@ func New(newTxs chan types.Announcements, coreDB kv.RoDB, cfg txpoolcfg.Config, 
 		}
 		cancunTimeU64 := cancunTime.Uint64()
 		res.cancunTime = &cancunTimeU64
+	}
+	if pragueTime != nil {
+		if !pragueTime.IsUint64() {
+			return nil, errors.New("pragueTime overflow")
+		}
+		pragueTimeU64 := pragueTime.Uint64()
+		res.pragueTime = &pragueTimeU64
 	}
 
 	return res, nil
@@ -761,7 +771,7 @@ func (p *TxPool) best(n uint16, txs *types.TxsRlp, tx kv.Tx, onTopOf, availableG
 		// make sure we have enough gas in the caller to add this transaction.
 		// not an exact science using intrinsic gas but as close as we could hope for at
 		// this stage
-		intrinsicGas, _ := txpoolcfg.CalcIntrinsicGas(uint64(mt.Tx.DataLen), uint64(mt.Tx.DataNonZeroLen), nil, mt.Tx.Creation, true, true, isShanghai)
+		intrinsicGas, _ := txpoolcfg.CalcIntrinsicGas(uint64(mt.Tx.DataLen), uint64(mt.Tx.DataNonZeroLen), uint64(mt.Tx.AuthorizationLen), nil, mt.Tx.Creation, true, true, isShanghai)
 		if intrinsicGas > availableGas {
 			// we might find another txn with a low enough intrinsic gas to include so carry on
 			continue
@@ -885,6 +895,12 @@ func (p *TxPool) validateTx(txn *types.TxSlot, isLocal bool, stateCache kvcache.
 		}
 	}
 
+	if txn.Type == types.SetCodeTxType {
+		if !p.isPrague() {
+			return txpoolcfg.TypeNotActivated
+		}
+	}
+
 	// Drop non-local transactions under our own minimal accepted gas price or tip
 	if !isLocal && uint256.NewInt(p.cfg.MinFeeCap).Cmp(&txn.FeeCap) == 1 {
 		if txn.Traced {
@@ -892,7 +908,7 @@ func (p *TxPool) validateTx(txn *types.TxSlot, isLocal bool, stateCache kvcache.
 		}
 		return txpoolcfg.UnderPriced
 	}
-	gas, reason := txpoolcfg.CalcIntrinsicGas(uint64(txn.DataLen), uint64(txn.DataNonZeroLen), nil, txn.Creation, true, true, isShanghai)
+	gas, reason := txpoolcfg.CalcIntrinsicGas(uint64(txn.DataLen), uint64(txn.DataNonZeroLen), uint64(txn.AuthorizationLen), nil, txn.Creation, true, true, isShanghai)
 	if txn.Traced {
 		p.logger.Info(fmt.Sprintf("TX TRACING: validateTx intrinsic gas idHash=%x gas=%d", txn.IDHash, gas))
 	}
@@ -1049,6 +1065,31 @@ func (p *TxPool) isCancun() bool {
 	activated := uint64(now) >= cancunTime
 	if activated {
 		p.isPostCancun.Swap(true)
+	}
+	return activated
+}
+
+func (p *TxPool) isPrague() bool {
+	// once this flag has been set for the first time we no longer need to check the timestamp
+	set := p.isPostPrague.Load()
+	if set {
+		return true
+	}
+	if p.pragueTime == nil {
+		return false
+	}
+	pragueTime := *p.pragueTime
+
+	// a zero here means Prague is always active
+	if pragueTime == 0 {
+		p.isPostPrague.Swap(true)
+		return true
+	}
+
+	now := time.Now().Unix()
+	activated := uint64(now) >= pragueTime
+	if activated {
+		p.isPostPrague.Swap(true)
 	}
 	return activated
 }
@@ -1965,8 +2006,19 @@ func (p *TxPool) flush(ctx context.Context, db kv.RwDB) (written uint64, err err
 		return 0, err
 	}
 
-	// fsync
-	if err := db.Update(ctx, func(tx kv.RwTx) error { return nil }); err != nil {
+	// fsync. increase state version - just to make RwTx non-empty (mdbx skips empty RwTx)
+	if err := db.Update(ctx, func(tx kv.RwTx) error {
+		v, err := tx.GetOne(kv.PoolInfo, PoolStateVersion)
+		if err != nil {
+			return err
+		}
+		var version uint64
+		if len(v) == 8 {
+			version = binary.BigEndian.Uint64(v)
+		}
+		version++
+		return tx.Put(kv.PoolInfo, PoolStateVersion, hexutility.EncodeTs(version))
+	}); err != nil {
 		return 0, err
 	}
 	return written, nil
@@ -2328,6 +2380,7 @@ var PoolChainConfigKey = []byte("chain_config")
 var PoolLastSeenBlockKey = []byte("last_seen_block")
 var PoolPendingBaseFeeKey = []byte("pending_base_fee")
 var PoolPendingBlobFeeKey = []byte("pending_blob_fee")
+var PoolStateVersion = []byte("state_version")
 
 // recentlyConnectedPeers does buffer IDs of recently connected good peers
 // then sync of pooled Transaction can happen to all of then at once

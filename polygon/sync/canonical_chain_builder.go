@@ -20,11 +20,12 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
+	"slices"
 	"time"
 
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon/core/types"
-	"github.com/ledgerwatch/erigon/polygon/bor"
+	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon/core/types"
+	"github.com/erigontech/erigon/polygon/bor"
 )
 
 //go:generate mockgen -typed=true -destination=./canonical_chain_builder_mock.go -package=sync . CanonicalChainBuilder
@@ -133,7 +134,7 @@ func (ccb *canonicalChainBuilder) Headers() []*types.Header {
 		headers = append(headers, node.header)
 		node = node.parent
 	}
-	libcommon.SliceReverse(headers)
+	slices.Reverse(headers)
 	return headers
 }
 

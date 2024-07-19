@@ -26,11 +26,11 @@ import (
 	"io"
 	"math/big"
 
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/common/hexutil"
-	"github.com/ledgerwatch/erigon-lib/common/hexutility"
-	"github.com/ledgerwatch/erigon/crypto"
-	"github.com/ledgerwatch/erigon/rlp"
+	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common/hexutil"
+	"github.com/erigontech/erigon-lib/common/hexutility"
+	"github.com/erigontech/erigon/crypto"
+	"github.com/erigontech/erigon/rlp"
 )
 
 // go:generate gencodec -type Receipt -field-override receiptMarshaling -out gen_receipt_json.go
@@ -229,7 +229,7 @@ func (r *Receipt) DecodeRLP(s *rlp.Stream) error {
 		}
 		r.Type = b[0]
 		switch r.Type {
-		case AccessListTxType, DynamicFeeTxType, BlobTxType:
+		case AccessListTxType, DynamicFeeTxType, BlobTxType, SetCodeTxType:
 			if err := r.decodePayload(s); err != nil {
 				return err
 			}
@@ -376,6 +376,11 @@ func (rs Receipts) EncodeIndex(i int, w *bytes.Buffer) {
 		if err := rlp.Encode(w, data); err != nil {
 			panic(err)
 		}
+	case SetCodeTxType:
+		w.WriteByte(SetCodeTxType)
+		if err := rlp.Encode(w, data); err != nil {
+			panic(err)
+		}
 	default:
 		// For unsupported types, write nothing. Since this is for
 		// DeriveSha, the error will be caught matching the derived hash
@@ -449,7 +454,7 @@ func (rl Receipts) DeriveFieldsV3ForSingleReceipt(i int, blockHash libcommon.Has
 func (r *Receipt) DeriveFieldsV3ForSingleReceipt(txnIdx int, blockHash libcommon.Hash, blockNum uint64, txn Transaction, prevReceipt *Receipt) error {
 	logIndex := r.FirstLogIndex // logIdx is unique within the block and starts from 0
 
-	sender, ok := txn.cashedSender()
+	sender, ok := txn.cachedSender()
 	if !ok {
 		return fmt.Errorf("tx must have cached sender")
 	}
@@ -488,4 +493,10 @@ func (r *Receipt) DeriveFieldsV3ForSingleReceipt(txnIdx int, blockHash libcommon
 		logIndex++
 	}
 	return nil
+}
+
+// TODO: maybe make it more prettier (only for debug purposes)
+func (r *Receipt) String() string {
+	str := fmt.Sprintf("Receipt of tx %+v", *r)
+	return str
 }

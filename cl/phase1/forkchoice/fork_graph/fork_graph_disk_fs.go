@@ -25,9 +25,10 @@ import (
 
 	"github.com/golang/snappy"
 	"github.com/klauspost/compress/zstd"
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon/cl/phase1/core/state"
 	"github.com/spf13/afero"
+
+	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon/cl/phase1/core/state"
 )
 
 func getBeaconStateFilename(blockRoot libcommon.Hash) string {
@@ -104,7 +105,10 @@ func (f *forkGraphDisk) readBeaconStateFromDisk(blockRoot libcommon.Hash) (bs *s
 }
 
 // dumpBeaconStateOnDisk dumps a beacon state on disk in ssz snappy format
-func (f *forkGraphDisk) dumpBeaconStateOnDisk(bs *state.CachingBeaconState, blockRoot libcommon.Hash) (err error) {
+func (f *forkGraphDisk) DumpBeaconStateOnDisk(blockRoot libcommon.Hash, bs *state.CachingBeaconState, forced bool) (err error) {
+	if !forced && bs.Slot()%dumpSlotFrequency != 0 {
+		return
+	}
 	// Truncate and then grow the buffer to the size of the state.
 	encodingSizeSSZ := bs.EncodingSizeSSZ()
 	f.sszBuffer.Grow(encodingSizeSSZ)

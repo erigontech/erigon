@@ -21,12 +21,12 @@ import (
 
 	"github.com/holiman/uint256"
 
-	"github.com/ledgerwatch/erigon-lib/chain"
-	"github.com/ledgerwatch/erigon-lib/common"
-	types2 "github.com/ledgerwatch/erigon-lib/types"
+	"github.com/erigontech/erigon-lib/chain"
+	"github.com/erigontech/erigon-lib/common"
+	types2 "github.com/erigontech/erigon-lib/types"
 
-	"github.com/ledgerwatch/erigon/core/tracing"
-	"github.com/ledgerwatch/erigon/core/types"
+	"github.com/erigontech/erigon/core/tracing"
+	"github.com/erigontech/erigon/core/types"
 )
 
 // BlockContext provides the EVM with auxiliary information. Once provided
@@ -114,7 +114,7 @@ type (
 	GetHashFunc func(uint64) common.Hash
 
 	// PostApplyMessageFunc is an extension point to execute custom logic at the end of core.ApplyMessage.
-	// It's used in Bor for AddFeeTransferLog.
+	// It's used in Bor for AddFeeTransferLog or in ethereum to clear out the authority code at end of tx.
 	PostApplyMessageFunc func(ibs IntraBlockState, sender common.Address, coinbase common.Address, result *ExecutionResult)
 )
 
@@ -157,7 +157,7 @@ type IntraBlockState interface {
 	Empty(common.Address) bool
 
 	Prepare(rules *chain.Rules, sender, coinbase common.Address, dest *common.Address,
-		precompiles []common.Address, txAccesses types2.AccessList)
+		precompiles []common.Address, txAccesses types2.AccessList, authorities []common.Address)
 
 	AddressInAccessList(addr common.Address) bool
 	// AddAddressToAccessList adds the given address to the access list. This operation is safe to perform

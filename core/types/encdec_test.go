@@ -26,9 +26,10 @@ import (
 	"time"
 
 	"github.com/holiman/uint256"
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	types2 "github.com/ledgerwatch/erigon-lib/types"
-	"github.com/ledgerwatch/erigon/rlp"
+
+	libcommon "github.com/erigontech/erigon-lib/common"
+	types2 "github.com/erigontech/erigon-lib/types"
+	"github.com/erigontech/erigon/rlp"
 )
 
 const RUNS = 100 // for local tests increase this number
@@ -171,8 +172,28 @@ func (tr *TRand) RandAccessList(size int) types2.AccessList {
 	return al
 }
 
+func (tr *TRand) RandAuthorizations(size int) []Authorization {
+	auths := make([]Authorization, size)
+	for i := 0; i < size; i++ {
+		auths[i] = Authorization{
+			ChainID: uint256.NewInt(*tr.RandUint64()),
+			Address: tr.RandAddress(),
+			V:       *uint256.NewInt(*tr.RandUint64()),
+			R:       *uint256.NewInt(*tr.RandUint64()),
+			S:       *uint256.NewInt(*tr.RandUint64()),
+		}
+
+		if *tr.RandUint64()%2 == 0 {
+			auths[i].Nonce = []uint64{*tr.RandUint64()}
+		} else {
+			auths[i].Nonce = []uint64{}
+		}
+	}
+	return auths
+}
+
 func (tr *TRand) RandTransaction() Transaction {
-	txType := tr.RandIntInRange(0, 4) // LegacyTxType, AccessListTxType, DynamicFeeTxType, BlobTxType
+	txType := tr.RandIntInRange(0, 5) // LegacyTxType, AccessListTxType, DynamicFeeTxType, BlobTxType, SetCodeTxType
 	to := tr.RandAddress()
 	commonTx := CommonTx{
 		Nonce: *tr.RandUint64(),
@@ -219,6 +240,17 @@ func (tr *TRand) RandTransaction() Transaction {
 			},
 			MaxFeePerBlobGas:    uint256.NewInt(r),
 			BlobVersionedHashes: tr.RandHashes(tr.RandIntInRange(1, 2)),
+		}
+	case SetCodeTxType:
+		return &SetCodeTransaction{
+			DynamicFeeTransaction: DynamicFeeTransaction{
+				CommonTx:   commonTx,
+				ChainID:    uint256.NewInt(*tr.RandUint64()),
+				Tip:        uint256.NewInt(*tr.RandUint64()),
+				FeeCap:     uint256.NewInt(*tr.RandUint64()),
+				AccessList: tr.RandAccessList(tr.RandIntInRange(1, 5)),
+			},
+			Authorizations: tr.RandAuthorizations(tr.RandIntInRange(0, 5)),
 		}
 	default:
 		fmt.Printf("unexpected txType %v", txType)

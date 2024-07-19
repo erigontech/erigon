@@ -25,12 +25,12 @@ import (
 	"github.com/libp2p/go-libp2p/core/peer"
 	"github.com/stretchr/testify/require"
 
-	"github.com/ledgerwatch/erigon-lib/log/v3"
+	"github.com/erigontech/erigon-lib/log/v3"
 
-	"github.com/ledgerwatch/erigon/cl/clparams"
-	"github.com/ledgerwatch/erigon/cl/clparams/initial_state"
-	"github.com/ledgerwatch/erigon/cl/phase1/forkchoice/mock_services"
-	"github.com/ledgerwatch/erigon/cl/utils/eth_clock"
+	"github.com/erigontech/erigon/cl/clparams"
+	"github.com/erigontech/erigon/cl/clparams/initial_state"
+	"github.com/erigontech/erigon/cl/phase1/forkchoice/mock_services"
+	"github.com/erigontech/erigon/cl/utils/eth_clock"
 )
 
 func getEthClock(t *testing.T) eth_clock.EthereumClock {
@@ -88,12 +88,9 @@ func TestSentinelGossipOnHardFork(t *testing.T) {
 	require.NoError(t, err)
 	defer sub1.Close()
 
-	sub1.Listen()
-
 	sub2, err := sentinel2.SubscribeGossip(BeaconBlockSsz, time.Unix(0, math.MaxInt64))
 	require.NoError(t, err)
 	defer sub2.Close()
-	sub2.Listen()
 	time.Sleep(200 * time.Millisecond)
 
 	err = h.Connect(ctx, peer.AddrInfo{

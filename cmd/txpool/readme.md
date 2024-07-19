@@ -4,9 +4,9 @@ Transaction Pool - place where living "not-included-to-block-yet transactions".
 Erigon's TxPool can work inside Erigon (default) and as separated process.
 
 Erigon's pool implementation is not fork of Geth’s - Design
-docs: https://github.com/ledgerwatch/erigon/wiki/Transaction-Pool-Design
+docs: https://github.com/erigontech/erigon/wiki/Transaction-Pool-Design
 95% of pool-related code (from p2p message parsing, to sorting logic) is inside this
-folder: https://github.com/ledgerwatch/erigon-lib/tree/main/txpool
+folder: https://github.com/erigontech/erigon-lib/tree/main/txpool
 
 ## Internal mode
 

@@ -23,7 +23,7 @@ import (
 	"slices"
 	"time"
 
-	"github.com/ledgerwatch/erigon-lib/log/v3"
+	"github.com/erigontech/erigon-lib/log/v3"
 )
 
 type entityFetcher[TEntity Entity] interface {
