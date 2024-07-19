@@ -37,7 +37,6 @@ const INTERMEDIATE_TX_STATEROOTS = "hermez_intermediate_tx_stateRoots" // l2bloc
 const BATCH_WITNESSES = "hermez_batch_witnesses"                       // batch number -> witness
 const BATCH_COUNTERS = "hermez_batch_counters"                         // batch number -> counters
 const L1_BATCH_DATA = "l1_batch_data"                                  // batch number -> l1 batch data from transaction call data
-const L1_INFO_TREE_HIGHEST_BLOCK = "l1_info_tree_highest_block"        // highest l1 block number found with L1 info tree updates
 const REUSED_L1_INFO_TREE_INDEX = "reused_l1_info_tree_index"          // block number => const 1
 const LATEST_USED_GER = "latest_used_ger"                              // batch number -> GER latest used GER
 const BATCH_BLOCKS = "batch_blocks"                                    // batch number -> block numbers (concatenated together)
@@ -96,7 +95,6 @@ func CreateHermezBuckets(tx kv.RwTx) error {
 		BATCH_WITNESSES,
 		BATCH_COUNTERS,
 		L1_BATCH_DATA,
-		L1_INFO_TREE_HIGHEST_BLOCK,
 		REUSED_L1_INFO_TREE_INDEX,
 		LATEST_USED_GER,
 		BATCH_BLOCKS,
@@ -1323,18 +1321,6 @@ func (db *HermezDbReader) GetLastL1BatchData() (uint64, error) {
 	}
 
 	return BytesToUint64(k), nil
-}
-
-func (db *HermezDb) WriteL1InfoTreeHighestBlock(blockNumber uint64) error {
-	return db.tx.Put(L1_INFO_TREE_HIGHEST_BLOCK, []byte{}, Uint64ToBytes(blockNumber))
-}
-
-func (db *HermezDbReader) GetL1InfoTreeHighestBlock() (uint64, error) {
-	data, err := db.tx.GetOne(L1_INFO_TREE_HIGHEST_BLOCK, []byte{})
-	if err != nil {
-		return 0, err
-	}
-	return BytesToUint64(data), nil
 }
 
 func (db *HermezDb) WriteLatestUsedGer(batchNo uint64, ger common.Hash) error {
