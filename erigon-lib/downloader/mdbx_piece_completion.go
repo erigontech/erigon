@@ -129,20 +129,9 @@ func (m *mdbxPieceCompletion) Set(pk metainfo.PieceKey, b bool, awaitFlush bool)
 	}
 
 	if awaitFlush {
-		tx, err := m.db.BeginRw(context.Background())
-		if err != nil {
-			return err
-		}
-
-		defer tx.Rollback()
-
-		err = putCompletion(tx, pk.InfoHash, uint32(pk.Index), b)
-
-		if err != nil {
-			return err
-		}
-
-		return tx.Commit()
+		return m.db.Update(context.Background(), func(tx kv.RwTx) error {
+			return putCompletion(tx, pk.InfoHash, uint32(pk.Index), b)
+		})
 	}
 
 	return m.db.Batch(func(tx kv.RwTx) error {
