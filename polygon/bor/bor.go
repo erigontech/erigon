@@ -1618,7 +1618,7 @@ func validatorContains(a []*valset.Validator, x *valset.Validator) (*valset.Vali
 	return nil, false
 }
 
-func getUpdatedValidatorSet(oldValidatorSet *valset.ValidatorSet, newVals []*valset.Validator, logger log.Logger) *valset.ValidatorSet {
+func GetUpdatedValidatorSet(oldValidatorSet *valset.ValidatorSet, newVals []*valset.Validator, logger log.Logger) *valset.ValidatorSet {
 	v := oldValidatorSet
 	oldVals := v.Validators
 

@@ -31,6 +31,7 @@ type ServiceStore interface {
 	Checkpoints() EntityStore[*Checkpoint]
 	Milestones() EntityStore[*Milestone]
 	Spans() EntityStore[*Span]
+	AccumProducerPriorities() EntityStore[*SpanAccumProducerPriorities]
 	Prepare(ctx context.Context) error
 	Close()
 }

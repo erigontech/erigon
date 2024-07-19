@@ -69,6 +69,15 @@ func (s *Span) CmpRange(n uint64) int {
 	return 0
 }
 
+func (s *Span) Producers() []*valset.Validator {
+	res := make([]*valset.Validator, len(s.SelectedProducers))
+	for i, p := range s.SelectedProducers {
+		res[i] = &p
+	}
+
+	return res
+}
+
 type SpanResponse struct {
 	Height string `json:"height"`
 	Result Span   `json:"result"`
