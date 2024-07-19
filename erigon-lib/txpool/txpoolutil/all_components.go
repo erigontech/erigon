@@ -14,7 +14,7 @@
    limitations under the License.
 */
 
-package txpooluitl
+package txpoolutil
 
 import (
 	"context"
@@ -140,8 +140,9 @@ func AllComponents(ctx context.Context, cfg txpoolcfg.Config, cache kvcache.Cach
 		agraBlock = chainConfig.Bor.GetAgraBlock()
 	}
 	cancunTime := chainConfig.CancunTime
+	pragueTime := chainConfig.PragueTime
 
-	txPool, err := txpool.New(newTxs, chainDB, cfg, cache, *chainID, shanghaiTime, agraBlock, cancunTime, maxBlobsPerBlock, feeCalculator, logger)
+	txPool, err := txpool.New(newTxs, chainDB, cfg, cache, *chainID, shanghaiTime, agraBlock, cancunTime, pragueTime, maxBlobsPerBlock, feeCalculator, logger)
 	if err != nil {
 		return nil, nil, nil, nil, nil, err
 	}
