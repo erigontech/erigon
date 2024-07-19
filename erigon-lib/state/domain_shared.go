@@ -1092,6 +1092,7 @@ func (sdc *SharedDomainsCommitmentContext) GetAccount(plainKey []byte, cell *com
 	}
 	cell.Nonce = 0
 	cell.Balance.Clear()
+
 	if len(encAccount) > 0 {
 		nonce, balance, chash := types.DecodeAccountBytesV3(encAccount)
 		cell.Nonce = nonce

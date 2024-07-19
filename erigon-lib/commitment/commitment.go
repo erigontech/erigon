@@ -114,57 +114,8 @@ const (
 	AccountPlainPart PartFlags = 2
 	StoragePlainPart PartFlags = 4
 	HashPart         PartFlags = 8
+	AccLeafHashPart  PartFlags = 16
 )
-
-type BranchData []byte
-
-func (branchData BranchData) String() string {
-	if len(branchData) == 0 {
-		return ""
-	}
-	touchMap := binary.BigEndian.Uint16(branchData[0:])
-	afterMap := binary.BigEndian.Uint16(branchData[2:])
-	pos := 4
-	var sb strings.Builder
-	var cell Cell
-	fmt.Fprintf(&sb, "touchMap %016b, afterMap %016b\n", touchMap, afterMap)
-	for bitset, j := touchMap, 0; bitset != 0; j++ {
-		bit := bitset & -bitset
-		nibble := bits.TrailingZeros16(bit)
-		fmt.Fprintf(&sb, "   %x => ", nibble)
-		if afterMap&bit == 0 {
-			sb.WriteString("{DELETED}\n")
-		} else {
-			fieldBits := PartFlags(branchData[pos])
-			pos++
-			var err error
-			if pos, err = cell.fillFromFields(branchData, pos, fieldBits); err != nil {
-				// This is used for test output, so ok to panic
-				panic(err)
-			}
-			sb.WriteString("{")
-			var comma string
-			if cell.downHashedLen > 0 {
-				fmt.Fprintf(&sb, "hashedKey=[%x]", cell.downHashedKey[:cell.downHashedLen])
-				comma = ","
-			}
-			if cell.apl > 0 {
-				fmt.Fprintf(&sb, "%saccountPlainKey=[%x]", comma, cell.apk[:cell.apl])
-				comma = ","
-			}
-			if cell.spl > 0 {
-				fmt.Fprintf(&sb, "%sstoragePlainKey=[%x]", comma, cell.spk[:cell.spl])
-				comma = ","
-			}
-			if cell.hl > 0 {
-				fmt.Fprintf(&sb, "%shash=[%x]", comma, cell.h[:cell.hl])
-			}
-			sb.WriteString("}\n")
-		}
-		bitset ^= bit
-	}
-	return sb.String()
-}
 
 type BranchEncoder struct {
 	buf       *bytes.Buffer
@@ -296,6 +247,9 @@ func (be *BranchEncoder) EncodeBranch(bitmap, touchMap, afterMap uint16, readCel
 			}
 			if cell.apl > 0 {
 				fieldBits |= AccountPlainPart
+				if cell.alhlen > 0 {
+					fieldBits |= AccLeafHashPart
+				}
 			}
 			if cell.spl > 0 {
 				fieldBits |= StoragePlainPart
@@ -303,6 +257,7 @@ func (be *BranchEncoder) EncodeBranch(bitmap, touchMap, afterMap uint16, readCel
 			if cell.hl > 0 {
 				fieldBits |= HashPart
 			}
+
 			if err := be.buf.WriteByte(byte(fieldBits)); err != nil {
 				return nil, 0, err
 			}
@@ -326,6 +281,12 @@ func (be *BranchEncoder) EncodeBranch(bitmap, touchMap, afterMap uint16, readCel
 					return nil, 0, err
 				}
 			}
+			if fieldBits&AccLeafHashPart != 0 {
+				//fmt.Printf("ALH encoded %x\n", cell.accLeafHash[:cell.alhlen])
+				if err := putUvarAndVal(uint64(cell.alhlen), cell.accLeafHash[:cell.alhlen]); err != nil {
+					return nil, 0, err
+				}
+			}
 		}
 		bitset ^= bit
 	}
@@ -334,6 +295,59 @@ func (be *BranchEncoder) EncodeBranch(bitmap, touchMap, afterMap uint16, readCel
 }
 
 func RetrieveCellNoop(nibble int, skip bool) (*Cell, error) { return nil, nil }
+
+type BranchData []byte
+
+func (branchData BranchData) String() string {
+	if len(branchData) == 0 {
+		return ""
+	}
+	touchMap := binary.BigEndian.Uint16(branchData[0:])
+	afterMap := binary.BigEndian.Uint16(branchData[2:])
+	pos := 4
+	var sb strings.Builder
+	var cell Cell
+	fmt.Fprintf(&sb, "touchMap %016b, afterMap %016b\n", touchMap, afterMap)
+	for bitset, j := touchMap, 0; bitset != 0; j++ {
+		bit := bitset & -bitset
+		nibble := bits.TrailingZeros16(bit)
+		fmt.Fprintf(&sb, "   %x => ", nibble)
+		if afterMap&bit == 0 {
+			sb.WriteString("{DELETED}\n")
+		} else {
+			fieldBits := PartFlags(branchData[pos])
+			pos++
+			var err error
+			if pos, err = cell.fillFromFields(branchData, pos, fieldBits); err != nil {
+				// This is used for test output, so ok to panic
+				panic(err)
+			}
+			sb.WriteString("{")
+			var comma string
+			if cell.downHashedLen > 0 {
+				fmt.Fprintf(&sb, "hashedKey=[%x]", cell.downHashedKey[:cell.downHashedLen])
+				comma = ","
+			}
+			if cell.apl > 0 {
+				fmt.Fprintf(&sb, "%saccountPlainKey=[%x]", comma, cell.apk[:cell.apl])
+				comma = ","
+			}
+			if cell.spl > 0 {
+				fmt.Fprintf(&sb, "%sstoragePlainKey=[%x]", comma, cell.spk[:cell.spl])
+				comma = ","
+			}
+			if cell.hl > 0 {
+				fmt.Fprintf(&sb, "%shash=[%x]", comma, cell.h[:cell.hl])
+			}
+			if cell.alhlen > 0 {
+				fmt.Fprintf(&sb, "%saccLeafHash=[%x]", comma, cell.accLeafHash[:cell.alhlen])
+			}
+			sb.WriteString("}\n")
+		}
+		bitset ^= bit
+	}
+	return sb.String()
+}
 
 // if fn returns nil, the original key will be copied from branchData
 func (branchData BranchData) ReplacePlainKeys(newData []byte, fn func(key []byte, isStorage bool) (newKey []byte, err error)) (BranchData, error) {
@@ -454,6 +468,24 @@ func (branchData BranchData) ReplacePlainKeys(newData []byte, fn func(key []byte
 				pos += int(l)
 			}
 		}
+		if fieldBits&AccLeafHashPart != 0 {
+			l, n := binary.Uvarint(branchData[pos:])
+			if n == 0 {
+				return nil, fmt.Errorf("replacePlainKeys buffer too small for acLeaf hash len")
+			} else if n < 0 {
+				return nil, fmt.Errorf("replacePlainKeys value overflow for acLeafhash len")
+			}
+			newData = append(newData, branchData[pos:pos+n]...)
+			pos += n
+			if len(branchData) < pos+int(l) {
+				return nil, fmt.Errorf("replacePlainKeys buffer too small for acLeafHash")
+			}
+			if l > 0 {
+				newData = append(newData, branchData[pos:pos+int(l)]...)
+				pos += int(l)
+			}
+		}
+
 		bitset ^= bit
 	}
 
@@ -561,6 +593,7 @@ func (branchData BranchData) DecodeCells() (touchMap, afterMap uint16, row [16]*
 			fieldBits := PartFlags(branchData[pos])
 			pos++
 			row[nibble] = new(Cell)
+
 			if pos, err = row[nibble].fillFromFields(branchData, pos, fieldBits); err != nil {
 				err = fmt.Errorf("faield to fill cell at nibble %x: %w", nibble, err)
 				return
