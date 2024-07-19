@@ -30,7 +30,7 @@ import (
 	"github.com/jedib0t/go-pretty/v6/text"
 	"github.com/urfave/cli/v2"
 
-	"github.com/ledgerwatch/erigonwatch"
+	"github.com/erigontech/erigonwatch"
 
 	"github.com/erigontech/erigon/cmd/diag/flags"
 )
