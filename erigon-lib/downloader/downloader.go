@@ -2753,11 +2753,8 @@ func openClient(ctx context.Context, dbDir, snapDir string, cfg *torrent.ClientC
 		MapSize(16 * datasize.GB).
 		PageSize(uint64(4 * datasize.KB)).
 		RoTxsLimiter(semaphore.NewWeighted(9_000)).
-		Path(dbDir)
-
-	if writeMap {
-		dbCfg = dbCfg.WriteMap()
-	}
+		Path(dbDir).
+		WriteMap(writeMap)
 	db, err = dbCfg.Open(ctx)
 	if err != nil {
 		return nil, nil, nil, nil, fmt.Errorf("torrentcfg.openClient: %w", err)
