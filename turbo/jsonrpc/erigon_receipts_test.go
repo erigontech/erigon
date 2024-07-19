@@ -19,7 +19,6 @@ package jsonrpc
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 	"math/big"
 	"testing"
 
@@ -117,8 +116,7 @@ func TestErigonGetLatestLogs(t *testing.T) {
 		Removed:     false,
 		Timestamp:   100,
 	}
-	assert.Equal(expectedLog, actual[0])
-	println(fmt.Sprintf("%+v\n%+v\n", expectedLog, actual[0]))
+	assert.EqualValues(expectedLog, actual[0])
 }
 
 func TestErigonGetLatestLogsIgnoreTopics(t *testing.T) {
