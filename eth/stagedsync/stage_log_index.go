@@ -102,7 +102,7 @@ func SpawnLogIndex(s *StageState, tx kv.RwTx, cfg LogIndexCfg, ctx context.Conte
 	}
 
 	startBlock := s.BlockNumber
-	pruneTo := cfg.prune.History.PruneTo(endBlock) //endBlock - prune.r.older
+	pruneTo := cfg.prune.Receipts.PruneTo(endBlock) //endBlock - prune.r.older
 	// if startBlock < pruneTo {
 	// 	startBlock = pruneTo
 	// }
@@ -435,7 +435,7 @@ func pruneOldLogChunks(tx kv.RwTx, bucket string, inMem *etl.Collector, pruneTo 
 
 // Call pruneLogIndex with the current sync progresses and commit the data to db
 func PruneLogIndex(s *PruneState, tx kv.RwTx, cfg LogIndexCfg, ctx context.Context, logger log.Logger) (err error) {
-	if !cfg.prune.History.Enabled() {
+	if !cfg.prune.Receipts.Enabled() {
 		return nil
 	}
 	logPrefix := s.LogPrefix()
@@ -449,7 +449,7 @@ func PruneLogIndex(s *PruneState, tx kv.RwTx, cfg LogIndexCfg, ctx context.Conte
 		defer tx.Rollback()
 	}
 
-	pruneTo := cfg.prune.History.PruneTo(s.ForwardProgress)
+	pruneTo := cfg.prune.Receipts.PruneTo(s.ForwardProgress)
 	if err = pruneLogIndex(logPrefix, tx, cfg.tmpdir, s.PruneProgress, pruneTo, ctx, logger, cfg.depositContract); err != nil {
 		return err
 	}

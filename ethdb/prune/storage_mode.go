@@ -17,6 +17,7 @@
 package prune
 
 import (
+	"bytes"
 	"encoding/binary"
 	"errors"
 	"fmt"
@@ -30,7 +31,10 @@ import (
 
 var DefaultMode = Mode{
 	Initialised: true,
-	History:     Distance(math.MaxUint64),
+	History:     Distance(math.MaxUint64), // all off
+	Receipts:    Distance(math.MaxUint64),
+	TxIndex:     Distance(math.MaxUint64),
+	CallTraces:  Distance(math.MaxUint64),
 	Blocks:      Distance(math.MaxUint64),
 	Experiments: Experiments{}, // all off
 }
@@ -38,11 +42,60 @@ var DefaultMode = Mode{
 type Experiments struct {
 }
 
-func FromCli(chainId uint64, distanceHistory, distanceBlocks uint64, experiments []string) (Mode, error) {
+func FromCli(chainId uint64, flags string, exactBlocks, exactHistory, exactReceipts, exactTxIndex, exactCallTraces,
+	beforeB, beforeH, beforeR, beforeT, beforeC uint64, experiments []string) (Mode, error) {
 	mode := DefaultMode
 
-	mode.History = Distance(distanceHistory)
-	mode.Blocks = Distance(distanceBlocks)
+	if flags != "default" && flags != "disabled" {
+		for _, flag := range flags {
+			switch flag {
+			case 'h':
+				mode.History = Distance(params.FullImmutabilityThreshold)
+			case 'r':
+				mode.Receipts = Distance(params.FullImmutabilityThreshold)
+			case 't':
+				mode.TxIndex = Distance(params.FullImmutabilityThreshold)
+			case 'c':
+				mode.CallTraces = Distance(params.FullImmutabilityThreshold)
+			case 'b':
+				mode.Blocks = Distance(params.FullImmutabilityThreshold)
+			default:
+				return DefaultMode, fmt.Errorf("unexpected flag found: %c", flag)
+			}
+		}
+	}
+
+	if exactBlocks > 0 {
+		mode.Blocks = Distance(exactBlocks)
+	}
+	if exactHistory > 0 {
+		mode.History = Distance(exactHistory)
+	}
+	if exactReceipts > 0 {
+		mode.Receipts = Distance(exactReceipts)
+	}
+	if exactTxIndex > 0 {
+		mode.TxIndex = Distance(exactTxIndex)
+	}
+	if exactCallTraces > 0 {
+		mode.CallTraces = Distance(exactCallTraces)
+	}
+
+	if beforeH > 0 {
+		mode.History = Before(beforeH)
+	}
+	if beforeR > 0 {
+		mode.Receipts = Before(beforeR)
+	}
+	if beforeT > 0 {
+		mode.TxIndex = Before(beforeT)
+	}
+	if beforeC > 0 {
+		mode.CallTraces = Before(beforeC)
+	}
+	if beforeB > 0 {
+		mode.Blocks = Before(beforeB)
+	}
 
 	for _, ex := range experiments {
 		switch ex {
@@ -67,6 +120,30 @@ func Get(db kv.Getter) (Mode, error) {
 		prune.History = blockAmount
 	}
 
+	blockAmount, err = get(db, kv.PruneReceipts)
+	if err != nil {
+		return prune, err
+	}
+	if blockAmount != nil {
+		prune.Receipts = blockAmount
+	}
+
+	blockAmount, err = get(db, kv.PruneTxIndex)
+	if err != nil {
+		return prune, err
+	}
+	if blockAmount != nil {
+		prune.TxIndex = blockAmount
+	}
+
+	blockAmount, err = get(db, kv.PruneCallTraces)
+	if err != nil {
+		return prune, err
+	}
+	if blockAmount != nil {
+		prune.CallTraces = blockAmount
+	}
+
 	blockAmount, err = get(db, kv.PruneBlocks)
 	if err != nil {
 		return prune, err
@@ -81,6 +158,9 @@ func Get(db kv.Getter) (Mode, error) {
 type Mode struct {
 	Initialised bool // Set when the values are initialised (not default)
 	History     BlockAmount
+	Receipts    BlockAmount
+	TxIndex     BlockAmount
+	CallTraces  BlockAmount
 	Blocks      BlockAmount
 	Experiments Experiments
 }
@@ -108,10 +188,29 @@ func (p Distance) useDefaultValue() bool { return uint64(p) == params.FullImmuta
 func (p Distance) dbType() []byte        { return kv.PruneTypeOlder }
 
 func (p Distance) PruneTo(stageHead uint64) uint64 {
+	if p == 0 {
+		panic("pruning distance were not set")
+	}
 	if uint64(p) > stageHead {
 		return 0
 	}
 	return stageHead - uint64(p)
+}
+
+// Before number after which keep in DB
+type Before uint64
+
+func (b Before) Enabled() bool         { return b > 0 }
+func (b Before) toValue() uint64       { return uint64(b) }
+func (b Before) useDefaultValue() bool { return uint64(b) == 0 }
+func (b Before) dbType() []byte        { return kv.PruneTypeBefore }
+
+func (b Before) PruneTo(uint64) uint64 {
+	if b == 0 {
+		return uint64(b)
+	}
+
+	return uint64(b) - 1
 }
 
 func (m Mode) String() string {
@@ -135,6 +234,27 @@ func (m Mode) String() string {
 			long += fmt.Sprintf(" --prune.b.%s=%d", m.Blocks.dbType(), m.Blocks.toValue())
 		}
 	}
+	if m.Receipts.Enabled() {
+		if m.Receipts.useDefaultValue() {
+			short += fmt.Sprintf(" --prune.r.older=%d", defaultVal)
+		} else {
+			long += fmt.Sprintf(" --prune.r.%s=%d", m.Receipts.dbType(), m.Receipts.toValue())
+		}
+	}
+	if m.TxIndex.Enabled() {
+		if m.TxIndex.useDefaultValue() {
+			short += fmt.Sprintf(" --prune.t.older=%d", defaultVal)
+		} else {
+			long += fmt.Sprintf(" --prune.t.%s=%d", m.TxIndex.dbType(), m.TxIndex.toValue())
+		}
+	}
+	if m.CallTraces.Enabled() {
+		if m.CallTraces.useDefaultValue() {
+			short += fmt.Sprintf(" --prune.c.older=%d", defaultVal)
+		} else {
+			long += fmt.Sprintf(" --prune.c.%s=%d", m.CallTraces.dbType(), m.CallTraces.toValue())
+		}
+	}
 
 	return strings.TrimLeft(short+long, " ")
 }
@@ -145,6 +265,21 @@ func Override(db kv.RwTx, sm Mode) error {
 	)
 
 	err = set(db, kv.PruneHistory, sm.History)
+	if err != nil {
+		return err
+	}
+
+	err = set(db, kv.PruneReceipts, sm.Receipts)
+	if err != nil {
+		return err
+	}
+
+	err = set(db, kv.PruneTxIndex, sm.TxIndex)
+	if err != nil {
+		return err
+	}
+
+	err = set(db, kv.PruneCallTraces, sm.CallTraces)
 	if err != nil {
 		return err
 	}
@@ -170,9 +305,17 @@ func EnsureNotChanged(tx kv.GetPut, pruneMode Mode) (Mode, error) {
 	}
 
 	if pruneMode.Initialised {
+		// Don't change from previous default as default for Receipts pruning has now changed
+		if pruneMode.Receipts.useDefaultValue() {
+			pruneMode.Receipts = pm.Receipts
+		}
 
 		// If storage mode is not explicitly specified, we take whatever is in the database
 		if !reflect.DeepEqual(pm, pruneMode) {
+			if bytes.Equal(pm.Receipts.dbType(), kv.PruneTypeOlder) && bytes.Equal(pruneMode.Receipts.dbType(), kv.PruneTypeBefore) {
+				log.Error("--prune=r flag has been changed to mean pruning of receipts before the Beacon Chain genesis. Please re-sync Erigon from scratch. " +
+					"Alternatively, enforce the old behaviour explicitly by --prune.r.older=90000 flag at the risk of breaking the Consensus Layer.")
+			}
 			return pm, errors.New("not allowed change of --prune flag, last time you used: " + pm.String())
 		}
 	}
@@ -188,8 +331,11 @@ func setIfNotExist(db kv.GetPut, pm Mode) error {
 	}
 
 	pruneDBData := map[string]BlockAmount{
-		string(kv.PruneHistory): pm.History,
-		string(kv.PruneBlocks):  pm.Blocks,
+		string(kv.PruneHistory):    pm.History,
+		string(kv.PruneReceipts):   pm.Receipts,
+		string(kv.PruneTxIndex):    pm.TxIndex,
+		string(kv.PruneCallTraces): pm.CallTraces,
+		string(kv.PruneBlocks):     pm.Blocks,
 	}
 
 	for key, value := range pruneDBData {
@@ -208,6 +354,8 @@ func createBlockAmount(pruneType []byte, v []byte) (BlockAmount, error) {
 	switch string(pruneType) {
 	case string(kv.PruneTypeOlder):
 		blockAmount = Distance(binary.BigEndian.Uint64(v))
+	case string(kv.PruneTypeBefore):
+		blockAmount = Before(binary.BigEndian.Uint64(v))
 	default:
 		return nil, fmt.Errorf("unexpected block amount type: %s", string(pruneType))
 	}

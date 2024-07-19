@@ -87,8 +87,8 @@ func SpawnTxLookup(s *StageState, tx kv.RwTx, toBlock uint64, cfg TxLookupCfg, c
 	}
 
 	startBlock := s.BlockNumber
-	if cfg.prune.History.Enabled() {
-		pruneTo := cfg.prune.History.PruneTo(endBlock)
+	if cfg.prune.TxIndex.Enabled() {
+		pruneTo := cfg.prune.TxIndex.PruneTo(endBlock)
 		if startBlock < pruneTo {
 			startBlock = pruneTo
 			if err = s.UpdatePrune(tx, pruneTo); err != nil { // prune func of this stage will use this value to prevent all ancient blocks traversal
@@ -248,8 +248,8 @@ func PruneTxLookup(s *PruneState, tx kv.RwTx, cfg TxLookupCfg, ctx context.Conte
 	var pruneBor bool
 
 	// Forward stage doesn't write anything before PruneTo point
-	if cfg.prune.History.Enabled() {
-		blockTo = cfg.prune.History.PruneTo(s.ForwardProgress)
+	if cfg.prune.TxIndex.Enabled() {
+		blockTo = cfg.prune.TxIndex.PruneTo(s.ForwardProgress)
 		pruneBor = true
 	} else if cfg.blockReader.FreezingCfg().Enabled {
 		blockTo = cfg.blockReader.CanPruneTo(s.ForwardProgress)

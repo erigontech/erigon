@@ -393,8 +393,8 @@ func PruneCallTraces(s *PruneState, tx kv.RwTx, cfg CallTracesCfg, ctx context.C
 		defer tx.Rollback()
 	}
 
-	if cfg.prune.History.Enabled() {
-		if err = pruneCallTraces(tx, logPrefix, cfg.prune.History.PruneTo(s.ForwardProgress), ctx, cfg.tmpdir, logger); err != nil {
+	if cfg.prune.CallTraces.Enabled() {
+		if err = pruneCallTraces(tx, logPrefix, cfg.prune.CallTraces.PruneTo(s.ForwardProgress), ctx, cfg.tmpdir, logger); err != nil {
 			return err
 		}
 	}
