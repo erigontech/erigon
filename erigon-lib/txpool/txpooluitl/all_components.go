@@ -120,6 +120,10 @@ func AllComponents(ctx context.Context, cfg txpoolcfg.Config, cache kvcache.Cach
 		opts = opts.GrowthStep(cfg.MdbxGrowthStep)
 	}
 
+	if cfg.MdbxWriteMap {
+		opts = opts.WriteMap()
+	}
+
 	txPoolDB, err := opts.Open(ctx)
 
 	if err != nil {

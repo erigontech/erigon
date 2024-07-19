@@ -155,6 +155,11 @@ var (
 		Usage: "Disabling p2p gossip of txs. Any txs received by p2p - will be dropped. Some networks like 'Optimism execution engine'/'Optimistic Rollup' - using it to protect against MEV attacks",
 		Value: txpoolcfg.DefaultConfig.NoGossip,
 	}
+	TxPoolMdbxWriteMapFlag = cli.BoolFlag{
+		Name:  "txpool.db.writemap",
+		Usage: "Enable WRITE_MAP feature for fast database writes and fast commit times",
+		Value: txpoolcfg.DefaultConfig.MdbxWriteMap,
+	}
 	TxPoolLocalsFlag = cli.StringFlag{
 		Name:  "txpool.locals",
 		Usage: "Comma separated accounts to treat as locals (no flush, priority inclusion)",
@@ -765,7 +770,7 @@ var (
 	}
 	DbWriteMapFlag = cli.BoolFlag{
 		Name:  "db.writemap",
-		Usage: "Enable WRITE_MAP feauture for fast database writes and fast commit times",
+		Usage: "Enable WRITE_MAP feature for fast database writes and fast commit times",
 		Value: true,
 	}
 
@@ -1516,6 +1521,9 @@ func setTxPool(ctx *cli.Context, fullCfg *ethconfig.Config) {
 	}
 	if ctx.IsSet(TxPoolBlobPriceBumpFlag.Name) {
 		fullCfg.TxPool.BlobPriceBump = ctx.Uint64(TxPoolBlobPriceBumpFlag.Name)
+	}
+	if ctx.IsSet(TxPoolMdbxWriteMapFlag.Name) {
+		fullCfg.TxPool.MdbxWriteMap = ctx.Bool(TxPoolMdbxWriteMapFlag.Name)
 	}
 	cfg.CommitEvery = common2.RandomizeDuration(ctx.Duration(TxPoolCommitEveryFlag.Name))
 }
