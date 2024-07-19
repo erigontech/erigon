@@ -264,13 +264,13 @@ func (in *EVMInterpreter) Run(contract *Contract, input []byte, readOnly bool) (
 		// enough stack items available to perform the operation.
 		op = contract.GetOp(_pc)
 		operation := in.jt[op]
-		cost = operation.constantGas // For tracing
 		// Validate stack
 		if sLen := locStack.Len(); sLen < operation.numPop {
 			return nil, &ErrStackUnderflow{stackLen: sLen, required: operation.numPop}
 		} else if sLen > operation.maxStack {
 			return nil, &ErrStackOverflow{stackLen: sLen, limit: operation.maxStack}
 		}
+		cost = operation.constantGas // For tracing
 		if !contract.UseGas(cost, tracing.GasChangeIgnored) {
 			return nil, ErrOutOfGas
 		}
