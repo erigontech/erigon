@@ -66,7 +66,7 @@ func (api *OtterscanAPIImpl) traceBlock(dbtx kv.Tx, ctx context.Context, blockNu
 	if err != nil {
 		return false, nil, err
 	}
-	if block != nil {
+	if block == nil {
 		return false, nil, nil
 	}
 
