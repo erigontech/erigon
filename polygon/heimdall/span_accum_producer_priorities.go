@@ -38,7 +38,8 @@ import "github.com/erigontech/erigon/polygon/bor/valset"
 //
 // However, to correctly calculate the accumulated proposer priorities, one has to start
 // from span zero, create a valset.ValidatorSet, call IncrementProposerPriority(spanSprintCount)
-// and at every next span call bor.GetUpdatedValidatorSet(span.SelectedProducers) and repeat.
+// and at every next span call bor.GetUpdatedValidatorSet(oldValidatorSet, span.SelectedProducers)
+// and repeat.
 type SpanAccumProducerPriorities struct {
 	SpanId     SpanId
 	StartBlock uint64
