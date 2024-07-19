@@ -280,6 +280,10 @@ func (api *OtterscanAPIImpl) findNonce(ctx context.Context, tx kv.Tx, addr commo
 	if err != nil {
 		return false, common.Hash{}, err
 	}
+	if block == nil {
+		return false, common.Hash{}, fmt.Errorf("block not found: %d", blockNum)
+	}
+
 	senders := block.Body().SendersFromTxs()
 
 	txs := block.Transactions()
