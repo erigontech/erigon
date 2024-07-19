@@ -1053,28 +1053,7 @@ func (p *TxPool) isCancun() bool {
 }
 
 func (p *TxPool) isPrague() bool {
-	// once this flag has been set for the first time we no longer need to check the timestamp
-	set := p.isPostPrague.Load()
-	if set {
-		return true
-	}
-	if p.pragueTime == nil {
-		return false
-	}
-	pragueTime := *p.pragueTime
-
-	// a zero here means Prague is always active
-	if pragueTime == 0 {
-		p.isPostPrague.Swap(true)
-		return true
-	}
-
-	now := time.Now().Unix()
-	activated := uint64(now) >= pragueTime
-	if activated {
-		p.isPostPrague.Swap(true)
-	}
-	return activated
+	return isTimeBasedForkActivated(&p.isPostPrague, p.pragueTime)
 }
 
 // Check that the serialized txn should not exceed a certain max size
