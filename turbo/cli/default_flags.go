@@ -43,6 +43,7 @@ var DefaultFlags = []cli.Flag{
 	&utils.TxPoolLifetimeFlag,
 	&utils.TxPoolTraceSendersFlag,
 	&utils.TxPoolCommitEveryFlag,
+	&utils.TxPoolMdbxWriteMapFlag,
 	&PruneFlag,
 	&PruneBlocksFlag,
 	&PruneHistoryFlag,
