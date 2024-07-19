@@ -891,8 +891,14 @@ func (d *Downloader) mainLoop(silent bool) error {
 
 			var pending []*torrent.Torrent
 
+			var plist []string
+			var clist []string
+			var flist []string
+			var dlist []string
+
 			for _, t := range torrents {
 				if _, ok := complete[t.Name()]; ok {
+					clist = append(clist, t.Name())
 					continue
 				}
 
@@ -944,6 +950,7 @@ func (d *Downloader) mainLoop(silent bool) error {
 								}(fileInfo, t.InfoHash(), length, *completionTime)
 
 							} else {
+								clist = append(clist, t.Name())
 								complete[t.Name()] = struct{}{}
 								continue
 							}
@@ -954,6 +961,7 @@ func (d *Downloader) mainLoop(silent bool) error {
 				}
 
 				if _, ok := failed[t.Name()]; ok {
+					flist = append(flist, t.Name())
 					continue
 				}
 
@@ -1009,14 +1017,17 @@ func (d *Downloader) mainLoop(silent bool) error {
 					delete(d.downloading, t.Name())
 					d.lock.Unlock()
 					complete[t.Name()] = struct{}{}
+					clist = append(clist, t.Name())
 					continue
 				}
 
 				if downloading {
+					dlist = append(dlist, t.Name())
 					continue
 				}
 
 				pending = append(pending, t)
+				plist = append(plist, t.Name())
 			}
 
 			select {
@@ -1150,6 +1161,20 @@ func (d *Downloader) mainLoop(silent bool) error {
 			}
 			d.lock.RUnlock()
 
+			d.lock.RLock()
+			completed := d.stats.Completed
+			d.lock.RUnlock()
+
+			if !completed {
+				var alist []string
+
+				for _, t := range available {
+					alist = append(alist, t.Name())
+				}
+
+				d.logger.Debug("[snapshot] download status", "pending", plist, "availible", alist, "downloading", dlist, "complete", clist, "failed", flist)
+			}
+
 			for _, t := range available {
 
 				torrentInfo, err := d.torrentInfo(t.Name())
@@ -1217,7 +1242,7 @@ func (d *Downloader) mainLoop(silent bool) error {
 
 				switch {
 				case len(t.PeerConns()) > 0:
-					d.logger.Debug("[snapshots] Downloading from BitTorrent", "file", t.Name(), "peers", len(t.PeerConns()), "webpeers", len(t.WebseedPeerConns()))
+					d.logger.Debug("[snapshots] Downloading from torrent", "file", t.Name(), "peers", len(t.PeerConns()), "webpeers", len(t.WebseedPeerConns()))
 					delete(waiting, t.Name())
 					d.torrentDownload(t, downloadComplete)
 				case len(t.WebseedPeerConns()) > 0:
@@ -2759,10 +2784,10 @@ func openClient(ctx context.Context, dbDir, snapDir string, cfg *torrent.ClientC
 	dnsResolver := &downloadercfg.DnsCacheResolver{RefreshTimeout: 24 * time.Hour}
 	cfg.TrackerDialContext = dnsResolver.DialContext
 
-	err = func() error {
+	err = func() (err error) {
 		defer func() {
-			if err := recover(); err != nil {
-				fmt.Printf("openTorrentClient: %v\n", err)
+			if e := recover(); e != nil {
+				err = fmt.Errorf("openTorrentClient: %v", e)
 			}
 		}()
 

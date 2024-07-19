@@ -35,7 +35,6 @@ import (
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/kv/kvcache"
 	"github.com/erigontech/erigon-lib/log/v3"
-	libstate "github.com/erigontech/erigon-lib/state"
 
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cmd/rpcdaemon/cli"
@@ -100,13 +99,12 @@ func (e *EngineServer) Start(
 	blockReader services.FullBlockReader,
 	filters *rpchelper.Filters,
 	stateCache kvcache.Cache,
-	agg *libstate.Aggregator,
 	engineReader consensus.EngineReader,
 	eth rpchelper.ApiBackend,
 	txPool txpool.TxpoolClient,
 	mining txpool.MiningClient,
 ) {
-	base := jsonrpc.NewBaseApi(filters, stateCache, blockReader, httpConfig.WithDatadir, httpConfig.EvmCallTimeout, engineReader)
+	base := jsonrpc.NewBaseApi(filters, stateCache, blockReader, httpConfig.WithDatadir, httpConfig.EvmCallTimeout, engineReader, httpConfig.Dirs)
 
 	ethImpl := jsonrpc.NewEthAPI(base, db, eth, txPool, mining, httpConfig.Gascap, httpConfig.Feecap, httpConfig.ReturnDataLimit, httpConfig.AllowUnprotectedTxs, httpConfig.MaxGetProofRewindBlockCount, httpConfig.WebsocketSubscribeLogsChannelSize, e.logger)
 

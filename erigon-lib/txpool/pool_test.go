@@ -711,7 +711,7 @@ func TestShanghaiValidateTx(t *testing.T) {
 			}
 
 			cache := &kvcache.DummyCache{}
-			pool, err := New(ch, coreDB, cfg, cache, *u256.N1, shanghaiTime, nil /* agraBlock */, nil /* cancunTime */, nil /* pragueTime */, fixedgas.DefaultMaxBlobsPerBlock, nil, logger)
+			pool, err := New(ch, coreDB, cfg, cache, *u256.N1, shanghaiTime, nil /* agraBlock */, nil /* cancunTime */, nil, fixedgas.DefaultMaxBlobsPerBlock, nil, logger)
 			asrt.NoError(err)
 			ctx := context.Background()
 			tx, err := coreDB.BeginRw(ctx)

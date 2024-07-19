@@ -229,6 +229,7 @@ type TxPool struct {
 	cancunTime              *uint64
 	isPostCancun            atomic.Bool
 	pragueTime              *uint64
+	isPostPrague            atomic.Bool
 	maxBlobsPerBlock        uint64
 	feeCalculator           FeeCalculator
 	logger                  log.Logger
@@ -770,7 +771,7 @@ func (p *TxPool) best(n uint16, txs *types.TxsRlp, tx kv.Tx, onTopOf, availableG
 		// make sure we have enough gas in the caller to add this transaction.
 		// not an exact science using intrinsic gas but as close as we could hope for at
 		// this stage
-		intrinsicGas, _ := txpoolcfg.CalcIntrinsicGas(uint64(mt.Tx.DataLen), uint64(mt.Tx.DataNonZeroLen), 0, nil, mt.Tx.Creation, true, true, isShanghai)
+		intrinsicGas, _ := txpoolcfg.CalcIntrinsicGas(uint64(mt.Tx.DataLen), uint64(mt.Tx.DataNonZeroLen), uint64(mt.Tx.AuthorizationLen), nil, mt.Tx.Creation, true, true, isShanghai)
 		if intrinsicGas > availableGas {
 			// we might find another txn with a low enough intrinsic gas to include so carry on
 			continue
@@ -894,6 +895,12 @@ func (p *TxPool) validateTx(txn *types.TxSlot, isLocal bool, stateCache kvcache.
 		}
 	}
 
+	if txn.Type == types.SetCodeTxType {
+		if !p.isPrague() {
+			return txpoolcfg.TypeNotActivated
+		}
+	}
+
 	// Drop non-local transactions under our own minimal accepted gas price or tip
 	if !isLocal && uint256.NewInt(p.cfg.MinFeeCap).Cmp(&txn.FeeCap) == 1 {
 		if txn.Traced {
@@ -901,7 +908,7 @@ func (p *TxPool) validateTx(txn *types.TxSlot, isLocal bool, stateCache kvcache.
 		}
 		return txpoolcfg.UnderPriced
 	}
-	gas, reason := txpoolcfg.CalcIntrinsicGas(uint64(txn.DataLen), uint64(txn.DataNonZeroLen), 0, nil, txn.Creation, true, true, isShanghai)
+	gas, reason := txpoolcfg.CalcIntrinsicGas(uint64(txn.DataLen), uint64(txn.DataNonZeroLen), uint64(txn.AuthorizationLen), nil, txn.Creation, true, true, isShanghai)
 	if txn.Traced {
 		p.logger.Info(fmt.Sprintf("TX TRACING: validateTx intrinsic gas idHash=%x gas=%d", txn.IDHash, gas))
 	}
@@ -1043,6 +1050,31 @@ func (p *TxPool) isAgra() bool {
 
 func (p *TxPool) isCancun() bool {
 	return isTimeBasedForkActivated(&p.isPostCancun, p.cancunTime)
+}
+
+func (p *TxPool) isPrague() bool {
+	// once this flag has been set for the first time we no longer need to check the timestamp
+	set := p.isPostPrague.Load()
+	if set {
+		return true
+	}
+	if p.pragueTime == nil {
+		return false
+	}
+	pragueTime := *p.pragueTime
+
+	// a zero here means Prague is always active
+	if pragueTime == 0 {
+		p.isPostPrague.Swap(true)
+		return true
+	}
+
+	now := time.Now().Unix()
+	activated := uint64(now) >= pragueTime
+	if activated {
+		p.isPostPrague.Swap(true)
+	}
+	return activated
 }
 
 // Check that the serialized txn should not exceed a certain max size
