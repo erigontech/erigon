@@ -712,7 +712,7 @@ var (
 	TorrentDownloadSlotsFlag = cli.IntFlag{
 		Name:  "torrent.download.slots",
 		Value: 128,
-		Usage: "Amount of files to download in parallel. If network has enough seeders 1-3 slot enough, if network has lack of seeders increase to 5-7 (too big value will slow down everything).",
+		Usage: "Amount of files to download in parallel.",
 	}
 	TorrentStaticPeersFlag = cli.StringFlag{
 		Name:  "torrent.staticpeers",
