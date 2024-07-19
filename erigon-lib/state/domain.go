@@ -1819,7 +1819,8 @@ func (dt *DomainRoTx) Prune(ctx context.Context, rwTx kv.RwTx, step, txFrom, txT
 		if err := ancientDomainValsCollector.Collect(k, v); err != nil {
 			return nil, err
 		}
-
+		stat.MinStep = min(stat.MinStep, is)
+		stat.MaxStep = max(stat.MaxStep, is)
 		select {
 		case <-ctx.Done():
 			// consider ctx exiting as incorrect outcome, error is returned
