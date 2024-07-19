@@ -189,7 +189,9 @@ func (opts MdbxOpts) MapSize(sz datasize.ByteSize) MdbxOpts {
 }
 
 func (opts MdbxOpts) WriteMap(flag bool) MdbxOpts {
-	opts.flags |= mdbx.WriteMap & flag
+	if flag {
+		opts.flags |= mdbx.WriteMap
+	}
 	return opts
 }
 func (opts MdbxOpts) LifoReclaim() MdbxOpts {
