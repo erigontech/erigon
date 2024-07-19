@@ -30,7 +30,6 @@ import (
 	"runtime"
 	"testing"
 
-	"github.com/erigontech/erigon-lib/common/datadir"
 	"github.com/erigontech/erigon-lib/kv/temporal/temporaltest"
 	"github.com/erigontech/erigon-lib/log/v3"
 
@@ -60,8 +59,8 @@ func TestState(t *testing.T) {
 	st.skipLoad(`.*vmPerformance/loop.*`)
 	//if ethconfig.EnableHistoryV3InTest {
 	//}
-
-	db, _ := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
+	dirs := datadir.New(t.TempDir())
+	db, _ := temporaltest.NewTestDB(t, dirs)
 	st.walk(t, stateTestDir, func(t *testing.T, name string, test *StateTest) {
 		for _, subtest := range test.Subtests() {
 			subtest := subtest
@@ -73,7 +72,7 @@ func TestState(t *testing.T) {
 						t.Fatal(err)
 					}
 					defer tx.Rollback()
-					_, _, err = test.Run(tx, subtest, vmconfig)
+					_, _, err = test.Run(tx, subtest, vmconfig, dirs)
 					tx.Rollback()
 					if err != nil && len(test.json.Post[subtest.Fork][subtest.Index].ExpectException) > 0 {
 						// Ignore expected errors

@@ -1318,6 +1318,7 @@ func reconstituteStep(last bool,
 		reconWorkers[i] = exec3.NewReconWorker(lock.RLocker(), reconstWorkersCtx, rs, localAs, blockReader, chainConfig, logger, genesis, engine, chainTxs[i])
 		reconWorkers[i].SetTx(roTxs[i])
 		reconWorkers[i].SetChainTx(chainTxs[i])
+		reconWorkers[i].SetDirs(dirs)
 	}
 
 	rollbackCount := uint64(0)
