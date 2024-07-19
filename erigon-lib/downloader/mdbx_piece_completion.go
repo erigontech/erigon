@@ -98,16 +98,6 @@ func (m *mdbxPieceCompletion) Set(pk metainfo.PieceKey, b bool, awaitFlush bool)
 		m.mu.Lock()
 		defer m.mu.Unlock()
 
-		// On power-off recent "no-sync" txs may be lost.
-		// It will cause 2 cases of in-consistency between files on disk and db metadata:
-		//  - Good piece on disk and recent "complete"   db marker lost. Self-Heal by re-download.
-		//  - Bad  piece on disk and recent "incomplete" db marker lost. No Self-Heal. Means: can't afford loosing recent "incomplete" markers.
-		// FYI: Fsync of torrent pieces happenng before storing db markers: https://github.com/anacrolix/torrent/blob/master/torrent.go#L2026
-		//
-		// Mainnet stats:
-		//  call amount 2 minutes complete=100K vs incomple=1K
-		//  1K fsyncs/2minutes it's quite expensive, but even on cloud (high latency) drive it allow download 100mb/s
-		//  and Erigon doesn't do anything when downloading snapshots
 		if b {
 			completed, ok := m.completed[pk.InfoHash]
 
