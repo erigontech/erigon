@@ -984,7 +984,6 @@ func requiredBalance(txn *types.TxSlot) *uint256.Int {
 }
 
 func isTimeBasedForkActivated(isPostFlag *atomic.Bool, forkTime *uint64) bool {
-
 	// once this flag has been set for the first time we no longer need to check the timestamp
 	set := isPostFlag.Load()
 	if set {
