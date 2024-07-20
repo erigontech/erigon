@@ -1,3 +1,19 @@
+// Copyright 2024 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+
 package handler
 
 import (
@@ -7,12 +23,12 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	mockaggregation "github.com/ledgerwatch/erigon/cl/aggregation/mock_services"
-	"github.com/ledgerwatch/erigon/cl/beacon/beacon_router_configuration"
-	"github.com/ledgerwatch/erigon/cl/cltypes/solid"
-	"github.com/ledgerwatch/erigon/cl/pool"
-	"github.com/ledgerwatch/erigon/common"
+	libcommon "github.com/erigontech/erigon-lib/common"
+	mockaggregation "github.com/erigontech/erigon/cl/aggregation/mock_services"
+	"github.com/erigontech/erigon/cl/beacon/beacon_router_configuration"
+	"github.com/erigontech/erigon/cl/cltypes/solid"
+	"github.com/erigontech/erigon/cl/pool"
+	"github.com/erigontech/erigon/common"
 	"github.com/stretchr/testify/suite"
 	"go.uber.org/mock/gomock"
 )
@@ -50,6 +66,7 @@ func (t *validatorTestSuite) SetupTest() {
 		nil,
 		nil,
 		t.mockAggrPool,
+		nil,
 		nil,
 		nil,
 		nil,

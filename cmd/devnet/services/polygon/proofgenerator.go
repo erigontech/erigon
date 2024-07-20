@@ -1,3 +1,19 @@
+// Copyright 2024 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+
 package polygon
 
 import (
@@ -10,22 +26,22 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/ledgerwatch/erigon/cl/merkle_tree"
-	bortypes "github.com/ledgerwatch/erigon/polygon/bor/types"
+	"github.com/erigontech/erigon/cl/merkle_tree"
+	bortypes "github.com/erigontech/erigon/polygon/bor/types"
 	"golang.org/x/sync/errgroup"
 
-	"github.com/ledgerwatch/erigon-lib/chain/networkname"
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/common/hexutility"
-	"github.com/ledgerwatch/erigon/accounts/abi/bind"
-	"github.com/ledgerwatch/erigon/cmd/devnet/devnet"
-	"github.com/ledgerwatch/erigon/cmd/devnet/requests"
-	"github.com/ledgerwatch/erigon/core/types"
-	"github.com/ledgerwatch/erigon/crypto"
-	"github.com/ledgerwatch/erigon/rlp"
-	"github.com/ledgerwatch/erigon/rpc"
-	"github.com/ledgerwatch/erigon/turbo/jsonrpc"
-	"github.com/ledgerwatch/erigon/turbo/trie"
+	"github.com/erigontech/erigon-lib/chain/networkname"
+	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common/hexutility"
+	"github.com/erigontech/erigon/accounts/abi/bind"
+	"github.com/erigontech/erigon/cmd/devnet/devnet"
+	"github.com/erigontech/erigon/cmd/devnet/requests"
+	"github.com/erigontech/erigon/core/types"
+	"github.com/erigontech/erigon/crypto"
+	"github.com/erigontech/erigon/rlp"
+	"github.com/erigontech/erigon/rpc"
+	"github.com/erigontech/erigon/turbo/jsonrpc"
+	"github.com/erigontech/erigon/turbo/trie"
 )
 
 var ErrTokenIndexOutOfRange = errors.New("index is grater than the number of tokens in transaction")
@@ -276,7 +292,7 @@ func getReceiptProof(ctx context.Context, node requests.RequestGenerator, receip
 
 		for _, transaction := range block.Transactions {
 			if transaction.Hash == stateSyncTxHash {
-				// ignore if tx hash is bor state-sync tx
+				// ignore if txn hash is bor state-sync tx
 				continue
 			}
 
@@ -527,7 +543,7 @@ func (pg *ProofGenerator) getRootBlockInfo(txBlockNumber uint64) (rootBlockNumbe
 		return 0, 0, 0, err
 	}
 
-	headerBlock, err := pg.heimdall.rootChainBinding.HeaderBlocks(&bind.CallOpts{}, big.NewInt(int64(rootBlockNumber)))
+	headerBlock, err := pg.heimdall.rootChainBinding.HeaderBlocks(&bind.CallOpts{}, new(big.Int).SetUint64(rootBlockNumber))
 
 	if err != nil {
 		return 0, 0, 0, err
@@ -560,7 +576,7 @@ func (pg *ProofGenerator) findRootBlockFromChild(childBlockNumber uint64) (uint6
 		}
 
 		mid := (start + end) / 2
-		headerBlock, err := pg.heimdall.rootChainBinding.HeaderBlocks(&bind.CallOpts{}, big.NewInt(int64(mid*checkPointInterval)))
+		headerBlock, err := pg.heimdall.rootChainBinding.HeaderBlocks(&bind.CallOpts{}, new(big.Int).SetUint64(mid*checkPointInterval))
 
 		if err != nil {
 			return 0, err

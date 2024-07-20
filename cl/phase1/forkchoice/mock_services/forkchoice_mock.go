@@ -1,3 +1,19 @@
+// Copyright 2024 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+
 package mock_services
 
 import (
@@ -6,17 +22,17 @@ import (
 
 	"go.uber.org/mock/gomock"
 
-	"github.com/ledgerwatch/erigon-lib/common"
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon/cl/cltypes"
-	"github.com/ledgerwatch/erigon/cl/cltypes/solid"
-	"github.com/ledgerwatch/erigon/cl/phase1/core/state"
-	"github.com/ledgerwatch/erigon/cl/phase1/execution_client"
-	"github.com/ledgerwatch/erigon/cl/phase1/forkchoice"
-	"github.com/ledgerwatch/erigon/cl/pool"
-	"github.com/ledgerwatch/erigon/cl/transition/impl/eth2"
-	"github.com/ledgerwatch/erigon/cl/validator/sync_contribution_pool"
-	syncpoolmock "github.com/ledgerwatch/erigon/cl/validator/sync_contribution_pool/mock_services"
+	"github.com/erigontech/erigon-lib/common"
+	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon/cl/cltypes"
+	"github.com/erigontech/erigon/cl/cltypes/solid"
+	"github.com/erigontech/erigon/cl/phase1/core/state"
+	"github.com/erigontech/erigon/cl/phase1/execution_client"
+	"github.com/erigontech/erigon/cl/phase1/forkchoice"
+	"github.com/erigontech/erigon/cl/pool"
+	"github.com/erigontech/erigon/cl/transition/impl/eth2"
+	"github.com/erigontech/erigon/cl/validator/sync_contribution_pool"
+	syncpoolmock "github.com/erigontech/erigon/cl/validator/sync_contribution_pool/mock_services"
 )
 
 // Make mocks with maps and simple setters and getters, panic on methods from ForkChoiceStorageWriter

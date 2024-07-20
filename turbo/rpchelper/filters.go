@@ -1,3 +1,19 @@
+// Copyright 2024 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+
 package rpchelper
 
 import (
@@ -16,18 +32,18 @@ import (
 
 	"google.golang.org/grpc"
 
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/common/concurrent"
-	"github.com/ledgerwatch/erigon-lib/gointerfaces"
-	"github.com/ledgerwatch/erigon-lib/gointerfaces/grpcutil"
-	remote "github.com/ledgerwatch/erigon-lib/gointerfaces/remoteproto"
-	txpool "github.com/ledgerwatch/erigon-lib/gointerfaces/txpoolproto"
-	"github.com/ledgerwatch/erigon-lib/log/v3"
-	txpool2 "github.com/ledgerwatch/erigon-lib/txpool"
+	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common/concurrent"
+	"github.com/erigontech/erigon-lib/gointerfaces"
+	"github.com/erigontech/erigon-lib/gointerfaces/grpcutil"
+	remote "github.com/erigontech/erigon-lib/gointerfaces/remoteproto"
+	txpool "github.com/erigontech/erigon-lib/gointerfaces/txpoolproto"
+	"github.com/erigontech/erigon-lib/log/v3"
+	txpool2 "github.com/erigontech/erigon-lib/txpool"
 
-	"github.com/ledgerwatch/erigon/core/types"
-	"github.com/ledgerwatch/erigon/eth/filters"
-	"github.com/ledgerwatch/erigon/rlp"
+	"github.com/erigontech/erigon/core/types"
+	"github.com/erigontech/erigon/eth/filters"
+	"github.com/erigontech/erigon/rlp"
 )
 
 // Filters holds the state for managing subscriptions to various Ethereum events.
@@ -46,7 +62,6 @@ type Filters struct {
 	logsRequestor    atomic.Value
 	onNewSnapshot    func()
 
-	storeMu            sync.Mutex
 	logsStores         *concurrent.SyncMap[LogsSubID, []*types.Log]
 	pendingHeadsStores *concurrent.SyncMap[HeadsSubID, []*types.Header]
 	pendingTxsStores   *concurrent.SyncMap[PendingTxsSubID, [][]types.Transaction]
@@ -649,8 +664,20 @@ func (ff *Filters) AddLogs(id LogsSubID, log *types.Log) {
 
 		maxLogs := ff.config.RpcSubscriptionFiltersMaxLogs
 		if maxLogs > 0 && len(st)+1 > maxLogs {
-			st = st[len(st)+1-maxLogs:] // Remove oldest logs to make space
+			// Calculate the number of logs to remove
+			excessLogs := len(st) + 1 - maxLogs
+			if excessLogs > 0 {
+				if excessLogs >= len(st) {
+					// If excessLogs is greater than or equal to the length of st, remove all
+					st = []*types.Log{}
+				} else {
+					// Otherwise, remove the oldest logs
+					st = st[excessLogs:]
+				}
+			}
 		}
+
+		// Append the new log
 		st = append(st, log)
 		return st
 	})
@@ -674,9 +701,21 @@ func (ff *Filters) AddPendingBlock(id HeadsSubID, block *types.Header) {
 		}
 
 		maxHeaders := ff.config.RpcSubscriptionFiltersMaxHeaders
-		if maxHeaders > 0 && len(st) >= maxHeaders {
-			st = st[1:] // Remove the oldest header to make space
+		if maxHeaders > 0 && len(st)+1 > maxHeaders {
+			// Calculate the number of headers to remove
+			excessHeaders := len(st) + 1 - maxHeaders
+			if excessHeaders > 0 {
+				if excessHeaders >= len(st) {
+					// If excessHeaders is greater than or equal to the length of st, remove all
+					st = []*types.Header{}
+				} else {
+					// Otherwise, remove the oldest headers
+					st = st[excessHeaders:]
+				}
+			}
 		}
+
+		// Append the new header
 		st = append(st, block)
 		return st
 	})
@@ -714,9 +753,16 @@ func (ff *Filters) AddPendingTxs(id PendingTxsSubID, txs []types.Transaction) {
 				flatSt = append(flatSt, txBatch...)
 			}
 
-			// Remove the oldest transactions to make space for new ones
-			if len(flatSt)+len(txs) > maxTxs {
-				flatSt = flatSt[len(flatSt)+len(txs)-maxTxs:]
+			// Calculate how many transactions need to be removed
+			excessTxs := len(flatSt) + len(txs) - maxTxs
+			if excessTxs > 0 {
+				if excessTxs >= len(flatSt) {
+					// If excessTxs is greater than or equal to the length of flatSt, remove all
+					flatSt = []types.Transaction{}
+				} else {
+					// Otherwise, remove the oldest transactions
+					flatSt = flatSt[excessTxs:]
+				}
 			}
 
 			// Convert flatSt back to [][]types.Transaction with a single batch

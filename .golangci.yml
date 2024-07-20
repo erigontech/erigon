@@ -12,12 +12,12 @@ linters:
     - unused
     - performance
   disable:
-    - gosec # enable it after 1-2 weeks. it failing CI withoutt enough info to fix: https://github.com/ledgerwatch/erigon/actions/runs/5928644129/job/16074701625
+    - gosec # enable it after 1-2 weeks. it failing CI withoutt enough info to fix: https://github.com/erigontech/erigon/actions/runs/5928644129/job/16074701625
     - exhaustive
     - musttag
     - contextcheck
     - wrapcheck
-    - goerr113
+    - err113
     - unparam
     - makezero #TODO: enable me
     - noctx #TODO: enable me

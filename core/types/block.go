@@ -1,18 +1,21 @@
 // Copyright 2014 The go-ethereum Authors
-// This file is part of the go-ethereum library.
+// (original work)
+// Copyright 2024 The Erigon Authors
+// (modifications)
+// This file is part of Erigon.
 //
-// The go-ethereum library is free software: you can redistribute it and/or modify
+// Erigon is free software: you can redistribute it and/or modify
 // it under the terms of the GNU Lesser General Public License as published by
 // the Free Software Foundation, either version 3 of the License, or
 // (at your option) any later version.
 //
-// The go-ethereum library is distributed in the hope that it will be useful,
+// Erigon is distributed in the hope that it will be useful,
 // but WITHOUT ANY WARRANTY; without even the implied warranty of
 // MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
 // GNU Lesser General Public License for more details.
 //
 // You should have received a copy of the GNU Lesser General Public License
-// along with the go-ethereum library. If not, see <http://www.gnu.org/licenses/>.
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
 // Package types contains data types related to Ethereum consensus.
 package types
@@ -29,12 +32,12 @@ import (
 
 	"github.com/gballet/go-verkle"
 
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/common/hexutil"
-	"github.com/ledgerwatch/erigon-lib/common/hexutility"
-	rlp2 "github.com/ledgerwatch/erigon-lib/rlp"
-	"github.com/ledgerwatch/erigon/common"
-	"github.com/ledgerwatch/erigon/rlp"
+	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common/hexutil"
+	"github.com/erigontech/erigon-lib/common/hexutility"
+	rlp2 "github.com/erigontech/erigon-lib/rlp"
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/rlp"
 )
 
 var (
@@ -640,8 +643,43 @@ type RawBody struct {
 	Requests     Requests
 }
 
+// BaseTxnID represents internal auto-incremented transaction number in block, may be different across the nodes
+// e.g. block has 3 transactions, then txAmount = 3+2/*systemTx*/ = 5 therefore:
+//
+//	0 - base tx/systemBegin
+//	1 - tx0
+//	2 - tx1
+//	3 - tx2
+//	4 - systemEnd
+//
+//	System transactions are used to write history of state changes done by consensus (not by eth-transactions) - for example "miner rewards"
+type BaseTxnID uint64
+
+// TxCountToTxAmount converts number of transactions in block to TxAmount
+func TxCountToTxAmount(txsLen int) uint32 {
+	return uint32(txsLen + 2)
+}
+
+func (b BaseTxnID) U64() uint64 { return uint64(b) }
+
+func (b BaseTxnID) Bytes() []byte { return hexutility.EncodeTs(uint64(b)) }
+
+// First non-system txn number in block
+// as if baseTxnID is first original transaction in block
+func (b BaseTxnID) First() uint64 { return uint64(b + 1) }
+
+// At returns txn number at block position `ti`.
+func (b BaseTxnID) At(ti int) uint64 { return b.First() + uint64(ti) }
+
+// FirstSystemTx returns first system txn number in block
+func (b BaseTxnID) FirstSystemTx() BaseTxnID { return b }
+
+// LastSystemTx returns last system txn number in block. result+1 will be baseID of next block a.k.a. beginning system txn number
+// Supposed that txAmount includes 2 system txns.
+func (b BaseTxnID) LastSystemTx(txAmount uint32) uint64 { return b.U64() + uint64(txAmount) - 1 }
+
 type BodyForStorage struct {
-	BaseTxId    uint64
+	BaseTxnID   BaseTxnID
 	TxCount     uint32
 	Uncles      []*Header
 	Withdrawals []*Withdrawal
@@ -661,9 +699,9 @@ func (r RawBlock) AsBlock() (*Block, error) {
 	b.requests = r.Body.Requests
 
 	txs := make([]Transaction, len(r.Body.Transactions))
-	for i, tx := range r.Body.Transactions {
+	for i, txn := range r.Body.Transactions {
 		var err error
-		if txs[i], err = DecodeTransaction(tx); err != nil {
+		if txs[i], err = DecodeTransaction(txn); err != nil {
 			return nil, err
 		}
 	}
@@ -690,16 +728,16 @@ func (b *Body) SendersToTxs(senders []libcommon.Address) {
 	if senders == nil {
 		return
 	}
-	for i, tx := range b.Transactions {
-		tx.SetSender(senders[i])
+	for i, txn := range b.Transactions {
+		txn.SetSender(senders[i])
 	}
 }
 
 // Copy transaction senders from transactions to the body
 func (b *Body) SendersFromTxs() []libcommon.Address {
 	senders := make([]libcommon.Address, len(b.Transactions))
-	for i, tx := range b.Transactions {
-		if sender, ok := tx.GetSender(); ok {
+	for i, txn := range b.Transactions {
+		if sender, ok := txn.GetSender(); ok {
 			senders[i] = sender
 		}
 	}
@@ -713,8 +751,8 @@ func (rb RawBody) EncodingSize() int {
 
 func (rb RawBody) payloadSize() (payloadSize, txsLen, unclesLen, withdrawalsLen, requestsLen int) {
 	// size of Transactions
-	for _, tx := range rb.Transactions {
-		txsLen += len(tx)
+	for _, txn := range rb.Transactions {
+		txsLen += len(txn)
 	}
 	payloadSize += rlp2.ListPrefixLen(txsLen) + txsLen
 
@@ -748,8 +786,8 @@ func (rb RawBody) EncodeRLP(w io.Writer) error {
 	if err := EncodeStructSizePrefix(txsLen, w, b[:]); err != nil {
 		return err
 	}
-	for _, tx := range rb.Transactions {
-		if _, err := w.Write(tx); err != nil {
+	for _, txn := range rb.Transactions {
+		if _, err := w.Write(txn); err != nil {
 			return nil
 		}
 	}
@@ -779,12 +817,12 @@ func (rb *RawBody) DecodeRLP(s *rlp.Stream) error {
 	if _, err = s.List(); err != nil {
 		return err
 	}
-	var tx []byte
-	for tx, err = s.Raw(); err == nil; tx, err = s.Raw() {
-		if tx == nil {
-			return errors.New("RawBody.DecodeRLP tx nil")
+	var txn []byte
+	for txn, err = s.Raw(); err == nil; txn, err = s.Raw() {
+		if txn == nil {
+			return errors.New("RawBody.DecodeRLP txn nil")
 		}
-		rb.Transactions = append(rb.Transactions, tx)
+		rb.Transactions = append(rb.Transactions, txn)
 	}
 	if !errors.Is(err, rlp.EOL) {
 		return err
@@ -811,10 +849,10 @@ func (rb *RawBody) DecodeRLP(s *rlp.Stream) error {
 }
 
 func (bfs BodyForStorage) payloadSize() (payloadSize, unclesLen, withdrawalsLen, requestsLen int) {
-	baseTxIdLen := 1 + rlp.IntLenExcludingHead(bfs.BaseTxId)
+	baseTxnIDLen := 1 + rlp.IntLenExcludingHead(bfs.BaseTxnID.U64())
 	txCountLen := 1 + rlp.IntLenExcludingHead(uint64(bfs.TxCount))
 
-	payloadSize += baseTxIdLen
+	payloadSize += baseTxnIDLen
 	payloadSize += txCountLen
 
 	// size of Uncles
@@ -846,7 +884,7 @@ func (bfs BodyForStorage) EncodeRLP(w io.Writer) error {
 	}
 
 	// encode BaseTxId
-	if err := rlp.Encode(w, bfs.BaseTxId); err != nil {
+	if err := rlp.Encode(w, bfs.BaseTxnID); err != nil {
 		return err
 	}
 
@@ -880,7 +918,7 @@ func (bfs *BodyForStorage) DecodeRLP(s *rlp.Stream) error {
 	}
 
 	// decode BaseTxId
-	if err = s.Decode(&bfs.BaseTxId); err != nil {
+	if err = s.Decode(&bfs.BaseTxnID); err != nil {
 		return err
 	}
 	// decode TxCount
@@ -1289,8 +1327,8 @@ func (b *Block) SendersToTxs(senders []libcommon.Address) {
 	if len(senders) == 0 {
 		return
 	}
-	for i, tx := range b.transactions {
-		tx.SetSender(senders[i])
+	for i, txn := range b.transactions {
+		txn.SetSender(senders[i])
 	}
 }
 
@@ -1298,9 +1336,9 @@ func (b *Block) SendersToTxs(senders []libcommon.Address) {
 // will probably be removed in favour of RawBlock. Also it panics
 func (b *Block) RawBody() *RawBody {
 	br := &RawBody{Transactions: make([][]byte, len(b.transactions)), Uncles: b.uncles, Withdrawals: b.withdrawals, Requests: b.requests}
-	for i, tx := range b.transactions {
+	for i, txn := range b.transactions {
 		var err error
-		br.Transactions[i], err = rlp.EncodeToBytes(tx)
+		br.Transactions[i], err = rlp.EncodeToBytes(txn)
 		if err != nil {
 			panic(err)
 		}
@@ -1311,9 +1349,9 @@ func (b *Block) RawBody() *RawBody {
 // RawBody creates a RawBody based on the body.
 func (b *Body) RawBody() *RawBody {
 	br := &RawBody{Transactions: make([][]byte, len(b.Transactions)), Uncles: b.Uncles, Withdrawals: b.Withdrawals, Requests: b.Requests}
-	for i, tx := range b.Transactions {
+	for i, txn := range b.Transactions {
 		var err error
-		br.Transactions[i], err = rlp.EncodeToBytes(tx)
+		br.Transactions[i], err = rlp.EncodeToBytes(txn)
 		if err != nil {
 			panic(err)
 		}
@@ -1408,8 +1446,8 @@ func CopyTxs(in Transactions) Transactions {
 	if err != nil {
 		panic(fmt.Errorf("DecodeTransactions failed: %w", err))
 	}
-	for i, tx := range in {
-		if txWrapper, ok := tx.(*BlobTxWrapper); ok {
+	for i, txn := range in {
+		if txWrapper, ok := txn.(*BlobTxWrapper); ok {
 			blobTx := out[i].(*BlobTx)
 			out[i] = &BlobTxWrapper{
 				Tx:          *blobTx,
@@ -1496,18 +1534,21 @@ func (b *Block) Hash() libcommon.Hash {
 
 type Blocks []*Block
 
-func DecodeOnlyTxMetadataFromBody(payload []byte) (baseTxId uint64, txCount uint32, err error) {
+func DecodeOnlyTxMetadataFromBody(payload []byte) (baseTxnID BaseTxnID, txCount uint32, err error) {
 	pos, _, err := rlp2.List(payload, 0)
 	if err != nil {
-		return baseTxId, txCount, err
+		return baseTxnID, txCount, err
 	}
-	pos, baseTxId, err = rlp2.U64(payload, pos)
+	var btID uint64
+	pos, btID, err = rlp2.U64(payload, pos)
 	if err != nil {
-		return baseTxId, txCount, err
+		return baseTxnID, txCount, err
 	}
+	baseTxnID = BaseTxnID(btID)
+
 	_, txCount, err = rlp2.U32(payload, pos)
 	if err != nil {
-		return baseTxId, txCount, err
+		return baseTxnID, txCount, err
 	}
 	return
 }
@@ -1547,10 +1588,10 @@ func decodeTxns(appendList *[]Transaction, s *rlp.Stream) error {
 	if _, err = s.List(); err != nil {
 		return err
 	}
-	var tx Transaction
+	var txn Transaction
 	blobTxnsAreWrappedWithBlobs := false
-	for tx, err = DecodeRLPTransaction(s, blobTxnsAreWrappedWithBlobs); err == nil; tx, err = DecodeRLPTransaction(s, blobTxnsAreWrappedWithBlobs) {
-		*appendList = append(*appendList, tx)
+	for txn, err = DecodeRLPTransaction(s, blobTxnsAreWrappedWithBlobs); err == nil; txn, err = DecodeRLPTransaction(s, blobTxnsAreWrappedWithBlobs) {
+		*appendList = append(*appendList, txn)
 	}
 	return checkErrListEnd(s, err)
 }

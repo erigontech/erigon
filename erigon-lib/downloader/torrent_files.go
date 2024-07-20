@@ -1,3 +1,19 @@
+// Copyright 2024 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+
 package downloader
 
 import (
@@ -12,7 +28,7 @@ import (
 
 	"github.com/anacrolix/torrent"
 	"github.com/anacrolix/torrent/metainfo"
-	"github.com/ledgerwatch/erigon-lib/common/dir"
+	"github.com/erigontech/erigon-lib/common/dir"
 )
 
 // AtomicTorrentFS - does provide thread-safe CRUD operations on .torrent files
@@ -25,13 +41,13 @@ func NewAtomicTorrentFS(dir string) *AtomicTorrentFS {
 	return &AtomicTorrentFS{dir: dir}
 }
 
-func (tf *AtomicTorrentFS) Exists(name string) bool {
+func (tf *AtomicTorrentFS) Exists(name string) (bool, error) {
 	tf.lock.Lock()
 	defer tf.lock.Unlock()
 	return tf.exists(name)
 }
 
-func (tf *AtomicTorrentFS) exists(name string) bool {
+func (tf *AtomicTorrentFS) exists(name string) (bool, error) {
 	if !strings.HasSuffix(name, ".torrent") {
 		name += ".torrent"
 	}
@@ -54,7 +70,11 @@ func (tf *AtomicTorrentFS) Create(name string, res []byte) (ts *torrent.TorrentS
 	tf.lock.Lock()
 	defer tf.lock.Unlock()
 
-	if !tf.exists(name) {
+	exists, err := tf.exists(name)
+	if err != nil {
+		return nil, false, err
+	}
+	if !exists {
 		err = tf.create(name, res)
 		if err != nil {
 			return nil, false, err
@@ -132,7 +152,11 @@ func (tf *AtomicTorrentFS) CreateWithMetaInfo(info *metainfo.Info, additionalMet
 	tf.lock.Lock()
 	defer tf.lock.Unlock()
 
-	if tf.exists(name) {
+	exists, err := tf.exists(name)
+	if err != nil {
+		return false, err
+	}
+	if exists {
 		return false, nil
 	}
 	if err = tf.createFromMetaInfo(filepath.Join(tf.dir, name), mi); err != nil {

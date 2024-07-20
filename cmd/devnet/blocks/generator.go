@@ -1,3 +1,19 @@
+// Copyright 2024 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+
 package blocks
 
 import (
@@ -6,12 +22,12 @@ import (
 	"fmt"
 	"testing"
 
-	"github.com/ledgerwatch/erigon/accounts/abi/bind"
-	"github.com/ledgerwatch/erigon/accounts/abi/bind/backends"
-	"github.com/ledgerwatch/erigon/core"
-	"github.com/ledgerwatch/erigon/core/types"
-	"github.com/ledgerwatch/erigon/crypto"
-	"github.com/ledgerwatch/erigon/turbo/stages/mock"
+	"github.com/erigontech/erigon/accounts/abi/bind"
+	"github.com/erigontech/erigon/accounts/abi/bind/backends"
+	"github.com/erigontech/erigon/core"
+	"github.com/erigontech/erigon/core/types"
+	"github.com/erigontech/erigon/crypto"
+	"github.com/erigontech/erigon/turbo/stages/mock"
 )
 
 type TxFn func(_ *core.BlockGen, backend bind.ContractBackend) (types.Transaction, bool)
@@ -28,7 +44,7 @@ func GenerateBlocks(t *testing.T, gspec *types.Genesis, blocks int, txs map[int]
 	contractBackend := backends.NewTestSimulatedBackendWithConfig(t, gspec.Alloc, gspec.Config, gspec.GasLimit)
 
 	chain, err := core.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, blocks, func(blockNum int, block *core.BlockGen) {
-		var tx types.Transaction
+		var txn types.Transaction
 		var isContractCall bool
 		signer := types.LatestSignerForChainID(nil)
 
@@ -36,23 +52,23 @@ func GenerateBlocks(t *testing.T, gspec *types.Genesis, blocks int, txs map[int]
 
 		for i := 0; i < txCount; i++ {
 			if txToSend, ok := txs[i%len(txs)]; ok {
-				tx, isContractCall = txToSend.Fn(block, contractBackend)
+				txn, isContractCall = txToSend.Fn(block, contractBackend)
 				var err error
-				tx, err = types.SignTx(tx, *signer, txToSend.Key)
+				txn, err = types.SignTx(txn, *signer, txToSend.Key)
 				if err != nil {
 					return
 				}
 			}
 
-			if tx != nil {
+			if txn != nil {
 				if !isContractCall {
-					err := contractBackend.SendTransaction(context.Background(), tx)
+					err := contractBackend.SendTransaction(context.Background(), txn)
 					if err != nil {
 						return
 					}
 				}
 
-				block.AddTx(tx)
+				block.AddTx(txn)
 			}
 		}
 

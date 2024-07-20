@@ -1,3 +1,19 @@
+// Copyright 2024 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+
 package sync
 
 import (
@@ -20,19 +36,19 @@ import (
 	"github.com/urfave/cli/v2"
 	"golang.org/x/sync/errgroup"
 
-	"github.com/ledgerwatch/erigon-lib/common/dbg"
-	"github.com/ledgerwatch/erigon-lib/log/v3"
+	"github.com/erigontech/erigon-lib/common/dbg"
+	"github.com/erigontech/erigon-lib/log/v3"
 
-	"github.com/ledgerwatch/erigon-lib/chain/snapcfg"
-	"github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/common/datadir"
-	"github.com/ledgerwatch/erigon-lib/downloader"
-	"github.com/ledgerwatch/erigon-lib/downloader/downloadercfg"
-	"github.com/ledgerwatch/erigon-lib/downloader/snaptype"
-	"github.com/ledgerwatch/erigon/cmd/downloader/downloadernat"
-	"github.com/ledgerwatch/erigon/cmd/utils"
-	"github.com/ledgerwatch/erigon/p2p/nat"
-	"github.com/ledgerwatch/erigon/params"
+	"github.com/erigontech/erigon-lib/chain/snapcfg"
+	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common/datadir"
+	"github.com/erigontech/erigon-lib/downloader"
+	"github.com/erigontech/erigon-lib/downloader/downloadercfg"
+	"github.com/erigontech/erigon-lib/downloader/snaptype"
+	"github.com/erigontech/erigon/cmd/downloader/downloadernat"
+	"github.com/erigontech/erigon/cmd/utils"
+	"github.com/erigontech/erigon/p2p/nat"
+	"github.com/erigontech/erigon/params"
 )
 
 type LType int
@@ -110,7 +126,7 @@ func ParseLocator(value string) (*Locator, error) {
 
 		default:
 			loc.LType = LocalFs
-			loc.Root = downloader.Clean(matches[2])
+			loc.Root = filepath.Clean(matches[2])
 		}
 
 		return &loc, nil
@@ -217,7 +233,7 @@ func NewTorrentClient(config CreateNewTorrentClientConfig) (*TorrentClient, erro
 
 	cfg, err := downloadercfg.New(dirs, version, logLevel, downloadRate, uploadRate,
 		config.TorrentPort,
-		config.ConnsPerFile, 0, nil, webseedsList, config.Chain, true)
+		config.ConnsPerFile, 0, nil, webseedsList, config.Chain, true, true)
 
 	if err != nil {
 		return nil, err

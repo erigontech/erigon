@@ -1,18 +1,21 @@
 // Copyright 2014 The go-ethereum Authors
-// This file is part of the go-ethereum library.
+// (original work)
+// Copyright 2024 The Erigon Authors
+// (modifications)
+// This file is part of Erigon.
 //
-// The go-ethereum library is free software: you can redistribute it and/or modify
+// Erigon is free software: you can redistribute it and/or modify
 // it under the terms of the GNU Lesser General Public License as published by
 // the Free Software Foundation, either version 3 of the License, or
 // (at your option) any later version.
 //
-// The go-ethereum library is distributed in the hope that it will be useful,
+// Erigon is distributed in the hope that it will be useful,
 // but WITHOUT ANY WARRANTY; without even the implied warranty of
 // MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
 // GNU Lesser General Public License for more details.
 //
 // You should have received a copy of the GNU Lesser General Public License
-// along with the go-ethereum library. If not, see <http://www.gnu.org/licenses/>.
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
 package core
 
@@ -30,28 +33,29 @@ import (
 	"github.com/holiman/uint256"
 	"golang.org/x/sync/errgroup"
 
-	"github.com/ledgerwatch/erigon-lib/log/v3"
+	"github.com/erigontech/erigon-lib/log/v3"
 
-	"github.com/ledgerwatch/erigon-lib/chain"
-	"github.com/ledgerwatch/erigon-lib/chain/networkname"
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/common/datadir"
-	"github.com/ledgerwatch/erigon-lib/common/hexutil"
-	"github.com/ledgerwatch/erigon-lib/config3"
-	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon-lib/kv/mdbx"
-	"github.com/ledgerwatch/erigon-lib/kv/rawdbv3"
-	"github.com/ledgerwatch/erigon-lib/kv/temporal"
-	state2 "github.com/ledgerwatch/erigon-lib/state"
+	"github.com/erigontech/erigon-lib/chain"
+	"github.com/erigontech/erigon-lib/chain/networkname"
+	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common/datadir"
+	"github.com/erigontech/erigon-lib/common/hexutil"
+	"github.com/erigontech/erigon-lib/config3"
+	"github.com/erigontech/erigon-lib/kv"
+	"github.com/erigontech/erigon-lib/kv/mdbx"
+	"github.com/erigontech/erigon-lib/kv/rawdbv3"
+	"github.com/erigontech/erigon-lib/kv/temporal"
+	state2 "github.com/erigontech/erigon-lib/state"
 
-	"github.com/ledgerwatch/erigon/common"
-	"github.com/ledgerwatch/erigon/consensus/ethash"
-	"github.com/ledgerwatch/erigon/consensus/merge"
-	"github.com/ledgerwatch/erigon/core/rawdb"
-	"github.com/ledgerwatch/erigon/core/state"
-	"github.com/ledgerwatch/erigon/core/types"
-	"github.com/ledgerwatch/erigon/crypto"
-	"github.com/ledgerwatch/erigon/params"
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/consensus/ethash"
+	"github.com/erigontech/erigon/consensus/merge"
+	"github.com/erigontech/erigon/core/rawdb"
+	"github.com/erigontech/erigon/core/state"
+	"github.com/erigontech/erigon/core/tracing"
+	"github.com/erigontech/erigon/core/types"
+	"github.com/erigontech/erigon/crypto"
+	"github.com/erigontech/erigon/params"
 )
 
 //go:embed allocs
@@ -344,18 +348,6 @@ func SepoliaGenesisBlock() *types.Genesis {
 	}
 }
 
-// GoerliGenesisBlock returns the Görli network genesis block.
-func GoerliGenesisBlock() *types.Genesis {
-	return &types.Genesis{
-		Config:     params.GoerliChainConfig,
-		Timestamp:  1548854791,
-		ExtraData:  hexutil.MustDecode("0x22466c6578692069732061207468696e6722202d204166726900000000000000e0a2bd4258d2768837baa26a28fe71dc079f84c70000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000"),
-		GasLimit:   10485760,
-		Difficulty: big.NewInt(1),
-		Alloc:      readPrealloc("allocs/goerli.json"),
-	}
-}
-
 // MumbaiGenesisBlock returns the Amoy network genesis block.
 func MumbaiGenesisBlock() *types.Genesis {
 	return &types.Genesis{
@@ -552,7 +544,8 @@ func GenesisToBlock(g *types.Genesis, tmpDir string, logger log.Logger) (*types.
 		genesisTmpDB := mdbx.NewMDBX(logger).InMem(tmpDir).MapSize(2 * datasize.GB).GrowthStep(1 * datasize.MB).MustOpen()
 		defer genesisTmpDB.Close()
 
-		agg, err := state2.NewAggregator(context.Background(), datadir.New(tmpDir), config3.HistoryV3AggregationStep, genesisTmpDB, logger)
+		cr := rawdb.NewCanonicalReader()
+		agg, err := state2.NewAggregator(context.Background(), datadir.New(tmpDir), config3.HistoryV3AggregationStep, genesisTmpDB, cr, logger)
 		if err != nil {
 			return err
 		}
@@ -602,7 +595,7 @@ func GenesisToBlock(g *types.Genesis, tmpDir string, logger log.Logger) (*types.
 			if overflow {
 				panic("overflow at genesis allocs")
 			}
-			statedb.AddBalance(addr, balance)
+			statedb.AddBalance(addr, balance, tracing.BalanceIncreaseGenesisBalance)
 			statedb.SetCode(addr, account.Code)
 			statedb.SetNonce(addr, account.Nonce)
 			for key, value := range account.Storage {
@@ -676,8 +669,6 @@ func GenesisBlockByChainName(chain string) *types.Genesis {
 		return HoleskyGenesisBlock()
 	case networkname.SepoliaChainName:
 		return SepoliaGenesisBlock()
-	case networkname.GoerliChainName:
-		return GoerliGenesisBlock()
 	case networkname.MumbaiChainName:
 		return MumbaiGenesisBlock()
 	case networkname.AmoyChainName:

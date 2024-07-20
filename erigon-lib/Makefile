@@ -27,7 +27,7 @@ PROTOC_OS = linux
 endif
 
 PROTOC_INCLUDE = build/include/google
-PROTO_PATH = vendor/github.com/ledgerwatch/interfaces
+PROTO_PATH = vendor/github.com/erigontech/interfaces
 
 
 default: gen
@@ -66,8 +66,8 @@ grpc: protoc-all
 		--go_opt=Mtypes/types.proto=./typesproto \
 		types/types.proto
 	PATH="$(GOBIN):$(PATH)" protoc --proto_path=$(PROTO_PATH) --go_out=gointerfaces --go-grpc_out=gointerfaces -I=$(PROTOC_INCLUDE) \
-		--go_opt=Mtypes/types.proto=github.com/ledgerwatch/erigon-lib/gointerfaces/typesproto \
-		--go-grpc_opt=Mtypes/types.proto=github.com/ledgerwatch/erigon-lib/gointerfaces/typesproto \
+		--go_opt=Mtypes/types.proto=github.com/erigontech/erigon-lib/gointerfaces/typesproto \
+		--go-grpc_opt=Mtypes/types.proto=github.com/erigontech/erigon-lib/gointerfaces/typesproto \
 		--go_opt=Mp2psentry/sentry.proto=./sentryproto \
 		--go-grpc_opt=Mp2psentry/sentry.proto=./sentryproto \
 		--go_opt=Mp2psentinel/sentinel.proto=./sentinelproto \
@@ -104,16 +104,11 @@ lintci-deps:
 lintci:
 	@CGO_CXXFLAGS="$(CGO_CXXFLAGS)" ./tools/golangci_lint.sh
 
-lint-licenses-deps:
-	@./tools/licenses_check.sh --install-deps
-lint-licenses:
-	@./tools/licenses_check.sh
-
 lint-mod-tidy:
 	@./tools/mod_tidy_check.sh
 
-lint-deps: lintci-deps lint-licenses-deps
-lint: lintci lint-licenses lint-mod-tidy
+lint-deps: lintci-deps
+lint: lintci lint-mod-tidy
 
 test:
 	$(GOTEST) --count 1 -p 2 -coverprofile=coverage.out ./...

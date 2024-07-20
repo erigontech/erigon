@@ -1,18 +1,21 @@
 // Copyright 2014 The go-ethereum Authors
-// This file is part of the go-ethereum library.
+// (original work)
+// Copyright 2024 The Erigon Authors
+// (modifications)
+// This file is part of Erigon.
 //
-// The go-ethereum library is free software: you can redistribute it and/or modify
+// Erigon is free software: you can redistribute it and/or modify
 // it under the terms of the GNU Lesser General Public License as published by
 // the Free Software Foundation, either version 3 of the License, or
 // (at your option) any later version.
 //
-// The go-ethereum library is distributed in the hope that it will be useful,
+// Erigon is distributed in the hope that it will be useful,
 // but WITHOUT ANY WARRANTY; without even the implied warranty of
 // MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
 // GNU Lesser General Public License for more details.
 //
 // You should have received a copy of the GNU Lesser General Public License
-// along with the go-ethereum library. If not, see <http://www.gnu.org/licenses/>.
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
 package state
 
@@ -21,24 +24,25 @@ import (
 	"context"
 	"testing"
 
-	"github.com/ledgerwatch/erigon-lib/common/datadir"
-	"github.com/ledgerwatch/erigon-lib/kv/temporal"
-
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
 	checker "gopkg.in/check.v1"
 
-	"github.com/ledgerwatch/erigon-lib/log/v3"
+	"github.com/erigontech/erigon-lib/chain"
+	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common/datadir"
+	"github.com/erigontech/erigon-lib/kv"
+	"github.com/erigontech/erigon-lib/kv/memdb"
+	"github.com/erigontech/erigon-lib/kv/rawdbv3"
+	"github.com/erigontech/erigon-lib/kv/temporal"
+	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon-lib/state"
+	stateLib "github.com/erigontech/erigon-lib/state"
 
-	"github.com/ledgerwatch/erigon-lib/chain"
-	"github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon-lib/kv/memdb"
-	"github.com/ledgerwatch/erigon-lib/kv/rawdbv3"
-	"github.com/ledgerwatch/erigon-lib/state"
-	stateLib "github.com/ledgerwatch/erigon-lib/state"
-	"github.com/ledgerwatch/erigon/core/types/accounts"
-	"github.com/ledgerwatch/erigon/crypto"
+	"github.com/erigontech/erigon/core/rawdb"
+	"github.com/erigontech/erigon/core/tracing"
+	"github.com/erigontech/erigon/core/types/accounts"
+	"github.com/erigontech/erigon/crypto"
 )
 
 var toAddr = common.BytesToAddress
@@ -56,11 +60,11 @@ var _ = checker.Suite(&StateSuite{})
 func (s *StateSuite) TestDump(c *checker.C) {
 	// generate a few entries
 	obj1 := s.state.GetOrNewStateObject(toAddr([]byte{0x01}))
-	obj1.AddBalance(uint256.NewInt(22))
+	obj1.AddBalance(uint256.NewInt(22), tracing.BalanceChangeUnspecified)
 	obj2 := s.state.GetOrNewStateObject(toAddr([]byte{0x01, 0x02}))
 	obj2.SetCode(crypto.Keccak256Hash([]byte{3, 3, 3, 3, 3, 3, 3}), []byte{3, 3, 3, 3, 3, 3, 3})
 	obj3 := s.state.GetOrNewStateObject(toAddr([]byte{0x02}))
-	obj3.SetBalance(uint256.NewInt(44))
+	obj3.SetBalance(uint256.NewInt(44), tracing.BalanceChangeUnspecified)
 
 	// write some of them to the trie
 	err := s.w.UpdateAccountData(obj1.address, &obj1.data, new(accounts.Account))
@@ -117,7 +121,8 @@ func (s *StateSuite) SetUpTest(c *checker.C) {
 	db := memdb.NewStateDB("")
 	defer db.Close()
 
-	agg, err := stateLib.NewAggregator(context.Background(), datadir.New(""), 16, db, log.New())
+	cr := rawdb.NewCanonicalReader()
+	agg, err := stateLib.NewAggregator(context.Background(), datadir.New(""), 16, db, cr, log.New())
 	if err != nil {
 		panic(err)
 	}
@@ -194,7 +199,7 @@ func (s *StateSuite) TestTouchDelete(c *checker.C) {
 	s.state.Reset()
 
 	snapshot := s.state.Snapshot()
-	s.state.AddBalance(common.Address{}, new(uint256.Int))
+	s.state.AddBalance(common.Address{}, new(uint256.Int), tracing.BalanceChangeUnspecified)
 
 	if len(s.state.journal.dirties) != 1 {
 		c.Fatal("expected one dirty state object")
@@ -272,7 +277,7 @@ func TestSnapshot2(t *testing.T) {
 
 	// db, trie are already non-empty values
 	so0 := state.getStateObject(stateobjaddr0)
-	so0.SetBalance(uint256.NewInt(42))
+	so0.SetBalance(uint256.NewInt(42), tracing.BalanceChangeUnspecified)
 	so0.SetNonce(43)
 	so0.SetCode(crypto.Keccak256Hash([]byte{'c', 'a', 'f', 'e'}), []byte{'c', 'a', 'f', 'e'})
 	so0.selfdestructed = false
@@ -291,7 +296,7 @@ func TestSnapshot2(t *testing.T) {
 
 	// and one with deleted == true
 	so1 := state.getStateObject(stateobjaddr1)
-	so1.SetBalance(uint256.NewInt(52))
+	so1.SetBalance(uint256.NewInt(52), tracing.BalanceChangeUnspecified)
 	so1.SetNonce(53)
 	so1.SetCode(crypto.Keccak256Hash([]byte{'c', 'a', 'f', 'e', '2'}), []byte{'c', 'a', 'f', 'e', '2'})
 	so1.selfdestructed = true
@@ -374,7 +379,8 @@ func NewTestTemporalDb(tb testing.TB) (kv.RwDB, kv.RwTx, *state.Aggregator) {
 	db := memdb.NewStateDB(tb.TempDir())
 	tb.Cleanup(db.Close)
 
-	agg, err := state.NewAggregator(context.Background(), datadir.New(tb.TempDir()), 16, db, log.New())
+	cr := rawdb.NewCanonicalReader()
+	agg, err := state.NewAggregator(context.Background(), datadir.New(tb.TempDir()), 16, db, cr, log.New())
 	if err != nil {
 		tb.Fatal(err)
 	}
@@ -409,12 +415,12 @@ func TestDump(t *testing.T) {
 
 	// generate a few entries
 	obj1 := st.GetOrNewStateObject(toAddr([]byte{0x01}))
-	obj1.AddBalance(uint256.NewInt(22))
+	obj1.AddBalance(uint256.NewInt(22), tracing.BalanceChangeUnspecified)
 	obj2 := st.GetOrNewStateObject(toAddr([]byte{0x01, 0x02}))
 	obj2.SetCode(crypto.Keccak256Hash([]byte{3, 3, 3, 3, 3, 3, 3}), []byte{3, 3, 3, 3, 3, 3, 3})
 	obj2.setIncarnation(1)
 	obj3 := st.GetOrNewStateObject(toAddr([]byte{0x02}))
-	obj3.SetBalance(uint256.NewInt(44))
+	obj3.SetBalance(uint256.NewInt(44), tracing.BalanceChangeUnspecified)
 
 	w := NewWriterV4(domains)
 	// write some of them to the trie

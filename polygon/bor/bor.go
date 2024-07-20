@@ -1,3 +1,19 @@
+// Copyright 2024 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+
 package bor
 
 import (
@@ -17,37 +33,41 @@ import (
 	"time"
 
 	lru "github.com/hashicorp/golang-lru/arc/v2"
+	"github.com/holiman/uint256"
 	"github.com/xsleonard/go-merkle"
 	"golang.org/x/crypto/sha3"
 	"golang.org/x/sync/errgroup"
 
-	"github.com/ledgerwatch/erigon-lib/log/v3"
+	"github.com/erigontech/erigon-lib/log/v3"
 
-	"github.com/ledgerwatch/erigon-lib/chain"
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/common/length"
-	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon/common"
-	"github.com/ledgerwatch/erigon/consensus"
-	"github.com/ledgerwatch/erigon/consensus/misc"
-	"github.com/ledgerwatch/erigon/core/rawdb"
-	"github.com/ledgerwatch/erigon/core/state"
-	"github.com/ledgerwatch/erigon/core/types"
-	"github.com/ledgerwatch/erigon/core/types/accounts"
-	"github.com/ledgerwatch/erigon/crypto"
-	"github.com/ledgerwatch/erigon/crypto/cryptopool"
-	"github.com/ledgerwatch/erigon/eth/ethconfig/estimate"
-	"github.com/ledgerwatch/erigon/params"
-	"github.com/ledgerwatch/erigon/polygon/bor/borcfg"
-	"github.com/ledgerwatch/erigon/polygon/bor/finality"
-	"github.com/ledgerwatch/erigon/polygon/bor/finality/flags"
-	"github.com/ledgerwatch/erigon/polygon/bor/finality/whitelist"
-	"github.com/ledgerwatch/erigon/polygon/bor/statefull"
-	"github.com/ledgerwatch/erigon/polygon/bor/valset"
-	"github.com/ledgerwatch/erigon/polygon/heimdall"
-	"github.com/ledgerwatch/erigon/rlp"
-	"github.com/ledgerwatch/erigon/rpc"
-	"github.com/ledgerwatch/erigon/turbo/services"
+	"github.com/erigontech/erigon-lib/chain"
+	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common/length"
+	"github.com/erigontech/erigon-lib/kv"
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/consensus"
+	"github.com/erigontech/erigon/consensus/misc"
+	"github.com/erigontech/erigon/core/rawdb"
+	"github.com/erigontech/erigon/core/state"
+	"github.com/erigontech/erigon/core/tracing"
+	"github.com/erigontech/erigon/core/types"
+	"github.com/erigontech/erigon/core/types/accounts"
+	"github.com/erigontech/erigon/core/vm/evmtypes"
+	"github.com/erigontech/erigon/crypto"
+	"github.com/erigontech/erigon/crypto/cryptopool"
+	"github.com/erigontech/erigon/eth/ethconfig/estimate"
+	"github.com/erigontech/erigon/params"
+	"github.com/erigontech/erigon/polygon/bor/borcfg"
+	"github.com/erigontech/erigon/polygon/bor/finality"
+	"github.com/erigontech/erigon/polygon/bor/finality/flags"
+	"github.com/erigontech/erigon/polygon/bor/finality/whitelist"
+	"github.com/erigontech/erigon/polygon/bor/statefull"
+	"github.com/erigontech/erigon/polygon/bor/valset"
+	"github.com/erigontech/erigon/polygon/bridge"
+	"github.com/erigontech/erigon/polygon/heimdall"
+	"github.com/erigontech/erigon/rlp"
+	"github.com/erigontech/erigon/rpc"
+	"github.com/erigontech/erigon/turbo/services"
 )
 
 const (
@@ -309,6 +329,7 @@ type Bor struct {
 	frozenSnapshotsInit sync.Once
 	rootHashCache       *lru.ARCCache[string, string]
 	headerProgress      HeaderProgress
+	polygonBridge       bridge.PolygonBridge
 }
 
 type signer struct {
@@ -325,6 +346,7 @@ func New(
 	heimdallClient heimdall.HeimdallClient,
 	genesisContracts GenesisContracts,
 	logger log.Logger,
+	polygonBridge bridge.Service,
 ) *Bor {
 	// get bor config
 	borConfig := chainConfig.Bor.(*borcfg.BorConfig)
@@ -351,6 +373,7 @@ func New(
 		execCtx:                context.Background(),
 		logger:                 logger,
 		closeCh:                make(chan struct{}),
+		polygonBridge:          polygonBridge,
 	}
 
 	c.authorizedSigner.Store(&signer{
@@ -998,6 +1021,7 @@ func (c *Bor) Finalize(config *chain.Config, header *types.Header, state *state.
 				c.logger.Error("[bor] committing span", "err", err)
 				return nil, types.Receipts{}, nil, err
 			}
+
 			// commit states
 			if err := c.CommitStates(state, header, cx, syscall); err != nil {
 				err := fmt.Errorf("Finalize.CommitStates: %w", err)
@@ -1102,7 +1126,7 @@ func (c *Bor) GenerateSeal(chain consensus.ChainHeaderReader, currnt, parent *ty
 }
 
 func (c *Bor) Initialize(config *chain.Config, chain consensus.ChainHeaderReader, header *types.Header,
-	state *state.IntraBlockState, syscall consensus.SysCallCustom, logger log.Logger) {
+	state *state.IntraBlockState, syscall consensus.SysCallCustom, logger log.Logger, tracer *tracing.Hooks) {
 }
 
 // Authorize injects a private key into the consensus engine to mint new blocks
@@ -1460,6 +1484,24 @@ func (c *Bor) CommitStates(
 	syscall consensus.SystemCall,
 ) error {
 	blockNum := header.Number.Uint64()
+
+	if c.polygonBridge != nil {
+		events, err := c.polygonBridge.GetEvents(c.execCtx, blockNum)
+		if err != nil {
+			return err
+		}
+
+		c.logger.Debug("using polygon bridge", "len(events)", len(events), "blockNum", blockNum)
+
+		for _, event := range events {
+			_, err := syscall(*event.To(), event.Data())
+			if err != nil {
+				return err
+			}
+		}
+		return nil
+	}
+
 	events := chain.Chain.BorEventsByBlock(header.Hash(), blockNum)
 
 	//if len(events) == 50 || len(events) == 0 { // we still sometime could get 0 events from borevent file
@@ -1607,6 +1649,52 @@ func getUpdatedValidatorSet(oldValidatorSet *valset.ValidatorSet, newVals []*val
 
 func isSprintStart(number, sprint uint64) bool {
 	return number%sprint == 0
+}
+
+// BorTransfer transfer in Bor
+func BorTransfer(db evmtypes.IntraBlockState, sender, recipient libcommon.Address, amount *uint256.Int, bailout bool) {
+	// get inputs before
+	input1 := db.GetBalance(sender).Clone()
+	input2 := db.GetBalance(recipient).Clone()
+
+	if !bailout {
+		db.SubBalance(sender, amount, tracing.BalanceChangeTransfer)
+	}
+	db.AddBalance(recipient, amount, tracing.BalanceChangeTransfer)
+
+	// get outputs after
+	output1 := db.GetBalance(sender).Clone()
+	output2 := db.GetBalance(recipient).Clone()
+
+	// add transfer log into state
+	addTransferLog(db, transferLogSig, sender, recipient, amount, input1, input2, output1, output2)
+}
+
+func (c *Bor) GetTransferFunc() evmtypes.TransferFunc {
+	return BorTransfer
+}
+
+// AddFeeTransferLog adds fee transfer log into state
+// Deprecating transfer log and will be removed in future fork. PLEASE DO NOT USE this transfer log going forward. Parameters won't get updated as expected going forward with EIP1559
+func AddFeeTransferLog(ibs evmtypes.IntraBlockState, sender libcommon.Address, coinbase libcommon.Address, result *evmtypes.ExecutionResult) {
+	output1 := result.SenderInitBalance.Clone()
+	output2 := result.CoinbaseInitBalance.Clone()
+	addTransferLog(
+		ibs,
+		transferFeeLogSig,
+		sender,
+		coinbase,
+		result.FeeTipped,
+		result.SenderInitBalance,
+		result.CoinbaseInitBalance,
+		output1.Sub(output1, result.FeeTipped),
+		output2.Add(output2, result.FeeTipped),
+	)
+
+}
+
+func (c *Bor) GetPostApplyMessageFunc() evmtypes.PostApplyMessageFunc {
+	return AddFeeTransferLog
 }
 
 // In bor, RLP encoding of BlockExtraData will be stored in the Extra field in the header

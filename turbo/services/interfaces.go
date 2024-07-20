@@ -1,17 +1,33 @@
+// Copyright 2024 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+
 package services
 
 import (
 	"context"
 
-	"github.com/ledgerwatch/erigon-lib/log/v3"
+	"github.com/erigontech/erigon-lib/log/v3"
 
-	"github.com/ledgerwatch/erigon-lib/chain"
-	"github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/downloader/snaptype"
-	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon/core/types"
-	"github.com/ledgerwatch/erigon/eth/ethconfig"
-	"github.com/ledgerwatch/erigon/rlp"
+	"github.com/erigontech/erigon-lib/chain"
+	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/downloader/snaptype"
+	"github.com/erigontech/erigon-lib/kv"
+	"github.com/erigontech/erigon/core/types"
+	"github.com/erigontech/erigon/eth/ethconfig"
+	"github.com/erigontech/erigon/rlp"
 )
 
 type All struct {
@@ -32,7 +48,7 @@ type HeaderReader interface {
 	HeaderByHash(ctx context.Context, tx kv.Getter, hash common.Hash) (*types.Header, error)
 	ReadAncestor(db kv.Getter, hash common.Hash, number, ancestor uint64, maxNonCanonical *uint64) (common.Hash, uint64)
 
-	// HeadersRange - TODO: change it to `iter`
+	// HeadersRange - TODO: change it to `stream`
 	HeadersRange(ctx context.Context, walker func(header *types.Header) error) error
 	Integrity(ctx context.Context) error
 }

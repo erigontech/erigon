@@ -1,18 +1,21 @@
 // Copyright 2019 The go-ethereum Authors
-// This file is part of the go-ethereum library.
+// (original work)
+// Copyright 2024 The Erigon Authors
+// (modifications)
+// This file is part of Erigon.
 //
-// The go-ethereum library is free software: you can redistribute it and/or modify
+// Erigon is free software: you can redistribute it and/or modify
 // it under the terms of the GNU Lesser General Public License as published by
 // the Free Software Foundation, either version 3 of the License, or
 // (at your option) any later version.
 //
-// The go-ethereum library is distributed in the hope that it will be useful,
+// Erigon is distributed in the hope that it will be useful,
 // but WITHOUT ANY WARRANTY; without even the implied warranty of
 // MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
 // GNU Lesser General Public License for more details.
 //
 // You should have received a copy of the GNU Lesser General Public License
-// along with the go-ethereum library. If not, see <http://www.gnu.org/licenses/>.
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
 package state_test
 
@@ -27,22 +30,23 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/ledgerwatch/erigon-lib/chain"
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon-lib/log/v3"
-	state3 "github.com/ledgerwatch/erigon-lib/state"
+	"github.com/erigontech/erigon-lib/chain"
+	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/kv"
+	"github.com/erigontech/erigon-lib/log/v3"
+	state3 "github.com/erigontech/erigon-lib/state"
 
-	"github.com/ledgerwatch/erigon/accounts/abi/bind"
-	"github.com/ledgerwatch/erigon/accounts/abi/bind/backends"
-	"github.com/ledgerwatch/erigon/common"
-	"github.com/ledgerwatch/erigon/core"
-	"github.com/ledgerwatch/erigon/core/state"
-	"github.com/ledgerwatch/erigon/core/state/contracts"
-	"github.com/ledgerwatch/erigon/core/types"
-	"github.com/ledgerwatch/erigon/crypto"
-	"github.com/ledgerwatch/erigon/params"
-	"github.com/ledgerwatch/erigon/turbo/stages/mock"
+	"github.com/erigontech/erigon/accounts/abi/bind"
+	"github.com/erigontech/erigon/accounts/abi/bind/backends"
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/core"
+	"github.com/erigontech/erigon/core/state"
+	"github.com/erigontech/erigon/core/state/contracts"
+	"github.com/erigontech/erigon/core/tracing"
+	"github.com/erigontech/erigon/core/types"
+	"github.com/erigontech/erigon/crypto"
+	"github.com/erigontech/erigon/params"
+	"github.com/erigontech/erigon/turbo/stages/mock"
 )
 
 // Create revival problem
@@ -90,37 +94,37 @@ func TestCreate2Revive(t *testing.T) {
 	// In the forth block, we create the second child contract, and we expect it to have a "clean slate" of storage,
 	// i.e. without any storage items that "inherited" from the first child contract by mistake
 	chain, err := core.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 4, func(i int, block *core.BlockGen) {
-		var tx types.Transaction
+		var txn types.Transaction
 
 		switch i {
 		case 0:
-			contractAddress, tx, revive, err = contracts.DeployRevive(transactOpts, contractBackend)
+			contractAddress, txn, revive, err = contracts.DeployRevive(transactOpts, contractBackend)
 			if err != nil {
 				t.Fatal(err)
 			}
-			block.AddTx(tx)
+			block.AddTx(txn)
 		case 1:
-			tx, err = revive.Deploy(transactOpts, big.NewInt(0))
+			txn, err = revive.Deploy(transactOpts, big.NewInt(0))
 			if err != nil {
 				t.Fatal(err)
 			}
-			block.AddTx(tx)
+			block.AddTx(txn)
 		case 2:
-			tx, err = types.SignTx(types.NewTransaction(block.TxNonce(address), create2address, uint256.NewInt(0), 1000000, new(uint256.Int), nil), *signer, key)
+			txn, err = types.SignTx(types.NewTransaction(block.TxNonce(address), create2address, uint256.NewInt(0), 1000000, new(uint256.Int), nil), *signer, key)
 			if err != nil {
 				t.Fatal(err)
 			}
-			err = contractBackend.SendTransaction(context.Background(), tx)
+			err = contractBackend.SendTransaction(context.Background(), txn)
 			if err != nil {
 				t.Fatal(err)
 			}
-			block.AddTx(tx)
+			block.AddTx(txn)
 		case 3:
-			tx, err = revive.Deploy(transactOpts, big.NewInt(0))
+			txn, err = revive.Deploy(transactOpts, big.NewInt(0))
 			if err != nil {
 				t.Fatal(err)
 			}
-			block.AddTx(tx)
+			block.AddTx(txn)
 		}
 		contractBackend.Commit()
 	})
@@ -261,71 +265,71 @@ func TestCreate2Polymorth(t *testing.T) {
 	// In the forth block, we create the second child contract
 	// In the 5th block, we delete and re-create the child contract twice
 	chain, err := core.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 5, func(i int, block *core.BlockGen) {
-		var tx types.Transaction
+		var txn types.Transaction
 
 		switch i {
 		case 0:
-			contractAddress, tx, poly, err = contracts.DeployPoly(transactOpts, contractBackend)
+			contractAddress, txn, poly, err = contracts.DeployPoly(transactOpts, contractBackend)
 			if err != nil {
 				t.Fatal(err)
 			}
-			block.AddTx(tx)
+			block.AddTx(txn)
 		case 1:
-			tx, err = poly.Deploy(transactOpts, big.NewInt(0))
+			txn, err = poly.Deploy(transactOpts, big.NewInt(0))
 			if err != nil {
 				t.Fatal(err)
 			}
-			block.AddTx(tx)
+			block.AddTx(txn)
 		case 2:
 			// Trigger self-destruct
-			tx, err = types.SignTx(types.NewTransaction(block.TxNonce(address), create2address, uint256.NewInt(0), 1000000, new(uint256.Int), nil), *signer, key)
+			txn, err = types.SignTx(types.NewTransaction(block.TxNonce(address), create2address, uint256.NewInt(0), 1000000, new(uint256.Int), nil), *signer, key)
 			if err != nil {
 				t.Fatal(err)
 			}
-			err = contractBackend.SendTransaction(context.Background(), tx)
+			err = contractBackend.SendTransaction(context.Background(), txn)
 			if err != nil {
 				t.Fatal(err)
 			}
-			block.AddTx(tx)
+			block.AddTx(txn)
 		case 3:
-			tx, err = poly.Deploy(transactOpts, big.NewInt(0))
+			txn, err = poly.Deploy(transactOpts, big.NewInt(0))
 			if err != nil {
 				t.Fatal(err)
 			}
-			block.AddTx(tx)
+			block.AddTx(txn)
 		case 4:
 			// Trigger self-destruct
-			tx, err = types.SignTx(types.NewTransaction(block.TxNonce(address), create2address, uint256.NewInt(0), 1000000, new(uint256.Int), nil), *signer, key)
+			txn, err = types.SignTx(types.NewTransaction(block.TxNonce(address), create2address, uint256.NewInt(0), 1000000, new(uint256.Int), nil), *signer, key)
 			if err != nil {
 				t.Fatal(err)
 			}
-			err = contractBackend.SendTransaction(context.Background(), tx)
+			err = contractBackend.SendTransaction(context.Background(), txn)
 			if err != nil {
 				t.Fatal(err)
 			}
-			block.AddTx(tx)
+			block.AddTx(txn)
 			// Recreate in the same block
-			tx, err = poly.Deploy(transactOpts, big.NewInt(0))
+			txn, err = poly.Deploy(transactOpts, big.NewInt(0))
 			if err != nil {
 				t.Fatal(err)
 			}
-			block.AddTx(tx)
+			block.AddTx(txn)
 			// Trigger self-destruct
-			tx, err = types.SignTx(types.NewTransaction(block.TxNonce(address), create2address, uint256.NewInt(0), 1000000, new(uint256.Int), nil), *signer, key)
+			txn, err = types.SignTx(types.NewTransaction(block.TxNonce(address), create2address, uint256.NewInt(0), 1000000, new(uint256.Int), nil), *signer, key)
 			if err != nil {
 				t.Fatal(err)
 			}
-			err = contractBackend.SendTransaction(context.Background(), tx)
+			err = contractBackend.SendTransaction(context.Background(), txn)
 			if err != nil {
 				t.Fatal(err)
 			}
-			block.AddTx(tx)
+			block.AddTx(txn)
 			// Recreate in the same block
-			tx, err = poly.Deploy(transactOpts, big.NewInt(0))
+			txn, err = poly.Deploy(transactOpts, big.NewInt(0))
 			if err != nil {
 				t.Fatal(err)
 			}
-			block.AddTx(tx)
+			block.AddTx(txn)
 		}
 		contractBackend.Commit()
 	})
@@ -475,27 +479,27 @@ func TestReorgOverSelfDestruct(t *testing.T) {
 
 	// Here we generate 3 blocks, two of which (the one with "Change" invocation and "Destruct" invocation will be reverted during the reorg)
 	chain, err := core.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 3, func(i int, block *core.BlockGen) {
-		var tx types.Transaction
+		var txn types.Transaction
 
 		switch i {
 		case 0:
-			contractAddress, tx, selfDestruct, err = contracts.DeploySelfdestruct(transactOpts, contractBackend)
+			contractAddress, txn, selfDestruct, err = contracts.DeploySelfdestruct(transactOpts, contractBackend)
 			if err != nil {
 				t.Fatal(err)
 			}
-			block.AddTx(tx)
+			block.AddTx(txn)
 		case 1:
-			tx, err = selfDestruct.Change(transactOpts)
+			txn, err = selfDestruct.Change(transactOpts)
 			if err != nil {
 				t.Fatal(err)
 			}
-			block.AddTx(tx)
+			block.AddTx(txn)
 		case 2:
-			tx, err = selfDestruct.Destruct(transactOpts)
+			txn, err = selfDestruct.Destruct(transactOpts)
 			if err != nil {
 				t.Fatal(err)
 			}
-			block.AddTx(tx)
+			block.AddTx(txn)
 		}
 		contractBackend.Commit()
 	})
@@ -510,15 +514,15 @@ func TestReorgOverSelfDestruct(t *testing.T) {
 	transactOptsLonger.GasLimit = 1000000
 
 	longerChain, err := core.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 4, func(i int, block *core.BlockGen) {
-		var tx types.Transaction
+		var txn types.Transaction
 
 		switch i {
 		case 0:
-			_, tx, _, err = contracts.DeploySelfdestruct(transactOptsLonger, contractBackendLonger)
+			_, txn, _, err = contracts.DeploySelfdestruct(transactOptsLonger, contractBackendLonger)
 			if err != nil {
 				t.Fatal(err)
 			}
-			block.AddTx(tx)
+			block.AddTx(txn)
 		}
 		contractBackendLonger.Commit()
 	})
@@ -623,21 +627,21 @@ func TestReorgOverStateChange(t *testing.T) {
 
 	// Here we generate 3 blocks, two of which (the one with "Change" invocation and "Destruct" invocation will be reverted during the reorg)
 	chain, err := core.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 2, func(i int, block *core.BlockGen) {
-		var tx types.Transaction
+		var txn types.Transaction
 
 		switch i {
 		case 0:
-			contractAddress, tx, selfDestruct, err = contracts.DeploySelfdestruct(transactOpts, contractBackend)
+			contractAddress, txn, selfDestruct, err = contracts.DeploySelfdestruct(transactOpts, contractBackend)
 			if err != nil {
 				t.Fatal(err)
 			}
-			block.AddTx(tx)
+			block.AddTx(txn)
 		case 1:
-			tx, err = selfDestruct.Change(transactOpts)
+			txn, err = selfDestruct.Change(transactOpts)
 			if err != nil {
 				t.Fatal(err)
 			}
-			block.AddTx(tx)
+			block.AddTx(txn)
 		}
 		contractBackend.Commit()
 	})
@@ -651,15 +655,15 @@ func TestReorgOverStateChange(t *testing.T) {
 	require.NoError(t, err)
 	transactOptsLonger.GasLimit = 1000000
 	longerChain, err := core.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 3, func(i int, block *core.BlockGen) {
-		var tx types.Transaction
+		var txn types.Transaction
 
 		switch i {
 		case 0:
-			_, tx, _, err = contracts.DeploySelfdestruct(transactOptsLonger, contractBackendLonger)
+			_, txn, _, err = contracts.DeploySelfdestruct(transactOptsLonger, contractBackendLonger)
 			if err != nil {
 				t.Fatal(err)
 			}
-			block.AddTx(tx)
+			block.AddTx(txn)
 		}
 		contractBackendLonger.Commit()
 	})
@@ -781,15 +785,15 @@ func TestCreateOnExistingStorage(t *testing.T) {
 	// On the address contractAddr, where there is a storage item in the genesis, but no contract code
 	// We expect the pre-existing storage items to be removed by the deployment
 	chain, err := core.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 4, func(i int, block *core.BlockGen) {
-		var tx types.Transaction
+		var txn types.Transaction
 
 		switch i {
 		case 0:
-			contractAddress, tx, _, err = contracts.DeployRevive(transactOpts, contractBackend)
+			contractAddress, txn, _, err = contracts.DeployRevive(transactOpts, contractBackend)
 			if err != nil {
 				t.Fatal(err)
 			}
-			block.AddTx(tx)
+			block.AddTx(txn)
 		}
 		contractBackend.Commit()
 	})
@@ -868,19 +872,20 @@ func TestReproduceCrash(t *testing.T) {
 		t.Errorf("error finalising 1st tx: %v", err)
 	}
 	// Start the 3rd transaction
-	intraBlockState.AddBalance(contract, uint256.NewInt(1000000000))
+	intraBlockState.AddBalance(contract, uint256.NewInt(1000000000), tracing.BalanceChangeUnspecified)
 	intraBlockState.SetState(contract, &storageKey2, *value2)
 	if err := intraBlockState.FinalizeTx(&chain.Rules{}, tsw); err != nil {
 		t.Errorf("error finalising 1st tx: %v", err)
 	}
 	// Start the 4th transaction - clearing both storage cells
-	intraBlockState.SubBalance(contract, uint256.NewInt(1000000000))
+	intraBlockState.SubBalance(contract, uint256.NewInt(1000000000), tracing.BalanceChangeUnspecified)
 	intraBlockState.SetState(contract, &storageKey1, *value0)
 	intraBlockState.SetState(contract, &storageKey2, *value0)
 	if err := intraBlockState.FinalizeTx(&chain.Rules{}, tsw); err != nil {
 		t.Errorf("error finalising 1st tx: %v", err)
 	}
 }
+
 func TestEip2200Gas(t *testing.T) {
 	t.Parallel()
 	// Configure and generate a sample block chain
@@ -918,22 +923,22 @@ func TestEip2200Gas(t *testing.T) {
 	// Here we generate 1 block with 2 transactions, first creates a contract with some initial values in the
 	// It activates the SSTORE pricing rules specific to EIP-2200 (istanbul)
 	chain, err := core.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 3, func(i int, block *core.BlockGen) {
-		var tx types.Transaction
+		var txn types.Transaction
 
 		switch i {
 		case 0:
-			contractAddress, tx, selfDestruct, err = contracts.DeploySelfdestruct(transactOpts, contractBackend)
+			contractAddress, txn, selfDestruct, err = contracts.DeploySelfdestruct(transactOpts, contractBackend)
 			if err != nil {
 				t.Fatal(err)
 			}
-			block.AddTx(tx)
+			block.AddTx(txn)
 
 			transactOpts.GasPrice = big.NewInt(1)
-			tx, err = selfDestruct.Change(transactOpts)
+			txn, err = selfDestruct.Change(transactOpts)
 			if err != nil {
 				t.Fatal(err)
 			}
-			block.AddTx(tx)
+			block.AddTx(txn)
 		}
 		contractBackend.Commit()
 	})
@@ -1008,21 +1013,21 @@ func TestWrongIncarnation(t *testing.T) {
 	var changer *contracts.Changer
 
 	chain, err := core.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 2, func(i int, block *core.BlockGen) {
-		var tx types.Transaction
+		var txn types.Transaction
 
 		switch i {
 		case 0:
-			contractAddress, tx, changer, err = contracts.DeployChanger(transactOpts, contractBackend)
+			contractAddress, txn, changer, err = contracts.DeployChanger(transactOpts, contractBackend)
 			if err != nil {
 				t.Fatal(err)
 			}
-			block.AddTx(tx)
+			block.AddTx(txn)
 		case 1:
-			tx, err = changer.Change(transactOpts)
+			txn, err = changer.Change(transactOpts)
 			if err != nil {
 				t.Fatal(err)
 			}
-			block.AddTx(tx)
+			block.AddTx(txn)
 		}
 		contractBackend.Commit()
 	})
@@ -1124,25 +1129,25 @@ func TestWrongIncarnation2(t *testing.T) {
 	var contractAddress libcommon.Address
 
 	chain, err := core.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 2, func(i int, block *core.BlockGen) {
-		var tx types.Transaction
+		var txn types.Transaction
 
 		switch i {
 		case 0:
-			tx, err = types.SignTx(types.NewTransaction(block.TxNonce(address), knownContractAddress, uint256.NewInt(1000), 1000000, new(uint256.Int), nil), *signer, key)
+			txn, err = types.SignTx(types.NewTransaction(block.TxNonce(address), knownContractAddress, uint256.NewInt(1000), 1000000, new(uint256.Int), nil), *signer, key)
 			if err != nil {
 				t.Fatal(err)
 			}
-			err = contractBackend.SendTransaction(context.Background(), tx)
+			err = contractBackend.SendTransaction(context.Background(), txn)
 			if err != nil {
 				t.Fatal(err)
 			}
-			block.AddTx(tx)
+			block.AddTx(txn)
 		case 1:
-			contractAddress, tx, _, err = contracts.DeployChanger(transactOpts, contractBackend)
+			contractAddress, txn, _, err = contracts.DeployChanger(transactOpts, contractBackend)
 			if err != nil {
 				t.Fatal(err)
 			}
-			block.AddTx(tx)
+			block.AddTx(txn)
 		}
 		contractBackend.Commit()
 	})
@@ -1151,7 +1156,7 @@ func TestWrongIncarnation2(t *testing.T) {
 	}
 
 	if knownContractAddress != contractAddress {
-		t.Errorf("Expexted contractAddress: %x, got %x", knownContractAddress, contractAddress)
+		t.Errorf("Expected contractAddress: %x, got %x", knownContractAddress, contractAddress)
 	}
 
 	// Create a longer chain, with 4 blocks (with higher total difficulty) that reverts the change of stroage self-destruction of the contract
@@ -1160,19 +1165,19 @@ func TestWrongIncarnation2(t *testing.T) {
 	require.NoError(t, err)
 	transactOptsLonger.GasLimit = 1000000
 	longerChain, err := core.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 3, func(i int, block *core.BlockGen) {
-		var tx types.Transaction
+		var txn types.Transaction
 
 		switch i {
 		case 0:
-			tx, err = types.SignTx(types.NewTransaction(block.TxNonce(address), knownContractAddress, uint256.NewInt(1000), 1000000, new(uint256.Int), nil), *signer, key)
+			txn, err = types.SignTx(types.NewTransaction(block.TxNonce(address), knownContractAddress, uint256.NewInt(1000), 1000000, new(uint256.Int), nil), *signer, key)
 			if err != nil {
 				t.Fatal(err)
 			}
-			err = contractBackendLonger.SendTransaction(context.Background(), tx)
+			err = contractBackendLonger.SendTransaction(context.Background(), txn)
 			if err != nil {
 				t.Fatal(err)
 			}
-			block.AddTx(tx)
+			block.AddTx(txn)
 		}
 		contractBackendLonger.Commit()
 	})
@@ -1259,7 +1264,7 @@ func TestChangeAccountCodeBetweenBlocks(t *testing.T) {
 	oldCode := []byte{0x01, 0x02, 0x03, 0x04}
 
 	intraBlockState.SetCode(contract, oldCode)
-	intraBlockState.AddBalance(contract, uint256.NewInt(1000000000))
+	intraBlockState.AddBalance(contract, uint256.NewInt(1000000000), tracing.BalanceChangeUnspecified)
 	if err := intraBlockState.FinalizeTx(&chain.Rules{}, tsw); err != nil {
 		t.Errorf("error finalising 1st tx: %v", err)
 	}
@@ -1312,7 +1317,7 @@ func TestCacheCodeSizeSeparately(t *testing.T) {
 	code := []byte{0x01, 0x02, 0x03, 0x04}
 
 	intraBlockState.SetCode(contract, code)
-	intraBlockState.AddBalance(contract, uint256.NewInt(1000000000))
+	intraBlockState.AddBalance(contract, uint256.NewInt(1000000000), tracing.BalanceChangeUnspecified)
 	if err := intraBlockState.FinalizeTx(&chain.Rules{}, w); err != nil {
 		t.Errorf("error finalising 1st tx: %v", err)
 	}
@@ -1330,7 +1335,7 @@ func TestCacheCodeSizeSeparately(t *testing.T) {
 	assert.Equal(t, code, code2, "new code should be received")
 }
 
-// TestCacheCodeSizeInTrie makes sure that we dont just read from the DB all the time
+// TestCacheCodeSizeInTrie makes sure that we don't just read from the DB all the time
 func TestCacheCodeSizeInTrie(t *testing.T) {
 	t.Parallel()
 	//t.Skip("switch to TG state readers/writers")
@@ -1351,7 +1356,7 @@ func TestCacheCodeSizeInTrie(t *testing.T) {
 	code := []byte{0x01, 0x02, 0x03, 0x04}
 
 	intraBlockState.SetCode(contract, code)
-	intraBlockState.AddBalance(contract, uint256.NewInt(1000000000))
+	intraBlockState.AddBalance(contract, uint256.NewInt(1000000000), tracing.BalanceChangeUnspecified)
 	if err := intraBlockState.FinalizeTx(&chain.Rules{}, w); err != nil {
 		t.Errorf("error finalising 1st tx: %v", err)
 	}
@@ -1405,16 +1410,16 @@ func TestRecreateAndRewind(t *testing.T) {
 	var phoenixAddress libcommon.Address
 
 	chain, err1 := core.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 4, func(i int, block *core.BlockGen) {
-		var tx types.Transaction
+		var txn types.Transaction
 
 		switch i {
 		case 0:
 			// Deploy phoenix factory
-			reviveAddress, tx, revive, err = contracts.DeployRevive2(transactOpts, contractBackend)
+			reviveAddress, txn, revive, err = contracts.DeployRevive2(transactOpts, contractBackend)
 			if err != nil {
 				panic(err)
 			}
-			block.AddTx(tx)
+			block.AddTx(txn)
 		case 1:
 			// Calculate the address of the Phoenix and create handle to phoenix contract
 			var codeHash libcommon.Hash
@@ -1426,35 +1431,35 @@ func TestRecreateAndRewind(t *testing.T) {
 				panic(err)
 			}
 			// Deploy phoenix
-			if tx, err = revive.Deploy(transactOpts, [32]byte{}); err != nil {
+			if txn, err = revive.Deploy(transactOpts, [32]byte{}); err != nil {
 				panic(err)
 			}
-			block.AddTx(tx)
+			block.AddTx(txn)
 			// Modify phoenix storage
-			if tx, err = phoenix.Increment(transactOpts); err != nil {
+			if txn, err = phoenix.Increment(transactOpts); err != nil {
 				panic(err)
 			}
-			block.AddTx(tx)
-			if tx, err = phoenix.Increment(transactOpts); err != nil {
+			block.AddTx(txn)
+			if txn, err = phoenix.Increment(transactOpts); err != nil {
 				panic(err)
 			}
-			block.AddTx(tx)
+			block.AddTx(txn)
 		case 2:
 			// Destruct the phoenix
-			if tx, err = phoenix.Die(transactOpts); err != nil {
+			if txn, err = phoenix.Die(transactOpts); err != nil {
 				panic(err)
 			}
-			block.AddTx(tx)
+			block.AddTx(txn)
 		case 3:
 			// Recreate the phoenix, and change the storage
-			if tx, err = revive.Deploy(transactOpts, [32]byte{}); err != nil {
+			if txn, err = revive.Deploy(transactOpts, [32]byte{}); err != nil {
 				panic(err)
 			}
-			block.AddTx(tx)
-			if tx, err = phoenix.Increment(transactOpts); err != nil {
+			block.AddTx(txn)
+			if txn, err = phoenix.Increment(transactOpts); err != nil {
 				panic(err)
 			}
-			block.AddTx(tx)
+			block.AddTx(txn)
 		}
 		contractBackend.Commit()
 	})
@@ -1467,16 +1472,16 @@ func TestRecreateAndRewind(t *testing.T) {
 	require.NoError(t, err)
 	transactOptsLonger.GasLimit = 1000000
 	longerChain, err1 := core.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 5, func(i int, block *core.BlockGen) {
-		var tx types.Transaction
+		var txn types.Transaction
 
 		switch i {
 		case 0:
 			// Deploy phoenix factory
-			reviveAddress, tx, revive, err = contracts.DeployRevive2(transactOptsLonger, contractBackendLonger)
+			reviveAddress, txn, revive, err = contracts.DeployRevive2(transactOptsLonger, contractBackendLonger)
 			if err != nil {
 				panic(err)
 			}
-			block.AddTx(tx)
+			block.AddTx(txn)
 		case 1:
 			// Calculate the address of the Phoenix and create handle to phoenix contract
 			var codeHash libcommon.Hash
@@ -1488,31 +1493,31 @@ func TestRecreateAndRewind(t *testing.T) {
 				panic(err)
 			}
 			// Deploy phoenix
-			if tx, err = revive.Deploy(transactOptsLonger, [32]byte{}); err != nil {
+			if txn, err = revive.Deploy(transactOptsLonger, [32]byte{}); err != nil {
 				panic(err)
 			}
-			block.AddTx(tx)
+			block.AddTx(txn)
 			// Modify phoenix storage
-			if tx, err = phoenix.Increment(transactOptsLonger); err != nil {
+			if txn, err = phoenix.Increment(transactOptsLonger); err != nil {
 				panic(err)
 			}
-			block.AddTx(tx)
-			if tx, err = phoenix.Increment(transactOptsLonger); err != nil {
+			block.AddTx(txn)
+			if txn, err = phoenix.Increment(transactOptsLonger); err != nil {
 				panic(err)
 			}
-			block.AddTx(tx)
+			block.AddTx(txn)
 		case 2:
 			// Destruct the phoenix
-			if tx, err = phoenix.Die(transactOptsLonger); err != nil {
+			if txn, err = phoenix.Die(transactOptsLonger); err != nil {
 				panic(err)
 			}
-			block.AddTx(tx)
+			block.AddTx(txn)
 		case 3:
 			// Recreate the phoenix, but now with the empty storage
-			if tx, err = revive.Deploy(transactOptsLonger, [32]byte{}); err != nil {
+			if txn, err = revive.Deploy(transactOptsLonger, [32]byte{}); err != nil {
 				panic(err)
 			}
-			block.AddTx(tx)
+			block.AddTx(txn)
 		}
 		contractBackendLonger.Commit()
 	})
@@ -1603,15 +1608,15 @@ func TestTxLookupUnwind(t *testing.T) {
 
 	m := mock.MockWithGenesis(t, gspec, key, false)
 	chain1, err := core.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 2, func(i int, block *core.BlockGen) {
-		var tx types.Transaction
+		var txn types.Transaction
 		var e error
 		switch i {
 		case 1:
-			tx, e = types.SignTx(types.NewTransaction(block.TxNonce(address), address, uint256.NewInt(0), 1000000, new(uint256.Int), nil), *signer, key)
+			txn, e = types.SignTx(types.NewTransaction(block.TxNonce(address), address, uint256.NewInt(0), 1000000, new(uint256.Int), nil), *signer, key)
 			if e != nil {
 				t.Fatal(e)
 			}
-			block.AddTx(tx)
+			block.AddTx(txn)
 		}
 	})
 	if err != nil {
@@ -1630,12 +1635,8 @@ func TestTxLookupUnwind(t *testing.T) {
 	}
 	var count uint64
 	if err = m.DB.View(context.Background(), func(tx kv.Tx) error {
-		c, e := tx.Cursor(kv.TxLookup)
-		if e != nil {
-			return e
-		}
-		defer c.Close()
-		if count, e = c.Count(); e != nil {
+		var e error
+		if count, e = tx.Count(kv.TxLookup); e != nil {
 			return e
 		}
 		return nil

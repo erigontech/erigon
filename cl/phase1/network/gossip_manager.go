@@ -1,3 +1,19 @@
+// Copyright 2024 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+
 package network
 
 import (
@@ -9,21 +25,21 @@ import (
 	"github.com/c2h5oh/datasize"
 	"google.golang.org/grpc"
 
-	"github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/gointerfaces/grpcutil"
-	sentinel "github.com/ledgerwatch/erigon-lib/gointerfaces/sentinelproto"
-	"github.com/ledgerwatch/erigon-lib/types/ssz"
-	"github.com/ledgerwatch/erigon/cl/beacon/beaconevents"
-	"github.com/ledgerwatch/erigon/cl/clparams"
-	"github.com/ledgerwatch/erigon/cl/cltypes"
-	"github.com/ledgerwatch/erigon/cl/cltypes/solid"
-	"github.com/ledgerwatch/erigon/cl/gossip"
-	"github.com/ledgerwatch/erigon/cl/phase1/forkchoice"
-	"github.com/ledgerwatch/erigon/cl/phase1/network/services"
-	"github.com/ledgerwatch/erigon/cl/utils/eth_clock"
-	"github.com/ledgerwatch/erigon/cl/validator/committee_subscription"
+	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/gointerfaces/grpcutil"
+	sentinel "github.com/erigontech/erigon-lib/gointerfaces/sentinelproto"
+	"github.com/erigontech/erigon-lib/types/ssz"
+	"github.com/erigontech/erigon/cl/beacon/beaconevents"
+	"github.com/erigontech/erigon/cl/clparams"
+	"github.com/erigontech/erigon/cl/cltypes"
+	"github.com/erigontech/erigon/cl/cltypes/solid"
+	"github.com/erigontech/erigon/cl/gossip"
+	"github.com/erigontech/erigon/cl/phase1/forkchoice"
+	"github.com/erigontech/erigon/cl/phase1/network/services"
+	"github.com/erigontech/erigon/cl/utils/eth_clock"
+	"github.com/erigontech/erigon/cl/validator/committee_subscription"
 
-	"github.com/ledgerwatch/erigon-lib/log/v3"
+	"github.com/erigontech/erigon-lib/log/v3"
 )
 
 // Gossip manager is sending all messages to fork choice or others

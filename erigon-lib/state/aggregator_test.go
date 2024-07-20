@@ -1,3 +1,19 @@
+// Copyright 2024 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+
 package state
 
 import (
@@ -14,24 +30,23 @@ import (
 	"testing"
 	"time"
 
-	"github.com/ledgerwatch/erigon-lib/kv/rawdbv3"
-	"github.com/ledgerwatch/erigon-lib/log/v3"
-
-	"github.com/ledgerwatch/erigon-lib/kv/iter"
-	"github.com/ledgerwatch/erigon-lib/kv/order"
-
 	"github.com/c2h5oh/datasize"
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
+	"go.uber.org/mock/gomock"
 
-	"github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/common/datadir"
-	"github.com/ledgerwatch/erigon-lib/common/length"
-	"github.com/ledgerwatch/erigon-lib/etl"
-	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon-lib/kv/mdbx"
-	"github.com/ledgerwatch/erigon-lib/seg"
-	"github.com/ledgerwatch/erigon-lib/types"
+	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common/datadir"
+	"github.com/erigontech/erigon-lib/common/length"
+	"github.com/erigontech/erigon-lib/etl"
+	"github.com/erigontech/erigon-lib/kv"
+	"github.com/erigontech/erigon-lib/kv/mdbx"
+	"github.com/erigontech/erigon-lib/kv/order"
+	"github.com/erigontech/erigon-lib/kv/rawdbv3"
+	"github.com/erigontech/erigon-lib/kv/stream"
+	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon-lib/seg"
+	"github.com/erigontech/erigon-lib/types"
 )
 
 func TestAggregatorV3_Merge(t *testing.T) {
@@ -118,7 +133,7 @@ func TestAggregatorV3_Merge(t *testing.T) {
 
 	logEvery := time.NewTicker(30 * time.Second)
 	defer logEvery.Stop()
-	stat, err := ac.Prune(context.Background(), rwTx, 0, false, logEvery)
+	stat, err := ac.Prune(context.Background(), rwTx, 0, logEvery)
 	require.NoError(t, err)
 	t.Logf("Prune: %s", stat)
 
@@ -227,7 +242,7 @@ func TestAggregatorV3_MergeValTransform(t *testing.T) {
 
 	logEvery := time.NewTicker(30 * time.Second)
 	defer logEvery.Stop()
-	stat, err := ac.Prune(context.Background(), rwTx, 0, false, logEvery)
+	stat, err := ac.Prune(context.Background(), rwTx, 0, logEvery)
 	require.NoError(t, err)
 	t.Logf("Prune: %s", stat)
 
@@ -342,8 +357,15 @@ func aggregatorV3_RestartOnDatadir(t *testing.T, rc runCfg) {
 
 	agg.Close()
 
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+	canonicalsReader := NewMockCanonicalsReader(ctrl)
+	canonicalsReader.EXPECT().TxnIdsOfCanonicalBlocks(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).
+		Return(stream.EmptyU64, nil).
+		AnyTimes()
+
 	// Start another aggregator on same datadir
-	anotherAgg, err := NewAggregator(context.Background(), agg.dirs, aggStep, db, logger)
+	anotherAgg, err := NewAggregator(context.Background(), agg.dirs, aggStep, db, canonicalsReader, logger)
 	require.NoError(t, err)
 	defer anotherAgg.Close()
 
@@ -557,7 +579,7 @@ type vs struct {
 	s uint64
 }
 
-func extractKVSErrIterator(t *testing.T, it iter.KVS) map[string]vs {
+func extractKVSErrIterator(t *testing.T, it stream.KVS) map[string]vs {
 	t.Helper()
 
 	accounts := make(map[string]vs)
@@ -570,7 +592,7 @@ func extractKVSErrIterator(t *testing.T, it iter.KVS) map[string]vs {
 	return accounts
 }
 
-func extractKVErrIterator(t *testing.T, it iter.KV) map[string][]byte {
+func extractKVErrIterator(t *testing.T, it stream.KV) map[string][]byte {
 	t.Helper()
 
 	accounts := make(map[string][]byte)
@@ -760,7 +782,7 @@ func TestAggregatorV3_RestartOnFiles(t *testing.T) {
 	err = domains.Flush(context.Background(), tx)
 	require.NoError(t, err)
 
-	latestStepInDB := agg.d[kv.AccountsDomain].LastStepInDB(tx)
+	latestStepInDB := agg.d[kv.AccountsDomain].maxStepInDB(tx)
 	require.Equal(t, 5, int(latestStepInDB))
 
 	err = tx.Commit()
@@ -782,7 +804,18 @@ func TestAggregatorV3_RestartOnFiles(t *testing.T) {
 	}).MustOpen()
 	t.Cleanup(newDb.Close)
 
-	newAgg, err := NewAggregator(context.Background(), agg.dirs, aggStep, newDb, logger)
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+	canonicalsReader := NewMockCanonicalsReader(ctrl)
+	canonicalsReader.EXPECT().TxnIdsOfCanonicalBlocks(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).
+		DoAndReturn(func(tx kv.Tx, txFrom, txTo int, by order.By, i3 int) (stream.U64, error) {
+			currentStep := uint64(txFrom) / aggStep
+			canonicalBlockTxNum := aggStep*currentStep + 1
+			it := stream.Array[uint64]([]uint64{canonicalBlockTxNum})
+			return it, nil
+		}).
+		AnyTimes()
+	newAgg, err := NewAggregator(context.Background(), agg.dirs, aggStep, newDb, canonicalsReader, logger)
 	require.NoError(t, err)
 	require.NoError(t, newAgg.OpenFolder())
 
@@ -1074,7 +1107,14 @@ func testDbAndAggregatorv3(t *testing.T, aggStep uint64) (kv.RwDB, *Aggregator) 
 	}).MustOpen()
 	t.Cleanup(db.Close)
 
-	agg, err := NewAggregator(context.Background(), dirs, aggStep, db, logger)
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+	canonicalsReader := NewMockCanonicalsReader(ctrl)
+	canonicalsReader.EXPECT().TxnIdsOfCanonicalBlocks(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).
+		Return(stream.EmptyU64, nil).
+		AnyTimes()
+
+	agg, err := NewAggregator(context.Background(), dirs, aggStep, db, canonicalsReader, logger)
 	require.NoError(err)
 	t.Cleanup(agg.Close)
 	err = agg.OpenFolder()

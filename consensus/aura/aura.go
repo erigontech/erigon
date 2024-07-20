@@ -1,18 +1,18 @@
-// Copyright 2017 The go-ethereum Authors
-// This file is part of the go-ethereum library.
+// Copyright 2024 The Erigon Authors
+// This file is part of Erigon.
 //
-// The go-ethereum library is free software: you can redistribute it and/or modify
+// Erigon is free software: you can redistribute it and/or modify
 // it under the terms of the GNU Lesser General Public License as published by
 // the Free Software Foundation, either version 3 of the License, or
 // (at your option) any later version.
 //
-// The go-ethereum library is distributed in the hope that it will be useful,
+// Erigon is distributed in the hope that it will be useful,
 // but WITHOUT ANY WARRANTY; without even the implied warranty of
 // MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
 // GNU Lesser General Public License for more details.
 //
 // You should have received a copy of the GNU Lesser General Public License
-// along with the go-ethereum library. If not, see <http://www.gnu.org/licenses/>.
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
 package aura
 
@@ -26,20 +26,22 @@ import (
 
 	"github.com/holiman/uint256"
 
-	"github.com/ledgerwatch/erigon-lib/common/dbg"
-	"github.com/ledgerwatch/erigon-lib/log/v3"
+	"github.com/erigontech/erigon-lib/common/dbg"
 
-	"github.com/ledgerwatch/erigon-lib/chain"
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/erigontech/erigon-lib/chain"
+	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/kv"
+	"github.com/erigontech/erigon-lib/log/v3"
 
-	"github.com/ledgerwatch/erigon/consensus"
-	"github.com/ledgerwatch/erigon/consensus/clique"
-	"github.com/ledgerwatch/erigon/consensus/ethash"
-	"github.com/ledgerwatch/erigon/core/state"
-	"github.com/ledgerwatch/erigon/core/types"
-	"github.com/ledgerwatch/erigon/rlp"
-	"github.com/ledgerwatch/erigon/rpc"
+	"github.com/erigontech/erigon/consensus"
+	"github.com/erigontech/erigon/consensus/clique"
+	"github.com/erigontech/erigon/consensus/ethash"
+	"github.com/erigontech/erigon/core/state"
+	"github.com/erigontech/erigon/core/tracing"
+	"github.com/erigontech/erigon/core/types"
+	"github.com/erigontech/erigon/core/vm/evmtypes"
+	"github.com/erigontech/erigon/rlp"
+	"github.com/erigontech/erigon/rpc"
 )
 
 var DEBUG_LOG_FROM = uint64(dbg.EnvInt("AURA_DEBUG_FROM", 999_999_999))
@@ -636,7 +638,7 @@ func (c *AuRa) Prepare(chain consensus.ChainHeaderReader, header *types.Header, 
 }
 
 func (c *AuRa) Initialize(config *chain.Config, chain consensus.ChainHeaderReader, header *types.Header,
-	state *state.IntraBlockState, syscallCustom consensus.SysCallCustom, logger log.Logger,
+	state *state.IntraBlockState, syscallCustom consensus.SysCallCustom, logger log.Logger, tracer *tracing.Hooks,
 ) {
 	blockNum := header.Number.Uint64()
 
@@ -697,7 +699,7 @@ func (c *AuRa) applyRewards(header *types.Header, state *state.IntraBlockState, 
 		return err
 	}
 	for _, r := range rewards {
-		state.AddBalance(r.Beneficiary, &r.Amount)
+		state.AddBalance(r.Beneficiary, &r.Amount, tracing.BalanceIncreaseRewardMineBlock)
 	}
 	return nil
 }
@@ -1102,7 +1104,7 @@ func (c *AuRa) IsServiceTransaction(sender libcommon.Address, syscall consensus.
 	}
 	res, err := certifierAbi().Unpack("certified", out)
 	if err != nil {
-		log.Warn("error while detecting service tx on AuRa", "err", err)
+		log.Warn("error while detecting service txn on AuRa", "err", err)
 		return false
 	}
 	if len(res) == 0 {
@@ -1222,6 +1224,14 @@ func (c *AuRa) ExecuteSystemWithdrawals(withdrawals []*types.Withdrawal, syscall
 		log.Warn("ExecuteSystemWithdrawals", "err", err)
 	}
 	return err
+}
+
+func (c *AuRa) GetTransferFunc() evmtypes.TransferFunc {
+	return consensus.Transfer
+}
+
+func (c *AuRa) GetPostApplyMessageFunc() evmtypes.PostApplyMessageFunc {
+	return nil
 }
 
 /*

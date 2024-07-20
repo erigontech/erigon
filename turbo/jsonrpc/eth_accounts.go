@@ -1,3 +1,19 @@
+// Copyright 2024 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+
 package jsonrpc
 
 import (
@@ -5,19 +21,19 @@ import (
 	"fmt"
 	"math/big"
 
-	"github.com/ledgerwatch/erigon-lib/common/hexutil"
+	"github.com/erigontech/erigon-lib/common/hexutil"
 
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/common/hexutility"
-	"github.com/ledgerwatch/erigon-lib/gointerfaces"
+	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common/hexutility"
+	"github.com/erigontech/erigon-lib/gointerfaces"
 	"google.golang.org/grpc"
 
-	"github.com/ledgerwatch/erigon/turbo/rpchelper"
+	"github.com/erigontech/erigon/turbo/rpchelper"
 
-	txpool_proto "github.com/ledgerwatch/erigon-lib/gointerfaces/txpoolproto"
+	txpool_proto "github.com/erigontech/erigon-lib/gointerfaces/txpoolproto"
 
-	"github.com/ledgerwatch/erigon/common"
-	"github.com/ledgerwatch/erigon/rpc"
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/rpc"
 )
 
 // GetBalance implements eth_getBalance. Returns the balance of an account for a given address.

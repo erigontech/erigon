@@ -1,3 +1,19 @@
+// Copyright 2024 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+
 package bor_test
 
 import (
@@ -8,26 +24,26 @@ import (
 	"testing"
 	"time"
 
-	"github.com/ledgerwatch/erigon/polygon/bor/borcfg"
-	"github.com/ledgerwatch/erigon/polygon/heimdall"
+	"github.com/erigontech/erigon/polygon/bor/borcfg"
+	"github.com/erigontech/erigon/polygon/heimdall"
 
-	"github.com/ledgerwatch/erigon-lib/log/v3"
+	"github.com/erigontech/erigon-lib/log/v3"
 
-	"github.com/ledgerwatch/erigon-lib/chain"
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	sentry "github.com/ledgerwatch/erigon-lib/gointerfaces/sentryproto"
-	"github.com/ledgerwatch/erigon-lib/kv/memdb"
-	"github.com/ledgerwatch/erigon/consensus"
-	"github.com/ledgerwatch/erigon/core"
-	"github.com/ledgerwatch/erigon/core/types"
-	"github.com/ledgerwatch/erigon/crypto"
-	"github.com/ledgerwatch/erigon/eth/protocols/eth"
-	"github.com/ledgerwatch/erigon/ethdb/prune"
-	"github.com/ledgerwatch/erigon/params"
-	"github.com/ledgerwatch/erigon/polygon/bor"
-	"github.com/ledgerwatch/erigon/polygon/bor/valset"
-	"github.com/ledgerwatch/erigon/rlp"
-	"github.com/ledgerwatch/erigon/turbo/stages/mock"
+	"github.com/erigontech/erigon-lib/chain"
+	libcommon "github.com/erigontech/erigon-lib/common"
+	sentry "github.com/erigontech/erigon-lib/gointerfaces/sentryproto"
+	"github.com/erigontech/erigon-lib/kv/memdb"
+	"github.com/erigontech/erigon/consensus"
+	"github.com/erigontech/erigon/core"
+	"github.com/erigontech/erigon/core/types"
+	"github.com/erigontech/erigon/crypto"
+	"github.com/erigontech/erigon/eth/protocols/eth"
+	"github.com/erigontech/erigon/ethdb/prune"
+	"github.com/erigontech/erigon/params"
+	"github.com/erigontech/erigon/polygon/bor"
+	"github.com/erigontech/erigon/polygon/bor/valset"
+	"github.com/erigontech/erigon/rlp"
+	"github.com/erigontech/erigon/turbo/stages/mock"
 )
 
 type test_heimdall struct {
@@ -307,6 +323,7 @@ func newValidator(t *testing.T, heimdall *test_heimdall, blocks map[uint64]*type
 		heimdall,
 		test_genesisContract{},
 		logger,
+		nil,
 	)
 
 	/*fmt.Printf("Private: 0x%s\nPublic: 0x%s\nAddress: %s\n",

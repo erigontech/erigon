@@ -1,11 +1,30 @@
+// Copyright 2024 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+
 package diagnostics
 
 import (
 	"context"
 	"encoding/json"
+	"fmt"
+	"io"
 
-	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon-lib/log/v3"
+	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/kv"
+	"github.com/erigontech/erigon-lib/log/v3"
 )
 
 var (
@@ -100,11 +119,7 @@ func (d *DiagnosticClient) runSyncStagesListListener(rootCtx context.Context) {
 			case <-rootCtx.Done():
 				return
 			case info := <-ch:
-				d.mu.Lock()
 				d.SetStagesList(info.StagesList)
-				d.mu.Unlock()
-
-				d.saveSyncStagesToDB()
 			}
 		}
 	}()
@@ -121,11 +136,7 @@ func (d *DiagnosticClient) runCurrentSyncStageListener(rootCtx context.Context) 
 			case <-rootCtx.Done():
 				return
 			case info := <-ch:
-				d.mu.Lock()
 				d.SetCurrentSyncStage(info)
-				d.mu.Unlock()
-
-				d.saveSyncStagesToDB()
 			}
 		}
 	}()
@@ -142,11 +153,7 @@ func (d *DiagnosticClient) runCurrentSyncSubStageListener(rootCtx context.Contex
 			case <-rootCtx.Done():
 				return
 			case info := <-ch:
-				d.mu.Lock()
 				d.SetCurrentSyncSubStage(info)
-				d.mu.Unlock()
-
-				d.saveSyncStagesToDB()
 			}
 		}
 	}()
@@ -163,23 +170,13 @@ func (d *DiagnosticClient) runSubStageListener(rootCtx context.Context) {
 			case <-rootCtx.Done():
 				return
 			case info := <-ch:
-				d.mu.Lock()
 				d.SetSubStagesList(info.Stage, info.List)
-				d.mu.Unlock()
-
-				d.saveSyncStagesToDB()
 			}
 		}
 	}()
 }
 
-func (d *DiagnosticClient) saveSyncStagesToDB() {
-	if err := d.db.Update(d.ctx, StagesListUpdater(d.syncStages)); err != nil {
-		log.Error("[Diagnostics] Failed to update stages list", "err", err)
-	}
-}
-
-func (d *DiagnosticClient) getCurrentSyncIdxs() CurrentSyncStagesIdxs {
+func (d *DiagnosticClient) GetCurrentSyncIdxs() CurrentSyncStagesIdxs {
 	currentIdxs := CurrentSyncStagesIdxs{
 		Stage:    -1,
 		SubStage: -1,
@@ -202,12 +199,17 @@ func (d *DiagnosticClient) getCurrentSyncIdxs() CurrentSyncStagesIdxs {
 }
 
 func (d *DiagnosticClient) SetStagesList(stages []SyncStage) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+
 	if len(d.syncStages) != len(stages) {
 		d.syncStages = stages
 	}
 }
 
 func (d *DiagnosticClient) SetSubStagesList(stageId string, subStages []SyncSubStage) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
 	for idx, stage := range d.syncStages {
 		if stage.ID == stageId {
 			if len(d.syncStages[idx].SubStages) != len(subStages) {
@@ -218,7 +220,18 @@ func (d *DiagnosticClient) SetSubStagesList(stageId string, subStages []SyncSubS
 	}
 }
 
-func (d *DiagnosticClient) SetCurrentSyncStage(css CurrentSyncStage) {
+func (d *DiagnosticClient) SetCurrentSyncStage(css CurrentSyncStage) error {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	stageState, err := d.GetStageState(css.Stage)
+	if err != nil {
+		return err
+	}
+
+	if stageState == Completed {
+		return nil
+	}
+
 	isSet := false
 	for idx, stage := range d.syncStages {
 		if !isSet {
@@ -232,6 +245,8 @@ func (d *DiagnosticClient) SetCurrentSyncStage(css CurrentSyncStage) {
 			d.setStagesState(idx, Queued)
 		}
 	}
+
+	return nil
 }
 
 func (d *DiagnosticClient) setStagesState(stadeIdx int, state StageState) {
@@ -246,6 +261,9 @@ func (d *DiagnosticClient) setSubStagesState(stadeIdx int, state StageState) {
 }
 
 func (d *DiagnosticClient) SetCurrentSyncSubStage(css CurrentSyncSubStage) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+
 	for idx, stage := range d.syncStages {
 		if stage.State == Running {
 			for subIdx, subStage := range stage.SubStages {
@@ -267,28 +285,48 @@ func (d *DiagnosticClient) SetCurrentSyncSubStage(css CurrentSyncSubStage) {
 	}
 }
 
-func ReadSyncStages(db kv.RoDB) []SyncStage {
-	data := ReadDataFromTable(db, kv.DiagSyncStages, StagesListKey)
+// Deprecated - used only in tests. Non-thread-safe.
+func (d *DiagnosticClient) GetStageState(stageId string) (StageState, error) {
+	return d.getStageState(stageId)
+}
 
-	if len(data) == 0 {
-		return []SyncStage{}
+func (d *DiagnosticClient) getStageState(stageId string) (StageState, error) {
+	for _, stage := range d.syncStages {
+		if stage.ID == stageId {
+			return stage.State, nil
+		}
 	}
 
-	var info []SyncStage
-	err := json.Unmarshal(data, &info)
+	stagesIdsList := make([]string, 0, len(d.syncStages))
+	for _, stage := range d.syncStages {
+		stagesIdsList = append(stagesIdsList, stage.ID)
+	}
 
+	return 0, fmt.Errorf("stage %s not found in stages list %s", stageId, stagesIdsList)
+}
+
+func SyncStagesFromTX(tx kv.Tx) ([]byte, error) {
+	bytes, err := ReadDataFromTable(tx, kv.DiagSyncStages, StagesListKey)
 	if err != nil {
-		log.Error("[Diagnostics] Failed to read stages list", "err", err)
-		return []SyncStage{}
-	} else {
-		return info
+		return nil, err
 	}
+
+	return common.CopyBytes(bytes), nil
 }
 
 func StagesListUpdater(info []SyncStage) func(tx kv.RwTx) error {
 	return PutDataToTable(kv.DiagSyncStages, StagesListKey, info)
 }
 
+// Deprecated - not thread-safe method. Used only in tests. Need introduce more thread-safe method or something special for tests.
 func (d *DiagnosticClient) GetSyncStages() []SyncStage {
 	return d.syncStages
+}
+
+func (d *DiagnosticClient) SyncStagesJson(w io.Writer) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	if err := json.NewEncoder(w).Encode(d.syncStages); err != nil {
+		log.Debug("[diagnostics] HardwareInfoJson", "err", err)
+	}
 }

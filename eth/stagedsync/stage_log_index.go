@@ -1,3 +1,19 @@
+// Copyright 2024 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+
 package stagedsync
 
 import (
@@ -12,18 +28,18 @@ import (
 	"github.com/RoaringBitmap/roaring"
 	"github.com/c2h5oh/datasize"
 
-	"github.com/ledgerwatch/erigon-lib/log/v3"
+	"github.com/erigontech/erigon-lib/log/v3"
 
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/common/dbg"
-	"github.com/ledgerwatch/erigon-lib/common/hexutility"
-	"github.com/ledgerwatch/erigon-lib/etl"
-	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon-lib/kv/bitmapdb"
-	"github.com/ledgerwatch/erigon-lib/kv/dbutils"
+	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common/dbg"
+	"github.com/erigontech/erigon-lib/common/hexutility"
+	"github.com/erigontech/erigon-lib/etl"
+	"github.com/erigontech/erigon-lib/kv"
+	"github.com/erigontech/erigon-lib/kv/bitmapdb"
+	"github.com/erigontech/erigon-lib/kv/dbutils"
 
-	"github.com/ledgerwatch/erigon/core/types"
-	"github.com/ledgerwatch/erigon/ethdb/prune"
+	"github.com/erigontech/erigon/core/types"
+	"github.com/erigontech/erigon/ethdb/prune"
 )
 
 const (
@@ -86,7 +102,7 @@ func SpawnLogIndex(s *StageState, tx kv.RwTx, cfg LogIndexCfg, ctx context.Conte
 	}
 
 	startBlock := s.BlockNumber
-	pruneTo := cfg.prune.Receipts.PruneTo(endBlock) //endBlock - prune.r.older
+	pruneTo := cfg.prune.History.PruneTo(endBlock) //endBlock - prune.r.older
 	// if startBlock < pruneTo {
 	// 	startBlock = pruneTo
 	// }
@@ -419,7 +435,7 @@ func pruneOldLogChunks(tx kv.RwTx, bucket string, inMem *etl.Collector, pruneTo 
 
 // Call pruneLogIndex with the current sync progresses and commit the data to db
 func PruneLogIndex(s *PruneState, tx kv.RwTx, cfg LogIndexCfg, ctx context.Context, logger log.Logger) (err error) {
-	if !cfg.prune.Receipts.Enabled() {
+	if !cfg.prune.History.Enabled() {
 		return nil
 	}
 	logPrefix := s.LogPrefix()
@@ -433,7 +449,7 @@ func PruneLogIndex(s *PruneState, tx kv.RwTx, cfg LogIndexCfg, ctx context.Conte
 		defer tx.Rollback()
 	}
 
-	pruneTo := cfg.prune.Receipts.PruneTo(s.ForwardProgress)
+	pruneTo := cfg.prune.History.PruneTo(s.ForwardProgress)
 	if err = pruneLogIndex(logPrefix, tx, cfg.tmpdir, s.PruneProgress, pruneTo, ctx, logger, cfg.depositContract); err != nil {
 		return err
 	}

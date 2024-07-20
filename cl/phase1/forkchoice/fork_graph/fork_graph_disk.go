@@ -1,3 +1,19 @@
+// Copyright 2024 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+
 package fork_graph
 
 import (
@@ -10,18 +26,18 @@ import (
 	"github.com/klauspost/compress/zstd"
 	"github.com/spf13/afero"
 
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/log/v3"
-	"github.com/ledgerwatch/erigon/cl/beacon/beacon_router_configuration"
-	"github.com/ledgerwatch/erigon/cl/clparams"
-	"github.com/ledgerwatch/erigon/cl/cltypes"
-	"github.com/ledgerwatch/erigon/cl/cltypes/lightclient_utils"
-	"github.com/ledgerwatch/erigon/cl/cltypes/solid"
-	"github.com/ledgerwatch/erigon/cl/persistence/base_encoding"
-	"github.com/ledgerwatch/erigon/cl/phase1/core/state"
-	diffstorage "github.com/ledgerwatch/erigon/cl/phase1/forkchoice/fork_graph/diff_storage"
-	"github.com/ledgerwatch/erigon/cl/transition"
-	"github.com/ledgerwatch/erigon/cl/transition/impl/eth2"
+	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/cl/beacon/beacon_router_configuration"
+	"github.com/erigontech/erigon/cl/clparams"
+	"github.com/erigontech/erigon/cl/cltypes"
+	"github.com/erigontech/erigon/cl/cltypes/lightclient_utils"
+	"github.com/erigontech/erigon/cl/cltypes/solid"
+	"github.com/erigontech/erigon/cl/persistence/base_encoding"
+	"github.com/erigontech/erigon/cl/phase1/core/state"
+	diffstorage "github.com/erigontech/erigon/cl/phase1/forkchoice/fork_graph/diff_storage"
+	"github.com/erigontech/erigon/cl/transition"
+	"github.com/erigontech/erigon/cl/transition/impl/eth2"
 )
 
 const dumpSlotFrequency = 4
@@ -174,7 +190,7 @@ func NewForkGraphDisk(anchorState *state.CachingBeaconState, aferoFs afero.Fs, r
 	f.lowestAvaiableBlock.Store(anchorState.Slot())
 	f.headers.Store(libcommon.Hash(anchorRoot), &anchorHeader)
 
-	f.dumpBeaconStateOnDisk(anchorState, anchorRoot)
+	f.DumpBeaconStateOnDisk(anchorRoot, anchorState, true)
 	return f
 }
 
@@ -297,12 +313,6 @@ func (f *forkGraphDisk) AddChainSegment(signedBlock *cltypes.SignedBeaconBlock, 
 		BodyRoot:      bodyRoot,
 	})
 
-	if newState.Slot()%dumpSlotFrequency == 0 {
-		if err := f.dumpBeaconStateOnDisk(newState, blockRoot); err != nil {
-			return nil, LogisticError, err
-		}
-	}
-
 	// Lastly add checkpoints to caches as well.
 	f.currentJustifiedCheckpoints.Store(libcommon.Hash(blockRoot), newState.CurrentJustifiedCheckpoint().Copy())
 	f.finalizedCheckpoints.Store(libcommon.Hash(blockRoot), newState.FinalizedCheckpoint().Copy())
@@ -345,30 +355,36 @@ func (f *forkGraphDisk) GetState(blockRoot libcommon.Hash, alwaysCopy bool) (*st
 	blocksInTheWay := []*cltypes.SignedBeaconBlock{}
 	// Use the parent root as a reverse iterator.
 	currentIteratorRoot := blockRoot
+	var copyReferencedState *state.CachingBeaconState
+	var err error
 	// try and find the point of recconection
-	for {
+	for copyReferencedState == nil {
 		block, isSegmentPresent := f.getBlock(currentIteratorRoot)
 		if !isSegmentPresent {
 			// check if it is in the header
 			bHeader, ok := f.GetHeader(currentIteratorRoot)
 			if ok && bHeader.Slot%dumpSlotFrequency == 0 {
-				break
+				copyReferencedState, err = f.readBeaconStateFromDisk(currentIteratorRoot)
+				if err != nil {
+					log.Trace("Could not retrieve state: Missing header", "missing", currentIteratorRoot, "err", err)
+					copyReferencedState = nil
+				}
+				continue
 			}
 			log.Trace("Could not retrieve state: Missing header", "missing", currentIteratorRoot)
 			return nil, nil
 		}
 		if block.Block.Slot%dumpSlotFrequency == 0 {
-			break
+			copyReferencedState, err = f.readBeaconStateFromDisk(currentIteratorRoot)
+			if err != nil {
+				log.Trace("Could not retrieve state: Missing header", "missing", currentIteratorRoot, "err", err)
+			}
+			if copyReferencedState != nil {
+				break
+			}
 		}
 		blocksInTheWay = append(blocksInTheWay, block)
 		currentIteratorRoot = block.Block.ParentRoot
-	}
-	copyReferencedState, err := f.readBeaconStateFromDisk(currentIteratorRoot)
-	if err != nil {
-		return nil, err
-	}
-	if copyReferencedState == nil {
-		return nil, ErrStateNotFound
 	}
 
 	// Traverse the blocks from top to bottom.
@@ -400,15 +416,23 @@ func (f *forkGraphDisk) MarkHeaderAsInvalid(blockRoot libcommon.Hash) {
 	f.badBlocks.Store(blockRoot, struct{}{})
 }
 
+func (f *forkGraphDisk) hasBeaconState(blockRoot libcommon.Hash) bool {
+	_, err := f.fs.Stat(getBeaconStateFilename(blockRoot))
+	return err == nil
+}
+
 func (f *forkGraphDisk) Prune(pruneSlot uint64) (err error) {
 	pruneSlot -= f.beaconCfg.SlotsPerEpoch * 2
 	oldRoots := make([]libcommon.Hash, 0, f.beaconCfg.SlotsPerEpoch)
-	highestCrossedEpochSlot := uint64(0)
+	highestStoredBeaconStateSlot := uint64(0)
 	f.blocks.Range(func(key, value interface{}) bool {
 		hash := key.(libcommon.Hash)
 		signedBlock := value.(*cltypes.SignedBeaconBlock)
-		if signedBlock.Block.Slot%f.beaconCfg.SlotsPerEpoch == 0 && highestCrossedEpochSlot < signedBlock.Block.Slot {
-			highestCrossedEpochSlot = signedBlock.Block.Slot
+		if signedBlock.Block.Slot < highestStoredBeaconStateSlot {
+			return true
+		}
+		if f.hasBeaconState(hash) {
+			highestStoredBeaconStateSlot = signedBlock.Block.Slot
 		}
 		if signedBlock.Block.Slot >= pruneSlot {
 			return true
@@ -417,7 +441,7 @@ func (f *forkGraphDisk) Prune(pruneSlot uint64) (err error) {
 
 		return true
 	})
-	if pruneSlot >= highestCrossedEpochSlot {
+	if pruneSlot >= highestStoredBeaconStateSlot {
 		return
 	}
 

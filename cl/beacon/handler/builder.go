@@ -1,14 +1,33 @@
+// Copyright 2024 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+
 package handler
 
 import (
+	"encoding/json"
 	"fmt"
 	"net/http"
 
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon/cl/beacon/beaconhttp"
-	"github.com/ledgerwatch/erigon/cl/clparams"
-	"github.com/ledgerwatch/erigon/cl/persistence/beacon_indicies"
-	"github.com/ledgerwatch/erigon/cl/phase1/core/state"
+	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/cl/beacon/beaconhttp"
+	"github.com/erigontech/erigon/cl/clparams"
+	"github.com/erigontech/erigon/cl/cltypes"
+	"github.com/erigontech/erigon/cl/persistence/beacon_indicies"
+	"github.com/erigontech/erigon/cl/phase1/core/state"
 )
 
 func (a *ApiHandler) GetEth1V1BuilderStatesExpectedWithdrawals(w http.ResponseWriter, r *http.Request) (*beaconhttp.BeaconResponse, error) {
@@ -69,4 +88,22 @@ func (a *ApiHandler) GetEth1V1BuilderStatesExpectedWithdrawals(w http.ResponseWr
 	}
 
 	return nil, beaconhttp.NewEndpointError(http.StatusNotFound, fmt.Errorf("state not found"))
+}
+
+func (a *ApiHandler) PostEthV1BuilderRegisterValidator(w http.ResponseWriter, r *http.Request) (*beaconhttp.BeaconResponse, error) {
+	registerReq := []*cltypes.ValidatorRegistration{}
+	if err := json.NewDecoder(r.Body).Decode(&registerReq); err != nil {
+		return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, err)
+	}
+	if len(registerReq) == 0 {
+		return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, fmt.Errorf("empty request"))
+	}
+	if err := a.builderClient.RegisterValidator(r.Context(), registerReq); err != nil {
+		return nil, beaconhttp.NewEndpointError(http.StatusInternalServerError, err)
+	}
+	for _, v := range registerReq {
+		a.logger.Debug("[Caplin] Registered new validator", "fee_recipient", v.Message.FeeRecipient)
+	}
+	log.Info("Registered new validator", "count", len(registerReq))
+	return newBeaconResponse(nil), nil
 }

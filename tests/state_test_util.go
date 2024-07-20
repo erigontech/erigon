@@ -1,18 +1,21 @@
 // Copyright 2015 The go-ethereum Authors
-// This file is part of the go-ethereum library.
+// (original work)
+// Copyright 2024 The Erigon Authors
+// (modifications)
+// This file is part of Erigon.
 //
-// The go-ethereum library is free software: you can redistribute it and/or modify
+// Erigon is free software: you can redistribute it and/or modify
 // it under the terms of the GNU Lesser General Public License as published by
 // the Free Software Foundation, either version 3 of the License, or
 // (at your option) any later version.
 //
-// The go-ethereum library is distributed in the hope that it will be useful,
+// Erigon is distributed in the hope that it will be useful,
 // but WITHOUT ANY WARRANTY; without even the implied warranty of
 // MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
 // GNU Lesser General Public License for more details.
 //
 // You should have received a copy of the GNU Lesser General Public License
-// along with the go-ethereum library. If not, see <http://www.gnu.org/licenses/>.
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
 package tests
 
@@ -29,27 +32,27 @@ import (
 	"github.com/holiman/uint256"
 	"golang.org/x/crypto/sha3"
 
-	"github.com/ledgerwatch/erigon-lib/config3"
+	"github.com/erigontech/erigon-lib/config3"
 
-	"github.com/ledgerwatch/erigon-lib/chain"
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/common/hexutility"
-	"github.com/ledgerwatch/erigon-lib/common/length"
-	"github.com/ledgerwatch/erigon-lib/kv"
-	state2 "github.com/ledgerwatch/erigon-lib/state"
-	types2 "github.com/ledgerwatch/erigon-lib/types"
-	"github.com/ledgerwatch/erigon-lib/wrap"
+	"github.com/erigontech/erigon-lib/chain"
+	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common/hexutility"
+	"github.com/erigontech/erigon-lib/kv"
+	state2 "github.com/erigontech/erigon-lib/state"
+	types2 "github.com/erigontech/erigon-lib/types"
+	"github.com/erigontech/erigon-lib/wrap"
 
-	"github.com/ledgerwatch/erigon-lib/log/v3"
-	"github.com/ledgerwatch/erigon/common"
-	"github.com/ledgerwatch/erigon/common/math"
-	"github.com/ledgerwatch/erigon/core"
-	"github.com/ledgerwatch/erigon/core/state"
-	"github.com/ledgerwatch/erigon/core/types"
-	"github.com/ledgerwatch/erigon/core/vm"
-	"github.com/ledgerwatch/erigon/crypto"
-	"github.com/ledgerwatch/erigon/rlp"
-	"github.com/ledgerwatch/erigon/turbo/rpchelper"
+	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/math"
+	"github.com/erigontech/erigon/core"
+	"github.com/erigontech/erigon/core/state"
+	"github.com/erigontech/erigon/core/tracing"
+	"github.com/erigontech/erigon/core/types"
+	"github.com/erigontech/erigon/core/vm"
+	"github.com/erigontech/erigon/crypto"
+	"github.com/erigontech/erigon/rlp"
+	"github.com/erigontech/erigon/turbo/rpchelper"
 )
 
 // StateTest checks transaction processing without block context.
@@ -271,59 +274,12 @@ func (t *StateTest) RunNoVerify(tx kv.RwTx, subtest StateSubtest, vmconfig vm.Co
 		return nil, libcommon.Hash{}, err
 	}
 
-	if config3.EnableHistoryV4InTest {
-		var root libcommon.Hash
-		rootBytes, err := domains.ComputeCommitment(context2.Background(), false, header.Number.Uint64(), "")
-		if err != nil {
-			return statedb, root, fmt.Errorf("ComputeCommitment: %w", err)
-		}
-		return statedb, libcommon.BytesToHash(rootBytes), nil
-	}
-	// Generate hashed state
-	c, err := tx.RwCursor(kv.PlainState)
+	var root libcommon.Hash
+	rootBytes, err := domains.ComputeCommitment(context2.Background(), false, header.Number.Uint64(), "")
 	if err != nil {
-		return nil, libcommon.Hash{}, err
+		return statedb, root, fmt.Errorf("ComputeCommitment: %w", err)
 	}
-	h := libcommon.NewHasher()
-	defer libcommon.ReturnHasherToPool(h)
-	for k, v, err := c.First(); k != nil; k, v, err = c.Next() {
-		if err != nil {
-			return nil, libcommon.Hash{}, fmt.Errorf("interate over plain state: %w", err)
-		}
-		var newK []byte
-		if len(k) == length.Addr {
-			newK = make([]byte, length.Hash)
-		} else {
-			newK = make([]byte, length.Hash*2+length.Incarnation)
-		}
-		h.Sha.Reset()
-		//nolint:errcheck
-		h.Sha.Write(k[:length.Addr])
-		//nolint:errcheck
-		h.Sha.Read(newK[:length.Hash])
-		if len(k) > length.Addr {
-			copy(newK[length.Hash:], k[length.Addr:length.Addr+length.Incarnation])
-			h.Sha.Reset()
-			//nolint:errcheck
-			h.Sha.Write(k[length.Addr+length.Incarnation:])
-			//nolint:errcheck
-			h.Sha.Read(newK[length.Hash+length.Incarnation:])
-			if err = tx.Put(kv.HashedStorage, newK, libcommon.CopyBytes(v)); err != nil {
-				return nil, libcommon.Hash{}, fmt.Errorf("insert hashed key: %w", err)
-			}
-		} else {
-			if err = tx.Put(kv.HashedAccounts, newK, libcommon.CopyBytes(v)); err != nil {
-				return nil, libcommon.Hash{}, fmt.Errorf("insert hashed key: %w", err)
-			}
-		}
-	}
-	c.Close()
-
-	root, err := txc.Doms.ComputeCommitment(context2.Background(), true, writeBlockNr, "")
-	if err != nil {
-		return nil, libcommon.Hash{}, fmt.Errorf("error calculating state root: %w", err)
-	}
-	return statedb, libcommon.CastToHash(root), nil
+	return statedb, libcommon.BytesToHash(rootBytes), nil
 }
 
 func MakePreState(rules *chain.Rules, tx kv.RwTx, accounts types.GenesisAlloc, blockNr uint64, histV3 bool) (*state.IntraBlockState, error) {
@@ -336,7 +292,7 @@ func MakePreState(rules *chain.Rules, tx kv.RwTx, accounts types.GenesisAlloc, b
 		if a.Balance != nil {
 			balance, _ = uint256.FromBig(a.Balance)
 		}
-		statedb.SetBalance(addr, balance)
+		statedb.SetBalance(addr, balance, tracing.BalanceChangeUnspecified)
 		for k, v := range a.Storage {
 			key := k
 			val := uint256.NewInt(0).SetBytes(v.Bytes())
@@ -402,7 +358,7 @@ func rlpHash(x interface{}) (h libcommon.Hash) {
 }
 
 func vmTestBlockHash(n uint64) libcommon.Hash {
-	return libcommon.BytesToHash(crypto.Keccak256([]byte(big.NewInt(int64(n)).String())))
+	return libcommon.BytesToHash(crypto.Keccak256([]byte(new(big.Int).SetUint64(n).String())))
 }
 
 func toMessage(tx stTransaction, ps stPostState, baseFee *big.Int) (core.Message, error) {

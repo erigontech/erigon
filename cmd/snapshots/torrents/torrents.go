@@ -1,3 +1,19 @@
+// Copyright 2024 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+
 package torrents
 
 import (
@@ -11,18 +27,18 @@ import (
 	gosync "sync"
 	"time"
 
-	"github.com/ledgerwatch/erigon-lib/log/v3"
+	"github.com/erigontech/erigon-lib/log/v3"
 
 	"github.com/anacrolix/torrent/metainfo"
 	"github.com/urfave/cli/v2"
 	"golang.org/x/sync/errgroup"
 
-	"github.com/ledgerwatch/erigon-lib/downloader"
-	"github.com/ledgerwatch/erigon-lib/downloader/snaptype"
-	"github.com/ledgerwatch/erigon/cmd/snapshots/manifest"
-	"github.com/ledgerwatch/erigon/cmd/snapshots/sync"
-	"github.com/ledgerwatch/erigon/cmd/utils"
-	"github.com/ledgerwatch/erigon/turbo/logging"
+	"github.com/erigontech/erigon-lib/downloader"
+	"github.com/erigontech/erigon-lib/downloader/snaptype"
+	"github.com/erigontech/erigon/cmd/snapshots/manifest"
+	"github.com/erigontech/erigon/cmd/snapshots/sync"
+	"github.com/erigontech/erigon/cmd/utils"
+	"github.com/erigontech/erigon/turbo/logging"
 )
 
 var Command = cli.Command{

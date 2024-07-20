@@ -1,18 +1,18 @@
-/*
-   Copyright 2022 Erigon contributors
-
-   Licensed under the Apache License, Version 2.0 (the "License");
-   you may not use this file except in compliance with the License.
-   You may obtain a copy of the License at
-
-       http://www.apache.org/licenses/LICENSE-2.0
-
-   Unless required by applicable law or agreed to in writing, software
-   distributed under the License is distributed on an "AS IS" BASIS,
-   WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-   See the License for the specific language governing permissions and
-   limitations under the License.
-*/
+// Copyright 2022 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
 package state
 
@@ -26,19 +26,19 @@ import (
 
 	"go.uber.org/mock/gomock"
 
-	"github.com/ledgerwatch/erigon-lib/common/hexutility"
-	"github.com/ledgerwatch/erigon-lib/kv/iter"
-	"github.com/ledgerwatch/erigon-lib/kv/order"
-	"github.com/ledgerwatch/erigon-lib/log/v3"
+	"github.com/erigontech/erigon-lib/common/hexutility"
+	"github.com/erigontech/erigon-lib/kv/order"
+	"github.com/erigontech/erigon-lib/kv/stream"
+	"github.com/erigontech/erigon-lib/log/v3"
 
 	"github.com/stretchr/testify/require"
 	btree2 "github.com/tidwall/btree"
 
-	"github.com/ledgerwatch/erigon-lib/common/background"
-	"github.com/ledgerwatch/erigon-lib/common/datadir"
-	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon-lib/kv/mdbx"
-	"github.com/ledgerwatch/erigon-lib/seg"
+	"github.com/erigontech/erigon-lib/common/background"
+	"github.com/erigontech/erigon-lib/common/datadir"
+	"github.com/erigontech/erigon-lib/kv"
+	"github.com/erigontech/erigon-lib/kv/mdbx"
+	"github.com/erigontech/erigon-lib/seg"
 )
 
 func testDbAndAppendable(tb testing.TB, aggStep uint64, logger log.Logger) (kv.RwDB, *Appendable) {
@@ -54,7 +54,7 @@ func testDbAndAppendable(tb testing.TB, aggStep uint64, logger log.Logger) (kv.R
 	}).MustOpen()
 	tb.Cleanup(db.Close)
 	salt := uint32(1)
-	cfg := AppendableCfg{Salt: &salt, Dirs: dirs, DB: db, CanonicalMarkersTable: kv.HeaderCanonical}
+	cfg := AppendableCfg{Salt: &salt, Dirs: dirs, DB: db}
 	ii, err := NewAppendable(cfg, aggStep, "receipt", table, nil, logger)
 	require.NoError(tb, err)
 	ii.DisableFsync()
@@ -87,12 +87,12 @@ func TestAppendableCollationBuild(t *testing.T) {
 		require.Equal(1, int(binary.BigEndian.Uint64(v)))
 
 		//never existed key
-		_, ok, err = ic.Get(txs+1, tx)
+		_, ok, err = ic.Get(kv.TxnId(txs+1), tx)
 		require.NoError(err)
 		require.False(ok)
 
 		//non-canonical key: must exist before collate+prune
-		_, ok, err = ic.Get(steps+1, tx)
+		_, ok, err = ic.Get(kv.TxnId(steps+1), tx)
 		require.NoError(err)
 		require.True(ok)
 
@@ -103,12 +103,12 @@ func TestAppendableCollationBuild(t *testing.T) {
 	defer ctrl.Finish()
 
 	//see only canonical records in files
-	iters := NewMockIterFactory(ctrl)
+	iters := NewMockCanonicalsReader(ctrl)
 	iters.EXPECT().TxnIdsOfCanonicalBlocks(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).
-		DoAndReturn(func(tx kv.Tx, txFrom, txTo int, by order.By, i3 int) (iter.U64, error) {
+		DoAndReturn(func(tx kv.Tx, txFrom, txTo int, by order.By, i3 int) (stream.U64, error) {
 			currentStep := uint64(txFrom) / aggStep
 			canonicalBlockTxNum := aggStep*currentStep + 1
-			it := iter.Array[uint64]([]uint64{canonicalBlockTxNum})
+			it := stream.Array[uint64]([]uint64{canonicalBlockTxNum})
 			return it, nil
 		}).
 		AnyTimes()
@@ -139,7 +139,7 @@ func TestAppendableCollationBuild(t *testing.T) {
 		ii, err := NewAppendable(ii.cfg, ii.aggregationStep, ii.filenameBase, ii.table, nil, log.New())
 		require.NoError(err)
 		defer ii.Close()
-		err = ii.OpenFolder(true)
+		err = ii.openFolder(true)
 		require.NoError(err)
 		require.Equal(5, ii.dirtyFiles.Len())
 		require.Equal(0, len(ii._visibleFiles))
@@ -172,7 +172,7 @@ func TestAppendableCollationBuild(t *testing.T) {
 		err = os.WriteFile(fn, make([]byte, 33), 0644)
 		require.NoError(err)
 
-		err = ii.OpenFolder(true)
+		err = ii.openFolder(true)
 		require.NoError(err)
 		ii.Close()
 	})
@@ -195,7 +195,7 @@ func filledAppendableOfSize(tb testing.TB, txs, aggStep uint64, logger log.Logge
 	defer ic.Close()
 
 	for i := uint64(0); i < txs; i++ {
-		err = ic.Append(i, hexutility.EncodeTs(i), tx)
+		err = ic.Append(kv.TxnId(i), hexutility.EncodeTs(i), tx)
 		require.NoError(err)
 	}
 	err = tx.Commit()
@@ -229,12 +229,12 @@ func checkAppendableGet(t *testing.T, dbtx kv.Tx, tx *AppendableRoTx, txs uint64
 	require.Equal(62.4375, to)
 
 	//non-canonical key: must exist before collate+prune
-	_, ok, err = tx.Get(steps+1, dbtx)
+	_, ok, err = tx.Get(kv.TxnId(steps+1), dbtx)
 	require.NoError(err)
 	require.False(ok)
 
 	//non-canonical keys of last step: must exist after collate+prune
-	_, ok, err = tx.Get(aggStep*steps+2, dbtx)
+	_, ok, err = tx.Get(kv.TxnId(aggStep*steps+2), dbtx)
 	require.NoError(err)
 	require.True(ok)
 }
@@ -262,23 +262,20 @@ func mergeAppendable(tb testing.TB, db kv.RwDB, ii *Appendable, txs uint64) {
 			ii.reCalcVisibleFiles()
 			ic := ii.BeginFilesRo()
 			defer ic.Close()
-			_, err = ic.Prune(ctx, tx, step*ii.aggregationStep, (step+1)*ii.aggregationStep, math.MaxUint64, logEvery, false, false, nil)
+			_, err = ic.Prune(ctx, tx, step*ii.aggregationStep, (step+1)*ii.aggregationStep, math.MaxUint64, logEvery, false, nil)
 			require.NoError(tb, err)
-			var found bool
-			var startTxNum, endTxNum uint64
-			maxEndTxNum := ii.endTxNumMinimax()
 			maxSpan := ii.aggregationStep * StepsInColdFile
 
 			for {
 				if stop := func() bool {
 					ic := ii.BeginFilesRo()
 					defer ic.Close()
-					found, startTxNum, endTxNum = ic.findMergeRange(maxEndTxNum, maxSpan)
-					if !found {
+					r := ic.findMergeRange(ic.files.EndTxNum(), maxSpan)
+					if !r.needMerge {
 						return true
 					}
-					outs, _ := ic.staticFilesInRange(startTxNum, endTxNum)
-					in, err := ic.mergeFiles(ctx, outs, startTxNum, endTxNum, background.NewProgressSet())
+					outs := ic.staticFilesInRange(r.from, r.to)
+					in, err := ic.mergeFiles(ctx, outs, r.from, r.to, background.NewProgressSet())
 					require.NoError(tb, err)
 					ii.integrateMergedDirtyFiles(outs, in)
 					ii.reCalcVisibleFiles()
@@ -297,7 +294,7 @@ func mergeAppendable(tb testing.TB, db kv.RwDB, ii *Appendable, txs uint64) {
 func emptyTestAppendable(aggStep uint64) *Appendable {
 	salt := uint32(1)
 	logger := log.New()
-	return &Appendable{cfg: AppendableCfg{Salt: &salt, DB: nil, CanonicalMarkersTable: kv.HeaderCanonical},
+	return &Appendable{cfg: AppendableCfg{Salt: &salt, DB: nil},
 		logger:       logger,
 		filenameBase: "test", aggregationStep: aggStep, dirtyFiles: btree2.NewBTreeG[*filesItem](filesItemLess)}
 }
@@ -312,13 +309,13 @@ func TestAppendableScanStaticFiles(t *testing.T) {
 		"v1-test.3-4.ap",
 		"v1-test.4-5.ap",
 	}
-	ii.scanStateFiles(files)
+	ii.scanDirtyFiles(files)
 	require.Equal(t, 6, ii.dirtyFiles.Len())
 
 	//integrity extension case
 	ii.dirtyFiles.Clear()
 	ii.integrityCheck = func(fromStep, toStep uint64) bool { return false }
-	ii.scanStateFiles(files)
+	ii.scanDirtyFiles(files)
 	require.Equal(t, 0, ii.dirtyFiles.Len())
 }
 
@@ -336,7 +333,7 @@ func TestAppendableCtxFiles(t *testing.T) {
 		"v1-test.480-496.ap",
 		"v1-test.480-512.ap",
 	}
-	ii.scanStateFiles(files)
+	ii.scanDirtyFiles(files)
 	require.Equal(t, 10, ii.dirtyFiles.Len())
 	ii.dirtyFiles.Scan(func(item *filesItem) bool {
 		fName := ii.apFilePath(item.startTxNum/ii.aggregationStep, item.endTxNum/ii.aggregationStep)

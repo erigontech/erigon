@@ -1,3 +1,19 @@
+// Copyright 2024 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+
 package polygon
 
 import (
@@ -13,34 +29,34 @@ import (
 	"github.com/holiman/uint256"
 	"github.com/pion/randutil"
 
-	"github.com/ledgerwatch/erigon-lib/log/v3"
+	"github.com/erigontech/erigon-lib/log/v3"
 
-	"github.com/ledgerwatch/erigon-lib/chain"
-	"github.com/ledgerwatch/erigon-lib/common"
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/common/hexutility"
-	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon-lib/kv/memdb"
-	"github.com/ledgerwatch/erigon/accounts/abi/bind"
-	"github.com/ledgerwatch/erigon/cmd/devnet/blocks"
-	"github.com/ledgerwatch/erigon/cmd/devnet/requests"
-	"github.com/ledgerwatch/erigon/consensus"
-	"github.com/ledgerwatch/erigon/core"
-	"github.com/ledgerwatch/erigon/core/rawdb"
-	"github.com/ledgerwatch/erigon/core/state"
-	"github.com/ledgerwatch/erigon/core/types"
-	"github.com/ledgerwatch/erigon/core/vm"
-	"github.com/ledgerwatch/erigon/crypto"
-	"github.com/ledgerwatch/erigon/params"
-	"github.com/ledgerwatch/erigon/polygon/bor"
-	"github.com/ledgerwatch/erigon/polygon/bor/valset"
-	"github.com/ledgerwatch/erigon/polygon/heimdall"
-	"github.com/ledgerwatch/erigon/rlp"
-	"github.com/ledgerwatch/erigon/rpc"
-	"github.com/ledgerwatch/erigon/turbo/jsonrpc"
-	"github.com/ledgerwatch/erigon/turbo/services"
-	"github.com/ledgerwatch/erigon/turbo/stages/mock"
-	"github.com/ledgerwatch/erigon/turbo/transactions"
+	"github.com/erigontech/erigon-lib/chain"
+	"github.com/erigontech/erigon-lib/common"
+	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common/hexutility"
+	"github.com/erigontech/erigon-lib/kv"
+	"github.com/erigontech/erigon-lib/kv/memdb"
+	"github.com/erigontech/erigon/accounts/abi/bind"
+	"github.com/erigontech/erigon/cmd/devnet/blocks"
+	"github.com/erigontech/erigon/cmd/devnet/requests"
+	"github.com/erigontech/erigon/consensus"
+	"github.com/erigontech/erigon/core"
+	"github.com/erigontech/erigon/core/rawdb"
+	"github.com/erigontech/erigon/core/state"
+	"github.com/erigontech/erigon/core/types"
+	"github.com/erigontech/erigon/core/vm"
+	"github.com/erigontech/erigon/crypto"
+	"github.com/erigontech/erigon/params"
+	"github.com/erigontech/erigon/polygon/bor"
+	"github.com/erigontech/erigon/polygon/bor/valset"
+	"github.com/erigontech/erigon/polygon/heimdall"
+	"github.com/erigontech/erigon/rlp"
+	"github.com/erigontech/erigon/rpc"
+	"github.com/erigontech/erigon/turbo/jsonrpc"
+	"github.com/erigontech/erigon/turbo/services"
+	"github.com/erigontech/erigon/turbo/stages/mock"
+	"github.com/erigontech/erigon/turbo/transactions"
 )
 
 type requestGenerator struct {
@@ -105,9 +121,9 @@ func (rg *requestGenerator) GetBlockByNumber(ctx context.Context, blockNum rpc.B
 
 		transactions := make([]*jsonrpc.RPCTransaction, len(block.Transactions()))
 
-		for i, tx := range block.Transactions() {
-			rg.txBlockMap[tx.Hash()] = block
-			transactions[i] = jsonrpc.NewRPCTransaction(tx, block.Hash(), blockNum.Uint64(), uint64(i), block.BaseFee())
+		for i, txn := range block.Transactions() {
+			rg.txBlockMap[txn.Hash()] = block
+			transactions[i] = jsonrpc.NewRPCTransaction(txn, block.Hash(), blockNum.Uint64(), uint64(i), block.BaseFee())
 		}
 
 		return &requests.Block{
@@ -200,7 +216,7 @@ func (reader blockReader) BlockByNumber(ctx context.Context, db kv.Tx, number ui
 	return nil, fmt.Errorf("block not found")
 }
 
-func (reader blockReader) HeaderByNumber(ctx context.Context, tx kv.Getter, blockNum uint64) (*types.Header, error) {
+func (reader blockReader) HeaderByNumber(ctx context.Context, txn kv.Getter, blockNum uint64) (*types.Header, error) {
 	if int(blockNum) < len(reader.chain.Headers) {
 		return reader.chain.Headers[blockNum], nil
 	}

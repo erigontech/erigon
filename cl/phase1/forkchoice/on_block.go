@@ -1,3 +1,19 @@
+// Copyright 2024 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+
 package forkchoice
 
 import (
@@ -6,21 +22,21 @@ import (
 	"sort"
 	"time"
 
-	"github.com/ledgerwatch/erigon-lib/log/v3"
+	"github.com/erigontech/erigon-lib/log/v3"
 
-	"github.com/ledgerwatch/erigon-lib/common"
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common"
+	libcommon "github.com/erigontech/erigon-lib/common"
 
-	"github.com/ledgerwatch/erigon/cl/clparams"
-	"github.com/ledgerwatch/erigon/cl/cltypes"
-	"github.com/ledgerwatch/erigon/cl/cltypes/solid"
-	"github.com/ledgerwatch/erigon/cl/phase1/core/state"
-	"github.com/ledgerwatch/erigon/cl/phase1/execution_client"
-	"github.com/ledgerwatch/erigon/cl/phase1/forkchoice/fork_graph"
-	"github.com/ledgerwatch/erigon/cl/transition/impl/eth2/statechange"
-	"github.com/ledgerwatch/erigon/cl/utils"
-	"github.com/ledgerwatch/erigon/core/types"
-	"github.com/ledgerwatch/erigon/eth/ethutils"
+	"github.com/erigontech/erigon/cl/clparams"
+	"github.com/erigontech/erigon/cl/cltypes"
+	"github.com/erigontech/erigon/cl/cltypes/solid"
+	"github.com/erigontech/erigon/cl/phase1/core/state"
+	"github.com/erigontech/erigon/cl/phase1/execution_client"
+	"github.com/erigontech/erigon/cl/phase1/forkchoice/fork_graph"
+	"github.com/erigontech/erigon/cl/transition/impl/eth2/statechange"
+	"github.com/erigontech/erigon/cl/utils"
+	"github.com/erigontech/erigon/core/types"
+	"github.com/erigontech/erigon/eth/ethutils"
 )
 
 const foreseenProposers = 16
@@ -106,6 +122,7 @@ func (f *ForkChoiceStore) OnBlock(ctx context.Context, block *cltypes.SignedBeac
 				return fmt.Errorf("failed to add block to optimistic store: %v", err)
 			}
 		case execution_client.PayloadStatusInvalidated:
+			log.Warn("OnBlock: block is invalid", "block", libcommon.Hash(blockRoot), "err", err)
 			log.Debug("OnBlock: block is invalid", "block", libcommon.Hash(blockRoot))
 			f.forkGraph.MarkHeaderAsInvalid(blockRoot)
 			// remove from optimistic candidate
@@ -114,7 +131,7 @@ func (f *ForkChoiceStore) OnBlock(ctx context.Context, block *cltypes.SignedBeac
 			}
 			return fmt.Errorf("block is invalid")
 		case execution_client.PayloadStatusValidated:
-			log.Debug("OnBlock: block is validated", "block", libcommon.Hash(blockRoot))
+			log.Trace("OnBlock: block is validated", "block", libcommon.Hash(blockRoot))
 			// remove from optimistic candidate
 			if err := f.optimisticStore.ValidateBlock(block.Block); err != nil {
 				return fmt.Errorf("failed to validate block in optimistic store: %v", err)

@@ -1,3 +1,19 @@
+// Copyright 2024 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+
 package state
 
 import (
@@ -6,10 +22,11 @@ import (
 
 	btree2 "github.com/tidwall/btree"
 
-	"github.com/ledgerwatch/erigon-lib/kv/bitmapdb"
-	"github.com/ledgerwatch/erigon-lib/log/v3"
-	"github.com/ledgerwatch/erigon-lib/recsplit"
-	"github.com/ledgerwatch/erigon-lib/seg"
+	"github.com/erigontech/erigon-lib/config3"
+	"github.com/erigontech/erigon-lib/kv/bitmapdb"
+	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon-lib/recsplit"
+	"github.com/erigontech/erigon-lib/seg"
 )
 
 // filesItem is "dirty" file - means file which can be:
@@ -146,11 +163,11 @@ func deleteMergeFile(dirtyFiles *btree2.BTreeG[*filesItem], outs []*filesItem, f
 			out.closeFilesAndRemove()
 
 			if filenameBase == traceFileLife && out.decompressor != nil {
-				logger.Info("[agg.dbg] deleteMergeFile: remove", "f", out.decompressor.FileName())
+				logger.Warn("[agg.dbg] deleteMergeFile: remove", "f", out.decompressor.FileName())
 			}
 		} else {
 			if filenameBase == traceFileLife && out.decompressor != nil {
-				logger.Info("[agg.dbg] deleteMergeFile: mark as canDelete=true", "f", out.decompressor.FileName())
+				logger.Warn("[agg.dbg] deleteMergeFile: mark as canDelete=true", "f", out.decompressor.FileName())
 			}
 		}
 	}
@@ -173,7 +190,7 @@ func (i *ctxItem) isSubSetOf(j *ctxItem) bool { return i.src.isSubsetOf(j.src) }
 func (i *ctxItem) isSubsetOf(j *ctxItem) bool { return i.src.isSubsetOf(j.src) } //nolint
 
 func calcVisibleFiles(files *btree2.BTreeG[*filesItem], l idxList, trace bool) (roItems []ctxItem) {
-	visibleFiles := make([]ctxItem, 0, files.Len())
+	newVisibleFiles := make([]ctxItem, 0, files.Len())
 	if trace {
 		log.Warn("[dbg] calcVisibleFiles", "amount", files.Len())
 	}
@@ -217,24 +234,48 @@ func calcVisibleFiles(files *btree2.BTreeG[*filesItem], l idxList, trace bool) (
 
 			// `kill -9` may leave small garbage files, but if big one already exists we assume it's good(fsynced) and no reason to merge again
 			// see super-set file, just drop sub-set files from list
-			for len(visibleFiles) > 0 && visibleFiles[len(visibleFiles)-1].src.isSubsetOf(item) {
+			for len(newVisibleFiles) > 0 && newVisibleFiles[len(newVisibleFiles)-1].src.isSubsetOf(item) {
 				if trace {
-					log.Warn("[dbg] calcVisibleFiles5", "f", visibleFiles[len(visibleFiles)-1].src.decompressor.FileName())
+					log.Warn("[dbg] calcVisibleFiles5", "f", newVisibleFiles[len(newVisibleFiles)-1].src.decompressor.FileName())
 				}
-				visibleFiles[len(visibleFiles)-1].src = nil
-				visibleFiles = visibleFiles[:len(visibleFiles)-1]
+				newVisibleFiles[len(newVisibleFiles)-1].src = nil
+				newVisibleFiles = newVisibleFiles[:len(newVisibleFiles)-1]
 			}
-			visibleFiles = append(visibleFiles, ctxItem{
+			newVisibleFiles = append(newVisibleFiles, ctxItem{
 				startTxNum: item.startTxNum,
 				endTxNum:   item.endTxNum,
-				i:          len(visibleFiles),
+				i:          len(newVisibleFiles),
 				src:        item,
 			})
 		}
 		return true
 	})
-	if visibleFiles == nil {
-		visibleFiles = []ctxItem{}
+	if newVisibleFiles == nil {
+		newVisibleFiles = []ctxItem{}
 	}
-	return visibleFiles
+	return newVisibleFiles
+}
+
+// visibleFiles have no garbage (overlaps, unindexed, etc...)
+type visibleFiles []ctxItem
+
+// EndTxNum return txNum which not included in file - it will be first txNum in future file
+func (files visibleFiles) EndTxNum() uint64 {
+	if len(files) == 0 {
+		return 0
+	}
+	return files[len(files)-1].endTxNum
+}
+
+func (files visibleFiles) LatestMergedRange() MergeRange {
+	if len(files) == 0 {
+		return MergeRange{}
+	}
+	for i := len(files) - 1; i >= 0; i-- {
+		shardSize := (files[i].endTxNum - files[i].startTxNum) / config3.HistoryV3AggregationStep
+		if shardSize > 2 {
+			return MergeRange{from: files[i].startTxNum, to: files[i].endTxNum}
+		}
+	}
+	return MergeRange{}
 }

@@ -56,7 +56,7 @@ Use `--snap.keepblocks=true` to don't delete retired blocks from DB
 Any network/chain can start with snapshot sync:
 
 - node will download only snapshots registered in next
-  repo https://github.com/ledgerwatch/erigon-snapshot
+  repo https://github.com/erigontech/erigon-snapshot
 - node will move old blocks from DB to snapshots of 1K blocks size, then merge
   snapshots to bigger range, until
   snapshots of 500K blocks, then automatically start seeding new snapshot
@@ -75,7 +75,7 @@ erigon snapshots retire --datadir=<your_datadir>
 # Create .torrent files (you can think about them as "checksum")
 downloader torrent_create --datadir=<your_datadir>
 
-# output format is compatible with https://github.com/ledgerwatch/erigon-snapshot
+# output format is compatible with https://github.com/erigontech/erigon-snapshot
 downloader torrent_hashes --datadir=<your_datadir>
 
 # Start downloader (read all .torrent files, and download/seed data)
@@ -111,7 +111,7 @@ can be created 4 ways:
 Erigon does:
 
 - connect to Downloader
-- share list of hashes (see https://github.com/ledgerwatch/erigon-snapshot )
+- share list of hashes (see https://github.com/erigontech/erigon-snapshot )
 - wait for download of all snapshots
 - when .seg available - automatically create .idx files - secondary indices, for
   example to find block by hash
@@ -183,7 +183,10 @@ downloader torrent_clean --datadir <datadir> # remote all .torrent files in data
 ```
 
 ## Remote manifest verify
-To check that remote webseeds has available manifest and all manifested files are available, has correct format of ETag, does not have dangling torrents etc.
+
+To check that remote webseeds has available manifest and all manifested files are available, has correct format of ETag,
+does not have dangling torrents etc.
+
 ```
 downloader manifest-verify --chain <chain> [--webseeds 'a','b','c']
 ```
@@ -215,18 +218,29 @@ downloader --datadir=<your> --chain=mainnet
 ## Launch new network or new type of snapshots
 
 Usually Erigon's network is self-sufficient - peers automatically producing and
-seedingsnapshots. But new network or new type of snapshots need Bootstrapping
+seeding snapshots. But new network or new type of snapshots need Bootstrapping
 step - no peers yet have this files.
 
 **WebSeed** - is centralized file-storage - used to Bootstrap network. For
-example S3 with signed_url.
+example S3 with signed_url or R2 public.
 
-Erigon dev team can share existing **webseed_url**. Or you can create own.
+Upload data to R2 bucket (or any HTTP server) and create `manifest.txt`:
 
 ```
-downloader --datadir=<your> --chain=mainnet --webseed=<webseed_url>
+go run ./cmd/downloader manifest --datadir=/erigon/ --chain="$CHAIN" > /erigon/snapshots/manifest.txt
 
-# See also: `downloader --help` of `--webseed` flag. There is an option to pass it by `datadir/webseed.toml` file.   
+rclone sync /erigon/snapshots/   your_account:your-bucket-name-$CHAIN/ -L --progress --files-from=/erigon/snapshots/manifest.txt --s3-use-multipart-uploads=true --s3-use-multipart-etag=true --s3-upload-cutoff=300Mi
+```
+
+Say for Erigon to use this webseed:
+
+```
+erigon --datadir=<your> --chain=mainnet --webseed=<webseed_url>
+or
+downloader --datadir=<your> --chain=mainnet --webseed=<webseed_url> --seedbox 
+
+// default urls list: `erigon-snapshot/webseed/mainnet.toml`   
 ```
 
 ---------------
+

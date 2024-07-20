@@ -1,3 +1,19 @@
+// Copyright 2024 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+
 package types
 
 import (
@@ -5,11 +21,12 @@ import (
 	// "fmt"
 	"io"
 
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	rlp2 "github.com/ledgerwatch/erigon-lib/rlp"
-	"github.com/ledgerwatch/erigon/rlp"
+	libcommon "github.com/erigontech/erigon-lib/common"
+	rlp2 "github.com/erigontech/erigon-lib/rlp"
+	"github.com/erigontech/erigon/rlp"
 )
 
+// EIP-7002 Withdrawal Request see https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7002.md
 type WithdrawalRequest struct {
 	SourceAddress   libcommon.Address
 	ValidatorPubkey [BLSPubKeyLen]byte // bls
@@ -55,10 +72,6 @@ func (w *WithdrawalRequest) EncodeRLP(b io.Writer) (err error) {
 	return
 }
 
-func (w WithdrawalRequest) encodeRLP(b *bytes.Buffer) error {
-	b.WriteByte(0x01)
-	return rlp.Encode(b, w)
-}
 func (w *WithdrawalRequest) DecodeRLP(input []byte) error { return rlp.DecodeBytes(input[1:], w) }
 func (w *WithdrawalRequest) copy() Request {
 	return &WithdrawalRequest{
@@ -78,8 +91,7 @@ func (s WithdrawalRequests) EncodeIndex(i int, w *bytes.Buffer) {
 	s[i].EncodeRLP(w)
 }
 
-// Requests creates a deep copy of each deposit and returns a slice of the
-// withdrwawal requests as Request objects.
+// Requests creates a deep copy of each WithdrawalRequest and returns a slice (as Requests).
 func (s WithdrawalRequests) Requests() (reqs Requests) {
 	for _, d := range s {
 		reqs = append(reqs, d)

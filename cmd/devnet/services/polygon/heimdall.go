@@ -1,3 +1,19 @@
+// Copyright 2024 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+
 package polygon
 
 import (
@@ -15,19 +31,19 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
-	"github.com/ledgerwatch/erigon-lib/log/v3"
+	"github.com/erigontech/erigon-lib/log/v3"
 
-	ethereum "github.com/ledgerwatch/erigon"
-	"github.com/ledgerwatch/erigon-lib/chain"
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon/accounts/abi/bind"
-	"github.com/ledgerwatch/erigon/cmd/devnet/accounts"
-	"github.com/ledgerwatch/erigon/cmd/devnet/blocks"
-	"github.com/ledgerwatch/erigon/cmd/devnet/contracts"
-	"github.com/ledgerwatch/erigon/cmd/devnet/devnet"
-	"github.com/ledgerwatch/erigon/polygon/bor/borcfg"
-	"github.com/ledgerwatch/erigon/polygon/bor/valset"
-	"github.com/ledgerwatch/erigon/polygon/heimdall"
+	ethereum "github.com/erigontech/erigon"
+	"github.com/erigontech/erigon-lib/chain"
+	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon/accounts/abi/bind"
+	"github.com/erigontech/erigon/cmd/devnet/accounts"
+	"github.com/erigontech/erigon/cmd/devnet/blocks"
+	"github.com/erigontech/erigon/cmd/devnet/contracts"
+	"github.com/erigontech/erigon/cmd/devnet/devnet"
+	"github.com/erigontech/erigon/polygon/bor/borcfg"
+	"github.com/erigontech/erigon/polygon/bor/valset"
+	"github.com/erigontech/erigon/polygon/heimdall"
 )
 
 type BridgeEvent string

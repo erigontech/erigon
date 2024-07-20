@@ -1,3 +1,19 @@
+// Copyright 2024 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+
 package merge
 
 import (
@@ -9,16 +25,19 @@ import (
 
 	"github.com/holiman/uint256"
 
-	"github.com/ledgerwatch/erigon-lib/chain"
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/log/v3"
-	"github.com/ledgerwatch/erigon/consensus"
-	"github.com/ledgerwatch/erigon/consensus/aura"
-	"github.com/ledgerwatch/erigon/consensus/misc"
-	"github.com/ledgerwatch/erigon/core/state"
-	"github.com/ledgerwatch/erigon/core/types"
-	"github.com/ledgerwatch/erigon/params"
-	"github.com/ledgerwatch/erigon/rpc"
+	"github.com/erigontech/erigon-lib/chain"
+	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/log/v3"
+
+	"github.com/erigontech/erigon/consensus"
+	"github.com/erigontech/erigon/consensus/aura"
+	"github.com/erigontech/erigon/consensus/misc"
+	"github.com/erigontech/erigon/core/state"
+	"github.com/erigontech/erigon/core/tracing"
+	"github.com/erigontech/erigon/core/types"
+	"github.com/erigontech/erigon/core/vm/evmtypes"
+	"github.com/erigontech/erigon/params"
+	"github.com/erigontech/erigon/rpc"
 )
 
 // Constants for The Merge as specified by EIP-3675: Upgrade consensus to Proof-of-Stake
@@ -132,11 +151,11 @@ func (s *Merge) CalculateRewards(config *chain.Config, header *types.Header, unc
 }
 
 func (s *Merge) Finalize(config *chain.Config, header *types.Header, state *state.IntraBlockState,
-	txs types.Transactions, uncles []*types.Header, receipts types.Receipts, withdrawals []*types.Withdrawal, requests types.Requests,
+	txs types.Transactions, uncles []*types.Header, receipts types.Receipts, withdrawals []*types.Withdrawal, requestsInBlock types.Requests,
 	chain consensus.ChainReader, syscall consensus.SystemCall, logger log.Logger,
 ) (types.Transactions, types.Receipts, types.Requests, error) {
 	if !misc.IsPoSHeader(header) {
-		return s.eth1Engine.Finalize(config, header, state, txs, uncles, receipts, withdrawals, requests, chain, syscall, logger)
+		return s.eth1Engine.Finalize(config, header, state, txs, uncles, receipts, withdrawals, requestsInBlock, chain, syscall, logger)
 	}
 
 	rewards, err := s.CalculateRewards(config, header, uncles, syscall)
@@ -144,7 +163,14 @@ func (s *Merge) Finalize(config *chain.Config, header *types.Header, state *stat
 		return nil, nil, nil, err
 	}
 	for _, r := range rewards {
-		state.AddBalance(r.Beneficiary, &r.Amount)
+		switch r.Kind {
+		case consensus.RewardAuthor:
+			state.AddBalance(r.Beneficiary, &r.Amount, tracing.BalanceIncreaseRewardMineBlock)
+		case consensus.RewardUncle:
+			state.AddBalance(r.Beneficiary, &r.Amount, tracing.BalanceIncreaseRewardMineUncle)
+		default:
+			state.AddBalance(r.Beneficiary, &r.Amount, tracing.BalanceChangeUnspecified)
+		}
 	}
 
 	if withdrawals != nil {
@@ -155,7 +181,7 @@ func (s *Merge) Finalize(config *chain.Config, header *types.Header, state *stat
 		} else {
 			for _, w := range withdrawals {
 				amountInWei := new(uint256.Int).Mul(uint256.NewInt(w.Amount), uint256.NewInt(params.GWei))
-				state.AddBalance(w.Address, amountInWei)
+				state.AddBalance(w.Address, amountInWei, tracing.BalanceIncreaseWithdrawal)
 			}
 		}
 	}
@@ -167,23 +193,29 @@ func (s *Merge) Finalize(config *chain.Config, header *types.Header, state *stat
 		for _, rec := range receipts {
 			allLogs = append(allLogs, rec.Logs...)
 		}
-		ds, err := types.ParseDepositLogs(allLogs, config.DepositContract)
-		rs = append(rs, ds...)
+		depositReqs, err := types.ParseDepositLogs(allLogs, config.DepositContract)
 		if err != nil {
 			return nil, nil, nil, fmt.Errorf("error: could not parse requests logs: %v", err)
 		}
-
-		rs = append(rs, misc.DequeueWithdrawalRequests7002(syscall)...)
-		if requests != nil || header.RequestsRoot != nil {
+		rs = append(rs, depositReqs...)
+		withdrawalReqs := misc.DequeueWithdrawalRequests7002(syscall)
+		rs = append(rs, withdrawalReqs...)
+		consolidations := misc.DequeueConsolidationRequests7251(syscall)
+		rs = append(rs, consolidations...)
+		if requestsInBlock != nil || header.RequestsRoot != nil {
 			rh := types.DeriveSha(rs)
 			if *header.RequestsRoot != rh {
 				return nil, nil, nil, fmt.Errorf("error: invalid requests root hash in header, expected: %v, got :%v", header.RequestsRoot, rh)
 			}
-			sds := requests.Deposits()
-			if !reflect.DeepEqual(sds, ds.Deposits()) {
-				return nil, nil, nil, fmt.Errorf("error: invalid deposits in block")
+			if !reflect.DeepEqual(requestsInBlock.Deposits(), depositReqs.Deposits()) {
+				return nil, nil, nil, fmt.Errorf("error: invalid EIP-6110 Deposit Requests in block")
 			}
-			//TODO @somnathb1 add DeepEqual check for WithdrawaRequests too, because in future there could be other types of requests
+			if !reflect.DeepEqual(requestsInBlock.Withdrawals(), withdrawalReqs.Withdrawals()) {
+				return nil, nil, nil, fmt.Errorf("error: invalid EIP-7002 Withdrawal requests in block")
+			}
+			if !reflect.DeepEqual(requestsInBlock.Consolidations(), consolidations.Consolidations()) {
+				return nil, nil, nil, fmt.Errorf("error: invalid EIP-7251 Consolidation requests in block")
+			}
 		}
 	}
 
@@ -193,7 +225,6 @@ func (s *Merge) Finalize(config *chain.Config, header *types.Header, state *stat
 func (s *Merge) FinalizeAndAssemble(config *chain.Config, header *types.Header, state *state.IntraBlockState,
 	txs types.Transactions, uncles []*types.Header, receipts types.Receipts, withdrawals []*types.Withdrawal, requests types.Requests, chain consensus.ChainReader, syscall consensus.SystemCall, call consensus.Call, logger log.Logger,
 ) (*types.Block, types.Transactions, types.Receipts, error) {
-
 	if !misc.IsPoSHeader(header) {
 		return s.eth1Engine.FinalizeAndAssemble(config, header, state, txs, uncles, receipts, withdrawals, requests, chain, syscall, call, logger)
 	}
@@ -315,15 +346,15 @@ func (s *Merge) IsServiceTransaction(sender libcommon.Address, syscall consensus
 }
 
 func (s *Merge) Initialize(config *chain.Config, chain consensus.ChainHeaderReader, header *types.Header,
-	state *state.IntraBlockState, syscall consensus.SysCallCustom, logger log.Logger,
+	state *state.IntraBlockState, syscall consensus.SysCallCustom, logger log.Logger, tracer *tracing.Hooks,
 ) {
 	if !misc.IsPoSHeader(header) {
-		s.eth1Engine.Initialize(config, chain, header, state, syscall, logger)
+		s.eth1Engine.Initialize(config, chain, header, state, syscall, logger, tracer)
 	}
 	if chain.Config().IsCancun(header.Time) {
 		misc.ApplyBeaconRootEip4788(header.ParentBeaconBlockRoot, func(addr libcommon.Address, data []byte) ([]byte, error) {
 			return syscall(addr, data, state, header, false /* constCall */)
-		})
+		}, tracer)
 	}
 	if chain.Config().IsPrague(header.Time) {
 		misc.StoreBlockHashesEip2935(header, state, config, chain)
@@ -332,6 +363,14 @@ func (s *Merge) Initialize(config *chain.Config, chain consensus.ChainHeaderRead
 
 func (s *Merge) APIs(chain consensus.ChainHeaderReader) []rpc.API {
 	return s.eth1Engine.APIs(chain)
+}
+
+func (s *Merge) GetTransferFunc() evmtypes.TransferFunc {
+	return s.eth1Engine.GetTransferFunc()
+}
+
+func (s *Merge) GetPostApplyMessageFunc() evmtypes.PostApplyMessageFunc {
+	return s.eth1Engine.GetPostApplyMessageFunc()
 }
 
 func (s *Merge) Close() error {

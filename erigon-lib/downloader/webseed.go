@@ -1,3 +1,19 @@
+// Copyright 2024 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+
 package downloader
 
 import (
@@ -14,20 +30,22 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/erigontech/erigon-lib/downloader/downloadercfg"
+
 	"github.com/hashicorp/go-retryablehttp"
 
 	"github.com/anacrolix/torrent"
 	"github.com/c2h5oh/datasize"
 	"golang.org/x/sync/errgroup"
 
-	"github.com/ledgerwatch/erigon-lib/chain/snapcfg"
-	"github.com/ledgerwatch/erigon-lib/log/v3"
+	"github.com/erigontech/erigon-lib/chain/snapcfg"
+	"github.com/erigontech/erigon-lib/log/v3"
 
 	"github.com/anacrolix/torrent/bencode"
 	"github.com/anacrolix/torrent/metainfo"
 	"github.com/pelletier/go-toml/v2"
 
-	"github.com/ledgerwatch/erigon-lib/downloader/snaptype"
+	"github.com/erigontech/erigon-lib/downloader/snaptype"
 )
 
 // WebSeeds - allow use HTTP-based infrastrucutre to support Bittorrent network
@@ -57,7 +75,7 @@ func NewWebSeeds(seeds []*url.URL, verbosity log.Lvl, logger log.Logger) *WebSee
 
 	rc := retryablehttp.NewClient()
 	rc.RetryMax = 5
-	rc.Logger = logger
+	rc.Logger = downloadercfg.NewRetryableHttpLogger(logger.New("app", "downloader"))
 	ws.client = rc.StandardClient()
 	return ws
 }
@@ -348,14 +366,6 @@ func (d *WebSeeds) constructListsOfFiles(ctx context.Context, httpProviders []*u
 			d.logger.Debug("[snapshots.webseed] get from HTTP provider", "err", err, "url", webSeedProviderURL.String())
 			continue
 		}
-		// check if we need to prohibit new downloads for some files
-		for name := range manifestResponse {
-			prohibited, err := d.torrentFiles.NewDownloadsAreProhibited(name)
-			if prohibited || err != nil {
-				delete(manifestResponse, name)
-			}
-		}
-
 		listsOfFiles = append(listsOfFiles, manifestResponse)
 	}
 
@@ -365,13 +375,6 @@ func (d *WebSeeds) constructListsOfFiles(ctx context.Context, httpProviders []*u
 		if err != nil { // don't fail on error
 			d.logger.Debug("[snapshots.webseed] get from File provider", "err", err)
 			continue
-		}
-		// check if we need to prohibit new downloads for some files
-		for name := range response {
-			prohibited, err := d.torrentFiles.NewDownloadsAreProhibited(name)
-			if prohibited || err != nil {
-				delete(response, name)
-			}
 		}
 		listsOfFiles = append(listsOfFiles, response)
 	}
@@ -572,7 +575,7 @@ func (d *WebSeeds) downloadTorrentFilesFromProviders(ctx context.Context, rootDi
 		e3blackListed := strings.Contains(name, "commitment") && (strings.HasSuffix(name, ".v.torrent") || strings.HasSuffix(name, ".ef.torrent"))
 		if e3blackListed {
 			_, fName := filepath.Split(name)
-			d.logger.Log(d.verbosity, "[snapshots] webseed has .torrent, but we skip it because this file-type not supported yet", "name", fName)
+			d.logger.Debug("[snapshots] webseed has .torrent, but we skip it because this file-type not supported yet", "name", fName)
 			continue
 		}
 
@@ -582,7 +585,7 @@ func (d *WebSeeds) downloadTorrentFilesFromProviders(ctx context.Context, rootDi
 				//validation happens inside
 				_, err := d.callTorrentHttpProvider(ctx, url, name)
 				if err != nil {
-					d.logger.Log(d.verbosity, "[snapshots] got from webseed", "name", name, "err", err, "url", url)
+					d.logger.Debug("[snapshots] got from webseed", "name", name, "err", err, "url", url)
 					continue
 				}
 				//don't save .torrent here - do it inside downloader.Add
@@ -614,7 +617,7 @@ func (d *WebSeeds) DownloadAndSaveTorrentFile(ctx context.Context, name string) 
 		}
 		res, err := d.callTorrentHttpProvider(ctx, parsedUrl, name)
 		if err != nil {
-			d.logger.Log(d.verbosity, "[snapshots] .torrent from webseed rejected", "name", name, "err", err, "url", urlStr)
+			d.logger.Debug("[snapshots] .torrent from webseed rejected", "name", name, "err", err, "url", urlStr)
 			continue // it's ok if some HTTP provider failed - try next one
 		}
 		ts, _, err = d.torrentFiles.Create(name, res)

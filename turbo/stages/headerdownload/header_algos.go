@@ -1,3 +1,19 @@
+// Copyright 2024 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+
 package headerdownload
 
 import (
@@ -15,24 +31,24 @@ import (
 	"strings"
 	"time"
 
-	"github.com/ledgerwatch/erigon-lib/common/dbg"
-	"github.com/ledgerwatch/erigon-lib/common/metrics"
-	"github.com/ledgerwatch/erigon-lib/kv/dbutils"
-	"github.com/ledgerwatch/erigon-lib/log/v3"
+	"github.com/erigontech/erigon-lib/common/dbg"
+	"github.com/erigontech/erigon-lib/common/metrics"
+	"github.com/erigontech/erigon-lib/kv/dbutils"
+	"github.com/erigontech/erigon-lib/log/v3"
 
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/etl"
-	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon/dataflow"
-	"github.com/ledgerwatch/erigon/turbo/services"
+	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/etl"
+	"github.com/erigontech/erigon-lib/kv"
+	"github.com/erigontech/erigon/dataflow"
+	"github.com/erigontech/erigon/turbo/services"
 
-	"github.com/ledgerwatch/erigon/common"
-	"github.com/ledgerwatch/erigon/consensus"
-	"github.com/ledgerwatch/erigon/core/rawdb"
-	"github.com/ledgerwatch/erigon/core/types"
-	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
-	"github.com/ledgerwatch/erigon/params"
-	"github.com/ledgerwatch/erigon/rlp"
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/consensus"
+	"github.com/erigontech/erigon/core/rawdb"
+	"github.com/erigontech/erigon/core/types"
+	"github.com/erigontech/erigon/eth/stagedsync/stages"
+	"github.com/erigontech/erigon/params"
+	"github.com/erigontech/erigon/rlp"
 )
 
 const POSPandaBanner = `
@@ -130,7 +146,7 @@ func (hd *HeaderDownload) ReportBadHeader(headerHash libcommon.Hash) {
 func (hd *HeaderDownload) UnlinkHeader(headerHash libcommon.Hash) {
 	hd.lock.Lock()
 	defer hd.lock.Unlock()
-	// Find the link, remove it and all its descendands from all the queues
+	// Find the link, remove it and all its descendants from all the queues
 	if link, ok := hd.links[headerHash]; ok {
 		hd.removeUpwards(link)
 	}
@@ -427,7 +443,7 @@ func (hd *HeaderDownload) requestMoreHeadersForPOS(currentTime time.Time) (timeo
 		return
 	}
 
-	hd.logger.Debug("[downloader] Request header", "numer", anchor.blockHeight-1, "length", 192)
+	hd.logger.Debug("[downloader] Request header", "number", anchor.blockHeight-1, "length", 192)
 
 	// Request ancestors
 	request = &HeaderRequest{
@@ -686,7 +702,7 @@ func (hd *HeaderDownload) ProcessHeadersPOS(csHeaders []ChainSegmentHeader, tx k
 		headerHash := sh.Hash
 
 		if headerHash != hd.posAnchor.parentHash {
-			// Code below prevented syncing from Nethermind nodes who discregarded Reverse parameter to GetBlockHeaders messages
+			// Code below prevented syncing from Nethermind nodes who disregarded Reverse parameter to GetBlockHeaders messages
 			// With this code commented out, the sync proceeds but very slowly (getting 1 header from the response of 192 headers)
 			/*
 				if hd.posAnchor.blockHeight != 1 && sh.Number != hd.posAnchor.blockHeight-1 {
@@ -912,7 +928,7 @@ func (hi *HeaderInserter) FeedHeaderPoW(db kv.StatelessRwTx, headerReader servic
 	// Calculate total difficulty of this header using parent's total difficulty
 	td = new(big.Int).Add(parentTd, header.Difficulty)
 
-	// Now we can decide wether this header will create a change in the canonical head
+	// Now we can decide whether this header will create a change in the canonical head
 	if td.Cmp(hi.localTd) >= 0 {
 		reorg := true
 

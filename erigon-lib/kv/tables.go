@@ -1,18 +1,18 @@
-/*
-   Copyright 2021 Erigon contributors
-
-   Licensed under the Apache License, Version 2.0 (the "License");
-   you may not use this file except in compliance with the License.
-   You may obtain a copy of the License at
-
-       http://www.apache.org/licenses/LICENSE-2.0
-
-   Unless required by applicable law or agreed to in writing, software
-   distributed under the License is distributed on an "AS IS" BASIS,
-   WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-   See the License for the specific language governing permissions and
-   limitations under the License.
-*/
+// Copyright 2021 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
 package kv
 
@@ -21,14 +21,14 @@ import (
 	"sort"
 	"strings"
 
-	types "github.com/ledgerwatch/erigon-lib/gointerfaces/typesproto"
+	types "github.com/erigontech/erigon-lib/gointerfaces/typesproto"
 )
 
 // DBSchemaVersion versions list
 // 5.0 - BlockTransaction table now has canonical ids (txs of non-canonical blocks moving to NonCanonicalTransaction table)
 // 6.0 - BlockTransaction table now has system-txs before and after block (records are absent if block has no system-tx, but sequence increasing)
 // 6.1 - Canonical/NonCanonical/BadBlock transitions now stored in same table: kv.EthTx. Add kv.BadBlockNumber table
-var DBSchemaVersion = types.VersionReply{Major: 6, Minor: 1, Patch: 0}
+var DBSchemaVersion = types.VersionReply{Major: 7, Minor: 0, Patch: 0}
 
 // ChaindataTables
 
@@ -271,9 +271,8 @@ const (
 	// block has no system-tx - records are absent, but TxnID increasing
 	//
 	// In Erigon3: table MaxTxNum storing TxNum (not TxnID). History/Indices are using TxNum (not TxnID).
-	EthTx           = "BlockTransaction"        // tx_id_u64 -> rlp(tx)
-	NonCanonicalTxs = "NonCanonicalTransaction" // tbl_sequence_u64 -> rlp(tx)
-	MaxTxNum        = "MaxTxNum"                // block_number_u64 -> max_tx_num_in_block_u64
+	EthTx    = "BlockTransaction" // tx_id_u64 -> rlp(tx)
+	MaxTxNum = "MaxTxNum"         // block_number_u64 -> max_tx_num_in_block_u64
 
 	Receipts = "Receipt"        // block_num_u64 -> canonical block receipts (non-canonical are not stored)
 	Log      = "TransactionLog" // block_num_u64 + txId -> logs of transaction
@@ -297,10 +296,6 @@ const (
 	// Store bitmap indices - in which block number we saw calls from (CallFromIndex) or to (CallToIndex) some addresses
 	CallFromIndex = "CallFromIndex"
 	CallToIndex   = "CallToIndex"
-
-	// Cumulative indexes for estimation of stage execution
-	CumulativeGasIndex         = "CumulativeGasIndex"
-	CumulativeTransactionIndex = "CumulativeTransactionIndex"
 
 	TxLookup = "BlockTransactionLookup" // hash -> transaction/receipt lookup metadata
 
@@ -373,7 +368,7 @@ const (
 	BittorrentCompletion = "BittorrentCompletion"
 	BittorrentInfo       = "BittorrentInfo"
 
-	// Domains/Histry/InvertedIndices
+	// Domains/History/InvertedIndices
 	// Contants have "Tbl" prefix, to avoid collision with actual Domain names
 	// This constants is very rarely used in APP, but Domain/History/Idx names are widely used
 	TblAccountKeys        = "AccountKeys"
@@ -399,12 +394,6 @@ const (
 	TblCommitmentHistoryKeys = "CommitmentHistoryKeys"
 	TblCommitmentHistoryVals = "CommitmentHistoryVals"
 	TblCommitmentIdx         = "CommitmentIdx"
-
-	//TblGasUsedKeys        = "GasUsedKeys"
-	//TblGasUsedVals        = "GasUsedVals"
-	//TblGasUsedHistoryKeys = "GasUsedHistoryKeys"
-	//TblGasUsedHistoryVals = "GasUsedHistoryVals"
-	//TblGasUsedIdx         = "GasUsedIdx"
 
 	TblLogAddressKeys = "LogAddressKeys"
 	TblLogAddressIdx  = "LogAddressIdx"
@@ -552,7 +541,8 @@ var (
 	LightClientOptimisticUpdate = []byte("LightClientOptimisticUpdate")
 	LastNewBlockSeen            = []byte("LastNewBlockSeen") // last seen block hash
 
-	StatesProcessingKey = []byte("StatesProcessing")
+	StatesProcessingKey          = []byte("StatesProcessing")
+	MinimumPrunableStepDomainKey = []byte("MinimumPrunableStepDomainKey")
 )
 
 // ChaindataTables - list of all buckets. App will panic if some bucket is not in this list.
@@ -592,12 +582,9 @@ var ChaindataTables = []string{
 	CallTraceSet,
 	CallFromIndex,
 	CallToIndex,
-	CumulativeGasIndex,
-	CumulativeTransactionIndex,
 	Log,
 	Sequence,
 	EthTx,
-	NonCanonicalTxs,
 	TrieOfAccounts,
 	TrieOfStorage,
 	HashedAccounts,
@@ -646,12 +633,6 @@ var ChaindataTables = []string{
 	TblCommitmentHistoryKeys,
 	TblCommitmentHistoryVals,
 	TblCommitmentIdx,
-
-	//TblGasUsedKeys,
-	//TblGasUsedVals,
-	//TblGasUsedHistoryKeys,
-	//TblGasUsedHistoryVals,
-	//TblGasUsedIdx,
 
 	TblLogAddressKeys,
 	TblLogAddressIdx,
@@ -814,10 +795,12 @@ var ChaindataTablesCfg = TableCfg{
 	CallTraceSet: {Flags: DupSort},
 
 	TblAccountKeys:           {Flags: DupSort},
+	TblAccountVals:           {Flags: DupSort},
 	TblAccountHistoryKeys:    {Flags: DupSort},
 	TblAccountHistoryVals:    {Flags: DupSort},
 	TblAccountIdx:            {Flags: DupSort},
 	TblStorageKeys:           {Flags: DupSort},
+	TblStorageVals:           {Flags: DupSort},
 	TblStorageHistoryKeys:    {Flags: DupSort},
 	TblStorageHistoryVals:    {Flags: DupSort},
 	TblStorageIdx:            {Flags: DupSort},
@@ -825,22 +808,19 @@ var ChaindataTablesCfg = TableCfg{
 	TblCodeHistoryKeys:       {Flags: DupSort},
 	TblCodeIdx:               {Flags: DupSort},
 	TblCommitmentKeys:        {Flags: DupSort},
+	TblCommitmentVals:        {Flags: DupSort},
 	TblCommitmentHistoryKeys: {Flags: DupSort},
 	TblCommitmentHistoryVals: {Flags: DupSort},
 	TblCommitmentIdx:         {Flags: DupSort},
-	//TblGasUsedKeys:           {Flags: DupSort},
-	//TblGasUsedHistoryKeys:    {Flags: DupSort},
-	//TblGasUsedHistoryVals:    {Flags: DupSort},
-	//TblGasUsedIdx:            {Flags: DupSort},
-	TblLogAddressKeys:  {Flags: DupSort},
-	TblLogAddressIdx:   {Flags: DupSort},
-	TblLogTopicsKeys:   {Flags: DupSort},
-	TblLogTopicsIdx:    {Flags: DupSort},
-	TblTracesFromKeys:  {Flags: DupSort},
-	TblTracesFromIdx:   {Flags: DupSort},
-	TblTracesToKeys:    {Flags: DupSort},
-	TblTracesToIdx:     {Flags: DupSort},
-	TblPruningProgress: {Flags: DupSort},
+	TblLogAddressKeys:        {Flags: DupSort},
+	TblLogAddressIdx:         {Flags: DupSort},
+	TblLogTopicsKeys:         {Flags: DupSort},
+	TblLogTopicsIdx:          {Flags: DupSort},
+	TblTracesFromKeys:        {Flags: DupSort},
+	TblTracesFromIdx:         {Flags: DupSort},
+	TblTracesToKeys:          {Flags: DupSort},
+	TblTracesToIdx:           {Flags: DupSort},
+	TblPruningProgress:       {Flags: DupSort},
 
 	RAccountKeys: {Flags: DupSort},
 	RAccountIdx:  {Flags: DupSort},
@@ -962,9 +942,7 @@ const (
 	StorageDomain    Domain = 1
 	CodeDomain       Domain = 2
 	CommitmentDomain Domain = 3
-	//GasUsedDomain    Domain = 4
-
-	DomainLen Domain = 4
+	DomainLen        Domain = 4
 )
 
 const (
@@ -972,7 +950,6 @@ const (
 	StorageHistory    History = "StorageHistory"
 	CodeHistory       History = "CodeHistory"
 	CommitmentHistory History = "CommitmentHistory"
-	//GasUsedHistory    History = "GasUsedHistory"
 )
 
 const (
@@ -980,7 +957,6 @@ const (
 	StorageHistoryIdx    InvertedIdx = "StorageHistoryIdx"
 	CodeHistoryIdx       InvertedIdx = "CodeHistoryIdx"
 	CommitmentHistoryIdx InvertedIdx = "CommitmentHistoryIdx"
-	//GasUsedHistoryIdx    InvertedIdx = "GasUsedHistoryIdx"
 
 	LogTopicIdx   InvertedIdx = "LogTopicIdx"
 	LogAddrIdx    InvertedIdx = "LogAddrIdx"
@@ -991,12 +967,12 @@ const (
 	LogTopicIdxPos   InvertedIdxPos = 1
 	TracesFromIdxPos InvertedIdxPos = 2
 	TracesToIdxPos   InvertedIdxPos = 3
-	StandaloneIdxLen uint16         = 4
+	StandaloneIdxLen InvertedIdxPos = 4
 )
 
 const (
-	// ReceiptsAppendable Appendable = 0
-
+	//ReceiptsAppendable Appendable = 0
+	//AppendableLen      Appendable = 1
 	AppendableLen Appendable = 0
 )
 
@@ -1025,8 +1001,6 @@ func (d Domain) String() string {
 		return "code"
 	case CommitmentDomain:
 		return "commitment"
-	//case GasUsedDomain:
-	//	return "gasused"
 	default:
 		return "unknown domain"
 	}
@@ -1042,9 +1016,25 @@ func String2Domain(in string) (Domain, error) {
 		return CodeDomain, nil
 	case "commitment":
 		return CommitmentDomain, nil
-	//case "gasused":
-	//	return GasUsedDomain, nil
 	default:
 		return 0, fmt.Errorf("unknown history name: %s", in)
+	}
+}
+
+func (iip Appendable) String() string {
+	switch iip {
+	//case ReceiptsAppendable:
+	//	return "receipts"
+	default:
+		return "unknown Appendable"
+	}
+}
+
+func String2Appendable(in string) (Appendable, error) {
+	switch in {
+	//case "receipts":
+	//	return ReceiptsAppendable, nil
+	default:
+		return 0, fmt.Errorf("unknown Appendable name: %s", in)
 	}
 }

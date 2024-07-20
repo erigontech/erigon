@@ -1,18 +1,18 @@
-/*
-   Copyright 2022 Erigon contributors
-
-   Licensed under the Apache License, Version 2.0 (the "License");
-   you may not use this file except in compliance with the License.
-   You may obtain a copy of the License at
-
-       http://www.apache.org/licenses/LICENSE-2.0
-
-   Unless required by applicable law or agreed to in writing, software
-   distributed under the License is distributed on an "AS IS" BASIS,
-   WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-   See the License for the specific language governing permissions and
-   limitations under the License.
-*/
+// Copyright 2022 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
 package state
 
@@ -29,16 +29,16 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/ledgerwatch/erigon-lib/common/background"
-	"github.com/ledgerwatch/erigon-lib/common/datadir"
-	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon-lib/kv/iter"
-	"github.com/ledgerwatch/erigon-lib/kv/mdbx"
-	"github.com/ledgerwatch/erigon-lib/kv/order"
-	"github.com/ledgerwatch/erigon-lib/log/v3"
-	"github.com/ledgerwatch/erigon-lib/recsplit"
-	"github.com/ledgerwatch/erigon-lib/recsplit/eliasfano32"
-	"github.com/ledgerwatch/erigon-lib/seg"
+	"github.com/erigontech/erigon-lib/common/background"
+	"github.com/erigontech/erigon-lib/common/datadir"
+	"github.com/erigontech/erigon-lib/kv"
+	"github.com/erigontech/erigon-lib/kv/mdbx"
+	"github.com/erigontech/erigon-lib/kv/order"
+	"github.com/erigontech/erigon-lib/kv/stream"
+	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon-lib/recsplit"
+	"github.com/erigontech/erigon-lib/recsplit/eliasfano32"
+	"github.com/erigontech/erigon-lib/seg"
 )
 
 func testDbAndInvertedIndex(tb testing.TB, aggStep uint64, logger log.Logger) (kv.RwDB, *InvertedIndex) {
@@ -99,20 +99,20 @@ func TestInvIndexPruningCorrectness(t *testing.T) {
 	require.EqualValues(t, count, pruneIters*int(pruneLimit))
 
 	// this one should not prune anything due to forced=false but no files built
-	stat, err := ic.Prune(context.Background(), rwTx, 0, 10, pruneLimit, logEvery, false, false, nil)
+	stat, err := ic.Prune(context.Background(), rwTx, 0, 10, pruneLimit, logEvery, false, nil)
 	require.NoError(t, err)
 	require.Zero(t, stat.PruneCountTx)
 	require.Zero(t, stat.PruneCountValues)
 
 	// this one should not prune anything as well due to given range [0,1) even it is forced
-	stat, err = ic.Prune(context.Background(), rwTx, 0, 1, pruneLimit, logEvery, true, false, nil)
+	stat, err = ic.Prune(context.Background(), rwTx, 0, 1, pruneLimit, logEvery, true, nil)
 	require.NoError(t, err)
 	require.Zero(t, stat.PruneCountTx)
 	require.Zero(t, stat.PruneCountValues)
 
 	// this should prune exactly pruneLimit*pruneIter transactions
 	for i := 0; i < pruneIters; i++ {
-		stat, err = ic.Prune(context.Background(), rwTx, 0, 1000, pruneLimit, logEvery, true, false, nil)
+		stat, err = ic.Prune(context.Background(), rwTx, 0, 1000, pruneLimit, logEvery, true, nil)
 		require.NoError(t, err)
 		t.Logf("[%d] stats: %v", i, stat)
 	}
@@ -286,7 +286,7 @@ func TestInvIndexAfterPrune(t *testing.T) {
 		ic = ii.BeginFilesRo()
 		defer ic.Close()
 
-		_, err = ic.Prune(ctx, tx, 0, 16, math.MaxUint64, logEvery, false, false, nil)
+		_, err = ic.Prune(ctx, tx, 0, 16, math.MaxUint64, logEvery, false, nil)
 		require.NoError(t, err)
 		return nil
 	})
@@ -371,7 +371,7 @@ func checkRanges(t *testing.T, db kv.RwDB, ii *InvertedIndex, txs uint64) {
 	ic := ii.BeginFilesRo()
 	defer ic.Close()
 
-	// Check the iterator ranges first without roTx
+	// Check the iterator invertedIndex first without roTx
 	for keyNum := uint64(1); keyNum <= uint64(31); keyNum++ {
 		var k [8]byte
 		binary.BigEndian.PutUint64(k[:], keyNum)
@@ -393,32 +393,32 @@ func checkRanges(t *testing.T, db kv.RwDB, ii *InvertedIndex, txs uint64) {
 		t.Run("desc", func(t *testing.T) {
 			reverseStream, err := ic.IdxRange(k[:], 976-1, 0, order.Desc, -1, nil)
 			require.NoError(t, err)
-			iter.ExpectEqualU64(t, iter.ReverseArray(values), reverseStream)
+			stream.ExpectEqualU64(t, stream.ReverseArray(values), reverseStream)
 		})
 		t.Run("unbounded asc", func(t *testing.T) {
 			forwardLimited, err := ic.IdxRange(k[:], -1, 976, order.Asc, 2, nil)
 			require.NoError(t, err)
-			iter.ExpectEqualU64(t, iter.Array(values[:2]), forwardLimited)
+			stream.ExpectEqualU64(t, stream.Array(values[:2]), forwardLimited)
 		})
 		t.Run("unbounded desc", func(t *testing.T) {
 			reverseLimited, err := ic.IdxRange(k[:], 976-1, -1, order.Desc, 2, nil)
 			require.NoError(t, err)
-			iter.ExpectEqualU64(t, iter.ReverseArray(values[len(values)-2:]), reverseLimited)
+			stream.ExpectEqualU64(t, stream.ReverseArray(values[len(values)-2:]), reverseLimited)
 		})
 		t.Run("tiny bound asc", func(t *testing.T) {
 			it, err := ic.IdxRange(k[:], 100, 102, order.Asc, -1, nil)
 			require.NoError(t, err)
-			expect := iter.FilterU64(iter.Array(values), func(k uint64) bool { return k >= 100 && k < 102 })
-			iter.ExpectEqualU64(t, expect, it)
+			expect := stream.FilterU64(stream.Array(values), func(k uint64) bool { return k >= 100 && k < 102 })
+			stream.ExpectEqualU64(t, expect, it)
 		})
 		t.Run("tiny bound desc", func(t *testing.T) {
 			it, err := ic.IdxRange(k[:], 102, 100, order.Desc, -1, nil)
 			require.NoError(t, err)
-			expect := iter.FilterU64(iter.ReverseArray(values), func(k uint64) bool { return k <= 102 && k > 100 })
-			iter.ExpectEqualU64(t, expect, it)
+			expect := stream.FilterU64(stream.ReverseArray(values), func(k uint64) bool { return k <= 102 && k > 100 })
+			stream.ExpectEqualU64(t, expect, it)
 		})
 	}
-	// Now check ranges that require access to DB
+	// Now check invertedIndex that require access to DB
 	roTx, err := db.BeginRo(ctx)
 	require.NoError(t, err)
 	defer roTx.Rollback()
@@ -440,8 +440,8 @@ func checkRanges(t *testing.T, db kv.RwDB, ii *InvertedIndex, txs uint64) {
 
 		reverseStream, err := ic.IdxRange(k[:], 1000-1, 400-1, false, -1, roTx)
 		require.NoError(t, err)
-		arr := iter.ToArrU64Must(reverseStream)
-		expect := iter.ToArrU64Must(iter.ReverseArray(values))
+		arr := stream.ToArrU64Must(reverseStream)
+		expect := stream.ToArrU64Must(stream.ReverseArray(values))
 		require.Equal(t, expect, arr)
 	}
 }
@@ -467,11 +467,11 @@ func mergeInverted(tb testing.TB, db kv.RwDB, ii *InvertedIndex, txs uint64) {
 			ii.reCalcVisibleFiles()
 			ic := ii.BeginFilesRo()
 			defer ic.Close()
-			_, err = ic.Prune(ctx, tx, step*ii.aggregationStep, (step+1)*ii.aggregationStep, math.MaxUint64, logEvery, false, false, nil)
+			_, err = ic.Prune(ctx, tx, step*ii.aggregationStep, (step+1)*ii.aggregationStep, math.MaxUint64, logEvery, false, nil)
 			require.NoError(tb, err)
 			var found bool
 			var startTxNum, endTxNum uint64
-			maxEndTxNum := ii.endTxNumMinimax()
+			maxEndTxNum := ii.dirtyFilesEndTxNumMinimax()
 			maxSpan := ii.aggregationStep * StepsInColdFile
 
 			for {
@@ -520,7 +520,7 @@ func TestInvIndexRanges(t *testing.T) {
 			ii.reCalcVisibleFiles()
 			ic := ii.BeginFilesRo()
 			defer ic.Close()
-			_, err = ic.Prune(ctx, tx, step*ii.aggregationStep, (step+1)*ii.aggregationStep, math.MaxUint64, logEvery, false, false, nil)
+			_, err = ic.Prune(ctx, tx, step*ii.aggregationStep, (step+1)*ii.aggregationStep, math.MaxUint64, logEvery, false, nil)
 			require.NoError(t, err)
 		}()
 	}
@@ -549,7 +549,7 @@ func TestInvIndexScanFiles(t *testing.T) {
 	ii, err = NewInvertedIndex(cfg, ii.aggregationStep, ii.filenameBase, ii.indexKeysTable, ii.indexTable, nil, logger)
 	require.NoError(err)
 	defer ii.Close()
-	err = ii.OpenFolder()
+	err = ii.openFolder()
 	require.NoError(err)
 
 	mergeInverted(t, db, ii, txs)
@@ -628,13 +628,13 @@ func TestScanStaticFiles(t *testing.T) {
 		"v1-test.3-4.ef",
 		"v1-test.4-5.ef",
 	}
-	ii.scanStateFiles(files)
+	ii.scanDirtyFiles(files)
 	require.Equal(t, 6, ii.dirtyFiles.Len())
 
 	//integrity extension case
 	ii.dirtyFiles.Clear()
 	ii.integrityCheck = func(fromStep, toStep uint64) bool { return false }
-	ii.scanStateFiles(files)
+	ii.scanDirtyFiles(files)
 	require.Equal(t, 0, ii.dirtyFiles.Len())
 }
 
@@ -652,7 +652,7 @@ func TestCtxFiles(t *testing.T) {
 		"v1-test.480-496.ef",
 		"v1-test.480-512.ef",
 	}
-	ii.scanStateFiles(files)
+	ii.scanDirtyFiles(files)
 	require.Equal(t, 10, ii.dirtyFiles.Len())
 	ii.dirtyFiles.Scan(func(item *filesItem) bool {
 		fName := ii.efFilePath(item.startTxNum/ii.aggregationStep, item.endTxNum/ii.aggregationStep)
@@ -724,7 +724,7 @@ func TestInvIndex_OpenFolder(t *testing.T) {
 	err = os.WriteFile(fn, make([]byte, 33), 0644)
 	require.NoError(t, err)
 
-	err = ii.OpenFolder()
+	err = ii.openFolder()
 	require.NoError(t, err)
 	ii.Close()
 }

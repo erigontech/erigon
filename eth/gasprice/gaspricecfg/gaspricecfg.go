@@ -1,15 +1,31 @@
+// Copyright 2024 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+
 package gaspricecfg
 
 import (
 	"math/big"
 
-	"github.com/ledgerwatch/erigon/params"
+	"github.com/erigontech/erigon/params"
 )
 
 var DefaultIgnorePrice = big.NewInt(2 * params.Wei)
 
 // BorDefaultGpoIgnorePrice defines the minimum gas price below which bor gpo will ignore transactions.
-var BorDefaultGpoIgnorePrice = big.NewInt(30 * params.Wei)
+var BorDefaultGpoIgnorePrice = big.NewInt(25 * params.Wei)
 
 var (
 	DefaultMaxPrice = big.NewInt(500 * params.GWei)

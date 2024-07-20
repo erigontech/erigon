@@ -1,3 +1,19 @@
+// Copyright 2024 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+
 package backup
 
 import (
@@ -16,11 +32,11 @@ import (
 	"golang.org/x/sync/errgroup"
 	"golang.org/x/sync/semaphore"
 
-	common2 "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/common/dbg"
-	"github.com/ledgerwatch/erigon-lib/kv"
-	mdbx2 "github.com/ledgerwatch/erigon-lib/kv/mdbx"
-	"github.com/ledgerwatch/erigon-lib/log/v3"
+	common2 "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common/dbg"
+	"github.com/erigontech/erigon-lib/kv"
+	mdbx2 "github.com/erigontech/erigon-lib/kv/mdbx"
+	"github.com/erigontech/erigon-lib/log/v3"
 )
 
 func OpenPair(from, to string, label kv.Label, targetPageSize datasize.ByteSize, logger log.Logger) (kv.RoDB, kv.RwDB) {
@@ -98,7 +114,7 @@ func backupTable(ctx context.Context, src kv.RoDB, srcTx kv.Tx, dst kv.RwDB, tab
 	if err != nil {
 		return err
 	}
-	total, _ = srcC.Count()
+	total, _ = srcTx.Count(table)
 
 	if err := dst.Update(ctx, func(tx kv.RwTx) error {
 		return tx.ClearBucket(table)
@@ -168,8 +184,7 @@ func WarmupTable(ctx context.Context, db kv.RoDB, bucket string, lvl log.Lvl, re
 	var ThreadsLimit = readAheadThreads
 	var total uint64
 	db.View(ctx, func(tx kv.Tx) error {
-		c, _ := tx.Cursor(bucket)
-		total, _ = c.Count()
+		total, _ = tx.Count(bucket)
 		return nil
 	})
 	if total < 10_000 {

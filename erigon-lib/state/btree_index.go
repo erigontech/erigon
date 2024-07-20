@@ -1,3 +1,19 @@
+// Copyright 2024 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+
 package state
 
 import (
@@ -19,13 +35,13 @@ import (
 	"github.com/edsrzf/mmap-go"
 	"github.com/spaolacci/murmur3"
 
-	"github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/common/background"
-	"github.com/ledgerwatch/erigon-lib/common/dbg"
-	"github.com/ledgerwatch/erigon-lib/etl"
-	"github.com/ledgerwatch/erigon-lib/log/v3"
-	"github.com/ledgerwatch/erigon-lib/recsplit/eliasfano32"
-	"github.com/ledgerwatch/erigon-lib/seg"
+	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common/background"
+	"github.com/erigontech/erigon-lib/common/dbg"
+	"github.com/erigontech/erigon-lib/etl"
+	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon-lib/recsplit/eliasfano32"
+	"github.com/erigontech/erigon-lib/seg"
 )
 
 var UseBpsTree = true
@@ -880,7 +896,7 @@ func (b *BtIndex) keyCmp(k []byte, di uint64, g ArchiveGetter) (int, []byte, err
 	var res []byte
 	res, _ = g.Next(res[:0])
 
-	//TODO: use `b.getter.Match` after https://github.com/ledgerwatch/erigon/issues/7855
+	//TODO: use `b.getter.Match` after https://github.com/erigontech/erigon/issues/7855
 	return bytes.Compare(res, k), res, nil
 	//return b.getter.Match(k), result, nil
 }

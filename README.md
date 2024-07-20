@@ -8,7 +8,7 @@ An accessible and complete version of the documentation is available at **[erigo
 **.
 <br>
 
-![Build status](https://github.com/ledgerwatch/erigon/actions/workflows/ci.yml/badge.svg) [![Coverage](https://sonarcloud.io/api/project_badges/measure?project=ledgerwatch_erigon&metric=coverage)](https://sonarcloud.io/summary/new_code?id=ledgerwatch_erigon)
+![Build status](https://github.com/erigontech/erigon/actions/workflows/ci.yml/badge.svg) [![Coverage](https://sonarcloud.io/api/project_badges/measure?project=erigontech_erigon&metric=coverage)](https://sonarcloud.io/summary/new_code?id=erigontech_erigon)
 
 <!--ts-->
 
@@ -19,7 +19,7 @@ An accessible and complete version of the documentation is available at **[erigo
     + [Testnets](#testnets)
     + [Block Production](#block-production-pow-miner-or-pos-validator)
     + [Windows](#windows)
-    + [GoDoc](https://godoc.org/github.com/ledgerwatch/erigon)
+    + [GoDoc](https://godoc.org/github.com/erigontech/erigon)
     + [Beacon Chain](#beacon-chain-consensus-layer)
     + [Dev Chain](#dev-chain)
     + [Caplin (Internal Consensus Layer)](#caplin)
@@ -58,8 +58,6 @@ System Requirements
   mount folder `<datadir>/temp` to another disk).
   Ethereum Mainnet Full node (see [Pruned Node][pruned_node]): 1.1TiB not including temp files (June 2024).
 
-* Goerli Full node (see [Pruned Node][pruned_node]): 189GB on Beta, 114GB on Alpha (April 2022).
-
 * Gnosis Chain Archive: 1.7TiB (March 2024).
   Gnosis Chain Full node (see [Pruned Node][pruned_node]): 300GiB (June 2024).
 
@@ -87,25 +85,25 @@ Usage
 For building the latest release (this will be suitable for most users just wanting to run a node):
 
 ```sh
-git clone --branch release/<x.xx> --single-branch https://github.com/ledgerwatch/erigon.git
+git clone --branch release/<x.xx> --single-branch https://github.com/erigontech/erigon.git
 cd erigon
 make erigon
 ./build/bin/erigon
 ```
 
-You can check [the list of releases](https://github.com/ledgerwatch/erigon/releases) for release notes.
+You can check [the list of releases](https://github.com/erigontech/erigon/releases) for release notes.
 
 For building the bleeding edge development branch:
 
 ```sh
-git clone --recurse-submodules https://github.com/ledgerwatch/erigon.git
+git clone --recurse-submodules https://github.com/erigontech/erigon.git
 cd erigon
 git checkout main
 make erigon
 ./build/bin/erigon
 ```
 
-Default `--snapshots` for `mainnet`, `goerli`, `gnosis`, `chiado`. Other networks now have default `--snapshots=false`.
+Default `--snapshots` for `mainnet`, `gnosis`, `chiado`. Other networks now have default `--snapshots=false`.
 Increase
 download speed by flag `--torrent.download.rate=20mb`. <code>🔬 See [Downloader docs](./cmd/downloader/readme.md)</code>
 
@@ -171,7 +169,7 @@ How to start Erigon's services as separated processes, see in [docker-compose.ym
 
 ### Embedded Consensus Layer
 
-On Ethereum Mainnet, Görli, and Sepolia, the Engine API can be disabled in favour of the Erigon native Embedded
+On Ethereum Mainnet and Sepolia, the Engine API can be disabled in favour of the Erigon native Embedded
 Consensus Layer.
 If you want to use the internal Consensus Layer, run Erigon with flag `--internalcl`.
 _Warning:_ Staking (block production) is not possible with the embedded CL.
@@ -179,17 +177,17 @@ _Warning:_ Staking (block production) is not possible with the embedded CL.
 ### Testnets
 
 If you would like to give Erigon a try, but do not have spare 2TB on your drive, a good option is to start syncing one
-of the public testnets, Görli. It syncs much quicker, and does not take so much disk space:
+of the public testnets, Sepolia. It syncs much quicker, and does not take so much disk space:
 
 ```sh
-git clone --recurse-submodules -j8 https://github.com/ledgerwatch/erigon.git
+git clone --recurse-submodules -j8 https://github.com/erigontech/erigon.git
 cd erigon
 make erigon
-./build/bin/erigon --datadir=<your_datadir> --chain=goerli
+./build/bin/erigon --datadir=<your_datadir> --chain=sepolia
 ```
 
 Please note the `--datadir` option that allows you to store Erigon files in a non-default location, in this example,
-in `goerli` subdirectory of the current directory. Name of the directory `--datadir` does not have to match the name of
+in `sepolia` subdirectory of the current directory. Name of the directory `--datadir` does not have to match the name of
 the chain in `--chain`.
 
 ### Block Production (PoW Miner or PoS Validator)
@@ -255,11 +253,11 @@ file can be overwritten by writing the flags directly on Erigon command line
 
 ### Example
 
-`./build/bin/erigon --config ./config.yaml --chain=goerli`
+`./build/bin/erigon --config ./config.yaml --chain=sepolia`
 
-Assuming we have `chain : "mainnet"` in our configuration file, by adding `--chain=goerli` allows the overwrite of the
+Assuming we have `chain : "mainnet"` in our configuration file, by adding `--chain=sepolia` allows the overwrite of the
 flag inside
-of the yaml configuration file and sets the chain to goerli
+of the yaml configuration file and sets the chain to sepolia
 
 ### TOML
 
@@ -376,7 +374,7 @@ is being updated on recurring basis.</code>
 **Preprocessing**. For some operations, Erigon uses temporary files to preprocess data before inserting it into the main
 DB. That reduces write amplification and DB inserts are orders of magnitude quicker.
 
-<code> 🔬 See our detailed ETL explanation [here](https://github.com/ledgerwatch/erigon-lib/blob/main/etl/README.md).</code>
+<code> 🔬 See our detailed ETL explanation [here](https://github.com/erigontech/erigon-lib/blob/main/etl/README.md).</code>
 
 **Plain state**.
 
@@ -523,7 +521,7 @@ sudo -u ${ERIGON_USER} DOCKER_UID=$(id -u ${ERIGON_USER}) DOCKER_GID=$(id -g ${E
 
 Makefile creates the initial directories for erigon, prometheus and grafana. The PID namespace is shared between erigon
 and rpcdaemon which is required to open Erigon's DB from another process (RPCDaemon local-mode).
-See: https://github.com/ledgerwatch/erigon/pull/2392/files
+See: https://github.com/erigontech/erigon/pull/2392/files
 
 If your docker installation requires the docker daemon to run as root (which is by default), you will need to prefix
 the command above with `sudo`. However, it is sometimes recommended running docker (and therefore its containers) as a
@@ -690,7 +688,7 @@ https://github.com/mathMakesArt/Erigon-on-RPi-4
 
 ### How to change db pagesize
 
-[post](https://github.com/ledgerwatch/erigon/blob/main/cmd/integration/Readme.md#copy-data-to-another-db)
+[post](https://github.com/erigontech/erigon/blob/main/cmd/integration/Readme.md#copy-data-to-another-db)
 
 
 Getting in touch
@@ -745,7 +743,7 @@ Next tools show correct memory usage of Erigon:
 
 ### Blocks Execution is slow on cloud-network-drives
 
-Please read https://github.com/ledgerwatch/erigon/issues/1516#issuecomment-811958891
+Please read https://github.com/erigontech/erigon/issues/1516#issuecomment-811958891
 In short: network-disks are bad for blocks execution - because blocks execution reading data from db non-parallel
 non-batched way.
 
@@ -787,13 +785,18 @@ Supported networks: all (except Mumbai).
 - E3 can execute 1 historical transaction - without executing it's block - because history/indices have
   transaction-granularity, instead of block-granularity.
 - E3 doesn't store Logs (aka Receipts) - it always re-executing historical txn (but it's cheaper then in E2 - see point
-  above). Also Logs LRU added in E2 (release/2.60) and E3: https://github.com/ledgerwatch/erigon/pull/10112
-  here. Likely later we will add optional flag "to persist receipts".
-- `--sync.loop.block.limit` is enabled by default. (Default: `2_000`.
-  Set `--sync.loop.block.limit=10_000_000 --batchSize=1g` to increase sync speed on good hardware).
-- datadir/chaindata is small now - to prevent it's grow: we recommend set `--batchSize <= 1G`. And it's fine
+  above). Known perf issues: https://github.com/erigontech/erigon/issues/10747
+- `--sync.loop.block.limit` is enabled by default. (Default: `5_000`.
+  Set `--sync.loop.block.limit=10_000 --batchSize=1g` to increase sync speed on good hardware).
+- datadir/chaindata is small now - to prevent it's grow: we recommend set `--batchSize <= 2G`. And it's fine
   to `rm -rf chaindata`
 - can symlink/mount latest state to fast drive and history to cheap drive
+- Archive Node is default. Full Node: `--prune.mode=full`, Minimal Node: `--prune.mode=minimal`
+
+### Known Problems of E3:
+
+- don't `rm -rf downloader` - it will cause re-downloading of files: https://github.com/erigontech/erigon/issues/10976
+- `eth_getLogs` fields `index` always 0: https://github.com/erigontech/erigon/issues/10324
 
 ### E3 datadir structure
 
@@ -839,44 +842,40 @@ datadir
 
 du -hsc /erigon/* 
 6G  	/erigon/caplin
-80G 	/erigon/chaindata
-1.7T	/erigon/snapshots
-1.8T	total
+50G 	/erigon/chaindata
+1.8T	/erigon/snapshots
+1.9T	total
 
 du -hsc /erigon/snapshots/* 
 100G 	/erigon/snapshots/accessor
-230G	/erigon/snapshots/domain
-250G	/erigon/snapshots/history
-400G	/erigon/snapshots/idx
+240G	/erigon/snapshots/domain
+260G	/erigon/snapshots/history
+410G	/erigon/snapshots/idx
 1.7T	/erigon/snapshots
 ```
 
 ```
-# bor-mainnet - archive - April 2024
+# bor-mainnet - archive - Jun 2024
 
 du -hsc /erigon/* 
+
 160M	/erigon/bor
-60G 	/erigon/chaindata
+50G 	/erigon/chaindata
 3.7T	/erigon/snapshots
 3.8T	total
 
 du -hsc /erigon/snapshots/* 
-24G	/erigon/snapshots/accessor
-680G	/erigon/snapshots/domain
-580G	/erigon/snapshots/history
-1.3T	/erigon/snapshots/idx
-3.7T	/erigon/snapshots
+260G	/erigon-data/snapshots/accessor
+850G	/erigon-data/snapshots/domain
+650G	/erigon-data/snapshots/history
+1.4T	/erigon-data/snapshots/idx
+4.1T	/erigon/snapshots
 ```
 
 ### E3 other perf trics
 
-- `--sync.loop.block.limit=10_000_000 --batchSize=1g` - likely will help for sync speed.
-- on cloud-drives (good throughput, bad latency) - can enable OS's brain to pre-fetch some data (`madv_normal` instead
-  of `madv_random`). For `snapshots/domain` folder (latest
-  state) `KV_MADV_NORMAL_NO_LAST_LVL=accounts,storage,commitment` (or if have enough
-  RAM:  `KV_MADV_NORMAL=accounts,storage,commitment`). For `chaindata` folder (latest updates) `MDBX_READAHEAD=true`.
-  For all files - `SNAPSHOT_MADV_RND=false`
-
+- `--sync.loop.block.limit=10_000 --batchSize=2g` - likely will help for sync speed.
+- on cloud-drives (good throughput, bad latency) - can enable OS's brain to pre-fetch: `SNAPSHOT_MADV_RND=false`
 - can lock latest state in RAM - to prevent from eviction (node may face high historical RPC traffic without impacting
   Chain-Tip perf):
 

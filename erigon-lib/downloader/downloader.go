@@ -1,18 +1,18 @@
-/*
-   Copyright 2021 Erigon contributors
-
-   Licensed under the Apache License, Version 2.0 (the "License");
-   you may not use this file except in compliance with the License.
-   You may obtain a copy of the License at
-
-       http://www.apache.org/licenses/LICENSE-2.0
-
-   Unless required by applicable law or agreed to in writing, software
-   distributed under the License is distributed on an "AS IS" BASIS,
-   WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-   See the License for the specific language governing permissions and
-   limitations under the License.
-*/
+// Copyright 2021 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
 package downloader
 
@@ -51,17 +51,17 @@ import (
 	"golang.org/x/sync/semaphore"
 	"golang.org/x/time/rate"
 
-	"github.com/ledgerwatch/erigon-lib/chain/snapcfg"
-	"github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/common/datadir"
-	"github.com/ledgerwatch/erigon-lib/common/dbg"
-	"github.com/ledgerwatch/erigon-lib/common/dir"
-	"github.com/ledgerwatch/erigon-lib/diagnostics"
-	"github.com/ledgerwatch/erigon-lib/downloader/downloadercfg"
-	"github.com/ledgerwatch/erigon-lib/downloader/snaptype"
-	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon-lib/kv/mdbx"
-	"github.com/ledgerwatch/erigon-lib/log/v3"
+	"github.com/erigontech/erigon-lib/chain/snapcfg"
+	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common/datadir"
+	"github.com/erigontech/erigon-lib/common/dbg"
+	"github.com/erigontech/erigon-lib/common/dir"
+	"github.com/erigontech/erigon-lib/diagnostics"
+	"github.com/erigontech/erigon-lib/downloader/downloadercfg"
+	"github.com/erigontech/erigon-lib/downloader/snaptype"
+	"github.com/erigontech/erigon-lib/kv"
+	"github.com/erigontech/erigon-lib/kv/mdbx"
+	"github.com/erigontech/erigon-lib/log/v3"
 )
 
 // Downloader - component which downloading historical files. Can use BitTorrent, or other protocols
@@ -94,6 +94,8 @@ type Downloader struct {
 	webDownloadInfo map[string]webDownloadInfo
 	downloading     map[string]*downloadInfo
 	downloadLimit   *rate.Limit
+
+	stuckFileDetailedLogs bool
 }
 
 type downloadInfo struct {
@@ -127,10 +129,12 @@ type AggStats struct {
 	LocalFileHashes            int
 	LocalFileHashTime          time.Duration
 
-	WebseedTripCount     *atomic.Int64
-	WebseedDiscardCount  *atomic.Int64
-	WebseedServerFails   *atomic.Int64
-	WebseedBytesDownload *atomic.Int64
+	WebseedActiveTrips    *atomic.Int64
+	WebseedMaxActiveTrips *atomic.Int64
+	WebseedTripCount      *atomic.Int64
+	WebseedDiscardCount   *atomic.Int64
+	WebseedServerFails    *atomic.Int64
+	WebseedBytesDownload  *atomic.Int64
 
 	lastTorrentStatus time.Time
 }
@@ -177,6 +181,20 @@ func calcBackoff(min, max time.Duration, attemptNum int, resp *http.Response) ti
 }
 
 func (r *requestHandler) RoundTrip(req *http.Request) (resp *http.Response, err error) {
+	r.downloader.lock.RLock()
+	webseedMaxActiveTrips := r.downloader.stats.WebseedMaxActiveTrips
+	webseedActiveTrips := r.downloader.stats.WebseedActiveTrips
+	webseedTripCount := r.downloader.stats.WebseedTripCount
+	webseedBytesDownload := r.downloader.stats.WebseedBytesDownload
+	webseedDiscardCount := r.downloader.stats.WebseedDiscardCount
+	WebseedServerFails := r.downloader.stats.WebseedServerFails
+	r.downloader.lock.RUnlock()
+
+	activeTrips := webseedActiveTrips.Add(1)
+	if activeTrips > webseedMaxActiveTrips.Load() {
+		webseedMaxActiveTrips.Store(activeTrips)
+	}
+
 	defer func() {
 		if r := recover(); r != nil {
 			if resp != nil && resp.Body != nil {
@@ -186,6 +204,8 @@ func (r *requestHandler) RoundTrip(req *http.Request) (resp *http.Response, err 
 
 			err = fmt.Errorf("http client panic: %s", r)
 		}
+
+		webseedActiveTrips.Add(-1)
 	}()
 
 	insertCloudflareHeaders(req)
@@ -200,7 +220,7 @@ func (r *requestHandler) RoundTrip(req *http.Request) (resp *http.Response, err 
 	const maxAttempts = 10
 
 	for err == nil && retry {
-		r.downloader.stats.WebseedTripCount.Add(1)
+		webseedTripCount.Add(1)
 
 		switch resp.StatusCode {
 		case http.StatusOK:
@@ -213,22 +233,22 @@ func (r *requestHandler) RoundTrip(req *http.Request) (resp *http.Response, err 
 				// TODO: We could count the bytes - probably need to take this from the req though
 				// as its not clear the amount of the content which will be read.  This needs
 				// further investigation - if required.
-				r.downloader.stats.WebseedDiscardCount.Add(1)
+				webseedDiscardCount.Add(1)
 			}
 
-			r.downloader.stats.WebseedBytesDownload.Add(resp.ContentLength)
+			webseedBytesDownload.Add(resp.ContentLength)
 			retry = false
 
 		// the first two statuses here have been observed from cloudflare
 		// during testing.  The remainder are generally understood to be
-		// retriable http responses, calcBackoff will use the Retry-After
-		// header if its availible
+		// retry-able http responses, calcBackoff will use the Retry-After
+		// header if its available
 		case http.StatusInternalServerError, http.StatusBadGateway,
 			http.StatusRequestTimeout, http.StatusTooEarly,
 			http.StatusTooManyRequests, http.StatusServiceUnavailable,
 			http.StatusGatewayTimeout:
 
-			r.downloader.stats.WebseedServerFails.Add(1)
+			WebseedServerFails.Add(1)
 
 			if resp.Body != nil {
 				resp.Body.Close()
@@ -242,7 +262,7 @@ func (r *requestHandler) RoundTrip(req *http.Request) (resp *http.Response, err 
 			case <-delayTimer.C:
 				// Note this assumes the req.Body is nil
 				resp, err = r.Transport.RoundTrip(req)
-				r.downloader.stats.WebseedTripCount.Add(1)
+				webseedTripCount.Add(1)
 
 			case <-req.Context().Done():
 				err = req.Context().Err()
@@ -250,7 +270,7 @@ func (r *requestHandler) RoundTrip(req *http.Request) (resp *http.Response, err 
 			retry = attempts < maxAttempts
 
 		default:
-			r.downloader.stats.WebseedBytesDownload.Add(resp.ContentLength)
+			webseedBytesDownload.Add(resp.ContentLength)
 			retry = false
 		}
 	}
@@ -270,7 +290,7 @@ func New(ctx context.Context, cfg *downloadercfg.Cfg, logger log.Logger, verbosi
 
 	cfg.ClientConfig.WebTransport = requestHandler
 
-	db, c, m, torrentClient, err := openClient(ctx, cfg.Dirs.Downloader, cfg.Dirs.Snap, cfg.ClientConfig)
+	db, c, m, torrentClient, err := openClient(ctx, cfg.Dirs.Downloader, cfg.Dirs.Snap, cfg.ClientConfig, cfg.MdbxWriteMap, logger)
 	if err != nil {
 		return nil, fmt.Errorf("openClient: %w", err)
 	}
@@ -288,10 +308,12 @@ func New(ctx context.Context, cfg *downloadercfg.Cfg, logger log.Logger, verbosi
 
 	mutex := &sync.RWMutex{}
 	stats := AggStats{
-		WebseedTripCount:     &atomic.Int64{},
-		WebseedBytesDownload: &atomic.Int64{},
-		WebseedDiscardCount:  &atomic.Int64{},
-		WebseedServerFails:   &atomic.Int64{},
+		WebseedActiveTrips:    &atomic.Int64{},
+		WebseedMaxActiveTrips: &atomic.Int64{},
+		WebseedTripCount:      &atomic.Int64{},
+		WebseedBytesDownload:  &atomic.Int64{},
+		WebseedDiscardCount:   &atomic.Int64{},
+		WebseedServerFails:    &atomic.Int64{},
 	}
 
 	snapLock, err := getSnapshotLock(ctx, cfg, db, &stats, mutex, logger)
@@ -729,8 +751,11 @@ func localHashBytes(ctx context.Context, fileInfo snaptype.FileInfo, db kv.RoDB,
 }
 
 func fileHashBytes(ctx context.Context, fileInfo snaptype.FileInfo, stats *AggStats, statsLock *sync.RWMutex) ([]byte, error) {
-
-	if !dir.FileExist(fileInfo.Path) {
+	exists, err := dir.FileExist(fileInfo.Path)
+	if err != nil {
+		return nil, err
+	}
+	if !exists {
 		return nil, os.ErrNotExist
 	}
 
@@ -807,6 +832,20 @@ func (d *Downloader) mainLoop(silent bool) error {
 
 			for _, t := range d.torrentClient.Torrents() {
 				if urls, ok := d.webseeds.ByFileName(t.Name()); ok {
+					// if we have created a torrent, but it has no info, assume that the
+					// webseed download either has not been called yet or has failed and
+					// try again here - otherwise the torrent will be left with no info
+					if t.Info() == nil {
+						ts, ok, err := d.webseeds.DownloadAndSaveTorrentFile(d.ctx, t.Name())
+						if ok && err == nil {
+							_, _, err = addTorrentFile(d.ctx, ts, d.torrentClient, d.db, d.webseeds)
+							if err != nil {
+								d.logger.Warn("[snapshots] addTorrentFile from webseed", "err", err)
+								continue
+							}
+						}
+					}
+
 					t.AddWebSeeds(urls)
 				}
 			}
@@ -852,8 +891,14 @@ func (d *Downloader) mainLoop(silent bool) error {
 
 			var pending []*torrent.Torrent
 
+			var plist []string
+			var clist []string
+			var flist []string
+			var dlist []string
+
 			for _, t := range torrents {
 				if _, ok := complete[t.Name()]; ok {
+					clist = append(clist, t.Name())
 					continue
 				}
 
@@ -905,6 +950,7 @@ func (d *Downloader) mainLoop(silent bool) error {
 								}(fileInfo, t.InfoHash(), length, *completionTime)
 
 							} else {
+								clist = append(clist, t.Name())
 								complete[t.Name()] = struct{}{}
 								continue
 							}
@@ -915,6 +961,7 @@ func (d *Downloader) mainLoop(silent bool) error {
 				}
 
 				if _, ok := failed[t.Name()]; ok {
+					flist = append(flist, t.Name())
 					continue
 				}
 
@@ -970,14 +1017,17 @@ func (d *Downloader) mainLoop(silent bool) error {
 					delete(d.downloading, t.Name())
 					d.lock.Unlock()
 					complete[t.Name()] = struct{}{}
+					clist = append(clist, t.Name())
 					continue
 				}
 
 				if downloading {
+					dlist = append(dlist, t.Name())
 					continue
 				}
 
 				pending = append(pending, t)
+				plist = append(plist, t.Name())
 			}
 
 			select {
@@ -1056,10 +1106,10 @@ func (d *Downloader) mainLoop(silent bool) error {
 				}
 			}
 
-			d.lock.RLock()
+			d.lock.Lock()
 			downloadingLen := len(d.downloading)
 			d.stats.Downloading = int32(downloadingLen)
-			d.lock.RUnlock()
+			d.lock.Unlock()
 
 			// the call interval of the loop (elapsed sec) used to get slots/sec for
 			// calculating the number of files to download based on the loop speed
@@ -1110,6 +1160,20 @@ func (d *Downloader) mainLoop(silent bool) error {
 				}
 			}
 			d.lock.RUnlock()
+
+			d.lock.RLock()
+			completed := d.stats.Completed
+			d.lock.RUnlock()
+
+			if !completed {
+				var alist []string
+
+				for _, t := range available {
+					alist = append(alist, t.Name())
+				}
+
+				d.logger.Debug("[snapshot] download status", "pending", plist, "availible", alist, "downloading", dlist, "complete", clist, "failed", flist)
+			}
 
 			for _, t := range available {
 
@@ -1178,7 +1242,7 @@ func (d *Downloader) mainLoop(silent bool) error {
 
 				switch {
 				case len(t.PeerConns()) > 0:
-					d.logger.Debug("[snapshots] Downloading from BitTorrent", "file", t.Name(), "peers", len(t.PeerConns()), "webpeers", len(t.WebseedPeerConns()))
+					d.logger.Debug("[snapshots] Downloading from torrent", "file", t.Name(), "peers", len(t.PeerConns()), "webpeers", len(t.WebseedPeerConns()))
 					delete(waiting, t.Name())
 					d.torrentDownload(t, downloadComplete)
 				case len(t.WebseedPeerConns()) > 0:
@@ -1602,8 +1666,11 @@ func (d *Downloader) webDownload(peerUrls []*url.URL, t *torrent.Torrent, i *web
 
 	go func() {
 		defer d.wg.Done()
-
-		if dir.FileExist(info.Path) {
+		exists, err := dir.FileExist(info.Path)
+		if err != nil {
+			d.logger.Warn("FileExist error", "file", name, "path", info.Path, "err", err)
+		}
+		if exists {
 			if err := os.Remove(info.Path); err != nil {
 				d.logger.Warn("Couldn't remove previous file before download", "file", name, "path", info.Path, "err", err)
 			}
@@ -1635,7 +1702,7 @@ func (d *Downloader) webDownload(peerUrls []*url.URL, t *torrent.Torrent, i *web
 			}()
 		}
 
-		err := session.Download(d.ctx, name)
+		err = session.Download(d.ctx, name)
 
 		if err != nil {
 			d.logger.Error("Web download failed", "file", name, "err", err)
@@ -2100,13 +2167,15 @@ func (d *Downloader) ReCalcStats(interval time.Duration) {
 	}
 
 	if !stats.Completed {
-		logger.Debug("[snapshots] info",
+		logger.Debug("[snapshots] download info",
 			"len", len(torrents),
 			"webTransfers", webTransfers,
 			"torrent", torrentInfo,
 			"db", dbInfo,
 			"t-complete", tComplete,
 			"webseed-trips", stats.WebseedTripCount.Load(),
+			"webseed-active", stats.WebseedActiveTrips.Load(),
+			"webseed-max-active", stats.WebseedMaxActiveTrips.Load(),
 			"webseed-discards", stats.WebseedDiscardCount.Load(),
 			"webseed-fails", stats.WebseedServerFails.Load(),
 			"webseed-bytes", common.ByteCount(uint64(stats.WebseedBytesDownload.Load())),
@@ -2162,7 +2231,7 @@ func (d *Downloader) ReCalcStats(interval time.Duration) {
 		logger.Log(verbosity, "[snapshots] downloading", "files", amount, "list", strings.Join(files, ", "))
 	}
 
-	if time.Since(stats.lastTorrentStatus) > 5*time.Minute {
+	if d.stuckFileDetailedLogs && time.Since(stats.lastTorrentStatus) > 5*time.Minute {
 		stats.lastTorrentStatus = time.Now()
 
 		if len(noDownloadProgress) > 0 {
@@ -2304,7 +2373,7 @@ func getPeersRatesForlogs(peersOfThisFile []*torrent.PeerConn, fName string) ([]
 			DownloadRate: dr,
 		}
 		peers = append(peers, segPeer)
-		rates = append(rates, peer.PeerClientName.Load(), fmt.Sprintf("%s/s", common.ByteCount(dr)))
+		rates = append(rates, url, fmt.Sprintf("%s/s", common.ByteCount(dr)))
 	}
 
 	return rates, peers
@@ -2323,7 +2392,11 @@ func (d *Downloader) VerifyData(ctx context.Context, whiteList []string, failFas
 			continue
 		}
 
-		if !dir.FileExist(filepath.Join(d.SnapDir(), t.Name())) {
+		exists, err := dir.FileExist(filepath.Join(d.SnapDir(), t.Name()))
+		if err != nil {
+			return err
+		}
+		if !exists {
 			continue
 		}
 
@@ -2395,7 +2468,7 @@ func (d *Downloader) VerifyData(ctx context.Context, whiteList []string, failFas
 	return nil
 }
 
-// AddNewSeedableFile decides what we do depending on wether we have the .seg file or the .torrent file
+// AddNewSeedableFile decides what we do depending on whether we have the .seg file or the .torrent file
 // have .torrent no .seg => get .seg file from .torrent
 // have .seg no .torrent => get .torrent from .seg
 func (d *Downloader) AddNewSeedableFile(ctx context.Context, name string) error {
@@ -2451,7 +2524,12 @@ func (d *Downloader) AddMagnetLink(ctx context.Context, infoHash metainfo.Hash, 
 		return err
 	}
 
-	if isProhibited && !d.torrentFS.Exists(name) {
+	exists, err := d.torrentFS.Exists(name)
+	if err != nil {
+		return err
+	}
+
+	if isProhibited && !exists {
 		return nil
 	}
 
@@ -2667,23 +2745,22 @@ func (d *Downloader) StopSeeding(hash metainfo.Hash) error {
 
 func (d *Downloader) TorrentClient() *torrent.Client { return d.torrentClient }
 
-func openClient(ctx context.Context, dbDir, snapDir string, cfg *torrent.ClientConfig) (db kv.RwDB, c storage.PieceCompletion, m storage.ClientImplCloser, torrentClient *torrent.Client, err error) {
-	db, err = mdbx.NewMDBX(log.New()).
+func openClient(ctx context.Context, dbDir, snapDir string, cfg *torrent.ClientConfig, writeMap bool, logger log.Logger) (db kv.RwDB, c storage.PieceCompletion, m storage.ClientImplCloser, torrentClient *torrent.Client, err error) {
+	dbCfg := mdbx.NewMDBX(log.New()).
 		Label(kv.DownloaderDB).
 		WithTableCfg(func(defaultBuckets kv.TableCfg) kv.TableCfg { return kv.DownloaderTablesCfg }).
 		GrowthStep(16 * datasize.MB).
 		MapSize(16 * datasize.GB).
 		PageSize(uint64(4 * datasize.KB)).
-		//WriteMap().
-		//LifoReclaim().
 		RoTxsLimiter(semaphore.NewWeighted(9_000)).
 		Path(dbDir).
-		Open(ctx)
+		WriteMap(writeMap)
+	db, err = dbCfg.Open(ctx)
 	if err != nil {
 		return nil, nil, nil, nil, fmt.Errorf("torrentcfg.openClient: %w", err)
 	}
 	//c, err = NewMdbxPieceCompletion(db)
-	c, err = NewMdbxPieceCompletionBatch(db)
+	c, err = NewMdbxPieceCompletion(db, logger)
 	if err != nil {
 		return nil, nil, nil, nil, fmt.Errorf("torrentcfg.NewMdbxPieceCompletion: %w", err)
 	}
@@ -2693,7 +2770,7 @@ func openClient(ctx context.Context, dbDir, snapDir string, cfg *torrent.ClientC
 	// - "sig-bus" at disk-full - may happen anyway, because DB is mmap
 	// - MMAP - means less GC pressure, more zero-copy
 	// - MMAP files are pre-allocated - which is not cool, but: 1. we can live with it 2. maybe can just resize MMAP in future
-	// See also: https://github.com/ledgerwatch/erigon/pull/10074
+	// See also: https://github.com/erigontech/erigon/pull/10074
 	m = storage.NewMMapWithCompletion(snapDir, c)
 	//m = storage.NewFileOpts(storage.NewFileClientOpts{
 	//	ClientBaseDir:   snapDir,
@@ -2704,10 +2781,10 @@ func openClient(ctx context.Context, dbDir, snapDir string, cfg *torrent.ClientC
 	dnsResolver := &downloadercfg.DnsCacheResolver{RefreshTimeout: 24 * time.Hour}
 	cfg.TrackerDialContext = dnsResolver.DialContext
 
-	err = func() error {
+	err = func() (err error) {
 		defer func() {
-			if err := recover(); err != nil {
-				fmt.Printf("openTorrentClient: %v\n", err)
+			if e := recover(); e != nil {
+				err = fmt.Errorf("openTorrentClient: %v", e)
 			}
 		}()
 

@@ -1,18 +1,21 @@
 // Copyright 2019 The go-ethereum Authors
-// This file is part of the go-ethereum library.
+// (original work)
+// Copyright 2024 The Erigon Authors
+// (modifications)
+// This file is part of Erigon.
 //
-// The go-ethereum library is free software: you can redistribute it and/or modify
+// Erigon is free software: you can redistribute it and/or modify
 // it under the terms of the GNU Lesser General Public License as published by
 // the Free Software Foundation, either version 3 of the License, or
 // (at your option) any later version.
 //
-// The go-ethereum library is distributed in the hope that it will be useful,
+// Erigon is distributed in the hope that it will be useful,
 // but WITHOUT ANY WARRANTY; without even the implied warranty of
 // MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
 // GNU Lesser General Public License for more details.
 //
 // You should have received a copy of the GNU Lesser General Public License
-// along with the go-ethereum library. If not, see <http://www.gnu.org/licenses/>.
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
 package discover
 
@@ -30,13 +33,13 @@ import (
 
 	lru "github.com/hashicorp/golang-lru/v2"
 
-	"github.com/ledgerwatch/erigon-lib/log/v3"
+	"github.com/erigontech/erigon-lib/log/v3"
 
-	"github.com/ledgerwatch/erigon/common/debug"
-	"github.com/ledgerwatch/erigon/crypto"
-	"github.com/ledgerwatch/erigon/p2p/discover/v4wire"
-	"github.com/ledgerwatch/erigon/p2p/enode"
-	"github.com/ledgerwatch/erigon/p2p/netutil"
+	"github.com/erigontech/erigon/common/debug"
+	"github.com/erigontech/erigon/crypto"
+	"github.com/erigontech/erigon/p2p/discover/v4wire"
+	"github.com/erigontech/erigon/p2p/enode"
+	"github.com/erigontech/erigon/p2p/netutil"
 )
 
 // Errors
@@ -606,14 +609,15 @@ func (t *UDPv4) loop() {
 			return
 
 		case p := <-t.addReplyMatcher:
-			func() {
-				mutex.Lock()
-				defer mutex.Unlock()
-				p.deadline = time.Now().Add(t.replyTimeout)
-				listUpdate <- plist.PushBack(p)
-			}()
+			mutex.Lock()
+			p.deadline = time.Now().Add(t.replyTimeout)
+			back := plist.PushBack(p)
+			mutex.Unlock()
+			listUpdate <- back
 
 		case r := <-t.gotreply:
+			var removals []*list.Element
+
 			func() {
 				mutex.Lock()
 				defer mutex.Unlock()
@@ -629,7 +633,7 @@ func (t *UDPv4) loop() {
 						if requestDone {
 							p.errc <- nil
 							plist.Remove(el)
-							listUpdate <- el
+							removals = append(removals, el)
 						}
 						// Reset the continuous timeout counter (time drift detection)
 						contTimeouts = 0
@@ -637,6 +641,10 @@ func (t *UDPv4) loop() {
 				}
 				r.matched <- matched
 			}()
+
+			for _, el := range removals {
+				listUpdate <- el
+			}
 
 		case key := <-t.gotkey:
 			go func() {

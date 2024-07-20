@@ -1,3 +1,19 @@
+// Copyright 2024 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+
 package stagedsync_test
 
 import (
@@ -7,16 +23,17 @@ import (
 	"testing"
 	"time"
 
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/common/u256"
-	"github.com/ledgerwatch/erigon-lib/config3"
-	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon-lib/kv/rawdbv3"
+	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common/u256"
+	"github.com/erigontech/erigon-lib/config3"
+	"github.com/erigontech/erigon-lib/kv"
+	"github.com/erigontech/erigon-lib/kv/rawdbv3"
+	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/stretchr/testify/require"
 
-	"github.com/ledgerwatch/erigon/core/rawdb"
-	"github.com/ledgerwatch/erigon/core/types"
-	"github.com/ledgerwatch/erigon/turbo/stages/mock"
+	"github.com/erigontech/erigon/core/rawdb"
+	"github.com/erigontech/erigon/core/types"
+	"github.com/erigontech/erigon/turbo/stages/mock"
 )
 
 func testingHeaderBody(t *testing.T) (h *types.Header, b *types.RawBody) {
@@ -34,6 +51,9 @@ func testingHeaderBody(t *testing.T) (h *types.Header, b *types.RawBody) {
 }
 
 func TestBodiesCanonical(t *testing.T) {
+	defer log.Root().SetHandler(log.Root().GetHandler())
+	log.Root().SetHandler(log.LvlFilterHandler(log.LvlError, log.StderrHandler))
+
 	m := mock.Mock(t)
 	tx, err := m.DB.BeginRw(m.Ctx)
 	require := require.New(t)
@@ -55,7 +75,7 @@ func TestBodiesCanonical(t *testing.T) {
 			err = bw.MakeBodiesCanonical(tx, 1)
 			require.NoError(err)
 		}
-		h.Number = big.NewInt(int64(i))
+		h.Number = new(big.Int).SetUint64(i)
 		hash := h.Hash()
 		err = rawdb.WriteHeader(tx, h)
 		require.NoError(err)
@@ -93,7 +113,7 @@ func TestBodiesUnwind(t *testing.T) {
 	defer logEvery.Stop()
 
 	for i := uint64(1); i <= 10; i++ {
-		h.Number = big.NewInt(int64(i))
+		h.Number = new(big.Int).SetUint64(i)
 		hash := h.Hash()
 		err = rawdb.WriteHeader(tx, h)
 		require.NoError(err)

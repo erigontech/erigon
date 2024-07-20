@@ -1,18 +1,18 @@
-/*
-   Copyright 2022 Erigon contributors
-
-   Licensed under the Apache License, Version 2.0 (the "License");
-   you may not use this file except in compliance with the License.
-   You may obtain a copy of the License at
-
-       http://www.apache.org/licenses/LICENSE-2.0
-
-   Unless required by applicable law or agreed to in writing, software
-   distributed under the License is distributed on an "AS IS" BASIS,
-   WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-   See the License for the specific language governing permissions and
-   limitations under the License.
-*/
+// Copyright 2022 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
 package mdbx
 
@@ -20,6 +20,7 @@ import (
 	"context"
 	"encoding/binary"
 	"errors"
+	"math/rand"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -28,10 +29,10 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon-lib/kv/iter"
-	"github.com/ledgerwatch/erigon-lib/kv/order"
-	"github.com/ledgerwatch/erigon-lib/log/v3"
+	"github.com/erigontech/erigon-lib/kv"
+	"github.com/erigontech/erigon-lib/kv/order"
+	"github.com/erigontech/erigon-lib/kv/stream"
+	"github.com/erigontech/erigon-lib/log/v3"
 )
 
 func BaseCaseDB(t *testing.T) kv.RwDB {
@@ -46,6 +47,21 @@ func BaseCaseDB(t *testing.T) kv.RwDB {
 		}
 	}).MapSize(128 * datasize.MB).MustOpen()
 	t.Cleanup(db.Close)
+	return db
+}
+
+func BaseCaseDBForBenchmark(b *testing.B) kv.RwDB {
+	b.Helper()
+	path := b.TempDir()
+	logger := log.New()
+	table := "Table"
+	db := NewMDBX(logger).InMem(path).WithTableCfg(func(defaultBuckets kv.TableCfg) kv.TableCfg {
+		return kv.TableCfg{
+			table:       kv.TableCfgItem{Flags: kv.DupSort},
+			kv.Sequence: kv.TableCfgItem{},
+		}
+	}).MapSize(128 * datasize.MB).MustOpen()
+	b.Cleanup(db.Close)
 	return db
 }
 
@@ -195,13 +211,13 @@ func TestRangeDupSort(t *testing.T) {
 		// [from, nil) means [from, INF)
 		it, err = tx.RangeDupSort("Table", []byte("key1"), []byte("value1"), nil, order.Asc, -1)
 		require.NoError(t, err)
-		_, vals, err := iter.ToArrayKV(it)
+		_, vals, err := stream.ToArrayKV(it)
 		require.NoError(t, err)
 		require.Equal(t, 2, len(vals))
 
 		it, err = tx.RangeDupSort("Table", []byte("key1"), []byte("value1"), []byte("value1.3"), order.Asc, -1)
 		require.NoError(t, err)
-		_, vals, err = iter.ToArrayKV(it)
+		_, vals, err = stream.ToArrayKV(it)
 		require.NoError(t, err)
 		require.Equal(t, 1, len(vals))
 	})
@@ -227,13 +243,13 @@ func TestRangeDupSort(t *testing.T) {
 
 		it, err = tx.RangeDupSort("Table", []byte("key1"), []byte("value1"), []byte("value0"), order.Desc, -1)
 		require.NoError(t, err)
-		_, vals, err := iter.ToArrayKV(it)
+		_, vals, err := stream.ToArrayKV(it)
 		require.NoError(t, err)
 		require.Equal(t, 2, len(vals))
 
 		it, err = tx.RangeDupSort("Table", []byte("key1"), []byte("value1.3"), []byte("value1.1"), order.Desc, -1)
 		require.NoError(t, err)
-		_, vals, err = iter.ToArrayKV(it)
+		_, vals, err = stream.ToArrayKV(it)
 		require.NoError(t, err)
 		require.Equal(t, 1, len(vals))
 	})
@@ -377,36 +393,39 @@ func TestForAmount(t *testing.T) {
 	require.Nil(t, keys3)
 }
 
-func TestForPrefix(t *testing.T) {
+func TestPrefix(t *testing.T) {
 	_, tx, _ := BaseCase(t)
 
 	table := "Table"
-
-	var keys []string
-
-	err := tx.ForPrefix(table, []byte("key"), func(k, v []byte) error {
-		keys = append(keys, string(k))
-		return nil
-	})
+	var keys, keys1, keys2 []string
+	kvs1, err := tx.Prefix(table, []byte("key"))
 	require.Nil(t, err)
+	defer kvs1.Close()
+	for kvs1.HasNext() {
+		k1, _, err := kvs1.Next()
+		require.Nil(t, err)
+		keys = append(keys, string(k1))
+	}
 	require.Equal(t, []string{"key1", "key1", "key3", "key3"}, keys)
 
-	var keys1 []string
-
-	err = tx.ForPrefix(table, []byte("key1"), func(k, v []byte) error {
-		keys1 = append(keys1, string(k))
-		return nil
-	})
+	kvs2, err := tx.Prefix(table, []byte("key1"))
 	require.Nil(t, err)
+	defer kvs2.Close()
+	for kvs2.HasNext() {
+		k1, _, err := kvs2.Next()
+		require.Nil(t, err)
+		keys1 = append(keys1, string(k1))
+	}
 	require.Equal(t, []string{"key1", "key1"}, keys1)
 
-	var keys2 []string
-
-	err = tx.ForPrefix(table, []byte("e"), func(k, v []byte) error {
-		keys2 = append(keys2, string(k))
-		return nil
-	})
+	kvs3, err := tx.Prefix(table, []byte("e"))
 	require.Nil(t, err)
+	defer kvs3.Close()
+	for kvs3.HasNext() {
+		k1, _, err := kvs3.Next()
+		require.Nil(t, err)
+		keys2 = append(keys2, string(k1))
+	}
 	require.Nil(t, keys2)
 }
 
@@ -629,7 +648,7 @@ func TestCurrentDup(t *testing.T) {
 
 	count, err := c.CountDuplicates()
 	require.Nil(t, err)
-	require.Equal(t, count, uint64(2))
+	require.Equal(t, uint64(2), count)
 
 	require.Error(t, c.PutNoDupData([]byte("key3"), []byte("value3.3")))
 	require.NoError(t, c.DeleteCurrentDuplicates())
@@ -645,7 +664,7 @@ func TestCurrentDup(t *testing.T) {
 }
 
 func TestDupDelete(t *testing.T) {
-	_, _, c := BaseCase(t)
+	_, tx, c := BaseCase(t)
 
 	k, _, err := c.Current()
 	require.Nil(t, err)
@@ -657,7 +676,8 @@ func TestDupDelete(t *testing.T) {
 	err = c.Delete([]byte("key1"))
 	require.Nil(t, err)
 
-	count, err := c.Count()
+	//TODO: find better way
+	count, err := tx.Count("Table")
 	require.Nil(t, err)
 	assert.Zero(t, count)
 }
@@ -1090,5 +1110,122 @@ func TestDB_BatchTime(t *testing.T) {
 		return nil
 	}); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func BenchmarkDB_Get(b *testing.B) {
+	_db := BaseCaseDBForBenchmark(b)
+	table := "Table"
+	db := _db.(*MdbxKV)
+
+	// buffered so we never leak goroutines
+	err := db.Update(context.Background(), func(tx kv.RwTx) error {
+		return tx.Put(table, u64tob(uint64(1)), u64tob(uint64(1)))
+	})
+	if err != nil {
+		b.Fatal(err)
+	}
+
+	// Ensure data is correct.
+	if err := db.View(context.Background(), func(tx kv.Tx) error {
+		key := u64tob(uint64(1))
+		b.ResetTimer()
+		for i := 1; i <= b.N; i++ {
+			v, err := tx.GetOne(table, key)
+			if err != nil {
+				return err
+			}
+			if v == nil {
+				b.Errorf("key not found: %d", 1)
+			}
+		}
+		return nil
+	}); err != nil {
+		b.Fatal(err)
+	}
+}
+
+func BenchmarkDB_Put(b *testing.B) {
+	_db := BaseCaseDBForBenchmark(b)
+	table := "Table"
+	db := _db.(*MdbxKV)
+
+	// Ensure data is correct.
+	if err := db.Update(context.Background(), func(tx kv.RwTx) error {
+		keys := make([][]byte, b.N)
+		for i := 1; i <= b.N; i++ {
+			keys[i-1] = u64tob(uint64(i))
+		}
+		b.ResetTimer()
+		for i := 0; i < b.N; i++ {
+			err := tx.Put(table, keys[i], keys[i])
+			if err != nil {
+				return err
+			}
+		}
+		return nil
+	}); err != nil {
+		b.Fatal(err)
+	}
+}
+
+func BenchmarkDB_PutRandom(b *testing.B) {
+	_db := BaseCaseDBForBenchmark(b)
+	table := "Table"
+	db := _db.(*MdbxKV)
+
+	// Ensure data is correct.
+	if err := db.Update(context.Background(), func(tx kv.RwTx) error {
+		keys := make(map[string]struct{}, b.N)
+		for len(keys) < b.N {
+			keys[string(u64tob(uint64(rand.Intn(1e10))))] = struct{}{}
+		}
+		b.ResetTimer()
+		for key := range keys {
+			err := tx.Put(table, []byte(key), []byte(key))
+			if err != nil {
+				return err
+			}
+		}
+		return nil
+	}); err != nil {
+		b.Fatal(err)
+	}
+}
+
+func BenchmarkDB_Delete(b *testing.B) {
+	_db := BaseCaseDBForBenchmark(b)
+	table := "Table"
+	db := _db.(*MdbxKV)
+
+	keys := make([][]byte, b.N)
+	for i := 1; i <= b.N; i++ {
+		keys[i-1] = u64tob(uint64(i))
+	}
+
+	if err := db.Update(context.Background(), func(tx kv.RwTx) error {
+		for i := 0; i < b.N; i++ {
+			err := tx.Put(table, keys[i], keys[i])
+			if err != nil {
+				return err
+			}
+		}
+		return nil
+	}); err != nil {
+		b.Fatal(err)
+	}
+
+	// Ensure data is correct.
+	if err := db.Update(context.Background(), func(tx kv.RwTx) error {
+		b.ResetTimer()
+		for i := 0; i < b.N; i++ {
+			err := tx.Delete(table, keys[i])
+			if err != nil {
+				return err
+			}
+		}
+		return nil
+	}); err != nil {
+		b.Fatal(err)
 	}
 }

@@ -1,18 +1,21 @@
 // Copyright 2015 The go-ethereum Authors
-// This file is part of the go-ethereum library.
+// (original work)
+// Copyright 2024 The Erigon Authors
+// (modifications)
+// This file is part of Erigon.
 //
-// The go-ethereum library is free software: you can redistribute it and/or modify
+// Erigon is free software: you can redistribute it and/or modify
 // it under the terms of the GNU Lesser General Public License as published by
 // the Free Software Foundation, either version 3 of the License, or
 // (at your option) any later version.
 //
-// The go-ethereum library is distributed in the hope that it will be useful,
+// Erigon is distributed in the hope that it will be useful,
 // but WITHOUT ANY WARRANTY; without even the implied warranty of
 // MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
 // GNU Lesser General Public License for more details.
 //
 // You should have received a copy of the GNU Lesser General Public License
-// along with the go-ethereum library. If not, see <http://www.gnu.org/licenses/>.
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
 package abi
 
@@ -20,7 +23,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/ledgerwatch/erigon/crypto"
+	"github.com/erigontech/erigon/crypto"
 )
 
 // FunctionType represents different types of functions a contract might have.
@@ -45,8 +48,8 @@ const (
 // If the method is `Const` no transaction needs to be created for this
 // particular Method call. It can easily be simulated using a local VM.
 // For example a `Balance()` method only needs to retrieve something
-// from the storage and therefore requires no Tx to be sent to the
-// network. A method such as `Transact` does require a Tx and thus will
+// from the storage and therefore requires no Txn to be sent to the
+// network. A method such as `Transact` does require a Txn and thus will
 // be flagged `false`.
 // Input specifies the required input parameters for this gives method.
 type Method struct {

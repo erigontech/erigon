@@ -1,10 +1,27 @@
+// Copyright 2024 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+
 package funcmap
 
 import (
-	"github.com/ledgerwatch/erigon/cl/abstract"
-	"github.com/ledgerwatch/erigon/cl/cltypes"
-	"github.com/ledgerwatch/erigon/cl/cltypes/solid"
-	"github.com/ledgerwatch/erigon/cl/transition/machine"
+	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon/cl/abstract"
+	"github.com/erigontech/erigon/cl/cltypes"
+	"github.com/erigontech/erigon/cl/cltypes/solid"
+	"github.com/erigontech/erigon/cl/transition/machine"
 )
 
 var _ machine.Interface = (*Impl)(nil)
@@ -13,9 +30,9 @@ type Impl struct {
 	FnVerifyBlockSignature        func(s abstract.BeaconState, block *cltypes.SignedBeaconBlock) error
 	FnVerifyTransition            func(s abstract.BeaconState, block *cltypes.BeaconBlock) error
 	FnProcessSlots                func(s abstract.BeaconState, slot uint64) error
-	FnProcessBlockHeader          func(s abstract.BeaconState, block *cltypes.BeaconBlock) error
+	FnProcessBlockHeader          func(s abstract.BeaconState, slot, proposerIndex uint64, parentRoot common.Hash, bodyRoot [32]byte) error
 	FnProcessWithdrawals          func(s abstract.BeaconState, withdrawals *solid.ListSSZ[*cltypes.Withdrawal]) error
-	FnProcessExecutionPayload     func(s abstract.BeaconState, payload *cltypes.Eth1Block) error
+	FnProcessExecutionPayload     func(s abstract.BeaconState, parentHash, prevRandao common.Hash, time uint64, payloadHeader *cltypes.Eth1Header) error
 	FnProcessRandao               func(s abstract.BeaconState, randao [96]byte, proposerIndex uint64) error
 	FnProcessEth1Data             func(state abstract.BeaconState, eth1Data *cltypes.Eth1Data) error
 	FnProcessSyncAggregate        func(s abstract.BeaconState, sync *cltypes.SyncAggregate) error
@@ -35,16 +52,16 @@ func (i Impl) VerifyTransition(s abstract.BeaconState, block *cltypes.BeaconBloc
 	return i.FnVerifyTransition(s, block)
 }
 
-func (i Impl) ProcessBlockHeader(s abstract.BeaconState, block *cltypes.BeaconBlock) error {
-	return i.FnProcessBlockHeader(s, block)
+func (i Impl) ProcessBlockHeader(s abstract.BeaconState, slot, proposerIndex uint64, parentRoot common.Hash, bodyRoot [32]byte) error {
+	return i.FnProcessBlockHeader(s, slot, proposerIndex, parentRoot, bodyRoot)
 }
 
 func (i Impl) ProcessWithdrawals(s abstract.BeaconState, withdrawals *solid.ListSSZ[*cltypes.Withdrawal]) error {
 	return i.FnProcessWithdrawals(s, withdrawals)
 }
 
-func (i Impl) ProcessExecutionPayload(s abstract.BeaconState, payload *cltypes.Eth1Block) error {
-	return i.FnProcessExecutionPayload(s, payload)
+func (i Impl) ProcessExecutionPayload(s abstract.BeaconState, parentHash, prevRandao common.Hash, time uint64, payloadHeader *cltypes.Eth1Header) error {
+	return i.FnProcessExecutionPayload(s, parentHash, prevRandao, time, payloadHeader)
 }
 
 func (i Impl) ProcessRandao(s abstract.BeaconState, randao [96]byte, proposerIndex uint64) error {

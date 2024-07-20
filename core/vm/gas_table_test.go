@@ -1,18 +1,21 @@
 // Copyright 2017 The go-ethereum Authors
-// This file is part of the go-ethereum library.
+// (original work)
+// Copyright 2024 The Erigon Authors
+// (modifications)
+// This file is part of Erigon.
 //
-// The go-ethereum library is free software: you can redistribute it and/or modify
+// Erigon is free software: you can redistribute it and/or modify
 // it under the terms of the GNU Lesser General Public License as published by
 // the Free Software Foundation, either version 3 of the License, or
 // (at your option) any later version.
 //
-// The go-ethereum library is distributed in the hope that it will be useful,
+// Erigon is distributed in the hope that it will be useful,
 // but WITHOUT ANY WARRANTY; without even the implied warranty of
 // MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
 // GNU Lesser General Public License for more details.
 //
 // You should have received a copy of the GNU Lesser General Public License
-// along with the go-ethereum library. If not, see <http://www.gnu.org/licenses/>.
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
 package vm
 
@@ -23,27 +26,25 @@ import (
 	"strconv"
 	"testing"
 
-	"github.com/ledgerwatch/erigon-lib/common/hexutil"
-	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon-lib/kv/temporal"
-	"github.com/ledgerwatch/erigon-lib/kv/temporal/temporaltest"
-	"github.com/ledgerwatch/erigon-lib/log/v3"
-	"github.com/ledgerwatch/erigon-lib/wrap"
-
+	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
 
-	state3 "github.com/ledgerwatch/erigon-lib/state"
+	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common/datadir"
+	"github.com/erigontech/erigon-lib/common/hexutil"
+	"github.com/erigontech/erigon-lib/kv"
+	"github.com/erigontech/erigon-lib/kv/memdb"
+	"github.com/erigontech/erigon-lib/kv/temporal"
+	"github.com/erigontech/erigon-lib/kv/temporal/temporaltest"
+	"github.com/erigontech/erigon-lib/log/v3"
+	state3 "github.com/erigontech/erigon-lib/state"
+	"github.com/erigontech/erigon-lib/wrap"
+	"github.com/erigontech/erigon/core/rawdb"
 
-	"github.com/holiman/uint256"
-
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/common/datadir"
-	"github.com/ledgerwatch/erigon-lib/kv/memdb"
-
-	"github.com/ledgerwatch/erigon/core/state"
-	"github.com/ledgerwatch/erigon/core/vm/evmtypes"
-	"github.com/ledgerwatch/erigon/params"
-	"github.com/ledgerwatch/erigon/turbo/rpchelper"
+	"github.com/erigontech/erigon/core/state"
+	"github.com/erigontech/erigon/core/vm/evmtypes"
+	"github.com/erigontech/erigon/params"
+	"github.com/erigontech/erigon/turbo/rpchelper"
 )
 
 func TestMemoryGasCost(t *testing.T) {
@@ -101,7 +102,8 @@ func testTemporalDB(t *testing.T) *temporal.DB {
 
 	t.Cleanup(db.Close)
 
-	agg, err := state3.NewAggregator(context.Background(), datadir.New(t.TempDir()), 16, db, log.New())
+	cr := rawdb.NewCanonicalReader()
+	agg, err := state3.NewAggregator(context.Background(), datadir.New(t.TempDir()), 16, db, cr, log.New())
 	require.NoError(t, err)
 	t.Cleanup(agg.Close)
 

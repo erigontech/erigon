@@ -1,3 +1,19 @@
+// Copyright 2024 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+
 package engine_types
 
 import (
@@ -5,37 +21,38 @@ import (
 	"encoding/json"
 	"errors"
 
-	"github.com/ledgerwatch/erigon-lib/common/hexutil"
+	"github.com/erigontech/erigon-lib/common/hexutil"
 
-	"github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/common/hexutility"
-	"github.com/ledgerwatch/erigon-lib/gointerfaces"
-	execution "github.com/ledgerwatch/erigon-lib/gointerfaces/executionproto"
-	types2 "github.com/ledgerwatch/erigon-lib/gointerfaces/typesproto"
-	"github.com/ledgerwatch/erigon/core/types"
+	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common/hexutility"
+	"github.com/erigontech/erigon-lib/gointerfaces"
+	execution "github.com/erigontech/erigon-lib/gointerfaces/executionproto"
+	types2 "github.com/erigontech/erigon-lib/gointerfaces/typesproto"
+	"github.com/erigontech/erigon/core/types"
 )
 
 // ExecutionPayload represents an execution payload (aka block)
 type ExecutionPayload struct {
-	ParentHash         common.Hash           `json:"parentHash"    gencodec:"required"`
-	FeeRecipient       common.Address        `json:"feeRecipient"  gencodec:"required"`
-	StateRoot          common.Hash           `json:"stateRoot"     gencodec:"required"`
-	ReceiptsRoot       common.Hash           `json:"receiptsRoot"  gencodec:"required"`
-	LogsBloom          hexutility.Bytes      `json:"logsBloom"     gencodec:"required"`
-	PrevRandao         common.Hash           `json:"prevRandao"    gencodec:"required"`
-	BlockNumber        hexutil.Uint64        `json:"blockNumber"   gencodec:"required"`
-	GasLimit           hexutil.Uint64        `json:"gasLimit"      gencodec:"required"`
-	GasUsed            hexutil.Uint64        `json:"gasUsed"       gencodec:"required"`
-	Timestamp          hexutil.Uint64        `json:"timestamp"     gencodec:"required"`
-	ExtraData          hexutility.Bytes      `json:"extraData"     gencodec:"required"`
-	BaseFeePerGas      *hexutil.Big          `json:"baseFeePerGas" gencodec:"required"`
-	BlockHash          common.Hash           `json:"blockHash"     gencodec:"required"`
-	Transactions       []hexutility.Bytes    `json:"transactions"  gencodec:"required"`
-	Withdrawals        []*types.Withdrawal   `json:"withdrawals"`
-	BlobGasUsed        *hexutil.Uint64       `json:"blobGasUsed"`
-	ExcessBlobGas      *hexutil.Uint64       `json:"excessBlobGas"`
-	DepositRequests    types.DepositRequests `json:"depositRequests"` // do not forget to add it into erigon-lib/gointerfaces/types if needed
-	WithdrawalRequests types.Requests        `json:"withdrawalRequests"`
+	ParentHash            common.Hash                 `json:"parentHash"    gencodec:"required"`
+	FeeRecipient          common.Address              `json:"feeRecipient"  gencodec:"required"`
+	StateRoot             common.Hash                 `json:"stateRoot"     gencodec:"required"`
+	ReceiptsRoot          common.Hash                 `json:"receiptsRoot"  gencodec:"required"`
+	LogsBloom             hexutility.Bytes            `json:"logsBloom"     gencodec:"required"`
+	PrevRandao            common.Hash                 `json:"prevRandao"    gencodec:"required"`
+	BlockNumber           hexutil.Uint64              `json:"blockNumber"   gencodec:"required"`
+	GasLimit              hexutil.Uint64              `json:"gasLimit"      gencodec:"required"`
+	GasUsed               hexutil.Uint64              `json:"gasUsed"       gencodec:"required"`
+	Timestamp             hexutil.Uint64              `json:"timestamp"     gencodec:"required"`
+	ExtraData             hexutility.Bytes            `json:"extraData"     gencodec:"required"`
+	BaseFeePerGas         *hexutil.Big                `json:"baseFeePerGas" gencodec:"required"`
+	BlockHash             common.Hash                 `json:"blockHash"     gencodec:"required"`
+	Transactions          []hexutility.Bytes          `json:"transactions"  gencodec:"required"`
+	Withdrawals           []*types.Withdrawal         `json:"withdrawals"`
+	BlobGasUsed           *hexutil.Uint64             `json:"blobGasUsed"`
+	ExcessBlobGas         *hexutil.Uint64             `json:"excessBlobGas"`
+	DepositRequests       types.DepositRequests       `json:"depositRequests"` // do not forget to add it into erigon-lib/gointerfaces/types if needed
+	WithdrawalRequests    types.WithdrawalRequests    `json:"withdrawalRequests"`
+	ConsolidationRequests types.ConsolidationRequests `json:"consolidationRequests"`
 }
 
 // PayloadAttributes represent the attributes required to start assembling a payload
@@ -68,9 +85,12 @@ type BlobsBundleV1 struct {
 	Blobs       []hexutility.Bytes `json:"blobs"       gencodec:"required"`
 }
 
-type ExecutionPayloadBodyV1 struct {
-	Transactions []hexutility.Bytes  `json:"transactions" gencodec:"required"`
-	Withdrawals  []*types.Withdrawal `json:"withdrawals"  gencodec:"required"`
+type ExecutionPayloadBody struct {
+	Transactions          []hexutility.Bytes          `json:"transactions" gencodec:"required"`
+	Withdrawals           []*types.Withdrawal         `json:"withdrawals"  gencodec:"required"`
+	DepositRequests       types.DepositRequests       `json:"depositRequests"`
+	WithdrawalRequests    types.WithdrawalRequests    `json:"withdrawalRequests"`
+	ConsolidationRequests types.ConsolidationRequests `json:"consolidationRequests"`
 }
 
 type PayloadStatus struct {

@@ -1,3 +1,19 @@
+// Copyright 2024 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+
 package handler
 
 import (
@@ -10,11 +26,11 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"github.com/ledgerwatch/erigon-lib/log/v3"
-	"github.com/ledgerwatch/erigon/cl/clparams"
-	"github.com/ledgerwatch/erigon/cl/cltypes/solid"
-	"github.com/ledgerwatch/erigon/cl/phase1/core/state"
-	"github.com/ledgerwatch/erigon/common"
+	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/cl/clparams"
+	"github.com/erigontech/erigon/cl/cltypes/solid"
+	"github.com/erigontech/erigon/cl/phase1/core/state"
+	"github.com/erigontech/erigon/common"
 )
 
 func TestGetStateFork(t *testing.T) {
@@ -427,7 +443,7 @@ func TestGetStateFinalityCheckpoints(t *testing.T) {
 			code:    http.StatusOK,
 		},
 	}
-	expected := `{"data":{"finalized_checkpoint":{"epoch":"1","root":"0xde46b0f2ed5e72f0cec20246403b14c963ec995d7c2825f3532b0460c09d5693"},"current_justified_checkpoint":{"epoch":"3","root":"0xa6e47f164b1a3ca30ea3b2144bd14711de442f51e5b634750a12a1734e24c987"},"previous_justified_checkpoint":{"epoch":"2","root":"0x4c3ee7969e485696669498a88c17f70e6999c40603e2f4338869004392069063"}},"execution_optimistic":false,"finalized":false,"version":"bellatrix"}` + "\n"
+	expected := `{"data":{"finalized":{"epoch":"1","root":"0xde46b0f2ed5e72f0cec20246403b14c963ec995d7c2825f3532b0460c09d5693"},"current_justified":{"epoch":"3","root":"0xa6e47f164b1a3ca30ea3b2144bd14711de442f51e5b634750a12a1734e24c987"},"previous_justified":{"epoch":"2","root":"0x4c3ee7969e485696669498a88c17f70e6999c40603e2f4338869004392069063"}},"execution_optimistic":false,"finalized":false,"version":"bellatrix"}` + "\n"
 	for _, c := range cases {
 		t.Run(c.blockID, func(t *testing.T) {
 			server := httptest.NewServer(handler.mux)
