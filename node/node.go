@@ -331,11 +331,8 @@ func OpenDatabase(ctx context.Context, config *nodecfg.Config, label kv.Label, n
 		opts := mdbx.NewMDBX(logger).
 			Path(dbPath).Label(label).
 			GrowthStep(16 * datasize.MB).
-			DBVerbosity(config.DatabaseVerbosity).RoTxsLimiter(roTxsLimiter)
-
-		if config.MdbxWriteMap {
-			opts = opts.WriteMap()
-		}
+			DBVerbosity(config.DatabaseVerbosity).RoTxsLimiter(roTxsLimiter).
+			WriteMap(config.MdbxWriteMap)
 
 		if readonly {
 			opts = opts.Readonly()
