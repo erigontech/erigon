@@ -502,6 +502,8 @@ func logStats(ctx context.Context, stats *proto_downloader.StatsReply, startTime
 			"time-left", downloadTimeLeft,
 			"total-time", time.Since(startTime).Round(time.Second).String(),
 			"download", common.ByteCount(stats.DownloadRate)+"/s",
+			"hash", common.ByteCount(stats.HashRate)+"/s",
+			"flush", common.ByteCount(stats.CompletionRate)+"/s",
 			"upload", common.ByteCount(stats.UploadRate)+"/s",
 			"peers", stats.PeersUnique,
 			"files", stats.FilesTotal,
