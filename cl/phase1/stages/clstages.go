@@ -302,10 +302,24 @@ func ConsensusClStages(ctx context.Context,
 						})
 
 						for i, block := range blocks {
+							blockRoot, err := block.Block.HashSSZ()
+							if err != nil {
+								logger.Warn("failed to hash block", "err", err)
+								blocks = blocks[i:]
+								break
+							}
+
 							if err := processBlock(cfg.indiciesDB, block, false, true, false); err != nil {
 								log.Warn("bad blocks segment received", "err", err)
 								blocks = blocks[i:]
 								break
+							}
+
+							st, err := cfg.forkChoice.GetStateAtBlockRoot(blockRoot, false)
+							if err == nil && block.Block.Slot%(cfg.beaconCfg.SlotsPerEpoch*2) == 0 {
+								if err := cfg.forkChoice.DumpBeaconStateOnDisk(st); err != nil {
+									logger.Warn("failed to dump state", "err", err)
+								}
 							}
 							if shouldInsert && block.Version() >= clparams.BellatrixVersion {
 								if err := cfg.blockCollector.AddBlock(block.Block); err != nil {

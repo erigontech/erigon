@@ -1781,11 +1781,8 @@ func (dt *DomainRoTx) Prune(ctx context.Context, rwTx kv.RwTx, step, txFrom, txT
 	}
 
 	var k, v []byte
-	if prunedKey != nil {
+	if prunedKey != nil && limit < 100_000 {
 		k, v, err = valsCursor.Seek(prunedKey)
-		if err != nil {
-			return stat, err
-		}
 	} else {
 		k, v, err = valsCursor.First()
 	}
@@ -1818,10 +1815,12 @@ func (dt *DomainRoTx) Prune(ctx context.Context, rwTx kv.RwTx, step, txFrom, txT
 			return stat, nil
 		}
 		limit--
+		stat.Values++
 		if err := ancientDomainValsCollector.Collect(k, v); err != nil {
 			return nil, err
 		}
-
+		stat.MinStep = min(stat.MinStep, is)
+		stat.MaxStep = max(stat.MaxStep, is)
 		select {
 		case <-ctx.Done():
 			// consider ctx exiting as incorrect outcome, error is returned

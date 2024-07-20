@@ -122,9 +122,12 @@ func (s *Sentinel) listenForPeers() {
 			continue
 		}
 
-		if err := s.ConnectWithPeer(s.ctx, *peerInfo); err != nil {
-			log.Trace("[Sentinel] Could not connect with peer", "err", err)
-		}
+		go func() {
+			if err := s.ConnectWithPeer(s.ctx, *peerInfo); err != nil {
+				log.Trace("[Sentinel] Could not connect with peer", "err", err)
+			}
+		}()
+
 	}
 }
 
