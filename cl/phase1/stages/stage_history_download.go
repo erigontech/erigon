@@ -127,7 +127,6 @@ func SpawnStageHistoryDownload(cfg StageHistoryReconstructionCfg, ctx context.Co
 		if cfg.engine != nil && cfg.engine.SupportInsertion() && blk.Version() >= clparams.BellatrixVersion {
 			payload := blk.Block.Body.ExecutionPayload
 			hasELBlock, err := cfg.engine.HasBlock(ctx, payload.BlockHash)
-			hasELBlock = hasELBlock || blk.Block.Body.ExecutionPayload.BlockNumber == 0
 			if err != nil {
 				return false, fmt.Errorf("error retrieving whether execution payload is present: %s", err)
 			}
@@ -143,9 +142,6 @@ func SpawnStageHistoryDownload(cfg StageHistoryReconstructionCfg, ctx context.Co
 			if hasELBlock && !cfg.backfilling {
 				return true, tx.Commit()
 			}
-		}
-		if slot == 0 {
-			return true, tx.Commit()
 		}
 		isInElSnapshots := true
 		if blk.Version() >= clparams.BellatrixVersion && cfg.engine != nil && cfg.engine.SupportInsertion() {
