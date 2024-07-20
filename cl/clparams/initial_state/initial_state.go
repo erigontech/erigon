@@ -74,7 +74,7 @@ func GetGenesisState(network clparams.NetworkType) (*state.CachingBeaconState, e
 		if err != nil {
 			return nil, err
 		}
-		if err := returnState.DecodeSSZ(encodedState, int(clparams.HoleskyNetwork)); err != nil {
+		if err := returnState.DecodeSSZ(encodedState, int(clparams.BellatrixVersion)); err != nil {
 			return nil, err
 		}
 	default:
