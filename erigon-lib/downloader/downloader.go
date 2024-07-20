@@ -129,6 +129,9 @@ type AggStats struct {
 	LocalFileHashes            int
 	LocalFileHashTime          time.Duration
 
+	PieceBytesHashed, PieceBytesCompleted uint64
+	HashRate, CompletionRate              uint64
+
 	WebseedActiveTrips    *atomic.Int64
 	WebseedMaxActiveTrips *atomic.Int64
 	WebseedTripCount      *atomic.Int64
@@ -1980,6 +1983,8 @@ func (d *Downloader) ReCalcStats(interval time.Duration) {
 	stats.Completed = true
 	stats.BytesDownload = uint64(connStats.BytesReadUsefulIntendedData.Int64())
 	stats.BytesUpload = uint64(connStats.BytesWrittenData.Int64())
+	stats.PieceBytesHashed = uint64(connStats.BytesHashed.Int64())
+	stats.PieceBytesCompleted = uint64(connStats.BytesCompleted.Int64())
 
 	lastMetadataReady := stats.MetadataReady
 
@@ -2173,6 +2178,10 @@ func (d *Downloader) ReCalcStats(interval time.Duration) {
 			"torrent", torrentInfo,
 			"db", dbInfo,
 			"t-complete", tComplete,
+			"hashed", common.ByteCount(stats.PieceBytesHashed),
+			"hash-rate", "",
+			"completion-rate", "",
+			"completed", common.ByteCount(stats.PieceBytesCompleted),
 			"webseed-trips", stats.WebseedTripCount.Load(),
 			"webseed-active", stats.WebseedActiveTrips.Load(),
 			"webseed-max-active", stats.WebseedMaxActiveTrips.Load(),
@@ -2247,6 +2256,18 @@ func (d *Downloader) ReCalcStats(interval time.Duration) {
 		stats.DownloadRate = (stats.BytesDownload - prevStats.BytesDownload) / uint64(interval.Seconds())
 	} else {
 		stats.DownloadRate = prevStats.DownloadRate / 2
+	}
+
+	if stats.PieceBytesHashed > prevStats.PieceBytesHashed {
+		stats.HashRate = (stats.PieceBytesHashed - prevStats.PieceBytesHashed) / uint64(interval.Seconds())
+	} else {
+		stats.HashRate = prevStats.HashRate / 2
+	}
+
+	if stats.PieceBytesCompleted > prevStats.PieceBytesCompleted {
+		stats.CompletionRate = (stats.PieceBytesCompleted - prevStats.PieceBytesCompleted) / uint64(interval.Seconds())
+	} else {
+		stats.CompletionRate = prevStats.CompletionRate / 2
 	}
 
 	if stats.BytesUpload > prevStats.BytesUpload {
