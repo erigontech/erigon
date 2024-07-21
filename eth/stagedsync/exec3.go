@@ -885,7 +885,8 @@ Loop:
 				//}
 				// If we skip post evaluation, then we should compute root hash ASAP for fail-fast
 				aggregatorRo := applyTx.(state2.HasAggTx).AggTx().(*state2.AggregatorRoTx)
-				if !skipPostEvaluation && (rs.SizeEstimate() < commitThreshold || inMemExec) {
+
+				if !skipPostEvaluation && (rs.SizeEstimate() < commitThreshold || inMemExec) && aggregatorRo.CanPrune(applyTx, agg.EndTxNumMinimax()) {
 					break
 				}
 				var (
