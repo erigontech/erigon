@@ -1986,11 +1986,12 @@ func (d *Downloader) ReCalcStats(interval time.Duration) {
 	stats.BytesUpload = uint64(connStats.BytesWrittenData.Int64())
 	stats.BytesHashed = uint64(connStats.BytesHashed.Int64())
 	stats.BytesFlushed = uint64(connStats.BytesFlushed.Int64())
+	stats.BytesCompleted = uint64(connStats.BytesCompleted.Int64())
 
 	lastMetadataReady := stats.MetadataReady
 
-	stats.BytesTotal, stats.BytesCompleted, stats.ConnectionsTotal, stats.MetadataReady =
-		atomic.LoadUint64(&stats.DroppedTotal), atomic.LoadUint64(&stats.DroppedCompleted), 0, 0
+	stats.BytesTotal /*stats.BytesCompleted,*/, stats.ConnectionsTotal, stats.MetadataReady =
+		atomic.LoadUint64(&stats.DroppedTotal) /*atomic.LoadUint64(&stats.DroppedCompleted),*/, 0, 0
 
 	var zeroProgress []string
 	var noMetadata []string
@@ -2046,7 +2047,7 @@ func (d *Downloader) ReCalcStats(interval time.Duration) {
 			}
 		}
 
-		stats.BytesCompleted += uint64(bytesCompleted)
+		//stats.BytesCompleted += uint64(bytesCompleted)
 		stats.BytesTotal += uint64(tLen)
 
 		for _, peer := range peersOfThisFile {
