@@ -1986,11 +1986,12 @@ func (d *Downloader) ReCalcStats(interval time.Duration) {
 	stats.BytesUpload = uint64(connStats.BytesWrittenData.Int64())
 	stats.BytesHashed = uint64(connStats.BytesHashed.Int64())
 	stats.BytesFlushed = uint64(connStats.BytesFlushed.Int64())
+	stats.BytesCompleted = uint64(connStats.BytesCompleted.Int64()) - stats.DroppedCompleted
 
 	lastMetadataReady := stats.MetadataReady
 
-	stats.BytesTotal, stats.BytesCompleted, stats.ConnectionsTotal, stats.MetadataReady =
-		atomic.LoadUint64(&stats.DroppedTotal), atomic.LoadUint64(&stats.DroppedCompleted), 0, 0
+	stats.BytesTotal, stats.ConnectionsTotal, stats.MetadataReady =
+		atomic.LoadUint64(&stats.DroppedTotal), 0, 0
 
 	var zeroProgress []string
 	var noMetadata []string
@@ -2035,7 +2036,7 @@ func (d *Downloader) ReCalcStats(interval time.Duration) {
 			bytesCompleted = t.Length()
 			delete(downloading, torrentName)
 		} else {
-			bytesCompleted = connStats.BytesCompleted.Int64()
+			bytesCompleted = t.BytesCompleted()
 		}
 		progress := float32(float64(100) * (float64(bytesCompleted) / float64(tLen)))
 
@@ -2046,7 +2047,7 @@ func (d *Downloader) ReCalcStats(interval time.Duration) {
 			}
 		}
 
-		stats.BytesCompleted += uint64(bytesCompleted)
+		//stats.BytesCompleted += uint64(bytesCompleted)
 		stats.BytesTotal += uint64(tLen)
 
 		for _, peer := range peersOfThisFile {
@@ -2265,6 +2266,10 @@ func (d *Downloader) ReCalcStats(interval time.Duration) {
 		stats.HashRate = (stats.BytesHashed - prevStats.BytesHashed) / uint64(interval.Seconds())
 	} else {
 		stats.HashRate = prevStats.HashRate / 2
+	}
+
+	if stats.BytesCompleted > stats.BytesTotal {
+		stats.BytesCompleted = stats.BytesTotal
 	}
 
 	if stats.BytesCompleted > prevStats.BytesCompleted {
