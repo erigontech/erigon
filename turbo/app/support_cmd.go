@@ -256,7 +256,7 @@ func tunnel(ctx context.Context, cancel context.CancelFunc, sigs chan os.Signal,
 		Nodes    []*info  `json:"nodes"`
 	}
 
-	codec := rpc.NewWebsocketCodec(conn)
+	codec := rpc.NewWebsocketCodec(conn, "wss://"+diagnosticsUrl, nil) //TODO: revise why is it so
 	defer codec.Close()
 
 	err = codec.WriteJSON(ctx1, &connectionInfo{
