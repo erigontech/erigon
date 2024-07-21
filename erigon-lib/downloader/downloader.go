@@ -122,6 +122,7 @@ type AggStats struct {
 	Progress  float32
 
 	BytesCompleted, BytesTotal     uint64
+	CompletionRate                 uint64
 	DroppedCompleted, DroppedTotal uint64
 
 	BytesDownload, BytesUpload uint64
@@ -129,8 +130,8 @@ type AggStats struct {
 	LocalFileHashes            int
 	LocalFileHashTime          time.Duration
 
-	PieceBytesHashed, PieceBytesCompleted uint64
-	HashRate, CompletionRate              uint64
+	BytesHashed, BytesFlushed uint64
+	HashRate, FlushRate       uint64
 
 	WebseedActiveTrips    *atomic.Int64
 	WebseedMaxActiveTrips *atomic.Int64
@@ -1983,8 +1984,8 @@ func (d *Downloader) ReCalcStats(interval time.Duration) {
 	stats.Completed = true
 	stats.BytesDownload = uint64(connStats.BytesReadUsefulIntendedData.Int64())
 	stats.BytesUpload = uint64(connStats.BytesWrittenData.Int64())
-	stats.PieceBytesHashed = uint64(connStats.BytesHashed.Int64())
-	stats.PieceBytesCompleted = uint64(connStats.BytesCompleted.Int64())
+	stats.BytesHashed = uint64(connStats.BytesHashed.Int64())
+	stats.BytesFlushed = uint64(connStats.BytesFlushed.Int64())
 
 	lastMetadataReady := stats.MetadataReady
 
@@ -2178,10 +2179,12 @@ func (d *Downloader) ReCalcStats(interval time.Duration) {
 			"torrent", torrentInfo,
 			"db", dbInfo,
 			"t-complete", tComplete,
-			"hashed", common.ByteCount(stats.PieceBytesHashed),
+			"hashed", common.ByteCount(stats.BytesHashed),
 			"hash-rate", fmt.Sprintf("%s/s", common.ByteCount(stats.HashRate)),
-			"completed", common.ByteCount(stats.PieceBytesCompleted),
+			"completed", common.ByteCount(stats.BytesCompleted),
 			"completion-rate", fmt.Sprintf("%s/s", common.ByteCount(stats.CompletionRate)),
+			"flushed", common.ByteCount(stats.BytesFlushed),
+			"flush-rate", fmt.Sprintf("%s/s", common.ByteCount(stats.FlushRate)),
 			"webseed-trips", stats.WebseedTripCount.Load(),
 			"webseed-active", stats.WebseedActiveTrips.Load(),
 			"webseed-max-active", stats.WebseedMaxActiveTrips.Load(),
@@ -2258,16 +2261,22 @@ func (d *Downloader) ReCalcStats(interval time.Duration) {
 		stats.DownloadRate = prevStats.DownloadRate / 2
 	}
 
-	if stats.PieceBytesHashed > prevStats.PieceBytesHashed {
-		stats.HashRate = (stats.PieceBytesHashed - prevStats.PieceBytesHashed) / uint64(interval.Seconds())
+	if stats.BytesHashed > prevStats.BytesHashed {
+		stats.HashRate = (stats.BytesHashed - prevStats.BytesHashed) / uint64(interval.Seconds())
 	} else {
 		stats.HashRate = prevStats.HashRate / 2
 	}
 
-	if stats.PieceBytesCompleted > prevStats.PieceBytesCompleted {
-		stats.CompletionRate = (stats.PieceBytesCompleted - prevStats.PieceBytesCompleted) / uint64(interval.Seconds())
+	if stats.BytesCompleted > prevStats.BytesCompleted {
+		stats.CompletionRate = (stats.BytesCompleted - prevStats.BytesCompleted) / uint64(interval.Seconds())
 	} else {
 		stats.CompletionRate = prevStats.CompletionRate / 2
+	}
+
+	if stats.BytesFlushed > prevStats.BytesFlushed {
+		stats.FlushRate = (stats.BytesFlushed - prevStats.BytesFlushed) / uint64(interval.Seconds())
+	} else {
+		stats.FlushRate = prevStats.FlushRate / 2
 	}
 
 	if stats.BytesUpload > prevStats.BytesUpload {
