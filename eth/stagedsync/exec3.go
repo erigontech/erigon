@@ -876,7 +876,7 @@ Loop:
 
 			select {
 			case <-logEvery.C:
-				stepsInDB := rawdbhelpers.IdxStepsCountV3(applyTx)
+				stepsInDB := rawdbhelpers.IdxStepsCountV3WithLstTxNum(applyTx, doms.TxNum())
 				hasEnoughToPrune := stepsInDB > 1.1
 				progress.Log(rs, in, rws, count, inputBlockNum.Load(), outputBlockNum.GetValueUint64(), outputTxNum.Load(), execRepeats.GetValueUint64(), stepsInDB)
 				//if applyTx.(state2.HasAggTx).AggTx().(*state2.AggregatorRoTx).CanPrune(applyTx, outputTxNum.Load()) {

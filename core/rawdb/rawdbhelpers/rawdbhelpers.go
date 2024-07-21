@@ -34,3 +34,13 @@ func IdxStepsCountV3(tx kv.Tx) float64 {
 	}
 	return 0
 }
+
+func IdxStepsCountV3WithLstTxNum(tx kv.Tx, lstTxNum uint64) float64 {
+	fst, _ := kv.FirstKey(tx, kv.TblAccountHistoryKeys)
+	lst, _ := kv.LastKey(tx, kv.TblAccountHistoryKeys)
+	if len(fst) > 0 && len(lst) > 0 {
+		fstTxNum := binary.BigEndian.Uint64(fst)
+		return float64(lstTxNum-fstTxNum) / float64(config3.HistoryV3AggregationStep)
+	}
+	return 0
+}
