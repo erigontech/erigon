@@ -204,7 +204,7 @@ func (api *APIImpl) GetLogs(ctx context.Context, crit filters.FilterCriteria) (t
 				log.Index = logIndex
 				logIndex++
 			}
-			filtered := logs.Filter(addrMap, crit.Topics)
+			filtered := logs.Filter(addrMap, crit.Topics, 0)
 			if len(filtered) == 0 {
 				continue
 			}
