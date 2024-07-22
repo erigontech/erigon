@@ -371,9 +371,9 @@ func PruneExecutionStage(s *PruneState, tx kv.RwTx, cfg ExecuteBlockCfg, ctx con
 		defer tx.Rollback()
 	}
 	if s.ForwardProgress > config3.MaxReorgDepthV3 {
-		// (chunkLen is 8Kb) * (1_000 chunks) = 8mb
+		// (chunkLen is 8Kb) * (256 chunks) = 2mb
 		// Some blocks on bor-mainnet have 400 chunks of diff = 3mb
-		var pruneDiffsLimitOnChainTip = 1_000
+		var pruneDiffsLimitOnChainTip = 256
 		if s.CurrentSyncCycle.IsInitialCycle {
 			pruneDiffsLimitOnChainTip *= 10
 		}
