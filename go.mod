@@ -61,6 +61,7 @@ require (
 	github.com/jedib0t/go-pretty/v6 v6.5.9
 	github.com/json-iterator/go v1.1.12
 	github.com/julienschmidt/httprouter v1.3.0
+	github.com/karrick/godirwalk v1.17.0
 	github.com/klauspost/compress v1.17.8
 	github.com/libp2p/go-libp2p v0.34.0
 	github.com/libp2p/go-libp2p-mplex v0.9.0
@@ -114,7 +115,6 @@ require (
 	github.com/go-ole/go-ole v1.2.6 // indirect
 	github.com/hashicorp/go-cleanhttp v0.5.2 // indirect
 	github.com/hashicorp/go-retryablehttp v0.7.7 // indirect
-	github.com/karrick/godirwalk v1.17.0 // indirect
 	github.com/tklauser/go-sysconf v0.3.14 // indirect
 	github.com/tklauser/numcpus v0.8.0 // indirect
 	github.com/yusufpapurcu/wmi v1.2.4 // indirect
