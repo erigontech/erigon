@@ -878,10 +878,7 @@ Loop:
 			case <-logEvery.C:
 				stepsInMem := rawdbhelpers.IdxStepsCountV3WithLstTxNum(applyTx, doms.TxNum())
 				stepsInDB := rawdbhelpers.IdxStepsCountV3(applyTx)
-				hasEnoughToPrune := (stepsInMem > 1.1 && !useExternalTx) || stepsInDB > 1.1
-				if hasEnoughToPrune {
-					agg.BuildFilesInBackground(outputTxNum.Load())
-				}
+				hasEnoughToPrune := stepsInMem > 1.1 && !useExternalTx
 				progress.Log(rs, in, rws, count, inputBlockNum.Load(), outputBlockNum.GetValueUint64(), outputTxNum.Load(), execRepeats.GetValueUint64(), stepsInDB)
 				//if applyTx.(state2.HasAggTx).AggTx().(*state2.AggregatorRoTx).CanPrune(applyTx, outputTxNum.Load()) {
 				//	//small prune cause MDBX_TXN_FULL
