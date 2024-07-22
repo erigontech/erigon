@@ -796,7 +796,6 @@ Supported networks: all (except Mumbai).
 ### Known Problems of E3:
 
 - don't `rm -rf downloader` - it will cause re-downloading of files: https://github.com/erigontech/erigon/issues/10976
-- `eth_getLogs` fields `index` always 0: https://github.com/erigontech/erigon/issues/10324
 
 ### E3 datadir structure
 
