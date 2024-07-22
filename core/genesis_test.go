@@ -18,6 +18,7 @@ package core_test
 
 import (
 	"context"
+	"encoding/json"
 	"math/big"
 	"os"
 	"testing"
