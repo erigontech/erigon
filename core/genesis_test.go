@@ -152,4 +152,5 @@ func TestDecodeBalance0(t *testing.T) {
 	genesis := &types.Genesis{}
 	err = json.Unmarshal(genesisData, genesis)
 	require.NoError(t, err)
+	_ = genesisData
 }
