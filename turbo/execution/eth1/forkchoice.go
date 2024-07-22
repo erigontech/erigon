@@ -288,22 +288,23 @@ func (e *EthereumExecutionModule) updateForkChoice(ctx context.Context, original
 				return
 			}
 		}
-
-		if err := e.executionPipeline.UnwindTo(currentParentNumber, stagedsync.ForkChoice, tx); err != nil {
-			sendForkchoiceErrorWithoutWaiting(outcomeCh, err)
-			return
-		}
-		if e.hook != nil {
-			if err = e.hook.BeforeRun(tx, isSynced); err != nil {
+		if currentParentNumber != e.blockReader.FrozenBlocks() {
+			if err := e.executionPipeline.UnwindTo(currentParentNumber, stagedsync.ForkChoice, tx); err != nil {
 				sendForkchoiceErrorWithoutWaiting(outcomeCh, err)
 				return
 			}
-		}
-		// Run the unwind
-		if err := e.executionPipeline.RunUnwind(e.db, wrap.TxContainer{Tx: tx}); err != nil {
-			err = fmt.Errorf("updateForkChoice: %w", err)
-			sendForkchoiceErrorWithoutWaiting(outcomeCh, err)
-			return
+			if e.hook != nil {
+				if err = e.hook.BeforeRun(tx, isSynced); err != nil {
+					sendForkchoiceErrorWithoutWaiting(outcomeCh, err)
+					return
+				}
+			}
+			// Run the unwind
+			if err := e.executionPipeline.RunUnwind(e.db, wrap.TxContainer{Tx: tx}); err != nil {
+				err = fmt.Errorf("updateForkChoice: %w", err)
+				sendForkchoiceErrorWithoutWaiting(outcomeCh, err)
+				return
+			}
 		}
 
 		if err := rawdbv3.TxNums.Truncate(tx, currentParentNumber+1); err != nil {
