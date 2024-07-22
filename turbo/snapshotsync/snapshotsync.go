@@ -259,7 +259,6 @@ func WaitForDownloader(ctx context.Context, logPrefix string, headerchain, blobs
 	// send all hashes to the Downloader service
 	snapCfg := snapcfg.KnownCfg(cc.ChainName)
 	preverifiedBlockSnapshots := snapCfg.Preverified
-	fmt.Println(snapCfg)
 	downloadRequest := make([]services.DownloadRequest, 0, len(preverifiedBlockSnapshots))
 
 	blockPrune, historyPrune := computeBlocksToPrune(blockReader, prune)
