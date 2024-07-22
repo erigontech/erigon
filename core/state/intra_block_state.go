@@ -238,7 +238,7 @@ func (sdb *IntraBlockState) GetNonce(addr libcommon.Address) uint64 {
 func (sdb *IntraBlockState) GetStorageRoot(addr libcommon.Address) libcommon.Hash {
 	stateObject := sdb.getStateObject(addr)
 	if stateObject != nil && !stateObject.deleted {
-		return stateObject.data.CodeHash
+		return stateObject.data.Root
 	}
 	return trie.EmptyRoot
 }
