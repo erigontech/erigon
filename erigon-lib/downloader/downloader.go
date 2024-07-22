@@ -2256,16 +2256,29 @@ func (d *Downloader) ReCalcStats(interval time.Duration) {
 		}
 	}
 
+	decay := func(prev uint64) uint64 {
+		switch {
+		case prev < 1000:
+			return prev / 16
+		case stats.FlushRate < 10000:
+			return prev / 8
+		case stats.FlushRate < 100000:
+			return prev / 4
+		default:
+			return prev / 2
+		}
+	}
+
 	if stats.BytesDownload > prevStats.BytesDownload {
 		stats.DownloadRate = (stats.BytesDownload - prevStats.BytesDownload) / uint64(interval.Seconds())
 	} else {
-		stats.DownloadRate = prevStats.DownloadRate / 2
+		stats.DownloadRate = decay(prevStats.DownloadRate)
 	}
 
 	if stats.BytesHashed > prevStats.BytesHashed {
 		stats.HashRate = (stats.BytesHashed - prevStats.BytesHashed) / uint64(interval.Seconds())
 	} else {
-		stats.HashRate = prevStats.HashRate / 2
+		stats.HashRate = decay(prevStats.HashRate)
 	}
 
 	if stats.BytesCompleted > stats.BytesTotal {
@@ -2275,19 +2288,19 @@ func (d *Downloader) ReCalcStats(interval time.Duration) {
 	if stats.BytesCompleted > prevStats.BytesCompleted {
 		stats.CompletionRate = (stats.BytesCompleted - prevStats.BytesCompleted) / uint64(interval.Seconds())
 	} else {
-		stats.CompletionRate = prevStats.CompletionRate / 2
+		stats.CompletionRate = decay(prevStats.CompletionRate)
 	}
 
 	if stats.BytesFlushed > prevStats.BytesFlushed {
 		stats.FlushRate = (stats.BytesFlushed - prevStats.BytesFlushed) / uint64(interval.Seconds())
 	} else {
-		stats.FlushRate = prevStats.FlushRate / 2
+		stats.FlushRate = decay(prevStats.FlushRate)
 	}
 
 	if stats.BytesUpload > prevStats.BytesUpload {
 		stats.UploadRate = (stats.BytesUpload - prevStats.BytesUpload) / uint64(interval.Seconds())
 	} else {
-		stats.UploadRate = prevStats.UploadRate / 2
+		stats.UploadRate = decay(prevStats.UploadRate)
 	}
 
 	if stats.BytesTotal == 0 {
