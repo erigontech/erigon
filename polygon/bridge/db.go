@@ -133,10 +133,10 @@ func (s *MdbxStore) GetSprintLastEventID(ctx context.Context, lastID uint64, tim
 	}
 	defer cursor.Close()
 
-	kDBLast, _, err := cursor.Last()
-	if err != nil {
-		return eventID, err
-	}
+	//kDBLast, _, err := cursor.Last()
+	//if err != nil {
+	//	return eventID, err
+	//}
 
 	kLastID := make([]byte, 8)
 	binary.BigEndian.PutUint64(kLastID, lastID)
@@ -150,6 +150,9 @@ func (s *MdbxStore) GetSprintLastEventID(ctx context.Context, lastID uint64, tim
 		k, v, err := cursor.Next()
 		if err != nil {
 			return eventID, err
+		}
+		if k == nil || v == nil {
+			return eventID, nil
 		}
 
 		event, err := heimdall.UnpackEventRecordWithTime(stateContract, v)
@@ -166,9 +169,9 @@ func (s *MdbxStore) GetSprintLastEventID(ctx context.Context, lastID uint64, tim
 
 		eventID = event.ID
 
-		if bytes.Equal(k, kDBLast) {
-			return eventID, nil
-		}
+		//if bytes.Equal(k, kDBLast) {
+		//	return eventID, nil
+		//}
 	}
 }
 
