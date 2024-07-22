@@ -19,7 +19,6 @@ package snapcfg
 import (
 	_ "embed"
 	"encoding/json"
-	"fmt"
 	"path/filepath"
 	"slices"
 	"sort"
@@ -414,7 +413,6 @@ func MergeSteps(networkName string, snapType snaptype.Enum, fromBlock uint64) []
 // KnownCfg return list of preverified hashes for given network, but apply whiteList filter if it's not empty
 func KnownCfg(networkName string) *Cfg {
 	c, ok := knownPreverified[networkName]
-	fmt.Println(networkName, c, ok)
 	if !ok {
 		return newCfg(networkName, Preverified{})
 	}
