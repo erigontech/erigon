@@ -926,24 +926,12 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 	executionRpc := direct.NewExecutionClientDirect(backend.eth1ExecutionServer)
 
 	var executionEngine executionclient.ExecutionEngine
-	caplinUseEngineAPI := config.NetworkID == uint64(clparams.HoleskyNetwork)
-	// Gnosis has too few blocks on his network for phase2 to work. Once we have proper snapshot automation, it can go back to normal.
-	if caplinUseEngineAPI {
-		// Read the jwt secret
-		jwtSecret, err := cli.ObtainJWTSecret(&stack.Config().Http, logger)
-		if err != nil {
-			return nil, err
-		}
-		executionEngine, err = executionclient.NewExecutionClientRPC(jwtSecret, stack.Config().Http.AuthRpcHTTPListenAddress, stack.Config().Http.AuthRpcPort)
-		if err != nil {
-			return nil, err
-		}
-	} else {
-		executionEngine, err = executionclient.NewExecutionClientDirect(eth1_chain_reader.NewChainReaderEth1(chainConfig, executionRpc, 1000))
-		if err != nil {
-			return nil, err
-		}
+
+	executionEngine, err = executionclient.NewExecutionClientDirect(eth1_chain_reader.NewChainReaderEth1(chainConfig, executionRpc, 1000))
+	if err != nil {
+		return nil, err
 	}
+
 	engineBackendRPC := engineapi.NewEngineServer(
 		logger,
 		chainConfig,
@@ -953,7 +941,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 			logger, backend.sentriesClient.Hd, executionRpc,
 			backend.sentriesClient.Bd, backend.sentriesClient.BroadcastNewBlock, backend.sentriesClient.SendBodyRequest, blockReader,
 			backend.chainDB, chainConfig, tmpdir, config.Sync),
-		config.InternalCL && !caplinUseEngineAPI, // If the chain supports the engine API, then we should not make the server fail.
+		config.InternalCL, // If the chain supports the engine API, then we should not make the server fail.
 		false,
 		config.Miner.EnabledPOS)
 	backend.engineBackendRPC = engineBackendRPC
