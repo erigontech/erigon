@@ -19,6 +19,7 @@ package core_test
 import (
 	"context"
 	"math/big"
+	"os"
 	"testing"
 
 	"github.com/holiman/uint256"
@@ -166,4 +167,14 @@ func TestAllocConstructor(t *testing.T) {
 	storage1 := &uint256.Int{}
 	state.GetState(address, &key1, storage1)
 	assert.Equal(uint256.NewInt(0x01c9), storage1)
+}
+
+// See https://github.com/erigontech/erigon/pull/11264
+func TestDecodeBalance0(t *testing.T) {
+	genesisData, err := os.ReadFile("./genesis_test.json")
+	require.NoError(t, err)
+
+	genesis := &types.Genesis{}
+	err = json.Unmarshal(genesisData, genesis)
+	require.NoError(t, err)
 }
