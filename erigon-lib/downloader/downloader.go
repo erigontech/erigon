@@ -1176,7 +1176,7 @@ func (d *Downloader) mainLoop(silent bool) error {
 					alist = append(alist, t.Name())
 				}
 
-				d.logger.Debug("[snapshot] download status", "pending", plist, "availible", alist, "downloading", dlist, "complete", clist, "failed", flist)
+				d.logger.Trace("[snapshot] download status", "pending", plist, "availible", alist, "downloading", dlist, "complete", clist, "failed", flist)
 			}
 
 			for _, t := range available {
