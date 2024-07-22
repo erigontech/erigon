@@ -317,6 +317,8 @@ func WaitForDownloader(ctx context.Context, logPrefix string, headerchain, blobs
 
 	}
 
+	time.Sleep(10 * time.Second) // TODO: seems it's possible to
+
 	downloadStartTime := time.Now()
 	const logInterval = 20 * time.Second
 	logEvery := time.NewTicker(logInterval)
