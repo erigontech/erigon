@@ -77,7 +77,7 @@ The configuration of the uploader implicitly sets the following flag values on s
 
 ```shell
     --sync.loop.break.after=Senders
-	--sync.loop.block.limit=1_000
+	--sync.loop.block.limit=800
 	--sync.loop.prune.limit=100000
 	--upload.snapshot.limit=1500000 
 	--nodownloader=true

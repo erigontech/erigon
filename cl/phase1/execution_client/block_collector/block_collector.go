@@ -34,7 +34,7 @@ import (
 
 var (
 	etlPrefix = "Caplin-Blocks"
-	batchSize = 1000
+	batchSize = 100
 )
 
 type BlockCollector interface {
