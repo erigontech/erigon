@@ -1688,7 +1688,7 @@ func RemoveContents(dirname string) error {
 		FollowSymbolicLinks: true,
 		Unsorted:            true,
 		Callback: func(osPathname string, d *godirwalk.Dirent) error {
-			if d.Name() == dirname {
+			if osPathname == dirname {
 				return nil
 			}
 			err := os.RemoveAll(filepath.Join(dirname, d.Name()))
