@@ -343,6 +343,9 @@ func (a *ApiHandler) writeValidatorsResponse(
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
+		} else if validatorSet == nil {
+			http.Error(w, fmt.Errorf("state not found for slot %v", *slot).Error(), http.StatusNotFound)
+			return
 		}
 		balances, err := a.stateReader.ReadValidatorsBalances(tx, *slot)
 		if err != nil {
@@ -371,7 +374,6 @@ func (a *ApiHandler) writeValidatorsResponse(
 		return
 	}
 	responseValidators(w, filterIndicies, statusFilters, stateEpoch, balances, validators, *slot <= a.forkchoiceStore.FinalizedSlot(), isOptimistic)
-
 }
 
 func parseQueryValidatorIndex(tx kv.Tx, id string) (uint64, error) {

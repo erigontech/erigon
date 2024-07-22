@@ -97,7 +97,7 @@ jobs:
       if: steps.test_step.outputs.test_executed == 'true'
       uses: actions/upload-artifact@v4
       with:
-        name: test-results
+        name: test-results-${{ env.CHAIN }}
         path: ${{ github.workspace }}/result-${{ env.CHAIN }}.json
 
     - name: Action for Success
