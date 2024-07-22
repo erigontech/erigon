@@ -20,7 +20,7 @@ import (
 	"encoding/json"
 	"math"
 
-	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/erigontech/erigon-lib/kv"
 )
 
 type BeaconDataConfig struct {

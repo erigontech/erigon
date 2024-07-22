@@ -21,7 +21,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/ledgerwatch/erigon/cmd/observer/database"
+	"github.com/erigontech/erigon/cmd/observer/database"
 )
 
 type StatusReport struct {

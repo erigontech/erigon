@@ -19,8 +19,8 @@ package downloadernat
 import (
 	"github.com/anacrolix/torrent"
 
-	"github.com/ledgerwatch/erigon-lib/log/v3"
-	"github.com/ledgerwatch/erigon/p2p/nat"
+	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/p2p/nat"
 )
 
 // DoNat can mutate `cfg` parameter

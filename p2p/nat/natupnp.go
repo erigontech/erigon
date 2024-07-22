@@ -30,7 +30,8 @@ import (
 	"github.com/huin/goupnp"
 	"github.com/huin/goupnp/dcps/internetgateway1"
 	"github.com/huin/goupnp/dcps/internetgateway2"
-	"github.com/ledgerwatch/erigon/common/debug"
+
+	"github.com/erigontech/erigon/common/debug"
 )
 
 const (
