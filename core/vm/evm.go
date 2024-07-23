@@ -38,6 +38,10 @@ import (
 // deployed contract addresses (relevant after the account abstraction).
 var emptyCodeHash = crypto.Keccak256Hash(nil)
 
+func (evm *EVM) Precompile(addr libcommon.Address) (PrecompiledContract, bool) {
+	return evm.precompile(addr)
+}
+
 func (evm *EVM) precompile(addr libcommon.Address) (PrecompiledContract, bool) {
 	var precompiles map[libcommon.Address]PrecompiledContract
 	switch {
@@ -415,7 +419,6 @@ func (evm *EVM) create(caller ContractRef, codeAndHash *codeAndHash, gasRemainin
 	// The contract is a scoped environment for this execution context only.
 	contract := NewContract(caller, address, value, gasRemaining, evm.config.SkipAnalysis)
 	contract.SetCodeOptionalHash(&address, codeAndHash)
-
 	if evm.config.NoRecursion && depth > 0 {
 		return nil, address, gasRemaining, nil
 	}
