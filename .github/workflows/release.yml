@@ -59,9 +59,20 @@ jobs:
 
       - run: echo ${{ steps.prepare.outputs.tag_name }}
 
-      - name: Run GoReleaser
+
+      - if:  ${{ !inputs.dry_run }}
         run: |
           make release
+          docker images
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VERSION: ${{ steps.prepare.outputs.tag_name }}
+          DOCKER_USERNAME: ${{ secrets.DOCKERHUB }}
+          DOCKER_PASSWORD: ${{ secrets.DOCKERHUB_KEY }}
+
+      - if: ${{ inputs.dry_run }}
+        run: |
+          make release-dry-run
           docker images
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
