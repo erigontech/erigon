@@ -14,11 +14,6 @@ on:
       # to be used by fork patch-releases ^^
       - 'v*.*.*-*'
   workflow_dispatch:
-    inputs:
-      publish_artifacts:
-        description: 'Publish Artifacts (not dry-run)'
-        required: true
-        type: boolean
 
 jobs:
   goreleaser:
@@ -59,13 +54,9 @@ jobs:
 
       - run: echo ${{ steps.prepare.outputs.tag_name }}
 
-      - name: Release publish_artifacts=${{ inputs.publish_artifacts }}
+      - name: Release
         run: |
-          if ${{ inputs.publish_artifacts }}; then
-            make release
-          else
-            make release-dry-run
-          fi
+          make release
           docker images
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
