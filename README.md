@@ -786,7 +786,7 @@ Supported networks: all (except Mumbai).
   transaction-granularity, instead of block-granularity.
 - E3 doesn't store Logs (aka Receipts) - it always re-executing historical txn (but it's cheaper then in E2 - see point
   above). Known perf issues: https://github.com/erigontech/erigon/issues/10747
-- `--sync.loop.block.limit` is enabled by default. (Default: `800`.
+- `--sync.loop.block.limit` is enabled by default. (Default: `1000`.
   Set `--batchSize=1g` to increase sync speed on good hardware).
 - datadir/chaindata is small now - to prevent it's grow: we recommend set `--batchSize <= 2G`. And it's fine
   to `rm -rf chaindata`
