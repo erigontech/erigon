@@ -1016,7 +1016,7 @@ func (bph *BinPatriciaHashed) fold() (err error) {
 		upDepth = bph.depths[bph.activeRows-2]
 		col = int(bph.currentKey[upDepth-1])
 		if bph.trace {
-			fmt.Printf("upcell is (%d x %x), upDepth=%d\n", row-1, col, upDepth)
+			fmt.Printf("upcell is (%d, %x), upDepth=%d\n", row-1, col, upDepth)
 		}
 		upBinaryCell = &bph.grid[row-1][col]
 	}
