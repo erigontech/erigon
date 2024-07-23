@@ -208,7 +208,7 @@ func (e *EthereumExecutionModule) updateForkChoice(ctx context.Context, original
 		isSynced = false
 		log.Info("[sync] limited big jump", "from", finishProgressBefore, "amount", uint64(e.syncCfg.LoopBlockLimit))
 	}
-
+	_ = isSynced
 	canonicalHash, err := rawdb.ReadCanonicalHash(tx, fcuHeader.Number.Uint64())
 	if err != nil {
 		sendForkchoiceErrorWithoutWaiting(outcomeCh, err)
