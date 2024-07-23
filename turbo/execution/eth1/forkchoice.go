@@ -37,6 +37,7 @@ import (
 	"github.com/erigontech/erigon/eth/consensuschain"
 	"github.com/erigontech/erigon/eth/stagedsync"
 	"github.com/erigontech/erigon/eth/stagedsync/stages"
+	"github.com/erigontech/erigon/turbo/engineapi/engine_helpers"
 )
 
 const startPruneFrom = 1024
@@ -378,7 +379,9 @@ func (e *EthereumExecutionModule) updateForkChoice(ctx context.Context, original
 		sendForkchoiceErrorWithoutWaiting(outcomeCh, err)
 		return
 	}
-	if blockHash == e.forkValidator.ExtendingForkHeadHash() {
+
+	flushExtendingFork := blockHash == e.forkValidator.ExtendingForkHeadHash()
+	if flushExtendingFork {
 		e.logger.Info("[updateForkchoice] Fork choice update: flushing in-memory state (built by previous newPayload)")
 		if err := e.forkValidator.FlushExtendingFork(tx, e.accumulator); err != nil {
 			sendForkchoiceErrorWithoutWaiting(outcomeCh, err)
@@ -463,9 +466,17 @@ func (e *EthereumExecutionModule) updateForkChoice(ctx context.Context, original
 
 		var m runtime.MemStats
 		dbg.ReadMemStats(&m)
-		timings = append(timings, e.forkValidator.GetTimings(headHash)...)
+		blockTimings := e.forkValidator.GetTimings(blockHash)
+		timings = append(timings, "BlockValidation", blockTimings[engine_helpers.BlockTimingsValidationIndex])
+
+		if flushExtendingFork {
+			totalTime := blockTimings[engine_helpers.BlockTimingsValidationIndex] + blockTimings[engine_helpers.BlockTimingsFlushExtendingFork]
+			gasUsedMgas := float64(fcuHeader.GasUsed) / 1e6
+			mgasPerSec := gasUsedMgas / totalTime.Seconds()
+			timings = append(timings, "FlushExtendingFork", blockTimings[engine_helpers.BlockTimingsFlushExtendingFork], "Mgas/s", fmt.Sprintf("%.2f", mgasPerSec))
+		}
 		timings = append(timings, "commit", commitTime, "alloc", common.ByteCount(m.Alloc), "sys", common.ByteCount(m.Sys))
-		e.logger.Info("Timings (slower than 50ms)", timings...)
+		e.logger.Info("Timings", timings...)
 	}
 	if *headNumber >= startPruneFrom {
 		e.runPostForkchoiceInBackground(initialCycle)
