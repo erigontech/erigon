@@ -28,13 +28,13 @@ import (
 	"slices"
 	"testing"
 
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/common/length"
+	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common/length"
 	"github.com/stretchr/testify/require"
 
-	"github.com/ledgerwatch/erigon/common"
-	"github.com/ledgerwatch/erigon/crypto"
-	"github.com/ledgerwatch/erigon/turbo/rlphacks"
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/crypto"
+	"github.com/erigontech/erigon/turbo/rlphacks"
 )
 
 func TestV2HashBuilding(t *testing.T) {

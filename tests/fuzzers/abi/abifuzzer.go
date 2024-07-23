@@ -25,7 +25,8 @@ import (
 	"strings"
 
 	fuzz "github.com/google/gofuzz"
-	"github.com/ledgerwatch/erigon/accounts/abi"
+
+	"github.com/erigontech/erigon/accounts/abi"
 )
 
 var (

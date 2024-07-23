@@ -27,8 +27,8 @@ import (
 	"testing"
 	"testing/quick"
 
-	"github.com/ledgerwatch/erigon/p2p/enr"
-	"github.com/ledgerwatch/erigon/rlp"
+	"github.com/erigontech/erigon/p2p/enr"
+	"github.com/erigontech/erigon/rlp"
 	"github.com/stretchr/testify/assert"
 )
 

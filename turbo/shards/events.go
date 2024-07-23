@@ -19,9 +19,9 @@ package shards
 import (
 	"sync"
 
-	"github.com/ledgerwatch/erigon-lib/common"
-	remote "github.com/ledgerwatch/erigon-lib/gointerfaces/remoteproto"
-	"github.com/ledgerwatch/erigon/core/types"
+	"github.com/erigontech/erigon-lib/common"
+	remote "github.com/erigontech/erigon-lib/gointerfaces/remoteproto"
+	"github.com/erigontech/erigon/core/types"
 )
 
 type RpcEventType uint64

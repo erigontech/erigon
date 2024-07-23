@@ -28,8 +28,8 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/common/hexutil"
+	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common/hexutil"
 )
 
 // API describes the set of methods offered over the RPC interface
@@ -56,8 +56,10 @@ type DataError interface {
 // a RPC session. Implementations must be go-routine safe since the codec can be called in
 // multiple go-routines concurrently.
 type ServerCodec interface {
+	peerInfo() PeerInfo
 	ReadBatch() (msgs []*jsonrpcMessage, isBatch bool, err error)
 	Close()
+
 	jsonWriter
 }
 

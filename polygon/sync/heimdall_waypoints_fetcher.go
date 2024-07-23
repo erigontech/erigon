@@ -14,18 +14,16 @@
 // You should have received a copy of the GNU Lesser General Public License
 // along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
-package generics
+package sync
 
 import (
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon/core/types"
+	"context"
+
+	"github.com/erigontech/erigon/polygon/heimdall"
 )
 
-func Empty[T any]() (t T) {
-	return
-}
-
-type Response struct {
-	Headers []*types.Header
-	Hashes  []libcommon.Hash
+//go:generate mockgen -typed=true -source=./heimdall_waypoints_fetcher.go -destination=./heimdall_waypoints_fetcher_mock.go -package=sync
+type heimdallWaypointsFetcher interface {
+	FetchCheckpointsFromBlock(ctx context.Context, startBlock uint64) (heimdall.Waypoints, error)
+	FetchMilestonesFromBlock(ctx context.Context, startBlock uint64) (heimdall.Waypoints, error)
 }
