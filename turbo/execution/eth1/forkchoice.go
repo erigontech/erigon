@@ -35,6 +35,7 @@ import (
 	"github.com/erigontech/erigon-lib/wrap"
 	"github.com/erigontech/erigon/core/rawdb"
 	"github.com/erigontech/erigon/eth/consensuschain"
+	"github.com/erigontech/erigon/eth/stagedsync"
 	"github.com/erigontech/erigon/eth/stagedsync/stages"
 )
 
@@ -208,7 +209,7 @@ func (e *EthereumExecutionModule) updateForkChoice(ctx context.Context, original
 		isSynced = false
 		log.Info("[sync] limited big jump", "from", finishProgressBefore, "amount", uint64(e.syncCfg.LoopBlockLimit))
 	}
-	_ = isSynced
+
 	canonicalHash, err := rawdb.ReadCanonicalHash(tx, fcuHeader.Number.Uint64())
 	if err != nil {
 		sendForkchoiceErrorWithoutWaiting(outcomeCh, err)
@@ -248,19 +249,6 @@ func (e *EthereumExecutionModule) updateForkChoice(ctx context.Context, original
 
 		currentParentHash := fcuHeader.ParentHash
 		currentParentNumber := fcuHeader.Number.Uint64() - 1
-
-		if isDomainAheadOfBlocks(tx) {
-			if err := tx.Commit(); err != nil {
-				sendForkchoiceErrorWithoutWaiting(outcomeCh, err)
-				return
-			}
-			sendForkchoiceReceiptWithoutWaiting(outcomeCh, &execution.ForkChoiceReceipt{
-				LatestValidHash: gointerfaces.ConvertHashToH256(common.Hash{}),
-				Status:          execution.ExecutionStatus_TooFarAway,
-				ValidationError: "domain ahead of blocks",
-			})
-			return
-		}
 		isCanonicalHash, err := rawdb.IsCanonicalHash(tx, currentParentHash, currentParentNumber)
 		if err != nil {
 			sendForkchoiceErrorWithoutWaiting(outcomeCh, err)
@@ -300,24 +288,23 @@ func (e *EthereumExecutionModule) updateForkChoice(ctx context.Context, original
 				return
 			}
 		}
-		// if currentParentNumber != e.blockReader.FrozenBlocks() {
-		// 	if err := e.executionPipeline.UnwindTo(currentParentNumber, stagedsync.ForkChoice, tx); err != nil {
-		// 		sendForkchoiceErrorWithoutWaiting(outcomeCh, err)
-		// 		return
-		// 	}
-		// 	if e.hook != nil {
-		// 		if err = e.hook.BeforeRun(tx, isSynced); err != nil {
-		// 			sendForkchoiceErrorWithoutWaiting(outcomeCh, err)
-		// 			return
-		// 		}
-		// 	}
-		// 	// Run the unwind
-		// 	if err := e.executionPipeline.RunUnwind(e.db, wrap.TxContainer{Tx: tx}); err != nil {
-		// 		err = fmt.Errorf("updateForkChoice: %w", err)
-		// 		sendForkchoiceErrorWithoutWaiting(outcomeCh, err)
-		// 		return
-		// 	}
-		// }
+
+		if err := e.executionPipeline.UnwindTo(currentParentNumber, stagedsync.ForkChoice, tx); err != nil {
+			sendForkchoiceErrorWithoutWaiting(outcomeCh, err)
+			return
+		}
+		if e.hook != nil {
+			if err = e.hook.BeforeRun(tx, isSynced); err != nil {
+				sendForkchoiceErrorWithoutWaiting(outcomeCh, err)
+				return
+			}
+		}
+		// Run the unwind
+		if err := e.executionPipeline.RunUnwind(e.db, wrap.TxContainer{Tx: tx}); err != nil {
+			err = fmt.Errorf("updateForkChoice: %w", err)
+			sendForkchoiceErrorWithoutWaiting(outcomeCh, err)
+			return
+		}
 
 		if err := rawdbv3.TxNums.Truncate(tx, currentParentNumber+1); err != nil {
 			sendForkchoiceErrorWithoutWaiting(outcomeCh, err)
