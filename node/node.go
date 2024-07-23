@@ -32,21 +32,21 @@ import (
 	"github.com/c2h5oh/datasize"
 	"golang.org/x/sync/semaphore"
 
-	"github.com/ledgerwatch/erigon-lib/common/datadir"
+	"github.com/erigontech/erigon-lib/common/datadir"
 
-	"github.com/ledgerwatch/erigon/cmd/utils"
-	"github.com/ledgerwatch/erigon/node/nodecfg"
-	"github.com/ledgerwatch/erigon/params"
-	"github.com/ledgerwatch/erigon/turbo/debug"
+	"github.com/erigontech/erigon/cmd/utils"
+	"github.com/erigontech/erigon/node/nodecfg"
+	"github.com/erigontech/erigon/params"
+	"github.com/erigontech/erigon/turbo/debug"
 
 	"github.com/gofrs/flock"
 
-	"github.com/ledgerwatch/erigon-lib/log/v3"
+	"github.com/erigontech/erigon-lib/log/v3"
 
-	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon-lib/kv/mdbx"
-	"github.com/ledgerwatch/erigon-lib/kv/memdb"
-	"github.com/ledgerwatch/erigon/migrations"
+	"github.com/erigontech/erigon-lib/kv"
+	"github.com/erigontech/erigon-lib/kv/mdbx"
+	"github.com/erigontech/erigon-lib/kv/memdb"
+	"github.com/erigontech/erigon/migrations"
 )
 
 // Node is a container on which services can be registered.
@@ -331,11 +331,8 @@ func OpenDatabase(ctx context.Context, config *nodecfg.Config, label kv.Label, n
 		opts := mdbx.NewMDBX(logger).
 			Path(dbPath).Label(label).
 			GrowthStep(16 * datasize.MB).
-			DBVerbosity(config.DatabaseVerbosity).RoTxsLimiter(roTxsLimiter)
-
-		if config.MdbxWriteMap {
-			opts = opts.WriteMap()
-		}
+			DBVerbosity(config.DatabaseVerbosity).RoTxsLimiter(roTxsLimiter).
+			WriteMap(config.MdbxWriteMap)
 
 		if readonly {
 			opts = opts.Readonly()

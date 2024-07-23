@@ -30,16 +30,16 @@ import (
 	"google.golang.org/grpc/metadata"
 	"google.golang.org/protobuf/types/known/emptypb"
 
-	"github.com/ledgerwatch/erigon-lib/log/v3"
-
-	"github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/direct"
-	sentry "github.com/ledgerwatch/erigon-lib/gointerfaces/sentryproto"
-	"github.com/ledgerwatch/erigon/core/types"
-	"github.com/ledgerwatch/erigon/eth/protocols/eth"
-	sentrymulticlient "github.com/ledgerwatch/erigon/p2p/sentry/sentry_multi_client"
-	"github.com/ledgerwatch/erigon/rlp"
-	"github.com/ledgerwatch/erigon/turbo/testlog"
+	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common/generics"
+	"github.com/erigontech/erigon-lib/direct"
+	sentry "github.com/erigontech/erigon-lib/gointerfaces/sentryproto"
+	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/core/types"
+	"github.com/erigontech/erigon/eth/protocols/eth"
+	sentrymulticlient "github.com/erigontech/erigon/p2p/sentry/sentry_multi_client"
+	"github.com/erigontech/erigon/rlp"
+	"github.com/erigontech/erigon/turbo/testlog"
 )
 
 func TestMessageListenerRegisterBlockHeadersObserver(t *testing.T) {
@@ -335,8 +335,7 @@ type mockSentryMessagesStream[M any] struct {
 }
 
 func (s *mockSentryMessagesStream[M]) Recv() (M, error) {
-	var nilValue M
-	return nilValue, nil
+	return generics.Zero[M](), nil
 }
 
 func (s *mockSentryMessagesStream[M]) Header() (metadata.MD, error) {

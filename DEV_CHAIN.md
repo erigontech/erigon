@@ -5,7 +5,7 @@ Steps to setup and run Erigon dev chain. This tutorial is made for macOS.
 Open terminal 1 and type the following command
 
 ```bash 
-git clone --recurse-submodules -j8 https://github.com/ledgerwatch/erigon.git
+git clone --recurse-submodules -j8 https://github.com/erigontech/erigon.git
 cd erigon
 make erigon
 ```

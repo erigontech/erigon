@@ -24,17 +24,17 @@ import (
 	"github.com/stretchr/testify/suite"
 	"go.uber.org/mock/gomock"
 
-	"github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/types/ssz"
-	"github.com/ledgerwatch/erigon/cl/abstract"
-	mockState "github.com/ledgerwatch/erigon/cl/abstract/mock_services"
-	mockSync "github.com/ledgerwatch/erigon/cl/beacon/synced_data/mock_services"
-	"github.com/ledgerwatch/erigon/cl/clparams"
-	"github.com/ledgerwatch/erigon/cl/cltypes"
-	"github.com/ledgerwatch/erigon/cl/cltypes/solid"
-	"github.com/ledgerwatch/erigon/cl/phase1/forkchoice/mock_services"
-	"github.com/ledgerwatch/erigon/cl/utils/eth_clock"
-	mockCommittee "github.com/ledgerwatch/erigon/cl/validator/committee_subscription/mock_services"
+	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/types/ssz"
+	"github.com/erigontech/erigon/cl/abstract"
+	mockState "github.com/erigontech/erigon/cl/abstract/mock_services"
+	mockSync "github.com/erigontech/erigon/cl/beacon/synced_data/mock_services"
+	"github.com/erigontech/erigon/cl/clparams"
+	"github.com/erigontech/erigon/cl/cltypes"
+	"github.com/erigontech/erigon/cl/cltypes/solid"
+	"github.com/erigontech/erigon/cl/phase1/forkchoice/mock_services"
+	"github.com/erigontech/erigon/cl/utils/eth_clock"
+	mockCommittee "github.com/erigontech/erigon/cl/validator/committee_subscription/mock_services"
 )
 
 var (

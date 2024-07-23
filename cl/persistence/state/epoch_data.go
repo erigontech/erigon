@@ -20,10 +20,10 @@ import (
 	"encoding/binary"
 	"io"
 
-	"github.com/ledgerwatch/erigon/cl/cltypes"
-	"github.com/ledgerwatch/erigon/cl/cltypes/solid"
-	"github.com/ledgerwatch/erigon/cl/phase1/core/state"
-	ssz2 "github.com/ledgerwatch/erigon/cl/ssz"
+	"github.com/erigontech/erigon/cl/cltypes"
+	"github.com/erigontech/erigon/cl/cltypes/solid"
+	"github.com/erigontech/erigon/cl/phase1/core/state"
+	ssz2 "github.com/erigontech/erigon/cl/ssz"
 )
 
 // EpochData stores the data for the epoch (valid throughout the epoch)

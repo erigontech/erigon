@@ -17,9 +17,9 @@
 package stagedsynctest
 
 import (
-	"github.com/ledgerwatch/erigon-lib/chain"
-	"github.com/ledgerwatch/erigon/params"
-	"github.com/ledgerwatch/erigon/polygon/bor/borcfg"
+	"github.com/erigontech/erigon-lib/chain"
+	"github.com/erigontech/erigon/params"
+	"github.com/erigontech/erigon/polygon/bor/borcfg"
 )
 
 func BorDevnetChainConfigWithNoBlockSealDelays() *chain.Config {

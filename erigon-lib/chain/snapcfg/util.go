@@ -31,13 +31,13 @@ import (
 	snapshothashes "github.com/erigontech/erigon-snapshot"
 	"github.com/erigontech/erigon-snapshot/webseed"
 
-	"github.com/ledgerwatch/erigon-lib/chain/networkname"
-	"github.com/ledgerwatch/erigon-lib/downloader/snaptype"
+	"github.com/erigontech/erigon-lib/chain/networkname"
+	"github.com/erigontech/erigon-lib/downloader/snaptype"
 )
 
 var (
-	Mainnet = fromToml(snapshothashes.Mainnet)
-	// Holesky    = fromToml(snapshothashes.Holesky)
+	Mainnet    = fromToml(snapshothashes.Mainnet)
+	Holesky    = fromToml(snapshothashes.Holesky)
 	Sepolia    = fromToml(snapshothashes.Sepolia)
 	Mumbai     = fromToml(snapshothashes.Mumbai)
 	Amoy       = fromToml(snapshothashes.Amoy)
@@ -357,8 +357,8 @@ func (c Cfg) MergeLimit(t snaptype.Enum, fromBlock uint64) uint64 {
 }
 
 var knownPreverified = map[string]Preverified{
-	networkname.MainnetChainName: Mainnet,
-	// networkname.HoleskyChainName:    HoleskyChainSnapshotCfg,
+	networkname.MainnetChainName:    Mainnet,
+	networkname.HoleskyChainName:    Holesky,
 	networkname.SepoliaChainName:    Sepolia,
 	networkname.MumbaiChainName:     Mumbai,
 	networkname.AmoyChainName:       Amoy,
@@ -413,7 +413,6 @@ func MergeSteps(networkName string, snapType snaptype.Enum, fromBlock uint64) []
 // KnownCfg return list of preverified hashes for given network, but apply whiteList filter if it's not empty
 func KnownCfg(networkName string) *Cfg {
 	c, ok := knownPreverified[networkName]
-
 	if !ok {
 		return newCfg(networkName, Preverified{})
 	}
@@ -438,6 +437,7 @@ var KnownWebseeds = map[string][]string{
 	networkname.BorMainnetChainName: webseedsParse(webseed.BorMainnet),
 	networkname.GnosisChainName:     webseedsParse(webseed.Gnosis),
 	networkname.ChiadoChainName:     webseedsParse(webseed.Chiado),
+	networkname.HoleskyChainName:    webseedsParse(webseed.Holesky),
 }
 
 func webseedsParse(in []byte) (res []string) {

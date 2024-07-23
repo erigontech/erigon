@@ -19,7 +19,7 @@ package heimdall
 import (
 	"github.com/google/btree"
 
-	"github.com/ledgerwatch/erigon/polygon/bor/valset"
+	"github.com/erigontech/erigon/polygon/bor/valset"
 )
 
 type Span struct {

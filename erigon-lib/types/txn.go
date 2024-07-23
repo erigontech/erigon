@@ -32,13 +32,13 @@ import (
 
 	"github.com/erigontech/secp256k1"
 
-	"github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/common/fixedgas"
-	"github.com/ledgerwatch/erigon-lib/common/length"
-	"github.com/ledgerwatch/erigon-lib/common/u256"
-	"github.com/ledgerwatch/erigon-lib/crypto"
-	types "github.com/ledgerwatch/erigon-lib/gointerfaces/typesproto"
-	"github.com/ledgerwatch/erigon-lib/rlp"
+	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common/fixedgas"
+	"github.com/erigontech/erigon-lib/common/length"
+	"github.com/erigontech/erigon-lib/common/u256"
+	"github.com/erigontech/erigon-lib/crypto"
+	types "github.com/erigontech/erigon-lib/gointerfaces/typesproto"
+	"github.com/erigontech/erigon-lib/rlp"
 )
 
 type TxParseConfig struct {
@@ -109,6 +109,9 @@ type TxSlot struct {
 	Blobs       [][]byte
 	Commitments []gokzg4844.KZGCommitment
 	Proofs      []gokzg4844.KZGProof
+
+	// EIP-7702: set code tx
+	AuthorizationLen int
 }
 
 const (
@@ -186,7 +189,7 @@ func (ctx *TxParseContext) ParseTransaction(payload []byte, pos int, slot *TxSlo
 	// If it is non-legacy transaction, the transaction type follows, and then the list
 	if !legacy {
 		slot.Type = payload[p]
-		if slot.Type > BlobTxType {
+		if slot.Type > SetCodeTxType {
 			return 0, fmt.Errorf("%w: unknown transaction type: %d", ErrParseTxn, slot.Type)
 		}
 		p++
@@ -441,6 +444,26 @@ func (ctx *TxParseContext) parseTransactionBody(payload []byte, pos, p0 int, slo
 		}
 		if tuplePos != dataPos+dataLen {
 			return 0, fmt.Errorf("%w: extraneous space in the access list after all tuples", ErrParseTxn)
+		}
+		p = dataPos + dataLen
+	}
+	if slot.Type == SetCodeTxType {
+		dataPos, dataLen, err = rlp.List(payload, p)
+		if err != nil {
+			return 0, fmt.Errorf("%w: authorizations len: %s", ErrParseTxn, err) //nolint
+		}
+		authPos := dataPos
+		var authLen int
+		for authPos < dataPos+dataLen {
+			authPos, authLen, err = rlp.List(payload, authPos)
+			if err != nil {
+				return 0, fmt.Errorf("%w: authorization: %s", ErrParseTxn, err) //nolint
+			}
+			slot.AuthorizationLen++
+			authPos += authLen
+		}
+		if authPos != dataPos+dataLen {
+			return 0, fmt.Errorf("%w: extraneous space in the authorizations", ErrParseTxn)
 		}
 		p = dataPos + dataLen
 	}

@@ -30,9 +30,10 @@ import (
 	"github.com/go-echarts/go-echarts/v2/components"
 	"github.com/go-echarts/go-echarts/v2/opts"
 	"github.com/go-echarts/go-echarts/v2/types"
-	"github.com/ledgerwatch/erigon-lib/commitment"
-	"github.com/ledgerwatch/erigon-lib/seg"
-	"github.com/ledgerwatch/erigon-lib/state"
+
+	"github.com/erigontech/erigon-lib/commitment"
+	"github.com/erigontech/erigon-lib/seg"
+	"github.com/erigontech/erigon-lib/state"
 )
 
 var (

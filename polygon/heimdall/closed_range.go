@@ -39,7 +39,3 @@ func ClosedRangeMap[TResult any](r ClosedRange, projection func(i uint64) (TResu
 
 	return results, nil
 }
-
-func (r ClosedRange) Map(projection func(i uint64) (any, error)) ([]any, error) {
-	return ClosedRangeMap(r, projection)
-}

@@ -29,13 +29,13 @@ import (
 	"github.com/stretchr/testify/require"
 	"go.uber.org/mock/gomock"
 
-	"github.com/ledgerwatch/erigon-lib/log/v3"
+	"github.com/erigontech/erigon-lib/log/v3"
 
-	"github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon/core/types"
-	"github.com/ledgerwatch/erigon/polygon/heimdall"
-	"github.com/ledgerwatch/erigon/polygon/p2p"
-	"github.com/ledgerwatch/erigon/turbo/testlog"
+	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon/core/types"
+	"github.com/erigontech/erigon/polygon/heimdall"
+	"github.com/erigontech/erigon/polygon/p2p"
+	"github.com/erigontech/erigon/turbo/testlog"
 )
 
 func newBlockDownloaderTest(t *testing.T) *blockDownloaderTest {
@@ -44,7 +44,7 @@ func newBlockDownloaderTest(t *testing.T) *blockDownloaderTest {
 
 func newBlockDownloaderTestWithOpts(t *testing.T, opts blockDownloaderTestOpts) *blockDownloaderTest {
 	ctrl := gomock.NewController(t)
-	heimdallService := heimdall.NewMockHeimdall(ctrl)
+	heimdall := NewMockheimdallWaypointsFetcher(ctrl)
 	p2pService := p2p.NewMockService(ctrl)
 	p2pService.EXPECT().MaxPeers().Return(100).Times(1)
 	logger := testlog.Logger(t, log.LvlDebug)
@@ -55,7 +55,7 @@ func newBlockDownloaderTestWithOpts(t *testing.T, opts blockDownloaderTestOpts) 
 	headerDownloader := newBlockDownloader(
 		logger,
 		p2pService,
-		heimdallService,
+		heimdall,
 		checkpointVerifier,
 		milestoneVerifier,
 		blocksVerifier,
@@ -65,7 +65,7 @@ func newBlockDownloaderTestWithOpts(t *testing.T, opts blockDownloaderTestOpts) 
 		opts.getOrCreateDefaultBlockLimit(),
 	)
 	return &blockDownloaderTest{
-		heimdall:        heimdallService,
+		heimdall:        heimdall,
 		p2pService:      p2pService,
 		blockDownloader: headerDownloader,
 		store:           store,
@@ -123,7 +123,7 @@ func (opts blockDownloaderTestOpts) getOrCreateDefaultBlockLimit() uint {
 }
 
 type blockDownloaderTest struct {
-	heimdall        *heimdall.MockHeimdall
+	heimdall        *MockheimdallWaypointsFetcher
 	p2pService      *p2p.MockService
 	blockDownloader *blockDownloader
 	store           *MockStore

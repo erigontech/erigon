@@ -19,9 +19,9 @@ package heimdall
 import (
 	"testing"
 
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon/polygon/bor/valset"
-	"github.com/ledgerwatch/erigon/polygon/heimdall/heimdalltest"
+	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon/polygon/bor/valset"
+	"github.com/erigontech/erigon/polygon/heimdall/heimdalltest"
 )
 
 func TestSpanJsonMarshall(t *testing.T) {
