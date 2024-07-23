@@ -141,7 +141,24 @@ func (cell *Cell) reset() {
 }
 
 func (cell *Cell) String() string {
-	return fmt.Sprintf("{apl=%d spl=%d hl=%d loaded=%v}", cell.apl, cell.spl, cell.hl, cell.loaded)
+	b := new(strings.Builder)
+	b.WriteString("{")
+	b.WriteString(fmt.Sprintf("loaded=%v ", cell.loaded))
+	if cell.Delete {
+		b.WriteString("DELETED ")
+	}
+	if cell.apl > 0 {
+		b.WriteString(fmt.Sprintf("apk=%x ", cell.apk[:cell.apl]))
+	}
+	if cell.spl > 0 {
+		b.WriteString(fmt.Sprintf("spk=%x", cell.spk[:cell.spl]))
+
+	}
+	if cell.hl > 0 {
+		b.WriteString(fmt.Sprintf("h=%x", cell.h[:cell.hl]))
+	}
+	b.WriteString("}")
+	return b.String()
 }
 
 func (cell *Cell) FullString() string {
@@ -183,6 +200,7 @@ func (cell *Cell) FullString() string {
 	return b.String()
 }
 
+// fillFromUpperCell fills the cell with the data from the cell of the row above during unfold
 func (cell *Cell) fillFromUpperCell(upCell *Cell, depth, depthIncrement int) {
 	//fmt.Printf("fillFromUpperCell %d %d %s\n", depth, depthIncrement, upCell.FullString())
 	if upCell.downHashedLen >= depthIncrement {
@@ -229,18 +247,17 @@ func (cell *Cell) fillFromUpperCell(upCell *Cell, depth, depthIncrement int) {
 		copy(cell.h[:], upCell.h[:upCell.hl])
 	}
 
-	if upCell.alhlen > 0 {
-		upCell.alhlen = 0
-	}
+	// if upCell.alhlen > 0 {
+	// copy(cell.accLeafHash[:], upCell.accLeafHash[:upCell.alhlen])
+	// cell.alhlen = upCell.alhlen
+	// }
+
 	cell.alhlen = 0
-	//	copy(cell.accLeafHash[:], upCell.accLeafHash[:upCell.alhlen])
-	//	cell.alhlen = upCell.alhlen
-	//} else {
-	//	cell.alhlen = 0
-	//}
+	upCell.alhlen = 0
 	cell.loaded = upCell.loaded
 }
 
+// fillFromLowerCell fills the cell with the data from the cell of the lower row during fold
 func (cell *Cell) fillFromLowerCell(lowCell *Cell, lowDepth int, preExtension []byte, nibble int) {
 	//fmt.Printf("fillFromLowerCell %d %d, lower: %s\n", lowDepth, nibble, lowCell.FullString())
 	if lowCell.apl > 0 || lowDepth < 64 {
@@ -289,6 +306,7 @@ func (cell *Cell) fillFromLowerCell(lowCell *Cell, lowDepth int, preExtension []
 	//} else {
 	//	cell.alhlen = 0
 	//}
+	lowCell.alhlen = 0
 	cell.alhlen = 0
 	cell.loaded = lowCell.loaded
 }
@@ -778,11 +796,6 @@ func (hph *HexPatriciaHashed) computeCellHash(cell *Cell, depth int, buf []byte)
 			if cell.alhlen > 0 {
 				if cell.apl > 0 {
 					cell.alhlen = 0
-				} else {
-					res := append([]byte{160}, cell.accLeafHash[:cell.alhlen]...)
-					fmt.Printf("sac %x %x\n", res, cell.apk[:cell.apl])
-					hph.keccak.Reset()
-					return res, nil
 				}
 			}
 
@@ -805,13 +818,9 @@ func (hph *HexPatriciaHashed) computeCellHash(cell *Cell, depth int, buf []byte)
 			}
 			storageRootHash = *(*[length.Hash]byte)(aux[1:])
 			storageRootHashIsSet = true
-			//fmt.Printf("slh calculated %x\n", aux)
-			//copy(cell.accLeafHash[:], aux[1:])
-			//cell.alhlen = length.Hash
-			//return aux, nil
 		} else {
 			if hph.trace {
-				fmt.Printf("leafHashWithKeyVal for [%x]=>[%x] loaded=%t apk %x spk %x\n", cell.downHashedKey[:64-hashedKeyOffset+1], cell.Storage[:cell.StorageLen], cell.loaded, cell.apk[:cell.apl], cell.spk[:cell.spl])
+				fmt.Printf("leafHashWithKeyVal for [%x]=>[%x] %v\n", cell.downHashedKey[:64-hashedKeyOffset+1], cell.Storage[:cell.StorageLen], cell.String())
 			}
 			accLeafHash, err := hph.leafHashWithKeyVal(buf, cell.downHashedKey[:64-hashedKeyOffset+1], cell.Storage[:cell.StorageLen], false)
 			if err != nil {
@@ -821,6 +830,7 @@ func (hph *HexPatriciaHashed) computeCellHash(cell *Cell, depth int, buf []byte)
 			fmt.Printf("slh calculated %x\n", accLeafHash)
 			copy(cell.accLeafHash[:], accLeafHash[1:])
 			cell.alhlen = length.Hash
+
 			return accLeafHash, nil
 		}
 	}
@@ -851,7 +861,7 @@ func (hph *HexPatriciaHashed) computeCellHash(cell *Cell, depth int, buf []byte)
 		if !cell.loaded {
 			if cell.alhlen > 0 {
 				res := append([]byte{160}, cell.accLeafHash[:cell.alhlen]...)
-				//fmt.Printf("mac %x %x\n", res, cell.apk[:cell.apl])
+				fmt.Printf("mac %x %x\n", res, cell.apk[:cell.apl])
 				hph.keccak.Reset()
 				return res, nil
 			}

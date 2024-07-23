@@ -172,6 +172,7 @@ func (be *BranchEncoder) CollectUpdate(
 	if err != nil {
 		return 0, err
 	}
+	//fmt.Printf("collectBranchUpdate [%x:\n%s\n", prefix, BranchData(update).String())
 
 	prev, prevStep, err := ctx.GetBranch(prefix)
 	_ = prevStep
@@ -547,6 +548,7 @@ func (branchData BranchData) MergeHexBranches(branchData2 BranchData, newData []
 					pos2 += int(l)
 				}
 			}
+			// continue
 		}
 		if bitmap1&bit != 0 {
 			add := (touchMap2&bit == 0) && (afterMap2&bit != 0) // Add fields from branchData1

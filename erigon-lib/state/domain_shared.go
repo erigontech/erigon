@@ -395,6 +395,7 @@ func (sd *SharedDomains) LatestCommitment(prefix []byte) ([]byte, uint64, error)
 		return v, endTx / sd.aggTx.a.StepSize(), nil
 	}
 
+	// if not unwrap all keys, trie will use them as PLAINs which affects hashing
 	// replace shortened keys in the branch with full keys to allow HPH work seamlessly
 	rv, err := sd.replaceShortenedKeysInBranch(prefix, commitment.BranchData(v), startTx, endTx)
 	if err != nil {
@@ -1021,6 +1022,8 @@ type SharedDomainsCommitmentContext struct {
 	updates      *commitment.UpdateTree
 	patriciaTrie commitment.Trie
 	justRestored atomic.Bool
+
+	counters map[string]uint64
 }
 
 func NewSharedDomainsCommitmentContext(sd *SharedDomains, mode commitment.Mode, trieVariant commitment.TrieVariant) *SharedDomainsCommitmentContext {
@@ -1030,6 +1033,7 @@ func NewSharedDomainsCommitmentContext(sd *SharedDomains, mode commitment.Mode, 
 		discard:  dbg.DiscardCommitment(),
 		branches: make(map[string]cachedBranch),
 		keccak:   sha3.NewLegacyKeccak256().(cryptozerocopy.KeccakState),
+		counters: make(map[string]uint64),
 	}
 
 	ctx.patriciaTrie, ctx.updates = commitment.InitializeTrieAndUpdateTree(trieVariant, mode, sd.aggTx.a.tmpdir)
@@ -1049,15 +1053,22 @@ type cachedBranch struct {
 // ResetBranchCache should be called after each commitment computation
 func (sdc *SharedDomainsCommitmentContext) ResetBranchCache() {
 	clear(sdc.branches)
+	fmt.Printf("[SDC] ResetBranchCache COUNTERS %#+v\n", sdc.counters)
+	clear(sdc.counters)
 }
 
 func (sdc *SharedDomainsCommitmentContext) GetBranch(pref []byte) ([]byte, uint64, error) {
+	sdc.counters["GetBranchCached"]++
 	cached, ok := sdc.branches[string(pref)]
 	if ok {
+		sdc.counters["GetBranchCachedHit"]++
 		// cached value is already transformed/clean to read.
 		// Cache should ResetBranchCache after each commitment computation
 		return cached.data, cached.step, nil
 	}
+
+	sdc.counters["GetBranchCachedMiss"]++
+	sdc.counters["GetBranch"]++
 
 	v, step, err := sdc.sd.LatestCommitment(pref)
 	if err != nil {
@@ -1085,11 +1096,18 @@ func (sdc *SharedDomainsCommitmentContext) PutBranch(prefix []byte, data []byte,
 	return sdc.sd.updateCommitmentData(prefix, data, prevData, prevStep)
 }
 
-func (sdc *SharedDomainsCommitmentContext) GetAccount(plainKey []byte, cell *commitment.Cell) error {
-	encAccount, _, err := sdc.sd.DomainGet(kv.AccountsDomain, plainKey, nil)
-	if err != nil {
-		return fmt.Errorf("GetAccount failed: %w", err)
+func (sdc *SharedDomainsCommitmentContext) GetAccount(plainKey []byte, cell *commitment.Cell) (err error) {
+	encAccount, _, cached := sdc.sd.get(kv.AccountsDomain, plainKey)
+	if !cached {
+		encAccount, _, err = sdc.sd.DomainGet(kv.AccountsDomain, plainKey, nil)
+		if err != nil {
+			return fmt.Errorf("GetAccount failed: %w", err)
+		}
+		sdc.counters["GetAccount"]++
+	} else {
+		sdc.counters["GetAccountCached"]++
 	}
+
 	cell.Nonce = 0
 	cell.Balance.Clear()
 
@@ -1106,10 +1124,17 @@ func (sdc *SharedDomainsCommitmentContext) GetAccount(plainKey []byte, cell *com
 		return nil
 	}
 
-	code, _, err := sdc.sd.DomainGet(kv.CodeDomain, plainKey, nil)
-	if err != nil {
-		return fmt.Errorf("GetAccount: failed to read latest code: %w", err)
+	code, _, cached := sdc.sd.get(kv.CodeDomain, plainKey)
+	if !cached {
+		code, _, err = sdc.sd.DomainGet(kv.CodeDomain, plainKey, nil)
+		if err != nil {
+			return fmt.Errorf("GetAccount: failed to read latest code: %w", err)
+		}
+		sdc.counters["GetCode"]++
+	} else {
+		sdc.counters["GetCodeCached"]++
 	}
+
 	if len(code) > 0 {
 		sdc.keccak.Reset()
 		sdc.keccak.Write(code)
@@ -1121,11 +1146,17 @@ func (sdc *SharedDomainsCommitmentContext) GetAccount(plainKey []byte, cell *com
 	return nil
 }
 
-func (sdc *SharedDomainsCommitmentContext) GetStorage(plainKey []byte, cell *commitment.Cell) error {
+func (sdc *SharedDomainsCommitmentContext) GetStorage(plainKey []byte, cell *commitment.Cell) (err error) {
 	// Look in the summary table first
-	enc, _, err := sdc.sd.DomainGet(kv.StorageDomain, plainKey, nil)
-	if err != nil {
-		return err
+	enc, _, cached := sdc.sd.get(kv.StorageDomain, plainKey)
+	if !cached {
+		enc, _, err = sdc.sd.DomainGet(kv.StorageDomain, plainKey, nil)
+		if err != nil {
+			return err
+		}
+		sdc.counters["GetStorage"]++
+	} else {
+		sdc.counters["GetStorageCached"]++
 	}
 	cell.StorageLen = len(enc)
 	copy(cell.Storage[:], enc)
