@@ -29,8 +29,18 @@ import (
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/log/v3"
 
+<<<<<<< HEAD
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/rpc"
+=======
+	"github.com/erigontech/erigon-lib/chain"
+	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/eth/gasprice/gaspricecfg"
+
+	"github.com/erigontech/erigon/core/types"
+	"github.com/erigontech/erigon/rpc"
+>>>>>>> 6b371a0059 (eth: apply gas enforcements to all polygon chains)
 )
 
 const sampleNumber = 3 // Number of transactions sampled in a block
@@ -286,9 +296,8 @@ func (s *sortingHeap) Pop() interface{} {
 }
 
 // setBorDefaultGpoIgnorePrice enforces gpo IgnorePrice to be equal to BorDefaultGpoIgnorePrice (25gwei by default)
-// only for polygon amoy network.
 func setBorDefaultGpoIgnorePrice(chainConfig *chain.Config, gasPriceConfig gaspricecfg.Config) {
-	if chainConfig.Bor != nil && chainConfig.ChainID.Cmp(params.AmoyChainConfig.ChainID) == 0 && gasPriceConfig.IgnorePrice != gaspricecfg.BorDefaultGpoIgnorePrice {
+	if chainConfig.Bor != nil && gasPriceConfig.IgnorePrice != gaspricecfg.BorDefaultGpoIgnorePrice {
 		log.Warn("Sanitizing invalid bor gasprice oracle ignore price", "provided", gasPriceConfig.IgnorePrice, "updated", gaspricecfg.BorDefaultGpoIgnorePrice)
 		gasPriceConfig.IgnorePrice = gaspricecfg.BorDefaultGpoIgnorePrice
 	}
