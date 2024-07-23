@@ -102,9 +102,9 @@ func (p *Progress) Log(rs *state.StateV3, in *state.QueueWithRetry, rws *state.R
 
 	var suffix string
 	if shouldGenerateChangesets {
-		suffix = " on chain-tip"
+		suffix = " Near chain-tip"
 	}
-	p.logger.Info(fmt.Sprintf("[%s] Exec"+suffix, p.logPrefix),
+	p.logger.Info(fmt.Sprintf("[%s]"+suffix, p.logPrefix),
 		//"workers", workerCount,
 		"blk", outputBlockNum,
 		"tx/s", fmt.Sprintf("%.1f", speedTx),
