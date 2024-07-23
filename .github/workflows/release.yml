@@ -54,7 +54,7 @@ jobs:
 
       - run: echo ${{ steps.prepare.outputs.tag_name }}
 
-      - name: Release publish_artifacts=${{ inputs.publish_artifacts }}
+      - name: Release
         run: |
           make release
           docker images
