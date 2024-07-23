@@ -779,16 +779,8 @@ func NewLoopBreakCheck(cfg *ethconfig.Config, heimdallClient heimdall.HeimdallCl
 		}
 	}
 
-	if cfg.Sync.LoopBlockLimit == 0 {
-		return loopBreakCheck
-	}
-
 	previousBreakCheck := loopBreakCheck
 	return func(loopCount int) bool {
-		if loopCount > int(cfg.Sync.LoopBlockLimit) {
-			return true
-		}
-
 		if previousBreakCheck != nil {
 			return previousBreakCheck(loopCount)
 		}
