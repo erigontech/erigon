@@ -10,6 +10,8 @@ import (
 	"fmt"
 	"strconv"
 
+	"sync"
+
 	"github.com/0xPolygonHermez/zkevm-data-streamer/datastreamer"
 	"github.com/gateway-fm/cdk-erigon-lib/common"
 	"github.com/gateway-fm/cdk-erigon-lib/kv"
@@ -20,9 +22,8 @@ import (
 	"github.com/ledgerwatch/erigon/zk/hermez_db"
 	"github.com/ledgerwatch/erigon/zk/legacy_executor_verifier/proto/github.com/0xPolygonHermez/zkevm-node/state/runtime/executor"
 	"github.com/ledgerwatch/erigon/zk/syncer"
-	"github.com/ledgerwatch/log/v3"
-	"sync"
 	"github.com/ledgerwatch/erigon/zk/utils"
+	"github.com/ledgerwatch/log/v3"
 )
 
 var ErrNoExecutorAvailable = fmt.Errorf("no executor available")
@@ -281,8 +282,10 @@ func (v *LegacyExecutorVerifier) AddRequestUnsafe(request *VerifierRequest, sequ
 		// log timing w/o stream write
 		t.LogTimer()
 
-		if err = v.checkAndWriteToStream(tx, hermezDb, request.BatchNumber); err != nil {
-			log.Error("error writing data to stream", "err", err)
+		if ok {
+			if err = v.checkAndWriteToStream(tx, hermezDb, request.BatchNumber); err != nil {
+				log.Error("error writing data to stream", "err", err)
+			}
 		}
 
 		verifierBundle.response = &VerifierResponse{
