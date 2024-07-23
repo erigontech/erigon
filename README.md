@@ -4,16 +4,22 @@ cdk-erigon is a fork of Erigon, currently in Alpha, optimized for syncing with t
 
 ***
 ## Release Roadmap
-- **v0.9.x**: Support for Cardona testnet
-- **v1.x.x**: Support for Mainnet
+- **v1.1.x**: RPC (full support)
+- **v2.x.x**: Sequencer (full support)
 - **v3.x.x**: Erigon 3 based (snapshot support)
 
 ***
 
+## Hardware requirements
+
+* A Linux-based OS (e.g., Ubuntu Server 22.04 LTS).
+* At least 32GB RAM with a 4-core CPU.
+* Both Apple Silicon and AMD64 are supported.
+
 ## Chain/Fork Support
 Current status of cdk-erigon's support for running various chains and fork ids:
 
-- zkEVM Cardona testnet — beta support
+- zkEVM Cardona testnet — full support
 - zkEVM mainnet — beta support
 - CDK Chains - beta support (forkid.9 and above)
 
