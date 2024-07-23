@@ -277,7 +277,8 @@ install:
 	@ls -al "$(DIST)"
 
 PACKAGE_NAME          := github.com/erigontech/erigon
-GOLANG_CROSS_VERSION  ?= v1.22.4
+GOLANG_CROSS_VERSION  ?= v1.21.5
+
 
 .PHONY: release-dry-run
 release-dry-run: git-submodules

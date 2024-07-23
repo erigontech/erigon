@@ -14,13 +14,18 @@ on:
       # to be used by fork patch-releases ^^
       - 'v*.*.*-*'
   workflow_dispatch:
+    inputs:
+      publish_artifacts:
+        description: 'Publish Artifacts (not dry-run)'
+        required: true
+        type: boolean
 
 jobs:
   goreleaser:
     runs-on: ubuntu-latest
     steps:
       - name: Maximize build space
-        uses: AdityaGarg8/remove-unwanted-software@v1
+        uses: AdityaGarg8/remove-unwanted-software@v4
         with:
           remove-dotnet: 'true'
           remove-android: 'true'
@@ -32,12 +37,12 @@ jobs:
           fetch-depth: 0
 
       - name: dockerhub-login
-        uses: docker/login-action@v2
+        uses: docker/login-action@v3
         with:
           username: ${{ secrets.DOCKERHUB }}
           password: ${{ secrets.DOCKERHUB_KEY }}
       - name: ghcr-login
-        uses: docker/login-action@v2
+        uses: docker/login-action@v3
         with:
           registry: ghcr.io
           username: ${{ github.repository_owner }}
@@ -50,13 +55,17 @@ jobs:
           echo "tag_name=${TAG}" >> $GITHUB_OUTPUT
 
       - name: Set up QEMU
-        uses: docker/setup-qemu-action@v2
+        uses: docker/setup-qemu-action@v3
 
       - run: echo ${{ steps.prepare.outputs.tag_name }}
 
-      - name: Run GoReleaser
+      - name: Release publish_artifacts=${{ inputs.publish_artifacts }}
         run: |
-          make release
+          if ${{ inputs.publish_artifacts }}; then
+            make release
+          else
+            make release-dry-run
+          fi
           docker images
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
