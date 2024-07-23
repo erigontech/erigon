@@ -467,13 +467,12 @@ func (e *EthereumExecutionModule) updateForkChoice(ctx context.Context, original
 		var m runtime.MemStats
 		dbg.ReadMemStats(&m)
 		blockTimings := e.forkValidator.GetTimings(blockHash)
-		timings = append(timings, "BlockValidation", blockTimings[engine_helpers.BlockTimingsValidationIndex])
 
 		if flushExtendingFork {
 			totalTime := blockTimings[engine_helpers.BlockTimingsValidationIndex] + blockTimings[engine_helpers.BlockTimingsFlushExtendingFork]
 			gasUsedMgas := float64(fcuHeader.GasUsed) / 1e6
 			mgasPerSec := gasUsedMgas / totalTime.Seconds()
-			timings = append(timings, "FlushExtendingFork", blockTimings[engine_helpers.BlockTimingsFlushExtendingFork], "Mgas/s", fmt.Sprintf("%.2f", mgasPerSec))
+			timings = append(timings, "BlockValidation", blockTimings[engine_helpers.BlockTimingsValidationIndex], "FlushExtendingFork", blockTimings[engine_helpers.BlockTimingsFlushExtendingFork], "Mgas/s", fmt.Sprintf("%.2f", mgasPerSec))
 		}
 		timings = append(timings, "commit", commitTime, "alloc", common.ByteCount(m.Alloc), "sys", common.ByteCount(m.Sys))
 		e.logger.Info("Timings", timings...)
