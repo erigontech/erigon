@@ -14,6 +14,11 @@ on:
       # to be used by fork patch-releases ^^
       - 'v*.*.*-*'
   workflow_dispatch:
+    inputs:
+      dry_run:
+        description: 'Dry run'
+        required: true
+        type: boolean
 
 jobs:
   goreleaser:
