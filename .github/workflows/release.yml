@@ -59,20 +59,13 @@ jobs:
 
       - run: echo ${{ steps.prepare.outputs.tag_name }}
 
-
-      - if:  ${{ !inputs.dry_run }}
+      - name: Release dry_run=${{ inputs.dry_run }}
         run: |
-          make release
-          docker images
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          VERSION: ${{ steps.prepare.outputs.tag_name }}
-          DOCKER_USERNAME: ${{ secrets.DOCKERHUB }}
-          DOCKER_PASSWORD: ${{ secrets.DOCKERHUB_KEY }}
-
-      - if: ${{ inputs.dry_run }}
-        run: |
-          make release-dry-run
+          if ${{ inputs.dry_run }}; then
+            make release-dry-run
+          else
+            make release
+          fi
           docker images
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
