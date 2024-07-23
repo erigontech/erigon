@@ -134,11 +134,11 @@ func createBatchStartEntriesProto(
 	batchNumber, lastBatchNumber, batchGap, chainId uint64,
 	root libcommon.Hash,
 	gers []types.GerUpdateProto,
-) ([]DataStreamEntryProto, error) {
+) (*DataStreamEntries, error) {
 	var err error
 	var batchStartEntries []DataStreamEntryProto
 
-	entries := make([]DataStreamEntryProto, 0, 2+int(3*(batchGap-1))+len(gers))
+	entries := NewDataStreamEntries(2 + int(3*(batchGap-1)) + len(gers))
 
 	// if we have a gap of more than 1 batch then we need to write in the batch start and ends for these empty batches
 	if batchGap > 1 {
@@ -150,14 +150,14 @@ func createBatchStartEntriesProto(
 			if batchStartEntries, err = addBatchStartEntries(reader, workingBatch, chainId); err != nil {
 				return nil, err
 			}
-			entries = append(entries, batchStartEntries...)
+			// entries = append(entries, batchStartEntries...)
+			entries.AddMany(batchStartEntries)
 
 			// see if we have any gers to handle
 			for _, ger := range gers {
 				upd := ger.UpdateGER
 				if upd.BatchNumber == workingBatch {
-					entries = append(
-						entries,
+					entries.Add(
 						newGerUpdateProto(upd.BatchNumber, upd.Timestamp, libcommon.BytesToHash(upd.GlobalExitRoot), libcommon.BytesToAddress(upd.Coinbase), upd.ForkId, upd.ChainId, libcommon.BytesToHash(upd.StateRoot)),
 					)
 				}
@@ -167,7 +167,7 @@ func createBatchStartEntriesProto(
 			if localExitRoot, err = utils.GetBatchLocalExitRootFromSCStorage(workingBatch, reader, tx); err != nil {
 				return nil, err
 			}
-			entries = append(entries, newBatchEndProto(localExitRoot, root, workingBatch))
+			entries.Add(newBatchEndProto(localExitRoot, root, workingBatch))
 		}
 	}
 
@@ -175,13 +175,12 @@ func createBatchStartEntriesProto(
 	if batchStartEntries, err = addBatchStartEntries(reader, batchNumber, chainId); err != nil {
 		return nil, err
 	}
-	entries = append(entries, batchStartEntries...)
+	entries.AddMany(batchStartEntries)
 	return entries, nil
 }
 
 func addBatchEndEntriesProto(
-	tx kv.Tx,
-	batchNumber, lastBatchNumber uint64,
+	batchNumber uint64,
 	root *libcommon.Hash,
 	gers []types.GerUpdateProto,
 	localExitRoot *libcommon.Hash,
@@ -229,22 +228,6 @@ func addBatchStartEntries(reader DbReader, batchNum, chainId uint64) ([]DataStre
 
 	entries[1] = newBatchStartProto(batchNum, chainId, fork, batchType)
 	return entries, nil
-}
-
-func filterTransactionByIndexes(
-	filteredTransactions eritypes.Transactions,
-	transactionsToIncludeByIndex []int,
-) eritypes.Transactions {
-	if transactionsToIncludeByIndex != nil {
-		filteredTransactionsBuilder := make(eritypes.Transactions, len(transactionsToIncludeByIndex))
-		for i, txIndexInBlock := range transactionsToIncludeByIndex {
-			filteredTransactionsBuilder[i] = filteredTransactions[txIndexInBlock]
-		}
-
-		filteredTransactions = filteredTransactionsBuilder
-	}
-
-	return filteredTransactions
 }
 
 const (

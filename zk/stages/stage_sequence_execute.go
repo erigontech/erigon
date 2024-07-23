@@ -74,6 +74,15 @@ func SpawnSequencingStage(
 	getHeader := func(hash common.Hash, number uint64) *types.Header { return rawdb.ReadHeader(sdb.tx, hash, number) }
 	hasExecutorForThisBatch := !isLastBatchPariallyProcessed && cfg.zk.HasExecutors()
 
+	// handle case where batch wasn't closed properly
+	// close it before starting a new one
+	// this occurs when sequencer was switched from syncer or sequencer datastream files were deleted
+	// and datastream was regenerated
+	isLastEntryBatchEnd, err := cfg.datastreamServer.IsLastEntryBatchEnd()
+	if err != nil {
+		return err
+	}
+
 	// injected batch
 	if executionAt == 0 {
 		// set the block height for the fork we're running at to ensure contract interactions are correct
@@ -93,8 +102,7 @@ func SpawnSequencingStage(
 			return err
 		}
 
-		// write the batch directly to the stream
-		if err = cfg.datastreamServer.WriteBlocksToStream(tx, sdb.hermezDb.HermezDbReader, injectedBatchBlockNumber, injectedBatchBlockNumber, logPrefix); err != nil {
+		if err = cfg.datastreamServer.WriteWholeBatchToStream(logPrefix, tx, sdb.hermezDb.HermezDbReader, lastBatch, injectedBatchNumber); err != nil {
 			return err
 		}
 
@@ -105,6 +113,23 @@ func SpawnSequencingStage(
 		}
 
 		return nil
+	}
+
+	if !isLastBatchPariallyProcessed && !isLastEntryBatchEnd {
+		log.Warn(fmt.Sprintf("[%s] Last batch %d was not closed properly, closing it now...", logPrefix, lastBatch))
+		ler, err := utils.GetBatchLocalExitRootFromSCStorage(lastBatch, sdb.hermezDb.HermezDbReader, tx)
+		if err != nil {
+			return err
+		}
+
+		lastBlock, err := rawdb.ReadBlockByNumber(sdb.tx, executionAt)
+		if err != nil {
+			return err
+		}
+		root := lastBlock.Root()
+		if err = cfg.datastreamServer.WriteBatchEnd(sdb.hermezDb, lastBatch, lastBatch-1, &root, &ler); err != nil {
+			return err
+		}
 	}
 
 	if err := utils.UpdateZkEVMBlockCfg(cfg.chainConfig, sdb.hermezDb, logPrefix); err != nil {
@@ -501,25 +526,22 @@ func SpawnSequencingStage(
 			// because it would be later added twice
 			counters := batchCounters.CombineCollectorsNoChanges(l1InfoIndex != 0)
 
-			err = sdb.hermezDb.WriteBatchCounters(thisBatch, counters.UsedAsMap())
-			if err != nil {
+			if err = sdb.hermezDb.WriteBatchCounters(thisBatch, counters.UsedAsMap()); err != nil {
 				return err
 			}
 
-			err = sdb.hermezDb.WriteIsBatchPartiallyProcessed(thisBatch)
-			if err != nil {
+			if err = sdb.hermezDb.WriteIsBatchPartiallyProcessed(thisBatch); err != nil {
 				return err
 			}
 
-			if err = cfg.datastreamServer.WriteBlockToStream(logPrefix, tx, sdb.hermezDb, thisBatch, lastBatch, blockNumber); err != nil {
+			if err = cfg.datastreamServer.WriteBlockWithBatchStartToStream(logPrefix, tx, sdb.hermezDb, forkId, thisBatch, lastBatch, *parentBlock, *block); err != nil {
 				return err
 			}
 
 			if err = tx.Commit(); err != nil {
 				return err
 			}
-			tx, err = cfg.db.BeginRw(ctx)
-			if err != nil {
+			if tx, err = cfg.db.BeginRw(ctx); err != nil {
 				return err
 			}
 			// TODO: This creates stacked up deferrals
@@ -563,7 +585,7 @@ func SpawnSequencingStage(
 
 	if !hasExecutorForThisBatch {
 		blockRoot := block.Root()
-		if err = cfg.datastreamServer.WriteBatchEnd(logPrefix, tx, sdb.hermezDb, thisBatch, lastBatch, &blockRoot, &ler); err != nil {
+		if err = cfg.datastreamServer.WriteBatchEnd(sdb.hermezDb, thisBatch, lastBatch, &blockRoot, &ler); err != nil {
 			return err
 		}
 	}
