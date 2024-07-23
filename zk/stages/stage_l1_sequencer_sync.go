@@ -208,7 +208,6 @@ func HandleL1InfoTreeUpdate(
 }
 
 const (
-	injectedBatchLogTrailingBytes        = 24
 	injectedBatchLogTransactionStartByte = 128
 	injectedBatchLastGerStartByte        = 31
 	injectedBatchLastGerEndByte          = 64
@@ -231,9 +230,11 @@ func HandleInitialSequenceBatches(
 		}
 	}
 
-	// the log appears to have some trailing 24 bytes of all 0s in it.  Not sure why but we can't handle the
+	// the log appears to have some trailing some bytes of all 0s in it.  Not sure why but we can't handle the
 	// TX without trimming these off
+	injectedBatchLogTrailingBytes := getTrailingCutoffLen(l.Data)
 	trailingCutoff := len(l.Data) - injectedBatchLogTrailingBytes
+	log.Debug(fmt.Sprintf("Handle initial sequence batches, trail len:%v, log data: %v", injectedBatchLogTrailingBytes, l.Data))
 
 	txData := l.Data[injectedBatchLogTransactionStartByte:trailingCutoff]
 
@@ -260,4 +261,13 @@ func UnwindL1SequencerSyncStage(u *stagedsync.UnwindState, tx kv.RwTx, cfg L1Seq
 
 func PruneL1SequencerSyncStage(s *stagedsync.PruneState, tx kv.RwTx, cfg L1SequencerSyncCfg, ctx context.Context) error {
 	return nil
+}
+
+func getTrailingCutoffLen(logData []byte) int {
+	for i := len(logData) - 1; i >= 0; i-- {
+		if logData[i] != 0 {
+			return len(logData) - i - 1
+		}
+	}
+	return 0
 }
