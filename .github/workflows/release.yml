@@ -15,8 +15,8 @@ on:
       - 'v*.*.*-*'
   workflow_dispatch:
     inputs:
-      dry_run:
-        description: 'Dry run'
+      publish_artifacts:
+        description: 'Publish Artifacts (not dry-run)'
         required: true
         type: boolean
 
@@ -59,12 +59,12 @@ jobs:
 
       - run: echo ${{ steps.prepare.outputs.tag_name }}
 
-      - name: Release dry_run=${{ inputs.dry_run }}
+      - name: Release publish_artifacts=${{ inputs.publish_artifacts }}
         run: |
-          if ${{ inputs.dry_run }}; then
-            make release-dry-run
-          else
+          if ${{ inputs.publish_artifacts }}; then
             make release
+          else
+            make release-dry-run
           fi
           docker images
         env:
