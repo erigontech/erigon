@@ -984,6 +984,8 @@ func (b *BeaconChainConfig) GetForkVersionByVersion(v StateVersion) uint32 {
 		return uint32(b.CapellaForkVersion)
 	case DenebVersion:
 		return uint32(b.DenebForkVersion)
+	case ElectraVersion:
+		return uint32(b.ElectraForkVersion)
 	}
 	panic("invalid version")
 }
@@ -1000,6 +1002,8 @@ func (b *BeaconChainConfig) GetForkEpochByVersion(v StateVersion) uint64 {
 		return b.CapellaForkEpoch
 	case DenebVersion:
 		return b.DenebForkEpoch
+	case ElectraVersion:
+		return b.ElectraForkEpoch
 	}
 	panic("invalid version")
 }
