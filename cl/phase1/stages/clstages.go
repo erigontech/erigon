@@ -316,7 +316,7 @@ func ConsensusClStages(ctx context.Context,
 							}
 
 							st, err := cfg.forkChoice.GetStateAtBlockRoot(blockRoot, false)
-							if err == nil && block.Block.Slot%(cfg.beaconCfg.SlotsPerEpoch*2) == 0 {
+							if err == nil && block.Block.Slot%(cfg.beaconCfg.SlotsPerEpoch*2) == 0 && st != nil {
 								if err := cfg.forkChoice.DumpBeaconStateOnDisk(st); err != nil {
 									logger.Warn("failed to dump state", "err", err)
 								}

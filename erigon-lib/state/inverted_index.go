@@ -822,7 +822,7 @@ func (iit *InvertedIndexRoTx) Prune(ctx context.Context, rwTx kv.RwTx, txFrom, t
 
 	collector := etl.NewCollector(ii.filenameBase+".prune.ii", ii.dirs.Tmp, etl.NewSortableBuffer(etl.BufferOptimalSize/8), ii.logger)
 	defer collector.Close()
-	collector.LogLvl(log.LvlDebug)
+	collector.LogLvl(log.LvlTrace)
 	collector.SortAndFlushInBackground(true)
 
 	var txKey [8]byte
