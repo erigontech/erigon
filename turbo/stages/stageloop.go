@@ -308,7 +308,7 @@ func (h *Hook) sendNotifications(notifications *shards.Notifications, tx kv.Tx, 
 			notifications.Accumulator.StartChange(0, currentHeader.Hash(), nil, false)
 		}
 
-		pendingBaseFee := misc.CalcBaseFee(h.chainConfig, currentHeader)
+		pendingBaseFee := misc.CalcBaseFeeZk(h.chainConfig, currentHeader)
 		pendingBlobFee := h.chainConfig.GetMinBlobGasPrice()
 		if currentHeader.ExcessBlobGas != nil {
 			excessBlobGas := misc.CalcExcessBlobGas(h.chainConfig, currentHeader)

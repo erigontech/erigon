@@ -16,6 +16,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/kv/membatch"
 	"github.com/ledgerwatch/log/v3"
 
+	"github.com/ledgerwatch/erigon/consensus/misc"
 	"github.com/ledgerwatch/erigon/core"
 	"github.com/ledgerwatch/erigon/zk/erigon_db"
 	"github.com/ledgerwatch/erigon/zk/hermez_db"
@@ -302,6 +303,14 @@ func getPreexecuteValues(cfg ExecuteBlockCfg, ctx context.Context, tx kv.RwTx, b
 	}
 
 	block.HeaderNoCopy().ParentHash = prevBlockHash
+
+	if cfg.chainConfig.IsLondon(blockNum) {
+		parentHeader, err := cfg.blockReader.Header(ctx, tx, prevBlockHash, blockNum-1)
+		if err != nil {
+			return common.Hash{}, nil, nil, err
+		}
+		block.HeaderNoCopy().BaseFee = misc.CalcBaseFeeZk(cfg.chainConfig, parentHeader)
+	}
 
 	return preExecuteHeaderHash, block, senders, nil
 }

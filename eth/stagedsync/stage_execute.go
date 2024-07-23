@@ -35,6 +35,7 @@ import (
 	"github.com/ledgerwatch/erigon/common/changeset"
 	"github.com/ledgerwatch/erigon/common/math"
 	"github.com/ledgerwatch/erigon/consensus"
+	"github.com/ledgerwatch/erigon/consensus/misc"
 	"github.com/ledgerwatch/erigon/core"
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/state"
@@ -511,6 +512,14 @@ Loop:
 		if header == nil {
 			logger.Error(fmt.Sprintf("[%s] Empty block", logPrefix), "blocknum", blockNum)
 			break
+		}
+
+		if cfg.chainConfig.IsLondon(blockNum) {
+			parentHeader, err := cfg.blockReader.Header(ctx, txc.Tx, header.ParentHash, blockNum-1)
+			if err != nil {
+				return err
+			}
+			header.BaseFee = misc.CalcBaseFeeZk(cfg.chainConfig, parentHeader)
 		}
 
 		lastLogTx += uint64(block.Transactions().Len())

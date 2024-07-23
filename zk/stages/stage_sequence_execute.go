@@ -80,7 +80,7 @@ func SpawnSequencingStage(
 			return err
 		}
 
-		header, parentBlock, err := prepareHeader(tx, executionAt, math.MaxUint64, math.MaxUint64, forkId, cfg.zk.AddressSequencer)
+		header, parentBlock, err := prepareHeader(tx, executionAt, math.MaxUint64, math.MaxUint64, forkId, cfg.zk.AddressSequencer, cfg.chainConfig, cfg.miningConfig)
 		if err != nil {
 			return err
 		}
@@ -247,7 +247,7 @@ func SpawnSequencingStage(
 		log.Info(fmt.Sprintf("[%s] Continuing unfinished batch %d from block %d", logPrefix, thisBatch, executionAt))
 	}
 
-	blockDataSizeChecker := NewBlockDataChecker()
+	blockDataSizeChecker := NewBlockDataChecker(cfg.zk.ShouldCountersBeUnlimited(l1Recovery))
 
 	prevHeader := rawdb.ReadHeaderByNumber(tx, executionAt)
 	batchDataOverflow := false
@@ -284,7 +284,7 @@ func SpawnSequencingStage(
 			addedReceipts = []*types.Receipt{}
 			addedExecutionResults = []*core.ExecutionResult{}
 			effectiveGases = []uint8{}
-			header, parentBlock, err = prepareHeader(tx, blockNumber, deltaTimestamp, limboHeaderTimestamp, forkId, nextBatchData.Coinbase)
+			header, parentBlock, err = prepareHeader(tx, blockNumber, deltaTimestamp, limboHeaderTimestamp, forkId, nextBatchData.Coinbase, cfg.chainConfig, cfg.miningConfig)
 			if err != nil {
 				return err
 			}
@@ -299,12 +299,15 @@ func SpawnSequencingStage(
 
 			// create a copy of the header otherwise the executor will return "state root mismatch error"
 			header = &types.Header{
-				ParentHash: header.ParentHash,
-				Coinbase:   header.Coinbase,
-				Difficulty: header.Difficulty,
-				Number:     header.Number,
-				GasLimit:   header.GasLimit,
-				Time:       header.Time,
+				ParentHash:    header.ParentHash,
+				Coinbase:      header.Coinbase,
+				Difficulty:    header.Difficulty,
+				Number:        header.Number,
+				GasLimit:      header.GasLimit,
+				Time:          header.Time,
+				BaseFee:       header.BaseFee,
+				BlobGasUsed:   header.BlobGasUsed,
+				ExcessBlobGas: header.ExcessBlobGas,
 			}
 		}
 

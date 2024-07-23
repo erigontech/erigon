@@ -72,7 +72,7 @@ type Zk struct {
 var DefaultZkConfig = &Zk{}
 
 func (c *Zk) ShouldCountersBeUnlimited(l1Recovery bool) bool {
-	return l1Recovery || (c.DisableVirtualCounters && !c.ExecutorStrictMode && len(c.ExecutorUrls) != 0)
+	return l1Recovery || (c.DisableVirtualCounters && !c.ExecutorStrictMode && !c.HasExecutors())
 }
 
 func (c *Zk) HasExecutors() bool {

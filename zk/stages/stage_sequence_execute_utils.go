@@ -27,6 +27,7 @@ import (
 	"github.com/ledgerwatch/erigon/eth/stagedsync"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 	"github.com/ledgerwatch/erigon/ethdb/prune"
+	"github.com/ledgerwatch/erigon/params"
 	db2 "github.com/ledgerwatch/erigon/smt/pkg/db"
 	smtNs "github.com/ledgerwatch/erigon/smt/pkg/smt"
 	"github.com/ledgerwatch/erigon/turbo/services"
@@ -83,6 +84,7 @@ type SequenceBlockCfg struct {
 	stream           *datastreamer.StreamServer
 	datastreamServer *server.DataStreamServer
 	zk               *ethconfig.Zk
+	miningConfig     *params.MiningConfig
 
 	txPool   *txpool.TxPool
 	txPoolDb kv.RwDB
@@ -108,6 +110,7 @@ func StageSequenceBlocksCfg(
 	agg *libstate.Aggregator,
 	stream *datastreamer.StreamServer,
 	zk *ethconfig.Zk,
+	miningConfig *params.MiningConfig,
 
 	txPool *txpool.TxPool,
 	txPoolDb kv.RwDB,
@@ -133,6 +136,7 @@ func StageSequenceBlocksCfg(
 		stream:           stream,
 		datastreamServer: server.NewDataStreamServer(stream, chainConfig.ChainID.Uint64()),
 		zk:               zk,
+		miningConfig:     miningConfig,
 		txPool:           txPool,
 		txPoolDb:         txPoolDb,
 	}
@@ -240,7 +244,7 @@ func prepareForkId(lastBatch, executionAt uint64, hermezDb forkDb) (uint64, erro
 	return latest, nil
 }
 
-func prepareHeader(tx kv.RwTx, previousBlockNumber, deltaTimestamp, forcedTimestamp, forkId uint64, coinbase common.Address) (*types.Header, *types.Block, error) {
+func prepareHeader(tx kv.RwTx, previousBlockNumber, deltaTimestamp, forcedTimestamp, forkId uint64, coinbase common.Address, chainConfig *chain.Config, miningConfig *params.MiningConfig) (*types.Header, *types.Block, error) {
 	parentBlock, err := rawdb.ReadBlockByNumber(tx, previousBlockNumber)
 	if err != nil {
 		return nil, nil, err
@@ -261,14 +265,20 @@ func prepareHeader(tx kv.RwTx, previousBlockNumber, deltaTimestamp, forcedTimest
 		}
 	}
 
-	return &types.Header{
-		ParentHash: parentBlock.Hash(),
-		Coinbase:   coinbase,
-		Difficulty: blockDifficulty,
-		Number:     new(big.Int).SetUint64(previousBlockNumber + 1),
-		GasLimit:   utils.GetBlockGasLimitForFork(forkId),
-		Time:       newBlockTimestamp,
-	}, parentBlock, nil
+	var targetGas uint64
+
+	if chainConfig.IsNormalcy(previousBlockNumber + 1) {
+		targetGas = miningConfig.GasLimit
+	}
+
+	header := core.MakeEmptyHeader(parentBlock.Header(), chainConfig, newBlockTimestamp, &targetGas)
+
+	if !chainConfig.IsNormalcy(previousBlockNumber + 1) {
+		header.GasLimit = utils.GetBlockGasLimitForFork(forkId)
+	}
+
+	header.Coinbase = coinbase
+	return header, parentBlock, nil
 }
 
 func prepareL1AndInfoTreeRelatedStuff(sdb *stageDb, decodedBlock *zktx.DecodedBatchL2Data, l1Recovery bool, proposedTimestamp uint64) (uint64, *zktypes.L1InfoTreeUpdate, uint64, common.Hash, common.Hash, bool, error) {
@@ -463,9 +473,16 @@ type BlockDataChecker struct {
 	counter uint64 // counter amount of bytes
 }
 
-func NewBlockDataChecker() *BlockDataChecker {
+func NewBlockDataChecker(unlimitedData bool) *BlockDataChecker {
+	var limit uint64
+	if unlimitedData {
+		limit = math.MaxUint64
+	} else {
+		limit = LIMIT_120_KB
+	}
+
 	return &BlockDataChecker{
-		limit:   LIMIT_120_KB,
+		limit:   limit,
 		counter: 0,
 	}
 }

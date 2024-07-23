@@ -7,6 +7,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/ledgerwatch/erigon-lib/chain"
 	"github.com/ledgerwatch/erigon-lib/common"
 
 	"github.com/ledgerwatch/erigon-lib/kv"
@@ -14,6 +15,7 @@ import (
 	ethTypes "github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/eth/stagedsync"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
+	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/zk"
 	"github.com/ledgerwatch/erigon/zk/datastream/types"
 	"github.com/ledgerwatch/erigon/zk/erigon_db"
@@ -33,7 +35,7 @@ const (
 )
 
 type ErigonDb interface {
-	WriteHeader(batchNo *big.Int, blockHash common.Hash, stateRoot, txHash, parentHash common.Hash, coinbase common.Address, ts, gasLimit uint64) (*ethTypes.Header, error)
+	WriteHeader(batchNo *big.Int, blockHash common.Hash, stateRoot, txHash, parentHash common.Hash, coinbase common.Address, ts, gasLimit uint64, chainConfig *chain.Config) (*ethTypes.Header, error)
 	WriteBody(batchNo *big.Int, headerHash common.Hash, txs []ethTypes.Transaction) error
 }
 
@@ -86,14 +88,18 @@ type BatchesCfg struct {
 	blockRoutineStarted bool
 	dsClient            DatastreamClient
 	zkCfg               *ethconfig.Zk
+	chainConfig         *chain.Config
+	miningConfig        *params.MiningConfig
 }
 
-func StageBatchesCfg(db kv.RwDB, dsClient DatastreamClient, zkCfg *ethconfig.Zk) BatchesCfg {
+func StageBatchesCfg(db kv.RwDB, dsClient DatastreamClient, zkCfg *ethconfig.Zk, chainConfig *chain.Config, miningConfig *params.MiningConfig) BatchesCfg {
 	return BatchesCfg{
 		db:                  db,
 		blockRoutineStarted: false,
 		dsClient:            dsClient,
 		zkCfg:               zkCfg,
+		chainConfig:         chainConfig,
+		miningConfig:        miningConfig,
 	}
 }
 
@@ -340,7 +346,7 @@ LOOP:
 				l2Block.ParentHash = previousHash
 			}
 
-			if err := writeL2Block(eriDb, hermezDb, &l2Block, highestL1InfoTreeIndex); err != nil {
+			if err := writeL2Block(eriDb, hermezDb, &l2Block, highestL1InfoTreeIndex, cfg.chainConfig, cfg.miningConfig); err != nil {
 				return fmt.Errorf("writeL2Block error: %v", err)
 			}
 			dsClientProgress.Store(l2Block.L2BlockNumber)
@@ -756,7 +762,7 @@ func PruneBatchesStage(s *stagedsync.PruneState, tx kv.RwTx, cfg BatchesCfg, ctx
 
 // writeL2Block writes L2Block to ErigonDb and HermezDb
 // writes header, body, forkId and blockBatch
-func writeL2Block(eriDb ErigonDb, hermezDb HermezDb, l2Block *types.FullL2Block, highestL1InfoTreeIndex uint64) error {
+func writeL2Block(eriDb ErigonDb, hermezDb HermezDb, l2Block *types.FullL2Block, highestL1InfoTreeIndex uint64, chainConfig *chain.Config, miningConfig *params.MiningConfig) error {
 	bn := new(big.Int).SetUint64(l2Block.L2BlockNumber)
 	txs := make([]ethTypes.Transaction, 0, len(l2Block.L2Txs))
 	for _, transaction := range l2Block.L2Txs {
@@ -781,9 +787,15 @@ func writeL2Block(eriDb ErigonDb, hermezDb HermezDb, l2Block *types.FullL2Block,
 	txCollection := ethTypes.Transactions(txs)
 	txHash := ethTypes.DeriveSha(txCollection)
 
-	gasLimit := utils.GetBlockGasLimitForFork(l2Block.ForkId)
+	var gasLimit uint64
 
-	_, err := eriDb.WriteHeader(bn, l2Block.L2Blockhash, l2Block.StateRoot, txHash, l2Block.ParentHash, l2Block.Coinbase, uint64(l2Block.Timestamp), gasLimit)
+	if !chainConfig.IsNormalcy(l2Block.L2BlockNumber) {
+		gasLimit = utils.GetBlockGasLimitForFork(l2Block.ForkId)
+	} else {
+		gasLimit = miningConfig.GasLimit
+	}
+
+	_, err := eriDb.WriteHeader(bn, l2Block.L2Blockhash, l2Block.StateRoot, txHash, l2Block.ParentHash, l2Block.Coinbase, uint64(l2Block.Timestamp), gasLimit, chainConfig)
 	if err != nil {
 		return fmt.Errorf("write header error: %v", err)
 	}

@@ -1123,10 +1123,8 @@ func addTxsOnNewBlock(blockNum uint64, cacheView kvcache.CacheView, stateChanges
 
 func (p *TxPool) setBaseFee(baseFee uint64) (uint64, bool) {
 	changed := false
-	if baseFee > 0 {
-		changed = baseFee != p.pendingBaseFee.Load()
-		p.pendingBaseFee.Store(baseFee)
-	}
+	changed = baseFee != p.pendingBaseFee.Load()
+	p.pendingBaseFee.Store(baseFee)
 	return p.pendingBaseFee.Load(), changed
 }
 

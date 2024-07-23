@@ -191,11 +191,13 @@ func WriteGenesisBlock(tx kv.RwTx, genesis *types.Genesis, overridePragueTime *b
 	}
 
 	// set unwanted forks block to max number, so they are not activated
-	maxInt := new(big.Int).SetUint64(math.MaxUint64)
-	newCfg.LondonBlock = maxInt
-	newCfg.ShanghaiTime = maxInt
-	newCfg.CancunTime = maxInt
-	newCfg.PragueTime = maxInt
+	if newCfg.NormalcyBlock != nil && newCfg.NormalcyBlock.Cmp(big.NewInt(0)) != 0 {
+		maxInt := new(big.Int).SetUint64(math.MaxUint64)
+		newCfg.LondonBlock = maxInt
+		newCfg.ShanghaiTime = maxInt
+		newCfg.CancunTime = maxInt
+		newCfg.PragueTime = maxInt
+	}
 
 	return newCfg, storedBlock, nil
 }

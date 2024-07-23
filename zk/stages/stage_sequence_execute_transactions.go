@@ -9,7 +9,6 @@ import (
 	"github.com/ledgerwatch/erigon-lib/common/length"
 	"github.com/ledgerwatch/erigon-lib/kv"
 
-	"bytes"
 	"io"
 
 	mapset "github.com/deckarep/golang-set/v2"
@@ -19,7 +18,6 @@ import (
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/core/vm"
 	"github.com/ledgerwatch/erigon/core/vm/evmtypes"
-	"github.com/ledgerwatch/erigon/rlp"
 	"github.com/ledgerwatch/erigon/zk/hermez_db"
 	zktx "github.com/ledgerwatch/erigon/zk/tx"
 	"github.com/ledgerwatch/erigon/zk/utils"
@@ -152,12 +150,8 @@ func getNextL1BatchData(batchNumber uint64, forkId uint64, hermezDb *hermez_db.H
 
 func extractTransactionsFromSlot(slot *types2.TxsRlp) ([]types.Transaction, error) {
 	transactions := make([]types.Transaction, 0, len(slot.Txs))
-	reader := bytes.NewReader([]byte{})
-	stream := new(rlp.Stream)
 	for idx, txBytes := range slot.Txs {
-		reader.Reset(txBytes)
-		stream.Reset(reader, uint64(len(txBytes)))
-		transaction, err := types.DecodeRLPTransaction(stream, false)
+		transaction, err := types.DecodeTransaction(txBytes)
 		if err == io.EOF {
 			continue
 		}
