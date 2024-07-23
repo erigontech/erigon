@@ -503,9 +503,10 @@ func setEmbeddedRpcDaemon(ctx *cli.Context, cfg *nodecfg.Config, logger log.Logg
 		StateCache:          kvcache.DefaultCoherentConfig,
 		RPCSlowLogThreshold: ctx.Duration(utils.RPCSlowFlag.Name),
 
-		DataStreamPort: ctx.Int(utils.DataStreamPort.Name),
-		DataStreamHost: ctx.String(utils.DataStreamHost.Name),
-		L2RpcUrl:       ctx.String(utils.L2RpcUrlFlag.Name),
+		DataStreamPort:         ctx.Int(utils.DataStreamPort.Name),
+		DataStreamHost:         ctx.String(utils.DataStreamHost.Name),
+		DataStreamWriteTimeout: ctx.Duration(utils.DataStreamWriteTimeout.Name),
+		L2RpcUrl:               ctx.String(utils.L2RpcUrlFlag.Name),
 	}
 
 	if ctx.IsSet(utils.HttpCompressionFlag.Name) {

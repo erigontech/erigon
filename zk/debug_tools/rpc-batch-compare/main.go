@@ -10,8 +10,9 @@ import (
 	"net/http"
 	"os"
 
-	"github.com/google/go-cmp/cmp"
 	"io"
+
+	"github.com/google/go-cmp/cmp"
 )
 
 func getBatchNumber(url string) (*big.Int, error) {
@@ -162,6 +163,7 @@ func main() {
 	log.Printf("Skipping %d batches\n", *skip)
 
 	for i := 0; i < *numBatches; i++ {
+		log.Println("Checking batch", i+1, "of", *numBatches)
 		batchNumber := new(big.Int).Sub(startBatch, big.NewInt(int64(i**skip)))
 		diff, err := compareBatches(*erigonURL, *legacyURL, batchNumber)
 		if err != nil {

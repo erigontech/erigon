@@ -206,7 +206,12 @@ func (s *SMT) SetContractStorage(ethAddr string, storage map[string]string, prog
 func (s *SMT) SetStorage(ctx context.Context, logPrefix string, accChanges map[libcommon.Address]*accounts.Account, codeChanges map[libcommon.Address]string, storageChanges map[libcommon.Address]map[string]string) ([]*utils.NodeKey, []*utils.NodeValue8, error) {
 	var isDelete bool
 
-	initialCapacity := len(accChanges) + len(codeChanges) + len(storageChanges)
+	storageChangesInitialCapacity := 0
+	for _, storage := range storageChanges {
+		storageChangesInitialCapacity += len(storage)
+	}
+
+	initialCapacity := len(accChanges)*2 + len(codeChanges)*2 + storageChangesInitialCapacity
 	keysBatchStorage := make([]*utils.NodeKey, 0, initialCapacity)
 	valuesBatchStorage := make([]*utils.NodeValue8, 0, initialCapacity)
 

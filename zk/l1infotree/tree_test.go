@@ -128,3 +128,33 @@ func TestAddLeaf2(t *testing.T) {
 		require.Equal(t, testVector.NewRoot, newRoot)
 	}
 }
+
+func TestLeafExists(t *testing.T) {
+	data, err := os.ReadFile("../tests/vectors/l1infotree/proof-vectors.json")
+	require.NoError(t, err)
+	var mtTestVectors []l1infotree2.L1InfoTreeProof
+	err = json.Unmarshal(data, &mtTestVectors)
+	require.NoError(t, err)
+	testVector := mtTestVectors[3]
+	var leaves [][32]byte
+	mt, err := l1infotree.NewL1InfoTree(uint8(32), leaves)
+	require.NoError(t, err)
+	for _, leaf := range testVector.Leaves {
+		_, count, _ := mt.GetCurrentRootCountAndSiblings()
+		_, err := mt.AddLeaf(count, leaf)
+		require.NoError(t, err)
+	}
+	log.Debugf("%d leaves added successfully", len(testVector.Leaves))
+	root, _, _ := mt.GetCurrentRootCountAndSiblings()
+	require.Equal(t, testVector.Root, root)
+	log.Debug("Final root: ", root)
+
+	for _, leaf := range testVector.Leaves {
+		exists := mt.LeafExists(leaf)
+		require.True(t, exists)
+	}
+
+	nonExistentLeaf := common.HexToHash("0x1234")
+	exists := mt.LeafExists(nonExistentLeaf)
+	require.False(t, exists)
+}

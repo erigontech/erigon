@@ -579,7 +579,7 @@ func GenesisToBlock(g *types.Genesis, tmpDir string, logger log.Logger) (*types.
 
 	var err error
 	sparseDb := eridb.NewMemDb()
-	sparseTree := smt.NewSMT(sparseDb)
+	sparseTree := smt.NewSMT(sparseDb, false)
 	go func() { // we may run inside write tx, can't open 2nd write tx in same goroutine
 		// TODO(yperbasis): use memdb.MemoryMutation instead
 		defer wg.Done()

@@ -141,6 +141,13 @@ func TestScalarToArrayBig(t *testing.T) {
 	}
 }
 
+func BenchmarkScalarToArrayBig(b *testing.B) {
+	scalar := big.NewInt(0x1234567890ABCDEF)
+	for i := 0; i < b.N; i++ {
+		ScalarToArrayBig(scalar)
+	}
+}
+
 func TestArrayBigToScalar(t *testing.T) {
 	scalar := big.NewInt(0x1234567890ABCDEF)
 

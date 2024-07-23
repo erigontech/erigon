@@ -90,7 +90,8 @@ type HttpCfg struct {
 	RPCSlowLogThreshold time.Duration
 
 	// zkevm
-	DataStreamPort int
-	DataStreamHost string
-	L2RpcUrl       string
+	DataStreamPort         int
+	DataStreamHost         string
+	DataStreamWriteTimeout time.Duration
+	L2RpcUrl               string
 }

@@ -125,8 +125,10 @@ func CheckChangeSets(ctx context.Context, genesis *types.Genesis, blockNum uint6
 
 	engine := initConsensusEngine(ctx, chainConfig, allSnapshots, blockReader, logger)
 
-	for !interrupt {
+	reader := state.NewPlainState(historyTx, blockNum, systemcontracts.SystemContractCodeLookup[chainConfig.ChainName])
+	defer reader.Close()
 
+	for !interrupt {
 		if blockNum > execAt {
 			log.Warn(fmt.Sprintf("Force stop: because trying to check blockNumber=%d higher than Exec stage=%d", blockNum, execAt))
 			break
@@ -148,7 +150,7 @@ func CheckChangeSets(ctx context.Context, genesis *types.Genesis, blockNum uint6
 		if b == nil {
 			break
 		}
-		reader := state.NewPlainState(historyTx, blockNum, systemcontracts.SystemContractCodeLookup[chainConfig.ChainName])
+		reader.SetBlockNr(blockNum)
 		//reader.SetTrace(blockNum == uint64(block))
 		intraBlockState := state.New(reader)
 		csw := state.NewChangeSetWriterPlain(nil /* db */, blockNum)

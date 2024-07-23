@@ -185,7 +185,7 @@ func (sdb *stageDb) SetTx(tx kv.RwTx) {
 	sdb.hermezDb = hermez_db.NewHermezDb(tx)
 	sdb.eridb = db2.NewEriDb(tx)
 	sdb.stateReader = state.NewPlainStateReader(tx)
-	sdb.smt = smtNs.NewSMT(sdb.eridb)
+	sdb.smt = smtNs.NewSMT(sdb.eridb, false)
 }
 
 type nextBatchL1Data struct {

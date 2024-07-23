@@ -333,6 +333,7 @@ func runTest(t *testing.T, blockReader services.FullBlockReader, test vector, er
 				transaction,
 				&header.GasUsed,
 				zktypes.EFFECTIVE_GAS_PRICE_PERCENTAGE_MAXIMUM,
+				true,
 			)
 
 			if err != nil {

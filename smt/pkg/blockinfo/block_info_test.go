@@ -9,6 +9,7 @@ import (
 	"github.com/ledgerwatch/erigon/core/types"
 	ethTypes "github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/smt/pkg/smt"
+	smtutils "github.com/ledgerwatch/erigon/smt/pkg/utils"
 	"github.com/ledgerwatch/erigon/zk/utils"
 )
 
@@ -81,7 +82,7 @@ func TestBlockInfoHeader(t *testing.T) {
 		ger := common.HexToHash(test.FinalGER)
 		l1BlochHash := common.HexToHash(test.L1BlochHash)
 
-		err := infoTree.InitBlockHeader(
+		keys, vals, err := infoTree.GenerateBlockHeader(
 			&blockHash,
 			&coinbaseAddress,
 			test.NewBlockNumber,
@@ -94,10 +95,14 @@ func TestBlockInfoHeader(t *testing.T) {
 			t.Fatal(err)
 		}
 
-		root := common.BigToHash(infoTree.GetRoot()).Hex()
+		root, err := infoTree.smt.InsertBatch(context.Background(), "", keys, vals, nil, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		rootHash := common.BigToHash(root.NewRootScalar.ToBigInt()).Hex()
 
-		if root != test.FinalBlockInfoRoot {
-			t.Fatalf("expected root %s, got %s", test.FinalBlockInfoRoot, root)
+		if rootHash != test.FinalBlockInfoRoot {
+			t.Fatalf("expected root %s, got %s", test.FinalBlockInfoRoot, rootHash)
 		}
 	}
 }
@@ -197,22 +202,7 @@ func TestSetBlockTx(t *testing.T) {
 
 	for _, test := range tests {
 		infoTree := NewBlockInfoTree()
-
-		root, err := infoTree.SetBlockTx(
-			&test.l2TxHash,
-			test.txIndex,
-			&test.receipt,
-			test.logIndex,
-			test.cumulativeGasUsed,
-			test.effectivePercentage,
-		)
-		if err != nil {
-			t.Fatal(err)
-		}
-		rootHex := common.BigToHash(root).Hex()
-
-		infoTree2 := NewBlockInfoTree()
-		keys, vals, err := infoTree2.GenerateBlockTxKeysVals(
+		keys, vals, err := infoTree.GenerateBlockTxKeysVals(
 			&test.l2TxHash,
 			test.txIndex,
 			&test.receipt,
@@ -224,15 +214,12 @@ func TestSetBlockTx(t *testing.T) {
 			t.Fatal(err)
 		}
 
-		root2, err2 := infoTree2.smt.InsertBatch(context.Background(), "", keys, vals, nil, nil)
+		root, err2 := infoTree.smt.InsertBatch(context.Background(), "", keys, vals, nil, nil)
 		if err2 != nil {
 			t.Fatal(err2)
 		}
 
-		rootHex2 := common.BigToHash(root2.NewRootScalar.ToBigInt()).Hex()
-		if rootHex != rootHex2 {
-			t.Fatalf("generate different root, raw method root is %s, new method root %s", rootHex, rootHex2)
-		}
+		rootHex := common.BigToHash(root.NewRootScalar.ToBigInt()).Hex()
 
 		if rootHex != test.finalBlockInfoRoot {
 			t.Fatalf("expected root %s, got %s", test.finalBlockInfoRoot, rootHex)
@@ -260,14 +247,21 @@ func TestBlockComulativeGasUsed(t *testing.T) {
 	for i, test := range tests {
 		infoTree := NewBlockInfoTree()
 
-		root, err := infoTree.SetBlockGasUsed(test.gasUsed)
+		key, val, err := generateBlockGasUsed(test.gasUsed)
 		if err != nil {
 			t.Fatal(err)
 		}
-		actualRoot := common.BigToHash(root).Hex()
+
+		root, err2 := infoTree.smt.InsertKA(*key, smtutils.NodeValue8ToBigInt(val))
+		if err2 != nil {
+			t.Fatal(err2)
+		}
+
+		rootHex := common.BigToHash(root.NewRootScalar.ToBigInt()).Hex()
+
 		// root taken from JS implementation
-		if actualRoot != test.expectedRoot {
-			t.Fatalf("Test %d expected root %s, got %s", i+1, test.expectedRoot, actualRoot)
+		if rootHex != test.expectedRoot {
+			t.Fatalf("Test %d expected root %s, got %s", i+1, test.expectedRoot, rootHex)
 		}
 	}
 }
@@ -288,15 +282,20 @@ func TestSetL2BlockHash(t *testing.T) {
 	}
 
 	for i, test := range tests {
-		smt := smt.NewSMT(nil)
 		blockHash := common.HexToHash(test.blockHash)
 
-		root, err := setL2BlockHash(smt, &blockHash)
+		key, val, err := generateL2BlockHash(&blockHash)
 		if err != nil {
 			t.Fatal(err)
 		}
-		actualRoot := common.BigToHash(root).Hex()
-		// root taken from JS implementation
+		smt := smt.NewSMT(nil, true)
+
+		root, err2 := smt.InsertKA(*key, smtutils.NodeValue8ToBigInt(val))
+		if err2 != nil {
+			t.Fatal(err2)
+		}
+
+		actualRoot := common.BigToHash(root.NewRootScalar.ToBigInt()).Hex()
 		if actualRoot != test.expectedRoot {
 			t.Fatalf("Test %d expected root %s, got %s", i+1, test.expectedRoot, actualRoot)
 		}
@@ -315,15 +314,19 @@ func TestSetCoinbase(t *testing.T) {
 	}
 
 	for i, test := range tests {
-		smt := smt.NewSMT(nil)
+		smt := smt.NewSMT(nil, true)
 		coinbaseAddress := common.HexToAddress(test.coinbaseAddress)
 
-		root, err := setCoinbase(smt, &coinbaseAddress)
+		key, val, err := generateCoinbase(&coinbaseAddress)
 		if err != nil {
 			t.Fatal(err)
 		}
-		actualRoot := common.BigToHash(root).Hex()
-		// root taken from JS implementation
+		root, err2 := smt.InsertKA(*key, smtutils.NodeValue8ToBigInt(val))
+		if err2 != nil {
+			t.Fatal(err2)
+		}
+
+		actualRoot := common.BigToHash(root.NewRootScalar.ToBigInt()).Hex()
 		if actualRoot != test.expectedRoot {
 			t.Fatalf("Test %d expected root %s, got %s", i+1, test.expectedRoot, actualRoot)
 		}
@@ -345,13 +348,18 @@ func TestSetBlockNumber(t *testing.T) {
 	}
 
 	for i, test := range tests {
-		smt := smt.NewSMT(nil)
+		smt := smt.NewSMT(nil, true)
 
-		root, err := setBlockNumber(smt, test.blockNum)
+		key, val, err := generateBlockNumber(test.blockNum)
 		if err != nil {
 			t.Fatal(err)
 		}
-		actualRoot := common.BigToHash(root).Hex()
+		root, err2 := smt.InsertKA(*key, smtutils.NodeValue8ToBigInt(val))
+		if err2 != nil {
+			t.Fatal(err2)
+		}
+
+		actualRoot := common.BigToHash(root.NewRootScalar.ToBigInt()).Hex()
 		// root taken from JS implementation
 		if actualRoot != test.expectedRoot {
 			t.Fatalf("Test %d expected root %s, got %s", i+1, test.expectedRoot, actualRoot)
@@ -371,13 +379,18 @@ func TestSetGasLimit(t *testing.T) {
 	}
 
 	for i, test := range tests {
-		smt := smt.NewSMT(nil)
+		smt := smt.NewSMT(nil, true)
 
-		root, err := setGasLimit(smt, test.gasLimit)
+		key, val, err := generateGasLimit(test.gasLimit)
 		if err != nil {
 			t.Fatal(err)
 		}
-		actualRoot := common.BigToHash(root).Hex()
+		root, err2 := smt.InsertKA(*key, smtutils.NodeValue8ToBigInt(val))
+		if err2 != nil {
+			t.Fatal(err2)
+		}
+
+		actualRoot := common.BigToHash(root.NewRootScalar.ToBigInt()).Hex()
 		// root taken from JS implementation
 		if actualRoot != test.expectedRoot {
 			t.Fatalf("Test %d expected root %s, got %s", i+1, test.expectedRoot, actualRoot)
@@ -397,13 +410,18 @@ func TestSetTimestamp(t *testing.T) {
 	}
 
 	for i, test := range tests {
-		smt := smt.NewSMT(nil)
+		smt := smt.NewSMT(nil, true)
 
-		root, err := setTimestamp(smt, test.timestamp)
+		key, val, err := generateTimestamp(test.timestamp)
 		if err != nil {
 			t.Fatal(err)
 		}
-		actualRoot := common.BigToHash(root).Hex()
+		root, err2 := smt.InsertKA(*key, smtutils.NodeValue8ToBigInt(val))
+		if err2 != nil {
+			t.Fatal(err2)
+		}
+
+		actualRoot := common.BigToHash(root.NewRootScalar.ToBigInt()).Hex()
 		// root taken from JS implementation
 		if actualRoot != test.expectedRoot {
 			t.Fatalf("Test %d expected root %s, got %s", i+1, test.expectedRoot, actualRoot)
@@ -429,14 +447,19 @@ func TestSetGer(t *testing.T) {
 	}
 
 	for i, test := range tests {
-		smt := smt.NewSMT(nil)
+		smt := smt.NewSMT(nil, true)
 		ger := common.HexToHash(test.ger)
 
-		root, err := setGer(smt, &ger)
+		key, val, err := generateGer(&ger)
 		if err != nil {
 			t.Fatal(err)
 		}
-		actualRoot := common.BigToHash(root).Hex()
+		root, err2 := smt.InsertKA(*key, smtutils.NodeValue8ToBigInt(val))
+		if err2 != nil {
+			t.Fatal(err2)
+		}
+
+		actualRoot := common.BigToHash(root.NewRootScalar.ToBigInt()).Hex()
 		// root taken from JS implementation
 		if actualRoot != test.expectedRoot {
 			t.Fatalf("Test %d expected root %s, got %s", i+1, test.expectedRoot, actualRoot)
@@ -462,14 +485,19 @@ func TestSetL1BlockHash(t *testing.T) {
 	}
 
 	for i, test := range tests {
-		smt := smt.NewSMT(nil)
+		smt := smt.NewSMT(nil, true)
 		l1BlockHash := common.HexToHash(test.l1BlockHash)
 
-		root, err := setL1BlockHash(smt, &l1BlockHash)
+		key, val, err := generateL1BlockHash(&l1BlockHash)
 		if err != nil {
 			t.Fatal(err)
 		}
-		actualRoot := common.BigToHash(root).Hex()
+		root, err2 := smt.InsertKA(*key, smtutils.NodeValue8ToBigInt(val))
+		if err2 != nil {
+			t.Fatal(err2)
+		}
+
+		actualRoot := common.BigToHash(root.NewRootScalar.ToBigInt()).Hex()
 		// root taken from JS implementation
 		if actualRoot != test.expectedRoot {
 			t.Fatalf("Test %d expected root %s, got %s", i+1, test.expectedRoot, actualRoot)
@@ -478,96 +506,119 @@ func TestSetL1BlockHash(t *testing.T) {
 }
 
 func TestSetL2TxHash(t *testing.T) {
-	smt := smt.NewSMT(nil)
+	smt := smt.NewSMT(nil, true)
 	txIndex := big.NewInt(1)
 	l2TxHash := common.HexToHash("0x000000000000000000000000000000005Ca1aB1E").Big()
 
-	root, err := setL2TxHash(smt, txIndex, l2TxHash)
+	key, val, err := generateL2TxHash(txIndex, l2TxHash)
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	// root taken from JS implementation
-	expectedRoot := "a9127a157cee3cd2452a194e4efc2f8a5612cfc36c66e768700727ede4d0e2e6"
-	actualRoot := root.Text(16)
+	root, err2 := smt.InsertKA(*key, smtutils.NodeValue8ToBigInt(val))
+	if err2 != nil {
+		t.Fatal(err2)
+	}
 
+	actualRoot := common.BigToHash(root.NewRootScalar.ToBigInt()).Hex()
+	// root taken from JS implementation
+	expectedRoot := "0xa9127a157cee3cd2452a194e4efc2f8a5612cfc36c66e768700727ede4d0e2e6"
 	if actualRoot != expectedRoot {
 		t.Fatalf("expected root %s, got %s", expectedRoot, actualRoot)
 	}
 }
 
 func TestSetTxStatus(t *testing.T) {
-	smt := smt.NewSMT(nil)
+	smt := smt.NewSMT(nil, true)
 	txIndex := big.NewInt(1)
 	status := common.HexToHash("0x000000000000000000000000000000005Ca1aB1E").Big()
 
-	root, err := setTxStatus(smt, txIndex, status)
+	key, val, err := generateTxStatus(txIndex, status)
 	if err != nil {
 		t.Fatal(err)
 	}
+	root, err2 := smt.InsertKA(*key, smtutils.NodeValue8ToBigInt(val))
+	if err2 != nil {
+		t.Fatal(err2)
+	}
+
+	actualRoot := common.BigToHash(root.NewRootScalar.ToBigInt()).Hex()
 
 	// root taken from JS implementation
-	expectedRoot := "7cb6a0928f5165a422cfbe5f93d1cc9eda3f686715639823f6087818465fcbb8"
-	actualRoot := root.Text(16)
-
+	expectedRoot := "0x7cb6a0928f5165a422cfbe5f93d1cc9eda3f686715639823f6087818465fcbb8"
 	if actualRoot != expectedRoot {
 		t.Fatalf("expected root %s, got %s", expectedRoot, actualRoot)
 	}
 }
 
 func TestSetCumulativeGasUsed(t *testing.T) {
-	smt := smt.NewSMT(nil)
+	smt := smt.NewSMT(nil, true)
 	txIndex := big.NewInt(1)
 	cgu := common.HexToHash("0x000000000000000000000000000000005Ca1aB1E").Big()
 
-	root, err := setCumulativeGasUsed(smt, txIndex, cgu)
+	key, val, err := generateCumulativeGasUsed(txIndex, cgu)
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	// root taken from JS implementation
-	expectedRoot := "c07ff46f07be5b81465c30848202acc4bf82805961d8a9f9ffe74e820e4bca68"
-	actualRoot := root.Text(16)
+	root, err2 := smt.InsertKA(*key, smtutils.NodeValue8ToBigInt(val))
+	if err2 != nil {
+		t.Fatal(err2)
+	}
 
+	actualRoot := common.BigToHash(root.NewRootScalar.ToBigInt()).Hex()
+
+	// root taken from JS implementation
+	expectedRoot := "0xc07ff46f07be5b81465c30848202acc4bf82805961d8a9f9ffe74e820e4bca68"
 	if actualRoot != expectedRoot {
 		t.Fatalf("expected root %s, got %s", expectedRoot, actualRoot)
 	}
 }
 
 func TestSetTxEffectivePercentage(t *testing.T) {
-	smt := smt.NewSMT(nil)
+	smt := smt.NewSMT(nil, true)
 	txIndex := big.NewInt(1)
 	egp := common.HexToHash("0x000000000000000000000000000000005Ca1aB1E").Big()
 
-	root, err := setTxEffectivePercentage(smt, txIndex, egp)
+	key, val, err := generateTxEffectivePercentage(txIndex, egp)
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	// root taken from JS implementation
-	expectedRoot := "f6b3130ecdd23bd9e47c4dda0fdde6bd0e0446c6d6927778e57e80016fa9fa23"
-	actualRoot := root.Text(16)
+	root, err2 := smt.InsertKA(*key, smtutils.NodeValue8ToBigInt(val))
+	if err2 != nil {
+		t.Fatal(err2)
+	}
 
+	actualRoot := common.BigToHash(root.NewRootScalar.ToBigInt()).Hex()
+
+	// root taken from JS implementation
+	expectedRoot := "0xf6b3130ecdd23bd9e47c4dda0fdde6bd0e0446c6d6927778e57e80016fa9fa23"
 	if actualRoot != expectedRoot {
 		t.Fatalf("expected root %s, got %s", expectedRoot, actualRoot)
 	}
 }
 
 func TestSetTxLogs(t *testing.T) {
-	smt := smt.NewSMT(nil)
+	smt := smt.NewSMT(nil, true)
 	txIndex := big.NewInt(1)
 	logIndex := big.NewInt(1)
 	log := common.HexToHash("0x000000000000000000000000000000005Ca1aB1E").Big()
 
-	root, err := setTxLog(smt, txIndex, logIndex, log)
+	key, val, err := generateTxLog(txIndex, logIndex, log)
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	// root taken from JS implementation
-	expectedRoot := "aff38141ae4538baf61f08efe3019ef2d219f30b98b1d40a9813d502f6bacb12"
-	actualRoot := root.Text(16)
+	root, err2 := smt.InsertKA(*key, smtutils.NodeValue8ToBigInt(val))
+	if err2 != nil {
+		t.Fatal(err2)
+	}
 
+	actualRoot := common.BigToHash(root.NewRootScalar.ToBigInt()).Hex()
+
+	// root taken from JS implementation
+	expectedRoot := "0xaff38141ae4538baf61f08efe3019ef2d219f30b98b1d40a9813d502f6bacb12"
 	if actualRoot != expectedRoot {
 		t.Fatalf("expected root %s, got %s", expectedRoot, actualRoot)
 	}

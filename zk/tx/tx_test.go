@@ -318,6 +318,21 @@ func TestComputeL2TxHashScenarios(t *testing.T) {
 
 }
 
+func BenchmarkComputeL2TxHashSt(b *testing.B) {
+	chainId := big.NewInt(2440)
+	nonce := uint64(87)
+	gasPrice := uint256.NewInt(493000000)
+	gasLimit := uint64(100000)
+	value := uint256.NewInt(100)
+	data := []byte{}
+	to := common.HexToAddress("0x5751D5b29dA14d5C334A9453cF04181f417aBe4c")
+	from := common.HexToAddress("0x5751D5b29dA14d5C334A9453cF04181f417aBe4c")
+
+	for i := 0; i < b.N; i++ {
+		_, _ = ComputeL2TxHash(chainId, value, gasPrice, nonce, gasLimit, &to, &from, data)
+	}
+}
+
 type testCase struct {
 	param       interface{}
 	paramLength int
@@ -358,6 +373,12 @@ func TestFormatL2TxHashParam(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func BenchmarkFormatL2TxHashParam(b *testing.B) {
+	for i := 0; i < b.N; i++ {
+		_, _ = formatL2TxHashParam(uint256.NewInt(1000), 8)
 	}
 }
 

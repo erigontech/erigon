@@ -165,7 +165,7 @@ func checkBlocks(erigonNodeURL, compareNodeURL string, maxBlockDiff int) (int64,
 			return 0, false
 		}
 
-		lowestBlockHex := fmt.Sprintf("0x%x", lowestBlockNumber)
+		lowestBlockHex := "0x" + strconv.FormatInt(lowestBlockNumber, 16)
 
 		erigonBlock, err := getBlockByNumber(erigonNodeURL, lowestBlockHex)
 		if err != nil {

@@ -27,7 +27,7 @@ func TestSMT_Mdbx_AddRemove1Element(t *testing.T) {
 	}
 	//defer dbi.Close()
 
-	s := NewSMT(sdb)
+	s := NewSMT(sdb, false)
 
 	r, _ := s.InsertBI(big.NewInt(1), big.NewInt(2))
 	if r.Mode != "insertNotFound" {
@@ -50,7 +50,7 @@ func TestSMT_Mdbx_AddRemove3Elements(t *testing.T) {
 		t.Errorf("Failed to create temp db: %v", err)
 	}
 
-	s := NewSMT(sdb)
+	s := NewSMT(sdb, false)
 	N := 3
 	var r *SMTResponse
 
@@ -82,7 +82,7 @@ func TestSMT_Mdbx_AddRemove128Elements(t *testing.T) {
 		t.Errorf("Failed to create temp db: %v", err)
 	}
 
-	s := NewSMT(sdb)
+	s := NewSMT(sdb, false)
 	N := 128
 	var r *SMTResponse
 
@@ -163,7 +163,7 @@ func TestSMT_Mdbx_MultipleInsert(t *testing.T) {
 			tr = x
 		}
 
-		s := NewSMT(sdb)
+		s := NewSMT(sdb, false)
 
 		s.SetLastRoot(tr)
 		r, err := s.InsertBI(testCase.key, testCase.value)
@@ -217,7 +217,7 @@ func runGenesisTestMdbx(tb testing.TB, filename string) {
 		tb.Fatal("Failed to create db buckets: ", err)
 	}
 
-	smt := NewSMT(sdb)
+	smt := NewSMT(sdb, false)
 
 	for _, addr := range genesis.Genesis {
 		fmt.Println(addr.ContractName)
@@ -275,7 +275,7 @@ func runTestVectorsMdbx(t *testing.T, filename string) {
 
 	for k, tc := range testCases {
 		t.Run(strconv.Itoa(k), func(t *testing.T) {
-			smt := NewSMT(nil)
+			smt := NewSMT(nil, false)
 			for _, addr := range tc.Addresses {
 
 				bal, _ := new(big.Int).SetString(addr.Balance, 10)

@@ -272,6 +272,11 @@ func getExecRange(cfg ExecuteBlockCfg, tx kv.RwTx, stageProgress, toBlock uint64
 		return 0, 0, err
 	}
 
+	// skip if no progress
+	if prevStageProgress == 0 && toBlock == 0 {
+		return 0, 0, nil
+	}
+
 	to := prevStageProgress
 	if toBlock > 0 {
 		to = cmp.Min(prevStageProgress, toBlock)

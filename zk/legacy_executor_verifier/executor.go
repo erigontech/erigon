@@ -3,6 +3,7 @@ package legacy_executor_verifier
 import (
 	"bytes"
 	"context"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -192,14 +193,14 @@ func (e *Executor) Verify(p *Payload, request *VerifierRequest, oldStateRoot com
 		// now save the witness as a hex string along with the datastream
 		// this is to allow for easy debugging of the witness and datastream
 		witnessHexFile := path.Join(e.outputLocation, fmt.Sprintf("witness_%d.hex", request.BatchNumber))
-		witnessAsHex := fmt.Sprintf("0x%x", p.Witness)
+		witnessAsHex := "0x" + hex.EncodeToString(p.Witness)
 		err = os.WriteFile(witnessHexFile, []byte(witnessAsHex), 0644)
 		if err != nil {
 			return false, nil, err
 		}
 
 		dataStreamHexFile := path.Join(e.outputLocation, fmt.Sprintf("datastream_%d.hex", request.BatchNumber))
-		dataStreamAsHex := fmt.Sprintf("0x%x", p.DataStream)
+		dataStreamAsHex := "0x" + hex.EncodeToString(p.DataStream)
 		err = os.WriteFile(dataStreamHexFile, []byte(dataStreamAsHex), 0644)
 		if err != nil {
 			return false, nil, err

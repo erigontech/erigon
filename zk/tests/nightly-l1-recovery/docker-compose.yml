@@ -40,7 +40,7 @@ services:
 
   block-checker:
     image: golang:1.19
-    command: ["go", "run", "/repo/zk/debug_tools/nightly-block-compare-wait/main.go", "--compare=http://34.175.214.161:8505", "--compare2=http://erigon-sync:8123", "--duration=1h", "--interval=10s"]
+    command: ["go", "run", "/repo/zk/debug_tools/nightly-block-compare-wait/main.go", "--compare=http://34.175.214.161:8505", "--compare2=http://erigon-sync:8123", "--duration=3h", "--interval=10s"]
     volumes:
       - ../../../:/repo
     working_dir: /repo

@@ -11,6 +11,7 @@ var timerEnabled bool
 
 type Timer struct {
 	start     time.Time
+	elapsed   time.Duration
 	taskNames []string
 }
 
@@ -19,12 +20,10 @@ func EnableTimer(enable bool) {
 }
 
 func StartTimer(taskNames ...string) *Timer {
-	if !timerEnabled {
-		return nil
-	}
 	return &Timer{
 		start:     time.Now(),
 		taskNames: taskNames,
+		elapsed:   0,
 	}
 }
 
@@ -33,12 +32,16 @@ func (t *Timer) LogTimer() {
 		return
 	}
 
-	elapsed := time.Since(t.start)
-	logArgs := []interface{}{"duration", elapsed, "task", t.taskNames[0]}
+	t.elapsed = time.Since(t.start)
+	logMessage := fmt.Sprintf("duration: %s, task: %s", t.elapsed, t.taskNames[0])
 
 	for i, task := range t.taskNames[1:] {
-		logArgs = append(logArgs, fmt.Sprintf("subtask%d", i+1), task)
+		logMessage += fmt.Sprintf(", subtask%d: %s", i+1, task)
 	}
 
-	log.Info("[cdk-metric]", logArgs...)
+	log.Info("[cdk-metric] " + logMessage)
+}
+
+func (t *Timer) Elapsed() time.Duration {
+	return t.elapsed
 }

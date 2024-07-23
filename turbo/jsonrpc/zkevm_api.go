@@ -244,21 +244,37 @@ func (api *ZkEvmAPIImpl) GetBatchDataByNumbers(ctx context.Context, batchNumbers
 
 	hermezDb := hermez_db.NewHermezDbReader(tx)
 
+	// use inbuilt rpc.BlockNumber type to implement the 'latest' behaviour
+	// highest block/batch tied to last block synced
+	// unless the node is still syncing - in which case 'current block' is used
+	// this is the batch number of stage progress of the Finish stage
+
+	highestBlock, err := rawdb.ReadLastBlockSynced(tx)
+	if err != nil {
+		return nil, err
+	}
+
+	highestBatchNo, err := hermezDb.GetBatchNoByL2Block(highestBlock.NumberU64())
+	if err != nil {
+		return nil, err
+	}
+
+	// check sync status of node
+	syncing, err := api.ethApi.Syncing(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if syncing != nil && syncing != false {
+		bn := syncing.(map[string]interface{})["currentBlock"]
+		highestBatchNo, err = hermezDb.GetBatchNoByL2Block(uint64(bn.(hexutil.Uint64)))
+	}
+
 	bds := make([]*types.BatchDataSlim, 0, len(batchNumbers))
 
 	for _, batchNumber := range batchNumbers {
 		bd := &types.BatchDataSlim{
 			Number: uint64(batchNumber.Int64()),
 			Empty:  false,
-		}
-
-		highestBlock, err := rawdb.ReadLastBlockSynced(tx)
-		if err != nil {
-			return nil, err
-		}
-		highestBatchNo, err := hermezDb.GetBatchNoByL2Block(highestBlock.NumberU64())
-		if err != nil {
-			return nil, err
 		}
 
 		// return null if we're not at this block height yet
@@ -387,16 +403,30 @@ func (api *ZkEvmAPIImpl) GetBatchByNumber(ctx context.Context, batchNumber rpc.B
 	defer tx.Rollback()
 	hermezDb := hermez_db.NewHermezDbReader(tx)
 
+	// use inbuilt rpc.BlockNumber type to implement the 'latest' behaviour
+	// highest block/batch tied to last block synced
+	// unless the node is still syncing - in which case 'current block' is used
+	// this is the batch number of stage progress of the Finish stage
+
 	highestBlock, err := rawdb.ReadLastBlockSynced(tx)
 	if err != nil {
 		return nil, err
 	}
+
 	highestBatchNo, err := hermezDb.GetBatchNoByL2Block(highestBlock.NumberU64())
 	if err != nil {
 		return nil, err
 	}
 
-	// return null if we're not at this block height yet
+	// check sync status of node
+	syncing, err := api.ethApi.Syncing(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if syncing != nil && syncing != false {
+		bn := syncing.(map[string]interface{})["currentBlock"]
+		highestBatchNo, err = hermezDb.GetBatchNoByL2Block(uint64(bn.(hexutil.Uint64)))
+	}
 	if batchNumber > rpc.BlockNumber(highestBatchNo) {
 		return nil, nil
 	}
@@ -435,6 +465,8 @@ func (api *ZkEvmAPIImpl) GetBatchByNumber(ctx context.Context, batchNumber rpc.B
 	// last block in batch data
 	batch.Coinbase = block.Coinbase()
 	batch.StateRoot = block.Root()
+
+	// TODO: this logic is wrong it is the L1 verification timestamp we need
 	batch.Timestamp = types.ArgUint64(block.Time())
 
 	// block numbers in batch
@@ -540,40 +572,12 @@ func (api *ZkEvmAPIImpl) GetBatchByNumber(ctx context.Context, batchNumber rpc.B
 	}
 
 	// global exit root of batch
-	batchGer, foundBatchGerNumber, err := hermezDb.GetLastBatchGlobalExitRoot(batchNo)
+	batchGer, _, err := hermezDb.GetLastBlockGlobalExitRoot(blockNo)
 	if err != nil {
 		return nil, err
 	}
 
-	// get last block in batch
-	lastBlockInbatch, err := hermezDb.GetHighestBlockInBatch(batchNo)
-	if err != nil {
-		return nil, err
-	}
-
-	// get latest found ger by block
-	latestBlockHer, blockNum, err := hermezDb.GetLastBlockGlobalExitRoot(lastBlockInbatch)
-	if err != nil {
-		return nil, err
-	}
-
-	//get latest block ger batch number
-	latestBlockGerBatchNumber, err := hermezDb.GetBatchNoByL2Block(blockNum)
-	if err != nil {
-		return nil, err
-	}
-
-	var ger *common.Hash
-	if batchGer != nil {
-		ger = &batchGer.GlobalExitRoot
-	}
-	if foundBatchGerNumber < latestBlockGerBatchNumber {
-		ger = &latestBlockHer
-	}
-
-	if ger != nil {
-		batch.GlobalExitRoot = *ger
-	}
+	batch.GlobalExitRoot = batchGer
 
 	// sequence
 	seq, err := hermezDb.GetSequenceByBatchNo(batchNo)
@@ -600,7 +604,7 @@ func (api *ZkEvmAPIImpl) GetBatchByNumber(ctx context.Context, batchNumber rpc.B
 	}
 
 	// exit roots (MainnetExitRoot, RollupExitRoot)
-	infoTreeUpdate, err := hermezDb.GetL1InfoTreeUpdateByGer(batch.GlobalExitRoot)
+	infoTreeUpdate, err := hermezDb.GetL1InfoTreeUpdateByGer(batchGer)
 	if err != nil {
 		return nil, err
 	}
@@ -640,22 +644,24 @@ func (api *ZkEvmAPIImpl) GetBatchByNumber(ctx context.Context, batchNumber rpc.B
 	if forkId < 12 {
 		// get the previous batches exit roots
 		prevBatchNo := batchNo - 1
-		prevBatchGer, _, err := hermezDb.GetLastBatchGlobalExitRoot(prevBatchNo)
+		prevBatchHighestBlock, err := hermezDb.GetHighestBlockInBatch(prevBatchNo)
+		if err != nil {
+			return nil, err
+		}
+		prevBatchGer, _, err := hermezDb.GetLastBlockGlobalExitRoot(prevBatchHighestBlock)
 		if err != nil {
 			return nil, err
 		}
 
-		if prevBatchGer != nil {
-			itu, err := hermezDb.GetL1InfoTreeUpdateByGer(prevBatchGer.GlobalExitRoot)
-			if err != nil {
-				return nil, err
-			}
+		itu, err := hermezDb.GetL1InfoTreeUpdateByGer(prevBatchGer)
+		if err != nil {
+			return nil, err
+		}
 
-			if itu == nil || batch.MainnetExitRoot == itu.MainnetExitRoot {
-				batch.MainnetExitRoot = common.Hash{}
-				batch.RollupExitRoot = common.Hash{}
-				batch.GlobalExitRoot = common.Hash{}
-			}
+		if itu == nil || batch.MainnetExitRoot == itu.MainnetExitRoot {
+			batch.MainnetExitRoot = common.Hash{}
+			batch.RollupExitRoot = common.Hash{}
+			batch.GlobalExitRoot = common.Hash{}
 		}
 	}
 

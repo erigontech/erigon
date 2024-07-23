@@ -8,11 +8,13 @@ import (
 	"github.com/ledgerwatch/erigon/zk/datastream/proto/github.com/0xPolygonHermez/zkevm-node/state/datastream"
 	"github.com/ledgerwatch/erigon/zk/datastream/types"
 	zktypes "github.com/ledgerwatch/erigon/zk/types"
+	"github.com/ledgerwatch/erigon/zk/utils"
 
 	"github.com/ledgerwatch/erigon/zk/hermez_db"
 )
 
 type DbReader interface {
+	GetLocalExitRootForBatchNo(batchNo uint64) (libcommon.Hash, error)
 	GetBatchGlobalExitRootsProto(lastBatchNumber, batchNumber uint64) ([]types.GerUpdateProto, error)
 	GetForkId(batchNumber uint64) (uint64, error)
 	GetBlockGlobalExitRoot(blockNumber uint64) (libcommon.Hash, error)
@@ -148,7 +150,6 @@ func createBlockWithBatchCheckStreamEntriesProto(
 	filteredTransactions := filterTransactionByIndexes(block.Transactions(), transactionsToIncludeByIndex)
 
 	blockNum := block.NumberU64()
-
 	// batch start
 	// BATCH BOOKMARK
 	if isBatchStart {
@@ -175,7 +176,12 @@ func createBlockWithBatchCheckStreamEntriesProto(
 	blockEntriesProto = blockEntries.Entries()
 
 	if isBatchEnd {
-		if endEntriesProto, err = addBatchEndEntriesProto(reader, tx, batchNumber, lastBatchNumber, block.Root(), gers); err != nil {
+		localExitRoot, err := utils.GetBatchLocalExitRootFromSCStorage(batchNumber, reader, tx)
+		if err != nil {
+			return nil, err
+		}
+		blockRoot := block.Root()
+		if endEntriesProto, err = addBatchEndEntriesProto(tx, batchNumber, lastBatchNumber, &blockRoot, gers, &localExitRoot); err != nil {
 			return nil, err
 		}
 	}
@@ -323,20 +329,29 @@ func (srv *DataStreamServer) GetHighestBlockNumber() (uint64, error) {
 		if err != nil {
 			return 0, err
 		}
-		if entry.Type == datastreamer.EntryType(2) {
+		if uint32(entry.Type) == uint32(types.EntryTypeL2Block) || uint32(entry.Type) == uint32(types.EntryTypeL2Tx) {
 			break
 		}
 		entryNum -= 1
 	}
 
-	l2Block, err := types.UnmarshalL2Block(entry.Data)
-	if err != nil {
-		return 0, err
+	if uint32(entry.Type) == uint32(types.EntryTypeL2Block) {
+		l2Block, err := types.UnmarshalL2Block(entry.Data)
+		if err != nil {
+			return 0, err
+		}
+
+		return l2Block.L2BlockNumber, nil
+	} else if uint32(entry.Type) == uint32(types.EntryTypeL2Tx) {
+		tx, err := types.UnmarshalTx(entry.Data)
+		if err != nil {
+			return 0, err
+		}
+
+		return tx.L2BlockNumber, nil
 	}
 
-	srv.highestBlockWritten = &l2Block.L2BlockNumber
-
-	return l2Block.L2BlockNumber, nil
+	return 0, nil
 }
 
 func (srv *DataStreamServer) GetHighestBatchNumber() (uint64, error) {

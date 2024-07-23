@@ -58,7 +58,7 @@ func prepareSMT(t *testing.T) (*smt.SMT, *trie.RetainList) {
 
 	memdb := db.NewMemDb()
 
-	smtTrie := smt.NewSMT(memdb)
+	smtTrie := smt.NewSMT(memdb, false)
 
 	smtTrie.SetAccountState(contract.String(), balance.ToBig(), uint256.NewInt(1).ToBig())
 	smtTrie.SetContractBytecode(contract.String(), hex.EncodeToString(code))

@@ -1,13 +1,14 @@
 package main
 
 import (
+	"encoding/json"
 	"flag"
 	"fmt"
-	"net/http"
-	"strings"
-	"encoding/json"
 	"io"
 	"math/big"
+	"net/http"
+	"strconv"
+	"strings"
 )
 
 const SequenceBatchesTopic = "0x303446e6a8cb73c83dff421c0b1d5e5ce0719dab1bff13660fc254e58cc17fce"
@@ -101,8 +102,8 @@ func main() {
 }
 
 func makeRequest(startBlock, endBlock uint64, contracts string) (*Response, error) {
-	startHex := fmt.Sprintf("0x%x", startBlock)
-	endHex := fmt.Sprintf("0x%x", endBlock)
+	startHex := "0x" + strconv.FormatUint(startBlock, 16)
+	endHex := "0x" + strconv.FormatUint(endBlock, 16)
 
 	reqBody := fmt.Sprintf(req, startHex, endHex, contracts, SequenceBatchesTopic, SequenceBatchesTopic2)
 

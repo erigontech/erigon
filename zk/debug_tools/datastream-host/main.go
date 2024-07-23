@@ -1,12 +1,14 @@
 package main
 
 import (
-	"github.com/0xPolygonHermez/zkevm-data-streamer/datastreamer"
 	"flag"
-	log2 "github.com/0xPolygonHermez/zkevm-data-streamer/log"
 	"fmt"
 	"os"
 	"os/signal"
+	"time"
+
+	"github.com/0xPolygonHermez/zkevm-data-streamer/datastreamer"
+	log2 "github.com/0xPolygonHermez/zkevm-data-streamer/log"
 )
 
 var file = ""
@@ -21,7 +23,7 @@ func main() {
 		Outputs:     []string{"stdout"},
 	}
 
-	stream, err := datastreamer.NewServer(uint16(6900), uint8(3), 1, datastreamer.StreamType(1), file, logConfig)
+	stream, err := datastreamer.NewServer(uint16(6900), uint8(3), 1, datastreamer.StreamType(1), file, 5*time.Second, logConfig)
 	if err != nil {
 		fmt.Println("Error creating datastream server:", err)
 		return

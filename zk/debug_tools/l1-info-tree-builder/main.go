@@ -8,6 +8,7 @@ import (
 	"math/big"
 	"net/http"
 	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/iden3/go-iden3-crypto/keccak256"
@@ -120,8 +121,8 @@ func main() {
 			stop = true
 		}
 		fmt.Println("Requesting logs from", from, "to", end)
-		fromAsHex := fmt.Sprintf("0x%x", from)
-		endAsHex := fmt.Sprintf("0x%x", end)
+		fromAsHex := "0x" + strconv.FormatUint(from, 16)
+		endAsHex := "0x" + strconv.FormatUint(end, 16)
 		reqBody := fmt.Sprintf(logReq, fromAsHex, endAsHex, address)
 		req, err := http.NewRequest("POST", endpoint, strings.NewReader(reqBody))
 		if err != nil {
