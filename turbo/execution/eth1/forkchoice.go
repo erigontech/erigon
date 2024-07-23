@@ -460,10 +460,6 @@ func (e *EthereumExecutionModule) updateForkChoice(ctx context.Context, original
 			return
 		}
 
-		if log {
-			e.logger.Info("head updated", "number", *headNumber, "hash", headHash)
-		}
-
 		var m runtime.MemStats
 		dbg.ReadMemStats(&m)
 		blockTimings := e.forkValidator.GetTimings(blockHash)
@@ -475,7 +471,9 @@ func (e *EthereumExecutionModule) updateForkChoice(ctx context.Context, original
 			timings = append(timings, "number", fcuHeader.Number.Uint64(), "execution", blockTimings[engine_helpers.BlockTimingsValidationIndex], "flushing", blockTimings[engine_helpers.BlockTimingsFlushExtendingFork], "mgas/s", fmt.Sprintf("%.2f", mgasPerSec))
 		}
 		timings = append(timings, "commit", commitTime, "alloc", common.ByteCount(m.Alloc), "sys", common.ByteCount(m.Sys))
-		e.logger.Info("Timings", timings...)
+		if log {
+			e.logger.Info("head updated", "number", *headNumber, "hash", headHash, timings...)
+		}
 	}
 	if *headNumber >= startPruneFrom {
 		e.runPostForkchoiceInBackground(initialCycle)
