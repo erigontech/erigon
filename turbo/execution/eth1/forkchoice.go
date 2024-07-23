@@ -21,7 +21,6 @@ import (
 	"errors"
 	"fmt"
 	"runtime"
-	"slices"
 	"time"
 
 	"github.com/erigontech/erigon-lib/common"
@@ -398,8 +397,6 @@ func (e *EthereumExecutionModule) updateForkChoice(ctx context.Context, original
 		return
 	}
 
-	timings := slices.Clone(e.executionPipeline.PrintTimings())
-
 	// if head hash was set then success otherwise no
 	headHash := rawdb.ReadHeadBlockHash(tx)
 	headNumber := rawdb.ReadHeaderNumber(tx, headHash)
@@ -464,7 +461,6 @@ func (e *EthereumExecutionModule) updateForkChoice(ctx context.Context, original
 		dbg.ReadMemStats(&m)
 		blockTimings := e.forkValidator.GetTimings(blockHash)
 		logArgs := []interface{}{"head", headHash, "hash", blockHash}
-		logArgs = append(logArgs, timings...)
 		if flushExtendingFork {
 			totalTime := blockTimings[engine_helpers.BlockTimingsValidationIndex] + blockTimings[engine_helpers.BlockTimingsFlushExtendingFork]
 			gasUsedMgas := float64(fcuHeader.GasUsed) / 1e6
