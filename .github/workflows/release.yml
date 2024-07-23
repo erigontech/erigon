@@ -13,19 +13,7 @@ on:
       - 'v*.*.*'
       # to be used by fork patch-releases ^^
       - 'v*.*.*-*'
-  workflow_call:
-    inputs:
-      publish_artifacts:
-        description: 'Publish Artifacts (not dry-run)'
-        required: true
-        type: boolean
-        default: true
   workflow_dispatch:
-    inputs:
-      publish_artifacts:
-        description: 'Publish Artifacts (not dry-run)'
-        required: true
-        type: boolean
 
 jobs:
   goreleaser:
@@ -68,11 +56,7 @@ jobs:
 
       - name: Release publish_artifacts=${{ inputs.publish_artifacts }}
         run: |
-          if ${{ inputs.publish_artifacts }}; then
-            make release
-          else
-            make release-dry-run
-          fi
+          make release
           docker images
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
