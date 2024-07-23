@@ -77,7 +77,7 @@ import (
 	libstate "github.com/erigontech/erigon-lib/state"
 	"github.com/erigontech/erigon-lib/txpool"
 	"github.com/erigontech/erigon-lib/txpool/txpoolcfg"
-	"github.com/erigontech/erigon-lib/txpool/txpooluitl"
+	"github.com/erigontech/erigon-lib/txpool/txpoolutil"
 	libtypes "github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon-lib/wrap"
 	"github.com/erigontech/erigon/cl/clparams"
@@ -653,7 +653,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 
 		backend.newTxs = make(chan libtypes.Announcements, 1024)
 		//defer close(newTxs)
-		backend.txPoolDB, backend.txPool, backend.txPoolFetch, backend.txPoolSend, backend.txPoolGrpcServer, err = txpooluitl.AllComponents(
+		backend.txPoolDB, backend.txPool, backend.txPoolFetch, backend.txPoolSend, backend.txPoolGrpcServer, err = txpoolutil.AllComponents(
 			ctx, config.TxPool, kvcache.NewDummy(), backend.newTxs, chainKv, backend.sentriesClient.Sentries(), stateDiffClient, misc.Eip1559FeeCalculator, logger,
 		)
 		if err != nil {
@@ -926,24 +926,12 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 	executionRpc := direct.NewExecutionClientDirect(backend.eth1ExecutionServer)
 
 	var executionEngine executionclient.ExecutionEngine
-	caplinUseEngineAPI := config.NetworkID == uint64(clparams.HoleskyNetwork)
-	// Gnosis has too few blocks on his network for phase2 to work. Once we have proper snapshot automation, it can go back to normal.
-	if caplinUseEngineAPI {
-		// Read the jwt secret
-		jwtSecret, err := cli.ObtainJWTSecret(&stack.Config().Http, logger)
-		if err != nil {
-			return nil, err
-		}
-		executionEngine, err = executionclient.NewExecutionClientRPC(jwtSecret, stack.Config().Http.AuthRpcHTTPListenAddress, stack.Config().Http.AuthRpcPort)
-		if err != nil {
-			return nil, err
-		}
-	} else {
-		executionEngine, err = executionclient.NewExecutionClientDirect(eth1_chain_reader.NewChainReaderEth1(chainConfig, executionRpc, 1000))
-		if err != nil {
-			return nil, err
-		}
+
+	executionEngine, err = executionclient.NewExecutionClientDirect(eth1_chain_reader.NewChainReaderEth1(chainConfig, executionRpc, 1000))
+	if err != nil {
+		return nil, err
 	}
+
 	engineBackendRPC := engineapi.NewEngineServer(
 		logger,
 		chainConfig,
@@ -953,7 +941,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 			logger, backend.sentriesClient.Hd, executionRpc,
 			backend.sentriesClient.Bd, backend.sentriesClient.BroadcastNewBlock, backend.sentriesClient.SendBodyRequest, blockReader,
 			backend.chainDB, chainConfig, tmpdir, config.Sync),
-		config.InternalCL && !caplinUseEngineAPI, // If the chain supports the engine API, then we should not make the server fail.
+		config.InternalCL, // If the chain supports the engine API, then we should not make the server fail.
 		false,
 		config.Miner.EnabledPOS)
 	backend.engineBackendRPC = engineBackendRPC
