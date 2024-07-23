@@ -1456,7 +1456,7 @@ func (hph *HexPatriciaHashed) ProcessTree(ctx context.Context, tree *UpdateTree,
 				cell.setAccountFields(stagedCell.CodeHash[:], &stagedCell.Balance, stagedCell.Nonce)
 				if hph.trace {
 					// todo add String for Cell
-					fmt.Printf("GetAccount %x => balance=%d nonce=%v codeHash=%x\n", cell.apk[:cell.apl], &stagedCell.Balance, stagedCell.Nonce, stagedCell.CodeHash)
+					fmt.Printf("GetAccount %x => balance=%d nonce=%v codeHash=%x\n", cell.apk[:cell.apl], &cell.Balance, cell.Nonce, cell.CodeHash)
 				}
 			}
 		} else {
