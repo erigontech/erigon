@@ -144,36 +144,25 @@ func (b *BpsTree) WarmUp(kv ArchiveGetter) error {
 		fmt.Printf("mx cap %d N=%d M=%d\n", cap(b.mx), N, b.M)
 	}
 
-	if N < b.M {
-		//fmt.Printf("N < M %d %d, fill in\n", N, b.M)
-		for di := uint64(0); di < N; di++ {
-			_, key, err := b.keyCmpFunc(nil, di, kv)
-			if err != nil {
-				return err
-			}
-			if b.st == nil {
-				b.st = splay.NewTree(common.Copy(key), splay.Loc{Di: di, Offset: b.offt.Get(di)})
-			} else {
-				b.st.Insert(common.Copy(key), splay.Loc{Di: di, Offset: b.offt.Get(di)})
-			}
-		}
-		return nil
+	step := b.M
+	if N < b.M { // cache all keys if less than M
+		step = 1
 	}
 
 	// extremely stupid picking of needed nodes:
 	cachedBytes := uint64(0)
 	nsz := uint64(unsafe.Sizeof(Node{}))
-	for i := b.M; i < N; i += b.M {
+	for i := step; i < N; i += step {
 		di := i - 1
 		_, key, err := b.keyCmpFunc(nil, di, kv)
 		if err != nil {
 			return err
 		}
-		if b.st == nil {
-			b.st = splay.NewTree(common.Copy(key), splay.Loc{Di: di, Offset: b.offt.Get(di)})
-		} else {
-			b.st.Insert(common.Copy(key), splay.Loc{Di: di, Offset: b.offt.Get(di)})
-		}
+		//if b.st == nil {
+		//	b.st = splay.NewTree(common.Copy(key), splay.Loc{Di: di, Offset: b.offt.Get(di)})
+		//} else {
+		//	b.st.Insert(common.Copy(key), splay.Loc{Di: di, Offset: b.offt.Get(di)})
+		//}
 		b.mx = append(b.mx, Node{off: b.offt.Get(di), key: common.Copy(key), di: di})
 		cachedBytes += nsz + uint64(len(key))
 	}
@@ -228,33 +217,33 @@ func (b *BpsTree) Seek(g ArchiveGetter, key []byte) (skey []byte, di uint64, fou
 		return skey, 0, cmp == 0, nil
 	}
 
-	if b.st == nil {
-		panic("what? nil st")
-	}
-	n := b.st.Seek(key)
-	if bytes.Equal(n.Key, key) {
-		if b.trace {
-			fmt.Printf("found %x [%d]\n", n.Key, n.Di)
-		}
-		return key, n.Di, true, nil
-	}
-	var l, r uint64
-	r = b.offt.Count()
-	if n.Right() != nil {
-		r = n.Right().Di
-	}
-	if n.Left() != nil {
-		l = n.Left().Di
-	}
-	if b.trace {
-		fmt.Printf("pivot di:%d di(LR): [%d %d] k: %x\n", n.Di, l, r, n.Key)
-	}
-
-	//n, l, r := b.bs(key) // l===r when key is found
-	//if b.trace {
-	//	fmt.Printf("pivot di:%d di(LR): [%d %d] k: %x found: %t\n", n.di, l, r, n.key, l == r)
-	//	defer func() { fmt.Printf("found %x [%d %d]\n", key, l, r) }()
+	//if b.st == nil {
+	//	panic("what? nil st")
 	//}
+	//n := b.st.Seek(key)
+	//if bytes.Equal(n.Key, key) {
+	//	if b.trace {
+	//		fmt.Printf("found %x [%d]\n", n.Key, n.Di)
+	//	}
+	//	return key, n.Di, true, nil
+	//}
+	//var l, r uint64
+	//r = b.offt.Count()
+	//if n.Right() != nil {
+	//	r = n.Right().Di
+	//}
+	//if n.Left() != nil {
+	//	l = n.Left().Di
+	//}
+	//if b.trace {
+	//	fmt.Printf("pivot di:%d di(LR): [%d %d] k: %x\n", n.Di, l, r, n.Key)
+	//}
+
+	n, l, r := b.bs(key) // l===r when key is found
+	if b.trace {
+		fmt.Printf("pivot di:%d di(LR): [%d %d] k: %x found: %t\n", n.di, l, r, n.key, l == r)
+		defer func() { fmt.Printf("found %x [%d %d]\n", key, l, r) }()
+	}
 
 	var m uint64
 	var cmp int
@@ -304,33 +293,33 @@ func (b *BpsTree) Get(g ArchiveGetter, key []byte) ([]byte, bool, uint64, error)
 		}
 		return v0, true, 0, nil
 	}
-	if b.st == nil {
-		panic("what? nil st")
-	}
-	n := b.st.Seek(key)
-	if bytes.Equal(n.Key, key) {
-		if b.trace {
-			fmt.Printf("found %x [%d]\n", n.Key, n.Di)
-		}
-		return key, true, n.Di, nil
-	}
-	var l, r uint64
-	r = b.offt.Count()
-	if n.Right() != nil {
-		r = n.Right().Di
-	}
-	if n.Left() != nil {
-		l = n.Left().Di
-	}
-	if b.trace {
-		fmt.Printf("pivot di:%d di(LR): [%d %d] k: %x\n", n.Di, l, r, n.Key)
-	}
-
-	//n, l, r := b.bs(key) // l===r when key is found
-	//if b.trace {
-	//	fmt.Printf("pivot di: %d di(LR): [%d %d] k: %x found: %t\n", n.di, l, r, n.key, l == r)
-	//	defer func() { fmt.Printf("found %x [%d %d]\n", key, l, r) }()
+	//if b.st == nil {
+	//	panic("what? nil st")
 	//}
+	//n := b.st.Seek(key)
+	//if bytes.Equal(n.Key, key) {
+	//	if b.trace {
+	//		fmt.Printf("found %x [%d]\n", n.Key, n.Di)
+	//	}
+	//	return key, true, n.Di, nil
+	//}
+	//var l, r uint64
+	//r = b.offt.Count()
+	//if n.Right() != nil {
+	//	r = n.Right().Di
+	//}
+	//if n.Left() != nil {
+	//	l = n.Left().Di
+	//}
+	//if b.trace {
+	//	fmt.Printf("pivot di:%d di(LR): [%d %d] k: %x\n", n.Di, l, r, n.Key)
+	//}
+
+	n, l, r := b.bs(key) // l===r when key is found
+	if b.trace {
+		fmt.Printf("pivot di: %d di(LR): [%d %d] k: %x found: %t\n", n.di, l, r, n.key, l == r)
+		defer func() { fmt.Printf("found %x [%d %d]\n", key, l, r) }()
+	}
 
 	var m uint64
 	for l < r {

@@ -781,7 +781,6 @@ func BuildBtreeIndexWithDecompressor(indexPath string, kv *seg.Decompressor, com
 
 	key := make([]byte, 0, 64)
 	var pos uint64
-	// TODO remember offt for each first byte
 
 	for getter.HasNext() {
 		key, _ = getter.Next(key[:0])
