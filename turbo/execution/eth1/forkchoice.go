@@ -397,7 +397,7 @@ func (e *EthereumExecutionModule) updateForkChoice(ctx context.Context, original
 			ValidationError: validationError,
 		}, false)
 		if err := e.forkValidator.FlushExtendingFork(tx, e.accumulator); err != nil {
-			sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, err, false)
+			sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, err, flushExtendingFork)
 			return
 		}
 	}
@@ -407,7 +407,7 @@ func (e *EthereumExecutionModule) updateForkChoice(ctx context.Context, original
 	if _, err := e.executionPipeline.Run(e.db, wrap.TxContainer{Tx: tx}, initialCycle, firstCycle); err != nil {
 		err = fmt.Errorf("updateForkChoice: %w", err)
 		e.logger.Warn("Cannot update chain head", "hash", blockHash, "err", err)
-		sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, err, false)
+		sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, err, flushExtendingFork)
 		return
 	}
 
