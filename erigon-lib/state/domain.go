@@ -705,6 +705,24 @@ type DomainRoTx struct {
 	valsC kv.Cursor
 }
 
+func (dt *DomainRoTx) getFromFileL0(i int, filekey []byte) ([]byte, bool, error) {
+	return dt.getFromFile(i, filekey)
+}
+func (dt *DomainRoTx) getFromFileL1(i int, filekey []byte) ([]byte, bool, error) {
+	return dt.getFromFile(i, filekey)
+}
+func (dt *DomainRoTx) getFromFileL2(i int, filekey []byte) ([]byte, bool, error) {
+	return dt.getFromFile(i, filekey)
+}
+func (dt *DomainRoTx) getFromFileL3(i int, filekey []byte) ([]byte, bool, error) {
+	return dt.getFromFile(i, filekey)
+}
+func (dt *DomainRoTx) getFromFileL4(i int, filekey []byte) ([]byte, bool, error) {
+	return dt.getFromFile(i, filekey)
+}
+func (dt *DomainRoTx) getFromFileLRecent(i int, filekey []byte) ([]byte, bool, error) {
+	return dt.getFromFile(i, filekey)
+}
 func (dt *DomainRoTx) getFromFile(i int, filekey []byte) ([]byte, bool, error) {
 	g := dt.statelessGetter(i)
 	if !(UseBtree || UseBpsTree) {
@@ -1393,7 +1411,20 @@ func (dt *DomainRoTx) getFromFiles(filekey []byte) (v []byte, found bool, fileSt
 		}
 
 		//t := time.Now()
-		v, found, err = dt.getFromFile(i, filekey)
+		switch i {
+		case 0:
+			v, found, err = dt.getFromFileL0(i, filekey)
+		case 1:
+			v, found, err = dt.getFromFileL1(i, filekey)
+		case 2:
+			v, found, err = dt.getFromFileL2(i, filekey)
+		case 3:
+			v, found, err = dt.getFromFileL3(i, filekey)
+		case 4:
+			v, found, err = dt.getFromFileL4(i, filekey)
+		default:
+			v, found, err = dt.getFromFileLRecent(i, filekey)
+		}
 		if err != nil {
 			return nil, false, 0, 0, err
 		}

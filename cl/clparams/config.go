@@ -1065,7 +1065,10 @@ func EmbeddedEnabledByDefault(id uint64) bool {
 }
 
 func SupportBackfilling(networkId uint64) bool {
-	return networkId == uint64(MainnetNetwork) || networkId == uint64(SepoliaNetwork) || networkId == uint64(GnosisNetwork)
+	return networkId == uint64(MainnetNetwork) ||
+		networkId == uint64(SepoliaNetwork) ||
+		networkId == uint64(GnosisNetwork) ||
+		networkId == uint64(HoleskyNetwork)
 }
 
 func EpochToPaths(slot uint64, config *BeaconChainConfig, suffix string) (string, string) {
