@@ -145,20 +145,19 @@ func (b *BpsTree) WarmUp(kv ArchiveGetter) error {
 	}
 
 	if N < b.M {
-		for i := b.M; i < N; i += b.M {
-			di := i - 1
+		//fmt.Printf("N < M %d %d, fill in\n", N, b.M)
+		for di := uint64(0); di < N; di++ {
 			_, key, err := b.keyCmpFunc(nil, di, kv)
 			if err != nil {
 				return err
 			}
 			if b.st == nil {
-				b.st = splay.NewTree(key, splay.Loc{Di: b.M, Offset: b.offt.Get(b.M)})
+				b.st = splay.NewTree(common.Copy(key), splay.Loc{Di: di, Offset: b.offt.Get(di)})
 			} else {
 				b.st.Insert(common.Copy(key), splay.Loc{Di: di, Offset: b.offt.Get(di)})
 			}
 		}
 		return nil
-
 	}
 
 	// extremely stupid picking of needed nodes:
@@ -171,7 +170,7 @@ func (b *BpsTree) WarmUp(kv ArchiveGetter) error {
 			return err
 		}
 		if b.st == nil {
-			b.st = splay.NewTree(key, splay.Loc{Di: b.M, Offset: b.offt.Get(b.M)})
+			b.st = splay.NewTree(common.Copy(key), splay.Loc{Di: di, Offset: b.offt.Get(di)})
 		} else {
 			b.st.Insert(common.Copy(key), splay.Loc{Di: di, Offset: b.offt.Get(di)})
 		}
@@ -216,7 +215,10 @@ func (b *BpsTree) bs(x []byte) (n Node, dl, dr uint64) {
 // If found item.key has a prefix of key, returns found=false and item.key
 // if key is greater than all keys, returns nil, found=false
 func (b *BpsTree) Seek(g ArchiveGetter, key []byte) (skey []byte, di uint64, found bool, err error) {
-	if key == nil && b.offt.Count() > 0 {
+	if b.trace {
+		fmt.Printf("seek %x\n", key)
+	}
+	if len(key) == 0 && b.offt.Count() > 0 {
 		//return &BpsTreeIterator{t: b, i: 0}, nil
 		var cmp int
 		cmp, skey, err = b.keyCmpFunc(key, 0, g)
@@ -226,16 +228,15 @@ func (b *BpsTree) Seek(g ArchiveGetter, key []byte) (skey []byte, di uint64, fou
 		return skey, 0, cmp == 0, nil
 	}
 
-	if b.trace {
-		fmt.Printf("seek %x\n", key)
+	if b.st == nil {
+		panic("what? nil st")
 	}
 	n := b.st.Seek(key)
-	if b.trace {
-		fmt.Printf("pivot di:%d di(LR): [%d %d] k: %x\n", n.Di, n.Left().Di, n.Right().Di, n.Key)
-	}
 	if bytes.Equal(n.Key, key) {
-		fmt.Printf("found %x [%d]\n", n.Key, n.Di)
-		return n.Key, n.Di, true, nil
+		if b.trace {
+			fmt.Printf("found %x [%d]\n", n.Key, n.Di)
+		}
+		return key, n.Di, true, nil
 	}
 	var l, r uint64
 	r = b.offt.Count()
@@ -244,6 +245,9 @@ func (b *BpsTree) Seek(g ArchiveGetter, key []byte) (skey []byte, di uint64, fou
 	}
 	if n.Left() != nil {
 		l = n.Left().Di
+	}
+	if b.trace {
+		fmt.Printf("pivot di:%d di(LR): [%d %d] k: %x\n", n.Di, l, r, n.Key)
 	}
 
 	//n, l, r := b.bs(key) // l===r when key is found
@@ -290,22 +294,43 @@ func (b *BpsTree) Seek(g ArchiveGetter, key []byte) (skey []byte, di uint64, fou
 // If key is nil, returns first key
 // if key is greater than all keys, returns nil
 func (b *BpsTree) Get(g ArchiveGetter, key []byte) ([]byte, bool, uint64, error) {
-	if key == nil && b.offt.Count() > 0 {
+	if b.trace {
+		fmt.Printf("get   %x\n", key)
+	}
+	if len(key) == 0 && b.offt.Count() > 0 {
 		k0, v0, err := b.dataLookupFunc(0, g)
 		if err != nil || k0 != nil {
 			return nil, false, 0, err
 		}
 		return v0, true, 0, nil
 	}
+	if b.st == nil {
+		panic("what? nil st")
+	}
+	n := b.st.Seek(key)
+	if bytes.Equal(n.Key, key) {
+		if b.trace {
+			fmt.Printf("found %x [%d]\n", n.Key, n.Di)
+		}
+		return key, true, n.Di, nil
+	}
+	var l, r uint64
+	r = b.offt.Count()
+	if n.Right() != nil {
+		r = n.Right().Di
+	}
+	if n.Left() != nil {
+		l = n.Left().Di
+	}
+	if b.trace {
+		fmt.Printf("pivot di:%d di(LR): [%d %d] k: %x\n", n.Di, l, r, n.Key)
+	}
 
-	if b.trace {
-		fmt.Printf("get %x\n", key)
-	}
-	n, l, r := b.bs(key) // l===r when key is found
-	if b.trace {
-		fmt.Printf("pivot di: %d di(LR): [%d %d] k: %x found: %t\n", n.di, l, r, n.key, l == r)
-		defer func() { fmt.Printf("found %x [%d %d]\n", key, l, r) }()
-	}
+	//n, l, r := b.bs(key) // l===r when key is found
+	//if b.trace {
+	//	fmt.Printf("pivot di: %d di(LR): [%d %d] k: %x found: %t\n", n.di, l, r, n.key, l == r)
+	//	defer func() { fmt.Printf("found %x [%d %d]\n", key, l, r) }()
+	//}
 
 	var m uint64
 	for l < r {
@@ -315,7 +340,7 @@ func (b *BpsTree) Get(g ArchiveGetter, key []byte) ([]byte, bool, uint64, error)
 			return nil, false, 0, err
 		}
 		if b.trace {
-			fmt.Printf("lr [%d %d]\n", l, r)
+			fmt.Printf("fs [%d %d]\n", l, r)
 		}
 
 		switch cmp {

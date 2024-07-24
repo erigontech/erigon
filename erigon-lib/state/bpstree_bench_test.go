@@ -12,7 +12,7 @@ import (
 func BenchmarkBpsTreeSeek(t *testing.B) {
 	tmp := t.TempDir()
 	logger := log.New()
-	keyCount, M := 12_000_000, 1024
+	keyCount, M := 12_000_000, 512
 	compressFlags := CompressKeys | CompressVals
 
 	dataPath := generateKV(t, tmp, 52, 180, keyCount, logger, 0)

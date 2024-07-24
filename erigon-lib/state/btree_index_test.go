@@ -133,7 +133,7 @@ func Test_BtreeIndex_Seek(t *testing.T) {
 	for i := 0; i < len(keys); i++ {
 		cur, err := bt.Seek(getter, keys[i])
 		require.NoErrorf(t, err, "i=%d", i)
-		require.EqualValues(t, keys[i], cur.key)
+		require.EqualValuesf(t, keys[i], cur.key, "i=%d", i)
 		require.NotEmptyf(t, cur.Value(), "i=%d", i)
 		// require.EqualValues(t, uint64(i), cur.Value())
 	}

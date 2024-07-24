@@ -2,7 +2,6 @@ package splay
 
 import (
 	"bytes"
-	"fmt"
 )
 
 type Node struct {
@@ -32,8 +31,12 @@ func (n *Node) setParent(p *Node) {
 }
 
 func (n *Node) keepParent() {
-	n.left.setParent(n)
-	n.right.setParent(n)
+	if n.left != nil {
+		n.left.setParent(n)
+	}
+	if n.right != nil {
+		n.right.setParent(n)
+	}
 }
 
 func (n *Node) rotate(child *Node) {
@@ -89,47 +92,50 @@ func (n *Node) splay() *Node {
 	}
 	return n
 }
-
-func (n *Node) find(key Key) *Node {
+func (n *Node) find(key Key) (*Node, *Node) {
 	if n == nil {
-		return nil
+		return nil, nil
 	}
-	fmt.Printf("V %x %d ", n.Key, n.Di)
+	//fmt.Printf("V %x %d ", n.Key, n.Di)
 	cmp := bytes.Compare(n.Key, key)
 	if cmp == 0 {
-		return n.splay()
+		//fmt.Printf("F %x %d\n", n.Key, n.Di)
+		return n.splay(), nil
 	}
 
-	var curNode *Node
+	var curNode, nextGreater *Node
 	if cmp > 0 && n.left != nil {
-		fmt.Printf("L %x %d\n", n.left.Key, n.left.Di)
+		//fmt.Printf("L %d\n", n.left.Di)
 		curNode = n.left
+		nextGreater = n
 	} else if cmp < 0 && n.right != nil {
-		fmt.Printf("R %x %d\n", n.right.Key, n.right.Di)
+		//fmt.Printf("R %d\n", n.right.Di)
 		curNode = n.right
-	} else {
-		fmt.Printf("S\n")
-		return n.splay()
 	}
+	//fmt.Printf("\n")
 
-	for {
+	for curNode != nil {
 		cmp = bytes.Compare(curNode.Key, key)
-		switch cmp {
-		case 1:
+		if cmp == 0 {
+			return curNode.splay(), nil
+		} else if cmp > 0 {
+			nextGreater = curNode
 			if curNode.left != nil {
 				curNode = curNode.left
 				continue
 			}
-		case -1:
+		} else {
 			if curNode.right != nil {
 				curNode = curNode.right
 				continue
 			}
-		case 0:
 		}
 		break
 	}
-	return curNode.splay()
+	if curNode != nil {
+		return curNode.splay(), nextGreater
+	}
+	return n.splay(), nextGreater
 }
 
 type Key []byte
@@ -172,8 +178,8 @@ func (t *Tree) Split(key Key) (*Node, *Node) {
 	}
 
 	var (
-		L, R *Node
-		root = t.root.find(key)
+		L, R    *Node
+		root, _ = t.root.find(key)
 	)
 
 	cmp := bytes.Compare(root.Key, key)
@@ -196,7 +202,14 @@ func (t *Tree) Split(key Key) (*Node, *Node) {
 }
 
 func (t *Tree) Seek(key Key) *Node {
-	t.root = t.root.find(key)
+	if t.root == nil {
+		return nil
+	}
+	var next *Node
+	t.root, next = t.root.find(key)
+	if next != nil && !bytes.Equal(t.root.Key, key) {
+		t.root = next.splay()
+	}
 	return t.root
 }
 
@@ -209,7 +222,7 @@ func Merge(L, R *Node) *Node {
 		return L
 	}
 
-	R = R.find(L.Key)
+	R, _ = R.find(L.Key)
 	R.left, L.parent = L, R
 	return R
 }
