@@ -23,6 +23,7 @@ import (
 	"path/filepath"
 	"reflect"
 
+	"github.com/erigontech/erigon-lib/common/dbg"
 	"github.com/erigontech/erigon-lib/downloader/snaptype"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/cmd/hack/tool/fromdb"
@@ -31,14 +32,14 @@ import (
 	"github.com/erigontech/erigon/turbo/services"
 )
 
-const DisableBorBlocksProduction = true
+var BorProduceFiles = dbg.EnvBool("BOR_PRODUCE_FILES", false)
 
 func (br *BlockRetire) dbHasEnoughDataForBorRetire(ctx context.Context) (bool, error) {
 	return true, nil
 }
 
 func (br *BlockRetire) retireBorBlocks(ctx context.Context, minBlockNum uint64, maxBlockNum uint64, lvl log.Lvl, seedNewSnapshots func(downloadRequest []services.DownloadRequest) error, onDelete func(l []string) error) (bool, error) {
-	if DisableBorBlocksProduction {
+	if !BorProduceFiles {
 		return false, nil
 	}
 
