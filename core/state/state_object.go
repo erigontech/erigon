@@ -80,8 +80,8 @@ type stateObject struct {
 	// Used to make decision on whether to make a write to the
 	// database (value != origin) or not (value == origin)
 	blockOriginStorage Storage
-	dirtyStorage       Storage        // Storage entries that need to be flushed to disk
-	fakeStorage        Storage        // Fake storage which constructed by caller for debugging purpose.
+	dirtyStorage       Storage // Storage entries that need to be flushed to disk
+	fakeStorage        Storage // Fake storage which constructed by caller for debugging purpose.
 
 	// Cache flags.
 	// When an object is marked selfdestructed it will be delete from the trie

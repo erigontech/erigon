@@ -403,10 +403,8 @@ func (evm *EVM) create(caller ContractRef, codeAndHash *codeAndHash, gasRemainin
 	}
 	// Ensure there's no existing contract already at the designated address
 	contractHash := evm.intraBlockState.GetCodeHash(address)
-	storageRoot := evm.intraBlockState.GetStorageRoot(address)
 	if evm.intraBlockState.GetNonce(address) != 0 ||
-		(contractHash != emptyHash && contractHash != trie.EmptyCodeHash) ||
-		(storageRoot != emptyHash && storageRoot != trie.EmptyRoot) {
+		(contractHash != emptyHash && contractHash != trie.EmptyCodeHash) {
 		err = ErrContractAddressCollision
 		return nil, libcommon.Address{}, 0, err
 	}

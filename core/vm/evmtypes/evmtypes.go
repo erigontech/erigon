@@ -143,8 +143,6 @@ type IntraBlockState interface {
 	GetState(address common.Address, slot *common.Hash, outValue *uint256.Int)
 	SetState(common.Address, *common.Hash, uint256.Int)
 
-	GetStorageRoot(addr common.Address) common.Hash
-
 	GetTransientState(addr common.Address, key common.Hash) uint256.Int
 	SetTransientState(addr common.Address, key common.Hash, value uint256.Int)
 

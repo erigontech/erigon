@@ -235,14 +235,6 @@ func (sdb *IntraBlockState) GetNonce(addr libcommon.Address) uint64 {
 	return 0
 }
 
-func (sdb *IntraBlockState) GetStorageRoot(addr libcommon.Address) libcommon.Hash {
-	stateObject := sdb.getStateObject(addr)
-	if stateObject != nil && !stateObject.deleted {
-		return stateObject.data.Root
-	}
-	return trie.EmptyRoot
-}
-
 // TxIndex returns the current transaction index set by Prepare.
 func (sdb *IntraBlockState) TxIndex() int {
 	return sdb.txIndex
