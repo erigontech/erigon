@@ -8,19 +8,18 @@ import (
 )
 
 func TestRemoveContents(t *testing.T) {
-	rootName := t.TempDir()
-	err := os.RemoveAll(rootName)
+	tmpDirName := t.TempDir()
+	err := os.RemoveAll(tmpDirName)
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = os.Mkdir(tmpDirName, 0750)
 	if err != nil {
 		t.Fatal(err)
 	}
 	//t.Logf("creating %s/root...", rootName)
-	root := fmt.Sprintf("%s/root", rootName)
+	rootName := filepath.Join(tmpDirName, "root")
 	err = os.Mkdir(rootName, 0750)
-	if err != nil {
-		t.Fatal(err)
-	}
-	rootName = root
-	err = os.Mkdir(root, 0750)
 	if err != nil {
 		t.Fatal(err)
 	}
