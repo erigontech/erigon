@@ -39,6 +39,7 @@ import (
 	"github.com/erigontech/erigon/cl/clparams/initial_state"
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
+	"github.com/erigontech/erigon/cl/monitor"
 	"github.com/erigontech/erigon/cl/rpc"
 	"github.com/erigontech/erigon/cl/sentinel"
 	"github.com/erigontech/erigon/cl/sentinel/service"
@@ -193,10 +194,11 @@ func RunCaplinPhase1(ctx context.Context, engine execution_client.ExecutionEngin
 	if err != nil {
 		return err
 	}
+	validatorMonitor := monitor.NewValidatorMonitor(forkChoice)
 	beaconRpc := rpc.NewBeaconRpcP2P(ctx, sentinel, beaconConfig, ethClock)
 	committeeSub := committee_subscription.NewCommitteeSubscribeManagement(ctx, indexDB, beaconConfig, networkConfig, ethClock, sentinel, state, aggregationPool, syncedDataManager)
 	// Define gossip services
-	blockService := services.NewBlockService(ctx, indexDB, forkChoice, syncedDataManager, ethClock, beaconConfig, emitters)
+	blockService := services.NewBlockService(ctx, indexDB, forkChoice, syncedDataManager, ethClock, beaconConfig, emitters, validatorMonitor)
 	blobService := services.NewBlobSidecarService(ctx, beaconConfig, forkChoice, syncedDataManager, ethClock, false)
 	syncCommitteeMessagesService := services.NewSyncCommitteeMessagesService(beaconConfig, ethClock, syncedDataManager, syncContributionPool, false)
 	attestationService := services.NewAttestationService(ctx, forkChoice, committeeSub, ethClock, syncedDataManager, beaconConfig, networkConfig)
@@ -315,6 +317,7 @@ func RunCaplinPhase1(ctx context.Context, engine execution_client.ExecutionEngin
 			blsToExecutionChangeService,
 			proposerSlashingService,
 			option.builderClient,
+			validatorMonitor,
 		)
 		go beacon.ListenAndServe(&beacon.LayeredBeaconHandler{
 			ArchiveApi: apiHandler,
@@ -322,7 +325,28 @@ func RunCaplinPhase1(ctx context.Context, engine execution_client.ExecutionEngin
 		log.Info("Beacon API started", "addr", config.BeaconRouter.Address)
 	}
 
-	stageCfg := stages.ClStagesCfg(beaconRpc, antiq, ethClock, beaconConfig, state, engine, gossipManager, forkChoice, indexDB, csn, rcsn, dirs.Tmp, uint64(config.LoopBlockLimit), backfilling, blobBackfilling, syncedDataManager, emitters, blobStorage, attestationProducer)
+	stageCfg := stages.ClStagesCfg(
+		beaconRpc,
+		antiq,
+		ethClock,
+		beaconConfig,
+		state,
+		engine,
+		gossipManager,
+		forkChoice,
+		indexDB,
+		csn,
+		rcsn,
+		dirs.Tmp,
+		uint64(config.LoopBlockLimit),
+		backfilling,
+		blobBackfilling,
+		syncedDataManager,
+		emitters,
+		blobStorage,
+		attestationProducer,
+		validatorMonitor,
+	)
 	sync := stages.ConsensusClStages(ctx, stageCfg)
 
 	logger.Info("[Caplin] starting clstages loop")

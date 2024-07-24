@@ -29,6 +29,7 @@ import (
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
+	mockMonitor "github.com/erigontech/erigon/cl/monitor/mock_services"
 	"github.com/erigontech/erigon/cl/phase1/forkchoice/mock_services"
 	"github.com/erigontech/erigon/cl/utils/eth_clock"
 )
@@ -39,7 +40,8 @@ func setupBlockService(t *testing.T, ctrl *gomock.Controller) (BlockService, *sy
 	syncedDataManager := synced_data.NewSyncedDataManager(true, cfg)
 	ethClock := eth_clock.NewMockEthereumClock(ctrl)
 	forkchoiceMock := mock_services.NewForkChoiceStorageMock(t)
-	blockService := NewBlockService(context.Background(), db, forkchoiceMock, syncedDataManager, ethClock, cfg, nil)
+	validatorMonitor := mockMonitor.NewMockValidatorMonitor(ctrl)
+	blockService := NewBlockService(context.Background(), db, forkchoiceMock, syncedDataManager, ethClock, cfg, nil, validatorMonitor)
 	return blockService, syncedDataManager, ethClock, forkchoiceMock
 }
 
