@@ -21,7 +21,6 @@ import (
 	"errors"
 	"fmt"
 	"runtime"
-	"slices"
 	"time"
 
 	"github.com/erigontech/erigon-lib/common"
@@ -37,6 +36,7 @@ import (
 	"github.com/erigontech/erigon/eth/consensuschain"
 	"github.com/erigontech/erigon/eth/stagedsync"
 	"github.com/erigontech/erigon/eth/stagedsync/stages"
+	"github.com/erigontech/erigon/turbo/engineapi/engine_helpers"
 )
 
 const startPruneFrom = 1024
@@ -389,16 +389,17 @@ func (e *EthereumExecutionModule) updateForkChoice(ctx context.Context, original
 
 	flushExtendingFork := blockHash == e.forkValidator.ExtendingForkHeadHash()
 	if flushExtendingFork {
-		e.logger.Info("[updateForkchoice] Fork choice update: flushing in-memory state (built by previous newPayload)")
-		if err := e.forkValidator.FlushExtendingFork(tx, e.accumulator); err != nil {
-			sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, err, false)
-			return
-		}
+		e.logger.Debug("[updateForkchoice] Fork choice update: flushing in-memory state (built by previous newPayload)")
+		// Send forkchoice early (We already know the fork is valid)
 		sendForkchoiceReceiptWithoutWaiting(outcomeCh, &execution.ForkChoiceReceipt{
 			LatestValidHash: gointerfaces.ConvertHashToH256(blockHash),
 			Status:          execution.ExecutionStatus_Success,
 			ValidationError: validationError,
 		}, false)
+		if err := e.forkValidator.FlushExtendingFork(tx, e.accumulator); err != nil {
+			sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, err, false)
+			return
+		}
 	}
 	// Run the forkchoice
 	initialCycle := limitedBigJump
@@ -409,8 +410,6 @@ func (e *EthereumExecutionModule) updateForkChoice(ctx context.Context, original
 		sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, err, false)
 		return
 	}
-
-	timings := slices.Clone(e.executionPipeline.PrintTimings())
 
 	// if head hash was set then success otherwise no
 	headHash := rawdb.ReadHeadBlockHash(tx)
@@ -472,15 +471,20 @@ func (e *EthereumExecutionModule) updateForkChoice(ctx context.Context, original
 			return
 		}
 
-		if log {
-			e.logger.Info("head updated", "number", *headNumber, "hash", headHash)
-		}
-
 		var m runtime.MemStats
 		dbg.ReadMemStats(&m)
-		timings = append(timings, e.forkValidator.GetTimings(headHash)...)
-		timings = append(timings, "commit", commitTime, "alloc", common.ByteCount(m.Alloc), "sys", common.ByteCount(m.Sys))
-		e.logger.Info("Timings (slower than 50ms)", timings...)
+		blockTimings := e.forkValidator.GetTimings(blockHash)
+		logArgs := []interface{}{"head", headHash, "hash", blockHash}
+		if flushExtendingFork {
+			totalTime := blockTimings[engine_helpers.BlockTimingsValidationIndex]
+			gasUsedMgas := float64(fcuHeader.GasUsed) / 1e6
+			mgasPerSec := gasUsedMgas / totalTime.Seconds()
+			logArgs = append(logArgs, "number", fcuHeader.Number.Uint64(), "execution", blockTimings[engine_helpers.BlockTimingsValidationIndex], "mgas/s", fmt.Sprintf("%.2f", mgasPerSec))
+		}
+		logArgs = append(logArgs, "commit", commitTime, "alloc", common.ByteCount(m.Alloc), "sys", common.ByteCount(m.Sys))
+		if log {
+			e.logger.Info("head updated", logArgs...)
+		}
 	}
 	if *headNumber >= startPruneFrom {
 		e.runPostForkchoiceInBackground(initialCycle)
