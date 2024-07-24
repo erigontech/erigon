@@ -69,7 +69,7 @@ import (
 var execStepsInDB = metrics.NewGauge(`exec_steps_in_db`) //nolint
 var execRepeats = metrics.NewCounter(`exec_repeats`)     //nolint
 var execTriggers = metrics.NewCounter(`exec_triggers`)   //nolint
-const changesetBlockRange = 200                          // Generate changeset only if execution of blocks <= changesetBlockRange
+const changesetBlockRange = 32                           // Generate changeset only for last N blocks of sync process
 
 func NewProgress(prevOutputBlockNum, commitThreshold uint64, workersCount int, logPrefix string, logger log.Logger) *Progress {
 	return &Progress{prevTime: time.Now(), prevOutputBlockNum: prevOutputBlockNum, commitThreshold: commitThreshold, workersCount: workersCount, logPrefix: logPrefix, logger: logger}
@@ -317,7 +317,7 @@ func ExecV3(ctx context.Context,
 	blockNum = doms.BlockNum()
 	outputTxNum.Store(doms.TxNum())
 
-	shouldGenerateChangesets := maxBlockNum-blockNum <= changesetBlockRange
+	shouldGenerateChangesets := maxBlockNum-blockNum <= uint64(cfg.syncCfg.LoopBlockLimit-8)
 	if blockNum < cfg.blockReader.FrozenBlocks() {
 		shouldGenerateChangesets = false
 	}
@@ -639,7 +639,8 @@ func ExecV3(ctx context.Context,
 Loop:
 	for ; blockNum <= maxBlockNum; blockNum++ {
 		changeset := &state2.StateChangeSet{}
-		if shouldGenerateChangesets && blockNum > 0 {
+		shouldGenerateChangesetsForBlock := shouldGenerateChangesets && blockNum > maxBlockNum-changesetBlockRange
+		if shouldGenerateChangesetsForBlock && blockNum > 0 {
 			doms.SetChangesetAccumulator(changeset)
 		}
 		if !parallel {
@@ -850,7 +851,7 @@ Loop:
 			stageProgress = blockNum
 			inputTxNum++
 		}
-		if shouldGenerateChangesets {
+		if shouldGenerateChangesetsForBlock {
 			aggTx := applyTx.(state2.HasAggTx).AggTx().(*state2.AggregatorRoTx)
 			aggTx.RestrictSubsetFileDeletions(true)
 			start := time.Now()
