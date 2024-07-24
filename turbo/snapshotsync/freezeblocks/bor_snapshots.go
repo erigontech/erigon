@@ -31,11 +31,17 @@ import (
 	"github.com/erigontech/erigon/turbo/services"
 )
 
+const DisableBorBlocksProduction = true
+
 func (br *BlockRetire) dbHasEnoughDataForBorRetire(ctx context.Context) (bool, error) {
 	return true, nil
 }
 
 func (br *BlockRetire) retireBorBlocks(ctx context.Context, minBlockNum uint64, maxBlockNum uint64, lvl log.Lvl, seedNewSnapshots func(downloadRequest []services.DownloadRequest) error, onDelete func(l []string) error) (bool, error) {
+	if DisableBorBlocksProduction {
+		return false, nil
+	}
+
 	select {
 	case <-ctx.Done():
 		return false, ctx.Err()
