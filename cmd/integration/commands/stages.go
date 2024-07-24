@@ -1027,7 +1027,7 @@ func stageExec(db kv.RwDB, ctx context.Context, logger log.Logger) error {
 	br, _ := blocksIO(db, logger)
 	cfg := stagedsync.StageExecuteBlocksCfg(db, pm, batchSize, chainConfig, engine, vmConfig, nil,
 		/*stateStream=*/ false,
-		/*badBlockHalt=*/ true, dirs, br, nil, genesis, syncCfg, agg, nil)
+		/*badBlockHalt=*/ true, false, dirs, br, nil, genesis, syncCfg, agg, nil)
 
 	if unwind > 0 {
 		if err := db.View(ctx, func(tx kv.Tx) error {
@@ -1500,6 +1500,7 @@ func newSync(ctx context.Context, db kv.RwDB, miningConfig *params.MiningConfig,
 				notifications.Accumulator,
 				cfg.StateStream,
 				/*stateStream=*/ false,
+				false,
 				dirs,
 				blockReader,
 				sentryControlServer.Hd,
