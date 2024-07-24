@@ -20,6 +20,8 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
+	"github.com/c2h5oh/datasize"
+	"unsafe"
 
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/log/v3"
@@ -54,9 +56,9 @@ func NewBpsTree(kv ArchiveGetter, offt *eliasfano32.EliasFano, M uint64, dataLoo
 }
 
 type BpsTree struct {
-	offt  *eliasfano32.EliasFano
-	mx    [][]Node
-	M     uint64
+	offt  *eliasfano32.EliasFano // ef with offsets to key/vals
+	mx    []Node
+	M     uint64 // limit on amount of 'children' for node
 	trace bool
 
 	dataLookupFunc dataLookupFunc
@@ -68,6 +70,7 @@ type BpsTreeIterator struct {
 	i uint64
 }
 
+// Di returns ordinal number of current key in the tree
 func (it *BpsTreeIterator) Di() uint64 {
 	return it.i
 }
@@ -124,89 +127,64 @@ func (it *BpsTreeIterator) Next() bool {
 //}
 
 type Node struct {
-	off    uint64
-	di     uint64
-	prefix []byte
+	off uint64 // offset in kv file to key
+	di  uint64 // key ordinal number in kv
+	key []byte
 }
 
 func (b *BpsTree) WarmUp(kv ArchiveGetter) error {
-	k := b.offt.Count()
-	if k == 0 {
+	N := b.offt.Count()
+	if N == 0 {
 		return nil
 	}
 	// Value cacheNodesPerM should be tuned along with M. For M=256, cacheNodesPerM=2 is optimal, while 8 could be already too much.
 	// `cacheNodesPerM = 1` means that we put only each parent node into cache, while `cacheNodesPerM = M` means that we put all nodes into cache.
-	var (
-		cacheNodesPerM   = uint64(2)
-		currentLevelSize = k
+	const cacheNodesPerM = uint64(2)
+	b.mx = make([]Node, 0, N/b.M/cacheNodesPerM)
+	if b.trace {
+		fmt.Printf("mx cap %d N=%d M=%d cM=%d\n", cap(b.mx), N, b.M, cacheNodesPerM)
+	}
 
-		mx = make([][]Node, 0) // usually `d` but for experiments we put them all into flat list
-		l  = -1
-	)
-
-	for currentLevelSize > 1 {
-		var nextLevel []Node
-		for i := b.M / cacheNodesPerM; i < currentLevelSize; i += b.M / cacheNodesPerM {
-			di := i - 1
-			if l >= 0 {
-				di = mx[l][di].di - 1
-			}
-			_, key, err := b.keyCmpFunc(nil, di, kv)
-			if err != nil {
-				return err
-			}
-			nextLevel = append(nextLevel, Node{off: b.offt.Get(di), prefix: common.Copy(key), di: di})
+	// extremely stupid picking of needed nodes:
+	cachedBytes := uint64(0)
+	nsz := uint64(unsafe.Sizeof(Node{}))
+	for i := b.M / cacheNodesPerM; i < N; i += b.M / cacheNodesPerM {
+		di := i - 1
+		_, key, err := b.keyCmpFunc(nil, di, kv)
+		if err != nil {
+			return err
 		}
-		l++
-		currentLevelSize = uint64(len(nextLevel))
-		mx = append(mx, nextLevel)
-	}
-	// turn around mx
-	for i, j := 0, len(mx)-1; i < j; i, j = i+1, j-1 {
-		mx[i], mx[j] = mx[j], mx[i]
+		b.mx = append(b.mx, Node{off: b.offt.Get(di), key: common.Copy(key), di: di})
+		cachedBytes += nsz + uint64(len(key))
 	}
 
-	//b.trace = true
-	c := 0
-	for i := 0; i < len(mx); i++ {
-		c += len(mx[i])
-		if b.trace {
-			fmt.Printf("WarmUp %d: ", i)
-			for j := 0; j < len(mx[i]); j++ {
-				//fmt.Printf("mx[%d][%d] %x %d %d\n", i, j, mx[i][j].prefix, mx[i][j].off, mx[i][j].di)
-				fmt.Printf("%d ", mx[i][j].di)
-			}
-			fmt.Printf("\n")
-		}
-	}
-	log.Root().Debug("WarmUp finished", "file", kv.FileName(), "M", b.M, "depth", len(mx), "total offsets", k, "cached", c, "cached %", float64(c)/float64(k)*100)
-	b.mx = mx
+	log.Root().Info("WarmUp finished", "file", kv.FileName(), "M", b.M, "N", N,
+		"cached", fmt.Sprintf("%d %%%.5f", len(b.mx), float64(len(b.mx))/float64(N)*100),
+		"cacheSize", datasize.ByteSize(cachedBytes).HR(), "fileSize", datasize.ByteSize(kv.Size()).HR())
 	return nil
 }
 
+// bs performs pre-seach over warmed-up list of nodes to figure out left and right bounds on di for key
 func (b *BpsTree) bs(x []byte) (n Node, dl, dr uint64) {
 	dr = b.offt.Count()
-	for d, row := range b.mx {
-		m, l, r := 0, 0, len(row) //nolint
-		for l < r {
-			m = (l + r) >> 1
-			n = row[m]
+	m, l, r := 0, 0, len(b.mx) //nolint
+	for l < r {
+		m = (l + r) >> 1
+		n = b.mx[m]
 
-			if b.trace {
-				fmt.Printf("bs[%d][%d] i=%d %x\n", d, m, n.di, n.prefix)
-			}
-			switch bytes.Compare(n.prefix, x) {
-			case 0:
-				return n, n.di, n.di
-			case 1:
-				r = m
-				dr = n.di
-			case -1:
-				l = m + 1
-				dl = n.di
-			}
+		if b.trace {
+			fmt.Printf("bs di:%d k:%x\n", n.di, n.key)
 		}
-
+		switch bytes.Compare(n.key, x) {
+		case 0:
+			return n, n.di, n.di
+		case 1:
+			r = m
+			dr = n.di
+		case -1:
+			l = m + 1
+			dl = n.di
+		}
 	}
 	return n, dl, dr
 }
@@ -227,21 +205,14 @@ func (b *BpsTree) Seek(g ArchiveGetter, key []byte) (skey []byte, di uint64, fou
 		return skey, 0, cmp == 0, nil
 	}
 
-	l, r := uint64(0), b.offt.Count()
 	if b.trace {
-		fmt.Printf("seek %x [%d %d]\n", key, l, r)
+		fmt.Printf("seek %x\n", key)
 	}
-	defer func() {
-		if b.trace {
-			fmt.Printf("found %x [%d %d]\n", key, l, r)
-		}
-	}()
-
-	n, dl, dr := b.bs(key)
+	n, l, r := b.bs(key) // l===r when key is found
 	if b.trace {
-		fmt.Printf("pivot %d n %x [%d %d]\n", n.di, n.prefix, dl, dr)
+		fmt.Printf("pivot di:%d di(LR): [%d %d] k: %x found: %t\n", n.di, l, r, n.key, l == r)
+		defer func() { fmt.Printf("found %x [%d %d]\n", key, l, r) }()
 	}
-	l, r = dl, dr
 
 	var m uint64
 	var cmp int
@@ -252,7 +223,7 @@ func (b *BpsTree) Seek(g ArchiveGetter, key []byte) (skey []byte, di uint64, fou
 			return nil, 0, false, err
 		}
 		if b.trace {
-			fmt.Printf("lr %x [%d %d]\n", skey, l, r)
+			fmt.Printf("fs di:[%d %d] k: %x\n", l, r, skey)
 		}
 
 		switch cmp {
@@ -289,21 +260,15 @@ func (b *BpsTree) Get(g ArchiveGetter, key []byte) ([]byte, bool, uint64, error)
 		return v0, true, 0, nil
 	}
 
-	l, r := uint64(0), b.offt.Count()
 	if b.trace {
-		fmt.Printf("seek %x [%d %d]\n", key, l, r)
+		fmt.Printf("get %x\n", key)
 	}
-	defer func() {
-		if b.trace {
-			fmt.Printf("found %x [%d %d]\n", key, l, r)
-		}
-	}()
+	n, l, r := b.bs(key) // l===r when key is found
+	if b.trace {
+		fmt.Printf("pivot di: %d di(LR): [%d %d] k: %x found: %t\n", n.di, l, r, n.key, l == r)
+		defer func() { fmt.Printf("found %x [%d %d]\n", key, l, r) }()
+	}
 
-	n, dl, dr := b.bs(key)
-	if b.trace {
-		fmt.Printf("pivot %d n %x [%d %d]\n", n.di, n.prefix, dl, dr)
-	}
-	l, r = dl, dr
 	var m uint64
 	for l < r {
 		m = (l + r) >> 1
