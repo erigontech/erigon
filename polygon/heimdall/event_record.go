@@ -55,6 +55,21 @@ func (e *EventRecordWithTime) BuildEventRecord() *EventRecord {
 	}
 }
 
+func (e *EventRecordWithTime) Pack(stateContract abi.ABI) (rlp.RawValue, error) {
+	eventRecordWithoutTime := e.BuildEventRecord()
+	recordBytes, err := rlp.EncodeToBytes(eventRecordWithoutTime)
+	if err != nil {
+		return nil, err
+	}
+
+	data, err := stateContract.Pack("commitState", big.NewInt(e.Time.Unix()), recordBytes)
+	if err != nil {
+		return nil, err
+	}
+
+	return data, nil
+}
+
 func UnpackEventRecordWithTime(stateContract abi.ABI, encodedEvent rlp.RawValue) (*EventRecordWithTime, error) {
 	commitStateInputs := stateContract.Methods["commitState"].Inputs
 	methodId := stateContract.Methods["commitState"].ID

@@ -607,6 +607,9 @@ func (cr ChainReaderImpl) GetTd(hash libcommon.Hash, number uint64) *big.Int {
 func (cr ChainReaderImpl) FrozenBlocks() uint64 {
 	return cr.blockReader.FrozenBlocks()
 }
+func (cr ChainReaderImpl) FrozenBorBlocks() uint64 {
+	return cr.blockReader.FrozenBorBlocks()
+}
 func (cr ChainReaderImpl) GetBlock(hash libcommon.Hash, number uint64) *types.Block {
 	b, _, _ := cr.blockReader.BlockWithSenders(context.Background(), cr.tx, hash, number)
 	return b

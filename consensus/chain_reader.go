@@ -4,11 +4,12 @@ import (
 	"context"
 	"math/big"
 
+	"github.com/ledgerwatch/log/v3"
+
 	"github.com/ledgerwatch/erigon-lib/chain"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/turbo/services"
-	"github.com/ledgerwatch/log/v3"
 
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/types"
@@ -77,6 +78,10 @@ func (cr ChainReaderImpl) GetTd(hash libcommon.Hash, number uint64) *big.Int {
 
 func (cr ChainReaderImpl) FrozenBlocks() uint64 {
 	return cr.BlockReader.FrozenBlocks()
+}
+
+func (cr ChainReaderImpl) FrozenBorBlocks() uint64 {
+	return cr.BlockReader.FrozenBorBlocks()
 }
 
 func (cr ChainReaderImpl) BorSpan(spanId uint64) []byte {

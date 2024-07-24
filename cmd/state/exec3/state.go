@@ -277,6 +277,9 @@ func (cr ChainReader) GetTd(hash libcommon.Hash, number uint64) *big.Int {
 func (cr ChainReader) FrozenBlocks() uint64 {
 	return cr.blockReader.FrozenBlocks()
 }
+func (cr ChainReader) FrozenBorBlocks() uint64 {
+	return cr.blockReader.FrozenBorBlocks()
+}
 func (cr ChainReader) GetBlock(hash libcommon.Hash, number uint64) *types.Block {
 	panic("")
 }
