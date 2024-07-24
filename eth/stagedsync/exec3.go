@@ -988,6 +988,7 @@ Loop:
 
 					tt = time.Now()
 					applyTx.CollectMetrics()
+
 					if !useExternalTx {
 						tt = time.Now()
 						if err = applyTx.Commit(); err != nil {
@@ -1015,6 +1016,11 @@ Loop:
 					return nil
 				}(); err != nil {
 					return err
+				}
+
+				// on chain-tip: if batch is full then stop execution - to allow stages commit
+				if !execStage.CurrentSyncCycle.IsInitialCycle {
+					break Loop
 				}
 				logger.Info("Committed", "time", time.Since(commitStart),
 					"block", doms.BlockNum(), "txNum", doms.TxNum(),
