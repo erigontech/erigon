@@ -11,8 +11,8 @@ import (
 
 var (
 	// metrics
-	metricValidatorAttHit  = metrics.GetOrCreateCounter("validator_attester_hit")
-	metricValidatorAttMiss = metrics.GetOrCreateCounter("validator_attester_miss")
+	metricValidatorAttHit  = metrics.GetOrCreateCounter("validator_attestation_hit")
+	metricValidatorAttMiss = metrics.GetOrCreateCounter("validator_attestation_miss")
 )
 
 type ValidatorMonitorImpl struct {
