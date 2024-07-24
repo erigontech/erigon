@@ -852,6 +852,7 @@ Loop:
 			inputTxNum++
 		}
 		if shouldGenerateChangesetsForBlock {
+			fmt.Println(blockNum, "generate changeset")
 			aggTx := applyTx.(state2.HasAggTx).AggTx().(*state2.AggregatorRoTx)
 			aggTx.RestrictSubsetFileDeletions(true)
 			start := time.Now()
