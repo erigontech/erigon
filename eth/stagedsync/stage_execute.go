@@ -82,8 +82,9 @@ type ExecuteBlockCfg struct {
 	genesis   *types.Genesis
 	agg       *libstate.Aggregator
 
-	silkworm        *silkworm.Silkworm
-	blockProduction bool
+	silkworm                *silkworm.Silkworm
+	blockProduction         bool
+	alwaysGenerateChangeSet bool
 }
 
 func StageExecuteBlocksCfg(
@@ -96,6 +97,7 @@ func StageExecuteBlocksCfg(
 	accumulator *shards.Accumulator,
 	stateStream bool,
 	badBlockHalt bool,
+	alwaysGenerateChangeSet bool,
 
 	dirs datadir.Dirs,
 	blockReader services.FullBlockReader,
@@ -106,23 +108,24 @@ func StageExecuteBlocksCfg(
 	silkworm *silkworm.Silkworm,
 ) ExecuteBlockCfg {
 	return ExecuteBlockCfg{
-		db:           db,
-		prune:        pm,
-		batchSize:    batchSize,
-		chainConfig:  chainConfig,
-		engine:       engine,
-		vmConfig:     vmConfig,
-		dirs:         dirs,
-		accumulator:  accumulator,
-		stateStream:  stateStream,
-		badBlockHalt: badBlockHalt,
-		blockReader:  blockReader,
-		hd:           hd,
-		genesis:      genesis,
-		historyV3:    true,
-		syncCfg:      syncCfg,
-		agg:          agg,
-		silkworm:     silkworm,
+		db:                      db,
+		prune:                   pm,
+		batchSize:               batchSize,
+		chainConfig:             chainConfig,
+		engine:                  engine,
+		vmConfig:                vmConfig,
+		dirs:                    dirs,
+		accumulator:             accumulator,
+		stateStream:             stateStream,
+		badBlockHalt:            badBlockHalt,
+		blockReader:             blockReader,
+		hd:                      hd,
+		genesis:                 genesis,
+		historyV3:               true,
+		syncCfg:                 syncCfg,
+		agg:                     agg,
+		silkworm:                silkworm,
+		alwaysGenerateChangeSet: alwaysGenerateChangeSet,
 	}
 }
 
