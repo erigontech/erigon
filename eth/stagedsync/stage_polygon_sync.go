@@ -310,7 +310,7 @@ type polygonSyncStageHeimdallStore struct {
 	spans       *polygonSyncStageSpanStore
 }
 
-func (s polygonSyncStageHeimdallStore) AccumProducerPriorities() heimdall.EntityStore[*heimdall.SpanAccumProposerPriorities] {
+func (s polygonSyncStageHeimdallStore) SpanBlockProducerSelections() heimdall.EntityStore[*heimdall.SpanBlockProducerSelection] {
 	//TODO implement me
 	panic("implement me")
 }

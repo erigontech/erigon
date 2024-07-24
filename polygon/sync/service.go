@@ -65,7 +65,7 @@ func NewService(
 	milestoneVerifier := VerifyMilestoneHeaders
 	blocksVerifier := VerifyBlocks
 	p2pService := p2p.NewService(maxPeers, logger, sentryClient, statusDataProvider.GetStatusData)
-	heimdallService := heimdall.AssembleService(heimdallUrl, dataDir, tmpDir, logger)
+	heimdallService := heimdall.AssembleService(borConfig, heimdallUrl, dataDir, tmpDir, logger)
 	execution := NewExecutionClient(executionClient)
 	store := NewStore(logger, execution, polygonBridge)
 	blockDownloader := NewBlockDownloader(

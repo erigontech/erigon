@@ -26,6 +26,7 @@ import (
 
 	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/polygon/bor/borcfg"
 	"github.com/erigontech/erigon/polygon/polygoncommon"
 )
 
@@ -39,19 +40,20 @@ type Service interface {
 }
 
 type service struct {
-	store             ServiceStore
-	checkpointScraper *scraper[*Checkpoint]
-	milestoneScraper  *scraper[*Milestone]
-	spanScraper       *scraper[*Span]
+	store                     ServiceStore
+	checkpointScraper         *scraper[*Checkpoint]
+	milestoneScraper          *scraper[*Milestone]
+	spanScraper               *scraper[*Span]
+	spanBlockProducersTracker spanBlockProducersTracker
 }
 
-func AssembleService(heimdallUrl string, dataDir string, tmpDir string, logger log.Logger) Service {
+func AssembleService(borConfig *borcfg.BorConfig, heimdallUrl string, dataDir string, tmpDir string, logger log.Logger) Service {
 	store := NewMdbxServiceStore(logger, dataDir, tmpDir)
 	client := NewHeimdallClient(heimdallUrl, logger)
-	return NewService(client, store, logger)
+	return NewService(borConfig, client, store, logger)
 }
 
-func NewService(client HeimdallClient, store ServiceStore, logger log.Logger) Service {
+func NewService(borConfig *borcfg.BorConfig, client HeimdallClient, store ServiceStore, logger log.Logger) Service {
 	checkpointFetcher := newCheckpointFetcher(client, logger)
 	milestoneFetcher := newMilestoneFetcher(client, logger)
 	spanFetcher := newSpanFetcher(client, logger)
@@ -82,6 +84,12 @@ func NewService(client HeimdallClient, store ServiceStore, logger log.Logger) Se
 		checkpointScraper: checkpointScraper,
 		milestoneScraper:  milestoneScraper,
 		spanScraper:       spanScraper,
+		spanBlockProducersTracker: spanBlockProducersTracker{
+			logger:    logger,
+			borConfig: borConfig,
+			store:     store.SpanBlockProducerSelections(),
+			newSpans:  make(chan *Span),
+		},
 	}
 }
 
@@ -220,9 +228,14 @@ func (s *service) Run(ctx context.Context) error {
 		return nil
 	}
 
-	scrapersGroup, scrapersGroupCtx := errgroup.WithContext(ctx)
-	scrapersGroup.Go(func() error { return s.checkpointScraper.Run(scrapersGroupCtx) })
-	scrapersGroup.Go(func() error { return s.milestoneScraper.Run(scrapersGroupCtx) })
-	scrapersGroup.Go(func() error { return s.spanScraper.Run(scrapersGroupCtx) })
-	return scrapersGroup.Wait()
+	s.RegisterSpanObserver(func(span *Span) {
+		s.spanBlockProducersTracker.ObserveSpan(span)
+	})
+
+	eg, ctx := errgroup.WithContext(ctx)
+	eg.Go(func() error { return s.checkpointScraper.Run(ctx) })
+	eg.Go(func() error { return s.milestoneScraper.Run(ctx) })
+	eg.Go(func() error { return s.spanScraper.Run(ctx) })
+	eg.Go(func() error { return s.spanBlockProducersTracker.Run(ctx) })
+	return eg.Wait()
 }

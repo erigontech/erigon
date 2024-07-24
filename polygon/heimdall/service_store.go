@@ -31,7 +31,7 @@ type ServiceStore interface {
 	Checkpoints() EntityStore[*Checkpoint]
 	Milestones() EntityStore[*Milestone]
 	Spans() EntityStore[*Span]
-	AccumProducerPriorities() EntityStore[*SpanAccumProposerPriorities]
+	SpanBlockProducerSelections() EntityStore[*SpanBlockProducerSelection]
 	Prepare(ctx context.Context) error
 	Close()
 }
@@ -57,7 +57,7 @@ type MdbxServiceStore struct {
 	spans       EntityStore[*Span]
 }
 
-func (s *MdbxServiceStore) AccumProducerPriorities() EntityStore[*SpanAccumProposerPriorities] {
+func (s *MdbxServiceStore) SpanBlockProducerSelections() EntityStore[*SpanBlockProducerSelection] {
 	//TODO implement me
 	panic("implement me")
 }

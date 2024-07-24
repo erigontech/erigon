@@ -16,9 +16,11 @@
 
 package heimdall
 
-import "github.com/erigontech/erigon/polygon/bor/valset"
+import (
+	"github.com/erigontech/erigon/polygon/bor/valset"
+)
 
-// SpanAccumProposerPriorities represents the block producer selection at each epoch
+// SpanBlockProducerSelection represents the block producer selection at each epoch
 // with their corresponding accumulated ProposerPriority.
 //
 // In the context of the bor chain, an epoch is equal to 1 span, while
@@ -26,8 +28,8 @@ import "github.com/erigontech/erigon/polygon/bor/valset"
 // This data type aims to make this distinction a bit more visible and is
 // intended to be used specifically for span based epochs.
 //
-// The difference between SpanAccumProposerPriorities and Span.SelectedProducers
-// is that SpanAccumProposerPriorities contains the correct accumulated
+// The difference between SpanBlockProducerSelection and Span.SelectedProducers
+// is that SpanBlockProducerSelection contains the correct accumulated
 // ProposerPriority for each selected producer, while Span.SelectedProducers
 // always has ProposerPriority=0.
 //
@@ -40,26 +42,26 @@ import "github.com/erigontech/erigon/polygon/bor/valset"
 // from span zero, create a valset.ValidatorSet, call IncrementProposerPriority(spanSprintCount)
 // and at every next span call bor.GetUpdatedValidatorSet(oldValidatorSet, span.SelectedProducers)
 // and repeat.
-type SpanAccumProposerPriorities struct {
+type SpanBlockProducerSelection struct {
 	SpanId     SpanId
 	StartBlock uint64
 	EndBlock   uint64
 	Producers  []*valset.Validator
 }
 
-var _ Entity = (*SpanAccumProposerPriorities)(nil)
+var _ Entity = (*SpanBlockProducerSelection)(nil)
 
-func (s *SpanAccumProposerPriorities) RawId() uint64 {
+func (s *SpanBlockProducerSelection) RawId() uint64 {
 	return uint64(s.SpanId)
 }
 
-func (s *SpanAccumProposerPriorities) BlockNumRange() ClosedRange {
+func (s *SpanBlockProducerSelection) BlockNumRange() ClosedRange {
 	return ClosedRange{
 		Start: s.StartBlock,
 		End:   s.EndBlock,
 	}
 }
 
-func (s *SpanAccumProposerPriorities) SetRawId(id uint64) {
+func (s *SpanBlockProducerSelection) SetRawId(id uint64) {
 	s.SpanId = SpanId(id)
 }

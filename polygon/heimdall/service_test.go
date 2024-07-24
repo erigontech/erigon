@@ -57,7 +57,7 @@ func TestSpanProducerSelection(t *testing.T) {
 	// do for span 0
 	spanZero := &Span{}
 	validatorSet := valset.NewValidatorSet(spanZero.Producers())
-	accumPriorities := SpanAccumProposerPriorities{
+	accumPriorities := SpanBlockProducerSelection{
 		SpanId:    SpanIdAt(0),
 		Producers: validatorSet.Validators,
 	}
@@ -69,7 +69,7 @@ func TestSpanProducerSelection(t *testing.T) {
 	newSpan := &Span{}
 	validatorSet = valset.GetUpdatedValidatorSet(validatorSet, newSpan.Producers(), logger)
 	validatorSet.IncrementProposerPriority(1)
-	accumPriorities = SpanAccumProposerPriorities{
+	accumPriorities = SpanBlockProducerSelection{
 		SpanId:    SpanId(1),
 		Producers: validatorSet.Validators,
 	}
