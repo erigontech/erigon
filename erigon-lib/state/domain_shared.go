@@ -446,12 +446,6 @@ func (sd *SharedDomains) replaceShortenedKeysInBranch(prefix []byte, branch comm
 					"decoded", fmt.Sprintf("step %d-%d; offt %d", s0, s1, decodeShorterKey(key)))
 				return nil, fmt.Errorf("replace back lost storage full key: %x", key)
 			}
-			v, _, err := sd.DomainGet(kv.StorageDomain, storagePlainKey, nil)
-			if err != nil {
-				return nil, err
-			}
-			sd.put(kv.StorageDomain, string(storagePlainKey), v)
-
 			return storagePlainKey, nil
 		}
 
@@ -466,11 +460,6 @@ func (sd *SharedDomains) replaceShortenedKeysInBranch(prefix []byte, branch comm
 				"decoded", fmt.Sprintf("step %d-%d; offt %d", s0, s1, decodeShorterKey(key)))
 			return nil, fmt.Errorf("replace back lost account full key: %x", key)
 		}
-		v, _, err := sd.DomainGet(kv.AccountsDomain, apkBuf, nil)
-		if err != nil {
-			return nil, err
-		}
-		sd.put(kv.AccountsDomain, string(apkBuf), v)
 		return apkBuf, nil
 	})
 }
