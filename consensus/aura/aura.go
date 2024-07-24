@@ -1,18 +1,18 @@
-// Copyright 2017 The go-ethereum Authors
-// This file is part of the go-ethereum library.
+// Copyright 2024 The Erigon Authors
+// This file is part of Erigon.
 //
-// The go-ethereum library is free software: you can redistribute it and/or modify
+// Erigon is free software: you can redistribute it and/or modify
 // it under the terms of the GNU Lesser General Public License as published by
 // the Free Software Foundation, either version 3 of the License, or
 // (at your option) any later version.
 //
-// The go-ethereum library is distributed in the hope that it will be useful,
+// Erigon is distributed in the hope that it will be useful,
 // but WITHOUT ANY WARRANTY; without even the implied warranty of
 // MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
 // GNU Lesser General Public License for more details.
 //
 // You should have received a copy of the GNU Lesser General Public License
-// along with the go-ethereum library. If not, see <http://www.gnu.org/licenses/>.
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
 package aura
 
@@ -25,22 +25,26 @@ import (
 	"time"
 
 	"github.com/holiman/uint256"
-	"github.com/ledgerwatch/log/v3"
 
-	"github.com/ledgerwatch/erigon-lib/chain"
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/erigontech/erigon-lib/common/dbg"
 
-	"github.com/ledgerwatch/erigon/consensus"
-	"github.com/ledgerwatch/erigon/consensus/clique"
-	"github.com/ledgerwatch/erigon/consensus/ethash"
-	"github.com/ledgerwatch/erigon/core/state"
-	"github.com/ledgerwatch/erigon/core/types"
-	"github.com/ledgerwatch/erigon/rlp"
-	"github.com/ledgerwatch/erigon/rpc"
+	"github.com/erigontech/erigon-lib/chain"
+	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/kv"
+	"github.com/erigontech/erigon-lib/log/v3"
+
+	"github.com/erigontech/erigon/consensus"
+	"github.com/erigontech/erigon/consensus/clique"
+	"github.com/erigontech/erigon/consensus/ethash"
+	"github.com/erigontech/erigon/core/state"
+	"github.com/erigontech/erigon/core/tracing"
+	"github.com/erigontech/erigon/core/types"
+	"github.com/erigontech/erigon/core/vm/evmtypes"
+	"github.com/erigontech/erigon/rlp"
+	"github.com/erigontech/erigon/rpc"
 )
 
-const DEBUG_LOG_FROM = 999_999_999
+var DEBUG_LOG_FROM = uint64(dbg.EnvInt("AURA_DEBUG_FROM", 999_999_999))
 
 /*
 Not implemented features from OS:
@@ -203,7 +207,7 @@ func (e *EpochManager) zoomToAfter(chain consensus.ChainHeaderReader, er *NonTra
 // / or transitions to.
 // / This will give the epoch that any children of this parent belong to.
 // /
-// / The block corresponding the the parent hash must be stored already.
+// / The block corresponding the parent hash must be stored already.
 // nolint
 func epochTransitionFor(chain consensus.ChainHeaderReader, e *NonTransactionalEpochReader, parentHash libcommon.Hash) (transition EpochTransition, ok bool) {
 	//TODO: probably this version of func doesn't support non-canonical epoch transitions
@@ -359,6 +363,9 @@ func (c *AuRa) Author(header *types.Header) (libcommon.Address, error) {
 // VerifyHeader checks whether a header conforms to the consensus rules.
 func (c *AuRa) VerifyHeader(chain consensus.ChainHeaderReader, header *types.Header, _ bool) error {
 	number := header.Number.Uint64()
+	if number == 0 {
+		return nil
+	}
 	parent := chain.GetHeader(header.ParentHash, number-1)
 	if parent == nil {
 		log.Error("consensus.ErrUnknownAncestor", "parentNum", number-1, "hash", header.ParentHash.String())
@@ -631,7 +638,7 @@ func (c *AuRa) Prepare(chain consensus.ChainHeaderReader, header *types.Header, 
 }
 
 func (c *AuRa) Initialize(config *chain.Config, chain consensus.ChainHeaderReader, header *types.Header,
-	state *state.IntraBlockState, syscallCustom consensus.SysCallCustom, logger log.Logger,
+	state *state.IntraBlockState, syscallCustom consensus.SysCallCustom, logger log.Logger, tracer *tracing.Hooks,
 ) {
 	blockNum := header.Number.Uint64()
 
@@ -692,18 +699,18 @@ func (c *AuRa) applyRewards(header *types.Header, state *state.IntraBlockState, 
 		return err
 	}
 	for _, r := range rewards {
-		state.AddBalance(r.Beneficiary, &r.Amount)
+		state.AddBalance(r.Beneficiary, &r.Amount, tracing.BalanceIncreaseRewardMineBlock)
 	}
 	return nil
 }
 
 // word `signal epoch` == word `pending epoch`
 func (c *AuRa) Finalize(config *chain.Config, header *types.Header, state *state.IntraBlockState, txs types.Transactions,
-	uncles []*types.Header, receipts types.Receipts, withdrawals []*types.Withdrawal,
+	uncles []*types.Header, receipts types.Receipts, withdrawals []*types.Withdrawal, requests types.Requests,
 	chain consensus.ChainReader, syscall consensus.SystemCall, logger log.Logger,
-) (types.Transactions, types.Receipts, error) {
+) (types.Transactions, types.Receipts, types.Requests, error) {
 	if err := c.applyRewards(header, state, syscall); err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 
 	// check_and_lock_block -> check_epoch_end_signal (after enact)
@@ -712,14 +719,14 @@ func (c *AuRa) Finalize(config *chain.Config, header *types.Header, state *state
 	}
 	pendingTransitionProof, err := c.cfg.Validators.signalEpochEnd(header.Number.Uint64() == 0, header, receipts)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 	if pendingTransitionProof != nil {
 		if header.Number.Uint64() >= DEBUG_LOG_FROM {
 			fmt.Printf("insert_pending_transition: %d,receipts=%d, lenProof=%d\n", header.Number.Uint64(), len(receipts), len(pendingTransitionProof))
 		}
 		if err = c.e.PutPendingEpoch(header.Hash(), header.Number.Uint64(), pendingTransitionProof); err != nil {
-			return nil, nil, err
+			return nil, nil, nil, err
 		}
 	}
 	// check_and_lock_block -> check_epoch_end_signal END
@@ -728,17 +735,17 @@ func (c *AuRa) Finalize(config *chain.Config, header *types.Header, state *state
 	c.EpochManager.finalityChecker.print(header.Number.Uint64())
 	epochEndProof, err := isEpochEnd(chain, c.e, finalized, header)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 	if epochEndProof != nil {
 		c.EpochManager.noteNewEpoch()
 		logger.Info("[aura] epoch transition", "block_num", header.Number.Uint64())
 		if err := c.e.PutEpoch(header.Hash(), header.Number.Uint64(), epochEndProof); err != nil {
-			return nil, nil, err
+			return nil, nil, nil, err
 		}
 	}
 
-	return txs, receipts, nil
+	return txs, receipts, nil, nil
 }
 
 func buildFinality(e *EpochManager, chain consensus.ChainHeaderReader, er *NonTransactionalEpochReader, validators ValidatorSet, header *types.Header, syscall consensus.SystemCall) []unAssembledHeader {
@@ -838,14 +845,14 @@ func allHeadersUntil(chain consensus.ChainHeaderReader, from *types.Header, to l
 //}
 
 // FinalizeAndAssemble implements consensus.Engine
-func (c *AuRa) FinalizeAndAssemble(config *chain.Config, header *types.Header, state *state.IntraBlockState, txs types.Transactions, uncles []*types.Header, receipts types.Receipts, withdrawals []*types.Withdrawal, chain consensus.ChainReader, syscall consensus.SystemCall, call consensus.Call, logger log.Logger) (*types.Block, types.Transactions, types.Receipts, error) {
-	outTxs, outReceipts, err := c.Finalize(config, header, state, txs, uncles, receipts, withdrawals, chain, syscall, logger)
+func (c *AuRa) FinalizeAndAssemble(config *chain.Config, header *types.Header, state *state.IntraBlockState, txs types.Transactions, uncles []*types.Header, receipts types.Receipts, withdrawals []*types.Withdrawal, requests types.Requests, chain consensus.ChainReader, syscall consensus.SystemCall, call consensus.Call, logger log.Logger) (*types.Block, types.Transactions, types.Receipts, error) {
+	outTxs, outReceipts, _, err := c.Finalize(config, header, state, txs, uncles, receipts, withdrawals, requests, chain, syscall, logger)
 	if err != nil {
 		return nil, nil, nil, err
 	}
 
 	// Assemble and return the final block for sealing
-	return types.NewBlock(header, outTxs, uncles, outReceipts, withdrawals), outTxs, outReceipts, nil
+	return types.NewBlock(header, outTxs, uncles, outReceipts, withdrawals, requests), outTxs, outReceipts, nil
 }
 
 // Authorize injects a private key into the consensus engine to mint new blocks
@@ -1097,7 +1104,7 @@ func (c *AuRa) IsServiceTransaction(sender libcommon.Address, syscall consensus.
 	}
 	res, err := certifierAbi().Unpack("certified", out)
 	if err != nil {
-		log.Warn("error while detecting service tx on AuRa", "err", err)
+		log.Warn("error while detecting service txn on AuRa", "err", err)
 		return false
 	}
 	if len(res) == 0 {
@@ -1217,6 +1224,14 @@ func (c *AuRa) ExecuteSystemWithdrawals(withdrawals []*types.Withdrawal, syscall
 		log.Warn("ExecuteSystemWithdrawals", "err", err)
 	}
 	return err
+}
+
+func (c *AuRa) GetTransferFunc() evmtypes.TransferFunc {
+	return consensus.Transfer
+}
+
+func (c *AuRa) GetPostApplyMessageFunc() evmtypes.PostApplyMessageFunc {
+	return nil
 }
 
 /*

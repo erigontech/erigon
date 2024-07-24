@@ -1,3 +1,19 @@
+// Copyright 2024 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+
 package rpc
 
 import (
@@ -8,22 +24,23 @@ import (
 	"io"
 	"time"
 
-	"github.com/ledgerwatch/erigon/cl/sentinel/communication"
-	"github.com/ledgerwatch/erigon/cl/sentinel/communication/ssz_snappy"
+	"github.com/erigontech/erigon/cl/sentinel/communication"
+	"github.com/erigontech/erigon/cl/sentinel/communication/ssz_snappy"
+	"github.com/erigontech/erigon/cl/utils/eth_clock"
 
 	"github.com/c2h5oh/datasize"
 	"github.com/golang/snappy"
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/gointerfaces"
-	"github.com/ledgerwatch/erigon-lib/gointerfaces/sentinel"
-	"github.com/ledgerwatch/log/v3"
 	"go.uber.org/zap/buffer"
 
-	"github.com/ledgerwatch/erigon/cl/clparams"
-	"github.com/ledgerwatch/erigon/cl/cltypes"
-	"github.com/ledgerwatch/erigon/cl/cltypes/solid"
-	"github.com/ledgerwatch/erigon/cl/fork"
-	"github.com/ledgerwatch/erigon/cl/utils"
+	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/gointerfaces"
+	sentinel "github.com/erigontech/erigon-lib/gointerfaces/sentinelproto"
+	"github.com/erigontech/erigon-lib/log/v3"
+
+	"github.com/erigontech/erigon/cl/clparams"
+	"github.com/erigontech/erigon/cl/cltypes"
+	"github.com/erigontech/erigon/cl/cltypes/solid"
+	"github.com/erigontech/erigon/cl/utils"
 )
 
 const maxMessageLength = 18 * datasize.MB
@@ -36,18 +53,18 @@ type BeaconRpcP2P struct {
 	sentinel sentinel.SentinelClient
 	// beaconConfig is the configuration for the beacon chain.
 	beaconConfig *clparams.BeaconChainConfig
-	// genesisConfig is the configuration for the genesis block of the beacon chain.
-	genesisConfig *clparams.GenesisConfig
+	// ethClock handles all time-related operations.
+	ethClock eth_clock.EthereumClock
 }
 
 // NewBeaconRpcP2P creates a new BeaconRpcP2P struct and returns a pointer to it.
 // It takes a context, a sentinel.Sent
-func NewBeaconRpcP2P(ctx context.Context, sentinel sentinel.SentinelClient, beaconConfig *clparams.BeaconChainConfig, genesisConfig *clparams.GenesisConfig) *BeaconRpcP2P {
+func NewBeaconRpcP2P(ctx context.Context, sentinel sentinel.SentinelClient, beaconConfig *clparams.BeaconChainConfig, ethClock eth_clock.EthereumClock) *BeaconRpcP2P {
 	return &BeaconRpcP2P{
-		ctx:           ctx,
-		sentinel:      sentinel,
-		beaconConfig:  beaconConfig,
-		genesisConfig: genesisConfig,
+		ctx:          ctx,
+		sentinel:     sentinel,
+		beaconConfig: beaconConfig,
+		ethClock:     ethClock,
 	}
 }
 
@@ -108,7 +125,7 @@ func (b *BeaconRpcP2P) sendBlocksRequest(ctx context.Context, topic string, reqD
 			return nil, message.Peer.Pid, fmt.Errorf("null fork digest")
 		}
 
-		version, err := fork.ForkDigestVersion(utils.Uint32ToBytes4(respForkDigest), b.beaconConfig, b.genesisConfig.GenesisValidatorRoot)
+		version, err := b.ethClock.StateVersionByForkDigest(utils.Uint32ToBytes4(respForkDigest))
 		if err != nil {
 			return nil, message.Peer.Pid, err
 		}
@@ -182,7 +199,7 @@ func (b *BeaconRpcP2P) sendBlobsSidecar(ctx context.Context, topic string, reqDa
 			return nil, message.Peer.Pid, fmt.Errorf("null fork digest")
 		}
 
-		version, err := fork.ForkDigestVersion(utils.Uint32ToBytes4(respForkDigest), b.beaconConfig, b.genesisConfig.GenesisValidatorRoot)
+		version, err := b.ethClock.StateVersionByForkDigest(utils.Uint32ToBytes4(respForkDigest))
 		if err != nil {
 			return nil, message.Peer.Pid, err
 		}
@@ -264,7 +281,7 @@ func (b *BeaconRpcP2P) Peers() (uint64, error) {
 }
 
 func (b *BeaconRpcP2P) SetStatus(finalizedRoot libcommon.Hash, finalizedEpoch uint64, headRoot libcommon.Hash, headSlot uint64) error {
-	forkDigest, err := fork.ComputeForkDigest(b.beaconConfig, b.genesisConfig)
+	forkDigest, err := b.ethClock.CurrentForkDigest()
 	if err != nil {
 		return err
 	}

@@ -1,18 +1,21 @@
 // Copyright 2019 The go-ethereum Authors
-// This file is part of the go-ethereum library.
+// (original work)
+// Copyright 2024 The Erigon Authors
+// (modifications)
+// This file is part of Erigon.
 //
-// The go-ethereum library is free software: you can redistribute it and/or modify
+// Erigon is free software: you can redistribute it and/or modify
 // it under the terms of the GNU Lesser General Public License as published by
 // the Free Software Foundation, either version 3 of the License, or
 // (at your option) any later version.
 //
-// The go-ethereum library is distributed in the hope that it will be useful,
+// Erigon is distributed in the hope that it will be useful,
 // but WITHOUT ANY WARRANTY; without even the implied warranty of
 // MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
 // GNU Lesser General Public License for more details.
 //
 // You should have received a copy of the GNU Lesser General Public License
-// along with the go-ethereum library. If not, see <http://www.gnu.org/licenses/>.
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
 package rpc
 
@@ -27,9 +30,10 @@ import (
 	"time"
 
 	jsoniter "github.com/json-iterator/go"
-	"github.com/ledgerwatch/log/v3"
 
-	"github.com/ledgerwatch/erigon/rpc/rpccfg"
+	"github.com/erigontech/erigon-lib/log/v3"
+
+	"github.com/erigontech/erigon/rpc/rpccfg"
 )
 
 // handler handles JSON-RPC messages. There is one handler per connection. Note that
@@ -578,9 +582,28 @@ func writeNilIfNotPresent(stream *jsoniter.Stream) {
 	} else {
 		hasNil = false
 	}
-	if !hasNil {
-		stream.WriteNil()
+	if hasNil {
+		// not needed
+		return
 	}
+
+	var validJsonEnd bool
+	if len(b) > 0 {
+		// assumption is that api call handlers would write valid json in case of errors
+		// we are not guaranteed that they did write valid json if last elem is "}" or "]"
+		// since we don't check json nested-ness
+		// however appending "null" after "}" or "]" does not help much either
+		lastIdx := len(b) - 1
+		validJsonEnd = b[lastIdx] == '}' || b[lastIdx] == ']'
+	}
+	if validJsonEnd {
+		// not needed
+		return
+	}
+
+	// does not have nil ending
+	// does not have valid json
+	stream.WriteNil()
 }
 
 // unsubscribe is the callback function for all *_unsubscribe calls.

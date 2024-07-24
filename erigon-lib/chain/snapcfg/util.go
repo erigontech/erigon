@@ -1,27 +1,44 @@
+// Copyright 2024 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+
 package snapcfg
 
 import (
 	_ "embed"
 	"encoding/json"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
 
-	"github.com/ledgerwatch/erigon-lib/chain/networkname"
-	"github.com/ledgerwatch/erigon-lib/downloader/snaptype"
-	snapshothashes "github.com/ledgerwatch/erigon-snapshot"
-	"github.com/ledgerwatch/erigon-snapshot/webseed"
 	"github.com/pelletier/go-toml/v2"
 	"github.com/tidwall/btree"
-	"golang.org/x/exp/slices"
+
+	snapshothashes "github.com/erigontech/erigon-snapshot"
+	"github.com/erigontech/erigon-snapshot/webseed"
+
+	"github.com/erigontech/erigon-lib/chain/networkname"
+	"github.com/erigontech/erigon-lib/downloader/snaptype"
 )
 
 var (
-	Mainnet = fromToml(snapshothashes.Mainnet)
-	// Holesky    = fromToml(snapshothashes.Holesky)
+	Mainnet    = fromToml(snapshothashes.Mainnet)
+	Holesky    = fromToml(snapshothashes.Holesky)
 	Sepolia    = fromToml(snapshothashes.Sepolia)
-	Goerli     = fromToml(snapshothashes.Goerli)
 	Mumbai     = fromToml(snapshothashes.Mumbai)
 	Amoy       = fromToml(snapshothashes.Amoy)
 	BorMainnet = fromToml(snapshothashes.BorMainnet)
@@ -79,13 +96,17 @@ func (p Preverified) Typed(types []snaptype.Type) Preverified {
 
 		parts := strings.Split(name, "-")
 		if len(parts) < 3 {
+			if strings.HasPrefix(p.Name, "domain") || strings.HasPrefix(p.Name, "history") || strings.HasPrefix(p.Name, "idx") {
+				bestVersions.Set(p.Name, p)
+				continue
+			}
 			continue
 		}
 		typeName, _ := strings.CutSuffix(parts[2], filepath.Ext(parts[2]))
 		include := false
 
 		for _, typ := range types {
-			if typeName == typ.String() {
+			if typeName == typ.Name() {
 				preferredVersion = typ.Versions().Current
 				minVersion = typ.Versions().MinSupported
 				include = true
@@ -137,12 +158,22 @@ func (p Preverified) Versioned(preferredVersion snaptype.Version, minVersion sna
 
 	for _, p := range p {
 		v, name, ok := strings.Cut(p.Name, "-")
-
 		if !ok {
+			if strings.HasPrefix(p.Name, "domain") || strings.HasPrefix(p.Name, "history") || strings.HasPrefix(p.Name, "idx") {
+				bestVersions.Set(p.Name, p)
+				continue
+			}
 			continue
 		}
 
 		parts := strings.Split(name, "-")
+		if len(parts) < 3 {
+			if strings.HasPrefix(p.Name, "domain") || strings.HasPrefix(p.Name, "history") || strings.HasPrefix(p.Name, "idx") {
+				bestVersions.Set(p.Name, p)
+				continue
+			}
+			continue
+		}
 		typeName, _ := strings.CutSuffix(parts[2], filepath.Ext(parts[2]))
 		include := false
 
@@ -280,32 +311,55 @@ type Cfg struct {
 }
 
 func (c Cfg) Seedable(info snaptype.FileInfo) bool {
-	mergeLimit := c.MergeLimit(info.From)
+	mergeLimit := c.MergeLimit(info.Type.Enum(), info.From)
 	return info.To-info.From == mergeLimit
 }
 
-func (c Cfg) MergeLimit(fromBlock uint64) uint64 {
-	for _, p := range c.Preverified {
-		if info, ok := snaptype.ParseFileName("", p.Name); ok && info.Ext == ".seg" {
-			if fromBlock >= info.From && fromBlock < info.To {
-				if info.Len() == snaptype.Erigon2MergeLimit ||
-					info.Len() == snaptype.Erigon2OldMergeLimit {
-					return info.Len()
-				}
+func (c Cfg) MergeLimit(t snaptype.Enum, fromBlock uint64) uint64 {
+	hasType := t == snaptype.MinCoreEnum
 
-				break
-			}
+	for _, p := range c.Preverified {
+		info, _, ok := snaptype.ParseFileName("", p.Name)
+		if !ok {
+			continue
 		}
+
+		if info.Ext != ".seg" || (t != snaptype.Unknown && t != info.Type.Enum()) {
+			continue
+		}
+
+		hasType = true
+
+		if fromBlock < info.From || fromBlock >= info.To {
+			continue
+		}
+
+		if info.Len() == snaptype.Erigon2MergeLimit ||
+			info.Len() == snaptype.Erigon2OldMergeLimit {
+			return info.Len()
+		}
+
+		break
 	}
 
-	return snaptype.Erigon2MergeLimit
+	// This should only get called the first time a new type is added and created - as it will
+	// not have previous history to check against
+
+	// BeaconBlocks && BlobSidecars follow their own slot based sharding scheme which is
+	// not the same as other snapshots which follow a block based sharding scheme
+	// TODO: If we add any more sharding schemes (we currently have blocks, state & beacon block schemes)
+	// - we may need to add some kind of sharding scheme identifier to snaptype.Type
+	if hasType || snaptype.IsCaplinType(t) {
+		return snaptype.Erigon2MergeLimit
+	}
+
+	return c.MergeLimit(snaptype.MinCoreEnum, fromBlock)
 }
 
 var knownPreverified = map[string]Preverified{
-	networkname.MainnetChainName: Mainnet,
-	// networkname.HoleskyChainName:    HoleskyChainSnapshotCfg,
+	networkname.MainnetChainName:    Mainnet,
+	networkname.HoleskyChainName:    Holesky,
 	networkname.SepoliaChainName:    Sepolia,
-	networkname.GoerliChainName:     Goerli,
 	networkname.MumbaiChainName:     Mumbai,
 	networkname.AmoyChainName:       Amoy,
 	networkname.BorMainnetChainName: BorMainnet,
@@ -313,27 +367,21 @@ var knownPreverified = map[string]Preverified{
 	networkname.ChiadoChainName:     Chiado,
 }
 
-var ethereumTypes = append(snaptype.BlockSnapshotTypes, snaptype.CaplinSnapshotTypes...)
-var borTypes = append(snaptype.BlockSnapshotTypes, snaptype.BorSnapshotTypes...)
-
-var knownTypes = map[string][]snaptype.Type{
-	networkname.MainnetChainName: ethereumTypes,
-	// networkname.HoleskyChainName:    HoleskyChainSnapshotCfg,
-	networkname.SepoliaChainName:    ethereumTypes,
-	networkname.GoerliChainName:     ethereumTypes,
-	networkname.MumbaiChainName:     borTypes,
-	networkname.AmoyChainName:       borTypes,
-	networkname.BorMainnetChainName: borTypes,
-	networkname.GnosisChainName:     ethereumTypes,
-	networkname.ChiadoChainName:     ethereumTypes,
+func RegisterKnownTypes(networkName string, types []snaptype.Type) {
+	knownTypes[networkName] = types
 }
 
+var knownTypes = map[string][]snaptype.Type{}
+
 func Seedable(networkName string, info snaptype.FileInfo) bool {
+	if networkName == "" {
+		panic("empty network name")
+	}
 	return KnownCfg(networkName).Seedable(info)
 }
 
-func MergeLimit(networkName string, fromBlock uint64) uint64 {
-	return KnownCfg(networkName).MergeLimit(fromBlock)
+func MergeLimit(networkName string, snapType snaptype.Enum, fromBlock uint64) uint64 {
+	return KnownCfg(networkName).MergeLimit(snapType, fromBlock)
 }
 
 func MaxSeedableSegment(chain string, dir string) uint64 {
@@ -341,7 +389,7 @@ func MaxSeedableSegment(chain string, dir string) uint64 {
 
 	if list, err := snaptype.Segments(dir); err == nil {
 		for _, info := range list {
-			if Seedable(chain, info) && info.Type.Enum() == snaptype.Enums.Headers && info.To > max {
+			if Seedable(chain, info) && info.Type.Enum() == snaptype.MinCoreEnum && info.To > max {
 				max = info.To
 			}
 		}
@@ -352,8 +400,8 @@ func MaxSeedableSegment(chain string, dir string) uint64 {
 
 var oldMergeSteps = append([]uint64{snaptype.Erigon2OldMergeLimit}, snaptype.MergeSteps...)
 
-func MergeSteps(networkName string, fromBlock uint64) []uint64 {
-	mergeLimit := MergeLimit(networkName, fromBlock)
+func MergeSteps(networkName string, snapType snaptype.Enum, fromBlock uint64) []uint64 {
+	mergeLimit := MergeLimit(networkName, snapType, fromBlock)
 
 	if mergeLimit == snaptype.Erigon2OldMergeLimit {
 		return oldMergeSteps
@@ -365,11 +413,9 @@ func MergeSteps(networkName string, fromBlock uint64) []uint64 {
 // KnownCfg return list of preverified hashes for given network, but apply whiteList filter if it's not empty
 func KnownCfg(networkName string) *Cfg {
 	c, ok := knownPreverified[networkName]
-
 	if !ok {
 		return newCfg(networkName, Preverified{})
 	}
-
 	return newCfg(networkName, c.Typed(knownTypes[networkName]))
 }
 
@@ -386,12 +432,12 @@ func VersionedCfg(networkName string, preferred snaptype.Version, min snaptype.V
 var KnownWebseeds = map[string][]string{
 	networkname.MainnetChainName:    webseedsParse(webseed.Mainnet),
 	networkname.SepoliaChainName:    webseedsParse(webseed.Sepolia),
-	networkname.GoerliChainName:     webseedsParse(webseed.Goerli),
 	networkname.MumbaiChainName:     webseedsParse(webseed.Mumbai),
 	networkname.AmoyChainName:       webseedsParse(webseed.Amoy),
 	networkname.BorMainnetChainName: webseedsParse(webseed.BorMainnet),
 	networkname.GnosisChainName:     webseedsParse(webseed.Gnosis),
 	networkname.ChiadoChainName:     webseedsParse(webseed.Chiado),
+	networkname.HoleskyChainName:    webseedsParse(webseed.Holesky),
 }
 
 func webseedsParse(in []byte) (res []string) {

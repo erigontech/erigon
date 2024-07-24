@@ -1,19 +1,36 @@
+// Copyright 2024 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+
 package app
 
 import (
 	"fmt"
-	"github.com/ledgerwatch/erigon-lib/common"
 	"os"
 	"path/filepath"
 
+	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/kv/backup"
+
 	"github.com/c2h5oh/datasize"
-	"github.com/ledgerwatch/erigon-lib/common/datadir"
-	"github.com/ledgerwatch/erigon-lib/common/dir"
-	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon/cmd/utils"
-	"github.com/ledgerwatch/erigon/cmd/utils/flags"
-	"github.com/ledgerwatch/erigon/turbo/backup"
-	"github.com/ledgerwatch/erigon/turbo/debug"
+	"github.com/erigontech/erigon-lib/common/datadir"
+	"github.com/erigontech/erigon-lib/common/dir"
+	"github.com/erigontech/erigon-lib/kv"
+	"github.com/erigontech/erigon/cmd/utils"
+	"github.com/erigontech/erigon/cmd/utils/flags"
+	"github.com/erigontech/erigon/turbo/debug"
 	"github.com/urfave/cli/v2"
 )
 
@@ -54,7 +71,7 @@ var (
 		Required: true,
 	}
 	BackupLabelsFlag = cli.StringFlag{
-		Name:  "lables",
+		Name:  "labels",
 		Usage: "Name of component to backup. Example: chaindata,txpool,downloader",
 	}
 	BackupTablesFlag = cli.StringFlag{
@@ -76,7 +93,7 @@ CloudDrives (and ssd) have bad-latency and good-parallel-throughput - then havin
 )
 
 func doBackup(cliCtx *cli.Context) error {
-	logger, _, err := debug.Setup(cliCtx, true /* rootLogger */)
+	logger, _, _, err := debug.Setup(cliCtx, true /* rootLogger */)
 	if err != nil {
 		return err
 	}
@@ -125,7 +142,11 @@ func doBackup(cliCtx *cli.Context) error {
 			panic(fmt.Sprintf("unexpected: %+v", label))
 		}
 
-		if !dir.Exist(from) {
+		exists, err := dir.Exist(from)
+		if err != nil {
+			return err
+		}
+		if !exists {
 			continue
 		}
 

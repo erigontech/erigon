@@ -1,5 +1,5 @@
 # syntax = docker/dockerfile:1.2
-FROM docker.io/library/golang:1.21-alpine3.17 AS builder
+FROM docker.io/library/golang:1.22-alpine3.19 AS builder
 
 RUN apk --no-cache add build-base linux-headers git bash ca-certificates libstdc++
 
@@ -18,7 +18,7 @@ RUN --mount=type=cache,target=/root/.cache \
     make BUILD_TAGS=nosqlite,noboltdb,nosilkworm all
 
 
-FROM docker.io/library/golang:1.21-alpine3.17 AS tools-builder
+FROM docker.io/library/golang:1.22-alpine3.19 AS tools-builder
 RUN apk --no-cache add build-base linux-headers git bash ca-certificates libstdc++
 WORKDIR /app
 
@@ -36,7 +36,7 @@ RUN --mount=type=cache,target=/root/.cache \
     --mount=type=cache,target=/go/pkg/mod \
     make db-tools
 
-FROM docker.io/library/alpine:3.17
+FROM docker.io/library/alpine:3.19
 
 # install required runtime libs, along with some helpers for debugging
 RUN apk add --no-cache ca-certificates libstdc++ tzdata
@@ -102,7 +102,7 @@ LABEL org.label-schema.build-date=$BUILD_DATE \
       org.label-schema.schema-version="1.0" \
       org.label-schema.url="https://torquem.ch" \
       org.label-schema.vcs-ref=$VCS_REF \
-      org.label-schema.vcs-url="https://github.com/ledgerwatch/erigon.git" \
+      org.label-schema.vcs-url="https://github.com/erigontech/erigon.git" \
       org.label-schema.vendor="Torquem" \
       org.label-schema.version=$VERSION
 

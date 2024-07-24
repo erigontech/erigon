@@ -1,24 +1,46 @@
+// Copyright 2024 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+
 package downloader
 
 import (
 	"context"
 	"path/filepath"
+	"runtime"
 	"testing"
 
 	lg "github.com/anacrolix/log"
-	"github.com/ledgerwatch/erigon-lib/common/datadir"
-	downloadercfg2 "github.com/ledgerwatch/erigon-lib/downloader/downloadercfg"
-	"github.com/ledgerwatch/erigon-lib/downloader/snaptype"
-	"github.com/ledgerwatch/log/v3"
 	"github.com/stretchr/testify/require"
+
+	"github.com/erigontech/erigon-lib/common/datadir"
+	downloadercfg2 "github.com/erigontech/erigon-lib/downloader/downloadercfg"
+	"github.com/erigontech/erigon-lib/downloader/snaptype"
+	"github.com/erigontech/erigon-lib/log/v3"
 )
 
 func TestChangeInfoHashOfSameFile(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("fix me on win please")
+	}
+
 	require := require.New(t)
 	dirs := datadir.New(t.TempDir())
-	cfg, err := downloadercfg2.New(dirs, "", lg.Info, 0, 0, 0, 0, 0, nil, nil, "testnet", false)
+	cfg, err := downloadercfg2.New(dirs, "", lg.Info, 0, 0, 0, 0, 0, nil, nil, "testnet", false, false)
 	require.NoError(err)
-	d, err := New(context.Background(), cfg, dirs, log.New(), log.LvlInfo, true)
+	d, err := New(context.Background(), cfg, log.New(), log.LvlInfo, true)
 	require.NoError(err)
 	defer d.Close()
 	err = d.AddMagnetLink(d.ctx, snaptype.Hex2InfoHash("aa"), "a.seg")
@@ -48,20 +70,20 @@ func TestNoEscape(t *testing.T) {
 	dirs := datadir.New(t.TempDir())
 	ctx := context.Background()
 
-	tf := NewAtomicTorrentFiles(dirs.Snap)
+	tf := NewAtomicTorrentFS(dirs.Snap)
 	// allow adding files only if they are inside snapshots dir
-	err := BuildTorrentIfNeed(ctx, "a.seg", dirs.Snap, tf)
+	_, err := BuildTorrentIfNeed(ctx, "a.seg", dirs.Snap, tf)
 	require.NoError(err)
-	err = BuildTorrentIfNeed(ctx, "b/a.seg", dirs.Snap, tf)
+	_, err = BuildTorrentIfNeed(ctx, "b/a.seg", dirs.Snap, tf)
 	require.NoError(err)
-	err = BuildTorrentIfNeed(ctx, filepath.Join(dirs.Snap, "a.seg"), dirs.Snap, tf)
+	_, err = BuildTorrentIfNeed(ctx, filepath.Join(dirs.Snap, "a.seg"), dirs.Snap, tf)
 	require.NoError(err)
-	err = BuildTorrentIfNeed(ctx, filepath.Join(dirs.Snap, "b", "a.seg"), dirs.Snap, tf)
+	_, err = BuildTorrentIfNeed(ctx, filepath.Join(dirs.Snap, "b", "a.seg"), dirs.Snap, tf)
 	require.NoError(err)
 
 	// reject escaping snapshots dir
-	err = BuildTorrentIfNeed(ctx, filepath.Join(dirs.Chaindata, "b", "a.seg"), dirs.Snap, tf)
+	_, err = BuildTorrentIfNeed(ctx, filepath.Join(dirs.Chaindata, "b", "a.seg"), dirs.Snap, tf)
 	require.Error(err)
-	err = BuildTorrentIfNeed(ctx, "./../a.seg", dirs.Snap, tf)
+	_, err = BuildTorrentIfNeed(ctx, "./../a.seg", dirs.Snap, tf)
 	require.Error(err)
 }

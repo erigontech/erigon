@@ -1,13 +1,31 @@
+// Copyright 2024 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+
 package forkchoice
 
 import (
-	"github.com/ledgerwatch/erigon-lib/common"
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon/cl/cltypes"
-	"github.com/ledgerwatch/erigon/cl/cltypes/solid"
-	"github.com/ledgerwatch/erigon/cl/phase1/core/state"
-	"github.com/ledgerwatch/erigon/cl/phase1/execution_client"
-	"github.com/ledgerwatch/erigon/cl/transition/impl/eth2"
+	"context"
+
+	"github.com/erigontech/erigon-lib/common"
+	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon/cl/cltypes"
+	"github.com/erigontech/erigon/cl/cltypes/solid"
+	"github.com/erigontech/erigon/cl/phase1/core/state"
+	"github.com/erigontech/erigon/cl/phase1/execution_client"
+	"github.com/erigontech/erigon/cl/transition/impl/eth2"
 )
 
 type ForkChoiceStorage interface {
@@ -28,9 +46,15 @@ type ForkChoiceStorageReader interface {
 	JustifiedCheckpoint() solid.Checkpoint
 	JustifiedSlot() uint64
 	ProposerBoostRoot() common.Hash
-	GetStateAtBlockRoot(blockRoot libcommon.Hash, alwaysCopy bool) (*state.CachingBeaconState, error)
-	GetFinalityCheckpoints(blockRoot libcommon.Hash) (bool, solid.Checkpoint, solid.Checkpoint, solid.Checkpoint)
-	GetSyncCommittees(blockRoot libcommon.Hash) (*solid.SyncCommittee, *solid.SyncCommittee, bool)
+	GetStateAtBlockRoot(
+		blockRoot libcommon.Hash,
+		alwaysCopy bool,
+	) (*state.CachingBeaconState, error)
+	GetFinalityCheckpoints(
+		blockRoot libcommon.Hash,
+	) (bool, solid.Checkpoint, solid.Checkpoint, solid.Checkpoint)
+	GetSyncCommittees(period uint64) (*solid.SyncCommittee, *solid.SyncCommittee, bool)
+	GetBeaconCommitee(slot, committeeIndex uint64) ([]uint64, error)
 	Slot() uint64
 	Time() uint64
 	Partecipation(epoch uint64) (*solid.BitList, bool)
@@ -50,16 +74,24 @@ type ForkChoiceStorageReader interface {
 	GetPreviousPartecipationIndicies(blockRoot libcommon.Hash) (*solid.BitList, error)
 	GetValidatorSet(blockRoot libcommon.Hash) (*solid.ValidatorSet, error)
 	GetCurrentPartecipationIndicies(blockRoot libcommon.Hash) (*solid.BitList, error)
+
+	ValidateOnAttestation(attestation *solid.Attestation) error
+	IsRootOptimistic(root common.Hash) bool
+	IsHeadOptimistic() bool
 }
 
 type ForkChoiceStorageWriter interface {
-	OnAggregateAndProof(aggregateAndProof *cltypes.SignedAggregateAndProof, test bool) error
 	OnAttestation(attestation *solid.Attestation, fromBlock, insert bool) error
 	OnAttesterSlashing(attesterSlashing *cltypes.AttesterSlashing, test bool) error
-	OnVoluntaryExit(signedVoluntaryExit *cltypes.SignedVoluntaryExit, test bool) error
-	OnProposerSlashing(proposerSlashing *cltypes.ProposerSlashing, test bool) error
-	OnBlsToExecutionChange(signedChange *cltypes.SignedBLSToExecutionChange, test bool) error
-	OnBlock(block *cltypes.SignedBeaconBlock, newPayload bool, fullValidation bool) error
+	OnBlock(
+		ctx context.Context,
+		block *cltypes.SignedBeaconBlock,
+		newPayload bool,
+		fullValidation bool,
+		checkDataAvaibility bool,
+	) error
+	AddPreverifiedBlobSidecar(blobSidecar *cltypes.BlobSidecar) error
 	OnTick(time uint64)
 	SetSynced(synced bool)
+	ProcessAttestingIndicies(attestation *solid.Attestation, attestionIndicies []uint64)
 }

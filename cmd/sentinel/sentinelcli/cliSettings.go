@@ -1,23 +1,38 @@
+// Copyright 2024 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+
 package sentinelcli
 
 import (
 	"fmt"
 
-	"github.com/ledgerwatch/erigon/cl/clparams"
-	"github.com/ledgerwatch/erigon/cmd/sentinel/sentinelflags"
-	"github.com/ledgerwatch/erigon/cmd/utils"
+	"github.com/erigontech/erigon/cl/clparams"
+	"github.com/erigontech/erigon/cmd/sentinel/sentinelflags"
+	"github.com/erigontech/erigon/cmd/utils"
 
-	"github.com/ledgerwatch/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common"
 
 	"github.com/urfave/cli/v2"
 
-	"github.com/ledgerwatch/erigon/turbo/logging"
+	"github.com/erigontech/erigon/turbo/logging"
 
-	"github.com/ledgerwatch/log/v3"
+	"github.com/erigontech/erigon-lib/log/v3"
 )
 
 type SentinelCliCfg struct {
-	GenesisCfg     *clparams.GenesisConfig
 	BeaconCfg      *clparams.BeaconChainConfig
 	NetworkCfg     *clparams.NetworkConfig
 	NetworkType    clparams.NetworkType
@@ -35,7 +50,7 @@ func SetupSentinelCli(ctx *cli.Context) (*SentinelCliCfg, error) {
 	cfg := &SentinelCliCfg{}
 	chainName := ctx.String(utils.ChainFlag.Name)
 	var err error
-	cfg.GenesisCfg, cfg.NetworkCfg, cfg.BeaconCfg, cfg.NetworkType, err = clparams.GetConfigsByNetworkName(chainName)
+	cfg.NetworkCfg, cfg.BeaconCfg, cfg.NetworkType, err = clparams.GetConfigsByNetworkName(chainName)
 	if err != nil {
 		return nil, err
 	}
@@ -47,7 +62,6 @@ func SetupSentinelCli(ctx *cli.Context) (*SentinelCliCfg, error) {
 		if ctx.String(sentinelflags.GenesisSSZFlag.Name) == "" {
 			return nil, fmt.Errorf("no genesis file provided")
 		}
-		cfg.GenesisCfg = new(clparams.GenesisConfig)
 
 	}
 	cfg.ServerAddr = fmt.Sprintf("%s:%d", ctx.String(sentinelflags.SentinelServerAddr.Name), ctx.Int(sentinelflags.SentinelServerPort.Name))

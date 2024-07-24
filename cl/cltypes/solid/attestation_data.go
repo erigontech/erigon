@@ -1,3 +1,19 @@
+// Copyright 2024 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+
 package solid
 
 import (
@@ -5,11 +21,11 @@ import (
 	"encoding/binary"
 	"encoding/json"
 
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/common/length"
-	"github.com/ledgerwatch/erigon-lib/types/clonable"
-	"github.com/ledgerwatch/erigon-lib/types/ssz"
-	"github.com/ledgerwatch/erigon/cl/merkle_tree"
+	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common/length"
+	"github.com/erigontech/erigon-lib/types/clonable"
+	"github.com/erigontech/erigon-lib/types/ssz"
+	"github.com/erigontech/erigon/cl/merkle_tree"
 )
 
 // slot: 8 bytes
@@ -19,19 +35,19 @@ import (
 // target: 40 bytes
 const AttestationDataBufferSize = 8 + 8 + 32 + 40*2
 
-// AttestantionData contains information about attestantion, including finalized/attested checkpoints.
+// AttestationData contains information about attestantion, including finalized/attested checkpoints.
 type AttestationData []byte
 
 func NewAttestionDataFromParameters(
 	slot uint64,
-	validatorIndex uint64,
+	committeeIndex uint64,
 	beaconBlockRoot libcommon.Hash,
 	source Checkpoint,
 	target Checkpoint,
 ) AttestationData {
 	a := NewAttestationData()
 	a.SetSlot(slot)
-	a.SetValidatorIndex(validatorIndex)
+	a.SetCommitteeIndex(committeeIndex)
 	a.SetBeaconBlockRoot(beaconBlockRoot)
 	a.SetSource(source)
 	a.SetTarget(target)
@@ -48,7 +64,7 @@ func (a AttestationData) MarshalJSON() ([]byte, error) {
 	}{
 		Slot:            a.Slot(),
 		BeaconBlockRoot: a.BeaconBlockRoot(),
-		Index:           a.ValidatorIndex(),
+		Index:           a.CommitteeIndex(),
 		Source:          a.Source(),
 		Target:          a.Target(),
 	})
@@ -68,7 +84,7 @@ func (a AttestationData) UnmarshalJSON(buf []byte) error {
 		return err
 	}
 	a.SetSlot(tmp.Slot)
-	a.SetValidatorIndex(tmp.Index)
+	a.SetCommitteeIndex(tmp.Index)
 	a.SetBeaconBlockRoot(tmp.BeaconBlockRoot)
 	a.SetSource(tmp.Source)
 	a.SetTarget(tmp.Target)
@@ -87,7 +103,7 @@ func (a AttestationData) Slot() uint64 {
 	return binary.LittleEndian.Uint64(a[:8])
 }
 
-func (a AttestationData) ValidatorIndex() uint64 {
+func (a AttestationData) CommitteeIndex() uint64 {
 	return binary.LittleEndian.Uint64(a[8:16])
 }
 
@@ -108,7 +124,7 @@ func (a AttestationData) SetSlot(slot uint64) {
 	binary.LittleEndian.PutUint64(a[:8], slot)
 }
 
-func (a AttestationData) SetValidatorIndex(validatorIndex uint64) {
+func (a AttestationData) SetCommitteeIndex(validatorIndex uint64) {
 	binary.LittleEndian.PutUint64(a[8:16], validatorIndex)
 }
 
@@ -120,7 +136,7 @@ func (a AttestationData) SetSlotWithRawBytes(b []byte) {
 	copy(a[:8], b)
 }
 
-func (a AttestationData) SetValidatorIndexWithRawBytes(b []byte) {
+func (a AttestationData) SetCommitteeIndexWithRawBytes(b []byte) {
 	copy(a[8:16], b)
 
 }

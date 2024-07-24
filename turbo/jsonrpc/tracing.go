@@ -1,72 +1,79 @@
+// Copyright 2024 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+
 package jsonrpc
 
 import (
 	"context"
 	"fmt"
-	"math/big"
 	"time"
 
 	"github.com/holiman/uint256"
 	jsoniter "github.com/json-iterator/go"
-	"github.com/ledgerwatch/log/v3"
 
-	"github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/common/hexutil"
-	"github.com/ledgerwatch/erigon/common/math"
-	"github.com/ledgerwatch/erigon/core"
-	"github.com/ledgerwatch/erigon/core/state"
-	"github.com/ledgerwatch/erigon/core/types"
-	"github.com/ledgerwatch/erigon/core/vm"
-	"github.com/ledgerwatch/erigon/core/vm/evmtypes"
-	"github.com/ledgerwatch/erigon/eth/tracers"
-	polygontracer "github.com/ledgerwatch/erigon/polygon/tracer"
-	"github.com/ledgerwatch/erigon/rpc"
-	"github.com/ledgerwatch/erigon/turbo/adapter/ethapi"
-	"github.com/ledgerwatch/erigon/turbo/rpchelper"
-	"github.com/ledgerwatch/erigon/turbo/transactions"
+	"github.com/erigontech/erigon-lib/log/v3"
+
+	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common/hexutil"
+
+	"github.com/erigontech/erigon/common/math"
+	"github.com/erigontech/erigon/core"
+	"github.com/erigontech/erigon/core/state"
+	"github.com/erigontech/erigon/core/types"
+	"github.com/erigontech/erigon/core/vm"
+	"github.com/erigontech/erigon/core/vm/evmtypes"
+	tracersConfig "github.com/erigontech/erigon/eth/tracers/config"
+	bortypes "github.com/erigontech/erigon/polygon/bor/types"
+	polygontracer "github.com/erigontech/erigon/polygon/tracer"
+	"github.com/erigontech/erigon/rpc"
+	"github.com/erigontech/erigon/turbo/adapter/ethapi"
+	"github.com/erigontech/erigon/turbo/rpchelper"
+	"github.com/erigontech/erigon/turbo/transactions"
 )
 
 // TraceBlockByNumber implements debug_traceBlockByNumber. Returns Geth style block traces.
-func (api *PrivateDebugAPIImpl) TraceBlockByNumber(ctx context.Context, blockNum rpc.BlockNumber, config *tracers.TraceConfig, stream *jsoniter.Stream) error {
+func (api *PrivateDebugAPIImpl) TraceBlockByNumber(ctx context.Context, blockNum rpc.BlockNumber, config *tracersConfig.TraceConfig, stream *jsoniter.Stream) error {
 	return api.traceBlock(ctx, rpc.BlockNumberOrHashWithNumber(blockNum), config, stream)
 }
 
 // TraceBlockByHash implements debug_traceBlockByHash. Returns Geth style block traces.
-func (api *PrivateDebugAPIImpl) TraceBlockByHash(ctx context.Context, hash common.Hash, config *tracers.TraceConfig, stream *jsoniter.Stream) error {
+func (api *PrivateDebugAPIImpl) TraceBlockByHash(ctx context.Context, hash common.Hash, config *tracersConfig.TraceConfig, stream *jsoniter.Stream) error {
 	return api.traceBlock(ctx, rpc.BlockNumberOrHashWithHash(hash, true), config, stream)
 }
 
-func (api *PrivateDebugAPIImpl) traceBlock(ctx context.Context, blockNrOrHash rpc.BlockNumberOrHash, config *tracers.TraceConfig, stream *jsoniter.Stream) error {
+func (api *PrivateDebugAPIImpl) traceBlock(ctx context.Context, blockNrOrHash rpc.BlockNumberOrHash, config *tracersConfig.TraceConfig, stream *jsoniter.Stream) error {
 	tx, err := api.db.BeginRo(ctx)
 	if err != nil {
 		stream.WriteNil()
 		return err
 	}
 	defer tx.Rollback()
-	var (
-		block    *types.Block
-		number   rpc.BlockNumber
-		numberOk bool
-		hash     common.Hash
-		hashOk   bool
-	)
-	if number, numberOk = blockNrOrHash.Number(); numberOk {
-		block, err = api.blockByRPCNumber(number, tx)
-	} else if hash, hashOk = blockNrOrHash.Hash(); hashOk {
-		block, err = api.blockByHashWithSenders(tx, hash)
-	} else {
-		return fmt.Errorf("invalid arguments; neither block nor hash specified")
-	}
 
+	blockNumber, hash, _, err := rpchelper.GetCanonicalBlockNumber(blockNrOrHash, tx, api.filters)
 	if err != nil {
 		stream.WriteNil()
 		return err
 	}
-
+	block, err := api.blockWithSenders(ctx, tx, hash, blockNumber)
+	if err != nil {
+		stream.WriteNil()
+		return err
+	}
 	if block == nil {
-		if numberOk {
-			return fmt.Errorf("invalid arguments; block with number %d not found", number)
-		}
+		stream.WriteNil()
 		return fmt.Errorf("invalid arguments; block with hash %x not found", hash)
 	}
 
@@ -79,7 +86,7 @@ func (api *PrivateDebugAPIImpl) traceBlock(ctx context.Context, blockNrOrHash rp
 	}
 
 	if config == nil {
-		config = &tracers.TraceConfig{}
+		config = &tracersConfig.TraceConfig{}
 	}
 
 	if config.BorTraceEnabled == nil {
@@ -87,14 +94,14 @@ func (api *PrivateDebugAPIImpl) traceBlock(ctx context.Context, blockNrOrHash rp
 		config.BorTraceEnabled = &disabled
 	}
 
-	chainConfig, err := api.chainConfig(tx)
+	chainConfig, err := api.chainConfig(ctx, tx)
 	if err != nil {
 		stream.WriteNil()
 		return err
 	}
 	engine := api.engine()
 
-	_, blockCtx, _, ibs, _, err := transactions.ComputeTxEnv(ctx, engine, block, chainConfig, api._blockReader, tx, 0, api.historyV3(tx))
+	_, blockCtx, _, ibs, _, err := transactions.ComputeTxEnv(ctx, engine, block, chainConfig, api._blockReader, tx, 0)
 	if err != nil {
 		stream.WriteNil()
 		return err
@@ -107,14 +114,14 @@ func (api *PrivateDebugAPIImpl) traceBlock(ctx context.Context, blockNrOrHash rp
 	txns := block.Transactions()
 	var borStateSyncTxn types.Transaction
 	if *config.BorTraceEnabled {
-		borStateSyncTxHash := types.ComputeBorTxHash(block.NumberU64(), block.Hash())
+		borStateSyncTxHash := bortypes.ComputeBorTxHash(block.NumberU64(), block.Hash())
 		_, ok, err := api._blockReader.EventLookup(ctx, tx, borStateSyncTxHash)
 		if err != nil {
 			stream.WriteArrayEnd()
 			return err
 		}
 		if ok {
-			borStateSyncTxn = types.NewBorTransaction()
+			borStateSyncTxn = bortypes.NewBorTransaction()
 			txns = append(txns, borStateSyncTxn)
 		}
 	}
@@ -123,7 +130,7 @@ func (api *PrivateDebugAPIImpl) traceBlock(ctx context.Context, blockNrOrHash rp
 		isBorStateSyncTxn := borStateSyncTxn == txn
 		var txnHash common.Hash
 		if isBorStateSyncTxn {
-			txnHash = types.ComputeBorTxHash(block.NumberU64(), block.Hash())
+			txnHash = bortypes.ComputeBorTxHash(block.NumberU64(), block.Hash())
 		} else {
 			txnHash = txn.Hash()
 		}
@@ -152,9 +159,10 @@ func (api *PrivateDebugAPIImpl) traceBlock(ctx context.Context, blockNrOrHash rp
 		}
 
 		txCtx := evmtypes.TxContext{
-			TxHash:   txnHash,
-			Origin:   msg.From(),
-			GasPrice: msg.GasPrice(),
+			TxHash:     txnHash,
+			Origin:     msg.From(),
+			GasPrice:   msg.GasPrice(),
+			BlobHashes: msg.BlobHashes(),
 		}
 
 		if isBorStateSyncTxn {
@@ -204,21 +212,21 @@ func (api *PrivateDebugAPIImpl) traceBlock(ctx context.Context, blockNrOrHash rp
 }
 
 // TraceTransaction implements debug_traceTransaction. Returns Geth style transaction traces.
-func (api *PrivateDebugAPIImpl) TraceTransaction(ctx context.Context, hash common.Hash, config *tracers.TraceConfig, stream *jsoniter.Stream) error {
+func (api *PrivateDebugAPIImpl) TraceTransaction(ctx context.Context, hash common.Hash, config *tracersConfig.TraceConfig, stream *jsoniter.Stream) error {
 	tx, err := api.db.BeginRo(ctx)
 	if err != nil {
 		stream.WriteNil()
 		return err
 	}
 	defer tx.Rollback()
-	chainConfig, err := api.chainConfig(tx)
+	chainConfig, err := api.chainConfig(ctx, tx)
 	if err != nil {
 		stream.WriteNil()
 		return err
 	}
 	// Retrieve the transaction and assemble its EVM context
 	var isBorStateSyncTxn bool
-	blockNum, ok, err := api.txnLookup(tx, hash)
+	blockNum, ok, err := api.txnLookup(ctx, tx, hash)
 	if err != nil {
 		stream.WriteNil()
 		return err
@@ -254,7 +262,7 @@ func (api *PrivateDebugAPIImpl) TraceTransaction(ctx context.Context, hash commo
 		return err
 	}
 
-	block, err := api.blockByNumberWithSenders(tx, blockNum)
+	block, err := api.blockByNumberWithSenders(ctx, tx, blockNum)
 	if err != nil {
 		stream.WriteNil()
 		return err
@@ -275,7 +283,7 @@ func (api *PrivateDebugAPIImpl) TraceTransaction(ctx context.Context, hash commo
 	}
 	if txn == nil {
 		if isBorStateSyncTxn {
-			// bor state sync tx is appended at the end of the block
+			// bor state sync txn is appended at the end of the block
 			txnIndex = block.Transactions().Len()
 		} else {
 			stream.WriteNil()
@@ -284,7 +292,7 @@ func (api *PrivateDebugAPIImpl) TraceTransaction(ctx context.Context, hash commo
 	}
 	engine := api.engine()
 
-	msg, blockCtx, txCtx, ibs, _, err := transactions.ComputeTxEnv(ctx, engine, block, chainConfig, api._blockReader, tx, txnIndex, api.historyV3(tx))
+	msg, blockCtx, txCtx, ibs, _, err := transactions.ComputeTxEnv(ctx, engine, block, chainConfig, api._blockReader, tx, txnIndex)
 	if err != nil {
 		stream.WriteNil()
 		return err
@@ -309,14 +317,15 @@ func (api *PrivateDebugAPIImpl) TraceTransaction(ctx context.Context, hash commo
 	return transactions.TraceTx(ctx, msg, blockCtx, txCtx, ibs, config, chainConfig, stream, api.evmCallTimeout)
 }
 
-func (api *PrivateDebugAPIImpl) TraceCall(ctx context.Context, args ethapi.CallArgs, blockNrOrHash rpc.BlockNumberOrHash, config *tracers.TraceConfig, stream *jsoniter.Stream) error {
+// TraceCall implements debug_traceCall. Returns Geth style call traces.
+func (api *PrivateDebugAPIImpl) TraceCall(ctx context.Context, args ethapi.CallArgs, blockNrOrHash rpc.BlockNumberOrHash, config *tracersConfig.TraceConfig, stream *jsoniter.Stream) error {
 	dbtx, err := api.db.BeginRo(ctx)
 	if err != nil {
 		return fmt.Errorf("create ro transaction: %v", err)
 	}
 	defer dbtx.Rollback()
 
-	chainConfig, err := api.chainConfig(dbtx)
+	chainConfig, err := api.chainConfig(ctx, dbtx)
 	if err != nil {
 		return fmt.Errorf("read chain config: %v", err)
 	}
@@ -333,15 +342,15 @@ func (api *PrivateDebugAPIImpl) TraceCall(ctx context.Context, args ethapi.CallA
 	}
 
 	var stateReader state.StateReader
-	if config.TxIndex == nil || isLatest {
-		stateReader, err = rpchelper.CreateStateReader(ctx, dbtx, blockNrOrHash, 0, api.filters, api.stateCache, api.historyV3(dbtx), chainConfig.ChainName)
+	if config == nil || config.TxIndex == nil || isLatest {
+		stateReader, err = rpchelper.CreateStateReader(ctx, dbtx, blockNrOrHash, 0, api.filters, api.stateCache, chainConfig.ChainName)
 	} else {
-		stateReader, err = rpchelper.CreateHistoryStateReader(dbtx, blockNumber, int(*config.TxIndex), api.historyV3(dbtx), chainConfig.ChainName)
+		stateReader, err = rpchelper.CreateHistoryStateReader(dbtx, blockNumber, int(*config.TxIndex), chainConfig.ChainName)
 	}
 	if err != nil {
 		return fmt.Errorf("create state reader: %v", err)
 	}
-	header, err := api._blockReader.Header(context.Background(), dbtx, hash, blockNumber)
+	header, err := api._blockReader.Header(ctx, dbtx, hash, blockNumber)
 	if err != nil {
 		return fmt.Errorf("could not fetch header %d(%x): %v", blockNumber, hash, err)
 	}
@@ -369,13 +378,13 @@ func (api *PrivateDebugAPIImpl) TraceCall(ctx context.Context, args ethapi.CallA
 		return fmt.Errorf("convert args to msg: %v", err)
 	}
 
-	blockCtx := transactions.NewEVMBlockContext(engine, header, blockNrOrHash.RequireCanonical, dbtx, api._blockReader)
+	blockCtx := transactions.NewEVMBlockContext(engine, header, blockNrOrHash.RequireCanonical, dbtx, api._blockReader, chainConfig)
 	txCtx := core.NewEVMTxContext(msg)
 	// Trace the transaction and return
 	return transactions.TraceTx(ctx, msg, blockCtx, txCtx, ibs, config, chainConfig, stream, api.evmCallTimeout)
 }
 
-func (api *PrivateDebugAPIImpl) TraceCallMany(ctx context.Context, bundles []Bundle, simulateContext StateContext, config *tracers.TraceConfig, stream *jsoniter.Stream) error {
+func (api *PrivateDebugAPIImpl) TraceCallMany(ctx context.Context, bundles []Bundle, simulateContext StateContext, config *tracersConfig.TraceConfig, stream *jsoniter.Stream) error {
 	var (
 		hash               common.Hash
 		replayTransactions types.Transactions
@@ -383,11 +392,10 @@ func (api *PrivateDebugAPIImpl) TraceCallMany(ctx context.Context, bundles []Bun
 		blockCtx           evmtypes.BlockContext
 		txCtx              evmtypes.TxContext
 		overrideBlockHash  map[uint64]common.Hash
-		baseFee            uint256.Int
 	)
 
 	if config == nil {
-		config = &tracers.TraceConfig{}
+		config = &tracersConfig.TraceConfig{}
 	}
 
 	overrideBlockHash = make(map[uint64]common.Hash)
@@ -397,7 +405,7 @@ func (api *PrivateDebugAPIImpl) TraceCallMany(ctx context.Context, bundles []Bun
 		return err
 	}
 	defer tx.Rollback()
-	chainConfig, err := api.chainConfig(tx)
+	chainConfig, err := api.chainConfig(ctx, tx)
 	if err != nil {
 		stream.WriteNil()
 		return err
@@ -431,10 +439,14 @@ func (api *PrivateDebugAPIImpl) TraceCallMany(ctx context.Context, bundles []Bun
 		return err
 	}
 
-	block, err := api.blockByNumberWithSenders(tx, blockNum)
+	block, err := api.blockByNumberWithSenders(ctx, tx, blockNum)
 	if err != nil {
 		stream.WriteNil()
 		return err
+	}
+	if block == nil {
+		stream.WriteNil()
+		return fmt.Errorf("block %d not found", blockNum)
 	}
 
 	// -1 is a default value for transaction index.
@@ -451,7 +463,7 @@ func (api *PrivateDebugAPIImpl) TraceCallMany(ctx context.Context, bundles []Bun
 
 	replayTransactions = block.Transactions()[:transactionIndex]
 
-	stateReader, err := rpchelper.CreateStateReader(ctx, tx, rpc.BlockNumberOrHashWithNumber(rpc.BlockNumber(blockNum-1)), 0, api.filters, api.stateCache, api.historyV3(tx), chainConfig.ChainName)
+	stateReader, err := rpchelper.CreateStateReader(ctx, tx, rpc.BlockNumberOrHashWithNumber(rpc.BlockNumber(blockNum-1)), 0, api.filters, api.stateCache, chainConfig.ChainName)
 	if err != nil {
 		stream.WriteNil()
 		return err
@@ -459,9 +471,9 @@ func (api *PrivateDebugAPIImpl) TraceCallMany(ctx context.Context, bundles []Bun
 
 	st := state.New(stateReader)
 
-	parent := block.Header()
+	header := block.Header()
 
-	if parent == nil {
+	if header == nil {
 		stream.WriteNil()
 		return fmt.Errorf("block %d(%x) not found", blockNum, hash)
 	}
@@ -477,22 +489,7 @@ func (api *PrivateDebugAPIImpl) TraceCallMany(ctx context.Context, bundles []Bun
 		return hash
 	}
 
-	if parent.BaseFee != nil {
-		baseFee.SetFromBig(parent.BaseFee)
-	}
-
-	blockCtx = evmtypes.BlockContext{
-		CanTransfer: core.CanTransfer,
-		Transfer:    core.Transfer,
-		GetHash:     getHash,
-		Coinbase:    parent.Coinbase,
-		BlockNumber: parent.Number.Uint64(),
-		Time:        parent.Time,
-		Difficulty:  new(big.Int).Set(parent.Difficulty),
-		GasLimit:    parent.GasLimit,
-		BaseFee:     &baseFee,
-	}
-
+	blockCtx = core.NewEVMBlockContext(header, getHash, api.engine(), nil /* author */, chainConfig)
 	// Get a new instance of the EVM
 	evm = vm.NewEVM(blockCtx, txCtx, st, chainConfig, vm.Config{Debug: false})
 	signer := types.MakeSigner(chainConfig, blockNum, block.Time())
@@ -546,7 +543,7 @@ func (api *PrivateDebugAPIImpl) TraceCallMany(ctx context.Context, bundles []Bun
 			}
 			txCtx = core.NewEVMTxContext(msg)
 			ibs := evm.IntraBlockState().(*state.IntraBlockState)
-			ibs.SetTxContext(common.Hash{}, parent.Hash(), txnIndex)
+			ibs.SetTxContext(common.Hash{}, header.Hash(), txnIndex)
 			err = transactions.TraceTx(ctx, msg, blockCtx, txCtx, evm.IntraBlockState(), config, chainConfig, stream, api.evmCallTimeout)
 			if err != nil {
 				stream.WriteArrayEnd()

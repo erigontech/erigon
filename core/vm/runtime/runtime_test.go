@@ -1,18 +1,21 @@
 // Copyright 2015 The go-ethereum Authors
-// This file is part of the go-ethereum library.
+// (original work)
+// Copyright 2024 The Erigon Authors
+// (modifications)
+// This file is part of Erigon.
 //
-// The go-ethereum library is free software: you can redistribute it and/or modify
+// Erigon is free software: you can redistribute it and/or modify
 // it under the terms of the GNU Lesser General Public License as published by
 // the Free Software Foundation, either version 3 of the License, or
 // (at your option) any later version.
 //
-// The go-ethereum library is distributed in the hope that it will be useful,
+// Erigon is distributed in the hope that it will be useful,
 // but WITHOUT ANY WARRANTY; without even the implied warranty of
 // MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
 // GNU Lesser General Public License for more details.
 //
 // You should have received a copy of the GNU Lesser General Public License
-// along with the go-ethereum library. If not, see <http://www.gnu.org/licenses/>.
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
 package runtime
 
@@ -24,19 +27,55 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/ledgerwatch/erigon-lib/chain"
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/kv/memdb"
-	"github.com/ledgerwatch/erigon/accounts/abi"
-	"github.com/ledgerwatch/erigon/common"
-	"github.com/ledgerwatch/erigon/consensus"
-	"github.com/ledgerwatch/erigon/core"
-	"github.com/ledgerwatch/erigon/core/asm"
-	"github.com/ledgerwatch/erigon/core/state"
-	"github.com/ledgerwatch/erigon/core/types"
-	"github.com/ledgerwatch/erigon/core/vm"
-	"github.com/ledgerwatch/erigon/eth/tracers/logger"
+	"github.com/holiman/uint256"
+	"github.com/stretchr/testify/require"
+
+	"github.com/erigontech/erigon-lib/chain"
+	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common/datadir"
+	"github.com/erigontech/erigon-lib/kv"
+	"github.com/erigontech/erigon-lib/kv/memdb"
+	"github.com/erigontech/erigon-lib/kv/rawdbv3"
+	"github.com/erigontech/erigon-lib/kv/temporal"
+	"github.com/erigontech/erigon-lib/log/v3"
+	stateLib "github.com/erigontech/erigon-lib/state"
+
+	"github.com/erigontech/erigon/accounts/abi"
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/consensus"
+	"github.com/erigontech/erigon/core"
+	"github.com/erigontech/erigon/core/asm"
+	"github.com/erigontech/erigon/core/rawdb"
+	"github.com/erigontech/erigon/core/state"
+	"github.com/erigontech/erigon/core/types"
+	"github.com/erigontech/erigon/core/vm"
+	"github.com/erigontech/erigon/eth/tracers/logger"
+	"github.com/erigontech/erigon/rlp"
 )
+
+func NewTestTemporalDb(tb testing.TB) (kv.RwDB, kv.RwTx, *stateLib.Aggregator) {
+	tb.Helper()
+	db := memdb.NewStateDB(tb.TempDir())
+	tb.Cleanup(db.Close)
+
+	cr := rawdb.NewCanonicalReader()
+	agg, err := stateLib.NewAggregator(context.Background(), datadir.New(tb.TempDir()), 16, db, cr, log.New())
+	if err != nil {
+		tb.Fatal(err)
+	}
+	tb.Cleanup(agg.Close)
+
+	_db, err := temporal.New(db, agg)
+	if err != nil {
+		tb.Fatal(err)
+	}
+	tx, err := _db.BeginTemporalRw(context.Background()) //nolint:gocritic
+	if err != nil {
+		tb.Fatal(err)
+	}
+	tb.Cleanup(tx.Rollback)
+	return _db, tx, agg
+}
 
 func TestDefaults(t *testing.T) {
 	t.Parallel()
@@ -83,7 +122,7 @@ func TestEVM(t *testing.T) {
 		byte(vm.ORIGIN),
 		byte(vm.BLOCKHASH),
 		byte(vm.COINBASE),
-	}, nil, nil, 0); err != nil {
+	}, nil, nil, t.TempDir()); err != nil {
 		t.Fatal("didn't expect error", err)
 	}
 }
@@ -97,7 +136,7 @@ func TestExecute(t *testing.T) {
 		byte(vm.PUSH1), 32,
 		byte(vm.PUSH1), 0,
 		byte(vm.RETURN),
-	}, nil, nil, 0)
+	}, nil, nil, t.TempDir())
 	if err != nil {
 		t.Fatal("didn't expect error", err)
 	}
@@ -110,8 +149,11 @@ func TestExecute(t *testing.T) {
 
 func TestCall(t *testing.T) {
 	t.Parallel()
-	_, tx := memdb.NewTestTx(t)
-	state := state.New(state.NewDbStateReader(tx))
+	_, tx, _ := NewTestTemporalDb(t)
+	domains, err := stateLib.NewSharedDomains(tx, log.New())
+	require.NoError(t, err)
+	defer domains.Close()
+	state := state.New(state.NewReaderV4(domains))
 	address := libcommon.HexToAddress("0xaa")
 	state.SetCode(address, []byte{
 		byte(vm.PUSH1), 10,
@@ -131,6 +173,33 @@ func TestCall(t *testing.T) {
 	if num.Cmp(big.NewInt(10)) != 0 {
 		t.Error("Expected 10, got", num)
 	}
+}
+
+func testTemporalDB(t testing.TB) *temporal.DB {
+	db := memdb.NewStateDB(t.TempDir())
+
+	t.Cleanup(db.Close)
+
+	cr := rawdb.NewCanonicalReader()
+	agg, err := stateLib.NewAggregator(context.Background(), datadir.New(t.TempDir()), 16, db, cr, log.New())
+	require.NoError(t, err)
+	t.Cleanup(agg.Close)
+
+	_db, err := temporal.New(db, agg)
+	require.NoError(t, err)
+	return _db
+}
+
+func testTemporalTxSD(t testing.TB, db *temporal.DB) (kv.RwTx, *stateLib.SharedDomains) {
+	tx, err := db.BeginTemporalRw(context.Background()) //nolint:gocritic
+	require.NoError(t, err)
+	t.Cleanup(tx.Rollback)
+
+	sd, err := stateLib.NewSharedDomains(tx, log.New())
+	require.NoError(t, err)
+	t.Cleanup(sd.Close)
+
+	return tx, sd
 }
 
 func BenchmarkCall(b *testing.B) {
@@ -155,32 +224,40 @@ func BenchmarkCall(b *testing.B) {
 	if err != nil {
 		b.Fatal(err)
 	}
-	cfg := &Config{}
-	db := memdb.New("")
-	defer db.Close()
-	tx, err := db.BeginRw(context.Background())
-	if err != nil {
-		panic(err)
-	}
+	cfg := &Config{ChainConfig: &chain.Config{}, BlockNumber: big.NewInt(0), Time: big.NewInt(0), Value: uint256.MustFromBig(big.NewInt(13377))}
+	db := testTemporalDB(b)
+	tx, sd := testTemporalTxSD(b, db)
 	defer tx.Rollback()
-	cfg.r = state.NewPlainStateReader(tx)
-	cfg.w = state.NewPlainStateWriter(tx, tx, 0)
+	cfg.r = state.NewReaderV4(sd)
+	cfg.w = state.NewWriterV4(sd)
 	cfg.State = state.New(cfg.r)
 
+	tmpdir := b.TempDir()
 	cfg.Debug = true
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		for j := 0; j < 400; j++ {
-			_, _, _ = Execute(code, cpurchase, cfg, 0)
-			_, _, _ = Execute(code, creceived, cfg, 0)
-			_, _, _ = Execute(code, refund, cfg, 0)
+			_, _, _ = Execute(code, cpurchase, cfg, tmpdir)
+			_, _, _ = Execute(code, creceived, cfg, tmpdir)
+			_, _, _ = Execute(code, refund, cfg, tmpdir)
 		}
 	}
 }
 func benchmarkEVM_Create(b *testing.B, code string) {
-	_, tx := memdb.NewTestTx(b)
+	db := testTemporalDB(b)
+	tx, err := db.BeginTemporalRw(context.Background())
+	require.NoError(b, err)
+	domains, err := stateLib.NewSharedDomains(tx, log.New())
+	require.NoError(b, err)
+	defer domains.Close()
+
+	domains.SetTxNum(1)
+	domains.SetBlockNum(1)
+	err = rawdbv3.TxNums.Append(tx, 1, 1)
+	require.NoError(b, err)
+
 	var (
-		statedb  = state.New(state.NewPlainState(tx, 1, nil))
+		statedb  = state.New(state.NewReaderV4(domains))
 		sender   = libcommon.BytesToAddress([]byte("sender"))
 		receiver = libcommon.BytesToAddress([]byte("receiver"))
 	)
@@ -233,9 +310,9 @@ func BenchmarkEVM_CREATE2_1200(bench *testing.B) {
 func fakeHeader(n uint64, parentHash libcommon.Hash) *types.Header {
 	header := types.Header{
 		Coinbase:   libcommon.HexToAddress("0x00000000000000000000000000000000deadbeef"),
-		Number:     big.NewInt(int64(n)),
+		Number:     new(big.Int).SetUint64(n),
 		ParentHash: parentHash,
-		Time:       1000,
+		Time:       n,
 		Nonce:      types.BlockNonce{0x1},
 		Extra:      []byte{},
 		Difficulty: big.NewInt(0),
@@ -243,6 +320,48 @@ func fakeHeader(n uint64, parentHash libcommon.Hash) *types.Header {
 	}
 	return &header
 }
+
+// FakeChainHeaderReader implements consensus.ChainHeaderReader interface
+type FakeChainHeaderReader struct{}
+
+func (cr *FakeChainHeaderReader) GetHeaderByHash(hash libcommon.Hash) *types.Header {
+	return nil
+}
+func (cr *FakeChainHeaderReader) GetHeaderByNumber(number uint64) *types.Header {
+	return cr.GetHeaderByHash(libcommon.BigToHash(new(big.Int).SetUint64(number)))
+}
+func (cr *FakeChainHeaderReader) Config() *chain.Config                 { return nil }
+func (cr *FakeChainHeaderReader) CurrentHeader() *types.Header          { return nil }
+func (cr *FakeChainHeaderReader) CurrentFinalizedHeader() *types.Header { return nil }
+func (cr *FakeChainHeaderReader) CurrentSafeHeader() *types.Header      { return nil }
+
+// GetHeader returns a fake header with the parentHash equal to the number - 1
+func (cr *FakeChainHeaderReader) GetHeader(hash libcommon.Hash, number uint64) *types.Header {
+	return &types.Header{
+		Coinbase:   libcommon.HexToAddress("0x00000000000000000000000000000000deadbeef"),
+		Number:     new(big.Int).SetUint64(number),
+		ParentHash: libcommon.BigToHash(new(big.Int).SetUint64(number - 1)),
+		Time:       number,
+		Nonce:      types.BlockNonce{0x1},
+		Extra:      []byte{},
+		Difficulty: big.NewInt(0),
+		GasLimit:   100000,
+	}
+}
+func (cr *FakeChainHeaderReader) GetBlock(hash libcommon.Hash, number uint64) *types.Block {
+	return nil
+}
+func (cr *FakeChainHeaderReader) HasBlock(hash libcommon.Hash, number uint64) bool  { return false }
+func (cr *FakeChainHeaderReader) GetTd(hash libcommon.Hash, number uint64) *big.Int { return nil }
+func (cr *FakeChainHeaderReader) FrozenBlocks() uint64                              { return 0 }
+func (cr *FakeChainHeaderReader) FrozenBorBlocks() uint64                           { return 0 }
+func (cr *FakeChainHeaderReader) BorEventsByBlock(hash libcommon.Hash, number uint64) []rlp.RawValue {
+	return nil
+}
+func (cr *FakeChainHeaderReader) BorStartEventID(hash libcommon.Hash, number uint64) uint64 {
+	return 0
+}
+func (cr *FakeChainHeaderReader) BorSpan(spanId uint64) []byte { return nil }
 
 type dummyChain struct {
 	counter int
@@ -257,7 +376,7 @@ func (d *dummyChain) Engine() consensus.Engine {
 func (d *dummyChain) GetHeader(h libcommon.Hash, n uint64) *types.Header {
 	d.counter++
 	parentHash := libcommon.Hash{}
-	s := common.LeftPadBytes(big.NewInt(int64(n-1)).Bytes(), 32)
+	s := common.LeftPadBytes(new(big.Int).SetUint64(n-1).Bytes(), 32)
 	copy(parentHash[:], s)
 
 	//parentHash := libcommon.Hash{byte(n - 1)}
@@ -272,7 +391,7 @@ func TestBlockhash(t *testing.T) {
 	// Current head
 	n := uint64(1000)
 	parentHash := libcommon.Hash{}
-	s := common.LeftPadBytes(big.NewInt(int64(n-1)).Bytes(), 32)
+	s := common.LeftPadBytes(new(big.Int).SetUint64(n-1).Bytes(), 32)
 	copy(parentHash[:], s)
 	header := fakeHeader(n, parentHash)
 
@@ -313,10 +432,14 @@ func TestBlockhash(t *testing.T) {
 	// The method call to 'test()'
 	input := libcommon.Hex2Bytes("f8a8fd6d")
 	chain := &dummyChain{}
-	ret, _, err := Execute(data, input, &Config{
+	cfg := &Config{
 		GetHashFn:   core.GetHashFn(header, chain.GetHeader),
 		BlockNumber: new(big.Int).Set(header.Number),
-	}, header.Number.Uint64())
+		Time:        new(big.Int),
+	}
+	setDefaults(cfg)
+	cfg.ChainConfig.PragueTime = big.NewInt(1)
+	ret, _, err := Execute(data, input, cfg, t.TempDir())
 	if err != nil {
 		t.Fatalf("expected no error, got %v", err)
 	}
@@ -346,8 +469,19 @@ func TestBlockhash(t *testing.T) {
 func benchmarkNonModifyingCode(b *testing.B, gas uint64, code []byte, name string) { //nolint:unparam
 	cfg := new(Config)
 	setDefaults(cfg)
-	_, tx := memdb.NewTestTx(b)
-	cfg.State = state.New(state.NewPlainState(tx, 1, nil))
+	db := testTemporalDB(b)
+	tx, err := db.BeginTemporalRw(context.Background())
+	require.NoError(b, err)
+	domains, err := stateLib.NewSharedDomains(tx, log.New())
+	require.NoError(b, err)
+	defer domains.Close()
+
+	domains.SetTxNum(1)
+	domains.SetBlockNum(1)
+	err = rawdbv3.TxNums.Append(tx, 1, 1)
+	require.NoError(b, err)
+
+	cfg.State = state.New(state.NewReaderV4(domains))
 	cfg.GasLimit = gas
 	var (
 		destination = libcommon.BytesToAddress([]byte("contract"))
@@ -503,6 +637,7 @@ func BenchmarkSimpleLoop(b *testing.B) {
 // EIP-2929 about gas repricings
 func TestEip2929Cases(t *testing.T) {
 
+	tmpdir := t.TempDir()
 	id := 1
 	prettyPrint := func(comment string, code []byte) {
 
@@ -521,14 +656,16 @@ func TestEip2929Cases(t *testing.T) {
 		fmt.Printf("%v\n\nBytecode: \n```\n0x%x\n```\nOperations: \n```\n%v\n```\n\n",
 			comment,
 			code, ops)
-		//nolint:errcheck
-		Execute(code, nil, &Config{
+		cfg := &Config{
 			EVMConfig: vm.Config{
 				Debug:     true,
 				Tracer:    logger.NewMarkdownLogger(nil, os.Stdout),
 				ExtraEips: []int{2929},
 			},
-		}, 0)
+		}
+		setDefaults(cfg)
+		//nolint:errcheck
+		Execute(code, nil, cfg, tmpdir)
 	}
 
 	{ // First eip testcase

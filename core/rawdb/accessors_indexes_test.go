@@ -1,18 +1,21 @@
 // Copyright 2018 The go-ethereum Authors
-// This file is part of the go-ethereum library.
+// (original work)
+// Copyright 2024 The Erigon Authors
+// (modifications)
+// This file is part of Erigon.
 //
-// The go-ethereum library is free software: you can redistribute it and/or modify
+// Erigon is free software: you can redistribute it and/or modify
 // it under the terms of the GNU Lesser General Public License as published by
 // the Free Software Foundation, either version 3 of the License, or
 // (at your option) any later version.
 //
-// The go-ethereum library is distributed in the hope that it will be useful,
+// Erigon is distributed in the hope that it will be useful,
 // but WITHOUT ANY WARRANTY; without even the implied warranty of
 // MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
 // GNU Lesser General Public License for more details.
 //
 // You should have received a copy of the GNU Lesser General Public License
-// along with the go-ethereum library. If not, see <http://www.gnu.org/licenses/>.
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
 package rawdb_test
 
@@ -22,14 +25,15 @@ import (
 	"testing"
 
 	"github.com/holiman/uint256"
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon/core/rawdb"
-	"github.com/ledgerwatch/erigon/core/types"
-	"github.com/ledgerwatch/erigon/turbo/services"
-	"github.com/ledgerwatch/erigon/turbo/stages/mock"
-	"github.com/ledgerwatch/log/v3"
 	"github.com/stretchr/testify/require"
+
+	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/kv"
+	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/core/rawdb"
+	"github.com/erigontech/erigon/core/types"
+	"github.com/erigontech/erigon/turbo/services"
+	"github.com/erigontech/erigon/turbo/stages/mock"
 )
 
 // Tests that positional lookup metadata can be stored and retrieved.
@@ -63,7 +67,7 @@ func TestLookupStorage(t *testing.T) {
 			tx3 := types.NewTransaction(3, libcommon.BytesToAddress([]byte{0x33}), uint256.NewInt(333), 3333, uint256.NewInt(33333), []byte{0x33, 0x33, 0x33})
 			txs := []types.Transaction{tx1, tx2, tx3}
 
-			block := types.NewBlock(&types.Header{Number: big.NewInt(314)}, txs, nil, nil, nil)
+			block := types.NewBlock(&types.Header{Number: big.NewInt(314)}, txs, nil, nil, nil, nil /*requests*/)
 
 			// Check that no transactions entries are in a pristine database
 			for i, txn := range txs {
@@ -135,9 +139,9 @@ func readTransactionByHash(db kv.Tx, hash libcommon.Hash, br services.FullBlockR
 		return nil, libcommon.Hash{}, 0, 0, err1
 	}
 	body.SendersToTxs(senders)
-	for txIndex, tx := range body.Transactions {
-		if tx.Hash() == hash {
-			return tx, blockHash, *blockNumber, uint64(txIndex), nil
+	for txIndex, txn := range body.Transactions {
+		if txn.Hash() == hash {
+			return txn, blockHash, *blockNumber, uint64(txIndex), nil
 		}
 	}
 	log.Error("Transaction not found", "number", blockNumber, "hash", blockHash, "txhash", hash)

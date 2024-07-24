@@ -1,28 +1,54 @@
-/*
-   Copyright 2021 Erigon contributors
-
-   Licensed under the Apache License, Version 2.0 (the "License");
-   you may not use this file except in compliance with the License.
-   You may obtain a copy of the License at
-
-       http://www.apache.org/licenses/LICENSE-2.0
-
-   Unless required by applicable law or agreed to in writing, software
-   distributed under the License is distributed on an "AS IS" BASIS,
-   WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-   See the License for the specific language governing permissions and
-   limitations under the License.
-*/
+// Copyright 2021 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
 package rawdbv3
 
 import (
 	"encoding/binary"
+	"errors"
 	"fmt"
 	"sort"
 
-	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/erigontech/erigon-lib/common/dbg"
+	"github.com/erigontech/erigon-lib/kv"
+	"github.com/erigontech/erigon-lib/kv/order"
+	"github.com/erigontech/erigon-lib/kv/stream"
 )
+
+type ErrTxNumsAppendWithGap struct {
+	appendBlockNum uint64
+	lastBlockNum   uint64
+	stack          string
+}
+
+func (e ErrTxNumsAppendWithGap) LastBlock() uint64 {
+	return e.lastBlockNum
+}
+
+func (e ErrTxNumsAppendWithGap) Error() string {
+	return fmt.Sprintf(
+		"append with gap blockNum=%d, but current height=%d, stack: %s",
+		e.appendBlockNum, e.lastBlockNum, e.stack,
+	)
+}
+
+func (e ErrTxNumsAppendWithGap) Is(err error) bool {
+	var target ErrTxNumsAppendWithGap
+	return errors.As(err, &target)
+}
 
 type txNums struct{}
 
@@ -90,7 +116,7 @@ func (txNums) Append(tx kv.RwTx, blockNum, maxTxNum uint64) (err error) {
 	if len(lastK) != 0 {
 		lastBlockNum := binary.BigEndian.Uint64(lastK)
 		if lastBlockNum > 1 && lastBlockNum+1 != blockNum { //allow genesis
-			return fmt.Errorf("append with gap blockNum=%d, but current heigh=%d", blockNum, lastBlockNum)
+			return ErrTxNumsAppendWithGap{appendBlockNum: blockNum, lastBlockNum: lastBlockNum, stack: dbg.Stack()}
 		}
 	}
 
@@ -120,10 +146,12 @@ func (txNums) Truncate(tx kv.RwTx, blockNum uint64) (err error) {
 		if err != nil {
 			return err
 		}
-		if err = c.DeleteCurrent(); err != nil {
+		if err = tx.Delete(kv.MaxTxNum, k); err != nil {
 			return err
 		}
-
+		//if err = c.DeleteCurrent(); err != nil {
+		//	return err
+		//}
 	}
 	return nil
 }
@@ -135,21 +163,40 @@ func (txNums) FindBlockNum(tx kv.Tx, endTxNumMinimax uint64) (ok bool, blockNum 
 	}
 	defer c.Close()
 
-	cnt, err := c.Count()
+	lastK, _, err := c.Last()
 	if err != nil {
 		return false, 0, err
 	}
+	if lastK == nil {
+		return false, 0, nil
+	}
+	if len(lastK) != 8 {
+		return false, 0, fmt.Errorf("seems broken TxNum value: %x", lastK)
+	}
+	lastBlockNum := binary.BigEndian.Uint64(lastK)
 
-	blockNum = uint64(sort.Search(int(cnt), func(i int) bool {
+	blockNum = uint64(sort.Search(int(lastBlockNum+1), func(i int) bool {
+		if err != nil { // don't loose errors from prev iterations
+			return true
+		}
+
 		binary.BigEndian.PutUint64(seek[:], uint64(i))
-		var v []byte
-		_, v, err = c.SeekExact(seek[:])
+		var v, found []byte
+		found, v, err = c.SeekExact(seek[:])
+		if err != nil {
+			return true
+		}
+		if len(v) != 8 {
+			_lb, _lt, _ := TxNums.Last(tx)
+			err = fmt.Errorf("FindBlockNum(%d): seems broken TxNum value: %x -> (%x, %x); last in db: (%d, %d)", endTxNumMinimax, seek, found, v, _lb, _lt)
+			return true
+		}
 		return binary.BigEndian.Uint64(v) >= endTxNumMinimax
 	}))
 	if err != nil {
 		return false, 0, err
 	}
-	if blockNum == cnt {
+	if blockNum > lastBlockNum {
 		return false, 0, nil
 	}
 	return true, blockNum, nil
@@ -231,4 +278,70 @@ func SecondKey(tx kv.Tx, table string) ([]byte, error) {
 		return nil, err
 	}
 	return k, nil
+}
+
+// MapTxNum2BlockNumIter - enrich iterator by TxNumbers, adding more info:
+//   - blockNum
+//   - txIndex in block: -1 means first system tx
+//   - isFinalTxn: last system-txn. BlockRewards and similar things - are attribute to this virtual txn.
+//   - blockNumChanged: means this and previous txNum belongs to different blockNumbers
+//
+// Expect: `it` to return sorted txNums, then blockNum will not change until `it.Next() < maxTxNumInBlock`
+//
+//	it allow certain optimizations.
+type MapTxNum2BlockNumIter struct {
+	it          stream.U64
+	tx          kv.Tx
+	orderAscend bool
+
+	blockNum                         uint64
+	minTxNumInBlock, maxTxNumInBlock uint64
+}
+
+func TxNums2BlockNums(tx kv.Tx, it stream.U64, by order.By) *MapTxNum2BlockNumIter {
+	return &MapTxNum2BlockNumIter{tx: tx, it: it, orderAscend: bool(by)}
+}
+func (i *MapTxNum2BlockNumIter) Close() {
+	if i.it != nil {
+		i.it.Close()
+		i.it = nil
+	}
+}
+func (i *MapTxNum2BlockNumIter) HasNext() bool { return i.it.HasNext() }
+func (i *MapTxNum2BlockNumIter) Next() (txNum, blockNum uint64, txIndex int, isFinalTxn, blockNumChanged bool, err error) {
+	txNum, err = i.it.Next()
+	if err != nil {
+		return txNum, blockNum, txIndex, isFinalTxn, blockNumChanged, err
+	}
+
+	// txNums are sorted, it means blockNum will not change until `txNum < maxTxNumInBlock`
+	if i.maxTxNumInBlock == 0 || (i.orderAscend && txNum > i.maxTxNumInBlock) || (!i.orderAscend && txNum < i.minTxNumInBlock) {
+		blockNumChanged = true
+
+		var ok bool
+		ok, i.blockNum, err = TxNums.FindBlockNum(i.tx, txNum)
+		if err != nil {
+			return
+		}
+		if !ok {
+			return txNum, i.blockNum, txIndex, isFinalTxn, blockNumChanged, fmt.Errorf("can't find blockNumber by txnID=%d", txNum)
+		}
+	}
+	blockNum = i.blockNum
+
+	// if block number changed, calculate all related field
+	if blockNumChanged {
+		i.minTxNumInBlock, err = TxNums.Min(i.tx, blockNum)
+		if err != nil {
+			return
+		}
+		i.maxTxNumInBlock, err = TxNums.Max(i.tx, blockNum)
+		if err != nil {
+			return
+		}
+	}
+
+	txIndex = int(txNum) - int(i.minTxNumInBlock) - 1
+	isFinalTxn = txNum == i.maxTxNumInBlock
+	return
 }

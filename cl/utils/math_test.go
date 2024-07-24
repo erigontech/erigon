@@ -1,10 +1,25 @@
+// Copyright 2024 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+
 package utils_test
 
 import (
-	"math"
 	"testing"
 
-	"github.com/ledgerwatch/erigon/cl/utils"
+	"github.com/erigontech/erigon/cl/utils"
 )
 
 func TestIsPowerOf2(t *testing.T) {
@@ -92,56 +107,6 @@ func TestIntegerSquareRoot(t *testing.T) {
 		sqrt := utils.IntegerSquareRoot(tc.n)
 		if sqrt != tc.expectedSqrt {
 			t.Errorf("IntegerSquareRoot returned incorrect result for %d. Expected: %d, Got: %d", tc.n, tc.expectedSqrt, sqrt)
-		}
-	}
-}
-
-func TestMax64(t *testing.T) {
-	testCases := []struct {
-		a        uint64
-		b        uint64
-		expected uint64
-	}{
-		{0, 0, 0},
-		{0, 1, 1},
-		{1, 0, 1},
-		{1, 1, 1},
-		{10, 5, 10},
-		{5, 10, 10},
-		{math.MaxUint64, 0, math.MaxUint64},
-		{0, math.MaxUint64, math.MaxUint64},
-		{math.MaxUint64, math.MaxUint64, math.MaxUint64},
-	}
-
-	for _, tc := range testCases {
-		max := utils.Max64(tc.a, tc.b)
-		if max != tc.expected {
-			t.Errorf("Max64 returned incorrect result for %d and %d. Expected: %d, Got: %d", tc.a, tc.b, tc.expected, max)
-		}
-	}
-}
-
-func TestMin64(t *testing.T) {
-	testCases := []struct {
-		a        uint64
-		b        uint64
-		expected uint64
-	}{
-		{0, 0, 0},
-		{0, 1, 0},
-		{1, 0, 0},
-		{1, 1, 1},
-		{10, 5, 5},
-		{5, 10, 5},
-		{math.MaxUint64, 0, 0},
-		{0, math.MaxUint64, 0},
-		{math.MaxUint64, math.MaxUint64, math.MaxUint64},
-	}
-
-	for _, tc := range testCases {
-		min := utils.Min64(tc.a, tc.b)
-		if min != tc.expected {
-			t.Errorf("Min64 returned incorrect result for %d and %d. Expected: %d, Got: %d", tc.a, tc.b, tc.expected, min)
 		}
 	}
 }

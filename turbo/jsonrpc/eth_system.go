@@ -1,20 +1,38 @@
+// Copyright 2024 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+
 package jsonrpc
 
 import (
 	"context"
-	"github.com/ledgerwatch/erigon-lib/common/hexutil"
+	"math"
 	"math/big"
 
-	"github.com/ledgerwatch/erigon-lib/chain"
-	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/erigontech/erigon-lib/common/hexutil"
 
-	"github.com/ledgerwatch/erigon/core/rawdb"
-	"github.com/ledgerwatch/erigon/core/types"
-	"github.com/ledgerwatch/erigon/eth/ethconfig"
-	"github.com/ledgerwatch/erigon/eth/gasprice"
-	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
-	"github.com/ledgerwatch/erigon/rpc"
-	"github.com/ledgerwatch/erigon/turbo/rpchelper"
+	"github.com/erigontech/erigon-lib/chain"
+	"github.com/erigontech/erigon-lib/kv"
+
+	"github.com/erigontech/erigon/core/rawdb"
+	"github.com/erigontech/erigon/core/types"
+	"github.com/erigontech/erigon/eth/ethconfig"
+	"github.com/erigontech/erigon/eth/gasprice"
+	"github.com/erigontech/erigon/eth/stagedsync/stages"
+	"github.com/erigontech/erigon/rpc"
+	"github.com/erigontech/erigon/turbo/rpchelper"
 )
 
 // BlockNumber implements eth_blockNumber. Returns the block number of most recent block.
@@ -38,17 +56,34 @@ func (api *APIImpl) Syncing(ctx context.Context) (interface{}, error) {
 		return nil, err
 	}
 	defer tx.Rollback()
-	highestBlock, err := stages.GetStageProgress(tx, stages.Headers)
+
+	highestBlock, err := rawdb.ReadLastNewBlockSeen(tx)
 	if err != nil {
 		return false, err
 	}
 
-	currentBlock, err := stages.GetStageProgress(tx, stages.Finish)
+	currentBlock, err := stages.GetStageProgress(tx, stages.Execution)
 	if err != nil {
 		return false, err
 	}
 
-	if currentBlock > 0 && currentBlock >= highestBlock { // Return not syncing if the synchronisation already completed
+	frozenBlocks := api._blockReader.FrozenBlocks()
+	if highestBlock < frozenBlocks {
+		highestBlock = frozenBlocks
+	}
+
+	// Maybe it is still downloading snapshots. Impossible to determine the highest block.
+	if highestBlock == 0 {
+		return map[string]interface{}{
+			"startingBlock": "0x0", // TODO: this is a placeholder, I do not think it matters what we return here, but 0x0 is probably a good placeholder.
+			"currentBlock":  hexutil.Uint64(currentBlock),
+			"highestBlock":  hexutil.Uint64(math.MaxUint64),
+		}, nil
+	}
+	reorgRange := 8
+
+	// If the distance between the current block and the highest block is less than the reorg range, we are not syncing. abs(highestBlock - currentBlock) < reorgRange
+	if math.Abs(float64(highestBlock)-float64(currentBlock)) < float64(reorgRange) {
 		return false, nil
 	}
 
@@ -68,9 +103,10 @@ func (api *APIImpl) Syncing(ctx context.Context) (interface{}, error) {
 	}
 
 	return map[string]interface{}{
-		"currentBlock": hexutil.Uint64(currentBlock),
-		"highestBlock": hexutil.Uint64(highestBlock),
-		"stages":       stagesMap,
+		"startingBlock": "0x0", // TODO: this is a placeholder, I do not think it matters what we return here, but 0x0 is probably a good placeholder.
+		"currentBlock":  hexutil.Uint64(currentBlock),
+		"highestBlock":  hexutil.Uint64(highestBlock),
+		"stages":        stagesMap,
 	}, nil
 }
 
@@ -82,7 +118,7 @@ func (api *APIImpl) ChainId(ctx context.Context) (hexutil.Uint64, error) {
 	}
 	defer tx.Rollback()
 
-	chainConfig, err := api.chainConfig(tx)
+	chainConfig, err := api.chainConfig(ctx, tx)
 	if err != nil {
 		return 0, err
 	}
@@ -110,12 +146,7 @@ func (api *APIImpl) GasPrice(ctx context.Context) (*hexutil.Big, error) {
 		return nil, err
 	}
 	defer tx.Rollback()
-	cc, err := api.chainConfig(tx)
-	if err != nil {
-		return nil, err
-	}
-
-	oracle := gasprice.NewOracle(NewGasPriceOracleBackend(tx, cc, api.BaseAPI), ethconfig.Defaults.GPO, api.gasCache)
+	oracle := gasprice.NewOracle(NewGasPriceOracleBackend(tx, api.BaseAPI), ethconfig.Defaults.GPO, api.gasCache, api.logger.New("app", "gasPriceOracle"))
 	tipcap, err := oracle.SuggestTipCap(ctx)
 	gasResult := big.NewInt(0)
 
@@ -137,11 +168,7 @@ func (api *APIImpl) MaxPriorityFeePerGas(ctx context.Context) (*hexutil.Big, err
 		return nil, err
 	}
 	defer tx.Rollback()
-	cc, err := api.chainConfig(tx)
-	if err != nil {
-		return nil, err
-	}
-	oracle := gasprice.NewOracle(NewGasPriceOracleBackend(tx, cc, api.BaseAPI), ethconfig.Defaults.GPO, api.gasCache)
+	oracle := gasprice.NewOracle(NewGasPriceOracleBackend(tx, api.BaseAPI), ethconfig.Defaults.GPO, api.gasCache, api.logger.New("app", "gasPriceOracle"))
 	tipcap, err := oracle.SuggestTipCap(ctx)
 	if err != nil {
 		return nil, err
@@ -162,11 +189,7 @@ func (api *APIImpl) FeeHistory(ctx context.Context, blockCount rpc.DecimalOrHex,
 		return nil, err
 	}
 	defer tx.Rollback()
-	cc, err := api.chainConfig(tx)
-	if err != nil {
-		return nil, err
-	}
-	oracle := gasprice.NewOracle(NewGasPriceOracleBackend(tx, cc, api.BaseAPI), ethconfig.Defaults.GPO, api.gasCache)
+	oracle := gasprice.NewOracle(NewGasPriceOracleBackend(tx, api.BaseAPI), ethconfig.Defaults.GPO, api.gasCache, api.logger.New("app", "gasPriceOracle"))
 
 	oldest, reward, baseFee, gasUsed, err := oracle.FeeHistory(ctx, int(blockCount), lastBlock, rewardPercentiles)
 	if err != nil {
@@ -196,16 +219,15 @@ func (api *APIImpl) FeeHistory(ctx context.Context, blockCount rpc.DecimalOrHex,
 
 type GasPriceOracleBackend struct {
 	tx      kv.Tx
-	cc      *chain.Config
 	baseApi *BaseAPI
 }
 
-func NewGasPriceOracleBackend(tx kv.Tx, cc *chain.Config, baseApi *BaseAPI) *GasPriceOracleBackend {
-	return &GasPriceOracleBackend{tx: tx, cc: cc, baseApi: baseApi}
+func NewGasPriceOracleBackend(tx kv.Tx, baseApi *BaseAPI) *GasPriceOracleBackend {
+	return &GasPriceOracleBackend{tx: tx, baseApi: baseApi}
 }
 
 func (b *GasPriceOracleBackend) HeaderByNumber(ctx context.Context, number rpc.BlockNumber) (*types.Header, error) {
-	header, err := b.baseApi.headerByRPCNumber(number, b.tx)
+	header, err := b.baseApi.headerByRPCNumber(ctx, number, b.tx)
 	if err != nil {
 		return nil, err
 	}
@@ -215,13 +237,14 @@ func (b *GasPriceOracleBackend) HeaderByNumber(ctx context.Context, number rpc.B
 	return header, nil
 }
 func (b *GasPriceOracleBackend) BlockByNumber(ctx context.Context, number rpc.BlockNumber) (*types.Block, error) {
-	return b.baseApi.blockByRPCNumber(number, b.tx)
+	return b.baseApi.blockByRPCNumber(ctx, number, b.tx)
 }
 func (b *GasPriceOracleBackend) ChainConfig() *chain.Config {
-	return b.cc
+	cc, _ := b.baseApi.chainConfig(context.Background(), b.tx)
+	return cc
 }
 func (b *GasPriceOracleBackend) GetReceipts(ctx context.Context, block *types.Block) (types.Receipts, error) {
-	return rawdb.ReadReceipts(b.tx, block, nil), nil
+	return b.baseApi.getReceipts(ctx, b.tx, block, nil)
 }
 func (b *GasPriceOracleBackend) PendingBlockAndReceipts() (*types.Block, types.Receipts) {
 	return nil, nil

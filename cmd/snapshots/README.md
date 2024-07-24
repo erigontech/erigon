@@ -1,6 +1,6 @@
 # Snapshots - tool for managing remote stanshots
 
-In the root of `Erigon` project, use this command to build the the commands:
+In the root of `Erigon` project, use this command to build the commands:
 
 ```shell
 make snapshots

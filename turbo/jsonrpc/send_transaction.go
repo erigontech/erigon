@@ -6,13 +6,12 @@ import (
 	"fmt"
 	"math/big"
 
-	"github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/common/hexutility"
-	txPoolProto "github.com/ledgerwatch/erigon-lib/gointerfaces/txpool"
+	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common/hexutility"
+	txPoolProto "github.com/erigontech/erigon-lib/gointerfaces/txpoolproto"
 
-	"github.com/ledgerwatch/erigon/core/types"
-	"github.com/ledgerwatch/erigon/eth/ethconfig"
-	"github.com/ledgerwatch/erigon/params"
+	"github.com/erigontech/erigon/core/types"
+	"github.com/erigontech/erigon/params"
 )
 
 // SendRawTransaction implements eth_sendRawTransaction. Creates new message call transaction or a contract creation for previously-signed transactions.
@@ -24,7 +23,7 @@ func (api *APIImpl) SendRawTransaction(ctx context.Context, encodedTx hexutility
 
 	// If the transaction fee cap is already specified, ensure the
 	// fee of the given transaction is _reasonable_.
-	if err := checkTxFee(txn.GetPrice().ToBig(), txn.GetGas(), ethconfig.Defaults.RPCTxFeeCap); err != nil {
+	if err := checkTxFee(txn.GetPrice().ToBig(), txn.GetGas(), api.FeeCap); err != nil {
 		return common.Hash{}, err
 	}
 	if !txn.Protected() && !api.AllowUnprotectedTxs {
@@ -40,7 +39,7 @@ func (api *APIImpl) SendRawTransaction(ctx context.Context, encodedTx hexutility
 
 	defer tx.Rollback()
 
-	cc, err := api.chainConfig(tx)
+	cc, err := api.chainConfig(ctx, tx)
 	if err != nil {
 		return common.Hash{}, err
 	}

@@ -1,3 +1,19 @@
+// Copyright 2024 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+
 package rpc
 
 import (
@@ -29,6 +45,10 @@ func TestHandlerDoesNotDoubleWriteNull(t *testing.T) {
 			params:   []byte("[3]"),
 			expected: `{"jsonrpc":"2.0","id":1,"result":{}}`,
 		},
+		"err_with_valid_json": {
+			params:   []byte("[4]"),
+			expected: `{"jsonrpc":"2.0","id":1,"result":{"structLogs":[]},"error":{"code":-32000,"message":"id 4"}}`,
+		},
 	}
 
 	for name, testParams := range tests {
@@ -50,7 +70,17 @@ func TestHandlerDoesNotDoubleWriteNull(t *testing.T) {
 				if id == 2 {
 					return fmt.Errorf("id 2")
 				}
-				stream.WriteEmptyObject()
+				if id == 3 {
+					stream.WriteEmptyObject()
+					return nil
+				}
+				if id == 4 {
+					stream.WriteObjectStart()
+					stream.WriteObjectField("structLogs")
+					stream.WriteEmptyArray()
+					stream.WriteObjectEnd()
+					return fmt.Errorf("id 4")
+				}
 				return nil
 			}
 

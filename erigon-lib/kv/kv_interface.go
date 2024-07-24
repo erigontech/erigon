@@ -1,18 +1,18 @@
-/*
-   Copyright 2022 Erigon contributors
-
-   Licensed under the Apache License, Version 2.0 (the "License");
-   you may not use this file except in compliance with the License.
-   You may obtain a copy of the License at
-
-       http://www.apache.org/licenses/LICENSE-2.0
-
-   Unless required by applicable law or agreed to in writing, software
-   distributed under the License is distributed on an "AS IS" BASIS,
-   WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-   See the License for the specific language governing permissions and
-   limitations under the License.
-*/
+// Copyright 2022 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
 package kv
 
@@ -22,21 +22,21 @@ import (
 	"fmt"
 	"unsafe"
 
-	"github.com/ledgerwatch/erigon-lib/kv/iter"
-	"github.com/ledgerwatch/erigon-lib/kv/order"
-	"github.com/ledgerwatch/erigon-lib/metrics"
+	"github.com/erigontech/erigon-lib/kv/order"
+	"github.com/erigontech/erigon-lib/kv/stream"
+	"github.com/erigontech/erigon-lib/metrics"
 )
 
 //Variables Naming:
 //  tx - Database Transaction
-//  txn - Ethereum Transaction (and TxNum - is also number of Etherum Transaction)
-//  blockNum - Ethereum block number - same across all nodes. blockID - auto-increment ID - which can be differrent across all nodes
+//  txn - Ethereum Transaction (and TxNum - is also number of Ethereum Transaction)
+//  blockNum - Ethereum block number - same across all nodes. blockID - auto-increment ID - which can be different across all nodes
 //  txNum/txID - same
 //  RoTx - Read-Only Database Transaction. RwTx - read-write
 //  k, v - key, value
-//  ts - TimeStamp. Usually it's Etherum's TransactionNumber (auto-increment ID). Or BlockNumber.
+//  ts - TimeStamp. Usually it's Ethereum's TransactionNumber (auto-increment ID). Or BlockNumber.
 //  Cursor - low-level mdbx-tide api to navigate over Table
-//  Iter - high-level iterator-like api over Table/InvertedIndex/History/Domain. Has less features than Cursor. See package `iter`.
+//  Stream - high-level iterator-like api over Table/InvertedIndex/History/Domain. Server-side-streaming-friendly. See package `stream`.
 
 //Methods Naming:
 //  Prune: delete old data
@@ -60,11 +60,11 @@ import (
 //
 // MediumLevel:
 //    1. TemporalDB - abstracting DB+Snapshots. Target is:
-//         - provide 'time-travel' API for data: consistan snapshot of data as of given Timestamp.
-//         - auto-close iterators on Commit/Rollback
-//         - auto-open/close agg.MakeContext() on Begin/Commit/Rollback
+//         - provide 'time-travel' API for data: consistent snapshot of data as of given Timestamp.
+//         - auto-close streams on Commit/Rollback
+//         - auto-open/close agg.BeginRo() on Begin/Commit/Rollback
 //         - to keep DB small - only for Hot/Recent data (can be update/delete by re-org).
-//         - And TemporalRoTx/TemporalRwTx actaully open Read-Only files view (MakeContext) - no concept of "Read-Write view of snapshot files".
+//         - And TemporalRoTx/TemporalRwTx actually open Read-Only files view (BeginRo) - no concept of "Read-Write view of snapshot files".
 //         - using next entities:
 //               - InvertedIndex: supports range-scans
 //               - History: can return value of key K as of given TimeStamp. Doesn't know about latest/current
@@ -149,12 +149,15 @@ type DBVerbosityLvl int8
 type Label uint8
 
 const (
-	ChainDB      Label = 0
-	TxPoolDB     Label = 1
-	SentryDB     Label = 2
-	ConsensusDB  Label = 3
-	DownloaderDB Label = 4
-	InMem        Label = 5
+	ChainDB         Label = 0
+	TxPoolDB        Label = 1
+	SentryDB        Label = 2
+	ConsensusDB     Label = 3
+	DownloaderDB    Label = 4
+	InMem           Label = 5
+	HeimdallDB      Label = 6
+	DiagnosticsDB   Label = 7
+	PolygonBridgeDB Label = 8
 )
 
 func (l Label) String() string {
@@ -171,6 +174,12 @@ func (l Label) String() string {
 		return "downloader"
 	case InMem:
 		return "inMem"
+	case HeimdallDB:
+		return "heimdall"
+	case DiagnosticsDB:
+		return "diagnostics"
+	case PolygonBridgeDB:
+		return "polygon-bridge"
 	default:
 		return "unknown"
 	}
@@ -189,6 +198,12 @@ func UnmarshalLabel(s string) Label {
 		return DownloaderDB
 	case "inMem":
 		return InMem
+	case "heimdall":
+		return HeimdallDB
+	case "diagnostics":
+		return DiagnosticsDB
+	case "polygon-bridge":
+		return PolygonBridgeDB
 	default:
 		panic(fmt.Sprintf("unexpected label: %s", s))
 	}
@@ -214,7 +229,7 @@ type Getter interface {
 	//   - implementations of local db - stop
 	//   - implementations of remote db - do not handle this error and may finish (send all entries to client) before error happen.
 	ForEach(table string, fromPrefix []byte, walker func(k, v []byte) error) error
-	ForPrefix(table string, prefix []byte, walker func(k, v []byte) error) error
+
 	ForAmount(table string, prefix []byte, amount uint32, walker func(k, v []byte) error) error
 }
 
@@ -294,6 +309,9 @@ type RwDB interface {
 	BeginRw(ctx context.Context) (RwTx, error)
 	BeginRwNosync(ctx context.Context) (RwTx, error)
 }
+type HasRwKV interface {
+	RwKV() RwDB
+}
 
 type StatelessReadTx interface {
 	Getter
@@ -301,7 +319,7 @@ type StatelessReadTx interface {
 	Commit() error // Commit all the operations of a transaction into the database.
 	Rollback()     // Rollback - abandon all the operations of the transaction instead of saving them.
 
-	// ReadSequence - allows to create a linear sequence of unique positive integers for each table.
+	// ReadSequence - allows to create a linear sequence of unique positive integers for each table (AutoIncrement).
 	// Can be called for a read transaction to retrieve the current sequence value, and the increment must be zero.
 	// Sequence changes become visible outside the current write transaction after it is committed, and discarded on abort.
 	// Starts from 0.
@@ -380,22 +398,22 @@ type Tx interface {
 	// Range [from, to)
 	// Range(from, nil) means [from, EndOfTable)
 	// Range(nil, to)   means [StartOfTable, to)
-	Range(table string, fromPrefix, toPrefix []byte) (iter.KV, error)
+	Range(table string, fromPrefix, toPrefix []byte) (stream.KV, error)
 	// Stream is like Range, but for requesting huge data (Example: full table scan). Client can't stop it.
-	//Stream(table string, fromPrefix, toPrefix []byte) (iter.KV, error)
+	//Stream(table string, fromPrefix, toPrefix []byte) (stream.KV, error)
 	// RangeAscend - like Range [from, to) but also allow pass Limit parameters
 	// Limit -1 means Unlimited
-	RangeAscend(table string, fromPrefix, toPrefix []byte, limit int) (iter.KV, error)
-	//StreamAscend(table string, fromPrefix, toPrefix []byte, limit int) (iter.KV, error)
+	RangeAscend(table string, fromPrefix, toPrefix []byte, limit int) (stream.KV, error)
+	//StreamAscend(table string, fromPrefix, toPrefix []byte, limit int) (stream.KV, error)
 	// RangeDescend - is like Range [from, to), but expecing `from`<`to`
 	// example: RangeDescend("Table", "B", "A", -1)
-	RangeDescend(table string, fromPrefix, toPrefix []byte, limit int) (iter.KV, error)
-	//StreamDescend(table string, fromPrefix, toPrefix []byte, limit int) (iter.KV, error)
+	RangeDescend(table string, fromPrefix, toPrefix []byte, limit int) (stream.KV, error)
+	//StreamDescend(table string, fromPrefix, toPrefix []byte, limit int) (stream.KV, error)
 	// Prefix - is exactly Range(Table, prefix, kv.NextSubtree(prefix))
-	Prefix(table string, prefix []byte) (iter.KV, error)
+	Prefix(table string, prefix []byte) (stream.KV, error)
 
 	// RangeDupSort - like Range but for fixed single key and iterating over range of values
-	RangeDupSort(table string, key []byte, fromPrefix, toPrefix []byte, asc order.By, limit int) (iter.KV, error)
+	RangeDupSort(table string, key []byte, fromPrefix, toPrefix []byte, asc order.By, limit int) (stream.KV, error)
 
 	// --- High-Level methods: 1request -> 1page of values in response -> send next page request ---
 	// Paginate(table string, fromPrefix, toPrefix []byte) (PairsStream, error)
@@ -403,12 +421,12 @@ type Tx interface {
 	// --- High-Level deprecated methods ---
 
 	ForEach(table string, fromPrefix []byte, walker func(k, v []byte) error) error
-	ForPrefix(table string, prefix []byte, walker func(k, v []byte) error) error
 	ForAmount(table string, prefix []byte, amount uint32, walker func(k, v []byte) error) error
 
 	// Pointer to the underlying C transaction handle (e.g. *C.MDBX_txn)
 	CHandle() unsafe.Pointer
 	BucketSize(table string) (uint64, error)
+	Count(bucket string) (uint64, error)
 }
 
 // RwTx
@@ -446,7 +464,7 @@ type BucketMigrator interface {
 // Cursor - class for navigating through a database
 // CursorDupSort are inherit this class
 //
-// If methods (like First/Next/Seek) return error, then returned key SHOULD not be nil (can be []byte{} for example).
+// If methods (like First/Next/seekInFiles) return error, then returned key SHOULD not be nil (can be []byte{} for example).
 // Then looping code will look as:
 // c := kv.Cursor(bucketName)
 //
@@ -464,8 +482,6 @@ type Cursor interface {
 	Prev() ([]byte, []byte, error)                // Prev - position at previous key
 	Last() ([]byte, []byte, error)                // Last - position at last key and last possible value
 	Current() ([]byte, []byte, error)             // Current - return key/data at current cursor position
-
-	Count() (uint64, error) // Count - fast way to calculate amount of keys in bucket. It counts all keys even if Prefix was set.
 
 	Close()
 }
@@ -530,16 +546,22 @@ type RwCursorDupSort interface {
 // ---- Temporal part
 
 type (
-	Domain      string
+	Domain      uint16
+	Appendable  uint16
 	History     string
 	InvertedIdx string
+
+	InvertedIdxPos uint16
 )
 
+type TemporalGetter interface {
+	DomainGet(name Domain, k, k2 []byte) (v []byte, step uint64, err error)
+}
 type TemporalTx interface {
 	Tx
-	DomainGet(name Domain, k, k2 []byte) (v []byte, ok bool, err error)
+	TemporalGetter
 	DomainGetAsOf(name Domain, k, k2 []byte, ts uint64) (v []byte, ok bool, err error)
-	HistoryGet(name History, k []byte, ts uint64) (v []byte, ok bool, err error)
+	HistorySeek(name History, k []byte, ts uint64) (v []byte, ok bool, err error)
 
 	// IndexRange - return iterator over range of inverted index for given key `k`
 	// Asc semantic:  [from, to) AND from > to
@@ -548,7 +570,46 @@ type TemporalTx interface {
 	// from -1, to -1 means unbounded (StartOfTable, EndOfTable)
 	// Example: IndexRange("IndexName", 10, 5, order.Desc, -1)
 	// Example: IndexRange("IndexName", -1, -1, order.Asc, 10)
-	IndexRange(name InvertedIdx, k []byte, fromTs, toTs int, asc order.By, limit int) (timestamps iter.U64, err error)
-	HistoryRange(name History, fromTs, toTs int, asc order.By, limit int) (it iter.KV, err error)
-	DomainRange(name Domain, fromKey, toKey []byte, ts uint64, asc order.By, limit int) (it iter.KV, err error)
+	IndexRange(name InvertedIdx, k []byte, fromTs, toTs int, asc order.By, limit int) (timestamps stream.U64, err error)
+	DomainRange(name Domain, fromKey, toKey []byte, ts uint64, asc order.By, limit int) (it stream.KV, err error)
+
+	// HistoryRange - producing "state patch" - sorted list of keys updated at [fromTs,toTs) with their most-recent value.
+	//   no duplicates
+	HistoryRange(name History, fromTs, toTs int, asc order.By, limit int) (it stream.KV, err error)
+
+	AppendableGet(name Appendable, ts TxnId) ([]byte, bool, error)
+}
+
+type TxnId uint64 // internal auto-increment ID. can't cast to eth-network canonical blocks txNum
+
+type TemporalCommitment interface {
+	ComputeCommitment(ctx context.Context, saveStateAfter, trace bool) (rootHash []byte, err error)
+}
+
+type TemporalRwTx interface {
+	RwTx
+	TemporalTx
+}
+
+type TemporalPutDel interface {
+	// DomainPut
+	// Optimizations:
+	//   - user can prvide `prevVal != nil` - then it will not read prev value from storage
+	//   - user can append k2 into k1, then underlying methods will not preform append
+	//   - if `val == nil` it will call DomainDel
+	DomainPut(domain Domain, k1, k2 []byte, val, prevVal []byte, prevStep uint64) error
+
+	// DomainDel
+	// Optimizations:
+	//   - user can prvide `prevVal != nil` - then it will not read prev value from storage
+	//   - user can append k2 into k1, then underlying methods will not preform append
+	//   - if `val == nil` it will call DomainDel
+	DomainDel(domain Domain, k1, k2 []byte, prevVal []byte, prevStep uint64) error
+	DomainDelPrefix(domain Domain, prefix []byte) error
+
+	AppendablePut(name Appendable, ts TxnId, v []byte) error
+}
+type CanWarmupDB interface {
+	WarmupDB(force bool) error
+	LockDBInRam() error
 }

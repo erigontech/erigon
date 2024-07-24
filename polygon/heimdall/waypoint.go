@@ -1,19 +1,36 @@
+// Copyright 2024 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+
 package heimdall
 
 import (
 	"fmt"
 	"math/big"
 
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	libcommon "github.com/erigontech/erigon-lib/common"
 )
 
 type Waypoint interface {
+	Entity
 	fmt.Stringer
 	StartBlock() *big.Int
 	EndBlock() *big.Int
 	RootHash() libcommon.Hash
 	Timestamp() uint64
-	Length() int
+	Length() uint64
 	CmpRange(n uint64) int
 }
 
@@ -26,8 +43,8 @@ type WaypointFields struct {
 	Timestamp  uint64            `json:"timestamp"`
 }
 
-func (a *WaypointFields) Length() int {
-	return int(new(big.Int).Sub(a.EndBlock, a.StartBlock).Int64() + 1)
+func (a *WaypointFields) Length() uint64 {
+	return a.EndBlock.Uint64() - a.StartBlock.Uint64() + 1
 }
 
 func (a *WaypointFields) CmpRange(n uint64) int {
@@ -35,7 +52,7 @@ func (a *WaypointFields) CmpRange(n uint64) int {
 	if num.Cmp(a.StartBlock) < 0 {
 		return -1
 	}
-	if num.Cmp(a.StartBlock) > 0 {
+	if num.Cmp(a.EndBlock) > 0 {
 		return 1
 	}
 	return 0

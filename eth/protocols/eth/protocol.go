@@ -1,18 +1,21 @@
 // Copyright 2014 The go-ethereum Authors
-// This file is part of the go-ethereum library.
+// (original work)
+// Copyright 2024 The Erigon Authors
+// (modifications)
+// This file is part of Erigon.
 //
-// The go-ethereum library is free software: you can redistribute it and/or modify
+// Erigon is free software: you can redistribute it and/or modify
 // it under the terms of the GNU Lesser General Public License as published by
 // the Free Software Foundation, either version 3 of the License, or
 // (at your option) any later version.
 //
-// The go-ethereum library is distributed in the hope that it will be useful,
+// Erigon is distributed in the hope that it will be useful,
 // but WITHOUT ANY WARRANTY; without even the implied warranty of
 // MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
 // GNU Lesser General Public License for more details.
 //
 // You should have received a copy of the GNU Lesser General Public License
-// along with the go-ethereum library. If not, see <http://www.gnu.org/licenses/>.
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
 package eth
 
@@ -21,14 +24,14 @@ import (
 	"io"
 	"math/big"
 
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/direct"
-	proto_sentry "github.com/ledgerwatch/erigon-lib/gointerfaces/sentry"
-	rlp2 "github.com/ledgerwatch/erigon-lib/rlp"
+	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/direct"
+	proto_sentry "github.com/erigontech/erigon-lib/gointerfaces/sentryproto"
+	rlp2 "github.com/erigontech/erigon-lib/rlp"
 
-	"github.com/ledgerwatch/erigon/core/forkid"
-	"github.com/ledgerwatch/erigon/core/types"
-	"github.com/ledgerwatch/erigon/rlp"
+	"github.com/erigontech/erigon/core/forkid"
+	"github.com/erigontech/erigon/core/types"
+	"github.com/erigontech/erigon/rlp"
 )
 
 var ProtocolToString = map[uint]string{
@@ -356,18 +359,19 @@ type BlockBodiesRLPPacket66 struct {
 	BlockBodiesRLPPacket
 }
 
-// Unpack retrieves the transactions, uncles, and withdrawals from the range packet and returns
+// Unpack retrieves the transactions, uncles, withdrawals, and requests from the range packet and returns
 // them in a split flat format that's more consistent with the internal data structures.
-func (p *BlockRawBodiesPacket) Unpack() ([][][]byte, [][]*types.Header, []types.Withdrawals) {
+func (p *BlockRawBodiesPacket) Unpack() ([][][]byte, [][]*types.Header, []types.Withdrawals, []types.Requests) {
 	var (
 		txSet         = make([][][]byte, len(*p))
 		uncleSet      = make([][]*types.Header, len(*p))
 		withdrawalSet = make([]types.Withdrawals, len(*p))
+		requestSet    = make([]types.Requests, len(*p))
 	)
 	for i, body := range *p {
-		txSet[i], uncleSet[i], withdrawalSet[i] = body.Transactions, body.Uncles, body.Withdrawals
+		txSet[i], uncleSet[i], withdrawalSet[i], requestSet[i] = body.Transactions, body.Uncles, body.Withdrawals, body.Requests
 	}
-	return txSet, uncleSet, withdrawalSet
+	return txSet, uncleSet, withdrawalSet, requestSet
 }
 
 // GetReceiptsPacket represents a block receipts query.

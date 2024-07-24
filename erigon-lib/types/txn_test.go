@@ -1,18 +1,18 @@
-/*
-   Copyright 2021 The Erigon contributors
-
-   Licensed under the Apache License, Version 2.0 (the "License");
-   you may not use this file except in compliance with the License.
-   You may obtain a copy of the License at
-
-       http://www.apache.org/licenses/LICENSE-2.0
-
-   Unless required by applicable law or agreed to in writing, software
-   distributed under the License is distributed on an "AS IS" BASIS,
-   WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-   See the License for the specific language governing permissions and
-   limitations under the License.
-*/
+// Copyright 2021 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
 package types
 
@@ -27,8 +27,8 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/ledgerwatch/erigon-lib/common/fixedgas"
-	"github.com/ledgerwatch/erigon-lib/common/hexutility"
+	"github.com/erigontech/erigon-lib/common/fixedgas"
+	"github.com/erigontech/erigon-lib/common/hexutility"
 )
 
 func TestParseTransactionRLP(t *testing.T) {
@@ -203,7 +203,7 @@ func TestBlobTxParsing(t *testing.T) {
 	ctx := NewTxParseContext(*uint256.NewInt(5))
 	ctx.withSender = false
 
-	var thinTx TxSlot // only tx body, no blobs
+	var thinTx TxSlot // only txn body, no blobs
 	txType, err := PeekTransactionType(bodyEnvelope)
 	require.NoError(t, err)
 	assert.Equal(t, BlobTxType, txType)
@@ -219,7 +219,7 @@ func TestBlobTxParsing(t *testing.T) {
 	assert.Equal(t, 0, len(thinTx.Commitments))
 	assert.Equal(t, 0, len(thinTx.Proofs))
 
-	// Now parse the same tx body, but wrapped with blobs/commitments/proofs
+	// Now parse the same txn body, but wrapped with blobs/commitments/proofs
 	wrappedWithBlobs = true
 	hasEnvelope = false
 
@@ -291,4 +291,71 @@ func TestBlobTxParsing(t *testing.T) {
 	assert.Equal(t, commitment1, fatTx.Commitments[1])
 	assert.Equal(t, proof0, fatTx.Proofs[0])
 	assert.Equal(t, proof1, fatTx.Proofs[1])
+}
+
+func TestSetCodeTxParsing(t *testing.T) {
+	bodyRlxHex := "0x04f902b10188a804b97e55f1619888a08ae04b7dc9b296889262bfb381a9852c88c3ed5816717427719426b97a6e638930cd51d0482d4c3908e171c848ca88e7fcd96deec354e0b8b45c84e7ba97d4d60285eebbf3f7be79aed25dfe2a9f086c69c8ae152aa777b806f45ab602f4b354a6537154e24b4f6b85b58535726876fa885dba96b202417326bb4e4ba5e0bcccd9b4e4df6096401c19e7d38df3599157249a72ac3cf095c39cfde8d4233303823f5341ccaa9ebaf78cd8dd06ec61af9924df9a2f97d13c88ae737a017c914d21d3390984a6102c51293b3b2cec8214e6be2ee033ed4795f1158d9103c9ab5f50786729dd9baf395bb20c71456cf8d5f89b94f8032107975d3fbd90ffa74185a0cb5ab43afe85f884a037e36aea1770355c584876f969c7014017aa51a5e287c9679f4402d1a878b6e3a0be3cdb54e9c5fc3032535d262e6e9ce6a092e068ad0c95f19b4022c1111652b0a0562f7754a0c1d29acfbdaad8ae779125ccc6afec0ec1177056391479b25cee72a069a8be541415e284e16be88ecdb73d5e14ae0e0ade0db635a8d717b70d98293ef794cad5e3980e2d53db6d79d5e6821cff73bef01803e1a0415787a09d11b750dfd34dfe0868ab2c7e6bd8d7ef1a66720f2ea6c7f6e9bb01f8ccf201943d8b4362475b3d0504ccd9e63cddd351b88fa052c088832c50d9581133828864e3d39680cff14988237c283c57f04c54f201940e7ceefb1855e91bd085d85852b2a9df4f9da4f0c088a87ef261eb89b837882d717143b8cb5e718854d879dc9f18304ef2019477be91ff1fb94eb618aebb4d829e9f8eeec4301bc088343c738cf5c7f5b1880521e62bff507ec288ce2f51e36cb6d54ef20194c32daf3ad4597567184d790ab83d7bf34cf0e446c088c04ac61fbe29181988f8c0d967f0799fb988772265a4be2b26ab0188c91023f53ea594d7881c46b9feb3b7cbc6"
+	bodyRlx := hexutility.MustDecodeHex(bodyRlxHex)
+
+	hasEnvelope := false
+	ctx := NewTxParseContext(*uint256.NewInt(1))
+	ctx.withSender = false
+
+	var tx TxSlot
+	txType, err := PeekTransactionType(bodyRlx)
+	require.NoError(t, err)
+	assert.Equal(t, SetCodeTxType, txType)
+
+	_, err = ctx.ParseTransaction(bodyRlx, 0, &tx, nil, hasEnvelope, false, nil)
+	require.NoError(t, err)
+	assert.Equal(t, 4, tx.AuthorizationLen)
+	assert.Equal(t, SetCodeTxType, tx.Type)
+
+	// test empty authorizations
+	bodyRlxHex = "0x04f903420188db1b29114eba96ab887145908699cc1f3488987b96c0c55fced7886b85e4937b481442949a60a150fda306891ad7aff6d47584c8a0e1571788c5f7682286d452e0b9021164b57ad1f652639f5d44536f1b868437787082df48b3e2a684742d0eafcfda5336e7a958afb22ae57aad8e9a271528f9aa1f4a34e29491a8929732e22c04a438578b2b8510862572dd36b5304a9c3b6668b7c8f818be8411c07866ccb1fbe34586f80a1ace62753b918139acefc71f92d0c4679c0a56bb6c8ae38bc37a7ee8f348255c8ada95e842b52d4bd2b2447789a8543beda9f3bc8e27f28d51373ef9b1494c3d21adc6b0416444088ed08834eb5736d48566da000356bbcd7d78b118c39d15a56874fd254dcfcc172cd7a82e36621b964ebc54fdaa64de9e381b1545cfc7c4ea1cfccff829f0dfa395ef5f750b79689e5c8e3f6c7de9afe34d05f599dac8e3ae999f7acb32f788991425a7d8b36bf92a7dc14d913c3cc5854e580f48d507bf06018f3d012155791e1930791afccefe46f268b59e023ddacaf1e8278026a4c962f9b968f065e7c33d98d2aea49e8885ac77bfcc952e322c5e414cb5b4e7477829c0a4b8b0964fc28d202bca1b3bedca34f3fe12d62629b30a4764121440d0ea0f50f26579c486070d00309a44c14f6c3347c5d14b520eca8a399a1cd3c421f28ae5485e96b4c500a411754a78f558701d1a9788d22e6d2f02fefd1c45c2d427b518adda66a34432c3f94b4b3811e2d063dca2917f403033b0400e4e9dc3fd327b10a43a15229332596671d0392e501c39f43b23f814e95b093e981418091f9e2a32013ab8fa7a409d5636b52fded6f8d5f794de688ae4be9a54b20eb5366903223863de2bc895e1a0f5ecb3956919b8e9e9956c20c89b523e71c5803592c99871b7d5ee025e402941f89b94ae16863cc3bf6e6946f186d0f63d77343f81363ef884a0b09afe54c0376e3e3091473edb4e2bf43f08530356a2c9236bf373869b79c8d0a0ec2c57ca577173865f340a7cd13cf0051e52229722e3a529f851d4b74e315c8ca00bbe5f1a1ef2e5830d0c5cb8e93a05d4d29b4d7bf244ceea432888c4fbd5d5d5a0823b7ceaeba3a4cd70572c2ccc560d588ffeed638aec7c0cc364afa7dbf1c51cc0018818848492f65ca7bd88ea2017dc526fff7f"
+	bodyRlx = hexutility.MustDecodeHex(bodyRlxHex)
+	ctx = NewTxParseContext(*uint256.NewInt(1))
+	ctx.withSender = false
+	var tx2 TxSlot
+
+	txType, err = PeekTransactionType(bodyRlx)
+	require.NoError(t, err)
+	assert.Equal(t, SetCodeTxType, txType)
+
+	_, err = ctx.ParseTransaction(bodyRlx, 0, &tx2, nil, hasEnvelope, false, nil)
+	require.NoError(t, err)
+	assert.Equal(t, 0, tx2.AuthorizationLen)
+	assert.Equal(t, SetCodeTxType, tx2.Type)
+
+	// generated using this in encdec_test.go
+	/*
+		func TestGenerateSetCodeTxRlp(t *testing.T) {
+			tr := NewTRand()
+			var tx Transaction
+			requiredAuthLen := 0
+			for tx = tr.RandTransaction(); tx.Type() != types2.SetCodeTxType || len(tx.(*SetCodeTransaction).GetAuthorizations()) != requiredAuthLen; tx = tr.RandTransaction() {
+			}
+			v, _, _ := tx.RawSignatureValues()
+			v.SetUint64(uint64(randIntInRange(0, 2)))
+
+			tx.GetChainID().SetUint64(1)
+
+			for _, auth := range tx.(*SetCodeTransaction).GetAuthorizations() {
+				auth.ChainID.SetUint64(1)
+				auth.V.SetUint64(uint64(randIntInRange(0, 2)))
+			}
+			w := bytes.NewBuffer(nil)
+			if err := tx.MarshalBinary(w); err != nil {
+				t.Error(err)
+			}
+
+			hex := hexutility.Bytes(w.Bytes()).String()
+			//hex := libcommon.BytesToHash().Hex()
+			authj, err := json.Marshal(tx.(*SetCodeTransaction).GetAuthorizations())
+			if err != nil {
+				t.Error(err)
+			}
+			fmt.Println("tx", hex, len(tx.(*SetCodeTransaction).GetAuthorizations()), string(authj))
+		}
+	*/
 }

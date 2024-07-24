@@ -1,3 +1,19 @@
+// Copyright 2024 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+
 package handler
 
 import (
@@ -7,12 +23,12 @@ import (
 	"net/http"
 	"sort"
 
-	"github.com/ledgerwatch/erigon/cl/beacon/beaconhttp"
-	"github.com/ledgerwatch/erigon/cl/clparams"
-	"github.com/ledgerwatch/erigon/cl/cltypes/solid"
-	"github.com/ledgerwatch/erigon/cl/persistence/beacon_indicies"
-	state_accessors "github.com/ledgerwatch/erigon/cl/persistence/state"
-	"github.com/ledgerwatch/erigon/cl/utils"
+	"github.com/erigontech/erigon/cl/beacon/beaconhttp"
+	"github.com/erigontech/erigon/cl/clparams"
+	"github.com/erigontech/erigon/cl/cltypes/solid"
+	"github.com/erigontech/erigon/cl/persistence/beacon_indicies"
+	state_accessors "github.com/erigontech/erigon/cl/persistence/state"
+	"github.com/erigontech/erigon/cl/utils"
 )
 
 type blockRewardsResponse struct {
@@ -40,6 +56,7 @@ func (a *ApiHandler) GetEthV1BeaconRewardsBlocks(w http.ResponseWriter, r *http.
 	if err != nil {
 		return nil, err
 	}
+	isOptimistic := a.forkchoiceStore.IsRootOptimistic(root)
 	blk, err := a.blockReader.ReadHeaderByRoot(ctx, tx, root)
 	if err != nil {
 		return nil, err
@@ -62,7 +79,7 @@ func (a *ApiHandler) GetEthV1BeaconRewardsBlocks(w http.ResponseWriter, r *http.
 			AttesterSlashings: blkRewards.AttesterSlashings,
 			SyncAggregate:     blkRewards.SyncAggregate,
 			Total:             blkRewards.Attestations + blkRewards.ProposerSlashings + blkRewards.AttesterSlashings + blkRewards.SyncAggregate,
-		}).WithFinalized(isFinalized), nil
+		}).WithFinalized(isFinalized).WithOptimistic(isOptimistic), nil
 	}
 	slotData, err := state_accessors.ReadSlotData(tx, slot)
 	if err != nil {
@@ -127,6 +144,7 @@ func (a *ApiHandler) PostEthV1BeaconRewardsSyncCommittees(w http.ResponseWriter,
 	if blk == nil {
 		return nil, beaconhttp.NewEndpointError(http.StatusNotFound, fmt.Errorf("block not found"))
 	}
+	slot := blk.Block.Slot
 	version := a.beaconChainCfg.GetCurrentStateVersion(blk.Block.Slot / a.beaconChainCfg.SlotsPerEpoch)
 	if version < clparams.AltairVersion {
 		return nil, beaconhttp.NewEndpointError(http.StatusNotFound, fmt.Errorf("sync committee rewards not available before Altair fork"))
@@ -168,7 +186,7 @@ func (a *ApiHandler) PostEthV1BeaconRewardsSyncCommittees(w http.ResponseWriter,
 		}
 	} else {
 		var ok bool
-		syncCommittee, _, ok = a.forkchoiceStore.GetSyncCommittees(root)
+		syncCommittee, _, ok = a.forkchoiceStore.GetSyncCommittees(a.beaconChainCfg.SyncCommitteePeriod(slot))
 		if !ok {
 			return nil, beaconhttp.NewEndpointError(http.StatusNotFound, fmt.Errorf("non-finalized sync committee not found"))
 		}

@@ -1,9 +1,25 @@
+// Copyright 2024 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+
 package heimdall
 
 import (
 	"github.com/google/btree"
 
-	"github.com/ledgerwatch/erigon/polygon/bor/valset"
+	"github.com/erigontech/erigon/polygon/bor/valset"
 )
 
 type Span struct {
@@ -15,13 +31,30 @@ type Span struct {
 	ChainID           string              `json:"bor_chain_id,omitempty" yaml:"bor_chain_id"`
 }
 
-func (hs *Span) Less(other btree.Item) bool {
-	otherHs := other.(*Span)
-	if hs.EndBlock == 0 || otherHs.EndBlock == 0 {
-		// if endblock is not specified in one of the items, allow search by ID
-		return hs.Id < otherHs.Id
+var _ Entity = &Span{}
+
+func (s *Span) RawId() uint64 {
+	return uint64(s.Id)
+}
+
+func (s *Span) SetRawId(id uint64) {
+	panic("unimplemented")
+}
+
+func (s *Span) BlockNumRange() ClosedRange {
+	return ClosedRange{
+		Start: s.StartBlock,
+		End:   s.EndBlock,
 	}
-	return hs.EndBlock < otherHs.EndBlock
+}
+
+func (s *Span) Less(other btree.Item) bool {
+	otherHs := other.(*Span)
+	if s.EndBlock == 0 || otherHs.EndBlock == 0 {
+		// if endblock is not specified in one of the items, allow search by ID
+		return s.Id < otherHs.Id
+	}
+	return s.EndBlock < otherHs.EndBlock
 }
 
 func (s *Span) CmpRange(n uint64) int {

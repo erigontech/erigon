@@ -1,18 +1,21 @@
 // Copyright 2014 The go-ethereum Authors
-// This file is part of the go-ethereum library.
+// (original work)
+// Copyright 2024 The Erigon Authors
+// (modifications)
+// This file is part of Erigon.
 //
-// The go-ethereum library is free software: you can redistribute it and/or modify
+// Erigon is free software: you can redistribute it and/or modify
 // it under the terms of the GNU Lesser General Public License as published by
 // the Free Software Foundation, either version 3 of the License, or
 // (at your option) any later version.
 //
-// The go-ethereum library is distributed in the hope that it will be useful,
+// Erigon is distributed in the hope that it will be useful,
 // but WITHOUT ANY WARRANTY; without even the implied warranty of
 // MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
 // GNU Lesser General Public License for more details.
 //
 // You should have received a copy of the GNU Lesser General Public License
-// along with the go-ethereum library. If not, see <http://www.gnu.org/licenses/>.
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
 package state
 
@@ -22,15 +25,24 @@ import (
 	"testing"
 
 	"github.com/holiman/uint256"
-	"github.com/ledgerwatch/erigon-lib/chain"
-	"github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon-lib/kv/kvcfg"
-	"github.com/ledgerwatch/erigon-lib/kv/memdb"
+	"github.com/stretchr/testify/require"
 	checker "gopkg.in/check.v1"
 
-	"github.com/ledgerwatch/erigon/core/types/accounts"
-	"github.com/ledgerwatch/erigon/crypto"
+	"github.com/erigontech/erigon-lib/chain"
+	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common/datadir"
+	"github.com/erigontech/erigon-lib/kv"
+	"github.com/erigontech/erigon-lib/kv/memdb"
+	"github.com/erigontech/erigon-lib/kv/rawdbv3"
+	"github.com/erigontech/erigon-lib/kv/temporal"
+	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon-lib/state"
+	stateLib "github.com/erigontech/erigon-lib/state"
+
+	"github.com/erigontech/erigon/core/rawdb"
+	"github.com/erigontech/erigon/core/tracing"
+	"github.com/erigontech/erigon/core/types/accounts"
+	"github.com/erigontech/erigon/crypto"
 )
 
 var toAddr = common.BytesToAddress
@@ -48,11 +60,11 @@ var _ = checker.Suite(&StateSuite{})
 func (s *StateSuite) TestDump(c *checker.C) {
 	// generate a few entries
 	obj1 := s.state.GetOrNewStateObject(toAddr([]byte{0x01}))
-	obj1.AddBalance(uint256.NewInt(22))
+	obj1.AddBalance(uint256.NewInt(22), tracing.BalanceChangeUnspecified)
 	obj2 := s.state.GetOrNewStateObject(toAddr([]byte{0x01, 0x02}))
 	obj2.SetCode(crypto.Keccak256Hash([]byte{3, 3, 3, 3, 3, 3, 3}), []byte{3, 3, 3, 3, 3, 3, 3})
 	obj3 := s.state.GetOrNewStateObject(toAddr([]byte{0x02}))
-	obj3.SetBalance(uint256.NewInt(44))
+	obj3.SetBalance(uint256.NewInt(44), tracing.BalanceChangeUnspecified)
 
 	// write some of them to the trie
 	err := s.w.UpdateAccountData(obj1.address, &obj1.data, new(accounts.Account))
@@ -73,11 +85,7 @@ func (s *StateSuite) TestDump(c *checker.C) {
 	}
 	defer tx.Rollback()
 
-	historyV3, err := kvcfg.HistoryV3.Enabled(tx)
-	if err != nil {
-		panic(err)
-	}
-	got := string(NewDumper(tx, 1, historyV3).DefaultDump())
+	got := string(NewDumper(tx, 1).DefaultDump())
 	want := `{
     "root": "71edff0130dd2385947095001c73d9e28d862fc286fca2b922ca6f6f3cddfdd2",
     "accounts": {
@@ -108,14 +116,45 @@ func (s *StateSuite) TestDump(c *checker.C) {
 }
 
 func (s *StateSuite) SetUpTest(c *checker.C) {
-	s.kv = memdb.New("")
-	tx, err := s.kv.BeginRw(context.Background()) //nolint
+	//var agg *state.Aggregator
+	//s.kv, s.tx, agg = memdb.NewTestTemporalDb(c.Logf)
+	db := memdb.NewStateDB("")
+	defer db.Close()
+
+	cr := rawdb.NewCanonicalReader()
+	agg, err := stateLib.NewAggregator(context.Background(), datadir.New(""), 16, db, cr, log.New())
+	if err != nil {
+		panic(err)
+	}
+	defer agg.Close()
+
+	_db, err := temporal.New(db, agg)
+	if err != nil {
+		panic(err)
+	}
+
+	tx, err := _db.BeginTemporalRw(context.Background()) //nolint:gocritic
+	if err != nil {
+		panic(err)
+	}
+	defer tx.Rollback()
+
+	domains, err := stateLib.NewSharedDomains(tx, log.New())
+	if err != nil {
+		panic(err)
+	}
+	defer domains.Close()
+
+	domains.SetTxNum(1)
+	domains.SetBlockNum(1)
+	err = rawdbv3.TxNums.Append(tx, 1, 1)
 	if err != nil {
 		panic(err)
 	}
 	s.tx = tx
-	s.r = NewPlainState(tx, 1, nil)
-	s.w = NewPlainState(tx, 1, nil)
+	//s.r = NewWriterV4(s.tx)
+	s.r = NewReaderV4(domains)
+	s.w = NewWriterV4(domains)
 	s.state = New(s.r)
 }
 
@@ -160,7 +199,7 @@ func (s *StateSuite) TestTouchDelete(c *checker.C) {
 	s.state.Reset()
 
 	snapshot := s.state.Snapshot()
-	s.state.AddBalance(common.Address{}, new(uint256.Int))
+	s.state.AddBalance(common.Address{}, new(uint256.Int), tracing.BalanceChangeUnspecified)
 
 	if len(s.state.journal.dirties) != 1 {
 		c.Fatal("expected one dirty state object")
@@ -209,10 +248,22 @@ func (s *StateSuite) TestSnapshotEmpty(c *checker.C) {
 // use testing instead of checker because checker does not support
 // printing/logging in tests (-check.vv does not work)
 func TestSnapshot2(t *testing.T) {
+	//TODO: why I shouldn't recreate writer here? And why domains.SetBlockNum(1) is enough for green test?
 	t.Parallel()
-	_, tx := memdb.NewTestTx(t)
-	w := NewPlainState(tx, 1, nil)
-	state := New(NewPlainState(tx, 1, nil))
+	_, tx, _ := NewTestTemporalDb(t)
+
+	domains, err := stateLib.NewSharedDomains(tx, log.New())
+	require.NoError(t, err)
+	defer domains.Close()
+
+	domains.SetTxNum(1)
+	domains.SetBlockNum(2)
+	err = rawdbv3.TxNums.Append(tx, 1, 1)
+	require.NoError(t, err)
+
+	w := NewWriterV4(domains)
+
+	state := New(NewReaderV4(domains))
 
 	stateobjaddr0 := toAddr([]byte("so0"))
 	stateobjaddr1 := toAddr([]byte("so1"))
@@ -226,18 +277,17 @@ func TestSnapshot2(t *testing.T) {
 
 	// db, trie are already non-empty values
 	so0 := state.getStateObject(stateobjaddr0)
-	so0.SetBalance(uint256.NewInt(42))
+	so0.SetBalance(uint256.NewInt(42), tracing.BalanceChangeUnspecified)
 	so0.SetNonce(43)
 	so0.SetCode(crypto.Keccak256Hash([]byte{'c', 'a', 'f', 'e'}), []byte{'c', 'a', 'f', 'e'})
 	so0.selfdestructed = false
 	so0.deleted = false
 	state.setStateObject(stateobjaddr0, so0)
 
-	err := state.FinalizeTx(&chain.Rules{}, w)
+	err = state.FinalizeTx(&chain.Rules{}, w)
 	if err != nil {
 		t.Fatal("error while finalizing transaction", err)
 	}
-	w = NewPlainState(tx, 2, nil)
 
 	err = state.CommitBlock(&chain.Rules{}, w)
 	if err != nil {
@@ -246,7 +296,7 @@ func TestSnapshot2(t *testing.T) {
 
 	// and one with deleted == true
 	so1 := state.getStateObject(stateobjaddr1)
-	so1.SetBalance(uint256.NewInt(52))
+	so1.SetBalance(uint256.NewInt(52), tracing.BalanceChangeUnspecified)
 	so1.SetNonce(53)
 	so1.SetCode(crypto.Keccak256Hash([]byte{'c', 'a', 'f', 'e', '2'}), []byte{'c', 'a', 'f', 'e', '2'})
 	so1.selfdestructed = true
@@ -324,56 +374,71 @@ func compareStateObjects(so0, so1 *stateObject, t *testing.T) {
 	}
 }
 
+func NewTestTemporalDb(tb testing.TB) (kv.RwDB, kv.RwTx, *state.Aggregator) {
+	tb.Helper()
+	db := memdb.NewStateDB(tb.TempDir())
+	tb.Cleanup(db.Close)
+
+	cr := rawdb.NewCanonicalReader()
+	agg, err := state.NewAggregator(context.Background(), datadir.New(tb.TempDir()), 16, db, cr, log.New())
+	if err != nil {
+		tb.Fatal(err)
+	}
+	tb.Cleanup(agg.Close)
+
+	_db, err := temporal.New(db, agg)
+	if err != nil {
+		tb.Fatal(err)
+	}
+	tx, err := _db.BeginTemporalRw(context.Background()) //nolint:gocritic
+	if err != nil {
+		tb.Fatal(err)
+	}
+	tb.Cleanup(tx.Rollback)
+	return _db, tx, agg
+}
+
 func TestDump(t *testing.T) {
 	t.Parallel()
-	_, tx := memdb.NewTestTx(t)
-	w := NewPlainStateWriter(tx, tx, 0)
-	state := New(NewPlainStateReader(tx))
+	_, tx, _ := NewTestTemporalDb(t)
+
+	domains, err := state.NewSharedDomains(tx, log.New())
+	require.NoError(t, err)
+	defer domains.Close()
+
+	domains.SetTxNum(1)
+	domains.SetBlockNum(1)
+	err = rawdbv3.TxNums.Append(tx, 1, 1)
+	require.NoError(t, err)
+
+	st := New(NewReaderV4(domains))
 
 	// generate a few entries
-	obj1 := state.GetOrNewStateObject(toAddr([]byte{0x01}))
-	obj1.AddBalance(uint256.NewInt(22))
-	obj2 := state.GetOrNewStateObject(toAddr([]byte{0x01, 0x02}))
+	obj1 := st.GetOrNewStateObject(toAddr([]byte{0x01}))
+	obj1.AddBalance(uint256.NewInt(22), tracing.BalanceChangeUnspecified)
+	obj2 := st.GetOrNewStateObject(toAddr([]byte{0x01, 0x02}))
 	obj2.SetCode(crypto.Keccak256Hash([]byte{3, 3, 3, 3, 3, 3, 3}), []byte{3, 3, 3, 3, 3, 3, 3})
 	obj2.setIncarnation(1)
-	obj3 := state.GetOrNewStateObject(toAddr([]byte{0x02}))
-	obj3.SetBalance(uint256.NewInt(44))
+	obj3 := st.GetOrNewStateObject(toAddr([]byte{0x02}))
+	obj3.SetBalance(uint256.NewInt(44), tracing.BalanceChangeUnspecified)
 
+	w := NewWriterV4(domains)
 	// write some of them to the trie
-	err := w.UpdateAccountData(obj1.address, &obj1.data, new(accounts.Account))
-	if err != nil {
-		t.Fatal(err)
-	}
+	err = w.UpdateAccountData(obj1.address, &obj1.data, new(accounts.Account))
+	require.NoError(t, err)
 	err = w.UpdateAccountData(obj2.address, &obj2.data, new(accounts.Account))
-	if err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, err)
+	err = st.FinalizeTx(&chain.Rules{}, w)
+	require.NoError(t, err)
 
-	err = state.FinalizeTx(&chain.Rules{}, w)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	blockWriter := NewPlainStateWriter(tx, tx, 1)
-	err = state.CommitBlock(&chain.Rules{}, blockWriter)
-	if err != nil {
-		t.Fatal(err)
-	}
-	err = blockWriter.WriteChangeSets()
-	if err != nil {
-		t.Fatal(err)
-	}
-	err = blockWriter.WriteHistory()
-	if err != nil {
-		t.Fatal(err)
-	}
+	blockWriter := NewWriterV4(domains)
+	err = st.CommitBlock(&chain.Rules{}, blockWriter)
+	require.NoError(t, err)
+	err = domains.Flush(context.Background(), tx)
+	require.NoError(t, err)
 
 	// check that dump contains the state objects that are in trie
-	historyV3, err := kvcfg.HistoryV3.Enabled(tx)
-	if err != nil {
-		panic(err)
-	}
-	got := string(NewDumper(tx, 2, historyV3).DefaultDump())
+	got := string(NewDumper(tx, 1).DefaultDump())
 	want := `{
     "root": "0000000000000000000000000000000000000000000000000000000000000000",
     "accounts": {

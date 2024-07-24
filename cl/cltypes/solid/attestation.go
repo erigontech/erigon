@@ -1,14 +1,31 @@
+// Copyright 2024 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+
 package solid
 
 import (
+	"encoding/binary"
 	"encoding/json"
 
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/common/hexutility"
-	"github.com/ledgerwatch/erigon-lib/common/length"
-	"github.com/ledgerwatch/erigon-lib/types/clonable"
-	"github.com/ledgerwatch/erigon-lib/types/ssz"
-	"github.com/ledgerwatch/erigon/cl/merkle_tree"
+	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common/hexutility"
+	"github.com/erigontech/erigon-lib/common/length"
+	"github.com/erigontech/erigon-lib/types/clonable"
+	"github.com/erigontech/erigon-lib/types/ssz"
+	"github.com/erigontech/erigon/cl/merkle_tree"
 )
 
 const (
@@ -34,6 +51,14 @@ func (*Attestation) Static() bool {
 	return false
 }
 
+func (a *Attestation) Copy() *Attestation {
+	new := &Attestation{}
+	copy(new.staticBuffer[:], a.staticBuffer[:])
+	new.aggregationBitsBuffer = make([]byte, len(a.aggregationBitsBuffer))
+	copy(new.aggregationBitsBuffer, a.aggregationBitsBuffer)
+	return new
+}
+
 // NewAttestionFromParameters creates a new Attestation instance using provided parameters
 func NewAttestionFromParameters(
 	aggregationBits []byte,
@@ -41,6 +66,7 @@ func NewAttestionFromParameters(
 	signature [96]byte,
 ) *Attestation {
 	a := &Attestation{}
+	binary.LittleEndian.PutUint32(a.staticBuffer[:4], aggregationBitsOffset)
 	a.SetAttestationData(attestationData)
 	a.SetSignature(signature)
 	a.SetAggregationBits(aggregationBits)
@@ -69,6 +95,7 @@ func (a *Attestation) UnmarshalJSON(buf []byte) error {
 	if err := json.Unmarshal(buf, &tmp); err != nil {
 		return err
 	}
+	binary.LittleEndian.PutUint32(a.staticBuffer[:4], aggregationBitsOffset)
 	a.SetAggregationBits(tmp.AggregationBits)
 	a.SetSignature(tmp.Signature)
 	a.SetAttestationData(tmp.Data)
@@ -170,6 +197,19 @@ func (a *Attestation) HashSSZ() (o [32]byte, err error) {
 
 // Clone creates a new clone of the Attestation instance.
 // This can be useful for creating copies without changing the original object.
-func (*Attestation) Clone() clonable.Clonable {
-	return &Attestation{}
+func (a *Attestation) Clone() clonable.Clonable {
+	if a == nil {
+		return &Attestation{}
+	}
+	var staticBuffer [attestationStaticBufferSize]byte
+	var bitsBuffer []byte
+	copy(staticBuffer[:], a.staticBuffer[:])
+	if a.aggregationBitsBuffer != nil {
+		bitsBuffer = make([]byte, len(a.aggregationBitsBuffer))
+		copy(bitsBuffer, a.aggregationBitsBuffer)
+	}
+	return &Attestation{
+		aggregationBitsBuffer: bitsBuffer,
+		staticBuffer:          staticBuffer,
+	}
 }

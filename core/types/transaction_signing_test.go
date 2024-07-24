@@ -1,18 +1,21 @@
 // Copyright 2016 The go-ethereum Authors
-// This file is part of the go-ethereum library.
+// (original work)
+// Copyright 2024 The Erigon Authors
+// (modifications)
+// This file is part of Erigon.
 //
-// The go-ethereum library is free software: you can redistribute it and/or modify
+// Erigon is free software: you can redistribute it and/or modify
 // it under the terms of the GNU Lesser General Public License as published by
 // the Free Software Foundation, either version 3 of the License, or
 // (at your option) any later version.
 //
-// The go-ethereum library is distributed in the hope that it will be useful,
+// Erigon is distributed in the hope that it will be useful,
 // but WITHOUT ANY WARRANTY; without even the implied warranty of
 // MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
 // GNU Lesser General Public License for more details.
 //
 // You should have received a copy of the GNU Lesser General Public License
-// along with the go-ethereum library. If not, see <http://www.gnu.org/licenses/>.
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
 package types
 
@@ -21,9 +24,10 @@ import (
 	"testing"
 
 	"github.com/holiman/uint256"
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
 
-	"github.com/ledgerwatch/erigon/crypto"
+	libcommon "github.com/erigontech/erigon-lib/common"
+
+	"github.com/erigontech/erigon/crypto"
 )
 
 func TestEIP1559Signing(t *testing.T) {
@@ -33,12 +37,12 @@ func TestEIP1559Signing(t *testing.T) {
 
 	chainId := uint256.NewInt(18)
 	signer := LatestSignerForChainID(chainId.ToBig())
-	tx, err := SignTx(NewEIP1559Transaction(*chainId, 0, addr, new(uint256.Int), 0, new(uint256.Int), new(uint256.Int), new(uint256.Int), nil), *signer, key)
+	txn, err := SignTx(NewEIP1559Transaction(*chainId, 0, addr, new(uint256.Int), 0, new(uint256.Int), new(uint256.Int), new(uint256.Int), nil), *signer, key)
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	from, err := tx.Sender(*signer)
+	from, err := txn.Sender(*signer)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -53,12 +57,12 @@ func TestEIP155Signing(t *testing.T) {
 	addr := crypto.PubkeyToAddress(key.PublicKey)
 
 	signer := LatestSignerForChainID(big.NewInt(18))
-	tx, err := SignTx(NewTransaction(0, addr, new(uint256.Int), 0, new(uint256.Int), nil), *signer, key)
+	txn, err := SignTx(NewTransaction(0, addr, new(uint256.Int), 0, new(uint256.Int), nil), *signer, key)
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	from, err := tx.Sender(*signer)
+	from, err := txn.Sender(*signer)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -73,30 +77,30 @@ func TestEIP155ChainId(t *testing.T) {
 	addr := crypto.PubkeyToAddress(key.PublicKey)
 
 	signer := LatestSignerForChainID(big.NewInt(18))
-	tx, err := SignTx(NewTransaction(0, addr, new(uint256.Int), 0, new(uint256.Int), nil), *signer, key)
+	txn, err := SignTx(NewTransaction(0, addr, new(uint256.Int), 0, new(uint256.Int), nil), *signer, key)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !tx.Protected() {
-		t.Fatal("expected tx to be protected")
+	if !txn.Protected() {
+		t.Fatal("expected txn to be protected")
 	}
 
-	if !tx.GetChainID().Eq(&signer.chainID) {
-		t.Errorf("expected chainId to be %s, got %s", &signer.chainID, tx.GetChainID())
+	if !txn.GetChainID().Eq(&signer.chainID) {
+		t.Errorf("expected chainId to be %s, got %s", &signer.chainID, txn.GetChainID())
 	}
 
-	tx = NewTransaction(0, addr, new(uint256.Int), 0, new(uint256.Int), nil)
-	tx, err = SignTx(tx, *LatestSignerForChainID(nil), key)
+	txn = NewTransaction(0, addr, new(uint256.Int), 0, new(uint256.Int), nil)
+	txn, err = SignTx(txn, *LatestSignerForChainID(nil), key)
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	if tx.Protected() {
-		t.Error("didn't expect tx to be protected")
+	if txn.Protected() {
+		t.Error("didn't expect txn to be protected")
 	}
 
-	if !tx.GetChainID().IsZero() {
-		t.Error("expected chain id to be 0 got", tx.GetChainID())
+	if !txn.GetChainID().IsZero() {
+		t.Error("expected chain id to be 0 got", txn.GetChainID())
 	}
 }
 
@@ -119,13 +123,13 @@ func TestEIP155SigningVitalik(t *testing.T) {
 	} {
 		signer := LatestSignerForChainID(big.NewInt(1))
 
-		tx, err := DecodeTransaction(libcommon.Hex2Bytes(test.txRlp))
+		txn, err := DecodeTransaction(libcommon.Hex2Bytes(test.txRlp))
 		if err != nil {
 			t.Errorf("%d: %v", i, err)
 			continue
 		}
 
-		from, err := tx.Sender(*signer)
+		from, err := txn.Sender(*signer)
 		if err != nil {
 			t.Errorf("%d: %v", i, err)
 			continue
@@ -143,20 +147,20 @@ func TestChainId(t *testing.T) {
 	t.Parallel()
 	key, _ := defaultTestKey()
 
-	var tx Transaction = NewTransaction(0, libcommon.Address{}, new(uint256.Int), 0, new(uint256.Int), nil)
+	var txn Transaction = NewTransaction(0, libcommon.Address{}, new(uint256.Int), 0, new(uint256.Int), nil)
 
 	var err error
-	tx, err = SignTx(tx, *LatestSignerForChainID(big.NewInt(1)), key)
+	txn, err = SignTx(txn, *LatestSignerForChainID(big.NewInt(1)), key)
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	_, err = tx.Sender(*LatestSignerForChainID(big.NewInt(2)))
+	_, err = txn.Sender(*LatestSignerForChainID(big.NewInt(2)))
 	if err != ErrInvalidChainId {
 		t.Error("expected error:", ErrInvalidChainId)
 	}
 
-	_, err = tx.Sender(*LatestSignerForChainID(big.NewInt(1)))
+	_, err = txn.Sender(*LatestSignerForChainID(big.NewInt(1)))
 	if err != nil {
 		t.Error("expected no error")
 	}

@@ -1,18 +1,18 @@
-/*
-   Copyright 2021 Erigon contributors
-
-   Licensed under the Apache License, Version 2.0 (the "License");
-   you may not use this file except in compliance with the License.
-   You may obtain a copy of the License at
-
-       http://www.apache.org/licenses/LICENSE-2.0
-
-   Unless required by applicable law or agreed to in writing, software
-   distributed under the License is distributed on an "AS IS" BASIS,
-   WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-   See the License for the specific language governing permissions and
-   limitations under the License.
-*/
+// Copyright 2021 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
 package downloadercfg
 
@@ -21,7 +21,8 @@ import (
 	"strings"
 
 	lg "github.com/anacrolix/log"
-	"github.com/ledgerwatch/log/v3"
+
+	"github.com/erigontech/erigon-lib/log/v3"
 )
 
 func init() {
@@ -92,7 +93,7 @@ func (b adapterHandler) Handle(r lg.Record) {
 		skip := strings.Contains(str, "EOF") ||
 			strings.Contains(str, "requested chunk too long") ||
 			strings.Contains(str, "banned ip") ||
-			strings.Contains(str, "banning webseed") ||
+			//strings.Contains(str, "banning webseed") ||
 			strings.Contains(str, "TrackerClient closed") ||
 			strings.Contains(str, "being sole dirtier of piece") ||
 			strings.Contains(str, "webrtc conn for unloaded torrent") ||
@@ -101,7 +102,7 @@ func (b adapterHandler) Handle(r lg.Record) {
 			strings.Contains(str, "reservation cancelled")
 
 		if skip {
-			log.Trace(str)
+			log.Debug(str)
 			break
 		}
 		log.Warn(str)
@@ -135,4 +136,25 @@ func (b adapterHandler) Handle(r lg.Record) {
 		}
 		log.Info("[downloader] "+r.String(), "torrent_log_type", "unknown", "or", lvl.LogString())
 	}
+}
+
+type RetryableHttpLogger struct {
+	l log.Logger
+}
+
+func NewRetryableHttpLogger(l log.Logger) *RetryableHttpLogger {
+	return &RetryableHttpLogger{l: l}
+}
+
+func (l *RetryableHttpLogger) Error(msg string, keysAndValues ...interface{}) {
+	l.l.Debug(msg, keysAndValues...)
+}
+func (l *RetryableHttpLogger) Warn(msg string, keysAndValues ...interface{}) {
+	l.l.Debug(msg, keysAndValues...)
+}
+func (l *RetryableHttpLogger) Info(msg string, keysAndValues ...interface{}) {
+	l.l.Debug(msg, keysAndValues...)
+}
+func (l *RetryableHttpLogger) Debug(msg string, keysAndValues ...interface{}) {
+	l.l.Trace(msg, keysAndValues...)
 }

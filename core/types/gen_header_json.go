@@ -5,11 +5,13 @@ package types
 import (
 	"encoding/json"
 	"errors"
-	"github.com/ledgerwatch/erigon-lib/common/hexutil"
 	"math/big"
 
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/common/hexutility"
+	"github.com/gballet/go-verkle"
+
+	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common/hexutil"
+	"github.com/erigontech/erigon-lib/common/hexutility"
 )
 
 var _ = (*headerMarshaling)(nil)
@@ -17,24 +19,33 @@ var _ = (*headerMarshaling)(nil)
 // MarshalJSON marshals as JSON.
 func (h Header) MarshalJSON() ([]byte, error) {
 	type Header struct {
-		ParentHash      libcommon.Hash    `json:"parentHash"       gencodec:"required"`
-		UncleHash       libcommon.Hash    `json:"sha3Uncles"       gencodec:"required"`
-		Coinbase        libcommon.Address `json:"miner"`
-		Root            libcommon.Hash    `json:"stateRoot"        gencodec:"required"`
-		TxHash          libcommon.Hash    `json:"transactionsRoot" gencodec:"required"`
-		ReceiptHash     libcommon.Hash    `json:"receiptsRoot"     gencodec:"required"`
-		Bloom           Bloom             `json:"logsBloom"        gencodec:"required"`
-		Difficulty      *hexutil.Big      `json:"difficulty"       gencodec:"required"`
-		Number          *hexutil.Big      `json:"number"           gencodec:"required"`
-		GasLimit        hexutil.Uint64    `json:"gasLimit"         gencodec:"required"`
-		GasUsed         hexutil.Uint64    `json:"gasUsed"          gencodec:"required"`
-		Time            hexutil.Uint64    `json:"timestamp"        gencodec:"required"`
-		Extra           hexutility.Bytes  `json:"extraData"        gencodec:"required"`
-		MixDigest       libcommon.Hash    `json:"mixHash"`
-		Nonce           BlockNonce        `json:"nonce"`
-		BaseFee         *hexutil.Big      `json:"baseFeePerGas"`
-		WithdrawalsHash *libcommon.Hash   `json:"withdrawalsRoot"`
-		Hash            libcommon.Hash    `json:"hash"`
+		ParentHash            common.Hash      `json:"parentHash"       gencodec:"required"`
+		UncleHash             common.Hash      `json:"sha3Uncles"       gencodec:"required"`
+		Coinbase              common.Address   `json:"miner"`
+		Root                  common.Hash      `json:"stateRoot"        gencodec:"required"`
+		TxHash                common.Hash      `json:"transactionsRoot" gencodec:"required"`
+		ReceiptHash           common.Hash      `json:"receiptsRoot"     gencodec:"required"`
+		Bloom                 Bloom            `json:"logsBloom"        gencodec:"required"`
+		Difficulty            *hexutil.Big     `json:"difficulty"       gencodec:"required"`
+		Number                *hexutil.Big     `json:"number"           gencodec:"required"`
+		GasLimit              hexutil.Uint64   `json:"gasLimit"         gencodec:"required"`
+		GasUsed               hexutil.Uint64   `json:"gasUsed"          gencodec:"required"`
+		Time                  hexutil.Uint64   `json:"timestamp"        gencodec:"required"`
+		Extra                 hexutility.Bytes `json:"extraData"        gencodec:"required"`
+		MixDigest             common.Hash      `json:"mixHash"`
+		Nonce                 BlockNonce       `json:"nonce"`
+		AuRaStep              uint64
+		AuRaSeal              []byte
+		BaseFee               *hexutil.Big    `json:"baseFeePerGas"`
+		WithdrawalsHash       *common.Hash    `json:"withdrawalsRoot"`
+		BlobGasUsed           *hexutil.Uint64 `json:"blobGasUsed"`
+		ExcessBlobGas         *hexutil.Uint64 `json:"excessBlobGas"`
+		ParentBeaconBlockRoot *common.Hash    `json:"parentBeaconBlockRoot"`
+		RequestsRoot          *common.Hash    `json:"requestsRoot"`
+		Verkle                bool
+		VerkleProof           []byte
+		VerkleKeyVals         []verkle.KeyValuePair
+		Hash                  common.Hash `json:"hash"`
 	}
 	var enc Header
 	enc.ParentHash = h.ParentHash
@@ -52,8 +63,17 @@ func (h Header) MarshalJSON() ([]byte, error) {
 	enc.Extra = h.Extra
 	enc.MixDigest = h.MixDigest
 	enc.Nonce = h.Nonce
+	enc.AuRaStep = h.AuRaStep
+	enc.AuRaSeal = h.AuRaSeal
 	enc.BaseFee = (*hexutil.Big)(h.BaseFee)
 	enc.WithdrawalsHash = h.WithdrawalsHash
+	enc.BlobGasUsed = (*hexutil.Uint64)(h.BlobGasUsed)
+	enc.ExcessBlobGas = (*hexutil.Uint64)(h.ExcessBlobGas)
+	enc.ParentBeaconBlockRoot = h.ParentBeaconBlockRoot
+	enc.RequestsRoot = h.RequestsRoot
+	enc.Verkle = h.Verkle
+	enc.VerkleProof = h.VerkleProof
+	enc.VerkleKeyVals = h.VerkleKeyVals
 	enc.Hash = h.Hash()
 	return json.Marshal(&enc)
 }
@@ -61,23 +81,32 @@ func (h Header) MarshalJSON() ([]byte, error) {
 // UnmarshalJSON unmarshals from JSON.
 func (h *Header) UnmarshalJSON(input []byte) error {
 	type Header struct {
-		ParentHash      *libcommon.Hash    `json:"parentHash"       gencodec:"required"`
-		UncleHash       *libcommon.Hash    `json:"sha3Uncles"       gencodec:"required"`
-		Coinbase        *libcommon.Address `json:"miner"`
-		Root            *libcommon.Hash    `json:"stateRoot"        gencodec:"required"`
-		TxHash          *libcommon.Hash    `json:"transactionsRoot" gencodec:"required"`
-		ReceiptHash     *libcommon.Hash    `json:"receiptsRoot"     gencodec:"required"`
-		Bloom           *Bloom             `json:"logsBloom"        gencodec:"required"`
-		Difficulty      *hexutil.Big       `json:"difficulty"       gencodec:"required"`
-		Number          *hexutil.Big       `json:"number"           gencodec:"required"`
-		GasLimit        *hexutil.Uint64    `json:"gasLimit"         gencodec:"required"`
-		GasUsed         *hexutil.Uint64    `json:"gasUsed"          gencodec:"required"`
-		Time            *hexutil.Uint64    `json:"timestamp"        gencodec:"required"`
-		Extra           *hexutility.Bytes  `json:"extraData"        gencodec:"required"`
-		MixDigest       *libcommon.Hash    `json:"mixHash"`
-		Nonce           *BlockNonce        `json:"nonce"`
-		BaseFee         *hexutil.Big       `json:"baseFeePerGas"`
-		WithdrawalsHash *libcommon.Hash    `json:"withdrawalsRoot"`
+		ParentHash            *common.Hash      `json:"parentHash"       gencodec:"required"`
+		UncleHash             *common.Hash      `json:"sha3Uncles"       gencodec:"required"`
+		Coinbase              *common.Address   `json:"miner"`
+		Root                  *common.Hash      `json:"stateRoot"        gencodec:"required"`
+		TxHash                *common.Hash      `json:"transactionsRoot" gencodec:"required"`
+		ReceiptHash           *common.Hash      `json:"receiptsRoot"     gencodec:"required"`
+		Bloom                 *Bloom            `json:"logsBloom"        gencodec:"required"`
+		Difficulty            *hexutil.Big      `json:"difficulty"       gencodec:"required"`
+		Number                *hexutil.Big      `json:"number"           gencodec:"required"`
+		GasLimit              *hexutil.Uint64   `json:"gasLimit"         gencodec:"required"`
+		GasUsed               *hexutil.Uint64   `json:"gasUsed"          gencodec:"required"`
+		Time                  *hexutil.Uint64   `json:"timestamp"        gencodec:"required"`
+		Extra                 *hexutility.Bytes `json:"extraData"        gencodec:"required"`
+		MixDigest             *common.Hash      `json:"mixHash"`
+		Nonce                 *BlockNonce       `json:"nonce"`
+		AuRaStep              *uint64
+		AuRaSeal              []byte
+		BaseFee               *hexutil.Big    `json:"baseFeePerGas"`
+		WithdrawalsHash       *common.Hash    `json:"withdrawalsRoot"`
+		BlobGasUsed           *hexutil.Uint64 `json:"blobGasUsed"`
+		ExcessBlobGas         *hexutil.Uint64 `json:"excessBlobGas"`
+		ParentBeaconBlockRoot *common.Hash    `json:"parentBeaconBlockRoot"`
+		RequestsRoot          *common.Hash    `json:"requestsRoot"`
+		Verkle                *bool
+		VerkleProof           []byte
+		VerkleKeyVals         []verkle.KeyValuePair
 	}
 	var dec Header
 	if err := json.Unmarshal(input, &dec); err != nil {
@@ -140,9 +169,38 @@ func (h *Header) UnmarshalJSON(input []byte) error {
 	if dec.Nonce != nil {
 		h.Nonce = *dec.Nonce
 	}
+	if dec.AuRaStep != nil {
+		h.AuRaStep = *dec.AuRaStep
+	}
+	if dec.AuRaSeal != nil {
+		h.AuRaSeal = dec.AuRaSeal
+	}
 	if dec.BaseFee != nil {
 		h.BaseFee = (*big.Int)(dec.BaseFee)
 	}
-	h.WithdrawalsHash = dec.WithdrawalsHash
+	if dec.WithdrawalsHash != nil {
+		h.WithdrawalsHash = dec.WithdrawalsHash
+	}
+	if dec.BlobGasUsed != nil {
+		h.BlobGasUsed = (*uint64)(dec.BlobGasUsed)
+	}
+	if dec.ExcessBlobGas != nil {
+		h.ExcessBlobGas = (*uint64)(dec.ExcessBlobGas)
+	}
+	if dec.ParentBeaconBlockRoot != nil {
+		h.ParentBeaconBlockRoot = dec.ParentBeaconBlockRoot
+	}
+	if dec.RequestsRoot != nil {
+		h.RequestsRoot = dec.RequestsRoot
+	}
+	if dec.Verkle != nil {
+		h.Verkle = *dec.Verkle
+	}
+	if dec.VerkleProof != nil {
+		h.VerkleProof = dec.VerkleProof
+	}
+	if dec.VerkleKeyVals != nil {
+		h.VerkleKeyVals = dec.VerkleKeyVals
+	}
 	return nil
 }

@@ -3,10 +3,10 @@
 Transaction Pool - place where living "not-included-to-block-yet transactions".
 Erigon's TxPool can work inside Erigon (default) and as separated process.
 
-Erigon's pool implementation is not fork of Geth’s, has Apache license - Design
-docs: https://github.com/ledgerwatch/erigon/wiki/Transaction-Pool-Design
+Erigon's pool implementation is not fork of Geth’s - Design
+docs: https://github.com/erigontech/erigon/wiki/Transaction-Pool-Design
 95% of pool-related code (from p2p message parsing, to sorting logic) is inside this
-folder: https://github.com/ledgerwatch/erigon-lib/tree/main/txpool
+folder: https://github.com/erigontech/erigon-lib/tree/main/txpool
 
 ## Internal mode
 
@@ -28,10 +28,10 @@ make txpool
 # --sentry.api.addr  - connect to Sentry's grpc api
 # --txpool.api.addr  - other services to connect TxPool's grpc api
 # Increase limits flags: --txpool.globalslots, --txpool.globalbasefeeslots, --txpool.globalqueue
-# --txpool.trace.senders - print more logs about Txs with senders in this list 
+# --txpool.trace.senders - print more logs about Txs with senders in this list
 ./build/bin/txpool --private.api.addr=localhost:9090 --sentry.api.addr=localhost:9091 --txpool.api.addr=localhost:9094 --datadir=<your_datadir>
 
-# Add flag `--txpool.api.addr` to RPCDaemon  
+# Add flag `--txpool.api.addr` to RPCDaemon
 ```
 
 ## ToDo list
@@ -40,5 +40,4 @@ make txpool
 [] Add pool to docker-compose
 [] Add pool (db table) - where store recently mined txs - for faster unwind/reorg.
 [] Save history of local transactions - with 1 day expiration
-[] move tx.rlp field to separated map, to make tx immutable
-
+[] move tx.rlp field to separated map, to make txn immutable

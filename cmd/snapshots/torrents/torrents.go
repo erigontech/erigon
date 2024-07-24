@@ -1,3 +1,19 @@
+// Copyright 2024 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+
 package torrents
 
 import (
@@ -5,24 +21,24 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	gosync "sync"
 	"time"
 
-	"golang.org/x/exp/slices"
-
-	"github.com/ledgerwatch/log/v3"
+	"github.com/erigontech/erigon-lib/log/v3"
 
 	"github.com/anacrolix/torrent/metainfo"
-	"github.com/ledgerwatch/erigon-lib/downloader"
-	"github.com/ledgerwatch/erigon-lib/downloader/snaptype"
-	"github.com/ledgerwatch/erigon/cmd/snapshots/manifest"
-	"github.com/ledgerwatch/erigon/cmd/snapshots/sync"
-	"github.com/ledgerwatch/erigon/cmd/utils"
-	"github.com/ledgerwatch/erigon/turbo/logging"
 	"github.com/urfave/cli/v2"
 	"golang.org/x/sync/errgroup"
+
+	"github.com/erigontech/erigon-lib/downloader"
+	"github.com/erigontech/erigon-lib/downloader/snaptype"
+	"github.com/erigontech/erigon/cmd/snapshots/manifest"
+	"github.com/erigontech/erigon/cmd/snapshots/sync"
+	"github.com/erigontech/erigon/cmd/utils"
+	"github.com/erigontech/erigon/turbo/logging"
 )
 
 var Command = cli.Command{
@@ -162,7 +178,8 @@ func torrents(cliCtx *cli.Context, command string) error {
 
 	if rcCli != nil {
 		if src != nil && src.LType == sync.RemoteFs {
-			srcSession, err = rcCli.NewSession(cliCtx.Context, filepath.Join(tempDir, "src"), src.Src+":"+src.Root)
+			ctx := cliCtx.Context // avoiding sonar dup complaint
+			srcSession, err = rcCli.NewSession(ctx, filepath.Join(tempDir, "src"), src.Src+":"+src.Root, nil)
 
 			if err != nil {
 				return err
@@ -225,10 +242,12 @@ func listTorrents(ctx context.Context, srcSession *downloader.RCloneSession, out
 	}
 
 	for _, fi := range entries {
-		if filepath.Ext(fi.Name()) == ".torrent" {
-			if from > 0 || to > 0 {
-				info, _ := snaptype.ParseFileName("", strings.TrimSuffix(fi.Name(), ".torrent"))
-
+		if filepath.Ext(fi.Name()) != ".torrent" {
+			continue
+		}
+		if from > 0 || to > 0 {
+			info, _, ok := snaptype.ParseFileName("", strings.TrimSuffix(fi.Name(), ".torrent"))
+			if ok {
 				if from > 0 && info.From < from {
 					continue
 				}
@@ -237,9 +256,9 @@ func listTorrents(ctx context.Context, srcSession *downloader.RCloneSession, out
 					continue
 				}
 			}
-
-			fmt.Fprintln(out, fi.Name())
 		}
+
+		fmt.Fprintln(out, fi.Name())
 	}
 
 	return nil
@@ -263,10 +282,12 @@ func torrentHashes(ctx context.Context, srcSession *downloader.RCloneSession, fr
 	g.SetLimit(16)
 
 	for _, fi := range entries {
-		if filepath.Ext(fi.Name()) == ".torrent" {
-			if from > 0 || to > 0 {
-				info, _ := snaptype.ParseFileName("", strings.TrimSuffix(fi.Name(), ".torrent"))
-
+		if filepath.Ext(fi.Name()) != ".torrent" {
+			continue
+		}
+		if from > 0 || to > 0 {
+			info, _, ok := snaptype.ParseFileName("", strings.TrimSuffix(fi.Name(), ".torrent"))
+			if ok {
 				if from > 0 && info.From < from {
 					continue
 				}
@@ -275,49 +296,49 @@ func torrentHashes(ctx context.Context, srcSession *downloader.RCloneSession, fr
 					continue
 				}
 			}
+		}
 
-			file := fi.Name()
+		file := fi.Name()
 
-			g.Go(func() error {
-				var mi *metainfo.MetaInfo
+		g.Go(func() error {
+			var mi *metainfo.MetaInfo
 
-				errs := 0
+			errs := 0
 
-				for {
-					reader, err := srcSession.Cat(gctx, file)
-
-					if err != nil {
-						return fmt.Errorf("can't read remote torrent: %s: %w", file, err)
-					}
-
-					mi, err = metainfo.Load(reader)
-
-					if err != nil {
-						errs++
-
-						if errs == 4 {
-							return fmt.Errorf("can't parse remote torrent: %s: %w", file, err)
-						}
-
-						continue
-					}
-
-					break
-				}
-
-				info, err := mi.UnmarshalInfo()
+			for {
+				reader, err := srcSession.Cat(gctx, file)
 
 				if err != nil {
-					return fmt.Errorf("can't unmarshal torrent info: %s: %w", file, err)
+					return fmt.Errorf("can't read remote torrent: %s: %w", file, err)
 				}
 
-				hashesMutex.Lock()
-				defer hashesMutex.Unlock()
-				hashes = append(hashes, hashInfo{info.Name, mi.HashInfoBytes().String()})
+				mi, err = metainfo.Load(reader)
 
-				return nil
-			})
-		}
+				if err != nil {
+					errs++
+
+					if errs == 4 {
+						return fmt.Errorf("can't parse remote torrent: %s: %w", file, err)
+					}
+
+					continue
+				}
+
+				break
+			}
+
+			info, err := mi.UnmarshalInfo()
+
+			if err != nil {
+				return fmt.Errorf("can't unmarshal torrent info: %s: %w", file, err)
+			}
+
+			hashesMutex.Lock()
+			defer hashesMutex.Unlock()
+			hashes = append(hashes, hashInfo{info.Name, mi.HashInfoBytes().String()})
+
+			return nil
+		})
 	}
 
 	if err := g.Wait(); err != nil {
@@ -345,16 +366,18 @@ func updateTorrents(ctx context.Context, srcSession *downloader.RCloneSession, f
 	g, gctx := errgroup.WithContext(ctx)
 	g.SetLimit(16)
 
-	torrentFiles := downloader.NewAtomicTorrentFiles(srcSession.LocalFsRoot())
+	torrentFiles := downloader.NewAtomicTorrentFS(srcSession.LocalFsRoot())
 
 	for _, fi := range entries {
-		if filepath.Ext(fi.Name()) == ".torrent" {
-			file := strings.TrimSuffix(fi.Name(), ".torrent")
+		if filepath.Ext(fi.Name()) != ".torrent" {
+			continue
+		}
+		file := strings.TrimSuffix(fi.Name(), ".torrent")
 
-			g.Go(func() error {
-				if from > 0 || to > 0 {
-					info, _ := snaptype.ParseFileName("", file)
-
+		g.Go(func() error {
+			if from > 0 || to > 0 {
+				info, _, ok := snaptype.ParseFileName("", file)
+				if ok {
 					if from > 0 && info.From < from {
 						return nil
 					}
@@ -363,28 +386,28 @@ func updateTorrents(ctx context.Context, srcSession *downloader.RCloneSession, f
 						return nil
 					}
 				}
+			}
 
-				logger.Info(fmt.Sprintf("Updating %s", file+".torrent"))
+			logger.Info(fmt.Sprintf("Updating %s", file+".torrent"))
 
-				err := srcSession.Download(gctx, file)
+			err := srcSession.Download(gctx, file)
 
-				if err != nil {
-					return err
-				}
+			if err != nil {
+				return err
+			}
 
-				defer os.Remove(filepath.Join(srcSession.LocalFsRoot(), file))
+			defer os.Remove(filepath.Join(srcSession.LocalFsRoot(), file))
 
-				err = downloader.BuildTorrentIfNeed(gctx, file, srcSession.LocalFsRoot(), torrentFiles)
+			_, err = downloader.BuildTorrentIfNeed(gctx, file, srcSession.LocalFsRoot(), torrentFiles)
 
-				if err != nil {
-					return err
-				}
+			if err != nil {
+				return err
+			}
 
-				defer os.Remove(filepath.Join(srcSession.LocalFsRoot(), file+".torrent"))
+			defer os.Remove(filepath.Join(srcSession.LocalFsRoot(), file+".torrent"))
 
-				return srcSession.Upload(gctx, file+".torrent")
-			})
-		}
+			return srcSession.Upload(gctx, file+".torrent")
+		})
 	}
 
 	return g.Wait()
@@ -400,16 +423,18 @@ func verifyTorrents(ctx context.Context, srcSession *downloader.RCloneSession, f
 	g, gctx := errgroup.WithContext(ctx)
 	g.SetLimit(16)
 
-	torrentFiles := downloader.NewAtomicTorrentFiles(srcSession.LocalFsRoot())
+	torrentFiles := downloader.NewAtomicTorrentFS(srcSession.LocalFsRoot())
 
 	for _, fi := range entries {
-		if filepath.Ext(fi.Name()) == ".torrent" {
-			file := strings.TrimSuffix(fi.Name(), ".torrent")
+		if filepath.Ext(fi.Name()) != ".torrent" {
+			continue
+		}
+		file := strings.TrimSuffix(fi.Name(), ".torrent")
 
-			g.Go(func() error {
-				if from > 0 || to > 0 {
-					info, _ := snaptype.ParseFileName("", file)
-
+		g.Go(func() error {
+			if from > 0 || to > 0 {
+				info, _, ok := snaptype.ParseFileName("", file)
+				if ok {
 					if from > 0 && info.From < from {
 						return nil
 					}
@@ -418,86 +443,86 @@ func verifyTorrents(ctx context.Context, srcSession *downloader.RCloneSession, f
 						return nil
 					}
 				}
+			}
 
-				logger.Info(fmt.Sprintf("Validating %s", file+".torrent"))
+			logger.Info(fmt.Sprintf("Validating %s", file+".torrent"))
 
-				var mi *metainfo.MetaInfo
+			var mi *metainfo.MetaInfo
 
-				errs := 0
+			errs := 0
 
-				for {
-					reader, err := srcSession.Cat(gctx, file+".torrent")
+			for {
+				reader, err := srcSession.Cat(gctx, file+".torrent")
 
-					if err != nil {
-						return fmt.Errorf("can't read remote torrent: %s: %w", file+".torrent", err)
+				if err != nil {
+					return fmt.Errorf("can't read remote torrent: %s: %w", file+".torrent", err)
+				}
+
+				mi, err = metainfo.Load(reader)
+
+				if err != nil {
+					errs++
+
+					if errs == 4 {
+						return fmt.Errorf("can't parse remote torrent: %s: %w", file+".torrent", err)
 					}
 
-					mi, err = metainfo.Load(reader)
-
-					if err != nil {
-						errs++
-
-						if errs == 4 {
-							return fmt.Errorf("can't parse remote torrent: %s: %w", file+".torrent", err)
-						}
-
-						continue
-					}
-
-					break
+					continue
 				}
 
-				info, err := mi.UnmarshalInfo()
+				break
+			}
 
-				if err != nil {
-					return fmt.Errorf("can't unmarshal torrent info: %s: %w", file+".torrent", err)
-				}
+			info, err := mi.UnmarshalInfo()
 
-				if info.Name != file {
-					return fmt.Errorf("torrent name does not match file: %s", file)
-				}
+			if err != nil {
+				return fmt.Errorf("can't unmarshal torrent info: %s: %w", file+".torrent", err)
+			}
 
-				err = srcSession.Download(gctx, file)
+			if info.Name != file {
+				return fmt.Errorf("torrent name does not match file: %s", file)
+			}
 
-				if err != nil {
-					return err
-				}
+			err = srcSession.Download(gctx, file)
 
-				defer os.Remove(filepath.Join(srcSession.LocalFsRoot(), file))
+			if err != nil {
+				return err
+			}
 
-				err = downloader.BuildTorrentIfNeed(gctx, file, srcSession.LocalFsRoot(), torrentFiles)
+			defer os.Remove(filepath.Join(srcSession.LocalFsRoot(), file))
 
-				if err != nil {
-					return err
-				}
+			_, err = downloader.BuildTorrentIfNeed(gctx, file, srcSession.LocalFsRoot(), torrentFiles)
 
-				torrentPath := filepath.Join(srcSession.LocalFsRoot(), file+".torrent")
+			if err != nil {
+				return err
+			}
 
-				defer os.Remove(torrentPath)
+			torrentPath := filepath.Join(srcSession.LocalFsRoot(), file+".torrent")
 
-				lmi, err := metainfo.LoadFromFile(torrentPath)
+			defer os.Remove(torrentPath)
 
-				if err != nil {
-					return fmt.Errorf("can't load local torrent from: %s: %w", torrentPath, err)
-				}
+			lmi, err := metainfo.LoadFromFile(torrentPath)
 
-				if lmi.HashInfoBytes() != mi.HashInfoBytes() {
-					return fmt.Errorf("computed local hash does not match torrent: %s: expected: %s, got: %s", file+".torrent", lmi.HashInfoBytes(), mi.HashInfoBytes())
-				}
+			if err != nil {
+				return fmt.Errorf("can't load local torrent from: %s: %w", torrentPath, err)
+			}
 
-				localInfo, err := lmi.UnmarshalInfo()
+			if lmi.HashInfoBytes() != mi.HashInfoBytes() {
+				return fmt.Errorf("computed local hash does not match torrent: %s: expected: %s, got: %s", file+".torrent", lmi.HashInfoBytes(), mi.HashInfoBytes())
+			}
 
-				if err != nil {
-					return fmt.Errorf("can't unmarshal local torrent info: %s: %w", torrentPath, err)
-				}
+			localInfo, err := lmi.UnmarshalInfo()
 
-				if localInfo.Name != info.Name {
-					return fmt.Errorf("computed local name does not match torrent: %s: expected: %s, got: %s", file+".torrent", localInfo.Name, info.Name)
-				}
+			if err != nil {
+				return fmt.Errorf("can't unmarshal local torrent info: %s: %w", torrentPath, err)
+			}
 
-				return nil
-			})
-		}
+			if localInfo.Name != info.Name {
+				return fmt.Errorf("computed local name does not match torrent: %s: expected: %s, got: %s", file+".torrent", localInfo.Name, info.Name)
+			}
+
+			return nil
+		})
 	}
 
 	return g.Wait()

@@ -1,3 +1,19 @@
+// Copyright 2024 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+
 package rpctest
 
 import (
@@ -116,7 +132,7 @@ func BenchDebugTraceBlockByHash(erigonUrl, gethUrl string, needCompare bool, blo
 		nBlocks++
 		reqGen.reqID++
 		request := reqGen.traceBlockByHash(b.Result.Hash.Hex())
-		errCtx := fmt.Sprintf("block %d, tx %s", bn, b.Result.Hash.Hex())
+		errCtx := fmt.Sprintf("block %d, txn %s", bn, b.Result.Hash.Hex())
 		if err := requestAndCompare(request, "debug_traceBlockByHash", errCtx, reqGen, needCompare, rec, errs, resultsCh,
 			/* insertOnlyIfSuccess */ false); err != nil {
 			fmt.Println(err)
@@ -202,13 +218,13 @@ func BenchDebugTraceTransaction(erigonUrl, gethUrl string, needCompare bool, blo
 			}
 		}
 
-		for _, tx := range erigonBlock.Result.Transactions {
+		for _, txn := range erigonBlock.Result.Transactions {
 			reqGen.reqID++
 			nTransactions++
 
 			var request string
-			request = reqGen.debugTraceTransaction(tx.Hash)
-			errCtx := fmt.Sprintf("bn=%d hash=%s", bn, tx.Hash)
+			request = reqGen.debugTraceTransaction(txn.Hash)
+			errCtx := fmt.Sprintf("bn=%d hash=%s", bn, txn.Hash)
 
 			if err := requestAndCompare(request, "debug_traceTransaction", errCtx, reqGen, needCompare, rec, errs, resultsCh,
 				/* insertOnlyIfSuccess */ false); err != nil {
@@ -300,12 +316,12 @@ func BenchDebugTraceCall(erigonURL, gethURL string, needCompare bool, blockFrom 
 		}
 		nBlocks++
 
-		for _, tx := range b.Result.Transactions {
+		for _, txn := range b.Result.Transactions {
 			nTransactions++
 			reqGen.reqID++
 
-			request := reqGen.debugTraceCall(tx.From, tx.To, &tx.Gas, &tx.GasPrice, &tx.Value, tx.Input, bn-1)
-			errCtx := fmt.Sprintf("block %d tx %s", bn, tx.Hash)
+			request := reqGen.debugTraceCall(txn.From, txn.To, &txn.Gas, &txn.GasPrice, &txn.Value, txn.Input, bn-1)
+			errCtx := fmt.Sprintf("block %d txn %s", bn, txn.Hash)
 			if err := requestAndCompare(request, "debug_traceCall", errCtx, reqGen, needCompare, rec, errs, resultsCh,
 				/* insertOnlyIfSuccess*/ false); err != nil {
 				fmt.Println(err)

@@ -1,17 +1,35 @@
+// Copyright 2024 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+
 package dbg
 
 import (
-	"fmt"
 	"os"
 	"strconv"
+	"time"
 
 	"github.com/c2h5oh/datasize"
+
+	"github.com/erigontech/erigon-lib/log/v3"
 )
 
 func EnvString(envVarName string, defaultVal string) string {
 	v, _ := os.LookupEnv(envVarName)
 	if v != "" {
-		fmt.Printf("[dbg] env %s=%s\n", envVarName, v)
+		log.Info("[dbg] env", envVarName, v)
 		return v
 	}
 	return defaultVal
@@ -19,11 +37,11 @@ func EnvString(envVarName string, defaultVal string) string {
 func EnvBool(envVarName string, defaultVal bool) bool {
 	v, _ := os.LookupEnv(envVarName)
 	if v == "true" {
-		fmt.Printf("[dbg] env %s=%t\n", envVarName, true)
+		log.Info("[dbg] env", envVarName, true)
 		return true
 	}
 	if v == "false" {
-		fmt.Printf("[dbg] env %s=%t\n", envVarName, false)
+		log.Info("[dbg] env", envVarName, false)
 		return false
 	}
 	return defaultVal
@@ -35,10 +53,7 @@ func EnvInt(envVarName string, defaultVal int) int {
 		if err != nil {
 			panic(err)
 		}
-		if i < 0 || i > 4 {
-			panic(i)
-		}
-		fmt.Printf("[dbg] env %s=%d\n", envVarName, i)
+		log.Info("[dbg] env", envVarName, i)
 		return i
 	}
 	return defaultVal
@@ -50,7 +65,20 @@ func EnvDataSize(envVarName string, defaultVal datasize.ByteSize) datasize.ByteS
 		if err != nil {
 			panic(err)
 		}
-		fmt.Printf("[dbg] env %s=%s\n", envVarName, val)
+		log.Info("[dbg] env", envVarName, val)
+		return val
+	}
+	return defaultVal
+}
+
+func EnvDuration(envVarName string, defaultVal time.Duration) time.Duration {
+	v, _ := os.LookupEnv(envVarName)
+	if v != "" {
+		log.Info("[dbg] env", envVarName, v)
+		val, err := time.ParseDuration(v)
+		if err != nil {
+			panic(err)
+		}
 		return val
 	}
 	return defaultVal

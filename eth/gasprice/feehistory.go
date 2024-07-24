@@ -1,18 +1,21 @@
 // Copyright 2021 The go-ethereum Authors
-// This file is part of the go-ethereum library.
+// (original work)
+// Copyright 2024 The Erigon Authors
+// (modifications)
+// This file is part of Erigon.
 //
-// The go-ethereum library is free software: you can redistribute it and/or modify
+// Erigon is free software: you can redistribute it and/or modify
 // it under the terms of the GNU Lesser General Public License as published by
 // the Free Software Foundation, either version 3 of the License, or
 // (at your option) any later version.
 //
-// The go-ethereum library is distributed in the hope that it will be useful,
+// Erigon is distributed in the hope that it will be useful,
 // but WITHOUT ANY WARRANTY; without even the implied warranty of
 // MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
 // GNU Lesser General Public License for more details.
 //
 // You should have received a copy of the GNU Lesser General Public License
-// along with the go-ethereum library. If not, see <http://www.gnu.org/licenses/>.
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
 package gasprice
 
@@ -25,11 +28,11 @@ import (
 	"sync/atomic"
 
 	"github.com/holiman/uint256"
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon/consensus/misc"
-	"github.com/ledgerwatch/erigon/core/types"
-	"github.com/ledgerwatch/erigon/rpc"
-	"github.com/ledgerwatch/log/v3"
+
+	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon/consensus/misc"
+	"github.com/erigontech/erigon/core/types"
+	"github.com/erigontech/erigon/rpc"
 )
 
 var (
@@ -93,7 +96,7 @@ func (oracle *Oracle) processBlock(bf *blockFees, percentiles []float64) {
 		return
 	}
 	if bf.block == nil || (bf.receipts == nil && len(bf.block.Transactions()) != 0) {
-		log.Error("Block or receipts are missing while reward percentiles are requested")
+		oracle.log.Error("Block or receipts are missing while reward percentiles are requested")
 		return
 	}
 
@@ -111,8 +114,8 @@ func (oracle *Oracle) processBlock(bf *blockFees, percentiles []float64) {
 	if bf.block.BaseFee() != nil {
 		baseFee.SetFromBig(bf.block.BaseFee())
 	}
-	for i, tx := range bf.block.Transactions() {
-		reward := tx.GetEffectiveGasTip(baseFee)
+	for i, txn := range bf.block.Transactions() {
+		reward := txn.GetEffectiveGasTip(baseFee)
 		sorter[i] = txGasAndReward{gasUsed: bf.receipts[i].GasUsed, reward: reward.ToBig()}
 	}
 	sort.Sort(sorter)
@@ -205,7 +208,7 @@ func (oracle *Oracle) FeeHistory(ctx context.Context, blocks int, unresolvedLast
 		return libcommon.Big0, nil, nil, nil, nil // returning with no data and no error means there are no retrievable blocks
 	}
 	if blocks > maxFeeHistory {
-		log.Warn("Sanitizing fee history length", "requested", blocks, "truncated", maxFeeHistory)
+		oracle.log.Warn("Sanitizing fee history length", "requested", blocks, "truncated", maxFeeHistory)
 		blocks = maxFeeHistory
 	}
 	for i, p := range rewardPercentiles {

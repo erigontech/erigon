@@ -1,18 +1,18 @@
-/*
-   Copyright 2021 Erigon contributors
-
-   Licensed under the Apache License, Version 2.0 (the "License");
-   you may not use this file except in compliance with the License.
-   You may obtain a copy of the License at
-
-       http://www.apache.org/licenses/LICENSE-2.0
-
-   Unless required by applicable law or agreed to in writing, software
-   distributed under the License is distributed on an "AS IS" BASIS,
-   WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-   See the License for the specific language governing permissions and
-   limitations under the License.
-*/
+// Copyright 2021 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
 package eliasfano16
 
@@ -24,7 +24,7 @@ import (
 	"math/bits"
 	"unsafe"
 
-	"github.com/ledgerwatch/erigon-lib/common/bitutil"
+	"github.com/erigontech/erigon-lib/common/bitutil"
 )
 
 // EliasFano algo overview https://www.antoniomallia.it/sorted-integers-compression-with-elias-fano-encoding.html
@@ -442,8 +442,7 @@ func (ef *DoubleEliasFano) Data() []uint64 {
 func (ef *DoubleEliasFano) get2(i uint64) (cumKeys, position uint64,
 	windowCumKeys uint64, selectCumKeys int, currWordCumKeys, lower, cumDelta uint64) {
 	posLower := i * (ef.lCumKeys + ef.lPosition)
-	idx64 := posLower / 64
-	shift := posLower % 64
+	idx64, shift := posLower/64, posLower%64
 	lower = ef.lowerBits[idx64] >> shift
 	if shift > 0 {
 		lower |= ef.lowerBits[idx64+1] << (64 - shift)
@@ -504,11 +503,10 @@ func (ef *DoubleEliasFano) Get2(i uint64) (cumKeys, position uint64) {
 }
 
 func (ef *DoubleEliasFano) Get3(i uint64) (cumKeys, cumKeysNext, position uint64) {
-	var windowCumKeys uint64
-	var selectCumKeys int
-	var currWordCumKeys uint64
-	var lower uint64
-	var cumDelta uint64
+	var (
+		windowCumKeys, currWordCumKeys, lower, cumDelta uint64
+		selectCumKeys                                   int
+	)
 	cumKeys, position, windowCumKeys, selectCumKeys, currWordCumKeys, lower, cumDelta = ef.get2(i)
 	windowCumKeys &= (uint64(0xffffffffffffffff) << selectCumKeys) << 1
 	for windowCumKeys == 0 {

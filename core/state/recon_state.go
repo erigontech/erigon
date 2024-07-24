@@ -1,3 +1,19 @@
+// Copyright 2024 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+
 package state
 
 import (
@@ -11,9 +27,10 @@ import (
 
 	"github.com/RoaringBitmap/roaring/roaring64"
 	"github.com/google/btree"
-	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon/cmd/state/exec22"
+
 	btree2 "github.com/tidwall/btree"
+
+	"github.com/erigontech/erigon-lib/kv"
 )
 
 type reconPair struct {
@@ -39,9 +56,9 @@ func ReconnLess(i, thanItem reconPair) bool {
 type ReconnWork struct {
 	lock          sync.RWMutex
 	doneBitmap    roaring64.Bitmap
-	triggers      map[uint64][]*exec22.TxTask
-	workCh        chan *exec22.TxTask
-	queue         exec22.TxTaskQueue
+	triggers      map[uint64][]*TxTask
+	workCh        chan *TxTask
+	queue         TxTaskQueue
 	rollbackCount uint64
 	maxTxNum      uint64
 }
@@ -56,11 +73,11 @@ type ReconState struct {
 	sizeEstimate int
 }
 
-func NewReconState(workCh chan *exec22.TxTask) *ReconState {
+func NewReconState(workCh chan *TxTask) *ReconState {
 	rs := &ReconState{
 		ReconnWork: &ReconnWork{
 			workCh:   workCh,
-			triggers: map[uint64][]*exec22.TxTask{},
+			triggers: map[uint64][]*TxTask{},
 		},
 		changes: map[string]*btree2.BTreeG[reconPair]{},
 		hints:   map[string]*btree2.PathHint{},
@@ -68,11 +85,11 @@ func NewReconState(workCh chan *exec22.TxTask) *ReconState {
 	return rs
 }
 
-func (rs *ReconState) Reset(workCh chan *exec22.TxTask) {
+func (rs *ReconState) Reset(workCh chan *TxTask) {
 	rs.lock.Lock()
 	defer rs.lock.Unlock()
 	rs.workCh = workCh
-	rs.triggers = map[uint64][]*exec22.TxTask{}
+	rs.triggers = map[uint64][]*TxTask{}
 	rs.rollbackCount = 0
 	rs.queue = rs.queue[:cap(rs.queue)]
 	for i := 0; i < len(rs.queue); i++ {
@@ -186,7 +203,7 @@ func (rs *ReconState) Flush(rwTx kv.RwTx) error {
 	return nil
 }
 
-func (rs *ReconnWork) Schedule(ctx context.Context) (*exec22.TxTask, bool, error) {
+func (rs *ReconnWork) Schedule(ctx context.Context) (*TxTask, bool, error) {
 	rs.lock.Lock()
 	defer rs.lock.Unlock()
 Loop:
@@ -203,7 +220,7 @@ Loop:
 		}
 	}
 	if rs.queue.Len() > 0 {
-		return heap.Pop(&rs.queue).(*exec22.TxTask), true, nil
+		return heap.Pop(&rs.queue).(*TxTask), true, nil
 	}
 	return nil, false, nil
 }
@@ -223,7 +240,7 @@ func (rs *ReconnWork) CommitTxNum(txNum uint64) {
 	}
 }
 
-func (rs *ReconnWork) RollbackTx(txTask *exec22.TxTask, dependency uint64) {
+func (rs *ReconnWork) RollbackTx(txTask *TxTask, dependency uint64) {
 	rs.lock.Lock()
 	defer rs.lock.Unlock()
 	if rs.doneBitmap.Contains(dependency) {

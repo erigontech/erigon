@@ -1,0 +1,136 @@
+name: QA - RPC Integration Tests
+
+on:
+  schedule:
+    - cron: '0 8 * * *'  # Run every day at 8:00 UTC
+  workflow_dispatch:     # Run manually
+  push:
+    branches:
+      - qa_tests_rpc_integration  # only to debug the workflow
+
+jobs:
+  integration-test-suite:
+    runs-on: [self-hosted, Erigon3]
+    env:
+      ERIGON_REFERENCE_DATA_DIR: /opt/erigon-versions/reference-version/datadir
+      ERIGON_TESTBED_DATA_DIR: /opt/erigon-testbed/datadir
+      ERIGON_QA_PATH: /home/qarunner/erigon-qa
+      RPC_PAST_TEST_DIR: /opt/rpc-past-tests
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Checkout RPC Tests Repository & Install Requirements
+        run: |
+          rm -rf ${{ runner.workspace }}/rpc-tests
+          git -c advice.detachedHead=false clone --depth 1 --branch v0.26.0 https://github.com/erigontech/rpc-tests ${{runner.workspace}}/rpc-tests
+          cd ${{ runner.workspace }}/rpc-tests
+          pip3 install -r requirements.txt
+
+      - name: Clean Erigon Build Directory
+        run: |
+          make clean
+
+      - name: Build Erigon RPCDaemon
+        run: |
+          make erigon
+        working-directory: ${{ github.workspace }}
+
+      - name: Pause the Erigon instance dedicated to db maintenance
+        run: |
+          python3 $ERIGON_QA_PATH/test_system/db-producer/pause_production.py || true
+
+      - name: Restore Erigon Testbed Data Directory
+        run: |
+          rsync -a --delete $ERIGON_REFERENCE_DATA_DIR/ $ERIGON_TESTBED_DATA_DIR/
+
+      - name: Run RpcDaemon
+        working-directory: ${{ github.workspace }}/build/bin
+        run: |
+          echo "Erigon (RpcDaemon) starting..."
+          
+          ./erigon --datadir $ERIGON_TESTBED_DATA_DIR --http.api admin,debug,eth,parity,erigon,trace,web3,txpool,ots,net --ws --verbosity 1 > erigon.log 2>&1 &
+
+          RPC_DAEMON_PID=$!          
+          echo "RPC_DAEMON_PID=$RPC_DAEMON_PID" >> $GITHUB_ENV
+          
+          echo "Erigon (RpcDaemon) started"
+
+      - name: Run RPC Integration Tests
+        id: test_step
+        run: |
+          set +e # Disable exit on error
+          commit=$(git -C ${{runner.workspace}}/erigon rev-parse --short HEAD)
+
+          cd ${{ runner.workspace }}/rpc-tests/integration
+          rm -rf ./mainnet/results/
+          
+          # Run RPC integration test runner via http
+          python3 ./run_tests.py --continue --blockchain mainnet --display-only-fail --port 8545 -x debug_,trace_ --transport_type http,websocket
+          #python3 ./run_tests.py --continue --blockchain mainnet --display-only-fail --port 8545 -x debug_,trace_,admin_,eth_mining,eth_getWork,eth_coinbase,eth_createAccessList/test_16.json,engine_,net_,web3_,txpool_,eth_submitWork,eth_submitHashrate,eth_protocolVersion,erigon_nodeInfo --transport_type http,websocket
+
+          # Capture test runner script exit status
+          test_exit_status=$?
+          
+          # Save the subsection reached status
+          echo "::set-output name=test_executed::true"
+        
+          # Check test runner exit status
+          if [ $test_exit_status -eq 0 ]; then
+            echo "tests completed successfully"
+            echo
+            echo "TEST_RESULT=success" >> "$GITHUB_OUTPUT"
+          else
+            echo "error detected during tests"
+            echo "TEST_RESULT=failure" >> "$GITHUB_OUTPUT"
+            
+            # Save failed results to a directory with timestamp and commit hash
+            cp -r ${{ runner.workspace }}/rpc-tests/integration/mainnet/results/ $RPC_PAST_TEST_DIR/mainnet_$(date +%Y%m%d_%H%M%S)_integration_$commit_http/
+          fi
+
+      - name: Stop Erigon RpcDaemon
+        working-directory: ${{ github.workspace }}/build/bin
+        run: |
+          # Clean up rpcdaemon process if it's still running
+          if kill -0 $RPC_DAEMON_PID 2> /dev/null; then
+            echo "Erigon RpcDaemon stopping..."
+            kill $RPC_DAEMON_PID
+            echo "Erigon RpcDaemon stopped"
+          else
+            echo "Erigon RpcDaemon has already terminated"
+          fi
+
+      - name: Delete Erigon Testbed Data Directory
+        if: always()
+        run: |
+          rm -rf $ERIGON_TESTBED_DATA_DIR
+
+      - name: Resume the Erigon instance dedicated to db maintenance
+        run: |
+          python3 $ERIGON_QA_PATH/test_system/db-producer/resume_production.py || true
+
+      - name: Upload test results
+        if: steps.test_step.outputs.test_executed == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-results
+          path: ${{ runner.workspace }}/rpc-tests/integration/mainnet/results/
+
+      - name: Save test results
+        if: steps.test_step.outputs.test_executed == 'true'
+        working-directory: ${{ github.workspace }}
+        env:
+          TEST_RESULT: ${{ steps.test_step.outputs.TEST_RESULT }}
+        run: python3 $ERIGON_QA_PATH/test_system/qa-tests/uploads/upload_test_results.py --repo erigon --commit $(git rev-parse HEAD) --test_name rpc-integration-tests --outcome $TEST_RESULT #--result_file ${{runner.workspace}}/rpc-tests/integration/mainnet/result.json
+
+      - name: Action for Success
+        if: steps.test_step.outputs.TEST_RESULT == 'success'
+        run: echo "::notice::Tests completed successfully"
+
+      - name: Action for Failure
+        if: steps.test_step.outputs.TEST_RESULT != 'success'
+        run: |
+          echo "::error::Error detected during tests"
+          exit 1
+

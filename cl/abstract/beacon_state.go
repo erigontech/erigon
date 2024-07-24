@@ -1,11 +1,27 @@
+// Copyright 2024 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+
 package abstract
 
 import (
-	"github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/types/clonable"
-	"github.com/ledgerwatch/erigon/cl/clparams"
-	"github.com/ledgerwatch/erigon/cl/cltypes"
-	"github.com/ledgerwatch/erigon/cl/cltypes/solid"
+	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/types/clonable"
+	"github.com/erigontech/erigon/cl/clparams"
+	"github.com/erigontech/erigon/cl/cltypes"
+	"github.com/erigontech/erigon/cl/cltypes/solid"
 )
 
 type BeaconState interface {
@@ -61,6 +77,7 @@ type BeaconStateSSZ interface {
 	HashSSZ() (out [32]byte, err error)
 }
 
+//go:generate mockgen -typed=true -destination=./mock_services/beacon_state_mutator_mock.go -package=mock_services . BeaconStateMutator
 type BeaconStateMutator interface {
 	SetVersion(version clparams.StateVersion)
 	SetSlot(slot uint64)
@@ -104,7 +121,7 @@ type BeaconStateMutator interface {
 	SetValidatorInactivityScore(index int, score uint64) error
 	SetCurrentEpochParticipationFlags(flags []cltypes.ParticipationFlags)
 	SetPreviousEpochParticipationFlags(flags []cltypes.ParticipationFlags)
-	SetPreviousEpochAttestations(attestations *solid.ListSSZ[*solid.PendingAttestation])
+	SetPreviousEpochAttestations(attestations *solid.ListSSZ[*solid.PendingAttestation]) // temporarily skip this mock
 
 	AddEth1DataVote(vote *cltypes.Eth1Data)
 	AddValidator(validator solid.Validator, balance uint64)
@@ -192,8 +209,14 @@ type BeaconStateMinimal interface {
 	PreviousEpochAttestationsLength() int
 }
 
-// TODO figure this out
-type BeaconStateCopying interface {
-	//CopyInto(dst *raw.BeaconState) error
-	//Copy() (*raw.BeaconState, error)
+// BeaconStateReader is an interface for reading the beacon state.
+//
+//go:generate mockgen -typed=true -destination=./mock_services/beacon_state_reader_mock.go -package=mock_services . BeaconStateReader
+type BeaconStateReader interface {
+	ValidatorPublicKey(index int) (common.Bytes48, error)
+	GetDomain(domainType [4]byte, epoch uint64) ([]byte, error)
+	CommitteeCount(epoch uint64) uint64
+	ValidatorForValidatorIndex(index int) (solid.Validator, error)
+	Version() clparams.StateVersion
+	GenesisValidatorsRoot() common.Hash
 }

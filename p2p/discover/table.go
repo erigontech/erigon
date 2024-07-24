@@ -1,18 +1,21 @@
 // Copyright 2015 The go-ethereum Authors
-// This file is part of the go-ethereum library.
+// (original work)
+// Copyright 2024 The Erigon Authors
+// (modifications)
+// This file is part of Erigon.
 //
-// The go-ethereum library is free software: you can redistribute it and/or modify
+// Erigon is free software: you can redistribute it and/or modify
 // it under the terms of the GNU Lesser General Public License as published by
 // the Free Software Foundation, either version 3 of the License, or
 // (at your option) any later version.
 //
-// The go-ethereum library is distributed in the hope that it will be useful,
+// Erigon is distributed in the hope that it will be useful,
 // but WITHOUT ANY WARRANTY; without even the implied warranty of
 // MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
 // GNU Lesser General Public License for more details.
 //
 // You should have received a copy of the GNU Lesser General Public License
-// along with the go-ethereum library. If not, see <http://www.gnu.org/licenses/>.
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
 // Package discover implements the Node Discovery Protocol.
 //
@@ -30,14 +33,15 @@ import (
 	"net"
 	"sort"
 	"sync"
+	"sync/atomic"
 	"time"
 
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/log/v3"
+	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/log/v3"
 
-	"github.com/ledgerwatch/erigon/common/debug"
-	"github.com/ledgerwatch/erigon/p2p/enode"
-	"github.com/ledgerwatch/erigon/p2p/netutil"
+	"github.com/erigontech/erigon/common/debug"
+	"github.com/erigontech/erigon/p2p/enode"
+	"github.com/erigontech/erigon/p2p/netutil"
 )
 
 const (
@@ -88,8 +92,8 @@ type Table struct {
 
 	// diagnostics
 	errors      map[string]uint
-	dbseeds     int
-	revalidates int
+	dbseeds     atomic.Int32
+	revalidates atomic.Int32
 	protocol    string
 }
 
@@ -258,6 +262,7 @@ func (tab *Table) loop() {
 	go tab.doRefresh(refreshDone)
 
 	var minRefreshTimer *time.Timer
+	var minRefreshTimerActive atomic.Bool
 
 	defer func() {
 		if minRefreshTimer != nil {
@@ -292,9 +297,9 @@ loop:
 			}
 		case <-revalidateDone:
 			revalidate.Reset(tab.revalidateInterval)
-			if tab.live() == 0 && len(waiting) == 0 && minRefreshTimer == nil {
+			if tab.live() == 0 && len(waiting) == 0 && minRefreshTimerActive.CompareAndSwap(false, true) {
 				minRefreshTimer = time.AfterFunc(minRefreshInterval, func() {
-					minRefreshTimer = nil
+					defer minRefreshTimerActive.Store(false)
 					tab.net.lookupRandom()
 					tab.refresh()
 				})
@@ -304,7 +309,7 @@ loop:
 			live := tab.live()
 
 			vals := []interface{}{"protocol", tab.protocol, "version", tab.net.Version(),
-				"len", tab.len(), "live", tab.live(), "unsol", tab.net.LenUnsolicited(), "ips", tab.ips.Len(), "db", tab.dbseeds, "reval", tab.revalidates}
+				"len", tab.len(), "live", tab.live(), "unsol", tab.net.LenUnsolicited(), "ips", tab.ips.Len(), "db", tab.dbseeds.Load(), "reval", tab.revalidates.Load()}
 
 			func() {
 				tab.mutex.Lock()
@@ -373,7 +378,7 @@ func (tab *Table) doRefresh(done chan struct{}) {
 
 func (tab *Table) loadSeedNodes() {
 	dbseeds := tab.db.QuerySeeds(seedCount, seedMaxAge)
-	tab.dbseeds = len(dbseeds)
+	tab.dbseeds.Store(int32(len(dbseeds)))
 
 	seeds := wrapNodes(dbseeds)
 	tab.log.Debug("QuerySeeds read nodes from the node DB", "count", len(seeds))
@@ -392,7 +397,7 @@ func (tab *Table) doRevalidate(done chan<- struct{}) {
 	defer debug.LogPanic()
 	defer func() { done <- struct{}{} }()
 
-	tab.revalidates++
+	tab.revalidates.Add(1)
 
 	last, bi := tab.nodeToRevalidate()
 	if last == nil {

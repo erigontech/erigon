@@ -1,18 +1,21 @@
 // Copyright 2019 The go-ethereum Authors
-// This file is part of the go-ethereum library.
+// (original work)
+// Copyright 2024 The Erigon Authors
+// (modifications)
+// This file is part of Erigon.
 //
-// The go-ethereum library is free software: you can redistribute it and/or modify
+// Erigon is free software: you can redistribute it and/or modify
 // it under the terms of the GNU Lesser General Public License as published by
 // the Free Software Foundation, either version 3 of the License, or
 // (at your option) any later version.
 //
-// The go-ethereum library is distributed in the hope that it will be useful,
+// Erigon is distributed in the hope that it will be useful,
 // but WITHOUT ANY WARRANTY; without even the implied warranty of
 // MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
 // GNU Lesser General Public License for more details.
 //
 // You should have received a copy of the GNU Lesser General Public License
-// along with the go-ethereum library. If not, see <http://www.gnu.org/licenses/>.
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
 // Package state provides a caching layer atop the Ethereum state trie.
 package state
@@ -23,15 +26,19 @@ import (
 
 	"github.com/holiman/uint256"
 
-	"github.com/ledgerwatch/erigon-lib/chain"
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	types2 "github.com/ledgerwatch/erigon-lib/types"
-	"github.com/ledgerwatch/erigon/common/u256"
-	"github.com/ledgerwatch/erigon/core/types"
-	"github.com/ledgerwatch/erigon/core/types/accounts"
-	"github.com/ledgerwatch/erigon/crypto"
-	"github.com/ledgerwatch/erigon/turbo/trie"
+	"github.com/erigontech/erigon-lib/chain"
+	libcommon "github.com/erigontech/erigon-lib/common"
+	types2 "github.com/erigontech/erigon-lib/types"
+	"github.com/erigontech/erigon/common/u256"
+	"github.com/erigontech/erigon/core/tracing"
+	"github.com/erigontech/erigon/core/types"
+	"github.com/erigontech/erigon/core/types/accounts"
+	"github.com/erigontech/erigon/core/vm/evmtypes"
+	"github.com/erigontech/erigon/crypto"
+	"github.com/erigontech/erigon/turbo/trie"
 )
+
+var _ evmtypes.IntraBlockState = new(IntraBlockState) // compile-time interface-check
 
 type revision struct {
 	id           int
@@ -103,6 +110,7 @@ func New(stateReader StateReader) *IntraBlockState {
 		accessList:        newAccessList(),
 		transientStorage:  newTransientStorage(),
 		balanceInc:        map[libcommon.Address]*BalanceIncrease{},
+		//trace:             true,
 	}
 }
 
@@ -130,11 +138,24 @@ func (sdb *IntraBlockState) Reset() {
 	//		"len(sdb.stateObjectsDirty)", len(sdb.stateObjectsDirty),
 	//		"len(sdb.balanceInc)", len(sdb.balanceInc))
 	//}
+
+	/*
+		sdb.nilAccounts = make(map[libcommon.Address]struct{})
+		sdb.stateObjects = make(map[libcommon.Address]*stateObject)
+		sdb.stateObjectsDirty = make(map[libcommon.Address]struct{})
+		sdb.logs = make(map[libcommon.Hash][]*types.Log)
+		sdb.balanceInc = make(map[libcommon.Address]*BalanceIncrease)
+	*/
+
 	sdb.nilAccounts = make(map[libcommon.Address]struct{})
+	//clear(sdb.nilAccounts)
 	sdb.stateObjects = make(map[libcommon.Address]*stateObject)
+	//clear(sdb.stateObjects)
 	sdb.stateObjectsDirty = make(map[libcommon.Address]struct{})
+	//clear(sdb.stateObjectsDirty)
 	sdb.logs = make(map[libcommon.Hash][]*types.Log)
 	sdb.balanceInc = make(map[libcommon.Address]*BalanceIncrease)
+	//clear(sdb.balanceInc)
 	sdb.thash = libcommon.Hash{}
 	sdb.bhash = libcommon.Hash{}
 	sdb.txIndex = 0
@@ -300,7 +321,7 @@ func (sdb *IntraBlockState) HasSelfdestructed(addr libcommon.Address) bool {
 
 // AddBalance adds amount to the account associated with addr.
 // DESCRIBED: docs/programmers_guide/guide.md#address---identifier-of-an-account
-func (sdb *IntraBlockState) AddBalance(addr libcommon.Address, amount *uint256.Int) {
+func (sdb *IntraBlockState) AddBalance(addr libcommon.Address, amount *uint256.Int, reason tracing.BalanceChangeReason) {
 	if sdb.trace {
 		fmt.Printf("AddBalance %x, %d\n", addr, amount)
 	}
@@ -325,27 +346,27 @@ func (sdb *IntraBlockState) AddBalance(addr libcommon.Address, amount *uint256.I
 	}
 
 	stateObject := sdb.GetOrNewStateObject(addr)
-	stateObject.AddBalance(amount)
+	stateObject.AddBalance(amount, reason)
 }
 
 // SubBalance subtracts amount from the account associated with addr.
 // DESCRIBED: docs/programmers_guide/guide.md#address---identifier-of-an-account
-func (sdb *IntraBlockState) SubBalance(addr libcommon.Address, amount *uint256.Int) {
+func (sdb *IntraBlockState) SubBalance(addr libcommon.Address, amount *uint256.Int, reason tracing.BalanceChangeReason) {
 	if sdb.trace {
 		fmt.Printf("SubBalance %x, %d\n", addr, amount)
 	}
 
 	stateObject := sdb.GetOrNewStateObject(addr)
 	if stateObject != nil {
-		stateObject.SubBalance(amount)
+		stateObject.SubBalance(amount, reason)
 	}
 }
 
 // DESCRIBED: docs/programmers_guide/guide.md#address---identifier-of-an-account
-func (sdb *IntraBlockState) SetBalance(addr libcommon.Address, amount *uint256.Int) {
+func (sdb *IntraBlockState) SetBalance(addr libcommon.Address, amount *uint256.Int, reason tracing.BalanceChangeReason) {
 	stateObject := sdb.GetOrNewStateObject(addr)
 	if stateObject != nil {
-		stateObject.SetBalance(amount)
+		stateObject.SetBalance(amount, reason)
 	}
 }
 
@@ -668,8 +689,8 @@ func (sdb *IntraBlockState) FinalizeTx(chainRules *chain.Rules, stateWriter Stat
 	for addr := range sdb.journal.dirties {
 		so, exist := sdb.stateObjects[addr]
 		if !exist {
-			// ripeMD is 'touched' at block 1714175, in tx 0x1237f737031e40bcde4a8b7e717b2d15e3ecadfe49bb1bbc71ee9deb09c6fcf2
-			// That tx goes out of gas, and although the notion of 'touched' does not exist there, the
+			// ripeMD is 'touched' at block 1714175, in txn 0x1237f737031e40bcde4a8b7e717b2d15e3ecadfe49bb1bbc71ee9deb09c6fcf2
+			// That txn goes out of gas, and although the notion of 'touched' does not exist there, the
 			// touch-event will still be recorded in the journal. Since ripeMD is a special snowflake,
 			// it will persist in the journal even though the journal is reverted. In this special circumstance,
 			// it may exist in `sdb.journal.dirties` but not in `sdb.stateObjects`.
@@ -677,6 +698,7 @@ func (sdb *IntraBlockState) FinalizeTx(chainRules *chain.Rules, stateWriter Stat
 			continue
 		}
 
+		//fmt.Printf("FinalizeTx: %x, balance=%d %T\n", addr, so.data.Balance.Uint64(), stateWriter)
 		if err := updateAccount(chainRules.IsSpuriousDragon, chainRules.IsAura, stateWriter, addr, so, true); err != nil {
 			return err
 		}
@@ -686,6 +708,24 @@ func (sdb *IntraBlockState) FinalizeTx(chainRules *chain.Rules, stateWriter Stat
 	// Invalidate journal because reverting across transactions is not allowed.
 	sdb.clearJournalAndRefund()
 	return nil
+}
+
+func (sdb *IntraBlockState) SoftFinalise() {
+	for addr := range sdb.journal.dirties {
+		_, exist := sdb.stateObjects[addr]
+		if !exist {
+			// ripeMD is 'touched' at block 1714175, in txn 0x1237f737031e40bcde4a8b7e717b2d15e3ecadfe49bb1bbc71ee9deb09c6fcf2
+			// That txn goes out of gas, and although the notion of 'touched' does not exist there, the
+			// touch-event will still be recorded in the journal. Since ripeMD is a special snowflake,
+			// it will persist in the journal even though the journal is reverted. In this special circumstance,
+			// it may exist in `sdb.journal.dirties` but not in `sdb.stateObjects`.
+			// Thus, we can safely ignore it here
+			continue
+		}
+		sdb.stateObjectsDirty[addr] = struct{}{}
+	}
+	// Invalidate journal because reverting across transactions is not allowed.
+	sdb.clearJournalAndRefund()
 }
 
 // CommitBlock finalizes the state by removing the self destructed objects
@@ -744,7 +784,7 @@ func (sdb *IntraBlockState) SetTxContext(thash, bhash libcommon.Hash, ti int) {
 
 // no not lock
 func (sdb *IntraBlockState) clearJournalAndRefund() {
-	sdb.journal = newJournal()
+	sdb.journal.Reset()
 	sdb.validRevisions = sdb.validRevisions[:0]
 	sdb.refund = 0
 }
@@ -756,7 +796,7 @@ func (sdb *IntraBlockState) clearJournalAndRefund() {
 // - Add sender to access list (EIP-2929)
 // - Add destination to access list (EIP-2929)
 // - Add precompiles to access list (EIP-2929)
-// - Add the contents of the optional tx access list (EIP-2930)
+// - Add the contents of the optional txn access list (EIP-2930)
 //
 // Shanghai fork:
 // - Add coinbase to access list (EIP-3651)
@@ -764,12 +804,16 @@ func (sdb *IntraBlockState) clearJournalAndRefund() {
 // Cancun fork:
 // - Reset transient storage (EIP-1153)
 func (sdb *IntraBlockState) Prepare(rules *chain.Rules, sender, coinbase libcommon.Address, dst *libcommon.Address,
-	precompiles []libcommon.Address, list types2.AccessList,
-) {
+	precompiles []libcommon.Address, list types2.AccessList, authorities []libcommon.Address) {
+	if sdb.trace {
+		fmt.Printf("ibs.Prepare %x, %x, %x, %x, %v, %v, %v\n", sender, coinbase, dst, precompiles, list, rules, authorities)
+	}
 	if rules.IsBerlin {
 		// Clear out any leftover from previous executions
 		al := newAccessList()
 		sdb.accessList = al
+		//sdb.accessList.Reset()
+		//al := sdb.accessList
 
 		al.AddAddress(sender)
 		if dst != nil {
@@ -787,6 +831,11 @@ func (sdb *IntraBlockState) Prepare(rules *chain.Rules, sender, coinbase libcomm
 		}
 		if rules.IsShanghai { // EIP-3651: warm coinbase
 			al.AddAddress(coinbase)
+		}
+	}
+	if rules.IsPrague {
+		for _, addr := range authorities {
+			sdb.accessList.AddAddress(addr)
 		}
 	}
 	// Reset transient storage at the beginning of transaction execution

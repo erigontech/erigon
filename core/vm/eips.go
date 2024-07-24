@@ -1,18 +1,21 @@
 // Copyright 2019 The go-ethereum Authors
-// This file is part of the go-ethereum library.
+// (original work)
+// Copyright 2024 The Erigon Authors
+// (modifications)
+// This file is part of Erigon.
 //
-// The go-ethereum library is free software: you can redistribute it and/or modify
+// Erigon is free software: you can redistribute it and/or modify
 // it under the terms of the GNU Lesser General Public License as published by
 // the Free Software Foundation, either version 3 of the License, or
 // (at your option) any later version.
 //
-// The go-ethereum library is distributed in the hope that it will be useful,
+// Erigon is distributed in the hope that it will be useful,
 // but WITHOUT ANY WARRANTY; without even the implied warranty of
 // MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
 // GNU Lesser General Public License for more details.
 //
 // You should have received a copy of the GNU Lesser General Public License
-// along with the go-ethereum library. If not, see <http://www.gnu.org/licenses/>.
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
 package vm
 
@@ -22,10 +25,9 @@ import (
 
 	"github.com/holiman/uint256"
 
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	libcommon "github.com/erigontech/erigon-lib/common"
 
-	"github.com/ledgerwatch/erigon/consensus/misc"
-	"github.com/ledgerwatch/erigon/params"
+	"github.com/erigontech/erigon/params"
 )
 
 var activators = map[int]func(*JumpTable){
@@ -247,7 +249,7 @@ func enable3860(jt *JumpTable) {
 }
 
 // enable4844 applies mini-danksharding (BLOBHASH opcode)
-// - Adds an opcode that returns the versioned blob hash of the tx at a index.
+// - Adds an opcode that returns the versioned blob hash of the txn at a index.
 func enable4844(jt *JumpTable) {
 	jt[BLOBHASH] = &operation{
 		execute:     opBlobHash,
@@ -297,22 +299,12 @@ func opMcopy(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]by
 
 // enable6780 applies EIP-6780 (deactivate SELFDESTRUCT)
 func enable6780(jt *JumpTable) {
-	jt[SELFDESTRUCT] = &operation{
-		execute:     opSelfdestruct6780,
-		dynamicGas:  gasSelfdestructEIP3529,
-		constantGas: params.SelfdestructGasEIP150,
-		numPop:      1,
-		numPush:     0,
-	}
+	jt[SELFDESTRUCT].execute = opSelfdestruct6780
 }
 
 // opBlobBaseFee implements the BLOBBASEFEE opcode
 func opBlobBaseFee(pc *uint64, interpreter *EVMInterpreter, callContext *ScopeContext) ([]byte, error) {
-	excessBlobGas := interpreter.evm.Context.ExcessBlobGas
-	blobBaseFee, err := misc.GetBlobGasPrice(interpreter.evm.ChainConfig(), *excessBlobGas)
-	if err != nil {
-		return nil, err
-	}
+	blobBaseFee := interpreter.evm.Context.BlobBaseFee
 	callContext.Stack.Push(blobBaseFee)
 	return nil, nil
 }

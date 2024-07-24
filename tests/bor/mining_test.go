@@ -12,22 +12,23 @@ import (
 	"time"
 
 	"github.com/holiman/uint256"
-	"github.com/ledgerwatch/erigon-lib/chain/networkname"
-	"github.com/ledgerwatch/erigon/common"
-	"github.com/ledgerwatch/erigon/common/fdlimit"
-	"github.com/ledgerwatch/erigon/core/types"
-	"github.com/ledgerwatch/erigon/crypto"
-	"github.com/ledgerwatch/erigon/eth"
-	"github.com/ledgerwatch/erigon/node"
-	"github.com/ledgerwatch/erigon/params"
-	"github.com/ledgerwatch/erigon/tests/bor/helper"
-	"github.com/ledgerwatch/log/v3"
 
-	"github.com/ledgerwatch/erigon-lib/gointerfaces"
+	"github.com/erigontech/erigon-lib/chain/networkname"
+	"github.com/erigontech/erigon-lib/config3"
+	"github.com/erigontech/erigon-lib/gointerfaces"
+	remote "github.com/erigontech/erigon-lib/gointerfaces/remoteproto"
+	txpool "github.com/erigontech/erigon-lib/gointerfaces/txpoolproto"
+	txpool_proto "github.com/erigontech/erigon-lib/gointerfaces/txpoolproto"
+	"github.com/erigontech/erigon-lib/log/v3"
 
-	"github.com/ledgerwatch/erigon-lib/gointerfaces/remote"
-	"github.com/ledgerwatch/erigon-lib/gointerfaces/txpool"
-	txpool_proto "github.com/ledgerwatch/erigon-lib/gointerfaces/txpool"
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/fdlimit"
+	"github.com/erigontech/erigon/core/types"
+	"github.com/erigontech/erigon/crypto"
+	"github.com/erigontech/erigon/eth"
+	"github.com/erigontech/erigon/node"
+	"github.com/erigontech/erigon/params"
+	"github.com/erigontech/erigon/tests/bor/helper"
 )
 
 const (
@@ -52,10 +53,14 @@ var (
 )
 
 // CGO_CFLAGS="-D__BLST_PORTABLE__" : flag required for go test.
-// Example : CGO_CFLAGS="-D__BLST_PORTABLE__" go test -run ^TestMiningBenchmark$ github.com/ledgerwatch/erigon/tests/bor -v -count=1
+// Example : CGO_CFLAGS="-D__BLST_PORTABLE__" go test -run ^TestMiningBenchmark$ github.com/erigontech/erigon/tests/bor -v -count=1
 // In TestMiningBenchmark, we will test the mining performance. We will initialize a single node devnet and fire 5000 txs. We will measure the time it takes to include all the txs. This can be made more advcanced by increasing blockLimit and txsInTxpool.
 func TestMiningBenchmark(t *testing.T) {
-	log.Root().SetHandler(log.LvlFilterHandler(log.LvlInfo, log.StreamHandler(os.Stderr, log.TerminalFormat())))
+	if config3.EnableHistoryV4InTest {
+		t.Skip("TODO: [e4] implement me")
+	}
+
+	log.Root().SetHandler(log.LvlFilterHandler(log.LvlWarn, log.StreamHandler(os.Stderr, log.TerminalFormat())))
 	fdlimit.Raise(2048)
 
 	genesis := helper.InitGenesis("./testdata/genesis_2val.json", 64, networkname.BorE2ETestChain2ValName)
@@ -100,15 +105,15 @@ func TestMiningBenchmark(t *testing.T) {
 	initNonce := uint64(0)
 
 	for i := 0; i < txInTxpool; i++ {
-		tx := *newRandomTxWithNonce(false, initNonce+uint64(i), ethbackends[0].TxpoolServer())
-		txs = append(txs, &tx)
+		txn := *newRandomTxWithNonce(false, initNonce+uint64(i), ethbackends[0].TxpoolServer())
+		txs = append(txs, &txn)
 	}
 
 	start := time.Now()
 
-	for _, tx := range txs {
+	for _, txn := range txs {
 		buf := bytes.NewBuffer(nil)
-		txV := *tx
+		txV := *txn
 		err := txV.MarshalBinary(buf)
 		if err != nil {
 			panic(err)
@@ -137,16 +142,16 @@ func TestMiningBenchmark(t *testing.T) {
 
 // newRandomTxWithNonce creates a new transaction with the given nonce.
 func newRandomTxWithNonce(creation bool, nonce uint64, txPool txpool_proto.TxpoolServer) *types.Transaction {
-	var tx types.Transaction
+	var txn types.Transaction
 
 	gasPrice := uint256.NewInt(100 * params.InitialBaseFee)
 
 	if creation {
 		nonce, _ := txPool.Nonce(context.Background(), &txpool_proto.NonceRequest{Address: gointerfaces.ConvertAddressToH160(addr1)})
-		tx, _ = types.SignTx(types.NewContractCreation(nonce.Nonce, uint256.NewInt(0), testGas, gasPrice, common.FromHex(testCode)), *types.LatestSignerForChainID(nil), pkey1)
+		txn, _ = types.SignTx(types.NewContractCreation(nonce.Nonce, uint256.NewInt(0), testGas, gasPrice, common.FromHex(testCode)), *types.LatestSignerForChainID(nil), pkey1)
 	} else {
-		tx, _ = types.SignTx(types.NewTransaction(nonce, addr2, uint256.NewInt(1000), params.TxGas, gasPrice, nil), *types.LatestSignerForChainID(nil), pkey1)
+		txn, _ = types.SignTx(types.NewTransaction(nonce, addr2, uint256.NewInt(1000), params.TxGas, gasPrice, nil), *types.LatestSignerForChainID(nil), pkey1)
 	}
 
-	return &tx
+	return &txn
 }

@@ -1,35 +1,55 @@
+// Copyright 2024 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+
 package commands
 
 import (
 	"github.com/spf13/cobra"
 
-	"github.com/ledgerwatch/erigon/turbo/cli"
+	"github.com/erigontech/erigon/turbo/cli"
 
-	"github.com/ledgerwatch/erigon/cmd/utils"
-	"github.com/ledgerwatch/erigon/eth/ethconfig"
+	"github.com/erigontech/erigon/cmd/utils"
+	"github.com/erigontech/erigon/eth/ethconfig"
 )
 
 var (
-	chaindata                      string
-	databaseVerbosity              int
-	referenceChaindata             string
-	block, pruneTo, unwind         uint64
-	unwindEvery                    uint64
-	batchSizeStr                   string
-	reset, warmup, noCommit        bool
-	bucket                         string
-	datadirCli, toChaindata        string
-	migration                      string
-	integrityFast, integritySlow   bool
-	file                           string
-	HeimdallURL                    string
-	txtrace                        bool // Whether to trace the execution (should only be used together with `block`)
-	pruneFlag                      string
-	pruneH, pruneR, pruneT, pruneC uint64
-	pruneHBefore, pruneRBefore     uint64
-	pruneTBefore, pruneCBefore     uint64
-	experiments                    []string
-	chain                          string // Which chain to use (mainnet, goerli, sepolia, etc.)
+	chaindata                                string
+	databaseVerbosity                        int
+	referenceChaindata                       string
+	block, pruneTo, unwind                   uint64
+	unwindEvery                              uint64
+	batchSizeStr                             string
+	reset, warmup, noCommit                  bool
+	resetPruneAt                             bool
+	bucket                                   string
+	datadirCli, toChaindata                  string
+	migration                                string
+	squeezeCommitmentFiles                   bool
+	integrityFast, integritySlow             bool
+	file                                     string
+	HeimdallURL                              string
+	txtrace                                  bool // Whether to trace the execution (should only be used together with `block`)
+	pruneFlag                                string
+	pruneB, pruneH, pruneR, pruneT, pruneC   uint64
+	pruneBBefore, pruneHBefore, pruneRBefore uint64
+	pruneTBefore, pruneCBefore               uint64
+	experiments                              []string
+	unwindTypes                              []string
+	chain                                    string // Which chain to use (mainnet, sepolia, etc.)
+	outputCsvFile                            string
 
 	commitmentMode string
 	commitmentTrie string
@@ -39,6 +59,7 @@ var (
 
 	_forceSetHistoryV3    bool
 	workers, reconWorkers uint64
+	dbWriteMap            bool
 )
 
 func must(err error) {
@@ -102,8 +123,16 @@ func withReset(cmd *cobra.Command) {
 	cmd.Flags().BoolVar(&warmup, "warmup", false, "warmup relevant tables by parallel random reads")
 }
 
+func withResetPruneAt(cmd *cobra.Command) {
+	cmd.Flags().BoolVar(&resetPruneAt, "resetPruneAt", false, "reset prune_at to 0 for a given stage")
+}
+
 func withBucket(cmd *cobra.Command) {
 	cmd.Flags().StringVar(&bucket, "bucket", "", "reset given stage")
+}
+
+func withSqueezeCommitmentFiles(cmd *cobra.Command) {
+	cmd.Flags().BoolVar(&squeezeCommitmentFiles, "squeeze", false, "allow to squeeze commitment files on start")
 }
 
 func withDataDir2(cmd *cobra.Command) {
@@ -112,6 +141,8 @@ func withDataDir2(cmd *cobra.Command) {
 	must(cmd.MarkFlagDirname(utils.DataDirFlag.Name))
 	must(cmd.MarkFlagRequired(utils.DataDirFlag.Name))
 	cmd.Flags().IntVar(&databaseVerbosity, "database.verbosity", 2, "Enabling internal db logs. Very high verbosity levels may require recompile db. Default: 2, means warning.")
+
+	cmd.Flags().BoolVar(&dbWriteMap, utils.DbWriteMapFlag.Name, utils.DbWriteMapFlag.Value, utils.DbWriteMapFlag.Usage)
 }
 
 func withDataDir(cmd *cobra.Command) {
@@ -123,6 +154,8 @@ func withDataDir(cmd *cobra.Command) {
 	must(cmd.MarkFlagDirname("chaindata"))
 
 	cmd.Flags().IntVar(&databaseVerbosity, "database.verbosity", 2, "Enabling internal db logs. Very high verbosity levels may require recompile db. Default: 2, means warning")
+
+	cmd.Flags().BoolVar(&dbWriteMap, utils.DbWriteMapFlag.Name, utils.DbWriteMapFlag.Value, utils.DbWriteMapFlag.Usage)
 }
 
 func withBatchSize(cmd *cobra.Command) {
@@ -161,7 +194,11 @@ func withStartTx(cmd *cobra.Command) {
 }
 
 func withTraceFromTx(cmd *cobra.Command) {
-	cmd.Flags().Uint64Var(&traceFromTx, "txtrace.from", 0, "start tracing from tx number")
+	cmd.Flags().Uint64Var(&traceFromTx, "txtrace.from", 0, "start tracing from txn number")
+}
+
+func withOutputCsvFile(cmd *cobra.Command) {
+	cmd.Flags().StringVar(&outputCsvFile, "output.csv.file", "", "location to output csv data")
 }
 
 func withCommitment(cmd *cobra.Command) {

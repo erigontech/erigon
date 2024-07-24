@@ -1,3 +1,19 @@
+// Copyright 2024 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+
 package copy
 
 import (
@@ -8,13 +24,14 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/ledgerwatch/erigon-lib/downloader"
-	"github.com/ledgerwatch/erigon-lib/downloader/snaptype"
-	"github.com/ledgerwatch/erigon/cmd/snapshots/flags"
-	"github.com/ledgerwatch/erigon/cmd/snapshots/sync"
-	"github.com/ledgerwatch/erigon/cmd/utils"
-	"github.com/ledgerwatch/erigon/turbo/logging"
 	"github.com/urfave/cli/v2"
+
+	"github.com/erigontech/erigon-lib/downloader"
+	"github.com/erigontech/erigon-lib/downloader/snaptype"
+	"github.com/erigontech/erigon/cmd/snapshots/flags"
+	"github.com/erigontech/erigon/cmd/snapshots/sync"
+	"github.com/erigontech/erigon/cmd/utils"
+	"github.com/erigontech/erigon/turbo/logging"
 )
 
 var (
@@ -126,7 +143,8 @@ func copy(cliCtx *cli.Context) error {
 
 	switch src.LType {
 	case sync.TorrentFs:
-		torrentCli, err = sync.NewTorrentClient(cliCtx, dst.Chain)
+		config := sync.NewTorrentClientConfigFromCobra(cliCtx, dst.Chain)
+		torrentCli, err = sync.NewTorrentClient(config)
 		if err != nil {
 			return fmt.Errorf("can't create torrent: %w", err)
 		}
@@ -242,7 +260,7 @@ func remoteToLocal(ctx context.Context, rcCli *downloader.RCloneClient, src *syn
 		return fmt.Errorf("no remote downloader")
 	}
 
-	session, err := rcCli.NewSession(ctx, dst.Root, src.Src+":"+src.Root)
+	session, err := rcCli.NewSession(ctx, dst.Root, src.Src+":"+src.Root, nil)
 
 	if err != nil {
 		return err
@@ -297,8 +315,12 @@ func selectFiles(entries []fs.DirEntry, version snaptype.Version, firstBlock, la
 				if ext := filepath.Ext(info.Name()); ext == ".torrent" {
 					fileName := strings.TrimSuffix(info.Name(), ".torrent")
 
-					if fileInfo, ok := snaptype.ParseFileName("", fileName); ok {
-						snapInfo = sinf{fileInfo}
+					if fileInfo, isStateFile, ok := snaptype.ParseFileName("", fileName); ok {
+						if isStateFile {
+							//TODO
+						} else {
+							snapInfo = sinf{fileInfo}
+						}
 					}
 				}
 			}

@@ -1,3 +1,19 @@
+// Copyright 2024 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+
 package state
 
 import (
@@ -6,15 +22,15 @@ import (
 	"io"
 	"math"
 
-	"github.com/ledgerwatch/erigon/cl/cltypes/solid"
-	"github.com/ledgerwatch/erigon/cl/phase1/core/state/lru"
-	"github.com/ledgerwatch/erigon/cl/phase1/core/state/raw"
-	shuffling2 "github.com/ledgerwatch/erigon/cl/phase1/core/state/shuffling"
+	"github.com/erigontech/erigon/cl/cltypes/solid"
+	"github.com/erigontech/erigon/cl/phase1/core/state/lru"
+	"github.com/erigontech/erigon/cl/phase1/core/state/raw"
+	shuffling2 "github.com/erigontech/erigon/cl/phase1/core/state/shuffling"
 
-	"github.com/ledgerwatch/erigon-lib/common"
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon/cl/clparams"
-	"github.com/ledgerwatch/erigon/cl/utils"
+	"github.com/erigontech/erigon-lib/common"
+	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon/cl/clparams"
+	"github.com/erigontech/erigon/cl/utils"
 )
 
 const (
@@ -190,7 +206,10 @@ func (b *CachingBeaconState) _initializeValidatorsPhase0() error {
 	})
 }
 
-func (b *CachingBeaconState) _refreshActiveBalances() {
+func (b *CachingBeaconState) _refreshActiveBalancesIfNeeded() {
+	if b.totalActiveBalanceCache != nil && *b.totalActiveBalanceCache != 0 {
+		return
+	}
 	epoch := Epoch(b)
 	b.totalActiveBalanceCache = new(uint64)
 	*b.totalActiveBalanceCache = 0
@@ -200,7 +219,7 @@ func (b *CachingBeaconState) _refreshActiveBalances() {
 		}
 		return true
 	})
-	*b.totalActiveBalanceCache = utils.Max64(b.BeaconConfig().EffectiveBalanceIncrement, *b.totalActiveBalanceCache)
+	*b.totalActiveBalanceCache = max(b.BeaconConfig().EffectiveBalanceIncrement, *b.totalActiveBalanceCache)
 	b.totalActiveBalanceRootCache = utils.IntegerSquareRoot(*b.totalActiveBalanceCache)
 }
 
@@ -217,7 +236,8 @@ func (b *CachingBeaconState) initCaches() error {
 }
 
 func (b *CachingBeaconState) InitBeaconState() error {
-	b._refreshActiveBalances()
+	b.totalActiveBalanceCache = nil
+	b._refreshActiveBalancesIfNeeded()
 
 	b.publicKeyIndicies = make(map[[48]byte]uint64)
 

@@ -1,13 +1,30 @@
+// Copyright 2024 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+
 package jsonrpc
 
 import (
 	"bytes"
-	"github.com/ledgerwatch/erigon-lib/common/hexutil"
 	"testing"
 
+	"github.com/erigontech/erigon-lib/common/hexutil"
+
 	"github.com/RoaringBitmap/roaring/roaring64"
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon/cmd/rpcdaemon/rpcdaemontest"
+	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon/cmd/rpcdaemon/rpcdaemontest"
 	"github.com/stretchr/testify/require"
 )
 
@@ -189,9 +206,8 @@ func TestSearchTransactionsBefore(t *testing.T) {
 		require.Equal(3, int(results.Txs[1].BlockNumber.ToInt().Uint64()))
 		require.Equal(2, int(results.Txs[1].Nonce))
 		require.Equal(3, int(results.Receipts[1]["blockNumber"].(hexutil.Uint64)))
-		require.Equal(libcommon.HexToHash("0x79491e16fd1b1ceea44c46af850b2ef121683055cd579fd4d877beba22e77c1c"), results.Receipts[0]["transactionHash"].(libcommon.Hash))
-		require.Equal(libcommon.HexToAddress("0x0D3ab14BBaD3D99F4203bd7a11aCB94882050E7e"), results.Receipts[0]["from"].(libcommon.Address))
-		require.Equal(addr, *results.Receipts[0]["to"].(*libcommon.Address))
+		require.Equal(libcommon.HexToHash("0x6e25f89e24254ba3eb460291393a4715fd3c33d805334cbd05c1b2efe1080f18"), results.Receipts[1]["transactionHash"].(libcommon.Hash))
+		require.Equal(libcommon.HexToAddress("0x71562b71999873DB5b286dF957af199Ec94617F7"), results.Receipts[1]["from"].(libcommon.Address))
+		require.Nil(results.Receipts[1]["to"].(*libcommon.Address))
 	})
-
 }

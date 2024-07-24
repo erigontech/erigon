@@ -1,7 +1,25 @@
+// Copyright 2024 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+
 package metrics
 
 import (
 	"fmt"
+
+	"github.com/prometheus/client_golang/prometheus"
 )
 
 // NewCounter registers and returns new counter with the given name.
@@ -88,6 +106,26 @@ func GetOrCreateGauge(name string) Gauge {
 	return &gauge{g}
 }
 
+// GetOrCreateGaugeVec returns registered GaugeVec with the given name
+// or creates a new GaugeVec if the registry doesn't contain a GaugeVec with
+// the given name and labels.
+//
+// name must be a valid Prometheus-compatible metric with possible labels.
+// labels are the names of the dimensions associated with the gauge vector.
+// For instance,
+//
+//   - foo, with labels []string{"bar", "baz"}
+//
+// The returned GaugeVec is safe to use from concurrent goroutines.
+func GetOrCreateGaugeVec(name string, labels []string, help ...string) *prometheus.GaugeVec {
+	gv, err := defaultSet.GetOrCreateGaugeVec(name, labels, help...)
+	if err != nil {
+		panic(fmt.Errorf("could not get or create new gaugevec: %w", err))
+	}
+
+	return gv
+}
+
 // NewSummary creates and returns new summary with the given name.
 //
 // name must be valid Prometheus-compatible metric with possible labels.
@@ -140,8 +178,8 @@ func GetOrCreateSummary(name string) Summary {
 //   - foo{bar="baz",aaa="b"}
 //
 // The returned histogram is safe to use from concurrent goroutines.
-func NewHistogram(name string) Histogram {
-	h, err := defaultSet.NewHistogram(name)
+func NewHistogram(name string, buckets []float64) Histogram {
+	h, err := defaultSet.NewHistogram(name, buckets)
 	if err != nil {
 		panic(fmt.Errorf("could not create new histogram: %w", err))
 	}
@@ -164,6 +202,15 @@ func NewHistogram(name string) Histogram {
 //
 // Performance tip: prefer NewHistogram instead of GetOrCreateHistogram.
 func GetOrCreateHistogram(name string) Histogram {
+	h, err := defaultSet.GetOrCreateHistogram(name)
+	if err != nil {
+		panic(fmt.Errorf("could not get or create new histogram: %w", err))
+	}
+
+	return &histogram{h}
+}
+
+func GetOrCreateHistogramWithBuckets(name string) Histogram {
 	h, err := defaultSet.GetOrCreateHistogram(name)
 	if err != nil {
 		panic(fmt.Errorf("could not get or create new histogram: %w", err))

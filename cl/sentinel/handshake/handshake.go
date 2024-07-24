@@ -1,3 +1,19 @@
+// Copyright 2024 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+
 package handshake
 
 import (
@@ -8,13 +24,13 @@ import (
 	"net/http"
 	"sync"
 
-	communication2 "github.com/ledgerwatch/erigon/cl/sentinel/communication"
-	"github.com/ledgerwatch/erigon/cl/sentinel/communication/ssz_snappy"
-	"github.com/ledgerwatch/erigon/cl/sentinel/httpreqresp"
+	communication2 "github.com/erigontech/erigon/cl/sentinel/communication"
+	"github.com/erigontech/erigon/cl/sentinel/communication/ssz_snappy"
+	"github.com/erigontech/erigon/cl/sentinel/httpreqresp"
+	"github.com/erigontech/erigon/cl/utils/eth_clock"
 
-	"github.com/ledgerwatch/erigon/cl/clparams"
-	"github.com/ledgerwatch/erigon/cl/cltypes"
-	"github.com/ledgerwatch/erigon/cl/fork"
+	"github.com/erigontech/erigon/cl/clparams"
+	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/libp2p/go-libp2p/core/peer"
 )
 
@@ -23,22 +39,22 @@ import (
 type HandShaker struct {
 	ctx context.Context
 	// Status object to send over.
-	status        *cltypes.Status // Contains status object for handshakes
-	set           bool
-	handler       http.Handler
-	genesisConfig *clparams.GenesisConfig
-	beaconConfig  *clparams.BeaconChainConfig
+	status       *cltypes.Status // Contains status object for handshakes
+	set          bool
+	handler      http.Handler
+	beaconConfig *clparams.BeaconChainConfig
+	ethClock     eth_clock.EthereumClock
 
 	mu sync.Mutex
 }
 
-func New(ctx context.Context, genesisConfig *clparams.GenesisConfig, beaconConfig *clparams.BeaconChainConfig, handler http.Handler) *HandShaker {
+func New(ctx context.Context, ethClock eth_clock.EthereumClock, beaconConfig *clparams.BeaconChainConfig, handler http.Handler) *HandShaker {
 	return &HandShaker{
-		ctx:           ctx,
-		handler:       handler,
-		genesisConfig: genesisConfig,
-		beaconConfig:  beaconConfig,
-		status:        &cltypes.Status{},
+		ctx:          ctx,
+		handler:      handler,
+		ethClock:     ethClock,
+		beaconConfig: beaconConfig,
+		status:       &cltypes.Status{},
 	}
 }
 
@@ -89,16 +105,13 @@ func (h *HandShaker) ValidatePeer(id peer.ID) (bool, error) {
 	if resp.Header.Get("REQRESP-RESPONSE-CODE") != "0" {
 		a, _ := io.ReadAll(resp.Body)
 		//TODO: proper errors
-		return false, fmt.Errorf("handshake error: %s", string(a))
+		return false, fmt.Errorf("hand  shake error: %s", string(a))
 	}
 	responseStatus := &cltypes.Status{}
 
 	if err := ssz_snappy.DecodeAndReadNoForkDigest(resp.Body, responseStatus, clparams.Phase0Version); err != nil {
 		return false, nil
 	}
-	forkDigest, err := fork.ComputeForkDigest(h.beaconConfig, h.genesisConfig)
-	if err != nil {
-		return false, nil
-	}
-	return responseStatus.ForkDigest == forkDigest, nil
+	forkDigest, err := h.ethClock.CurrentForkDigest()
+	return responseStatus.ForkDigest == forkDigest, err
 }

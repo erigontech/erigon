@@ -1,3 +1,19 @@
+// Copyright 2024 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+
 package main
 
 import (
@@ -7,10 +23,11 @@ import (
 	"os/signal"
 	"syscall"
 
-	"github.com/ledgerwatch/erigon/cmd/rpctest/rpctest"
-	"github.com/ledgerwatch/erigon/turbo/logging"
-	"github.com/ledgerwatch/log/v3"
 	"github.com/spf13/cobra"
+
+	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/cmd/rpctest/rpctest"
+	"github.com/erigontech/erigon/turbo/logging"
 )
 
 func main() {
@@ -240,6 +257,19 @@ func main() {
 	}
 	with(benchEthGetLogsCmd, withErigonUrl, withGethUrl, withNeedCompare, withBlockNum, withRecord, withErrorFile)
 
+	var benchOverlayGetLogsCmd = &cobra.Command{
+		Use:   "benchOverlayGetLogs",
+		Short: "",
+		Long:  ``,
+		Run: func(cmd *cobra.Command, args []string) {
+			err := rpctest.BenchOverlayGetLogs(erigonURL, needCompare, blockFrom, blockTo, recordFile, errorFile)
+			if err != nil {
+				logger.Error(err.Error())
+			}
+		},
+	}
+	with(benchOverlayGetLogsCmd, withErigonUrl, withGethUrl, withNeedCompare, withBlockNum, withRecord, withErrorFile)
+
 	var bench9Cmd = &cobra.Command{
 		Use:   "bench9",
 		Short: "",
@@ -457,6 +487,7 @@ func main() {
 		bench6Cmd,
 		bench7Cmd,
 		benchEthGetLogsCmd,
+		benchOverlayGetLogsCmd,
 		bench9Cmd,
 		benchTraceCallCmd,
 		benchTraceCallManyCmd,

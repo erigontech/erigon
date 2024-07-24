@@ -1,18 +1,21 @@
 // Copyright 2015 The go-ethereum Authors
-// This file is part of the go-ethereum library.
+// (original work)
+// Copyright 2024 The Erigon Authors
+// (modifications)
+// This file is part of Erigon.
 //
-// The go-ethereum library is free software: you can redistribute it and/or modify
+// Erigon is free software: you can redistribute it and/or modify
 // it under the terms of the GNU Lesser General Public License as published by
 // the Free Software Foundation, either version 3 of the License, or
 // (at your option) any later version.
 //
-// The go-ethereum library is distributed in the hope that it will be useful,
+// Erigon is distributed in the hope that it will be useful,
 // but WITHOUT ANY WARRANTY; without even the implied warranty of
 // MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
 // GNU Lesser General Public License for more details.
 //
 // You should have received a copy of the GNU Lesser General Public License
-// along with the go-ethereum library. If not, see <http://www.gnu.org/licenses/>.
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
 //go:build integration
 
@@ -27,12 +30,12 @@ import (
 	"runtime"
 	"testing"
 
-	"github.com/ledgerwatch/erigon-lib/common/datadir"
-	"github.com/ledgerwatch/erigon/core/state/temporal"
-	"github.com/ledgerwatch/log/v3"
+	"github.com/erigontech/erigon-lib/common/datadir"
+	"github.com/erigontech/erigon-lib/kv/temporal/temporaltest"
+	"github.com/erigontech/erigon-lib/log/v3"
 
-	"github.com/ledgerwatch/erigon/core/vm"
-	"github.com/ledgerwatch/erigon/eth/tracers/logger"
+	"github.com/erigontech/erigon/core/vm"
+	"github.com/erigontech/erigon/eth/tracers/logger"
 )
 
 func TestState(t *testing.T) {
@@ -49,7 +52,16 @@ func TestState(t *testing.T) {
 	st.skipLoad(`^stTimeConsuming/`)
 	st.skipLoad(`.*vmPerformance/loop.*`)
 
-	_, db, _ := temporal.NewTestDB(t, datadir.New(t.TempDir()), nil)
+	//st.slow(`^/modexp`)
+	//st.slow(`^stQuadraticComplexityTest/`)
+
+	// Very time consuming
+	st.skipLoad(`^stTimeConsuming/`)
+	st.skipLoad(`.*vmPerformance/loop.*`)
+	//if ethconfig.EnableHistoryV3InTest {
+	//}
+
+	db, _ := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
 	st.walk(t, stateTestDir, func(t *testing.T, name string, test *StateTest) {
 		for _, subtest := range test.Subtests() {
 			subtest := subtest
@@ -61,7 +73,7 @@ func TestState(t *testing.T) {
 						t.Fatal(err)
 					}
 					defer tx.Rollback()
-					_, err = test.Run(tx, subtest, vmconfig)
+					_, _, err = test.Run(tx, subtest, vmconfig)
 					tx.Rollback()
 					if err != nil && len(test.json.Post[subtest.Fork][subtest.Index].ExpectException) > 0 {
 						// Ignore expected errors
@@ -95,8 +107,9 @@ func withTrace(t *testing.T, test func(vm.Config) error) {
 	w.Flush()
 	if buf.Len() == 0 {
 		t.Log("no EVM operation logs generated")
-	} else {
-		t.Log("EVM operation log:\n" + buf.String())
+		//} else {
+		//enable it if need extensive logging
+		//t.Log("EVM operation log:\n" + buf.String())
 	}
 	//t.Logf("EVM output: 0x%x", tracer.Output())
 	//t.Logf("EVM error: %v", tracer.Error())

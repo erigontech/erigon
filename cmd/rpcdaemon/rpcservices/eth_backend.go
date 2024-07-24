@@ -1,3 +1,19 @@
+// Copyright 2024 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+
 package rpcservices
 
 import (
@@ -9,23 +25,27 @@ import (
 	"io"
 	"sync/atomic"
 
-	"github.com/ledgerwatch/log/v3"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/types/known/emptypb"
 
-	"github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/gointerfaces"
-	"github.com/ledgerwatch/erigon-lib/gointerfaces/remote"
-	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon/core/rawdb"
-	"github.com/ledgerwatch/erigon/core/types"
-	"github.com/ledgerwatch/erigon/eth/ethconfig"
-	"github.com/ledgerwatch/erigon/ethdb/privateapi"
-	"github.com/ledgerwatch/erigon/p2p"
-	"github.com/ledgerwatch/erigon/rlp"
-	"github.com/ledgerwatch/erigon/turbo/services"
+	"github.com/erigontech/erigon-lib/log/v3"
+
+	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/downloader/snaptype"
+	"github.com/erigontech/erigon-lib/gointerfaces"
+	remote "github.com/erigontech/erigon-lib/gointerfaces/remoteproto"
+	"github.com/erigontech/erigon-lib/kv"
+	"github.com/erigontech/erigon/core/rawdb"
+	"github.com/erigontech/erigon/core/types"
+	"github.com/erigontech/erigon/eth/ethconfig"
+	"github.com/erigontech/erigon/ethdb/privateapi"
+	"github.com/erigontech/erigon/p2p"
+	"github.com/erigontech/erigon/rlp"
+	"github.com/erigontech/erigon/turbo/services"
 )
+
+var _ services.FullBlockReader = &RemoteBackend{}
 
 type RemoteBackend struct {
 	remoteEthBackend remote.ETHBACKENDClient
@@ -92,6 +112,7 @@ func (back *RemoteBackend) BlockByHash(ctx context.Context, db kv.Tx, hash commo
 func (back *RemoteBackend) TxsV3Enabled() bool                    { panic("not implemented") }
 func (back *RemoteBackend) Snapshots() services.BlockSnapshots    { panic("not implemented") }
 func (back *RemoteBackend) BorSnapshots() services.BlockSnapshots { panic("not implemented") }
+func (back *RemoteBackend) AllTypes() []snaptype.Type             { panic("not implemented") }
 func (back *RemoteBackend) FrozenBlocks() uint64                  { return back.blockReader.FrozenBlocks() }
 func (back *RemoteBackend) FrozenBorBlocks() uint64               { return back.blockReader.FrozenBorBlocks() }
 func (back *RemoteBackend) FrozenFiles() (list []string)          { return back.blockReader.FrozenFiles() }
@@ -252,7 +273,7 @@ func (back *RemoteBackend) BlockWithSenders(ctx context.Context, tx kv.Getter, h
 	return back.blockReader.BlockWithSenders(ctx, tx, hash, blockNum)
 }
 
-func (back *RemoteBackend) IterateFrozenBodies(_ func(blockNum uint64, baseTxNum uint64, txAmount uint64) error) error {
+func (back *RemoteBackend) IterateFrozenBodies(_ func(blockNum uint64, baseTxNum uint64, txCount uint64) error) error {
 	panic("not implemented")
 }
 
@@ -262,7 +283,7 @@ func (back *RemoteBackend) BodyWithTransactions(ctx context.Context, tx kv.Gette
 func (back *RemoteBackend) BodyRlp(ctx context.Context, tx kv.Getter, hash common.Hash, blockNum uint64) (bodyRlp rlp.RawValue, err error) {
 	return back.blockReader.BodyRlp(ctx, tx, hash, blockNum)
 }
-func (back *RemoteBackend) Body(ctx context.Context, tx kv.Getter, hash common.Hash, blockNum uint64) (body *types.Body, txAmount uint32, err error) {
+func (back *RemoteBackend) Body(ctx context.Context, tx kv.Getter, hash common.Hash, blockNum uint64) (body *types.Body, txCount uint32, err error) {
 	return back.blockReader.Body(ctx, tx, hash, blockNum)
 }
 func (back *RemoteBackend) Header(ctx context.Context, tx kv.Getter, hash common.Hash, blockNum uint64) (*types.Header, error) {
@@ -289,8 +310,8 @@ func (back *RemoteBackend) EventLookup(ctx context.Context, tx kv.Getter, txnHas
 func (back *RemoteBackend) EventsByBlock(ctx context.Context, tx kv.Tx, hash common.Hash, blockNum uint64) ([]rlp.RawValue, error) {
 	return back.blockReader.EventsByBlock(ctx, tx, hash, blockNum)
 }
-func (back *RemoteBackend) BorStartEventID(ctx context.Context, tx kv.Tx, blockNum uint64) (uint64, error) {
-	return back.blockReader.BorStartEventID(ctx, tx, blockNum)
+func (back *RemoteBackend) BorStartEventID(ctx context.Context, tx kv.Tx, hash common.Hash, blockNum uint64) (uint64, error) {
+	return back.blockReader.BorStartEventID(ctx, tx, hash, blockNum)
 }
 
 func (back *RemoteBackend) LastSpanId(ctx context.Context, tx kv.Tx) (uint64, bool, error) {

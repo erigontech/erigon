@@ -1,3 +1,19 @@
+// Copyright 2024 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+
 package types
 
 import (
@@ -5,18 +21,17 @@ import (
 	"io"
 	"math/big"
 	"math/bits"
-	"time"
 
 	gokzg4844 "github.com/crate-crypto/go-kzg-4844"
 	"github.com/holiman/uint256"
 
-	"github.com/ledgerwatch/erigon-lib/chain"
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/common/fixedgas"
-	libkzg "github.com/ledgerwatch/erigon-lib/crypto/kzg"
-	types2 "github.com/ledgerwatch/erigon-lib/types"
+	"github.com/erigontech/erigon-lib/chain"
+	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common/fixedgas"
+	libkzg "github.com/erigontech/erigon-lib/crypto/kzg"
+	types2 "github.com/erigontech/erigon-lib/types"
 
-	"github.com/ledgerwatch/erigon/rlp"
+	"github.com/erigontech/erigon/rlp"
 )
 
 const (
@@ -260,7 +275,7 @@ func (txw *BlobTxWrapper) ValidateBlobTransactionWrapper() error {
 	blobTx := txw.Tx
 	l1 := len(blobTx.BlobVersionedHashes)
 	if l1 == 0 {
-		return fmt.Errorf("a blob tx must contain at least one blob")
+		return fmt.Errorf("a blob txn must contain at least one blob")
 	}
 	l2 := len(txw.Commitments)
 	l3 := len(txw.Blobs)
@@ -298,14 +313,11 @@ func (txw *BlobTxWrapper) GetEffectiveGasTip(baseFee *uint256.Int) *uint256.Int 
 }
 func (txw *BlobTxWrapper) GetFeeCap() *uint256.Int { return txw.Tx.GetFeeCap() }
 
-func (txw *BlobTxWrapper) Cost() *uint256.Int { return txw.Tx.GetFeeCap() }
-
 func (txw *BlobTxWrapper) GetBlobHashes() []libcommon.Hash { return txw.Tx.GetBlobHashes() }
 
 func (txw *BlobTxWrapper) GetGas() uint64            { return txw.Tx.GetGas() }
 func (txw *BlobTxWrapper) GetBlobGas() uint64        { return txw.Tx.GetBlobGas() }
 func (txw *BlobTxWrapper) GetValue() *uint256.Int    { return txw.Tx.GetValue() }
-func (txw *BlobTxWrapper) Time() time.Time           { return txw.Tx.Time() }
 func (txw *BlobTxWrapper) GetTo() *libcommon.Address { return txw.Tx.GetTo() }
 
 func (txw *BlobTxWrapper) AsMessage(s Signer, baseFee *big.Int, rules *chain.Rules) (Message, error) {
@@ -315,7 +327,7 @@ func (txw *BlobTxWrapper) WithSignature(signer Signer, sig []byte) (Transaction,
 	return txw.Tx.WithSignature(signer, sig)
 }
 
-func (txw *BlobTxWrapper) FakeSign(address libcommon.Address) (Transaction, error) {
+func (txw *BlobTxWrapper) FakeSign(address libcommon.Address) Transaction {
 	return txw.Tx.FakeSign(address)
 }
 
@@ -334,6 +346,8 @@ func (txw *BlobTxWrapper) Protected() bool { return txw.Tx.Protected() }
 func (txw *BlobTxWrapper) RawSignatureValues() (*uint256.Int, *uint256.Int, *uint256.Int) {
 	return txw.Tx.RawSignatureValues()
 }
+
+func (txw *BlobTxWrapper) cachedSender() (libcommon.Address, bool) { return txw.Tx.cachedSender() }
 
 func (txw *BlobTxWrapper) Sender(s Signer) (libcommon.Address, error) { return txw.Tx.Sender(s) }
 
@@ -372,12 +386,12 @@ func (txw *BlobTxWrapper) DecodeRLP(s *rlp.Stream) error {
 
 // We deliberately encode only the transaction payload because the only case we need to serialize
 // blobs/commitments/proofs is when we reply to GetPooledTransactions (and that's handled by the txpool).
-func (txw BlobTxWrapper) EncodingSize() int {
+func (txw *BlobTxWrapper) EncodingSize() int {
 	return txw.Tx.EncodingSize()
 }
 func (txw *BlobTxWrapper) MarshalBinary(w io.Writer) error {
 	return txw.Tx.MarshalBinary(w)
 }
-func (txw BlobTxWrapper) EncodeRLP(w io.Writer) error {
+func (txw *BlobTxWrapper) EncodeRLP(w io.Writer) error {
 	return txw.Tx.EncodeRLP(w)
 }

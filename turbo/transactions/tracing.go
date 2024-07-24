@@ -1,3 +1,19 @@
+// Copyright 2024 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+
 package transactions
 
 import (
@@ -9,22 +25,22 @@ import (
 	"time"
 
 	jsoniter "github.com/json-iterator/go"
-	"github.com/ledgerwatch/log/v3"
 
-	"github.com/ledgerwatch/erigon-lib/chain"
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon/consensus"
-	"github.com/ledgerwatch/erigon/core"
-	"github.com/ledgerwatch/erigon/core/state"
-	"github.com/ledgerwatch/erigon/core/types"
-	"github.com/ledgerwatch/erigon/core/vm"
-	"github.com/ledgerwatch/erigon/core/vm/evmtypes"
-	"github.com/ledgerwatch/erigon/eth/stagedsync"
-	"github.com/ledgerwatch/erigon/eth/tracers"
-	"github.com/ledgerwatch/erigon/eth/tracers/logger"
-	"github.com/ledgerwatch/erigon/turbo/rpchelper"
-	"github.com/ledgerwatch/erigon/turbo/services"
+	"github.com/erigontech/erigon-lib/chain"
+	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/kv"
+
+	"github.com/erigontech/erigon/consensus"
+	"github.com/erigontech/erigon/core"
+	"github.com/erigontech/erigon/core/state"
+	"github.com/erigontech/erigon/core/types"
+	"github.com/erigontech/erigon/core/vm"
+	"github.com/erigontech/erigon/core/vm/evmtypes"
+	"github.com/erigontech/erigon/eth/tracers"
+	tracersConfig "github.com/erigontech/erigon/eth/tracers/config"
+	"github.com/erigontech/erigon/eth/tracers/logger"
+	"github.com/erigontech/erigon/turbo/rpchelper"
+	"github.com/erigontech/erigon/turbo/services"
 )
 
 type BlockGetter interface {
@@ -36,8 +52,8 @@ type BlockGetter interface {
 }
 
 // ComputeTxEnv returns the execution environment of a certain transaction.
-func ComputeTxEnv(ctx context.Context, engine consensus.EngineReader, block *types.Block, cfg *chain.Config, headerReader services.HeaderReader, dbtx kv.Tx, txIndex int, historyV3 bool) (core.Message, evmtypes.BlockContext, evmtypes.TxContext, *state.IntraBlockState, state.StateReader, error) {
-	reader, err := rpchelper.CreateHistoryStateReader(dbtx, block.NumberU64(), txIndex, historyV3, cfg.ChainName)
+func ComputeTxEnv(ctx context.Context, engine consensus.EngineReader, block *types.Block, cfg *chain.Config, headerReader services.HeaderReader, dbtx kv.Tx, txIndex int) (core.Message, evmtypes.BlockContext, evmtypes.TxContext, *state.IntraBlockState, state.StateReader, error) {
+	reader, err := rpchelper.CreateHistoryStateReader(dbtx, block.NumberU64(), txIndex, cfg.ChainName)
 	if err != nil {
 		return nil, evmtypes.BlockContext{}, evmtypes.TxContext{}, nil, nil, err
 	}
@@ -54,72 +70,23 @@ func ComputeTxEnv(ctx context.Context, engine consensus.EngineReader, block *typ
 	}
 	header := block.HeaderNoCopy()
 
-	blockContext := core.NewEVMBlockContext(header, core.GetHashFn(header, getHeader), engine, nil)
+	blockContext := core.NewEVMBlockContext(header, core.GetHashFn(header, getHeader), engine, nil, cfg)
 
 	// Recompute transactions up to the target index.
 	signer := types.MakeSigner(cfg, block.NumberU64(), block.Time())
-	if historyV3 {
-		rules := cfg.Rules(blockContext.BlockNumber, blockContext.Time)
-		txn := block.Transactions()[txIndex]
-		statedb.SetTxContext(txn.Hash(), block.Hash(), txIndex)
-		msg, _ := txn.AsMessage(*signer, block.BaseFee(), rules)
-		if msg.FeeCap().IsZero() && engine != nil {
-			syscall := func(contract libcommon.Address, data []byte) ([]byte, error) {
-				return core.SysCallContract(contract, data, cfg, statedb, header, engine, true /* constCall */)
-			}
-			msg.SetIsFree(engine.IsServiceTransaction(msg.From(), syscall))
+	rules := cfg.Rules(blockContext.BlockNumber, blockContext.Time)
+	txn := block.Transactions()[txIndex]
+	statedb.SetTxContext(txn.Hash(), block.Hash(), txIndex)
+	msg, _ := txn.AsMessage(*signer, block.BaseFee(), rules)
+	if msg.FeeCap().IsZero() && engine != nil {
+		syscall := func(contract libcommon.Address, data []byte) ([]byte, error) {
+			return core.SysCallContract(contract, data, cfg, statedb, header, engine, true /* constCall */)
 		}
-
-		TxContext := core.NewEVMTxContext(msg)
-		return msg, blockContext, TxContext, statedb, reader, nil
-	}
-	vmenv := vm.NewEVM(blockContext, evmtypes.TxContext{}, statedb, cfg, vm.Config{})
-	rules := vmenv.ChainRules()
-
-	consensusHeaderReader := stagedsync.NewChainReaderImpl(cfg, dbtx, nil, nil)
-
-	logger := log.New("tracing")
-	err = core.InitializeBlockExecution(engine.(consensus.Engine), consensusHeaderReader, header, cfg, statedb, logger)
-	if err != nil {
-		return nil, evmtypes.BlockContext{}, evmtypes.TxContext{}, nil, nil, err
+		msg.SetIsFree(engine.IsServiceTransaction(msg.From(), syscall))
 	}
 
-	for idx, txn := range block.Transactions() {
-		select {
-		default:
-		case <-ctx.Done():
-			return nil, evmtypes.BlockContext{}, evmtypes.TxContext{}, nil, nil, ctx.Err()
-		}
-		statedb.SetTxContext(txn.Hash(), block.Hash(), idx)
-
-		// Assemble the transaction call message and return if the requested offset
-		msg, _ := txn.AsMessage(*signer, block.BaseFee(), rules)
-		if msg.FeeCap().IsZero() && engine != nil {
-			syscall := func(contract libcommon.Address, data []byte) ([]byte, error) {
-				return core.SysCallContract(contract, data, cfg, statedb, header, engine, true /* constCall */)
-			}
-			msg.SetIsFree(engine.IsServiceTransaction(msg.From(), syscall))
-		}
-
-		TxContext := core.NewEVMTxContext(msg)
-		if idx == txIndex {
-			return msg, blockContext, TxContext, statedb, reader, nil
-		}
-		vmenv.Reset(TxContext, statedb)
-		// Not yet the searched for transaction, execute on top of the current state
-		if _, err := core.ApplyMessage(vmenv, msg, new(core.GasPool).AddGas(txn.GetGas()).AddBlobGas(txn.GetBlobGas()), true /* refunds */, false /* gasBailout */); err != nil {
-			return nil, evmtypes.BlockContext{}, evmtypes.TxContext{}, nil, nil, fmt.Errorf("transaction %x failed: %w", txn.Hash(), err)
-		}
-		// Ensure any modifications are committed to the state
-		// Only delete empty objects if EIP161 (part of Spurious Dragon) is in effect
-		_ = statedb.FinalizeTx(rules, reader.(*state.PlainState))
-
-		if idx+1 == len(block.Transactions()) {
-			// Return the state from evaluating all txs in the block, note no msg or TxContext in this case
-			return nil, blockContext, evmtypes.TxContext{}, statedb, reader, nil
-		}
-	}
-	return nil, evmtypes.BlockContext{}, evmtypes.TxContext{}, nil, nil, fmt.Errorf("transaction index %d out of range for block %x", txIndex, block.Hash())
+	TxContext := core.NewEVMTxContext(msg)
+	return msg, blockContext, TxContext, statedb, reader, nil
 }
 
 // TraceTx configures a new tracer according to the provided configuration, and
@@ -131,7 +98,7 @@ func TraceTx(
 	blockCtx evmtypes.BlockContext,
 	txCtx evmtypes.TxContext,
 	ibs evmtypes.IntraBlockState,
-	config *tracers.TraceConfig,
+	config *tracersConfig.TraceConfig,
 	chainConfig *chain.Config,
 	stream *jsoniter.Stream,
 	callTimeout time.Duration,
@@ -144,7 +111,7 @@ func TraceTx(
 
 	defer cancel()
 
-	execCb := func(evm *vm.EVM, refunds bool) (*core.ExecutionResult, error) {
+	execCb := func(evm *vm.EVM, refunds bool) (*evmtypes.ExecutionResult, error) {
 		gp := new(core.GasPool).AddGas(message.Gas()).AddBlobGas(message.BlobGas())
 		return core.ApplyMessage(evm, message, gp, refunds, false /* gasBailout */)
 	}
@@ -154,7 +121,7 @@ func TraceTx(
 
 func AssembleTracer(
 	ctx context.Context,
-	config *tracers.TraceConfig,
+	config *tracersConfig.TraceConfig,
 	txHash libcommon.Hash,
 	stream *jsoniter.Stream,
 	callTimeout time.Duration,
@@ -201,15 +168,15 @@ func ExecuteTraceTx(
 	blockCtx evmtypes.BlockContext,
 	txCtx evmtypes.TxContext,
 	ibs evmtypes.IntraBlockState,
-	config *tracers.TraceConfig,
+	config *tracersConfig.TraceConfig,
 	chainConfig *chain.Config,
 	stream *jsoniter.Stream,
 	tracer vm.EVMLogger,
 	streaming bool,
-	execCb func(evm *vm.EVM, refunds bool) (*core.ExecutionResult, error),
+	execCb func(evm *vm.EVM, refunds bool) (*evmtypes.ExecutionResult, error),
 ) error {
 	// Run the transaction with tracing enabled.
-	evm := vm.NewEVM(blockCtx, txCtx, ibs, chainConfig, vm.Config{Debug: true, Tracer: tracer})
+	evm := vm.NewEVM(blockCtx, txCtx, ibs, chainConfig, vm.Config{Debug: true, Tracer: tracer, NoBaseFee: true})
 
 	var refunds = true
 	if config != nil && config.NoRefunds != nil && *config.NoRefunds {

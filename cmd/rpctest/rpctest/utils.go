@@ -1,3 +1,19 @@
+// Copyright 2024 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+
 package rpctest
 
 import (
@@ -11,12 +27,13 @@ import (
 	"strings"
 	"time"
 
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/log/v3"
 	"github.com/valyala/fastjson"
 
-	"github.com/ledgerwatch/erigon/core/state"
-	"github.com/ledgerwatch/erigon/crypto"
+	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/log/v3"
+
+	"github.com/erigontech/erigon/core/state"
+	"github.com/erigontech/erigon/crypto"
 )
 
 func compareBlocks(b, bg *EthBlockByNumber) bool {
@@ -34,22 +51,22 @@ func compareBlocks(b, bg *EthBlockByNumber) bool {
 		fmt.Printf("Num of txs different: %d %d\n", len(r.Transactions), len(rg.Transactions))
 		return false
 	}
-	for i, tx := range r.Transactions {
+	for i, txn := range r.Transactions {
 		txg := rg.Transactions[i]
-		if tx.From != txg.From {
-			fmt.Printf("Tx %d different From: %x %x\n", i, tx.From, txg.From)
+		if txn.From != txg.From {
+			fmt.Printf("Tx %d different From: %x %x\n", i, txn.From, txg.From)
 			return false
 		}
-		if (tx.To == nil && txg.To != nil) || (tx.To != nil && txg.To == nil) {
-			fmt.Printf("Tx %d different To nilness: %t %t\n", i, tx.To == nil, txg.To == nil)
+		if (txn.To == nil && txg.To != nil) || (txn.To != nil && txg.To == nil) {
+			fmt.Printf("Tx %d different To nilness: %t %t\n", i, txn.To == nil, txg.To == nil)
 			return false
 		}
-		if tx.To != nil && txg.To != nil && *tx.To != *txg.To {
-			fmt.Printf("Tx %d different To: %x %x\n", i, *tx.To, *txg.To)
+		if txn.To != nil && txg.To != nil && *txn.To != *txg.To {
+			fmt.Printf("Tx %d different To: %x %x\n", i, *txn.To, *txg.To)
 			return false
 		}
-		if tx.Hash != txg.Hash {
-			fmt.Printf("Tx %x different Hash: %s %s\n", i, tx.Hash, txg.Hash)
+		if txn.Hash != txg.Hash {
+			fmt.Printf("Tx %x different Hash: %s %s\n", i, txn.Hash, txg.Hash)
 			return false
 		}
 	}
@@ -290,6 +307,66 @@ func requestAndCompare(request string, methodName string, errCtx string, reqGen 
 	return nil
 }
 
+func requestAndCompareErigon(requestA, requestB string, methodNameA, methodNameB string, errCtx string, reqGen *RequestGenerator, needCompare bool, rec *bufio.Writer, errs *bufio.Writer, channel chan CallResult, insertOnlyIfSuccess bool) error {
+	recording := rec != nil
+	res := reqGen.Erigon2(methodNameA, requestA)
+	if res.Err != nil {
+		return fmt.Errorf("could not invoke %s (Erigon): %w", methodNameA, res.Err)
+	}
+	errVal := res.Result.Get("error")
+	if errVal != nil {
+		if !needCompare && channel == nil {
+			return fmt.Errorf("error invoking %s (Erigon): %d %s", methodNameA, errVal.GetInt("code"), errVal.GetStringBytes("message"))
+		}
+	}
+	if needCompare {
+		resg := reqGen.Erigon2(methodNameB, requestB)
+		if resg.Err != nil {
+			return fmt.Errorf("could not invoke %s (Geth/OE): %w", methodNameB, res.Err)
+		}
+		errValg := resg.Result.Get("error")
+		if errVal == nil && errValg == nil {
+			if err := compareResults(res.Result, resg.Result); err != nil {
+				recording = false
+				if errs != nil {
+					fmt.Printf("different results for methods %s, %s, errCtx: %s: %v\n", methodNameA, methodNameB, errCtx, err)
+					fmt.Fprintf(errs, "\nDifferent results for methods %s, %s, errCtx %s: %v\n", methodNameA, methodNameB, errCtx, err)
+					fmt.Fprintf(errs, "Request=====================================\n%s\n", requestA)
+					fmt.Fprintf(errs, "%s response=================================\n%s\n", methodNameA, res.Response)
+					fmt.Fprintf(errs, "%s response=================================\n%s\n", methodNameB, resg.Response)
+					errs.Flush() // nolint:errcheck
+					// Keep going
+				} else {
+					reqFile, _ := os.Create("request.json")                //nolint:errcheck
+					reqFile.Write([]byte(requestA))                        //nolint:errcheck
+					reqFile.Close()                                        //nolint:errcheck
+					erigonRespFile, _ := os.Create("erigon-response.json") //nolint:errcheck
+					erigonRespFile.Write(res.Response)                     //nolint:errcheck
+					erigonRespFile.Close()                                 //nolint:errcheck
+					oeRespFile, _ := os.Create("oe-response.json")         //nolint:errcheck
+					oeRespFile.Write(resg.Response)                        //nolint:errcheck
+					oeRespFile.Close()                                     //nolint:errcheck
+					return fmt.Errorf("different results for methods %s, %s, errCtx %s: %v\nRequest in file request.json, Erigon response in file erigon-response.json, Geth/OE response in file oe-response.json", methodNameA, methodNameB, errCtx, err)
+				}
+			}
+		} else {
+			//TODO fix for two methods
+			return compareErrors(errVal, errValg, methodNameA, errCtx, errs)
+		}
+	} else {
+		if channel != nil {
+			if insertOnlyIfSuccess == false || (insertOnlyIfSuccess && errVal == nil) {
+				channel <- res
+			}
+		}
+	}
+
+	if recording {
+		fmt.Fprintf(rec, "%s\n%s\n\n", requestA, res.Response)
+	}
+	return nil
+}
+
 func compareBalances(balance, balanceg *EthBalance) bool {
 	if balance.Balance.ToInt().Cmp(balanceg.Balance.ToInt()) != 0 {
 		fmt.Printf("Different balance: %d %d\n", balance.Balance.ToInt(), balanceg.Balance.ToInt())
@@ -369,7 +446,7 @@ func compareReceipts(receipt, receiptg *EthReceipt) bool {
 	r := receipt.Result
 	rg := receiptg.Result
 	if r.TxHash != rg.TxHash {
-		fmt.Printf("Different tx hashes: %x %x\n", r.TxHash, rg.TxHash)
+		fmt.Printf("Different txn hashes: %x %x\n", r.TxHash, rg.TxHash)
 		return false
 	}
 	if r.Status != rg.Status {
@@ -734,58 +811,58 @@ func compareBlockTransactions(b, bg *OtsBlockTransactions) bool {
 			return false
 		}
 	}
-	for i, tx := range r.FullBlock.Transactions {
+	for i, txn := range r.FullBlock.Transactions {
 		txg := rg.FullBlock.Transactions[i]
-		if tx.From != txg.From {
-			fmt.Printf("Tx %d different From: %x %x\n", i, tx.From, txg.From)
+		if txn.From != txg.From {
+			fmt.Printf("Tx %d different From: %x %x\n", i, txn.From, txg.From)
 			return false
 		}
-		if (tx.To == nil && txg.To != nil) || (tx.To != nil && txg.To == nil) {
-			fmt.Printf("Tx %d different To nilness: %t %t\n", i, tx.To == nil, txg.To == nil)
+		if (txn.To == nil && txg.To != nil) || (txn.To != nil && txg.To == nil) {
+			fmt.Printf("Tx %d different To nilness: %t %t\n", i, txn.To == nil, txg.To == nil)
 			return false
 		}
-		if tx.To != nil && txg.To != nil && *tx.To != *txg.To {
-			fmt.Printf("Tx %d different To: %x %x\n", i, *tx.To, *txg.To)
+		if txn.To != nil && txg.To != nil && *txn.To != *txg.To {
+			fmt.Printf("Tx %d different To: %x %x\n", i, *txn.To, *txg.To)
 			return false
 		}
-		if tx.Hash != txg.Hash {
-			fmt.Printf("Tx %d different Hash: %s %s\n", i, tx.Hash, txg.Hash)
+		if txn.Hash != txg.Hash {
+			fmt.Printf("Tx %d different Hash: %s %s\n", i, txn.Hash, txg.Hash)
 			return false
 		}
-		if tx.BlockHash.String() != txg.BlockHash.String() {
-			fmt.Printf("Tx %d different BlockHash: %s %s\n", i, tx.BlockHash.String(), txg.BlockHash.String())
+		if txn.BlockHash.String() != txg.BlockHash.String() {
+			fmt.Printf("Tx %d different BlockHash: %s %s\n", i, txn.BlockHash.String(), txg.BlockHash.String())
 			return false
 		}
-		if tx.BlockNumber.String() != txg.BlockNumber.String() {
-			fmt.Printf("Tx %d different TransactionHash: %s %s\n", i, tx.BlockNumber.String(), txg.BlockNumber.String())
+		if txn.BlockNumber.String() != txg.BlockNumber.String() {
+			fmt.Printf("Tx %d different TransactionHash: %s %s\n", i, txn.BlockNumber.String(), txg.BlockNumber.String())
 			return false
 		}
-		if tx.Gas.ToInt().Cmp(txg.Gas.ToInt()) != 0 {
-			fmt.Printf("Tx %d different Gas: %d %d\n", i, tx.Gas.ToInt(), txg.Gas.ToInt())
+		if txn.Gas.ToInt().Cmp(txg.Gas.ToInt()) != 0 {
+			fmt.Printf("Tx %d different Gas: %d %d\n", i, txn.Gas.ToInt(), txg.Gas.ToInt())
 			return false
 		}
-		if tx.GasPrice.ToInt().Cmp(txg.GasPrice.ToInt()) != 0 {
-			fmt.Printf("Tx %d different GasPrice: %d %d\n", i, tx.GasPrice.ToInt(), txg.GasPrice.ToInt())
+		if txn.GasPrice.ToInt().Cmp(txg.GasPrice.ToInt()) != 0 {
+			fmt.Printf("Tx %d different GasPrice: %d %d\n", i, txn.GasPrice.ToInt(), txg.GasPrice.ToInt())
 			return false
 		}
-		if tx.Input.String() != txg.Input.String() {
-			fmt.Printf("Tx %d different Input: %s %s\n", i, tx.Input.String(), txg.Input.String())
+		if txn.Input.String() != txg.Input.String() {
+			fmt.Printf("Tx %d different Input: %s %s\n", i, txn.Input.String(), txg.Input.String())
 			return false
 		}
-		if tx.TransactionIndex.String() != txg.TransactionIndex.String() {
-			fmt.Printf("Tx %d different TransactionIndex: %s %s\n", i, tx.TransactionIndex.String(), txg.TransactionIndex.String())
+		if txn.TransactionIndex.String() != txg.TransactionIndex.String() {
+			fmt.Printf("Tx %d different TransactionIndex: %s %s\n", i, txn.TransactionIndex.String(), txg.TransactionIndex.String())
 			return false
 		}
-		if tx.Value.ToInt().Cmp(txg.Value.ToInt()) != 0 {
-			fmt.Printf("Tx %d different Value: %d %d\n", i, tx.Value.ToInt(), txg.Value.ToInt())
+		if txn.Value.ToInt().Cmp(txg.Value.ToInt()) != 0 {
+			fmt.Printf("Tx %d different Value: %d %d\n", i, txn.Value.ToInt(), txg.Value.ToInt())
 			return false
 		}
-		if tx.Type.ToInt().Cmp(txg.Type.ToInt()) != 0 {
-			fmt.Printf("Tx %d different Type: %d %d\n", i, tx.Type.ToInt(), txg.Type.ToInt())
+		if txn.Type.ToInt().Cmp(txg.Type.ToInt()) != 0 {
+			fmt.Printf("Tx %d different Type: %d %d\n", i, txn.Type.ToInt(), txg.Type.ToInt())
 			return false
 		}
-		if tx.ChainId.ToInt().Cmp(txg.ChainId.ToInt()) != 0 {
-			fmt.Printf("Tx %d different ChainId: %d %d\n", i, tx.ChainId.ToInt(), txg.ChainId.ToInt())
+		if txn.ChainId.ToInt().Cmp(txg.ChainId.ToInt()) != 0 {
+			fmt.Printf("Tx %d different ChainId: %d %d\n", i, txn.ChainId.ToInt(), txg.ChainId.ToInt())
 			return false
 		}
 	}

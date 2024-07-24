@@ -1,3 +1,19 @@
+// Copyright 2024 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+
 package solid
 
 import (
@@ -6,11 +22,11 @@ import (
 	"encoding/json"
 	"strconv"
 
-	"github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/common/length"
-	"github.com/ledgerwatch/erigon-lib/types/ssz"
-	"github.com/ledgerwatch/erigon/cl/merkle_tree"
-	"github.com/ledgerwatch/erigon/cl/utils"
+	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common/length"
+	"github.com/erigontech/erigon-lib/types/ssz"
+	"github.com/erigontech/erigon/cl/merkle_tree"
+	"github.com/erigontech/erigon/cl/utils"
 )
 
 const treeCacheDepthUint64Slice = 0
@@ -53,12 +69,8 @@ func NewUint64Slice(limit int) *byteBasedUint64Slice {
 // Clear clears the slice by setting its length to 0 and zeroing out its backing array.
 func (arr *byteBasedUint64Slice) Clear() {
 	arr.l = 0
-	for i := range arr.u {
-		arr.u[i] = 0
-	}
-	for i := range arr.treeCacheBuffer {
-		arr.treeCacheBuffer[i] = 0
-	}
+	clear(arr.u)
+	clear(arr.treeCacheBuffer)
 }
 
 // CopyTo copies the slice to a target slice.
@@ -199,14 +211,14 @@ func (arr *byteBasedUint64Slice) HashVectorSSZ() ([32]byte, error) {
 	for i := 0; i < maxTo; i += chunkSize {
 		offset = (i / chunkSize) * length.Hash
 		from := i
-		to := int(utils.Min64(uint64(from+chunkSize), uint64(maxTo)))
+		to := min(from+chunkSize, maxTo)
 
 		if !bytes.Equal(arr.treeCacheBuffer[offset:offset+length.Hash], emptyHashBytes) {
 			continue
 		}
 		layerBuffer = layerBuffer[:to-from]
 		copy(layerBuffer, arr.u[from:to])
-		if err := computeFlatRootsToBuffer(uint8(utils.Min64(treeCacheDepthUint64Slice, uint64(depth))), layerBuffer, arr.treeCacheBuffer[offset:]); err != nil {
+		if err := computeFlatRootsToBuffer(uint8(min(treeCacheDepthUint64Slice, uint64(depth))), layerBuffer, arr.treeCacheBuffer[offset:]); err != nil {
 			return [32]byte{}, err
 		}
 	}

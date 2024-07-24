@@ -34,18 +34,18 @@ an idea.
 
 Sometimes the chain makes a reorg and we need to "undo" some parts of our sync.
 
-This happens backward from the last stage to the first one with one caveat that tx pool is updated after we already unwound the execution so we know the new nonces.
+This happens backward from the last stage to the first one with one caveat that txn pool is updated after we already unwound the execution so we know the new nonces.
 
 That is the example of stages order to be unwound (unwind happens from right to left).
 
 ```
 state.unwindOrder = []*Stage{
-		// Unwinding of tx pool (reinjecting transactions into the pool needs to happen after unwinding execution)
+		// Unwinding of txn pool (reinjecting transactions into the pool needs to happen after unwinding execution)
 		stages[0], stages[1], stages[2], stages[9], stages[3], stages[4], stages[5], stages[6], stages[7], stages[8],
 	}
 ```
 
-## Preprocessing with [ETL](https://github.com/ledgerwatch/erigon-lib/tree/main/etl)
+## Preprocessing with [ETL](https://github.com/erigontech/erigon-lib/tree/main/etl)
 
 Some stages use our ETL framework to sort data by keys before inserting it into the database.
 
@@ -125,7 +125,6 @@ This stage can spawn unwinds if the block execution fails.
 
 Translation each marked for translation contract (from EVM to TEVM)
 
-
 ### Stage 9: [VerkleTrie](/eth/stagedsync/stage_verkle_trie.go)
 
 [TODO]
@@ -155,7 +154,6 @@ Though, to make sure that some APIs work and keep the compatibility with the oth
 If the hashed state is not empty, then we are looking at the History ChangeSets and update only the items that were changed.
 
 This stage doesn't use a network connection.
-
 
 ### Stages [12, 13](/eth/stagedsync/stage_indexes.go), [14](/eth/stagedsync/stage_log_index.go), [15](/eth/stagedsync/stage_call_traces.go) and [16](/eth/stagedsync/stage_txlookup.go): Generate Indexes
 

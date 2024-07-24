@@ -1,3 +1,19 @@
+// Copyright 2024 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+
 package stagedsynctest
 
 import (
@@ -11,32 +27,32 @@ import (
 	"testing"
 	"time"
 
-	"github.com/golang/mock/gomock"
 	"github.com/holiman/uint256"
-	"github.com/ledgerwatch/log/v3"
 	"github.com/stretchr/testify/require"
+	"go.uber.org/mock/gomock"
 
-	"github.com/ledgerwatch/erigon-lib/chain"
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon-lib/kv/memdb"
-	"github.com/ledgerwatch/erigon-lib/wrap"
-	"github.com/ledgerwatch/erigon/consensus"
-	consensusmock "github.com/ledgerwatch/erigon/consensus/mock"
-	"github.com/ledgerwatch/erigon/core"
-	"github.com/ledgerwatch/erigon/core/rawdb"
-	"github.com/ledgerwatch/erigon/core/types"
-	"github.com/ledgerwatch/erigon/crypto"
-	"github.com/ledgerwatch/erigon/eth/ethconfig"
-	"github.com/ledgerwatch/erigon/eth/stagedsync"
-	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
-	"github.com/ledgerwatch/erigon/polygon/bor"
-	"github.com/ledgerwatch/erigon/polygon/bor/borcfg"
-	"github.com/ledgerwatch/erigon/polygon/bor/valset"
-	"github.com/ledgerwatch/erigon/polygon/heimdall"
-	"github.com/ledgerwatch/erigon/turbo/services"
-	"github.com/ledgerwatch/erigon/turbo/stages/mock"
-	"github.com/ledgerwatch/erigon/turbo/testlog"
+	"github.com/erigontech/erigon-lib/log/v3"
+
+	"github.com/erigontech/erigon-lib/chain"
+	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/kv"
+	"github.com/erigontech/erigon-lib/kv/memdb"
+	"github.com/erigontech/erigon-lib/wrap"
+	"github.com/erigontech/erigon/consensus"
+	"github.com/erigontech/erigon/core"
+	"github.com/erigontech/erigon/core/rawdb"
+	"github.com/erigontech/erigon/core/types"
+	"github.com/erigontech/erigon/crypto"
+	"github.com/erigontech/erigon/eth/ethconfig"
+	"github.com/erigontech/erigon/eth/stagedsync"
+	"github.com/erigontech/erigon/eth/stagedsync/stages"
+	"github.com/erigontech/erigon/polygon/bor"
+	"github.com/erigontech/erigon/polygon/bor/borcfg"
+	"github.com/erigontech/erigon/polygon/bor/valset"
+	"github.com/erigontech/erigon/polygon/heimdall"
+	"github.com/erigontech/erigon/turbo/services"
+	"github.com/erigontech/erigon/turbo/stages/mock"
+	"github.com/erigontech/erigon/turbo/testlog"
 )
 
 func InitHarness(ctx context.Context, t *testing.T, cfg HarnessCfg) Harness {
@@ -61,25 +77,10 @@ func InitHarness(ctx context.Context, t *testing.T, cfg HarnessCfg) Harness {
 		nil, // loopBreakCheck
 		nil, // recent bor snapshots cached
 		nil, // signatures lru cache
+		false,
+		nil,
 	)
-	stateSyncStages := stagedsync.DefaultStages(
-		ctx,
-		stagedsync.SnapshotsCfg{},
-		stagedsync.HeadersCfg{},
-		bhCfg,
-		stagedsync.BlockHashesCfg{},
-		stagedsync.BodiesCfg{},
-		stagedsync.SendersCfg{},
-		stagedsync.ExecuteBlockCfg{},
-		stagedsync.HashStateCfg{},
-		stagedsync.TrieCfg{},
-		stagedsync.HistoryCfg{},
-		stagedsync.LogIndexCfg{},
-		stagedsync.CallTracesCfg{},
-		stagedsync.TxLookupCfg{},
-		stagedsync.FinishCfg{},
-		true,
-	)
+	stateSyncStages := stagedsync.DefaultStages(ctx, stagedsync.SnapshotsCfg{}, stagedsync.HeadersCfg{}, bhCfg, stagedsync.BlockHashesCfg{}, stagedsync.BodiesCfg{}, stagedsync.SendersCfg{}, stagedsync.ExecuteBlockCfg{}, stagedsync.TxLookupCfg{}, stagedsync.FinishCfg{}, true)
 	stateSync := stagedsync.New(
 		ethconfig.Defaults.Sync,
 		stateSyncStages,
@@ -91,9 +92,9 @@ func InitHarness(ctx context.Context, t *testing.T, cfg HarnessCfg) Harness {
 		ctx,
 		stagedsync.MiningCreateBlockCfg{},
 		bhCfg,
+		stagedsync.ExecuteBlockCfg{},
+		stagedsync.SendersCfg{},
 		stagedsync.MiningExecCfg{},
-		stagedsync.HashStateCfg{},
-		stagedsync.TrieCfg{},
 		stagedsync.MiningFinishCfg{},
 	)
 	miningSync := stagedsync.New(
@@ -443,7 +444,7 @@ func (h *Harness) generateChain(ctx context.Context, t *testing.T, ctrl *gomock.
 				t.Fatal(err)
 			}
 
-			h.logger.Info("Adding 1 mock tx to block", "blockNum", gen.GetHeader().Number)
+			h.logger.Info("Adding 1 mock txn to block", "blockNum", gen.GetHeader().Number)
 			chainID := uint256.Int{}
 			overflow := chainID.SetFromBig(h.chainConfig.ChainID)
 			require.False(t, overflow)
@@ -506,6 +507,7 @@ func (h *Harness) consensusEngine(t *testing.T, cfg HarnessCfg) consensus.Engine
 			h.heimdallClient,
 			genesisContracts,
 			h.logger,
+			nil,
 		)
 
 		borConsensusEng.Authorize(h.validatorAddress, func(_ libcommon.Address, _ string, msg []byte) ([]byte, error) {
@@ -537,7 +539,7 @@ func (h *Harness) saveHeaders(ctx context.Context, t *testing.T, headers []*type
 }
 
 func (h *Harness) mockChainHeaderReader(ctrl *gomock.Controller) consensus.ChainHeaderReader {
-	mockChainHR := consensusmock.NewMockChainHeaderReader(ctrl)
+	mockChainHR := consensus.NewMockChainHeaderReader(ctrl)
 	mockChainHR.
 		EXPECT().
 		GetHeader(gomock.Any(), gomock.Any()).
@@ -652,6 +654,13 @@ func (h *Harness) mockHeimdallClient() {
 			return []*heimdall.EventRecordWithTime{&newEvent}, nil
 		}).
 		AnyTimes()
+	h.heimdallClient.
+		EXPECT().
+		FetchStateSyncEvent(gomock.Any(), gomock.Any()).
+		DoAndReturn(func(_ context.Context, _ uint64) (*heimdall.EventRecordWithTime, error) {
+			return nil, heimdall.ErrEventRecordNotFound
+		}).
+		AnyTimes()
 }
 
 func (h *Harness) runSyncStageForwardWithErrorIs(
@@ -679,10 +688,10 @@ func (h *Harness) runSyncStageForwardWithReturnError(
 	stage, found := h.findSyncStageByID(id, syncStages)
 	require.True(t, found)
 
-	stageState, err := sync.StageState(id, txc.Tx, h.chainDataDB)
+	stageState, err := sync.StageState(id, txc.Tx, h.chainDataDB, true, false)
 	require.NoError(t, err)
 
-	return stage.Forward(true, false, stageState, sync, txc, h.logger)
+	return stage.Forward(false, stageState, sync, txc, h.logger)
 }
 
 func (h *Harness) findSyncStageByID(id stages.SyncStage, syncStages []*stagedsync.Stage) (*stagedsync.Stage, bool) {

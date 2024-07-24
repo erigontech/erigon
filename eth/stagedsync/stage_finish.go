@@ -1,3 +1,19 @@
+// Copyright 2024 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+
 package stagedsync
 
 import (
@@ -5,23 +21,25 @@ import (
 	"context"
 	"encoding/binary"
 	"fmt"
-	"github.com/ledgerwatch/erigon-lib/kv/dbutils"
 	"time"
 
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/common/hexutility"
-	"github.com/ledgerwatch/erigon-lib/gointerfaces"
-	"github.com/ledgerwatch/erigon-lib/gointerfaces/remote"
-	types2 "github.com/ledgerwatch/erigon-lib/gointerfaces/types"
-	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon/turbo/engineapi/engine_helpers"
-	"github.com/ledgerwatch/erigon/turbo/services"
-	"github.com/ledgerwatch/log/v3"
+	"github.com/erigontech/erigon-lib/kv/dbutils"
 
-	"github.com/ledgerwatch/erigon/core/rawdb"
-	"github.com/ledgerwatch/erigon/core/types"
-	"github.com/ledgerwatch/erigon/ethdb/cbor"
-	"github.com/ledgerwatch/erigon/params"
+	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common/hexutility"
+	"github.com/erigontech/erigon-lib/gointerfaces"
+	remote "github.com/erigontech/erigon-lib/gointerfaces/remoteproto"
+	types2 "github.com/erigontech/erigon-lib/gointerfaces/typesproto"
+	"github.com/erigontech/erigon-lib/kv"
+	"github.com/erigontech/erigon-lib/log/v3"
+	bortypes "github.com/erigontech/erigon/polygon/bor/types"
+	"github.com/erigontech/erigon/turbo/engineapi/engine_helpers"
+	"github.com/erigontech/erigon/turbo/services"
+
+	"github.com/erigontech/erigon/core/rawdb"
+	"github.com/erigontech/erigon/core/types"
+	"github.com/erigontech/erigon/ethdb/cbor"
+	"github.com/erigontech/erigon/params"
 )
 
 type FinishCfg struct {
@@ -38,7 +56,7 @@ func StageFinishCfg(db kv.RwDB, tmpDir string, forkValidator *engine_helpers.For
 	}
 }
 
-func FinishForward(s *StageState, tx kv.RwTx, cfg FinishCfg, initialCycle bool) error {
+func FinishForward(s *StageState, tx kv.RwTx, cfg FinishCfg) error {
 	useExternalTx := tx != nil
 	if !useExternalTx {
 		var err error
@@ -70,7 +88,7 @@ func FinishForward(s *StageState, tx kv.RwTx, cfg FinishCfg, initialCycle bool) 
 		cfg.forkValidator.NotifyCurrentHeight(executionAt)
 	}
 
-	if initialCycle {
+	if s.CurrentSyncCycle.IsInitialCycle {
 		if err := params.SetErigonVersion(tx, params.VersionKeyFinished); err != nil {
 			return err
 		}
@@ -148,21 +166,20 @@ func NotifyNewHeaders(ctx context.Context, finishStageBeforeSync uint64, finishS
 	var notifyTo = notifyFrom
 	var notifyToHash libcommon.Hash
 	var headersRlp [][]byte
-	if err := tx.ForEach(kv.Headers, hexutility.EncodeTs(notifyFrom), func(k, headerRLP []byte) error {
-		if len(headerRLP) == 0 {
+	if err := tx.ForEach(kv.HeaderCanonical, hexutility.EncodeTs(notifyFrom), func(k, hash []byte) (err error) {
+		if len(hash) == 0 {
 			return nil
 		}
-		notifyTo = binary.BigEndian.Uint64(k)
-		var err error
-		if notifyToHash, err = blockReader.CanonicalHash(ctx, tx, notifyTo); err != nil {
-			logger.Warn("[Finish] failed checking if header is cannonical")
+		blockNum := binary.BigEndian.Uint64(k)
+		if blockNum > finishStageAfterSync { //[from,to)
+			return nil
 		}
-
-		headerHash := libcommon.BytesToHash(k[8:])
-		if notifyToHash == headerHash {
+		notifyTo = blockNum
+		notifyToHash = libcommon.BytesToHash(hash)
+		headerRLP := rawdb.ReadHeaderRLP(tx, notifyToHash, notifyTo)
+		if headerRLP != nil {
 			headersRlp = append(headersRlp, libcommon.CopyBytes(headerRLP))
 		}
-
 		return libcommon.Stopped(ctx.Done())
 	}); err != nil {
 		logger.Error("RPC Daemon notification failed", "err", err)
@@ -182,7 +199,7 @@ func NotifyNewHeaders(ctx context.Context, finishStageBeforeSync uint64, finishS
 			notifier.OnLogs(logs)
 		}
 		logTiming := time.Since(t)
-		logger.Info("RPC Daemon notified of new headers", "from", notifyFrom-1, "to", notifyTo, "hash", notifyToHash, "header sending", headerTiming, "log sending", logTiming)
+		logger.Info("RPC Daemon notified of new headers", "from", notifyFrom-1, "to", notifyTo, "amount", len(headersRlp), "hash", notifyToHash, "header sending", headerTiming, "log sending", logTiming)
 	}
 	return nil
 }
@@ -218,7 +235,7 @@ func ReadLogs(tx kv.Tx, from uint64, isUnwind bool, blockReader services.FullBlo
 
 		// bor transactions are at the end of the bodies transactions (added manually but not actually part of the block)
 		if txIndex == uint64(len(block.Transactions())) {
-			txHash = types.ComputeBorTxHash(blockNum, block.Hash())
+			txHash = bortypes.ComputeBorTxHash(blockNum, block.Hash())
 		} else {
 			txHash = block.Transactions()[txIndex].Hash()
 		}

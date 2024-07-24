@@ -9,11 +9,11 @@ All commands require parameter `--datadir=<datadir>` - I will skip it for readab
 integration --help
 integration print_stages
 
-# Run single stage 
-integration stage_senders 
-integration stage_exec  
+# Run single stage
+integration stage_senders
+integration stage_exec
 integration stage_exec --block=1_000_000 # stop at 1M block
-integration stage_hash_state 
+integration stage_hash_state
 integration stage_trie
 integration stage_history
 integration stage_tx_lookup
@@ -21,25 +21,28 @@ integration stage_tx_lookup
 # Unwind single stage 10 blocks backward
 integration stage_exec --unwind=10
 
-# Drop data of single stage 
-integration stage_exec --reset     
+# Drop data of single stage
+integration stage_exec --reset
 integration stage_history --reset
 
 # Unwind single stage N blocks backward
-integration stage_exec --unwind=N 
+integration stage_exec --unwind=N
 integration stage_history --unwind=N
 
 # Run stage prune to block N
-integration stage_exec --prune.to=N     
+integration stage_exec --prune.to=N
 integration stage_history --prune.to=N
+
+# Reset stage_headers
+integration stage_headers --reset --datadir=<my_datadir> --chain=<my_chain>
 
 # Exec blocks, but don't commit changes (loose them)
 integration stage_exec --no-commit
 ...
 
-# Run tx replay with domains [requires 6th stage to be done before run]
-integration state_domains --chain goerli --last-step=4 # stop replay when 4th step is merged
-integration read_domains --chain goerli account <addr> <addr> ... # read values for given accounts 
+# Run txn replay with domains [requires 6th stage to be done before run]
+integration state_domains --chain sepolia --last-step=4 # stop replay when 4th step is merged
+integration read_domains --chain sepolia account <addr> <addr> ... # read values for given accounts
 
 # hack which allows to force clear unwind stack of all stages
 clear_unwind_stack
@@ -81,18 +84,41 @@ make all
 ## Copy data to another db
 
 ```
+0. You will need 2x disk space (can be different disks).
 1. Stop Erigon
-2. Create new db, by starting erigon in new directory: with option --datadir /path/to/copy-to/
-(set new --db.pagesize option if need)
-3. Stop Erigon again after about 1 minute (Steps 2 and 3 create a new empty db in /path/to/copy-to/chaindata )
-4. Build integration: cd erigon; make integration
-5. Run: ./build/bin/integration mdbx_to_mdbx --chaindata /existing/erigon/path/chaindata/ --chaindata.to /path/to/copy-to/chaindata/
-6. cp -R /existing/erigon/path/snapshots /path/to/copy-to/snapshots
+2. Create new db with new --db.pagesize:
+ONLY_CREATE_DB=true ./build/bin/erigon --datadir=/erigon-new/ --chain="$CHAIN" --db.pagesize=8kb --db.size.limit=12T
+# if erigon doesn't stop after 1 min. just stop it.
+3. Build integration: cd erigon; make integration
+5. Run: ./build/bin/integration mdbx_to_mdbx --chaindata /existing/erigon/path/chaindata/ --chaindata.to /erigon-new/chaindata/
+6. cp -R /existing/erigon/path/snapshots /erigon-new/snapshots
 7. start erigon in new datadir as usually
 ```
 
-## Clear bad blocks markers table in the case some block was marked as invalid after some error 
+## Recover db from some bad state
+
+If you face db-open error like `MDBX_PROBLEM: Unexpected internal error`. First: use tools
+like https://www.memtest86.com to test RAM and tools like https://www.smartmontools.org to test Disk. If hardware is
+fine: can try manually recover db (see `./build/bin/mdbx_chk -h` for more details):
+
+```
+make db-tools
+
+./build/bin/mdbx_chk -0 -d /erigon/chaindata
+./build/bin/mdbx_chk -1 -d /erigon/chaindata
+./build/bin/mdbx_chk -2 -d /erigon/chaindata
+
+# if all 3 commands return success - then remove `-d` parameter and run again
+# if all 1 command is fail but other success. choose successful number - for example 2 - and switch db manually to it:  
+./build/bin/mdbx_chk -2 -d -t -w /erigon/chaindata  
+
+# if all 3 commands are fail - game over. use backups.
+```
+
+## Clear bad blocks markers table in the case some block was marked as invalid after some error
+
 It allows to process this blocks again
+
 ```
 1. ./build/bin/integration clear_bad_blocks --datadir=<datadir>
 ```

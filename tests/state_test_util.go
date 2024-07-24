@@ -1,22 +1,26 @@
 // Copyright 2015 The go-ethereum Authors
-// This file is part of the go-ethereum library.
+// (original work)
+// Copyright 2024 The Erigon Authors
+// (modifications)
+// This file is part of Erigon.
 //
-// The go-ethereum library is free software: you can redistribute it and/or modify
+// Erigon is free software: you can redistribute it and/or modify
 // it under the terms of the GNU Lesser General Public License as published by
 // the Free Software Foundation, either version 3 of the License, or
 // (at your option) any later version.
 //
-// The go-ethereum library is distributed in the hope that it will be useful,
+// Erigon is distributed in the hope that it will be useful,
 // but WITHOUT ANY WARRANTY; without even the implied warranty of
 // MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
 // GNU Lesser General Public License for more details.
 //
 // You should have received a copy of the GNU Lesser General Public License
-// along with the go-ethereum library. If not, see <http://www.gnu.org/licenses/>.
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
 package tests
 
 import (
+	context2 "context"
 	"encoding/binary"
 	"encoding/hex"
 	"encoding/json"
@@ -28,25 +32,27 @@ import (
 	"github.com/holiman/uint256"
 	"golang.org/x/crypto/sha3"
 
-	"github.com/ledgerwatch/erigon-lib/chain"
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/common/hexutility"
-	"github.com/ledgerwatch/erigon-lib/common/length"
-	"github.com/ledgerwatch/erigon-lib/kv"
-	types2 "github.com/ledgerwatch/erigon-lib/types"
+	"github.com/erigontech/erigon-lib/config3"
 
-	"github.com/ledgerwatch/erigon/common"
-	"github.com/ledgerwatch/erigon/common/math"
-	"github.com/ledgerwatch/erigon/core"
-	"github.com/ledgerwatch/erigon/core/state"
-	"github.com/ledgerwatch/erigon/core/types"
-	"github.com/ledgerwatch/erigon/core/vm"
-	"github.com/ledgerwatch/erigon/crypto"
-	"github.com/ledgerwatch/erigon/eth/ethconfig"
-	"github.com/ledgerwatch/erigon/rlp"
-	"github.com/ledgerwatch/erigon/turbo/rpchelper"
-	"github.com/ledgerwatch/erigon/turbo/trie"
-	"github.com/ledgerwatch/log/v3"
+	"github.com/erigontech/erigon-lib/chain"
+	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common/hexutility"
+	"github.com/erigontech/erigon-lib/kv"
+	state2 "github.com/erigontech/erigon-lib/state"
+	types2 "github.com/erigontech/erigon-lib/types"
+	"github.com/erigontech/erigon-lib/wrap"
+
+	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/math"
+	"github.com/erigontech/erigon/core"
+	"github.com/erigontech/erigon/core/state"
+	"github.com/erigontech/erigon/core/tracing"
+	"github.com/erigontech/erigon/core/types"
+	"github.com/erigontech/erigon/core/vm"
+	"github.com/erigontech/erigon/crypto"
+	"github.com/erigontech/erigon/rlp"
+	"github.com/erigontech/erigon/turbo/rpchelper"
 )
 
 // StateTest checks transaction processing without block context.
@@ -159,21 +165,21 @@ func (t *StateTest) Subtests() []StateSubtest {
 }
 
 // Run executes a specific subtest and verifies the post-state and logs
-func (t *StateTest) Run(tx kv.RwTx, subtest StateSubtest, vmconfig vm.Config) (*state.IntraBlockState, error) {
+func (t *StateTest) Run(tx kv.RwTx, subtest StateSubtest, vmconfig vm.Config) (*state.IntraBlockState, libcommon.Hash, error) {
 	state, root, err := t.RunNoVerify(tx, subtest, vmconfig)
 	if err != nil {
-		return state, err
+		return state, types.EmptyRootHash, err
 	}
 	post := t.json.Post[subtest.Fork][subtest.Index]
 	// N.B: We need to do this in a two-step process, because the first Commit takes care
 	// of suicides, and we need to touch the coinbase _after_ it has potentially suicided.
 	if root != libcommon.Hash(post.Root) {
-		return state, fmt.Errorf("post state root mismatch: got %x, want %x", root, post.Root)
+		return state, root, fmt.Errorf("post state root mismatch: got %x, want %x", root, post.Root)
 	}
 	if logs := rlpHash(state.Logs()); logs != libcommon.Hash(post.Logs) {
-		return state, fmt.Errorf("post state logs hash mismatch: got %x, want %x", logs, post.Logs)
+		return state, root, fmt.Errorf("post state logs hash mismatch: got %x, want %x", logs, post.Logs)
 	}
-	return state, nil
+	return state, root, nil
 }
 
 // RunNoVerify runs a specific subtest and returns the statedb and post-state root
@@ -191,20 +197,27 @@ func (t *StateTest) RunNoVerify(tx kv.RwTx, subtest StateSubtest, vmconfig vm.Co
 	readBlockNr := block.NumberU64()
 	writeBlockNr := readBlockNr + 1
 
-	_, err = MakePreState(&chain.Rules{}, tx, t.json.Pre, readBlockNr)
+	_, err = MakePreState(&chain.Rules{}, tx, t.json.Pre, readBlockNr, config3.EnableHistoryV4InTest)
 	if err != nil {
 		return nil, libcommon.Hash{}, UnsupportedForkError{subtest.Fork}
 	}
 
-	r := rpchelper.NewLatestStateReader(tx)
-	statedb := state.New(r)
-
+	var r state.StateReader
 	var w state.StateWriter
-	if ethconfig.EnableHistoryV4InTest {
-		panic("implement me")
-	} else {
-		w = state.NewPlainStateWriter(tx, nil, writeBlockNr)
+	var domains *state2.SharedDomains
+	var txc wrap.TxContainer
+	txc.Tx = tx
+	if config3.EnableHistoryV4InTest {
+		domains, err = state2.NewSharedDomains(tx, log.New())
+		if err != nil {
+			return nil, libcommon.Hash{}, UnsupportedForkError{subtest.Fork}
+		}
+		defer domains.Close()
+		txc.Doms = domains
 	}
+	r = rpchelper.NewLatestStateReader(tx)
+	w = rpchelper.NewLatestStateWriter(txc, writeBlockNr)
+	statedb := state.New(r)
 
 	var baseFee *big.Int
 	if config.IsLondon(0) {
@@ -221,7 +234,7 @@ func (t *StateTest) RunNoVerify(tx kv.RwTx, subtest StateSubtest, vmconfig vm.Co
 		return nil, libcommon.Hash{}, err
 	}
 	if len(post.Tx) != 0 {
-		txn, err := types.UnmarshalTransactionFromBinary(post.Tx)
+		txn, err := types.UnmarshalTransactionFromBinary(post.Tx, false /* blobTxnsAreWrappedWithBlobs */)
 		if err != nil {
 			return nil, libcommon.Hash{}, err
 		}
@@ -233,8 +246,8 @@ func (t *StateTest) RunNoVerify(tx kv.RwTx, subtest StateSubtest, vmconfig vm.Co
 
 	// Prepare the EVM.
 	txContext := core.NewEVMTxContext(msg)
-	header := block.Header()
-	context := core.NewEVMBlockContext(header, core.GetHashFn(header, nil), nil, &t.json.Env.Coinbase)
+	header := block.HeaderNoCopy()
+	context := core.NewEVMBlockContext(header, core.GetHashFn(header, nil), nil, &t.json.Env.Coinbase, config)
 	context.GetHash = vmTestBlockHash
 	if baseFee != nil {
 		context.BaseFee = new(uint256.Int)
@@ -260,54 +273,16 @@ func (t *StateTest) RunNoVerify(tx kv.RwTx, subtest StateSubtest, vmconfig vm.Co
 	if err = statedb.CommitBlock(evm.ChainRules(), w); err != nil {
 		return nil, libcommon.Hash{}, err
 	}
-	// Generate hashed state
-	c, err := tx.RwCursor(kv.PlainState)
-	if err != nil {
-		return nil, libcommon.Hash{}, err
-	}
-	h := libcommon.NewHasher()
-	defer libcommon.ReturnHasherToPool(h)
-	for k, v, err := c.First(); k != nil; k, v, err = c.Next() {
-		if err != nil {
-			return nil, libcommon.Hash{}, fmt.Errorf("interate over plain state: %w", err)
-		}
-		var newK []byte
-		if len(k) == length.Addr {
-			newK = make([]byte, length.Hash)
-		} else {
-			newK = make([]byte, length.Hash*2+length.Incarnation)
-		}
-		h.Sha.Reset()
-		//nolint:errcheck
-		h.Sha.Write(k[:length.Addr])
-		//nolint:errcheck
-		h.Sha.Read(newK[:length.Hash])
-		if len(k) > length.Addr {
-			copy(newK[length.Hash:], k[length.Addr:length.Addr+length.Incarnation])
-			h.Sha.Reset()
-			//nolint:errcheck
-			h.Sha.Write(k[length.Addr+length.Incarnation:])
-			//nolint:errcheck
-			h.Sha.Read(newK[length.Hash+length.Incarnation:])
-			if err = tx.Put(kv.HashedStorage, newK, libcommon.CopyBytes(v)); err != nil {
-				return nil, libcommon.Hash{}, fmt.Errorf("insert hashed key: %w", err)
-			}
-		} else {
-			if err = tx.Put(kv.HashedAccounts, newK, libcommon.CopyBytes(v)); err != nil {
-				return nil, libcommon.Hash{}, fmt.Errorf("insert hashed key: %w", err)
-			}
-		}
-	}
-	c.Close()
 
-	root, err := trie.CalcRoot("", tx)
+	var root libcommon.Hash
+	rootBytes, err := domains.ComputeCommitment(context2.Background(), false, header.Number.Uint64(), "")
 	if err != nil {
-		return nil, libcommon.Hash{}, fmt.Errorf("error calculating state root: %w", err)
+		return statedb, root, fmt.Errorf("ComputeCommitment: %w", err)
 	}
-	return statedb, root, nil
+	return statedb, libcommon.BytesToHash(rootBytes), nil
 }
 
-func MakePreState(rules *chain.Rules, tx kv.RwTx, accounts types.GenesisAlloc, blockNr uint64) (*state.IntraBlockState, error) {
+func MakePreState(rules *chain.Rules, tx kv.RwTx, accounts types.GenesisAlloc, blockNr uint64, histV3 bool) (*state.IntraBlockState, error) {
 	r := rpchelper.NewLatestStateReader(tx)
 	statedb := state.New(r)
 	for addr, a := range accounts {
@@ -317,7 +292,7 @@ func MakePreState(rules *chain.Rules, tx kv.RwTx, accounts types.GenesisAlloc, b
 		if a.Balance != nil {
 			balance, _ = uint256.FromBig(a.Balance)
 		}
-		statedb.SetBalance(addr, balance)
+		statedb.SetBalance(addr, balance, tracing.BalanceChangeUnspecified)
 		for k, v := range a.Storage {
 			key := k
 			val := uint256.NewInt(0).SetBytes(v.Bytes())
@@ -336,11 +311,21 @@ func MakePreState(rules *chain.Rules, tx kv.RwTx, accounts types.GenesisAlloc, b
 	}
 
 	var w state.StateWriter
-	if ethconfig.EnableHistoryV4InTest {
-		panic("implement me")
-	} else {
-		w = state.NewPlainStateWriter(tx, nil, blockNr+1)
+	var domains *state2.SharedDomains
+	var txc wrap.TxContainer
+	txc.Tx = tx
+	if config3.EnableHistoryV4InTest {
+		var err error
+		domains, err = state2.NewSharedDomains(tx, log.New())
+		if err != nil {
+			return nil, err
+		}
+		defer domains.Close()
+		defer domains.Flush(context2.Background(), tx)
+		txc.Doms = domains
 	}
+	w = rpchelper.NewLatestStateWriter(txc, blockNr-1)
+
 	// Commit and re-open to start with a clean state.
 	if err := statedb.FinalizeTx(rules, w); err != nil {
 		return nil, err
@@ -373,7 +358,7 @@ func rlpHash(x interface{}) (h libcommon.Hash) {
 }
 
 func vmTestBlockHash(n uint64) libcommon.Hash {
-	return libcommon.BytesToHash(crypto.Keccak256([]byte(big.NewInt(int64(n)).String())))
+	return libcommon.BytesToHash(crypto.Keccak256([]byte(new(big.Int).SetUint64(n).String())))
 }
 
 func toMessage(tx stTransaction, ps stPostState, baseFee *big.Int) (core.Message, error) {

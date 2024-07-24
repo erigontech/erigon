@@ -1,22 +1,40 @@
+// Copyright 2024 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+
 package engine_block_downloader
 
 import (
+	"context"
 	"fmt"
 	"runtime"
 	"time"
 
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/common/dbg"
-	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon/core/rawdb"
-	"github.com/ledgerwatch/erigon/dataflow"
-	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
-	"github.com/ledgerwatch/erigon/turbo/stages/bodydownload"
-	"github.com/ledgerwatch/log/v3"
+	"github.com/erigontech/erigon-lib/log/v3"
+
+	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common/dbg"
+	"github.com/erigontech/erigon-lib/kv"
+	"github.com/erigontech/erigon/core/rawdb"
+	"github.com/erigontech/erigon/dataflow"
+	"github.com/erigontech/erigon/eth/stagedsync/stages"
+	"github.com/erigontech/erigon/turbo/stages/bodydownload"
 )
 
 // downloadBodies executes bodies download.
-func (e *EngineBlockDownloader) downloadAndLoadBodiesSyncronously(tx kv.RwTx, fromBlock, toBlock uint64) (err error) {
+func (e *EngineBlockDownloader) downloadAndLoadBodiesSyncronously(ctx context.Context, tx kv.RwTx, fromBlock, toBlock uint64) (err error) {
 	headerProgress := toBlock
 	bodyProgress := fromBlock - 1
 
@@ -80,7 +98,7 @@ func (e *EngineBlockDownloader) downloadAndLoadBodiesSyncronously(tx kv.RwTx, fr
 			sentToPeer = false
 			if req != nil {
 				start = time.Now()
-				peer, sentToPeer = e.bodyReqSend(e.ctx, req)
+				peer, sentToPeer = e.bodyReqSend(ctx, req)
 				d2 += time.Since(start)
 			}
 			if req != nil && sentToPeer {
@@ -152,7 +170,7 @@ func (e *EngineBlockDownloader) downloadAndLoadBodiesSyncronously(tx kv.RwTx, fr
 		timer.Stop()
 		timer = time.NewTimer(1 * time.Second)
 		select {
-		case <-e.ctx.Done():
+		case <-ctx.Done():
 			stopped = true
 		case <-logEvery.C:
 			deliveredCount, wastedCount := e.bd.DeliveryCounts()
@@ -204,8 +222,8 @@ func logDownloadingBodies(logPrefix string, committed, remaining uint64, totalDe
 
 	var m runtime.MemStats
 	dbg.ReadMemStats(&m)
-	logger.Info(fmt.Sprintf("[%s] Downloading block bodies", logPrefix),
-		"block_num", committed,
+	logger.Info(fmt.Sprintf("[%s] Downloading bodies", logPrefix),
+		"block", committed,
 		"delivery/sec", libcommon.ByteCount(uint64(speed)),
 		"wasted/sec", libcommon.ByteCount(uint64(wastedSpeed)),
 		"remaining", remaining,
@@ -220,8 +238,8 @@ func logWritingBodies(logPrefix string, committed, headerProgress uint64, logger
 	var m runtime.MemStats
 	dbg.ReadMemStats(&m)
 	remaining := headerProgress - committed
-	logger.Info(fmt.Sprintf("[%s] Writing block bodies", logPrefix),
-		"block_num", committed,
+	logger.Info(fmt.Sprintf("[%s] Writing bodies", logPrefix),
+		"block", committed,
 		"remaining", remaining,
 		"alloc", libcommon.ByteCount(m.Alloc),
 		"sys", libcommon.ByteCount(m.Sys),

@@ -1,11 +1,27 @@
+// Copyright 2024 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+
 package cbor
 
 import (
-	"fmt"
 	"io"
 
-	"github.com/ledgerwatch/log/v3"
 	"github.com/ugorji/go/codec"
+
+	"github.com/erigontech/erigon-lib/log/v3"
 )
 
 var logger = log.New("package", "cbor")
@@ -24,22 +40,6 @@ func Decoder(r io.Reader) *codec.Decoder {
 			handle.ReaderBufferSize = 64 * 1024
 			handle.ZeroCopy = true // if you need access to object outside of db transaction - please copy bytes before deserialization
 			d = codec.NewDecoder(r, &handle)
-		}
-	}
-	return d
-}
-
-func DecoderBytes(r []byte) *codec.Decoder {
-	var d *codec.Decoder
-	select {
-	case d = <-decoderPool:
-		d.ResetBytes(r)
-	default:
-		{
-			var handle codec.CborHandle
-			handle.ReaderBufferSize = 64 * 1024
-			handle.ZeroCopy = true // if you need access to object outside of db transaction - please copy bytes before deserialization
-			d = codec.NewDecoderBytes(r, &handle)
 		}
 	}
 	return d
@@ -75,40 +75,10 @@ func Encoder(w io.Writer) *codec.Encoder {
 	return e
 }
 
-func EncoderBytes(w *[]byte) *codec.Encoder {
-	var e *codec.Encoder
-	select {
-	case e = <-encoderPool:
-		e.ResetBytes(w)
-	default:
-		{
-			var handle codec.CborHandle
-			handle.WriterBufferSize = 64 * 1024
-			handle.StructToArray = true
-			handle.OptimumSize = true
-			handle.StringToRaw = true
-
-			e = codec.NewEncoderBytes(w, &handle)
-		}
-	}
-	return e
-}
-
 func returnEncoderToPool(e *codec.Encoder) {
 	select {
 	case encoderPool <- e:
 	default:
 		logger.Trace("Allowing encoder to be garbage collected, pool is full")
-	}
-}
-
-func Return(d interface{}) {
-	switch toReturn := d.(type) {
-	case *codec.Decoder:
-		returnDecoderToPool(toReturn)
-	case *codec.Encoder:
-		returnEncoderToPool(toReturn)
-	default:
-		panic(fmt.Sprintf("unexpected type: %T", d))
 	}
 }

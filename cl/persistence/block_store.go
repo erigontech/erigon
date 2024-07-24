@@ -1,15 +1,29 @@
+// Copyright 2024 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+
 package persistence
 
 import (
 	"context"
-	"sync"
 	"time"
 
-	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon/cl/cltypes"
-	"github.com/ledgerwatch/erigon/cl/rpc"
-	"github.com/ledgerwatch/erigon/cl/sentinel/peers"
-	"github.com/tidwall/btree"
+	"github.com/erigontech/erigon-lib/kv"
+	"github.com/erigontech/erigon/cl/cltypes"
+	"github.com/erigontech/erigon/cl/rpc"
+	"github.com/erigontech/erigon/cl/sentinel/peers"
 )
 
 var _ BlockSource = (*BeaconRpcSource)(nil)
@@ -65,72 +79,5 @@ func (b *BeaconRpcSource) GetRange(ctx context.Context, _ kv.Tx, from uint64, co
 
 // a noop for rpc source since we always return new data
 func (b *BeaconRpcSource) PurgeRange(ctx context.Context, _ kv.Tx, from uint64, count uint64) error {
-	return nil
-}
-
-var _ BlockSource = (*GossipSource)(nil)
-
-type GossipSource struct {
-	mu     sync.Mutex
-	blocks *btree.Map[uint64, []*peers.PeeredObject[*cltypes.SignedBeaconBlock]]
-}
-
-func (*GossipSource) GetBlock(ctx context.Context, tx kv.Tx, slot uint64) (*peers.PeeredObject[*cltypes.SignedBeaconBlock], error) {
-	panic("unimplemented")
-}
-
-func NewGossipSource(ctx context.Context) *GossipSource {
-	g := &GossipSource{
-		blocks: btree.NewMap[uint64, []*peers.PeeredObject[*cltypes.SignedBeaconBlock]](32),
-	}
-
-	return g
-}
-
-func (b *GossipSource) InsertBlock(ctx context.Context, block *peers.PeeredObject[*cltypes.SignedBeaconBlock]) {
-	current, ok := b.blocks.Get(block.Data.Block.Slot)
-	if !ok {
-		current = make([]*peers.PeeredObject[*cltypes.SignedBeaconBlock], 0, 1)
-	}
-	current = append(current, block)
-	b.blocks.Set(block.Data.Block.Slot, current)
-}
-
-func (b *GossipSource) GetRange(ctx context.Context, _ kv.Tx, from uint64, count uint64) (*peers.PeeredObject[[]*cltypes.SignedBeaconBlock], error) {
-	out := &peers.PeeredObject[[]*cltypes.SignedBeaconBlock]{}
-	for i := from; i < from+count; i++ {
-		current, ok := b.blocks.Get(i)
-		if !ok {
-			continue
-		}
-		for _, v := range current {
-			out.Data = append(out.Data, v.Data)
-		}
-	}
-	return out, nil
-}
-
-func (b *GossipSource) PurgeRange(ctx context.Context, tx kv.Tx, from uint64, count uint64) error {
-	b.mu.Lock()
-	defer b.mu.Unlock()
-	return b.purgeRange(ctx, tx, from, count)
-}
-
-func (b *GossipSource) purgeRange(ctx context.Context, _ kv.Tx, from uint64, count uint64) error {
-	initSize := count
-	if initSize > 256 {
-		initSize = 256
-	}
-	xs := make([]uint64, 0, initSize)
-	b.blocks.Ascend(from, func(key uint64, value []*peers.PeeredObject[*cltypes.SignedBeaconBlock]) bool {
-		if key >= from+count {
-			return false
-		}
-		xs = append(xs, key)
-		return true
-	})
-	for _, v := range xs {
-		b.blocks.Delete(v)
-	}
 	return nil
 }

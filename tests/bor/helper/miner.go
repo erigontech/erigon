@@ -9,24 +9,25 @@ import (
 	"os"
 	"time"
 
-	"github.com/ledgerwatch/erigon/polygon/bor/borcfg"
+	"github.com/erigontech/erigon/polygon/bor/borcfg"
 
 	"github.com/c2h5oh/datasize"
-	"github.com/ledgerwatch/erigon-lib/common/datadir"
-	"github.com/ledgerwatch/erigon-lib/direct"
-	"github.com/ledgerwatch/erigon-lib/downloader/downloadercfg"
-	"github.com/ledgerwatch/erigon-lib/txpool/txpoolcfg"
-	"github.com/ledgerwatch/erigon/cmd/utils"
-	"github.com/ledgerwatch/erigon/core/types"
-	"github.com/ledgerwatch/erigon/crypto"
-	"github.com/ledgerwatch/erigon/eth"
-	"github.com/ledgerwatch/erigon/eth/ethconfig"
-	"github.com/ledgerwatch/erigon/node"
-	"github.com/ledgerwatch/erigon/node/nodecfg"
-	"github.com/ledgerwatch/erigon/p2p"
-	"github.com/ledgerwatch/erigon/p2p/nat"
-	"github.com/ledgerwatch/erigon/params"
-	"github.com/ledgerwatch/log/v3"
+
+	"github.com/erigontech/erigon-lib/common/datadir"
+	"github.com/erigontech/erigon-lib/direct"
+	"github.com/erigontech/erigon-lib/downloader/downloadercfg"
+	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon-lib/txpool/txpoolcfg"
+	"github.com/erigontech/erigon/cmd/utils"
+	"github.com/erigontech/erigon/core/types"
+	"github.com/erigontech/erigon/crypto"
+	"github.com/erigontech/erigon/eth"
+	"github.com/erigontech/erigon/eth/ethconfig"
+	"github.com/erigontech/erigon/node"
+	"github.com/erigontech/erigon/node/nodecfg"
+	"github.com/erigontech/erigon/p2p"
+	"github.com/erigontech/erigon/p2p/nat"
+	"github.com/erigontech/erigon/params"
 )
 
 // InitGenesis initializes genesis file from json with sprint size and chain name as configurable inputs
@@ -104,7 +105,7 @@ func InitMiner(ctx context.Context, genesis *types.Genesis, privKey *ecdsa.Priva
 		MdbxDBSizeLimit: 64 * datasize.MB,
 	}
 
-	stack, err := node.New(context.Background(), nodeCfg, logger)
+	stack, err := node.New(ctx, nodeCfg, logger)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -124,7 +125,7 @@ func InitMiner(ctx context.Context, genesis *types.Genesis, privKey *ecdsa.Priva
 		return nil, nil, err
 	}
 
-	downloaderConfig, err := downloadercfg.New(datadir.New(ddir), nodeCfg.Version, torrentLogLevel, downloadRate, uploadRate, utils.TorrentPortFlag.Value, utils.TorrentConnsPerFileFlag.Value, utils.TorrentDownloadSlotsFlag.Value, []string{}, []string{}, "", true)
+	downloaderConfig, err := downloadercfg.New(datadir.New(ddir), nodeCfg.Version, torrentLogLevel, downloadRate, uploadRate, utils.TorrentPortFlag.Value, utils.TorrentConnsPerFileFlag.Value, utils.TorrentDownloadSlotsFlag.Value, []string{}, []string{}, "", true, utils.DbWriteMapFlag.Value)
 	if err != nil {
 		return nil, nil, err
 	}

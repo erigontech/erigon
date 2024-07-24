@@ -1,21 +1,39 @@
+// Copyright 2024 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+
 package sync
 
 import (
 	"bytes"
 	"errors"
 	"fmt"
+	"slices"
 	"time"
 
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon/core/types"
-	"github.com/ledgerwatch/erigon/polygon/bor"
+	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon/core/types"
+	"github.com/erigontech/erigon/polygon/bor"
 )
 
-//go:generate mockgen -destination=./canonical_chain_builder_mock.go -package=sync . CanonicalChainBuilder
+//go:generate mockgen -typed=true -destination=./canonical_chain_builder_mock.go -package=sync . CanonicalChainBuilder
 type CanonicalChainBuilder interface {
 	Reset(root *types.Header)
 	ContainsHash(hash libcommon.Hash) bool
 	Tip() *types.Header
+	Root() *types.Header
 	HeadersInRange(start uint64, count uint64) []*types.Header
 	Prune(newRootNum uint64) error
 	Connect(headers []*types.Header) error
@@ -105,6 +123,9 @@ func (ccb *canonicalChainBuilder) ContainsHash(hash libcommon.Hash) bool {
 func (ccb *canonicalChainBuilder) Tip() *types.Header {
 	return ccb.tip.header
 }
+func (ccb *canonicalChainBuilder) Root() *types.Header {
+	return ccb.root.header
+}
 
 func (ccb *canonicalChainBuilder) Headers() []*types.Header {
 	var headers []*types.Header
@@ -113,7 +134,7 @@ func (ccb *canonicalChainBuilder) Headers() []*types.Header {
 		headers = append(headers, node.header)
 		node = node.parent
 	}
-	libcommon.SliceReverse(headers)
+	slices.Reverse(headers)
 	return headers
 }
 

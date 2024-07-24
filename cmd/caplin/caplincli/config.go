@@ -1,3 +1,19 @@
+// Copyright 2024 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+
 package caplincli
 
 import (
@@ -7,22 +23,21 @@ import (
 	"strings"
 	"time"
 
-	"github.com/ledgerwatch/erigon-lib/common/datadir"
-	"github.com/ledgerwatch/erigon/cl/clparams"
-	"github.com/ledgerwatch/erigon/cl/phase1/core/state"
-	"github.com/ledgerwatch/erigon/cmd/caplin/caplinflags"
-	"github.com/ledgerwatch/erigon/cmd/sentinel/sentinelcli"
-	"github.com/ledgerwatch/erigon/cmd/sentinel/sentinelflags"
-	"github.com/ledgerwatch/erigon/cmd/utils"
-	"github.com/ledgerwatch/erigon/common"
-	"github.com/ledgerwatch/log/v3"
 	"github.com/urfave/cli/v2"
+
+	"github.com/erigontech/erigon-lib/common/datadir"
+	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/cl/clparams"
+	"github.com/erigontech/erigon/cl/phase1/core/state"
+	"github.com/erigontech/erigon/cmd/caplin/caplinflags"
+	"github.com/erigontech/erigon/cmd/sentinel/sentinelcli"
+	"github.com/erigontech/erigon/cmd/utils"
+	"github.com/erigontech/erigon/common"
 )
 
 type CaplinCliCfg struct {
 	*sentinelcli.SentinelCliCfg
 
-	CheckpointUri         string        `json:"checkpoint_uri"`
 	Chaindata             string        `json:"chaindata"`
 	ErigonPrivateApi      string        `json:"erigon_private_api"`
 	TransitionChain       bool          `json:"transition_chain"`
@@ -38,6 +53,7 @@ type CaplinCliCfg struct {
 	RunEngineAPI          bool          `json:"run_engine_api"`
 	EngineAPIAddr         string        `json:"engine_api_addr"`
 	EngineAPIPort         int           `json:"engine_api_port"`
+	MevRelayUrl           string        `json:"mev_relay_url"`
 	JwtSecret             []byte
 
 	AllowedMethods   []string `json:"allowed_methods"`
@@ -57,20 +73,21 @@ func SetupCaplinCli(ctx *cli.Context) (cfg *CaplinCliCfg, err error) {
 
 	cfg.ErigonPrivateApi = ctx.String(caplinflags.ErigonPrivateApiFlag.Name)
 
-	if ctx.String(sentinelflags.BeaconConfigFlag.Name) != "" {
-		var stateByte []byte
-		// Now parse genesis time and genesis fork
-		if *cfg.GenesisCfg, stateByte, err = clparams.ParseGenesisSSZToGenesisConfig(
-			ctx.String(sentinelflags.GenesisSSZFlag.Name),
-			cfg.BeaconCfg.GetCurrentStateVersion(0)); err != nil {
-			return nil, err
-		}
+	//T TODO(Giulio2002): Refactor later
+	// if ctx.String(sentinelflags.BeaconConfigFlag.Name) != "" {
+	// 	var stateByte []byte
+	// 	// Now parse genesis time and genesis fork
+	// 	if *cfg.GenesisCfg, stateByte, err = clparams.ParseGenesisSSZToGenesisConfig(
+	// 		ctx.String(sentinelflags.GenesisSSZFlag.Name),
+	// 		cfg.BeaconCfg.GetCurrentStateVersion(0)); err != nil {
+	// 		return nil, err
+	// 	}
 
-		cfg.InitalState = state.New(cfg.BeaconCfg)
-		if cfg.InitalState.DecodeSSZ(stateByte, int(cfg.BeaconCfg.GetCurrentStateVersion(0))); err != nil {
-			return nil, err
-		}
-	}
+	// 	cfg.InitalState = state.New(cfg.BeaconCfg)
+	// 	if cfg.InitalState.DecodeSSZ(stateByte, int(cfg.BeaconCfg.GetCurrentStateVersion(0))); err != nil {
+	// 		return nil, err
+	// 	}
+	// }
 
 	cfg.AllowedEndpoints = ctx.StringSlice(utils.BeaconAPIFlag.Name)
 
@@ -99,16 +116,15 @@ func SetupCaplinCli(ctx *cli.Context) (cfg *CaplinCliCfg, err error) {
 		}
 	}
 
-	if ctx.String(caplinflags.CheckpointSyncUrlFlag.Name) != "" {
-		cfg.CheckpointUri = ctx.String(caplinflags.CheckpointSyncUrlFlag.Name)
-	} else {
-		cfg.CheckpointUri = clparams.GetCheckpointSyncEndpoint(cfg.NetworkType)
+	if checkpointUrls := ctx.StringSlice(utils.CaplinCheckpointSyncUrlFlag.Name); len(checkpointUrls) > 0 {
+		clparams.ConfigurableCheckpointsURLs = checkpointUrls
 	}
 
 	cfg.Chaindata = ctx.String(caplinflags.ChaindataFlag.Name)
 
 	cfg.TransitionChain = ctx.Bool(caplinflags.TransitionChainFlag.Name)
 	cfg.InitialSync = ctx.Bool(caplinflags.InitSyncFlag.Name)
+	cfg.MevRelayUrl = ctx.String(caplinflags.MevRelayUrl.Name)
 
 	return cfg, err
 }

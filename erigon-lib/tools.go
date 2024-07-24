@@ -1,3 +1,19 @@
+// Copyright 2024 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+
 //go:build tools
 
 package tools
@@ -17,15 +33,16 @@ package tools
 // build tag 'trick_go_mod_tidy' - is used to hide warnings of IDEA (because we can't import `main` packages in go)
 
 import (
-	_ "github.com/ledgerwatch/interfaces"
-	_ "github.com/ledgerwatch/interfaces/downloader"
-	_ "github.com/ledgerwatch/interfaces/execution"
-	_ "github.com/ledgerwatch/interfaces/p2psentinel"
-	_ "github.com/ledgerwatch/interfaces/p2psentry"
-	_ "github.com/ledgerwatch/interfaces/remote"
-	_ "github.com/ledgerwatch/interfaces/txpool"
-	_ "github.com/ledgerwatch/interfaces/types"
-	_ "github.com/ledgerwatch/interfaces/web3"
-	_ "github.com/matryer/moq"
+	_ "github.com/erigontech/interfaces"
+	_ "github.com/erigontech/interfaces/downloader"
+	_ "github.com/erigontech/interfaces/execution"
+	_ "github.com/erigontech/interfaces/p2psentinel"
+	_ "github.com/erigontech/interfaces/p2psentry"
+	_ "github.com/erigontech/interfaces/remote"
+	_ "github.com/erigontech/interfaces/txpool"
+	_ "github.com/erigontech/interfaces/types"
+	_ "github.com/erigontech/interfaces/web3"
+	_ "go.uber.org/mock/mockgen"
+	_ "go.uber.org/mock/mockgen/model"
 	_ "google.golang.org/grpc/cmd/protoc-gen-go-grpc"
 )

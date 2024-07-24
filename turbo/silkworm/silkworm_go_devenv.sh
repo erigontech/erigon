@@ -40,16 +40,16 @@ then
     exit 1
 fi
 
-ln -s "$silkworm_dir/silkworm/capi/silkworm.h" "$silkworm_go_dir/include/"
+ln -sf "$silkworm_dir/silkworm/capi/silkworm.h" "$silkworm_go_dir/include/"
 
 product_dir="$silkworm_build_dir/silkworm/capi"
-product_path=$(echo "$product_dir/"*$TARGET*)
+product_path=$(echo "$product_dir/"*$TARGET.*)
 product_file_name=$(basename "$product_path")
 
 for platform in macos_arm64 macos_x64 linux_arm64 linux_x64
 do
-    mkdir "$silkworm_go_dir/lib/$platform"
-    ln -s "$product_path" "$silkworm_go_dir/lib/$platform/$product_file_name"
+    mkdir -p "$silkworm_go_dir/lib/$platform"
+    ln -sf "$product_path" "$silkworm_go_dir/lib/$platform/$product_file_name"
 done
 
 cd "$project_dir/.."

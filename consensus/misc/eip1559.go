@@ -1,18 +1,21 @@
 // Copyright 2021 The go-ethereum Authors
-// This file is part of the go-ethereum library.
+// (original work)
+// Copyright 2024 The Erigon Authors
+// (modifications)
+// This file is part of Erigon.
 //
-// The go-ethereum library is free software: you can redistribute it and/or modify
+// Erigon is free software: you can redistribute it and/or modify
 // it under the terms of the GNU Lesser General Public License as published by
 // the Free Software Foundation, either version 3 of the License, or
 // (at your option) any later version.
 //
-// The go-ethereum library is distributed in the hope that it will be useful,
+// Erigon is distributed in the hope that it will be useful,
 // but WITHOUT ANY WARRANTY; without even the implied warranty of
 // MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
 // GNU Lesser General Public License for more details.
 //
 // You should have received a copy of the GNU Lesser General Public License
-// along with the go-ethereum library. If not, see <http://www.gnu.org/licenses/>.
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
 package misc
 
@@ -20,16 +23,15 @@ import (
 	"fmt"
 	"math/big"
 
-	"github.com/ledgerwatch/erigon-lib/chain"
-	"github.com/ledgerwatch/erigon-lib/common"
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon/polygon/bor/borcfg"
+	"github.com/erigontech/erigon-lib/chain"
+	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/kv"
+	"github.com/erigontech/erigon/polygon/bor/borcfg"
 
-	"github.com/ledgerwatch/erigon/common/math"
-	"github.com/ledgerwatch/erigon/core/rawdb"
-	"github.com/ledgerwatch/erigon/core/types"
-	"github.com/ledgerwatch/erigon/params"
+	"github.com/erigontech/erigon/common/math"
+	"github.com/erigontech/erigon/core/rawdb"
+	"github.com/erigontech/erigon/core/types"
+	"github.com/erigontech/erigon/params"
 )
 
 // VerifyEip1559Header verifies some header attributes which were changed in EIP-1559,
@@ -66,7 +68,7 @@ type eip1559Calculator struct{}
 func (f eip1559Calculator) CurrentFees(chainConfig *chain.Config, db kv.Getter) (baseFee, blobFee, minBlobGasPrice, blockGasLimit uint64, err error) {
 	hash := rawdb.ReadHeadHeaderHash(db)
 
-	if hash == (libcommon.Hash{}) {
+	if hash == (common.Hash{}) {
 		return 0, 0, 0, 0, fmt.Errorf("can't get head header hash")
 	}
 
@@ -86,9 +88,10 @@ func (f eip1559Calculator) CurrentFees(chainConfig *chain.Config, db kv.Getter) 
 		if currentHeader.ExcessBlobGas != nil {
 			excessBlobGas := CalcExcessBlobGas(chainConfig, currentHeader)
 			b, err := GetBlobGasPrice(chainConfig, excessBlobGas)
-			if err == nil {
-				blobFee = b.Uint64()
+			if err != nil {
+				return 0, 0, 0, 0, err
 			}
+			blobFee = b.Uint64()
 		}
 	}
 

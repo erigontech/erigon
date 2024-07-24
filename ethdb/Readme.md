@@ -25,7 +25,7 @@ About "key-value-style": Modern key-value databases don't provide Get/Put/Delete
                                       v                                      v
                     +-----------------------------------+   +-----------------------------------+
                     |       ethdb/kv_mdbx.go            |   |       ethdb/kv_remote.go          |                
-                    |  (tg-specific MDBX implementaion) |   |   (tg-specific remote DB access)  |              
+                    |  (tg-specific MDBX implementation) |   |   (tg-specific remote DB access)  |              
                     +-----------------------------------+   +-----------------------------------+
                                       |                                      |
                                       |                                      |
@@ -35,7 +35,7 @@ About "key-value-style": Modern key-value databases don't provide Get/Put/Delete
             |         (Common KV interface. DB-friendly, disk-friendly, cpu-cache-friendly.                |
             |           Same app code can work with local or remote database.                              |
             |           Allows experiment with another database implementations.                           |
-            |          Supports context.Context for cancelation. Any operation can return error)           |
+            |          Supports context.Context for cancellation. Any operation can return error)           |
             +----------------------------------------------------------------------------------------------+
                  |                                        |                                      |
                  |                                        |                                      |

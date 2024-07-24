@@ -1,18 +1,21 @@
 // Copyright 2014 The go-ethereum Authors
-// This file is part of the go-ethereum library.
+// (original work)
+// Copyright 2024 The Erigon Authors
+// (modifications)
+// This file is part of Erigon.
 //
-// The go-ethereum library is free software: you can redistribute it and/or modify
+// Erigon is free software: you can redistribute it and/or modify
 // it under the terms of the GNU Lesser General Public License as published by
 // the Free Software Foundation, either version 3 of the License, or
 // (at your option) any later version.
 //
-// The go-ethereum library is distributed in the hope that it will be useful,
+// Erigon is distributed in the hope that it will be useful,
 // but WITHOUT ANY WARRANTY; without even the implied warranty of
 // MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
 // GNU Lesser General Public License for more details.
 //
 // You should have received a copy of the GNU Lesser General Public License
-// along with the go-ethereum library. If not, see <http://www.gnu.org/licenses/>.
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
 package rlp
 
@@ -28,7 +31,7 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/ledgerwatch/log/v3"
+	"github.com/erigontech/erigon-lib/log/v3"
 
 	"github.com/holiman/uint256"
 )
@@ -672,6 +675,11 @@ func NewListStream(r io.Reader, len uint64) *Stream {
 	return s
 }
 
+// Remaining returns number of bytes remaining to be read
+func (s *Stream) Remaining() uint64 {
+	return s.remaining
+}
+
 // Bytes reads an RLP string and returns its contents as a byte slice.
 // If the input does not contain an RLP string, the returned
 // error will be ErrExpectedString.
@@ -1058,9 +1066,7 @@ func (s *Stream) readUint(size byte) (uint64, error) {
 		return uint64(b), err
 	default:
 		buffer := s.uintbuf[:8]
-		for i := range buffer {
-			buffer[i] = 0
-		}
+		clear(buffer)
 		start := int(8 - size)
 		if err := s.readFull(buffer[start:]); err != nil {
 			return 0, err

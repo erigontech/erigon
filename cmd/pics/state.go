@@ -1,3 +1,19 @@
+// Copyright 2024 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+
 package main
 
 import (
@@ -12,22 +28,23 @@ import (
 	"strings"
 
 	"github.com/holiman/uint256"
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon-lib/kv/memdb"
-	"github.com/ledgerwatch/log/v3"
 
-	"github.com/ledgerwatch/erigon/accounts/abi/bind"
-	"github.com/ledgerwatch/erigon/accounts/abi/bind/backends"
-	"github.com/ledgerwatch/erigon/cmd/pics/contracts"
-	"github.com/ledgerwatch/erigon/common"
-	"github.com/ledgerwatch/erigon/core"
-	"github.com/ledgerwatch/erigon/core/types"
-	"github.com/ledgerwatch/erigon/crypto"
-	"github.com/ledgerwatch/erigon/params"
-	"github.com/ledgerwatch/erigon/turbo/stages/mock"
-	"github.com/ledgerwatch/erigon/turbo/trie"
-	"github.com/ledgerwatch/erigon/visual"
+	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/kv"
+	"github.com/erigontech/erigon-lib/kv/memdb"
+	"github.com/erigontech/erigon-lib/log/v3"
+
+	"github.com/erigontech/erigon/accounts/abi/bind"
+	"github.com/erigontech/erigon/accounts/abi/bind/backends"
+	"github.com/erigontech/erigon/cmd/pics/contracts"
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/core"
+	"github.com/erigontech/erigon/core/types"
+	"github.com/erigontech/erigon/crypto"
+	"github.com/erigontech/erigon/params"
+	"github.com/erigontech/erigon/turbo/stages/mock"
+	"github.com/erigontech/erigon/turbo/trie"
+	"github.com/erigontech/erigon/visual"
 )
 
 /*func statePicture(t *trie.Trie, number int, keyCompression int, codeCompressed bool, valCompressed bool,
@@ -288,7 +305,7 @@ func initialState1() error {
 	m := mock.MockWithGenesis(nil, gspec, key, false)
 	defer m.DB.Close()
 
-	contractBackend := backends.NewSimulatedBackendWithConfig(gspec.Alloc, gspec.Config, gspec.GasLimit)
+	contractBackend := backends.NewSimulatedBackendWithConfig(nil, gspec.Alloc, gspec.Config, gspec.GasLimit)
 	defer contractBackend.Close()
 	transactOpts, err := bind.NewKeyedTransactorWithChainID(key, m.ChainConfig.ChainID)
 	if err != nil {
@@ -307,7 +324,7 @@ func initialState1() error {
 	// We generate the blocks without plainstant because it's not supported in core.GenerateChain
 	chain, err := core.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 8, func(i int, block *core.BlockGen) {
 		var (
-			tx  types.Transaction
+			txn types.Transaction
 			txs []types.Transaction
 			err error
 		)
@@ -315,29 +332,29 @@ func initialState1() error {
 		ctx := context.Background()
 		switch i {
 		case 0:
-			tx, err = types.SignTx(types.NewTransaction(0, theAddr, uint256.NewInt(1000000000000000), 21000, new(uint256.Int), nil), *signer, key)
+			txn, err = types.SignTx(types.NewTransaction(0, theAddr, uint256.NewInt(1000000000000000), 21000, new(uint256.Int), nil), *signer, key)
 			if err != nil {
 				panic(err)
 			}
-			err = contractBackend.SendTransaction(ctx, tx)
+			err = contractBackend.SendTransaction(ctx, txn)
 			if err != nil {
 				panic(err)
 			}
 		case 1:
-			tx, err = types.SignTx(types.NewTransaction(1, theAddr, uint256.NewInt(1000000000000000), 21000, new(uint256.Int), nil), *signer, key)
+			txn, err = types.SignTx(types.NewTransaction(1, theAddr, uint256.NewInt(1000000000000000), 21000, new(uint256.Int), nil), *signer, key)
 			if err != nil {
 				panic(err)
 			}
-			err = contractBackend.SendTransaction(ctx, tx)
+			err = contractBackend.SendTransaction(ctx, txn)
 			if err != nil {
 				panic(err)
 			}
 		case 2:
-			_, tx, tokenContract, err = contracts.DeployToken(transactOpts, contractBackend, address1)
+			_, txn, tokenContract, err = contracts.DeployToken(transactOpts, contractBackend, address1)
 		case 3:
-			tx, err = tokenContract.Mint(transactOpts1, address2, big.NewInt(10))
+			txn, err = tokenContract.Mint(transactOpts1, address2, big.NewInt(10))
 		case 4:
-			tx, err = tokenContract.Transfer(transactOpts2, address, big.NewInt(3))
+			txn, err = tokenContract.Transfer(transactOpts2, address, big.NewInt(3))
 		case 5:
 			// Multiple transactions sending small amounts of ether to various accounts
 			var j uint64
@@ -345,69 +362,69 @@ func initialState1() error {
 			nonce := block.TxNonce(address)
 			for j = 1; j <= 32; j++ {
 				binary.BigEndian.PutUint64(toAddr[:], j)
-				tx, err = types.SignTx(types.NewTransaction(nonce, toAddr, uint256.NewInt(1000000000000000), 21000, new(uint256.Int), nil), *signer, key)
+				txn, err = types.SignTx(types.NewTransaction(nonce, toAddr, uint256.NewInt(1000000000000000), 21000, new(uint256.Int), nil), *signer, key)
 				if err != nil {
 					panic(err)
 				}
-				err = contractBackend.SendTransaction(ctx, tx)
+				err = contractBackend.SendTransaction(ctx, txn)
 				if err != nil {
 					panic(err)
 				}
-				txs = append(txs, tx)
+				txs = append(txs, txn)
 				nonce++
 			}
 		case 6:
-			_, tx, tokenContract, err = contracts.DeployToken(transactOpts, contractBackend, address1)
+			_, txn, tokenContract, err = contracts.DeployToken(transactOpts, contractBackend, address1)
 			if err != nil {
 				panic(err)
 			}
-			txs = append(txs, tx)
-			tx, err = tokenContract.Mint(transactOpts1, address2, big.NewInt(100))
+			txs = append(txs, txn)
+			txn, err = tokenContract.Mint(transactOpts1, address2, big.NewInt(100))
 			if err != nil {
 				panic(err)
 			}
-			txs = append(txs, tx)
+			txs = append(txs, txn)
 			// Multiple transactions sending small amounts of ether to various accounts
 			var j uint64
 			var toAddr libcommon.Address
 			for j = 1; j <= 32; j++ {
 				binary.BigEndian.PutUint64(toAddr[:], j)
-				tx, err = tokenContract.Transfer(transactOpts2, toAddr, big.NewInt(1))
+				txn, err = tokenContract.Transfer(transactOpts2, toAddr, big.NewInt(1))
 				if err != nil {
 					panic(err)
 				}
-				txs = append(txs, tx)
+				txs = append(txs, txn)
 			}
 		case 7:
 			var toAddr libcommon.Address
 			nonce := block.TxNonce(address)
 			binary.BigEndian.PutUint64(toAddr[:], 4)
-			tx, err = types.SignTx(types.NewTransaction(nonce, toAddr, uint256.NewInt(1000000000000000), 21000, new(uint256.Int), nil), *signer, key)
+			txn, err = types.SignTx(types.NewTransaction(nonce, toAddr, uint256.NewInt(1000000000000000), 21000, new(uint256.Int), nil), *signer, key)
 			if err != nil {
 				panic(err)
 			}
-			err = contractBackend.SendTransaction(ctx, tx)
+			err = contractBackend.SendTransaction(ctx, txn)
 			if err != nil {
 				panic(err)
 			}
-			txs = append(txs, tx)
+			txs = append(txs, txn)
 			binary.BigEndian.PutUint64(toAddr[:], 12)
-			tx, err = tokenContract.Transfer(transactOpts2, toAddr, big.NewInt(1))
+			txn, err = tokenContract.Transfer(transactOpts2, toAddr, big.NewInt(1))
 			if err != nil {
 				panic(err)
 			}
-			txs = append(txs, tx)
+			txs = append(txs, txn)
 		}
 
 		if err != nil {
 			panic(err)
 		}
-		if txs == nil && tx != nil {
-			txs = append(txs, tx)
+		if txs == nil && txn != nil {
+			txs = append(txs, txn)
 		}
 
-		for _, tx := range txs {
-			block.AddTx(tx)
+		for _, txn := range txs {
+			block.AddTx(txn)
 		}
 		contractBackend.Commit()
 	})

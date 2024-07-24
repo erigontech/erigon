@@ -1,15 +1,18 @@
-/*
-   Copyright 2022 Erigon-Lightclient contributors
-   Licensed under the Apache License, Version 2.0 (the "License");
-   you may not use this file except in compliance with the License.
-   You may obtain a copy of the License at
-       http://www.apache.org/licenses/LICENSE-2.0
-   Unless required by applicable law or agreed to in writing, software
-   distributed under the License is distributed on an "AS IS" BASIS,
-   WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-   See the License for the specific language governing permissions and
-   limitations under the License.
-*/
+// Copyright 2022 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
 package handlers
 
@@ -21,21 +24,25 @@ import (
 	"sync"
 	"time"
 
-	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon/cl/phase1/forkchoice"
-	"github.com/ledgerwatch/erigon/cl/sentinel/communication"
-	"github.com/ledgerwatch/erigon/cl/sentinel/handshake"
-	"github.com/ledgerwatch/erigon/cl/sentinel/peers"
-	"github.com/ledgerwatch/erigon/cl/utils"
-	"github.com/ledgerwatch/erigon/p2p/enode"
-	"github.com/ledgerwatch/erigon/turbo/snapshotsync/freezeblocks"
 	"golang.org/x/time/rate"
 
-	"github.com/ledgerwatch/erigon/cl/clparams"
-	"github.com/ledgerwatch/log/v3"
+	"github.com/erigontech/erigon-lib/kv"
+	"github.com/erigontech/erigon/cl/persistence/blob_storage"
+	"github.com/erigontech/erigon/cl/phase1/forkchoice"
+	"github.com/erigontech/erigon/cl/sentinel/communication"
+	"github.com/erigontech/erigon/cl/sentinel/handshake"
+	"github.com/erigontech/erigon/cl/sentinel/peers"
+	"github.com/erigontech/erigon/cl/utils"
+	"github.com/erigontech/erigon/cl/utils/eth_clock"
+	"github.com/erigontech/erigon/p2p/enode"
+	"github.com/erigontech/erigon/turbo/snapshotsync/freezeblocks"
+
 	"github.com/libp2p/go-libp2p/core/host"
 	"github.com/libp2p/go-libp2p/core/network"
 	"github.com/libp2p/go-libp2p/core/protocol"
+
+	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/cl/clparams"
 )
 
 type RateLimits struct {
@@ -47,31 +54,36 @@ type RateLimits struct {
 	beaconBlocksByRangeLimit int
 	beaconBlocksByRootLimit  int
 	lightClientLimit         int
+	blobSidecarsLimit        int
 }
 
-const punishmentPeriod = time.Minute
-const defaultRateLimit = math.MaxInt
-const defaultBlockHandlerRateLimit = 200
-const defaultLightClientRateLimit = 500
+const (
+	punishmentPeriod      = time.Minute
+	heartBeatRateLimit    = math.MaxInt
+	blockHandlerRateLimit = 200
+	lightClientRateLimit  = 500
+	blobHandlerRateLimit  = 50 // very generous here.
+)
 
 var rateLimits = RateLimits{
-	pingLimit:                defaultRateLimit,
-	goodbyeLimit:             defaultRateLimit,
-	metadataV1Limit:          defaultRateLimit,
-	metadataV2Limit:          defaultRateLimit,
-	statusLimit:              defaultRateLimit,
-	beaconBlocksByRangeLimit: defaultBlockHandlerRateLimit,
-	beaconBlocksByRootLimit:  defaultBlockHandlerRateLimit,
-	lightClientLimit:         defaultLightClientRateLimit,
+	pingLimit:                heartBeatRateLimit,
+	goodbyeLimit:             heartBeatRateLimit,
+	metadataV1Limit:          heartBeatRateLimit,
+	metadataV2Limit:          heartBeatRateLimit,
+	statusLimit:              heartBeatRateLimit,
+	beaconBlocksByRangeLimit: blockHandlerRateLimit,
+	beaconBlocksByRootLimit:  blockHandlerRateLimit,
+	lightClientLimit:         lightClientRateLimit,
+	blobSidecarsLimit:        blobHandlerRateLimit,
 }
 
 type ConsensusHandlers struct {
-	handlers      map[protocol.ID]network.StreamHandler
-	hs            *handshake.HandShaker
-	beaconConfig  *clparams.BeaconChainConfig
-	genesisConfig *clparams.GenesisConfig
-	ctx           context.Context
-	beaconDB      freezeblocks.BeaconSnapshotReader
+	handlers     map[protocol.ID]network.StreamHandler
+	hs           *handshake.HandShaker
+	beaconConfig *clparams.BeaconChainConfig
+	ethClock     eth_clock.EthereumClock
+	ctx          context.Context
+	beaconDB     freezeblocks.BeaconSnapshotReader
 
 	indiciesDB         kv.RoDB
 	peerRateLimits     sync.Map
@@ -80,6 +92,7 @@ type ConsensusHandlers struct {
 	host               host.Host
 	me                 *enode.LocalNode
 	netCfg             *clparams.NetworkConfig
+	blobsStorage       blob_storage.BlobStorage
 
 	enableBlocks bool
 }
@@ -91,13 +104,13 @@ const (
 )
 
 func NewConsensusHandlers(ctx context.Context, db freezeblocks.BeaconSnapshotReader, indiciesDB kv.RoDB, host host.Host,
-	peers *peers.Pool, netCfg *clparams.NetworkConfig, me *enode.LocalNode, beaconConfig *clparams.BeaconChainConfig, genesisConfig *clparams.GenesisConfig, hs *handshake.HandShaker, forkChoiceReader forkchoice.ForkChoiceStorageReader, enabledBlocks bool) *ConsensusHandlers {
+	peers *peers.Pool, netCfg *clparams.NetworkConfig, me *enode.LocalNode, beaconConfig *clparams.BeaconChainConfig, ethClock eth_clock.EthereumClock, hs *handshake.HandShaker, forkChoiceReader forkchoice.ForkChoiceStorageReader, blobsStorage blob_storage.BlobStorage, enabledBlocks bool) *ConsensusHandlers {
 	c := &ConsensusHandlers{
 		host:               host,
 		hs:                 hs,
 		beaconDB:           db,
 		indiciesDB:         indiciesDB,
-		genesisConfig:      genesisConfig,
+		ethClock:           ethClock,
 		beaconConfig:       beaconConfig,
 		ctx:                ctx,
 		peerRateLimits:     sync.Map{},
@@ -106,6 +119,7 @@ func NewConsensusHandlers(ctx context.Context, db freezeblocks.BeaconSnapshotRea
 		forkChoiceReader:   forkChoiceReader,
 		me:                 me,
 		netCfg:             netCfg,
+		blobsStorage:       blobsStorage,
 	}
 
 	hm := map[string]func(s network.Stream) error{
@@ -123,6 +137,8 @@ func NewConsensusHandlers(ctx context.Context, db freezeblocks.BeaconSnapshotRea
 	if c.enableBlocks {
 		hm[communication.BeaconBlocksByRangeProtocolV2] = c.beaconBlocksByRangeHandler
 		hm[communication.BeaconBlocksByRootProtocolV2] = c.beaconBlocksByRootHandler
+		hm[communication.BlobSidecarByRangeProtocolV1] = c.blobsSidecarsByRangeHandler
+		hm[communication.BlobSidecarByRootProtocolV1] = c.blobsSidecarsByIdsHandler
 	}
 
 	c.handlers = map[protocol.ID]network.StreamHandler{}

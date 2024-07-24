@@ -1,18 +1,18 @@
-/*
-   Copyright 2021 Erigon contributors
-
-   Licensed under the Apache License, Version 2.0 (the "License");
-   you may not use this file except in compliance with the License.
-   You may obtain a copy of the License at
-
-       http://www.apache.org/licenses/LICENSE-2.0
-
-   Unless required by applicable law or agreed to in writing, software
-   distributed under the License is distributed on an "AS IS" BASIS,
-   WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-   See the License for the specific language governing permissions and
-   limitations under the License.
-*/
+// Copyright 2021 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
 package bitmapdb
 
@@ -21,8 +21,9 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/ledgerwatch/log/v3"
 	"github.com/stretchr/testify/require"
+
+	"github.com/erigontech/erigon-lib/log/v3"
 )
 
 func TestFixedSizeBitmaps(t *testing.T) {
@@ -30,7 +31,7 @@ func TestFixedSizeBitmaps(t *testing.T) {
 	tmpDir, require := t.TempDir(), require.New(t)
 	must := require.NoError
 	idxPath := filepath.Join(tmpDir, "idx.tmp")
-	wr, err := NewFixedSizeBitmapsWriter(idxPath, 14, 7, log.New())
+	wr, err := NewFixedSizeBitmapsWriter(idxPath, 14, 0, 7, log.New())
 	require.NoError(err)
 	defer wr.Close()
 
@@ -47,7 +48,7 @@ func TestFixedSizeBitmaps(t *testing.T) {
 	err = wr.Build()
 	require.NoError(err)
 
-	bm, err := OpenFixedSizeBitmaps(idxPath, 14)
+	bm, err := OpenFixedSizeBitmaps(idxPath)
 	require.NoError(err)
 	defer bm.Close()
 
@@ -95,13 +96,13 @@ func TestPageAlined(t *testing.T) {
 	tmpDir, require := t.TempDir(), require.New(t)
 	idxPath := filepath.Join(tmpDir, "idx.tmp")
 
-	bm2, err := NewFixedSizeBitmapsWriter(idxPath, 128, 100, log.New())
+	bm2, err := NewFixedSizeBitmapsWriter(idxPath, 128, 0, 100, log.New())
 	require.NoError(err)
 	require.Equal((128/8*100/os.Getpagesize()+1)*os.Getpagesize(), bm2.size)
 	defer bm2.Close()
 	bm2.Close()
 
-	bm3, err := NewFixedSizeBitmapsWriter(idxPath, 128, 1000, log.New())
+	bm3, err := NewFixedSizeBitmapsWriter(idxPath, 128, 0, 1000, log.New())
 	require.NoError(err)
 	require.Equal((128/8*1000/os.Getpagesize()+1)*os.Getpagesize(), bm3.size)
 	defer bm3.Close()

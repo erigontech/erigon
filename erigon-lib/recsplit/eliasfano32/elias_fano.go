@@ -1,23 +1,24 @@
-/*
-   Copyright 2022 Erigon contributors
-
-   Licensed under the Apache License, Version 2.0 (the "License");
-   you may not use this file except in compliance with the License.
-   You may obtain a copy of the License at
-
-       http://www.apache.org/licenses/LICENSE-2.0
-
-   Unless required by applicable law or agreed to in writing, software
-   distributed under the License is distributed on an "AS IS" BASIS,
-   WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-   See the License for the specific language governing permissions and
-   limitations under the License.
-*/
+// Copyright 2022 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
 package eliasfano32
 
 import (
 	"encoding/binary"
+	"errors"
 	"fmt"
 	"io"
 	"math"
@@ -25,13 +26,13 @@ import (
 	"sort"
 	"unsafe"
 
-	"github.com/ledgerwatch/erigon-lib/common/bitutil"
-	"github.com/ledgerwatch/erigon-lib/kv/iter"
+	"github.com/erigontech/erigon-lib/common/bitutil"
 )
 
 // EliasFano algo overview https://www.antoniomallia.it/sorted-integers-compression-with-elias-fano-encoding.html
 // P. Elias. Efficient storage and retrieval by content and address of static files. J. ACM, 21(2):246–260, 1974.
 // Partitioned Elias-Fano Indexes http://groups.di.unipi.it/~ottavian/files/elias_fano_sigir14.pdf
+// Quasi-Succinct Indices, Sebastiano Vigna https://arxiv.org/pdf/1206.4300
 
 const (
 	log2q      uint64 = 8
@@ -42,6 +43,8 @@ const (
 	qPerSuperQ uint64 = superQ / q       // 64
 	superQSize uint64 = 1 + qPerSuperQ/2 // 1 + 64/2 = 33
 )
+
+var ErrEliasFanoIterExhausted = errors.New("elias fano iterator exhausted")
 
 // EliasFano can be used to encode one monotone sequence
 type EliasFano struct {
@@ -119,32 +122,33 @@ func (ef *EliasFano) deriveFields() int {
 func (ef *EliasFano) Build() {
 	for i, c, lastSuperQ := uint64(0), uint64(0), uint64(0); i < uint64(ef.wordsUpperBits); i++ {
 		for b := uint64(0); b < 64; b++ {
-			if ef.upperBits[i]&(uint64(1)<<b) != 0 {
-				if (c & superQMask) == 0 {
-					// When c is multiple of 2^14 (4096)
-					lastSuperQ = i*64 + b
-					ef.jump[(c/superQ)*superQSize] = lastSuperQ
-				}
-				if (c & qMask) != 0 {
-					c++
-					continue
-				}
-				// When c is multiple of 2^8 (256)
-				var offset = i*64 + b - lastSuperQ // offset can be either 0, 256, 512, 768, ..., up to 4096-256
-				// offset needs to be encoded as 16-bit integer, therefore the following check
-				if offset >= (1 << 32) {
-					fmt.Printf("ef.l=%x,ef.u=%x\n", ef.l, ef.u)
-					fmt.Printf("offset=%x,lastSuperQ=%x,i=%x,b=%x,c=%x\n", offset, lastSuperQ, i, b, c)
-					panic("")
-				}
-				// c % superQ is the bit index inside the group of 4096 bits
-				jumpSuperQ := (c / superQ) * superQSize
-				jumpInsideSuperQ := (c % superQ) / q
-				idx64, shift := jumpSuperQ+1+(jumpInsideSuperQ>>1), 32*(jumpInsideSuperQ%2)
-				mask := uint64(0xffffffff) << shift
-				ef.jump[idx64] = (ef.jump[idx64] &^ mask) | (offset << shift)
-				c++
+			if ef.upperBits[i]&(uint64(1)<<b) == 0 {
+				continue
 			}
+			if (c & superQMask) == 0 {
+				// When c is multiple of 2^14 (4096)
+				lastSuperQ = i*64 + b
+				ef.jump[(c/superQ)*superQSize] = lastSuperQ
+			}
+			if (c & qMask) != 0 {
+				c++
+				continue
+			}
+			// When c is multiple of 2^8 (256)
+			var offset = i*64 + b - lastSuperQ // offset can be either 0, 256, 512, 768, ..., up to 4096-256
+			// offset needs to be encoded as 16-bit integer, therefore the following check
+			if offset >= (1 << 32) {
+				fmt.Printf("ef.l=%x,ef.u=%x\n", ef.l, ef.u)
+				fmt.Printf("offset=%x,lastSuperQ=%x,i=%x,b=%x,c=%x\n", offset, lastSuperQ, i, b, c)
+				panic("")
+			}
+			// c % superQ is the bit index inside the group of 4096 bits
+			jumpSuperQ := (c / superQ) * superQSize
+			jumpInsideSuperQ := (c % superQ) / q
+			idx64, shift := jumpSuperQ+1+(jumpInsideSuperQ>>1), 32*(jumpInsideSuperQ%2)
+			mask := uint64(0xffffffff) << shift
+			ef.jump[idx64] = (ef.jump[idx64] &^ mask) | (offset << shift)
+			c++
 		}
 	}
 }
@@ -221,33 +225,59 @@ func (ef *EliasFano) upper(i uint64) uint64 {
 	return currWord*64 + uint64(sel) - i
 }
 
-// Search returns the value in the sequence, equal or greater than given value
-func (ef *EliasFano) search(v uint64) (nextV uint64, nextI uint64, ok bool) {
+// TODO: optimize me - to avoid object allocation
+func Seek(data []byte, n uint64) (uint64, bool) {
+	ef, _ := ReadEliasFano(data)
+	//TODO: if startTxNum==0, can do ef.Get(0)
+	return ef.Search(n)
+}
+
+func (ef *EliasFano) search(v uint64, reverse bool) (nextV uint64, nextI uint64, ok bool) {
 	if v == 0 {
+		if reverse {
+			return 0, 0, ef.Min() == 0
+		}
 		return ef.Min(), 0, true
 	}
 	if v == ef.Max() {
 		return ef.Max(), ef.count, true
 	}
 	if v > ef.Max() {
+		if reverse {
+			return ef.Max(), ef.count, true
+		}
 		return 0, 0, false
 	}
 
 	hi := v >> ef.l
 	i := sort.Search(int(ef.count+1), func(i int) bool {
+		if reverse {
+			return ef.upper(ef.count-uint64(i)) <= hi
+		}
 		return ef.upper(uint64(i)) >= hi
 	})
-	for j := uint64(i); j <= ef.count; j++ {
-		val, _, _, _, _ := ef.get(j)
-		if val >= v {
-			return val, j, true
+	if reverse {
+		for j := uint64(i); j <= ef.count; j++ {
+			idx := ef.count - j
+			val, _, _, _, _ := ef.get(idx)
+			if val <= v {
+				return val, idx, true
+			}
+		}
+	} else {
+		for j := uint64(i); j <= ef.count; j++ {
+			val, _, _, _, _ := ef.get(j)
+			if val >= v {
+				return val, j, true
+			}
 		}
 	}
 	return 0, 0, false
 }
 
+// Search returns the value in the sequence, equal or greater than given value
 func (ef *EliasFano) Search(v uint64) (uint64, bool) {
-	n, _, ok := ef.search(v)
+	n, _, ok := ef.search(v, false /* reverse */)
 	return n, ok
 }
 
@@ -264,20 +294,34 @@ func (ef *EliasFano) Count() uint64 {
 }
 
 func (ef *EliasFano) Iterator() *EliasFanoIter {
-	return &EliasFanoIter{ef: ef, upperMask: 1, upperStep: uint64(1) << ef.l, lowerBits: ef.lowerBits, upperBits: ef.upperBits, count: ef.count, l: ef.l, lowerBitsMask: ef.lowerBitsMask}
-}
-func (ef *EliasFano) ReverseIterator() *iter.ArrStream[uint64] {
-	//TODO: this is very un-optimal, need implement proper reverse-iterator
-	it := ef.Iterator()
-	var values []uint64
-	for it.HasNext() {
-		v, err := it.Next()
-		if err != nil {
-			panic(err)
-		}
-		values = append(values, v)
+	it := &EliasFanoIter{
+		ef:            ef,
+		lowerBits:     ef.lowerBits,
+		upperBits:     ef.upperBits,
+		count:         ef.count,
+		lowerBitsMask: ef.lowerBitsMask,
+		l:             ef.l,
+		upperStep:     uint64(1) << ef.l,
 	}
-	return iter.ReverseArray[uint64](values)
+
+	it.init()
+	return it
+}
+
+func (ef *EliasFano) ReverseIterator() *EliasFanoIter {
+	it := &EliasFanoIter{
+		ef:            ef,
+		lowerBits:     ef.lowerBits,
+		upperBits:     ef.upperBits,
+		count:         ef.count,
+		lowerBitsMask: ef.lowerBitsMask,
+		l:             ef.l,
+		upperStep:     uint64(1) << ef.l,
+		reverse:       true,
+	}
+
+	it.init()
+	return it
 }
 
 type EliasFanoIter struct {
@@ -290,71 +334,103 @@ type EliasFanoIter struct {
 	lowerBitsMask uint64
 	l             uint64
 	upperStep     uint64
+	reverse       bool
 
 	//fields of current value
 	upper    uint64
 	upperIdx uint64
 
 	//fields of next value
-	idx       uint64
 	lowerIdx  uint64
 	upperMask uint64
+
+	itemsIterated uint64
 }
 
+func (efi *EliasFanoIter) Close() {}
 func (efi *EliasFanoIter) HasNext() bool {
-	return efi.idx <= efi.count
+	return efi.itemsIterated <= efi.count
 }
 
 func (efi *EliasFanoIter) Reset() {
-	efi.upperMask = 1
-	efi.upperStep = uint64(1) << efi.l
-	efi.upperIdx = 0
-
 	efi.upper = 0
+	efi.upperIdx = 0
 	efi.lowerIdx = 0
-	efi.idx = 0
+	efi.upperMask = 0
+	efi.itemsIterated = 0
+	efi.init()
 }
 
-func (efi *EliasFanoIter) SeekDeprecated(n uint64) {
-	efi.Reset()
-	_, i, ok := efi.ef.search(n)
-	if !ok {
-		efi.idx = efi.count + 1
+func (efi *EliasFanoIter) init() {
+	if efi.itemsIterated != 0 {
 		return
 	}
-	for j := uint64(0); j < i; j++ {
-		efi.increment()
+
+	if efi.reverse {
+		higherBitsMaxValue := efi.ef.u >> efi.l
+		lastUpperBitIdx := (efi.ef.count + 1) + higherBitsMaxValue
+		efi.upperMask = 1 << (lastUpperBitIdx % 64) >> 1 // last bit is always 0 delimiter, so we move >> 1
+		efi.upperIdx = lastUpperBitIdx / 64
+		efi.upper = higherBitsMaxValue << efi.l
+		efi.lowerIdx = efi.count * efi.l
+	} else {
+		efi.upperMask = 1
 	}
-	//fmt.Printf("seek: efi.upperMask(%d)=%d, upperIdx=%d, lowerIdx=%d, idx=%d\n", n, bits.TrailingZeros64(efi.upperMask), efi.upperIdx, efi.lowerIdx, efi.idx)
-	//fmt.Printf("seek: efi.upper=%d\n", efi.upper)
 }
 
 func (efi *EliasFanoIter) Seek(n uint64) {
-	//fmt.Printf("b seek2: efi.upperMask(%d)=%d, upperIdx=%d, lowerIdx=%d, idx=%d\n", n, bits.TrailingZeros64(efi.upperMask), efi.upperIdx, efi.lowerIdx, efi.idx)
+	//fmt.Printf("b seek2: efi.upperMask(%d)=%d, upperIdx=%d, lowerIdx=%d, itemsIterated=%d\n", n, bits.TrailingZeros64(efi.upperMask), efi.upperIdx, efi.lowerIdx, efi.itemsIterated)
 	//fmt.Printf("b seek2: efi.upper=%d\n", efi.upper)
 	efi.Reset()
-	nn, nextI, ok := efi.ef.search(n)
+	nn, nextI, ok := efi.ef.search(n, efi.reverse)
 	_ = nn
 	if !ok {
-		efi.idx = efi.count + 1
+		efi.itemsIterated = efi.count + 1
 		return
 	}
-	if nextI == 0 {
+	if nextI == 0 && !efi.reverse {
+		return
+	}
+	if nextI == efi.count && efi.reverse {
 		return
 	}
 
-	// fields of current value
-	v, _, sel, currWords, lower := efi.ef.get(nextI - 1) //TODO: search can return same info
-	efi.upper = v &^ (lower & efi.ef.lowerBitsMask)
-	efi.upperIdx = currWords
+	if efi.reverse {
+		efi.itemsIterated = efi.count - nextI
 
-	// fields of next value
-	efi.lowerIdx = nextI * efi.l
-	efi.idx = nextI
-	efi.upperMask = 1 << (sel + 1)
+		// fields of current value
+		v, _, sel, currWords, lower := efi.ef.get(nextI + 1)
+		efi.upper = v &^ (lower & efi.ef.lowerBitsMask)
+		efi.upperIdx = currWords
 
-	//fmt.Printf("seek2: efi.upperMask(%d)=%d, upperIdx=%d, lowerIdx=%d, idx=%d\n", n, bits.TrailingZeros64(efi.upperMask), efi.upperIdx, efi.lowerIdx, efi.idx)
+		// fields of next value
+		efi.lowerIdx -= efi.itemsIterated * efi.l
+		efi.upperMask = 1 << (sel - 1)
+	} else {
+		efi.itemsIterated = nextI
+
+		// fields of current value
+		v, _, sel, currWords, lower := efi.ef.get(nextI - 1)
+		efi.upper = v &^ (lower & efi.ef.lowerBitsMask)
+		efi.upperIdx = currWords
+
+		// fields of next value
+		efi.lowerIdx = nextI * efi.l
+		efi.upperMask = 1 << (sel + 1)
+	}
+
+	//fmt.Printf("seek2: efi.upperMask(%d)=%d, upperIdx=%d, lowerIdx=%d, itemsIterated=%d\n", n, bits.TrailingZeros64(efi.upperMask), efi.upperIdx, efi.lowerIdx, efi.itemsIterated)
 	//fmt.Printf("seek2: efi.upper=%d\n", efi.upper)
+}
+
+func (efi *EliasFanoIter) moveNext() {
+	if efi.reverse {
+		efi.decrement()
+	} else {
+		efi.increment()
+	}
+
+	efi.itemsIterated++
 }
 
 func (efi *EliasFanoIter) increment() {
@@ -372,16 +448,48 @@ func (efi *EliasFanoIter) increment() {
 	}
 	efi.upperMask <<= 1
 	efi.lowerIdx += efi.l
-	efi.idx++
+}
+
+func (efi *EliasFanoIter) decrement() {
+	if efi.upperMask == 0 {
+		if efi.upperIdx == 0 {
+			panic("decrement: unexpected efi.upperIdx underflow")
+		}
+		efi.upperIdx--
+		efi.upperMask = 1 << 63
+	}
+
+	for efi.upperBits[efi.upperIdx]&efi.upperMask == 0 {
+		if efi.upper < efi.upperStep {
+			panic("decrement: unexpected efi.upper underflow")
+		}
+		efi.upper -= efi.upperStep
+		efi.upperMask >>= 1
+		if efi.upperMask == 0 {
+			if efi.upperIdx == 0 {
+				panic("decrement: unexpected efi.upperIdx underflow")
+			}
+			efi.upperIdx--
+			efi.upperMask = 1 << 63
+		}
+	}
+
+	// note: there can be an underflow here after the last Next()
+	// but that is ok since we are protected from ErrEliasFanoIterExhausted
+	efi.lowerIdx -= efi.l
+	efi.upperMask >>= 1
 }
 
 func (efi *EliasFanoIter) Next() (uint64, error) {
+	if !efi.HasNext() {
+		return 0, ErrEliasFanoIterExhausted
+	}
 	idx64, shift := efi.lowerIdx/64, efi.lowerIdx%64
 	lower := efi.lowerBits[idx64] >> shift
 	if shift > 0 {
 		lower |= efi.lowerBits[idx64+1] << (64 - shift)
 	}
-	efi.increment()
+	efi.moveNext()
 	return efi.upper | (lower & efi.lowerBitsMask), nil
 }
 
@@ -583,53 +691,56 @@ func (ef *DoubleEliasFano) Build(cumKeys []uint64, position []uint64) {
 	// superQSize is how many words is required to encode one block of 4096 bits. It is 17 words which is 1088 bits
 	for i, c, lastSuperQ := uint64(0), uint64(0), uint64(0); i < uint64(wordsCumKeys); i++ {
 		for b := uint64(0); b < 64; b++ {
-			if ef.upperBitsCumKeys[i]&(uint64(1)<<b) != 0 {
-				if (c & superQMask) == 0 {
-					// When c is multiple of 2^14 (4096)
-					lastSuperQ = i*64 + b
-					ef.jump[(c/superQ)*(superQSize*2)] = lastSuperQ
-				}
-				if (c & qMask) == 0 {
-					// When c is multiple of 2^8 (256)
-					var offset = i*64 + b - lastSuperQ // offset can be either 0, 256, 512, 768, ..., up to 4096-256
-					// offset needs to be encoded as 16-bit integer, therefore the following check
-					if offset >= (1 << 32) {
-						panic("")
-					}
-					// c % superQ is the bit index inside the group of 4096 bits
-					jumpSuperQ := (c / superQ) * (superQSize * 2)
-					jumpInsideSuperQ := 2 * (c % superQ) / q
-					idx64 := jumpSuperQ + 2 + (jumpInsideSuperQ >> 1)
-					shift := 32 * (jumpInsideSuperQ % 2)
-					mask := uint64(0xffffffff) << shift
-					ef.jump[idx64] = (ef.jump[idx64] &^ mask) | (offset << shift)
-				}
-				c++
+			if ef.upperBitsCumKeys[i]&(uint64(1)<<b) == 0 {
+				continue
 			}
+			if (c & superQMask) == 0 {
+				// When c is multiple of 2^14 (4096)
+				lastSuperQ = i*64 + b
+				ef.jump[(c/superQ)*(superQSize*2)] = lastSuperQ
+			}
+			if (c & qMask) == 0 {
+				// When c is multiple of 2^8 (256)
+				var offset = i*64 + b - lastSuperQ // offset can be either 0, 256, 512, 768, ..., up to 4096-256
+				// offset needs to be encoded as 16-bit integer, therefore the following check
+				if offset >= (1 << 32) {
+					panic("")
+				}
+				// c % superQ is the bit index inside the group of 4096 bits
+				jumpSuperQ := (c / superQ) * (superQSize * 2)
+				jumpInsideSuperQ := 2 * (c % superQ) / q
+				idx64 := jumpSuperQ + 2 + (jumpInsideSuperQ >> 1)
+				shift := 32 * (jumpInsideSuperQ % 2)
+				mask := uint64(0xffffffff) << shift
+				ef.jump[idx64] = (ef.jump[idx64] &^ mask) | (offset << shift)
+			}
+			c++
 		}
 	}
 
 	for i, c, lastSuperQ := uint64(0), uint64(0), uint64(0); i < uint64(wordsPosition); i++ {
 		for b := uint64(0); b < 64; b++ {
-			if ef.upperBitsPosition[i]&(uint64(1)<<b) != 0 {
-				if (c & superQMask) == 0 {
-					lastSuperQ = i*64 + b
-					ef.jump[(c/superQ)*(superQSize*2)+1] = lastSuperQ
-				}
-				if (c & qMask) == 0 {
-					var offset = i*64 + b - lastSuperQ
-					if offset >= (1 << 32) {
-						panic("")
-					}
-					jumpSuperQ := (c / superQ) * (superQSize * 2)
-					jumpInsideSuperQ := 2*((c%superQ)/q) + 1
-					idx64 := jumpSuperQ + 2 + (jumpInsideSuperQ >> 1)
-					shift := 32 * (jumpInsideSuperQ % 2)
-					mask := uint64(0xffffffff) << shift
-					ef.jump[idx64] = (ef.jump[idx64] &^ mask) | (offset << shift)
-				}
-				c++
+			if ef.upperBitsPosition[i]&(uint64(1)<<b) == 0 {
+				continue
 			}
+
+			if (c & superQMask) == 0 {
+				lastSuperQ = i*64 + b
+				ef.jump[(c/superQ)*(superQSize*2)+1] = lastSuperQ
+			}
+			if (c & qMask) == 0 {
+				var offset = i*64 + b - lastSuperQ
+				if offset >= (1 << 32) {
+					panic("")
+				}
+				jumpSuperQ := (c / superQ) * (superQSize * 2)
+				jumpInsideSuperQ := 2*((c%superQ)/q) + 1
+				idx64 := jumpSuperQ + 2 + (jumpInsideSuperQ >> 1)
+				shift := 32 * (jumpInsideSuperQ % 2)
+				mask := uint64(0xffffffff) << shift
+				ef.jump[idx64] = (ef.jump[idx64] &^ mask) | (offset << shift)
+			}
+			c++
 		}
 	}
 	//fmt.Printf("jump: %x\n", ef.jump)

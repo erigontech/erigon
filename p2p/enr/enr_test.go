@@ -1,18 +1,21 @@
 // Copyright 2017 The go-ethereum Authors
-// This file is part of the go-ethereum library.
+// (original work)
+// Copyright 2024 The Erigon Authors
+// (modifications)
+// This file is part of Erigon.
 //
-// The go-ethereum library is free software: you can redistribute it and/or modify
+// Erigon is free software: you can redistribute it and/or modify
 // it under the terms of the GNU Lesser General Public License as published by
 // the Free Software Foundation, either version 3 of the License, or
 // (at your option) any later version.
 //
-// The go-ethereum library is distributed in the hope that it will be useful,
+// Erigon is distributed in the hope that it will be useful,
 // but WITHOUT ANY WARRANTY; without even the implied warranty of
 // MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
 // GNU Lesser General Public License for more details.
 //
 // You should have received a copy of the GNU Lesser General Public License
-// along with the go-ethereum library. If not, see <http://www.gnu.org/licenses/>.
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
 package enr
 
@@ -24,7 +27,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/ledgerwatch/erigon/rlp"
+	"github.com/erigontech/erigon/rlp"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -48,7 +51,7 @@ func TestGetSetID(t *testing.T) {
 	assert.Equal(t, id, id2)
 }
 
-// TestGetSetIP4 tests encoding/decoding and setting/getting of the IP key.
+// TestGetSetIPv4 tests encoding/decoding and setting/getting of the IP key.
 func TestGetSetIPv4(t *testing.T) {
 	ip := IPv4{192, 168, 0, 3}
 	var r Record
@@ -59,7 +62,7 @@ func TestGetSetIPv4(t *testing.T) {
 	assert.Equal(t, ip, ip2)
 }
 
-// TestGetSetIP6 tests encoding/decoding and setting/getting of the IP6 key.
+// TestGetSetIPv6 tests encoding/decoding and setting/getting of the IP6 key.
 func TestGetSetIPv6(t *testing.T) {
 	ip := IPv6{0x20, 0x01, 0x48, 0x60, 0, 0, 0x20, 0x01, 0, 0, 0, 0, 0, 0, 0x00, 0x68}
 	var r Record

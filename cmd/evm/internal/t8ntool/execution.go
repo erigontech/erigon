@@ -1,18 +1,21 @@
 // Copyright 2020 The go-ethereum Authors
-// This file is part of the go-ethereum library.
+// (original work)
+// Copyright 2024 The Erigon Authors
+// (modifications)
+// This file is part of Erigon.
 //
-// The go-ethereum library is free software: you can redistribute it and/or modify
+// Erigon is free software: you can redistribute it and/or modify
 // it under the terms of the GNU Lesser General Public License as published by
 // the Free Software Foundation, either version 3 of the License, or
 // (at your option) any later version.
 //
-// The go-ethereum library is distributed in the hope that it will be useful,
+// Erigon is distributed in the hope that it will be useful,
 // but WITHOUT ANY WARRANTY; without even the implied warranty of
 // MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
 // GNU Lesser General Public License for more details.
 //
 // You should have received a copy of the GNU Lesser General Public License
-// along with the go-ethereum library. If not, see <http://www.gnu.org/licenses/>.
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
 package t8ntool
 
@@ -21,16 +24,18 @@ import (
 	"math/big"
 
 	"github.com/holiman/uint256"
-	"github.com/ledgerwatch/erigon-lib/chain"
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/kv"
 
-	"github.com/ledgerwatch/erigon/common"
-	"github.com/ledgerwatch/erigon/common/math"
-	"github.com/ledgerwatch/erigon/consensus/ethash"
-	"github.com/ledgerwatch/erigon/core/state"
-	"github.com/ledgerwatch/erigon/core/types"
-	"github.com/ledgerwatch/erigon/turbo/rpchelper"
+	"github.com/erigontech/erigon-lib/chain"
+	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/kv"
+	state3 "github.com/erigontech/erigon-lib/state"
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/math"
+	"github.com/erigontech/erigon/consensus/ethash"
+	"github.com/erigontech/erigon/core/state"
+	"github.com/erigontech/erigon/core/tracing"
+	"github.com/erigontech/erigon/core/types"
+	"github.com/erigontech/erigon/turbo/rpchelper"
 )
 
 type Prestate struct {
@@ -61,6 +66,8 @@ type stEnv struct {
 	UncleHash        libcommon.Hash                         `json:"uncleHash,omitempty"`
 	Withdrawals      []*types.Withdrawal                    `json:"withdrawals,omitempty"`
 	WithdrawalsHash  *libcommon.Hash                        `json:"withdrawalsRoot,omitempty"`
+	Requests         types.Requests                         `json:"requests,omitempty"`
+	RequestsRoot     *libcommon.Hash                        `json:"requestsRoot,omitempty"`
 }
 
 type stEnvMarshaling struct {
@@ -75,15 +82,18 @@ type stEnvMarshaling struct {
 	BaseFee          *math.HexOrDecimal256
 }
 
-func MakePreState(chainRules *chain.Rules, tx kv.RwTx, accounts types.GenesisAlloc) (state.StateReader, *state.PlainStateWriter) {
+func MakePreState(chainRules *chain.Rules, tx kv.RwTx, sd *state3.SharedDomains, accounts types.GenesisAlloc) (state.StateReader, state.WriterWithChangeSets) {
 	var blockNr uint64 = 0
-	stateReader, stateWriter := rpchelper.NewLatestStateReader(tx), state.NewPlainStateWriter(tx, tx, blockNr)
+
+	stateReader, stateWriter := rpchelper.NewLatestStateReader(tx), state.NewWriterV4(sd)
+	sd.SetBlockNum(blockNr)
+
 	statedb := state.New(stateReader) //ibs
 	for addr, a := range accounts {
 		statedb.SetCode(addr, a.Code)
 		statedb.SetNonce(addr, a.Nonce)
 		balance, _ := uint256.FromBig(a.Balance)
-		statedb.SetBalance(addr, balance)
+		statedb.SetBalance(addr, balance, tracing.BalanceIncreaseGenesisBalance)
 		for k, v := range a.Storage {
 			key := k
 			val := uint256.NewInt(0).SetBytes(v.Bytes())
@@ -98,10 +108,11 @@ func MakePreState(chainRules *chain.Rules, tx kv.RwTx, accounts types.GenesisAll
 		}
 	}
 	// Commit and re-open to start with a clean state.
-	if err := statedb.FinalizeTx(chainRules, state.NewPlainStateWriter(tx, tx, blockNr+1)); err != nil {
+	sd.SetBlockNum(blockNr + 1)
+	if err := statedb.FinalizeTx(chainRules, stateWriter); err != nil {
 		panic(err)
 	}
-	if err := statedb.CommitBlock(chainRules, state.NewPlainStateWriter(tx, tx, blockNr+1)); err != nil {
+	if err := statedb.CommitBlock(chainRules, stateWriter); err != nil {
 		panic(err)
 	}
 	return stateReader, stateWriter

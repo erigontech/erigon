@@ -1,5 +1,5 @@
 {
-  "ChainName": "bor-mainnet",
+  "chainName": "bor-mainnet",
   "chainId": 137,
   "consensus": "bor",
   "homesteadBlock": 0,
@@ -64,6 +64,7 @@
     "jaipurBlock": 23850000,
     "delhiBlock": 38189056,
     "indoreBlock": 44934656,
-    "agraBlock": 50523000
+    "agraBlock": 50523000,
+    "napoliBlock": 54876000
   }
 }

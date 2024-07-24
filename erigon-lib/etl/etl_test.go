@@ -1,35 +1,41 @@
-/*
-Copyright 2021 Erigon contributors
+// Copyright 2021 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
-Licensed under the Apache License, Version 2.0 (the "License");
-you may not use this file except in compliance with the License.
-You may obtain a copy of the License at
-
-	http://www.apache.org/licenses/LICENSE-2.0
-
-Unless required by applicable law or agreed to in writing, software
-distributed under the License is distributed on an "AS IS" BASIS,
-WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-See the License for the specific language governing permissions and
-limitations under the License.
-*/
 package etl
 
 import (
 	"bytes"
+	"encoding/binary"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
 	"os"
+	"sort"
 	"strings"
 	"testing"
 
-	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon-lib/kv/memdb"
-	"github.com/ledgerwatch/log/v3"
+	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/log/v3"
+
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/erigontech/erigon-lib/kv"
+	"github.com/erigontech/erigon-lib/kv/memdb"
 )
 
 func decodeHex(in string) []byte {
@@ -71,23 +77,6 @@ func TestEmptyValueIsNotANil(t *testing.T) {
 	})
 	t.Run("oldest", func(t *testing.T) {
 		collector := NewCollector(t.Name(), "", NewOldestEntryBuffer(1), logger)
-		defer collector.Close()
-		require := require.New(t)
-		require.NoError(collector.Collect([]byte{1}, []byte{}))
-		require.NoError(collector.Collect([]byte{2}, nil))
-		require.NoError(collector.Load(nil, "", func(k, v []byte, table CurrentTableReader, next LoadNextFunc) error {
-			if k[0] == 1 {
-				require.Equal([]byte{}, v)
-			} else {
-				require.Nil(v)
-			}
-			return nil
-		}, TransformArgs{}))
-	})
-	t.Run("merge", func(t *testing.T) {
-		collector := NewCollector(t.Name(), "", NewLatestMergedEntryMergedBuffer(1, func(v1 []byte, v2 []byte) []byte {
-			return append(v1, v2...)
-		}), logger)
 		defer collector.Close()
 		require := require.New(t)
 		require.NoError(collector.Collect([]byte{1}, []byte{}))
@@ -531,37 +520,36 @@ func TestReuseCollectorAfterLoad(t *testing.T) {
 	require.Equal(t, 1, see)
 }
 
-func TestMerge(t *testing.T) {
-	collector := NewCollector(t.Name(), "", NewLatestMergedEntryMergedBuffer(4, func(v1 []byte, v2 []byte) []byte {
-		return append(v1, v2...)
-	}), log.New())
+func TestAppendAndSortPrefixes(t *testing.T) {
+	collector := NewCollector(t.Name(), "", NewAppendBuffer(4), log.New())
 	defer collector.Close()
 	require := require.New(t)
-	require.NoError(collector.Collect([]byte{1}, []byte{1}))
-	require.NoError(collector.Collect([]byte{1}, []byte{2}))
-	require.NoError(collector.Collect([]byte{1}, []byte{3}))
-	require.NoError(collector.Collect([]byte{1}, []byte{4}))
-	require.NoError(collector.Collect([]byte{1}, []byte{5}))
-	require.NoError(collector.Collect([]byte{1}, []byte{6}))
-	require.NoError(collector.Collect([]byte{1}, []byte{7}))
-	require.NoError(collector.Collect([]byte{2}, []byte{10}))
-	require.NoError(collector.Collect([]byte{2}, []byte{20}))
-	require.NoError(collector.Collect([]byte{2}, []byte{30}))
-	require.NoError(collector.Collect([]byte{2}, []byte{40}))
-	require.NoError(collector.Collect([]byte{2}, []byte{50}))
-	require.NoError(collector.Collect([]byte{2}, []byte{}))
-	require.NoError(collector.Collect([]byte{2}, nil))
-	require.NoError(collector.Collect([]byte{3}, nil))
-	require.NoError(collector.Load(nil, "", func(k, v []byte, table CurrentTableReader, next LoadNextFunc) error {
-		if k[0] == 1 {
-			require.Equal([]byte{1, 2, 3, 4, 5, 6, 7}, v)
-		} else if k[0] == 2 {
-			require.Equal([]byte{10, 20, 30, 40, 50}, v)
-		} else {
-			require.Nil(v)
+
+	key := common.FromHex("ed7229d50cde8de174cc64a882a0833ca5f11669")
+	key1 := append(common.Copy(key), make([]byte, 16)...)
+
+	keys := make([]string, 0)
+	for i := 10; i >= 0; i-- {
+		binary.BigEndian.PutUint64(key1[len(key):], uint64(i))
+		binary.BigEndian.PutUint64(key1[len(key)+8:], uint64(i))
+		kl := len(key1)
+		if i%5 == 0 && i != 0 {
+			kl = len(key) + 8
 		}
+		keys = append(keys, fmt.Sprintf("%x", key1[:kl]))
+		require.NoError(collector.Collect(key1[:kl], key1[len(key):]))
+	}
+
+	sort.Strings(keys)
+	i := 0
+
+	err := collector.Load(nil, "", func(k, v []byte, table CurrentTableReader, next LoadNextFunc) error {
+		t.Logf("collated %x %x\n", k, v)
+		require.EqualValuesf(keys[i], fmt.Sprintf("%x", k), "i=%d", i)
+		i++
 		return nil
-	}, TransformArgs{}))
+	}, TransformArgs{})
+	require.NoError(err)
 }
 
 func TestAppend(t *testing.T) {

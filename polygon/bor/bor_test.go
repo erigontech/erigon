@@ -1,3 +1,19 @@
+// Copyright 2024 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+
 package bor_test
 
 import (
@@ -8,26 +24,26 @@ import (
 	"testing"
 	"time"
 
-	"github.com/ledgerwatch/erigon/polygon/bor/borcfg"
-	"github.com/ledgerwatch/erigon/polygon/heimdall"
+	"github.com/erigontech/erigon/polygon/bor/borcfg"
+	"github.com/erigontech/erigon/polygon/heimdall"
 
-	"github.com/ledgerwatch/log/v3"
+	"github.com/erigontech/erigon-lib/log/v3"
 
-	"github.com/ledgerwatch/erigon-lib/chain"
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/gointerfaces/sentry"
-	"github.com/ledgerwatch/erigon-lib/kv/memdb"
-	"github.com/ledgerwatch/erigon/consensus"
-	"github.com/ledgerwatch/erigon/core"
-	"github.com/ledgerwatch/erigon/core/types"
-	"github.com/ledgerwatch/erigon/crypto"
-	"github.com/ledgerwatch/erigon/eth/protocols/eth"
-	"github.com/ledgerwatch/erigon/ethdb/prune"
-	"github.com/ledgerwatch/erigon/params"
-	"github.com/ledgerwatch/erigon/polygon/bor"
-	"github.com/ledgerwatch/erigon/polygon/bor/valset"
-	"github.com/ledgerwatch/erigon/rlp"
-	"github.com/ledgerwatch/erigon/turbo/stages/mock"
+	"github.com/erigontech/erigon-lib/chain"
+	libcommon "github.com/erigontech/erigon-lib/common"
+	sentry "github.com/erigontech/erigon-lib/gointerfaces/sentryproto"
+	"github.com/erigontech/erigon-lib/kv/memdb"
+	"github.com/erigontech/erigon/consensus"
+	"github.com/erigontech/erigon/core"
+	"github.com/erigontech/erigon/core/types"
+	"github.com/erigontech/erigon/crypto"
+	"github.com/erigontech/erigon/eth/protocols/eth"
+	"github.com/erigontech/erigon/ethdb/prune"
+	"github.com/erigontech/erigon/params"
+	"github.com/erigontech/erigon/polygon/bor"
+	"github.com/erigontech/erigon/polygon/bor/valset"
+	"github.com/erigontech/erigon/rlp"
+	"github.com/erigontech/erigon/turbo/stages/mock"
 )
 
 type test_heimdall struct {
@@ -53,6 +69,10 @@ func (h *test_heimdall) BorConfig() *borcfg.BorConfig {
 }
 
 func (h test_heimdall) FetchStateSyncEvents(ctx context.Context, fromID uint64, to time.Time, limit int) ([]*heimdall.EventRecordWithTime, error) {
+	return nil, nil
+}
+
+func (h *test_heimdall) FetchStateSyncEvent(ctx context.Context, id uint64) (*heimdall.EventRecordWithTime, error) {
 	return nil, nil
 }
 
@@ -112,11 +132,19 @@ func (h test_heimdall) FetchCheckpointCount(ctx context.Context) (int64, error) 
 	return 0, fmt.Errorf("TODO")
 }
 
+func (h *test_heimdall) FetchCheckpoints(ctx context.Context, page uint64, limit uint64) ([]*heimdall.Checkpoint, error) {
+	return nil, fmt.Errorf("TODO")
+}
+
 func (h test_heimdall) FetchMilestone(ctx context.Context, number int64) (*heimdall.Milestone, error) {
 	return nil, fmt.Errorf("TODO")
 }
 
 func (h test_heimdall) FetchMilestoneCount(ctx context.Context) (int64, error) {
+	return 0, fmt.Errorf("TODO")
+}
+
+func (h test_heimdall) FetchFirstMilestoneNum(ctx context.Context) (int64, error) {
 	return 0, fmt.Errorf("TODO")
 }
 
@@ -156,11 +184,17 @@ func (r headerReader) Config() *chain.Config {
 	return r.validator.ChainConfig
 }
 
-func (r headerReader) FrozenBlocks() uint64 {
-	return 0
-}
+func (r headerReader) FrozenBlocks() uint64    { return 0 }
+func (r headerReader) FrozenBorBlocks() uint64 { return 0 }
 
 func (r headerReader) CurrentHeader() *types.Header {
+	return nil
+}
+
+func (r headerReader) CurrentFinalizedHeader() *types.Header {
+	return nil
+}
+func (r headerReader) CurrentSafeHeader() *types.Header {
 	return nil
 }
 
@@ -289,6 +323,7 @@ func newValidator(t *testing.T, heimdall *test_heimdall, blocks map[uint64]*type
 		heimdall,
 		test_genesisContract{},
 		logger,
+		nil,
 	)
 
 	/*fmt.Printf("Private: 0x%s\nPublic: 0x%s\nAddress: %s\n",

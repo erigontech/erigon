@@ -1,43 +1,46 @@
 // Copyright 2019 The go-ethereum Authors
-// This file is part of the go-ethereum library.
+// (original work)
+// Copyright 2024 The Erigon Authors
+// (modifications)
+// This file is part of Erigon.
 //
-// The go-ethereum library is free software: you can redistribute it and/or modify
+// Erigon is free software: you can redistribute it and/or modify
 // it under the terms of the GNU Lesser General Public License as published by
 // the Free Software Foundation, either version 3 of the License, or
 // (at your option) any later version.
 //
-// The go-ethereum library is distributed in the hope that it will be useful,
+// Erigon is distributed in the hope that it will be useful,
 // but WITHOUT ANY WARRANTY; without even the implied warranty of
 // MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
 // GNU Lesser General Public License for more details.
 //
 // You should have received a copy of the GNU Lesser General Public License
-// along with the go-ethereum library. If not, see <http://www.gnu.org/licenses/>.
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 //
 //nolint:errcheck,prealloc
-package core
+package core_test
 
 import (
 	"fmt"
 	"math/big"
 	"testing"
 
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/common/datadir"
-	"github.com/ledgerwatch/erigon/core/state/temporal"
-	"github.com/ledgerwatch/log/v3"
 	"golang.org/x/crypto/sha3"
 
-	"github.com/ledgerwatch/erigon/common/u256"
-	"github.com/ledgerwatch/erigon/consensus/ethash"
-	"github.com/ledgerwatch/erigon/core/types"
-	"github.com/ledgerwatch/erigon/crypto"
-	"github.com/ledgerwatch/erigon/params"
-	"github.com/ledgerwatch/erigon/rlp"
+	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/core"
+	"github.com/erigontech/erigon/turbo/stages/mock"
+
+	"github.com/erigontech/erigon/common/u256"
+	"github.com/erigontech/erigon/consensus/ethash"
+	"github.com/erigontech/erigon/core/types"
+	"github.com/erigontech/erigon/crypto"
+	"github.com/erigontech/erigon/params"
+	"github.com/erigontech/erigon/rlp"
 )
 
 func getBlock(tb testing.TB, transactions int, uncles int, dataSize int, tmpDir string, logger log.Logger) *types.Block {
-	_, db, _ := temporal.NewTestDB(tb, datadir.New(tmpDir), nil)
 	var (
 		aa = libcommon.HexToAddress("0x000000000000000000000000000000000000aaaa")
 		// Generate a canonical chain to act as the main dataset
@@ -50,11 +53,13 @@ func getBlock(tb testing.TB, transactions int, uncles int, dataSize int, tmpDir 
 			Config: params.TestChainConfig,
 			Alloc:  types.GenesisAlloc{address: {Balance: funds}},
 		}
-		genesis = MustCommitGenesis(gspec, db, tmpDir, logger)
 	)
+	m := mock.MockWithGenesis(tb, gspec, key, false)
+	genesis := m.Genesis
+	db := m.DB
 
 	// We need to generate as many blocks +1 as uncles
-	chain, _ := GenerateChain(params.TestChainConfig, genesis, engine, db, uncles+1, func(n int, b *BlockGen) {
+	chain, _ := core.GenerateChain(params.TestChainConfig, genesis, engine, db, uncles+1, func(n int, b *core.BlockGen) {
 		if n == uncles {
 			// Add transactions and stuff on the last block
 			for i := 0; i < transactions; i++ {
@@ -125,8 +130,8 @@ func testRlpIterator(t *testing.T, txs, uncles, datasize int) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, tx := range expBody.Transactions {
-		expHashes = append(expHashes, tx.Hash())
+	for _, txn := range expBody.Transactions {
+		expHashes = append(expHashes, txn.Hash())
 	}
 	if gotLen, expLen := len(gotHashes), len(expHashes); gotLen != expLen {
 		t.Fatalf("testcase %v: length wrong, got %d exp %d", desc, gotLen, expLen)
@@ -185,8 +190,8 @@ func BenchmarkHashing(b *testing.B) {
 		for i := 0; i < b.N; i++ {
 			var body types.Body
 			rlp.DecodeBytes(bodyRlp, &body)
-			for _, tx := range body.Transactions {
-				exp = tx.Hash()
+			for _, txn := range body.Transactions {
+				exp = txn.Hash()
 			}
 		}
 	})
@@ -195,8 +200,8 @@ func BenchmarkHashing(b *testing.B) {
 		for i := 0; i < b.N; i++ {
 			var block types.Block
 			rlp.DecodeBytes(blockRlp, &block)
-			for _, tx := range block.Transactions() {
-				tx.Hash()
+			for _, txn := range block.Transactions() {
+				txn.Hash()
 			}
 		}
 	})

@@ -1,3 +1,19 @@
+// Copyright 2024 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+
 package rawdb
 
 import (
@@ -5,20 +21,21 @@ import (
 	"fmt"
 	"math/big"
 
-	"github.com/ledgerwatch/log/v3"
+	"github.com/erigontech/erigon-lib/log/v3"
 
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/common/hexutility"
-	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon-lib/kv/dbutils"
-	"github.com/ledgerwatch/erigon/core/types"
-	"github.com/ledgerwatch/erigon/ethdb/cbor"
-	"github.com/ledgerwatch/erigon/rlp"
+	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common/hexutility"
+	"github.com/erigontech/erigon-lib/kv"
+	"github.com/erigontech/erigon-lib/kv/dbutils"
+	"github.com/erigontech/erigon/core/types"
+	"github.com/erigontech/erigon/ethdb/cbor"
+	bortypes "github.com/erigontech/erigon/polygon/bor/types"
+	"github.com/erigontech/erigon/rlp"
 )
 
 var (
 	// bor receipt key
-	borReceiptKey = types.BorReceiptKey
+	borReceiptKey = bortypes.BorReceiptKey
 )
 
 // HasBorReceipts verifies the existence of all block receipt belonging to a block.
@@ -78,7 +95,7 @@ func ReadBorReceipt(db kv.Tx, blockHash libcommon.Hash, blockNumber uint64, rece
 		}
 	}
 
-	types.DeriveFieldsForBorReceipt(borReceipt, blockHash, blockNumber, receipts)
+	bortypes.DeriveFieldsForBorReceipt(borReceipt, blockHash, blockNumber, receipts)
 
 	return borReceipt, nil
 }
@@ -126,7 +143,7 @@ func ReadBorTransactionForBlock(db kv.Tx, blockNum uint64) types.Transaction {
 	if !HasBorReceipts(db, blockNum) {
 		return nil
 	}
-	return types.NewBorTransaction()
+	return bortypes.NewBorTransaction()
 }
 
 // TruncateBorReceipts removes all bor receipt for given block number or newer

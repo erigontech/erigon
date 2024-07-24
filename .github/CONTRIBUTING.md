@@ -7,7 +7,7 @@ smallest of fixes!
 If you'd like to contribute to Erigon, please fork, fix, commit and send a 
 pull request for the maintainers to review and merge into the main code base. If
 you wish to submit more complex changes though, please check up with the core 
-devs first on [Discord server](https://github.com/ledgerwatch/erigon#erigon-discord-server) to 
+devs first on [Discord server](https://github.com/erigontech/erigon#erigon-discord-server) to 
 ensure those changes are in line with the general philosophy of the project 
 and/or get some early feedback which can make both your efforts much lighter as
 well as our review and merge procedures quick and simple.
@@ -21,7 +21,7 @@ Please make sure your contributions adhere to our coding guidelines:
 (i.e. uses [gofmt](https://golang.org/cmd/gofmt/)).
  * Code must be documented adhering to the official Go 
 [commentary](https://golang.org/doc/effective_go.html#commentary) guidelines.
- * Pull requests need to be based on and opened against the `devel` branch.
+ * Pull requests need to be based on and opened against the `main` branch.
  * Commit messages should be prefixed with the package(s) they modify.
    * E.g. "eth, rpc: make trace configs optional"
 
@@ -30,11 +30,11 @@ Please make sure your contributions adhere to our coding guidelines:
 Before you submit a feature request, please check and make sure that it isn't 
 possible through some other means. The JavaScript-enabled console is a powerful 
 feature in the right hands. Please check our 
-[Wiki page](https://github.com/ledgerwatch/erigon/wiki) for more info
+[Wiki page](https://github.com/erigontech/erigon/wiki) for more info
 and help.
 
 ## Configuration, dependencies, and tests
 
-Please see the [Readme](https://github.com/ledgerwatch/erigon#readme) file
+Please see the [Readme](https://github.com/erigontech/erigon#readme) file
 for more details on configuring your environment, managing project dependencies
 and testing procedures.

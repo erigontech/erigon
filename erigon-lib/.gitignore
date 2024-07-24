@@ -73,3 +73,5 @@ libmdbx/build/*
 tests/testdata/*
 
 go.work*
+
+coverage.out
