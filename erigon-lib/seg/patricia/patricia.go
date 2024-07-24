@@ -17,13 +17,13 @@
 package patricia
 
 import (
+	"cmp"
 	"fmt"
 	"math/bits"
 	"slices"
 	"strings"
 
-	"github.com/ledgerwatch/erigon-lib/common/cmp"
-	"github.com/ledgerwatch/erigon-lib/seg/sais"
+	"github.com/erigontech/erigon-lib/seg/sais"
 )
 
 // Implementation of paticia tree for efficient search of substrings from a dictionary in a given string

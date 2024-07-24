@@ -16,7 +16,7 @@
 
 package state
 
-import "github.com/ledgerwatch/erigon-lib/metrics"
+import "github.com/erigontech/erigon-lib/metrics"
 
 var (
 	//LatestStateReadWarm          = metrics.GetOrCreateSummary(`latest_state_read{type="warm",found="yes"}`)  //nolint

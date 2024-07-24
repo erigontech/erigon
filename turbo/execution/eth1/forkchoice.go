@@ -21,22 +21,22 @@ import (
 	"errors"
 	"fmt"
 	"runtime"
-	"slices"
 	"time"
 
-	"github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/common/dbg"
-	"github.com/ledgerwatch/erigon-lib/gointerfaces"
-	execution "github.com/ledgerwatch/erigon-lib/gointerfaces/executionproto"
-	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon-lib/kv/rawdbv3"
-	"github.com/ledgerwatch/erigon-lib/log/v3"
-	"github.com/ledgerwatch/erigon-lib/state"
-	"github.com/ledgerwatch/erigon-lib/wrap"
-	"github.com/ledgerwatch/erigon/core/rawdb"
-	"github.com/ledgerwatch/erigon/eth/consensuschain"
-	"github.com/ledgerwatch/erigon/eth/stagedsync"
-	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
+	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common/dbg"
+	"github.com/erigontech/erigon-lib/gointerfaces"
+	execution "github.com/erigontech/erigon-lib/gointerfaces/executionproto"
+	"github.com/erigontech/erigon-lib/kv"
+	"github.com/erigontech/erigon-lib/kv/rawdbv3"
+	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon-lib/state"
+	"github.com/erigontech/erigon-lib/wrap"
+	"github.com/erigontech/erigon/core/rawdb"
+	"github.com/erigontech/erigon/eth/consensuschain"
+	"github.com/erigontech/erigon/eth/stagedsync"
+	"github.com/erigontech/erigon/eth/stagedsync/stages"
+	"github.com/erigontech/erigon/turbo/engineapi/engine_helpers"
 )
 
 const startPruneFrom = 1024
@@ -378,8 +378,10 @@ func (e *EthereumExecutionModule) updateForkChoice(ctx context.Context, original
 		sendForkchoiceErrorWithoutWaiting(outcomeCh, err)
 		return
 	}
-	if blockHash == e.forkValidator.ExtendingForkHeadHash() {
-		e.logger.Info("[updateForkchoice] Fork choice update: flushing in-memory state (built by previous newPayload)")
+
+	flushExtendingFork := blockHash == e.forkValidator.ExtendingForkHeadHash()
+	if flushExtendingFork {
+		e.logger.Debug("[updateForkchoice] Fork choice update: flushing in-memory state (built by previous newPayload)")
 		if err := e.forkValidator.FlushExtendingFork(tx, e.accumulator); err != nil {
 			sendForkchoiceErrorWithoutWaiting(outcomeCh, err)
 			return
@@ -394,8 +396,6 @@ func (e *EthereumExecutionModule) updateForkChoice(ctx context.Context, original
 		sendForkchoiceErrorWithoutWaiting(outcomeCh, err)
 		return
 	}
-
-	timings := slices.Clone(e.executionPipeline.PrintTimings())
 
 	// if head hash was set then success otherwise no
 	headHash := rawdb.ReadHeadBlockHash(tx)
@@ -448,15 +448,29 @@ func (e *EthereumExecutionModule) updateForkChoice(ctx context.Context, original
 				return
 			}
 		}
-		if log {
-			e.logger.Info("head updated", "number", *headNumber, "hash", headHash)
+
+		// force fsync after notifications are sent
+		if err := e.db.Update(ctx, func(tx kv.RwTx) error {
+			return kv.IncrementKey(tx, kv.DatabaseInfo, []byte("alex"))
+		}); err != nil {
+			sendForkchoiceErrorWithoutWaiting(outcomeCh, err)
+			return
 		}
 
 		var m runtime.MemStats
 		dbg.ReadMemStats(&m)
-		timings = append(timings, e.forkValidator.GetTimings(headHash)...)
-		timings = append(timings, "commit", commitTime, "alloc", common.ByteCount(m.Alloc), "sys", common.ByteCount(m.Sys))
-		e.logger.Info("Timings (slower than 50ms)", timings...)
+		blockTimings := e.forkValidator.GetTimings(blockHash)
+		logArgs := []interface{}{"head", headHash, "hash", blockHash}
+		if flushExtendingFork {
+			totalTime := blockTimings[engine_helpers.BlockTimingsValidationIndex] + blockTimings[engine_helpers.BlockTimingsFlushExtendingFork]
+			gasUsedMgas := float64(fcuHeader.GasUsed) / 1e6
+			mgasPerSec := gasUsedMgas / totalTime.Seconds()
+			logArgs = append(logArgs, "number", fcuHeader.Number.Uint64(), "execution", blockTimings[engine_helpers.BlockTimingsValidationIndex], "flushing", blockTimings[engine_helpers.BlockTimingsFlushExtendingFork], "mgas/s", fmt.Sprintf("%.2f", mgasPerSec))
+		}
+		logArgs = append(logArgs, "commit", commitTime, "alloc", common.ByteCount(m.Alloc), "sys", common.ByteCount(m.Sys))
+		if log {
+			e.logger.Info("head updated", logArgs...)
+		}
 	}
 	if *headNumber >= startPruneFrom {
 		e.runPostForkchoiceInBackground(initialCycle)

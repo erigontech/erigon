@@ -25,7 +25,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/ledgerwatch/erigon-lib/log/v3"
+	"github.com/erigontech/erigon-lib/log/v3"
 )
 
 func confirmStatusCode(t *testing.T, got, want int) {
@@ -130,5 +130,42 @@ func TestHTTPRespBodyUnlimited(t *testing.T) {
 	}
 	if len(r) != respLength {
 		t.Fatalf("response has wrong length %d, want %d", len(r), respLength)
+	}
+}
+
+func TestHTTPPeerInfo(t *testing.T) {
+	logger := log.New()
+	s := newTestServer(logger)
+	defer s.Stop()
+	ts := httptest.NewServer(s)
+	defer ts.Close()
+
+	c, err := Dial(ts.URL, logger)
+	if err != nil {
+		t.Fatal(err)
+	}
+	c.SetHeader("user-agent", "ua-testing")
+	c.SetHeader("origin", "origin.example.com")
+
+	// Request peer information.
+	var info PeerInfo
+	if err := c.Call(&info, "test_peerInfo"); err != nil {
+		t.Fatal(err)
+	}
+
+	if info.RemoteAddr == "" {
+		t.Error("RemoteAddr not set")
+	}
+	if info.Transport != "http" {
+		t.Errorf("wrong Transport %q", info.Transport)
+	}
+	if info.HTTP.Version != "HTTP/1.1" {
+		t.Errorf("wrong HTTP.Version %q", info.HTTP.Version)
+	}
+	if info.HTTP.UserAgent != "ua-testing" {
+		t.Errorf("wrong HTTP.UserAgent %q", info.HTTP.UserAgent)
+	}
+	if info.HTTP.Origin != "origin.example.com" {
+		t.Errorf("wrong HTTP.Origin %q", info.HTTP.UserAgent)
 	}
 }

@@ -13,10 +13,10 @@ import (
 	context "context"
 	reflect "reflect"
 
-	sentryproto "github.com/ledgerwatch/erigon-lib/gointerfaces/sentryproto"
-	types "github.com/ledgerwatch/erigon/core/types"
-	eth "github.com/ledgerwatch/erigon/eth/protocols/eth"
-	polygoncommon "github.com/ledgerwatch/erigon/polygon/polygoncommon"
+	sentryproto "github.com/erigontech/erigon-lib/gointerfaces/sentryproto"
+	types "github.com/erigontech/erigon/core/types"
+	eth "github.com/erigontech/erigon/eth/protocols/eth"
+	polygoncommon "github.com/erigontech/erigon/polygon/polygoncommon"
 	gomock "go.uber.org/mock/gomock"
 )
 
