@@ -24,7 +24,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"github.com/karrick/godirwalk"
 	"math"
 	"math/big"
 	"net"
@@ -36,6 +35,8 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+
+	"github.com/karrick/godirwalk"
 
 	"github.com/erigontech/mdbx-go/mdbx"
 	lru "github.com/hashicorp/golang-lru/arc/v2"
@@ -1689,6 +1690,9 @@ func RemoveContents(dirname string) error {
 		Unsorted:            true,
 		Callback: func(osPathname string, d *godirwalk.Dirent) error {
 			if osPathname == dirname {
+				return nil
+			}
+			if d.IsSymlink() {
 				return nil
 			}
 			err := os.RemoveAll(filepath.Join(dirname, d.Name()))
