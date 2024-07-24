@@ -798,7 +798,7 @@ func (hph *HexPatriciaHashed) computeCellHash(cell *Cell, depth int, buf []byte)
 		if cell.alhlen > 0 {
 			res := append([]byte{160}, cell.accLeafHash[:cell.alhlen]...)
 			hph.keccak.Reset()
-			fmt.Printf("ReuSe %x %x\n", res, cell.spk[:cell.spl])
+			//fmt.Printf("OLDS %x %x\n", res, cell.spk[:cell.spl])
 			return res, nil
 		}
 		cell.downHashedKey[64-hashedKeyOffset] = 16 // Add terminator
@@ -825,7 +825,7 @@ func (hph *HexPatriciaHashed) computeCellHash(cell *Cell, depth int, buf []byte)
 				return nil, err
 			}
 
-			fmt.Printf("Calc Stor %x\n", accLeafHash)
+			//fmt.Printf("NEWS %x\n", accLeafHash)
 			copy(cell.accLeafHash[:], accLeafHash[1:])
 			cell.alhlen = length.Hash
 
@@ -858,7 +858,7 @@ func (hph *HexPatriciaHashed) computeCellHash(cell *Cell, depth int, buf []byte)
 		}
 		if cell.alhlen > 0 && !cell.loaded {
 			res := append([]byte{160}, cell.accLeafHash[:cell.alhlen]...)
-			fmt.Printf("Reuse %x %x\n", res, cell.apk[:cell.apl])
+			//fmt.Printf("OLD %x %x\n", res, cell.apk[:cell.apl])
 			hph.keccak.Reset()
 			return res, nil
 		}
@@ -872,7 +872,7 @@ func (hph *HexPatriciaHashed) computeCellHash(cell *Cell, depth int, buf []byte)
 		if err != nil {
 			return nil, err
 		}
-		fmt.Printf("Calc %x\n", accLeafHash)
+		//fmt.Printf("NEW %x\n", accLeafHash)
 		copy(cell.accLeafHash[:], accLeafHash[1:])
 		cell.alhlen = length.Hash
 		return accLeafHash, nil
