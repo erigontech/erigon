@@ -795,12 +795,12 @@ func (hph *HexPatriciaHashed) computeCellHash(cell *Cell, depth int, buf []byte)
 		if err := hashKey(hph.keccak, cell.spk[koffset:cell.spl], cell.downHashedKey[:], hashedKeyOffset); err != nil {
 			return nil, err
 		}
-		if cell.alhlen > 0 {
-			res := append([]byte{160}, cell.accLeafHash[:cell.alhlen]...)
-			hph.keccak.Reset()
-			//fmt.Printf("OLDS %x %x\n", res, cell.spk[:cell.spl])
-			return res, nil
-		}
+		// if cell.alhlen > 0 {
+		// 	res := append([]byte{160}, cell.accLeafHash[:cell.alhlen]...)
+		// 	hph.keccak.Reset()
+		// 	//fmt.Printf("OLDS %x %x\n", res, cell.spk[:cell.spl])
+		// 	return res, nil
+		// }
 		cell.downHashedKey[64-hashedKeyOffset] = 16 // Add terminator
 
 		if singleton {
