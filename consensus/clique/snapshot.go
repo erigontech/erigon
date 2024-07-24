@@ -70,7 +70,7 @@ type Snapshot struct {
 	Tally   map[libcommon.Address]Tally    `json:"tally"`   // Current vote tally to avoid recalculating
 }
 
-// signersAscending implements the sort interface to allow sorting a list of addresses
+// SignersAscending implements the sort interface to allow sorting a list of addresses
 type SignersAscending []libcommon.Address
 
 func (s SignersAscending) Len() int           { return len(s) }
