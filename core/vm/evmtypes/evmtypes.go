@@ -60,7 +60,6 @@ type TxContext struct {
 	TxHash     common.Hash
 	Origin     common.Address // Provides information for ORIGIN
 	GasPrice   *uint256.Int   // Provides information for GASPRICE
-	BlobFeeCap *uint256.Int   // Is used to zero the blobbasefee if NoBaseFee is set
 	BlobHashes []common.Hash  // Provides versioned blob hashes for BLOBHASH
 }
 

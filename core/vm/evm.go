@@ -106,9 +106,6 @@ func NewEVM(blockCtx evmtypes.BlockContext, txCtx evmtypes.TxContext, state evmt
 		if txCtx.GasPrice.IsZero() {
 			blockCtx.BaseFee = new(uint256.Int)
 		}
-		if txCtx.BlobFeeCap != nil && txCtx.BlobFeeCap.BitLen() == 0 {
-			blockCtx.BlobBaseFee = new(uint256.Int)
-		}
 	}
 
 	evm := &EVM{

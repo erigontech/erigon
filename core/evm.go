@@ -95,16 +95,11 @@ func NewEVMBlockContext(header *types.Header, blockHashFunc func(n uint64) libco
 
 // NewEVMTxContext creates a new transaction context for a single transaction.
 func NewEVMTxContext(msg Message) evmtypes.TxContext {
-	ctx := evmtypes.TxContext{
+	return evmtypes.TxContext{
 		Origin:     msg.From(),
 		GasPrice:   msg.GasPrice(),
 		BlobHashes: msg.BlobHashes(),
 	}
-	if msg.MaxFeePerBlobGas() != nil {
-		ctx.BlobFeeCap = new(uint256.Int).SetBytes(msg.MaxFeePerBlobGas().Bytes())
-	}
-
-	return ctx
 }
 
 // GetHashFn returns a GetHashFunc which retrieves header hashes by number
