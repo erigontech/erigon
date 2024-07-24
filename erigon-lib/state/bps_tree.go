@@ -21,6 +21,7 @@ import (
 	"errors"
 	"fmt"
 	"github.com/c2h5oh/datasize"
+	"github.com/erigontech/erigon-lib/state/splay"
 	"unsafe"
 
 	"github.com/erigontech/erigon-lib/common"
@@ -57,6 +58,7 @@ func NewBpsTree(kv ArchiveGetter, offt *eliasfano32.EliasFano, M uint64, dataLoo
 
 type BpsTree struct {
 	offt  *eliasfano32.EliasFano // ef with offsets to key/vals
+	st    *splay.Tree
 	mx    []Node
 	M     uint64 // limit on amount of 'children' for node
 	trace bool
@@ -127,9 +129,9 @@ func (it *BpsTreeIterator) Next() bool {
 //}
 
 type Node struct {
+	key []byte
 	off uint64 // offset in kv file to key
 	di  uint64 // key ordinal number in kv
-	key []byte
 }
 
 func (b *BpsTree) WarmUp(kv ArchiveGetter) error {
@@ -142,6 +144,23 @@ func (b *BpsTree) WarmUp(kv ArchiveGetter) error {
 		fmt.Printf("mx cap %d N=%d M=%d\n", cap(b.mx), N, b.M)
 	}
 
+	if N < b.M {
+		for i := b.M; i < N; i += b.M {
+			di := i - 1
+			_, key, err := b.keyCmpFunc(nil, di, kv)
+			if err != nil {
+				return err
+			}
+			if b.st == nil {
+				b.st = splay.NewTree(key, splay.Loc{Di: b.M, Offset: b.offt.Get(b.M)})
+			} else {
+				b.st.Insert(common.Copy(key), splay.Loc{Di: di, Offset: b.offt.Get(di)})
+			}
+		}
+		return nil
+
+	}
+
 	// extremely stupid picking of needed nodes:
 	cachedBytes := uint64(0)
 	nsz := uint64(unsafe.Sizeof(Node{}))
@@ -150,6 +169,11 @@ func (b *BpsTree) WarmUp(kv ArchiveGetter) error {
 		_, key, err := b.keyCmpFunc(nil, di, kv)
 		if err != nil {
 			return err
+		}
+		if b.st == nil {
+			b.st = splay.NewTree(key, splay.Loc{Di: b.M, Offset: b.offt.Get(b.M)})
+		} else {
+			b.st.Insert(common.Copy(key), splay.Loc{Di: di, Offset: b.offt.Get(di)})
 		}
 		b.mx = append(b.mx, Node{off: b.offt.Get(di), key: common.Copy(key), di: di})
 		cachedBytes += nsz + uint64(len(key))
@@ -205,11 +229,28 @@ func (b *BpsTree) Seek(g ArchiveGetter, key []byte) (skey []byte, di uint64, fou
 	if b.trace {
 		fmt.Printf("seek %x\n", key)
 	}
-	n, l, r := b.bs(key) // l===r when key is found
+	n := b.st.Seek(key)
 	if b.trace {
-		fmt.Printf("pivot di:%d di(LR): [%d %d] k: %x found: %t\n", n.di, l, r, n.key, l == r)
-		defer func() { fmt.Printf("found %x [%d %d]\n", key, l, r) }()
+		fmt.Printf("pivot di:%d di(LR): [%d %d] k: %x\n", n.Di, n.Left().Di, n.Right().Di, n.Key)
 	}
+	if bytes.Equal(n.Key, key) {
+		fmt.Printf("found %x [%d]\n", n.Key, n.Di)
+		return n.Key, n.Di, true, nil
+	}
+	var l, r uint64
+	r = b.offt.Count()
+	if n.Right() != nil {
+		r = n.Right().Di
+	}
+	if n.Left() != nil {
+		l = n.Left().Di
+	}
+
+	//n, l, r := b.bs(key) // l===r when key is found
+	//if b.trace {
+	//	fmt.Printf("pivot di:%d di(LR): [%d %d] k: %x found: %t\n", n.di, l, r, n.key, l == r)
+	//	defer func() { fmt.Printf("found %x [%d %d]\n", key, l, r) }()
+	//}
 
 	var m uint64
 	var cmp int
