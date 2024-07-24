@@ -381,7 +381,7 @@ func (e *EthereumExecutionModule) updateForkChoice(ctx context.Context, original
 
 	flushExtendingFork := blockHash == e.forkValidator.ExtendingForkHeadHash()
 	if flushExtendingFork {
-		e.logger.Info("[updateForkchoice] Fork choice update: flushing in-memory state (built by previous newPayload)")
+		e.logger.Debug("[updateForkchoice] Fork choice update: flushing in-memory state (built by previous newPayload)")
 		if err := e.forkValidator.FlushExtendingFork(tx, e.accumulator); err != nil {
 			sendForkchoiceErrorWithoutWaiting(outcomeCh, err)
 			return
