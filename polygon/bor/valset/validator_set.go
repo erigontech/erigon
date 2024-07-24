@@ -27,6 +27,7 @@ import (
 	"strings"
 
 	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/log/v3"
 )
 
 // MaxTotalVotingPower - the maximum allowed total voting power.
@@ -816,4 +817,43 @@ func safeSubClip(a, b int64) int64 {
 	}
 
 	return c
+}
+
+func GetUpdatedValidatorSet(oldValidatorSet *ValidatorSet, newVals []*Validator, logger log.Logger) *ValidatorSet {
+	v := oldValidatorSet
+	oldVals := v.Validators
+
+	changes := make([]*Validator, 0, len(oldVals))
+
+	for _, ov := range oldVals {
+		if f, ok := validatorContains(newVals, ov); ok {
+			ov.VotingPower = f.VotingPower
+		} else {
+			ov.VotingPower = 0
+		}
+
+		changes = append(changes, ov)
+	}
+
+	for _, nv := range newVals {
+		if _, ok := validatorContains(changes, nv); !ok {
+			changes = append(changes, nv)
+		}
+	}
+
+	if err := v.UpdateWithChangeSet(changes); err != nil {
+		logger.Error("[bor] Error while updating change set", "error", err)
+	}
+
+	return v
+}
+
+func validatorContains(a []*Validator, x *Validator) (*Validator, bool) {
+	for _, n := range a {
+		if bytes.Equal(n.Address.Bytes(), x.Address.Bytes()) {
+			return n, true
+		}
+	}
+
+	return nil, false
 }

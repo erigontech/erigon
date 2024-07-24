@@ -310,6 +310,11 @@ type polygonSyncStageHeimdallStore struct {
 	spans       *polygonSyncStageSpanStore
 }
 
+func (s polygonSyncStageHeimdallStore) AccumProducerPriorities() heimdall.EntityStore[*heimdall.SpanAccumProposerPriorities] {
+	//TODO implement me
+	panic("implement me")
+}
+
 func (s polygonSyncStageHeimdallStore) Checkpoints() heimdall.EntityStore[*heimdall.Checkpoint] {
 	return s.checkpoints
 }

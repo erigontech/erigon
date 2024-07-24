@@ -18,13 +18,13 @@ package heimdall
 
 import (
 	"context"
+	"fmt"
 	"testing"
 
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon/polygon/bor"
 	"github.com/erigontech/erigon/polygon/bor/valset"
 	"github.com/erigontech/erigon/polygon/polygoncommon"
 	"github.com/erigontech/erigon/turbo/testlog"
@@ -57,7 +57,7 @@ func TestSpanProducerSelection(t *testing.T) {
 	// do for span 0
 	spanZero := &Span{}
 	validatorSet := valset.NewValidatorSet(spanZero.Producers())
-	accumPriorities := SpanAccumProducerPriorities{
+	accumPriorities := SpanAccumProposerPriorities{
 		SpanId:    SpanIdAt(0),
 		Producers: validatorSet.Validators,
 	}
@@ -67,12 +67,14 @@ func TestSpanProducerSelection(t *testing.T) {
 	// 2. validatorSet.UpdateWithChangeSet
 	logger := testlog.Logger(t, log.LvlDebug)
 	newSpan := &Span{}
-	validatorSet = bor.GetUpdatedValidatorSet(validatorSet, newSpan.Producers(), logger)
+	validatorSet = valset.GetUpdatedValidatorSet(validatorSet, newSpan.Producers(), logger)
 	validatorSet.IncrementProposerPriority(1)
-	accumPriorities = SpanAccumProducerPriorities{
+	accumPriorities = SpanAccumProposerPriorities{
 		SpanId:    SpanId(1),
 		Producers: validatorSet.Validators,
 	}
+
+	fmt.Println(accumPriorities)
 
 	// have a span producers tracker component that the heimdall service uses
 	// it registers for receiving new span updates
