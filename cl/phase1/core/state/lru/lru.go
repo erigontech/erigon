@@ -54,7 +54,12 @@ func New[K comparable, V any](metricName string, size int) (*Cache[K, V], error)
 	if err != nil {
 		return nil, err
 	}
-	return &Cache[K, V]{Cache: v, metricName: metricName}, nil
+	return &Cache[K, V]{
+		Cache:      v,
+		metricName: metricName,
+		metricHit:  metrics.GetOrCreateCounter(fmt.Sprintf(`golang_lru_cache_hit{%s="%s"}`, "cache", metricName)),
+		metricMiss: metrics.GetOrCreateCounter(fmt.Sprintf(`golang_lru_cache_miss{%s="%s"}`, "cache", metricName)),
+	}, nil
 }
 
 func (c *Cache[K, V]) Get(k K) (V, bool) {
