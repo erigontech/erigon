@@ -17,7 +17,7 @@
 // You should have received a copy of the GNU Lesser General Public License
 // along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
-////go:build integration
+//go:build integration
 
 package tests
 
@@ -60,6 +60,13 @@ func TestState(t *testing.T) {
 	st.skipLoad(`.*vmPerformance/loop.*`)
 	//if ethconfig.EnableHistoryV3InTest {
 	//}
+	// these need to implement eip-7610
+	st.skipLoad(`InitCollisionParis.json`)
+	st.skipLoad(`RevertInCreateInInit_Paris.json`)
+	st.skipLoad(`RevertInCreateInInitCreate2Paris.json`)
+	st.skipLoad(`create2collisionStorageParis.json`)
+	st.skipLoad(`dynamicAccountOverwriteEmpty_Paris.json`)
+
 	dirs := datadir.New(t.TempDir())
 	db, _ := temporaltest.NewTestDB(t, dirs)
 	st.walk(t, stateTestDir, func(t *testing.T, name string, test *StateTest) {
