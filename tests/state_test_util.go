@@ -271,12 +271,10 @@ func (t *StateTest) RunNoVerify(tx kv.RwTx, subtest StateSubtest, vmconfig vm.Co
 	// Execute the message.
 	snapshot := statedb.Snapshot()
 	gaspool := new(core.GasPool)
-	gaspool.AddGas(block.GasLimit()) //.AddBlobGas(config.GetMaxBlobGasPerBlock())
+	gaspool.AddGas(block.GasLimit()).AddBlobGas(config.GetMaxBlobGasPerBlock())
 	if _, err = core.ApplyMessage(evm, msg, gaspool, true /* refunds */, false /* gasBailout */); err != nil {
 		statedb.RevertToSnapshot(snapshot)
 	}
-
-	//statedb.AddBalance(t.json.Env.Coinbase, new(uint256.Int), tracing.BalanceChangeUnspecified)
 
 	if err = statedb.FinalizeTx(evm.ChainRules(), w); err != nil {
 		return nil, libcommon.Hash{}, err
@@ -353,11 +351,6 @@ func (t *StateTest) genesis(config *chain.Config) *types.Genesis {
 		Number:     t.json.Env.Number,
 		Timestamp:  t.json.Env.Timestamp,
 		Alloc:      t.json.Pre,
-	}
-	if t.json.Env.Random != nil {
-		// Post-Merge
-		genesis.Mixhash = libcommon.BigToHash(t.json.Env.Random)
-		genesis.Difficulty = big.NewInt(0)
 	}
 	return genesis
 }
@@ -445,10 +438,13 @@ func toMessage(tx stTransaction, ps stPostState, baseFee *big.Int) (core.Message
 			tx.MaxPriorityFeePerGas = tx.MaxFeePerGas
 		}
 
-		feeCap = big.Int(*tx.MaxPriorityFeePerGas)
-		tipCap = big.Int(*tx.MaxFeePerGas)
+		//feeCap = big.Int(*tx.MaxPriorityFeePerGas)
+		//tipCap = big.Int(*tx.MaxFeePerGas)
 
-		gp := math.BigMin(new(big.Int).Add(&feeCap, baseFee), &tipCap)
+		tipCap = big.Int(*tx.MaxPriorityFeePerGas)
+		feeCap = big.Int(*tx.MaxFeePerGas)
+
+		gp := math.BigMin(new(big.Int).Add(&tipCap, baseFee), &feeCap)
 		gasPrice = math.NewHexOrDecimal256(gp.Int64())
 	}
 	if gasPrice == nil {
