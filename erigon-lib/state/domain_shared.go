@@ -1118,9 +1118,9 @@ func (sdc *SharedDomainsCommitmentContext) GetAccount(plainKey []byte, cell *com
 		}
 	}
 
-	_, fl, ln, _ := runtime.Caller(1)
-	fl = filepath.Base(fl)
-	fmt.Printf("%s:%d GetAccount %x: %s\n", fl, ln, plainKey, cell.FullString())
+	//_, fl, ln, _ := runtime.Caller(1)
+	//fl = filepath.Base(fl)
+	//fmt.Printf("%s:%d GetAccount %x: %s\n", fl, ln, plainKey, cell.FullString())
 	if bytes.Equal(cell.CodeHash[:], commitment.EmptyCodeHash) {
 		cell.Delete = len(encAccount) == 0
 		return nil
@@ -1163,9 +1163,9 @@ func (sdc *SharedDomainsCommitmentContext) GetStorage(plainKey []byte, cell *com
 	copy(cell.Storage[:], enc)
 	cell.StorageLen = len(enc)
 	cell.Delete = cell.StorageLen == 0
-	_, fl, ln, _ := runtime.Caller(1)
-	fl = filepath.Base(fl)
-	fmt.Printf("%s:%d GetStorage %x %d: %s\n", fl, ln, plainKey, cell.StorageLen, cell.FullString())
+	//_, fl, ln, _ := runtime.Caller(1)
+	//fl = filepath.Base(fl)
+	//fmt.Printf("%s:%d GetStorage %x %d: %s\n", fl, ln, plainKey, cell.StorageLen, cell.FullString())
 	return nil
 }
 
