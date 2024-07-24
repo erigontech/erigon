@@ -43,23 +43,20 @@ func NewMdbxServiceStore(logger log.Logger, dataDir string, tmpDir string) *Mdbx
 	}
 
 	return &MdbxServiceStore{
-		db:          db,
-		checkpoints: newMdbxEntityStore(db, kv.HeimdallDB, kv.BorCheckpoints, generics.New[Checkpoint], blockNumToIdIndexFactory),
-		milestones:  newMdbxEntityStore(db, kv.HeimdallDB, kv.BorMilestones, generics.New[Milestone], blockNumToIdIndexFactory),
-		spans:       newMdbxEntityStore(db, kv.HeimdallDB, kv.BorSpans, generics.New[Span], blockNumToIdIndexFactory),
+		db:                          db,
+		checkpoints:                 newMdbxEntityStore(db, kv.HeimdallDB, kv.BorCheckpoints, generics.New[Checkpoint], blockNumToIdIndexFactory),
+		milestones:                  newMdbxEntityStore(db, kv.HeimdallDB, kv.BorMilestones, generics.New[Milestone], blockNumToIdIndexFactory),
+		spans:                       newMdbxEntityStore(db, kv.HeimdallDB, kv.BorSpans, generics.New[Span], blockNumToIdIndexFactory),
+		spanBlockProducerSelections: newMdbxEntityStore(db, kv.HeimdallDB, kv.BorProducerSelections, generics.New[SpanBlockProducerSelection], blockNumToIdIndexFactory),
 	}
 }
 
 type MdbxServiceStore struct {
-	db          *polygoncommon.Database
-	checkpoints EntityStore[*Checkpoint]
-	milestones  EntityStore[*Milestone]
-	spans       EntityStore[*Span]
-}
-
-func (s *MdbxServiceStore) SpanBlockProducerSelections() EntityStore[*SpanBlockProducerSelection] {
-	//TODO implement me
-	panic("implement me")
+	db                          *polygoncommon.Database
+	checkpoints                 EntityStore[*Checkpoint]
+	milestones                  EntityStore[*Milestone]
+	spans                       EntityStore[*Span]
+	spanBlockProducerSelections EntityStore[*SpanBlockProducerSelection]
 }
 
 func (s *MdbxServiceStore) Checkpoints() EntityStore[*Checkpoint] {
@@ -74,11 +71,16 @@ func (s *MdbxServiceStore) Spans() EntityStore[*Span] {
 	return s.spans
 }
 
+func (s *MdbxServiceStore) SpanBlockProducerSelections() EntityStore[*SpanBlockProducerSelection] {
+	return s.spanBlockProducerSelections
+}
+
 func (s *MdbxServiceStore) Prepare(ctx context.Context) error {
 	eg, ctx := errgroup.WithContext(ctx)
 	eg.Go(func() error { return s.checkpoints.Prepare(ctx) })
 	eg.Go(func() error { return s.milestones.Prepare(ctx) })
 	eg.Go(func() error { return s.spans.Prepare(ctx) })
+	eg.Go(func() error { return s.spanBlockProducerSelections.Prepare(ctx) })
 	return eg.Wait()
 }
 
