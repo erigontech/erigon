@@ -1695,11 +1695,7 @@ func RemoveContents(dirname string) error {
 			if d.IsSymlink() {
 				return nil
 			}
-			err := os.RemoveAll(filepath.Join(dirname, d.Name()))
-			if err != nil {
-				return err
-			}
-			return nil
+			return os.RemoveAll(filepath.Join(dirname, d.Name()))
 		},
 		PostChildrenCallback: nil,
 		ScratchBuffer:        nil,
