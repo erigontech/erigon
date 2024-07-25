@@ -315,7 +315,7 @@ func TestBpsTree_Seek(t *testing.T) {
 
 	for i := 0; i < len(keys); i++ {
 		sk := keys[i]
-		k, di, found, err := bp.Seek(g, sk[:len(sk)/2])
+		k, _, di, found, err := bp.Seek(g, sk[:len(sk)/2])
 		_ = di
 		_ = found
 		require.NoError(t, err)

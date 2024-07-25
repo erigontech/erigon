@@ -1013,24 +1013,19 @@ func (b *BtIndex) Seek(g ArchiveGetter, x []byte) (*Cursor, error) {
 	if b.Empty() {
 		return nil, nil
 	}
-
-	// defer func() {
-	// 	fmt.Printf("[Bindex][%s] seekInFiles '%x' -> '%x' di=%d\n", b.FileName(), x, cursor.Value(), cursor.d)
-	// }()
-	var (
-		k     []byte
-		dt    uint64
-		found bool
-		err   error
-	)
-
 	if UseBpsTree {
-		_, dt, found, err = b.bplus.Seek(g, x)
-	} else {
-		_, dt, found, err = b.alloc.Seek(g, x)
+		k, v, dt, found, err := b.bplus.Seek(g, x)
+		if err != nil || !found {
+			if errors.Is(err, ErrBtIndexLookupBounds) {
+				return nil, nil
+			}
+			return nil, err
+		}
+		return b.newCursor(context.Background(), k, v, dt, g), nil
 	}
-	_ = found
-	if err != nil /*|| !found*/ {
+
+	_, dt, found, err := b.alloc.Seek(g, x)
+	if err != nil || !found {
 		if errors.Is(err, ErrBtIndexLookupBounds) {
 			return nil, nil
 		}
