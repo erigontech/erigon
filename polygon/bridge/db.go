@@ -134,6 +134,7 @@ func (s *MdbxStore) GetSprintLastEventID(ctx context.Context, lastID uint64, tim
 	if err != nil {
 		return eventID, err
 	}
+	defer it.Close()
 
 	for it.HasNext() {
 		_, v, err := it.Next()
