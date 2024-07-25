@@ -37,7 +37,13 @@ func (db ErigonDb) WriteHeader(
 		return nil, fmt.Errorf("failed to get parent header: %w", err)
 	}
 
-	h := core.MakeEmptyHeader(parentHeader, chainConfig, ts, &gasLimit)
+	h := &ethTypes.Header{}
+
+	if parentHeader != nil {
+		h = core.MakeEmptyHeader(parentHeader, chainConfig, ts, &gasLimit)
+	} else {
+		h.Number = blockNo
+	}
 
 	h.ParentHash = parentHash
 	h.Root = stateRoot

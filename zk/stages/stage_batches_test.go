@@ -5,6 +5,7 @@ import (
 	"encoding/hex"
 	"testing"
 
+	"github.com/ledgerwatch/erigon-lib/chain"
 	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/memdb"
@@ -72,7 +73,8 @@ func TestUnwindBatches(t *testing.T) {
 	require.NoError(t, err)
 
 	dsClient := NewTestDatastreamClient(fullL2Blocks, gerUpdates)
-	cfg := StageBatchesCfg(db1, dsClient, &ethconfig.Zk{}, nil)
+
+	cfg := StageBatchesCfg(db1, dsClient, &ethconfig.Zk{}, &chain.Config{}, nil)
 
 	s := &stagedsync.StageState{ID: stages.Batches, BlockNumber: 0}
 	u := &stagedsync.Sync{}
