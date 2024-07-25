@@ -148,5 +148,5 @@ func (s *validatorStatus) reportAttester() {
 	countAttestedBlock := s.attestedBlockRoots.Cardinality()
 	m := metrics.GetOrCreateCounter(fmt.Sprintf(metricAttestHit, s.vindex))
 	m.AddInt(countAttestedBlock)
-	log.Info("[attester] report attester status", "epoch", s.epoch, "countAttestedBlock", countAttestedBlock)
+	log.Info("[attester] report attester status", "epoch", s.epoch, "vindex", s.vindex, "countAttestedBlock", countAttestedBlock)
 }
