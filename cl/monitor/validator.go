@@ -41,13 +41,19 @@ func (m *ValidatorMonitorImpl) OnNewBlock(block *cltypes.BeaconBlock) error {
 		hitSet  = mapset.NewSet[uint64]()
 		missSet mapset.Set[uint64]
 	)
-	state, err := m.fc.GetStateAtBlockRoot(block.StateRoot, false)
+
+	blockRoot, err := block.HashSSZ()
 	if err != nil {
-		log.Warn("failed to get state at block root", "err", err, "slot", block.Slot, "parentRoot", block.StateRoot)
+		log.Warn("failed to hash block", "err", err, "slot", block.Slot)
 		return err
 	}
-	if state == nil {
-		log.Info("state is nil. syncing", "slot", block.Slot, "parentRoot", block.StateRoot)
+
+	state, err := m.fc.GetStateAtBlockRoot(blockRoot, false)
+	if err != nil {
+		log.Warn("failed to get state at block root", "err", err, "slot", block.Slot, "blockRoot", blockRoot)
+		return err
+	} else if state == nil {
+		log.Info("state is nil. syncing", "slot", block.Slot, "blockRoot", blockRoot)
 		return nil
 	}
 
