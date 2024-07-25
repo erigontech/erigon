@@ -1015,7 +1015,8 @@ func (b *BtIndex) Seek(g ArchiveGetter, x []byte) (*Cursor, error) {
 	}
 	if UseBpsTree {
 		k, v, dt, found, err := b.bplus.Seek(g, x)
-		if err != nil || !found {
+		_ = found
+		if err != nil /*|| !found*/ {
 			if errors.Is(err, ErrBtIndexLookupBounds) {
 				return nil, nil
 			}

@@ -241,6 +241,7 @@ func (b *BpsTree) Seek(g ArchiveGetter, key []byte) (skey, value []byte, di uint
 				if cmp > 0 {
 					l++
 				}
+
 				return skey, value, l, false, nil
 			}
 		}
@@ -290,28 +291,6 @@ func (b *BpsTree) Get(g ArchiveGetter, key []byte) ([]byte, bool, uint64, error)
 		}
 		return v0, true, 0, nil
 	}
-	//if b.st == nil {
-	//	panic("what? nil st")
-	//}
-	//n := b.st.Seek(key)
-	//if bytes.Equal(n.Key, key) {
-	//	if b.trace {
-	//		fmt.Printf("found %x [%d]\n", n.Key, n.Di)
-	//	}
-	//	return key, true, n.Di, nil
-	//}
-	//var l, r uint64
-	//r = b.offt.Count()
-	//if n.Right() != nil {
-	//	r = n.Right().Di
-	//}
-	//if n.Left() != nil {
-	//	l = n.Left().Di
-	//}
-	//if b.trace {
-	//	fmt.Printf("pivot di:%d di(LR): [%d %d] k: %x\n", n.Di, l, r, n.Key)
-	//}
-
 	n, l, r := b.bs(key) // l===r when key is found
 	if b.trace {
 		fmt.Printf("pivot di: %d di(LR): [%d %d] k: %x found: %t\n", n.di, l, r, n.key, l == r)
