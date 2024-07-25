@@ -29,10 +29,11 @@ type ValidatorMonitorImpl struct {
 	vaidatorStatuses map[uint64]map[uint64]*validatorStatus // map validatorID -> epoch -> validatorStatus
 }
 
-func NewValidatorMonitor(fc forkchoice.ForkChoiceStorageReader, ethClock eth_clock.EthereumClock) ValidatorMonitor {
+func NewValidatorMonitor(fc forkchoice.ForkChoiceStorageReader, ethClock eth_clock.EthereumClock, beaconConfig *clparams.BeaconChainConfig) ValidatorMonitor {
 	m := &ValidatorMonitorImpl{
 		fc:               fc,
 		ethClock:         ethClock,
+		beaconCfg:        beaconConfig,
 		vaidatorStatuses: make(map[uint64]map[uint64]*validatorStatus),
 	}
 	go m.runReportAttesterStatus()
