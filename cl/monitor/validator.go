@@ -46,6 +46,10 @@ func (m *ValidatorMonitorImpl) OnNewBlock(block *cltypes.BeaconBlock) error {
 		log.Warn("failed to get state at block root", "err", err, "slot", block.Slot, "parentRoot", block.StateRoot)
 		return err
 	}
+	if state == nil {
+		log.Info("state is nil. syncing", "slot", block.Slot, "parentRoot", block.StateRoot)
+		return nil
+	}
 
 	atts.Range(func(i int, att *solid.Attestation, length int) bool {
 		indicies, err := state.GetAttestingIndicies(att.AttestantionData(), att.AggregationBits(), true)
