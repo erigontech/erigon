@@ -225,7 +225,7 @@ func (b *BpsTree) Seek(g ArchiveGetter, key []byte) (skey, value []byte, di uint
 		if b.trace {
 			fmt.Printf("fs di:[%d %d] k: %x\n", l, r, skey)
 		}
-		if l-r <= 128 {
+		if l-r <= 64 {
 			for l < r {
 				skey, value, err := b.dataLookupFunc(l, g)
 				if err != nil {
