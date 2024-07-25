@@ -505,7 +505,7 @@ func initSnapshotLock(ctx context.Context, cfg *downloadercfg.Cfg, db kv.RoDB, s
 		Chain: cfg.ChainName,
 	}
 
-	files, err := SeedableFiles(cfg.Dirs, cfg.ChainName)
+	files, err := SeedableFiles(cfg.Dirs, cfg.ChainName, false)
 	if err != nil {
 		return nil, err
 	}
@@ -2592,20 +2592,20 @@ func (d *Downloader) AddMagnetLink(ctx context.Context, infoHash metainfo.Hash, 
 	return nil
 }
 
-func SeedableFiles(dirs datadir.Dirs, chainName string) ([]string, error) {
-	files, err := seedableSegmentFiles(dirs.Snap, chainName)
+func SeedableFiles(dirs datadir.Dirs, chainName string, all bool) ([]string, error) {
+	files, err := seedableSegmentFiles(dirs.Snap, chainName, all)
 	if err != nil {
 		return nil, fmt.Errorf("seedableSegmentFiles: %w", err)
 	}
-	l1, err := seedableStateFilesBySubDir(dirs.Snap, "idx")
+	l1, err := seedableStateFilesBySubDir(dirs.Snap, "idx", all)
 	if err != nil {
 		return nil, err
 	}
-	l2, err := seedableStateFilesBySubDir(dirs.Snap, "history")
+	l2, err := seedableStateFilesBySubDir(dirs.Snap, "history", all)
 	if err != nil {
 		return nil, err
 	}
-	l3, err := seedableStateFilesBySubDir(dirs.Snap, "domain")
+	l3, err := seedableStateFilesBySubDir(dirs.Snap, "domain", all)
 	if err != nil {
 		return nil, err
 	}
@@ -2701,7 +2701,7 @@ func (d *Downloader) addTorrentFilesFromDisk(quiet bool) error {
 	return eg.Wait()
 }
 func (d *Downloader) BuildTorrentFilesIfNeed(ctx context.Context, chain string, ignore snapcfg.Preverified) error {
-	_, err := BuildTorrentFilesIfNeed(ctx, d.cfg.Dirs, d.torrentFS, chain, ignore)
+	_, err := BuildTorrentFilesIfNeed(ctx, d.cfg.Dirs, d.torrentFS, chain, ignore, false)
 	return err
 }
 func (d *Downloader) Stats() AggStats {
