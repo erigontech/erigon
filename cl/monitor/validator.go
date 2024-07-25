@@ -100,8 +100,8 @@ func (m *ValidatorMonitorImpl) OnNewBlock(block *cltypes.BeaconBlock) error {
 			if !ok {
 				status = &validatorStatus{
 					epoch:              attEpoch,
+					vindex:             vidx,
 					attestedBlockRoots: mapset.NewSet[common.Hash](),
-					attesterMetric:     metrics.GetOrCreateCounter(fmt.Sprintf(metricAttestHit, vidx)),
 				}
 				m.vaidatorStatuses[vidx][attEpoch] = status
 			}
@@ -135,8 +135,8 @@ func (m *ValidatorMonitorImpl) runReportAttesterStatus() {
 
 type validatorStatus struct {
 	epoch              uint64
+	vindex             uint64
 	attestedBlockRoots mapset.Set[common.Hash]
-	attesterMetric     metrics.Counter
 }
 
 func (s *validatorStatus) updateAttesterStatus(att *solid.Attestation) {
@@ -146,5 +146,7 @@ func (s *validatorStatus) updateAttesterStatus(att *solid.Attestation) {
 
 func (s *validatorStatus) reportAttester() {
 	countAttestedBlock := s.attestedBlockRoots.Cardinality()
-	s.attesterMetric.AddInt(countAttestedBlock)
+	m := metrics.GetOrCreateCounter(fmt.Sprintf(metricAttestHit, s.vindex))
+	m.AddInt(countAttestedBlock)
+	log.Info("[attester] report attester status", "epoch", s.epoch, "countAttestedBlock", countAttestedBlock)
 }
