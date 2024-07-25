@@ -29,9 +29,10 @@ import (
 )
 
 var databaseTablesCfg = kv.TableCfg{
-	kv.BorCheckpoints: {},
-	kv.BorMilestones:  {},
-	kv.BorSpans:       {},
+	kv.BorCheckpoints:        {},
+	kv.BorMilestones:         {},
+	kv.BorSpans:              {},
+	kv.BorProducerSelections: {},
 }
 
 type EntityStore[TEntity Entity] interface {

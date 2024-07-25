@@ -18,13 +18,24 @@ package heimdall
 
 import (
 	"context"
+	"encoding/json"
+	"errors"
 	"fmt"
+	"os"
+	"regexp"
+	"sort"
+	"strconv"
+	"sync"
 	"testing"
 
 	"github.com/stretchr/testify/require"
+	"go.uber.org/mock/gomock"
 
+	"github.com/erigontech/erigon-lib/common/dir"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/params"
+	"github.com/erigontech/erigon/polygon/bor/borcfg"
 	"github.com/erigontech/erigon/polygon/bor/valset"
 	"github.com/erigontech/erigon/polygon/polygoncommon"
 	"github.com/erigontech/erigon/turbo/testlog"
@@ -51,6 +62,46 @@ func TestConfirmCantHave2RwTxAtSameTime(t *testing.T) {
 	//
 	// TODO need to introduce some mutex at inside the MdbxEntityStore layer
 	//
+}
+
+func TestDBI(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+
+	logger := testlog.Logger(t, log.LvlDebug)
+	dataDir := t.TempDir()
+	db := polygoncommon.NewDatabase(dataDir, logger)
+	err := db.OpenOnce(ctx, kv.HeimdallDB, databaseTablesCfg)
+	require.NoError(t, err)
+
+	var wg sync.WaitGroup
+	var mu sync.Mutex
+	for i := 0; i < 5000; i++ {
+		wg.Add(1)
+
+		go func() {
+			defer wg.Done()
+			defer mu.Unlock()
+			mu.Lock()
+
+			tx, err := db.BeginRw(ctx)
+			if err != nil {
+				panic(err)
+			}
+
+			err = tx.Put(kv.BorCheckpoints, []byte{1}, []byte{2})
+			if err != nil {
+				panic(err)
+			}
+
+			err = tx.Commit()
+			if err != nil {
+				panic(err)
+			}
+		}()
+	}
+
+	wg.Wait()
 }
 
 func TestSpanProducerSelection(t *testing.T) {
@@ -81,4 +132,97 @@ func TestSpanProducerSelection(t *testing.T) {
 	// upon changing from span X to span Y it performs UpdateWithChangeSet
 	// and persists the new producer priorities in the DB
 	// TODO implement this component
+}
+
+const spanTestDataDir = "testdata/amoy/spans"
+
+func TestServiceFetchLatestSpans(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	ctrl := gomock.NewController(t)
+	tempDir := t.TempDir()
+	dataDir := fmt.Sprintf("%s/datadir", tempDir)
+	logger := testlog.Logger(t, log.LvlDebug)
+	borConfig := params.AmoyChainConfig.Bor.(*borcfg.BorConfig)
+	client := NewMockHeimdallClient(ctrl)
+	client.EXPECT().
+		FetchSpan(gomock.Any(), gomock.Any()).
+		DoAndReturn(func(ctx context.Context, id uint64) (*Span, error) {
+			bytes, err := os.ReadFile(fmt.Sprintf("%s/span_%d.json", spanTestDataDir, id))
+			if err != nil {
+				return nil, err
+			}
+
+			var span Span
+			err = json.Unmarshal(bytes, &span)
+			if err != nil {
+				return nil, err
+			}
+
+			return &span, nil
+		}).
+		AnyTimes()
+	client.EXPECT().
+		FetchLatestSpan(gomock.Any()).
+		DoAndReturn(func(ctx context.Context) (*Span, error) {
+			files, err := dir.ReadDir(spanTestDataDir)
+			if err != nil {
+				return nil, err
+			}
+
+			sort.Slice(files, func(i, j int) bool {
+				r := regexp.MustCompile("span_([0-9]+).json")
+				matchI := r.FindStringSubmatch(files[i].Name())
+				matchJ := r.FindStringSubmatch(files[j].Name())
+				spanIdI, err := strconv.ParseInt(matchI[1], 10, 64)
+				if err != nil {
+					panic(fmt.Errorf("could not parse span id from file name: %w", err))
+				}
+				spanIdJ, err := strconv.ParseInt(matchJ[1], 10, 64)
+				if err != nil {
+					panic(fmt.Errorf("could not parse span id from file name: %w", err))
+				}
+				return spanIdI < spanIdJ
+			})
+
+			bytes, err := os.ReadFile(fmt.Sprintf("%s/%s", spanTestDataDir, files[len(files)-1].Name()))
+			if err != nil {
+				return nil, err
+			}
+
+			var span Span
+			err = json.Unmarshal(bytes, &span)
+			if err != nil {
+				return nil, err
+			}
+
+			return &span, nil
+		}).
+		AnyTimes()
+	client.EXPECT().
+		FetchCheckpointCount(gomock.Any()).
+		Return(0, nil).
+		AnyTimes()
+	client.EXPECT().
+		FetchMilestoneCount(gomock.Any()).
+		Return(0, nil).
+		AnyTimes()
+	client.EXPECT().
+		FetchFirstMilestoneNum(gomock.Any()).
+		Return(1, nil).
+		AnyTimes()
+	store := NewMdbxServiceStore(logger, dataDir, tempDir)
+	svc := NewService(borConfig, client, store, logger)
+	go func() {
+		err := svc.Run(ctx)
+		if err != nil && !errors.Is(err, context.Canceled) {
+			panic(fmt.Errorf("service err: %w", err))
+		}
+	}()
+
+	spans, err := svc.FetchLatestSpans(ctx, 3)
+	require.NoError(t, err)
+	require.Equal(t, spans[0].Id, SpanId(1548))
+	require.Equal(t, spans[1].Id, SpanId(1549))
+	require.Equal(t, spans[2].Id, SpanId(1550))
 }

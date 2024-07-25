@@ -56,9 +56,22 @@ func (t spanBlockProducersTracker) handleNewSpan(ctx context.Context, newSpan *S
 		return err
 	}
 
-	// TODO handle not found when we have no entities at all
+	if lastProducerSelection == nil {
+		if newSpan.Id != 0 {
+			return errors.New("expected span 0 missing")
+		}
 
-	if newSpan.Id <= lastProducerSelection.SpanId {
+		newProducerSelection := &SpanBlockProducerSelection{
+			SpanId:     newSpan.Id,
+			StartBlock: newSpan.StartBlock,
+			EndBlock:   newSpan.EndBlock,
+			Producers:  newSpan.Producers(),
+		}
+		err = t.store.PutEntity(ctx, uint64(newProducerSelection.SpanId), newProducerSelection)
+		if err != nil {
+			return err
+		}
+
 		return nil
 	}
 
@@ -71,20 +84,24 @@ func (t spanBlockProducersTracker) handleNewSpan(ctx context.Context, newSpan *S
 		)
 	}
 
+	if newSpan.Id <= lastProducerSelection.SpanId {
+		return nil
+	}
+
 	startSprintNumInSpan := t.borConfig.CalculateSprintNumber(lastProducerSelection.StartBlock)
 	endSprintNumInSpan := t.borConfig.CalculateSprintNumber(lastProducerSelection.EndBlock)
 	numSprintsInSpan := int(endSprintNumInSpan - startSprintNumInSpan)
 	validatorSet := valset.NewValidatorSet(lastProducerSelection.Producers)
 	validatorSet.IncrementProposerPriority(numSprintsInSpan)
 	newValidatorSet := valset.GetUpdatedValidatorSet(validatorSet, newSpan.Producers(), t.logger)
-	newProducerSet := &SpanBlockProducerSelection{
+	newProducerSelection := &SpanBlockProducerSelection{
 		SpanId:     newSpan.Id,
 		StartBlock: newSpan.StartBlock,
 		EndBlock:   newSpan.EndBlock,
 		Producers:  newValidatorSet.Validators,
 	}
 
-	err = t.store.PutEntity(ctx, uint64(newProducerSet.SpanId), newProducerSet)
+	err = t.store.PutEntity(ctx, uint64(newProducerSelection.SpanId), newProducerSelection)
 	if err != nil {
 		return err
 	}
