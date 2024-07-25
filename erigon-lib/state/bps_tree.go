@@ -21,7 +21,6 @@ import (
 	"errors"
 	"fmt"
 	"github.com/c2h5oh/datasize"
-	"github.com/erigontech/erigon-lib/state/splay"
 	"unsafe"
 
 	"github.com/erigontech/erigon-lib/common"
@@ -58,7 +57,6 @@ func NewBpsTree(kv ArchiveGetter, offt *eliasfano32.EliasFano, M uint64, dataLoo
 
 type BpsTree struct {
 	offt  *eliasfano32.EliasFano // ef with offsets to key/vals
-	st    *splay.Tree
 	mx    []Node
 	M     uint64 // limit on amount of 'children' for node
 	trace bool
