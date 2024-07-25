@@ -465,7 +465,7 @@ func (e *EthereumExecutionModule) updateForkChoice(ctx context.Context, original
 
 		// force fsync after notifications are sent
 		if err := e.db.Update(ctx, func(tx kv.RwTx) error {
-			return kv.IncrementKey(tx, kv.DatabaseInfo, []byte("alex"))
+			return kv.IncrementKey(tx, kv.DatabaseInfo, []byte("chaindata_force"))
 		}); err != nil {
 			sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, err, flushExtendingFork)
 			return
