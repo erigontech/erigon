@@ -96,16 +96,15 @@ func (m *ValidatorMonitorImpl) OnNewBlock(block *cltypes.BeaconBlock) error {
 				// skip unknown validators
 				continue
 			}
-			status, ok := m.vaidatorStatuses[vidx][attEpoch]
-			if !ok {
-				status = &validatorStatus{
+			if _, ok := m.vaidatorStatuses[vidx][attEpoch]; !ok {
+				status := &validatorStatus{
 					epoch:              attEpoch,
 					vindex:             vidx,
 					attestedBlockRoots: mapset.NewSet[common.Hash](),
 				}
 				m.vaidatorStatuses[vidx][attEpoch] = status
 			}
-			status.updateAttesterStatus(att)
+			m.vaidatorStatuses[vidx][attEpoch].updateAttesterStatus(att)
 		}
 		return true
 	})
