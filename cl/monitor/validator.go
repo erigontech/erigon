@@ -1,7 +1,6 @@
 package monitor
 
 import (
-	"fmt"
 	"sync"
 	"time"
 
@@ -18,7 +17,8 @@ import (
 
 var (
 	// metrics
-	metricAttestHit = "validator_attestation_hit{vid=\"%d\"}"
+	metricAttestHit  = metrics.GetOrCreateCounter("validator_attestation_hit")
+	metricAttestMiss = metrics.GetOrCreateCounter("validator_attestation_miss")
 )
 
 type ValidatorMonitorImpl struct {
@@ -121,10 +121,14 @@ func (m *ValidatorMonitorImpl) runReportAttesterStatus() {
 		currentEpoch := m.ethClock.GetCurrentEpoch()
 		// report attester status for current_epoch - 2
 		epoch := currentEpoch - 2
-		for _, statuses := range m.vaidatorStatuses {
+		for vindex, statuses := range m.vaidatorStatuses {
 			if status, ok := statuses[epoch]; ok {
-				status.reportAttester()
+				metricAttestHit.AddInt(status.attestedBlockRoots.Cardinality())
 				delete(statuses, epoch)
+				log.Info("[attester] report attester status hit", "epoch", epoch, "vindex", vindex, "countAttestedBlock", status.attestedBlockRoots.Cardinality())
+			} else {
+				metricAttestMiss.AddInt(1)
+				log.Info("[attester] report attester status miss", "epoch", epoch, "vindex", vindex, "countAttestedBlock", 0)
 			}
 		}
 		m.vStatusMutex.Unlock()
@@ -141,11 +145,4 @@ type validatorStatus struct {
 func (s *validatorStatus) updateAttesterStatus(att *solid.Attestation) {
 	data := att.AttestantionData()
 	s.attestedBlockRoots.Add(data.BeaconBlockRoot())
-}
-
-func (s *validatorStatus) reportAttester() {
-	countAttestedBlock := s.attestedBlockRoots.Cardinality()
-	m := metrics.GetOrCreateCounter(fmt.Sprintf(metricAttestHit, s.vindex))
-	m.AddInt(countAttestedBlock)
-	log.Info("[attester] report attester status", "epoch", s.epoch, "vindex", s.vindex, "countAttestedBlock", countAttestedBlock)
 }
