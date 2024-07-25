@@ -128,12 +128,12 @@ func init() {
 	rootCmd.PersistentFlags().BoolVar(&verify, "verify", false, utils.DownloaderVerifyFlag.Usage)
 	rootCmd.PersistentFlags().StringVar(&_verifyFiles, "verify.files", "", "Limit list of files to verify")
 	rootCmd.PersistentFlags().BoolVar(&verifyFailfast, "verify.failfast", false, "Stop on first found error. Report it and exit")
-	rootCmd.Flags().BoolVar(&all, "all", false, "Produce all possible .torrent files")
 
 	withDataDir(createTorrent)
 	withFile(createTorrent)
 	withChainFlag(createTorrent)
 	rootCmd.AddCommand(createTorrent)
+	createTorrent.Flags().BoolVar(&all, "all", false, "Produce all possible .torrent files")
 
 	rootCmd.AddCommand(torrentCat)
 	rootCmd.AddCommand(torrentMagnet)
