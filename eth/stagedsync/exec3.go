@@ -176,7 +176,7 @@ func ExecV3(ctx context.Context,
 	batchSize := cfg.batchSize
 	chainDb := cfg.db
 	blockReader := cfg.blockReader
-	agg, engine := cfg.agg, cfg.engine
+	engine := cfg.engine
 	chainConfig, genesis := cfg.chainConfig, cfg.genesis
 
 	applyTx := txc.Tx
@@ -194,6 +194,7 @@ func ExecV3(ctx context.Context,
 		}
 	}
 
+	agg := cfg.db.(state2.HasAgg).Agg().(*state2.Aggregator)
 	if initialCycle {
 		agg.SetCollateAndBuildWorkers(min(2, estimate.StateV3Collate.Workers()))
 		agg.SetCompressWorkers(estimate.CompressSnapshot.Workers())

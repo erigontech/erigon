@@ -700,7 +700,6 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 				backend.sentriesClient.Hd,
 				config.Genesis,
 				config.Sync,
-				agg,
 				stages2.SilkwormForExecutionStage(backend.silkworm, config),
 			),
 			stagedsync.StageSendersCfg(backend.chainDB, chainConfig, config.Sync, false, dirs.Tmp, config.Prune, blockReader, backend.sentriesClient.Hd, loopBreakCheck),
