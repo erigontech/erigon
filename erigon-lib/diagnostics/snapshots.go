@@ -39,7 +39,6 @@ func (d *DiagnosticClient) setupSnapshotDiagnostics(rootCtx context.Context) {
 	d.runSegmentDownloadingListener(rootCtx)
 	d.runSnapshotFilesListListener(rootCtx)
 	d.runSegmentIndexingListener(rootCtx)
-	d.runSegmentIndexingFinishedListener(rootCtx)
 	d.runFileDownloadedListener(rootCtx)
 	d.runFillDBListener(rootCtx)
 }
