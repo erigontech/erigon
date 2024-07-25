@@ -130,7 +130,7 @@ func (s *MdbxStore) GetSprintLastEventID(ctx context.Context, lastID uint64, tim
 	kLastID := make([]byte, 8)
 	binary.BigEndian.PutUint64(kLastID, lastID)
 
-	it, err := tx.RangeAscend(kv.BorEvents, kLastID, nil, 0)
+	it, err := tx.RangeAscend(kv.BorEvents, kLastID, nil, -1)
 	if err != nil {
 		return eventID, err
 	}
