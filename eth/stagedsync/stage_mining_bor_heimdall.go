@@ -81,10 +81,9 @@ func MiningBorHeimdallForward(
 		return err
 	}
 
-	lastStateSyncEventID, records, fetchTime, err := fetchHeimdallStateSyncEvents(
+	lastStateSyncEventID, records, fetchTime, err := fetchRequiredHeimdallStateSyncEventsIfNeeded(
 		ctx,
 		header,
-		lastStateSyncEventID,
 		tx,
 		cfg.borConfig,
 		cfg.blockReader,
@@ -93,6 +92,7 @@ func MiningBorHeimdallForward(
 		cfg.stateReceiverABI,
 		logPrefix,
 		logger,
+		lastStateSyncEventID,
 	)
 
 	if err != nil {

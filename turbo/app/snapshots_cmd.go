@@ -467,8 +467,9 @@ func doIntegrity(cliCtx *cli.Context) error {
 	defer chainDB.Close()
 
 	cfg := ethconfig.NewSnapCfg(true, false, true, true)
+	from := cliCtx.Uint64(SnapshotFromFlag.Name)
 
-	_, _, _, blockRetire, agg, clean, err := openSnaps(ctx, cfg, dirs, chainDB, logger)
+	_, _, _, blockRetire, agg, clean, err := openSnaps(ctx, cfg, dirs, from, chainDB, logger)
 	if err != nil {
 		return err
 	}
@@ -485,7 +486,7 @@ func doIntegrity(cliCtx *cli.Context) error {
 				return err
 			}
 		case integrity.Blocks:
-			if err := integrity.SnapBlocksRead(chainDB, blockReader, ctx, failFast); err != nil {
+			if err := integrity.SnapBlocksRead(ctx, chainDB, blockReader, 0, 0, failFast); err != nil {
 				return err
 			}
 		case integrity.InvertedIndex:
@@ -640,7 +641,9 @@ func doIndicesCommand(cliCtx *cli.Context, dirs datadir.Dirs) error {
 
 	cfg := ethconfig.NewSnapCfg(true, false, true, true)
 	chainConfig := fromdb.ChainConfig(chainDB)
-	_, _, caplinSnaps, br, agg, clean, err := openSnaps(ctx, cfg, dirs, chainDB, logger)
+	from := cliCtx.Uint64(SnapshotFromFlag.Name)
+
+	_, _, caplinSnaps, br, agg, clean, err := openSnaps(ctx, cfg, dirs, from, chainDB, logger)
 	if err != nil {
 		return err
 	}
@@ -670,7 +673,8 @@ func doLS(cliCtx *cli.Context, dirs datadir.Dirs) error {
 	chainDB := dbCfg(kv.ChainDB, dirs.Chaindata).MustOpen()
 	defer chainDB.Close()
 	cfg := ethconfig.NewSnapCfg(true, false, true, true)
-	blockSnaps, borSnaps, caplinSnaps, _, agg, clean, err := openSnaps(ctx, cfg, dirs, chainDB, logger)
+	from := cliCtx.Uint64(SnapshotFromFlag.Name)
+	blockSnaps, borSnaps, caplinSnaps, _, agg, clean, err := openSnaps(ctx, cfg, dirs, from, chainDB, logger)
 	if err != nil {
 		return err
 	}
@@ -684,17 +688,17 @@ func doLS(cliCtx *cli.Context, dirs datadir.Dirs) error {
 	return nil
 }
 
-func openSnaps(ctx context.Context, cfg ethconfig.BlocksFreezing, dirs datadir.Dirs, chainDB kv.RwDB, logger log.Logger) (
+func openSnaps(ctx context.Context, cfg ethconfig.BlocksFreezing, dirs datadir.Dirs, from uint64, chainDB kv.RwDB, logger log.Logger) (
 	blockSnaps *freezeblocks.RoSnapshots, borSnaps *freezeblocks.BorRoSnapshots, csn *freezeblocks.CaplinSnapshots,
 	br *freezeblocks.BlockRetire, agg *libstate.Aggregator, clean func(), err error,
 ) {
-	blockSnaps = freezeblocks.NewRoSnapshots(cfg, dirs.Snap, from, logger)
+	blockSnaps = freezeblocks.NewRoSnapshots(cfg, dirs.Snap, 0, logger)
 	if err = blockSnaps.ReopenFolder(); err != nil {
 		return
 	}
 	blockSnaps.LogStat("block")
 
-	borSnaps = freezeblocks.NewBorRoSnapshots(cfg, dirs.Snap, from, logger)
+	borSnaps = freezeblocks.NewBorRoSnapshots(cfg, dirs.Snap, 0, logger)
 	if err = borSnaps.ReopenFolder(); err != nil {
 		return
 	}
@@ -867,7 +871,8 @@ func doRetireCommand(cliCtx *cli.Context, dirs datadir.Dirs) error {
 	defer db.Close()
 
 	cfg := ethconfig.NewSnapCfg(true, false, true, true)
-	blockSnaps, _, caplinSnaps, br, agg, clean, err := openSnaps(ctx, cfg, dirs, db, logger)
+
+	blockSnaps, _, caplinSnaps, br, agg, clean, err := openSnaps(ctx, cfg, dirs, from, db, logger)
 	if err != nil {
 		return err
 	}

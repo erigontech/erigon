@@ -23,6 +23,7 @@ import (
 	"path/filepath"
 	"reflect"
 
+	"github.com/erigontech/erigon-lib/common/dbg"
 	"github.com/erigontech/erigon-lib/downloader/snaptype"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/cmd/hack/tool/fromdb"
@@ -31,11 +32,17 @@ import (
 	"github.com/erigontech/erigon/turbo/services"
 )
 
+var BorProduceFiles = dbg.EnvBool("BOR_PRODUCE_FILES", false)
+
 func (br *BlockRetire) dbHasEnoughDataForBorRetire(ctx context.Context) (bool, error) {
 	return true, nil
 }
 
 func (br *BlockRetire) retireBorBlocks(ctx context.Context, minBlockNum uint64, maxBlockNum uint64, lvl log.Lvl, seedNewSnapshots func(downloadRequest []services.DownloadRequest) error, onDelete func(l []string) error) (bool, error) {
+	if !BorProduceFiles {
+		return false, nil
+	}
+
 	select {
 	case <-ctx.Done():
 		return false, ctx.Err()
@@ -100,11 +107,15 @@ func (br *BlockRetire) retireBorBlocks(ctx context.Context, minBlockNum uint64, 
 			notifier.OnNewSnapshot()
 		}
 
-		err := merger.Merge(ctx, &snapshots.RoSnapshots, snapType, rangesToMerge, snapshots.Dir(), true /* doIndex */, onMerge, onDelete)
-
-		if err != nil {
-			return ok, err
+		if seedNewSnapshots != nil {
+			downloadRequest := []services.DownloadRequest{
+				services.NewDownloadRequest("", ""),
+			}
+			if err := seedNewSnapshots(downloadRequest); err != nil {
+				return err
+			}
 		}
+		return nil
 	}
 
 	err := merger.Merge(ctx, &snapshots.RoSnapshots, borsnaptype.BorSnapshotTypes(), rangesToMerge, snapshots.Dir(), true /* doIndex */, onMerge, onDelete)
@@ -147,10 +158,10 @@ func NewBorRoSnapshots(cfg ethconfig.BlocksFreezing, snapDir string, segmentsMin
 	return &BorRoSnapshots{*newRoSnapshots(cfg, snapDir, borsnaptype.BorSnapshotTypes(), segmentsMin, logger)}
 }
 
-func (s *BorRoSnapshots) Ranges(t snaptype.Type) []Range {
+func (s *BorRoSnapshots) Ranges() []Range {
 	view := s.View()
 	defer view.Close()
-	return view.base.Ranges(t)
+	return view.base.Ranges()
 }
 
 // this is one off code to fix an issue in 2.49.x->2.52.x which missed

@@ -477,7 +477,7 @@ func fetchAndWriteHeimdallStateSyncEvents(
 		"to", to.Format(time.RFC3339),
 	)
 
-	eventRecords, err := heimdallClient.FetchStateSyncEvents(ctx, from, fetchTo, fetchLimit)
+	eventRecords, err := heimdallClient.FetchStateSyncEvents(ctx, fromId, fetchTo, fetchLimit)
 
 	if err != nil {
 		return lastStateSyncEventID, 0, time.Since(fetchStart), err
