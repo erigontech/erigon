@@ -61,16 +61,9 @@ func opExtCodeHash_zkevm(pc *uint64, interpreter *EVMInterpreter, scope *ScopeCo
 
 func opBlockhash_zkevm(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]byte, error) {
 	num := scope.Stack.Peek()
-	num64, overflow := num.Uint64WithOverflow()
-	if overflow {
-		num.Clear()
-		return nil, nil
-	}
 
 	ibs := interpreter.evm.IntraBlockState()
-	hash := ibs.GetBlockStateRoot(num64)
-
-	num.SetFromBig(hash.Big())
+	num.Set(ibs.GetBlockStateRoot(num))
 
 	return nil, nil
 }

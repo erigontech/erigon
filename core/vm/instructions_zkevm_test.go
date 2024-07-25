@@ -143,8 +143,8 @@ func (ibs TestIntraBlockState) GetLogs(hash libcommon.Hash) []*types.Log {
 	panic("implement me")
 }
 
-func (ibs TestIntraBlockState) GetBlockStateRoot(blockNum uint64) libcommon.Hash {
-	return libcommon.BigToHash(new(big.Int).SetUint64(blockNum))
+func (ibs TestIntraBlockState) GetBlockStateRoot(blockNum *uint256.Int) *uint256.Int {
+	return uint256.NewInt(0).Set(blockNum)
 }
 
 func (ibs TestIntraBlockState) GetBlockNumber() *uint256.Int {

@@ -44,6 +44,39 @@ func getJumpTable(cr *chain.Rules) *JumpTable {
 	return jt
 }
 
+func shouldExecuteLastOpCode(op OpCode) bool {
+	switch op {
+	case BLOCKHASH:
+		fallthrough
+	case CODESIZE:
+		fallthrough
+	case EXTCODESIZE:
+		fallthrough
+	case EXTCODECOPY:
+		fallthrough
+	case EXTCODEHASH:
+		fallthrough
+	case SELFBALANCE:
+		fallthrough
+	case BALANCE:
+		fallthrough
+	case CREATE:
+		fallthrough
+	case RETURN:
+		fallthrough
+	case CREATE2:
+		fallthrough
+	case SENDALL:
+		fallthrough
+	case SLOAD:
+		fallthrough
+	case SSTORE:
+		return true
+	}
+
+	return false
+}
+
 // NewZKEVMInterpreter returns a new instance of the Interpreter.
 func NewZKEVMInterpreter(evm VMInterpreter, cfg ZkConfig) *EVMInterpreter {
 	jt := getJumpTable(evm.ChainRules())
@@ -138,10 +171,45 @@ func (in *EVMInterpreter) RunZk(contract *Contract, input []byte, readOnly bool)
 			return
 		}
 
-		// execute the operation in case of SLOAD | SSTORE
+		/*
+			The code below this line is executed in case of an error => it is reverted.
+			The single side-effect of this execution (which is reverted anyway) is accounts that are "touched", because "touches" are not reverted and they are needed during witness generation.
+		*/
+
+		/*
+			Zkevm detects errors during execution of an opcode.
+			Cdk-erigon detects some errors (listed below) before execution of an opcode.
+			=> zkevm may execute (partially) 1 additinal opcode compared to cdk-erigon because cdk-erigon detects the errors before trying to execute an opcode.
+
+			In terms of execution - everything is fine because there is an error and everything will be reverted.
+			In terms of "touched" accounts - there could be some accounts that are not "touched" because the 1 additional opcode is not execute (even partially).
+			=> The additional opcode execution (even partially) could touch more accounts than cdk-erigon
+
+			That's why we must execute the last opcode in order to mimic the zkevm logic.
+			During this execution (that will be reverted anyway) we may detect panic but instead of stopping the node just ignore the panic.
+			By ignoring the panic we ensure that we've execute as much as possible of the additional 1 opcode.
+		*/
+
+		// execute the operation in case of a list of opcodes
+		executeBecauseOfSpecificOpCodes := shouldExecuteLastOpCode(op)
+
+		// execute the operation in case of early error detection
+		// _, errorIsUnderflow := err.(*ErrStackUnderflow)
+		// _, errorIsOverflow := err.(*ErrStackOverflow)
+		// executeBecauseOfEarlyErrorDetection := errors.Is(err, ErrOutOfGas) || errors.Is(err, ErrGasUintOverflow) || errorIsUnderflow || errorIsOverflow
+
+		// uncommend the live above in order to enable execution based on error types in addition to opcode list
+		executeBecauseOfEarlyErrorDetection := false
+
 		// the actual result of this operation does not matter because it will be reverted anyway, because err != nil
 		// we implement it this way in order execution to be identical to tracing
-		if op == SLOAD || op == SSTORE {
+		if executeBecauseOfSpecificOpCodes || executeBecauseOfEarlyErrorDetection {
+			defer func() {
+				// the goal if this recover is to catch a panic that could have happen during the execution of "in.jt[op].execute" below
+				// by ignoring the panic we are effectively executing as much as possible instructions of the last opcode before the error
+				recover()
+			}()
+
 			// we can safely use pc here instead of pcCopy,
 			// because pc and pcCopy can be different only if the main loop finishes normally without error
 			// but is it finishes normally without error then "ret" != nil and the .execute below will never be invoked at all
