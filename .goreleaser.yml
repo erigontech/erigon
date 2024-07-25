@@ -68,7 +68,6 @@ snapshot:
 dockers:
   - image_templates:
       - thorax/{{ .ProjectName }}:{{ .Version }}-amd64
-      - ghcr.io/ledgerwatch/{{ .ProjectName }}:{{ .Version }}-amd64
     dockerfile: Dockerfile.release
     use: buildx
     skip_push: true
@@ -80,7 +79,6 @@ dockers:
 
   - image_templates:
       - thorax/{{ .ProjectName }}:{{ .Version }}-arm64
-      - ghcr.io/ledgerwatch/{{ .ProjectName }}:{{ .Version }}-arm64
     dockerfile: Dockerfile.release
     skip_push: true
     use: buildx
@@ -97,23 +95,11 @@ docker_manifests:
       - thorax/{{ .ProjectName }}:{{ .Version }}-amd64
       - thorax/{{ .ProjectName }}:{{ .Version }}-arm64
 
-  - name_template: ghcr.io/ledgerwatch/{{ .ProjectName }}:{{ .Version }}
-    skip_push: true
-    image_templates:
-      - ghcr.io/ledgerwatch/{{ .ProjectName }}:{{ .Version }}-amd64
-      - ghcr.io/ledgerwatch/{{ .ProjectName }}:{{ .Version }}-arm64
-
   - name_template: thorax/{{ .ProjectName }}:latest
     skip_push: true
     image_templates:
       - thorax/{{ .ProjectName }}:{{ .Version }}-amd64
       - thorax/{{ .ProjectName }}:{{ .Version }}-arm64
-
-  - name_template: ghcr.io/ledgerwatch/{{ .ProjectName }}:latest
-    skip_push: true
-    image_templates:
-      - ghcr.io/ledgerwatch/{{ .ProjectName }}:{{ .Version }}-amd64
-      - ghcr.io/ledgerwatch/{{ .ProjectName }}:{{ .Version }}-arm64
 
 announce:
   slack:
