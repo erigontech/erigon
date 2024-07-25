@@ -70,7 +70,7 @@ jobs:
             --env PROFILE=${PROFILE} \
             --workdir /app \
             eth-bench-temp-${{ matrix.profile_name}} \
-            python bench.py -p "$PROFILE" -c 5 -t 12 --all --recover
+            python bench.py -p "$PROFILE" -c 5 -t 12 --confirmed --allconfirmed --unconfirmed --erc20 --uniswap --precompileds --pairings --eventminter --recover
 
           docker run --rm \
             --volume "$(pwd):/app" \
