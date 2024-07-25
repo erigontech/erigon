@@ -59,6 +59,14 @@ func newL2BlockProto(
 	}
 }
 
+func newL2BlockEndProto(
+	blockNumber uint64,
+) *types.L2BlockEndProto {
+	return &types.L2BlockEndProto{
+		Number: blockNumber,
+	}
+}
+
 func newTransactionProto(
 	effectiveGasPricePercentage uint8,
 	stateRoot libcommon.Hash,

@@ -1,9 +1,9 @@
 package types
 
 import (
+	libcommon "github.com/gateway-fm/cdk-erigon-lib/common"
 	"github.com/ledgerwatch/erigon/zk/datastream/proto/github.com/0xPolygonHermez/zkevm-node/state/datastream"
 	"google.golang.org/protobuf/proto"
-	libcommon "github.com/gateway-fm/cdk-erigon-lib/common"
 )
 
 type BatchType uint32
@@ -41,6 +41,7 @@ func (b *BatchStartProto) Type() EntryType {
 }
 
 type BatchEnd struct {
+	Number        uint64
 	LocalExitRoot libcommon.Hash
 	StateRoot     libcommon.Hash
 	Debug         Debug

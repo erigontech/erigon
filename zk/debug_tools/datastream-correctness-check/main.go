@@ -34,6 +34,10 @@ func main() {
 	progressBlock := uint64(0)
 	function := func(file *types.FileEntry) error {
 		switch file.EntryType {
+		case types.EntryTypeL2BlockEnd:
+			if previousFile != nil && previousFile.EntryType != types.EntryTypeL2Block && previousFile.EntryType != types.EntryTypeL2Tx {
+				return fmt.Errorf("unexpected entry type before l2 block end: %v", previousFile.EntryType)
+			}
 		case types.BookmarkEntryType:
 			bookmark, err := types.UnmarshalBookmark(file.Data)
 			if err != nil {
@@ -49,8 +53,7 @@ func main() {
 				progressBlock = bookmark.Value
 				if previousFile != nil &&
 					previousFile.EntryType != types.EntryTypeBatchStart &&
-					previousFile.EntryType != types.EntryTypeL2Tx &&
-					previousFile.EntryType != types.EntryTypeL2Block {
+					previousFile.EntryType != types.EntryTypeL2BlockEnd {
 					return fmt.Errorf("unexpected entry type before block bookmark type: %v, bookmark block number: %d", previousFile.EntryType, bookmark.Value)
 				}
 			}
@@ -75,8 +78,7 @@ func main() {
 			}
 		case types.EntryTypeBatchEnd:
 			if previousFile != nil &&
-				previousFile.EntryType != types.EntryTypeL2Tx &&
-				previousFile.EntryType != types.EntryTypeL2Block &&
+				previousFile.EntryType != types.EntryTypeL2BlockEnd &&
 				previousFile.EntryType != types.EntryTypeBatchStart {
 				return fmt.Errorf("unexpected entry type before batch end: %v", previousFile.EntryType)
 			}
@@ -91,7 +93,7 @@ func main() {
 			}
 			progressBlock = l2Block.L2BlockNumber
 			if previousFile != nil {
-				if previousFile.EntryType != types.BookmarkEntryType {
+				if previousFile.EntryType != types.BookmarkEntryType && !previousFile.IsL2BlockEnd() {
 					return fmt.Errorf("unexpected entry type before l2 block: %v, block number: %d", previousFile.EntryType, l2Block.L2BlockNumber)
 				} else {
 					bookmark, err := types.UnmarshalBookmark(previousFile.Data)

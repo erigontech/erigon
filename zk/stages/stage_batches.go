@@ -74,7 +74,9 @@ type HermezDb interface {
 type DatastreamClient interface {
 	ReadAllEntriesToChannel() error
 	GetL2BlockChan() chan types.FullL2Block
+	GetL2TxChan() chan types.L2TransactionProto
 	GetBatchStartChan() chan types.BatchStart
+	GetBatchEndChan() chan types.BatchEnd
 	GetGerUpdatesChan() chan types.GerUpdate
 	GetLastWrittenTimeAtomic() *atomic.Int64
 	GetStreamingAtomic() *atomic.Bool
@@ -215,6 +217,7 @@ func SpawnStageBatches(
 
 	l2BlockChan := cfg.dsClient.GetL2BlockChan()
 	batchStartChan := cfg.dsClient.GetBatchStartChan()
+	batchEndChan := cfg.dsClient.GetBatchEndChan()
 	gerUpdateChan := cfg.dsClient.GetGerUpdatesChan()
 	lastWrittenTimeAtomic := cfg.dsClient.GetLastWrittenTimeAtomic()
 	streamingAtomic := cfg.dsClient.GetStreamingAtomic()
@@ -242,6 +245,12 @@ LOOP:
 				}
 			}
 			_ = batchStart
+		case batchEnd := <-batchEndChan:
+			if batchEnd.LocalExitRoot != emptyHash {
+				if err := hermezDb.WriteLocalExitRootForBatchNo(batchEnd.Number, batchEnd.LocalExitRoot); err != nil {
+					return fmt.Errorf("write local exit root for l1 block hash error: %v", err)
+				}
+			}
 		case l2Block := <-l2BlockChan:
 			if cfg.zkCfg.SyncLimit > 0 && l2Block.L2BlockNumber >= cfg.zkCfg.SyncLimit {
 				// stop the node going into a crazy loop
@@ -268,10 +277,6 @@ LOOP:
 				}
 				// NOTE (RPC): avoided use of 'writeForkIdBlockOnce' by reading instead batch by forkId, and then lowest block number in batch
 			}
-
-			l2Block.ChainId = cfg.zkCfg.L2ChainId
-
-			atLeastOneBlockWritten = true
 
 			// ignore genesis or a repeat of the last block
 			if l2Block.L2BlockNumber == 0 {
@@ -352,6 +357,7 @@ LOOP:
 
 			lastHash = l2Block.L2Blockhash
 
+			atLeastOneBlockWritten = true
 			lastBlockHeight = l2Block.L2BlockNumber
 			blocksWritten++
 			progressChan <- blocksWritten
@@ -829,18 +835,11 @@ func writeL2Block(eriDb ErigonDb, hermezDb HermezDb, l2Block *types.FullL2Block,
 					return fmt.Errorf("write ger for l1 block hash error: %v", err)
 				}
 			}
-
-			// LER per batch - write the ler of the last block in the batch
-			if l2Block.BatchEnd && l2Block.LocalExitRoot != emptyHash {
-				if err := hermezDb.WriteLocalExitRootForBatchNo(l2Block.BatchNumber, l2Block.LocalExitRoot); err != nil {
-					return fmt.Errorf("write local exit root for l1 block hash error: %v", err)
-				}
-			}
 		}
 	}
 
 	if l2Block.L1InfoTreeIndex != 0 {
-		if err = hermezDb.WriteBlockL1InfoTreeIndex(l2Block.L2BlockNumber, uint64(l2Block.L1InfoTreeIndex)); err != nil {
+		if err := hermezDb.WriteBlockL1InfoTreeIndex(l2Block.L2BlockNumber, uint64(l2Block.L1InfoTreeIndex)); err != nil {
 			return err
 		}
 
@@ -850,13 +849,13 @@ func writeL2Block(eriDb ErigonDb, hermezDb HermezDb, l2Block *types.FullL2Block,
 		// for the stream and also for the block info root to be correct
 		if uint64(l2Block.L1InfoTreeIndex) <= highestL1InfoTreeIndex {
 			l1InfoTreeIndexReused = true
-			if err = hermezDb.WriteBlockGlobalExitRoot(l2Block.L2BlockNumber, l2Block.GlobalExitRoot); err != nil {
+			if err := hermezDb.WriteBlockGlobalExitRoot(l2Block.L2BlockNumber, l2Block.GlobalExitRoot); err != nil {
 				return fmt.Errorf("write block global exit root error: %w", err)
 			}
-			if err = hermezDb.WriteBlockL1BlockHash(l2Block.L2BlockNumber, l2Block.L1BlockHash); err != nil {
+			if err := hermezDb.WriteBlockL1BlockHash(l2Block.L2BlockNumber, l2Block.L1BlockHash); err != nil {
 				return fmt.Errorf("write block global exit root error: %w", err)
 			}
-			if err = hermezDb.WriteReusedL1InfoTreeIndex(l2Block.L2BlockNumber); err != nil {
+			if err := hermezDb.WriteReusedL1InfoTreeIndex(l2Block.L2BlockNumber); err != nil {
 				return fmt.Errorf("write reused l1 info tree index error: %w", err)
 			}
 		}
@@ -867,7 +866,7 @@ func writeL2Block(eriDb ErigonDb, hermezDb HermezDb, l2Block *types.FullL2Block,
 	// we always want the last written GER in this table as it's at the batch level, so it can and should
 	// be overwritten
 	if !l1InfoTreeIndexReused && didStoreGer {
-		if err = hermezDb.WriteLatestUsedGer(l2Block.BatchNumber, l2Block.GlobalExitRoot); err != nil {
+		if err := hermezDb.WriteLatestUsedGer(l2Block.BatchNumber, l2Block.GlobalExitRoot); err != nil {
 			return fmt.Errorf("write latest used ger error: %w", err)
 		}
 	}

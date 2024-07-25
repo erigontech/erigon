@@ -1,10 +1,27 @@
 package types
 
 import (
+	"encoding/binary"
+
 	libcommon "github.com/gateway-fm/cdk-erigon-lib/common"
 	"github.com/ledgerwatch/erigon/zk/datastream/proto/github.com/0xPolygonHermez/zkevm-node/state/datastream"
 	"google.golang.org/protobuf/proto"
 )
+
+type L2BlockEndProto struct {
+	Number uint64 `protobuf:"varint,1,opt,name=number,proto3" json:"number,omitempty"`
+}
+
+func (b *L2BlockEndProto) Type() EntryType {
+	return EntryTypeL2BlockEnd
+}
+
+// temporary until protos are made
+func (b *L2BlockEndProto) Marshal() ([]byte, error) {
+	bytes := make([]byte, 8)
+	binary.BigEndian.AppendUint64(bytes, b.Number)
+	return bytes, nil
+}
 
 type L2BlockProto struct {
 	*datastream.L2Block
@@ -19,16 +36,13 @@ type FullL2Block struct {
 	GlobalExitRoot  libcommon.Hash
 	Coinbase        libcommon.Address
 	ForkId          uint64
-	ChainId         uint64
 	L1BlockHash     libcommon.Hash
 	L2Blockhash     libcommon.Hash
-	StateRoot       libcommon.Hash
-	L2Txs           []L2TransactionProto
 	ParentHash      libcommon.Hash
-	BatchEnd        bool
-	LocalExitRoot   libcommon.Hash
+	StateRoot       libcommon.Hash
 	BlockGasLimit   uint64
 	BlockInfoRoot   libcommon.Hash
+	L2Txs           []L2TransactionProto
 	Debug           Debug
 }
 

@@ -796,6 +796,7 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 		}
 
 		seqVerSyncer := syncer.NewL1Syncer(
+			ctx,
 			ethermanClients,
 			seqAndVerifL1Contracts,
 			seqAndVerifTopics,
@@ -805,6 +806,7 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 		)
 
 		backend.l1Syncer = syncer.NewL1Syncer(
+			ctx,
 			ethermanClients,
 			l1Contracts,
 			l1Topics,
@@ -814,6 +816,7 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 		)
 
 		l1InfoTreeSyncer := syncer.NewL1Syncer(
+			ctx,
 			ethermanClients,
 			[]libcommon.Address{cfg.AddressGerManager},
 			[][]libcommon.Hash{{contracts.UpdateL1InfoTreeTopic}},
@@ -867,6 +870,7 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 			backend.txPool2.ForceUpdateLatestBlock(executionProgress)
 
 			l1BlockSyncer := syncer.NewL1Syncer(
+				ctx,
 				ethermanClients,
 				[]libcommon.Address{cfg.AddressZkevm, cfg.AddressRollup},
 				[][]libcommon.Hash{{

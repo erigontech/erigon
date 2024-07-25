@@ -35,7 +35,6 @@ func TestUnwindBatches(t *testing.T) {
 			GlobalExitRoot:  common.Hash{byte(i)},
 			Coinbase:        common.Address{byte(i)},
 			ForkId:          uint64(i) / 3,
-			ChainId:         uint64(1),
 			L1BlockHash:     common.Hash{byte(i)},
 			L2Blockhash:     common.Hash{byte(i)},
 			StateRoot:       common.Hash{byte(i)},

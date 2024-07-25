@@ -15,14 +15,14 @@ func Test_readHeaderEntry(t *testing.T) {
 	type testCase struct {
 		name           string
 		input          []byte
-		expectedResult types.HeaderEntry
+		expectedResult *types.HeaderEntry
 		expectedError  error
 	}
 	testCases := []testCase{
 		{
 			name:  "Happy path",
 			input: []byte{101, 0, 0, 0, 29, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 24, 0, 0, 0, 0, 0, 0, 0, 64},
-			expectedResult: types.HeaderEntry{
+			expectedResult: &types.HeaderEntry{
 				PacketType:   101,
 				HeadLength:   29,
 				StreamType:   types.StreamType(1),
@@ -34,7 +34,7 @@ func Test_readHeaderEntry(t *testing.T) {
 		{
 			name:           "Invalid byte array length",
 			input:          []byte{20, 21, 22, 23, 24, 20},
-			expectedResult: types.HeaderEntry{},
+			expectedResult: nil,
 			expectedError:  fmt.Errorf("failed to read header bytes reading from server: unexpected EOF"),
 		},
 	}
@@ -54,7 +54,7 @@ func Test_readHeaderEntry(t *testing.T) {
 
 			header, err := c.readHeaderEntry()
 			require.Equal(t, testCase.expectedError, err)
-			assert.DeepEqual(t, testCase.expectedResult, *header)
+			assert.DeepEqual(t, testCase.expectedResult, header)
 		})
 	}
 }
@@ -63,14 +63,14 @@ func Test_readResultEntry(t *testing.T) {
 	type testCase struct {
 		name           string
 		input          []byte
-		expectedResult types.ResultEntry
+		expectedResult *types.ResultEntry
 		expectedError  error
 	}
 	testCases := []testCase{
 		{
 			name:  "Happy path",
 			input: []byte{0, 0, 0, 9, 0, 0, 0, 0},
-			expectedResult: types.ResultEntry{
+			expectedResult: &types.ResultEntry{
 				PacketType: 1,
 				Length:     9,
 				ErrorNum:   0,
@@ -81,7 +81,7 @@ func Test_readResultEntry(t *testing.T) {
 		{
 			name:  "Happy path - error str length",
 			input: []byte{0, 0, 0, 19, 0, 0, 0, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10},
-			expectedResult: types.ResultEntry{
+			expectedResult: &types.ResultEntry{
 				PacketType: 1,
 				Length:     19,
 				ErrorNum:   0,
@@ -92,13 +92,13 @@ func Test_readResultEntry(t *testing.T) {
 		{
 			name:           "Invalid byte array length",
 			input:          []byte{20, 21, 22, 23, 24, 20},
-			expectedResult: types.ResultEntry{},
+			expectedResult: nil,
 			expectedError:  fmt.Errorf("failed to read main result bytes reading from server: unexpected EOF"),
 		},
 		{
 			name:           "Invalid error length",
 			input:          []byte{0, 0, 0, 12, 0, 0, 0, 0, 20, 21},
-			expectedResult: types.ResultEntry{},
+			expectedResult: nil,
 			expectedError:  fmt.Errorf("failed to read result errStr bytes reading from server: unexpected EOF"),
 		},
 	}
@@ -118,7 +118,7 @@ func Test_readResultEntry(t *testing.T) {
 
 			result, err := c.readResultEntry([]byte{1})
 			require.Equal(t, testCase.expectedError, err)
-			assert.DeepEqual(t, testCase.expectedResult, *result)
+			assert.DeepEqual(t, testCase.expectedResult, result)
 		})
 	}
 }
@@ -127,14 +127,14 @@ func Test_readFileEntry(t *testing.T) {
 	type testCase struct {
 		name           string
 		input          []byte
-		expectedResult types.FileEntry
+		expectedResult *types.FileEntry
 		expectedError  error
 	}
 	testCases := []testCase{
 		{
 			name:  "Happy path",
 			input: []byte{2, 0, 0, 0, 29, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 45, 0, 0, 0, 24, 0, 0, 0, 0, 0, 0, 0, 64},
-			expectedResult: types.FileEntry{
+			expectedResult: &types.FileEntry{
 				PacketType: 2,
 				Length:     29,
 				EntryType:  types.EntryType(1),
@@ -145,7 +145,7 @@ func Test_readFileEntry(t *testing.T) {
 		}, {
 			name:  "Happy path - no data",
 			input: []byte{2, 0, 0, 0, 17, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 45},
-			expectedResult: types.FileEntry{
+			expectedResult: &types.FileEntry{
 				PacketType: 2,
 				Length:     17,
 				EntryType:  types.EntryType(1),
@@ -157,18 +157,18 @@ func Test_readFileEntry(t *testing.T) {
 		{
 			name:           "Invalid packet type",
 			input:          []byte{5, 0, 0, 0, 17, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 45},
-			expectedResult: types.FileEntry{},
+			expectedResult: nil,
 			expectedError:  fmt.Errorf("error expecting data packet type 2 and received 5"),
 		},
 		{
 			name:           "Invalid byte array length",
 			input:          []byte{2, 21, 22, 23, 24, 20},
-			expectedResult: types.FileEntry{},
+			expectedResult: nil,
 			expectedError:  fmt.Errorf("error reading file bytes: reading from server: unexpected EOF"),
 		}, {
 			name:           "Invalid data length",
 			input:          []byte{2, 0, 0, 0, 31, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 45, 0, 0, 0, 24, 0, 0, 0, 0, 0, 0, 0, 64},
-			expectedResult: types.FileEntry{},
+			expectedResult: nil,
 			expectedError:  fmt.Errorf("error reading file data bytes: reading from server: unexpected EOF"),
 		},
 	}
@@ -187,7 +187,7 @@ func Test_readFileEntry(t *testing.T) {
 
 			result, err := c.readFileEntry()
 			require.Equal(t, testCase.expectedError, err)
-			assert.DeepEqual(t, testCase.expectedResult, *result)
+			assert.DeepEqual(t, testCase.expectedResult, result)
 		})
 	}
 }

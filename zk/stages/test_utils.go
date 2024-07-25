@@ -13,9 +13,11 @@ type TestDatastreamClient struct {
 	streamingAtomic       atomic.Bool
 	progress              atomic.Uint64
 	l2BlockChan           chan types.FullL2Block
+	l2TxChan              chan types.L2TransactionProto
 	gerUpdatesChan        chan types.GerUpdate
 	errChan               chan error
 	batchStartChan        chan types.BatchStart
+	batchEndChan          chan types.BatchEnd
 }
 
 func NewTestDatastreamClient(fullL2Blocks []types.FullL2Block, gerUpdates []types.GerUpdate) *TestDatastreamClient {
@@ -48,6 +50,10 @@ func (c *TestDatastreamClient) GetL2BlockChan() chan types.FullL2Block {
 	return c.l2BlockChan
 }
 
+func (c *TestDatastreamClient) GetL2TxChan() chan types.L2TransactionProto {
+	return c.l2TxChan
+}
+
 func (c *TestDatastreamClient) GetGerUpdatesChan() chan types.GerUpdate {
 	return c.gerUpdatesChan
 }
@@ -58,6 +64,10 @@ func (c *TestDatastreamClient) GetErrChan() chan error {
 
 func (c *TestDatastreamClient) GetBatchStartChan() chan types.BatchStart {
 	return c.batchStartChan
+}
+
+func (c *TestDatastreamClient) GetBatchEndChan() chan types.BatchEnd {
+	return c.batchEndChan
 }
 
 func (c *TestDatastreamClient) GetLastWrittenTimeAtomic() *atomic.Int64 {

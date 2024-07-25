@@ -48,6 +48,7 @@ type jobResult struct {
 }
 
 type L1Syncer struct {
+	ctx                 context.Context
 	etherMans           []IEtherman
 	ethermanIndex       uint8
 	ethermanMtx         *sync.Mutex
@@ -71,8 +72,9 @@ type L1Syncer struct {
 	highestBlockType string // finalized, latest, safe
 }
 
-func NewL1Syncer(etherMans []IEtherman, l1ContractAddresses []common.Address, topics [][]common.Hash, blockRange, queryDelay uint64, highestBlockType string) *L1Syncer {
+func NewL1Syncer(ctx context.Context, etherMans []IEtherman, l1ContractAddresses []common.Address, topics [][]common.Hash, blockRange, queryDelay uint64, highestBlockType string) *L1Syncer {
 	return &L1Syncer{
+		ctx:                 ctx,
 		etherMans:           etherMans,
 		ethermanIndex:       0,
 		ethermanMtx:         &sync.Mutex{},
@@ -350,6 +352,9 @@ func (s *L1Syncer) queryBlocks() error {
 loop:
 	for {
 		select {
+		case <-s.ctx.Done():
+			close(stop)
+			break loop
 		case res := <-results:
 			complete++
 			if res.Error != nil {

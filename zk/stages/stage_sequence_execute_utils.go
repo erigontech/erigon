@@ -270,37 +270,35 @@ func prepareHeader(tx kv.RwTx, previousBlockNumber, deltaTimestamp, forcedTimest
 	}, parentBlock, nil
 }
 
-func prepareL1AndInfoTreeRelatedStuff(sdb *stageDb, decodedBlock *zktx.DecodedBatchL2Data, l1Recovery bool, proposedTimestamp uint64) (uint64, *zktypes.L1InfoTreeUpdate, uint64, common.Hash, common.Hash, bool, error) {
-	var l1TreeUpdateIndex uint64
-	var l1TreeUpdate *zktypes.L1InfoTreeUpdate
-	var err error
-
+func prepareL1AndInfoTreeRelatedStuff(sdb *stageDb, decodedBlock *zktx.DecodedBatchL2Data, l1Recovery bool, proposedTimestamp uint64) (
+	infoTreeIndexProgress uint64,
+	l1TreeUpdate *zktypes.L1InfoTreeUpdate,
+	l1TreeUpdateIndex uint64,
+	l1BlockHash common.Hash,
+	ger common.Hash,
+	shouldWriteGerToContract bool,
+	err error,
+) {
 	// if we are in a recovery state and recognise that a l1 info tree index has been reused
 	// then we need to not include the GER and L1 block hash into the block info root calculation, so
 	// we keep track of this here
-	shouldWriteGerToContract := true
+	shouldWriteGerToContract = true
 
-	l1BlockHash := common.Hash{}
-	ger := common.Hash{}
-
-	infoTreeIndexProgress, err := stages.GetStageProgress(sdb.tx, stages.HighestUsedL1InfoIndex)
-	if err != nil {
-		return infoTreeIndexProgress, l1TreeUpdate, l1TreeUpdateIndex, l1BlockHash, ger, shouldWriteGerToContract, err
+	if infoTreeIndexProgress, err = stages.GetStageProgress(sdb.tx, stages.HighestUsedL1InfoIndex); err != nil {
+		return
 	}
 
 	if l1Recovery {
 		l1TreeUpdateIndex = uint64(decodedBlock.L1InfoTreeIndex)
-		l1TreeUpdate, err = sdb.hermezDb.GetL1InfoTreeUpdate(l1TreeUpdateIndex)
-		if err != nil {
-			return infoTreeIndexProgress, l1TreeUpdate, l1TreeUpdateIndex, l1BlockHash, ger, shouldWriteGerToContract, err
+		if l1TreeUpdate, err = sdb.hermezDb.GetL1InfoTreeUpdate(l1TreeUpdateIndex); err != nil {
+			return
 		}
 		if infoTreeIndexProgress >= l1TreeUpdateIndex {
 			shouldWriteGerToContract = false
 		}
 	} else {
-		l1TreeUpdateIndex, l1TreeUpdate, err = calculateNextL1TreeUpdateToUse(infoTreeIndexProgress, sdb.hermezDb, proposedTimestamp)
-		if err != nil {
-			return infoTreeIndexProgress, l1TreeUpdate, l1TreeUpdateIndex, l1BlockHash, ger, shouldWriteGerToContract, err
+		if l1TreeUpdateIndex, l1TreeUpdate, err = calculateNextL1TreeUpdateToUse(infoTreeIndexProgress, sdb.hermezDb, proposedTimestamp); err != nil {
+			return
 		}
 		if l1TreeUpdateIndex > 0 {
 			infoTreeIndexProgress = l1TreeUpdateIndex
@@ -313,7 +311,7 @@ func prepareL1AndInfoTreeRelatedStuff(sdb *stageDb, decodedBlock *zktx.DecodedBa
 		ger = l1TreeUpdate.GER
 	}
 
-	return infoTreeIndexProgress, l1TreeUpdate, l1TreeUpdateIndex, l1BlockHash, ger, shouldWriteGerToContract, nil
+	return
 }
 
 // will be called at the start of every new block created within a batch to figure out if there is a new GER

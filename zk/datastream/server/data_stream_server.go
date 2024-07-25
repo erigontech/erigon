@@ -227,7 +227,7 @@ func createFullBlockStreamEntriesProto(
 	batchNumber uint64,
 	l1InfoTreeMinTimestamps map[uint64]uint64,
 ) (*DataStreamEntries, error) {
-	entries := NewDataStreamEntries(len(filteredTransactions) + 2)
+	entries := NewDataStreamEntries(len(filteredTransactions) + 3) // block bookmark + block + block end
 	blockNum := block.NumberU64()
 	// L2 BLOCK BOOKMARK
 	entries.Add(newL2BlockBookmarkEntryProto(blockNum))
@@ -273,6 +273,8 @@ func createFullBlockStreamEntriesProto(
 		}
 		entries.Add(transaction)
 	}
+
+	entries.Add(newL2BlockEndProto(blockNum))
 
 	return entries, nil
 }
