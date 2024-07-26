@@ -543,7 +543,7 @@ func SanityCheckBeaconBlocks(ctx context.Context, csn *CaplinSnapshots, db kv.Ro
 		return err
 	}
 	previousBlockSlot := genesisHeader.Header.Slot
-	for i := uint64(from + 1); i < to; i++ {
+	for i := from + 1; i < to; i++ {
 		if min(0, i-2000) > previousBlockSlot {
 			return fmt.Errorf("snapshot %d has invalid slot", i)
 		}
