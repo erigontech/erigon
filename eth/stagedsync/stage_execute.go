@@ -80,7 +80,6 @@ type ExecuteBlockCfg struct {
 	historyV3 bool
 	syncCfg   ethconfig.Sync
 	genesis   *types.Genesis
-	agg       *libstate.Aggregator
 
 	silkworm        *silkworm.Silkworm
 	blockProduction bool
@@ -102,7 +101,6 @@ func StageExecuteBlocksCfg(
 	hd headerDownloader,
 	genesis *types.Genesis,
 	syncCfg ethconfig.Sync,
-	agg *libstate.Aggregator,
 	silkworm *silkworm.Silkworm,
 ) ExecuteBlockCfg {
 	return ExecuteBlockCfg{
@@ -121,7 +119,6 @@ func StageExecuteBlocksCfg(
 		genesis:      genesis,
 		historyV3:    true,
 		syncCfg:      syncCfg,
-		agg:          agg,
 		silkworm:     silkworm,
 	}
 }

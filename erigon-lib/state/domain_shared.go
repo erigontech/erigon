@@ -104,7 +104,10 @@ type SharedDomains struct {
 }
 
 type HasAggTx interface {
-	AggTx() interface{}
+	AggTx() any
+}
+type HasAgg interface {
+	Agg() any
 }
 
 func NewSharedDomains(tx kv.Tx, logger log.Logger) (*SharedDomains, error) {
@@ -176,7 +179,7 @@ func (sd *SharedDomains) GetDiffset(tx kv.RwTx, blockHash common.Hash, blockNumb
 	return ReadDiffSet(tx, blockNumber, blockHash)
 }
 
-func (sd *SharedDomains) AggTx() interface{} { return sd.aggTx }
+func (sd *SharedDomains) AggTx() any { return sd.aggTx }
 func (sd *SharedDomains) CanonicalReader() CanonicalsReader {
 	return nil
 	//return sd.aggTx.appendable[kv.ReceiptsAppendable].ap.cfg.iters
