@@ -128,12 +128,17 @@ func (m *mdbxPieceCompletion) Set(pk metainfo.PieceKey, b bool, awaitFlush bool)
 		return nil
 	}
 
+	// if we're awaiting flush update the DB immediately so it does not
+	// intefere with the timing of the background commit - may not be
+	// necessary - in which case the batch can be used
 	if awaitFlush {
 		return m.db.Update(context.Background(), func(tx kv.RwTx) error {
 			return putCompletion(tx, pk.InfoHash, uint32(pk.Index), b)
 		})
 	}
 
+	// batch updates for non flushed updated as they may happen in validation and
+	// there may be many if fast succession which can be slow if handled individually
 	return m.db.Batch(func(tx kv.RwTx) error {
 		return putCompletion(tx, pk.InfoHash, uint32(pk.Index), b)
 	})
