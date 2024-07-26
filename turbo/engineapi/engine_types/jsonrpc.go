@@ -218,7 +218,7 @@ func ConvertPayloadFromRpc(payload *types2.ExecutionPayload) *ExecutionPayload {
 	if payload.Version >= 4 {
 		res.DepositRequests = ConvertDepositRequestsFromRpc(payload.DepositRequests)
 		res.WithdrawalRequests = ConvertWithdrawalRequestsFromRpc(payload.WithdrawalRequests)
-		// res.ConsolidationRequests = Conver
+		res.ConsolidationRequests = ConvertConsolidationRequestsFromRpc(payload.ConsolidationRequests)
 	}
 	return res
 }
@@ -316,8 +316,8 @@ func ConvertConsolidationRequestsFromRpc(in []*types2.ConsolidationRequest) []*t
 	for _, c := range in {
 		out = append(out, &types.ConsolidationRequest{
 			SourceAddress: gointerfaces.ConvertH160toAddress(c.SourceAddress),
-			SourcePubKey: [48]byte(c.SourcePubkey),
-			TargetPubKey: [48]byte(c.TargetPubkey),
+			SourcePubKey:  [48]byte(c.SourcePubkey),
+			TargetPubKey:  [48]byte(c.TargetPubkey),
 		})
 	}
 	return out
