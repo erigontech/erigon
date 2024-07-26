@@ -47,12 +47,9 @@ type EntityStore[TEntity Entity] interface {
 type RangeIndexFactory func(ctx context.Context) (*RangeIndex, error)
 
 type mdbxEntityStore[TEntity Entity] struct {
-	db    *polygoncommon.Database
-	label kv.Label
-	table string
-
-	makeEntity func() TEntity
-
+	db                       *polygoncommon.Database
+	table                    string
+	makeEntity               func() TEntity
 	blockNumToIdIndexFactory RangeIndexFactory
 	blockNumToIdIndex        *RangeIndex
 	prepareOnce              sync.Once
@@ -60,18 +57,14 @@ type mdbxEntityStore[TEntity Entity] struct {
 
 func newMdbxEntityStore[TEntity Entity](
 	db *polygoncommon.Database,
-	label kv.Label,
 	table string,
 	makeEntity func() TEntity,
 	blockNumToIdIndexFactory RangeIndexFactory,
 ) *mdbxEntityStore[TEntity] {
 	return &mdbxEntityStore[TEntity]{
-		db:    db,
-		label: label,
-		table: table,
-
-		makeEntity: makeEntity,
-
+		db:                       db,
+		table:                    table,
+		makeEntity:               makeEntity,
 		blockNumToIdIndexFactory: blockNumToIdIndexFactory,
 	}
 }
@@ -79,7 +72,7 @@ func newMdbxEntityStore[TEntity Entity](
 func (s *mdbxEntityStore[TEntity]) Prepare(ctx context.Context) error {
 	var err error
 	s.prepareOnce.Do(func() {
-		err = s.db.OpenOnce(ctx, s.label, databaseTablesCfg)
+		err = s.db.OpenOnce(ctx)
 		if err != nil {
 			return
 		}

@@ -1,11 +1,11 @@
 # Erigon
 
+Documentation: **[erigon.gitbook.io](https://erigon.gitbook.io)**
+
 Erigon is an implementation of Ethereum (execution layer with embeddable consensus layer), on the efficiency
 frontier. [Archive Node](https://ethereum.org/en/developers/docs/nodes-and-clients/archive-nodes/#what-is-an-archive-node)
 by default.
 
-An accessible and complete version of the documentation is available at **[erigon.gitbook.io](https://erigon.gitbook.io)
-**.
 <br>
 
 ![Build status](https://github.com/erigontech/erigon/actions/workflows/ci.yml/badge.svg) [![Coverage](https://sonarcloud.io/api/project_badges/measure?project=erigontech_erigon&metric=coverage)](https://sonarcloud.io/summary/new_code?id=erigontech_erigon)

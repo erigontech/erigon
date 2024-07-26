@@ -70,7 +70,7 @@ func NewStore(db *polygoncommon.Database) *MdbxStore {
 }
 
 func (s *MdbxStore) Prepare(ctx context.Context) error {
-	err := s.db.OpenOnce(ctx, kv.PolygonBridgeDB, databaseTablesCfg)
+	err := s.db.OpenOnce(ctx)
 	if err != nil {
 		return err
 	}
