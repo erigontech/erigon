@@ -1229,7 +1229,7 @@ func (r *BlockReader) borBlockByEventHash(txnHash common.Hash, segments []*Segme
 		offset := idxBorTxnHash.OrdinalLookup(blockEventId)
 		gg := sn.MakeGetter()
 		gg.Reset(offset)
-		if gg.MatchPrefixCmp(txnHash[:]) == 0 {
+		if gg.MatchPrefixCmp(txnHash[:]) != 0 {
 			continue
 		}
 		buf, _ = gg.Next(buf[:0])
