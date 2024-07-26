@@ -34,7 +34,7 @@ import (
 	"github.com/erigontech/erigon/cl/utils/eth_clock"
 )
 
-func setupBlockService(t *testing.T, ctrl *gomock.Controller) (BlockService, *synced_data.SyncedDataManager, *eth_clock.MockEthereumClock, *mock_services.ForkChoiceStorageMock) {
+func setupBlockService(t *testing.T, ctrl *gomock.Controller) (BlockService, *synced_data.SyncedDataManager, *eth_clock.MockEthereumClock, *mock_services.ForkChoiceStorageMock, *mockMonitor.MockValidatorMonitor) {
 	db := memdb.NewTestDB(t)
 	cfg := &clparams.MainnetBeaconConfig
 	syncedDataManager := synced_data.NewSyncedDataManager(true, cfg)
@@ -42,7 +42,7 @@ func setupBlockService(t *testing.T, ctrl *gomock.Controller) (BlockService, *sy
 	forkchoiceMock := mock_services.NewForkChoiceStorageMock(t)
 	validatorMonitor := mockMonitor.NewMockValidatorMonitor(ctrl)
 	blockService := NewBlockService(context.Background(), db, forkchoiceMock, syncedDataManager, ethClock, cfg, nil, validatorMonitor)
-	return blockService, syncedDataManager, ethClock, forkchoiceMock
+	return blockService, syncedDataManager, ethClock, forkchoiceMock, validatorMonitor
 }
 
 func TestBlockServiceUnsynced(t *testing.T) {
@@ -51,7 +51,7 @@ func TestBlockServiceUnsynced(t *testing.T) {
 
 	blocks, _, _ := tests.GetBellatrixRandom()
 
-	blockService, _, _, _ := setupBlockService(t, ctrl)
+	blockService, _, _, _, _ := setupBlockService(t, ctrl)
 	require.Error(t, blockService.ProcessMessage(context.Background(), nil, blocks[0]))
 }
 
@@ -61,7 +61,7 @@ func TestBlockServiceIgnoreSlot(t *testing.T) {
 
 	blocks, _, post := tests.GetBellatrixRandom()
 
-	blockService, syncedData, ethClock, _ := setupBlockService(t, ctrl)
+	blockService, syncedData, ethClock, _, _ := setupBlockService(t, ctrl)
 	syncedData.OnHeadState(post)
 	ethClock.EXPECT().GetCurrentSlot().Return(uint64(0)).AnyTimes()
 	ethClock.EXPECT().IsSlotCurrentSlotWithMaximumClockDisparity(gomock.Any()).Return(false).AnyTimes()
@@ -75,7 +75,7 @@ func TestBlockServiceLowerThanFinalizedCheckpoint(t *testing.T) {
 
 	blocks, _, post := tests.GetBellatrixRandom()
 
-	blockService, syncedData, ethClock, fcu := setupBlockService(t, ctrl)
+	blockService, syncedData, ethClock, fcu, _ := setupBlockService(t, ctrl)
 	syncedData.OnHeadState(post)
 	ethClock.EXPECT().GetCurrentSlot().Return(uint64(0)).AnyTimes()
 	ethClock.EXPECT().IsSlotCurrentSlotWithMaximumClockDisparity(gomock.Any()).Return(true).AnyTimes()
@@ -91,7 +91,7 @@ func TestBlockServiceUnseenParentRoot(t *testing.T) {
 
 	blocks, _, post := tests.GetBellatrixRandom()
 
-	blockService, syncedData, ethClock, fcu := setupBlockService(t, ctrl)
+	blockService, syncedData, ethClock, fcu, _ := setupBlockService(t, ctrl)
 	syncedData.OnHeadState(post)
 	ethClock.EXPECT().GetCurrentSlot().Return(uint64(0)).AnyTimes()
 	ethClock.EXPECT().IsSlotCurrentSlotWithMaximumClockDisparity(gomock.Any()).Return(true).AnyTimes()
@@ -106,7 +106,7 @@ func TestBlockServiceYoungerThanParent(t *testing.T) {
 
 	blocks, _, post := tests.GetBellatrixRandom()
 
-	blockService, syncedData, ethClock, fcu := setupBlockService(t, ctrl)
+	blockService, syncedData, ethClock, fcu, _ := setupBlockService(t, ctrl)
 	syncedData.OnHeadState(post)
 	ethClock.EXPECT().GetCurrentSlot().Return(uint64(0)).AnyTimes()
 	ethClock.EXPECT().IsSlotCurrentSlotWithMaximumClockDisparity(gomock.Any()).Return(true).AnyTimes()
@@ -123,7 +123,7 @@ func TestBlockServiceInvalidCommitmentsPerBlock(t *testing.T) {
 
 	blocks, _, post := tests.GetBellatrixRandom()
 
-	blockService, syncedData, ethClock, fcu := setupBlockService(t, ctrl)
+	blockService, syncedData, ethClock, fcu, _ := setupBlockService(t, ctrl)
 	syncedData.OnHeadState(post)
 	ethClock.EXPECT().GetCurrentSlot().Return(uint64(0)).AnyTimes()
 	ethClock.EXPECT().IsSlotCurrentSlotWithMaximumClockDisparity(gomock.Any()).Return(true).AnyTimes()
@@ -143,13 +143,14 @@ func TestBlockServiceSuccess(t *testing.T) {
 
 	blocks, _, post := tests.GetBellatrixRandom()
 
-	blockService, syncedData, ethClock, fcu := setupBlockService(t, ctrl)
+	blockService, syncedData, ethClock, fcu, validatorMonitor := setupBlockService(t, ctrl)
 	syncedData.OnHeadState(post)
 	ethClock.EXPECT().GetCurrentSlot().Return(uint64(0)).AnyTimes()
 	ethClock.EXPECT().IsSlotCurrentSlotWithMaximumClockDisparity(gomock.Any()).Return(true).AnyTimes()
 	fcu.FinalizedCheckpointVal = post.FinalizedCheckpoint()
 	fcu.Headers[blocks[1].Block.ParentRoot] = blocks[0].SignedBeaconBlockHeader().Header.Copy()
 	blocks[1].Block.Body.BlobKzgCommitments = solid.NewStaticListSSZ[*cltypes.KZGCommitment](100, 48)
+	validatorMonitor.EXPECT().OnNewBlock(blocks[1].Block).Return(nil).Times(1)
 
 	require.NoError(t, blockService.ProcessMessage(context.Background(), nil, blocks[1]))
 }
