@@ -148,16 +148,16 @@ func (branchData BranchData) String() string {
 				fmt.Fprintf(&sb, "hashedKey=[%x]", cell.downHashedKey[:cell.downHashedLen])
 				comma = ","
 			}
-			if cell.apl > 0 {
-				fmt.Fprintf(&sb, "%saccountPlainKey=[%x]", comma, cell.apk[:cell.apl])
+			if cell.accountPlainKeyLen > 0 {
+				fmt.Fprintf(&sb, "%saccountPlainKey=[%x]", comma, cell.accountPlainKey[:cell.accountPlainKeyLen])
 				comma = ","
 			}
-			if cell.spl > 0 {
-				fmt.Fprintf(&sb, "%sstoragePlainKey=[%x]", comma, cell.spk[:cell.spl])
+			if cell.storagePlainKeyLen > 0 {
+				fmt.Fprintf(&sb, "%sstoragePlainKey=[%x]", comma, cell.storagePlainKey[:cell.storagePlainKeyLen])
 				comma = ","
 			}
-			if cell.hl > 0 {
-				fmt.Fprintf(&sb, "%shash=[%x]", comma, cell.h[:cell.hl])
+			if cell.HashLen > 0 {
+				fmt.Fprintf(&sb, "%shash=[%x]", comma, cell.hash[:cell.HashLen])
 			}
 			sb.WriteString("}\n")
 		}
@@ -291,16 +291,16 @@ func (be *BranchEncoder) EncodeBranch(bitmap, touchMap, afterMap uint16, readCel
 
 		if bitmap&bit != 0 {
 			var fieldBits PartFlags
-			if cell.extLen > 0 && cell.spl == 0 {
+			if cell.extLen > 0 && cell.storagePlainKeyLen == 0 {
 				fieldBits |= HashedKeyPart
 			}
-			if cell.apl > 0 {
+			if cell.accountPlainKeyLen > 0 {
 				fieldBits |= AccountPlainPart
 			}
-			if cell.spl > 0 {
+			if cell.storagePlainKeyLen > 0 {
 				fieldBits |= StoragePlainPart
 			}
-			if cell.hl > 0 {
+			if cell.HashLen > 0 {
 				fieldBits |= HashPart
 			}
 			if err := be.buf.WriteByte(byte(fieldBits)); err != nil {
@@ -312,17 +312,17 @@ func (be *BranchEncoder) EncodeBranch(bitmap, touchMap, afterMap uint16, readCel
 				}
 			}
 			if fieldBits&AccountPlainPart != 0 {
-				if err := putUvarAndVal(uint64(cell.apl), cell.apk[:cell.apl]); err != nil {
+				if err := putUvarAndVal(uint64(cell.accountPlainKeyLen), cell.accountPlainKey[:cell.accountPlainKeyLen]); err != nil {
 					return nil, 0, err
 				}
 			}
 			if fieldBits&StoragePlainPart != 0 {
-				if err := putUvarAndVal(uint64(cell.spl), cell.spk[:cell.spl]); err != nil {
+				if err := putUvarAndVal(uint64(cell.storagePlainKeyLen), cell.storagePlainKey[:cell.storagePlainKeyLen]); err != nil {
 					return nil, 0, err
 				}
 			}
 			if fieldBits&HashPart != 0 {
-				if err := putUvarAndVal(uint64(cell.hl), cell.h[:cell.hl]); err != nil {
+				if err := putUvarAndVal(uint64(cell.HashLen), cell.hash[:cell.HashLen]); err != nil {
 					return nil, 0, err
 				}
 			}
@@ -751,14 +751,14 @@ func DecodeBranchAndCollectStat(key, branch []byte, tv TrieVariant) *BranchStat 
 			stat.MinCellSize = min(stat.MinCellSize, enc)
 			stat.MaxCellSize = max(stat.MaxCellSize, enc)
 			switch {
-			case c.apl > 0:
-				stat.APKSize += uint64(c.apl)
+			case c.accountPlainKeyLen > 0:
+				stat.APKSize += uint64(c.accountPlainKeyLen)
 				stat.APKCount++
-			case c.spl > 0:
-				stat.SPKSize += uint64(c.spl)
+			case c.storagePlainKeyLen > 0:
+				stat.SPKSize += uint64(c.storagePlainKeyLen)
 				stat.SPKCount++
-			case c.hl > 0:
-				stat.HashSize += uint64(c.hl)
+			case c.HashLen > 0:
+				stat.HashSize += uint64(c.HashLen)
 				stat.HashCount++
 			default:
 				panic("no plain key" + fmt.Sprintf("#+%v", c))

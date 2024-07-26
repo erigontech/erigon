@@ -177,6 +177,12 @@ func (d *DiagnosticClient) runSubStageListener(rootCtx context.Context) {
 }
 
 func (d *DiagnosticClient) GetCurrentSyncIdxs() CurrentSyncStagesIdxs {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	return d.getCurrentSyncIdxs()
+}
+
+func (d *DiagnosticClient) getCurrentSyncIdxs() CurrentSyncStagesIdxs {
 	currentIdxs := CurrentSyncStagesIdxs{
 		Stage:    -1,
 		SubStage: -1,
