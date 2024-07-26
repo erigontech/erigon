@@ -199,7 +199,7 @@ func (s *Snapshot) Apply(parent *types.Header, headers []*types.Header, logger l
 
 			// get validators from headers and use that for new validator set
 			newVals, _ := valset.ParseValidators(validatorBytes)
-			v := getUpdatedValidatorSet(snap.ValidatorSet.Copy(), newVals, logger)
+			v := valset.GetUpdatedValidatorSet(snap.ValidatorSet.Copy(), newVals, logger)
 			v.IncrementProposerPriority(1)
 			snap.ValidatorSet = v
 		}
