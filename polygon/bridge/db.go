@@ -43,7 +43,7 @@ import (
 	ID range is [4,6].
 */
 
-var DatabaseTablesCfg = kv.TableCfg{
+var databaseTablesCfg = kv.TableCfg{
 	kv.BorEvents:    {},
 	kv.BorEventNums: {},
 }
