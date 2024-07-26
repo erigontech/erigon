@@ -52,6 +52,7 @@ type mdbxEntityStore[TEntity Entity] struct {
 	makeEntity               func() TEntity
 	blockNumToIdIndexFactory RangeIndexFactory
 	blockNumToIdIndex        *RangeIndex
+	writeMu                  *sync.Mutex
 	prepareOnce              sync.Once
 }
 
@@ -60,12 +61,14 @@ func newMdbxEntityStore[TEntity Entity](
 	table string,
 	makeEntity func() TEntity,
 	blockNumToIdIndexFactory RangeIndexFactory,
+	writeMu *sync.Mutex,
 ) *mdbxEntityStore[TEntity] {
 	return &mdbxEntityStore[TEntity]{
 		db:                       db,
 		table:                    table,
 		makeEntity:               makeEntity,
 		blockNumToIdIndexFactory: blockNumToIdIndexFactory,
+		writeMu:                  writeMu,
 	}
 }
 
@@ -166,6 +169,9 @@ func (s *mdbxEntityStore[TEntity]) GetEntity(ctx context.Context, id uint64) (TE
 }
 
 func (s *mdbxEntityStore[TEntity]) PutEntity(ctx context.Context, id uint64, entity TEntity) error {
+	defer s.writeMu.Unlock()
+	s.writeMu.Lock()
+
 	tx, err := s.db.BeginRw(ctx)
 	if err != nil {
 		return err

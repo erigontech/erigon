@@ -18,6 +18,7 @@ package heimdall
 
 import (
 	"context"
+	"sync"
 
 	"golang.org/x/sync/errgroup"
 
@@ -41,11 +42,12 @@ func NewMdbxServiceStore(logger log.Logger, dataDir string, tmpDir string) *Mdbx
 		return NewRangeIndex(ctx, tmpDir, logger)
 	}
 
+	var writeMu sync.Mutex
 	return &MdbxServiceStore{
 		db:          db,
-		checkpoints: newMdbxEntityStore(db, kv.BorCheckpoints, generics.New[Checkpoint], blockNumToIdIndexFactory),
-		milestones:  newMdbxEntityStore(db, kv.BorMilestones, generics.New[Milestone], blockNumToIdIndexFactory),
-		spans:       newMdbxEntityStore(db, kv.BorSpans, generics.New[Span], blockNumToIdIndexFactory),
+		checkpoints: newMdbxEntityStore(db, kv.BorCheckpoints, generics.New[Checkpoint], blockNumToIdIndexFactory, &writeMu),
+		milestones:  newMdbxEntityStore(db, kv.BorMilestones, generics.New[Milestone], blockNumToIdIndexFactory, &writeMu),
+		spans:       newMdbxEntityStore(db, kv.BorSpans, generics.New[Span], blockNumToIdIndexFactory, &writeMu),
 	}
 }
 
