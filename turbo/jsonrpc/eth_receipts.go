@@ -339,10 +339,9 @@ func (api *BaseAPI) getLogsV3(ctx context.Context, tx kv.TemporalTx, begin, end 
 			log.BlockHash = blockHash
 			log.TxHash = txn.Hash()
 		}
-		filteredErigonLogs := make(types.ErigonLogs, 0, len(rawLogs))
 		//TODO: maybe Logs by default and enreach them with
 		for _, filteredLog := range filtered {
-			filteredErigonLogs = append(filteredErigonLogs, &types.ErigonLog{
+			logs = append(logs, &types.ErigonLog{
 				Address:     filteredLog.Address,
 				Topics:      filteredLog.Topics,
 				Data:        filteredLog.Data,
@@ -355,7 +354,6 @@ func (api *BaseAPI) getLogsV3(ctx context.Context, tx kv.TemporalTx, begin, end 
 				Timestamp:   timestamp,
 			})
 		}
-		logs = append(logs, filteredErigonLogs...)
 	}
 
 	//stats := api._agg.GetAndResetStats()
