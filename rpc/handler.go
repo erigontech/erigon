@@ -443,7 +443,7 @@ func (h *handler) handleCallMsg(ctx *callProc, msg *jsonrpcMessage, stream *json
 		if h.traceRequests {
 			h.logger.Info("Served", "t", time.Since(start), "method", msg.Method, "reqid", idForLog(msg.ID), "params", string(msg.Params))
 		} else {
-			h.logger.Trace("Served", "t", time.Since(start), "method", msg.Method, "reqid", idForLog(msg.ID), "params", string(msg.Params))
+			//h.logger.Trace("Served", "t", time.Since(start), "method", msg.Method, "reqid", idForLog(msg.ID), "params", string(msg.Params))
 		}
 
 		return resp
