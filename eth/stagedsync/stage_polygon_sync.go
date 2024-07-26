@@ -675,7 +675,7 @@ func blockRangeEntitiesFromBlockNum[T blockRangeComparator](tx kv.Tx, table stri
 	defer cur.Close()
 	var k, v []byte
 	var entities []T
-	for k, v, err = cur.Last(); err == nil && k != nil; _, v, err = cur.Prev() {
+	for k, v, err = cur.Last(); err == nil && k != nil; k, v, err = cur.Prev() {
 		entity := makeEntity()
 		err = json.Unmarshal(v, entity)
 		if err != nil {
