@@ -121,17 +121,23 @@ func (m *ValidatorMonitorImpl) runReportAttesterStatus() {
 		currentEpoch := m.ethClock.GetCurrentEpoch()
 		// report attester status for current_epoch - 2
 		epoch := currentEpoch - 2
+		hitCount := 0
+		missCount := 0
 		for vindex, statuses := range m.vaidatorStatuses {
 			if status, ok := statuses[epoch]; ok {
-				metricAttestHit.AddInt(status.attestedBlockRoots.Cardinality())
+				successAtt := status.attestedBlockRoots.Cardinality()
+				metricAttestHit.AddInt(successAtt)
+				hitCount += successAtt
 				delete(statuses, epoch)
-				log.Debug("[attester] report attester status hit", "epoch", epoch, "vindex", vindex, "countAttestedBlock", status.attestedBlockRoots.Cardinality())
+				log.Debug("[monitor] report attester status hit", "epoch", epoch, "vindex", vindex, "countAttestedBlock", status.attestedBlockRoots.Cardinality())
 			} else {
 				metricAttestMiss.AddInt(1)
-				log.Debug("[attester] report attester status miss", "epoch", epoch, "vindex", vindex, "countAttestedBlock", 0)
+				missCount++
+				log.Debug("[monitor] report attester status miss", "epoch", epoch, "vindex", vindex, "countAttestedBlock", 0)
 			}
 		}
 		m.vStatusMutex.Unlock()
+		log.Info("[monitor] report attester hit/miss", "epoch", epoch, "hitCount", hitCount, "missCount", missCount)
 	}
 
 }
