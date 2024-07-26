@@ -1033,17 +1033,8 @@ func (g *Getter) MatchPrefixCmp(prefix []byte) int {
 		copy(decoded[lastUncovered:wordLen], g.data[postLoopPos:postLoopPos+dif])
 		// postLoopPos += dif
 	}
-	var cmp int
-	if prefixLen > int(wordLen) {
-		// TODO(racytech): handle this case
-		// e.g: prefix = 'aaacb'
-		// 		word = 'aaa'
-		cmp = bytes.Compare(prefix, decoded)
-	} else {
-		cmp = bytes.Compare(prefix, decoded[:prefixLen])
-	}
 
-	return cmp
+	return bytes.Compare(prefix, decoded[:min(prefixLen, int(wordLen))])
 }
 
 func (g *Getter) MatchPrefixUncompressed(prefix []byte) int {
@@ -1064,13 +1055,7 @@ func (g *Getter) MatchPrefixUncompressed(prefix []byte) int {
 
 	g.nextPos(true)
 
-	// if prefixLen > int(wordLen) {
-	// 	// TODO(racytech): handle this case
-	// 	// e.g: prefix = 'aaacb'
-	// 	// 		word = 'aaa'
-	// }
-
-	return bytes.Compare(prefix, g.data[g.dataP:g.dataP+wordLen])
+	return bytes.Compare(prefix, g.data[g.dataP:g.dataP+min(uint64(prefixLen), wordLen)])
 }
 
 // FastNext extracts a compressed word from current offset in the file
