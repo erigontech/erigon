@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/common/u256"
 	"github.com/erigontech/erigon/core"
@@ -50,7 +51,7 @@ type Bridge struct {
 }
 
 func Assemble(dataDir string, logger log.Logger, borConfig *borcfg.BorConfig, fetchSyncEvents fetchSyncEventsType, stateReceiverABI abi.ABI) *Bridge {
-	bridgeDB := polygoncommon.NewDatabase(dataDir, logger)
+	bridgeDB := polygoncommon.NewDatabase(dataDir, kv.PolygonBridgeDB, DatabaseTablesCfg, logger)
 	bridgeStore := NewStore(bridgeDB)
 	return NewBridge(bridgeStore, logger, borConfig, fetchSyncEvents, stateReceiverABI)
 }

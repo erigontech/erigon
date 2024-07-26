@@ -12,6 +12,7 @@ import (
 	"go.uber.org/mock/gomock"
 
 	"github.com/erigontech/erigon-lib/common/hexutil"
+	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/accounts/abi"
 	"github.com/erigontech/erigon/core/types"
@@ -33,7 +34,7 @@ func setup(t *testing.T, abi abi.ABI) (*heimdall.MockHeimdallClient, *bridge.Bri
 	}
 
 	heimdallClient := heimdall.NewMockHeimdallClient(ctrl)
-	polygonBridgeDB := polygoncommon.NewDatabase(t.TempDir(), logger)
+	polygonBridgeDB := polygoncommon.NewDatabase(t.TempDir(), kv.PolygonBridgeDB, bridge.DatabaseTablesCfg, logger)
 	store := bridge.NewStore(polygonBridgeDB)
 	b := bridge.NewBridge(store, logger, &borConfig, heimdallClient.FetchStateSyncEvents, abi)
 
