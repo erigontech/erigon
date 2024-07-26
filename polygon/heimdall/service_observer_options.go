@@ -20,7 +20,7 @@ type ObserverOptions struct {
 
 type ObserverOption func(opts *ObserverOptions)
 
-func ObserverWithEventsLimit(eventsLimit int) ObserverOption {
+func WithEventsLimit(eventsLimit int) ObserverOption {
 	return func(config *ObserverOptions) {
 		config.eventsLimit = eventsLimit
 	}

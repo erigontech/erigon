@@ -149,7 +149,7 @@ func (te *TipEvents) Run(ctx context.Context) error {
 			Type:         EventTypeNewMilestone,
 			newMilestone: milestone,
 		})
-	}, heimdall.ObserverWithEventsLimit(5))
+	}, heimdall.WithEventsLimit(5))
 	defer milestoneObserverCancel()
 
 	spanObserverCancel := te.heimdallObserverRegistrar.RegisterSpanObserver(func(span *heimdall.Span) {
@@ -157,7 +157,7 @@ func (te *TipEvents) Run(ctx context.Context) error {
 			Type:    EventTypeNewSpan,
 			newSpan: span,
 		})
-	}, heimdall.ObserverWithEventsLimit(2))
+	}, heimdall.WithEventsLimit(2))
 	defer spanObserverCancel()
 
 	return te.events.Run(ctx)
