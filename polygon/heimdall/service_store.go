@@ -36,16 +36,16 @@ type ServiceStore interface {
 }
 
 func NewMdbxServiceStore(logger log.Logger, dataDir string, tmpDir string) *MdbxServiceStore {
-	db := polygoncommon.NewDatabase(dataDir, logger)
+	db := polygoncommon.NewDatabase(dataDir, kv.HeimdallDB, databaseTablesCfg, logger)
 	blockNumToIdIndexFactory := func(ctx context.Context) (*RangeIndex, error) {
 		return NewRangeIndex(ctx, tmpDir, logger)
 	}
 
 	return &MdbxServiceStore{
 		db:          db,
-		checkpoints: newMdbxEntityStore(db, kv.HeimdallDB, kv.BorCheckpoints, generics.New[Checkpoint], blockNumToIdIndexFactory),
-		milestones:  newMdbxEntityStore(db, kv.HeimdallDB, kv.BorMilestones, generics.New[Milestone], blockNumToIdIndexFactory),
-		spans:       newMdbxEntityStore(db, kv.HeimdallDB, kv.BorSpans, generics.New[Span], blockNumToIdIndexFactory),
+		checkpoints: newMdbxEntityStore(db, kv.BorCheckpoints, generics.New[Checkpoint], blockNumToIdIndexFactory),
+		milestones:  newMdbxEntityStore(db, kv.BorMilestones, generics.New[Milestone], blockNumToIdIndexFactory),
+		spans:       newMdbxEntityStore(db, kv.BorSpans, generics.New[Span], blockNumToIdIndexFactory),
 	}
 }
 
