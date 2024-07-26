@@ -56,4 +56,5 @@ var (
 	mxFlushTook            = metrics.GetOrCreateSummary("domain_flush_took")
 	mxCommitmentRunning    = metrics.GetOrCreateGauge("domain_running_commitment")
 	mxCommitmentTook       = metrics.GetOrCreateSummary("domain_commitment_took")
+	mxFileReadTime         = metrics.GetOrCreateHistogram("domain_file_read_time")
 )
