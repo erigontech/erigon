@@ -33,8 +33,8 @@ type Service interface {
 	FetchLatestSpans(ctx context.Context, count uint) ([]*Span, error)
 	FetchCheckpointsFromBlock(ctx context.Context, startBlock uint64) (Waypoints, error)
 	FetchMilestonesFromBlock(ctx context.Context, startBlock uint64) (Waypoints, error)
-	RegisterMilestoneObserver(callback func(*Milestone)) polygoncommon.UnregisterFunc
-	RegisterSpanObserver(callback func(*Span)) polygoncommon.UnregisterFunc
+	RegisterMilestoneObserver(cb func(*Milestone), opts ...ObserverOption) polygoncommon.UnregisterFunc
+	RegisterSpanObserver(cb func(*Span), opts ...ObserverOption) polygoncommon.UnregisterFunc
 	Run(ctx context.Context) error
 }
 
@@ -193,22 +193,20 @@ func (s *service) FetchMilestonesFromBlock(ctx context.Context, startBlock uint6
 	return libcommon.SliceMap(entities, castEntityToWaypoint[*Milestone]), err
 }
 
-// TODO: this limit is a temporary solution to avoid piping thousands of events
-// during the first sync. Let's discuss alternatives. Hopefully we can remove this limit.
-const maxEntityEvents = 5
-
-func (s *service) RegisterMilestoneObserver(callback func(*Milestone)) polygoncommon.UnregisterFunc {
+func (s *service) RegisterMilestoneObserver(cb func(*Milestone), opts ...ObserverOption) polygoncommon.UnregisterFunc {
+	options := NewObserverOptions(opts...)
 	return s.milestoneScraper.RegisterObserver(func(entities []*Milestone) {
-		for _, entity := range libcommon.SliceTakeLast(entities, maxEntityEvents) {
-			callback(entity)
+		for _, entity := range libcommon.SliceTakeLast(entities, options.eventsLimit) {
+			cb(entity)
 		}
 	})
 }
 
-func (s *service) RegisterSpanObserver(callback func(*Span)) polygoncommon.UnregisterFunc {
+func (s *service) RegisterSpanObserver(cb func(*Span), opts ...ObserverOption) polygoncommon.UnregisterFunc {
+	options := NewObserverOptions(opts...)
 	return s.spanScraper.RegisterObserver(func(entities []*Span) {
-		for _, entity := range libcommon.SliceTakeLast(entities, maxEntityEvents) {
-			callback(entity)
+		for _, entity := range libcommon.SliceTakeLast(entities, options.eventsLimit) {
+			cb(entity)
 		}
 	})
 }
