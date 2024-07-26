@@ -259,7 +259,7 @@ func (c *StreamClient) ReadAllEntriesToChannel() error {
 		}
 
 		// reset the channels as there could be data ahead of the bookmark we want to track here.
-		c.resetChannels()
+		// c.resetChannels()
 
 		return err2
 	}

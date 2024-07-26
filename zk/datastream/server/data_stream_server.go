@@ -181,8 +181,8 @@ func createBlockWithBatchCheckStreamEntriesProto(
 			if err != nil {
 				return nil, err
 			}
-			blockRoot := block.Root()
-			if endEntriesProto, err = addBatchEndEntriesProto(lastBatchNumber, &blockRoot, gers, &localExitRoot); err != nil {
+			lastBlockRoot := lastBlock.Root()
+			if endEntriesProto, err = addBatchEndEntriesProto(lastBatchNumber, &lastBlockRoot, gers, &localExitRoot); err != nil {
 				return nil, err
 			}
 		}
