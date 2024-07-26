@@ -125,10 +125,10 @@ func (m *ValidatorMonitorImpl) runReportAttesterStatus() {
 			if status, ok := statuses[epoch]; ok {
 				metricAttestHit.AddInt(status.attestedBlockRoots.Cardinality())
 				delete(statuses, epoch)
-				log.Info("[attester] report attester status hit", "epoch", epoch, "vindex", vindex, "countAttestedBlock", status.attestedBlockRoots.Cardinality())
+				log.Debug("[attester] report attester status hit", "epoch", epoch, "vindex", vindex, "countAttestedBlock", status.attestedBlockRoots.Cardinality())
 			} else {
 				metricAttestMiss.AddInt(1)
-				log.Info("[attester] report attester status miss", "epoch", epoch, "vindex", vindex, "countAttestedBlock", 0)
+				log.Debug("[attester] report attester status miss", "epoch", epoch, "vindex", vindex, "countAttestedBlock", 0)
 			}
 		}
 		m.vStatusMutex.Unlock()
