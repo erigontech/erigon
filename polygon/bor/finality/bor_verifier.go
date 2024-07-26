@@ -22,11 +22,11 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/ledgerwatch/erigon-lib/log/v3"
+	"github.com/erigontech/erigon-lib/log/v3"
 
-	"github.com/ledgerwatch/erigon-lib/metrics"
-	"github.com/ledgerwatch/erigon/core/rawdb"
-	"github.com/ledgerwatch/erigon/polygon/bor/finality/whitelist"
+	"github.com/erigontech/erigon-lib/metrics"
+	"github.com/erigontech/erigon/core/rawdb"
+	"github.com/erigontech/erigon/polygon/bor/finality/whitelist"
 )
 
 var (

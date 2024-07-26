@@ -26,9 +26,9 @@ import (
 	"io"
 	"math/big"
 
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	libcommon "github.com/erigontech/erigon-lib/common"
 
-	"github.com/ledgerwatch/erigon/visual"
+	"github.com/erigontech/erigon/visual"
 )
 
 // VisualOpts contains various configuration options fo the Visual function

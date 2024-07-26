@@ -23,7 +23,7 @@ import (
 	"container/heap"
 	"time"
 
-	"github.com/ledgerwatch/erigon/common/mclock"
+	"github.com/erigontech/erigon/common/mclock"
 )
 
 // LazyQueue is a priority queue data structure where priorities can change over

@@ -53,7 +53,7 @@ endif
 
 GOPRIVATE = github.com/erigontech/silkworm-go
 
-PACKAGE = github.com/ledgerwatch/erigon
+PACKAGE = github.com/erigontech/erigon
 
 GO_FLAGS += -trimpath -tags $(BUILD_TAGS) -buildvcs=false 
 GO_FLAGS += -ldflags "-X ${PACKAGE}/params.GitCommit=${GIT_COMMIT} -X ${PACKAGE}/params.GitBranch=${GIT_BRANCH} -X ${PACKAGE}/params.GitTag=${GIT_TAG}"
@@ -276,8 +276,9 @@ install:
 	@echo "Copied files to $(DIST):"
 	@ls -al "$(DIST)"
 
-PACKAGE_NAME          := github.com/ledgerwatch/erigon
-GOLANG_CROSS_VERSION  ?= v1.22.4
+PACKAGE_NAME          := github.com/erigontech/erigon
+GOLANG_CROSS_VERSION  ?= v1.21.5
+
 
 .PHONY: release-dry-run
 release-dry-run: git-submodules
@@ -292,7 +293,7 @@ release-dry-run: git-submodules
 		-v `pwd`:/go/src/$(PACKAGE_NAME) \
 		-w /go/src/$(PACKAGE_NAME) \
 		ghcr.io/goreleaser/goreleaser-cross:${GOLANG_CROSS_VERSION} \
-		--clean --skip-validate --skip-publish
+		--clean --skip=validate --skip=publish
 
 .PHONY: release
 release: git-submodules
@@ -307,10 +308,10 @@ release: git-submodules
 		-v `pwd`:/go/src/$(PACKAGE_NAME) \
 		-w /go/src/$(PACKAGE_NAME) \
 		ghcr.io/goreleaser/goreleaser-cross:${GOLANG_CROSS_VERSION} \
-		--clean --skip-validate
+		--clean --skip=validate
 
 	@docker image push --all-tags thorax/erigon
-	@docker image push --all-tags ghcr.io/ledgerwatch/erigon
+	@docker image push --all-tags ghcr.io/erigontech/erigon
 
 # since DOCKER_UID, DOCKER_GID are default initialized to the current user uid/gid,
 # we need separate envvars to facilitate creation of the erigon user on the host OS.

@@ -20,8 +20,8 @@ import (
 	"encoding/binary"
 	"errors"
 
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon/cl/cltypes/solid"
+	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon/cl/cltypes/solid"
 )
 
 // THIS IS EXPERMIENTAL, IT MAY CHANGE

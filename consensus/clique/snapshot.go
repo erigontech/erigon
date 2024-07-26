@@ -27,19 +27,19 @@ import (
 	"sort"
 	"time"
 
-	"github.com/ledgerwatch/erigon-lib/kv/dbutils"
+	"github.com/erigontech/erigon-lib/kv/dbutils"
 
 	"github.com/goccy/go-json"
 	lru "github.com/hashicorp/golang-lru/arc/v2"
 
-	"github.com/ledgerwatch/erigon-lib/chain"
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/erigontech/erigon-lib/chain"
+	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/kv"
 
-	"github.com/ledgerwatch/erigon-lib/log/v3"
+	"github.com/erigontech/erigon-lib/log/v3"
 
-	"github.com/ledgerwatch/erigon/common"
-	"github.com/ledgerwatch/erigon/core/types"
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/core/types"
 )
 
 // Vote represents a single vote that an authorized signer made to modify the
@@ -70,7 +70,7 @@ type Snapshot struct {
 	Tally   map[libcommon.Address]Tally    `json:"tally"`   // Current vote tally to avoid recalculating
 }
 
-// signersAscending implements the sort interface to allow sorting a list of addresses
+// SignersAscending implements the sort interface to allow sorting a list of addresses
 type SignersAscending []libcommon.Address
 
 func (s SignersAscending) Len() int           { return len(s) }

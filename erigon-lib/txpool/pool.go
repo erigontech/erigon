@@ -39,25 +39,26 @@ import (
 	"github.com/google/btree"
 	"github.com/hashicorp/golang-lru/v2/simplelru"
 	"github.com/holiman/uint256"
-	"github.com/ledgerwatch/erigon-lib/chain"
-	"github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/common/assert"
-	"github.com/ledgerwatch/erigon-lib/common/dbg"
-	"github.com/ledgerwatch/erigon-lib/common/fixedgas"
-	"github.com/ledgerwatch/erigon-lib/common/hexutility"
-	"github.com/ledgerwatch/erigon-lib/common/u256"
-	libkzg "github.com/ledgerwatch/erigon-lib/crypto/kzg"
-	"github.com/ledgerwatch/erigon-lib/gointerfaces"
-	"github.com/ledgerwatch/erigon-lib/gointerfaces/grpcutil"
-	remote "github.com/ledgerwatch/erigon-lib/gointerfaces/remoteproto"
-	"github.com/ledgerwatch/erigon-lib/gointerfaces/txpoolproto"
-	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon-lib/kv/kvcache"
-	"github.com/ledgerwatch/erigon-lib/kv/mdbx"
-	"github.com/ledgerwatch/erigon-lib/log/v3"
-	"github.com/ledgerwatch/erigon-lib/metrics"
-	"github.com/ledgerwatch/erigon-lib/txpool/txpoolcfg"
-	"github.com/ledgerwatch/erigon-lib/types"
+
+	"github.com/erigontech/erigon-lib/chain"
+	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common/assert"
+	"github.com/erigontech/erigon-lib/common/dbg"
+	"github.com/erigontech/erigon-lib/common/fixedgas"
+	"github.com/erigontech/erigon-lib/common/hexutility"
+	"github.com/erigontech/erigon-lib/common/u256"
+	libkzg "github.com/erigontech/erigon-lib/crypto/kzg"
+	"github.com/erigontech/erigon-lib/gointerfaces"
+	"github.com/erigontech/erigon-lib/gointerfaces/grpcutil"
+	remote "github.com/erigontech/erigon-lib/gointerfaces/remoteproto"
+	"github.com/erigontech/erigon-lib/gointerfaces/txpoolproto"
+	"github.com/erigontech/erigon-lib/kv"
+	"github.com/erigontech/erigon-lib/kv/kvcache"
+	"github.com/erigontech/erigon-lib/kv/mdbx"
+	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon-lib/metrics"
+	"github.com/erigontech/erigon-lib/txpool/txpoolcfg"
+	"github.com/erigontech/erigon-lib/types"
 )
 
 const DefaultBlockGasLimit = uint64(30000000)
@@ -227,6 +228,8 @@ type TxPool struct {
 	isPostAgra              atomic.Bool
 	cancunTime              *uint64
 	isPostCancun            atomic.Bool
+	pragueTime              *uint64
+	isPostPrague            atomic.Bool
 	maxBlobsPerBlock        uint64
 	feeCalculator           FeeCalculator
 	logger                  log.Logger
@@ -237,7 +240,7 @@ type FeeCalculator interface {
 }
 
 func New(newTxs chan types.Announcements, coreDB kv.RoDB, cfg txpoolcfg.Config, cache kvcache.Cache,
-	chainID uint256.Int, shanghaiTime, agraBlock, cancunTime *big.Int, maxBlobsPerBlock uint64,
+	chainID uint256.Int, shanghaiTime, agraBlock, cancunTime, pragueTime *big.Int, maxBlobsPerBlock uint64,
 	feeCalculator FeeCalculator, logger log.Logger,
 ) (*TxPool, error) {
 	localsHistory, err := simplelru.NewLRU[string, struct{}](10_000, nil)
@@ -308,6 +311,13 @@ func New(newTxs chan types.Announcements, coreDB kv.RoDB, cfg txpoolcfg.Config, 
 		}
 		cancunTimeU64 := cancunTime.Uint64()
 		res.cancunTime = &cancunTimeU64
+	}
+	if pragueTime != nil {
+		if !pragueTime.IsUint64() {
+			return nil, errors.New("pragueTime overflow")
+		}
+		pragueTimeU64 := pragueTime.Uint64()
+		res.pragueTime = &pragueTimeU64
 	}
 
 	return res, nil
@@ -761,7 +771,7 @@ func (p *TxPool) best(n uint16, txs *types.TxsRlp, tx kv.Tx, onTopOf, availableG
 		// make sure we have enough gas in the caller to add this transaction.
 		// not an exact science using intrinsic gas but as close as we could hope for at
 		// this stage
-		intrinsicGas, _ := txpoolcfg.CalcIntrinsicGas(uint64(mt.Tx.DataLen), uint64(mt.Tx.DataNonZeroLen), 0, nil, mt.Tx.Creation, true, true, isShanghai)
+		intrinsicGas, _ := txpoolcfg.CalcIntrinsicGas(uint64(mt.Tx.DataLen), uint64(mt.Tx.DataNonZeroLen), uint64(mt.Tx.AuthorizationLen), nil, mt.Tx.Creation, true, true, isShanghai)
 		if intrinsicGas > availableGas {
 			// we might find another txn with a low enough intrinsic gas to include so carry on
 			continue
@@ -885,6 +895,12 @@ func (p *TxPool) validateTx(txn *types.TxSlot, isLocal bool, stateCache kvcache.
 		}
 	}
 
+	if txn.Type == types.SetCodeTxType {
+		if !p.isPrague() {
+			return txpoolcfg.TypeNotActivated
+		}
+	}
+
 	// Drop non-local transactions under our own minimal accepted gas price or tip
 	if !isLocal && uint256.NewInt(p.cfg.MinFeeCap).Cmp(&txn.FeeCap) == 1 {
 		if txn.Traced {
@@ -892,7 +908,7 @@ func (p *TxPool) validateTx(txn *types.TxSlot, isLocal bool, stateCache kvcache.
 		}
 		return txpoolcfg.UnderPriced
 	}
-	gas, reason := txpoolcfg.CalcIntrinsicGas(uint64(txn.DataLen), uint64(txn.DataNonZeroLen), 0, nil, txn.Creation, true, true, isShanghai)
+	gas, reason := txpoolcfg.CalcIntrinsicGas(uint64(txn.DataLen), uint64(txn.DataNonZeroLen), uint64(txn.AuthorizationLen), nil, txn.Creation, true, true, isShanghai)
 	if txn.Traced {
 		p.logger.Info(fmt.Sprintf("TX TRACING: validateTx intrinsic gas idHash=%x gas=%d", txn.IDHash, gas))
 	}
@@ -967,29 +983,32 @@ func requiredBalance(txn *types.TxSlot) *uint256.Int {
 	return total
 }
 
-func (p *TxPool) isShanghai() bool {
+func isTimeBasedForkActivated(isPostFlag *atomic.Bool, forkTime *uint64) bool {
 	// once this flag has been set for the first time we no longer need to check the timestamp
-	set := p.isPostShanghai.Load()
+	set := isPostFlag.Load()
 	if set {
 		return true
 	}
-	if p.shanghaiTime == nil {
+	if forkTime == nil { // the fork is not enabled
 		return false
 	}
-	shanghaiTime := *p.shanghaiTime
 
-	// a zero here means Shanghai is always active
-	if shanghaiTime == 0 {
-		p.isPostShanghai.Swap(true)
+	// a zero here means the fork is always active
+	if *forkTime == 0 {
+		isPostFlag.Swap(true)
 		return true
 	}
 
 	now := time.Now().Unix()
-	activated := uint64(now) >= shanghaiTime
+	activated := uint64(now) >= *forkTime
 	if activated {
-		p.isPostShanghai.Swap(true)
+		isPostFlag.Swap(true)
 	}
 	return activated
+}
+
+func (p *TxPool) isShanghai() bool {
+	return isTimeBasedForkActivated(&p.isPostShanghai, p.shanghaiTime)
 }
 
 func (p *TxPool) isAgra() bool {
@@ -1029,28 +1048,11 @@ func (p *TxPool) isAgra() bool {
 }
 
 func (p *TxPool) isCancun() bool {
-	// once this flag has been set for the first time we no longer need to check the timestamp
-	set := p.isPostCancun.Load()
-	if set {
-		return true
-	}
-	if p.cancunTime == nil {
-		return false
-	}
-	cancunTime := *p.cancunTime
+	return isTimeBasedForkActivated(&p.isPostCancun, p.cancunTime)
+}
 
-	// a zero here means Cancun is always active
-	if cancunTime == 0 {
-		p.isPostCancun.Swap(true)
-		return true
-	}
-
-	now := time.Now().Unix()
-	activated := uint64(now) >= cancunTime
-	if activated {
-		p.isPostCancun.Swap(true)
-	}
-	return activated
+func (p *TxPool) isPrague() bool {
+	return isTimeBasedForkActivated(&p.isPostPrague, p.pragueTime)
 }
 
 // Check that the serialized txn should not exceed a certain max size

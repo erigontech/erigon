@@ -33,7 +33,7 @@ jobs:
           make release-dry-run
           docker images
         #          docker image push --all-tags thorax/erigon
-        #          docker image push --all-tags ghcr.io/ledgerwatch/erigon
+        #          docker image push --all-tags ghcr.io/erigontech/erigon
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           VERSION: ${GITHUB_REF#refs/tags/}

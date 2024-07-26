@@ -17,7 +17,7 @@
 package types
 
 import (
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	libcommon "github.com/erigontech/erigon-lib/common"
 )
 
 // This is introduced because of the Tendermint IAVL Merkle Proof verification exploitation.

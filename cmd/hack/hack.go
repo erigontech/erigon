@@ -24,7 +24,6 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
-	"math/big"
 	"net/http"
 	_ "net/http/pprof" //nolint:gosec
 	"os"
@@ -34,39 +33,39 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/ledgerwatch/erigon-lib/kv/dbutils"
+	"github.com/erigontech/erigon-lib/kv/dbutils"
 
 	"github.com/RoaringBitmap/roaring/roaring64"
 	"github.com/holiman/uint256"
 
-	"github.com/ledgerwatch/erigon-lib/log/v3"
+	"github.com/erigontech/erigon-lib/log/v3"
 
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/common/hexutility"
-	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon-lib/kv/mdbx"
-	"github.com/ledgerwatch/erigon-lib/recsplit"
-	"github.com/ledgerwatch/erigon-lib/recsplit/eliasfano32"
-	"github.com/ledgerwatch/erigon-lib/seg"
+	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common/hexutility"
+	"github.com/erigontech/erigon-lib/kv"
+	"github.com/erigontech/erigon-lib/kv/mdbx"
+	"github.com/erigontech/erigon-lib/recsplit"
+	"github.com/erigontech/erigon-lib/recsplit/eliasfano32"
+	"github.com/erigontech/erigon-lib/seg"
 
-	hackdb "github.com/ledgerwatch/erigon/cmd/hack/db"
-	"github.com/ledgerwatch/erigon/cmd/hack/flow"
-	"github.com/ledgerwatch/erigon/cmd/hack/tool"
-	"github.com/ledgerwatch/erigon/common"
-	"github.com/ledgerwatch/erigon/common/paths"
-	"github.com/ledgerwatch/erigon/core"
-	"github.com/ledgerwatch/erigon/core/rawdb"
-	"github.com/ledgerwatch/erigon/core/rawdb/blockio"
-	"github.com/ledgerwatch/erigon/core/types"
-	"github.com/ledgerwatch/erigon/eth/ethconfig"
-	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
-	"github.com/ledgerwatch/erigon/ethdb/cbor"
-	"github.com/ledgerwatch/erigon/params"
-	"github.com/ledgerwatch/erigon/rlp"
-	"github.com/ledgerwatch/erigon/turbo/debug"
-	"github.com/ledgerwatch/erigon/turbo/logging"
-	"github.com/ledgerwatch/erigon/turbo/services"
-	"github.com/ledgerwatch/erigon/turbo/snapshotsync/freezeblocks"
+	hackdb "github.com/erigontech/erigon/cmd/hack/db"
+	"github.com/erigontech/erigon/cmd/hack/flow"
+	"github.com/erigontech/erigon/cmd/hack/tool"
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/paths"
+	"github.com/erigontech/erigon/core"
+	"github.com/erigontech/erigon/core/rawdb"
+	"github.com/erigontech/erigon/core/rawdb/blockio"
+	"github.com/erigontech/erigon/core/types"
+	"github.com/erigontech/erigon/eth/ethconfig"
+	"github.com/erigontech/erigon/eth/stagedsync/stages"
+	"github.com/erigontech/erigon/ethdb/cbor"
+	"github.com/erigontech/erigon/params"
+	"github.com/erigontech/erigon/rlp"
+	"github.com/erigontech/erigon/turbo/debug"
+	"github.com/erigontech/erigon/turbo/logging"
+	"github.com/erigontech/erigon/turbo/services"
+	"github.com/erigontech/erigon/turbo/snapshotsync/freezeblocks"
 )
 
 var (
@@ -467,62 +466,6 @@ func snapSizes(chaindata string) error {
 	fmt.Printf("Total size: %d bytes\n", total)
 
 	return nil
-}
-
-func fixTd(chaindata string) error {
-	db := mdbx.MustOpen(chaindata)
-	defer db.Close()
-	tx, err := db.BeginRw(context.Background())
-	if err != nil {
-		return err
-	}
-	defer tx.Rollback()
-	c, err1 := tx.RwCursor(kv.Headers)
-	if err1 != nil {
-		return err1
-	}
-	defer c.Close()
-	var k, v []byte
-	for k, v, err = c.First(); err == nil && k != nil; k, v, err = c.Next() {
-		hv, herr := tx.GetOne(kv.HeaderTD, k)
-		if herr != nil {
-			return herr
-		}
-		if hv == nil {
-			fmt.Printf("Missing TD record for %x, fixing\n", k)
-			var header types.Header
-			if err = rlp.DecodeBytes(v, &header); err != nil {
-				return fmt.Errorf("decoding header from %x: %w", v, err)
-			}
-			if header.Number.Uint64() == 0 {
-				continue
-			}
-			var parentK [40]byte
-			binary.BigEndian.PutUint64(parentK[:], header.Number.Uint64()-1)
-			copy(parentK[8:], header.ParentHash[:])
-			var parentTdRec []byte
-			if parentTdRec, err = tx.GetOne(kv.HeaderTD, parentK[:]); err != nil {
-				return fmt.Errorf("reading parentTd Rec for %d: %w", header.Number.Uint64(), err)
-			}
-			var parentTd big.Int
-			if err = rlp.DecodeBytes(parentTdRec, &parentTd); err != nil {
-				return fmt.Errorf("decoding parent Td record for block %d, from %x: %w", header.Number.Uint64(), parentTdRec, err)
-			}
-			var td big.Int
-			td.Add(&parentTd, header.Difficulty)
-			var newHv []byte
-			if newHv, err = rlp.EncodeToBytes(&td); err != nil {
-				return fmt.Errorf("encoding td record for block %d: %w", header.Number.Uint64(), err)
-			}
-			if err = tx.Put(kv.HeaderTD, k, newHv); err != nil {
-				return err
-			}
-		}
-	}
-	if err != nil {
-		return err
-	}
-	return tx.Commit()
 }
 
 func advanceExec(chaindata string) error {
@@ -955,25 +898,6 @@ func iterate(filename string, prefix string) error {
 	return nil
 }
 
-func readSeg(chaindata string) error {
-	vDecomp, err := seg.NewDecompressor(chaindata)
-	if err != nil {
-		return err
-	}
-	defer vDecomp.Close()
-	g := vDecomp.MakeGetter()
-	var buf []byte
-	var count int
-	var offset, nextPos uint64
-	for g.HasNext() {
-		buf, nextPos = g.Next(buf[:0])
-		fmt.Printf("offset: %d, val: %x\n", offset, buf)
-		offset = nextPos
-		count++
-	}
-	return nil
-}
-
 func main() {
 	debug.RaiseFdLimit()
 	flag.Parse()
@@ -1042,9 +966,6 @@ func main() {
 	case "snapSizes":
 		err = snapSizes(*chaindata)
 
-	case "fixTd":
-		err = fixTd(*chaindata)
-
 	case "advanceExec":
 		err = advanceExec(*chaindata)
 
@@ -1070,8 +991,6 @@ func main() {
 		err = iterate(*chaindata, *account)
 	case "rmSnKey":
 		err = rmSnKey(*chaindata)
-	case "readSeg":
-		err = readSeg(*chaindata)
 	}
 
 	if err != nil {

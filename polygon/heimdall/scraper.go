@@ -20,10 +20,10 @@ import (
 	"context"
 	"time"
 
-	"github.com/ledgerwatch/erigon-lib/log/v3"
+	"github.com/erigontech/erigon-lib/log/v3"
 
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon/polygon/polygoncommon"
+	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon/polygon/polygoncommon"
 )
 
 type scraper[TEntity Entity] struct {

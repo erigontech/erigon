@@ -20,13 +20,13 @@ import (
 	"context"
 	"errors"
 
-	"github.com/ledgerwatch/erigon-lib/common/hexutil"
+	"github.com/erigontech/erigon-lib/common/hexutil"
 
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	txpool "github.com/ledgerwatch/erigon-lib/gointerfaces/txpoolproto"
+	libcommon "github.com/erigontech/erigon-lib/common"
+	txpool "github.com/erigontech/erigon-lib/gointerfaces/txpoolproto"
 	"google.golang.org/grpc/status"
 
-	"github.com/ledgerwatch/erigon/core/types"
+	"github.com/erigontech/erigon/core/types"
 )
 
 // Coinbase implements eth_coinbase. Returns the current client coinbase address.
