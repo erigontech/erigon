@@ -270,7 +270,7 @@ func (b *BpsTree) Seek(g ArchiveGetter, seekKey []byte) (key, value []byte, di u
 	if l == r {
 		m = l
 	}
-	key, value, err = b.dataLookupFunc(l, g)
+	key, value, err = b.dataLookupFunc(m, g)
 	if err != nil {
 		return nil, nil, 0, false, err
 	}
