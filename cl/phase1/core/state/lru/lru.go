@@ -26,8 +26,6 @@ import (
 	"github.com/erigontech/erigon-lib/metrics"
 )
 
-var ()
-
 // Cache is a wrapper around hashicorp lru but with metric for Get
 type Cache[K comparable, V any] struct {
 	*lru.Cache[K, V]
