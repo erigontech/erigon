@@ -151,6 +151,9 @@ func SpawnStageHistoryDownload(cfg StageHistoryReconstructionCfg, ctx context.Co
 				destinationSlotForEL = frozenBlocksInEL - 1
 			}
 		}
+		if slot == 0 {
+			return true, tx.Commit()
+		}
 		return (!cfg.backfilling || slot <= destinationSlotForCL) && (slot <= destinationSlotForEL || isInElSnapshots), tx.Commit()
 	})
 	prevProgress := cfg.downloader.Progress()
