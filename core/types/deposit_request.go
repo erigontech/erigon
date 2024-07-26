@@ -19,10 +19,12 @@ package types
 import (
 	"bytes"
 	"encoding/binary"
+	"encoding/json"
 	"fmt"
 	"io"
 
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/common/hexutil"
 	rlp2 "github.com/ledgerwatch/erigon-lib/rlp"
 	"github.com/ledgerwatch/erigon/accounts/abi"
 	"github.com/ledgerwatch/erigon/rlp"
@@ -108,6 +110,39 @@ func (d *DepositRequest) EncodingSize() (encodingSize int) {
 	encodingSize += rlp2.ListPrefixLen(encodingSize)
 	encodingSize += 1 //RequestType
 	return
+}
+
+func (d *DepositRequest) UnmarshalJSON(input []byte) error {
+	type auxJson struct {
+		Pubkey                string         `json:"pubkey"`                // public key of validator
+		WithdrawalCredentials libcommon.Hash `json:"withdrawalCredentials"` // beneficiary of the validator
+		Amount                hexutil.Uint64 `json:"amount"`                // deposit size in Gwei
+		Signature             string         `json:"signature"`             // signature over deposit msg
+		Index                 hexutil.Uint64 `json:"index"`                 // deposit count value
+	}
+	tt := auxJson{}
+	err := json.Unmarshal(input, &tt)
+	if err != nil {
+		return err
+	}
+	hexkey1, err := hexutil.Decode(tt.Pubkey)
+	if err != nil {
+		return err
+	}
+	if len(hexkey1) != BLSPubKeyLen {
+		return fmt.Errorf("Unmarshalled pubkey not equal to BLSPubkeyLen")
+	}
+	hexkey2, err := hexutil.Decode(tt.Signature)
+	if len(hexkey2) != BLSSigLen {
+		return fmt.Errorf("Unmarshalled Sig not equal to BLSSiglen")
+	}
+
+	d.Pubkey = [48]byte(hexkey1)
+	d.Signature = [96]byte(hexkey2)
+	d.WithdrawalCredentials = tt.WithdrawalCredentials
+	d.Amount = tt.Amount.Uint64()
+	d.Index = tt.Index.Uint64()
+	return nil
 }
 
 // field type overrides for abi upacking

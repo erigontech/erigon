@@ -18,9 +18,12 @@ package types
 
 import (
 	"bytes"
+	"encoding/json"
+	"fmt"
 	"io"
 
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/common/hexutil"
 	rlp2 "github.com/ledgerwatch/erigon-lib/rlp"
 	"github.com/ledgerwatch/erigon/rlp"
 )
@@ -66,6 +69,34 @@ func (w *ConsolidationRequest) EncodeRLP(b io.Writer) (err error) {
 		return err
 	}
 	return
+}
+
+func (d *ConsolidationRequest) UnmarshalJSON(input []byte) error {
+	type auxJson struct {
+		SourceAddress libcommon.Address `json:"sourceAddress"`
+		SourcePubKey  string            `json:"sourcePubkey"`
+		TargetPubKey  string            `json:"targetPubkey"`
+	}
+	tt := auxJson{}
+	err := json.Unmarshal(input, &tt)
+	if err != nil {
+		return err
+	}
+	hexkey1, err := hexutil.Decode(tt.SourcePubKey)
+	if err != nil {
+		return err
+	}
+	if len(hexkey1) != BLSPubKeyLen {
+		return fmt.Errorf("Unmarshalled pubkey not equal to BLSPubkeyLen")
+	}
+	hexkey2, err := hexutil.Decode(tt.TargetPubKey)
+	if len(hexkey2) != BLSSigLen {
+		return fmt.Errorf("Unmarshalled Sig not equal to BLSSiglen")
+	}
+	d.SourceAddress = tt.SourceAddress
+	d.SourcePubKey = [48]byte(hexkey1)
+	d.TargetPubKey = [48]byte(hexkey2)
+	return nil
 }
 
 func (w *ConsolidationRequest) DecodeRLP(input []byte) error { return rlp.DecodeBytes(input[1:], w) }
