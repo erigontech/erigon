@@ -1053,8 +1053,8 @@ type cachedBranch struct {
 // ResetBranchCache should be called after each commitment computation
 func (sdc *SharedDomainsCommitmentContext) ResetBranchCache() {
 	clear(sdc.branches)
-	fmt.Printf("[SDC] ResetBranchCache COUNTERS %#+v\n", sdc.counters)
-	//clear(sdc.counters)
+	log.Debug("ResetBranchCache", "counters", fmt.Sprintf("%#+v", sdc.counters))
+	clear(sdc.counters)
 }
 
 func (sdc *SharedDomainsCommitmentContext) GetBranch(pref []byte) ([]byte, uint64, error) {
