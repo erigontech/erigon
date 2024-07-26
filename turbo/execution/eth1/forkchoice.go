@@ -474,7 +474,7 @@ func (e *EthereumExecutionModule) updateForkChoice(ctx context.Context, original
 		var m runtime.MemStats
 		dbg.ReadMemStats(&m)
 		blockTimings := e.forkValidator.GetTimings(blockHash)
-		logArgs := []interface{}{"head", headHash, "hash", blockHash}
+		logArgs := []interface{}{"head", headHash}
 		if flushExtendingFork {
 			totalTime := blockTimings[engine_helpers.BlockTimingsValidationIndex]
 			gasUsedMgas := float64(fcuHeader.GasUsed) / 1e6
