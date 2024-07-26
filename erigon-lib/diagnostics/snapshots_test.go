@@ -111,3 +111,74 @@ func TestFillDBFromSnapshots(t *testing.T) {
 	require.NotEmpty(t, stats.SnapshotFillDB.Stages)
 	require.Equal(t, stats.SnapshotFillDB.Stages[0], diagnostics.SnapshotFillDBStage{StageName: "Headers", Current: 1, Total: 10})
 }
+
+func TestAddOrUpdateSegmentIndexingState(t *testing.T) {
+	dts := []diagnostics.SnapshotSegmentIndexingStatistics{
+		{
+			SegmentName: "test",
+			Percent:     50,
+			Alloc:       0,
+			Sys:         0,
+		},
+	}
+
+	d, err := NewTestDiagnosticClient()
+	require.NoError(t, err)
+
+	d.AddOrUpdateSegmentIndexingState(diagnostics.SnapshotIndexingStatistics{
+		Segments:    dts,
+		TimeElapsed: -1,
+	})
+	stats := d.SyncStatistics()
+
+	require.NotEmpty(t, stats.SnapshotIndexing)
+	require.NotEmpty(t, stats.SnapshotIndexing.Segments)
+	require.Equal(t, stats.SnapshotIndexing.Segments[0], dts[0])
+	require.True(t, stats.SnapshotIndexing.TimeElapsed == 0)
+	require.False(t, stats.SnapshotIndexing.IndexingFinished)
+
+	dts = []diagnostics.SnapshotSegmentIndexingStatistics{
+		{
+			SegmentName: "test",
+			Percent:     100,
+			Alloc:       0,
+			Sys:         0,
+		},
+		{
+			SegmentName: "test2",
+			Percent:     10,
+			Alloc:       0,
+			Sys:         0,
+		},
+	}
+
+	d.AddOrUpdateSegmentIndexingState(diagnostics.SnapshotIndexingStatistics{
+		Segments:    dts,
+		TimeElapsed: 20,
+	})
+
+	stats = d.SyncStatistics()
+	require.Equal(t, stats.SnapshotIndexing.Segments[0].Percent, 100)
+
+	finished := d.UpdateIndexingStatus()
+	require.False(t, finished)
+
+	//test indexing finished
+	dts = []diagnostics.SnapshotSegmentIndexingStatistics{
+		{
+			SegmentName: "test2",
+			Percent:     100,
+			Alloc:       0,
+			Sys:         0,
+		},
+	}
+	d.AddOrUpdateSegmentIndexingState(diagnostics.SnapshotIndexingStatistics{
+		Segments:    dts,
+		TimeElapsed: 20,
+	})
+
+	finished = d.UpdateIndexingStatus()
+	require.True(t, finished)
+	stats = d.SyncStatistics()
+	require.True(t, stats.SnapshotIndexing.IndexingFinished)
+}

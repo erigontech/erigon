@@ -73,49 +73,9 @@ func (d *DiagnosticClient) addOrUpdateSegmentIndexingState(upd SnapshotIndexingS
 		}
 	}
 
-	d.syncStats.SnapshotIndexing.TimeElapsed = upd.TimeElapsed
-}
-
-func (d *DiagnosticClient) runSegmentIndexingFinishedListener(rootCtx context.Context) {
-	go func() {
-		ctx, ch, closeChannel := Context[SnapshotSegmentIndexingFinishedUpdate](rootCtx, 1)
-		defer closeChannel()
-
-		StartProviders(ctx, TypeOf(SnapshotSegmentIndexingFinishedUpdate{}), log.Root())
-		for {
-			select {
-			case <-rootCtx.Done():
-				return
-			case info := <-ch:
-				d.SegmentIndexed(&info)
-				d.UpdateIndexingStatus()
-			}
-		}
-	}()
-}
-
-func (d *DiagnosticClient) SegmentIndexed(info *SnapshotSegmentIndexingFinishedUpdate) {
-	d.mu.Lock()
-	defer d.mu.Unlock()
-	d.segmentIndexed(info)
-}
-
-func (d *DiagnosticClient) segmentIndexed(info *SnapshotSegmentIndexingFinishedUpdate) {
-	found := false
-	for i := range d.syncStats.SnapshotIndexing.Segments {
-		if d.syncStats.SnapshotIndexing.Segments[i].SegmentName == info.SegmentName {
-			found = true
-			d.syncStats.SnapshotIndexing.Segments[i].Percent = 100
-		}
-	}
-
-	if !found {
-		d.syncStats.SnapshotIndexing.Segments = append(d.syncStats.SnapshotIndexing.Segments, SnapshotSegmentIndexingStatistics{
-			SegmentName: info.SegmentName,
-			Percent:     100,
-			Alloc:       0,
-			Sys:         0,
-		})
+	// If elapsed time is equal to minus one it menas that indexing took less than main loop update and we should not update it
+	if upd.TimeElapsed != -1 {
+		d.syncStats.SnapshotIndexing.TimeElapsed = upd.TimeElapsed
 	}
 }
 
@@ -143,5 +103,6 @@ func (d *DiagnosticClient) updateIndexingStatus() (indexingFinished bool) {
 	if totalProgress >= 100 {
 		d.syncStats.SnapshotIndexing.IndexingFinished = true
 	}
+
 	return d.syncStats.SnapshotIndexing.IndexingFinished
 }
