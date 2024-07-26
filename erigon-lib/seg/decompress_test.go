@@ -216,6 +216,11 @@ func TestDecompressMatchPrefixCmp(t *testing.T) {
 		if cmp != 0 {
 			t.Errorf("expexted match with %s", expected)
 		}
+		expected = []byte(fmt.Sprintf("%s %daddedmorectx", w, i+1))
+		cmp = g.MatchPrefixCmp(expected)
+		if cmp == 0 {
+			t.Errorf("expexted don't match with %s", expected)
+		}
 		g.Skip()
 		skipCount++
 		i++
