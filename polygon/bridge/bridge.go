@@ -137,7 +137,7 @@ func (b *Bridge) ProcessNewBlocks(ctx context.Context, blocks []*types.Block) er
 			return err
 		}
 
-		if lastDBID > b.lastProcessedEventID {
+		if lastDBID != 0 && lastDBID > b.lastProcessedEventID {
 			b.log.Debug(bridgeLogPrefix(fmt.Sprintf("Creating map for block %d, start ID %d, end ID %d", block.NumberU64(), b.lastProcessedEventID, lastDBID)))
 			eventMap[block.NumberU64()] = b.lastProcessedEventID
 
