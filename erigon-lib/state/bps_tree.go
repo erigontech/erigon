@@ -201,58 +201,59 @@ func (b *BpsTree) bs(x []byte) (n Node, dl, dr uint64) {
 // If key is nil, returns first key and found=true
 // If found item.key has a prefix of key, returns found=false and item.key
 // if key is greater than all keys, returns nil, found=false
-func (b *BpsTree) Seek(g ArchiveGetter, key []byte) (skey, value []byte, di uint64, found bool, err error) {
+func (b *BpsTree) Seek(g ArchiveGetter, seekKey []byte) (key, value []byte, di uint64, found bool, err error) {
+	//b.trace = true
 	if b.trace {
-		fmt.Printf("seek %x\n", key)
+		fmt.Printf("seek %x\n", seekKey)
 	}
-	if len(key) == 0 && b.offt.Count() > 0 {
-		skey, value, err = b.dataLookupFunc(0, g)
+	if len(seekKey) == 0 && b.offt.Count() > 0 {
+		key, value, err = b.dataLookupFunc(0, g)
 		if err != nil {
 			return nil, nil, 0, false, err
 		}
-		return skey, value, 0, bytes.Equal(skey, key), nil
+		//return key, value, 0, bytes.Compare(key, seekKey) >= 0, nil
+		return key, value, 0, bytes.Equal(key, seekKey), nil
 	}
 
-	n, l, r := b.bs(key) // l===r when key is found
+	n, l, r := b.bs(seekKey) // l===r when key is found
 	if b.trace {
 		fmt.Printf("pivot di:%d di(LR): [%d %d] k: %x found: %t\n", n.di, l, r, n.key, l == r)
-		defer func() { fmt.Printf("found %x [%d %d]\n", key, l, r) }()
+		defer func() { fmt.Printf("found=%t %x [%d %d]\n", bytes.Equal(key, seekKey), seekKey, l, r) }()
 	}
-
 	var m uint64
 	var cmp int
 	for l < r {
-		if b.trace {
-			fmt.Printf("fs di:[%d %d] k: %x\n", l, r, skey)
-		}
-		if r-l <= 8 {
-			for l < r {
-				skey, value, err := b.dataLookupFunc(l, g)
-				if err != nil {
-					return nil, nil, 0, false, err
-				}
-				if b.trace {
-					fmt.Printf("fs di:[%d %d] k: %x\n", l, r, skey)
-				}
-				cmp = bytes.Compare(skey, key)
-				if cmp == 0 {
-					return skey, value, l, true, nil
-				}
-				if cmp > 0 {
-					l++
-				}
-
-				return skey, value, l, false, nil
+		if r-l <= DefaultBtreeStartSkip { // found small range, faster to scan now
+			cmp, key, err = b.keyCmpFunc(seekKey, l, g)
+			if err != nil {
+				return nil, nil, 0, false, err
 			}
+			if b.trace {
+				fmt.Printf("fs di:[%d %d] k: %x\n", l, r, key)
+			}
+			//fmt.Printf("N %d l %d cmp %d (found %x want %x)\n", b.offt.Count(), l, cmp, key, seekKey)
+			if cmp == 0 {
+				r = l
+				break
+				//return key, value, l, true, nil
+			} else if cmp < 0 { //found key is greater than seekKey
+				if l+1 < b.offt.Count() {
+					l++
+					continue
+				}
+			}
+			r = l
+			break
+			//return key, value, l, false, nil
 		}
 
 		m = (l + r) >> 1
-		cmp, skey, err = b.keyCmpFunc(key, m, g)
+		cmp, key, err = b.keyCmpFunc(seekKey, m, g)
 		if err != nil {
 			return nil, nil, 0, false, err
 		}
 		if b.trace {
-			fmt.Printf("fs di:[%d %d] k: %x\n", l, r, skey)
+			fmt.Printf("fs di:[%d %d] k: %x\n", l, r, key)
 		}
 
 		if cmp == 0 {
@@ -262,7 +263,6 @@ func (b *BpsTree) Seek(g ArchiveGetter, key []byte) (skey, value []byte, di uint
 			r = m
 		} else {
 			l = m + 1
-
 		}
 
 	}
@@ -270,11 +270,11 @@ func (b *BpsTree) Seek(g ArchiveGetter, key []byte) (skey, value []byte, di uint
 	if l == r {
 		m = l
 	}
-	skey, value, err = b.dataLookupFunc(l, g)
+	key, value, err = b.dataLookupFunc(l, g)
 	if err != nil {
 		return nil, nil, 0, false, err
 	}
-	return skey, value, l, bytes.Compare(skey, key) == 0, nil
+	return key, value, l, bytes.Equal(key, seekKey), nil
 }
 
 // returns first key which is >= key.

@@ -51,6 +51,9 @@ const BtreeLogPrefix = "btree"
 // DefaultBtreeM - amount of keys on leaf of BTree
 // It will do log2(M) co-located-reads from data file - for binary-search inside leaf
 var DefaultBtreeM = uint64(256)
+
+const DefaultBtreeStartSkip = uint64(4) // defines smallest shard available for scan instead of binsearch
+
 var ErrBtIndexLookupBounds = errors.New("BtIndex: lookup di bounds error")
 
 func logBase(n, base uint64) uint64 {
@@ -1014,15 +1017,17 @@ func (b *BtIndex) Seek(g ArchiveGetter, x []byte) (*Cursor, error) {
 		return nil, nil
 	}
 	if UseBpsTree {
-		k, v, dt, found, err := b.bplus.Seek(g, x)
-		_ = found
+		k, v, dt, _, err := b.bplus.Seek(g, x)
 		if err != nil /*|| !found*/ {
 			if errors.Is(err, ErrBtIndexLookupBounds) {
 				return nil, nil
 			}
 			return nil, err
 		}
-		return b.newCursor(context.Background(), k, v, dt, g), nil
+		if bytes.Compare(k, x) >= 0 {
+			return b.newCursor(context.Background(), k, v, dt, g), nil
+		}
+		return nil, nil
 	}
 
 	_, dt, found, err := b.alloc.Seek(g, x)

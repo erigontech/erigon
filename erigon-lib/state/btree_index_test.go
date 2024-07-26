@@ -175,6 +175,7 @@ func Test_BtreeIndex_Build(t *testing.T) {
 
 	c, err := bt.Seek(getter, nil)
 	require.NoError(t, err)
+	require.NotNil(t, c)
 	for i := 0; i < len(keys); i++ {
 		k := c.Key()
 		if !bytes.Equal(keys[i], k) {
