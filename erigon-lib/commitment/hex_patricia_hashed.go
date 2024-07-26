@@ -1542,7 +1542,8 @@ func (hph *HexPatriciaHashed) ProcessTree(ctx context.Context, tree *Updates, lo
 	if err != nil {
 		return nil, fmt.Errorf("branch update failed: %w", err)
 	}
-	log.Warn("commitment finished, counters updated (no reset)", "hadToLoad", hadToLoad.Load(), "skippedLoad", skippedLoad.Load(), "ratio", float64(hadToLoad.Load()+skippedLoad.Load())/float64(skippedLoad.Load()))
+	fmt.Printf("commitment finished, counters updated (no reset) hadToLoad=%d skippedLoad=%d ratio=%f\n", hadToLoad.Load(), skippedLoad.Load(), float64(skippedLoad.Load())/float64(hadToLoad.Load()+skippedLoad.Load()))
+	log.Warn("commitment finished, counters updated (no reset)", "hadToLoad", hadToLoad.Load(), "skippedLoad", skippedLoad.Load(), "ratio", float64(skippedLoad.Load())/float64(hadToLoad.Load()+skippedLoad.Load()))
 	return rootHash, nil
 }
 
