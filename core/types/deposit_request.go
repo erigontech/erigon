@@ -139,20 +139,23 @@ func (d *DepositRequest) UnmarshalJSON(input []byte) error {
 	if err != nil {
 		return err
 	}
-	hexkey1, err := hexutil.Decode(tt.Pubkey)
+	pubkey, err := hexutil.Decode(tt.Pubkey)
 	if err != nil {
 		return err
 	}
-	if len(hexkey1) != BLSPubKeyLen {
-		return fmt.Errorf("Unmarshalled pubkey not equal to BLSPubkeyLen")
+	if len(pubkey) != BLSPubKeyLen {
+		return fmt.Errorf("Unmarshalled pubkey len not equal to BLSPubkeyLen")
 	}
-	hexkey2, err := hexutil.Decode(tt.Signature)
-	if len(hexkey2) != BLSSigLen {
-		return fmt.Errorf("Unmarshalled Sig not equal to BLSSiglen")
+	sig, err := hexutil.Decode(tt.Signature)
+	if err != nil {
+		return err
+	}
+	if len(sig) != BLSSigLen {
+		return fmt.Errorf("Unmarshalled Signature len not equal to BLSSiglen")
 	}
 
-	d.Pubkey = [48]byte(hexkey1)
-	d.Signature = [96]byte(hexkey2)
+	d.Pubkey = [48]byte(pubkey)
+	d.Signature = [96]byte(sig)
 	d.WithdrawalCredentials = tt.WithdrawalCredentials
 	d.Amount = tt.Amount.Uint64()
 	d.Index = tt.Index.Uint64()

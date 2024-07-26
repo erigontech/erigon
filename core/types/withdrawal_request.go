@@ -108,15 +108,15 @@ func (w *WithdrawalRequest) UnmarshalJSON(input []byte) error {
 		return err
 	}
 
-	hexkey, err := hexutil.Decode(tt.ValidatorPubkey)
+	validatorKey, err := hexutil.Decode(tt.ValidatorPubkey)
 	if err != nil {
 		return err
 	}
-	if len(hexkey) != 48 {
-		return fmt.Errorf("decode hexkey len after UnmarshalJSON doesn't match BLSKeyLen")
+	if len(validatorKey) != 48 {
+		return fmt.Errorf("decoded validatorKey len after UnmarshalJSON doesn't match BLSKeyLen")
 	}
 
-	w.ValidatorPubkey = [48]byte(hexkey)
+	w.ValidatorPubkey = [48]byte(validatorKey)
 	w.Amount = tt.Amount.Uint64()
 	w.SourceAddress = tt.SourceAddress
 	return nil
