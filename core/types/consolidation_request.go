@@ -24,6 +24,7 @@ import (
 
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/hexutil"
+	"github.com/ledgerwatch/erigon-lib/common/hexutility"
 	rlp2 "github.com/ledgerwatch/erigon-lib/rlp"
 	"github.com/ledgerwatch/erigon/rlp"
 )
@@ -33,6 +34,12 @@ type ConsolidationRequest struct {
 	SourceAddress libcommon.Address
 	SourcePubKey  [BLSPubKeyLen]byte
 	TargetPubKey  [BLSPubKeyLen]byte
+}
+
+type ConsolidationRequestJson struct {
+	SourceAddress libcommon.Address `json:"sourceAddress"`
+	SourcePubKey  string            `json:"sourcePubkey"`
+	TargetPubKey  string            `json:"targetPubkey"`
 }
 
 func (w *ConsolidationRequest) RequestType() byte {
@@ -71,13 +78,17 @@ func (w *ConsolidationRequest) EncodeRLP(b io.Writer) (err error) {
 	return
 }
 
-func (d *ConsolidationRequest) UnmarshalJSON(input []byte) error {
-	type auxJson struct {
-		SourceAddress libcommon.Address `json:"sourceAddress"`
-		SourcePubKey  string            `json:"sourcePubkey"`
-		TargetPubKey  string            `json:"targetPubkey"`
+func (d *ConsolidationRequest) MarshalJSON() ([]byte, error) {
+	tt := ConsolidationRequestJson{
+		SourceAddress: d.SourceAddress,
+		SourcePubKey: hexutility.Encode(d.SourcePubKey[:]),
+		TargetPubKey: hexutility.Encode(d.TargetPubKey[:]),
 	}
-	tt := auxJson{}
+	return json.Marshal(tt)
+}
+
+func (d *ConsolidationRequest) UnmarshalJSON(input []byte) error {
+	tt := ConsolidationRequestJson{}
 	err := json.Unmarshal(input, &tt)
 	if err != nil {
 		return err

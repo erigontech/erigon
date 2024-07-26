@@ -25,6 +25,8 @@ import (
 
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/hexutil"
+	"github.com/ledgerwatch/erigon-lib/common/hexutility"
+
 	rlp2 "github.com/ledgerwatch/erigon-lib/rlp"
 	"github.com/ledgerwatch/erigon/accounts/abi"
 	"github.com/ledgerwatch/erigon/rlp"
@@ -50,11 +52,19 @@ var (
 )
 
 type DepositRequest struct {
-	Pubkey                [BLSPubKeyLen]byte `json:"pubkey"`                // public key of validator
-	WithdrawalCredentials libcommon.Hash     `json:"withdrawalCredentials"` // beneficiary of the validator
-	Amount                uint64             `json:"amount"`                // deposit size in Gwei
-	Signature             [BLSSigLen]byte    `json:"signature"`             // signature over deposit msg
-	Index                 uint64             `json:"index"`                 // deposit count value
+	Pubkey                [BLSPubKeyLen]byte  // public key of validator
+	WithdrawalCredentials libcommon.Hash      // beneficiary of the validator
+	Amount                uint64              // deposit size in Gwei
+	Signature             [BLSSigLen]byte     // signature over deposit msg
+	Index                 uint64              // deposit count value
+}
+
+type DepositRequestJson struct {
+	Pubkey                string         `json:"pubkey"`
+	WithdrawalCredentials libcommon.Hash `json:"withdrawalCredentials"`
+	Amount                hexutil.Uint64 `json:"amount"`
+	Signature             string         `json:"signature"`
+	Index                 hexutil.Uint64 `json:"index"`
 }
 
 func (d *DepositRequest) RequestType() byte { return DepositRequestType }
@@ -112,15 +122,19 @@ func (d *DepositRequest) EncodingSize() (encodingSize int) {
 	return
 }
 
-func (d *DepositRequest) UnmarshalJSON(input []byte) error {
-	type auxJson struct {
-		Pubkey                string         `json:"pubkey"`                // public key of validator
-		WithdrawalCredentials libcommon.Hash `json:"withdrawalCredentials"` // beneficiary of the validator
-		Amount                hexutil.Uint64 `json:"amount"`                // deposit size in Gwei
-		Signature             string         `json:"signature"`             // signature over deposit msg
-		Index                 hexutil.Uint64 `json:"index"`                 // deposit count value
+func (d *DepositRequest) MarshalJSON() ([]byte, error) {
+	tt := DepositRequestJson{
+		Pubkey: hexutility.Encode(d.Pubkey[:]),
+		WithdrawalCredentials: d.WithdrawalCredentials,
+		Amount: hexutil.Uint64(d.Amount),
+		Signature: hexutility.Encode(d.Signature[:]),
+		Index: hexutil.Uint64(d.Index),
 	}
-	tt := auxJson{}
+	return json.Marshal(tt)
+}
+
+func (d *DepositRequest) UnmarshalJSON(input []byte) error {
+	tt := DepositRequestJson{}
 	err := json.Unmarshal(input, &tt)
 	if err != nil {
 		return err
