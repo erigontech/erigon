@@ -944,7 +944,7 @@ func (r *BlockReader) txnByHash(txnHash common.Hash, segments []*Segment, buf []
 		gg := sn.MakeGetter()
 		gg.Reset(offset)
 		// first byte txnHash check - reducing false-positives 256 times. Allows don't store and don't calculate full hash of entity - when checking many snapshots.
-		if !gg.MatchPrefix([]byte{txnHash[0]}) {
+		if gg.MatchPrefixCmp([]byte{txnHash[0]}) != 0 {
 			continue
 		}
 		buf, _ = gg.Next(buf[:0])
@@ -1229,7 +1229,7 @@ func (r *BlockReader) borBlockByEventHash(txnHash common.Hash, segments []*Segme
 		offset := idxBorTxnHash.OrdinalLookup(blockEventId)
 		gg := sn.MakeGetter()
 		gg.Reset(offset)
-		if !gg.MatchPrefix(txnHash[:]) {
+		if gg.MatchPrefixCmp(txnHash[:]) == 0 {
 			continue
 		}
 		buf, _ = gg.Next(buf[:0])
@@ -1364,7 +1364,7 @@ func (r *BlockReader) EventsByBlock(ctx context.Context, tx kv.Tx, hash common.H
 		offset := idxBorTxnHash.OrdinalLookup(blockEventId)
 		gg := sn.MakeGetter()
 		gg.Reset(offset)
-		for gg.HasNext() && gg.MatchPrefix(borTxHash[:]) {
+		for gg.HasNext() && gg.MatchPrefixCmp(borTxHash[:]) == 0 {
 			buf, _ = gg.Next(buf[:0])
 			result = append(result, rlp.RawValue(common.Copy(buf[length.Hash+length.BlockNum+8:])))
 		}

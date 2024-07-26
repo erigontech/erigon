@@ -202,45 +202,6 @@ func TestDecompressMatchNotOK(t *testing.T) {
 	}
 }
 
-func TestDecompressMatchPrefix(t *testing.T) {
-	d := prepareLoremDict(t)
-	defer d.Close()
-	g := d.MakeGetter()
-	i := 0
-	skipCount := 0
-	for g.HasNext() {
-		w := loremStrings[i]
-		expected := []byte(fmt.Sprintf("%s %d", w, i+1))
-		expected = expected[:len(expected)/2]
-		if !g.MatchPrefix(expected) {
-			t.Errorf("expexted match with %s", expected)
-		}
-		g.Skip()
-		skipCount++
-		i++
-	}
-	if skipCount != i {
-		t.Errorf("something wrong with match logic")
-	}
-	g.Reset(0)
-	skipCount = 0
-	i = 0
-	for g.HasNext() {
-		w := loremStrings[i]
-		expected := []byte(fmt.Sprintf("%s %d", w, i+1))
-		expected = expected[:len(expected)/2]
-		if len(expected) > 0 {
-			expected[len(expected)-1]++
-			if g.MatchPrefix(expected) {
-				t.Errorf("not expexted match with %s", expected)
-			}
-		}
-		g.Skip()
-		skipCount++
-		i++
-	}
-}
-
 func TestDecompressMatchPrefixCmp(t *testing.T) {
 	d := prepareLoremDict(t)
 	defer d.Close()

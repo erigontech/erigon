@@ -59,7 +59,7 @@ func NewArchiveGetter(g *seg.Getter, c FileCompression) ArchiveGetter {
 
 func (g *getter) MatchPrefix(prefix []byte) bool {
 	if g.c&CompressKeys != 0 {
-		return g.Getter.MatchPrefix(prefix)
+		return g.Getter.MatchPrefixCmp(prefix) == 0
 	}
 	return g.Getter.MatchPrefixUncompressed(prefix) == 0
 }
@@ -103,7 +103,7 @@ func (g *getter) Skip() (uint64, int) {
 type ArchiveGetter interface {
 	HasNext() bool
 	FileName() string
-	MatchPrefix(prefix []byte) bool
+	MatchPrefixCmp(prefix []byte) int
 	Skip() (uint64, int)
 	Size() int
 	Next(buf []byte) ([]byte, uint64)
