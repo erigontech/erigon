@@ -52,11 +52,11 @@ var (
 )
 
 type DepositRequest struct {
-	Pubkey                [BLSPubKeyLen]byte  // public key of validator
-	WithdrawalCredentials libcommon.Hash      // beneficiary of the validator
-	Amount                uint64              // deposit size in Gwei
-	Signature             [BLSSigLen]byte     // signature over deposit msg
-	Index                 uint64              // deposit count value
+	Pubkey                [BLSPubKeyLen]byte // public key of validator
+	WithdrawalCredentials libcommon.Hash     // beneficiary of the validator
+	Amount                uint64             // deposit size in Gwei
+	Signature             [BLSSigLen]byte    // signature over deposit msg
+	Index                 uint64             // deposit count value
 }
 
 type DepositRequestJson struct {
@@ -124,11 +124,11 @@ func (d *DepositRequest) EncodingSize() (encodingSize int) {
 
 func (d *DepositRequest) MarshalJSON() ([]byte, error) {
 	tt := DepositRequestJson{
-		Pubkey: hexutility.Encode(d.Pubkey[:]),
+		Pubkey:                hexutility.Encode(d.Pubkey[:]),
 		WithdrawalCredentials: d.WithdrawalCredentials,
-		Amount: hexutil.Uint64(d.Amount),
-		Signature: hexutility.Encode(d.Signature[:]),
-		Index: hexutil.Uint64(d.Index),
+		Amount:                hexutil.Uint64(d.Amount),
+		Signature:             hexutility.Encode(d.Signature[:]),
+		Index:                 hexutil.Uint64(d.Index),
 	}
 	return json.Marshal(tt)
 }

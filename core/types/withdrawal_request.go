@@ -94,9 +94,9 @@ func (w *WithdrawalRequest) copy() Request {
 
 func (w *WithdrawalRequest) MarshalJSON() ([]byte, error) {
 	tt := WithdrawalRequestJson{
-		SourceAddress: w.SourceAddress,
+		SourceAddress:   w.SourceAddress,
 		ValidatorPubkey: hexutility.Encode(w.ValidatorPubkey[:]),
-		Amount: hexutil.Uint64(w.Amount),
+		Amount:          hexutil.Uint64(w.Amount),
 	}
 	return json.Marshal(tt)
 }

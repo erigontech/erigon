@@ -81,8 +81,8 @@ func (w *ConsolidationRequest) EncodeRLP(b io.Writer) (err error) {
 func (d *ConsolidationRequest) MarshalJSON() ([]byte, error) {
 	tt := ConsolidationRequestJson{
 		SourceAddress: d.SourceAddress,
-		SourcePubKey: hexutility.Encode(d.SourcePubKey[:]),
-		TargetPubKey: hexutility.Encode(d.TargetPubKey[:]),
+		SourcePubKey:  hexutility.Encode(d.SourcePubKey[:]),
+		TargetPubKey:  hexutility.Encode(d.TargetPubKey[:]),
 	}
 	return json.Marshal(tt)
 }
