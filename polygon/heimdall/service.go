@@ -33,8 +33,8 @@ type Service interface {
 	FetchLatestSpans(ctx context.Context, count uint) ([]*Span, error)
 	FetchCheckpointsFromBlock(ctx context.Context, startBlock uint64) (Waypoints, error)
 	FetchMilestonesFromBlock(ctx context.Context, startBlock uint64) (Waypoints, error)
-	RegisterMilestoneObserver(cb func(*Milestone), opts ...ObserverOption) polygoncommon.UnregisterFunc
-	RegisterSpanObserver(cb func(*Span), opts ...ObserverOption) polygoncommon.UnregisterFunc
+	RegisterMilestoneObserver(callback func(*Milestone), opts ...ObserverOption) polygoncommon.UnregisterFunc
+	RegisterSpanObserver(callback func(*Span), opts ...ObserverOption) polygoncommon.UnregisterFunc
 	Run(ctx context.Context) error
 }
 
@@ -193,20 +193,20 @@ func (s *service) FetchMilestonesFromBlock(ctx context.Context, startBlock uint6
 	return libcommon.SliceMap(entities, castEntityToWaypoint[*Milestone]), err
 }
 
-func (s *service) RegisterMilestoneObserver(cb func(*Milestone), opts ...ObserverOption) polygoncommon.UnregisterFunc {
+func (s *service) RegisterMilestoneObserver(callback func(*Milestone), opts ...ObserverOption) polygoncommon.UnregisterFunc {
 	options := NewObserverOptions(opts...)
 	return s.milestoneScraper.RegisterObserver(func(entities []*Milestone) {
 		for _, entity := range libcommon.SliceTakeLast(entities, options.eventsLimit) {
-			cb(entity)
+			callback(entity)
 		}
 	})
 }
 
-func (s *service) RegisterSpanObserver(cb func(*Span), opts ...ObserverOption) polygoncommon.UnregisterFunc {
+func (s *service) RegisterSpanObserver(callback func(*Span), opts ...ObserverOption) polygoncommon.UnregisterFunc {
 	options := NewObserverOptions(opts...)
 	return s.spanScraper.RegisterObserver(func(entities []*Span) {
 		for _, entity := range libcommon.SliceTakeLast(entities, options.eventsLimit) {
-			cb(entity)
+			callback(entity)
 		}
 	})
 }
