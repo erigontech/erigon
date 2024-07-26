@@ -10,13 +10,11 @@
 
 extern const struct evmc_host_interface evmc_go_host;
 
+// #ifdef __cplusplus
 
+// #else
 
-#ifdef __cplusplus
-
-#else
-
-#endif
+// #endif
 
 #ifdef __cplusplus
 extern "C" {

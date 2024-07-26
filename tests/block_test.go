@@ -22,7 +22,6 @@
 package tests
 
 import (
-	"path/filepath"
 	"runtime"
 	"testing"
 
@@ -53,9 +52,9 @@ func TestBlockchain(t *testing.T) {
 
 	checkStateRoot := true
 
-	dir := filepath.Join(".", "/testdata/BlockchainTests/ValidBlocks")
+	// dir := filepath.Join(".", "/testdata/BlockchainTests/ValidBlocks/bcStateTests")
 
-	bt.walk(t, dir, func(t *testing.T, name string, test *BlockTest) {
+	bt.walk(t, blockTestDir, func(t *testing.T, name string, test *BlockTest) {
 		// import pre accounts & construct test genesis block & state root
 		if err := bt.checkFailure(t, test.Run(t, checkStateRoot)); err != nil {
 			t.Error(err)

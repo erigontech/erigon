@@ -4,15 +4,8 @@ include(FetchContent)
 
 FetchContent_Declare(
     evmone
-    GIT_REPOSITORY https://github.com/racytech/evmone.git
+    GIT_REPOSITORY https://github.com/ethereum/evmone.git
 )
-
-FetchContent_Declare(
-    intx
-    GIT_REPOSITORY https://github.com/chfast/intx.git
-    GIT_TAG v0.10.1
-)
-
-FetchContent_MakeAvailable(evmone intx)
+FetchContent_MakeAvailable(evmone)
 
 project(evmone-go LANGUAGES C CXX)

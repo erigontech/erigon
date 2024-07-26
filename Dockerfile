@@ -14,7 +14,8 @@ ADD . .
 
 RUN cmake -S . -B build -DEVMONE_TESTING=OFF
 RUN cmake --build build --parallel
-RUN cp ./build/lib/libevmon* /usr/local/lib
+RUN mkdir -p ./core/evmone-go/lib
+RUN cp ./build/lib/libevmon* ./core/evmone-go/lib
 
 RUN --mount=type=cache,target=/root/.cache \
     --mount=type=cache,target=/tmp/go-build \

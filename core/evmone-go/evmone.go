@@ -1,7 +1,7 @@
 package evmonego
 
 /*
-#cgo LDFLAGS: -L/usr/local/lib -levmone -Wl,-rpath,/usr/local/lib
+#cgo LDFLAGS: -L${SRCDIR}/lib -levmone -Wl,-rpath,${SRCDIR}/lib
 
 #cgo CXXFLAGS: -std=c++20
 #cgo CXXFLAGS: -I${SRCDIR}/../../build/_deps/evmone-src/include -Wall -Wextra -Wno-unused-parameter

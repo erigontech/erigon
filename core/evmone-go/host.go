@@ -1,18 +1,6 @@
 package evmonego
 
 /*
-#cgo LDFLAGS: -L/usr/local/lib -levmone -Wl,-rpath,/usr/local/lib
-
-#cgo CXXFLAGS: -std=c++20
-#cgo CXXFLAGS: -I${SRCDIR}/../../build/_deps/evmone-src/include -Wall -Wextra -Wno-unused-parameter
-#cgo CXXFLAGS: -I${SRCDIR}/../../build/_deps/evmone-src/lib -Wall -Wextra -Wno-unused-parameter
-#cgo CXXFLAGS: -I${SRCDIR}/../../build/_deps/evmone-src/evmc/include -Wall -Wextra -Wno-unused-parameter
-#cgo CXXFLAGS: -I${SRCDIR}/build/_deps/intx-src/include -Wall -Wextra -Wno-unused-parameter
-
-
-#cgo CFLAGS: -I${SRCDIR}/../../build/_deps/evmone-src/include -Wall -Wextra -Wno-unused-parameter
-#cgo CFLAGS: -I${SRCDIR}/../../build/_deps/evmone-src/evmc/include -Wall -Wextra -Wno-unused-parameter
-// #cgo CFLAGS: -I${SRCDIR}/../../build/_deps/intx-src/include -Wall -Wextra -Wno-unused-parameter
 
 #include "evmonego.h"
 
