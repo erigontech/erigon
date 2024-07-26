@@ -24,7 +24,6 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
-	"math/big"
 	"net/http"
 	_ "net/http/pprof" //nolint:gosec
 	"os"
@@ -469,62 +468,6 @@ func snapSizes(chaindata string) error {
 	return nil
 }
 
-func fixTd(chaindata string) error {
-	db := mdbx.MustOpen(chaindata)
-	defer db.Close()
-	tx, err := db.BeginRw(context.Background())
-	if err != nil {
-		return err
-	}
-	defer tx.Rollback()
-	c, err1 := tx.RwCursor(kv.Headers)
-	if err1 != nil {
-		return err1
-	}
-	defer c.Close()
-	var k, v []byte
-	for k, v, err = c.First(); err == nil && k != nil; k, v, err = c.Next() {
-		hv, herr := tx.GetOne(kv.HeaderTD, k)
-		if herr != nil {
-			return herr
-		}
-		if hv == nil {
-			fmt.Printf("Missing TD record for %x, fixing\n", k)
-			var header types.Header
-			if err = rlp.DecodeBytes(v, &header); err != nil {
-				return fmt.Errorf("decoding header from %x: %w", v, err)
-			}
-			if header.Number.Uint64() == 0 {
-				continue
-			}
-			var parentK [40]byte
-			binary.BigEndian.PutUint64(parentK[:], header.Number.Uint64()-1)
-			copy(parentK[8:], header.ParentHash[:])
-			var parentTdRec []byte
-			if parentTdRec, err = tx.GetOne(kv.HeaderTD, parentK[:]); err != nil {
-				return fmt.Errorf("reading parentTd Rec for %d: %w", header.Number.Uint64(), err)
-			}
-			var parentTd big.Int
-			if err = rlp.DecodeBytes(parentTdRec, &parentTd); err != nil {
-				return fmt.Errorf("decoding parent Td record for block %d, from %x: %w", header.Number.Uint64(), parentTdRec, err)
-			}
-			var td big.Int
-			td.Add(&parentTd, header.Difficulty)
-			var newHv []byte
-			if newHv, err = rlp.EncodeToBytes(&td); err != nil {
-				return fmt.Errorf("encoding td record for block %d: %w", header.Number.Uint64(), err)
-			}
-			if err = tx.Put(kv.HeaderTD, k, newHv); err != nil {
-				return err
-			}
-		}
-	}
-	if err != nil {
-		return err
-	}
-	return tx.Commit()
-}
-
 func advanceExec(chaindata string) error {
 	db := mdbx.MustOpen(chaindata)
 	defer db.Close()
@@ -955,25 +898,6 @@ func iterate(filename string, prefix string) error {
 	return nil
 }
 
-func readSeg(chaindata string) error {
-	vDecomp, err := seg.NewDecompressor(chaindata)
-	if err != nil {
-		return err
-	}
-	defer vDecomp.Close()
-	g := vDecomp.MakeGetter()
-	var buf []byte
-	var count int
-	var offset, nextPos uint64
-	for g.HasNext() {
-		buf, nextPos = g.Next(buf[:0])
-		fmt.Printf("offset: %d, val: %x\n", offset, buf)
-		offset = nextPos
-		count++
-	}
-	return nil
-}
-
 func main() {
 	debug.RaiseFdLimit()
 	flag.Parse()
@@ -1042,9 +966,6 @@ func main() {
 	case "snapSizes":
 		err = snapSizes(*chaindata)
 
-	case "fixTd":
-		err = fixTd(*chaindata)
-
 	case "advanceExec":
 		err = advanceExec(*chaindata)
 
@@ -1070,8 +991,6 @@ func main() {
 		err = iterate(*chaindata, *account)
 	case "rmSnKey":
 		err = rmSnKey(*chaindata)
-	case "readSeg":
-		err = readSeg(*chaindata)
 	}
 
 	if err != nil {
