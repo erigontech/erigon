@@ -22,10 +22,10 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/ledgerwatch/erigon-lib/log/v3"
+	"github.com/erigontech/erigon-lib/log/v3"
 
-	"github.com/ledgerwatch/erigon/core/types"
-	"github.com/ledgerwatch/erigon/polygon/bridge"
+	"github.com/erigontech/erigon/core/types"
+	"github.com/erigontech/erigon/polygon/bridge"
 )
 
 //go:generate mockgen -typed=true -destination=./store_mock.go -package=sync . Store

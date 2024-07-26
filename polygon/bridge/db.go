@@ -24,10 +24,10 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon/accounts/abi"
-	"github.com/ledgerwatch/erigon/polygon/heimdall"
-	"github.com/ledgerwatch/erigon/polygon/polygoncommon"
+	"github.com/erigontech/erigon-lib/kv"
+	"github.com/erigontech/erigon/accounts/abi"
+	"github.com/erigontech/erigon/polygon/heimdall"
+	"github.com/erigontech/erigon/polygon/polygoncommon"
 )
 
 /*
@@ -70,7 +70,7 @@ func NewStore(db *polygoncommon.Database) *MdbxStore {
 }
 
 func (s *MdbxStore) Prepare(ctx context.Context) error {
-	err := s.db.OpenOnce(ctx, kv.PolygonBridgeDB, databaseTablesCfg)
+	err := s.db.OpenOnce(ctx)
 	if err != nil {
 		return err
 	}

@@ -25,11 +25,12 @@ import (
 	"sync/atomic"
 
 	"github.com/holiman/uint256"
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
 
-	"github.com/ledgerwatch/erigon/common"
-	"github.com/ledgerwatch/erigon/core/vm"
-	"github.com/ledgerwatch/erigon/eth/tracers"
+	libcommon "github.com/erigontech/erigon-lib/common"
+
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/core/vm"
+	"github.com/erigontech/erigon/eth/tracers"
 )
 
 func init() {

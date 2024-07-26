@@ -17,11 +17,11 @@
 package transition
 
 import (
-	"github.com/ledgerwatch/erigon/cl/abstract"
-	"github.com/ledgerwatch/erigon/cl/transition/impl/eth2"
-	machine2 "github.com/ledgerwatch/erigon/cl/transition/machine"
+	"github.com/erigontech/erigon/cl/abstract"
+	"github.com/erigontech/erigon/cl/transition/impl/eth2"
+	machine2 "github.com/erigontech/erigon/cl/transition/machine"
 
-	"github.com/ledgerwatch/erigon/cl/cltypes"
+	"github.com/erigontech/erigon/cl/cltypes"
 )
 
 var _ machine2.Interface = (*eth2.Impl)(nil)

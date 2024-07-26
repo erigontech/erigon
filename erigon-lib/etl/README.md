@@ -1,5 +1,5 @@
 # ETL
-ETL framework is most commonly used in [staged sync](https://github.com/ledgerwatch/erigon/blob/main/eth/stagedsync/README.md).
+ETL framework is most commonly used in [staged sync](https://github.com/erigontech/erigon/blob/main/eth/stagedsync/README.md).
 
 It implements a pattern where we extract some data from a database, transform it,
 then put it into temp files and insert back to the database in sorted order.

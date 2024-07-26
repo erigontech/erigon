@@ -20,12 +20,12 @@ import (
 	"encoding/binary"
 	"testing"
 
-	"github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon/cl/transition/impl/eth2/statechange"
+	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon/cl/transition/impl/eth2/statechange"
 
-	"github.com/ledgerwatch/erigon/cl/clparams"
-	"github.com/ledgerwatch/erigon/cl/cltypes/solid"
-	"github.com/ledgerwatch/erigon/cl/phase1/core/state"
+	"github.com/erigontech/erigon/cl/clparams"
+	"github.com/erigontech/erigon/cl/cltypes/solid"
+	"github.com/erigontech/erigon/cl/phase1/core/state"
 	"github.com/stretchr/testify/require"
 )
 

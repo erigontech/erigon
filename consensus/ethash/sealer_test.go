@@ -30,14 +30,14 @@ import (
 
 	"github.com/goccy/go-json"
 
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon/consensus/ethash/ethashcfg"
+	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon/consensus/ethash/ethashcfg"
 
-	"github.com/ledgerwatch/erigon/turbo/testlog"
+	"github.com/erigontech/erigon/turbo/testlog"
 
-	"github.com/ledgerwatch/erigon-lib/log/v3"
+	"github.com/erigontech/erigon-lib/log/v3"
 
-	"github.com/ledgerwatch/erigon/core/types"
+	"github.com/erigontech/erigon/core/types"
 )
 
 // Tests whether remote HTTP servers are correctly notified of new work.

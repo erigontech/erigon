@@ -19,9 +19,9 @@ package consensus
 import (
 	"context"
 
-	"github.com/ledgerwatch/erigon-lib/log/v3"
-	"github.com/ledgerwatch/erigon/common/debug"
-	"github.com/ledgerwatch/erigon/core/types"
+	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/common/debug"
+	"github.com/erigontech/erigon/core/types"
 )
 
 type ResultWithContext struct {

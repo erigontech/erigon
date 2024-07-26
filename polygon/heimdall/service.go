@@ -19,17 +19,22 @@ package heimdall
 import (
 	"context"
 	"errors"
+	"slices"
 	"time"
 
 	"golang.org/x/sync/errgroup"
 
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/log/v3"
-	"github.com/ledgerwatch/erigon/polygon/polygoncommon"
+	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/polygon/polygoncommon"
 )
 
 type Service interface {
-	Heimdall
+	FetchLatestSpans(ctx context.Context, count uint) ([]*Span, error)
+	FetchCheckpointsFromBlock(ctx context.Context, startBlock uint64) (Waypoints, error)
+	FetchMilestonesFromBlock(ctx context.Context, startBlock uint64) (Waypoints, error)
+	RegisterMilestoneObserver(callback func(*Milestone), opts ...ObserverOption) polygoncommon.UnregisterFunc
+	RegisterSpanObserver(callback func(*Span), opts ...ObserverOption) polygoncommon.UnregisterFunc
 	Run(ctx context.Context) error
 }
 
@@ -38,10 +43,6 @@ type service struct {
 	checkpointScraper *scraper[*Checkpoint]
 	milestoneScraper  *scraper[*Milestone]
 	spanScraper       *scraper[*Span]
-}
-
-func makeType[T any]() *T {
-	return new(T)
 }
 
 func AssembleService(heimdallUrl string, dataDir string, tmpDir string, logger log.Logger) Service {
@@ -166,7 +167,7 @@ func (s *service) FetchLatestSpans(ctx context.Context, count uint) ([]*Span, er
 		count--
 	}
 
-	libcommon.SliceReverse(latestSpans)
+	slices.Reverse(latestSpans)
 	return latestSpans, nil
 }
 
@@ -192,21 +193,19 @@ func (s *service) FetchMilestonesFromBlock(ctx context.Context, startBlock uint6
 	return libcommon.SliceMap(entities, castEntityToWaypoint[*Milestone]), err
 }
 
-// TODO: this limit is a temporary solution to avoid piping thousands of events
-// during the first sync. Let's discuss alternatives. Hopefully we can remove this limit.
-const maxEntityEvents = 5
-
-func (s *service) RegisterMilestoneObserver(callback func(*Milestone)) polygoncommon.UnregisterFunc {
+func (s *service) RegisterMilestoneObserver(callback func(*Milestone), opts ...ObserverOption) polygoncommon.UnregisterFunc {
+	options := NewObserverOptions(opts...)
 	return s.milestoneScraper.RegisterObserver(func(entities []*Milestone) {
-		for _, entity := range libcommon.SliceTakeLast(entities, maxEntityEvents) {
+		for _, entity := range libcommon.SliceTakeLast(entities, options.eventsLimit) {
 			callback(entity)
 		}
 	})
 }
 
-func (s *service) RegisterSpanObserver(callback func(*Span)) polygoncommon.UnregisterFunc {
+func (s *service) RegisterSpanObserver(callback func(*Span), opts ...ObserverOption) polygoncommon.UnregisterFunc {
+	options := NewObserverOptions(opts...)
 	return s.spanScraper.RegisterObserver(func(entities []*Span) {
-		for _, entity := range libcommon.SliceTakeLast(entities, maxEntityEvents) {
+		for _, entity := range libcommon.SliceTakeLast(entities, options.eventsLimit) {
 			callback(entity)
 		}
 	})
