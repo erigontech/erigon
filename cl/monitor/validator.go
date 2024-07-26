@@ -45,6 +45,7 @@ func (m *ValidatorMonitorImpl) AddValidator(vid uint64) {
 	defer m.vStatusMutex.Unlock()
 	if _, ok := m.vaidatorStatuses[vid]; !ok {
 		m.vaidatorStatuses[vid] = make(map[uint64]*validatorStatus)
+		log.Info("[monitor] add validator", "vid", vid)
 	}
 }
 
