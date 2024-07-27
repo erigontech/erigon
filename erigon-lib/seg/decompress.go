@@ -219,13 +219,13 @@ func NewDecompressor(compressedFilePath string) (*Decompressor, error) {
 	d.data = d.mmapHandle1[:d.size]
 	defer d.EnableReadAhead().DisableReadAhead() //speedup opening on slow drives
 	versionInfoBytes := 0
-	version := binary.BigEndian.Uint64(d.data[:1])
+	version := d.data[0]
 	if version == V1 {
-		_ = binary.BigEndian.Uint64(d.data[1:2])
+		_ = d.data[1:2]
 		versionInfoBytes = 2
 	}
 
-	log.Trace("version of a file is", "v", version)
+	//log.Trace("version of a file is", "v", version)
 
 	d.wordsCount = binary.BigEndian.Uint64(d.data[versionInfoBytes : versionInfoBytes+8])
 	d.emptyWordsCount = binary.BigEndian.Uint64(d.data[versionInfoBytes+8 : versionInfoBytes+16])

@@ -316,13 +316,6 @@ func compressWithPatternCandidates(ctx context.Context, trace bool, logPrefix, s
 	defer intermediateFile.Close()
 	intermediateW := bufio.NewWriterSize(intermediateFile, 8*etl.BufIOSize)
 
-	if err = intermediateW.WriteByte(V1); err != nil {
-		return err
-	}
-	if err = intermediateW.WriteByte(None); err != nil {
-		return err
-	}
-
 	var inCount, outCount, emptyWordsCount uint64 // Counters words sent to compression and returned for compression
 	var numBuf [binary.MaxVarintLen64]byte
 	totalWords := uncompressedFile.count
