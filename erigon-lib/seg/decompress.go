@@ -819,9 +819,9 @@ func (g *Getter) SkipUncompressed() (uint64, int) {
 
 // Match returns
 //
-//	1 if the word at current offset is greater than the buf
+// -1 if the word at current offset is greater than the buf
 //
-// -1 if it is less than the buf
+// 1 if it is less than the buf
 //
 //	0 if they are equal.
 func (g *Getter) Match(buf []byte) int {
@@ -1079,6 +1079,27 @@ func (g *Getter) MatchPrefixUncompressed(prefix []byte) bool {
 	g.nextPos(true)
 
 	return bytes.HasPrefix(g.data[g.dataP:g.dataP+wordLen], prefix)
+}
+
+func (g *Getter) MatchCmpUncompressed(buf []byte) int {
+	savePos := g.dataP
+	defer func() {
+		g.dataP, g.dataBit = savePos, 0
+	}()
+
+	wordLen := g.nextPos(true /* clean */)
+	wordLen-- // because when create huffman tree we do ++ , because 0 is terminator
+	bufLen := len(buf)
+	if wordLen == 0 && bufLen != 0 {
+		return 1
+	}
+	if bufLen == 0 {
+		return -1
+	}
+
+	g.nextPos(true)
+
+	return bytes.Compare(buf, g.data[g.dataP:g.dataP+wordLen])
 }
 
 // FastNext extracts a compressed word from current offset in the file
