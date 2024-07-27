@@ -210,7 +210,7 @@ func (t *callTracer) CaptureState(pc uint64, op vm.OpCode, gas, cost uint64, sco
 			topics[i] = libcommon.Hash(topic.Bytes32())
 		}
 		var data []byte
-		if err != nil {
+		if err == nil {
 			data = scope.Memory.GetCopy(int64(mStart.Uint64()), int64(mSize.Uint64()))
 		}
 		log := callLog{Address: scope.Contract.Address(), Topics: topics, Data: hexutility.Bytes(data), Index: t.logIndex}
