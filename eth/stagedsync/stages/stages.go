@@ -67,12 +67,6 @@ var AllStages = []SyncStage{
 	Execution,
 	CustomTrace,
 	Translation,
-	HashState,
-	IntermediateHashes,
-	AccountHistoryIndex,
-	StorageHistoryIndex,
-	LogIndex,
-	CallTraces,
 	TxLookup,
 	Finish,
 }
