@@ -178,7 +178,7 @@ func (t *callTracer) CaptureEnd(output []byte, gasUsed uint64, err error) {
 // CaptureState implements the EVMLogger interface to trace a single step of VM execution.
 func (t *callTracer) CaptureState(pc uint64, op vm.OpCode, gas, cost uint64, scope *vm.ScopeContext, rData []byte, depth int, err error) {
 	// Only logs need to be captured via opcode processing
-	if !t.config.WithLog {
+	if !t.config.WithLog || err != nil {
 		return
 	}
 	// Avoid processing nested calls when only caring about top call
@@ -189,6 +189,7 @@ func (t *callTracer) CaptureState(pc uint64, op vm.OpCode, gas, cost uint64, sco
 	if atomic.LoadUint32(&t.interrupt) > 0 {
 		return
 	}
+
 	switch op {
 	case vm.LOG0, vm.LOG1, vm.LOG2, vm.LOG3, vm.LOG4:
 		size := int(op - vm.LOG0)
