@@ -1144,7 +1144,7 @@ func readPages(f io.ReaderAt, visStream io.Writer, pgno uint32, blockID *int, pa
 	*blockID++
 	pBlock := *blockID
 
-	fillcolor := ""
+	var fillcolor string
 	if _isBranch {
 		fillcolor = colors["purple"]
 	} else {
