@@ -170,11 +170,11 @@ func (args *CallArgs) ToMessage(globalGasCap uint64, baseFee *uint256.Int) (type
 // if statDiff is set, all diff will be applied first and then execute the call
 // message.
 type Account struct {
-	Nonce     *hexutil.Uint64                 `json:"nonce"`
-	Code      *hexutility.Bytes               `json:"code"`
-	Balance   **hexutil.Big                   `json:"balance"`
-	State     *map[libcommon.Hash]uint256.Int `json:"state"`
-	StateDiff *map[libcommon.Hash]uint256.Int `json:"stateDiff"`
+	Nonce     *hexutil.Uint64                    `json:"nonce"`
+	Code      *hexutility.Bytes                  `json:"code"`
+	Balance   **hexutil.Big                      `json:"balance"`
+	State     *map[libcommon.Hash]libcommon.Hash `json:"state"`
+	StateDiff *map[libcommon.Hash]libcommon.Hash `json:"stateDiff"`
 }
 
 func NewRevertError(result *core.ExecutionResult) *RevertError {

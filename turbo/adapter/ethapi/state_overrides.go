@@ -36,13 +36,19 @@ func (overrides *StateOverrides) Override(state *state.IntraBlockState) error {
 		}
 		// Replace entire state if caller requires.
 		if account.State != nil {
-			state.SetStorage(addr, *account.State)
+			intState := map[libcommon.Hash]uint256.Int{}
+			for key, value := range *account.State {
+				intValue := new(uint256.Int).SetBytes32(value.Bytes())
+				intState[key] = *intValue
+			}
+			state.SetStorage(addr, intState)
 		}
 		// Apply state diff into specified accounts.
 		if account.StateDiff != nil {
 			for key, value := range *account.StateDiff {
 				key := key
-				state.SetState(addr, &key, value)
+				intValue := new(uint256.Int).SetBytes32(value.Bytes())
+				state.SetState(addr, &key, *intValue)
 			}
 		}
 	}
