@@ -51,6 +51,9 @@ const BtreeLogPrefix = "btree"
 // DefaultBtreeM - amount of keys on leaf of BTree
 // It will do log2(M) co-located-reads from data file - for binary-search inside leaf
 var DefaultBtreeM = uint64(256)
+
+const DefaultBtreeStartSkip = uint64(4) // defines smallest shard available for scan instead of binsearch
+
 var ErrBtIndexLookupBounds = errors.New("BtIndex: lookup di bounds error")
 
 func logBase(n, base uint64) uint64 {
@@ -947,6 +950,9 @@ func (b *BtIndex) Close() {
 		}
 		b.file = nil
 	}
+	if b.bplus != nil {
+		b.bplus.Close()
+	}
 }
 
 // Get - exact match of key. `k == nil` - means not found
@@ -1010,24 +1016,22 @@ func (b *BtIndex) Seek(g ArchiveGetter, x []byte) (*Cursor, error) {
 	if b.Empty() {
 		return nil, nil
 	}
-
-	// defer func() {
-	// 	fmt.Printf("[Bindex][%s] seekInFiles '%x' -> '%x' di=%d\n", b.FileName(), x, cursor.Value(), cursor.d)
-	// }()
-	var (
-		k     []byte
-		dt    uint64
-		found bool
-		err   error
-	)
-
 	if UseBpsTree {
-		_, dt, found, err = b.bplus.Seek(g, x)
-	} else {
-		_, dt, found, err = b.alloc.Seek(g, x)
+		k, v, dt, _, err := b.bplus.Seek(g, x)
+		if err != nil /*|| !found*/ {
+			if errors.Is(err, ErrBtIndexLookupBounds) {
+				return nil, nil
+			}
+			return nil, err
+		}
+		if bytes.Compare(k, x) >= 0 {
+			return b.newCursor(context.Background(), k, v, dt, g), nil
+		}
+		return nil, nil
 	}
-	_ = found
-	if err != nil /*|| !found*/ {
+
+	_, dt, found, err := b.alloc.Seek(g, x)
+	if err != nil || !found {
 		if errors.Is(err, ErrBtIndexLookupBounds) {
 			return nil, nil
 		}
