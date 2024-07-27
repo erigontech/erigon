@@ -357,38 +357,39 @@ func (r *BlockReader) HeadersRange(ctx context.Context, walker func(header *type
 }
 
 func (r *BlockReader) HeaderByNumber(ctx context.Context, tx kv.Getter, blockHeight uint64) (h *types.Header, err error) {
-	//TODO: investigate why code blolow causing getting error `Could not set forkchoice                 app=caplin stage=ForkChoice err="execution Client RPC failed to retrieve ForkChoiceUpdate response, err: unknown ancestor"`
-	//maxBlockNumInFiles := r.sn.BlocksAvailable()
-	//if maxBlockNumInFiles == 0 || blockHeight > maxBlockNumInFiles {
-	//	if tx == nil {
-	//		return nil, nil
-	//	}
-	//	blockHash, err := rawdb.ReadCanonicalHash(tx, blockHeight)
-	//	if err != nil {
-	//		return nil, err
-	//	}
-	//	if blockHash == (common.Hash{}) {
-	//		return nil, nil
-	//	}
-	//	h = rawdb.ReadHeader(tx, blockHash, blockHeight)
-	//	return h, nil
-	//}
+	var dbgPrefix string
+	dbgLogs := dbg.Enabled(ctx)
+	if dbgLogs {
+		dbgPrefix = fmt.Sprintf("[dbg] BlockReader(idxMax=%d,segMax=%d).HeaderByNumber(blk=%d) -> ", r.sn.idxMax.Load(), r.sn.segmentsMax.Load(), blockHeight)
+	}
+
 	if tx != nil {
 		blockHash, err := rawdb.ReadCanonicalHash(tx, blockHeight)
 		if err != nil {
 			return nil, err
 		}
-		if blockHash == (common.Hash{}) {
-			return nil, nil
-		}
-		h = rawdb.ReadHeader(tx, blockHash, blockHeight)
-		if h != nil {
-			return h, nil
+		// if no canonical marker - still can try read from files
+		if blockHash != emptyHash {
+			h = rawdb.ReadHeader(tx, blockHash, blockHeight)
+			if h != nil {
+				return h, nil
+			} else {
+				if dbgLogs {
+					log.Info(dbgPrefix + "not found in db")
+				}
+			}
+		} else {
+			if dbgLogs {
+				log.Info(dbgPrefix + "canonical hash is empty")
+			}
 		}
 	}
 
 	seg, ok, release := r.sn.ViewSingleFile(coresnaptype.Headers, blockHeight)
 	if !ok {
+		if dbgLogs {
+			log.Info(dbgPrefix + "not found file for such blockHeight")
+		}
 		return
 	}
 	defer release()
@@ -396,6 +397,11 @@ func (r *BlockReader) HeaderByNumber(ctx context.Context, tx kv.Getter, blockHei
 	h, _, err = r.headerFromSnapshot(blockHeight, seg, nil)
 	if err != nil {
 		return nil, err
+	}
+	if h == nil {
+		if dbgLogs {
+			log.Info(dbgPrefix + "got nil from file")
+		}
 	}
 	return h, nil
 }
