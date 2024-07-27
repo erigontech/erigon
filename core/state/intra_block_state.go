@@ -24,6 +24,7 @@ import (
 	"fmt"
 	"sort"
 
+	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon-lib/chain"
@@ -163,6 +164,7 @@ func (sdb *IntraBlockState) Reset() {
 }
 
 func (sdb *IntraBlockState) AddLog(log2 *types.Log) {
+	log.Warn("[dbg] AddLog", "sdb.txIndex", sdb.txIndex)
 	sdb.journal.append(addLogChange{txhash: sdb.thash})
 	log2.TxHash = sdb.thash
 	log2.BlockHash = sdb.bhash
