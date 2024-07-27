@@ -398,21 +398,21 @@ func getTransaction(txJson jsonrpc.RPCTransaction) (types.Transaction, error) {
 	if txJson.Value != nil {
 		value, overflow = uint256.FromBig(txJson.Value.ToInt())
 		if overflow {
-			return nil, fmt.Errorf("value field caused an overflow (uint256)")
+			return nil, errors.New("value field caused an overflow (uint256)")
 		}
 	}
 
 	if txJson.GasPrice != nil {
 		gasPrice, overflow = uint256.FromBig(txJson.GasPrice.ToInt())
 		if overflow {
-			return nil, fmt.Errorf("gasPrice field caused an overflow (uint256)")
+			return nil, errors.New("gasPrice field caused an overflow (uint256)")
 		}
 	}
 
 	if txJson.ChainID != nil {
 		chainId, overflow = uint256.FromBig(txJson.ChainID.ToInt())
 		if overflow {
-			return nil, fmt.Errorf("chainId field caused an overflow (uint256)")
+			return nil, errors.New("chainId field caused an overflow (uint256)")
 		}
 	}
 
@@ -448,14 +448,14 @@ func getTransaction(txJson jsonrpc.RPCTransaction) (types.Transaction, error) {
 		if txJson.Tip != nil {
 			tip, overflow = uint256.FromBig(txJson.Tip.ToInt())
 			if overflow {
-				return nil, fmt.Errorf("maxPriorityFeePerGas field caused an overflow (uint256)")
+				return nil, errors.New("maxPriorityFeePerGas field caused an overflow (uint256)")
 			}
 		}
 
 		if txJson.FeeCap != nil {
 			feeCap, overflow = uint256.FromBig(txJson.FeeCap.ToInt())
 			if overflow {
-				return nil, fmt.Errorf("maxFeePerGas field caused an overflow (uint256)")
+				return nil, errors.New("maxFeePerGas field caused an overflow (uint256)")
 			}
 		}
 

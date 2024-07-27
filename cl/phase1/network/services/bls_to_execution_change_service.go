@@ -19,6 +19,7 @@ package services
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 
 	libcommon "github.com/erigontech/erigon-lib/common"
@@ -84,7 +85,7 @@ func (s *blsToExecutionChangeService) ProcessMessage(ctx context.Context, subnet
 
 	// assert validator.withdrawal_credentials[:1] == BLS_WITHDRAWAL_PREFIX
 	if wc[0] != byte(s.beaconCfg.BLSWithdrawalPrefixByte) {
-		return fmt.Errorf("invalid withdrawal credentials prefix")
+		return errors.New("invalid withdrawal credentials prefix")
 	}
 
 	// assert validator.withdrawal_credentials[1:] == hash(address_change.from_bls_pubkey)[1:]
@@ -92,7 +93,7 @@ func (s *blsToExecutionChangeService) ProcessMessage(ctx context.Context, subnet
 	// Check the validator's withdrawal credentials against the provided message.
 	hashedFrom := utils.Sha256(change.From[:])
 	if !bytes.Equal(hashedFrom[1:], wc[1:]) {
-		return fmt.Errorf("invalid withdrawal credentials hash")
+		return errors.New("invalid withdrawal credentials hash")
 	}
 
 	// assert bls.Verify(address_change.from_bls_pubkey, signing_root, signed_address_change.signature)
@@ -110,7 +111,7 @@ func (s *blsToExecutionChangeService) ProcessMessage(ctx context.Context, subnet
 		return err
 	}
 	if !valid {
-		return fmt.Errorf("invalid signature")
+		return errors.New("invalid signature")
 	}
 
 	// validator.withdrawal_credentials = (

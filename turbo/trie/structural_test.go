@@ -24,6 +24,7 @@ package trie
 import (
 	"bytes"
 	"encoding/binary"
+	"errors"
 	"fmt"
 	"slices"
 	"testing"
@@ -550,7 +551,7 @@ func TestStorageOnly(t *testing.T) {
 			require.Equal(t, fmt.Sprintf("%b", uint16(0b100000)), fmt.Sprintf("%b", hasTree))
 			require.NotNil(t, hashes)
 		case 5:
-			require.NoError(t, fmt.Errorf("not expected"))
+			require.NoError(t, errors.New("not expected"))
 		}
 
 		return nil

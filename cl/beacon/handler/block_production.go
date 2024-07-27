@@ -68,7 +68,7 @@ const (
 )
 
 var (
-	errBuilderNotEnabled = fmt.Errorf("builder is not enabled")
+	errBuilderNotEnabled = errors.New("builder is not enabled")
 )
 
 var defaultGraffitiString = "Caplin"
@@ -88,14 +88,14 @@ func (a *ApiHandler) GetEthV1ValidatorAttestationData(
 	if slot == nil || committeeIndex == nil {
 		return nil, beaconhttp.NewEndpointError(
 			http.StatusBadRequest,
-			fmt.Errorf("slot and committee_index url params are required"),
+			errors.New("slot and committee_index url params are required"),
 		)
 	}
 	headState := a.syncedData.HeadState()
 	if headState == nil {
 		return nil, beaconhttp.NewEndpointError(
 			http.StatusServiceUnavailable,
-			fmt.Errorf("beacon node is still syncing"),
+			errors.New("beacon node is still syncing"),
 		)
 	}
 
@@ -164,7 +164,7 @@ func (a *ApiHandler) GetEthV3ValidatorBlock(
 	if s == nil {
 		return nil, beaconhttp.NewEndpointError(
 			http.StatusServiceUnavailable,
-			fmt.Errorf("node is syncing"),
+			errors.New("node is syncing"),
 		)
 	}
 
@@ -400,7 +400,7 @@ func (a *ApiHandler) getBuilderPayload(
 	if err != nil {
 		return nil, err
 	} else if header == nil {
-		return nil, fmt.Errorf("no error but nil header")
+		return nil, errors.New("no error but nil header")
 	}
 
 	// check the version
@@ -419,10 +419,10 @@ func (a *ApiHandler) getBuilderPayload(
 		for i := 0; i < header.Data.Message.BlobKzgCommitments.Len(); i++ {
 			c := header.Data.Message.BlobKzgCommitments.Get(i)
 			if c == nil {
-				return nil, fmt.Errorf("nil blob kzg commitment")
+				return nil, errors.New("nil blob kzg commitment")
 			}
 			if len(c) != length.Bytes48 {
-				return nil, fmt.Errorf("invalid blob kzg commitment length")
+				return nil, errors.New("invalid blob kzg commitment length")
 			}
 		}
 	}
@@ -626,7 +626,7 @@ func (a *ApiHandler) produceBeaconBody(
 
 	wg.Wait()
 	if executionPayload == nil {
-		return nil, 0, fmt.Errorf("failed to produce execution payload")
+		return nil, 0, errors.New("failed to produce execution payload")
 	}
 	beaconBody.ExecutionPayload = executionPayload
 	return beaconBody, executionValue, nil
@@ -859,7 +859,7 @@ func (a *ApiHandler) publishBlindedBlocks(w http.ResponseWriter, r *http.Request
 		// check commitments
 		blockCommitments := signedBlindedBlock.Block.Body.BlobKzgCommitments
 		if len(blobsBundle.Commitments) != blockCommitments.Len() {
-			return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, fmt.Errorf("commitments length mismatch"))
+			return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, errors.New("commitments length mismatch"))
 		}
 		for i := range blobsBundle.Commitments {
 			// add the bundle to recently produced blobs
@@ -885,7 +885,7 @@ func (a *ApiHandler) parseEthConsensusVersion(
 	apiVersion int,
 ) (clparams.StateVersion, error) {
 	if str == "" && apiVersion == 2 {
-		return 0, fmt.Errorf("Eth-Consensus-Version header is required")
+		return 0, errors.New("Eth-Consensus-Version header is required")
 	}
 	if str == "" && apiVersion == 1 {
 		currentEpoch := a.ethClock.GetCurrentEpoch()
@@ -931,7 +931,7 @@ func (a *ApiHandler) parseRequestBeaconBlock(
 		block.SignedBlock.Block.SetVersion(version)
 		return block, nil
 	}
-	return nil, fmt.Errorf("invalid content type")
+	return nil, errors.New("invalid content type")
 }
 
 func (a *ApiHandler) broadcastBlock(ctx context.Context, blk *cltypes.SignedBeaconBlock) error {

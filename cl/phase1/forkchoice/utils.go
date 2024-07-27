@@ -17,7 +17,7 @@
 package forkchoice
 
 import (
-	"fmt"
+	"errors"
 
 	"github.com/erigontech/erigon/cl/transition"
 
@@ -124,7 +124,7 @@ func (f *ForkChoiceStore) getCheckpointState(checkpoint solid.Checkpoint) (*chec
 		return nil, err
 	}
 	if baseState == nil {
-		return nil, fmt.Errorf("getCheckpointState: baseState not found in graph")
+		return nil, errors.New("getCheckpointState: baseState not found in graph")
 	}
 	// By default use the no change encoding to signal that there is no future epoch here.
 	if baseState.Slot() < f.computeStartSlotAtEpoch(checkpoint.Epoch()) {

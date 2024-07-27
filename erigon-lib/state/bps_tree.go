@@ -20,8 +20,9 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
-	"github.com/c2h5oh/datasize"
 	"unsafe"
+
+	"github.com/c2h5oh/datasize"
 
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/log/v3"
@@ -77,7 +78,7 @@ func (it *BpsTreeIterator) Di() uint64 {
 
 func (it *BpsTreeIterator) KVFromGetter(g ArchiveGetter) ([]byte, []byte, error) {
 	if it == nil {
-		return nil, nil, fmt.Errorf("iterator is nil")
+		return nil, nil, errors.New("iterator is nil")
 	}
 	//fmt.Printf("kv from %p getter %p tree %p offt %d\n", it, g, it.t, it.i)
 	k, v, err := it.t.dataLookupFunc(it.i, g)

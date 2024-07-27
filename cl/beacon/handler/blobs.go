@@ -17,7 +17,7 @@
 package handler
 
 import (
-	"fmt"
+	"errors"
 	"net/http"
 	"strconv"
 
@@ -50,7 +50,7 @@ func (a *ApiHandler) GetEthV1BeaconBlobSidecars(w http.ResponseWriter, r *http.R
 		return nil, err
 	}
 	if slot == nil {
-		return nil, beaconhttp.NewEndpointError(http.StatusNotFound, fmt.Errorf("block not found"))
+		return nil, beaconhttp.NewEndpointError(http.StatusNotFound, errors.New("block not found"))
 	}
 	if a.caplinSnapshots != nil && *slot <= a.caplinSnapshots.FrozenBlobs() {
 		out, err := a.caplinSnapshots.ReadBlobSidecars(*slot)

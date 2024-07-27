@@ -725,7 +725,7 @@ func chainConfig(name string) error {
 	if chainConfig == nil {
 		return fmt.Errorf("unknown name: %s", name)
 	}
-	f, err := os.Create(filepath.Join("params", "chainspecs", fmt.Sprintf("%s.json", name)))
+	f, err := os.Create(filepath.Join("params", "chainspecs", name+".json"))
 	if err != nil {
 		return err
 	}

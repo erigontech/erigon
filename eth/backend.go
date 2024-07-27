@@ -1024,7 +1024,7 @@ func (s *Ethereum) Init(stack *node.Node, config *ethconfig.Config, chainConfig 
 			badBlockHeader, hErr := rawdb.ReadHeaderByHash(tx, config.BadBlockHash)
 			if badBlockHeader != nil {
 				unwindPoint := badBlockHeader.Number.Uint64() - 1
-				if err := s.stagedSync.UnwindTo(unwindPoint, stagedsync.BadBlock(config.BadBlockHash, fmt.Errorf("Init unwind")), tx); err != nil {
+				if err := s.stagedSync.UnwindTo(unwindPoint, stagedsync.BadBlock(config.BadBlockHash, errors.New("Init unwind")), tx); err != nil {
 					return err
 				}
 			}
@@ -1110,7 +1110,7 @@ func (s *Ethereum) Etherbase() (eb libcommon.Address, err error) {
 	if etherbase != (libcommon.Address{}) {
 		return etherbase, nil
 	}
-	return libcommon.Address{}, fmt.Errorf("etherbase must be explicitly specified")
+	return libcommon.Address{}, errors.New("etherbase must be explicitly specified")
 }
 
 // isLocalBlock checks whether the specified block is mined

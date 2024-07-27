@@ -18,6 +18,7 @@ package services
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	"github.com/erigontech/erigon/cl/beacon/synced_data"
@@ -83,7 +84,7 @@ func (s *proposerSlashingService) ProcessMessage(ctx context.Context, subnet *ui
 
 	// Verify the headers are different
 	if *h1 == *h2 {
-		return fmt.Errorf("proposee slashing headers are the same")
+		return errors.New("proposee slashing headers are the same")
 	}
 
 	// Verify the proposer is slashable
