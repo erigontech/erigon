@@ -42,6 +42,17 @@ import (
 // MinPatternScore is minimum score (per superstring) required to consider including pattern into the dictionary
 const MinPatternScore = 1024
 
+const (
+	None         = 0b0
+	CompressKeys = 0b1
+	CompressVals = 0b10
+)
+
+const (
+	V0 = 0b0
+	V1 = 0b1
+)
+
 func coverWordByPatterns(trace bool, input []byte, mf2 *patricia.MatchFinder2, output []byte, uncovered []int, patterns []int, cellRing *Ring, posMap map[uint64]uint64) ([]byte, []int, []int) {
 	matches := mf2.FindLongestMatches(input)
 
@@ -304,6 +315,13 @@ func compressWithPatternCandidates(ctx context.Context, trace bool, logPrefix, s
 	}
 	defer intermediateFile.Close()
 	intermediateW := bufio.NewWriterSize(intermediateFile, 8*etl.BufIOSize)
+
+	if err = intermediateW.WriteByte(V1); err != nil {
+		return err
+	}
+	if err = intermediateW.WriteByte(None); err != nil {
+		return err
+	}
 
 	var inCount, outCount, emptyWordsCount uint64 // Counters words sent to compression and returned for compression
 	var numBuf [binary.MaxVarintLen64]byte

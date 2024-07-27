@@ -218,12 +218,20 @@ func NewDecompressor(compressedFilePath string) (*Decompressor, error) {
 	// read patterns from file
 	d.data = d.mmapHandle1[:d.size]
 	defer d.EnableReadAhead().DisableReadAhead() //speedup opening on slow drives
+	versionInfoBytes := 0
+	version := binary.BigEndian.Uint64(d.data[:1])
+	if version == V1 {
+		_ = binary.BigEndian.Uint64(d.data[1:2])
+		versionInfoBytes = 2
+	}
 
-	d.wordsCount = binary.BigEndian.Uint64(d.data[:8])
-	d.emptyWordsCount = binary.BigEndian.Uint64(d.data[8:16])
+	log.Trace("version of a file is", "v", version)
 
-	pos := uint64(24)
-	dictSize := binary.BigEndian.Uint64(d.data[16:pos])
+	d.wordsCount = binary.BigEndian.Uint64(d.data[versionInfoBytes : versionInfoBytes+8])
+	d.emptyWordsCount = binary.BigEndian.Uint64(d.data[versionInfoBytes+8 : versionInfoBytes+16])
+
+	pos := uint64(versionInfoBytes + 24)
+	dictSize := binary.BigEndian.Uint64(d.data[versionInfoBytes+16 : pos])
 
 	if pos+dictSize > uint64(d.size) {
 		return nil, &ErrCompressedFileCorrupted{
