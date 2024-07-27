@@ -1446,30 +1446,30 @@ func setUpBlockReader(ctx context.Context, db kv.RwDB, dirs datadir.Dirs, snConf
 	}
 
 	allSnapshots := freezeblocks.NewRoSnapshots(snConfig.Snapshot, dirs.Snap, minFrozenBlock, logger)
+	allSnapshots.OptimisticalyReopenFolder() // TODO: run in background after https://github.com/erigontech/erigon/issues/11314
+	g := &errgroup.Group{}
+	g.Go(func() error {
+		//allSnapshots.OptimisticalyReopenFolder()
+		return nil
+	})
 
 	var allBorSnapshots *freezeblocks.BorRoSnapshots
 	if isBor {
 		allBorSnapshots = freezeblocks.NewBorRoSnapshots(snConfig.Snapshot, dirs.Snap, minFrozenBlock, logger)
 	}
-	cr := rawdb.NewCanonicalReader()
-	agg, err := libstate.NewAggregator(ctx, dirs, config3.HistoryV3AggregationStep, db, cr, logger)
-	if err != nil {
-		return nil, nil, nil, nil, nil, err
-	}
-
-	agg.SetProduceMod(snConfig.Snapshot.ProduceE3)
-
-	g := &errgroup.Group{}
-	g.Go(func() error {
-		allSnapshots.OptimisticalyReopenFolder()
-		return nil
-	})
 	g.Go(func() error {
 		if isBor {
 			allBorSnapshots.OptimisticalyReopenFolder()
 		}
 		return nil
 	})
+
+	cr := rawdb.NewCanonicalReader()
+	agg, err := libstate.NewAggregator(ctx, dirs, config3.HistoryV3AggregationStep, db, cr, logger)
+	if err != nil {
+		return nil, nil, nil, nil, nil, err
+	}
+	agg.SetProduceMod(snConfig.Snapshot.ProduceE3)
 	g.Go(func() error {
 		return agg.OpenFolder()
 	})
