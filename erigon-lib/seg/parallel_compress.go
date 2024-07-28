@@ -314,7 +314,6 @@ func compressWithPatternCandidates(ctx context.Context, trace bool, logPrefix, s
 		return fmt.Errorf("create intermediate file: %w", err)
 	}
 	defer intermediateFile.Close()
-	println("dictBuilder", dictBuilder.Len(), "code2p", len(code2pattern))
 	intermediateW := bufio.NewWriterSize(intermediateFile, 8*etl.BufIOSize)
 
 	if err = intermediateW.WriteByte(V1); err != nil {
@@ -697,7 +696,6 @@ func compressWithPatternCandidates(ctx context.Context, trace bool, logPrefix, s
 			var lastPos uint64
 			var lastUncovered int
 			var uncoveredCount int
-			println("pNum", pNum)
 			for i := 0; i < int(pNum); i++ {
 				var pos uint64 // Starting position for pattern
 				if pos, e = binary.ReadUvarint(r); e != nil {
