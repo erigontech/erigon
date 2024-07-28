@@ -855,6 +855,11 @@ var (
 		Usage: "MEV relay endpoint. Caplin runs in builder mode if this is set",
 		Value: "",
 	}
+	CaplinValidatorMonitorFlag = cli.BoolFlag{
+		Name:  "caplin.validator-monitor",
+		Usage: "Enable caplin validator monitoring metrics",
+		Value: false,
+	}
 
 	SentinelAddrFlag = cli.StringFlag{
 		Name:  "sentinel.addr",
@@ -1687,6 +1692,7 @@ func setCaplin(ctx *cli.Context, cfg *ethconfig.Config) {
 	cfg.CaplinConfig.BlobPruningDisabled = ctx.Bool(CaplinDisableBlobPruningFlag.Name)
 	cfg.CaplinConfig.Archive = ctx.Bool(CaplinArchiveFlag.Name)
 	cfg.CaplinConfig.MevRelayUrl = ctx.String(CaplinMevRelayUrl.Name)
+	cfg.CaplinConfig.EnableValidatorMonitor = ctx.Bool(CaplinValidatorMonitorFlag.Name)
 	if checkpointUrls := ctx.StringSlice(CaplinCheckpointSyncUrlFlag.Name); len(checkpointUrls) > 0 {
 		clparams.ConfigurableCheckpointsURLs = checkpointUrls
 	}

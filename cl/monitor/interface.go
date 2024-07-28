@@ -10,3 +10,13 @@ type ValidatorMonitor interface {
 	RemoveValidator(vid uint64)
 	OnNewBlock(block *cltypes.BeaconBlock) error
 }
+
+type dummyValdatorMonitor struct{}
+
+func (d *dummyValdatorMonitor) AddValidator(vid uint64) {}
+
+func (d *dummyValdatorMonitor) RemoveValidator(vid uint64) {}
+
+func (d *dummyValdatorMonitor) OnNewBlock(block *cltypes.BeaconBlock) error {
+	return nil
+}

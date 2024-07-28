@@ -29,7 +29,16 @@ type ValidatorMonitorImpl struct {
 	vaidatorStatuses map[uint64]map[uint64]*validatorStatus // map validatorID -> epoch -> validatorStatus
 }
 
-func NewValidatorMonitor(fc forkchoice.ForkChoiceStorageReader, ethClock eth_clock.EthereumClock, beaconConfig *clparams.BeaconChainConfig) ValidatorMonitor {
+func NewValidatorMonitor(
+	enableMonitor bool,
+	fc forkchoice.ForkChoiceStorageReader,
+	ethClock eth_clock.EthereumClock,
+	beaconConfig *clparams.BeaconChainConfig,
+) ValidatorMonitor {
+	if !enableMonitor {
+		return &dummyValdatorMonitor{}
+	}
+
 	m := &ValidatorMonitorImpl{
 		fc:               fc,
 		ethClock:         ethClock,

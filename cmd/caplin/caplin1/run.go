@@ -120,7 +120,13 @@ func OpenCaplinDatabase(ctx context.Context,
 
 func RunCaplinPhase1(ctx context.Context, engine execution_client.ExecutionEngine, config *ethconfig.Config, networkConfig *clparams.NetworkConfig,
 	beaconConfig *clparams.BeaconChainConfig, ethClock eth_clock.EthereumClock, state *state.CachingBeaconState, dirs datadir.Dirs, eth1Getter snapshot_format.ExecutionBlockReaderByNumber,
-	snDownloader proto_downloader.DownloaderClient, backfilling, blobBackfilling bool, states bool, indexDB kv.RwDB, blobStorage blob_storage.BlobStorage, creds credentials.TransportCredentials, snBuildSema *semaphore.Weighted, caplinOptions ...CaplinOption) error {
+	snDownloader proto_downloader.DownloaderClient, indexDB kv.RwDB, blobStorage blob_storage.BlobStorage, creds credentials.TransportCredentials, snBuildSema *semaphore.Weighted, caplinOptions ...CaplinOption) error {
+	var (
+		backfilling     = config.CaplinConfig.Backfilling
+		blobBackfilling = config.CaplinConfig.BlobBackfilling
+		states          = config.CaplinConfig.Archive
+	)
+
 	ctx, cn := context.WithCancel(ctx)
 	defer cn()
 
@@ -194,7 +200,7 @@ func RunCaplinPhase1(ctx context.Context, engine execution_client.ExecutionEngin
 	if err != nil {
 		return err
 	}
-	validatorMonitor := monitor.NewValidatorMonitor(forkChoice, ethClock, beaconConfig)
+	validatorMonitor := monitor.NewValidatorMonitor(config.CaplinConfig.EnableValidatorMonitor, forkChoice, ethClock, beaconConfig)
 	beaconRpc := rpc.NewBeaconRpcP2P(ctx, sentinel, beaconConfig, ethClock)
 	committeeSub := committee_subscription.NewCommitteeSubscribeManagement(ctx, indexDB, beaconConfig, networkConfig, ethClock, sentinel, state, aggregationPool, syncedDataManager)
 	// Define gossip services
