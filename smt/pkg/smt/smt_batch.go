@@ -162,7 +162,7 @@ func (s *SMT) InsertBatch(ctx context.Context, logPrefix string, nodeKeys []*uti
 	}
 	for i, nodeValue := range nodeValues {
 		if !nodeValue.IsZero() {
-			_, err = s.hashSave(nodeValue.ToUintArray(), utils.BranchCapacity, *nodeValuesHashes[i])
+			err = s.hashSave(nodeValue.ToUintArray(), utils.BranchCapacity, *nodeValuesHashes[i])
 			if err != nil {
 				return nil, err
 			}
@@ -256,7 +256,7 @@ func calculateNodeValueHashesIfMissing(s *SMT, nodeValues []*utils.NodeValue8, n
 				if endIndex > size {
 					endIndex = size
 				}
-				err := calculateNodeValueHashesIfMissingInInterval(s, nodeValues, nodeValuesHashes, startIndex, endIndex)
+				err := calculateNodeValueHashesIfMissingInInterval(nodeValues, nodeValuesHashes, startIndex, endIndex)
 				if err != nil {
 					globalError = err
 				}
@@ -265,19 +265,19 @@ func calculateNodeValueHashesIfMissing(s *SMT, nodeValues []*utils.NodeValue8, n
 
 		wg.Wait()
 	} else {
-		globalError = calculateNodeValueHashesIfMissingInInterval(s, nodeValues, nodeValuesHashes, 0, len(nodeValues))
+		globalError = calculateNodeValueHashesIfMissingInInterval(nodeValues, nodeValuesHashes, 0, len(nodeValues))
 	}
 
 	return globalError
 }
 
-func calculateNodeValueHashesIfMissingInInterval(s *SMT, nodeValues []*utils.NodeValue8, nodeValuesHashes *[]*[4]uint64, startIndex, endIndex int) error {
+func calculateNodeValueHashesIfMissingInInterval(nodeValues []*utils.NodeValue8, nodeValuesHashes *[]*[4]uint64, startIndex, endIndex int) error {
 	for i := startIndex; i < endIndex; i++ {
 		if (*nodeValuesHashes)[i] != nil {
 			continue
 		}
 
-		nodeValueHashObj, err := s.hashcalc(nodeValues[i].ToUintArray(), utils.BranchCapacity)
+		nodeValueHashObj, err := utils.Hash(nodeValues[i].ToUintArray(), utils.BranchCapacity)
 		if err != nil {
 			return err
 		}
