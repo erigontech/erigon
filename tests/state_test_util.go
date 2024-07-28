@@ -32,8 +32,6 @@ import (
 	"github.com/holiman/uint256"
 	"golang.org/x/crypto/sha3"
 
-	"github.com/erigontech/erigon-lib/config3"
-
 	"github.com/erigontech/erigon-lib/chain"
 	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/hexutility"
@@ -202,21 +200,16 @@ func (t *StateTest) RunNoVerify(tx kv.RwTx, subtest StateSubtest, vmconfig vm.Co
 		return nil, libcommon.Hash{}, UnsupportedForkError{subtest.Fork}
 	}
 
-	var r state.StateReader
-	var w state.StateWriter
-	var domains *state2.SharedDomains
 	var txc wrap.TxContainer
 	txc.Tx = tx
-	if config3.EnableHistoryV4InTest {
-		domains, err = state2.NewSharedDomains(tx, log.New())
-		if err != nil {
-			return nil, libcommon.Hash{}, UnsupportedForkError{subtest.Fork}
-		}
-		defer domains.Close()
-		txc.Doms = domains
+	domains, err := state2.NewSharedDomains(tx, log.New())
+	if err != nil {
+		return nil, libcommon.Hash{}, UnsupportedForkError{subtest.Fork}
 	}
-	r = rpchelper.NewLatestStateReader(tx)
-	w = rpchelper.NewLatestStateWriter(txc, writeBlockNr)
+	defer domains.Close()
+	txc.Doms = domains
+	r := rpchelper.NewLatestStateReader(tx)
+	w := rpchelper.NewLatestStateWriter(txc, writeBlockNr)
 	statedb := state.New(r)
 
 	var baseFee *big.Int
@@ -310,21 +303,18 @@ func MakePreState(rules *chain.Rules, tx kv.RwTx, accounts types.GenesisAlloc, b
 		}
 	}
 
-	var w state.StateWriter
-	var domains *state2.SharedDomains
 	var txc wrap.TxContainer
 	txc.Tx = tx
-	if config3.EnableHistoryV4InTest {
-		var err error
-		domains, err = state2.NewSharedDomains(tx, log.New())
-		if err != nil {
-			return nil, err
-		}
-		defer domains.Close()
-		defer domains.Flush(context2.Background(), tx)
-		txc.Doms = domains
+
+	domains, err := state2.NewSharedDomains(tx, log.New())
+	if err != nil {
+		return nil, err
 	}
-	w = rpchelper.NewLatestStateWriter(txc, blockNr-1)
+	defer domains.Close()
+	defer domains.Flush(context2.Background(), tx)
+	txc.Doms = domains
+
+	w := rpchelper.NewLatestStateWriter(txc, blockNr-1)
 
 	// Commit and re-open to start with a clean state.
 	if err := statedb.FinalizeTx(rules, w); err != nil {
