@@ -108,7 +108,8 @@ func AllComponents(ctx context.Context, cfg txpoolcfg.Config, cache kvcache.Cach
 		PageSize(uint64(16 * datasize.KB)).
 		GrowthStep(16 * datasize.MB).
 		DirtySpace(uint64(128 * datasize.MB)).
-		MapSize(1 * datasize.TB)
+		MapSize(1 * datasize.TB).
+		WriteMap(cfg.MdbxWriteMap)
 
 	if cfg.MdbxPageSize.Bytes() > 0 {
 		opts = opts.PageSize(cfg.MdbxPageSize.Bytes())
@@ -118,10 +119,6 @@ func AllComponents(ctx context.Context, cfg txpoolcfg.Config, cache kvcache.Cach
 	}
 	if cfg.MdbxGrowthStep > 0 {
 		opts = opts.GrowthStep(cfg.MdbxGrowthStep)
-	}
-
-	if cfg.MdbxWriteMap {
-		opts = opts.WriteMap()
 	}
 
 	txPoolDB, err := opts.Open(ctx)
