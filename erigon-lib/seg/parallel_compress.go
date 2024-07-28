@@ -48,6 +48,8 @@ const (
 	CompressVals = 0b10
 )
 
+var V1Enabled = false
+
 const (
 	V0 = 0b0
 	V1 = 0b1
@@ -315,15 +317,15 @@ func compressWithPatternCandidates(ctx context.Context, trace bool, logPrefix, s
 	}
 	defer intermediateFile.Close()
 	intermediateW := bufio.NewWriterSize(intermediateFile, 8*etl.BufIOSize)
-
-	if err = intermediateW.WriteByte(V1); err != nil {
-		return err
+	if V1Enabled {
+		if err = intermediateW.WriteByte(V1); err != nil {
+			return err
+		}
+		if err = intermediateW.WriteByte(None); err != nil {
+			return err
+		}
+		outputSize.Add(2)
 	}
-	if err = intermediateW.WriteByte(None); err != nil {
-		return err
-	}
-
-	outputSize.Add(2)
 
 	var inCount, outCount, emptyWordsCount uint64 // Counters words sent to compression and returned for compression
 	var numBuf [binary.MaxVarintLen64]byte
@@ -672,8 +674,10 @@ func compressWithPatternCandidates(ctx context.Context, trace bool, logPrefix, s
 	var hc BitWriter
 	hc.w = cw
 	r := bufio.NewReaderSize(intermediateFile, 2*etl.BufIOSize)
-	_, _ = r.ReadByte() // read version //TODO: maybe special logic here, huh?
-	_, _ = r.ReadByte() // read specific flag
+	if V1Enabled {
+		_, _ = r.ReadByte() // read version //TODO: maybe special logic here, huh?
+		_, _ = r.ReadByte() // read specific flag
+	}
 	var l uint64
 	var e error
 	for l, e = binary.ReadUvarint(r); e == nil; l, e = binary.ReadUvarint(r) {
