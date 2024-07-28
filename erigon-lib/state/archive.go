@@ -104,6 +104,7 @@ type ArchiveGetter interface {
 	HasNext() bool
 	FileName() string
 	MatchPrefix(prefix []byte) bool
+	MatchCmp(buf []byte) int
 	Skip() (uint64, int)
 	Size() int
 	Next(buf []byte) ([]byte, uint64)
