@@ -497,7 +497,7 @@ func logStats(ctx context.Context, stats *proto_downloader.StatsReply, startTime
 			remainingBytes = stats.BytesTotal - stats.BytesCompleted
 		}
 
-		downloadTimeLeft := calculateTime(remainingBytes, stats.DownloadRate)
+		downloadTimeLeft := calculateTime(remainingBytes, stats.CompletionRate)
 
 		log.Info(fmt.Sprintf("[%s] %s", logPrefix, logReason),
 			"progress", fmt.Sprintf("%.2f%% %s/%s", stats.Progress, common.ByteCount(stats.BytesCompleted), common.ByteCount(stats.BytesTotal)),
@@ -505,6 +505,9 @@ func logStats(ctx context.Context, stats *proto_downloader.StatsReply, startTime
 			"time-left", downloadTimeLeft,
 			"total-time", time.Since(startTime).Round(time.Second).String(),
 			"download", common.ByteCount(stats.DownloadRate)+"/s",
+			"flush", common.ByteCount(stats.FlushRate)+"/s",
+			"hash", common.ByteCount(stats.HashRate)+"/s",
+			"complete", common.ByteCount(stats.CompletionRate)+"/s",
 			"upload", common.ByteCount(stats.UploadRate)+"/s",
 			"peers", stats.PeersUnique,
 			"files", stats.FilesTotal,

@@ -32,6 +32,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/erigontech/erigon-lib/common/dbg"
 	lru "github.com/hashicorp/golang-lru/arc/v2"
 	"github.com/holiman/uint256"
 	"github.com/xsleonard/go-merkle"
@@ -1471,6 +1472,7 @@ func (c *Bor) getHeaderByNumber(ctx context.Context, tx kv.Tx, number uint64) (*
 		return nil, err
 	}
 	if header == nil {
+		_, _ = c.blockReader.HeaderByNumber(dbg.ContextWithDebug(ctx, true), tx, number)
 		return nil, fmt.Errorf("[bor] header not found: %d", number)
 	}
 	return header, nil
@@ -1606,45 +1608,6 @@ func (c *Bor) getNextHeimdallSpanForTest(
 	heimdallSpan.ChainID = c.chainConfig.ChainID.String()
 
 	return &heimdallSpan, nil
-}
-
-func validatorContains(a []*valset.Validator, x *valset.Validator) (*valset.Validator, bool) {
-	for _, n := range a {
-		if bytes.Equal(n.Address.Bytes(), x.Address.Bytes()) {
-			return n, true
-		}
-	}
-
-	return nil, false
-}
-
-func getUpdatedValidatorSet(oldValidatorSet *valset.ValidatorSet, newVals []*valset.Validator, logger log.Logger) *valset.ValidatorSet {
-	v := oldValidatorSet
-	oldVals := v.Validators
-
-	changes := make([]*valset.Validator, 0, len(oldVals))
-
-	for _, ov := range oldVals {
-		if f, ok := validatorContains(newVals, ov); ok {
-			ov.VotingPower = f.VotingPower
-		} else {
-			ov.VotingPower = 0
-		}
-
-		changes = append(changes, ov)
-	}
-
-	for _, nv := range newVals {
-		if _, ok := validatorContains(changes, nv); !ok {
-			changes = append(changes, nv)
-		}
-	}
-
-	if err := v.UpdateWithChangeSet(changes); err != nil {
-		logger.Error("[bor] Error while updating change set", "error", err)
-	}
-
-	return v
 }
 
 func isSprintStart(number, sprint uint64) bool {

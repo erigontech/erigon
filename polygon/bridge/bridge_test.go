@@ -19,7 +19,6 @@ import (
 	"github.com/erigontech/erigon/polygon/bor/borcfg"
 	"github.com/erigontech/erigon/polygon/bridge"
 	"github.com/erigontech/erigon/polygon/heimdall"
-	"github.com/erigontech/erigon/polygon/polygoncommon"
 	"github.com/erigontech/erigon/rlp"
 	"github.com/erigontech/erigon/turbo/testlog"
 )
@@ -33,9 +32,7 @@ func setup(t *testing.T, abi abi.ABI) (*heimdall.MockHeimdallClient, *bridge.Bri
 	}
 
 	heimdallClient := heimdall.NewMockHeimdallClient(ctrl)
-	polygonBridgeDB := polygoncommon.NewDatabase(t.TempDir(), logger)
-	store := bridge.NewStore(polygonBridgeDB)
-	b := bridge.NewBridge(store, logger, &borConfig, heimdallClient.FetchStateSyncEvents, abi)
+	b := bridge.Assemble(t.TempDir(), logger, &borConfig, heimdallClient.FetchStateSyncEvents, abi)
 
 	return heimdallClient, b
 }

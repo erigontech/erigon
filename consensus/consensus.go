@@ -146,7 +146,7 @@ type EngineReader interface {
 	Close() error
 }
 
-// EngineReader are write methods of the consensus engine
+// EngineWriter are write methods of the consensus engine
 type EngineWriter interface {
 	// VerifyHeader checks whether a header conforms to the consensus rules of a
 	// given engine. Verifying the seal may be done optionally here, or explicitly

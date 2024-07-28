@@ -136,6 +136,9 @@ func (s *GrpcServer) Stats(ctx context.Context, request *proto_downloader.StatsR
 		BytesTotal:     stats.BytesTotal,
 		UploadRate:     stats.UploadRate,
 		DownloadRate:   stats.DownloadRate,
+		HashRate:       stats.HashRate,
+		FlushRate:      stats.FlushRate,
+		CompletionRate: stats.CompletionRate,
 	}, nil
 }
 

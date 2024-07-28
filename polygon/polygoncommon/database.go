@@ -23,47 +23,48 @@ import (
 
 	"github.com/c2h5oh/datasize"
 
-	"github.com/erigontech/erigon-lib/log/v3"
-
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/kv/mdbx"
+	"github.com/erigontech/erigon-lib/log/v3"
 )
 
 type Database struct {
-	db kv.RwDB
-
+	db       kv.RwDB
 	dataDir  string
+	label    kv.Label
+	tableCfg kv.TableCfg
 	openOnce sync.Once
-
-	logger log.Logger
+	logger   log.Logger
 }
 
-func NewDatabase(
-	dataDir string,
-	logger log.Logger,
-) *Database {
-	return &Database{dataDir: dataDir, logger: logger}
+func NewDatabase(dataDir string, label kv.Label, tableCfg kv.TableCfg, logger log.Logger) *Database {
+	return &Database{
+		dataDir:  dataDir,
+		label:    label,
+		tableCfg: tableCfg,
+		logger:   logger,
+	}
 }
 
-func (db *Database) open(ctx context.Context, label kv.Label, tableCfg kv.TableCfg) error {
-	dbPath := filepath.Join(db.dataDir, label.String())
-	db.logger.Info("Opening Database", "label", label.String(), "path", dbPath)
+func (db *Database) open(ctx context.Context) error {
+	dbPath := filepath.Join(db.dataDir, db.label.String())
+	db.logger.Info("Opening Database", "label", db.label.String(), "path", dbPath)
 
 	var err error
 	db.db, err = mdbx.NewMDBX(db.logger).
-		Label(label).
+		Label(db.label).
 		Path(dbPath).
-		WithTableCfg(func(_ kv.TableCfg) kv.TableCfg { return tableCfg }).
+		WithTableCfg(func(_ kv.TableCfg) kv.TableCfg { return db.tableCfg }).
 		MapSize(16 * datasize.GB).
 		GrowthStep(16 * datasize.MB).
 		Open(ctx)
 	return err
 }
 
-func (db *Database) OpenOnce(ctx context.Context, label kv.Label, tableCfg kv.TableCfg) error {
+func (db *Database) OpenOnce(ctx context.Context) error {
 	var err error
 	db.openOnce.Do(func() {
-		err = db.open(ctx, label, tableCfg)
+		err = db.open(ctx)
 	})
 	return err
 }

@@ -88,7 +88,7 @@ func TestDecompressMatchOK(t *testing.T) {
 		w := loremStrings[i]
 		if i%2 != 0 {
 			expected := fmt.Sprintf("%s %d", w, i)
-			cmp := g.Match([]byte(expected))
+			cmp := g.MatchCmp([]byte(expected))
 			if cmp != 0 {
 				t.Errorf("expexted match with %s", expected)
 			}
@@ -164,7 +164,7 @@ func TestDecompressMatchOKCondensed(t *testing.T) {
 	for g.HasNext() {
 		if i%2 != 0 {
 			expected := fmt.Sprintf("word-%d", i)
-			cmp := g.Match([]byte(expected))
+			cmp := g.MatchCmp([]byte(expected))
 			if cmp != 0 {
 				t.Errorf("expexted match with %s", expected)
 			}
@@ -188,7 +188,7 @@ func TestDecompressMatchNotOK(t *testing.T) {
 	for g.HasNext() {
 		w := loremStrings[i]
 		expected := fmt.Sprintf("%s %d", w, i+1)
-		cmp := g.Match([]byte(expected))
+		cmp := g.MatchCmp([]byte(expected))
 		if cmp == 0 {
 			t.Errorf("not expexted match with %s", expected)
 		} else {
@@ -232,47 +232,6 @@ func TestDecompressMatchPrefix(t *testing.T) {
 		if len(expected) > 0 {
 			expected[len(expected)-1]++
 			if g.MatchPrefix(expected) {
-				t.Errorf("not expexted match with %s", expected)
-			}
-		}
-		g.Skip()
-		skipCount++
-		i++
-	}
-}
-
-func TestDecompressMatchPrefixCmp(t *testing.T) {
-	d := prepareLoremDict(t)
-	defer d.Close()
-	g := d.MakeGetter()
-	i := 0
-	skipCount := 0
-	for g.HasNext() {
-		w := loremStrings[i]
-		expected := []byte(fmt.Sprintf("%s %d", w, i+1))
-		expected = expected[:len(expected)/2]
-		cmp := g.MatchPrefixCmp(expected)
-		if cmp != 0 {
-			t.Errorf("expexted match with %s", expected)
-		}
-		g.Skip()
-		skipCount++
-		i++
-	}
-	if skipCount != i {
-		t.Errorf("something wrong with match logic")
-	}
-	g.Reset(0)
-	skipCount = 0
-	i = 0
-	for g.HasNext() {
-		w := loremStrings[i]
-		expected := []byte(fmt.Sprintf("%s %d", w, i+1))
-		expected = expected[:len(expected)/2]
-		if len(expected) > 0 {
-			expected[len(expected)-1]++
-			cmp := g.MatchPrefixCmp(expected)
-			if cmp == 0 {
 				t.Errorf("not expexted match with %s", expected)
 			}
 		}

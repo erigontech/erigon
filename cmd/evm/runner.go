@@ -24,6 +24,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"github.com/erigontech/erigon-lib/common/datadir"
 	"io"
 	"math/big"
 	"os"
@@ -158,7 +159,7 @@ func runCmd(ctx *cli.Context) error {
 	defer db.Close()
 	if ctx.String(GenesisFlag.Name) != "" {
 		gen := readGenesis(ctx.String(GenesisFlag.Name))
-		core.MustCommitGenesis(gen, db, "", log.Root())
+		core.MustCommitGenesis(gen, db, datadir.New(""), log.Root())
 		genesisConfig = gen
 		chainConfig = gen.Config
 	} else {

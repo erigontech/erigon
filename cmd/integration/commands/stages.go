@@ -1027,7 +1027,7 @@ func stageExec(db kv.RwDB, ctx context.Context, logger log.Logger) error {
 	br, _ := blocksIO(db, logger)
 	cfg := stagedsync.StageExecuteBlocksCfg(db, pm, batchSize, chainConfig, engine, vmConfig, nil,
 		/*stateStream=*/ false,
-		/*badBlockHalt=*/ true, dirs, br, nil, genesis, syncCfg, agg, nil)
+		/*badBlockHalt=*/ true, dirs, br, nil, genesis, syncCfg, nil)
 
 	if unwind > 0 {
 		if err := db.View(ctx, func(tx kv.Tx) error {
@@ -1406,7 +1406,7 @@ func newSync(ctx context.Context, db kv.RwDB, miningConfig *params.MiningConfig,
 	events := shards.NewEvents()
 
 	genesis := core.GenesisBlockByChainName(chain)
-	chainConfig, genesisBlock, genesisErr := core.CommitGenesisBlock(db, genesis, "", logger)
+	chainConfig, genesisBlock, genesisErr := core.CommitGenesisBlock(db, genesis, dirs, logger)
 	if _, ok := genesisErr.(*chain2.ConfigCompatError); genesisErr != nil && !ok {
 		panic(genesisErr)
 	}
@@ -1505,7 +1505,6 @@ func newSync(ctx context.Context, db kv.RwDB, miningConfig *params.MiningConfig,
 				sentryControlServer.Hd,
 				cfg.Genesis,
 				cfg.Sync,
-				agg,
 				nil,
 			),
 			stagedsync.StageSendersCfg(db, sentryControlServer.ChainConfig, cfg.Sync, false, dirs.Tmp, cfg.Prune, blockReader, sentryControlServer.Hd, nil),
