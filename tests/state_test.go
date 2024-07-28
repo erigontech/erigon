@@ -30,6 +30,7 @@ import (
 	"runtime"
 	"testing"
 
+	"github.com/erigontech/erigon-lib/common/datadir"
 	"github.com/erigontech/erigon-lib/kv/temporal/temporaltest"
 	"github.com/erigontech/erigon-lib/log/v3"
 
