@@ -314,7 +314,17 @@ func compressWithPatternCandidates(ctx context.Context, trace bool, logPrefix, s
 		return fmt.Errorf("create intermediate file: %w", err)
 	}
 	defer intermediateFile.Close()
+	println("dictBuilder", dictBuilder.Len(), "code2p", len(code2pattern))
 	intermediateW := bufio.NewWriterSize(intermediateFile, 8*etl.BufIOSize)
+
+	if err = intermediateW.WriteByte(V1); err != nil {
+		return err
+	}
+	if err = intermediateW.WriteByte(None); err != nil {
+		return err
+	}
+
+	outputSize.Add(2)
 
 	var inCount, outCount, emptyWordsCount uint64 // Counters words sent to compression and returned for compression
 	var numBuf [binary.MaxVarintLen64]byte
@@ -663,6 +673,8 @@ func compressWithPatternCandidates(ctx context.Context, trace bool, logPrefix, s
 	var hc BitWriter
 	hc.w = cw
 	r := bufio.NewReaderSize(intermediateFile, 2*etl.BufIOSize)
+	_, _ = r.ReadByte() // read version //TODO: maybe special logic here, huh?
+	_, _ = r.ReadByte() // read specific flag
 	var l uint64
 	var e error
 	for l, e = binary.ReadUvarint(r); e == nil; l, e = binary.ReadUvarint(r) {
@@ -685,6 +697,7 @@ func compressWithPatternCandidates(ctx context.Context, trace bool, logPrefix, s
 			var lastPos uint64
 			var lastUncovered int
 			var uncoveredCount int
+			println("pNum", pNum)
 			for i := 0; i < int(pNum); i++ {
 				var pos uint64 // Starting position for pattern
 				if pos, e = binary.ReadUvarint(r); e != nil {
