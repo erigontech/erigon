@@ -34,11 +34,16 @@ import (
 	"github.com/erigontech/erigon/cl/utils"
 )
 
+var LocalStateFileName = "latest.ssz_snappy"
+
 type CaplinConfig struct {
 	Backfilling         bool
 	BlobBackfilling     bool
 	BlobPruningDisabled bool
 	Archive             bool
+	NetworkId           NetworkType
+	// DisableCheckpointSync is optional and is used to disable checkpoint sync used by default in the node
+	DisabledCheckpointSync bool
 	// CaplinMeVRelayUrl is optional and is used to connect to the external builder service.
 	// If it's set, the node will start in builder mode
 	MevRelayUrl string
