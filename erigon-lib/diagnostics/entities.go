@@ -148,10 +148,6 @@ type SnapshotSegmentIndexingStatistics struct {
 	Sys         uint64 `json:"sys"`
 }
 
-type SnapshotSegmentIndexingFinishedUpdate struct {
-	SegmentName string `json:"segmentName"`
-}
-
 type SnapshotFillDBStatistics struct {
 	Stages []SnapshotFillDBStage `json:"stages"`
 }
@@ -328,10 +324,6 @@ func (ti SegmentDownloadStatistics) Type() Type {
 }
 
 func (ti SnapshotIndexingStatistics) Type() Type {
-	return TypeOf(ti)
-}
-
-func (ti SnapshotSegmentIndexingFinishedUpdate) Type() Type {
 	return TypeOf(ti)
 }
 

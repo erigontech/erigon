@@ -33,7 +33,7 @@ linters:
     - unconvert
     #    - predeclared #TODO: enable me
     #    - thelper #TODO: enable me
-    #    - wastedassign
+    - wastedassign
     - gofmt
     - gocritic
 #    - revive

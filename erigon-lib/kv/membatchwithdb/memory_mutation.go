@@ -723,10 +723,10 @@ func (m *MemoryMutation) CHandle() unsafe.Pointer {
 }
 
 type hasAggCtx interface {
-	AggTx() interface{}
+	AggTx() any
 }
 
-func (m *MemoryMutation) AggTx() interface{} {
+func (m *MemoryMutation) AggTx() any {
 	return m.db.(hasAggCtx).AggTx()
 }
 

@@ -35,7 +35,7 @@ import (
 // target: 40 bytes
 const AttestationDataBufferSize = 8 + 8 + 32 + 40*2
 
-// AttestantionData contains information about attestantion, including finalized/attested checkpoints.
+// AttestationData contains information about attestantion, including finalized/attested checkpoints.
 type AttestationData []byte
 
 func NewAttestionDataFromParameters(
