@@ -899,7 +899,7 @@ func (b *BtIndex) keyCmp(k []byte, di uint64, g ArchiveGetter) (int, []byte, err
 	cmp := g.MatchCmp(k)
 	g.Reset(offset)
 	var res []byte
-	res, _ = g.Next(nil)
+	res, _ = g.Next(res[:0])
 
 	return -1 * cmp, res, nil
 }
