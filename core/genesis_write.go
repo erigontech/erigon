@@ -460,6 +460,10 @@ func DeveloperGenesisBlock(period uint64, faucet libcommon.Address) *types.Genes
 // ToBlock creates the genesis block and writes state of a genesis specification
 // to the given database (or discards it if nil).
 func GenesisToBlock(g *types.Genesis, dirs datadir.Dirs, logger log.Logger) (*types.Block, *state.IntraBlockState, error) {
+	if dirs.SnapDomain == "" {
+		panic("empty `dirs` variable")
+	}
+
 	_ = g.Alloc //nil-check
 
 	head := &types.Header{
