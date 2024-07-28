@@ -14,7 +14,7 @@
 // You should have received a copy of the GNU Lesser General Public License
 // along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
-package txpooluitl
+package txpoolutil
 
 import (
 	"context"
@@ -144,8 +144,13 @@ func AllComponents(ctx context.Context, cfg txpoolcfg.Config, cache kvcache.Cach
 		agraBlock = chainConfig.Bor.GetAgraBlock()
 	}
 	cancunTime := chainConfig.CancunTime
+	pragueTime := chainConfig.PragueTime
+	if cfg.OverridePragueTime != nil {
+		pragueTime = cfg.OverridePragueTime
+	}
 
-	txPool, err := txpool.New(newTxs, chainDB, cfg, cache, *chainID, shanghaiTime, agraBlock, cancunTime, maxBlobsPerBlock, feeCalculator, logger)
+	txPool, err := txpool.New(newTxs, chainDB, cfg, cache, *chainID, shanghaiTime, agraBlock, cancunTime, pragueTime,
+		maxBlobsPerBlock, feeCalculator, logger)
 	if err != nil {
 		return nil, nil, nil, nil, nil, err
 	}

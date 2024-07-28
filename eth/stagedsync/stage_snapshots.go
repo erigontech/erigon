@@ -491,11 +491,6 @@ func FillDBFromSnapshots(logPrefix string, ctx context.Context, tx kv.RwTx, dirs
 	return nil
 }
 
-func computeBlocksToPrune(cfg SnapshotsCfg) (blocksToPrune uint64, historyToPrune uint64) {
-	frozenBlocks := cfg.blockReader.Snapshots().SegmentsMax()
-	return frozenBlocks - cfg.prune.Blocks.PruneTo(frozenBlocks), frozenBlocks - cfg.prune.History.PruneTo(frozenBlocks)
-}
-
 /* ====== PRUNING ====== */
 // snapshots pruning sections works more as a retiring of blocks
 // retiring blocks means moving block data from db into snapshots
@@ -621,19 +616,15 @@ func pruneBlockSnapshots(ctx context.Context, cfg SnapshotsCfg, logger log.Logge
 		return false, err
 	}
 	// If we are behind the execution stage, we should not prune snapshots
-	if headNumber > executionProgress {
+	if headNumber > executionProgress || !cfg.prune.Blocks.Enabled() {
 		return false, nil
 	}
 
 	// Keep at least 2 block snapshots as we do not want FrozenBlocks to be 0
-	pruneAmount, _ := computeBlocksToPrune(cfg)
-	if pruneAmount == 0 {
-		return false, nil
-	}
+	pruneTo := cfg.prune.Blocks.PruneTo(headNumber)
 
-	minBlockNumberToKeep := uint64(0)
-	if headNumber > pruneAmount {
-		minBlockNumberToKeep = headNumber - pruneAmount
+	if pruneTo > executionProgress {
+		return false, nil
 	}
 
 	snapshotFileNames := cfg.blockReader.FrozenFiles()
@@ -649,7 +640,7 @@ func pruneBlockSnapshots(ctx context.Context, cfg SnapshotsCfg, logger log.Logge
 		if !ok {
 			continue
 		}
-		if info.To >= minBlockNumberToKeep {
+		if info.To >= pruneTo {
 			continue
 		}
 		if info.To-info.From != snaptype.Erigon2MergeLimit {

@@ -89,8 +89,8 @@ type p2pObserverRegistrar interface {
 }
 
 type heimdallObserverRegistrar interface {
-	RegisterMilestoneObserver(func(*heimdall.Milestone)) polygoncommon.UnregisterFunc
-	RegisterSpanObserver(func(*heimdall.Span)) polygoncommon.UnregisterFunc
+	RegisterMilestoneObserver(callback func(*heimdall.Milestone), opts ...heimdall.ObserverOption) polygoncommon.UnregisterFunc
+	RegisterSpanObserver(callback func(*heimdall.Span), opts ...heimdall.ObserverOption) polygoncommon.UnregisterFunc
 }
 
 type TipEvents struct {
@@ -149,7 +149,7 @@ func (te *TipEvents) Run(ctx context.Context) error {
 			Type:         EventTypeNewMilestone,
 			newMilestone: milestone,
 		})
-	})
+	}, heimdall.WithEventsLimit(5))
 	defer milestoneObserverCancel()
 
 	spanObserverCancel := te.heimdallObserverRegistrar.RegisterSpanObserver(func(span *heimdall.Span) {
@@ -157,7 +157,7 @@ func (te *TipEvents) Run(ctx context.Context) error {
 			Type:    EventTypeNewSpan,
 			newSpan: span,
 		})
-	})
+	}, heimdall.WithEventsLimit(2))
 	defer spanObserverCancel()
 
 	return te.events.Run(ctx)
