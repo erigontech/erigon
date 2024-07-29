@@ -1,10 +1,25 @@
+// Copyright 2024 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+
 package diagnostics
 
 import (
-	"encoding/json"
 	"net/http"
 
-	diaglib "github.com/ledgerwatch/erigon-lib/diagnostics"
+	diaglib "github.com/erigontech/erigon-lib/diagnostics"
 )
 
 func SetupStagesAccess(metricsMux *http.ServeMux, diag *diaglib.DiagnosticClient) {
@@ -50,25 +65,25 @@ func SetupStagesAccess(metricsMux *http.ServeMux, diag *diaglib.DiagnosticClient
 }
 
 func writeNetworkSpeed(w http.ResponseWriter, diag *diaglib.DiagnosticClient) {
-	json.NewEncoder(w).Encode(diag.GetNetworkSpeed())
+	diag.NetworkSpeedJson(w)
 }
 
 func writeResourcesUsage(w http.ResponseWriter, diag *diaglib.DiagnosticClient) {
-	json.NewEncoder(w).Encode(diag.GetResourcesUsage())
+	diag.ResourcesUsageJson(w)
 }
 
 func writeStages(w http.ResponseWriter, diag *diaglib.DiagnosticClient) {
-	json.NewEncoder(w).Encode(diag.SyncStatistics())
+	diag.SyncStatsJson(w)
 }
 
 func writeFilesList(w http.ResponseWriter, diag *diaglib.DiagnosticClient) {
-	json.NewEncoder(w).Encode(diag.SnapshotFilesList())
+	diag.SnapshotFilesListJson(w)
 }
 
 func writeHardwareInfo(w http.ResponseWriter, diag *diaglib.DiagnosticClient) {
-	json.NewEncoder(w).Encode(diag.HardwareInfo())
+	diag.HardwareInfoJson(w)
 }
 
 func writeSyncStages(w http.ResponseWriter, diag *diaglib.DiagnosticClient) {
-	json.NewEncoder(w).Encode(diag.GetSyncStages())
+	diag.SyncStagesJson(w)
 }

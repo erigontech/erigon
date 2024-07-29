@@ -19,15 +19,25 @@ DOCKER_TAG ?= thorax/erigon:latest
 # Go to be available, but with docker it's not strictly necessary
 CGO_CFLAGS := $(shell $(GO) env CGO_CFLAGS 2>/dev/null) # don't lose default
 CGO_CFLAGS += -DMDBX_FORCE_ASSERTIONS=0 # Enable MDBX's asserts by default in 'main' branch and disable in releases
-#CGO_CFLAGS += -DMDBX_DISABLE_VALIDATION=1 # This feature is not ready yet
+CGO_CFLAGS += -DMDBX_DISABLE_VALIDATION=0 # Can disable it on CI by separated PR which will measure perf impact.
 #CGO_CFLAGS += -DMDBX_ENABLE_PROFGC=0 # Disabled by default, but may be useful for performance debugging
 #CGO_CFLAGS += -DMDBX_ENABLE_PGOP_STAT=0 # Disabled by default, but may be useful for performance debugging
-#CGO_CFLAGS += -DMDBX_ENV_CHECKPID=0 # Erigon doesn't do fork() syscall
-CGO_CFLAGS += -O
-CGO_CFLAGS += -D__BLST_PORTABLE__
-CGO_CFLAGS += -Wno-unknown-warning-option -Wno-enum-int-mismatch -Wno-strict-prototypes -Wno-unused-but-set-variable
+CGO_CFLAGS += -DMDBX_ENV_CHECKPID=0 # Erigon doesn't do fork() syscall
+
+# If it is arm64 or aarch64, then we need to use portable version of blst. use or with stringw "arm64" and "aarch64" to support both
+ifeq ($(shell uname -m), arm64)
+	CGO_CFLAGS += -D__BLST_PORTABLE__
+endif
+ifeq ($(shell uname -m), aarch64)
+	CGO_CFLAGS += -D__BLST_PORTABLE__
+endif
+
+
+CGO_CFLAGS += -Wno-unknown-warning-option -Wno-enum-int-mismatch -Wno-strict-prototypes -Wno-unused-but-set-variable -O3
 
 CGO_LDFLAGS := $(shell $(GO) env CGO_LDFLAGS 2> /dev/null)
+CGO_LDFLAGS += -O3 -g
+
 ifeq ($(shell uname -s), Darwin)
 	ifeq ($(filter-out 13.%,$(shell sw_vers --productVersion)),)
 		CGO_LDFLAGS += -mmacosx-version-min=13.3
@@ -43,9 +53,9 @@ endif
 
 GOPRIVATE = github.com/erigontech/silkworm-go
 
-PACKAGE = github.com/ledgerwatch/erigon
+PACKAGE = github.com/erigontech/erigon
 
-GO_FLAGS += -trimpath -tags $(BUILD_TAGS) -buildvcs=false
+GO_FLAGS += -trimpath -tags $(BUILD_TAGS) -buildvcs=false 
 GO_FLAGS += -ldflags "-X ${PACKAGE}/params.GitCommit=${GIT_COMMIT} -X ${PACKAGE}/params.GitBranch=${GIT_BRANCH} -X ${PACKAGE}/params.GitTag=${GIT_TAG}"
 
 GOBUILD = CGO_CFLAGS="$(CGO_CFLAGS)" CGO_LDFLAGS="$(CGO_LDFLAGS)" GOPRIVATE="$(GOPRIVATE)" $(GO) build $(GO_FLAGS)
@@ -266,8 +276,9 @@ install:
 	@echo "Copied files to $(DIST):"
 	@ls -al "$(DIST)"
 
-PACKAGE_NAME          := github.com/ledgerwatch/erigon
-GOLANG_CROSS_VERSION  ?= v1.22.4
+PACKAGE_NAME          := github.com/erigontech/erigon
+GOLANG_CROSS_VERSION  ?= v1.21.5
+
 
 .PHONY: release-dry-run
 release-dry-run: git-submodules
@@ -282,7 +293,7 @@ release-dry-run: git-submodules
 		-v `pwd`:/go/src/$(PACKAGE_NAME) \
 		-w /go/src/$(PACKAGE_NAME) \
 		ghcr.io/goreleaser/goreleaser-cross:${GOLANG_CROSS_VERSION} \
-		--clean --skip-validate --skip-publish
+		--clean --skip=validate --skip=publish
 
 .PHONY: release
 release: git-submodules
@@ -297,10 +308,10 @@ release: git-submodules
 		-v `pwd`:/go/src/$(PACKAGE_NAME) \
 		-w /go/src/$(PACKAGE_NAME) \
 		ghcr.io/goreleaser/goreleaser-cross:${GOLANG_CROSS_VERSION} \
-		--clean --skip-validate
+		--clean --skip=validate
 
 	@docker image push --all-tags thorax/erigon
-	@docker image push --all-tags ghcr.io/ledgerwatch/erigon
+	@docker image push --all-tags ghcr.io/erigontech/erigon
 
 # since DOCKER_UID, DOCKER_GID are default initialized to the current user uid/gid,
 # we need separate envvars to facilitate creation of the erigon user on the host OS.

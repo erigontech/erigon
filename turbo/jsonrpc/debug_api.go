@@ -1,27 +1,44 @@
+// Copyright 2024 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+
 package jsonrpc
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
-	"github.com/ledgerwatch/erigon-lib/common/hexutil"
-
 	jsoniter "github.com/json-iterator/go"
-	"github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/common/hexutility"
-	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon-lib/kv/order"
-	"github.com/ledgerwatch/erigon-lib/kv/rawdbv3"
 
-	"github.com/ledgerwatch/erigon/core/rawdb"
-	"github.com/ledgerwatch/erigon/core/state"
-	"github.com/ledgerwatch/erigon/core/types/accounts"
-	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
-	tracersConfig "github.com/ledgerwatch/erigon/eth/tracers/config"
-	"github.com/ledgerwatch/erigon/rlp"
-	"github.com/ledgerwatch/erigon/rpc"
-	"github.com/ledgerwatch/erigon/turbo/adapter/ethapi"
-	"github.com/ledgerwatch/erigon/turbo/rpchelper"
+	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common/hexutil"
+	"github.com/erigontech/erigon-lib/common/hexutility"
+	"github.com/erigontech/erigon-lib/kv"
+	"github.com/erigontech/erigon-lib/kv/order"
+	"github.com/erigontech/erigon-lib/kv/rawdbv3"
+
+	"github.com/erigontech/erigon/core/rawdb"
+	"github.com/erigontech/erigon/core/state"
+	"github.com/erigontech/erigon/core/types/accounts"
+	"github.com/erigontech/erigon/eth/stagedsync/stages"
+	tracersConfig "github.com/erigontech/erigon/eth/tracers/config"
+	"github.com/erigontech/erigon/rlp"
+	"github.com/erigontech/erigon/rpc"
+	"github.com/erigontech/erigon/turbo/adapter/ethapi"
+	"github.com/erigontech/erigon/turbo/rpchelper"
 )
 
 // AccountRangeMaxResults is the maximum number of results to be returned
@@ -73,7 +90,7 @@ func (api *PrivateDebugAPIImpl) StorageRangeAt(ctx context.Context, blockHash co
 
 	number := rawdb.ReadHeaderNumber(tx, blockHash)
 	if number == nil {
-		return StorageRangeResult{}, fmt.Errorf("block not found")
+		return StorageRangeResult{}, errors.New("block not found")
 	}
 	minTxNum, err := rawdbv3.TxNums.Min(tx, *number)
 	if err != nil {
@@ -94,7 +111,7 @@ func (api *PrivateDebugAPIImpl) AccountRange(ctx context.Context, blockNrOrHash 
 
 	if number, ok := blockNrOrHash.Number(); ok {
 		if number == rpc.PendingBlockNumber {
-			return state.IteratorDump{}, fmt.Errorf("accountRange for pending block not supported")
+			return state.IteratorDump{}, errors.New("accountRange for pending block not supported")
 		}
 		if number == rpc.LatestBlockNumber {
 			var err error
@@ -286,7 +303,7 @@ func (api *PrivateDebugAPIImpl) AccountAt(ctx context.Context, blockHash common.
 	canonicalHash, _ := api._blockReader.CanonicalHash(ctx, tx, *number)
 	isCanonical := canonicalHash == blockHash
 	if !isCanonical {
-		return nil, fmt.Errorf("block hash is not canonical")
+		return nil, errors.New("block hash is not canonical")
 	}
 
 	minTxNum, err := rawdbv3.TxNums.Min(tx, *number)
@@ -341,7 +358,7 @@ func (api *PrivateDebugAPIImpl) GetRawHeader(ctx context.Context, blockNrOrHash 
 		return nil, err
 	}
 	if header == nil {
-		return nil, fmt.Errorf("header not found")
+		return nil, errors.New("header not found")
 	}
 	return rlp.EncodeToBytes(header)
 }
@@ -361,7 +378,7 @@ func (api *PrivateDebugAPIImpl) GetRawBlock(ctx context.Context, blockNrOrHash r
 		return nil, err
 	}
 	if block == nil {
-		return nil, fmt.Errorf("block not found")
+		return nil, errors.New("block not found")
 	}
 	return rlp.EncodeToBytes(block)
 }

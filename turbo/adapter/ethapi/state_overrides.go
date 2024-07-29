@@ -1,14 +1,32 @@
+// Copyright 2024 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+
 package ethapi
 
 import (
+	"errors"
 	"fmt"
 	"math/big"
 
 	"github.com/holiman/uint256"
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
 
-	"github.com/ledgerwatch/erigon/core/state"
-	"github.com/ledgerwatch/erigon/core/tracing"
+	libcommon "github.com/erigontech/erigon-lib/common"
+
+	"github.com/erigontech/erigon/core/state"
+	"github.com/erigontech/erigon/core/tracing"
 )
 
 type StateOverrides map[libcommon.Address]Account
@@ -28,7 +46,7 @@ func (overrides *StateOverrides) Override(state *state.IntraBlockState) error {
 		if account.Balance != nil {
 			balance, overflow := uint256.FromBig((*big.Int)(*account.Balance))
 			if overflow {
-				return fmt.Errorf("account.Balance higher than 2^256-1")
+				return errors.New("account.Balance higher than 2^256-1")
 			}
 			state.SetBalance(addr, balance, tracing.BalanceChangeUnspecified)
 		}
@@ -37,13 +55,19 @@ func (overrides *StateOverrides) Override(state *state.IntraBlockState) error {
 		}
 		// Replace entire state if caller requires.
 		if account.State != nil {
-			state.SetStorage(addr, *account.State)
+			intState := map[libcommon.Hash]uint256.Int{}
+			for key, value := range *account.State {
+				intValue := new(uint256.Int).SetBytes32(value.Bytes())
+				intState[key] = *intValue
+			}
+			state.SetStorage(addr, intState)
 		}
 		// Apply state diff into specified accounts.
 		if account.StateDiff != nil {
 			for key, value := range *account.StateDiff {
 				key := key
-				state.SetState(addr, &key, value)
+				intValue := new(uint256.Int).SetBytes32(value.Bytes())
+				state.SetState(addr, &key, *intValue)
 			}
 		}
 	}

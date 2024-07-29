@@ -1,3 +1,19 @@
+// Copyright 2024 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+
 package jsonrpc
 
 import (
@@ -6,79 +22,33 @@ import (
 
 	"github.com/RoaringBitmap/roaring"
 
-	"github.com/ledgerwatch/erigon-lib/log/v3"
+	"github.com/erigontech/erigon-lib/log/v3"
 
-	"github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon-lib/kv/bitmapdb"
-	"github.com/ledgerwatch/erigon-lib/kv/iter"
-	"github.com/ledgerwatch/erigon-lib/kv/order"
-	"github.com/ledgerwatch/erigon-lib/kv/rawdbv3"
+	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/kv"
+	"github.com/erigontech/erigon-lib/kv/bitmapdb"
+	"github.com/erigontech/erigon-lib/kv/order"
+	"github.com/erigontech/erigon-lib/kv/rawdbv3"
+	"github.com/erigontech/erigon-lib/kv/stream"
 
-	"github.com/ledgerwatch/erigon/cmd/state/exec3"
-	"github.com/ledgerwatch/erigon/core"
-	"github.com/ledgerwatch/erigon/core/rawdb"
-	"github.com/ledgerwatch/erigon/core/state"
-	"github.com/ledgerwatch/erigon/core/types"
-	"github.com/ledgerwatch/erigon/core/vm"
-	"github.com/ledgerwatch/erigon/eth/ethutils"
-	"github.com/ledgerwatch/erigon/eth/filters"
-	bortypes "github.com/ledgerwatch/erigon/polygon/bor/types"
-	"github.com/ledgerwatch/erigon/rpc"
-	"github.com/ledgerwatch/erigon/turbo/rpchelper"
-	"github.com/ledgerwatch/erigon/turbo/transactions"
+	"github.com/erigontech/erigon/cmd/state/exec3"
+	"github.com/erigontech/erigon/core/rawdb"
+	"github.com/erigontech/erigon/core/types"
+	"github.com/erigontech/erigon/eth/ethutils"
+	"github.com/erigontech/erigon/eth/filters"
+	bortypes "github.com/erigontech/erigon/polygon/bor/types"
+	"github.com/erigontech/erigon/rpc"
+	"github.com/erigontech/erigon/turbo/rpchelper"
 )
 
 // getReceipts - checking in-mem cache, or else fallback to db, or else fallback to re-exec of block to re-gen receipts
 func (api *BaseAPI) getReceipts(ctx context.Context, tx kv.Tx, block *types.Block, senders []common.Address) (types.Receipts, error) {
-	if receipts, ok := api.receiptsCache.Get(block.Hash()); ok {
-		return receipts, nil
-	}
-
-	if receipts := rawdb.ReadReceipts(tx, block, senders); receipts != nil {
-		api.receiptsCache.Add(block.Hash(), receipts)
-		return receipts, nil
-	}
-
-	engine := api.engine()
 	chainConfig, err := api.chainConfig(ctx, tx)
 	if err != nil {
 		return nil, err
 	}
 
-	_, _, _, ibs, _, err := transactions.ComputeTxEnv(ctx, engine, block, chainConfig, api._blockReader, tx, 0)
-	if err != nil {
-		return nil, err
-	}
-
-	usedGas := new(uint64)
-	usedBlobGas := new(uint64)
-	gp := new(core.GasPool).AddGas(block.GasLimit()).AddBlobGas(chainConfig.GetMaxBlobGasPerBlock())
-
-	noopWriter := state.NewNoopWriter()
-
-	receipts := make(types.Receipts, len(block.Transactions()))
-
-	getHeader := func(hash common.Hash, number uint64) *types.Header {
-		h, e := api._blockReader.Header(ctx, tx, hash, number)
-		if e != nil {
-			log.Error("getHeader error", "number", number, "hash", hash, "err", e)
-		}
-		return h
-	}
-	header := block.Header()
-	for i, txn := range block.Transactions() {
-		ibs.SetTxContext(txn.Hash(), block.Hash(), i)
-		receipt, _, err := core.ApplyTransaction(chainConfig, core.GetHashFn(header, getHeader), engine, nil, gp, ibs, noopWriter, header, txn, usedGas, usedBlobGas, vm.Config{})
-		if err != nil {
-			return nil, err
-		}
-		receipt.BlockHash = block.Hash()
-		receipts[i] = receipt
-	}
-
-	api.receiptsCache.Add(block.Hash(), receipts)
-	return receipts, nil
+	return api.receiptsGenerator.GetReceipts(ctx, chainConfig, tx, block, senders)
 }
 
 // GetLogs implements eth_getLogs. Returns an array of logs matching a given filter object.
@@ -154,7 +124,25 @@ func (api *APIImpl) GetLogs(ctx context.Context, crit filters.FilterCriteria) (t
 		end = latest
 	}
 
-	return api.getLogsV3(ctx, tx.(kv.TemporalTx), begin, end, crit)
+	erigonLogs, err := api.getLogsV3(ctx, tx.(kv.TemporalTx), begin, end, crit)
+	if err != nil {
+		return nil, err
+	}
+	logs = make(types.Logs, len(erigonLogs))
+	for i, log := range erigonLogs {
+		logs[i] = &types.Log{
+			Address:     log.Address,
+			Topics:      log.Topics,
+			Data:        log.Data,
+			BlockNumber: log.BlockNumber,
+			TxHash:      log.TxHash,
+			TxIndex:     log.TxIndex,
+			BlockHash:   log.BlockHash,
+			Index:       log.Index,
+			Removed:     log.Removed,
+		}
+	}
+	return logs, nil
 }
 
 // The Topic list restricts matches to particular event topics. Each event has a list
@@ -235,7 +223,7 @@ func applyFilters(out *roaring.Bitmap, tx kv.Tx, begin, end uint64, crit filters
 	return nil
 }
 
-func applyFiltersV3(tx kv.TemporalTx, begin, end uint64, crit filters.FilterCriteria) (out iter.U64, err error) {
+func applyFiltersV3(tx kv.TemporalTx, begin, end uint64, crit filters.FilterCriteria) (out stream.U64, err error) {
 	//[from,to)
 	var fromTxNum, toTxNum uint64
 	if begin > 0 {
@@ -265,17 +253,17 @@ func applyFiltersV3(tx kv.TemporalTx, begin, end uint64, crit filters.FilterCrit
 		if out == nil {
 			out = addrBitmap
 		} else {
-			out = iter.Intersect[uint64](out, addrBitmap, -1)
+			out = stream.Intersect[uint64](out, addrBitmap, -1)
 		}
 	}
 	if out == nil {
-		out = iter.Range[uint64](fromTxNum, toTxNum)
+		out = stream.Range[uint64](fromTxNum, toTxNum)
 	}
 	return out, nil
 }
 
-func (api *APIImpl) getLogsV3(ctx context.Context, tx kv.TemporalTx, begin, end uint64, crit filters.FilterCriteria) ([]*types.Log, error) {
-	logs := []*types.Log{}
+func (api *BaseAPI) getLogsV3(ctx context.Context, tx kv.TemporalTx, begin, end uint64, crit filters.FilterCriteria) ([]*types.ErigonLog, error) {
+	logs := []*types.ErigonLog{}
 
 	addrMap := make(map[common.Address]struct{}, len(crit.Addresses))
 	for _, v := range crit.Addresses {
@@ -295,13 +283,14 @@ func (api *APIImpl) getLogsV3(ctx context.Context, tx kv.TemporalTx, begin, end 
 	if err != nil {
 		return logs, err
 	}
-	iter := rawdbv3.TxNums2BlockNums(tx, txNumbers, order.Asc)
-	defer iter.Close()
-	for iter.HasNext() {
+	it := rawdbv3.TxNums2BlockNums(tx, txNumbers, order.Asc)
+	defer it.Close()
+	var timestamp uint64
+	for it.HasNext() {
 		if err = ctx.Err(); err != nil {
 			return nil, err
 		}
-		txNum, blockNum, txIndex, isFinalTxn, blockNumChanged, err := iter.Next()
+		txNum, blockNum, txIndex, isFinalTxn, blockNumChanged, err := it.Next()
 		if err != nil {
 			return nil, err
 		}
@@ -310,6 +299,7 @@ func (api *APIImpl) getLogsV3(ctx context.Context, tx kv.TemporalTx, begin, end 
 		}
 
 		// if block number changed, calculate all related field
+
 		if blockNumChanged {
 			if header, err = api._blockReader.HeaderByNumber(ctx, tx, blockNum); err != nil {
 				return nil, err
@@ -320,6 +310,7 @@ func (api *APIImpl) getLogsV3(ctx context.Context, tx kv.TemporalTx, begin, end 
 			}
 			blockHash = header.Hash()
 			exec.ChangeBlock(header)
+			timestamp = header.Time
 		}
 
 		//fmt.Printf("txNum=%d, blockNum=%d, txIndex=%d, maxTxNumInBlock=%d,mixTxNumInBlock=%d\n", txNum, blockNum, txIndex, maxTxNumInBlock, minTxNumInBlock)
@@ -342,13 +333,27 @@ func (api *APIImpl) getLogsV3(ctx context.Context, tx kv.TemporalTx, begin, end 
 		//	log.Index = logIndex
 		//	logIndex++
 		//}
-		filtered := rawLogs.Filter(addrMap, crit.Topics)
+		filtered := rawLogs.Filter(addrMap, crit.Topics, 0)
 		for _, log := range filtered {
 			log.BlockNumber = blockNum
 			log.BlockHash = blockHash
 			log.TxHash = txn.Hash()
 		}
-		logs = append(logs, filtered...)
+		//TODO: maybe Logs by default and enreach them with
+		for _, filteredLog := range filtered {
+			logs = append(logs, &types.ErigonLog{
+				Address:     filteredLog.Address,
+				Topics:      filteredLog.Topics,
+				Data:        filteredLog.Data,
+				BlockNumber: filteredLog.BlockNumber,
+				TxHash:      filteredLog.TxHash,
+				TxIndex:     filteredLog.TxIndex,
+				BlockHash:   filteredLog.BlockHash,
+				Index:       filteredLog.Index,
+				Removed:     filteredLog.Removed,
+				Timestamp:   timestamp,
+			})
+		}
 	}
 
 	//stats := api._agg.GetAndResetStats()
@@ -367,34 +372,34 @@ func (api *APIImpl) getLogsV3(ctx context.Context, tx kv.TemporalTx, begin, end 
 // {{}, {B}}          matches any topic in first position AND B in second position
 // {{A}, {B}}         matches topic A in first position AND B in second position
 // {{A, B}, {C, D}}   matches topic (A OR B) in first position AND (C OR D) in second position
-func getTopicsBitmapV3(tx kv.TemporalTx, topics [][]common.Hash, from, to uint64) (res iter.U64, err error) {
+func getTopicsBitmapV3(tx kv.TemporalTx, topics [][]common.Hash, from, to uint64) (res stream.U64, err error) {
 	for _, sub := range topics {
 
-		var topicsUnion iter.U64
+		var topicsUnion stream.U64
 		for _, topic := range sub {
 			it, err := tx.IndexRange(kv.LogTopicIdx, topic.Bytes(), int(from), int(to), order.Asc, kv.Unlim)
 			if err != nil {
 				return nil, err
 			}
-			topicsUnion = iter.Union[uint64](topicsUnion, it, order.Asc, -1)
+			topicsUnion = stream.Union[uint64](topicsUnion, it, order.Asc, -1)
 		}
 
 		if res == nil {
 			res = topicsUnion
 			continue
 		}
-		res = iter.Intersect[uint64](res, topicsUnion, -1)
+		res = stream.Intersect[uint64](res, topicsUnion, -1)
 	}
 	return res, nil
 }
 
-func getAddrsBitmapV3(tx kv.TemporalTx, addrs []common.Address, from, to uint64) (res iter.U64, err error) {
+func getAddrsBitmapV3(tx kv.TemporalTx, addrs []common.Address, from, to uint64) (res stream.U64, err error) {
 	for _, addr := range addrs {
 		it, err := tx.IndexRange(kv.LogAddrIdx, addr[:], int(from), int(to), true, kv.Unlim)
 		if err != nil {
 			return nil, err
 		}
-		res = iter.Union[uint64](res, it, order.Asc, -1)
+		res = stream.Union[uint64](res, it, order.Asc, -1)
 	}
 	return res, nil
 }
@@ -436,7 +441,7 @@ func (api *APIImpl) GetTransactionReceipt(ctx context.Context, txnHash common.Ha
 		return nil, err
 	}
 	if block == nil {
-		return nil, nil // not error, see https://github.com/ledgerwatch/erigon/issues/1645
+		return nil, nil // not error, see https://github.com/erigontech/erigon/issues/1645
 	}
 
 	var txnIndex uint64
@@ -538,7 +543,7 @@ func (api *APIImpl) GetBlockReceipts(ctx context.Context, numberOrHash rpc.Block
 //
 //	it allow certain optimizations.
 type MapTxNum2BlockNumIter struct {
-	it          iter.U64
+	it          stream.U64
 	tx          kv.Tx
 	orderAscend bool
 
@@ -546,10 +551,10 @@ type MapTxNum2BlockNumIter struct {
 	minTxNumInBlock, maxTxNumInBlock uint64
 }
 
-func MapTxNum2BlockNum(tx kv.Tx, it iter.U64) *MapTxNum2BlockNumIter {
+func MapTxNum2BlockNum(tx kv.Tx, it stream.U64) *MapTxNum2BlockNumIter {
 	return &MapTxNum2BlockNumIter{tx: tx, it: it, orderAscend: true}
 }
-func MapDescendTxNum2BlockNum(tx kv.Tx, it iter.U64) *MapTxNum2BlockNumIter {
+func MapDescendTxNum2BlockNum(tx kv.Tx, it stream.U64) *MapTxNum2BlockNumIter {
 	return &MapTxNum2BlockNumIter{tx: tx, it: it, orderAscend: false}
 }
 func (i *MapTxNum2BlockNumIter) HasNext() bool { return i.it.HasNext() }

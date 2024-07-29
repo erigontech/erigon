@@ -1,8 +1,25 @@
+// Copyright 2024 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+
 package cmp
 
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"io/fs"
 	"os"
@@ -15,21 +32,21 @@ import (
 	"github.com/urfave/cli/v2"
 	"golang.org/x/sync/errgroup"
 
-	"github.com/ledgerwatch/erigon-lib/log/v3"
+	"github.com/erigontech/erigon-lib/log/v3"
 
-	"github.com/ledgerwatch/erigon-lib/chain"
-	"github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/downloader"
-	"github.com/ledgerwatch/erigon-lib/downloader/snaptype"
-	"github.com/ledgerwatch/erigon/cmd/snapshots/flags"
-	"github.com/ledgerwatch/erigon/cmd/snapshots/sync"
-	"github.com/ledgerwatch/erigon/cmd/utils"
-	coresnaptype "github.com/ledgerwatch/erigon/core/snaptype"
-	"github.com/ledgerwatch/erigon/core/types"
-	"github.com/ledgerwatch/erigon/eth/ethconfig"
-	"github.com/ledgerwatch/erigon/params"
-	"github.com/ledgerwatch/erigon/turbo/logging"
-	"github.com/ledgerwatch/erigon/turbo/snapshotsync/freezeblocks"
+	"github.com/erigontech/erigon-lib/chain"
+	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/downloader"
+	"github.com/erigontech/erigon-lib/downloader/snaptype"
+	"github.com/erigontech/erigon/cmd/snapshots/flags"
+	"github.com/erigontech/erigon/cmd/snapshots/sync"
+	"github.com/erigontech/erigon/cmd/utils"
+	coresnaptype "github.com/erigontech/erigon/core/snaptype"
+	"github.com/erigontech/erigon/core/types"
+	"github.com/erigontech/erigon/eth/ethconfig"
+	"github.com/erigontech/erigon/params"
+	"github.com/erigontech/erigon/turbo/logging"
+	"github.com/erigontech/erigon/turbo/snapshotsync/freezeblocks"
 )
 
 var Command = cli.Command{
@@ -205,11 +222,11 @@ func cmp(cliCtx *cli.Context) error {
 	}
 
 	if session1 == nil {
-		return fmt.Errorf("no first session established")
+		return errors.New("no first session established")
 	}
 
 	if session1 == nil {
-		return fmt.Errorf("no second session established")
+		return errors.New("no second session established")
 	}
 
 	logger.Info(fmt.Sprintf("Starting compare: %s==%s", loc1.String(), loc2.String()), "first", firstBlock, "last", lastBlock, "types", snapTypes, "dir", tempDir)
@@ -423,7 +440,7 @@ func (c comparitor) compareHeaders(ctx context.Context, f1ents []fs.DirEntry, f2
 				g.SetLimit(2)
 
 				g.Go(func() error {
-					logger.Info(fmt.Sprintf("Downloading %s", ent1.Name()), "entry", fmt.Sprint(i1+1, "/", len(f1ents)))
+					logger.Info("Downloading ", ent1.Name(), "entry", fmt.Sprint(i1+1, "/", len(f1ents)))
 					startTime := time.Now()
 					defer func() {
 						atomic.AddUint64(&downloadTime, uint64(time.Since(startTime)))
@@ -444,7 +461,7 @@ func (c comparitor) compareHeaders(ctx context.Context, f1ents []fs.DirEntry, f2
 						atomic.AddUint64(&downloadTime, uint64(time.Since(startTime)))
 					}()
 
-					logger.Info(fmt.Sprintf("Downloading %s", ent2.Name()), "entry", fmt.Sprint(i2+1, "/", len(f2ents)), "size", datasize.ByteSize(ent2Info.Size()))
+					logger.Info("Downloading "+ent2.Name(), "entry", fmt.Sprint(i2+1, "/", len(f2ents)), "size", datasize.ByteSize(ent2Info.Size()))
 					err := c.session2.Download(gctx, ent2.Name())
 
 					if err != nil {
@@ -599,7 +616,7 @@ func (c comparitor) compareBodies(ctx context.Context, f1ents []*BodyEntry, f2en
 							atomic.AddUint64(&downloadTime, uint64(time.Since(startTime)))
 						}()
 
-						logger.Info(fmt.Sprintf("Downloading %s", ent1.Body.Name()), "entry", fmt.Sprint(i1+1, "/", len(f1ents)))
+						logger.Info("Downloading "+ent1.Body.Name(), "entry", fmt.Sprint(i1+1, "/", len(f1ents)))
 						return c.session1.Download(ctx, ent1.Body.Name())
 					}()
 
@@ -615,7 +632,7 @@ func (c comparitor) compareBodies(ctx context.Context, f1ents []*BodyEntry, f2en
 						atomic.AddUint64(&indexTime, uint64(time.Since(startTime)))
 					}()
 
-					logger.Info(fmt.Sprintf("Indexing %s", ent1.Body.Name()))
+					logger.Info("Indexing " + ent1.Body.Name())
 
 					return coresnaptype.Bodies.BuildIndexes(ctx, info, c.chainConfig(), c.session1.LocalFsRoot(), nil, log.LvlDebug, logger)
 				})
@@ -631,7 +648,7 @@ func (c comparitor) compareBodies(ctx context.Context, f1ents []*BodyEntry, f2en
 						defer func() {
 							atomic.AddUint64(&downloadTime, uint64(time.Since(startTime)))
 						}()
-						logger.Info(fmt.Sprintf("Downloading %s", ent1.Transactions.Name()), "entry", fmt.Sprint(i1+1, "/", len(f1ents)))
+						logger.Info("Downloading "+ent1.Transactions.Name(), "entry", fmt.Sprint(i1+1, "/", len(f1ents)))
 						return c.session1.Download(ctx, ent1.Transactions.Name())
 					}()
 
@@ -654,7 +671,7 @@ func (c comparitor) compareBodies(ctx context.Context, f1ents []*BodyEntry, f2en
 						atomic.AddUint64(&indexTime, uint64(time.Since(startTime)))
 					}()
 
-					logger.Info(fmt.Sprintf("Indexing %s", ent1.Transactions.Name()))
+					logger.Info("Indexing " + ent1.Transactions.Name())
 					return coresnaptype.Transactions.BuildIndexes(ctx, info, c.chainConfig(), c.session1.LocalFsRoot(), nil, log.LvlDebug, logger)
 				})
 
@@ -674,7 +691,7 @@ func (c comparitor) compareBodies(ctx context.Context, f1ents []*BodyEntry, f2en
 							atomic.AddUint64(&downloadTime, uint64(time.Since(startTime)))
 						}()
 
-						logger.Info(fmt.Sprintf("Downloading %s", ent2.Body.Name()), "entry", fmt.Sprint(i2+1, "/", len(f2ents)))
+						logger.Info("Downloading "+ent2.Body.Name(), "entry", fmt.Sprint(i2+1, "/", len(f2ents)))
 						return c.session2.Download(ctx, ent2.Body.Name())
 					}()
 
@@ -690,7 +707,7 @@ func (c comparitor) compareBodies(ctx context.Context, f1ents []*BodyEntry, f2en
 						atomic.AddUint64(&indexTime, uint64(time.Since(startTime)))
 					}()
 
-					logger.Info(fmt.Sprintf("Indexing %s", ent2.Body.Name()))
+					logger.Info("Indexing " + ent2.Body.Name())
 					return coresnaptype.Bodies.BuildIndexes(ctx, info, c.chainConfig(), c.session1.LocalFsRoot(), nil, log.LvlDebug, logger)
 				})
 
@@ -708,7 +725,7 @@ func (c comparitor) compareBodies(ctx context.Context, f1ents []*BodyEntry, f2en
 							atomic.AddUint64(&downloadTime, uint64(time.Since(startTime)))
 						}()
 
-						logger.Info(fmt.Sprintf("Downloading %s", ent2.Transactions.Name()), "entry", fmt.Sprint(i2+1, "/", len(f2ents)))
+						logger.Info("Downloading "+ent2.Transactions.Name(), "entry", fmt.Sprint(i2+1, "/", len(f2ents)))
 						return c.session2.Download(ctx, ent2.Transactions.Name())
 					}()
 
@@ -731,7 +748,7 @@ func (c comparitor) compareBodies(ctx context.Context, f1ents []*BodyEntry, f2en
 						atomic.AddUint64(&indexTime, uint64(time.Since(startTime)))
 					}()
 
-					logger.Info(fmt.Sprintf("Indexing %s", ent2.Transactions.Name()))
+					logger.Info("Indexing " + ent2.Transactions.Name())
 					return coresnaptype.Transactions.BuildIndexes(ctx, info, c.chainConfig(), c.session2.LocalFsRoot(), nil, log.LvlDebug, logger)
 				})
 

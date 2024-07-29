@@ -1,16 +1,33 @@
+// Copyright 2024 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+
 package diagnostics
 
 import (
 	"encoding/json"
+	"io"
 
 	"github.com/shirou/gopsutil/v3/cpu"
 	"github.com/shirou/gopsutil/v3/disk"
 	"github.com/shirou/gopsutil/v3/mem"
 
-	"github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/diskutils"
-	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon-lib/log/v3"
+	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/diskutils"
+	"github.com/erigontech/erigon-lib/kv"
+	"github.com/erigontech/erigon-lib/log/v3"
 )
 
 var (
@@ -20,26 +37,36 @@ var (
 )
 
 func (d *DiagnosticClient) setupSysInfoDiagnostics() {
-	sysInfo := GetSysInfo(d.dataDirPath)
-	if err := d.db.Update(d.ctx, RAMInfoUpdater(sysInfo.RAM)); err != nil {
-		log.Warn("[Diagnostics] Failed to update RAM info", "err", err)
-	}
-
-	if err := d.db.Update(d.ctx, CPUInfoUpdater(sysInfo.CPU)); err != nil {
-		log.Warn("[Diagnostics] Failed to update CPU info", "err", err)
-	}
-
-	if err := d.db.Update(d.ctx, DiskInfoUpdater(sysInfo.Disk)); err != nil {
-		log.Warn("[Diagnostics] Failed to update Disk info", "err", err)
-	}
-
 	d.mu.Lock()
+	defer d.mu.Unlock()
+
+	sysInfo := GetSysInfo(d.dataDirPath)
+
+	var funcs []func(tx kv.RwTx) error
+	funcs = append(funcs, RAMInfoUpdater(sysInfo.RAM), CPUInfoUpdater(sysInfo.CPU), DiskInfoUpdater(sysInfo.Disk))
+
+	err := d.db.Update(d.ctx, func(tx kv.RwTx) error {
+		for _, updater := range funcs {
+			updErr := updater(tx)
+			if updErr != nil {
+				return updErr
+			}
+		}
+
+		return nil
+	})
+	if err != nil {
+		log.Warn("[Diagnostics] Failed to update system info", "err", err)
+	}
 	d.hardwareInfo = sysInfo
-	d.mu.Unlock()
 }
 
-func (d *DiagnosticClient) HardwareInfo() HardwareInfo {
-	return d.hardwareInfo
+func (d *DiagnosticClient) HardwareInfoJson(w io.Writer) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	if err := json.NewEncoder(w).Encode(d.hardwareInfo); err != nil {
+		log.Debug("[diagnostics] HardwareInfoJson", "err", err)
+	}
 }
 
 func findNodeDisk(dirPath string) string {
@@ -139,17 +166,6 @@ func ReadRAMInfoFromTx(tx kv.Tx) ([]byte, error) {
 	return common.CopyBytes(bytes), nil
 }
 
-func ParseRamInfo(data []byte) (info RAMInfo) {
-	err := json.Unmarshal(data, &info)
-
-	if err != nil {
-		log.Warn("[Diagnostics] Failed to parse RAM info", "err", err)
-		return RAMInfo{}
-	} else {
-		return info
-	}
-}
-
 func ReadCPUInfoFromTx(tx kv.Tx) ([]byte, error) {
 	bytes, err := ReadDataFromTable(tx, kv.DiagSystemInfo, SystemCpuInfoKey)
 	if err != nil {
@@ -159,17 +175,6 @@ func ReadCPUInfoFromTx(tx kv.Tx) ([]byte, error) {
 	return common.CopyBytes(bytes), nil
 }
 
-func ParseCPUInfo(data []byte) (info CPUInfo) {
-	err := json.Unmarshal(data, &info)
-
-	if err != nil {
-		log.Warn("[Diagnostics] Failed to parse CPU info", "err", err)
-		return CPUInfo{}
-	} else {
-		return info
-	}
-}
-
 func ReadDiskInfoFromTx(tx kv.Tx) ([]byte, error) {
 	bytes, err := ReadDataFromTable(tx, kv.DiagSystemInfo, SystemDiskInfoKey)
 	if err != nil {
@@ -177,17 +182,6 @@ func ReadDiskInfoFromTx(tx kv.Tx) ([]byte, error) {
 	}
 
 	return common.CopyBytes(bytes), nil
-}
-
-func ParseDiskInfo(data []byte) (info DiskInfo) {
-	err := json.Unmarshal(data, &info)
-
-	if err != nil {
-		log.Warn("[Diagnostics] Failed to parse Disk info", "err", err)
-		return DiskInfo{}
-	} else {
-		return info
-	}
 }
 
 func RAMInfoUpdater(info RAMInfo) func(tx kv.RwTx) error {

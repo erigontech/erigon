@@ -1,3 +1,19 @@
+// Copyright 2024 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+
 package commitment
 
 import (
@@ -9,7 +25,7 @@ import (
 	"sort"
 	"testing"
 
-	"github.com/ledgerwatch/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common"
 
 	"github.com/stretchr/testify/require"
 )
@@ -21,21 +37,21 @@ func generateCellRow(tb testing.TB, size int) (row []*Cell, bitmap uint16) {
 	var bm uint16
 	for i := 0; i < len(row); i++ {
 		row[i] = new(Cell)
-		row[i].hl = 32
-		n, err := rand.Read(row[i].h[:])
+		row[i].HashLen = 32
+		n, err := rand.Read(row[i].hash[:])
 		require.NoError(tb, err)
-		require.EqualValues(tb, row[i].hl, n)
+		require.EqualValues(tb, row[i].HashLen, n)
 
 		th := rand.Intn(120)
 		switch {
 		case th > 70:
-			n, err = rand.Read(row[i].apk[:])
+			n, err = rand.Read(row[i].accountPlainKey[:])
 			require.NoError(tb, err)
-			row[i].apl = n
+			row[i].accountPlainKeyLen = n
 		case th > 20 && th <= 70:
-			n, err = rand.Read(row[i].spk[:])
+			n, err = rand.Read(row[i].storagePlainKey[:])
 			require.NoError(tb, err)
-			row[i].spl = n
+			row[i].storagePlainKeyLen = n
 		case th <= 20:
 			n, err = rand.Read(row[i].extension[:th])
 			row[i].extLen = n
@@ -76,10 +92,10 @@ func TestBranchData_MergeHexBranches2(t *testing.T) {
 		}
 		require.EqualValues(t, row[i].extLen, c.extLen)
 		require.EqualValues(t, row[i].extension, c.extension)
-		require.EqualValues(t, row[i].apl, c.apl)
-		require.EqualValues(t, row[i].apk, c.apk)
-		require.EqualValues(t, row[i].spl, c.spl)
-		require.EqualValues(t, row[i].spk, c.spk)
+		require.EqualValues(t, row[i].accountPlainKeyLen, c.accountPlainKeyLen)
+		require.EqualValues(t, row[i].accountPlainKey, c.accountPlainKey)
+		require.EqualValues(t, row[i].storagePlainKeyLen, c.storagePlainKeyLen)
+		require.EqualValues(t, row[i].storagePlainKey, c.storagePlainKey)
 		i++
 	}
 }
@@ -185,13 +201,13 @@ func TestBranchData_ReplacePlainKeys(t *testing.T) {
 		if c == nil {
 			continue
 		}
-		if c.apl > 0 {
-			offt, _ := binary.Uvarint(c.apk[:c.apl])
-			t.Logf("%d apk %x, offt %d\n", i, c.apk[:c.apl], offt)
+		if c.accountPlainKeyLen > 0 {
+			offt, _ := binary.Uvarint(c.accountPlainKey[:c.accountPlainKeyLen])
+			t.Logf("%d apk %x, offt %d\n", i, c.accountPlainKey[:c.accountPlainKeyLen], offt)
 		}
-		if c.spl > 0 {
-			offt, _ := binary.Uvarint(c.spk[:c.spl])
-			t.Logf("%d spk %x offt %d\n", i, c.spk[:c.spl], offt)
+		if c.storagePlainKeyLen > 0 {
+			offt, _ := binary.Uvarint(c.storagePlainKey[:c.storagePlainKeyLen])
+			t.Logf("%d spk %x offt %d\n", i, c.storagePlainKey[:c.storagePlainKeyLen], offt)
 		}
 
 	}

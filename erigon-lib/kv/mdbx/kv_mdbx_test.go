@@ -1,18 +1,18 @@
-/*
-   Copyright 2022 Erigon contributors
-
-   Licensed under the Apache License, Version 2.0 (the "License");
-   you may not use this file except in compliance with the License.
-   You may obtain a copy of the License at
-
-       http://www.apache.org/licenses/LICENSE-2.0
-
-   Unless required by applicable law or agreed to in writing, software
-   distributed under the License is distributed on an "AS IS" BASIS,
-   WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-   See the License for the specific language governing permissions and
-   limitations under the License.
-*/
+// Copyright 2022 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
 package mdbx
 
@@ -29,10 +29,10 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon-lib/kv/iter"
-	"github.com/ledgerwatch/erigon-lib/kv/order"
-	"github.com/ledgerwatch/erigon-lib/log/v3"
+	"github.com/erigontech/erigon-lib/kv"
+	"github.com/erigontech/erigon-lib/kv/order"
+	"github.com/erigontech/erigon-lib/kv/stream"
+	"github.com/erigontech/erigon-lib/log/v3"
 )
 
 func BaseCaseDB(t *testing.T) kv.RwDB {
@@ -211,13 +211,13 @@ func TestRangeDupSort(t *testing.T) {
 		// [from, nil) means [from, INF)
 		it, err = tx.RangeDupSort("Table", []byte("key1"), []byte("value1"), nil, order.Asc, -1)
 		require.NoError(t, err)
-		_, vals, err := iter.ToArrayKV(it)
+		_, vals, err := stream.ToArrayKV(it)
 		require.NoError(t, err)
 		require.Equal(t, 2, len(vals))
 
 		it, err = tx.RangeDupSort("Table", []byte("key1"), []byte("value1"), []byte("value1.3"), order.Asc, -1)
 		require.NoError(t, err)
-		_, vals, err = iter.ToArrayKV(it)
+		_, vals, err = stream.ToArrayKV(it)
 		require.NoError(t, err)
 		require.Equal(t, 1, len(vals))
 	})
@@ -243,13 +243,13 @@ func TestRangeDupSort(t *testing.T) {
 
 		it, err = tx.RangeDupSort("Table", []byte("key1"), []byte("value1"), []byte("value0"), order.Desc, -1)
 		require.NoError(t, err)
-		_, vals, err := iter.ToArrayKV(it)
+		_, vals, err := stream.ToArrayKV(it)
 		require.NoError(t, err)
 		require.Equal(t, 2, len(vals))
 
 		it, err = tx.RangeDupSort("Table", []byte("key1"), []byte("value1.3"), []byte("value1.1"), order.Desc, -1)
 		require.NoError(t, err)
-		_, vals, err = iter.ToArrayKV(it)
+		_, vals, err = stream.ToArrayKV(it)
 		require.NoError(t, err)
 		require.Equal(t, 1, len(vals))
 	})

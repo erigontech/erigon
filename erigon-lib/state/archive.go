@@ -1,10 +1,27 @@
+// Copyright 2024 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+
 package state
 
 import (
+	"encoding/binary"
 	"fmt"
 
-	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon-lib/seg"
+	"github.com/erigontech/erigon-lib/kv"
+	"github.com/erigontech/erigon-lib/seg"
 )
 
 type FileCompression uint8
@@ -44,7 +61,7 @@ func (g *getter) MatchPrefix(prefix []byte) bool {
 	if g.c&CompressKeys != 0 {
 		return g.Getter.MatchPrefix(prefix)
 	}
-	return g.Getter.MatchPrefixUncompressed(prefix) == 0
+	return g.Getter.MatchPrefixUncompressed(prefix)
 }
 
 func (g *getter) Next(buf []byte) ([]byte, uint64) {
@@ -161,4 +178,26 @@ func GetExecV3PruneProgress(db kv.Getter, prunedTblName string) (pruned []byte, 
 	default:
 		return v[1:], nil
 	}
+}
+
+// SaveExecV3PrunableProgress saves latest pruned key in given table to the database.
+func SaveExecV3PrunableProgress(db kv.RwTx, tbl []byte, step uint64) error {
+	v := make([]byte, 8)
+	binary.BigEndian.PutUint64(v, step)
+	if err := db.Delete(kv.TblPruningProgress, append(kv.MinimumPrunableStepDomainKey, tbl...)); err != nil {
+		return err
+	}
+	return db.Put(kv.TblPruningProgress, append(kv.MinimumPrunableStepDomainKey, tbl...), v)
+}
+
+// GetExecV3PrunableProgress retrieves saved progress of given table pruning from the database.
+func GetExecV3PrunableProgress(db kv.Getter, tbl []byte) (step uint64, err error) {
+	v, err := db.GetOne(kv.TblPruningProgress, append(kv.MinimumPrunableStepDomainKey, tbl...))
+	if err != nil {
+		return 0, err
+	}
+	if len(v) == 0 {
+		return 0, nil
+	}
+	return binary.BigEndian.Uint64(v), nil
 }

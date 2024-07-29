@@ -1,23 +1,25 @@
-/*
-   Copyright 2021 Erigon contributors
-
-   Licensed under the Apache License, Version 2.0 (the "License");
-   you may not use this file except in compliance with the License.
-   You may obtain a copy of the License at
-
-       http://www.apache.org/licenses/LICENSE-2.0
-
-   Unless required by applicable law or agreed to in writing, software
-   distributed under the License is distributed on an "AS IS" BASIS,
-   WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-   See the License for the specific language governing permissions and
-   limitations under the License.
-*/
+// Copyright 2021 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
 package diagnostics
 
 import (
 	"time"
+
+	"golang.org/x/exp/maps"
 )
 
 type SyncStageType string
@@ -47,6 +49,25 @@ type PeerStatistics struct {
 	TypeBytesOut map[string]uint64
 }
 
+func (p PeerStatistics) Clone() PeerStatistics {
+	p1 := p
+	p1.CapBytesIn = maps.Clone(p.CapBytesIn)
+	p1.CapBytesOut = maps.Clone(p.CapBytesOut)
+	p1.TypeBytesIn = maps.Clone(p.TypeBytesIn)
+	p1.TypeBytesOut = maps.Clone(p.TypeBytesOut)
+	return p1
+}
+
+func (p PeerStatistics) Equal(p2 PeerStatistics) bool {
+	return p.PeerType == p2.PeerType &&
+		p.BytesIn == p2.BytesIn &&
+		p.BytesOut == p2.BytesOut &&
+		maps.Equal(p.CapBytesIn, p2.CapBytesIn) &&
+		maps.Equal(p.CapBytesOut, p2.CapBytesOut) &&
+		maps.Equal(p.TypeBytesIn, p2.TypeBytesIn) &&
+		maps.Equal(p.TypeBytesOut, p2.TypeBytesOut)
+}
+
 type PeerDataUpdate struct {
 	PeerID string
 	ENR    string
@@ -70,7 +91,6 @@ type SyncStatistics struct {
 	SnapshotDownload SnapshotDownloadStatistics `json:"snapshotDownload"`
 	SnapshotIndexing SnapshotIndexingStatistics `json:"snapshotIndexing"`
 	SnapshotFillDB   SnapshotFillDBStatistics   `json:"snapshotFillDB"`
-	BlockExecution   BlockExecutionStatistics   `json:"blockExecution"`
 	SyncFinished     bool                       `json:"syncFinished"`
 }
 
@@ -116,8 +136,9 @@ type SegmentPeer struct {
 }
 
 type SnapshotIndexingStatistics struct {
-	Segments    []SnapshotSegmentIndexingStatistics `json:"segments"`
-	TimeElapsed float64                             `json:"timeElapsed"`
+	Segments         []SnapshotSegmentIndexingStatistics `json:"segments"`
+	TimeElapsed      float64                             `json:"timeElapsed"`
+	IndexingFinished bool                                `json:"indexingFinished"`
 }
 
 type SnapshotSegmentIndexingStatistics struct {
@@ -125,10 +146,6 @@ type SnapshotSegmentIndexingStatistics struct {
 	Percent     int    `json:"percent"`
 	Alloc       uint64 `json:"alloc"`
 	Sys         uint64 `json:"sys"`
-}
-
-type SnapshotSegmentIndexingFinishedUpdate struct {
-	SegmentName string `json:"segmentName"`
 }
 
 type SnapshotFillDBStatistics struct {
@@ -144,19 +161,6 @@ type SnapshotFillDBStage struct {
 type SnapshotFillDBStageUpdate struct {
 	Stage       SnapshotFillDBStage `json:"stage"`
 	TimeElapsed float64             `json:"timeElapsed"`
-}
-type BlockExecutionStatistics struct {
-	From        uint64  `json:"from"`
-	To          uint64  `json:"to"`
-	BlockNumber uint64  `json:"blockNumber"`
-	BlkPerSec   float64 `json:"blkPerSec"`
-	TxPerSec    float64 `json:"txPerSec"`
-	MgasPerSec  float64 `json:"mgasPerSec"`
-	GasState    float64 `json:"gasState"`
-	Batch       uint64  `json:"batch"`
-	Alloc       uint64  `json:"alloc"`
-	Sys         uint64  `json:"sys"`
-	TimeElapsed float64 `json:"timeElapsed"`
 }
 
 type SnapshoFilesList struct {
@@ -320,10 +324,6 @@ func (ti SegmentDownloadStatistics) Type() Type {
 }
 
 func (ti SnapshotIndexingStatistics) Type() Type {
-	return TypeOf(ti)
-}
-
-func (ti SnapshotSegmentIndexingFinishedUpdate) Type() Type {
 	return TypeOf(ti)
 }
 

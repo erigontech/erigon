@@ -1,18 +1,18 @@
-/*
-   Copyright 2022 Erigon contributors
-
-   Licensed under the Apache License, Version 2.0 (the "License");
-   you may not use this file except in compliance with the License.
-   You may obtain a copy of the License at
-
-       http://www.apache.org/licenses/LICENSE-2.0
-
-   Unless required by applicable law or agreed to in writing, software
-   distributed under the License is distributed on an "AS IS" BASIS,
-   WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-   See the License for the specific language governing permissions and
-   limitations under the License.
-*/
+// Copyright 2022 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
 package commitment
 
@@ -29,8 +29,8 @@ import (
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
 
-	"github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/common/length"
+	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common/length"
 )
 
 func Test_HexPatriciaHashed_ResetThenSingularUpdates(t *testing.T) {
@@ -503,29 +503,29 @@ func Test_HexPatriciaHashed_Sepolia(t *testing.T) {
 func Test_Cell_EncodeDecode(t *testing.T) {
 	rnd := rand.New(rand.NewSource(time.Now().UnixMilli()))
 	first := &Cell{
-		Nonce:         rnd.Uint64(),
-		hl:            length.Hash,
-		StorageLen:    rnd.Intn(33),
-		apl:           length.Addr,
-		spl:           length.Addr + length.Hash,
-		downHashedLen: rnd.Intn(129),
-		extLen:        rnd.Intn(65),
-		downHashedKey: [128]byte{},
-		extension:     [64]byte{},
-		spk:           [52]byte{},
-		h:             [32]byte{},
-		CodeHash:      [32]byte{},
-		Storage:       [32]byte{},
-		apk:           [20]byte{},
+		Nonce:              rnd.Uint64(),
+		HashLen:            length.Hash,
+		StorageLen:         rnd.Intn(33),
+		accountPlainKeyLen: length.Addr,
+		storagePlainKeyLen: length.Addr + length.Hash,
+		downHashedLen:      rnd.Intn(129),
+		extLen:             rnd.Intn(65),
+		downHashedKey:      [128]byte{},
+		extension:          [64]byte{},
+		storagePlainKey:    [52]byte{},
+		hash:               [32]byte{},
+		CodeHash:           [32]byte{},
+		Storage:            [32]byte{},
+		accountPlainKey:    [20]byte{},
 	}
 	b := uint256.NewInt(rnd.Uint64())
 	first.Balance = *b
 
 	rnd.Read(first.downHashedKey[:first.downHashedLen])
 	rnd.Read(first.extension[:first.extLen])
-	rnd.Read(first.spk[:])
-	rnd.Read(first.apk[:])
-	rnd.Read(first.h[:])
+	rnd.Read(first.storagePlainKey[:])
+	rnd.Read(first.accountPlainKey[:])
+	rnd.Read(first.hash[:])
 	rnd.Read(first.CodeHash[:])
 	rnd.Read(first.Storage[:first.StorageLen])
 	if rnd.Intn(100) > 50 {
@@ -537,14 +537,14 @@ func Test_Cell_EncodeDecode(t *testing.T) {
 
 	require.EqualValues(t, first.downHashedLen, second.downHashedLen)
 	require.EqualValues(t, first.downHashedKey[:], second.downHashedKey[:])
-	require.EqualValues(t, first.apl, second.apl)
-	require.EqualValues(t, first.spl, second.spl)
-	require.EqualValues(t, first.hl, second.hl)
-	require.EqualValues(t, first.apk[:], second.apk[:])
-	require.EqualValues(t, first.spk[:], second.spk[:])
-	require.EqualValues(t, first.h[:], second.h[:])
+	require.EqualValues(t, first.accountPlainKeyLen, second.accountPlainKeyLen)
+	require.EqualValues(t, first.storagePlainKeyLen, second.storagePlainKeyLen)
+	require.EqualValues(t, first.HashLen, second.HashLen)
+	require.EqualValues(t, first.accountPlainKey[:], second.accountPlainKey[:])
+	require.EqualValues(t, first.storagePlainKey[:], second.storagePlainKey[:])
+	require.EqualValues(t, first.hash[:], second.hash[:])
 	require.EqualValues(t, first.extension[:first.extLen], second.extension[:second.extLen])
-	// encode doesnt code Nonce, Balance, CodeHash and Storage
+	// encode doesn't code Nonce, Balance, CodeHash and Storage
 	require.EqualValues(t, first.Delete, second.Delete)
 }
 
@@ -763,8 +763,8 @@ func Test_HexPatriciaHashed_RestoreAndContinue(t *testing.T) {
 
 	err = trieOne.SetState(buf)
 	require.NoError(t, err)
-	fmt.Printf("rh %x\n", trieOne.root.h[:])
-	require.EqualValues(t, beforeRestore[:], trieOne.root.h[:])
+	fmt.Printf("rh %x\n", trieOne.root.hash[:])
+	require.EqualValues(t, beforeRestore[:], trieOne.root.hash[:])
 
 	hashAfterRestore, err := trieOne.RootHash()
 	require.NoError(t, err)

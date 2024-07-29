@@ -1,16 +1,32 @@
+// Copyright 2024 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+
 package forkchoice
 
 import (
-	"fmt"
+	"errors"
 
-	"github.com/ledgerwatch/erigon/cl/cltypes/solid"
-	"github.com/ledgerwatch/erigon/cl/phase1/core/state"
+	"github.com/erigontech/erigon/cl/cltypes/solid"
+	"github.com/erigontech/erigon/cl/phase1/core/state"
 
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	libcommon "github.com/erigontech/erigon-lib/common"
 )
 
 var (
-	ErrIgnore = fmt.Errorf("ignore")
+	ErrIgnore = errors.New("ignore")
 )
 
 // OnAttestation processes incoming attestations.
@@ -85,7 +101,7 @@ func (f *ForkChoiceStore) verifyAttestationWithCheckpointState(
 	}
 	// Verify attestation signature.
 	if targetState == nil {
-		return nil, fmt.Errorf("target state does not exist")
+		return nil, errors.New("target state does not exist")
 	}
 	// Now we need to find the attesting indicies.
 	attestationIndicies, err = targetState.getAttestingIndicies(
@@ -106,7 +122,7 @@ func (f *ForkChoiceStore) verifyAttestationWithCheckpointState(
 			return nil, err
 		}
 		if !valid {
-			return nil, fmt.Errorf("invalid attestation")
+			return nil, errors.New("invalid attestation")
 		}
 	}
 	return attestationIndicies, nil
@@ -136,7 +152,7 @@ func (f *ForkChoiceStore) verifyAttestationWithState(
 			return nil, err
 		}
 		if !valid {
-			return nil, fmt.Errorf("invalid attestation")
+			return nil, errors.New("invalid attestation")
 		}
 	}
 	return attestationIndicies, nil
@@ -211,23 +227,23 @@ func (f *ForkChoiceStore) ValidateOnAttestation(attestation *solid.Attestation) 
 	target := attestation.AttestantionData().Target()
 
 	if target.Epoch() != f.computeEpochAtSlot(attestation.AttestantionData().Slot()) {
-		return fmt.Errorf("mismatching target epoch with slot data")
+		return errors.New("mismatching target epoch with slot data")
 	}
 	if _, has := f.forkGraph.GetHeader(target.BlockRoot()); !has {
-		return fmt.Errorf("target root is missing")
+		return errors.New("target root is missing")
 	}
 	if blockHeader, has := f.forkGraph.GetHeader(attestation.AttestantionData().BeaconBlockRoot()); !has ||
 		blockHeader.Slot > attestation.AttestantionData().Slot() {
-		return fmt.Errorf("bad attestation data")
+		return errors.New("bad attestation data")
 	}
 	// LMD vote must be consistent with FFG vote target
 	targetSlot := f.computeStartSlotAtEpoch(target.Epoch())
 	ancestorRoot := f.Ancestor(attestation.AttestantionData().BeaconBlockRoot(), targetSlot)
 	if ancestorRoot == (libcommon.Hash{}) {
-		return fmt.Errorf("could not retrieve ancestor")
+		return errors.New("could not retrieve ancestor")
 	}
 	if ancestorRoot != target.BlockRoot() {
-		return fmt.Errorf("ancestor root mismatches with target")
+		return errors.New("ancestor root mismatches with target")
 	}
 
 	return nil
@@ -247,5 +263,5 @@ func (f *ForkChoiceStore) validateTargetEpochAgainstCurrentTime(
 	if target.Epoch() == currentEpoch || target.Epoch() == previousEpoch {
 		return nil
 	}
-	return fmt.Errorf("verification of attestation against current time failed")
+	return errors.New("verification of attestation against current time failed")
 }

@@ -1,3 +1,19 @@
+// Copyright 2024 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+
 package heimdall
 
 import (
@@ -5,9 +21,10 @@ import (
 
 	"golang.org/x/sync/errgroup"
 
-	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon-lib/log/v3"
-	"github.com/ledgerwatch/erigon/polygon/polygoncommon"
+	"github.com/erigontech/erigon-lib/common/generics"
+	"github.com/erigontech/erigon-lib/kv"
+	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/polygon/polygoncommon"
 )
 
 type ServiceStore interface {
@@ -19,16 +36,16 @@ type ServiceStore interface {
 }
 
 func NewMdbxServiceStore(logger log.Logger, dataDir string, tmpDir string) *MdbxServiceStore {
-	db := polygoncommon.NewDatabase(dataDir, logger)
+	db := polygoncommon.NewDatabase(dataDir, kv.HeimdallDB, databaseTablesCfg, logger)
 	blockNumToIdIndexFactory := func(ctx context.Context) (*RangeIndex, error) {
 		return NewRangeIndex(ctx, tmpDir, logger)
 	}
 
 	return &MdbxServiceStore{
 		db:          db,
-		checkpoints: newMdbxEntityStore(db, kv.HeimdallDB, kv.BorCheckpoints, makeType[Checkpoint], blockNumToIdIndexFactory),
-		milestones:  newMdbxEntityStore(db, kv.HeimdallDB, kv.BorMilestones, makeType[Milestone], blockNumToIdIndexFactory),
-		spans:       newMdbxEntityStore(db, kv.HeimdallDB, kv.BorSpans, makeType[Span], blockNumToIdIndexFactory),
+		checkpoints: newMdbxEntityStore(db, kv.BorCheckpoints, generics.New[Checkpoint], blockNumToIdIndexFactory),
+		milestones:  newMdbxEntityStore(db, kv.BorMilestones, generics.New[Milestone], blockNumToIdIndexFactory),
+		spans:       newMdbxEntityStore(db, kv.BorSpans, generics.New[Span], blockNumToIdIndexFactory),
 	}
 }
 

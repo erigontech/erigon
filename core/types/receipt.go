@@ -1,18 +1,21 @@
 // Copyright 2014 The go-ethereum Authors
-// This file is part of the go-ethereum library.
+// (original work)
+// Copyright 2024 The Erigon Authors
+// (modifications)
+// This file is part of Erigon.
 //
-// The go-ethereum library is free software: you can redistribute it and/or modify
+// Erigon is free software: you can redistribute it and/or modify
 // it under the terms of the GNU Lesser General Public License as published by
 // the Free Software Foundation, either version 3 of the License, or
 // (at your option) any later version.
 //
-// The go-ethereum library is distributed in the hope that it will be useful,
+// Erigon is distributed in the hope that it will be useful,
 // but WITHOUT ANY WARRANTY; without even the implied warranty of
 // MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
 // GNU Lesser General Public License for more details.
 //
 // You should have received a copy of the GNU Lesser General Public License
-// along with the go-ethereum library. If not, see <http://www.gnu.org/licenses/>.
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
 package types
 
@@ -23,11 +26,11 @@ import (
 	"io"
 	"math/big"
 
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/common/hexutil"
-	"github.com/ledgerwatch/erigon-lib/common/hexutility"
-	"github.com/ledgerwatch/erigon/crypto"
-	"github.com/ledgerwatch/erigon/rlp"
+	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common/hexutil"
+	"github.com/erigontech/erigon-lib/common/hexutility"
+	"github.com/erigontech/erigon/crypto"
+	"github.com/erigontech/erigon/rlp"
 )
 
 // go:generate gencodec -type Receipt -field-override receiptMarshaling -out gen_receipt_json.go
@@ -68,7 +71,7 @@ type Receipt struct {
 	BlockNumber      *big.Int       `json:"blockNumber,omitempty"`
 	TransactionIndex uint           `json:"transactionIndex"`
 
-	firstLogIndex uint32 `json:"-"` // field which used to store in db and re-calc
+	FirstLogIndex uint32 `json:"-"` // field which used to store in db and re-calc
 }
 
 type receiptMarshaling struct {
@@ -226,7 +229,7 @@ func (r *Receipt) DecodeRLP(s *rlp.Stream) error {
 		}
 		r.Type = b[0]
 		switch r.Type {
-		case AccessListTxType, DynamicFeeTxType, BlobTxType:
+		case AccessListTxType, DynamicFeeTxType, BlobTxType, SetCodeTxType:
 			if err := r.decodePayload(s); err != nil {
 				return err
 			}
@@ -330,7 +333,7 @@ func (r *ReceiptForStorage) DecodeRLP(s *rlp.Stream) error {
 		return err
 	}
 	r.CumulativeGasUsed = stored.CumulativeGasUsed
-	r.firstLogIndex = stored.FirstLogIndex
+	r.FirstLogIndex = stored.FirstLogIndex
 
 	//r.Logs = make([]*Log, len(stored.Logs))
 	//for i, log := range stored.Logs {
@@ -370,6 +373,11 @@ func (rs Receipts) EncodeIndex(i int, w *bytes.Buffer) {
 		}
 	case BlobTxType:
 		w.WriteByte(BlobTxType)
+		if err := rlp.Encode(w, data); err != nil {
+			panic(err)
+		}
+	case SetCodeTxType:
+		w.WriteByte(SetCodeTxType)
 		if err := rlp.Encode(w, data); err != nil {
 			panic(err)
 		}
@@ -432,11 +440,23 @@ func (r Receipts) DeriveFields(hash libcommon.Hash, number uint64, txs Transacti
 // data and contextual infos like containing block and transactions.
 func (rl Receipts) DeriveFieldsV3ForSingleReceipt(i int, blockHash libcommon.Hash, blockNum uint64, txn Transaction) (*Receipt, error) {
 	r := rl[i]
-	logIndex := r.firstLogIndex // logIdx is unique within the block and starts from 0
+	var prevReceipt *Receipt
+	if i > 0 {
+		prevReceipt = rl[i-1]
+	}
+	err := r.DeriveFieldsV3ForSingleReceipt(i, blockHash, blockNum, txn, prevReceipt)
+	if err != nil {
+		return nil, err
+	}
+	return r, nil
+}
 
-	sender, ok := txn.cashedSender()
+func (r *Receipt) DeriveFieldsV3ForSingleReceipt(txnIdx int, blockHash libcommon.Hash, blockNum uint64, txn Transaction, prevReceipt *Receipt) error {
+	logIndex := r.FirstLogIndex // logIdx is unique within the block and starts from 0
+
+	sender, ok := txn.cachedSender()
 	if !ok {
-		return nil, fmt.Errorf("tx must have cached sender")
+		return errors.New("tx must have cached sender")
 	}
 
 	blockNumber := new(big.Int).SetUint64(blockNum)
@@ -447,7 +467,7 @@ func (rl Receipts) DeriveFieldsV3ForSingleReceipt(i int, blockHash libcommon.Has
 	// block location fields
 	r.BlockHash = blockHash
 	r.BlockNumber = blockNumber
-	r.TransactionIndex = uint(i)
+	r.TransactionIndex = uint(txnIdx)
 
 	// The contract address can be derived from the transaction itself
 	if txn.GetTo() == nil {
@@ -457,19 +477,26 @@ func (rl Receipts) DeriveFieldsV3ForSingleReceipt(i int, blockHash libcommon.Has
 		r.ContractAddress = crypto.CreateAddress(sender, txn.GetNonce())
 	}
 	// The used gas can be calculated based on previous r
-	if i == 0 {
+	if txnIdx == 0 {
 		r.GasUsed = r.CumulativeGasUsed
 	} else {
-		r.GasUsed = r.CumulativeGasUsed - rl[i-1].CumulativeGasUsed
+		r.GasUsed = r.CumulativeGasUsed - prevReceipt.CumulativeGasUsed
 	}
+
 	// The derived log fields can simply be set from the block and transaction
 	for j := 0; j < len(r.Logs); j++ {
 		r.Logs[j].BlockNumber = blockNum
 		r.Logs[j].BlockHash = blockHash
 		r.Logs[j].TxHash = r.TxHash
-		r.Logs[j].TxIndex = uint(i)
+		r.Logs[j].TxIndex = uint(txnIdx)
 		r.Logs[j].Index = uint(logIndex)
 		logIndex++
 	}
-	return r, nil
+	return nil
+}
+
+// TODO: maybe make it more prettier (only for debug purposes)
+func (r *Receipt) String() string {
+	str := fmt.Sprintf("Receipt of tx %+v", *r)
+	return str
 }

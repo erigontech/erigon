@@ -1,25 +1,41 @@
+// Copyright 2024 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+
 package services
 
 import (
 	"context"
-	"fmt"
+	"errors"
 	"slices"
 	"sync"
 	"time"
 
 	"github.com/Giulio2002/bls"
 
-	"github.com/ledgerwatch/erigon-lib/log/v3"
+	"github.com/erigontech/erigon-lib/log/v3"
 
-	"github.com/ledgerwatch/erigon/cl/beacon/synced_data"
-	"github.com/ledgerwatch/erigon/cl/clparams"
-	"github.com/ledgerwatch/erigon/cl/cltypes"
-	"github.com/ledgerwatch/erigon/cl/fork"
-	"github.com/ledgerwatch/erigon/cl/merkle_tree"
-	"github.com/ledgerwatch/erigon/cl/phase1/core/state"
-	"github.com/ledgerwatch/erigon/cl/phase1/forkchoice"
-	"github.com/ledgerwatch/erigon/cl/pool"
-	"github.com/ledgerwatch/erigon/cl/utils"
+	"github.com/erigontech/erigon/cl/beacon/synced_data"
+	"github.com/erigontech/erigon/cl/clparams"
+	"github.com/erigontech/erigon/cl/cltypes"
+	"github.com/erigontech/erigon/cl/fork"
+	"github.com/erigontech/erigon/cl/merkle_tree"
+	"github.com/erigontech/erigon/cl/phase1/core/state"
+	"github.com/erigontech/erigon/cl/phase1/forkchoice"
+	"github.com/erigontech/erigon/cl/pool"
+	"github.com/erigontech/erigon/cl/utils"
 )
 
 type aggregateJob struct {
@@ -99,11 +115,11 @@ func (a *aggregateAndProofServiceImpl) ProcessMessage(
 	// [REJECT] The committee index is within the expected range -- i.e. index < get_committee_count_per_slot(state, aggregate.data.target.epoch).
 	committeeCountPerSlot := headState.CommitteeCount(target.Epoch())
 	if aggregateData.CommitteeIndex() >= committeeCountPerSlot {
-		return fmt.Errorf("invalid committee index in aggregate and proof")
+		return errors.New("invalid committee index in aggregate and proof")
 	}
 	// [REJECT] The aggregate attestation's epoch matches its target -- i.e. aggregate.data.target.epoch == compute_epoch_at_slot(aggregate.data.slot)
 	if aggregateData.Target().Epoch() != epoch {
-		return fmt.Errorf("invalid target epoch in aggregate and proof")
+		return errors.New("invalid target epoch in aggregate and proof")
 	}
 	committee, err := headState.GetBeaconCommitee(slot, committeeIndex)
 	if err != nil {
@@ -112,14 +128,14 @@ func (a *aggregateAndProofServiceImpl) ProcessMessage(
 
 	// [REJECT] The aggregator's validator index is within the committee -- i.e. aggregate_and_proof.aggregator_index in get_beacon_committee(state, aggregate.data.slot, index).
 	if !slices.Contains(committee, aggregateAndProof.Message.AggregatorIndex) {
-		return fmt.Errorf("committee index not in committee")
+		return errors.New("committee index not in committee")
 	}
 	// [REJECT] The aggregate attestation's target block is an ancestor of the block named in the LMD vote -- i.e. get_checkpoint_block(store, aggregate.data.beacon_block_root, aggregate.data.target.epoch) == aggregate.data.target.root
 	if a.forkchoiceStore.Ancestor(
 		aggregateData.BeaconBlockRoot(),
 		epoch*a.beaconCfg.SlotsPerEpoch,
 	) != target.BlockRoot() {
-		return fmt.Errorf("invalid target block")
+		return errors.New("invalid target block")
 	}
 	if a.test {
 		return nil
@@ -128,7 +144,7 @@ func (a *aggregateAndProofServiceImpl) ProcessMessage(
 	// [REJECT] aggregate_and_proof.selection_proof selects the validator as an aggregator for the slot -- i.e. is_aggregator(state, aggregate.data.slot, index, aggregate_and_proof.selection_proof) returns True.
 	if !state.IsAggregator(a.beaconCfg, uint64(len(committee)), committeeIndex, selectionProof) {
 		log.Warn("receveived aggregate and proof from invalid aggregator")
-		return fmt.Errorf("invalid aggregate and proof")
+		return errors.New("invalid aggregate and proof")
 	}
 	attestingIndicies, err := headState.GetAttestingIndicies(
 		aggregateAndProof.Message.Aggregate.AttestantionData(),
@@ -167,7 +183,7 @@ func verifySignaturesOnAggregate(
 		return err
 	}
 	if len(attestingIndicies) == 0 {
-		return fmt.Errorf("no attesting indicies")
+		return errors.New("no attesting indicies")
 	}
 	// [REJECT] The aggregate_and_proof.selection_proof is a valid signature of the aggregate.data.slot by the validator with index aggregate_and_proof.aggregator_index.
 	if err := verifyAggregateAndProofSignature(s, aggregateAndProof.Message); err != nil {
@@ -204,7 +220,7 @@ func verifyAggregateAndProofSignature(
 		return err
 	}
 	if !valid {
-		return fmt.Errorf("invalid bls signature on aggregate and proof")
+		return errors.New("invalid bls signature on aggregate and proof")
 	}
 	return nil
 }
@@ -230,7 +246,7 @@ func verifyAggregatorSignature(
 		return err
 	}
 	if !valid {
-		return fmt.Errorf("invalid bls signature on aggregate and proof")
+		return errors.New("invalid bls signature on aggregate and proof")
 	}
 	return nil
 }
@@ -250,7 +266,7 @@ func verifyAggregateMessageSignature(
 		return err
 	}
 	if !valid {
-		return fmt.Errorf("invalid aggregate signature")
+		return errors.New("invalid aggregate signature")
 	}
 	return nil
 }

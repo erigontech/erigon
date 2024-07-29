@@ -1,3 +1,19 @@
+// Copyright 2024 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+
 package downloader
 
 import (
@@ -5,7 +21,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"github.com/ledgerwatch/erigon-lib/downloader/downloadercfg"
 	"io"
 	"net/http"
 	"net/url"
@@ -15,20 +30,22 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/erigontech/erigon-lib/downloader/downloadercfg"
+
 	"github.com/hashicorp/go-retryablehttp"
 
 	"github.com/anacrolix/torrent"
 	"github.com/c2h5oh/datasize"
 	"golang.org/x/sync/errgroup"
 
-	"github.com/ledgerwatch/erigon-lib/chain/snapcfg"
-	"github.com/ledgerwatch/erigon-lib/log/v3"
+	"github.com/erigontech/erigon-lib/chain/snapcfg"
+	"github.com/erigontech/erigon-lib/log/v3"
 
 	"github.com/anacrolix/torrent/bencode"
 	"github.com/anacrolix/torrent/metainfo"
 	"github.com/pelletier/go-toml/v2"
 
-	"github.com/ledgerwatch/erigon-lib/downloader/snaptype"
+	"github.com/erigontech/erigon-lib/downloader/snaptype"
 )
 
 // WebSeeds - allow use HTTP-based infrastrucutre to support Bittorrent network
@@ -349,14 +366,6 @@ func (d *WebSeeds) constructListsOfFiles(ctx context.Context, httpProviders []*u
 			d.logger.Debug("[snapshots.webseed] get from HTTP provider", "err", err, "url", webSeedProviderURL.String())
 			continue
 		}
-		// check if we need to prohibit new downloads for some files
-		for name := range manifestResponse {
-			prohibited, err := d.torrentFiles.NewDownloadsAreProhibited(name)
-			if prohibited || err != nil {
-				delete(manifestResponse, name)
-			}
-		}
-
 		listsOfFiles = append(listsOfFiles, manifestResponse)
 	}
 
@@ -366,13 +375,6 @@ func (d *WebSeeds) constructListsOfFiles(ctx context.Context, httpProviders []*u
 		if err != nil { // don't fail on error
 			d.logger.Debug("[snapshots.webseed] get from File provider", "err", err)
 			continue
-		}
-		// check if we need to prohibit new downloads for some files
-		for name := range response {
-			prohibited, err := d.torrentFiles.NewDownloadsAreProhibited(name)
-			if prohibited || err != nil {
-				delete(response, name)
-			}
 		}
 		listsOfFiles = append(listsOfFiles, response)
 	}
@@ -443,8 +445,8 @@ func (d *WebSeeds) ByFileName(name string) (metainfo.UrlList, bool) {
 	return v, ok
 }
 
-var ErrInvalidEtag = fmt.Errorf("invalid etag")
-var ErrEtagNotFound = fmt.Errorf("not found")
+var ErrInvalidEtag = errors.New("invalid etag")
+var ErrEtagNotFound = errors.New("not found")
 
 func (d *WebSeeds) retrieveFileEtag(ctx context.Context, file *url.URL) (string, error) {
 	request, err := http.NewRequestWithContext(ctx, http.MethodHead, file.String(), nil)

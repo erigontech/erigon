@@ -1,3 +1,19 @@
+// Copyright 2024 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+
 package main
 
 import (
@@ -6,12 +22,13 @@ import (
 	"os"
 	"os/exec"
 	"sort"
+	"strconv"
 
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	libcommon "github.com/erigontech/erigon-lib/common"
 
-	"github.com/ledgerwatch/erigon/crypto"
-	"github.com/ledgerwatch/erigon/turbo/trie"
-	"github.com/ledgerwatch/erigon/visual"
+	"github.com/erigontech/erigon/crypto"
+	"github.com/erigontech/erigon/turbo/trie"
+	"github.com/erigontech/erigon/visual"
 )
 
 var pic = flag.String("pic", "", "specifies picture to regenerate")
@@ -45,7 +62,7 @@ func prefixGroups1() {
 	visual.StartGraph(f, false)
 	for i, key := range keys {
 		visual.QuadVertical(f, []byte(key), len(key), fmt.Sprintf("q_%x", key))
-		visual.Circle(f, fmt.Sprintf("e_%d", i), fmt.Sprintf("%d", i), false)
+		visual.Circle(f, fmt.Sprintf("e_%d", i), strconv.Itoa(i), false)
 		fmt.Fprintf(f,
 			`q_%x -> e_%d;
 `, key, i)
@@ -74,7 +91,7 @@ func prefixGroups2() {
 	visual.StartGraph(f, false)
 	for i, key := range keys {
 		visual.QuadVertical(f, []byte(key), len(key), fmt.Sprintf("q_%x", key))
-		visual.Circle(f, fmt.Sprintf("e_%d", i), fmt.Sprintf("%d", i), false)
+		visual.Circle(f, fmt.Sprintf("e_%d", i), strconv.Itoa(i), false)
 		fmt.Fprintf(f,
 			`q_%x -> e_%d;
 `, key, i)
@@ -160,7 +177,7 @@ q_%x->q_%x;
 		}
 		// Display the key
 		visual.QuadVertical(f, []byte(key), len(key), fmt.Sprintf("q_%x", key))
-		visual.Circle(f, fmt.Sprintf("e_%d", i), fmt.Sprintf("%d", i), false)
+		visual.Circle(f, fmt.Sprintf("e_%d", i), strconv.Itoa(i), false)
 		fmt.Fprintf(f,
 			`q_%x -> e_%d;
 `, key, i)
@@ -202,7 +219,7 @@ func prefixGroups4() {
 		for j := 0; j < len(hexKey); j++ {
 			hexKey[j] = key[2*j+1] | (key[2*j] << 4)
 		}
-		vs := fmt.Sprintf("%d", i)
+		vs := strconv.Itoa(i)
 		tr.Update(hexKey, []byte(vs))
 		hightlights = append(hightlights, []byte(key))
 	}
@@ -242,7 +259,7 @@ func prefixGroups5() {
 		for j := 0; j < len(hexKey); j++ {
 			hexKey[j] = key[2*j+1] | (key[2*j] << 4)
 		}
-		vs := fmt.Sprintf("%d", i)
+		vs := strconv.Itoa(i)
 		tr.Update(hexKey, []byte(vs))
 		hightlights = append(hightlights, []byte(key))
 		folds = append(folds, hexKey)
@@ -284,7 +301,7 @@ func prefixGroups6() {
 		for j := 0; j < len(hexKey); j++ {
 			hexKey[j] = key[2*j+1] | (key[2*j] << 4)
 		}
-		vs := fmt.Sprintf("%d", i)
+		vs := strconv.Itoa(i)
 		tr.Update(hexKey, []byte(vs))
 		hightlights = append(hightlights, []byte(key))
 		folds = append(folds, hexKey)
@@ -327,7 +344,7 @@ func prefixGroups7() {
 		for j := 0; j < len(hexKey); j++ {
 			hexKey[j] = key[2*j+1] | (key[2*j] << 4)
 		}
-		vs := fmt.Sprintf("%d", i)
+		vs := strconv.Itoa(i)
 		tr.Update(hexKey, []byte(vs))
 		hightlights = append(hightlights, []byte(key))
 		folds = append(folds, hexKey)
@@ -372,7 +389,7 @@ func prefixGroups8() {
 		for j := 0; j < len(hexKey); j++ {
 			hexKey[j] = key[2*j+1] | (key[2*j] << 4)
 		}
-		vs := fmt.Sprintf("%d", i)
+		vs := strconv.Itoa(i)
 		tr.Update(hexKey, []byte(vs))
 		hightlights = append(hightlights, []byte(key))
 		switch i {

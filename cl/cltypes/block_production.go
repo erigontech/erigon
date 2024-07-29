@@ -1,22 +1,52 @@
+// Copyright 2024 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+
 package cltypes
 
 import (
-	"encoding/json"
+	"errors"
 	"math/big"
 
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon/cl/clparams"
+	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon/cl/clparams"
 )
 
+// BlindOrExecutionBeaconBlock is a union type that can be either a BlindedBeaconBlock or a BeaconBlock, depending on the context.
+// It's a intermediate type used in the block production process.
 type BlindOrExecutionBeaconBlock struct {
-	Slot          uint64         `json:"slot,string"`
-	ProposerIndex uint64         `json:"proposer_index,string"`
-	ParentRoot    libcommon.Hash `json:"parent_root"`
-	StateRoot     libcommon.Hash `json:"state_root"`
-	// BeaconBody or BlindedBeaconBody with json tag "body"
-	BeaconBody        *BeaconBody        `json:"-"`
+	Slot          uint64         `json:"-"`
+	ProposerIndex uint64         `json:"-"`
+	ParentRoot    libcommon.Hash `json:"-"`
+	StateRoot     libcommon.Hash `json:"-"`
+	// Full body
+	BeaconBody *BeaconBody         `json:"-"`
+	KzgProofs  []libcommon.Bytes48 `json:"-"`
+	Blobs      []*Blob             `json:"-"`
+	// Blinded body
 	BlindedBeaconBody *BlindedBeaconBody `json:"-"`
-	ExecutionValue    *big.Int           `json:"-"`
+
+	ExecutionValue *big.Int `json:"-"`
+	Cfg            *clparams.BeaconChainConfig
+}
+
+func (b *BlindOrExecutionBeaconBlock) ToGeneric() GenericBeaconBlock {
+	if b.BlindedBeaconBody != nil {
+		return b.ToBlinded()
+	}
+	return b.ToExecution()
 }
 
 func (b *BlindOrExecutionBeaconBlock) ToBlinded() *BlindedBeaconBlock {
@@ -29,44 +59,35 @@ func (b *BlindOrExecutionBeaconBlock) ToBlinded() *BlindedBeaconBlock {
 	}
 }
 
-func (b *BlindOrExecutionBeaconBlock) ToExecution() *BeaconBlock {
-	return &BeaconBlock{
+func (b *BlindOrExecutionBeaconBlock) ToExecution() *DenebBeaconBlock {
+	beaconBlock := &BeaconBlock{
 		Slot:          b.Slot,
 		ProposerIndex: b.ProposerIndex,
 		ParentRoot:    b.ParentRoot,
 		StateRoot:     b.StateRoot,
 		Body:          b.BeaconBody,
 	}
+	DenebBeaconBlock := NewDenebBeaconBlock(b.Cfg)
+	DenebBeaconBlock.Block = beaconBlock
+	DenebBeaconBlock.Block.SetVersion(b.Version())
+	for _, kzgProof := range b.KzgProofs {
+		proof := KZGProof{}
+		copy(proof[:], kzgProof[:])
+		DenebBeaconBlock.KZGProofs.Append(&proof)
+	}
+	for _, blob := range b.Blobs {
+		DenebBeaconBlock.Blobs.Append(blob)
+	}
+
+	return DenebBeaconBlock
 }
 
 func (b *BlindOrExecutionBeaconBlock) MarshalJSON() ([]byte, error) {
-	// if b.BeaconBody != nil, then marshal BeaconBody
-	// if b.BlindedBeaconBody != nil, then marshal BlindedBeaconBody
-	temp := struct {
-		Slot          uint64         `json:"slot,string"`
-		ProposerIndex uint64         `json:"proposer_index,string"`
-		ParentRoot    libcommon.Hash `json:"parent_root"`
-		StateRoot     libcommon.Hash `json:"state_root"`
-		Body          any            `json:"body"`
-	}{
-		Slot:          b.Slot,
-		ProposerIndex: b.ProposerIndex,
-		ParentRoot:    b.ParentRoot,
-		StateRoot:     b.StateRoot,
-	}
-	if b.BeaconBody != nil {
-		temp.Body = b.BeaconBody
-	} else if b.BlindedBeaconBody != nil {
-		temp.Body = b.BlindedBeaconBody
-	}
-	return json.Marshal(temp)
+	return []byte{}, errors.New("json marshal unsupported for BlindOrExecutionBeaconBlock")
 }
 
 func (b *BlindOrExecutionBeaconBlock) UnmarshalJSON(data []byte) error {
-	if err := json.Unmarshal(data, b); err != nil {
-		return err
-	}
-	return nil
+	return errors.New("json unmarshal unsupported for BlindOrExecutionBeaconBlock")
 }
 
 func (b *BlindOrExecutionBeaconBlock) IsBlinded() bool {

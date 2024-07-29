@@ -1,3 +1,19 @@
+// Copyright 2024 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+
 package bridge
 
 import (
@@ -8,10 +24,10 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon/accounts/abi"
-	"github.com/ledgerwatch/erigon/polygon/heimdall"
-	"github.com/ledgerwatch/erigon/polygon/polygoncommon"
+	"github.com/erigontech/erigon-lib/kv"
+	"github.com/erigontech/erigon/accounts/abi"
+	"github.com/erigontech/erigon/polygon/heimdall"
+	"github.com/erigontech/erigon/polygon/polygoncommon"
 )
 
 /*
@@ -54,7 +70,7 @@ func NewStore(db *polygoncommon.Database) *MdbxStore {
 }
 
 func (s *MdbxStore) Prepare(ctx context.Context) error {
-	err := s.db.OpenOnce(ctx, kv.PolygonBridgeDB, databaseTablesCfg)
+	err := s.db.OpenOnce(ctx)
 	if err != nil {
 		return err
 	}
@@ -111,27 +127,17 @@ func (s *MdbxStore) GetSprintLastEventID(ctx context.Context, lastID uint64, tim
 		return eventID, nil
 	}
 
-	cursor, err := tx.Cursor(kv.BorEvents)
-	if err != nil {
-		return eventID, err
-	}
-	defer cursor.Close()
-
-	kDBLast, _, err := cursor.Last()
-	if err != nil {
-		return eventID, err
-	}
-
 	kLastID := make([]byte, 8)
 	binary.BigEndian.PutUint64(kLastID, lastID)
 
-	_, _, err = cursor.Seek(kLastID)
+	it, err := tx.RangeAscend(kv.BorEvents, kLastID, nil, -1)
 	if err != nil {
 		return eventID, err
 	}
+	defer it.Close()
 
-	for {
-		k, v, err := cursor.Next()
+	for it.HasNext() {
+		_, v, err := it.Next()
 		if err != nil {
 			return eventID, err
 		}
@@ -149,11 +155,9 @@ func (s *MdbxStore) GetSprintLastEventID(ctx context.Context, lastID uint64, tim
 		}
 
 		eventID = event.ID
-
-		if bytes.Equal(k, kDBLast) {
-			return eventID, nil
-		}
 	}
+
+	return eventID, nil
 }
 
 func (s *MdbxStore) AddEvents(ctx context.Context, events []*heimdall.EventRecordWithTime, stateContract abi.ABI) error {

@@ -1,3 +1,19 @@
+// Copyright 2024 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+
 package beaconhttp
 
 import (
@@ -9,9 +25,9 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/ledgerwatch/erigon-lib/log/v3"
-	"github.com/ledgerwatch/erigon-lib/types/ssz"
-	"github.com/ledgerwatch/erigon/cl/phase1/forkchoice/fork_graph"
+	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon-lib/types/ssz"
+	"github.com/erigontech/erigon/cl/phase1/forkchoice/fork_graph"
 )
 
 var _ error = EndpointError{}
@@ -131,7 +147,7 @@ func HandleEndpoint[T any](h EndpointHandler[T]) http.HandlerFunc {
 		case strings.Contains(contentType, "text/event-stream"):
 			return
 		default:
-			http.Error(w, fmt.Sprintf("content type must include application/json, application/octet-stream, or text/event-stream, got %s", contentType), http.StatusBadRequest)
+			http.Error(w, "content type must include application/json, application/octet-stream, or text/event-stream, got "+contentType, http.StatusBadRequest)
 		}
 	})
 }

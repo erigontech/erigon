@@ -1,8 +1,25 @@
+// Copyright 2024 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+
 package service
 
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -13,18 +30,18 @@ import (
 	"time"
 	"unicode"
 
-	"github.com/ledgerwatch/erigon/cl/gossip"
-	"github.com/ledgerwatch/erigon/cl/sentinel"
-	"github.com/ledgerwatch/erigon/cl/sentinel/httpreqresp"
+	"github.com/erigontech/erigon/cl/gossip"
+	"github.com/erigontech/erigon/cl/sentinel"
+	"github.com/erigontech/erigon/cl/sentinel/httpreqresp"
 
 	"github.com/libp2p/go-libp2p/core/peer"
 
-	"github.com/ledgerwatch/erigon-lib/diagnostics"
-	"github.com/ledgerwatch/erigon-lib/gointerfaces"
-	sentinelrpc "github.com/ledgerwatch/erigon-lib/gointerfaces/sentinelproto"
-	"github.com/ledgerwatch/erigon-lib/log/v3"
-	"github.com/ledgerwatch/erigon/cl/cltypes"
-	"github.com/ledgerwatch/erigon/cl/utils"
+	"github.com/erigontech/erigon-lib/diagnostics"
+	"github.com/erigontech/erigon-lib/gointerfaces"
+	sentinelrpc "github.com/erigontech/erigon-lib/gointerfaces/sentinelproto"
+	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/cl/cltypes"
+	"github.com/erigontech/erigon/cl/utils"
 )
 
 const gracePeerCount = 8
@@ -105,17 +122,17 @@ func (s *SentinelServer) PublishGossip(_ context.Context, msg *sentinelrpc.Gossi
 		switch {
 		case gossip.IsTopicBlobSidecar(msg.Name):
 			if msg.SubnetId == nil {
-				return nil, fmt.Errorf("subnetId is required for blob sidecar")
+				return nil, errors.New("subnetId is required for blob sidecar")
 			}
 			subscription = manager.GetMatchingSubscription(gossip.TopicNameBlobSidecar(*msg.SubnetId))
 		case gossip.IsTopicSyncCommittee(msg.Name):
 			if msg.SubnetId == nil {
-				return nil, fmt.Errorf("subnetId is required for sync_committee")
+				return nil, errors.New("subnetId is required for sync_committee")
 			}
 			subscription = manager.GetMatchingSubscription(gossip.TopicNameSyncCommittee(int(*msg.SubnetId)))
 		case gossip.IsTopicBeaconAttestation(msg.Name):
 			if msg.SubnetId == nil {
-				return nil, fmt.Errorf("subnetId is required for beacon attestation")
+				return nil, errors.New("subnetId is required for beacon attestation")
 			}
 			subscription = manager.GetMatchingSubscription(gossip.TopicNameBeaconAttestation(*msg.SubnetId))
 		default:
@@ -352,7 +369,7 @@ func (s *SentinelServer) SetSubscribeExpiry(ctx context.Context, expiryReq *sent
 	)
 	subs := s.sentinel.GossipManager().GetMatchingSubscription(topic)
 	if subs == nil {
-		return nil, fmt.Errorf("no such subscription")
+		return nil, errors.New("no such subscription")
 	}
 	subs.OverwriteSubscriptionExpiry(expiryTime)
 	return &sentinelrpc.EmptyMessage{}, nil

@@ -1,3 +1,19 @@
+// Copyright 2024 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+
 package heimdall
 
 import (
@@ -6,9 +22,10 @@ import (
 	"encoding/json"
 	"sync"
 
-	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon-lib/kv/iter"
-	"github.com/ledgerwatch/erigon/polygon/polygoncommon"
+	"github.com/erigontech/erigon-lib/common/generics"
+	"github.com/erigontech/erigon-lib/kv"
+	"github.com/erigontech/erigon-lib/kv/stream"
+	"github.com/erigontech/erigon/polygon/polygoncommon"
 )
 
 var databaseTablesCfg = kv.TableCfg{
@@ -24,20 +41,15 @@ type EntityStore[TEntity Entity] interface {
 	GetLastEntity(ctx context.Context) (TEntity, error)
 	GetEntity(ctx context.Context, id uint64) (TEntity, error)
 	PutEntity(ctx context.Context, id uint64, entity TEntity) error
-	FindByBlockNum(ctx context.Context, blockNum uint64) (TEntity, error)
-	RangeFromId(ctx context.Context, startId uint64) ([]TEntity, error)
 	RangeFromBlockNum(ctx context.Context, startBlockNum uint64) ([]TEntity, error)
 }
 
 type RangeIndexFactory func(ctx context.Context) (*RangeIndex, error)
 
 type mdbxEntityStore[TEntity Entity] struct {
-	db    *polygoncommon.Database
-	label kv.Label
-	table string
-
-	makeEntity func() TEntity
-
+	db                       *polygoncommon.Database
+	table                    string
+	makeEntity               func() TEntity
 	blockNumToIdIndexFactory RangeIndexFactory
 	blockNumToIdIndex        *RangeIndex
 	prepareOnce              sync.Once
@@ -45,18 +57,14 @@ type mdbxEntityStore[TEntity Entity] struct {
 
 func newMdbxEntityStore[TEntity Entity](
 	db *polygoncommon.Database,
-	label kv.Label,
 	table string,
 	makeEntity func() TEntity,
 	blockNumToIdIndexFactory RangeIndexFactory,
 ) *mdbxEntityStore[TEntity] {
 	return &mdbxEntityStore[TEntity]{
-		db:    db,
-		label: label,
-		table: table,
-
-		makeEntity: makeEntity,
-
+		db:                       db,
+		table:                    table,
+		makeEntity:               makeEntity,
 		blockNumToIdIndexFactory: blockNumToIdIndexFactory,
 	}
 }
@@ -64,7 +72,7 @@ func newMdbxEntityStore[TEntity Entity](
 func (s *mdbxEntityStore[TEntity]) Prepare(ctx context.Context) error {
 	var err error
 	s.prepareOnce.Do(func() {
-		err = s.db.OpenOnce(ctx, s.label, databaseTablesCfg)
+		err = s.db.OpenOnce(ctx)
 		if err != nil {
 			return
 		}
@@ -72,7 +80,7 @@ func (s *mdbxEntityStore[TEntity]) Prepare(ctx context.Context) error {
 		if err != nil {
 			return
 		}
-		iteratorFactory := func(tx kv.Tx) (iter.KV, error) { return tx.Range(s.table, nil, nil) }
+		iteratorFactory := func(tx kv.Tx) (stream.KV, error) { return tx.Range(s.table, nil, nil) }
 		err = buildBlockNumToIdIndex(ctx, s.blockNumToIdIndex, s.db.BeginRo, iteratorFactory, s.entityUnmarshalJSON)
 	})
 	return err
@@ -107,22 +115,14 @@ func (s *mdbxEntityStore[TEntity]) GetLastEntityId(ctx context.Context) (uint64,
 	return entityStoreKeyParse(lastKey), true, nil
 }
 
-// Zero value of any type T
-// https://stackoverflow.com/questions/70585852/return-default-value-for-generic-type)
-// https://go.dev/ref/spec#The_zero_value
-func Zero[T any]() T {
-	var value T
-	return value
-}
-
 func (s *mdbxEntityStore[TEntity]) GetLastEntity(ctx context.Context) (TEntity, error) {
 	id, ok, err := s.GetLastEntityId(ctx)
 	if err != nil {
-		return Zero[TEntity](), err
+		return generics.Zero[TEntity](), err
 	}
 	// not found
 	if !ok {
-		return Zero[TEntity](), nil
+		return generics.Zero[TEntity](), nil
 	}
 	return s.GetEntity(ctx, id)
 }
@@ -140,7 +140,7 @@ func entityStoreKeyParse(key []byte) uint64 {
 func (s *mdbxEntityStore[TEntity]) entityUnmarshalJSON(jsonBytes []byte) (TEntity, error) {
 	entity := s.makeEntity()
 	if err := json.Unmarshal(jsonBytes, entity); err != nil {
-		return Zero[TEntity](), err
+		return generics.Zero[TEntity](), err
 	}
 	return entity, nil
 }
@@ -148,18 +148,18 @@ func (s *mdbxEntityStore[TEntity]) entityUnmarshalJSON(jsonBytes []byte) (TEntit
 func (s *mdbxEntityStore[TEntity]) GetEntity(ctx context.Context, id uint64) (TEntity, error) {
 	tx, err := s.db.BeginRo(ctx)
 	if err != nil {
-		return Zero[TEntity](), err
+		return generics.Zero[TEntity](), err
 	}
 	defer tx.Rollback()
 
 	key := entityStoreKey(id)
 	jsonBytes, err := tx.GetOne(s.table, key[:])
 	if err != nil {
-		return Zero[TEntity](), err
+		return generics.Zero[TEntity](), err
 	}
 	// not found
 	if jsonBytes == nil {
-		return Zero[TEntity](), nil
+		return generics.Zero[TEntity](), nil
 	}
 
 	return s.entityUnmarshalJSON(jsonBytes)
@@ -187,19 +187,6 @@ func (s *mdbxEntityStore[TEntity]) PutEntity(ctx context.Context, id uint64, ent
 
 	// update blockNumToIdIndex
 	return s.blockNumToIdIndex.Put(ctx, entity.BlockNumRange(), id)
-}
-
-func (s *mdbxEntityStore[TEntity]) FindByBlockNum(ctx context.Context, blockNum uint64) (TEntity, error) {
-	id, err := s.blockNumToIdIndex.Lookup(ctx, blockNum)
-	if err != nil {
-		return Zero[TEntity](), err
-	}
-	// not found
-	if id == 0 {
-		return Zero[TEntity](), nil
-	}
-
-	return s.GetEntity(ctx, id)
 }
 
 func (s *mdbxEntityStore[TEntity]) RangeFromId(ctx context.Context, startId uint64) ([]TEntity, error) {
@@ -248,7 +235,7 @@ func buildBlockNumToIdIndex[TEntity Entity](
 	ctx context.Context,
 	index *RangeIndex,
 	txFactory func(context.Context) (kv.Tx, error),
-	iteratorFactory func(tx kv.Tx) (iter.KV, error),
+	iteratorFactory func(tx kv.Tx) (stream.KV, error),
 	entityUnmarshalJSON func([]byte) (TEntity, error),
 ) error {
 	tx, err := txFactory(ctx)

@@ -1,18 +1,21 @@
 // Copyright 2018 The go-ethereum Authors
-// This file is part of the go-ethereum library.
+// (original work)
+// Copyright 2024 The Erigon Authors
+// (modifications)
+// This file is part of Erigon.
 //
-// The go-ethereum library is free software: you can redistribute it and/or modify
+// Erigon is free software: you can redistribute it and/or modify
 // it under the terms of the GNU Lesser General Public License as published by
 // the Free Software Foundation, either version 3 of the License, or
 // (at your option) any later version.
 //
-// The go-ethereum library is distributed in the hope that it will be useful,
+// Erigon is distributed in the hope that it will be useful,
 // but WITHOUT ANY WARRANTY; without even the implied warranty of
 // MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
 // GNU Lesser General Public License for more details.
 //
 // You should have received a copy of the GNU Lesser General Public License
-// along with the go-ethereum library. If not, see <http://www.gnu.org/licenses/>.
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
 package rawdb
 
@@ -28,19 +31,19 @@ import (
 
 	"github.com/gballet/go-verkle"
 
-	"github.com/ledgerwatch/erigon-lib/log/v3"
+	"github.com/erigontech/erigon-lib/log/v3"
 
-	"github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/common/dbg"
-	"github.com/ledgerwatch/erigon-lib/common/hexutility"
-	"github.com/ledgerwatch/erigon-lib/common/length"
-	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon-lib/kv/dbutils"
-	"github.com/ledgerwatch/erigon-lib/kv/rawdbv3"
+	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common/dbg"
+	"github.com/erigontech/erigon-lib/common/hexutility"
+	"github.com/erigontech/erigon-lib/common/length"
+	"github.com/erigontech/erigon-lib/kv"
+	"github.com/erigontech/erigon-lib/kv/dbutils"
+	"github.com/erigontech/erigon-lib/kv/rawdbv3"
 
-	"github.com/ledgerwatch/erigon/core/types"
-	"github.com/ledgerwatch/erigon/ethdb/cbor"
-	"github.com/ledgerwatch/erigon/rlp"
+	"github.com/erigontech/erigon/core/types"
+	"github.com/erigontech/erigon/ethdb/cbor"
+	"github.com/erigontech/erigon/rlp"
 )
 
 // ReadCanonicalHash retrieves the hash assigned to a canonical block number.
@@ -603,7 +606,7 @@ func ReadBody(db kv.Getter, hash common.Hash, number uint64) (*types.Body, uint6
 	if bodyForStorage.TxCount < 2 {
 		panic(fmt.Sprintf("block body hash too few txs amount: %d, %d", number, bodyForStorage.TxCount))
 	}
-	return body, bodyForStorage.BaseTxnID.First(), bodyForStorage.TxCount - 2 // 1 system txn in the begining of block, and 1 at the end
+	return body, bodyForStorage.BaseTxnID.First(), bodyForStorage.TxCount - 2 // 1 system txn in the beginning of block, and 1 at the end
 }
 
 func HasSenders(db kv.Getter, hash common.Hash, number uint64) (bool, error) {
@@ -884,38 +887,6 @@ func WriteReceipts(tx kv.Putter, number uint64, receipts types.Receipts) error {
 
 	if err = tx.Put(kv.Receipts, hexutility.EncodeTs(number), buf.Bytes()); err != nil {
 		return fmt.Errorf("writing receipts for block %d: %w", number, err)
-	}
-	return nil
-}
-
-// AppendReceipts stores all the transaction receipts belonging to a block.
-func AppendReceipts(tx kv.StatelessWriteTx, blockNumber uint64, receipts types.Receipts) error {
-	buf := bytes.NewBuffer(make([]byte, 0, 1024))
-
-	for txId, r := range receipts {
-		if len(r.Logs) == 0 {
-			continue
-		}
-
-		buf.Reset()
-		err := cbor.Marshal(buf, r.Logs)
-		if err != nil {
-			return fmt.Errorf("encode block receipts for block %d: %w", blockNumber, err)
-		}
-
-		if err = tx.Append(kv.Log, dbutils.LogKey(blockNumber, uint32(txId)), buf.Bytes()); err != nil {
-			return fmt.Errorf("writing receipts for block %d: %w", blockNumber, err)
-		}
-	}
-
-	buf.Reset()
-	err := cbor.Marshal(buf, receipts)
-	if err != nil {
-		return fmt.Errorf("encode block receipts for block %d: %w", blockNumber, err)
-	}
-
-	if err = tx.Append(kv.Receipts, hexutility.EncodeTs(blockNumber), buf.Bytes()); err != nil {
-		return fmt.Errorf("writing receipts for block %d: %w", blockNumber, err)
 	}
 	return nil
 }
@@ -1255,7 +1226,7 @@ func Transitioned(db kv.Getter, blockNum uint64, terminalTotalDifficulty *big.In
 		return false, nil
 	}
 
-	if terminalTotalDifficulty.Cmp(common.Big0) == 0 {
+	if terminalTotalDifficulty.Sign() == 0 {
 		return true, nil
 	}
 	header := ReadHeaderByNumber(db, blockNum)
@@ -1263,7 +1234,7 @@ func Transitioned(db kv.Getter, blockNum uint64, terminalTotalDifficulty *big.In
 		return false, nil
 	}
 
-	if header.Difficulty.Cmp(common.Big0) == 0 {
+	if header.Difficulty.Sign() == 0 {
 		return true, nil
 	}
 
@@ -1285,7 +1256,7 @@ func IsPosBlock(db kv.Getter, blockHash common.Hash) (trans bool, err error) {
 		return false, nil
 	}
 
-	return header.Difficulty.Cmp(common.Big0) == 0, nil
+	return header.Difficulty.Sign() == 0, nil
 }
 
 var SnapshotsKey = []byte("snapshots")

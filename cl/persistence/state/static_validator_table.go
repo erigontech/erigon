@@ -1,13 +1,29 @@
+// Copyright 2024 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+
 package state_accessors
 
 import (
-	"fmt"
+	"errors"
 	"io"
 	"sync"
 
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon/cl/cltypes/solid"
-	"github.com/ledgerwatch/erigon/ethdb/cbor"
+	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon/cl/cltypes/solid"
+	"github.com/erigontech/erigon/ethdb/cbor"
 )
 
 // class Validator(Container):
@@ -276,7 +292,7 @@ func (s *StaticValidatorTable) AddValidator(v solid.Validator, validatorIndex, s
 	}
 	s.validatorTable = append(s.validatorTable, NewStaticValidatorFromValidator(v, slot))
 	if validatorIndex != uint64(len(s.validatorTable))-1 {
-		return fmt.Errorf("validator index mismatch")
+		return errors.New("validator index mismatch")
 	}
 	return nil
 }
@@ -288,7 +304,7 @@ func (s *StaticValidatorTable) AddWithdrawalCredentials(validatorIndex, slot uin
 		return nil
 	}
 	if validatorIndex >= uint64(len(s.validatorTable)) {
-		return fmt.Errorf("validator index mismatch")
+		return errors.New("validator index mismatch")
 	}
 	s.validatorTable[validatorIndex].AddWithdrawalCredentials(slot, withdrawalCredentials)
 	return nil
@@ -301,7 +317,7 @@ func (s *StaticValidatorTable) AddSlashed(validatorIndex, slot uint64, slashed b
 		return nil
 	}
 	if validatorIndex >= uint64(len(s.validatorTable)) {
-		return fmt.Errorf("validator index mismatch")
+		return errors.New("validator index mismatch")
 	}
 	s.validatorTable[validatorIndex].AddSlashed(slot, slashed)
 	return nil
@@ -314,7 +330,7 @@ func (s *StaticValidatorTable) AddActivationEligibility(validatorIndex, slot uin
 		return nil
 	}
 	if validatorIndex >= uint64(len(s.validatorTable)) {
-		return fmt.Errorf("validator index mismatch")
+		return errors.New("validator index mismatch")
 	}
 	s.validatorTable[validatorIndex].AddActivationEligibility(slot, activationEligibility)
 	return nil
@@ -327,7 +343,7 @@ func (s *StaticValidatorTable) AddActivationEpoch(validatorIndex, slot uint64, a
 		return nil
 	}
 	if validatorIndex >= uint64(len(s.validatorTable)) {
-		return fmt.Errorf("validator index mismatch")
+		return errors.New("validator index mismatch")
 	}
 	s.validatorTable[validatorIndex].AddActivationEpoch(slot, activationEpoch)
 	return nil
@@ -340,7 +356,7 @@ func (s *StaticValidatorTable) AddExitEpoch(validatorIndex, slot uint64, exitEpo
 		return nil
 	}
 	if validatorIndex >= uint64(len(s.validatorTable)) {
-		return fmt.Errorf("validator index mismatch")
+		return errors.New("validator index mismatch")
 	}
 	s.validatorTable[validatorIndex].AddExitEpoch(slot, exitEpoch)
 	return nil
@@ -353,7 +369,7 @@ func (s *StaticValidatorTable) AddWithdrawableEpoch(validatorIndex, slot uint64,
 		return nil
 	}
 	if validatorIndex >= uint64(len(s.validatorTable)) {
-		return fmt.Errorf("validator index mismatch")
+		return errors.New("validator index mismatch")
 	}
 	s.validatorTable[validatorIndex].AddWithdrawableEpoch(slot, withdrawableEpoch)
 	return nil

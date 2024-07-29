@@ -1,10 +1,27 @@
+// Copyright 2024 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+
 package commitment
 
 import (
 	"encoding/binary"
-	"github.com/ledgerwatch/erigon-lib/common"
-	"github.com/stretchr/testify/require"
 	"testing"
+
+	"github.com/erigontech/erigon-lib/common"
+	"github.com/stretchr/testify/require"
 )
 
 func BenchmarkBranchMerger_Merge(b *testing.B) {
@@ -55,13 +72,13 @@ func BenchmarkBranchData_ReplacePlainKeys(b *testing.B) {
 		if c == nil {
 			continue
 		}
-		if c.apl > 0 {
-			offt, _ := binary.Uvarint(c.apk[:c.apl])
-			b.Logf("%d apk %x, offt %d\n", i, c.apk[:c.apl], offt)
+		if c.accountPlainKeyLen > 0 {
+			offt, _ := binary.Uvarint(c.accountPlainKey[:c.accountPlainKeyLen])
+			b.Logf("%d apk %x, offt %d\n", i, c.accountPlainKey[:c.accountPlainKeyLen], offt)
 		}
-		if c.spl > 0 {
-			offt, _ := binary.Uvarint(c.spk[:c.spl])
-			b.Logf("%d spk %x offt %d\n", i, c.spk[:c.spl], offt)
+		if c.storagePlainKeyLen > 0 {
+			offt, _ := binary.Uvarint(c.storagePlainKey[:c.storagePlainKeyLen])
+			b.Logf("%d spk %x offt %d\n", i, c.storagePlainKey[:c.storagePlainKeyLen], offt)
 		}
 
 	}

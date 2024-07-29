@@ -1,23 +1,27 @@
 // Copyright 2015 The go-ethereum Authors
-// This file is part of the go-ethereum library.
+// (original work)
+// Copyright 2024 The Erigon Authors
+// (modifications)
+// This file is part of Erigon.
 //
-// The go-ethereum library is free software: you can redistribute it and/or modify
+// Erigon is free software: you can redistribute it and/or modify
 // it under the terms of the GNU Lesser General Public License as published by
 // the Free Software Foundation, either version 3 of the License, or
 // (at your option) any later version.
 //
-// The go-ethereum library is distributed in the hope that it will be useful,
+// Erigon is distributed in the hope that it will be useful,
 // but WITHOUT ANY WARRANTY; without even the implied warranty of
 // MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
 // GNU Lesser General Public License for more details.
 //
 // You should have received a copy of the GNU Lesser General Public License
-// along with the go-ethereum library. If not, see <http://www.gnu.org/licenses/>.
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
 package abi
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"reflect"
 	"strings"
@@ -79,7 +83,7 @@ func (arguments Arguments) isTuple() bool {
 func (arguments Arguments) Unpack(data []byte) ([]interface{}, error) {
 	if len(data) == 0 {
 		if len(arguments) != 0 {
-			return nil, fmt.Errorf("abi: attempting to unmarshall an empty string while arguments are expected")
+			return nil, errors.New("abi: attempting to unmarshall an empty string while arguments are expected")
 		}
 		// Nothing to unmarshal, return default variables
 		nonIndexedArgs := arguments.NonIndexed()
@@ -96,11 +100,11 @@ func (arguments Arguments) Unpack(data []byte) ([]interface{}, error) {
 func (arguments Arguments) UnpackIntoMap(v map[string]interface{}, data []byte) error {
 	// Make sure map is not nil
 	if v == nil {
-		return fmt.Errorf("abi: cannot unpack into a nil map")
+		return errors.New("abi: cannot unpack into a nil map")
 	}
 	if len(data) == 0 {
 		if len(arguments) != 0 {
-			return fmt.Errorf("abi: attempting to unmarshall an empty string while arguments are expected")
+			return errors.New("abi: attempting to unmarshall an empty string while arguments are expected")
 		}
 		return nil // Nothing to unmarshal, return
 	}

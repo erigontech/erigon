@@ -1,18 +1,35 @@
+// Copyright 2024 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+
 package services
 
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon/cl/beacon/beaconevents"
-	"github.com/ledgerwatch/erigon/cl/beacon/synced_data"
-	"github.com/ledgerwatch/erigon/cl/clparams"
-	"github.com/ledgerwatch/erigon/cl/cltypes"
-	"github.com/ledgerwatch/erigon/cl/fork"
-	"github.com/ledgerwatch/erigon/cl/pool"
-	"github.com/ledgerwatch/erigon/cl/utils"
+	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon/cl/beacon/beaconevents"
+	"github.com/erigontech/erigon/cl/beacon/synced_data"
+	"github.com/erigontech/erigon/cl/clparams"
+	"github.com/erigontech/erigon/cl/cltypes"
+	"github.com/erigontech/erigon/cl/fork"
+	"github.com/erigontech/erigon/cl/pool"
+	"github.com/erigontech/erigon/cl/utils"
 )
 
 type blsToExecutionChangeService struct {
@@ -68,7 +85,7 @@ func (s *blsToExecutionChangeService) ProcessMessage(ctx context.Context, subnet
 
 	// assert validator.withdrawal_credentials[:1] == BLS_WITHDRAWAL_PREFIX
 	if wc[0] != byte(s.beaconCfg.BLSWithdrawalPrefixByte) {
-		return fmt.Errorf("invalid withdrawal credentials prefix")
+		return errors.New("invalid withdrawal credentials prefix")
 	}
 
 	// assert validator.withdrawal_credentials[1:] == hash(address_change.from_bls_pubkey)[1:]
@@ -76,7 +93,7 @@ func (s *blsToExecutionChangeService) ProcessMessage(ctx context.Context, subnet
 	// Check the validator's withdrawal credentials against the provided message.
 	hashedFrom := utils.Sha256(change.From[:])
 	if !bytes.Equal(hashedFrom[1:], wc[1:]) {
-		return fmt.Errorf("invalid withdrawal credentials hash")
+		return errors.New("invalid withdrawal credentials hash")
 	}
 
 	// assert bls.Verify(address_change.from_bls_pubkey, signing_root, signed_address_change.signature)
@@ -94,7 +111,7 @@ func (s *blsToExecutionChangeService) ProcessMessage(ctx context.Context, subnet
 		return err
 	}
 	if !valid {
-		return fmt.Errorf("invalid signature")
+		return errors.New("invalid signature")
 	}
 
 	// validator.withdrawal_credentials = (

@@ -1,18 +1,21 @@
 // Copyright 2015 The go-ethereum Authors
-// This file is part of the go-ethereum library.
+// (original work)
+// Copyright 2024 The Erigon Authors
+// (modifications)
+// This file is part of Erigon.
 //
-// The go-ethereum library is free software: you can redistribute it and/or modify
+// Erigon is free software: you can redistribute it and/or modify
 // it under the terms of the GNU Lesser General Public License as published by
 // the Free Software Foundation, either version 3 of the License, or
 // (at your option) any later version.
 //
-// The go-ethereum library is distributed in the hope that it will be useful,
+// Erigon is distributed in the hope that it will be useful,
 // but WITHOUT ANY WARRANTY; without even the implied warranty of
 // MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
 // GNU Lesser General Public License for more details.
 //
 // You should have received a copy of the GNU Lesser General Public License
-// along with the go-ethereum library. If not, see <http://www.gnu.org/licenses/>.
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
 package common
 
@@ -21,14 +24,13 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
-	"fmt"
-	"github.com/ledgerwatch/erigon-lib/common/hexutil"
 	"reflect"
 	"strings"
 
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/common/hexutility"
-	"github.com/ledgerwatch/erigon-lib/common/length"
+	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common/hexutil"
+	"github.com/erigontech/erigon-lib/common/hexutility"
+	"github.com/erigontech/erigon-lib/common/length"
 )
 
 // Lengths of hashes and addresses in bytes.
@@ -101,9 +103,9 @@ func (ma *MixedcaseAddress) UnmarshalJSON(input []byte) error {
 // MarshalJSON marshals the original value
 func (ma *MixedcaseAddress) MarshalJSON() ([]byte, error) {
 	if strings.HasPrefix(ma.original, "0x") || strings.HasPrefix(ma.original, "0X") {
-		return json.Marshal(fmt.Sprintf("0x%s", ma.original[2:]))
+		return json.Marshal("0x" + ma.original[2:])
 	}
-	return json.Marshal(fmt.Sprintf("0x%s", ma.original))
+	return json.Marshal("0x" + ma.original)
 }
 
 // Address returns the address
@@ -114,9 +116,9 @@ func (ma *MixedcaseAddress) Address() libcommon.Address {
 // String implements fmt.Stringer
 func (ma *MixedcaseAddress) String() string {
 	if ma.ValidChecksum() {
-		return fmt.Sprintf("%s [chksum ok]", ma.original)
+		return ma.original + " [chksum ok]"
 	}
-	return fmt.Sprintf("%s [chksum INVALID]", ma.original)
+	return ma.original + " [chksum INVALID]"
 }
 
 // ValidChecksum returns true if the address has valid checksum
