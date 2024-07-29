@@ -12,6 +12,7 @@ import (
 	"time"
 
 	lru "github.com/hashicorp/golang-lru/arc/v2"
+	"github.com/ledgerwatch/erigon-lib/common/dbg"
 	"github.com/ledgerwatch/log/v3"
 	"golang.org/x/sync/errgroup"
 
@@ -250,6 +251,7 @@ func BorHeimdallForward(
 			return err
 		}
 		if header == nil {
+			_, _ = cfg.blockReader.HeaderByNumber(dbg.ContextWithDebug(ctx, true), tx, blockNum)
 			return fmt.Errorf("header not found: %d", blockNum)
 		}
 
