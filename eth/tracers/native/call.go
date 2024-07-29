@@ -182,6 +182,10 @@ func (t *callTracer) CaptureState(pc uint64, op vm.OpCode, gas, cost uint64, sco
 	if t.config.OnlyTopCall && depth > 0 {
 		return
 	}
+	// on-error `stackData[stackSize-2]` will contain error data instead of logs.
+	if err != nil {
+		return
+	}
 	// Skip if tracing was interrupted
 	if atomic.LoadUint32(&t.interrupt) > 0 {
 		return
