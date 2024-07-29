@@ -26,22 +26,22 @@ import (
 
 	"github.com/holiman/uint256"
 
-	"github.com/ledgerwatch/erigon-lib/common/dbg"
+	"github.com/erigontech/erigon-lib/common/dbg"
 
-	"github.com/ledgerwatch/erigon-lib/chain"
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon-lib/log/v3"
+	"github.com/erigontech/erigon-lib/chain"
+	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/kv"
+	"github.com/erigontech/erigon-lib/log/v3"
 
-	"github.com/ledgerwatch/erigon/consensus"
-	"github.com/ledgerwatch/erigon/consensus/clique"
-	"github.com/ledgerwatch/erigon/consensus/ethash"
-	"github.com/ledgerwatch/erigon/core/state"
-	"github.com/ledgerwatch/erigon/core/tracing"
-	"github.com/ledgerwatch/erigon/core/types"
-	"github.com/ledgerwatch/erigon/core/vm/evmtypes"
-	"github.com/ledgerwatch/erigon/rlp"
-	"github.com/ledgerwatch/erigon/rpc"
+	"github.com/erigontech/erigon/consensus"
+	"github.com/erigontech/erigon/consensus/clique"
+	"github.com/erigontech/erigon/consensus/ethash"
+	"github.com/erigontech/erigon/core/state"
+	"github.com/erigontech/erigon/core/tracing"
+	"github.com/erigontech/erigon/core/types"
+	"github.com/erigontech/erigon/core/vm/evmtypes"
+	"github.com/erigontech/erigon/rlp"
+	"github.com/erigontech/erigon/rpc"
 )
 
 var DEBUG_LOG_FROM = uint64(dbg.EnvInt("AURA_DEBUG_FROM", 999_999_999))
@@ -251,11 +251,11 @@ func NewAuRa(spec *chain.AuRaConfig, db kv.RwDB) (*AuRa, error) {
 	}
 
 	if _, ok := auraParams.StepDurations[0]; !ok {
-		return nil, fmt.Errorf("authority Round step 0 duration is undefined")
+		return nil, errors.New("authority Round step 0 duration is undefined")
 	}
 	for _, v := range auraParams.StepDurations {
 		if v == 0 {
-			return nil, fmt.Errorf("authority Round step duration cannot be 0")
+			return nil, errors.New("authority Round step duration cannot be 0")
 		}
 	}
 	//shouldTimeout := auraParams.StartStep == nil
@@ -276,7 +276,7 @@ func NewAuRa(spec *chain.AuRaConfig, db kv.RwDB) (*AuRa, error) {
 		dur := auraParams.StepDurations[time]
 		step, t, ok := nextStepTimeDuration(durInfo, time)
 		if !ok {
-			return nil, fmt.Errorf("timestamp overflow")
+			return nil, errors.New("timestamp overflow")
 		}
 		durInfo.TransitionStep = step
 		durInfo.TransitionTimestamp = t
@@ -1059,7 +1059,7 @@ func (c *AuRa) epochSet(chain consensus.ChainHeaderReader, e *NonTransactionalEp
 
 	finalityChecker, epochTransitionNumber, ok := c.EpochManager.zoomToAfter(chain, e, c.cfg.Validators, h.ParentHash, call)
 	if !ok {
-		return nil, 0, fmt.Errorf("unable to zoomToAfter to epoch")
+		return nil, 0, errors.New("unable to zoomToAfter to epoch")
 	}
 	return finalityChecker.signers, epochTransitionNumber, nil
 }

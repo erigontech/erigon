@@ -22,9 +22,9 @@ import (
 
 	"google.golang.org/protobuf/types/known/emptypb"
 
-	"github.com/ledgerwatch/erigon-lib/gointerfaces"
-	sentry "github.com/ledgerwatch/erigon-lib/gointerfaces/sentryproto"
-	"github.com/ledgerwatch/erigon-lib/types"
+	"github.com/erigontech/erigon-lib/gointerfaces"
+	sentry "github.com/erigontech/erigon-lib/gointerfaces/sentryproto"
+	"github.com/erigontech/erigon-lib/types"
 )
 
 type MockSentry struct {

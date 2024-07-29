@@ -19,11 +19,12 @@ package heimdall
 import (
 	"encoding/binary"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"math/big"
 
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/kv"
+	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/kv"
 )
 
 type CheckpointId uint64
@@ -159,7 +160,7 @@ type CheckpointListResponse struct {
 	Result Checkpoints `json:"result"`
 }
 
-var ErrCheckpointNotFound = fmt.Errorf("checkpoint not found")
+var ErrCheckpointNotFound = errors.New("checkpoint not found")
 
 func CheckpointIdAt(tx kv.Tx, block uint64) (CheckpointId, error) {
 	var id uint64

@@ -20,17 +20,17 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/ledgerwatch/erigon-lib/log/v3"
+	"github.com/erigontech/erigon-lib/log/v3"
 
-	"github.com/ledgerwatch/erigon-lib/chain"
-	"github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon/core"
-	"github.com/ledgerwatch/erigon/core/state"
-	"github.com/ledgerwatch/erigon/core/types"
-	"github.com/ledgerwatch/erigon/core/vm"
-	"github.com/ledgerwatch/erigon/eth/ethutils"
-	"github.com/ledgerwatch/erigon/turbo/rpchelper"
+	"github.com/erigontech/erigon-lib/chain"
+	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/kv"
+	"github.com/erigontech/erigon/core"
+	"github.com/erigontech/erigon/core/state"
+	"github.com/erigontech/erigon/core/types"
+	"github.com/erigontech/erigon/core/vm"
+	"github.com/erigontech/erigon/eth/ethutils"
+	"github.com/erigontech/erigon/turbo/rpchelper"
 )
 
 func (api *OtterscanAPIImpl) searchTraceBlock(ctx context.Context, addr common.Address, chainConfig *chain.Config, idx int, bNum uint64, results []*TransactionsWithReceipts) {
@@ -65,6 +65,9 @@ func (api *OtterscanAPIImpl) traceBlock(dbtx kv.Tx, ctx context.Context, blockNu
 	block, err := api.blockWithSenders(ctx, dbtx, blockHash, blockNum)
 	if err != nil {
 		return false, nil, err
+	}
+	if block == nil {
+		return false, nil, nil
 	}
 
 	reader, err := rpchelper.CreateHistoryStateReader(dbtx, blockNum, 0, chainConfig.ChainName)

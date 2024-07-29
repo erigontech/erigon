@@ -36,12 +36,12 @@ import (
 	"sync/atomic"
 	"time"
 
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/log/v3"
+	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/log/v3"
 
-	"github.com/ledgerwatch/erigon/common/debug"
-	"github.com/ledgerwatch/erigon/p2p/enode"
-	"github.com/ledgerwatch/erigon/p2p/netutil"
+	"github.com/erigontech/erigon/common/debug"
+	"github.com/erigontech/erigon/p2p/enode"
+	"github.com/erigontech/erigon/p2p/netutil"
 )
 
 const (
@@ -262,6 +262,7 @@ func (tab *Table) loop() {
 	go tab.doRefresh(refreshDone)
 
 	var minRefreshTimer *time.Timer
+	var minRefreshTimerActive atomic.Bool
 
 	defer func() {
 		if minRefreshTimer != nil {
@@ -296,9 +297,9 @@ loop:
 			}
 		case <-revalidateDone:
 			revalidate.Reset(tab.revalidateInterval)
-			if tab.live() == 0 && len(waiting) == 0 && minRefreshTimer == nil {
+			if tab.live() == 0 && len(waiting) == 0 && minRefreshTimerActive.CompareAndSwap(false, true) {
 				minRefreshTimer = time.AfterFunc(minRefreshInterval, func() {
-					minRefreshTimer = nil
+					defer minRefreshTimerActive.Store(false)
 					tab.net.lookupRandom()
 					tab.refresh()
 				})

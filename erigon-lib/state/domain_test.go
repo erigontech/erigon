@@ -33,21 +33,21 @@ import (
 	"testing"
 	"time"
 
-	datadir2 "github.com/ledgerwatch/erigon-lib/common/datadir"
-	"github.com/ledgerwatch/erigon-lib/kv/order"
-	"github.com/ledgerwatch/erigon-lib/kv/stream"
-	"github.com/ledgerwatch/erigon-lib/log/v3"
-	"github.com/ledgerwatch/erigon-lib/types"
+	datadir2 "github.com/erigontech/erigon-lib/common/datadir"
+	"github.com/erigontech/erigon-lib/kv/order"
+	"github.com/erigontech/erigon-lib/kv/stream"
+	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon-lib/types"
 
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
 	btree2 "github.com/tidwall/btree"
 
-	"github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/common/background"
-	"github.com/ledgerwatch/erigon-lib/common/length"
-	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon-lib/kv/mdbx"
+	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common/background"
+	"github.com/erigontech/erigon-lib/common/length"
+	"github.com/erigontech/erigon-lib/kv"
+	"github.com/erigontech/erigon-lib/kv/mdbx"
 )
 
 func testDbAndDomain(t *testing.T, logger log.Logger) (kv.RwDB, *Domain) {

@@ -18,15 +18,16 @@ package services
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
-	"github.com/ledgerwatch/erigon/cl/beacon/synced_data"
-	"github.com/ledgerwatch/erigon/cl/clparams"
-	"github.com/ledgerwatch/erigon/cl/cltypes"
-	st "github.com/ledgerwatch/erigon/cl/phase1/core/state"
-	"github.com/ledgerwatch/erigon/cl/phase1/core/state/lru"
-	"github.com/ledgerwatch/erigon/cl/pool"
-	"github.com/ledgerwatch/erigon/cl/utils/eth_clock"
+	"github.com/erigontech/erigon/cl/beacon/synced_data"
+	"github.com/erigontech/erigon/cl/clparams"
+	"github.com/erigontech/erigon/cl/cltypes"
+	st "github.com/erigontech/erigon/cl/phase1/core/state"
+	"github.com/erigontech/erigon/cl/phase1/core/state/lru"
+	"github.com/erigontech/erigon/cl/pool"
+	"github.com/erigontech/erigon/cl/utils/eth_clock"
 )
 
 type proposerSlashingService struct {
@@ -83,7 +84,7 @@ func (s *proposerSlashingService) ProcessMessage(ctx context.Context, subnet *ui
 
 	// Verify the headers are different
 	if *h1 == *h2 {
-		return fmt.Errorf("proposee slashing headers are the same")
+		return errors.New("proposee slashing headers are the same")
 	}
 
 	// Verify the proposer is slashable

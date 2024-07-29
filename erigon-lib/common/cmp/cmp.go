@@ -17,11 +17,11 @@
 package cmp
 
 import (
-	"golang.org/x/exp/constraints"
+	"cmp"
 )
 
 // InRange - ensure val is in [min,max] range
-func InRange[T constraints.Ordered](min, max, val T) T {
+func InRange[T cmp.Ordered](min, max, val T) T {
 	if min >= val {
 		return min
 	}
@@ -29,15 +29,4 @@ func InRange[T constraints.Ordered](min, max, val T) T {
 		return max
 	}
 	return val
-}
-
-func Compare[T constraints.Ordered](a, b T) int {
-	switch {
-	case a < b:
-		return -1
-	case a == b:
-		return 0
-	default:
-		return 1
-	}
 }

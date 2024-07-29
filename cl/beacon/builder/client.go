@@ -26,17 +26,17 @@ import (
 	"net/http"
 	"net/url"
 
-	"github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/log/v3"
-	"github.com/ledgerwatch/erigon/cl/clparams"
-	"github.com/ledgerwatch/erigon/cl/cltypes"
-	"github.com/ledgerwatch/erigon/turbo/engineapi/engine_types"
+	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/cl/clparams"
+	"github.com/erigontech/erigon/cl/cltypes"
+	"github.com/erigontech/erigon/turbo/engineapi/engine_types"
 )
 
 var _ BuilderClient = &builderClient{}
 
 var (
-	ErrNoContent = fmt.Errorf("no http content")
+	ErrNoContent = errors.New("no http content")
 )
 
 type builderClient struct {

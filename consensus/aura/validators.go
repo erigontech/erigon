@@ -18,6 +18,7 @@ package aura
 
 import (
 	"container/list"
+	"errors"
 	"fmt"
 	"math"
 	"sort"
@@ -26,18 +27,19 @@ import (
 	"sync/atomic"
 
 	lru "github.com/hashicorp/golang-lru/v2"
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/log/v3"
 
-	"github.com/ledgerwatch/erigon/accounts/abi"
-	"github.com/ledgerwatch/erigon/accounts/abi/bind"
-	"github.com/ledgerwatch/erigon/common"
-	"github.com/ledgerwatch/erigon/consensus"
-	"github.com/ledgerwatch/erigon/consensus/aura/auraabi"
-	"github.com/ledgerwatch/erigon/consensus/aura/aurainterfaces"
-	"github.com/ledgerwatch/erigon/core/types"
-	"github.com/ledgerwatch/erigon/crypto"
-	"github.com/ledgerwatch/erigon/rlp"
+	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/log/v3"
+
+	"github.com/erigontech/erigon/accounts/abi"
+	"github.com/erigontech/erigon/accounts/abi/bind"
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/consensus"
+	"github.com/erigontech/erigon/consensus/aura/auraabi"
+	"github.com/erigontech/erigon/consensus/aura/aurainterfaces"
+	"github.com/erigontech/erigon/core/types"
+	"github.com/erigontech/erigon/crypto"
+	"github.com/erigontech/erigon/rlp"
 )
 
 // nolint
@@ -332,7 +334,7 @@ func (s *SimpleList) defaultCaller(blockHash libcommon.Hash) (Call, error) {
 }
 func (s *SimpleList) getWithCaller(parentHash libcommon.Hash, nonce uint, caller consensus.Call) (libcommon.Address, error) {
 	if len(s.validators) == 0 {
-		return libcommon.Address{}, fmt.Errorf("cannot operate with an empty validator set")
+		return libcommon.Address{}, errors.New("cannot operate with an empty validator set")
 	}
 	return s.validators[nonce%uint(len(s.validators))], nil
 }

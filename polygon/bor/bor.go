@@ -32,42 +32,43 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/erigontech/erigon-lib/common/dbg"
 	lru "github.com/hashicorp/golang-lru/arc/v2"
 	"github.com/holiman/uint256"
 	"github.com/xsleonard/go-merkle"
 	"golang.org/x/crypto/sha3"
 	"golang.org/x/sync/errgroup"
 
-	"github.com/ledgerwatch/erigon-lib/log/v3"
+	"github.com/erigontech/erigon-lib/log/v3"
 
-	"github.com/ledgerwatch/erigon-lib/chain"
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/common/length"
-	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon/common"
-	"github.com/ledgerwatch/erigon/consensus"
-	"github.com/ledgerwatch/erigon/consensus/misc"
-	"github.com/ledgerwatch/erigon/core/rawdb"
-	"github.com/ledgerwatch/erigon/core/state"
-	"github.com/ledgerwatch/erigon/core/tracing"
-	"github.com/ledgerwatch/erigon/core/types"
-	"github.com/ledgerwatch/erigon/core/types/accounts"
-	"github.com/ledgerwatch/erigon/core/vm/evmtypes"
-	"github.com/ledgerwatch/erigon/crypto"
-	"github.com/ledgerwatch/erigon/crypto/cryptopool"
-	"github.com/ledgerwatch/erigon/eth/ethconfig/estimate"
-	"github.com/ledgerwatch/erigon/params"
-	"github.com/ledgerwatch/erigon/polygon/bor/borcfg"
-	"github.com/ledgerwatch/erigon/polygon/bor/finality"
-	"github.com/ledgerwatch/erigon/polygon/bor/finality/flags"
-	"github.com/ledgerwatch/erigon/polygon/bor/finality/whitelist"
-	"github.com/ledgerwatch/erigon/polygon/bor/statefull"
-	"github.com/ledgerwatch/erigon/polygon/bor/valset"
-	"github.com/ledgerwatch/erigon/polygon/bridge"
-	"github.com/ledgerwatch/erigon/polygon/heimdall"
-	"github.com/ledgerwatch/erigon/rlp"
-	"github.com/ledgerwatch/erigon/rpc"
-	"github.com/ledgerwatch/erigon/turbo/services"
+	"github.com/erigontech/erigon-lib/chain"
+	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common/length"
+	"github.com/erigontech/erigon-lib/kv"
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/consensus"
+	"github.com/erigontech/erigon/consensus/misc"
+	"github.com/erigontech/erigon/core/rawdb"
+	"github.com/erigontech/erigon/core/state"
+	"github.com/erigontech/erigon/core/tracing"
+	"github.com/erigontech/erigon/core/types"
+	"github.com/erigontech/erigon/core/types/accounts"
+	"github.com/erigontech/erigon/core/vm/evmtypes"
+	"github.com/erigontech/erigon/crypto"
+	"github.com/erigontech/erigon/crypto/cryptopool"
+	"github.com/erigontech/erigon/eth/ethconfig/estimate"
+	"github.com/erigontech/erigon/params"
+	"github.com/erigontech/erigon/polygon/bor/borcfg"
+	"github.com/erigontech/erigon/polygon/bor/finality"
+	"github.com/erigontech/erigon/polygon/bor/finality/flags"
+	"github.com/erigontech/erigon/polygon/bor/finality/whitelist"
+	"github.com/erigontech/erigon/polygon/bor/statefull"
+	"github.com/erigontech/erigon/polygon/bor/valset"
+	"github.com/erigontech/erigon/polygon/bridge"
+	"github.com/erigontech/erigon/polygon/heimdall"
+	"github.com/erigontech/erigon/rlp"
+	"github.com/erigontech/erigon/rpc"
+	"github.com/erigontech/erigon/turbo/services"
 )
 
 const (
@@ -399,19 +400,19 @@ type rwWrapper struct {
 }
 
 func (w rwWrapper) Update(ctx context.Context, f func(tx kv.RwTx) error) error {
-	return fmt.Errorf("Update not implemented")
+	return errors.New("Update not implemented")
 }
 
 func (w rwWrapper) UpdateNosync(ctx context.Context, f func(tx kv.RwTx) error) error {
-	return fmt.Errorf("UpdateNosync not implemented")
+	return errors.New("UpdateNosync not implemented")
 }
 
 func (w rwWrapper) BeginRw(ctx context.Context) (kv.RwTx, error) {
-	return nil, fmt.Errorf("BeginRw not implemented")
+	return nil, errors.New("BeginRw not implemented")
 }
 
 func (w rwWrapper) BeginRwNosync(ctx context.Context) (kv.RwTx, error) {
-	return nil, fmt.Errorf("BeginRwNosync not implemented")
+	return nil, errors.New("BeginRwNosync not implemented")
 }
 
 // This is used by the rpcdaemon and tests which need read only access to the provided data services
@@ -1471,6 +1472,7 @@ func (c *Bor) getHeaderByNumber(ctx context.Context, tx kv.Tx, number uint64) (*
 		return nil, err
 	}
 	if header == nil {
+		_, _ = c.blockReader.HeaderByNumber(dbg.ContextWithDebug(ctx, true), tx, number)
 		return nil, fmt.Errorf("[bor] header not found: %d", number)
 	}
 	return header, nil
@@ -1606,45 +1608,6 @@ func (c *Bor) getNextHeimdallSpanForTest(
 	heimdallSpan.ChainID = c.chainConfig.ChainID.String()
 
 	return &heimdallSpan, nil
-}
-
-func validatorContains(a []*valset.Validator, x *valset.Validator) (*valset.Validator, bool) {
-	for _, n := range a {
-		if bytes.Equal(n.Address.Bytes(), x.Address.Bytes()) {
-			return n, true
-		}
-	}
-
-	return nil, false
-}
-
-func getUpdatedValidatorSet(oldValidatorSet *valset.ValidatorSet, newVals []*valset.Validator, logger log.Logger) *valset.ValidatorSet {
-	v := oldValidatorSet
-	oldVals := v.Validators
-
-	changes := make([]*valset.Validator, 0, len(oldVals))
-
-	for _, ov := range oldVals {
-		if f, ok := validatorContains(newVals, ov); ok {
-			ov.VotingPower = f.VotingPower
-		} else {
-			ov.VotingPower = 0
-		}
-
-		changes = append(changes, ov)
-	}
-
-	for _, nv := range newVals {
-		if _, ok := validatorContains(changes, nv); !ok {
-			changes = append(changes, nv)
-		}
-	}
-
-	if err := v.UpdateWithChangeSet(changes); err != nil {
-		logger.Error("[bor] Error while updating change set", "error", err)
-	}
-
-	return v
 }
 
 func isSprintStart(number, sprint uint64) bool {

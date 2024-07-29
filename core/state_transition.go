@@ -22,23 +22,24 @@ package core
 import (
 	"bytes"
 	"fmt"
+	"slices"
 
 	"github.com/holiman/uint256"
-	"github.com/ledgerwatch/erigon-lib/log/v3"
 
-	"github.com/ledgerwatch/erigon-lib/common"
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/txpool/txpoolcfg"
-	types2 "github.com/ledgerwatch/erigon-lib/types"
+	"github.com/erigontech/erigon-lib/common"
+	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon-lib/txpool/txpoolcfg"
+	types2 "github.com/erigontech/erigon-lib/types"
 
-	cmath "github.com/ledgerwatch/erigon/common/math"
-	"github.com/ledgerwatch/erigon/common/u256"
-	"github.com/ledgerwatch/erigon/core/tracing"
-	"github.com/ledgerwatch/erigon/core/types"
-	"github.com/ledgerwatch/erigon/core/vm"
-	"github.com/ledgerwatch/erigon/core/vm/evmtypes"
-	"github.com/ledgerwatch/erigon/crypto"
-	"github.com/ledgerwatch/erigon/params"
+	cmath "github.com/erigontech/erigon/common/math"
+	"github.com/erigontech/erigon/common/u256"
+	"github.com/erigontech/erigon/core/tracing"
+	"github.com/erigontech/erigon/core/types"
+	"github.com/erigontech/erigon/core/vm"
+	"github.com/erigontech/erigon/core/vm/evmtypes"
+	"github.com/erigontech/erigon/crypto"
+	"github.com/erigontech/erigon/params"
 )
 
 var emptyCodeHash = crypto.Keccak256Hash(nil)
@@ -345,10 +346,7 @@ func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (*evmtype
 	rules := st.evm.ChainRules()
 	vmConfig := st.evm.Config()
 	isEIP3860 := vmConfig.HasEip3860(rules)
-	accessTuples := make(types2.AccessList, 0)
-	if msg.AccessList() != nil {
-		accessTuples = append(accessTuples, msg.AccessList()...)
-	}
+	accessTuples := slices.Clone[types2.AccessList](msg.AccessList())
 
 	// set code tx
 	auths := msg.Authorizations()
@@ -444,7 +442,7 @@ func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (*evmtype
 		// nonce to calculate the address of the contract that is being created
 		// It does get incremented inside the `Create` call, after the computation
 		// of the contract's address, but before the execution of the code.
-		ret, _, st.gasRemaining, vmerr = st.evm.Create(sender, st.data, st.gasRemaining, st.value)
+		ret, _, st.gasRemaining, vmerr = st.evm.Create(sender, st.data, st.gasRemaining, st.value, bailout)
 	} else {
 		// Increment the nonce for the next transaction
 		st.state.SetNonce(msg.From(), st.state.GetNonce(sender.Address())+1)

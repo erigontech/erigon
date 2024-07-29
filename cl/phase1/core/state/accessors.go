@@ -18,17 +18,18 @@ package state
 
 import (
 	"encoding/binary"
+	"errors"
 	"fmt"
 
 	"github.com/Giulio2002/bls"
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	libcommon "github.com/erigontech/erigon-lib/common"
 
-	"github.com/ledgerwatch/erigon/cl/abstract"
-	"github.com/ledgerwatch/erigon/cl/clparams"
-	"github.com/ledgerwatch/erigon/cl/cltypes"
-	"github.com/ledgerwatch/erigon/cl/cltypes/solid"
-	"github.com/ledgerwatch/erigon/cl/fork"
-	"github.com/ledgerwatch/erigon/cl/utils"
+	"github.com/erigontech/erigon/cl/abstract"
+	"github.com/erigontech/erigon/cl/clparams"
+	"github.com/erigontech/erigon/cl/cltypes"
+	"github.com/erigontech/erigon/cl/cltypes/solid"
+	"github.com/erigontech/erigon/cl/fork"
+	"github.com/erigontech/erigon/cl/utils"
 )
 
 const PreAllocatedRewardsAndPenalties = 8192
@@ -128,7 +129,7 @@ func EligibleValidatorsIndicies(b abstract.BeaconState) (eligibleValidators []ui
 func IsValidIndexedAttestation(b abstract.BeaconStateBasic, att *cltypes.IndexedAttestation) (bool, error) {
 	inds := att.AttestingIndices
 	if inds.Length() == 0 || !solid.IsUint64SortedSet(inds) {
-		return false, fmt.Errorf("isValidIndexedAttestation: attesting indices are not sorted or are null")
+		return false, errors.New("isValidIndexedAttestation: attesting indices are not sorted or are null")
 	}
 
 	pks := make([][]byte, 0, inds.Length())
@@ -159,7 +160,7 @@ func IsValidIndexedAttestation(b abstract.BeaconStateBasic, att *cltypes.Indexed
 		return false, fmt.Errorf("error while validating signature: %v", err)
 	}
 	if !valid {
-		return false, fmt.Errorf("invalid aggregate signature")
+		return false, errors.New("invalid aggregate signature")
 	}
 	return true, nil
 }
@@ -174,7 +175,7 @@ func GetUnslashedParticipatingIndices(b abstract.BeaconState, flagIndex int, epo
 	case PreviousEpoch(b):
 		participation = b.EpochParticipation(false)
 	default:
-		return nil, fmt.Errorf("getUnslashedParticipatingIndices: only epoch and previous epoch can be used")
+		return nil, errors.New("getUnslashedParticipatingIndices: only epoch and previous epoch can be used")
 	}
 	// Iterate over all validators and include the active ones that have flag_index enabled and are not slashed.
 	b.ForEachValidator(func(validator solid.Validator, i, total int) bool {

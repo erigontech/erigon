@@ -66,7 +66,7 @@ type typekey struct {
 
 type decoder func(*Stream, reflect.Value) error
 
-type writer func(reflect.Value, *encbuf) error
+type writer func(reflect.Value, *encBuffer) error
 
 func cachedDecoder(typ reflect.Type) (decoder, error) {
 	info := cachedTypeInfo(typ, tags{})

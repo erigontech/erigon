@@ -18,8 +18,10 @@ package diagnostics
 
 import (
 	"context"
+	"encoding/json"
+	"io"
 
-	"github.com/ledgerwatch/erigon-lib/log/v3"
+	"github.com/erigontech/erigon-lib/log/v3"
 )
 
 func (d *DiagnosticClient) setupHeadersDiagnostics(rootCtx context.Context) {
@@ -29,8 +31,12 @@ func (d *DiagnosticClient) setupHeadersDiagnostics(rootCtx context.Context) {
 	d.runProcessedListener(rootCtx)
 }
 
-func (d *DiagnosticClient) GetHeaders() Headers {
-	return d.headers
+func (d *DiagnosticClient) HeadersJson(w io.Writer) {
+	d.headerMutex.Lock()
+	defer d.headerMutex.Unlock()
+	if err := json.NewEncoder(w).Encode(d.headers); err != nil {
+		log.Debug("[diagnostics] HeadersJson", "err", err)
+	}
 }
 
 func (d *DiagnosticClient) runHeadersWaitingListener(rootCtx context.Context) {

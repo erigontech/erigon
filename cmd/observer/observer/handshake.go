@@ -25,17 +25,17 @@ import (
 	"net"
 	"time"
 
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/direct"
+	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/direct"
 
-	"github.com/ledgerwatch/erigon/common"
-	"github.com/ledgerwatch/erigon/core/forkid"
-	"github.com/ledgerwatch/erigon/crypto"
-	"github.com/ledgerwatch/erigon/eth/protocols/eth"
-	"github.com/ledgerwatch/erigon/p2p"
-	"github.com/ledgerwatch/erigon/p2p/rlpx"
-	"github.com/ledgerwatch/erigon/params"
-	"github.com/ledgerwatch/erigon/rlp"
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/core/forkid"
+	"github.com/erigontech/erigon/crypto"
+	"github.com/erigontech/erigon/eth/protocols/eth"
+	"github.com/erigontech/erigon/p2p"
+	"github.com/erigontech/erigon/p2p/rlpx"
+	"github.com/erigontech/erigon/params"
+	"github.com/erigontech/erigon/rlp"
 )
 
 // https://github.com/ethereum/devp2p/blob/master/rlpx.md#p2p-capability

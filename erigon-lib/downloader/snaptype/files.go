@@ -17,6 +17,7 @@
 package snaptype
 
 import (
+	"cmp"
 	"encoding/hex"
 	"errors"
 	"fmt"
@@ -29,12 +30,11 @@ import (
 
 	"github.com/anacrolix/torrent/metainfo"
 
-	"github.com/ledgerwatch/erigon-lib/common/cmp"
-	"github.com/ledgerwatch/erigon-lib/common/dir"
+	"github.com/erigontech/erigon-lib/common/dir"
 )
 
 var (
-	ErrInvalidFileName = fmt.Errorf("invalid compressed file name")
+	ErrInvalidFileName = errors.New("invalid compressed file name")
 )
 
 func FileName(version Version, from, to uint64, fileType string) string {

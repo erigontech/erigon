@@ -39,16 +39,17 @@ import (
 	"crypto/elliptic"
 	"crypto/sha256"
 	"crypto/sha512"
+	"errors"
 	"fmt"
 	"hash"
 
-	ethcrypto "github.com/ledgerwatch/erigon/crypto"
+	ethcrypto "github.com/erigontech/erigon/crypto"
 )
 
 var (
 	DefaultCurve                  = ethcrypto.S256()
-	ErrUnsupportedECDHAlgorithm   = fmt.Errorf("ecies: unsupported ECDH algorithm")
-	ErrUnsupportedECIESParameters = fmt.Errorf("ecies: unsupported ECIES parameters")
+	ErrUnsupportedECDHAlgorithm   = errors.New("ecies: unsupported ECDH algorithm")
+	ErrUnsupportedECIESParameters = errors.New("ecies: unsupported ECIES parameters")
 	ErrInvalidKeyLen              = fmt.Errorf("ecies: invalid key size (> %d) in ECIESParams", maxKeyLen)
 )
 

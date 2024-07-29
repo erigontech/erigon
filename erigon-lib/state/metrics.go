@@ -16,7 +16,7 @@
 
 package state
 
-import "github.com/ledgerwatch/erigon-lib/metrics"
+import "github.com/erigontech/erigon-lib/metrics"
 
 var (
 	//LatestStateReadWarm          = metrics.GetOrCreateSummary(`latest_state_read{type="warm",found="yes"}`)  //nolint
@@ -56,4 +56,5 @@ var (
 	mxFlushTook            = metrics.GetOrCreateSummary("domain_flush_took")
 	mxCommitmentRunning    = metrics.GetOrCreateGauge("domain_running_commitment")
 	mxCommitmentTook       = metrics.GetOrCreateSummary("domain_commitment_took")
+	mxFileReadTime         = metrics.GetOrCreateHistogram("domain_file_read_time")
 )

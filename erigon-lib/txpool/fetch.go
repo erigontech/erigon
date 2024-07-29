@@ -27,15 +27,15 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/protobuf/types/known/emptypb"
 
-	"github.com/ledgerwatch/erigon-lib/common/dbg"
-	"github.com/ledgerwatch/erigon-lib/direct"
-	"github.com/ledgerwatch/erigon-lib/gointerfaces/grpcutil"
-	remote "github.com/ledgerwatch/erigon-lib/gointerfaces/remoteproto"
-	sentry "github.com/ledgerwatch/erigon-lib/gointerfaces/sentryproto"
-	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon-lib/log/v3"
-	"github.com/ledgerwatch/erigon-lib/rlp"
-	types2 "github.com/ledgerwatch/erigon-lib/types"
+	"github.com/erigontech/erigon-lib/common/dbg"
+	"github.com/erigontech/erigon-lib/direct"
+	"github.com/erigontech/erigon-lib/gointerfaces/grpcutil"
+	remote "github.com/erigontech/erigon-lib/gointerfaces/remoteproto"
+	sentry "github.com/erigontech/erigon-lib/gointerfaces/sentryproto"
+	"github.com/erigontech/erigon-lib/kv"
+	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon-lib/rlp"
+	types2 "github.com/erigontech/erigon-lib/types"
 )
 
 // Fetch connects to sentry and implements eth/66 protocol regarding the transaction
@@ -146,7 +146,6 @@ func (f *Fetch) receiveMessageLoop(sentryClient sentry.SentryClient) {
 			f.logger.Warn("[txpool.recvMessage] sentry not ready yet", "err", err)
 			continue
 		}
-
 		if err := f.receiveMessage(f.ctx, sentryClient); err != nil {
 			if grpcutil.IsRetryLater(err) || grpcutil.IsEndOfStream(err) {
 				time.Sleep(3 * time.Second)
@@ -175,7 +174,6 @@ func (f *Fetch) receiveMessage(ctx context.Context, sentryClient sentry.SentryCl
 		}
 		return err
 	}
-
 	var req *sentry.InboundMessage
 	for req, err = stream.Recv(); ; req, err = stream.Recv() {
 		if err != nil {
@@ -184,17 +182,17 @@ func (f *Fetch) receiveMessage(ctx context.Context, sentryClient sentry.SentryCl
 				return ctx.Err()
 			default:
 			}
-			return err
+			return fmt.Errorf("txpool.receiveMessage: %w", err)
 		}
 		if req == nil {
 			return nil
 		}
-		if err := f.handleInboundMessage(streamCtx, req, sentryClient); err != nil {
+		if err = f.handleInboundMessage(streamCtx, req, sentryClient); err != nil {
 			if grpcutil.IsRetryLater(err) || grpcutil.IsEndOfStream(err) {
 				time.Sleep(3 * time.Second)
 				continue
 			}
-			f.logger.Debug("[txpool.fetch] Handling incoming message", "msg", req.Id.String(), "err", err)
+			f.logger.Debug("[txpool.fetch] Handling incoming message", "reqID", req.Id.String(), "err", err)
 		}
 		if f.wg != nil {
 			f.wg.Done()

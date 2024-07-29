@@ -20,23 +20,24 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"math"
 	"math/big"
 
-	"github.com/ledgerwatch/erigon-lib/chain/networkname"
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon/accounts/abi"
-	"github.com/ledgerwatch/erigon/accounts/abi/bind"
-	"github.com/ledgerwatch/erigon/cmd/devnet/accounts"
-	"github.com/ledgerwatch/erigon/cmd/devnet/blocks"
-	"github.com/ledgerwatch/erigon/cmd/devnet/contracts"
-	"github.com/ledgerwatch/erigon/cmd/devnet/devnet"
-	"github.com/ledgerwatch/erigon/cmd/devnet/requests"
-	"github.com/ledgerwatch/erigon/cmd/devnet/scenarios"
-	"github.com/ledgerwatch/erigon/cmd/devnet/services"
-	"github.com/ledgerwatch/erigon/rpc"
-	"github.com/ledgerwatch/erigon/turbo/adapter/ethapi"
+	"github.com/erigontech/erigon-lib/chain/networkname"
+	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon/accounts/abi"
+	"github.com/erigontech/erigon/accounts/abi/bind"
+	"github.com/erigontech/erigon/cmd/devnet/accounts"
+	"github.com/erigontech/erigon/cmd/devnet/blocks"
+	"github.com/erigontech/erigon/cmd/devnet/contracts"
+	"github.com/erigontech/erigon/cmd/devnet/devnet"
+	"github.com/erigontech/erigon/cmd/devnet/requests"
+	"github.com/erigontech/erigon/cmd/devnet/scenarios"
+	"github.com/erigontech/erigon/cmd/devnet/services"
+	"github.com/erigontech/erigon/rpc"
+	"github.com/erigontech/erigon/turbo/adapter/ethapi"
 )
 
 func init() {
@@ -132,7 +133,7 @@ func GenerateSyncEvents(ctx context.Context, senderName string, numberOfTransfer
 			}
 
 			if !sendConfirmed {
-				return fmt.Errorf("No post sync log received")
+				return errors.New("No post sync log received")
 			}
 
 			auth.Nonce = (&big.Int{}).Add(auth.Nonce, big.NewInt(1))

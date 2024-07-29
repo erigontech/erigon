@@ -18,21 +18,26 @@ package diagnostics
 
 import (
 	"context"
+	"encoding/json"
+	"io"
 
-	"github.com/ledgerwatch/erigon-lib/log/v3"
+	"github.com/erigontech/erigon-lib/log/v3"
 )
 
 func (d *DiagnosticClient) setupResourcesUsageDiagnostics(rootCtx context.Context) {
 	d.runMemoryStatsListener(rootCtx)
 }
 
-func (d *DiagnosticClient) GetResourcesUsage() ResourcesUsage {
+func (d *DiagnosticClient) ResourcesUsageJson(w io.Writer) {
 	d.resourcesUsageMutex.Lock()
 	defer d.resourcesUsageMutex.Unlock()
 
 	returnObj := d.resourcesUsage
 	d.resourcesUsage = ResourcesUsage{}
-	return returnObj
+
+	if err := json.NewEncoder(w).Encode(returnObj); err != nil {
+		log.Debug("[diagnostics] ResourcesUsageJson", "err", err)
+	}
 }
 
 func (d *DiagnosticClient) runMemoryStatsListener(rootCtx context.Context) {

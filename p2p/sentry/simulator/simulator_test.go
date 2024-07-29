@@ -23,14 +23,14 @@ import (
 	"context"
 	"testing"
 
-	"github.com/ledgerwatch/erigon-lib/log/v3"
+	"github.com/erigontech/erigon-lib/log/v3"
 
-	"github.com/ledgerwatch/erigon-lib/direct"
-	sentry "github.com/ledgerwatch/erigon-lib/gointerfaces/sentryproto"
-	sentry_if "github.com/ledgerwatch/erigon-lib/gointerfaces/sentryproto"
-	"github.com/ledgerwatch/erigon/eth/protocols/eth"
-	"github.com/ledgerwatch/erigon/p2p/sentry/simulator"
-	"github.com/ledgerwatch/erigon/rlp"
+	"github.com/erigontech/erigon-lib/direct"
+	sentry "github.com/erigontech/erigon-lib/gointerfaces/sentryproto"
+	sentry_if "github.com/erigontech/erigon-lib/gointerfaces/sentryproto"
+	"github.com/erigontech/erigon/eth/protocols/eth"
+	"github.com/erigontech/erigon/p2p/sentry/simulator"
+	"github.com/erigontech/erigon/rlp"
 )
 
 func TestSimulatorStart(t *testing.T) {

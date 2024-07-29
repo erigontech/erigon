@@ -19,14 +19,15 @@ package historyv2
 import (
 	"bytes"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"reflect"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 
-	"github.com/ledgerwatch/erigon-lib/common/hexutility"
-	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/erigontech/erigon-lib/common/hexutility"
+	"github.com/erigontech/erigon-lib/kv"
 )
 
 func TestEncodingAccount(t *testing.T) {
@@ -36,7 +37,7 @@ func TestEncodingAccount(t *testing.T) {
 	ch := m.New()
 	// empty StorageChangeSset first
 	err := m.Encode(1, ch, func(k, v []byte) error {
-		return fmt.Errorf("must never call")
+		return errors.New("must never call")
 	})
 	assert.NoError(t, err)
 

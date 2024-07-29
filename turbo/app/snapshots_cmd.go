@@ -38,41 +38,41 @@ import (
 
 	"golang.org/x/sync/semaphore"
 
-	"github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/common/datadir"
-	"github.com/ledgerwatch/erigon-lib/common/dbg"
-	"github.com/ledgerwatch/erigon-lib/common/dir"
-	"github.com/ledgerwatch/erigon-lib/common/disk"
-	"github.com/ledgerwatch/erigon-lib/common/mem"
-	"github.com/ledgerwatch/erigon-lib/config3"
-	"github.com/ledgerwatch/erigon-lib/downloader"
-	"github.com/ledgerwatch/erigon-lib/downloader/snaptype"
-	"github.com/ledgerwatch/erigon-lib/etl"
-	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon-lib/kv/mdbx"
-	"github.com/ledgerwatch/erigon-lib/kv/rawdbv3"
-	"github.com/ledgerwatch/erigon-lib/kv/temporal"
-	"github.com/ledgerwatch/erigon-lib/log/v3"
-	"github.com/ledgerwatch/erigon-lib/metrics"
-	"github.com/ledgerwatch/erigon-lib/seg"
-	libstate "github.com/ledgerwatch/erigon-lib/state"
-	"github.com/ledgerwatch/erigon/cl/clparams"
-	"github.com/ledgerwatch/erigon/cmd/hack/tool/fromdb"
-	"github.com/ledgerwatch/erigon/cmd/utils"
-	"github.com/ledgerwatch/erigon/core/rawdb"
-	"github.com/ledgerwatch/erigon/core/rawdb/blockio"
-	coresnaptype "github.com/ledgerwatch/erigon/core/snaptype"
-	"github.com/ledgerwatch/erigon/diagnostics"
-	"github.com/ledgerwatch/erigon/eth/ethconfig"
-	"github.com/ledgerwatch/erigon/eth/ethconfig/estimate"
-	"github.com/ledgerwatch/erigon/eth/integrity"
-	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
-	"github.com/ledgerwatch/erigon/params"
-	erigoncli "github.com/ledgerwatch/erigon/turbo/cli"
-	"github.com/ledgerwatch/erigon/turbo/debug"
-	"github.com/ledgerwatch/erigon/turbo/logging"
-	"github.com/ledgerwatch/erigon/turbo/node"
-	"github.com/ledgerwatch/erigon/turbo/snapshotsync/freezeblocks"
+	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common/datadir"
+	"github.com/erigontech/erigon-lib/common/dbg"
+	"github.com/erigontech/erigon-lib/common/dir"
+	"github.com/erigontech/erigon-lib/common/disk"
+	"github.com/erigontech/erigon-lib/common/mem"
+	"github.com/erigontech/erigon-lib/config3"
+	"github.com/erigontech/erigon-lib/downloader"
+	"github.com/erigontech/erigon-lib/downloader/snaptype"
+	"github.com/erigontech/erigon-lib/etl"
+	"github.com/erigontech/erigon-lib/kv"
+	"github.com/erigontech/erigon-lib/kv/mdbx"
+	"github.com/erigontech/erigon-lib/kv/rawdbv3"
+	"github.com/erigontech/erigon-lib/kv/temporal"
+	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon-lib/metrics"
+	"github.com/erigontech/erigon-lib/seg"
+	libstate "github.com/erigontech/erigon-lib/state"
+	"github.com/erigontech/erigon/cl/clparams"
+	"github.com/erigontech/erigon/cmd/hack/tool/fromdb"
+	"github.com/erigontech/erigon/cmd/utils"
+	"github.com/erigontech/erigon/core/rawdb"
+	"github.com/erigontech/erigon/core/rawdb/blockio"
+	coresnaptype "github.com/erigontech/erigon/core/snaptype"
+	"github.com/erigontech/erigon/diagnostics"
+	"github.com/erigontech/erigon/eth/ethconfig"
+	"github.com/erigontech/erigon/eth/ethconfig/estimate"
+	"github.com/erigontech/erigon/eth/integrity"
+	"github.com/erigontech/erigon/eth/stagedsync/stages"
+	"github.com/erigontech/erigon/params"
+	erigoncli "github.com/erigontech/erigon/turbo/cli"
+	"github.com/erigontech/erigon/turbo/debug"
+	"github.com/erigontech/erigon/turbo/logging"
+	"github.com/erigontech/erigon/turbo/node"
+	"github.com/erigontech/erigon/turbo/snapshotsync/freezeblocks"
 )
 
 func joinFlags(lists ...[]cli.Flag) (res []cli.Flag) {
@@ -585,7 +585,7 @@ func doDecompressSpeed(cliCtx *cli.Context) error {
 	}
 	args := cliCtx.Args()
 	if args.Len() < 1 {
-		return fmt.Errorf("expecting file path as a first argument")
+		return errors.New("expecting file path as a first argument")
 	}
 	f := args.First()
 
@@ -758,7 +758,7 @@ func doUncompress(cliCtx *cli.Context) error {
 
 	args := cliCtx.Args()
 	if args.Len() < 1 {
-		return fmt.Errorf("expecting file path as a first argument")
+		return errors.New("expecting file path as a first argument")
 	}
 	f := args.First()
 
@@ -811,7 +811,7 @@ func doCompress(cliCtx *cli.Context) error {
 
 	args := cliCtx.Args()
 	if args.Len() < 1 {
-		return fmt.Errorf("expecting file path as a first argument")
+		return errors.New("expecting file path as a first argument")
 	}
 	f := args.First()
 	dirs := datadir.New(cliCtx.String(utils.DataDirFlag.Name))

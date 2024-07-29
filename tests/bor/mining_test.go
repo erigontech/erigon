@@ -12,23 +12,23 @@ import (
 	"time"
 
 	"github.com/holiman/uint256"
-	"github.com/ledgerwatch/erigon-lib/chain/networkname"
-	"github.com/ledgerwatch/erigon-lib/config3"
-	"github.com/ledgerwatch/erigon-lib/log/v3"
-	"github.com/ledgerwatch/erigon/common"
-	"github.com/ledgerwatch/erigon/common/fdlimit"
-	"github.com/ledgerwatch/erigon/core/types"
-	"github.com/ledgerwatch/erigon/crypto"
-	"github.com/ledgerwatch/erigon/eth"
-	"github.com/ledgerwatch/erigon/node"
-	"github.com/ledgerwatch/erigon/params"
-	"github.com/ledgerwatch/erigon/tests/bor/helper"
 
-	"github.com/ledgerwatch/erigon-lib/gointerfaces"
+	"github.com/erigontech/erigon-lib/chain/networkname"
+	"github.com/erigontech/erigon-lib/config3"
+	"github.com/erigontech/erigon-lib/gointerfaces"
+	remote "github.com/erigontech/erigon-lib/gointerfaces/remoteproto"
+	txpool "github.com/erigontech/erigon-lib/gointerfaces/txpoolproto"
+	txpool_proto "github.com/erigontech/erigon-lib/gointerfaces/txpoolproto"
+	"github.com/erigontech/erigon-lib/log/v3"
 
-	remote "github.com/ledgerwatch/erigon-lib/gointerfaces/remoteproto"
-	txpool "github.com/ledgerwatch/erigon-lib/gointerfaces/txpoolproto"
-	txpool_proto "github.com/ledgerwatch/erigon-lib/gointerfaces/txpoolproto"
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/fdlimit"
+	"github.com/erigontech/erigon/core/types"
+	"github.com/erigontech/erigon/crypto"
+	"github.com/erigontech/erigon/eth"
+	"github.com/erigontech/erigon/node"
+	"github.com/erigontech/erigon/params"
+	"github.com/erigontech/erigon/tests/bor/helper"
 )
 
 const (
@@ -53,7 +53,7 @@ var (
 )
 
 // CGO_CFLAGS="-D__BLST_PORTABLE__" : flag required for go test.
-// Example : CGO_CFLAGS="-D__BLST_PORTABLE__" go test -run ^TestMiningBenchmark$ github.com/ledgerwatch/erigon/tests/bor -v -count=1
+// Example : CGO_CFLAGS="-D__BLST_PORTABLE__" go test -run ^TestMiningBenchmark$ github.com/erigontech/erigon/tests/bor -v -count=1
 // In TestMiningBenchmark, we will test the mining performance. We will initialize a single node devnet and fire 5000 txs. We will measure the time it takes to include all the txs. This can be made more advcanced by increasing blockLimit and txsInTxpool.
 func TestMiningBenchmark(t *testing.T) {
 	if config3.EnableHistoryV4InTest {

@@ -20,15 +20,17 @@ import (
 	"bufio"
 	"bytes"
 	"encoding/binary"
+	"errors"
 	"fmt"
 	"io"
 	"sync"
 
 	"github.com/c2h5oh/datasize"
 	"github.com/golang/snappy"
-	"github.com/ledgerwatch/erigon-lib/types/ssz"
-	"github.com/ledgerwatch/erigon/cl/clparams"
-	"github.com/ledgerwatch/erigon/cl/utils/eth_clock"
+
+	"github.com/erigontech/erigon-lib/types/ssz"
+	"github.com/erigontech/erigon/cl/clparams"
+	"github.com/erigontech/erigon/cl/utils/eth_clock"
 )
 
 var writerPool = sync.Pool{
@@ -87,7 +89,7 @@ func DecodeAndReadNoForkDigest(r io.Reader, val ssz.EncodableSSZ, version clpara
 		return fmt.Errorf("unable to read varint from message prefix: %v", err)
 	}
 	if encodedLn > uint64(16*datasize.MB) {
-		return fmt.Errorf("payload too big")
+		return errors.New("payload too big")
 	}
 
 	sr := snappy.NewReader(r)

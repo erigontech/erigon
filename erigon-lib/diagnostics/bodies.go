@@ -18,8 +18,10 @@ package diagnostics
 
 import (
 	"context"
+	"encoding/json"
+	"io"
 
-	"github.com/ledgerwatch/erigon-lib/log/v3"
+	"github.com/erigontech/erigon-lib/log/v3"
 )
 
 func (d *DiagnosticClient) setupBodiesDiagnostics(rootCtx context.Context) {
@@ -109,8 +111,10 @@ func (d *DiagnosticClient) runBodiesProcessingListener(rootCtx context.Context) 
 	}()
 }
 
-func (d *DiagnosticClient) GetBodiesInfo() BodiesInfo {
+func (d *DiagnosticClient) BodiesInfoJson(w io.Writer) {
 	d.bodiesMutex.Lock()
 	defer d.bodiesMutex.Unlock()
-	return d.bodies
+	if err := json.NewEncoder(w).Encode(d.bodies); err != nil {
+		log.Debug("[diagnostics] BodiesInfoJson", "err", err)
+	}
 }

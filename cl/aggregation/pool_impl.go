@@ -18,19 +18,19 @@ package aggregation
 
 import (
 	"context"
-	"fmt"
+	"errors"
 	"sync"
 	"time"
 
 	"github.com/Giulio2002/bls"
-	"github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon/cl/clparams"
-	"github.com/ledgerwatch/erigon/cl/cltypes/solid"
-	"github.com/ledgerwatch/erigon/cl/utils"
-	"github.com/ledgerwatch/erigon/cl/utils/eth_clock"
+	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon/cl/clparams"
+	"github.com/erigontech/erigon/cl/cltypes/solid"
+	"github.com/erigontech/erigon/cl/utils"
+	"github.com/erigontech/erigon/cl/utils/eth_clock"
 )
 
-var ErrIsSuperset = fmt.Errorf("attestation is superset of existing attestation")
+var ErrIsSuperset = errors.New("attestation is superset of existing attestation")
 
 var (
 	blsAggregate = bls.AggregateSignatures
@@ -89,7 +89,7 @@ func (p *aggregationPoolImpl) AddAttestation(inAtt *solid.Attestation) error {
 		return err
 	}
 	if len(merged) != 96 {
-		return fmt.Errorf("merged signature is too long")
+		return errors.New("merged signature is too long")
 	}
 	var mergedSig [96]byte
 	copy(mergedSig[:], merged)

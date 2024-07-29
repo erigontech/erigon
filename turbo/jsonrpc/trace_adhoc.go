@@ -20,30 +20,31 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"math"
 	"strings"
 
 	"github.com/holiman/uint256"
 
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/common/hexutil"
-	"github.com/ledgerwatch/erigon-lib/common/hexutility"
-	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon-lib/log/v3"
-	types2 "github.com/ledgerwatch/erigon-lib/types"
-	math2 "github.com/ledgerwatch/erigon/common/math"
-	"github.com/ledgerwatch/erigon/core"
-	"github.com/ledgerwatch/erigon/core/state"
-	"github.com/ledgerwatch/erigon/core/types"
-	"github.com/ledgerwatch/erigon/core/types/accounts"
-	"github.com/ledgerwatch/erigon/core/vm"
-	"github.com/ledgerwatch/erigon/core/vm/evmtypes"
-	"github.com/ledgerwatch/erigon/eth/tracers/config"
-	"github.com/ledgerwatch/erigon/polygon/tracer"
-	"github.com/ledgerwatch/erigon/rpc"
-	"github.com/ledgerwatch/erigon/turbo/rpchelper"
-	"github.com/ledgerwatch/erigon/turbo/transactions"
+	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common/hexutil"
+	"github.com/erigontech/erigon-lib/common/hexutility"
+	"github.com/erigontech/erigon-lib/kv"
+	"github.com/erigontech/erigon-lib/log/v3"
+	types2 "github.com/erigontech/erigon-lib/types"
+	math2 "github.com/erigontech/erigon/common/math"
+	"github.com/erigontech/erigon/core"
+	"github.com/erigontech/erigon/core/state"
+	"github.com/erigontech/erigon/core/types"
+	"github.com/erigontech/erigon/core/types/accounts"
+	"github.com/erigontech/erigon/core/vm"
+	"github.com/erigontech/erigon/core/vm/evmtypes"
+	"github.com/erigontech/erigon/eth/tracers/config"
+	"github.com/erigontech/erigon/polygon/tracer"
+	"github.com/erigontech/erigon/rpc"
+	"github.com/erigontech/erigon/turbo/rpchelper"
+	"github.com/erigontech/erigon/turbo/transactions"
 )
 
 const (
@@ -178,7 +179,7 @@ func (args *TraceCallParam) ToMessage(globalGasCap uint64, baseFee *uint256.Int)
 		if args.GasPrice != nil {
 			overflow := gasPrice.SetFromBig(args.GasPrice.ToInt())
 			if overflow {
-				return types.Message{}, fmt.Errorf("args.GasPrice higher than 2^256-1")
+				return types.Message{}, errors.New("args.GasPrice higher than 2^256-1")
 			}
 		}
 		gasFeeCap, gasTipCap = gasPrice, gasPrice
@@ -189,7 +190,7 @@ func (args *TraceCallParam) ToMessage(globalGasCap uint64, baseFee *uint256.Int)
 			// User specified the legacy gas field, convert to 1559 gas typing
 			gasPrice, overflow = uint256.FromBig(args.GasPrice.ToInt())
 			if overflow {
-				return types.Message{}, fmt.Errorf("args.GasPrice higher than 2^256-1")
+				return types.Message{}, errors.New("args.GasPrice higher than 2^256-1")
 			}
 			gasFeeCap, gasTipCap = gasPrice, gasPrice
 		} else {
@@ -198,14 +199,14 @@ func (args *TraceCallParam) ToMessage(globalGasCap uint64, baseFee *uint256.Int)
 			if args.MaxFeePerGas != nil {
 				overflow := gasFeeCap.SetFromBig(args.MaxFeePerGas.ToInt())
 				if overflow {
-					return types.Message{}, fmt.Errorf("args.GasPrice higher than 2^256-1")
+					return types.Message{}, errors.New("args.GasPrice higher than 2^256-1")
 				}
 			}
 			gasTipCap = new(uint256.Int)
 			if args.MaxPriorityFeePerGas != nil {
 				overflow := gasTipCap.SetFromBig(args.MaxPriorityFeePerGas.ToInt())
 				if overflow {
-					return types.Message{}, fmt.Errorf("args.GasPrice higher than 2^256-1")
+					return types.Message{}, errors.New("args.GasPrice higher than 2^256-1")
 				}
 			}
 			// Backfill the legacy gasPrice for EVM execution, unless we're all zeroes
@@ -226,7 +227,7 @@ func (args *TraceCallParam) ToMessage(globalGasCap uint64, baseFee *uint256.Int)
 	if args.Value != nil {
 		overflow := value.SetFromBig(args.Value.ToInt())
 		if overflow {
-			return types.Message{}, fmt.Errorf("args.Value higher than 2^256-1")
+			return types.Message{}, errors.New("args.Value higher than 2^256-1")
 		}
 	}
 	var data []byte
@@ -1007,7 +1008,7 @@ func (api *TraceAPIImpl) Call(ctx context.Context, args TraceCallParam, traceTyp
 		var overflow bool
 		baseFee, overflow = uint256.FromBig(header.BaseFee)
 		if overflow {
-			return nil, fmt.Errorf("header.BaseFee uint256 overflow")
+			return nil, errors.New("header.BaseFee uint256 overflow")
 		}
 	}
 	msg, err := args.ToMessage(api.gasCap, baseFee)
@@ -1073,7 +1074,7 @@ func (api *TraceAPIImpl) CallMany(ctx context.Context, calls json.RawMessage, pa
 		return nil, err
 	}
 	if tok != json.Delim('[') {
-		return nil, fmt.Errorf("expected array of [callparam, tracetypes]")
+		return nil, errors.New("expected array of [callparam, tracetypes]")
 	}
 	for dec.More() {
 		tok, err = dec.Token()
@@ -1081,7 +1082,7 @@ func (api *TraceAPIImpl) CallMany(ctx context.Context, calls json.RawMessage, pa
 			return nil, err
 		}
 		if tok != json.Delim('[') {
-			return nil, fmt.Errorf("expected [callparam, tracetypes]")
+			return nil, errors.New("expected [callparam, tracetypes]")
 		}
 		callParams = append(callParams, TraceCallParam{})
 		args := &callParams[len(callParams)-1]
@@ -1096,7 +1097,7 @@ func (api *TraceAPIImpl) CallMany(ctx context.Context, calls json.RawMessage, pa
 			return nil, err
 		}
 		if tok != json.Delim(']') {
-			return nil, fmt.Errorf("expected end of [callparam, tracetypes]")
+			return nil, errors.New("expected end of [callparam, tracetypes]")
 		}
 	}
 	tok, err = dec.Token()
@@ -1104,7 +1105,7 @@ func (api *TraceAPIImpl) CallMany(ctx context.Context, calls json.RawMessage, pa
 		return nil, err
 	}
 	if tok != json.Delim(']') {
-		return nil, fmt.Errorf("expected end of array of [callparam, tracetypes]")
+		return nil, errors.New("expected end of array of [callparam, tracetypes]")
 	}
 	var baseFee *uint256.Int
 	if parentNrOrHash == nil {
@@ -1129,7 +1130,7 @@ func (api *TraceAPIImpl) CallMany(ctx context.Context, calls json.RawMessage, pa
 		var overflow bool
 		baseFee, overflow = uint256.FromBig(parentHeader.BaseFee)
 		if overflow {
-			return nil, fmt.Errorf("header.BaseFee uint256 overflow")
+			return nil, errors.New("header.BaseFee uint256 overflow")
 		}
 	}
 	msgs := make([]types.Message, len(callParams))

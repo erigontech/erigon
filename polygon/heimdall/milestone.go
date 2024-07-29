@@ -19,11 +19,12 @@ package heimdall
 import (
 	"encoding/binary"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"math/big"
 
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/kv"
+	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/kv"
 )
 
 type MilestoneId uint64
@@ -169,7 +170,7 @@ type MilestoneIDResponse struct {
 	Result MilestoneID `json:"result"`
 }
 
-var ErrMilestoneNotFound = fmt.Errorf("milestone not found")
+var ErrMilestoneNotFound = errors.New("milestone not found")
 
 func MilestoneIdAt(tx kv.Tx, block uint64) (MilestoneId, error) {
 	var id uint64

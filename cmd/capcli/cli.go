@@ -19,6 +19,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"math"
@@ -32,35 +33,35 @@ import (
 	"github.com/spf13/afero"
 	"google.golang.org/grpc"
 
-	"github.com/ledgerwatch/erigon-lib/log/v3"
+	"github.com/erigontech/erigon-lib/log/v3"
 
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/common/datadir"
-	"github.com/ledgerwatch/erigon-lib/downloader/snaptype"
-	sentinel "github.com/ledgerwatch/erigon-lib/gointerfaces/sentinelproto"
-	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon-lib/metrics"
+	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common/datadir"
+	"github.com/erigontech/erigon-lib/downloader/snaptype"
+	sentinel "github.com/erigontech/erigon-lib/gointerfaces/sentinelproto"
+	"github.com/erigontech/erigon-lib/kv"
+	"github.com/erigontech/erigon-lib/metrics"
 
-	"github.com/ledgerwatch/erigon/cl/antiquary"
-	"github.com/ledgerwatch/erigon/cl/clparams"
-	"github.com/ledgerwatch/erigon/cl/clparams/initial_state"
-	"github.com/ledgerwatch/erigon/cl/persistence/beacon_indicies"
-	"github.com/ledgerwatch/erigon/cl/persistence/format/snapshot_format"
-	"github.com/ledgerwatch/erigon/cl/persistence/format/snapshot_format/getters"
-	state_accessors "github.com/ledgerwatch/erigon/cl/persistence/state"
-	"github.com/ledgerwatch/erigon/cl/persistence/state/historical_states_reader"
-	"github.com/ledgerwatch/erigon/cl/phase1/core"
-	"github.com/ledgerwatch/erigon/cl/phase1/core/state"
-	"github.com/ledgerwatch/erigon/cl/phase1/network"
-	"github.com/ledgerwatch/erigon/cl/phase1/stages"
-	"github.com/ledgerwatch/erigon/cl/rpc"
-	"github.com/ledgerwatch/erigon/cl/utils/eth_clock"
-	"github.com/ledgerwatch/erigon/cmd/caplin/caplin1"
-	"github.com/ledgerwatch/erigon/common"
-	"github.com/ledgerwatch/erigon/eth/ethconfig"
-	"github.com/ledgerwatch/erigon/eth/ethconfig/estimate"
-	"github.com/ledgerwatch/erigon/turbo/debug"
-	"github.com/ledgerwatch/erigon/turbo/snapshotsync/freezeblocks"
+	"github.com/erigontech/erigon/cl/antiquary"
+	"github.com/erigontech/erigon/cl/clparams"
+	"github.com/erigontech/erigon/cl/clparams/initial_state"
+	"github.com/erigontech/erigon/cl/persistence/beacon_indicies"
+	"github.com/erigontech/erigon/cl/persistence/format/snapshot_format"
+	"github.com/erigontech/erigon/cl/persistence/format/snapshot_format/getters"
+	state_accessors "github.com/erigontech/erigon/cl/persistence/state"
+	"github.com/erigontech/erigon/cl/persistence/state/historical_states_reader"
+	"github.com/erigontech/erigon/cl/phase1/core"
+	"github.com/erigontech/erigon/cl/phase1/core/state"
+	"github.com/erigontech/erigon/cl/phase1/network"
+	"github.com/erigontech/erigon/cl/phase1/stages"
+	"github.com/erigontech/erigon/cl/rpc"
+	"github.com/erigontech/erigon/cl/utils/eth_clock"
+	"github.com/erigontech/erigon/cmd/caplin/caplin1"
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/eth/ethconfig"
+	"github.com/erigontech/erigon/eth/ethconfig/estimate"
+	"github.com/erigontech/erigon/turbo/debug"
+	"github.com/erigontech/erigon/turbo/snapshotsync/freezeblocks"
 )
 
 var CLI struct {
@@ -208,9 +209,9 @@ func (c *ChainEndpoint) Run(ctx *Context) error {
 	}
 	log.Info("Hooked", "uri", baseUri)
 	// Let's fetch the head first
-	currentBlock, err := core.RetrieveBlock(ctx, beaconConfig, fmt.Sprintf("%s/head", baseUri), nil)
+	currentBlock, err := core.RetrieveBlock(ctx, beaconConfig, baseUri+"/head", nil)
 	if err != nil {
-		return err
+		return fmt.Errorf("failed to retrieve head: %w, uri: %s", err, baseUri+"/head")
 	}
 	currentRoot, err := currentBlock.Block.HashSSZ()
 	if err != nil {
@@ -246,7 +247,7 @@ func (c *ChainEndpoint) Run(ctx *Context) error {
 		// Let's fetch the head first
 		currentBlock, err := core.RetrieveBlock(ctx, beaconConfig, fmt.Sprintf("%s/0x%s", baseUri, stringifiedRoot), (*libcommon.Hash)(&currentRoot))
 		if err != nil {
-			return false, err
+			return false, fmt.Errorf("failed to retrieve block: %w, uri: %s", err, fmt.Sprintf("%s/0x%s", baseUri, stringifiedRoot))
 		}
 		currentRoot, err = currentBlock.Block.HashSSZ()
 		if err != nil {
@@ -388,7 +389,7 @@ func (c *CheckSnapshots) Run(ctx *Context) error {
 
 	if genesisHeader == nil {
 		log.Warn("beaconIndices up to", "block", to, "caplinSnapIndexMax", csn.IndicesMax())
-		return fmt.Errorf("genesis header is nil")
+		return errors.New("genesis header is nil")
 	}
 	previousBlockRoot, err := genesisHeader.Header.HashSSZ()
 	if err != nil {
@@ -601,7 +602,7 @@ type ArchiveSanitizer struct {
 
 func getHead(beaconApiURL string) (uint64, error) {
 	headResponse := map[string]interface{}{}
-	req, err := http.NewRequest("GET", fmt.Sprintf("%s/eth/v2/debug/beacon/heads", beaconApiURL), nil)
+	req, err := http.NewRequest("GET", beaconApiURL+"/eth/v2/debug/beacon/heads", nil)
 	if err != nil {
 		return 0, err
 	}
@@ -616,12 +617,12 @@ func getHead(beaconApiURL string) (uint64, error) {
 	}
 	data := headResponse["data"].([]interface{})
 	if len(data) == 0 {
-		return 0, fmt.Errorf("no head found")
+		return 0, errors.New("no head found")
 	}
 	head := data[0].(map[string]interface{})
 	slotStr, ok := head["slot"].(string)
 	if !ok {
-		return 0, fmt.Errorf("no slot found")
+		return 0, errors.New("no slot found")
 	}
 	slot, err := strconv.ParseUint(slotStr, 10, 64)
 	if err != nil {
@@ -650,7 +651,7 @@ func getStateRootAtSlot(beaconApiURL string, slot uint64) (libcommon.Hash, error
 	}
 	data := response["data"].(map[string]interface{})
 	if len(data) == 0 {
-		return libcommon.Hash{}, fmt.Errorf("no head found")
+		return libcommon.Hash{}, errors.New("no head found")
 	}
 	rootStr := data["root"].(string)
 
@@ -781,8 +782,8 @@ func (b *BenchmarkNode) Run(ctx *Context) error {
 
 	for i := uint64(startSlot); i < headSlot; i += uint64(interval) {
 		uri := b.BaseURL + b.Endpoint
-		uri = strings.Replace(uri, "{slot}", fmt.Sprintf("%d", i), 1)
-		uri = strings.Replace(uri, "{epoch}", fmt.Sprintf("%d", i/beaconConfig.SlotsPerEpoch), 1)
+		uri = strings.Replace(uri, "{slot}", strconv.FormatUint(i, 10), 1)
+		uri = strings.Replace(uri, "{epoch}", strconv.FormatUint(i/beaconConfig.SlotsPerEpoch, 10), 1)
 		elapsed, err := timeRequest(uri, b.Accept, b.Method, b.Body)
 		if err != nil {
 			log.Warn("Failed to benchmark", "error", err, "uri", uri)

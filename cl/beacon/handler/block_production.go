@@ -35,28 +35,28 @@ import (
 	"github.com/go-chi/chi/v5"
 	"golang.org/x/exp/slices"
 
-	"github.com/ledgerwatch/erigon-lib/common"
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/common/hexutil"
-	"github.com/ledgerwatch/erigon-lib/common/length"
-	sentinel "github.com/ledgerwatch/erigon-lib/gointerfaces/sentinelproto"
-	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon-lib/log/v3"
-	"github.com/ledgerwatch/erigon/cl/abstract"
-	"github.com/ledgerwatch/erigon/cl/beacon/beaconhttp"
-	"github.com/ledgerwatch/erigon/cl/beacon/builder"
-	"github.com/ledgerwatch/erigon/cl/clparams"
-	"github.com/ledgerwatch/erigon/cl/cltypes"
-	"github.com/ledgerwatch/erigon/cl/cltypes/solid"
-	"github.com/ledgerwatch/erigon/cl/gossip"
-	"github.com/ledgerwatch/erigon/cl/persistence/beacon_indicies"
-	"github.com/ledgerwatch/erigon/cl/phase1/core/state"
-	"github.com/ledgerwatch/erigon/cl/transition"
-	"github.com/ledgerwatch/erigon/cl/transition/impl/eth2"
-	"github.com/ledgerwatch/erigon/cl/transition/machine"
-	"github.com/ledgerwatch/erigon/cl/utils"
-	"github.com/ledgerwatch/erigon/core/types"
-	"github.com/ledgerwatch/erigon/turbo/engineapi/engine_types"
+	"github.com/erigontech/erigon-lib/common"
+	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common/hexutil"
+	"github.com/erigontech/erigon-lib/common/length"
+	sentinel "github.com/erigontech/erigon-lib/gointerfaces/sentinelproto"
+	"github.com/erigontech/erigon-lib/kv"
+	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/cl/abstract"
+	"github.com/erigontech/erigon/cl/beacon/beaconhttp"
+	"github.com/erigontech/erigon/cl/beacon/builder"
+	"github.com/erigontech/erigon/cl/clparams"
+	"github.com/erigontech/erigon/cl/cltypes"
+	"github.com/erigontech/erigon/cl/cltypes/solid"
+	"github.com/erigontech/erigon/cl/gossip"
+	"github.com/erigontech/erigon/cl/persistence/beacon_indicies"
+	"github.com/erigontech/erigon/cl/phase1/core/state"
+	"github.com/erigontech/erigon/cl/transition"
+	"github.com/erigontech/erigon/cl/transition/impl/eth2"
+	"github.com/erigontech/erigon/cl/transition/machine"
+	"github.com/erigontech/erigon/cl/utils"
+	"github.com/erigontech/erigon/core/types"
+	"github.com/erigontech/erigon/turbo/engineapi/engine_types"
 )
 
 type BlockPublishingValidation string
@@ -68,7 +68,7 @@ const (
 )
 
 var (
-	errBuilderNotEnabled = fmt.Errorf("builder is not enabled")
+	errBuilderNotEnabled = errors.New("builder is not enabled")
 )
 
 var defaultGraffitiString = "Caplin"
@@ -88,14 +88,14 @@ func (a *ApiHandler) GetEthV1ValidatorAttestationData(
 	if slot == nil || committeeIndex == nil {
 		return nil, beaconhttp.NewEndpointError(
 			http.StatusBadRequest,
-			fmt.Errorf("slot and committee_index url params are required"),
+			errors.New("slot and committee_index url params are required"),
 		)
 	}
 	headState := a.syncedData.HeadState()
 	if headState == nil {
 		return nil, beaconhttp.NewEndpointError(
 			http.StatusServiceUnavailable,
-			fmt.Errorf("beacon node is still syncing"),
+			errors.New("beacon node is still syncing"),
 		)
 	}
 
@@ -164,7 +164,7 @@ func (a *ApiHandler) GetEthV3ValidatorBlock(
 	if s == nil {
 		return nil, beaconhttp.NewEndpointError(
 			http.StatusServiceUnavailable,
-			fmt.Errorf("node is syncing"),
+			errors.New("node is syncing"),
 		)
 	}
 
@@ -208,16 +208,9 @@ func (a *ApiHandler) GetEthV3ValidatorBlock(
 	}
 
 	// do state transition
-	if block.IsBlinded() {
-		if err := machine.ProcessBlindedBlock(transition.DefaultMachine, baseState, block.ToBlinded()); err != nil {
-			log.Warn("Failed to process blinded block", "err", err, "slot", targetSlot)
-			return nil, err
-		}
-	} else {
-		if err := machine.ProcessBlock(transition.DefaultMachine, baseState, block.ToExecution().Block); err != nil {
-			log.Warn("Failed to process execution block", "err", err, "slot", targetSlot)
-			return nil, err
-		}
+	if err := machine.ProcessBlock(transition.DefaultMachine, baseState, block.ToGeneric()); err != nil {
+		log.Warn("Failed to process execution block", "err", err, "slot", targetSlot)
+		return nil, err
 	}
 	block.StateRoot, err = baseState.HashSSZ()
 	if err != nil {
@@ -407,7 +400,7 @@ func (a *ApiHandler) getBuilderPayload(
 	if err != nil {
 		return nil, err
 	} else if header == nil {
-		return nil, fmt.Errorf("no error but nil header")
+		return nil, errors.New("no error but nil header")
 	}
 
 	// check the version
@@ -426,10 +419,10 @@ func (a *ApiHandler) getBuilderPayload(
 		for i := 0; i < header.Data.Message.BlobKzgCommitments.Len(); i++ {
 			c := header.Data.Message.BlobKzgCommitments.Get(i)
 			if c == nil {
-				return nil, fmt.Errorf("nil blob kzg commitment")
+				return nil, errors.New("nil blob kzg commitment")
 			}
 			if len(c) != length.Bytes48 {
-				return nil, fmt.Errorf("invalid blob kzg commitment length")
+				return nil, errors.New("invalid blob kzg commitment length")
 			}
 		}
 	}
@@ -633,7 +626,7 @@ func (a *ApiHandler) produceBeaconBody(
 
 	wg.Wait()
 	if executionPayload == nil {
-		return nil, 0, fmt.Errorf("failed to produce execution payload")
+		return nil, 0, errors.New("failed to produce execution payload")
 	}
 	beaconBody.ExecutionPayload = executionPayload
 	return beaconBody, executionValue, nil
@@ -866,7 +859,7 @@ func (a *ApiHandler) publishBlindedBlocks(w http.ResponseWriter, r *http.Request
 		// check commitments
 		blockCommitments := signedBlindedBlock.Block.Body.BlobKzgCommitments
 		if len(blobsBundle.Commitments) != blockCommitments.Len() {
-			return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, fmt.Errorf("commitments length mismatch"))
+			return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, errors.New("commitments length mismatch"))
 		}
 		for i := range blobsBundle.Commitments {
 			// add the bundle to recently produced blobs
@@ -892,7 +885,7 @@ func (a *ApiHandler) parseEthConsensusVersion(
 	apiVersion int,
 ) (clparams.StateVersion, error) {
 	if str == "" && apiVersion == 2 {
-		return 0, fmt.Errorf("Eth-Consensus-Version header is required")
+		return 0, errors.New("Eth-Consensus-Version header is required")
 	}
 	if str == "" && apiVersion == 1 {
 		currentEpoch := a.ethClock.GetCurrentEpoch()
@@ -938,7 +931,7 @@ func (a *ApiHandler) parseRequestBeaconBlock(
 		block.SignedBlock.Block.SetVersion(version)
 		return block, nil
 	}
-	return nil, fmt.Errorf("invalid content type")
+	return nil, errors.New("invalid content type")
 }
 
 func (a *ApiHandler) broadcastBlock(ctx context.Context, blk *cltypes.SignedBeaconBlock) error {

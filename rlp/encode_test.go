@@ -28,7 +28,7 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/ledgerwatch/erigon/common/math"
+	"github.com/erigontech/erigon/common/math"
 
 	"github.com/holiman/uint256"
 )
@@ -453,7 +453,7 @@ func TestEncodeToReaderPiecewise(t *testing.T) {
 }
 
 // This is a regression test verifying that encReader
-// returns its encbuf to the pool only once.
+// returns its encBuffer to the pool only once.
 func TestEncodeToReaderReturnToPool(t *testing.T) {
 	buf := make([]byte, 50)
 	wg := new(sync.WaitGroup)

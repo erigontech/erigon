@@ -25,14 +25,14 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"github.com/ledgerwatch/erigon-lib/common/datadir"
-	"github.com/ledgerwatch/erigon-lib/kv/memdb"
-	"github.com/ledgerwatch/erigon-lib/log/v3"
-	"github.com/ledgerwatch/erigon/cl/antiquary/tests"
-	"github.com/ledgerwatch/erigon/cl/clparams"
-	"github.com/ledgerwatch/erigon/cl/cltypes"
-	state_accessors "github.com/ledgerwatch/erigon/cl/persistence/state"
-	"github.com/ledgerwatch/erigon/cl/phase1/core/state"
+	"github.com/erigontech/erigon-lib/common/datadir"
+	"github.com/erigontech/erigon-lib/kv/memdb"
+	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/cl/antiquary/tests"
+	"github.com/erigontech/erigon/cl/clparams"
+	"github.com/erigontech/erigon/cl/cltypes"
+	state_accessors "github.com/erigontech/erigon/cl/persistence/state"
+	"github.com/erigontech/erigon/cl/phase1/core/state"
 )
 
 func runTest(t *testing.T, blocks []*cltypes.SignedBeaconBlock, preState, postState *state.CachingBeaconState) {

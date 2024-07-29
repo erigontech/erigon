@@ -20,7 +20,7 @@
 package vm
 
 import (
-	"github.com/ledgerwatch/erigon/params"
+	"github.com/erigontech/erigon/params"
 )
 
 func maxStack(pop, push int) int {

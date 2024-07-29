@@ -25,19 +25,19 @@ import (
 
 	"github.com/holiman/uint256"
 
-	"github.com/ledgerwatch/erigon-lib/chain"
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/log/v3"
+	"github.com/erigontech/erigon-lib/chain"
+	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/log/v3"
 
-	"github.com/ledgerwatch/erigon/consensus"
-	"github.com/ledgerwatch/erigon/consensus/aura"
-	"github.com/ledgerwatch/erigon/consensus/misc"
-	"github.com/ledgerwatch/erigon/core/state"
-	"github.com/ledgerwatch/erigon/core/tracing"
-	"github.com/ledgerwatch/erigon/core/types"
-	"github.com/ledgerwatch/erigon/core/vm/evmtypes"
-	"github.com/ledgerwatch/erigon/params"
-	"github.com/ledgerwatch/erigon/rpc"
+	"github.com/erigontech/erigon/consensus"
+	"github.com/erigontech/erigon/consensus/aura"
+	"github.com/erigontech/erigon/consensus/misc"
+	"github.com/erigontech/erigon/core/state"
+	"github.com/erigontech/erigon/core/tracing"
+	"github.com/erigontech/erigon/core/types"
+	"github.com/erigontech/erigon/core/vm/evmtypes"
+	"github.com/erigontech/erigon/params"
+	"github.com/erigontech/erigon/rpc"
 )
 
 // Constants for The Merge as specified by EIP-3675: Upgrade consensus to Proof-of-Stake
@@ -208,13 +208,13 @@ func (s *Merge) Finalize(config *chain.Config, header *types.Header, state *stat
 				return nil, nil, nil, fmt.Errorf("error: invalid requests root hash in header, expected: %v, got :%v", header.RequestsRoot, rh)
 			}
 			if !reflect.DeepEqual(requestsInBlock.Deposits(), depositReqs.Deposits()) {
-				return nil, nil, nil, fmt.Errorf("error: invalid EIP-6110 Deposit Requests in block")
+				return nil, nil, nil, errors.New("error: invalid EIP-6110 Deposit Requests in block")
 			}
 			if !reflect.DeepEqual(requestsInBlock.Withdrawals(), withdrawalReqs.Withdrawals()) {
-				return nil, nil, nil, fmt.Errorf("error: invalid EIP-7002 Withdrawal requests in block")
+				return nil, nil, nil, errors.New("error: invalid EIP-7002 Withdrawal requests in block")
 			}
 			if !reflect.DeepEqual(requestsInBlock.Consolidations(), consolidations.Consolidations()) {
-				return nil, nil, nil, fmt.Errorf("error: invalid EIP-7251 Consolidation requests in block")
+				return nil, nil, nil, errors.New("error: invalid EIP-7251 Consolidation requests in block")
 			}
 		}
 	}
@@ -301,7 +301,7 @@ func (s *Merge) verifyHeader(chain consensus.ChainHeaderReader, header, parent *
 	// Verify existence / non-existence of withdrawalsHash
 	shanghai := chain.Config().IsShanghai(header.Time)
 	if shanghai && header.WithdrawalsHash == nil {
-		return fmt.Errorf("missing withdrawalsHash")
+		return errors.New("missing withdrawalsHash")
 	}
 	if !shanghai && header.WithdrawalsHash != nil {
 		return consensus.ErrUnexpectedWithdrawals
@@ -321,7 +321,7 @@ func (s *Merge) verifyHeader(chain consensus.ChainHeaderReader, header, parent *
 	// Verify existence / non-existence of requestsRoot
 	prague := chain.Config().IsPrague(header.Time)
 	if prague && header.RequestsRoot == nil {
-		return fmt.Errorf("missing requestsRoot")
+		return errors.New("missing requestsRoot")
 	}
 	if !prague && header.RequestsRoot != nil {
 		return consensus.ErrUnexpectedRequests

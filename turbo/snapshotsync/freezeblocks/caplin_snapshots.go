@@ -29,25 +29,25 @@ import (
 
 	"github.com/klauspost/compress/zstd"
 
-	"github.com/ledgerwatch/erigon-lib/log/v3"
+	"github.com/erigontech/erigon-lib/log/v3"
 
-	"github.com/ledgerwatch/erigon-lib/chain/snapcfg"
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/common/background"
-	"github.com/ledgerwatch/erigon-lib/common/datadir"
-	"github.com/ledgerwatch/erigon-lib/common/dbg"
-	"github.com/ledgerwatch/erigon-lib/downloader/snaptype"
-	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon-lib/kv/dbutils"
-	"github.com/ledgerwatch/erigon-lib/recsplit"
-	"github.com/ledgerwatch/erigon-lib/seg"
+	"github.com/erigontech/erigon-lib/chain/snapcfg"
+	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common/background"
+	"github.com/erigontech/erigon-lib/common/datadir"
+	"github.com/erigontech/erigon-lib/common/dbg"
+	"github.com/erigontech/erigon-lib/downloader/snaptype"
+	"github.com/erigontech/erigon-lib/kv"
+	"github.com/erigontech/erigon-lib/kv/dbutils"
+	"github.com/erigontech/erigon-lib/recsplit"
+	"github.com/erigontech/erigon-lib/seg"
 
-	"github.com/ledgerwatch/erigon/cl/clparams"
-	"github.com/ledgerwatch/erigon/cl/cltypes"
-	"github.com/ledgerwatch/erigon/cl/persistence/beacon_indicies"
-	"github.com/ledgerwatch/erigon/cl/persistence/blob_storage"
-	"github.com/ledgerwatch/erigon/cl/persistence/format/snapshot_format"
-	"github.com/ledgerwatch/erigon/eth/ethconfig"
+	"github.com/erigontech/erigon/cl/clparams"
+	"github.com/erigontech/erigon/cl/cltypes"
+	"github.com/erigontech/erigon/cl/persistence/beacon_indicies"
+	"github.com/erigontech/erigon/cl/persistence/blob_storage"
+	"github.com/erigontech/erigon/cl/persistence/format/snapshot_format"
+	"github.com/erigontech/erigon/eth/ethconfig"
 )
 
 var sidecarSSZSize = (&cltypes.BlobSidecar{}).EncodingSizeSSZ()
@@ -56,7 +56,7 @@ func BeaconSimpleIdx(ctx context.Context, sn snaptype.FileInfo, salt uint32, tmp
 	num := make([]byte, binary.MaxVarintLen64)
 	if err := snaptype.BuildIndex(ctx, sn, salt, sn.From, tmpDir, log.LvlDebug, p, func(idx *recsplit.RecSplit, i, offset uint64, word []byte) error {
 		if i%20_000 == 0 {
-			logger.Log(lvl, fmt.Sprintf("Generating idx for %s", sn.Type.Name()), "progress", i)
+			logger.Log(lvl, "Generating idx for "+sn.Type.Name(), "progress", i)
 		}
 		p.Processed.Add(1)
 		n := binary.PutUvarint(num, i)
@@ -665,7 +665,7 @@ func (s *CaplinSnapshots) ReadBlobSidecars(slot uint64) ([]*cltypes.BlobSidecar,
 		return nil, nil
 	}
 	if len(buf)%sidecarSSZSize != 0 {
-		return nil, fmt.Errorf("invalid sidecar list length")
+		return nil, errors.New("invalid sidecar list length")
 	}
 	sidecars := make([]*cltypes.BlobSidecar, len(buf)/sidecarSSZSize)
 	for i := 0; i < len(buf); i += sidecarSSZSize {

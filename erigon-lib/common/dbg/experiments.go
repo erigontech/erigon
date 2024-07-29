@@ -23,7 +23,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/ledgerwatch/erigon-lib/log/v3"
+	"github.com/erigontech/erigon-lib/log/v3"
 )
 
 var (
@@ -53,12 +53,11 @@ var (
 
 	// allow simultaneous build of multiple snapshot types.
 	// Values from 1 to 4 makes sense since we have only 3 types of snapshots.
-
-	BuildSnapshotAllowance = EnvInt("SNAPSHOT_BUILD_SEMA_SIZE", 1)
+	BuildSnapshotAllowance = EnvInt("SNAPSHOT_BUILD_SEMA_SIZE", 2) // allows 2 kind of snapshots to be built simultaneously (e.g Caplin+Domains)
 
 	SnapshotMadvRnd       = EnvBool("SNAPSHOT_MADV_RND", true)
-	KvMadvNormalNoLastLvl = EnvString("KV_MADV_NORMAL_NO_LAST_LVL", "")
-	KvMadvNormal          = EnvString("KV_MADV_NORMAL", "")
+	KvMadvNormalNoLastLvl = EnvString("KV_MADV_NORMAL_NO_LAST_LVL", "") //TODO: move this logic - from hacks to app-level
+	KvMadvNormal          = EnvString("KV_MADV_NORMAL", "accounts,storage,code,commitment")
 	OnlyCreateDB          = EnvBool("ONLY_CREATE_DB", false)
 
 	CommitEachStage = EnvBool("COMMIT_EACH_STAGE", false)

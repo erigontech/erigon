@@ -39,18 +39,18 @@ import (
 	"golang.org/x/sync/errgroup"
 	"golang.org/x/sync/semaphore"
 
-	common2 "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/common/background"
-	"github.com/ledgerwatch/erigon-lib/common/datadir"
-	"github.com/ledgerwatch/erigon-lib/common/dbg"
-	"github.com/ledgerwatch/erigon-lib/common/dir"
-	"github.com/ledgerwatch/erigon-lib/diagnostics"
-	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon-lib/kv/bitmapdb"
-	"github.com/ledgerwatch/erigon-lib/kv/order"
-	"github.com/ledgerwatch/erigon-lib/kv/stream"
-	"github.com/ledgerwatch/erigon-lib/log/v3"
-	"github.com/ledgerwatch/erigon-lib/seg"
+	common2 "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common/background"
+	"github.com/erigontech/erigon-lib/common/datadir"
+	"github.com/erigontech/erigon-lib/common/dbg"
+	"github.com/erigontech/erigon-lib/common/dir"
+	"github.com/erigontech/erigon-lib/diagnostics"
+	"github.com/erigontech/erigon-lib/kv"
+	"github.com/erigontech/erigon-lib/kv/bitmapdb"
+	"github.com/erigontech/erigon-lib/kv/order"
+	"github.com/erigontech/erigon-lib/kv/stream"
+	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon-lib/seg"
 )
 
 type Aggregator struct {
@@ -381,6 +381,7 @@ func (a *Aggregator) DiscardHistory(name kv.Domain) *Aggregator {
 	a.d[name].historyDisabled = true
 	return a
 }
+
 func (a *Aggregator) EnableHistory(name kv.Domain) *Aggregator {
 	a.d[name].historyDisabled = false
 	return a

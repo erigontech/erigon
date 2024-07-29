@@ -22,12 +22,13 @@ package vm
 import (
 	"fmt"
 	"sort"
+	"strconv"
 
 	"github.com/holiman/uint256"
 
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	libcommon "github.com/erigontech/erigon-lib/common"
 
-	"github.com/ledgerwatch/erigon/params"
+	"github.com/erigontech/erigon/params"
 )
 
 var activators = map[int]func(*JumpTable){
@@ -66,7 +67,7 @@ func ValidEip(eipNum int) bool {
 func ActivateableEips() []string {
 	var nums []string //nolint:prealloc
 	for k := range activators {
-		nums = append(nums, fmt.Sprintf("%d", k))
+		nums = append(nums, strconv.Itoa(k))
 	}
 	sort.Strings(nums)
 	return nums

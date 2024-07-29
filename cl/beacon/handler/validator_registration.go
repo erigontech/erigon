@@ -20,7 +20,7 @@ import (
 	"encoding/json"
 	"net/http"
 
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	libcommon "github.com/erigontech/erigon-lib/common"
 )
 
 type ValidatorPreparationPayload struct {
@@ -36,7 +36,7 @@ func (a *ApiHandler) PostEthV1ValidatorPrepareBeaconProposal(w http.ResponseWrit
 		return
 	}
 	for _, v := range req {
-		a.logger.Debug("[Caplin] Registred new validator", "index", v.ValidatorIndex, "fee_recipient", v.FeeRecipient.String())
+		a.logger.Debug("[Caplin] Registered new validator", "index", v.ValidatorIndex, "fee_recipient", v.FeeRecipient.String())
 		a.validatorParams.SetFeeRecipient(v.ValidatorIndex, v.FeeRecipient)
 	}
 	w.WriteHeader(http.StatusOK)

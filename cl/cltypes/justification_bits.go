@@ -19,9 +19,9 @@ package cltypes
 import (
 	"encoding/json"
 
-	"github.com/ledgerwatch/erigon-lib/common/hexutility"
-	"github.com/ledgerwatch/erigon-lib/types/clonable"
-	"github.com/ledgerwatch/erigon/cl/utils"
+	"github.com/erigontech/erigon-lib/common/hexutility"
+	"github.com/erigontech/erigon-lib/types/clonable"
+	"github.com/erigontech/erigon/cl/utils"
 )
 
 const JustificationBitsLength = 4

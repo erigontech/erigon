@@ -35,13 +35,13 @@ import (
 	"github.com/edsrzf/mmap-go"
 	"github.com/spaolacci/murmur3"
 
-	"github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/common/background"
-	"github.com/ledgerwatch/erigon-lib/common/dbg"
-	"github.com/ledgerwatch/erigon-lib/etl"
-	"github.com/ledgerwatch/erigon-lib/log/v3"
-	"github.com/ledgerwatch/erigon-lib/recsplit/eliasfano32"
-	"github.com/ledgerwatch/erigon-lib/seg"
+	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common/background"
+	"github.com/erigontech/erigon-lib/common/dbg"
+	"github.com/erigontech/erigon-lib/etl"
+	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon-lib/recsplit/eliasfano32"
+	"github.com/erigontech/erigon-lib/seg"
 )
 
 var UseBpsTree = true
@@ -51,6 +51,9 @@ const BtreeLogPrefix = "btree"
 // DefaultBtreeM - amount of keys on leaf of BTree
 // It will do log2(M) co-located-reads from data file - for binary-search inside leaf
 var DefaultBtreeM = uint64(256)
+
+const DefaultBtreeStartSkip = uint64(4) // defines smallest shard available for scan instead of binsearch
+
 var ErrBtIndexLookupBounds = errors.New("BtIndex: lookup di bounds error")
 
 func logBase(n, base uint64) uint64 {
@@ -611,7 +614,7 @@ func NewBtIndexWriter(args BtIndexWriterArgs, logger log.Logger) (*BtIndexWriter
 
 func (btw *BtIndexWriter) AddKey(key []byte, offset uint64) error {
 	if btw.built {
-		return fmt.Errorf("cannot add keys after perfect hash function had been built")
+		return errors.New("cannot add keys after perfect hash function had been built")
 	}
 
 	binary.BigEndian.PutUint64(btw.numBuf[:], offset)
@@ -643,7 +646,7 @@ func (btw *BtIndexWriter) loadFuncBucket(k, v []byte, _ etl.CurrentTableReader, 
 // of building the perfect hash function and writing index into a file
 func (btw *BtIndexWriter) Build() error {
 	if btw.built {
-		return fmt.Errorf("already built")
+		return errors.New("already built")
 	}
 	var err error
 	if btw.indexF, err = os.Create(btw.tmpFilePath); err != nil {
@@ -896,7 +899,7 @@ func (b *BtIndex) keyCmp(k []byte, di uint64, g ArchiveGetter) (int, []byte, err
 	var res []byte
 	res, _ = g.Next(res[:0])
 
-	//TODO: use `b.getter.Match` after https://github.com/ledgerwatch/erigon/issues/7855
+	//TODO: use `b.getter.Match` after https://github.com/erigontech/erigon/issues/7855
 	return bytes.Compare(res, k), res, nil
 	//return b.getter.Match(k), result, nil
 }
@@ -946,6 +949,9 @@ func (b *BtIndex) Close() {
 			log.Log(dbg.FileCloseLogLevel, "close", "err", err, "file", b.FileName(), "stack", dbg.Stack())
 		}
 		b.file = nil
+	}
+	if b.bplus != nil {
+		b.bplus.Close()
 	}
 }
 
@@ -1010,24 +1016,22 @@ func (b *BtIndex) Seek(g ArchiveGetter, x []byte) (*Cursor, error) {
 	if b.Empty() {
 		return nil, nil
 	}
-
-	// defer func() {
-	// 	fmt.Printf("[Bindex][%s] seekInFiles '%x' -> '%x' di=%d\n", b.FileName(), x, cursor.Value(), cursor.d)
-	// }()
-	var (
-		k     []byte
-		dt    uint64
-		found bool
-		err   error
-	)
-
 	if UseBpsTree {
-		_, dt, found, err = b.bplus.Seek(g, x)
-	} else {
-		_, dt, found, err = b.alloc.Seek(g, x)
+		k, v, dt, _, err := b.bplus.Seek(g, x)
+		if err != nil /*|| !found*/ {
+			if errors.Is(err, ErrBtIndexLookupBounds) {
+				return nil, nil
+			}
+			return nil, err
+		}
+		if bytes.Compare(k, x) >= 0 {
+			return b.newCursor(context.Background(), k, v, dt, g), nil
+		}
+		return nil, nil
 	}
-	_ = found
-	if err != nil /*|| !found*/ {
+
+	_, dt, found, err := b.alloc.Seek(g, x)
+	if err != nil || !found {
 		if errors.Is(err, ErrBtIndexLookupBounds) {
 			return nil, nil
 		}

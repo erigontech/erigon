@@ -18,23 +18,24 @@ package execution_client
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"math/big"
 	"net/http"
 	"strings"
 	"time"
 
-	"github.com/ledgerwatch/erigon-lib/common/hexutil"
+	"github.com/erigontech/erigon-lib/common/hexutil"
 
-	"github.com/ledgerwatch/erigon-lib/log/v3"
+	"github.com/erigontech/erigon-lib/log/v3"
 
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon/cl/clparams"
-	"github.com/ledgerwatch/erigon/cl/cltypes"
-	"github.com/ledgerwatch/erigon/cl/phase1/execution_client/rpc_helper"
-	"github.com/ledgerwatch/erigon/core/types"
-	"github.com/ledgerwatch/erigon/rpc"
-	"github.com/ledgerwatch/erigon/turbo/engineapi/engine_types"
+	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon/cl/clparams"
+	"github.com/erigontech/erigon/cl/cltypes"
+	"github.com/erigontech/erigon/cl/phase1/execution_client/rpc_helper"
+	"github.com/erigontech/erigon/core/types"
+	"github.com/erigontech/erigon/rpc"
+	"github.com/erigontech/erigon/turbo/engineapi/engine_types"
 )
 
 const DefaultRPCHTTPTimeout = time.Second * 30
@@ -89,7 +90,7 @@ func (cc *ExecutionClientRpc) NewPayload(ctx context.Context, payload *cltypes.E
 	case clparams.DenebVersion:
 		engineMethod = rpc_helper.EngineNewPayloadV3
 	default:
-		return PayloadStatusNone, fmt.Errorf("invalid payload version")
+		return PayloadStatusNone, errors.New("invalid payload version")
 	}
 
 	request := engine_types.ExecutionPayload{
@@ -174,7 +175,7 @@ func (cc *ExecutionClientRpc) ForkChoiceUpdate(ctx context.Context, finalized li
 
 func checkPayloadStatus(payloadStatus *engine_types.PayloadStatus) error {
 	if payloadStatus == nil {
-		return fmt.Errorf("empty payloadStatus")
+		return errors.New("empty payloadStatus")
 	}
 
 	validationError := payloadStatus.ValidationError

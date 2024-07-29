@@ -20,9 +20,9 @@ import (
 	"fmt"
 	"testing"
 
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon/core/vm/evmtypes"
-	"github.com/ledgerwatch/erigon/params"
+	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon/core/vm/evmtypes"
+	"github.com/erigontech/erigon/params"
 
 	"github.com/holiman/uint256"
 	"pgregory.net/rapid"

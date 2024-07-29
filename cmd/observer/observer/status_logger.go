@@ -21,10 +21,10 @@ import (
 	"errors"
 	"time"
 
-	"github.com/ledgerwatch/erigon-lib/log/v3"
+	"github.com/erigontech/erigon-lib/log/v3"
 
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon/cmd/observer/database"
+	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon/cmd/observer/database"
 )
 
 func StatusLoggerLoop(ctx context.Context, db database.DB, networkID uint, period time.Duration, logger log.Logger) {

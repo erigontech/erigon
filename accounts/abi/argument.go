@@ -21,6 +21,7 @@ package abi
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"reflect"
 	"strings"
@@ -82,7 +83,7 @@ func (arguments Arguments) isTuple() bool {
 func (arguments Arguments) Unpack(data []byte) ([]interface{}, error) {
 	if len(data) == 0 {
 		if len(arguments) != 0 {
-			return nil, fmt.Errorf("abi: attempting to unmarshall an empty string while arguments are expected")
+			return nil, errors.New("abi: attempting to unmarshall an empty string while arguments are expected")
 		}
 		// Nothing to unmarshal, return default variables
 		nonIndexedArgs := arguments.NonIndexed()
@@ -99,11 +100,11 @@ func (arguments Arguments) Unpack(data []byte) ([]interface{}, error) {
 func (arguments Arguments) UnpackIntoMap(v map[string]interface{}, data []byte) error {
 	// Make sure map is not nil
 	if v == nil {
-		return fmt.Errorf("abi: cannot unpack into a nil map")
+		return errors.New("abi: cannot unpack into a nil map")
 	}
 	if len(data) == 0 {
 		if len(arguments) != 0 {
-			return fmt.Errorf("abi: attempting to unmarshall an empty string while arguments are expected")
+			return errors.New("abi: attempting to unmarshall an empty string while arguments are expected")
 		}
 		return nil // Nothing to unmarshal, return
 	}

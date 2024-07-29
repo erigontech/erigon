@@ -28,30 +28,34 @@ import (
 	"time"
 
 	"github.com/c2h5oh/datasize"
+	lru "github.com/hashicorp/golang-lru/v2"
+	"golang.org/x/sync/semaphore"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/backoff"
 	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/keepalive"
 	"google.golang.org/protobuf/types/known/emptypb"
 
-	"github.com/ledgerwatch/erigon-lib/log/v3"
+	"github.com/erigontech/erigon-lib/chain"
+	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common/dbg"
+	"github.com/erigontech/erigon-lib/direct"
+	"github.com/erigontech/erigon-lib/gointerfaces/grpcutil"
+	proto_sentry "github.com/erigontech/erigon-lib/gointerfaces/sentryproto"
+	proto_types "github.com/erigontech/erigon-lib/gointerfaces/typesproto"
+	"github.com/erigontech/erigon-lib/kv"
+	"github.com/erigontech/erigon-lib/log/v3"
 
-	"github.com/ledgerwatch/erigon-lib/chain"
-	"github.com/ledgerwatch/erigon-lib/common/dbg"
-	"github.com/ledgerwatch/erigon-lib/direct"
-	"github.com/ledgerwatch/erigon-lib/gointerfaces/grpcutil"
-	proto_sentry "github.com/ledgerwatch/erigon-lib/gointerfaces/sentryproto"
-	proto_types "github.com/ledgerwatch/erigon-lib/gointerfaces/typesproto"
-	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon/consensus"
-	"github.com/ledgerwatch/erigon/core/types"
-	"github.com/ledgerwatch/erigon/eth/ethconfig"
-	"github.com/ledgerwatch/erigon/eth/protocols/eth"
-	"github.com/ledgerwatch/erigon/p2p/sentry"
-	"github.com/ledgerwatch/erigon/rlp"
-	"github.com/ledgerwatch/erigon/turbo/services"
-	"github.com/ledgerwatch/erigon/turbo/stages/bodydownload"
-	"github.com/ledgerwatch/erigon/turbo/stages/headerdownload"
+	"github.com/erigontech/erigon/consensus"
+	"github.com/erigontech/erigon/core/types"
+	"github.com/erigontech/erigon/eth/ethconfig"
+	"github.com/erigontech/erigon/eth/protocols/eth"
+	"github.com/erigontech/erigon/p2p/sentry"
+	"github.com/erigontech/erigon/rlp"
+	"github.com/erigontech/erigon/turbo/jsonrpc/receipts"
+	"github.com/erigontech/erigon/turbo/services"
+	"github.com/erigontech/erigon/turbo/stages/bodydownload"
+	"github.com/erigontech/erigon/turbo/stages/headerdownload"
 )
 
 type (
@@ -291,8 +295,12 @@ type MultiClient struct {
 	// decouple sentry multi client from header and body downloading logic is done
 	disableBlockDownload bool
 
-	logger log.Logger
+	logger                           log.Logger
+	getReceiptsActiveGoroutineNumber *semaphore.Weighted
+	ethApiWrapper                    eth.ReceiptsGetter
 }
+
+var _ eth.ReceiptsGetter = new(receipts.Generator) // compile-time interface-check
 
 func NewMultiClient(
 	db kv.RwDB,
@@ -342,6 +350,14 @@ func NewMultiClient(
 		bd = &bodydownload.BodyDownload{}
 	}
 
+	receiptsCacheLimit := 32
+	receiptsCache, err := lru.New[common.Hash, []*types.Receipt](receiptsCacheLimit)
+	if err != nil {
+		return nil, err
+	}
+
+	receiptsGenerator := receipts.NewGenerator(receiptsCache, blockReader, engine)
+
 	cs := &MultiClient{
 		Hd:                                hd,
 		Bd:                                bd,
@@ -356,6 +372,8 @@ func NewMultiClient(
 		maxBlockBroadcastPeers:            maxBlockBroadcastPeers,
 		disableBlockDownload:              disableBlockDownload,
 		logger:                            logger,
+		getReceiptsActiveGoroutineNumber:  semaphore.NewWeighted(1),
+		ethApiWrapper:                     receiptsGenerator,
 	}
 
 	return cs, nil
@@ -696,45 +714,50 @@ func (cs *MultiClient) getBlockBodies66(ctx context.Context, inreq *proto_sentry
 	return nil
 }
 
-func (cs *MultiClient) getReceipts66(ctx context.Context, inreq *proto_sentry.InboundMessage, sentry direct.SentryClient) error {
-	return nil //TODO: https://github.com/ledgerwatch/erigon/issues/10320
-	//var query eth.GetReceiptsPacket66
-	//if err := rlp.DecodeBytes(inreq.Data, &query); err != nil {
-	//	return fmt.Errorf("decoding getReceipts66: %w, data: %x", err, inreq.Data)
-	//}
-	//tx, err := cs.db.BeginRo(ctx)
-	//if err != nil {
-	//	return err
-	//}
-	//defer tx.Rollback()
-	//receipts, err := eth.AnswerGetReceiptsQuery(cs.blockReader, tx, query.GetReceiptsPacket)
-	//if err != nil {
-	//	return err
-	//}
-	//tx.Rollback()
-	//b, err := rlp.EncodeToBytes(&eth.ReceiptsRLPPacket66{
-	//	RequestId:         query.RequestId,
-	//	ReceiptsRLPPacket: receipts,
-	//})
-	//if err != nil {
-	//	return fmt.Errorf("encode header response: %w", err)
-	//}
-	//outreq := proto_sentry.SendMessageByIdRequest{
-	//	PeerId: inreq.PeerId,
-	//	Data: &proto_sentry.OutboundMessageData{
-	//		Id:   proto_sentry.MessageId_RECEIPTS_66,
-	//		Data: b,
-	//	},
-	//}
-	//_, err = sentry.SendMessageById(ctx, &outreq, &grpc.EmptyCallOption{})
-	//if err != nil {
-	//	if isPeerNotFoundErr(err) {
-	//		return nil
-	//	}
-	//	return fmt.Errorf("send bodies response: %w", err)
-	//}
-	////cs.logger.Info(fmt.Sprintf("[%s] GetReceipts responseLen %d", ConvertH512ToPeerID(inreq.PeerId), len(b)))
-	//return nil
+func (cs *MultiClient) getReceipts66(ctx context.Context, inreq *proto_sentry.InboundMessage, sentryClient direct.SentryClient) error {
+	err := cs.getReceiptsActiveGoroutineNumber.Acquire(ctx, 1)
+	if err != nil {
+		return err
+	}
+	defer cs.getReceiptsActiveGoroutineNumber.Release(1)
+	var query eth.GetReceiptsPacket66
+	if err := rlp.DecodeBytes(inreq.Data, &query); err != nil {
+		return fmt.Errorf("decoding getReceipts66: %w, data: %x", err, inreq.Data)
+	}
+
+	tx, err := cs.db.BeginRo(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	receiptsList, err := eth.AnswerGetReceiptsQuery(ctx, cs.ChainConfig, cs.ethApiWrapper, cs.blockReader, tx, query.GetReceiptsPacket)
+	if err != nil {
+		return err
+	}
+	b, err := rlp.EncodeToBytes(&eth.ReceiptsRLPPacket66{
+		RequestId:         query.RequestId,
+		ReceiptsRLPPacket: receiptsList,
+	})
+	if err != nil {
+		return fmt.Errorf("encode header response: %w", err)
+	}
+	outreq := proto_sentry.SendMessageByIdRequest{
+		PeerId: inreq.PeerId,
+		Data: &proto_sentry.OutboundMessageData{
+			Id:   proto_sentry.MessageId_RECEIPTS_66,
+			Data: b,
+		},
+	}
+	_, err = sentryClient.SendMessageById(ctx, &outreq, &grpc.OnFinishCallOption{})
+	if err != nil {
+		if isPeerNotFoundErr(err) {
+			return nil
+		}
+		return fmt.Errorf("send receipts response: %w", err)
+	}
+	//println(fmt.Sprintf("[%s] GetReceipts responseLen %d", sentry.ConvertH512ToPeerID(inreq.PeerId), len(b)))
+	return nil
 }
 
 func MakeInboundMessage() *proto_sentry.InboundMessage {
@@ -747,7 +770,6 @@ func (cs *MultiClient) HandleInboundMessage(ctx context.Context, message *proto_
 			err = fmt.Errorf("%+v, msgID=%s, trace: %s", rec, message.Id.String(), dbg.Stack())
 		}
 	}() // avoid crash because Erigon's core does many things
-
 	err = cs.handleInboundMessage(ctx, message, sentry)
 
 	if (err != nil) && rlp.IsInvalidRLPError(err) {

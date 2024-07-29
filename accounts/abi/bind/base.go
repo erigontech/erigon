@@ -26,13 +26,14 @@ import (
 	"math/big"
 
 	"github.com/holiman/uint256"
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
 
-	ethereum "github.com/ledgerwatch/erigon"
-	"github.com/ledgerwatch/erigon/accounts/abi"
-	"github.com/ledgerwatch/erigon/core/types"
-	"github.com/ledgerwatch/erigon/crypto"
-	"github.com/ledgerwatch/erigon/event"
+	libcommon "github.com/erigontech/erigon-lib/common"
+
+	ethereum "github.com/erigontech/erigon"
+	"github.com/erigontech/erigon/accounts/abi"
+	"github.com/erigontech/erigon/core/types"
+	"github.com/erigontech/erigon/crypto"
+	"github.com/erigontech/erigon/event"
 )
 
 // SignerFn is a signer function callback when a contract requires a method to
@@ -217,7 +218,7 @@ func (c *BoundContract) transact(opts *TransactOpts, contract *libcommon.Address
 	if opts.Value != nil {
 		overflow := value.SetFromBig(opts.Value)
 		if overflow {
-			return nil, fmt.Errorf("opts.Value higher than 2^256-1")
+			return nil, errors.New("opts.Value higher than 2^256-1")
 		}
 	}
 	var nonce uint64
@@ -239,7 +240,7 @@ func (c *BoundContract) transact(opts *TransactOpts, contract *libcommon.Address
 	}
 	gasPrice, overflow := uint256.FromBig(gasPriceBig)
 	if overflow {
-		return nil, fmt.Errorf("gasPriceBig higher than 2^256-1")
+		return nil, errors.New("gasPriceBig higher than 2^256-1")
 	}
 	gasLimit := opts.GasLimit
 	if gasLimit == 0 {

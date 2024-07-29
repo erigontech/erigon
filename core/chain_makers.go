@@ -22,26 +22,27 @@ package core
 import (
 	"context"
 	"encoding/binary"
+	"errors"
 	"fmt"
 	"math/big"
 
-	"github.com/ledgerwatch/erigon-lib/log/v3"
+	"github.com/erigontech/erigon-lib/log/v3"
 
-	"github.com/ledgerwatch/erigon-lib/chain"
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/common/length"
-	"github.com/ledgerwatch/erigon-lib/config3"
-	"github.com/ledgerwatch/erigon-lib/kv"
-	libstate "github.com/ledgerwatch/erigon-lib/state"
-	"github.com/ledgerwatch/erigon/consensus"
-	"github.com/ledgerwatch/erigon/consensus/merge"
-	"github.com/ledgerwatch/erigon/consensus/misc"
-	"github.com/ledgerwatch/erigon/core/state"
-	"github.com/ledgerwatch/erigon/core/types"
-	"github.com/ledgerwatch/erigon/core/types/accounts"
-	"github.com/ledgerwatch/erigon/core/vm"
-	"github.com/ledgerwatch/erigon/params"
-	"github.com/ledgerwatch/erigon/rlp"
+	"github.com/erigontech/erigon-lib/chain"
+	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common/length"
+	"github.com/erigontech/erigon-lib/config3"
+	"github.com/erigontech/erigon-lib/kv"
+	libstate "github.com/erigontech/erigon-lib/state"
+	"github.com/erigontech/erigon/consensus"
+	"github.com/erigontech/erigon/consensus/merge"
+	"github.com/erigontech/erigon/consensus/misc"
+	"github.com/erigontech/erigon/core/state"
+	"github.com/erigontech/erigon/core/types"
+	"github.com/erigontech/erigon/core/types/accounts"
+	"github.com/erigontech/erigon/core/vm"
+	"github.com/erigontech/erigon/params"
+	"github.com/erigontech/erigon/rlp"
 )
 
 // BlockGen creates blocks for testing.
@@ -407,7 +408,7 @@ func GenerateChain(config *chain.Config, parent *types.Block, engine consensus.E
 			block := types.NewBlock(b.header, b.txs, b.uncles, b.receipts, nil /* withdrawals */, nil /*requests*/)
 			return block, b.receipts, nil
 		}
-		return nil, nil, fmt.Errorf("no engine to generate blocks")
+		return nil, nil, errors.New("no engine to generate blocks")
 	}
 
 	for i := 0; i < n; i++ {

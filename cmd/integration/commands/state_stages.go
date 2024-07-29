@@ -25,31 +25,31 @@ import (
 	"os"
 	"time"
 
-	"github.com/ledgerwatch/erigon-lib/wrap"
+	"github.com/erigontech/erigon-lib/wrap"
 
 	"github.com/c2h5oh/datasize"
 	"github.com/spf13/cobra"
 
-	"github.com/ledgerwatch/erigon-lib/log/v3"
+	"github.com/erigontech/erigon-lib/log/v3"
 
-	chain2 "github.com/ledgerwatch/erigon-lib/chain"
-	common2 "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/common/datadir"
-	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon/cmd/hack/tool/fromdb"
-	"github.com/ledgerwatch/erigon/cmd/utils"
-	"github.com/ledgerwatch/erigon/common/debugprint"
-	"github.com/ledgerwatch/erigon/core"
-	"github.com/ledgerwatch/erigon/core/types"
-	"github.com/ledgerwatch/erigon/eth/ethconfig"
-	"github.com/ledgerwatch/erigon/eth/stagedsync"
-	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
-	"github.com/ledgerwatch/erigon/eth/tracers/logger"
-	"github.com/ledgerwatch/erigon/node/nodecfg"
-	"github.com/ledgerwatch/erigon/params"
-	erigoncli "github.com/ledgerwatch/erigon/turbo/cli"
-	"github.com/ledgerwatch/erigon/turbo/debug"
-	"github.com/ledgerwatch/erigon/turbo/shards"
+	chain2 "github.com/erigontech/erigon-lib/chain"
+	common2 "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common/datadir"
+	"github.com/erigontech/erigon-lib/kv"
+	"github.com/erigontech/erigon/cmd/hack/tool/fromdb"
+	"github.com/erigontech/erigon/cmd/utils"
+	"github.com/erigontech/erigon/common/debugprint"
+	"github.com/erigontech/erigon/core"
+	"github.com/erigontech/erigon/core/types"
+	"github.com/erigontech/erigon/eth/ethconfig"
+	"github.com/erigontech/erigon/eth/stagedsync"
+	"github.com/erigontech/erigon/eth/stagedsync/stages"
+	"github.com/erigontech/erigon/eth/tracers/logger"
+	"github.com/erigontech/erigon/node/nodecfg"
+	"github.com/erigontech/erigon/params"
+	erigoncli "github.com/erigontech/erigon/turbo/cli"
+	"github.com/erigontech/erigon/turbo/debug"
+	"github.com/erigontech/erigon/turbo/shards"
 )
 
 var stateStages = &cobra.Command{
@@ -179,7 +179,7 @@ func syncBySmallSteps(db kv.RwDB, miningConfig params.MiningConfig, ctx context.
 	syncCfg.ReconWorkerCount = int(reconWorkers)
 
 	br, _ := blocksIO(db, logger1)
-	execCfg := stagedsync.StageExecuteBlocksCfg(db, pm, batchSize, chainConfig, engine, vmConfig, changesAcc, false, true, dirs, br, nil, genesis, syncCfg, agg, nil)
+	execCfg := stagedsync.StageExecuteBlocksCfg(db, pm, batchSize, chainConfig, engine, vmConfig, changesAcc, false, true, dirs, br, nil, genesis, syncCfg, nil)
 
 	execUntilFunc := func(execToBlock uint64) stagedsync.ExecFunc {
 		return func(badBlockUnwind bool, s *stagedsync.StageState, unwinder stagedsync.Unwinder, txc wrap.TxContainer, logger log.Logger) error {
@@ -410,7 +410,7 @@ func loopExec(db kv.RwDB, ctx context.Context, unwind uint64, logger log.Logger)
 
 	initialCycle := false
 	br, _ := blocksIO(db, logger)
-	cfg := stagedsync.StageExecuteBlocksCfg(db, pm, batchSize, chainConfig, engine, vmConfig, nil, false, true, dirs, br, nil, genesis, syncCfg, agg, nil)
+	cfg := stagedsync.StageExecuteBlocksCfg(db, pm, batchSize, chainConfig, engine, vmConfig, nil, false, true, dirs, br, nil, genesis, syncCfg, nil)
 
 	// set block limit of execute stage
 	sync.MockExecFunc(stages.Execution, func(badBlockUnwind bool, stageState *stagedsync.StageState, unwinder stagedsync.Unwinder, txc wrap.TxContainer, logger log.Logger) error {

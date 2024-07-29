@@ -26,10 +26,10 @@ import (
 	"io"
 	"math/big"
 
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	libcommon "github.com/erigontech/erigon-lib/common"
 
-	"github.com/ledgerwatch/erigon/consensus/ethash"
-	"github.com/ledgerwatch/erigon/core/types"
+	"github.com/erigontech/erigon/consensus/ethash"
+	"github.com/erigontech/erigon/core/types"
 )
 
 type fuzzer struct {

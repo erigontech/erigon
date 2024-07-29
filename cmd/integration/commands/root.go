@@ -26,16 +26,16 @@ import (
 	"github.com/spf13/cobra"
 	"golang.org/x/sync/semaphore"
 
-	"github.com/ledgerwatch/erigon-lib/kv/temporal"
-	"github.com/ledgerwatch/erigon-lib/log/v3"
+	"github.com/erigontech/erigon-lib/kv/temporal"
+	"github.com/erigontech/erigon-lib/log/v3"
 
-	"github.com/ledgerwatch/erigon-lib/kv"
-	kv2 "github.com/ledgerwatch/erigon-lib/kv/mdbx"
+	"github.com/erigontech/erigon-lib/kv"
+	kv2 "github.com/erigontech/erigon-lib/kv/mdbx"
 
-	"github.com/ledgerwatch/erigon/cmd/utils"
-	"github.com/ledgerwatch/erigon/migrations"
-	"github.com/ledgerwatch/erigon/turbo/debug"
-	"github.com/ledgerwatch/erigon/turbo/logging"
+	"github.com/erigontech/erigon/cmd/utils"
+	"github.com/erigontech/erigon/migrations"
+	"github.com/erigontech/erigon/turbo/debug"
+	"github.com/erigontech/erigon/turbo/logging"
 )
 
 func expandHomeDir(dirpath string) string {
@@ -76,11 +76,7 @@ func RootCommand() *cobra.Command {
 func dbCfg(label kv.Label, path string) kv2.MdbxOpts {
 	const ThreadsLimit = 9_000
 	limiterB := semaphore.NewWeighted(ThreadsLimit)
-	opts := kv2.NewMDBX(log.New()).Path(path).Label(label).RoTxsLimiter(limiterB)
-
-	if dbWriteMap {
-		opts = opts.WriteMap()
-	}
+	opts := kv2.NewMDBX(log.New()).Path(path).Label(label).RoTxsLimiter(limiterB).WriteMap(dbWriteMap)
 
 	// integration tool don't intent to create db, then easiest way to open db - it's pass mdbx.Accede flag, which allow
 	// to read all options from DB, instead of overriding them

@@ -18,14 +18,15 @@ package handler
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"strconv"
 
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon/cl/beacon/beaconhttp"
-	state_accessors "github.com/ledgerwatch/erigon/cl/persistence/state"
-	"github.com/ledgerwatch/erigon/cl/phase1/core/state"
+	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon/cl/beacon/beaconhttp"
+	state_accessors "github.com/erigontech/erigon/cl/persistence/state"
+	"github.com/erigontech/erigon/cl/phase1/core/state"
 )
 
 type attesterDutyResponse struct {
@@ -63,7 +64,7 @@ func (a *ApiHandler) getAttesterDuties(w http.ResponseWriter, r *http.Request) (
 	}
 	s := a.syncedData.HeadState()
 	if s == nil {
-		return nil, beaconhttp.NewEndpointError(http.StatusServiceUnavailable, fmt.Errorf("node is syncing"))
+		return nil, beaconhttp.NewEndpointError(http.StatusServiceUnavailable, errors.New("node is syncing"))
 	}
 	dependentRoot := a.getDependentRoot(s, epoch)
 
@@ -101,7 +102,7 @@ func (a *ApiHandler) getAttesterDuties(w http.ResponseWriter, r *http.Request) (
 		// non-finality case
 
 		if s == nil {
-			return nil, beaconhttp.NewEndpointError(http.StatusServiceUnavailable, fmt.Errorf("node is syncing"))
+			return nil, beaconhttp.NewEndpointError(http.StatusServiceUnavailable, errors.New("node is syncing"))
 		}
 
 		if epoch > state.Epoch(s)+3 {

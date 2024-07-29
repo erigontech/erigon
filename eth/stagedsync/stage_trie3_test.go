@@ -23,13 +23,13 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"github.com/ledgerwatch/erigon-lib/kv/temporal/temporaltest"
-	"github.com/ledgerwatch/erigon-lib/log/v3"
+	"github.com/erigontech/erigon-lib/kv/temporal/temporaltest"
+	"github.com/erigontech/erigon-lib/log/v3"
 
-	"github.com/ledgerwatch/erigon-lib/common/datadir"
-	"github.com/ledgerwatch/erigon-lib/kv/rawdbv3"
-	"github.com/ledgerwatch/erigon-lib/state"
-	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
+	"github.com/erigontech/erigon-lib/common/datadir"
+	"github.com/erigontech/erigon-lib/kv/rawdbv3"
+	"github.com/erigontech/erigon-lib/state"
+	"github.com/erigontech/erigon/eth/stagedsync/stages"
 )
 
 func TestRebuildPatriciaTrieBasedOnFiles(t *testing.T) {

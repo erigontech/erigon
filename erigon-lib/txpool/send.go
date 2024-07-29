@@ -23,11 +23,11 @@ import (
 
 	"google.golang.org/grpc"
 
-	"github.com/ledgerwatch/erigon-lib/direct"
-	sentry "github.com/ledgerwatch/erigon-lib/gointerfaces/sentryproto"
-	"github.com/ledgerwatch/erigon-lib/log/v3"
-	"github.com/ledgerwatch/erigon-lib/rlp"
-	types2 "github.com/ledgerwatch/erigon-lib/types"
+	"github.com/erigontech/erigon-lib/direct"
+	sentry "github.com/erigontech/erigon-lib/gointerfaces/sentryproto"
+	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon-lib/rlp"
+	types2 "github.com/erigontech/erigon-lib/types"
 )
 
 type SentryClient interface {

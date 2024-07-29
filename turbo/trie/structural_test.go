@@ -24,17 +24,18 @@ package trie
 import (
 	"bytes"
 	"encoding/binary"
+	"errors"
 	"fmt"
 	"slices"
 	"testing"
 
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/common/length"
+	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common/length"
 	"github.com/stretchr/testify/require"
 
-	"github.com/ledgerwatch/erigon/common"
-	"github.com/ledgerwatch/erigon/crypto"
-	"github.com/ledgerwatch/erigon/turbo/rlphacks"
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/crypto"
+	"github.com/erigontech/erigon/turbo/rlphacks"
 )
 
 func TestV2HashBuilding(t *testing.T) {
@@ -550,7 +551,7 @@ func TestStorageOnly(t *testing.T) {
 			require.Equal(t, fmt.Sprintf("%b", uint16(0b100000)), fmt.Sprintf("%b", hasTree))
 			require.NotNil(t, hashes)
 		case 5:
-			require.NoError(t, fmt.Errorf("not expected"))
+			require.NoError(t, errors.New("not expected"))
 		}
 
 		return nil

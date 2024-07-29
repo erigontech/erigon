@@ -23,8 +23,8 @@ import (
 	"runtime"
 	"strings"
 
-	"github.com/ledgerwatch/erigon-lib/chain/networkname"
-	"github.com/ledgerwatch/erigon-lib/log/v3"
+	"github.com/erigontech/erigon-lib/chain/networkname"
+	"github.com/erigontech/erigon-lib/log/v3"
 )
 
 const dirname = "Erigon"
