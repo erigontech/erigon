@@ -18,6 +18,7 @@ package cltypes
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 
 	libcommon "github.com/erigontech/erigon-lib/common"
@@ -369,7 +370,7 @@ func (b *BeaconBody) ExecutionPayloadMerkleProof() ([][32]byte, error) {
 
 func (b *BeaconBody) KzgCommitmentMerkleProof(index int) ([][32]byte, error) {
 	if index >= b.BlobKzgCommitments.Len() {
-		return nil, fmt.Errorf("index out of range")
+		return nil, errors.New("index out of range")
 	}
 	kzgCommitmentsProof, err := merkle_tree.MerkleProof(4, 11, b.getSchema(false)...)
 	if err != nil {

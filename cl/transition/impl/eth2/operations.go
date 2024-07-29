@@ -63,7 +63,7 @@ func (I *impl) ProcessProposerSlashing(
 	}
 
 	if *h1 == *h2 {
-		return fmt.Errorf("proposee slashing headers are the same")
+		return errors.New("proposee slashing headers are the same")
 	}
 
 	proposer, err := s.ValidatorForValidatorIndex(int(h1.ProposerIndex))
@@ -125,7 +125,7 @@ func (I *impl) ProcessAttesterSlashing(
 		return fmt.Errorf("error calculating indexed attestation 1 validity: %v", err)
 	}
 	if !valid {
-		return fmt.Errorf("invalid indexed attestation 1")
+		return errors.New("invalid indexed attestation 1")
 	}
 
 	valid, err = state.IsValidIndexedAttestation(s, att2)
@@ -133,7 +133,7 @@ func (I *impl) ProcessAttesterSlashing(
 		return fmt.Errorf("error calculating indexed attestation 2 validity: %v", err)
 	}
 	if !valid {
-		return fmt.Errorf("invalid indexed attestation 2")
+		return errors.New("invalid indexed attestation 2")
 	}
 
 	slashedAny := false
@@ -158,7 +158,7 @@ func (I *impl) ProcessAttesterSlashing(
 	}
 
 	if !slashedAny {
-		return fmt.Errorf("no validators slashed")
+		return errors.New("no validators slashed")
 	}
 	return nil
 }
@@ -186,7 +186,7 @@ func (I *impl) ProcessDeposit(s abstract.BeaconState, deposit *cltypes.Deposit) 
 		depositIndex,
 		eth1Data.Root,
 	) {
-		return fmt.Errorf("processDepositForAltair: Could not validate deposit root")
+		return errors.New("processDepositForAltair: Could not validate deposit root")
 	}
 
 	// Increment index
@@ -360,7 +360,7 @@ func (I *impl) ProcessWithdrawals(
 func (I *impl) ProcessExecutionPayload(s abstract.BeaconState, parentHash, prevRandao common.Hash, time uint64, payloadHeader *cltypes.Eth1Header) error {
 	if state.IsMergeTransitionComplete(s) {
 		if parentHash != s.LatestExecutionPayloadHeader().BlockHash {
-			return fmt.Errorf("ProcessExecutionPayload: invalid eth1 chain. mismatching parent")
+			return errors.New("ProcessExecutionPayload: invalid eth1 chain. mismatching parent")
 		}
 	}
 	if prevRandao != s.GetRandaoMixes(state.Epoch(s)) {
@@ -371,7 +371,7 @@ func (I *impl) ProcessExecutionPayload(s abstract.BeaconState, parentHash, prevR
 		)
 	}
 	if time != state.ComputeTimestampAtSlot(s, s.Slot()) {
-		return fmt.Errorf("ProcessExecutionPayload: invalid Eth1 timestamp")
+		return errors.New("ProcessExecutionPayload: invalid Eth1 timestamp")
 	}
 	s.SetLatestExecutionPayloadHeader(payloadHeader)
 	return nil
@@ -490,13 +490,13 @@ func (I *impl) ProcessBlsToExecutionChange(
 	if I.FullValidation {
 		// Check the validator's withdrawal credentials prefix.
 		if wc[0] != byte(beaconConfig.BLSWithdrawalPrefixByte) {
-			return fmt.Errorf("invalid withdrawal credentials prefix")
+			return errors.New("invalid withdrawal credentials prefix")
 		}
 
 		// Check the validator's withdrawal credentials against the provided message.
 		hashedFrom := utils.Sha256(change.From[:])
 		if !bytes.Equal(hashedFrom[1:], wc[1:]) {
-			return fmt.Errorf("invalid withdrawal credentials")
+			return errors.New("invalid withdrawal credentials")
 		}
 
 		// Compute the signing domain and verify the message signature.
@@ -517,7 +517,7 @@ func (I *impl) ProcessBlsToExecutionChange(
 			return err
 		}
 		if !valid {
-			return fmt.Errorf("invalid signature")
+			return errors.New("invalid signature")
 		}
 	}
 	credentials := wc
@@ -658,7 +658,7 @@ func (I *impl) processAttestationPhase0(
 	}
 
 	if len(committee) != utils.GetBitlistLength(attestation.AggregationBits()) {
-		return nil, fmt.Errorf("processAttestationPhase0: mismatching aggregation bits size")
+		return nil, errors.New("processAttestationPhase0: mismatching aggregation bits size")
 	}
 	// Cached so it is performant.
 	proposerIndex, err := s.GetBeaconProposerIndex()
@@ -677,12 +677,12 @@ func (I *impl) processAttestationPhase0(
 	// Depending of what slot we are on we put in either the current justified or previous justified.
 	if isCurrentAttestation {
 		if !data.Source().Equal(s.CurrentJustifiedCheckpoint()) {
-			return nil, fmt.Errorf("processAttestationPhase0: mismatching sources")
+			return nil, errors.New("processAttestationPhase0: mismatching sources")
 		}
 		s.AddCurrentEpochAtteastation(pendingAttestation)
 	} else {
 		if !data.Source().Equal(s.PreviousJustifiedCheckpoint()) {
-			return nil, fmt.Errorf("processAttestationPhase0: mismatching sources")
+			return nil, errors.New("processAttestationPhase0: mismatching sources")
 		}
 		s.AddPreviousEpochAttestation(pendingAttestation)
 	}

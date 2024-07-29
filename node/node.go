@@ -307,7 +307,7 @@ func OpenDatabase(ctx context.Context, config *nodecfg.Config, label kv.Label, n
 		name = "polygon-bridge"
 	case kv.ConsensusDB:
 		if len(name) == 0 {
-			return nil, fmt.Errorf("expected a consensus name")
+			return nil, errors.New("expected a consensus name")
 		}
 	default:
 		name = "test"

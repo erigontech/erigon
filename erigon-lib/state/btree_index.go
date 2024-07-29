@@ -614,7 +614,7 @@ func NewBtIndexWriter(args BtIndexWriterArgs, logger log.Logger) (*BtIndexWriter
 
 func (btw *BtIndexWriter) AddKey(key []byte, offset uint64) error {
 	if btw.built {
-		return fmt.Errorf("cannot add keys after perfect hash function had been built")
+		return errors.New("cannot add keys after perfect hash function had been built")
 	}
 
 	binary.BigEndian.PutUint64(btw.numBuf[:], offset)
@@ -646,7 +646,7 @@ func (btw *BtIndexWriter) loadFuncBucket(k, v []byte, _ etl.CurrentTableReader, 
 // of building the perfect hash function and writing index into a file
 func (btw *BtIndexWriter) Build() error {
 	if btw.built {
-		return fmt.Errorf("already built")
+		return errors.New("already built")
 	}
 	var err error
 	if btw.indexF, err = os.Create(btw.tmpFilePath); err != nil {

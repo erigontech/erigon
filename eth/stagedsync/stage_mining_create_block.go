@@ -135,7 +135,7 @@ func SpawnMiningCreateBlockStage(s *StageState, txc wrap.TxContainer, cfg Mining
 
 	if cfg.miner.MiningConfig.Etherbase == (libcommon.Address{}) {
 		if cfg.blockBuilderParameters == nil {
-			return fmt.Errorf("refusing to mine without etherbase")
+			return errors.New("refusing to mine without etherbase")
 		}
 		// If we do not have an etherbase, let's use the suggested one
 		coinbase = cfg.blockBuilderParameters.SuggestedFeeRecipient

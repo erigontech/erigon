@@ -21,6 +21,7 @@ import (
 	"context"
 	"crypto/sha1"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -494,7 +495,7 @@ func ScheduleVerifyFile(ctx context.Context, t *torrent.Torrent, completePieces 
 				if change.Err != nil {
 					err = change.Err
 				} else {
-					err = fmt.Errorf("unexpected piece change error")
+					err = errors.New("unexpected piece change error")
 				}
 
 				cancel()

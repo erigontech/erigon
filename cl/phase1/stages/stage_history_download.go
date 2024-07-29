@@ -18,6 +18,7 @@ package stages
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"math"
 	"sync/atomic"
@@ -364,11 +365,11 @@ func downloadBlobHistoryWorker(cfg StageHistoryReconstructionCfg, ctx context.Co
 					continue
 				}
 				if block.Signature != header.Signature {
-					return fmt.Errorf("signature mismatch beetwen blob and stored block")
+					return errors.New("signature mismatch beetwen blob and stored block")
 				}
 				return nil
 			}
-			return fmt.Errorf("block not in batch")
+			return errors.New("block not in batch")
 		})
 		if err != nil {
 			rpc.BanPeer(blobs.Peer)

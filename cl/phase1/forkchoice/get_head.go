@@ -18,7 +18,7 @@ package forkchoice
 
 import (
 	"bytes"
-	"fmt"
+	"errors"
 	"sort"
 
 	libcommon "github.com/erigontech/erigon-lib/common"
@@ -104,7 +104,7 @@ func (f *ForkChoiceStore) GetHead() (libcommon.Hash, uint64, error) {
 		if len(children) == 0 {
 			header, hasHeader := f.forkGraph.GetHeader(f.headHash)
 			if !hasHeader {
-				return libcommon.Hash{}, 0, fmt.Errorf("no slot for head is stored")
+				return libcommon.Hash{}, 0, errors.New("no slot for head is stored")
 			}
 			f.headSlot = header.Slot
 			return f.headHash, f.headSlot, nil
