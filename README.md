@@ -374,7 +374,7 @@ is being updated on recurring basis.</code>
 **Preprocessing**. For some operations, Erigon uses temporary files to preprocess data before inserting it into the main
 DB. That reduces write amplification and DB inserts are orders of magnitude quicker.
 
-<code> 🔬 See our detailed ETL explanation [here](https://github.com/erigontech/erigon-lib/blob/main/etl/README.md).</code>
+<code> 🔬 See our detailed ETL explanation [here](https://github.com/erigontech/erigon/blob/main/erigon-lib/etl/README.md).</code>
 
 **Plain state**.
 
