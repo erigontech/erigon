@@ -110,7 +110,8 @@ func (t *VerkleTrie) GetAccount(addr common.Address) (*accounts.Account, error) 
 	for i := 0; values != nil && i <= vkutils.CodeHashLeafKey && emptyAccount; i++ {
 		emptyAccount = emptyAccount && values[i] == nil
 	}
-	if emptyAccount {		return nil, nil
+	if emptyAccount {		
+		return nil, nil
 	}
 	if len(values[vkutils.NonceLeafKey]) > 0 {
 		acc.Nonce = binary.LittleEndian.Uint64(values[vkutils.NonceLeafKey])

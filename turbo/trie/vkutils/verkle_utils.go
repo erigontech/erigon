@@ -37,9 +37,9 @@ var (
 	zero                                = uint256.NewInt(0)
 	VerkleNodeWidthLog2                 = 8
 	HeaderStorageOffset                 = uint256.NewInt(64)
-	mainStorageOffsetLshVerkleNodeWidth = new(uint256.Int).Lsh(uint256.NewInt(256), 31-uint(VerkleNodeWidthLog2))
+	mainStorageOffsetLshVerkleNodeWidth = new(uint256.Int).Lsh(uint256.NewInt(1), 248-uint(VerkleNodeWidthLog2))
 	CodeOffset                          = uint256.NewInt(128)
-	MainStorageOffset                   = new(uint256.Int).Lsh(uint256.NewInt(256), 31)
+	MainStorageOffset                   = new(uint256.Int).Lsh(uint256.NewInt(1), 248 /* 8 * 31*/)
 	VerkleNodeWidth                     = uint256.NewInt(256)
 	codeStorageDelta                    = uint256.NewInt(0).Sub(CodeOffset, HeaderStorageOffset)
 
@@ -209,15 +209,7 @@ func GetTreeKeyStorageSlot(address []byte, storageKey *uint256.Int) []byte {
 }
 
 func PointToHash(evaluated *verkle.Point, suffix byte) []byte {
-	// The output of Byte() is big engian for banderwagon. This
-	// introduces an imbalance in the tree, because hashes are
-	// elements of a 253-bit field. This means more than half the
-	// tree would be empty. To avoid this problem, use a little
-	// endian commitment and chop the MSB.
-	retb := evaluated.Bytes()
-	for i := 0; i < 16; i++ {
-		retb[31-i], retb[i] = retb[i], retb[31-i]
-	}
+	retb := verkle.HashPointToBytes(evaluated)
 	retb[31] = suffix
 	return retb[:]
 }
