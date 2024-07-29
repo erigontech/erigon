@@ -147,7 +147,7 @@ func HandleEndpoint[T any](h EndpointHandler[T]) http.HandlerFunc {
 		case strings.Contains(contentType, "text/event-stream"):
 			return
 		default:
-			http.Error(w, fmt.Sprintf("content type must include application/json, application/octet-stream, or text/event-stream, got %s", contentType), http.StatusBadRequest)
+			http.Error(w, "content type must include application/json, application/octet-stream, or text/event-stream, got "+contentType, http.StatusBadRequest)
 		}
 	})
 }

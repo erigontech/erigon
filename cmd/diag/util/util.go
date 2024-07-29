@@ -19,6 +19,7 @@ package util
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -43,7 +44,7 @@ func MakeHttpGetCall(ctx context.Context, url string, data interface{}) error {
 	resp, err := client.Do(req)
 	if err != nil {
 		if strings.Contains(err.Error(), "connection refused") {
-			return fmt.Errorf("it looks like the Erigon node is not running, is running incorrectly, or you have specified the wrong diagnostics URL. If you run the Erigon node with the '--diagnostics.endpoint.addr' or '--diagnostics.endpoint.port' flags, you must also specify the '--debug.addr' flag with the same address and port")
+			return errors.New("it looks like the Erigon node is not running, is running incorrectly, or you have specified the wrong diagnostics URL. If you run the Erigon node with the '--diagnostics.endpoint.addr' or '--diagnostics.endpoint.port' flags, you must also specify the '--debug.addr' flag with the same address and port")
 		}
 		return err
 	}
@@ -57,7 +58,7 @@ func MakeHttpGetCall(ctx context.Context, url string, data interface{}) error {
 	err = json.Unmarshal(body, &data)
 	if err != nil {
 		if err.Error() == "invalid character 'p' after top-level value" {
-			return fmt.Errorf("diagnostics was not initialized yet. Please try again in a few seconds")
+			return errors.New("diagnostics was not initialized yet. Please try again in a few seconds")
 		}
 
 		return err

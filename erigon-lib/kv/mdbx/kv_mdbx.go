@@ -230,7 +230,7 @@ func PathDbMap() map[string]kv.RoDB {
 	return maps.Clone(pathDbMap)
 }
 
-var ErrDBDoesNotExists = fmt.Errorf("can't create database - because opening in `Accede` mode. probably another (main) process can create it")
+var ErrDBDoesNotExists = errors.New("can't create database - because opening in `Accede` mode. probably another (main) process can create it")
 
 func (opts MdbxOpts) Open(ctx context.Context) (kv.RwDB, error) {
 	opts = opts.WriteMap(dbg.WriteMap())
@@ -759,7 +759,7 @@ func (db *MdbxKV) BeginRo(ctx context.Context) (txn kv.Tx, err error) {
 	}
 
 	if !db.trackTxBegin() {
-		return nil, fmt.Errorf("db closed")
+		return nil, errors.New("db closed")
 	}
 
 	// will return nil err if context is cancelled (may appear to acquire the semaphore)
@@ -806,7 +806,7 @@ func (db *MdbxKV) beginRw(ctx context.Context, flags uint) (txn kv.RwTx, err err
 	}
 
 	if !db.trackTxBegin() {
-		return nil, fmt.Errorf("db closed")
+		return nil, errors.New("db closed")
 	}
 
 	runtime.LockOSThread()
@@ -1007,7 +1007,7 @@ func (tx *MdbxTx) CreateBucket(name string) error {
 		flags ^= kv.DupSort
 	}
 	if flags != 0 {
-		return fmt.Errorf("some not supported flag provided for bucket")
+		return errors.New("some not supported flag provided for bucket")
 	}
 
 	dbi, err = tx.tx.OpenDBI(name, nativeFlags, nil, nil)

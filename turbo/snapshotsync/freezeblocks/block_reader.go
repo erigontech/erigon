@@ -254,7 +254,7 @@ func (r *RemoteBlockReader) BodyRlp(ctx context.Context, tx kv.Getter, hash comm
 }
 
 func (r *RemoteBlockReader) LastEventId(ctx context.Context, tx kv.Tx) (uint64, bool, error) {
-	return 0, false, fmt.Errorf("not implemented")
+	return 0, false, errors.New("not implemented")
 }
 
 func (r *RemoteBlockReader) EventLookup(ctx context.Context, tx kv.Getter, txnHash common.Hash) (uint64, bool, error) {
@@ -301,7 +301,7 @@ func (r *RemoteBlockReader) LastFrozenSpanId() uint64 {
 }
 
 func (r *RemoteBlockReader) LastMilestoneId(ctx context.Context, tx kv.Tx) (uint64, bool, error) {
-	return 0, false, fmt.Errorf("not implemented")
+	return 0, false, errors.New("not implemented")
 }
 
 func (r *RemoteBlockReader) Milestone(ctx context.Context, tx kv.Getter, spanId uint64) ([]byte, error) {
@@ -309,7 +309,7 @@ func (r *RemoteBlockReader) Milestone(ctx context.Context, tx kv.Getter, spanId 
 }
 
 func (r *RemoteBlockReader) LastCheckpointId(ctx context.Context, tx kv.Tx) (uint64, bool, error) {
-	return 0, false, fmt.Errorf("not implemented")
+	return 0, false, errors.New("not implemented")
 }
 
 func (r *RemoteBlockReader) Checkpoint(ctx context.Context, tx kv.Getter, spanId uint64) ([]byte, error) {

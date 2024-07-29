@@ -18,6 +18,7 @@ package trie
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 	"io"
 	"math/bits"
@@ -488,7 +489,7 @@ func (hb *HashBuilder) extensionHash(key []byte) error {
 		fmt.Printf("extensionHash [%x]=>[%x]\nHash [%x]\n", key, capture, hb.hashStack[len(hb.hashStack)-hashStackStride:len(hb.hashStack)])
 	}
 	if _, ok := hb.nodeStack[len(hb.nodeStack)-1].(*fullNode); ok {
-		return fmt.Errorf("extensionHash cannot be emitted when a node is on top of the stack")
+		return errors.New("extensionHash cannot be emitted when a node is on top of the stack")
 	}
 	return nil
 }
@@ -670,7 +671,7 @@ func (hb *HashBuilder) emptyRoot() {
 
 func (hb *HashBuilder) RootHash() (libcommon.Hash, error) {
 	if !hb.hasRoot() {
-		return libcommon.Hash{}, fmt.Errorf("no root in the tree")
+		return libcommon.Hash{}, errors.New("no root in the tree")
 	}
 	return hb.rootHash(), nil
 }

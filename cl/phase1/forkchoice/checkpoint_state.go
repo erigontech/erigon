@@ -17,6 +17,7 @@
 package forkchoice
 
 import (
+	"errors"
 	"fmt"
 
 	"github.com/erigontech/erigon/cl/cltypes/solid"
@@ -135,7 +136,7 @@ func (c *checkpointState) getAttestingIndicies(attestation *solid.AttestationDat
 		bitIndex := i % 8
 		sliceIndex := i / 8
 		if sliceIndex >= len(aggregationBits) {
-			return nil, fmt.Errorf("GetAttestingIndicies: committee is too big")
+			return nil, errors.New("GetAttestingIndicies: committee is too big")
 		}
 		if (aggregationBits[sliceIndex] & (1 << bitIndex)) > 0 {
 			attestingIndices = append(attestingIndices, member)
@@ -177,7 +178,7 @@ func (c *checkpointState) getDomain(domainType [4]byte, epoch uint64) ([]byte, e
 func (c *checkpointState) isValidIndexedAttestation(att *cltypes.IndexedAttestation) (bool, error) {
 	inds := att.AttestingIndices
 	if inds.Length() == 0 || !solid.IsUint64SortedSet(inds) {
-		return false, fmt.Errorf("isValidIndexedAttestation: attesting indices are not sorted or are null")
+		return false, errors.New("isValidIndexedAttestation: attesting indices are not sorted or are null")
 	}
 
 	pks := [][]byte{}
@@ -206,7 +207,7 @@ func (c *checkpointState) isValidIndexedAttestation(att *cltypes.IndexedAttestat
 		return false, fmt.Errorf("error while validating signature: %v", err)
 	}
 	if !valid {
-		return false, fmt.Errorf("invalid aggregate signature")
+		return false, errors.New("invalid aggregate signature")
 	}
 	return true, nil
 }
