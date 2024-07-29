@@ -411,14 +411,7 @@ func (p *TxPool) OnNewBlock(ctx context.Context, stateChanges *remote.StateChang
 		return err
 	}
 
-	var baseFee uint64
-	if !p.ethCfg.AllowFreeTransactions {
-		baseFee = stateChanges.PendingBlockBaseFee
-	} else {
-		baseFee = uint64(0)
-	}
-
-	pendingBaseFee, baseFeeChanged := p.setBaseFee(baseFee)
+	pendingBaseFee, baseFeeChanged := p.setBaseFee(stateChanges.PendingBlockBaseFee, p.ethCfg.AllowFreeTransactions)
 	// Update pendingBase for all pool queues and slices
 	if baseFeeChanged {
 		p.pending.best.pendingBaseFee = pendingBaseFee
@@ -1048,10 +1041,23 @@ func addTxs(blockNum uint64, cacheView kvcache.CacheView, senders *sendersBatch,
 
 	return announcements, discardReasons, nil
 }
-func addTxsOnNewBlock(blockNum uint64, cacheView kvcache.CacheView, stateChanges *remote.StateChangeBatch,
-	senders *sendersBatch, newTxs types.TxSlots, pendingBaseFee uint64, blockGasLimit uint64,
-	pending *PendingPool, baseFee, queued *SubPool,
-	byNonce *BySenderAndNonce, byHash map[string]*metaTx, sendersWithChangedStateBeforeLimboTrim *LimboSendersWithChangedState, add func(*metaTx, *types.Announcements) DiscardReason, discard func(*metaTx, DiscardReason)) (types.Announcements, error) {
+func addTxsOnNewBlock(
+	blockNum uint64,
+	cacheView kvcache.CacheView,
+	stateChanges *remote.StateChangeBatch,
+	senders *sendersBatch,
+	newTxs types.TxSlots,
+	pendingBaseFee uint64,
+	blockGasLimit uint64,
+	pending *PendingPool,
+	baseFee,
+	queued *SubPool,
+	byNonce *BySenderAndNonce,
+	byHash map[string]*metaTx,
+	sendersWithChangedStateBeforeLimboTrim *LimboSendersWithChangedState,
+	add func(*metaTx, *types.Announcements) DiscardReason,
+	discard func(*metaTx, DiscardReason),
+) (types.Announcements, error) {
 	protocolBaseFee := calcProtocolBaseFee(pendingBaseFee)
 	if assert.Enable {
 		for _, txn := range newTxs.Txs {
@@ -1121,8 +1127,14 @@ func addTxsOnNewBlock(blockNum uint64, cacheView kvcache.CacheView, stateChanges
 	return announcements, nil
 }
 
-func (p *TxPool) setBaseFee(baseFee uint64) (uint64, bool) {
+func (p *TxPool) setBaseFee(baseFee uint64, allowFreeTransactions bool) (uint64, bool) {
 	changed := false
+	if allowFreeTransactions {
+		changed = uint64(0) != p.pendingBaseFee.Load()
+		p.pendingBaseFee.Store(0)
+		return 0, changed
+	}
+
 	if baseFee > 0 {
 		changed = baseFee != p.pendingBaseFee.Load()
 		p.pendingBaseFee.Store(baseFee)
