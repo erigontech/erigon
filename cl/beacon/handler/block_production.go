@@ -1091,8 +1091,7 @@ func (a *ApiHandler) findBestAttestationsForBlockProduction(
 			log.Warn("[Block Production] Cannot compute attestation data root", "err", err)
 			continue
 		}
-		curAtt, exists := hashToMergedAtt[attestationDataRoot]
-		if exists {
+		if curAtt, exists := hashToMergedAtt[attestationDataRoot]; exists {
 			currAggregationBits := curAtt.AggregationBits()
 			if !utils.IsNonStrictSupersetBitlist(
 				currAggregationBits,
