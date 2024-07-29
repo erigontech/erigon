@@ -50,7 +50,10 @@ const (
 
 	transactionGasLimit = 30000000
 
-	yieldSize = 100 // arbitrary number defining how many transactions to yield from the pool at once
+	// this is the max number of send transactions that can be included in a block without overflowing counters
+	// this is for simple send transactions, any other type would consume more counters
+	//
+	preForkId11TxLimit = 444
 )
 
 var (

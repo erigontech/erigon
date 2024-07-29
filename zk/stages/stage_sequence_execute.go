@@ -387,7 +387,7 @@ func SpawnSequencingStage(
 			default:
 				if limboRecovery {
 					cfg.txPool.LockFlusher()
-					blockTransactions, err = getLimboTransaction(cfg, limboTxHash)
+					blockTransactions, err = getLimboTransaction(ctx, cfg, limboTxHash)
 					if err != nil {
 						cfg.txPool.UnlockFlusher()
 						return err
@@ -395,12 +395,18 @@ func SpawnSequencingStage(
 					cfg.txPool.UnlockFlusher()
 				} else if !l1Recovery {
 					cfg.txPool.LockFlusher()
-					blockTransactions, err = getNextPoolTransactions(cfg, executionAt, forkId, yielded)
+					blockTransactions, err = getNextPoolTransactions(ctx, cfg, executionAt, forkId, yielded)
 					if err != nil {
 						cfg.txPool.UnlockFlusher()
 						return err
 					}
 					cfg.txPool.UnlockFlusher()
+				}
+
+				if len(blockTransactions) == 0 {
+					time.Sleep(250 * time.Millisecond)
+				} else {
+					log.Trace(fmt.Sprintf("[%s] Yielded transactions from the pool", logPrefix), "txCount", len(blockTransactions))
 				}
 
 				var receipt *types.Receipt

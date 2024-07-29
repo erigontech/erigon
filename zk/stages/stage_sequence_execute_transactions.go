@@ -3,7 +3,6 @@ package stages
 import (
 	"context"
 	"encoding/binary"
-	"time"
 
 	"github.com/gateway-fm/cdk-erigon-lib/common"
 	"github.com/gateway-fm/cdk-erigon-lib/kv"
@@ -26,75 +25,48 @@ import (
 	"github.com/ledgerwatch/log/v3"
 )
 
-func getNextPoolTransactions(cfg SequenceBlockCfg, executionAt, forkId uint64, alreadyYielded mapset.Set[[32]byte]) ([]types.Transaction, error) {
+func getNextPoolTransactions(ctx context.Context, cfg SequenceBlockCfg, executionAt, forkId uint64, alreadyYielded mapset.Set[[32]byte]) ([]types.Transaction, error) {
 	var transactions []types.Transaction
 	var err error
-	var count int
-	killer := time.NewTicker(50 * time.Millisecond)
-LOOP:
-	for {
-		// ensure we don't spin forever looking for transactions, attempt for a while then exit up to the caller
-		select {
-		case <-killer.C:
-			break LOOP
-		default:
-		}
-		if err := cfg.txPoolDb.View(context.Background(), func(poolTx kv.Tx) error {
-			slots := types2.TxsRlp{}
-			_, count, err = cfg.txPool.YieldBest(yieldSize, &slots, poolTx, executionAt, utils.GetBlockGasLimitForFork(forkId), alreadyYielded)
-			if err != nil {
-				return err
-			}
-			if count == 0 {
-				time.Sleep(500 * time.Microsecond)
-				return nil
-			}
-			transactions, err = extractTransactionsFromSlot(&slots)
-			if err != nil {
-				return err
-			}
-			return nil
-		}); err != nil {
-			return nil, err
-		}
+	gasLimit := utils.GetBlockGasLimitForFork(forkId)
 
-		if len(transactions) > 0 {
-			break
+	if err := cfg.txPoolDb.View(ctx, func(poolTx kv.Tx) error {
+		slots := types2.TxsRlp{}
+		if _, _, err = cfg.txPool.YieldBest(preForkId11TxLimit, &slots, poolTx, executionAt, gasLimit, alreadyYielded); err != nil {
+			return err
 		}
+		yieldedTxs, err := extractTransactionsFromSlot(&slots)
+		if err != nil {
+			return err
+		}
+		transactions = append(transactions, yieldedTxs...)
+		return nil
+	}); err != nil {
+		return nil, err
 	}
 
 	return transactions, err
 }
 
-func getLimboTransaction(cfg SequenceBlockCfg, txHash *common.Hash) ([]types.Transaction, error) {
+func getLimboTransaction(ctx context.Context, cfg SequenceBlockCfg, txHash *common.Hash) ([]types.Transaction, error) {
 	var transactions []types.Transaction
+	// ensure we don't spin forever looking for transactions, attempt for a while then exit up to the caller
+	if err := cfg.txPoolDb.View(ctx, func(poolTx kv.Tx) error {
+		slots, err := cfg.txPool.GetLimboTxRplsByHash(poolTx, txHash)
+		if err != nil {
+			return err
+		}
 
-	for {
-		// ensure we don't spin forever looking for transactions, attempt for a while then exit up to the caller
-		if err := cfg.txPoolDb.View(context.Background(), func(poolTx kv.Tx) error {
-			slots, err := cfg.txPool.GetLimboTxRplsByHash(poolTx, txHash)
+		if slots != nil {
+			transactions, err = extractTransactionsFromSlot(slots)
 			if err != nil {
 				return err
 			}
-
-			if slots != nil {
-				transactions, err = extractTransactionsFromSlot(slots)
-				if err != nil {
-					return err
-				}
-			}
-
-			return nil
-		}); err != nil {
-			return nil, err
 		}
 
-		if len(transactions) == 0 {
-			time.Sleep(250 * time.Millisecond)
-		} else {
-			break
-		}
-
+		return nil
+	}); err != nil {
+		return nil, err
 	}
 
 	return transactions, nil
