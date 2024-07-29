@@ -19,8 +19,7 @@ package types
 import (
 	"bytes"
 	"encoding/json"
-	"fmt"
-
+	"errors"
 	// "fmt"
 	"io"
 
@@ -113,7 +112,7 @@ func (w *WithdrawalRequest) UnmarshalJSON(input []byte) error {
 		return err
 	}
 	if len(validatorKey) != 48 {
-		return fmt.Errorf("decoded validatorKey len after UnmarshalJSON doesn't match BLSKeyLen")
+		return errors.New("decoded validatorKey len after UnmarshalJSON doesn't match BLSKeyLen")
 	}
 
 	w.ValidatorPubkey = [48]byte(validatorKey)
