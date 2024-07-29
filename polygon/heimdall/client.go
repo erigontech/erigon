@@ -534,7 +534,7 @@ func stateSyncURL(urlString string, id uint64) (*url.URL, error) {
 }
 
 func checkpointURL(urlString string, number int64) (*url.URL, error) {
-	url := ""
+	var url string
 	if number == -1 {
 		url = fmt.Sprintf(fetchCheckpoint, "latest")
 	} else {
