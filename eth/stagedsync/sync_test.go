@@ -206,21 +206,6 @@ func TestUnwindSomeStagesBehindUnwindPoint(t *testing.T) {
 				return u.Done(txc.Tx)
 			},
 		},
-		{
-			ID:       stages.IntermediateHashes,
-			Disabled: true,
-			Forward: func(badBlockUnwind bool, s *StageState, u Unwinder, txc wrap.TxContainer, logger log.Logger) error {
-				flow = append(flow, stages.IntermediateHashes)
-				if s.BlockNumber == 0 {
-					return s.Update(txc.Tx, 2000)
-				}
-				return nil
-			},
-			Unwind: func(u *UnwindState, s *StageState, txc wrap.TxContainer, logger log.Logger) error {
-				flow = append(flow, unwindOf(stages.IntermediateHashes))
-				return u.Done(txc.Tx)
-			},
-		},
 	}
 	state := New(ethconfig.Defaults.Sync, s, []stages.SyncStage{s[3].ID, s[2].ID, s[1].ID, s[0].ID}, nil, log.New())
 	db, tx := memdb.NewTestTx(t)
@@ -296,21 +281,6 @@ func TestUnwind(t *testing.T) {
 			},
 			Unwind: func(u *UnwindState, s *StageState, txc wrap.TxContainer, logger log.Logger) error {
 				flow = append(flow, unwindOf(stages.Senders))
-				return u.Done(txc.Tx)
-			},
-		},
-		{
-			ID:       stages.IntermediateHashes,
-			Disabled: true,
-			Forward: func(badBlockUnwind bool, s *StageState, u Unwinder, txc wrap.TxContainer, logger log.Logger) error {
-				flow = append(flow, stages.IntermediateHashes)
-				if s.BlockNumber == 0 {
-					return s.Update(txc.Tx, 2000)
-				}
-				return nil
-			},
-			Unwind: func(u *UnwindState, s *StageState, txc wrap.TxContainer, logger log.Logger) error {
-				flow = append(flow, unwindOf(stages.IntermediateHashes))
 				return u.Done(txc.Tx)
 			},
 		},
