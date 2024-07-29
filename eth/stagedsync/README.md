@@ -45,7 +45,7 @@ state.unwindOrder = []*Stage{
 	}
 ```
 
-## Preprocessing with [ETL](https://github.com/erigontech/erigon-lib/tree/main/etl)
+## Preprocessing with [ETL](https://github.com/erigontech/erigon/tree/main/erigon-lib/etl)
 
 Some stages use our ETL framework to sort data by keys before inserting it into the database.
 
