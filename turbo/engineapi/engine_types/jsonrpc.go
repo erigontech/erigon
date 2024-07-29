@@ -283,11 +283,11 @@ func ConvertDepositRequestsToRpc(in []*types.DepositRequest) []*types2.DepositRe
 	out := make([]*types2.DepositRequest, 0, len(in))
 	for _, w := range in {
 		out = append(out, &types2.DepositRequest{
-			Pubkey: w.Pubkey[:],
+			Pubkey:                w.Pubkey[:],
 			WithdrawalCredentials: gointerfaces.ConvertHashToH256(w.WithdrawalCredentials),
-			Amount: w.Amount,
-			Signature: w.Signature[:],
-			Index: w.Index,
+			Amount:                w.Amount,
+			Signature:             w.Signature[:],
+			Index:                 w.Index,
 		})
 	}
 	return out
@@ -317,9 +317,9 @@ func ConvertWithdrawalRequestsToRpc(in []*types.WithdrawalRequest) []*types2.Wit
 	out := make([]*types2.WithdrawalRequest, 0, len(in))
 	for _, w := range in {
 		out = append(out, &types2.WithdrawalRequest{
-			SourceAddress: gointerfaces.ConvertAddressToH160(w.SourceAddress),
+			SourceAddress:   gointerfaces.ConvertAddressToH160(w.SourceAddress),
 			ValidatorPubkey: w.ValidatorPubkey[:],
-			Amount: w.Amount,
+			Amount:          w.Amount,
 		})
 	}
 	return out
@@ -348,8 +348,8 @@ func ConvertConsolidationRequestsToRpc(in []*types.ConsolidationRequest) []*type
 	for _, w := range in {
 		out = append(out, &types2.ConsolidationRequest{
 			SourceAddress: gointerfaces.ConvertAddressToH160(w.SourceAddress),
-			SourcePubkey: w.SourcePubKey[:],
-			TargetPubkey: w.TargetPubKey[:],
+			SourcePubkey:  w.SourcePubKey[:],
+			TargetPubkey:  w.TargetPubKey[:],
 		})
 	}
 	return out
