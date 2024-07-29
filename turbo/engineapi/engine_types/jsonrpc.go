@@ -276,6 +276,23 @@ func ConvertWithdrawalsFromRpc(in []*types2.Withdrawal) []*types.Withdrawal {
 	return out
 }
 
+func ConvertDepositRequestsToRpc(in []*types.DepositRequest) []*types2.DepositRequest {
+	if in == nil {
+		return nil
+	}
+	out := make([]*types2.DepositRequest, 0, len(in))
+	for _, w := range in {
+		out = append(out, &types2.DepositRequest{
+			Pubkey: w.Pubkey[:],
+			WithdrawalCredentials: gointerfaces.ConvertHashToH256(w.WithdrawalCredentials),
+			Amount: w.Amount,
+			Signature: w.Signature[:],
+			Index: w.Index,
+		})
+	}
+	return out
+}
+
 func ConvertDepositRequestsFromRpc(in []*types2.DepositRequest) []*types.DepositRequest {
 	if in == nil {
 		return nil
@@ -293,6 +310,21 @@ func ConvertDepositRequestsFromRpc(in []*types2.DepositRequest) []*types.Deposit
 	return out
 }
 
+func ConvertWithdrawalRequestsToRpc(in []*types.WithdrawalRequest) []*types2.WithdrawalRequest {
+	if in == nil {
+		return nil
+	}
+	out := make([]*types2.WithdrawalRequest, 0, len(in))
+	for _, w := range in {
+		out = append(out, &types2.WithdrawalRequest{
+			SourceAddress: gointerfaces.ConvertAddressToH160(w.SourceAddress),
+			ValidatorPubkey: w.ValidatorPubkey[:],
+			Amount: w.Amount,
+		})
+	}
+	return out
+}
+
 func ConvertWithdrawalRequestsFromRpc(in []*types2.WithdrawalRequest) []*types.WithdrawalRequest {
 	if in == nil {
 		return nil
@@ -303,6 +335,21 @@ func ConvertWithdrawalRequestsFromRpc(in []*types2.WithdrawalRequest) []*types.W
 			SourceAddress:   gointerfaces.ConvertH160toAddress(w.SourceAddress),
 			ValidatorPubkey: [48]byte(w.ValidatorPubkey),
 			Amount:          w.Amount,
+		})
+	}
+	return out
+}
+
+func ConvertConsolidationRequestsToRpc(in []*types.ConsolidationRequest) []*types2.ConsolidationRequest {
+	if in == nil {
+		return nil
+	}
+	out := make([]*types2.ConsolidationRequest, 0, len(in))
+	for _, w := range in {
+		out = append(out, &types2.ConsolidationRequest{
+			SourceAddress: gointerfaces.ConvertAddressToH160(w.SourceAddress),
+			SourcePubkey: w.SourcePubKey[:],
+			TargetPubkey: w.TargetPubKey[:],
 		})
 	}
 	return out
