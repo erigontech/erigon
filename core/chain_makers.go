@@ -22,6 +22,7 @@ package core
 import (
 	"context"
 	"encoding/binary"
+	"errors"
 	"fmt"
 	"math/big"
 
@@ -407,7 +408,7 @@ func GenerateChain(config *chain.Config, parent *types.Block, engine consensus.E
 			block := types.NewBlock(b.header, b.txs, b.uncles, b.receipts, nil /* withdrawals */, nil /*requests*/)
 			return block, b.receipts, nil
 		}
-		return nil, nil, fmt.Errorf("no engine to generate blocks")
+		return nil, nil, errors.New("no engine to generate blocks")
 	}
 
 	for i := 0; i < n; i++ {

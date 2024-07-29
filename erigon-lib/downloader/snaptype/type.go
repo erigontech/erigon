@@ -52,7 +52,7 @@ func ParseVersion(v string) (Version, error) {
 	}
 
 	if len(v) == 0 {
-		return 0, fmt.Errorf("invalid version: no prefix")
+		return 0, errors.New("invalid version: no prefix")
 	}
 
 	return 0, fmt.Errorf("invalid version prefix: %s", v[0:1])

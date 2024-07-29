@@ -17,6 +17,7 @@
 package sentinelcli
 
 import (
+	"errors"
 	"fmt"
 
 	"github.com/erigontech/erigon/cl/clparams"
@@ -60,7 +61,7 @@ func SetupSentinelCli(ctx *cli.Context) (*SentinelCliCfg, error) {
 			return nil, err
 		}
 		if ctx.String(sentinelflags.GenesisSSZFlag.Name) == "" {
-			return nil, fmt.Errorf("no genesis file provided")
+			return nil, errors.New("no genesis file provided")
 		}
 
 	}

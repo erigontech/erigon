@@ -21,7 +21,6 @@ import (
 	"context"
 	"encoding/binary"
 	"errors"
-	"fmt"
 	"slices"
 	"sync"
 
@@ -95,7 +94,7 @@ func (s *syncContributionService) ProcessMessage(ctx context.Context, subnet *ui
 
 	// [REJECT] The subcommittee index is in the allowed range, i.e. contribution.subcommittee_index < SYNC_COMMITTEE_SUBNET_COUNT.
 	if contributionAndProof.Contribution.SubcommitteeIndex >= clparams.MainnetBeaconConfig.SyncCommitteeSubnetCount {
-		return fmt.Errorf("subcommittee index is out of range")
+		return errors.New("subcommittee index is out of range")
 	}
 
 	aggregatorPubKey, err := headState.ValidatorPublicKey(int(contributionAndProof.AggregatorIndex))
@@ -114,18 +113,18 @@ func (s *syncContributionService) ProcessMessage(ctx context.Context, subnet *ui
 
 	// [REJECT] The contribution has participants -- that is, any(contribution.aggregation_bits).
 	if bytes.Equal(aggregationBits, make([]byte, len(aggregationBits))) { // check if the aggregation bits are all zeros
-		return fmt.Errorf("contribution has no participants")
+		return errors.New("contribution has no participants")
 	}
 
 	modulo := max(1, s.beaconCfg.SyncCommitteeSize/s.beaconCfg.SyncCommitteeSubnetCount/s.beaconCfg.TargetAggregatorsPerSyncSubcommittee)
 	hashSignature := utils.Sha256(selectionProof[:])
 	if !s.test && binary.LittleEndian.Uint64(hashSignature[:8])%modulo != 0 {
-		return fmt.Errorf("selects the validator as an aggregator")
+		return errors.New("selects the validator as an aggregator")
 	}
 
 	// [REJECT] The aggregator's validator index is in the declared subcommittee of the current sync committee -- i.e. state.validators[contribution_and_proof.aggregator_index].pubkey in get_sync_subcommittee_pubkeys(state, contribution.subcommittee_index).
 	if !slices.Contains(subcommiteePubsKeys, aggregatorPubKey) {
-		return fmt.Errorf("aggregator's validator index is not in subcommittee")
+		return errors.New("aggregator's validator index is not in subcommittee")
 	}
 
 	// [IGNORE] The sync committee contribution is the first valid contribution received for the aggregator with index contribution_and_proof.aggregator_index for the slot contribution.slot and subcommittee index contribution.subcommittee_index (this requires maintaining a cache of size SYNC_COMMITTEE_SIZE for this topic that can be flushed after each slot).
@@ -236,7 +235,7 @@ func verifySyncContributionSelectionProof(st *state.CachingBeaconState, contribu
 		return err
 	}
 	if !valid {
-		return fmt.Errorf("invalid selectionProof signature")
+		return errors.New("invalid selectionProof signature")
 	}
 	return nil
 }
@@ -266,7 +265,7 @@ func verifySyncContributionProofAggregatedSignature(s *state.CachingBeaconState,
 	}
 
 	if !valid {
-		return fmt.Errorf("invalid signature for aggregate sync contribution")
+		return errors.New("invalid signature for aggregate sync contribution")
 	}
 	return nil
 }

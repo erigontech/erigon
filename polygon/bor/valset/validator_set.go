@@ -20,6 +20,7 @@ package valset
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 	"math"
 	"math/big"
@@ -618,7 +619,7 @@ func (vals *ValidatorSet) updateWithChangeSet(changes []*Validator, allowDeletes
 
 	// Check that the resulting set will not be empty.
 	if numNewValidators == 0 && len(vals.Validators) == len(deletes) {
-		return fmt.Errorf("applying the validator changes would result in empty set")
+		return errors.New("applying the validator changes would result in empty set")
 	}
 
 	// Compute the priorities for updates.

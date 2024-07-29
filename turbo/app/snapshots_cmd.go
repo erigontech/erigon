@@ -585,7 +585,7 @@ func doDecompressSpeed(cliCtx *cli.Context) error {
 	}
 	args := cliCtx.Args()
 	if args.Len() < 1 {
-		return fmt.Errorf("expecting file path as a first argument")
+		return errors.New("expecting file path as a first argument")
 	}
 	f := args.First()
 
@@ -758,7 +758,7 @@ func doUncompress(cliCtx *cli.Context) error {
 
 	args := cliCtx.Args()
 	if args.Len() < 1 {
-		return fmt.Errorf("expecting file path as a first argument")
+		return errors.New("expecting file path as a first argument")
 	}
 	f := args.First()
 
@@ -811,7 +811,7 @@ func doCompress(cliCtx *cli.Context) error {
 
 	args := cliCtx.Args()
 	if args.Len() < 1 {
-		return fmt.Errorf("expecting file path as a first argument")
+		return errors.New("expecting file path as a first argument")
 	}
 	f := args.First()
 	dirs := datadir.New(cliCtx.String(utils.DataDirFlag.Name))

@@ -704,7 +704,7 @@ func initValidatorSets(
 				}
 
 				if zeroSpanBytes == nil {
-					return nil, fmt.Errorf("zero span not found")
+					return nil, errors.New("zero span not found")
 				}
 
 				var zeroSpan heimdall.Span

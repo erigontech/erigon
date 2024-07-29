@@ -355,7 +355,7 @@ var torrentCat = &cobra.Command{
 	Example: "go run ./cmd/downloader torrent_cat <path_to_torrent_file>",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		if len(args) == 0 {
-			return fmt.Errorf("please pass .torrent file path by first argument")
+			return errors.New("please pass .torrent file path by first argument")
 		}
 		fPath := args[0]
 		mi, err := metainfo.LoadFromFile(fPath)
@@ -415,7 +415,7 @@ var torrentMagnet = &cobra.Command{
 	Example: "go run ./cmd/downloader torrent_magnet <path_to_torrent_file>",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		if len(args) == 0 {
-			return fmt.Errorf("please pass .torrent file path by first argument")
+			return errors.New("please pass .torrent file path by first argument")
 		}
 		fPath := args[0]
 		mi, err := metainfo.LoadFromFile(fPath)

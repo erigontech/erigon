@@ -535,7 +535,7 @@ func (s *KvServer) DomainGet(_ context.Context, req *remote.DomainGetReq) (reply
 	if err := s.with(req.TxId, func(tx kv.Tx) error {
 		ttx, ok := tx.(kv.TemporalTx)
 		if !ok {
-			return fmt.Errorf("server DB doesn't implement kv.Temporal interface")
+			return errors.New("server DB doesn't implement kv.Temporal interface")
 		}
 		if req.Latest {
 			reply.V, _, err = ttx.DomainGet(domainName, req.K, req.K2)
@@ -559,7 +559,7 @@ func (s *KvServer) HistorySeek(_ context.Context, req *remote.HistorySeekReq) (r
 	if err := s.with(req.TxId, func(tx kv.Tx) error {
 		ttx, ok := tx.(kv.TemporalTx)
 		if !ok {
-			return fmt.Errorf("server DB doesn't implement kv.Temporal interface")
+			return errors.New("server DB doesn't implement kv.Temporal interface")
 		}
 		reply.V, reply.Ok, err = ttx.HistorySeek(kv.History(req.Table), req.K, req.Ts)
 		if err != nil {
@@ -591,7 +591,7 @@ func (s *KvServer) IndexRange(_ context.Context, req *remote.IndexRangeReq) (*re
 	if err := s.with(req.TxId, func(tx kv.Tx) error {
 		ttx, ok := tx.(kv.TemporalTx)
 		if !ok {
-			return fmt.Errorf("server DB doesn't implement kv.Temporal interface")
+			return errors.New("server DB doesn't implement kv.Temporal interface")
 		}
 		it, err := ttx.IndexRange(kv.InvertedIdx(req.Table), req.K, from, int(req.ToTs), order.By(req.OrderAscend), limit)
 		if err != nil {
