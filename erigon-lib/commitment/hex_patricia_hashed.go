@@ -256,7 +256,7 @@ func (cell *Cell) fillFromUpperCell(upCell *Cell, depth, depthIncrement int) {
 	// }
 
 	//cell.alhlen = 0
-	// upCell.alhlen = 0
+	//upCell.alhlen = 0
 	cell.loaded = upCell.loaded
 }
 
@@ -757,6 +757,9 @@ func (hph *HexPatriciaHashed) extensionHash(key []byte, hash []byte) ([length.Ha
 
 func (hph *HexPatriciaHashed) computeCellHashLen(cell *Cell, depth int) int {
 	if cell.spl > 0 && depth >= 64 {
+		if cell.alhlen > 0 {
+			return cell.alhlen + 1
+		}
 		keyLen := 128 - depth + 1 // Length of hex key with terminator character
 		var kp, kl int
 		compactLen := (keyLen-1)/2 + 1
@@ -771,6 +774,7 @@ func (hph *HexPatriciaHashed) computeCellHashLen(cell *Cell, depth int) int {
 		var lenPrefix [4]byte
 		pt := rlp.GenerateStructLen(lenPrefix[:], totalLen)
 		if totalLen+pt < length.Hash {
+			fmt.Printf("\tTOTAL LEN %d + PREFIXLen %d = %d\n", totalLen, pt, totalLen+pt)
 			return totalLen + pt
 		}
 	}
@@ -791,15 +795,27 @@ func (hph *HexPatriciaHashed) computeCellHash(cell *Cell, depth int, buf []byte)
 		if depth == 0 && cell.apl == 0 {
 			// if account key is empty, then we need to hash storage key from the key beginning
 			koffset = 0
-			//cell.alhlen = 0
 		}
 
-		// if cell.alhlen > 0 {
-		// 	res := append([]byte{160}, cell.accLeafHash[:cell.alhlen]...)
-		// 	hph.keccak.Reset()
-		// 	//fmt.Printf("OLDS %x %x\n", res, cell.spk[:cell.spl])
-		// 	return res, nil
-		// }
+		if !cell.loaded {
+			if cell.alhlen > 0 {
+				res := append([]byte{160}, cell.accLeafHash[:cell.alhlen]...)
+				hph.keccak.Reset()
+				fmt.Printf("OLDS %x %x\n", res, cell.spk[:cell.spl])
+				return res, nil
+			}
+			if err = hph.ctx.GetStorage(cell.spk[:cell.spl], cell); err != nil {
+				return nil, err
+			}
+			if cell.apl > 0 {
+				if err = hph.ctx.GetAccount(cell.apk[:cell.apl], cell); err != nil {
+					return nil, err
+				}
+				hadToLoad.Add(1)
+			}
+			hadToLoad.Add(1)
+			cell.loaded = true
+		}
 		if err := hashKey(hph.keccak, cell.spk[koffset:cell.spl], cell.downHashedKey[:], hashedKeyOffset); err != nil {
 			return nil, err
 		}
@@ -818,6 +834,7 @@ func (hph *HexPatriciaHashed) computeCellHash(cell *Cell, depth int, buf []byte)
 			}
 			storageRootHash = *(*[length.Hash]byte)(aux[1:])
 			storageRootHashIsSet = true
+			cell.alhlen = 0
 		} else {
 			if hph.trace {
 				fmt.Printf("leafHashWithKeyVal for [%x]=>[%x] %v\n", cell.downHashedKey[:64-hashedKeyOffset+1], cell.Storage[:cell.StorageLen], cell.String())
@@ -828,19 +845,13 @@ func (hph *HexPatriciaHashed) computeCellHash(cell *Cell, depth int, buf []byte)
 			}
 
 			//fmt.Printf("NEWS %x\n", accLeafHash)
-			//copy(cell.accLeafHash[:], accLeafHash[1:])
-			//cell.alhlen = length.Hash
+			copy(cell.accLeafHash[:], accLeafHash[1:])
+			cell.alhlen = length.Hash
 
 			return accLeafHash, nil
 		}
 	}
 	if cell.apl > 0 {
-		if cell.alhlen > 0 && !cell.loaded {
-			res := append([]byte{160}, cell.accLeafHash[:cell.alhlen]...)
-			//fmt.Printf("OLD %x %x\n", res, cell.apk[:cell.apl])
-			hph.keccak.Reset()
-			return res, nil
-		}
 		if err := hashKey(hph.keccak, cell.apk[:cell.apl], cell.downHashedKey[:], depth); err != nil {
 			return nil, err
 		}
@@ -865,9 +876,20 @@ func (hph *HexPatriciaHashed) computeCellHash(cell *Cell, depth int, buf []byte)
 				storageRootHash = *(*[length.Hash]byte)(EmptyRootHash)
 			}
 		}
-		//if !cell.loaded && cell. {
-		//	panic("norlod")
-		//}
+		if !cell.loaded {
+			if cell.alhlen > 0 {
+				res := append([]byte{160}, cell.accLeafHash[:cell.alhlen]...)
+				//fmt.Printf("OLD %x %x\n", res, cell.apk[:cell.apl])
+				hph.keccak.Reset()
+				return res, nil
+			}
+			if err = hph.ctx.GetAccount(cell.apk[:cell.apl], cell); err != nil {
+				return nil, err
+			}
+			hadToLoad.Add(1)
+			cell.loaded = true
+			fmt.Printf("account was not loaded %s\n", cell.FullString())
+		}
 
 		var valBuf [128]byte
 		valLen := cell.accountForHashing(valBuf[:], storageRootHash)
@@ -1010,27 +1032,27 @@ func (hph *HexPatriciaHashed) unfoldBranchNode(row, depth int, deleted bool) (bo
 		if hph.trace {
 			fmt.Printf("cell (%d, %x, depth=%d) %s\n", row, nibble, depth, cell.FullString())
 		}
-		//if !cell.loaded {
-		if cell.spl > 0 {
-			if cell.apl > 0 {
-				hadToLoad.Add(1)
-				if err = hph.ctx.GetAccount(cell.apk[:cell.apl], cell); err != nil {
-					return false, fmt.Errorf("unfoldBranchNode GetAccount: %w", err)
-				}
-				cell.loaded = true
-				if hph.trace {
-					fmt.Printf("unfold: GetAccount %s\n", cell.FullString())
-				}
-			}
-			hadToLoad.Add(1)
-			if err = hph.ctx.GetStorage(cell.spk[:cell.spl], cell); err != nil {
-				return false, fmt.Errorf("unfoldBranchNode GetStorage: %w", err)
-			}
-			cell.loaded = true
-			if hph.trace {
-				fmt.Printf("unfold: GetStorage %s\n", cell.FullString())
-			}
-		}
+		////if !cell.loaded {
+		//if cell.spl > 0 {
+		//	if cell.apl > 0 {
+		//		hadToLoad.Add(1)
+		//		if err = hph.ctx.GetAccount(cell.apk[:cell.apl], cell); err != nil {
+		//			return false, fmt.Errorf("unfoldBranchNode GetAccount: %w", err)
+		//		}
+		//		cell.loaded = true
+		//		if hph.trace {
+		//			fmt.Printf("unfold: GetAccount %s\n", cell.FullString())
+		//		}
+		//	}
+		//	hadToLoad.Add(1)
+		//	if err = hph.ctx.GetStorage(cell.spk[:cell.spl], cell); err != nil {
+		//		return false, fmt.Errorf("unfoldBranchNode GetStorage: %w", err)
+		//	}
+		//	cell.loaded = true
+		//	if hph.trace {
+		//		fmt.Printf("unfold: GetStorage %s\n", cell.FullString())
+		//	}
+		//}
 		//}
 
 		// relies on plain account/storage key so need to be dereferenced before hashing
@@ -1138,6 +1160,7 @@ func (hph *HexPatriciaHashed) needFolding(hashedKey []byte) bool {
 var (
 	hadToLoad   atomic.Uint64
 	skippedLoad atomic.Uint64
+	hadToReset  atomic.Uint64
 )
 
 // The purpose of fold is to reduce hph.currentKey[:hph.currentKeyLen]. It should be invoked
@@ -1193,15 +1216,9 @@ func (hph *HexPatriciaHashed) fold() (err error) {
 				hph.afterMap[row-1] &^= uint16(1) << col
 			}
 		}
-		upCell.hl = 0
-		upCell.apl = 0
-		upCell.spl = 0
-		upCell.extLen = 0
-		upCell.downHashedLen = 0
 
 		upCell.reset()
 		if hph.branchBefore[row] {
-			// TODO rubbish? seems it should be both maps 0
 			_, err := hph.branchEncoder.CollectUpdate(hph.ctx, updateKey, 0, hph.touchMap[row], 0, RetrieveCellNoop)
 			if err != nil {
 				return fmt.Errorf("failed to encode leaf node update: %w", err)
@@ -1266,6 +1283,7 @@ func (hph *HexPatriciaHashed) fold() (err error) {
 			if hph.touchMap[row]&hph.afterMap[row]&uint16(1<<nibble) > 0 && cell.alhlen > 0 {
 				//fmt.Printf("nibble %x touched %s\n", nibble, cell.FullString())
 				cell.alhlen = 0
+				hadToReset.Add(1)
 			}
 			if !cell.loaded && cell.alhlen == 0 {
 				if cell.apl > 0 {
@@ -1542,7 +1560,12 @@ func (hph *HexPatriciaHashed) ProcessTree(ctx context.Context, tree *Updates, lo
 	if err != nil {
 		return nil, fmt.Errorf("branch update failed: %w", err)
 	}
-	log.Warn("commitment finished, counters updated (no reset)", "hadToLoad", hadToLoad.Load(), "skippedLoad", skippedLoad.Load(), "ratio", float64(skippedLoad.Load())/float64(hadToLoad.Load()+skippedLoad.Load()))
+	log.Warn("commitment finished, counters updated (no reset)",
+		"hadToLoad", hadToLoad.Load(), "skippedLoad", skippedLoad.Load(),
+		"hadToReset", hadToReset.Load(),
+		"skip ratio", float64(skippedLoad.Load())/float64(hadToLoad.Load()+skippedLoad.Load()),
+		"reset ratio", float64(hadToReset.Load())/float64(hadToLoad.Load()+skippedLoad.Load()),
+	)
 	return rootHash, nil
 }
 
@@ -1745,15 +1768,7 @@ func (hph *HexPatriciaHashed) Variant() TrieVariant { return VariantHexPatriciaT
 
 // Reset allows HexPatriciaHashed instance to be reused for the new commitment calculation
 func (hph *HexPatriciaHashed) Reset() {
-	hph.root.hl = 0
-	hph.root.downHashedLen = 0
-	hph.root.apl = 0
-	hph.root.spl = 0
-	hph.root.extLen = 0
-	copy(hph.root.CodeHash[:], EmptyCodeHash)
-	hph.root.StorageLen = 0
-	hph.root.Balance.Clear()
-	hph.root.Nonce = 0
+	hph.root.reset()
 	hph.rootTouched = false
 	hph.rootChecked = false
 	hph.rootPresent = true
