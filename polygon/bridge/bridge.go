@@ -126,19 +126,30 @@ func (b *Bridge) Close() {
 // ProcessNewBlocks iterates through all blocks and constructs a map from block number to sync events
 func (b *Bridge) ProcessNewBlocks(ctx context.Context, blocks []*types.Block) error {
 	eventMap := make(map[uint64]uint64)
+	var prevSprintTime time.Time
+
 	for _, block := range blocks {
 		// check if block is start of span
 		if !b.isSprintStart(block.NumberU64()) {
 			continue
 		}
 
-		blockTimestamp := time.Unix(int64(block.Time()), 0)
-		lastDBID, err := b.store.GetSprintLastEventID(ctx, b.lastProcessedEventID, blockTimestamp, b.stateReceiverABI)
+		var timeLimit time.Time
+		if b.borConfig.IsIndore(block.NumberU64()) {
+			stateSyncDelay := b.borConfig.CalculateStateSyncDelay(block.NumberU64())
+			timeLimit = time.Unix(int64(block.Time()-stateSyncDelay), 0)
+		} else {
+			timeLimit = prevSprintTime
+		}
+
+		prevSprintTime = time.Unix(int64(block.Time()), 0)
+
+		lastDBID, err := b.store.GetSprintLastEventID(ctx, b.lastProcessedEventID, timeLimit, b.stateReceiverABI)
 		if err != nil {
 			return err
 		}
 
-		if lastDBID != 0 && lastDBID > b.lastProcessedEventID {
+		if lastDBID > b.lastProcessedEventID {
 			b.log.Debug(bridgeLogPrefix(fmt.Sprintf("Creating map for block %d, start ID %d, end ID %d", block.NumberU64(), b.lastProcessedEventID, lastDBID)))
 			eventMap[block.NumberU64()] = b.lastProcessedEventID
 
@@ -185,8 +196,6 @@ func (b *Bridge) GetEvents(ctx context.Context, blockNum uint64) ([]*types.Messa
 	if end == 0 { // exception for tip processing
 		end = b.lastProcessedEventID
 	}
-
-	b.log.Debug("got map", "blockNum", blockNum, "start", start, "end", end)
 
 	eventsRaw := make([]*types.Message, 0, end-start+1)
 
