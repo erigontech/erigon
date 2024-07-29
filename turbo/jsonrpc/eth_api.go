@@ -19,7 +19,7 @@ package jsonrpc
 import (
 	"bytes"
 	"context"
-	"fmt"
+	"errors"
 	"math/big"
 	"sync"
 	"sync/atomic"
@@ -257,7 +257,7 @@ func (api *BaseAPI) chainConfigWithGenesis(ctx context.Context, tx kv.Tx) (*chai
 		return nil, nil, err
 	}
 	if genesisBlock == nil {
-		return nil, nil, fmt.Errorf("genesis block not found in database")
+		return nil, nil, errors.New("genesis block not found in database")
 	}
 	cc, err = rawdb.ReadChainConfig(tx, genesisBlock.Hash())
 	if err != nil {
@@ -316,7 +316,7 @@ func (api *BaseAPI) checkPruneHistory(tx kv.Tx, block uint64) error {
 		}
 		prunedTo := p.History.PruneTo(latest)
 		if block < prunedTo {
-			return fmt.Errorf("history has been pruned for this block")
+			return errors.New("history has been pruned for this block")
 		}
 	}
 

@@ -327,7 +327,7 @@ func (back *RemoteBackend) Span(ctx context.Context, tx kv.Getter, spanId uint64
 }
 
 func (r *RemoteBackend) LastMilestoneId(ctx context.Context, tx kv.Tx) (uint64, bool, error) {
-	return 0, false, fmt.Errorf("not implemented")
+	return 0, false, errors.New("not implemented")
 }
 
 func (r *RemoteBackend) Milestone(ctx context.Context, tx kv.Getter, spanId uint64) ([]byte, error) {
@@ -335,7 +335,7 @@ func (r *RemoteBackend) Milestone(ctx context.Context, tx kv.Getter, spanId uint
 }
 
 func (r *RemoteBackend) LastCheckpointId(ctx context.Context, tx kv.Tx) (uint64, bool, error) {
-	return 0, false, fmt.Errorf("not implemented")
+	return 0, false, errors.New("not implemented")
 }
 
 func (r *RemoteBackend) Checkpoint(ctx context.Context, tx kv.Getter, spanId uint64) ([]byte, error) {

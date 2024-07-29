@@ -728,13 +728,13 @@ func (s *RoSnapshots) buildMissedIndicesIfNeed(ctx context.Context, logPrefix st
 		return nil
 	}
 	if !s.Cfg().ProduceE2 && s.IndicesMax() == 0 {
-		return fmt.Errorf("please remove --snap.stop, erigon can't work without creating basic indices")
+		return errors.New("please remove --snap.stop, erigon can't work without creating basic indices")
 	}
 	if !s.Cfg().ProduceE2 {
 		return nil
 	}
 	if !s.SegmentsReady() {
-		return fmt.Errorf("not all snapshot segments are available")
+		return errors.New("not all snapshot segments are available")
 	}
 	s.LogStat("missed-idx")
 
@@ -944,7 +944,7 @@ func (s *RoSnapshots) AddSnapshotsToSilkworm(silkwormInstance *silkworm.Silkworm
 	}
 
 	if len(mappedHeaderSnapshots) != len(mappedBodySnapshots) || len(mappedBodySnapshots) != len(mappedTxnSnapshots) {
-		return fmt.Errorf("addSnapshots: the number of headers/bodies/txs snapshots must be the same")
+		return errors.New("addSnapshots: the number of headers/bodies/txs snapshots must be the same")
 	}
 
 	for i := 0; i < len(mappedHeaderSnapshots); i++ {

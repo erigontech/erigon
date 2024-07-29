@@ -233,7 +233,7 @@ const wordBytes = (32 << (uint64(^big.Word(0)) >> 63)) / 8
 
 func writeBigInt(i *big.Int, w *encBuffer) error {
 	if i.Sign() == -1 {
-		return fmt.Errorf("rlp: cannot encode negative *big.Int")
+		return errors.New("rlp: cannot encode negative *big.Int")
 	}
 	bitlen := i.BitLen()
 	if bitlen <= 64 {

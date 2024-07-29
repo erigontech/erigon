@@ -20,6 +20,7 @@
 package ethapi
 
 import (
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"math/big"
@@ -98,7 +99,7 @@ func (args *CallArgs) ToMessage(globalGasCap uint64, baseFee *uint256.Int) (type
 		if args.GasPrice != nil {
 			overflow := gasPrice.SetFromBig(args.GasPrice.ToInt())
 			if overflow {
-				return types.Message{}, fmt.Errorf("args.GasPrice higher than 2^256-1")
+				return types.Message{}, errors.New("args.GasPrice higher than 2^256-1")
 			}
 		}
 		gasFeeCap, gasTipCap = gasPrice, gasPrice
@@ -109,7 +110,7 @@ func (args *CallArgs) ToMessage(globalGasCap uint64, baseFee *uint256.Int) (type
 			gasPrice = new(uint256.Int)
 			overflow := gasPrice.SetFromBig(args.GasPrice.ToInt())
 			if overflow {
-				return types.Message{}, fmt.Errorf("args.GasPrice higher than 2^256-1")
+				return types.Message{}, errors.New("args.GasPrice higher than 2^256-1")
 			}
 			gasFeeCap, gasTipCap = gasPrice, gasPrice
 		} else {
@@ -118,14 +119,14 @@ func (args *CallArgs) ToMessage(globalGasCap uint64, baseFee *uint256.Int) (type
 			if args.MaxFeePerGas != nil {
 				overflow := gasFeeCap.SetFromBig(args.MaxFeePerGas.ToInt())
 				if overflow {
-					return types.Message{}, fmt.Errorf("args.GasPrice higher than 2^256-1")
+					return types.Message{}, errors.New("args.GasPrice higher than 2^256-1")
 				}
 			}
 			gasTipCap = new(uint256.Int)
 			if args.MaxPriorityFeePerGas != nil {
 				overflow := gasTipCap.SetFromBig(args.MaxPriorityFeePerGas.ToInt())
 				if overflow {
-					return types.Message{}, fmt.Errorf("args.GasPrice higher than 2^256-1")
+					return types.Message{}, errors.New("args.GasPrice higher than 2^256-1")
 				}
 			}
 			// Backfill the legacy gasPrice for EVM execution, unless we're all zeroes
@@ -137,7 +138,7 @@ func (args *CallArgs) ToMessage(globalGasCap uint64, baseFee *uint256.Int) (type
 		if args.MaxFeePerBlobGas != nil {
 			blobFee, overflow := uint256.FromBig(args.MaxFeePerBlobGas.ToInt())
 			if overflow {
-				return types.Message{}, fmt.Errorf("args.MaxFeePerBlobGas higher than 2^256-1")
+				return types.Message{}, errors.New("args.MaxFeePerBlobGas higher than 2^256-1")
 			}
 			maxFeePerBlobGas = blobFee
 		}
@@ -147,7 +148,7 @@ func (args *CallArgs) ToMessage(globalGasCap uint64, baseFee *uint256.Int) (type
 	if args.Value != nil {
 		overflow := value.SetFromBig(args.Value.ToInt())
 		if overflow {
-			return types.Message{}, fmt.Errorf("args.Value higher than 2^256-1")
+			return types.Message{}, errors.New("args.Value higher than 2^256-1")
 		}
 	}
 	var data []byte
@@ -172,11 +173,11 @@ func (args *CallArgs) ToMessage(globalGasCap uint64, baseFee *uint256.Int) (type
 // if statDiff is set, all diff will be applied first and then execute the call
 // message.
 type Account struct {
-	Nonce     *hexutil.Uint64                 `json:"nonce"`
-	Code      *hexutility.Bytes               `json:"code"`
-	Balance   **hexutil.Big                   `json:"balance"`
-	State     *map[libcommon.Hash]uint256.Int `json:"state"`
-	StateDiff *map[libcommon.Hash]uint256.Int `json:"stateDiff"`
+	Nonce     *hexutil.Uint64                    `json:"nonce"`
+	Code      *hexutility.Bytes                  `json:"code"`
+	Balance   **hexutil.Big                      `json:"balance"`
+	State     *map[libcommon.Hash]libcommon.Hash `json:"state"`
+	StateDiff *map[libcommon.Hash]libcommon.Hash `json:"stateDiff"`
 }
 
 func NewRevertError(result *evmtypes.ExecutionResult) *RevertError {
@@ -248,14 +249,14 @@ func FormatLogs(logs []logger.StructLog) []StructLogRes {
 		if trace.Stack != nil {
 			stack := make([]string, len(trace.Stack))
 			for i, stackValue := range trace.Stack {
-				stack[i] = fmt.Sprintf("%x", math.PaddedBigBytes(stackValue, 32))
+				stack[i] = hex.EncodeToString(math.PaddedBigBytes(stackValue, 32))
 			}
 			formatted[index].Stack = &stack
 		}
 		if trace.Memory != nil {
 			memory := make([]string, 0, (len(trace.Memory)+31)/32)
 			for i := 0; i+32 <= len(trace.Memory); i += 32 {
-				memory = append(memory, fmt.Sprintf("%x", trace.Memory[i:i+32]))
+				memory = append(memory, hex.EncodeToString(trace.Memory[i:i+32]))
 			}
 			formatted[index].Memory = &memory
 		}

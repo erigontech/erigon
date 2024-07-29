@@ -34,7 +34,7 @@ import (
 )
 
 var (
-	ErrInvalidFileName = fmt.Errorf("invalid compressed file name")
+	ErrInvalidFileName = errors.New("invalid compressed file name")
 )
 
 func FileName(version Version, from, to uint64, fileType string) string {

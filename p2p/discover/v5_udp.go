@@ -29,6 +29,7 @@ import (
 	"io"
 	"math"
 	"net"
+	"slices"
 	"sync"
 	"time"
 
@@ -435,24 +436,15 @@ func (t *UDPv5) verifyResponseNode(c *callV5, r *enr.Record, distances []uint, s
 	}
 	if distances != nil {
 		nd := enode.LogDist(c.node.ID(), node.ID())
-		if !containsUint(uint(nd), distances) {
+		if !slices.Contains(distances, uint(nd)) {
 			return nil, errors.New("does not match any requested distance")
 		}
 	}
 	if _, ok := seen[node.ID()]; ok {
-		return nil, fmt.Errorf("duplicate record")
+		return nil, errors.New("duplicate record")
 	}
 	seen[node.ID()] = struct{}{}
 	return node, nil
-}
-
-func containsUint(x uint, xs []uint) bool {
-	for _, v := range xs {
-		if x == v {
-			return true
-		}
-	}
-	return false
 }
 
 // call sends the given call and sets up a handler for response packets (of message type
@@ -701,11 +693,11 @@ func (t *UDPv5) handleCallResponse(fromID enode.ID, fromAddr *net.UDPAddr, p v5w
 		return false
 	}
 	if !fromAddr.IP.Equal(ac.node.IP()) || fromAddr.Port != ac.node.UDP() {
-		t.log.Trace(fmt.Sprintf("%s from wrong endpoint", p.Name()), "id", fromID, "addr", fromAddr)
+		t.log.Trace(p.Name()+" from wrong endpoint", "id", fromID, "addr", fromAddr)
 		return false
 	}
 	if p.Kind() != ac.responseType {
-		t.log.Trace(fmt.Sprintf("Wrong discv5 response type %s", p.Name()), "id", fromID, "addr", fromAddr)
+		t.log.Trace("Wrong discv5 response type "+p.Name(), "id", fromID, "addr", fromAddr)
 		return false
 	}
 	t.startResponseTimeout(ac)

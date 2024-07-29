@@ -18,6 +18,7 @@ package health
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	"github.com/erigontech/erigon/rpc"
@@ -25,7 +26,7 @@ import (
 
 func checkBlockNumber(blockNumber rpc.BlockNumber, api EthAPI) error {
 	if api == nil {
-		return fmt.Errorf("no connection to the Erigon server or `eth` namespace isn't enabled")
+		return errors.New("no connection to the Erigon server or `eth` namespace isn't enabled")
 	}
 	data, err := api.GetBlockByNumber(context.TODO(), blockNumber, false)
 	if err != nil {

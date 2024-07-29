@@ -254,7 +254,7 @@ func (r *RemoteBlockReader) BodyRlp(ctx context.Context, tx kv.Getter, hash comm
 }
 
 func (r *RemoteBlockReader) LastEventId(ctx context.Context, tx kv.Tx) (uint64, bool, error) {
-	return 0, false, fmt.Errorf("not implemented")
+	return 0, false, errors.New("not implemented")
 }
 
 func (r *RemoteBlockReader) EventLookup(ctx context.Context, tx kv.Getter, txnHash common.Hash) (uint64, bool, error) {
@@ -301,7 +301,7 @@ func (r *RemoteBlockReader) LastFrozenSpanId() uint64 {
 }
 
 func (r *RemoteBlockReader) LastMilestoneId(ctx context.Context, tx kv.Tx) (uint64, bool, error) {
-	return 0, false, fmt.Errorf("not implemented")
+	return 0, false, errors.New("not implemented")
 }
 
 func (r *RemoteBlockReader) Milestone(ctx context.Context, tx kv.Getter, spanId uint64) ([]byte, error) {
@@ -309,7 +309,7 @@ func (r *RemoteBlockReader) Milestone(ctx context.Context, tx kv.Getter, spanId 
 }
 
 func (r *RemoteBlockReader) LastCheckpointId(ctx context.Context, tx kv.Tx) (uint64, bool, error) {
-	return 0, false, fmt.Errorf("not implemented")
+	return 0, false, errors.New("not implemented")
 }
 
 func (r *RemoteBlockReader) Checkpoint(ctx context.Context, tx kv.Getter, spanId uint64) ([]byte, error) {
@@ -371,6 +371,12 @@ func (r *BlockReader) HeadersRange(ctx context.Context, walker func(header *type
 }
 
 func (r *BlockReader) HeaderByNumber(ctx context.Context, tx kv.Getter, blockHeight uint64) (h *types.Header, err error) {
+	var dbgPrefix string
+	dbgLogs := dbg.Enabled(ctx)
+	if dbgLogs {
+		dbgPrefix = fmt.Sprintf("[dbg] BlockReader(idxMax=%d,segMax=%d).HeaderByNumber(blk=%d) -> ", r.sn.idxMax.Load(), r.sn.segmentsMax.Load(), blockHeight)
+	}
+
 	if tx != nil {
 		blockHash, err := rawdb.ReadCanonicalHash(tx, blockHeight)
 		if err != nil {
@@ -381,12 +387,27 @@ func (r *BlockReader) HeaderByNumber(ctx context.Context, tx kv.Getter, blockHei
 			h = rawdb.ReadHeader(tx, blockHash, blockHeight)
 			if h != nil {
 				return h, nil
+			} else {
+				if dbgLogs {
+					log.Info(dbgPrefix + "not found in db")
+				}
 			}
+		} else {
+			if dbgLogs {
+				log.Info(dbgPrefix + "canonical hash is empty")
+			}
+		}
+	} else {
+		if dbgLogs {
+			log.Info(dbgPrefix + "tx is nil")
 		}
 	}
 
 	seg, ok, release := r.sn.ViewSingleFile(coresnaptype.Headers, blockHeight)
 	if !ok {
+		if dbgLogs {
+			log.Info(dbgPrefix + "not found file for such blockHeight")
+		}
 		return
 	}
 	defer release()
@@ -394,6 +415,11 @@ func (r *BlockReader) HeaderByNumber(ctx context.Context, tx kv.Getter, blockHei
 	h, _, err = r.headerFromSnapshot(blockHeight, seg, nil)
 	if err != nil {
 		return nil, err
+	}
+	if h == nil {
+		if dbgLogs {
+			log.Info(dbgPrefix + "got nil from file")
+		}
 	}
 	return h, nil
 }

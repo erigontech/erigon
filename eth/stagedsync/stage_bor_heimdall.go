@@ -27,6 +27,7 @@ import (
 	"sort"
 	"time"
 
+	"github.com/erigontech/erigon-lib/common/dbg"
 	lru "github.com/hashicorp/golang-lru/arc/v2"
 	"golang.org/x/sync/errgroup"
 
@@ -269,6 +270,7 @@ func BorHeimdallForward(
 			return err
 		}
 		if header == nil {
+			_, _ = cfg.blockReader.HeaderByNumber(dbg.ContextWithDebug(ctx, true), tx, blockNum)
 			return fmt.Errorf("header not found: %d", blockNum)
 		}
 
@@ -702,7 +704,7 @@ func initValidatorSets(
 				}
 
 				if zeroSpanBytes == nil {
-					return nil, fmt.Errorf("zero span not found")
+					return nil, errors.New("zero span not found")
 				}
 
 				var zeroSpan heimdall.Span

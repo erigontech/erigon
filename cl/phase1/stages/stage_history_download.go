@@ -18,6 +18,7 @@ package stages
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"math"
 	"sync/atomic"
@@ -150,6 +151,9 @@ func SpawnStageHistoryDownload(cfg StageHistoryReconstructionCfg, ctx context.Co
 			if cfg.engine.HasGapInSnapshots(ctx) && frozenBlocksInEL > 0 {
 				destinationSlotForEL = frozenBlocksInEL - 1
 			}
+		}
+		if slot == 0 {
+			return true, tx.Commit()
 		}
 		return (!cfg.backfilling || slot <= destinationSlotForCL) && (slot <= destinationSlotForEL || isInElSnapshots), tx.Commit()
 	})
@@ -361,11 +365,11 @@ func downloadBlobHistoryWorker(cfg StageHistoryReconstructionCfg, ctx context.Co
 					continue
 				}
 				if block.Signature != header.Signature {
-					return fmt.Errorf("signature mismatch beetwen blob and stored block")
+					return errors.New("signature mismatch beetwen blob and stored block")
 				}
 				return nil
 			}
-			return fmt.Errorf("block not in batch")
+			return errors.New("block not in batch")
 		})
 		if err != nil {
 			rpc.BanPeer(blobs.Peer)

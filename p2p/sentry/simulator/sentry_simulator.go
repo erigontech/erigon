@@ -19,6 +19,7 @@ package simulator
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"path/filepath"
 
@@ -142,7 +143,7 @@ func (s *server) Close() {
 }
 
 func (s *server) NodeInfo(context.Context, *emptypb.Empty) (*types.NodeInfoReply, error) {
-	return nil, fmt.Errorf("TODO")
+	return nil, errors.New("TODO")
 }
 
 func (s *server) PeerById(ctx context.Context, in *isentry.PeerByIdRequest) (*isentry.PeerByIdReply, error) {
@@ -151,7 +152,7 @@ func (s *server) PeerById(ctx context.Context, in *isentry.PeerByIdRequest) (*is
 	peer, ok := s.peers[peerId]
 
 	if !ok {
-		return nil, fmt.Errorf("unknown peer")
+		return nil, errors.New("unknown peer")
 	}
 
 	info := peer.Info()
@@ -177,11 +178,11 @@ func (s *server) PeerCount(context.Context, *isentry.PeerCountRequest) (*isentry
 }
 
 func (s *server) PeerEvents(*isentry.PeerEventsRequest, isentry.Sentry_PeerEventsServer) error {
-	return fmt.Errorf("TODO")
+	return errors.New("TODO")
 }
 
 func (s *server) PeerMinBlock(context.Context, *isentry.PeerMinBlockRequest) (*emptypb.Empty, error) {
-	return nil, fmt.Errorf("TODO")
+	return nil, errors.New("TODO")
 }
 
 func (s *server) Peers(context.Context, *emptypb.Empty) (*isentry.PeersReply, error) {
@@ -224,7 +225,7 @@ func (s *server) sendMessageById(ctx context.Context, peerId [64]byte, messageDa
 	peer, ok := s.peers[peerId]
 
 	if !ok {
-		return fmt.Errorf("unknown peer")
+		return errors.New("unknown peer")
 	}
 
 	switch messageData.Id {

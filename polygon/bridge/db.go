@@ -70,7 +70,7 @@ func NewStore(db *polygoncommon.Database) *MdbxStore {
 }
 
 func (s *MdbxStore) Prepare(ctx context.Context) error {
-	err := s.db.OpenOnce(ctx, kv.PolygonBridgeDB, databaseTablesCfg)
+	err := s.db.OpenOnce(ctx)
 	if err != nil {
 		return err
 	}
@@ -127,27 +127,17 @@ func (s *MdbxStore) GetSprintLastEventID(ctx context.Context, lastID uint64, tim
 		return eventID, nil
 	}
 
-	cursor, err := tx.Cursor(kv.BorEvents)
-	if err != nil {
-		return eventID, err
-	}
-	defer cursor.Close()
-
-	kDBLast, _, err := cursor.Last()
-	if err != nil {
-		return eventID, err
-	}
-
 	kLastID := make([]byte, 8)
 	binary.BigEndian.PutUint64(kLastID, lastID)
 
-	_, _, err = cursor.Seek(kLastID)
+	it, err := tx.RangeAscend(kv.BorEvents, kLastID, nil, -1)
 	if err != nil {
 		return eventID, err
 	}
+	defer it.Close()
 
-	for {
-		k, v, err := cursor.Next()
+	for it.HasNext() {
+		_, v, err := it.Next()
 		if err != nil {
 			return eventID, err
 		}
@@ -165,11 +155,9 @@ func (s *MdbxStore) GetSprintLastEventID(ctx context.Context, lastID uint64, tim
 		}
 
 		eventID = event.ID
-
-		if bytes.Equal(k, kDBLast) {
-			return eventID, nil
-		}
 	}
+
+	return eventID, nil
 }
 
 func (s *MdbxStore) AddEvents(ctx context.Context, events []*heimdall.EventRecordWithTime, stateContract abi.ABI) error {

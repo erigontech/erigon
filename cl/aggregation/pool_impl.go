@@ -18,7 +18,7 @@ package aggregation
 
 import (
 	"context"
-	"fmt"
+	"errors"
 	"sync"
 	"time"
 
@@ -30,7 +30,7 @@ import (
 	"github.com/erigontech/erigon/cl/utils/eth_clock"
 )
 
-var ErrIsSuperset = fmt.Errorf("attestation is superset of existing attestation")
+var ErrIsSuperset = errors.New("attestation is superset of existing attestation")
 
 var (
 	blsAggregate = bls.AggregateSignatures
@@ -89,7 +89,7 @@ func (p *aggregationPoolImpl) AddAttestation(inAtt *solid.Attestation) error {
 		return err
 	}
 	if len(merged) != 96 {
-		return fmt.Errorf("merged signature is too long")
+		return errors.New("merged signature is too long")
 	}
 	var mergedSig [96]byte
 	copy(mergedSig[:], merged)
