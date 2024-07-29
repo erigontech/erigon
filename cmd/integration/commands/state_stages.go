@@ -22,6 +22,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	stateLib "github.com/erigontech/erigon-lib/state"
 	"os"
 	"time"
 
@@ -165,6 +166,12 @@ func syncBySmallSteps(db kv.RwDB, miningConfig params.MiningConfig, ctx context.
 	}
 	defer tx.Rollback()
 
+	sd, err := stateLib.NewSharedDomains(tx, logger1)
+	if err != nil {
+		return err
+	}
+	defer sd.Close()
+
 	quit := ctx.Done()
 
 	var batchSize datasize.ByteSize
@@ -270,7 +277,7 @@ func syncBySmallSteps(db kv.RwDB, miningConfig params.MiningConfig, ctx context.
 
 		stateStages.MockExecFunc(stages.Execution, execUntilFunc(execToBlock))
 		_ = stateStages.SetCurrentStage(stages.Execution)
-		if _, err := stateStages.Run(db, wrap.TxContainer{Tx: tx}, false /* firstCycle */, false); err != nil {
+		if _, err := stateStages.Run(db, wrap.TxContainer{Tx: tx, Doms: sd}, false /* firstCycle */, false); err != nil {
 			return err
 		}
 
@@ -300,7 +307,7 @@ func syncBySmallSteps(db kv.RwDB, miningConfig params.MiningConfig, ctx context.
 			miner.MiningConfig.Etherbase = nextBlock.Coinbase()
 			miner.MiningConfig.ExtraData = nextBlock.Extra()
 			miningStages.MockExecFunc(stages.MiningCreateBlock, func(badBlockUnwind bool, s *stagedsync.StageState, u stagedsync.Unwinder, txc wrap.TxContainer, logger log.Logger) error {
-				err = stagedsync.SpawnMiningCreateBlockStage(s, txc.Ttx,
+				err = stagedsync.SpawnMiningCreateBlockStage(s, txc,
 					stagedsync.StageMiningCreateBlockCfg(db, miner, *chainConfig, engine, nil, nil, dirs.Tmp, br),
 					quit, logger)
 				if err != nil {
@@ -322,7 +329,7 @@ func syncBySmallSteps(db kv.RwDB, miningConfig params.MiningConfig, ctx context.
 			//})
 
 			_ = miningStages.SetCurrentStage(stages.MiningCreateBlock)
-			if _, err := miningStages.Run(db, wrap.TxContainer{Tx: tx}, false /* firstCycle */, false); err != nil {
+			if _, err := miningStages.Run(db, wrap.TxContainer{Tx: tx, Doms: sd}, false /* firstCycle */, false); err != nil {
 				return err
 			}
 			tx.Rollback()
