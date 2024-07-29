@@ -71,7 +71,7 @@ func TestMiningBenchmark(t *testing.T) {
 	var txs []*types.Transaction
 
 	for i := 0; i < 1; i++ {
-		stack, ethBackend, err := helper.InitMiner(context.Background(), &genesis, pkeys[i], true, i)
+		stack, ethBackend, err := helper.InitMiner(context.Background(), t.TempDir(), &genesis, pkeys[i], true, i)
 		if err != nil {
 			panic(err)
 		}
@@ -120,11 +120,10 @@ func TestMiningBenchmark(t *testing.T) {
 		if err != nil {
 			panic(err)
 		}
-		resp, err := ethbackends[0].TxpoolServer().Add(context.Background(), &txpool.AddRequest{RlpTxs: [][]byte{buf.Bytes()}})
+		_, err = ethbackends[0].TxpoolServer().Add(context.Background(), &txpool.AddRequest{RlpTxs: [][]byte{buf.Bytes()}})
 		if err != nil {
 			panic(err)
 		}
-		println(fmt.Sprintf("%+v", resp))
 	}
 
 	for {
@@ -132,7 +131,6 @@ func TestMiningBenchmark(t *testing.T) {
 		if err != nil {
 			panic(err)
 		}
-
 		if pendingReply.PendingCount == 0 {
 			break
 		}
