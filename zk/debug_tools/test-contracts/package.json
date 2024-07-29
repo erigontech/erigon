@@ -12,7 +12,8 @@
     "counter:mainnet": "npx hardhat compile && npx hardhat run scripts/counter.js --network mainnet",
     "emitlog:bali": "npx hardhat compile && npx hardhat run scripts/emitlog.js --network bali",
     "emitlog:cardona": "npx hardhat compile && npx hardhat run scripts/emitlog.js --network cardona",
-    "emitlog:mainnet": "npx hardhat compile && npx hardhat run scripts/emitlog.js --network mainnet"
+    "emitlog:mainnet": "npx hardhat compile && npx hardhat run scripts/emitlog.js --network mainnet",
+    "spam:local": "npx hardhat compile && npx hardhat run scripts/spam-transactions.js --network local"
   },
   "keywords": [],
   "author": "",

@@ -27,96 +27,120 @@ func main() {
 	}
 
 	// create bookmark
-	bookmark := types.NewBookmarkProto(1, datastream.BookmarkType_BOOKMARK_TYPE_L2_BLOCK)
+	bookmark := types.NewBookmarkProto(5191325, datastream.BookmarkType_BOOKMARK_TYPE_L2_BLOCK)
 
-	var previousFile *types.FileEntry
+	// var previousFile *types.FileEntry
 	progressBatch := uint64(0)
 	progressBlock := uint64(0)
-	function := func(file *types.FileEntry) error {
+
+	printFunction := func(file *types.FileEntry) error {
 		switch file.EntryType {
-		case types.EntryTypeL2BlockEnd:
-			if previousFile != nil && previousFile.EntryType != types.EntryTypeL2Block && previousFile.EntryType != types.EntryTypeL2Tx {
-				return fmt.Errorf("unexpected entry type before l2 block end: %v", previousFile.EntryType)
-			}
-		case types.BookmarkEntryType:
-			bookmark, err := types.UnmarshalBookmark(file.Data)
-			if err != nil {
-				return err
-			}
-			if bookmark.BookmarkType() == datastream.BookmarkType_BOOKMARK_TYPE_BATCH {
-				progressBatch = bookmark.Value
-				if previousFile != nil && previousFile.EntryType != types.EntryTypeBatchEnd {
-					return fmt.Errorf("unexpected entry type before batch bookmark type: %v, bookmark batch number: %d", previousFile.EntryType, bookmark.Value)
-				}
-			}
-			if bookmark.BookmarkType() == datastream.BookmarkType_BOOKMARK_TYPE_L2_BLOCK {
-				progressBlock = bookmark.Value
-				if previousFile != nil &&
-					previousFile.EntryType != types.EntryTypeBatchStart &&
-					previousFile.EntryType != types.EntryTypeL2BlockEnd {
-					return fmt.Errorf("unexpected entry type before block bookmark type: %v, bookmark block number: %d", previousFile.EntryType, bookmark.Value)
-				}
-			}
-		case types.EntryTypeBatchStart:
-			batchStart, err := types.UnmarshalBatchStart(file.Data)
-			if err != nil {
-				return err
-			}
-			progressBatch = batchStart.Number
-			if previousFile != nil {
-				if previousFile.EntryType != types.BookmarkEntryType {
-					return fmt.Errorf("unexpected entry type before batch start: %v, batchStart Batch number: %d", previousFile.EntryType, batchStart.Number)
-				} else {
-					bookmark, err := types.UnmarshalBookmark(previousFile.Data)
-					if err != nil {
-						return err
-					}
-					if bookmark.BookmarkType() != datastream.BookmarkType_BOOKMARK_TYPE_BATCH {
-						return fmt.Errorf("unexpected bookmark type before batch start: %v, batchStart Batch number: %d", bookmark.BookmarkType(), batchStart.Number)
-					}
-				}
-			}
-		case types.EntryTypeBatchEnd:
-			if previousFile != nil &&
-				previousFile.EntryType != types.EntryTypeL2BlockEnd &&
-				previousFile.EntryType != types.EntryTypeBatchStart {
-				return fmt.Errorf("unexpected entry type before batch end: %v", previousFile.EntryType)
-			}
-		case types.EntryTypeL2Tx:
-			if previousFile != nil && previousFile.EntryType != types.EntryTypeL2Tx && previousFile.EntryType != types.EntryTypeL2Block {
-				return fmt.Errorf("unexpected entry type before l2 tx: %v", previousFile.EntryType)
-			}
 		case types.EntryTypeL2Block:
 			l2Block, err := types.UnmarshalL2Block(file.Data)
 			if err != nil {
 				return err
 			}
-			progressBlock = l2Block.L2BlockNumber
-			if previousFile != nil {
-				if previousFile.EntryType != types.BookmarkEntryType && !previousFile.IsL2BlockEnd() {
-					return fmt.Errorf("unexpected entry type before l2 block: %v, block number: %d", previousFile.EntryType, l2Block.L2BlockNumber)
-				} else {
-					bookmark, err := types.UnmarshalBookmark(previousFile.Data)
-					if err != nil {
-						return err
-					}
-					if bookmark.BookmarkType() != datastream.BookmarkType_BOOKMARK_TYPE_L2_BLOCK {
-						return fmt.Errorf("unexpected bookmark type before l2 block: %v, block number: %d", bookmark.BookmarkType(), l2Block.L2BlockNumber)
-					}
-
-				}
+			fmt.Println("L2Block: ", l2Block.L2BlockNumber, "batch", l2Block.BatchNumber, "stateRoot", l2Block.StateRoot.Hex())
+			if l2Block.L2BlockNumber > 5191335 {
+				return fmt.Errorf("stop")
 			}
-		case types.EntryTypeGerUpdate:
-			return nil
-		default:
-			return fmt.Errorf("unexpected entry type: %v", file.EntryType)
+		case types.EntryTypeBatchEnd:
+			batchEnd, err := types.UnmarshalBatchEnd(file.Data)
+			if err != nil {
+				return err
+			}
+			fmt.Println("BatchEnd: ", batchEnd.Number, "stateRoot", batchEnd.StateRoot.Hex())
+
 		}
 
-		previousFile = file
 		return nil
 	}
+
+	// function := func(file *types.FileEntry) error {
+	// 	switch file.EntryType {
+	// 	case types.EntryTypeL2BlockEnd:
+	// 		if previousFile != nil && previousFile.EntryType != types.EntryTypeL2Block && previousFile.EntryType != types.EntryTypeL2Tx {
+	// 			return fmt.Errorf("unexpected entry type before l2 block end: %v", previousFile.EntryType)
+	// 		}
+	// 	case types.BookmarkEntryType:
+	// 		bookmark, err := types.UnmarshalBookmark(file.Data)
+	// 		if err != nil {
+	// 			return err
+	// 		}
+	// 		if bookmark.BookmarkType() == datastream.BookmarkType_BOOKMARK_TYPE_BATCH {
+	// 			progressBatch = bookmark.Value
+	// 			if previousFile != nil && previousFile.EntryType != types.EntryTypeBatchEnd {
+	// 				return fmt.Errorf("unexpected entry type before batch bookmark type: %v, bookmark batch number: %d", previousFile.EntryType, bookmark.Value)
+	// 			}
+	// 		}
+	// 		if bookmark.BookmarkType() == datastream.BookmarkType_BOOKMARK_TYPE_L2_BLOCK {
+	// 			progressBlock = bookmark.Value
+	// 			if previousFile != nil &&
+	// 				previousFile.EntryType != types.EntryTypeBatchStart &&
+	// 				previousFile.EntryType != types.EntryTypeL2BlockEnd {
+	// 				return fmt.Errorf("unexpected entry type before block bookmark type: %v, bookmark block number: %d", previousFile.EntryType, bookmark.Value)
+	// 			}
+	// 		}
+	// 	case types.EntryTypeBatchStart:
+	// 		batchStart, err := types.UnmarshalBatchStart(file.Data)
+	// 		if err != nil {
+	// 			return err
+	// 		}
+	// 		progressBatch = batchStart.Number
+	// 		if previousFile != nil {
+	// 			if previousFile.EntryType != types.BookmarkEntryType {
+	// 				return fmt.Errorf("unexpected entry type before batch start: %v, batchStart Batch number: %d", previousFile.EntryType, batchStart.Number)
+	// 			} else {
+	// 				bookmark, err := types.UnmarshalBookmark(previousFile.Data)
+	// 				if err != nil {
+	// 					return err
+	// 				}
+	// 				if bookmark.BookmarkType() != datastream.BookmarkType_BOOKMARK_TYPE_BATCH {
+	// 					return fmt.Errorf("unexpected bookmark type before batch start: %v, batchStart Batch number: %d", bookmark.BookmarkType(), batchStart.Number)
+	// 				}
+	// 			}
+	// 		}
+	// 	case types.EntryTypeBatchEnd:
+	// 		if previousFile != nil &&
+	// 			previousFile.EntryType != types.EntryTypeL2BlockEnd &&
+	// 			previousFile.EntryType != types.EntryTypeBatchStart {
+	// 			return fmt.Errorf("unexpected entry type before batch end: %v", previousFile.EntryType)
+	// 		}
+	// 	case types.EntryTypeL2Tx:
+	// 		if previousFile != nil && previousFile.EntryType != types.EntryTypeL2Tx && previousFile.EntryType != types.EntryTypeL2Block {
+	// 			return fmt.Errorf("unexpected entry type before l2 tx: %v", previousFile.EntryType)
+	// 		}
+	// 	case types.EntryTypeL2Block:
+	// 		l2Block, err := types.UnmarshalL2Block(file.Data)
+	// 		if err != nil {
+	// 			return err
+	// 		}
+	// 		progressBlock = l2Block.L2BlockNumber
+	// 		if previousFile != nil {
+	// 			if previousFile.EntryType != types.BookmarkEntryType && !previousFile.IsL2BlockEnd() {
+	// 				return fmt.Errorf("unexpected entry type before l2 block: %v, block number: %d", previousFile.EntryType, l2Block.L2BlockNumber)
+	// 			} else {
+	// 				bookmark, err := types.UnmarshalBookmark(previousFile.Data)
+	// 				if err != nil {
+	// 					return err
+	// 				}
+	// 				if bookmark.BookmarkType() != datastream.BookmarkType_BOOKMARK_TYPE_L2_BLOCK {
+	// 					return fmt.Errorf("unexpected bookmark type before l2 block: %v, block number: %d", bookmark.BookmarkType(), l2Block.L2BlockNumber)
+	// 				}
+
+	// 			}
+	// 		}
+	// 	case types.EntryTypeGerUpdate:
+	// 		return nil
+	// 	default:
+	// 		return fmt.Errorf("unexpected entry type: %v", file.EntryType)
+	// 	}
+
+	// 	previousFile = file
+	// 	return nil
+	// }
 	// send start command
-	err = client.ExecutePerFile(bookmark, function)
+	err = client.ExecutePerFile(bookmark, printFunction)
 	fmt.Println("progress block: ", progressBlock)
 	fmt.Println("progress batch: ", progressBatch)
 	if err != nil {
