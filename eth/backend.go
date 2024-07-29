@@ -238,7 +238,7 @@ const blockBufferSize = 128
 // initialisation of the common Ethereum object)
 func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger log.Logger) (*Ethereum, error) {
 	config.Snapshot.Enabled = config.Sync.UseSnapshots
-	if config.Miner.GasPrice == nil || config.Miner.GasPrice.Cmp(libcommon.Big0) <= 0 {
+	if config.Miner.GasPrice == nil || config.Miner.GasPrice.Sign() <= 0 {
 		logger.Warn("Sanitizing invalid miner gas price", "provided", config.Miner.GasPrice, "updated", ethconfig.Defaults.Miner.GasPrice)
 		config.Miner.GasPrice = new(big.Int).Set(ethconfig.Defaults.Miner.GasPrice)
 	}
