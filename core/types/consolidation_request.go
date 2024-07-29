@@ -19,7 +19,7 @@ package types
 import (
 	"bytes"
 	"encoding/json"
-	"fmt"
+	"errors"
 	"io"
 
 	libcommon "github.com/erigontech/erigon-lib/common"
@@ -98,14 +98,14 @@ func (d *ConsolidationRequest) UnmarshalJSON(input []byte) error {
 		return err
 	}
 	if len(sourceKey) != BLSPubKeyLen {
-		return fmt.Errorf("Unmarshalled pubkey not equal to BLSPubkeyLen")
+		return errors.New("Unmarshalled pubkey not equal to BLSPubkeyLen")
 	}
 	targetKey, err := hexutil.Decode(tt.TargetPubKey)
 	if err != nil {
 		return err
 	}
 	if len(targetKey) != BLSSigLen {
-		return fmt.Errorf("Unmarshalled TargetPubKey len not equal to BLSSiglen")
+		return errors.New("Unmarshalled TargetPubKey len not equal to BLSSiglen")
 	}
 	d.SourceAddress = tt.SourceAddress
 	d.SourcePubKey = [48]byte(sourceKey)
