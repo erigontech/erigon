@@ -37,6 +37,7 @@ func (srv *DataStreamServer) WriteWholeBatchToStream(
 	if err = srv.stream.StartAtomicOp(); err != nil {
 		return err
 	}
+	defer srv.stream.RollbackAtomicOp()
 
 	blocksForBatch, err := reader.GetL2BlockNosByBatch(batchNum)
 	if err != nil {
@@ -118,6 +119,7 @@ func (srv *DataStreamServer) WriteBlocksToStreamConsecutively(
 	if err = srv.stream.StartAtomicOp(); err != nil {
 		return err
 	}
+	defer srv.stream.RollbackAtomicOp()
 
 	if err = srv.UnwindIfNecessary(logPrefix, reader, from, latestbatchNum, batchNum); err != nil {
 		return err
@@ -221,6 +223,7 @@ func (srv *DataStreamServer) WriteBlockWithBatchStartToStream(
 	if err = srv.stream.StartAtomicOp(); err != nil {
 		return err
 	}
+	defer srv.stream.RollbackAtomicOp()
 
 	blockNum := block.NumberU64()
 
@@ -327,6 +330,7 @@ func (srv *DataStreamServer) WriteBatchEnd(
 	if err = srv.stream.StartAtomicOp(); err != nil {
 		return err
 	}
+	defer srv.stream.RollbackAtomicOp()
 
 	batchEndEntries, err := addBatchEndEntriesProto(batchNumber, stateRoot, gers, localExitRoot)
 	if err != nil {
@@ -363,6 +367,7 @@ func (srv *DataStreamServer) WriteGenesisToStream(
 	if err != nil {
 		return err
 	}
+	defer srv.stream.RollbackAtomicOp()
 
 	batchBookmark := newBatchBookmarkEntryProto(genesis.NumberU64())
 	l2BlockBookmark := newL2BlockBookmarkEntryProto(genesis.NumberU64())
