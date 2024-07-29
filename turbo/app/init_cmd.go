@@ -18,6 +18,7 @@ package app
 
 import (
 	"encoding/json"
+	"github.com/erigontech/erigon-lib/common/datadir"
 	"os"
 
 	"github.com/urfave/cli/v2"
@@ -82,7 +83,7 @@ func initGenesis(cliCtx *cli.Context) error {
 	if err != nil {
 		utils.Fatalf("Failed to open database: %v", err)
 	}
-	_, hash, err := core.CommitGenesisBlock(chaindb, genesis, "", logger)
+	_, hash, err := core.CommitGenesisBlock(chaindb, genesis, datadir.New(""), logger)
 	if err != nil {
 		utils.Fatalf("Failed to write genesis block: %v", err)
 	}
