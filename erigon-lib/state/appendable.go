@@ -128,22 +128,21 @@ func (ap *Appendable) fileNamesOnDisk() ([]string, error) {
 	return filesFromDir(ap.cfg.Dirs.SnapHistory)
 }
 
-func (ap *Appendable) openList(fNames []string, readonly bool) error {
+func (ap *Appendable) openList(fNames []string) error {
 	ap.closeWhatNotInList(fNames)
 	ap.scanDirtyFiles(fNames)
 	if err := ap.openDirtyFiles(); err != nil {
 		return fmt.Errorf("NewHistory.openDirtyFiles: %w, %s", err, ap.filenameBase)
 	}
-	_ = readonly // for future safety features. RPCDaemon must not delte files
 	return nil
 }
 
-func (ap *Appendable) openFolder(readonly bool) error {
+func (ap *Appendable) openFolder() error {
 	files, err := ap.fileNamesOnDisk()
 	if err != nil {
 		return err
 	}
-	return ap.openList(files, readonly)
+	return ap.openList(files)
 }
 
 func (ap *Appendable) scanDirtyFiles(fileNames []string) (garbageFiles []*filesItem) {

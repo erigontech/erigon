@@ -139,7 +139,7 @@ func TestAppendableCollationBuild(t *testing.T) {
 		ii, err := NewAppendable(ii.cfg, ii.aggregationStep, ii.filenameBase, ii.table, nil, log.New())
 		require.NoError(err)
 		defer ii.Close()
-		err = ii.openFolder(true)
+		err = ii.openFolder()
 		require.NoError(err)
 		require.Equal(5, ii.dirtyFiles.Len())
 		require.Equal(0, len(ii._visibleFiles))
@@ -172,7 +172,7 @@ func TestAppendableCollationBuild(t *testing.T) {
 		err = os.WriteFile(fn, make([]byte, 33), 0644)
 		require.NoError(err)
 
-		err = ii.openFolder(true)
+		err = ii.openFolder()
 		require.NoError(err)
 		ii.Close()
 	})
