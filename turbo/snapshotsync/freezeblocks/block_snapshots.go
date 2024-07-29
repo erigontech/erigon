@@ -626,10 +626,17 @@ func (s *RoSnapshots) Ranges() []Range {
 func (s *RoSnapshots) OptimisticalyReopenFolder()           { _ = s.ReopenFolder() }
 func (s *RoSnapshots) OptimisticalyReopenWithDB(db kv.RoDB) { _ = s.ReopenWithDB(db) }
 func (s *RoSnapshots) ReopenFolder() error {
-	if err := s.ReopenSegments(s.Types(), false); err != nil {
-		return fmt.Errorf("ReopenSegments: %w", err)
+	files, _, err := typedSegments(s.dir, s.segmentsMin.Load(), s.Types(), false)
+	if err != nil {
+		return err
 	}
-	return nil
+
+	list := make([]string, 0, len(files))
+	for _, f := range files {
+		_, fName := filepath.Split(f.Path)
+		list = append(list, fName)
+	}
+	return s.ReopenList(list, false)
 }
 
 func (s *RoSnapshots) ReopenSegments(types []snaptype.Type, allowGaps bool) error {
