@@ -98,18 +98,18 @@ func (d *ConsolidationRequest) UnmarshalJSON(input []byte) error {
 		return err
 	}
 	if len(sourceKey) != BLSPubKeyLen {
-		return fmt.Errorf("Unmarshalled pubkey not equal to BLSPubkeyLen")
+		return fmt.Errorf("ConsolidationRequest SourcePubKey not equal to BLSPubkeyLen after UnmarshalJSON")
 	}
 	targetKey, err := hexutil.Decode(tt.TargetPubKey)
 	if err != nil {
 		return err
 	}
-	if len(targetKey) != BLSSigLen {
-		return fmt.Errorf("Unmarshalled TargetPubKey len not equal to BLSSiglen")
+	if len(targetKey) != BLSPubKeyLen {
+		return fmt.Errorf("ConsolidationRequest TargetPubKey len not equal to BLSSiglen after UnmarshalJSON")
 	}
 	d.SourceAddress = tt.SourceAddress
-	d.SourcePubKey = [48]byte(sourceKey)
-	d.TargetPubKey = [48]byte(targetKey)
+	d.SourcePubKey = [BLSPubKeyLen]byte(sourceKey)
+	d.TargetPubKey = [BLSPubKeyLen]byte(targetKey)
 	return nil
 }
 

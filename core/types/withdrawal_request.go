@@ -112,11 +112,11 @@ func (w *WithdrawalRequest) UnmarshalJSON(input []byte) error {
 	if err != nil {
 		return err
 	}
-	if len(validatorKey) != 48 {
-		return fmt.Errorf("decoded validatorKey len after UnmarshalJSON doesn't match BLSKeyLen")
+	if len(validatorKey) != BLSPubKeyLen {
+		return fmt.Errorf("WithdrawalRequest ValidatorPubkey len after UnmarshalJSON doesn't match BLSKeyLen")
 	}
 
-	w.ValidatorPubkey = [48]byte(validatorKey)
+	w.ValidatorPubkey = [BLSPubKeyLen]byte(validatorKey)
 	w.Amount = tt.Amount.Uint64()
 	w.SourceAddress = tt.SourceAddress
 	return nil

@@ -185,6 +185,7 @@ func (e *EthereumExecutionModule) GetAssembledBlock(ctx context.Context, req *ex
 	}
 	reqs := block.Requests()
 	if reqs != nil {
+		payload.Version = 4
 		payload.DepositRequests = engine_types.ConvertDepositRequestsToRpc(reqs.Deposits())
 		payload.WithdrawalRequests = engine_types.ConvertWithdrawalRequestsToRpc(reqs.Withdrawals())
 		payload.ConsolidationRequests = engine_types.ConvertConsolidationRequestsToRpc(reqs.Consolidations())
