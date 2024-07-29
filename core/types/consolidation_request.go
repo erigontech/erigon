@@ -99,6 +99,7 @@ func (d *ConsolidationRequest) UnmarshalJSON(input []byte) error {
 	}
 	if len(sourceKey) != BLSPubKeyLen {
 		return errors.New("ConsolidationRequest SourcePubKey not equal to BLSPubkeyLen after UnmarshalJSON")
+
 	}
 	targetKey, err := hexutil.Decode(tt.TargetPubKey)
 	if err != nil {

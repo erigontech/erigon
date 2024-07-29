@@ -20,7 +20,6 @@ import (
 	"bytes"
 	"encoding/json"
 	"errors"
-
 	"io"
 
 	libcommon "github.com/erigontech/erigon-lib/common"
