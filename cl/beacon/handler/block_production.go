@@ -1080,9 +1080,10 @@ func (a *ApiHandler) findBestAttestationsForBlockProduction(
 	sort.Slice(attestationCandidates, func(i, j int) bool {
 		return attestationCandidates[i].reward > attestationCandidates[j].reward
 	})
+
 	// Some aggregates can be supersets of existing ones so let's filter out the supersets
 	// this MAP is HashTreeRoot(AttestationData) => AggregationBits
-	aggregationBitsByAttestationData := make(map[libcommon.Hash][]byte)
+	hashToMergedAtt := make(map[libcommon.Hash]*solid.Attestation)
 	for _, candidate := range attestationCandidates {
 		// Check if it is a superset of a pre-included attestation with higher reward
 		attestationDataRoot, err := candidate.attestation.AttestantionData().HashSSZ()
@@ -1090,25 +1091,27 @@ func (a *ApiHandler) findBestAttestationsForBlockProduction(
 			log.Warn("[Block Production] Cannot compute attestation data root", "err", err)
 			continue
 		}
-		currAggregationBits, exists := aggregationBitsByAttestationData[attestationDataRoot]
-		if exists {
-			if utils.IsNonStrictSupersetBitlist(
+		if curAtt, exists := hashToMergedAtt[attestationDataRoot]; exists {
+			currAggregationBits := curAtt.AggregationBits()
+			if !utils.IsNonStrictSupersetBitlist(
 				currAggregationBits,
 				candidate.attestation.AggregationBits(),
 			) {
-				continue
+				// merge if not a superset
+				utils.MergeBitlists(currAggregationBits, candidate.attestation.AggregationBits())
+				curAtt.SetAggregationBits(currAggregationBits)
 			}
-			utils.MergeBitlists(currAggregationBits, candidate.attestation.AggregationBits())
 		} else {
-			currAggregationBits = candidate.attestation.AggregationBits()
+			// Update the currently built superset
+			hashToMergedAtt[attestationDataRoot] = candidate.attestation.Copy()
 		}
-		// Update the currently built superset
-		aggregationBitsByAttestationData[attestationDataRoot] = currAggregationBits
 
-		ret.Append(candidate.attestation)
-		if ret.Len() >= int(a.beaconChainCfg.MaxAttestations) {
+		if len(hashToMergedAtt) >= int(a.beaconChainCfg.MaxAttestations) {
 			break
 		}
+	}
+	for _, att := range hashToMergedAtt {
+		ret.Append(att)
 	}
 	return ret
 }
