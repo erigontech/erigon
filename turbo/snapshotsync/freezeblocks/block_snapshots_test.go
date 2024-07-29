@@ -18,7 +18,6 @@ package freezeblocks
 
 import (
 	"context"
-	"fmt"
 	"path/filepath"
 	"testing"
 	"testing/fstest"
@@ -173,10 +172,9 @@ func TestMergeSnapshots(t *testing.T) {
 	{
 		merger := NewMerger(dir, 1, log.LvlInfo, nil, params.MainnetChainConfig, logger)
 		merger.DisableFsync()
-		s.ReopenSegments(coresnaptype.BlockSnapshotTypes, false)
+		s.ReopenFolder()
 		ranges := merger.FindMergeRanges(s.Ranges(), s.SegmentsMax())
-		fmt.Printf("[dbg] 2 %+v\n", ranges)
-		require.True(len(ranges) == 0)
+		require.Equal(0, len(ranges))
 		err := merger.Merge(context.Background(), s, coresnaptype.BlockSnapshotTypes, ranges, s.Dir(), false, nil, nil)
 		require.NoError(err)
 	}
