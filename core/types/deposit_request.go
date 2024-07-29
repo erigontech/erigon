@@ -20,6 +20,7 @@ import (
 	"bytes"
 	"encoding/binary"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 
@@ -144,14 +145,14 @@ func (d *DepositRequest) UnmarshalJSON(input []byte) error {
 		return err
 	}
 	if len(pubkey) != BLSPubKeyLen {
-		return fmt.Errorf("DepositRequest Pubkey len not equal to BLSPubkeyLen after UnmarshalJSON")
+		return errors.New("DepositRequest Pubkey len not equal to BLSPubkeyLen after UnmarshalJSON")
 	}
 	sig, err := hexutil.Decode(tt.Signature)
 	if err != nil {
 		return err
 	}
 	if len(sig) != BLSSigLen {
-		return fmt.Errorf("DepositRequest Signature len not equal to BLSSiglen after UnmarshalJSON")
+		return errors.New("DepositRequest Signature len not equal to BLSSiglen after UnmarshalJSON")
 	}
 
 	d.Pubkey = [BLSPubKeyLen]byte(pubkey)

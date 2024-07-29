@@ -19,9 +19,8 @@ package types
 import (
 	"bytes"
 	"encoding/json"
-	"fmt"
+	"errors"
 
-	// "fmt"
 	"io"
 
 	libcommon "github.com/erigontech/erigon-lib/common"
@@ -113,7 +112,7 @@ func (w *WithdrawalRequest) UnmarshalJSON(input []byte) error {
 		return err
 	}
 	if len(validatorKey) != BLSPubKeyLen {
-		return fmt.Errorf("WithdrawalRequest ValidatorPubkey len after UnmarshalJSON doesn't match BLSKeyLen")
+		return errors.New("WithdrawalRequest ValidatorPubkey len after UnmarshalJSON doesn't match BLSKeyLen")
 	}
 
 	w.ValidatorPubkey = [BLSPubKeyLen]byte(validatorKey)
