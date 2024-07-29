@@ -63,7 +63,6 @@ System Requirements
 
 * Polygon Mainnet Archive: 8.5TiB (December 2023).
   Polygon Mainnet Full node (see [Pruned Node][pruned_node]) with `--prune.*.older 15768000`: 5.1Tb (September 2023).
-  Polygon Mumbai Archive: 1TB. (April 2022).
 
 SSD or NVMe. Do not recommend HDD - on HDD Erigon will always stay N blocks behind chain tip, but not fall behind.
 Bear in mind that SSD performance deteriorates when close to capacity.
@@ -110,7 +109,7 @@ download speed by flag `--torrent.download.rate=20mb`. <code>🔬 See [Downloade
 Use `--datadir` to choose where to store data.
 
 Use `--chain=gnosis` for [Gnosis Chain](https://www.gnosis.io/), `--chain=bor-mainnet` for Polygon Mainnet,
-`--chain=mumbai` for Polygon Mumbai and `--chain=amoy` for Polygon Amoy.
+and `--chain=amoy` for Polygon Amoy.
 For Gnosis Chain you need a [Consensus Layer](#beacon-chain-consensus-layer) client alongside
 Erigon (https://docs.gnosischain.com/node/manual/beacon).
 
@@ -775,7 +774,7 @@ Golang 1.21
 
 Almost all RPC methods are implemented - if something doesn't work - just drop it on our head.
 
-Supported networks: all (except Mumbai).
+Supported networks: all.
 
 ### E3 changes from E2:
 

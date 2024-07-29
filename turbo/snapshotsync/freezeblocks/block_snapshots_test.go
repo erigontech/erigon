@@ -332,7 +332,7 @@ func TestOpenAllSnapshot(t *testing.T) {
 	logger := log.New()
 	baseDir, require := t.TempDir(), require.New(t)
 
-	for _, chain := range []string{networkname.MainnetChainName, networkname.MumbaiChainName} {
+	for _, chain := range []string{networkname.MainnetChainName, networkname.AmoyChainName} {
 		dir := filepath.Join(baseDir, chain)
 		chainSnapshotCfg := snapcfg.KnownCfg(chain)
 		chainSnapshotCfg.ExpectBlocks = math.MaxUint64

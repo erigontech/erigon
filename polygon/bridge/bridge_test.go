@@ -73,7 +73,7 @@ func TestBridge(t *testing.T) {
 	event1 := &heimdall.EventRecordWithTime{
 		EventRecord: heimdall.EventRecord{
 			ID:      1,
-			ChainID: "80001",
+			ChainID: "80002",
 			Data:    hexutil.MustDecode("0x01"),
 		},
 		Time: time.Unix(50, 0), // block 2
@@ -81,7 +81,7 @@ func TestBridge(t *testing.T) {
 	event2 := &heimdall.EventRecordWithTime{
 		EventRecord: heimdall.EventRecord{
 			ID:      2,
-			ChainID: "80001",
+			ChainID: "80002",
 			Data:    hexutil.MustDecode("0x02"),
 		},
 		Time: time.Unix(100, 0), // block 2
@@ -89,7 +89,7 @@ func TestBridge(t *testing.T) {
 	event3 := &heimdall.EventRecordWithTime{
 		EventRecord: heimdall.EventRecord{
 			ID:      3,
-			ChainID: "80001",
+			ChainID: "80002",
 			Data:    hexutil.MustDecode("0x03"),
 		},
 		Time: time.Unix(200, 0), // block 4
@@ -171,7 +171,7 @@ func TestBridge_Unwind(t *testing.T) {
 	event1 := &heimdall.EventRecordWithTime{
 		EventRecord: heimdall.EventRecord{
 			ID:      1,
-			ChainID: "80001",
+			ChainID: "80002",
 			Data:    hexutil.MustDecode("0x01"),
 		},
 		Time: time.Unix(50, 0), // block 2
@@ -179,7 +179,7 @@ func TestBridge_Unwind(t *testing.T) {
 	event2 := &heimdall.EventRecordWithTime{
 		EventRecord: heimdall.EventRecord{
 			ID:      2,
-			ChainID: "80001",
+			ChainID: "80002",
 			Data:    hexutil.MustDecode("0x02"),
 		},
 		Time: time.Unix(100, 0), // block 2
@@ -187,7 +187,7 @@ func TestBridge_Unwind(t *testing.T) {
 	event3 := &heimdall.EventRecordWithTime{
 		EventRecord: heimdall.EventRecord{
 			ID:      3,
-			ChainID: "80001",
+			ChainID: "80002",
 			Data:    hexutil.MustDecode("0x03"),
 		},
 		Time: time.Unix(200, 0), // block 4
@@ -195,7 +195,7 @@ func TestBridge_Unwind(t *testing.T) {
 	event4 := &heimdall.EventRecordWithTime{
 		EventRecord: heimdall.EventRecord{
 			ID:      4,
-			ChainID: "80001",
+			ChainID: "80002",
 			Data:    hexutil.MustDecode("0x03"),
 		},
 		Time: time.Unix(300, 0), // block 6
