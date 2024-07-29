@@ -44,6 +44,8 @@ type CaplinConfig struct {
 	// CaplinMeVRelayUrl is optional and is used to connect to the external builder service.
 	// If it's set, the node will start in builder mode
 	MevRelayUrl string
+	// EnableValidatorMonitor is used to enable the validator monitor metrics and corresponding logs
+	EnableValidatorMonitor bool
 }
 
 func (c CaplinConfig) RelayUrlExist() bool {

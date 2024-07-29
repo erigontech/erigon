@@ -36,6 +36,7 @@ import (
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/clstages"
 	"github.com/erigontech/erigon/cl/cltypes"
+	"github.com/erigontech/erigon/cl/monitor"
 	"github.com/erigontech/erigon/cl/persistence"
 	"github.com/erigontech/erigon/cl/persistence/beacon_indicies"
 	"github.com/erigontech/erigon/cl/persistence/blob_storage"
@@ -73,6 +74,7 @@ type Cfg struct {
 	sn                      *freezeblocks.CaplinSnapshots
 	blobStore               blob_storage.BlobStorage
 	attestationDataProducer attestation_producer.AttestationDataProducer
+	validatorMonitor        monitor.ValidatorMonitor
 
 	hasDownloaded, backfilling, blobBackfilling bool
 }
@@ -106,6 +108,7 @@ func ClStagesCfg(
 	emitters *beaconevents.Emitters,
 	blobStore blob_storage.BlobStorage,
 	attestationDataProducer attestation_producer.AttestationDataProducer,
+	validatorMonitor monitor.ValidatorMonitor,
 ) *Cfg {
 	return &Cfg{
 		rpc:                     rpc,
@@ -127,6 +130,7 @@ func ClStagesCfg(
 		blockCollector:          block_collector.NewBlockCollector(log.Root(), executionClient, beaconCfg, syncBackLoopLimit, tmpdir),
 		blobBackfilling:         blobBackfilling,
 		attestationDataProducer: attestationDataProducer,
+		validatorMonitor:        validatorMonitor,
 	}
 }
 
@@ -210,7 +214,7 @@ digraph {
 func ConsensusClStages(ctx context.Context,
 	cfg *Cfg,
 ) *clstages.StageGraph[*Cfg, Args] {
-
+	// todo: refactor this function
 	rpcSource := persistence.NewBeaconRpcSource(cfg.rpc)
 	processBlock := func(db kv.RwDB, block *cltypes.SignedBeaconBlock, newPayload, fullValidation, checkDataAvaiability bool) error {
 		if err := db.Update(ctx, func(tx kv.RwTx) error {
@@ -314,6 +318,7 @@ func ConsensusClStages(ctx context.Context,
 								blocks = blocks[i:]
 								break
 							}
+							// don't need to monitor validators status here when we are doing forward sync
 
 							st, err := cfg.forkChoice.GetStateAtBlockRoot(blockRoot, false)
 							if err == nil && block.Block.Slot%(cfg.beaconCfg.SlotsPerEpoch*2) == 0 && st != nil {
@@ -563,9 +568,11 @@ func ConsensusClStages(ctx context.Context,
 									"block":                common.Hash(blockRoot),
 									"execution_optimistic": false, // TODO: i don't know what to put here. i see other places doing false, leaving flase for now
 								})
+								cfg.validatorMonitor.OnNewBlock(block.Block)
 								if block.Block.Slot >= args.targetSlot {
 									break MainLoop
 								}
+
 							}
 						case <-logTimer.C:
 							logger.Info("[Caplin] Progress", "progress", cfg.forkChoice.HighestSeen(), "from", args.seenSlot, "to", args.targetSlot)
