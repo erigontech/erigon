@@ -241,5 +241,5 @@ func notifyInboundMessageObservers[TPacket any](
 }
 
 func messageListenerLogPrefix(message string) string {
-	return fmt.Sprintf("[p2p.message.listener] %s", message)
+	return "[p2p.message.listener] " + message
 }

@@ -19,6 +19,7 @@ package sync
 import (
 	"bufio"
 	"context"
+	"errors"
 	"fmt"
 	"io/fs"
 	"os"
@@ -139,7 +140,7 @@ func ParseLocator(value string) (*Locator, error) {
 		}, nil
 	}
 
-	return nil, fmt.Errorf("Invalid locator syntax")
+	return nil, errors.New("Invalid locator syntax")
 }
 
 type TorrentClient struct {

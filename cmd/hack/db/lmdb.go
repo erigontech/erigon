@@ -27,6 +27,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 
 	"github.com/erigontech/erigon-lib/kv"
@@ -122,14 +123,14 @@ func _64(page []byte, pos int) uint64 {
 func pagesToString(pages []uint32) (out string) {
 
 	if len(pages) == 1 {
-		out += fmt.Sprint(pages[0])
+		out += strconv.FormatUint(uint64(pages[0]), 10)
 		return
 	}
 
 	if len(pages) == 2 {
-		out += fmt.Sprint(pages[0])
+		out += strconv.FormatUint(uint64(pages[0]), 10)
 		out += ", "
-		out += fmt.Sprint(pages[1])
+		out += strconv.FormatUint(uint64(pages[1]), 10)
 		return
 	}
 
@@ -166,7 +167,7 @@ func pagesToString(pages []uint32) (out string) {
 					if i < len(container)-1 {
 						out += fmt.Sprintf("%d, ", n)
 					} else {
-						out += fmt.Sprintf("%d", n)
+						out += strconv.FormatUint(uint64(n), 10)
 					}
 				}
 
@@ -189,7 +190,7 @@ func pagesToString(pages []uint32) (out string) {
 			if i < len(container)-1 {
 				out += fmt.Sprintf("%d, ", n)
 			} else {
-				out += fmt.Sprintf("%d", n)
+				out += strconv.FormatUint(uint64(n), 10)
 			}
 		}
 
@@ -1109,7 +1110,7 @@ func _conditions(f io.ReaderAt, visStream io.Writer, node *mdbx_node, _header *h
 
 		for _, subNode := range subHeader.nodes {
 			val := string(subNode.data[:subNode.ksize])
-			*out += fmt.Sprintf("|%s", val)
+			*out += "|" + val
 		}
 
 		*out += "}"
@@ -1144,7 +1145,7 @@ func readPages(f io.ReaderAt, visStream io.Writer, pgno uint32, blockID *int, pa
 	*blockID++
 	pBlock := *blockID
 
-	fillcolor := ""
+	var fillcolor string
 	if _isBranch {
 		fillcolor = colors["purple"]
 	} else {
@@ -1240,7 +1241,7 @@ func freeDBPages(f io.ReaderAt, visStream io.Writer, freeRoot uint32) error {
 				out += fmt.Sprintf("txid(%v)", txnID)
 				out += fmt.Sprintf("(ON %d OVERFLOW PAGES)=", overflowPages)
 				for i := 0; i < overflowPages; i++ {
-					out += fmt.Sprintf("%d", int(node.pgno)+i)
+					out += strconv.Itoa(int(node.pgno) + i)
 					if i+1 < overflowPages {
 						out += ", "
 					}

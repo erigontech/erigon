@@ -17,6 +17,7 @@
 package state
 
 import (
+	"errors"
 	"fmt"
 
 	"github.com/erigontech/erigon-lib/common/math"
@@ -120,7 +121,7 @@ func (b *CachingBeaconState) InitiateValidatorExit(index uint64) error {
 	var overflow bool
 	var newWithdrawableEpoch uint64
 	if newWithdrawableEpoch, overflow = math.SafeAdd(exitQueueEpoch, b.BeaconConfig().MinValidatorWithdrawabilityDelay); overflow {
-		return fmt.Errorf("withdrawable epoch is too big")
+		return errors.New("withdrawable epoch is too big")
 	}
 	b.SetExitEpochForValidatorAtIndex(int(index), exitQueueEpoch)
 	b.SetWithdrawableEpochForValidatorAtIndex(int(index), newWithdrawableEpoch)

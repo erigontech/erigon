@@ -863,7 +863,7 @@ func stageBodies(db kv.RwDB, ctx context.Context, logger log.Logger) error {
 
 		if unwind > 0 {
 			if unwind > s.BlockNumber {
-				return fmt.Errorf("cannot unwind past 0")
+				return errors.New("cannot unwind past 0")
 			}
 
 			u := sync.NewUnwindState(stages.Bodies, s.BlockNumber-unwind, s.BlockNumber, true, false)

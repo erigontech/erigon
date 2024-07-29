@@ -251,11 +251,11 @@ func NewAuRa(spec *chain.AuRaConfig, db kv.RwDB) (*AuRa, error) {
 	}
 
 	if _, ok := auraParams.StepDurations[0]; !ok {
-		return nil, fmt.Errorf("authority Round step 0 duration is undefined")
+		return nil, errors.New("authority Round step 0 duration is undefined")
 	}
 	for _, v := range auraParams.StepDurations {
 		if v == 0 {
-			return nil, fmt.Errorf("authority Round step duration cannot be 0")
+			return nil, errors.New("authority Round step duration cannot be 0")
 		}
 	}
 	//shouldTimeout := auraParams.StartStep == nil
@@ -276,7 +276,7 @@ func NewAuRa(spec *chain.AuRaConfig, db kv.RwDB) (*AuRa, error) {
 		dur := auraParams.StepDurations[time]
 		step, t, ok := nextStepTimeDuration(durInfo, time)
 		if !ok {
-			return nil, fmt.Errorf("timestamp overflow")
+			return nil, errors.New("timestamp overflow")
 		}
 		durInfo.TransitionStep = step
 		durInfo.TransitionTimestamp = t
@@ -1059,7 +1059,7 @@ func (c *AuRa) epochSet(chain consensus.ChainHeaderReader, e *NonTransactionalEp
 
 	finalityChecker, epochTransitionNumber, ok := c.EpochManager.zoomToAfter(chain, e, c.cfg.Validators, h.ParentHash, call)
 	if !ok {
-		return nil, 0, fmt.Errorf("unable to zoomToAfter to epoch")
+		return nil, 0, errors.New("unable to zoomToAfter to epoch")
 	}
 	return finalityChecker.signers, epochTransitionNumber, nil
 }

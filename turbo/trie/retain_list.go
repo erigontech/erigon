@@ -22,6 +22,7 @@ package trie
 import (
 	"bytes"
 	"encoding/binary"
+	"errors"
 	"fmt"
 	"math/big"
 	"sort"
@@ -151,7 +152,7 @@ func (pr *ProofRetainer) ProofResult() (*accounts.AccProofResult, error) {
 	}
 
 	if pr.acc.Initialised && result.StorageHash == (libcommon.Hash{}) {
-		return nil, fmt.Errorf("did not find storage root in proof elements")
+		return nil, errors.New("did not find storage root in proof elements")
 	}
 
 	result.StorageProof = make([]accounts.StorProofResult, len(pr.storageKeys))

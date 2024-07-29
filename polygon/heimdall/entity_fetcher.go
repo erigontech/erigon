@@ -19,7 +19,6 @@ package heimdall
 import (
 	"cmp"
 	"context"
-	"fmt"
 	"slices"
 	"time"
 
@@ -138,7 +137,7 @@ func (f *entityFetcherImpl[TEntity]) FetchAllEntities(ctx context.Context) ([]TE
 		select {
 		case <-progressLogTicker.C:
 			f.logger.Debug(
-				heimdallLogPrefix(fmt.Sprintf("%s progress", f.name)),
+				heimdallLogPrefix(f.name+" progress"),
 				"page", page,
 				"len", len(entities),
 			)
@@ -158,7 +157,7 @@ func (f *entityFetcherImpl[TEntity]) FetchAllEntities(ctx context.Context) ([]TE
 	}
 
 	f.logger.Debug(
-		heimdallLogPrefix(fmt.Sprintf("%s done", f.name)),
+		heimdallLogPrefix(f.name+" done"),
 		"len", len(entities),
 		"duration", time.Since(fetchStartTime),
 	)

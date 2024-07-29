@@ -943,7 +943,7 @@ func (d *Downloader) mainLoop(silent bool) error {
 										} else {
 											downloadComplete <- downloadStatus{
 												name: fileInfo.Name(),
-												err:  fmt.Errorf("hash check failed"),
+												err:  errors.New("hash check failed"),
 											}
 
 											d.logger.Warn("[snapshots] Torrent hash does not match file", "file", fileInfo.Name(), "torrent-hash", infoHash, "file-hash", hex.EncodeToString(fileHashBytes))
@@ -1609,7 +1609,7 @@ func (d *Downloader) torrentDownload(t *torrent.Torrent, statusChan chan downloa
 
 func (d *Downloader) webDownload(peerUrls []*url.URL, t *torrent.Torrent, i *webDownloadInfo, statusChan chan downloadStatus) (*RCloneSession, error) {
 	if d.webDownloadClient == nil {
-		return nil, fmt.Errorf("webdownload client not enabled")
+		return nil, errors.New("webdownload client not enabled")
 	}
 
 	peerUrl, err := selectDownloadPeer(d.ctx, peerUrls, t)
@@ -1743,7 +1743,7 @@ func (d *Downloader) webDownload(peerUrls []*url.URL, t *torrent.Torrent, i *web
 func selectDownloadPeer(ctx context.Context, peerUrls []*url.URL, t *torrent.Torrent) (string, error) {
 	switch len(peerUrls) {
 	case 0:
-		return "", fmt.Errorf("no download peers")
+		return "", errors.New("no download peers")
 
 	case 1:
 		downloadUrl := peerUrls[0].JoinPath(t.Name())
@@ -1775,7 +1775,7 @@ func selectDownloadPeer(ctx context.Context, peerUrls []*url.URL, t *torrent.Tor
 		}
 	}
 
-	return "", fmt.Errorf("can't find download peer")
+	return "", errors.New("can't find download peer")
 }
 
 func availableTorrents(ctx context.Context, pending []*torrent.Torrent, downloading map[string]*downloadInfo, fileSlots int, pieceSlots int) []*torrent.Torrent {

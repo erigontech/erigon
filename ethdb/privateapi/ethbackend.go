@@ -19,7 +19,6 @@ package privateapi
 import (
 	"context"
 	"errors"
-	"fmt"
 
 	"google.golang.org/protobuf/types/known/emptypb"
 
@@ -272,7 +271,7 @@ func (s *EthBackendServer) SubscribeLogs(server remote.ETHBACKEND_SubscribeLogsS
 	if s.logsFilter != nil {
 		return s.logsFilter.subscribeLogs(server)
 	}
-	return fmt.Errorf("no logs filter available")
+	return errors.New("no logs filter available")
 }
 
 func (s *EthBackendServer) BorEvent(ctx context.Context, req *remote.BorEventRequest) (*remote.BorEventReply, error) {

@@ -32,6 +32,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/erigontech/erigon-lib/common/dbg"
 	lru "github.com/hashicorp/golang-lru/arc/v2"
 	"github.com/holiman/uint256"
 	"github.com/xsleonard/go-merkle"
@@ -399,19 +400,19 @@ type rwWrapper struct {
 }
 
 func (w rwWrapper) Update(ctx context.Context, f func(tx kv.RwTx) error) error {
-	return fmt.Errorf("Update not implemented")
+	return errors.New("Update not implemented")
 }
 
 func (w rwWrapper) UpdateNosync(ctx context.Context, f func(tx kv.RwTx) error) error {
-	return fmt.Errorf("UpdateNosync not implemented")
+	return errors.New("UpdateNosync not implemented")
 }
 
 func (w rwWrapper) BeginRw(ctx context.Context) (kv.RwTx, error) {
-	return nil, fmt.Errorf("BeginRw not implemented")
+	return nil, errors.New("BeginRw not implemented")
 }
 
 func (w rwWrapper) BeginRwNosync(ctx context.Context) (kv.RwTx, error) {
-	return nil, fmt.Errorf("BeginRwNosync not implemented")
+	return nil, errors.New("BeginRwNosync not implemented")
 }
 
 // This is used by the rpcdaemon and tests which need read only access to the provided data services
@@ -1471,6 +1472,7 @@ func (c *Bor) getHeaderByNumber(ctx context.Context, tx kv.Tx, number uint64) (*
 		return nil, err
 	}
 	if header == nil {
+		_, _ = c.blockReader.HeaderByNumber(dbg.ContextWithDebug(ctx, true), tx, number)
 		return nil, fmt.Errorf("[bor] header not found: %d", number)
 	}
 	return header, nil
