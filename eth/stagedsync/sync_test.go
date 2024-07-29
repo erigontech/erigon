@@ -312,7 +312,7 @@ func TestUnwind(t *testing.T) {
 
 	//check that at unwind disabled stage not appear
 	flow = flow[:0]
-	state.unwindOrder = []*Stage{s[3], s[2], s[1], s[0]}
+	state.unwindOrder = []*Stage{s[2], s[1], s[0]}
 	_ = state.UnwindTo(100, UnwindReason{}, tx)
 	_, err = state.Run(db, wrap.TxContainer{Tx: tx}, true /* initialCycle */, false)
 	assert.NoError(t, err)
