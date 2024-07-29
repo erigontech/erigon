@@ -235,7 +235,7 @@ func (api *ZkEvmAPIImpl) VerifiedBatchNumber(ctx context.Context) (hexutil.Uint6
 }
 
 // GetBatchDataByNumbers returns the batch data for the given batch numbers
-func (api *ZkEvmAPIImpl) GetBatchDataByNumbers(ctx context.Context, batchNumbers []rpc.BlockNumber) (json.RawMessage, error) {
+func (api *ZkEvmAPIImpl) GetBatchDataByNumbers(ctx context.Context, batchNumbers rpc.RpcNumberArray) (json.RawMessage, error) {
 	tx, err := api.db.BeginRo(ctx)
 	if err != nil {
 		return nil, err
@@ -269,9 +269,9 @@ func (api *ZkEvmAPIImpl) GetBatchDataByNumbers(ctx context.Context, batchNumbers
 		highestBatchNo, err = hermezDb.GetBatchNoByL2Block(uint64(bn.(hexutil.Uint64)))
 	}
 
-	bds := make([]*types.BatchDataSlim, 0, len(batchNumbers))
+	bds := make([]*types.BatchDataSlim, 0, len(batchNumbers.Numbers))
 
-	for _, batchNumber := range batchNumbers {
+	for _, batchNumber := range batchNumbers.Numbers {
 		bd := &types.BatchDataSlim{
 			Number: uint64(batchNumber.Int64()),
 			Empty:  false,
