@@ -39,7 +39,7 @@ import (
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/txpool"
 	"github.com/erigontech/erigon-lib/txpool/txpoolcfg"
-	"github.com/erigontech/erigon-lib/txpool/txpooluitl"
+	"github.com/erigontech/erigon-lib/txpool/txpoolutil"
 	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon/cmd/rpcdaemon/rpcdaemontest"
 	common2 "github.com/erigontech/erigon/common"
@@ -76,6 +76,8 @@ var (
 
 	noTxGossip bool
 
+	mdbxWriteMap bool
+
 	commitEvery time.Duration
 )
 
@@ -103,6 +105,7 @@ func init() {
 	rootCmd.PersistentFlags().Uint64Var(&blobPriceBump, "txpool.blobpricebump", txpoolcfg.DefaultConfig.BlobPriceBump, "Price bump percentage to replace an existing blob (type-3) transaction")
 	rootCmd.PersistentFlags().DurationVar(&commitEvery, utils.TxPoolCommitEveryFlag.Name, utils.TxPoolCommitEveryFlag.Value, utils.TxPoolCommitEveryFlag.Usage)
 	rootCmd.PersistentFlags().BoolVar(&noTxGossip, utils.TxPoolGossipDisableFlag.Name, utils.TxPoolGossipDisableFlag.Value, utils.TxPoolGossipDisableFlag.Usage)
+	rootCmd.PersistentFlags().BoolVar(&mdbxWriteMap, utils.DbWriteMapFlag.Name, utils.DbWriteMapFlag.Value, utils.DbWriteMapFlag.Usage)
 	rootCmd.Flags().StringSliceVar(&traceSenders, utils.TxPoolTraceSendersFlag.Name, []string{}, utils.TxPoolTraceSendersFlag.Usage)
 }
 
@@ -171,6 +174,7 @@ func doTxpool(ctx context.Context, logger log.Logger) error {
 	cfg.PriceBump = priceBump
 	cfg.BlobPriceBump = blobPriceBump
 	cfg.NoGossip = noTxGossip
+	cfg.MdbxWriteMap = mdbxWriteMap
 
 	cacheConfig := kvcache.DefaultCoherentConfig
 	cacheConfig.MetricsLabel = "txpool"
@@ -183,7 +187,7 @@ func doTxpool(ctx context.Context, logger log.Logger) error {
 
 	newTxs := make(chan types.Announcements, 1024)
 	defer close(newTxs)
-	txPoolDB, txPool, fetch, send, txpoolGrpcServer, err := txpooluitl.AllComponents(ctx, cfg,
+	txPoolDB, txPool, fetch, send, txpoolGrpcServer, err := txpoolutil.AllComponents(ctx, cfg,
 		kvcache.New(cacheConfig), newTxs, coreDB, sentryClients, kvClient, misc.Eip1559FeeCalculator, logger)
 	if err != nil {
 		return err

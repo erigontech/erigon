@@ -119,7 +119,7 @@ func writeLogsRead(w http.ResponseWriter, r *http.Request, dirPath string) {
 	}
 
 	if fileInfo.IsDir() {
-		http.Error(w, fmt.Sprintf("%s is a directory, needs to be a file", file), http.StatusInternalServerError)
+		http.Error(w, file+" is a directory, needs to be a file", http.StatusInternalServerError)
 		return
 	}
 

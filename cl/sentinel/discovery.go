@@ -18,7 +18,7 @@ package sentinel
 
 import (
 	"context"
-	"fmt"
+	"errors"
 	"time"
 
 	"github.com/libp2p/go-libp2p/core/network"
@@ -42,7 +42,7 @@ func (s *Sentinel) ConnectWithPeer(ctx context.Context, info peer.AddrInfo) (err
 		return nil
 	}
 	if s.peers.BanStatus(info.ID) {
-		return fmt.Errorf("refused to connect to bad peer")
+		return errors.New("refused to connect to bad peer")
 	}
 	ctxWithTimeout, cancel := context.WithTimeout(ctx, clparams.MaxDialTimeout)
 	defer cancel()
@@ -122,9 +122,12 @@ func (s *Sentinel) listenForPeers() {
 			continue
 		}
 
-		if err := s.ConnectWithPeer(s.ctx, *peerInfo); err != nil {
-			log.Trace("[Sentinel] Could not connect with peer", "err", err)
-		}
+		go func() {
+			if err := s.ConnectWithPeer(s.ctx, *peerInfo); err != nil {
+				log.Trace("[Sentinel] Could not connect with peer", "err", err)
+			}
+		}()
+
 	}
 }
 

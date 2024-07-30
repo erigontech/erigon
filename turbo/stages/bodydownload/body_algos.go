@@ -19,6 +19,7 @@ package bodydownload
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"math/big"
 
@@ -75,7 +76,7 @@ func (bd *BodyDownload) UpdateFromDb(db kv.Tx) (headHeight, headTime uint64, hea
 	headTd256 = new(uint256.Int)
 	overflow := headTd256.SetFromBig(headTd)
 	if overflow {
-		return 0, 0, libcommon.Hash{}, nil, fmt.Errorf("headTd higher than 2^256-1")
+		return 0, 0, libcommon.Hash{}, nil, errors.New("headTd higher than 2^256-1")
 	}
 	headTime = 0
 	headHeader, err := bd.br.Header(context.Background(), db, headHash, headHeight)

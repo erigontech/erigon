@@ -728,13 +728,13 @@ func (s *RoSnapshots) buildMissedIndicesIfNeed(ctx context.Context, logPrefix st
 		return nil
 	}
 	if !s.Cfg().ProduceE2 && s.IndicesMax() == 0 {
-		return fmt.Errorf("please remove --snap.stop, erigon can't work without creating basic indices")
+		return errors.New("please remove --snap.stop, erigon can't work without creating basic indices")
 	}
 	if !s.Cfg().ProduceE2 {
 		return nil
 	}
 	if !s.SegmentsReady() {
-		return fmt.Errorf("not all snapshot segments are available")
+		return errors.New("not all snapshot segments are available")
 	}
 	s.LogStat("missed-idx")
 
@@ -944,7 +944,7 @@ func (s *RoSnapshots) AddSnapshotsToSilkworm(silkwormInstance *silkworm.Silkworm
 	}
 
 	if len(mappedHeaderSnapshots) != len(mappedBodySnapshots) || len(mappedBodySnapshots) != len(mappedTxnSnapshots) {
-		return fmt.Errorf("addSnapshots: the number of headers/bodies/txs snapshots must be the same")
+		return errors.New("addSnapshots: the number of headers/bodies/txs snapshots must be the same")
 	}
 
 	for i := 0; i < len(mappedHeaderSnapshots); i++ {
@@ -972,11 +972,18 @@ func buildIdx(ctx context.Context, sn snaptype.FileInfo, chainConfig *chain.Conf
 }
 
 func notifySegmentIndexingFinished(name string) {
-	diagnostics.Send(
-		diagnostics.SnapshotSegmentIndexingFinishedUpdate{
+	dts := []diagnostics.SnapshotSegmentIndexingStatistics{
+		diagnostics.SnapshotSegmentIndexingStatistics{
 			SegmentName: name,
+			Percent:     100,
+			Alloc:       0,
+			Sys:         0,
 		},
-	)
+	}
+	diagnostics.Send(diagnostics.SnapshotIndexingStatistics{
+		Segments:    dts,
+		TimeElapsed: -1,
+	})
 }
 
 func sendDiagnostics(startIndexingTime time.Time, indexPercent map[string]int, alloc uint64, sys uint64) {
@@ -1595,13 +1602,21 @@ func dumpRange(ctx context.Context, f snaptype.FileInfo, dumper dumpFunc, firstK
 	var lastKeyValue uint64
 
 	sn, err := seg.NewCompressor(ctx, "Snapshot "+f.Type.Name(), f.Path, tmpDir, seg.MinPatternScore, workers, log.LvlTrace, logger)
-
 	if err != nil {
 		return lastKeyValue, err
 	}
 	defer sn.Close()
 
+	// E3 need to keep db smaller: earlier retire -> earlier prune.
+	// Means:
+	//  - build must be fast
+	//  - merge can be slow and expensive
+	noCompress := (f.To - f.From) < (snaptype.Erigon2MergeLimit - 1)
+
 	lastKeyValue, err = dumper(ctx, chainDB, chainConfig, f.From, f.To, firstKey, func(v []byte) error {
+		if noCompress {
+			return sn.AddUncompressedWord(v)
+		}
 		return sn.AddWord(v)
 	}, workers, lvl, logger)
 

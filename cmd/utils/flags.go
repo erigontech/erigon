@@ -765,7 +765,7 @@ var (
 	}
 	DbWriteMapFlag = cli.BoolFlag{
 		Name:  "db.writemap",
-		Usage: "Enable WRITE_MAP feauture for fast database writes and fast commit times",
+		Usage: "Enable WRITE_MAP feature for fast database writes and fast commit times",
 		Value: true,
 	}
 
@@ -1517,6 +1517,9 @@ func setTxPool(ctx *cli.Context, fullCfg *ethconfig.Config) {
 	if ctx.IsSet(TxPoolBlobPriceBumpFlag.Name) {
 		fullCfg.TxPool.BlobPriceBump = ctx.Uint64(TxPoolBlobPriceBumpFlag.Name)
 	}
+	if ctx.IsSet(DbWriteMapFlag.Name) {
+		fullCfg.TxPool.MdbxWriteMap = ctx.Bool(DbWriteMapFlag.Name)
+	}
 	cfg.CommitEvery = common2.RandomizeDuration(ctx.Duration(TxPoolCommitEveryFlag.Name))
 }
 
@@ -1885,6 +1888,7 @@ func SetEthConfig(ctx *cli.Context, nodeConfig *nodecfg.Config, cfg *ethconfig.C
 
 	if ctx.IsSet(OverridePragueFlag.Name) {
 		cfg.OverridePragueTime = flags.GlobalBig(ctx, OverridePragueFlag.Name)
+		cfg.TxPool.OverridePragueTime = cfg.OverridePragueTime
 	}
 
 	if clparams.EmbeddedSupported(cfg.NetworkID) {

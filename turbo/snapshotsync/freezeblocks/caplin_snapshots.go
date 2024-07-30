@@ -56,7 +56,7 @@ func BeaconSimpleIdx(ctx context.Context, sn snaptype.FileInfo, salt uint32, tmp
 	num := make([]byte, binary.MaxVarintLen64)
 	if err := snaptype.BuildIndex(ctx, sn, salt, sn.From, tmpDir, log.LvlDebug, p, func(idx *recsplit.RecSplit, i, offset uint64, word []byte) error {
 		if i%20_000 == 0 {
-			logger.Log(lvl, fmt.Sprintf("Generating idx for %s", sn.Type.Name()), "progress", i)
+			logger.Log(lvl, "Generating idx for "+sn.Type.Name(), "progress", i)
 		}
 		p.Processed.Add(1)
 		n := binary.PutUvarint(num, i)
@@ -665,7 +665,7 @@ func (s *CaplinSnapshots) ReadBlobSidecars(slot uint64) ([]*cltypes.BlobSidecar,
 		return nil, nil
 	}
 	if len(buf)%sidecarSSZSize != 0 {
-		return nil, fmt.Errorf("invalid sidecar list length")
+		return nil, errors.New("invalid sidecar list length")
 	}
 	sidecars := make([]*cltypes.BlobSidecar, len(buf)/sidecarSSZSize)
 	for i := 0; i < len(buf); i += sidecarSSZSize {

@@ -26,6 +26,7 @@ import (
 	"net/url"
 	"path"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -530,15 +531,15 @@ func stateSyncListURL(urlString string, fromID uint64, to int64) (*url.URL, erro
 }
 
 func stateSyncURL(urlString string, id uint64) (*url.URL, error) {
-	return makeURL(urlString, fmt.Sprintf(fetchStateSyncEvent, fmt.Sprint(id)), "")
+	return makeURL(urlString, fmt.Sprintf(fetchStateSyncEvent, strconv.FormatUint(id, 10)), "")
 }
 
 func checkpointURL(urlString string, number int64) (*url.URL, error) {
-	url := ""
+	var url string
 	if number == -1 {
 		url = fmt.Sprintf(fetchCheckpoint, "latest")
 	} else {
-		url = fmt.Sprintf(fetchCheckpoint, fmt.Sprint(number))
+		url = fmt.Sprintf(fetchCheckpoint, strconv.FormatInt(number, 10))
 	}
 
 	return makeURL(urlString, url, "")

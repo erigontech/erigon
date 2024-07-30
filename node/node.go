@@ -307,7 +307,7 @@ func OpenDatabase(ctx context.Context, config *nodecfg.Config, label kv.Label, n
 		name = "polygon-bridge"
 	case kv.ConsensusDB:
 		if len(name) == 0 {
-			return nil, fmt.Errorf("expected a consensus name")
+			return nil, errors.New("expected a consensus name")
 		}
 	default:
 		name = "test"
@@ -331,11 +331,8 @@ func OpenDatabase(ctx context.Context, config *nodecfg.Config, label kv.Label, n
 		opts := mdbx.NewMDBX(logger).
 			Path(dbPath).Label(label).
 			GrowthStep(16 * datasize.MB).
-			DBVerbosity(config.DatabaseVerbosity).RoTxsLimiter(roTxsLimiter)
-
-		if config.MdbxWriteMap {
-			opts = opts.WriteMap()
-		}
+			DBVerbosity(config.DatabaseVerbosity).RoTxsLimiter(roTxsLimiter).
+			WriteMap(config.MdbxWriteMap)
 
 		if readonly {
 			opts = opts.Readonly()

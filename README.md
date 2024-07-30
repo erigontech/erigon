@@ -1,11 +1,11 @@
 # Erigon
 
+Documentation: **[erigon.gitbook.io](https://erigon.gitbook.io)**
+
 Erigon is an implementation of Ethereum (execution layer with embeddable consensus layer), on the efficiency
 frontier. [Archive Node](https://ethereum.org/en/developers/docs/nodes-and-clients/archive-nodes/#what-is-an-archive-node)
 by default.
 
-An accessible and complete version of the documentation is available at **[erigon.gitbook.io](https://erigon.gitbook.io)
-**.
 <br>
 
 ![Build status](https://github.com/erigontech/erigon/actions/workflows/ci.yml/badge.svg) [![Coverage](https://sonarcloud.io/api/project_badges/measure?project=erigontech_erigon&metric=coverage)](https://sonarcloud.io/summary/new_code?id=erigontech_erigon)
@@ -787,16 +787,15 @@ Supported networks: all (except Mumbai).
 - E3 doesn't store Logs (aka Receipts) - it always re-executing historical txn (but it's cheaper then in E2 - see point
   above). Known perf issues: https://github.com/erigontech/erigon/issues/10747
 - `--sync.loop.block.limit` is enabled by default. (Default: `5_000`.
-  Set `--sync.loop.block.limit=10_000 --batchSize=1g` to increase sync speed on good hardware).
+  Set `--sync.loop.block.limit=10_000 --batchSize=2g` to increase sync speed on good hardware).
 - datadir/chaindata is small now - to prevent it's grow: we recommend set `--batchSize <= 2G`. And it's fine
   to `rm -rf chaindata`
 - can symlink/mount latest state to fast drive and history to cheap drive
-- ArchiveNode is default. FullNode same as in E2: --prune=hrtc
+- Archive Node is default. Full Node: `--prune.mode=full`, Minimal Node (EIP-4444): `--prune.mode=minimal`
 
 ### Known Problems of E3:
 
 - don't `rm -rf downloader` - it will cause re-downloading of files: https://github.com/erigontech/erigon/issues/10976
-- `eth_getLogs` fields `index` always 0: https://github.com/erigontech/erigon/issues/10324
 
 ### E3 datadir structure
 

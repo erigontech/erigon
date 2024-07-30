@@ -20,6 +20,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/binary"
+	"errors"
 	"fmt"
 	"math/bits"
 	"strings"
@@ -148,16 +149,16 @@ func (branchData BranchData) String() string {
 				fmt.Fprintf(&sb, "hashedKey=[%x]", cell.downHashedKey[:cell.downHashedLen])
 				comma = ","
 			}
-			if cell.apl > 0 {
-				fmt.Fprintf(&sb, "%saccountPlainKey=[%x]", comma, cell.apk[:cell.apl])
+			if cell.accountPlainKeyLen > 0 {
+				fmt.Fprintf(&sb, "%saccountPlainKey=[%x]", comma, cell.accountPlainKey[:cell.accountPlainKeyLen])
 				comma = ","
 			}
-			if cell.spl > 0 {
-				fmt.Fprintf(&sb, "%sstoragePlainKey=[%x]", comma, cell.spk[:cell.spl])
+			if cell.storagePlainKeyLen > 0 {
+				fmt.Fprintf(&sb, "%sstoragePlainKey=[%x]", comma, cell.storagePlainKey[:cell.storagePlainKeyLen])
 				comma = ","
 			}
-			if cell.hl > 0 {
-				fmt.Fprintf(&sb, "%shash=[%x]", comma, cell.h[:cell.hl])
+			if cell.HashLen > 0 {
+				fmt.Fprintf(&sb, "%shash=[%x]", comma, cell.hash[:cell.HashLen])
 			}
 			sb.WriteString("}\n")
 		}
@@ -261,14 +262,14 @@ func (be *BranchEncoder) EncodeBranch(bitmap, touchMap, afterMap uint16, readCel
 			return err
 		}
 		if n != wn {
-			return fmt.Errorf("n != wn size")
+			return errors.New("n != wn size")
 		}
 		wn, err = be.buf.Write(val)
 		if err != nil {
 			return err
 		}
 		if len(val) != wn {
-			return fmt.Errorf("wn != value size")
+			return errors.New("wn != value size")
 		}
 		return nil
 	}
@@ -291,16 +292,16 @@ func (be *BranchEncoder) EncodeBranch(bitmap, touchMap, afterMap uint16, readCel
 
 		if bitmap&bit != 0 {
 			var fieldBits PartFlags
-			if cell.extLen > 0 && cell.spl == 0 {
+			if cell.extLen > 0 && cell.storagePlainKeyLen == 0 {
 				fieldBits |= HashedKeyPart
 			}
-			if cell.apl > 0 {
+			if cell.accountPlainKeyLen > 0 {
 				fieldBits |= AccountPlainPart
 			}
-			if cell.spl > 0 {
+			if cell.storagePlainKeyLen > 0 {
 				fieldBits |= StoragePlainPart
 			}
-			if cell.hl > 0 {
+			if cell.HashLen > 0 {
 				fieldBits |= HashPart
 			}
 			if err := be.buf.WriteByte(byte(fieldBits)); err != nil {
@@ -312,17 +313,17 @@ func (be *BranchEncoder) EncodeBranch(bitmap, touchMap, afterMap uint16, readCel
 				}
 			}
 			if fieldBits&AccountPlainPart != 0 {
-				if err := putUvarAndVal(uint64(cell.apl), cell.apk[:cell.apl]); err != nil {
+				if err := putUvarAndVal(uint64(cell.accountPlainKeyLen), cell.accountPlainKey[:cell.accountPlainKeyLen]); err != nil {
 					return nil, 0, err
 				}
 			}
 			if fieldBits&StoragePlainPart != 0 {
-				if err := putUvarAndVal(uint64(cell.spl), cell.spk[:cell.spl]); err != nil {
+				if err := putUvarAndVal(uint64(cell.storagePlainKeyLen), cell.storagePlainKey[:cell.storagePlainKeyLen]); err != nil {
 					return nil, 0, err
 				}
 			}
 			if fieldBits&HashPart != 0 {
-				if err := putUvarAndVal(uint64(cell.hl), cell.h[:cell.hl]); err != nil {
+				if err := putUvarAndVal(uint64(cell.HashLen), cell.hash[:cell.HashLen]); err != nil {
 					return nil, 0, err
 				}
 			}
@@ -357,14 +358,14 @@ func (branchData BranchData) ReplacePlainKeys(newData []byte, fn func(key []byte
 		if fieldBits&HashedKeyPart != 0 {
 			l, n := binary.Uvarint(branchData[pos:])
 			if n == 0 {
-				return nil, fmt.Errorf("replacePlainKeys buffer too small for hashedKey len")
+				return nil, errors.New("replacePlainKeys buffer too small for hashedKey len")
 			} else if n < 0 {
-				return nil, fmt.Errorf("replacePlainKeys value overflow for hashedKey len")
+				return nil, errors.New("replacePlainKeys value overflow for hashedKey len")
 			}
 			newData = append(newData, branchData[pos:pos+n]...)
 			pos += n
 			if len(branchData) < pos+int(l) {
-				return nil, fmt.Errorf("replacePlainKeys buffer too small for hashedKey")
+				return nil, errors.New("replacePlainKeys buffer too small for hashedKey")
 			}
 			if l > 0 {
 				newData = append(newData, branchData[pos:pos+int(l)]...)
@@ -374,13 +375,13 @@ func (branchData BranchData) ReplacePlainKeys(newData []byte, fn func(key []byte
 		if fieldBits&AccountPlainPart != 0 {
 			l, n := binary.Uvarint(branchData[pos:])
 			if n == 0 {
-				return nil, fmt.Errorf("replacePlainKeys buffer too small for accountPlainKey len")
+				return nil, errors.New("replacePlainKeys buffer too small for accountPlainKey len")
 			} else if n < 0 {
-				return nil, fmt.Errorf("replacePlainKeys value overflow for accountPlainKey len")
+				return nil, errors.New("replacePlainKeys value overflow for accountPlainKey len")
 			}
 			pos += n
 			if len(branchData) < pos+int(l) {
-				return nil, fmt.Errorf("replacePlainKeys buffer too small for accountPlainKey")
+				return nil, errors.New("replacePlainKeys buffer too small for accountPlainKey")
 			}
 			if l > 0 {
 				pos += int(l)
@@ -407,13 +408,13 @@ func (branchData BranchData) ReplacePlainKeys(newData []byte, fn func(key []byte
 		if fieldBits&StoragePlainPart != 0 {
 			l, n := binary.Uvarint(branchData[pos:])
 			if n == 0 {
-				return nil, fmt.Errorf("replacePlainKeys buffer too small for storagePlainKey len")
+				return nil, errors.New("replacePlainKeys buffer too small for storagePlainKey len")
 			} else if n < 0 {
-				return nil, fmt.Errorf("replacePlainKeys value overflow for storagePlainKey len")
+				return nil, errors.New("replacePlainKeys value overflow for storagePlainKey len")
 			}
 			pos += n
 			if len(branchData) < pos+int(l) {
-				return nil, fmt.Errorf("replacePlainKeys buffer too small for storagePlainKey")
+				return nil, errors.New("replacePlainKeys buffer too small for storagePlainKey")
 			}
 			if l > 0 {
 				pos += int(l)
@@ -440,14 +441,14 @@ func (branchData BranchData) ReplacePlainKeys(newData []byte, fn func(key []byte
 		if fieldBits&HashPart != 0 {
 			l, n := binary.Uvarint(branchData[pos:])
 			if n == 0 {
-				return nil, fmt.Errorf("replacePlainKeys buffer too small for hash len")
+				return nil, errors.New("replacePlainKeys buffer too small for hash len")
 			} else if n < 0 {
-				return nil, fmt.Errorf("replacePlainKeys value overflow for hash len")
+				return nil, errors.New("replacePlainKeys value overflow for hash len")
 			}
 			newData = append(newData, branchData[pos:pos+n]...)
 			pos += n
 			if len(branchData) < pos+int(l) {
-				return nil, fmt.Errorf("replacePlainKeys buffer too small for hash")
+				return nil, errors.New("replacePlainKeys buffer too small for hash")
 			}
 			if l > 0 {
 				newData = append(newData, branchData[pos:pos+int(l)]...)
@@ -501,14 +502,14 @@ func (branchData BranchData) MergeHexBranches(branchData2 BranchData, newData []
 			for i := 0; i < bits.OnesCount8(byte(fieldBits)); i++ {
 				l, n := binary.Uvarint(branchData2[pos2:])
 				if n == 0 {
-					return nil, fmt.Errorf("MergeHexBranches buffer2 too small for field")
+					return nil, errors.New("MergeHexBranches buffer2 too small for field")
 				} else if n < 0 {
-					return nil, fmt.Errorf("MergeHexBranches value2 overflow for field")
+					return nil, errors.New("MergeHexBranches value2 overflow for field")
 				}
 				newData = append(newData, branchData2[pos2:pos2+n]...)
 				pos2 += n
 				if len(branchData2) < pos2+int(l) {
-					return nil, fmt.Errorf("MergeHexBranches buffer2 too small for field")
+					return nil, errors.New("MergeHexBranches buffer2 too small for field")
 				}
 				if l > 0 {
 					newData = append(newData, branchData2[pos2:pos2+int(l)]...)
@@ -526,16 +527,16 @@ func (branchData BranchData) MergeHexBranches(branchData2 BranchData, newData []
 			for i := 0; i < bits.OnesCount8(byte(fieldBits)); i++ {
 				l, n := binary.Uvarint(branchData[pos1:])
 				if n == 0 {
-					return nil, fmt.Errorf("MergeHexBranches buffer1 too small for field")
+					return nil, errors.New("MergeHexBranches buffer1 too small for field")
 				} else if n < 0 {
-					return nil, fmt.Errorf("MergeHexBranches value1 overflow for field")
+					return nil, errors.New("MergeHexBranches value1 overflow for field")
 				}
 				if add {
 					newData = append(newData, branchData[pos1:pos1+n]...)
 				}
 				pos1 += n
 				if len(branchData) < pos1+int(l) {
-					return nil, fmt.Errorf("MergeHexBranches buffer1 too small for field")
+					return nil, errors.New("MergeHexBranches buffer1 too small for field")
 				}
 				if l > 0 {
 					if add {
@@ -562,7 +563,7 @@ func (branchData BranchData) DecodeCells() (touchMap, afterMap uint16, row [16]*
 			pos++
 			row[nibble] = new(Cell)
 			if pos, err = row[nibble].fillFromFields(branchData, pos, fieldBits); err != nil {
-				err = fmt.Errorf("faield to fill cell at nibble %x: %w", nibble, err)
+				err = fmt.Errorf("failed to fill cell at nibble %x: %w", nibble, err)
 				return
 			}
 		}
@@ -616,9 +617,9 @@ func (m *BranchMerger) Merge(branch1 BranchData, branch2 BranchData) (BranchData
 			for i := 0; i < bits.OnesCount8(byte(fieldBits)); i++ {
 				l, n := binary.Uvarint(branch2[pos2:])
 				if n == 0 {
-					return nil, fmt.Errorf("MergeHexBranches branch2 is too small: expected node info size")
+					return nil, errors.New("MergeHexBranches branch2 is too small: expected node info size")
 				} else if n < 0 {
-					return nil, fmt.Errorf("MergeHexBranches branch2: size overflow for length")
+					return nil, errors.New("MergeHexBranches branch2: size overflow for length")
 				}
 
 				m.buf = append(m.buf, branch2[pos2:pos2+n]...)
@@ -644,9 +645,9 @@ func (m *BranchMerger) Merge(branch1 BranchData, branch2 BranchData) (BranchData
 			for i := 0; i < bits.OnesCount8(byte(fieldBits)); i++ {
 				l, n := binary.Uvarint(branch1[pos1:])
 				if n == 0 {
-					return nil, fmt.Errorf("MergeHexBranches branch1 is too small: expected node info size")
+					return nil, errors.New("MergeHexBranches branch1 is too small: expected node info size")
 				} else if n < 0 {
-					return nil, fmt.Errorf("MergeHexBranches branch1: size overflow for length")
+					return nil, errors.New("MergeHexBranches branch1: size overflow for length")
 				}
 
 				if add {
@@ -751,14 +752,14 @@ func DecodeBranchAndCollectStat(key, branch []byte, tv TrieVariant) *BranchStat 
 			stat.MinCellSize = min(stat.MinCellSize, enc)
 			stat.MaxCellSize = max(stat.MaxCellSize, enc)
 			switch {
-			case c.apl > 0:
-				stat.APKSize += uint64(c.apl)
+			case c.accountPlainKeyLen > 0:
+				stat.APKSize += uint64(c.accountPlainKeyLen)
 				stat.APKCount++
-			case c.spl > 0:
-				stat.SPKSize += uint64(c.spl)
+			case c.storagePlainKeyLen > 0:
+				stat.SPKSize += uint64(c.storagePlainKeyLen)
 				stat.SPKCount++
-			case c.hl > 0:
-				stat.HashSize += uint64(c.hl)
+			case c.HashLen > 0:
+				stat.HashSize += uint64(c.HashLen)
 				stat.HashCount++
 			default:
 				panic("no plain key" + fmt.Sprintf("#+%v", c))

@@ -24,6 +24,7 @@ import (
 	"crypto/ecdsa"
 	"embed"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"math/big"
 	"slices"
@@ -202,7 +203,7 @@ func WriteGenesisState(g *types.Genesis, tx kv.RwTx, dirs datadir.Dirs, logger l
 	stateWriter = state.NewNoopWriter()
 
 	if block.Number().Sign() != 0 {
-		return nil, statedb, fmt.Errorf("can't commit genesis block with number > 0")
+		return nil, statedb, errors.New("can't commit genesis block with number > 0")
 	}
 	if err := statedb.CommitBlock(&chain.Rules{}, stateWriter); err != nil {
 		return nil, statedb, fmt.Errorf("cannot write state: %w", err)
@@ -460,6 +461,9 @@ func DeveloperGenesisBlock(period uint64, faucet libcommon.Address) *types.Genes
 // ToBlock creates the genesis block and writes state of a genesis specification
 // to the given database (or discards it if nil).
 func GenesisToBlock(g *types.Genesis, dirs datadir.Dirs, logger log.Logger) (*types.Block, *state.IntraBlockState, error) {
+	if dirs.SnapDomain == "" {
+		panic("empty `dirs` variable")
+	}
 	_ = g.Alloc //nil-check
 
 	head := &types.Header{

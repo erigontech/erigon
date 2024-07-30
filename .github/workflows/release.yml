@@ -20,7 +20,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Maximize build space
-        uses: AdityaGarg8/remove-unwanted-software@v1
+        uses: AdityaGarg8/remove-unwanted-software@v4
         with:
           remove-dotnet: 'true'
           remove-android: 'true'
@@ -32,12 +32,12 @@ jobs:
           fetch-depth: 0
 
       - name: dockerhub-login
-        uses: docker/login-action@v2
+        uses: docker/login-action@v3
         with:
           username: ${{ secrets.DOCKERHUB }}
           password: ${{ secrets.DOCKERHUB_KEY }}
       - name: ghcr-login
-        uses: docker/login-action@v2
+        uses: docker/login-action@v3
         with:
           registry: ghcr.io
           username: ${{ github.repository_owner }}
@@ -50,11 +50,11 @@ jobs:
           echo "tag_name=${TAG}" >> $GITHUB_OUTPUT
 
       - name: Set up QEMU
-        uses: docker/setup-qemu-action@v2
+        uses: docker/setup-qemu-action@v3
 
       - run: echo ${{ steps.prepare.outputs.tag_name }}
 
-      - name: Run GoReleaser
+      - name: Release
         run: |
           make release
           docker images

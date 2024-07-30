@@ -21,6 +21,7 @@ import (
 	"context"
 	"encoding/binary"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"io"
 	"math/bits"
@@ -158,13 +159,13 @@ func (cell *BinaryCell) unwrapToHexCell() (cl *Cell) {
 	cl.Balance = *cell.Balance.Clone()
 	cl.Nonce = cell.Nonce
 	cl.StorageLen = cell.StorageLen
-	cl.apl = cell.apl
-	cl.spl = cell.spl
-	cl.hl = cell.hl
+	cl.accountPlainKeyLen = cell.apl
+	cl.storagePlainKeyLen = cell.spl
+	cl.HashLen = cell.hl
 
-	copy(cl.apk[:], cell.apk[:])
-	copy(cl.spk[:], cell.spk[:])
-	copy(cl.h[:], cell.h[:])
+	copy(cl.accountPlainKey[:], cell.apk[:])
+	copy(cl.storagePlainKey[:], cell.spk[:])
+	copy(cl.hash[:], cell.h[:])
 
 	if cell.extLen > 0 {
 		compactedExt := binToCompact(cell.extension[:cell.extLen])
@@ -294,7 +295,7 @@ func (cell *BinaryCell) deriveHashedKeys(depth int, keccak keccakState, accountK
 	extraLen := 0
 	if cell.apl > 0 {
 		if depth > halfKeySize {
-			return fmt.Errorf("deriveHashedKeys accountPlainKey present at depth > halfKeySize")
+			return errors.New("deriveHashedKeys accountPlainKey present at depth > halfKeySize")
 		}
 		extraLen = halfKeySize - depth
 	}
@@ -333,9 +334,9 @@ func (cell *BinaryCell) fillFromFields(data []byte, pos int, fieldBits PartFlags
 	if fieldBits&HashedKeyPart != 0 {
 		l, n := binary.Uvarint(data[pos:])
 		if n == 0 {
-			return 0, fmt.Errorf("fillFromFields buffer too small for hashedKey len")
+			return 0, errors.New("fillFromFields buffer too small for hashedKey len")
 		} else if n < 0 {
-			return 0, fmt.Errorf("fillFromFields value overflow for hashedKey len")
+			return 0, errors.New("fillFromFields value overflow for hashedKey len")
 		}
 		pos += n
 		if len(data) < pos+int(l) {
@@ -355,13 +356,13 @@ func (cell *BinaryCell) fillFromFields(data []byte, pos int, fieldBits PartFlags
 	if fieldBits&AccountPlainPart != 0 {
 		l, n := binary.Uvarint(data[pos:])
 		if n == 0 {
-			return 0, fmt.Errorf("fillFromFields buffer too small for accountPlainKey len")
+			return 0, errors.New("fillFromFields buffer too small for accountPlainKey len")
 		} else if n < 0 {
-			return 0, fmt.Errorf("fillFromFields value overflow for accountPlainKey len")
+			return 0, errors.New("fillFromFields value overflow for accountPlainKey len")
 		}
 		pos += n
 		if len(data) < pos+int(l) {
-			return 0, fmt.Errorf("fillFromFields buffer too small for accountPlainKey")
+			return 0, errors.New("fillFromFields buffer too small for accountPlainKey")
 		}
 		cell.apl = int(l)
 		if l > 0 {
@@ -374,13 +375,13 @@ func (cell *BinaryCell) fillFromFields(data []byte, pos int, fieldBits PartFlags
 	if fieldBits&StoragePlainPart != 0 {
 		l, n := binary.Uvarint(data[pos:])
 		if n == 0 {
-			return 0, fmt.Errorf("fillFromFields buffer too small for storagePlainKey len")
+			return 0, errors.New("fillFromFields buffer too small for storagePlainKey len")
 		} else if n < 0 {
-			return 0, fmt.Errorf("fillFromFields value overflow for storagePlainKey len")
+			return 0, errors.New("fillFromFields value overflow for storagePlainKey len")
 		}
 		pos += n
 		if len(data) < pos+int(l) {
-			return 0, fmt.Errorf("fillFromFields buffer too small for storagePlainKey")
+			return 0, errors.New("fillFromFields buffer too small for storagePlainKey")
 		}
 		cell.spl = int(l)
 		if l > 0 {
@@ -393,13 +394,13 @@ func (cell *BinaryCell) fillFromFields(data []byte, pos int, fieldBits PartFlags
 	if fieldBits&HashPart != 0 {
 		l, n := binary.Uvarint(data[pos:])
 		if n == 0 {
-			return 0, fmt.Errorf("fillFromFields buffer too small for hash len")
+			return 0, errors.New("fillFromFields buffer too small for hash len")
 		} else if n < 0 {
-			return 0, fmt.Errorf("fillFromFields value overflow for hash len")
+			return 0, errors.New("fillFromFields value overflow for hash len")
 		}
 		pos += n
 		if len(data) < pos+int(l) {
-			return 0, fmt.Errorf("fillFromFields buffer too small for hash")
+			return 0, errors.New("fillFromFields buffer too small for hash")
 		}
 		cell.hl = int(l)
 		if l > 0 {
@@ -740,7 +741,7 @@ func (bph *BinPatriciaHashed) computeBinaryCellHash(cell *BinaryCell, depth int,
 						return nil, err
 					}
 				} else {
-					return nil, fmt.Errorf("computeBinaryCellHash extension without hash")
+					return nil, errors.New("computeBinaryCellHash extension without hash")
 				}
 			} else if cell.hl > 0 {
 				storageRootHash = cell.h
@@ -768,7 +769,7 @@ func (bph *BinPatriciaHashed) computeBinaryCellHash(cell *BinaryCell, depth int,
 			}
 			buf = append(buf, hash[:]...)
 		} else {
-			return nil, fmt.Errorf("computeBinaryCellHash extension without hash")
+			return nil, errors.New("computeBinaryCellHash extension without hash")
 		}
 	} else if cell.hl > 0 {
 		buf = append(buf, cell.h[:cell.hl]...)
@@ -997,7 +998,7 @@ func (bph *BinPatriciaHashed) needFolding(hashedKey []byte) bool {
 func (bph *BinPatriciaHashed) fold() (err error) {
 	updateKeyLen := bph.currentKeyLen
 	if bph.activeRows == 0 {
-		return fmt.Errorf("cannot fold - no active rows")
+		return errors.New("cannot fold - no active rows")
 	}
 	if bph.trace {
 		fmt.Printf("fold: activeRows: %d, currentKey: [%x], touchMap: %016b, afterMap: %016b\n", bph.activeRows, bph.currentKey[:bph.currentKeyLen], bph.touchMap[bph.activeRows-1], bph.afterMap[bph.activeRows-1])
@@ -1433,7 +1434,7 @@ func (c *BinaryCell) bytes() []byte {
 
 func (c *BinaryCell) decodeBytes(buf []byte) error {
 	if len(buf) < 1 {
-		return fmt.Errorf("invalid buffer size to contain BinaryCell (at least 1 byte expected)")
+		return errors.New("invalid buffer size to contain BinaryCell (at least 1 byte expected)")
 	}
 	c.fillEmpty()
 
@@ -1497,7 +1498,7 @@ func (bph *BinPatriciaHashed) EncodeCurrentState(buf []byte) ([]byte, error) {
 // buf expected to be encoded hph state. Decode state and set up hph to that state.
 func (bph *BinPatriciaHashed) SetState(buf []byte) error {
 	if bph.activeRows != 0 {
-		return fmt.Errorf("has active rows, could not reset state")
+		return errors.New("has active rows, could not reset state")
 	}
 
 	var s state
@@ -1674,12 +1675,12 @@ func wrapAccountStorageFn(fn func([]byte, *Cell) error) func(pk []byte, bc *Bina
 		bc.Balance = *cl.Balance.Clone()
 		bc.Nonce = cl.Nonce
 		bc.StorageLen = cl.StorageLen
-		bc.apl = cl.apl
-		bc.spl = cl.spl
-		bc.hl = cl.hl
-		copy(bc.apk[:], cl.apk[:])
-		copy(bc.spk[:], cl.spk[:])
-		copy(bc.h[:], cl.h[:])
+		bc.apl = cl.accountPlainKeyLen
+		bc.spl = cl.storagePlainKeyLen
+		bc.hl = cl.HashLen
+		copy(bc.apk[:], cl.accountPlainKey[:])
+		copy(bc.spk[:], cl.storagePlainKey[:])
+		copy(bc.h[:], cl.hash[:])
 
 		if cl.extLen > 0 {
 			binExt := compactToBin(cl.extension[:cl.extLen])

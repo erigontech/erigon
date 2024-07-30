@@ -46,17 +46,27 @@ const (
 // HexOrDecimal64 marshals uint64 as hex or decimal.
 type HexOrDecimal64 uint64
 
+// UnmarshalJSON implements json.Unmarshaler.
+//
+// It is similar to UnmarshalText, but allows parsing real decimals too, not just
+// quoted decimal strings.
+func (i *HexOrDecimal64) UnmarshalJSON(input []byte) error {
+	if len(input) > 1 && input[0] == '"' {
+		input = input[1 : len(input)-1]
+	}
+	return i.UnmarshalText(input)
+}
+
 // UnmarshalText implements encoding.TextUnmarshaler.
 func (i *HexOrDecimal64) UnmarshalText(input []byte) error {
-	in, ok := ParseUint64(string(input))
+	n, ok := ParseUint64(string(input))
 	if !ok {
 		return fmt.Errorf("invalid hex or decimal integer %q", input)
 	}
-	*i = HexOrDecimal64(in)
+	*i = HexOrDecimal64(n)
 	return nil
 }
 
-// MarshalText implements encoding.TextMarshaler.
 func (i HexOrDecimal64) MarshalText() ([]byte, error) {
 	return []byte(fmt.Sprintf("%#x", uint64(i))), nil
 }

@@ -20,6 +20,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"sync/atomic"
 
@@ -119,7 +120,7 @@ func collectAndComputeCommitment(ctx context.Context, tx kv.RwTx, tmpDir string,
 			}
 			logger.Info("Committing batch",
 				"processed", fmt.Sprintf("%dM/%dM (%.2f%%)", processed.Load()/1_000_000, totalKeys.Load()/1_000_000, float64(processed.Load())/float64(totalKeys.Load())*100),
-				"intermediate root", fmt.Sprintf("%x", rh))
+				"intermediate root", hex.EncodeToString(rh))
 		}
 		processed.Add(1)
 		sdCtx.TouchKey(kv.AccountsDomain, string(k), nil)
@@ -235,7 +236,7 @@ func StageHashStateCfg(db kv.RwDB, dirs datadir.Dirs) HashStateCfg {
 	}
 }
 
-var ErrInvalidStateRootHash = fmt.Errorf("invalid state root hash")
+var ErrInvalidStateRootHash = errors.New("invalid state root hash")
 
 func RebuildPatriciaTrieBasedOnFiles(rwTx kv.RwTx, cfg TrieCfg, ctx context.Context, logger log.Logger) (libcommon.Hash, error) {
 	useExternalTx := rwTx != nil
@@ -299,7 +300,7 @@ func RebuildPatriciaTrieBasedOnFiles(rwTx kv.RwTx, cfg TrieCfg, ctx context.Cont
 		logger.Error(fmt.Sprintf("[RebuildCommitment] Wrong trie root of block %d: %x, expected (from header): %x. Block hash: %x", blockNum, rh, expectedRootHash, headerHash))
 		rwTx.Rollback()
 
-		return trie.EmptyRoot, fmt.Errorf("wrong trie root")
+		return trie.EmptyRoot, errors.New("wrong trie root")
 	}
 	logger.Info(fmt.Sprintf("[RebuildCommitment] Trie root of block %d txNum %d: %x. Could not verify with block hash because txnum of state is in the middle of the block.", blockNum, toTxNum, rh))
 

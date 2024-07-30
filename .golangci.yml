@@ -26,16 +26,16 @@ linters:
     - errchkjson #TODO: enable me
     - unused #TODO: enable me
     - testifylint #TODO: enable me
-    - perfsprint #TODO: enable me
     - gocheckcompilerdirectives
     - protogetter
   enable:
     - unconvert
     #    - predeclared #TODO: enable me
     #    - thelper #TODO: enable me
-    #    - wastedassign
+    - wastedassign
     - gofmt
     - gocritic
+    - perfsprint
 #    - revive
 #    - forcetypeassert
 #    - stylecheck

@@ -84,7 +84,9 @@ func (f *forkGraphDisk) readBeaconStateFromDisk(blockRoot libcommon.Hash) (bs *s
 		return nil, fmt.Errorf("failed to decode snappy buffer: %w, root: %x, len: %d, decLen: %d", err, blockRoot, n, decLen)
 	}
 	bs = state.New(f.beaconCfg)
-	err = bs.DecodeSSZ(sszBuffer, int(v[0]))
+	if err = bs.DecodeSSZ(sszBuffer, int(v[0])); err != nil {
+		return nil, fmt.Errorf("failed to decode beacon state: %w, root: %x, len: %d, decLen: %d, bs: %+v", err, blockRoot, n, decLen, bs)
+	}
 	// decode the cache file
 	cacheFile, err := f.fs.Open(getBeaconStateCacheFilename(blockRoot))
 	if err != nil {

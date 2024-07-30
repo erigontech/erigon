@@ -16,18 +16,18 @@ jobs:
           fetch-depth: 0
 
       - name: dockerhub-login
-        uses: docker/login-action@v2
+        uses: docker/login-action@v3
         with:
           username: ${{ secrets.DOCKERHUB }}
           password: ${{ secrets.DOCKERHUB_KEY }}
       - name: ghcr-login
-        uses: docker/login-action@v2
+        uses: docker/login-action@v3
         with:
           registry: ghcr.io
           username: ${{ github.repository_owner }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - uses: docker/setup-qemu-action@v2
+      - uses: docker/setup-qemu-action@v3
 
       - run: |
           make release-dry-run

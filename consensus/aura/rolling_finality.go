@@ -18,6 +18,7 @@ package aura
 
 import (
 	"container/list"
+	"errors"
 	"fmt"
 
 	libcommon "github.com/erigontech/erigon-lib/common"
@@ -72,7 +73,7 @@ func (f *RollingFinality) clear() {
 func (f *RollingFinality) push(head libcommon.Hash, num uint64, signers []libcommon.Address) (newlyFinalized []unAssembledHeader, err error) {
 	for i := range signers {
 		if !f.hasSigner(signers[i]) {
-			return nil, fmt.Errorf("unknown validator")
+			return nil, errors.New("unknown validator")
 		}
 	}
 
