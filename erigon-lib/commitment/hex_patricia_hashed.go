@@ -823,17 +823,17 @@ func (hph *HexPatriciaHashed) computeCellHash(cell *Cell, depth int, buf []byte)
 				//}
 				//} else {
 			}
-			if err = hph.ctx.GetStorage(cell.spk[:cell.spl], cell); err != nil {
-				return nil, err
-			}
-			hadToLoad.Add(1)
-			if cell.apl > 0 {
-				if err = hph.ctx.GetAccount(cell.apk[:cell.apl], cell); err != nil {
-					return nil, err
-				}
-				hadToLoad.Add(1)
-			}
-			cell.loaded = true
+			//if err = hph.ctx.GetStorage(cell.spk[:cell.spl], cell); err != nil {
+			//	return nil, err
+			//}
+			//hadToLoad.Add(1)
+			//if cell.apl > 0 {
+			//	if err = hph.ctx.GetAccount(cell.apk[:cell.apl], cell); err != nil {
+			//		return nil, err
+			//	}
+			//	hadToLoad.Add(1)
+			//}
+			//cell.loaded = true
 			if hph.trace {
 				fmt.Printf("leafHashWithKeyVal(singleton) for [%x]=>[%x]\n", cell.downHashedKey[:64-hashedKeyOffset+1], cell.Storage[:cell.StorageLen])
 			}
@@ -1293,7 +1293,7 @@ func (hph *HexPatriciaHashed) fold() (err error) {
 			bit := bitset & -bitset
 			nibble := bits.TrailingZeros16(bit)
 			cell := &hph.grid[row][nibble]
-			if hph.touchMap[row]&hph.afterMap[row]&uint16(1<<nibble) > 0 && cell.alhlen > 0 {
+			if hph.touchMap[row]&hph.afterMap[row]&uint16(1<<nibble) > 0 && cell.alhlen > 0 || depth < 64 && cell.spl > 0 {
 				//fmt.Printf("nibble %x touched %s\n", nibble, cell.FullString())
 				cell.alhlen = 0
 				hadToReset.Add(1)
