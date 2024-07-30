@@ -458,7 +458,6 @@ func LoadRemotePreverified() bool {
 	Mainnet = fromToml(snapshothashes.Mainnet)
 	Holesky = fromToml(snapshothashes.Holesky)
 	Sepolia = fromToml(snapshothashes.Sepolia)
-	Mumbai = fromToml(snapshothashes.Mumbai)
 	Amoy = fromToml(snapshothashes.Amoy)
 	BorMainnet = fromToml(snapshothashes.BorMainnet)
 	Gnosis = fromToml(snapshothashes.Gnosis)
@@ -467,7 +466,6 @@ func LoadRemotePreverified() bool {
 	KnownWebseeds = map[string][]string{
 		networkname.MainnetChainName:    webseedsParse(webseed.Mainnet),
 		networkname.SepoliaChainName:    webseedsParse(webseed.Sepolia),
-		networkname.MumbaiChainName:     webseedsParse(webseed.Mumbai),
 		networkname.AmoyChainName:       webseedsParse(webseed.Amoy),
 		networkname.BorMainnetChainName: webseedsParse(webseed.BorMainnet),
 		networkname.GnosisChainName:     webseedsParse(webseed.Gnosis),
@@ -479,7 +477,6 @@ func LoadRemotePreverified() bool {
 		networkname.MainnetChainName:    Mainnet,
 		networkname.HoleskyChainName:    Holesky,
 		networkname.SepoliaChainName:    Sepolia,
-		networkname.MumbaiChainName:     Mumbai,
 		networkname.AmoyChainName:       Amoy,
 		networkname.BorMainnetChainName: BorMainnet,
 		networkname.GnosisChainName:     Gnosis,
