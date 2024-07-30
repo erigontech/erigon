@@ -72,7 +72,6 @@ type BorHeimdallCfg struct {
 	hd               *headerdownload.HeaderDownload
 	penalize         func(context.Context, []headerdownload.PenaltyItem)
 	stateReceiverABI abi.ABI
-	loopBreakCheck   func(int) bool
 	recents          *lru.ARCCache[libcommon.Hash, *bor.Snapshot]
 	signatures       *lru.ARCCache[libcommon.Hash, libcommon.Address]
 	recordWaypoints  bool
@@ -88,7 +87,6 @@ func StageBorHeimdallCfg(
 	blockReader services.FullBlockReader,
 	hd *headerdownload.HeaderDownload,
 	penalize func(context.Context, []headerdownload.PenaltyItem),
-	loopBreakCheck func(int) bool,
 	recents *lru.ARCCache[libcommon.Hash, *bor.Snapshot],
 	signatures *lru.ARCCache[libcommon.Hash, libcommon.Address],
 	recordWaypoints bool,
@@ -110,7 +108,6 @@ func StageBorHeimdallCfg(
 		hd:               hd,
 		penalize:         penalize,
 		stateReceiverABI: bor.GenesisContractStateReceiverABI(),
-		loopBreakCheck:   loopBreakCheck,
 		recents:          recents,
 		signatures:       signatures,
 		recordWaypoints:  recordWaypoints,
@@ -429,21 +426,6 @@ func BorHeimdallForward(
 		fetchTime += callTime
 		syncEventTime = syncEventTime + time.Since(syncEventStart)
 
-		bodyProgress, err := stages.GetStageProgress(tx, stages.Bodies)
-
-		if err != nil {
-			return err
-		}
-
-		// don't break if progress is less than the bodies stage otherwisa
-		// we can potentially process invalid blocks as we won't have fetched
-		// all sync events.  (This can happen if more bodies than bor events
-		// are downloaded from the torrent)
-		if cfg.loopBreakCheck != nil &&
-			blockNum > bodyProgress && cfg.loopBreakCheck(int(blockNum-lastBlockNum)) {
-			headNumber = blockNum
-			break
-		}
 	}
 
 	if err = s.Update(tx, headNumber); err != nil {
