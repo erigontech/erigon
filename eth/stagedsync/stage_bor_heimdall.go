@@ -429,7 +429,18 @@ func BorHeimdallForward(
 		fetchTime += callTime
 		syncEventTime = syncEventTime + time.Since(syncEventStart)
 
-		if cfg.loopBreakCheck != nil && cfg.loopBreakCheck(int(blockNum-lastBlockNum)) {
+		bodyProgress, err := stages.GetStageProgress(tx, stages.Bodies)
+
+		if err != nil {
+			return err
+		}
+
+		// don't break if progress is less than the bodies stage otherwisa
+		// we can potentially process invalid blocks as we won't have fetched
+		// all sync events.  (This can happen if more bodies than bor events
+		// are downloaded from the torrent)
+		if cfg.loopBreakCheck != nil &&
+			blockNum > bodyProgress && cfg.loopBreakCheck(int(blockNum-lastBlockNum)) {
 			headNumber = blockNum
 			break
 		}
