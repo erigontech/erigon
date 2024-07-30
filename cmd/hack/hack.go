@@ -140,7 +140,7 @@ func printCurrentBlockNumber(chaindata string) {
 }
 
 func blocksIO(db kv.RoDB) (services.FullBlockReader, *blockio.BlockWriter) {
-	br := freezeblocks.NewBlockReader(freezeblocks.NewRoSnapshots(ethconfig.BlocksFreezing{Enabled: false}, "", 0, log.New()), nil /* BorSnapshots */)
+	br := freezeblocks.NewBlockReader(freezeblocks.NewRoSnapshots(ethconfig.BlocksFreezing{}, "", 0, log.New()), nil /* BorSnapshots */)
 	bw := blockio.NewBlockWriter()
 	return br, bw
 }
@@ -282,7 +282,6 @@ func extractHeaders(chaindata string, block uint64, blockTotalOrOffset int64) er
 
 func extractBodies(datadir string) error {
 	snaps := freezeblocks.NewRoSnapshots(ethconfig.BlocksFreezing{
-		Enabled:    true,
 		KeepBlocks: true,
 		ProduceE2:  false,
 	}, filepath.Join(datadir, "snapshots"), 0, log.New())
