@@ -357,20 +357,6 @@ LOOP:
 	return err
 }
 
-// clar them manually rather than making new ones, because we use the pointers instage batches and hang
-func (c *StreamClient) resetChannels() {
-L:
-	for {
-		select {
-		case <-c.batchStartChan:
-		case <-c.l2BlockChan:
-		case <-c.gerUpdatesChan:
-		default:
-			break L
-		}
-	}
-}
-
 func (c *StreamClient) tryReConnect() error {
 	var err error
 	for i := 0; i < 5; i++ {
@@ -413,31 +399,31 @@ func (c *StreamClient) readFullBlockProto() (
 		}
 		if bookmark.BookmarkType() == datastream.BookmarkType_BOOKMARK_TYPE_BATCH {
 			batchBookmark = bookmark
-			log.Trace("batch bookmark", "bookmark", bookmark)
 			return
 		} else {
 			blockBookmark = bookmark
-			log.Trace("block bookmark", "bookmark", bookmark)
 			return
 		}
 	case types.EntryTypeGerUpdate:
-		gerUpdate, err = types.DecodeGerUpdateProto(file.Data)
+		if gerUpdate, err = types.DecodeGerUpdateProto(file.Data); err != nil {
+			return
+		}
 		log.Trace("ger update", "ger", gerUpdate)
 		return
 	case types.EntryTypeBatchStart:
-		batchStart, err = types.UnmarshalBatchStart(file.Data)
-		log.Trace("batch start", "batchStart", batchStart)
-		return
-	case types.EntryTypeBatchEnd:
-		batchEnd, err = types.UnmarshalBatchEnd(file.Data)
-		log.Trace("batch end", "batchEnd", batchEnd)
-		return
-	case types.EntryTypeL2Block:
-		l2Block, err = types.UnmarshalL2Block(file.Data)
-		if err != nil {
+		if batchStart, err = types.UnmarshalBatchStart(file.Data); err != nil {
 			return
 		}
-		log.Trace("l2 block", "l2Block", l2Block)
+		return
+	case types.EntryTypeBatchEnd:
+		if batchEnd, err = types.UnmarshalBatchEnd(file.Data); err != nil {
+			return
+		}
+		return
+	case types.EntryTypeL2Block:
+		if l2Block, err = types.UnmarshalL2Block(file.Data); err != nil {
+			return
+		}
 
 		txs := []types.L2TransactionProto{}
 
@@ -453,9 +439,16 @@ func (c *StreamClient) readFullBlockProto() (
 				if l2Tx, err = types.UnmarshalTx(innerFile.Data); err != nil {
 					return
 				}
-				log.Trace("l2 tx", "l2Tx", l2Tx)
 				txs = append(txs, *l2Tx)
 			} else if innerFile.IsL2BlockEnd() {
+				var l2BlockEnd *types.L2BlockEndProto
+				if l2BlockEnd, err = types.UnmarshalL2BlockEnd(innerFile.Data); err != nil {
+					return
+				}
+				if l2BlockEnd.GetBlockNumber() == l2Block.L2BlockNumber {
+					err = fmt.Errorf("unexpected block end inside block: %d", l2BlockEnd.GetBlockNumber())
+					return
+				}
 				break LOOP
 			} else if innerFile.IsBookmark() {
 				var bookmark *types.BookmarkProto
@@ -463,10 +456,8 @@ func (c *StreamClient) readFullBlockProto() (
 					return
 				}
 				if bookmark.BookmarkType() == datastream.BookmarkType_BOOKMARK_TYPE_L2_BLOCK {
-					log.Trace("block bookmark", "bookmark", bookmark)
 					break LOOP
 				} else {
-					log.Trace("batch bookmark", "bookmark", bookmark)
 					err = fmt.Errorf("unexpected bookmark type inside block: %v", bookmark.Type())
 					return
 				}
@@ -474,7 +465,6 @@ func (c *StreamClient) readFullBlockProto() (
 				if batchEnd, err = types.UnmarshalBatchEnd(file.Data); err != nil {
 					return
 				}
-				log.Trace("batch end", "batchEnd", batchEnd)
 				break LOOP
 			} else {
 				err = fmt.Errorf("unexpected entry type inside a block: %d", innerFile.EntryType)

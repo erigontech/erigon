@@ -36,6 +36,11 @@ message L2Block {
   Debug debug = 14;
 }
 
+
+message L2BlockEnd {
+  uint64 number = 1;
+}
+
 message Transaction {
   uint64 l2block_number = 1;
   uint64 index = 2;

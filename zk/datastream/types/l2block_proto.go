@@ -1,26 +1,38 @@
 package types
 
 import (
-	"encoding/binary"
-
 	libcommon "github.com/gateway-fm/cdk-erigon-lib/common"
 	"github.com/ledgerwatch/erigon/zk/datastream/proto/github.com/0xPolygonHermez/zkevm-node/state/datastream"
 	"google.golang.org/protobuf/proto"
 )
 
 type L2BlockEndProto struct {
-	Number uint64 `protobuf:"varint,1,opt,name=number,proto3" json:"number,omitempty"`
+	Number uint64
+}
+
+func (b *L2BlockEndProto) Marshal() ([]byte, error) {
+	return proto.Marshal(&datastream.L2BlockEnd{
+		Number: b.Number,
+	})
 }
 
 func (b *L2BlockEndProto) Type() EntryType {
 	return EntryTypeL2BlockEnd
 }
 
-// temporary until protos are made
-func (b *L2BlockEndProto) Marshal() ([]byte, error) {
-	bytes := make([]byte, 8)
-	binary.BigEndian.AppendUint64(bytes, b.Number)
-	return bytes, nil
+func (b *L2BlockEndProto) GetBlockNumber() uint64 {
+	return b.Number
+}
+
+func UnmarshalL2BlockEnd(data []byte) (*L2BlockEndProto, error) {
+	blockEnd := datastream.L2BlockEnd{}
+	if err := proto.Unmarshal(data, &blockEnd); err != nil {
+		return nil, err
+	}
+
+	return &L2BlockEndProto{
+		Number: blockEnd.Number,
+	}, nil
 }
 
 type L2BlockProto struct {
