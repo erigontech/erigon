@@ -76,7 +76,6 @@ func InitHarness(ctx context.Context, t *testing.T, cfg HarnessCfg) Harness {
 		nil, // penalize
 		nil, // loopBreakCheck
 		nil, // recent bor snapshots cached
-		nil, // signatures lru cache
 		false,
 		nil,
 	)
