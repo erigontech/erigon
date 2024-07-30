@@ -149,7 +149,7 @@ func TestMergeSnapshots(t *testing.T) {
 	for i := uint64(0); i < N; i++ {
 		createFile(i*10_000, (i+1)*10_000)
 	}
-	s := NewRoSnapshots(ethconfig.BlocksFreezing{Enabled: true}, dir, 0, logger)
+	s := NewRoSnapshots(ethconfig.BlocksFreezing{}, dir, 0, logger)
 	defer s.Close()
 	require.NoError(s.ReopenFolder())
 	{
@@ -245,7 +245,7 @@ func TestDeleteSnapshots(t *testing.T) {
 	for i := uint64(0); i < N; i++ {
 		createFile(i*10_000, (i+1)*10_000)
 	}
-	s := NewRoSnapshots(ethconfig.BlocksFreezing{Enabled: true}, dir, 0, logger)
+	s := NewRoSnapshots(ethconfig.BlocksFreezing{}, dir, 0, logger)
 	defer s.Close()
 	retireFiles := []string{
 		"v1-000000-000010-bodies.seg",
@@ -284,7 +284,7 @@ func TestRemoveOverlaps(t *testing.T) {
 		createFile(200_000+i*10_000, 200_000+(i+1)*10_000)
 	}
 
-	s := NewRoSnapshots(ethconfig.BlocksFreezing{Enabled: true}, dir, 0, logger)
+	s := NewRoSnapshots(ethconfig.BlocksFreezing{}, dir, 0, logger)
 
 	defer s.Close()
 	require.NoError(s.ReopenSegments(coresnaptype.BlockSnapshotTypes, false))
@@ -336,7 +336,7 @@ func TestOpenAllSnapshot(t *testing.T) {
 		dir := filepath.Join(baseDir, chain)
 		chainSnapshotCfg := snapcfg.KnownCfg(chain)
 		chainSnapshotCfg.ExpectBlocks = math.MaxUint64
-		cfg := ethconfig.BlocksFreezing{Enabled: true}
+		cfg := ethconfig.BlocksFreezing{}
 		createFile := func(from, to uint64, name snaptype.Type) {
 			createTestSegmentFile(t, from, to, name.Enum(), dir, 1, logger)
 		}
