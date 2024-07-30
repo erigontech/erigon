@@ -49,6 +49,7 @@ func NewValidatorMonitor(
 		fc:               fc,
 		ethClock:         ethClock,
 		beaconCfg:        beaconConfig,
+		syncedData:       syncedData,
 		vaidatorStatuses: make(map[uint64]map[uint64]*validatorStatus),
 	}
 	go m.runReportAttesterStatus()
