@@ -7,21 +7,12 @@ import (
 	mapset "github.com/deckarep/golang-set/v2"
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon-lib/metrics"
 	"github.com/erigontech/erigon/cl/beacon/synced_data"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
 	"github.com/erigontech/erigon/cl/phase1/forkchoice"
 	"github.com/erigontech/erigon/cl/utils/eth_clock"
-)
-
-var (
-	// metrics
-	metricAttestHit    = metrics.GetOrCreateCounter("validator_attestation_hit")
-	metricAttestMiss   = metrics.GetOrCreateCounter("validator_attestation_miss")
-	metricProposerHit  = metrics.GetOrCreateCounter("validator_propose_hit")
-	metricProposerMiss = metrics.GetOrCreateCounter("validator_propose_miss")
 )
 
 type ValidatorMonitorImpl struct {
@@ -31,7 +22,6 @@ type ValidatorMonitorImpl struct {
 	beaconCfg        *clparams.BeaconChainConfig
 	vStatusMutex     sync.RWMutex
 	vaidatorStatuses map[uint64]map[uint64]*validatorStatus // map validatorID -> epoch -> validatorStatus
-	//proposerHitCache map[uint64]*proposerStatus             // map slot -> proposerStatus
 }
 
 func NewValidatorMonitor(
@@ -57,7 +47,7 @@ func NewValidatorMonitor(
 	return m
 }
 
-func (m *ValidatorMonitorImpl) AddValidator(vid uint64) {
+func (m *ValidatorMonitorImpl) ObserveValidator(vid uint64) {
 	m.vStatusMutex.Lock()
 	defer m.vStatusMutex.Unlock()
 	if _, ok := m.vaidatorStatuses[vid]; !ok {
@@ -126,12 +116,14 @@ func (m *ValidatorMonitorImpl) OnNewBlock(block *cltypes.BeaconBlock) error {
 		if status == nil {
 			return nil
 		}
-		status.proposerHitSlot.Add(block.Slot)
+		status.proposalSlots.Add(block.Slot)
 	}
 
 	return nil
 }
 
+// getValidatorStatus returns the validator status for the given validator index and epoch.
+// returns nil if validator is not observed.
 func (m *ValidatorMonitorImpl) getValidatorStatus(vid uint64, epoch uint64) *validatorStatus {
 	statusByEpoch, ok := m.vaidatorStatuses[vid]
 	if !ok {
@@ -142,7 +134,7 @@ func (m *ValidatorMonitorImpl) getValidatorStatus(vid uint64, epoch uint64) *val
 			epoch:              epoch,
 			vindex:             vid,
 			attestedBlockRoots: mapset.NewSet[common.Hash](),
-			proposerHitSlot:    mapset.NewSet[uint64](),
+			proposalSlots:      mapset.NewSet[uint64](),
 		}
 	}
 
@@ -179,18 +171,6 @@ func (m *ValidatorMonitorImpl) runReportAttesterStatus() {
 
 }
 
-type validatorStatus struct {
-	epoch              uint64
-	vindex             uint64
-	attestedBlockRoots mapset.Set[common.Hash]
-	proposerHitSlot    mapset.Set[uint64]
-}
-
-func (s *validatorStatus) updateAttesterStatus(att *solid.Attestation) {
-	data := att.AttestantionData()
-	s.attestedBlockRoots.Add(data.BeaconBlockRoot())
-}
-
 func (m *ValidatorMonitorImpl) runReportProposerStatus() {
 	// check proposer in previous slot every slot duration
 	ticker := time.NewTicker(time.Duration(m.beaconCfg.SecondsPerSlot) * time.Second)
@@ -210,7 +190,7 @@ func (m *ValidatorMonitorImpl) runReportProposerStatus() {
 			continue
 		}
 		if status := m.getValidatorStatus(proposerIndex, prevSlot/m.beaconCfg.SlotsPerEpoch); status != nil {
-			if status.proposerHitSlot.Contains(prevSlot) {
+			if status.proposalSlots.Contains(prevSlot) {
 				metricProposerHit.AddInt(1)
 				log.Info("[monitor] proposer hit", "slot", prevSlot, "proposerIndex", proposerIndex)
 			} else {
@@ -220,4 +200,16 @@ func (m *ValidatorMonitorImpl) runReportProposerStatus() {
 		}
 		m.vStatusMutex.Unlock()
 	}
+}
+
+type validatorStatus struct {
+	epoch              uint64
+	vindex             uint64
+	attestedBlockRoots mapset.Set[common.Hash]
+	proposalSlots      mapset.Set[uint64]
+}
+
+func (s *validatorStatus) updateAttesterStatus(att *solid.Attestation) {
+	data := att.AttestantionData()
+	s.attestedBlockRoots.Add(data.BeaconBlockRoot())
 }
