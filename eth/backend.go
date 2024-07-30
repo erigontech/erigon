@@ -456,6 +456,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 
 		var pi int // points to next port to be picked from refCfg.AllowedPorts
 		for _, protocol := range p2pConfig.ProtocolVersion {
+			logger.Error("in sentry:", "protocol", protocol)
 			cfg := p2pConfig
 			cfg.NodeDatabase = filepath.Join(stack.Config().Dirs.Nodes, eth.ProtocolToString[protocol])
 
@@ -1309,6 +1310,7 @@ func (s *Ethereum) StartMining(ctx context.Context, db kv.RwDB, stateDiffClient 
 			}
 
 			if !working && hasWork {
+				s.logger.Error("Started working")
 				working = true
 				hasWork = false
 				mineEvery.Reset(miner.MiningConfig.Recommit)
