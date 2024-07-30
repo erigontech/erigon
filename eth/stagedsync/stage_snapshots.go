@@ -343,7 +343,6 @@ func FillDBFromSnapshots(logPrefix string, ctx context.Context, tx kv.RwTx, dirs
 	// updating the progress of further stages (but only forward) that are contained inside of snapshots
 	for _, stage := range []stages.SyncStage{stages.Headers, stages.Bodies, stages.BlockHashes, stages.Senders} {
 		progress, err := stages.GetStageProgress(tx, stage)
-
 		if err != nil {
 			return fmt.Errorf("get %s stage progress to advance: %w", stage, err)
 		}
@@ -476,7 +475,6 @@ func FillDBFromSnapshots(logPrefix string, ctx context.Context, tx kv.RwTx, dirs
 				return err
 			}
 			ac.Close()
-
 		default:
 			diagnostics.Send(diagnostics.SnapshotFillDBStageUpdate{
 				Stage: diagnostics.SnapshotFillDBStage{
@@ -488,6 +486,31 @@ func FillDBFromSnapshots(logPrefix string, ctx context.Context, tx kv.RwTx, dirs
 			})
 		}
 	}
+
+	{ //advance stage exec
+		ds, err := state.NewSharedDomains(tx, logger)
+		if err != nil {
+			return err
+		}
+		if ds.TxNum() > 0 {
+			ok, commitmentProgress, err := rawdbv3.TxNums.FindBlockNum(tx, ds.TxNum())
+			if err != nil {
+				return err
+			}
+			if ok {
+				execProgress, err := stages.GetStageProgress(tx, stages.Execution)
+				if err != nil {
+					return fmt.Errorf("get %s stage progress to advance: %w", stages.Execution, err)
+				}
+				if execProgress < commitmentProgress {
+					if err := stages.SaveStageProgress(tx, stages.Execution, commitmentProgress); err != nil {
+						return fmt.Errorf("advancing %s stage: %w", stages.Execution, err)
+					}
+				}
+			}
+		}
+	}
+
 	return nil
 }
 
