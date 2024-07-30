@@ -1040,6 +1040,7 @@ func (a *ApiHandler) storeBlockAndBlobs(
 	if _, err := a.engine.ForkChoiceUpdate(ctx, a.forkchoiceStore.GetEth1Hash(finalizedBlockRoot), a.forkchoiceStore.GetEth1Hash(blockRoot), nil); err != nil {
 		return err
 	}
+	a.validatorsMonitor.OnNewBlock(block.Block)
 	return nil
 }
 

@@ -428,6 +428,7 @@ func (s *RoSnapshots) idxAvailability() uint64 {
 	if len(maximums) == 0 {
 		return 0
 	}
+
 	return slices.Min(maximums)
 }
 
@@ -498,6 +499,9 @@ func (s *RoSnapshots) OpenFiles() (list []string) {
 
 // ReopenList stops on optimistic=false, continue opening files on optimistic=true
 func (s *RoSnapshots) ReopenList(fileNames []string, optimistic bool) error {
+	s.lockSegments()
+	defer s.unlockSegments()
+	s.closeWhatNotInList(fileNames)
 	if err := s.rebuildSegments(fileNames, true, optimistic); err != nil {
 		return err
 	}
@@ -505,6 +509,9 @@ func (s *RoSnapshots) ReopenList(fileNames []string, optimistic bool) error {
 }
 
 func (s *RoSnapshots) InitSegments(fileNames []string) error {
+	s.lockSegments()
+	defer s.unlockSegments()
+	s.closeWhatNotInList(fileNames)
 	if err := s.rebuildSegments(fileNames, false, true); err != nil {
 		return err
 	}
@@ -526,10 +533,6 @@ func (s *RoSnapshots) unlockSegments() {
 }
 
 func (s *RoSnapshots) rebuildSegments(fileNames []string, open bool, optimistic bool) error {
-	s.lockSegments()
-	defer s.unlockSegments()
-
-	s.closeWhatNotInList(fileNames)
 	var segmentsMax uint64
 	var segmentsMaxSet bool
 
@@ -623,10 +626,17 @@ func (s *RoSnapshots) Ranges() []Range {
 func (s *RoSnapshots) OptimisticalyReopenFolder()           { _ = s.ReopenFolder() }
 func (s *RoSnapshots) OptimisticalyReopenWithDB(db kv.RoDB) { _ = s.ReopenWithDB(db) }
 func (s *RoSnapshots) ReopenFolder() error {
-	if err := s.ReopenSegments(s.Types(), false); err != nil {
-		return fmt.Errorf("ReopenSegments: %w", err)
+	files, _, err := typedSegments(s.dir, s.segmentsMin.Load(), s.Types(), false)
+	if err != nil {
+		return err
 	}
-	return nil
+
+	list := make([]string, 0, len(files))
+	for _, f := range files {
+		_, fName := filepath.Split(f.Path)
+		list = append(list, fName)
+	}
+	return s.ReopenList(list, false)
 }
 
 func (s *RoSnapshots) ReopenSegments(types []snaptype.Type, allowGaps bool) error {
@@ -640,7 +650,14 @@ func (s *RoSnapshots) ReopenSegments(types []snaptype.Type, allowGaps bool) erro
 		_, fName := filepath.Split(f.Path)
 		list = append(list, fName)
 	}
-	return s.ReopenList(list, false)
+
+	s.lockSegments()
+	defer s.unlockSegments()
+	// don't need close already opened files
+	if err := s.rebuildSegments(list, true, false); err != nil {
+		return err
+	}
+	return nil
 }
 
 func (s *RoSnapshots) ReopenWithDB(db kv.RoDB) error {
