@@ -161,7 +161,7 @@ var (
 	FlagSnapStateStop  = "snap.state.stop"
 )
 
-func NewSnapCfg(enabled, keepBlocks, produceE2, produceE3 bool) BlocksFreezing {
+func NewSnapCfg(keepBlocks, produceE2, produceE3 bool) BlocksFreezing {
 	return BlocksFreezing{KeepBlocks: keepBlocks, ProduceE2: produceE2, ProduceE3: produceE3}
 }
 

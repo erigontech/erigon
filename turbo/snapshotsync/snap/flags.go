@@ -18,7 +18,6 @@ package snap
 
 import (
 	"github.com/erigontech/erigon-lib/kv"
-	"github.com/erigontech/erigon/eth/ethconfig"
 )
 
 var (
@@ -27,15 +26,4 @@ var (
 
 func Enabled(tx kv.Getter) (bool, error) {
 	return kv.GetBool(tx, kv.DatabaseInfo, blockSnapshotEnabledKey)
-}
-
-func EnsureNotChanged(tx kv.GetPut, cfg ethconfig.BlocksFreezing) (bool, bool, error) {
-	ok, v, err := kv.EnsureNotChangedBool(tx, kv.DatabaseInfo, blockSnapshotEnabledKey, cfg.Enabled)
-	if err != nil {
-		return false, false, err
-	}
-	if !ok {
-		return false, v, nil
-	}
-	return true, false, nil
 }
