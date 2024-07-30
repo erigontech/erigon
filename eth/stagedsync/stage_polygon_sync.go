@@ -814,14 +814,36 @@ func (e *polygonSyncStageExecutionEngine) updateForkChoice(ctx context.Context, 
 		return nil
 	}
 
-	for i := len(newNodes) - 1; i >= 0; i-- {
-		err = e.downloadStateSyncEvents(ctx, tx, newNodes[i], logTicker)
+	// TODO remove below for loop once the bridge is integrated in the stage
+	borConfig := e.chainConfig.Bor.(*borcfg.BorConfig)
+	for i := len(newNodes) - 1; i >= 0; {
+		blockNum := newNodes[i].number
+		blockHash := newNodes[i].hash
+		if blockNum == 0 {
+			break
+		}
+
+		sprintLen := borConfig.CalculateSprintLength(blockNum)
+		blockPosInSprint := blockNum % sprintLen
+		if blockPosInSprint > 0 {
+			i -= int(blockPosInSprint)
+			continue
+		}
+
+		header, err := e.blockReader.Header(ctx, tx, blockHash, blockNum)
 		if err != nil {
 			return err
 		}
+
+		err = e.downloadStateSyncEvents(ctx, tx, header, logTicker)
+		if err != nil {
+			return err
+		}
+
+		i -= int(sprintLen)
 	}
 
-	if err := rawdb.AppendCanonicalTxNums(tx, newNodes[len(newNodes)-1].Number.Uint64()); err != nil {
+	if err := rawdb.AppendCanonicalTxNums(tx, newNodes[len(newNodes)-1].number); err != nil {
 		return err
 	}
 

@@ -373,15 +373,14 @@ type chainNode struct {
 	number uint64
 }
 
-func fixCanonicalChain(logPrefix string, logEvery *time.Ticker, height uint64, hash libcommon.Hash, tx kv.StatelessRwTx, headerReader services.FullBlockReader, logger log.Logger) ([]*types.Header, []chainNode, error) {
+func fixCanonicalChain(logPrefix string, logEvery *time.Ticker, height uint64, hash libcommon.Hash, tx kv.StatelessRwTx, headerReader services.FullBlockReader, logger log.Logger) ([]chainNode, []chainNode, error) {
 	if height == 0 {
 		return nil, nil, nil
 	}
 	ancestorHash := hash
 	ancestorHeight := height
 
-	var newNodes []*types.Header
-	var badNodes []chainNode
+	var newNodes, badNodes []chainNode
 	var emptyHash libcommon.Hash
 	var ch libcommon.Hash
 	var err error
@@ -412,7 +411,11 @@ func fixCanonicalChain(logPrefix string, logEvery *time.Ticker, height uint64, h
 			})
 		}
 
-		newNodes = append(newNodes, ancestor)
+		newNodes = append(newNodes, chainNode{
+			hash:   ancestorHash,
+			number: ancestorHeight,
+		})
+
 		ancestorHash = ancestor.ParentHash
 		ancestorHeight--
 	}
