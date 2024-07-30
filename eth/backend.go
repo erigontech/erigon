@@ -24,6 +24,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/erigontech/erigon-lib/common/dir"
+	"io/fs"
 	"math"
 	"math/big"
 	"net"
@@ -35,8 +37,6 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
-
-	"github.com/karrick/godirwalk"
 
 	"github.com/erigontech/mdbx-go/mdbx"
 	lru "github.com/hashicorp/golang-lru/arc/v2"
@@ -1677,30 +1677,25 @@ func (s *Ethereum) ExecutionModule() *eth1.EthereumExecutionModule {
 
 // RemoveContents is like os.RemoveAll, but preserve dir itself
 func RemoveContents(dirname string) error {
-	err := godirwalk.Walk(dirname, &godirwalk.Options{
-		ErrorCallback: func(s string, err error) godirwalk.ErrorAction {
-			if os.IsNotExist(err) {
-				return godirwalk.SkipNode
-			}
-			return godirwalk.Halt
-		},
-		FollowSymbolicLinks: true,
-		Unsorted:            true,
-		Callback: func(osPathname string, d *godirwalk.Dirent) error {
-			if osPathname == dirname {
-				return nil
-			}
-			if d.IsSymlink() {
-				return nil
-			}
-			return os.RemoveAll(filepath.Join(dirname, d.Name()))
-		},
-		PostChildrenCallback: nil,
-		ScratchBuffer:        nil,
-		AllowNonDirectory:    false,
-	})
+	d, err := os.Open(dirname)
+	if err != nil {
+		if errors.Is(err, fs.ErrNotExist) {
+			// ignore due to windows
+			_ = os.MkdirAll(dirname, 0o755)
+			return nil
+		}
+		return err
+	}
+	defer d.Close()
+	files, err := dir.ReadDir(dirname)
 	if err != nil {
 		return err
+	}
+	for _, file := range files {
+		err = os.RemoveAll(filepath.Join(dirname, file.Name()))
+		if err != nil {
+			return err
+		}
 	}
 	return nil
 }
