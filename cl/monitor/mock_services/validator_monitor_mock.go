@@ -39,38 +39,38 @@ func (m *MockValidatorMonitor) EXPECT() *MockValidatorMonitorMockRecorder {
 	return m.recorder
 }
 
-// AddValidator mocks base method.
-func (m *MockValidatorMonitor) AddValidator(arg0 uint64) {
+// ObserveValidator mocks base method.
+func (m *MockValidatorMonitor) ObserveValidator(arg0 uint64) {
 	m.ctrl.T.Helper()
-	m.ctrl.Call(m, "AddValidator", arg0)
+	m.ctrl.Call(m, "ObserveValidator", arg0)
 }
 
-// AddValidator indicates an expected call of AddValidator.
-func (mr *MockValidatorMonitorMockRecorder) AddValidator(arg0 any) *MockValidatorMonitorAddValidatorCall {
+// ObserveValidator indicates an expected call of ObserveValidator.
+func (mr *MockValidatorMonitorMockRecorder) ObserveValidator(arg0 any) *MockValidatorMonitorObserveValidatorCall {
 	mr.mock.ctrl.T.Helper()
-	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "AddValidator", reflect.TypeOf((*MockValidatorMonitor)(nil).AddValidator), arg0)
-	return &MockValidatorMonitorAddValidatorCall{Call: call}
+	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ObserveValidator", reflect.TypeOf((*MockValidatorMonitor)(nil).ObserveValidator), arg0)
+	return &MockValidatorMonitorObserveValidatorCall{Call: call}
 }
 
-// MockValidatorMonitorAddValidatorCall wrap *gomock.Call
-type MockValidatorMonitorAddValidatorCall struct {
+// MockValidatorMonitorObserveValidatorCall wrap *gomock.Call
+type MockValidatorMonitorObserveValidatorCall struct {
 	*gomock.Call
 }
 
 // Return rewrite *gomock.Call.Return
-func (c *MockValidatorMonitorAddValidatorCall) Return() *MockValidatorMonitorAddValidatorCall {
+func (c *MockValidatorMonitorObserveValidatorCall) Return() *MockValidatorMonitorObserveValidatorCall {
 	c.Call = c.Call.Return()
 	return c
 }
 
 // Do rewrite *gomock.Call.Do
-func (c *MockValidatorMonitorAddValidatorCall) Do(f func(uint64)) *MockValidatorMonitorAddValidatorCall {
+func (c *MockValidatorMonitorObserveValidatorCall) Do(f func(uint64)) *MockValidatorMonitorObserveValidatorCall {
 	c.Call = c.Call.Do(f)
 	return c
 }
 
 // DoAndReturn rewrite *gomock.Call.DoAndReturn
-func (c *MockValidatorMonitorAddValidatorCall) DoAndReturn(f func(uint64)) *MockValidatorMonitorAddValidatorCall {
+func (c *MockValidatorMonitorObserveValidatorCall) DoAndReturn(f func(uint64)) *MockValidatorMonitorObserveValidatorCall {
 	c.Call = c.Call.DoAndReturn(f)
 	return c
 }
