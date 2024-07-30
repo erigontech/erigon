@@ -20,7 +20,6 @@ import (
 	"bytes"
 	"encoding/json"
 	"errors"
-	// "fmt"
 	"io"
 
 	libcommon "github.com/erigontech/erigon-lib/common"
@@ -111,11 +110,11 @@ func (w *WithdrawalRequest) UnmarshalJSON(input []byte) error {
 	if err != nil {
 		return err
 	}
-	if len(validatorKey) != 48 {
-		return errors.New("decoded validatorKey len after UnmarshalJSON doesn't match BLSKeyLen")
+	if len(validatorKey) != BLSPubKeyLen {
+		return errors.New("WithdrawalRequest ValidatorPubkey len after UnmarshalJSON doesn't match BLSKeyLen")
 	}
 
-	w.ValidatorPubkey = [48]byte(validatorKey)
+	w.ValidatorPubkey = [BLSPubKeyLen]byte(validatorKey)
 	w.Amount = tt.Amount.Uint64()
 	w.SourceAddress = tt.SourceAddress
 	return nil
