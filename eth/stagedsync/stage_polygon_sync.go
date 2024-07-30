@@ -914,6 +914,8 @@ func (e *polygonSyncStageExecutionEngine) downloadStateSyncEvents(
 	header *types.Header,
 	logTicker *time.Ticker,
 ) error {
+	e.logger.Trace(e.appendLogPrefix("download state sync event"), "block", header.Number.Uint64())
+
 	var err error
 	if !e.lastStateSyncEventIdInit {
 		e.lastStateSyncEventId, _, err = e.blockReader.LastEventId(ctx, tx)
