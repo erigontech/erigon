@@ -425,6 +425,7 @@ func BorHeimdallForward(
 
 		fetchTime += callTime
 		syncEventTime = syncEventTime + time.Since(syncEventStart)
+
 	}
 
 	if err = s.Update(tx, headNumber); err != nil {
