@@ -253,7 +253,6 @@ Loop:
 		}
 		// Load headers into the database
 		inSync, err := cfg.hd.InsertHeaders(headerInserter.NewFeedHeaderFunc(tx, cfg.blockReader), cfg.syncConfig.LoopBlockLimit, cfg.chainConfig.TerminalTotalDifficulty, logPrefix, logEvery.C, uint64(currentTime.Unix()))
-
 		if err != nil {
 			return err
 		}
@@ -268,13 +267,20 @@ Loop:
 		}
 
 		if cfg.syncConfig.LoopBlockLimit > 0 {
-			bodyProgress, _ := stages.GetStageProgress(tx, stages.Bodies)
-			bodyProgress, _ := stages.GetStageProgress(tx, stages.Execution)
-
-			if bodyProgress, err := stages.GetStageProgress(tx, stages.Bodies); err == nil {
-				if cfg.hd.Progress() > bodyProgress && cfg.hd.Progress()-bodyProgress > uint64(cfg.syncConfig.LoopBlockLimit*2) {
-					break
-				}
+			bodyProgress, err := stages.GetStageProgress(tx, stages.Bodies)
+			if err != nil {
+				return err
+			} // 100
+			execProgress, err := stages.GetStageProgress(tx, stages.Execution)
+			if err != nil {
+				return err
+			} // 200
+			// expect to align all stages after 1 sync cycle.
+			// even if amount of state files > amount of block files.
+			needHeadersProgress := max(bodyProgress, execProgress) + uint64(cfg.syncConfig.LoopBlockLimit)
+			if cfg.hd.Progress() > needHeadersProgress {
+				log.Warn("[dbg] break stage_headers", "needHeadersProgress", needHeadersProgress, "uint64(cfg.syncConfig.LoopBlockLimit)", uint64(cfg.syncConfig.LoopBlockLimit))
+				break
 			}
 		}
 
