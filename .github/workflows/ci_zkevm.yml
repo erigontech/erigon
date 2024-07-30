@@ -96,11 +96,15 @@ jobs:
           /usr/local/bin/yq -i '.args.data_availability_mode = "rollup"' cdk-erigon-sequencer-params.yml
           /usr/local/bin/yq -i '.args.cdk_erigon_node_image = "cdk-erigon:local"' cdk-erigon-sequencer-params.yml
           /usr/local/bin/yq -i '.args.zkevm_bridge_service_image = "hermeznetwork/zkevm-bridge-service:v0.5.0-RC8"' cdk-erigon-sequencer-params.yml
-          sed -i '/zkevm\.sequencer-initial-fork-id/d' ./templates/cdk-erigon/config-sequencer.yaml
 
       - name: Deploy Kurtosis CDK package
         working-directory: ./kurtosis-cdk
         run: kurtosis run --enclave cdk-v1 --args-file cdk-erigon-sequencer-params.yml --image-download always .
+
+      - name: Override gas limit for test transactions
+        working-directory: ./kurtosis-cdk
+        run: |
+          sed -i 's/--gas-limit [0-9]*/--gas-limit 100000/gi' .github/actions/monitor-cdk-verified-batches/batch_verification_monitor.sh
 
       - name: Monitor verified batches
         working-directory: ./kurtosis-cdk
