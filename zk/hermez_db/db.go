@@ -1463,6 +1463,26 @@ func (db *HermezDb) GetL1InfoTreeIndexByRoot(hash common.Hash) (uint64, bool, er
 	return BytesToUint64(data), data != nil, nil
 }
 
+func (db *HermezDbReader) GetL1InfoTreeIndexToRoots() (map[uint64]common.Hash, error) {
+	c, err := db.tx.Cursor(L1_INFO_ROOTS)
+	if err != nil {
+		return nil, err
+	}
+	defer c.Close()
+
+	indexToRoot := make(map[uint64]common.Hash)
+	for k, v, err := c.First(); k != nil; k, v, err = c.Next() {
+		if err != nil {
+			return nil, err
+		}
+		index := BytesToUint64(v)
+		root := common.BytesToHash(k)
+		indexToRoot[index] = root
+	}
+
+	return indexToRoot, nil
+}
+
 func (db *HermezDbReader) GetForkIdByBlockNum(blockNum uint64) (uint64, error) {
 	blockbatch, err := db.GetBatchNoByL2Block(blockNum)
 	if err != nil {
