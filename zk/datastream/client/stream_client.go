@@ -445,8 +445,8 @@ func (c *StreamClient) readFullBlockProto() (
 				if l2BlockEnd, err = types.UnmarshalL2BlockEnd(innerFile.Data); err != nil {
 					return
 				}
-				if l2BlockEnd.GetBlockNumber() == l2Block.L2BlockNumber {
-					err = fmt.Errorf("unexpected block end inside block: %d", l2BlockEnd.GetBlockNumber())
+				if l2BlockEnd.GetBlockNumber() != l2Block.L2BlockNumber {
+					err = fmt.Errorf("block end number (%d) not equal to block number (%d)", l2BlockEnd.GetBlockNumber(), l2Block.L2BlockNumber)
 					return
 				}
 				break LOOP
