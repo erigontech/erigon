@@ -18,6 +18,7 @@ package bridge
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
@@ -34,6 +35,8 @@ import (
 	"github.com/erigontech/erigon/polygon/bor/borcfg"
 	"github.com/erigontech/erigon/polygon/heimdall"
 )
+
+var ErrMapNotAvailable = errors.New("map not available")
 
 type fetchSyncEventsType func(ctx context.Context, fromId uint64, to time.Time, limit int) ([]*heimdall.EventRecordWithTime, error)
 
@@ -81,6 +84,13 @@ func (b *Bridge) Run(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+
+	lastProcessedEventID, err := b.store.GetLastProcessedEventID(ctx)
+	if err != nil {
+		return err
+	}
+
+	b.lastProcessedEventID = lastProcessedEventID
 
 	// start syncing
 	b.log.Debug(bridgeLogPrefix("Bridge is running"), "lastEventID", lastEventID)
@@ -179,6 +189,10 @@ func (b *Bridge) Unwind(ctx context.Context, tip *types.Header) error {
 func (b *Bridge) GetEvents(ctx context.Context, blockNum uint64) ([]*types.Message, error) {
 	start, end, err := b.store.GetEventIDRange(ctx, blockNum)
 	if err != nil {
+		if errors.Is(err, ErrMapNotAvailable) {
+			return nil, nil
+		}
+
 		return nil, err
 	}
 
