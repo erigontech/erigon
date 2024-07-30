@@ -102,7 +102,7 @@ func (m *ValidatorMonitorImpl) OnNewBlock(block *cltypes.BeaconBlock) error {
 	// update proposer status
 	pIndex := block.ProposerIndex
 	if status := m.vaidatorStatuses.getValidatorStatus(pIndex, blockEpoch); status != nil {
-		status.proposalSlots.Add(block.Slot)
+		status.proposeSlots.Add(block.Slot)
 	}
 
 	return nil
@@ -153,7 +153,7 @@ func (m *ValidatorMonitorImpl) runReportProposerStatus() {
 			return
 		}
 		if status := m.vaidatorStatuses.getValidatorStatus(proposerIndex, prevSlot/m.beaconCfg.SlotsPerEpoch); status != nil {
-			if status.proposalSlots.Contains(prevSlot) {
+			if status.proposeSlots.Contains(prevSlot) {
 				metricProposerHit.AddInt(1)
 				log.Info("[monitor] proposer hit", "slot", prevSlot, "proposerIndex", proposerIndex)
 			} else {
@@ -165,8 +165,10 @@ func (m *ValidatorMonitorImpl) runReportProposerStatus() {
 }
 
 type validatorStatus struct {
+	// attestedBlockRoots is the set of block roots that the validator has successfully attested during one epoch.
 	attestedBlockRoots mapset.Set[common.Hash]
-	proposalSlots      mapset.Set[uint64]
+	// proposeSlots is the set of slots that the proposer has successfully proposed blocks during one epoch.
+	proposeSlots mapset.Set[uint64]
 }
 
 func (s *validatorStatus) updateAttesterStatus(att *solid.Attestation) {
@@ -197,7 +199,7 @@ func (s *validatorStatuses) getValidatorStatus(vid uint64, epoch uint64) *valida
 	if _, ok := statusByEpoch[epoch]; !ok {
 		statusByEpoch[epoch] = &validatorStatus{
 			attestedBlockRoots: mapset.NewSet[common.Hash](),
-			proposalSlots:      mapset.NewSet[uint64](),
+			proposeSlots:       mapset.NewSet[uint64](),
 		}
 	}
 
