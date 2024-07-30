@@ -8,6 +8,7 @@ import (
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/metrics"
+	"github.com/erigontech/erigon/cl/beacon/synced_data"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
@@ -25,10 +26,12 @@ var (
 
 type ValidatorMonitorImpl struct {
 	fc               forkchoice.ForkChoiceStorageReader
+	syncedData       *synced_data.SyncedDataManager
 	ethClock         eth_clock.EthereumClock
 	beaconCfg        *clparams.BeaconChainConfig
 	vStatusMutex     sync.RWMutex
 	vaidatorStatuses map[uint64]map[uint64]*validatorStatus // map validatorID -> epoch -> validatorStatus
+	//proposerHitCache map[uint64]*proposerStatus             // map slot -> proposerStatus
 }
 
 func NewValidatorMonitor(
@@ -36,6 +39,7 @@ func NewValidatorMonitor(
 	fc forkchoice.ForkChoiceStorageReader,
 	ethClock eth_clock.EthereumClock,
 	beaconConfig *clparams.BeaconChainConfig,
+	syncedData *synced_data.SyncedDataManager,
 ) ValidatorMonitor {
 	if !enableMonitor {
 		return &dummyValdatorMonitor{}
@@ -96,6 +100,7 @@ func (m *ValidatorMonitorImpl) OnNewBlock(block *cltypes.BeaconBlock) error {
 	// todo: maybe launch a goroutine to update attester status
 	m.vStatusMutex.Lock()
 	defer m.vStatusMutex.Unlock()
+	// update attester status
 	atts.Range(func(i int, att *solid.Attestation, length int) bool {
 		indicies, err := state.GetAttestingIndicies(att.AttestantionData(), att.AggregationBits(), true)
 		if err != nil {
@@ -105,24 +110,42 @@ func (m *ValidatorMonitorImpl) OnNewBlock(block *cltypes.BeaconBlock) error {
 		slot := att.AttestantionData().Slot()
 		attEpoch := m.ethClock.GetEpochAtSlot(slot)
 		for _, vidx := range indicies {
-			if _, ok := m.vaidatorStatuses[vidx]; !ok {
-				// skip unknown validators
+			status := m.getValidatorStatus(vidx, attEpoch)
+			if status == nil {
 				continue
 			}
-			if _, ok := m.vaidatorStatuses[vidx][attEpoch]; !ok {
-				status := &validatorStatus{
-					epoch:              attEpoch,
-					vindex:             vidx,
-					attestedBlockRoots: mapset.NewSet[common.Hash](),
-				}
-				m.vaidatorStatuses[vidx][attEpoch] = status
-			}
-			m.vaidatorStatuses[vidx][attEpoch].updateAttesterStatus(att)
+			status.updateAttesterStatus(att)
 		}
 		return true
 	})
+	// update proposer status
+	pIndex := block.ProposerIndex
+	if _, ok := m.vaidatorStatuses[pIndex]; ok {
+		status := m.getValidatorStatus(pIndex, blockEpoch)
+		if status == nil {
+			return nil
+		}
+		status.proposerHitSlot.Add(block.Slot)
+	}
 
 	return nil
+}
+
+func (m *ValidatorMonitorImpl) getValidatorStatus(vid uint64, epoch uint64) *validatorStatus {
+	statusByEpoch, ok := m.vaidatorStatuses[vid]
+	if !ok {
+		return nil
+	}
+	if _, ok := statusByEpoch[epoch]; !ok {
+		statusByEpoch[epoch] = &validatorStatus{
+			epoch:              epoch,
+			vindex:             vid,
+			attestedBlockRoots: mapset.NewSet[common.Hash](),
+			proposerHitSlot:    mapset.NewSet[uint64](),
+		}
+	}
+
+	return statusByEpoch[epoch]
 }
 
 func (m *ValidatorMonitorImpl) runReportAttesterStatus() {
@@ -159,6 +182,7 @@ type validatorStatus struct {
 	epoch              uint64
 	vindex             uint64
 	attestedBlockRoots mapset.Set[common.Hash]
+	proposerHitSlot    mapset.Set[uint64]
 }
 
 func (s *validatorStatus) updateAttesterStatus(att *solid.Attestation) {
@@ -171,6 +195,24 @@ func (m *ValidatorMonitorImpl) runReportProposerStatus() {
 	ticker := time.NewTicker(time.Duration(m.beaconCfg.SecondsPerSlot) * time.Second)
 	defer ticker.Stop()
 	for range ticker.C {
-
+		m.vStatusMutex.Lock()
+		headState := m.syncedData.HeadStateReader()
+		// check proposer in previous slot
+		prevSlot := m.ethClock.GetCurrentSlot() - 1
+		proposerIndex, err := headState.GetBeaconProposerIndexForSlot(prevSlot)
+		if err != nil {
+			log.Warn("failed to get proposer index", "slot", prevSlot, "err", err)
+			continue
+		}
+		if status := m.getValidatorStatus(proposerIndex, prevSlot/m.beaconCfg.SlotsPerEpoch); status != nil {
+			if status.proposerHitSlot.Contains(prevSlot) {
+				metricProposerHit.AddInt(1)
+				log.Info("[monitor] proposer hit", "slot", prevSlot, "proposerIndex", proposerIndex)
+			} else {
+				metricProposerMiss.AddInt(1)
+				log.Info("[monitor] proposer miss", "slot", prevSlot, "proposerIndex", proposerIndex)
+			}
+		}
+		m.vStatusMutex.Unlock()
 	}
 }
