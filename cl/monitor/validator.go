@@ -197,6 +197,10 @@ func (m *ValidatorMonitorImpl) runReportProposerStatus() {
 	for range ticker.C {
 		m.vStatusMutex.Lock()
 		headState := m.syncedData.HeadStateReader()
+		if headState == nil {
+			m.vStatusMutex.Unlock()
+			continue
+		}
 		// check proposer in previous slot
 		prevSlot := m.ethClock.GetCurrentSlot() - 1
 		proposerIndex, err := headState.GetBeaconProposerIndexForSlot(prevSlot)
