@@ -39,17 +39,3 @@ func EnsureNotChanged(tx kv.GetPut, cfg ethconfig.BlocksFreezing) (bool, bool, e
 	}
 	return true, false, nil
 }
-
-// ForceSetFlags - if you know what you are doing
-func ForceSetFlags(tx kv.GetPut, cfg ethconfig.BlocksFreezing) error {
-	if cfg.Enabled {
-		if err := tx.Put(kv.DatabaseInfo, blockSnapshotEnabledKey, []byte{1}); err != nil {
-			return err
-		}
-	} else {
-		if err := tx.Put(kv.DatabaseInfo, blockSnapshotEnabledKey, []byte{0}); err != nil {
-			return err
-		}
-	}
-	return nil
-}
