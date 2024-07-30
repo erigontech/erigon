@@ -43,7 +43,7 @@ func TestSimulatorStart(t *testing.T) {
 	// logger.SetHandler(log.StdoutHandler)
 	dataDir := t.TempDir()
 
-	sim, err := simulator.NewSentry(ctx, "mumbai", dataDir, 1, logger)
+	sim, err := simulator.NewSentry(ctx, "amoy", dataDir, 1, logger)
 	if err != nil {
 		t.Fatal(err)
 	}
