@@ -797,31 +797,43 @@ func (hph *HexPatriciaHashed) computeCellHash(cell *Cell, depth int, buf []byte)
 			koffset = 0
 		}
 
-		if !cell.loaded {
-			if cell.alhlen > 0 {
-				res := append([]byte{160}, cell.accLeafHash[:cell.alhlen]...)
-				hph.keccak.Reset()
-				fmt.Printf("OLDS %x %x\n", res, cell.spk[:cell.spl])
-				return res, nil
-			}
-			if err = hph.ctx.GetStorage(cell.spk[:cell.spl], cell); err != nil {
-				return nil, err
-			}
-			if cell.apl > 0 {
-				if err = hph.ctx.GetAccount(cell.apk[:cell.apl], cell); err != nil {
-					return nil, err
-				}
-				hadToLoad.Add(1)
-			}
-			hadToLoad.Add(1)
-			cell.loaded = true
-		}
 		if err := hashKey(hph.keccak, cell.spk[koffset:cell.spl], cell.downHashedKey[:], hashedKeyOffset); err != nil {
 			return nil, err
 		}
 		cell.downHashedKey[64-hashedKeyOffset] = 16 // Add terminator
 
 		if singleton {
+			if !cell.loaded && cell.alhlen > 0 {
+				res := append([]byte{160}, cell.accLeafHash[:cell.alhlen]...)
+				hph.keccak.Reset()
+				//if depth >= 64 {
+				//fmt.Printf("OLDS %x %x\n", res, cell.spk[:cell.spl])
+				return res, nil
+				//}
+				//fmt.Printf("UpdateStorage %x %x\n", res, cell.spk[:cell.spl])
+				//copy(storageRootHash[:], cell.accLeafHash[:cell.alhlen])
+				////storageRootHash = *(*[length.Hash]byte)(aux[1:])
+				//storageRootHashIsSet = true
+				//cell.alhlen = 0
+				//if cell.apl > 0 {
+				//	if err = hph.ctx.GetAccount(cell.apk[:cell.apl], cell); err != nil {
+				//		return nil, err
+				//	}
+				//	hadToLoad.Add(1)
+				//}
+				//} else {
+			}
+			if err = hph.ctx.GetStorage(cell.spk[:cell.spl], cell); err != nil {
+				return nil, err
+			}
+			hadToLoad.Add(1)
+			if cell.apl > 0 {
+				if err = hph.ctx.GetAccount(cell.apk[:cell.apl], cell); err != nil {
+					return nil, err
+				}
+				hadToLoad.Add(1)
+			}
+			cell.loaded = true
 			if hph.trace {
 				fmt.Printf("leafHashWithKeyVal(singleton) for [%x]=>[%x]\n", cell.downHashedKey[:64-hashedKeyOffset+1], cell.Storage[:cell.StorageLen])
 			}
@@ -835,6 +847,7 @@ func (hph *HexPatriciaHashed) computeCellHash(cell *Cell, depth int, buf []byte)
 			storageRootHash = *(*[length.Hash]byte)(aux[1:])
 			storageRootHashIsSet = true
 			cell.alhlen = 0
+			//}
 		} else {
 			if hph.trace {
 				fmt.Printf("leafHashWithKeyVal for [%x]=>[%x] %v\n", cell.downHashedKey[:64-hashedKeyOffset+1], cell.Storage[:cell.StorageLen], cell.String())
@@ -1509,7 +1522,6 @@ func (hph *HexPatriciaHashed) ProcessTree(ctx context.Context, tree *Updates, lo
 			if !stagedCell.Delete {
 				cell := hph.updateCell(plainKey, hashedKey)
 				cell.setAccountFields(stagedCell.CodeHash[:], &stagedCell.Balance, stagedCell.Nonce)
-				// cell.loaded = false
 				if hph.trace {
 					fmt.Printf("GetAccount %s", cell.FullString())
 				}
@@ -1521,7 +1533,6 @@ func (hph *HexPatriciaHashed) ProcessTree(ctx context.Context, tree *Updates, lo
 			if !stagedCell.Delete {
 				cell := hph.updateCell(plainKey, hashedKey)
 				cell.setStorage(stagedCell.Storage[:stagedCell.StorageLen])
-				// cell.loaded = false
 				if hph.trace {
 					fmt.Printf("GetStorage %s", cell.FullString())
 				}
@@ -1633,7 +1644,8 @@ func (hph *HexPatriciaHashed) ProcessKeys(ctx context.Context, plainKeys [][]byt
 				return nil, fmt.Errorf("GetStorage for key %x failed: %w", plainKey, err)
 			}
 			if !stagedCell.Delete {
-				hph.updateCell(plainKey, hashedKey).setStorage(stagedCell.Storage[:stagedCell.StorageLen])
+				cell := hph.updateCell(plainKey, hashedKey)
+				cell.setStorage(stagedCell.Storage[:stagedCell.StorageLen])
 				if hph.trace {
 					fmt.Printf("GetStorage reading key %x => %x\n", plainKey, stagedCell.Storage[:stagedCell.StorageLen])
 				}
@@ -1710,6 +1722,9 @@ func (hph *HexPatriciaHashed) ProcessUpdates(ctx context.Context, plainKeys [][]
 			}
 		} else {
 			cell := hph.updateCell(update.plainKey, update.hashedKey)
+			if hph.trace {
+				fmt.Printf("!GetAccount %s", cell.FullString())
+			}
 			if hph.trace && len(update.plainKey) == hph.accountKeyLen {
 				fmt.Printf("GetAccount updated key %x =>", update.plainKey)
 			}
