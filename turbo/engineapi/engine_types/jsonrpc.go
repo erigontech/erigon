@@ -171,6 +171,12 @@ func ConvertRpcBlockToExecutionPayload(payload *execution.Block) *ExecutionPaylo
 		excessBlobGas := *header.ExcessBlobGas
 		res.ExcessBlobGas = (*hexutil.Uint64)(&excessBlobGas)
 	}
+	if header.RequestsRoot != nil {
+		reqs, _ := types.UnmarshalRequestsFromBinary(body.Requests)
+		res.DepositRequests = reqs.Deposits()
+		res.WithdrawalRequests = reqs.Withdrawals()
+		res.ConsolidationRequests = reqs.Consolidations()
+	}
 	return res
 }
 
@@ -208,6 +214,11 @@ func ConvertPayloadFromRpc(payload *types2.ExecutionPayload) *ExecutionPayload {
 		res.BlobGasUsed = (*hexutil.Uint64)(&blobGasUsed)
 		excessBlobGas := *payload.ExcessBlobGas
 		res.ExcessBlobGas = (*hexutil.Uint64)(&excessBlobGas)
+	}
+	if payload.Version >= 4 {
+		res.DepositRequests = ConvertDepositRequestsFromRpc(payload.DepositRequests)
+		res.WithdrawalRequests = ConvertWithdrawalRequestsFromRpc(payload.WithdrawalRequests)
+		res.ConsolidationRequests = ConvertConsolidationRequestsFromRpc(payload.ConsolidationRequests)
 	}
 	return res
 }
@@ -260,6 +271,100 @@ func ConvertWithdrawalsFromRpc(in []*types2.Withdrawal) []*types.Withdrawal {
 			Validator: w.ValidatorIndex,
 			Address:   gointerfaces.ConvertH160toAddress(w.Address),
 			Amount:    w.Amount,
+		})
+	}
+	return out
+}
+
+func ConvertDepositRequestsToRpc(in []*types.DepositRequest) []*types2.DepositRequest {
+	if in == nil {
+		return nil
+	}
+	out := make([]*types2.DepositRequest, 0, len(in))
+	for _, w := range in {
+		out = append(out, &types2.DepositRequest{
+			Pubkey:                w.Pubkey[:],
+			WithdrawalCredentials: gointerfaces.ConvertHashToH256(w.WithdrawalCredentials),
+			Amount:                w.Amount,
+			Signature:             w.Signature[:],
+			Index:                 w.Index,
+		})
+	}
+	return out
+}
+
+func ConvertDepositRequestsFromRpc(in []*types2.DepositRequest) []*types.DepositRequest {
+	if in == nil {
+		return nil
+	}
+	out := make([]*types.DepositRequest, 0, len(in))
+	for _, w := range in {
+		out = append(out, &types.DepositRequest{
+			Pubkey:                [48]byte(w.Pubkey),
+			WithdrawalCredentials: gointerfaces.ConvertH256ToHash(w.WithdrawalCredentials),
+			Amount:                w.Amount,
+			Signature:             [96]byte(w.Signature),
+			Index:                 w.Index,
+		})
+	}
+	return out
+}
+
+func ConvertWithdrawalRequestsToRpc(in []*types.WithdrawalRequest) []*types2.WithdrawalRequest {
+	if in == nil {
+		return nil
+	}
+	out := make([]*types2.WithdrawalRequest, 0, len(in))
+	for _, w := range in {
+		out = append(out, &types2.WithdrawalRequest{
+			SourceAddress:   gointerfaces.ConvertAddressToH160(w.SourceAddress),
+			ValidatorPubkey: w.ValidatorPubkey[:],
+			Amount:          w.Amount,
+		})
+	}
+	return out
+}
+
+func ConvertWithdrawalRequestsFromRpc(in []*types2.WithdrawalRequest) []*types.WithdrawalRequest {
+	if in == nil {
+		return nil
+	}
+	out := make([]*types.WithdrawalRequest, 0, len(in))
+	for _, w := range in {
+		out = append(out, &types.WithdrawalRequest{
+			SourceAddress:   gointerfaces.ConvertH160toAddress(w.SourceAddress),
+			ValidatorPubkey: [48]byte(w.ValidatorPubkey),
+			Amount:          w.Amount,
+		})
+	}
+	return out
+}
+
+func ConvertConsolidationRequestsToRpc(in []*types.ConsolidationRequest) []*types2.ConsolidationRequest {
+	if in == nil {
+		return nil
+	}
+	out := make([]*types2.ConsolidationRequest, 0, len(in))
+	for _, w := range in {
+		out = append(out, &types2.ConsolidationRequest{
+			SourceAddress: gointerfaces.ConvertAddressToH160(w.SourceAddress),
+			SourcePubkey:  w.SourcePubKey[:],
+			TargetPubkey:  w.TargetPubKey[:],
+		})
+	}
+	return out
+}
+
+func ConvertConsolidationRequestsFromRpc(in []*types2.ConsolidationRequest) []*types.ConsolidationRequest {
+	if in == nil {
+		return nil
+	}
+	out := make([]*types.ConsolidationRequest, 0, len(in))
+	for _, c := range in {
+		out = append(out, &types.ConsolidationRequest{
+			SourceAddress: gointerfaces.ConvertH160toAddress(c.SourceAddress),
+			SourcePubKey:  [48]byte(c.SourcePubkey),
+			TargetPubKey:  [48]byte(c.TargetPubkey),
 		})
 	}
 	return out

@@ -24,7 +24,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"github.com/erigontech/erigon-lib/common/dir"
 	"io/fs"
 	"math"
 	"math/big"
@@ -37,6 +36,8 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+
+	"github.com/erigontech/erigon-lib/common/dir"
 
 	"github.com/erigontech/mdbx-go/mdbx"
 	lru "github.com/hashicorp/golang-lru/arc/v2"
@@ -314,7 +315,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 			genesisSpec = nil
 		}
 		var genesisErr error
-		chainConfig, genesis, genesisErr = core.WriteGenesisBlock(tx, genesisSpec, config.OverridePragueTime, tmpdir, logger)
+		chainConfig, genesis, genesisErr = core.WriteGenesisBlock(tx, genesisSpec, config.OverridePragueTime, dirs, logger)
 		if _, ok := genesisErr.(*chain.ConfigCompatError); genesisErr != nil && !ok {
 			return genesisErr
 		}
@@ -679,13 +680,12 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 		recents = bor.Recents
 		signatures = bor.Signatures
 	}
-	loopBreakCheck := stages2.NewLoopBreakCheck(config, nil)
 	// proof-of-work mining
 	mining := stagedsync.New(
 		config.Sync,
 		stagedsync.MiningStages(backend.sentryCtx,
 			stagedsync.StageMiningCreateBlockCfg(backend.chainDB, miner, *backend.chainConfig, backend.engine, backend.txPoolDB, nil, tmpdir, backend.blockReader),
-			stagedsync.StageBorHeimdallCfg(backend.chainDB, snapDb, miner, *backend.chainConfig, heimdallClient, backend.blockReader, nil, nil, nil, recents, signatures, false, nil), stagedsync.StageExecuteBlocksCfg(
+			stagedsync.StageBorHeimdallCfg(backend.chainDB, snapDb, miner, *backend.chainConfig, heimdallClient, backend.blockReader, nil, nil, recents, signatures, false, nil), stagedsync.StageExecuteBlocksCfg(
 				backend.chainDB,
 				config.Prune,
 				config.BatchSize,
@@ -702,7 +702,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 				config.Sync,
 				stages2.SilkwormForExecutionStage(backend.silkworm, config),
 			),
-			stagedsync.StageSendersCfg(backend.chainDB, chainConfig, config.Sync, false, dirs.Tmp, config.Prune, blockReader, backend.sentriesClient.Hd, loopBreakCheck),
+			stagedsync.StageSendersCfg(backend.chainDB, chainConfig, config.Sync, false, dirs.Tmp, config.Prune, blockReader, backend.sentriesClient.Hd),
 			stagedsync.StageMiningExecCfg(backend.chainDB, miner, backend.notifications.Events, *backend.chainConfig, backend.engine, &vm.Config{}, tmpdir, nil, 0, backend.txPool, backend.txPoolDB, blockReader),
 			stagedsync.StageMiningFinishCfg(backend.chainDB, *backend.chainConfig, backend.engine, miner, backend.miningSealingQuit, backend.blockReader, latestBlockBuiltStore),
 		), stagedsync.MiningUnwindOrder, stagedsync.MiningPruneOrder,
@@ -721,7 +721,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 			config.Sync,
 			stagedsync.MiningStages(backend.sentryCtx,
 				stagedsync.StageMiningCreateBlockCfg(backend.chainDB, miningStatePos, *backend.chainConfig, backend.engine, backend.txPoolDB, param, tmpdir, backend.blockReader),
-				stagedsync.StageBorHeimdallCfg(backend.chainDB, snapDb, miningStatePos, *backend.chainConfig, heimdallClient, backend.blockReader, nil, nil, nil, recents, signatures, false, nil),
+				stagedsync.StageBorHeimdallCfg(backend.chainDB, snapDb, miningStatePos, *backend.chainConfig, heimdallClient, backend.blockReader, nil, nil, recents, signatures, false, nil),
 				stagedsync.StageExecuteBlocksCfg(
 					backend.chainDB,
 					config.Prune,
@@ -739,7 +739,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 					config.Sync,
 					stages2.SilkwormForExecutionStage(backend.silkworm, config),
 				),
-				stagedsync.StageSendersCfg(backend.chainDB, chainConfig, config.Sync, false, dirs.Tmp, config.Prune, blockReader, backend.sentriesClient.Hd, loopBreakCheck),
+				stagedsync.StageSendersCfg(backend.chainDB, chainConfig, config.Sync, false, dirs.Tmp, config.Prune, blockReader, backend.sentriesClient.Hd),
 				stagedsync.StageMiningExecCfg(backend.chainDB, miningStatePos, backend.notifications.Events, *backend.chainConfig, backend.engine, &vm.Config{}, tmpdir, interrupt, param.PayloadId, backend.txPool, backend.txPoolDB, blockReader),
 				stagedsync.StageMiningFinishCfg(backend.chainDB, *backend.chainConfig, backend.engine, miningStatePos, backend.miningSealingQuit, backend.blockReader, latestBlockBuiltStore)), stagedsync.MiningUnwindOrder, stagedsync.MiningPruneOrder, logger)
 		// We start the mining step
@@ -979,8 +979,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 			log.Info("Starting caplin")
 			eth1Getter := getters.NewExecutionSnapshotReader(ctx, beaconCfg, blockReader, backend.chainDB)
 			if err := caplin1.RunCaplinPhase1(ctx, executionEngine, config, networkCfg, beaconCfg, ethClock,
-				state, dirs, eth1Getter, backend.downloaderClient, config.CaplinConfig.Backfilling,
-				config.CaplinConfig.BlobBackfilling, config.CaplinConfig.Archive, indiciesDB, blobStorage, creds,
+				state, dirs, eth1Getter, backend.downloaderClient, indiciesDB, blobStorage, creds,
 				blockSnapBuildSema, caplinOpt...); err != nil {
 				logger.Error("could not start caplin", "err", err)
 			}

@@ -124,7 +124,7 @@ func TestBridge(t *testing.T) {
 	err = b.ProcessNewBlocks(ctx, blocks)
 	require.NoError(t, err)
 
-	res, err := b.GetEvents(ctx, 2)
+	res, err := b.GetEvents(ctx, 4)
 	require.NoError(t, err)
 
 	event1Data, err := event1.Pack(stateReceiverABI)
@@ -140,11 +140,9 @@ func TestBridge(t *testing.T) {
 	res, err = b.GetEvents(ctx, 4)
 	require.NoError(t, err)
 
-	event3Data, err := event3.Pack(stateReceiverABI)
-	require.NoError(t, err)
-
-	require.Equal(t, 1, len(res))
-	require.Equal(t, event3Data, rlp.RawValue(res[0].Data()))
+	require.Equal(t, 2, len(res))
+	require.Equal(t, event1Data, rlp.RawValue(res[0].Data()))
+	require.Equal(t, event2Data, rlp.RawValue(res[1].Data()))
 
 	// get non-sprint block
 	_, err = b.GetEvents(ctx, 1)
@@ -230,11 +228,11 @@ func TestBridge_Unwind(t *testing.T) {
 	err = b.ProcessNewBlocks(ctx, blocks)
 	require.NoError(t, err)
 
-	event3Data, err := event3.Pack(stateReceiverABI)
+	event1Data, err := event1.Pack(stateReceiverABI)
 	require.NoError(t, err)
 
 	res, err := b.GetEvents(ctx, 4)
-	require.Equal(t, event3Data, rlp.RawValue(res[0].Data()))
+	require.Equal(t, event1Data, rlp.RawValue(res[0].Data()))
 	require.NoError(t, err)
 
 	err = b.Unwind(ctx, &types.Header{Number: big.NewInt(3)})

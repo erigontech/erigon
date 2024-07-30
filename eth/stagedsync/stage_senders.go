@@ -60,11 +60,10 @@ type SendersCfg struct {
 	chainConfig     *chain.Config
 	hd              *headerdownload.HeaderDownload
 	blockReader     services.FullBlockReader
-	loopBreakCheck  func(int) bool
 	syncCfg         ethconfig.Sync
 }
 
-func StageSendersCfg(db kv.RwDB, chainCfg *chain.Config, syncCfg ethconfig.Sync, badBlockHalt bool, tmpdir string, prune prune.Mode, blockReader services.FullBlockReader, hd *headerdownload.HeaderDownload, loopBreakCheck func(int) bool) SendersCfg {
+func StageSendersCfg(db kv.RwDB, chainCfg *chain.Config, syncCfg ethconfig.Sync, badBlockHalt bool, tmpdir string, prune prune.Mode, blockReader services.FullBlockReader, hd *headerdownload.HeaderDownload) SendersCfg {
 	const sendersBatchSize = 10000
 	const sendersBlockSize = 4096
 
@@ -81,7 +80,6 @@ func StageSendersCfg(db kv.RwDB, chainCfg *chain.Config, syncCfg ethconfig.Sync,
 		prune:           prune,
 		hd:              hd,
 		blockReader:     blockReader,
-		loopBreakCheck:  loopBreakCheck,
 		syncCfg:         syncCfg,
 	}
 }
@@ -214,10 +212,6 @@ Loop:
 		blockHash := libcommon.BytesToHash(v)
 
 		if blockNumber > to {
-			break
-		}
-
-		if cfg.loopBreakCheck != nil && cfg.loopBreakCheck(int(blockNumber-startFrom)) {
 			break
 		}
 

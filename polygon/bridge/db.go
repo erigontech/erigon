@@ -53,6 +53,7 @@ type Store interface {
 	Close()
 
 	GetLatestEventID(ctx context.Context) (uint64, error)
+	GetLastProcessedEventID(ctx context.Context) (uint64, error)
 	GetSprintLastEventID(ctx context.Context, lastID uint64, timeLimit time.Time, stateContract abi.ABI) (uint64, error)
 	AddEvents(ctx context.Context, events []*heimdall.EventRecordWithTime, stateContract abi.ABI) error
 	GetEvents(ctx context.Context, start, end uint64) ([][]byte, error)
@@ -107,6 +108,32 @@ func (s *MdbxStore) GetLatestEventID(ctx context.Context) (uint64, error) {
 	}
 
 	return binary.BigEndian.Uint64(k), err
+}
+
+// GetLastProcessedEventID gets the last seen event ID in the BorEventNums table
+func (s *MdbxStore) GetLastProcessedEventID(ctx context.Context) (uint64, error) {
+	tx, err := s.db.BeginRo(ctx)
+	if err != nil {
+		return 0, err
+	}
+	defer tx.Rollback()
+
+	cursor, err := tx.Cursor(kv.BorEventNums)
+	if err != nil {
+		return 0, err
+	}
+	defer cursor.Close()
+
+	_, v, err := cursor.Last()
+	if err != nil {
+		return 0, err
+	}
+
+	if len(v) == 0 {
+		return 0, nil
+	}
+
+	return binary.BigEndian.Uint64(v), err
 }
 
 // GetSprintLastEventID gets the last event id where event.ID >= lastID and event.Time <= time
