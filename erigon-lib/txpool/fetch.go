@@ -475,6 +475,7 @@ func (f *Fetch) handleStateChanges(ctx context.Context, client StateChangesClien
 
 func (f *Fetch) handleStateChangesRequest(ctx context.Context, req *remote.StateChangeBatch) error {
 	var unwindTxs, unwindBlobTxs, minedTxs types2.TxSlots
+	f.logger.Error("[txpool.fetch] state changes")
 	for _, change := range req.ChangeBatch {
 		if change.Direction == remote.Direction_FORWARD {
 			minedTxs.Resize(uint(len(change.Txs)))
