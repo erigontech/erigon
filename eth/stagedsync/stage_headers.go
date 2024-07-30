@@ -279,7 +279,7 @@ Loop:
 			// even if amount of state files > amount of block files.
 			needHeadersProgress := max(bodyProgress, execProgress) + uint64(cfg.syncConfig.LoopBlockLimit)
 			if cfg.hd.Progress() > needHeadersProgress {
-				log.Warn("[dbg] break stage_headers", "needHeadersProgress", needHeadersProgress, "uint64(cfg.syncConfig.LoopBlockLimit)", uint64(cfg.syncConfig.LoopBlockLimit))
+				log.Warn("[dbg] break stage_headers", "cfg.hd.Progress()", cfg.hd.Progress(), "needHeadersProgress", needHeadersProgress, "uint64(cfg.syncConfig.LoopBlockLimit)", uint64(cfg.syncConfig.LoopBlockLimit))
 				break
 			}
 		}
