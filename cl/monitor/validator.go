@@ -118,12 +118,12 @@ func (m *ValidatorMonitorImpl) runReportAttesterStatus() {
 		epoch := currentEpoch - 2
 		hitCount := 0
 		missCount := 0
-		m.vaidatorStatuses.iterate(func(vindex uint64, statuses map[uint64]*validatorStatus) {
-			if status, ok := statuses[epoch]; ok {
+		m.vaidatorStatuses.iterate(func(vindex uint64, epochStatuses map[uint64]*validatorStatus) {
+			if status, ok := epochStatuses[epoch]; ok {
 				successAtt := status.attestedBlockRoots.Cardinality()
 				metricAttestHit.AddInt(successAtt)
 				hitCount += successAtt
-				delete(statuses, epoch)
+				delete(epochStatuses, epoch)
 				log.Debug("[monitor] report attester status hit", "epoch", epoch, "vindex", vindex, "countAttestedBlock", status.attestedBlockRoots.Cardinality())
 			} else {
 				metricAttestMiss.AddInt(1)
@@ -141,10 +141,9 @@ func (m *ValidatorMonitorImpl) runReportProposerStatus() {
 	ticker := time.NewTicker(time.Duration(m.beaconCfg.SecondsPerSlot) * time.Second)
 	defer ticker.Stop()
 	for range ticker.C {
-
 		headState := m.syncedData.HeadStateReader()
 		if headState == nil {
-			return
+			continue
 		}
 		// check proposer in previous slot
 		prevSlot := m.ethClock.GetCurrentSlot() - 1
