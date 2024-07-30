@@ -793,6 +793,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 	// 2) we cannot propose for block 1 regardless.
 
 	if !config.DeprecatedTxPool.Disable {
+		println("connected to backend core")
 		backend.txPoolFetch.ConnectCore()
 		backend.txPoolFetch.ConnectSentries()
 		var newTxsBroadcaster *txpool.NewSlotsStreams
