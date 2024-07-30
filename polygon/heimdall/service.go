@@ -30,7 +30,7 @@ import (
 )
 
 type Service interface {
-	FetchLatestSpans(ctx context.Context, count uint) ([]*Span, error)
+	FetchLatestSpans(ctx context.Context, count uint) ([]*Span, bool, error)
 	FetchCheckpointsFromBlock(ctx context.Context, startBlock uint64) (Waypoints, error)
 	FetchMilestonesFromBlock(ctx context.Context, startBlock uint64) (Waypoints, error)
 	RegisterMilestoneObserver(callback func(*Milestone), opts ...ObserverOption) polygoncommon.UnregisterFunc
@@ -133,19 +133,19 @@ func newSpanFetcher(client HeimdallClient, logger log.Logger) entityFetcher[*Spa
 	)
 }
 
-func (s *service) FetchLatestSpan(ctx context.Context) (*Span, error) {
+func (s *service) FetchLatestSpan(ctx context.Context) (*Span, bool, error) {
 	s.checkpointScraper.Synchronize(ctx)
 	return s.store.Spans().GetLastEntity(ctx)
 }
 
-func (s *service) FetchLatestSpans(ctx context.Context, count uint) ([]*Span, error) {
+func (s *service) FetchLatestSpans(ctx context.Context, count uint) ([]*Span, bool, error) {
 	if count == 0 {
-		return nil, errors.New("can't fetch 0 latest spans")
+		return nil, false, errors.New("can't fetch 0 latest spans")
 	}
 
-	span, err := s.FetchLatestSpan(ctx)
-	if err != nil {
-		return nil, err
+	span, ok, err := s.FetchLatestSpan(ctx)
+	if err != nil || !ok {
+		return nil, ok, err
 	}
 
 	latestSpans := make([]*Span, 0, count)
@@ -158,9 +158,9 @@ func (s *service) FetchLatestSpans(ctx context.Context, count uint) ([]*Span, er
 			break
 		}
 
-		span, err = s.store.Spans().GetEntity(ctx, prevSpanRawId-1)
-		if err != nil {
-			return nil, err
+		span, ok, err = s.store.Spans().GetEntity(ctx, prevSpanRawId-1)
+		if err != nil || !ok {
+			return nil, ok, err
 		}
 
 		latestSpans = append(latestSpans, span)
@@ -168,7 +168,7 @@ func (s *service) FetchLatestSpans(ctx context.Context, count uint) ([]*Span, er
 	}
 
 	slices.Reverse(latestSpans)
-	return latestSpans, nil
+	return latestSpans, true, nil
 }
 
 func castEntityToWaypoint[TEntity Waypoint](entity TEntity) Waypoint {

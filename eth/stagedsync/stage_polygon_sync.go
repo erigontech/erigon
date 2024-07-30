@@ -354,19 +354,19 @@ func (s polygonSyncStageCheckpointStore) GetLastEntityId(ctx context.Context) (u
 	return r.id, r.ok, r.err
 }
 
-func (s polygonSyncStageCheckpointStore) GetLastEntity(ctx context.Context) (cp *heimdall.Checkpoint, err error) {
+func (s polygonSyncStageCheckpointStore) GetLastEntity(ctx context.Context) (*heimdall.Checkpoint, bool, error) {
 	id, ok, err := s.GetLastEntityId(ctx)
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
 	if !ok {
-		return nil, errors.New("last checkpoint not found")
+		return nil, false, errors.New("last checkpoint not found")
 	}
 
 	return s.GetEntity(ctx, id)
 }
 
-func (s polygonSyncStageCheckpointStore) GetEntity(ctx context.Context, id uint64) (*heimdall.Checkpoint, error) {
+func (s polygonSyncStageCheckpointStore) GetEntity(ctx context.Context, id uint64) (*heimdall.Checkpoint, bool, error) {
 	type response struct {
 		v   []byte
 		err error
@@ -378,15 +378,15 @@ func (s polygonSyncStageCheckpointStore) GetEntity(ctx context.Context, id uint6
 		return nil
 	})
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
 	if r.err != nil {
-		return nil, r.err
+		return nil, false, r.err
 	}
 
 	var c heimdall.Checkpoint
 	err = json.Unmarshal(r.v, &c)
-	return &c, err
+	return &c, true, err
 }
 
 func (s polygonSyncStageCheckpointStore) PutEntity(ctx context.Context, id uint64, entity *heimdall.Checkpoint) error {
@@ -466,19 +466,19 @@ func (s polygonSyncStageMilestoneStore) GetLastEntityId(ctx context.Context) (ui
 	return r.id, r.ok, r.err
 }
 
-func (s polygonSyncStageMilestoneStore) GetLastEntity(ctx context.Context) (*heimdall.Milestone, error) {
+func (s polygonSyncStageMilestoneStore) GetLastEntity(ctx context.Context) (*heimdall.Milestone, bool, error) {
 	id, ok, err := s.GetLastEntityId(ctx)
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
 	if !ok {
-		return nil, errors.New("last milestone not found")
+		return nil, false, errors.New("last milestone not found")
 	}
 
 	return s.GetEntity(ctx, id)
 }
 
-func (s polygonSyncStageMilestoneStore) GetEntity(ctx context.Context, id uint64) (*heimdall.Milestone, error) {
+func (s polygonSyncStageMilestoneStore) GetEntity(ctx context.Context, id uint64) (*heimdall.Milestone, bool, error) {
 	type response struct {
 		v   []byte
 		err error
@@ -490,15 +490,15 @@ func (s polygonSyncStageMilestoneStore) GetEntity(ctx context.Context, id uint64
 		return nil
 	})
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
 	if r.err != nil {
-		return nil, r.err
+		return nil, false, r.err
 	}
 
 	var m heimdall.Milestone
 	err = json.Unmarshal(r.v, &m)
-	return &m, err
+	return &m, true, err
 }
 
 func (s polygonSyncStageMilestoneStore) PutEntity(ctx context.Context, id uint64, entity *heimdall.Milestone) error {
@@ -576,19 +576,19 @@ func (s polygonSyncStageSpanStore) GetLastEntityId(ctx context.Context) (id uint
 	return r.id, r.ok, r.err
 }
 
-func (s polygonSyncStageSpanStore) GetLastEntity(ctx context.Context) (*heimdall.Span, error) {
+func (s polygonSyncStageSpanStore) GetLastEntity(ctx context.Context) (*heimdall.Span, bool, error) {
 	id, ok, err := s.GetLastEntityId(ctx)
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
 	if !ok {
-		return nil, errors.New("last span not found")
+		return nil, false, errors.New("last span not found")
 	}
 
 	return s.GetEntity(ctx, id)
 }
 
-func (s polygonSyncStageSpanStore) GetEntity(ctx context.Context, id uint64) (*heimdall.Span, error) {
+func (s polygonSyncStageSpanStore) GetEntity(ctx context.Context, id uint64) (*heimdall.Span, bool, error) {
 	type response struct {
 		v   []byte
 		err error
@@ -600,15 +600,15 @@ func (s polygonSyncStageSpanStore) GetEntity(ctx context.Context, id uint64) (*h
 		return nil
 	})
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
 	if r.err != nil {
-		return nil, r.err
+		return nil, false, r.err
 	}
 
 	var span heimdall.Span
 	err = json.Unmarshal(r.v, &span)
-	return &span, err
+	return &span, true, err
 }
 
 func (s polygonSyncStageSpanStore) PutEntity(ctx context.Context, id uint64, entity *heimdall.Span) error {

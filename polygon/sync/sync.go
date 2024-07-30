@@ -27,7 +27,7 @@ import (
 	"github.com/erigontech/erigon/polygon/p2p"
 )
 
-type latestSpanFetcher func(ctx context.Context, count uint) ([]*heimdall.Span, error)
+type latestSpanFetcher func(ctx context.Context, count uint) ([]*heimdall.Span, bool, error)
 
 type Sync struct {
 	store             Store
@@ -248,9 +248,12 @@ func (s *Sync) Run(ctx context.Context) error {
 		return err
 	}
 
-	latestSpans, err := s.fetchLatestSpans(ctx, 2)
+	latestSpans, ok, err := s.fetchLatestSpans(ctx, 2)
 	if err != nil {
 		return err
+	}
+	if !ok {
+		return errors.New("failed to fetch latest spans")
 	}
 
 	for _, span := range latestSpans {
