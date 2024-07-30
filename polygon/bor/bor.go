@@ -163,8 +163,6 @@ var (
 // backing account.
 type SignerFn func(signer libcommon.Address, mimeType string, message []byte) ([]byte, error)
 
-type SpanGetter func(context.Context, uint64) (*heimdall.Span, error)
-
 // ecrecover extracts the Ethereum account address from a signed header.
 func Ecrecover(header *types.Header, sigcache *lru.ARCCache[libcommon.Hash, libcommon.Address], c *borcfg.BorConfig) (libcommon.Address, error) {
 	// If the signature's already cached, return that
@@ -322,6 +320,7 @@ type Bor struct {
 	spanner                Spanner
 	GenesisContractsClient GenesisContracts
 	HeimdallClient         heimdall.HeimdallClient
+	HeimdallService        heimdall.Service
 
 	// scope event.SubscriptionScope
 	// The fields below are for testing only
@@ -334,7 +333,6 @@ type Bor struct {
 	rootHashCache       *lru.ARCCache[string, string]
 	headerProgress      HeaderProgress
 	polygonBridge       bridge.PolygonBridge
-	getSpan             SpanGetter
 }
 
 type signer struct {
@@ -397,10 +395,6 @@ func New(
 	}
 
 	return c
-}
-
-func (c *Bor) SetGetSpan(f SpanGetter) {
-	c.getSpan = f
 }
 
 type rwWrapper struct {
@@ -1392,8 +1386,8 @@ func (c *Bor) fetchAndCommitSpan(
 		}
 
 		heimdallSpan = *s
-	} else if c.getSpan != nil {
-		span, err := c.getSpan(context.Background(), newSpanID)
+	} else if c.HeimdallService != nil {
+		span, err := c.HeimdallService.GetSpan(context.Background(), newSpanID)
 		if err != nil {
 			return err
 		}

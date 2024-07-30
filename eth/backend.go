@@ -989,7 +989,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 	}
 
 	if config.PolygonSync {
-		polygonSync, spanGetter := polygonsync.NewService(
+		polygonSync := polygonsync.NewService(
 			logger,
 			chainConfig,
 			dirs.DataDir,
@@ -1004,7 +1004,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 		)
 
 		backend.polygonSyncService = polygonSync
-		backend.engine.(*bor.Bor).SetGetSpan(spanGetter)
+		backend.engine.(*bor.Bor).HeimdallService = polygonSync.HeimdallService()
 	}
 
 	return backend, nil

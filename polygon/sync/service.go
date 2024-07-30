@@ -26,7 +26,6 @@ import (
 	"github.com/erigontech/erigon-lib/gointerfaces/executionproto"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/p2p/sentry"
-	"github.com/erigontech/erigon/polygon/bor"
 	"github.com/erigontech/erigon/polygon/bor/borcfg"
 	"github.com/erigontech/erigon/polygon/bridge"
 	"github.com/erigontech/erigon/polygon/heimdall"
@@ -34,6 +33,7 @@ import (
 )
 
 type Service interface {
+	HeimdallService() heimdall.Service
 	Run(ctx context.Context) error
 }
 
@@ -60,7 +60,7 @@ func NewService(
 	executionClient executionproto.ExecutionClient,
 	blockLimit uint,
 	polygonBridge bridge.Service,
-) (Service, bor.SpanGetter) {
+) Service {
 	borConfig := chainConfig.Bor.(*borcfg.BorConfig)
 	checkpointVerifier := VerifyCheckpointHeaders
 	milestoneVerifier := VerifyMilestoneHeaders
@@ -102,7 +102,11 @@ func NewService(
 		events:          events,
 		heimdallService: heimdallService,
 		bridge:          polygonBridge,
-	}, heimdallService.GetSpan
+	}
+}
+
+func (s *service) HeimdallService() heimdall.Service {
+	return s.heimdallService
 }
 
 func (s *service) Run(parentCtx context.Context) error {
