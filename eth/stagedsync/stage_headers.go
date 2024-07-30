@@ -264,7 +264,7 @@ Loop:
 		}
 
 		loopBlockLimit := uint64(cfg.syncConfig.LoopBlockLimit)
-		if loopBlockLimit > 0 && cfg.hd.Progress()-startProgress > loopBlockLimit {
+		if loopBlockLimit > 0 && cfg.hd.Progress() > startProgress+loopBlockLimit {
 			break
 		}
 
