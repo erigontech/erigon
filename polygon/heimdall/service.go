@@ -30,7 +30,7 @@ import (
 )
 
 type Service interface {
-	GetSpan(ctx context.Context, id uint64) (*Span, error)
+	FetchSpan(ctx context.Context, id uint64) (*Span, error)
 	FetchLatestSpans(ctx context.Context, count uint) ([]*Span, error)
 	FetchCheckpointsFromBlock(ctx context.Context, startBlock uint64) (Waypoints, error)
 	FetchMilestonesFromBlock(ctx context.Context, startBlock uint64) (Waypoints, error)
@@ -172,17 +172,8 @@ func (s *service) FetchLatestSpans(ctx context.Context, count uint) ([]*Span, er
 	return latestSpans, nil
 }
 
-func (s *service) GetSpan(ctx context.Context, id uint64) (*Span, error) {
-	span, err := s.FetchLatestSpan(ctx)
-	if err != nil {
-		return nil, err
-	}
-
-	if uint64(span.Id) < id {
-		return nil, errors.New("span not found")
-	}
-
-	span, err = s.store.Spans().GetEntity(ctx, id)
+func (s *service) FetchSpan(ctx context.Context, id uint64) (*Span, error) {
+	span, err := s.store.Spans().GetEntity(ctx, id)
 	if err != nil {
 		return nil, err
 	}

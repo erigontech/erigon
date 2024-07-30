@@ -1387,7 +1387,7 @@ func (c *Bor) fetchAndCommitSpan(
 
 		heimdallSpan = *s
 	} else if c.HeimdallService != nil {
-		span, err := c.HeimdallService.GetSpan(context.Background(), newSpanID)
+		span, err := c.HeimdallService.FetchSpan(context.Background(), newSpanID)
 		if err != nil {
 			return err
 		}
