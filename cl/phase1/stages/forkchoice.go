@@ -15,19 +15,22 @@ import (
 	"github.com/erigontech/erigon/cl/phase1/core/state"
 )
 
-func computeAndNotiftyServicesOfNewForkChoice(ctx context.Context, logger log.Logger, cfg *Cfg) (headSlot uint64, headRoot common.Hash, err error) {
-	// Now check the head
+// computeAndNotifyServicesOfNewForkChoice calculates the new head of the fork choice and notifies relevant services.
+// It updates the fork choice if possible and sets the status in the RPC. It returns the head slot, head root, and any error encountered.
+func computeAndNotifyServicesOfNewForkChoice(ctx context.Context, logger log.Logger, cfg *Cfg) (headSlot uint64, headRoot common.Hash, err error) {
+	// Get the current head of the fork choice
 	headRoot, headSlot, err = cfg.forkChoice.GetHead()
 	if err != nil {
 		err = fmt.Errorf("failed to get head: %w", err)
 		return
 	}
 
-	// Do forkchoice if possible
+	// Perform fork choice update if the engine is available
 	if cfg.forkChoice.Engine() != nil {
 		finalizedCheckpoint := cfg.forkChoice.FinalizedCheckpoint()
 		logger.Debug("Caplin is sending forkchoice")
-		// Run forkchoice
+
+		// Run fork choice update with finalized checkpoint and head
 		if _, err = cfg.forkChoice.Engine().ForkChoiceUpdate(
 			ctx,
 			cfg.forkChoice.GetEth1Hash(finalizedCheckpoint.BlockRoot()),
@@ -37,15 +40,21 @@ func computeAndNotiftyServicesOfNewForkChoice(ctx context.Context, logger log.Lo
 			return
 		}
 	}
-	if err2 := cfg.rpc.SetStatus(cfg.forkChoice.FinalizedCheckpoint().BlockRoot(),
+
+	// Set the status in the RPC
+	if err2 := cfg.rpc.SetStatus(
+		cfg.forkChoice.FinalizedCheckpoint().BlockRoot(),
 		cfg.forkChoice.FinalizedCheckpoint().Epoch(),
-		headRoot, headSlot); err != nil {
+		headRoot, headSlot); err2 != nil {
 		logger.Warn("Could not set status", "err", err2)
 	}
 
 	return
 }
 
+// updateCanonicalChainInTheDatabase updates the canonical chain in the database by marking the given head slot and root as canonical.
+// It traces back through parent block roots to find the common ancestor with the existing canonical chain, truncates the chain,
+// and then marks the new chain segments as canonical.
 func updateCanonicalChainInTheDatabase(ctx context.Context, tx kv.RwTx, headSlot uint64, headRoot common.Hash) error {
 	type canonicalEntry struct {
 		slot uint64
@@ -54,45 +63,65 @@ func updateCanonicalChainInTheDatabase(ctx context.Context, tx kv.RwTx, headSlot
 
 	currentRoot := headRoot
 	currentSlot := headSlot
+	// Read the current canonical block root for the given slot
 	currentCanonical, err := beacon_indicies.ReadCanonicalBlockRoot(tx, currentSlot)
 	if err != nil {
 		return fmt.Errorf("failed to read canonical block root: %w", err)
 	}
+
+	// List of new canonical chain entries
 	reconnectionRoots := []canonicalEntry{{currentSlot, currentRoot}}
 
+	// Trace back through the parent block roots until the current root matches the canonical root
 	for currentRoot != currentCanonical {
 		var newFoundSlot *uint64
 
+		// Read the parent block root
 		if currentRoot, err = beacon_indicies.ReadParentBlockRoot(ctx, tx, currentRoot); err != nil {
 			return fmt.Errorf("failed to read parent block root: %w", err)
 		}
+
+		// Read the slot for the current block root
 		if newFoundSlot, err = beacon_indicies.ReadBlockSlotByBlockRoot(tx, currentRoot); err != nil {
 			return fmt.Errorf("failed to read block slot by block root: %w", err)
 		}
 		if newFoundSlot == nil {
 			break
 		}
+
 		currentSlot = *newFoundSlot
+
+		// Read the canonical block root for the new slot
 		currentCanonical, err = beacon_indicies.ReadCanonicalBlockRoot(tx, currentSlot)
 		if err != nil {
 			return fmt.Errorf("failed to read canonical block root: %w", err)
 		}
+
+		// Append the current slot and root to the list of reconnection roots
 		reconnectionRoots = append(reconnectionRoots, canonicalEntry{currentSlot, currentRoot})
 	}
+
+	// Truncate the canonical chain at the current slot
 	if err := beacon_indicies.TruncateCanonicalChain(ctx, tx, currentSlot); err != nil {
 		return fmt.Errorf("failed to truncate canonical chain: %w", err)
 	}
+
+	// Mark the new canonical chain segments in reverse order
 	for i := len(reconnectionRoots) - 1; i >= 0; i-- {
 		if err := beacon_indicies.MarkRootCanonical(ctx, tx, reconnectionRoots[i].slot, reconnectionRoots[i].root); err != nil {
 			return fmt.Errorf("failed to mark root canonical: %w", err)
 		}
 	}
+
+	// Mark the head slot and root as canonical
 	if err := beacon_indicies.MarkRootCanonical(ctx, tx, headSlot, headRoot); err != nil {
 		return fmt.Errorf("failed to mark root canonical: %w", err)
 	}
+
 	return nil
 }
 
+// runIndexingRoutines runs the indexing routines for the database.
 func runIndexingRoutines(ctx context.Context, tx kv.RwTx, cfg *Cfg, headState *state.CachingBeaconState) error {
 	preverifiedValidators := cfg.forkChoice.PreverifiedValidator(headState.FinalizedCheckpoint().BlockRoot())
 	preverifiedHistoricalSummary := cfg.forkChoice.PreverifiedHistoricalSummaries(headState.FinalizedCheckpoint().BlockRoot())
@@ -110,6 +139,7 @@ func runIndexingRoutines(ctx context.Context, tx kv.RwTx, cfg *Cfg, headState *s
 	return nil
 }
 
+// emitHeadEvent emits the head event with the given head slot, head root, and head state.
 func emitHeadEvent(cfg *Cfg, headSlot uint64, headRoot common.Hash, headState *state.CachingBeaconState) error {
 	headEpoch := headSlot / cfg.beaconCfg.SlotsPerEpoch
 	previous_duty_dependent_root, err := headState.GetBlockRootAtSlot((headEpoch-1)*cfg.beaconCfg.SlotsPerEpoch - 1)
@@ -138,6 +168,8 @@ func emitHeadEvent(cfg *Cfg, headSlot uint64, headRoot common.Hash, headState *s
 	return nil
 }
 
+// postForkchoiceOperations performs the post fork choice operations such as updating the head state, producing and caching attestation data,
+// these sets of operations can take as long as they need to run, as by-now we are already synced.
 func postForkchoiceOperations(ctx context.Context, tx kv.RwTx, logger log.Logger, cfg *Cfg, headSlot uint64, headRoot common.Hash) error {
 	// Retrieve the head state
 	headState, err := cfg.forkChoice.GetStateAtBlockRoot(headRoot, false)
@@ -169,13 +201,14 @@ func postForkchoiceOperations(ctx context.Context, tx kv.RwTx, logger log.Logger
 	return emitHeadEvent(cfg, headSlot, headRoot, headState)
 }
 
+// doForkchoiceRoutine performs the fork choice routine by computing the new fork choice, updating the canonical chain in the database,
 func doForkchoiceRoutine(ctx context.Context, logger log.Logger, cfg *Cfg, args Args) error {
 	var (
 		headSlot uint64
 		headRoot common.Hash
 		err      error
 	)
-	if headSlot, headRoot, err = computeAndNotiftyServicesOfNewForkChoice(ctx, logger, cfg); err != nil {
+	if headSlot, headRoot, err = computeAndNotifyServicesOfNewForkChoice(ctx, logger, cfg); err != nil {
 		return fmt.Errorf("failed to compute and notify services of new fork choice: %w", err)
 	}
 
