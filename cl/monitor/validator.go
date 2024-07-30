@@ -131,7 +131,7 @@ func (m *ValidatorMonitorImpl) runReportAttesterStatus() {
 				log.Debug("[monitor] report attester status miss", "epoch", epoch, "vindex", vindex, "countAttestedBlock", 0)
 			}
 		})
-		log.Info("[monitor] report attester hit/miss", "epoch", epoch, "hitCount", hitCount, "missCount", missCount)
+		log.Info("[monitor] report attester hit/miss", "epoch", epoch, "hitCount", hitCount, "missCount", missCount, "cur_epoch", currentEpoch)
 	}
 
 }
