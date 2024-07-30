@@ -157,7 +157,7 @@ func TestMergeSnapshots(t *testing.T) {
 		merger.DisableFsync()
 		s.ReopenSegments(coresnaptype.BlockSnapshotTypes, false)
 		ranges := merger.FindMergeRanges(s.Ranges(), s.SegmentsMax())
-		require.True(len(ranges) > 0)
+		require.Equal(3, len(ranges))
 		err := merger.Merge(context.Background(), s, coresnaptype.BlockSnapshotTypes, ranges, s.Dir(), false, nil, nil)
 		require.NoError(err)
 	}
@@ -172,9 +172,9 @@ func TestMergeSnapshots(t *testing.T) {
 	{
 		merger := NewMerger(dir, 1, log.LvlInfo, nil, params.MainnetChainConfig, logger)
 		merger.DisableFsync()
-		s.ReopenSegments(coresnaptype.BlockSnapshotTypes, false)
+		s.ReopenFolder()
 		ranges := merger.FindMergeRanges(s.Ranges(), s.SegmentsMax())
-		require.True(len(ranges) == 0)
+		require.Equal(0, len(ranges))
 		err := merger.Merge(context.Background(), s, coresnaptype.BlockSnapshotTypes, ranges, s.Dir(), false, nil, nil)
 		require.NoError(err)
 	}
