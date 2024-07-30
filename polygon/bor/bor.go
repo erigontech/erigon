@@ -32,12 +32,13 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/erigontech/erigon-lib/common/dbg"
 	lru "github.com/hashicorp/golang-lru/arc/v2"
 	"github.com/holiman/uint256"
 	"github.com/xsleonard/go-merkle"
 	"golang.org/x/crypto/sha3"
 	"golang.org/x/sync/errgroup"
+
+	"github.com/erigontech/erigon-lib/common/dbg"
 
 	"github.com/erigontech/erigon-lib/log/v3"
 
@@ -161,6 +162,8 @@ var (
 // SignerFn is a signer callback function to request a header to be signed by a
 // backing account.
 type SignerFn func(signer libcommon.Address, mimeType string, message []byte) ([]byte, error)
+
+type SpanGetter func(context.Context, uint64) (*heimdall.Span, error)
 
 // ecrecover extracts the Ethereum account address from a signed header.
 func Ecrecover(header *types.Header, sigcache *lru.ARCCache[libcommon.Hash, libcommon.Address], c *borcfg.BorConfig) (libcommon.Address, error) {
@@ -331,6 +334,7 @@ type Bor struct {
 	rootHashCache       *lru.ARCCache[string, string]
 	headerProgress      HeaderProgress
 	polygonBridge       bridge.PolygonBridge
+	getSpan             SpanGetter
 }
 
 type signer struct {
@@ -393,6 +397,10 @@ func New(
 	}
 
 	return c
+}
+
+func (c *Bor) SetGetSpan(f SpanGetter) {
+	c.getSpan = f
 }
 
 type rwWrapper struct {
@@ -1384,6 +1392,13 @@ func (c *Bor) fetchAndCommitSpan(
 		}
 
 		heimdallSpan = *s
+	} else if c.getSpan != nil {
+		span, err := c.getSpan(context.Background(), newSpanID)
+		if err != nil {
+			return err
+		}
+
+		heimdallSpan = *span
 	} else {
 		spanJson := chain.Chain.BorSpan(newSpanID)
 		if err := json.Unmarshal(spanJson, &heimdallSpan); err != nil {

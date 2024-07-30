@@ -24,7 +24,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"github.com/erigontech/erigon-lib/common/dir"
 	"io/fs"
 	"math"
 	"math/big"
@@ -37,6 +36,8 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+
+	"github.com/erigontech/erigon-lib/common/dir"
 
 	"github.com/erigontech/mdbx-go/mdbx"
 	lru "github.com/hashicorp/golang-lru/arc/v2"
@@ -988,7 +989,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 	}
 
 	if config.PolygonSync {
-		backend.polygonSyncService = polygonsync.NewService(
+		polygonSync, spanGetter := polygonsync.NewService(
 			logger,
 			chainConfig,
 			dirs.DataDir,
@@ -1001,6 +1002,9 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 			config.LoopBlockLimit,
 			polygonBridge,
 		)
+
+		backend.polygonSyncService = polygonSync
+		backend.engine.(*bor.Bor).SetGetSpan(spanGetter)
 	}
 
 	return backend, nil
