@@ -119,16 +119,6 @@ func TestSetupGenesis(t *testing.T) {
 			wantConfig: params.BorMainnetChainConfig,
 		},
 		{
-			name: "custom block in DB, genesis == mumbai",
-			fn: func(t *testing.T, db kv.RwDB) (*chain.Config, *types.Block, error) {
-				core.MustCommitGenesis(&customg, db, datadir.New(tmpdir), logger)
-				return core.CommitGenesisBlock(db, core.MumbaiGenesisBlock(), datadir.New(tmpdir), logger)
-			},
-			wantErr:    &types.GenesisMismatchError{Stored: customghash, New: params.MumbaiGenesisHash},
-			wantHash:   params.MumbaiGenesisHash,
-			wantConfig: params.MumbaiChainConfig,
-		},
-		{
 			name: "custom block in DB, genesis == amoy",
 			fn: func(t *testing.T, db kv.RwDB) (*chain.Config, *types.Block, error) {
 				core.MustCommitGenesis(&customg, db, datadir.New(tmpdir), logger)
