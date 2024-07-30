@@ -21,9 +21,7 @@ import (
 	"errors"
 	"fmt"
 	"runtime"
-	"sort"
 	"strconv"
-	"sync/atomic"
 	"time"
 
 	"github.com/erigontech/erigon-lib/common"
@@ -164,6 +162,19 @@ func MetaCatchingUp(args Args) StageName {
 	return ""
 }
 
+func processBlock(ctx context.Context, cfg *Cfg, db kv.RwDB, block *cltypes.SignedBeaconBlock, newPayload, fullValidation, checkDataAvaiability bool) error {
+	if err := db.Update(ctx, func(tx kv.RwTx) error {
+		if err := beacon_indicies.WriteHighestFinalized(tx, cfg.forkChoice.FinalizedSlot()); err != nil {
+			return err
+		}
+		return beacon_indicies.WriteBeaconBlockAndIndicies(ctx, tx, block, false)
+	}); err != nil {
+		return err
+	}
+
+	return cfg.forkChoice.OnBlock(ctx, block, newPayload, fullValidation, checkDataAvaiability)
+}
+
 /*
 
 this graph describes the state transitions for cl
@@ -216,19 +227,6 @@ func ConsensusClStages(ctx context.Context,
 ) *clstages.StageGraph[*Cfg, Args] {
 	// todo: refactor this function
 	rpcSource := persistence.NewBeaconRpcSource(cfg.rpc)
-	processBlock := func(db kv.RwDB, block *cltypes.SignedBeaconBlock, newPayload, fullValidation, checkDataAvaiability bool) error {
-		if err := db.Update(ctx, func(tx kv.RwTx) error {
-			if err := beacon_indicies.WriteHighestFinalized(tx, cfg.forkChoice.FinalizedSlot()); err != nil {
-				return err
-			}
-			return beacon_indicies.WriteBeaconBlockAndIndicies(ctx, tx, block, false)
-		}); err != nil {
-			return err
-		}
-
-		return cfg.forkChoice.OnBlock(ctx, block, newPayload, fullValidation, checkDataAvaiability)
-	}
-
 	// TODO: this is an ugly hack, but it works! Basically, we want shared state in the clstages.
 	// Probably the correct long term solution is to create a third generic parameter that defines shared state
 	// but for now, all it would have are the two gossip sources and the forkChoicesSinceReorg, so i don't think its worth it (yet).
@@ -262,6 +260,7 @@ func ConsensusClStages(ctx context.Context,
 					return CatchUpBlocks
 				},
 				ActionFunc: func(ctx context.Context, logger log.Logger, cfg *Cfg, args Args) error {
+					// We only download historical blocks once
 					cfg.hasDownloaded = true
 					startingRoot, err := cfg.state.BlockRoot()
 					if err != nil {
@@ -286,119 +285,7 @@ func ConsensusClStages(ctx context.Context,
 					}
 					return CatchUpBlocks
 				},
-				ActionFunc: func(ctx context.Context, logger log.Logger, cfg *Cfg, args Args) error {
-					shouldInsert := cfg.executionClient != nil && cfg.executionClient.SupportInsertion()
-
-					downloader := network2.NewForwardBeaconDownloader(ctx, cfg.rpc)
-					finalizedCheckpoint := cfg.forkChoice.FinalizedCheckpoint()
-					var currentSlot atomic.Uint64
-					currentSlot.Store(finalizedCheckpoint.Epoch() * cfg.beaconCfg.SlotsPerEpoch)
-					secsPerLog := 30
-					logTicker := time.NewTicker(time.Duration(secsPerLog) * time.Second)
-					// Always start from the current finalized checkpoint
-					downloader.SetHighestProcessedRoot(finalizedCheckpoint.BlockRoot())
-					downloader.SetHighestProcessedSlot(currentSlot.Load())
-					downloader.SetProcessFunction(func(highestSlotProcessed uint64, highestBlockRootProcessed common.Hash, blocks []*cltypes.SignedBeaconBlock) (newHighestSlotProcessed uint64, newHighestBlockRootProcessed common.Hash, err error) {
-						initialHighestSlotProcessed := highestSlotProcessed
-						initialHighestBlockRootProcessed := highestBlockRootProcessed
-						sort.Slice(blocks, func(i, j int) bool {
-							return blocks[i].Block.Slot < blocks[j].Block.Slot
-						})
-
-						for i, block := range blocks {
-							blockRoot, err := block.Block.HashSSZ()
-							if err != nil {
-								logger.Warn("failed to hash block", "err", err)
-								blocks = blocks[i:]
-								break
-							}
-
-							if err := processBlock(cfg.indiciesDB, block, false, true, false); err != nil {
-								log.Warn("bad blocks segment received", "err", err)
-								blocks = blocks[i:]
-								break
-							}
-							// don't need to monitor validators status here when we are doing forward sync
-
-							st, err := cfg.forkChoice.GetStateAtBlockRoot(blockRoot, false)
-							if err == nil && block.Block.Slot%(cfg.beaconCfg.SlotsPerEpoch*2) == 0 && st != nil {
-								if err := cfg.forkChoice.DumpBeaconStateOnDisk(st); err != nil {
-									logger.Warn("failed to dump state", "err", err)
-								}
-							}
-							if shouldInsert && block.Version() >= clparams.BellatrixVersion {
-								if err := cfg.blockCollector.AddBlock(block.Block); err != nil {
-									logger.Warn("failed to add block to collector", "err", err)
-									blocks = blocks[i:]
-									break
-								}
-							}
-
-							if highestSlotProcessed < block.Block.Slot {
-								currentSlot.Store(block.Block.Slot)
-								highestSlotProcessed = block.Block.Slot
-								highestBlockRootProcessed, err = block.Block.HashSSZ()
-								if err != nil {
-									blocks = blocks[i:]
-									logger.Warn("failed to hash block", "err", err)
-									break
-								}
-							}
-						}
-						// Do the DA now, first of all see what blobs to retrieve
-						ids, err := network2.BlobsIdentifiersFromBlocks(blocks)
-						if err != nil {
-							logger.Warn("failed to get blob identifiers", "err", err)
-							return initialHighestSlotProcessed, initialHighestBlockRootProcessed, err
-						}
-						if ids.Len() == 0 { // no blobs, no DA.
-							return highestSlotProcessed, highestBlockRootProcessed, nil
-						}
-						blobs, err := network2.RequestBlobsFrantically(ctx, cfg.rpc, ids)
-						if err != nil {
-							logger.Warn("failed to get blobs", "err", err)
-							return initialHighestSlotProcessed, initialHighestBlockRootProcessed, err
-						}
-						var highestProcessed, inserted uint64
-						if highestProcessed, inserted, err = blob_storage.VerifyAgainstIdentifiersAndInsertIntoTheBlobStore(ctx, cfg.blobStore, ids, blobs.Responses, nil); err != nil {
-							logger.Warn("failed to get verify blobs", "err", err)
-							cfg.rpc.BanPeer(blobs.Peer)
-							return initialHighestSlotProcessed, initialHighestBlockRootProcessed, err
-						}
-						if inserted == uint64(ids.Len()) {
-							return highestSlotProcessed, highestBlockRootProcessed, nil
-						}
-
-						if highestProcessed <= initialHighestSlotProcessed {
-							return initialHighestSlotProcessed, initialHighestBlockRootProcessed, nil
-						}
-						return highestProcessed - 1, highestBlockRootProcessed, err
-					})
-					chainTipSlot := cfg.ethClock.GetCurrentSlot()
-					logger.Info("[Caplin] Forward Sync", "from", currentSlot.Load(), "to", chainTipSlot)
-					prevProgress := currentSlot.Load()
-					for downloader.GetHighestProcessedSlot() < chainTipSlot {
-						downloader.RequestMore(ctx)
-
-						select {
-						case <-ctx.Done():
-							return ctx.Err()
-						case <-logTicker.C:
-							progressMade := chainTipSlot - currentSlot.Load()
-							distFromChainTip := time.Duration(progressMade*cfg.beaconCfg.SecondsPerSlot) * time.Second
-							timeProgress := currentSlot.Load() - prevProgress
-							estimatedTimeRemaining := 999 * time.Hour
-							if timeProgress > 0 {
-								estimatedTimeRemaining = time.Duration(float64(progressMade)/(float64(currentSlot.Load()-prevProgress)/float64(secsPerLog))) * time.Second
-							}
-							prevProgress = currentSlot.Load()
-							logger.Info("[Caplin] Forward Sync", "progress", currentSlot.Load(), "distance-from-chain-tip", distFromChainTip, "estimated-time-remaining", estimatedTimeRemaining)
-						default:
-						}
-					}
-
-					return nil
-				},
+				ActionFunc: forwardSync,
 			},
 			CatchUpBlocks: {
 				Description: `if we are within the epoch but not at head, we run catchupblocks`,
@@ -553,7 +440,7 @@ func ConsensusClStages(ctx context.Context,
 									continue
 								}
 								seenBlockRoots[blockRoot] = struct{}{}
-								if err := processBlock(cfg.indiciesDB, block, true, true, true); err != nil {
+								if err := processBlock(ctx, cfg, cfg.indiciesDB, block, true, true, true); err != nil {
 									log.Debug("bad blocks segment received", "err", err)
 									continue
 								}
