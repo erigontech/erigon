@@ -210,6 +210,7 @@ LOOP:
 			if !cfg.syncer.IsDownloading() {
 				break LOOP
 			}
+			time.Sleep(10 * time.Millisecond)
 		}
 	}
 

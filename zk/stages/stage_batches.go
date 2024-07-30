@@ -410,6 +410,7 @@ LOOP:
 					startTime = time.Now()
 				}
 			}
+			time.Sleep(10 * time.Millisecond)
 		}
 
 		if blocksWritten != prevAmountBlocksWritten && blocksWritten%STAGE_PROGRESS_SAVE == 0 {

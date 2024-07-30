@@ -3,6 +3,7 @@ package stages
 import (
 	"context"
 	"fmt"
+	"time"
 
 	"math/big"
 
@@ -144,6 +145,7 @@ Loop:
 			if !cfg.syncer.IsDownloading() {
 				break Loop
 			}
+			time.Sleep(10 * time.Millisecond)
 		}
 	}
 

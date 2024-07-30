@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/gateway-fm/cdk-erigon-lib/kv"
 	"github.com/ledgerwatch/log/v3"
@@ -162,6 +163,7 @@ Loop:
 			if !cfg.syncer.IsDownloading() {
 				break Loop
 			}
+			time.Sleep(10 * time.Millisecond)
 		}
 	}
 
