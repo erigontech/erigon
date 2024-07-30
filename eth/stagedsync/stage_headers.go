@@ -270,11 +270,11 @@ Loop:
 			bodyProgress, err := stages.GetStageProgress(tx, stages.Bodies)
 			if err != nil {
 				return err
-			} // 100
+			}
 			execProgress, err := stages.GetStageProgress(tx, stages.Execution)
 			if err != nil {
 				return err
-			} // 200
+			}
 			// expect to align all stages after 1 sync cycle.
 			// even if amount of state files > amount of block files.
 			needHeadersProgress := max(bodyProgress, execProgress) + uint64(cfg.syncConfig.LoopBlockLimit)
