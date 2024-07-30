@@ -17,8 +17,10 @@ import (
 
 var (
 	// metrics
-	metricAttestHit  = metrics.GetOrCreateCounter("validator_attestation_hit")
-	metricAttestMiss = metrics.GetOrCreateCounter("validator_attestation_miss")
+	metricAttestHit    = metrics.GetOrCreateCounter("validator_attestation_hit")
+	metricAttestMiss   = metrics.GetOrCreateCounter("validator_attestation_miss")
+	metricProposerHit  = metrics.GetOrCreateCounter("validator_propose_hit")
+	metricProposerMiss = metrics.GetOrCreateCounter("validator_propose_miss")
 )
 
 type ValidatorMonitorImpl struct {
@@ -46,6 +48,7 @@ func NewValidatorMonitor(
 		vaidatorStatuses: make(map[uint64]map[uint64]*validatorStatus),
 	}
 	go m.runReportAttesterStatus()
+	go m.runReportProposerStatus()
 	return m
 }
 
@@ -161,4 +164,13 @@ type validatorStatus struct {
 func (s *validatorStatus) updateAttesterStatus(att *solid.Attestation) {
 	data := att.AttestantionData()
 	s.attestedBlockRoots.Add(data.BeaconBlockRoot())
+}
+
+func (m *ValidatorMonitorImpl) runReportProposerStatus() {
+	// check proposer in previous slot every slot duration
+	ticker := time.NewTicker(time.Duration(m.beaconCfg.SecondsPerSlot) * time.Second)
+	defer ticker.Stop()
+	for range ticker.C {
+
+	}
 }
