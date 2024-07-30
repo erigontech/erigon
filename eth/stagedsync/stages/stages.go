@@ -29,7 +29,7 @@ import (
 type SyncStage string
 
 var (
-	Snapshots       SyncStage = "Snapshots"       // Snapshots
+	Snapshots       SyncStage = "OtterSync"       // Snapshots
 	Headers         SyncStage = "Headers"         // Headers are downloaded, their Proof-Of-Work validity and chaining is verified
 	BorHeimdall     SyncStage = "BorHeimdall"     // Downloading data from heimdall corresponding to the downloaded headers (validator sets and sync events)
 	PolygonSync     SyncStage = "PolygonSync"     // Use polygon sync component to sync headers, bodies and heimdall data
