@@ -508,6 +508,7 @@ func (h *Harness) consensusEngine(t *testing.T, cfg HarnessCfg) consensus.Engine
 			genesisContracts,
 			h.logger,
 			nil,
+			nil,
 		)
 
 		borConsensusEng.Authorize(h.validatorAddress, func(_ libcommon.Address, _ string, msg []byte) ([]byte, error) {
