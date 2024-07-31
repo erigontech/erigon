@@ -664,6 +664,8 @@ func (s *RoSnapshots) ReopenFolder() error {
 }
 
 func (s *RoSnapshots) ReopenSegments(types []snaptype.Type, allowGaps bool) error {
+	log.Warn("[dbg] ReopenSegments", "t", types)
+	defer log.Warn("[dbg] ReopenSegments end")
 	files, _, err := typedSegments(s.dir, s.segmentsMin.Load(), types, allowGaps)
 
 	if err != nil {
