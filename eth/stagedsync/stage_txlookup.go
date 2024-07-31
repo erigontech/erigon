@@ -76,11 +76,11 @@ func SpawnTxLookup(s *StageState, tx kv.RwTx, toBlock uint64, cfg TxLookupCfg, c
 	}
 	logPrefix := s.LogPrefix()
 	endBlock, err := s.ExecutionAt(tx)
-	if s.BlockNumber > endBlock { // Erigon will self-heal (download missed blocks) eventually
-		return nil
-	}
 	if err != nil {
 		return err
+	}
+	if s.BlockNumber > endBlock { // Erigon will self-heal (download missed blocks) eventually
+		return nil
 	}
 	if toBlock > 0 {
 		endBlock = min(endBlock, toBlock)
@@ -240,10 +240,10 @@ func PruneTxLookup(s *PruneState, tx kv.RwTx, cfg TxLookupCfg, ctx context.Conte
 		}
 		defer tx.Rollback()
 	}
-	blockFrom, blockTo := s.PruneProgress, uint64(0)
+	blockFrom := s.PruneProgress
+	var blockTo uint64
 
 	var pruneBor bool
-
 	// Forward stage doesn't write anything before PruneTo point
 	if cfg.prune.History.Enabled() {
 		blockTo = cfg.prune.History.PruneTo(s.ForwardProgress)
