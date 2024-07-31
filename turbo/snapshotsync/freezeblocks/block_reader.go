@@ -410,6 +410,7 @@ func (r *BlockReader) HeaderByNumber(ctx context.Context, tx kv.Getter, blockHei
 			log.Warn("[dbg] zero segents?????", "v.Headers()", len(v.Headers()), "v.Txs()", len(v.Txs()))
 			v.Close()
 			log.Info(dbgPrefix + "not found file for such blockHeight")
+			panic(1)
 		}
 		return
 	}
