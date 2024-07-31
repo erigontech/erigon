@@ -116,6 +116,7 @@ func (a *Antiquary) Loop() error {
 		case <-a.ctx.Done():
 		}
 	}
+	fmt.Println("B")
 	if err := a.sn.BuildMissingIndices(a.ctx, a.logger); err != nil {
 		return err
 	}
