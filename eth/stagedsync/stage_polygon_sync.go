@@ -45,6 +45,7 @@ import (
 	"github.com/erigontech/erigon/polygon/p2p"
 	polygonsync "github.com/erigontech/erigon/polygon/sync"
 	"github.com/erigontech/erigon/turbo/services"
+	"github.com/erigontech/erigon/turbo/snapshotsync/freezeblocks"
 )
 
 var updateForkChoiceSuccessErr = errors.New("update fork choice success")
@@ -381,6 +382,10 @@ func (s polygonSyncStageCheckpointStore) GetEntity(ctx context.Context, id uint6
 		return nil, false, err
 	}
 	if r.err != nil {
+		if errors.Is(r.err, freezeblocks.ErrCheckpointNotFound) {
+			return nil, false, nil
+		}
+
 		return nil, false, r.err
 	}
 
@@ -493,6 +498,10 @@ func (s polygonSyncStageMilestoneStore) GetEntity(ctx context.Context, id uint64
 		return nil, false, err
 	}
 	if r.err != nil {
+		if errors.Is(r.err, freezeblocks.ErrMilestoneNotFound) {
+			return nil, false, nil
+		}
+
 		return nil, false, r.err
 	}
 
@@ -603,6 +612,10 @@ func (s polygonSyncStageSpanStore) GetEntity(ctx context.Context, id uint64) (*h
 		return nil, false, err
 	}
 	if r.err != nil {
+		if errors.Is(r.err, freezeblocks.ErrSpanNotFound) {
+			return nil, false, nil
+		}
+
 		return nil, false, r.err
 	}
 
