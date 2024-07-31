@@ -406,6 +406,9 @@ func (r *BlockReader) HeaderByNumber(ctx context.Context, tx kv.Getter, blockHei
 	seg, ok, release := r.sn.ViewSingleFile(coresnaptype.Headers, blockHeight)
 	if !ok {
 		if dbgLogs {
+			v := r.sn.View()
+			log.Warn("[dbg] zero segents?????", "v.Headers()", len(v.Headers()), "v.Txs()", len(v.Txs()))
+			v.Close()
 			log.Info(dbgPrefix + "not found file for such blockHeight")
 		}
 		return

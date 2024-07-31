@@ -2343,24 +2343,7 @@ func (s *RoSnapshots) ViewSingleFile(t snaptype.Type, blockNum uint64) (segment 
 			released = true
 		}
 	}
-	if len(segs.segments) > 0 {
-		log.Warn("[dbg] last se ", "t", t.Enum().String(), "from", segs.segments[len(segs.segments)-1].from, "to", segs.segments[len(segs.segments)-1].to, "look", blockNum)
-	} else {
-		for _, t := range s.types {
-			fmt.Printf("[dbg] type=%s\n", t.Enum().String())
-		}
-		log.Warn("[dbg] zero segents!!!!", "t", t.Enum().String())
-	}
 	segs.lock.RUnlock()
-	if len(segs.segments) > 0 {
-		log.Warn("[dbg] last se ", "t", t.Enum().String(), "from", segs.segments[len(segs.segments)-1].from, "to", segs.segments[len(segs.segments)-1].to, "look", blockNum)
-	} else {
-		v := s.View()
-		log.Warn("[dbg] zero segents!!!!", "t", t.Enum().String(), "v.Headers()", len(v.Headers()), "v.Txs()", len(v.Txs()))
-		v.Close()
-		panic(t.Enum().String())
-	}
-
 	return nil, false, noop
 }
 
