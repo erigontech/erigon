@@ -719,6 +719,8 @@ func (s *RoSnapshots) Close() {
 }
 
 func (s *RoSnapshots) closeWhatNotInList(l []string) {
+	log.Warn("[dbg] closeWhatNotInList")
+	defer log.Warn("[dbg] closeWhatNotInList end")
 	s.segments.Scan(func(segtype snaptype.Enum, value *segments) bool {
 	Segments:
 		for i, sn := range value.segments {
