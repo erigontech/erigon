@@ -134,6 +134,16 @@ func (c *Counters) GetPoseidonPaddings() *Counter {
 	return (*c)[D]
 }
 
+func (cc Counters) Clone() Counters {
+	var clonedCounters Counters = Counters{}
+
+	for k, v := range cc {
+		clonedCounters[k] = v.Clone()
+	}
+
+	return clonedCounters
+}
+
 type CounterKey string
 
 var (

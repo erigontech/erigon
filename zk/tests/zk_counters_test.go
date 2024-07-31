@@ -337,6 +337,8 @@ func runTest(t *testing.T, test vector, err error, fileName string, idx int) {
 			if err = txCounters.ProcessTx(ibs, result.ReturnData); err != nil {
 				t.Fatal(err)
 			}
+
+			batchCollector.UpdateExecutionAndProcessingCountersCache(txCounters)
 		}
 	}
 
