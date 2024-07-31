@@ -12,8 +12,8 @@ import (
 	"github.com/ledgerwatch/erigon/cmd/utils"
 	"github.com/ledgerwatch/erigon/eth/ethconfig"
 	"github.com/ledgerwatch/erigon/zk/sequencer"
-	"github.com/urfave/cli/v2"
 	utils2 "github.com/ledgerwatch/erigon/zk/utils"
+	"github.com/urfave/cli/v2"
 )
 
 func ApplyFlagsForZkConfig(ctx *cli.Context, cfg *ethconfig.Config) {
@@ -127,7 +127,7 @@ func ApplyFlagsForZkConfig(ctx *cli.Context, cfg *ethconfig.Config) {
 		SequencerBlockSealTime:                 sequencerBlockSealTime,
 		SequencerBatchSealTime:                 sequencerBatchSealTime,
 		SequencerNonEmptyBatchSealTime:         sequencerNonEmptyBatchSealTime,
-		ExecutorUrls:                           strings.Split(ctx.String(utils.ExecutorUrls.Name), ","),
+		ExecutorUrls:                           strings.Split(strings.ReplaceAll(ctx.String(utils.ExecutorUrls.Name), " ", ""), ","),
 		ExecutorStrictMode:                     ctx.Bool(utils.ExecutorStrictMode.Name),
 		ExecutorRequestTimeout:                 ctx.Duration(utils.ExecutorRequestTimeout.Name),
 		DatastreamNewBlockTimeout:              ctx.Duration(utils.DatastreamNewBlockTimeout.Name),
