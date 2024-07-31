@@ -57,4 +57,11 @@ var (
 	mxCommitmentRunning    = metrics.GetOrCreateGauge("domain_running_commitment")
 	mxCommitmentTook       = metrics.GetOrCreateSummary("domain_commitment_took")
 	mxFileReadTime         = metrics.GetOrCreateHistogram("domain_file_read_time")
+
+	mxKvGetL0  = metrics.GetOrCreateSummary("kv_get_l0")
+	mxKvGetL1  = metrics.GetOrCreateSummary("kv_get_l1")
+	mxKvGetL2  = metrics.GetOrCreateSummary("kv_get_l2")
+	mxKvGetL3  = metrics.GetOrCreateSummary("kv_get_l3")
+	mxKvGetL4  = metrics.GetOrCreateSummary("kv_get_l4")
+	mxKvGetRec = metrics.GetOrCreateSummary("kv_get_recent")
 )

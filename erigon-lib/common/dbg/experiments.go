@@ -48,6 +48,9 @@ var (
 	// force skipping of any non-Erigon2 .torrent files
 	DownloaderOnlyBlocks = EnvBool("DOWNLOADER_ONLY_BLOCKS", false)
 
+	// allows to collect reading metrics for kv by file level
+	KVReadLevelledMetrics = EnvBool("KV_READ_METRICS", false)
+
 	// run prune on flush with given timeout. If timeout is 0, no prune on flush will be performed
 	PruneOnFlushTimeout = EnvDuration("PRUNE_ON_FLUSH_TIMEOUT", time.Duration(0))
 

@@ -706,21 +706,39 @@ type DomainRoTx struct {
 }
 
 func (dt *DomainRoTx) getFromFileL0(i int, filekey []byte) ([]byte, bool, error) {
+	if dbg.KVReadLevelledMetrics {
+		defer mxKvGetL0.ObserveDuration(time.Now())
+	}
 	return dt.getFromFile(i, filekey)
 }
 func (dt *DomainRoTx) getFromFileL1(i int, filekey []byte) ([]byte, bool, error) {
+	if dbg.KVReadLevelledMetrics {
+		defer mxKvGetL1.ObserveDuration(time.Now())
+	}
 	return dt.getFromFile(i, filekey)
 }
 func (dt *DomainRoTx) getFromFileL2(i int, filekey []byte) ([]byte, bool, error) {
+	if dbg.KVReadLevelledMetrics {
+		defer mxKvGetL2.ObserveDuration(time.Now())
+	}
 	return dt.getFromFile(i, filekey)
 }
 func (dt *DomainRoTx) getFromFileL3(i int, filekey []byte) ([]byte, bool, error) {
+	if dbg.KVReadLevelledMetrics {
+		defer mxKvGetL3.ObserveDuration(time.Now())
+	}
 	return dt.getFromFile(i, filekey)
 }
 func (dt *DomainRoTx) getFromFileL4(i int, filekey []byte) ([]byte, bool, error) {
+	if dbg.KVReadLevelledMetrics {
+		defer mxKvGetL4.ObserveDuration(time.Now())
+	}
 	return dt.getFromFile(i, filekey)
 }
 func (dt *DomainRoTx) getFromFileLRecent(i int, filekey []byte) ([]byte, bool, error) {
+	if dbg.KVReadLevelledMetrics {
+		defer mxKvGetRec.ObserveDuration(time.Now())
+	}
 	return dt.getFromFile(i, filekey)
 }
 func (dt *DomainRoTx) getFromFile(i int, filekey []byte) ([]byte, bool, error) {
