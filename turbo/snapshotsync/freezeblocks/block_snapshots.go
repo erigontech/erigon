@@ -698,6 +698,9 @@ func (s *RoSnapshots) ReopenSegments(types []snaptype.Type, allowGaps bool) erro
 }
 
 func (s *RoSnapshots) ReopenWithDB(db kv.RoDB) error {
+	log.Warn("[dbg] ReopenWithDB")
+	defer log.Warn("[dbg] ReopenWithDB end")
+
 	if err := db.View(context.Background(), func(tx kv.Tx) error {
 		snList, _, err := rawdb.ReadSnapshots(tx)
 		if err != nil {
