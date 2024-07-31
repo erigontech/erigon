@@ -147,7 +147,7 @@ func newSpanFetcher(client HeimdallClient, logger log.Logger) entityFetcher[*Spa
 }
 
 func (s *service) FetchLatestSpan(ctx context.Context) (*Span, bool, error) {
-	s.checkpointScraper.Synchronize(ctx)
+	s.spanScraper.Synchronize(ctx)
 	return s.store.Spans().GetLastEntity(ctx)
 }
 
