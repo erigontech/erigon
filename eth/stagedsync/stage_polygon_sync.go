@@ -716,7 +716,7 @@ func (e *polygonSyncStageExecutionEngine) InsertBlocks(ctx context.Context, bloc
 	}
 
 	r, err := awaitTxAction(ctx, e.txActionStream, func(tx kv.RwTx, responseStream chan<- response) error {
-		responseStream <- response{err: e.insertBlocks(ctx, blocks, tx)}
+		responseStream <- response{err: e.insertBlocks(blocks, tx)}
 		return nil
 	})
 	if err != nil {
@@ -726,10 +726,7 @@ func (e *polygonSyncStageExecutionEngine) InsertBlocks(ctx context.Context, bloc
 	return r.err
 }
 
-func (e *polygonSyncStageExecutionEngine) insertBlocks(ctx context.Context, blocks []*types.Block, tx kv.RwTx) error {
-	stateSyncEventsLogTicker := time.NewTicker(logInterval)
-	defer stateSyncEventsLogTicker.Stop()
-
+func (e *polygonSyncStageExecutionEngine) insertBlocks(blocks []*types.Block, tx kv.RwTx) error {
 	for _, block := range blocks {
 		height := block.NumberU64()
 		header := block.Header()
@@ -767,10 +764,6 @@ func (e *polygonSyncStageExecutionEngine) insertBlocks(ctx context.Context, bloc
 		if _, err := rawdb.WriteRawBodyIfNotExists(tx, header.Hash(), height, body.RawBody()); err != nil {
 			return err
 		}
-
-		if err := e.downloadStateSyncEvents(ctx, tx, header, stateSyncEventsLogTicker); err != nil {
-			return err
-		}
 	}
 
 	return nil
@@ -782,7 +775,7 @@ func (e *polygonSyncStageExecutionEngine) UpdateForkChoice(ctx context.Context, 
 	}
 
 	r, err := awaitTxAction(ctx, e.txActionStream, func(tx kv.RwTx, responseStream chan<- response) error {
-		err := e.updateForkChoice(tx, tip)
+		err := e.updateForkChoice(ctx, tx, tip)
 		responseStream <- response{err: err}
 		if err == nil {
 			return updateForkChoiceSuccessErr
@@ -796,7 +789,7 @@ func (e *polygonSyncStageExecutionEngine) UpdateForkChoice(ctx context.Context, 
 	return r.err
 }
 
-func (e *polygonSyncStageExecutionEngine) updateForkChoice(tx kv.RwTx, tip *types.Header) error {
+func (e *polygonSyncStageExecutionEngine) updateForkChoice(ctx context.Context, tx kv.RwTx, tip *types.Header) error {
 	tipBlockNum := tip.Number.Uint64()
 	tipHash := tip.Hash()
 
@@ -819,6 +812,35 @@ func (e *polygonSyncStageExecutionEngine) updateForkChoice(tx kv.RwTx, tip *type
 
 	if len(newNodes) == 0 {
 		return nil
+	}
+
+	// TODO remove below for loop once the bridge is integrated in the stage
+	borConfig := e.chainConfig.Bor.(*borcfg.BorConfig)
+	for i := len(newNodes) - 1; i >= 0; {
+		blockNum := newNodes[i].number
+		blockHash := newNodes[i].hash
+		if blockNum == 0 {
+			break
+		}
+
+		sprintLen := borConfig.CalculateSprintLength(blockNum)
+		blockPosInSprint := blockNum % sprintLen
+		if blockPosInSprint > 0 {
+			i -= int(blockPosInSprint)
+			continue
+		}
+
+		header, err := e.blockReader.Header(ctx, tx, blockHash, blockNum)
+		if err != nil {
+			return err
+		}
+
+		err = e.downloadStateSyncEvents(ctx, tx, header, logTicker)
+		if err != nil {
+			return err
+		}
+
+		i -= int(sprintLen)
 	}
 
 	if err := rawdb.AppendCanonicalTxNums(tx, newNodes[len(newNodes)-1].number); err != nil {
@@ -892,6 +914,8 @@ func (e *polygonSyncStageExecutionEngine) downloadStateSyncEvents(
 	header *types.Header,
 	logTicker *time.Ticker,
 ) error {
+	e.logger.Trace(e.appendLogPrefix("download state sync event"), "block", header.Number.Uint64())
+
 	var err error
 	if !e.lastStateSyncEventIdInit {
 		e.lastStateSyncEventId, _, err = e.blockReader.LastEventId(ctx, tx)
