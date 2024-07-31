@@ -436,8 +436,6 @@ func (s *RoSnapshots) idxAvailability() uint64 {
 // - user must be able: delete any snapshot file and Erigon will self-heal by re-downloading
 // - RPC return Nil for historical blocks if snapshots are not open
 func (s *RoSnapshots) OptimisticReopenWithDB(db kv.RoDB) {
-	log.Warn("[dbg] OptimisticReopenWithDB")
-	defer log.Warn("[dbg] OptimisticReopenWithDB end")
 	var snList []string
 	_ = db.View(context.Background(), func(tx kv.Tx) (err error) {
 		snList, _, err = rawdb.ReadSnapshots(tx)
@@ -505,8 +503,6 @@ func (s *RoSnapshots) OpenFiles() (list []string) {
 
 // ReopenList stops on optimistic=false, continue opening files on optimistic=true
 func (s *RoSnapshots) ReopenList(fileNames []string, optimistic bool) error {
-	log.Warn("[dbg] ReopenList")
-	defer log.Warn("[dbg] ReopenList end")
 	s.lockSegments()
 	defer s.unlockSegments()
 	s.closeWhatNotInList(fileNames)
@@ -517,9 +513,6 @@ func (s *RoSnapshots) ReopenList(fileNames []string, optimistic bool) error {
 }
 
 func (s *RoSnapshots) InitSegments(fileNames []string) error {
-	log.Warn("[dbg] InitSegments")
-	defer log.Warn("[dbg] InitSegments end")
-
 	s.lockSegments()
 	defer s.unlockSegments()
 	s.closeWhatNotInList(fileNames)
@@ -558,11 +551,6 @@ func (s *RoSnapshots) rebuildSegments(fileNames []string, open bool, optimistic 
 
 		segtype, ok := s.segments.Get(f.Type.Enum())
 		if !ok {
-
-			for _, t := range s.types {
-				fmt.Printf("[dbg] %s\n", t.Enum().String())
-			}
-			panic(f.Type.Enum().String())
 			segtype = &segments{}
 			s.segments.Set(f.Type.Enum(), segtype)
 			segtype.lock.Lock() // this will be unlocked by defer s.unlockSegments() above
@@ -652,31 +640,10 @@ func (s *RoSnapshots) ReopenFolder() error {
 		_, fName := filepath.Split(f.Path)
 		list = append(list, fName)
 	}
-	if err := s.ReopenList(list, false); err != nil {
-		return err
-	}
-	return nil
+	return s.ReopenList(list, false)
 }
 
 func (s *RoSnapshots) ReopenSegments(types []snaptype.Type, allowGaps bool) error {
-	if s.HasType(coresnaptype.Headers) {
-		v := s.View()
-		z := v.Headers()
-		fmt.Printf("[dbg] alex3: %d\n", len(z))
-		v.Close()
-	}
-
-	defer func() {
-		if s.HasType(coresnaptype.Headers) {
-			v := s.View()
-			z := v.Headers()
-			fmt.Printf("[dbg] alex4: %d\n", len(z))
-			v.Close()
-		}
-	}()
-
-	log.Warn("[dbg] ReopenSegments", "t", types)
-	defer log.Warn("[dbg] ReopenSegments end")
 	files, _, err := typedSegments(s.dir, s.segmentsMin.Load(), types, allowGaps)
 
 	if err != nil {
@@ -698,9 +665,6 @@ func (s *RoSnapshots) ReopenSegments(types []snaptype.Type, allowGaps bool) erro
 }
 
 func (s *RoSnapshots) ReopenWithDB(db kv.RoDB) error {
-	log.Warn("[dbg] ReopenWithDB")
-	defer log.Warn("[dbg] ReopenWithDB end")
-
 	if err := db.View(context.Background(), func(tx kv.Tx) error {
 		snList, _, err := rawdb.ReadSnapshots(tx)
 		if err != nil {
@@ -714,9 +678,6 @@ func (s *RoSnapshots) ReopenWithDB(db kv.RoDB) error {
 }
 
 func (s *RoSnapshots) Close() {
-	log.Warn("[dbg] Close", "stack", dbg.Stack())
-	defer log.Warn("[dbg] Close end")
-
 	if s == nil {
 		return
 	}
@@ -726,8 +687,6 @@ func (s *RoSnapshots) Close() {
 }
 
 func (s *RoSnapshots) closeWhatNotInList(l []string) {
-	log.Warn("[dbg] closeWhatNotInList")
-	defer log.Warn("[dbg] closeWhatNotInList end")
 	s.segments.Scan(func(segtype snaptype.Enum, value *segments) bool {
 	Segments:
 		for i, sn := range value.segments {
@@ -2329,10 +2288,6 @@ func (s *RoSnapshots) ViewType(t snaptype.Type) (segments []*Segment, release fu
 func (s *RoSnapshots) ViewSingleFile(t snaptype.Type, blockNum uint64) (segment *Segment, ok bool, release func()) {
 	segs, ok := s.segments.Get(t.Enum())
 	if !ok {
-		for _, t := range s.types {
-			fmt.Printf("[dbg] type=%s\n", t.Enum().String())
-		}
-		panic(t.Enum().String())
 		return nil, false, noop
 	}
 
