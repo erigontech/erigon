@@ -484,6 +484,7 @@ func (s *RoSnapshots) Files() (list []string) {
 }
 
 func (s *RoSnapshots) OpenFiles() (list []string) {
+	log.Warn("[dbg] OpenFiles start", "stack", dbg.Stack())
 	s.segments.Scan(func(segtype snaptype.Enum, value *segments) bool {
 		value.lock.RLock()
 		defer value.lock.RUnlock()
@@ -493,28 +494,34 @@ func (s *RoSnapshots) OpenFiles() (list []string) {
 		}
 		return true
 	})
+	log.Warn("[dbg] OpenFiles end")
 
 	return list
 }
 
 // ReopenList stops on optimistic=false, continue opening files on optimistic=true
 func (s *RoSnapshots) ReopenList(fileNames []string, optimistic bool) error {
+	log.Warn("[dbg] ReopenList start", "stack", dbg.Stack())
 	s.lockSegments()
 	defer s.unlockSegments()
 	s.closeWhatNotInList(fileNames)
 	if err := s.rebuildSegments(fileNames, true, optimistic); err != nil {
 		return err
 	}
+	log.Warn("[dbg] ReopenList end")
 	return nil
 }
 
 func (s *RoSnapshots) InitSegments(fileNames []string) error {
+	log.Warn("[dbg] InitSegments start", "stack", dbg.Stack())
+
 	s.lockSegments()
 	defer s.unlockSegments()
 	s.closeWhatNotInList(fileNames)
 	if err := s.rebuildSegments(fileNames, false, true); err != nil {
 		return err
 	}
+	log.Warn("[dbg] InitSegments end")
 	return nil
 }
 
