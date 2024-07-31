@@ -450,7 +450,6 @@ func GenesisToBlock(g *types.Genesis, dirs datadir.Dirs, logger log.Logger) (*ty
 	if dirs.SnapDomain == "" {
 		panic("empty `dirs` variable")
 	}
-
 	_ = g.Alloc //nil-check
 
 	head := &types.Header{

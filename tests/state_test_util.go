@@ -26,10 +26,11 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"github.com/erigontech/erigon-lib/common/datadir"
 	"math/big"
 	"strconv"
 	"strings"
+
+	"github.com/erigontech/erigon-lib/common/datadir"
 
 	"github.com/holiman/uint256"
 	"golang.org/x/crypto/sha3"
