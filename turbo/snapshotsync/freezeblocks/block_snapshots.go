@@ -131,6 +131,7 @@ func (s Segment) FileInfo(dir string) snaptype.FileInfo {
 }
 
 func (s *Segment) reopenSeg(dir string) (err error) {
+	fmt.Printf("[dbg] reopenSeg: %s, %s\n", s.FileName(), dbg.Stack())
 	s.closeSeg()
 	s.Decompressor, err = seg.NewDecompressor(filepath.Join(dir, s.FileName()))
 	if err != nil {
