@@ -503,16 +503,7 @@ func (s *RoSnapshots) OpenFiles() (list []string) {
 
 // ReopenList stops on optimistic=false, continue opening files on optimistic=true
 func (s *RoSnapshots) ReopenList(fileNames []string, optimistic bool) error {
-	defer func() {
 
-		if s.HasType(coresnaptype.Headers) {
-			v := s.View()
-			z := v.Headers()
-			fmt.Printf("[dbg] alex: %d\n", len(z))
-			v.Close()
-		}
-
-	}()
 	log.Warn("[dbg] ReopenList start", "stack", dbg.Stack())
 	s.lockSegments()
 	defer s.unlockSegments()
@@ -667,6 +658,22 @@ func (s *RoSnapshots) ReopenFolder() error {
 }
 
 func (s *RoSnapshots) ReopenSegments(types []snaptype.Type, allowGaps bool) error {
+	if s.HasType(coresnaptype.Headers) {
+		v := s.View()
+		z := v.Headers()
+		fmt.Printf("[dbg] alex3: %d\n", len(z))
+		v.Close()
+	}
+
+	defer func() {
+		if s.HasType(coresnaptype.Headers) {
+			v := s.View()
+			z := v.Headers()
+			fmt.Printf("[dbg] alex4: %d\n", len(z))
+			v.Close()
+		}
+	}()
+
 	log.Warn("[dbg] ReopenSegments", "t", types)
 	defer log.Warn("[dbg] ReopenSegments end")
 	files, _, err := typedSegments(s.dir, s.segmentsMin.Load(), types, allowGaps)
@@ -2097,7 +2104,7 @@ func (m *Merger) filesByRange(snapshots *RoSnapshots, from, to uint64) (map[snap
 func (m *Merger) filesByRangeOfType(view *View, from, to uint64, snapshotType snaptype.Type) []string {
 	paths := make([]string, 0)
 
-	for _, sn := range view.Segments(snapshotType) {
+	for _, sn := range view.segments(snapshotType) {
 		if sn.from < from {
 			continue
 		}
@@ -2355,16 +2362,16 @@ func (s *RoSnapshots) ViewSingleFile(t snaptype.Type, blockNum uint64) (segment 
 	return nil, false, noop
 }
 
-func (v *View) Segments(t snaptype.Type) []*Segment {
+func (v *View) segments(t snaptype.Type) []*Segment {
 	if s, ok := v.s.segments.Get(t.Enum()); ok {
 		return s.segments
 	}
 	return nil
 }
 
-func (v *View) Headers() []*Segment { return v.Segments(coresnaptype.Headers) }
-func (v *View) Bodies() []*Segment  { return v.Segments(coresnaptype.Bodies) }
-func (v *View) Txs() []*Segment     { return v.Segments(coresnaptype.Transactions) }
+func (v *View) Headers() []*Segment { return v.segments(coresnaptype.Headers) }
+func (v *View) Bodies() []*Segment  { return v.segments(coresnaptype.Bodies) }
+func (v *View) Txs() []*Segment     { return v.segments(coresnaptype.Transactions) }
 
 func (v *View) Segment(t snaptype.Type, blockNum uint64) (*Segment, bool) {
 	if s, ok := v.s.segments.Get(t.Enum()); ok {
@@ -2379,7 +2386,7 @@ func (v *View) Segment(t snaptype.Type, blockNum uint64) (*Segment, bool) {
 }
 
 func (v *View) Ranges() (ranges []Range) {
-	for _, sn := range v.Segments(v.baseSegType) {
+	for _, sn := range v.segments(v.baseSegType) {
 		ranges = append(ranges, sn.Range)
 	}
 
