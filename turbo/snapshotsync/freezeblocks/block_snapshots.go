@@ -131,7 +131,6 @@ func (s Segment) FileInfo(dir string) snaptype.FileInfo {
 }
 
 func (s *Segment) reopenSeg(dir string) (err error) {
-	fmt.Printf("[dbg] reopenSeg: %s, %s\n", s.FileName(), dbg.Stack())
 	s.closeSeg()
 	s.Decompressor, err = seg.NewDecompressor(filepath.Join(dir, s.FileName()))
 	if err != nil {
@@ -504,6 +503,16 @@ func (s *RoSnapshots) OpenFiles() (list []string) {
 
 // ReopenList stops on optimistic=false, continue opening files on optimistic=true
 func (s *RoSnapshots) ReopenList(fileNames []string, optimistic bool) error {
+	defer func() {
+
+		if s.HasType(coresnaptype.Headers) {
+			v := s.View()
+			z := v.Headers()
+			fmt.Printf("[dbg] alex: %d\n", len(z))
+			v.Close()
+		}
+
+	}()
 	log.Warn("[dbg] ReopenList start", "stack", dbg.Stack())
 	s.lockSegments()
 	defer s.unlockSegments()
@@ -653,13 +662,6 @@ func (s *RoSnapshots) ReopenFolder() error {
 	}
 	if err := s.ReopenList(list, false); err != nil {
 		return err
-	}
-
-	if s.HasType(coresnaptype.Headers) {
-		v := s.View()
-		z := v.Headers()
-		fmt.Printf("[dbg] alex: %d\n", len(z))
-		v.Close()
 	}
 	return nil
 }
