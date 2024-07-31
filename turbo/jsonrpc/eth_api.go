@@ -26,6 +26,7 @@ import (
 	"time"
 
 	"github.com/erigontech/erigon-lib/common/datadir"
+	"github.com/erigontech/erigon/polygon/bridge"
 	"github.com/erigontech/erigon/turbo/jsonrpc/receipts"
 
 	"github.com/erigontech/erigon-lib/common/hexutil"
@@ -358,12 +359,17 @@ type APIImpl struct {
 	MaxGetProofRewindBlockCount int
 	SubscribeLogsChannelSize    int
 	logger                      log.Logger
+	polygonBridge               bridge.PolygonBridge
 }
 
 // NewEthAPI returns APIImpl instance
-func NewEthAPI(base *BaseAPI, db kv.RoDB, eth rpchelper.ApiBackend, txPool txpool.TxpoolClient, mining txpool.MiningClient, gascap uint64, feecap float64, returnDataLimit int, allowUnprotectedTxs bool, maxGetProofRewindBlockCount int, subscribeLogsChannelSize int, logger log.Logger) *APIImpl {
+func NewEthAPI(base *BaseAPI, db kv.RoDB, eth rpchelper.ApiBackend, txPool txpool.TxpoolClient, mining txpool.MiningClient, gascap uint64, feecap float64, returnDataLimit int, allowUnprotectedTxs bool, maxGetProofRewindBlockCount int, subscribeLogsChannelSize int, logger log.Logger, polygonBridge bridge.PolygonBridge) *APIImpl {
 	if gascap == 0 {
 		gascap = uint64(math.MaxUint64 / 2)
+	}
+
+	if polygonBridge != nil {
+		logger.Info("starting rpc with polygon bridge")
 	}
 
 	return &APIImpl{
@@ -380,6 +386,7 @@ func NewEthAPI(base *BaseAPI, db kv.RoDB, eth rpchelper.ApiBackend, txPool txpoo
 		MaxGetProofRewindBlockCount: maxGetProofRewindBlockCount,
 		SubscribeLogsChannelSize:    subscribeLogsChannelSize,
 		logger:                      logger,
+		polygonBridge:               polygonBridge,
 	}
 }
 

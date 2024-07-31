@@ -32,12 +32,13 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/erigontech/erigon-lib/common/dbg"
 	lru "github.com/hashicorp/golang-lru/arc/v2"
 	"github.com/holiman/uint256"
 	"github.com/xsleonard/go-merkle"
 	"golang.org/x/crypto/sha3"
 	"golang.org/x/sync/errgroup"
+
+	"github.com/erigontech/erigon-lib/common/dbg"
 
 	"github.com/erigontech/erigon-lib/log/v3"
 
@@ -330,7 +331,7 @@ type Bor struct {
 	frozenSnapshotsInit sync.Once
 	rootHashCache       *lru.ARCCache[string, string]
 	headerProgress      HeaderProgress
-	polygonBridge       bridge.PolygonBridge
+	PolygonBridge       bridge.PolygonBridge
 }
 
 type signer struct {
@@ -374,7 +375,7 @@ func New(
 		execCtx:                context.Background(),
 		logger:                 logger,
 		closeCh:                make(chan struct{}),
-		polygonBridge:          polygonBridge,
+		PolygonBridge:          polygonBridge,
 	}
 
 	c.authorizedSigner.Store(&signer{
@@ -1487,8 +1488,8 @@ func (c *Bor) CommitStates(
 ) error {
 	blockNum := header.Number.Uint64()
 
-	if c.polygonBridge != nil {
-		events, err := c.polygonBridge.GetEvents(c.execCtx, blockNum)
+	if c.PolygonBridge != nil {
+		events, err := c.PolygonBridge.GetEvents(c.execCtx, blockNum)
 		if err != nil {
 			return err
 		}
