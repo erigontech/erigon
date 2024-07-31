@@ -18,7 +18,6 @@ package antiquary
 
 import (
 	"context"
-	"fmt"
 	"io/ioutil"
 	"math"
 	"strings"
@@ -137,7 +136,6 @@ func (a *Antiquary) Loop() error {
 		case <-a.ctx.Done():
 		}
 	}
-	fmt.Println(statsReply.Completed, doesSnapshotDirHaveBeaconBlocksFiles(a.dirs.Snap))
 	if err := a.sn.BuildMissingIndices(a.ctx, a.logger); err != nil {
 		return err
 	}
