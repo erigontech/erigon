@@ -991,22 +991,17 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 	}
 
 	if config.PolygonSync {
-		polygonSync := polygonsync.NewService(
+		backend.polygonSyncService = polygonsync.NewService(
 			logger,
 			chainConfig,
-			dirs.DataDir,
-			tmpdir,
 			polygonSyncSentry(sentries),
 			p2pConfig.MaxPeers,
 			statusDataProvider,
-			config.HeimdallURL,
 			executionRpc,
 			config.LoopBlockLimit,
 			polygonBridge,
 			heimdallService,
 		)
-
-		backend.polygonSyncService = polygonSync
 	}
 
 	return backend, nil

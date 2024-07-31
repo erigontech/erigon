@@ -50,12 +50,9 @@ type service struct {
 func NewService(
 	logger log.Logger,
 	chainConfig *chain.Config,
-	dataDir string,
-	tmpDir string,
 	sentryClient direct.SentryClient,
 	maxPeers int,
 	statusDataProvider *sentry.StatusDataProvider,
-	heimdallUrl string,
 	executionClient executionproto.ExecutionClient,
 	blockLimit uint,
 	polygonBridge bridge.Service,
