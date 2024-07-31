@@ -272,6 +272,7 @@ func SpawnSequencingStage(
 
 	prevHeader := rawdb.ReadHeaderByNumber(tx, executionAt)
 	batchDataOverflow := false
+	tryHaltSequencer(logPrefix, cfg, thisBatch)
 
 	var block *types.Block
 	for blockNumber := executionAt + 1; runLoopBlocks; blockNumber++ {
@@ -603,4 +604,14 @@ func SpawnSequencingStage(
 	}
 
 	return nil
+}
+
+func tryHaltSequencer(logPrefix string, cfg SequenceBlockCfg, thisBatch uint64) {
+	if cfg.zk.SequencerHaltOnBatchNumber != 0 &&
+		cfg.zk.SequencerHaltOnBatchNumber == thisBatch {
+		for {
+			log.Info(fmt.Sprintf("[%s] Halt sequencer on batch %d...", logPrefix, thisBatch))
+			time.Sleep(5 * time.Second) //nolint:gomnd
+		}
+	}
 }

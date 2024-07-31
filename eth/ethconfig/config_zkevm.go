@@ -31,6 +31,7 @@ type Zk struct {
 	SequencerBlockSealTime                 time.Duration
 	SequencerBatchSealTime                 time.Duration
 	SequencerNonEmptyBatchSealTime         time.Duration
+	SequencerHaltOnBatchNumber             uint64
 	ExecutorUrls                           []string
 	ExecutorStrictMode                     bool
 	ExecutorRequestTimeout                 time.Duration
