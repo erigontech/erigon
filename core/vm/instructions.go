@@ -206,21 +206,13 @@ func opByte(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]byt
 
 func opAddmod(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]byte, error) {
 	x, y, z := scope.Stack.Pop(), scope.Stack.Pop(), scope.Stack.Peek()
-	if z.IsZero() {
-		z.Clear()
-	} else {
-		z.AddMod(&x, &y, z)
-	}
+	z.AddMod(&x, &y, z)
 	return nil, nil
 }
 
 func opMulmod(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]byte, error) {
 	x, y, z := scope.Stack.Pop(), scope.Stack.Pop(), scope.Stack.Peek()
-	if z.IsZero() {
-		z.Clear()
-	} else {
-		z.MulMod(&x, &y, z)
-	}
+	z.MulMod(&x, &y, z)
 	return nil, nil
 }
 

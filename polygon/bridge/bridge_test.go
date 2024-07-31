@@ -73,7 +73,7 @@ func TestBridge(t *testing.T) {
 	event1 := &heimdall.EventRecordWithTime{
 		EventRecord: heimdall.EventRecord{
 			ID:      1,
-			ChainID: "80001",
+			ChainID: "80002",
 			Data:    hexutil.MustDecode("0x01"),
 		},
 		Time: time.Unix(50, 0), // block 2
@@ -81,7 +81,7 @@ func TestBridge(t *testing.T) {
 	event2 := &heimdall.EventRecordWithTime{
 		EventRecord: heimdall.EventRecord{
 			ID:      2,
-			ChainID: "80001",
+			ChainID: "80002",
 			Data:    hexutil.MustDecode("0x02"),
 		},
 		Time: time.Unix(100, 0), // block 2
@@ -89,7 +89,7 @@ func TestBridge(t *testing.T) {
 	event3 := &heimdall.EventRecordWithTime{
 		EventRecord: heimdall.EventRecord{
 			ID:      3,
-			ChainID: "80001",
+			ChainID: "80002",
 			Data:    hexutil.MustDecode("0x03"),
 		},
 		Time: time.Unix(200, 0), // block 4
@@ -124,7 +124,7 @@ func TestBridge(t *testing.T) {
 	err = b.ProcessNewBlocks(ctx, blocks)
 	require.NoError(t, err)
 
-	res, err := b.GetEvents(ctx, 2)
+	res, err := b.GetEvents(ctx, 4)
 	require.NoError(t, err)
 
 	event1Data, err := event1.Pack(stateReceiverABI)
@@ -140,11 +140,9 @@ func TestBridge(t *testing.T) {
 	res, err = b.GetEvents(ctx, 4)
 	require.NoError(t, err)
 
-	event3Data, err := event3.Pack(stateReceiverABI)
-	require.NoError(t, err)
-
-	require.Equal(t, 1, len(res))
-	require.Equal(t, event3Data, rlp.RawValue(res[0].Data()))
+	require.Equal(t, 2, len(res))
+	require.Equal(t, event1Data, rlp.RawValue(res[0].Data()))
+	require.Equal(t, event2Data, rlp.RawValue(res[1].Data()))
 
 	// get non-sprint block
 	_, err = b.GetEvents(ctx, 1)
@@ -171,7 +169,7 @@ func TestBridge_Unwind(t *testing.T) {
 	event1 := &heimdall.EventRecordWithTime{
 		EventRecord: heimdall.EventRecord{
 			ID:      1,
-			ChainID: "80001",
+			ChainID: "80002",
 			Data:    hexutil.MustDecode("0x01"),
 		},
 		Time: time.Unix(50, 0), // block 2
@@ -179,7 +177,7 @@ func TestBridge_Unwind(t *testing.T) {
 	event2 := &heimdall.EventRecordWithTime{
 		EventRecord: heimdall.EventRecord{
 			ID:      2,
-			ChainID: "80001",
+			ChainID: "80002",
 			Data:    hexutil.MustDecode("0x02"),
 		},
 		Time: time.Unix(100, 0), // block 2
@@ -187,7 +185,7 @@ func TestBridge_Unwind(t *testing.T) {
 	event3 := &heimdall.EventRecordWithTime{
 		EventRecord: heimdall.EventRecord{
 			ID:      3,
-			ChainID: "80001",
+			ChainID: "80002",
 			Data:    hexutil.MustDecode("0x03"),
 		},
 		Time: time.Unix(200, 0), // block 4
@@ -195,7 +193,7 @@ func TestBridge_Unwind(t *testing.T) {
 	event4 := &heimdall.EventRecordWithTime{
 		EventRecord: heimdall.EventRecord{
 			ID:      4,
-			ChainID: "80001",
+			ChainID: "80002",
 			Data:    hexutil.MustDecode("0x03"),
 		},
 		Time: time.Unix(300, 0), // block 6
@@ -230,11 +228,11 @@ func TestBridge_Unwind(t *testing.T) {
 	err = b.ProcessNewBlocks(ctx, blocks)
 	require.NoError(t, err)
 
-	event3Data, err := event3.Pack(stateReceiverABI)
+	event1Data, err := event1.Pack(stateReceiverABI)
 	require.NoError(t, err)
 
 	res, err := b.GetEvents(ctx, 4)
-	require.Equal(t, event3Data, rlp.RawValue(res[0].Data()))
+	require.Equal(t, event1Data, rlp.RawValue(res[0].Data()))
 	require.NoError(t, err)
 
 	err = b.Unwind(ctx, &types.Header{Number: big.NewInt(3)})

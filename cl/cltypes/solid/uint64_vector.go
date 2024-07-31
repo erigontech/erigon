@@ -19,7 +19,6 @@ package solid
 import (
 	"encoding/json"
 
-	"github.com/erigontech/erigon-lib/common/length"
 	"github.com/erigontech/erigon-lib/types/clonable"
 )
 
@@ -29,10 +28,9 @@ type uint64VectorSSZ struct {
 
 func NewUint64VectorSSZ(size int) Uint64VectorSSZ {
 	o := &byteBasedUint64Slice{
-		c:               size,
-		l:               size,
-		u:               make([]byte, size*8),
-		treeCacheBuffer: make([]byte, getTreeCacheSize((size+3)/4, treeCacheDepthUint64Slice)*length.Hash),
+		c: size,
+		l: size,
+		u: make([]byte, size*8),
 	}
 	return &uint64VectorSSZ{
 		u: o,

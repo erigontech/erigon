@@ -855,6 +855,11 @@ var (
 		Usage: "MEV relay endpoint. Caplin runs in builder mode if this is set",
 		Value: "",
 	}
+	CaplinValidatorMonitorFlag = cli.BoolFlag{
+		Name:  "caplin.validator-monitor",
+		Usage: "Enable caplin validator monitoring metrics",
+		Value: false,
+	}
 
 	SentinelAddrFlag = cli.StringFlag{
 		Name:  "sentinel.addr",
@@ -1023,7 +1028,7 @@ var (
 	DiagEndpointAddrFlag = cli.StringFlag{
 		Name:  "diagnostics.endpoint.addr",
 		Usage: "Diagnostics HTTP server listening interface",
-		Value: "0.0.0.0",
+		Value: "127.0.0.1",
 	}
 	DiagEndpointPortFlag = cli.UintFlag{
 		Name:  "diagnostics.endpoint.port",
@@ -1396,12 +1401,27 @@ func SetNodeConfigCobra(cmd *cobra.Command, cfg *nodecfg.Config) {
 	setDataDirCobra(flags, cfg)
 }
 
+func setupSnapCfg(dirs datadir.Dirs) {
+	snapshotsDir := dirs.Snap // <-- snapshots directory
+	// Check if there any .torrent files in the snapshots directory
+	torrentFiles, err := filepath.Glob(filepath.Join(snapshotsDir, "*.torrent"))
+	if err != nil {
+		panic(fmt.Errorf("error checking .torrent files: %s", err))
+	}
+	// If there are, do not load remote preverified snapshots
+	if len(torrentFiles) > 0 {
+		return
+	}
+	snapcfg.LoadRemotePreverified()
+}
+
 func setDataDir(ctx *cli.Context, cfg *nodecfg.Config) {
 	if ctx.IsSet(DataDirFlag.Name) {
 		cfg.Dirs = datadir.New(ctx.String(DataDirFlag.Name))
 	} else {
 		cfg.Dirs = datadir.New(paths.DataDirForNetwork(paths.DefaultDataDir(), ctx.String(ChainFlag.Name)))
 	}
+	setupSnapCfg(cfg.Dirs)
 	cfg.MdbxPageSize = flags.DBPageSizeFlagUnmarshal(ctx, DbPageSizeFlag.Name, DbPageSizeFlag.Usage)
 	if err := cfg.MdbxDBSizeLimit.UnmarshalText([]byte(ctx.String(DbSizeLimitFlag.Name))); err != nil {
 		panic(err)
@@ -1690,6 +1710,7 @@ func setCaplin(ctx *cli.Context, cfg *ethconfig.Config) {
 	cfg.CaplinConfig.BlobPruningDisabled = ctx.Bool(CaplinDisableBlobPruningFlag.Name)
 	cfg.CaplinConfig.Archive = ctx.Bool(CaplinArchiveFlag.Name)
 	cfg.CaplinConfig.MevRelayUrl = ctx.String(CaplinMevRelayUrl.Name)
+	cfg.CaplinConfig.EnableValidatorMonitor = ctx.Bool(CaplinValidatorMonitorFlag.Name)
 	if checkpointUrls := ctx.StringSlice(CaplinCheckpointSyncUrlFlag.Name); len(checkpointUrls) > 0 {
 		clparams.ConfigurableCheckpointsURLs = checkpointUrls
 	}

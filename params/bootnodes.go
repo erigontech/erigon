@@ -146,8 +146,6 @@ func BootnodeURLsOfChain(chain string) []string {
 		return HoleskyBootnodes
 	case networkname.SepoliaChainName:
 		return SepoliaBootnodes
-	case networkname.MumbaiChainName:
-		return MumbaiBootnodes
 	case networkname.AmoyChainName:
 		return AmoyBootnodes
 	case networkname.BorMainnetChainName:
