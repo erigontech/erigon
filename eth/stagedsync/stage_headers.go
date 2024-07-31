@@ -162,7 +162,7 @@ func HeadersPOW(s *StageState, u Unwinder, ctx context.Context, tx kv.RwTx, cfg 
 		return nil
 	}
 
-	logger.Info(fmt.Sprintf("[%s] Waiting for headers...", logPrefix), "from", startProgress)
+	logger.Info(fmt.Sprintf("[%s] Waiting for headers...", logPrefix), "from", startProgress, "hash", hash.Hex())
 
 	diagnostics.Send(diagnostics.HeadersWaitingUpdate{From: startProgress})
 
@@ -175,6 +175,9 @@ func HeadersPOW(s *StageState, u Unwinder, ctx context.Context, tx kv.RwTx, cfg 
 		return fmt.Errorf("localTD is nil: %d, %x", startProgress, hash)
 	}
 	TEMP TESTING */
+	if localTd == nil {
+		logger.Error("localTD is nil", "startProgress", startProgress, "hash", hash)
+	}
 	headerInserter := headerdownload.NewHeaderInserter(logPrefix, localTd, startProgress, cfg.blockReader)
 	cfg.hd.SetHeaderReader(&ChainReaderImpl{
 		config:      &cfg.chainConfig,

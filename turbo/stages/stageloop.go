@@ -72,10 +72,11 @@ func StageLoop(
 	hook *Hook,
 ) {
 	defer close(waitForDone)
-
+	logger.Error("stageLoop start")
 	if err := ProcessFrozenBlocks(ctx, db, blockReader, sync); err != nil {
 		if err != nil {
 			if errors.Is(err, libcommon.ErrStopped) || errors.Is(err, context.Canceled) {
+				println("what")
 				return
 			}
 
@@ -85,6 +86,20 @@ func StageLoop(
 			}
 		}
 	}
+
+	//tx, err := db.BeginRw(ctx)
+	//if err != nil {
+	//	logger.Error("BeginRw err", "err", err)
+	//	return
+	//}
+	//defer tx.Rollback()
+	//
+	//sd, err := state.NewSharedDomains(tx, logger)
+	//if err != nil {
+	//	logger.Error("NewSharedDomains err", "err", err)
+	//	return
+	//}
+	//defer sd.Close()
 
 	initialCycle := true
 	for {
@@ -99,7 +114,8 @@ func StageLoop(
 
 		t := time.Now()
 		// Estimate the current top height seen from the peer
-		err := StageLoopIteration(ctx, db, wrap.TxContainer{}, sync, initialCycle, false, logger, blockReader, hook)
+
+		err := StageLoopIteration(ctx, db, wrap.TxContainer{ /*Tx: tx, Doms: sd*/ }, sync, initialCycle, false, logger, blockReader, hook)
 		if err != nil {
 			if errors.Is(err, libcommon.ErrStopped) || errors.Is(err, context.Canceled) {
 				return
@@ -178,11 +194,13 @@ func ProcessFrozenBlocks(ctx context.Context, db kv.RwDB, blockReader services.F
 func StageLoopIteration(ctx context.Context, db kv.RwDB, txc wrap.TxContainer, sync *stagedsync.Sync, initialCycle, firstCycle bool, logger log.Logger, blockReader services.FullBlockReader, hook *Hook) (err error) {
 	defer func() {
 		if rec := recover(); rec != nil {
+			logger.Error("panic", "err", dbg.Stack())
 			err = fmt.Errorf("%+v, trace: %s", rec, dbg.Stack())
 		}
 	}() // avoid crash because Erigon's core does many things
 
 	externalTx := txc.Tx != nil
+	println("externalTx", externalTx)
 	finishProgressBefore, borProgressBefore, headersProgressBefore, err := stagesHeadersAndFinish(db, txc.Tx)
 	if err != nil {
 		return err
@@ -218,17 +236,27 @@ func StageLoopIteration(ctx context.Context, db kv.RwDB, txc wrap.TxContainer, s
 			return err
 		}
 		defer txc.Tx.Rollback()
+		txc.Doms, err = state.NewSharedDomains(txc.Tx, logger)
+		if err != nil {
+			logger.Error("NewSharedDomains err", "err", err)
+			return err
+		}
+		defer txc.Doms.Close()
 	}
 
 	if hook != nil {
 		if err = hook.BeforeRun(txc.Tx, isSynced); err != nil {
+			logger.Error("BeforeRun err", "err", err)
 			return err
 		}
+		logger.Error("BeforeRun hook", "hook", hook.chainConfig.ChainID.String())
 	}
+	logger.Error("start sync")
 	_, err = sync.Run(db, txc, initialCycle, firstCycle)
 	if err != nil {
 		return err
 	}
+	logger.Error("finish sync")
 	logCtx := sync.PrintTimings()
 	//var tableSizes []interface{}
 	var commitTime time.Duration
@@ -240,10 +268,12 @@ func StageLoopIteration(ctx context.Context, db kv.RwDB, txc wrap.TxContainer, s
 		if errTx != nil {
 			return errTx
 		}
+		txc.Doms = nil
 		commitTime = time.Since(commitStart)
 	}
 
 	// -- send notifications START
+	logger.Error("trying to after run", "hook nil?", hook == nil)
 	if hook != nil {
 		if err = hook.AfterRun(txc.Tx, finishProgressBefore); err != nil {
 			return err
@@ -345,6 +375,7 @@ func (h *Hook) AfterRun(tx kv.Tx, finishProgressBefore uint64) error {
 }
 func (h *Hook) afterRun(tx kv.Tx, finishProgressBefore uint64) error {
 	// Update sentry status for peers to see our sync status
+	h.logger.Error("after run", "finishProgressBefore", finishProgressBefore)
 	if h.updateHead != nil {
 		h.updateHead(h.ctx)
 	}
@@ -356,6 +387,7 @@ func (h *Hook) afterRun(tx kv.Tx, finishProgressBefore uint64) error {
 func (h *Hook) sendNotifications(notifications *shards.Notifications, tx kv.Tx, finishProgressBefore uint64) error {
 	// update the accumulator with a new plain state version so the cache can be notified that
 	// state has moved on
+	h.logger.Error("starting to send")
 	if notifications.Accumulator != nil {
 		plainStateVersion, err := rawdb.GetStateVersion(tx)
 		if err != nil {
@@ -397,7 +429,7 @@ func (h *Hook) sendNotifications(notifications *shards.Notifications, tx kv.Tx, 
 			finalizedBlock = *fb
 		}
 
-		//h.logger.Debug("[hook] Sending state changes", "currentBlock", currentHeader.Number.Uint64(), "finalizedBlock", finalizedBlock)
+		h.logger.Error("[hook] Sending state changes", "currentBlock", currentHeader.Number.Uint64(), "finalizedBlock", finalizedBlock)
 		notifications.Accumulator.SendAndReset(h.ctx, notifications.StateChangesConsumer, pendingBaseFee.Uint64(), pendingBlobFee, currentHeader.GasLimit, finalizedBlock)
 	}
 	return nil

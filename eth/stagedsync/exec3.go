@@ -1074,6 +1074,11 @@ func flushAndCheckCommitmentV3(ctx context.Context, header *types.Header, applyT
 			return false, fmt.Errorf("writing plain state version: %w", err)
 		}
 	}
+
+	if header == nil {
+		return false, fmt.Errorf("header is nil")
+	}
+
 	if dbg.DiscardCommitment() {
 		return true, nil
 	}
