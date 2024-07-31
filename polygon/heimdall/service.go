@@ -237,8 +237,12 @@ func (s *service) Run(ctx context.Context) error {
 		return nil
 	}
 
+	if err := s.replayUntrackedSpans(ctx); err != nil {
+		return err
+	}
+
 	s.RegisterSpanObserver(func(span *Span) {
-		s.spanBlockProducersTracker.ObserveSpan(span)
+		s.spanBlockProducersTracker.ObserveSpanAsync(span)
 	})
 
 	eg, ctx := errgroup.WithContext(ctx)
@@ -247,4 +251,33 @@ func (s *service) Run(ctx context.Context) error {
 	eg.Go(func() error { return s.spanScraper.Run(ctx) })
 	eg.Go(func() error { return s.spanBlockProducersTracker.Run(ctx) })
 	return eg.Wait()
+}
+
+func (s *service) replayUntrackedSpans(ctx context.Context) error {
+	lastSpanId, _, err := s.store.Spans().GetLastEntityId(ctx)
+	if err != nil {
+		return err
+	}
+
+	lastProducerSelectionId, _, err := s.store.SpanBlockProducerSelections().GetLastEntityId(ctx)
+	if err != nil {
+		return err
+	}
+
+	for id := lastProducerSelectionId + 1; id <= lastSpanId; id++ {
+		span, ok, err := s.store.Spans().GetEntity(ctx, id)
+		if err != nil {
+			return err
+		}
+		if !ok {
+			return fmt.Errorf("%w: %d", errors.New("can't replay missing span"), id)
+		}
+
+		err = s.spanBlockProducersTracker.ObserveSpan(ctx, span)
+		if err != nil {
+			return err
+		}
+	}
+
+	return nil
 }

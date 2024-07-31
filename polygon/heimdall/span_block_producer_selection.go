@@ -65,3 +65,7 @@ func (s *SpanBlockProducerSelection) BlockNumRange() ClosedRange {
 func (s *SpanBlockProducerSelection) SetRawId(id uint64) {
 	s.SpanId = SpanId(id)
 }
+
+func (s *SpanBlockProducerSelection) CmpRange(n uint64) int {
+	return cmpBlockRange(s.StartBlock, s.EndBlock, n)
+}

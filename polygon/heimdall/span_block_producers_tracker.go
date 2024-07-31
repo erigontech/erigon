@@ -35,17 +35,13 @@ func (t spanBlockProducersTracker) Producers(ctx context.Context, blockNum uint6
 	return validatorSet, nil
 }
 
-func (t spanBlockProducersTracker) ObserveSpan(span *Span) {
-	t.newSpans <- span
-}
-
 func (t spanBlockProducersTracker) Run(ctx context.Context) error {
 	for {
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
 		case newSpan := <-t.newSpans:
-			err := t.handleNewSpan(ctx, newSpan)
+			err := t.ObserveSpan(ctx, newSpan)
 			if err != nil {
 				return err
 			}
@@ -53,7 +49,11 @@ func (t spanBlockProducersTracker) Run(ctx context.Context) error {
 	}
 }
 
-func (t spanBlockProducersTracker) handleNewSpan(ctx context.Context, newSpan *Span) error {
+func (t spanBlockProducersTracker) ObserveSpanAsync(span *Span) {
+	t.newSpans <- span
+}
+
+func (t spanBlockProducersTracker) ObserveSpan(ctx context.Context, newSpan *Span) error {
 	lastProducerSelection, ok, err := t.store.GetLastEntity(ctx)
 	if err != nil {
 		return err

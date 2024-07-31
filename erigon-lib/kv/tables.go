@@ -611,6 +611,7 @@ var ChaindataTables = []string{
 	BorMilestoneEnds,
 	BorCheckpoints,
 	BorCheckpointEnds,
+	BorProducerSelections,
 	TblAccountKeys,
 	TblAccountVals,
 	TblAccountHistoryKeys,
@@ -832,16 +833,17 @@ var ChaindataTablesCfg = TableCfg{
 }
 
 var BorTablesCfg = TableCfg{
-	BorReceipts:       {Flags: DupSort},
-	BorFinality:       {Flags: DupSort},
-	BorTxLookup:       {Flags: DupSort},
-	BorEvents:         {Flags: DupSort},
-	BorEventNums:      {Flags: DupSort},
-	BorSpans:          {Flags: DupSort},
-	BorCheckpoints:    {Flags: DupSort},
-	BorCheckpointEnds: {Flags: DupSort},
-	BorMilestones:     {Flags: DupSort},
-	BorMilestoneEnds:  {Flags: DupSort},
+	BorReceipts:           {Flags: DupSort},
+	BorFinality:           {Flags: DupSort},
+	BorTxLookup:           {Flags: DupSort},
+	BorEvents:             {Flags: DupSort},
+	BorEventNums:          {Flags: DupSort},
+	BorSpans:              {Flags: DupSort},
+	BorCheckpoints:        {Flags: DupSort},
+	BorCheckpointEnds:     {Flags: DupSort},
+	BorMilestones:         {Flags: DupSort},
+	BorMilestoneEnds:      {Flags: DupSort},
+	BorProducerSelections: {Flags: DupSort},
 }
 
 var TxpoolTablesCfg = TableCfg{}

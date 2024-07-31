@@ -58,15 +58,7 @@ func (s *Span) Less(other btree.Item) bool {
 }
 
 func (s *Span) CmpRange(n uint64) int {
-	if n < s.StartBlock {
-		return -1
-	}
-
-	if n > s.EndBlock {
-		return 1
-	}
-
-	return 0
+	return cmpBlockRange(s.StartBlock, s.EndBlock, n)
 }
 
 func (s *Span) Producers() []*valset.Validator {
