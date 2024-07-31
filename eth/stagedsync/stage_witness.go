@@ -12,7 +12,6 @@ import (
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/kv/membatchwithdb"
 	"github.com/erigontech/erigon-lib/log/v3"
-	libstate "github.com/erigontech/erigon-lib/state"
 	"github.com/erigontech/erigon-lib/wrap"
 	"github.com/erigontech/erigon/consensus"
 	"github.com/erigontech/erigon/core"
@@ -276,10 +275,9 @@ func RewindStagesForWitness(batch *membatchwithdb.MemoryMutation, blockNr, lates
 	dirs := cfg.dirs
 	blockReader := cfg.blockReader
 	syncCfg := ethconfig.Defaults.Sync
-	var agg *libstate.Aggregator = nil
 	execCfg := StageExecuteBlocksCfg(cfg.db, pruneMode, batchSize, cfg.chainConfig, cfg.engine, vmConfig, nil,
 		/*stateStream=*/ false,
-		/*badBlockHalt=*/ true, dirs, blockReader, nil, nil, syncCfg, agg, nil)
+		/*badBlockHalt=*/ true, dirs, blockReader, nil, nil, syncCfg, nil)
 
 	if err := UnwindExecutionStage(unwindState, stageState, txc, ctx, execCfg, logger); err != nil {
 		return nil, nil, err

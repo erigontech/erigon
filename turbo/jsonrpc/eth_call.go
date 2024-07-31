@@ -31,19 +31,16 @@ import (
 	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/hexutil"
 	"github.com/erigontech/erigon-lib/common/hexutility"
-	"github.com/erigontech/erigon-lib/config3"
 	"github.com/erigontech/erigon-lib/gointerfaces"
 	txpool_proto "github.com/erigontech/erigon-lib/gointerfaces/txpoolproto"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/kv/rawdbv3"
 	"github.com/erigontech/erigon-lib/log/v3"
-	libstate "github.com/erigontech/erigon-lib/state"
 	types2 "github.com/erigontech/erigon-lib/types"
 
 	"github.com/erigontech/erigon-lib/kv/membatchwithdb"
 	"github.com/erigontech/erigon/consensus"
 	"github.com/erigontech/erigon/core"
-	"github.com/erigontech/erigon/core/rawdb"
 	"github.com/erigontech/erigon/core/state"
 	"github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/core/types/accounts"
@@ -535,7 +532,7 @@ func (api *BaseAPI) getWitness(ctx context.Context, db kv.RoDB, blockNrOrHash rp
 	// 	return nil, err
 	// }
 
-	txc := wrap.TxContainer{Tx: txBatch}
+	txc := wrap.TxContainer{Tx: txBatch.MemTx()}
 	batchSizeStr := "512M"
 	var batchSize datasize.ByteSize
 	err = batchSize.UnmarshalText([]byte(batchSizeStr))
@@ -548,15 +545,15 @@ func (api *BaseAPI) getWitness(ctx context.Context, db kv.RoDB, blockNrOrHash rp
 	}
 	vmConfig := &vm.Config{}
 	syncCfg := ethconfig.Defaults.Sync
-	cr := rawdb.NewCanonicalReader()
-	agg, err := libstate.NewAggregator(ctx, api.dirs, config3.HistoryV3AggregationStep, db, cr, logger)
-	if err != nil {
-		return nil, err
-	}
+	// cr := rawdb.NewCanonicalReader()
+	// agg, err := libstate.NewAggregator(ctx, api.dirs, config3.HistoryV3AggregationStep, db, cr, logger)
+	// if err != nil {
+	// 	return nil, err
+	// }
 
 	execCfg := stagedsync.StageExecuteBlocksCfg(txBatch.MemDB(), pruneMode, batchSize, chainConfig, engine, vmConfig, nil,
 		/*stateStream=*/ false,
-		/*badBlockHalt=*/ true, api.dirs, api._blockReader, nil, nil, syncCfg, agg, nil)
+		/*badBlockHalt=*/ true, api.dirs, api._blockReader, nil, nil, syncCfg, nil)
 
 	stateSyncStages := stagedsync.DefaultStages(ctx, stagedsync.SnapshotsCfg{}, stagedsync.HeadersCfg{}, stagedsync.BorHeimdallCfg{}, stagedsync.BlockHashesCfg{}, stagedsync.BodiesCfg{}, stagedsync.SendersCfg{}, stagedsync.ExecuteBlockCfg{}, stagedsync.TxLookupCfg{}, stagedsync.FinishCfg{}, true)
 	stateSync := stagedsync.New(
