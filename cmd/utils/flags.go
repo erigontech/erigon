@@ -1028,7 +1028,7 @@ var (
 	DiagEndpointAddrFlag = cli.StringFlag{
 		Name:  "diagnostics.endpoint.addr",
 		Usage: "Diagnostics HTTP server listening interface",
-		Value: "0.0.0.0",
+		Value: "127.0.0.1",
 	}
 	DiagEndpointPortFlag = cli.UintFlag{
 		Name:  "diagnostics.endpoint.port",
@@ -1401,12 +1401,27 @@ func SetNodeConfigCobra(cmd *cobra.Command, cfg *nodecfg.Config) {
 	setDataDirCobra(flags, cfg)
 }
 
+func setupSnapCfg(dirs datadir.Dirs) {
+	snapshotsDir := dirs.Snap // <-- snapshots directory
+	// Check if there any .torrent files in the snapshots directory
+	torrentFiles, err := filepath.Glob(filepath.Join(snapshotsDir, "*.torrent"))
+	if err != nil {
+		panic(fmt.Errorf("error checking .torrent files: %s", err))
+	}
+	// If there are, do not load remote preverified snapshots
+	if len(torrentFiles) > 0 {
+		return
+	}
+	snapcfg.LoadRemotePreverified()
+}
+
 func setDataDir(ctx *cli.Context, cfg *nodecfg.Config) {
 	if ctx.IsSet(DataDirFlag.Name) {
 		cfg.Dirs = datadir.New(ctx.String(DataDirFlag.Name))
 	} else {
 		cfg.Dirs = datadir.New(paths.DataDirForNetwork(paths.DefaultDataDir(), ctx.String(ChainFlag.Name)))
 	}
+	setupSnapCfg(cfg.Dirs)
 	cfg.MdbxPageSize = flags.DBPageSizeFlagUnmarshal(ctx, DbPageSizeFlag.Name, DbPageSizeFlag.Usage)
 	if err := cfg.MdbxDBSizeLimit.UnmarshalText([]byte(ctx.String(DbSizeLimitFlag.Name))); err != nil {
 		panic(err)

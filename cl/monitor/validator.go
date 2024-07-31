@@ -7,7 +7,7 @@ import (
 	mapset "github.com/deckarep/golang-set/v2"
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon-lib/metrics"
+	"github.com/erigontech/erigon/cl/beacon/synced_data"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
@@ -15,18 +15,12 @@ import (
 	"github.com/erigontech/erigon/cl/utils/eth_clock"
 )
 
-var (
-	// metrics
-	metricAttestHit  = metrics.GetOrCreateCounter("validator_attestation_hit")
-	metricAttestMiss = metrics.GetOrCreateCounter("validator_attestation_miss")
-)
-
 type ValidatorMonitorImpl struct {
 	fc               forkchoice.ForkChoiceStorageReader
+	syncedData       *synced_data.SyncedDataManager
 	ethClock         eth_clock.EthereumClock
 	beaconCfg        *clparams.BeaconChainConfig
-	vStatusMutex     sync.RWMutex
-	vaidatorStatuses map[uint64]map[uint64]*validatorStatus // map validatorID -> epoch -> validatorStatus
+	vaidatorStatuses *validatorStatuses // map validatorID -> epoch -> validatorStatus
 }
 
 func NewValidatorMonitor(
@@ -34,6 +28,7 @@ func NewValidatorMonitor(
 	fc forkchoice.ForkChoiceStorageReader,
 	ethClock eth_clock.EthereumClock,
 	beaconConfig *clparams.BeaconChainConfig,
+	syncedData *synced_data.SyncedDataManager,
 ) ValidatorMonitor {
 	if !enableMonitor {
 		return &dummyValdatorMonitor{}
@@ -43,25 +38,20 @@ func NewValidatorMonitor(
 		fc:               fc,
 		ethClock:         ethClock,
 		beaconCfg:        beaconConfig,
-		vaidatorStatuses: make(map[uint64]map[uint64]*validatorStatus),
+		syncedData:       syncedData,
+		vaidatorStatuses: newValidatorStatuses(),
 	}
 	go m.runReportAttesterStatus()
+	go m.runReportProposerStatus()
 	return m
 }
 
-func (m *ValidatorMonitorImpl) AddValidator(vid uint64) {
-	m.vStatusMutex.Lock()
-	defer m.vStatusMutex.Unlock()
-	if _, ok := m.vaidatorStatuses[vid]; !ok {
-		m.vaidatorStatuses[vid] = make(map[uint64]*validatorStatus)
-		log.Info("[monitor] add validator", "vid", vid)
-	}
+func (m *ValidatorMonitorImpl) ObserveValidator(vid uint64) {
+	m.vaidatorStatuses.addValidator(vid)
 }
 
 func (m *ValidatorMonitorImpl) RemoveValidator(vid uint64) {
-	m.vStatusMutex.Lock()
-	defer m.vStatusMutex.Unlock()
-	delete(m.vaidatorStatuses, vid)
+	m.vaidatorStatuses.removeValidator(vid)
 }
 
 func (m *ValidatorMonitorImpl) OnNewBlock(block *cltypes.BeaconBlock) error {
@@ -91,8 +81,7 @@ func (m *ValidatorMonitorImpl) OnNewBlock(block *cltypes.BeaconBlock) error {
 	}
 
 	// todo: maybe launch a goroutine to update attester status
-	m.vStatusMutex.Lock()
-	defer m.vStatusMutex.Unlock()
+	// update attester status
 	atts.Range(func(i int, att *solid.Attestation, length int) bool {
 		indicies, err := state.GetAttestingIndicies(att.AttestantionData(), att.AggregationBits(), true)
 		if err != nil {
@@ -102,22 +91,19 @@ func (m *ValidatorMonitorImpl) OnNewBlock(block *cltypes.BeaconBlock) error {
 		slot := att.AttestantionData().Slot()
 		attEpoch := m.ethClock.GetEpochAtSlot(slot)
 		for _, vidx := range indicies {
-			if _, ok := m.vaidatorStatuses[vidx]; !ok {
-				// skip unknown validators
+			status := m.vaidatorStatuses.getValidatorStatus(vidx, attEpoch)
+			if status == nil {
 				continue
 			}
-			if _, ok := m.vaidatorStatuses[vidx][attEpoch]; !ok {
-				status := &validatorStatus{
-					epoch:              attEpoch,
-					vindex:             vidx,
-					attestedBlockRoots: mapset.NewSet[common.Hash](),
-				}
-				m.vaidatorStatuses[vidx][attEpoch] = status
-			}
-			m.vaidatorStatuses[vidx][attEpoch].updateAttesterStatus(att)
+			status.updateAttesterStatus(att)
 		}
 		return true
 	})
+	// update proposer status
+	pIndex := block.ProposerIndex
+	if status := m.vaidatorStatuses.getValidatorStatus(pIndex, blockEpoch); status != nil {
+		status.proposeSlots.Add(block.Slot)
+	}
 
 	return nil
 }
@@ -127,38 +113,121 @@ func (m *ValidatorMonitorImpl) runReportAttesterStatus() {
 	epochDuration := time.Duration(m.beaconCfg.SlotsPerEpoch) * time.Duration(m.beaconCfg.SecondsPerSlot) * time.Second
 	ticker := time.NewTicker(epochDuration)
 	for range ticker.C {
-		m.vStatusMutex.Lock()
 		currentEpoch := m.ethClock.GetCurrentEpoch()
 		// report attester status for current_epoch - 2
 		epoch := currentEpoch - 2
 		hitCount := 0
 		missCount := 0
-		for vindex, statuses := range m.vaidatorStatuses {
-			if status, ok := statuses[epoch]; ok {
+		m.vaidatorStatuses.iterate(func(vindex uint64, epochStatuses map[uint64]*validatorStatus) {
+			if status, ok := epochStatuses[epoch]; ok {
 				successAtt := status.attestedBlockRoots.Cardinality()
 				metricAttestHit.AddInt(successAtt)
 				hitCount += successAtt
-				delete(statuses, epoch)
+				delete(epochStatuses, epoch)
 				log.Debug("[monitor] report attester status hit", "epoch", epoch, "vindex", vindex, "countAttestedBlock", status.attestedBlockRoots.Cardinality())
 			} else {
 				metricAttestMiss.AddInt(1)
 				missCount++
 				log.Debug("[monitor] report attester status miss", "epoch", epoch, "vindex", vindex, "countAttestedBlock", 0)
 			}
-		}
-		m.vStatusMutex.Unlock()
-		log.Info("[monitor] report attester hit/miss", "epoch", epoch, "hitCount", hitCount, "missCount", missCount)
+		})
+		log.Info("[monitor] report attester hit/miss", "epoch", epoch, "hitCount", hitCount, "missCount", missCount, "cur_epoch", currentEpoch)
 	}
 
 }
 
+func (m *ValidatorMonitorImpl) runReportProposerStatus() {
+	// check proposer in previous slot every slot duration
+	ticker := time.NewTicker(time.Duration(m.beaconCfg.SecondsPerSlot) * time.Second)
+	defer ticker.Stop()
+	for range ticker.C {
+		headState := m.syncedData.HeadStateReader()
+		if headState == nil {
+			continue
+		}
+		// check proposer in previous slot
+		prevSlot := m.ethClock.GetCurrentSlot() - 1
+		proposerIndex, err := headState.GetBeaconProposerIndexForSlot(prevSlot)
+		if err != nil {
+			log.Warn("failed to get proposer index", "slot", prevSlot, "err", err)
+			return
+		}
+		if status := m.vaidatorStatuses.getValidatorStatus(proposerIndex, prevSlot/m.beaconCfg.SlotsPerEpoch); status != nil {
+			if status.proposeSlots.Contains(prevSlot) {
+				metricProposerHit.AddInt(1)
+				log.Info("[monitor] proposer hit", "slot", prevSlot, "proposerIndex", proposerIndex)
+			} else {
+				metricProposerMiss.AddInt(1)
+				log.Info("[monitor] proposer miss", "slot", prevSlot, "proposerIndex", proposerIndex)
+			}
+		}
+	}
+}
+
 type validatorStatus struct {
-	epoch              uint64
-	vindex             uint64
+	// attestedBlockRoots is the set of block roots that the validator has successfully attested during one epoch.
 	attestedBlockRoots mapset.Set[common.Hash]
+	// proposeSlots is the set of slots that the proposer has successfully proposed blocks during one epoch.
+	proposeSlots mapset.Set[uint64]
 }
 
 func (s *validatorStatus) updateAttesterStatus(att *solid.Attestation) {
 	data := att.AttestantionData()
 	s.attestedBlockRoots.Add(data.BeaconBlockRoot())
+}
+
+type validatorStatuses struct {
+	statuses     map[uint64]map[uint64]*validatorStatus
+	vStatusMutex sync.RWMutex
+}
+
+func newValidatorStatuses() *validatorStatuses {
+	return &validatorStatuses{
+		statuses: make(map[uint64]map[uint64]*validatorStatus),
+	}
+}
+
+// getValidatorStatus returns the validator status for the given validator index and epoch.
+// returns nil if validator is not observed.
+func (s *validatorStatuses) getValidatorStatus(vid uint64, epoch uint64) *validatorStatus {
+	s.vStatusMutex.Lock()
+	defer s.vStatusMutex.Unlock()
+	statusByEpoch, ok := s.statuses[vid]
+	if !ok {
+		return nil
+	}
+	if _, ok := statusByEpoch[epoch]; !ok {
+		statusByEpoch[epoch] = &validatorStatus{
+			attestedBlockRoots: mapset.NewSet[common.Hash](),
+			proposeSlots:       mapset.NewSet[uint64](),
+		}
+	}
+
+	return statusByEpoch[epoch]
+}
+
+func (s *validatorStatuses) addValidator(vid uint64) {
+	s.vStatusMutex.Lock()
+	defer s.vStatusMutex.Unlock()
+	if _, ok := s.statuses[vid]; !ok {
+		s.statuses[vid] = make(map[uint64]*validatorStatus)
+		log.Info("[monitor] add validator", "vid", vid)
+	}
+}
+
+func (s *validatorStatuses) removeValidator(vid uint64) {
+	s.vStatusMutex.Lock()
+	defer s.vStatusMutex.Unlock()
+	if _, ok := s.statuses[vid]; ok {
+		delete(s.statuses, vid)
+		log.Info("[monitor] remove validator", "vid", vid)
+	}
+}
+
+func (s *validatorStatuses) iterate(run func(vid uint64, statuses map[uint64]*validatorStatus)) {
+	s.vStatusMutex.Lock()
+	defer s.vStatusMutex.Unlock()
+	for vid, statuses := range s.statuses {
+		run(vid, statuses)
+	}
 }

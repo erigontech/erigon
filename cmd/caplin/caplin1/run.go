@@ -200,7 +200,7 @@ func RunCaplinPhase1(ctx context.Context, engine execution_client.ExecutionEngin
 	if err != nil {
 		return err
 	}
-	validatorMonitor := monitor.NewValidatorMonitor(config.CaplinConfig.EnableValidatorMonitor, forkChoice, ethClock, beaconConfig)
+	validatorMonitor := monitor.NewValidatorMonitor(config.CaplinConfig.EnableValidatorMonitor, forkChoice, ethClock, beaconConfig, syncedDataManager)
 	beaconRpc := rpc.NewBeaconRpcP2P(ctx, sentinel, beaconConfig, ethClock)
 	committeeSub := committee_subscription.NewCommitteeSubscribeManagement(ctx, indexDB, beaconConfig, networkConfig, ethClock, sentinel, state, aggregationPool, syncedDataManager)
 	// Define gossip services

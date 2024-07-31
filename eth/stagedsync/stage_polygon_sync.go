@@ -45,6 +45,7 @@ import (
 	"github.com/erigontech/erigon/polygon/p2p"
 	polygonsync "github.com/erigontech/erigon/polygon/sync"
 	"github.com/erigontech/erigon/turbo/services"
+	"github.com/erigontech/erigon/turbo/snapshotsync/freezeblocks"
 )
 
 var updateForkChoiceSuccessErr = errors.New("update fork choice success")
@@ -354,19 +355,19 @@ func (s polygonSyncStageCheckpointStore) GetLastEntityId(ctx context.Context) (u
 	return r.id, r.ok, r.err
 }
 
-func (s polygonSyncStageCheckpointStore) GetLastEntity(ctx context.Context) (cp *heimdall.Checkpoint, err error) {
+func (s polygonSyncStageCheckpointStore) GetLastEntity(ctx context.Context) (*heimdall.Checkpoint, bool, error) {
 	id, ok, err := s.GetLastEntityId(ctx)
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
 	if !ok {
-		return nil, errors.New("last checkpoint not found")
+		return nil, false, nil
 	}
 
 	return s.GetEntity(ctx, id)
 }
 
-func (s polygonSyncStageCheckpointStore) GetEntity(ctx context.Context, id uint64) (*heimdall.Checkpoint, error) {
+func (s polygonSyncStageCheckpointStore) GetEntity(ctx context.Context, id uint64) (*heimdall.Checkpoint, bool, error) {
 	type response struct {
 		v   []byte
 		err error
@@ -378,15 +379,19 @@ func (s polygonSyncStageCheckpointStore) GetEntity(ctx context.Context, id uint6
 		return nil
 	})
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
 	if r.err != nil {
-		return nil, r.err
+		if errors.Is(r.err, freezeblocks.ErrCheckpointNotFound) {
+			return nil, false, nil
+		}
+
+		return nil, false, r.err
 	}
 
 	var c heimdall.Checkpoint
 	err = json.Unmarshal(r.v, &c)
-	return &c, err
+	return &c, true, err
 }
 
 func (s polygonSyncStageCheckpointStore) PutEntity(ctx context.Context, id uint64, entity *heimdall.Checkpoint) error {
@@ -466,19 +471,19 @@ func (s polygonSyncStageMilestoneStore) GetLastEntityId(ctx context.Context) (ui
 	return r.id, r.ok, r.err
 }
 
-func (s polygonSyncStageMilestoneStore) GetLastEntity(ctx context.Context) (*heimdall.Milestone, error) {
+func (s polygonSyncStageMilestoneStore) GetLastEntity(ctx context.Context) (*heimdall.Milestone, bool, error) {
 	id, ok, err := s.GetLastEntityId(ctx)
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
 	if !ok {
-		return nil, errors.New("last milestone not found")
+		return nil, false, nil
 	}
 
 	return s.GetEntity(ctx, id)
 }
 
-func (s polygonSyncStageMilestoneStore) GetEntity(ctx context.Context, id uint64) (*heimdall.Milestone, error) {
+func (s polygonSyncStageMilestoneStore) GetEntity(ctx context.Context, id uint64) (*heimdall.Milestone, bool, error) {
 	type response struct {
 		v   []byte
 		err error
@@ -490,15 +495,19 @@ func (s polygonSyncStageMilestoneStore) GetEntity(ctx context.Context, id uint64
 		return nil
 	})
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
 	if r.err != nil {
-		return nil, r.err
+		if errors.Is(r.err, freezeblocks.ErrMilestoneNotFound) {
+			return nil, false, nil
+		}
+
+		return nil, false, r.err
 	}
 
 	var m heimdall.Milestone
 	err = json.Unmarshal(r.v, &m)
-	return &m, err
+	return &m, true, err
 }
 
 func (s polygonSyncStageMilestoneStore) PutEntity(ctx context.Context, id uint64, entity *heimdall.Milestone) error {
@@ -576,19 +585,19 @@ func (s polygonSyncStageSpanStore) GetLastEntityId(ctx context.Context) (id uint
 	return r.id, r.ok, r.err
 }
 
-func (s polygonSyncStageSpanStore) GetLastEntity(ctx context.Context) (*heimdall.Span, error) {
+func (s polygonSyncStageSpanStore) GetLastEntity(ctx context.Context) (*heimdall.Span, bool, error) {
 	id, ok, err := s.GetLastEntityId(ctx)
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
 	if !ok {
-		return nil, errors.New("last span not found")
+		return nil, false, nil
 	}
 
 	return s.GetEntity(ctx, id)
 }
 
-func (s polygonSyncStageSpanStore) GetEntity(ctx context.Context, id uint64) (*heimdall.Span, error) {
+func (s polygonSyncStageSpanStore) GetEntity(ctx context.Context, id uint64) (*heimdall.Span, bool, error) {
 	type response struct {
 		v   []byte
 		err error
@@ -600,15 +609,19 @@ func (s polygonSyncStageSpanStore) GetEntity(ctx context.Context, id uint64) (*h
 		return nil
 	})
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
 	if r.err != nil {
-		return nil, r.err
+		if errors.Is(r.err, freezeblocks.ErrSpanNotFound) {
+			return nil, false, nil
+		}
+
+		return nil, false, r.err
 	}
 
 	var span heimdall.Span
 	err = json.Unmarshal(r.v, &span)
-	return &span, err
+	return &span, true, err
 }
 
 func (s polygonSyncStageSpanStore) PutEntity(ctx context.Context, id uint64, entity *heimdall.Span) error {
@@ -675,7 +688,7 @@ func blockRangeEntitiesFromBlockNum[T blockRangeComparator](tx kv.Tx, table stri
 	defer cur.Close()
 	var k, v []byte
 	var entities []T
-	for k, v, err = cur.Last(); err == nil && k != nil; _, v, err = cur.Prev() {
+	for k, v, err = cur.Last(); err == nil && k != nil; k, v, err = cur.Prev() {
 		entity := makeEntity()
 		err = json.Unmarshal(v, entity)
 		if err != nil {
@@ -716,7 +729,7 @@ func (e *polygonSyncStageExecutionEngine) InsertBlocks(ctx context.Context, bloc
 	}
 
 	r, err := awaitTxAction(ctx, e.txActionStream, func(tx kv.RwTx, responseStream chan<- response) error {
-		responseStream <- response{err: e.insertBlocks(ctx, blocks, tx)}
+		responseStream <- response{err: e.insertBlocks(blocks, tx)}
 		return nil
 	})
 	if err != nil {
@@ -726,10 +739,7 @@ func (e *polygonSyncStageExecutionEngine) InsertBlocks(ctx context.Context, bloc
 	return r.err
 }
 
-func (e *polygonSyncStageExecutionEngine) insertBlocks(ctx context.Context, blocks []*types.Block, tx kv.RwTx) error {
-	stateSyncEventsLogTicker := time.NewTicker(logInterval)
-	defer stateSyncEventsLogTicker.Stop()
-
+func (e *polygonSyncStageExecutionEngine) insertBlocks(blocks []*types.Block, tx kv.RwTx) error {
 	for _, block := range blocks {
 		height := block.NumberU64()
 		header := block.Header()
@@ -767,10 +777,6 @@ func (e *polygonSyncStageExecutionEngine) insertBlocks(ctx context.Context, bloc
 		if _, err := rawdb.WriteRawBodyIfNotExists(tx, header.Hash(), height, body.RawBody()); err != nil {
 			return err
 		}
-
-		if err := e.downloadStateSyncEvents(ctx, tx, header, stateSyncEventsLogTicker); err != nil {
-			return err
-		}
 	}
 
 	return nil
@@ -782,7 +788,7 @@ func (e *polygonSyncStageExecutionEngine) UpdateForkChoice(ctx context.Context, 
 	}
 
 	r, err := awaitTxAction(ctx, e.txActionStream, func(tx kv.RwTx, responseStream chan<- response) error {
-		err := e.updateForkChoice(tx, tip)
+		err := e.updateForkChoice(ctx, tx, tip)
 		responseStream <- response{err: err}
 		if err == nil {
 			return updateForkChoiceSuccessErr
@@ -796,7 +802,7 @@ func (e *polygonSyncStageExecutionEngine) UpdateForkChoice(ctx context.Context, 
 	return r.err
 }
 
-func (e *polygonSyncStageExecutionEngine) updateForkChoice(tx kv.RwTx, tip *types.Header) error {
+func (e *polygonSyncStageExecutionEngine) updateForkChoice(ctx context.Context, tx kv.RwTx, tip *types.Header) error {
 	tipBlockNum := tip.Number.Uint64()
 	tipHash := tip.Hash()
 
@@ -819,6 +825,35 @@ func (e *polygonSyncStageExecutionEngine) updateForkChoice(tx kv.RwTx, tip *type
 
 	if len(newNodes) == 0 {
 		return nil
+	}
+
+	// TODO remove below for loop once the bridge is integrated in the stage
+	borConfig := e.chainConfig.Bor.(*borcfg.BorConfig)
+	for i := len(newNodes) - 1; i >= 0; {
+		blockNum := newNodes[i].number
+		blockHash := newNodes[i].hash
+		if blockNum == 0 {
+			break
+		}
+
+		sprintLen := borConfig.CalculateSprintLength(blockNum)
+		blockPosInSprint := blockNum % sprintLen
+		if blockPosInSprint > 0 {
+			i -= int(blockPosInSprint)
+			continue
+		}
+
+		header, err := e.blockReader.Header(ctx, tx, blockHash, blockNum)
+		if err != nil {
+			return err
+		}
+
+		err = e.downloadStateSyncEvents(ctx, tx, header, logTicker)
+		if err != nil {
+			return err
+		}
+
+		i -= int(sprintLen)
 	}
 
 	if err := rawdb.AppendCanonicalTxNums(tx, newNodes[len(newNodes)-1].number); err != nil {
@@ -892,6 +927,8 @@ func (e *polygonSyncStageExecutionEngine) downloadStateSyncEvents(
 	header *types.Header,
 	logTicker *time.Ticker,
 ) error {
+	e.logger.Trace(e.appendLogPrefix("download state sync event"), "block", header.Number.Uint64())
+
 	var err error
 	if !e.lastStateSyncEventIdInit {
 		e.lastStateSyncEventId, _, err = e.blockReader.LastEventId(ctx, tx)

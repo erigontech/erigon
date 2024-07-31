@@ -74,9 +74,8 @@ func InitHarness(ctx context.Context, t *testing.T, cfg HarnessCfg) Harness {
 		blockReader,
 		nil, // headerDownloader
 		nil, // penalize
-		nil, // loopBreakCheck
 		nil, // recent bor snapshots cached
-		nil, // signatures lru cache
+		nil, // signatures
 		false,
 		nil,
 	)

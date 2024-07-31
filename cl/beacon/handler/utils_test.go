@@ -136,7 +136,7 @@ func setupTestingHandler(t *testing.T, v clparams.StateVersion, logger log.Logge
 		opPool.ProposerSlashingsPool.Insert(pool.ComputeKeyForProposerSlashing(msg), msg)
 		return nil
 	}).AnyTimes()
-	mockValidatorMonitor.EXPECT().AddValidator(gomock.Any()).AnyTimes()
+	mockValidatorMonitor.EXPECT().ObserveValidator(gomock.Any()).AnyTimes()
 
 	vp = validator_params.NewValidatorParams()
 	h = NewApiHandler(
