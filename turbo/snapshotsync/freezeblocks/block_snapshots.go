@@ -2313,6 +2313,7 @@ func (s *RoSnapshots) ViewSingleFile(t snaptype.Type, blockNum uint64) (segment 
 	if len(segs.segments) > 0 {
 		log.Warn("[dbg] last se ", "t", t.Enum().String(), "from", segs.segments[len(segs.segments)-1].from, "to", segs.segments[len(segs.segments)-1].to, "look", blockNum)
 	} else {
+		panic(1)
 		log.Warn("[dbg] zero segents!!!!", "t", t.Enum().String())
 	}
 
