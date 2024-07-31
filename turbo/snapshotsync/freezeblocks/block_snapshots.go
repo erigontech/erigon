@@ -661,6 +661,7 @@ func (s *RoSnapshots) ReopenFolder() error {
 	v := s.View()
 	z := v.Headers()
 	fmt.Printf("[dbg] alex: %d, %s\n", len(z), list)
+	v.Close()
 	return nil
 }
 
