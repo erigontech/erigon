@@ -641,6 +641,9 @@ func (s *RoSnapshots) Ranges() []Range {
 func (s *RoSnapshots) OptimisticalyReopenFolder()           { _ = s.ReopenFolder() }
 func (s *RoSnapshots) OptimisticalyReopenWithDB(db kv.RoDB) { _ = s.ReopenWithDB(db) }
 func (s *RoSnapshots) ReopenFolder() error {
+	kk, _ := s.segments.Get(coresnaptype.Headers.Enum())
+	fmt.Printf("[dbg] alex1: %d\n", len(kk.segments))
+
 	files, _, err := typedSegments(s.dir, s.segmentsMin.Load(), s.Types(), false)
 	if err != nil {
 		return err
@@ -651,7 +654,14 @@ func (s *RoSnapshots) ReopenFolder() error {
 		_, fName := filepath.Split(f.Path)
 		list = append(list, fName)
 	}
-	return s.ReopenList(list, false)
+	if err := s.ReopenList(list, false); err != nil {
+		return err
+	}
+
+	v := s.View()
+	z := v.Headers()
+	fmt.Printf("[dbg] alex: %d, %s\n", len(z), list)
+	return nil
 }
 
 func (s *RoSnapshots) ReopenSegments(types []snaptype.Type, allowGaps bool) error {
