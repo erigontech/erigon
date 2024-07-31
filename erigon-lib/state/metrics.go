@@ -57,11 +57,41 @@ var (
 	mxCommitmentRunning    = metrics.GetOrCreateGauge("domain_running_commitment")
 	mxCommitmentTook       = metrics.GetOrCreateSummary("domain_commitment_took")
 	mxFileReadTime         = metrics.GetOrCreateHistogram("domain_file_read_time")
+)
 
-	mxKvGetL0  = metrics.GetOrCreateSummary(`kv_get{level="L0"}`)
-	mxKvGetL1  = metrics.GetOrCreateSummary(`kv_get{level="L1"}`)
-	mxKvGetL2  = metrics.GetOrCreateSummary(`kv_get{level="L2"}`)
-	mxKvGetL3  = metrics.GetOrCreateSummary(`kv_get{level="L3"}`)
-	mxKvGetL4  = metrics.GetOrCreateSummary(`kv_get{level="L4"}`)
-	mxKvGetRec = metrics.GetOrCreateSummary(`kv_get{level="recent"}`)
+var (
+	mxsKVGet = map[string][]metrics.Summary{
+		"account": {
+			metrics.GetOrCreateSummary(`kv_get{level="L0",domain="account"}`),
+			metrics.GetOrCreateSummary(`kv_get{level="L1",domain="account"}`),
+			metrics.GetOrCreateSummary(`kv_get{level="L2",domain="account"}`),
+			metrics.GetOrCreateSummary(`kv_get{level="L3",domain="account"}`),
+			metrics.GetOrCreateSummary(`kv_get{level="L4",domain="account"}`),
+			metrics.GetOrCreateSummary(`kv_get{level="recent",domain="account"}`),
+		},
+		"storage": {
+			metrics.GetOrCreateSummary(`kv_get{level="L0",domain="storage"}`),
+			metrics.GetOrCreateSummary(`kv_get{level="L1",domain="storage"}`),
+			metrics.GetOrCreateSummary(`kv_get{level="L2",domain="storage"}`),
+			metrics.GetOrCreateSummary(`kv_get{level="L3",domain="storage"}`),
+			metrics.GetOrCreateSummary(`kv_get{level="L4",domain="storage"}`),
+			metrics.GetOrCreateSummary(`kv_get{level="recent",domain="storage"}`),
+		},
+		"code": {
+			metrics.GetOrCreateSummary(`kv_get{level="L0",domain="code"}`),
+			metrics.GetOrCreateSummary(`kv_get{level="L1",domain="code"}`),
+			metrics.GetOrCreateSummary(`kv_get{level="L2",domain="code"}`),
+			metrics.GetOrCreateSummary(`kv_get{level="L3",domain="code"}`),
+			metrics.GetOrCreateSummary(`kv_get{level="L4",domain="code"}`),
+			metrics.GetOrCreateSummary(`kv_get{level="recent",domain="code"}`),
+		},
+		"commitment": {
+			metrics.GetOrCreateSummary(`kv_get{level="L0",domain="commitment"}`),
+			metrics.GetOrCreateSummary(`kv_get{level="L1",domain="commitment"}`),
+			metrics.GetOrCreateSummary(`kv_get{level="L2",domain="commitment"}`),
+			metrics.GetOrCreateSummary(`kv_get{level="L3",domain="commitment"}`),
+			metrics.GetOrCreateSummary(`kv_get{level="L4",domain="commitment"}`),
+			metrics.GetOrCreateSummary(`kv_get{level="recent",domain="commitment"}`),
+		},
+	}
 )
