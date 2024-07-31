@@ -142,7 +142,7 @@ func GetCPUInfo() []CPUInfo {
 		for _, info := range cpuInfo {
 			cpuinfo = append(cpuinfo, CPUInfo{
 				ModelName: info.ModelName,
-				Cores:     int32(info.Cores),
+				Cores:     info.Cores,
 				Mhz:       info.Mhz,
 			})
 		}
