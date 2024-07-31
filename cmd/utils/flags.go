@@ -1061,6 +1061,11 @@ var (
 		Usage: "Port for sentinel",
 		Value: 7777,
 	}
+	YieldSizeFlag = cli.Uint64Flag{
+		Name:  "yieldsize",
+		Usage: "transaction count fetched from txpool each time",
+		Value: 1000,
+	}
 )
 
 var MetricFlags = []cli.Flag{&MetricsEnabledFlag, &MetricsHTTPFlag, &MetricsPortFlag}
@@ -1798,6 +1803,7 @@ func SetEthConfig(ctx *cli.Context, nodeConfig *nodecfg.Config, cfg *ethconfig.C
 	setTxPool(ctx, &cfg.DeprecatedTxPool)
 	cfg.TxPool = ethconfig.DefaultTxPool2Config(cfg.DeprecatedTxPool)
 	cfg.TxPool.DBDir = nodeConfig.Dirs.TxPool
+	cfg.YieldSize = ctx.Uint64(YieldSizeFlag.Name)
 
 	setEthash(ctx, nodeConfig.Dirs.DataDir, cfg)
 	setClique(ctx, &cfg.Clique, nodeConfig.Dirs.DataDir)

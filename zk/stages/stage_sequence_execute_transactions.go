@@ -28,6 +28,7 @@ import (
 func getNextPoolTransactions(ctx context.Context, cfg SequenceBlockCfg, executionAt, forkId uint64, alreadyYielded mapset.Set[[32]byte]) ([]types.Transaction, error) {
 	var transactions []types.Transaction
 	var err error
+
 	gasLimit := utils.GetBlockGasLimitForFork(forkId)
 
 	if err := cfg.txPoolDb.View(ctx, func(poolTx kv.Tx) error {

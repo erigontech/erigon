@@ -163,6 +163,7 @@ var DefaultFlags = []cli.Flag{
 	&utils.LightClientDiscoveryTCPPortFlag,
 	&utils.SentinelAddrFlag,
 	&utils.SentinelPortFlag,
+	&utils.YieldSizeFlag,
 
 	&utils.L2ChainIdFlag,
 	&utils.L2RpcUrlFlag,
