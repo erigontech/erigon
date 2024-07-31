@@ -10,11 +10,7 @@ import (
 	"github.com/gateway-fm/cdk-erigon-lib/common"
 	"github.com/gateway-fm/cdk-erigon-lib/common/hexutility"
 	txPoolProto "github.com/gateway-fm/cdk-erigon-lib/gointerfaces/txpool"
-	"github.com/ledgerwatch/log/v3"
-
-	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/types"
-	"github.com/ledgerwatch/erigon/crypto"
 	"github.com/ledgerwatch/erigon/eth/ethconfig"
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/rlp"
@@ -68,33 +64,6 @@ func (api *APIImpl) SendRawTransaction(ctx context.Context, encodedTx hexutility
 
 	if res.Imported[0] != txPoolProto.ImportResult_SUCCESS {
 		return hash, fmt.Errorf("%s: %s", txPoolProto.ImportResult_name[int32(res.Imported[0])], res.Errors[0])
-	}
-
-	// Print a log with full txn details for manual investigations and interventions
-	blockNum := rawdb.ReadCurrentBlockNumber(tx)
-	if blockNum == nil {
-		return common.Hash{}, err
-	}
-
-	txnChainId := txn.GetChainID()
-
-	if txn.Protected() {
-		if chainId.Cmp(txnChainId.ToBig()) != 0 {
-			return common.Hash{}, fmt.Errorf("invalid chain id, expected: %d got: %d", chainId, *txnChainId)
-		}
-	}
-
-	signer := types.MakeSigner(cc, *blockNum)
-	from, err := txn.Sender(*signer)
-	if err != nil {
-		return common.Hash{}, err
-	}
-
-	if txn.GetTo() == nil {
-		addr := crypto.CreateAddress(from, txn.GetNonce())
-		log.Debug("Submitted contract creation", "hash", txn.Hash().Hex(), "from", from, "nonce", txn.GetNonce(), "contract", addr.Hex(), "value", txn.GetValue())
-	} else {
-		log.Debug("Submitted transaction", "hash", txn.Hash().Hex(), "from", from, "nonce", txn.GetNonce(), "recipient", txn.GetTo(), "value", txn.GetValue())
 	}
 
 	return txn.Hash(), nil
