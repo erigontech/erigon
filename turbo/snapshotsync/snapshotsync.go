@@ -370,7 +370,7 @@ func WaitForDownloader(ctx context.Context, logPrefix string, headerchain, blobs
 			return ctx.Err()
 		case <-logEvery.C:
 			if firstLog && headerchain {
-				log.Info("[ChadSync] Starting Ottersync")
+				log.Info("[OtterSync] Starting Ottersync")
 				log.Info(greatOtterBanner)
 				firstLog = false
 			}
