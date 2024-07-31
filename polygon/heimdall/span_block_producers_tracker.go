@@ -19,9 +19,12 @@ type spanBlockProducersTracker struct {
 
 func (t spanBlockProducersTracker) Producers(ctx context.Context, blockNum uint64) (*valset.ValidatorSet, error) {
 	spanId := SpanIdAt(blockNum)
-	producerSelection, err := t.store.GetEntity(ctx, uint64(spanId))
+	producerSelection, ok, err := t.store.GetEntity(ctx, uint64(spanId))
 	if err != nil {
 		return nil, err
+	}
+	if !ok {
+		return nil, errors.New("no producers found for block num")
 	}
 
 	startSprintNumInSpan := t.borConfig.CalculateSprintNumber(uint64(producerSelection.SpanId))
@@ -51,14 +54,13 @@ func (t spanBlockProducersTracker) Run(ctx context.Context) error {
 }
 
 func (t spanBlockProducersTracker) handleNewSpan(ctx context.Context, newSpan *Span) error {
-	lastProducerSelection, err := t.store.GetLastEntity(ctx)
+	lastProducerSelection, ok, err := t.store.GetLastEntity(ctx)
 	if err != nil {
 		return err
 	}
-
-	if lastProducerSelection == nil {
+	if !ok {
 		if newSpan.Id != 0 {
-			return errors.New("expected span 0 missing")
+			return errors.New("expected first new span to be span 0")
 		}
 
 		newProducerSelection := &SpanBlockProducerSelection{
