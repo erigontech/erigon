@@ -141,6 +141,7 @@ func StageSequenceBlocksCfg(
 		zk:               zk,
 		txPool:           txPool,
 		txPoolDb:         txPoolDb,
+		yieldSize:        yieldSize,
 	}
 }
 

@@ -12,7 +12,8 @@ try {
       await signer.sendTransaction({ 
         to: "0xB6f9665E564c0ADdA517c698Ebe32BA6Feb5Da35",
         value: hre.ethers.parseEther("0.000000000000000001"),
-        gasPrice: 1, //if allowGreeTransactions flag is not set, the minimum gasPrice is 1gWei
+        gasPrice: 10, //if allowGreeTransactions flag is not set, the minimum gasPrice is 1gWei
+        gasLimit: 40000,
         nonce: i
       });
     } catch(e) {
