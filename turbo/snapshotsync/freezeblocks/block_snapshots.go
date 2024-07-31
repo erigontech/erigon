@@ -642,7 +642,9 @@ func (s *RoSnapshots) OptimisticalyReopenFolder()           { _ = s.ReopenFolder
 func (s *RoSnapshots) OptimisticalyReopenWithDB(db kv.RoDB) { _ = s.ReopenWithDB(db) }
 func (s *RoSnapshots) ReopenFolder() error {
 	kk, _ := s.segments.Get(coresnaptype.Headers.Enum())
-	fmt.Printf("[dbg] alex1: %d\n", len(kk.segments))
+	if kk != nil {
+		fmt.Printf("[dbg] alex1: %d\n", len(kk.segments))
+	}
 
 	files, _, err := typedSegments(s.dir, s.segmentsMin.Load(), s.Types(), false)
 	if err != nil {
