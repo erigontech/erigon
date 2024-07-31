@@ -2303,7 +2303,10 @@ func (s *RoSnapshots) ViewType(t snaptype.Type) (segments []*Segment, release fu
 func (s *RoSnapshots) ViewSingleFile(t snaptype.Type, blockNum uint64) (segment *Segment, ok bool, release func()) {
 	segs, ok := s.segments.Get(t.Enum())
 	if !ok {
-		panic(t.Enum())
+		for _, t := range s.types {
+			fmt.Printf("[dbg] type=%s\n", t.Enum().String())
+		}
+		panic(t.Enum().String())
 		return nil, false, noop
 	}
 
