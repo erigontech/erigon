@@ -367,7 +367,10 @@ func (api *APIImpl) GetBlockTransactionCountByNumber(ctx context.Context, blockN
 
 	if chainConfig.Bor != nil {
 		borStateSyncTxHash := bortypes.ComputeBorTxHash(blockNum, blockHash)
-		_, ok, err := api._blockReader.EventLookup(ctx, tx, borStateSyncTxHash)
+		b, ok, err := api._blockReader.EventLookup(ctx, tx, borStateSyncTxHash) // this returns block number, not the events
+
+		api.logger.Warn("GOT BLOCK NUM", "num", b)
+
 		if err != nil {
 			return nil, err
 		}
