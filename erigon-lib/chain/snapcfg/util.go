@@ -448,3 +448,37 @@ func webseedsParse(in []byte) (res []string) {
 	slices.Sort(res)
 	return res
 }
+
+func LoadRemotePreverified() bool {
+	couldFetch := snapshothashes.LoadSnapshots()
+	// Re-load the preverified hashes
+	Mainnet = fromToml(snapshothashes.Mainnet)
+	Holesky = fromToml(snapshothashes.Holesky)
+	Sepolia = fromToml(snapshothashes.Sepolia)
+	Amoy = fromToml(snapshothashes.Amoy)
+	BorMainnet = fromToml(snapshothashes.BorMainnet)
+	Gnosis = fromToml(snapshothashes.Gnosis)
+	Chiado = fromToml(snapshothashes.Chiado)
+	// Update the known preverified hashes
+	KnownWebseeds = map[string][]string{
+		networkname.MainnetChainName:    webseedsParse(webseed.Mainnet),
+		networkname.SepoliaChainName:    webseedsParse(webseed.Sepolia),
+		networkname.AmoyChainName:       webseedsParse(webseed.Amoy),
+		networkname.BorMainnetChainName: webseedsParse(webseed.BorMainnet),
+		networkname.GnosisChainName:     webseedsParse(webseed.Gnosis),
+		networkname.ChiadoChainName:     webseedsParse(webseed.Chiado),
+		networkname.HoleskyChainName:    webseedsParse(webseed.Holesky),
+	}
+
+	knownPreverified = map[string]Preverified{
+		networkname.MainnetChainName:    Mainnet,
+		networkname.HoleskyChainName:    Holesky,
+		networkname.SepoliaChainName:    Sepolia,
+		networkname.AmoyChainName:       Amoy,
+		networkname.BorMainnetChainName: BorMainnet,
+		networkname.GnosisChainName:     Gnosis,
+		networkname.ChiadoChainName:     Chiado,
+	}
+
+	return couldFetch
+}
