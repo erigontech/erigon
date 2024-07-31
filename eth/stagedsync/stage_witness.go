@@ -136,7 +136,7 @@ func SpawnWitnessStage(s *StageState, rootTx kv.RwTx, cfg WitnessCfg, ctx contex
 			return err
 		}
 
-		batch, rl, err = RewindStagesForWitness(batch, blockNr, &cfg, false, ctx, logger)
+		batch, rl, err = RewindStagesForWitness(batch, blockNr, blockNr, &cfg, false, ctx, logger)
 		if err != nil {
 			return err
 		}
@@ -254,11 +254,11 @@ func PrepareForWitness(tx kv.Tx, block *types.Block, prevRoot libcommon.Hash, rl
 }
 
 // RewindStagesForWitness rewinds the Execution stage to previous block.
-func RewindStagesForWitness(batch *membatchwithdb.MemoryMutation, blockNr uint64, cfg *WitnessCfg, regenerateHash bool, ctx context.Context, logger log.Logger) (*membatchwithdb.MemoryMutation, *trie.RetainList, error) {
+func RewindStagesForWitness(batch *membatchwithdb.MemoryMutation, blockNr, latestBlockNr uint64, cfg *WitnessCfg, regenerateHash bool, ctx context.Context, logger log.Logger) (*membatchwithdb.MemoryMutation, *trie.RetainList, error) {
 	rl := trie.NewRetainList(0)
 
 	// Rewind the Execution stage to previous block
-	unwindState := &UnwindState{ID: stages.Execution, UnwindPoint: blockNr - 1, CurrentBlockNumber: blockNr}
+	unwindState := &UnwindState{ID: stages.Execution, UnwindPoint: blockNr - 1, CurrentBlockNumber: latestBlockNr}
 	stageState := &StageState{ID: stages.Execution, BlockNumber: blockNr}
 
 	txc := wrap.TxContainer{Tx: batch}
@@ -272,13 +272,12 @@ func RewindStagesForWitness(batch *membatchwithdb.MemoryMutation, blockNr uint64
 	pruneMode := prune.Mode{
 		Initialised: false,
 	}
-	var engine consensus.Engine = nil
 	vmConfig := &vm.Config{}
 	dirs := cfg.dirs
 	blockReader := cfg.blockReader
 	syncCfg := ethconfig.Defaults.Sync
 	var agg *libstate.Aggregator = nil
-	execCfg := StageExecuteBlocksCfg(cfg.db, pruneMode, batchSize, nil, engine, vmConfig, nil,
+	execCfg := StageExecuteBlocksCfg(cfg.db, pruneMode, batchSize, cfg.chainConfig, cfg.engine, vmConfig, nil,
 		/*stateStream=*/ false,
 		/*badBlockHalt=*/ true, dirs, blockReader, nil, nil, syncCfg, agg, nil)
 
