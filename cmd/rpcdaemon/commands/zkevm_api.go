@@ -899,9 +899,11 @@ func (api *ZkEvmAPIImpl) getBlockRangeWitness(ctx context.Context, db kv.RoDB, s
 type WitnessMode string
 
 const (
-	WitnessModeNone    WitnessMode = "none"
-	WitnessModeFull    WitnessMode = "full"
-	WitnessModeTrimmed WitnessMode = "trimmed"
+	WitnessModeNone         WitnessMode = "none"
+	WitnessModeFull         WitnessMode = "full"          // if the node mode is "full witness" - will return witness from cache
+	WitnessModeTrimmed      WitnessMode = "trimmed"       // if the node mode is "partial witness" - will return witness from cache
+	WitnessModeFullRegen    WitnessMode = "full_regen"    // forces regenerate no matter the node mode
+	WitnessModeTrimmedRegen WitnessMode = "trimmed_regen" // forces regenerate no matter the node mode
 )
 
 func (api *ZkEvmAPIImpl) GetBatchWitness(ctx context.Context, batchNumber uint64, mode *WitnessMode) (interface{}, error) {
@@ -930,9 +932,14 @@ func (api *ZkEvmAPIImpl) GetBatchWitness(ctx context.Context, batchNumber uint64
 		checkedMode = *mode
 	}
 
-	// we only want to check the cache if no special run mode has been supplied.  If a run mode is supplied
-	// we need to always regenerate the witness from scratch
-	if checkedMode == WitnessModeNone {
+	isWitnessModeNone := checkedMode == WitnessModeNone
+	rpcModeMatchesNodeMode :=
+		checkedMode == WitnessModeFull && api.config.WitnessFull ||
+			checkedMode == WitnessModeTrimmed && !api.config.WitnessFull
+	// we only want to check the cache if no special run mode has been supplied.
+	// or if requested mode matches the node mode
+	// otherwise regenerate it
+	if isWitnessModeNone || rpcModeMatchesNodeMode {
 		hermezDb := hermez_db.NewHermezDbReader(tx)
 		witnessCached, err := hermezDb.GetWitness(batchNumber)
 		if err != nil {
