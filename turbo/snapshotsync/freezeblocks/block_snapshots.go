@@ -559,7 +559,6 @@ func (s *RoSnapshots) rebuildSegments(fileNames []string, open bool, optimistic 
 		if !s.HasType(f.Type) {
 			continue
 		}
-		fmt.Printf("[dbg] again %s\n", f.Type.Enum().String())
 
 		segtype, ok := s.segments.Get(f.Type.Enum())
 		if !ok {
