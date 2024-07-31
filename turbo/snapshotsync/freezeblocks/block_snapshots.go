@@ -2284,6 +2284,7 @@ func (s *RoSnapshots) ViewType(t snaptype.Type) (segments []*Segment, release fu
 func (s *RoSnapshots) ViewSingleFile(t snaptype.Type, blockNum uint64) (segment *Segment, ok bool, release func()) {
 	segs, ok := s.segments.Get(t.Enum())
 	if !ok {
+		panic(t.Enum())
 		return nil, false, noop
 	}
 
@@ -2302,6 +2303,9 @@ func (s *RoSnapshots) ViewSingleFile(t snaptype.Type, blockNum uint64) (segment 
 		}
 	}
 	segs.lock.RUnlock()
+	if len(segs.segments) > 0 {
+		log.Warn("[dbg] last se ", "t", t.Enum().String(), "from", segs.segments[len(segs.segments)-1].from, "to", segs.segments[len(segs.segments)-1].to, "look", blockNum)
+	}
 	return nil, false, noop
 }
 
