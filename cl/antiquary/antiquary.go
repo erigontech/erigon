@@ -106,7 +106,7 @@ func (a *Antiquary) Loop() error {
 	reCheckTicker := time.NewTicker(3 * time.Second)
 	defer reCheckTicker.Stop()
 
-	minWaitTime := time.Now().Add(20 * time.Minute)
+	minWaitTime := time.Now().Add(time.Hour)
 	// Fist part of the antiquate is to download caplin snapshots
 	for !statsReply.Completed && time.Now().After(minWaitTime) {
 		select {
@@ -212,6 +212,7 @@ func (a *Antiquary) Loop() error {
 			if !a.backfilled.Load() {
 				continue
 			}
+
 			var (
 				from uint64
 				to   uint64
