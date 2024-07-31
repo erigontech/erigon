@@ -134,27 +134,21 @@ func GetDiskInfo(nodeDisk string) DiskInfo {
 	}
 }
 
-func GetCPUInfo() CPUInfo {
-	modelName := ""
-	cores := 0
-	mhz := float64(0)
+func GetCPUInfo() []CPUInfo {
+	cpuinfo := make([]CPUInfo, 0)
 
 	cpuInfo, err := cpu.Info()
 	if err == nil {
 		for _, info := range cpuInfo {
-			modelName = info.ModelName
-			cores = int(info.Cores)
-			mhz = info.Mhz
-
-			break
+			cpuinfo = append(cpuinfo, CPUInfo{
+				ModelName: info.ModelName,
+				Cores:     int32(info.Cores),
+				Mhz:       info.Mhz,
+			})
 		}
 	}
 
-	return CPUInfo{
-		ModelName: modelName,
-		Cores:     cores,
-		Mhz:       mhz,
-	}
+	return cpuinfo
 }
 
 func ReadRAMInfoFromTx(tx kv.Tx) ([]byte, error) {
@@ -188,7 +182,7 @@ func RAMInfoUpdater(info RAMInfo) func(tx kv.RwTx) error {
 	return PutDataToTable(kv.DiagSystemInfo, SystemRamInfoKey, info)
 }
 
-func CPUInfoUpdater(info CPUInfo) func(tx kv.RwTx) error {
+func CPUInfoUpdater(info []CPUInfo) func(tx kv.RwTx) error {
 	return PutDataToTable(kv.DiagSystemInfo, SystemCpuInfoKey, info)
 }
 
