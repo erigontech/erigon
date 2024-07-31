@@ -284,7 +284,7 @@ type RoSnapshots struct {
 	cfg         ethconfig.BlocksFreezing
 	logger      log.Logger
 
-	// allows for pruning segments - this is the min availible segment
+	// allows for pruning segments - this is the min available segment
 	segmentsMin atomic.Uint64
 }
 
@@ -833,6 +833,9 @@ func (s *RoSnapshots) buildMissedIndices(logPrefix string, ctx context.Context, 
 	failedIndexes := make(map[string]error, 0)
 
 	s.segments.Scan(func(segtype snaptype.Enum, value *segments) bool {
+		value.lock.Lock()
+		defer value.lock.Unlock()
+
 		for _, segment := range value.segments {
 			info := segment.FileInfo(dir)
 
