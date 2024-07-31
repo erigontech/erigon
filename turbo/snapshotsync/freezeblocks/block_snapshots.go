@@ -714,7 +714,7 @@ func (s *RoSnapshots) ReopenWithDB(db kv.RoDB) error {
 }
 
 func (s *RoSnapshots) Close() {
-	log.Warn("[dbg] Close")
+	log.Warn("[dbg] Close", "stack", dbg.Stack())
 	defer log.Warn("[dbg] Close end")
 
 	if s == nil {
