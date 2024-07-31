@@ -18,6 +18,7 @@ package downloader
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -60,7 +61,7 @@ func (s *GrpcServer) Add(ctx context.Context, request *proto_downloader.AddReque
 
 	for i, it := range request.Items {
 		if it.Path == "" {
-			return nil, fmt.Errorf("field 'path' is required")
+			return nil, errors.New("field 'path' is required")
 		}
 
 		select {
@@ -91,7 +92,7 @@ func (s *GrpcServer) Delete(ctx context.Context, request *proto_downloader.Delet
 	torrents := s.d.torrentClient.Torrents()
 	for _, name := range request.Paths {
 		if name == "" {
-			return nil, fmt.Errorf("field 'path' is required")
+			return nil, errors.New("field 'path' is required")
 		}
 		for _, t := range torrents {
 			select {
@@ -136,6 +137,9 @@ func (s *GrpcServer) Stats(ctx context.Context, request *proto_downloader.StatsR
 		BytesTotal:     stats.BytesTotal,
 		UploadRate:     stats.UploadRate,
 		DownloadRate:   stats.DownloadRate,
+		HashRate:       stats.HashRate,
+		FlushRate:      stats.FlushRate,
+		CompletionRate: stats.CompletionRate,
 	}, nil
 }
 

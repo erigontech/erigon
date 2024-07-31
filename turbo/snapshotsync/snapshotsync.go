@@ -47,6 +47,46 @@ import (
 	"github.com/erigontech/erigon/turbo/services"
 )
 
+var greatOtterBanner = `
+   _____ _             _   _                ____  _   _                                       
+  / ____| |           | | (_)              / __ \| | | |                                      
+ | (___ | |_ __ _ _ __| |_ _ _ __   __ _  | |  | | |_| |_ ___ _ __ ___ _   _ _ __   ___       
+  \___ \| __/ _ | '__| __| | '_ \ / _ | | |  | | __| __/ _ \ '__/ __| | | | '_ \ / __|      
+  ____) | || (_| | |  | |_| | | | | (_| | | |__| | |_| ||  __/ |  \__ \ |_| | | | | (__ _ _ _ 
+ |_____/ \__\__,_|_|   \__|_|_| |_|\__, |  \____/ \__|\__\___|_|  |___/\__, |_| |_|\___(_|_|_)
+                                    __/ |                               __/ |                 
+                                   |___/                               |___/                                            
+
+
+                                        .:-===++**++===-:                                 
+                                   :=##%@@@@@@@@@@@@@@@@@@%#*=.                           
+                               .=#@@@@@@%##+====--====+##@@@@@@@#=.     ...               
+                   .=**###*=:+#@@@@%*=:.                  .:=#%@@@@#==#@@@@@%#-           
+                 -#@@@@%%@@@@@@%+-.                            .=*%@@@@#*+*#@@@%=         
+                =@@@*:    -%%+:                                    -#@+.     =@@@-        
+                %@@#     +@#.                                        :%%-     %@@*        
+                @@@+    +%=.     -+=                        :=-       .#@-    %@@#        
+                *@@%:  #@-      =@@@*                      +@@@%.       =@= -*@@@:        
+                 #@@@##@+       #@@@@.                     %@@@@=        #@%@@@#-         
+                  :#@@@@:       +@@@#       :=++++==-.     *@@@@:        =@@@@-           
+                  =%@@%=         +#*.    =#%#+==-==+#%%=:  .+#*:         .#@@@#.          
+                 +@@%+.               .+%+-.          :=##-                :#@@@-         
+                -@@@=                -%#:     ..::.      +@*                 +@@%.        
+    .::-========*@@@..              -@#      +%@@@@%.     -@#               .-@@@+=======-
+.:-====----:::::#@@%:--=::::..      #@:      *@@@@@%:      *@=      ..:-:-=--:@@@+::::----
+                =@@@:.......        @@        :+@#=.       -@+        .......-@@@:        
+       .:=++####*%@@%=--::::..      @@   %#     %*    :@*  -@+      ...::---+@@@#*#*##+=-:
+  ..--==::..     :%@@@-   ..:::..   @@   +@*:.-#@@+-.-#@-  -@+   ..:::..  .+@@@#.     ..:-
+                  .#@@@##-:.        @@    :+#@%=.:+@@#=.   -@+        .-=#@@@@+           
+             -=+++=--+%@@%+=.       @@       +%*=+#%-      -@+       :=#@@@%+--++++=:     
+         .=**=:.      .=*@@@@@#=:.  @@         :--.        -@+  .-+#@@@@%+:       .:=*+-. 
+        ::.              .=*@@@@@@%#@@+=-:..         ..::=+#@%#@@@@@@%+-.             ..-.
+                            ..=*#@@@@@@@@@@@@@@@%%@@@@@@@@@@@@@@%#+-.                     
+                                  .:-==++*#######%######**+==-:                           
+
+             
+`
+
 type CaplinMode int
 
 const (
@@ -244,13 +284,6 @@ func WaitForDownloader(ctx context.Context, logPrefix string, headerchain, blobs
 		return nil
 	}
 
-	if headerchain {
-		snapshots.Close()
-		if cc.Bor != nil {
-			borSnapshots.Close()
-		}
-	}
-
 	//Corner cases:
 	// - Erigon generated file X with hash H1. User upgraded Erigon. New version has preverified file X with hash H2. Must ignore H2 (don't send to Downloader)
 	// - Erigon "download once": means restart/upgrade/downgrade must not download files (and will be fast)
@@ -317,9 +350,6 @@ func WaitForDownloader(ctx context.Context, logPrefix string, headerchain, blobs
 
 	}
 
-	// TODO: https://github.com/erigontech/erigon/issues/11271
-	time.Sleep(10 * time.Second)
-
 	downloadStartTime := time.Now()
 	const logInterval = 20 * time.Second
 	logEvery := time.NewTicker(logInterval)
@@ -333,11 +363,17 @@ func WaitForDownloader(ctx context.Context, logPrefix string, headerchain, blobs
 
 	// Print download progress until all segments are available
 
+	firstLog := true
 	for !stats.Completed {
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
 		case <-logEvery.C:
+			if firstLog && headerchain {
+				log.Info("[ChadSync] Starting Ottersync")
+				log.Info(greatOtterBanner)
+				firstLog = false
+			}
 			if stats, err = snapshotDownloader.Stats(ctx, &proto_downloader.StatsRequest{}); err != nil {
 				log.Warn("Error while waiting for snapshots progress", "err", err)
 			} else {
@@ -497,7 +533,7 @@ func logStats(ctx context.Context, stats *proto_downloader.StatsReply, startTime
 			remainingBytes = stats.BytesTotal - stats.BytesCompleted
 		}
 
-		downloadTimeLeft := calculateTime(remainingBytes, stats.DownloadRate)
+		downloadTimeLeft := calculateTime(remainingBytes, stats.CompletionRate)
 
 		log.Info(fmt.Sprintf("[%s] %s", logPrefix, logReason),
 			"progress", fmt.Sprintf("%.2f%% %s/%s", stats.Progress, common.ByteCount(stats.BytesCompleted), common.ByteCount(stats.BytesTotal)),
@@ -505,6 +541,9 @@ func logStats(ctx context.Context, stats *proto_downloader.StatsReply, startTime
 			"time-left", downloadTimeLeft,
 			"total-time", time.Since(startTime).Round(time.Second).String(),
 			"download", common.ByteCount(stats.DownloadRate)+"/s",
+			"flush", common.ByteCount(stats.FlushRate)+"/s",
+			"hash", common.ByteCount(stats.HashRate)+"/s",
+			"complete", common.ByteCount(stats.CompletionRate)+"/s",
 			"upload", common.ByteCount(stats.UploadRate)+"/s",
 			"peers", stats.PeersUnique,
 			"files", stats.FilesTotal,

@@ -21,6 +21,7 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/binary"
+	"errors"
 	"fmt"
 	"io"
 	"math"
@@ -39,7 +40,7 @@ import (
 	"github.com/erigontech/erigon-lib/recsplit/eliasfano32"
 )
 
-var ErrCollision = fmt.Errorf("duplicate key")
+var ErrCollision = errors.New("duplicate key")
 
 const RecSplitLogPrefix = "recsplit"
 
@@ -349,7 +350,7 @@ func (rs *RecSplit) golombParam(m uint16) int {
 // the slice underlying key is not getting accessed by RecSplit after this invocation.
 func (rs *RecSplit) AddKey(key []byte, offset uint64) error {
 	if rs.built {
-		return fmt.Errorf("cannot add keys after perfect hash function had been built")
+		return errors.New("cannot add keys after perfect hash function had been built")
 	}
 	rs.hasher.Reset()
 	rs.hasher.Write(key) //nolint:errcheck
@@ -582,7 +583,7 @@ func (rs *RecSplit) loadFuncOffset(k, _ []byte, _ etl.CurrentTableReader, _ etl.
 // of building the perfect hash function and writing index into a file
 func (rs *RecSplit) Build(ctx context.Context) error {
 	if rs.built {
-		return fmt.Errorf("already built")
+		return errors.New("already built")
 	}
 	if rs.keysAdded != rs.keyExpectedCount {
 		return fmt.Errorf("rs %s expected keys %d, got %d", rs.indexFileName, rs.keyExpectedCount, rs.keysAdded)

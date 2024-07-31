@@ -100,7 +100,7 @@ func (ath *Authorization) RecoverSigner(data *bytes.Buffer, b []byte) (*libcommo
 	}
 
 	if !crypto.ValidateSignatureValues(sig[64], &ath.R, &ath.S, false) {
-		return nil, fmt.Errorf("invalid signature")
+		return nil, errors.New("invalid signature")
 	}
 
 	pubkey, err := crypto.Ecrecover(hash.Bytes(), sig[:])

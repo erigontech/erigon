@@ -358,7 +358,7 @@ func (tx *DynamicFeeTransaction) AsMessage(s Signer, baseFee *big.Int, rules *ch
 	if baseFee != nil {
 		overflow := msg.gasPrice.SetFromBig(baseFee)
 		if overflow {
-			return msg, fmt.Errorf("gasPrice higher than 2^256-1")
+			return msg, errors.New("gasPrice higher than 2^256-1")
 		}
 	}
 	msg.gasPrice.Add(&msg.gasPrice, tx.Tip)

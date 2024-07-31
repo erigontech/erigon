@@ -21,6 +21,7 @@ import (
 	"context"
 	"crypto/sha1"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -74,7 +75,7 @@ type torrentInfo struct {
 	Completed *time.Time `json:"completed,omitempty"`
 }
 
-func seedableSegmentFiles(dir string, chainName string) ([]string, error) {
+func seedableSegmentFiles(dir string, chainName string, skipSeedableCheck bool) ([]string, error) {
 	files, err := dir2.ListFiles(dir, snaptype.SeedableV2Extensions()...)
 	if err != nil {
 		return nil, err
@@ -90,7 +91,7 @@ func seedableSegmentFiles(dir string, chainName string) ([]string, error) {
 		if !ok || isStateFile {
 			continue
 		}
-		if !snapcfg.Seedable(chainName, ff) {
+		if !skipSeedableCheck && !snapcfg.Seedable(chainName, ff) {
 			continue
 		}
 		res = append(res, name)
@@ -98,7 +99,7 @@ func seedableSegmentFiles(dir string, chainName string) ([]string, error) {
 	return res, nil
 }
 
-func seedableStateFilesBySubDir(dir, subDir string) ([]string, error) {
+func seedableStateFilesBySubDir(dir, subDir string, skipSeedable bool) ([]string, error) {
 	historyDir := filepath.Join(dir, subDir)
 	dir2.MustExist(historyDir)
 	files, err := dir2.ListFiles(historyDir, snaptype.SeedableV3Extensions()...)
@@ -108,7 +109,7 @@ func seedableStateFilesBySubDir(dir, subDir string) ([]string, error) {
 	res := make([]string, 0, len(files))
 	for _, fPath := range files {
 		_, name := filepath.Split(fPath)
-		if !snaptype.E3Seedable(name) {
+		if !skipSeedable && !snaptype.E3Seedable(name) {
 			continue
 		}
 		res = append(res, filepath.Join(subDir, name))
@@ -171,11 +172,11 @@ func BuildTorrentIfNeed(ctx context.Context, fName, root string, torrentFiles *A
 }
 
 // BuildTorrentFilesIfNeed - create .torrent files from .seg files (big IO) - if .seg files were added manually
-func BuildTorrentFilesIfNeed(ctx context.Context, dirs datadir.Dirs, torrentFiles *AtomicTorrentFS, chain string, ignore snapcfg.Preverified) (int, error) {
+func BuildTorrentFilesIfNeed(ctx context.Context, dirs datadir.Dirs, torrentFiles *AtomicTorrentFS, chain string, ignore snapcfg.Preverified, all bool) (int, error) {
 	logEvery := time.NewTicker(20 * time.Second)
 	defer logEvery.Stop()
 
-	files, err := SeedableFiles(dirs, chain)
+	files, err := SeedableFiles(dirs, chain, all)
 	if err != nil {
 		return 0, err
 	}
@@ -494,7 +495,7 @@ func ScheduleVerifyFile(ctx context.Context, t *torrent.Torrent, completePieces 
 				if change.Err != nil {
 					err = change.Err
 				} else {
-					err = fmt.Errorf("unexpected piece change error")
+					err = errors.New("unexpected piece change error")
 				}
 
 				cancel()

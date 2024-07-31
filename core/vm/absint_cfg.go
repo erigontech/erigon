@@ -291,7 +291,7 @@ func (state *astate) String(abbrev bool) string {
 		if len(values) > 1 {
 			e = fmt.Sprintf("{%v}", strings.Join(elm, ","))
 		} else {
-			e = fmt.Sprintf("%v", strings.Join(elm, ","))
+			e = strings.Join(elm, ",")
 		}
 		elms = append(elms, e)
 	}

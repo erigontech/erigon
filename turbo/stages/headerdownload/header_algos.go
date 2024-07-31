@@ -28,6 +28,7 @@ import (
 	"math/big"
 	"slices"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -270,7 +271,7 @@ func (hd *HeaderDownload) logAnchorState() {
 		slices.Sort(bs)
 		for j, b := range bs {
 			if j == 0 {
-				sbb.WriteString(fmt.Sprintf("%d", b))
+				sbb.WriteString(strconv.Itoa(b))
 			} else if j == len(bs)-1 {
 				if bs[j-1]+1 == b {
 					// Close interval

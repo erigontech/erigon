@@ -19,7 +19,7 @@ package stream_test
 import (
 	"bytes"
 	"context"
-	"fmt"
+	"errors"
 	"testing"
 
 	"github.com/erigontech/erigon-lib/kv"
@@ -244,7 +244,7 @@ func TestPaginated(t *testing.T) {
 	})
 	t.Run("error", func(t *testing.T) {
 		i := 0
-		testErr := fmt.Errorf("test")
+		testErr := errors.New("test")
 		s1 := stream.Paginate[uint64](func(pageToken string) (arr []uint64, nextPageToken string, err error) {
 			i++
 			switch i {
@@ -310,7 +310,7 @@ func TestPaginatedDual(t *testing.T) {
 	})
 	t.Run("error", func(t *testing.T) {
 		i := 0
-		testErr := fmt.Errorf("test")
+		testErr := errors.New("test")
 		s1 := stream.PaginateKV(func(pageToken string) (keys, values [][]byte, nextPageToken string, err error) {
 			i++
 			switch i {

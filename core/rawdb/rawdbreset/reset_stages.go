@@ -136,7 +136,7 @@ func ResetExec(ctx context.Context, db kv.RwDB, chain string, tmpDir string, log
 	cleanupList = append(cleanupList, stateV3Buckets...)
 
 	return db.Update(ctx, func(tx kv.RwTx) error {
-		if err := clearStageProgress(tx, stages.Execution, stages.HashState, stages.IntermediateHashes); err != nil {
+		if err := clearStageProgress(tx, stages.Execution); err != nil {
 			return err
 		}
 
@@ -162,10 +162,8 @@ func ResetTxLookup(tx kv.RwTx) error {
 }
 
 var Tables = map[stages.SyncStage][]string{
-	stages.HashState:          {kv.HashedAccounts, kv.HashedStorage, kv.ContractCode},
-	stages.IntermediateHashes: {kv.TrieOfAccounts, kv.TrieOfStorage},
-	stages.CustomTrace:        {},
-	stages.Finish:             {},
+	stages.CustomTrace: {},
+	stages.Finish:      {},
 }
 var stateBuckets = []string{
 	kv.Epoch, kv.PendingEpoch, kv.BorReceipts,

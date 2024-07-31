@@ -19,6 +19,7 @@ package heimdall
 import (
 	"context"
 	"errors"
+	"fmt"
 	"slices"
 	"time"
 
@@ -34,8 +35,8 @@ type Service interface {
 	FetchLatestSpans(ctx context.Context, count uint) ([]*Span, error)
 	FetchCheckpointsFromBlock(ctx context.Context, startBlock uint64) (Waypoints, error)
 	FetchMilestonesFromBlock(ctx context.Context, startBlock uint64) (Waypoints, error)
-	RegisterMilestoneObserver(cb func(*Milestone), opts ...ObserverOption) polygoncommon.UnregisterFunc
-	RegisterSpanObserver(cb func(*Span), opts ...ObserverOption) polygoncommon.UnregisterFunc
+	RegisterMilestoneObserver(callback func(*Milestone), opts ...ObserverOption) polygoncommon.UnregisterFunc
+	RegisterSpanObserver(callback func(*Span), opts ...ObserverOption) polygoncommon.UnregisterFunc
 	Run(ctx context.Context) error
 }
 
@@ -145,8 +146,8 @@ func newSpanFetcher(client HeimdallClient, logger log.Logger) entityFetcher[*Spa
 	)
 }
 
-func (s *service) FetchLatestSpan(ctx context.Context) (*Span, error) {
-	s.spanScraper.Synchronize(ctx)
+func (s *service) FetchLatestSpan(ctx context.Context) (*Span, bool, error) {
+	s.checkpointScraper.Synchronize(ctx)
 	return s.store.Spans().GetLastEntity(ctx)
 }
 
@@ -155,9 +156,12 @@ func (s *service) FetchLatestSpans(ctx context.Context, count uint) ([]*Span, er
 		return nil, errors.New("can't fetch 0 latest spans")
 	}
 
-	span, err := s.FetchLatestSpan(ctx)
+	span, ok, err := s.FetchLatestSpan(ctx)
 	if err != nil {
 		return nil, err
+	}
+	if !ok {
+		return nil, errors.New("can't fetch latest span")
 	}
 
 	latestSpans := make([]*Span, 0, count)
@@ -170,9 +174,12 @@ func (s *service) FetchLatestSpans(ctx context.Context, count uint) ([]*Span, er
 			break
 		}
 
-		span, err = s.store.Spans().GetEntity(ctx, prevSpanRawId-1)
+		span, ok, err = s.store.Spans().GetEntity(ctx, prevSpanRawId-1)
 		if err != nil {
 			return nil, err
+		}
+		if !ok {
+			return nil, errors.New(fmt.Sprintf("can't fetch span %v", prevSpanRawId-1))
 		}
 
 		latestSpans = append(latestSpans, span)

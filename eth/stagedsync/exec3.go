@@ -176,7 +176,7 @@ func ExecV3(ctx context.Context,
 	batchSize := cfg.batchSize
 	chainDb := cfg.db
 	blockReader := cfg.blockReader
-	agg, engine := cfg.agg, cfg.engine
+	engine := cfg.engine
 	chainConfig, genesis := cfg.chainConfig, cfg.genesis
 
 	applyTx := txc.Tx
@@ -194,6 +194,7 @@ func ExecV3(ctx context.Context,
 		}
 	}
 
+	agg := cfg.db.(state2.HasAgg).Agg().(*state2.Aggregator)
 	if initialCycle {
 		agg.SetCollateAndBuildWorkers(min(2, estimate.StateV3Collate.Workers()))
 		agg.SetCompressWorkers(estimate.CompressSnapshot.Workers())
@@ -1100,7 +1101,7 @@ func flushAndCheckCommitmentV3(ctx context.Context, header *types.Header, applyT
 	}
 	logger.Error(fmt.Sprintf("[%s] Wrong trie root of block %d: %x, expected (from header): %x. Block hash: %x", e.LogPrefix(), header.Number.Uint64(), rh, header.Root.Bytes(), header.Hash()))
 	if cfg.badBlockHalt {
-		return false, fmt.Errorf("wrong trie root")
+		return false, errors.New("wrong trie root")
 	}
 	if cfg.hd != nil {
 		cfg.hd.ReportBadHeaderPoS(header.Hash(), header.ParentHash)
@@ -1331,6 +1332,7 @@ func reconstituteStep(last bool,
 		reconWorkers[i] = exec3.NewReconWorker(lock.RLocker(), reconstWorkersCtx, rs, localAs, blockReader, chainConfig, logger, genesis, engine, chainTxs[i])
 		reconWorkers[i].SetTx(roTxs[i])
 		reconWorkers[i].SetChainTx(chainTxs[i])
+		reconWorkers[i].SetDirs(dirs)
 	}
 
 	rollbackCount := uint64(0)
@@ -1531,11 +1533,11 @@ func reconstituteStep(last bool,
 		return err
 	}
 
-	plainStateCollector := etl.NewCollector(fmt.Sprintf("%s recon plainState", s.LogPrefix()), dirs.Tmp, etl.NewSortableBuffer(etl.BufferOptimalSize), logger)
+	plainStateCollector := etl.NewCollector(s.LogPrefix()+" recon plainState", dirs.Tmp, etl.NewSortableBuffer(etl.BufferOptimalSize), logger)
 	defer plainStateCollector.Close()
-	codeCollector := etl.NewCollector(fmt.Sprintf("%s recon code", s.LogPrefix()), dirs.Tmp, etl.NewOldestEntryBuffer(etl.BufferOptimalSize), logger)
+	codeCollector := etl.NewCollector(s.LogPrefix()+" recon code", dirs.Tmp, etl.NewOldestEntryBuffer(etl.BufferOptimalSize), logger)
 	defer codeCollector.Close()
-	plainContractCollector := etl.NewCollector(fmt.Sprintf("%s recon plainContract", s.LogPrefix()), dirs.Tmp, etl.NewSortableBuffer(etl.BufferOptimalSize), logger)
+	plainContractCollector := etl.NewCollector(s.LogPrefix()+" recon plainContract", dirs.Tmp, etl.NewSortableBuffer(etl.BufferOptimalSize), logger)
 	defer plainContractCollector.Close()
 	var transposedKey []byte
 
@@ -1774,7 +1776,7 @@ func ReconstituteState(ctx context.Context, s *StageState, dirs datadir.Dirs, wo
 			return fmt.Errorf("blockNum for mininmaxTxNum=%d not found. See lastBlockNum=%d,lastTxNum=%d", toTxNum, lastBn, lastTn)
 		}
 		if blockNum == 0 {
-			return fmt.Errorf("not enough transactions in the history data")
+			return errors.New("not enough transactions in the history data")
 		}
 		blockNum--
 		txNum, err = rawdbv3.TxNums.Max(tx, blockNum)
@@ -1814,11 +1816,11 @@ func ReconstituteState(ctx context.Context, s *StageState, dirs datadir.Dirs, wo
 		}
 	}
 	db.Close()
-	plainStateCollector := etl.NewCollector(fmt.Sprintf("%s recon plainState", s.LogPrefix()), dirs.Tmp, etl.NewSortableBuffer(etl.BufferOptimalSize), logger)
+	plainStateCollector := etl.NewCollector(s.LogPrefix()+" recon plainState", dirs.Tmp, etl.NewSortableBuffer(etl.BufferOptimalSize), logger)
 	defer plainStateCollector.Close()
-	codeCollector := etl.NewCollector(fmt.Sprintf("%s recon code", s.LogPrefix()), dirs.Tmp, etl.NewOldestEntryBuffer(etl.BufferOptimalSize), logger)
+	codeCollector := etl.NewCollector(s.LogPrefix()+" recon code", dirs.Tmp, etl.NewOldestEntryBuffer(etl.BufferOptimalSize), logger)
 	defer codeCollector.Close()
-	plainContractCollector := etl.NewCollector(fmt.Sprintf("%s recon plainContract", s.LogPrefix()), dirs.Tmp, etl.NewSortableBuffer(etl.BufferOptimalSize), logger)
+	plainContractCollector := etl.NewCollector(s.LogPrefix()+" recon plainContract", dirs.Tmp, etl.NewSortableBuffer(etl.BufferOptimalSize), logger)
 	defer plainContractCollector.Close()
 
 	fillWorker := exec3.NewFillWorker(txNum, aggSteps[len(aggSteps)-1])

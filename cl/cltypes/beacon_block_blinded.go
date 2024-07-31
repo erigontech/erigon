@@ -17,6 +17,7 @@
 package cltypes
 
 import (
+	"errors"
 	"fmt"
 
 	libcommon "github.com/erigontech/erigon-lib/common"
@@ -76,7 +77,7 @@ func (b *SignedBlindedBeaconBlock) Clone() clonable.Clonable {
 
 func (b *SignedBlindedBeaconBlock) Unblind(blockPayload *Eth1Block) (*SignedBeaconBlock, error) {
 	if b == nil {
-		return nil, fmt.Errorf("nil block")
+		return nil, errors.New("nil block")
 	}
 	// check root
 	blindedRoot := b.Block.Body.ExecutionPayload.StateRoot

@@ -22,23 +22,6 @@ import (
 	"golang.org/x/exp/maps"
 )
 
-type SyncStageType string
-
-const (
-	Snapshots           SyncStageType = "Snapshots"
-	BlockHashes         SyncStageType = "BlockHashes"
-	Senders             SyncStageType = "Senders"
-	Execution           SyncStageType = "Execution"
-	HashState           SyncStageType = "HashState"
-	IntermediateHashes  SyncStageType = "IntermediateHashes"
-	CallTraces          SyncStageType = "CallTraces"
-	AccountHistoryIndex SyncStageType = "AccountHistoryIndex"
-	StorageHistoryIndex SyncStageType = "StorageHistoryIndex"
-	LogIndex            SyncStageType = "LogIndex"
-	TxLookup            SyncStageType = "TxLookup"
-	Finish              SyncStageType = "Finish"
-)
-
 type PeerStatistics struct {
 	PeerType     string
 	BytesIn      uint64
@@ -146,10 +129,6 @@ type SnapshotSegmentIndexingStatistics struct {
 	Percent     int    `json:"percent"`
 	Alloc       uint64 `json:"alloc"`
 	Sys         uint64 `json:"sys"`
-}
-
-type SnapshotSegmentIndexingFinishedUpdate struct {
-	SegmentName string `json:"segmentName"`
 }
 
 type SnapshotFillDBStatistics struct {
@@ -328,10 +307,6 @@ func (ti SegmentDownloadStatistics) Type() Type {
 }
 
 func (ti SnapshotIndexingStatistics) Type() Type {
-	return TypeOf(ti)
-}
-
-func (ti SnapshotSegmentIndexingFinishedUpdate) Type() Type {
 	return TypeOf(ti)
 }
 

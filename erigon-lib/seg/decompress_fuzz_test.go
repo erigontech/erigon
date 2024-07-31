@@ -83,7 +83,7 @@ func FuzzDecompressMatch(f *testing.F) {
 				t.Fatalf("MatchCmp: expected match: %v\n", expected)
 			}
 			g.Reset(savePos)
-			ok := g.Match(expected)
+			ok := g.MatchCmp(expected)
 			pos2 := g.dataP
 			if ok != 0 {
 				t.Fatalf("MatchBool: expected match: %v\n", expected)
