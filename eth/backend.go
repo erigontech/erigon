@@ -555,6 +555,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 
 	var heimdallClient heimdall.HeimdallClient
 	var polygonBridge bridge.Service
+	var heimdallService heimdall.Service
 
 	if chainConfig.Bor != nil {
 		if !config.WithoutHeimdall {
@@ -563,12 +564,13 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 
 		if config.PolygonSync {
 			polygonBridge = bridge.Assemble(config.Dirs.DataDir, logger, consensusConfig.(*borcfg.BorConfig), heimdallClient.FetchStateSyncEvents, bor.GenesisContractStateReceiverABI())
+			heimdallService = heimdall.AssembleService(config.HeimdallURL, dirs.DataDir, tmpdir, logger)
 		}
 
 		flags.Milestone = config.WithHeimdallMilestones
 	}
 
-	backend.engine = ethconsensusconfig.CreateConsensusEngine(ctx, stack.Config(), chainConfig, consensusConfig, config.Miner.Notify, config.Miner.Noverify, heimdallClient, config.WithoutHeimdall, blockReader, false /* readonly */, logger, polygonBridge)
+	backend.engine = ethconsensusconfig.CreateConsensusEngine(ctx, stack.Config(), chainConfig, consensusConfig, config.Miner.Notify, config.Miner.Noverify, heimdallClient, config.WithoutHeimdall, blockReader, false /* readonly */, logger, polygonBridge, heimdallService)
 
 	inMemoryExecution := func(txc wrap.TxContainer, header *types.Header, body *types.RawBody, unwindPoint uint64, headersChain []*types.Header, bodiesChain []*types.RawBody,
 		notifications *shards.Notifications) error {
@@ -1001,10 +1003,10 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 			executionRpc,
 			config.LoopBlockLimit,
 			polygonBridge,
+			heimdallService,
 		)
 
 		backend.polygonSyncService = polygonSync
-		backend.engine.(*bor.Bor).HeimdallService = polygonSync.HeimdallService()
 	}
 
 	return backend, nil

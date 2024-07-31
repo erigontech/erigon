@@ -320,7 +320,7 @@ type Bor struct {
 	spanner                Spanner
 	GenesisContractsClient GenesisContracts
 	HeimdallClient         heimdall.HeimdallClient
-	HeimdallService        heimdall.Service
+	heimdallService        heimdall.Service
 
 	// scope event.SubscriptionScope
 	// The fields below are for testing only
@@ -350,6 +350,7 @@ func New(
 	genesisContracts GenesisContracts,
 	logger log.Logger,
 	polygonBridge bridge.Service,
+	heimdallService heimdall.Service,
 ) *Bor {
 	// get bor config
 	borConfig := chainConfig.Bor.(*borcfg.BorConfig)
@@ -377,6 +378,7 @@ func New(
 		logger:                 logger,
 		closeCh:                make(chan struct{}),
 		polygonBridge:          polygonBridge,
+		heimdallService:        heimdallService,
 	}
 
 	c.authorizedSigner.Store(&signer{
@@ -1386,8 +1388,8 @@ func (c *Bor) fetchAndCommitSpan(
 		}
 
 		heimdallSpan = *s
-	} else if c.HeimdallService != nil {
-		span, err := c.HeimdallService.FetchSpan(context.Background(), newSpanID)
+	} else if c.heimdallService != nil {
+		span, err := c.heimdallService.FetchSpan(context.Background(), newSpanID)
 		if err != nil {
 			return err
 		}

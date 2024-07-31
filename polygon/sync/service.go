@@ -33,7 +33,6 @@ import (
 )
 
 type Service interface {
-	HeimdallService() heimdall.Service
 	Run(ctx context.Context) error
 }
 
@@ -60,13 +59,13 @@ func NewService(
 	executionClient executionproto.ExecutionClient,
 	blockLimit uint,
 	polygonBridge bridge.Service,
+	heimdallService heimdall.Service,
 ) Service {
 	borConfig := chainConfig.Bor.(*borcfg.BorConfig)
 	checkpointVerifier := VerifyCheckpointHeaders
 	milestoneVerifier := VerifyMilestoneHeaders
 	blocksVerifier := VerifyBlocks
 	p2pService := p2p.NewService(maxPeers, logger, sentryClient, statusDataProvider.GetStatusData)
-	heimdallService := heimdall.AssembleService(heimdallUrl, dataDir, tmpDir, logger)
 	execution := NewExecutionClient(executionClient)
 	store := NewStore(logger, execution, polygonBridge)
 	blockDownloader := NewBlockDownloader(
@@ -103,10 +102,6 @@ func NewService(
 		heimdallService: heimdallService,
 		bridge:          polygonBridge,
 	}
-}
-
-func (s *service) HeimdallService() heimdall.Service {
-	return s.heimdallService
 }
 
 func (s *service) Run(parentCtx context.Context) error {
