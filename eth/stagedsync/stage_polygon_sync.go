@@ -360,7 +360,7 @@ func (s polygonSyncStageCheckpointStore) GetLastEntity(ctx context.Context) (*he
 		return nil, false, err
 	}
 	if !ok {
-		return nil, false, errors.New("last checkpoint not found")
+		return nil, false, nil
 	}
 
 	return s.GetEntity(ctx, id)
@@ -472,7 +472,7 @@ func (s polygonSyncStageMilestoneStore) GetLastEntity(ctx context.Context) (*hei
 		return nil, false, err
 	}
 	if !ok {
-		return nil, false, errors.New("last milestone not found")
+		return nil, false, nil
 	}
 
 	return s.GetEntity(ctx, id)
@@ -582,7 +582,7 @@ func (s polygonSyncStageSpanStore) GetLastEntity(ctx context.Context) (*heimdall
 		return nil, false, err
 	}
 	if !ok {
-		return nil, false, errors.New("last span not found")
+		return nil, false, nil
 	}
 
 	return s.GetEntity(ctx, id)
