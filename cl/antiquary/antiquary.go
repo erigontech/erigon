@@ -209,9 +209,6 @@ func (a *Antiquary) Loop() error {
 	for {
 		select {
 		case <-retirementTicker.C:
-			if err := a.sn.BuildMissingIndices(a.ctx, a.logger); err != nil {
-				return err
-			}
 			if !a.backfilled.Load() {
 				continue
 			}
