@@ -551,10 +551,6 @@ func (s *RoSnapshots) rebuildSegments(fileNames []string, open bool, optimistic 
 	var segmentsMax uint64
 	var segmentsMaxSet bool
 
-	for _, t := range s.types {
-		fmt.Printf("[dbg] type %s\n", t.Enum().String())
-	}
-
 	for _, fName := range fileNames {
 		f, isState, ok := snaptype.ParseFileName(s.dir, fName)
 		if !ok || isState {
@@ -667,7 +663,10 @@ func (s *RoSnapshots) ReopenFolder() error {
 
 	v := s.View()
 	z := v.Headers()
-	fmt.Printf("[dbg] alex: %d, %s\n", len(z), list)
+	for _, t := range s.types {
+		fmt.Printf("[dbg] type %s\n", t.Enum().String())
+	}
+	fmt.Printf("[dbg] alex: %d\n", len(z))
 	v.Close()
 	return nil
 }
