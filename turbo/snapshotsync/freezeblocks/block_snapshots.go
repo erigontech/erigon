@@ -663,6 +663,7 @@ func (s *RoSnapshots) ReopenFolder() error {
 
 	v := s.View()
 	z := v.Headers()
+	s.HasType(coresnaptype.Headers)
 	for _, t := range s.types {
 		fmt.Printf("[dbg] type %s\n", t.Enum().String())
 	}
