@@ -284,13 +284,6 @@ func WaitForDownloader(ctx context.Context, logPrefix string, headerchain, blobs
 		return nil
 	}
 
-	if headerchain {
-		snapshots.Close()
-		if cc.Bor != nil {
-			borSnapshots.Close()
-		}
-	}
-
 	//Corner cases:
 	// - Erigon generated file X with hash H1. User upgraded Erigon. New version has preverified file X with hash H2. Must ignore H2 (don't send to Downloader)
 	// - Erigon "download once": means restart/upgrade/downgrade must not download files (and will be fast)
@@ -356,9 +349,6 @@ func WaitForDownloader(ctx context.Context, logPrefix string, headerchain, blobs
 		break
 
 	}
-
-	// TODO: https://github.com/erigontech/erigon/issues/11271
-	time.Sleep(10 * time.Second)
 
 	downloadStartTime := time.Now()
 	const logInterval = 20 * time.Second
