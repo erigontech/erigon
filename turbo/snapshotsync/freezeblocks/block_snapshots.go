@@ -556,6 +556,11 @@ func (s *RoSnapshots) rebuildSegments(fileNames []string, open bool, optimistic 
 
 		segtype, ok := s.segments.Get(f.Type.Enum())
 		if !ok {
+
+			for _, t := range s.types {
+				fmt.Printf("[dbg] %s\n", t.Enum().String())
+			}
+			panic(f.Type.Enum().String())
 			segtype = &segments{}
 			s.segments.Set(f.Type.Enum(), segtype)
 			segtype.lock.Lock() // this will be unlocked by defer s.unlockSegments() above
