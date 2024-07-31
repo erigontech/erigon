@@ -2305,7 +2305,10 @@ func (s *RoSnapshots) ViewSingleFile(t snaptype.Type, blockNum uint64) (segment 
 	segs.lock.RUnlock()
 	if len(segs.segments) > 0 {
 		log.Warn("[dbg] last se ", "t", t.Enum().String(), "from", segs.segments[len(segs.segments)-1].from, "to", segs.segments[len(segs.segments)-1].to, "look", blockNum)
+	} else {
+		log.Warn("[dbg] zero segents!!!!")
 	}
+
 	return nil, false, noop
 }
 
