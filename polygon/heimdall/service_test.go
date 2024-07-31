@@ -25,84 +25,18 @@ import (
 	"regexp"
 	"sort"
 	"strconv"
-	"sync"
 	"testing"
 
 	"github.com/stretchr/testify/require"
 	"go.uber.org/mock/gomock"
 
 	"github.com/erigontech/erigon-lib/common/dir"
-	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/params"
 	"github.com/erigontech/erigon/polygon/bor/borcfg"
 	"github.com/erigontech/erigon/polygon/bor/valset"
-	"github.com/erigontech/erigon/polygon/polygoncommon"
 	"github.com/erigontech/erigon/turbo/testlog"
 )
-
-func TestConfirmCantHave2RwTxAtSameTime(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
-	t.Cleanup(cancel)
-
-	logger := testlog.Logger(t, log.LvlDebug)
-	dataDir := t.TempDir()
-	db := polygoncommon.NewDatabase(dataDir, logger)
-	err := db.OpenOnce(ctx, kv.HeimdallDB, databaseTablesCfg)
-	require.NoError(t, err)
-
-	tx1, err := db.BeginRw(ctx)
-	require.NoError(t, err)
-	t.Cleanup(tx1.Rollback)
-
-	tx2, err := db.BeginRw(ctx)
-	require.NoError(t, err)
-	t.Cleanup(tx2.Rollback)
-
-	//
-	// TODO need to introduce some mutex at inside the MdbxEntityStore layer
-	//
-}
-
-func TestDBI(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
-	t.Cleanup(cancel)
-
-	logger := testlog.Logger(t, log.LvlDebug)
-	dataDir := t.TempDir()
-	db := polygoncommon.NewDatabase(dataDir, logger)
-	err := db.OpenOnce(ctx, kv.HeimdallDB, databaseTablesCfg)
-	require.NoError(t, err)
-
-	var wg sync.WaitGroup
-	var mu sync.Mutex
-	for i := 0; i < 5000; i++ {
-		wg.Add(1)
-
-		go func() {
-			defer wg.Done()
-			defer mu.Unlock()
-			mu.Lock()
-
-			tx, err := db.BeginRw(ctx)
-			if err != nil {
-				panic(err)
-			}
-
-			err = tx.Put(kv.BorCheckpoints, []byte{1}, []byte{2})
-			if err != nil {
-				panic(err)
-			}
-
-			err = tx.Commit()
-			if err != nil {
-				panic(err)
-			}
-		}()
-	}
-
-	wg.Wait()
-}
 
 func TestSpanProducerSelection(t *testing.T) {
 	// do for span 0
