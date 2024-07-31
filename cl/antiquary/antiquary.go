@@ -105,8 +105,10 @@ func (a *Antiquary) Loop() error {
 	}
 	reCheckTicker := time.NewTicker(3 * time.Second)
 	defer reCheckTicker.Stop()
+
+	minWaitTime := time.Now().Add(20 * time.Minute)
 	// Fist part of the antiquate is to download caplin snapshots
-	for !statsReply.Completed {
+	for !statsReply.Completed && time.Now().After(minWaitTime) {
 		select {
 		case <-reCheckTicker.C:
 			statsReply, err = a.downloader.Stats(a.ctx, &proto_downloader.StatsRequest{})
