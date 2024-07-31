@@ -1458,15 +1458,15 @@ func setUpBlockReader(ctx context.Context, db kv.RwDB, dirs datadir.Dirs, snConf
 
 	agg.SetProduceMod(snConfig.Snapshot.ProduceE3)
 
-	allSnapshots.OptimisticalyReopenFolder()
-	if isBor {
-		allBorSnapshots.OptimisticalyReopenFolder()
-	}
 	g := &errgroup.Group{}
 	g.Go(func() error {
+		allSnapshots.OptimisticalyReopenFolder()
 		return nil
 	})
 	g.Go(func() error {
+		if isBor {
+			allBorSnapshots.OptimisticalyReopenFolder()
+		}
 		return nil
 	})
 	g.Go(func() error {
