@@ -37,10 +37,10 @@ func generateCellRow(tb testing.TB, size int) (row []*Cell, bitmap uint16) {
 	var bm uint16
 	for i := 0; i < len(row); i++ {
 		row[i] = new(Cell)
-		row[i].HashLen = 32
+		row[i].hashLen = 32
 		n, err := rand.Read(row[i].hash[:])
 		require.NoError(tb, err)
-		require.EqualValues(tb, row[i].HashLen, n)
+		require.EqualValues(tb, row[i].hashLen, n)
 
 		th := rand.Intn(120)
 		switch {
@@ -373,7 +373,7 @@ func TestUpdateTree_TouchPlainKey(t *testing.T) {
 
 	for i := 0; i < len(sortedUniqUpds); i++ {
 		require.EqualValues(t, sortedUniqUpds[i].key, pk[i])
-		require.EqualValues(t, sortedUniqUpds[i].val, upd[i].CodeHashOrStorage[:upd[i].ValLength])
+		require.EqualValues(t, sortedUniqUpds[i].val, upd[i].Storage[:upd[i].StorageLen])
 	}
 
 	pk, upd = utDirect.List(true)

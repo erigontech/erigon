@@ -1088,51 +1088,67 @@ func (sdc *SharedDomainsCommitmentContext) PutBranch(prefix []byte, data []byte,
 	return sdc.sharedDomains.updateCommitmentData(prefix, data, prevData, prevStep)
 }
 
-func (sdc *SharedDomainsCommitmentContext) GetAccount(plainKey []byte, cell *commitment.Cell) error {
+func (sdc *SharedDomainsCommitmentContext) GetAccount(plainKey []byte) (*commitment.Update, error) {
 	encAccount, _, err := sdc.sharedDomains.DomainGet(kv.AccountsDomain, plainKey, nil)
 	if err != nil {
-		return fmt.Errorf("GetAccount failed: %w", err)
+		return nil, fmt.Errorf("GetAccount failed: %w", err)
 	}
-	cell.Nonce = 0
-	cell.Balance.Clear()
+	u := new(commitment.Update)
+	u.Reset()
+
 	if len(encAccount) > 0 {
 		nonce, balance, chash := types.DecodeAccountBytesV3(encAccount)
-		cell.Nonce = nonce
-		cell.Balance.Set(balance)
+		u.Flags |= commitment.NonceUpdate
+		u.Nonce = nonce
+		u.Flags |= commitment.BalanceUpdate
+		u.Balance.Set(balance)
 		if len(chash) > 0 {
-			copy(cell.CodeHash[:], chash)
+			u.Flags |= commitment.CodeUpdate
+			copy(u.CodeHash[:], chash)
 		}
 	}
-	if bytes.Equal(cell.CodeHash[:], commitment.EmptyCodeHash) {
-		cell.Delete = len(encAccount) == 0
-		return nil
+	if bytes.Equal(u.CodeHash[:], commitment.EmptyCodeHash) {
+		if len(encAccount) == 0 {
+			u.Flags = commitment.DeleteUpdate
+		}
+		return u, nil
 	}
 
 	code, _, err := sdc.sharedDomains.DomainGet(kv.CodeDomain, plainKey, nil)
 	if err != nil {
-		return fmt.Errorf("GetAccount: failed to read latest code: %w", err)
+		return nil, fmt.Errorf("GetAccount/Code: failed to read latest code: %w", err)
 	}
 	if len(code) > 0 {
 		sdc.keccak.Reset()
 		sdc.keccak.Write(code)
-		sdc.keccak.Read(cell.CodeHash[:])
+		sdc.keccak.Read(u.CodeHash[:])
+		u.Flags |= commitment.CodeUpdate
+
 	} else {
-		cell.CodeHash = commitment.EmptyCodeHashArray
+		copy(u.CodeHash[:], commitment.EmptyCodeHashArray[:])
 	}
-	cell.Delete = len(encAccount) == 0 && len(code) == 0
-	return nil
+
+	if len(encAccount) == 0 && len(code) == 0 {
+		u.Flags = commitment.DeleteUpdate
+	}
+	return u, nil
 }
 
-func (sdc *SharedDomainsCommitmentContext) GetStorage(plainKey []byte, cell *commitment.Cell) error {
+func (sdc *SharedDomainsCommitmentContext) GetStorage(plainKey []byte) (*commitment.Update, error) {
 	// Look in the summary table first
 	enc, _, err := sdc.sharedDomains.DomainGet(kv.StorageDomain, plainKey, nil)
 	if err != nil {
-		return err
+		return nil, err
 	}
-	cell.StorageLen = len(enc)
-	copy(cell.Storage[:], enc)
-	cell.Delete = cell.StorageLen == 0
-	return nil
+	u := new(commitment.Update)
+	u.StorageLen = len(enc)
+	if len(enc) == 0 {
+		u.Flags = commitment.DeleteUpdate
+	} else {
+		u.Flags |= commitment.StorageUpdate
+		copy(u.Storage[:u.StorageLen], enc)
+	}
+	return u, nil
 }
 
 func (sdc *SharedDomainsCommitmentContext) Reset() {

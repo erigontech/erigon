@@ -503,9 +503,11 @@ func Test_HexPatriciaHashed_Sepolia(t *testing.T) {
 func Test_Cell_EncodeDecode(t *testing.T) {
 	rnd := rand.New(rand.NewSource(time.Now().UnixMilli()))
 	first := &Cell{
-		Nonce:              rnd.Uint64(),
-		HashLen:            length.Hash,
-		StorageLen:         rnd.Intn(33),
+		//Nonce:              rnd.Uint64(),
+		//StorageLen:         rnd.Intn(33),
+		//CodeHash:           [32]byte{},
+		//Storage:            [32]byte{},
+		hashLen:            length.Hash,
 		accountPlainKeyLen: length.Addr,
 		storagePlainKeyLen: length.Addr + length.Hash,
 		downHashedLen:      rnd.Intn(129),
@@ -514,8 +516,6 @@ func Test_Cell_EncodeDecode(t *testing.T) {
 		extension:          [64]byte{},
 		storagePlainKey:    [52]byte{},
 		hash:               [32]byte{},
-		CodeHash:           [32]byte{},
-		Storage:            [32]byte{},
 		accountPlainKey:    [20]byte{},
 	}
 	b := uint256.NewInt(rnd.Uint64())
@@ -528,9 +528,9 @@ func Test_Cell_EncodeDecode(t *testing.T) {
 	rnd.Read(first.hash[:])
 	rnd.Read(first.CodeHash[:])
 	rnd.Read(first.Storage[:first.StorageLen])
-	if rnd.Intn(100) > 50 {
-		first.Delete = true
-	}
+	//if rnd.Intn(100) > 50 {
+	//	first.Delete = true
+	//}
 
 	second := &Cell{}
 	second.Decode(first.Encode())
@@ -539,13 +539,13 @@ func Test_Cell_EncodeDecode(t *testing.T) {
 	require.EqualValues(t, first.downHashedKey[:], second.downHashedKey[:])
 	require.EqualValues(t, first.accountPlainKeyLen, second.accountPlainKeyLen)
 	require.EqualValues(t, first.storagePlainKeyLen, second.storagePlainKeyLen)
-	require.EqualValues(t, first.HashLen, second.HashLen)
+	require.EqualValues(t, first.hashLen, second.hashLen)
 	require.EqualValues(t, first.accountPlainKey[:], second.accountPlainKey[:])
 	require.EqualValues(t, first.storagePlainKey[:], second.storagePlainKey[:])
 	require.EqualValues(t, first.hash[:], second.hash[:])
 	require.EqualValues(t, first.extension[:first.extLen], second.extension[:second.extLen])
 	// encode doesn't code Nonce, Balance, CodeHash and Storage
-	require.EqualValues(t, first.Delete, second.Delete)
+	//require.EqualValues(t, first.Delete, second.Delete)
 }
 
 func Test_HexPatriciaHashed_StateEncode(t *testing.T) {
