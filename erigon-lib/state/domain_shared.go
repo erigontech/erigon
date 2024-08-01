@@ -1021,7 +1021,7 @@ type SharedDomainsCommitmentContext struct {
 	mode          commitment.Mode
 	branches      map[string]cachedBranch
 	keccak        cryptozerocopy.KeccakState
-	updates       *commitment.UpdateTree
+	updates       *commitment.Updates
 	patriciaTrie  commitment.Trie
 	justRestored  atomic.Bool
 }
