@@ -30,47 +30,18 @@ import (
 	"github.com/stretchr/testify/require"
 	"go.uber.org/mock/gomock"
 
+	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/dir"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/params"
 	"github.com/erigontech/erigon/polygon/bor/borcfg"
-	"github.com/erigontech/erigon/polygon/bor/valset"
 	"github.com/erigontech/erigon/turbo/testlog"
 )
 
-func TestSpanProducerSelection(t *testing.T) {
-	// do for span 0
-	spanZero := &Span{}
-	validatorSet := valset.NewValidatorSet(spanZero.Producers())
-	accumPriorities := SpanBlockProducerSelection{
-		SpanId:    SpanIdAt(0),
-		Producers: validatorSet.Validators,
-	}
-
-	// then onwards for every new span need to do
-	// 1. validatorSet.IncrementProposerPriority(sprintCountInSpan)
-	// 2. validatorSet.UpdateWithChangeSet
-	logger := testlog.Logger(t, log.LvlDebug)
-	newSpan := &Span{}
-	validatorSet = valset.GetUpdatedValidatorSet(validatorSet, newSpan.Producers(), logger)
-	validatorSet.IncrementProposerPriority(1)
-	accumPriorities = SpanBlockProducerSelection{
-		SpanId:    SpanId(1),
-		Producers: validatorSet.Validators,
-	}
-
-	fmt.Println(accumPriorities)
-
-	// have a span producers tracker component that the heimdall service uses
-	// it registers for receiving new span updates
-	// upon changing from span X to span Y it performs UpdateWithChangeSet
-	// and persists the new producer priorities in the DB
-	// TODO implement this component
-}
-
 const spanTestDataDir = "testdata/amoy/spans"
+const proposerSequenceTestDataDir = "testdata/amoy/getSnapshotProposerSequence"
 
-func TestServiceFetchLatestSpans(t *testing.T) {
+func TestService(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)
 	ctrl := gomock.NewController(t)
@@ -154,9 +125,74 @@ func TestServiceFetchLatestSpans(t *testing.T) {
 		}
 	}()
 
-	spans, err := svc.FetchLatestSpans(ctx, 3)
-	require.NoError(t, err)
-	require.Equal(t, spans[0].Id, SpanId(1548))
-	require.Equal(t, spans[1].Id, SpanId(1549))
-	require.Equal(t, spans[2].Id, SpanId(1550))
+	t.Run("FetchLatestSpans", func(t *testing.T) {
+		spans, err := svc.FetchLatestSpans(ctx, 3)
+		require.NoError(t, err)
+		require.Equal(t, spans[0].Id, SpanId(1548))
+		require.Equal(t, spans[1].Id, SpanId(1549))
+		require.Equal(t, spans[2].Id, SpanId(1550))
+	})
+
+	t.Run("Producers", func(t *testing.T) {
+		// span 0
+		producersTest(ctx, t, svc, 1)   // start
+		producersTest(ctx, t, svc, 255) // end
+		// span 167
+		producersTest(ctx, t, svc, 1062656) // start
+		producersTest(ctx, t, svc, 1069055) // end
+		// span 168 - first span that has changes to selected producers
+		producersTest(ctx, t, svc, 1069056) // start
+		producersTest(ctx, t, svc, 1072256) // middle
+		producersTest(ctx, t, svc, 1075455) // end
+		// span 169
+		producersTest(ctx, t, svc, 1075456) // start
+		producersTest(ctx, t, svc, 1081855) // end
+		// span 182 - second span that has changes to selected producers
+		producersTest(ctx, t, svc, 1158656) // start
+		producersTest(ctx, t, svc, 1165055) // end
+		// span 1279
+		producersTest(ctx, t, svc, 8179456) // start
+		producersTest(ctx, t, svc, 8185855) // end
+		// span 1280 - span where we discovered the need for this API
+		producersTest(ctx, t, svc, 8185856) // start
+		producersTest(ctx, t, svc, 8187309) // middle where we discovered error
+		producersTest(ctx, t, svc, 8192255) // end
+	})
+}
+
+func producersTest(ctx context.Context, t *testing.T, svc Service, blockNum uint64) {
+	t.Run(fmt.Sprintf("blockNum_%d", blockNum), func(t *testing.T) {
+		b, err := os.ReadFile(fmt.Sprintf("%s/blockNum_%d.json", proposerSequenceTestDataDir, blockNum))
+		require.NoError(t, err)
+		var proposerSequenceResponse getSnapshotProposerSequenceResponse
+		err = json.Unmarshal(b, &proposerSequenceResponse)
+		require.NoError(t, err)
+		want := proposerSequenceResponse.Result
+
+		producers, err := svc.Producers(ctx, blockNum)
+		require.NoError(t, err)
+
+		errInfoMsgArgs := []interface{}{"want: %v\nhave: %v\n", want, producers}
+		require.Equal(t, len(want.Signers), len(producers.Validators), errInfoMsgArgs...)
+		for _, signer := range want.Signers {
+			_, producer := producers.GetByAddress(signer.Signer)
+			producerDifficulty, err := producers.Difficulty(producer.Address)
+			require.NoError(t, err)
+			require.Equal(t, signer.Difficulty, producerDifficulty, errInfoMsgArgs...)
+		}
+	})
+}
+
+// getSnapshotProposerSequenceResponse is reflecting the result from BOR API bor_getSnapshotProposerSequence for testing
+type getSnapshotProposerSequenceResponse struct {
+	Result proposerSequenceResult `json:"result"`
+}
+
+type proposerSequenceResult struct {
+	Signers []difficultiesKV
+}
+
+type difficultiesKV struct {
+	Signer     common.Address
+	Difficulty uint64
 }
