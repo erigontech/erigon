@@ -136,7 +136,6 @@ import (
 	"github.com/erigontech/erigon/turbo/shards"
 	"github.com/erigontech/erigon/turbo/silkworm"
 	"github.com/erigontech/erigon/turbo/snapshotsync/freezeblocks"
-	"github.com/erigontech/erigon/turbo/snapshotsync/snap"
 	stages2 "github.com/erigontech/erigon/turbo/stages"
 	"github.com/erigontech/erigon/turbo/stages/headerdownload"
 )
@@ -238,7 +237,6 @@ const blockBufferSize = 128
 // New creates a new Ethereum object (including the
 // initialisation of the common Ethereum object)
 func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger log.Logger) (*Ethereum, error) {
-	config.Snapshot.Enabled = config.Sync.UseSnapshots
 	if config.Miner.GasPrice == nil || config.Miner.GasPrice.Sign() <= 0 {
 		logger.Warn("Sanitizing invalid miner gas price", "provided", config.Miner.GasPrice, "updated", ethconfig.Defaults.Miner.GasPrice)
 		config.Miner.GasPrice = new(big.Int).Set(ethconfig.Defaults.Miner.GasPrice)
@@ -330,21 +328,6 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 
 	setBorDefaultMinerGasPrice(chainConfig, config, logger)
 	setBorDefaultTxPoolPriceLimit(chainConfig, config.TxPool, logger)
-
-	if err := chainKv.Update(context.Background(), func(tx kv.RwTx) error {
-		isCorrectSync, useSnapshots, err := snap.EnsureNotChanged(tx, config.Snapshot)
-		if err != nil {
-			return err
-		}
-		// if we are in the incorrect syncmode then we change it to the appropriate one
-		if !isCorrectSync {
-			config.Sync.UseSnapshots = useSnapshots
-			config.Snapshot.Enabled = ethconfig.UseSnapshotsByChainName(chainConfig.ChainName) && useSnapshots
-		}
-		return nil
-	}); err != nil {
-		return nil, err
-	}
 
 	logger.Info("Initialised chain configuration", "config", chainConfig, "genesis", genesis.Hash())
 	if dbg.OnlyCreateDB {
@@ -555,6 +538,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 
 	var heimdallClient heimdall.HeimdallClient
 	var polygonBridge bridge.Service
+	var heimdallService heimdall.Service
 
 	if chainConfig.Bor != nil {
 		if !config.WithoutHeimdall {
@@ -563,12 +547,13 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 
 		if config.PolygonSync {
 			polygonBridge = bridge.Assemble(config.Dirs.DataDir, logger, consensusConfig.(*borcfg.BorConfig), heimdallClient.FetchStateSyncEvents, bor.GenesisContractStateReceiverABI())
+			heimdallService = heimdall.AssembleService(chainConfig.Bor.(*borcfg.BorConfig), config.HeimdallURL, dirs.DataDir, tmpdir, logger)
 		}
 
 		flags.Milestone = config.WithHeimdallMilestones
 	}
 
-	backend.engine = ethconsensusconfig.CreateConsensusEngine(ctx, stack.Config(), chainConfig, consensusConfig, config.Miner.Notify, config.Miner.Noverify, heimdallClient, config.WithoutHeimdall, blockReader, false /* readonly */, logger, polygonBridge)
+	backend.engine = ethconsensusconfig.CreateConsensusEngine(ctx, stack.Config(), chainConfig, consensusConfig, config.Miner.Notify, config.Miner.Noverify, heimdallClient, config.WithoutHeimdall, blockReader, false /* readonly */, logger, polygonBridge, heimdallService)
 
 	inMemoryExecution := func(txc wrap.TxContainer, header *types.Header, body *types.RawBody, unwindPoint uint64, headersChain []*types.Header, bodiesChain []*types.RawBody,
 		notifications *shards.Notifications) error {
@@ -896,7 +881,8 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 
 	hook := stages2.NewHook(backend.sentryCtx, backend.chainDB, backend.notifications, backend.stagedSync, backend.blockReader, backend.chainConfig, backend.logger, backend.sentriesClient.SetStatus)
 
-	if !config.Sync.UseSnapshots && backend.downloaderClient != nil {
+	useSnapshots := blockReader != nil && (blockReader.FreezingCfg().ProduceE2 || blockReader.FreezingCfg().ProduceE3)
+	if !useSnapshots && backend.downloaderClient != nil {
 		for _, p := range blockReader.AllTypes() {
 			backend.downloaderClient.ProhibitNewDownloads(ctx, &protodownloader.ProhibitNewDownloadsRequest{
 				Type: p.Name(),
@@ -991,15 +977,13 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 		backend.polygonSyncService = polygonsync.NewService(
 			logger,
 			chainConfig,
-			dirs.DataDir,
-			tmpdir,
 			polygonSyncSentry(sentries),
 			p2pConfig.MaxPeers,
 			statusDataProvider,
-			config.HeimdallURL,
 			executionRpc,
 			config.LoopBlockLimit,
 			polygonBridge,
+			heimdallService,
 		)
 	}
 

@@ -133,7 +133,7 @@ func StageSnapshotsCfg(db kv.RwDB,
 
 		freezingCfg := cfg.blockReader.FreezingCfg()
 
-		if freezingCfg.Enabled && freezingCfg.ProduceE2 {
+		if freezingCfg.ProduceE2 {
 			u := cfg.snapshotUploader
 
 			if maxSeedable := u.maxSeedableHeader(); u.cfg.syncConfig.FrozenBlockLimit > 0 && maxSeedable > u.cfg.syncConfig.FrozenBlockLimit {
@@ -242,9 +242,6 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 	}
 
 	if !s.CurrentSyncCycle.IsFirstCycle {
-		return nil
-	}
-	if !cfg.blockReader.FreezingCfg().Enabled {
 		return nil
 	}
 
@@ -505,71 +502,69 @@ func SnapshotsPrune(s *PruneState, cfg SnapshotsCfg, ctx context.Context, tx kv.
 	}
 
 	freezingCfg := cfg.blockReader.FreezingCfg()
-	if freezingCfg.Enabled {
-		if cfg.blockRetire.HasNewFrozenFiles() || cfg.agg.HasNewFrozenFiles() {
-			ac := cfg.agg.BeginFilesRo()
-			defer ac.Close()
-			aggFiles := ac.Files()
-			ac.Close()
+	if cfg.blockRetire.HasNewFrozenFiles() || cfg.agg.HasNewFrozenFiles() {
+		ac := cfg.agg.BeginFilesRo()
+		defer ac.Close()
+		aggFiles := ac.Files()
+		ac.Close()
 
-			if err := rawdb.WriteSnapshots(tx, cfg.blockReader.FrozenFiles(), aggFiles); err != nil {
-				return err
-			}
-		}
-
-		if freezingCfg.ProduceE2 {
-			//TODO: initialSync maybe save files progress here
-
-			var minBlockNumber uint64
-
-			if cfg.snapshotUploader != nil {
-				minBlockNumber = cfg.snapshotUploader.minBlockNumber()
-			}
-
-			if s.CurrentSyncCycle.IsInitialCycle {
-				cfg.blockRetire.SetWorkers(estimate.CompressSnapshot.Workers())
-			} else {
-				cfg.blockRetire.SetWorkers(1)
-			}
-
-			cfg.blockRetire.RetireBlocksInBackground(ctx, minBlockNumber, s.ForwardProgress, log.LvlDebug, func(downloadRequest []services.DownloadRequest) error {
-				if cfg.snapshotDownloader != nil && !reflect.ValueOf(cfg.snapshotDownloader).IsNil() {
-					if err := snapshotsync.RequestSnapshotsDownload(ctx, downloadRequest, cfg.snapshotDownloader); err != nil {
-						return err
-					}
-				}
-
-				return nil
-			}, func(l []string) error {
-				//if cfg.snapshotUploader != nil {
-				// TODO - we need to also remove files from the uploader (100k->500K transition)
-				//}
-
-				if !(cfg.snapshotDownloader == nil || reflect.ValueOf(cfg.snapshotDownloader).IsNil()) {
-					_, err := cfg.snapshotDownloader.Delete(ctx, &protodownloader.DeleteRequest{Paths: l})
-					return err
-				}
-
-				return nil
-			}, func() error {
-				filesDeleted, err := pruneBlockSnapshots(ctx, cfg, logger)
-				if filesDeleted && cfg.notifier != nil {
-					cfg.notifier.Events.OnNewSnapshot()
-				}
-				return err
-			})
-
-			//	cfg.agg.BuildFilesInBackground()
-
-		}
-
-		pruneLimit := 100
-		if s.CurrentSyncCycle.IsInitialCycle {
-			pruneLimit = 10_000
-		}
-		if _, err := cfg.blockRetire.PruneAncientBlocks(tx, pruneLimit); err != nil {
+		if err := rawdb.WriteSnapshots(tx, cfg.blockReader.FrozenFiles(), aggFiles); err != nil {
 			return err
 		}
+	}
+
+	if freezingCfg.ProduceE2 {
+		//TODO: initialSync maybe save files progress here
+
+		var minBlockNumber uint64
+
+		if cfg.snapshotUploader != nil {
+			minBlockNumber = cfg.snapshotUploader.minBlockNumber()
+		}
+
+		if s.CurrentSyncCycle.IsInitialCycle {
+			cfg.blockRetire.SetWorkers(estimate.CompressSnapshot.Workers())
+		} else {
+			cfg.blockRetire.SetWorkers(1)
+		}
+
+		cfg.blockRetire.RetireBlocksInBackground(ctx, minBlockNumber, s.ForwardProgress, log.LvlDebug, func(downloadRequest []services.DownloadRequest) error {
+			if cfg.snapshotDownloader != nil && !reflect.ValueOf(cfg.snapshotDownloader).IsNil() {
+				if err := snapshotsync.RequestSnapshotsDownload(ctx, downloadRequest, cfg.snapshotDownloader); err != nil {
+					return err
+				}
+			}
+
+			return nil
+		}, func(l []string) error {
+			//if cfg.snapshotUploader != nil {
+			// TODO - we need to also remove files from the uploader (100k->500K transition)
+			//}
+
+			if !(cfg.snapshotDownloader == nil || reflect.ValueOf(cfg.snapshotDownloader).IsNil()) {
+				_, err := cfg.snapshotDownloader.Delete(ctx, &protodownloader.DeleteRequest{Paths: l})
+				return err
+			}
+
+			return nil
+		}, func() error {
+			filesDeleted, err := pruneBlockSnapshots(ctx, cfg, logger)
+			if filesDeleted && cfg.notifier != nil {
+				cfg.notifier.Events.OnNewSnapshot()
+			}
+			return err
+		})
+
+		//	cfg.agg.BuildFilesInBackground()
+
+	}
+
+	pruneLimit := 100
+	if s.CurrentSyncCycle.IsInitialCycle {
+		pruneLimit = 10_000
+	}
+	if _, err := cfg.blockRetire.PruneAncientBlocks(tx, pruneLimit); err != nil {
+		return err
 	}
 
 	if cfg.snapshotUploader != nil {
@@ -689,7 +684,7 @@ func (u *snapshotUploader) init(ctx context.Context, logger log.Logger) {
 	if u.files == nil {
 		freezingCfg := u.cfg.blockReader.FreezingCfg()
 
-		if freezingCfg.Enabled && freezingCfg.ProduceE2 {
+		if freezingCfg.ProduceE2 {
 			u.files = map[string]*uploadState{}
 			u.start(ctx, logger)
 		}

@@ -76,11 +76,11 @@ func SpawnTxLookup(s *StageState, tx kv.RwTx, toBlock uint64, cfg TxLookupCfg, c
 	}
 	logPrefix := s.LogPrefix()
 	endBlock, err := s.ExecutionAt(tx)
-	if s.BlockNumber > endBlock { // Erigon will self-heal (download missed blocks) eventually
-		return nil
-	}
 	if err != nil {
 		return err
+	}
+	if s.BlockNumber > endBlock { // Erigon will self-heal (download missed blocks) eventually
+		return nil
 	}
 	if toBlock > 0 {
 		endBlock = min(endBlock, toBlock)
@@ -97,13 +97,11 @@ func SpawnTxLookup(s *StageState, tx kv.RwTx, toBlock uint64, cfg TxLookupCfg, c
 		}
 	}
 
-	if cfg.blockReader.FreezingCfg().Enabled {
-		if cfg.blockReader.FrozenBlocks() > startBlock {
-			// Snapshot .idx files already have TxLookup index - then no reason iterate over them here
-			startBlock = cfg.blockReader.FrozenBlocks()
-			if err = s.UpdatePrune(tx, startBlock); err != nil { // prune func of this stage will use this value to prevent all ancient blocks traversal
-				return err
-			}
+	if cfg.blockReader.FrozenBlocks() > startBlock {
+		// Snapshot .idx files already have TxLookup index - then no reason iterate over them here
+		startBlock = cfg.blockReader.FrozenBlocks()
+		if err = s.UpdatePrune(tx, startBlock); err != nil { // prune func of this stage will use this value to prevent all ancient blocks traversal
+			return err
 		}
 	}
 
@@ -209,10 +207,9 @@ func UnwindTxLookup(u *UnwindState, s *StageState, tx kv.RwTx, cfg TxLookupCfg, 
 	// end key needs to be s.BlockNumber + 1 and not s.BlockNumber, because
 	// the keys in BlockBody table always have hash after the block number
 	blockFrom, blockTo := u.UnwindPoint+1, s.BlockNumber+1
-	if cfg.blockReader.FreezingCfg().Enabled {
-		smallestInDB := cfg.blockReader.FrozenBlocks()
-		blockFrom, blockTo = max(blockFrom, smallestInDB), max(blockTo, smallestInDB)
-	}
+	smallestInDB := cfg.blockReader.FrozenBlocks()
+	blockFrom, blockTo = max(blockFrom, smallestInDB), max(blockTo, smallestInDB)
+
 	// etl.Transform uses ExtractEndKey as exclusive bound, therefore blockTo + 1
 	if err := deleteTxLookupRange(tx, s.LogPrefix(), blockFrom, blockTo+1, ctx, cfg, logger); err != nil {
 		return fmt.Errorf("unwind TxLookUp: %w", err)
@@ -243,15 +240,15 @@ func PruneTxLookup(s *PruneState, tx kv.RwTx, cfg TxLookupCfg, ctx context.Conte
 		}
 		defer tx.Rollback()
 	}
-	blockFrom, blockTo := s.PruneProgress, uint64(0)
+	blockFrom := s.PruneProgress
+	var blockTo uint64
 
 	var pruneBor bool
-
 	// Forward stage doesn't write anything before PruneTo point
 	if cfg.prune.History.Enabled() {
 		blockTo = cfg.prune.History.PruneTo(s.ForwardProgress)
 		pruneBor = true
-	} else if cfg.blockReader.FreezingCfg().Enabled {
+	} else {
 		blockTo = cfg.blockReader.CanPruneTo(s.ForwardProgress)
 	}
 	// can't prune much here: because tx_lookup index has crypto-hashed-keys, and 1 block producing hundreds of deletes
