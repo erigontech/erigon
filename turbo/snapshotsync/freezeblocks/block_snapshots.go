@@ -294,7 +294,7 @@ func NewRoSnapshots(cfg ethconfig.BlocksFreezing, snapDir string, segmentsMin ui
 }
 
 func newRoSnapshots(cfg ethconfig.BlocksFreezing, snapDir string, types []snaptype.Type, segmentsMin uint64, logger log.Logger) *RoSnapshots {
-	var segs map[snaptype.Enum]*segments
+	segs := map[snaptype.Enum]*segments{}
 	for _, snapType := range types {
 		segs[snapType.Enum()] = &segments{}
 	}
