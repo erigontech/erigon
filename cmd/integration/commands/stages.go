@@ -78,7 +78,6 @@ import (
 	"github.com/erigontech/erigon/turbo/services"
 	"github.com/erigontech/erigon/turbo/shards"
 	"github.com/erigontech/erigon/turbo/snapshotsync/freezeblocks"
-	"github.com/erigontech/erigon/turbo/snapshotsync/snap"
 	stages2 "github.com/erigontech/erigon/turbo/stages"
 )
 
@@ -445,42 +444,6 @@ var cmdSetPrune = &cobra.Command{
 	},
 }
 
-var cmdSetSnap = &cobra.Command{
-	Use:   "force_set_snap",
-	Short: "Override existing --snapshots flag value (if you know what you are doing)",
-	Run: func(cmd *cobra.Command, args []string) {
-		logger := debug.SetupCobra(cmd, "integration")
-		db, err := openDB(dbCfg(kv.ChainDB, chaindata), true, logger)
-		if err != nil {
-			logger.Error("Opening DB", "error", err)
-			return
-		}
-		defer db.Close()
-		sn, borSn, agg, _ := allSnapshots(cmd.Context(), db, logger)
-		defer sn.Close()
-		defer borSn.Close()
-		defer agg.Close()
-
-		cfg := sn.Cfg()
-		flags := cmd.Flags()
-		if flags.Lookup("snapshots") != nil {
-			cfg.Enabled, err = flags.GetBool("snapshots")
-			if err != nil {
-				panic(err)
-			}
-		}
-
-		if err := db.Update(context.Background(), func(tx kv.RwTx) error {
-			return snap.ForceSetFlags(tx, cfg)
-		}); err != nil {
-			if !errors.Is(err, context.Canceled) {
-				logger.Error(err.Error())
-			}
-			return
-		}
-	},
-}
-
 func init() {
 	withConfig(cmdPrintStages)
 	withDataDir(cmdPrintStages)
@@ -598,13 +561,6 @@ func init() {
 	withChain(cmdRunMigrations)
 	withHeimdall(cmdRunMigrations)
 	rootCmd.AddCommand(cmdRunMigrations)
-
-	withConfig(cmdSetSnap)
-	withDataDir2(cmdSetSnap)
-	withChain(cmdSetSnap)
-	cmdSetSnap.Flags().Bool("snapshots", false, "")
-	must(cmdSetSnap.MarkFlagRequired("snapshots"))
-	rootCmd.AddCommand(cmdSetSnap)
 
 	withConfig(cmdSetPrune)
 	withDataDir(cmdSetPrune)
@@ -1307,15 +1263,9 @@ var _aggSingleton *libstate.Aggregator
 
 func allSnapshots(ctx context.Context, db kv.RoDB, logger log.Logger) (*freezeblocks.RoSnapshots, *freezeblocks.BorRoSnapshots, *libstate.Aggregator, *freezeblocks.CaplinSnapshots) {
 	openSnapshotOnce.Do(func() {
-		var useSnapshots bool
-		_ = db.View(context.Background(), func(tx kv.Tx) error {
-			useSnapshots, _ = snap.Enabled(tx)
-			return nil
-		})
 		dirs := datadir.New(datadirCli)
 
-		//useSnapshots = true
-		snapCfg := ethconfig.NewSnapCfg(useSnapshots, true, true, true)
+		snapCfg := ethconfig.NewSnapCfg(true, true, true)
 
 		_allSnapshotsSingleton = freezeblocks.NewRoSnapshots(snapCfg, dirs.Snap, 0, logger)
 		_allBorSnapshotsSingleton = freezeblocks.NewBorRoSnapshots(snapCfg, dirs.Snap, 0, logger)
@@ -1328,57 +1278,55 @@ func allSnapshots(ctx context.Context, db kv.RoDB, logger log.Logger) (*freezebl
 
 		_aggSingleton.SetProduceMod(snapCfg.ProduceE3)
 
-		if useSnapshots {
-			g := &errgroup.Group{}
-			g.Go(func() error {
-				_allSnapshotsSingleton.OptimisticalyReopenFolder()
-				return nil
-			})
-			g.Go(func() error {
-				_allBorSnapshotsSingleton.OptimisticalyReopenFolder()
-				return nil
-			})
-			g.Go(func() error { return _aggSingleton.OpenFolder() })
-			g.Go(func() error {
-				chainConfig := fromdb.ChainConfig(db)
-				var beaconConfig *clparams.BeaconChainConfig
-				_, beaconConfig, _, err = clparams.GetConfigsByNetworkName(chainConfig.ChainName)
-				if err == nil {
-					_allCaplinSnapshotsSingleton = freezeblocks.NewCaplinSnapshots(snapCfg, beaconConfig, dirs, logger)
-					if err = _allCaplinSnapshotsSingleton.ReopenFolder(); err != nil {
-						return err
-					}
-					_allCaplinSnapshotsSingleton.LogStat("caplin")
+		g := &errgroup.Group{}
+		g.Go(func() error {
+			_allSnapshotsSingleton.OptimisticalyReopenFolder()
+			return nil
+		})
+		g.Go(func() error {
+			_allBorSnapshotsSingleton.OptimisticalyReopenFolder()
+			return nil
+		})
+		g.Go(func() error { return _aggSingleton.OpenFolder() })
+		g.Go(func() error {
+			chainConfig := fromdb.ChainConfig(db)
+			var beaconConfig *clparams.BeaconChainConfig
+			_, beaconConfig, _, err = clparams.GetConfigsByNetworkName(chainConfig.ChainName)
+			if err == nil {
+				_allCaplinSnapshotsSingleton = freezeblocks.NewCaplinSnapshots(snapCfg, beaconConfig, dirs, logger)
+				if err = _allCaplinSnapshotsSingleton.ReopenFolder(); err != nil {
+					return err
 				}
-				return nil
-			})
-
-			g.Go(func() error {
-				ls, er := os.Stat(filepath.Join(dirs.Snap, downloader.ProhibitNewDownloadsFileName))
-				mtime := time.Time{}
-				if er == nil {
-					mtime = ls.ModTime()
-				}
-				logger.Info("[downloads]", "locked", er == nil, "at", mtime.Format("02 Jan 06 15:04 2006"))
-				return nil
-			})
-			err := g.Wait()
-			if err != nil {
-				panic(err)
+				_allCaplinSnapshotsSingleton.LogStat("caplin")
 			}
+			return nil
+		})
 
-			_allSnapshotsSingleton.LogStat("blocks")
-			_allBorSnapshotsSingleton.LogStat("bor")
-			_ = db.View(context.Background(), func(tx kv.Tx) error {
-				ac := _aggSingleton.BeginFilesRo()
-				defer ac.Close()
-				ac.LogStats(tx, func(endTxNumMinimax uint64) (uint64, error) {
-					_, histBlockNumProgress, err := rawdbv3.TxNums.FindBlockNum(tx, endTxNumMinimax)
-					return histBlockNumProgress, err
-				})
-				return nil
-			})
+		g.Go(func() error {
+			ls, er := os.Stat(filepath.Join(dirs.Snap, downloader.ProhibitNewDownloadsFileName))
+			mtime := time.Time{}
+			if er == nil {
+				mtime = ls.ModTime()
+			}
+			logger.Info("[downloads]", "locked", er == nil, "at", mtime.Format("02 Jan 06 15:04 2006"))
+			return nil
+		})
+		err = g.Wait()
+		if err != nil {
+			panic(err)
 		}
+
+		_allSnapshotsSingleton.LogStat("blocks")
+		_allBorSnapshotsSingleton.LogStat("bor")
+		_ = db.View(context.Background(), func(tx kv.Tx) error {
+			ac := _aggSingleton.BeginFilesRo()
+			defer ac.Close()
+			ac.LogStats(tx, func(endTxNumMinimax uint64) (uint64, error) {
+				_, histBlockNumProgress, err := rawdbv3.TxNums.FindBlockNum(tx, endTxNumMinimax)
+				return histBlockNumProgress, err
+			})
+			return nil
+		})
 	})
 	return _allSnapshotsSingleton, _allBorSnapshotsSingleton, _aggSingleton, _allCaplinSnapshotsSingleton
 }
