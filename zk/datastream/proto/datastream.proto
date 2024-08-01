@@ -84,6 +84,7 @@ enum EntryType {
   ENTRY_TYPE_TRANSACTION = 3;
   ENTRY_TYPE_BATCH_END = 4;
   ENTRY_TYPE_UPDATE_GER = 5;
+  ENTRY_TYPE_L2_BLOCK_END = 6;
 }
 
 enum BatchType {
