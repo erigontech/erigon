@@ -11,6 +11,7 @@ import (
 	"github.com/spf13/afero"
 )
 
+// ReadOrFetchLatestBeaconState reads the latest beacon state from disk or fetches it from the network.
 func ReadOrFetchLatestBeaconState(ctx context.Context, dirs datadir.Dirs, beaconCfg *clparams.BeaconChainConfig, caplinConfig clparams.CaplinConfig) (*state.CachingBeaconState, error) {
 	var syncer CheckpointSyncer
 	remoteSync := !caplinConfig.DisabledCheckpointSync

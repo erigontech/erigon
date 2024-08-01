@@ -27,7 +27,7 @@ func NewLocalCheckpointSyncer(genesisState *state.CachingBeaconState, dir afero.
 
 func (l *LocalCheckpointSyncer) GetLatestBeaconState(ctx context.Context) (*state.CachingBeaconState, error) {
 	// Open file {latestStateSubDir}/{fileName}
-	snappyEncoded, err := afero.ReadFile(l.dir, clparams.LocalStateFileName)
+	snappyEncoded, err := afero.ReadFile(l.dir, clparams.LatestStateFileName)
 	if err != nil {
 		log.Warn("could not read local state, starting sync from genesis. Ignore this if this appears on first sync.")
 		return l.genesisState.Copy()
