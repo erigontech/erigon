@@ -484,6 +484,9 @@ func LoadRemotePreverified() bool {
 }
 
 func SetToml(networkName string, toml []byte) {
+	if _, ok := knownPreverified[networkName]; !ok {
+		return
+	}
 	knownPreverified[networkName] = fromToml(toml)
 }
 
