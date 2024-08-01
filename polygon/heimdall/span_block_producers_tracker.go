@@ -8,6 +8,7 @@ import (
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/polygon/bor/borcfg"
 	"github.com/erigontech/erigon/polygon/bor/valset"
+	"github.com/erigontech/erigon/polygon/polygoncommon"
 )
 
 type spanBlockProducersTracker struct {
@@ -15,9 +16,12 @@ type spanBlockProducersTracker struct {
 	borConfig *borcfg.BorConfig
 	store     EntityStore[*SpanBlockProducerSelection]
 	newSpans  chan *Span
+	idle      *polygoncommon.EventNotifier
 }
 
 func (t spanBlockProducersTracker) Producers(ctx context.Context, blockNum uint64) (*valset.ValidatorSet, error) {
+	t.Synchronize(ctx)
+
 	spanId := SpanIdAt(blockNum)
 	producerSelection, ok, err := t.store.GetEntity(ctx, uint64(spanId))
 	if err != nil {
@@ -41,12 +45,19 @@ func (t spanBlockProducersTracker) Run(ctx context.Context) error {
 		case <-ctx.Done():
 			return ctx.Err()
 		case newSpan := <-t.newSpans:
+			t.idle.Reset()
 			err := t.ObserveSpan(ctx, newSpan)
 			if err != nil {
 				return err
 			}
+		default:
+			t.idle.SetAndBroadcast()
 		}
 	}
+}
+
+func (t spanBlockProducersTracker) Synchronize(ctx context.Context) {
+	t.idle.Wait(ctx)
 }
 
 func (t spanBlockProducersTracker) ObserveSpanAsync(span *Span) {
@@ -54,6 +65,8 @@ func (t spanBlockProducersTracker) ObserveSpanAsync(span *Span) {
 }
 
 func (t spanBlockProducersTracker) ObserveSpan(ctx context.Context, newSpan *Span) error {
+	t.logger.Debug(heimdallLogPrefix("block producers tracker observing span"), "id", newSpan.Id)
+
 	lastProducerSelection, ok, err := t.store.GetLastEntity(ctx)
 	if err != nil {
 		return err
