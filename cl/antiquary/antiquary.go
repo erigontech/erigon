@@ -18,7 +18,6 @@ package antiquary
 
 import (
 	"context"
-	"fmt"
 	"math"
 	"sync/atomic"
 	"time"
@@ -98,7 +97,6 @@ func (a *Antiquary) Loop() error {
 	if !clparams.SupportBackfilling(a.cfg.DepositNetworkID) {
 		return nil
 	}
-	fmt.Println("A")
 	statsReply, err := a.downloader.Stats(a.ctx, &proto_downloader.StatsRequest{})
 	if err != nil {
 		return err
