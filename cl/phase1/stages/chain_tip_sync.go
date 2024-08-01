@@ -109,7 +109,7 @@ func fetchBlocksFromReqResp(ctx context.Context, cfg *Cfg, from uint64, count ui
 
 // startFetchingBlocksMissedByGossipAfterSomeTime starts fetching blocks that might have been missed by gossip after a delay.
 // It periodically fetches blocks from the highest seen block up to the current slot and sends the results or errors to the provided channels.
-func startFetchingBlocksMissedByGossipAfterSomeTime(ctx context.Context, cfg *Cfg, args Args, respCh chan *peers.PeeredObject[[]*cltypes.SignedBeaconBlock], errCh chan error) {
+func startFetchingBlocksMissedByGossipAfterSomeTime(ctx context.Context, cfg *Cfg, args Args, respCh chan <-*peers.PeeredObject[[]*cltypes.SignedBeaconBlock], errCh chan error) {
 	// Wait for half the duration of SecondsPerSlot or until the context is done
 	select {
 	case <-time.After((time.Duration(cfg.beaconCfg.SecondsPerSlot) * time.Second) / 2):
