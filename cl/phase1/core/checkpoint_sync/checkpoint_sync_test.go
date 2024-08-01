@@ -52,7 +52,7 @@ func TestLocalCheckpointSyncFromFile(t *testing.T) {
 	enc, err := st.EncodeSSZ(nil)
 	enc = utils.CompressSnappy(enc)
 	require.NoError(t, err)
-	require.NoError(t, afero.WriteFile(f, clparams.LocalStateFileName, enc, 0644))
+	require.NoError(t, afero.WriteFile(f, clparams.LatestStateFileName, enc, 0644))
 
 	genesisState, err := st.Copy()
 	require.NoError(t, err)
