@@ -827,7 +827,8 @@ func ParseCommitmentMode(s string) Mode {
 type Updates struct {
 	keccak cryptozerocopy.KeccakState
 	hasher keyHasher
-	keys   map[string][]byte
+	keys   map[string]struct{}
+	etl    *etl.Collector
 	tree   *btree.BTreeG[*KeyUpdate]
 	mode   Mode
 	tmpdir string
@@ -845,11 +846,35 @@ func NewUpdates(m Mode, tmpdir string, hasher keyHasher) *Updates {
 		mode:   m,
 	}
 	if t.mode == ModeDirect {
-		t.keys = make(map[string][]byte)
+		t.keys = make(map[string]struct{})
+		t.initCollector()
 	} else if t.mode == ModeUpdate {
 		t.tree = btree.NewG[*KeyUpdate](64, keyUpdateLessFn)
 	}
 	return t
+}
+
+func (t *Updates) Mode() Mode { return t.mode }
+
+func (t *Updates) Size() (updates uint64) {
+	switch t.mode {
+	case ModeDirect:
+		return uint64(len(t.keys))
+	case ModeUpdate:
+		return uint64(t.tree.Len())
+	default:
+		return 0
+	}
+}
+
+func (t *Updates) initCollector() {
+	if t.etl != nil {
+		t.etl.Close()
+		t.etl = nil
+	}
+	t.etl = etl.NewCollector("commitment", t.tmpdir, etl.NewSortableBuffer(etl.BufferOptimalSize/2), log.Root().New("update-tree"))
+	t.etl.LogLvl(log.LvlDebug)
+	t.etl.SortAndFlushInBackground(true)
 }
 
 // TouchPlainKey marks plainKey as updated and applies different fn for different key types
@@ -874,20 +899,12 @@ func (t *Updates) TouchPlainKey(key, val []byte, fn func(c *KeyUpdate, val []byt
 		}
 	case ModeDirect:
 		if _, ok := t.keys[string(key)]; !ok {
-			t.keys[string(key)] = t.hasher(key)
+			if err := t.etl.Collect(t.hasher(key), key); err != nil {
+				log.Warn("failed to collect updated key", "key", key, "err", err)
+			}
+			t.keys[string(key)] = struct{}{}
 		}
 	default:
-	}
-}
-
-func (t *Updates) Size() (updates uint64) {
-	switch t.mode {
-	case ModeDirect:
-		return uint64(len(t.keys))
-	case ModeUpdate:
-		return uint64(t.tree.Len())
-	default:
-		return 0
 	}
 }
 
@@ -953,35 +970,25 @@ func (t *Updates) Close() {
 		t.tree.Clear(true)
 		t.tree = nil
 	}
+	if t.etl != nil {
+		t.etl.Close()
+	}
 }
 
 // HashSort sorts and applies fn to each key-value pair in the order of hashed keys.
 func (t *Updates) HashSort(ctx context.Context, fn func(hk, pk []byte) error) error {
 	switch t.mode {
 	case ModeDirect:
-		collector := etl.NewCollector("commitment", t.tmpdir, etl.NewSortableBuffer(etl.BufferOptimalSize/4), log.Root().New("update-tree"))
-		defer collector.Close()
-		collector.LogLvl(log.LvlDebug)
-		collector.SortAndFlushInBackground(true)
-
-		for pk, hk := range t.keys {
-			select {
-			case <-ctx.Done():
-				return nil
-			default:
-			}
-			if err := collector.Collect(hk, []byte(pk)); err != nil {
-				return err
-			}
-		}
 		clear(t.keys)
 
-		err := collector.Load(nil, "", func(k, v []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) error {
+		err := t.etl.Load(nil, "", func(k, v []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) error {
 			return fn(k, v)
 		}, etl.TransformArgs{Quit: ctx.Done()})
 		if err != nil {
 			return err
 		}
+
+		t.initCollector()
 	case ModeUpdate:
 		t.tree.Ascend(func(item *KeyUpdate) bool {
 			select {
