@@ -1189,7 +1189,7 @@ func (iit *InvertedIndexRoTx) garbage(merged *filesItem) (outs []*filesItem) {
 	return garbage(iit.ii.dirtyFiles, iit.files, merged)
 }
 
-func garbage(dirtyFiles *btree.BTreeG[*filesItem], visibleFiles []ctxItem, merged *filesItem) (outs []*filesItem) {
+func garbage(dirtyFiles *btree.BTreeG[*filesItem], visibleFiles []visibleFile, merged *filesItem) (outs []*filesItem) {
 	if merged == nil {
 		return
 	}
@@ -1212,7 +1212,7 @@ func garbage(dirtyFiles *btree.BTreeG[*filesItem], visibleFiles []ctxItem, merge
 	})
 	return outs
 }
-func hasCoverVisibleFile(visibleFiles []ctxItem, item *filesItem) bool {
+func hasCoverVisibleFile(visibleFiles []visibleFile, item *filesItem) bool {
 	for _, f := range visibleFiles {
 		if item.isSubsetOf(f.src) {
 			return true

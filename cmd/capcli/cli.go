@@ -20,6 +20,7 @@ import (
 	"context"
 	"encoding/binary"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"math"
@@ -262,7 +263,7 @@ func (c *ChainEndpoint) Run(ctx *Context) error {
 	// Let's fetch the head first
 	currentBlock, err := retrieveAndSanitizeBlockFromRemoteEndpoint(ctx, beaconConfig, fmt.Sprintf("%s/head", baseUri), nil)
 	if err != nil {
-		return fmt.Errorf("failed to retrieve head: %w, uri: %s", err, fmt.Sprintf("%s/head", baseUri))
+		return fmt.Errorf("failed to retrieve head: %w, uri: %s", err, baseUri+"/head")
 	}
 	currentRoot, err := currentBlock.Block.HashSSZ()
 	if err != nil {
@@ -440,7 +441,7 @@ func (c *CheckSnapshots) Run(ctx *Context) error {
 
 	if genesisHeader == nil {
 		log.Warn("beaconIndices up to", "block", to, "caplinSnapIndexMax", csn.IndicesMax())
-		return fmt.Errorf("genesis header is nil")
+		return errors.New("genesis header is nil")
 	}
 	previousBlockRoot, err := genesisHeader.Header.HashSSZ()
 	if err != nil {
@@ -653,7 +654,7 @@ type ArchiveSanitizer struct {
 
 func getHead(beaconApiURL string) (uint64, error) {
 	headResponse := map[string]interface{}{}
-	req, err := http.NewRequest("GET", fmt.Sprintf("%s/eth/v2/debug/beacon/heads", beaconApiURL), nil)
+	req, err := http.NewRequest("GET", beaconApiURL+"/eth/v2/debug/beacon/heads", nil)
 	if err != nil {
 		return 0, err
 	}
@@ -668,12 +669,12 @@ func getHead(beaconApiURL string) (uint64, error) {
 	}
 	data := headResponse["data"].([]interface{})
 	if len(data) == 0 {
-		return 0, fmt.Errorf("no head found")
+		return 0, errors.New("no head found")
 	}
 	head := data[0].(map[string]interface{})
 	slotStr, ok := head["slot"].(string)
 	if !ok {
-		return 0, fmt.Errorf("no slot found")
+		return 0, errors.New("no slot found")
 	}
 	slot, err := strconv.ParseUint(slotStr, 10, 64)
 	if err != nil {
@@ -702,7 +703,7 @@ func getStateRootAtSlot(beaconApiURL string, slot uint64) (libcommon.Hash, error
 	}
 	data := response["data"].(map[string]interface{})
 	if len(data) == 0 {
-		return libcommon.Hash{}, fmt.Errorf("no head found")
+		return libcommon.Hash{}, errors.New("no head found")
 	}
 	rootStr := data["root"].(string)
 
@@ -833,8 +834,8 @@ func (b *BenchmarkNode) Run(ctx *Context) error {
 
 	for i := uint64(startSlot); i < headSlot; i += uint64(interval) {
 		uri := b.BaseURL + b.Endpoint
-		uri = strings.Replace(uri, "{slot}", fmt.Sprintf("%d", i), 1)
-		uri = strings.Replace(uri, "{epoch}", fmt.Sprintf("%d", i/beaconConfig.SlotsPerEpoch), 1)
+		uri = strings.Replace(uri, "{slot}", strconv.FormatUint(i, 10), 1)
+		uri = strings.Replace(uri, "{epoch}", strconv.FormatUint(i/beaconConfig.SlotsPerEpoch, 10), 1)
 		elapsed, err := timeRequest(uri, b.Accept, b.Method, b.Body)
 		if err != nil {
 			log.Warn("Failed to benchmark", "error", err, "uri", uri)

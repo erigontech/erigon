@@ -193,7 +193,7 @@ func (e *EngineBlockDownloader) loadDownloadedHeaders(tx kv.RwTx) (fromBlock uin
 			return saveHeader(tx, &h, h.Hash())
 		}
 
-		foundPow = h.Difficulty.Cmp(libcommon.Big0) != 0
+		foundPow = h.Difficulty.Sign() != 0
 		if foundPow {
 			if (fromHash == libcommon.Hash{}) {
 				fromHash = h.Hash()

@@ -112,7 +112,7 @@ type blockDownloader struct {
 }
 
 func (d *blockDownloader) DownloadBlocksUsingCheckpoints(ctx context.Context, start uint64) (*types.Header, error) {
-	waypoints, err := d.heimdall.FetchCheckpointsFromBlock(ctx, start)
+	waypoints, err := d.heimdall.CheckpointsFromBlock(ctx, start)
 	if err != nil {
 		return nil, err
 	}
@@ -121,7 +121,7 @@ func (d *blockDownloader) DownloadBlocksUsingCheckpoints(ctx context.Context, st
 }
 
 func (d *blockDownloader) DownloadBlocksUsingMilestones(ctx context.Context, start uint64) (*types.Header, error) {
-	waypoints, err := d.heimdall.FetchMilestonesFromBlock(ctx, start)
+	waypoints, err := d.heimdall.MilestonesFromBlock(ctx, start)
 	if err != nil {
 		return nil, err
 	}
@@ -202,7 +202,7 @@ func (d *blockDownloader) downloadBlocksUsingWaypoints(
 				"peerCount", len(peers),
 				"maxWorkers", d.maxWorkers,
 				"blk/s", fmt.Sprintf("%.2f", float64(blockCount.Load())/time.Since(fetchStartTime).Seconds()),
-				"bytes/s", fmt.Sprintf("%s", common.ByteCount(uint64(float64(blocksTotalSize.Load())/time.Since(fetchStartTime).Seconds()))),
+				"bytes/s", common.ByteCount(uint64(float64(blocksTotalSize.Load())/time.Since(fetchStartTime).Seconds())),
 			)
 
 			blockCount.Store(0)

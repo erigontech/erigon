@@ -18,6 +18,7 @@ package jsonrpc
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	libcommon "github.com/erigontech/erigon-lib/common"
@@ -70,7 +71,7 @@ func (api *ParityAPIImpl) ListStorageKeys(ctx context.Context, account libcommon
 	if err != nil {
 		return nil, err
 	} else if a == nil {
-		return nil, fmt.Errorf("acc not found")
+		return nil, errors.New("acc not found")
 	}
 
 	bn := rawdb.ReadCurrentBlockNumber(tx)

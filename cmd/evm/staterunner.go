@@ -168,7 +168,7 @@ func aggregateResultsFromStateTests(
 			// Run the test and aggregate the result
 			result := &StatetestResult{Name: key, Fork: st.Fork, Pass: true}
 
-			statedb, root, err := test.Run(tx, st, cfg)
+			statedb, root, err := test.Run(tx, st, cfg, dirs)
 			if err != nil {
 				// Test failed, mark as so and dump any state to aid debugging
 				result.Pass, result.Error = false, err.Error()

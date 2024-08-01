@@ -245,7 +245,7 @@ func ReadSavedData(db kv.RoDB) (hinfo HardwareInfo, ssinfo []SyncStage, snpdwl S
 	}
 
 	var ramInfo RAMInfo
-	var cpuInfo CPUInfo
+	var cpuInfo []CPUInfo
 	var diskInfo DiskInfo
 	ParseData(ramBytes, &ramInfo)
 	ParseData(cpuBytes, &cpuInfo)

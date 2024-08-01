@@ -64,7 +64,7 @@ func (s *scraper[TEntity]) Run(ctx context.Context) error {
 	}
 
 	for ctx.Err() == nil {
-		lastKnownId, hasLastKnownId, err := s.store.GetLastEntityId(ctx)
+		lastKnownId, hasLastKnownId, err := s.store.LastEntityId(ctx)
 		if err != nil {
 			return err
 		}

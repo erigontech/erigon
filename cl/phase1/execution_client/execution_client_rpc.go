@@ -18,6 +18,7 @@ package execution_client
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"math/big"
 	"net/http"
@@ -89,7 +90,7 @@ func (cc *ExecutionClientRpc) NewPayload(ctx context.Context, payload *cltypes.E
 	case clparams.DenebVersion:
 		engineMethod = rpc_helper.EngineNewPayloadV3
 	default:
-		return PayloadStatusNone, fmt.Errorf("invalid payload version")
+		return PayloadStatusNone, errors.New("invalid payload version")
 	}
 
 	request := engine_types.ExecutionPayload{
@@ -174,7 +175,7 @@ func (cc *ExecutionClientRpc) ForkChoiceUpdate(ctx context.Context, finalized li
 
 func checkPayloadStatus(payloadStatus *engine_types.PayloadStatus) error {
 	if payloadStatus == nil {
-		return fmt.Errorf("empty payloadStatus")
+		return errors.New("empty payloadStatus")
 	}
 
 	validationError := payloadStatus.ValidationError

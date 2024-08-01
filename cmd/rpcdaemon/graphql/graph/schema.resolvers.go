@@ -20,7 +20,7 @@ import (
 
 // SendRawTransaction is the resolver for the sendRawTransaction field.
 func (r *mutationResolver) SendRawTransaction(ctx context.Context, data string) (string, error) {
-	panic(fmt.Errorf("not implemented: SendRawTransaction - sendRawTransaction"))
+	panic("not implemented: SendRawTransaction - sendRawTransaction")
 }
 
 // Block is the resolver for the block field.
@@ -208,32 +208,32 @@ func (r *queryResolver) Blocks(ctx context.Context, from *uint64, to *uint64) ([
 
 // Pending is the resolver for the pending field.
 func (r *queryResolver) Pending(ctx context.Context) (*model.Pending, error) {
-	panic(fmt.Errorf("not implemented: Pending - pending"))
+	panic("not implemented: Pending - pending")
 }
 
 // Transaction is the resolver for the transaction field.
 func (r *queryResolver) Transaction(ctx context.Context, hash string) (*model.Transaction, error) {
-	panic(fmt.Errorf("not implemented: Transaction - transaction"))
+	panic("not implemented: Transaction - transaction")
 }
 
 // Logs is the resolver for the logs field.
 func (r *queryResolver) Logs(ctx context.Context, filter model.FilterCriteria) ([]*model.Log, error) {
-	panic(fmt.Errorf("not implemented: Logs - logs"))
+	panic("not implemented: Logs - logs")
 }
 
 // GasPrice is the resolver for the gasPrice field.
 func (r *queryResolver) GasPrice(ctx context.Context) (string, error) {
-	panic(fmt.Errorf("not implemented: GasPrice - gasPrice"))
+	panic("not implemented: GasPrice - gasPrice")
 }
 
 // MaxPriorityFeePerGas is the resolver for the maxPriorityFeePerGas field.
 func (r *queryResolver) MaxPriorityFeePerGas(ctx context.Context) (string, error) {
-	panic(fmt.Errorf("not implemented: MaxPriorityFeePerGas - maxPriorityFeePerGas"))
+	panic("not implemented: MaxPriorityFeePerGas - maxPriorityFeePerGas")
 }
 
 // Syncing is the resolver for the syncing field.
 func (r *queryResolver) Syncing(ctx context.Context) (*model.SyncState, error) {
-	panic(fmt.Errorf("not implemented: Syncing - syncing"))
+	panic("not implemented: Syncing - syncing")
 }
 
 // ChainID is the resolver for the chainID field.

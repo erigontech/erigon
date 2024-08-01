@@ -445,8 +445,8 @@ func (d *WebSeeds) ByFileName(name string) (metainfo.UrlList, bool) {
 	return v, ok
 }
 
-var ErrInvalidEtag = fmt.Errorf("invalid etag")
-var ErrEtagNotFound = fmt.Errorf("not found")
+var ErrInvalidEtag = errors.New("invalid etag")
+var ErrEtagNotFound = errors.New("not found")
 
 func (d *WebSeeds) retrieveFileEtag(ctx context.Context, file *url.URL) (string, error) {
 	request, err := http.NewRequestWithContext(ctx, http.MethodHead, file.String(), nil)

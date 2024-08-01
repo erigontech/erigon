@@ -72,7 +72,7 @@ type InvertedIndex struct {
 
 	// _visibleFiles - underscore in name means: don't use this field directly, use BeginFilesRo()
 	// underlying array is immutable - means it's ready for zero-copy use
-	_visibleFiles []ctxItem
+	_visibleFiles []visibleFile
 
 	indexKeysTable  string // txnNum_u64 -> key (k+auto_increment)
 	indexTable      string // k -> txnNum_u64 , Needs to be table with DupSort
@@ -116,7 +116,7 @@ func NewInvertedIndex(cfg iiCfg, aggregationStep uint64, filenameBase, indexKeys
 	}
 	ii.indexList = withHashMap
 
-	ii._visibleFiles = []ctxItem{}
+	ii._visibleFiles = []visibleFile{}
 
 	return &ii, nil
 }
@@ -908,7 +908,7 @@ func (iit *InvertedIndexRoTx) DebugEFAllValuesAreInRange(ctx context.Context, fa
 	logEvery := time.NewTicker(30 * time.Second)
 	defer logEvery.Stop()
 	fromTxNum := fromStep * iit.ii.aggregationStep
-	iterStep := func(item ctxItem) error {
+	iterStep := func(item visibleFile) error {
 		g := item.src.decompressor.MakeGetter()
 		g.Reset(0)
 		defer item.src.decompressor.EnableReadAhead().DisableReadAhead()
@@ -976,7 +976,7 @@ type FrozenInvertedIdxIter struct {
 
 	efIt       stream.Uno[uint64]
 	indexTable string
-	stack      []ctxItem
+	stack      []visibleFile
 
 	nextN   uint64
 	hasNext bool

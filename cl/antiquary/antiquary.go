@@ -18,7 +18,9 @@ package antiquary
 
 import (
 	"context"
+	"io/ioutil"
 	"math"
+	"strings"
 	"sync/atomic"
 	"time"
 
@@ -88,6 +90,25 @@ func NewAntiquary(ctx context.Context, blobStorage blob_storage.BlobStorage, gen
 	}
 }
 
+// Check if the snapshot directory has beacon blocks files aka "contains beaconblock" and has a ".seg" extension over its first layer
+func doesSnapshotDirHaveBeaconBlocksFiles(snapshotDir string) bool {
+	// Iterate over the files in the snapshot directory
+	files, err := ioutil.ReadDir(snapshotDir)
+	if err != nil {
+		return false
+	}
+	for _, file := range files {
+		// Check if the file has a ".seg" extension
+		if file.IsDir() {
+			continue
+		}
+		if strings.Contains(file.Name(), "beaconblock") && strings.HasSuffix(file.Name(), ".seg") {
+			return true
+		}
+	}
+	return false
+}
+
 // Antiquate is the function that starts transactions seeding and shit, very cool but very shit too as a name.
 func (a *Antiquary) Loop() error {
 	if a.downloader == nil || !a.blocks {
@@ -103,8 +124,9 @@ func (a *Antiquary) Loop() error {
 	}
 	reCheckTicker := time.NewTicker(3 * time.Second)
 	defer reCheckTicker.Stop()
+
 	// Fist part of the antiquate is to download caplin snapshots
-	for !statsReply.Completed {
+	for (!statsReply.Completed || !doesSnapshotDirHaveBeaconBlocksFiles(a.dirs.Snap)) && !a.backfilled.Load() {
 		select {
 		case <-reCheckTicker.C:
 			statsReply, err = a.downloader.Stats(a.ctx, &proto_downloader.StatsRequest{})
@@ -208,6 +230,7 @@ func (a *Antiquary) Loop() error {
 			if !a.backfilled.Load() {
 				continue
 			}
+
 			var (
 				from uint64
 				to   uint64

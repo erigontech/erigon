@@ -52,7 +52,6 @@ import (
 	"github.com/erigontech/erigon/cmd/hack/flow"
 	"github.com/erigontech/erigon/cmd/hack/tool"
 	"github.com/erigontech/erigon/common"
-	"github.com/erigontech/erigon/common/paths"
 	"github.com/erigontech/erigon/core"
 	"github.com/erigontech/erigon/core/rawdb"
 	"github.com/erigontech/erigon/core/rawdb/blockio"
@@ -141,7 +140,7 @@ func printCurrentBlockNumber(chaindata string) {
 }
 
 func blocksIO(db kv.RoDB) (services.FullBlockReader, *blockio.BlockWriter) {
-	br := freezeblocks.NewBlockReader(freezeblocks.NewRoSnapshots(ethconfig.BlocksFreezing{Enabled: false}, "", 0, log.New()), nil /* BorSnapshots */)
+	br := freezeblocks.NewBlockReader(freezeblocks.NewRoSnapshots(ethconfig.BlocksFreezing{}, "", 0, log.New()), nil /* BorSnapshots */)
 	bw := blockio.NewBlockWriter()
 	return br, bw
 }
@@ -165,56 +164,6 @@ func printTxHashes(chaindata string, block uint64) error {
 		return err
 	}
 	return nil
-}
-
-func repairCurrent() {
-	historyDb := mdbx.MustOpen("/Volumes/tb4/erigon/ropsten/geth/chaindata")
-	defer historyDb.Close()
-	currentDb := mdbx.MustOpen("statedb")
-	defer currentDb.Close()
-	tool.Check(historyDb.Update(context.Background(), func(tx kv.RwTx) error {
-		return tx.ClearBucket(kv.HashedStorage)
-	}))
-	tool.Check(historyDb.Update(context.Background(), func(tx kv.RwTx) error {
-		newB, err := tx.RwCursor(kv.HashedStorage)
-		if err != nil {
-			return err
-		}
-		count := 0
-		if err := currentDb.View(context.Background(), func(ctx kv.Tx) error {
-			c, err := ctx.Cursor(kv.HashedStorage)
-			if err != nil {
-				return err
-			}
-			for k, v, err := c.First(); k != nil; k, v, err = c.Next() {
-				if err != nil {
-					return err
-				}
-				tool.Check(newB.Put(k, v))
-				count++
-				if count == 10000 {
-					fmt.Printf("Copied %d storage items\n", count)
-				}
-			}
-			return nil
-		}); err != nil {
-			return err
-		}
-		return nil
-	}))
-}
-
-func dumpStorage() {
-	db := mdbx.MustOpen(paths.DefaultDataDir() + "/geth/chaindata")
-	defer db.Close()
-	if err := db.View(context.Background(), func(tx kv.Tx) error {
-		return tx.ForEach(kv.E2StorageHistory, nil, func(k, v []byte) error {
-			fmt.Printf("%x %x\n", k, v)
-			return nil
-		})
-	}); err != nil {
-		panic(err)
-	}
 }
 
 func printBucket(chaindata string) {
@@ -333,7 +282,6 @@ func extractHeaders(chaindata string, block uint64, blockTotalOrOffset int64) er
 
 func extractBodies(datadir string) error {
 	snaps := freezeblocks.NewRoSnapshots(ethconfig.BlocksFreezing{
-		Enabled:    true,
 		KeepBlocks: true,
 		ProduceE2:  false,
 	}, filepath.Join(datadir, "snapshots"), 0, log.New())
@@ -725,7 +673,7 @@ func chainConfig(name string) error {
 	if chainConfig == nil {
 		return fmt.Errorf("unknown name: %s", name)
 	}
-	f, err := os.Create(filepath.Join("params", "chainspecs", fmt.Sprintf("%s.json", name)))
+	f, err := os.Create(filepath.Join("params", "chainspecs", name+".json"))
 	if err != nil {
 		return err
 	}
@@ -930,9 +878,6 @@ func main() {
 	case "testBlockHashes":
 		testBlockHashes(*chaindata, *block, libcommon.HexToHash(*hash))
 
-	case "dumpStorage":
-		dumpStorage()
-
 	case "current":
 		printCurrentBlockNumber(*chaindata)
 
@@ -956,9 +901,6 @@ func main() {
 
 	case "extractBodies":
 		err = extractBodies(*chaindata)
-
-	case "repairCurrent":
-		repairCurrent()
 
 	case "printTxHashes":
 		printTxHashes(*chaindata, uint64(*block))

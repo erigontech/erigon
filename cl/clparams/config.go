@@ -18,12 +18,14 @@ package clparams
 
 import (
 	"crypto/rand"
+	"errors"
 	"fmt"
 	"math"
 	"math/big"
 	mathrand "math/rand"
 	"os"
 	"path"
+	"strconv"
 	"time"
 
 	"gopkg.in/yaml.v2"
@@ -34,7 +36,7 @@ import (
 	"github.com/erigontech/erigon/cl/utils"
 )
 
-var LocalStateFileName = "latest.ssz_snappy"
+var LatestStateFileName = "latest.ssz_snappy"
 
 type CaplinConfig struct {
 	Backfilling         bool
@@ -47,6 +49,8 @@ type CaplinConfig struct {
 	// CaplinMeVRelayUrl is optional and is used to connect to the external builder service.
 	// If it's set, the node will start in builder mode
 	MevRelayUrl string
+	// EnableValidatorMonitor is used to enable the validator monitor metrics and corresponding logs
+	EnableValidatorMonitor bool
 }
 
 func (c CaplinConfig) RelayUrlExist() bool {
@@ -1037,7 +1041,7 @@ func GetConfigsByNetworkName(net string) (*NetworkConfig, *BeaconChainConfig, Ne
 		networkCfg, beaconCfg := GetConfigsByNetwork(HoleskyNetwork)
 		return networkCfg, beaconCfg, HoleskyNetwork, nil
 	default:
-		return nil, nil, MainnetNetwork, fmt.Errorf("chain not found")
+		return nil, nil, MainnetNetwork, errors.New("chain not found")
 	}
 }
 
@@ -1117,6 +1121,6 @@ func SupportBackfilling(networkId uint64) bool {
 }
 
 func EpochToPaths(slot uint64, config *BeaconChainConfig, suffix string) (string, string) {
-	folderPath := path.Clean(fmt.Sprintf("%d", slot/SubDivisionFolderSize))
+	folderPath := path.Clean(strconv.FormatUint(slot/SubDivisionFolderSize, 10))
 	return folderPath, path.Clean(fmt.Sprintf("%s/%d.%s.sz", folderPath, slot, suffix))
 }
