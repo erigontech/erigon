@@ -96,7 +96,7 @@ func (s *scraper[TEntity]) Run(ctx context.Context) error {
 				}
 			}
 
-			s.observers.NotifySync(entities)
+			s.observers.NotifySync(entities) // NotifySync preserves order of events
 		}
 	}
 	return ctx.Err()
