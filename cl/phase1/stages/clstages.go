@@ -227,6 +227,9 @@ func ConsensusClStages(ctx context.Context,
 					return ChainTipSync
 				},
 				ActionFunc: func(ctx context.Context, logger log.Logger, cfg *Cfg, args Args) error {
+					if err := saveHeadStateOnDiskIfNeeded(cfg, cfg.state); err != nil {
+						return err
+					}
 					// We only download historical blocks once
 					cfg.hasDownloaded = true
 					startingRoot, err := cfg.state.BlockRoot()
@@ -241,6 +244,7 @@ func ConsensusClStages(ctx context.Context,
 						cfg.hasDownloaded = false
 						return err
 					}
+					cfg.state = nil // Release the state
 					return nil
 				},
 			},
