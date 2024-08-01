@@ -181,16 +181,24 @@ func NewBranchEncoder(sz uint64, tmpdir string) *BranchEncoder {
 		tmpdir: tmpdir,
 		merger: NewHexBranchMerger(sz / 2),
 	}
-	be.initCollector()
+	//be.initCollector()
 	return be
 }
 
 func (be *BranchEncoder) initCollector() {
+	if be.updates != nil {
+		be.updates.Close()
+	}
 	be.updates = etl.NewCollector("commitment.BranchEncoder", be.tmpdir, etl.NewOldestEntryBuffer(etl.BufferOptimalSize/2), log.Root().New("branch-encoder"))
 	be.updates.LogLvl(log.LvlDebug)
 }
 
 func (be *BranchEncoder) Load(pc PatriciaContext, args etl.TransformArgs) error {
+	// do not collect them at least now. Write them at CollectUpdate into pc
+	if be.updates == nil {
+		return nil
+	}
+
 	if err := be.updates.Load(nil, "", func(prefix, update []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) error {
 		stateValue, stateStep, err := pc.GetBranch(prefix)
 		if err != nil {
@@ -238,9 +246,11 @@ func (be *BranchEncoder) CollectUpdate(
 		}
 	}
 	//fmt.Printf("collectBranchUpdate [%x] -> [%x]\n", prefix, update)
-	if err = be.updates.Collect(prefix, update); err != nil {
+	// has to copy :(
+	if err = ctx.PutBranch(common.Copy(prefix), common.Copy(update), prev, prevStep); err != nil {
 		return 0, err
 	}
+	mxBranchUpdatesApplied.Inc()
 	return lastNibble, nil
 }
 
