@@ -11,13 +11,13 @@ jobs:
     strategy:
       matrix:
         include:
-          - profile_name: "network5"
+          - profile_name: "network8"
             l1_ep: "https://rpc.eu-central-1.gateway.fm/v4/ethereum/non-archival/sepolia"
-            l2_ep: "http://34.175.214.161:8500"
-            bridge_ep: "http://34.175.214.161:8085"
+            l2_ep: "http://34.175.214.161:18124"
+            bridge_ep: "http://34.175.214.161:18080"
             l1_pk_secret_name: "L1_SEPOLIA_FUNDED_PRIVATE_KEY"
             l2_pk_secret_name: "NETWORK5_PRIVATE_KEY_0X126"
-            bridge_addr: "0xb566BE17B22404BD46F389030ec5592F8ffAde12"
+            bridge_addr: "0x27DAeD0badd500740762d1792F3277a7F3DAdd79"
             
     steps:
       - name: Checkout current repository
