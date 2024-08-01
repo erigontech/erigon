@@ -31,6 +31,7 @@ import (
 )
 
 type Service interface {
+	FetchSpan(ctx context.Context, id uint64) (*Span, bool, error)
 	FetchLatestSpans(ctx context.Context, count uint) ([]*Span, error)
 	FetchCheckpointsFromBlock(ctx context.Context, startBlock uint64) (Waypoints, error)
 	FetchMilestonesFromBlock(ctx context.Context, startBlock uint64) (Waypoints, error)
@@ -176,6 +177,15 @@ func (s *service) FetchLatestSpans(ctx context.Context, count uint) ([]*Span, er
 
 	slices.Reverse(latestSpans)
 	return latestSpans, nil
+}
+
+func (s *service) FetchSpan(ctx context.Context, id uint64) (*Span, bool, error) {
+	span, ok, err := s.store.Spans().GetEntity(ctx, id)
+	if err != nil || !ok {
+		return nil, ok, err
+	}
+
+	return span, ok, nil
 }
 
 func castEntityToWaypoint[TEntity Waypoint](entity TEntity) Waypoint {

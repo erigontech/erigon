@@ -569,6 +569,7 @@ func (s *CaplinSnapshots) BuildMissingIndices(ctx context.Context, logger log.Lo
 	if err != nil {
 		return err
 	}
+	noneDone := true
 	for index := range segments {
 		segment := segments[index]
 		// The same slot=>offset mapping is used for both beacon blocks and blob sidecars.
@@ -579,10 +580,13 @@ func (s *CaplinSnapshots) BuildMissingIndices(ctx context.Context, logger log.Lo
 			continue
 		}
 		p := &background.Progress{}
-
+		noneDone = false
 		if err := BeaconSimpleIdx(ctx, segment, s.Salt, s.tmpdir, p, log.LvlDebug, logger); err != nil {
 			return err
 		}
+	}
+	if noneDone {
+		return nil
 	}
 
 	return s.ReopenFolder()
