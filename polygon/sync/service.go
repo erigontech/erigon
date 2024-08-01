@@ -87,7 +87,7 @@ func NewService(
 		blockDownloader,
 		ccBuilderFactory,
 		spansCache,
-		heimdallService.FetchLatestSpans,
+		heimdallService.LatestSpans,
 		events.Events(),
 		logger,
 	)

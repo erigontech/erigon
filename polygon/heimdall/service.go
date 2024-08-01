@@ -31,10 +31,11 @@ import (
 )
 
 type Service interface {
-	FetchSpan(ctx context.Context, id uint64) (*Span, bool, error)
-	FetchLatestSpans(ctx context.Context, count uint) ([]*Span, error)
-	FetchCheckpointsFromBlock(ctx context.Context, startBlock uint64) (Waypoints, error)
-	FetchMilestonesFromBlock(ctx context.Context, startBlock uint64) (Waypoints, error)
+	Span(ctx context.Context, id uint64) (*Span, bool, error)
+	LatestSpans(ctx context.Context, count uint) ([]*Span, error)
+	CheckpointsFromBlock(ctx context.Context, startBlock uint64) (Waypoints, error)
+	MilestonesFromBlock(ctx context.Context, startBlock uint64) (Waypoints, error)
+
 	RegisterMilestoneObserver(callback func(*Milestone), opts ...ObserverOption) polygoncommon.UnregisterFunc
 	RegisterSpanObserver(callback func(*Span), opts ...ObserverOption) polygoncommon.UnregisterFunc
 	Run(ctx context.Context) error
@@ -137,10 +138,10 @@ func newSpanFetcher(client HeimdallClient, logger log.Logger) entityFetcher[*Spa
 
 func (s *service) FetchLatestSpan(ctx context.Context) (*Span, bool, error) {
 	s.checkpointScraper.Synchronize(ctx)
-	return s.store.Spans().GetLastEntity(ctx)
+	return s.store.Spans().LastEntity(ctx)
 }
 
-func (s *service) FetchLatestSpans(ctx context.Context, count uint) ([]*Span, error) {
+func (s *service) LatestSpans(ctx context.Context, count uint) ([]*Span, error) {
 	if count == 0 {
 		return nil, errors.New("can't fetch 0 latest spans")
 	}
@@ -163,7 +164,7 @@ func (s *service) FetchLatestSpans(ctx context.Context, count uint) ([]*Span, er
 			break
 		}
 
-		span, ok, err = s.store.Spans().GetEntity(ctx, prevSpanRawId-1)
+		span, ok, err = s.store.Spans().Entity(ctx, prevSpanRawId-1)
 		if err != nil {
 			return nil, err
 		}
@@ -179,8 +180,8 @@ func (s *service) FetchLatestSpans(ctx context.Context, count uint) ([]*Span, er
 	return latestSpans, nil
 }
 
-func (s *service) FetchSpan(ctx context.Context, id uint64) (*Span, bool, error) {
-	span, ok, err := s.store.Spans().GetEntity(ctx, id)
+func (s *service) Span(ctx context.Context, id uint64) (*Span, bool, error) {
+	span, ok, err := s.store.Spans().Entity(ctx, id)
 	if err != nil || !ok {
 		return nil, ok, err
 	}
@@ -198,13 +199,13 @@ func (s *service) synchronizeScrapers(ctx context.Context) {
 	s.spanScraper.Synchronize(ctx)
 }
 
-func (s *service) FetchCheckpointsFromBlock(ctx context.Context, startBlock uint64) (Waypoints, error) {
+func (s *service) CheckpointsFromBlock(ctx context.Context, startBlock uint64) (Waypoints, error) {
 	s.synchronizeScrapers(ctx)
 	entities, err := s.store.Checkpoints().RangeFromBlockNum(ctx, startBlock)
 	return libcommon.SliceMap(entities, castEntityToWaypoint[*Checkpoint]), err
 }
 
-func (s *service) FetchMilestonesFromBlock(ctx context.Context, startBlock uint64) (Waypoints, error) {
+func (s *service) MilestonesFromBlock(ctx context.Context, startBlock uint64) (Waypoints, error) {
 	s.synchronizeScrapers(ctx)
 	entities, err := s.store.Milestones().RangeFromBlockNum(ctx, startBlock)
 	return libcommon.SliceMap(entities, castEntityToWaypoint[*Milestone]), err

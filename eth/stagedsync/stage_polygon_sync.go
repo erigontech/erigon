@@ -116,7 +116,7 @@ func NewPolygonSyncStageCfg(
 		blockDownloader,
 		polygonsync.NewCanonicalChainBuilderFactory(chainConfig, borConfig, spansCache),
 		spansCache,
-		heimdallService.FetchLatestSpans,
+		heimdallService.LatestSpans,
 		events.Events(),
 		logger,
 	)
@@ -336,7 +336,7 @@ type polygonSyncStageCheckpointStore struct {
 	txActionStream   chan<- polygonSyncStageTxAction
 }
 
-func (s polygonSyncStageCheckpointStore) GetLastEntityId(ctx context.Context) (uint64, bool, error) {
+func (s polygonSyncStageCheckpointStore) LastEntityId(ctx context.Context) (uint64, bool, error) {
 	type response struct {
 		id  uint64
 		ok  bool
@@ -355,8 +355,8 @@ func (s polygonSyncStageCheckpointStore) GetLastEntityId(ctx context.Context) (u
 	return r.id, r.ok, r.err
 }
 
-func (s polygonSyncStageCheckpointStore) GetLastEntity(ctx context.Context) (*heimdall.Checkpoint, bool, error) {
-	id, ok, err := s.GetLastEntityId(ctx)
+func (s polygonSyncStageCheckpointStore) LastEntity(ctx context.Context) (*heimdall.Checkpoint, bool, error) {
+	id, ok, err := s.LastEntityId(ctx)
 	if err != nil {
 		return nil, false, err
 	}
@@ -364,10 +364,10 @@ func (s polygonSyncStageCheckpointStore) GetLastEntity(ctx context.Context) (*he
 		return nil, false, nil
 	}
 
-	return s.GetEntity(ctx, id)
+	return s.Entity(ctx, id)
 }
 
-func (s polygonSyncStageCheckpointStore) GetEntity(ctx context.Context, id uint64) (*heimdall.Checkpoint, bool, error) {
+func (s polygonSyncStageCheckpointStore) Entity(ctx context.Context, id uint64) (*heimdall.Checkpoint, bool, error) {
 	type response struct {
 		v   []byte
 		err error
@@ -452,7 +452,7 @@ type polygonSyncStageMilestoneStore struct {
 	txActionStream  chan<- polygonSyncStageTxAction
 }
 
-func (s polygonSyncStageMilestoneStore) GetLastEntityId(ctx context.Context) (uint64, bool, error) {
+func (s polygonSyncStageMilestoneStore) LastEntityId(ctx context.Context) (uint64, bool, error) {
 	type response struct {
 		id  uint64
 		ok  bool
@@ -471,8 +471,8 @@ func (s polygonSyncStageMilestoneStore) GetLastEntityId(ctx context.Context) (ui
 	return r.id, r.ok, r.err
 }
 
-func (s polygonSyncStageMilestoneStore) GetLastEntity(ctx context.Context) (*heimdall.Milestone, bool, error) {
-	id, ok, err := s.GetLastEntityId(ctx)
+func (s polygonSyncStageMilestoneStore) LastEntity(ctx context.Context) (*heimdall.Milestone, bool, error) {
+	id, ok, err := s.LastEntityId(ctx)
 	if err != nil {
 		return nil, false, err
 	}
@@ -480,10 +480,10 @@ func (s polygonSyncStageMilestoneStore) GetLastEntity(ctx context.Context) (*hei
 		return nil, false, nil
 	}
 
-	return s.GetEntity(ctx, id)
+	return s.Entity(ctx, id)
 }
 
-func (s polygonSyncStageMilestoneStore) GetEntity(ctx context.Context, id uint64) (*heimdall.Milestone, bool, error) {
+func (s polygonSyncStageMilestoneStore) Entity(ctx context.Context, id uint64) (*heimdall.Milestone, bool, error) {
 	type response struct {
 		v   []byte
 		err error
@@ -566,7 +566,7 @@ type polygonSyncStageSpanStore struct {
 	txActionStream chan<- polygonSyncStageTxAction
 }
 
-func (s polygonSyncStageSpanStore) GetLastEntityId(ctx context.Context) (id uint64, ok bool, err error) {
+func (s polygonSyncStageSpanStore) LastEntityId(ctx context.Context) (id uint64, ok bool, err error) {
 	type response struct {
 		id  uint64
 		ok  bool
@@ -585,8 +585,8 @@ func (s polygonSyncStageSpanStore) GetLastEntityId(ctx context.Context) (id uint
 	return r.id, r.ok, r.err
 }
 
-func (s polygonSyncStageSpanStore) GetLastEntity(ctx context.Context) (*heimdall.Span, bool, error) {
-	id, ok, err := s.GetLastEntityId(ctx)
+func (s polygonSyncStageSpanStore) LastEntity(ctx context.Context) (*heimdall.Span, bool, error) {
+	id, ok, err := s.LastEntityId(ctx)
 	if err != nil {
 		return nil, false, err
 	}
@@ -594,10 +594,10 @@ func (s polygonSyncStageSpanStore) GetLastEntity(ctx context.Context) (*heimdall
 		return nil, false, nil
 	}
 
-	return s.GetEntity(ctx, id)
+	return s.Entity(ctx, id)
 }
 
-func (s polygonSyncStageSpanStore) GetEntity(ctx context.Context, id uint64) (*heimdall.Span, bool, error) {
+func (s polygonSyncStageSpanStore) Entity(ctx context.Context, id uint64) (*heimdall.Span, bool, error) {
 	type response struct {
 		v   []byte
 		err error

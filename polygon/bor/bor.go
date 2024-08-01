@@ -256,11 +256,11 @@ type ValidateHeaderTimeSignerSuccessionNumber interface {
 }
 
 type spanReader interface {
-	FetchSpan(ctx context.Context, id uint64) (*heimdall.Span, bool, error)
+	Span(ctx context.Context, id uint64) (*heimdall.Span, bool, error)
 }
 
 type bridgeReader interface {
-	GetEvents(ctx context.Context, blockNum uint64) ([]*types.Message, error)
+	Events(ctx context.Context, blockNum uint64) ([]*types.Message, error)
 }
 
 func ValidateHeaderTime(
@@ -1396,7 +1396,7 @@ func (c *Bor) fetchAndCommitSpan(
 
 		heimdallSpan = *s
 	} else if c.spanReader != nil {
-		span, ok, err := c.spanReader.FetchSpan(context.Background(), newSpanID)
+		span, ok, err := c.spanReader.Span(context.Background(), newSpanID)
 		if err != nil {
 			return err
 		}
@@ -1509,7 +1509,7 @@ func (c *Bor) CommitStates(
 	blockNum := header.Number.Uint64()
 
 	if c.bridgeReader != nil {
-		events, err := c.bridgeReader.GetEvents(c.execCtx, blockNum)
+		events, err := c.bridgeReader.Events(c.execCtx, blockNum)
 		if err != nil {
 			return err
 		}
