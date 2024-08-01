@@ -17,6 +17,7 @@ type spanBlockProducersTracker struct {
 	store     EntityStore[*SpanBlockProducerSelection]
 	newSpans  chan *Span
 	idle      *polygoncommon.EventNotifier
+	wake      *polygoncommon.EventNotifier
 }
 
 func (t spanBlockProducersTracker) Producers(ctx context.Context, blockNum uint64) (*valset.ValidatorSet, error) {
@@ -46,12 +47,14 @@ func (t spanBlockProducersTracker) Run(ctx context.Context) error {
 			return ctx.Err()
 		case newSpan := <-t.newSpans:
 			t.idle.Reset()
+			t.wake.Reset()
 			err := t.ObserveSpan(ctx, newSpan)
 			if err != nil {
 				return err
 			}
 		default:
 			t.idle.SetAndBroadcast()
+			t.wake.Wait(ctx)
 		}
 	}
 }
@@ -61,6 +64,7 @@ func (t spanBlockProducersTracker) Synchronize(ctx context.Context) {
 }
 
 func (t spanBlockProducersTracker) ObserveSpanAsync(span *Span) {
+	t.wake.SetAndBroadcast()
 	t.newSpans <- span
 }
 

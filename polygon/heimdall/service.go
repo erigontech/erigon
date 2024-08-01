@@ -94,6 +94,7 @@ func NewService(borConfig *borcfg.BorConfig, client HeimdallClient, store Servic
 			store:     store.SpanBlockProducerSelections(),
 			newSpans:  make(chan *Span),
 			idle:      polygoncommon.NewEventNotifier(),
+			wake:      polygoncommon.NewEventNotifier(),
 		},
 	}
 }
