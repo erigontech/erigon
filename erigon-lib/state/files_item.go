@@ -39,7 +39,7 @@ import (
 // such files must be hiddend from user (reader), but may be useful for background merging process, etc...
 // list of filesItem must be represented as Tree - because they may overlap
 
-// ctxItem - class is used for good/visible files
+// visibleFile - class is used for good/visible files
 type filesItem struct {
 	decompressor         *seg.Decompressor
 	index                *recsplit.Index
@@ -173,9 +173,9 @@ func deleteMergeFile(dirtyFiles *btree2.BTreeG[*filesItem], outs []*filesItem, f
 	}
 }
 
-// ctxItem is like filesItem but only for good/visible files (indexed, not overlaped, not marked for deletion, etc...)
-// it's ok to store ctxItem in array
-type ctxItem struct {
+// visibleFile is like filesItem but only for good/visible files (indexed, not overlaped, not marked for deletion, etc...)
+// it's ok to store visibleFile in array
+type visibleFile struct {
 	getter     *seg.Getter
 	reader     *recsplit.IndexReader
 	startTxNum uint64
@@ -185,12 +185,12 @@ type ctxItem struct {
 	src *filesItem
 }
 
-func (i *ctxItem) hasTS(ts uint64) bool       { return i.startTxNum <= ts && i.endTxNum > ts }
-func (i *ctxItem) isSubSetOf(j *ctxItem) bool { return i.src.isSubsetOf(j.src) } //nolint
-func (i *ctxItem) isSubsetOf(j *ctxItem) bool { return i.src.isSubsetOf(j.src) } //nolint
+func (i *visibleFile) hasTS(ts uint64) bool           { return i.startTxNum <= ts && i.endTxNum > ts }
+func (i *visibleFile) isSubSetOf(j *visibleFile) bool { return i.src.isSubsetOf(j.src) } //nolint
+func (i *visibleFile) isSubsetOf(j *visibleFile) bool { return i.src.isSubsetOf(j.src) } //nolint
 
-func calcVisibleFiles(files *btree2.BTreeG[*filesItem], l idxList, trace bool) (roItems []ctxItem) {
-	newVisibleFiles := make([]ctxItem, 0, files.Len())
+func calcVisibleFiles(files *btree2.BTreeG[*filesItem], l idxList, trace bool) (roItems []visibleFile) {
+	newVisibleFiles := make([]visibleFile, 0, files.Len())
 	if trace {
 		log.Warn("[dbg] calcVisibleFiles", "amount", files.Len())
 	}
@@ -241,7 +241,7 @@ func calcVisibleFiles(files *btree2.BTreeG[*filesItem], l idxList, trace bool) (
 				newVisibleFiles[len(newVisibleFiles)-1].src = nil
 				newVisibleFiles = newVisibleFiles[:len(newVisibleFiles)-1]
 			}
-			newVisibleFiles = append(newVisibleFiles, ctxItem{
+			newVisibleFiles = append(newVisibleFiles, visibleFile{
 				startTxNum: item.startTxNum,
 				endTxNum:   item.endTxNum,
 				i:          len(newVisibleFiles),
@@ -251,13 +251,13 @@ func calcVisibleFiles(files *btree2.BTreeG[*filesItem], l idxList, trace bool) (
 		return true
 	})
 	if newVisibleFiles == nil {
-		newVisibleFiles = []ctxItem{}
+		newVisibleFiles = []visibleFile{}
 	}
 	return newVisibleFiles
 }
 
 // visibleFiles have no garbage (overlaps, unindexed, etc...)
-type visibleFiles []ctxItem
+type visibleFiles []visibleFile
 
 // EndTxNum return txNum which not included in file - it will be first txNum in future file
 func (files visibleFiles) EndTxNum() uint64 {
