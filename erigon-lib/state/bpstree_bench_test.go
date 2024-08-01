@@ -1,10 +1,11 @@
 package state
 
 import (
-	"github.com/stretchr/testify/require"
 	"path"
 	"path/filepath"
 	"testing"
+
+	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon-lib/log/v3"
 )

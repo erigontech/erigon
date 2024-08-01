@@ -117,6 +117,45 @@ func (c *MockBeaconStateReaderGenesisValidatorsRootCall) DoAndReturn(f func() co
 	return c
 }
 
+// GetBeaconProposerIndexForSlot mocks base method.
+func (m *MockBeaconStateReader) GetBeaconProposerIndexForSlot(arg0 uint64) (uint64, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "GetBeaconProposerIndexForSlot", arg0)
+	ret0, _ := ret[0].(uint64)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// GetBeaconProposerIndexForSlot indicates an expected call of GetBeaconProposerIndexForSlot.
+func (mr *MockBeaconStateReaderMockRecorder) GetBeaconProposerIndexForSlot(arg0 any) *MockBeaconStateReaderGetBeaconProposerIndexForSlotCall {
+	mr.mock.ctrl.T.Helper()
+	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetBeaconProposerIndexForSlot", reflect.TypeOf((*MockBeaconStateReader)(nil).GetBeaconProposerIndexForSlot), arg0)
+	return &MockBeaconStateReaderGetBeaconProposerIndexForSlotCall{Call: call}
+}
+
+// MockBeaconStateReaderGetBeaconProposerIndexForSlotCall wrap *gomock.Call
+type MockBeaconStateReaderGetBeaconProposerIndexForSlotCall struct {
+	*gomock.Call
+}
+
+// Return rewrite *gomock.Call.Return
+func (c *MockBeaconStateReaderGetBeaconProposerIndexForSlotCall) Return(arg0 uint64, arg1 error) *MockBeaconStateReaderGetBeaconProposerIndexForSlotCall {
+	c.Call = c.Call.Return(arg0, arg1)
+	return c
+}
+
+// Do rewrite *gomock.Call.Do
+func (c *MockBeaconStateReaderGetBeaconProposerIndexForSlotCall) Do(f func(uint64) (uint64, error)) *MockBeaconStateReaderGetBeaconProposerIndexForSlotCall {
+	c.Call = c.Call.Do(f)
+	return c
+}
+
+// DoAndReturn rewrite *gomock.Call.DoAndReturn
+func (c *MockBeaconStateReaderGetBeaconProposerIndexForSlotCall) DoAndReturn(f func(uint64) (uint64, error)) *MockBeaconStateReaderGetBeaconProposerIndexForSlotCall {
+	c.Call = c.Call.DoAndReturn(f)
+	return c
+}
+
 // GetDomain mocks base method.
 func (m *MockBeaconStateReader) GetDomain(arg0 [4]byte, arg1 uint64) ([]byte, error) {
 	m.ctrl.T.Helper()
