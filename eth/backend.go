@@ -703,11 +703,7 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 	defer tx.Rollback()
 
 	// create buckets
-	if err := hermez_db.CreateHermezBuckets(tx); err != nil {
-		return nil, err
-	}
-
-	if err := db.CreateEriDbBuckets(tx); err != nil {
+	if err := createBuckets(tx); err != nil {
 		return nil, err
 	}
 
@@ -869,6 +865,12 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 			// we switch context from being an RPC node to a sequencer
 			backend.txPool2.ForceUpdateLatestBlock(executionProgress)
 
+			// we need to start the pool before stage loop itself
+			// the pool holds the info about how execution stage should work - as regular or as limbo recovery
+			if err := backend.txPool2.StartIfNotStarted(ctx, backend.txPool2DB, tx); err != nil {
+				return nil, err
+			}
+
 			l1BlockSyncer := syncer.NewL1Syncer(
 				ctx,
 				ethermanClients,
@@ -953,6 +955,22 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 	}
 
 	return backend, nil
+}
+
+func createBuckets(tx kv.RwTx) error {
+	if err := hermez_db.CreateHermezBuckets(tx); err != nil {
+		return err
+	}
+
+	if err := db.CreateEriDbBuckets(tx); err != nil {
+		return err
+	}
+
+	if err := txpool.CreateTxPoolBuckets(tx); err != nil {
+		return err
+	}
+
+	return nil
 }
 
 // creates an EtherMan instance with default parameters

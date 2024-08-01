@@ -23,9 +23,24 @@ import (
 
 func Test_Persistency(t *testing.T) {
 	dbPath := "/tmp/limbo-persistency"
-	db, tx, aclDb := initDb(t, dbPath)
+
+	pSource := store(t, dbPath)
+
+	restoreRo(t, dbPath, pSource)
+
+	t.Cleanup(func() {
+		os.RemoveAll(dbPath)
+	})
+}
+
+func store(t *testing.T, dbPath string) *TxPool {
+	db, tx, aclDb := initDb(t, dbPath, true)
+	defer db.Close()
+	defer tx.Rollback()
+	defer aclDb.Close()
 
 	newTxs := make(chan types.Announcements, 1024)
+	defer close(newTxs)
 
 	ethCfg := &ethconfig.Defaults
 	ethCfg.Zk.Limbo = true
@@ -108,7 +123,8 @@ func Test_Persistency(t *testing.T) {
 
 	pSource.limbo.awaitingBlockHandling.Store(true)
 
-	pSource.flushLockedLimbo(tx)
+	err = pSource.flushLockedLimbo(tx)
+	assert.NilError(t, err)
 
 	// restore
 	pTarget, err := New(make(chan types.Announcements), db, txpoolcfg.DefaultConfig, ethCfg, kvcache.NewDummy(), *uint256.NewInt(1101), big.NewInt(0), big.NewInt(0), aclDb)
@@ -116,7 +132,12 @@ func Test_Persistency(t *testing.T) {
 
 	cacheView, err := pTarget._stateCache.View(context.Background(), tx)
 	assert.NilError(t, err)
-	pTarget.fromDBLimbo(context.Background(), tx, cacheView)
+
+	tx.CreateBucket(TablePoolLimbo)
+	err = pTarget.fromDBLimbo(context.Background(), tx, cacheView)
+	assert.NilError(t, err)
+	err = pTarget.fromDBLimbo(context.Background(), tx, cacheView)
+	assert.NilError(t, err)
 
 	assert.DeepEqual(t, pSource.limbo.invalidTxsMap, pTarget.limbo.invalidTxsMap)
 	assert.DeepEqual(t, pSource.limbo.limboSlots, pTarget.limbo.limboSlots)
@@ -125,18 +146,51 @@ func Test_Persistency(t *testing.T) {
 
 	err = tx.Commit()
 	assert.NilError(t, err)
-
-	t.Cleanup(func() {
-		close(newTxs)
-		db.Close()
-		os.RemoveAll(dbPath)
-	})
+	return pSource
 }
 
-func initDb(t *testing.T, dbPath string) (kv.RwDB, kv.RwTx, kv.RwDB) {
+func restoreRo(t *testing.T, dbPath string, pSource *TxPool) {
+	db, tx, aclDb := initDb(t, dbPath, false)
+	defer db.Close()
+	defer tx.Rollback()
+	defer aclDb.Close()
+
+	err := tx.CreateBucket(TablePoolLimbo)
+	assert.NilError(t, err)
+
+	tx.Commit() // Close the tx because we don't need it
+
+	newTxs := make(chan types.Announcements, 1024)
+	defer close(newTxs)
+
+	pTarget, err := New(newTxs, db, txpoolcfg.DefaultConfig, &ethconfig.Defaults, kvcache.NewDummy(), *uint256.NewInt(1101), big.NewInt(0), big.NewInt(0), aclDb)
+	assert.NilError(t, err)
+
+	err = db.View(context.Background(), func(tx kv.Tx) error {
+		cacheView, err := pTarget._stateCache.View(context.Background(), tx)
+		if err != nil {
+			return err
+		}
+
+		return pTarget.fromDBLimbo(context.Background(), tx, cacheView)
+	})
+	assert.NilError(t, err)
+
+	assert.DeepEqual(t, pSource.limbo.invalidTxsMap, pTarget.limbo.invalidTxsMap)
+	assert.DeepEqual(t, pSource.limbo.limboSlots, pTarget.limbo.limboSlots)
+	assert.DeepEqual(t, pSource.limbo.limboBatches, pTarget.limbo.limboBatches)
+	assert.Equal(t, pSource.limbo.awaitingBlockHandling.Load(), pTarget.limbo.awaitingBlockHandling.Load())
+
+	err = tx.Commit()
+	assert.NilError(t, err)
+}
+
+func initDb(t *testing.T, dbPath string, wipe bool) (kv.RwDB, kv.RwTx, kv.RwDB) {
 	ctx := context.Background()
 
-	os.RemoveAll(dbPath)
+	if wipe {
+		os.RemoveAll(dbPath)
+	}
 
 	dbOpts := mdbx.NewMDBX(log.Root()).Path(dbPath).Label(kv.ChainDB).GrowthStep(16 * datasize.MB).RoTxsLimiter(semaphore.NewWeighted(128))
 	database, err := dbOpts.Open()
@@ -146,12 +200,12 @@ func initDb(t *testing.T, dbPath string) (kv.RwDB, kv.RwTx, kv.RwDB) {
 
 	txRw, err := database.BeginRw(ctx)
 	if err != nil {
-		t.Fatalf("Cannot craete db transaction")
+		t.Fatalf("Cannot create db transaction %e", err)
 	}
 
 	aclDB, err := OpenACLDB(ctx, dbPath)
 	if err != nil {
-		t.Fatalf("Cannot craete acl db")
+		t.Fatalf("Cannot create acl db %e", err)
 	}
 
 	return database, txRw, aclDB
