@@ -206,27 +206,27 @@ func calcVisibleFiles(files *btree2.BTreeG[*filesItem], l idxList, trace bool) (
 			// TODO: need somehow handle this case, but indices do not open in tests TestFindMergeRangeCornerCases
 			if item.decompressor == nil {
 				if trace {
-					log.Warn("[dbg] calcVisibleFiles1", "from", item.startTxNum, "to", item.endTxNum)
+					log.Warn("[dbg] calcVisibleFiles: decompressor not opened", "from", item.startTxNum, "to", item.endTxNum)
 				}
 				continue
 			}
 			if (l&withBTree != 0) && item.bindex == nil {
 				if trace {
-					log.Warn("[dbg] calcVisibleFiles2", "f", item.decompressor.FileName())
+					log.Warn("[dbg] calcVisibleFiles: BTindex not opened", "f", item.decompressor.FileName())
 				}
 				//panic(fmt.Errorf("btindex nil: %s", item.decompressor.FileName()))
 				continue
 			}
 			if (l&withHashMap != 0) && item.index == nil {
 				if trace {
-					log.Warn("[dbg] calcVisibleFiles3", "f", item.decompressor.FileName())
+					log.Warn("[dbg] calcVisibleFiles: RecSplit not opened", "f", item.decompressor.FileName())
 				}
 				//panic(fmt.Errorf("index nil: %s", item.decompressor.FileName()))
 				continue
 			}
 			if (l&withExistence != 0) && item.existence == nil {
 				if trace {
-					log.Warn("[dbg] calcVisibleFiles4", "f", item.decompressor.FileName())
+					log.Warn("[dbg] calcVisibleFiles: Existence not opened", "f", item.decompressor.FileName())
 				}
 				//panic(fmt.Errorf("existence nil: %s", item.decompressor.FileName()))
 				continue
@@ -236,7 +236,8 @@ func calcVisibleFiles(files *btree2.BTreeG[*filesItem], l idxList, trace bool) (
 			// see super-set file, just drop sub-set files from list
 			for len(newVisibleFiles) > 0 && newVisibleFiles[len(newVisibleFiles)-1].src.isSubsetOf(item) {
 				if trace {
-					log.Warn("[dbg] calcVisibleFiles5", "f", newVisibleFiles[len(newVisibleFiles)-1].src.decompressor.FileName())
+					log.Warn("[dbg] calcVisibleFiles: marked as garbage (is subset)", "item", item.decompressor.FileName(),
+						"of", newVisibleFiles[len(newVisibleFiles)-1].src.decompressor.FileName())
 				}
 				newVisibleFiles[len(newVisibleFiles)-1].src = nil
 				newVisibleFiles = newVisibleFiles[:len(newVisibleFiles)-1]
