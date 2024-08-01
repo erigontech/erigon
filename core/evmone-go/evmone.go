@@ -104,6 +104,41 @@ func errorToStatusCode(err error) Error {
 	return 0
 }
 
+// func mapStatusCodeToVmErr(statusCode int32) error {
+// 	switch statusCode {
+// 	case C.EVMC_SUCCESS:
+// 		return nil // "success";
+// 	// case C.EVMC_FAILURE:
+// 	case C.EVMC_REVERT:
+// 		return vm.ErrExecutionReverted
+// 	case C.EVMC_OUT_OF_GAS:
+// 		return vm.ErrOutOfGas
+// 	// case C.EVMC_INVALID_INSTRUCTION:
+// 	// case C.EVMC_UNDEFINED_INSTRUCTION:
+// 	case C.EVMC_STACK_OVERFLOW:
+// 		return errors.New("stack overflow")
+// 	case C.EVMC_STACK_UNDERFLOW:
+// 		return errors.New("stack underflow")
+// 	case C.EVMC_BAD_JUMP_DESTINATION:
+// 		return vm.ErrInvalidJump
+// 	// case C.EVMC_INVALID_MEMORY_ACCESS:
+// 	case C.EVMC_CALL_DEPTH_EXCEEDED:
+// 		return vm.ErrDepth
+// 	// case C.EVMC_STATIC_MODE_VIOLATION:
+// 	// case C.EVMC_PRECOMPILE_FAILURE:
+// 	// case C.EVMC_CONTRACT_VALIDATION_FAILURE:
+// 	// case C.EVMC_ARGUMENT_OUT_OF_RANGE:
+// 	// case C.EVMC_WASM_UNREACHABLE_INSTRUCTION:
+// 	// case C.EVMC_WASM_TRAP:
+// 	// case C.EVMC_INSUFFICIENT_BALANCE:
+// 	// case C.EVMC_INTERNAL_ERROR:
+// 	// case C.EVMC_REJECTED:
+// 	// case C.EVMC_OUT_OF_MEMORY:
+// 	default:
+// 		panic(fmt.Sprintf("unhandled status code: %v", statusCode))
+// 	}
+// }
+
 const (
 	Failure = Error(C.EVMC_FAILURE)
 	Revert  = Error(C.EVMC_REVERT)
@@ -150,6 +185,7 @@ type Capability uint32
 const (
 	CapabilityEVM1  Capability = C.EVMC_CAPABILITY_EVM1
 	CapabilityEWASM Capability = C.EVMC_CAPABILITY_EWASM
+	// CapabilityPrecompiles Capability = C.EVMC_CAPABILITY_PRECOMPILES // is not supported
 )
 
 func (h *HostImpl) HasCapability(capability Capability) bool {
@@ -170,9 +206,10 @@ func (h *HostImpl) SetOption(name string, value string) (err error) {
 }
 
 type Result struct {
-	Output    []byte
-	GasLeft   int64
-	GasRefund int64
+	StatusCode int32
+	Output     []byte
+	GasLeft    int64
+	GasRefund  int64
 }
 
 func (h *HostImpl) Execute(
@@ -199,6 +236,7 @@ func (h *HostImpl) Execute(
 	res.Output = C.GoBytes(unsafe.Pointer(result.output_data), C.int(result.output_size))
 	res.GasLeft = int64(result.gas_left)
 	res.GasRefund = int64(result.gas_refund)
+	res.StatusCode = int32(result.status_code)
 	if result.status_code != C.EVMC_SUCCESS {
 		err = Error(result.status_code) // TODO: map status code to error msg
 	}

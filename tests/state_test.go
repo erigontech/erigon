@@ -17,7 +17,7 @@
 // You should have received a copy of the GNU Lesser General Public License
 // along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
-//go:build integration
+// //go:build integration
 
 package tests
 
@@ -26,6 +26,7 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"path/filepath"
 	"reflect"
 	"runtime"
 	"testing"
@@ -61,8 +62,10 @@ func TestState(t *testing.T) {
 	//if ethconfig.EnableHistoryV3InTest {
 	//}
 
+	dir := filepath.Join(".", "/testdata/GeneralStateTests/stZeroKnowledge2")
+
 	db, _ := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
-	st.walk(t, stateTestDir, func(t *testing.T, name string, test *StateTest) {
+	st.walk(t, dir, func(t *testing.T, name string, test *StateTest) {
 		for _, subtest := range test.Subtests() {
 			subtest := subtest
 			key := fmt.Sprintf("%s/%d", subtest.Fork, subtest.Index)

@@ -5,6 +5,7 @@ package evmonego
 */
 import "C"
 import (
+	"fmt"
 	"math/big"
 
 	"github.com/erigontech/erigon-lib/common"
@@ -81,16 +82,19 @@ func NewEvmOneHost(env ExecEnv, bailout bool) *HostImpl {
 }
 
 func (h *HostImpl) AccountExists(addr common.Address) bool {
+	// fmt.Println("calling 1")
 	r := h.ibs.Exist(common.Address(addr))
 	return r
 }
 
 func (h *HostImpl) GetStorage(addr common.Address, key common.Hash) common.Hash {
+	// fmt.Println("calling 2")
 	w := new(uint256.Int)
 	h.ibs.GetState(addr, &key, w)
 	return w.Bytes32()
 }
 func (h *HostImpl) SetStorage(addr common.Address, key common.Hash, value common.Hash) StorageStatus {
+	// fmt.Println("calling 3")
 	var (
 		current  uint256.Int
 		original uint256.Int
@@ -135,18 +139,23 @@ func (h *HostImpl) SetStorage(addr common.Address, key common.Hash, value common
 	return status
 }
 func (h *HostImpl) GetBalance(addr common.Address) common.Hash {
+	// fmt.Println("calling 4")
 	return h.ibs.GetBalance(addr).Bytes32()
 }
 func (h *HostImpl) GetCodeSize(addr common.Address) int {
+	// fmt.Println("calling 5")
 	return h.ibs.GetCodeSize(addr)
 }
 func (h *HostImpl) GetCodeHash(addr common.Address) common.Hash {
+	// fmt.Println("calling 6")
 	return h.ibs.GetCodeHash(addr)
 }
 func (h *HostImpl) GetCode(addr common.Address) []byte {
+	// fmt.Println("calling 7")
 	return h.ibs.GetCode(addr)
 }
 func (h *HostImpl) Selfdestruct(addr common.Address, beneficiary common.Address) bool {
+	// fmt.Println("calling 8")
 	balance := *h.ibs.GetBalance(addr)
 	if h.rev >= Cancun {
 		h.ibs.SubBalance(addr, &balance, tracing.BalanceDecreaseSelfdestruct)
@@ -160,6 +169,7 @@ func (h *HostImpl) Selfdestruct(addr common.Address, beneficiary common.Address)
 	return h.ibs.HasSelfdestructed(addr)
 }
 func (h *HostImpl) GetTxContext() TxContext {
+	// fmt.Println("calling 9")
 	chainID := new(uint256.Int)
 	chainID.SetFromBig(h.chainID)
 	hash := chainID.Bytes32()
@@ -189,9 +199,11 @@ func (h *HostImpl) GetTxContext() TxContext {
 	}
 }
 func (h *HostImpl) GetBlockHash(number int64) common.Hash {
+	// fmt.Println("calling 10")
 	return h.blockCtx.GetHash(uint64(number))
 }
 func (h *HostImpl) EmitLog(addr common.Address, topics []common.Hash, data []byte) {
+	// fmt.Println("calling 11")
 	h.ibs.AddLog(&types.Log{
 		Address:     addr,
 		Topics:      topics,
@@ -200,7 +212,7 @@ func (h *HostImpl) EmitLog(addr common.Address, topics []common.Hash, data []byt
 	})
 }
 
-func (h *HostImpl) handleCalls(kind CallKind,
+func (h *HostImpl) handleCall(kind CallKind,
 	recipient common.Address,
 	sender common.Address,
 	value *uint256.Int,
@@ -209,11 +221,13 @@ func (h *HostImpl) handleCalls(kind CallKind,
 	depth int,
 	static bool,
 	salt common.Hash,
-	codeAddress common.Address) (output []byte, gasLeft int64, gasRefund int64,
-	createAddr common.Address, err error) {
-
-	gasLeft = int64(gas)
-
+	codeAddress common.Address) ([]byte, int64, int64, common.Address, error) {
+	fmt.Println("---- Calling Call EVMONE")
+	var output []byte
+	var err error
+	gasLeft := int64(gas)
+	var gasRefund int64
+	fmt.Printf("start gas: %v, gasLeft: %v\n", gas, gasLeft)
 	if kind == Call || kind == CallCode {
 		// Fail if we're trying to transfer more than the available balance
 		if !value.IsZero() && !h.evm.Context.CanTransfer(h.ibs, sender, value) {
@@ -228,13 +242,14 @@ func (h *HostImpl) handleCalls(kind CallKind,
 	if !isPrecompile {
 		code = h.ibs.GetCode(codeAddress)
 	}
-
+	fmt.Println("isPrecompile: ", isPrecompile)
 	snapshot := h.ibs.Snapshot()
 
 	if kind == Call {
 		if !h.ibs.Exist(recipient) {
 			if !isPrecompile && h.evm.ChainRules().IsSpuriousDragon && value.IsZero() {
-				return nil, gasLeft, 0, common.Address{}, nil
+				fmt.Println("HITTING THIS")
+				return output, gasLeft, 0, common.Address{}, err
 			}
 			h.ibs.CreateAccount(recipient, false)
 		}
@@ -249,70 +264,60 @@ func (h *HostImpl) handleCalls(kind CallKind,
 	// h.ibs.AddBalance(recipient, u256.Num0, tracing.BalanceChangeTouchAccount)
 	// }
 
-	var evmone_result Result
+	var evr Result
 	var gLeft uint64
 	// It is allowed to call precompiles, even via delegatecall
 	if isPrecompile {
+		fmt.Printf("input: 0x%x, gas: %v\n", input, gas)
 		output, gLeft, err = vm.RunPrecompiledContract(p, input, gas)
 		gasLeft = int64(gLeft)
+		fmt.Printf("output: 0x%x, gasLeft: %v\n", output, gasLeft)
 	} else if len(code) == 0 {
 		// If the account has no code, we can abort here
 		// The depth-check is already done, and precompiles handled above
 		output, err = nil, nil // gas is unchanged
+		fmt.Printf("len(code) == 0, gas: %v, gasLeft: %v\n", gas, gasLeft)
 	} else {
-
-		evmone_result, err = h.Execute(Call, static, depth, int64(gas), recipient, sender, input, value.Bytes32(), code)
-		output = evmone_result.Output
-		gasLeft = evmone_result.GasLeft
-		gasRefund = evmone_result.GasRefund
+		fmt.Println("Executing")
+		evr, err = h.Execute(Call, static, depth, int64(gas), recipient, sender, input, value.Bytes32(), code)
+		output = evr.Output
+		gasLeft = evr.GasLeft
+		gasRefund = evr.GasRefund
+		// fmt.Println("GAS LEFT: ", gasLeft)
+		// fmt.Println("GAS REFUND: ", gasRefund)
 	}
+
 	// When an error was returned by the EVM or when setting the creation code
 	// above we revert to the snapshot and consume any gas remaining. Additionally
 	// when we're in Homestead this also counts for code storage gas errors.
 	if err != nil || h.config.RestoreState {
 		h.ibs.RevertToSnapshot(snapshot)
-		if err != vm.ErrExecutionReverted {
-			gas = 0
+		if evr.StatusCode != int32(Revert) {
+			gasLeft = 0
 		}
 		// TODO: consider clearing up unused snapshots:
 		//} else {
 		//	evm.StateDB.DiscardSnapshot(snapshot)
 	}
-
-	return
+	fmt.Printf("end gas: %v, gasLeft: %v\n", gas, gasLeft)
+	return output, gasLeft, gasRefund, common.Address{}, err
 }
 
-func (h *HostImpl) Call(kind CallKind,
+func (h *HostImpl) handleCreate(kind CallKind,
 	recipient common.Address,
 	sender common.Address,
-	value common.Hash,
+	value *uint256.Int,
 	input []byte,
-	gas int64,
+	gas uint64,
 	depth int,
 	static bool,
 	salt common.Hash,
-	codeAddress common.Address) (output []byte, gasLeft int64, gasRefund int64,
-	createAddr common.Address, err error) {
-
-	// fmt.Println("--")
-	// fmt.Println("kind: ", kind)
-	// fmt.Printf("recipient: 0x%x\n", recipient)
-	// fmt.Printf("sender: 0x%x\n", sender)
-	// fmt.Printf("value: 0x%x\n", value)
-	// fmt.Printf("input: 0x%x\n", input)
-	// fmt.Println("gas: ", gas)
-	// fmt.Println("depth: ", depth)
-	// fmt.Println("static: ", static)
-	// fmt.Printf("salt: 0x%x\n", salt)
-	// fmt.Printf("codeAddress: 0x%x\n", codeAddress)
-
-	_value := new(uint256.Int).SetBytes32(value[:])
-
-	if kind == Call || kind == DelegateCall || kind == CallCode {
-		return h.handleCalls(kind, recipient, sender, _value, input, uint64(gas), depth, static, salt, codeAddress)
-	}
+	codeAddress common.Address) ([]byte, int64, int64, common.Address, error) {
+	fmt.Println("---- Calling Create EVMONE")
 
 	var code []byte
+	var createAddr common.Address
+	var err error
 	if kind == Create {
 		createAddr = crypto.CreateAddress(sender, h.ibs.GetNonce(sender))
 		code = input
@@ -325,9 +330,7 @@ func (h *HostImpl) Call(kind CallKind,
 	}
 	recipient = createAddr
 
-	var ret []byte
-
-	if !h.evm.Context.CanTransfer(h.ibs, sender, _value) {
+	if !h.evm.Context.CanTransfer(h.ibs, sender, value) {
 		err = vm.ErrInsufficientBalance
 		return nil, 0, 0, common.Address{}, err
 	}
@@ -355,16 +358,18 @@ func (h *HostImpl) Call(kind CallKind,
 	if h.evm.ChainRules().IsSpuriousDragon {
 		h.ibs.SetNonce(recipient, 1)
 	}
-	h.evm.Context.Transfer(h.ibs, sender, recipient, _value, false /* bailout */)
-
-	var evmone_result Result
-	evmone_result, err = h.Execute(kind, static, depth, gas, recipient, sender, input, value, code)
-	ret = evmone_result.Output
-	gasLeft = evmone_result.GasLeft
-	gasRefund = evmone_result.GasRefund
+	h.evm.Context.Transfer(h.ibs, sender, recipient, value, false /* bailout */)
+	// fmt.Println("GAS BEFORE EXECUTE: ", gas)
+	var evr Result
+	evr, err = h.Execute(kind, static, depth, int64(gas), recipient, sender, input, value.Bytes32(), code)
+	// output = evr.Output
+	// gasLeft = evr.GasLeft
+	// gasRefund = evr.GasRefund
+	// fmt.Println("GAS LEFT: ", gasLeft)
+	// fmt.Println("evr.StatusCode", evr.StatusCode)
 
 	// EIP-170: Contract code size limit
-	if err == nil && h.evm.ChainRules().IsSpuriousDragon && len(ret) > params.MaxCodeSize {
+	if err == nil && h.evm.ChainRules().IsSpuriousDragon && len(evr.Output) > params.MaxCodeSize {
 		// Gnosis Chain prior to Shanghai didn't have EIP-170 enabled,
 		// but EIP-3860 (part of Shanghai) requires EIP-170.
 		if !h.evm.ChainRules().IsAura || h.config.HasEip3860(h.evm.ChainRules()) {
@@ -373,15 +378,15 @@ func (h *HostImpl) Call(kind CallKind,
 	}
 
 	// Reject code starting with 0xEF if EIP-3541 is enabled.
-	if err == nil && h.evm.ChainRules().IsLondon && len(ret) >= 1 && ret[0] == 0xEF {
+	if err == nil && h.evm.ChainRules().IsLondon && len(evr.Output) >= 1 && evr.Output[0] == 0xEF {
 		err = vm.ErrInvalidCode
 	}
 
 	if err == nil {
-		createDataGas := uint64(len(ret)) * params.CreateDataGas
-		if gasLeft >= int64(createDataGas) {
-			gasLeft -= int64(createDataGas)
-			h.ibs.SetCode(recipient, ret)
+		createDataGas := uint64(len(evr.Output)) * params.CreateDataGas
+		if evr.GasLeft >= int64(createDataGas) {
+			evr.GasLeft -= int64(createDataGas)
+			h.ibs.SetCode(recipient, evr.Output)
 		} else if h.evm.ChainRules().IsHomestead {
 			err = vm.ErrCodeStoreOutOfGas
 		}
@@ -392,15 +397,55 @@ func (h *HostImpl) Call(kind CallKind,
 	// when we're in homestead this also counts for code storage gas errors.
 	if err != nil && (h.evm.ChainRules().IsHomestead || err != vm.ErrCodeStoreOutOfGas) {
 		h.ibs.RevertToSnapshot(snapshot)
-		if err != vm.ErrExecutionReverted {
-			gasLeft, gasRefund = 0, 0
+		// fmt.Println("HITTIN THIS")
+		if evr.StatusCode != int32(Revert) {
+			// fmt.Println("ERR: ", err)
+			// fmt.Println("HITTIN THIS: err != vm.ErrExecutionReverted")
+			// gasLeft, gasRefund = 0, 0
+			evr.GasLeft, evr.GasRefund = 0, 0
 		}
 	}
-	codeAddress = recipient
-	return ret, gasLeft, gasRefund, codeAddress, err
+	createAddr = recipient
+	// fmt.Printf("RET: %v, ADDR: %v, GAS: %v, ERR: %v\n", evr.Output, createAddr, evr.GasLeft, err)
+	return evr.Output, evr.GasLeft, evr.GasRefund, createAddr, err
+}
+
+func (h *HostImpl) Call(kind CallKind,
+	recipient common.Address,
+	sender common.Address,
+	value common.Hash,
+	input []byte,
+	gas int64,
+	depth int,
+	static bool,
+	salt common.Hash,
+	codeAddress common.Address) (output []byte, gasLeft int64, gasRefund int64,
+	createAddr common.Address, err error) {
+	fmt.Println("calling 12")
+
+	fmt.Println("--")
+	fmt.Println("kind: ", kind)
+	fmt.Printf("recipient: 0x%x\n", recipient)
+	fmt.Printf("sender: 0x%x\n", sender)
+	fmt.Printf("value: 0x%x\n", value)
+	fmt.Printf("input: 0x%x\n", input)
+	fmt.Println("gas: ", gas)
+	fmt.Println("depth: ", depth)
+	fmt.Println("static: ", static)
+	fmt.Printf("salt: 0x%x\n", salt)
+	fmt.Printf("codeAddress: 0x%x\n", codeAddress)
+
+	_value := new(uint256.Int).SetBytes32(value[:])
+
+	if kind == Call || kind == DelegateCall || kind == CallCode {
+		return h.handleCall(kind, recipient, sender, _value, input, uint64(gas), depth, static, salt, codeAddress)
+	} else {
+		return h.handleCreate(kind, recipient, sender, _value, input, uint64(gas), depth, static, salt, codeAddress)
+	}
 }
 
 func (h *HostImpl) AccessAccount(addr common.Address) AccessStatus {
+	// fmt.Println("calling 13")
 	addrMod := h.ibs.AddAddressToAccessList(addr)
 	if addrMod {
 		return ColdAccess
@@ -408,6 +453,7 @@ func (h *HostImpl) AccessAccount(addr common.Address) AccessStatus {
 	return WarmAccess
 }
 func (h *HostImpl) AccessStorage(addr common.Address, key common.Hash) AccessStatus {
+	// fmt.Println("calling 14")
 	_, slotMod := h.ibs.AddSlotToAccessList(addr, key)
 	if slotMod {
 		return ColdAccess
@@ -415,11 +461,16 @@ func (h *HostImpl) AccessStorage(addr common.Address, key common.Hash) AccessSta
 	return WarmAccess
 }
 func (h *HostImpl) GetTransientStorage(addr common.Address, key common.Hash) common.Hash {
+	// fmt.Println("calling 1")
 	w := h.ibs.GetTransientState(addr, key)
 	return w.Bytes32()
 }
 func (h *HostImpl) SetTransientStorage(addr common.Address, key common.Hash, value common.Hash) {
+	// fmt.Println("calling 15")
 	w := new(uint256.Int)
 	w = w.SetBytes(value[:])
 	h.ibs.SetTransientState(addr, key, *w)
 }
+
+// 779117
+// 855917

@@ -20,6 +20,7 @@
 package vm
 
 import (
+	"fmt"
 	"hash"
 	"sync"
 
@@ -189,7 +190,7 @@ func (in *EVMInterpreter) Run(contract *Contract, input []byte, readOnly bool) (
 	if len(contract.Code) == 0 {
 		return nil, nil
 	}
-
+	// fmt.Println("-- Run Interpreter")
 	// Reset the previous call's return data. It's unimportant to preserve the old buffer
 	// as every returning call will return new data anyway.
 	in.returnData = nil
@@ -265,6 +266,7 @@ func (in *EVMInterpreter) Run(contract *Contract, input []byte, readOnly bool) (
 		op = contract.GetOp(_pc)
 		operation := in.jt[op]
 		cost = operation.constantGas // For tracing
+		fmt.Printf("%v ", op)
 		// Validate stack
 		if sLen := locStack.Len(); sLen < operation.numPop {
 			return nil, &ErrStackUnderflow{stackLen: sLen, required: operation.numPop}
@@ -300,6 +302,7 @@ func (in *EVMInterpreter) Run(contract *Contract, input []byte, readOnly bool) (
 			if err != nil || !contract.UseGas(dynamicCost, tracing.GasChangeIgnored) {
 				return nil, ErrOutOfGas
 			}
+			fmt.Println("COST: ", cost)
 			// Do tracing before memory expansion
 			if in.cfg.Debug {
 				in.cfg.Tracer.CaptureState(_pc, op, gasCopy, cost, callContext, in.returnData, in.depth, err) //nolint:errcheck
@@ -314,12 +317,13 @@ func (in *EVMInterpreter) Run(contract *Contract, input []byte, readOnly bool) (
 		}
 		// execute the operation
 		res, err = operation.execute(pc, in, callContext)
-
 		if err != nil {
+			// fmt.Println("ERR: ", err)
 			break
 		}
 		_pc++
 	}
+	fmt.Println("")
 
 	if err == errStopToken {
 		err = nil // clear stop token error

@@ -20,6 +20,7 @@
 package vm
 
 import (
+	"fmt"
 	"sync/atomic"
 
 	"github.com/holiman/uint256"
@@ -177,6 +178,8 @@ func (evm *EVM) Interpreter() Interpreter {
 }
 
 func (evm *EVM) call(typ OpCode, caller ContractRef, addr libcommon.Address, input []byte, gas uint64, value *uint256.Int, bailout bool) (ret []byte, leftOverGas uint64, err error) {
+	fmt.Println("---- Calling Call")
+	fmt.Println("start gas: ", gas)
 	depth := evm.interpreter.Depth()
 
 	if evm.config.NoRecursion && depth > 0 {
@@ -254,10 +257,12 @@ func (evm *EVM) call(typ OpCode, caller ContractRef, addr libcommon.Address, inp
 			}(gas)
 		}
 	}
-
+	fmt.Println("isPrecompile: ", isPrecompile)
 	// It is allowed to call precompiles, even via delegatecall
 	if isPrecompile {
+		fmt.Printf("input: 0x%x, gas: %v\n", input, gas)
 		ret, gas, err = RunPrecompiledContract(p, input, gas)
+		fmt.Printf("output: 0x%x, gasLeft: %v, ERR: %v\n", ret, gas, err)
 	} else if len(code) == 0 {
 		// If the account has no code, we can abort here
 		// The depth-check is already done, and precompiles handled above
@@ -278,6 +283,7 @@ func (evm *EVM) call(typ OpCode, caller ContractRef, addr libcommon.Address, inp
 		} else {
 			contract = NewContract(caller, addrCopy, value, gas, evm.config.SkipAnalysis)
 		}
+		// fmt.Println("contract.Gas: ", contract.Gas)
 		contract.SetCallCode(&addrCopy, codeHash, code)
 		readOnly := false
 		if typ == STATICCALL {
@@ -298,6 +304,7 @@ func (evm *EVM) call(typ OpCode, caller ContractRef, addr libcommon.Address, inp
 		//} else {
 		//	evm.StateDB.DiscardSnapshot(snapshot)
 	}
+	fmt.Println("end gas: ", gas)
 	return ret, gas, err
 }
 
@@ -359,6 +366,7 @@ func (evm *EVM) OverlayCreate(caller ContractRef, codeAndHash *codeAndHash, gas 
 
 // create creates a new contract using code as deployment code.
 func (evm *EVM) create(caller ContractRef, codeAndHash *codeAndHash, gasRemaining uint64, value *uint256.Int, address libcommon.Address, typ OpCode, incrementNonce bool, bailout bool) ([]byte, libcommon.Address, uint64, error) {
+	fmt.Println("---- Calling Create")
 	var ret []byte
 	var err error
 	var gasConsumption uint64
@@ -424,7 +432,7 @@ func (evm *EVM) create(caller ContractRef, codeAndHash *codeAndHash, gasRemainin
 	if evm.config.NoRecursion && depth > 0 {
 		return nil, address, gasRemaining, nil
 	}
-
+	// fmt.Println("contract.Gas: ", contract.Gas)
 	ret, err = run(evm, contract, nil, false)
 
 	// EIP-170: Contract code size limit
@@ -457,15 +465,17 @@ func (evm *EVM) create(caller ContractRef, codeAndHash *codeAndHash, gasRemainin
 	// above we revert to the snapshot and consume any gas remaining. Additionally
 	// when we're in homestead this also counts for code storage gas errors.
 	if err != nil && (evm.chainRules.IsHomestead || err != ErrCodeStoreOutOfGas) {
+		// fmt.Println("HITTIN THIS")
 		evm.intraBlockState.RevertToSnapshot(snapshot)
 		if err != ErrExecutionReverted {
+			// fmt.Println("HITTIN THIS: err != ErrExecutionReverted")
 			contract.UseGas(contract.Gas, tracing.GasChangeCallFailedExecution)
 		}
 	}
 
 	// calculate gasConsumption for deferred captures
 	gasConsumption = gasRemaining - contract.Gas
-
+	// fmt.Printf("RET: %v, ADDR: %v, GAS: %v, ERR: %v\n", ret, address, contract.Gas, err)
 	return ret, address, contract.Gas, err
 }
 
