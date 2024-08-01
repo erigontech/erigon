@@ -272,9 +272,6 @@ func (s *segments) Segment(blockNum uint64, f func(*Segment) error) (found bool,
 }
 
 type RoSnapshots struct {
-	indicesReady  atomic.Bool
-	segmentsReady atomic.Bool
-
 	types    []snaptype.Type
 	segments btree.Map[snaptype.Enum, *segments]
 
@@ -311,8 +308,6 @@ func newRoSnapshots(cfg ethconfig.BlocksFreezing, snapDir string, types []snapty
 
 func (s *RoSnapshots) Cfg() ethconfig.BlocksFreezing { return s.cfg }
 func (s *RoSnapshots) Dir() string                   { return s.dir }
-func (s *RoSnapshots) SegmentsReady() bool           { return s.segmentsReady.Load() }
-func (s *RoSnapshots) IndicesReady() bool            { return s.indicesReady.Load() }
 func (s *RoSnapshots) IndicesMax() uint64            { return s.idxMax.Load() }
 func (s *RoSnapshots) SegmentsMax() uint64           { return s.segmentsMax.Load() }
 func (s *RoSnapshots) SegmentsMin() uint64           { return s.segmentsMin.Load() }
@@ -614,9 +609,7 @@ func (s *RoSnapshots) rebuildSegments(fileNames []string, open bool, optimistic 
 	if segmentsMaxSet {
 		s.segmentsMax.Store(segmentsMax)
 	}
-	s.segmentsReady.Store(true)
 	s.idxMax.Store(s.idxAvailability())
-	s.indicesReady.Store(true)
 
 	return nil
 }
@@ -753,9 +746,6 @@ func (s *RoSnapshots) buildMissedIndicesIfNeed(ctx context.Context, logPrefix st
 	}
 	if !s.Cfg().ProduceE2 {
 		return nil
-	}
-	if !s.SegmentsReady() {
-		return errors.New("not all snapshot segments are available")
 	}
 	s.LogStat("missed-idx")
 
