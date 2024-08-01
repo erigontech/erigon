@@ -260,7 +260,7 @@ func (t *StateTest) RunNoVerify(tx kv.RwTx, subtest StateSubtest, vmconfig vm.Co
 		context.PrevRanDao = &rnd
 		context.Difficulty = big.NewInt(0)
 	}
-	if config.IsCancun(0) && t.json.Env.ExcessBlobGas != nil {
+	if config.IsCancun(block.Time()) && t.json.Env.ExcessBlobGas != nil {
 		context.BlobBaseFee, err = misc.GetBlobGasPrice(config, *t.json.Env.ExcessBlobGas)
 		if err != nil {
 			return nil, libcommon.Hash{}, err

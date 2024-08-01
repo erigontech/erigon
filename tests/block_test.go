@@ -42,7 +42,7 @@ func TestBlockchain(t *testing.T) {
 
 	// Currently it fails because SpawnStageHeaders doesn't accept any PoW blocks after PoS transition
 	// TODO(yperbasis): make it work
-	bt.skipLoad(`^TransitionTests/bcArrowGlacierToParis/powToPosBlockRejection\.json`)
+	bt.skipLoad(`^TransitionTests/bcArrowGlacierToMerge/powToPosBlockRejection\.json`)
 	bt.skipLoad(`^TransitionTests/bcFrontierToHomestead/blockChainFrontierWithLargerTDvsHomesteadBlockchain\.json`)
 
 	// TODO: HistoryV3: doesn't produce receipts on execution by design. But maybe we can Generate them on-the fly (on history) and enable this tests
