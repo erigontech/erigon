@@ -37,7 +37,7 @@ func (s *Span) RawId() uint64 {
 	return uint64(s.Id)
 }
 
-func (s *Span) SetRawId(id uint64) {
+func (s *Span) SetRawId(_ uint64) {
 	panic("unimplemented")
 }
 
@@ -64,7 +64,8 @@ func (s *Span) CmpRange(n uint64) int {
 func (s *Span) Producers() []*valset.Validator {
 	res := make([]*valset.Validator, len(s.SelectedProducers))
 	for i, p := range s.SelectedProducers {
-		res[i] = &p
+		pCopy := p
+		res[i] = &pCopy
 	}
 
 	return res

@@ -64,7 +64,7 @@ func (t spanBlockProducersTracker) ObserveSpan(ctx context.Context, newSpan *Spa
 			SpanId:     newSpan.Id,
 			StartBlock: newSpan.StartBlock,
 			EndBlock:   newSpan.EndBlock,
-			Producers:  newSpan.Producers(),
+			Producers:  valset.NewValidatorSet(newSpan.Producers()),
 		}
 		err = t.store.PutEntity(ctx, uint64(newProducerSelection.SpanId), newProducerSelection)
 		if err != nil {
@@ -87,17 +87,23 @@ func (t spanBlockProducersTracker) ObserveSpan(ctx context.Context, newSpan *Spa
 		return nil
 	}
 
+	producers := lastProducerSelection.Producers
+	producers.UpdateValidatorMap()
+	err = producers.UpdateTotalVotingPower()
+	if err != nil {
+		return err
+	}
+
 	startSprintNumInSpan := t.borConfig.CalculateSprintNumber(lastProducerSelection.StartBlock)
 	endSprintNumInSpan := t.borConfig.CalculateSprintNumber(lastProducerSelection.EndBlock)
-	numSprintsInSpan := int(endSprintNumInSpan - startSprintNumInSpan)
-	validatorSet := valset.NewValidatorSet(lastProducerSelection.Producers)
-	validatorSet.IncrementProposerPriority(numSprintsInSpan)
-	newValidatorSet := valset.GetUpdatedValidatorSet(validatorSet, newSpan.Producers(), t.logger)
+	numSprintsInSpan := int(endSprintNumInSpan-startSprintNumInSpan) + 1
+	producers.IncrementProposerPriority(numSprintsInSpan)
+	newProducers := valset.GetUpdatedValidatorSet(producers, newSpan.Producers(), t.logger)
 	newProducerSelection := &SpanBlockProducerSelection{
 		SpanId:     newSpan.Id,
 		StartBlock: newSpan.StartBlock,
 		EndBlock:   newSpan.EndBlock,
-		Producers:  newValidatorSet.Validators,
+		Producers:  newProducers,
 	}
 
 	err = t.store.PutEntity(ctx, uint64(newProducerSelection.SpanId), newProducerSelection)
@@ -118,10 +124,16 @@ func (t spanBlockProducersTracker) Producers(ctx context.Context, blockNum uint6
 		return nil, errors.New("no producers found for block num")
 	}
 
-	startSprintNumInSpan := t.borConfig.CalculateSprintNumber(uint64(producerSelection.SpanId))
-	blockSprintNum := t.borConfig.CalculateSprintNumber(blockNum)
-	numSprints := int(blockSprintNum - startSprintNumInSpan)
-	validatorSet := valset.NewValidatorSet(producerSelection.Producers)
-	validatorSet.IncrementProposerPriority(numSprints)
-	return validatorSet, nil
+	producers := producerSelection.Producers
+	producers.UpdateValidatorMap()
+	err = producers.UpdateTotalVotingPower()
+	if err != nil {
+		return nil, err
+	}
+
+	currentSprintNumber := t.borConfig.CalculateSprintNumber(blockNum)
+	startSprintNumInSpan := t.borConfig.CalculateSprintNumber(producerSelection.StartBlock)
+	incrementsNeeded := int(currentSprintNumber-startSprintNumInSpan) + 1
+	producers.IncrementProposerPriority(incrementsNeeded)
+	return producers, nil
 }

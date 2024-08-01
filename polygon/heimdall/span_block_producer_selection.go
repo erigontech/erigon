@@ -46,7 +46,7 @@ type SpanBlockProducerSelection struct {
 	SpanId     SpanId
 	StartBlock uint64
 	EndBlock   uint64
-	Producers  []*valset.Validator
+	Producers  *valset.ValidatorSet
 }
 
 var _ Entity = (*SpanBlockProducerSelection)(nil)
