@@ -23,6 +23,7 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
+	"github.com/erigontech/erigon-lib/metrics"
 	"math"
 	"path/filepath"
 	"regexp"
@@ -35,19 +36,19 @@ import (
 	btree2 "github.com/tidwall/btree"
 	"golang.org/x/sync/errgroup"
 
-	"github.com/ledgerwatch/erigon-lib/log/v3"
-	"github.com/ledgerwatch/erigon-lib/recsplit/eliasfano32"
+	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon-lib/recsplit/eliasfano32"
 
-	"github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/common/background"
-	"github.com/ledgerwatch/erigon-lib/common/dbg"
-	"github.com/ledgerwatch/erigon-lib/common/dir"
-	"github.com/ledgerwatch/erigon-lib/etl"
-	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon-lib/kv/order"
-	"github.com/ledgerwatch/erigon-lib/kv/stream"
-	"github.com/ledgerwatch/erigon-lib/recsplit"
-	"github.com/ledgerwatch/erigon-lib/seg"
+	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common/background"
+	"github.com/erigontech/erigon-lib/common/dbg"
+	"github.com/erigontech/erigon-lib/common/dir"
+	"github.com/erigontech/erigon-lib/etl"
+	"github.com/erigontech/erigon-lib/kv"
+	"github.com/erigontech/erigon-lib/kv/order"
+	"github.com/erigontech/erigon-lib/kv/stream"
+	"github.com/erigontech/erigon-lib/recsplit"
+	"github.com/erigontech/erigon-lib/seg"
 )
 
 // StepsInColdFile - files of this size are completely frozen/immutable.
@@ -705,7 +706,20 @@ type DomainRoTx struct {
 	valsC kv.Cursor
 }
 
+func domainReadMetric(name string, level int) metrics.Summary {
+	if level > 4 {
+		level = 5
+	}
+	return mxsKVGet[name][level]
+}
+
 func (dt *DomainRoTx) getFromFile(i int, filekey []byte) ([]byte, bool, error) {
+	s := time.Now()
+	defer mxFileReadTime.ObserveDuration(s)
+	if dbg.KVReadLevelledMetrics {
+		defer domainReadMetric(dt.d.filenameBase, i).ObserveDuration(time.Now())
+	}
+
 	g := dt.statelessGetter(i)
 	if !(UseBtree || UseBpsTree) {
 		reader := dt.statelessIdxReader(i)
@@ -1781,11 +1795,8 @@ func (dt *DomainRoTx) Prune(ctx context.Context, rwTx kv.RwTx, step, txFrom, txT
 	}
 
 	var k, v []byte
-	if prunedKey != nil {
+	if prunedKey != nil && limit < 100_000 {
 		k, v, err = valsCursor.Seek(prunedKey)
-		if err != nil {
-			return stat, err
-		}
 	} else {
 		k, v, err = valsCursor.First()
 	}
@@ -1818,10 +1829,12 @@ func (dt *DomainRoTx) Prune(ctx context.Context, rwTx kv.RwTx, step, txFrom, txT
 			return stat, nil
 		}
 		limit--
+		stat.Values++
 		if err := ancientDomainValsCollector.Collect(k, v); err != nil {
 			return nil, err
 		}
-
+		stat.MinStep = min(stat.MinStep, is)
+		stat.MaxStep = max(stat.MaxStep, is)
 		select {
 		case <-ctx.Done():
 			// consider ctx exiting as incorrect outcome, error is returned

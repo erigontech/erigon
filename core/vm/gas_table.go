@@ -24,11 +24,11 @@ import (
 
 	"github.com/holiman/uint256"
 
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/common/math"
+	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common/math"
 
-	"github.com/ledgerwatch/erigon/core/vm/stack"
-	"github.com/ledgerwatch/erigon/params"
+	"github.com/erigontech/erigon/core/vm/stack"
+	"github.com/erigontech/erigon/params"
 )
 
 // memoryGasCost calculates the quadratic gas for memory expansion. It does so

@@ -26,33 +26,34 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/common/dbg"
-	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon-lib/kv/memdb"
-	"github.com/ledgerwatch/erigon/cl/antiquary"
-	"github.com/ledgerwatch/erigon/cl/beacon/beaconevents"
-	"github.com/ledgerwatch/erigon/cl/beacon/synced_data"
-	"github.com/ledgerwatch/erigon/cl/clparams"
-	"github.com/ledgerwatch/erigon/cl/clstages"
-	"github.com/ledgerwatch/erigon/cl/cltypes"
-	"github.com/ledgerwatch/erigon/cl/persistence"
-	"github.com/ledgerwatch/erigon/cl/persistence/beacon_indicies"
-	"github.com/ledgerwatch/erigon/cl/persistence/blob_storage"
-	state_accessors "github.com/ledgerwatch/erigon/cl/persistence/state"
-	"github.com/ledgerwatch/erigon/cl/phase1/core/state"
-	"github.com/ledgerwatch/erigon/cl/phase1/execution_client"
-	"github.com/ledgerwatch/erigon/cl/phase1/execution_client/block_collector"
-	"github.com/ledgerwatch/erigon/cl/phase1/forkchoice"
-	"github.com/ledgerwatch/erigon/cl/utils/eth_clock"
-	"github.com/ledgerwatch/erigon/cl/validator/attestation_producer"
-	"github.com/ledgerwatch/erigon/turbo/snapshotsync/freezeblocks"
+	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common/dbg"
+	"github.com/erigontech/erigon-lib/kv"
+	"github.com/erigontech/erigon-lib/kv/memdb"
+	"github.com/erigontech/erigon/cl/antiquary"
+	"github.com/erigontech/erigon/cl/beacon/beaconevents"
+	"github.com/erigontech/erigon/cl/beacon/synced_data"
+	"github.com/erigontech/erigon/cl/clparams"
+	"github.com/erigontech/erigon/cl/clstages"
+	"github.com/erigontech/erigon/cl/cltypes"
+	"github.com/erigontech/erigon/cl/monitor"
+	"github.com/erigontech/erigon/cl/persistence"
+	"github.com/erigontech/erigon/cl/persistence/beacon_indicies"
+	"github.com/erigontech/erigon/cl/persistence/blob_storage"
+	state_accessors "github.com/erigontech/erigon/cl/persistence/state"
+	"github.com/erigontech/erigon/cl/phase1/core/state"
+	"github.com/erigontech/erigon/cl/phase1/execution_client"
+	"github.com/erigontech/erigon/cl/phase1/execution_client/block_collector"
+	"github.com/erigontech/erigon/cl/phase1/forkchoice"
+	"github.com/erigontech/erigon/cl/utils/eth_clock"
+	"github.com/erigontech/erigon/cl/validator/attestation_producer"
+	"github.com/erigontech/erigon/turbo/snapshotsync/freezeblocks"
 
-	"github.com/ledgerwatch/erigon-lib/log/v3"
+	"github.com/erigontech/erigon-lib/log/v3"
 
-	network2 "github.com/ledgerwatch/erigon/cl/phase1/network"
-	"github.com/ledgerwatch/erigon/cl/rpc"
-	"github.com/ledgerwatch/erigon/cl/sentinel/peers"
+	network2 "github.com/erigontech/erigon/cl/phase1/network"
+	"github.com/erigontech/erigon/cl/rpc"
+	"github.com/erigontech/erigon/cl/sentinel/peers"
 )
 
 type Cfg struct {
@@ -73,6 +74,7 @@ type Cfg struct {
 	sn                      *freezeblocks.CaplinSnapshots
 	blobStore               blob_storage.BlobStorage
 	attestationDataProducer attestation_producer.AttestationDataProducer
+	validatorMonitor        monitor.ValidatorMonitor
 
 	hasDownloaded, backfilling, blobBackfilling bool
 }
@@ -106,6 +108,7 @@ func ClStagesCfg(
 	emitters *beaconevents.Emitters,
 	blobStore blob_storage.BlobStorage,
 	attestationDataProducer attestation_producer.AttestationDataProducer,
+	validatorMonitor monitor.ValidatorMonitor,
 ) *Cfg {
 	return &Cfg{
 		rpc:                     rpc,
@@ -127,6 +130,7 @@ func ClStagesCfg(
 		blockCollector:          block_collector.NewBlockCollector(log.Root(), executionClient, beaconCfg, syncBackLoopLimit, tmpdir),
 		blobBackfilling:         blobBackfilling,
 		attestationDataProducer: attestationDataProducer,
+		validatorMonitor:        validatorMonitor,
 	}
 }
 
@@ -210,7 +214,7 @@ digraph {
 func ConsensusClStages(ctx context.Context,
 	cfg *Cfg,
 ) *clstages.StageGraph[*Cfg, Args] {
-
+	// todo: refactor this function
 	rpcSource := persistence.NewBeaconRpcSource(cfg.rpc)
 	processBlock := func(db kv.RwDB, block *cltypes.SignedBeaconBlock, newPayload, fullValidation, checkDataAvaiability bool) error {
 		if err := db.Update(ctx, func(tx kv.RwTx) error {
@@ -302,10 +306,25 @@ func ConsensusClStages(ctx context.Context,
 						})
 
 						for i, block := range blocks {
+							blockRoot, err := block.Block.HashSSZ()
+							if err != nil {
+								logger.Warn("failed to hash block", "err", err)
+								blocks = blocks[i:]
+								break
+							}
+
 							if err := processBlock(cfg.indiciesDB, block, false, true, false); err != nil {
 								log.Warn("bad blocks segment received", "err", err)
 								blocks = blocks[i:]
 								break
+							}
+							// don't need to monitor validators status here when we are doing forward sync
+
+							st, err := cfg.forkChoice.GetStateAtBlockRoot(blockRoot, false)
+							if err == nil && block.Block.Slot%(cfg.beaconCfg.SlotsPerEpoch*2) == 0 && st != nil {
+								if err := cfg.forkChoice.DumpBeaconStateOnDisk(st); err != nil {
+									logger.Warn("failed to dump state", "err", err)
+								}
 							}
 							if shouldInsert && block.Version() >= clparams.BellatrixVersion {
 								if err := cfg.blockCollector.AddBlock(block.Block); err != nil {
@@ -549,9 +568,11 @@ func ConsensusClStages(ctx context.Context,
 									"block":                common.Hash(blockRoot),
 									"execution_optimistic": false, // TODO: i don't know what to put here. i see other places doing false, leaving flase for now
 								})
+								cfg.validatorMonitor.OnNewBlock(block.Block)
 								if block.Block.Slot >= args.targetSlot {
 									break MainLoop
 								}
+
 							}
 						case <-logTimer.C:
 							logger.Info("[Caplin] Progress", "progress", cfg.forkChoice.HighestSeen(), "from", args.seenSlot, "to", args.targetSlot)
@@ -663,6 +684,7 @@ func ConsensusClStages(ctx context.Context,
 					if _, err = cfg.attestationDataProducer.ProduceAndCacheAttestationData(copiedHeadState, copiedHeadState.Slot(), 0); err != nil {
 						logger.Warn("failed to produce and cache attestation data", "err", err)
 					}
+
 					// Incement some stuff here
 					preverifiedValidators := cfg.forkChoice.PreverifiedValidator(headState.FinalizedCheckpoint().BlockRoot())
 					preverifiedHistoricalSummary := cfg.forkChoice.PreverifiedHistoricalSummaries(headState.FinalizedCheckpoint().BlockRoot())
@@ -681,6 +703,10 @@ func ConsensusClStages(ctx context.Context,
 					stateRoot, err := headState.HashSSZ()
 					if err != nil {
 						return fmt.Errorf("failed to hash ssz: %w", err)
+					}
+
+					if err := cfg.forkChoice.DumpBeaconStateOnDisk(headState); err != nil {
+						return fmt.Errorf("failed to dump beacon state on disk: %w", err)
 					}
 
 					headEpoch := headSlot / cfg.beaconCfg.SlotsPerEpoch

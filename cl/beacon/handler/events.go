@@ -19,13 +19,12 @@ package handler
 import (
 	"bytes"
 	"encoding/json"
-	"fmt"
 	"net/http"
 	"sync"
 
 	"github.com/gfx-labs/sse"
 
-	"github.com/ledgerwatch/erigon-lib/log/v3"
+	"github.com/erigontech/erigon-lib/log/v3"
 )
 
 var validTopics = map[string]struct{}{
@@ -51,7 +50,7 @@ func (a *ApiHandler) EventSourceGetV1Events(w http.ResponseWriter, r *http.Reque
 	topics := r.URL.Query()["topics"]
 	for _, v := range topics {
 		if _, ok := validTopics[v]; !ok {
-			http.Error(w, fmt.Sprintf("invalid Topic: %s", v), http.StatusBadRequest)
+			http.Error(w, "invalid Topic: "+v, http.StatusBadRequest)
 		}
 	}
 	var mu sync.Mutex

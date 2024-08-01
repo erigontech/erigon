@@ -18,12 +18,12 @@ package forkchoice
 
 import (
 	"bytes"
-	"fmt"
+	"errors"
 	"sort"
 
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon/cl/cltypes"
-	"github.com/ledgerwatch/erigon/cl/cltypes/solid"
+	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon/cl/cltypes"
+	"github.com/erigontech/erigon/cl/cltypes/solid"
 )
 
 // accountWeights updates the weights of the validators, given the vote and given an head leaf.
@@ -104,7 +104,7 @@ func (f *ForkChoiceStore) GetHead() (libcommon.Hash, uint64, error) {
 		if len(children) == 0 {
 			header, hasHeader := f.forkGraph.GetHeader(f.headHash)
 			if !hasHeader {
-				return libcommon.Hash{}, 0, fmt.Errorf("no slot for head is stored")
+				return libcommon.Hash{}, 0, errors.New("no slot for head is stored")
 			}
 			f.headSlot = header.Slot
 			return f.headHash, f.headSlot, nil

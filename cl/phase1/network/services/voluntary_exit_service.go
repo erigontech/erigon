@@ -20,14 +20,14 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/ledgerwatch/erigon/cl/beacon/beaconevents"
-	"github.com/ledgerwatch/erigon/cl/beacon/synced_data"
-	"github.com/ledgerwatch/erigon/cl/clparams"
-	"github.com/ledgerwatch/erigon/cl/cltypes"
-	"github.com/ledgerwatch/erigon/cl/fork"
-	"github.com/ledgerwatch/erigon/cl/pool"
-	"github.com/ledgerwatch/erigon/cl/utils"
-	"github.com/ledgerwatch/erigon/cl/utils/eth_clock"
+	"github.com/erigontech/erigon/cl/beacon/beaconevents"
+	"github.com/erigontech/erigon/cl/beacon/synced_data"
+	"github.com/erigontech/erigon/cl/clparams"
+	"github.com/erigontech/erigon/cl/cltypes"
+	"github.com/erigontech/erigon/cl/fork"
+	"github.com/erigontech/erigon/cl/pool"
+	"github.com/erigontech/erigon/cl/utils"
+	"github.com/erigontech/erigon/cl/utils/eth_clock"
 	"github.com/pkg/errors"
 )
 
@@ -80,7 +80,7 @@ func (s *voluntaryExitService) ProcessMessage(ctx context.Context, subnet *uint6
 	// Verify the validator is active
 	// assert is_active_validator(validator, get_current_epoch(state))
 	if !val.Active(curEpoch) {
-		return fmt.Errorf("validator is not active")
+		return errors.New("validator is not active")
 	}
 
 	// Verify exit has not been initiated
@@ -92,13 +92,13 @@ func (s *voluntaryExitService) ProcessMessage(ctx context.Context, subnet *uint6
 	// Exits must specify an epoch when they become valid; they are not valid before then
 	// assert get_current_epoch(state) >= voluntary_exit.epoch
 	if !(curEpoch >= voluntaryExit.Epoch) {
-		return fmt.Errorf("exits must specify an epoch when they become valid; they are not valid before then")
+		return errors.New("exits must specify an epoch when they become valid; they are not valid before then")
 	}
 
 	// Verify the validator has been active long enough
 	// assert get_current_epoch(state) >= validator.activation_epoch + SHARD_COMMITTEE_PERIOD
 	if !(curEpoch >= val.ActivationEpoch()+s.beaconCfg.ShardCommitteePeriod) {
-		return fmt.Errorf("verify the validator has been active long enough")
+		return errors.New("verify the validator has been active long enough")
 	}
 
 	// Verify signature

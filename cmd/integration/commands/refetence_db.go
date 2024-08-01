@@ -20,6 +20,7 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"os"
@@ -31,15 +32,15 @@ import (
 	"golang.org/x/sync/errgroup"
 	"golang.org/x/sync/semaphore"
 
-	"github.com/ledgerwatch/erigon-lib/log/v3"
+	"github.com/erigontech/erigon-lib/log/v3"
 
-	common2 "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon-lib/kv/backup"
-	mdbx2 "github.com/ledgerwatch/erigon-lib/kv/mdbx"
+	common2 "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/kv"
+	"github.com/erigontech/erigon-lib/kv/backup"
+	mdbx2 "github.com/erigontech/erigon-lib/kv/mdbx"
 
-	"github.com/ledgerwatch/erigon/common"
-	"github.com/ledgerwatch/erigon/turbo/debug"
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/turbo/debug"
 )
 
 var stateBuckets = []string{
@@ -198,11 +199,8 @@ func init() {
 
 func doWarmup(ctx context.Context, chaindata string, bucket string, logger log.Logger) error {
 	const ThreadsLimit = 5_000
-	dbOpts := mdbx2.NewMDBX(log.New()).Path(chaindata).Accede().RoTxsLimiter(semaphore.NewWeighted(ThreadsLimit))
-
-	if dbWriteMap {
-		dbOpts = dbOpts.WriteMap()
-	}
+	dbOpts := mdbx2.NewMDBX(log.New()).Path(chaindata).Accede().RoTxsLimiter(semaphore.NewWeighted(ThreadsLimit)).
+		WriteMap(dbWriteMap)
 
 	db := dbOpts.MustOpen()
 	defer db.Close()
@@ -258,11 +256,8 @@ func doWarmup(ctx context.Context, chaindata string, bucket string, logger log.L
 
 func mdbxTopDup(ctx context.Context, chaindata string, bucket string, logger log.Logger) error {
 	const ThreadsLimit = 5_000
-	dbOpts := mdbx2.NewMDBX(log.New()).Path(chaindata).Accede().RoTxsLimiter(semaphore.NewWeighted(ThreadsLimit))
-
-	if dbWriteMap {
-		dbOpts = dbOpts.WriteMap()
-	}
+	dbOpts := mdbx2.NewMDBX(log.New()).Path(chaindata).Accede().RoTxsLimiter(semaphore.NewWeighted(ThreadsLimit)).
+		WriteMap(dbWriteMap)
 
 	db := dbOpts.MustOpen()
 	defer db.Close()
@@ -427,10 +422,7 @@ func fToMdbx(ctx context.Context, logger log.Logger, to string) error {
 	}
 	defer file.Close()
 
-	dstOpts := mdbx2.NewMDBX(logger).Path(to)
-	if dbWriteMap {
-		dstOpts = dstOpts.WriteMap()
-	}
+	dstOpts := mdbx2.NewMDBX(logger).Path(to).WriteMap(dbWriteMap)
 	dst := dstOpts.MustOpen()
 	dstTx, err1 := dst.BeginRw(ctx)
 	if err1 != nil {
@@ -508,7 +500,7 @@ MainLoop:
 			case <-ctx.Done():
 				return ctx.Err()
 			case <-commitEvery.C:
-				logger.Info("Progress", "bucket", bucket, "key", fmt.Sprintf("%x", k))
+				logger.Info("Progress", "bucket", bucket, "key", hex.EncodeToString(k))
 			}
 		}
 		err = fileScanner.Err()

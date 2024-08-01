@@ -7,8 +7,8 @@ import (
 	"io"
 	"testing"
 
-	"github.com/ledgerwatch/erigon-lib/common/hexutil"
-	"github.com/ledgerwatch/erigon/core/vm"
+	"github.com/erigontech/erigon-lib/common/hexutil"
+	"github.com/erigontech/erigon/core/vm"
 )
 
 // A BlockTest checks handling of entire blocks.

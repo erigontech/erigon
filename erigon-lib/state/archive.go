@@ -20,8 +20,8 @@ import (
 	"encoding/binary"
 	"fmt"
 
-	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon-lib/seg"
+	"github.com/erigontech/erigon-lib/kv"
+	"github.com/erigontech/erigon-lib/seg"
 )
 
 type FileCompression uint8
@@ -61,7 +61,7 @@ func (g *getter) MatchPrefix(prefix []byte) bool {
 	if g.c&CompressKeys != 0 {
 		return g.Getter.MatchPrefix(prefix)
 	}
-	return g.Getter.MatchPrefixUncompressed(prefix) == 0
+	return g.Getter.MatchPrefixUncompressed(prefix)
 }
 
 func (g *getter) Next(buf []byte) ([]byte, uint64) {

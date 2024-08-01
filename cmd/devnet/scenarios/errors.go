@@ -16,10 +16,13 @@
 
 package scenarios
 
-import "fmt"
+import (
+	"errors"
+	"fmt"
+)
 
 // ErrUndefined is returned in case if step definition was not found
-var ErrUndefined = fmt.Errorf("step is undefined")
+var ErrUndefined = errors.New("step is undefined")
 
 type ScenarioError struct {
 	error

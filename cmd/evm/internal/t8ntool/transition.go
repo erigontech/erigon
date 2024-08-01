@@ -33,29 +33,29 @@ import (
 	"github.com/holiman/uint256"
 	"github.com/urfave/cli/v2"
 
-	"github.com/ledgerwatch/erigon-lib/common/datadir"
-	"github.com/ledgerwatch/erigon-lib/kv/temporal/temporaltest"
-	"github.com/ledgerwatch/erigon-lib/log/v3"
-	"github.com/ledgerwatch/erigon/eth/consensuschain"
+	"github.com/erigontech/erigon-lib/common/datadir"
+	"github.com/erigontech/erigon-lib/kv/temporal/temporaltest"
+	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/eth/consensuschain"
 
-	"github.com/ledgerwatch/erigon-lib/chain"
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/common/hexutility"
-	"github.com/ledgerwatch/erigon-lib/common/length"
-	"github.com/ledgerwatch/erigon-lib/kv"
-	libstate "github.com/ledgerwatch/erigon-lib/state"
-	"github.com/ledgerwatch/erigon/common/math"
-	"github.com/ledgerwatch/erigon/consensus/ethash"
-	"github.com/ledgerwatch/erigon/consensus/merge"
-	"github.com/ledgerwatch/erigon/core"
-	"github.com/ledgerwatch/erigon/core/state"
-	"github.com/ledgerwatch/erigon/core/types"
-	"github.com/ledgerwatch/erigon/core/vm"
-	"github.com/ledgerwatch/erigon/crypto"
-	trace_logger "github.com/ledgerwatch/erigon/eth/tracers/logger"
-	"github.com/ledgerwatch/erigon/rlp"
-	"github.com/ledgerwatch/erigon/tests"
-	"github.com/ledgerwatch/erigon/turbo/jsonrpc"
+	"github.com/erigontech/erigon-lib/chain"
+	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common/hexutility"
+	"github.com/erigontech/erigon-lib/common/length"
+	"github.com/erigontech/erigon-lib/kv"
+	libstate "github.com/erigontech/erigon-lib/state"
+	"github.com/erigontech/erigon/common/math"
+	"github.com/erigontech/erigon/consensus/ethash"
+	"github.com/erigontech/erigon/consensus/merge"
+	"github.com/erigontech/erigon/core"
+	"github.com/erigontech/erigon/core/state"
+	"github.com/erigontech/erigon/core/types"
+	"github.com/erigontech/erigon/core/vm"
+	"github.com/erigontech/erigon/crypto"
+	trace_logger "github.com/erigontech/erigon/eth/tracers/logger"
+	"github.com/erigontech/erigon/rlp"
+	"github.com/erigontech/erigon/tests"
+	"github.com/erigontech/erigon/turbo/jsonrpc"
 )
 
 const (
@@ -398,21 +398,21 @@ func getTransaction(txJson jsonrpc.RPCTransaction) (types.Transaction, error) {
 	if txJson.Value != nil {
 		value, overflow = uint256.FromBig(txJson.Value.ToInt())
 		if overflow {
-			return nil, fmt.Errorf("value field caused an overflow (uint256)")
+			return nil, errors.New("value field caused an overflow (uint256)")
 		}
 	}
 
 	if txJson.GasPrice != nil {
 		gasPrice, overflow = uint256.FromBig(txJson.GasPrice.ToInt())
 		if overflow {
-			return nil, fmt.Errorf("gasPrice field caused an overflow (uint256)")
+			return nil, errors.New("gasPrice field caused an overflow (uint256)")
 		}
 	}
 
 	if txJson.ChainID != nil {
 		chainId, overflow = uint256.FromBig(txJson.ChainID.ToInt())
 		if overflow {
-			return nil, fmt.Errorf("chainId field caused an overflow (uint256)")
+			return nil, errors.New("chainId field caused an overflow (uint256)")
 		}
 	}
 
@@ -448,14 +448,14 @@ func getTransaction(txJson jsonrpc.RPCTransaction) (types.Transaction, error) {
 		if txJson.Tip != nil {
 			tip, overflow = uint256.FromBig(txJson.Tip.ToInt())
 			if overflow {
-				return nil, fmt.Errorf("maxPriorityFeePerGas field caused an overflow (uint256)")
+				return nil, errors.New("maxPriorityFeePerGas field caused an overflow (uint256)")
 			}
 		}
 
 		if txJson.FeeCap != nil {
 			feeCap, overflow = uint256.FromBig(txJson.FeeCap.ToInt())
 			if overflow {
-				return nil, fmt.Errorf("maxFeePerGas field caused an overflow (uint256)")
+				return nil, errors.New("maxFeePerGas field caused an overflow (uint256)")
 			}
 		}
 

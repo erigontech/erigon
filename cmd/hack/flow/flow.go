@@ -30,11 +30,11 @@ import (
 	"strings"
 	"time"
 
-	"github.com/ledgerwatch/erigon-lib/common/dbg"
+	"github.com/erigontech/erigon-lib/common/dbg"
 
-	"github.com/ledgerwatch/erigon/cmd/hack/tool"
-	"github.com/ledgerwatch/erigon/common/debug"
-	"github.com/ledgerwatch/erigon/core/vm"
+	"github.com/erigontech/erigon/cmd/hack/tool"
+	"github.com/erigontech/erigon/common/debug"
+	"github.com/erigontech/erigon/core/vm"
 )
 
 const (
@@ -286,11 +286,11 @@ func batchServer() {
 }
 
 func si64(n int64) string {
-	return fmt.Sprintf("%v", n)
+	return strconv.FormatInt(n, 10)
 }
 
 func sui64(n uint64) string {
-	return fmt.Sprintf("%v", n)
+	return strconv.FormatUint(n, 10)
 }
 
 /*
@@ -742,11 +742,11 @@ type cfgJobResult struct {
 }
 
 func sb(b bool) string {
-	return fmt.Sprintf("%v", b)
+	return strconv.FormatBool(b)
 }
 
 func si(i int) string {
-	return fmt.Sprintf("%v", i)
+	return strconv.Itoa(i)
 }
 
 func percent(n int, d int) string {

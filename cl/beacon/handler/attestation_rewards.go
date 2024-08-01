@@ -18,20 +18,20 @@ package handler
 
 import (
 	"encoding/json"
-	"fmt"
+	"errors"
 	"io"
 	"net/http"
 
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon/cl/beacon/beaconhttp"
-	"github.com/ledgerwatch/erigon/cl/clparams"
-	"github.com/ledgerwatch/erigon/cl/cltypes"
-	"github.com/ledgerwatch/erigon/cl/cltypes/solid"
-	"github.com/ledgerwatch/erigon/cl/persistence/beacon_indicies"
-	state_accessors "github.com/ledgerwatch/erigon/cl/persistence/state"
-	"github.com/ledgerwatch/erigon/cl/transition/impl/eth2/statechange"
-	"github.com/ledgerwatch/erigon/cl/utils"
+	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/kv"
+	"github.com/erigontech/erigon/cl/beacon/beaconhttp"
+	"github.com/erigontech/erigon/cl/clparams"
+	"github.com/erigontech/erigon/cl/cltypes"
+	"github.com/erigontech/erigon/cl/cltypes/solid"
+	"github.com/erigontech/erigon/cl/persistence/beacon_indicies"
+	state_accessors "github.com/erigontech/erigon/cl/persistence/state"
+	"github.com/erigontech/erigon/cl/transition/impl/eth2/statechange"
+	"github.com/erigontech/erigon/cl/utils"
 )
 
 type IdealReward struct {
@@ -94,7 +94,7 @@ func (a *ApiHandler) PostEthV1BeaconRewardsAttestations(w http.ResponseWriter, r
 	}
 	headEpoch := headSlot / a.beaconChainCfg.SlotsPerEpoch
 	if epoch > headEpoch {
-		return nil, beaconhttp.NewEndpointError(http.StatusNotFound, fmt.Errorf("epoch is in the future"))
+		return nil, beaconhttp.NewEndpointError(http.StatusNotFound, errors.New("epoch is in the future"))
 	}
 	// Few cases to handle:
 	// 1) finalized data
@@ -115,14 +115,14 @@ func (a *ApiHandler) PostEthV1BeaconRewardsAttestations(w http.ResponseWriter, r
 				continue
 			}
 			if version == clparams.Phase0Version {
-				return nil, beaconhttp.NewEndpointError(http.StatusHTTPVersionNotSupported, fmt.Errorf("phase0 state is not supported when there is no antiquation"))
+				return nil, beaconhttp.NewEndpointError(http.StatusHTTPVersionNotSupported, errors.New("phase0 state is not supported when there is no antiquation"))
 			}
 			inactivityScores, err := a.forkchoiceStore.GetInactivitiesScores(blockRoot)
 			if err != nil {
 				return nil, err
 			}
 			if inactivityScores == nil {
-				return nil, beaconhttp.NewEndpointError(http.StatusNotFound, fmt.Errorf("no inactivity scores found for this epoch"))
+				return nil, beaconhttp.NewEndpointError(http.StatusNotFound, errors.New("no inactivity scores found for this epoch"))
 			}
 
 			prevPartecipation, err := a.forkchoiceStore.GetPreviousPartecipationIndicies(blockRoot)
@@ -130,24 +130,24 @@ func (a *ApiHandler) PostEthV1BeaconRewardsAttestations(w http.ResponseWriter, r
 				return nil, err
 			}
 			if prevPartecipation == nil {
-				return nil, beaconhttp.NewEndpointError(http.StatusNotFound, fmt.Errorf("no previous partecipation found for this epoch"))
+				return nil, beaconhttp.NewEndpointError(http.StatusNotFound, errors.New("no previous partecipation found for this epoch"))
 			}
 			validatorSet, err := a.forkchoiceStore.GetValidatorSet(blockRoot)
 			if err != nil {
 				return nil, err
 			}
 			if validatorSet == nil {
-				return nil, beaconhttp.NewEndpointError(http.StatusNotFound, fmt.Errorf("no validator set found for this epoch"))
+				return nil, beaconhttp.NewEndpointError(http.StatusNotFound, errors.New("no validator set found for this epoch"))
 			}
 
 			ok, finalizedCheckpoint, _, _ := a.forkchoiceStore.GetFinalityCheckpoints(blockRoot)
 			if !ok {
-				return nil, beaconhttp.NewEndpointError(http.StatusNotFound, fmt.Errorf("no finalized checkpoint found for this epoch"))
+				return nil, beaconhttp.NewEndpointError(http.StatusNotFound, errors.New("no finalized checkpoint found for this epoch"))
 			}
 
 			return a.computeAttestationsRewardsForAltair(validatorSet, inactivityScores, prevPartecipation, a.isInactivityLeaking(epoch, finalizedCheckpoint), filterIndicies, epoch)
 		}
-		return nil, beaconhttp.NewEndpointError(http.StatusNotFound, fmt.Errorf("no block found for this epoch"))
+		return nil, beaconhttp.NewEndpointError(http.StatusNotFound, errors.New("no block found for this epoch"))
 	}
 
 	root, err := a.findEpochRoot(tx, epoch)
@@ -159,7 +159,7 @@ func (a *ApiHandler) PostEthV1BeaconRewardsAttestations(w http.ResponseWriter, r
 		return nil, err
 	}
 	if lastSlotPtr == nil {
-		return nil, beaconhttp.NewEndpointError(http.StatusNotFound, fmt.Errorf("no block found for this epoch"))
+		return nil, beaconhttp.NewEndpointError(http.StatusNotFound, errors.New("no block found for this epoch"))
 	}
 	lastSlot := *lastSlotPtr
 
@@ -168,7 +168,7 @@ func (a *ApiHandler) PostEthV1BeaconRewardsAttestations(w http.ResponseWriter, r
 		return nil, err
 	}
 	if lastSlot > stateProgress {
-		return nil, beaconhttp.NewEndpointError(http.StatusNotFound, fmt.Errorf("requested range is not yet processed or the node is not archivial"))
+		return nil, beaconhttp.NewEndpointError(http.StatusNotFound, errors.New("requested range is not yet processed or the node is not archivial"))
 	}
 
 	epochData, err := state_accessors.ReadEpochData(tx, a.beaconChainCfg.RoundSlotToEpoch(lastSlot))
@@ -181,7 +181,7 @@ func (a *ApiHandler) PostEthV1BeaconRewardsAttestations(w http.ResponseWriter, r
 		return nil, err
 	}
 	if validatorSet == nil {
-		return nil, beaconhttp.NewEndpointError(http.StatusNotFound, fmt.Errorf("no validator set found for this epoch"))
+		return nil, beaconhttp.NewEndpointError(http.StatusNotFound, errors.New("no validator set found for this epoch"))
 	}
 
 	_, previousIdx, err := a.stateReader.ReadPartecipations(tx, lastSlot)

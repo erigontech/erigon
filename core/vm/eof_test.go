@@ -20,7 +20,7 @@ import (
 	"reflect"
 	"testing"
 
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	libcommon "github.com/erigontech/erigon-lib/common"
 )
 
 func TestEOFMarshaling(t *testing.T) {

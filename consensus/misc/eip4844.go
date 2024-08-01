@@ -20,14 +20,15 @@
 package misc
 
 import (
+	"errors"
 	"fmt"
 
 	"github.com/holiman/uint256"
 
-	"github.com/ledgerwatch/erigon-lib/chain"
-	"github.com/ledgerwatch/erigon-lib/common/fixedgas"
+	"github.com/erigontech/erigon-lib/chain"
+	"github.com/erigontech/erigon-lib/common/fixedgas"
 
-	"github.com/ledgerwatch/erigon/core/types"
+	"github.com/erigontech/erigon/core/types"
 )
 
 // CalcExcessBlobGas implements calc_excess_blob_gas from EIP-4844
@@ -77,13 +78,13 @@ func FakeExponential(factor, denom *uint256.Int, excessBlobGas uint64) (*uint256
 // VerifyPresenceOfCancunHeaderFields checks that the fields introduced in Cancun (EIP-4844, EIP-4788) are present.
 func VerifyPresenceOfCancunHeaderFields(header *types.Header) error {
 	if header.BlobGasUsed == nil {
-		return fmt.Errorf("header is missing blobGasUsed")
+		return errors.New("header is missing blobGasUsed")
 	}
 	if header.ExcessBlobGas == nil {
-		return fmt.Errorf("header is missing excessBlobGas")
+		return errors.New("header is missing excessBlobGas")
 	}
 	if header.ParentBeaconBlockRoot == nil {
-		return fmt.Errorf("header is missing parentBeaconBlockRoot")
+		return errors.New("header is missing parentBeaconBlockRoot")
 	}
 	return nil
 }

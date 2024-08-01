@@ -25,7 +25,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"github.com/ledgerwatch/erigon-lib/common/length"
+	"github.com/erigontech/erigon-lib/common/length"
 )
 
 func Test_BinPatriciaTrie_UniqueRepresentation(t *testing.T) {

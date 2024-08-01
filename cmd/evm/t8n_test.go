@@ -27,8 +27,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/docker/docker/pkg/reexec"
-	"github.com/ledgerwatch/erigon/turbo/cmdtest"
+	"github.com/erigontech/erigon/internal/reexec"
+	"github.com/erigontech/erigon/turbo/cmdtest"
 )
 
 func TestMain(m *testing.M) {

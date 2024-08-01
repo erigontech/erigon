@@ -19,15 +19,16 @@ package rpctest
 import (
 	"bytes"
 	"encoding/base64"
+	"errors"
 	"fmt"
 	"net/http"
 	"os"
 	"path/filepath"
 	"time"
 
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	libcommon "github.com/erigontech/erigon-lib/common"
 
-	"github.com/ledgerwatch/erigon/core/state"
+	"github.com/erigontech/erigon/core/state"
 )
 
 var routes map[string]string
@@ -161,7 +162,7 @@ func Bench1(erigonURL, gethURL string, needCompare bool, fullTest bool, blockFro
 							printStorageRange(sm)
 							fmt.Printf("================smg\n")
 							printStorageRange(smg)
-							return fmt.Errorf("Storage range different\n")
+							return errors.New("Storage range different\n")
 						}
 					}
 				}
@@ -229,7 +230,7 @@ func Bench1(erigonURL, gethURL string, needCompare bool, fullTest bool, blockFro
 					fmt.Printf("Different receipts block %d, txn %s\n", bn, txn.Hash)
 					print(client, routes[Geth], reqGen.getTransactionReceipt(txn.Hash))
 					print(client, routes[Erigon], reqGen.getTransactionReceipt(txn.Hash))
-					return fmt.Errorf("Receipts are different\n")
+					return errors.New("Receipts are different\n")
 				}
 			}
 		}
@@ -323,7 +324,7 @@ func Bench1(erigonURL, gethURL string, needCompare bool, fullTest bool, blockFro
 						fmt.Printf("Different next page keys: %x geth %x", page, pageGeth)
 					}
 					if !compareAccountRanges(accRangeErigon, accRangeGeth) {
-						return fmt.Errorf("Different in account ranges tx\n")
+						return errors.New("Different in account ranges tx\n")
 					}
 				}
 			}

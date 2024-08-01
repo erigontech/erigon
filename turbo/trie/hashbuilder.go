@@ -18,19 +18,21 @@ package trie
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 	"io"
 	"math/bits"
 
 	"github.com/holiman/uint256"
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	length2 "github.com/ledgerwatch/erigon-lib/common/length"
 	"golang.org/x/crypto/sha3"
 
-	"github.com/ledgerwatch/erigon/core/types/accounts"
-	"github.com/ledgerwatch/erigon/crypto"
-	"github.com/ledgerwatch/erigon/rlp"
-	"github.com/ledgerwatch/erigon/turbo/rlphacks"
+	libcommon "github.com/erigontech/erigon-lib/common"
+	length2 "github.com/erigontech/erigon-lib/common/length"
+
+	"github.com/erigontech/erigon/core/types/accounts"
+	"github.com/erigontech/erigon/crypto"
+	"github.com/erigontech/erigon/rlp"
+	"github.com/erigontech/erigon/turbo/rlphacks"
 )
 
 const hashStackStride = length2.Hash + 1 // + 1 byte for RLP encoding
@@ -487,7 +489,7 @@ func (hb *HashBuilder) extensionHash(key []byte) error {
 		fmt.Printf("extensionHash [%x]=>[%x]\nHash [%x]\n", key, capture, hb.hashStack[len(hb.hashStack)-hashStackStride:len(hb.hashStack)])
 	}
 	if _, ok := hb.nodeStack[len(hb.nodeStack)-1].(*fullNode); ok {
-		return fmt.Errorf("extensionHash cannot be emitted when a node is on top of the stack")
+		return errors.New("extensionHash cannot be emitted when a node is on top of the stack")
 	}
 	return nil
 }
@@ -669,7 +671,7 @@ func (hb *HashBuilder) emptyRoot() {
 
 func (hb *HashBuilder) RootHash() (libcommon.Hash, error) {
 	if !hb.hasRoot() {
-		return libcommon.Hash{}, fmt.Errorf("no root in the tree")
+		return libcommon.Hash{}, errors.New("no root in the tree")
 	}
 	return hb.rootHash(), nil
 }

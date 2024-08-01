@@ -22,16 +22,18 @@ package trie
 import (
 	"bytes"
 	"encoding/binary"
+	"errors"
 	"fmt"
 	"math/big"
 	"sort"
 
-	"github.com/ledgerwatch/erigon-lib/common/hexutil"
-
 	"github.com/holiman/uint256"
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/common/length"
-	"github.com/ledgerwatch/erigon/core/types/accounts"
+
+	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common/hexutil"
+	"github.com/erigontech/erigon-lib/common/length"
+
+	"github.com/erigontech/erigon/core/types/accounts"
 )
 
 type RetainDecider interface {
@@ -150,7 +152,7 @@ func (pr *ProofRetainer) ProofResult() (*accounts.AccProofResult, error) {
 	}
 
 	if pr.acc.Initialised && result.StorageHash == (libcommon.Hash{}) {
-		return nil, fmt.Errorf("did not find storage root in proof elements")
+		return nil, errors.New("did not find storage root in proof elements")
 	}
 
 	result.StorageProof = make([]accounts.StorProofResult, len(pr.storageKeys))

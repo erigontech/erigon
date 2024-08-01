@@ -18,21 +18,25 @@ package bridge
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
-	"github.com/ledgerwatch/erigon-lib/log/v3"
-	"github.com/ledgerwatch/erigon/common/u256"
-	"github.com/ledgerwatch/erigon/core"
-	"github.com/ledgerwatch/erigon/core/state"
-	"github.com/ledgerwatch/erigon/polygon/polygoncommon"
+	"github.com/erigontech/erigon-lib/kv"
+	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/common/u256"
+	"github.com/erigontech/erigon/core"
+	"github.com/erigontech/erigon/core/state"
+	"github.com/erigontech/erigon/polygon/polygoncommon"
 
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon/accounts/abi"
-	"github.com/ledgerwatch/erigon/core/types"
-	"github.com/ledgerwatch/erigon/polygon/bor/borcfg"
-	"github.com/ledgerwatch/erigon/polygon/heimdall"
+	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon/accounts/abi"
+	"github.com/erigontech/erigon/core/types"
+	"github.com/erigontech/erigon/polygon/bor/borcfg"
+	"github.com/erigontech/erigon/polygon/heimdall"
 )
+
+var ErrMapNotAvailable = errors.New("map not available")
 
 type fetchSyncEventsType func(ctx context.Context, fromId uint64, to time.Time, limit int) ([]*heimdall.EventRecordWithTime, error)
 
@@ -50,7 +54,7 @@ type Bridge struct {
 }
 
 func Assemble(dataDir string, logger log.Logger, borConfig *borcfg.BorConfig, fetchSyncEvents fetchSyncEventsType, stateReceiverABI abi.ABI) *Bridge {
-	bridgeDB := polygoncommon.NewDatabase(dataDir, logger)
+	bridgeDB := polygoncommon.NewDatabase(dataDir, kv.PolygonBridgeDB, databaseTablesCfg, logger)
 	bridgeStore := NewStore(bridgeDB)
 	return NewBridge(bridgeStore, logger, borConfig, fetchSyncEvents, stateReceiverABI)
 }
@@ -80,6 +84,13 @@ func (b *Bridge) Run(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+
+	lastProcessedEventID, err := b.store.GetLastProcessedEventID(ctx)
+	if err != nil {
+		return err
+	}
+
+	b.lastProcessedEventID = lastProcessedEventID
 
 	// start syncing
 	b.log.Debug(bridgeLogPrefix("Bridge is running"), "lastEventID", lastEventID)
@@ -125,19 +136,30 @@ func (b *Bridge) Close() {
 // ProcessNewBlocks iterates through all blocks and constructs a map from block number to sync events
 func (b *Bridge) ProcessNewBlocks(ctx context.Context, blocks []*types.Block) error {
 	eventMap := make(map[uint64]uint64)
+	var prevSprintTime time.Time
+
 	for _, block := range blocks {
 		// check if block is start of span
 		if !b.isSprintStart(block.NumberU64()) {
 			continue
 		}
 
-		blockTimestamp := time.Unix(int64(block.Time()), 0)
-		lastDBID, err := b.store.GetSprintLastEventID(ctx, b.lastProcessedEventID, blockTimestamp, b.stateReceiverABI)
+		var timeLimit time.Time
+		if b.borConfig.IsIndore(block.NumberU64()) {
+			stateSyncDelay := b.borConfig.CalculateStateSyncDelay(block.NumberU64())
+			timeLimit = time.Unix(int64(block.Time()-stateSyncDelay), 0)
+		} else {
+			timeLimit = prevSprintTime
+		}
+
+		prevSprintTime = time.Unix(int64(block.Time()), 0)
+
+		lastDBID, err := b.store.GetSprintLastEventID(ctx, b.lastProcessedEventID, timeLimit, b.stateReceiverABI)
 		if err != nil {
 			return err
 		}
 
-		if lastDBID != 0 && lastDBID > b.lastProcessedEventID {
+		if lastDBID > b.lastProcessedEventID {
 			b.log.Debug(bridgeLogPrefix(fmt.Sprintf("Creating map for block %d, start ID %d, end ID %d", block.NumberU64(), b.lastProcessedEventID, lastDBID)))
 			eventMap[block.NumberU64()] = b.lastProcessedEventID
 
@@ -178,14 +200,16 @@ func (b *Bridge) Unwind(ctx context.Context, tip *types.Header) error {
 func (b *Bridge) GetEvents(ctx context.Context, blockNum uint64) ([]*types.Message, error) {
 	start, end, err := b.store.GetEventIDRange(ctx, blockNum)
 	if err != nil {
+		if errors.Is(err, ErrMapNotAvailable) {
+			return nil, nil
+		}
+
 		return nil, err
 	}
 
 	if end == 0 { // exception for tip processing
 		end = b.lastProcessedEventID
 	}
-
-	b.log.Debug("got map", "blockNum", blockNum, "start", start, "end", end)
 
 	eventsRaw := make([]*types.Message, 0, end-start+1)
 

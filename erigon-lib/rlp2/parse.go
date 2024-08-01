@@ -22,11 +22,11 @@ import (
 
 	"github.com/holiman/uint256"
 
-	"github.com/ledgerwatch/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common"
 )
 
 var (
-	ErrBase          = fmt.Errorf("rlp")
+	ErrBase          = errors.New("rlp")
 	ErrParse         = fmt.Errorf("%w parse", ErrBase)
 	ErrDecode        = fmt.Errorf("%w decode", ErrBase)
 	ErrUnexpectedEOF = fmt.Errorf("%w EOF", ErrBase)

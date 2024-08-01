@@ -26,11 +26,11 @@ import (
 	"io"
 	"math/big"
 
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/common/hexutil"
-	"github.com/ledgerwatch/erigon-lib/common/hexutility"
-	"github.com/ledgerwatch/erigon/crypto"
-	"github.com/ledgerwatch/erigon/rlp"
+	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common/hexutil"
+	"github.com/erigontech/erigon-lib/common/hexutility"
+	"github.com/erigontech/erigon/crypto"
+	"github.com/erigontech/erigon/rlp"
 )
 
 // go:generate gencodec -type Receipt -field-override receiptMarshaling -out gen_receipt_json.go
@@ -456,7 +456,7 @@ func (r *Receipt) DeriveFieldsV3ForSingleReceipt(txnIdx int, blockHash libcommon
 
 	sender, ok := txn.cachedSender()
 	if !ok {
-		return fmt.Errorf("tx must have cached sender")
+		return errors.New("tx must have cached sender")
 	}
 
 	blockNumber := new(big.Int).SetUint64(blockNum)
@@ -493,4 +493,10 @@ func (r *Receipt) DeriveFieldsV3ForSingleReceipt(txnIdx int, blockHash libcommon
 		logIndex++
 	}
 	return nil
+}
+
+// TODO: maybe make it more prettier (only for debug purposes)
+func (r *Receipt) String() string {
+	str := fmt.Sprintf("Receipt of tx %+v", *r)
+	return str
 }

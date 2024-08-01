@@ -23,22 +23,29 @@ import (
 	"sync"
 	"time"
 
-	"github.com/ledgerwatch/erigon/cl/phase1/core/state/lru"
+	"github.com/erigontech/erigon/cl/phase1/core/state/lru"
 
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon-lib/kv/membatchwithdb"
-	"github.com/ledgerwatch/erigon-lib/log/v3"
-	"github.com/ledgerwatch/erigon-lib/state"
-	"github.com/ledgerwatch/erigon-lib/wrap"
-	"github.com/ledgerwatch/erigon/common/math"
-	"github.com/ledgerwatch/erigon/consensus"
-	"github.com/ledgerwatch/erigon/core/rawdb"
-	"github.com/ledgerwatch/erigon/core/types"
-	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
-	"github.com/ledgerwatch/erigon/turbo/engineapi/engine_types"
-	"github.com/ledgerwatch/erigon/turbo/services"
-	"github.com/ledgerwatch/erigon/turbo/shards"
+	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/kv"
+	"github.com/erigontech/erigon-lib/kv/membatchwithdb"
+	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon-lib/state"
+	"github.com/erigontech/erigon-lib/wrap"
+	"github.com/erigontech/erigon/common/math"
+	"github.com/erigontech/erigon/consensus"
+	"github.com/erigontech/erigon/core/rawdb"
+	"github.com/erigontech/erigon/core/types"
+	"github.com/erigontech/erigon/eth/stagedsync/stages"
+	"github.com/erigontech/erigon/turbo/engineapi/engine_types"
+	"github.com/erigontech/erigon/turbo/services"
+	"github.com/erigontech/erigon/turbo/shards"
+)
+
+type BlockTimings [2]time.Duration
+
+const (
+	BlockTimingsValidationIndex    = 0
+	BlockTimingsFlushExtendingFork = 1
 )
 
 const timingsCacheSize = 16
@@ -70,7 +77,7 @@ type ForkValidator struct {
 	// we want fork validator to be thread safe so let
 	lock sync.Mutex
 
-	timingsCache *lru.Cache[libcommon.Hash, []interface{}]
+	timingsCache *lru.Cache[libcommon.Hash, BlockTimings]
 }
 
 func NewForkValidatorMock(currentHeight uint64) *ForkValidator {
@@ -78,7 +85,7 @@ func NewForkValidatorMock(currentHeight uint64) *ForkValidator {
 	if err != nil {
 		panic(err)
 	}
-	timingsCache, err := lru.New[libcommon.Hash, []interface{}]("timingsCache", timingsCacheSize)
+	timingsCache, err := lru.New[libcommon.Hash, BlockTimings]("timingsCache", timingsCacheSize)
 	if err != nil {
 		panic(err)
 	}
@@ -95,7 +102,7 @@ func NewForkValidator(ctx context.Context, currentHeight uint64, validatePayload
 		panic(err)
 	}
 
-	timingsCache, err := lru.New[libcommon.Hash, []interface{}]("timingsCache", timingsCacheSize)
+	timingsCache, err := lru.New[libcommon.Hash, BlockTimings]("timingsCache", timingsCacheSize)
 	if err != nil {
 		panic(err)
 	}
@@ -152,7 +159,8 @@ func (fv *ForkValidator) FlushExtendingFork(tx kv.RwTx, accumulator *shards.Accu
 		}
 	}
 	timings, _ := fv.timingsCache.Get(fv.extendingForkHeadHash)
-	fv.timingsCache.Add(fv.extendingForkHeadHash, append(timings, "FlushExtendingFork", time.Since(start)))
+	timings[BlockTimingsFlushExtendingFork] = time.Since(start)
+	fv.timingsCache.Add(fv.extendingForkHeadHash, timings)
 	fv.extendingForkNotifications.Accumulator.CopyAndReset(accumulator)
 	// Clean extending fork data
 	fv.sharedDom = nil
@@ -302,7 +310,7 @@ func (fv *ForkValidator) validateAndStorePayload(txc wrap.TxContainer, header *t
 			return
 		}
 	}
-	fv.timingsCache.Add(header.Hash(), []interface{}{"BlockValidation", time.Since(start)})
+	fv.timingsCache.Add(header.Hash(), BlockTimings{time.Since(start), 0})
 
 	latestValidHash = header.Hash()
 	fv.extendingForkHeadHash = header.Hash()
@@ -341,11 +349,11 @@ func (fv *ForkValidator) validateAndStorePayload(txc wrap.TxContainer, header *t
 }
 
 // GetTimings returns the timings of the last block validation.
-func (fv *ForkValidator) GetTimings(hash libcommon.Hash) []interface{} {
+func (fv *ForkValidator) GetTimings(hash libcommon.Hash) BlockTimings {
 	fv.lock.Lock()
 	defer fv.lock.Unlock()
 	if timings, ok := fv.timingsCache.Get(hash); ok {
 		return timings
 	}
-	return nil
+	return BlockTimings{}
 }

@@ -39,37 +39,37 @@ import (
 	"github.com/anacrolix/torrent"
 	"golang.org/x/sync/errgroup"
 
-	"github.com/ledgerwatch/erigon-lib/log/v3"
+	"github.com/erigontech/erigon-lib/log/v3"
 
-	"github.com/ledgerwatch/erigon-lib/diagnostics"
-	"github.com/ledgerwatch/erigon-lib/kv/temporal"
+	"github.com/erigontech/erigon-lib/diagnostics"
+	"github.com/erigontech/erigon-lib/kv/temporal"
 
-	"github.com/ledgerwatch/erigon-lib/chain"
-	"github.com/ledgerwatch/erigon-lib/chain/snapcfg"
-	"github.com/ledgerwatch/erigon-lib/common/datadir"
-	"github.com/ledgerwatch/erigon-lib/common/dbg"
-	"github.com/ledgerwatch/erigon-lib/common/dir"
-	"github.com/ledgerwatch/erigon-lib/downloader"
-	"github.com/ledgerwatch/erigon-lib/downloader/snaptype"
-	"github.com/ledgerwatch/erigon-lib/etl"
-	protodownloader "github.com/ledgerwatch/erigon-lib/gointerfaces/downloaderproto"
-	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon-lib/kv/rawdbv3"
-	"github.com/ledgerwatch/erigon-lib/state"
-	"github.com/ledgerwatch/erigon/core/rawdb"
-	coresnaptype "github.com/ledgerwatch/erigon/core/snaptype"
-	"github.com/ledgerwatch/erigon/core/types"
-	"github.com/ledgerwatch/erigon/eth/ethconfig"
-	"github.com/ledgerwatch/erigon/eth/ethconfig/estimate"
-	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
-	"github.com/ledgerwatch/erigon/ethdb/prune"
-	borsnaptype "github.com/ledgerwatch/erigon/polygon/bor/snaptype"
-	"github.com/ledgerwatch/erigon/rpc"
-	"github.com/ledgerwatch/erigon/turbo/services"
-	"github.com/ledgerwatch/erigon/turbo/shards"
-	"github.com/ledgerwatch/erigon/turbo/silkworm"
-	"github.com/ledgerwatch/erigon/turbo/snapshotsync"
-	"github.com/ledgerwatch/erigon/turbo/snapshotsync/freezeblocks"
+	"github.com/erigontech/erigon-lib/chain"
+	"github.com/erigontech/erigon-lib/chain/snapcfg"
+	"github.com/erigontech/erigon-lib/common/datadir"
+	"github.com/erigontech/erigon-lib/common/dbg"
+	"github.com/erigontech/erigon-lib/common/dir"
+	"github.com/erigontech/erigon-lib/downloader"
+	"github.com/erigontech/erigon-lib/downloader/snaptype"
+	"github.com/erigontech/erigon-lib/etl"
+	protodownloader "github.com/erigontech/erigon-lib/gointerfaces/downloaderproto"
+	"github.com/erigontech/erigon-lib/kv"
+	"github.com/erigontech/erigon-lib/kv/rawdbv3"
+	"github.com/erigontech/erigon-lib/state"
+	"github.com/erigontech/erigon/core/rawdb"
+	coresnaptype "github.com/erigontech/erigon/core/snaptype"
+	"github.com/erigontech/erigon/core/types"
+	"github.com/erigontech/erigon/eth/ethconfig"
+	"github.com/erigontech/erigon/eth/ethconfig/estimate"
+	"github.com/erigontech/erigon/eth/stagedsync/stages"
+	"github.com/erigontech/erigon/ethdb/prune"
+	borsnaptype "github.com/erigontech/erigon/polygon/bor/snaptype"
+	"github.com/erigontech/erigon/rpc"
+	"github.com/erigontech/erigon/turbo/services"
+	"github.com/erigontech/erigon/turbo/shards"
+	"github.com/erigontech/erigon/turbo/silkworm"
+	"github.com/erigontech/erigon/turbo/snapshotsync"
+	"github.com/erigontech/erigon/turbo/snapshotsync/freezeblocks"
 )
 
 type SnapshotsCfg struct {
@@ -133,7 +133,7 @@ func StageSnapshotsCfg(db kv.RwDB,
 
 		freezingCfg := cfg.blockReader.FreezingCfg()
 
-		if freezingCfg.Enabled && freezingCfg.ProduceE2 {
+		if freezingCfg.ProduceE2 {
 			u := cfg.snapshotUploader
 
 			if maxSeedable := u.maxSeedableHeader(); u.cfg.syncConfig.FrozenBlockLimit > 0 && maxSeedable > u.cfg.syncConfig.FrozenBlockLimit {
@@ -242,9 +242,6 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 	}
 
 	if !s.CurrentSyncCycle.IsFirstCycle {
-		return nil
-	}
-	if !cfg.blockReader.FreezingCfg().Enabled {
 		return nil
 	}
 
@@ -491,11 +488,6 @@ func FillDBFromSnapshots(logPrefix string, ctx context.Context, tx kv.RwTx, dirs
 	return nil
 }
 
-func computeBlocksToPrune(cfg SnapshotsCfg) (blocksToPrune uint64, historyToPrune uint64) {
-	frozenBlocks := cfg.blockReader.Snapshots().SegmentsMax()
-	return frozenBlocks - cfg.prune.Blocks.PruneTo(frozenBlocks), frozenBlocks - cfg.prune.History.PruneTo(frozenBlocks)
-}
-
 /* ====== PRUNING ====== */
 // snapshots pruning sections works more as a retiring of blocks
 // retiring blocks means moving block data from db into snapshots
@@ -510,71 +502,69 @@ func SnapshotsPrune(s *PruneState, cfg SnapshotsCfg, ctx context.Context, tx kv.
 	}
 
 	freezingCfg := cfg.blockReader.FreezingCfg()
-	if freezingCfg.Enabled {
-		if cfg.blockRetire.HasNewFrozenFiles() || cfg.agg.HasNewFrozenFiles() {
-			ac := cfg.agg.BeginFilesRo()
-			defer ac.Close()
-			aggFiles := ac.Files()
-			ac.Close()
+	if cfg.blockRetire.HasNewFrozenFiles() || cfg.agg.HasNewFrozenFiles() {
+		ac := cfg.agg.BeginFilesRo()
+		defer ac.Close()
+		aggFiles := ac.Files()
+		ac.Close()
 
-			if err := rawdb.WriteSnapshots(tx, cfg.blockReader.FrozenFiles(), aggFiles); err != nil {
-				return err
-			}
-		}
-
-		if freezingCfg.ProduceE2 {
-			//TODO: initialSync maybe save files progress here
-
-			var minBlockNumber uint64
-
-			if cfg.snapshotUploader != nil {
-				minBlockNumber = cfg.snapshotUploader.minBlockNumber()
-			}
-
-			if s.CurrentSyncCycle.IsInitialCycle {
-				cfg.blockRetire.SetWorkers(estimate.CompressSnapshot.Workers())
-			} else {
-				cfg.blockRetire.SetWorkers(1)
-			}
-
-			cfg.blockRetire.RetireBlocksInBackground(ctx, minBlockNumber, s.ForwardProgress, log.LvlDebug, func(downloadRequest []services.DownloadRequest) error {
-				if cfg.snapshotDownloader != nil && !reflect.ValueOf(cfg.snapshotDownloader).IsNil() {
-					if err := snapshotsync.RequestSnapshotsDownload(ctx, downloadRequest, cfg.snapshotDownloader); err != nil {
-						return err
-					}
-				}
-
-				return nil
-			}, func(l []string) error {
-				//if cfg.snapshotUploader != nil {
-				// TODO - we need to also remove files from the uploader (100k->500K transition)
-				//}
-
-				if !(cfg.snapshotDownloader == nil || reflect.ValueOf(cfg.snapshotDownloader).IsNil()) {
-					_, err := cfg.snapshotDownloader.Delete(ctx, &protodownloader.DeleteRequest{Paths: l})
-					return err
-				}
-
-				return nil
-			}, func() error {
-				filesDeleted, err := pruneBlockSnapshots(ctx, cfg, logger)
-				if filesDeleted && cfg.notifier != nil {
-					cfg.notifier.Events.OnNewSnapshot()
-				}
-				return err
-			})
-
-			//	cfg.agg.BuildFilesInBackground()
-
-		}
-
-		pruneLimit := 100
-		if s.CurrentSyncCycle.IsInitialCycle {
-			pruneLimit = 10_000
-		}
-		if _, err := cfg.blockRetire.PruneAncientBlocks(tx, pruneLimit); err != nil {
+		if err := rawdb.WriteSnapshots(tx, cfg.blockReader.FrozenFiles(), aggFiles); err != nil {
 			return err
 		}
+	}
+
+	if freezingCfg.ProduceE2 {
+		//TODO: initialSync maybe save files progress here
+
+		var minBlockNumber uint64
+
+		if cfg.snapshotUploader != nil {
+			minBlockNumber = cfg.snapshotUploader.minBlockNumber()
+		}
+
+		if s.CurrentSyncCycle.IsInitialCycle {
+			cfg.blockRetire.SetWorkers(estimate.CompressSnapshot.Workers())
+		} else {
+			cfg.blockRetire.SetWorkers(1)
+		}
+
+		cfg.blockRetire.RetireBlocksInBackground(ctx, minBlockNumber, s.ForwardProgress, log.LvlDebug, func(downloadRequest []services.DownloadRequest) error {
+			if cfg.snapshotDownloader != nil && !reflect.ValueOf(cfg.snapshotDownloader).IsNil() {
+				if err := snapshotsync.RequestSnapshotsDownload(ctx, downloadRequest, cfg.snapshotDownloader); err != nil {
+					return err
+				}
+			}
+
+			return nil
+		}, func(l []string) error {
+			//if cfg.snapshotUploader != nil {
+			// TODO - we need to also remove files from the uploader (100k->500K transition)
+			//}
+
+			if !(cfg.snapshotDownloader == nil || reflect.ValueOf(cfg.snapshotDownloader).IsNil()) {
+				_, err := cfg.snapshotDownloader.Delete(ctx, &protodownloader.DeleteRequest{Paths: l})
+				return err
+			}
+
+			return nil
+		}, func() error {
+			filesDeleted, err := pruneBlockSnapshots(ctx, cfg, logger)
+			if filesDeleted && cfg.notifier != nil {
+				cfg.notifier.Events.OnNewSnapshot()
+			}
+			return err
+		})
+
+		//	cfg.agg.BuildFilesInBackground()
+
+	}
+
+	pruneLimit := 100
+	if s.CurrentSyncCycle.IsInitialCycle {
+		pruneLimit = 10_000
+	}
+	if _, err := cfg.blockRetire.PruneAncientBlocks(tx, pruneLimit); err != nil {
+		return err
 	}
 
 	if cfg.snapshotUploader != nil {
@@ -621,19 +611,15 @@ func pruneBlockSnapshots(ctx context.Context, cfg SnapshotsCfg, logger log.Logge
 		return false, err
 	}
 	// If we are behind the execution stage, we should not prune snapshots
-	if headNumber > executionProgress {
+	if headNumber > executionProgress || !cfg.prune.Blocks.Enabled() {
 		return false, nil
 	}
 
 	// Keep at least 2 block snapshots as we do not want FrozenBlocks to be 0
-	pruneAmount, _ := computeBlocksToPrune(cfg)
-	if pruneAmount == 0 {
-		return false, nil
-	}
+	pruneTo := cfg.prune.Blocks.PruneTo(headNumber)
 
-	minBlockNumberToKeep := uint64(0)
-	if headNumber > pruneAmount {
-		minBlockNumberToKeep = headNumber - pruneAmount
+	if pruneTo > executionProgress {
+		return false, nil
 	}
 
 	snapshotFileNames := cfg.blockReader.FrozenFiles()
@@ -649,7 +635,7 @@ func pruneBlockSnapshots(ctx context.Context, cfg SnapshotsCfg, logger log.Logge
 		if !ok {
 			continue
 		}
-		if info.To >= minBlockNumberToKeep {
+		if info.To >= pruneTo {
 			continue
 		}
 		if info.To-info.From != snaptype.Erigon2MergeLimit {
@@ -698,7 +684,7 @@ func (u *snapshotUploader) init(ctx context.Context, logger log.Logger) {
 	if u.files == nil {
 		freezingCfg := u.cfg.blockReader.FreezingCfg()
 
-		if freezingCfg.Enabled && freezingCfg.ProduceE2 {
+		if freezingCfg.ProduceE2 {
 			u.files = map[string]*uploadState{}
 			u.start(ctx, logger)
 		}

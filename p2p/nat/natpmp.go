@@ -20,13 +20,15 @@
 package nat
 
 import (
+	"errors"
 	"fmt"
 	"net"
 	"strings"
 	"time"
 
 	natpmp "github.com/jackpal/go-nat-pmp"
-	"github.com/ledgerwatch/erigon/common/debug"
+
+	"github.com/erigontech/erigon/common/debug"
 )
 
 // natPMPClient adapts the NAT-PMP protocol implementation so it conforms to
@@ -50,7 +52,7 @@ func (n *pmp) ExternalIP() (net.IP, error) {
 
 func (n *pmp) AddMapping(protocol string, extport, intport int, name string, lifetime time.Duration) error {
 	if lifetime <= 0 {
-		return fmt.Errorf("lifetime must not be <= 0")
+		return errors.New("lifetime must not be <= 0")
 	}
 	// Note order of port arguments is switched between our
 	// AddMapping and the client's AddPortMapping.

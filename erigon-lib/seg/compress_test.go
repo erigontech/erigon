@@ -27,7 +27,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"github.com/ledgerwatch/erigon-lib/log/v3"
+	"github.com/erigontech/erigon-lib/log/v3"
 )
 
 func TestCompressEmptyDict(t *testing.T) {
@@ -125,9 +125,6 @@ func TestCompressDict1(t *testing.T) {
 		require.True(t, g.MatchPrefix([]byte("")))
 		require.True(t, g.MatchPrefix([]byte{}))
 
-		require.Equal(t, 1, g.MatchPrefixCmp([]byte("long")))
-		require.Equal(t, 0, g.MatchPrefixCmp([]byte("")))
-		require.Equal(t, 0, g.MatchPrefixCmp([]byte{}))
 		word, _ := g.Next(nil)
 		require.NotNil(t, word)
 		require.Zero(t, len(word))
@@ -139,11 +136,6 @@ func TestCompressDict1(t *testing.T) {
 		require.False(t, g.MatchPrefix([]byte("longnotmatch")))
 		require.True(t, g.MatchPrefix([]byte{}))
 
-		require.Equal(t, 0, g.MatchPrefixCmp([]byte("long")))
-		require.Equal(t, 1, g.MatchPrefixCmp([]byte("longlong")))
-		require.Equal(t, 1, g.MatchPrefixCmp([]byte("wordnotmatch")))
-		require.Equal(t, 1, g.MatchPrefixCmp([]byte("longnotmatch")))
-		require.Equal(t, 0, g.MatchPrefixCmp([]byte{}))
 		_, _ = g.Next(nil)
 
 		// next word is `word`
@@ -155,13 +147,6 @@ func TestCompressDict1(t *testing.T) {
 		require.False(t, g.MatchPrefix([]byte("wordnotmatch")))
 		require.False(t, g.MatchPrefix([]byte("longnotmatch")))
 
-		require.Equal(t, -1, g.MatchPrefixCmp([]byte("long")))
-		require.Equal(t, -1, g.MatchPrefixCmp([]byte("longlong")))
-		require.Equal(t, 0, g.MatchPrefixCmp([]byte("word")))
-		require.Equal(t, 0, g.MatchPrefixCmp([]byte("")))
-		require.Equal(t, 0, g.MatchPrefixCmp(nil))
-		require.Equal(t, 1, g.MatchPrefixCmp([]byte("wordnotmatch")))
-		require.Equal(t, -1, g.MatchPrefixCmp([]byte("longnotmatch")))
 		_, _ = g.Next(nil)
 
 		// next word is `longlongword %d`
@@ -175,13 +160,6 @@ func TestCompressDict1(t *testing.T) {
 		require.False(t, g.MatchPrefix([]byte("longnotmatch")))
 		require.True(t, g.MatchPrefix([]byte{}))
 
-		require.Equal(t, 0, g.MatchPrefixCmp([]byte(fmt.Sprintf("%d", i))))
-		require.Equal(t, 0, g.MatchPrefixCmp([]byte(expectPrefix)))
-		require.Equal(t, 0, g.MatchPrefixCmp([]byte(expectPrefix+"long")))
-		require.Equal(t, 0, g.MatchPrefixCmp([]byte(expectPrefix+"longword ")))
-		require.Equal(t, 1, g.MatchPrefixCmp([]byte("wordnotmatch")))
-		require.Equal(t, 1, g.MatchPrefixCmp([]byte("longnotmatch")))
-		require.Equal(t, 0, g.MatchPrefixCmp([]byte{}))
 		savePos := g.dataP
 		word, nextPos := g.Next(nil)
 		expected := fmt.Sprintf("%d longlongword %d", i, i)
@@ -196,7 +174,7 @@ func TestCompressDict1(t *testing.T) {
 
 	if cs := checksum(d.filePath); cs != 3153486123 {
 		// it's ok if hash changed, but need re-generate all existing snapshot hashes
-		// in https://github.com/ledgerwatch/erigon-snapshot
+		// in https://github.com/erigontech/erigon-snapshot
 		t.Errorf("result file hash changed, %d", cs)
 	}
 }
@@ -266,7 +244,7 @@ func TestCompressDictCmp(t *testing.T) {
 
 	if cs := checksum(d.filePath); cs != 3153486123 {
 		// it's ok if hash changed, but need re-generate all existing snapshot hashes
-		// in https://github.com/ledgerwatch/erigon-snapshot
+		// in https://github.com/erigontech/erigon-snapshot
 		t.Errorf("result file hash changed, %d", cs)
 	}
 }

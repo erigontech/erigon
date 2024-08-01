@@ -19,21 +19,22 @@ package core
 import (
 	"context"
 	"encoding/binary"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
 
-	"github.com/ledgerwatch/erigon/cl/cltypes"
-	"github.com/ledgerwatch/erigon/cl/phase1/core/state"
+	"github.com/erigontech/erigon/cl/cltypes"
+	"github.com/erigontech/erigon/cl/phase1/core/state"
 
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/log/v3"
-	"github.com/ledgerwatch/erigon/cl/clparams"
+	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/cl/clparams"
 )
 
 func extractSlotFromSerializedBeaconState(beaconState []byte) (uint64, error) {
 	if len(beaconState) < 48 {
-		return 0, fmt.Errorf("checkpoint sync read failed, too short")
+		return 0, errors.New("checkpoint sync read failed, too short")
 	}
 	return binary.LittleEndian.Uint64(beaconState[40:48]), nil
 }
@@ -41,7 +42,7 @@ func extractSlotFromSerializedBeaconState(beaconState []byte) (uint64, error) {
 func RetrieveBeaconState(ctx context.Context, beaconConfig *clparams.BeaconChainConfig, net clparams.NetworkType) (*state.CachingBeaconState, error) {
 	uris := clparams.GetAllCheckpointSyncEndpoints(net)
 	if len(uris) == 0 {
-		return nil, fmt.Errorf("no uris for checkpoint sync")
+		return nil, errors.New("no uris for checkpoint sync")
 	}
 
 	fetchBeaconState := func(uri string) (*state.CachingBeaconState, error) {
@@ -122,7 +123,7 @@ func RetrieveBlock(ctx context.Context, beaconConfig *clparams.BeaconChainConfig
 		return nil, fmt.Errorf("checkpoint sync read failed %s", err)
 	}
 	if len(marshaled) < 108 {
-		return nil, fmt.Errorf("checkpoint sync read failed, too short")
+		return nil, errors.New("checkpoint sync read failed, too short")
 	}
 	currentSlot := binary.LittleEndian.Uint64(marshaled[100:108])
 	v := beaconConfig.GetCurrentStateVersion(currentSlot / beaconConfig.SlotsPerEpoch)

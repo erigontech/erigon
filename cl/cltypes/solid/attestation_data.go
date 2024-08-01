@@ -21,11 +21,11 @@ import (
 	"encoding/binary"
 	"encoding/json"
 
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/common/length"
-	"github.com/ledgerwatch/erigon-lib/types/clonable"
-	"github.com/ledgerwatch/erigon-lib/types/ssz"
-	"github.com/ledgerwatch/erigon/cl/merkle_tree"
+	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common/length"
+	"github.com/erigontech/erigon-lib/types/clonable"
+	"github.com/erigontech/erigon-lib/types/ssz"
+	"github.com/erigontech/erigon/cl/merkle_tree"
 )
 
 // slot: 8 bytes
@@ -35,7 +35,7 @@ import (
 // target: 40 bytes
 const AttestationDataBufferSize = 8 + 8 + 32 + 40*2
 
-// AttestantionData contains information about attestantion, including finalized/attested checkpoints.
+// AttestationData contains information about attestantion, including finalized/attested checkpoints.
 type AttestationData []byte
 
 func NewAttestionDataFromParameters(

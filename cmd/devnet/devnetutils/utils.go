@@ -27,11 +27,11 @@ import (
 	"strconv"
 	"strings"
 
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/common/dir"
+	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common/dir"
 
-	"github.com/ledgerwatch/erigon-lib/log/v3"
-	"github.com/ledgerwatch/erigon/crypto"
+	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/crypto"
 )
 
 var ErrInvalidEnodeString = errors.New("invalid enode string")
@@ -132,7 +132,7 @@ func RandomInt(max int) int {
 func NamespaceAndSubMethodFromMethod(method string) (string, string, error) {
 	parts := strings.SplitN(method, "_", 2)
 	if len(parts) != 2 {
-		return "", "", fmt.Errorf("invalid string to split")
+		return "", "", errors.New("invalid string to split")
 	}
 	return parts[0], parts[1], nil
 }

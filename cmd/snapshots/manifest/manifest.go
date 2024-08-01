@@ -20,6 +20,7 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"io/fs"
 	"os"
@@ -30,11 +31,11 @@ import (
 
 	"github.com/urfave/cli/v2"
 
-	"github.com/ledgerwatch/erigon-lib/downloader"
-	"github.com/ledgerwatch/erigon-lib/downloader/snaptype"
-	"github.com/ledgerwatch/erigon/cmd/snapshots/sync"
-	"github.com/ledgerwatch/erigon/cmd/utils"
-	"github.com/ledgerwatch/erigon/turbo/logging"
+	"github.com/erigontech/erigon-lib/downloader"
+	"github.com/erigontech/erigon-lib/downloader/snaptype"
+	"github.com/erigontech/erigon/cmd/snapshots/sync"
+	"github.com/erigontech/erigon/cmd/utils"
+	"github.com/erigontech/erigon/turbo/logging"
 )
 
 var (
@@ -99,7 +100,7 @@ func manifest(cliCtx *cli.Context, command string) error {
 	pos := 0
 
 	if cliCtx.Args().Len() == 0 {
-		return fmt.Errorf("missing manifest location")
+		return errors.New("missing manifest location")
 	}
 
 	arg := cliCtx.Args().Get(pos)
@@ -144,7 +145,7 @@ func manifest(cliCtx *cli.Context, command string) error {
 	}
 
 	if src != nil && srcSession == nil {
-		return fmt.Errorf("no src session established")
+		return errors.New("no src session established")
 	}
 
 	logger.Debug("Starting manifest " + command)

@@ -13,8 +13,8 @@ import (
 	reflect "reflect"
 	time "time"
 
-	common "github.com/ledgerwatch/erigon-lib/common"
-	clparams "github.com/ledgerwatch/erigon/cl/clparams"
+	common "github.com/erigontech/erigon-lib/common"
+	clparams "github.com/erigontech/erigon/cl/clparams"
 	gomock "go.uber.org/mock/gomock"
 )
 
@@ -306,6 +306,44 @@ func (c *MockEthereumClockGetCurrentSlotCall) Do(f func() uint64) *MockEthereumC
 
 // DoAndReturn rewrite *gomock.Call.DoAndReturn
 func (c *MockEthereumClockGetCurrentSlotCall) DoAndReturn(f func() uint64) *MockEthereumClockGetCurrentSlotCall {
+	c.Call = c.Call.DoAndReturn(f)
+	return c
+}
+
+// GetEpochAtSlot mocks base method.
+func (m *MockEthereumClock) GetEpochAtSlot(slot uint64) uint64 {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "GetEpochAtSlot", slot)
+	ret0, _ := ret[0].(uint64)
+	return ret0
+}
+
+// GetEpochAtSlot indicates an expected call of GetEpochAtSlot.
+func (mr *MockEthereumClockMockRecorder) GetEpochAtSlot(slot any) *MockEthereumClockGetEpochAtSlotCall {
+	mr.mock.ctrl.T.Helper()
+	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetEpochAtSlot", reflect.TypeOf((*MockEthereumClock)(nil).GetEpochAtSlot), slot)
+	return &MockEthereumClockGetEpochAtSlotCall{Call: call}
+}
+
+// MockEthereumClockGetEpochAtSlotCall wrap *gomock.Call
+type MockEthereumClockGetEpochAtSlotCall struct {
+	*gomock.Call
+}
+
+// Return rewrite *gomock.Call.Return
+func (c *MockEthereumClockGetEpochAtSlotCall) Return(arg0 uint64) *MockEthereumClockGetEpochAtSlotCall {
+	c.Call = c.Call.Return(arg0)
+	return c
+}
+
+// Do rewrite *gomock.Call.Do
+func (c *MockEthereumClockGetEpochAtSlotCall) Do(f func(uint64) uint64) *MockEthereumClockGetEpochAtSlotCall {
+	c.Call = c.Call.Do(f)
+	return c
+}
+
+// DoAndReturn rewrite *gomock.Call.DoAndReturn
+func (c *MockEthereumClockGetEpochAtSlotCall) DoAndReturn(f func(uint64) uint64) *MockEthereumClockGetEpochAtSlotCall {
 	c.Call = c.Call.DoAndReturn(f)
 	return c
 }

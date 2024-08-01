@@ -18,13 +18,14 @@ package rpctest
 
 import (
 	"encoding/base64"
+	"errors"
 	"fmt"
 	"net/http"
 	"time"
 
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	libcommon "github.com/erigontech/erigon-lib/common"
 
-	"github.com/ledgerwatch/erigon/core/state"
+	"github.com/erigontech/erigon/core/state"
 )
 
 func Bench3(erigon_url, geth_url string) error {
@@ -80,7 +81,7 @@ func Bench3(erigon_url, geth_url string) error {
 	}
 
 	if !compareAccountRanges(accRangeTG, accRangeGeth) {
-		return fmt.Errorf("Different in account ranges tx\n")
+		return errors.New("Different in account ranges tx\n")
 	}
 	fmt.Println("debug_accountRanges... OK!")
 
@@ -164,7 +165,7 @@ func Bench3(erigon_url, geth_url string) error {
 	}
 	fmt.Printf("storageRange g: %d\n", len(smg))
 	if !compareStorageRanges(sm, smg) {
-		return fmt.Errorf("Different in storage ranges tx\n")
+		return errors.New("Different in storage ranges tx\n")
 	}
 
 	return nil

@@ -30,7 +30,7 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/ledgerwatch/erigon-lib/downloader/downloadercfg"
+	"github.com/erigontech/erigon-lib/downloader/downloadercfg"
 
 	"github.com/hashicorp/go-retryablehttp"
 
@@ -38,14 +38,14 @@ import (
 	"github.com/c2h5oh/datasize"
 	"golang.org/x/sync/errgroup"
 
-	"github.com/ledgerwatch/erigon-lib/chain/snapcfg"
-	"github.com/ledgerwatch/erigon-lib/log/v3"
+	"github.com/erigontech/erigon-lib/chain/snapcfg"
+	"github.com/erigontech/erigon-lib/log/v3"
 
 	"github.com/anacrolix/torrent/bencode"
 	"github.com/anacrolix/torrent/metainfo"
 	"github.com/pelletier/go-toml/v2"
 
-	"github.com/ledgerwatch/erigon-lib/downloader/snaptype"
+	"github.com/erigontech/erigon-lib/downloader/snaptype"
 )
 
 // WebSeeds - allow use HTTP-based infrastrucutre to support Bittorrent network
@@ -445,8 +445,8 @@ func (d *WebSeeds) ByFileName(name string) (metainfo.UrlList, bool) {
 	return v, ok
 }
 
-var ErrInvalidEtag = fmt.Errorf("invalid etag")
-var ErrEtagNotFound = fmt.Errorf("not found")
+var ErrInvalidEtag = errors.New("invalid etag")
+var ErrEtagNotFound = errors.New("not found")
 
 func (d *WebSeeds) retrieveFileEtag(ctx context.Context, file *url.URL) (string, error) {
 	request, err := http.NewRequestWithContext(ctx, http.MethodHead, file.String(), nil)

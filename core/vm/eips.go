@@ -23,13 +23,14 @@ import (
 	"encoding/binary"
 	"fmt"
 	"sort"
+	"strconv"
 
 	"github.com/holiman/uint256"
 
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	libcommon "github.com/erigontech/erigon-lib/common"
 
-	"github.com/ledgerwatch/erigon/core/tracing"
-	"github.com/ledgerwatch/erigon/params"
+	"github.com/erigontech/erigon/core/tracing"
+	"github.com/erigontech/erigon/params"
 )
 
 var activators = map[int]func(*JumpTable){
@@ -68,7 +69,7 @@ func ValidEip(eipNum int) bool {
 func ActivateableEips() []string {
 	var nums []string //nolint:prealloc
 	for k := range activators {
-		nums = append(nums, fmt.Sprintf("%d", k))
+		nums = append(nums, strconv.Itoa(k))
 	}
 	sort.Strings(nums)
 	return nums
@@ -713,7 +714,7 @@ func opEOFCreate(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) (
 	scope.Contract.UseGas(gas, tracing.GasChangeCallContractEOFCreation)
 
 	stackValue := size
-	res, addr, returnGas, suberr := interpreter.evm.EOFCreate(scope.Contract, input, initContainer, gas, &value, &salt)
+	res, addr, returnGas, suberr := interpreter.evm.EOFCreate(scope.Contract, input, initContainer, gas, &value, &salt, false)
 
 	// Push item on the stack based on the returned error.
 	if suberr != nil {
@@ -769,7 +770,7 @@ func opTxnCreate(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) (
 	// 2. we need to run validation and unmarshalling on initcontainer again?
 
 	stackValue := size
-	res, addr, returnGas, suberr := interpreter.evm.TxnCreate(scope.Contract, input, initContainer, gas, &value, &salt)
+	res, addr, returnGas, suberr := interpreter.evm.TxnCreate(scope.Contract, input, initContainer, gas, &value, &salt, false)
 	// Push item on the stack based on the returned error.
 	if suberr != nil {
 		stackValue.Clear()

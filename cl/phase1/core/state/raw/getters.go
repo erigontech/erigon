@@ -20,11 +20,11 @@ import (
 	"errors"
 	"fmt"
 
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon/cl/clparams"
-	"github.com/ledgerwatch/erigon/cl/cltypes"
-	"github.com/ledgerwatch/erigon/cl/cltypes/solid"
-	"github.com/ledgerwatch/erigon/cl/fork"
+	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon/cl/clparams"
+	"github.com/erigontech/erigon/cl/cltypes"
+	"github.com/erigontech/erigon/cl/cltypes/solid"
+	"github.com/erigontech/erigon/cl/fork"
 )
 
 var (
@@ -331,7 +331,7 @@ func (b *BeaconState) GetBlockRootAtSlot(slot uint64) (libcommon.Hash, error) {
 		return libcommon.Hash{}, ErrGetBlockRootAtSlotFuture
 	}
 	if b.Slot() > slot+b.BeaconConfig().SlotsPerHistoricalRoot {
-		return libcommon.Hash{}, fmt.Errorf("GetBlockRootAtSlot: slot too much far behind")
+		return libcommon.Hash{}, errors.New("GetBlockRootAtSlot: slot too much far behind")
 	}
 	return b.blockRoots.Get(int(slot % b.BeaconConfig().SlotsPerHistoricalRoot)), nil
 }

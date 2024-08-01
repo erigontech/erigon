@@ -26,18 +26,18 @@ import (
 	"strings"
 	"time"
 
-	"github.com/ledgerwatch/erigon-lib/chain/networkname"
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/common/hexutility"
-	"github.com/ledgerwatch/erigon/accounts/abi/bind"
-	"github.com/ledgerwatch/erigon/cmd/devnet/accounts"
-	"github.com/ledgerwatch/erigon/cmd/devnet/blocks"
-	"github.com/ledgerwatch/erigon/cmd/devnet/contracts"
-	"github.com/ledgerwatch/erigon/cmd/devnet/devnet"
-	"github.com/ledgerwatch/erigon/cmd/devnet/requests"
-	"github.com/ledgerwatch/erigon/core/types"
-	"github.com/ledgerwatch/erigon/crypto"
-	"github.com/ledgerwatch/erigon/polygon/heimdall"
+	"github.com/erigontech/erigon-lib/chain/networkname"
+	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common/hexutility"
+	"github.com/erigontech/erigon/accounts/abi/bind"
+	"github.com/erigontech/erigon/cmd/devnet/accounts"
+	"github.com/erigontech/erigon/cmd/devnet/blocks"
+	"github.com/erigontech/erigon/cmd/devnet/contracts"
+	"github.com/erigontech/erigon/cmd/devnet/devnet"
+	"github.com/erigontech/erigon/cmd/devnet/requests"
+	"github.com/erigontech/erigon/core/types"
+	"github.com/erigontech/erigon/crypto"
+	"github.com/erigontech/erigon/polygon/heimdall"
 )
 
 type CheckpointBlock struct {
@@ -61,7 +61,7 @@ func (c CheckpointBlock) GetSignBytes() ([]byte, error) {
 	}
 
 	return sdk.SortJSON(b)*/
-	return nil, fmt.Errorf("TODO")
+	return nil, errors.New("TODO")
 }
 
 type CheckpointAck struct {
@@ -588,7 +588,7 @@ func (h *Heimdall) handleRootHeaderBlock(event *contracts.TestRootChainNewHeader
 
 	if ack.StartBlock != h.pendingCheckpoint.StartBlock().Uint64() {
 		h.logger.Error("Invalid start block", "startExpected", h.pendingCheckpoint.StartBlock, "startReceived", ack.StartBlock)
-		return fmt.Errorf("invalid Checkpoint Ack: Invalid start block")
+		return errors.New("invalid Checkpoint Ack: Invalid start block")
 	}
 
 	// Return err if start and end matches but contract root hash doesn't match
@@ -603,7 +603,7 @@ func (h *Heimdall) handleRootHeaderBlock(event *contracts.TestRootChainNewHeader
 			"rootRecieved", ack.RootHash.String(),
 		)
 
-		return fmt.Errorf("invalid Checkpoint Ack: Invalid root hash")
+		return errors.New("invalid Checkpoint Ack: Invalid root hash")
 	}
 
 	h.latestCheckpoint = &ack

@@ -20,12 +20,12 @@ import (
 	"encoding/json"
 	"strconv"
 
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/common/hexutility"
-	"github.com/ledgerwatch/erigon-lib/types/clonable"
-	"github.com/ledgerwatch/erigon-lib/types/ssz"
+	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common/hexutility"
+	"github.com/erigontech/erigon-lib/types/clonable"
+	"github.com/erigontech/erigon-lib/types/ssz"
 
-	ssz2 "github.com/ledgerwatch/erigon/cl/ssz"
+	ssz2 "github.com/erigontech/erigon/cl/ssz"
 )
 
 type Metadata struct {

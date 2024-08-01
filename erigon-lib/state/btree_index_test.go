@@ -26,11 +26,11 @@ import (
 	bloomfilter "github.com/holiman/bloomfilter/v2"
 	"github.com/stretchr/testify/require"
 
-	"github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/common/background"
-	"github.com/ledgerwatch/erigon-lib/log/v3"
-	"github.com/ledgerwatch/erigon-lib/recsplit/eliasfano32"
-	"github.com/ledgerwatch/erigon-lib/seg"
+	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common/background"
+	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon-lib/recsplit/eliasfano32"
+	"github.com/erigontech/erigon-lib/seg"
 )
 
 func Test_BtreeIndex_Init2(t *testing.T) {
@@ -133,7 +133,7 @@ func Test_BtreeIndex_Seek(t *testing.T) {
 	for i := 0; i < len(keys); i++ {
 		cur, err := bt.Seek(getter, keys[i])
 		require.NoErrorf(t, err, "i=%d", i)
-		require.EqualValues(t, keys[i], cur.key)
+		require.EqualValuesf(t, keys[i], cur.key, "i=%d", i)
 		require.NotEmptyf(t, cur.Value(), "i=%d", i)
 		// require.EqualValues(t, uint64(i), cur.Value())
 	}
@@ -175,6 +175,7 @@ func Test_BtreeIndex_Build(t *testing.T) {
 
 	c, err := bt.Seek(getter, nil)
 	require.NoError(t, err)
+	require.NotNil(t, c)
 	for i := 0; i < len(keys); i++ {
 		k := c.Key()
 		if !bytes.Equal(keys[i], k) {
@@ -302,7 +303,7 @@ func TestBpsTree_Seek(t *testing.T) {
 	//tr := newTrie()
 	ef := eliasfano32.NewEliasFano(uint64(keyCount), ps[len(ps)-1])
 	for i := 0; i < len(ps); i++ {
-		//tr.insert(Node{i: uint64(i), prefix: common.Copy(keys[i]), off: ps[i]})
+		//tr.insert(Node{i: uint64(i), key: common.Copy(keys[i]), off: ps[i]})
 		ef.AddOffset(ps[i])
 	}
 	ef.Build()
@@ -315,7 +316,7 @@ func TestBpsTree_Seek(t *testing.T) {
 
 	for i := 0; i < len(keys); i++ {
 		sk := keys[i]
-		k, di, found, err := bp.Seek(g, sk[:len(sk)/2])
+		k, _, di, found, err := bp.Seek(g, sk[:len(sk)/2])
 		_ = di
 		_ = found
 		require.NoError(t, err)
@@ -370,7 +371,7 @@ func (b *mockIndexReader) keyCmp(k []byte, di uint64, g ArchiveGetter) (int, []b
 	var res []byte
 	res, _ = g.Next(res[:0])
 
-	//TODO: use `b.getter.Match` after https://github.com/ledgerwatch/erigon/issues/7855
+	//TODO: use `b.getter.Match` after https://github.com/erigontech/erigon/issues/7855
 	return bytes.Compare(res, k), res, nil
 	//return b.getter.Match(k), result, nil
 }

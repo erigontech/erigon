@@ -34,21 +34,21 @@ import (
 	"sync"
 	"time"
 
-	txpool "github.com/ledgerwatch/erigon-lib/gointerfaces/txpoolproto"
+	txpool "github.com/erigontech/erigon-lib/gointerfaces/txpoolproto"
 
 	"github.com/gorilla/websocket"
 
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon-lib/log/v3"
-	"github.com/ledgerwatch/erigon/turbo/services"
+	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/kv"
+	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/turbo/services"
 
-	"github.com/ledgerwatch/erigon/consensus"
-	"github.com/ledgerwatch/erigon/core/rawdb"
-	"github.com/ledgerwatch/erigon/core/types"
-	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
-	"github.com/ledgerwatch/erigon/node"
-	"github.com/ledgerwatch/erigon/p2p/sentry"
+	"github.com/erigontech/erigon/consensus"
+	"github.com/erigontech/erigon/core/rawdb"
+	"github.com/erigontech/erigon/core/types"
+	"github.com/erigontech/erigon/eth/stagedsync/stages"
+	"github.com/erigontech/erigon/node"
+	"github.com/erigontech/erigon/p2p/sentry"
 )
 
 const (
@@ -175,7 +175,7 @@ func (s *Service) Stop() error {
 // until termination.
 func (s *Service) loop() {
 	// Resolve the URL, defaulting to TLS, but falling back to none too
-	path := fmt.Sprintf("%s/api", s.host)
+	path := s.host + "/api"
 	urls := []string{path}
 
 	// url.Parse and url.IsAbs is unsuitable (https://github.com/golang/go/issues/19779)
@@ -399,7 +399,7 @@ func (s *Service) login(conn *connWrapper) error {
 			Name:     s.node,
 			Node:     nodeName,
 			Port:     0,
-			Network:  fmt.Sprintf("%d", s.networkid),
+			Network:  strconv.FormatUint(s.networkid, 10),
 			Protocol: strings.Join(protocols, ", "),
 			API:      "No",
 			Os:       runtime.GOOS,

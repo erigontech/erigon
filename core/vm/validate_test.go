@@ -20,7 +20,7 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/ledgerwatch/erigon/common"
+	"github.com/erigontech/erigon/common"
 )
 
 func TestValidateCode(t *testing.T) {
