@@ -20,26 +20,6 @@ type spanBlockProducersTracker struct {
 	wake      *polygoncommon.EventNotifier
 }
 
-func (t spanBlockProducersTracker) Producers(ctx context.Context, blockNum uint64) (*valset.ValidatorSet, error) {
-	t.Synchronize(ctx)
-
-	spanId := SpanIdAt(blockNum)
-	producerSelection, ok, err := t.store.GetEntity(ctx, uint64(spanId))
-	if err != nil {
-		return nil, err
-	}
-	if !ok {
-		return nil, errors.New("no producers found for block num")
-	}
-
-	startSprintNumInSpan := t.borConfig.CalculateSprintNumber(uint64(producerSelection.SpanId))
-	blockSprintNum := t.borConfig.CalculateSprintNumber(blockNum)
-	numSprints := int(blockSprintNum - startSprintNumInSpan)
-	validatorSet := valset.NewValidatorSet(producerSelection.Producers)
-	validatorSet.IncrementProposerPriority(numSprints)
-	return validatorSet, nil
-}
-
 func (t spanBlockProducersTracker) Run(ctx context.Context) error {
 	for {
 		select {
@@ -126,4 +106,22 @@ func (t spanBlockProducersTracker) ObserveSpan(ctx context.Context, newSpan *Spa
 	}
 
 	return nil
+}
+
+func (t spanBlockProducersTracker) Producers(ctx context.Context, blockNum uint64) (*valset.ValidatorSet, error) {
+	spanId := SpanIdAt(blockNum)
+	producerSelection, ok, err := t.store.GetEntity(ctx, uint64(spanId))
+	if err != nil {
+		return nil, err
+	}
+	if !ok {
+		return nil, errors.New("no producers found for block num")
+	}
+
+	startSprintNumInSpan := t.borConfig.CalculateSprintNumber(uint64(producerSelection.SpanId))
+	blockSprintNum := t.borConfig.CalculateSprintNumber(blockNum)
+	numSprints := int(blockSprintNum - startSprintNumInSpan)
+	validatorSet := valset.NewValidatorSet(producerSelection.Producers)
+	validatorSet.IncrementProposerPriority(numSprints)
+	return validatorSet, nil
 }
