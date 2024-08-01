@@ -149,7 +149,7 @@ func startFetchingBlocksMissedByGossipAfterSomeTime(ctx context.Context, cfg *Cf
 
 // listenToIncomingBlocksUntilANewBlockIsReceived listens for incoming blocks until a new block with a slot greater than or equal to the target slot is received.
 // It processes blocks, checks their validity, and publishes them. It also handles context cancellation and logs progress periodically.
-func listenToIncomingBlocksUntilANewBlockIsReceived(ctx context.Context, logger log.Logger, cfg *Cfg, args Args, respCh chan *peers.PeeredObject[[]*cltypes.SignedBeaconBlock], errCh chan error) error {
+func listenToIncomingBlocksUntilANewBlockIsReceived(ctx context.Context, logger log.Logger, cfg *Cfg, args Args, respCh <- chan *peers.PeeredObject[[]*cltypes.SignedBeaconBlock], errCh chan error) error {
 	// Timer to log progress every 30 seconds
 	logTimer := time.NewTicker(30 * time.Second)
 	defer logTimer.Stop()
