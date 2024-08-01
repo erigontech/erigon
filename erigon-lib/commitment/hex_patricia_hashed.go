@@ -400,16 +400,6 @@ func (cell *Cell) setStorage(value []byte) {
 	}
 }
 
-func (cell *Cell) setAccountFields(codeHash []byte, balance *uint256.Int, nonce uint64) {
-	if len(codeHash) == 0 {
-		codeHash = common.Copy(EmptyCodeHash)
-	}
-	copy(cell.CodeHash[:], codeHash)
-
-	cell.Balance.SetBytes(balance.Bytes())
-	cell.Nonce = nonce
-}
-
 func (cell *Cell) accountForHashing(buffer []byte, storageRootHash [length.Hash]byte) int {
 	balanceBytes := 0
 	if !cell.Balance.LtUint64(128) {
@@ -1763,7 +1753,7 @@ func (cell *Cell) Decode(buf []byte) error {
 		pos += cell.extLen //nolint
 	}
 	if flags&cellFlagDelete != 0 {
-		panic("deleted cell should not be encoded")
+		log.Warn("deleted cell should not be encoded", "cell", cell.String())
 		cell.Update.Flags = DeleteUpdate
 	}
 	return nil
@@ -1856,15 +1846,15 @@ func (hph *HexPatriciaHashed) SetState(buf []byte) error {
 	return nil
 }
 
-func bytesToUint64(buf []byte) (x uint64) {
-	for i, b := range buf {
-		x = x<<8 + uint64(b)
-		if i == 7 {
-			return
-		}
-	}
-	return
-}
+//func bytesToUint64(buf []byte) (x uint64) {
+//	for i, b := range buf {
+//		x = x<<8 + uint64(b)
+//		if i == 7 {
+//			return
+//		}
+//	}
+//	return
+//}
 
 func hexToCompact(key []byte) []byte {
 	zeroByte, keyPos, keyLen := makeCompactZeroByte(key)
