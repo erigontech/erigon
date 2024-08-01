@@ -388,9 +388,7 @@ func (s *RoSnapshots) idxAvailability() uint64 {
 	//   5. file-types may have different height: 10 headers, 10 bodies, 9 trancasctions (for example if `kill -9` came during files building/merge). still need index all 3 types.
 	amount := 0
 
-	v := s.View()
-	defer v.Close()
-	for segtype, value := range v.s.segments {
+	for segtype, value := range s.segments {
 		if len(value.segments) == 0 || !s.HasType(segtype.Type()) {
 			continue
 		}
@@ -399,7 +397,7 @@ func (s *RoSnapshots) idxAvailability() uint64 {
 
 	maximums := make([]uint64, amount)
 	var i int
-	for segtype, value := range v.s.segments {
+	for segtype, value := range s.segments {
 		if len(value.segments) == 0 || !s.HasType(segtype.Type()) {
 			continue
 		}
