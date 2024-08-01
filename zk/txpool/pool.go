@@ -1664,7 +1664,7 @@ func (p *TxPool) fromDB(ctx context.Context, tx kv.Tx, coreTx kv.Tx) error {
 		isLocalTx := p.isLocalLRU.Contains(string(k))
 
 		if reason := p.validateTx(txn, isLocalTx, cacheView, addr); reason != NotSet && reason != Success {
-			return nil
+			continue
 		}
 		txs.Resize(uint(i + 1))
 		txs.Txs[i] = txn
