@@ -65,7 +65,6 @@ import (
 	"github.com/erigontech/erigon/polygon/bor/finality/whitelist"
 	"github.com/erigontech/erigon/polygon/bor/statefull"
 	"github.com/erigontech/erigon/polygon/bor/valset"
-	"github.com/erigontech/erigon/polygon/bridge"
 	"github.com/erigontech/erigon/polygon/heimdall"
 	"github.com/erigontech/erigon/rlp"
 	"github.com/erigontech/erigon/rpc"
@@ -260,6 +259,10 @@ type spanReader interface {
 	FetchSpan(ctx context.Context, id uint64) (*heimdall.Span, bool, error)
 }
 
+type bridgeReader interface {
+	GetEvents(ctx context.Context, blockNum uint64) ([]*types.Message, error)
+}
+
 func ValidateHeaderTime(
 	header *types.Header,
 	now time.Time,
@@ -325,6 +328,7 @@ type Bor struct {
 	GenesisContractsClient GenesisContracts
 	HeimdallClient         heimdall.HeimdallClient
 	spanReader             spanReader
+	bridgeReader           bridgeReader
 
 	// scope event.SubscriptionScope
 	// The fields below are for testing only
@@ -336,7 +340,6 @@ type Bor struct {
 	frozenSnapshotsInit sync.Once
 	rootHashCache       *lru.ARCCache[string, string]
 	headerProgress      HeaderProgress
-	polygonBridge       bridge.PolygonBridge
 }
 
 type signer struct {
@@ -353,8 +356,8 @@ func New(
 	heimdallClient heimdall.HeimdallClient,
 	genesisContracts GenesisContracts,
 	logger log.Logger,
-	polygonBridge bridge.Service,
-	heimdallService heimdall.Service,
+	bridgeReader bridgeReader,
+	spanReader spanReader,
 ) *Bor {
 	// get bor config
 	borConfig := chainConfig.Bor.(*borcfg.BorConfig)
@@ -381,8 +384,8 @@ func New(
 		execCtx:                context.Background(),
 		logger:                 logger,
 		closeCh:                make(chan struct{}),
-		polygonBridge:          polygonBridge,
-		spanReader:             heimdallService,
+		bridgeReader:           bridgeReader,
+		spanReader:             spanReader,
 	}
 
 	c.authorizedSigner.Store(&signer{
@@ -1505,8 +1508,8 @@ func (c *Bor) CommitStates(
 ) error {
 	blockNum := header.Number.Uint64()
 
-	if c.polygonBridge != nil {
-		events, err := c.polygonBridge.GetEvents(c.execCtx, blockNum)
+	if c.bridgeReader != nil {
+		events, err := c.bridgeReader.GetEvents(c.execCtx, blockNum)
 		if err != nil {
 			return err
 		}
