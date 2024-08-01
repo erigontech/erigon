@@ -966,3 +966,81 @@ func Test_HexPatriciaHashed_ProcessUpdates_UniqueRepresentationInTheMiddle(t *te
 		"expected equal roots, got sequential [%v] != batch [%v]", hex.EncodeToString(roots[len(roots)-1]), hex.EncodeToString(batchRoot))
 	require.Lenf(t, batchRoot, 32, "root hash length should be equal to 32 bytes")
 }
+
+func TestUpdate_EncodeDecode(t *testing.T) {
+	updates := []Update{
+		{Flags: BalanceUpdate, Balance: *uint256.NewInt(123), CodeHash: [32]byte(EmptyCodeHash)},
+		{Flags: BalanceUpdate | NonceUpdate, Balance: *uint256.NewInt(45639015), Nonce: 123, CodeHash: [32]byte(EmptyCodeHash)},
+		{Flags: BalanceUpdate | NonceUpdate | CodeUpdate, Balance: *uint256.NewInt(45639015), Nonce: 123,
+			CodeHash: [length.Hash]byte{
+				0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08,
+				0x09, 0x0A, 0x0B, 0x0C, 0x0D, 0x0E, 0x0F, 0x10,
+				0x11, 0x12, 0x13, 0x14, 0x15, 0x16, 0x17, 0x18,
+				0x19, 0x1A, 0x1B, 0x1C, 0x1D, 0x1E, 0x1F, 0x20}},
+		{Flags: StorageUpdate, Storage: [length.Hash]byte{0x21, 0x22, 0x23, 0x24}, StorageLen: 4, CodeHash: [32]byte(EmptyCodeHash)},
+		{Flags: DeleteUpdate, CodeHash: [32]byte(EmptyCodeHash)},
+	}
+
+	var numBuf [10]byte
+	for i, update := range updates {
+		encoded := update.Encode(nil, numBuf[:])
+
+		decoded := Update{}
+		n, err := decoded.Decode(encoded, 0)
+		require.NoError(t, err, i)
+		require.Equal(t, len(encoded), n, i)
+
+		require.Equal(t, update.Flags, decoded.Flags, i)
+		require.Equal(t, update.Balance, decoded.Balance, i)
+		require.Equal(t, update.Nonce, decoded.Nonce, i)
+		require.Equal(t, update.CodeHash, decoded.CodeHash, i)
+		require.Equal(t, update.Storage, decoded.Storage, i)
+		require.Equal(t, update.StorageLen, decoded.StorageLen, i)
+	}
+}
+
+func TestUpdate_Merge(t *testing.T) {
+	type tcase struct {
+		a, b, e Update
+	}
+
+	updates := []tcase{
+		{
+			a: Update{Flags: BalanceUpdate, Balance: *uint256.NewInt(123), CodeHash: [32]byte(EmptyCodeHash)},
+			b: Update{Flags: BalanceUpdate | NonceUpdate, Balance: *uint256.NewInt(45639015), Nonce: 123, CodeHash: [32]byte(EmptyCodeHash)},
+			e: Update{Flags: BalanceUpdate | NonceUpdate, Balance: *uint256.NewInt(45639015), Nonce: 123, CodeHash: [32]byte(EmptyCodeHash)},
+		},
+		{
+			a: Update{Flags: BalanceUpdate | NonceUpdate, Balance: *uint256.NewInt(45639015), Nonce: 123, CodeHash: [32]byte(EmptyCodeHash)},
+			b: Update{Flags: BalanceUpdate | NonceUpdate | CodeUpdate, Balance: *uint256.NewInt(1000000), Nonce: 547, CodeHash: [32]byte(EmptyCodeHash)},
+			e: Update{Flags: BalanceUpdate | NonceUpdate | CodeUpdate, Balance: *uint256.NewInt(1000000), Nonce: 547, CodeHash: [32]byte(EmptyCodeHash)},
+		},
+		{
+			a: Update{Flags: BalanceUpdate | NonceUpdate | CodeUpdate, Balance: *uint256.NewInt(4568314), Nonce: 123, CodeHash: [32]byte(EmptyCodeHash)},
+			b: Update{Flags: BalanceUpdate | NonceUpdate | CodeUpdate, Balance: *uint256.NewInt(45639015), Nonce: 124,
+				CodeHash: [length.Hash]byte{
+					0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08,
+					0x09, 0x0A, 0x0B, 0x0C, 0x0D, 0x0E, 0x0F, 0x10,
+					0x11, 0x12, 0x13, 0x14, 0x15, 0x16, 0x17, 0x18,
+					0x19, 0x1A, 0x1B, 0x1C, 0x1D, 0x1E, 0x1F, 0x20}},
+			e: Update{Flags: BalanceUpdate | NonceUpdate | CodeUpdate, Balance: *uint256.NewInt(45639015), Nonce: 124, CodeHash: [length.Hash]byte{
+				0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08,
+				0x09, 0x0A, 0x0B, 0x0C, 0x0D, 0x0E, 0x0F, 0x10,
+				0x11, 0x12, 0x13, 0x14, 0x15, 0x16, 0x17, 0x18,
+				0x19, 0x1A, 0x1B, 0x1C, 0x1D, 0x1E, 0x1F, 0x20}},
+		},
+		{
+			a: Update{Flags: StorageUpdate, Storage: [length.Hash]byte{0x21, 0x22, 0x23, 0x24}, StorageLen: 4, CodeHash: [32]byte(EmptyCodeHash)},
+			b: Update{Flags: DeleteUpdate, CodeHash: [32]byte(EmptyCodeHash)},
+			e: Update{Flags: DeleteUpdate, CodeHash: [32]byte(EmptyCodeHash)},
+		},
+	}
+
+	var numBuf [10]byte
+	for i, tc := range updates {
+		tc.a.Merge(&tc.b)
+		encA := tc.a.Encode(nil, numBuf[:])
+		encE := tc.e.Encode(nil, numBuf[:])
+		require.EqualValues(t, encE, encA, i)
+	}
+}
