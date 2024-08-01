@@ -157,8 +157,10 @@ type HardwareInfo struct {
 }
 
 type RAMInfo struct {
-	Total uint64 `json:"total"`
-	Free  uint64 `json:"free"`
+	Total       uint64  `json:"total"`
+	Available   uint64  `json:"available"`
+	Used        uint64  `json:"used"`
+	UsedPercent float64 `json:"usedPercent"`
 }
 
 type DiskInfo struct {

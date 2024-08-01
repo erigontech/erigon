@@ -90,19 +90,22 @@ func GetSysInfo(dirPath string) HardwareInfo {
 }
 
 func GetRAMInfo() RAMInfo {
-	totalRAM := uint64(0)
-	freeRAM := uint64(0)
+	rmi := RAMInfo{
+		Total:       0,
+		Available:   0,
+		Used:        0,
+		UsedPercent: 0,
+	}
 
 	vmStat, err := mem.VirtualMemory()
 	if err == nil {
-		totalRAM = vmStat.Total
-		freeRAM = vmStat.Free
+		rmi.Total = vmStat.Total
+		rmi.Available = vmStat.Available
+		rmi.Used = vmStat.Used
+		rmi.UsedPercent = vmStat.UsedPercent
 	}
 
-	return RAMInfo{
-		Total: totalRAM,
-		Free:  freeRAM,
-	}
+	return rmi
 }
 
 func GetDiskInfo(nodeDisk string) DiskInfo {
