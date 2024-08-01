@@ -1253,6 +1253,7 @@ func (s *Ethereum) StartMining(ctx context.Context, db kv.RwDB, stateDiffClient 
 		defer streamCancel()
 
 		mineEvery := time.NewTicker(miner.MiningConfig.Recommit)
+		s.logger.Error("mine every loop", "every", miner.MiningConfig.Recommit.Seconds())
 		defer mineEvery.Stop()
 
 		s.logger.Info("Starting to mine", "etherbase", eb)
@@ -1308,13 +1309,14 @@ func (s *Ethereum) StartMining(ctx context.Context, db kv.RwDB, stateDiffClient 
 					return
 				}
 			}
-
+			s.logger.Error("in loop of mining", "working", working, "hasWork", hasWork)
 			if !working && hasWork {
 				s.logger.Error("Started working")
 				working = true
 				hasWork = false
 				mineEvery.Reset(miner.MiningConfig.Recommit)
 				go func() {
+					s.logger.Error("come from goroutine in StartMining")
 					err := stages2.MiningStep(ctx, db, mining, tmpDir, logger)
 
 					waiting.Store(true)

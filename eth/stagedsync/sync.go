@@ -444,6 +444,7 @@ func (s *Sync) Run(db kv.RwDB, txc wrap.TxContainer, initialCycle, firstCycle bo
 
 		s.NextStage()
 	}
+	s.logger.Error("MINING IS OVER!!!!")
 
 	if err := s.SetCurrentStage(s.stages[0].ID); err != nil {
 		return false, err
