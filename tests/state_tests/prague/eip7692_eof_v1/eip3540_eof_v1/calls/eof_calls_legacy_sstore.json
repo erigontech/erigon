@@ -1,5 +1,5 @@
 {
-    "tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_calls.py::test_eof_calls_legacy_sstore[fork_PragueEIP7692-state_test-extcall]": {
+    "tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_calls.py::test_eof_calls_legacy_sstore[fork_CancunEIP7692-state_test-extcall]": {
         "env": {
             "currentCoinbase": "0x2adc25665018aa1fe0e6bc666dac8fc2697ff9ba",
             "currentGasLimit": "0x016345785d8a0000",
@@ -26,7 +26,7 @@
             "0x0000000000000000000000000000000000001100": {
                 "nonce": "0x01",
                 "balance": "0x00",
-                "code": "0xef000101000402000100260400000000800004600060006000730000000000000000000000000000000000001000f860025561201560015500",
+                "code": "0xef000101000402000100140400000000800004600060006000611000f860025561201560015500",
                 "storage": {}
             }
         },
@@ -49,7 +49,7 @@
         "post": {
             "Prague": [
                 {
-                    "hash": "0x8bb6366ac11514dddaa8ca038bade69296f37c16d511c5a970839ed0fbfde22d",
+                    "hash": "0x591fe899315a173c0ec5ebc9d549e61ecc38224283bd533d6b7537dd1c074d5c",
                     "logs": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
                     "txbytes": "0xf861800a8402faf08094000000000000000000000000000000000000110080801ca056c88a6605edb3f99e9e7cc00f610552b178d48d42c0b35ad6fac734c0494f0ca03eeaa85d4f62077ba1752742940c70b52ca3c6cd939d7eaaa4157c45362365be",
                     "indexes": {
@@ -61,16 +61,16 @@
             ]
         },
         "_info": {
-            "hash": "0xa9e84395ffaad16b3e3336a18b373f88a2d7d27b78c958cc30b95a5ab0e4c975",
+            "hash": "0x7f2e2621c76e7088b14de210fee768c07b92a0601ac902db86b7de731f2519af",
             "comment": "`execution-spec-tests` generated test",
-            "filling-transition-tool": "Hyperledger Besu evm 24.7-develop-8ca7129",
+            "filling-transition-tool": "evmone-t8n 0.12.0-dev+commit.26d56091",
             "description": "Test function documentation:\nTest EOF contracts calling Legacy contracts that use SSTORE",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692-prague@v1.0.5/tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_calls.py#L335",
+            "url": "https://github.com/ethereum/execution-spec-tests/tree/v3.0.0/tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_calls.py#L335",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-3540.md",
             "reference-spec-version": "2f013de4065babde7c02f84a2ce9864a3c5bfbd3"
         }
     },
-    "tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_calls.py::test_eof_calls_legacy_sstore[fork_PragueEIP7692-state_test-extdelegatecall]": {
+    "tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_calls.py::test_eof_calls_legacy_sstore[fork_CancunEIP7692-state_test-extdelegatecall]": {
         "env": {
             "currentCoinbase": "0x2adc25665018aa1fe0e6bc666dac8fc2697ff9ba",
             "currentGasLimit": "0x016345785d8a0000",
@@ -97,7 +97,7 @@
             "0x0000000000000000000000000000000000001100": {
                 "nonce": "0x01",
                 "balance": "0x00",
-                "code": "0xef00010100040200010024040000000080000360006000730000000000000000000000000000000000001000f960025561201560015500",
+                "code": "0xef00010100040200010012040000000080000360006000611000f960025561201560015500",
                 "storage": {}
             }
         },
@@ -120,7 +120,7 @@
         "post": {
             "Prague": [
                 {
-                    "hash": "0xbe028b5e2939d6a5cf2becebc9988ab3609d8cb435ad8661222e2b956ca6b448",
+                    "hash": "0x09181a56d36e83676cbb461fa3753167adc45bd18b66b3fbbf6a09b0138a384c",
                     "logs": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
                     "txbytes": "0xf861800a8402faf08094000000000000000000000000000000000000110080801ca056c88a6605edb3f99e9e7cc00f610552b178d48d42c0b35ad6fac734c0494f0ca03eeaa85d4f62077ba1752742940c70b52ca3c6cd939d7eaaa4157c45362365be",
                     "indexes": {
@@ -132,16 +132,16 @@
             ]
         },
         "_info": {
-            "hash": "0xb3d4306ac5a74ec17f797ecfd0307506b90c0b885b40413162f5230cb2db4186",
+            "hash": "0x6a8289fe4265f4c3b8aebc59f2b7a9532dfc9ab70351ff6d7444c6cb83281c71",
             "comment": "`execution-spec-tests` generated test",
-            "filling-transition-tool": "Hyperledger Besu evm 24.7-develop-8ca7129",
+            "filling-transition-tool": "evmone-t8n 0.12.0-dev+commit.26d56091",
             "description": "Test function documentation:\nTest EOF contracts calling Legacy contracts that use SSTORE",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692-prague@v1.0.5/tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_calls.py#L335",
+            "url": "https://github.com/ethereum/execution-spec-tests/tree/v3.0.0/tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_calls.py#L335",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-3540.md",
             "reference-spec-version": "2f013de4065babde7c02f84a2ce9864a3c5bfbd3"
         }
     },
-    "tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_calls.py::test_eof_calls_legacy_sstore[fork_PragueEIP7692-state_test-extstaticall]": {
+    "tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_calls.py::test_eof_calls_legacy_sstore[fork_CancunEIP7692-state_test-extstaticall]": {
         "env": {
             "currentCoinbase": "0x2adc25665018aa1fe0e6bc666dac8fc2697ff9ba",
             "currentGasLimit": "0x016345785d8a0000",
@@ -168,7 +168,7 @@
             "0x0000000000000000000000000000000000001100": {
                 "nonce": "0x01",
                 "balance": "0x00",
-                "code": "0xef00010100040200010024040000000080000360006000730000000000000000000000000000000000001000fb60025561201560015500",
+                "code": "0xef00010100040200010012040000000080000360006000611000fb60025561201560015500",
                 "storage": {}
             }
         },
@@ -191,7 +191,7 @@
         "post": {
             "Prague": [
                 {
-                    "hash": "0x1ff7f1d83c22fbb4d1cae55064d377e1bc9cb642e551f1491360fc05d07de49c",
+                    "hash": "0x3f41ced75d1526d80b0eb77f5f2caea2c02932513098d699aaaed4ad9eff553a",
                     "logs": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
                     "txbytes": "0xf861800a8402faf08094000000000000000000000000000000000000110080801ca056c88a6605edb3f99e9e7cc00f610552b178d48d42c0b35ad6fac734c0494f0ca03eeaa85d4f62077ba1752742940c70b52ca3c6cd939d7eaaa4157c45362365be",
                     "indexes": {
@@ -203,11 +203,11 @@
             ]
         },
         "_info": {
-            "hash": "0xb71891af894ec29569f44eb5dc6f7ce6bdfde22475a3f7b05603052502586e55",
+            "hash": "0x3b64925b9d97ce5e225ea2de717f4f365df1f43fc1c531c1ce875796510ab91f",
             "comment": "`execution-spec-tests` generated test",
-            "filling-transition-tool": "Hyperledger Besu evm 24.7-develop-8ca7129",
+            "filling-transition-tool": "evmone-t8n 0.12.0-dev+commit.26d56091",
             "description": "Test function documentation:\nTest EOF contracts calling Legacy contracts that use SSTORE",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692-prague@v1.0.5/tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_calls.py#L335",
+            "url": "https://github.com/ethereum/execution-spec-tests/tree/v3.0.0/tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_calls.py#L335",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-3540.md",
             "reference-spec-version": "2f013de4065babde7c02f84a2ce9864a3c5bfbd3"
         }

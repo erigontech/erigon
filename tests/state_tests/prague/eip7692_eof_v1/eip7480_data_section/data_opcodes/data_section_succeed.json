@@ -1,5 +1,5 @@
 {
-    "tests/prague/eip7692_eof_v1/eip7480_data_section/test_data_opcodes.py::test_data_section_succeed[fork_PragueEIP7692-state_test-empty_zero]": {
+    "tests/prague/eip7692_eof_v1/eip7480_data_section/test_data_opcodes.py::test_data_section_succeed[fork_CancunEIP7692-state_test-empty_zero]": {
         "env": {
             "currentCoinbase": "0x2adc25665018aa1fe0e6bc666dac8fc2697ff9ba",
             "currentGasLimit": "0x016345785d8a0000",
@@ -20,7 +20,7 @@
             "0x0000000000000000000000000000000000001100": {
                 "nonce": "0x01",
                 "balance": "0x00",
-                "code": "0x60006000600060007300000000000000000000000000000000000010005af460005500",
+                "code": "0x60006000600060006110005af460005500",
                 "storage": {}
             },
             "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b": {
@@ -49,7 +49,7 @@
         "post": {
             "Prague": [
                 {
-                    "hash": "0x7ebe22478370175c1820596f955eae74015197e205e1dee2986a073700b8abc4",
+                    "hash": "0xa29c3917b00b2984f37f4eec708243998f4dd31ca7d5ab726e2a5b561d5b238b",
                     "logs": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
                     "txbytes": "0xf861800a8402faf08094000000000000000000000000000000000000110080801ca056c88a6605edb3f99e9e7cc00f610552b178d48d42c0b35ad6fac734c0494f0ca03eeaa85d4f62077ba1752742940c70b52ca3c6cd939d7eaaa4157c45362365be",
                     "indexes": {
@@ -61,16 +61,16 @@
             ]
         },
         "_info": {
-            "hash": "0xea148dfc0c3409dfc4dff6815df179e97eda319e29b2cbfa41787975fe7acf75",
+            "hash": "0x334f9221bbbe921624e8135418fd29b7d198a9e3f8eb2f2a07ac8574692e6c39",
             "comment": "`execution-spec-tests` generated test",
-            "filling-transition-tool": "Hyperledger Besu evm 24.7-develop-8ca7129",
+            "filling-transition-tool": "evmone-t8n 0.12.0-dev+commit.26d56091",
             "description": "Test function documentation:\n\n    Test simple contracts that are simply expected to succeed on call.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692-prague@v1.0.5/tests/prague/eip7692_eof_v1/eip7480_data_section/test_data_opcodes.py#L121",
+            "url": "https://github.com/ethereum/execution-spec-tests/tree/v3.0.0/tests/prague/eip7692_eof_v1/eip7480_data_section/test_data_opcodes.py#L69",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7480.md",
             "reference-spec-version": "3ee1334ef110420685f1c8ed63e80f9e1766c251"
         }
     },
-    "tests/prague/eip7692_eof_v1/eip7480_data_section/test_data_opcodes.py::test_data_section_succeed[fork_PragueEIP7692-state_test-short_zero]": {
+    "tests/prague/eip7692_eof_v1/eip7480_data_section/test_data_opcodes.py::test_data_section_succeed[fork_CancunEIP7692-state_test-short_zero]": {
         "env": {
             "currentCoinbase": "0x2adc25665018aa1fe0e6bc666dac8fc2697ff9ba",
             "currentGasLimit": "0x016345785d8a0000",
@@ -91,7 +91,7 @@
             "0x0000000000000000000000000000000000001100": {
                 "nonce": "0x01",
                 "balance": "0x00",
-                "code": "0x60006000600060007300000000000000000000000000000000000010005af460005500",
+                "code": "0x60006000600060006110005af460005500",
                 "storage": {}
             },
             "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b": {
@@ -120,7 +120,7 @@
         "post": {
             "Prague": [
                 {
-                    "hash": "0x73048d0721029212bf12d6484ea6cd0b75178e679179781e65d923e2cf5ce9e6",
+                    "hash": "0xa713598eb154b86042266cef2f12063b683033de6e3c4229de87b4998548e1db",
                     "logs": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
                     "txbytes": "0xf861800a8402faf08094000000000000000000000000000000000000110080801ca056c88a6605edb3f99e9e7cc00f610552b178d48d42c0b35ad6fac734c0494f0ca03eeaa85d4f62077ba1752742940c70b52ca3c6cd939d7eaaa4157c45362365be",
                     "indexes": {
@@ -132,16 +132,16 @@
             ]
         },
         "_info": {
-            "hash": "0xa7bc06e81aa84a48a30284c10bd6c1c810fe577ea46c0e1de59379cab167df5a",
+            "hash": "0xe23dada71d298b41e3a75f9f3720dce1eaeb6fd4714d4db2ba3e72d54781add7",
             "comment": "`execution-spec-tests` generated test",
-            "filling-transition-tool": "Hyperledger Besu evm 24.7-develop-8ca7129",
+            "filling-transition-tool": "evmone-t8n 0.12.0-dev+commit.26d56091",
             "description": "Test function documentation:\n\n    Test simple contracts that are simply expected to succeed on call.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692-prague@v1.0.5/tests/prague/eip7692_eof_v1/eip7480_data_section/test_data_opcodes.py#L121",
+            "url": "https://github.com/ethereum/execution-spec-tests/tree/v3.0.0/tests/prague/eip7692_eof_v1/eip7480_data_section/test_data_opcodes.py#L69",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7480.md",
             "reference-spec-version": "3ee1334ef110420685f1c8ed63e80f9e1766c251"
         }
     },
-    "tests/prague/eip7692_eof_v1/eip7480_data_section/test_data_opcodes.py::test_data_section_succeed[fork_PragueEIP7692-state_test-exact_zero]": {
+    "tests/prague/eip7692_eof_v1/eip7480_data_section/test_data_opcodes.py::test_data_section_succeed[fork_CancunEIP7692-state_test-exact_zero]": {
         "env": {
             "currentCoinbase": "0x2adc25665018aa1fe0e6bc666dac8fc2697ff9ba",
             "currentGasLimit": "0x016345785d8a0000",
@@ -162,7 +162,7 @@
             "0x0000000000000000000000000000000000001100": {
                 "nonce": "0x01",
                 "balance": "0x00",
-                "code": "0x60006000600060007300000000000000000000000000000000000010005af460005500",
+                "code": "0x60006000600060006110005af460005500",
                 "storage": {}
             },
             "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b": {
@@ -191,7 +191,7 @@
         "post": {
             "Prague": [
                 {
-                    "hash": "0xd5011a4788ef0b01c009c20dd2119b79dfe8838ea7e8455be8f2ab4ec02acce5",
+                    "hash": "0x95233c1321b26fec1d1ee4c40c69a6d30e9645e099f24d6550c54f51db0726df",
                     "logs": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
                     "txbytes": "0xf861800a8402faf08094000000000000000000000000000000000000110080801ca056c88a6605edb3f99e9e7cc00f610552b178d48d42c0b35ad6fac734c0494f0ca03eeaa85d4f62077ba1752742940c70b52ca3c6cd939d7eaaa4157c45362365be",
                     "indexes": {
@@ -203,16 +203,16 @@
             ]
         },
         "_info": {
-            "hash": "0x6c3f42f6037d95266aaff203d591856cc5cf4a8247d217169fb04430f077c433",
+            "hash": "0xeffb168df680f0b6986f783209393477818f54b5b33a2e72ad4a049b4c115921",
             "comment": "`execution-spec-tests` generated test",
-            "filling-transition-tool": "Hyperledger Besu evm 24.7-develop-8ca7129",
+            "filling-transition-tool": "evmone-t8n 0.12.0-dev+commit.26d56091",
             "description": "Test function documentation:\n\n    Test simple contracts that are simply expected to succeed on call.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692-prague@v1.0.5/tests/prague/eip7692_eof_v1/eip7480_data_section/test_data_opcodes.py#L121",
+            "url": "https://github.com/ethereum/execution-spec-tests/tree/v3.0.0/tests/prague/eip7692_eof_v1/eip7480_data_section/test_data_opcodes.py#L69",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7480.md",
             "reference-spec-version": "3ee1334ef110420685f1c8ed63e80f9e1766c251"
         }
     },
-    "tests/prague/eip7692_eof_v1/eip7480_data_section/test_data_opcodes.py::test_data_section_succeed[fork_PragueEIP7692-state_test-large_zero]": {
+    "tests/prague/eip7692_eof_v1/eip7480_data_section/test_data_opcodes.py::test_data_section_succeed[fork_CancunEIP7692-state_test-large_zero]": {
         "env": {
             "currentCoinbase": "0x2adc25665018aa1fe0e6bc666dac8fc2697ff9ba",
             "currentGasLimit": "0x016345785d8a0000",
@@ -233,7 +233,7 @@
             "0x0000000000000000000000000000000000001100": {
                 "nonce": "0x01",
                 "balance": "0x00",
-                "code": "0x60006000600060007300000000000000000000000000000000000010005af460005500",
+                "code": "0x60006000600060006110005af460005500",
                 "storage": {}
             },
             "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b": {
@@ -262,7 +262,7 @@
         "post": {
             "Prague": [
                 {
-                    "hash": "0x2e69b335f0e5cf6e8bd60fe8df8d8e48d88ff460ed950fb1789ddc731d27db1f",
+                    "hash": "0x27dec5e00b55306076407df84d2da0f2e7c0fd9d7aee3fa7cc9b5349d69a1d13",
                     "logs": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
                     "txbytes": "0xf861800a8402faf08094000000000000000000000000000000000000110080801ca056c88a6605edb3f99e9e7cc00f610552b178d48d42c0b35ad6fac734c0494f0ca03eeaa85d4f62077ba1752742940c70b52ca3c6cd939d7eaaa4157c45362365be",
                     "indexes": {
@@ -274,16 +274,16 @@
             ]
         },
         "_info": {
-            "hash": "0x13b87a7e37369da890cced575a41f3d51ffa750408e84ac2d58a7d15c15f26d5",
+            "hash": "0xf6210788743499de2e84b74c21dc4ffbab23eceecd4f745891fe8f4614fd23f5",
             "comment": "`execution-spec-tests` generated test",
-            "filling-transition-tool": "Hyperledger Besu evm 24.7-develop-8ca7129",
+            "filling-transition-tool": "evmone-t8n 0.12.0-dev+commit.26d56091",
             "description": "Test function documentation:\n\n    Test simple contracts that are simply expected to succeed on call.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692-prague@v1.0.5/tests/prague/eip7692_eof_v1/eip7480_data_section/test_data_opcodes.py#L121",
+            "url": "https://github.com/ethereum/execution-spec-tests/tree/v3.0.0/tests/prague/eip7692_eof_v1/eip7480_data_section/test_data_opcodes.py#L69",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7480.md",
             "reference-spec-version": "3ee1334ef110420685f1c8ed63e80f9e1766c251"
         }
     },
-    "tests/prague/eip7692_eof_v1/eip7480_data_section/test_data_opcodes.py::test_data_section_succeed[fork_PragueEIP7692-state_test-empty_32]": {
+    "tests/prague/eip7692_eof_v1/eip7480_data_section/test_data_opcodes.py::test_data_section_succeed[fork_CancunEIP7692-state_test-empty_32]": {
         "env": {
             "currentCoinbase": "0x2adc25665018aa1fe0e6bc666dac8fc2697ff9ba",
             "currentGasLimit": "0x016345785d8a0000",
@@ -304,7 +304,7 @@
             "0x0000000000000000000000000000000000001100": {
                 "nonce": "0x01",
                 "balance": "0x00",
-                "code": "0x60006000600060007300000000000000000000000000000000000010005af460005500",
+                "code": "0x60006000600060006110005af460005500",
                 "storage": {}
             },
             "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b": {
@@ -333,7 +333,7 @@
         "post": {
             "Prague": [
                 {
-                    "hash": "0x00e66fc7e5f05afa5511a5584eda9408cf999d3423a0943ddf832b777dd018b6",
+                    "hash": "0xad79b231d6ba3922235ac8a547627fbb730fc7422446661c14ea697537de71eb",
                     "logs": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
                     "txbytes": "0xf861800a8402faf08094000000000000000000000000000000000000110080801ca056c88a6605edb3f99e9e7cc00f610552b178d48d42c0b35ad6fac734c0494f0ca03eeaa85d4f62077ba1752742940c70b52ca3c6cd939d7eaaa4157c45362365be",
                     "indexes": {
@@ -345,16 +345,16 @@
             ]
         },
         "_info": {
-            "hash": "0xc95329e4149f9766376653df19af1a6969518abf8ef25fbba298085ad5980745",
+            "hash": "0x9e06c32ecfd9c1dc82408209142ff24d0fa58406afbde0f31197f7c57ffe13df",
             "comment": "`execution-spec-tests` generated test",
-            "filling-transition-tool": "Hyperledger Besu evm 24.7-develop-8ca7129",
+            "filling-transition-tool": "evmone-t8n 0.12.0-dev+commit.26d56091",
             "description": "Test function documentation:\n\n    Test simple contracts that are simply expected to succeed on call.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692-prague@v1.0.5/tests/prague/eip7692_eof_v1/eip7480_data_section/test_data_opcodes.py#L121",
+            "url": "https://github.com/ethereum/execution-spec-tests/tree/v3.0.0/tests/prague/eip7692_eof_v1/eip7480_data_section/test_data_opcodes.py#L69",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7480.md",
             "reference-spec-version": "3ee1334ef110420685f1c8ed63e80f9e1766c251"
         }
     },
-    "tests/prague/eip7692_eof_v1/eip7480_data_section/test_data_opcodes.py::test_data_section_succeed[fork_PragueEIP7692-state_test-short_32]": {
+    "tests/prague/eip7692_eof_v1/eip7480_data_section/test_data_opcodes.py::test_data_section_succeed[fork_CancunEIP7692-state_test-short_32]": {
         "env": {
             "currentCoinbase": "0x2adc25665018aa1fe0e6bc666dac8fc2697ff9ba",
             "currentGasLimit": "0x016345785d8a0000",
@@ -375,7 +375,7 @@
             "0x0000000000000000000000000000000000001100": {
                 "nonce": "0x01",
                 "balance": "0x00",
-                "code": "0x60006000600060007300000000000000000000000000000000000010005af460005500",
+                "code": "0x60006000600060006110005af460005500",
                 "storage": {}
             },
             "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b": {
@@ -404,7 +404,7 @@
         "post": {
             "Prague": [
                 {
-                    "hash": "0xa061b52b1de739e4b33af68415df220e0be036d14f5352fb2ac6a1aeca1af61a",
+                    "hash": "0xbf099ce5c3febc1d4365ade166b9fc33c509ca4af7d843e7dab1959c1bfc9637",
                     "logs": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
                     "txbytes": "0xf861800a8402faf08094000000000000000000000000000000000000110080801ca056c88a6605edb3f99e9e7cc00f610552b178d48d42c0b35ad6fac734c0494f0ca03eeaa85d4f62077ba1752742940c70b52ca3c6cd939d7eaaa4157c45362365be",
                     "indexes": {
@@ -416,16 +416,16 @@
             ]
         },
         "_info": {
-            "hash": "0xe668e48aac9c96c0c7c748bb96f0927924950de80cb884c06b0d84474f2f03ac",
+            "hash": "0x640985684315cd56493a00e953c4082b9942252f25c841ed8e81c208e0749172",
             "comment": "`execution-spec-tests` generated test",
-            "filling-transition-tool": "Hyperledger Besu evm 24.7-develop-8ca7129",
+            "filling-transition-tool": "evmone-t8n 0.12.0-dev+commit.26d56091",
             "description": "Test function documentation:\n\n    Test simple contracts that are simply expected to succeed on call.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692-prague@v1.0.5/tests/prague/eip7692_eof_v1/eip7480_data_section/test_data_opcodes.py#L121",
+            "url": "https://github.com/ethereum/execution-spec-tests/tree/v3.0.0/tests/prague/eip7692_eof_v1/eip7480_data_section/test_data_opcodes.py#L69",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7480.md",
             "reference-spec-version": "3ee1334ef110420685f1c8ed63e80f9e1766c251"
         }
     },
-    "tests/prague/eip7692_eof_v1/eip7480_data_section/test_data_opcodes.py::test_data_section_succeed[fork_PragueEIP7692-state_test-exact_32]": {
+    "tests/prague/eip7692_eof_v1/eip7480_data_section/test_data_opcodes.py::test_data_section_succeed[fork_CancunEIP7692-state_test-exact_32]": {
         "env": {
             "currentCoinbase": "0x2adc25665018aa1fe0e6bc666dac8fc2697ff9ba",
             "currentGasLimit": "0x016345785d8a0000",
@@ -446,7 +446,7 @@
             "0x0000000000000000000000000000000000001100": {
                 "nonce": "0x01",
                 "balance": "0x00",
-                "code": "0x60006000600060007300000000000000000000000000000000000010005af460005500",
+                "code": "0x60006000600060006110005af460005500",
                 "storage": {}
             },
             "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b": {
@@ -475,7 +475,7 @@
         "post": {
             "Prague": [
                 {
-                    "hash": "0xe22af895559f56fe89451df46023d0b66ca4e1e75d0b473b12bd054d90c4e255",
+                    "hash": "0xc23862fe8681fd1c0321e0f29803794b88f15504e8aba0ad5a3efaa0492e6026",
                     "logs": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
                     "txbytes": "0xf861800a8402faf08094000000000000000000000000000000000000110080801ca056c88a6605edb3f99e9e7cc00f610552b178d48d42c0b35ad6fac734c0494f0ca03eeaa85d4f62077ba1752742940c70b52ca3c6cd939d7eaaa4157c45362365be",
                     "indexes": {
@@ -487,16 +487,16 @@
             ]
         },
         "_info": {
-            "hash": "0x6d7897c8a626960f5948cba00566c3fcd9b112c3a79e15cb58437ab976975442",
+            "hash": "0x860b60e2e24e6ee2647788014503ddee5fec902587f7ab43bf7050527041d9f4",
             "comment": "`execution-spec-tests` generated test",
-            "filling-transition-tool": "Hyperledger Besu evm 24.7-develop-8ca7129",
+            "filling-transition-tool": "evmone-t8n 0.12.0-dev+commit.26d56091",
             "description": "Test function documentation:\n\n    Test simple contracts that are simply expected to succeed on call.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692-prague@v1.0.5/tests/prague/eip7692_eof_v1/eip7480_data_section/test_data_opcodes.py#L121",
+            "url": "https://github.com/ethereum/execution-spec-tests/tree/v3.0.0/tests/prague/eip7692_eof_v1/eip7480_data_section/test_data_opcodes.py#L69",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7480.md",
             "reference-spec-version": "3ee1334ef110420685f1c8ed63e80f9e1766c251"
         }
     },
-    "tests/prague/eip7692_eof_v1/eip7480_data_section/test_data_opcodes.py::test_data_section_succeed[fork_PragueEIP7692-state_test-large_32]": {
+    "tests/prague/eip7692_eof_v1/eip7480_data_section/test_data_opcodes.py::test_data_section_succeed[fork_CancunEIP7692-state_test-large_32]": {
         "env": {
             "currentCoinbase": "0x2adc25665018aa1fe0e6bc666dac8fc2697ff9ba",
             "currentGasLimit": "0x016345785d8a0000",
@@ -517,7 +517,7 @@
             "0x0000000000000000000000000000000000001100": {
                 "nonce": "0x01",
                 "balance": "0x00",
-                "code": "0x60006000600060007300000000000000000000000000000000000010005af460005500",
+                "code": "0x60006000600060006110005af460005500",
                 "storage": {}
             },
             "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b": {
@@ -546,7 +546,7 @@
         "post": {
             "Prague": [
                 {
-                    "hash": "0x77d9b0ef3c26d1b3354ba965f0aa4c43c51da034d403ae9d3c0f033cb04981cf",
+                    "hash": "0x2435dfec05e77ff18bb48dfa95e73fd4b83a5c43ee7ba185c04942f9e04b4f1b",
                     "logs": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
                     "txbytes": "0xf861800a8402faf08094000000000000000000000000000000000000110080801ca056c88a6605edb3f99e9e7cc00f610552b178d48d42c0b35ad6fac734c0494f0ca03eeaa85d4f62077ba1752742940c70b52ca3c6cd939d7eaaa4157c45362365be",
                     "indexes": {
@@ -558,16 +558,16 @@
             ]
         },
         "_info": {
-            "hash": "0xc0f6cdaea09821b782e482b1962811c4df97a637a98965681b67a8f1bb0bc404",
+            "hash": "0x175900d772347c6488ba3734b9120955438a7e2a4058d2e8b6d6960421fd5c2e",
             "comment": "`execution-spec-tests` generated test",
-            "filling-transition-tool": "Hyperledger Besu evm 24.7-develop-8ca7129",
+            "filling-transition-tool": "evmone-t8n 0.12.0-dev+commit.26d56091",
             "description": "Test function documentation:\n\n    Test simple contracts that are simply expected to succeed on call.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692-prague@v1.0.5/tests/prague/eip7692_eof_v1/eip7480_data_section/test_data_opcodes.py#L121",
+            "url": "https://github.com/ethereum/execution-spec-tests/tree/v3.0.0/tests/prague/eip7692_eof_v1/eip7480_data_section/test_data_opcodes.py#L69",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7480.md",
             "reference-spec-version": "3ee1334ef110420685f1c8ed63e80f9e1766c251"
         }
     },
-    "tests/prague/eip7692_eof_v1/eip7480_data_section/test_data_opcodes.py::test_data_section_succeed[fork_PragueEIP7692-state_test-empty_23k]": {
+    "tests/prague/eip7692_eof_v1/eip7480_data_section/test_data_opcodes.py::test_data_section_succeed[fork_CancunEIP7692-state_test-empty_23k]": {
         "env": {
             "currentCoinbase": "0x2adc25665018aa1fe0e6bc666dac8fc2697ff9ba",
             "currentGasLimit": "0x016345785d8a0000",
@@ -588,7 +588,7 @@
             "0x0000000000000000000000000000000000001100": {
                 "nonce": "0x01",
                 "balance": "0x00",
-                "code": "0x60006000600060007300000000000000000000000000000000000010005af460005500",
+                "code": "0x60006000600060006110005af460005500",
                 "storage": {}
             },
             "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b": {
@@ -617,7 +617,7 @@
         "post": {
             "Prague": [
                 {
-                    "hash": "0xc2e7074b14b7ddea40b42ba938064dcdb2f1f370baa4f6f2242fcc77005d95b0",
+                    "hash": "0x2cffc9daa3662138bb1b5de7625d5d42d1e076670ce542c8a45376951a40ff2f",
                     "logs": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
                     "txbytes": "0xf861800a8402faf08094000000000000000000000000000000000000110080801ca056c88a6605edb3f99e9e7cc00f610552b178d48d42c0b35ad6fac734c0494f0ca03eeaa85d4f62077ba1752742940c70b52ca3c6cd939d7eaaa4157c45362365be",
                     "indexes": {
@@ -629,16 +629,16 @@
             ]
         },
         "_info": {
-            "hash": "0xa7c84d4a13180d6c993dd77b2de59d418dea048e9c525073a9d5ca748a14dd3c",
+            "hash": "0x69995438824cdafc0069acc9d540b344ad5c2b66a499403687640dfcf9237b9a",
             "comment": "`execution-spec-tests` generated test",
-            "filling-transition-tool": "Hyperledger Besu evm 24.7-develop-8ca7129",
+            "filling-transition-tool": "evmone-t8n 0.12.0-dev+commit.26d56091",
             "description": "Test function documentation:\n\n    Test simple contracts that are simply expected to succeed on call.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692-prague@v1.0.5/tests/prague/eip7692_eof_v1/eip7480_data_section/test_data_opcodes.py#L121",
+            "url": "https://github.com/ethereum/execution-spec-tests/tree/v3.0.0/tests/prague/eip7692_eof_v1/eip7480_data_section/test_data_opcodes.py#L69",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7480.md",
             "reference-spec-version": "3ee1334ef110420685f1c8ed63e80f9e1766c251"
         }
     },
-    "tests/prague/eip7692_eof_v1/eip7480_data_section/test_data_opcodes.py::test_data_section_succeed[fork_PragueEIP7692-state_test-short_23k]": {
+    "tests/prague/eip7692_eof_v1/eip7480_data_section/test_data_opcodes.py::test_data_section_succeed[fork_CancunEIP7692-state_test-short_23k]": {
         "env": {
             "currentCoinbase": "0x2adc25665018aa1fe0e6bc666dac8fc2697ff9ba",
             "currentGasLimit": "0x016345785d8a0000",
@@ -659,7 +659,7 @@
             "0x0000000000000000000000000000000000001100": {
                 "nonce": "0x01",
                 "balance": "0x00",
-                "code": "0x60006000600060007300000000000000000000000000000000000010005af460005500",
+                "code": "0x60006000600060006110005af460005500",
                 "storage": {}
             },
             "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b": {
@@ -688,7 +688,7 @@
         "post": {
             "Prague": [
                 {
-                    "hash": "0xc7d2eb4c85c7ca104081527984eb42733de2be6c85c8e83a5d38e8d7bfa7723c",
+                    "hash": "0xb3d4b269d3c74732795e9aaa3b8ae2946c3b077772f17e3a24c093c9e9310f75",
                     "logs": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
                     "txbytes": "0xf861800a8402faf08094000000000000000000000000000000000000110080801ca056c88a6605edb3f99e9e7cc00f610552b178d48d42c0b35ad6fac734c0494f0ca03eeaa85d4f62077ba1752742940c70b52ca3c6cd939d7eaaa4157c45362365be",
                     "indexes": {
@@ -700,16 +700,16 @@
             ]
         },
         "_info": {
-            "hash": "0x32d31e85711df188918b2fbd65d83960125ddd5d433eedbfffe1c7e712b6963b",
+            "hash": "0x7943bbd88b4d3df113530acd828b1faa22e121b7b45e7d7ee55e12f0a05a5ce9",
             "comment": "`execution-spec-tests` generated test",
-            "filling-transition-tool": "Hyperledger Besu evm 24.7-develop-8ca7129",
+            "filling-transition-tool": "evmone-t8n 0.12.0-dev+commit.26d56091",
             "description": "Test function documentation:\n\n    Test simple contracts that are simply expected to succeed on call.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692-prague@v1.0.5/tests/prague/eip7692_eof_v1/eip7480_data_section/test_data_opcodes.py#L121",
+            "url": "https://github.com/ethereum/execution-spec-tests/tree/v3.0.0/tests/prague/eip7692_eof_v1/eip7480_data_section/test_data_opcodes.py#L69",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7480.md",
             "reference-spec-version": "3ee1334ef110420685f1c8ed63e80f9e1766c251"
         }
     },
-    "tests/prague/eip7692_eof_v1/eip7480_data_section/test_data_opcodes.py::test_data_section_succeed[fork_PragueEIP7692-state_test-exact_23k]": {
+    "tests/prague/eip7692_eof_v1/eip7480_data_section/test_data_opcodes.py::test_data_section_succeed[fork_CancunEIP7692-state_test-exact_23k]": {
         "env": {
             "currentCoinbase": "0x2adc25665018aa1fe0e6bc666dac8fc2697ff9ba",
             "currentGasLimit": "0x016345785d8a0000",
@@ -730,7 +730,7 @@
             "0x0000000000000000000000000000000000001100": {
                 "nonce": "0x01",
                 "balance": "0x00",
-                "code": "0x60006000600060007300000000000000000000000000000000000010005af460005500",
+                "code": "0x60006000600060006110005af460005500",
                 "storage": {}
             },
             "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b": {
@@ -759,7 +759,7 @@
         "post": {
             "Prague": [
                 {
-                    "hash": "0x9f2e5ade7d92e6da78e123166232aabf4dea72584efebcaf53633e0145669a89",
+                    "hash": "0xaaf81cce513949785da6edd190c1119554dd8db7599647e252ab4a82d90404ea",
                     "logs": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
                     "txbytes": "0xf861800a8402faf08094000000000000000000000000000000000000110080801ca056c88a6605edb3f99e9e7cc00f610552b178d48d42c0b35ad6fac734c0494f0ca03eeaa85d4f62077ba1752742940c70b52ca3c6cd939d7eaaa4157c45362365be",
                     "indexes": {
@@ -771,16 +771,16 @@
             ]
         },
         "_info": {
-            "hash": "0xa30398a62514188e0108af4c6fae1759bd9feb3a60142c4371cb060d24867de0",
+            "hash": "0xa810dea54c6f4081b649efb3db721595292328c8399bc2a8a73e29c1ec9418ba",
             "comment": "`execution-spec-tests` generated test",
-            "filling-transition-tool": "Hyperledger Besu evm 24.7-develop-8ca7129",
+            "filling-transition-tool": "evmone-t8n 0.12.0-dev+commit.26d56091",
             "description": "Test function documentation:\n\n    Test simple contracts that are simply expected to succeed on call.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692-prague@v1.0.5/tests/prague/eip7692_eof_v1/eip7480_data_section/test_data_opcodes.py#L121",
+            "url": "https://github.com/ethereum/execution-spec-tests/tree/v3.0.0/tests/prague/eip7692_eof_v1/eip7480_data_section/test_data_opcodes.py#L69",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7480.md",
             "reference-spec-version": "3ee1334ef110420685f1c8ed63e80f9e1766c251"
         }
     },
-    "tests/prague/eip7692_eof_v1/eip7480_data_section/test_data_opcodes.py::test_data_section_succeed[fork_PragueEIP7692-state_test-large_23k]": {
+    "tests/prague/eip7692_eof_v1/eip7480_data_section/test_data_opcodes.py::test_data_section_succeed[fork_CancunEIP7692-state_test-large_23k]": {
         "env": {
             "currentCoinbase": "0x2adc25665018aa1fe0e6bc666dac8fc2697ff9ba",
             "currentGasLimit": "0x016345785d8a0000",
@@ -801,7 +801,7 @@
             "0x0000000000000000000000000000000000001100": {
                 "nonce": "0x01",
                 "balance": "0x00",
-                "code": "0x60006000600060007300000000000000000000000000000000000010005af460005500",
+                "code": "0x60006000600060006110005af460005500",
                 "storage": {}
             },
             "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b": {
@@ -830,7 +830,7 @@
         "post": {
             "Prague": [
                 {
-                    "hash": "0x896de1e98cad9a20ae352c1b7221be138d29ca3d77f88ba3edb9cceb9c812bde",
+                    "hash": "0x63be874292739f7e1a2f9750e011fddd8d9911a1ea2186910d406606ac9666bd",
                     "logs": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
                     "txbytes": "0xf861800a8402faf08094000000000000000000000000000000000000110080801ca056c88a6605edb3f99e9e7cc00f610552b178d48d42c0b35ad6fac734c0494f0ca03eeaa85d4f62077ba1752742940c70b52ca3c6cd939d7eaaa4157c45362365be",
                     "indexes": {
@@ -842,11 +842,11 @@
             ]
         },
         "_info": {
-            "hash": "0x98a73e23a4cd3a500ea6f3ff230d52b3d07e900c1e9511875f31bfd45c457f72",
+            "hash": "0x980f24a1ae2f9510e0ada12c21a8dcef8b72b4e528d164de7561c446b207c85b",
             "comment": "`execution-spec-tests` generated test",
-            "filling-transition-tool": "Hyperledger Besu evm 24.7-develop-8ca7129",
+            "filling-transition-tool": "evmone-t8n 0.12.0-dev+commit.26d56091",
             "description": "Test function documentation:\n\n    Test simple contracts that are simply expected to succeed on call.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692-prague@v1.0.5/tests/prague/eip7692_eof_v1/eip7480_data_section/test_data_opcodes.py#L121",
+            "url": "https://github.com/ethereum/execution-spec-tests/tree/v3.0.0/tests/prague/eip7692_eof_v1/eip7480_data_section/test_data_opcodes.py#L69",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7480.md",
             "reference-spec-version": "3ee1334ef110420685f1c8ed63e80f9e1766c251"
         }

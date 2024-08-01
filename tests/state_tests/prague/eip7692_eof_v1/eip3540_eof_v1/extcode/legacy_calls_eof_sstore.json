@@ -1,5 +1,5 @@
 {
-    "tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_extcode.py::test_legacy_calls_eof_sstore[fork_PragueEIP7692-state_test]": {
+    "tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_extcode.py::test_legacy_calls_eof_sstore[fork_CancunEIP7692-state_test]": {
         "env": {
             "currentCoinbase": "0x2adc25665018aa1fe0e6bc666dac8fc2697ff9ba",
             "currentGasLimit": "0x016345785d8a0000",
@@ -26,7 +26,7 @@
             "0x0000000000000000000000000000000000001200": {
                 "nonce": "0x01",
                 "balance": "0x00",
-                "code": "0x7300000000000000000000000000000000000011003b6000557300000000000000000000000000000000000011003b600060007300000000000000000000000000000000000011003c6000516001557300000000000000000000000000000000000011003f6002557300000000000000000000000000000000000010003b6003557300000000000000000000000000000000000010003b600060207300000000000000000000000000000000000010003c6020516004557300000000000000000000000000000000000010003f600555",
+                "code": "0x6111003b6000556111003b600060006111003c6000516001556111003f6002556110003b6003556006600060206110003c6020516004556110003f600555",
                 "storage": {}
             },
             "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b": {
@@ -55,7 +55,7 @@
         "post": {
             "Prague": [
                 {
-                    "hash": "0x2e0275a8414883e72a880dfbd23b06406c3bf42fb4fc7091c758cb681e05dbd3",
+                    "hash": "0x047ac0a772e4ac8ab931296ee30153aa532e3682561051d290a3322f93a2ef44",
                     "logs": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
                     "txbytes": "0xf861800a8402faf08094000000000000000000000000000000000000120080801ca0a1e643d63381920366e4a3c8585ea62b0b5129c5068e82c1ab925755a312300ca0478ccccc7869805668c19a8e84adef75e29a9f02556255d04768e325bdeef4b0",
                     "indexes": {
@@ -67,11 +67,11 @@
             ]
         },
         "_info": {
-            "hash": "0x3b16b3156fa0fc57e6220005660a8e8e6aa5468ed59325929714288ae72387a0",
+            "hash": "0x75779fa6e519321785cd8114367e695e55bef437f0efcfebf82046c9d3a3df0c",
             "comment": "`execution-spec-tests` generated test",
-            "filling-transition-tool": "Hyperledger Besu evm 24.7-develop-8ca7129",
+            "filling-transition-tool": "evmone-t8n 0.12.0-dev+commit.26d56091",
             "description": "Test function documentation:\nTest EXTCODE* opcodes calling EOF and legacy contracts",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692-prague@v1.0.5/tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_extcode.py#L19",
+            "url": "https://github.com/ethereum/execution-spec-tests/tree/v3.0.0/tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_extcode.py#L19",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-4750.md",
             "reference-spec-version": "90f716078d0b08ce508a1e57803f885cc2f2e15e"
         }

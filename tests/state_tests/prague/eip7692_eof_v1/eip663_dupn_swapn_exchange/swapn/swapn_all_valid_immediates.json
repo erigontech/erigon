@@ -1,5 +1,5 @@
 {
-    "tests/prague/eip7692_eof_v1/eip663_dupn_swapn_exchange/test_swapn.py::test_swapn_all_valid_immediates[fork_PragueEIP7692-state_test]": {
+    "tests/prague/eip7692_eof_v1/eip663_dupn_swapn_exchange/test_swapn.py::test_swapn_all_valid_immediates[fork_CancunEIP7692-state_test]": {
         "env": {
             "currentCoinbase": "0x2adc25665018aa1fe0e6bc666dac8fc2697ff9ba",
             "currentGasLimit": "0x016345785d8a0000",
@@ -57,9 +57,9 @@
         "_info": {
             "hash": "0x34d957638eb36daf3149cabb7f280050a91a1bd9dbb975d5488cd0a751ebcc37",
             "comment": "`execution-spec-tests` generated test",
-            "filling-transition-tool": "Hyperledger Besu evm 24.7-develop-8ca7129",
+            "filling-transition-tool": "evmone-t8n 0.12.0-dev+commit.26d56091",
             "description": "Test function documentation:\n\n    Test case for all valid SWAPN immediates.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692-prague@v1.0.5/tests/prague/eip7692_eof_v1/eip663_dupn_swapn_exchange/test_swapn.py#L20",
+            "url": "https://github.com/ethereum/execution-spec-tests/tree/v3.0.0/tests/prague/eip7692_eof_v1/eip663_dupn_swapn_exchange/test_swapn.py#L20",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-663.md",
             "reference-spec-version": "b658bb87fe039d29e9475d5cfaebca9b92e0fca2"
         }
