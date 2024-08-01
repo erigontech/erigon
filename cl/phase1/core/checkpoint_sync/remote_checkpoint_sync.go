@@ -3,6 +3,7 @@ package checkpoint_sync
 import (
 	"context"
 	"encoding/binary"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -27,7 +28,7 @@ func NewRemoteCheckpointSync(beaconConfig *clparams.BeaconChainConfig, net clpar
 
 func extractSlotFromSerializedBeaconState(beaconState []byte) (uint64, error) {
 	if len(beaconState) < 48 {
-		return 0, fmt.Errorf("checkpoint sync read failed, too short")
+		return 0, errors.New("checkpoint sync read failed, too short")
 	}
 	return binary.LittleEndian.Uint64(beaconState[40:48]), nil
 }
@@ -35,7 +36,7 @@ func extractSlotFromSerializedBeaconState(beaconState []byte) (uint64, error) {
 func (r *RemoteCheckpointSync) GetLatestBeaconState(ctx context.Context) (*state.CachingBeaconState, error) {
 	uris := clparams.GetAllCheckpointSyncEndpoints(r.net)
 	if len(uris) == 0 {
-		return nil, fmt.Errorf("no uris for checkpoint sync")
+		return nil, errors.New("no uris for checkpoint sync")
 	}
 
 	fetchBeaconState := func(uri string) (*state.CachingBeaconState, error) {

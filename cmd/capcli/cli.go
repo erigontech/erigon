@@ -212,7 +212,7 @@ func retrieveAndSanitizeBlockFromRemoteEndpoint(ctx context.Context, beaconConfi
 		return nil, fmt.Errorf("checkpoint sync read failed %s", err)
 	}
 	if len(marshaled) < 108 {
-		return nil, fmt.Errorf("checkpoint sync read failed, too short")
+		return nil, errors.New("read failed, too short")
 	}
 	currentSlot := binary.LittleEndian.Uint64(marshaled[100:108])
 	v := beaconConfig.GetCurrentStateVersion(currentSlot / beaconConfig.SlotsPerEpoch)
@@ -261,7 +261,7 @@ func (c *ChainEndpoint) Run(ctx *Context) error {
 	}
 	log.Info("Hooked", "uri", baseUri)
 	// Let's fetch the head first
-	currentBlock, err := retrieveAndSanitizeBlockFromRemoteEndpoint(ctx, beaconConfig, fmt.Sprintf("%s/head", baseUri), nil)
+	currentBlock, err := retrieveAndSanitizeBlockFromRemoteEndpoint(ctx, beaconConfig, baseUri+"/head", nil)
 	if err != nil {
 		return fmt.Errorf("failed to retrieve head: %w, uri: %s", err, baseUri+"/head")
 	}
