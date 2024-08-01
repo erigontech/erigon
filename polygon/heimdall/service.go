@@ -49,7 +49,7 @@ type service struct {
 	checkpointScraper         *scraper[*Checkpoint]
 	milestoneScraper          *scraper[*Milestone]
 	spanScraper               *scraper[*Span]
-	spanBlockProducersTracker spanBlockProducersTracker
+	spanBlockProducersTracker *spanBlockProducersTracker
 }
 
 func AssembleService(borConfig *borcfg.BorConfig, heimdallUrl string, dataDir string, tmpDir string, logger log.Logger) Service {
@@ -85,18 +85,11 @@ func NewService(borConfig *borcfg.BorConfig, client HeimdallClient, store Servic
 	)
 
 	return &service{
-		store:             store,
-		checkpointScraper: checkpointScraper,
-		milestoneScraper:  milestoneScraper,
-		spanScraper:       spanScraper,
-		spanBlockProducersTracker: spanBlockProducersTracker{
-			logger:    logger,
-			borConfig: borConfig,
-			store:     store.SpanBlockProducerSelections(),
-			newSpans:  make(chan *Span),
-			idle:      polygoncommon.NewEventNotifier(),
-			wake:      polygoncommon.NewEventNotifier(),
-		},
+		store:                     store,
+		checkpointScraper:         checkpointScraper,
+		milestoneScraper:          milestoneScraper,
+		spanScraper:               spanScraper,
+		spanBlockProducersTracker: newSpanBlockProducersTracker(logger, borConfig, store.SpanBlockProducerSelections()),
 	}
 }
 

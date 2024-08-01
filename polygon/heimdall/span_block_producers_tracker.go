@@ -4,51 +4,79 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sync/atomic"
 
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/polygon/bor/borcfg"
 	"github.com/erigontech/erigon/polygon/bor/valset"
-	"github.com/erigontech/erigon/polygon/polygoncommon"
 )
 
-type spanBlockProducersTracker struct {
-	logger    log.Logger
-	borConfig *borcfg.BorConfig
-	store     EntityStore[*SpanBlockProducerSelection]
-	newSpans  chan *Span
-	idle      *polygoncommon.EventNotifier
-	wake      *polygoncommon.EventNotifier
+func newSpanBlockProducersTracker(
+	logger log.Logger,
+	borConfig *borcfg.BorConfig,
+	store EntityStore[*SpanBlockProducerSelection],
+) *spanBlockProducersTracker {
+	return &spanBlockProducersTracker{
+		logger:     logger,
+		borConfig:  borConfig,
+		store:      store,
+		newSpans:   make(chan *Span),
+		idleSignal: make(chan struct{}),
+	}
 }
 
-func (t spanBlockProducersTracker) Run(ctx context.Context) error {
+type spanBlockProducersTracker struct {
+	logger     log.Logger
+	borConfig  *borcfg.BorConfig
+	store      EntityStore[*SpanBlockProducerSelection]
+	newSpans   chan *Span
+	queued     atomic.Int32
+	idleSignal chan struct{}
+}
+
+func (t *spanBlockProducersTracker) Run(ctx context.Context) error {
+	defer close(t.idleSignal)
+
 	for {
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
 		case newSpan := <-t.newSpans:
-			t.idle.Reset()
-			t.wake.Reset()
 			err := t.ObserveSpan(ctx, newSpan)
 			if err != nil {
 				return err
 			}
-		default:
-			t.idle.SetAndBroadcast()
-			t.wake.Wait(ctx)
+
+			t.queued.Add(-1)
+			if t.queued.Load() == 0 {
+				select {
+				case t.idleSignal <- struct{}{}:
+				default: // continue if a signal is already queued
+				}
+			}
 		}
 	}
 }
 
-func (t spanBlockProducersTracker) Synchronize(ctx context.Context) {
-	t.idle.Wait(ctx)
+func (t *spanBlockProducersTracker) Synchronize(ctx context.Context) {
+	if t.queued.Load() == 0 {
+		return
+	}
+
+	select {
+	case <-ctx.Done():
+		return
+	case <-t.idleSignal:
+		return
+	}
 }
 
-func (t spanBlockProducersTracker) ObserveSpanAsync(span *Span) {
-	t.wake.SetAndBroadcast()
+func (t *spanBlockProducersTracker) ObserveSpanAsync(span *Span) {
+	t.queued.Add(1)
 	t.newSpans <- span
 }
 
-func (t spanBlockProducersTracker) ObserveSpan(ctx context.Context, newSpan *Span) error {
+func (t *spanBlockProducersTracker) ObserveSpan(ctx context.Context, newSpan *Span) error {
 	t.logger.Debug(heimdallLogPrefix("block producers tracker observing span"), "id", newSpan.Id)
 
 	lastProducerSelection, ok, err := t.store.LastEntity(ctx)
@@ -114,7 +142,7 @@ func (t spanBlockProducersTracker) ObserveSpan(ctx context.Context, newSpan *Spa
 	return nil
 }
 
-func (t spanBlockProducersTracker) Producers(ctx context.Context, blockNum uint64) (*valset.ValidatorSet, error) {
+func (t *spanBlockProducersTracker) Producers(ctx context.Context, blockNum uint64) (*valset.ValidatorSet, error) {
 	spanId := SpanIdAt(blockNum)
 	producerSelection, ok, err := t.store.Entity(ctx, uint64(spanId))
 	if err != nil {
