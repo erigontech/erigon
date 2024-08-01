@@ -140,7 +140,7 @@ func SpawnMiningCreateBlockStage(s *StageState, txc wrap.TxContainer, cfg Mining
 		// If we do not have an etherbase, let's use the suggested one
 		coinbase = cfg.blockBuilderParameters.SuggestedFeeRecipient
 	}
-
+	logger.Error("in mining create", "last execution at", executionAt)
 	blockNum := executionAt + 1
 
 	localUncles, remoteUncles, err := readNonCanonicalHeaders(txc.Tx, blockNum, cfg.engine, coinbase, txPoolLocals)
