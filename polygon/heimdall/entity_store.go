@@ -38,9 +38,9 @@ var databaseTablesCfg = kv.TableCfg{
 type EntityStore[TEntity Entity] interface {
 	Prepare(ctx context.Context) error
 	Close()
-	GetLastEntityId(ctx context.Context) (uint64, bool, error)
-	GetLastEntity(ctx context.Context) (TEntity, bool, error)
-	GetEntity(ctx context.Context, id uint64) (TEntity, bool, error)
+	LastEntityId(ctx context.Context) (uint64, bool, error)
+	LastEntity(ctx context.Context) (TEntity, bool, error)
+	Entity(ctx context.Context, id uint64) (TEntity, bool, error)
 	PutEntity(ctx context.Context, id uint64, entity TEntity) error
 	RangeFromBlockNum(ctx context.Context, startBlockNum uint64) ([]TEntity, error)
 }
@@ -91,7 +91,7 @@ func (s *mdbxEntityStore[TEntity]) Close() {
 	s.blockNumToIdIndex.Close()
 }
 
-func (s *mdbxEntityStore[TEntity]) GetLastEntityId(ctx context.Context) (uint64, bool, error) {
+func (s *mdbxEntityStore[TEntity]) LastEntityId(ctx context.Context) (uint64, bool, error) {
 	tx, err := s.db.BeginRo(ctx)
 	if err != nil {
 		return 0, false, err
@@ -116,8 +116,8 @@ func (s *mdbxEntityStore[TEntity]) GetLastEntityId(ctx context.Context) (uint64,
 	return entityStoreKeyParse(lastKey), true, nil
 }
 
-func (s *mdbxEntityStore[TEntity]) GetLastEntity(ctx context.Context) (TEntity, bool, error) {
-	id, ok, err := s.GetLastEntityId(ctx)
+func (s *mdbxEntityStore[TEntity]) LastEntity(ctx context.Context) (TEntity, bool, error) {
+	id, ok, err := s.LastEntityId(ctx)
 	if err != nil {
 		return generics.Zero[TEntity](), false, err
 	}
@@ -125,7 +125,7 @@ func (s *mdbxEntityStore[TEntity]) GetLastEntity(ctx context.Context) (TEntity, 
 	if !ok {
 		return generics.Zero[TEntity](), false, nil
 	}
-	return s.GetEntity(ctx, id)
+	return s.Entity(ctx, id)
 }
 
 func entityStoreKey(id uint64) [8]byte {
@@ -146,7 +146,7 @@ func (s *mdbxEntityStore[TEntity]) entityUnmarshalJSON(jsonBytes []byte) (TEntit
 	return entity, nil
 }
 
-func (s *mdbxEntityStore[TEntity]) GetEntity(ctx context.Context, id uint64) (TEntity, bool, error) {
+func (s *mdbxEntityStore[TEntity]) Entity(ctx context.Context, id uint64) (TEntity, bool, error) {
 	tx, err := s.db.BeginRo(ctx)
 	if err != nil {
 		return generics.Zero[TEntity](), false, err

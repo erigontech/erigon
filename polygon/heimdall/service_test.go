@@ -126,11 +126,11 @@ func TestService(t *testing.T) {
 	}()
 
 	t.Run("FetchLatestSpans", func(t *testing.T) {
-		spans, err := svc.FetchLatestSpans(ctx, 3)
+		spans, err := svc.LatestSpans(ctx, 3)
 		require.NoError(t, err)
-		require.Equal(t, spans[0].Id, SpanId(1548))
-		require.Equal(t, spans[1].Id, SpanId(1549))
-		require.Equal(t, spans[2].Id, SpanId(1550))
+		require.Equal(t, spans[0].Id, SpanId(1278))
+		require.Equal(t, spans[1].Id, SpanId(1279))
+		require.Equal(t, spans[2].Id, SpanId(1280))
 	})
 
 	t.Run("Producers", func(t *testing.T) {

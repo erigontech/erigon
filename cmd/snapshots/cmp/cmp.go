@@ -478,7 +478,6 @@ func (c comparitor) compareHeaders(ctx context.Context, f1ents []fs.DirEntry, f2
 				info1, _, _ := snaptype.ParseFileName(c.session1.LocalFsRoot(), ent1.Name())
 
 				f1snaps := freezeblocks.NewRoSnapshots(ethconfig.BlocksFreezing{
-					Enabled:      true,
 					ProduceE2:    false,
 					NoDownloader: true,
 				}, info1.Dir(), info1.From, logger)
@@ -488,7 +487,6 @@ func (c comparitor) compareHeaders(ctx context.Context, f1ents []fs.DirEntry, f2
 				info2, _, _ := snaptype.ParseFileName(c.session2.LocalFsRoot(), ent1.Name())
 
 				f2snaps := freezeblocks.NewRoSnapshots(ethconfig.BlocksFreezing{
-					Enabled:      true,
 					ProduceE2:    false,
 					NoDownloader: true,
 				}, info2.Dir(), info2.From, logger)
@@ -759,7 +757,6 @@ func (c comparitor) compareBodies(ctx context.Context, f1ents []*BodyEntry, f2en
 				info1, _, _ := snaptype.ParseFileName(c.session1.LocalFsRoot(), ent1.Body.Name())
 
 				f1snaps := freezeblocks.NewRoSnapshots(ethconfig.BlocksFreezing{
-					Enabled:      true,
 					ProduceE2:    false,
 					NoDownloader: true,
 				}, info1.Dir(), info1.From, logger)
@@ -769,7 +766,6 @@ func (c comparitor) compareBodies(ctx context.Context, f1ents []*BodyEntry, f2en
 				info2, _, _ := snaptype.ParseFileName(c.session2.LocalFsRoot(), ent2.Body.Name())
 
 				f2snaps := freezeblocks.NewRoSnapshots(ethconfig.BlocksFreezing{
-					Enabled:      true,
 					ProduceE2:    false,
 					NoDownloader: true,
 				}, info2.Dir(), info2.From, logger)

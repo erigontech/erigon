@@ -24,6 +24,6 @@ import (
 
 //go:generate mockgen -typed=true -source=./heimdall_waypoints_fetcher.go -destination=./heimdall_waypoints_fetcher_mock.go -package=sync
 type heimdallWaypointsFetcher interface {
-	FetchCheckpointsFromBlock(ctx context.Context, startBlock uint64) (heimdall.Waypoints, error)
-	FetchMilestonesFromBlock(ctx context.Context, startBlock uint64) (heimdall.Waypoints, error)
+	CheckpointsFromBlock(ctx context.Context, startBlock uint64) (heimdall.Waypoints, error)
+	MilestonesFromBlock(ctx context.Context, startBlock uint64) (heimdall.Waypoints, error)
 }

@@ -175,7 +175,7 @@ func TestSetupGenesis(t *testing.T) {
 			t.Parallel()
 			dirs := datadir.New(tmpdir)
 			db, _ := temporaltest.NewTestDB(t, dirs)
-			blockReader := freezeblocks.NewBlockReader(freezeblocks.NewRoSnapshots(ethconfig.BlocksFreezing{Enabled: false}, dirs.Snap, 0, log.New()), freezeblocks.NewBorRoSnapshots(ethconfig.BlocksFreezing{Enabled: false}, dirs.Snap, 0, log.New()))
+			blockReader := freezeblocks.NewBlockReader(freezeblocks.NewRoSnapshots(ethconfig.BlocksFreezing{}, dirs.Snap, 0, log.New()), freezeblocks.NewBorRoSnapshots(ethconfig.BlocksFreezing{}, dirs.Snap, 0, log.New()))
 			config, genesis, err := test.fn(t, db)
 			// Check the return values.
 			if !reflect.DeepEqual(err, test.wantErr) {

@@ -32,6 +32,8 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/erigontech/erigon-lib/metrics"
+
 	btree2 "github.com/tidwall/btree"
 	"golang.org/x/sync/errgroup"
 
@@ -85,7 +87,7 @@ type Domain struct {
 
 	// _visibleFiles - underscore in name means: don't use this field directly, use BeginFilesRo()
 	// underlying array is immutable - means it's ready for zero-copy use
-	_visibleFiles []ctxItem
+	_visibleFiles []visibleFile
 
 	integrityCheck func(name kv.Domain, fromStep, toStep uint64) bool
 
@@ -128,7 +130,7 @@ func NewDomain(cfg domainCfg, aggregationStep uint64, filenameBase, valsTable, i
 		integrityCheck:              integrityCheck,
 	}
 
-	d._visibleFiles = []ctxItem{}
+	d._visibleFiles = []visibleFile{}
 
 	var err error
 	if d.History, err = NewHistory(cfg.hist, aggregationStep, filenameBase, indexKeysTable, indexTable, historyValsTable, nil, logger); err != nil {
@@ -705,27 +707,19 @@ type DomainRoTx struct {
 	valsC kv.Cursor
 }
 
-func (dt *DomainRoTx) getFromFileL0(i int, filekey []byte) ([]byte, bool, error) {
-	return dt.getFromFile(i, filekey)
+func domainReadMetric(name string, level int) metrics.Summary {
+	if level > 4 {
+		level = 5
+	}
+	return mxsKVGet[name][level]
 }
-func (dt *DomainRoTx) getFromFileL1(i int, filekey []byte) ([]byte, bool, error) {
-	return dt.getFromFile(i, filekey)
-}
-func (dt *DomainRoTx) getFromFileL2(i int, filekey []byte) ([]byte, bool, error) {
-	return dt.getFromFile(i, filekey)
-}
-func (dt *DomainRoTx) getFromFileL3(i int, filekey []byte) ([]byte, bool, error) {
-	return dt.getFromFile(i, filekey)
-}
-func (dt *DomainRoTx) getFromFileL4(i int, filekey []byte) ([]byte, bool, error) {
-	return dt.getFromFile(i, filekey)
-}
-func (dt *DomainRoTx) getFromFileLRecent(i int, filekey []byte) ([]byte, bool, error) {
-	return dt.getFromFile(i, filekey)
-}
+
 func (dt *DomainRoTx) getFromFile(i int, filekey []byte) ([]byte, bool, error) {
 	s := time.Now()
 	defer mxFileReadTime.ObserveDuration(s)
+	if dbg.KVReadLevelledMetrics {
+		defer domainReadMetric(dt.d.filenameBase, i).ObserveDuration(time.Now())
+	}
 
 	g := dt.statelessGetter(i)
 	if !(UseBtree || UseBpsTree) {
@@ -1414,20 +1408,7 @@ func (dt *DomainRoTx) getFromFiles(filekey []byte) (v []byte, found bool, fileSt
 		}
 
 		//t := time.Now()
-		switch i {
-		case 0:
-			v, found, err = dt.getFromFileL0(i, filekey)
-		case 1:
-			v, found, err = dt.getFromFileL1(i, filekey)
-		case 2:
-			v, found, err = dt.getFromFileL2(i, filekey)
-		case 3:
-			v, found, err = dt.getFromFileL3(i, filekey)
-		case 4:
-			v, found, err = dt.getFromFileL4(i, filekey)
-		default:
-			v, found, err = dt.getFromFileLRecent(i, filekey)
-		}
+		v, found, err = dt.getFromFile(i, filekey)
 		if err != nil {
 			return nil, false, 0, 0, err
 		}
