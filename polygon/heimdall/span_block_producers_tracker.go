@@ -122,11 +122,14 @@ func (t *spanBlockProducersTracker) ObserveSpan(ctx context.Context, newSpan *Sp
 		return err
 	}
 
-	startSprintNumInSpan := t.borConfig.CalculateSprintNumber(lastProducerSelection.StartBlock)
-	endSprintNumInSpan := t.borConfig.CalculateSprintNumber(lastProducerSelection.EndBlock)
-	numSprintsInSpan := int(endSprintNumInSpan-startSprintNumInSpan) + 1
-	producers.IncrementProposerPriority(numSprintsInSpan)
+	spanStartSprintNum := t.borConfig.CalculateSprintNumber(lastProducerSelection.StartBlock)
+	spanEndSprintNum := t.borConfig.CalculateSprintNumber(lastProducerSelection.EndBlock)
+	increments := int(spanEndSprintNum - spanStartSprintNum)
+	if increments > 0 {
+		producers.IncrementProposerPriority(increments)
+	}
 	newProducers := valset.GetUpdatedValidatorSet(producers, newSpan.Producers(), t.logger)
+	newProducers.IncrementProposerPriority(1)
 	newProducerSelection := &SpanBlockProducerSelection{
 		SpanId:     newSpan.Id,
 		StartBlock: newSpan.StartBlock,
@@ -159,9 +162,11 @@ func (t *spanBlockProducersTracker) Producers(ctx context.Context, blockNum uint
 		return nil, err
 	}
 
-	currentSprintNumber := t.borConfig.CalculateSprintNumber(blockNum)
-	startSprintNumInSpan := t.borConfig.CalculateSprintNumber(producerSelection.StartBlock)
-	incrementsNeeded := int(currentSprintNumber-startSprintNumInSpan) + 1
-	producers.IncrementProposerPriority(incrementsNeeded)
+	spanStartSprintNum := t.borConfig.CalculateSprintNumber(producerSelection.StartBlock)
+	currentSprintNum := t.borConfig.CalculateSprintNumber(blockNum)
+	increments := int(currentSprintNum - spanStartSprintNum)
+	if increments > 0 {
+		producers.IncrementProposerPriority(increments)
+	}
 	return producers, nil
 }
