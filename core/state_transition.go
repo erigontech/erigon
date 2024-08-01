@@ -371,14 +371,19 @@ func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (*evmtype
 				continue
 			}
 
-			// 3. authority code should be empty
+			// 3. authority code should be empty or already delegated
 			if codeHash := st.state.GetCodeHash(authority); codeHash != emptyCodeHash && codeHash != (libcommon.Hash{}) {
-				log.Debug("authority code is not empty, skipping", "auth index", i)
-				continue
+				// check for delegation
+				if code := st.state.GetCode(authority); len(code) > 3 && bytes.Equal(code[0:3], []byte{0xef, 0x01, 0x00}) {
+					// noop: has designated delegation, can be replaced
+				} else {
+					log.Debug("authority code is not empty or not delegated, skipping", "auth index", i)
+					continue
+				}
 			}
 
 			// 4. nonce check
-			if len(auth.Nonce) > 0 && st.state.GetNonce(authority) != auth.Nonce[0] {
+			if st.state.GetNonce(authority) != auth.Nonce {
 				log.Debug("invalid nonce, skipping", "auth index", i)
 				continue
 			}

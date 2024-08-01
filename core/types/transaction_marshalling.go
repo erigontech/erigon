@@ -72,8 +72,8 @@ type txJSON struct {
 type JsonAuthorization struct {
 	ChainID *hexutil.Big      `json:"chainId"`
 	Address libcommon.Address `json:"address"`
-	Nonce   []uint64          `json:"nonce,omitempty"`
-	V       hexutil.Big       `json:"v"`
+	Nonce   uint64            `json:"nonce"`
+	YParity hexutil.Big       `json:"v"`
 	R       hexutil.Big       `json:"r"`
 	S       hexutil.Big       `json:"s"`
 }
@@ -82,30 +82,24 @@ func (a JsonAuthorization) FromAuthorization(authorization Authorization) JsonAu
 	chainId := hexutil.Big(*authorization.ChainID.ToBig())
 	a.ChainID = &chainId
 	a.Address = authorization.Address
+	a.Nonce = authorization.Nonce
 
-	a.Nonce = make([]uint64, len(authorization.Nonce))
-	for i, nonce := range authorization.Nonce {
-		a.Nonce[i] = nonce
-	}
-
-	a.V = hexutil.Big(*authorization.V.ToBig())
+	a.YParity = hexutil.Big(*authorization.YParity.ToBig())
 	a.R = hexutil.Big(*authorization.R.ToBig())
 	a.S = hexutil.Big(*authorization.S.ToBig())
 	return a
 }
 
 func (a JsonAuthorization) ToAuthorization() Authorization {
-	nonce := make([]uint64, len(a.Nonce))
-	copy(nonce, a.Nonce)
-	v, _ := uint256.FromBig((*big.Int)(&a.V))
+	yparity, _ := uint256.FromBig((*big.Int)(&a.YParity))
 	r, _ := uint256.FromBig((*big.Int)(&a.R))
 	s, _ := uint256.FromBig((*big.Int)(&a.S))
 	chainId, _ := uint256.FromBig((*big.Int)(a.ChainID))
 	return Authorization{
 		ChainID: chainId,
 		Address: a.Address,
-		Nonce:   nonce,
-		V:       *v,
+		Nonce:   a.Nonce,
+		YParity: *yparity,
 		R:       *r,
 		S:       *s,
 	}
