@@ -12,10 +12,9 @@ package sync
 import (
 	context "context"
 	reflect "reflect"
-	
-	gomock "go.uber.org/mock/gomock"
 
 	heimdall "github.com/erigontech/erigon/polygon/heimdall"
+	gomock "go.uber.org/mock/gomock"
 )
 
 // MockheimdallWaypointsFetcher is a mock of heimdallWaypointsFetcher interface.
@@ -41,80 +40,80 @@ func (m *MockheimdallWaypointsFetcher) EXPECT() *MockheimdallWaypointsFetcherMoc
 	return m.recorder
 }
 
-// FetchCheckpointsFromBlock mocks base method.
-func (m *MockheimdallWaypointsFetcher) FetchCheckpointsFromBlock(ctx context.Context, startBlock uint64) (heimdall.Waypoints, error) {
+// CheckpointsFromBlock mocks base method.
+func (m *MockheimdallWaypointsFetcher) CheckpointsFromBlock(ctx context.Context, startBlock uint64) (heimdall.Waypoints, error) {
 	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "FetchCheckpointsFromBlock", ctx, startBlock)
+	ret := m.ctrl.Call(m, "CheckpointsFromBlock", ctx, startBlock)
 	ret0, _ := ret[0].(heimdall.Waypoints)
 	ret1, _ := ret[1].(error)
 	return ret0, ret1
 }
 
-// FetchCheckpointsFromBlock indicates an expected call of FetchCheckpointsFromBlock.
-func (mr *MockheimdallWaypointsFetcherMockRecorder) FetchCheckpointsFromBlock(ctx, startBlock any) *MockheimdallWaypointsFetcherFetchCheckpointsFromBlockCall {
+// CheckpointsFromBlock indicates an expected call of CheckpointsFromBlock.
+func (mr *MockheimdallWaypointsFetcherMockRecorder) CheckpointsFromBlock(ctx, startBlock any) *MockheimdallWaypointsFetcherCheckpointsFromBlockCall {
 	mr.mock.ctrl.T.Helper()
-	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "FetchCheckpointsFromBlock", reflect.TypeOf((*MockheimdallWaypointsFetcher)(nil).FetchCheckpointsFromBlock), ctx, startBlock)
-	return &MockheimdallWaypointsFetcherFetchCheckpointsFromBlockCall{Call: call}
+	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "CheckpointsFromBlock", reflect.TypeOf((*MockheimdallWaypointsFetcher)(nil).CheckpointsFromBlock), ctx, startBlock)
+	return &MockheimdallWaypointsFetcherCheckpointsFromBlockCall{Call: call}
 }
 
-// MockheimdallWaypointsFetcherFetchCheckpointsFromBlockCall wrap *gomock.Call
-type MockheimdallWaypointsFetcherFetchCheckpointsFromBlockCall struct {
+// MockheimdallWaypointsFetcherCheckpointsFromBlockCall wrap *gomock.Call
+type MockheimdallWaypointsFetcherCheckpointsFromBlockCall struct {
 	*gomock.Call
 }
 
 // Return rewrite *gomock.Call.Return
-func (c *MockheimdallWaypointsFetcherFetchCheckpointsFromBlockCall) Return(arg0 heimdall.Waypoints, arg1 error) *MockheimdallWaypointsFetcherFetchCheckpointsFromBlockCall {
+func (c *MockheimdallWaypointsFetcherCheckpointsFromBlockCall) Return(arg0 heimdall.Waypoints, arg1 error) *MockheimdallWaypointsFetcherCheckpointsFromBlockCall {
 	c.Call = c.Call.Return(arg0, arg1)
 	return c
 }
 
 // Do rewrite *gomock.Call.Do
-func (c *MockheimdallWaypointsFetcherFetchCheckpointsFromBlockCall) Do(f func(context.Context, uint64) (heimdall.Waypoints, error)) *MockheimdallWaypointsFetcherFetchCheckpointsFromBlockCall {
+func (c *MockheimdallWaypointsFetcherCheckpointsFromBlockCall) Do(f func(context.Context, uint64) (heimdall.Waypoints, error)) *MockheimdallWaypointsFetcherCheckpointsFromBlockCall {
 	c.Call = c.Call.Do(f)
 	return c
 }
 
 // DoAndReturn rewrite *gomock.Call.DoAndReturn
-func (c *MockheimdallWaypointsFetcherFetchCheckpointsFromBlockCall) DoAndReturn(f func(context.Context, uint64) (heimdall.Waypoints, error)) *MockheimdallWaypointsFetcherFetchCheckpointsFromBlockCall {
+func (c *MockheimdallWaypointsFetcherCheckpointsFromBlockCall) DoAndReturn(f func(context.Context, uint64) (heimdall.Waypoints, error)) *MockheimdallWaypointsFetcherCheckpointsFromBlockCall {
 	c.Call = c.Call.DoAndReturn(f)
 	return c
 }
 
-// FetchMilestonesFromBlock mocks base method.
-func (m *MockheimdallWaypointsFetcher) FetchMilestonesFromBlock(ctx context.Context, startBlock uint64) (heimdall.Waypoints, error) {
+// MilestonesFromBlock mocks base method.
+func (m *MockheimdallWaypointsFetcher) MilestonesFromBlock(ctx context.Context, startBlock uint64) (heimdall.Waypoints, error) {
 	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "FetchMilestonesFromBlock", ctx, startBlock)
+	ret := m.ctrl.Call(m, "MilestonesFromBlock", ctx, startBlock)
 	ret0, _ := ret[0].(heimdall.Waypoints)
 	ret1, _ := ret[1].(error)
 	return ret0, ret1
 }
 
-// FetchMilestonesFromBlock indicates an expected call of FetchMilestonesFromBlock.
-func (mr *MockheimdallWaypointsFetcherMockRecorder) FetchMilestonesFromBlock(ctx, startBlock any) *MockheimdallWaypointsFetcherFetchMilestonesFromBlockCall {
+// MilestonesFromBlock indicates an expected call of MilestonesFromBlock.
+func (mr *MockheimdallWaypointsFetcherMockRecorder) MilestonesFromBlock(ctx, startBlock any) *MockheimdallWaypointsFetcherMilestonesFromBlockCall {
 	mr.mock.ctrl.T.Helper()
-	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "FetchMilestonesFromBlock", reflect.TypeOf((*MockheimdallWaypointsFetcher)(nil).FetchMilestonesFromBlock), ctx, startBlock)
-	return &MockheimdallWaypointsFetcherFetchMilestonesFromBlockCall{Call: call}
+	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "MilestonesFromBlock", reflect.TypeOf((*MockheimdallWaypointsFetcher)(nil).MilestonesFromBlock), ctx, startBlock)
+	return &MockheimdallWaypointsFetcherMilestonesFromBlockCall{Call: call}
 }
 
-// MockheimdallWaypointsFetcherFetchMilestonesFromBlockCall wrap *gomock.Call
-type MockheimdallWaypointsFetcherFetchMilestonesFromBlockCall struct {
+// MockheimdallWaypointsFetcherMilestonesFromBlockCall wrap *gomock.Call
+type MockheimdallWaypointsFetcherMilestonesFromBlockCall struct {
 	*gomock.Call
 }
 
 // Return rewrite *gomock.Call.Return
-func (c *MockheimdallWaypointsFetcherFetchMilestonesFromBlockCall) Return(arg0 heimdall.Waypoints, arg1 error) *MockheimdallWaypointsFetcherFetchMilestonesFromBlockCall {
+func (c *MockheimdallWaypointsFetcherMilestonesFromBlockCall) Return(arg0 heimdall.Waypoints, arg1 error) *MockheimdallWaypointsFetcherMilestonesFromBlockCall {
 	c.Call = c.Call.Return(arg0, arg1)
 	return c
 }
 
 // Do rewrite *gomock.Call.Do
-func (c *MockheimdallWaypointsFetcherFetchMilestonesFromBlockCall) Do(f func(context.Context, uint64) (heimdall.Waypoints, error)) *MockheimdallWaypointsFetcherFetchMilestonesFromBlockCall {
+func (c *MockheimdallWaypointsFetcherMilestonesFromBlockCall) Do(f func(context.Context, uint64) (heimdall.Waypoints, error)) *MockheimdallWaypointsFetcherMilestonesFromBlockCall {
 	c.Call = c.Call.Do(f)
 	return c
 }
 
 // DoAndReturn rewrite *gomock.Call.DoAndReturn
-func (c *MockheimdallWaypointsFetcherFetchMilestonesFromBlockCall) DoAndReturn(f func(context.Context, uint64) (heimdall.Waypoints, error)) *MockheimdallWaypointsFetcherFetchMilestonesFromBlockCall {
+func (c *MockheimdallWaypointsFetcherMilestonesFromBlockCall) DoAndReturn(f func(context.Context, uint64) (heimdall.Waypoints, error)) *MockheimdallWaypointsFetcherMilestonesFromBlockCall {
 	c.Call = c.Call.DoAndReturn(f)
 	return c
 }
