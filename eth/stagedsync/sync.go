@@ -409,7 +409,7 @@ func (s *Sync) Run(db kv.RwDB, txc wrap.TxContainer, initialCycle, firstCycle bo
 			s.NextStage()
 			continue
 		}
-
+		s.logger.Error("current stage now is", "stage", stage.ID, "description", stage.DisabledDescription)
 		if err := s.runStage(stage, db, txc, initialCycle, firstCycle, badBlockUnwind); err != nil {
 			return false, err
 		}
