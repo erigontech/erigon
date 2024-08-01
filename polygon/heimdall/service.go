@@ -28,6 +28,7 @@ import (
 	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/polygon/bor/borcfg"
+	"github.com/erigontech/erigon/polygon/bor/valset"
 	"github.com/erigontech/erigon/polygon/polygoncommon"
 )
 
@@ -35,9 +36,11 @@ type Service interface {
 	FetchLatestSpans(ctx context.Context, count uint) ([]*Span, error)
 	FetchCheckpointsFromBlock(ctx context.Context, startBlock uint64) (Waypoints, error)
 	FetchMilestonesFromBlock(ctx context.Context, startBlock uint64) (Waypoints, error)
+	Producers(ctx context.Context, blockNum uint64) (*valset.ValidatorSet, error)
 	RegisterMilestoneObserver(callback func(*Milestone), opts ...ObserverOption) polygoncommon.UnregisterFunc
 	RegisterSpanObserver(callback func(*Span), opts ...ObserverOption) polygoncommon.UnregisterFunc
 	Run(ctx context.Context) error
+	Synchronize(ctx context.Context)
 }
 
 type service struct {
@@ -90,6 +93,7 @@ func NewService(borConfig *borcfg.BorConfig, client HeimdallClient, store Servic
 			borConfig: borConfig,
 			store:     store.SpanBlockProducerSelections(),
 			newSpans:  make(chan *Span),
+			idle:      polygoncommon.NewEventNotifier(),
 		},
 	}
 }
@@ -194,22 +198,28 @@ func castEntityToWaypoint[TEntity Waypoint](entity TEntity) Waypoint {
 	return entity
 }
 
-func (s *service) synchronizeScrapers(ctx context.Context) {
+func (s *service) Synchronize(ctx context.Context) {
 	s.checkpointScraper.Synchronize(ctx)
 	s.milestoneScraper.Synchronize(ctx)
 	s.spanScraper.Synchronize(ctx)
+	s.spanBlockProducersTracker.Synchronize(ctx)
 }
 
 func (s *service) FetchCheckpointsFromBlock(ctx context.Context, startBlock uint64) (Waypoints, error) {
-	s.synchronizeScrapers(ctx)
+	s.Synchronize(ctx)
 	entities, err := s.store.Checkpoints().RangeFromBlockNum(ctx, startBlock)
 	return libcommon.SliceMap(entities, castEntityToWaypoint[*Checkpoint]), err
 }
 
 func (s *service) FetchMilestonesFromBlock(ctx context.Context, startBlock uint64) (Waypoints, error) {
-	s.synchronizeScrapers(ctx)
+	s.Synchronize(ctx)
 	entities, err := s.store.Milestones().RangeFromBlockNum(ctx, startBlock)
 	return libcommon.SliceMap(entities, castEntityToWaypoint[*Milestone]), err
+}
+
+func (s *service) Producers(ctx context.Context, blockNum uint64) (*valset.ValidatorSet, error) {
+	s.Synchronize(ctx)
+	return s.spanBlockProducersTracker.Producers(ctx, blockNum)
 }
 
 func (s *service) RegisterMilestoneObserver(callback func(*Milestone), opts ...ObserverOption) polygoncommon.UnregisterFunc {
