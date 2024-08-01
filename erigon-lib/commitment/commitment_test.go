@@ -305,9 +305,9 @@ func TestBranchData_ReplacePlainKeys_WithEmpty(t *testing.T) {
 	})
 }
 
-func TestNewUpdateTree(t *testing.T) {
+func TestNewUpdates(t *testing.T) {
 	t.Run("ModeUpdate", func(t *testing.T) {
-		ut := NewUpdateTree(ModeUpdate, t.TempDir(), keyHasherNoop)
+		ut := NewUpdates(ModeUpdate, t.TempDir(), keyHasherNoop)
 
 		require.NotNil(t, ut.tree)
 		require.NotNil(t, ut.keccak)
@@ -316,7 +316,7 @@ func TestNewUpdateTree(t *testing.T) {
 	})
 
 	t.Run("ModeDirect", func(t *testing.T) {
-		ut := NewUpdateTree(ModeDirect, t.TempDir(), keyHasherNoop)
+		ut := NewUpdates(ModeDirect, t.TempDir(), keyHasherNoop)
 
 		require.NotNil(t, ut.keccak)
 		require.NotNil(t, ut.keys)
@@ -325,11 +325,11 @@ func TestNewUpdateTree(t *testing.T) {
 
 }
 
-func TestUpdateTree_TouchPlainKey(t *testing.T) {
-	utUpdate := NewUpdateTree(ModeUpdate, t.TempDir(), keyHasherNoop)
-	utDirect := NewUpdateTree(ModeDirect, t.TempDir(), keyHasherNoop)
-	utUpdate1 := NewUpdateTree(ModeUpdate, t.TempDir(), keyHasherNoop)
-	utDirect1 := NewUpdateTree(ModeDirect, t.TempDir(), keyHasherNoop)
+func TestUpdates_TouchPlainKey(t *testing.T) {
+	utUpdate := NewUpdates(ModeUpdate, t.TempDir(), keyHasherNoop)
+	utDirect := NewUpdates(ModeDirect, t.TempDir(), keyHasherNoop)
+	utUpdate1 := NewUpdates(ModeUpdate, t.TempDir(), keyHasherNoop)
+	utDirect1 := NewUpdates(ModeDirect, t.TempDir(), keyHasherNoop)
 
 	type tc struct {
 		key []byte

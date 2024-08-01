@@ -1,4 +1,3 @@
-//build +ignore
 // Copyright 2022 The Erigon Authors
 // This file is part of Erigon.
 //
