@@ -19,27 +19,33 @@ package handler
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"net/http"
-	"sync"
 
-	"github.com/gfx-labs/sse"
-
+	mapset "github.com/deckarep/golang-set/v2"
 	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/cl/beacon/beaconevents"
+	"github.com/gfx-labs/sse"
 )
 
-var validTopics = map[string]struct{}{
-	"head":                           {},
-	"block":                          {},
-	"attestation":                    {},
-	"voluntary_exit":                 {},
-	"bls_to_execution_change":        {},
-	"finalized_checkpoint":           {},
-	"chain_reorg":                    {},
-	"contribution_and_proof":         {},
-	"light_client_finality_update":   {},
-	"light_client_optimistic_update": {},
-	"payload_attributes":             {},
-	"*":                              {},
+var validTopics = map[beaconevents.EventTopic]struct{}{
+	// operation events
+	beaconevents.OpAttestation:       {},
+	beaconevents.OpAttesterSlashing:  {},
+	beaconevents.OpBlobSidecar:       {},
+	beaconevents.OpBlsToExecution:    {},
+	beaconevents.OpContributionProof: {},
+	beaconevents.OpProposerSlashing:  {},
+	beaconevents.OpVoluntaryExit:     {},
+	// state events
+	beaconevents.StateBlock:               {},
+	beaconevents.StateBlockGossip:         {},
+	beaconevents.StateChainReorg:          {},
+	beaconevents.StateFinalityUpdate:      {},
+	beaconevents.StateFinalizedCheckpoint: {},
+	beaconevents.StateHead:                {},
+	beaconevents.StateOptimisticUpdate:    {},
+	beaconevents.StatePayloadAttributes:   {},
 }
 
 func (a *ApiHandler) EventSourceGetV1Events(w http.ResponseWriter, r *http.Request) {
@@ -48,35 +54,41 @@ func (a *ApiHandler) EventSourceGetV1Events(w http.ResponseWriter, r *http.Reque
 		http.Error(w, "failed to upgrade", http.StatusInternalServerError)
 	}
 	topics := r.URL.Query()["topics"]
+	subscribeTopics := mapset.NewSet[beaconevents.EventTopic]()
 	for _, v := range topics {
-		if _, ok := validTopics[v]; !ok {
+		topic := beaconevents.EventTopic(v)
+		if _, ok := validTopics[topic]; !ok {
 			http.Error(w, "invalid Topic: "+v, http.StatusBadRequest)
 		}
+		subscribeTopics.Add(topic)
 	}
-	var mu sync.Mutex
-	closer, err := a.emitters.Subscribe(topics, func(topic string, item any) {
-		buf := &bytes.Buffer{}
-		err := json.NewEncoder(buf).Encode(item)
-		if err != nil {
-			// return early
+	eventCh := make(chan *beaconevents.EventStream, 128)
+	opSub := a.emitters.Operation().Subscribe(eventCh)
+	for {
+		select {
+		case event := <-eventCh:
+			if !subscribeTopics.Contains(event.Event) {
+				continue
+			}
+			if event.Data == nil {
+				log.Warn("event data is nil", "event", event)
+				continue
+			}
+			buf := &bytes.Buffer{}
+			if err := json.NewEncoder(buf).Encode(event.Data); err != nil {
+				log.Error("failed to encode data", "event", event, "err", err)
+				continue
+			}
+			sink.Encode(&sse.Event{
+				Event: []byte(event.Event),
+				Data:  buf,
+			})
+		case err := <-opSub.Err():
+			http.Error(w, fmt.Sprintf("event error %v", err), http.StatusInternalServerError)
+			return
+		case <-r.Context().Done():
+			opSub.Unsubscribe()
 			return
 		}
-		mu.Lock()
-		err = sink.Encode(&sse.Event{
-			Event: []byte(topic),
-			Data:  buf,
-		})
-		mu.Unlock()
-		if err != nil {
-			log.Error("failed to encode data", "topic", topic, "err", err)
-		}
-		// OK to ignore this error. maybe should log it later?
-	})
-	if err != nil {
-		http.Error(w, "failed to subscribe", http.StatusInternalServerError)
-		return
 	}
-	defer closer()
-	<-r.Context().Done()
-
 }
