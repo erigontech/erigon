@@ -708,7 +708,6 @@ func (ap *Appendable) collate(ctx context.Context, step uint64, roTx kv.Tx) (App
 	}
 	coll.writer = NewArchiveWriter(comp, ap.compression)
 
-	fmt.Printf("[dbg] collate: %d-%d\n", fromTxNum, toTxNum)
 	it, err := ap.cfg.iters.TxnIdsOfCanonicalBlocks(roTx, int(fromTxNum), int(toTxNum), order.Asc, -1)
 	if err != nil {
 		return coll, fmt.Errorf("collate %s: %w", ap.filenameBase, err)
@@ -730,11 +729,6 @@ func (ap *Appendable) collate(ctx context.Context, step uint64, roTx kv.Tx) (App
 		if err = coll.writer.AddWord(v); err != nil {
 			return coll, fmt.Errorf("collate %s: %w", ap.filenameBase, err)
 		}
-	}
-	if coll.writer.Count() != int(ap.aggregationStep) {
-		err := fmt.Errorf("expected: %d, got: %d\n", ap.aggregationStep, coll.writer.Count())
-		log.Warn(err.Error())
-		//panic(err)
 	}
 	closeComp = false
 	return coll, nil
