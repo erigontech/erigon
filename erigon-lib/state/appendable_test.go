@@ -112,8 +112,10 @@ func TestAppendableCollationBuild(t *testing.T) {
 			return it, nil
 		}).
 		AnyTimes()
-	iters.EXPECT().TxNum2ID(gomock.Any(), uint64(16)).
-		Return(0, 16, true, nil).
+	iters.EXPECT().TxNum2ID(gomock.Any(), gomock.Any()).
+		DoAndReturn(func(tx kv.Tx, u uint64) (uint64, kv.TxnId, bool, error) {
+			return 0, kv.TxnId(u), true, nil
+		}).
 		AnyTimes()
 	ii.cfg.iters = iters
 

@@ -724,7 +724,7 @@ func (ap *Appendable) collate(ctx context.Context, step uint64, roTx kv.Tx) (App
 		}
 	}
 	if coll.writer.Count() != int(ap.aggregationStep) {
-		err := fmt.Errorf("expected: %d, got: %d\n", coll.writer.Count(), ap.aggregationStep)
+		err := fmt.Errorf("expected: %d, got: %d\n", ap.aggregationStep, coll.writer.Count())
 		log.Warn(err.Error())
 		//panic(err)
 	}
