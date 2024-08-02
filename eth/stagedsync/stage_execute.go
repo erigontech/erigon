@@ -130,32 +130,6 @@ func StageExecuteBlocksCfg(
 
 // ================ Erigon3 ================
 
-func ExecBlockV3(s *StageState, u Unwinder, txc wrap.TxContainer, toBlock uint64, ctx context.Context, cfg ExecuteBlockCfg, initialCycle bool, logger log.Logger) (err error) {
-	workersCount := cfg.syncCfg.ExecWorkerCount
-	if !initialCycle {
-		workersCount = 1
-	}
-
-	prevStageProgress, err := senderStageProgress(txc.Tx, cfg.db)
-	if err != nil {
-		return err
-	}
-
-	var to = prevStageProgress
-	if toBlock > 0 {
-		to = min(prevStageProgress, toBlock)
-	}
-	if to < s.BlockNumber {
-		return nil
-	}
-
-	parallel := txc.Tx == nil
-	if err := ExecV3(ctx, s, u, workersCount, cfg, txc, parallel, to, logger, initialCycle); err != nil {
-		return err
-	}
-	return nil
-}
-
 var ErrTooDeepUnwind = errors.New("too deep unwind")
 
 func unwindExec3(u *UnwindState, s *StageState, txc wrap.TxContainer, ctx context.Context, accumulator *shards.Accumulator, logger log.Logger) (err error) {
@@ -237,7 +211,27 @@ func SpawnExecuteBlocksStage(s *StageState, u Unwinder, txc wrap.TxContainer, to
 	if dbg.StagesOnlyBlocks {
 		return nil
 	}
-	if err = ExecBlockV3(s, u, txc, toBlock, ctx, cfg, s.CurrentSyncCycle.IsInitialCycle, logger); err != nil {
+	workersCount := cfg.syncCfg.ExecWorkerCount
+	initialCycle := s.CurrentSyncCycle.IsInitialCycle
+	if !initialCycle {
+		workersCount = 1
+	}
+
+	prevStageProgress, err := senderStageProgress(txc.Tx, cfg.db)
+	if err != nil {
+		return err
+	}
+
+	var to = prevStageProgress
+	if toBlock > 0 {
+		to = min(prevStageProgress, toBlock)
+	}
+	if to < s.BlockNumber {
+		return nil
+	}
+
+	parallel := txc.Tx == nil
+	if err := ExecV3(ctx, s, u, workersCount, cfg, txc, parallel, to, logger, initialCycle); err != nil {
 		return err
 	}
 	return nil
@@ -328,23 +322,6 @@ func UnwindExecutionStage(u *UnwindState, s *StageState, txc wrap.TxContainer, c
 		return fmt.Errorf("%w: %d < %d", ErrTooDeepUnwind, u.UnwindPoint, unwindToLimit)
 	}
 
-	if err = unwindExecutionStage(u, s, txc, ctx, cfg, logger); err != nil {
-		return err
-	}
-	if err = u.Done(txc.Tx); err != nil {
-		return err
-	}
-	//dumpPlainStateDebug(tx, nil)
-
-	if !useExternalTx {
-		if err = txc.Tx.Commit(); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
-func unwindExecutionStage(u *UnwindState, s *StageState, txc wrap.TxContainer, ctx context.Context, cfg ExecuteBlockCfg, logger log.Logger) error {
 	var accumulator *shards.Accumulator
 	if cfg.stateStream && s.BlockNumber-u.UnwindPoint < stateStreamLimit {
 		accumulator = cfg.accumulator
@@ -360,7 +337,21 @@ func unwindExecutionStage(u *UnwindState, s *StageState, txc wrap.TxContainer, c
 		accumulator.StartChange(u.UnwindPoint, hash, txs, true)
 	}
 
-	return unwindExec3(u, s, txc, ctx, accumulator, logger)
+	if err := unwindExec3(u, s, txc, ctx, accumulator, logger); err != nil {
+		return err
+	}
+
+	if err = u.Done(txc.Tx); err != nil {
+		return err
+	}
+	//dumpPlainStateDebug(tx, nil)
+
+	if !useExternalTx {
+		if err = txc.Tx.Commit(); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func PruneExecutionStage(s *PruneState, tx kv.RwTx, cfg ExecuteBlockCfg, ctx context.Context) (err error) {
