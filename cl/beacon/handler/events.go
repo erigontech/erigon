@@ -69,7 +69,9 @@ func (a *ApiHandler) EventSourceGetV1Events(w http.ResponseWriter, r *http.Reque
 
 	eventCh := make(chan *event.EventStream, 128)
 	opSub := a.emitters.Operation().Subscribe(eventCh)
+	stateSub := a.emitters.State().Subscribe(eventCh)
 	defer opSub.Unsubscribe()
+	defer stateSub.Unsubscribe()
 
 	ticker := time.NewTicker(time.Duration(a.beaconChainCfg.SecondsPerSlot) * time.Second)
 	defer ticker.Stop()
