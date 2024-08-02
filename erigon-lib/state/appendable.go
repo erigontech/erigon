@@ -252,8 +252,6 @@ func (ap *Appendable) BuildMissedAccessors(ctx context.Context, g *errgroup.Grou
 }
 
 func (ap *Appendable) openDirtyFiles() error {
-	fmt.Printf("[dbg] dirtyFiles.Len() %d\n", ap.dirtyFiles.Len())
-
 	var invalidFileItems []*filesItem
 	invalidFileItemsLock := sync.Mutex{}
 	ap.dirtyFiles.Walk(func(items []*filesItem) bool {
@@ -684,7 +682,6 @@ func (tx *AppendableRoTx) txNum2id(rwTx kv.RwTx, txFrom, txTo uint64) (fromID, t
 }
 
 func (ap *Appendable) collate(ctx context.Context, step uint64, roTx kv.Tx) (AppendableCollation, error) {
-	defer func(t time.Time) { fmt.Printf("appendable.go:680: %s\n", time.Since(t)) }(time.Now())
 	stepTo := step + 1
 	fromTxNum, toTxNum := step*ap.aggregationStep, stepTo*ap.aggregationStep
 	start := time.Now()
