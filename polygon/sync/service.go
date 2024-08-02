@@ -53,8 +53,8 @@ func NewService(
 	statusDataProvider *sentry.StatusDataProvider,
 	executionClient executionproto.ExecutionClient,
 	blockLimit uint,
-	bridge bridge.Service,
-	heimdall heimdall.Service,
+	bridgeService bridge.Service,
+	heimdallService heimdall.Service,
 ) Service {
 	borConfig := chainConfig.Bor.(*borcfg.BorConfig)
 	checkpointVerifier := VerifyCheckpointHeaders
@@ -62,11 +62,11 @@ func NewService(
 	blocksVerifier := VerifyBlocks
 	p2pService := p2p.NewService(maxPeers, logger, sentryClient, statusDataProvider.GetStatusData)
 	execution := NewExecutionClient(executionClient)
-	store := NewStore(logger, execution, bridge, heimdall)
+	store := NewStore(logger, execution, bridgeService)
 	blockDownloader := NewBlockDownloader(
 		logger,
 		p2pService,
-		heimdall,
+		heimdallService,
 		checkpointVerifier,
 		milestoneVerifier,
 		blocksVerifier,
@@ -75,7 +75,7 @@ func NewService(
 	)
 	spansCache := NewSpansCache()
 	ccBuilderFactory := NewCanonicalChainBuilderFactory(chainConfig, borConfig, spansCache)
-	events := NewTipEvents(logger, p2pService, heimdall)
+	events := NewTipEvents(logger, p2pService, heimdallService)
 	sync := NewSync(
 		store,
 		execution,
@@ -84,8 +84,10 @@ func NewService(
 		p2pService,
 		blockDownloader,
 		ccBuilderFactory,
+		heimdallService,
+		bridgeService,
 		spansCache,
-		heimdall.LatestSpans,
+		heimdallService.LatestSpans,
 		events.Events(),
 		logger,
 	)
@@ -94,8 +96,8 @@ func NewService(
 		p2pService: p2pService,
 		store:      store,
 		events:     events,
-		heimdall:   heimdall,
-		bridge:     bridge,
+		heimdall:   heimdallService,
+		bridge:     bridgeService,
 	}
 }
 
