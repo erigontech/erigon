@@ -106,6 +106,9 @@ func (a *ApiHandler) EventSourceGetV1Events(w http.ResponseWriter, r *http.Reque
 				continue
 			}
 			w.(http.Flusher).Flush()
+		case err := <-stateSub.Err():
+			log.Warn("event error", "err", err)
+			http.Error(w, fmt.Sprintf("event error %v", err), http.StatusInternalServerError)
 		case err := <-opSub.Err():
 			log.Warn("event error", "err", err)
 			http.Error(w, fmt.Sprintf("event error %v", err), http.StatusInternalServerError)
