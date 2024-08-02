@@ -74,6 +74,10 @@ func (a *ApiHandler) EventSourceGetV1Events(w http.ResponseWriter, r *http.Reque
 
 	ticker := time.NewTicker(time.Duration(a.beaconChainCfg.SecondsPerSlot) * time.Second)
 	defer ticker.Stop()
+	if _, err := w.Write([]byte(":\n\n")); err != nil {
+		log.Warn("failed to write keep alive", "err", err)
+	}
+	w.(http.Flusher).Flush()
 
 	for {
 		select {
