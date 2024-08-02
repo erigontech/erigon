@@ -19,9 +19,9 @@ jobs:
       matrix:
         # list of os: https://github.com/actions/virtual-environments
         os:
-          # - ubuntu-22.04
-          - macos-14
-    runs-on: ${{ matrix.os }}
+          - { id: ubuntu-22.04, name: ubuntu } 
+          #- macos-14
+    runs-on: ${{ matrix.os.id }}
 
     steps:
       - uses: actions/checkout@v4
@@ -35,4 +35,4 @@ jobs:
       - name: Run Kurtosis + assertoor tests
         uses: ethpandaops/kurtosis-assertoor-github-action@v1
         with:
-            enclave_name: "kurtosis-run-${{ matrix.os }}-${{ github.run_id }}"
+            enclave_name: "kurtosis-run-${{ matrix.os.name }}-${{ github.run_id }}"
