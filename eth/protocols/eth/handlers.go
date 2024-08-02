@@ -22,6 +22,7 @@ package eth
 import (
 	"context"
 	"fmt"
+
 	"github.com/erigontech/erigon-lib/chain"
 	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/kv"
@@ -160,7 +161,7 @@ func AnswerGetBlockBodiesQuery(db kv.Tx, query GetBlockBodiesPacket, blockReader
 }
 
 type ReceiptsGetter interface {
-	GetReceipts(ctx context.Context, cfg *chain.Config, tx kv.Tx, block *types.Block, senders []libcommon.Address) (types.Receipts, error)
+	GetReceipts(ctx context.Context, cfg *chain.Config, tx kv.Tx, block *types.Block) (types.Receipts, error)
 }
 
 func AnswerGetReceiptsQuery(ctx context.Context, cfg *chain.Config, receiptsGetter ReceiptsGetter, br services.FullBlockReader, db kv.Tx, query GetReceiptsPacket) ([]rlp.RawValue, error) { //nolint:unparam
@@ -188,7 +189,7 @@ func AnswerGetReceiptsQuery(ctx context.Context, cfg *chain.Config, receiptsGett
 			return nil, nil
 		}
 
-		results, err := receiptsGetter.GetReceipts(ctx, cfg, db, b, s)
+		results, err := receiptsGetter.GetReceipts(ctx, cfg, db, b)
 		if err != nil {
 			return nil, err
 		}
