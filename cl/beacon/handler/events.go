@@ -105,11 +105,11 @@ func (a *ApiHandler) EventSourceGetV1Events(w http.ResponseWriter, r *http.Reque
 			log.Info("[test] sent event", "topic", event.Event)
 		case <-ticker.C:
 			// keep connection alive
-			/*if _, err := w.Write([]byte(":\n\n")); err != nil {
+			if _, err := w.Write([]byte(":\n\n")); err != nil {
 				log.Warn("failed to write keep alive", "err", err)
 				continue
 			}
-			w.(http.Flusher).Flush()*/
+			w.(http.Flusher).Flush()
 		case err := <-stateSub.Err():
 			log.Warn("event error", "err", err)
 			http.Error(w, fmt.Sprintf("event error %v", err), http.StatusInternalServerError)
