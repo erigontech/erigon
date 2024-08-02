@@ -51,6 +51,14 @@ type operation struct {
 	opNum   int // only for push, swap, dup
 	// memorySize returns the memory size required for the operation
 	memorySize memorySizeFunc
+
+	// undefined denotes if the instruction is not officially defined in the jump table
+	undefined bool
+
+	// terminal denotes if the instruction can be the final opcode in a code section
+	terminal bool
+
+	immediateSize uint8
 }
 
 var (
@@ -67,6 +75,7 @@ var (
 	napoliInstructionSet           = newNapoliInstructionSet()
 	cancunInstructionSet           = newCancunInstructionSet()
 	pragueInstructionSet           = newPragueInstructionSet()
+	pragueEOFInstructionSet        = NewPragueEOFInstructionSet()
 )
 
 // JumpTable contains the EVM opcodes supported at a given fork.
@@ -95,6 +104,14 @@ func validateAndFillMaxStack(jt *JumpTable) {
 // cancun, and prague instructions.
 func newPragueInstructionSet() JumpTable {
 	instructionSet := newCancunInstructionSet()
+	// enableEOF(&instructionSet)
+	validateAndFillMaxStack(&instructionSet)
+	return instructionSet
+}
+
+func NewPragueEOFInstructionSet() JumpTable {
+	instructionSet := newPragueInstructionSet()
+	enableEOF(&instructionSet)
 	validateAndFillMaxStack(&instructionSet)
 	return instructionSet
 }
@@ -233,6 +250,7 @@ func newByzantiumInstructionSet() JumpTable {
 		numPop:     2,
 		numPush:    0,
 		memorySize: memoryRevert,
+		terminal:   true,
 	}
 	validateAndFillMaxStack(&instructionSet)
 	return instructionSet
@@ -286,6 +304,7 @@ func newFrontierInstructionSet() JumpTable {
 			constantGas: 0,
 			numPop:      0,
 			numPush:     0,
+			terminal:    true,
 		},
 		ADD: {
 			execute:     opAdd,
@@ -1202,6 +1221,7 @@ func newFrontierInstructionSet() JumpTable {
 			numPop:     2,
 			numPush:    0,
 			memorySize: memoryReturn,
+			terminal:   true,
 		},
 		SELFDESTRUCT: {
 			execute:    opSelfdestruct,
@@ -1209,12 +1229,18 @@ func newFrontierInstructionSet() JumpTable {
 			numPop:     1,
 			numPush:    0,
 		},
+		INVALID: {
+			execute:  opUndefined,
+			numPop:   0,
+			numPush:  0,
+			terminal: true,
+		},
 	}
 
 	// Fill all unassigned slots with opUndefined.
 	for i, entry := range tbl {
 		if entry == nil {
-			tbl[i] = &operation{execute: opUndefined}
+			tbl[i] = &operation{execute: opUndefined, numPop: 0, numPush: 0, undefined: true}
 		}
 	}
 

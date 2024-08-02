@@ -1,0 +1,110 @@
+{
+    "tests/prague/eip7692_eof_v1/eip7620_eof_create/test_subcontainer_validation.py::test_container_combos_valid[fork_PragueEIP7692-eof_test-EOFCREATE/RETURNCONTRACT]": {
+        "vectors": {
+            "0": {
+                "code": "0xef00010100040200010011030001003204000000008000046000600060006000ec0061201560015500ef000101000402000100060300010014040000000080000260006000ee00ef00010100040200010001040000000080000000",
+                "results": {
+                    "Prague": {
+                        "result": true
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0x5b3092ac5daf83b1cb41ebfcb010a710f913c25e59af3128c4c151fffa6254de",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "Hyperledger Besu evm 24.7-develop-30c96c7",
+            "description": "Test function documentation:\nTest valid subcontainer reference / opcode combos",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692-prague@v1.0.7/tests/prague/eip7692_eof_v1/eip7620_eof_create/test_subcontainer_validation.py#L142",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7620.md",
+            "reference-spec-version": "52ddbcdddcf72dd72427c319f2beddeb468e1737"
+        }
+    },
+    "tests/prague/eip7692_eof_v1/eip7620_eof_create/test_subcontainer_validation.py::test_container_combos_valid[fork_PragueEIP7692-eof_test-RETURNCONTRACT/STOP]": {
+        "vectors": {
+            "0": {
+                "code": "0xef0001010004020001000c0300010014040000000080000261201560015560006000ee00ef00010100040200010001040000000080000000",
+                "containerKind": "INITCODE",
+                "results": {
+                    "Prague": {
+                        "result": true
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0x3a3a51d7f1493a8b0a78fc045c7682474bf732e3f3f4b86d15ed7671ca8abf4f",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "Hyperledger Besu evm 24.7-develop-30c96c7",
+            "description": "Test function documentation:\nTest valid subcontainer reference / opcode combos",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692-prague@v1.0.7/tests/prague/eip7692_eof_v1/eip7620_eof_create/test_subcontainer_validation.py#L142",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7620.md",
+            "reference-spec-version": "52ddbcdddcf72dd72427c319f2beddeb468e1737"
+        }
+    },
+    "tests/prague/eip7692_eof_v1/eip7620_eof_create/test_subcontainer_validation.py::test_container_combos_valid[fork_PragueEIP7692-eof_test-RETURNCONTRACT/RETURN]": {
+        "vectors": {
+            "0": {
+                "code": "0xef0001010004020001000c0300010018040000000080000261201560015560006000ee00ef00010100040200010005040000000080000260006000f3",
+                "containerKind": "INITCODE",
+                "results": {
+                    "Prague": {
+                        "result": true
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0x4ef84a4feeb49a56de06e0db6fc7aaedc57b5dc4f58170f41101b236c6ba1319",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "Hyperledger Besu evm 24.7-develop-30c96c7",
+            "description": "Test function documentation:\nTest valid subcontainer reference / opcode combos",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692-prague@v1.0.7/tests/prague/eip7692_eof_v1/eip7620_eof_create/test_subcontainer_validation.py#L142",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7620.md",
+            "reference-spec-version": "52ddbcdddcf72dd72427c319f2beddeb468e1737"
+        }
+    },
+    "tests/prague/eip7692_eof_v1/eip7620_eof_create/test_subcontainer_validation.py::test_container_combos_valid[fork_PragueEIP7692-eof_test-EOFCREATE/REVERT]": {
+        "vectors": {
+            "0": {
+                "code": "0xef00010100040200010011030001001804000000008000046000600060006000ec0061201560015500ef00010100040200010005040000000080000260006000fd",
+                "results": {
+                    "Prague": {
+                        "result": true
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0x57b62b8a58439f6d107aece65d0489b9c18fb28e52967bf02d5312f0ee13c61c",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "Hyperledger Besu evm 24.7-develop-30c96c7",
+            "description": "Test function documentation:\nTest valid subcontainer reference / opcode combos",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692-prague@v1.0.7/tests/prague/eip7692_eof_v1/eip7620_eof_create/test_subcontainer_validation.py#L142",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7620.md",
+            "reference-spec-version": "52ddbcdddcf72dd72427c319f2beddeb468e1737"
+        }
+    },
+    "tests/prague/eip7692_eof_v1/eip7620_eof_create/test_subcontainer_validation.py::test_container_combos_valid[fork_PragueEIP7692-eof_test-RETURNCONTRACT/REVERT]": {
+        "vectors": {
+            "0": {
+                "code": "0xef0001010004020001000c0300010018040000000080000261201560015560006000ee00ef00010100040200010005040000000080000260006000fd",
+                "containerKind": "INITCODE",
+                "results": {
+                    "Prague": {
+                        "result": true
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0x4bb1e3fee8584a26e87c6bc1cfd7796c9a06ca00d9d5267a46aed80c6616fcfa",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "Hyperledger Besu evm 24.7-develop-30c96c7",
+            "description": "Test function documentation:\nTest valid subcontainer reference / opcode combos",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692-prague@v1.0.7/tests/prague/eip7692_eof_v1/eip7620_eof_create/test_subcontainer_validation.py#L142",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7620.md",
+            "reference-spec-version": "52ddbcdddcf72dd72427c319f2beddeb468e1737"
+        }
+    }
+}

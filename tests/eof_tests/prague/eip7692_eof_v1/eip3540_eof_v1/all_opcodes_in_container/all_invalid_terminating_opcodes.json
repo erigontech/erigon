@@ -1,0 +1,3126 @@
+{
+    "tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_all_opcodes_in_container.py::test_all_invalid_terminating_opcodes[fork_PragueEIP7692-eof_test-opcode_ADD]": {
+        "vectors": {
+            "0": {
+                "code": "0xef0001010004020001000304002000008000025f5f010000000000000000000000000000000000000000000000000000000000000000",
+                "results": {
+                    "Prague": {
+                        "exception": "EOFException.MISSING_STOP_OPCODE",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0x21a3e70c45f6eee25243ce815d64225d0f3ab57c1f006c349e74119ce64e91cb",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "Hyperledger Besu evm 24.7-develop-30c96c7",
+            "description": "Test function documentation:\n\n    Test all opcodes that are invalid as the last opcode in a container",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692-prague@v1.0.7/tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_all_opcodes_in_container.py#L121",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-3540.md",
+            "reference-spec-version": "8dcb0a8c1c0102c87224308028632cc986a61183"
+        }
+    },
+    "tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_all_opcodes_in_container.py::test_all_invalid_terminating_opcodes[fork_PragueEIP7692-eof_test-opcode_MUL]": {
+        "vectors": {
+            "0": {
+                "code": "0xef0001010004020001000304002000008000025f5f020000000000000000000000000000000000000000000000000000000000000000",
+                "results": {
+                    "Prague": {
+                        "exception": "EOFException.MISSING_STOP_OPCODE",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0x8b62d509d498ad569ff0338fead8ed6734961c0260de3ad33a351b64e8795241",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "Hyperledger Besu evm 24.7-develop-30c96c7",
+            "description": "Test function documentation:\n\n    Test all opcodes that are invalid as the last opcode in a container",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692-prague@v1.0.7/tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_all_opcodes_in_container.py#L121",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-3540.md",
+            "reference-spec-version": "8dcb0a8c1c0102c87224308028632cc986a61183"
+        }
+    },
+    "tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_all_opcodes_in_container.py::test_all_invalid_terminating_opcodes[fork_PragueEIP7692-eof_test-opcode_SUB]": {
+        "vectors": {
+            "0": {
+                "code": "0xef0001010004020001000304002000008000025f5f030000000000000000000000000000000000000000000000000000000000000000",
+                "results": {
+                    "Prague": {
+                        "exception": "EOFException.MISSING_STOP_OPCODE",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0x8c914706a8e06aab8203e8c15fcdc485e2f5379604ec30da185f7207652869af",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "Hyperledger Besu evm 24.7-develop-30c96c7",
+            "description": "Test function documentation:\n\n    Test all opcodes that are invalid as the last opcode in a container",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692-prague@v1.0.7/tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_all_opcodes_in_container.py#L121",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-3540.md",
+            "reference-spec-version": "8dcb0a8c1c0102c87224308028632cc986a61183"
+        }
+    },
+    "tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_all_opcodes_in_container.py::test_all_invalid_terminating_opcodes[fork_PragueEIP7692-eof_test-opcode_DIV]": {
+        "vectors": {
+            "0": {
+                "code": "0xef0001010004020001000304002000008000025f5f040000000000000000000000000000000000000000000000000000000000000000",
+                "results": {
+                    "Prague": {
+                        "exception": "EOFException.MISSING_STOP_OPCODE",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0xf78048e6925cc8b627e8a351569bfb3f3afc3114063487b360ccc31db49545d0",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "Hyperledger Besu evm 24.7-develop-30c96c7",
+            "description": "Test function documentation:\n\n    Test all opcodes that are invalid as the last opcode in a container",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692-prague@v1.0.7/tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_all_opcodes_in_container.py#L121",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-3540.md",
+            "reference-spec-version": "8dcb0a8c1c0102c87224308028632cc986a61183"
+        }
+    },
+    "tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_all_opcodes_in_container.py::test_all_invalid_terminating_opcodes[fork_PragueEIP7692-eof_test-opcode_SDIV]": {
+        "vectors": {
+            "0": {
+                "code": "0xef0001010004020001000304002000008000025f5f050000000000000000000000000000000000000000000000000000000000000000",
+                "results": {
+                    "Prague": {
+                        "exception": "EOFException.MISSING_STOP_OPCODE",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0x2a845941d95e4ca121f95bb48be88c3a480c39f323ce7c5f00cf2b744d5cbd44",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "Hyperledger Besu evm 24.7-develop-30c96c7",
+            "description": "Test function documentation:\n\n    Test all opcodes that are invalid as the last opcode in a container",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692-prague@v1.0.7/tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_all_opcodes_in_container.py#L121",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-3540.md",
+            "reference-spec-version": "8dcb0a8c1c0102c87224308028632cc986a61183"
+        }
+    },
+    "tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_all_opcodes_in_container.py::test_all_invalid_terminating_opcodes[fork_PragueEIP7692-eof_test-opcode_MOD]": {
+        "vectors": {
+            "0": {
+                "code": "0xef0001010004020001000304002000008000025f5f060000000000000000000000000000000000000000000000000000000000000000",
+                "results": {
+                    "Prague": {
+                        "exception": "EOFException.MISSING_STOP_OPCODE",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0x7a72f155faaf258f66626cd4959304d9c3ef020eabdd050f2080dd93d7a2a4cc",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "Hyperledger Besu evm 24.7-develop-30c96c7",
+            "description": "Test function documentation:\n\n    Test all opcodes that are invalid as the last opcode in a container",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692-prague@v1.0.7/tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_all_opcodes_in_container.py#L121",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-3540.md",
+            "reference-spec-version": "8dcb0a8c1c0102c87224308028632cc986a61183"
+        }
+    },
+    "tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_all_opcodes_in_container.py::test_all_invalid_terminating_opcodes[fork_PragueEIP7692-eof_test-opcode_SMOD]": {
+        "vectors": {
+            "0": {
+                "code": "0xef0001010004020001000304002000008000025f5f070000000000000000000000000000000000000000000000000000000000000000",
+                "results": {
+                    "Prague": {
+                        "exception": "EOFException.MISSING_STOP_OPCODE",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0x0e9b7fe8a05e03d38fe0e6035f0f003477f288b156d344d502f8a97b1d021c28",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "Hyperledger Besu evm 24.7-develop-30c96c7",
+            "description": "Test function documentation:\n\n    Test all opcodes that are invalid as the last opcode in a container",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692-prague@v1.0.7/tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_all_opcodes_in_container.py#L121",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-3540.md",
+            "reference-spec-version": "8dcb0a8c1c0102c87224308028632cc986a61183"
+        }
+    },
+    "tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_all_opcodes_in_container.py::test_all_invalid_terminating_opcodes[fork_PragueEIP7692-eof_test-opcode_ADDMOD]": {
+        "vectors": {
+            "0": {
+                "code": "0xef0001010004020001000404002000008000035f5f5f080000000000000000000000000000000000000000000000000000000000000000",
+                "results": {
+                    "Prague": {
+                        "exception": "EOFException.MISSING_STOP_OPCODE",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0xf50612096228506914f3a62ae0c50418fceea7817218514bce53199f8d42e5e0",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "Hyperledger Besu evm 24.7-develop-30c96c7",
+            "description": "Test function documentation:\n\n    Test all opcodes that are invalid as the last opcode in a container",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692-prague@v1.0.7/tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_all_opcodes_in_container.py#L121",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-3540.md",
+            "reference-spec-version": "8dcb0a8c1c0102c87224308028632cc986a61183"
+        }
+    },
+    "tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_all_opcodes_in_container.py::test_all_invalid_terminating_opcodes[fork_PragueEIP7692-eof_test-opcode_MULMOD]": {
+        "vectors": {
+            "0": {
+                "code": "0xef0001010004020001000404002000008000035f5f5f090000000000000000000000000000000000000000000000000000000000000000",
+                "results": {
+                    "Prague": {
+                        "exception": "EOFException.MISSING_STOP_OPCODE",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0xa71c394e5490dbf6d97f3a9be94a25b40bc58fce87b34262eda34e9eedf1f1cb",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "Hyperledger Besu evm 24.7-develop-30c96c7",
+            "description": "Test function documentation:\n\n    Test all opcodes that are invalid as the last opcode in a container",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692-prague@v1.0.7/tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_all_opcodes_in_container.py#L121",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-3540.md",
+            "reference-spec-version": "8dcb0a8c1c0102c87224308028632cc986a61183"
+        }
+    },
+    "tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_all_opcodes_in_container.py::test_all_invalid_terminating_opcodes[fork_PragueEIP7692-eof_test-opcode_EXP]": {
+        "vectors": {
+            "0": {
+                "code": "0xef0001010004020001000304002000008000025f5f0a0000000000000000000000000000000000000000000000000000000000000000",
+                "results": {
+                    "Prague": {
+                        "exception": "EOFException.MISSING_STOP_OPCODE",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0x074cb86e0563a88d78529e529b67ddf46f183ee285d23a18ee5c1019601e181d",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "Hyperledger Besu evm 24.7-develop-30c96c7",
+            "description": "Test function documentation:\n\n    Test all opcodes that are invalid as the last opcode in a container",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692-prague@v1.0.7/tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_all_opcodes_in_container.py#L121",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-3540.md",
+            "reference-spec-version": "8dcb0a8c1c0102c87224308028632cc986a61183"
+        }
+    },
+    "tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_all_opcodes_in_container.py::test_all_invalid_terminating_opcodes[fork_PragueEIP7692-eof_test-opcode_SIGNEXTEND]": {
+        "vectors": {
+            "0": {
+                "code": "0xef0001010004020001000304002000008000025f5f0b0000000000000000000000000000000000000000000000000000000000000000",
+                "results": {
+                    "Prague": {
+                        "exception": "EOFException.MISSING_STOP_OPCODE",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0xa59aee5c45c29f7c19388c9ccd92fa90bd00b19f54488445b212838b6144b365",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "Hyperledger Besu evm 24.7-develop-30c96c7",
+            "description": "Test function documentation:\n\n    Test all opcodes that are invalid as the last opcode in a container",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692-prague@v1.0.7/tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_all_opcodes_in_container.py#L121",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-3540.md",
+            "reference-spec-version": "8dcb0a8c1c0102c87224308028632cc986a61183"
+        }
+    },
+    "tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_all_opcodes_in_container.py::test_all_invalid_terminating_opcodes[fork_PragueEIP7692-eof_test-opcode_LT]": {
+        "vectors": {
+            "0": {
+                "code": "0xef0001010004020001000304002000008000025f5f100000000000000000000000000000000000000000000000000000000000000000",
+                "results": {
+                    "Prague": {
+                        "exception": "EOFException.MISSING_STOP_OPCODE",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0xecaa309aad36f36fa7dcf08fb9fc86b330d97cec6f00a0da9f865a7e531c930c",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "Hyperledger Besu evm 24.7-develop-30c96c7",
+            "description": "Test function documentation:\n\n    Test all opcodes that are invalid as the last opcode in a container",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692-prague@v1.0.7/tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_all_opcodes_in_container.py#L121",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-3540.md",
+            "reference-spec-version": "8dcb0a8c1c0102c87224308028632cc986a61183"
+        }
+    },
+    "tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_all_opcodes_in_container.py::test_all_invalid_terminating_opcodes[fork_PragueEIP7692-eof_test-opcode_GT]": {
+        "vectors": {
+            "0": {
+                "code": "0xef0001010004020001000304002000008000025f5f110000000000000000000000000000000000000000000000000000000000000000",
+                "results": {
+                    "Prague": {
+                        "exception": "EOFException.MISSING_STOP_OPCODE",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0xaf578102163e29ddb5b2bfd4ec0bb345435059a6e2d242d7ccced25c6337ec63",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "Hyperledger Besu evm 24.7-develop-30c96c7",
+            "description": "Test function documentation:\n\n    Test all opcodes that are invalid as the last opcode in a container",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692-prague@v1.0.7/tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_all_opcodes_in_container.py#L121",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-3540.md",
+            "reference-spec-version": "8dcb0a8c1c0102c87224308028632cc986a61183"
+        }
+    },
+    "tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_all_opcodes_in_container.py::test_all_invalid_terminating_opcodes[fork_PragueEIP7692-eof_test-opcode_SLT]": {
+        "vectors": {
+            "0": {
+                "code": "0xef0001010004020001000304002000008000025f5f120000000000000000000000000000000000000000000000000000000000000000",
+                "results": {
+                    "Prague": {
+                        "exception": "EOFException.MISSING_STOP_OPCODE",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0x4da803ee87ce2789d107017147f5cd8ea6df554e6825f093d645ccff1c01e750",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "Hyperledger Besu evm 24.7-develop-30c96c7",
+            "description": "Test function documentation:\n\n    Test all opcodes that are invalid as the last opcode in a container",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692-prague@v1.0.7/tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_all_opcodes_in_container.py#L121",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-3540.md",
+            "reference-spec-version": "8dcb0a8c1c0102c87224308028632cc986a61183"
+        }
+    },
+    "tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_all_opcodes_in_container.py::test_all_invalid_terminating_opcodes[fork_PragueEIP7692-eof_test-opcode_SGT]": {
+        "vectors": {
+            "0": {
+                "code": "0xef0001010004020001000304002000008000025f5f130000000000000000000000000000000000000000000000000000000000000000",
+                "results": {
+                    "Prague": {
+                        "exception": "EOFException.MISSING_STOP_OPCODE",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0x5801dd392a389b552a91bdd81a1a17254f8e84088c737a02ef9ffd13197a460c",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "Hyperledger Besu evm 24.7-develop-30c96c7",
+            "description": "Test function documentation:\n\n    Test all opcodes that are invalid as the last opcode in a container",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692-prague@v1.0.7/tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_all_opcodes_in_container.py#L121",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-3540.md",
+            "reference-spec-version": "8dcb0a8c1c0102c87224308028632cc986a61183"
+        }
+    },
+    "tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_all_opcodes_in_container.py::test_all_invalid_terminating_opcodes[fork_PragueEIP7692-eof_test-opcode_EQ]": {
+        "vectors": {
+            "0": {
+                "code": "0xef0001010004020001000304002000008000025f5f140000000000000000000000000000000000000000000000000000000000000000",
+                "results": {
+                    "Prague": {
+                        "exception": "EOFException.MISSING_STOP_OPCODE",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0xc6460a4a3e86e8db3a41eed087ebb31cf1929febe7e5a2b6cc08076168901bd3",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "Hyperledger Besu evm 24.7-develop-30c96c7",
+            "description": "Test function documentation:\n\n    Test all opcodes that are invalid as the last opcode in a container",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692-prague@v1.0.7/tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_all_opcodes_in_container.py#L121",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-3540.md",
+            "reference-spec-version": "8dcb0a8c1c0102c87224308028632cc986a61183"
+        }
+    },
+    "tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_all_opcodes_in_container.py::test_all_invalid_terminating_opcodes[fork_PragueEIP7692-eof_test-opcode_ISZERO]": {
+        "vectors": {
+            "0": {
+                "code": "0xef0001010004020001000204002000008000015f150000000000000000000000000000000000000000000000000000000000000000",
+                "results": {
+                    "Prague": {
+                        "exception": "EOFException.MISSING_STOP_OPCODE",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0x01d3b5f789cafbec50ae92c5180adf21cda1cbf67327cc0f32a065f9819f039e",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "Hyperledger Besu evm 24.7-develop-30c96c7",
+            "description": "Test function documentation:\n\n    Test all opcodes that are invalid as the last opcode in a container",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692-prague@v1.0.7/tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_all_opcodes_in_container.py#L121",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-3540.md",
+            "reference-spec-version": "8dcb0a8c1c0102c87224308028632cc986a61183"
+        }
+    },
+    "tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_all_opcodes_in_container.py::test_all_invalid_terminating_opcodes[fork_PragueEIP7692-eof_test-opcode_AND]": {
+        "vectors": {
+            "0": {
+                "code": "0xef0001010004020001000304002000008000025f5f160000000000000000000000000000000000000000000000000000000000000000",
+                "results": {
+                    "Prague": {
+                        "exception": "EOFException.MISSING_STOP_OPCODE",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0xe597f9122f7536e70e2c2fa97e019a3fd897c15e8cf2869e984e0dd81280ef71",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "Hyperledger Besu evm 24.7-develop-30c96c7",
+            "description": "Test function documentation:\n\n    Test all opcodes that are invalid as the last opcode in a container",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692-prague@v1.0.7/tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_all_opcodes_in_container.py#L121",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-3540.md",
+            "reference-spec-version": "8dcb0a8c1c0102c87224308028632cc986a61183"
+        }
+    },
+    "tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_all_opcodes_in_container.py::test_all_invalid_terminating_opcodes[fork_PragueEIP7692-eof_test-opcode_OR]": {
+        "vectors": {
+            "0": {
+                "code": "0xef0001010004020001000304002000008000025f5f170000000000000000000000000000000000000000000000000000000000000000",
+                "results": {
+                    "Prague": {
+                        "exception": "EOFException.MISSING_STOP_OPCODE",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0x9c92045f0023f30aa170bb094cc802d9a6bfea6d83c3bd9877b588d56209c5c3",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "Hyperledger Besu evm 24.7-develop-30c96c7",
+            "description": "Test function documentation:\n\n    Test all opcodes that are invalid as the last opcode in a container",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692-prague@v1.0.7/tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_all_opcodes_in_container.py#L121",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-3540.md",
+            "reference-spec-version": "8dcb0a8c1c0102c87224308028632cc986a61183"
+        }
+    },
+    "tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_all_opcodes_in_container.py::test_all_invalid_terminating_opcodes[fork_PragueEIP7692-eof_test-opcode_XOR]": {
+        "vectors": {
+            "0": {
+                "code": "0xef0001010004020001000304002000008000025f5f180000000000000000000000000000000000000000000000000000000000000000",
+                "results": {
+                    "Prague": {
+                        "exception": "EOFException.MISSING_STOP_OPCODE",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0x6a1e3355c5f145b5b1e7b84c1b002e1b77e654807b37e6e61d8b20b6ea42e8c6",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "Hyperledger Besu evm 24.7-develop-30c96c7",
+            "description": "Test function documentation:\n\n    Test all opcodes that are invalid as the last opcode in a container",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692-prague@v1.0.7/tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_all_opcodes_in_container.py#L121",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-3540.md",
+            "reference-spec-version": "8dcb0a8c1c0102c87224308028632cc986a61183"
+        }
+    },
+    "tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_all_opcodes_in_container.py::test_all_invalid_terminating_opcodes[fork_PragueEIP7692-eof_test-opcode_NOT]": {
+        "vectors": {
+            "0": {
+                "code": "0xef0001010004020001000204002000008000015f190000000000000000000000000000000000000000000000000000000000000000",
+                "results": {
+                    "Prague": {
+                        "exception": "EOFException.MISSING_STOP_OPCODE",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0xf0d4d6c8e60eecbb815d93d650c7b2fc2a27ada109c7ec8235c31f75192a1eb7",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "Hyperledger Besu evm 24.7-develop-30c96c7",
+            "description": "Test function documentation:\n\n    Test all opcodes that are invalid as the last opcode in a container",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692-prague@v1.0.7/tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_all_opcodes_in_container.py#L121",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-3540.md",
+            "reference-spec-version": "8dcb0a8c1c0102c87224308028632cc986a61183"
+        }
+    },
+    "tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_all_opcodes_in_container.py::test_all_invalid_terminating_opcodes[fork_PragueEIP7692-eof_test-opcode_BYTE]": {
+        "vectors": {
+            "0": {
+                "code": "0xef0001010004020001000304002000008000025f5f1a0000000000000000000000000000000000000000000000000000000000000000",
+                "results": {
+                    "Prague": {
+                        "exception": "EOFException.MISSING_STOP_OPCODE",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0x0ea323e8c912ae3c240d747091742370471302875d62aa17b4dd2e4be175edf9",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "Hyperledger Besu evm 24.7-develop-30c96c7",
+            "description": "Test function documentation:\n\n    Test all opcodes that are invalid as the last opcode in a container",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692-prague@v1.0.7/tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_all_opcodes_in_container.py#L121",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-3540.md",
+            "reference-spec-version": "8dcb0a8c1c0102c87224308028632cc986a61183"
+        }
+    },
+    "tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_all_opcodes_in_container.py::test_all_invalid_terminating_opcodes[fork_PragueEIP7692-eof_test-opcode_SHL]": {
+        "vectors": {
+            "0": {
+                "code": "0xef0001010004020001000304002000008000025f5f1b0000000000000000000000000000000000000000000000000000000000000000",
+                "results": {
+                    "Prague": {
+                        "exception": "EOFException.MISSING_STOP_OPCODE",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0xf6a4e1beea6f76dfba26722159ba7494dd2408df759c8f6b7c7e6403d507188e",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "Hyperledger Besu evm 24.7-develop-30c96c7",
+            "description": "Test function documentation:\n\n    Test all opcodes that are invalid as the last opcode in a container",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692-prague@v1.0.7/tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_all_opcodes_in_container.py#L121",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-3540.md",
+            "reference-spec-version": "8dcb0a8c1c0102c87224308028632cc986a61183"
+        }
+    },
+    "tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_all_opcodes_in_container.py::test_all_invalid_terminating_opcodes[fork_PragueEIP7692-eof_test-opcode_SHR]": {
+        "vectors": {
+            "0": {
+                "code": "0xef0001010004020001000304002000008000025f5f1c0000000000000000000000000000000000000000000000000000000000000000",
+                "results": {
+                    "Prague": {
+                        "exception": "EOFException.MISSING_STOP_OPCODE",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0x1fb1b1886001679c4bd79539853efb34fe5ce7683d88f5453a01434fd8311cb9",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "Hyperledger Besu evm 24.7-develop-30c96c7",
+            "description": "Test function documentation:\n\n    Test all opcodes that are invalid as the last opcode in a container",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692-prague@v1.0.7/tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_all_opcodes_in_container.py#L121",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-3540.md",
+            "reference-spec-version": "8dcb0a8c1c0102c87224308028632cc986a61183"
+        }
+    },
+    "tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_all_opcodes_in_container.py::test_all_invalid_terminating_opcodes[fork_PragueEIP7692-eof_test-opcode_SAR]": {
+        "vectors": {
+            "0": {
+                "code": "0xef0001010004020001000304002000008000025f5f1d0000000000000000000000000000000000000000000000000000000000000000",
+                "results": {
+                    "Prague": {
+                        "exception": "EOFException.MISSING_STOP_OPCODE",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0x47b2fe654f9c843346fcf0493eda40bf9ca5caba66754e9f10409b7bc60003a4",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "Hyperledger Besu evm 24.7-develop-30c96c7",
+            "description": "Test function documentation:\n\n    Test all opcodes that are invalid as the last opcode in a container",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692-prague@v1.0.7/tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_all_opcodes_in_container.py#L121",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-3540.md",
+            "reference-spec-version": "8dcb0a8c1c0102c87224308028632cc986a61183"
+        }
+    },
+    "tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_all_opcodes_in_container.py::test_all_invalid_terminating_opcodes[fork_PragueEIP7692-eof_test-opcode_SHA3]": {
+        "vectors": {
+            "0": {
+                "code": "0xef0001010004020001000304002000008000025f5f200000000000000000000000000000000000000000000000000000000000000000",
+                "results": {
+                    "Prague": {
+                        "exception": "EOFException.MISSING_STOP_OPCODE",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0x7e7e7683538907018587dc31b2b5022dd115b6bd08f2b70847ca93b8afd6116a",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "Hyperledger Besu evm 24.7-develop-30c96c7",
+            "description": "Test function documentation:\n\n    Test all opcodes that are invalid as the last opcode in a container",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692-prague@v1.0.7/tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_all_opcodes_in_container.py#L121",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-3540.md",
+            "reference-spec-version": "8dcb0a8c1c0102c87224308028632cc986a61183"
+        }
+    },
+    "tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_all_opcodes_in_container.py::test_all_invalid_terminating_opcodes[fork_PragueEIP7692-eof_test-opcode_ADDRESS]": {
+        "vectors": {
+            "0": {
+                "code": "0xef000101000402000100010400200000800001300000000000000000000000000000000000000000000000000000000000000000",
+                "results": {
+                    "Prague": {
+                        "exception": "EOFException.MISSING_STOP_OPCODE",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0xff699dd95aaefe3b9110d6dae918db3359072c96de3256f5a058a007add459aa",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "Hyperledger Besu evm 24.7-develop-30c96c7",
+            "description": "Test function documentation:\n\n    Test all opcodes that are invalid as the last opcode in a container",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692-prague@v1.0.7/tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_all_opcodes_in_container.py#L121",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-3540.md",
+            "reference-spec-version": "8dcb0a8c1c0102c87224308028632cc986a61183"
+        }
+    },
+    "tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_all_opcodes_in_container.py::test_all_invalid_terminating_opcodes[fork_PragueEIP7692-eof_test-opcode_BALANCE]": {
+        "vectors": {
+            "0": {
+                "code": "0xef0001010004020001000204002000008000015f310000000000000000000000000000000000000000000000000000000000000000",
+                "results": {
+                    "Prague": {
+                        "exception": "EOFException.MISSING_STOP_OPCODE",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0x5a5f31dcf25f199d8b9f1d18046900e74232f949052741685833ded17c36cc2a",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "Hyperledger Besu evm 24.7-develop-30c96c7",
+            "description": "Test function documentation:\n\n    Test all opcodes that are invalid as the last opcode in a container",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692-prague@v1.0.7/tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_all_opcodes_in_container.py#L121",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-3540.md",
+            "reference-spec-version": "8dcb0a8c1c0102c87224308028632cc986a61183"
+        }
+    },
+    "tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_all_opcodes_in_container.py::test_all_invalid_terminating_opcodes[fork_PragueEIP7692-eof_test-opcode_ORIGIN]": {
+        "vectors": {
+            "0": {
+                "code": "0xef000101000402000100010400200000800001320000000000000000000000000000000000000000000000000000000000000000",
+                "results": {
+                    "Prague": {
+                        "exception": "EOFException.MISSING_STOP_OPCODE",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0x33e54ba83271cef37e08fe33c9206787b51036642cfbf9b08b8162b0cc8e71d7",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "Hyperledger Besu evm 24.7-develop-30c96c7",
+            "description": "Test function documentation:\n\n    Test all opcodes that are invalid as the last opcode in a container",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692-prague@v1.0.7/tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_all_opcodes_in_container.py#L121",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-3540.md",
+            "reference-spec-version": "8dcb0a8c1c0102c87224308028632cc986a61183"
+        }
+    },
+    "tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_all_opcodes_in_container.py::test_all_invalid_terminating_opcodes[fork_PragueEIP7692-eof_test-opcode_CALLER]": {
+        "vectors": {
+            "0": {
+                "code": "0xef000101000402000100010400200000800001330000000000000000000000000000000000000000000000000000000000000000",
+                "results": {
+                    "Prague": {
+                        "exception": "EOFException.MISSING_STOP_OPCODE",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0x3af2f5e41b1fd1b682d9b437723265b73990ae00a4cee710d60166ef2b7517db",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "Hyperledger Besu evm 24.7-develop-30c96c7",
+            "description": "Test function documentation:\n\n    Test all opcodes that are invalid as the last opcode in a container",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692-prague@v1.0.7/tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_all_opcodes_in_container.py#L121",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-3540.md",
+            "reference-spec-version": "8dcb0a8c1c0102c87224308028632cc986a61183"
+        }
+    },
+    "tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_all_opcodes_in_container.py::test_all_invalid_terminating_opcodes[fork_PragueEIP7692-eof_test-opcode_CALLVALUE]": {
+        "vectors": {
+            "0": {
+                "code": "0xef000101000402000100010400200000800001340000000000000000000000000000000000000000000000000000000000000000",
+                "results": {
+                    "Prague": {
+                        "exception": "EOFException.MISSING_STOP_OPCODE",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0x3b054e48511a6d332b6f9098a9f66e9ed92b86265457d885d14fb1fe6c4439d0",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "Hyperledger Besu evm 24.7-develop-30c96c7",
+            "description": "Test function documentation:\n\n    Test all opcodes that are invalid as the last opcode in a container",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692-prague@v1.0.7/tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_all_opcodes_in_container.py#L121",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-3540.md",
+            "reference-spec-version": "8dcb0a8c1c0102c87224308028632cc986a61183"
+        }
+    },
+    "tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_all_opcodes_in_container.py::test_all_invalid_terminating_opcodes[fork_PragueEIP7692-eof_test-opcode_CALLDATALOAD]": {
+        "vectors": {
+            "0": {
+                "code": "0xef0001010004020001000204002000008000015f350000000000000000000000000000000000000000000000000000000000000000",
+                "results": {
+                    "Prague": {
+                        "exception": "EOFException.MISSING_STOP_OPCODE",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0x986bd8d80e921ec437f9246abdf17183805842cc125533262005d2af80b50c95",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "Hyperledger Besu evm 24.7-develop-30c96c7",
+            "description": "Test function documentation:\n\n    Test all opcodes that are invalid as the last opcode in a container",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692-prague@v1.0.7/tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_all_opcodes_in_container.py#L121",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-3540.md",
+            "reference-spec-version": "8dcb0a8c1c0102c87224308028632cc986a61183"
+        }
+    },
+    "tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_all_opcodes_in_container.py::test_all_invalid_terminating_opcodes[fork_PragueEIP7692-eof_test-opcode_CALLDATASIZE]": {
+        "vectors": {
+            "0": {
+                "code": "0xef000101000402000100010400200000800001360000000000000000000000000000000000000000000000000000000000000000",
+                "results": {
+                    "Prague": {
+                        "exception": "EOFException.MISSING_STOP_OPCODE",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0x9c28cfb5b0c87a58987e83630a4f1562a126cf9187fa06e9582a3932fa538f8d",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "Hyperledger Besu evm 24.7-develop-30c96c7",
+            "description": "Test function documentation:\n\n    Test all opcodes that are invalid as the last opcode in a container",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692-prague@v1.0.7/tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_all_opcodes_in_container.py#L121",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-3540.md",
+            "reference-spec-version": "8dcb0a8c1c0102c87224308028632cc986a61183"
+        }
+    },
+    "tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_all_opcodes_in_container.py::test_all_invalid_terminating_opcodes[fork_PragueEIP7692-eof_test-opcode_CALLDATACOPY]": {
+        "vectors": {
+            "0": {
+                "code": "0xef0001010004020001000404002000008000035f5f5f370000000000000000000000000000000000000000000000000000000000000000",
+                "results": {
+                    "Prague": {
+                        "exception": "EOFException.MISSING_STOP_OPCODE",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0xd320e8cb020d181195b0289e2555d6dcf95ae5a34d9cb89634c2edadf5cf8636",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "Hyperledger Besu evm 24.7-develop-30c96c7",
+            "description": "Test function documentation:\n\n    Test all opcodes that are invalid as the last opcode in a container",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692-prague@v1.0.7/tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_all_opcodes_in_container.py#L121",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-3540.md",
+            "reference-spec-version": "8dcb0a8c1c0102c87224308028632cc986a61183"
+        }
+    },
+    "tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_all_opcodes_in_container.py::test_all_invalid_terminating_opcodes[fork_PragueEIP7692-eof_test-opcode_GASPRICE]": {
+        "vectors": {
+            "0": {
+                "code": "0xef0001010004020001000104002000008000013a0000000000000000000000000000000000000000000000000000000000000000",
+                "results": {
+                    "Prague": {
+                        "exception": "EOFException.MISSING_STOP_OPCODE",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0x475fbce6ce3814c3125ab175a4ecf345e9cfd87fb4cbbba59f77722e42336505",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "Hyperledger Besu evm 24.7-develop-30c96c7",
+            "description": "Test function documentation:\n\n    Test all opcodes that are invalid as the last opcode in a container",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692-prague@v1.0.7/tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_all_opcodes_in_container.py#L121",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-3540.md",
+            "reference-spec-version": "8dcb0a8c1c0102c87224308028632cc986a61183"
+        }
+    },
+    "tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_all_opcodes_in_container.py::test_all_invalid_terminating_opcodes[fork_PragueEIP7692-eof_test-opcode_RETURNDATASIZE]": {
+        "vectors": {
+            "0": {
+                "code": "0xef0001010004020001000104002000008000013d0000000000000000000000000000000000000000000000000000000000000000",
+                "results": {
+                    "Prague": {
+                        "exception": "EOFException.MISSING_STOP_OPCODE",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0xb098f3f0ce552de97d9622a2e7019026b096934a1b3c91b901aacb05baf5e671",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "Hyperledger Besu evm 24.7-develop-30c96c7",
+            "description": "Test function documentation:\n\n    Test all opcodes that are invalid as the last opcode in a container",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692-prague@v1.0.7/tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_all_opcodes_in_container.py#L121",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-3540.md",
+            "reference-spec-version": "8dcb0a8c1c0102c87224308028632cc986a61183"
+        }
+    },
+    "tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_all_opcodes_in_container.py::test_all_invalid_terminating_opcodes[fork_PragueEIP7692-eof_test-opcode_RETURNDATACOPY]": {
+        "vectors": {
+            "0": {
+                "code": "0xef0001010004020001000404002000008000035f5f5f3e0000000000000000000000000000000000000000000000000000000000000000",
+                "results": {
+                    "Prague": {
+                        "exception": "EOFException.MISSING_STOP_OPCODE",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0x950e4c0ed611c05f38d49effe24c2e08140a9a6a42ec0b91fd13ea2e018a4b66",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "Hyperledger Besu evm 24.7-develop-30c96c7",
+            "description": "Test function documentation:\n\n    Test all opcodes that are invalid as the last opcode in a container",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692-prague@v1.0.7/tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_all_opcodes_in_container.py#L121",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-3540.md",
+            "reference-spec-version": "8dcb0a8c1c0102c87224308028632cc986a61183"
+        }
+    },
+    "tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_all_opcodes_in_container.py::test_all_invalid_terminating_opcodes[fork_PragueEIP7692-eof_test-opcode_BLOCKHASH]": {
+        "vectors": {
+            "0": {
+                "code": "0xef0001010004020001000204002000008000015f400000000000000000000000000000000000000000000000000000000000000000",
+                "results": {
+                    "Prague": {
+                        "exception": "EOFException.MISSING_STOP_OPCODE",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0xe282d636313b497c0defdfb301facec2735c4cc17490b2a3b638f256ac7442f7",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "Hyperledger Besu evm 24.7-develop-30c96c7",
+            "description": "Test function documentation:\n\n    Test all opcodes that are invalid as the last opcode in a container",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692-prague@v1.0.7/tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_all_opcodes_in_container.py#L121",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-3540.md",
+            "reference-spec-version": "8dcb0a8c1c0102c87224308028632cc986a61183"
+        }
+    },
+    "tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_all_opcodes_in_container.py::test_all_invalid_terminating_opcodes[fork_PragueEIP7692-eof_test-opcode_COINBASE]": {
+        "vectors": {
+            "0": {
+                "code": "0xef000101000402000100010400200000800001410000000000000000000000000000000000000000000000000000000000000000",
+                "results": {
+                    "Prague": {
+                        "exception": "EOFException.MISSING_STOP_OPCODE",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0xabb0e5af30175af2a3781f5fe9ee50dbb5d832062a866d47c5813a824fcd22e0",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "Hyperledger Besu evm 24.7-develop-30c96c7",
+            "description": "Test function documentation:\n\n    Test all opcodes that are invalid as the last opcode in a container",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692-prague@v1.0.7/tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_all_opcodes_in_container.py#L121",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-3540.md",
+            "reference-spec-version": "8dcb0a8c1c0102c87224308028632cc986a61183"
+        }
+    },
+    "tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_all_opcodes_in_container.py::test_all_invalid_terminating_opcodes[fork_PragueEIP7692-eof_test-opcode_TIMESTAMP]": {
+        "vectors": {
+            "0": {
+                "code": "0xef000101000402000100010400200000800001420000000000000000000000000000000000000000000000000000000000000000",
+                "results": {
+                    "Prague": {
+                        "exception": "EOFException.MISSING_STOP_OPCODE",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0xf822edabf8e1d16f0dbbcbbb4356fad24629acf30b20fc2cd352cae974d0db53",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "Hyperledger Besu evm 24.7-develop-30c96c7",
+            "description": "Test function documentation:\n\n    Test all opcodes that are invalid as the last opcode in a container",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692-prague@v1.0.7/tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_all_opcodes_in_container.py#L121",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-3540.md",
+            "reference-spec-version": "8dcb0a8c1c0102c87224308028632cc986a61183"
+        }
+    },
+    "tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_all_opcodes_in_container.py::test_all_invalid_terminating_opcodes[fork_PragueEIP7692-eof_test-opcode_NUMBER]": {
+        "vectors": {
+            "0": {
+                "code": "0xef000101000402000100010400200000800001430000000000000000000000000000000000000000000000000000000000000000",
+                "results": {
+                    "Prague": {
+                        "exception": "EOFException.MISSING_STOP_OPCODE",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0x343b165399782b9cdfd3b59609eb3c564e0663073341425926aa9ea54d467328",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "Hyperledger Besu evm 24.7-develop-30c96c7",
+            "description": "Test function documentation:\n\n    Test all opcodes that are invalid as the last opcode in a container",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692-prague@v1.0.7/tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_all_opcodes_in_container.py#L121",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-3540.md",
+            "reference-spec-version": "8dcb0a8c1c0102c87224308028632cc986a61183"
+        }
+    },
+    "tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_all_opcodes_in_container.py::test_all_invalid_terminating_opcodes[fork_PragueEIP7692-eof_test-opcode_PREVRANDAO]": {
+        "vectors": {
+            "0": {
+                "code": "0xef000101000402000100010400200000800001440000000000000000000000000000000000000000000000000000000000000000",
+                "results": {
+                    "Prague": {
+                        "exception": "EOFException.MISSING_STOP_OPCODE",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0x886e0c922aaa33ec046f3b4912da07d92cfac168c8f39e4a9b0f9381accd5238",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "Hyperledger Besu evm 24.7-develop-30c96c7",
+            "description": "Test function documentation:\n\n    Test all opcodes that are invalid as the last opcode in a container",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692-prague@v1.0.7/tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_all_opcodes_in_container.py#L121",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-3540.md",
+            "reference-spec-version": "8dcb0a8c1c0102c87224308028632cc986a61183"
+        }
+    },
+    "tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_all_opcodes_in_container.py::test_all_invalid_terminating_opcodes[fork_PragueEIP7692-eof_test-opcode_GASLIMIT]": {
+        "vectors": {
+            "0": {
+                "code": "0xef000101000402000100010400200000800001450000000000000000000000000000000000000000000000000000000000000000",
+                "results": {
+                    "Prague": {
+                        "exception": "EOFException.MISSING_STOP_OPCODE",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0xaee797e5c14652493f51a9d0ff3ec55299096243ec4a8106dfa4cc9ca6dea997",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "Hyperledger Besu evm 24.7-develop-30c96c7",
+            "description": "Test function documentation:\n\n    Test all opcodes that are invalid as the last opcode in a container",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692-prague@v1.0.7/tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_all_opcodes_in_container.py#L121",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-3540.md",
+            "reference-spec-version": "8dcb0a8c1c0102c87224308028632cc986a61183"
+        }
+    },
+    "tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_all_opcodes_in_container.py::test_all_invalid_terminating_opcodes[fork_PragueEIP7692-eof_test-opcode_CHAINID]": {
+        "vectors": {
+            "0": {
+                "code": "0xef000101000402000100010400200000800001460000000000000000000000000000000000000000000000000000000000000000",
+                "results": {
+                    "Prague": {
+                        "exception": "EOFException.MISSING_STOP_OPCODE",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0x5e8bc9ec5dffe55487b92ca596125298a7a573cc1f75430d4894c2a9d66f9b19",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "Hyperledger Besu evm 24.7-develop-30c96c7",
+            "description": "Test function documentation:\n\n    Test all opcodes that are invalid as the last opcode in a container",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692-prague@v1.0.7/tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_all_opcodes_in_container.py#L121",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-3540.md",
+            "reference-spec-version": "8dcb0a8c1c0102c87224308028632cc986a61183"
+        }
+    },
+    "tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_all_opcodes_in_container.py::test_all_invalid_terminating_opcodes[fork_PragueEIP7692-eof_test-opcode_SELFBALANCE]": {
+        "vectors": {
+            "0": {
+                "code": "0xef000101000402000100010400200000800001470000000000000000000000000000000000000000000000000000000000000000",
+                "results": {
+                    "Prague": {
+                        "exception": "EOFException.MISSING_STOP_OPCODE",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0xaee3661d08be7898e17732dd14a938ce1e1f7d06ca2716c36553204663293136",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "Hyperledger Besu evm 24.7-develop-30c96c7",
+            "description": "Test function documentation:\n\n    Test all opcodes that are invalid as the last opcode in a container",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692-prague@v1.0.7/tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_all_opcodes_in_container.py#L121",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-3540.md",
+            "reference-spec-version": "8dcb0a8c1c0102c87224308028632cc986a61183"
+        }
+    },
+    "tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_all_opcodes_in_container.py::test_all_invalid_terminating_opcodes[fork_PragueEIP7692-eof_test-opcode_BASEFEE]": {
+        "vectors": {
+            "0": {
+                "code": "0xef000101000402000100010400200000800001480000000000000000000000000000000000000000000000000000000000000000",
+                "results": {
+                    "Prague": {
+                        "exception": "EOFException.MISSING_STOP_OPCODE",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0x252bd61e01e202f739208534090386046bf1ad055eb3f10fb219301604dfcccd",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "Hyperledger Besu evm 24.7-develop-30c96c7",
+            "description": "Test function documentation:\n\n    Test all opcodes that are invalid as the last opcode in a container",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692-prague@v1.0.7/tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_all_opcodes_in_container.py#L121",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-3540.md",
+            "reference-spec-version": "8dcb0a8c1c0102c87224308028632cc986a61183"
+        }
+    },
+    "tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_all_opcodes_in_container.py::test_all_invalid_terminating_opcodes[fork_PragueEIP7692-eof_test-opcode_BLOBHASH]": {
+        "vectors": {
+            "0": {
+                "code": "0xef0001010004020001000204002000008000015f490000000000000000000000000000000000000000000000000000000000000000",
+                "results": {
+                    "Prague": {
+                        "exception": "EOFException.MISSING_STOP_OPCODE",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0x12e4d171480d82aec9dcd25a55004fb5466049e4735b0043b0356890a2dd8067",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "Hyperledger Besu evm 24.7-develop-30c96c7",
+            "description": "Test function documentation:\n\n    Test all opcodes that are invalid as the last opcode in a container",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692-prague@v1.0.7/tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_all_opcodes_in_container.py#L121",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-3540.md",
+            "reference-spec-version": "8dcb0a8c1c0102c87224308028632cc986a61183"
+        }
+    },
+    "tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_all_opcodes_in_container.py::test_all_invalid_terminating_opcodes[fork_PragueEIP7692-eof_test-opcode_BLOBBASEFEE]": {
+        "vectors": {
+            "0": {
+                "code": "0xef0001010004020001000104002000008000014a0000000000000000000000000000000000000000000000000000000000000000",
+                "results": {
+                    "Prague": {
+                        "exception": "EOFException.MISSING_STOP_OPCODE",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0x680e3aabcfd439b936bb94241451eced551e3545f6689cad0129ddd8a2afba88",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "Hyperledger Besu evm 24.7-develop-30c96c7",
+            "description": "Test function documentation:\n\n    Test all opcodes that are invalid as the last opcode in a container",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692-prague@v1.0.7/tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_all_opcodes_in_container.py#L121",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-3540.md",
+            "reference-spec-version": "8dcb0a8c1c0102c87224308028632cc986a61183"
+        }
+    },
+    "tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_all_opcodes_in_container.py::test_all_invalid_terminating_opcodes[fork_PragueEIP7692-eof_test-opcode_POP]": {
+        "vectors": {
+            "0": {
+                "code": "0xef0001010004020001000204002000008000015f500000000000000000000000000000000000000000000000000000000000000000",
+                "results": {
+                    "Prague": {
+                        "exception": "EOFException.MISSING_STOP_OPCODE",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0xc392029b659b6b9866c863d8335655e4f6d33c54f8042ecc0bd1297f3978cc9a",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "Hyperledger Besu evm 24.7-develop-30c96c7",
+            "description": "Test function documentation:\n\n    Test all opcodes that are invalid as the last opcode in a container",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692-prague@v1.0.7/tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_all_opcodes_in_container.py#L121",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-3540.md",
+            "reference-spec-version": "8dcb0a8c1c0102c87224308028632cc986a61183"
+        }
+    },
+    "tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_all_opcodes_in_container.py::test_all_invalid_terminating_opcodes[fork_PragueEIP7692-eof_test-opcode_MLOAD]": {
+        "vectors": {
+            "0": {
+                "code": "0xef0001010004020001000204002000008000015f510000000000000000000000000000000000000000000000000000000000000000",
+                "results": {
+                    "Prague": {
+                        "exception": "EOFException.MISSING_STOP_OPCODE",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0x19228521120815eecf8e63b1309b420ac0bbb53f71a1e126ab0e1c81c6f7f3ac",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "Hyperledger Besu evm 24.7-develop-30c96c7",
+            "description": "Test function documentation:\n\n    Test all opcodes that are invalid as the last opcode in a container",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692-prague@v1.0.7/tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_all_opcodes_in_container.py#L121",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-3540.md",
+            "reference-spec-version": "8dcb0a8c1c0102c87224308028632cc986a61183"
+        }
+    },
+    "tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_all_opcodes_in_container.py::test_all_invalid_terminating_opcodes[fork_PragueEIP7692-eof_test-opcode_MSTORE]": {
+        "vectors": {
+            "0": {
+                "code": "0xef0001010004020001000304002000008000025f5f520000000000000000000000000000000000000000000000000000000000000000",
+                "results": {
+                    "Prague": {
+                        "exception": "EOFException.MISSING_STOP_OPCODE",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0x910b8837207fd6f0564cb1e62ae451df68e4ca54d0e0e67d3292e825ba11837e",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "Hyperledger Besu evm 24.7-develop-30c96c7",
+            "description": "Test function documentation:\n\n    Test all opcodes that are invalid as the last opcode in a container",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692-prague@v1.0.7/tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_all_opcodes_in_container.py#L121",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-3540.md",
+            "reference-spec-version": "8dcb0a8c1c0102c87224308028632cc986a61183"
+        }
+    },
+    "tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_all_opcodes_in_container.py::test_all_invalid_terminating_opcodes[fork_PragueEIP7692-eof_test-opcode_MSTORE8]": {
+        "vectors": {
+            "0": {
+                "code": "0xef0001010004020001000304002000008000025f5f530000000000000000000000000000000000000000000000000000000000000000",
+                "results": {
+                    "Prague": {
+                        "exception": "EOFException.MISSING_STOP_OPCODE",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0x91850b8173160cca9adeabdf47a748a6655fbf45c676aa1d17be49d29e0c341e",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "Hyperledger Besu evm 24.7-develop-30c96c7",
+            "description": "Test function documentation:\n\n    Test all opcodes that are invalid as the last opcode in a container",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692-prague@v1.0.7/tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_all_opcodes_in_container.py#L121",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-3540.md",
+            "reference-spec-version": "8dcb0a8c1c0102c87224308028632cc986a61183"
+        }
+    },
+    "tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_all_opcodes_in_container.py::test_all_invalid_terminating_opcodes[fork_PragueEIP7692-eof_test-opcode_SLOAD]": {
+        "vectors": {
+            "0": {
+                "code": "0xef0001010004020001000204002000008000015f540000000000000000000000000000000000000000000000000000000000000000",
+                "results": {
+                    "Prague": {
+                        "exception": "EOFException.MISSING_STOP_OPCODE",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0x8eb454b0657cd28c4d98d7495c2cde3886080248b457c3eeba4ecd8e2b32aa14",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "Hyperledger Besu evm 24.7-develop-30c96c7",
+            "description": "Test function documentation:\n\n    Test all opcodes that are invalid as the last opcode in a container",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692-prague@v1.0.7/tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_all_opcodes_in_container.py#L121",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-3540.md",
+            "reference-spec-version": "8dcb0a8c1c0102c87224308028632cc986a61183"
+        }
+    },
+    "tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_all_opcodes_in_container.py::test_all_invalid_terminating_opcodes[fork_PragueEIP7692-eof_test-opcode_SSTORE]": {
+        "vectors": {
+            "0": {
+                "code": "0xef0001010004020001000304002000008000025f5f550000000000000000000000000000000000000000000000000000000000000000",
+                "results": {
+                    "Prague": {
+                        "exception": "EOFException.MISSING_STOP_OPCODE",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0x43ab13d611092daaa9e9f6f809b64bc47b79e16a0023f8d7855672ccf1c03c0e",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "Hyperledger Besu evm 24.7-develop-30c96c7",
+            "description": "Test function documentation:\n\n    Test all opcodes that are invalid as the last opcode in a container",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692-prague@v1.0.7/tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_all_opcodes_in_container.py#L121",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-3540.md",
+            "reference-spec-version": "8dcb0a8c1c0102c87224308028632cc986a61183"
+        }
+    },
+    "tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_all_opcodes_in_container.py::test_all_invalid_terminating_opcodes[fork_PragueEIP7692-eof_test-opcode_MSIZE]": {
+        "vectors": {
+            "0": {
+                "code": "0xef000101000402000100010400200000800001590000000000000000000000000000000000000000000000000000000000000000",
+                "results": {
+                    "Prague": {
+                        "exception": "EOFException.MISSING_STOP_OPCODE",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0x0b19abef2f0a713aa244b300c686292c2dcb9ec78c3f10cabe333cb86b20c5a1",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "Hyperledger Besu evm 24.7-develop-30c96c7",
+            "description": "Test function documentation:\n\n    Test all opcodes that are invalid as the last opcode in a container",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692-prague@v1.0.7/tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_all_opcodes_in_container.py#L121",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-3540.md",
+            "reference-spec-version": "8dcb0a8c1c0102c87224308028632cc986a61183"
+        }
+    },
+    "tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_all_opcodes_in_container.py::test_all_invalid_terminating_opcodes[fork_PragueEIP7692-eof_test-opcode_JUMPDEST]": {
+        "vectors": {
+            "0": {
+                "code": "0xef0001010004020001000104002000008000005b0000000000000000000000000000000000000000000000000000000000000000",
+                "results": {
+                    "Prague": {
+                        "exception": "EOFException.MISSING_STOP_OPCODE",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0x423a9c75c3f31e4c27d4bad5823c5f8c66eb8918b1c63bed897d9e969621d589",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "Hyperledger Besu evm 24.7-develop-30c96c7",
+            "description": "Test function documentation:\n\n    Test all opcodes that are invalid as the last opcode in a container",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692-prague@v1.0.7/tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_all_opcodes_in_container.py#L121",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-3540.md",
+            "reference-spec-version": "8dcb0a8c1c0102c87224308028632cc986a61183"
+        }
+    },
+    "tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_all_opcodes_in_container.py::test_all_invalid_terminating_opcodes[fork_PragueEIP7692-eof_test-opcode_TLOAD]": {
+        "vectors": {
+            "0": {
+                "code": "0xef0001010004020001000204002000008000015f5c0000000000000000000000000000000000000000000000000000000000000000",
+                "results": {
+                    "Prague": {
+                        "exception": "EOFException.MISSING_STOP_OPCODE",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0x0db9a17c88a973f92553ab59e1f8afe06960f335719ede1259763c641676c8a8",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "Hyperledger Besu evm 24.7-develop-30c96c7",
+            "description": "Test function documentation:\n\n    Test all opcodes that are invalid as the last opcode in a container",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692-prague@v1.0.7/tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_all_opcodes_in_container.py#L121",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-3540.md",
+            "reference-spec-version": "8dcb0a8c1c0102c87224308028632cc986a61183"
+        }
+    },
+    "tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_all_opcodes_in_container.py::test_all_invalid_terminating_opcodes[fork_PragueEIP7692-eof_test-opcode_TSTORE]": {
+        "vectors": {
+            "0": {
+                "code": "0xef0001010004020001000304002000008000025f5f5d0000000000000000000000000000000000000000000000000000000000000000",
+                "results": {
+                    "Prague": {
+                        "exception": "EOFException.MISSING_STOP_OPCODE",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0x0e633a716d1572bfbe4054cba9b35e4b82ebac1c55d05d8dda2167d8f73e7e84",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "Hyperledger Besu evm 24.7-develop-30c96c7",
+            "description": "Test function documentation:\n\n    Test all opcodes that are invalid as the last opcode in a container",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692-prague@v1.0.7/tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_all_opcodes_in_container.py#L121",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-3540.md",
+            "reference-spec-version": "8dcb0a8c1c0102c87224308028632cc986a61183"
+        }
+    },
+    "tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_all_opcodes_in_container.py::test_all_invalid_terminating_opcodes[fork_PragueEIP7692-eof_test-opcode_MCOPY]": {
+        "vectors": {
+            "0": {
+                "code": "0xef0001010004020001000404002000008000035f5f5f5e0000000000000000000000000000000000000000000000000000000000000000",
+                "results": {
+                    "Prague": {
+                        "exception": "EOFException.MISSING_STOP_OPCODE",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0x28208e9453b5e1ac24ef898ddeeaf7ecc131d45aec886bf58ce94be4b979b2f2",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "Hyperledger Besu evm 24.7-develop-30c96c7",
+            "description": "Test function documentation:\n\n    Test all opcodes that are invalid as the last opcode in a container",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692-prague@v1.0.7/tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_all_opcodes_in_container.py#L121",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-3540.md",
+            "reference-spec-version": "8dcb0a8c1c0102c87224308028632cc986a61183"
+        }
+    },
+    "tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_all_opcodes_in_container.py::test_all_invalid_terminating_opcodes[fork_PragueEIP7692-eof_test-opcode_PUSH0]": {
+        "vectors": {
+            "0": {
+                "code": "0xef0001010004020001000104002000008000015f0000000000000000000000000000000000000000000000000000000000000000",
+                "results": {
+                    "Prague": {
+                        "exception": "EOFException.MISSING_STOP_OPCODE",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0xf254be44859fb931b87f032add60f0488f82754a23206234e453d7ced75e4ef4",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "Hyperledger Besu evm 24.7-develop-30c96c7",
+            "description": "Test function documentation:\n\n    Test all opcodes that are invalid as the last opcode in a container",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692-prague@v1.0.7/tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_all_opcodes_in_container.py#L121",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-3540.md",
+            "reference-spec-version": "8dcb0a8c1c0102c87224308028632cc986a61183"
+        }
+    },
+    "tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_all_opcodes_in_container.py::test_all_invalid_terminating_opcodes[fork_PragueEIP7692-eof_test-opcode_PUSH1]": {
+        "vectors": {
+            "0": {
+                "code": "0xef00010100040200010002040020000080000160000000000000000000000000000000000000000000000000000000000000000000",
+                "results": {
+                    "Prague": {
+                        "exception": "EOFException.MISSING_STOP_OPCODE",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0x8429b446d5d5c90396daea1a985072194046281f0bf101b72e56a8e7d3fe7d39",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "Hyperledger Besu evm 24.7-develop-30c96c7",
+            "description": "Test function documentation:\n\n    Test all opcodes that are invalid as the last opcode in a container",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692-prague@v1.0.7/tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_all_opcodes_in_container.py#L121",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-3540.md",
+            "reference-spec-version": "8dcb0a8c1c0102c87224308028632cc986a61183"
+        }
+    },
+    "tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_all_opcodes_in_container.py::test_all_invalid_terminating_opcodes[fork_PragueEIP7692-eof_test-opcode_PUSH2]": {
+        "vectors": {
+            "0": {
+                "code": "0xef0001010004020001000304002000008000016100000000000000000000000000000000000000000000000000000000000000000000",
+                "results": {
+                    "Prague": {
+                        "exception": "EOFException.MISSING_STOP_OPCODE",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0x9817cc4cff9ddabb53aaf7b8a26c0b0e05bb9026a7f684b67af101ed276f06da",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "Hyperledger Besu evm 24.7-develop-30c96c7",
+            "description": "Test function documentation:\n\n    Test all opcodes that are invalid as the last opcode in a container",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692-prague@v1.0.7/tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_all_opcodes_in_container.py#L121",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-3540.md",
+            "reference-spec-version": "8dcb0a8c1c0102c87224308028632cc986a61183"
+        }
+    },
+    "tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_all_opcodes_in_container.py::test_all_invalid_terminating_opcodes[fork_PragueEIP7692-eof_test-opcode_PUSH3]": {
+        "vectors": {
+            "0": {
+                "code": "0xef000101000402000100040400200000800001620000000000000000000000000000000000000000000000000000000000000000000000",
+                "results": {
+                    "Prague": {
+                        "exception": "EOFException.MISSING_STOP_OPCODE",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0x58de65afcb220d73be89266abf497e4da62497728a24ff5ba0b2551aa3ecbdd9",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "Hyperledger Besu evm 24.7-develop-30c96c7",
+            "description": "Test function documentation:\n\n    Test all opcodes that are invalid as the last opcode in a container",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692-prague@v1.0.7/tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_all_opcodes_in_container.py#L121",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-3540.md",
+            "reference-spec-version": "8dcb0a8c1c0102c87224308028632cc986a61183"
+        }
+    },
+    "tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_all_opcodes_in_container.py::test_all_invalid_terminating_opcodes[fork_PragueEIP7692-eof_test-opcode_PUSH4]": {
+        "vectors": {
+            "0": {
+                "code": "0xef00010100040200010005040020000080000163000000000000000000000000000000000000000000000000000000000000000000000000",
+                "results": {
+                    "Prague": {
+                        "exception": "EOFException.MISSING_STOP_OPCODE",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0x5a176effef1f2178373b3bca567949039e7b2620f6af75977ebc32011e5fb209",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "Hyperledger Besu evm 24.7-develop-30c96c7",
+            "description": "Test function documentation:\n\n    Test all opcodes that are invalid as the last opcode in a container",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692-prague@v1.0.7/tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_all_opcodes_in_container.py#L121",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-3540.md",
+            "reference-spec-version": "8dcb0a8c1c0102c87224308028632cc986a61183"
+        }
+    },
+    "tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_all_opcodes_in_container.py::test_all_invalid_terminating_opcodes[fork_PragueEIP7692-eof_test-opcode_PUSH5]": {
+        "vectors": {
+            "0": {
+                "code": "0xef0001010004020001000604002000008000016400000000000000000000000000000000000000000000000000000000000000000000000000",
+                "results": {
+                    "Prague": {
+                        "exception": "EOFException.MISSING_STOP_OPCODE",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0x06696e286fc1951f2d2143a68e2c080df337ca047563eb77b51337915ead2871",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "Hyperledger Besu evm 24.7-develop-30c96c7",
+            "description": "Test function documentation:\n\n    Test all opcodes that are invalid as the last opcode in a container",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692-prague@v1.0.7/tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_all_opcodes_in_container.py#L121",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-3540.md",
+            "reference-spec-version": "8dcb0a8c1c0102c87224308028632cc986a61183"
+        }
+    },
+    "tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_all_opcodes_in_container.py::test_all_invalid_terminating_opcodes[fork_PragueEIP7692-eof_test-opcode_PUSH6]": {
+        "vectors": {
+            "0": {
+                "code": "0xef000101000402000100070400200000800001650000000000000000000000000000000000000000000000000000000000000000000000000000",
+                "results": {
+                    "Prague": {
+                        "exception": "EOFException.MISSING_STOP_OPCODE",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0xc64b0c6859c4ff2e90af69b256883c283d48fd78f072a763fbb93b3d05797bde",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "Hyperledger Besu evm 24.7-develop-30c96c7",
+            "description": "Test function documentation:\n\n    Test all opcodes that are invalid as the last opcode in a container",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692-prague@v1.0.7/tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_all_opcodes_in_container.py#L121",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-3540.md",
+            "reference-spec-version": "8dcb0a8c1c0102c87224308028632cc986a61183"
+        }
+    },
+    "tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_all_opcodes_in_container.py::test_all_invalid_terminating_opcodes[fork_PragueEIP7692-eof_test-opcode_PUSH7]": {
+        "vectors": {
+            "0": {
+                "code": "0xef00010100040200010008040020000080000166000000000000000000000000000000000000000000000000000000000000000000000000000000",
+                "results": {
+                    "Prague": {
+                        "exception": "EOFException.MISSING_STOP_OPCODE",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0x7f7f9efe253b95e3d3e86cc658a9797abd78eec639fb3b47db5b1a49cc5685a9",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "Hyperledger Besu evm 24.7-develop-30c96c7",
+            "description": "Test function documentation:\n\n    Test all opcodes that are invalid as the last opcode in a container",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692-prague@v1.0.7/tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_all_opcodes_in_container.py#L121",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-3540.md",
+            "reference-spec-version": "8dcb0a8c1c0102c87224308028632cc986a61183"
+        }
+    },
+    "tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_all_opcodes_in_container.py::test_all_invalid_terminating_opcodes[fork_PragueEIP7692-eof_test-opcode_PUSH8]": {
+        "vectors": {
+            "0": {
+                "code": "0xef0001010004020001000904002000008000016700000000000000000000000000000000000000000000000000000000000000000000000000000000",
+                "results": {
+                    "Prague": {
+                        "exception": "EOFException.MISSING_STOP_OPCODE",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0x40baabc69d60d3fb5e63affa0e46ba80dabf45d96bb5f5c35585893ad6bcaf38",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "Hyperledger Besu evm 24.7-develop-30c96c7",
+            "description": "Test function documentation:\n\n    Test all opcodes that are invalid as the last opcode in a container",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692-prague@v1.0.7/tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_all_opcodes_in_container.py#L121",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-3540.md",
+            "reference-spec-version": "8dcb0a8c1c0102c87224308028632cc986a61183"
+        }
+    },
+    "tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_all_opcodes_in_container.py::test_all_invalid_terminating_opcodes[fork_PragueEIP7692-eof_test-opcode_PUSH9]": {
+        "vectors": {
+            "0": {
+                "code": "0xef0001010004020001000a0400200000800001680000000000000000000000000000000000000000000000000000000000000000000000000000000000",
+                "results": {
+                    "Prague": {
+                        "exception": "EOFException.MISSING_STOP_OPCODE",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0xbda3cb00ca3ee5d8ee70483ebccdbac448bbb618d320aedb374bd6d19578ec97",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "Hyperledger Besu evm 24.7-develop-30c96c7",
+            "description": "Test function documentation:\n\n    Test all opcodes that are invalid as the last opcode in a container",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692-prague@v1.0.7/tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_all_opcodes_in_container.py#L121",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-3540.md",
+            "reference-spec-version": "8dcb0a8c1c0102c87224308028632cc986a61183"
+        }
+    },
+    "tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_all_opcodes_in_container.py::test_all_invalid_terminating_opcodes[fork_PragueEIP7692-eof_test-opcode_PUSH10]": {
+        "vectors": {
+            "0": {
+                "code": "0xef0001010004020001000b040020000080000169000000000000000000000000000000000000000000000000000000000000000000000000000000000000",
+                "results": {
+                    "Prague": {
+                        "exception": "EOFException.MISSING_STOP_OPCODE",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0x4beec2074f09003cb34f406990f4a4a993b7cfd4ebe3023880c6331ece0ab6bf",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "Hyperledger Besu evm 24.7-develop-30c96c7",
+            "description": "Test function documentation:\n\n    Test all opcodes that are invalid as the last opcode in a container",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692-prague@v1.0.7/tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_all_opcodes_in_container.py#L121",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-3540.md",
+            "reference-spec-version": "8dcb0a8c1c0102c87224308028632cc986a61183"
+        }
+    },
+    "tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_all_opcodes_in_container.py::test_all_invalid_terminating_opcodes[fork_PragueEIP7692-eof_test-opcode_PUSH11]": {
+        "vectors": {
+            "0": {
+                "code": "0xef0001010004020001000c04002000008000016a00000000000000000000000000000000000000000000000000000000000000000000000000000000000000",
+                "results": {
+                    "Prague": {
+                        "exception": "EOFException.MISSING_STOP_OPCODE",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0xdc258e4cf122baf7dd57920ceb7961dd05d5a849d44d782a5ea25ab74e1bbfbb",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "Hyperledger Besu evm 24.7-develop-30c96c7",
+            "description": "Test function documentation:\n\n    Test all opcodes that are invalid as the last opcode in a container",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692-prague@v1.0.7/tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_all_opcodes_in_container.py#L121",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-3540.md",
+            "reference-spec-version": "8dcb0a8c1c0102c87224308028632cc986a61183"
+        }
+    },
+    "tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_all_opcodes_in_container.py::test_all_invalid_terminating_opcodes[fork_PragueEIP7692-eof_test-opcode_PUSH12]": {
+        "vectors": {
+            "0": {
+                "code": "0xef0001010004020001000d04002000008000016b0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000",
+                "results": {
+                    "Prague": {
+                        "exception": "EOFException.MISSING_STOP_OPCODE",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0xb5ddd5ade8ece7130c8f34b888b558b0e1ef35df5bae1d5f0779cfa07fd9e7b2",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "Hyperledger Besu evm 24.7-develop-30c96c7",
+            "description": "Test function documentation:\n\n    Test all opcodes that are invalid as the last opcode in a container",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692-prague@v1.0.7/tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_all_opcodes_in_container.py#L121",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-3540.md",
+            "reference-spec-version": "8dcb0a8c1c0102c87224308028632cc986a61183"
+        }
+    },
+    "tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_all_opcodes_in_container.py::test_all_invalid_terminating_opcodes[fork_PragueEIP7692-eof_test-opcode_PUSH13]": {
+        "vectors": {
+            "0": {
+                "code": "0xef0001010004020001000e04002000008000016c000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000",
+                "results": {
+                    "Prague": {
+                        "exception": "EOFException.MISSING_STOP_OPCODE",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0x4c47eab05679ef195570f9aa47e452537ef20112a18e350c184549734ccb2721",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "Hyperledger Besu evm 24.7-develop-30c96c7",
+            "description": "Test function documentation:\n\n    Test all opcodes that are invalid as the last opcode in a container",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692-prague@v1.0.7/tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_all_opcodes_in_container.py#L121",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-3540.md",
+            "reference-spec-version": "8dcb0a8c1c0102c87224308028632cc986a61183"
+        }
+    },
+    "tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_all_opcodes_in_container.py::test_all_invalid_terminating_opcodes[fork_PragueEIP7692-eof_test-opcode_PUSH14]": {
+        "vectors": {
+            "0": {
+                "code": "0xef0001010004020001000f04002000008000016d00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000",
+                "results": {
+                    "Prague": {
+                        "exception": "EOFException.MISSING_STOP_OPCODE",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0x8f0173adefddf363cfc715f170d0bd6c44a4ba734c30d03d3dff86660bab1229",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "Hyperledger Besu evm 24.7-develop-30c96c7",
+            "description": "Test function documentation:\n\n    Test all opcodes that are invalid as the last opcode in a container",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692-prague@v1.0.7/tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_all_opcodes_in_container.py#L121",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-3540.md",
+            "reference-spec-version": "8dcb0a8c1c0102c87224308028632cc986a61183"
+        }
+    },
+    "tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_all_opcodes_in_container.py::test_all_invalid_terminating_opcodes[fork_PragueEIP7692-eof_test-opcode_PUSH15]": {
+        "vectors": {
+            "0": {
+                "code": "0xef0001010004020001001004002000008000016e0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000",
+                "results": {
+                    "Prague": {
+                        "exception": "EOFException.MISSING_STOP_OPCODE",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0x5505aec9e3c0ad71a820bae0eb231b994189cc950f1cfdcf1aeebaf24d3d043d",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "Hyperledger Besu evm 24.7-develop-30c96c7",
+            "description": "Test function documentation:\n\n    Test all opcodes that are invalid as the last opcode in a container",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692-prague@v1.0.7/tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_all_opcodes_in_container.py#L121",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-3540.md",
+            "reference-spec-version": "8dcb0a8c1c0102c87224308028632cc986a61183"
+        }
+    },
+    "tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_all_opcodes_in_container.py::test_all_invalid_terminating_opcodes[fork_PragueEIP7692-eof_test-opcode_PUSH16]": {
+        "vectors": {
+            "0": {
+                "code": "0xef0001010004020001001104002000008000016f000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000",
+                "results": {
+                    "Prague": {
+                        "exception": "EOFException.MISSING_STOP_OPCODE",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0x3be4f92bf366438f1ad2bb20d14a06deaa152fdc0650efdbc982582210a4caef",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "Hyperledger Besu evm 24.7-develop-30c96c7",
+            "description": "Test function documentation:\n\n    Test all opcodes that are invalid as the last opcode in a container",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692-prague@v1.0.7/tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_all_opcodes_in_container.py#L121",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-3540.md",
+            "reference-spec-version": "8dcb0a8c1c0102c87224308028632cc986a61183"
+        }
+    },
+    "tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_all_opcodes_in_container.py::test_all_invalid_terminating_opcodes[fork_PragueEIP7692-eof_test-opcode_PUSH17]": {
+        "vectors": {
+            "0": {
+                "code": "0xef0001010004020001001204002000008000017000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000",
+                "results": {
+                    "Prague": {
+                        "exception": "EOFException.MISSING_STOP_OPCODE",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0x6a9129a3eb9a49dee525acba20e8fc1f91e7297d37e9921df41a8045a147f2ea",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "Hyperledger Besu evm 24.7-develop-30c96c7",
+            "description": "Test function documentation:\n\n    Test all opcodes that are invalid as the last opcode in a container",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692-prague@v1.0.7/tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_all_opcodes_in_container.py#L121",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-3540.md",
+            "reference-spec-version": "8dcb0a8c1c0102c87224308028632cc986a61183"
+        }
+    },
+    "tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_all_opcodes_in_container.py::test_all_invalid_terminating_opcodes[fork_PragueEIP7692-eof_test-opcode_PUSH18]": {
+        "vectors": {
+            "0": {
+                "code": "0xef000101000402000100130400200000800001710000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000",
+                "results": {
+                    "Prague": {
+                        "exception": "EOFException.MISSING_STOP_OPCODE",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0x4a7e072ac7848a5d2ffa6eeb7193912f15c246e6e49140de876990e70b8d5562",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "Hyperledger Besu evm 24.7-develop-30c96c7",
+            "description": "Test function documentation:\n\n    Test all opcodes that are invalid as the last opcode in a container",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692-prague@v1.0.7/tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_all_opcodes_in_container.py#L121",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-3540.md",
+            "reference-spec-version": "8dcb0a8c1c0102c87224308028632cc986a61183"
+        }
+    },
+    "tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_all_opcodes_in_container.py::test_all_invalid_terminating_opcodes[fork_PragueEIP7692-eof_test-opcode_PUSH19]": {
+        "vectors": {
+            "0": {
+                "code": "0xef00010100040200010014040020000080000172000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000",
+                "results": {
+                    "Prague": {
+                        "exception": "EOFException.MISSING_STOP_OPCODE",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0x45bc1227181679106839376b10b84d0435d6a71e81d87e6ad4255bcb137a677f",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "Hyperledger Besu evm 24.7-develop-30c96c7",
+            "description": "Test function documentation:\n\n    Test all opcodes that are invalid as the last opcode in a container",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692-prague@v1.0.7/tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_all_opcodes_in_container.py#L121",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-3540.md",
+            "reference-spec-version": "8dcb0a8c1c0102c87224308028632cc986a61183"
+        }
+    },
+    "tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_all_opcodes_in_container.py::test_all_invalid_terminating_opcodes[fork_PragueEIP7692-eof_test-opcode_PUSH20]": {
+        "vectors": {
+            "0": {
+                "code": "0xef0001010004020001001504002000008000017300000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000",
+                "results": {
+                    "Prague": {
+                        "exception": "EOFException.MISSING_STOP_OPCODE",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0x90791abfbe8a1eeca57ba912ef82ad8515c2ed554b373216d1da5466ad92bf2f",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "Hyperledger Besu evm 24.7-develop-30c96c7",
+            "description": "Test function documentation:\n\n    Test all opcodes that are invalid as the last opcode in a container",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692-prague@v1.0.7/tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_all_opcodes_in_container.py#L121",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-3540.md",
+            "reference-spec-version": "8dcb0a8c1c0102c87224308028632cc986a61183"
+        }
+    },
+    "tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_all_opcodes_in_container.py::test_all_invalid_terminating_opcodes[fork_PragueEIP7692-eof_test-opcode_PUSH21]": {
+        "vectors": {
+            "0": {
+                "code": "0xef000101000402000100160400200000800001740000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000",
+                "results": {
+                    "Prague": {
+                        "exception": "EOFException.MISSING_STOP_OPCODE",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0x3221b035ea9ecbd3cdc9d53ea71be1f98d7ad4b3fa3224792f5528cbc7a13e07",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "Hyperledger Besu evm 24.7-develop-30c96c7",
+            "description": "Test function documentation:\n\n    Test all opcodes that are invalid as the last opcode in a container",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692-prague@v1.0.7/tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_all_opcodes_in_container.py#L121",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-3540.md",
+            "reference-spec-version": "8dcb0a8c1c0102c87224308028632cc986a61183"
+        }
+    },
+    "tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_all_opcodes_in_container.py::test_all_invalid_terminating_opcodes[fork_PragueEIP7692-eof_test-opcode_PUSH22]": {
+        "vectors": {
+            "0": {
+                "code": "0xef00010100040200010017040020000080000175000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000",
+                "results": {
+                    "Prague": {
+                        "exception": "EOFException.MISSING_STOP_OPCODE",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0x8099e9db053e0320149bd77dc2af08e95123262d87c2e4ab9f637e0e3ee4e62c",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "Hyperledger Besu evm 24.7-develop-30c96c7",
+            "description": "Test function documentation:\n\n    Test all opcodes that are invalid as the last opcode in a container",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692-prague@v1.0.7/tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_all_opcodes_in_container.py#L121",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-3540.md",
+            "reference-spec-version": "8dcb0a8c1c0102c87224308028632cc986a61183"
+        }
+    },
+    "tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_all_opcodes_in_container.py::test_all_invalid_terminating_opcodes[fork_PragueEIP7692-eof_test-opcode_PUSH23]": {
+        "vectors": {
+            "0": {
+                "code": "0xef0001010004020001001804002000008000017600000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000",
+                "results": {
+                    "Prague": {
+                        "exception": "EOFException.MISSING_STOP_OPCODE",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0xbe62e6cde0f1c471692426de589105aaa5416641ec532e16af50ec21e329635f",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "Hyperledger Besu evm 24.7-develop-30c96c7",
+            "description": "Test function documentation:\n\n    Test all opcodes that are invalid as the last opcode in a container",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692-prague@v1.0.7/tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_all_opcodes_in_container.py#L121",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-3540.md",
+            "reference-spec-version": "8dcb0a8c1c0102c87224308028632cc986a61183"
+        }
+    },
+    "tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_all_opcodes_in_container.py::test_all_invalid_terminating_opcodes[fork_PragueEIP7692-eof_test-opcode_PUSH24]": {
+        "vectors": {
+            "0": {
+                "code": "0xef000101000402000100190400200000800001770000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000",
+                "results": {
+                    "Prague": {
+                        "exception": "EOFException.MISSING_STOP_OPCODE",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0xe829207a0f526bc6495ca95b26cdfac2095a4fe6ffefdabc735f827a61d876cd",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "Hyperledger Besu evm 24.7-develop-30c96c7",
+            "description": "Test function documentation:\n\n    Test all opcodes that are invalid as the last opcode in a container",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692-prague@v1.0.7/tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_all_opcodes_in_container.py#L121",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-3540.md",
+            "reference-spec-version": "8dcb0a8c1c0102c87224308028632cc986a61183"
+        }
+    },
+    "tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_all_opcodes_in_container.py::test_all_invalid_terminating_opcodes[fork_PragueEIP7692-eof_test-opcode_PUSH25]": {
+        "vectors": {
+            "0": {
+                "code": "0xef0001010004020001001a040020000080000178000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000",
+                "results": {
+                    "Prague": {
+                        "exception": "EOFException.MISSING_STOP_OPCODE",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0x34cc79bc75ff5d59f90bcad170bf246a74a834c2bdfbec7d792c514829f69163",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "Hyperledger Besu evm 24.7-develop-30c96c7",
+            "description": "Test function documentation:\n\n    Test all opcodes that are invalid as the last opcode in a container",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692-prague@v1.0.7/tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_all_opcodes_in_container.py#L121",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-3540.md",
+            "reference-spec-version": "8dcb0a8c1c0102c87224308028632cc986a61183"
+        }
+    },
+    "tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_all_opcodes_in_container.py::test_all_invalid_terminating_opcodes[fork_PragueEIP7692-eof_test-opcode_PUSH26]": {
+        "vectors": {
+            "0": {
+                "code": "0xef0001010004020001001b04002000008000017900000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000",
+                "results": {
+                    "Prague": {
+                        "exception": "EOFException.MISSING_STOP_OPCODE",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0x4acc71d3c1010a17f2a0e67b2c78a4cb00c5fc70d7287f5df674b1aaefc9ed40",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "Hyperledger Besu evm 24.7-develop-30c96c7",
+            "description": "Test function documentation:\n\n    Test all opcodes that are invalid as the last opcode in a container",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692-prague@v1.0.7/tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_all_opcodes_in_container.py#L121",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-3540.md",
+            "reference-spec-version": "8dcb0a8c1c0102c87224308028632cc986a61183"
+        }
+    },
+    "tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_all_opcodes_in_container.py::test_all_invalid_terminating_opcodes[fork_PragueEIP7692-eof_test-opcode_PUSH27]": {
+        "vectors": {
+            "0": {
+                "code": "0xef0001010004020001001c04002000008000017a0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000",
+                "results": {
+                    "Prague": {
+                        "exception": "EOFException.MISSING_STOP_OPCODE",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0xadf1e8215b999632f1ff9bd300d95cf611445f629610db9747b16126e5678819",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "Hyperledger Besu evm 24.7-develop-30c96c7",
+            "description": "Test function documentation:\n\n    Test all opcodes that are invalid as the last opcode in a container",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692-prague@v1.0.7/tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_all_opcodes_in_container.py#L121",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-3540.md",
+            "reference-spec-version": "8dcb0a8c1c0102c87224308028632cc986a61183"
+        }
+    },
+    "tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_all_opcodes_in_container.py::test_all_invalid_terminating_opcodes[fork_PragueEIP7692-eof_test-opcode_PUSH28]": {
+        "vectors": {
+            "0": {
+                "code": "0xef0001010004020001001d04002000008000017b000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000",
+                "results": {
+                    "Prague": {
+                        "exception": "EOFException.MISSING_STOP_OPCODE",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0x6f6b3917ce2c168071092c5d156310b579d6d6c6cea0c6758f6444c410d1a2aa",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "Hyperledger Besu evm 24.7-develop-30c96c7",
+            "description": "Test function documentation:\n\n    Test all opcodes that are invalid as the last opcode in a container",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692-prague@v1.0.7/tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_all_opcodes_in_container.py#L121",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-3540.md",
+            "reference-spec-version": "8dcb0a8c1c0102c87224308028632cc986a61183"
+        }
+    },
+    "tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_all_opcodes_in_container.py::test_all_invalid_terminating_opcodes[fork_PragueEIP7692-eof_test-opcode_PUSH29]": {
+        "vectors": {
+            "0": {
+                "code": "0xef0001010004020001001e04002000008000017c00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000",
+                "results": {
+                    "Prague": {
+                        "exception": "EOFException.MISSING_STOP_OPCODE",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0x4eb16adefe55bd2ee26a1ed4a0e8be13cc48caa937c54e78176209731e4c7df1",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "Hyperledger Besu evm 24.7-develop-30c96c7",
+            "description": "Test function documentation:\n\n    Test all opcodes that are invalid as the last opcode in a container",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692-prague@v1.0.7/tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_all_opcodes_in_container.py#L121",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-3540.md",
+            "reference-spec-version": "8dcb0a8c1c0102c87224308028632cc986a61183"
+        }
+    },
+    "tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_all_opcodes_in_container.py::test_all_invalid_terminating_opcodes[fork_PragueEIP7692-eof_test-opcode_PUSH30]": {
+        "vectors": {
+            "0": {
+                "code": "0xef0001010004020001001f04002000008000017d0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000",
+                "results": {
+                    "Prague": {
+                        "exception": "EOFException.MISSING_STOP_OPCODE",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0x128d670fef2dcc2371e68034a6c3a8deda9050242842cdfd59ed4e313b40224c",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "Hyperledger Besu evm 24.7-develop-30c96c7",
+            "description": "Test function documentation:\n\n    Test all opcodes that are invalid as the last opcode in a container",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692-prague@v1.0.7/tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_all_opcodes_in_container.py#L121",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-3540.md",
+            "reference-spec-version": "8dcb0a8c1c0102c87224308028632cc986a61183"
+        }
+    },
+    "tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_all_opcodes_in_container.py::test_all_invalid_terminating_opcodes[fork_PragueEIP7692-eof_test-opcode_PUSH31]": {
+        "vectors": {
+            "0": {
+                "code": "0xef0001010004020001002004002000008000017e000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000",
+                "results": {
+                    "Prague": {
+                        "exception": "EOFException.MISSING_STOP_OPCODE",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0x963d28384bde4ed1b4fd37111e41b7448112372d444f23379055818044851da1",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "Hyperledger Besu evm 24.7-develop-30c96c7",
+            "description": "Test function documentation:\n\n    Test all opcodes that are invalid as the last opcode in a container",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692-prague@v1.0.7/tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_all_opcodes_in_container.py#L121",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-3540.md",
+            "reference-spec-version": "8dcb0a8c1c0102c87224308028632cc986a61183"
+        }
+    },
+    "tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_all_opcodes_in_container.py::test_all_invalid_terminating_opcodes[fork_PragueEIP7692-eof_test-opcode_PUSH32]": {
+        "vectors": {
+            "0": {
+                "code": "0xef0001010004020001002104002000008000017f00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000",
+                "results": {
+                    "Prague": {
+                        "exception": "EOFException.MISSING_STOP_OPCODE",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0x281d7322dff38857fd203394ca6ebeaa10d95a02676a319cb069b46dc1531d5f",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "Hyperledger Besu evm 24.7-develop-30c96c7",
+            "description": "Test function documentation:\n\n    Test all opcodes that are invalid as the last opcode in a container",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692-prague@v1.0.7/tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_all_opcodes_in_container.py#L121",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-3540.md",
+            "reference-spec-version": "8dcb0a8c1c0102c87224308028632cc986a61183"
+        }
+    },
+    "tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_all_opcodes_in_container.py::test_all_invalid_terminating_opcodes[fork_PragueEIP7692-eof_test-opcode_DUP1]": {
+        "vectors": {
+            "0": {
+                "code": "0xef0001010004020001000204002000008000025f800000000000000000000000000000000000000000000000000000000000000000",
+                "results": {
+                    "Prague": {
+                        "exception": "EOFException.MISSING_STOP_OPCODE",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0x361b48aa9e5e72be89eba60f585230e549e122c6faac1186bb51b6eb85f28c8a",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "Hyperledger Besu evm 24.7-develop-30c96c7",
+            "description": "Test function documentation:\n\n    Test all opcodes that are invalid as the last opcode in a container",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692-prague@v1.0.7/tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_all_opcodes_in_container.py#L121",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-3540.md",
+            "reference-spec-version": "8dcb0a8c1c0102c87224308028632cc986a61183"
+        }
+    },
+    "tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_all_opcodes_in_container.py::test_all_invalid_terminating_opcodes[fork_PragueEIP7692-eof_test-opcode_DUP2]": {
+        "vectors": {
+            "0": {
+                "code": "0xef0001010004020001000304002000008000035f5f810000000000000000000000000000000000000000000000000000000000000000",
+                "results": {
+                    "Prague": {
+                        "exception": "EOFException.MISSING_STOP_OPCODE",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0x4280adbf98156169a8cd439ffd5ba0609787c7a12f9a0c01a5bebdeb8c42ad41",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "Hyperledger Besu evm 24.7-develop-30c96c7",
+            "description": "Test function documentation:\n\n    Test all opcodes that are invalid as the last opcode in a container",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692-prague@v1.0.7/tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_all_opcodes_in_container.py#L121",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-3540.md",
+            "reference-spec-version": "8dcb0a8c1c0102c87224308028632cc986a61183"
+        }
+    },
+    "tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_all_opcodes_in_container.py::test_all_invalid_terminating_opcodes[fork_PragueEIP7692-eof_test-opcode_DUP3]": {
+        "vectors": {
+            "0": {
+                "code": "0xef0001010004020001000404002000008000045f5f5f820000000000000000000000000000000000000000000000000000000000000000",
+                "results": {
+                    "Prague": {
+                        "exception": "EOFException.MISSING_STOP_OPCODE",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0x06811cc225fa7f895bd999852847839955ce13cb24b0db1ad9d0a4f065273a86",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "Hyperledger Besu evm 24.7-develop-30c96c7",
+            "description": "Test function documentation:\n\n    Test all opcodes that are invalid as the last opcode in a container",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692-prague@v1.0.7/tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_all_opcodes_in_container.py#L121",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-3540.md",
+            "reference-spec-version": "8dcb0a8c1c0102c87224308028632cc986a61183"
+        }
+    },
+    "tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_all_opcodes_in_container.py::test_all_invalid_terminating_opcodes[fork_PragueEIP7692-eof_test-opcode_DUP4]": {
+        "vectors": {
+            "0": {
+                "code": "0xef0001010004020001000504002000008000055f5f5f5f830000000000000000000000000000000000000000000000000000000000000000",
+                "results": {
+                    "Prague": {
+                        "exception": "EOFException.MISSING_STOP_OPCODE",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0x27f2004aaf977bae54c14a45155128d73c4a90992599d0ea3b242e56bb595246",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "Hyperledger Besu evm 24.7-develop-30c96c7",
+            "description": "Test function documentation:\n\n    Test all opcodes that are invalid as the last opcode in a container",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692-prague@v1.0.7/tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_all_opcodes_in_container.py#L121",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-3540.md",
+            "reference-spec-version": "8dcb0a8c1c0102c87224308028632cc986a61183"
+        }
+    },
+    "tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_all_opcodes_in_container.py::test_all_invalid_terminating_opcodes[fork_PragueEIP7692-eof_test-opcode_DUP5]": {
+        "vectors": {
+            "0": {
+                "code": "0xef0001010004020001000604002000008000065f5f5f5f5f840000000000000000000000000000000000000000000000000000000000000000",
+                "results": {
+                    "Prague": {
+                        "exception": "EOFException.MISSING_STOP_OPCODE",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0x9460dde387ef495cf2561d101a730767fa5264f2d691ee265fa299041ae6661d",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "Hyperledger Besu evm 24.7-develop-30c96c7",
+            "description": "Test function documentation:\n\n    Test all opcodes that are invalid as the last opcode in a container",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692-prague@v1.0.7/tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_all_opcodes_in_container.py#L121",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-3540.md",
+            "reference-spec-version": "8dcb0a8c1c0102c87224308028632cc986a61183"
+        }
+    },
+    "tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_all_opcodes_in_container.py::test_all_invalid_terminating_opcodes[fork_PragueEIP7692-eof_test-opcode_DUP6]": {
+        "vectors": {
+            "0": {
+                "code": "0xef0001010004020001000704002000008000075f5f5f5f5f5f850000000000000000000000000000000000000000000000000000000000000000",
+                "results": {
+                    "Prague": {
+                        "exception": "EOFException.MISSING_STOP_OPCODE",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0xc8cf328078af134288f5780df73a0b6fe7a3374bbccdd468fa5d9b3e4e915405",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "Hyperledger Besu evm 24.7-develop-30c96c7",
+            "description": "Test function documentation:\n\n    Test all opcodes that are invalid as the last opcode in a container",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692-prague@v1.0.7/tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_all_opcodes_in_container.py#L121",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-3540.md",
+            "reference-spec-version": "8dcb0a8c1c0102c87224308028632cc986a61183"
+        }
+    },
+    "tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_all_opcodes_in_container.py::test_all_invalid_terminating_opcodes[fork_PragueEIP7692-eof_test-opcode_DUP7]": {
+        "vectors": {
+            "0": {
+                "code": "0xef0001010004020001000804002000008000085f5f5f5f5f5f5f860000000000000000000000000000000000000000000000000000000000000000",
+                "results": {
+                    "Prague": {
+                        "exception": "EOFException.MISSING_STOP_OPCODE",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0x791b732b1829c692052d5ffe0c98de8a66d6c4b6b0d588ba38e9ddff3a35aa85",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "Hyperledger Besu evm 24.7-develop-30c96c7",
+            "description": "Test function documentation:\n\n    Test all opcodes that are invalid as the last opcode in a container",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692-prague@v1.0.7/tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_all_opcodes_in_container.py#L121",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-3540.md",
+            "reference-spec-version": "8dcb0a8c1c0102c87224308028632cc986a61183"
+        }
+    },
+    "tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_all_opcodes_in_container.py::test_all_invalid_terminating_opcodes[fork_PragueEIP7692-eof_test-opcode_DUP8]": {
+        "vectors": {
+            "0": {
+                "code": "0xef0001010004020001000904002000008000095f5f5f5f5f5f5f5f870000000000000000000000000000000000000000000000000000000000000000",
+                "results": {
+                    "Prague": {
+                        "exception": "EOFException.MISSING_STOP_OPCODE",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0xe5c3648b9a591f45a478dc421303115f843bd947b510353d21d4324bb8273724",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "Hyperledger Besu evm 24.7-develop-30c96c7",
+            "description": "Test function documentation:\n\n    Test all opcodes that are invalid as the last opcode in a container",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692-prague@v1.0.7/tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_all_opcodes_in_container.py#L121",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-3540.md",
+            "reference-spec-version": "8dcb0a8c1c0102c87224308028632cc986a61183"
+        }
+    },
+    "tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_all_opcodes_in_container.py::test_all_invalid_terminating_opcodes[fork_PragueEIP7692-eof_test-opcode_DUP9]": {
+        "vectors": {
+            "0": {
+                "code": "0xef0001010004020001000a040020000080000a5f5f5f5f5f5f5f5f5f880000000000000000000000000000000000000000000000000000000000000000",
+                "results": {
+                    "Prague": {
+                        "exception": "EOFException.MISSING_STOP_OPCODE",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0xde0ee3386e38ada6072fab420d971a163d709fca2d3328f964937ffc33dd8aeb",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "Hyperledger Besu evm 24.7-develop-30c96c7",
+            "description": "Test function documentation:\n\n    Test all opcodes that are invalid as the last opcode in a container",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692-prague@v1.0.7/tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_all_opcodes_in_container.py#L121",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-3540.md",
+            "reference-spec-version": "8dcb0a8c1c0102c87224308028632cc986a61183"
+        }
+    },
+    "tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_all_opcodes_in_container.py::test_all_invalid_terminating_opcodes[fork_PragueEIP7692-eof_test-opcode_DUP10]": {
+        "vectors": {
+            "0": {
+                "code": "0xef0001010004020001000b040020000080000b5f5f5f5f5f5f5f5f5f5f890000000000000000000000000000000000000000000000000000000000000000",
+                "results": {
+                    "Prague": {
+                        "exception": "EOFException.MISSING_STOP_OPCODE",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0x8590fffcd20a16f40616df46c5bd0e23732420835e9ad626d82da6a0504d2da7",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "Hyperledger Besu evm 24.7-develop-30c96c7",
+            "description": "Test function documentation:\n\n    Test all opcodes that are invalid as the last opcode in a container",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692-prague@v1.0.7/tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_all_opcodes_in_container.py#L121",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-3540.md",
+            "reference-spec-version": "8dcb0a8c1c0102c87224308028632cc986a61183"
+        }
+    },
+    "tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_all_opcodes_in_container.py::test_all_invalid_terminating_opcodes[fork_PragueEIP7692-eof_test-opcode_DUP11]": {
+        "vectors": {
+            "0": {
+                "code": "0xef0001010004020001000c040020000080000c5f5f5f5f5f5f5f5f5f5f5f8a0000000000000000000000000000000000000000000000000000000000000000",
+                "results": {
+                    "Prague": {
+                        "exception": "EOFException.MISSING_STOP_OPCODE",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0x77534a1a6ddf5f5439bb538331e149f453427f819efd9c5fbc09620d9e02afeb",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "Hyperledger Besu evm 24.7-develop-30c96c7",
+            "description": "Test function documentation:\n\n    Test all opcodes that are invalid as the last opcode in a container",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692-prague@v1.0.7/tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_all_opcodes_in_container.py#L121",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-3540.md",
+            "reference-spec-version": "8dcb0a8c1c0102c87224308028632cc986a61183"
+        }
+    },
+    "tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_all_opcodes_in_container.py::test_all_invalid_terminating_opcodes[fork_PragueEIP7692-eof_test-opcode_DUP12]": {
+        "vectors": {
+            "0": {
+                "code": "0xef0001010004020001000d040020000080000d5f5f5f5f5f5f5f5f5f5f5f5f8b0000000000000000000000000000000000000000000000000000000000000000",
+                "results": {
+                    "Prague": {
+                        "exception": "EOFException.MISSING_STOP_OPCODE",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0x67d22b120b2e50f998322ba4d9dfb3be95c34cdf8b441cb307d61c685b146a89",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "Hyperledger Besu evm 24.7-develop-30c96c7",
+            "description": "Test function documentation:\n\n    Test all opcodes that are invalid as the last opcode in a container",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692-prague@v1.0.7/tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_all_opcodes_in_container.py#L121",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-3540.md",
+            "reference-spec-version": "8dcb0a8c1c0102c87224308028632cc986a61183"
+        }
+    },
+    "tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_all_opcodes_in_container.py::test_all_invalid_terminating_opcodes[fork_PragueEIP7692-eof_test-opcode_DUP13]": {
+        "vectors": {
+            "0": {
+                "code": "0xef0001010004020001000e040020000080000e5f5f5f5f5f5f5f5f5f5f5f5f5f8c0000000000000000000000000000000000000000000000000000000000000000",
+                "results": {
+                    "Prague": {
+                        "exception": "EOFException.MISSING_STOP_OPCODE",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0x90d50a4c4501611a84511db7f4e90c2f2f01cca921261faae9d26dcbf536dbd4",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "Hyperledger Besu evm 24.7-develop-30c96c7",
+            "description": "Test function documentation:\n\n    Test all opcodes that are invalid as the last opcode in a container",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692-prague@v1.0.7/tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_all_opcodes_in_container.py#L121",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-3540.md",
+            "reference-spec-version": "8dcb0a8c1c0102c87224308028632cc986a61183"
+        }
+    },
+    "tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_all_opcodes_in_container.py::test_all_invalid_terminating_opcodes[fork_PragueEIP7692-eof_test-opcode_DUP14]": {
+        "vectors": {
+            "0": {
+                "code": "0xef0001010004020001000f040020000080000f5f5f5f5f5f5f5f5f5f5f5f5f5f5f8d0000000000000000000000000000000000000000000000000000000000000000",
+                "results": {
+                    "Prague": {
+                        "exception": "EOFException.MISSING_STOP_OPCODE",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0xc3fcc9cf9f858795115b9bd82d3ce0bc0f64e609a0e4be678e4e0486d6f02eec",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "Hyperledger Besu evm 24.7-develop-30c96c7",
+            "description": "Test function documentation:\n\n    Test all opcodes that are invalid as the last opcode in a container",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692-prague@v1.0.7/tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_all_opcodes_in_container.py#L121",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-3540.md",
+            "reference-spec-version": "8dcb0a8c1c0102c87224308028632cc986a61183"
+        }
+    },
+    "tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_all_opcodes_in_container.py::test_all_invalid_terminating_opcodes[fork_PragueEIP7692-eof_test-opcode_DUP15]": {
+        "vectors": {
+            "0": {
+                "code": "0xef0001010004020001001004002000008000105f5f5f5f5f5f5f5f5f5f5f5f5f5f5f8e0000000000000000000000000000000000000000000000000000000000000000",
+                "results": {
+                    "Prague": {
+                        "exception": "EOFException.MISSING_STOP_OPCODE",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0xa39fd459d74f4c309617366877565175a83b31483dc84fff7c1681727a9a8399",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "Hyperledger Besu evm 24.7-develop-30c96c7",
+            "description": "Test function documentation:\n\n    Test all opcodes that are invalid as the last opcode in a container",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692-prague@v1.0.7/tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_all_opcodes_in_container.py#L121",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-3540.md",
+            "reference-spec-version": "8dcb0a8c1c0102c87224308028632cc986a61183"
+        }
+    },
+    "tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_all_opcodes_in_container.py::test_all_invalid_terminating_opcodes[fork_PragueEIP7692-eof_test-opcode_DUP16]": {
+        "vectors": {
+            "0": {
+                "code": "0xef0001010004020001001104002000008000115f5f5f5f5f5f5f5f5f5f5f5f5f5f5f5f8f0000000000000000000000000000000000000000000000000000000000000000",
+                "results": {
+                    "Prague": {
+                        "exception": "EOFException.MISSING_STOP_OPCODE",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0x599395e1d95bd636b4f8b02ee04d5482d8b85bee1759a2a028e8eee640e3a62d",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "Hyperledger Besu evm 24.7-develop-30c96c7",
+            "description": "Test function documentation:\n\n    Test all opcodes that are invalid as the last opcode in a container",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692-prague@v1.0.7/tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_all_opcodes_in_container.py#L121",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-3540.md",
+            "reference-spec-version": "8dcb0a8c1c0102c87224308028632cc986a61183"
+        }
+    },
+    "tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_all_opcodes_in_container.py::test_all_invalid_terminating_opcodes[fork_PragueEIP7692-eof_test-opcode_SWAP1]": {
+        "vectors": {
+            "0": {
+                "code": "0xef0001010004020001000304002000008000025f5f900000000000000000000000000000000000000000000000000000000000000000",
+                "results": {
+                    "Prague": {
+                        "exception": "EOFException.MISSING_STOP_OPCODE",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0x419ee42082328478afe8cfb9b29d9dfb709285684973fefee14b452f52204567",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "Hyperledger Besu evm 24.7-develop-30c96c7",
+            "description": "Test function documentation:\n\n    Test all opcodes that are invalid as the last opcode in a container",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692-prague@v1.0.7/tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_all_opcodes_in_container.py#L121",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-3540.md",
+            "reference-spec-version": "8dcb0a8c1c0102c87224308028632cc986a61183"
+        }
+    },
+    "tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_all_opcodes_in_container.py::test_all_invalid_terminating_opcodes[fork_PragueEIP7692-eof_test-opcode_SWAP2]": {
+        "vectors": {
+            "0": {
+                "code": "0xef0001010004020001000404002000008000035f5f5f910000000000000000000000000000000000000000000000000000000000000000",
+                "results": {
+                    "Prague": {
+                        "exception": "EOFException.MISSING_STOP_OPCODE",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0xfdda874b1e48399f38906785c44379662997ba96db89761870b74e8e41c33d5f",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "Hyperledger Besu evm 24.7-develop-30c96c7",
+            "description": "Test function documentation:\n\n    Test all opcodes that are invalid as the last opcode in a container",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692-prague@v1.0.7/tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_all_opcodes_in_container.py#L121",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-3540.md",
+            "reference-spec-version": "8dcb0a8c1c0102c87224308028632cc986a61183"
+        }
+    },
+    "tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_all_opcodes_in_container.py::test_all_invalid_terminating_opcodes[fork_PragueEIP7692-eof_test-opcode_SWAP3]": {
+        "vectors": {
+            "0": {
+                "code": "0xef0001010004020001000504002000008000045f5f5f5f920000000000000000000000000000000000000000000000000000000000000000",
+                "results": {
+                    "Prague": {
+                        "exception": "EOFException.MISSING_STOP_OPCODE",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0xa869ef193face8e9027abded83b8d86640c6c6c4141943f37e11dfb7919f8d35",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "Hyperledger Besu evm 24.7-develop-30c96c7",
+            "description": "Test function documentation:\n\n    Test all opcodes that are invalid as the last opcode in a container",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692-prague@v1.0.7/tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_all_opcodes_in_container.py#L121",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-3540.md",
+            "reference-spec-version": "8dcb0a8c1c0102c87224308028632cc986a61183"
+        }
+    },
+    "tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_all_opcodes_in_container.py::test_all_invalid_terminating_opcodes[fork_PragueEIP7692-eof_test-opcode_SWAP4]": {
+        "vectors": {
+            "0": {
+                "code": "0xef0001010004020001000604002000008000055f5f5f5f5f930000000000000000000000000000000000000000000000000000000000000000",
+                "results": {
+                    "Prague": {
+                        "exception": "EOFException.MISSING_STOP_OPCODE",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0x67ff7ea8acdc053680daacfb0a6ba1e4d040d3ca14bae5848da87363c6e9656f",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "Hyperledger Besu evm 24.7-develop-30c96c7",
+            "description": "Test function documentation:\n\n    Test all opcodes that are invalid as the last opcode in a container",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692-prague@v1.0.7/tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_all_opcodes_in_container.py#L121",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-3540.md",
+            "reference-spec-version": "8dcb0a8c1c0102c87224308028632cc986a61183"
+        }
+    },
+    "tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_all_opcodes_in_container.py::test_all_invalid_terminating_opcodes[fork_PragueEIP7692-eof_test-opcode_SWAP5]": {
+        "vectors": {
+            "0": {
+                "code": "0xef0001010004020001000704002000008000065f5f5f5f5f5f940000000000000000000000000000000000000000000000000000000000000000",
+                "results": {
+                    "Prague": {
+                        "exception": "EOFException.MISSING_STOP_OPCODE",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0x697cceaa980a0e81185dcc03ae38bc49dcf9b0916f4bf4b0814a2a6e7a2278e0",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "Hyperledger Besu evm 24.7-develop-30c96c7",
+            "description": "Test function documentation:\n\n    Test all opcodes that are invalid as the last opcode in a container",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692-prague@v1.0.7/tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_all_opcodes_in_container.py#L121",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-3540.md",
+            "reference-spec-version": "8dcb0a8c1c0102c87224308028632cc986a61183"
+        }
+    },
+    "tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_all_opcodes_in_container.py::test_all_invalid_terminating_opcodes[fork_PragueEIP7692-eof_test-opcode_SWAP6]": {
+        "vectors": {
+            "0": {
+                "code": "0xef0001010004020001000804002000008000075f5f5f5f5f5f5f950000000000000000000000000000000000000000000000000000000000000000",
+                "results": {
+                    "Prague": {
+                        "exception": "EOFException.MISSING_STOP_OPCODE",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0xde62deb903019d36e89bc8b270d3a459f5b90c1f19cb032c8fe029d80684d7fc",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "Hyperledger Besu evm 24.7-develop-30c96c7",
+            "description": "Test function documentation:\n\n    Test all opcodes that are invalid as the last opcode in a container",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692-prague@v1.0.7/tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_all_opcodes_in_container.py#L121",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-3540.md",
+            "reference-spec-version": "8dcb0a8c1c0102c87224308028632cc986a61183"
+        }
+    },
+    "tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_all_opcodes_in_container.py::test_all_invalid_terminating_opcodes[fork_PragueEIP7692-eof_test-opcode_SWAP7]": {
+        "vectors": {
+            "0": {
+                "code": "0xef0001010004020001000904002000008000085f5f5f5f5f5f5f5f960000000000000000000000000000000000000000000000000000000000000000",
+                "results": {
+                    "Prague": {
+                        "exception": "EOFException.MISSING_STOP_OPCODE",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0x153a6cc40b3910602f285145b2246f0fb8f8514dc8042dc3445cfe9c637a9dbd",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "Hyperledger Besu evm 24.7-develop-30c96c7",
+            "description": "Test function documentation:\n\n    Test all opcodes that are invalid as the last opcode in a container",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692-prague@v1.0.7/tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_all_opcodes_in_container.py#L121",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-3540.md",
+            "reference-spec-version": "8dcb0a8c1c0102c87224308028632cc986a61183"
+        }
+    },
+    "tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_all_opcodes_in_container.py::test_all_invalid_terminating_opcodes[fork_PragueEIP7692-eof_test-opcode_SWAP8]": {
+        "vectors": {
+            "0": {
+                "code": "0xef0001010004020001000a04002000008000095f5f5f5f5f5f5f5f5f970000000000000000000000000000000000000000000000000000000000000000",
+                "results": {
+                    "Prague": {
+                        "exception": "EOFException.MISSING_STOP_OPCODE",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0x4193f770ece523ff0ce3c205518308184f9f08b4489375b39a7478a36319e836",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "Hyperledger Besu evm 24.7-develop-30c96c7",
+            "description": "Test function documentation:\n\n    Test all opcodes that are invalid as the last opcode in a container",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692-prague@v1.0.7/tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_all_opcodes_in_container.py#L121",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-3540.md",
+            "reference-spec-version": "8dcb0a8c1c0102c87224308028632cc986a61183"
+        }
+    },
+    "tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_all_opcodes_in_container.py::test_all_invalid_terminating_opcodes[fork_PragueEIP7692-eof_test-opcode_SWAP9]": {
+        "vectors": {
+            "0": {
+                "code": "0xef0001010004020001000b040020000080000a5f5f5f5f5f5f5f5f5f5f980000000000000000000000000000000000000000000000000000000000000000",
+                "results": {
+                    "Prague": {
+                        "exception": "EOFException.MISSING_STOP_OPCODE",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0xce0d409117dac396ef39ac9a4e25d5823213ecfb06c3a674b640faf90962b067",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "Hyperledger Besu evm 24.7-develop-30c96c7",
+            "description": "Test function documentation:\n\n    Test all opcodes that are invalid as the last opcode in a container",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692-prague@v1.0.7/tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_all_opcodes_in_container.py#L121",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-3540.md",
+            "reference-spec-version": "8dcb0a8c1c0102c87224308028632cc986a61183"
+        }
+    },
+    "tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_all_opcodes_in_container.py::test_all_invalid_terminating_opcodes[fork_PragueEIP7692-eof_test-opcode_SWAP10]": {
+        "vectors": {
+            "0": {
+                "code": "0xef0001010004020001000c040020000080000b5f5f5f5f5f5f5f5f5f5f5f990000000000000000000000000000000000000000000000000000000000000000",
+                "results": {
+                    "Prague": {
+                        "exception": "EOFException.MISSING_STOP_OPCODE",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0x9337300e84fa750a795019bb35242e6a1715e304340381e778c87592cf618962",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "Hyperledger Besu evm 24.7-develop-30c96c7",
+            "description": "Test function documentation:\n\n    Test all opcodes that are invalid as the last opcode in a container",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692-prague@v1.0.7/tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_all_opcodes_in_container.py#L121",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-3540.md",
+            "reference-spec-version": "8dcb0a8c1c0102c87224308028632cc986a61183"
+        }
+    },
+    "tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_all_opcodes_in_container.py::test_all_invalid_terminating_opcodes[fork_PragueEIP7692-eof_test-opcode_SWAP11]": {
+        "vectors": {
+            "0": {
+                "code": "0xef0001010004020001000d040020000080000c5f5f5f5f5f5f5f5f5f5f5f5f9a0000000000000000000000000000000000000000000000000000000000000000",
+                "results": {
+                    "Prague": {
+                        "exception": "EOFException.MISSING_STOP_OPCODE",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0xd8fec34f6422b05ddff44bb00a7008a6f8ebc54f3c9e0b1e1a36f561fda2bce8",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "Hyperledger Besu evm 24.7-develop-30c96c7",
+            "description": "Test function documentation:\n\n    Test all opcodes that are invalid as the last opcode in a container",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692-prague@v1.0.7/tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_all_opcodes_in_container.py#L121",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-3540.md",
+            "reference-spec-version": "8dcb0a8c1c0102c87224308028632cc986a61183"
+        }
+    },
+    "tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_all_opcodes_in_container.py::test_all_invalid_terminating_opcodes[fork_PragueEIP7692-eof_test-opcode_SWAP12]": {
+        "vectors": {
+            "0": {
+                "code": "0xef0001010004020001000e040020000080000d5f5f5f5f5f5f5f5f5f5f5f5f5f9b0000000000000000000000000000000000000000000000000000000000000000",
+                "results": {
+                    "Prague": {
+                        "exception": "EOFException.MISSING_STOP_OPCODE",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0x9ec3f07079a91554443281c6c916b9097c9134e8eaae63797d6b805a9e58e7b3",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "Hyperledger Besu evm 24.7-develop-30c96c7",
+            "description": "Test function documentation:\n\n    Test all opcodes that are invalid as the last opcode in a container",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692-prague@v1.0.7/tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_all_opcodes_in_container.py#L121",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-3540.md",
+            "reference-spec-version": "8dcb0a8c1c0102c87224308028632cc986a61183"
+        }
+    },
+    "tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_all_opcodes_in_container.py::test_all_invalid_terminating_opcodes[fork_PragueEIP7692-eof_test-opcode_SWAP13]": {
+        "vectors": {
+            "0": {
+                "code": "0xef0001010004020001000f040020000080000e5f5f5f5f5f5f5f5f5f5f5f5f5f5f9c0000000000000000000000000000000000000000000000000000000000000000",
+                "results": {
+                    "Prague": {
+                        "exception": "EOFException.MISSING_STOP_OPCODE",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0xcbb04dd53cee63426034841d25113a80257e58d68b783f2c807411fa6b4a6d80",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "Hyperledger Besu evm 24.7-develop-30c96c7",
+            "description": "Test function documentation:\n\n    Test all opcodes that are invalid as the last opcode in a container",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692-prague@v1.0.7/tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_all_opcodes_in_container.py#L121",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-3540.md",
+            "reference-spec-version": "8dcb0a8c1c0102c87224308028632cc986a61183"
+        }
+    },
+    "tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_all_opcodes_in_container.py::test_all_invalid_terminating_opcodes[fork_PragueEIP7692-eof_test-opcode_SWAP14]": {
+        "vectors": {
+            "0": {
+                "code": "0xef00010100040200010010040020000080000f5f5f5f5f5f5f5f5f5f5f5f5f5f5f5f9d0000000000000000000000000000000000000000000000000000000000000000",
+                "results": {
+                    "Prague": {
+                        "exception": "EOFException.MISSING_STOP_OPCODE",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0xdb9632df073a2741e914710ee87420e36d63a2e155660c32c3b7bf1c567184b7",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "Hyperledger Besu evm 24.7-develop-30c96c7",
+            "description": "Test function documentation:\n\n    Test all opcodes that are invalid as the last opcode in a container",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692-prague@v1.0.7/tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_all_opcodes_in_container.py#L121",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-3540.md",
+            "reference-spec-version": "8dcb0a8c1c0102c87224308028632cc986a61183"
+        }
+    },
+    "tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_all_opcodes_in_container.py::test_all_invalid_terminating_opcodes[fork_PragueEIP7692-eof_test-opcode_SWAP15]": {
+        "vectors": {
+            "0": {
+                "code": "0xef0001010004020001001104002000008000105f5f5f5f5f5f5f5f5f5f5f5f5f5f5f5f9e0000000000000000000000000000000000000000000000000000000000000000",
+                "results": {
+                    "Prague": {
+                        "exception": "EOFException.MISSING_STOP_OPCODE",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0x75d3dd645b0f6ad817d16bcacd2ee2965112772d9b09c4f186862e61040a2414",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "Hyperledger Besu evm 24.7-develop-30c96c7",
+            "description": "Test function documentation:\n\n    Test all opcodes that are invalid as the last opcode in a container",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692-prague@v1.0.7/tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_all_opcodes_in_container.py#L121",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-3540.md",
+            "reference-spec-version": "8dcb0a8c1c0102c87224308028632cc986a61183"
+        }
+    },
+    "tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_all_opcodes_in_container.py::test_all_invalid_terminating_opcodes[fork_PragueEIP7692-eof_test-opcode_SWAP16]": {
+        "vectors": {
+            "0": {
+                "code": "0xef0001010004020001001204002000008000115f5f5f5f5f5f5f5f5f5f5f5f5f5f5f5f5f9f0000000000000000000000000000000000000000000000000000000000000000",
+                "results": {
+                    "Prague": {
+                        "exception": "EOFException.MISSING_STOP_OPCODE",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0x222d0dd3ed3b122efc6c6772d690096eaff2bcd5763af2d67e743b614ce00d69",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "Hyperledger Besu evm 24.7-develop-30c96c7",
+            "description": "Test function documentation:\n\n    Test all opcodes that are invalid as the last opcode in a container",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692-prague@v1.0.7/tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_all_opcodes_in_container.py#L121",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-3540.md",
+            "reference-spec-version": "8dcb0a8c1c0102c87224308028632cc986a61183"
+        }
+    },
+    "tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_all_opcodes_in_container.py::test_all_invalid_terminating_opcodes[fork_PragueEIP7692-eof_test-opcode_LOG0]": {
+        "vectors": {
+            "0": {
+                "code": "0xef0001010004020001000304002000008000025f5fa00000000000000000000000000000000000000000000000000000000000000000",
+                "results": {
+                    "Prague": {
+                        "exception": "EOFException.MISSING_STOP_OPCODE",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0x8a68baa2f7590d06699211ec4c2f00b136aff6a42128af17a2f7dcfb8359de57",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "Hyperledger Besu evm 24.7-develop-30c96c7",
+            "description": "Test function documentation:\n\n    Test all opcodes that are invalid as the last opcode in a container",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692-prague@v1.0.7/tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_all_opcodes_in_container.py#L121",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-3540.md",
+            "reference-spec-version": "8dcb0a8c1c0102c87224308028632cc986a61183"
+        }
+    },
+    "tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_all_opcodes_in_container.py::test_all_invalid_terminating_opcodes[fork_PragueEIP7692-eof_test-opcode_LOG1]": {
+        "vectors": {
+            "0": {
+                "code": "0xef0001010004020001000404002000008000035f5f5fa10000000000000000000000000000000000000000000000000000000000000000",
+                "results": {
+                    "Prague": {
+                        "exception": "EOFException.MISSING_STOP_OPCODE",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0x06007ba267ea1a4221304741cdd8321af26c7751c851eea2c57dc591e160d163",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "Hyperledger Besu evm 24.7-develop-30c96c7",
+            "description": "Test function documentation:\n\n    Test all opcodes that are invalid as the last opcode in a container",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692-prague@v1.0.7/tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_all_opcodes_in_container.py#L121",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-3540.md",
+            "reference-spec-version": "8dcb0a8c1c0102c87224308028632cc986a61183"
+        }
+    },
+    "tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_all_opcodes_in_container.py::test_all_invalid_terminating_opcodes[fork_PragueEIP7692-eof_test-opcode_LOG2]": {
+        "vectors": {
+            "0": {
+                "code": "0xef0001010004020001000504002000008000045f5f5f5fa20000000000000000000000000000000000000000000000000000000000000000",
+                "results": {
+                    "Prague": {
+                        "exception": "EOFException.MISSING_STOP_OPCODE",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0x48cf1ff24b318e9b70ee4047bdaae1c66c844987cb723a64a45ceb414760f7c8",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "Hyperledger Besu evm 24.7-develop-30c96c7",
+            "description": "Test function documentation:\n\n    Test all opcodes that are invalid as the last opcode in a container",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692-prague@v1.0.7/tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_all_opcodes_in_container.py#L121",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-3540.md",
+            "reference-spec-version": "8dcb0a8c1c0102c87224308028632cc986a61183"
+        }
+    },
+    "tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_all_opcodes_in_container.py::test_all_invalid_terminating_opcodes[fork_PragueEIP7692-eof_test-opcode_LOG3]": {
+        "vectors": {
+            "0": {
+                "code": "0xef0001010004020001000604002000008000055f5f5f5f5fa30000000000000000000000000000000000000000000000000000000000000000",
+                "results": {
+                    "Prague": {
+                        "exception": "EOFException.MISSING_STOP_OPCODE",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0x7d3bc43d3216082c1c42e297aae748340e60a708e665400f5fda9eaae42eed9b",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "Hyperledger Besu evm 24.7-develop-30c96c7",
+            "description": "Test function documentation:\n\n    Test all opcodes that are invalid as the last opcode in a container",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692-prague@v1.0.7/tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_all_opcodes_in_container.py#L121",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-3540.md",
+            "reference-spec-version": "8dcb0a8c1c0102c87224308028632cc986a61183"
+        }
+    },
+    "tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_all_opcodes_in_container.py::test_all_invalid_terminating_opcodes[fork_PragueEIP7692-eof_test-opcode_LOG4]": {
+        "vectors": {
+            "0": {
+                "code": "0xef0001010004020001000704002000008000065f5f5f5f5f5fa40000000000000000000000000000000000000000000000000000000000000000",
+                "results": {
+                    "Prague": {
+                        "exception": "EOFException.MISSING_STOP_OPCODE",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0x09e5a201b4e00efacf900411e4daf972323f7dfc208788cf66485b302ffb791e",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "Hyperledger Besu evm 24.7-develop-30c96c7",
+            "description": "Test function documentation:\n\n    Test all opcodes that are invalid as the last opcode in a container",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692-prague@v1.0.7/tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_all_opcodes_in_container.py#L121",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-3540.md",
+            "reference-spec-version": "8dcb0a8c1c0102c87224308028632cc986a61183"
+        }
+    },
+    "tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_all_opcodes_in_container.py::test_all_invalid_terminating_opcodes[fork_PragueEIP7692-eof_test-opcode_DATALOAD]": {
+        "vectors": {
+            "0": {
+                "code": "0xef0001010004020001000204002000008000015fd00000000000000000000000000000000000000000000000000000000000000000",
+                "results": {
+                    "Prague": {
+                        "exception": "EOFException.MISSING_STOP_OPCODE",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0x7ba2be1e780df7e71409c76e74eaff0ee2ac47c91dd61c1a19e33b961e248e74",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "Hyperledger Besu evm 24.7-develop-30c96c7",
+            "description": "Test function documentation:\n\n    Test all opcodes that are invalid as the last opcode in a container",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692-prague@v1.0.7/tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_all_opcodes_in_container.py#L121",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-3540.md",
+            "reference-spec-version": "8dcb0a8c1c0102c87224308028632cc986a61183"
+        }
+    },
+    "tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_all_opcodes_in_container.py::test_all_invalid_terminating_opcodes[fork_PragueEIP7692-eof_test-opcode_DATALOADN]": {
+        "vectors": {
+            "0": {
+                "code": "0xef000101000402000100030400200000800001d100000000000000000000000000000000000000000000000000000000000000000000",
+                "results": {
+                    "Prague": {
+                        "exception": "EOFException.MISSING_STOP_OPCODE",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0xa0e28b1e16cfd4cf4e045555fa13414956fff01b28c0a3d207804de3fd1b8ee6",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "Hyperledger Besu evm 24.7-develop-30c96c7",
+            "description": "Test function documentation:\n\n    Test all opcodes that are invalid as the last opcode in a container",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692-prague@v1.0.7/tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_all_opcodes_in_container.py#L121",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-3540.md",
+            "reference-spec-version": "8dcb0a8c1c0102c87224308028632cc986a61183"
+        }
+    },
+    "tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_all_opcodes_in_container.py::test_all_invalid_terminating_opcodes[fork_PragueEIP7692-eof_test-opcode_DATASIZE]": {
+        "vectors": {
+            "0": {
+                "code": "0xef000101000402000100010400200000800001d20000000000000000000000000000000000000000000000000000000000000000",
+                "results": {
+                    "Prague": {
+                        "exception": "EOFException.MISSING_STOP_OPCODE",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0xac6c4b1ef3bcfb4af75777e45cb87977c2e20ee113eb6af028a35784eee9534e",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "Hyperledger Besu evm 24.7-develop-30c96c7",
+            "description": "Test function documentation:\n\n    Test all opcodes that are invalid as the last opcode in a container",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692-prague@v1.0.7/tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_all_opcodes_in_container.py#L121",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-3540.md",
+            "reference-spec-version": "8dcb0a8c1c0102c87224308028632cc986a61183"
+        }
+    },
+    "tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_all_opcodes_in_container.py::test_all_invalid_terminating_opcodes[fork_PragueEIP7692-eof_test-opcode_DATACOPY]": {
+        "vectors": {
+            "0": {
+                "code": "0xef0001010004020001000404002000008000035f5f5fd30000000000000000000000000000000000000000000000000000000000000000",
+                "results": {
+                    "Prague": {
+                        "exception": "EOFException.MISSING_STOP_OPCODE",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0xbbdf804df44151c03c840ed1d9776a316cf124f6ed59d9a1d20d41951fc025be",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "Hyperledger Besu evm 24.7-develop-30c96c7",
+            "description": "Test function documentation:\n\n    Test all opcodes that are invalid as the last opcode in a container",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692-prague@v1.0.7/tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_all_opcodes_in_container.py#L121",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-3540.md",
+            "reference-spec-version": "8dcb0a8c1c0102c87224308028632cc986a61183"
+        }
+    },
+    "tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_all_opcodes_in_container.py::test_all_invalid_terminating_opcodes[fork_PragueEIP7692-eof_test-opcode_CALLF]": {
+        "vectors": {
+            "0": {
+                "code": "0xef000101000802000200030001040020000080000000000000e30001e40000000000000000000000000000000000000000000000000000000000000000",
+                "results": {
+                    "Prague": {
+                        "exception": "EOFException.MISSING_STOP_OPCODE",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0x2b2d8b795657153b1fe0c612cbebe703b2cf54cd50bacb53017b4cb4f1b4e4c6",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "Hyperledger Besu evm 24.7-develop-30c96c7",
+            "description": "Test function documentation:\n\n    Test all opcodes that are invalid as the last opcode in a container",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692-prague@v1.0.7/tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_all_opcodes_in_container.py#L121",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-3540.md",
+            "reference-spec-version": "8dcb0a8c1c0102c87224308028632cc986a61183"
+        }
+    },
+    "tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_all_opcodes_in_container.py::test_all_invalid_terminating_opcodes[fork_PragueEIP7692-eof_test-opcode_DUPN]": {
+        "vectors": {
+            "0": {
+                "code": "0xef0001010004020001000304002000008000025fe6000000000000000000000000000000000000000000000000000000000000000000",
+                "results": {
+                    "Prague": {
+                        "exception": "EOFException.MISSING_STOP_OPCODE",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0x860e42dba3485230889410a891869e0c2a402a787046cbdc45472add0b2e1fda",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "Hyperledger Besu evm 24.7-develop-30c96c7",
+            "description": "Test function documentation:\n\n    Test all opcodes that are invalid as the last opcode in a container",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692-prague@v1.0.7/tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_all_opcodes_in_container.py#L121",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-3540.md",
+            "reference-spec-version": "8dcb0a8c1c0102c87224308028632cc986a61183"
+        }
+    },
+    "tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_all_opcodes_in_container.py::test_all_invalid_terminating_opcodes[fork_PragueEIP7692-eof_test-opcode_SWAPN]": {
+        "vectors": {
+            "0": {
+                "code": "0xef0001010004020001000404002000008000025f5fe7000000000000000000000000000000000000000000000000000000000000000000",
+                "results": {
+                    "Prague": {
+                        "exception": "EOFException.MISSING_STOP_OPCODE",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0xa69193ec6c135a8cc991fd3006939a372202a5dba571051f8b39e83444856777",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "Hyperledger Besu evm 24.7-develop-30c96c7",
+            "description": "Test function documentation:\n\n    Test all opcodes that are invalid as the last opcode in a container",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692-prague@v1.0.7/tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_all_opcodes_in_container.py#L121",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-3540.md",
+            "reference-spec-version": "8dcb0a8c1c0102c87224308028632cc986a61183"
+        }
+    },
+    "tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_all_opcodes_in_container.py::test_all_invalid_terminating_opcodes[fork_PragueEIP7692-eof_test-opcode_EXCHANGE]": {
+        "vectors": {
+            "0": {
+                "code": "0xef0001010004020001000504002000008000035f5f5fe8000000000000000000000000000000000000000000000000000000000000000000",
+                "results": {
+                    "Prague": {
+                        "exception": "EOFException.MISSING_STOP_OPCODE",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0xb53e599eea107d2afbd97fa7b7c7c6d9bae00f19bdbe040a47a02537dba488d5",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "Hyperledger Besu evm 24.7-develop-30c96c7",
+            "description": "Test function documentation:\n\n    Test all opcodes that are invalid as the last opcode in a container",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692-prague@v1.0.7/tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_all_opcodes_in_container.py#L121",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-3540.md",
+            "reference-spec-version": "8dcb0a8c1c0102c87224308028632cc986a61183"
+        }
+    },
+    "tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_all_opcodes_in_container.py::test_all_invalid_terminating_opcodes[fork_PragueEIP7692-eof_test-opcode_EOFCREATE]": {
+        "vectors": {
+            "0": {
+                "code": "0xef00010100040200010006030001003204002000008000045f5f5f5fec00ef000101000402000100060300010014040000000080000260006000ee00ef000101000402000100010400000000800000000000000000000000000000000000000000000000000000000000000000000000",
+                "results": {
+                    "Prague": {
+                        "exception": "EOFException.MISSING_STOP_OPCODE",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0x57a6a1c46ccea5362a1e2b5853420e18d2a6b2d5c4bfc5487b295750b5c32a52",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "Hyperledger Besu evm 24.7-develop-30c96c7",
+            "description": "Test function documentation:\n\n    Test all opcodes that are invalid as the last opcode in a container",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692-prague@v1.0.7/tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_all_opcodes_in_container.py#L121",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-3540.md",
+            "reference-spec-version": "8dcb0a8c1c0102c87224308028632cc986a61183"
+        }
+    },
+    "tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_all_opcodes_in_container.py::test_all_invalid_terminating_opcodes[fork_PragueEIP7692-eof_test-opcode_RETURNDATALOAD]": {
+        "vectors": {
+            "0": {
+                "code": "0xef0001010004020001000204002000008000015ff70000000000000000000000000000000000000000000000000000000000000000",
+                "results": {
+                    "Prague": {
+                        "exception": "EOFException.MISSING_STOP_OPCODE",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0xfcb59d302a76397ef0644e6e0f0a2b343d410399a5ba92ec95f170784871e59b",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "Hyperledger Besu evm 24.7-develop-30c96c7",
+            "description": "Test function documentation:\n\n    Test all opcodes that are invalid as the last opcode in a container",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692-prague@v1.0.7/tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_all_opcodes_in_container.py#L121",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-3540.md",
+            "reference-spec-version": "8dcb0a8c1c0102c87224308028632cc986a61183"
+        }
+    },
+    "tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_all_opcodes_in_container.py::test_all_invalid_terminating_opcodes[fork_PragueEIP7692-eof_test-opcode_EXTCALL]": {
+        "vectors": {
+            "0": {
+                "code": "0xef0001010004020001000504002000008000045f5f5f5ff80000000000000000000000000000000000000000000000000000000000000000",
+                "results": {
+                    "Prague": {
+                        "exception": "EOFException.MISSING_STOP_OPCODE",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0x5dad59a03c6a1369c18c8c602aefb0bf10a153fd751653506f1e25e8805ceb6e",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "Hyperledger Besu evm 24.7-develop-30c96c7",
+            "description": "Test function documentation:\n\n    Test all opcodes that are invalid as the last opcode in a container",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692-prague@v1.0.7/tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_all_opcodes_in_container.py#L121",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-3540.md",
+            "reference-spec-version": "8dcb0a8c1c0102c87224308028632cc986a61183"
+        }
+    },
+    "tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_all_opcodes_in_container.py::test_all_invalid_terminating_opcodes[fork_PragueEIP7692-eof_test-opcode_EXTDELEGATECALL]": {
+        "vectors": {
+            "0": {
+                "code": "0xef0001010004020001000404002000008000035f5f5ff90000000000000000000000000000000000000000000000000000000000000000",
+                "results": {
+                    "Prague": {
+                        "exception": "EOFException.MISSING_STOP_OPCODE",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0x63cd00efeef55268117269f1e354acdbe88c157dbb1e770d101d7a69bff32444",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "Hyperledger Besu evm 24.7-develop-30c96c7",
+            "description": "Test function documentation:\n\n    Test all opcodes that are invalid as the last opcode in a container",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692-prague@v1.0.7/tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_all_opcodes_in_container.py#L121",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-3540.md",
+            "reference-spec-version": "8dcb0a8c1c0102c87224308028632cc986a61183"
+        }
+    },
+    "tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_all_opcodes_in_container.py::test_all_invalid_terminating_opcodes[fork_PragueEIP7692-eof_test-opcode_EXTSTATICCALL]": {
+        "vectors": {
+            "0": {
+                "code": "0xef0001010004020001000404002000008000035f5f5ffb0000000000000000000000000000000000000000000000000000000000000000",
+                "results": {
+                    "Prague": {
+                        "exception": "EOFException.MISSING_STOP_OPCODE",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0xb6369a3274682313896283e305949bfdf5d3270731b0247a85ef70276baf24ce",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "Hyperledger Besu evm 24.7-develop-30c96c7",
+            "description": "Test function documentation:\n\n    Test all opcodes that are invalid as the last opcode in a container",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692-prague@v1.0.7/tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_all_opcodes_in_container.py#L121",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-3540.md",
+            "reference-spec-version": "8dcb0a8c1c0102c87224308028632cc986a61183"
+        }
+    }
+}

@@ -428,6 +428,7 @@ func (s *RoSnapshots) idxAvailability() uint64 {
 	if len(maximums) == 0 {
 		return 0
 	}
+
 	return slices.Min(maximums)
 }
 
@@ -435,13 +436,15 @@ func (s *RoSnapshots) idxAvailability() uint64 {
 // - user must be able: delete any snapshot file and Erigon will self-heal by re-downloading
 // - RPC return Nil for historical blocks if snapshots are not open
 func (s *RoSnapshots) OptimisticReopenWithDB(db kv.RoDB) {
-	_ = db.View(context.Background(), func(tx kv.Tx) error {
-		snList, _, err := rawdb.ReadSnapshots(tx)
+	var snList []string
+	_ = db.View(context.Background(), func(tx kv.Tx) (err error) {
+		snList, _, err = rawdb.ReadSnapshots(tx)
 		if err != nil {
 			return err
 		}
-		return s.ReopenList(snList, true)
+		return nil
 	})
+	_ = s.ReopenList(snList, true)
 }
 
 func (s *RoSnapshots) LS() {
@@ -483,6 +486,8 @@ func (s *RoSnapshots) Files() (list []string) {
 }
 
 func (s *RoSnapshots) OpenFiles() (list []string) {
+	log.Warn("[dbg] OpenFiles")
+	defer log.Warn("[dbg] OpenFiles end")
 	s.segments.Scan(func(segtype snaptype.Enum, value *segments) bool {
 		value.lock.RLock()
 		defer value.lock.RUnlock()
@@ -498,6 +503,9 @@ func (s *RoSnapshots) OpenFiles() (list []string) {
 
 // ReopenList stops on optimistic=false, continue opening files on optimistic=true
 func (s *RoSnapshots) ReopenList(fileNames []string, optimistic bool) error {
+	s.lockSegments()
+	defer s.unlockSegments()
+	s.closeWhatNotInList(fileNames)
 	if err := s.rebuildSegments(fileNames, true, optimistic); err != nil {
 		return err
 	}
@@ -505,6 +513,9 @@ func (s *RoSnapshots) ReopenList(fileNames []string, optimistic bool) error {
 }
 
 func (s *RoSnapshots) InitSegments(fileNames []string) error {
+	s.lockSegments()
+	defer s.unlockSegments()
+	s.closeWhatNotInList(fileNames)
 	if err := s.rebuildSegments(fileNames, false, true); err != nil {
 		return err
 	}
@@ -526,10 +537,6 @@ func (s *RoSnapshots) unlockSegments() {
 }
 
 func (s *RoSnapshots) rebuildSegments(fileNames []string, open bool, optimistic bool) error {
-	s.lockSegments()
-	defer s.unlockSegments()
-
-	s.closeWhatNotInList(fileNames)
 	var segmentsMax uint64
 	var segmentsMaxSet bool
 
@@ -623,10 +630,17 @@ func (s *RoSnapshots) Ranges() []Range {
 func (s *RoSnapshots) OptimisticalyReopenFolder()           { _ = s.ReopenFolder() }
 func (s *RoSnapshots) OptimisticalyReopenWithDB(db kv.RoDB) { _ = s.ReopenWithDB(db) }
 func (s *RoSnapshots) ReopenFolder() error {
-	if err := s.ReopenSegments(s.Types(), false); err != nil {
-		return fmt.Errorf("ReopenSegments: %w", err)
+	files, _, err := typedSegments(s.dir, s.segmentsMin.Load(), s.Types(), false)
+	if err != nil {
+		return err
 	}
-	return nil
+
+	list := make([]string, 0, len(files))
+	for _, f := range files {
+		_, fName := filepath.Split(f.Path)
+		list = append(list, fName)
+	}
+	return s.ReopenList(list, false)
 }
 
 func (s *RoSnapshots) ReopenSegments(types []snaptype.Type, allowGaps bool) error {
@@ -640,7 +654,14 @@ func (s *RoSnapshots) ReopenSegments(types []snaptype.Type, allowGaps bool) erro
 		_, fName := filepath.Split(f.Path)
 		list = append(list, fName)
 	}
-	return s.ReopenList(list, false)
+
+	s.lockSegments()
+	defer s.unlockSegments()
+	// don't need close already opened files
+	if err := s.rebuildSegments(list, true, false); err != nil {
+		return err
+	}
+	return nil
 }
 
 func (s *RoSnapshots) ReopenWithDB(db kv.RoDB) error {
@@ -728,13 +749,13 @@ func (s *RoSnapshots) buildMissedIndicesIfNeed(ctx context.Context, logPrefix st
 		return nil
 	}
 	if !s.Cfg().ProduceE2 && s.IndicesMax() == 0 {
-		return fmt.Errorf("please remove --snap.stop, erigon can't work without creating basic indices")
+		return errors.New("please remove --snap.stop, erigon can't work without creating basic indices")
 	}
 	if !s.Cfg().ProduceE2 {
 		return nil
 	}
 	if !s.SegmentsReady() {
-		return fmt.Errorf("not all snapshot segments are available")
+		return errors.New("not all snapshot segments are available")
 	}
 	s.LogStat("missed-idx")
 
@@ -944,7 +965,7 @@ func (s *RoSnapshots) AddSnapshotsToSilkworm(silkwormInstance *silkworm.Silkworm
 	}
 
 	if len(mappedHeaderSnapshots) != len(mappedBodySnapshots) || len(mappedBodySnapshots) != len(mappedTxnSnapshots) {
-		return fmt.Errorf("addSnapshots: the number of headers/bodies/txs snapshots must be the same")
+		return errors.New("addSnapshots: the number of headers/bodies/txs snapshots must be the same")
 	}
 
 	for i := 0; i < len(mappedHeaderSnapshots); i++ {
@@ -2051,7 +2072,7 @@ func (m *Merger) filesByRange(snapshots *RoSnapshots, from, to uint64) (map[snap
 func (m *Merger) filesByRangeOfType(view *View, from, to uint64, snapshotType snaptype.Type) []string {
 	paths := make([]string, 0)
 
-	for _, sn := range view.Segments(snapshotType) {
+	for _, sn := range view.segments(snapshotType) {
 		if sn.from < from {
 			continue
 		}
@@ -2288,16 +2309,16 @@ func (s *RoSnapshots) ViewSingleFile(t snaptype.Type, blockNum uint64) (segment 
 	return nil, false, noop
 }
 
-func (v *View) Segments(t snaptype.Type) []*Segment {
+func (v *View) segments(t snaptype.Type) []*Segment {
 	if s, ok := v.s.segments.Get(t.Enum()); ok {
 		return s.segments
 	}
 	return nil
 }
 
-func (v *View) Headers() []*Segment { return v.Segments(coresnaptype.Headers) }
-func (v *View) Bodies() []*Segment  { return v.Segments(coresnaptype.Bodies) }
-func (v *View) Txs() []*Segment     { return v.Segments(coresnaptype.Transactions) }
+func (v *View) Headers() []*Segment { return v.segments(coresnaptype.Headers) }
+func (v *View) Bodies() []*Segment  { return v.segments(coresnaptype.Bodies) }
+func (v *View) Txs() []*Segment     { return v.segments(coresnaptype.Transactions) }
 
 func (v *View) Segment(t snaptype.Type, blockNum uint64) (*Segment, bool) {
 	if s, ok := v.s.segments.Get(t.Enum()); ok {
@@ -2312,7 +2333,7 @@ func (v *View) Segment(t snaptype.Type, blockNum uint64) (*Segment, bool) {
 }
 
 func (v *View) Ranges() (ranges []Range) {
-	for _, sn := range v.Segments(v.baseSegType) {
+	for _, sn := range v.segments(v.baseSegType) {
 		ranges = append(ranges, sn.Range)
 	}
 

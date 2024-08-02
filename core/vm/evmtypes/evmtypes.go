@@ -61,6 +61,7 @@ type TxContext struct {
 	Origin     common.Address // Provides information for ORIGIN
 	GasPrice   *uint256.Int   // Provides information for GASPRICE
 	BlobHashes []common.Hash  // Provides versioned blob hashes for BLOBHASH
+	Initcodes  map[[32]byte][]byte
 }
 
 // ExecutionResult includes all output after executing given evm

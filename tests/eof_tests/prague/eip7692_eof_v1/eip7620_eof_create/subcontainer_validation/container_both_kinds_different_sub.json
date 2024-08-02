@@ -1,0 +1,24 @@
+{
+    "tests/prague/eip7692_eof_v1/eip7620_eof_create/test_subcontainer_validation.py::test_container_both_kinds_different_sub[fork_PragueEIP7692-eof_test]": {
+        "vectors": {
+            "0": {
+                "code": "0xef0001010008020002000d0006030002003200140400000000800004008000026000600060006000ec00e5000160006000ee01ef000101000402000100060300010014040000000080000260006000ee00ef00010100040200010001040000000080000000ef00010100040200010001040000000080000000",
+                "containerKind": "INITCODE",
+                "results": {
+                    "Prague": {
+                        "result": true
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0xf6f2628b0095c7323f2958ba794114fb94870dd92dfc413275be6621971aa170",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "Hyperledger Besu evm 24.7-develop-30c96c7",
+            "description": "Test function documentation:\nTest multiple kinds of subcontainer at the same level",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692-prague@v1.0.7/tests/prague/eip7692_eof_v1/eip7620_eof_create/test_subcontainer_validation.py#L454",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7620.md",
+            "reference-spec-version": "52ddbcdddcf72dd72427c319f2beddeb468e1737"
+        }
+    }
+}

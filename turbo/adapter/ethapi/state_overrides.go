@@ -17,6 +17,7 @@
 package ethapi
 
 import (
+	"errors"
 	"fmt"
 	"math/big"
 
@@ -45,7 +46,7 @@ func (overrides *StateOverrides) Override(state *state.IntraBlockState) error {
 		if account.Balance != nil {
 			balance, overflow := uint256.FromBig((*big.Int)(*account.Balance))
 			if overflow {
-				return fmt.Errorf("account.Balance higher than 2^256-1")
+				return errors.New("account.Balance higher than 2^256-1")
 			}
 			state.SetBalance(addr, balance, tracing.BalanceChangeUnspecified)
 		}

@@ -18,6 +18,7 @@ package committee_subscription
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sync"
 	"time"
@@ -37,13 +38,13 @@ import (
 )
 
 var (
-	ErrIgnore                   = fmt.Errorf("ignore")
-	ErrCommitteeIndexOutOfRange = fmt.Errorf("committee index out of range")
-	ErrWrongSubnet              = fmt.Errorf("attestation is for the wrong subnet")
+	ErrIgnore                   = errors.New("ignore")
+	ErrCommitteeIndexOutOfRange = errors.New("committee index out of range")
+	ErrWrongSubnet              = errors.New("attestation is for the wrong subnet")
 	ErrNotInPropagationRange    = fmt.Errorf("attestation is not in propagation range. %w", ErrIgnore)
-	ErrEpochMismatch            = fmt.Errorf("epoch mismatch")
-	ErrExactlyOneBitSet         = fmt.Errorf("exactly one aggregation bit should be set")
-	ErrAggregationBitsMismatch  = fmt.Errorf("aggregation bits mismatch committee size")
+	ErrEpochMismatch            = errors.New("epoch mismatch")
+	ErrExactlyOneBitSet         = errors.New("exactly one aggregation bit should be set")
+	ErrAggregationBitsMismatch  = errors.New("aggregation bits mismatch committee size")
 )
 
 type CommitteeSubscribeMgmt struct {
@@ -99,7 +100,7 @@ func (c *CommitteeSubscribeMgmt) AddAttestationSubscription(ctx context.Context,
 	)
 	headState := c.syncedData.HeadState()
 	if headState == nil {
-		return fmt.Errorf("head state not available")
+		return errors.New("head state not available")
 	}
 
 	log.Debug("Add attestation subscription", "slot", slot, "committeeIndex", cIndex, "isAggregator", p.IsAggregator, "validatorIndex", p.ValidatorIndex)

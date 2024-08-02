@@ -17,12 +17,14 @@
 package main
 
 import (
+	"errors"
 	"flag"
 	"fmt"
 	"io"
 	"os"
 	"path"
 	"path/filepath"
+	"strconv"
 	"sync"
 
 	"github.com/c2h5oh/datasize"
@@ -106,7 +108,7 @@ func proceedFiles(files []string) {
 			panic(err)
 		}
 	}
-	outPath := path.Join(dir, fmt.Sprintf("%s.html", "analysis"))
+	outPath := path.Join(dir, "analysis.html")
 	fmt.Printf("rendering total graph to %s\n", outPath)
 
 	f, err := os.Create(outPath)
@@ -184,7 +186,7 @@ func extractKVPairFromCompressed(filename string, keysSink chan commitment.Branc
 	for getter.HasNext() {
 		key, _ := getter.Next(nil)
 		if !getter.HasNext() {
-			return fmt.Errorf("invalid key/value pair during decompression")
+			return errors.New("invalid key/value pair during decompression")
 		}
 		val, afterValPos := getter.Next(nil)
 		cpair++
@@ -245,7 +247,7 @@ func processCommitmentFile(fpath string) (*overallStat, error) {
 func prefixLenCountChart(fname string, data *overallStat) *charts.Pie {
 	items := make([]opts.PieData, 0)
 	for prefSize, count := range data.prefCount {
-		items = append(items, opts.PieData{Name: fmt.Sprintf("%d", prefSize), Value: count})
+		items = append(items, opts.PieData{Name: strconv.FormatUint(prefSize, 10), Value: count})
 	}
 
 	pie := charts.NewPie()
@@ -268,7 +270,7 @@ func fileContentsMapChart(fileName string, data *overallStat) *charts.TreeMap {
 	TreeMap[keysIndex].Children = make([]opts.TreeMapNode, 0)
 	for prefSize, stat := range data.prefixes {
 		TreeMap[keysIndex].Children = append(TreeMap[keysIndex].Children, opts.TreeMapNode{
-			Name:  fmt.Sprintf("%d", prefSize),
+			Name:  strconv.FormatUint(prefSize, 10),
 			Value: int(stat.KeySize),
 		})
 	}

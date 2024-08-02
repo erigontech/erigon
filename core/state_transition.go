@@ -103,6 +103,7 @@ type Message interface {
 	AccessList() types2.AccessList
 	BlobHashes() []libcommon.Hash
 	Authorizations() []types.Authorization
+	Initcodes() map[[32]byte][]byte
 
 	IsFree() bool
 }

@@ -1,0 +1,25 @@
+{
+    "tests/prague/eip7692_eof_v1/eip7620_eof_create/test_returncontract.py::test_returncontract_invalid_index_0[fork_PragueEIP7692-eof_test]": {
+        "vectors": {
+            "0": {
+                "code": "0xef00010100040200010006040000000080000260006000ee00",
+                "containerKind": "INITCODE",
+                "results": {
+                    "Prague": {
+                        "exception": "EOFException.INVALID_CONTAINER_SECTION_INDEX",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0x1d007235aaf7d2dfd742136f7fc6e41b508215f9318293ecca9955c9338ed84e",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "Hyperledger Besu evm 24.7-develop-30c96c7",
+            "description": "Test function documentation:\nReferring to non-existent container section index 0",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692-prague@v1.0.7/tests/prague/eip7692_eof_v1/eip7620_eof_create/test_returncontract.py#L91",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7620.md",
+            "reference-spec-version": "f20b164b00ae5553f7536a6d7a83a0f254455e09"
+        }
+    }
+}

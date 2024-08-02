@@ -47,6 +47,9 @@ type Config struct {
 	StatelessExec bool      // true is certain conditions (like state trie root hash matching) need to be relaxed for stateless EVM execution
 	RestoreState  bool      // Revert all changes made to the state (useful for constant system calls)
 
+	JumpTable    *JumpTable // Legacy EVM instruction table
+	JumpTableEOF *JumpTable // EOF EVM instruction table
+
 	ExtraEips []int // Additional EIPS that are to be enabled
 }
 
@@ -84,6 +87,15 @@ type ScopeContext struct {
 	Memory   *Memory
 	Stack    *stack.Stack
 	Contract *Contract
+
+	CodeSection uint64
+	ReturnStack []*ReturnContext
+}
+
+type ReturnContext struct {
+	Section     uint64
+	Pc          uint64
+	StackHeight int
 }
 
 // keccakState wraps sha3.state. In addition to the usual hash methods, it also supports
@@ -128,10 +140,11 @@ func copyJumpTable(jt *JumpTable) *JumpTable {
 
 // NewEVMInterpreter returns a new instance of the Interpreter.
 func NewEVMInterpreter(evm *EVM, cfg Config) *EVMInterpreter {
-	var jt *JumpTable
+	var jt, eofJt *JumpTable
 	switch {
 	case evm.ChainRules().IsPrague:
 		jt = &pragueInstructionSet
+		eofJt = &pragueEOFInstructionSet
 	case evm.ChainRules().IsCancun:
 		jt = &cancunInstructionSet
 	case evm.ChainRules().IsNapoli:
@@ -168,12 +181,14 @@ func NewEVMInterpreter(evm *EVM, cfg Config) *EVMInterpreter {
 		}
 	}
 
+	cfg.JumpTable = jt
+	cfg.JumpTableEOF = eofJt
+
 	return &EVMInterpreter{
 		VM: &VM{
 			evm: evm,
 			cfg: cfg,
 		},
-		jt: jt,
 	}
 }
 
@@ -196,13 +211,16 @@ func (in *EVMInterpreter) Run(contract *Contract, input []byte, readOnly bool) (
 	in.returnData = nil
 
 	var (
-		op          OpCode // current opcode
+		jt          *JumpTable // current jump table
+		op          OpCode     // current opcode
 		mem         = pool.Get().(*Memory)
 		locStack    = stack.New()
 		callContext = &ScopeContext{
-			Memory:   mem,
-			Stack:    locStack,
-			Contract: contract,
+			Memory:      mem,
+			Stack:       locStack,
+			Contract:    contract,
+			CodeSection: 0,
+			ReturnStack: []*ReturnContext{{Section: 0, Pc: 0, StackHeight: 0}},
 		}
 		// For optimisation reason we're using uint64 as the program counter.
 		// It's theoretically possible to go above 2^64. The YP defines the PC
@@ -220,6 +238,12 @@ func (in *EVMInterpreter) Run(contract *Contract, input []byte, readOnly bool) (
 	mem.Reset()
 
 	contract.Input = input
+
+	if contract.IsEOF() {
+		jt = in.cfg.JumpTableEOF
+	} else {
+		jt = in.cfg.JumpTable
+	}
 
 	// Make sure the readOnly is only set if we aren't in readOnly yet.
 	// This makes also sure that the readOnly flag isn't removed for child calls.
@@ -246,7 +270,6 @@ func (in *EVMInterpreter) Run(contract *Contract, input []byte, readOnly bool) (
 		}
 		in.depth--
 	}()
-
 	// The Interpreter main run loop (contextual). This loop runs until either an
 	// explicit STOP, RETURN or SELFDESTRUCT is executed, an error occurred during
 	// the execution of one of the operations or until the done flag is set by the
@@ -264,7 +287,7 @@ func (in *EVMInterpreter) Run(contract *Contract, input []byte, readOnly bool) (
 		// Get the operation from the jump table and validate the stack to ensure there are
 		// enough stack items available to perform the operation.
 		op = contract.GetOp(_pc)
-		operation := in.jt[op]
+		operation := jt[op]
 		cost = operation.constantGas // For tracing
 		fmt.Printf("%v ", op)
 		// Validate stack

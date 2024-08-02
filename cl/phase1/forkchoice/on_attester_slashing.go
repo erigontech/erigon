@@ -17,6 +17,7 @@
 package forkchoice
 
 import (
+	"errors"
 	"fmt"
 
 	"github.com/Giulio2002/bls"
@@ -38,7 +39,7 @@ func (f *ForkChoiceStore) OnAttesterSlashing(attesterSlashing *cltypes.AttesterS
 	attestation1 := attesterSlashing.Attestation_1
 	attestation2 := attesterSlashing.Attestation_2
 	if !cltypes.IsSlashableAttestationData(attestation1.Data, attestation2.Data) {
-		return fmt.Errorf("attestation data is not slashable")
+		return errors.New("attestation data is not slashable")
 	}
 	var err error
 	s := f.syncedDataManager.HeadState()
@@ -50,7 +51,7 @@ func (f *ForkChoiceStore) OnAttesterSlashing(attesterSlashing *cltypes.AttesterS
 		}
 	}
 	if s == nil {
-		return fmt.Errorf("no state accessible")
+		return errors.New("no state accessible")
 	}
 	attestation1PublicKeys, err := getIndexedAttestationPublicKeys(s, attestation1)
 	if err != nil {
@@ -81,7 +82,7 @@ func (f *ForkChoiceStore) OnAttesterSlashing(attesterSlashing *cltypes.AttesterS
 			return fmt.Errorf("error while validating signature: %v", err)
 		}
 		if !valid {
-			return fmt.Errorf("invalid aggregate signature")
+			return errors.New("invalid aggregate signature")
 		}
 		// Verify validity of slashings (2)
 		signingRoot, err = fork.ComputeSigningRoot(attestation2.Data, domain2)
@@ -94,7 +95,7 @@ func (f *ForkChoiceStore) OnAttesterSlashing(attesterSlashing *cltypes.AttesterS
 			return fmt.Errorf("error while validating signature: %v", err)
 		}
 		if !valid {
-			return fmt.Errorf("invalid aggregate signature")
+			return errors.New("invalid aggregate signature")
 		}
 	}
 
@@ -120,7 +121,7 @@ func (f *ForkChoiceStore) OnAttesterSlashing(attesterSlashing *cltypes.AttesterS
 func getIndexedAttestationPublicKeys(b *state.CachingBeaconState, att *cltypes.IndexedAttestation) ([][]byte, error) {
 	inds := att.AttestingIndices
 	if inds.Length() == 0 || !solid.IsUint64SortedSet(inds) {
-		return nil, fmt.Errorf("isValidIndexedAttestation: attesting indices are not sorted or are null")
+		return nil, errors.New("isValidIndexedAttestation: attesting indices are not sorted or are null")
 	}
 	pks := make([][]byte, 0, inds.Length())
 	if err := solid.RangeErr[uint64](inds, func(_ int, v uint64, _ int) error {

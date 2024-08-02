@@ -839,6 +839,7 @@ func (m callMsg) Value() *uint256.Int                   { return m.CallMsg.Value
 func (m callMsg) Data() []byte                          { return m.CallMsg.Data }
 func (m callMsg) AccessList() types2.AccessList         { return m.CallMsg.AccessList }
 func (m callMsg) Authorizations() []types.Authorization { return m.CallMsg.Authorizations }
+func (m callMsg) Initcodes() map[[32]byte][]byte        { return m.CallMsg.Initcodes }
 func (m callMsg) IsFree() bool                          { return false }
 
 func (m callMsg) BlobGas() uint64                { return misc.GetBlobGasUsed(len(m.CallMsg.BlobHashes)) }

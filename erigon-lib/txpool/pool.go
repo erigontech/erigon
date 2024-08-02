@@ -468,12 +468,12 @@ func (p *TxPool) OnNewBlock(ctx context.Context, stateChanges *remote.StateChang
 	if assert.Enable {
 		for _, txn := range unwindTxs.Txs {
 			if txn.SenderID == 0 {
-				panic(fmt.Errorf("onNewBlock.unwindTxs: senderID can't be zero"))
+				panic("onNewBlock.unwindTxs: senderID can't be zero")
 			}
 		}
 		for _, txn := range minedTxs.Txs {
 			if txn.SenderID == 0 {
-				panic(fmt.Errorf("onNewBlock.minedTxs: senderID can't be zero"))
+				panic("onNewBlock.minedTxs: senderID can't be zero")
 			}
 		}
 	}
@@ -515,7 +515,7 @@ func (p *TxPool) OnNewBlock(ctx context.Context, stateChanges *remote.StateChang
 
 func (p *TxPool) processRemoteTxs(ctx context.Context) error {
 	if !p.Started() {
-		return fmt.Errorf("txpool not started yet")
+		return errors.New("txpool not started yet")
 	}
 
 	defer processBatchTxsTimer.ObserveDuration(time.Now())
@@ -1235,7 +1235,7 @@ func (p *TxPool) addTxs(blockNum uint64, cacheView kvcache.CacheView, senders *s
 	if assert.Enable {
 		for _, txn := range newTxs.Txs {
 			if txn.SenderID == 0 {
-				panic(fmt.Errorf("senderID can't be zero"))
+				panic("senderID can't be zero")
 			}
 		}
 	}
@@ -1293,7 +1293,7 @@ func (p *TxPool) addTxsOnNewBlock(blockNum uint64, cacheView kvcache.CacheView, 
 	if assert.Enable {
 		for _, txn := range newTxs.Txs {
 			if txn.SenderID == 0 {
-				panic(fmt.Errorf("senderID can't be zero"))
+				panic("senderID can't be zero")
 			}
 		}
 	}

@@ -1,0 +1,46 @@
+{
+    "tests/prague/eip7692_eof_v1/eip4200_relative_jumps/test_rjump.py::test_rjump_into_self_data_portion[fork_PragueEIP7692-eof_test-offset_1]": {
+        "vectors": {
+            "0": {
+                "code": "0xef000101000402000100040400000000800000e0ffff00",
+                "results": {
+                    "Prague": {
+                        "exception": "EOFException.INVALID_RJUMP_DESTINATION",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0x50a996d2367968887f186b3d9543b0f9cb868ad74a323598fc7813615f0c04e9",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "Hyperledger Besu evm 24.7-develop-30c96c7",
+            "description": "Test function documentation:\nEOF1I4200_0008 (Invalid) EOF code containing RJUMP with target self RJUMP immediate",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692-prague@v1.0.7/tests/prague/eip7692_eof_v1/eip4200_relative_jumps/test_rjump.py#L266",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-4200.md",
+            "reference-spec-version": "17d4a8d12d2b5e0f2985c866376c16c8c6df7cba"
+        }
+    },
+    "tests/prague/eip7692_eof_v1/eip4200_relative_jumps/test_rjump.py::test_rjump_into_self_data_portion[fork_PragueEIP7692-eof_test-offset_2]": {
+        "vectors": {
+            "0": {
+                "code": "0xef000101000402000100040400000000800000e0fffe00",
+                "results": {
+                    "Prague": {
+                        "exception": "EOFException.INVALID_RJUMP_DESTINATION",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0xbbc3b3ea3e71b7f4848d6b839647fd0774f6799c627d4adcb76202cb9ab3de2c",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "Hyperledger Besu evm 24.7-develop-30c96c7",
+            "description": "Test function documentation:\nEOF1I4200_0008 (Invalid) EOF code containing RJUMP with target self RJUMP immediate",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692-prague@v1.0.7/tests/prague/eip7692_eof_v1/eip4200_relative_jumps/test_rjump.py#L266",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-4200.md",
+            "reference-spec-version": "17d4a8d12d2b5e0f2985c866376c16c8c6df7cba"
+        }
+    }
+}

@@ -26,7 +26,6 @@ import (
 	"bytes"
 	"context"
 	"fmt"
-	"path/filepath"
 	"reflect"
 	"runtime"
 	"testing"
@@ -61,11 +60,9 @@ func TestState(t *testing.T) {
 	st.skipLoad(`.*vmPerformance/loop.*`)
 	//if ethconfig.EnableHistoryV3InTest {
 	//}
-
-	dir := filepath.Join(".", "/testdata/GeneralStateTests/stZeroKnowledge2")
-
-	db, _ := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
-	st.walk(t, dir, func(t *testing.T, name string, test *StateTest) {
+	dirs := datadir.New(t.TempDir())
+	db, _ := temporaltest.NewTestDB(t, dirs)
+	st.walk(t, stateTestDir, func(t *testing.T, name string, test *StateTest) {
 		for _, subtest := range test.Subtests() {
 			subtest := subtest
 			key := fmt.Sprintf("%s/%d", subtest.Fork, subtest.Index)
@@ -76,7 +73,7 @@ func TestState(t *testing.T) {
 						t.Fatal(err)
 					}
 					defer tx.Rollback()
-					_, _, err = test.Run(tx, subtest, vmconfig)
+					_, _, err = test.Run(tx, subtest, vmconfig, dirs)
 					tx.Rollback()
 					if err != nil && len(test.json.Post[subtest.Fork][subtest.Index].ExpectException) > 0 {
 						// Ignore expected errors

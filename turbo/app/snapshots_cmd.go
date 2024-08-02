@@ -466,7 +466,7 @@ func doIntegrity(cliCtx *cli.Context) error {
 	chainDB := dbCfg(kv.ChainDB, dirs.Chaindata).MustOpen()
 	defer chainDB.Close()
 
-	cfg := ethconfig.NewSnapCfg(true, false, true, true)
+	cfg := ethconfig.NewSnapCfg(false, true, true)
 
 	_, _, _, blockRetire, agg, clean, err := openSnaps(ctx, cfg, dirs, chainDB, logger)
 	if err != nil {
@@ -585,7 +585,7 @@ func doDecompressSpeed(cliCtx *cli.Context) error {
 	}
 	args := cliCtx.Args()
 	if args.Len() < 1 {
-		return fmt.Errorf("expecting file path as a first argument")
+		return errors.New("expecting file path as a first argument")
 	}
 	f := args.First()
 
@@ -638,7 +638,7 @@ func doIndicesCommand(cliCtx *cli.Context, dirs datadir.Dirs) error {
 		return err
 	}
 
-	cfg := ethconfig.NewSnapCfg(true, false, true, true)
+	cfg := ethconfig.NewSnapCfg(false, true, true)
 	chainConfig := fromdb.ChainConfig(chainDB)
 	_, _, caplinSnaps, br, agg, clean, err := openSnaps(ctx, cfg, dirs, chainDB, logger)
 	if err != nil {
@@ -669,7 +669,7 @@ func doLS(cliCtx *cli.Context, dirs datadir.Dirs) error {
 
 	chainDB := dbCfg(kv.ChainDB, dirs.Chaindata).MustOpen()
 	defer chainDB.Close()
-	cfg := ethconfig.NewSnapCfg(true, false, true, true)
+	cfg := ethconfig.NewSnapCfg(false, true, true)
 	blockSnaps, borSnaps, caplinSnaps, _, agg, clean, err := openSnaps(ctx, cfg, dirs, chainDB, logger)
 	if err != nil {
 		return err
@@ -758,7 +758,7 @@ func doUncompress(cliCtx *cli.Context) error {
 
 	args := cliCtx.Args()
 	if args.Len() < 1 {
-		return fmt.Errorf("expecting file path as a first argument")
+		return errors.New("expecting file path as a first argument")
 	}
 	f := args.First()
 
@@ -811,7 +811,7 @@ func doCompress(cliCtx *cli.Context) error {
 
 	args := cliCtx.Args()
 	if args.Len() < 1 {
-		return fmt.Errorf("expecting file path as a first argument")
+		return errors.New("expecting file path as a first argument")
 	}
 	f := args.First()
 	dirs := datadir.New(cliCtx.String(utils.DataDirFlag.Name))
@@ -866,7 +866,7 @@ func doRetireCommand(cliCtx *cli.Context, dirs datadir.Dirs) error {
 	db := dbCfg(kv.ChainDB, dirs.Chaindata).MustOpen()
 	defer db.Close()
 
-	cfg := ethconfig.NewSnapCfg(true, false, true, true)
+	cfg := ethconfig.NewSnapCfg(false, true, true)
 	blockSnaps, _, caplinSnaps, br, agg, clean, err := openSnaps(ctx, cfg, dirs, db, logger)
 	if err != nil {
 		return err

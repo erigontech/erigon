@@ -28,6 +28,7 @@ import (
 	"github.com/erigontech/erigon-lib/chain"
 	libcommon "github.com/erigontech/erigon-lib/common"
 
+	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/u256"
 	"github.com/erigontech/erigon/core/tracing"
 	"github.com/erigontech/erigon/core/vm/evmtypes"
@@ -284,7 +285,7 @@ func (evm *EVM) call(typ OpCode, caller ContractRef, addr libcommon.Address, inp
 			contract = NewContract(caller, addrCopy, value, gas, evm.config.SkipAnalysis)
 		}
 		// fmt.Println("contract.Gas: ", contract.Gas)
-		contract.SetCallCode(&addrCopy, codeHash, code)
+		contract.SetCallCode(&addrCopy, codeHash, code, evm.parseContainer(code))
 		readOnly := false
 		if typ == STATICCALL {
 			readOnly = true
@@ -344,6 +345,16 @@ func (evm *EVM) StaticCall(caller ContractRef, addr libcommon.Address, input []b
 	return evm.call(STATICCALL, caller, addr, input, gas, new(uint256.Int), false)
 }
 
+func (evm *EVM) ExtCall(caller ContractRef, addr libcommon.Address, input []byte, gas uint64, value *uint256.Int) (ret []byte, leftOverGas uint64, err error) {
+	return evm.call(EXTCALL, caller, addr, input, gas, value, false)
+}
+func (evm *EVM) ExtDelegateCall(caller ContractRef, addr libcommon.Address, input []byte, gas uint64) (ret []byte, leftOverGas uint64, err error) {
+	return evm.call(EXTDELEGATECALL, caller, addr, input, gas, nil, false)
+}
+func (evm *EVM) ExtStaticCall(caller ContractRef, addr libcommon.Address, input []byte, gas uint64) (ret []byte, leftOverGas uint64, err error) {
+	return evm.call(EXTSTATICCALL, caller, addr, input, gas, nil, false)
+}
+
 type codeAndHash struct {
 	code []byte
 	hash libcommon.Hash
@@ -361,12 +372,12 @@ func (c *codeAndHash) Hash() libcommon.Hash {
 }
 
 func (evm *EVM) OverlayCreate(caller ContractRef, codeAndHash *codeAndHash, gas uint64, value *uint256.Int, address libcommon.Address, typ OpCode, incrementNonce bool) ([]byte, libcommon.Address, uint64, error) {
-	return evm.create(caller, codeAndHash, gas, value, address, typ, incrementNonce, false)
+	return evm.create(caller, codeAndHash, gas, value, address, typ, incrementNonce, false, false /* fromEOF */)
 }
 
 // create creates a new contract using code as deployment code.
-func (evm *EVM) create(caller ContractRef, codeAndHash *codeAndHash, gasRemaining uint64, value *uint256.Int, address libcommon.Address, typ OpCode, incrementNonce bool, bailout bool) ([]byte, libcommon.Address, uint64, error) {
-	fmt.Println("---- Calling Create")
+func (evm *EVM) create(caller ContractRef, codeAndHash *codeAndHash, gasRemaining uint64, value *uint256.Int, address libcommon.Address, typ OpCode,
+	incrementNonce, bailout bool, fromEOF bool) ([]byte, libcommon.Address, uint64, error) {
 	var ret []byte
 	var err error
 	var gasConsumption uint64
@@ -395,8 +406,8 @@ func (evm *EVM) create(caller ContractRef, codeAndHash *codeAndHash, gasRemainin
 	if !evm.Context.CanTransfer(evm.intraBlockState, caller.Address(), value) {
 		if !bailout {
 			err = ErrInsufficientBalance
-			return nil, libcommon.Address{}, gasRemaining, err
 		}
+		return nil, libcommon.Address{}, gasRemaining, err
 	}
 	if incrementNonce {
 		nonce := evm.intraBlockState.GetNonce(caller.Address())
@@ -417,6 +428,7 @@ func (evm *EVM) create(caller ContractRef, codeAndHash *codeAndHash, gasRemainin
 		err = ErrContractAddressCollision
 		return nil, libcommon.Address{}, 0, err
 	}
+
 	// Create a new account on the state
 	snapshot := evm.intraBlockState.Snapshot()
 	evm.intraBlockState.CreateAccount(address, true)
@@ -425,10 +437,33 @@ func (evm *EVM) create(caller ContractRef, codeAndHash *codeAndHash, gasRemainin
 	}
 	evm.Context.Transfer(evm.intraBlockState, caller.Address(), address, value, bailout)
 
-	// Initialise a new contract and set the code that is to be used by the EVM.
-	// The contract is a scoped environment for this execution context only.
+	// // Initialise a new contract and set the code that is to be used by the EVM.
+	// // The contract is a scoped environment for this execution context only.
+	// contract := NewContract(caller, address, value, gasRemaining, evm.config.SkipAnalysis)
+	// contract.SetCodeOptionalHash(&address, codeAndHash) // TODO(racytech): find out which way is the right way
+
 	contract := NewContract(caller, address, value, gasRemaining, evm.config.SkipAnalysis)
 	contract.SetCodeOptionalHash(&address, codeAndHash)
+
+	isInitcodeEOF := hasEOFMagic(codeAndHash.code)
+	if evm.chainRules.IsPrague {
+		// TODO(racytech): revisit this part and double check!
+		if isInitcodeEOF {
+			// If the initcode is EOF, verify it is well-formed.
+			var c Container
+			if err := c.UnmarshalBinary(codeAndHash.code); err != nil {
+				return nil, libcommon.Address{}, gasRemaining, fmt.Errorf("%w: %v", ErrInvalidEOFInitcode, err)
+			}
+			if err := c.ValidateCode(evm.config.JumpTableEOF); err != nil {
+				return nil, libcommon.Address{}, gasRemaining, fmt.Errorf("%w: %v", ErrInvalidEOFInitcode, err)
+			}
+			contract.Container = &c
+		} else if fromEOF {
+			// Don't allow EOF contract to execute legacy initcode.
+			return nil, libcommon.Address{}, gasRemaining, ErrLegacyCode
+		}
+	}
+
 	if evm.config.NoRecursion && depth > 0 {
 		return nil, address, gasRemaining, nil
 	}
@@ -444,9 +479,29 @@ func (evm *EVM) create(caller ContractRef, codeAndHash *codeAndHash, gasRemainin
 		}
 	}
 
-	// Reject code starting with 0xEF if EIP-3541 is enabled.
-	if err == nil && evm.chainRules.IsLondon && len(ret) >= 1 && ret[0] == 0xEF {
-		err = ErrInvalidCode
+	// check whether the max code size has been exceeded
+	if err == nil && evm.chainRules.IsSpuriousDragon && len(ret) > params.MaxCodeSize && !evm.chainRules.IsAura {
+		err = ErrMaxCodeSizeExceeded
+	}
+
+	// Reject legacy contract deployment from EOF.
+	if err == nil && isInitcodeEOF && !hasEOFMagic(ret) {
+		err = ErrLegacyCode
+	}
+
+	if err == nil && HasEOFByte(ret) {
+		if evm.chainRules.IsPrague {
+			var c Container
+			if err = c.UnmarshalBinary(ret); err == nil {
+				err = c.ValidateCode(evm.config.JumpTableEOF)
+			}
+			if err != nil {
+				err = fmt.Errorf("%w: %v", ErrInvalidEOF, err)
+			}
+		} else if evm.chainRules.IsLondon {
+			// Reject code starting with 0xEF if EIP-3541 is enabled.
+			err = ErrInvalidCode
+		}
 	}
 	// if the contract creation ran successfully and no errors were returned
 	// calculate the gas required to store the code. If the code could not
@@ -481,9 +536,10 @@ func (evm *EVM) create(caller ContractRef, codeAndHash *codeAndHash, gasRemainin
 
 // Create creates a new contract using code as deployment code.
 // DESCRIBED: docs/programmers_guide/guide.md#nonce
-func (evm *EVM) Create(caller ContractRef, code []byte, gasRemaining uint64, endowment *uint256.Int, bailout bool) (ret []byte, contractAddr libcommon.Address, leftOverGas uint64, err error) {
+func (evm *EVM) Create(caller ContractRef, code []byte, gas uint64, endowment *uint256.Int, bailout bool) (ret []byte, contractAddr libcommon.Address, leftOverGas uint64, err error) {
 	contractAddr = crypto.CreateAddress(caller.Address(), evm.intraBlockState.GetNonce(caller.Address()))
-	return evm.create(caller, &codeAndHash{code: code}, gasRemaining, endowment, contractAddr, CREATE, true /* incrementNonce */, bailout)
+	isCallerEOF := hasEOFMagic(evm.intraBlockState.GetCode(caller.Address()))
+	return evm.create(caller, &codeAndHash{code: code}, gas, endowment, contractAddr, CREATE, true /* incrementNonce */, bailout, isCallerEOF)
 }
 
 // Create2 creates a new contract using code as deployment code.
@@ -491,16 +547,31 @@ func (evm *EVM) Create(caller ContractRef, code []byte, gasRemaining uint64, end
 // The different between Create2 with Create is Create2 uses keccak256(0xff ++ msg.sender ++ salt ++ keccak256(init_code))[12:]
 // instead of the usual sender-and-nonce-hash as the address where the contract is initialized at.
 // DESCRIBED: docs/programmers_guide/guide.md#nonce
-func (evm *EVM) Create2(caller ContractRef, code []byte, gasRemaining uint64, endowment *uint256.Int, salt *uint256.Int, bailout bool) (ret []byte, contractAddr libcommon.Address, leftOverGas uint64, err error) {
+func (evm *EVM) Create2(caller ContractRef, code []byte, gas uint64, endowment *uint256.Int, salt *uint256.Int, bailout bool) (ret []byte, contractAddr libcommon.Address, leftOverGas uint64, err error) {
 	codeAndHash := &codeAndHash{code: code}
 	contractAddr = crypto.CreateAddress2(caller.Address(), salt.Bytes32(), codeAndHash.Hash().Bytes())
-	return evm.create(caller, codeAndHash, gasRemaining, endowment, contractAddr, CREATE2, true /* incrementNonce */, bailout)
+	isCallerEOF := hasEOFMagic(evm.intraBlockState.GetCode(caller.Address())) // TODO(racytech): do we need this?
+	return evm.create(caller, codeAndHash, gas, endowment, contractAddr, CREATE2, true /* incrementNonce */, bailout, isCallerEOF)
+}
+
+func (evm *EVM) EOFCreate(caller ContractRef, code, initContainer []byte, gas uint64, endowment *uint256.Int, salt *uint256.Int, bailout bool) (ret []byte, contractAddr libcommon.Address, leftOverGas uint64, err error) {
+	codeAndHash := &codeAndHash{code: initContainer}
+	contractAddr = crypto.CreateEOFAddress(caller.Address(), salt.Bytes32(), initContainer)
+	isCallerEOF := hasEOFMagic(evm.intraBlockState.GetCode(caller.Address()))
+	return evm.create(caller, codeAndHash, gas, endowment, contractAddr, EOFCREATE, true /* incrementNonce */, bailout, isCallerEOF)
+}
+
+func (evm *EVM) TxnCreate(caller ContractRef, code, initContainer []byte, gas uint64, endowment *uint256.Int, salt *uint256.Int, bailout bool) (ret []byte, contractAddr libcommon.Address, leftOverGas uint64, err error) {
+	codeAndHash := &codeAndHash{code: initContainer}
+	contractAddr = crypto.CreateAddress(caller.Address(), evm.intraBlockState.GetNonce(caller.Address()))
+	isCallerEOF := hasEOFMagic(evm.intraBlockState.GetCode(caller.Address()))
+	return evm.create(caller, codeAndHash, gas, endowment, contractAddr, EOFCREATE, true /* incrementNonce */, bailout, isCallerEOF)
 }
 
 // SysCreate is a special (system) contract creation methods for genesis constructors.
 // Unlike the normal Create & Create2, it doesn't increment caller's nonce.
 func (evm *EVM) SysCreate(caller ContractRef, code []byte, gas uint64, endowment *uint256.Int, contractAddr libcommon.Address) (ret []byte, leftOverGas uint64, err error) {
-	ret, _, leftOverGas, err = evm.create(caller, &codeAndHash{code: code}, gas, endowment, contractAddr, CREATE, false /* incrementNonce */, false)
+	ret, _, leftOverGas, err = evm.create(caller, &codeAndHash{code: code}, gas, endowment, contractAddr, CREATE, false /* incrementNonce */, false, false /* isCallerEOF */)
 	return
 }
 
@@ -522,4 +593,17 @@ func (evm *EVM) ChainRules() *chain.Rules {
 // IntraBlockState returns the EVM's IntraBlockState
 func (evm *EVM) IntraBlockState() evmtypes.IntraBlockState {
 	return evm.intraBlockState
+}
+
+// parseContainer tries to parse an EOF container if the Cancun fork is active. It expects the code to already be validated.
+func (evm *EVM) parseContainer(b []byte) *Container {
+	if evm.chainRules.IsPrague && hasEOFMagic(b) {
+		var c Container
+		if err := c.UnmarshalBinary(b); err != nil {
+			// Code was already validated, so no other errors should be possible.
+			panic(fmt.Sprintf("unexpected error: %v\ncode: %s\n", err, common.Bytes2Hex(b)))
+		}
+		return &c
+	}
+	return nil
 }

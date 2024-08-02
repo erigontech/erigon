@@ -177,6 +177,7 @@ var DefaultFlags = []cli.Flag{
 	&utils.PolygonSyncStageFlag,
 	&utils.EthStatsURLFlag,
 	&utils.OverridePragueFlag,
+	&utils.PragueEOFFlag,
 
 	&utils.CaplinDiscoveryAddrFlag,
 	&utils.CaplinDiscoveryPortFlag,
@@ -215,6 +216,7 @@ var DefaultFlags = []cli.Flag{
 	&utils.CaplinDisableBlobPruningFlag,
 	&utils.CaplinArchiveFlag,
 	&utils.CaplinMevRelayUrl,
+	&utils.CaplinValidatorMonitorFlag,
 
 	&utils.TrustedSetupFile,
 	&utils.RPCSlowFlag,

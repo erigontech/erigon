@@ -1,0 +1,24 @@
+{
+    "tests/prague/eip7692_eof_v1/eip7620_eof_create/test_returncontract.py::test_returncontract_valid_index_0[fork_PragueEIP7692-eof_test]": {
+        "vectors": {
+            "0": {
+                "code": "0xef000101000402000100060300010014040000000080000260006000ee00ef000101000402000100010400000000800000fe",
+                "containerKind": "INITCODE",
+                "results": {
+                    "Prague": {
+                        "result": true
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0xf233a0c18d2a2308e91cfbbe837d6e2b2a130548bc606b0c953cd6ced1f52561",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "Hyperledger Besu evm 24.7-develop-30c96c7",
+            "description": "Test function documentation:\nDeploy container index 0",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692-prague@v1.0.7/tests/prague/eip7692_eof_v1/eip7620_eof_create/test_returncontract.py#L18",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7620.md",
+            "reference-spec-version": "f20b164b00ae5553f7536a6d7a83a0f254455e09"
+        }
+    }
+}

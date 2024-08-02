@@ -49,6 +49,8 @@ import (
 )
 
 var ErrSpanNotFound = errors.New("span not found")
+var ErrMilestoneNotFound = errors.New("milestone not found")
+var ErrCheckpointNotFound = errors.New("checkpoint not found")
 
 type RemoteBlockReader struct {
 	client remote.ETHBACKENDClient
@@ -254,7 +256,7 @@ func (r *RemoteBlockReader) BodyRlp(ctx context.Context, tx kv.Getter, hash comm
 }
 
 func (r *RemoteBlockReader) LastEventId(ctx context.Context, tx kv.Tx) (uint64, bool, error) {
-	return 0, false, fmt.Errorf("not implemented")
+	return 0, false, errors.New("not implemented")
 }
 
 func (r *RemoteBlockReader) EventLookup(ctx context.Context, tx kv.Getter, txnHash common.Hash) (uint64, bool, error) {
@@ -301,7 +303,7 @@ func (r *RemoteBlockReader) LastFrozenSpanId() uint64 {
 }
 
 func (r *RemoteBlockReader) LastMilestoneId(ctx context.Context, tx kv.Tx) (uint64, bool, error) {
-	return 0, false, fmt.Errorf("not implemented")
+	return 0, false, errors.New("not implemented")
 }
 
 func (r *RemoteBlockReader) Milestone(ctx context.Context, tx kv.Getter, spanId uint64) ([]byte, error) {
@@ -309,7 +311,7 @@ func (r *RemoteBlockReader) Milestone(ctx context.Context, tx kv.Getter, spanId 
 }
 
 func (r *RemoteBlockReader) LastCheckpointId(ctx context.Context, tx kv.Tx) (uint64, bool, error) {
-	return 0, false, fmt.Errorf("not implemented")
+	return 0, false, errors.New("not implemented")
 }
 
 func (r *RemoteBlockReader) Checkpoint(ctx context.Context, tx kv.Getter, spanId uint64) ([]byte, error) {
@@ -1653,7 +1655,7 @@ func (r *BlockReader) Milestone(ctx context.Context, tx kv.Getter, milestoneId u
 	}
 
 	if v == nil {
-		return nil, fmt.Errorf("milestone %d not found (db)", milestoneId)
+		return nil, fmt.Errorf("%w, id: %d (db)", ErrMilestoneNotFound, milestoneId)
 	}
 
 	return common.Copy(v), nil
@@ -1702,7 +1704,7 @@ func (r *BlockReader) Checkpoint(ctx context.Context, tx kv.Getter, checkpointId
 		return common.Copy(result), nil
 	}
 
-	return nil, fmt.Errorf("checkpoint %d not found (db)", checkpointId)
+	return nil, fmt.Errorf("%w, id: %d (db)", ErrCheckpointNotFound, checkpointId)
 }
 
 func (r *BlockReader) LastFrozenCheckpointId() uint64 {

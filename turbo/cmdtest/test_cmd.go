@@ -27,6 +27,7 @@ import (
 	"os"
 	"os/exec"
 	"regexp"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -36,8 +37,7 @@ import (
 	"time"
 
 	"github.com/erigontech/erigon-lib/log/v3"
-
-	"github.com/docker/docker/pkg/reexec"
+	"github.com/erigontech/erigon/internal/reexec"
 )
 
 func NewTestCmd(t *testing.T, data interface{}) *TestCmd {
@@ -66,7 +66,7 @@ var id int32
 // reexec init function for that name (e.g. "geth-test" in cmd/geth/run_test.go)
 func (tt *TestCmd) Run(name string, args ...string) {
 	id := atomic.AddInt32(&id, 1)
-	tt.stderr = &testlogger{t: tt.T, name: fmt.Sprintf("%d", id)}
+	tt.stderr = &testlogger{t: tt.T, name: strconv.FormatUint(uint64(id), 10)}
 	tt.cmd = &exec.Cmd{
 		Path:   reexec.Self(),
 		Args:   append([]string{name}, args...),
