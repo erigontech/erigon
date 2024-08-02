@@ -841,14 +841,22 @@ func (hph *HexPatriciaHashed) computeCellHash(cell *Cell, depth int, buf []byte)
 		cell.downHashedKey[64-hashedKeyOffset] = 16 // Add terminator
 
 		if singleton {
-			if !cell.loaded.storage() && cell.lhLen > 0 {
-				res := append([]byte{160}, cell.leafHash[:cell.lhLen]...)
-				hph.keccak.Reset()
-				if hph.trace {
-					fmt.Printf("LEAF HASH storage USED %x spk %x\n", res, cell.spk[:cell.spl])
+			if !cell.loaded.storage() {
+				if cell.lhLen > 0 {
+					res := append([]byte{160}, cell.leafHash[:cell.lhLen]...)
+					hph.keccak.Reset()
+					if hph.trace {
+						fmt.Printf("LEAF HASH storage USED %x spk %x\n", res, cell.spk[:cell.spl])
+					}
+					skippedLoad.Add(1)
+					return res, nil
 				}
-				skippedLoad.Add(1)
-				return res, nil
+				if err = hph.ctx.GetStorage(cell.spk[:cell.spl], cell); err != nil {
+					return nil, err
+				}
+				hadToLoad.Add(1)
+				cell.loaded = cell.loaded.addFlag(cellLoadStorage)
+				fmt.Printf("STORAGE WAS NOT LOADED, now %s\n", cell.FullString())
 			}
 			if hph.trace {
 				fmt.Printf("leafHashWithKeyVal(singleton) for [%x]=>[%x]\n", cell.downHashedKey[:64-hashedKeyOffset+1], cell.Storage[:cell.StorageLen])
@@ -863,7 +871,7 @@ func (hph *HexPatriciaHashed) computeCellHash(cell *Cell, depth int, buf []byte)
 			storageRootHash = *(*[length.Hash]byte)(aux[1:])
 			storageRootHashIsSet = true
 			cell.lhLen = 0
-			fmt.Printf("NEW STORAGE ROOT %x DROPS LEAF\n", storageRootHash)
+			hadToReset.Add(1)
 		} else {
 			if hph.trace {
 				fmt.Printf("leafHashWithKeyVal for [%x]=>[%x] %v\n", cell.downHashedKey[:64-hashedKeyOffset+1], cell.Storage[:cell.StorageLen], cell.String())
@@ -899,6 +907,7 @@ func (hph *HexPatriciaHashed) computeCellHash(cell *Cell, depth int, buf []byte)
 					}
 					cell.lhLen = 0
 					fmt.Printf("EXTENSION HASH %x DROPS LEAF\n", storageRootHash)
+					hadToReset.Add(1)
 				} else {
 					return nil, fmt.Errorf("computeCellHash extension without hash")
 				}
@@ -923,7 +932,9 @@ func (hph *HexPatriciaHashed) computeCellHash(cell *Cell, depth int, buf []byte)
 			}
 			hadToLoad.Add(1)
 			cell.loaded = cell.loaded.addFlag(cellLoadAccount)
-			fmt.Printf("ACCOUNT WAS NOT LOADED, now %s\n", cell.FullString())
+			if hph.trace {
+				fmt.Printf("ACCOUNT WAS NOT LOADED, now %s\n", cell.FullString())
+			}
 		}
 
 		var valBuf [128]byte
@@ -1519,6 +1530,7 @@ func (hph *HexPatriciaHashed) ProcessTree(ctx context.Context, tree *Updates, lo
 		updatesCount = tree.Size()
 		m            runtime.MemStats
 		ki           uint64
+		start        = time.Now()
 	)
 	defer logEvery.Stop()
 	//hph.trace = true
@@ -1610,7 +1622,8 @@ func (hph *HexPatriciaHashed) ProcessTree(ctx context.Context, tree *Updates, lo
 		"hadToLoad", hadToLoad.Load(), "skippedLoad", skippedLoad.Load(),
 		"hadToReset", hadToReset.Load(),
 		"skip ratio", float64(skippedLoad.Load())/float64(hadToLoad.Load()+skippedLoad.Load()),
-		"reset ratio", float64(hadToReset.Load())/float64(hadToLoad.Load()+skippedLoad.Load()),
+		"reset ratio", float64(hadToReset.Load())/float64(hadToLoad.Load()),
+		"keys", ki, "spent", time.Since(start),
 	)
 	return rootHash, nil
 }
