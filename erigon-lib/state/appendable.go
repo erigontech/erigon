@@ -540,8 +540,8 @@ func (tx *AppendableRoTx) statelessGetter(i int) ArchiveGetter {
 	return r
 }
 
-func (ap *Appendable) maxTxnIDInDB(dbtx kv.Tx) (txNum kv.TxnId, ok bool) {
-	k, _ := kv.LastKey(dbtx, ap.table)
+func (tx *AppendableRoTx) maxTxnIDInDB(dbtx kv.Tx) (txNum kv.TxnId, ok bool) {
+	k, _ := kv.LastKey(dbtx, tx.ap.table)
 	if len(k) == 0 {
 		return 0, false
 	}
@@ -562,6 +562,9 @@ func (tx *AppendableRoTx) CanPrune(dbtx kv.Tx) bool {
 		return false
 	}
 	_, txnIDInFiles, ok, _ := tx.ap.cfg.iters.TxNum2ID(dbtx, tx.files.EndTxNum())
+	if !ok {
+		return false
+	}
 	return txnIDInDB < txnIDInFiles
 }
 
@@ -570,8 +573,15 @@ func (tx *AppendableRoTx) canBuild(dbtx kv.Tx) bool { //nolint
 	//TODO: what if all files are pruned?
 	maxStepInFiles := tx.files.EndTxNum() / tx.ap.aggregationStep
 	txNumOfNextStep := (maxStepInFiles + 1) * tx.ap.aggregationStep
-	_, _, ok, _ := tx.ap.cfg.iters.TxNum2ID(dbtx, txNumOfNextStep)
-	return ok
+	_, expectingTxnID, ok, _ := tx.ap.cfg.iters.TxNum2ID(dbtx, txNumOfNextStep)
+	if !ok {
+		return false
+	}
+	maxInDB, ok := tx.maxTxnIDInDB(dbtx)
+	if !ok {
+		return false
+	}
+	return expectingTxnID <= maxInDB
 }
 
 type AppendablePruneStat struct {
