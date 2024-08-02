@@ -58,7 +58,7 @@ type Cfg struct {
 	blockReader             freezeblocks.BeaconSnapshotReader
 	antiquary               *antiquary.Antiquary
 	syncedData              *synced_data.SyncedDataManager
-	emitter                 *beaconevents.Emitters
+	emitter                 *beaconevents.EventNotifier
 	blockCollector          block_collector.BlockCollector
 	sn                      *freezeblocks.CaplinSnapshots
 	blobStore               blob_storage.BlobStorage
@@ -94,7 +94,7 @@ func ClStagesCfg(
 	backfilling bool,
 	blobBackfilling bool,
 	syncedData *synced_data.SyncedDataManager,
-	emitters *beaconevents.Emitters,
+	emitters *beaconevents.EventNotifier,
 	blobStore blob_storage.BlobStorage,
 	attestationDataProducer attestation_producer.AttestationDataProducer,
 	validatorMonitor monitor.ValidatorMonitor,

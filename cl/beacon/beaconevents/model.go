@@ -1,10 +1,15 @@
-package event
+package beaconevents
 
 import (
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
 )
+
+type EventStream struct {
+	Event EventTopic  `json:"event"`
+	Data  interface{} `json:"data"`
+}
 
 type EventTopic string
 
@@ -18,6 +23,18 @@ const (
 	OpBlobSidecar       EventTopic = "blob_sidecar"
 )
 
+// Operation event data types
+
+type (
+	AttestationData           = solid.Attestation
+	VoluntaryExitData         = cltypes.SignedVoluntaryExit
+	ProposerSlashingData      = cltypes.ProposerSlashing
+	AttesterSlashingData      = cltypes.AttesterSlashing
+	BlsToExecutionChangesData = cltypes.SignedBLSToExecutionChange
+	ContributionAndProofData  = cltypes.SignedContributionAndProof
+	BlobSidecarData           = cltypes.BlobSidecar
+)
+
 const (
 	StateHead                EventTopic = "head"
 	StateBlock               EventTopic = "block"
@@ -28,32 +45,6 @@ const (
 	StateOptimisticUpdate    EventTopic = "light_client_optimistic_update"
 	StatePayloadAttributes   EventTopic = "payload_attributes"
 )
-
-type OperationEvent struct {
-	Event EventTopic  `json:"event"`
-	Data  interface{} `json:"data"`
-}
-
-// Operation event data types
-
-type AttestationData solid.Attestation
-
-type VoluntaryExitData cltypes.SignedVoluntaryExit
-
-type ProposerSlashingData cltypes.ProposerSlashing
-
-type AttesterSlashingData cltypes.AttesterSlashing
-
-type BlsToExecutionChangesData cltypes.SignedBLSToExecutionChange
-
-type ContributionAndProofData cltypes.SignedContributionAndProof
-
-type BlobSidecarData cltypes.BlobSidecar
-
-type StateEvent struct {
-	Type EventTopic
-	Data interface{}
-}
 
 // State event data types
 

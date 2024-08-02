@@ -38,7 +38,7 @@ func (f *ForkChoiceStore) updateCheckpoints(justifiedCheckpoint, finalizedCheckp
 		f.justifiedCheckpoint.Store(justifiedCheckpoint)
 	}
 	if finalizedCheckpoint.Epoch() > f.finalizedCheckpoint.Load().(solid.Checkpoint).Epoch() {
-		f.emitters.Publish("finalized_checkpoint", finalizedCheckpoint)
+		// todo: f.emitters.State().Send(beaconevents.StateFinalizedCheckpoint, finalizedCheckpoint)
 		f.onNewFinalized(finalizedCheckpoint)
 		f.finalizedCheckpoint.Store(finalizedCheckpoint)
 	}
