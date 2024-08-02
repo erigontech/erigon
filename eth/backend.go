@@ -1347,7 +1347,7 @@ func loadSnapshotsEitherFromDiskIfNeeded(dirs datadir.Dirs, chainName string) er
 		return nil
 	}
 	// Doesn't exist case
-	return os.WriteFile(preverifiedToml, snapcfg.GetToml(chainName), 0644)
+	return dir.WriteFileWithFsync(preverifiedToml, snapcfg.GetToml(chainName), 0644)
 }
 
 func (s *Ethereum) IsMining() bool { return s.config.Miner.Enabled }
