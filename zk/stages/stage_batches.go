@@ -81,6 +81,7 @@ type DatastreamClient interface {
 	GetLastWrittenTimeAtomic() *atomic.Int64
 	GetStreamingAtomic() *atomic.Bool
 	GetProgressAtomic() *atomic.Uint64
+	EnsureConnected() (bool, error)
 }
 
 type BatchesCfg struct {
@@ -163,17 +164,26 @@ func SpawnStageBatches(
 		// if no error, break, else continue trying to get them
 		// Create bookmark
 
+		connected := false
+		for i := 0; i < 5; i++ {
+			connected, err = cfg.dsClient.EnsureConnected()
+			if err != nil {
+				log.Error("[datastream_client] Error connecting to datastream", "error", err)
+				continue
+			}
+			if connected {
+				break
+			}
+		}
+
 		go func() {
 			log.Info(fmt.Sprintf("[%s] Started downloading L2Blocks routine", logPrefix))
 			defer log.Info(fmt.Sprintf("[%s] Finished downloading L2Blocks routine", logPrefix))
 
-			for i := 0; i < 5; i++ {
+			if connected {
 				if err := cfg.dsClient.ReadAllEntriesToChannel(); err != nil {
 					log.Error("[datastream_client] Error downloading blocks from datastream", "error", err)
-					continue
 				}
-				// if it was overnot because of an error, don't try to reconnect
-				break
 			}
 		}()
 	}

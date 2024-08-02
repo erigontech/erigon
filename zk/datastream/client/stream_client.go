@@ -215,20 +215,22 @@ func (c *StreamClient) ExecutePerFile(bookmark *types.BookmarkProto, function fu
 	return nil
 }
 
+func (c *StreamClient) EnsureConnected() (bool, error) {
+	if c.conn == nil {
+		if err := c.tryReConnect(); err != nil {
+			return false, fmt.Errorf("failed to reconnect the datastream client: %w", err)
+		}
+		log.Info("[datastream_client] Datastream client connected.")
+	}
+
+	return true, nil
+}
+
 // reads entries to the end of the stream
 // at end will wait for new entries to arrive
 func (c *StreamClient) ReadAllEntriesToChannel() error {
 	c.streaming.Store(true)
 	defer c.streaming.Store(false)
-
-	// if connection is lost, try to reconnect
-	// this occurs when all 5 attempts failed on previous run
-	if c.conn == nil {
-		if err := c.tryReConnect(); err != nil {
-			return fmt.Errorf("failed to reconnect the datastream client: %W", err)
-		}
-		log.Info("[datastream_client] Datastream client connected.")
-	}
 
 	var bookmark *types.BookmarkProto
 	progress := c.progress.Load()
@@ -359,7 +361,7 @@ LOOP:
 
 func (c *StreamClient) tryReConnect() error {
 	var err error
-	for i := 0; i < 5; i++ {
+	for i := 0; i < 50; i++ {
 		if c.conn != nil {
 			if err := c.conn.Close(); err != nil {
 				return err
