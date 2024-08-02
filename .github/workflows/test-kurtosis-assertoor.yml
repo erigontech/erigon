@@ -25,8 +25,14 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
+      - name: Create a temporary file
+        run: |
+          echo "This is a temporary file" > ${{ runner.temp }}/tempfile.txt
+
       - name: Install dependencies on Linux
         if: runner.os == 'Linux'
         run: sudo apt update && sudo apt install build-essential
       - name: Run Kurtosis + assertoor tests
         uses: ethpandaops/kurtosis-assertoor-github-action@v1
+        with:
+            enclave_name: "kurtosis-run-${{ matrix.os }}-${{ github.run_id }}"
