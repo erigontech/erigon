@@ -48,7 +48,6 @@ const (
 )
 
 // State event data types
-
 type HeadData struct {
 	Slot                      uint64      `json:"slot,string"`
 	Block                     common.Hash `json:"block"`
