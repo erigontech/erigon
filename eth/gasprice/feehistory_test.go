@@ -66,11 +66,12 @@ func TestFeeHistory(t *testing.T) {
 			MaxBlockHistory:  c.maxBlock,
 		}
 		func() {
-			_, m := newTestBackend(t) //, big.NewInt(16), c.pending)
+			m := newTestBackend(t) //, big.NewInt(16), c.pending)
+			defer m.Close()
+
 			baseApi := jsonrpc.NewBaseApi(nil, kvcache.NewDummy(), m.BlockReader, false, rpccfg.DefaultEvmCallTimeout, m.Engine, m.Dirs)
 			tx, _ := m.DB.BeginRo(m.Ctx)
 			defer tx.Rollback()
-			defer m.Close()
 
 			cache := jsonrpc.NewGasPriceCache()
 			oracle := gasprice.NewOracle(jsonrpc.NewGasPriceOracleBackend(tx, baseApi), config, cache, log.New())
