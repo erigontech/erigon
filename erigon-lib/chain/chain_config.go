@@ -80,7 +80,7 @@ type Config struct {
 
 	// (Optional) deposit contract of PoS chains
 	// See also EIP-6110: Supply validator deposits on chain
-	DepositContract common.Address `json:"depositContract,omitempty"`
+	DepositContract common.Address `json:"depositContractAddress,omitempty"`
 
 	// Various consensus engines
 	Ethash *EthashConfig `json:"ethash,omitempty"`
