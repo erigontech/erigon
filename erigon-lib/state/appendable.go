@@ -363,12 +363,10 @@ func (tx *AppendableRoTx) Files() (res []string) {
 
 func (tx *AppendableRoTx) Get(txnID kv.TxnId, dbtx kv.Tx) (v []byte, ok bool, err error) {
 	v, ok = tx.getFromFiles(uint64(txnID))
-	fmt.Printf("[dbg] f: %d -> %t\n", txnID, ok)
 	if ok {
 		return v, true, nil
 	}
 	v, ok, err = tx.ap.getFromDBByTs(uint64(txnID), dbtx)
-	fmt.Printf("[dbg] db: %d -> %t\n", txnID, ok)
 	if err != nil {
 		return nil, false, err
 	}
