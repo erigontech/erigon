@@ -255,8 +255,7 @@ func Downloader(ctx context.Context, logger log.Logger) error {
 	cfg.AddTorrentsFromDisk = true // always true unless using uploader - which wants control of torrent files
 
 	if seedbox {
-		aa := snapcfg.LoadRemotePreverified()
-		fmt.Printf("could fetch: %t\n", aa)
+		snapcfg.LoadRemotePreverified()
 	}
 
 	d, err := downloader.New(ctx, cfg, logger, log.LvlInfo, seedbox)
