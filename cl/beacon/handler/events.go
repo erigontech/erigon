@@ -17,7 +17,6 @@
 package handler
 
 import (
-	"bytes"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -50,7 +49,7 @@ var validTopics = map[event.EventTopic]struct{}{
 }
 
 func (a *ApiHandler) EventSourceGetV1Events(w http.ResponseWriter, r *http.Request) {
-	sink, err := sse.DefaultUpgrader.Upgrade(w, r)
+	_, err := sse.DefaultUpgrader.Upgrade(w, r)
 	if err != nil {
 		http.Error(w, "failed to upgrade", http.StatusInternalServerError)
 		return
@@ -87,16 +86,21 @@ func (a *ApiHandler) EventSourceGetV1Events(w http.ResponseWriter, r *http.Reque
 				continue
 			}
 			// marshal and send
-			buf := &bytes.Buffer{}
-			if err := json.NewEncoder(buf).Encode(event.Data); err != nil {
+			//buf := &bytes.Buffer{}
+			buf, err := json.Marshal(event.Data)
+			if err != nil {
 				log.Warn("failed to encode data", "err", err, "topic", event.Event)
 				continue
 			}
-			if err := sink.Encode(&sse.Event{
+			/*if err := sink.Encode(&sse.Event{
 				Event: []byte(event.Event),
 				Data:  buf,
 			}); err != nil {
 				log.Warn("failed to encode event", "err", err)
+			}*/
+			if _, err := fmt.Fprintf(w, "event: %s\ndata: %s\n\n", event.Event, string(buf)); err != nil {
+				log.Warn("failed to write event", "err", err)
+				continue
 			}
 			log.Info("[test] sent event", "topic", event.Event)
 		case <-ticker.C:

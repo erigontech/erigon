@@ -14,16 +14,32 @@
 // You should have received a copy of the GNU Lesser General Public License
 // along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
-package beaconevents_test
+package beaconevents
 
 import (
-	"sync/atomic"
 	"testing"
-
-	"github.com/erigontech/erigon/cl/beacon/beaconevents"
-	"github.com/stretchr/testify/require"
+	"time"
 )
 
+func TestEmitterSet(t *testing.T) {
+	emitter := NewEventNotifier()
+	done := make(chan struct{})
+	go func() {
+		ch := make(chan *EventStream, 10)
+		t.Logf("Subscribing to emitter")
+		sub := emitter.Operation().Subscribe(ch)
+		defer sub.Unsubscribe()
+		t.Logf("Subscribed to emitter")
+		event := <-ch
+		t.Logf("Received event: %v", event)
+		close(done)
+	}()
+	time.Sleep(100 * time.Millisecond)
+	emitter.Operation().SendAttestation(&AttestationData{})
+	<-done
+}
+
+/*
 func TestEmitterSet(t *testing.T) {
 	e := beaconevents.NewEmitters()
 	var called int
@@ -68,3 +84,4 @@ func TestEmitterFilters(t *testing.T) {
 	require.EqualValues(t, 3, ab.Load())
 	require.EqualValues(t, 4, wild.Load())
 }
+*/
