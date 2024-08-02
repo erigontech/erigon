@@ -54,6 +54,11 @@ func (a *Accumulator) SendAndReset(ctx context.Context, c StateChangeConsumer, p
 		return
 	}
 	sc := &remote.StateChangeBatch{StateVersionId: a.plainStateID, ChangeBatch: a.changes, PendingBlockBaseFee: pendingBaseFee, BlockGasLimit: blockGasLimit, FinalizedBlock: finalizedBlock, PendingBlobFeePerGas: pendingBlobFee}
+	println("reseting")
+	for _, change := range a.changes {
+		println("txs", len(change.Txs))
+	}
+	println("---------------------------------------------")
 	c.SendStateChanges(ctx, sc)
 	a.Reset(0) // reset here for GC, but there will be another Reset with correct viewID
 }
