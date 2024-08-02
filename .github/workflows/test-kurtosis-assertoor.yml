@@ -3,7 +3,7 @@ name: Kurtosis Assertoor GitHub Action
 on:
     pull_request:
        branches:
-          - main
+          - kurtosis_assertoor
        types:
            - opened
            - reopened
@@ -21,5 +21,10 @@ jobs:
         runs-on: ${{ matrix.os }}
 
         steps:
-            - uses: ethpandaops/kurtosis-assertoor-github-action@v1
+            - uses: actions/checkout@v4
+            - name: Install dependencies on Linux
+              if: runner.os == 'Linux'
+              run: sudo apt update && sudo apt install build-essential
+            - name: Run Kurtosis + assertoor tests
+              uses: ethpandaops/kurtosis-assertoor-github-action@v1
 
