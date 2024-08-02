@@ -12,7 +12,7 @@ func newOpFeed() *operationFeed {
 	}
 }
 
-func (f *operationFeed) Subscribe(channel <-chan *EventStream) ethevent.Subscription {
+func (f *operationFeed) Subscribe(channel chan *EventStream) ethevent.Subscription {
 	return f.feed.Subscribe(channel)
 }
 
