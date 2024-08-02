@@ -39,6 +39,7 @@ import (
 	"golang.org/x/sync/errgroup"
 
 	"github.com/erigontech/erigon-lib/common/dbg"
+	"github.com/erigontech/erigon/polygon/bridge"
 
 	"github.com/erigontech/erigon-lib/log/v3"
 
@@ -1511,6 +1512,10 @@ func (c *Bor) CommitStates(
 	if c.bridgeReader != nil {
 		events, err := c.bridgeReader.Events(c.execCtx, blockNum)
 		if err != nil {
+			if errors.Is(err, bridge.ErrMapNotAvailable) {
+				return nil
+			}
+
 			return err
 		}
 
