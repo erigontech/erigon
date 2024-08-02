@@ -65,6 +65,7 @@ func TestFeeHistory(t *testing.T) {
 			MaxHeaderHistory: c.maxHeader,
 			MaxBlockHistory:  c.maxBlock,
 		}
+
 		func() {
 			m := newTestBackend(t) //, big.NewInt(16), c.pending)
 			defer m.Close()
