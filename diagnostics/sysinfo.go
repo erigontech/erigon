@@ -27,13 +27,13 @@ func SetupSysInfoAccess(metricsMux *http.ServeMux, diag *diaglib.DiagnosticClien
 		return
 	}
 
-	metricsMux.HandleFunc("/disk-info", func(w http.ResponseWriter, r *http.Request) {
+	metricsMux.HandleFunc("/hardware-info", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Access-Control-Allow-Origin", "*")
 		w.Header().Set("Content-Type", "application/json")
 		writeHardwareInfo(w, diag)
 	})
 }
 
-func writeDiskInfo(w http.ResponseWriter, diag *diaglib.DiagnosticClient) {
+func writeHardwareInfo(w http.ResponseWriter, diag *diaglib.DiagnosticClient) {
 	diag.HardwareInfoJson(w)
 }
