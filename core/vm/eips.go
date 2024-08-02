@@ -453,7 +453,6 @@ func enableEOF(jt *JumpTable) {
 		constantGas: GasFastestStep,
 		numPop:      1,
 		numPush:     1,
-		terminal:    true,
 	}
 	jt[EXTCALL] = &operation{
 		execute:     opExtCall,

@@ -71,7 +71,7 @@ func validateCode(code []byte, section int, metadata []*FunctionMetadata, jt *Ju
 }
 
 func validateInstructions(code []byte, section int, metadata []*FunctionMetadata, jt *JumpTable, dataSize, containerCount int) error {
-
+	fmt.Println("--- validateInstructions")
 	var (
 		expectedReturning  = metadata[section].Outputs != nonReturningFunction
 		isReturning        = false
@@ -163,7 +163,7 @@ func checkRjumpDest(codeSize, postPos, relOffset int, rjumpDests *[]int) bool {
 }
 
 func validateRjumpDestinations(code []byte, jt *JumpTable) error {
-
+	fmt.Println("--- validateRjumpDestinations")
 	var (
 		codeSize     = len(code)
 		rjumpDests   = make([]int, 0)
@@ -234,7 +234,7 @@ func visitSuccessor(currentOffset, nextOffset int, stackRequired stackHeightRang
 }
 
 func validateMaxStackHeight(code []byte, section int, metadata []*FunctionMetadata, jt *JumpTable) (int, error) {
-
+	fmt.Println("--- validateMaxStackHeight")
 	fmt.Println("outputs: ", metadata[section].Outputs)
 	stackHeights := make([]stackHeightRange, len(code))
 	for i := 1; i < len(code); i++ {
@@ -244,6 +244,7 @@ func validateMaxStackHeight(code []byte, section int, metadata []*FunctionMetada
 
 	for pos := 0; pos < len(code); {
 		op := OpCode(code[pos])
+		fmt.Printf("%v ", op)
 		stackHeightRequired := jt[op].numPop // how many stack items required by the instruction
 		stackHeightChange := 0
 		if stackHeightRequired != jt[op].numPush {
@@ -252,6 +253,7 @@ func validateMaxStackHeight(code []byte, section int, metadata []*FunctionMetada
 		stackHeight := stackHeights[pos]
 
 		if !stackHeight.visited() {
+			fmt.Println("hittin this err")
 			return 0, ErrUnreachableCode
 		}
 
@@ -346,6 +348,7 @@ func validateMaxStackHeight(code []byte, section int, metadata []*FunctionMetada
 
 		pos = next
 	}
+	fmt.Println("")
 
 	return len(stackHeights), nil
 }

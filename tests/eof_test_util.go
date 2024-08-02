@@ -77,6 +77,7 @@ func getError(err error) error {
 		vm.ErrInvalidNonReturning,
 		vm.ErrEOFStackUnderflow,
 		io.ErrUnexpectedEOF,
+		vm.ErrStackHeightMismatch,
 	}
 
 	for _, _err := range _errors {
@@ -120,6 +121,7 @@ var errorsMap = map[string][]error{
 	"EOFException.STACK_HIGHER_THAN_OUTPUTS":              []error{vm.ErrStackHeightHigher},
 	"EOFException.CONTAINER_SIZE_ABOVE_LIMIT":             []error{vm.ErrInvalidMagic}, // TODO(racytech): change this when tests get updated
 	"EOFException.INVALID_CONTAINER_SECTION_INDEX":        []error{vm.ErrInvalidContainerArgument},
+	"EOFException.STACK_HEIGHT_MISMATCH":                  []error{vm.ErrStackHeightMismatch},
 }
 
 func mapError(exception string, cmp error) bool {
