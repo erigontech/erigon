@@ -25,7 +25,6 @@ import (
 	mapset "github.com/deckarep/golang-set/v2"
 	"github.com/erigontech/erigon-lib/log/v3"
 	event "github.com/erigontech/erigon/cl/beacon/beaconevents"
-	"github.com/gfx-labs/sse"
 )
 
 var validTopics = map[event.EventTopic]struct{}{
@@ -49,11 +48,13 @@ var validTopics = map[event.EventTopic]struct{}{
 }
 
 func (a *ApiHandler) EventSourceGetV1Events(w http.ResponseWriter, r *http.Request) {
-	_, err := sse.DefaultUpgrader.Upgrade(w, r)
-	if err != nil {
-		http.Error(w, "failed to upgrade", http.StatusInternalServerError)
+	if _, ok := w.(http.Flusher); !ok {
+		http.Error(w, "streaming unsupported", http.StatusBadRequest)
 		return
 	}
+	w.Header().Set("Content-Type", "text/event-stream")
+	w.Header().Set("Connection", "keep-alive")
+
 	topics := r.URL.Query()["topics"]
 	subscribeTopics := mapset.NewSet[event.EventTopic]()
 	for _, v := range topics {
@@ -74,10 +75,6 @@ func (a *ApiHandler) EventSourceGetV1Events(w http.ResponseWriter, r *http.Reque
 
 	ticker := time.NewTicker(time.Duration(a.beaconChainCfg.SecondsPerSlot) * time.Second)
 	defer ticker.Stop()
-	if _, err := w.Write([]byte(":\n\n")); err != nil {
-		log.Warn("failed to write keep alive", "err", err)
-	}
-	w.(http.Flusher).Flush()
 
 	for {
 		select {
