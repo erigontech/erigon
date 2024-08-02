@@ -24,13 +24,13 @@ import (
 	"errors"
 	"testing"
 
+	"github.com/erigontech/erigon-lib/kv/kvcache"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/eth/gasprice"
 	"github.com/erigontech/erigon/eth/gasprice/gaspricecfg"
 	"github.com/erigontech/erigon/rpc"
+	"github.com/erigontech/erigon/rpc/rpccfg"
 	"github.com/erigontech/erigon/turbo/jsonrpc"
-	"github.com/ledgerwatch/erigon-lib/kv/kvcache"
-	"github.com/ledgerwatch/erigon/rpc/rpccfg"
 )
 
 func TestFeeHistory(t *testing.T) {
@@ -67,9 +67,7 @@ func TestFeeHistory(t *testing.T) {
 		}
 		func() {
 			_, m := newTestBackend(t) //, big.NewInt(16), c.pending)
-			agg := m.HistoryV3Components()
-			stateCache := kvcache.New(kvcache.DefaultCoherentConfig)
-			baseApi := jsonrpc.NewBaseApi(nil, stateCache, m.BlockReader, agg, false, rpccfg.DefaultEvmCallTimeout, m.Engine, m.Dirs)
+			baseApi := jsonrpc.NewBaseApi(nil, kvcache.NewDummy(), m.BlockReader, false, rpccfg.DefaultEvmCallTimeout, m.Engine, m.Dirs)
 			tx, _ := m.DB.BeginRo(m.Ctx)
 			defer tx.Rollback()
 			defer m.Close()

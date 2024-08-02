@@ -25,16 +25,9 @@ import (
 	"math/big"
 	"testing"
 
+	"github.com/erigontech/erigon-lib/kv/kvcache"
+	"github.com/erigontech/erigon/rpc/rpccfg"
 	"github.com/holiman/uint256"
-	"github.com/ledgerwatch/erigon-lib/chain"
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon-lib/kv/kvcache"
-	"github.com/ledgerwatch/erigon/eth/gasprice/gaspricecfg"
-	"github.com/ledgerwatch/erigon/rpc/rpccfg"
-	"github.com/ledgerwatch/erigon/turbo/jsonrpc"
-	"github.com/ledgerwatch/erigon/turbo/services"
-	"github.com/ledgerwatch/erigon/turbo/stages/mock"
 
 	"github.com/erigontech/erigon-lib/chain"
 	libcommon "github.com/erigontech/erigon-lib/common"
@@ -108,6 +101,7 @@ func (b *testBackend) ChainConfig() *chain.Config {
 }
 
 func newTestBackend(t *testing.T) (*testBackend, *mock.MockSentry) {
+
 	var (
 		key, _ = crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
 		addr   = crypto.PubkeyToAddress(key.PublicKey)
@@ -166,9 +160,7 @@ func TestSuggestPrice(t *testing.T) {
 	}
 
 	_, m := newTestBackend(t) //, big.NewInt(16), c.pending)
-	agg := m.HistoryV3Components()
-	stateCache := kvcache.New(kvcache.DefaultCoherentConfig)
-	baseApi := jsonrpc.NewBaseApi(nil, stateCache, m.BlockReader, agg, false, rpccfg.DefaultEvmCallTimeout, m.Engine, m.Dirs)
+	baseApi := jsonrpc.NewBaseApi(nil, kvcache.NewDummy(), m.BlockReader, false, rpccfg.DefaultEvmCallTimeout, m.Engine, m.Dirs)
 
 	tx, _ := m.DB.BeginRo(m.Ctx)
 	defer tx.Rollback()

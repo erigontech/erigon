@@ -379,7 +379,7 @@ func (api *OtterscanAPIImpl) GetBlockTransactions(ctx context.Context, number rp
 	}
 	defer tx.Rollback()
 
-	b, senders, err := api.getBlockWithSenders(ctx, number, tx)
+	b, _, err := api.getBlockWithSenders(ctx, number, tx)
 	if err != nil {
 		return nil, err
 	}

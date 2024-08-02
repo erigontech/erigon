@@ -72,7 +72,7 @@ func (api *GraphQLAPIImpl) GetBlockDetails(ctx context.Context, blockNumber rpc.
 	}
 	defer tx.Rollback()
 
-	block, senders, err := api.getBlockWithSenders(ctx, blockNumber, tx)
+	block, _, err := api.getBlockWithSenders(ctx, blockNumber, tx)
 	if err != nil {
 		return nil, err
 	}
