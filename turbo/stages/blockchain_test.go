@@ -597,6 +597,9 @@ func readReceipt(db kv.Tx, txHash libcommon.Hash, m *mock.MockSentry) (*types.Re
 
 	// Read all the receipts from the block and return the one with the matching hash
 	receipts, err := m.ReceiptsReader.GetReceipts(context.Background(), m.ChainConfig, db, b)
+	if err != nil {
+		return nil, libcommon.Hash{}, 0, 0, err
+	}
 	for receiptIndex, receipt := range receipts {
 		if receipt.TxHash == txHash {
 			return receipt, blockHash, *blockNumber, uint64(receiptIndex), nil
