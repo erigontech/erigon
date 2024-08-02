@@ -1,30 +1,32 @@
 name: Kurtosis Assertoor GitHub Action
 
 on:
-    pull_request:
-       branches:
-          - kurtosis_assertoor
-       types:
-           - opened
-           - reopened
-           - synchronize
-           - ready_for_review
+  pull_request:
+    branches:
+      - kurtosis_assertoor
+    types:
+      - opened
+      - reopened
+      - synchronize
+      - ready_for_review
+  push:
+    branches:
+      - kurtosis_assertoor
 
 jobs:
-    assertoor_test:
-        strategy:
-            matrix:
-                # list of os: https://github.com/actions/virtual-environments
-                os:
-                    #- ubuntu-22.04
-                    - macos-14
-        runs-on: ${{ matrix.os }}
+  assertoor_test:
+    strategy:
+      matrix:
+        # list of os: https://github.com/actions/virtual-environments
+        os:
+          # - ubuntu-22.04
+          - macos-14
+    runs-on: ${{ matrix.os }}
 
-        steps:
-            - uses: actions/checkout@v4
-            - name: Install dependencies on Linux
-              if: runner.os == 'Linux'
-              run: sudo apt update && sudo apt install build-essential
-            - name: Run Kurtosis + assertoor tests
-              uses: ethpandaops/kurtosis-assertoor-github-action@v1
-
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install dependencies on Linux
+        if: runner.os == 'Linux'
+        run: sudo apt update && sudo apt install build-essential
+      - name: Run Kurtosis + assertoor tests
+        uses: ethpandaops/kurtosis-assertoor-github-action@v1
