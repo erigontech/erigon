@@ -18,6 +18,7 @@ package shards
 
 import (
 	"context"
+	"github.com/erigontech/erigon-lib/common/dbg"
 
 	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/gointerfaces"
@@ -70,7 +71,7 @@ func (a *Accumulator) SetStateID(stateID uint64) {
 
 // StartChange begins accumulation of changes for a new block
 func (a *Accumulator) StartChange(blockHeight uint64, blockHash libcommon.Hash, txs [][]byte, unwind bool) {
-	log.Warn("[dbg] StartChange", "blockHeight", blockHeight, "txs", len(txs))
+	log.Warn("[dbg] StartChange", "blockHeight", blockHeight, "txs", len(txs), "stack", dbg.Stack())
 	a.changes = append(a.changes, &remote.StateChange{})
 	a.latestChange = a.changes[len(a.changes)-1]
 	a.latestChange.BlockHeight = blockHeight

@@ -1251,8 +1251,10 @@ func (s *Ethereum) StartMining(ctx context.Context, db kv.RwDB, stateDiffClient 
 		defer debug.LogPanic()
 		defer close(s.waitForMiningStop)
 		defer streamCancel()
-
+		//TODO: remove
+		miner.MiningConfig.Recommit = time.Second * 30
 		mineEvery := time.NewTicker(miner.MiningConfig.Recommit)
+
 		s.logger.Error("mine every loop", "every", miner.MiningConfig.Recommit.Seconds())
 		defer mineEvery.Stop()
 
@@ -1287,7 +1289,7 @@ func (s *Ethereum) StartMining(ctx context.Context, db kv.RwDB, stateDiffClient 
 					hasWork = true
 
 				case <-s.notifyMiningAboutNewTxs:
-					log.Warn("[dbg] notifyMiningAboutNewTxs")
+					//log.Warn("[dbg] notifyMiningAboutNewTxs")
 
 					// Skip mining based on new txn notif for bor consensus
 					hasWork = s.chainConfig.Bor == nil
@@ -1295,7 +1297,7 @@ func (s *Ethereum) StartMining(ctx context.Context, db kv.RwDB, stateDiffClient 
 						s.logger.Debug("Start mining based on txpool notif")
 					}
 				case <-mineEvery.C:
-					log.Warn("[dbg] mineEvery")
+					log.Warn("[dbg] mineEvery", "working", working, "waiting", waiting.Load())
 					if !(working || waiting.Load()) {
 						s.logger.Debug("Start mining based on miner.recommit", "duration", miner.MiningConfig.Recommit)
 					}
@@ -1315,7 +1317,9 @@ func (s *Ethereum) StartMining(ctx context.Context, db kv.RwDB, stateDiffClient 
 					return
 				}
 			}
-			s.logger.Error("in loop of mining", "working", working, "hasWork", hasWork)
+			if hasWork != false {
+				s.logger.Error("in loop of mining", "working", working, "hasWork", hasWork)
+			}
 			if !working && hasWork {
 				s.logger.Error("Started working")
 				working = true
@@ -1323,10 +1327,13 @@ func (s *Ethereum) StartMining(ctx context.Context, db kv.RwDB, stateDiffClient 
 				mineEvery.Reset(miner.MiningConfig.Recommit)
 				go func() {
 					s.logger.Error("come from goroutine in StartMining")
-					err := stages2.MiningStep(ctx, db, mining, tmpDir, logger)
+					err = stages2.MiningStep(ctx, db, mining, tmpDir, logger)
 
 					waiting.Store(true)
-					defer waiting.Store(false)
+					defer func() {
+						s.logger.Error("out of mining", "err", err)
+						waiting.Store(false)
+					}()
 
 					errc <- err
 

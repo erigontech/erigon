@@ -208,38 +208,39 @@ func SpawnMiningExecStage(s *StageState, txc wrap.TxContainer, cfg MiningExecCfg
 	current.Requests = block.Requests()
 
 	// Simulate the block execution to get the final state root
-	if err := rawdb.WriteHeader(txc.Tx, block.Header()); err != nil {
+	if err = rawdb.WriteHeader(txc.Tx, block.Header()); err != nil {
 		return fmt.Errorf("cannot write header: %s", err)
 	}
 	blockHeight := block.NumberU64()
 
-	if err := rawdb.WriteCanonicalHash(txc.Tx, block.Hash(), blockHeight); err != nil {
+	if err = rawdb.WriteCanonicalHash(txc.Tx, block.Hash(), blockHeight); err != nil {
 		return fmt.Errorf("cannot write canonical hash: %s", err)
 	}
-	if err := rawdb.WriteHeadHeaderHash(txc.Tx, block.Hash()); err != nil {
+	if err = rawdb.WriteHeadHeaderHash(txc.Tx, block.Hash()); err != nil {
 		return err
 	}
 	if _, err = rawdb.WriteRawBodyIfNotExists(txc.Tx, block.Hash(), blockHeight, block.RawBody()); err != nil {
 		return fmt.Errorf("cannot write body: %s", err)
 	}
-	if err := rawdb.AppendCanonicalTxNums(txc.Tx, blockHeight); err != nil {
+	if err = rawdb.AppendCanonicalTxNums(txc.Tx, blockHeight); err != nil {
 		return err
 	}
-	if err := stages.SaveStageProgress(txc.Tx, kv.Headers, blockHeight); err != nil {
+	if err = stages.SaveStageProgress(txc.Tx, kv.Headers, blockHeight); err != nil {
 		return err
 	}
-	if err := stages.SaveStageProgress(txc.Tx, stages.Bodies, blockHeight); err != nil {
+	if err = stages.SaveStageProgress(txc.Tx, stages.Bodies, blockHeight); err != nil {
 		return err
 	}
 	senderS := &StageState{state: s.state, ID: stages.Senders, BlockNumber: blockHeight - 1}
-	if err := SpawnRecoverSendersStage(sendersCfg, senderS, nil, txc.Tx, blockHeight, ctx, logger); err != nil {
+	if err = SpawnRecoverSendersStage(sendersCfg, senderS, nil, txc.Tx, blockHeight, ctx, logger); err != nil {
 		return err
 	}
 
 	// This flag will skip checking the state root
 	execCfg.blockProduction = true
 	execS := &StageState{state: s.state, ID: stages.Execution, BlockNumber: blockHeight - 1}
-	if err := ExecBlockV3(execS, u, txc, blockHeight, context.Background(), execCfg, false, logger); err != nil {
+	if err = ExecBlockV3(execS, u, txc, blockHeight, context.Background(), execCfg, false, logger); err != nil {
+		logger.Error("cannot execute block execution", "err", err)
 		return err
 	}
 
