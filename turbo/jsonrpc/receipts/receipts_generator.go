@@ -24,8 +24,13 @@ type Generator struct {
 	engine        consensus.EngineReader
 }
 
-func NewGenerator(receiptsCache *lru.Cache[common.Hash, []*types.Receipt], blockReader services.FullBlockReader,
+func NewGenerator(cacheSize int, blockReader services.FullBlockReader,
 	engine consensus.EngineReader) *Generator {
+	receiptsCache, err := lru.New[common.Hash, []*types.Receipt](cacheSize)
+	if err != nil {
+		panic(err)
+	}
+
 	return &Generator{
 		receiptsCache: receiptsCache,
 		blockReader:   blockReader,

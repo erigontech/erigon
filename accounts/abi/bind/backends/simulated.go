@@ -28,8 +28,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/erigontech/erigon/turbo/jsonrpc/receipts"
-	lru "github.com/hashicorp/golang-lru/v2"
 	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon-lib/chain"
@@ -92,8 +90,6 @@ type SimulatedBackend struct {
 	rmLogsFeed event.Feed
 	chainFeed  event.Feed
 	logsFeed   event.Feed
-
-	receiptsBackend *receipts.Generator
 }
 
 // NewSimulatedBackend creates a new binding backend using a simulated blockchain
@@ -103,11 +99,6 @@ func NewSimulatedBackendWithConfig(t *testing.T, alloc types.GenesisAlloc, confi
 	engine := ethash.NewFaker()
 	checkStateRoot := true
 	m := mock.MockWithGenesisEngine(t, &genesis, engine, false, checkStateRoot)
-
-	receiptsCache, err := lru.New[libcommon.Hash, []*types.Receipt](16)
-	if err != nil {
-		panic(err)
-	}
 
 	backend := &SimulatedBackend{
 		m:            m,
@@ -122,7 +113,6 @@ func NewSimulatedBackendWithConfig(t *testing.T, alloc types.GenesisAlloc, confi
 			}
 			return h
 		},
-		receiptsBackend: receipts.NewGenerator(receiptsCache, m.BlockReader, m.Engine),
 	}
 	backend.emptyPendingBlock()
 	return backend
@@ -290,7 +280,7 @@ func (b *SimulatedBackend) TransactionReceipt(ctx context.Context, txHash libcom
 	}
 
 	// Read all the receipts from the block and return the one with the matching hash
-	receipts, err := b.receiptsBackend.GetReceipts(ctx, b.m.ChainConfig, tx, block)
+	receipts, err := b.m.ReceiptsReader.GetReceipts(ctx, b.m.ChainConfig, tx, block)
 	if err != nil {
 		panic(err)
 	}
