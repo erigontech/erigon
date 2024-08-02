@@ -50,7 +50,7 @@ const (
 // State event data types
 
 type HeadData struct {
-	Slot                      string      `json:"slot"`
+	Slot                      uint64      `json:"slot,string"`
 	Block                     common.Hash `json:"block"`
 	State                     common.Hash `json:"state"`
 	EpochTransition           bool        `json:"epoch_transition"`
