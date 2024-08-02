@@ -36,7 +36,6 @@ import (
 	"github.com/erigontech/erigon/turbo/stages/mock"
 
 	"github.com/erigontech/erigon/core"
-	"github.com/erigontech/erigon/core/rawdb"
 	"github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/crypto"
 	"github.com/erigontech/erigon/eth/gasprice"
@@ -75,26 +74,6 @@ func newTestBackend(t *testing.T) *mock.MockSentry {
 	return m
 }
 
-func (b *testBackend) CurrentHeader() *types.Header {
-	tx, err := b.db.BeginRo(context.Background())
-	if err != nil {
-		panic(err)
-	}
-	defer tx.Rollback()
-	return rawdb.ReadCurrentHeader(tx)
-}
-
-func (b *testBackend) GetBlockByNumber(number uint64) *types.Block {
-	tx, err := b.db.BeginRo(context.Background())
-	if err != nil {
-		panic(err)
-	}
-	defer tx.Rollback()
-
-	block, _ := b.blockReader.BlockByNumber(context.Background(), tx, number)
-	return block
-}
-
 func TestSuggestPrice(t *testing.T) {
 	config := gaspricecfg.Config{
 		Blocks:     2,
@@ -102,7 +81,7 @@ func TestSuggestPrice(t *testing.T) {
 		Default:    big.NewInt(params.GWei),
 	}
 
-	_, m := newTestBackend(t) //, big.NewInt(16), c.pending)
+	m := newTestBackend(t) //, big.NewInt(16), c.pending)
 	baseApi := jsonrpc.NewBaseApi(nil, kvcache.NewDummy(), m.BlockReader, false, rpccfg.DefaultEvmCallTimeout, m.Engine, m.Dirs)
 
 	tx, _ := m.DB.BeginRo(m.Ctx)
