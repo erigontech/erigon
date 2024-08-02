@@ -174,27 +174,6 @@ func printStages(tx kv.Tx, snapshots *freezeblocks.RoSnapshots, borSn *freezeblo
 	}
 
 	fmt.Fprintf(w, "--\n")
-
-	//fmt.Printf("==== state =====\n")
-	//db.ForEach(kv.PlainState, nil, func(k, v []byte) error {
-	//	fmt.Printf("st: %x, %x\n", k, v)
-	//	return nil
-	//})
-	//fmt.Printf("====  code =====\n")
-	//db.ForEach(kv.Code, nil, func(k, v []byte) error {
-	//	fmt.Printf("code: %x, %x\n", k, v)
-	//	return nil
-	//})
-	//fmt.Printf("==== PlainContractCode =====\n")
-	//db.ForEach(kv.PlainContractCode, nil, func(k, v []byte) error {
-	//	fmt.Printf("code2: %x, %x\n", k, v)
-	//	return nil
-	//})
-	//fmt.Printf("====  IncarnationMap =====\n")
-	//db.ForEach(kv.IncarnationMap, nil, func(k, v []byte) error {
-	//	fmt.Printf("IncarnationMap: %x, %x\n", k, v)
-	//	return nil
-	//})
 	return nil
 }
 func u64or0(in []byte) (v uint64) {
