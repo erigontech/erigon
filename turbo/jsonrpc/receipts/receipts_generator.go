@@ -11,7 +11,6 @@ import (
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/consensus"
 	"github.com/erigontech/erigon/core"
-	"github.com/erigontech/erigon/core/rawdb"
 	"github.com/erigontech/erigon/core/state"
 	"github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/core/vm"
@@ -36,11 +35,6 @@ func NewGenerator(receiptsCache *lru.Cache[common.Hash, []*types.Receipt], block
 
 func (g *Generator) GetReceipts(ctx context.Context, cfg *chain.Config, tx kv.Tx, block *types.Block, senders []common.Address) (types.Receipts, error) {
 	if receipts, ok := g.receiptsCache.Get(block.Hash()); ok {
-		return receipts, nil
-	}
-
-	if receipts := rawdb.ReadReceipts(tx, block, senders); receipts != nil {
-		g.receiptsCache.Add(block.Hash(), receipts)
 		return receipts, nil
 	}
 

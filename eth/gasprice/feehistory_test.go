@@ -29,9 +29,12 @@ import (
 	"github.com/erigontech/erigon/eth/gasprice/gaspricecfg"
 	"github.com/erigontech/erigon/rpc"
 	"github.com/erigontech/erigon/turbo/jsonrpc"
+	"github.com/ledgerwatch/erigon-lib/kv/kvcache"
+	"github.com/ledgerwatch/erigon/rpc/rpccfg"
 )
 
 func TestFeeHistory(t *testing.T) {
+
 	var cases = []struct {
 		pending             bool
 		maxHeader, maxBlock int
@@ -62,35 +65,44 @@ func TestFeeHistory(t *testing.T) {
 			MaxHeaderHistory: c.maxHeader,
 			MaxBlockHistory:  c.maxBlock,
 		}
-		backend := newTestBackend(t) //, big.NewInt(16), c.pending)
-		cache := jsonrpc.NewGasPriceCache()
-		oracle := gasprice.NewOracle(backend, config, cache, log.New())
+		func() {
+			_, m := newTestBackend(t) //, big.NewInt(16), c.pending)
+			agg := m.HistoryV3Components()
+			stateCache := kvcache.New(kvcache.DefaultCoherentConfig)
+			baseApi := jsonrpc.NewBaseApi(nil, stateCache, m.BlockReader, agg, false, rpccfg.DefaultEvmCallTimeout, m.Engine, m.Dirs)
+			tx, _ := m.DB.BeginRo(m.Ctx)
+			defer tx.Rollback()
+			defer m.Close()
 
-		first, reward, baseFee, ratio, err := oracle.FeeHistory(context.Background(), c.count, c.last, c.percent)
+			cache := jsonrpc.NewGasPriceCache()
+			oracle := gasprice.NewOracle(jsonrpc.NewGasPriceOracleBackend(tx, baseApi), config, cache, log.New())
 
-		expReward := c.expCount
-		if len(c.percent) == 0 {
-			expReward = 0
-		}
-		expBaseFee := c.expCount
-		if expBaseFee != 0 {
-			expBaseFee++
-		}
+			first, reward, baseFee, ratio, err := oracle.FeeHistory(context.Background(), c.count, c.last, c.percent)
 
-		if first.Uint64() != c.expFirst {
-			t.Fatalf("Test case %d: first block mismatch, want %d, got %d", i, c.expFirst, first)
-		}
-		if len(reward) != expReward {
-			t.Fatalf("Test case %d: reward array length mismatch, want %d, got %d", i, expReward, len(reward))
-		}
-		if len(baseFee) != expBaseFee {
-			t.Fatalf("Test case %d: baseFee array length mismatch, want %d, got %d", i, expBaseFee, len(baseFee))
-		}
-		if len(ratio) != c.expCount {
-			t.Fatalf("Test case %d: gasUsedRatio array length mismatch, want %d, got %d", i, c.expCount, len(ratio))
-		}
-		if err != c.expErr && !errors.Is(err, c.expErr) {
-			t.Fatalf("Test case %d: error mismatch, want %v, got %v", i, c.expErr, err)
-		}
+			expReward := c.expCount
+			if len(c.percent) == 0 {
+				expReward = 0
+			}
+			expBaseFee := c.expCount
+			if expBaseFee != 0 {
+				expBaseFee++
+			}
+
+			if first.Uint64() != c.expFirst {
+				t.Fatalf("Test case %d: first block mismatch, want %d, got %d", i, c.expFirst, first)
+			}
+			if len(reward) != expReward {
+				t.Fatalf("Test case %d: reward array length mismatch, want %d, got %d", i, expReward, len(reward))
+			}
+			if len(baseFee) != expBaseFee {
+				t.Fatalf("Test case %d: baseFee array length mismatch, want %d, got %d", i, expBaseFee, len(baseFee))
+			}
+			if len(ratio) != c.expCount {
+				t.Fatalf("Test case %d: gasUsedRatio array length mismatch, want %d, got %d", i, c.expCount, len(ratio))
+			}
+			if err != c.expErr && !errors.Is(err, c.expErr) {
+				t.Fatalf("Test case %d: error mismatch, want %v, got %v", i, c.expErr, err)
+			}
+		}()
 	}
 }

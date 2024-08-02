@@ -26,6 +26,15 @@ import (
 	"testing"
 
 	"github.com/holiman/uint256"
+	"github.com/ledgerwatch/erigon-lib/chain"
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/ledgerwatch/erigon-lib/kv/kvcache"
+	"github.com/ledgerwatch/erigon/eth/gasprice/gaspricecfg"
+	"github.com/ledgerwatch/erigon/rpc/rpccfg"
+	"github.com/ledgerwatch/erigon/turbo/jsonrpc"
+	"github.com/ledgerwatch/erigon/turbo/services"
+	"github.com/ledgerwatch/erigon/turbo/stages/mock"
 
 	"github.com/erigontech/erigon-lib/chain"
 	libcommon "github.com/erigontech/erigon-lib/common"
@@ -98,7 +107,7 @@ func (b *testBackend) ChainConfig() *chain.Config {
 	return b.cfg
 }
 
-func newTestBackend(t *testing.T) *testBackend {
+func newTestBackend(t *testing.T) (*testBackend, *mock.MockSentry) {
 	var (
 		key, _ = crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
 		addr   = crypto.PubkeyToAddress(key.PublicKey)
@@ -126,7 +135,7 @@ func newTestBackend(t *testing.T) *testBackend {
 	if err = m.InsertChain(chain); err != nil {
 		t.Error(err)
 	}
-	return &testBackend{db: m.DB, cfg: params.TestChainConfig, blockReader: m.BlockReader}
+	return &testBackend{db: m.DB, cfg: params.TestChainConfig, blockReader: m.BlockReader}, m
 }
 
 func (b *testBackend) CurrentHeader() *types.Header {
@@ -155,9 +164,17 @@ func TestSuggestPrice(t *testing.T) {
 		Percentile: 60,
 		Default:    big.NewInt(params.GWei),
 	}
-	backend := newTestBackend(t)
+
+	_, m := newTestBackend(t) //, big.NewInt(16), c.pending)
+	agg := m.HistoryV3Components()
+	stateCache := kvcache.New(kvcache.DefaultCoherentConfig)
+	baseApi := jsonrpc.NewBaseApi(nil, stateCache, m.BlockReader, agg, false, rpccfg.DefaultEvmCallTimeout, m.Engine, m.Dirs)
+
+	tx, _ := m.DB.BeginRo(m.Ctx)
+	defer tx.Rollback()
+
 	cache := jsonrpc.NewGasPriceCache()
-	oracle := gasprice.NewOracle(backend, config, cache, log.New())
+	oracle := gasprice.NewOracle(jsonrpc.NewGasPriceOracleBackend(tx, baseApi), config, cache, log.New())
 
 	// The gas price sampled is: 32G, 31G, 30G, 29G, 28G, 27G
 	got, err := oracle.SuggestTipCap(context.Background())
