@@ -112,6 +112,9 @@ func TestAppendableCollationBuild(t *testing.T) {
 			return it, nil
 		}).
 		AnyTimes()
+	iters.EXPECT().TxNum2ID(gomock.Any(), uint64(16)).
+		Return(0, 16, true, nil).
+		AnyTimes()
 	ii.cfg.iters = iters
 
 	mergeAppendable(t, db, ii, txs)

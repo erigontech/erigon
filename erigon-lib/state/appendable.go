@@ -564,7 +564,6 @@ func (tx *AppendableRoTx) CanPrune(dbtx kv.Tx) bool {
 		return false
 	}
 	_, txnIDInFiles, ok, _ := tx.ap.cfg.iters.TxNum2ID(dbtx, tx.files.EndTxNum())
-	fmt.Printf("[dbg] CanPrune: txnIDInDB=%d, txnIDInFiles=%d, tx.files.EndTxNum()=%d\n", txnIDInDB, txnIDInFiles, tx.files.EndTxNum())
 	return txnIDInDB < txnIDInFiles
 }
 
