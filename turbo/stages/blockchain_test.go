@@ -557,12 +557,8 @@ func TestChainTxReorgs(t *testing.T) {
 		require.NoError(t, err)
 		require.True(t, found)
 
-		if m.HistoryV3 {
-			// m.HistoryV3 doesn't store
-		} else {
-			if rcpt, _, _, _, _ := readReceipt(tx, txn.Hash(), m); rcpt == nil {
-				t.Errorf("add %d: expected receipt to be found", i)
-			}
+		if rcpt, _, _, _, _ := readReceipt(tx, txn.Hash(), m); rcpt == nil {
+			t.Errorf("add %d: expected receipt to be found", i)
 		}
 	}
 	// shared tx
