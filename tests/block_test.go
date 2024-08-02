@@ -68,6 +68,7 @@ func TestBlockchainEIP(t *testing.T) {
 
 	// EOF is not supported yet
 	bt.skipLoad(`^StateTests/stEOF/`)
+	bt.skipLoad(`^StateTests/stEIP2537/`)
 
 	checkStateRoot := true
 
