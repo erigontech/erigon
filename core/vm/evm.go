@@ -32,11 +32,10 @@ import (
 	"github.com/erigontech/erigon/core/vm/evmtypes"
 	"github.com/erigontech/erigon/crypto"
 	"github.com/erigontech/erigon/params"
+	"github.com/erigontech/erigon/turbo/trie"
 )
 
-// emptyCodeHash is used by create to ensure deployment is disallowed to already
-// deployed contract addresses (relevant after the account abstraction).
-var emptyCodeHash = crypto.Keccak256Hash(nil)
+var emptyHash = libcommon.Hash{}
 
 func (evm *EVM) precompile(addr libcommon.Address) (PrecompiledContract, bool) {
 	var precompiles map[libcommon.Address]PrecompiledContract
@@ -343,7 +342,7 @@ func NewCodeAndHash(code []byte) *codeAndHash {
 }
 
 func (c *codeAndHash) Hash() libcommon.Hash {
-	if c.hash == (libcommon.Hash{}) {
+	if c.hash == emptyHash {
 		c.hash = crypto.Keccak256Hash(c.code)
 	}
 	return c.hash
@@ -401,7 +400,7 @@ func (evm *EVM) create(caller ContractRef, codeAndHash *codeAndHash, gasRemainin
 	}
 	// Ensure there's no existing contract already at the designated address
 	contractHash := evm.intraBlockState.GetCodeHash(address)
-	if evm.intraBlockState.GetNonce(address) != 0 || (contractHash != (libcommon.Hash{}) && contractHash != emptyCodeHash) {
+	if evm.intraBlockState.GetNonce(address) != 0 || (contractHash != (libcommon.Hash{}) && contractHash != trie.EmptyCodeHash) {
 		err = ErrContractAddressCollision
 		return nil, libcommon.Address{}, 0, err
 	}
