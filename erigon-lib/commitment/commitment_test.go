@@ -178,8 +178,8 @@ func TestUNfld(t *testing.T) {
 
 	for i := 0; i < len(row); i++ {
 		if row[i].apl > 0 {
-			rand.Read(row[i].accLeafHash[:])
-			row[i].alhlen = 32
+			rand.Read(row[i].leafHash[:])
+			row[i].lhLen = 32
 		}
 	}
 

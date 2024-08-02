@@ -248,7 +248,7 @@ func (be *BranchEncoder) EncodeBranch(bitmap, touchMap, afterMap uint16, readCel
 			}
 			if cell.apl > 0 {
 				fieldBits |= AccountPlainPart
-				if cell.alhlen > 0 {
+				if cell.lhLen > 0 {
 					fieldBits |= AccLeafHashPart
 				}
 			}
@@ -283,8 +283,8 @@ func (be *BranchEncoder) EncodeBranch(bitmap, touchMap, afterMap uint16, readCel
 				}
 			}
 			if fieldBits&AccLeafHashPart != 0 {
-				//fmt.Printf("ALH encoded %x\n", cell.accLeafHash[:cell.alhlen])
-				if err := putUvarAndVal(uint64(cell.alhlen), cell.accLeafHash[:cell.alhlen]); err != nil {
+				//fmt.Printf("LH encoded %x\n", cell.leafHash[:cell.lhLen])
+				if err := putUvarAndVal(uint64(cell.lhLen), cell.leafHash[:cell.lhLen]); err != nil {
 					return nil, 0, err
 				}
 			}
@@ -340,8 +340,8 @@ func (branchData BranchData) String() string {
 			if cell.hl > 0 {
 				fmt.Fprintf(&sb, "%shash=[%x]", comma, cell.h[:cell.hl])
 			}
-			if cell.alhlen > 0 {
-				fmt.Fprintf(&sb, "%saccLeafHash=[%x]", comma, cell.accLeafHash[:cell.alhlen])
+			if cell.lhLen > 0 {
+				fmt.Fprintf(&sb, "%sleafHash=[%x]", comma, cell.leafHash[:cell.lhLen])
 			}
 			sb.WriteString("}\n")
 		}
