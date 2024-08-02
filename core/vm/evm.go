@@ -124,8 +124,10 @@ func NewEVM(blockCtx evmtypes.BlockContext, txCtx evmtypes.TxContext, state evmt
 		chainRules:      chainConfig.Rules(blockCtx.BlockNumber, blockCtx.Time),
 	}
 
-	evm.interpreter = NewEVMInterpreter(evm, vmConfig)
-
+	interpreter := NewEVMInterpreter(evm, vmConfig)
+	evm.interpreter = interpreter
+	evm.config.JumpTableEOF = interpreter.cfg.JumpTableEOF
+	fmt.Println("NewEVM: evm.config.JumpTableEOF == nil: ", evm.config.JumpTableEOF == nil)
 	return evm
 }
 
@@ -284,12 +286,32 @@ func (evm *EVM) call(typ OpCode, caller ContractRef, addr libcommon.Address, inp
 		} else {
 			contract = NewContract(caller, addrCopy, value, gas, evm.config.SkipAnalysis)
 		}
-		// fmt.Println("contract.Gas: ", contract.Gas)
+
 		contract.SetCallCode(&addrCopy, codeHash, code, evm.parseContainer(code))
 		readOnly := false
 		if typ == STATICCALL {
 			readOnly = true
 		}
+
+		// isInitcodeEOF := hasEOFMagic(codeAndHash.code)
+		// if evm.chainRules.IsPrague {
+		// 	// TODO(racytech): revisit this part and double check!
+		// 	if isInitcodeEOF {
+		// 		// If the initcode is EOF, verify it is well-formed.
+		// 		var c Container
+		// 		if err := c.UnmarshalBinary(codeAndHash.code); err != nil {
+		// 			return nil, libcommon.Address{}, gasRemaining, fmt.Errorf("%w: %v", ErrInvalidEOFInitcode, err)
+		// 		}
+		// 		if err := c.ValidateCode(evm.config.JumpTableEOF); err != nil {
+		// 			return nil, libcommon.Address{}, gasRemaining, fmt.Errorf("%w: %v", ErrInvalidEOFInitcode, err)
+		// 		}
+		// 		contract.Container = &c
+		// 	} else if fromEOF {
+		// 		// Don't allow EOF contract to execute legacy initcode.
+		// 		return nil, libcommon.Address{}, gasRemaining, ErrLegacyCode
+		// 	}
+		// }
+
 		ret, err = run(evm, contract, input, readOnly)
 		gas = contract.Gas
 	}
@@ -602,6 +624,9 @@ func (evm *EVM) parseContainer(b []byte) *Container {
 		if err := c.UnmarshalBinary(b); err != nil {
 			// Code was already validated, so no other errors should be possible.
 			panic(fmt.Sprintf("unexpected error: %v\ncode: %s\n", err, common.Bytes2Hex(b)))
+		}
+		if err := c.ValidateCode(evm.interpreter.Config().JumpTableEOF); err != nil {
+			panic(fmt.Sprintf("error validating container: %v", err))
 		}
 		return &c
 	}

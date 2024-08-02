@@ -79,6 +79,8 @@ type Interpreter interface {
 
 	// `Depth` returns the current call stack's depth.
 	Depth() int
+
+	Config() *Config
 }
 
 // ScopeContext contains the things that are per-call, such as stack and memory,
@@ -113,6 +115,10 @@ type EVMInterpreter struct {
 	depth int
 }
 
+func (evmi *EVMInterpreter) Config() *Config {
+	return &evmi.cfg
+}
+
 // structcheck doesn't see embedding
 //
 //nolint:structcheck
@@ -140,11 +146,13 @@ func copyJumpTable(jt *JumpTable) *JumpTable {
 
 // NewEVMInterpreter returns a new instance of the Interpreter.
 func NewEVMInterpreter(evm *EVM, cfg Config) *EVMInterpreter {
+	fmt.Println("CALLING NewEVMInterpreter")
 	var jt, eofJt *JumpTable
 	switch {
 	case evm.ChainRules().IsPrague:
 		jt = &pragueInstructionSet
 		eofJt = &pragueEOFInstructionSet
+		fmt.Println("Hit PRAGUE")
 	case evm.ChainRules().IsCancun:
 		jt = &cancunInstructionSet
 	case evm.ChainRules().IsNapoli:
@@ -183,7 +191,7 @@ func NewEVMInterpreter(evm *EVM, cfg Config) *EVMInterpreter {
 
 	cfg.JumpTable = jt
 	cfg.JumpTableEOF = eofJt
-
+	fmt.Println("cfg.JumpTableEOF is nil: ", cfg.JumpTableEOF == nil)
 	return &EVMInterpreter{
 		VM: &VM{
 			evm: evm,
@@ -238,11 +246,13 @@ func (in *EVMInterpreter) Run(contract *Contract, input []byte, readOnly bool) (
 	mem.Reset()
 
 	contract.Input = input
-
+	var initcode []byte // TODO(racytech): temp solution, condsider a better way
 	if contract.IsEOF() {
 		jt = in.cfg.JumpTableEOF
+		initcode = contract.Container.Code[0]
 	} else {
 		jt = in.cfg.JumpTable
+		initcode = contract.Code
 	}
 
 	// Make sure the readOnly is only set if we aren't in readOnly yet.
@@ -286,7 +296,11 @@ func (in *EVMInterpreter) Run(contract *Contract, input []byte, readOnly bool) (
 		}
 		// Get the operation from the jump table and validate the stack to ensure there are
 		// enough stack items available to perform the operation.
-		op = contract.GetOp(_pc)
+		// op = contract.GetOp(_pc)
+		// if contract.IsEOF() {
+		// 	op = contract.GetOp(_pc)
+		// }
+		op = OpCode(initcode[_pc])
 		operation := jt[op]
 		cost = operation.constantGas // For tracing
 		fmt.Printf("%v ", op)

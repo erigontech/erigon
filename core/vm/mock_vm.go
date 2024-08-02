@@ -83,6 +83,10 @@ func (evm *testVM) Depth() int {
 	return 0
 }
 
+func (evm *testVM) Config() *Config {
+	return nil
+}
+
 type readOnlyState struct {
 	outer  bool
 	before bool
