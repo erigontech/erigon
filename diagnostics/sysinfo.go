@@ -14,18 +14,26 @@
 // You should have received a copy of the GNU Lesser General Public License
 // along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
-//go:build !darwin
+package diagnostics
 
-package diskutils
+import (
+	"net/http"
 
-import "github.com/erigontech/erigon-lib/log/v3"
+	diaglib "github.com/erigontech/erigon-lib/diagnostics"
+)
 
-func MountPointForDirPath(dirPath string) string {
-	log.Debug("[diskutils] Implemented only for darwin")
-	return "/"
+func SetupSysInfoAccess(metricsMux *http.ServeMux, diag *diaglib.DiagnosticClient) {
+	if metricsMux == nil {
+		return
+	}
+
+	metricsMux.HandleFunc("/disk-info", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Access-Control-Allow-Origin", "*")
+		w.Header().Set("Content-Type", "application/json")
+		writeHardwareInfo(w, diag)
+	})
 }
 
-func DiskInfo(disk string) (string, error) {
-	log.Debug("[diskutils] Implemented only for darwin")
-	return "", nil
+func writeDiskInfo(w http.ResponseWriter, diag *diaglib.DiagnosticClient) {
+	diag.HardwareInfoJson(w)
 }
