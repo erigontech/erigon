@@ -21,6 +21,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"time"
 
 	mapset "github.com/deckarep/golang-set/v2"
 	"github.com/erigontech/erigon-lib/log/v3"
@@ -52,6 +53,7 @@ func (a *ApiHandler) EventSourceGetV1Events(w http.ResponseWriter, r *http.Reque
 	sink, err := sse.DefaultUpgrader.Upgrade(w, r)
 	if err != nil {
 		http.Error(w, "failed to upgrade", http.StatusInternalServerError)
+		return
 	}
 	topics := r.URL.Query()["topics"]
 	subscribeTopics := mapset.NewSet[event.EventTopic]()
@@ -59,12 +61,17 @@ func (a *ApiHandler) EventSourceGetV1Events(w http.ResponseWriter, r *http.Reque
 		topic := event.EventTopic(v)
 		if _, ok := validTopics[topic]; !ok {
 			http.Error(w, "invalid Topic: "+v, http.StatusBadRequest)
+			return
 		}
 		subscribeTopics.Add(topic)
 	}
 	eventCh := make(chan *event.EventStream, 128)
 	opSub := a.emitters.Operation().Subscribe(eventCh)
 	defer opSub.Unsubscribe()
+
+	ticker := time.NewTicker(time.Duration(a.beaconChainCfg.SecondsPerSlot) * time.Second)
+	defer ticker.Stop()
+
 	for {
 		select {
 		case event := <-eventCh:
@@ -75,15 +82,25 @@ func (a *ApiHandler) EventSourceGetV1Events(w http.ResponseWriter, r *http.Reque
 				log.Warn("event data is nil", "event", event)
 				continue
 			}
+			// marshal and send
 			buf := &bytes.Buffer{}
 			if err := json.NewEncoder(buf).Encode(event.Data); err != nil {
-				log.Error("failed to encode data", "event", event, "err", err)
+				log.Warn("failed to encode data", "err", err, "topic", event.Event)
 				continue
 			}
-			sink.Encode(&sse.Event{
+			if err := sink.Encode(&sse.Event{
 				Event: []byte(event.Event),
 				Data:  buf,
-			})
+			}); err != nil {
+				log.Warn("failed to encode event", "err", err)
+			}
+		case <-ticker.C:
+			// keep connection alive
+			if _, err := w.Write([]byte(":\n\n")); err != nil {
+				log.Warn("failed to write keep alive", "err", err)
+				continue
+			}
+			w.(http.Flusher).Flush()
 		case err := <-opSub.Err():
 			http.Error(w, fmt.Sprintf("event error %v", err), http.StatusInternalServerError)
 			return

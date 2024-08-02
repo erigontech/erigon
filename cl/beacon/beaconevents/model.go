@@ -13,6 +13,7 @@ type EventStream struct {
 
 type EventTopic string
 
+// Operation event topics
 const (
 	OpAttestation       EventTopic = "attestation"
 	OpVoluntaryExit     EventTopic = "voluntary_exit"
@@ -34,6 +35,7 @@ type (
 	BlobSidecarData           = cltypes.BlobSidecar
 )
 
+// State event topics
 const (
 	StateHead                EventTopic = "head"
 	StateBlock               EventTopic = "block"
