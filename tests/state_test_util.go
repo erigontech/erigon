@@ -343,7 +343,7 @@ func MakePreState(rules *chain.Rules, tx kv.RwTx, accounts types.GenesisAlloc, b
 }
 
 func (t *StateTest) genesis(config *chain.Config) *types.Genesis {
-	genesis := &types.Genesis{
+	return &types.Genesis{
 		Config:     config,
 		Coinbase:   t.json.Env.Coinbase,
 		Difficulty: t.json.Env.Difficulty,
@@ -352,7 +352,6 @@ func (t *StateTest) genesis(config *chain.Config) *types.Genesis {
 		Timestamp:  t.json.Env.Timestamp,
 		Alloc:      t.json.Pre,
 	}
-	return genesis
 }
 
 func rlpHash(x interface{}) (h libcommon.Hash) {
