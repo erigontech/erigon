@@ -24,28 +24,28 @@ import (
 
 	mapset "github.com/deckarep/golang-set/v2"
 	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon/cl/beacon/beaconevents"
+	event "github.com/erigontech/erigon/cl/beacon/beaconevents"
 	"github.com/gfx-labs/sse"
 )
 
-var validTopics = map[beaconevents.EventTopic]struct{}{
+var validTopics = map[event.EventTopic]struct{}{
 	// operation events
-	beaconevents.OpAttestation:       {},
-	beaconevents.OpAttesterSlashing:  {},
-	beaconevents.OpBlobSidecar:       {},
-	beaconevents.OpBlsToExecution:    {},
-	beaconevents.OpContributionProof: {},
-	beaconevents.OpProposerSlashing:  {},
-	beaconevents.OpVoluntaryExit:     {},
+	event.OpAttestation:       {},
+	event.OpAttesterSlashing:  {},
+	event.OpBlobSidecar:       {},
+	event.OpBlsToExecution:    {},
+	event.OpContributionProof: {},
+	event.OpProposerSlashing:  {},
+	event.OpVoluntaryExit:     {},
 	// state events
-	beaconevents.StateBlock:               {},
-	beaconevents.StateBlockGossip:         {},
-	beaconevents.StateChainReorg:          {},
-	beaconevents.StateFinalityUpdate:      {},
-	beaconevents.StateFinalizedCheckpoint: {},
-	beaconevents.StateHead:                {},
-	beaconevents.StateOptimisticUpdate:    {},
-	beaconevents.StatePayloadAttributes:   {},
+	event.StateBlock:               {},
+	event.StateBlockGossip:         {},
+	event.StateChainReorg:          {},
+	event.StateFinalityUpdate:      {},
+	event.StateFinalizedCheckpoint: {},
+	event.StateHead:                {},
+	event.StateOptimisticUpdate:    {},
+	event.StatePayloadAttributes:   {},
 }
 
 func (a *ApiHandler) EventSourceGetV1Events(w http.ResponseWriter, r *http.Request) {
@@ -54,16 +54,17 @@ func (a *ApiHandler) EventSourceGetV1Events(w http.ResponseWriter, r *http.Reque
 		http.Error(w, "failed to upgrade", http.StatusInternalServerError)
 	}
 	topics := r.URL.Query()["topics"]
-	subscribeTopics := mapset.NewSet[beaconevents.EventTopic]()
+	subscribeTopics := mapset.NewSet[event.EventTopic]()
 	for _, v := range topics {
-		topic := beaconevents.EventTopic(v)
+		topic := event.EventTopic(v)
 		if _, ok := validTopics[topic]; !ok {
 			http.Error(w, "invalid Topic: "+v, http.StatusBadRequest)
 		}
 		subscribeTopics.Add(topic)
 	}
-	eventCh := make(chan *beaconevents.EventStream, 128)
+	eventCh := make(chan *event.EventStream, 128)
 	opSub := a.emitters.Operation().Subscribe(eventCh)
+	defer opSub.Unsubscribe()
 	for {
 		select {
 		case event := <-eventCh:
@@ -87,7 +88,6 @@ func (a *ApiHandler) EventSourceGetV1Events(w http.ResponseWriter, r *http.Reque
 			http.Error(w, fmt.Sprintf("event error %v", err), http.StatusInternalServerError)
 			return
 		case <-r.Context().Done():
-			opSub.Unsubscribe()
 			return
 		}
 	}
