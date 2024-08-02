@@ -17,7 +17,6 @@
 package handler
 
 import (
-	"encoding/json"
 	"fmt"
 	"net/http"
 	"time"
@@ -87,30 +86,30 @@ func (a *ApiHandler) EventSourceGetV1Events(w http.ResponseWriter, r *http.Reque
 			}
 			// marshal and send
 			//buf := &bytes.Buffer{}
-			buf, err := json.Marshal(event.Data)
+			/*buf, err := json.Marshal(event.Data)
 			if err != nil {
 				log.Warn("failed to encode data", "err", err, "topic", event.Event)
 				continue
 			}
-			/*if err := sink.Encode(&sse.Event{
+			if err := sink.Encode(&sse.Event{
 				Event: []byte(event.Event),
 				Data:  buf,
 			}); err != nil {
 				log.Warn("failed to encode event", "err", err)
 			}*/
-			if _, err := fmt.Fprintf(w, "event: %s\ndata: %s\n\n", event.Event, string(buf)); err != nil {
+			/*if _, err := fmt.Fprintf(w, "event: %s\ndata: %s\n\n", event.Event, string(buf)); err != nil {
 				log.Warn("failed to write event", "err", err)
 				continue
 			}
-			w.(http.Flusher).Flush()
+			w.(http.Flusher).Flush()*/
 			log.Info("[test] sent event", "topic", event.Event)
 		case <-ticker.C:
 			// keep connection alive
-			if _, err := w.Write([]byte(":\n\n")); err != nil {
+			/*if _, err := w.Write([]byte(":\n\n")); err != nil {
 				log.Warn("failed to write keep alive", "err", err)
 				continue
 			}
-			w.(http.Flusher).Flush()
+			w.(http.Flusher).Flush()*/
 		case err := <-stateSub.Err():
 			log.Warn("event error", "err", err)
 			http.Error(w, fmt.Sprintf("event error %v", err), http.StatusInternalServerError)
