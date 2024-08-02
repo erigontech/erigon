@@ -1,5 +1,5 @@
 {
-    "tests/prague/eip7692_eof_v1/eip7620_eof_create/test_eofcreate.py::test_eofcreate_in_initcode[fork_CancunEIP7692-state_test]": {
+    "tests/prague/eip7692_eof_v1/eip7620_eof_create/test_eofcreate.py::test_eofcreate_in_initcode[fork_PragueEIP7692-state_test]": {
         "env": {
             "currentCoinbase": "0x2adc25665018aa1fe0e6bc666dac8fc2697ff9ba",
             "currentGasLimit": "0x016345785d8a0000",
@@ -57,9 +57,9 @@
         "_info": {
             "hash": "0xcf58b74259cd73e0b114accb676ada0a6d9dd876cc461517aa8b75ce5fcf2779",
             "comment": "`execution-spec-tests` generated test",
-            "filling-transition-tool": "evmone-t8n 0.12.0-dev+commit.26d56091",
+            "filling-transition-tool": "Hyperledger Besu evm 24.7-develop-30c96c7",
             "description": "Test function documentation:\n\n    Verifies an EOFCREATE occuring within initcode creates that contract",
-            "url": "https://github.com/ethereum/execution-spec-tests/tree/v3.0.0/tests/prague/eip7692_eof_v1/eip7620_eof_create/test_eofcreate.py#L277",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692-prague@v1.0.7/tests/prague/eip7692_eof_v1/eip7620_eof_create/test_eofcreate.py#L277",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7620.md",
             "reference-spec-version": "52ddbcdddcf72dd72427c319f2beddeb468e1737"
         }

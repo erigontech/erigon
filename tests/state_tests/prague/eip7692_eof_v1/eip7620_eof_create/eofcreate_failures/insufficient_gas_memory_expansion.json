@@ -1,5 +1,5 @@
 {
-    "tests/prague/eip7692_eof_v1/eip7620_eof_create/test_eofcreate_failures.py::test_insufficient_gas_memory_expansion[fork_CancunEIP7692-state_test]": {
+    "tests/prague/eip7692_eof_v1/eip7620_eof_create/test_eofcreate_failures.py::test_insufficient_gas_memory_expansion[fork_PragueEIP7692-state_test]": {
         "env": {
             "currentCoinbase": "0x2adc25665018aa1fe0e6bc666dac8fc2697ff9ba",
             "currentGasLimit": "0x016345785d8a0000",
@@ -60,9 +60,9 @@
         "_info": {
             "hash": "0x6273b228802ee2e20a421f47de153852176e4b783b437034b745523ba53bc125",
             "comment": "`execution-spec-tests` generated test",
-            "filling-transition-tool": "evmone-t8n 0.12.0-dev+commit.26d56091",
+            "filling-transition-tool": "Hyperledger Besu evm 24.7-develop-30c96c7",
             "description": "Test function documentation:\n\n    Excercises an EOFCREATE when the memory for auxdata has not been expanded but is requested",
-            "url": "https://github.com/ethereum/execution-spec-tests/tree/v3.0.0/tests/prague/eip7692_eof_v1/eip7620_eof_create/test_eofcreate_failures.py#L461",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692-prague@v1.0.7/tests/prague/eip7692_eof_v1/eip7620_eof_create/test_eofcreate_failures.py#L461",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7620.md",
             "reference-spec-version": "52ddbcdddcf72dd72427c319f2beddeb468e1737"
         }

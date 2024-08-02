@@ -1,5 +1,5 @@
 {
-    "tests/prague/eip7692_eof_v1/eip7620_eof_create/test_eofcreate_failures.py::test_eofcreate_insufficient_stipend[fork_CancunEIP7692-state_test-1_wei]": {
+    "tests/prague/eip7692_eof_v1/eip7620_eof_create/test_eofcreate_failures.py::test_eofcreate_insufficient_stipend[fork_PragueEIP7692-state_test-1_wei]": {
         "env": {
             "currentCoinbase": "0x2adc25665018aa1fe0e6bc666dac8fc2697ff9ba",
             "currentGasLimit": "0x016345785d8a0000",
@@ -57,14 +57,14 @@
         "_info": {
             "hash": "0xdb0a49e5346c45dc8e0e92b8534407c2c4f3f402baee4bd90f5ea5a41266ba73",
             "comment": "`execution-spec-tests` generated test",
-            "filling-transition-tool": "evmone-t8n 0.12.0-dev+commit.26d56091",
+            "filling-transition-tool": "Hyperledger Besu evm 24.7-develop-30c96c7",
             "description": "Test function documentation:\n\n    Exercises an EOFCREATE that fails because the calling account does not have enough ether to\n    pay the stipend",
-            "url": "https://github.com/ethereum/execution-spec-tests/tree/v3.0.0/tests/prague/eip7692_eof_v1/eip7620_eof_create/test_eofcreate_failures.py#L346",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692-prague@v1.0.7/tests/prague/eip7692_eof_v1/eip7620_eof_create/test_eofcreate_failures.py#L346",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7620.md",
             "reference-spec-version": "52ddbcdddcf72dd72427c319f2beddeb468e1737"
         }
     },
-    "tests/prague/eip7692_eof_v1/eip7620_eof_create/test_eofcreate_failures.py::test_eofcreate_insufficient_stipend[fork_CancunEIP7692-state_test-1_gwei]": {
+    "tests/prague/eip7692_eof_v1/eip7620_eof_create/test_eofcreate_failures.py::test_eofcreate_insufficient_stipend[fork_PragueEIP7692-state_test-1_gwei]": {
         "env": {
             "currentCoinbase": "0x2adc25665018aa1fe0e6bc666dac8fc2697ff9ba",
             "currentGasLimit": "0x016345785d8a0000",
@@ -122,9 +122,9 @@
         "_info": {
             "hash": "0xa0d47d034b9ac7642cc54c643d9cdc5a8f2bbe39d5b5eb16fa22e5d99980bc55",
             "comment": "`execution-spec-tests` generated test",
-            "filling-transition-tool": "evmone-t8n 0.12.0-dev+commit.26d56091",
+            "filling-transition-tool": "Hyperledger Besu evm 24.7-develop-30c96c7",
             "description": "Test function documentation:\n\n    Exercises an EOFCREATE that fails because the calling account does not have enough ether to\n    pay the stipend",
-            "url": "https://github.com/ethereum/execution-spec-tests/tree/v3.0.0/tests/prague/eip7692_eof_v1/eip7620_eof_create/test_eofcreate_failures.py#L346",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692-prague@v1.0.7/tests/prague/eip7692_eof_v1/eip7620_eof_create/test_eofcreate_failures.py#L346",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7620.md",
             "reference-spec-version": "52ddbcdddcf72dd72427c319f2beddeb468e1737"
         }

@@ -1,5 +1,5 @@
 {
-    "tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_calls.py::test_legacy_calls_eof_mstore[fork_CancunEIP7692-state_test-call]": {
+    "tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_calls.py::test_legacy_calls_eof_mstore[fork_PragueEIP7692-state_test-call]": {
         "env": {
             "currentCoinbase": "0x2adc25665018aa1fe0e6bc666dac8fc2697ff9ba",
             "currentGasLimit": "0x016345785d8a0000",
@@ -63,14 +63,14 @@
         "_info": {
             "hash": "0x7a2804f33013964f0ef3f457715c76ee48700707875981364f9b5f1a4253b274",
             "comment": "`execution-spec-tests` generated test",
-            "filling-transition-tool": "evmone-t8n 0.12.0-dev+commit.26d56091",
+            "filling-transition-tool": "Hyperledger Besu evm 24.7-develop-30c96c7",
             "description": "Test function documentation:\nTest legacy contracts calling EOF contracts that only return data",
-            "url": "https://github.com/ethereum/execution-spec-tests/tree/v3.0.0/tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_calls.py#L129",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692-prague@v1.0.7/tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_calls.py#L129",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-3540.md",
             "reference-spec-version": "2f013de4065babde7c02f84a2ce9864a3c5bfbd3"
         }
     },
-    "tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_calls.py::test_legacy_calls_eof_mstore[fork_CancunEIP7692-state_test-delegatecall]": {
+    "tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_calls.py::test_legacy_calls_eof_mstore[fork_PragueEIP7692-state_test-delegatecall]": {
         "env": {
             "currentCoinbase": "0x2adc25665018aa1fe0e6bc666dac8fc2697ff9ba",
             "currentGasLimit": "0x016345785d8a0000",
@@ -134,14 +134,14 @@
         "_info": {
             "hash": "0x6d6963a9ec7158a0d17310b582869b4ea3367c971718b86e53ad1156108327fd",
             "comment": "`execution-spec-tests` generated test",
-            "filling-transition-tool": "evmone-t8n 0.12.0-dev+commit.26d56091",
+            "filling-transition-tool": "Hyperledger Besu evm 24.7-develop-30c96c7",
             "description": "Test function documentation:\nTest legacy contracts calling EOF contracts that only return data",
-            "url": "https://github.com/ethereum/execution-spec-tests/tree/v3.0.0/tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_calls.py#L129",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692-prague@v1.0.7/tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_calls.py#L129",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-3540.md",
             "reference-spec-version": "2f013de4065babde7c02f84a2ce9864a3c5bfbd3"
         }
     },
-    "tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_calls.py::test_legacy_calls_eof_mstore[fork_CancunEIP7692-state_test-callcode]": {
+    "tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_calls.py::test_legacy_calls_eof_mstore[fork_PragueEIP7692-state_test-callcode]": {
         "env": {
             "currentCoinbase": "0x2adc25665018aa1fe0e6bc666dac8fc2697ff9ba",
             "currentGasLimit": "0x016345785d8a0000",
@@ -205,14 +205,14 @@
         "_info": {
             "hash": "0x6a3b8fa26525a47a2d781371a51e1e7692398d1b34079184075476db3f6f62b2",
             "comment": "`execution-spec-tests` generated test",
-            "filling-transition-tool": "evmone-t8n 0.12.0-dev+commit.26d56091",
+            "filling-transition-tool": "Hyperledger Besu evm 24.7-develop-30c96c7",
             "description": "Test function documentation:\nTest legacy contracts calling EOF contracts that only return data",
-            "url": "https://github.com/ethereum/execution-spec-tests/tree/v3.0.0/tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_calls.py#L129",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692-prague@v1.0.7/tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_calls.py#L129",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-3540.md",
             "reference-spec-version": "2f013de4065babde7c02f84a2ce9864a3c5bfbd3"
         }
     },
-    "tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_calls.py::test_legacy_calls_eof_mstore[fork_CancunEIP7692-state_test-staticall]": {
+    "tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_calls.py::test_legacy_calls_eof_mstore[fork_PragueEIP7692-state_test-staticall]": {
         "env": {
             "currentCoinbase": "0x2adc25665018aa1fe0e6bc666dac8fc2697ff9ba",
             "currentGasLimit": "0x016345785d8a0000",
@@ -276,9 +276,9 @@
         "_info": {
             "hash": "0x1ed3b78594b278d1c29105fbb825dee93b639509ee4a25320f8f885f08c0cb72",
             "comment": "`execution-spec-tests` generated test",
-            "filling-transition-tool": "evmone-t8n 0.12.0-dev+commit.26d56091",
+            "filling-transition-tool": "Hyperledger Besu evm 24.7-develop-30c96c7",
             "description": "Test function documentation:\nTest legacy contracts calling EOF contracts that only return data",
-            "url": "https://github.com/ethereum/execution-spec-tests/tree/v3.0.0/tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_calls.py#L129",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692-prague@v1.0.7/tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_calls.py#L129",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-3540.md",
             "reference-spec-version": "2f013de4065babde7c02f84a2ce9864a3c5bfbd3"
         }
