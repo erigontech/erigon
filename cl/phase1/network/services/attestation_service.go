@@ -26,6 +26,7 @@ import (
 	"github.com/Giulio2002/bls"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/cl/aggregation"
+	"github.com/erigontech/erigon/cl/beacon/beaconevents"
 	"github.com/erigontech/erigon/cl/beacon/synced_data"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
@@ -53,6 +54,7 @@ type attestationService struct {
 	syncedDataManager  synced_data.SyncedData
 	beaconCfg          *clparams.BeaconChainConfig
 	netCfg             *clparams.NetworkConfig
+	emitters           *beaconevents.EventNotifier
 	// validatorAttestationSeen maps from epoch to validator index. This is used to ignore duplicate validator attestations in the same epoch.
 	validatorAttestationSeen       *lru.CacheWithTTL[uint64, uint64] // validator index -> epoch
 	attestationsToBeLaterProcessed sync.Map
@@ -66,6 +68,7 @@ func NewAttestationService(
 	syncedDataManager synced_data.SyncedData,
 	beaconCfg *clparams.BeaconChainConfig,
 	netCfg *clparams.NetworkConfig,
+	emitters *beaconevents.EventNotifier,
 ) AttestationService {
 	epochDuration := time.Duration(beaconCfg.SlotsPerEpoch*beaconCfg.SecondsPerSlot) * time.Second
 	a := &attestationService{
@@ -75,6 +78,7 @@ func NewAttestationService(
 		syncedDataManager:        syncedDataManager,
 		beaconCfg:                beaconCfg,
 		netCfg:                   netCfg,
+		emitters:                 emitters,
 		validatorAttestationSeen: lru.NewWithTTL[uint64, uint64]("validator_attestation_seen", validatorAttestationCacheSize, epochDuration),
 	}
 	go a.loop(ctx)
@@ -206,7 +210,11 @@ func (s *attestationService) ProcessMessage(ctx context.Context, subnet *uint64,
 	if errors.Is(err, aggregation.ErrIsSuperset) {
 		return ErrIgnore
 	}
-	return err
+	if err != nil {
+		return err
+	}
+	s.emitters.Operation().SendAttestation(att)
+	return nil
 }
 
 type attestationJob struct {

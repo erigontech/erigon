@@ -28,7 +28,6 @@ func (f *operationFeed) SendVoluntaryExit(value *VoluntaryExitData) int {
 		Event: OpVoluntaryExit,
 		Data:  value,
 	})
-
 }
 
 func (f *operationFeed) SendProposerSlashing(value *ProposerSlashingData) int {

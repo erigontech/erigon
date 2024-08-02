@@ -23,9 +23,8 @@ const (
 	OpBlobSidecar       EventTopic = "blob_sidecar"
 )
 
-// Operation event data types
-
 type (
+	// Operation event data types
 	AttestationData           = solid.Attestation
 	VoluntaryExitData         = cltypes.SignedVoluntaryExit
 	ProposerSlashingData      = cltypes.ProposerSlashing
