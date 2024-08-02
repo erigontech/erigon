@@ -63,16 +63,8 @@ type Log struct {
 }
 
 type ErigonLog struct {
-	Address     libcommon.Address `json:"address" gencodec:"required" codec:"1"`
-	Topics      []libcommon.Hash  `json:"topics" gencodec:"required" codec:"2"`
-	Data        []byte            `json:"data" gencodec:"required" codec:"3"`
-	BlockNumber uint64            `json:"blockNumber" codec:"-"`
-	TxHash      libcommon.Hash    `json:"transactionHash" gencodec:"required" codec:"-"`
-	TxIndex     uint              `json:"transactionIndex" codec:"-"`
-	BlockHash   libcommon.Hash    `json:"blockHash" codec:"-"`
-	Index       uint              `json:"logIndex" codec:"-"`
-	Removed     bool              `json:"removed" codec:"-"`
-	Timestamp   uint64            `json:"timestamp" codec:"-"`
+	Log
+	Timestamp uint64 `json:"timestamp" codec:"-"` // header.Time
 }
 
 type ErigonLogs []*ErigonLog
