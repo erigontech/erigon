@@ -263,7 +263,7 @@ func applyFiltersV3(tx kv.TemporalTx, begin, end uint64, crit filters.FilterCrit
 }
 
 func (api *BaseAPI) getLogsV3(ctx context.Context, tx kv.TemporalTx, begin, end uint64, crit filters.FilterCriteria) ([]*types.ErigonLog, error) {
-	logs := []*types.ErigonLog{}
+	logs := []*types.ErigonLog{} //nolint
 
 	addrMap := make(map[common.Address]struct{}, len(crit.Addresses))
 	for _, v := range crit.Addresses {
@@ -341,15 +341,18 @@ func (api *BaseAPI) getLogsV3(ctx context.Context, tx kv.TemporalTx, begin, end 
 		if err != nil {
 			return nil, err
 		}
-		filtered := rawLogs.Filter(addrMap, crit.Topics, 0)
+		var filtered types.Logs
 		if r == nil { // if receipt data is not released yet. fallback to manual field filling. can remove in future.
+			filtered = rawLogs.Filter(addrMap, crit.Topics, 0)
 			for _, log := range filtered {
 				log.BlockNumber = blockNum
 				log.BlockHash = blockHash
 				log.TxHash = txn.Hash()
 			}
+		} else {
+			filtered = r.Logs
 		}
-		//TODO: maybe Logs by default and enreach them with
+
 		for _, filteredLog := range filtered {
 			logs = append(logs, &types.ErigonLog{
 				Address:     filteredLog.Address,
