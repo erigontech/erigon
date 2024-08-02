@@ -34,11 +34,11 @@ import (
 	"time"
 
 	datadir2 "github.com/erigontech/erigon-lib/common/datadir"
+	"github.com/erigontech/erigon-lib/common/hexutility"
 	"github.com/erigontech/erigon-lib/kv/order"
 	"github.com/erigontech/erigon-lib/kv/stream"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/types"
-	"github.com/ledgerwatch/erigon-lib/common/hexutility"
 
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
@@ -2284,7 +2284,7 @@ func TestCanBuild(t *testing.T) {
 	dc := d.BeginFilesRo()
 	defer dc.Close()
 
-	dc.files = append(dc.files, ctxItem{startTxNum: 0, endTxNum: d.aggregationStep})
+	dc.files = append(dc.files, visibleFile{startTxNum: 0, endTxNum: d.aggregationStep})
 
 	writer := dc.NewWriter()
 	defer writer.close()
@@ -2294,7 +2294,7 @@ func TestCanBuild(t *testing.T) {
 	writer.SetTxNum(0)
 	_ = writer.PutWithPrev(k, nil, v, nil, 0)
 	_ = writer.Flush(context.Background(), tx)
-	canBuild, err := dc.canBuild(tx)
+	canBuild := dc.canBuild(tx)
 	require.NoError(t, err)
 	require.False(t, canBuild)
 
@@ -2302,7 +2302,7 @@ func TestCanBuild(t *testing.T) {
 	writer.SetTxNum(d.aggregationStep)
 	_ = writer.PutWithPrev(k, nil, v, nil, 0)
 	_ = writer.Flush(context.Background(), tx)
-	canBuild, err = dc.canBuild(tx)
+	canBuild = dc.canBuild(tx)
 	require.NoError(t, err)
 	require.False(t, canBuild)
 	_ = writer.PutWithPrev(k, nil, v, nil, 0)
@@ -2311,7 +2311,7 @@ func TestCanBuild(t *testing.T) {
 	writer.SetTxNum(d.aggregationStep * 2)
 	_ = writer.PutWithPrev(k, nil, v, nil, 0)
 	_ = writer.Flush(context.Background(), tx)
-	canBuild, err = dc.canBuild(tx)
+	canBuild = dc.canBuild(tx)
 	require.NoError(t, err)
 	require.True(t, canBuild)
 	_ = writer.PutWithPrev(k, nil, hexutility.EncodeTs(d.aggregationStep*2+1), nil, 0)

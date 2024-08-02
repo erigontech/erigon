@@ -121,18 +121,20 @@ func (c *MockCanonicalsReaderLastFrozenTxNumCall) DoAndReturn(f func(kv.Tx) (kv.
 }
 
 // TxNum2ID mocks base method.
-func (m *MockCanonicalsReader) TxNum2ID(arg0 kv.Tx, arg1 uint64, arg2 common.Hash, arg3 int, arg4 uint64) (kv.TxnId, error) {
+func (m *MockCanonicalsReader) TxNum2ID(arg0 kv.Tx, arg1 uint64) (uint64, kv.TxnId, bool, error) {
 	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "TxNum2ID", arg0, arg1, arg2, arg3, arg4)
-	ret0, _ := ret[0].(kv.TxnId)
-	ret1, _ := ret[1].(error)
-	return ret0, ret1
+	ret := m.ctrl.Call(m, "TxNum2ID", arg0, arg1)
+	ret0, _ := ret[0].(uint64)
+	ret1, _ := ret[1].(kv.TxnId)
+	ret2, _ := ret[2].(bool)
+	ret3, _ := ret[3].(error)
+	return ret0, ret1, ret2, ret3
 }
 
 // TxNum2ID indicates an expected call of TxNum2ID.
-func (mr *MockCanonicalsReaderMockRecorder) TxNum2ID(arg0, arg1, arg2, arg3, arg4 any) *MockCanonicalsReaderTxNum2IDCall {
+func (mr *MockCanonicalsReaderMockRecorder) TxNum2ID(arg0, arg1 any) *MockCanonicalsReaderTxNum2IDCall {
 	mr.mock.ctrl.T.Helper()
-	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "TxNum2ID", reflect.TypeOf((*MockCanonicalsReader)(nil).TxNum2ID), arg0, arg1, arg2, arg3, arg4)
+	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "TxNum2ID", reflect.TypeOf((*MockCanonicalsReader)(nil).TxNum2ID), arg0, arg1)
 	return &MockCanonicalsReaderTxNum2IDCall{Call: call}
 }
 
@@ -142,19 +144,19 @@ type MockCanonicalsReaderTxNum2IDCall struct {
 }
 
 // Return rewrite *gomock.Call.Return
-func (c *MockCanonicalsReaderTxNum2IDCall) Return(arg0 kv.TxnId, arg1 error) *MockCanonicalsReaderTxNum2IDCall {
-	c.Call = c.Call.Return(arg0, arg1)
+func (c *MockCanonicalsReaderTxNum2IDCall) Return(arg0 uint64, arg1 kv.TxnId, arg2 bool, arg3 error) *MockCanonicalsReaderTxNum2IDCall {
+	c.Call = c.Call.Return(arg0, arg1, arg2, arg3)
 	return c
 }
 
 // Do rewrite *gomock.Call.Do
-func (c *MockCanonicalsReaderTxNum2IDCall) Do(f func(kv.Tx, uint64, common.Hash, int, uint64) (kv.TxnId, error)) *MockCanonicalsReaderTxNum2IDCall {
+func (c *MockCanonicalsReaderTxNum2IDCall) Do(f func(kv.Tx, uint64) (uint64, kv.TxnId, bool, error)) *MockCanonicalsReaderTxNum2IDCall {
 	c.Call = c.Call.Do(f)
 	return c
 }
 
 // DoAndReturn rewrite *gomock.Call.DoAndReturn
-func (c *MockCanonicalsReaderTxNum2IDCall) DoAndReturn(f func(kv.Tx, uint64, common.Hash, int, uint64) (kv.TxnId, error)) *MockCanonicalsReaderTxNum2IDCall {
+func (c *MockCanonicalsReaderTxNum2IDCall) DoAndReturn(f func(kv.Tx, uint64) (uint64, kv.TxnId, bool, error)) *MockCanonicalsReaderTxNum2IDCall {
 	c.Call = c.Call.DoAndReturn(f)
 	return c
 }
