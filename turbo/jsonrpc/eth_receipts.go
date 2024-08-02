@@ -287,7 +287,6 @@ func (api *BaseAPI) getLogsV3(ctx context.Context, tx kv.TemporalTx, begin, end 
 	var baseBlockTxnID kv.TxnId
 	it := rawdbv3.TxNums2BlockNums(tx, txNumbers, order.Asc)
 	defer it.Close()
-	var timestamp uint64
 	for it.HasNext() {
 		if err = ctx.Err(); err != nil {
 			return nil, err
@@ -318,7 +317,6 @@ func (api *BaseAPI) getLogsV3(ctx context.Context, tx kv.TemporalTx, begin, end 
 				return nil, err
 			}
 			exec.ChangeBlock(header)
-			timestamp = header.Time
 		}
 
 		//fmt.Printf("txNum=%d, blockNum=%d, txIndex=%d, maxTxNumInBlock=%d,mixTxNumInBlock=%d\n", txNum, blockNum, txIndex, maxTxNumInBlock, minTxNumInBlock)
@@ -364,7 +362,7 @@ func (api *BaseAPI) getLogsV3(ctx context.Context, tx kv.TemporalTx, begin, end 
 				BlockHash:   filteredLog.BlockHash,
 				Index:       filteredLog.Index,
 				Removed:     filteredLog.Removed,
-				Timestamp:   timestamp,
+				Timestamp:   header.Time,
 			})
 		}
 	}
