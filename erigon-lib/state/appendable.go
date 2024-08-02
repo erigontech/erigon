@@ -420,17 +420,6 @@ func (ap *Appendable) getFromDB(k []byte, dbtx kv.Tx) ([]byte, bool, error) {
 	return v, v != nil, err
 }
 
-func (ap *Appendable) maxTxNumInDB(dbtx kv.Tx) (txNum uint64, err error) { //nolint
-	first, err := kv.LastKey(dbtx, ap.table)
-	if err != nil {
-		return 0, err
-	}
-	if len(first) == 0 {
-		return 0, nil
-	}
-	return binary.BigEndian.Uint64(first), nil
-}
-
 // Add - !NotThreadSafe. Must use WalRLock/BatchHistoryWriteEnd
 func (w *appendableBufferedWriter) Append(ts kv.TxnId, v []byte) error {
 	if w.discard {
@@ -553,29 +542,39 @@ func (tx *AppendableRoTx) statelessGetter(i int) ArchiveGetter {
 	return r
 }
 
-func (tx *AppendableRoTx) maxTxNumInDB(dbtx kv.Tx) uint64 {
-	panic("todo: convert TxnID to TxNum")
-	fst, _ := kv.LastKey(dbtx, tx.ap.table)
-	if len(fst) > 0 {
-		fstInDb := binary.BigEndian.Uint64(fst)
-		return min(fstInDb, math.MaxUint64)
+func (ap *Appendable) maxTxnIDInDB(dbtx kv.Tx) (txNum kv.TxnId, ok bool) {
+	k, _ := kv.LastKey(dbtx, ap.table)
+	if len(k) == 0 {
+		return 0, false
 	}
-	return math.MaxUint64
+	return kv.TxnId(binary.BigEndian.Uint64(k)), true
+}
+
+func (tx *AppendableRoTx) minTxnIDInDB(dbtx kv.Tx) (kv.TxnId, bool) {
+	k, _ := kv.FirstKey(dbtx, tx.ap.table)
+	if len(k) == 0 {
+		return 0, false
+	}
+	return kv.TxnId(binary.BigEndian.Uint64(k)), true
 }
 
 func (tx *AppendableRoTx) CanPrune(dbtx kv.Tx) bool {
-	return tx.maxTxNumInDB(dbtx) < tx.files.EndTxNum()
+	txnIDInDB, ok := tx.minTxnIDInDB(dbtx)
+	if !ok {
+		return false
+	}
+	_, txnIDInFiles, ok, _ := tx.ap.cfg.iters.TxNum2ID(dbtx, tx.files.EndTxNum())
+	fmt.Printf("[dbg] CanPrune: txnIDInDB=%d, txnIDInFiles=%d, tx.files.EndTxNum()=%d\n", txnIDInDB, txnIDInFiles, tx.files.EndTxNum())
+	return txnIDInDB < txnIDInFiles
 }
-func (tx *AppendableRoTx) canBuild(dbtx kv.Tx) (bool, error) { //nolint
+
+func (tx *AppendableRoTx) canBuild(dbtx kv.Tx) bool { //nolint
 	//TODO: support "keep in db" parameter
 	//TODO: what if all files are pruned?
-	maxTxNumInDB, err := tx.ap.maxTxNumInDB(dbtx)
-	if err != nil {
-		return false, err
-	}
-	maxStepInDB := maxTxNumInDB / tx.ap.aggregationStep
 	maxStepInFiles := tx.files.EndTxNum() / tx.ap.aggregationStep
-	return maxStepInFiles < maxStepInDB, nil
+	txNumOfNextStep := (maxStepInFiles + 1) * tx.ap.aggregationStep
+	_, _, ok, _ := tx.ap.cfg.iters.TxNum2ID(dbtx, txNumOfNextStep)
+	return ok
 }
 
 type AppendablePruneStat struct {

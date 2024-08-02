@@ -152,7 +152,7 @@ func TxNum2TxnID(tx kv.Tx, txNum uint64) (blockNum uint64, txnID kv.TxnId, ok bo
 	if body == nil { // TxNum == TxnID
 		return blockNum, kv.TxnId(txNum), true, nil
 	}
-	return blockNum, kv.TxnId(_minTxNum) + kv.TxnId(offset), true, nil
+	return blockNum, kv.TxnId(body.BaseTxnID) + kv.TxnId(offset), true, nil
 }
 
 // TxnIdsOfCanonicalBlocks - returns non-canonical txnIds of canonical block range
