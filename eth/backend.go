@@ -1336,8 +1336,11 @@ func (s *Ethereum) StartMining(ctx context.Context, db kv.RwDB, stateDiffClient 
 func loadSnapshotsEitherFromDiskIfNeeded(dirs datadir.Dirs, chainName string) error {
 	preverifiedToml := filepath.Join(dirs.Snap, "preverified.toml")
 
-	if _, err := os.Stat(preverifiedToml); err == nil {
-		// It exists case
+	exists, err := dir.FileExist(preverifiedToml)
+	if err != nil {
+		return err
+	}
+	if exists {
 		// Read the preverified.toml and load the snapshots
 		haveToml, err := os.ReadFile(preverifiedToml)
 		if err != nil {
@@ -1346,8 +1349,7 @@ func loadSnapshotsEitherFromDiskIfNeeded(dirs datadir.Dirs, chainName string) er
 		snapcfg.SetToml(chainName, haveToml)
 		return nil
 	}
-	// Doesn't exist case
-	return os.WriteFile(preverifiedToml, snapcfg.GetToml(chainName), 0644)
+	return dir.WriteFileWithFsync(preverifiedToml, snapcfg.GetToml(chainName), 0644)
 }
 
 func (s *Ethereum) IsMining() bool { return s.config.Miner.Enabled }
