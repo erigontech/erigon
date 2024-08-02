@@ -73,8 +73,7 @@ func NewService(
 		store,
 		blockLimit,
 	)
-	spansCache := NewSpansCache()
-	ccBuilderFactory := NewCanonicalChainBuilderFactory(chainConfig, borConfig, spansCache)
+	ccBuilderFactory := NewCanonicalChainBuilderFactory(chainConfig, borConfig, heimdall)
 	events := NewTipEvents(logger, p2pService, heimdall)
 	sync := NewSync(
 		store,
@@ -84,8 +83,6 @@ func NewService(
 		p2pService,
 		blockDownloader,
 		ccBuilderFactory,
-		spansCache,
-		heimdall.LatestSpans,
 		events.Events(),
 		logger,
 	)

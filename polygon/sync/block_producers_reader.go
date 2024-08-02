@@ -17,13 +17,31 @@
 package sync
 
 import (
+	"context"
+
 	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon/polygon/bor"
+	"github.com/erigontech/erigon/polygon/bor/valset"
 )
 
-// valset.ValidatorSet abstraction for unit tests
-type validatorSetInterface interface {
+type blockProducersReader interface {
+	Producers(ctx context.Context, blockNum uint64) (validatorSet, error)
+}
+
+type validatorSet interface {
 	bor.ValidateHeaderTimeSignerSuccessionNumber
 	IncrementProposerPriority(times int)
 	Difficulty(signer libcommon.Address) (uint64, error)
+}
+
+type heimdallBlockProducersReader interface {
+	Producers(ctx context.Context, blockNum uint64) (*valset.ValidatorSet, error)
+}
+
+type blockProducersReaderWrapper struct {
+	r heimdallBlockProducersReader
+}
+
+func (r *blockProducersReaderWrapper) Producers(ctx context.Context, blockNum uint64) (validatorSet, error) {
+	return r.r.Producers(ctx, blockNum)
 }

@@ -32,26 +32,36 @@ type CanonicalChainBuilderFactory func(root *types.Header) CanonicalChainBuilder
 func NewCanonicalChainBuilderFactory(
 	chainConfig *chain.Config,
 	borConfig *borcfg.BorConfig,
-	spansCache *SpansCache,
+	blockProducersReader heimdallBlockProducersReader,
 ) CanonicalChainBuilderFactory {
 	signaturesCache, err := lru.NewARC[common.Hash, common.Address](InMemorySignatures)
 	if err != nil {
 		panic(err)
 	}
 
-	difficultyCalculator := NewDifficultyCalculator(borConfig, spansCache, nil, signaturesCache)
-	headerTimeValidator := NewHeaderTimeValidator(borConfig, spansCache, nil, signaturesCache)
-	headerValidator := NewHeaderValidator(chainConfig, borConfig, headerTimeValidator)
+	producersReaderWrapper := &blockProducersReaderWrapper{
+		r: blockProducersReader,
+	}
+
+	difficultyCalculator := &DifficultyCalculator{
+		borConfig:            borConfig,
+		signaturesCache:      signaturesCache,
+		blockProducersReader: producersReaderWrapper,
+	}
+
+	headerTimeValidator := &HeaderTimeValidator{
+		borConfig:            borConfig,
+		signaturesCache:      signaturesCache,
+		blockProducersReader: producersReaderWrapper,
+	}
+
+	headerValidator := &HeaderValidator{
+		chainConfig:         chainConfig,
+		borConfig:           borConfig,
+		headerTimeValidator: headerTimeValidator,
+	}
 
 	return func(root *types.Header) CanonicalChainBuilder {
-		if spansCache.IsEmpty() {
-			panic("sync.Service: ccBuilderFactory - spansCache is empty")
-		}
-		return NewCanonicalChainBuilder(
-			root,
-			difficultyCalculator,
-			headerValidator,
-			spansCache,
-		)
+		return NewCanonicalChainBuilder(root, difficultyCalculator, headerValidator)
 	}
 }

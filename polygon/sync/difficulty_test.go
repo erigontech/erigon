@@ -17,10 +17,12 @@
 package sync
 
 import (
+	"context"
+	"errors"
 	"testing"
 
+	lru "github.com/hashicorp/golang-lru/arc/v2"
 	"github.com/stretchr/testify/assert"
-
 	"github.com/stretchr/testify/require"
 
 	libcommon "github.com/erigontech/erigon-lib/common"
@@ -28,41 +30,57 @@ import (
 	"github.com/erigontech/erigon/polygon/bor/borcfg"
 )
 
-type testValidatorSetInterface struct {
+type mockBlockProducersReader struct {
+	producers *mockValidatorSet
+	err       error
+}
+
+func (r *mockBlockProducersReader) Producers(_ context.Context, _ uint64) (validatorSet, error) {
+	if r.err != nil {
+		return nil, r.err
+	}
+
+	return r.producers, nil
+}
+
+type mockValidatorSet struct {
 	signers   []libcommon.Address
 	sprintNum int
 }
 
-func (v *testValidatorSetInterface) IncrementProposerPriority(times int) {
-	v.sprintNum = times
+func (mvs *mockValidatorSet) IncrementProposerPriority(times int) {
+	mvs.sprintNum = times
 }
 
-func (v *testValidatorSetInterface) GetSignerSuccessionNumber(signer libcommon.Address, number uint64) (int, error) {
+func (mvs *mockValidatorSet) GetSignerSuccessionNumber(signer libcommon.Address, _ uint64) (int, error) {
 	var i int
-	for (i < len(v.signers)) && (v.signers[i] != signer) {
+	for (i < len(mvs.signers)) && (mvs.signers[i] != signer) {
 		i++
 	}
 
-	sprintOffset := v.sprintNum % len(v.signers)
+	sprintOffset := mvs.sprintNum % len(mvs.signers)
 	var delta int
 	if i >= sprintOffset {
 		delta = i - sprintOffset
 	} else {
-		delta = i + len(v.signers) - sprintOffset
+		delta = i + len(mvs.signers) - sprintOffset
 	}
 
 	return delta, nil
 }
 
-func (v *testValidatorSetInterface) Difficulty(signer libcommon.Address) (uint64, error) {
-	delta, err := v.GetSignerSuccessionNumber(signer, 0)
+func (mvs *mockValidatorSet) Difficulty(signer libcommon.Address) (uint64, error) {
+	delta, err := mvs.GetSignerSuccessionNumber(signer, 0)
 	if err != nil {
 		return 0, nil
 	}
-	return uint64(len(v.signers) - delta), nil
+	return uint64(len(mvs.signers) - delta), nil
 }
 
 func TestSignerDifficulty(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+
 	borConfig := borcfg.BorConfig{
 		Sprint: map[string]uint64{"0": 16},
 	}
@@ -71,84 +89,114 @@ func TestSignerDifficulty(t *testing.T) {
 		libcommon.HexToAddress("01"),
 		libcommon.HexToAddress("02"),
 	}
-	validatorSetFactory := func(uint64) validatorSetInterface { return &testValidatorSetInterface{signers: signers} }
-	calc := NewDifficultyCalculator(&borConfig, nil, validatorSetFactory, nil).(*difficultyCalculator)
+	blockProducersReader := &mockBlockProducersReader{
+		producers: &mockValidatorSet{
+			signers: signers,
+		},
+	}
+	signaturesCache, err := lru.NewARC[libcommon.Hash, libcommon.Address](InMemorySignatures)
+	require.NoError(t, err)
+	calc := &DifficultyCalculator{
+		borConfig:            &borConfig,
+		signaturesCache:      signaturesCache,
+		blockProducersReader: blockProducersReader,
+	}
 
 	var d uint64
 
 	// sprint 0
-	d, _ = calc.signerDifficulty(signers[0], 0)
+	d, _ = calc.signerDifficulty(ctx, signers[0], 0)
 	assert.Equal(t, uint64(3), d)
 
-	d, _ = calc.signerDifficulty(signers[0], 1)
+	d, _ = calc.signerDifficulty(ctx, signers[0], 1)
 	assert.Equal(t, uint64(3), d)
 
-	d, _ = calc.signerDifficulty(signers[0], 15)
+	d, _ = calc.signerDifficulty(ctx, signers[0], 15)
 	assert.Equal(t, uint64(3), d)
 
-	d, _ = calc.signerDifficulty(signers[1], 0)
+	d, _ = calc.signerDifficulty(ctx, signers[1], 0)
 	assert.Equal(t, uint64(2), d)
 
-	d, _ = calc.signerDifficulty(signers[1], 1)
+	d, _ = calc.signerDifficulty(ctx, signers[1], 1)
 	assert.Equal(t, uint64(2), d)
 
-	d, _ = calc.signerDifficulty(signers[1], 15)
+	d, _ = calc.signerDifficulty(ctx, signers[1], 15)
 	assert.Equal(t, uint64(2), d)
 
-	d, _ = calc.signerDifficulty(signers[2], 0)
+	d, _ = calc.signerDifficulty(ctx, signers[2], 0)
 	assert.Equal(t, uint64(1), d)
 
-	d, _ = calc.signerDifficulty(signers[2], 1)
+	d, _ = calc.signerDifficulty(ctx, signers[2], 1)
 	assert.Equal(t, uint64(1), d)
 
-	d, _ = calc.signerDifficulty(signers[2], 15)
+	d, _ = calc.signerDifficulty(ctx, signers[2], 15)
 	assert.Equal(t, uint64(1), d)
 
 	// sprint 1
-	d, _ = calc.signerDifficulty(signers[1], 16)
+	d, _ = calc.signerDifficulty(ctx, signers[1], 16)
 	assert.Equal(t, uint64(3), d)
 
-	d, _ = calc.signerDifficulty(signers[2], 16)
+	d, _ = calc.signerDifficulty(ctx, signers[2], 16)
 	assert.Equal(t, uint64(2), d)
 
-	d, _ = calc.signerDifficulty(signers[0], 16)
+	d, _ = calc.signerDifficulty(ctx, signers[0], 16)
 	assert.Equal(t, uint64(1), d)
 
 	// sprint 2
-	d, _ = calc.signerDifficulty(signers[2], 32)
+	d, _ = calc.signerDifficulty(ctx, signers[2], 32)
 	assert.Equal(t, uint64(3), d)
 
-	d, _ = calc.signerDifficulty(signers[0], 32)
+	d, _ = calc.signerDifficulty(ctx, signers[0], 32)
 	assert.Equal(t, uint64(2), d)
 
-	d, _ = calc.signerDifficulty(signers[1], 32)
+	d, _ = calc.signerDifficulty(ctx, signers[1], 32)
 	assert.Equal(t, uint64(1), d)
 
 	// sprint 3
-	d, _ = calc.signerDifficulty(signers[0], 48)
+	d, _ = calc.signerDifficulty(ctx, signers[0], 48)
 	assert.Equal(t, uint64(3), d)
 
-	d, _ = calc.signerDifficulty(signers[1], 48)
+	d, _ = calc.signerDifficulty(ctx, signers[1], 48)
 	assert.Equal(t, uint64(2), d)
 
-	d, _ = calc.signerDifficulty(signers[2], 48)
+	d, _ = calc.signerDifficulty(ctx, signers[2], 48)
 	assert.Equal(t, uint64(1), d)
 }
 
 func TestHeaderDifficultyNoSignature(t *testing.T) {
-	borConfig := borcfg.BorConfig{}
-	spans := NewSpansCache()
-	calc := NewDifficultyCalculator(&borConfig, spans, nil, nil)
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
 
-	_, err := calc.HeaderDifficulty(new(types.Header))
+	borConfig := borcfg.BorConfig{}
+	signaturesCache, err := lru.NewARC[libcommon.Hash, libcommon.Address](InMemorySignatures)
+	require.NoError(t, err)
+	blockProducersReader := &mockBlockProducersReader{}
+	calc := &DifficultyCalculator{
+		borConfig:            &borConfig,
+		signaturesCache:      signaturesCache,
+		blockProducersReader: blockProducersReader,
+	}
+
+	_, err = calc.HeaderDifficulty(ctx, new(types.Header))
 	require.ErrorContains(t, err, "signature suffix missing")
 }
 
-func TestSignerDifficultyNoSpan(t *testing.T) {
-	borConfig := borcfg.BorConfig{}
-	spans := NewSpansCache()
-	calc := NewDifficultyCalculator(&borConfig, spans, nil, nil).(*difficultyCalculator)
+func TestSignerDifficultyBlockProducersNotFound(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
 
-	_, err := calc.signerDifficulty(libcommon.HexToAddress("00"), 0)
-	require.ErrorContains(t, err, "no span")
+	borConfig := borcfg.BorConfig{}
+	signaturesCache, err := lru.NewARC[libcommon.Hash, libcommon.Address](InMemorySignatures)
+	require.NoError(t, err)
+	blockProducersReader := &mockBlockProducersReader{
+		err: errors.New("block producer not found for blockNum"),
+	}
+	calc := &DifficultyCalculator{
+		borConfig:            &borConfig,
+		signaturesCache:      signaturesCache,
+		blockProducersReader: blockProducersReader,
+	}
+
+	_, err = calc.signerDifficulty(ctx, libcommon.HexToAddress("00"), 0)
+	require.ErrorContains(t, err, "block producer not found for blockNum")
 }

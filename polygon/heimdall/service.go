@@ -20,7 +20,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"slices"
 	"time"
 
 	"golang.org/x/sync/errgroup"
@@ -34,12 +33,10 @@ import (
 
 type Service interface {
 	Span(ctx context.Context, id uint64) (*Span, bool, error)
-	LatestSpans(ctx context.Context, count uint) ([]*Span, error)
 	CheckpointsFromBlock(ctx context.Context, startBlock uint64) (Waypoints, error)
 	MilestonesFromBlock(ctx context.Context, startBlock uint64) (Waypoints, error)
 	Producers(ctx context.Context, blockNum uint64) (*valset.ValidatorSet, error)
 	RegisterMilestoneObserver(callback func(*Milestone), opts ...ObserverOption) polygoncommon.UnregisterFunc
-	RegisterSpanObserver(callback func(*Span), opts ...ObserverOption) polygoncommon.UnregisterFunc
 	Run(ctx context.Context) error
 	Synchronize(ctx context.Context) error
 }
@@ -143,49 +140,6 @@ func newSpanFetcher(client HeimdallClient, logger log.Logger) entityFetcher[*Spa
 		0,
 		logger,
 	)
-}
-
-func (s *service) LatestSpan(ctx context.Context) (*Span, bool, error) {
-	return s.store.Spans().LastEntity(ctx)
-}
-
-func (s *service) LatestSpans(ctx context.Context, count uint) ([]*Span, error) {
-	if count == 0 {
-		return nil, errors.New("can't fetch 0 latest spans")
-	}
-
-	span, ok, err := s.LatestSpan(ctx)
-	if err != nil {
-		return nil, err
-	}
-	if !ok {
-		return nil, errors.New("can't fetch latest span")
-	}
-
-	latestSpans := make([]*Span, 0, count)
-	latestSpans = append(latestSpans, span)
-	count--
-
-	for count > 0 {
-		prevSpanRawId := span.RawId()
-		if prevSpanRawId == 0 {
-			break
-		}
-
-		span, ok, err = s.store.Spans().Entity(ctx, prevSpanRawId-1)
-		if err != nil {
-			return nil, err
-		}
-		if !ok {
-			return nil, errors.New(fmt.Sprintf("can't fetch span %v", prevSpanRawId-1))
-		}
-
-		latestSpans = append(latestSpans, span)
-		count--
-	}
-
-	slices.Reverse(latestSpans)
-	return latestSpans, nil
 }
 
 func (s *service) Span(ctx context.Context, id uint64) (*Span, bool, error) {
