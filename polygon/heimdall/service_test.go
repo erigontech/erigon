@@ -125,6 +125,9 @@ func TestService(t *testing.T) {
 		}
 	}()
 
+	err := svc.Synchronize(ctx)
+	require.NoError(t, err)
+
 	t.Run("FetchLatestSpans", func(t *testing.T) {
 		spans, err := svc.LatestSpans(ctx, 3)
 		require.NoError(t, err)
