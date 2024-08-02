@@ -102,6 +102,7 @@ func (a *ApiHandler) EventSourceGetV1Events(w http.ResponseWriter, r *http.Reque
 				log.Warn("failed to write event", "err", err)
 				continue
 			}
+			w.(http.Flusher).Flush()
 			log.Info("[test] sent event", "topic", event.Event)
 		case <-ticker.C:
 			// keep connection alive
