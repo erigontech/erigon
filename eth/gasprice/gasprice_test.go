@@ -29,13 +29,10 @@ import (
 	"github.com/erigontech/erigon/rpc/rpccfg"
 	"github.com/holiman/uint256"
 
-	"github.com/erigontech/erigon-lib/chain"
 	libcommon "github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/eth/gasprice/gaspricecfg"
 	"github.com/erigontech/erigon/turbo/jsonrpc"
-	"github.com/erigontech/erigon/turbo/services"
 	"github.com/erigontech/erigon/turbo/stages/mock"
 
 	"github.com/erigontech/erigon/core"
@@ -44,63 +41,9 @@ import (
 	"github.com/erigontech/erigon/crypto"
 	"github.com/erigontech/erigon/eth/gasprice"
 	"github.com/erigontech/erigon/params"
-	"github.com/erigontech/erigon/rpc"
 )
 
-type testBackend struct {
-	db          kv.RwDB
-	cfg         *chain.Config
-	blockReader services.FullBlockReader
-}
-
-func (b *testBackend) GetReceipts(ctx context.Context, block *types.Block) (types.Receipts, error) {
-	tx, err := b.db.BeginRo(context.Background())
-	if err != nil {
-		return nil, err
-	}
-	defer tx.Rollback()
-
-	receipts := rawdb.ReadReceipts(tx, block, nil)
-	return receipts, nil
-}
-
-func (b *testBackend) PendingBlockAndReceipts() (*types.Block, types.Receipts) {
-	return nil, nil
-	//if b.pending {
-	//	block := b.chain.GetBlockByNumber(testHead + 1)
-	//	return block, b.chain.GetReceiptsByHash(block.Hash())
-	//}
-}
-func (b *testBackend) HeaderByNumber(ctx context.Context, number rpc.BlockNumber) (*types.Header, error) {
-	tx, err := b.db.BeginRo(context.Background())
-	if err != nil {
-		return nil, err
-	}
-	defer tx.Rollback()
-	if number == rpc.LatestBlockNumber {
-		return rawdb.ReadCurrentHeader(tx), nil
-	}
-	return b.blockReader.HeaderByNumber(ctx, tx, uint64(number))
-}
-
-func (b *testBackend) BlockByNumber(ctx context.Context, number rpc.BlockNumber) (*types.Block, error) {
-	tx, err := b.db.BeginRo(context.Background())
-	if err != nil {
-		return nil, err
-	}
-	defer tx.Rollback()
-
-	if number == rpc.LatestBlockNumber {
-		return b.blockReader.CurrentBlock(tx)
-	}
-	return b.blockReader.BlockByNumber(ctx, tx, uint64(number))
-}
-
-func (b *testBackend) ChainConfig() *chain.Config {
-	return b.cfg
-}
-
-func newTestBackend(t *testing.T) (*testBackend, *mock.MockSentry) {
+func newTestBackend(t *testing.T) *mock.MockSentry {
 
 	var (
 		key, _ = crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
@@ -129,7 +72,7 @@ func newTestBackend(t *testing.T) (*testBackend, *mock.MockSentry) {
 	if err = m.InsertChain(chain); err != nil {
 		t.Error(err)
 	}
-	return &testBackend{db: m.DB, cfg: params.TestChainConfig, blockReader: m.BlockReader}, m
+	return m
 }
 
 func (b *testBackend) CurrentHeader() *types.Header {
