@@ -22,6 +22,7 @@ import (
 	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/gointerfaces"
 	remote "github.com/erigontech/erigon-lib/gointerfaces/remoteproto"
+	"github.com/erigontech/erigon-lib/log/v3"
 )
 
 // Accumulator collects state changes in a form that can then be delivered to the RPC daemon
@@ -69,6 +70,7 @@ func (a *Accumulator) SetStateID(stateID uint64) {
 
 // StartChange begins accumulation of changes for a new block
 func (a *Accumulator) StartChange(blockHeight uint64, blockHash libcommon.Hash, txs [][]byte, unwind bool) {
+	log.Warn("[dbg] StartChange", "blockHeight", blockHeight, "txs", len(txs))
 	a.changes = append(a.changes, &remote.StateChange{})
 	a.latestChange = a.changes[len(a.changes)-1]
 	a.latestChange.BlockHeight = blockHeight

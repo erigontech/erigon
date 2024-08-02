@@ -280,6 +280,7 @@ func getNextTransactions(
 			return err
 		}
 
+		log.Warn("[dbg] YieldBest", "executionAt", executionAt, "count", count)
 		return nil
 	}); err != nil {
 		return nil, 0, err
