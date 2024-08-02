@@ -96,7 +96,7 @@ func StageMiningExecCfg(
 // SpawnMiningExecStage
 // TODO:
 // - resubmitAdjustCh - variable is not implemented
-func SpawnMiningExecStage(s *StageState, txc wrap.TxContainer, cfg MiningExecCfg, sendersCfg SendersCfg, execCfg ExecuteBlockCfg, ctx context.Context, logger log.Logger) error {
+func SpawnMiningExecStage(s *StageState, txc wrap.TxContainer, cfg MiningExecCfg, sendersCfg SendersCfg, execCfg ExecuteBlockCfg, ctx context.Context, logger log.Logger, u Unwinder) error {
 	cfg.vmConfig.NoReceipts = false
 	chainID, _ := uint256.FromBig(cfg.chainConfig.ChainID)
 	logPrefix := s.LogPrefix()
@@ -239,7 +239,7 @@ func SpawnMiningExecStage(s *StageState, txc wrap.TxContainer, cfg MiningExecCfg
 	// This flag will skip checking the state root
 	execCfg.blockProduction = true
 	execS := &StageState{state: s.state, ID: stages.Execution, BlockNumber: blockHeight - 1}
-	if err := ExecBlockV3(execS, nil, txc, blockHeight, context.Background(), execCfg, false, logger); err != nil {
+	if err := ExecBlockV3(execS, u, txc, blockHeight, context.Background(), execCfg, false, logger); err != nil {
 		return err
 	}
 
