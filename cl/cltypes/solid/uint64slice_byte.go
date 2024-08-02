@@ -141,10 +141,10 @@ func (arr *byteBasedUint64Slice) Append(v uint64) {
 	}
 	offset := arr.l * 8
 	binary.LittleEndian.PutUint64(arr.u[offset:offset+8], v)
-	arr.l++
 	if arr.MerkleTree != nil {
 		arr.MerkleTree.MarkLeafAsDirty(arr.l / 4)
 	}
+	arr.l++
 }
 
 // Get returns the element at the given index.

@@ -120,6 +120,11 @@ func processDownloadedBlockBatches(ctx context.Context, cfg *Cfg, highestBlockPr
 				err = fmt.Errorf("failed to dump state: %w", err)
 				return
 			}
+			if err = saveHeadStateOnDiskIfNeeded(cfg, st); err != nil {
+				// Return an error if saving the head state fails
+				err = fmt.Errorf("failed to save head state: %w", err)
+				return
+			}
 		}
 
 		// Update the highest block processed if the current block's slot is higher
