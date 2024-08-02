@@ -538,6 +538,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 
 	var heimdallClient heimdall.HeimdallClient
 	var polygonBridge bridge.Service
+	var heimdallService heimdall.Service
 
 	if chainConfig.Bor != nil {
 		if !config.WithoutHeimdall {
@@ -546,12 +547,13 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 
 		if config.PolygonSync {
 			polygonBridge = bridge.Assemble(config.Dirs.DataDir, logger, consensusConfig.(*borcfg.BorConfig), heimdallClient.FetchStateSyncEvents, bor.GenesisContractStateReceiverABI())
+			heimdallService = heimdall.AssembleService(config.HeimdallURL, dirs.DataDir, tmpdir, logger)
 		}
 
 		flags.Milestone = config.WithHeimdallMilestones
 	}
 
-	backend.engine = ethconsensusconfig.CreateConsensusEngine(ctx, stack.Config(), chainConfig, consensusConfig, config.Miner.Notify, config.Miner.Noverify, heimdallClient, config.WithoutHeimdall, blockReader, false /* readonly */, logger, polygonBridge)
+	backend.engine = ethconsensusconfig.CreateConsensusEngine(ctx, stack.Config(), chainConfig, consensusConfig, config.Miner.Notify, config.Miner.Noverify, heimdallClient, config.WithoutHeimdall, blockReader, false /* readonly */, logger, polygonBridge, heimdallService)
 
 	inMemoryExecution := func(txc wrap.TxContainer, header *types.Header, body *types.RawBody, unwindPoint uint64, headersChain []*types.Header, bodiesChain []*types.RawBody,
 		notifications *shards.Notifications) error {
@@ -694,6 +696,11 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 	var ethashApi *ethash.API
 	if casted, ok := backend.engine.(*ethash.Ethash); ok {
 		ethashApi = casted.APIs(nil)[1].Service.(*ethash.API)
+	}
+
+	// setup snapcfg
+	if err := loadSnapshotsEitherFromDiskIfNeeded(dirs, chainConfig.ChainName); err != nil {
+		return nil, err
 	}
 
 	// proof-of-stake mining
@@ -879,7 +886,8 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 
 	hook := stages2.NewHook(backend.sentryCtx, backend.chainDB, backend.notifications, backend.stagedSync, backend.blockReader, backend.chainConfig, backend.logger, backend.sentriesClient.SetStatus)
 
-	if backend.downloaderClient != nil {
+	useSnapshots := blockReader != nil && (blockReader.FreezingCfg().ProduceE2 || blockReader.FreezingCfg().ProduceE3)
+	if !useSnapshots && backend.downloaderClient != nil {
 		for _, p := range blockReader.AllTypes() {
 			backend.downloaderClient.ProhibitNewDownloads(ctx, &protodownloader.ProhibitNewDownloadsRequest{
 				Type: p.Name(),
@@ -974,15 +982,13 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 		backend.polygonSyncService = polygonsync.NewService(
 			logger,
 			chainConfig,
-			dirs.DataDir,
-			tmpdir,
 			polygonSyncSentry(sentries),
 			p2pConfig.MaxPeers,
 			statusDataProvider,
-			config.HeimdallURL,
 			executionRpc,
 			config.LoopBlockLimit,
 			polygonBridge,
+			heimdallService,
 		)
 	}
 
@@ -1324,6 +1330,24 @@ func (s *Ethereum) StartMining(ctx context.Context, db kv.RwDB, stateDiffClient 
 	}()
 
 	return nil
+}
+
+// loadSnapshotsEitherFromDiskOrRemotely loads the snapshots to be downloaded from the disk if they exist, otherwise it loads them from the remote.
+func loadSnapshotsEitherFromDiskIfNeeded(dirs datadir.Dirs, chainName string) error {
+	preverifiedToml := filepath.Join(dirs.Snap, "preverified.toml")
+
+	if _, err := os.Stat(preverifiedToml); err == nil {
+		// It exists case
+		// Read the preverified.toml and load the snapshots
+		haveToml, err := os.ReadFile(preverifiedToml)
+		if err != nil {
+			return err
+		}
+		snapcfg.SetToml(chainName, haveToml)
+		return nil
+	}
+	// Doesn't exist case
+	return os.WriteFile(preverifiedToml, snapcfg.GetToml(chainName), 0644)
 }
 
 func (s *Ethereum) IsMining() bool { return s.config.Miner.Enabled }

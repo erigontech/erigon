@@ -1480,7 +1480,7 @@ func TestDomain_CanPruneAfterAggregation(t *testing.T) {
 
 	dc = d.BeginFilesRo()
 	can, untilStep = dc.canPruneDomainTables(tx, aggStep*stepToPrune)
-	require.False(t, can, "lattter step is not yet pruned")
+	require.False(t, can, "latter step is not yet pruned")
 	require.EqualValues(t, stepToPrune, untilStep)
 	dc.Close()
 

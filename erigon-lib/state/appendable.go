@@ -68,7 +68,7 @@ type Appendable struct {
 
 	// _visibleFiles - underscore in name means: don't use this field directly, use BeginFilesRo()
 	// underlying array is immutable - means it's ready for zero-copy use
-	_visibleFiles []ctxItem
+	_visibleFiles []visibleFile
 
 	table           string // txnNum_u64 -> key (k+auto_increment)
 	filenameBase    string
@@ -111,7 +111,7 @@ func NewAppendable(cfg AppendableCfg, aggregationStep uint64, filenameBase, tabl
 		compression:     CompressNone, //CompressKeys | CompressVals,
 	}
 	ap.indexList = withHashMap
-	ap._visibleFiles = []ctxItem{}
+	ap._visibleFiles = []visibleFile{}
 
 	return &ap, nil
 }

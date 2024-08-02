@@ -61,8 +61,6 @@ func TestBlockchain(t *testing.T) {
 }
 
 func TestBlockchainEIP(t *testing.T) {
-	t.Skip("TODO(yperbasis): fix me")
-
 	defer log.Root().SetHandler(log.Root().GetHandler())
 	log.Root().SetHandler(log.LvlFilterHandler(log.LvlError, log.StderrHandler))
 

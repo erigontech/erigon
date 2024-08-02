@@ -50,22 +50,19 @@ type service struct {
 func NewService(
 	logger log.Logger,
 	chainConfig *chain.Config,
-	dataDir string,
-	tmpDir string,
 	sentryClient direct.SentryClient,
 	maxPeers int,
 	statusDataProvider *sentry.StatusDataProvider,
-	heimdallUrl string,
 	executionClient executionproto.ExecutionClient,
 	blockLimit uint,
 	polygonBridge bridge.Service,
+	heimdallService heimdall.Service,
 ) Service {
 	borConfig := chainConfig.Bor.(*borcfg.BorConfig)
 	checkpointVerifier := VerifyCheckpointHeaders
 	milestoneVerifier := VerifyMilestoneHeaders
 	blocksVerifier := VerifyBlocks
 	p2pService := p2p.NewService(maxPeers, logger, sentryClient, statusDataProvider.GetStatusData)
-	heimdallService := heimdall.AssembleService(heimdallUrl, dataDir, tmpDir, logger)
 	execution := NewExecutionClient(executionClient)
 	store := NewStore(logger, execution, polygonBridge)
 	blockDownloader := NewBlockDownloader(
@@ -90,7 +87,7 @@ func NewService(
 		blockDownloader,
 		ccBuilderFactory,
 		spansCache,
-		heimdallService.FetchLatestSpans,
+		heimdallService.LatestSpans,
 		events.Events(),
 		logger,
 	)

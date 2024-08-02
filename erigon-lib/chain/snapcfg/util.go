@@ -451,6 +451,7 @@ func webseedsParse(in []byte) (res []string) {
 
 func LoadRemotePreverified() bool {
 	couldFetch := snapshothashes.LoadSnapshots()
+
 	// Re-load the preverified hashes
 	Mainnet = fromToml(snapshothashes.Mainnet)
 	Holesky = fromToml(snapshothashes.Holesky)
@@ -479,6 +480,33 @@ func LoadRemotePreverified() bool {
 		networkname.GnosisChainName:     Gnosis,
 		networkname.ChiadoChainName:     Chiado,
 	}
-
 	return couldFetch
+}
+
+func SetToml(networkName string, toml []byte) {
+	if _, ok := knownPreverified[networkName]; !ok {
+		return
+	}
+	knownPreverified[networkName] = fromToml(toml)
+}
+
+func GetToml(networkName string) []byte {
+	switch networkName {
+	case networkname.MainnetChainName:
+		return snapshothashes.Mainnet
+	case networkname.HoleskyChainName:
+		return snapshothashes.Holesky
+	case networkname.SepoliaChainName:
+		return snapshothashes.Sepolia
+	case networkname.AmoyChainName:
+		return snapshothashes.Amoy
+	case networkname.BorMainnetChainName:
+		return snapshothashes.BorMainnet
+	case networkname.GnosisChainName:
+		return snapshothashes.Gnosis
+	case networkname.ChiadoChainName:
+		return snapshothashes.Chiado
+	default:
+		return nil
+	}
 }

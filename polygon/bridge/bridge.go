@@ -196,8 +196,8 @@ func (b *Bridge) Unwind(ctx context.Context, tip *types.Header) error {
 	return b.store.PruneEventIDs(ctx, tip.Number.Uint64())
 }
 
-// GetEvents returns all sync events at blockNum
-func (b *Bridge) GetEvents(ctx context.Context, blockNum uint64) ([]*types.Message, error) {
+// Events returns all sync events at blockNum
+func (b *Bridge) Events(ctx context.Context, blockNum uint64) ([]*types.Message, error) {
 	start, end, err := b.store.GetEventIDRange(ctx, blockNum)
 	if err != nil {
 		if errors.Is(err, ErrMapNotAvailable) {

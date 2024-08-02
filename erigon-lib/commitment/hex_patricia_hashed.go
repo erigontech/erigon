@@ -1273,7 +1273,7 @@ func (hph *HexPatriciaHashed) RootHash() ([]byte, error) {
 	return rootHash[1:], nil // first byte is 128+hash_len
 }
 
-func (hph *HexPatriciaHashed) ProcessTree(ctx context.Context, tree *UpdateTree, logPrefix string) (rootHash []byte, err error) {
+func (hph *HexPatriciaHashed) ProcessTree(ctx context.Context, tree *Updates, logPrefix string) (rootHash []byte, err error) {
 	var (
 		stagedCell = new(Cell)
 		logEvery   = time.NewTicker(20 * time.Second)

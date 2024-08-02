@@ -236,7 +236,7 @@ func (hdt blockDownloaderTest) defaultInsertBlocksMock(capture *[]*types.Block) 
 func TestBlockDownloaderDownloadBlocksUsingMilestones(t *testing.T) {
 	test := newBlockDownloaderTest(t)
 	test.heimdall.EXPECT().
-		FetchMilestonesFromBlock(gomock.Any(), gomock.Any()).
+		MilestonesFromBlock(gomock.Any(), gomock.Any()).
 		Return(test.fakeMilestones(4), nil).
 		Times(1)
 	test.p2pService.EXPECT().
@@ -272,7 +272,7 @@ func TestBlockDownloaderDownloadBlocksUsingMilestones(t *testing.T) {
 func TestBlockDownloaderDownloadBlocksUsingCheckpoints(t *testing.T) {
 	test := newBlockDownloaderTest(t)
 	test.heimdall.EXPECT().
-		FetchCheckpointsFromBlock(gomock.Any(), gomock.Any()).
+		CheckpointsFromBlock(gomock.Any(), gomock.Any()).
 		Return(test.fakeCheckpoints(8), nil).
 		Times(1)
 	test.p2pService.EXPECT().
@@ -323,7 +323,7 @@ func TestBlockDownloaderDownloadBlocksWhenInvalidHeadersThenPenalizePeerAndReDow
 		},
 	})
 	test.heimdall.EXPECT().
-		FetchCheckpointsFromBlock(gomock.Any(), gomock.Any()).
+		CheckpointsFromBlock(gomock.Any(), gomock.Any()).
 		Return(test.fakeCheckpoints(6), nil).
 		Times(1)
 	test.p2pService.EXPECT().
@@ -378,7 +378,7 @@ func TestBlockDownloaderDownloadBlocksWhenInvalidHeadersThenPenalizePeerAndReDow
 func TestBlockDownloaderDownloadBlocksWhenZeroPeersTriesAgain(t *testing.T) {
 	test := newBlockDownloaderTest(t)
 	test.heimdall.EXPECT().
-		FetchCheckpointsFromBlock(gomock.Any(), gomock.Any()).
+		CheckpointsFromBlock(gomock.Any(), gomock.Any()).
 		Return(test.fakeCheckpoints(8), nil).
 		Times(1)
 	test.p2pService.EXPECT().
@@ -427,7 +427,7 @@ func TestBlockDownloaderDownloadBlocksWhenInvalidBodiesThenPenalizePeerAndReDown
 		},
 	})
 	test.heimdall.EXPECT().
-		FetchCheckpointsFromBlock(gomock.Any(), gomock.Any()).
+		CheckpointsFromBlock(gomock.Any(), gomock.Any()).
 		Return(test.fakeCheckpoints(6), nil).
 		Times(1)
 	test.p2pService.EXPECT().
@@ -482,7 +482,7 @@ func TestBlockDownloaderDownloadBlocksWhenInvalidBodiesThenPenalizePeerAndReDown
 func TestBlockDownloaderDownloadBlocksWhenMissingBodiesThenPenalizePeerAndReDownload(t *testing.T) {
 	test := newBlockDownloaderTestWithOpts(t, blockDownloaderTestOpts{})
 	test.heimdall.EXPECT().
-		FetchCheckpointsFromBlock(gomock.Any(), gomock.Any()).
+		CheckpointsFromBlock(gomock.Any(), gomock.Any()).
 		Return(test.fakeCheckpoints(6), nil).
 		Times(1)
 	test.p2pService.EXPECT().
@@ -545,7 +545,7 @@ func TestBlockDownloaderDownloadBlocksRespectsMaxWorkers(t *testing.T) {
 		maxWorkers: 1,
 	})
 	test.heimdall.EXPECT().
-		FetchCheckpointsFromBlock(gomock.Any(), gomock.Any()).
+		CheckpointsFromBlock(gomock.Any(), gomock.Any()).
 		Return(test.fakeCheckpoints(2), nil).
 		Times(1)
 	test.p2pService.EXPECT().
@@ -629,7 +629,7 @@ func TestBlockDownloaderDownloadBlocksRespectsBlockLimit(t *testing.T) {
 				blockLimit: tc.blockLimit,
 			})
 			test.heimdall.EXPECT().
-				FetchCheckpointsFromBlock(gomock.Any(), gomock.Any()).
+				CheckpointsFromBlock(gomock.Any(), gomock.Any()).
 				Return(test.fakeCheckpoints(tc.numCheckpoints), nil).
 				Times(1)
 			test.p2pService.EXPECT().
