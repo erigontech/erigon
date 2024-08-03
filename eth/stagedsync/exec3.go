@@ -956,7 +956,6 @@ Loop:
 
 				// on chain-tip: if batch is full then stop execution - to allow stages commit
 				if !execStage.CurrentSyncCycle.IsInitialCycle {
-					b = block
 					break Loop
 				}
 				logger.Info("Committed", "time", time.Since(commitStart),
