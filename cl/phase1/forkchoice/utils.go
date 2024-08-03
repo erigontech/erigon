@@ -18,7 +18,6 @@ package forkchoice
 
 import (
 	"errors"
-	"fmt"
 
 	"github.com/erigontech/erigon/cl/transition"
 
@@ -63,8 +62,8 @@ func (f *ForkChoiceStore) onNewFinalized(newFinalized solid.Checkpoint) {
 		}
 		return true
 	})
-	fmt.Println("A")
-	f.forkGraph.Prune(newFinalized.Epoch() * f.beaconCfg.SlotsPerEpoch)
+	lastSlotOfNewFinalized := ((newFinalized.Epoch() + 1) * f.beaconCfg.SlotsPerEpoch) - 1
+	f.forkGraph.Prune(lastSlotOfNewFinalized)
 }
 
 // updateCheckpoints updates the justified and finalized checkpoints if new checkpoints have higher epochs.
