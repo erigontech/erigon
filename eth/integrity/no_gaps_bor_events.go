@@ -13,11 +13,106 @@ import (
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/core"
 	"github.com/erigontech/erigon/core/types"
+	"github.com/erigontech/erigon/eth/stagedsync/stages"
 	"github.com/erigontech/erigon/polygon/bor"
 	"github.com/erigontech/erigon/polygon/bor/borcfg"
 	"github.com/erigontech/erigon/turbo/services"
 	"github.com/erigontech/erigon/turbo/snapshotsync/freezeblocks"
 )
+
+func checkBlockEvents(ctx context.Context, config *borcfg.BorConfig, blockReader services.FullBlockReader,
+	block uint64, prevBlock uint64, eventId uint64, prevBlockStartId uint64, prevEventTime *time.Time, tx kv.Tx, failFast bool) (*time.Time, error) {
+	header, err := blockReader.HeaderByNumber(ctx, tx, prevBlock)
+
+	if err != nil {
+		if failFast {
+			return nil, fmt.Errorf("can't get header for block %d: %w", block, err)
+		}
+
+		log.Error("[integrity] NoGapsInBorEvents: can't get header for block", "block", block, "err", err)
+	}
+
+	events, err := blockReader.EventsByBlock(ctx, tx, header.Hash(), header.Number.Uint64())
+
+	if err != nil {
+		if failFast {
+			return nil, fmt.Errorf("can't get events for block %d: %w", block, err)
+		}
+
+		log.Error("[integrity] NoGapsInBorEvents: can't get events for block", "block", block, "err", err)
+	}
+
+	if prevBlockStartId != 0 {
+		if len(events) != int(eventId-prevBlockStartId) {
+			if failFast {
+				return nil, fmt.Errorf("block event mismatch at %d: expected: %d, got: %d", block, eventId-prevBlockStartId, len(events))
+			}
+
+			log.Error("[integrity] NoGapsInBorEvents: block event count mismatch", "block", block, "eventId", eventId, "expected", eventId-prevBlockStartId, "got", len(events))
+		}
+	}
+
+	var lastBlockEventTime time.Time
+
+	for i, event := range events {
+
+		var eventId uint64
+
+		if prevBlockStartId != 0 {
+			eventId = bor.EventId(event)
+
+			if eventId != prevBlockStartId+uint64(i) {
+				if failFast {
+					return nil, fmt.Errorf("invalid event id %d for event %d in block %d: expected: %d", eventId, i, block, prevBlockStartId+uint64(i))
+				}
+
+				log.Error("[integrity] NoGapsInBorEvents: invalid event id", "block", block, "event", i, "expected", prevBlockStartId+uint64(i), "got", eventId)
+			}
+		} else {
+			eventId = prevBlockStartId + uint64(i)
+		}
+
+		eventTime := bor.EventTime(event)
+
+		//if i != 0 {
+		//	if eventTime.Before(lastBlockEventTime) {
+		//		eventTime = lastBlockEventTime
+		//	}
+		//}
+
+		if i == 0 {
+			lastBlockEventTime = eventTime
+		}
+
+		if prevEventTime != nil {
+			if eventTime.Before(*prevEventTime) {
+				log.Warn("[integrity] NoGapsInBorEvents: event time before prev", "block", block, "event", eventId, "time", eventTime, "prev", *prevEventTime, "diff", -prevEventTime.Sub(eventTime))
+			}
+		}
+
+		prevEventTime = &eventTime
+
+		if !checkBlockWindow(ctx, eventTime, config, header, tx, blockReader) {
+			from, to, _ := bor.CalculateEventWIndow(ctx, config, header, tx, blockReader)
+
+			var diff time.Duration
+
+			if eventTime.Before(from) {
+				diff = -from.Sub(eventTime)
+			} else if eventTime.After(to) {
+				diff = to.Sub(eventTime)
+			}
+
+			if failFast {
+				return nil, fmt.Errorf("invalid time %s for event %d in block %d: expected %s-%s", eventTime, eventId, block, from, to)
+			}
+
+			log.Error(fmt.Sprintf("[integrity] NoGapsInBorEvents: invalid event time at %d of %d", i, len(events)), "block", block, "event", eventId, "time", eventTime, "diff", diff, "expected", fmt.Sprintf("%s-%s", from, to), "block-start", prevBlockStartId, "first-time", lastBlockEventTime, "timestamps", fmt.Sprintf("%d-%d", from.Unix(), to.Unix()))
+		}
+	}
+
+	return prevEventTime, nil
+}
 
 func NoGapsInBorEvents(ctx context.Context, db kv.RoDB, blockReader services.FullBlockReader, from, to uint64, failFast bool) (err error) {
 	defer log.Info("[integrity] NoGapsInBorEvents: done", "err", err)
@@ -117,103 +212,17 @@ func NoGapsInBorEvents(ctx context.Context, db kv.RoDB, blockReader services.Ful
 			if prevBlock != 0 && prevBlock != block {
 				var err error
 
-				checkBlockEvents := func(tx kv.Tx) error {
-					header, err := blockReader.HeaderByNumber(ctx, tx, prevBlock)
-
-					if err != nil {
-						if failFast {
-							return fmt.Errorf("can't get header for block %d: %w", block, err)
-						}
-
-						log.Error("[integrity] NoGapsInBorEvents: can't get header for block", "block", block, "err", err)
-					}
-
-					events, err := blockReader.EventsByBlock(ctx, tx, header.Hash(), header.Number.Uint64())
-
-					if err != nil {
-						if failFast {
-							return fmt.Errorf("can't get events for block %d: %w", block, err)
-						}
-
-						log.Error("[integrity] NoGapsInBorEvents: can't get events for block", "block", block, "err", err)
-					}
-
-					if prevBlockStartId != 0 {
-						if len(events) != int(eventId-prevBlockStartId) {
-							if failFast {
-								return fmt.Errorf("block event mismatch at %d: expected: %d, got: %d", block, eventId-prevBlockStartId, len(events))
-							}
-
-							log.Error("[integrity] NoGapsInBorEvents: block event count mismatch", "block", block, "eventId", eventId, "expected", eventId-prevBlockStartId, "got", len(events))
-						}
-					}
-
-					var lastBlockEventTime time.Time
-
-					for i, event := range events {
-
-						var eventId uint64
-
-						if prevBlockStartId != 0 {
-							eventId = bor.EventId(event)
-
-							if eventId != prevBlockStartId+uint64(i) {
-								if failFast {
-									return fmt.Errorf("invalid event id %d for event %d in block %d: expected: %d", eventId, i, block, prevBlockStartId+uint64(i))
-								}
-
-								log.Error("[integrity] NoGapsInBorEvents: invalid event id", "block", block, "event", i, "expected", prevBlockStartId+uint64(i), "got", eventId)
-							}
-						} else {
-							eventId = prevBlockStartId + uint64(i)
-						}
-
-						eventTime := bor.EventTime(event)
-
-						//if i != 0 {
-						//	if eventTime.Before(lastBlockEventTime) {
-						//		eventTime = lastBlockEventTime
-						//	}
-						//}
-
-						if i == 0 {
-							lastBlockEventTime = eventTime
-						}
-
-						if prevEventTime != nil {
-							if eventTime.Before(*prevEventTime) {
-								log.Warn("[integrity] NoGapsInBorEvents: event time before prev", "block", block, "event", eventId, "time", eventTime, "prev", *prevEventTime, "diff", -prevEventTime.Sub(eventTime))
-							}
-						}
-
-						prevEventTime = &eventTime
-
-						if !checkBlockWindow(ctx, eventTime, config, header, tx, blockReader) {
-							from, to, _ := bor.CalculateEventWIndow(ctx, config, header, tx, blockReader)
-
-							var diff time.Duration
-
-							if eventTime.Before(from) {
-								diff = -from.Sub(eventTime)
-							} else if eventTime.After(to) {
-								diff = to.Sub(eventTime)
-							}
-
-							if failFast {
-								return fmt.Errorf("invalid time %s for event %d in block %d: expected %s-%s", eventTime, eventId, block, from, to)
-							}
-
-							log.Error(fmt.Sprintf("[integrity] NoGapsInBorEvents: invalid event time at %d of %d", i, len(events)), "block", block, "event", eventId, "time", eventTime, "diff", diff, "expected", fmt.Sprintf("%s-%s", from, to), "block-start", prevBlockStartId, "first-time", lastBlockEventTime, "timestamps", fmt.Sprintf("%d-%d", from.Unix(), to.Unix()))
-						}
-					}
-
-					return nil
+				if block>8660000 {
+					fmt.Println("BLK", block, "E", eventId)
 				}
-
+				
 				if db != nil {
-					err = db.View(ctx, checkBlockEvents)
+					err = db.View(ctx, func(tx kv.Tx) error {
+						prevEventTime, err = checkBlockEvents(ctx, config, blockReader, block, prevBlock, eventId, prevBlockStartId, prevEventTime, tx, failFast)
+						return err
+					})
 				} else {
-					err = checkBlockEvents(nil)
+					prevEventTime, err = checkBlockEvents(ctx, config, blockReader, block, prevBlock, eventId, prevBlockStartId, prevEventTime, nil, failFast)
 				}
 
 				if err != nil {
@@ -233,6 +242,40 @@ func NoGapsInBorEvents(ctx context.Context, db kv.RoDB, blockReader services.Ful
 				log.Info("[integrity] NoGapsInBorEvents", "blockNum", fmt.Sprintf("%dK/%dK", binary.BigEndian.Uint64(word[length.Hash:length.Hash+length.BlockNum])/1000, maxBlockNum/1000))
 			default:
 			}
+		}
+	}
+
+	if db != nil {
+		err = db.View(ctx, func(tx kv.Tx) error {
+			lastEventId, _, err := blockReader.LastEventId(ctx, tx)
+
+			if err != nil {
+				return err
+			}
+
+			borHeimdallProgress, err := stages.GetStageProgress(tx, stages.BorHeimdall)
+
+			if err != nil {
+				return err
+			}
+
+			bodyProgress, err := stages.GetStageProgress(tx, stages.Bodies)
+
+			if err != nil {
+				return err
+			}
+
+			fmt.Println("LAST Event", lastEventId, "BH", borHeimdallProgress, "B", bodyProgress)
+
+			for blockNum := maxBlockNum + 1; blockNum <= bodyProgress; blockNum++ {
+
+			}
+
+			return nil
+		})
+
+		if err != nil {
+			return err
 		}
 	}
 

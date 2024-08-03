@@ -497,6 +497,11 @@ func doIntegrity(cliCtx *cli.Context) error {
 			if err := integrity.E3HistoryNoSystemTxs(ctx, chainDB, agg); err != nil {
 				return err
 			}
+		case integrity.NoBorEventGaps:
+			if err := integrity.NoGapsInBorEvents(ctx, chainDB, blockReader, 0, 0, failFast); err != nil {
+				return err
+			}
+
 		default:
 			return fmt.Errorf("unknown check: %s", chk)
 		}
