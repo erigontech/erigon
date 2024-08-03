@@ -434,8 +434,8 @@ func (f *forkGraphDisk) Prune(pruneSlot uint64) (err error) {
 		if signedBlock.Block.Slot >= pruneSlot {
 			return true
 		}
+		fmt.Println("hasBeaconState", hash, f.hasBeaconState(hash))
 		if f.hasBeaconState(hash) && highestStoredBeaconStateSlot < signedBlock.Block.Slot {
-			fmt.Println("hasBeaconState", hash, f.hasBeaconState(hash))
 			highestStoredBeaconStateSlot = signedBlock.Block.Slot
 		}
 		oldRoots = append(oldRoots, hash)
