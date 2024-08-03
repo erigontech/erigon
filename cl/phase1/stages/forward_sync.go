@@ -166,7 +166,6 @@ func forwardSync(ctx context.Context, logger log.Logger, cfg *Cfg, args Args) er
 			logger.Warn("[Caplin] Failed to process block batch", "err", err)
 			return initialHighestSlotProcessed, err
 		}
-		fmt.Println(len(blocks), initialHighestSlotProcessed, highestSlotProcessed)
 
 		// Exit if we are pre-EIP-4844
 		if !shouldProcessBlobs(blocks) {
@@ -180,7 +179,6 @@ func forwardSync(ctx context.Context, logger log.Logger, cfg *Cfg, args Args) er
 			logger.Warn("[Caplin] Failed to process blobs", "err", err)
 			return initialHighestSlotProcessed, err
 		}
-		fmt.Println("Blobs", initialHighestSlotProcessed, highestBlobSlotProcessed)
 		if highestBlobSlotProcessed <= initialHighestSlotProcessed {
 			return initialHighestSlotProcessed, nil
 		}
