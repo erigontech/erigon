@@ -427,13 +427,13 @@ func (f *forkGraphDisk) Prune(pruneSlot uint64) (err error) {
 	f.blocks.Range(func(key, value interface{}) bool {
 		hash := key.(libcommon.Hash)
 		signedBlock := value.(*cltypes.SignedBeaconBlock)
-		if signedBlock.Block.Slot >= pruneSlot {
-			return true
-		}
-		fmt.Println("hasBeaconState", hash, f.hasBeaconState(hash))
 		if f.hasBeaconState(hash) && highestStoredBeaconStateSlot < signedBlock.Block.Slot {
 			highestStoredBeaconStateSlot = signedBlock.Block.Slot
 		}
+		if signedBlock.Block.Slot >= pruneSlot {
+			return true
+		}
+
 		oldRoots = append(oldRoots, hash)
 		return true
 	})
