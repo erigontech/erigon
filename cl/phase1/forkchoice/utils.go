@@ -18,6 +18,7 @@ package forkchoice
 
 import (
 	"errors"
+	"fmt"
 
 	"github.com/erigontech/erigon/cl/transition"
 
@@ -62,7 +63,7 @@ func (f *ForkChoiceStore) onNewFinalized(newFinalized solid.Checkpoint) {
 		}
 		return true
 	})
-
+	fmt.Println("A")
 	f.forkGraph.Prune(newFinalized.Epoch() * f.beaconCfg.SlotsPerEpoch)
 }
 
