@@ -437,6 +437,7 @@ func (f *forkGraphDisk) Prune(pruneSlot uint64) (err error) {
 		oldRoots = append(oldRoots, hash)
 		return true
 	})
+	fmt.Println("pruneSlot", pruneSlot, "highestStoredBeaconStateSlot", highestStoredBeaconStateSlot)
 	if pruneSlot >= highestStoredBeaconStateSlot {
 		return
 	}
