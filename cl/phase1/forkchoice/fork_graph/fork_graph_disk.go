@@ -417,8 +417,8 @@ func (f *forkGraphDisk) MarkHeaderAsInvalid(blockRoot libcommon.Hash) {
 }
 
 func (f *forkGraphDisk) hasBeaconState(blockRoot libcommon.Hash) bool {
-	_, err := f.fs.Stat(getBeaconStateFilename(blockRoot))
-	return err == nil
+	exists, err := afero.Exists(f.fs, getBeaconStateFilename(blockRoot))
+	return err == nil && exists
 }
 
 func (f *forkGraphDisk) Prune(pruneSlot uint64) (err error) {
@@ -431,14 +431,14 @@ func (f *forkGraphDisk) Prune(pruneSlot uint64) (err error) {
 		if signedBlock.Block.Slot < highestStoredBeaconStateSlot {
 			return true
 		}
-		if f.hasBeaconState(hash) {
-			highestStoredBeaconStateSlot = signedBlock.Block.Slot
-		}
 		if signedBlock.Block.Slot >= pruneSlot {
 			return true
 		}
+		if f.hasBeaconState(hash) && highestStoredBeaconStateSlot < signedBlock.Block.Slot {
+			fmt.Println("hasBeaconState", hash, f.hasBeaconState(hash))
+			highestStoredBeaconStateSlot = signedBlock.Block.Slot
+		}
 		oldRoots = append(oldRoots, hash)
-
 		return true
 	})
 	if pruneSlot >= highestStoredBeaconStateSlot {
