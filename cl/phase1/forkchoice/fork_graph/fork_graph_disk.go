@@ -422,7 +422,6 @@ func (f *forkGraphDisk) hasBeaconState(blockRoot libcommon.Hash) bool {
 }
 
 func (f *forkGraphDisk) Prune(pruneSlot uint64) (err error) {
-	pruneSlot -= f.beaconCfg.SlotsPerEpoch * 2
 	oldRoots := make([]libcommon.Hash, 0, f.beaconCfg.SlotsPerEpoch)
 	highestStoredBeaconStateSlot := uint64(0)
 	f.blocks.Range(func(key, value interface{}) bool {
