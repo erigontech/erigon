@@ -892,7 +892,7 @@ Loop:
 				//}
 				// If we skip post evaluation, then we should compute root hash ASAP for fail-fast
 				aggregatorRo := applyTx.(state2.HasAggTx).AggTx().(*state2.AggregatorRoTx)
-				if !skipPostEvaluation && (rs.SizeEstimate() < commitThreshold || inMemExec) && !aggregatorRo.CanPrune(applyTx, outputTxNum.Load()) {
+				if (!skipPostEvaluation && rs.SizeEstimate() < commitThreshold && !aggregatorRo.CanPrune(applyTx, outputTxNum.Load())) || inMemExec {
 					break
 				}
 				var (
@@ -956,6 +956,7 @@ Loop:
 
 				// on chain-tip: if batch is full then stop execution - to allow stages commit
 				if !execStage.CurrentSyncCycle.IsInitialCycle {
+					b = block
 					break Loop
 				}
 				logger.Info("Committed", "time", time.Since(commitStart),
