@@ -427,9 +427,6 @@ func (f *forkGraphDisk) Prune(pruneSlot uint64) (err error) {
 	f.blocks.Range(func(key, value interface{}) bool {
 		hash := key.(libcommon.Hash)
 		signedBlock := value.(*cltypes.SignedBeaconBlock)
-		if signedBlock.Block.Slot < highestStoredBeaconStateSlot {
-			return true
-		}
 		if signedBlock.Block.Slot >= pruneSlot {
 			return true
 		}
