@@ -20,7 +20,6 @@
 package state
 
 import (
-	"bytes"
 	"fmt"
 	"io"
 	"maps"
@@ -95,7 +94,7 @@ type stateObject struct {
 
 // empty returns whether the account is considered empty.
 func (so *stateObject) empty() bool {
-	return so.data.Nonce == 0 && so.data.Balance.IsZero() && bytes.Equal(so.data.CodeHash[:], emptyCodeHash)
+	return so.data.Nonce == 0 && so.data.Balance.IsZero() && (so.data.CodeHash == emptyCodeHashH)
 }
 
 // newObject creates a state object.
