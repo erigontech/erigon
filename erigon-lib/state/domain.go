@@ -33,6 +33,7 @@ import (
 	"time"
 
 	"github.com/erigontech/erigon-lib/metrics"
+	lru "github.com/hashicorp/golang-lru/v2"
 
 	btree2 "github.com/tidwall/btree"
 	"golang.org/x/sync/errgroup"
@@ -705,6 +706,8 @@ type DomainRoTx struct {
 	comBuf []byte
 
 	valsC kv.Cursor
+
+	l0Cache *lru.Cache[uint64, []byte]
 }
 
 func domainReadMetric(name string, level int) metrics.Summary {
@@ -855,6 +858,7 @@ func (d *Domain) BeginFilesRo() *DomainRoTx {
 			files[i].src.refcount.Add(1)
 		}
 	}
+
 	return &DomainRoTx{
 		d:     d,
 		ht:    d.History.BeginFilesRo(),
@@ -1407,7 +1411,20 @@ func (dt *DomainRoTx) getFromFiles(filekey []byte) (v []byte, found bool, fileSt
 			}
 		}
 
-		//t := time.Now()
+		if i == 0 {
+			if dt.l0Cache == nil {
+				dt.l0Cache, err = lru.New[uint64, []byte](32)
+				if err != nil {
+					panic(err)
+				}
+			}
+			var ok bool
+			v, ok = dt.l0Cache.Get(hi)
+			if ok {
+				return v, true, dt.files[i].startTxNum, dt.files[i].endTxNum, nil
+			}
+		}
+
 		v, found, err = dt.getFromFile(i, filekey)
 		if err != nil {
 			return nil, false, 0, 0, err
@@ -1416,13 +1433,15 @@ func (dt *DomainRoTx) getFromFiles(filekey []byte) (v []byte, found bool, fileSt
 			if traceGetLatest == dt.d.filenameBase {
 				fmt.Printf("GetLatest(%s, %x) -> not found in file %s\n", dt.d.filenameBase, filekey, dt.files[i].src.decompressor.FileName())
 			}
-			//	LatestStateReadGrindNotFound.ObserveDuration(t)
 			continue
 		}
 		if traceGetLatest == dt.d.filenameBase {
 			fmt.Printf("GetLatest(%s, %x) -> found in file %s\n", dt.d.filenameBase, filekey, dt.files[i].src.decompressor.FileName())
 		}
-		//LatestStateReadGrind.ObserveDuration(t)
+
+		if i == 0 {
+			dt.l0Cache.Add(hi, v)
+		}
 		return v, true, dt.files[i].startTxNum, dt.files[i].endTxNum, nil
 	}
 	if traceGetLatest == dt.d.filenameBase {
