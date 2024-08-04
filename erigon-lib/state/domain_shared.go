@@ -29,7 +29,6 @@ import (
 	"time"
 	"unsafe"
 
-	lru "github.com/hashicorp/golang-lru/v2"
 	"github.com/pkg/errors"
 	"golang.org/x/crypto/sha3"
 
@@ -102,8 +101,6 @@ type SharedDomains struct {
 
 	currentChangesAccumulator *StateChangeSet
 	pastChangesAccumulator    map[string]*StateChangeSet
-
-	codeSizeCache *lru.Cache[common.Hash, []byte]
 }
 
 type HasAggTx interface {
@@ -114,17 +111,10 @@ type HasAgg interface {
 }
 
 func NewSharedDomains(tx kv.Tx, logger log.Logger) (*SharedDomains, error) {
-	codeCache, err := lru.New[common.Hash, []byte](100)
-	if err != nil {
-		panic(err)
-	}
-
 	sd := &SharedDomains{
 		logger:  logger,
 		storage: btree2.NewMap[string, dataWithPrevStep](128),
 		//trace:   true,
-
-		codeSizeCache: codeCache,
 	}
 	sd.SetTx(tx)
 
