@@ -23,7 +23,6 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
-	"github.com/erigontech/erigon-lib/metrics"
 	"math"
 	"path/filepath"
 	"regexp"
@@ -32,6 +31,8 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+
+	"github.com/erigontech/erigon-lib/metrics"
 
 	btree2 "github.com/tidwall/btree"
 	"golang.org/x/sync/errgroup"

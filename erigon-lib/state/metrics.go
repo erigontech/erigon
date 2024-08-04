@@ -61,7 +61,7 @@ var (
 
 var (
 	mxsKVGet = map[string][]metrics.Summary{
-		"account": {
+		"accounts": {
 			metrics.GetOrCreateSummary(`kv_get{level="L0",domain="account"}`),
 			metrics.GetOrCreateSummary(`kv_get{level="L1",domain="account"}`),
 			metrics.GetOrCreateSummary(`kv_get{level="L2",domain="account"}`),
