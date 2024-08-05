@@ -1406,7 +1406,7 @@ func (dt *DomainRoTx) getFromFiles(filekey []byte) (v []byte, found bool, fileSt
 	hi, _ := dt.ht.iit.hashKey(filekey)
 	if dt.d.name != kv.CommitmentDomain {
 		if dt.lAllCache == nil {
-			dt.lAllCache, err = simplelru.NewLRU[uint64, fileCacheItem](32, nil)
+			dt.lAllCache, err = simplelru.NewLRU[uint64, fileCacheItem](64, nil)
 			if err != nil {
 				panic(err)
 			}
