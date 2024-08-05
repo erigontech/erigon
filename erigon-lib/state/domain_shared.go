@@ -1347,7 +1347,7 @@ func (sdc *SharedDomainsCommitmentContext) SeekCommitment(tx kv.Tx, cd *DomainRo
 }
 
 // After commitment state is retored, method .Reset() should NOT be called until new updates.
-// Otherwise state should be restorePatriciaState()d again.
+// Otherwise, state should be restorePatriciaState()d again.
 
 func (sdc *SharedDomainsCommitmentContext) restorePatriciaState(value []byte) (uint64, uint64, error) {
 	cs := new(commitmentState)
