@@ -1333,8 +1333,7 @@ func (hph *HexPatriciaHashed) fold() (err error) {
 			bit := bitset & -bitset
 			nibble := bits.TrailingZeros16(bit)
 			cell := &hph.grid[row][nibble]
-			if hph.touchMap[row]&hph.afterMap[row]&uint16(1<<nibble) > 0 && cell.lhLen > 0 ||
-					depth <= 64 && cell.spl > 0 {
+			if hph.touchMap[row]&hph.afterMap[row]&uint16(1<<nibble) > 0 && cell.lhLen > 0 || depth <= 64 && cell.spl > 0 {
 				if hph.trace {
 					fmt.Printf("DROP hash for row %d nibble %x, depth=%d %s\n", row, 1<<nibble, depth, cell.FullString())
 				}
