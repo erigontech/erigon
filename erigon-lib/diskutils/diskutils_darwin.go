@@ -3,7 +3,9 @@
 package diskutils
 
 import (
+	"bytes"
 	"os"
+	"os/exec"
 	"syscall"
 
 	"github.com/ledgerwatch/log/v3"
@@ -48,4 +50,17 @@ func SmlinkForDirPath(dirPath string) string {
 	} else {
 		return dirPath
 	}
+}
+
+func DiskInfo(disk string) (string, error) {
+	cmd := exec.Command("diskutil", "info", disk)
+	var out bytes.Buffer
+	cmd.Stdout = &out
+	err := cmd.Run()
+	if err != nil {
+		return "", err
+	}
+
+	output := out.String()
+	return output, nil
 }
