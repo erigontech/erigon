@@ -26,7 +26,6 @@ import (
 	"time"
 
 	"github.com/erigontech/erigon-lib/common/datadir"
-	"github.com/erigontech/erigon/polygon/bridge"
 	"github.com/erigontech/erigon/turbo/jsonrpc/receipts"
 
 	"github.com/erigontech/erigon-lib/common/hexutil"
@@ -336,6 +335,10 @@ func (api *BaseAPI) pruneMode(tx kv.Tx) (*prune.Mode, error) {
 	return p, nil
 }
 
+type bridgeReader interface {
+	Events(ctx context.Context, borTxHash common.Hash) ([]*types.Message, error)
+}
+
 // APIImpl is implementation of the EthAPI interface based on remote Db access
 type APIImpl struct {
 	*BaseAPI
@@ -351,16 +354,16 @@ type APIImpl struct {
 	MaxGetProofRewindBlockCount int
 	SubscribeLogsChannelSize    int
 	logger                      log.Logger
-	polygonBridge               bridge.PolygonBridge
+	bridgeReader                bridgeReader
 }
 
 // NewEthAPI returns APIImpl instance
-func NewEthAPI(base *BaseAPI, db kv.RoDB, eth rpchelper.ApiBackend, txPool txpool.TxpoolClient, mining txpool.MiningClient, gascap uint64, feecap float64, returnDataLimit int, allowUnprotectedTxs bool, maxGetProofRewindBlockCount int, subscribeLogsChannelSize int, logger log.Logger, polygonBridge bridge.PolygonBridge) *APIImpl {
+func NewEthAPI(base *BaseAPI, db kv.RoDB, eth rpchelper.ApiBackend, txPool txpool.TxpoolClient, mining txpool.MiningClient, gascap uint64, feecap float64, returnDataLimit int, allowUnprotectedTxs bool, maxGetProofRewindBlockCount int, subscribeLogsChannelSize int, logger log.Logger, bridgeReader bridgeReader) *APIImpl {
 	if gascap == 0 {
 		gascap = uint64(math.MaxUint64 / 2)
 	}
 
-	if polygonBridge != nil {
+	if bridgeReader != nil {
 		logger.Info("starting rpc with polygon bridge")
 	}
 
@@ -378,7 +381,7 @@ func NewEthAPI(base *BaseAPI, db kv.RoDB, eth rpchelper.ApiBackend, txPool txpoo
 		MaxGetProofRewindBlockCount: maxGetProofRewindBlockCount,
 		SubscribeLogsChannelSize:    subscribeLogsChannelSize,
 		logger:                      logger,
-		polygonBridge:               polygonBridge,
+		bridgeReader:                bridgeReader,
 	}
 }
 
