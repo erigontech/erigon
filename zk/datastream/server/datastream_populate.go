@@ -34,11 +34,6 @@ func (srv *DataStreamServer) WriteWholeBatchToStream(
 	batchNum uint64,
 ) error {
 	var err error
-	if err = srv.stream.StartAtomicOp(); err != nil {
-		return err
-	}
-	defer srv.stream.RollbackAtomicOp()
-
 	blocksForBatch, err := reader.GetL2BlockNosByBatch(batchNum)
 	if err != nil {
 		return err
@@ -57,6 +52,11 @@ func (srv *DataStreamServer) WriteWholeBatchToStream(
 	if err = srv.UnwindIfNecessary(logPrefix, reader, fromBlockNum, prevBatchNum, batchNum); err != nil {
 		return err
 	}
+
+	if err = srv.stream.StartAtomicOp(); err != nil {
+		return err
+	}
+	defer srv.stream.RollbackAtomicOp()
 
 	blocks := make([]eritypes.Block, 0)
 	txsPerBlock := make(map[uint64][]eritypes.Transaction)
@@ -116,14 +116,14 @@ func (srv *DataStreamServer) WriteBlocksToStreamConsecutively(
 		return err
 	}
 
+	if err = srv.UnwindIfNecessary(logPrefix, reader, from, latestbatchNum, batchNum); err != nil {
+		return err
+	}
+
 	if err = srv.stream.StartAtomicOp(); err != nil {
 		return err
 	}
 	defer srv.stream.RollbackAtomicOp()
-
-	if err = srv.UnwindIfNecessary(logPrefix, reader, from, latestbatchNum, batchNum); err != nil {
-		return err
-	}
 
 	// check if a new batch starts and the old needs closing before that
 	// if it is already closed with a batch end, do not add a new batch end
@@ -220,16 +220,16 @@ func (srv *DataStreamServer) WriteBlockWithBatchStartToStream(
 	t := utils.StartTimer("write-stream", "writeblockstostream")
 	defer t.LogTimer()
 
-	if err = srv.stream.StartAtomicOp(); err != nil {
-		return err
-	}
-	defer srv.stream.RollbackAtomicOp()
-
 	blockNum := block.NumberU64()
 
 	if err = srv.UnwindIfNecessary(logPrefix, reader, blockNum, prevBlockBatchNum, batchNum); err != nil {
 		return err
 	}
+
+	if err = srv.stream.StartAtomicOp(); err != nil {
+		return err
+	}
+	defer srv.stream.RollbackAtomicOp()
 
 	// if start of new batch add batch start entries
 	var batchStartEntries *DataStreamEntries
