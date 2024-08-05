@@ -43,4 +43,5 @@ jobs:
         with:
             enclave_name: "kurtosis-run-${{ matrix.os.name }}-${{ github.run_id }}"
             ethereum_package_args: "./kurtosis_config.yaml"
-            kurtosis_extra_args: --verbosity detailed --cli-log-level trace
+            #kurtosis_extra_args: --verbosity detailed --cli-log-level trace
+            enclave_dump: false
