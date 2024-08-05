@@ -412,7 +412,7 @@ func (api *APIImpl) GetBlockTransactionCountByHash(ctx context.Context, blockHas
 	if chainConfig.Bor != nil {
 		if api.polygonBridge != nil {
 			k := bortypes.ComputeBorTxHash(blockNum, blockHash)
-			events, err := api.polygonBridge.GetEvents(ctx, k)
+			events, err := api.polygonBridge.Events(ctx, k)
 			if err != nil {
 				return nil, err
 			}

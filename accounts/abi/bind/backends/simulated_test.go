@@ -863,9 +863,6 @@ func TestSimulatedBackend_TransactionReceipt(t *testing.T) {
 	}
 	sim.Commit()
 
-	if sim.m.HistoryV3 {
-		return
-	}
 	receipt, err := sim.TransactionReceipt(bgCtx, signedTx.Hash())
 	if err != nil {
 		t.Errorf("could not get transaction receipt: %v", err)

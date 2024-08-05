@@ -49,6 +49,8 @@ import (
 )
 
 var ErrSpanNotFound = errors.New("span not found")
+var ErrMilestoneNotFound = errors.New("milestone not found")
+var ErrCheckpointNotFound = errors.New("checkpoint not found")
 
 type RemoteBlockReader struct {
 	client remote.ETHBACKENDClient
@@ -1653,7 +1655,7 @@ func (r *BlockReader) Milestone(ctx context.Context, tx kv.Getter, milestoneId u
 	}
 
 	if v == nil {
-		return nil, fmt.Errorf("milestone %d not found (db)", milestoneId)
+		return nil, fmt.Errorf("%w, id: %d (db)", ErrMilestoneNotFound, milestoneId)
 	}
 
 	return common.Copy(v), nil
@@ -1702,7 +1704,7 @@ func (r *BlockReader) Checkpoint(ctx context.Context, tx kv.Getter, checkpointId
 		return common.Copy(result), nil
 	}
 
-	return nil, fmt.Errorf("checkpoint %d not found (db)", checkpointId)
+	return nil, fmt.Errorf("%w, id: %d (db)", ErrCheckpointNotFound, checkpointId)
 }
 
 func (r *BlockReader) LastFrozenCheckpointId() uint64 {

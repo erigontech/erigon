@@ -126,7 +126,7 @@ func TestBridge(t *testing.T) {
 	require.NoError(t, err)
 
 	block4Key := bortypes.ComputeBorTxHash(blocks[4].NumberU64(), blocks[4].Hash())
-	res, err := b.GetEvents(ctx, block4Key)
+	res, err := b.Events(ctx, block4Key)
 	require.NoError(t, err)
 
 	event1Data, err := event1.Pack(stateReceiverABI)
@@ -141,16 +141,16 @@ func TestBridge(t *testing.T) {
 
 	// get non-sprint block
 	block1Key := bortypes.ComputeBorTxHash(blocks[1].NumberU64(), blocks[1].Hash())
-	_, err = b.GetEvents(ctx, block1Key)
+	_, err = b.Events(ctx, block1Key)
 	require.Error(t, err)
 
 	block3Key := bortypes.ComputeBorTxHash(blocks[3].NumberU64(), blocks[3].Hash())
-	_, err = b.GetEvents(ctx, block3Key)
+	_, err = b.Events(ctx, block3Key)
 	require.Error(t, err)
 
 	// check block 0
 	block0Key := bortypes.ComputeBorTxHash(blocks[0].NumberU64(), blocks[0].Hash())
-	_, err = b.GetEvents(ctx, block0Key)
+	_, err = b.Events(ctx, block0Key)
 	require.Error(t, err)
 
 	cancel()
@@ -230,14 +230,14 @@ func TestBridge_Unwind(t *testing.T) {
 	require.NoError(t, err)
 
 	block4Key := bortypes.ComputeBorTxHash(blocks[4].NumberU64(), blocks[4].Hash())
-	res, err := b.GetEvents(ctx, block4Key)
+	res, err := b.Events(ctx, block4Key)
 	require.Equal(t, event1Data, rlp.RawValue(res[0].Data()))
 	require.NoError(t, err)
 
 	err = b.Unwind(ctx, &types.Header{Number: big.NewInt(3)})
 	require.NoError(t, err)
 
-	_, err = b.GetEvents(ctx, block4Key)
+	_, err = b.Events(ctx, block4Key)
 	require.Error(t, err)
 
 	cancel()

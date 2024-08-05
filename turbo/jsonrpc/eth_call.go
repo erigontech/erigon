@@ -22,9 +22,6 @@ import (
 	"fmt"
 	"math/big"
 
-	"github.com/holiman/uint256"
-	"google.golang.org/grpc"
-
 	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/hexutil"
 	"github.com/erigontech/erigon-lib/common/hexutility"
@@ -33,6 +30,8 @@ import (
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/log/v3"
 	types2 "github.com/erigontech/erigon-lib/types"
+	"github.com/holiman/uint256"
+	"google.golang.org/grpc"
 
 	"github.com/erigontech/erigon/core"
 	"github.com/erigontech/erigon/core/state"

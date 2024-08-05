@@ -20,8 +20,6 @@ import (
 	"bytes"
 	"context"
 	"encoding/binary"
-	"errors"
-	"fmt"
 	"time"
 
 	libcommon "github.com/erigontech/erigon-lib/common"
@@ -288,7 +286,7 @@ func (s *MdbxStore) GetEventIDRange(ctx context.Context, borTxHash libcommon.Has
 		return start, end, err
 	}
 	if v == nil { // we don't have a map
-		return start, end, errors.New(fmt.Sprintf("map not available for tx hash %d", borTxHash))
+		return start, end, ErrMapNotAvailable
 	}
 
 	err = binary.Read(bytes.NewReader(v), binary.BigEndian, &start)

@@ -90,25 +90,30 @@ func GetSysInfo(dirPath string) HardwareInfo {
 }
 
 func GetRAMInfo() RAMInfo {
-	totalRAM := uint64(0)
-	freeRAM := uint64(0)
+	rmi := RAMInfo{
+		Total:       0,
+		Available:   0,
+		Used:        0,
+		UsedPercent: 0,
+	}
 
 	vmStat, err := mem.VirtualMemory()
 	if err == nil {
-		totalRAM = vmStat.Total
-		freeRAM = vmStat.Free
+		rmi.Total = vmStat.Total
+		rmi.Available = vmStat.Available
+		rmi.Used = vmStat.Used
+		rmi.UsedPercent = vmStat.UsedPercent
 	}
 
-	return RAMInfo{
-		Total: totalRAM,
-		Free:  freeRAM,
-	}
+	return rmi
 }
 
 func GetDiskInfo(nodeDisk string) DiskInfo {
 	fsType := ""
 	total := uint64(0)
 	free := uint64(0)
+	mountPoint := "/"
+	device := "/"
 
 	partitions, err := disk.Partitions(false)
 
@@ -120,6 +125,8 @@ func GetDiskInfo(nodeDisk string) DiskInfo {
 					fsType = partition.Fstype
 					total = iocounters.Total
 					free = iocounters.Free
+					mountPoint = partition.Mountpoint
+					device = partition.Device
 
 					break
 				}
@@ -127,34 +134,36 @@ func GetDiskInfo(nodeDisk string) DiskInfo {
 		}
 	}
 
+	diskDetails, err := diskutils.DiskInfo(device)
+	if err != nil {
+		log.Debug("[diagnostics] Failed to get disk info", "err", err)
+	}
+
 	return DiskInfo{
-		FsType: fsType,
-		Total:  total,
-		Free:   free,
+		FsType:     fsType,
+		Total:      total,
+		Free:       free,
+		MountPoint: mountPoint,
+		Device:     device,
+		Details:    diskDetails,
 	}
 }
 
-func GetCPUInfo() CPUInfo {
-	modelName := ""
-	cores := 0
-	mhz := float64(0)
+func GetCPUInfo() []CPUInfo {
+	cpuinfo := make([]CPUInfo, 0)
 
 	cpuInfo, err := cpu.Info()
 	if err == nil {
 		for _, info := range cpuInfo {
-			modelName = info.ModelName
-			cores = int(info.Cores)
-			mhz = info.Mhz
-
-			break
+			cpuinfo = append(cpuinfo, CPUInfo{
+				ModelName: info.ModelName,
+				Cores:     info.Cores,
+				Mhz:       info.Mhz,
+			})
 		}
 	}
 
-	return CPUInfo{
-		ModelName: modelName,
-		Cores:     cores,
-		Mhz:       mhz,
-	}
+	return cpuinfo
 }
 
 func ReadRAMInfoFromTx(tx kv.Tx) ([]byte, error) {
@@ -188,7 +197,7 @@ func RAMInfoUpdater(info RAMInfo) func(tx kv.RwTx) error {
 	return PutDataToTable(kv.DiagSystemInfo, SystemRamInfoKey, info)
 }
 
-func CPUInfoUpdater(info CPUInfo) func(tx kv.RwTx) error {
+func CPUInfoUpdater(info []CPUInfo) func(tx kv.RwTx) error {
 	return PutDataToTable(kv.DiagSystemInfo, SystemCpuInfoKey, info)
 }
 

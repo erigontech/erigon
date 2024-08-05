@@ -19,13 +19,12 @@ package sync
 import (
 	"context"
 	"fmt"
-	"runtime"
 	"time"
 
 	"google.golang.org/protobuf/types/known/emptypb"
 
 	"github.com/erigontech/erigon-lib/gointerfaces"
-	executionproto "github.com/erigontech/erigon-lib/gointerfaces/executionproto"
+	"github.com/erigontech/erigon-lib/gointerfaces/executionproto"
 	"github.com/erigontech/erigon/turbo/execution/eth1/eth1_utils"
 
 	"github.com/erigontech/erigon/core/types"
@@ -76,11 +75,6 @@ func (e *executionClient) InsertBlocks(ctx context.Context, blocks []*types.Bloc
 }
 
 func (e *executionClient) UpdateForkChoice(ctx context.Context, tip *types.Header, finalizedHeader *types.Header) error {
-	// TODO - not ready for execution - missing state sync event and span data - uncomment once ready
-	if runtime.GOOS != "TODO" {
-		return nil
-	}
-
 	tipHash := tip.Hash()
 	const timeout = 5 * time.Second
 

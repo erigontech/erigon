@@ -1524,7 +1524,7 @@ func (bph *BinPatriciaHashed) SetState(buf []byte) error {
 	return nil
 }
 
-func (bph *BinPatriciaHashed) ProcessTree(ctx context.Context, t *UpdateTree, lp string) (rootHash []byte, err error) {
+func (bph *BinPatriciaHashed) ProcessTree(ctx context.Context, t *Updates, lp string) (rootHash []byte, err error) {
 	panic("not implemented")
 }
 

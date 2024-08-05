@@ -34,8 +34,8 @@ import (
 )
 
 func Test_BtreeIndex_Init2(t *testing.T) {
-	//mainnnet: storage.128-160.kv  110mil keys, 100mb bloomfilter of 0.01 (1%) miss-probability
-	//no much reason to merge bloomfilter - can merge them on starup
+	//mainnet: storage.128-160.kv  110mil keys, 100mb bloomfilter of 0.01 (1%) miss-probability
+	//no much reason to merge bloomfilter - can merge them on startup
 	//1B keys: 1Gb
 
 	sizes := []int{54, 74, 135, 139, 109, 105, 144}

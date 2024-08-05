@@ -128,9 +128,8 @@ type EthAPI interface {
 
 type BaseAPI struct {
 	// all caches are thread-safe
-	stateCache    kvcache.Cache
-	blocksLRU     *lru.Cache[common.Hash, *types.Block]
-	receiptsCache *lru.Cache[common.Hash, []*types.Receipt]
+	stateCache kvcache.Cache
+	blocksLRU  *lru.Cache[common.Hash, *types.Block]
 
 	filters      *rpchelper.Filters
 	_chainConfig atomic.Pointer[chain.Config]
@@ -160,23 +159,16 @@ func NewBaseApi(f *rpchelper.Filters, stateCache kvcache.Cache, blockReader serv
 	if err != nil {
 		panic(err)
 	}
-	receiptsCache, err := lru.New[common.Hash, []*types.Receipt](receiptsCacheLimit)
-	if err != nil {
-		panic(err)
-	}
-
-	receiptsGenerator := receipts.NewGenerator(receiptsCache, blockReader, engine)
 
 	return &BaseAPI{
 		filters:           f,
 		stateCache:        stateCache,
 		blocksLRU:         blocksLRU,
-		receiptsCache:     receiptsCache,
 		_blockReader:      blockReader,
 		_txnReader:        blockReader,
 		evmCallTimeout:    evmCallTimeout,
 		_engine:           engine,
-		receiptsGenerator: receiptsGenerator,
+		receiptsGenerator: receipts.NewGenerator(receiptsCacheLimit, blockReader, engine),
 		dirs:              dirs,
 	}
 }
