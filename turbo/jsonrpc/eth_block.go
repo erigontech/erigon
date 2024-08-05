@@ -22,12 +22,11 @@ import (
 	"math/big"
 	"time"
 
-	"github.com/erigontech/erigon-lib/log/v3"
-
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/hexutil"
 	"github.com/erigontech/erigon-lib/common/hexutility"
 	"github.com/erigontech/erigon-lib/kv"
+	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/common/math"
 	"github.com/erigontech/erigon/core"
@@ -366,6 +365,17 @@ func (api *APIImpl) GetBlockTransactionCountByNumber(ctx context.Context, blockN
 	}
 
 	if chainConfig.Bor != nil {
+		if api.bridgeReader != nil {
+			events, err := api.bridgeReader.Events(ctx, blockNum)
+			if err != nil {
+				return nil, err
+			}
+
+			if len(events) > 0 {
+				txCount++
+			}
+		}
+
 		borStateSyncTxHash := bortypes.ComputeBorTxHash(blockNum, blockHash)
 		b, ok, err := api._blockReader.EventLookup(ctx, tx, borStateSyncTxHash) // this returns block number, not the events
 
@@ -411,13 +421,14 @@ func (api *APIImpl) GetBlockTransactionCountByHash(ctx context.Context, blockHas
 
 	if chainConfig.Bor != nil {
 		if api.bridgeReader != nil {
-			k := bortypes.ComputeBorTxHash(blockNum, blockHash)
-			_, err := api.bridgeReader.TxLookup(ctx, k)
+			events, err := api.bridgeReader.Events(ctx, blockNum)
 			if err != nil {
 				return nil, err
 			}
 
-			txCount++
+			if len(events) > 0 {
+				txCount++
+			}
 		}
 
 		borStateSyncTxHash := bortypes.ComputeBorTxHash(blockNum, blockHash)
