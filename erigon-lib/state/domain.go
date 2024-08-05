@@ -75,6 +75,8 @@ var (
 type Domain struct {
 	*History
 
+	name kv.Domain
+
 	// dirtyFiles - list of ALL files - including: un-indexed-yet, garbage, merged-into-bigger-one, ...
 	// thread-safe, but maybe need 1 RWLock for all trees in Aggregator
 	//
@@ -114,11 +116,12 @@ type domainCfg struct {
 	restrictSubsetFileDeletions bool
 }
 
-func NewDomain(cfg domainCfg, aggregationStep uint64, filenameBase, valsTable, indexKeysTable, historyValsTable, indexTable string, integrityCheck func(name kv.Domain, fromStep, toStep uint64) bool, logger log.Logger) (*Domain, error) {
+func NewDomain(cfg domainCfg, aggregationStep uint64, name kv.Domain, valsTable, indexKeysTable, historyValsTable, indexTable string, integrityCheck func(name kv.Domain, fromStep, toStep uint64) bool, logger log.Logger) (*Domain, error) {
 	if cfg.hist.iiCfg.dirs.SnapDomain == "" {
 		panic("empty `dirs` variable")
 	}
 	d := &Domain{
+		name:        name,
 		valsTable:   valsTable,
 		compression: cfg.compress,
 		dirtyFiles:  btree2.NewBTreeGOptions[*filesItem](filesItemLess, btree2.Options{Degree: 128, NoLocks: false}),
@@ -134,7 +137,7 @@ func NewDomain(cfg domainCfg, aggregationStep uint64, filenameBase, valsTable, i
 	d._visibleFiles = []visibleFile{}
 
 	var err error
-	if d.History, err = NewHistory(cfg.hist, aggregationStep, filenameBase, indexKeysTable, indexTable, historyValsTable, nil, logger); err != nil {
+	if d.History, err = NewHistory(cfg.hist, aggregationStep, name.String(), indexKeysTable, indexTable, historyValsTable, nil, logger); err != nil {
 		return nil, err
 	}
 
@@ -711,7 +714,7 @@ type DomainRoTx struct {
 	l0CacheHit, l0CacheMiss int
 }
 
-func domainReadMetric(name string, level int) metrics.Summary {
+func domainReadMetric(name kv.Domain, level int) metrics.Summary {
 	if level > 4 {
 		level = 5
 	}
@@ -719,10 +722,8 @@ func domainReadMetric(name string, level int) metrics.Summary {
 }
 
 func (dt *DomainRoTx) getFromFile(i int, filekey []byte) ([]byte, bool, error) {
-	s := time.Now()
-	defer mxFileReadTime.ObserveDuration(s)
 	if dbg.KVReadLevelledMetrics {
-		defer domainReadMetric(dt.d.filenameBase, i).ObserveDuration(time.Now())
+		defer domainReadMetric(dt.d.name, i).ObserveDuration(time.Now())
 	}
 
 	g := dt.statelessGetter(i)

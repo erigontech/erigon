@@ -1102,7 +1102,7 @@ func (sdc *SharedDomainsCommitmentContext) GetAccount(plainKey []byte, cell *com
 			copy(cell.CodeHash[:], chash)
 		}
 	}
-	if bytes.Equal(cell.CodeHash[:], commitment.EmptyCodeHash) {
+	if cell.CodeHash == commitment.EmptyCodeHashArray {
 		cell.Delete = len(encAccount) == 0
 		return nil
 	}
