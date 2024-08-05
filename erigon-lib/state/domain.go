@@ -1424,7 +1424,7 @@ func (dt *DomainRoTx) getFromFiles(filekey []byte) (v []byte, found bool, fileSt
 					log.Warn("[dbg] lEachCache", "a", dt.d.filenameBase, "hit", dt.lAllCacheHit, "total", dt.lAllCacheTotal, "ratio", fmt.Sprintf("%.2f", float64(dt.lAllCacheHit)/float64(dt.lAllCacheTotal)))
 				}
 			}
-			return v, true, dt.files[cv.lvl].startTxNum, dt.files[cv.lvl].endTxNum, nil
+			return cv.v, true, dt.files[cv.lvl].startTxNum, dt.files[cv.lvl].endTxNum, nil
 		}
 	}
 
