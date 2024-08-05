@@ -39,7 +39,6 @@ import (
 	"golang.org/x/sync/errgroup"
 
 	"github.com/erigontech/erigon-lib/common/dbg"
-	bortypes "github.com/erigontech/erigon/polygon/bor/types"
 	"github.com/erigontech/erigon/polygon/bridge"
 
 	"github.com/erigontech/erigon-lib/log/v3"
@@ -262,7 +261,7 @@ type spanReader interface {
 }
 
 type bridgeReader interface {
-	Events(ctx context.Context, borTxHash libcommon.Hash) ([]*types.Message, error)
+	Events(ctx context.Context, blockNum uint64) ([]*types.Message, error)
 	TxLookup(ctx context.Context, borTxHash libcommon.Hash) (uint64, error)
 }
 
@@ -1512,8 +1511,7 @@ func (c *Bor) CommitStates(
 	blockNum := header.Number.Uint64()
 
 	if c.BridgeReader != nil {
-		k := bortypes.ComputeBorTxHash(blockNum, header.Hash())
-		events, err := c.BridgeReader.Events(c.execCtx, k)
+		events, err := c.BridgeReader.Events(c.execCtx, blockNum)
 		if err != nil {
 			if errors.Is(err, bridge.ErrMapNotAvailable) {
 				return nil

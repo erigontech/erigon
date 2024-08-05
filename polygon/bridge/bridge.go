@@ -136,7 +136,7 @@ func (b *Bridge) Close() {
 
 // ProcessNewBlocks iterates through all blocks and constructs a map from block number to sync events
 func (b *Bridge) ProcessNewBlocks(ctx context.Context, blocks []*types.Block) error {
-	eventMap := make(map[libcommon.Hash]uint64)
+	eventMap := make(map[uint64]uint64)
 	txMap := make(map[libcommon.Hash]uint64)
 	var prevSprintTime time.Time
 
@@ -165,7 +165,7 @@ func (b *Bridge) ProcessNewBlocks(ctx context.Context, blocks []*types.Block) er
 			b.log.Debug(bridgeLogPrefix(fmt.Sprintf("Creating map for block %d, start ID %d, end ID %d", block.NumberU64(), b.lastProcessedEventID.Load(), lastDBID)))
 
 			k := bortypes.ComputeBorTxHash(block.NumberU64(), block.Hash())
-			eventMap[k] = b.lastProcessedEventID.Load()
+			eventMap[block.NumberU64()] = b.lastProcessedEventID.Load()
 			txMap[k] = block.NumberU64()
 
 			b.lastProcessedEventID.Store(lastDBID)
@@ -203,13 +203,12 @@ func (b *Bridge) Synchronize(ctx context.Context, tip *types.Header) error {
 
 // Unwind deletes map entries till tip
 func (b *Bridge) Unwind(ctx context.Context, tip *types.Header) error {
-	k := bortypes.ComputeBorTxHash(tip.Number.Uint64(), tip.Hash())
-	return b.store.PruneEventIDs(ctx, k)
+	return b.store.PruneEventIDs(ctx, tip.Number.Uint64())
 }
 
 // Events returns all sync events at blockNum
-func (b *Bridge) Events(ctx context.Context, borTxHash libcommon.Hash) ([]*types.Message, error) {
-	start, end, err := b.store.GetEventIDRange(ctx, borTxHash)
+func (b *Bridge) Events(ctx context.Context, blockNum uint64) ([]*types.Message, error) {
+	start, end, err := b.store.GetEventIDRange(ctx, blockNum)
 	if err != nil {
 		return nil, err
 	}
@@ -226,7 +225,7 @@ func (b *Bridge) Events(ctx context.Context, borTxHash libcommon.Hash) ([]*types
 		return nil, err
 	}
 
-	b.log.Debug(bridgeLogPrefix(fmt.Sprintf("got %v events for tx %v", len(events), borTxHash)))
+	b.log.Debug(bridgeLogPrefix(fmt.Sprintf("got %v events for block %v", len(events), blockNum)))
 
 	// convert to message
 	for _, event := range events {

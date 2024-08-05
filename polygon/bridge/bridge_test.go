@@ -17,7 +17,6 @@ import (
 	"github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/polygon/bor"
 	"github.com/erigontech/erigon/polygon/bor/borcfg"
-	bortypes "github.com/erigontech/erigon/polygon/bor/types"
 	"github.com/erigontech/erigon/polygon/bridge"
 	"github.com/erigontech/erigon/polygon/heimdall"
 	"github.com/erigontech/erigon/rlp"
@@ -125,8 +124,7 @@ func TestBridge(t *testing.T) {
 	err = b.ProcessNewBlocks(ctx, blocks)
 	require.NoError(t, err)
 
-	block4Key := bortypes.ComputeBorTxHash(blocks[4].NumberU64(), blocks[4].Hash())
-	res, err := b.Events(ctx, block4Key)
+	res, err := b.Events(ctx, 4)
 	require.NoError(t, err)
 
 	event1Data, err := event1.Pack(stateReceiverABI)
@@ -140,17 +138,14 @@ func TestBridge(t *testing.T) {
 	require.Equal(t, event2Data, rlp.RawValue(res[1].Data()))
 
 	// get non-sprint block
-	block1Key := bortypes.ComputeBorTxHash(blocks[1].NumberU64(), blocks[1].Hash())
-	_, err = b.Events(ctx, block1Key)
+	_, err = b.Events(ctx, 1)
 	require.Error(t, err)
 
-	block3Key := bortypes.ComputeBorTxHash(blocks[3].NumberU64(), blocks[3].Hash())
-	_, err = b.Events(ctx, block3Key)
+	_, err = b.Events(ctx, 3)
 	require.Error(t, err)
 
 	// check block 0
-	block0Key := bortypes.ComputeBorTxHash(blocks[0].NumberU64(), blocks[0].Hash())
-	_, err = b.Events(ctx, block0Key)
+	_, err = b.Events(ctx, 0)
 	require.Error(t, err)
 
 	cancel()
@@ -229,15 +224,14 @@ func TestBridge_Unwind(t *testing.T) {
 	event1Data, err := event1.Pack(stateReceiverABI)
 	require.NoError(t, err)
 
-	block4Key := bortypes.ComputeBorTxHash(blocks[4].NumberU64(), blocks[4].Hash())
-	res, err := b.Events(ctx, block4Key)
+	res, err := b.Events(ctx, 4)
 	require.Equal(t, event1Data, rlp.RawValue(res[0].Data()))
 	require.NoError(t, err)
 
 	err = b.Unwind(ctx, &types.Header{Number: big.NewInt(3)})
 	require.NoError(t, err)
 
-	_, err = b.Events(ctx, block4Key)
+	_, err = b.Events(ctx, 4)
 	require.Error(t, err)
 
 	cancel()
