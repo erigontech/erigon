@@ -1425,7 +1425,7 @@ func (dt *DomainRoTx) getFromFiles(filekey []byte) (v []byte, found bool, fileSt
 			if ok {
 				if dbg.KVReadLevelledMetrics {
 					dt.lEachCacheHit[i]++
-					if dt.lEachCacheHit[i]%100_000 == 0 {
+					if dt.lEachCacheTotal[i]%1_000_000 == 0 {
 						log.Warn("[dbg] lEachCache", "a", dt.d.filenameBase, "hit", dt.lEachCacheHit[i], "total", dt.lEachCacheTotal[i], "ratio", fmt.Sprintf("%.2f", float64(dt.lEachCacheHit[i])/float64(dt.lEachCacheTotal[i])))
 					}
 				}
