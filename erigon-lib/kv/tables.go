@@ -1017,10 +1017,11 @@ func String2Domain(in string) (Domain, error) {
 	case "commitment":
 		return CommitmentDomain, nil
 	default:
-		const MaxUint16 uint16 = 1<<16 - 1
 		return Domain(MaxUint16), fmt.Errorf("unknown history name: %s", in)
 	}
 }
+
+const MaxUint16 uint16 = 1<<16 - 1
 
 func (iip Appendable) String() string {
 	switch iip {
@@ -1036,6 +1037,6 @@ func String2Appendable(in string) (Appendable, error) {
 	//case "receipts":
 	//	return ReceiptsAppendable, nil
 	default:
-		return 0, fmt.Errorf("unknown Appendable name: %s", in)
+		return Appendable(MaxUint16), fmt.Errorf("unknown Appendable name: %s", in)
 	}
 }
