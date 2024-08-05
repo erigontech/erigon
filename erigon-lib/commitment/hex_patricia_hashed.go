@@ -846,6 +846,41 @@ func (hph *HexPatriciaHashed) computeCellHash(cell *Cell, depth int, buf []byte)
 		if singleton {
 			if !cell.loaded.storage() {
 				if cell.lhLen > 0 {
+					hph.keccak.Reset()
+					if hph.trace {
+						fmt.Printf("LEAF HASH storage USED %x spk %x\n", cell.leafHash[:cell.lhLen], cell.spk[:cell.spl])
+					}
+					skippedLoad.Add(1)
+					storageRootHash = *(*[length.Hash]byte)(cell.leafHash[:cell.lhLen])
+					storageRootHashIsSet = true
+				} else {
+					if err = hph.ctx.GetStorage(cell.spk[:cell.spl], cell); err != nil {
+						return nil, err
+					}
+					hadToLoad.Add(1)
+					cell.loaded = cell.loaded.addFlag(cellLoadStorage)
+					fmt.Printf("STORAGE WAS NOT LOADED, now %s\n", cell.FullString())
+				}
+			}
+			if cell.loaded.storage() {
+				if hph.trace {
+					fmt.Printf("leafHashWithKeyVal(singleton) for [%x]=>[%x]\n", cell.downHashedKey[:64-hashedKeyOffset+1], cell.Storage[:cell.StorageLen])
+				}
+				aux := make([]byte, 0, 33)
+				if aux, err = hph.leafHashWithKeyVal(aux, cell.downHashedKey[:64-hashedKeyOffset+1], cell.Storage[:cell.StorageLen], true); err != nil {
+					return nil, err
+				}
+				if hph.trace {
+					fmt.Printf("leafHashWithKeyVal(singleton) storage hash [%x]\n", aux)
+				}
+				storageRootHash = *(*[length.Hash]byte)(aux[1:])
+				storageRootHashIsSet = true
+				cell.lhLen = 0
+				hadToReset.Add(1)
+			}
+		} else {
+			if !cell.loaded.storage() {
+				if cell.lhLen > 0 {
 					res := append([]byte{160}, cell.leafHash[:cell.lhLen]...)
 					hph.keccak.Reset()
 					if hph.trace {
@@ -854,31 +889,12 @@ func (hph *HexPatriciaHashed) computeCellHash(cell *Cell, depth int, buf []byte)
 					skippedLoad.Add(1)
 					return res, nil
 				}
-				if err = hph.ctx.GetStorage(cell.spk[:cell.spl], cell); err != nil {
-					return nil, err
-				}
-				hadToLoad.Add(1)
-				cell.loaded = cell.loaded.addFlag(cellLoadStorage)
-				fmt.Printf("STORAGE WAS NOT LOADED, now %s\n", cell.FullString())
 			}
-			if hph.trace {
-				fmt.Printf("leafHashWithKeyVal(singleton) for [%x]=>[%x]\n", cell.downHashedKey[:64-hashedKeyOffset+1], cell.Storage[:cell.StorageLen])
-			}
-			aux := make([]byte, 0, 33)
-			if aux, err = hph.leafHashWithKeyVal(aux, cell.downHashedKey[:64-hashedKeyOffset+1], cell.Storage[:cell.StorageLen], true); err != nil {
-				return nil, err
-			}
-			if hph.trace {
-				fmt.Printf("leafHashWithKeyVal(singleton) storage hash [%x]\n", aux)
-			}
-			storageRootHash = *(*[length.Hash]byte)(aux[1:])
-			storageRootHashIsSet = true
-			cell.lhLen = 0
-			hadToReset.Add(1)
-		} else {
+
 			if hph.trace {
 				fmt.Printf("leafHashWithKeyVal for [%x]=>[%x] %v\n", cell.downHashedKey[:64-hashedKeyOffset+1], cell.Storage[:cell.StorageLen], cell.String())
 			}
+
 			accLeafHash, err := hph.leafHashWithKeyVal(buf, cell.downHashedKey[:64-hashedKeyOffset+1], cell.Storage[:cell.StorageLen], false)
 			if err != nil {
 				return nil, err
@@ -1318,7 +1334,7 @@ func (hph *HexPatriciaHashed) fold() (err error) {
 			nibble := bits.TrailingZeros16(bit)
 			cell := &hph.grid[row][nibble]
 			if hph.touchMap[row]&hph.afterMap[row]&uint16(1<<nibble) > 0 && cell.lhLen > 0 ||
-				depth <= 64 && cell.spl > 0 {
+					depth <= 64 && cell.spl > 0 {
 				if hph.trace {
 					fmt.Printf("DROP hash for row %d nibble %x, depth=%d %s\n", row, 1<<nibble, depth, cell.FullString())
 				}
@@ -1341,7 +1357,15 @@ func (hph *HexPatriciaHashed) fold() (err error) {
 					cell.loaded = cell.loaded.addFlag(cellLoadStorage)
 				}
 			}
-			totalBranchLen += hph.computeCellHashLen(cell, depth)
+			if !cell.loaded.storage() && cell.spl > 0 && cell.lhLen > 0 {
+				b := 0
+				if cell.lhLen == 32 {
+					b = 1
+				}
+				totalBranchLen += cell.lhLen + b
+			} else {
+				totalBranchLen += hph.computeCellHashLen(cell, depth)
+			}
 			bitset ^= bit
 		}
 
@@ -1506,9 +1530,10 @@ func (hph *HexPatriciaHashed) ProcessTree(ctx context.Context, tree *Updates, lo
 		stagedCell   = new(Cell)
 		logEvery     = time.NewTicker(20 * time.Second)
 		updatesCount = tree.Size()
-		m            runtime.MemStats
-		ki           uint64
 		start        = time.Now()
+
+		m  runtime.MemStats
+		ki uint64
 	)
 	defer logEvery.Stop()
 	//hph.trace = true

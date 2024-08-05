@@ -97,6 +97,8 @@ func TestBranchData_MergeHexBranches2(t *testing.T) {
 		require.EqualValues(t, row[i].apk, c.apk)
 		require.EqualValues(t, row[i].spl, c.spl)
 		require.EqualValues(t, row[i].spk, c.spk)
+		require.EqualValues(t, row[i].leafHash, c.leafHash)
+		require.EqualValues(t, row[i].lhLen, c.lhLen)
 		i++
 	}
 }
