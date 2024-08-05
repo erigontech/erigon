@@ -1413,7 +1413,7 @@ func (dt *DomainRoTx) getFromFiles(filekey []byte) (v []byte, found bool, fileSt
 			}
 		}
 
-		if i == 0 {
+		if dt.d.name != kv.CommitmentDomain && i == 0 {
 			if dt.l0Cache == nil {
 				dt.l0Cache, err = simplelru.NewLRU[uint64, []byte](32, nil)
 				if err != nil {
