@@ -39,6 +39,7 @@ import (
 )
 
 var ErrMapNotAvailable = errors.New("map not available")
+var ErrTxNotAvailable = errors.New("tx not available")
 
 type fetchSyncEventsType func(ctx context.Context, fromId uint64, to time.Time, limit int) ([]*heimdall.EventRecordWithTime, error)
 
@@ -136,6 +137,7 @@ func (b *Bridge) Close() {
 // ProcessNewBlocks iterates through all blocks and constructs a map from block number to sync events
 func (b *Bridge) ProcessNewBlocks(ctx context.Context, blocks []*types.Block) error {
 	eventMap := make(map[libcommon.Hash]uint64)
+	txMap := make(map[libcommon.Hash]uint64)
 	var prevSprintTime time.Time
 
 	for _, block := range blocks {
@@ -161,8 +163,10 @@ func (b *Bridge) ProcessNewBlocks(ctx context.Context, blocks []*types.Block) er
 
 		if lastDBID > b.lastProcessedEventID.Load() {
 			b.log.Debug(bridgeLogPrefix(fmt.Sprintf("Creating map for block %d, start ID %d, end ID %d", block.NumberU64(), b.lastProcessedEventID.Load(), lastDBID)))
+
 			k := bortypes.ComputeBorTxHash(block.NumberU64(), block.Hash())
 			eventMap[k] = b.lastProcessedEventID.Load()
+			txMap[k] = block.NumberU64()
 
 			b.lastProcessedEventID.Store(lastDBID)
 		}
@@ -171,6 +175,11 @@ func (b *Bridge) ProcessNewBlocks(ctx context.Context, blocks []*types.Block) er
 	}
 
 	err := b.store.StoreEventID(ctx, eventMap)
+	if err != nil {
+		return err
+	}
+
+	err = b.store.StoreTxMap(ctx, txMap)
 	if err != nil {
 		return err
 	}
@@ -237,6 +246,15 @@ func (b *Bridge) Events(ctx context.Context, borTxHash libcommon.Hash) ([]*types
 	}
 
 	return eventsRaw, nil
+}
+
+func (b *Bridge) TxLookup(ctx context.Context, borTxHash libcommon.Hash) (uint64, error) {
+	blockNum, err := b.store.TxMap(ctx, borTxHash)
+	if err != nil {
+		return 0, err
+	}
+
+	return blockNum, nil
 }
 
 // Helper functions

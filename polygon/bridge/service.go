@@ -28,6 +28,7 @@ type PolygonBridge interface {
 	Synchronize(ctx context.Context, tip *types.Header) error
 	Unwind(ctx context.Context, tip *types.Header) error
 	Events(ctx context.Context, borTxHash libcommon.Hash) ([]*types.Message, error)
+	TxLookup(ctx context.Context, borTxHash libcommon.Hash) (uint64, error)
 }
 
 type Service interface {

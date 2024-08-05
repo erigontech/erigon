@@ -45,6 +45,7 @@ import (
 var databaseTablesCfg = kv.TableCfg{
 	kv.BorEvents:    {},
 	kv.BorEventNums: {},
+	kv.BorTxLookup:  {},
 }
 
 type Store interface {
@@ -53,6 +54,8 @@ type Store interface {
 
 	GetLatestEventID(ctx context.Context) (uint64, error)
 	GetLastProcessedEventID(ctx context.Context) (uint64, error)
+	StoreTxMap(ctx context.Context, txMap map[libcommon.Hash]uint64) error
+	TxMap(ctx context.Context, borTxHash libcommon.Hash) (uint64, error)
 	GetSprintLastEventID(ctx context.Context, lastID uint64, timeLimit time.Time, stateContract abi.ABI) (uint64, error)
 	AddEvents(ctx context.Context, events []*heimdall.EventRecordWithTime, stateContract abi.ABI) error
 	GetEvents(ctx context.Context, start, end uint64) ([][]byte, error)
@@ -133,6 +136,57 @@ func (s *MdbxStore) GetLastProcessedEventID(ctx context.Context) (uint64, error)
 	}
 
 	return binary.BigEndian.Uint64(v), err
+}
+
+func (s *MdbxStore) StoreTxMap(ctx context.Context, txMap map[libcommon.Hash]uint64) error {
+	tx, err := s.db.BeginRw(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	vByte := make([]byte, 8)
+
+	for k, v := range txMap {
+		binary.BigEndian.PutUint64(vByte, v)
+
+		err = tx.Put(kv.BorTxLookup, k.Bytes(), vByte)
+		if err != nil {
+			return err
+		}
+	}
+
+	return tx.Commit()
+}
+
+func (s *MdbxStore) TxMap(ctx context.Context, borTxHash libcommon.Hash) (uint64, error) {
+	var blockNum uint64
+
+	tx, err := s.db.BeginRo(ctx)
+	if err != nil {
+		return blockNum, err
+	}
+	defer tx.Rollback()
+
+	cursor, err := tx.Cursor(kv.BorEventNums)
+	if err != nil {
+		return blockNum, err
+	}
+
+	_, v, err := cursor.SeekExact(borTxHash.Bytes())
+	if err != nil {
+		return blockNum, err
+	}
+	if v == nil { // we don't have a map
+		return blockNum, ErrTxNotAvailable
+	}
+
+	err = binary.Read(bytes.NewReader(v), binary.BigEndian, &blockNum)
+	if err != nil {
+		return blockNum, err
+	}
+
+	return blockNum, nil
 }
 
 // GetSprintLastEventID gets the last event id where event.ID >= lastID and event.Time <= time
