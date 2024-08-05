@@ -168,7 +168,7 @@ func (s *MdbxStore) TxMap(ctx context.Context, borTxHash libcommon.Hash) (uint64
 	}
 	defer tx.Rollback()
 
-	cursor, err := tx.Cursor(kv.BorEventNums)
+	cursor, err := tx.Cursor(kv.BorTxLookup)
 	if err != nil {
 		return blockNum, false, err
 	}
