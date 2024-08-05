@@ -1252,7 +1252,7 @@ func (sdc *SharedDomainsCommitmentContext) ComputeCommitment(ctx context.Context
 	return rootHash, err
 }
 
-func (sdc *SharedDomainsCommitmentContext) storeCommitmentState(blockNum uint64, rh []byte) error {
+func (sdc *SharedDomainsCommitmentContext) storeCommitmentState(blockNum uint64, rootHash []byte) error {
 	if sdc.sd.aggTx == nil {
 		return fmt.Errorf("store commitment state: AggregatorContext is not initialized")
 	}
@@ -1271,11 +1271,11 @@ func (sdc *SharedDomainsCommitmentContext) storeCommitmentState(blockNum uint64,
 	// We do skip only full matches
 	if bytes.Equal(prevState, encodedState) {
 		//fmt.Printf("[commitment] skip store txn %d block %d (prev b=%d t=%d) rh %x\n",
-		//	binary.BigEndian.Uint64(prevState[8:16]), binary.BigEndian.Uint64(prevState[:8]), dc.ht.iit.txNum, blockNum, rh)
+		//	binary.BigEndian.Uint64(prevState[8:16]), binary.BigEndian.Uint64(prevState[:8]), dc.ht.iit.txNum, blockNum, rootHash)
 		return nil
 	}
 	if sdc.sd.trace {
-		fmt.Printf("[commitment] store txn %d block %d rh %x\n", sdc.sd.txNum, blockNum, rh)
+		fmt.Printf("[commitment] store txn %d block %d rootHash %x\n", sdc.sd.txNum, blockNum, rootHash)
 	}
 	sdc.sd.put(kv.CommitmentDomain, string(keyCommitmentState), encodedState)
 	return sdc.sd.domainWriters[kv.CommitmentDomain].PutWithPrev(keyCommitmentState, nil, encodedState, prevState, prevStep)

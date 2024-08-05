@@ -899,7 +899,7 @@ func (bph *BinPatriciaHashed) unfold(hashedKey []byte, unfolding int) error {
 	}
 	var upCell *BinaryCell
 	var touched, present bool
-	var col byte
+	var nibble byte
 	var upDepth, depth int
 	if bph.activeRows == 0 {
 		if bph.rootChecked && bph.root.hl == 0 && bph.root.downHashedLen == 0 {
@@ -910,18 +910,19 @@ func (bph *BinPatriciaHashed) unfold(hashedKey []byte, unfolding int) error {
 		touched = bph.rootTouched
 		present = bph.rootPresent
 		if bph.trace {
-			fmt.Printf("unfold root, touched %t, present %t, column %d\n", touched, present, col)
+			fmt.Printf("unfold root, touched %t, present %t, column %d\n", touched, present, nibble)
 		}
 	} else {
 		upDepth = bph.depths[bph.activeRows-1]
-		col = hashedKey[upDepth-1]
-		upCell = &bph.grid[bph.activeRows-1][col]
-		touched = bph.touchMap[bph.activeRows-1]&(uint16(1)<<col) != 0
-		present = bph.afterMap[bph.activeRows-1]&(uint16(1)<<col) != 0
+		nibble = hashedKey[upDepth-1]
+		upCell = &bph.grid[bph.activeRows-1][nibble]
+		col := uint16(1) << nibble
+		touched = bph.touchMap[bph.activeRows-1]&col != 0
+		present = bph.afterMap[bph.activeRows-1]&col != 0
 		if bph.trace {
-			fmt.Printf("upCell (%d, %x), touched %t, present %t\n", bph.activeRows-1, col, touched, present)
+			fmt.Printf("upCell (%d, %x), touched %t, present %t\n", bph.activeRows-1, nibble, touched, present)
 		}
-		bph.currentKey[bph.currentKeyLen] = col
+		bph.currentKey[bph.currentKeyLen] = nibble
 		bph.currentKeyLen++
 	}
 	row := bph.activeRows

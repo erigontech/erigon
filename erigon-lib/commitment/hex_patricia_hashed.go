@@ -1082,29 +1082,6 @@ func (hph *HexPatriciaHashed) unfoldBranchNode(row, depth int, deleted bool) (bo
 		if hph.trace {
 			fmt.Printf("cell (%d, %x, depth=%d) %s\n", row, nibble, depth, cell.FullString())
 		}
-		////if !cell.loaded {
-		//if cell.spl > 0 {
-		//	if cell.apl > 0 {
-		//		hadToLoad.Add(1)
-		//		if err = hph.ctx.GetAccount(cell.apk[:cell.apl], cell); err != nil {
-		//			return false, fmt.Errorf("unfoldBranchNode GetAccount: %w", err)
-		//		}
-		//		cell.loaded = true
-		//		if hph.trace {
-		//			fmt.Printf("unfold: GetAccount %s\n", cell.FullString())
-		//		}
-		//	}
-		//	hadToLoad.Add(1)
-		//	if err = hph.ctx.GetStorage(cell.spk[:cell.spl], cell); err != nil {
-		//		return false, fmt.Errorf("unfoldBranchNode GetStorage: %w", err)
-		//	}
-		//	cell.loaded = true
-		//	if hph.trace {
-		//		fmt.Printf("unfold: GetStorage %s\n", cell.FullString())
-		//	}
-		//}
-		//}
-
 		// relies on plain account/storage key so need to be dereferenced before hashing
 		if err = cell.deriveHashedKeys(depth, hph.keccak, hph.accountKeyLen); err != nil {
 			return false, err
@@ -1120,7 +1097,6 @@ func (hph *HexPatriciaHashed) unfold(hashedKey []byte, unfolding int) error {
 	}
 	var upCell *Cell
 	var touched, present bool
-	var nib byte
 	var upDepth, depth int
 	if hph.activeRows == 0 {
 		if hph.rootChecked && hph.root.hashLen == 0 && hph.root.downHashedLen == 0 {
@@ -1135,14 +1111,15 @@ func (hph *HexPatriciaHashed) unfold(hashedKey []byte, unfolding int) error {
 		}
 	} else {
 		upDepth = hph.depths[hph.activeRows-1]
-		nib = hashedKey[upDepth-1]
-		upCell = &hph.grid[hph.activeRows-1][nib]
-		touched = hph.touchMap[hph.activeRows-1]&(uint16(1)<<nib) != 0
-		present = hph.afterMap[hph.activeRows-1]&(uint16(1)<<nib) != 0
+		pNibble := hashedKey[upDepth-1]
+		upCell = &hph.grid[hph.activeRows-1][pNibble]
+		col := uint16(1) << pNibble
+		touched = hph.touchMap[hph.activeRows-1]&col != 0
+		present = hph.afterMap[hph.activeRows-1]&col != 0
 		if hph.trace {
-			fmt.Printf("upCell (%d, %x, depth=%d) touched: %t present: %t\n", hph.activeRows-1, nib, upDepth, touched, present)
+			fmt.Printf("upCell (%d, %x, depth=%d) touched: %t present: %t\n", hph.activeRows-1, pNibble, upDepth, touched, present)
 		}
-		hph.currentKey[hph.currentKeyLen] = nib
+		hph.currentKey[hph.currentKeyLen] = pNibble
 		hph.currentKeyLen++
 	}
 	row := hph.activeRows
@@ -1189,7 +1166,6 @@ func (hph *HexPatriciaHashed) unfold(hashedKey []byte, unfolding int) error {
 	if hph.trace {
 		fmt.Printf("cell (%d, %x, depth=%d)\n", row, nibble, depth)
 	}
-
 	if row >= 64 {
 		cell.apl = 0
 	}
