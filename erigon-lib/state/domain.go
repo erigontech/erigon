@@ -714,7 +714,7 @@ type DomainRoTx struct {
 	lEachCacheHit, lEachCacheTotal [LevelsWithLRU]int
 }
 
-const LevelsWithLRU = 2
+const LevelsWithLRU = 1
 
 func domainReadMetric(name kv.Domain, level int) metrics.Summary {
 	if level > 4 {
