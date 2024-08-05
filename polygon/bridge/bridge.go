@@ -39,7 +39,6 @@ import (
 )
 
 var ErrMapNotAvailable = errors.New("map not available")
-var ErrTxNotAvailable = errors.New("tx not available")
 
 type fetchSyncEventsType func(ctx context.Context, fromId uint64, to time.Time, limit int) ([]*heimdall.EventRecordWithTime, error)
 
