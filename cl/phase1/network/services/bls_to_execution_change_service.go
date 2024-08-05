@@ -34,14 +34,14 @@ import (
 
 type blsToExecutionChangeService struct {
 	operationsPool    pool.OperationsPool
-	emitters          *beaconevents.EventNotifier
+	emitters          *beaconevents.EventEmitter
 	syncedDataManager synced_data.SyncedData
 	beaconCfg         *clparams.BeaconChainConfig
 }
 
 func NewBLSToExecutionChangeService(
 	operationsPool pool.OperationsPool,
-	emitters *beaconevents.EventNotifier,
+	emitters *beaconevents.EventEmitter,
 	syncedDataManager synced_data.SyncedData,
 	beaconCfg *clparams.BeaconChainConfig,
 ) BLSToExecutionChangeService {

@@ -56,7 +56,7 @@ type blockService struct {
 	seenBlocksCache *lru.Cache[proposerIndexAndSlot, struct{}]
 
 	// blocks that should be scheduled for later execution (e.g missing blobs).
-	emitter                          *beaconevents.EventNotifier
+	emitter                          *beaconevents.EventEmitter
 	blocksScheduledForLaterExecution sync.Map
 	// store the block in db
 	db               kv.RwDB
@@ -71,7 +71,7 @@ func NewBlockService(
 	syncedData *synced_data.SyncedDataManager,
 	ethClock eth_clock.EthereumClock,
 	beaconCfg *clparams.BeaconChainConfig,
-	emitter *beaconevents.EventNotifier,
+	emitter *beaconevents.EventEmitter,
 	validatorMonitor monitor.ValidatorMonitor,
 ) Service[*cltypes.SignedBeaconBlock] {
 	seenBlocksCache, err := lru.New[proposerIndexAndSlot, struct{}]("seenblocks", seenBlockCacheSize)

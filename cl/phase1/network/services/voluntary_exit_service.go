@@ -33,7 +33,7 @@ import (
 
 type voluntaryExitService struct {
 	operationsPool    pool.OperationsPool
-	emitters          *beaconevents.EventNotifier
+	emitters          *beaconevents.EventEmitter
 	syncedDataManager synced_data.SyncedData
 	beaconCfg         *clparams.BeaconChainConfig
 	ethClock          eth_clock.EthereumClock
@@ -41,7 +41,7 @@ type voluntaryExitService struct {
 
 func NewVoluntaryExitService(
 	operationsPool pool.OperationsPool,
-	emitters *beaconevents.EventNotifier,
+	emitters *beaconevents.EventEmitter,
 	syncedDataManager synced_data.SyncedData,
 	beaconCfg *clparams.BeaconChainConfig,
 	ethClock eth_clock.EthereumClock,

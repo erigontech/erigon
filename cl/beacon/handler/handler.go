@@ -83,7 +83,7 @@ type ApiHandler struct {
 
 	// caches
 	lighthouseInclusionCache sync.Map
-	emitters                 *beaconevents.EventNotifier
+	emitters                 *beaconevents.EventEmitter
 
 	routerCfg *beacon_router_configuration.RouterConfiguration
 	logger    log.Logger
@@ -123,7 +123,7 @@ func NewApiHandler(
 	sentinel sentinel.SentinelClient,
 	version string,
 	routerCfg *beacon_router_configuration.RouterConfiguration,
-	emitters *beaconevents.EventNotifier,
+	emitters *beaconevents.EventEmitter,
 	blobStoage blob_storage.BlobStorage,
 	caplinSnapshots *freezeblocks.CaplinSnapshots,
 	validatorParams *validator_params.ValidatorParams,

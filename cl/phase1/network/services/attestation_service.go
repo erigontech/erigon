@@ -54,7 +54,7 @@ type attestationService struct {
 	syncedDataManager  synced_data.SyncedData
 	beaconCfg          *clparams.BeaconChainConfig
 	netCfg             *clparams.NetworkConfig
-	emitters           *beaconevents.EventNotifier
+	emitters           *beaconevents.EventEmitter
 	// validatorAttestationSeen maps from epoch to validator index. This is used to ignore duplicate validator attestations in the same epoch.
 	validatorAttestationSeen       *lru.CacheWithTTL[uint64, uint64] // validator index -> epoch
 	attestationsToBeLaterProcessed sync.Map
@@ -68,7 +68,7 @@ func NewAttestationService(
 	syncedDataManager synced_data.SyncedData,
 	beaconCfg *clparams.BeaconChainConfig,
 	netCfg *clparams.NetworkConfig,
-	emitters *beaconevents.EventNotifier,
+	emitters *beaconevents.EventEmitter,
 ) AttestationService {
 	epochDuration := time.Duration(beaconCfg.SlotsPerEpoch*beaconCfg.SecondsPerSlot) * time.Second
 	a := &attestationService{

@@ -44,7 +44,7 @@ type blobSidecarService struct {
 	beaconCfg         *clparams.BeaconChainConfig
 	syncedDataManager *synced_data.SyncedDataManager
 	ethClock          eth_clock.EthereumClock
-	emitters          *beaconevents.EventNotifier
+	emitters          *beaconevents.EventEmitter
 
 	blobSidecarsScheduledForLaterExecution sync.Map
 	test                                   bool
@@ -62,7 +62,7 @@ func NewBlobSidecarService(
 	forkchoiceStore forkchoice.ForkChoiceStorage,
 	syncedDataManager *synced_data.SyncedDataManager,
 	ethClock eth_clock.EthereumClock,
-	emitters *beaconevents.EventNotifier,
+	emitters *beaconevents.EventEmitter,
 	test bool,
 ) BlobSidecarsService {
 	b := &blobSidecarService{

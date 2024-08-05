@@ -76,7 +76,7 @@ func setupBlobSidecarService(t *testing.T, ctrl *gomock.Controller, test bool) (
 	syncedDataManager := synced_data.NewSyncedDataManager(true, cfg)
 	ethClock := eth_clock.NewMockEthereumClock(ctrl)
 	forkchoiceMock := mock_services.NewForkChoiceStorageMock(t)
-	emitters := beaconevents.NewEventNotifier()
+	emitters := beaconevents.NewEventEmitter()
 	blockService := NewBlobSidecarService(ctx2, cfg, forkchoiceMock, syncedDataManager, ethClock, emitters, test)
 	return blockService, syncedDataManager, ethClock, forkchoiceMock
 }

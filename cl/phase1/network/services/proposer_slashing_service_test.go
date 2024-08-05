@@ -56,7 +56,7 @@ func (t *proposerSlashingTestSuite) SetupTest() {
 	t.beaconCfg = &clparams.BeaconChainConfig{
 		SlotsPerEpoch: 2,
 	}
-	emitters := beaconevents.NewEventNotifier()
+	emitters := beaconevents.NewEventEmitter()
 	t.proposerSlashingService = NewProposerSlashingService(*t.operationsPool, t.syncedData, t.beaconCfg, t.ethClock, emitters)
 	// mock global functions
 	t.mockFuncs = &mockFuncs{ctrl: t.gomockCtrl}

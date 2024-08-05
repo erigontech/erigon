@@ -36,7 +36,7 @@ type proposerSlashingService struct {
 	syncedDataManager synced_data.SyncedData
 	beaconCfg         *clparams.BeaconChainConfig
 	ethClock          eth_clock.EthereumClock
-	emitters          *beaconevents.EventNotifier
+	emitters          *beaconevents.EventEmitter
 	cache             *lru.Cache[uint64, struct{}]
 }
 
@@ -45,7 +45,7 @@ func NewProposerSlashingService(
 	syncedDataManager synced_data.SyncedData,
 	beaconCfg *clparams.BeaconChainConfig,
 	ethClock eth_clock.EthereumClock,
-	emitters *beaconevents.EventNotifier,
+	emitters *beaconevents.EventEmitter,
 ) *proposerSlashingService {
 	cache, err := lru.New[uint64, struct{}]("proposer_slashing", proposerSlashingCacheSize)
 	if err != nil {

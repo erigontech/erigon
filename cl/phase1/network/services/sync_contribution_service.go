@@ -51,7 +51,7 @@ type syncContributionService struct {
 	beaconCfg                      *clparams.BeaconChainConfig
 	syncContributionPool           sync_contribution_pool.SyncContributionPool
 	seenSyncCommitteeContributions map[seenSyncCommitteeContribution]struct{}
-	emitters                       *beaconevents.EventNotifier
+	emitters                       *beaconevents.EventEmitter
 	ethClock                       eth_clock.EthereumClock
 	test                           bool
 
@@ -64,7 +64,7 @@ func NewSyncContributionService(
 	beaconCfg *clparams.BeaconChainConfig,
 	syncContributionPool sync_contribution_pool.SyncContributionPool,
 	ethClock eth_clock.EthereumClock,
-	emitters *beaconevents.EventNotifier,
+	emitters *beaconevents.EventEmitter,
 	test bool,
 ) SyncContributionService {
 	return &syncContributionService{

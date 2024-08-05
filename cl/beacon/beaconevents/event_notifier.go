@@ -1,21 +1,21 @@
 package beaconevents
 
-type EventNotifier struct {
+type EventEmitter struct {
 	stateFeed     *stateFeed     // block state feed
 	operationFeed *operationFeed // block operation feed
 }
 
-func NewEventNotifier() *EventNotifier {
-	return &EventNotifier{
+func NewEventEmitter() *EventEmitter {
+	return &EventEmitter{
 		operationFeed: newOpFeed(),
 		stateFeed:     newStateFeed(),
 	}
 }
 
-func (e *EventNotifier) State() *stateFeed {
+func (e *EventEmitter) State() *stateFeed {
 	return e.stateFeed
 }
 
-func (e *EventNotifier) Operation() *operationFeed {
+func (e *EventEmitter) Operation() *operationFeed {
 	return e.operationFeed
 }

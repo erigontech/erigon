@@ -22,7 +22,7 @@ import (
 )
 
 func TestEmitterSet(t *testing.T) {
-	emitter := NewEventNotifier()
+	emitter := NewEventEmitter()
 	done := make(chan struct{})
 	go func() {
 		ch := make(chan *EventStream, 10)
@@ -38,50 +38,3 @@ func TestEmitterSet(t *testing.T) {
 	emitter.Operation().SendAttestation(&AttestationData{})
 	<-done
 }
-
-/*
-func TestEmitterSet(t *testing.T) {
-	e := beaconevents.NewEmitters()
-	var called int
-	e.Subscribe([]string{"set"}, func(topic string, item any) {
-		require.EqualValues(t, "set", topic)
-		require.EqualValues(t, "hello", item.(string))
-		called = called + 1
-	})
-	e.Publish("set", "hello")
-	require.EqualValues(t, 1, called)
-}
-func TestEmitterFilters(t *testing.T) {
-	e := beaconevents.NewEmitters()
-	var a atomic.Int64
-	var b atomic.Int64
-	var ab atomic.Int64
-	var wild atomic.Int64
-	e.Subscribe([]string{"a"}, func(topic string, item any) {
-		require.EqualValues(t, topic, item.(string))
-		a.Add(1)
-	})
-	e.Subscribe([]string{"b"}, func(topic string, item any) {
-		require.EqualValues(t, topic, item.(string))
-		b.Add(1)
-	})
-	e.Subscribe([]string{"a", "b"}, func(topic string, item any) {
-		require.EqualValues(t, topic, item.(string))
-		ab.Add(1)
-	})
-	e.Subscribe([]string{"*"}, func(topic string, item any) {
-		require.EqualValues(t, topic, item.(string))
-		wild.Add(1)
-	})
-
-	e.Publish("a", "a")
-	e.Publish("b", "b")
-	e.Publish("b", "b")
-	e.Publish("c", "c")
-
-	require.EqualValues(t, 1, a.Load())
-	require.EqualValues(t, 2, b.Load())
-	require.EqualValues(t, 3, ab.Load())
-	require.EqualValues(t, 4, wild.Load())
-}
-*/

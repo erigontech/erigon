@@ -74,7 +74,7 @@ func (t *attestationTestSuite) SetupTest() {
 	t.ethClock = eth_clock.NewMockEthereumClock(t.gomockCtrl)
 	t.beaconConfig = &clparams.BeaconChainConfig{SlotsPerEpoch: mockSlotsPerEpoch}
 	netConfig := &clparams.NetworkConfig{}
-	emitters := beaconevents.NewEventNotifier()
+	emitters := beaconevents.NewEventEmitter()
 	computeSigningRoot = func(obj ssz.HashableSSZ, domain []byte) ([32]byte, error) { return [32]byte{}, nil }
 	blsVerify = func(sig []byte, msg []byte, pubKeys []byte) (bool, error) { return true, nil }
 	ctx, cn := context.WithCancel(context.Background())

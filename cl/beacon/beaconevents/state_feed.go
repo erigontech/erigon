@@ -31,3 +31,10 @@ func (f *stateFeed) SendBlock(value *BlockData) int {
 		Data:  value,
 	})
 }
+
+func (f *stateFeed) SendFinalizedCheckpoint(value *FinalizedCheckpointData) int {
+	return f.feed.Send(&EventStream{
+		Event: StateFinalizedCheckpoint,
+		Data:  value,
+	})
+}

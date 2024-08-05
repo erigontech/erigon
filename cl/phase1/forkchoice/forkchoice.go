@@ -131,7 +131,7 @@ type ForkChoiceStore struct {
 	operationsPool pool.OperationsPool
 	beaconCfg      *clparams.BeaconChainConfig
 
-	emitters *beaconevents.EventNotifier
+	emitters *beaconevents.EventEmitter
 	synced   atomic.Bool
 
 	ethClock        eth_clock.EthereumClock
@@ -155,7 +155,7 @@ func NewForkChoiceStore(
 	engine execution_client.ExecutionEngine,
 	operationsPool pool.OperationsPool,
 	forkGraph fork_graph.ForkGraph,
-	emitters *beaconevents.EventNotifier,
+	emitters *beaconevents.EventEmitter,
 	syncedDataManager *synced_data.SyncedDataManager,
 	blobStorage blob_storage.BlobStorage,
 ) (*ForkChoiceStore, error) {
