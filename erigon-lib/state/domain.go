@@ -827,11 +827,13 @@ func (dt *DomainRoTx) DebugEFKey(k []byte) error {
 // mgas/s=68.05 average mgas/s=58.05
 // mgas/s=57.92 average mgas/s=50.32
 // mgas/s=41.85 average mgas/s=53.17
-// mgas/s=33.05 average mgas/s=44.99 ?
+//  mgas/s=43.00 average mgas/s=49.40
+// ?
 
 // mgas/s=130.20 average mgas/s=126.69
 // mgas/s=65.05 average mgas/s=112.85
-// mgas/s=74.30 average mgas/s=70.46
+// mgas/s=57.70 average mgas/s=64.05
+// ?
 // ?
 
 func (d *Domain) collectFilesStats() (datsz, idxsz, files uint64) {
