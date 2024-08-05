@@ -197,6 +197,7 @@ var DefaultFlags = []cli.Flag{
 	&utils.ExecutorStrictMode,
 	&utils.ExecutorRequestTimeout,
 	&utils.DatastreamNewBlockTimeout,
+	&utils.WitnessMemdbSize,
 	&utils.ExecutorMaxConcurrentRequests,
 	&utils.Limbo,
 	&utils.AllowFreeTransactions,

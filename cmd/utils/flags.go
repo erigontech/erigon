@@ -501,6 +501,12 @@ var (
 		Usage: "The timeout for the executor request",
 		Value: 500 * time.Millisecond,
 	}
+
+	WitnessMemdbSize = DatasizeFlag{
+		Name:  "zkevm.witness-memdb-size",
+		Usage: "A size of the memdb used on witness generation in format \"2GB\". Might fail generation for older batches if not enough for the unwind.",
+		Value: datasizeFlagValue(2 * datasize.GB),
+	}
 	ExecutorMaxConcurrentRequests = cli.IntFlag{
 		Name:  "zkevm.executor-max-concurrent-requests",
 		Usage: "The maximum number of concurrent requests to the executor",

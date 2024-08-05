@@ -26,25 +26,21 @@ func (s *SMT) InsertBatch(ctx context.Context, logPrefix string, nodeKeys []*uti
 	progressChan, stopProgressPrinter := zk.ProgressPrinterWithoutValues(fmt.Sprintf("[%s] SMT incremental progress", logPrefix), uint64(size)+preprocessStage+finalizeStage)
 	defer stopProgressPrinter()
 
-	err = validateDataLengths(nodeKeys, nodeValues, &nodeValuesHashes)
-	if err != nil {
+	if err = validateDataLengths(nodeKeys, nodeValues, &nodeValuesHashes); err != nil {
 		return nil, err
 	}
 
-	err = removeDuplicateEntriesByKeys(&size, &nodeKeys, &nodeValues, &nodeValuesHashes)
-	if err != nil {
+	if err = removeDuplicateEntriesByKeys(&size, &nodeKeys, &nodeValues, &nodeValuesHashes); err != nil {
 		return nil, err
 	}
 
-	err = calculateNodeValueHashesIfMissing(s, nodeValues, &nodeValuesHashes)
-	if err != nil {
+	if err = calculateNodeValueHashesIfMissing(s, nodeValues, &nodeValuesHashes); err != nil {
 		return nil, err
 	}
 
 	progressChan <- uint64(preprocessStage)
 
-	err = calculateRootNodeHashIfNil(s, &rootNodeHash)
-	if err != nil {
+	if err = calculateRootNodeHashIfNil(s, &rootNodeHash); err != nil {
 		return nil, err
 	}
 
@@ -172,7 +168,9 @@ func (s *SMT) InsertBatch(ctx context.Context, logPrefix string, nodeKeys []*uti
 	if smtBatchNodeRoot == nil {
 		rootNodeHash = &utils.NodeKey{0, 0, 0, 0}
 	} else {
-		calculateAndSaveHashesDfs(s, smtBatchNodeRoot, make([]int, 256), 0)
+		if err := calculateAndSaveHashesDfs(s, smtBatchNodeRoot, make([]int, 256), 0); err != nil {
+			return nil, fmt.Errorf("calculating and saving hashes dfs: %w", err)
+		}
 		rootNodeHash = (*utils.NodeKey)(smtBatchNodeRoot.hash)
 	}
 	if err := s.setLastRoot(*rootNodeHash); err != nil {
@@ -386,13 +384,16 @@ func calculateAndSaveHashesDfs(s *SMT, smtBatchNode *smtBatchNode, path []int, l
 	if smtBatchNode.isLeaf() {
 		hashObj, err := s.hashcalcAndSave(utils.ConcatArrays4(*smtBatchNode.nodeLeftHashOrRemainingKey, *smtBatchNode.nodeRightHashOrValueHash), utils.LeafCapacity)
 		if err != nil {
-			return err
+			return fmt.Errorf("hashing leaf: %w", err)
 		}
 
-		nodeKey := utils.JoinKey(path[:level], *smtBatchNode.nodeLeftHashOrRemainingKey)
-		s.Db.InsertHashKey(hashObj, *nodeKey)
-
 		smtBatchNode.hash = &hashObj
+
+		nodeKey := utils.JoinKey(path[:level], *smtBatchNode.nodeLeftHashOrRemainingKey)
+		if err := s.Db.InsertHashKey(hashObj, *nodeKey); err != nil {
+			return fmt.Errorf("inserting hash key: %w", err)
+		}
+
 		return nil
 	}
 
@@ -400,18 +401,30 @@ func calculateAndSaveHashesDfs(s *SMT, smtBatchNode *smtBatchNode, path []int, l
 
 	if smtBatchNode.leftNode != nil {
 		path[level] = 0
-		calculateAndSaveHashesDfs(s, smtBatchNode.leftNode, path, level+1)
-		totalHash.SetHalfValue(*smtBatchNode.leftNode.hash, 0)
+		if err := calculateAndSaveHashesDfs(s, smtBatchNode.leftNode, path, level+1); err != nil {
+			return err
+		}
+		if err := totalHash.SetHalfValue(*smtBatchNode.leftNode.hash, 0); err != nil {
+			return err
+		}
 	} else {
-		totalHash.SetHalfValue(*smtBatchNode.nodeLeftHashOrRemainingKey, 0)
+		if err := totalHash.SetHalfValue(*smtBatchNode.nodeLeftHashOrRemainingKey, 0); err != nil {
+			return err
+		}
 	}
 
 	if smtBatchNode.rightNode != nil {
 		path[level] = 1
-		calculateAndSaveHashesDfs(s, smtBatchNode.rightNode, path, level+1)
-		totalHash.SetHalfValue(*smtBatchNode.rightNode.hash, 1)
+		if err := calculateAndSaveHashesDfs(s, smtBatchNode.rightNode, path, level+1); err != nil {
+			return err
+		}
+		if err := totalHash.SetHalfValue(*smtBatchNode.rightNode.hash, 1); err != nil {
+			return err
+		}
 	} else {
-		totalHash.SetHalfValue(*smtBatchNode.nodeRightHashOrValueHash, 1)
+		if err := totalHash.SetHalfValue(*smtBatchNode.nodeRightHashOrValueHash, 1); err != nil {
+			return err
+		}
 	}
 
 	hashObj, err := s.hashcalcAndSave(totalHash.ToUintArray(), utils.BranchCapacity)

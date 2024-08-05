@@ -3,6 +3,7 @@ package ethconfig
 import (
 	"time"
 
+	"github.com/c2h5oh/datasize"
 	"github.com/gateway-fm/cdk-erigon-lib/common"
 )
 
@@ -36,6 +37,7 @@ type Zk struct {
 	ExecutorStrictMode                     bool
 	ExecutorRequestTimeout                 time.Duration
 	DatastreamNewBlockTimeout              time.Duration
+	WitnessMemdbSize                       datasize.ByteSize
 	ExecutorMaxConcurrentRequests          int
 	Limbo                                  bool
 	AllowFreeTransactions                  bool

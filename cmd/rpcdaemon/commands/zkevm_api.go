@@ -849,6 +849,7 @@ func (api *ZkEvmAPIImpl) buildGenerator(tx kv.Tx, witnessMode WitnessMode) (*wit
 		api.ethApi._agg,
 		api.ethApi._blockReader,
 		chainConfig,
+		api.config.Zk,
 		api.ethApi._engine,
 	)
 
