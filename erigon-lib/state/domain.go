@@ -827,7 +827,7 @@ func (dt *DomainRoTx) DebugEFKey(k []byte) error {
 // mgas/s=68.05 average mgas/s=58.05
 // mgas/s=57.92 average mgas/s=50.32
 // mgas/s=41.85 average mgas/s=53.17
-//  mgas/s=43.00 average mgas/s=49.40
+// mgas/s=43.00 average mgas/s=49.40
 // ?
 
 // mgas/s=130.20 average mgas/s=126.69
