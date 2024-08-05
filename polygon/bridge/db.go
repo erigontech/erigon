@@ -55,7 +55,7 @@ type Store interface {
 	GetLatestEventID(ctx context.Context) (uint64, error)
 	GetLastProcessedEventID(ctx context.Context) (uint64, error)
 	StoreTxMap(ctx context.Context, txMap map[libcommon.Hash]uint64) error
-	TxMap(ctx context.Context, borTxHash libcommon.Hash) (uint64, error)
+	TxMap(ctx context.Context, borTxHash libcommon.Hash) (uint64, bool, error)
 	GetSprintLastEventID(ctx context.Context, lastID uint64, timeLimit time.Time, stateContract abi.ABI) (uint64, error)
 	AddEvents(ctx context.Context, events []*heimdall.EventRecordWithTime, stateContract abi.ABI) error
 	GetEvents(ctx context.Context, start, end uint64) ([][]byte, error)
@@ -159,34 +159,34 @@ func (s *MdbxStore) StoreTxMap(ctx context.Context, txMap map[libcommon.Hash]uin
 	return tx.Commit()
 }
 
-func (s *MdbxStore) TxMap(ctx context.Context, borTxHash libcommon.Hash) (uint64, error) {
+func (s *MdbxStore) TxMap(ctx context.Context, borTxHash libcommon.Hash) (uint64, bool, error) {
 	var blockNum uint64
 
 	tx, err := s.db.BeginRo(ctx)
 	if err != nil {
-		return blockNum, err
+		return blockNum, false, err
 	}
 	defer tx.Rollback()
 
 	cursor, err := tx.Cursor(kv.BorEventNums)
 	if err != nil {
-		return blockNum, err
+		return blockNum, false, err
 	}
 
 	_, v, err := cursor.SeekExact(borTxHash.Bytes())
 	if err != nil {
-		return blockNum, err
+		return blockNum, false, err
 	}
 	if v == nil { // we don't have a map
-		return blockNum, ErrTxNotAvailable
+		return blockNum, false, nil
 	}
 
 	err = binary.Read(bytes.NewReader(v), binary.BigEndian, &blockNum)
 	if err != nil {
-		return blockNum, err
+		return blockNum, false, err
 	}
 
-	return blockNum, nil
+	return blockNum, true, nil
 }
 
 // GetSprintLastEventID gets the last event id where event.ID >= lastID and event.Time <= time

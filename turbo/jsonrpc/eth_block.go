@@ -365,21 +365,16 @@ func (api *APIImpl) GetBlockTransactionCountByNumber(ctx context.Context, blockN
 	}
 
 	if chainConfig.Bor != nil {
-		if api.bridgeReader != nil {
-			events, err := api.bridgeReader.Events(ctx, blockNum)
-			if err != nil {
-				return nil, err
-			}
-
-			if len(events) > 0 {
-				txCount++
-			}
-		}
-
 		borStateSyncTxHash := bortypes.ComputeBorTxHash(blockNum, blockHash)
-		b, ok, err := api._blockReader.EventLookup(ctx, tx, borStateSyncTxHash) // this returns block number, not the events
 
-		api.logger.Warn("GOT BLOCK NUM", "num", b)
+		var ok bool
+		var err error
+
+		if api.bridgeReader != nil {
+			_, ok, err = api.bridgeReader.TxLookup(ctx, borStateSyncTxHash)
+		} else {
+			_, ok, err = api._blockReader.EventLookup(ctx, tx, borStateSyncTxHash)
+		}
 
 		if err != nil {
 			return nil, err
@@ -420,19 +415,16 @@ func (api *APIImpl) GetBlockTransactionCountByHash(ctx context.Context, blockHas
 	}
 
 	if chainConfig.Bor != nil {
-		if api.bridgeReader != nil {
-			events, err := api.bridgeReader.Events(ctx, blockNum)
-			if err != nil {
-				return nil, err
-			}
-
-			if len(events) > 0 {
-				txCount++
-			}
-		}
-
 		borStateSyncTxHash := bortypes.ComputeBorTxHash(blockNum, blockHash)
-		_, ok, err := api._blockReader.EventLookup(ctx, tx, borStateSyncTxHash)
+
+		var ok bool
+		var err error
+
+		if api.bridgeReader != nil {
+			_, ok, err = api.bridgeReader.TxLookup(ctx, borStateSyncTxHash)
+		} else {
+			_, ok, err = api._blockReader.EventLookup(ctx, tx, borStateSyncTxHash)
+		}
 		if err != nil {
 			return nil, err
 		}

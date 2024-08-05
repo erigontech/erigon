@@ -247,13 +247,8 @@ func (b *Bridge) Events(ctx context.Context, blockNum uint64) ([]*types.Message,
 	return eventsRaw, nil
 }
 
-func (b *Bridge) TxLookup(ctx context.Context, borTxHash libcommon.Hash) (uint64, error) {
-	blockNum, err := b.store.TxMap(ctx, borTxHash)
-	if err != nil {
-		return 0, err
-	}
-
-	return blockNum, nil
+func (b *Bridge) TxLookup(ctx context.Context, borTxHash libcommon.Hash) (uint64, bool, error) {
+	return b.store.TxMap(ctx, borTxHash)
 }
 
 // Helper functions

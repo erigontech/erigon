@@ -74,7 +74,11 @@ func (api *TraceAPIImpl) Transaction(ctx context.Context, txHash common.Hash, ga
 		}
 
 		// otherwise this may be a bor state sync transaction - check
-		blockNumber, ok, err = api._blockReader.EventLookup(ctx, tx, txHash)
+		if api.bridgeReader != nil {
+			blockNumber, ok, err = api.bridgeReader.TxLookup(ctx, txHash)
+		} else {
+			blockNumber, ok, err = api._blockReader.EventLookup(ctx, tx, txHash)
+		}
 		if err != nil {
 			return nil, err
 		}
@@ -726,7 +730,16 @@ func (api *TraceAPIImpl) callManyTransactions(
 		// check if this block has state sync txn
 		blockHash := block.Hash()
 		borStateSyncTxnHash = bortypes.ComputeBorTxHash(blockNumber, blockHash)
-		_, ok, err := api._blockReader.EventLookup(ctx, dbtx, borStateSyncTxnHash)
+
+		var ok bool
+		var err error
+
+		if api.bridgeReader != nil {
+			_, ok, err = api.bridgeReader.TxLookup(ctx, borStateSyncTxnHash)
+
+		} else {
+			_, ok, err = api._blockReader.EventLookup(ctx, dbtx, borStateSyncTxnHash)
+		}
 		if err != nil {
 			return nil, nil, err
 		}

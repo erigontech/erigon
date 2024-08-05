@@ -262,7 +262,7 @@ type spanReader interface {
 
 type bridgeReader interface {
 	Events(ctx context.Context, blockNum uint64) ([]*types.Message, error)
-	TxLookup(ctx context.Context, borTxHash libcommon.Hash) (uint64, error)
+	TxLookup(ctx context.Context, borTxHash libcommon.Hash) (uint64, bool, error)
 }
 
 func ValidateHeaderTime(
