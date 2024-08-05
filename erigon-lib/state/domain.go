@@ -1441,7 +1441,7 @@ func (dt *DomainRoTx) getFromFiles(filekey []byte) (v []byte, found bool, fileSt
 			fmt.Printf("GetLatest(%s, %x) -> found in file %s\n", dt.d.filenameBase, filekey, dt.files[i].src.decompressor.FileName())
 		}
 
-		if i == 0 {
+		if dt.d.name != kv.CommitmentDomain && i == 0 {
 			dt.l0Cache.Add(hi, v)
 		}
 		return v, true, dt.files[i].startTxNum, dt.files[i].endTxNum, nil
