@@ -1423,8 +1423,10 @@ func (dt *DomainRoTx) getFromFiles(filekey []byte) (v []byte, found bool, fileSt
 			var ok bool
 			v, ok = dt.l0Cache.Get(hi)
 			if ok {
+				dt.l0CacheHit++
 				return v, true, dt.files[i].startTxNum, dt.files[i].endTxNum, nil
 			}
+			dt.l0CacheMiss++
 		}
 
 		v, found, err = dt.getFromFile(i, filekey)
