@@ -1017,7 +1017,8 @@ func String2Domain(in string) (Domain, error) {
 	case "commitment":
 		return CommitmentDomain, nil
 	default:
-		return 0, fmt.Errorf("unknown history name: %s", in)
+		const MaxUint16 uint16 = 1<<16 - 1
+		return Domain(MaxUint16), fmt.Errorf("unknown history name: %s", in)
 	}
 }
 
