@@ -211,6 +211,10 @@ func (t *callTracer) CaptureEnter(typ vm.OpCode, from libcommon.Address, to libc
 	}
 	if value != nil {
 		call.Value = value.ToBig()
+	} else {
+		if typ == vm.DELEGATECALL {
+			call.Value = t.callstack[len(t.callstack)-1].Value
+		}
 	}
 	t.callstack = append(t.callstack, call)
 }
