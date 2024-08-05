@@ -710,9 +710,11 @@ type DomainRoTx struct {
 
 	valsC kv.Cursor
 
-	lEachCache                     [2]*simplelru.LRU[uint64, []byte]
-	lEachCacheHit, lEachCacheTotal [2]int
+	lEachCache                     [LevelsWithLRU]*simplelru.LRU[uint64, []byte]
+	lEachCacheHit, lEachCacheTotal [LevelsWithLRU]int
 }
+
+const LevelsWithLRU = 1
 
 func domainReadMetric(name kv.Domain, level int) metrics.Summary {
 	if level > 4 {
