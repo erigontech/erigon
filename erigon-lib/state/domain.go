@@ -1408,6 +1408,10 @@ var (
 )
 
 func (dt *DomainRoTx) getFromFiles(filekey []byte) (v []byte, found bool, fileStartTxNum uint64, fileEndTxNum uint64, err error) {
+	if len(dt.files) == 0 {
+		return
+	}
+
 	hi, _ := dt.ht.iit.hashKey(filekey)
 	if dt.d.name != kv.CommitmentDomain {
 		if dt.latestStateCache == nil {

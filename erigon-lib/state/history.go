@@ -1173,6 +1173,10 @@ func (ht *HistoryRoTx) getFile(txNum uint64) (it visibleFile, ok bool) {
 }
 
 func (ht *HistoryRoTx) historySeekInFiles(key []byte, txNum uint64) ([]byte, bool, error) {
+	if len(ht.files) == 0 {
+		return nil, false, nil
+	}
+
 	// Files list of II and History is different
 	// it means II can't return index of file, but can return TxNum which History will use to find own file
 	ok, histTxNum := ht.iit.seekInFiles(key, txNum)
