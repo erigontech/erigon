@@ -83,7 +83,7 @@ import (
 	"github.com/erigontech/erigon-lib/wrap"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/persistence/format/snapshot_format/getters"
-	clcore "github.com/erigontech/erigon/cl/phase1/core"
+	"github.com/erigontech/erigon/cl/phase1/core/checkpoint_sync"
 	executionclient "github.com/erigontech/erigon/cl/phase1/execution_client"
 	"github.com/erigontech/erigon/cl/utils/eth_clock"
 	"github.com/erigontech/erigon/cmd/caplin/caplin1"
@@ -941,7 +941,9 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 		if err != nil {
 			return nil, err
 		}
-		state, err := clcore.RetrieveBeaconState(ctx, beaconCfg, clparams.NetworkType(config.NetworkID))
+
+		config.CaplinConfig.NetworkId = clparams.NetworkType(config.NetworkID)
+		state, err := checkpoint_sync.ReadOrFetchLatestBeaconState(ctx, dirs, beaconCfg, config.CaplinConfig)
 		if err != nil {
 			return nil, err
 		}
