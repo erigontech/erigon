@@ -710,7 +710,7 @@ type DomainRoTx struct {
 
 	valsC kv.Cursor
 
-	// latestStateCache is a bit weird
+	// latestStateCache can be very big if .kv is not compressed - because can store pointer to `mmap`
 	latestStateCache *simplelru.LRU[uint64, fileCacheItem]
 	//latestStateCacheHit, latestStateCacheTotal int
 }
