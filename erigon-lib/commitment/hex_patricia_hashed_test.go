@@ -506,7 +506,7 @@ func Test_Cell_EncodeDecode(t *testing.T) {
 	rnd := rand.New(rand.NewSource(time.Now().UnixMilli()))
 	first := &Cell{
 		Nonce:         rnd.Uint64(),
-		hl:            length.Hash,
+		hashLen:       length.Hash,
 		StorageLen:    rnd.Intn(33),
 		apl:           length.Addr,
 		spl:           length.Addr + length.Hash,
@@ -515,7 +515,7 @@ func Test_Cell_EncodeDecode(t *testing.T) {
 		downHashedKey: [128]byte{},
 		extension:     [64]byte{},
 		spk:           [52]byte{},
-		h:             [32]byte{},
+		hash:          [32]byte{},
 		CodeHash:      [32]byte{},
 		Storage:       [32]byte{},
 		apk:           [20]byte{},
@@ -527,7 +527,7 @@ func Test_Cell_EncodeDecode(t *testing.T) {
 	rnd.Read(first.extension[:first.extLen])
 	rnd.Read(first.spk[:])
 	rnd.Read(first.apk[:])
-	rnd.Read(first.h[:])
+	rnd.Read(first.hash[:])
 	rnd.Read(first.CodeHash[:])
 	rnd.Read(first.Storage[:first.StorageLen])
 	if rnd.Intn(100) > 50 {
@@ -541,10 +541,10 @@ func Test_Cell_EncodeDecode(t *testing.T) {
 	require.EqualValues(t, first.downHashedKey[:], second.downHashedKey[:])
 	require.EqualValues(t, first.apl, second.apl)
 	require.EqualValues(t, first.spl, second.spl)
-	require.EqualValues(t, first.hl, second.hl)
+	require.EqualValues(t, first.hashLen, second.hashLen)
 	require.EqualValues(t, first.apk[:], second.apk[:])
 	require.EqualValues(t, first.spk[:], second.spk[:])
-	require.EqualValues(t, first.h[:], second.h[:])
+	require.EqualValues(t, first.hash[:], second.hash[:])
 	require.EqualValues(t, first.extension[:first.extLen], second.extension[:second.extLen])
 	// encode doesn't code Nonce, Balance, CodeHash and Storage
 	require.EqualValues(t, first.Delete, second.Delete)
@@ -765,8 +765,8 @@ func Test_HexPatriciaHashed_RestoreAndContinue(t *testing.T) {
 
 	err = trieOne.SetState(buf)
 	require.NoError(t, err)
-	fmt.Printf("rh %x\n", trieOne.root.h[:])
-	require.EqualValues(t, beforeRestore[:], trieOne.root.h[:])
+	fmt.Printf("rh %x\n", trieOne.root.hash[:])
+	require.EqualValues(t, beforeRestore[:], trieOne.root.hash[:])
 
 	hashAfterRestore, err := trieOne.RootHash()
 	require.NoError(t, err)

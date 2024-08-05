@@ -38,10 +38,10 @@ func generateCellRow(tb testing.TB, size int) (row []*Cell, bitmap uint16) {
 	var bm uint16
 	for i := 0; i < len(row); i++ {
 		row[i] = new(Cell)
-		row[i].hl = 32
-		n, err := rand.Read(row[i].h[:])
+		row[i].hashLen = 32
+		n, err := rand.Read(row[i].hash[:])
 		require.NoError(tb, err)
-		require.EqualValues(tb, row[i].hl, n)
+		require.EqualValues(tb, row[i].hashLen, n)
 
 		th := rand.Intn(120)
 		switch {

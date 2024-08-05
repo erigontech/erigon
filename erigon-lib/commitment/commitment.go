@@ -267,7 +267,7 @@ func (be *BranchEncoder) EncodeBranch(bitmap, touchMap, afterMap uint16, readCel
 			if cell.spl > 0 {
 				fieldBits |= StoragePlainPart
 			}
-			if cell.hl > 0 {
+			if cell.hashLen > 0 {
 				fieldBits |= HashPart
 			}
 
@@ -290,7 +290,7 @@ func (be *BranchEncoder) EncodeBranch(bitmap, touchMap, afterMap uint16, readCel
 				}
 			}
 			if fieldBits&HashPart != 0 {
-				if err := putUvarAndVal(uint64(cell.hl), cell.h[:cell.hl]); err != nil {
+				if err := putUvarAndVal(uint64(cell.hashLen), cell.hash[:cell.hashLen]); err != nil {
 					return nil, 0, err
 				}
 			}
@@ -349,8 +349,8 @@ func (branchData BranchData) String() string {
 				fmt.Fprintf(&sb, "%sstoragePlainKey=[%x]", comma, cell.spk[:cell.spl])
 				comma = ","
 			}
-			if cell.hl > 0 {
-				fmt.Fprintf(&sb, "%shash=[%x]", comma, cell.h[:cell.hl])
+			if cell.hashLen > 0 {
+				fmt.Fprintf(&sb, "%shash=[%x]", comma, cell.hash[:cell.hashLen])
 			}
 			if cell.lhLen > 0 {
 				fmt.Fprintf(&sb, "%sleafHash=[%x]", comma, cell.leafHash[:cell.lhLen])
@@ -804,8 +804,8 @@ func DecodeBranchAndCollectStat(key, branch []byte, tv TrieVariant) *BranchStat 
 			case c.spl > 0:
 				stat.SPKSize += uint64(c.spl)
 				stat.SPKCount++
-			case c.hl > 0:
-				stat.HashSize += uint64(c.hl)
+			case c.hashLen > 0:
+				stat.HashSize += uint64(c.hashLen)
 				stat.HashCount++
 			default:
 				panic("no plain key" + fmt.Sprintf("#+%v", c))

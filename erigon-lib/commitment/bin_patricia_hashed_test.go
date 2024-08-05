@@ -68,7 +68,7 @@ func Test_BinPatriciaTrie_UniqueRepresentation(t *testing.T) {
 		//       while root hashes are equal
 		//renderUpdates(branchNodeUpdates)
 
-		fmt.Printf("h=%x\n", sh)
+		fmt.Printf("hash=%x\n", sh)
 		seqHash = sh
 	}
 

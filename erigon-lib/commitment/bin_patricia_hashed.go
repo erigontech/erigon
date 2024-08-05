@@ -161,11 +161,11 @@ func (cell *BinaryCell) unwrapToHexCell() (cl *Cell) {
 	cl.StorageLen = cell.StorageLen
 	cl.apl = cell.apl
 	cl.spl = cell.spl
-	cl.hl = cell.hl
+	cl.hashLen = cell.hl
 
 	copy(cl.apk[:], cell.apk[:])
 	copy(cl.spk[:], cell.spk[:])
-	copy(cl.h[:], cell.h[:])
+	copy(cl.hash[:], cell.h[:])
 
 	if cell.extLen > 0 {
 		compactedExt := binToCompact(cell.extension[:cell.extLen])
@@ -800,7 +800,7 @@ func (bph *BinPatriciaHashed) needUnfolding(hashedKey []byte) int {
 		cell = &bph.grid[bph.activeRows-1][col]
 		depth = bph.depths[bph.activeRows-1]
 		if bph.trace {
-			fmt.Printf("needUnfolding cell (%d, %x), currentKey=[%x], depth=%d, cell.h=[%x]\n", bph.activeRows-1, col, bph.currentKey[:bph.currentKeyLen], depth, cell.h[:cell.hl])
+			fmt.Printf("needUnfolding cell (%d, %x), currentKey=[%x], depth=%d, cell.hash=[%x]\n", bph.activeRows-1, col, bph.currentKey[:bph.currentKeyLen], depth, cell.h[:cell.hl])
 		}
 	}
 	if len(hashedKey) <= depth {
@@ -1677,10 +1677,10 @@ func wrapAccountStorageFn(fn func([]byte, *Cell) error) func(pk []byte, bc *Bina
 		bc.StorageLen = cl.StorageLen
 		bc.apl = cl.apl
 		bc.spl = cl.spl
-		bc.hl = cl.hl
+		bc.hl = cl.hashLen
 		copy(bc.apk[:], cl.apk[:])
 		copy(bc.spk[:], cl.spk[:])
-		copy(bc.h[:], cl.h[:])
+		copy(bc.h[:], cl.hash[:])
 
 		if cl.extLen > 0 {
 			binExt := compactToBin(cl.extension[:cl.extLen])
