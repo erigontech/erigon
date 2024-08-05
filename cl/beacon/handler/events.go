@@ -65,7 +65,7 @@ func (a *ApiHandler) EventSourceGetV1Events(w http.ResponseWriter, r *http.Reque
 		}
 		subscribeTopics.Add(topic)
 	}
-	log.Info("[test] subscribed to topics", "topics", subscribeTopics)
+	log.Info("Subscribed to topics", "topics", subscribeTopics)
 
 	eventCh := make(chan *event.EventStream, 128)
 	opSub := a.emitters.Operation().Subscribe(eventCh)
@@ -92,18 +92,11 @@ func (a *ApiHandler) EventSourceGetV1Events(w http.ResponseWriter, r *http.Reque
 				log.Warn("failed to encode data", "err", err, "topic", event.Event)
 				continue
 			}
-			/*if err := sink.Encode(&sse.Event{
-				Event: []byte(event.Event),
-				Data:  buf,
-			}); err != nil {
-				log.Warn("failed to encode event", "err", err)
-			}*/
 			if _, err := fmt.Fprintf(w, "event: %s\ndata: %s\n\n", event.Event, string(buf)); err != nil {
 				log.Warn("failed to write event", "err", err)
 				continue
 			}
 			w.(http.Flusher).Flush()
-			log.Info("[test] sent event", "topic", event.Event)
 		case <-ticker.C:
 			// keep connection alive
 			if _, err := w.Write([]byte(":\n\n")); err != nil {
@@ -119,7 +112,7 @@ func (a *ApiHandler) EventSourceGetV1Events(w http.ResponseWriter, r *http.Reque
 			http.Error(w, fmt.Sprintf("event error %v", err), http.StatusInternalServerError)
 			return
 		case <-r.Context().Done():
-			log.Info("[test] client disconnected")
+			log.Info("Client disconnected")
 			return
 		}
 	}
