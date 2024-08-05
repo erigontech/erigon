@@ -830,6 +830,7 @@ Loop:
 					return err
 				}
 				if errors.Is(err, consensus.ErrInvalidBlock) {
+					fmt.Printf("[dbg] in unwindTo %T/n", applyTx)
 					if err := u.UnwindTo(blockNum-1, BadBlock(header.Hash(), err), applyTx); err != nil {
 						return err
 					}
