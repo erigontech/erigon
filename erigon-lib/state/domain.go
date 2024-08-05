@@ -711,8 +711,8 @@ type DomainRoTx struct {
 	valsC kv.Cursor
 
 	// latestStateCache is a bit weird
-	latestStateCache                           *simplelru.LRU[uint64, fileCacheItem]
-	latestStateCacheHit, latestStateCacheTotal int
+	latestStateCache *simplelru.LRU[uint64, fileCacheItem]
+	//latestStateCacheHit, latestStateCacheTotal int
 }
 
 const latestStateCachePerDomain = 64 * 1024
