@@ -17,6 +17,7 @@ import (
 	"github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/polygon/bor"
 	"github.com/erigontech/erigon/polygon/bor/borcfg"
+	bortypes "github.com/erigontech/erigon/polygon/bor/types"
 	"github.com/erigontech/erigon/polygon/bridge"
 	"github.com/erigontech/erigon/polygon/heimdall"
 	"github.com/erigontech/erigon/rlp"
@@ -124,7 +125,8 @@ func TestBridge(t *testing.T) {
 	err = b.ProcessNewBlocks(ctx, blocks)
 	require.NoError(t, err)
 
-	res, err := b.GetEvents(ctx, 4)
+	block4Key := bortypes.ComputeBorTxHash(blocks[4].NumberU64(), blocks[4].Hash())
+	res, err := b.GetEvents(ctx, block4Key)
 	require.NoError(t, err)
 
 	event1Data, err := event1.Pack(stateReceiverABI)
@@ -137,22 +139,18 @@ func TestBridge(t *testing.T) {
 	require.Equal(t, event1Data, rlp.RawValue(res[0].Data())) // check data fields
 	require.Equal(t, event2Data, rlp.RawValue(res[1].Data()))
 
-	res, err = b.GetEvents(ctx, 4)
-	require.NoError(t, err)
-
-	require.Equal(t, 2, len(res))
-	require.Equal(t, event1Data, rlp.RawValue(res[0].Data()))
-	require.Equal(t, event2Data, rlp.RawValue(res[1].Data()))
-
 	// get non-sprint block
-	_, err = b.GetEvents(ctx, 1)
+	block1Key := bortypes.ComputeBorTxHash(blocks[1].NumberU64(), blocks[1].Hash())
+	_, err = b.GetEvents(ctx, block1Key)
 	require.Error(t, err)
 
-	_, err = b.GetEvents(ctx, 3)
+	block3Key := bortypes.ComputeBorTxHash(blocks[3].NumberU64(), blocks[3].Hash())
+	_, err = b.GetEvents(ctx, block3Key)
 	require.Error(t, err)
 
 	// check block 0
-	_, err = b.GetEvents(ctx, 0)
+	block0Key := bortypes.ComputeBorTxHash(blocks[0].NumberU64(), blocks[0].Hash())
+	_, err = b.GetEvents(ctx, block0Key)
 	require.Error(t, err)
 
 	cancel()
@@ -231,14 +229,15 @@ func TestBridge_Unwind(t *testing.T) {
 	event1Data, err := event1.Pack(stateReceiverABI)
 	require.NoError(t, err)
 
-	res, err := b.GetEvents(ctx, 4)
+	block4Key := bortypes.ComputeBorTxHash(blocks[4].NumberU64(), blocks[4].Hash())
+	res, err := b.GetEvents(ctx, block4Key)
 	require.Equal(t, event1Data, rlp.RawValue(res[0].Data()))
 	require.NoError(t, err)
 
 	err = b.Unwind(ctx, &types.Header{Number: big.NewInt(3)})
 	require.NoError(t, err)
 
-	_, err = b.GetEvents(ctx, 4)
+	_, err = b.GetEvents(ctx, block4Key)
 	require.Error(t, err)
 
 	cancel()

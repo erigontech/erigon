@@ -39,6 +39,7 @@ import (
 	"golang.org/x/sync/errgroup"
 
 	"github.com/erigontech/erigon-lib/common/dbg"
+	bortypes "github.com/erigontech/erigon/polygon/bor/types"
 
 	"github.com/erigontech/erigon-lib/log/v3"
 
@@ -1489,7 +1490,8 @@ func (c *Bor) CommitStates(
 	blockNum := header.Number.Uint64()
 
 	if c.PolygonBridge != nil {
-		events, err := c.PolygonBridge.GetEvents(c.execCtx, blockNum)
+		k := bortypes.ComputeBorTxHash(blockNum, header.Hash())
+		events, err := c.PolygonBridge.GetEvents(c.execCtx, k)
 		if err != nil {
 			return err
 		}

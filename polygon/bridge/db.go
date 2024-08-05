@@ -24,6 +24,7 @@ import (
 	"fmt"
 	"time"
 
+	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon/accounts/abi"
 	"github.com/erigontech/erigon/polygon/heimdall"
@@ -57,9 +58,9 @@ type Store interface {
 	GetSprintLastEventID(ctx context.Context, lastID uint64, timeLimit time.Time, stateContract abi.ABI) (uint64, error)
 	AddEvents(ctx context.Context, events []*heimdall.EventRecordWithTime, stateContract abi.ABI) error
 	GetEvents(ctx context.Context, start, end uint64) ([][]byte, error)
-	StoreEventID(ctx context.Context, eventMap map[uint64]uint64) error
-	GetEventIDRange(ctx context.Context, blockNum uint64) (uint64, uint64, error)
-	PruneEventIDs(ctx context.Context, blockNum uint64) error
+	StoreEventID(ctx context.Context, eventMap map[libcommon.Hash]uint64) error
+	GetEventIDRange(ctx context.Context, borTxHash libcommon.Hash) (uint64, uint64, error)
+	PruneEventIDs(ctx context.Context, boxTxHash libcommon.Hash) error
 }
 
 type MdbxStore struct {
@@ -244,21 +245,19 @@ func (s *MdbxStore) GetEvents(ctx context.Context, start, end uint64) ([][]byte,
 	return events, err
 }
 
-func (s *MdbxStore) StoreEventID(ctx context.Context, eventMap map[uint64]uint64) error {
+func (s *MdbxStore) StoreEventID(ctx context.Context, eventMap map[libcommon.Hash]uint64) error {
 	tx, err := s.db.BeginRw(ctx)
 	if err != nil {
 		return err
 	}
 	defer tx.Rollback()
 
-	kByte := make([]byte, 8)
 	vByte := make([]byte, 8)
 
 	for k, v := range eventMap {
-		binary.BigEndian.PutUint64(kByte, k)
 		binary.BigEndian.PutUint64(vByte, v)
 
-		err = tx.Put(kv.BorEventNums, kByte, vByte)
+		err = tx.Put(kv.BorEventNums, k.Bytes(), vByte)
 		if err != nil {
 			return err
 		}
@@ -270,7 +269,7 @@ func (s *MdbxStore) StoreEventID(ctx context.Context, eventMap map[uint64]uint64
 // GetEventIDRange returns the state sync event ID range for the given block number.
 // An error is thrown if the block number is not found in the database. If the given block
 // number is the last in the database, then the second uint64 (representing end ID) is 0.
-func (s *MdbxStore) GetEventIDRange(ctx context.Context, blockNum uint64) (uint64, uint64, error) {
+func (s *MdbxStore) GetEventIDRange(ctx context.Context, borTxHash libcommon.Hash) (uint64, uint64, error) {
 	var start, end uint64
 
 	tx, err := s.db.BeginRo(ctx)
@@ -279,20 +278,17 @@ func (s *MdbxStore) GetEventIDRange(ctx context.Context, blockNum uint64) (uint6
 	}
 	defer tx.Rollback()
 
-	kByte := make([]byte, 8)
-	binary.BigEndian.PutUint64(kByte, blockNum)
-
 	cursor, err := tx.Cursor(kv.BorEventNums)
 	if err != nil {
 		return start, end, err
 	}
 
-	_, v, err := cursor.SeekExact(kByte)
+	_, v, err := cursor.SeekExact(borTxHash.Bytes())
 	if err != nil {
 		return start, end, err
 	}
 	if v == nil { // we don't have a map
-		return start, end, errors.New(fmt.Sprintf("map not available for block %d", blockNum))
+		return start, end, errors.New(fmt.Sprintf("map not available for tx hash %d", borTxHash))
 	}
 
 	err = binary.Read(bytes.NewReader(v), binary.BigEndian, &start)
@@ -315,15 +311,12 @@ func (s *MdbxStore) GetEventIDRange(ctx context.Context, blockNum uint64) (uint6
 	return start, end, nil
 }
 
-func (s *MdbxStore) PruneEventIDs(ctx context.Context, blockNum uint64) error {
+func (s *MdbxStore) PruneEventIDs(ctx context.Context, borTxHash libcommon.Hash) error {
 	tx, err := s.db.BeginRw(ctx)
 	if err != nil {
 		return err
 	}
 	defer tx.Rollback()
-
-	kByte := make([]byte, 8)
-	binary.BigEndian.PutUint64(kByte, blockNum)
 
 	cursor, err := tx.Cursor(kv.BorEventNums)
 	if err != nil {
@@ -332,7 +325,7 @@ func (s *MdbxStore) PruneEventIDs(ctx context.Context, blockNum uint64) error {
 	defer cursor.Close()
 
 	var k []byte
-	for k, _, err = cursor.Seek(kByte); err == nil && k != nil; k, _, err = cursor.Next() {
+	for k, _, err = cursor.Seek(borTxHash.Bytes()); err == nil && k != nil; k, _, err = cursor.Next() {
 		if err := tx.Delete(kv.BorEventNums, k); err != nil {
 			return err
 		}

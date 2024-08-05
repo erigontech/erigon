@@ -27,6 +27,7 @@ import (
 	"github.com/erigontech/erigon/common/u256"
 	"github.com/erigontech/erigon/core"
 	"github.com/erigontech/erigon/core/state"
+	bortypes "github.com/erigontech/erigon/polygon/bor/types"
 	"github.com/erigontech/erigon/polygon/polygoncommon"
 
 	libcommon "github.com/erigontech/erigon-lib/common"
@@ -135,7 +136,7 @@ func (b *Bridge) Close() {
 
 // ProcessNewBlocks iterates through all blocks and constructs a map from block number to sync events
 func (b *Bridge) ProcessNewBlocks(ctx context.Context, blocks []*types.Block) error {
-	eventMap := make(map[uint64]uint64)
+	eventMap := make(map[libcommon.Hash]uint64)
 	var prevSprintTime time.Time
 
 	for _, block := range blocks {
@@ -161,7 +162,8 @@ func (b *Bridge) ProcessNewBlocks(ctx context.Context, blocks []*types.Block) er
 
 		if lastDBID > b.lastProcessedEventID {
 			b.log.Debug(bridgeLogPrefix(fmt.Sprintf("Creating map for block %d, start ID %d, end ID %d", block.NumberU64(), b.lastProcessedEventID, lastDBID)))
-			eventMap[block.NumberU64()] = b.lastProcessedEventID
+			k := bortypes.ComputeBorTxHash(block.NumberU64(), block.Hash())
+			eventMap[k] = b.lastProcessedEventID
 
 			b.lastProcessedEventID = lastDBID
 		}
@@ -193,12 +195,13 @@ func (b *Bridge) Synchronize(ctx context.Context, tip *types.Header) error {
 
 // Unwind deletes map entries till tip
 func (b *Bridge) Unwind(ctx context.Context, tip *types.Header) error {
-	return b.store.PruneEventIDs(ctx, tip.Number.Uint64())
+	k := bortypes.ComputeBorTxHash(tip.Number.Uint64(), tip.Hash())
+	return b.store.PruneEventIDs(ctx, k)
 }
 
 // GetEvents returns all sync events at blockNum
-func (b *Bridge) GetEvents(ctx context.Context, blockNum uint64) ([]*types.Message, error) {
-	start, end, err := b.store.GetEventIDRange(ctx, blockNum)
+func (b *Bridge) GetEvents(ctx context.Context, borTxHash libcommon.Hash) ([]*types.Message, error) {
+	start, end, err := b.store.GetEventIDRange(ctx, borTxHash)
 	if err != nil {
 		if errors.Is(err, ErrMapNotAvailable) {
 			return nil, nil
@@ -219,7 +222,7 @@ func (b *Bridge) GetEvents(ctx context.Context, blockNum uint64) ([]*types.Messa
 		return nil, err
 	}
 
-	b.log.Debug(bridgeLogPrefix(fmt.Sprintf("got %v events for block %v", len(events), blockNum)))
+	b.log.Debug(bridgeLogPrefix(fmt.Sprintf("got %v events for tx %v", len(events), borTxHash)))
 
 	// convert to message
 	for _, event := range events {
