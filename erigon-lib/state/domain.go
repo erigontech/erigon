@@ -710,6 +710,7 @@ type DomainRoTx struct {
 
 	valsC kv.Cursor
 
+	// latestStateCache is a bit weird
 	latestStateCache                           *simplelru.LRU[uint64, fileCacheItem]
 	latestStateCacheHit, latestStateCacheTotal int
 }
@@ -718,7 +719,7 @@ const latestStateCachePerDomain = 64 * 1024
 
 type fileCacheItem struct {
 	lvl uint8
-	v   []byte
+	v   []byte // pointer to `mmap` - if .kv file is not compressed
 }
 
 func domainReadMetric(name kv.Domain, level int) metrics.Summary {
@@ -1496,7 +1497,7 @@ func (dt *DomainRoTx) GetAsOf(key []byte, txNum uint64, roTx kv.Tx) ([]byte, err
 		// domain must return nil
 		if len(v) == 0 {
 			if traceGetAsOf == dt.d.filenameBase {
-				fmt.Printf("GetAsOf(%s, %x, %d) -> not found in history\n", dt.d.filenameBase, key, txNum)
+				fmt.Printf("GetAsOf(%s  , %x, %d) -> not found in history\n", dt.d.filenameBase, key, txNum)
 			}
 			return nil, nil
 		}
