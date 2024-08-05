@@ -27,7 +27,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/docker/docker/pkg/reexec"
+	"github.com/erigontech/erigon/internal/reexec"
 	"github.com/erigontech/erigon/turbo/cmdtest"
 )
 

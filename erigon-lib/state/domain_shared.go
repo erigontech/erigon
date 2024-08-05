@@ -48,7 +48,7 @@ import (
 	"github.com/erigontech/erigon-lib/types"
 )
 
-var ErrBehindCommitment = fmt.Errorf("behind commitment")
+var ErrBehindCommitment = errors.New("behind commitment")
 
 // KvList sort.Interface to sort write list by keys
 type KvList struct {
@@ -426,12 +426,12 @@ func (sd *SharedDomains) replaceShortenedKeysInBranch(prefix []byte, branch comm
 	storageItem := sto.lookupFileByItsRange(fStartTxNum, fEndTxNum)
 	if storageItem == nil {
 		sd.logger.Crit(fmt.Sprintf("storage file of steps %d-%d not found\n", fStartTxNum/sd.aggTx.a.aggregationStep, fEndTxNum/sd.aggTx.a.aggregationStep))
-		return nil, fmt.Errorf("storage file not found")
+		return nil, errors.New("storage file not found")
 	}
 	accountItem := acc.lookupFileByItsRange(fStartTxNum, fEndTxNum)
 	if accountItem == nil {
 		sd.logger.Crit(fmt.Sprintf("storage file of steps %d-%d not found\n", fStartTxNum/sd.aggTx.a.aggregationStep, fEndTxNum/sd.aggTx.a.aggregationStep))
-		return nil, fmt.Errorf("account file not found")
+		return nil, errors.New("account file not found")
 	}
 	storageGetter := NewArchiveGetter(storageItem.decompressor.MakeGetter(), sto.d.compression)
 	accountGetter := NewArchiveGetter(accountItem.decompressor.MakeGetter(), acc.d.compression)
@@ -604,7 +604,7 @@ func (sd *SharedDomains) IndexAdd(table kv.InvertedIdx, key []byte) (err error) 
 
 func (sd *SharedDomains) SetTx(tx kv.Tx) {
 	if tx == nil {
-		panic(fmt.Errorf("tx is nil"))
+		panic("tx is nil")
 	}
 	sd.roTx = tx
 
@@ -615,7 +615,7 @@ func (sd *SharedDomains) SetTx(tx kv.Tx) {
 
 	sd.aggTx = casted.AggTx().(*AggregatorRoTx)
 	if sd.aggTx == nil {
-		panic(fmt.Errorf("aggtx is nil"))
+		panic(errors.New("aggtx is nil"))
 	}
 }
 
@@ -976,7 +976,7 @@ func (sd *SharedDomains) DomainDel(domain kv.Domain, k1, k2 []byte, prevVal []by
 
 func (sd *SharedDomains) DomainDelPrefix(domain kv.Domain, prefix []byte) error {
 	if domain != kv.StorageDomain {
-		return fmt.Errorf("DomainDelPrefix: not supported")
+		return errors.New("DomainDelPrefix: not supported")
 	}
 
 	type tuple struct {
@@ -1039,7 +1039,7 @@ func NewSharedDomainsCommitmentContext(sd *SharedDomains, mode commitment.Mode, 
 		counters: make(map[string]uint64),
 	}
 
-	ctx.patriciaTrie, ctx.updates = commitment.InitializeTrieAndUpdateTree(trieVariant, mode, sd.aggTx.a.tmpdir)
+	ctx.patriciaTrie, ctx.updates = commitment.InitializeTrieAndUpdates(trieVariant, mode, sd.aggTx.a.tmpdir)
 	ctx.patriciaTrie.ResetContext(ctx)
 	return ctx
 }
@@ -1120,11 +1120,7 @@ func (sdc *SharedDomainsCommitmentContext) GetAccount(plainKey []byte, cell *com
 			copy(cell.CodeHash[:], chash)
 		}
 	}
-
-	//_, fl, ln, _ := runtime.Caller(1)
-	//fl = filepath.Base(fl)
-	//fmt.Printf("%s:%d GetAccount %x: %s\n", fl, ln, plainKey, cell.FullString())
-	if bytes.Equal(cell.CodeHash[:], commitment.EmptyCodeHash) {
+	if cell.CodeHash == commitment.EmptyCodeHashArray {
 		cell.Delete = len(encAccount) == 0
 		return nil
 	}
@@ -1142,8 +1138,8 @@ func (sdc *SharedDomainsCommitmentContext) GetAccount(plainKey []byte, cell *com
 
 	if len(code) > 0 {
 		sdc.keccak.Reset()
-		sdc.keccak.Write(code)
-		sdc.keccak.Read(cell.CodeHash[:])
+		sdc.keccak.Write(code)            //nolint
+		sdc.keccak.Read(cell.CodeHash[:]) //nolint
 	} else {
 		cell.CodeHash = commitment.EmptyCodeHashArray
 	}
@@ -1166,9 +1162,6 @@ func (sdc *SharedDomainsCommitmentContext) GetStorage(plainKey []byte, cell *com
 	copy(cell.Storage[:], enc)
 	cell.StorageLen = len(enc)
 	cell.Delete = cell.StorageLen == 0
-	//_, fl, ln, _ := runtime.Caller(1)
-	//fl = filepath.Base(fl)
-	//fmt.Printf("%s:%d GetStorage %x %d: %s\n", fl, ln, plainKey, cell.StorageLen, cell.FullString())
 	return nil
 }
 
@@ -1377,7 +1370,7 @@ func (sdc *SharedDomainsCommitmentContext) restorePatriciaState(value []byte) (u
 			fmt.Printf("[commitment] restored state: block=%d txn=%d rh=%x\n", cs.blockNum, cs.txNum, rh)
 		}
 	} else {
-		return 0, 0, fmt.Errorf("state storing is only supported hex patricia trie")
+		return 0, 0, errors.New("state storing is only supported hex patricia trie")
 	}
 	return cs.blockNum, cs.txNum, nil
 }

@@ -21,6 +21,7 @@ package tests
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -185,7 +186,7 @@ func (tm *testMatcher) checkFailureWithName(t *testing.T, name string, err error
 			t.Logf("error: %v", err)
 			return nil
 		}
-		return fmt.Errorf("test succeeded unexpectedly")
+		return errors.New("test succeeded unexpectedly")
 	}
 	return err
 }

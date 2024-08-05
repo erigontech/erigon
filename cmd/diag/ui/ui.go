@@ -128,8 +128,8 @@ func runUI(cli *cli.Context) error {
 		}
 	}()
 
-	uiUrl := fmt.Sprintf("http://%s", listenUrl)
-	fmt.Println(text.Hyperlink(uiUrl, fmt.Sprintf("UI running on %s", uiUrl)))
+	uiUrl := "http://" + listenUrl
+	fmt.Println(text.Hyperlink(uiUrl, "UI running on "+uiUrl))
 
 	wg.Wait() // Wait for the server goroutine to finish
 	return nil

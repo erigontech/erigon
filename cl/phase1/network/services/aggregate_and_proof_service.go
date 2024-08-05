@@ -18,7 +18,7 @@ package services
 
 import (
 	"context"
-	"fmt"
+	"errors"
 	"slices"
 	"sync"
 	"time"
@@ -115,11 +115,11 @@ func (a *aggregateAndProofServiceImpl) ProcessMessage(
 	// [REJECT] The committee index is within the expected range -- i.e. index < get_committee_count_per_slot(state, aggregate.data.target.epoch).
 	committeeCountPerSlot := headState.CommitteeCount(target.Epoch())
 	if aggregateData.CommitteeIndex() >= committeeCountPerSlot {
-		return fmt.Errorf("invalid committee index in aggregate and proof")
+		return errors.New("invalid committee index in aggregate and proof")
 	}
 	// [REJECT] The aggregate attestation's epoch matches its target -- i.e. aggregate.data.target.epoch == compute_epoch_at_slot(aggregate.data.slot)
 	if aggregateData.Target().Epoch() != epoch {
-		return fmt.Errorf("invalid target epoch in aggregate and proof")
+		return errors.New("invalid target epoch in aggregate and proof")
 	}
 	committee, err := headState.GetBeaconCommitee(slot, committeeIndex)
 	if err != nil {
@@ -128,14 +128,14 @@ func (a *aggregateAndProofServiceImpl) ProcessMessage(
 
 	// [REJECT] The aggregator's validator index is within the committee -- i.e. aggregate_and_proof.aggregator_index in get_beacon_committee(state, aggregate.data.slot, index).
 	if !slices.Contains(committee, aggregateAndProof.Message.AggregatorIndex) {
-		return fmt.Errorf("committee index not in committee")
+		return errors.New("committee index not in committee")
 	}
 	// [REJECT] The aggregate attestation's target block is an ancestor of the block named in the LMD vote -- i.e. get_checkpoint_block(store, aggregate.data.beacon_block_root, aggregate.data.target.epoch) == aggregate.data.target.root
 	if a.forkchoiceStore.Ancestor(
 		aggregateData.BeaconBlockRoot(),
 		epoch*a.beaconCfg.SlotsPerEpoch,
 	) != target.BlockRoot() {
-		return fmt.Errorf("invalid target block")
+		return errors.New("invalid target block")
 	}
 	if a.test {
 		return nil
@@ -144,7 +144,7 @@ func (a *aggregateAndProofServiceImpl) ProcessMessage(
 	// [REJECT] aggregate_and_proof.selection_proof selects the validator as an aggregator for the slot -- i.e. is_aggregator(state, aggregate.data.slot, index, aggregate_and_proof.selection_proof) returns True.
 	if !state.IsAggregator(a.beaconCfg, uint64(len(committee)), committeeIndex, selectionProof) {
 		log.Warn("receveived aggregate and proof from invalid aggregator")
-		return fmt.Errorf("invalid aggregate and proof")
+		return errors.New("invalid aggregate and proof")
 	}
 	attestingIndicies, err := headState.GetAttestingIndicies(
 		aggregateAndProof.Message.Aggregate.AttestantionData(),
@@ -183,7 +183,7 @@ func verifySignaturesOnAggregate(
 		return err
 	}
 	if len(attestingIndicies) == 0 {
-		return fmt.Errorf("no attesting indicies")
+		return errors.New("no attesting indicies")
 	}
 	// [REJECT] The aggregate_and_proof.selection_proof is a valid signature of the aggregate.data.slot by the validator with index aggregate_and_proof.aggregator_index.
 	if err := verifyAggregateAndProofSignature(s, aggregateAndProof.Message); err != nil {
@@ -220,7 +220,7 @@ func verifyAggregateAndProofSignature(
 		return err
 	}
 	if !valid {
-		return fmt.Errorf("invalid bls signature on aggregate and proof")
+		return errors.New("invalid bls signature on aggregate and proof")
 	}
 	return nil
 }
@@ -246,7 +246,7 @@ func verifyAggregatorSignature(
 		return err
 	}
 	if !valid {
-		return fmt.Errorf("invalid bls signature on aggregate and proof")
+		return errors.New("invalid bls signature on aggregate and proof")
 	}
 	return nil
 }
@@ -266,7 +266,7 @@ func verifyAggregateMessageSignature(
 		return err
 	}
 	if !valid {
-		return fmt.Errorf("invalid aggregate signature")
+		return errors.New("invalid aggregate signature")
 	}
 	return nil
 }

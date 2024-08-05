@@ -38,6 +38,7 @@ import (
 	"github.com/erigontech/erigon/cl/clparams/initial_state"
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
+	mockMonitor "github.com/erigontech/erigon/cl/monitor/mock_services"
 	"github.com/erigontech/erigon/cl/persistence/blob_storage"
 	state_accessors "github.com/erigontech/erigon/cl/persistence/state"
 	"github.com/erigontech/erigon/cl/persistence/state/historical_states_reader"
@@ -109,6 +110,7 @@ func setupTestingHandler(t *testing.T, v clparams.StateVersion, logger log.Logge
 	voluntaryExitService := mock_services.NewMockVoluntaryExitService(ctrl)
 	blsToExecutionChangeService := mock_services.NewMockBLSToExecutionChangeService(ctrl)
 	proposerSlashingService := mock_services.NewMockProposerSlashingService(ctrl)
+	mockValidatorMonitor := mockMonitor.NewMockValidatorMonitor(ctrl)
 
 	// ctx context.Context, subnetID *uint64, msg *cltypes.SyncCommitteeMessage) error
 	syncCommitteeMessagesService.EXPECT().ProcessMessage(gomock.Any(), gomock.Any(), gomock.Any()).DoAndReturn(func(ctx context.Context, subnetID *uint64, msg *cltypes.SyncCommitteeMessage) error {
@@ -134,6 +136,7 @@ func setupTestingHandler(t *testing.T, v clparams.StateVersion, logger log.Logge
 		opPool.ProposerSlashingsPool.Insert(pool.ComputeKeyForProposerSlashing(msg), msg)
 		return nil
 	}).AnyTimes()
+	mockValidatorMonitor.EXPECT().ObserveValidator(gomock.Any()).AnyTimes()
 
 	vp = validator_params.NewValidatorParams()
 	h = NewApiHandler(
@@ -166,6 +169,7 @@ func setupTestingHandler(t *testing.T, v clparams.StateVersion, logger log.Logge
 		blsToExecutionChangeService,
 		proposerSlashingService,
 		nil,
+		mockValidatorMonitor,
 	) // TODO: add tests
 	h.Init()
 	return

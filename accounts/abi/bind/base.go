@@ -218,7 +218,7 @@ func (c *BoundContract) transact(opts *TransactOpts, contract *libcommon.Address
 	if opts.Value != nil {
 		overflow := value.SetFromBig(opts.Value)
 		if overflow {
-			return nil, fmt.Errorf("opts.Value higher than 2^256-1")
+			return nil, errors.New("opts.Value higher than 2^256-1")
 		}
 	}
 	var nonce uint64
@@ -240,7 +240,7 @@ func (c *BoundContract) transact(opts *TransactOpts, contract *libcommon.Address
 	}
 	gasPrice, overflow := uint256.FromBig(gasPriceBig)
 	if overflow {
-		return nil, fmt.Errorf("gasPriceBig higher than 2^256-1")
+		return nil, errors.New("gasPriceBig higher than 2^256-1")
 	}
 	gasLimit := opts.GasLimit
 	if gasLimit == 0 {

@@ -189,7 +189,7 @@ func (c *Client) CreateNode(config *adapters.NodeConfig) (*p2p.NodeInfo, error) 
 // GetNode returns details of a node
 func (c *Client) GetNode(nodeID string) (*p2p.NodeInfo, error) {
 	node := &p2p.NodeInfo{}
-	return node, c.Get(fmt.Sprintf("/nodes/%s", nodeID), node)
+	return node, c.Get("/nodes/"+nodeID, node)
 }
 
 // StartNode starts a node

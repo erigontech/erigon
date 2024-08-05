@@ -17,6 +17,7 @@
 package metrics
 
 import (
+	"errors"
 	"fmt"
 	"regexp"
 	"strings"
@@ -26,7 +27,7 @@ import (
 
 func parseMetric(s string) (string, prometheus.Labels, error) {
 	if len(s) == 0 {
-		return "", nil, fmt.Errorf("metric cannot be empty")
+		return "", nil, errors.New("metric cannot be empty")
 	}
 
 	ident, rest, ok := strings.Cut(s, "{")

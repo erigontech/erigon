@@ -22,6 +22,7 @@ package node
 import (
 	"compress/gzip"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -265,7 +266,7 @@ func (h *httpServer) enableRPC(apis []rpc.API, config httpConfig, allowList rpc.
 	defer h.mu.Unlock()
 
 	if h.rpcAllowed() {
-		return fmt.Errorf("JSON-RPC over HTTP is already enabled")
+		return errors.New("JSON-RPC over HTTP is already enabled")
 	}
 
 	// Create RPC server and handler.
@@ -298,7 +299,7 @@ func (h *httpServer) enableWS(apis []rpc.API, config wsConfig, allowList rpc.All
 	defer h.mu.Unlock()
 
 	if h.wsAllowed() {
-		return fmt.Errorf("JSON-RPC over WebSocket is already enabled")
+		return errors.New("JSON-RPC over WebSocket is already enabled")
 	}
 
 	// Create RPC server and handler.

@@ -18,7 +18,7 @@ package jsonrpc
 
 import (
 	"context"
-	"fmt"
+	"errors"
 	"testing"
 
 	"github.com/erigontech/erigon/rpc/rpccfg"
@@ -122,5 +122,5 @@ func TestParityAPIImpl_ListStorageKeys_AccNotFound(t *testing.T) {
 	api := NewParityAPIImpl(newBaseApiForTest(m), m.DB)
 	addr := libcommon.HexToAddress("0x920fd5070602feaea2e251e9e7238b6c376bcaef")
 	_, err := api.ListStorageKeys(context.Background(), addr, 2, nil, latestBlock)
-	assert.Error(err, fmt.Errorf("acc not found"))
+	assert.Error(err, errors.New("acc not found"))
 }

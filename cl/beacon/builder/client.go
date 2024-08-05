@@ -36,7 +36,7 @@ import (
 var _ BuilderClient = &builderClient{}
 
 var (
-	ErrNoContent = fmt.Errorf("no http content")
+	ErrNoContent = errors.New("no http content")
 )
 
 type builderClient struct {

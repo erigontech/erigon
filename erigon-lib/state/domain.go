@@ -87,7 +87,7 @@ type Domain struct {
 
 	// _visibleFiles - underscore in name means: don't use this field directly, use BeginFilesRo()
 	// underlying array is immutable - means it's ready for zero-copy use
-	_visibleFiles []ctxItem
+	_visibleFiles []visibleFile
 
 	integrityCheck func(name kv.Domain, fromStep, toStep uint64) bool
 
@@ -130,7 +130,7 @@ func NewDomain(cfg domainCfg, aggregationStep uint64, filenameBase, valsTable, i
 		integrityCheck:              integrityCheck,
 	}
 
-	d._visibleFiles = []ctxItem{}
+	d._visibleFiles = []visibleFile{}
 
 	var err error
 	if d.History, err = NewHistory(cfg.hist, aggregationStep, filenameBase, indexKeysTable, indexTable, historyValsTable, nil, logger); err != nil {

@@ -19,6 +19,7 @@ package bor_test
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"math/big"
 	"testing"
@@ -93,7 +94,7 @@ func (h *test_heimdall) FetchSpan(ctx context.Context, spanID uint64) (*heimdall
 		nextSpan.StartBlock = 1 //256
 	} else {
 		if spanID != uint64(h.currentSpan.Id+1) {
-			return nil, fmt.Errorf("Can't initialize span: non consecutive span")
+			return nil, errors.New("Can't initialize span: non consecutive span")
 		}
 
 		nextSpan.StartBlock = h.currentSpan.EndBlock + 1
@@ -125,42 +126,42 @@ func (h test_heimdall) currentSprintLength() int {
 }
 
 func (h test_heimdall) FetchCheckpoint(ctx context.Context, number int64) (*heimdall.Checkpoint, error) {
-	return nil, fmt.Errorf("TODO")
+	return nil, errors.New("TODO")
 }
 
 func (h test_heimdall) FetchCheckpointCount(ctx context.Context) (int64, error) {
-	return 0, fmt.Errorf("TODO")
+	return 0, errors.New("TODO")
 }
 
 func (h *test_heimdall) FetchCheckpoints(ctx context.Context, page uint64, limit uint64) ([]*heimdall.Checkpoint, error) {
-	return nil, fmt.Errorf("TODO")
+	return nil, errors.New("TODO")
 }
 
 func (h test_heimdall) FetchMilestone(ctx context.Context, number int64) (*heimdall.Milestone, error) {
-	return nil, fmt.Errorf("TODO")
+	return nil, errors.New("TODO")
 }
 
 func (h test_heimdall) FetchMilestoneCount(ctx context.Context) (int64, error) {
-	return 0, fmt.Errorf("TODO")
+	return 0, errors.New("TODO")
 }
 
 func (h test_heimdall) FetchFirstMilestoneNum(ctx context.Context) (int64, error) {
-	return 0, fmt.Errorf("TODO")
+	return 0, errors.New("TODO")
 }
 
 func (h test_heimdall) FetchNoAckMilestone(ctx context.Context, milestoneID string) error {
-	return fmt.Errorf("TODO")
+	return errors.New("TODO")
 }
 
 func (h test_heimdall) FetchLastNoAckMilestone(ctx context.Context) (string, error) {
-	return "", fmt.Errorf("TODO")
+	return "", errors.New("TODO")
 }
 
 func (h test_heimdall) FetchMilestoneID(ctx context.Context, milestoneID string) error {
-	return fmt.Errorf("TODO")
+	return errors.New("TODO")
 }
 func (h test_heimdall) FetchLatestSpan(ctx context.Context) (*heimdall.Span, error) {
-	return nil, fmt.Errorf("TODO")
+	return nil, errors.New("TODO")
 }
 
 func (h test_heimdall) Close() {}
@@ -323,6 +324,7 @@ func newValidator(t *testing.T, heimdall *test_heimdall, blocks map[uint64]*type
 		heimdall,
 		test_genesisContract{},
 		logger,
+		nil,
 		nil,
 	)
 

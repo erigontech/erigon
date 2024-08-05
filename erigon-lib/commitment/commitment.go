@@ -20,6 +20,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/binary"
+	"errors"
 	"fmt"
 	"math/bits"
 	"strings"
@@ -90,7 +91,7 @@ const (
 	VariantBinPatriciaTrie TrieVariant = "bin-patricia-hashed"
 )
 
-func InitializeTrieAndUpdateTree(tv TrieVariant, mode Mode, tmpdir string) (Trie, *Updates) {
+func InitializeTrieAndUpdates(tv TrieVariant, mode Mode, tmpdir string) (Trie, *Updates) {
 	switch tv {
 	case VariantBinPatriciaTrie:
 		trie := NewBinPatriciaHashed(length.Addr, nil, tmpdir)
@@ -131,17 +132,25 @@ func NewBranchEncoder(sz uint64, tmpdir string) *BranchEncoder {
 		tmpdir: tmpdir,
 		merger: NewHexBranchMerger(sz / 2),
 	}
-	be.initCollector()
+	//be.initCollector()
 	return be
 }
 
 func (be *BranchEncoder) initCollector() {
-	be.updates = etl.NewCollector("commitment.BranchEncoder", be.tmpdir, etl.NewOldestEntryBuffer(etl.BufferOptimalSize/4), log.Root().New("branch-encoder"))
+	if be.updates != nil {
+		be.updates.Close()
+	}
+	be.updates = etl.NewCollector("commitment.BranchEncoder", be.tmpdir, etl.NewOldestEntryBuffer(etl.BufferOptimalSize/2), log.Root().New("branch-encoder"))
 	be.updates.LogLvl(log.LvlDebug)
 	be.updates.SortAndFlushInBackground(true)
 }
 
 func (be *BranchEncoder) Load(pc PatriciaContext, args etl.TransformArgs) error {
+	// do not collect them at least now. Write them at CollectUpdate into pc
+	if be.updates == nil {
+		return nil
+	}
+
 	if err := be.updates.Load(nil, "", func(prefix, update []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) error {
 		stateValue, stateStep, err := pc.GetBranch(prefix)
 		if err != nil {
@@ -190,9 +199,11 @@ func (be *BranchEncoder) CollectUpdate(
 		}
 	}
 	//fmt.Printf("collectBranchUpdate [%x] -> [%x]\n", prefix, update)
-	if err = be.updates.Collect(prefix, update); err != nil {
+	// has to copy :(
+	if err = ctx.PutBranch(common.Copy(prefix), common.Copy(update), prev, prevStep); err != nil {
 		return 0, err
 	}
+	mxBranchUpdatesApplied.Inc()
 	return lastNibble, nil
 }
 
@@ -214,14 +225,14 @@ func (be *BranchEncoder) EncodeBranch(bitmap, touchMap, afterMap uint16, readCel
 			return err
 		}
 		if n != wn {
-			return fmt.Errorf("n != wn size")
+			return errors.New("n != wn size")
 		}
 		wn, err = be.buf.Write(val)
 		if err != nil {
 			return err
 		}
 		if len(val) != wn {
-			return fmt.Errorf("wn != value size")
+			return errors.New("wn != value size")
 		}
 		return nil
 	}
@@ -373,14 +384,14 @@ func (branchData BranchData) ReplacePlainKeys(newData []byte, fn func(key []byte
 		if fieldBits&HashedKeyPart != 0 {
 			l, n := binary.Uvarint(branchData[pos:])
 			if n == 0 {
-				return nil, fmt.Errorf("replacePlainKeys buffer too small for hashedKey len")
+				return nil, errors.New("replacePlainKeys buffer too small for hashedKey len")
 			} else if n < 0 {
-				return nil, fmt.Errorf("replacePlainKeys value overflow for hashedKey len")
+				return nil, errors.New("replacePlainKeys value overflow for hashedKey len")
 			}
 			newData = append(newData, branchData[pos:pos+n]...)
 			pos += n
 			if len(branchData) < pos+int(l) {
-				return nil, fmt.Errorf("replacePlainKeys buffer too small for hashedKey")
+				return nil, errors.New("replacePlainKeys buffer too small for hashedKey")
 			}
 			if l > 0 {
 				newData = append(newData, branchData[pos:pos+int(l)]...)
@@ -390,13 +401,13 @@ func (branchData BranchData) ReplacePlainKeys(newData []byte, fn func(key []byte
 		if fieldBits&AccountPlainPart != 0 {
 			l, n := binary.Uvarint(branchData[pos:])
 			if n == 0 {
-				return nil, fmt.Errorf("replacePlainKeys buffer too small for accountPlainKey len")
+				return nil, errors.New("replacePlainKeys buffer too small for accountPlainKey len")
 			} else if n < 0 {
-				return nil, fmt.Errorf("replacePlainKeys value overflow for accountPlainKey len")
+				return nil, errors.New("replacePlainKeys value overflow for accountPlainKey len")
 			}
 			pos += n
 			if len(branchData) < pos+int(l) {
-				return nil, fmt.Errorf("replacePlainKeys buffer too small for accountPlainKey")
+				return nil, errors.New("replacePlainKeys buffer too small for accountPlainKey")
 			}
 			if l > 0 {
 				pos += int(l)
@@ -423,13 +434,13 @@ func (branchData BranchData) ReplacePlainKeys(newData []byte, fn func(key []byte
 		if fieldBits&StoragePlainPart != 0 {
 			l, n := binary.Uvarint(branchData[pos:])
 			if n == 0 {
-				return nil, fmt.Errorf("replacePlainKeys buffer too small for storagePlainKey len")
+				return nil, errors.New("replacePlainKeys buffer too small for storagePlainKey len")
 			} else if n < 0 {
-				return nil, fmt.Errorf("replacePlainKeys value overflow for storagePlainKey len")
+				return nil, errors.New("replacePlainKeys value overflow for storagePlainKey len")
 			}
 			pos += n
 			if len(branchData) < pos+int(l) {
-				return nil, fmt.Errorf("replacePlainKeys buffer too small for storagePlainKey")
+				return nil, errors.New("replacePlainKeys buffer too small for storagePlainKey")
 			}
 			if l > 0 {
 				pos += int(l)
@@ -456,14 +467,14 @@ func (branchData BranchData) ReplacePlainKeys(newData []byte, fn func(key []byte
 		if fieldBits&HashPart != 0 {
 			l, n := binary.Uvarint(branchData[pos:])
 			if n == 0 {
-				return nil, fmt.Errorf("replacePlainKeys buffer too small for hash len")
+				return nil, errors.New("replacePlainKeys buffer too small for hash len")
 			} else if n < 0 {
-				return nil, fmt.Errorf("replacePlainKeys value overflow for hash len")
+				return nil, errors.New("replacePlainKeys value overflow for hash len")
 			}
 			newData = append(newData, branchData[pos:pos+n]...)
 			pos += n
 			if len(branchData) < pos+int(l) {
-				return nil, fmt.Errorf("replacePlainKeys buffer too small for hash")
+				return nil, errors.New("replacePlainKeys buffer too small for hash")
 			}
 			if l > 0 {
 				newData = append(newData, branchData[pos:pos+int(l)]...)
@@ -535,14 +546,14 @@ func (branchData BranchData) MergeHexBranches(branchData2 BranchData, newData []
 			for i := 0; i < bits.OnesCount8(byte(fieldBits)); i++ {
 				l, n := binary.Uvarint(branchData2[pos2:])
 				if n == 0 {
-					return nil, fmt.Errorf("MergeHexBranches buffer2 too small for field")
+					return nil, errors.New("MergeHexBranches buffer2 too small for field")
 				} else if n < 0 {
-					return nil, fmt.Errorf("MergeHexBranches value2 overflow for field")
+					return nil, errors.New("MergeHexBranches value2 overflow for field")
 				}
 				newData = append(newData, branchData2[pos2:pos2+n]...)
 				pos2 += n
 				if len(branchData2) < pos2+int(l) {
-					return nil, fmt.Errorf("MergeHexBranches buffer2 too small for field")
+					return nil, errors.New("MergeHexBranches buffer2 too small for field")
 				}
 				if l > 0 {
 					newData = append(newData, branchData2[pos2:pos2+int(l)]...)
@@ -561,16 +572,16 @@ func (branchData BranchData) MergeHexBranches(branchData2 BranchData, newData []
 			for i := 0; i < bits.OnesCount8(byte(fieldBits)); i++ {
 				l, n := binary.Uvarint(branchData[pos1:])
 				if n == 0 {
-					return nil, fmt.Errorf("MergeHexBranches buffer1 too small for field")
+					return nil, errors.New("MergeHexBranches buffer1 too small for field")
 				} else if n < 0 {
-					return nil, fmt.Errorf("MergeHexBranches value1 overflow for field")
+					return nil, errors.New("MergeHexBranches value1 overflow for field")
 				}
 				if add {
 					newData = append(newData, branchData[pos1:pos1+n]...)
 				}
 				pos1 += n
 				if len(branchData) < pos1+int(l) {
-					return nil, fmt.Errorf("MergeHexBranches buffer1 too small for field")
+					return nil, errors.New("MergeHexBranches buffer1 too small for field")
 				}
 				if l > 0 {
 					if add {
@@ -598,7 +609,7 @@ func (branchData BranchData) DecodeCells() (touchMap, afterMap uint16, row [16]*
 			row[nibble] = new(Cell)
 
 			if pos, err = row[nibble].fillFromFields(branchData, pos, fieldBits); err != nil {
-				err = fmt.Errorf("faield to fill cell at nibble %x: %w", nibble, err)
+				err = fmt.Errorf("failed to fill cell at nibble %x: %w", nibble, err)
 				return
 			}
 		}
@@ -652,9 +663,9 @@ func (m *BranchMerger) Merge(branch1 BranchData, branch2 BranchData) (BranchData
 			for i := 0; i < bits.OnesCount8(byte(fieldBits)); i++ {
 				l, n := binary.Uvarint(branch2[pos2:])
 				if n == 0 {
-					return nil, fmt.Errorf("MergeHexBranches branch2 is too small: expected node info size")
+					return nil, errors.New("MergeHexBranches branch2 is too small: expected node info size")
 				} else if n < 0 {
-					return nil, fmt.Errorf("MergeHexBranches branch2: size overflow for length")
+					return nil, errors.New("MergeHexBranches branch2: size overflow for length")
 				}
 
 				m.buf = append(m.buf, branch2[pos2:pos2+n]...)
@@ -680,9 +691,9 @@ func (m *BranchMerger) Merge(branch1 BranchData, branch2 BranchData) (BranchData
 			for i := 0; i < bits.OnesCount8(byte(fieldBits)); i++ {
 				l, n := binary.Uvarint(branch1[pos1:])
 				if n == 0 {
-					return nil, fmt.Errorf("MergeHexBranches branch1 is too small: expected node info size")
+					return nil, errors.New("MergeHexBranches branch1 is too small: expected node info size")
 				} else if n < 0 {
-					return nil, fmt.Errorf("MergeHexBranches branch1: size overflow for length")
+					return nil, errors.New("MergeHexBranches branch1: size overflow for length")
 				}
 
 				if add {
@@ -879,12 +890,25 @@ func NewUpdates(m Mode, tmpdir string, hasher keyHasher) *Updates {
 	return t
 }
 
+func (t *Updates) Mode() Mode { return t.mode }
+
+func (t *Updates) Size() (updates uint64) {
+	switch t.mode {
+	case ModeDirect:
+		return uint64(len(t.keys))
+	case ModeUpdate:
+		return uint64(t.tree.Len())
+	default:
+		return 0
+	}
+}
+
 func (t *Updates) initCollector() {
 	if t.etl != nil {
 		t.etl.Close()
 		t.etl = nil
 	}
-	t.etl = etl.NewCollector("commitment", t.tmpdir, etl.NewSortableBuffer(etl.BufferOptimalSize/4), log.Root().New("update-tree"))
+	t.etl = etl.NewCollector("commitment", t.tmpdir, etl.NewSortableBuffer(etl.BufferOptimalSize/2), log.Root().New("update-tree"))
 	t.etl.LogLvl(log.LvlDebug)
 	t.etl.SortAndFlushInBackground(true)
 }
@@ -917,17 +941,6 @@ func (t *Updates) TouchPlainKey(key, val []byte, fn func(c *KeyUpdate, val []byt
 			t.keys[string(key)] = struct{}{}
 		}
 	default:
-	}
-}
-
-func (t *Updates) Size() (updates uint64) {
-	switch t.mode {
-	case ModeDirect:
-		return uint64(len(t.keys))
-	case ModeUpdate:
-		return uint64(t.tree.Len())
-	default:
-		return 0
 	}
 }
 

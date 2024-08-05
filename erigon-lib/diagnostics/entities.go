@@ -22,23 +22,6 @@ import (
 	"golang.org/x/exp/maps"
 )
 
-type SyncStageType string
-
-const (
-	Snapshots           SyncStageType = "Snapshots"
-	BlockHashes         SyncStageType = "BlockHashes"
-	Senders             SyncStageType = "Senders"
-	Execution           SyncStageType = "Execution"
-	HashState           SyncStageType = "HashState"
-	IntermediateHashes  SyncStageType = "IntermediateHashes"
-	CallTraces          SyncStageType = "CallTraces"
-	AccountHistoryIndex SyncStageType = "AccountHistoryIndex"
-	StorageHistoryIndex SyncStageType = "StorageHistoryIndex"
-	LogIndex            SyncStageType = "LogIndex"
-	TxLookup            SyncStageType = "TxLookup"
-	Finish              SyncStageType = "Finish"
-)
-
 type PeerStatistics struct {
 	PeerType     string
 	BytesIn      uint64
@@ -168,26 +151,41 @@ type SnapshoFilesList struct {
 }
 
 type HardwareInfo struct {
-	Disk DiskInfo `json:"disk"`
-	RAM  RAMInfo  `json:"ram"`
-	CPU  CPUInfo  `json:"cpu"`
+	Disk DiskInfo  `json:"disk"`
+	RAM  RAMInfo   `json:"ram"`
+	CPU  []CPUInfo `json:"cpu"`
 }
 
 type RAMInfo struct {
-	Total uint64 `json:"total"`
-	Free  uint64 `json:"free"`
+	Total       uint64  `json:"total"`
+	Available   uint64  `json:"available"`
+	Used        uint64  `json:"used"`
+	UsedPercent float64 `json:"usedPercent"`
 }
 
 type DiskInfo struct {
-	FsType string `json:"fsType"`
-	Total  uint64 `json:"total"`
-	Free   uint64 `json:"free"`
+	FsType     string `json:"fsType"`
+	Total      uint64 `json:"total"`
+	Free       uint64 `json:"free"`
+	MountPoint string `json:"mountPoint"`
+	Device     string `json:"device"`
+	Details    string `json:"details"`
 }
 
 type CPUInfo struct {
-	Cores     int     `json:"cores"`
-	ModelName string  `json:"modelName"`
-	Mhz       float64 `json:"mhz"`
+	CPU        int32    `json:"cpu"`
+	VendorID   string   `json:"vendorId"`
+	Family     string   `json:"family"`
+	Model      string   `json:"model"`
+	Stepping   int32    `json:"stepping"`
+	PhysicalID string   `json:"physicalId"`
+	CoreID     string   `json:"coreId"`
+	Cores      int32    `json:"cores"`
+	ModelName  string   `json:"modelName"`
+	Mhz        float64  `json:"mhz"`
+	CacheSize  int32    `json:"cacheSize"`
+	Flags      []string `json:"flags"`
+	Microcode  string   `json:"microcode"`
 }
 
 type BlockHeadersUpdate struct {

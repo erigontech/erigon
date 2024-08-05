@@ -18,6 +18,7 @@ package services
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sync"
 	"time"
@@ -86,7 +87,7 @@ func (b *blobSidecarService) ProcessMessage(ctx context.Context, subnetId *uint6
 
 	// [REJECT] The sidecar's index is consistent with MAX_BLOBS_PER_BLOCK -- i.e. blob_sidecar.index < MAX_BLOBS_PER_BLOCK.
 	if msg.Index >= b.beaconCfg.MaxBlobsPerBlock {
-		return fmt.Errorf("blob index out of range")
+		return errors.New("blob index out of range")
 	}
 	sidecarSubnetIndex := msg.Index % b.beaconCfg.MaxBlobsPerBlock
 	if sidecarSubnetIndex != *subnetId {
@@ -148,7 +149,7 @@ func (b *blobSidecarService) verifyAndStoreBlobSidecar(headState *state.CachingB
 func (b *blobSidecarService) verifySidecarsSignature(headState *state.CachingBeaconState, header *cltypes.SignedBeaconBlockHeader) error {
 	parentHeader, ok := b.forkchoiceStore.GetHeader(header.Header.ParentRoot)
 	if !ok {
-		return fmt.Errorf("parent header not found")
+		return errors.New("parent header not found")
 	}
 	currentVersion := b.beaconCfg.GetCurrentStateVersion(parentHeader.Slot / b.beaconCfg.SlotsPerEpoch)
 	forkVersion := b.beaconCfg.GetForkVersionByVersion(currentVersion)
@@ -168,7 +169,7 @@ func (b *blobSidecarService) verifySidecarsSignature(headState *state.CachingBea
 		return err
 	}
 	if !ok {
-		return fmt.Errorf("blob signature validation: signature not valid")
+		return errors.New("blob signature validation: signature not valid")
 	}
 	return nil
 }

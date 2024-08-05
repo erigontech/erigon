@@ -38,6 +38,9 @@ import (
 	"golang.org/x/crypto/sha3"
 	"golang.org/x/sync/errgroup"
 
+	"github.com/erigontech/erigon-lib/common/dbg"
+	"github.com/erigontech/erigon/polygon/bridge"
+
 	"github.com/erigontech/erigon-lib/log/v3"
 
 	"github.com/erigontech/erigon-lib/chain"
@@ -63,7 +66,6 @@ import (
 	"github.com/erigontech/erigon/polygon/bor/finality/whitelist"
 	"github.com/erigontech/erigon/polygon/bor/statefull"
 	"github.com/erigontech/erigon/polygon/bor/valset"
-	"github.com/erigontech/erigon/polygon/bridge"
 	"github.com/erigontech/erigon/polygon/heimdall"
 	"github.com/erigontech/erigon/rlp"
 	"github.com/erigontech/erigon/rpc"
@@ -254,6 +256,14 @@ type ValidateHeaderTimeSignerSuccessionNumber interface {
 	GetSignerSuccessionNumber(signer libcommon.Address, number uint64) (int, error)
 }
 
+type spanReader interface {
+	Span(ctx context.Context, id uint64) (*heimdall.Span, bool, error)
+}
+
+type bridgeReader interface {
+	Events(ctx context.Context, blockNum uint64) ([]*types.Message, error)
+}
+
 func ValidateHeaderTime(
 	header *types.Header,
 	now time.Time,
@@ -318,6 +328,8 @@ type Bor struct {
 	spanner                Spanner
 	GenesisContractsClient GenesisContracts
 	HeimdallClient         heimdall.HeimdallClient
+	spanReader             spanReader
+	bridgeReader           bridgeReader
 
 	// scope event.SubscriptionScope
 	// The fields below are for testing only
@@ -329,7 +341,6 @@ type Bor struct {
 	frozenSnapshotsInit sync.Once
 	rootHashCache       *lru.ARCCache[string, string]
 	headerProgress      HeaderProgress
-	polygonBridge       bridge.PolygonBridge
 }
 
 type signer struct {
@@ -346,7 +357,8 @@ func New(
 	heimdallClient heimdall.HeimdallClient,
 	genesisContracts GenesisContracts,
 	logger log.Logger,
-	polygonBridge bridge.Service,
+	bridgeReader bridgeReader,
+	spanReader spanReader,
 ) *Bor {
 	// get bor config
 	borConfig := chainConfig.Bor.(*borcfg.BorConfig)
@@ -373,7 +385,8 @@ func New(
 		execCtx:                context.Background(),
 		logger:                 logger,
 		closeCh:                make(chan struct{}),
-		polygonBridge:          polygonBridge,
+		bridgeReader:           bridgeReader,
+		spanReader:             spanReader,
 	}
 
 	c.authorizedSigner.Store(&signer{
@@ -399,19 +412,19 @@ type rwWrapper struct {
 }
 
 func (w rwWrapper) Update(ctx context.Context, f func(tx kv.RwTx) error) error {
-	return fmt.Errorf("Update not implemented")
+	return errors.New("Update not implemented")
 }
 
 func (w rwWrapper) UpdateNosync(ctx context.Context, f func(tx kv.RwTx) error) error {
-	return fmt.Errorf("UpdateNosync not implemented")
+	return errors.New("UpdateNosync not implemented")
 }
 
 func (w rwWrapper) BeginRw(ctx context.Context) (kv.RwTx, error) {
-	return nil, fmt.Errorf("BeginRw not implemented")
+	return nil, errors.New("BeginRw not implemented")
 }
 
 func (w rwWrapper) BeginRwNosync(ctx context.Context) (kv.RwTx, error) {
-	return nil, fmt.Errorf("BeginRwNosync not implemented")
+	return nil, errors.New("BeginRwNosync not implemented")
 }
 
 // This is used by the rpcdaemon and tests which need read only access to the provided data services
@@ -1383,6 +1396,16 @@ func (c *Bor) fetchAndCommitSpan(
 		}
 
 		heimdallSpan = *s
+	} else if c.spanReader != nil {
+		span, ok, err := c.spanReader.Span(context.Background(), newSpanID)
+		if err != nil {
+			return err
+		}
+		if !ok {
+			return errors.New(fmt.Sprintf("error fetching span %v", newSpanID))
+		}
+
+		heimdallSpan = *span
 	} else {
 		spanJson := chain.Chain.BorSpan(newSpanID)
 		if err := json.Unmarshal(spanJson, &heimdallSpan); err != nil {
@@ -1471,6 +1494,7 @@ func (c *Bor) getHeaderByNumber(ctx context.Context, tx kv.Tx, number uint64) (*
 		return nil, err
 	}
 	if header == nil {
+		_, _ = c.blockReader.HeaderByNumber(dbg.ContextWithDebug(ctx, true), tx, number)
 		return nil, fmt.Errorf("[bor] header not found: %d", number)
 	}
 	return header, nil
@@ -1485,9 +1509,13 @@ func (c *Bor) CommitStates(
 ) error {
 	blockNum := header.Number.Uint64()
 
-	if c.polygonBridge != nil {
-		events, err := c.polygonBridge.GetEvents(c.execCtx, blockNum)
+	if c.bridgeReader != nil {
+		events, err := c.bridgeReader.Events(c.execCtx, blockNum)
 		if err != nil {
+			if errors.Is(err, bridge.ErrMapNotAvailable) {
+				return nil
+			}
+
 			return err
 		}
 

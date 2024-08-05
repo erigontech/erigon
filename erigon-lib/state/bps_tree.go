@@ -20,8 +20,9 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
-	"github.com/c2h5oh/datasize"
 	"unsafe"
+
+	"github.com/c2h5oh/datasize"
 
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/log/v3"
@@ -77,7 +78,7 @@ func (it *BpsTreeIterator) Di() uint64 {
 
 func (it *BpsTreeIterator) KVFromGetter(g ArchiveGetter) ([]byte, []byte, error) {
 	if it == nil {
-		return nil, nil, fmt.Errorf("iterator is nil")
+		return nil, nil, errors.New("iterator is nil")
 	}
 	//fmt.Printf("kv from %p getter %p tree %p offt %d\n", it, g, it.t, it.i)
 	k, v, err := it.t.dataLookupFunc(it.i, g)
@@ -156,16 +157,11 @@ func (b *BpsTree) WarmUp(kv ArchiveGetter) error {
 		if err != nil {
 			return err
 		}
-		//if b.st == nil {
-		//	b.st = splay.NewTree(common.Copy(key), splay.Loc{Di: di, Offset: b.offt.Get(di)})
-		//} else {
-		//	b.st.Insert(common.Copy(key), splay.Loc{Di: di, Offset: b.offt.Get(di)})
-		//}
 		b.mx = append(b.mx, Node{off: b.offt.Get(di), key: common.Copy(key), di: di})
 		cachedBytes += nsz + uint64(len(key))
 	}
 
-	log.Root().Info("WarmUp finished", "file", kv.FileName(), "M", b.M, "N", N,
+	log.Root().Debug("WarmUp finished", "file", kv.FileName(), "M", b.M, "N", N,
 		"cached", fmt.Sprintf("%d %%%.5f", len(b.mx), float64(len(b.mx))/float64(N)*100),
 		"cacheSize", datasize.ByteSize(cachedBytes).HR(), "fileSize", datasize.ByteSize(kv.Size()).HR())
 	return nil
@@ -235,7 +231,6 @@ func (b *BpsTree) Seek(g ArchiveGetter, seekKey []byte) (key, value []byte, di u
 			if cmp == 0 {
 				r = l
 				break
-				//return key, value, l, true, nil
 			} else if cmp < 0 { //found key is greater than seekKey
 				if l+1 < b.offt.Count() {
 					l++
@@ -244,7 +239,6 @@ func (b *BpsTree) Seek(g ArchiveGetter, seekKey []byte) (key, value []byte, di u
 			}
 			r = l
 			break
-			//return key, value, l, false, nil
 		}
 
 		m = (l + r) >> 1

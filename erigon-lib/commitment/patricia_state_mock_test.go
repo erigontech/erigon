@@ -19,6 +19,7 @@ package commitment
 import (
 	"encoding/binary"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"slices"
 	"testing"
@@ -84,7 +85,7 @@ func (ms *MockState) GetAccount(plainKey []byte, cell *Cell) error {
 	}
 	if ex.Flags&StorageUpdate != 0 {
 		ms.t.Logf("GetAccount reading storage item for key [%x]", plainKey)
-		return fmt.Errorf("storage read by GetAccount")
+		return errors.New("storage read by GetAccount")
 	}
 	if ex.Flags&DeleteUpdate != 0 {
 		ms.t.Fatalf("GetAccount reading deleted account for key [%x]", plainKey)

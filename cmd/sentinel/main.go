@@ -23,7 +23,7 @@ import (
 
 	"github.com/erigontech/erigon-lib/common/disk"
 	"github.com/erigontech/erigon-lib/common/mem"
-	"github.com/erigontech/erigon/cl/phase1/core"
+	"github.com/erigontech/erigon/cl/phase1/core/checkpoint_sync"
 	"github.com/erigontech/erigon/cl/sentinel"
 	"github.com/erigontech/erigon/cl/sentinel/service"
 	"github.com/erigontech/erigon/cl/utils/eth_clock"
@@ -60,7 +60,7 @@ func runSentinelNode(cliCtx *cli.Context) error {
 	go mem.LogMemStats(cliCtx.Context, log.Root())
 	go disk.UpdateDiskStats(cliCtx.Context, log.Root())
 
-	bs, err := core.RetrieveBeaconState(context.Background(), cfg.BeaconCfg, cfg.NetworkType)
+	bs, err := checkpoint_sync.NewRemoteCheckpointSync(cfg.BeaconCfg, cfg.NetworkType).GetLatestBeaconState(cliCtx.Context)
 	if err != nil {
 		return err
 	}

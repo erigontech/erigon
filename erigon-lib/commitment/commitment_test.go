@@ -329,7 +329,7 @@ func TestBranchData_ReplacePlainKeys_WithEmpty(t *testing.T) {
 	})
 }
 
-func TestNewUpdateTree(t *testing.T) {
+func TestNewUpdates(t *testing.T) {
 	t.Run("ModeUpdate", func(t *testing.T) {
 		ut := NewUpdates(ModeUpdate, t.TempDir(), keyHasherNoop)
 
@@ -349,7 +349,7 @@ func TestNewUpdateTree(t *testing.T) {
 
 }
 
-func TestUpdateTree_TouchPlainKey(t *testing.T) {
+func TestUpdates_TouchPlainKey(t *testing.T) {
 	utUpdate := NewUpdates(ModeUpdate, t.TempDir(), keyHasherNoop)
 	utDirect := NewUpdates(ModeDirect, t.TempDir(), keyHasherNoop)
 	utUpdate1 := NewUpdates(ModeUpdate, t.TempDir(), keyHasherNoop)

@@ -175,7 +175,7 @@ func (s *Service) Stop() error {
 // until termination.
 func (s *Service) loop() {
 	// Resolve the URL, defaulting to TLS, but falling back to none too
-	path := fmt.Sprintf("%s/api", s.host)
+	path := s.host + "/api"
 	urls := []string{path}
 
 	// url.Parse and url.IsAbs is unsuitable (https://github.com/golang/go/issues/19779)
@@ -399,7 +399,7 @@ func (s *Service) login(conn *connWrapper) error {
 			Name:     s.node,
 			Node:     nodeName,
 			Port:     0,
-			Network:  fmt.Sprintf("%d", s.networkid),
+			Network:  strconv.FormatUint(s.networkid, 10),
 			Protocol: strings.Join(protocols, ", "),
 			API:      "No",
 			Os:       runtime.GOOS,

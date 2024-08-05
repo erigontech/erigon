@@ -19,7 +19,7 @@ package jsonrpc
 import (
 	"bytes"
 	"context"
-	"fmt"
+	"errors"
 	"math/big"
 	"sync"
 	"sync/atomic"
@@ -127,9 +127,8 @@ type EthAPI interface {
 
 type BaseAPI struct {
 	// all caches are thread-safe
-	stateCache    kvcache.Cache
-	blocksLRU     *lru.Cache[common.Hash, *types.Block]
-	receiptsCache *lru.Cache[common.Hash, []*types.Receipt]
+	stateCache kvcache.Cache
+	blocksLRU  *lru.Cache[common.Hash, *types.Block]
 
 	filters      *rpchelper.Filters
 	_chainConfig atomic.Pointer[chain.Config]
@@ -159,23 +158,16 @@ func NewBaseApi(f *rpchelper.Filters, stateCache kvcache.Cache, blockReader serv
 	if err != nil {
 		panic(err)
 	}
-	receiptsCache, err := lru.New[common.Hash, []*types.Receipt](receiptsCacheLimit)
-	if err != nil {
-		panic(err)
-	}
-
-	receiptsGenerator := receipts.NewGenerator(receiptsCache, blockReader, engine)
 
 	return &BaseAPI{
 		filters:           f,
 		stateCache:        stateCache,
 		blocksLRU:         blocksLRU,
-		receiptsCache:     receiptsCache,
 		_blockReader:      blockReader,
 		_txnReader:        blockReader,
 		evmCallTimeout:    evmCallTimeout,
 		_engine:           engine,
-		receiptsGenerator: receiptsGenerator,
+		receiptsGenerator: receipts.NewGenerator(receiptsCacheLimit, blockReader, engine),
 		dirs:              dirs,
 	}
 }
@@ -261,7 +253,7 @@ func (api *BaseAPI) chainConfigWithGenesis(ctx context.Context, tx kv.Tx) (*chai
 		return nil, nil, err
 	}
 	if genesisBlock == nil {
-		return nil, nil, fmt.Errorf("genesis block not found in database")
+		return nil, nil, errors.New("genesis block not found in database")
 	}
 	cc, err = rawdb.ReadChainConfig(tx, genesisBlock.Hash())
 	if err != nil {
@@ -320,7 +312,7 @@ func (api *BaseAPI) checkPruneHistory(tx kv.Tx, block uint64) error {
 		}
 		prunedTo := p.History.PruneTo(latest)
 		if block < prunedTo {
-			return fmt.Errorf("history has been pruned for this block")
+			return errors.New("history has been pruned for this block")
 		}
 	}
 

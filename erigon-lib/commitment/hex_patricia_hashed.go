@@ -21,6 +21,7 @@ import (
 	"context"
 	"encoding/binary"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"hash"
 	"io"
@@ -390,7 +391,7 @@ func (cell *Cell) deriveHashedKeys(depth int, keccak keccakState, accountKeyLen 
 	extraLen := 0
 	if cell.apl > 0 {
 		if depth > 64 {
-			return fmt.Errorf("deriveHashedKeys accountPlainKey present at depth > 64")
+			return errors.New("deriveHashedKeys accountPlainKey present at depth > 64")
 		}
 		extraLen = 64 - depth
 	}
@@ -432,9 +433,9 @@ func (cell *Cell) fillFromFields(data []byte, pos int, fieldBits PartFlags) (int
 	if fieldBits&HashedKeyPart != 0 {
 		l, n := binary.Uvarint(data[pos:])
 		if n == 0 {
-			return 0, fmt.Errorf("fillFromFields buffer too small for hashedKey len")
+			return 0, errors.New("fillFromFields buffer too small for hashedKey len")
 		} else if n < 0 {
-			return 0, fmt.Errorf("fillFromFields value overflow for hashedKey len")
+			return 0, errors.New("fillFromFields value overflow for hashedKey len")
 		}
 		pos += n
 		if len(data) < pos+int(l) {
@@ -454,13 +455,13 @@ func (cell *Cell) fillFromFields(data []byte, pos int, fieldBits PartFlags) (int
 	if fieldBits&AccountPlainPart != 0 {
 		l, n := binary.Uvarint(data[pos:])
 		if n == 0 {
-			return 0, fmt.Errorf("fillFromFields buffer too small for accountPlainKey len")
+			return 0, errors.New("fillFromFields buffer too small for accountPlainKey len")
 		} else if n < 0 {
-			return 0, fmt.Errorf("fillFromFields value overflow for accountPlainKey len")
+			return 0, errors.New("fillFromFields value overflow for accountPlainKey len")
 		}
 		pos += n
 		if len(data) < pos+int(l) {
-			return 0, fmt.Errorf("fillFromFields buffer too small for accountPlainKey")
+			return 0, errors.New("fillFromFields buffer too small for accountPlainKey")
 		}
 		cell.apl = int(l)
 		if l > 0 {
@@ -474,13 +475,13 @@ func (cell *Cell) fillFromFields(data []byte, pos int, fieldBits PartFlags) (int
 	if fieldBits&StoragePlainPart != 0 {
 		l, n := binary.Uvarint(data[pos:])
 		if n == 0 {
-			return 0, fmt.Errorf("fillFromFields buffer too small for storagePlainKey len")
+			return 0, errors.New("fillFromFields buffer too small for storagePlainKey len")
 		} else if n < 0 {
-			return 0, fmt.Errorf("fillFromFields value overflow for storagePlainKey len")
+			return 0, errors.New("fillFromFields value overflow for storagePlainKey len")
 		}
 		pos += n
 		if len(data) < pos+int(l) {
-			return 0, fmt.Errorf("fillFromFields buffer too small for storagePlainKey")
+			return 0, errors.New("fillFromFields buffer too small for storagePlainKey")
 		}
 		cell.spl = int(l)
 		if l > 0 {
@@ -493,13 +494,13 @@ func (cell *Cell) fillFromFields(data []byte, pos int, fieldBits PartFlags) (int
 	if fieldBits&HashPart != 0 {
 		l, n := binary.Uvarint(data[pos:])
 		if n == 0 {
-			return 0, fmt.Errorf("fillFromFields buffer too small for hash len")
+			return 0, errors.New("fillFromFields buffer too small for hash len")
 		} else if n < 0 {
-			return 0, fmt.Errorf("fillFromFields value overflow for hash len")
+			return 0, errors.New("fillFromFields value overflow for hash len")
 		}
 		pos += n
 		if len(data) < pos+int(l) {
-			return 0, fmt.Errorf("fillFromFields buffer too small for hash")
+			return 0, errors.New("fillFromFields buffer too small for hash")
 		}
 		cell.hl = int(l)
 		if l > 0 {
@@ -909,7 +910,7 @@ func (hph *HexPatriciaHashed) computeCellHash(cell *Cell, depth int, buf []byte)
 					fmt.Printf("EXTENSION HASH %x DROPS LEAF\n", storageRootHash)
 					hadToReset.Add(1)
 				} else {
-					return nil, fmt.Errorf("computeCellHash extension without hash")
+					return nil, errors.New("computeCellHash extension without hash")
 				}
 			} else if cell.hl > 0 {
 				storageRootHash = cell.h
@@ -966,7 +967,7 @@ func (hph *HexPatriciaHashed) computeCellHash(cell *Cell, depth int, buf []byte)
 			}
 			buf = append(buf, hash[:]...)
 		} else {
-			return nil, fmt.Errorf("computeCellHash extension without hash")
+			return nil, errors.New("computeCellHash extension without hash")
 		}
 	} else if cell.hl > 0 {
 		buf = append(buf, cell.h[:cell.hl]...)
@@ -1227,7 +1228,7 @@ func updatedNibs(num uint16) string {
 func (hph *HexPatriciaHashed) fold() (err error) {
 	updateKeyLen := hph.currentKeyLen
 	if hph.activeRows == 0 {
-		return fmt.Errorf("cannot fold - no active rows")
+		return errors.New("cannot fold - no active rows")
 	}
 	// Move information to the row above
 	var upCell *Cell
@@ -2035,7 +2036,7 @@ const (
 
 func (cell *Cell) Decode(buf []byte) error {
 	if len(buf) < 1 {
-		return fmt.Errorf("invalid buffer size to contain Cell (at least 1 byte expected)")
+		return errors.New("invalid buffer size to contain Cell (at least 1 byte expected)")
 	}
 	cell.reset()
 
@@ -2120,7 +2121,7 @@ func (hph *HexPatriciaHashed) SetState(buf []byte) error {
 		return nil
 	}
 	if hph.activeRows != 0 {
-		return fmt.Errorf("target trie has active rows, could not reset state before fold")
+		return errors.New("target trie has active rows, could not reset state before fold")
 	}
 
 	var s state
@@ -2444,18 +2445,18 @@ func (u *Update) Encode(buf []byte, numBuf []byte) []byte {
 
 func (u *Update) Decode(buf []byte, pos int) (int, error) {
 	if len(buf) < pos+1 {
-		return 0, fmt.Errorf("decode Update: buffer too small for flags")
+		return 0, errors.New("decode Update: buffer too small for flags")
 	}
 	u.Flags = UpdateFlags(buf[pos])
 	pos++
 	if u.Flags&BalanceUpdate != 0 {
 		if len(buf) < pos+1 {
-			return 0, fmt.Errorf("decode Update: buffer too small for balance len")
+			return 0, errors.New("decode Update: buffer too small for balance len")
 		}
 		balanceLen := int(buf[pos])
 		pos++
 		if len(buf) < pos+balanceLen {
-			return 0, fmt.Errorf("decode Update: buffer too small for balance")
+			return 0, errors.New("decode Update: buffer too small for balance")
 		}
 		u.Balance.SetBytes(buf[pos : pos+balanceLen])
 		pos += balanceLen
@@ -2464,16 +2465,16 @@ func (u *Update) Decode(buf []byte, pos int) (int, error) {
 		var n int
 		u.Nonce, n = binary.Uvarint(buf[pos:])
 		if n == 0 {
-			return 0, fmt.Errorf("decode Update: buffer too small for nonce")
+			return 0, errors.New("decode Update: buffer too small for nonce")
 		}
 		if n < 0 {
-			return 0, fmt.Errorf("decode Update: nonce overflow")
+			return 0, errors.New("decode Update: nonce overflow")
 		}
 		pos += n
 	}
 	if u.Flags&CodeUpdate != 0 {
 		if len(buf) < pos+length.Hash {
-			return 0, fmt.Errorf("decode Update: buffer too small for codeHash")
+			return 0, errors.New("decode Update: buffer too small for codeHash")
 		}
 		copy(u.CodeHashOrStorage[:], buf[pos:pos+32])
 		pos += length.Hash
@@ -2482,14 +2483,14 @@ func (u *Update) Decode(buf []byte, pos int) (int, error) {
 	if u.Flags&StorageUpdate != 0 {
 		l, n := binary.Uvarint(buf[pos:])
 		if n == 0 {
-			return 0, fmt.Errorf("decode Update: buffer too small for storage len")
+			return 0, errors.New("decode Update: buffer too small for storage len")
 		}
 		if n < 0 {
-			return 0, fmt.Errorf("decode Update: storage pos overflow")
+			return 0, errors.New("decode Update: storage pos overflow")
 		}
 		pos += n
 		if len(buf) < pos+int(l) {
-			return 0, fmt.Errorf("decode Update: buffer too small for storage")
+			return 0, errors.New("decode Update: buffer too small for storage")
 		}
 		u.ValLength = int(l)
 		copy(u.CodeHashOrStorage[:], buf[pos:pos+int(l)])
