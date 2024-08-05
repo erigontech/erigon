@@ -710,8 +710,8 @@ type DomainRoTx struct {
 
 	valsC kv.Cursor
 
-	l0Cache                 *simplelru.LRU[uint64, []byte]
-	l0CacheHit, l0CacheMiss int
+	lEachCache                     [2]*simplelru.LRU[uint64, []byte]
+	lEachCacheHit, lEachCacheTotal [2]int
 }
 
 func domainReadMetric(name kv.Domain, level int) metrics.Summary {
@@ -1410,16 +1410,21 @@ func (dt *DomainRoTx) getFromFiles(filekey []byte) (v []byte, found bool, fileSt
 			}
 		}
 
-		if dt.d.name != kv.CommitmentDomain && i == 0 {
-			if dt.l0Cache == nil {
-				dt.l0Cache, err = simplelru.NewLRU[uint64, []byte](32, nil)
+		if dt.d.name != kv.CommitmentDomain && i < len(dt.lEachCache) {
+			if dt.lEachCache[i] == nil {
+				dt.lEachCache[i], err = simplelru.NewLRU[uint64, []byte](64, nil)
 				if err != nil {
 					panic(err)
 				}
 			}
 			var ok bool
-			v, ok = dt.l0Cache.Get(hi)
+			v, ok = dt.lEachCache[i].Get(hi)
+			//dt.lEachCacheTotal[i]++
 			if ok {
+				//dt.lEachCacheHit[i]++
+				//if dt.lEachCacheHit[i]%100_000 == 0 {
+				//	log.Warn("[dbg] lEachCache", "a", dt.d.filenameBase, "hit", dt.lEachCacheHit[i], "total", dt.lEachCacheTotal[i], "ratio", fmt.Sprintf("%.2f", float64(dt.lEachCacheHit[i])/float64(dt.lEachCacheTotal[i])))
+				//}
 				return v, true, dt.files[i].startTxNum, dt.files[i].endTxNum, nil
 			}
 		}
@@ -1438,8 +1443,8 @@ func (dt *DomainRoTx) getFromFiles(filekey []byte) (v []byte, found bool, fileSt
 			fmt.Printf("GetLatest(%s, %x) -> found in file %s\n", dt.d.filenameBase, filekey, dt.files[i].src.decompressor.FileName())
 		}
 
-		if dt.d.name != kv.CommitmentDomain && i == 0 {
-			dt.l0Cache.Add(hi, v)
+		if dt.d.name != kv.CommitmentDomain && i < len(dt.lEachCache) {
+			dt.lEachCache[i].Add(hi, v)
 		}
 		return v, true, dt.files[i].startTxNum, dt.files[i].endTxNum, nil
 	}
