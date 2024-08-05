@@ -1032,7 +1032,7 @@ var temporalReplacementForEmpty = []byte("root")
 
 // unfoldBranchNode returns true if unfolding has been done
 func (hph *HexPatriciaHashed) unfoldBranchNode(row, depth int, deleted bool) (bool, error) {
-	key := hexToCompact(hph.currentKey[:hph.currentKeyLen])
+	key := nibblesToBytes(hph.currentKey[:hph.currentKeyLen])
 	if len(key) == 0 {
 		fmt.Printf("unfoldBranchNode EMPTY KEY\n")
 		key = temporalReplacementForEmpty
@@ -1045,7 +1045,7 @@ func (hph *HexPatriciaHashed) unfoldBranchNode(row, depth int, deleted bool) (bo
 		branchData = branchData[2:] // skip touch map and keep the rest
 	}
 	if hph.trace {
-		fmt.Printf("unfoldBranchNode prefix '%x', compacted [%x] depth %d row %d '%x'\n", key, hph.currentKey[:hph.currentKeyLen], depth, row, branchData)
+		fmt.Printf("unfoldBranchNode prefix '%x' row %d depth %d  '%x'\n", key, row, depth, branchData)
 	}
 	if !hph.rootChecked && hph.currentKeyLen == 0 && len(branchData) == 0 {
 		// Special case - empty or deleted root
@@ -1054,7 +1054,7 @@ func (hph *HexPatriciaHashed) unfoldBranchNode(row, depth int, deleted bool) (bo
 	}
 	if len(branchData) == 0 {
 		log.Warn("got empty branch data during unfold", "key", hex.EncodeToString(key), "row", row, "depth", depth, "deleted", deleted)
-		return false, fmt.Errorf("empty branch data read during unfold, prefix %x", hexToCompact(hph.currentKey[:hph.currentKeyLen]))
+		return false, fmt.Errorf("empty branch data read during unfold, prefix %x", nibblesToBytes(hph.currentKey[:hph.currentKeyLen]))
 	}
 	hph.branchBefore[row] = true
 	bitmap := binary.BigEndian.Uint16(branchData[0:])
@@ -1193,7 +1193,7 @@ func updatedNibs(num uint16) string {
 	var nibbles []string
 	for i := 0; i < 16; i++ {
 		if num&(1<<i) != 0 {
-			nibbles = append(nibbles, fmt.Sprintf("%X", i))
+			nibbles = append(nibbles, fmt.Sprintf("%x", i))
 		}
 	}
 	return strings.Join(nibbles, ",")
@@ -1226,14 +1226,14 @@ func (hph *HexPatriciaHashed) fold() (err error) {
 	}
 
 	depth := hph.depths[row]
-	updateKey := hexToCompact(hph.currentKey[:updateKeyLen])
+	updateKey := nibblesToBytes(hph.currentKey[:updateKeyLen])
 	if len(updateKey) == 0 {
 		updateKey = temporalReplacementForEmpty
 	}
 	partsCount := bits.OnesCount16(hph.afterMap[row])
 
 	if hph.trace {
-		fmt.Printf("fold: row: %d updated: %s current prefix: [%x] touchMap: %016b afterMap: %016b \n",
+		fmt.Printf("fold: row: %d updatedNibs: %s current prefix: [%x] touchMap: %016b afterMap: %016b \n",
 			row, updatedNibs(hph.touchMap[row]&hph.afterMap[row]), hph.currentKey[:hph.currentKeyLen], hph.touchMap[row], hph.afterMap[row])
 	}
 	switch partsCount {
@@ -1455,30 +1455,30 @@ func (hph *HexPatriciaHashed) deleteCell(hashedKey []byte) {
 // fetches cell by key and set touch/after maps. Requires that prefix to be already unfolded
 func (hph *HexPatriciaHashed) updateCell(plainKey, hashedKey []byte) *Cell {
 	var cell *Cell
-	var nib, depth int
+	var nibble, depth int
 	if hph.activeRows == 0 {
 		cell = &hph.root
 		hph.rootTouched, hph.rootPresent = true, true
 	} else {
 		row := hph.activeRows - 1
 		depth = hph.depths[row]
-		nib = int(hashedKey[hph.currentKeyLen])
-		cell = &hph.grid[row][nib]
-		hph.touchMap[row] |= (uint16(1) << nib)
-		hph.afterMap[row] |= (uint16(1) << nib)
+		nibble = int(hashedKey[hph.currentKeyLen])
+		cell = &hph.grid[row][nibble]
+		hph.touchMap[row] |= (uint16(1) << nibble)
+		hph.afterMap[row] |= (uint16(1) << nibble)
 		if hph.trace {
-			fmt.Printf("updateCell setting (%d, %x, depth=%d)\n", row, nib, depth)
+			fmt.Printf("updateCell setting (%d, %x, depth=%d)\n", row, nibble, depth)
 		}
 	}
 	if cell.downHashedLen == 0 {
 		copy(cell.downHashedKey[:], hashedKey[depth:])
 		cell.downHashedLen = len(hashedKey) - depth
 		if hph.trace {
-			fmt.Printf("set downHasheKey=[%x]\n", cell.downHashedKey[:cell.downHashedLen])
+			fmt.Printf("	set downHasheKey=[%x]\n", cell.downHashedKey[:cell.downHashedLen])
 		}
 	} else {
 		if hph.trace {
-			fmt.Printf("keep downHasheKey=[%x]\n", cell.downHashedKey[:cell.downHashedLen])
+			fmt.Printf("	keep downHasheKey=[%x]\n", cell.downHashedKey[:cell.downHashedLen])
 		}
 	}
 	if len(plainKey) == hph.accountKeyLen {
@@ -2149,7 +2149,7 @@ func bytesToUint64(buf []byte) (x uint64) {
 	return
 }
 
-func hexToCompact(key []byte) []byte {
+func nibblesToBytes(key []byte) []byte {
 	zeroByte, keyPos, keyLen := makeCompactZeroByte(key)
 	bufLen := keyLen/2 + 1 // always > 0
 	buf := make([]byte, bufLen)
