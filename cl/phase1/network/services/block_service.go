@@ -21,6 +21,7 @@ import (
 	"sync"
 	"time"
 
+	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/cl/beacon/beaconevents"
@@ -152,7 +153,7 @@ func (b *blockService) ProcessMessage(ctx context.Context, _ *uint64, msg *cltyp
 
 // publishBlockEvent publishes a block event
 func (b *blockService) publishBlockEvent(block *cltypes.SignedBeaconBlock) {
-	/*if b.emitter == nil {
+	if b.emitter == nil {
 		return
 	}
 	blockRoot, err := block.Block.HashSSZ()
@@ -161,11 +162,11 @@ func (b *blockService) publishBlockEvent(block *cltypes.SignedBeaconBlock) {
 		return
 	}
 	// publish block to event handler
-	b.emitter.Publish("block", map[string]any{
-		"slot":                 strconv.Itoa(int(block.Block.Slot)),
-		"block":                libcommon.Hash(blockRoot),
-		"execution_optimistic": false,
-	})*/
+	b.emitter.State().SendBlock(&beaconevents.BlockData{
+		Slot:                block.Block.Slot,
+		Block:               libcommon.Hash(blockRoot),
+		ExecutionOptimistic: false,
+	})
 }
 
 // scheduleBlockForLaterProcessing schedules a block for later processing
