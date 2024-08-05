@@ -1385,6 +1385,10 @@ var (
 )
 
 func (dt *DomainRoTx) getFromFiles(filekey []byte) (v []byte, found bool, fileStartTxNum uint64, fileEndTxNum uint64, err error) {
+	if len(dt.files) == 0 {
+		return nil, false, 0, 0, err
+	}
+
 	hi, _ := dt.ht.iit.hashKey(filekey)
 
 	for i := len(dt.files) - 1; i >= 0; i-- {
