@@ -581,7 +581,7 @@ func (api *ZkEvmAPIImpl) GetBatchByNumber(ctx context.Context, batchNumber rpc.B
 	batch.GlobalExitRoot = batchGer
 
 	// sequence
-	seq, err := hermezDb.GetSequenceByBatchNo(batchNo)
+	seq, err := hermezDb.GetSequenceByBatchNoOrHighest(batchNo)
 	if err != nil {
 		return nil, err
 	}
@@ -595,23 +595,37 @@ func (api *ZkEvmAPIImpl) GetBatchByNumber(ctx context.Context, batchNumber rpc.B
 	// sequenced, genesis or injected batch 1 - special batches 0,1 will always be closed, if next batch has blocks, bn must be closed
 	batch.Closed = seq != nil || batchNo == 0 || batchNo == 1 || found
 
-	// verification
-	ver, err := hermezDb.GetVerificationByBatchNo(batchNo)
+	// verification - if we can't find one, maybe this batch was verified along with a higher batch number
+	ver, err := hermezDb.GetVerificationByBatchNoOrHighest(batchNo)
 	if err != nil {
 		return nil, err
+	}
+	if ver == nil {
+		// TODO: this is the actual unverified batch behaviour probably set 0x00
 	}
 	if ver != nil {
 		batch.VerifyBatchTxHash = &ver.L1TxHash
-	}
 
-	// exit roots (MainnetExitRoot, RollupExitRoot)
-	infoTreeUpdate, err := hermezDb.GetL1InfoTreeUpdateByGer(batchGer)
-	if err != nil {
-		return nil, err
-	}
-	if infoTreeUpdate != nil {
-		batch.MainnetExitRoot = infoTreeUpdate.MainnetExitRoot
-		batch.RollupExitRoot = infoTreeUpdate.RollupExitRoot
+		verificationBatch := ver.BatchNo
+		verifiedBatchHighestBlock, err := hermezDb.GetHighestBlockInBatch(verificationBatch)
+		if err != nil {
+			return nil, err
+		}
+
+		verifiedBatchGer, err := hermezDb.GetBlockGlobalExitRoot(verifiedBatchHighestBlock)
+		if err != nil {
+			return nil, err
+		}
+
+		// exit roots (MainnetExitRoot, RollupExitRoot)
+		infoTreeUpdate, err := hermezDb.GetL1InfoTreeUpdateByGer(verifiedBatchGer)
+		if err != nil {
+			return nil, err
+		}
+		if infoTreeUpdate != nil {
+			batch.MainnetExitRoot = infoTreeUpdate.MainnetExitRoot
+			batch.RollupExitRoot = infoTreeUpdate.RollupExitRoot
+		}
 	}
 
 	// local exit root
