@@ -12,10 +12,10 @@ jobs:
     strategy:
       matrix:
         include:
-          - name: "integration-5"
-            rpc_url: "http://34.175.214.161:8500"
-            eth_address: "0x41BB6960a5156aC29d6e9E04273837AD19d6691A"
-            secret_name: "NETWORK5_PRIVATE_KEY"
+          - name: "integration-8"
+            rpc_url: "http://34.175.214.161:18124"
+            eth_address: "0x126240A22FF66101131b0BcE1D6c27498ace7D41"
+            secret_name: "NETWORK5_PRIVATE_KEY_0X126"
           - name: "cdk-1"
             rpc_url: "http://34.175.214.161:8020"
             eth_address: "0x673df8221611aD1f714053b82c4F9E2b0867CcC6"
