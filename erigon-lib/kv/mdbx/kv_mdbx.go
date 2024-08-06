@@ -1389,14 +1389,6 @@ func (c *MdbxCursor) getBothRange(k, v []byte) ([]byte, error) {
 	_, v, err := c.c.Get(k, v, mdbx.GetBothRange)
 	return v, err
 }
-func (c *MdbxCursor) firstDup() ([]byte, error) {
-	_, v, err := c.c.Get(nil, nil, mdbx.FirstDup)
-	return v, err
-}
-func (c *MdbxCursor) lastDup() ([]byte, error) {
-	_, v, err := c.c.Get(nil, nil, mdbx.LastDup)
-	return v, err
-}
 
 func (c *MdbxCursor) First() ([]byte, []byte, error) {
 	return c.Seek(nil)
@@ -1800,7 +1792,7 @@ func (c *MdbxDupSortCursor) SeekBothRange(key, value []byte) ([]byte, error) {
 }
 
 func (c *MdbxDupSortCursor) FirstDup() ([]byte, error) {
-	v, err := c.firstDup()
+	_, v, err := c.c.Get(nil, nil, mdbx.FirstDup)
 	if err != nil {
 		if mdbx.IsNotFound(err) {
 			return nil, nil
@@ -1857,7 +1849,7 @@ func (c *MdbxDupSortCursor) PrevNoDup() ([]byte, []byte, error) {
 }
 
 func (c *MdbxDupSortCursor) LastDup() ([]byte, error) {
-	v, err := c.lastDup()
+	_, v, err := c.c.Get(nil, nil, mdbx.LastDup)
 	if err != nil {
 		if mdbx.IsNotFound(err) {
 			return nil, nil
