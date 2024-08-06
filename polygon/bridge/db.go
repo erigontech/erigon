@@ -17,6 +17,7 @@
 package bridge
 
 import (
+	"bytes"
 	"context"
 	"encoding/binary"
 	"time"
@@ -281,7 +282,7 @@ func (s *MdbxStore) GetEvents(ctx context.Context, start, end uint64) ([][]byte,
 			return nil, err
 		}
 
-		events = append(events, v)
+		events = append(events, bytes.Clone(v))
 	}
 
 	return events, err
