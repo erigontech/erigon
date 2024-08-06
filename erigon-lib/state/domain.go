@@ -826,37 +826,6 @@ func (dt *DomainRoTx) DebugEFKey(k []byte) error {
 	return nil
 }
 
-// mgas/s=68.05 average mgas/s=58.05
-// mgas/s=57.92 average mgas/s=50.32
-// mgas/s=41.85 average mgas/s=53.17
-// mgas/s=43.00 average mgas/s=49.40
-// - mgas/s=50.47 average mgas/s=52.11
-
-// mgas/s=130.20 average mgas/s=126.69
-// mgas/s=65.05 average mgas/s=112.85
-// mgas/s=57.70 average mgas/s=64.05
-// ?
-// - mgas/s=107.56 average mgas/s=86.65
-// - mgas/s=48.79 average mgas/s=60.01
-
-// mainnet chain tip: l0_cache_1_all - 16K items
-// a=code hit=61861 total=77861 Collisions=5779 Evictions=0 Inserts=16000 limit=16384 ratio=0.79
-// a=storage hit=664 total=1664 Collisions=29 Evictions=0 Inserts=1000 limit=16384 ratio=0.40
-// a=accounts hit=74395 total=154395 Collisions=46260 Evictions=63616 Inserts=80000 limit=16384 ratio=0.48
-//  mgas/s=65.67 average mgas/s=71.09
-
-// mainnet chain tip: l0_cache_1_all - 8K items
-// a=code hit=339 total=739 Collisions=6 Evictions=0 Inserts=400 limit=8000 ratio=0.46
-// a=storage hit=846 total=6446 Collisions=1527 Evictions=0 Inserts=5600 limit=8000 ratio=0.13
-// a=accounts hit=59 total=159 Collisions=1 Evictions=0 Inserts=100 limit=8000 ratio=0.37
-// mgas/s=63.94 average mgas/s=65.08
-
-// mainnet chain tip: l0_cache_1_all - 1K items
-// a=code hit=441 total=841 Collisions=69 Evictions=0 Inserts=400 limit=1000 ratio=0.52
-// a=storage hit=189 total=589 Collisions=64 Evictions=0 Inserts=400 limit=1000 ratio=0.32
-// a=accounts hit=64 total=164 Collisions=4 Evictions=0 Inserts=100 limit=1000 ratio=0.39
-// mgas/s=45.93 average mgas/s=59.59
-
 func (d *Domain) collectFilesStats() (datsz, idxsz, files uint64) {
 	d.History.dirtyFiles.Walk(func(items []*filesItem) bool {
 		for _, item := range items {
