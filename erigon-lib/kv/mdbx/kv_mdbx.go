@@ -1433,17 +1433,22 @@ func (c *MdbxCursor) Seek(seek []byte) (k, v []byte, err error) {
 
 	if len(seek) == 0 {
 		k, v, err = c.first()
-	} else {
-		k, v, err = c.setRange(seek)
+		if err != nil {
+			if mdbx.IsNotFound(err) {
+				return nil, nil, nil
+			}
+			return []byte{}, nil, fmt.Errorf("cursor.First: %w, bucket: %s, key: %x", err, c.bucketName, seek)
+		}
+		return k, v, nil
 	}
+
+	k, v, err = c.setRange(seek)
 	if err != nil {
 		if mdbx.IsNotFound(err) {
 			return nil, nil, nil
 		}
-		err = fmt.Errorf("failed MdbxKV cursor.seekInFiles(): %w, bucket: %s,  key: %x", err, c.bucketName, seek)
-		return []byte{}, nil, err
+		return []byte{}, nil, fmt.Errorf("cursor.SetRange: %w, bucket: %s, key: %x", err, c.bucketName, seek)
 	}
-
 	return k, v, nil
 }
 
