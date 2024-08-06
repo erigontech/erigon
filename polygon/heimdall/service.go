@@ -221,17 +221,27 @@ func (s *service) Run(ctx context.Context) error {
 }
 
 func (s *service) replayUntrackedSpans(ctx context.Context) error {
-	lastSpanId, _, err := s.store.Spans().LastEntityId(ctx)
+	lastSpanId, ok, err := s.store.Spans().LastEntityId(ctx)
+	if err != nil {
+		return err
+	}
+	if !ok {
+		return nil
+	}
+
+	lastProducerSelectionId, ok, err := s.store.SpanBlockProducerSelections().LastEntityId(ctx)
 	if err != nil {
 		return err
 	}
 
-	lastProducerSelectionId, _, err := s.store.SpanBlockProducerSelections().LastEntityId(ctx)
-	if err != nil {
-		return err
+	var start uint64
+	if ok {
+		start = lastProducerSelectionId + 1
+	} else {
+		start = lastProducerSelectionId
 	}
 
-	for id := lastProducerSelectionId + 1; id <= lastSpanId; id++ {
+	for id := start; id <= lastSpanId; id++ {
 		span, ok, err := s.store.Spans().Entity(ctx, id)
 		if err != nil {
 			return err
