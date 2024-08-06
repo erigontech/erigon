@@ -5,12 +5,12 @@ import (
 	"fmt"
 	"os"
 	"runtime"
-	"strconv"
 
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/dbg"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/cl/beacon/beaconevents"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/persistence/beacon_indicies"
 	state_accessors "github.com/erigontech/erigon/cl/persistence/state"
@@ -159,14 +159,14 @@ func emitHeadEvent(cfg *Cfg, headSlot uint64, headRoot common.Hash, headState *s
 		return fmt.Errorf("failed to hash ssz: %w", err)
 	}
 	// emit the head event
-	cfg.emitter.Publish("head", map[string]any{
-		"slot":                         strconv.Itoa(int(headSlot)),
-		"block":                        headRoot,
-		"state":                        common.Hash(stateRoot),
-		"epoch_transition":             true,
-		"previous_duty_dependent_root": previous_duty_dependent_root,
-		"current_duty_dependent_root":  current_duty_dependent_root,
-		"execution_optimistic":         false,
+	cfg.emitter.State().SendHead(&beaconevents.HeadData{
+		Slot:                      headSlot,
+		Block:                     headRoot,
+		State:                     stateRoot,
+		EpochTransition:           true,
+		PreviousDutyDependentRoot: previous_duty_dependent_root,
+		CurrentDutyDependentRoot:  current_duty_dependent_root,
+		ExecutionOptimistic:       false,
 	})
 	return nil
 }
