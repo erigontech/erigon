@@ -714,7 +714,7 @@ type DomainRoTx struct {
 	latestStateCache *freelru.LRU[uint64, fileCacheItem]
 }
 
-var latestStateCachePerDomain = dbg.EnvInt("LRU_LIMIT", 16*1024)
+var latestStateCachePerDomain = uint32(dbg.EnvInt("LRU_LIMIT", 16*1024))
 
 type fileCacheItem struct {
 	lvl uint8
