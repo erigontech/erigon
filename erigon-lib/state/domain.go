@@ -1395,11 +1395,11 @@ var (
 	UseBtree = true // if true, will use btree for all files
 )
 
-func u32h(u uint32) uint32 { return u }
+// func u32h(u uint32) uint32 { return u }
 func u64h(u uint64) uint32 { return uint32(u) }
-func u128h(u u128) uint32  { return uint32(u.hi) }
 
-type u128 struct{ hi, lo uint64 }
+//func u128h(u u128) uint32  { return uint32(u.hi) }
+//type u128 struct{ hi, lo uint64 }
 
 func (dt *DomainRoTx) getFromFiles(filekey []byte) (v []byte, found bool, fileStartTxNum uint64, fileEndTxNum uint64, err error) {
 	if len(dt.files) == 0 {
