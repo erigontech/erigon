@@ -210,6 +210,10 @@ func (b *Bridge) Unwind(ctx context.Context, tip *types.Header) error {
 func (b *Bridge) Events(ctx context.Context, blockNum uint64) ([]*types.Message, error) {
 	start, end, err := b.store.EventIDRange(ctx, blockNum)
 	if err != nil {
+		if errors.Is(err, ErrMapNotAvailable) {
+			return nil, nil
+		}
+
 		return nil, err
 	}
 

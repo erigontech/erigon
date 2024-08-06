@@ -138,15 +138,18 @@ func TestBridge(t *testing.T) {
 	require.Equal(t, event2Data, rlp.RawValue(res[1].Data()))
 
 	// get non-sprint block
-	_, err = b.Events(ctx, 1)
-	require.Error(t, err)
+	res, err = b.Events(ctx, 1)
+	require.Equal(t, len(res), 0)
+	require.NoError(t, err)
 
-	_, err = b.Events(ctx, 3)
-	require.Error(t, err)
+	res, err = b.Events(ctx, 3)
+	require.Equal(t, len(res), 0)
+	require.NoError(t, err)
 
 	// check block 0
-	_, err = b.Events(ctx, 0)
-	require.Error(t, err)
+	res, err = b.Events(ctx, 0)
+	require.Equal(t, len(res), 0)
+	require.NoError(t, err)
 
 	cancel()
 	wg.Wait()
@@ -231,8 +234,9 @@ func TestBridge_Unwind(t *testing.T) {
 	err = b.Unwind(ctx, &types.Header{Number: big.NewInt(3)})
 	require.NoError(t, err)
 
-	_, err = b.Events(ctx, 4)
-	require.Error(t, err)
+	res, err = b.Events(ctx, 4)
+	require.Equal(t, len(res), 0)
+	require.NoError(t, err)
 
 	cancel()
 	wg.Wait()
