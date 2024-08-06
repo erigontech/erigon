@@ -16,7 +16,7 @@ linters:
     - musttag
     - contextcheck
     - wrapcheck
-    - err113
+    - goerr113
     - unparam
     - makezero
     - testifylint #TODO: enable me
