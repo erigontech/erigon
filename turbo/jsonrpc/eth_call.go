@@ -23,8 +23,6 @@ import (
 	"fmt"
 	"math/big"
 
-	"github.com/c2h5oh/datasize"
-	"github.com/erigontech/erigon-lib/wrap"
 	"github.com/holiman/uint256"
 	"google.golang.org/grpc"
 
@@ -47,11 +45,9 @@ import (
 	"github.com/erigontech/erigon/core/vm"
 	"github.com/erigontech/erigon/core/vm/evmtypes"
 	"github.com/erigontech/erigon/crypto"
-	"github.com/erigontech/erigon/eth/ethconfig"
+	"github.com/erigontech/erigon/eth/consensuschain"
 	"github.com/erigontech/erigon/eth/stagedsync"
-	"github.com/erigontech/erigon/eth/stagedsync/stages"
 	"github.com/erigontech/erigon/eth/tracers/logger"
-	"github.com/erigontech/erigon/ethdb/prune"
 	"github.com/erigontech/erigon/params"
 	"github.com/erigontech/erigon/rpc"
 	ethapi2 "github.com/erigontech/erigon/turbo/adapter/ethapi"
@@ -496,10 +492,10 @@ func (api *BaseAPI) getWitness(ctx context.Context, db kv.RoDB, blockNrOrHash rp
 	}
 
 	// Compute the witness if it's for a tx or it's not present in db
-	// prevHeader, err := api._blockReader.HeaderByNumber(ctx, roTx, blockNr-1)
-	// if err != nil {
-	// 	return nil, err
-	// }
+	prevHeader, err := api._blockReader.HeaderByNumber(ctx, roTx, blockNr-1)
+	if err != nil {
+		return nil, err
+	}
 
 	regenerateHash := false
 	if latestBlock-blockNr > uint64(maxGetProofRewindBlockCount) {
@@ -516,59 +512,88 @@ func (api *BaseAPI) getWitness(ctx context.Context, db kv.RoDB, blockNrOrHash rp
 	}
 
 	// Prepare witness config
-	chainConfig, err := api.chainConfig(ctx, roTx)
+	chainConfig, err := api.chainConfig(ctx, txBatch)
 	if err != nil {
 		return nil, fmt.Errorf("error loading chain config: %v", err)
 	}
 
 	cfg := stagedsync.StageWitnessCfg(txBatch.MemDB(), true, 0, chainConfig, engine, api._blockReader, api.dirs)
-	txBatch, rl, err = stagedsync.RewindStagesForWitness(txBatch, blockNr, latestBlock, &cfg, regenerateHash, ctx, logger)
+	_, rl, err = stagedsync.RewindStagesForWitness(txBatch, blockNr, latestBlock, &cfg, regenerateHash, ctx, logger)
 	if err != nil {
 		return nil, err
 	}
 
-	// store, err := stagedsync.PrepareForWitness(roTx, block, prevHeader.Root, rl, &cfg, ctx, logger)
-	// if err != nil {
-	// 	return nil, err
-	// }
-
-	txc := wrap.TxContainer{Tx: txBatch.MemTx()}
-	batchSizeStr := "512M"
-	var batchSize datasize.ByteSize
-	err = batchSize.UnmarshalText([]byte(batchSizeStr))
+	store, err := stagedsync.PrepareForWitness(txBatch, block, prevHeader.Root, rl, &cfg, ctx, logger)
 	if err != nil {
 		return nil, err
 	}
 
-	pruneMode := prune.Mode{
-		Initialised: false,
-	}
-	vmConfig := &vm.Config{}
-	syncCfg := ethconfig.Defaults.Sync
+	_ = store
+
 	// cr := rawdb.NewCanonicalReader()
 	// agg, err := libstate.NewAggregator(ctx, api.dirs, config3.HistoryV3AggregationStep, db, cr, logger)
 	// if err != nil {
 	// 	return nil, err
 	// }
 
-	execCfg := stagedsync.StageExecuteBlocksCfg(txBatch.MemDB(), pruneMode, batchSize, chainConfig, engine, vmConfig, nil,
-		/*stateStream=*/ false,
-		/*badBlockHalt=*/ true, api.dirs, api._blockReader, nil, nil, syncCfg, nil)
+	// txc := wrap.TxContainer{Tx: txBatch.MemTx()}
+	// batchSizeStr := "512M"
+	// var batchSize datasize.ByteSize
+	// err = batchSize.UnmarshalText([]byte(batchSizeStr))
+	// if err != nil {
+	// 	return nil, err
+	// }
 
-	stateSyncStages := stagedsync.DefaultStages(ctx, stagedsync.SnapshotsCfg{}, stagedsync.HeadersCfg{}, stagedsync.BorHeimdallCfg{}, stagedsync.BlockHashesCfg{}, stagedsync.BodiesCfg{}, stagedsync.SendersCfg{}, stagedsync.ExecuteBlockCfg{}, stagedsync.TxLookupCfg{}, stagedsync.FinishCfg{}, true)
-	stateSync := stagedsync.New(
-		ethconfig.Defaults.Sync,
-		stateSyncStages,
-		stagedsync.DefaultUnwindOrder,
-		stagedsync.DefaultPruneOrder,
-		logger,
-	)
-	stageState := &stagedsync.StageState{ID: stages.Execution, BlockNumber: blockNr}
+	// pruneMode := prune.Mode{
+	// 	Initialised: false,
+	// }
+	// vmConfig := &vm.Config{}
+	// syncCfg := ethconfig.Defaults.Sync
+
+	// execCfg := stagedsync.StageExecuteBlocksCfg(txBatch.MemDB(), pruneMode, batchSize, chainConfig, engine, vmConfig, nil,
+	// 	/*stateStream=*/ false,
+	// 	/*badBlockHalt=*/ true, api.dirs, api._blockReader, nil, nil, syncCfg, nil)
+
+	// stateSyncStages := stagedsync.DefaultStages(ctx, stagedsync.SnapshotsCfg{}, stagedsync.HeadersCfg{}, stagedsync.BorHeimdallCfg{}, stagedsync.BlockHashesCfg{}, stagedsync.BodiesCfg{}, stagedsync.SendersCfg{}, stagedsync.ExecuteBlockCfg{}, stagedsync.TxLookupCfg{}, stagedsync.FinishCfg{}, true)
+	// stateSync := stagedsync.New(
+	// 	ethconfig.Defaults.Sync,
+	// 	stateSyncStages,
+	// 	stagedsync.DefaultUnwindOrder,
+	// 	stagedsync.DefaultPruneOrder,
+	// 	logger,
+	// )
+	// stageState := &stagedsync.StageState{ID: stages.Execution, BlockNumber: blockNr}
 	// Re-execute block
-	err = stagedsync.ExecBlockV3(stageState, stateSync, txc, stageState.BlockNumber, ctx, execCfg, false, logger)
+	// err = stagedsync.ExecBlockV3(stageState, stateSync, txc, stageState.BlockNumber, ctx, execCfg, false, logger)
+	// if err != nil {
+	// 	return nil, err
+	// }
 
+	// execute block ephemerally
+	chainReader := consensuschain.NewReader(chainConfig, txBatch, api._blockReader, logger)
+	// var getTracer func(txIndex int, txHash libcommon.Hash) (vm.EVMLogger, error)
+	// stateReader := rpchelper.NewLatestStateReader(txBatch)
+	stateReader, err := rpchelper.CreateHistoryStateReader(roTx, blockNr, 0, "")
+	// stateReader := state.NewHistoryReaderV3()
 	if err != nil {
 		return nil, err
+	}
+	execResult, err := core.ExecuteBlockEphemerally(chainConfig, &vm.Config{}, store.GetHashFn, engine, block, stateReader, store.TrieStateWriter, chainReader, nil, logger)
+	if err != nil {
+		return nil, err
+	}
+	_ = execResult
+
+	if execResult.TxRoot.String() != block.Header().TxHash.String() {
+		return nil, fmt.Errorf("transaction root mismatch , from execResult %s, from header %s", execResult.TxRoot.String(), block.Header().TxHash.String())
+	}
+
+	preStateRootHash := store.Tds.LastRoot()
+	preStateRoot := preStateRootHash[:]
+	preStateRootInHeader := prevHeader.Root[:]
+
+	if !bytes.Equal(preStateRoot, preStateRootInHeader) {
+		return nil, fmt.Errorf("state root mismatch, from witness store %s, from block header %s", string(preStateRoot), string(preStateRootInHeader))
 	}
 
 	// w, txTds, err := stagedsync.GenerateWitness(roTx, block, prevHeader, fullBlock, uint64(txIndex), store.Tds, store.TrieStateWriter, store.Statedb, store.GetHashFn, &cfg, regenerateHash, ctx, logger)

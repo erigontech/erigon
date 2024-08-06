@@ -230,9 +230,9 @@ func PrepareForWitness(tx kv.Tx, block *types.Block, prevRoot libcommon.Hash, rl
 	statedb.SetDisableBalanceInc(true)
 
 	chainReader := NewChainReaderImpl(cfg.chainConfig, tx, cfg.blockReader, logger)
-	if err := core.InitializeBlockExecution(cfg.engine, chainReader, block.Header(), cfg.chainConfig, statedb, trieStateWriter, logger, nil); err != nil {
-		return nil, err
-	}
+	// if err := core.InitializeBlockExecution(cfg.engine, chainReader, block.Header(), cfg.chainConfig, statedb, trieStateWriter, logger, nil); err != nil {
+	// 	return nil, err
+	// }
 
 	getHeader := func(hash libcommon.Hash, number uint64) *types.Header {
 		h, e := cfg.blockReader.Header(ctx, tx, hash, number)

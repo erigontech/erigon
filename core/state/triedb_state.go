@@ -1149,6 +1149,10 @@ func (tds *TrieDbState) TrieStateWriter() *TrieStateWriter {
 // 	return &DbStateWriter{blockNr: tds.blockNr, db: db, csw: NewChangeSetWriter()}
 // }
 
+func (tds *TrieStateWriter) WriteChangeSets() error { return nil }
+
+func (tds *TrieStateWriter) WriteHistory() error { return nil }
+
 func (tsw *TrieStateWriter) UpdateAccountData(address libcommon.Address, original, account *accounts.Account) error {
 	addrHash, err := tsw.tds.pw.HashAddress(address, false /*save*/)
 	if err != nil {
