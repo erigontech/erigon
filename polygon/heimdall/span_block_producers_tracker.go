@@ -58,16 +58,16 @@ func (t *spanBlockProducersTracker) Run(ctx context.Context) error {
 	}
 }
 
-func (t *spanBlockProducersTracker) Synchronize(ctx context.Context) error {
+func (t *spanBlockProducersTracker) Synchronize(ctx context.Context) {
 	if t.queued.Load() == 0 {
-		return nil
+		return
 	}
 
 	select {
 	case <-ctx.Done():
-		return ctx.Err()
+		return
 	case <-t.idleSignal:
-		return nil
+		return
 	}
 }
 

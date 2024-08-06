@@ -41,7 +41,7 @@ type Service interface {
 	RegisterMilestoneObserver(callback func(*Milestone), opts ...ObserverOption) polygoncommon.UnregisterFunc
 	RegisterSpanObserver(callback func(*Span), opts ...ObserverOption) polygoncommon.UnregisterFunc
 	Run(ctx context.Context) error
-	Synchronize(ctx context.Context) error
+	Synchronize(ctx context.Context)
 }
 
 type service struct {
@@ -146,6 +146,7 @@ func newSpanFetcher(client HeimdallClient, logger log.Logger) entityFetcher[*Spa
 }
 
 func (s *service) LatestSpan(ctx context.Context) (*Span, bool, error) {
+	s.spanScraper.Synchronize(ctx)
 	return s.store.Spans().LastEntity(ctx)
 }
 
@@ -189,40 +190,39 @@ func (s *service) LatestSpans(ctx context.Context, count uint) ([]*Span, error) 
 }
 
 func (s *service) Span(ctx context.Context, id uint64) (*Span, bool, error) {
-	return s.store.Spans().Entity(ctx, id)
+	span, ok, err := s.store.Spans().Entity(ctx, id)
+	if err != nil || !ok {
+		return nil, ok, err
+	}
+
+	return span, ok, nil
 }
 
 func castEntityToWaypoint[TEntity Waypoint](entity TEntity) Waypoint {
 	return entity
 }
 
-func (s *service) Synchronize(ctx context.Context) error {
-	if err := s.checkpointScraper.Synchronize(ctx); err != nil {
-		return err
-	}
-	if err := s.milestoneScraper.Synchronize(ctx); err != nil {
-		return err
-	}
-	if err := s.spanScraper.Synchronize(ctx); err != nil {
-		return err
-	}
-	if err := s.spanBlockProducersTracker.Synchronize(ctx); err != nil {
-		return err
-	}
-	return nil
+func (s *service) Synchronize(ctx context.Context) {
+	s.checkpointScraper.Synchronize(ctx)
+	s.milestoneScraper.Synchronize(ctx)
+	s.spanScraper.Synchronize(ctx)
+	s.spanBlockProducersTracker.Synchronize(ctx)
 }
 
 func (s *service) CheckpointsFromBlock(ctx context.Context, startBlock uint64) (Waypoints, error) {
+	s.Synchronize(ctx)
 	entities, err := s.store.Checkpoints().RangeFromBlockNum(ctx, startBlock)
 	return libcommon.SliceMap(entities, castEntityToWaypoint[*Checkpoint]), err
 }
 
 func (s *service) MilestonesFromBlock(ctx context.Context, startBlock uint64) (Waypoints, error) {
+	s.Synchronize(ctx)
 	entities, err := s.store.Milestones().RangeFromBlockNum(ctx, startBlock)
 	return libcommon.SliceMap(entities, castEntityToWaypoint[*Milestone]), err
 }
 
 func (s *service) Producers(ctx context.Context, blockNum uint64) (*valset.ValidatorSet, error) {
+	s.Synchronize(ctx)
 	return s.spanBlockProducersTracker.Producers(ctx, blockNum)
 }
 

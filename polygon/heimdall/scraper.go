@@ -106,6 +106,6 @@ func (s *scraper[TEntity]) RegisterObserver(observer func([]TEntity)) polygoncom
 	return s.observers.Register(observer)
 }
 
-func (s *scraper[TEntity]) Synchronize(ctx context.Context) error {
-	return s.syncEvent.Wait(ctx)
+func (s *scraper[TEntity]) Synchronize(ctx context.Context) {
+	s.syncEvent.Wait(ctx)
 }

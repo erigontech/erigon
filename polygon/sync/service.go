@@ -37,12 +37,14 @@ type Service interface {
 }
 
 type service struct {
-	sync       *Sync
+	sync *Sync
+
 	p2pService p2p.Service
 	store      Store
 	events     *TipEvents
-	heimdall   heimdall.Service
-	bridge     bridge.Service
+
+	heimdallService heimdall.Service
+	bridge          bridge.Service
 }
 
 func NewService(
@@ -53,8 +55,8 @@ func NewService(
 	statusDataProvider *sentry.StatusDataProvider,
 	executionClient executionproto.ExecutionClient,
 	blockLimit uint,
-	bridge bridge.Service,
-	heimdall heimdall.Service,
+	polygonBridge bridge.Service,
+	heimdallService heimdall.Service,
 ) Service {
 	borConfig := chainConfig.Bor.(*borcfg.BorConfig)
 	checkpointVerifier := VerifyCheckpointHeaders
@@ -62,11 +64,11 @@ func NewService(
 	blocksVerifier := VerifyBlocks
 	p2pService := p2p.NewService(maxPeers, logger, sentryClient, statusDataProvider.GetStatusData)
 	execution := NewExecutionClient(executionClient)
-	store := NewStore(logger, execution, bridge, heimdall)
+	store := NewStore(logger, execution, polygonBridge)
 	blockDownloader := NewBlockDownloader(
 		logger,
 		p2pService,
-		heimdall,
+		heimdallService,
 		checkpointVerifier,
 		milestoneVerifier,
 		blocksVerifier,
@@ -75,7 +77,7 @@ func NewService(
 	)
 	spansCache := NewSpansCache()
 	ccBuilderFactory := NewCanonicalChainBuilderFactory(chainConfig, borConfig, spansCache)
-	events := NewTipEvents(logger, p2pService, heimdall)
+	events := NewTipEvents(logger, p2pService, heimdallService)
 	sync := NewSync(
 		store,
 		execution,
@@ -85,17 +87,17 @@ func NewService(
 		blockDownloader,
 		ccBuilderFactory,
 		spansCache,
-		heimdall.LatestSpans,
+		heimdallService.LatestSpans,
 		events.Events(),
 		logger,
 	)
 	return &service{
-		sync:       sync,
-		p2pService: p2pService,
-		store:      store,
-		events:     events,
-		heimdall:   heimdall,
-		bridge:     bridge,
+		sync:            sync,
+		p2pService:      p2pService,
+		store:           store,
+		events:          events,
+		heimdallService: heimdallService,
+		bridge:          polygonBridge,
 	}
 }
 
@@ -105,7 +107,7 @@ func (s *service) Run(parentCtx context.Context) error {
 	group.Go(func() error { s.p2pService.Run(ctx); return nil })
 	group.Go(func() error { return s.store.Run(ctx) })
 	group.Go(func() error { return s.events.Run(ctx) })
-	group.Go(func() error { return s.heimdall.Run(ctx) })
+	group.Go(func() error { return s.heimdallService.Run(ctx) })
 	group.Go(func() error { return s.bridge.Run(ctx) })
 	group.Go(func() error { return s.sync.Run(ctx) })
 
