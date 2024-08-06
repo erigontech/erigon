@@ -32,9 +32,8 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/elastic/go-freelru"
 	"github.com/erigontech/erigon-lib/metrics"
-	"github.com/hashicorp/golang-lru/v2/simplelru"
-
 	btree2 "github.com/tidwall/btree"
 	"golang.org/x/sync/errgroup"
 
@@ -711,8 +710,7 @@ type DomainRoTx struct {
 	valsC kv.Cursor
 
 	// latestStateCache can be very big if .kv is not compressed - because can store pointer to `mmap` instead of data
-	latestStateCache *simplelru.LRU[uint64, fileCacheItem]
-	//latestStateCacheHit, latestStateCacheTotal int
+	latestStateCache *freelru.LRU[uint64, fileCacheItem]
 }
 
 const latestStateCachePerDomain = 16 * 1024
@@ -1408,6 +1406,12 @@ var (
 	UseBtree = true // if true, will use btree for all files
 )
 
+func u32h(u uint32) uint32 { return u }
+func u64h(u uint64) uint32 { return uint32(u) }
+func u128h(u u128) uint32  { return uint32(u.hi) }
+
+type u128 struct{ hi, lo uint64 }
+
 func (dt *DomainRoTx) getFromFiles(filekey []byte) (v []byte, found bool, fileStartTxNum uint64, fileEndTxNum uint64, err error) {
 	if len(dt.files) == 0 {
 		return
@@ -1416,22 +1420,19 @@ func (dt *DomainRoTx) getFromFiles(filekey []byte) (v []byte, found bool, fileSt
 	hi, _ := dt.ht.iit.hashKey(filekey)
 	if dt.d.name != kv.CommitmentDomain {
 		if dt.latestStateCache == nil {
-			dt.latestStateCache, err = simplelru.NewLRU[uint64, fileCacheItem](latestStateCachePerDomain, nil)
+			dt.latestStateCache, err = freelru.New[uint64, fileCacheItem](latestStateCachePerDomain, nil)
 			if err != nil {
 				panic(err)
 			}
 		}
 		cv, ok := dt.latestStateCache.Get(hi)
-		//if dbg.KVReadLevelledMetrics {
-		//	dt.latestStateCacheTotal++
-		//}
 		if ok {
-			//if dbg.KVReadLevelledMetrics {
-			//	dt.latestStateCacheHit++
-			//	if dt.latestStateCacheTotal%1_000_000 == 0 {
-			//		log.Warn("[dbg] lEachCache", "a", dt.d.filenameBase, "hit", dt.latestStateCacheHit, "total", dt.latestStateCacheTotal, "ratio", fmt.Sprintf("%.2f", float64(dt.latestStateCache)/float64(dt.latestStateCacheTotal)))
-			//	}
-			//}
+			if dbg.KVReadLevelledMetrics {
+				m := dt.latestStateCache.Metrics()
+				if m.Misses%1_000 == 0 {
+					log.Warn("[dbg] lEachCache", "a", dt.d.filenameBase, "hit", m.Hits, "total", m.Hits+m.Misses, "Collisions", m.Collisions, "Evictions", m.Evictions, "Inserts", m.Inserts, "ratio", fmt.Sprintf("%.2f", float64(m.Hits)/float64(m.Hits+m.Misses)))
+				}
+			}
 			return cv.v, true, dt.files[cv.lvl].startTxNum, dt.files[cv.lvl].endTxNum, nil
 		}
 	}
