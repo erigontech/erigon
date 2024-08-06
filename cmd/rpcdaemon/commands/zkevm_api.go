@@ -467,9 +467,6 @@ func (api *ZkEvmAPIImpl) GetBatchByNumber(ctx context.Context, batchNumber rpc.B
 	batch.Coinbase = block.Coinbase()
 	batch.StateRoot = block.Root()
 
-	// TODO: this logic is wrong it is the L1 verification timestamp we need
-	batch.Timestamp = types.ArgUint64(block.Time())
-
 	// block numbers in batch
 	blocksInBatch, err := hermezDb.GetL2BlockNosByBatch(batchNo)
 	if err != nil {
@@ -588,6 +585,12 @@ func (api *ZkEvmAPIImpl) GetBatchByNumber(ctx context.Context, batchNumber rpc.B
 	if seq != nil {
 		batch.SendSequencesTxHash = &seq.L1TxHash
 	}
+
+	// timestamp - ts of highest block in the batch always
+	if block != nil {
+		batch.Timestamp = types.ArgUint64(block.Time())
+	}
+
 	_, found, err = hermezDb.GetLowestBlockInBatch(batchNo + 1)
 	if err != nil {
 		return nil, err

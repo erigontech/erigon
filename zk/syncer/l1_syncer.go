@@ -34,6 +34,7 @@ type IEtherman interface {
 	FilterLogs(ctx context.Context, query ethereum.FilterQuery) ([]ethTypes.Log, error)
 	CallContract(ctx context.Context, msg ethereum.CallMsg, blockNumber *big.Int) ([]byte, error)
 	TransactionByHash(ctx context.Context, hash common.Hash) (ethTypes.Transaction, bool, error)
+	TransactionReceipt(ctx context.Context, txHash common.Hash) (*ethTypes.Receipt, error)
 }
 
 type fetchJob struct {
@@ -223,6 +224,21 @@ func (s *L1Syncer) GetOldAccInputHash(ctx context.Context, addr *common.Address,
 		batchNum = previousBatch
 		loopCount++
 	}
+}
+
+func (s *L1Syncer) GetL1BlockTimeStampByTxHash(ctx context.Context, txHash common.Hash) (uint64, error) {
+	em := s.getNextEtherman()
+	r, err := em.TransactionReceipt(ctx, txHash)
+	if err != nil {
+		return 0, err
+	}
+
+	header, err := em.HeaderByNumber(context.Background(), r.BlockNumber)
+	if err != nil {
+		return 0, err
+	}
+
+	return header.Time, nil
 }
 
 func (s *L1Syncer) L1QueryHeaders(logs []ethTypes.Log) (map[uint64]*ethTypes.Header, error) {
