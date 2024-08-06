@@ -32,27 +32,23 @@ type CanonicalChainBuilderFactory func(root *types.Header) CanonicalChainBuilder
 func NewCanonicalChainBuilderFactory(
 	chainConfig *chain.Config,
 	borConfig *borcfg.BorConfig,
-	blockProducersReader heimdallBlockProducersReader,
+	blockProducersReader blockProducersReader,
 ) CanonicalChainBuilderFactory {
 	signaturesCache, err := lru.NewARC[common.Hash, common.Address](InMemorySignatures)
 	if err != nil {
 		panic(err)
 	}
 
-	producersReaderWrapper := &blockProducersReaderWrapper{
-		r: blockProducersReader,
-	}
-
 	difficultyCalculator := &DifficultyCalculator{
 		borConfig:            borConfig,
 		signaturesCache:      signaturesCache,
-		blockProducersReader: producersReaderWrapper,
+		blockProducersReader: blockProducersReader,
 	}
 
 	headerTimeValidator := &HeaderTimeValidator{
 		borConfig:            borConfig,
 		signaturesCache:      signaturesCache,
-		blockProducersReader: producersReaderWrapper,
+		blockProducersReader: blockProducersReader,
 	}
 
 	headerValidator := &HeaderValidator{
