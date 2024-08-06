@@ -44,7 +44,7 @@ type service struct {
 	events     *TipEvents
 
 	heimdallService heimdall.Service
-	bridge          bridge.Service
+	bridgeService   bridge.Service
 }
 
 func NewService(
@@ -55,7 +55,7 @@ func NewService(
 	statusDataProvider *sentry.StatusDataProvider,
 	executionClient executionproto.ExecutionClient,
 	blockLimit uint,
-	polygonBridge bridge.Service,
+	bridgeService bridge.Service,
 	heimdallService heimdall.Service,
 ) Service {
 	borConfig := chainConfig.Bor.(*borcfg.BorConfig)
@@ -64,7 +64,7 @@ func NewService(
 	blocksVerifier := VerifyBlocks
 	p2pService := p2p.NewService(maxPeers, logger, sentryClient, statusDataProvider.GetStatusData)
 	execution := NewExecutionClient(executionClient)
-	store := NewStore(logger, execution, polygonBridge)
+	store := NewStore(logger, execution, bridgeService)
 	blockDownloader := NewBlockDownloader(
 		logger,
 		p2pService,
@@ -94,7 +94,7 @@ func NewService(
 		store:           store,
 		events:          events,
 		heimdallService: heimdallService,
-		bridge:          polygonBridge,
+		bridgeService:   bridgeService,
 	}
 }
 
@@ -105,7 +105,7 @@ func (s *service) Run(parentCtx context.Context) error {
 	group.Go(func() error { return s.store.Run(ctx) })
 	group.Go(func() error { return s.events.Run(ctx) })
 	group.Go(func() error { return s.heimdallService.Run(ctx) })
-	group.Go(func() error { return s.bridge.Run(ctx) })
+	group.Go(func() error { return s.bridgeService.Run(ctx) })
 	group.Go(func() error { return s.sync.Run(ctx) })
 
 	return group.Wait()
