@@ -54,27 +54,10 @@ type Bridge struct {
 	fetchSyncEvents    fetchSyncEventsType
 }
 
-type Reader struct {
-	store Store
-	log   log.Logger
-}
-
 func Assemble(dataDir string, logger log.Logger, borConfig *borcfg.BorConfig, fetchSyncEvents fetchSyncEventsType, stateReceiverABI abi.ABI) *Bridge {
 	bridgeDB := polygoncommon.NewDatabase(dataDir, kv.PolygonBridgeDB, databaseTablesCfg, logger)
 	bridgeStore := NewStore(bridgeDB)
 	return NewBridge(bridgeStore, logger, borConfig, fetchSyncEvents, stateReceiverABI)
-}
-
-func AssembleReader(ctx context.Context, dataDir string, logger log.Logger) (*Reader, error) {
-	bridgeDB := polygoncommon.NewDatabase(dataDir, kv.PolygonBridgeDB, databaseTablesCfg, logger)
-	bridgeStore := NewStore(bridgeDB)
-
-	err := bridgeStore.Prepare(ctx)
-	if err != nil {
-		return nil, err
-	}
-
-	return NewReader(bridgeStore, logger), nil
 }
 
 func NewBridge(store Store, logger log.Logger, borConfig *borcfg.BorConfig, fetchSyncEvents fetchSyncEventsType, stateReceiverABI abi.ABI) *Bridge {
@@ -85,13 +68,6 @@ func NewBridge(store Store, logger log.Logger, borConfig *borcfg.BorConfig, fetc
 		fetchSyncEvents:    fetchSyncEvents,
 		stateReceiverABI:   stateReceiverABI,
 		stateClientAddress: libcommon.HexToAddress(borConfig.StateReceiverContract),
-	}
-}
-
-func NewReader(store Store, log log.Logger) *Reader {
-	return &Reader{
-		store: store,
-		log:   log,
 	}
 }
 
@@ -267,60 +243,4 @@ func (b *Bridge) isSprintStart(headerNum uint64) bool {
 	}
 
 	return true
-}
-
-// Reader
-
-// Events returns all sync events at blockNum
-func (r *Reader) Events(ctx context.Context, blockNum uint64) ([]*types.Message, error) {
-	start, end, err := r.store.GetEventIDRange(ctx, blockNum)
-	if err != nil {
-		return nil, err
-	}
-
-	if end == 0 { // exception for tip processing
-		end, err = r.store.GetLastProcessedEventID(ctx)
-		if err != nil {
-			return nil, err
-		}
-	}
-
-	eventsRaw := make([]*types.Message, 0, end-start+1)
-
-	// get events from DB
-	events, err := r.store.GetEvents(ctx, start+1, end+1)
-	if err != nil {
-		return nil, err
-	}
-
-	r.log.Debug(bridgeLogPrefix(fmt.Sprintf("got %v events for block %v", len(events), blockNum)))
-
-	address := libcommon.HexToAddress("0x0000000000000000000000000000000000001001")
-
-	// convert to message
-	for _, event := range events {
-		msg := types.NewMessage(
-			state.SystemAddress,
-			&address, // TODO: use variable from struct
-			0, u256.Num0,
-			core.SysCallGasLimit,
-			u256.Num0,
-			nil, nil,
-			event, nil, false,
-			true,
-			nil,
-		)
-
-		eventsRaw = append(eventsRaw, &msg)
-	}
-
-	return eventsRaw, nil
-}
-
-func (r *Reader) TxLookup(ctx context.Context, borTxHash libcommon.Hash) (uint64, bool, error) {
-	return r.store.TxMap(ctx, borTxHash)
-}
-
-func (r *Reader) Close() {
-	r.store.Close()
 }
