@@ -41,7 +41,9 @@ type Service interface {
 	RegisterMilestoneObserver(callback func(*Milestone), opts ...ObserverOption) polygoncommon.UnregisterFunc
 	RegisterSpanObserver(callback func(*Span), opts ...ObserverOption) polygoncommon.UnregisterFunc
 	Run(ctx context.Context) error
-	Synchronize(ctx context.Context) error
+	SynchronizeCheckpoints(ctx context.Context) error
+	SynchronizeMilestones(ctx context.Context) error
+	SynchronizeSpans(ctx context.Context) error
 }
 
 type service struct {
@@ -196,13 +198,15 @@ func castEntityToWaypoint[TEntity Waypoint](entity TEntity) Waypoint {
 	return entity
 }
 
-func (s *service) Synchronize(ctx context.Context) error {
-	if err := s.checkpointScraper.Synchronize(ctx); err != nil {
-		return err
-	}
-	if err := s.milestoneScraper.Synchronize(ctx); err != nil {
-		return err
-	}
+func (s *service) SynchronizeCheckpoints(ctx context.Context) error {
+	return s.checkpointScraper.Synchronize(ctx)
+}
+
+func (s *service) SynchronizeMilestones(ctx context.Context) error {
+	return s.milestoneScraper.Synchronize(ctx)
+}
+
+func (s *service) SynchronizeSpans(ctx context.Context) error {
 	if err := s.spanScraper.Synchronize(ctx); err != nil {
 		return err
 	}

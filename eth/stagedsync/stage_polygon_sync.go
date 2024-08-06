@@ -119,6 +119,8 @@ func NewPolygonSyncStageCfg(
 		p2pService,
 		blockDownloader,
 		polygonsync.NewCanonicalChainBuilderFactory(chainConfig, borConfig, spansCache),
+		heimdallService,
+		&polygonSyncStageBridge{},
 		spansCache,
 		heimdallService.LatestSpans,
 		events.Events(),
@@ -293,6 +295,13 @@ func (s *polygonSyncStageService) runBgComponentsOnce(ctx context.Context) {
 	}()
 }
 
+// TODO will integrate in subsequent PR
+type polygonSyncStageBridge struct{}
+
+func (p *polygonSyncStageBridge) Synchronize(context.Context, *types.Header) error {
+	return nil
+}
+
 type polygonSyncStageSyncStore struct {
 	executionEngine *polygonSyncStageExecutionEngine
 }
@@ -301,7 +310,7 @@ func (s *polygonSyncStageSyncStore) InsertBlocks(ctx context.Context, blocks []*
 	return s.executionEngine.InsertBlocks(ctx, blocks)
 }
 
-func (s *polygonSyncStageSyncStore) Flush(context.Context, *types.Header) error {
+func (s *polygonSyncStageSyncStore) Flush(context.Context) error {
 	return nil
 }
 
