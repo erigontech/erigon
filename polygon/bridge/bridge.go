@@ -179,7 +179,7 @@ func (b *Bridge) ProcessNewBlocks(ctx context.Context, blocks []*types.Block) er
 		return err
 	}
 
-	err = b.store.StoreTxMap(ctx, txMap)
+	err = b.store.StoreEventTxnToBlockNum(ctx, txMap)
 	if err != nil {
 		return err
 	}
@@ -248,7 +248,7 @@ func (b *Bridge) Events(ctx context.Context, blockNum uint64) ([]*types.Message,
 }
 
 func (b *Bridge) EventTxnLookup(ctx context.Context, borTxHash libcommon.Hash) (uint64, bool, error) {
-	return b.store.TxMap(ctx, borTxHash)
+	return b.store.EventTxnToBlockNum(ctx, borTxHash)
 }
 
 // Helper functions

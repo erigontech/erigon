@@ -54,8 +54,8 @@ type Store interface {
 
 	GetLatestEventID(ctx context.Context) (uint64, error)
 	GetLastProcessedEventID(ctx context.Context) (uint64, error)
-	StoreTxMap(ctx context.Context, txMap map[libcommon.Hash]uint64) error
-	TxMap(ctx context.Context, borTxHash libcommon.Hash) (uint64, bool, error)
+	StoreEventTxnToBlockNum(ctx context.Context, txMap map[libcommon.Hash]uint64) error
+	EventTxnToBlockNum(ctx context.Context, borTxHash libcommon.Hash) (uint64, bool, error)
 	GetSprintLastEventID(ctx context.Context, lastID uint64, timeLimit time.Time, stateContract abi.ABI) (uint64, error)
 	AddEvents(ctx context.Context, events []*heimdall.EventRecordWithTime, stateContract abi.ABI) error
 	GetEvents(ctx context.Context, start, end uint64) ([][]byte, error)
@@ -138,7 +138,7 @@ func (s *MdbxStore) GetLastProcessedEventID(ctx context.Context) (uint64, error)
 	return binary.BigEndian.Uint64(v), err
 }
 
-func (s *MdbxStore) StoreTxMap(ctx context.Context, txMap map[libcommon.Hash]uint64) error {
+func (s *MdbxStore) StoreEventTxnToBlockNum(ctx context.Context, txMap map[libcommon.Hash]uint64) error {
 	tx, err := s.db.BeginRw(ctx)
 	if err != nil {
 		return err
@@ -159,7 +159,7 @@ func (s *MdbxStore) StoreTxMap(ctx context.Context, txMap map[libcommon.Hash]uin
 	return tx.Commit()
 }
 
-func (s *MdbxStore) TxMap(ctx context.Context, borTxHash libcommon.Hash) (uint64, bool, error) {
+func (s *MdbxStore) EventTxnToBlockNum(ctx context.Context, borTxHash libcommon.Hash) (uint64, bool, error) {
 	var blockNum uint64
 
 	tx, err := s.db.BeginRo(ctx)
