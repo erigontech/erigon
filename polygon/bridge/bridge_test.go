@@ -116,7 +116,7 @@ func TestBridge(t *testing.T) {
 		}
 	}(b)
 
-	err := b.Synchronize(ctx, &types.Header{Number: big.NewInt(100)}) // hack to wait for b.ready
+	err := b.Synchronize(ctx, 100) // hack to wait for b.ready
 	require.NoError(t, err)
 
 	blocks := getBlocks(t, 5)
@@ -223,7 +223,7 @@ func TestBridge_Unwind(t *testing.T) {
 		}
 	}(b)
 
-	err := b.Synchronize(ctx, &types.Header{Number: big.NewInt(100)}) // hack to wait for b.ready
+	err := b.Synchronize(ctx, 100) // hack to wait for b.ready
 	require.NoError(t, err)
 
 	blocks := getBlocks(t, 8)
@@ -238,7 +238,7 @@ func TestBridge_Unwind(t *testing.T) {
 	require.Equal(t, event1Data, rlp.RawValue(res[0].Data()))
 	require.NoError(t, err)
 
-	err = b.Unwind(ctx, &types.Header{Number: big.NewInt(3)})
+	err = b.Unwind(ctx, 3)
 	require.NoError(t, err)
 
 	res, err = b.Events(ctx, 4)

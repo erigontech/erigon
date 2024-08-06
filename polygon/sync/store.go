@@ -38,7 +38,6 @@ type Store interface {
 }
 
 type bridgeStore interface {
-	Synchronize(ctx context.Context, tip *types.Header) error
 	ProcessNewBlocks(ctx context.Context, blocks []*types.Block) error
 }
 
@@ -117,11 +116,6 @@ func (s *executionClientStore) insertBlocks(ctx context.Context, blocks []*types
 
 	insertStartTime := time.Now()
 	err := s.execution.InsertBlocks(ctx, blocks)
-	if err != nil {
-		return err
-	}
-
-	err = s.bridge.Synchronize(ctx, blocks[len(blocks)-1].Header())
 	if err != nil {
 		return err
 	}

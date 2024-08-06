@@ -30,13 +30,13 @@ import (
 type latestSpanFetcher func(ctx context.Context, count uint) ([]*heimdall.Span, error)
 
 type heimdallSynchronizer interface {
-	SynchronizeSpans(ctx context.Context) error
 	SynchronizeCheckpoints(ctx context.Context) error
 	SynchronizeMilestones(ctx context.Context) error
+	SynchronizeSpans(ctx context.Context, blockNum uint64) error
 }
 
 type bridgeSynchronizer interface {
-	Synchronize(ctx context.Context, tip *types.Header) error
+	Synchronize(ctx context.Context, blockNum uint64) error
 }
 
 type Sync struct {
@@ -92,11 +92,13 @@ func (s *Sync) commitExecution(ctx context.Context, newTip *types.Header, finali
 		return err
 	}
 
-	if err := s.heimdallSync.SynchronizeSpans(ctx); err != nil {
+	blockNum := newTip.Number.Uint64()
+
+	if err := s.heimdallSync.SynchronizeSpans(ctx, blockNum); err != nil {
 		return err
 	}
 
-	if err := s.bridgeSync.Synchronize(ctx, newTip); err != nil {
+	if err := s.bridgeSync.Synchronize(ctx, blockNum); err != nil {
 		return err
 	}
 
@@ -321,11 +323,6 @@ func (s *Sync) syncToTip(ctx context.Context) (*types.Header, error) {
 	}
 
 	tip, err = s.syncToTipUsingMilestones(ctx, tip)
-	if err != nil {
-		return nil, err
-	}
-
-	err = s.heimdallSync.SynchronizeSpans(ctx)
 	if err != nil {
 		return nil, err
 	}

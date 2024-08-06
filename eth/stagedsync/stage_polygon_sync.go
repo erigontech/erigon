@@ -298,7 +298,7 @@ func (s *polygonSyncStageService) runBgComponentsOnce(ctx context.Context) {
 // TODO will integrate in subsequent PR
 type polygonSyncStageBridge struct{}
 
-func (p *polygonSyncStageBridge) Synchronize(context.Context, *types.Header) error {
+func (p *polygonSyncStageBridge) Synchronize(context.Context, uint64) error {
 	return nil
 }
 

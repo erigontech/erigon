@@ -43,10 +43,11 @@ type Service interface {
 	Run(ctx context.Context) error
 	SynchronizeCheckpoints(ctx context.Context) error
 	SynchronizeMilestones(ctx context.Context) error
-	SynchronizeSpans(ctx context.Context) error
+	SynchronizeSpans(ctx context.Context, blockNum uint64) error
 }
 
 type service struct {
+	logger                    log.Logger
 	store                     ServiceStore
 	checkpointScraper         *scraper[*Checkpoint]
 	milestoneScraper          *scraper[*Milestone]
@@ -87,6 +88,7 @@ func NewService(borConfig *borcfg.BorConfig, client HeimdallClient, store Servic
 	)
 
 	return &service{
+		logger:                    logger,
 		store:                     store,
 		checkpointScraper:         checkpointScraper,
 		milestoneScraper:          milestoneScraper,
@@ -199,20 +201,50 @@ func castEntityToWaypoint[TEntity Waypoint](entity TEntity) Waypoint {
 }
 
 func (s *service) SynchronizeCheckpoints(ctx context.Context) error {
+	s.logger.Debug(heimdallLogPrefix("synchronizing checkpoints..."))
 	return s.checkpointScraper.Synchronize(ctx)
 }
 
 func (s *service) SynchronizeMilestones(ctx context.Context) error {
+	s.logger.Debug(heimdallLogPrefix("synchronizing milestones..."))
 	return s.milestoneScraper.Synchronize(ctx)
 }
 
-func (s *service) SynchronizeSpans(ctx context.Context) error {
+func (s *service) SynchronizeSpans(ctx context.Context, blockNum uint64) error {
+	s.logger.Debug(heimdallLogPrefix("synchronizing spans..."), "blockNum", blockNum)
+
+	lastSpan, ok, err := s.store.Spans().LastEntity(ctx)
+	if err != nil {
+		return err
+	}
+	if !ok {
+		return s.synchronizeSpans(ctx)
+	}
+
+	lastProducerSelection, ok, err := s.store.SpanBlockProducerSelections().LastEntity(ctx)
+	if err != nil {
+		return err
+	}
+	if !ok {
+		return s.synchronizeSpans(ctx)
+	}
+
+	if lastSpan.EndBlock < blockNum || lastProducerSelection.EndBlock < blockNum {
+		return s.synchronizeSpans(ctx)
+	}
+
+	return nil
+}
+
+func (s *service) synchronizeSpans(ctx context.Context) error {
 	if err := s.spanScraper.Synchronize(ctx); err != nil {
 		return err
 	}
+
 	if err := s.spanBlockProducersTracker.Synchronize(ctx); err != nil {
 		return err
 	}
+
 	return nil
 }
 

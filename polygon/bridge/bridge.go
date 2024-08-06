@@ -134,6 +134,14 @@ func (b *Bridge) Close() {
 
 // ProcessNewBlocks iterates through all blocks and constructs a map from block number to sync events
 func (b *Bridge) ProcessNewBlocks(ctx context.Context, blocks []*types.Block) error {
+	if len(blocks) == 0 {
+		return nil
+	}
+
+	if err := b.Synchronize(ctx, blocks[len(blocks)-1].NumberU64()); err != nil {
+		return err
+	}
+
 	eventMap := make(map[uint64]uint64)
 	var prevSprintTime time.Time
 
@@ -177,22 +185,22 @@ func (b *Bridge) ProcessNewBlocks(ctx context.Context, blocks []*types.Block) er
 }
 
 // Synchronize blocks till bridge has map at tip
-func (b *Bridge) Synchronize(ctx context.Context, tip *types.Header) error {
+func (b *Bridge) Synchronize(ctx context.Context, blockNum uint64) error {
 	for {
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
 		default:
 		}
-		if b.ready.Load() || b.lastProcessedBlockNumber.Load() >= tip.Number.Uint64() {
+		if b.ready.Load() || b.lastProcessedBlockNumber.Load() >= blockNum {
 			return nil
 		}
 	}
 }
 
 // Unwind deletes map entries till tip
-func (b *Bridge) Unwind(ctx context.Context, tip *types.Header) error {
-	return b.store.PruneEventIDs(ctx, tip.Number.Uint64())
+func (b *Bridge) Unwind(ctx context.Context, blockNum uint64) error {
+	return b.store.PruneEventIDs(ctx, blockNum)
 }
 
 // Events returns all sync events at blockNum
