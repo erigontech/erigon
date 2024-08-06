@@ -141,13 +141,14 @@ func (b *Bridge) ProcessNewBlocks(ctx context.Context, blocks []*types.Block) er
 
 	for _, block := range blocks {
 		// check if block is start of span
-		if !b.isSprintStart(block.NumberU64()) {
+		blockNum := block.NumberU64()
+		if !b.isSprintStart(blockNum) {
 			continue
 		}
 
 		var timeLimit time.Time
-		if b.borConfig.IsIndore(block.NumberU64()) {
-			stateSyncDelay := b.borConfig.CalculateStateSyncDelay(block.NumberU64())
+		if b.borConfig.IsIndore(blockNum) {
+			stateSyncDelay := b.borConfig.CalculateStateSyncDelay(blockNum)
 			timeLimit = time.Unix(int64(block.Time()-stateSyncDelay), 0)
 		} else {
 			timeLimit = prevSprintTime
@@ -161,16 +162,16 @@ func (b *Bridge) ProcessNewBlocks(ctx context.Context, blocks []*types.Block) er
 		}
 
 		if lastDBID > b.lastProcessedEventID.Load() {
-			b.log.Debug(bridgeLogPrefix(fmt.Sprintf("Creating map for block %d, start ID %d, end ID %d", block.NumberU64(), b.lastProcessedEventID.Load(), lastDBID)))
+			b.log.Debug(bridgeLogPrefix(fmt.Sprintf("Creating map for block %d, start ID %d, end ID %d", blockNum, b.lastProcessedEventID.Load(), lastDBID)))
 
-			k := bortypes.ComputeBorTxHash(block.NumberU64(), block.Hash())
-			eventMap[block.NumberU64()] = b.lastProcessedEventID.Load()
-			txMap[k] = block.NumberU64()
+			k := bortypes.ComputeBorTxHash(blockNum, block.Hash())
+			eventMap[blockNum] = b.lastProcessedEventID.Load()
+			txMap[k] = blockNum
 
 			b.lastProcessedEventID.Store(lastDBID)
 		}
 
-		b.lastProcessedBlockNumber.Store(block.NumberU64())
+		b.lastProcessedBlockNumber.Store(blockNum)
 	}
 
 	err := b.store.StoreEventID(ctx, eventMap)
