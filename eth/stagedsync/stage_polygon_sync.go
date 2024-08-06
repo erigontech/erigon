@@ -34,6 +34,7 @@ import (
 	"github.com/erigontech/erigon-lib/common/metrics"
 	"github.com/erigontech/erigon-lib/direct"
 	"github.com/erigontech/erigon-lib/kv"
+	"github.com/erigontech/erigon-lib/kv/dbutils"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/accounts/abi"
 	"github.com/erigontech/erigon/core/rawdb"
@@ -85,9 +86,12 @@ func NewPolygonSyncStageCfg(
 			spanReader:     blockReader,
 			txActionStream: txActionStream,
 		},
+		spanBlockProducerSelections: &polygonSyncStageSbpsStore{
+			txActionStream: txActionStream,
+		},
 	}
-	heimdallService := heimdall.NewService(heimdallClient, heimdallStore, logger)
 	borConfig := chainConfig.Bor.(*borcfg.BorConfig)
+	heimdallService := heimdall.NewService(borConfig, heimdallClient, heimdallStore, logger)
 	p2pService := p2p.NewService(maxPeers, logger, sentry, statusDataProvider.GetStatusData)
 	checkpointVerifier := polygonsync.VerifyCheckpointHeaders
 	milestoneVerifier := polygonsync.VerifyMilestoneHeaders
@@ -306,9 +310,14 @@ func (s *polygonSyncStageSyncStore) Run(context.Context) error {
 }
 
 type polygonSyncStageHeimdallStore struct {
-	checkpoints *polygonSyncStageCheckpointStore
-	milestones  *polygonSyncStageMilestoneStore
-	spans       *polygonSyncStageSpanStore
+	checkpoints                 *polygonSyncStageCheckpointStore
+	milestones                  *polygonSyncStageMilestoneStore
+	spans                       *polygonSyncStageSpanStore
+	spanBlockProducerSelections *polygonSyncStageSbpsStore
+}
+
+func (s polygonSyncStageHeimdallStore) SpanBlockProducerSelections() heimdall.EntityStore[*heimdall.SpanBlockProducerSelection] {
+	return s.spanBlockProducerSelections
 }
 
 func (s polygonSyncStageHeimdallStore) Checkpoints() heimdall.EntityStore[*heimdall.Checkpoint] {
@@ -672,6 +681,150 @@ func (s polygonSyncStageSpanStore) Prepare(_ context.Context) error {
 }
 
 func (s polygonSyncStageSpanStore) Close() {
+	// no-op
+}
+
+// polygonSyncStageSbpsStore is the store for heimdall.SpanBlockProducerSelection
+type polygonSyncStageSbpsStore struct {
+	txActionStream chan<- polygonSyncStageTxAction
+}
+
+func (s polygonSyncStageSbpsStore) LastEntityId(ctx context.Context) (uint64, bool, error) {
+	entity, ok, err := s.LastEntity(ctx)
+	if err != nil || !ok {
+		return 0, ok, err
+	}
+
+	return entity.RawId(), true, nil
+}
+
+func (s polygonSyncStageSbpsStore) LastEntity(ctx context.Context) (*heimdall.SpanBlockProducerSelection, bool, error) {
+	type response struct {
+		v   []byte
+		ok  bool
+		err error
+	}
+
+	r, err := awaitTxAction(ctx, s.txActionStream, func(tx kv.RwTx, responseStream chan<- response) error {
+		cursor, err := tx.Cursor(kv.BorProducerSelections)
+		if err != nil {
+			responseStream <- response{err: err}
+			return nil
+		}
+
+		defer cursor.Close()
+		k, v, err := cursor.Last()
+		if err != nil {
+			responseStream <- response{v: nil, ok: false, err: err}
+			return nil
+		}
+		if k == nil {
+			// not found
+			responseStream <- response{v: nil, ok: false, err: nil}
+			return nil
+		}
+
+		responseStream <- response{v: v, ok: true, err: err}
+		return nil
+	})
+	if err != nil {
+		return nil, false, err
+	}
+	if r.err != nil || !r.ok {
+		return nil, r.ok, r.err
+	}
+
+	var selection heimdall.SpanBlockProducerSelection
+	err = json.Unmarshal(r.v, &selection)
+	return &selection, true, err
+}
+
+func (s polygonSyncStageSbpsStore) Entity(ctx context.Context, id uint64) (*heimdall.SpanBlockProducerSelection, bool, error) {
+	type response struct {
+		v   []byte
+		ok  bool
+		err error
+	}
+
+	r, err := awaitTxAction(ctx, s.txActionStream, func(tx kv.RwTx, responseStream chan<- response) error {
+		k := make([]byte, dbutils.NumberLength)
+		binary.BigEndian.PutUint64(k, id)
+
+		v, err := tx.GetOne(kv.BorProducerSelections, k)
+		if err != nil {
+			responseStream <- response{v: nil, ok: false, err: err}
+			return nil
+		}
+		if v == nil {
+			// not found
+			responseStream <- response{v: nil, ok: false, err: nil}
+			return nil
+		}
+
+		responseStream <- response{v: v, ok: true, err: err}
+		return nil
+	})
+	if err != nil {
+		return nil, false, err
+	}
+	if r.err != nil || !r.ok {
+		return nil, r.ok, r.err
+	}
+
+	var selection heimdall.SpanBlockProducerSelection
+	err = json.Unmarshal(r.v, &selection)
+	return &selection, true, err
+}
+
+func (s polygonSyncStageSbpsStore) PutEntity(ctx context.Context, id uint64, entity *heimdall.SpanBlockProducerSelection) error {
+	type response struct {
+		err error
+	}
+
+	r, err := awaitTxAction(ctx, s.txActionStream, func(tx kv.RwTx, responseStream chan<- response) error {
+		k := make([]byte, dbutils.NumberLength)
+		binary.BigEndian.PutUint64(k, id)
+
+		v, err := json.Marshal(entity)
+		if err != nil {
+			responseStream <- response{err: err}
+			return nil
+		}
+
+		responseStream <- response{err: tx.Put(kv.BorProducerSelections, k, v)}
+		return nil
+	})
+	if err != nil {
+		return err
+	}
+
+	return r.err
+}
+
+func (s polygonSyncStageSbpsStore) RangeFromBlockNum(ctx context.Context, blockNum uint64) ([]*heimdall.SpanBlockProducerSelection, error) {
+	type response struct {
+		result []*heimdall.SpanBlockProducerSelection
+		err    error
+	}
+
+	r, err := awaitTxAction(ctx, s.txActionStream, func(tx kv.RwTx, responseStream chan<- response) error {
+		makeEntity := func() *heimdall.SpanBlockProducerSelection { return &heimdall.SpanBlockProducerSelection{} }
+		r, err := blockRangeEntitiesFromBlockNum(tx, kv.BorProducerSelections, makeEntity, blockNum)
+		responseStream <- response{result: r, err: err}
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	return r.result, r.err
+}
+
+func (s polygonSyncStageSbpsStore) Prepare(_ context.Context) error {
+	return nil
+}
+
+func (s polygonSyncStageSbpsStore) Close() {
 	// no-op
 }
 

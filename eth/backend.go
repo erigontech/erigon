@@ -547,7 +547,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 
 		if config.PolygonSync {
 			polygonBridge = bridge.Assemble(config.Dirs.DataDir, logger, consensusConfig.(*borcfg.BorConfig), heimdallClient.FetchStateSyncEvents, bor.GenesisContractStateReceiverABI())
-			heimdallService = heimdall.AssembleService(config.HeimdallURL, dirs.DataDir, tmpdir, logger)
+			heimdallService = heimdall.AssembleService(chainConfig.Bor.(*borcfg.BorConfig), config.HeimdallURL, dirs.DataDir, tmpdir, logger)
 		}
 
 		flags.Milestone = config.WithHeimdallMilestones
