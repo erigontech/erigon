@@ -20,8 +20,6 @@ import (
 	"bytes"
 	"context"
 	"encoding/binary"
-	"errors"
-	"fmt"
 	"time"
 
 	"github.com/erigontech/erigon-lib/kv"
@@ -292,7 +290,7 @@ func (s *MdbxStore) GetEventIDRange(ctx context.Context, blockNum uint64) (uint6
 		return start, end, err
 	}
 	if v == nil { // we don't have a map
-		return start, end, errors.New(fmt.Sprintf("map not available for block %d", blockNum))
+		return start, end, ErrMapNotAvailable
 	}
 
 	err = binary.Read(bytes.NewReader(v), binary.BigEndian, &start)

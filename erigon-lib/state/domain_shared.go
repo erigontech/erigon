@@ -1107,7 +1107,7 @@ func (sdc *SharedDomainsCommitmentContext) GetAccount(plainKey []byte) (*commitm
 			copy(u.CodeHash[:], chash)
 		}
 	}
-	if bytes.Equal(u.CodeHash[:], commitment.EmptyCodeHash) {
+	if u.CodeHash == commitment.EmptyCodeHashArray {
 		if len(encAccount) == 0 {
 			u.Flags = commitment.DeleteUpdate
 		}

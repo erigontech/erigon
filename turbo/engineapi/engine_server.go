@@ -212,9 +212,6 @@ func (s *EngineServer) newPayload(ctx context.Context, req *engine_types.Executi
 		requests = append(requests, req.DepositRequests.Requests()...)
 		requests = append(requests, req.WithdrawalRequests.Requests()...)
 		requests = append(requests, req.ConsolidationRequests.Requests()...)
-	}
-
-	if requests != nil {
 		rh := types.DeriveSha(requests)
 		header.RequestsRoot = &rh
 	}

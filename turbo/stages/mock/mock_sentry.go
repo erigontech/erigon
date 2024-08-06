@@ -28,6 +28,7 @@ import (
 	"time"
 
 	"github.com/c2h5oh/datasize"
+	"github.com/erigontech/erigon/turbo/jsonrpc/receipts"
 	lru "github.com/hashicorp/golang-lru/arc/v2"
 	"github.com/holiman/uint256"
 	"go.uber.org/mock/gomock"
@@ -134,6 +135,7 @@ type MockSentry struct {
 	agg            *libstate.Aggregator
 	BlockSnapshots *freezeblocks.RoSnapshots
 	BlockReader    services.FullBlockReader
+	ReceiptsReader *receipts.Generator
 	posStagedSync  *stagedsync.Sync
 }
 
@@ -288,6 +290,8 @@ func MockWithEverything(tb testing.TB, gspec *types.Genesis, key *ecdsa.PrivateK
 	erigonGrpcServeer := remotedbserver.NewKvServer(ctx, db, nil, nil, nil, logger)
 	allSnapshots := freezeblocks.NewRoSnapshots(ethconfig.Defaults.Snapshot, dirs.Snap, 0, logger)
 	allBorSnapshots := freezeblocks.NewBorRoSnapshots(ethconfig.Defaults.Snapshot, dirs.Snap, 0, logger)
+	br := freezeblocks.NewBlockReader(allSnapshots, allBorSnapshots)
+
 	mock := &MockSentry{
 		Ctx: ctx, cancel: ctxCancel, DB: db, agg: agg,
 		tb:          tb,
@@ -304,9 +308,11 @@ func MockWithEverything(tb testing.TB, gspec *types.Genesis, key *ecdsa.PrivateK
 		},
 		PeerId:         gointerfaces.ConvertHashToH512([64]byte{0x12, 0x34, 0x50}), // "12345"
 		BlockSnapshots: allSnapshots,
-		BlockReader:    freezeblocks.NewBlockReader(allSnapshots, allBorSnapshots),
+		BlockReader:    br,
+		ReceiptsReader: receipts.NewGenerator(16, br, engine),
 		HistoryV3:      true,
 	}
+
 	if tb != nil {
 		tb.Cleanup(mock.Close)
 	}

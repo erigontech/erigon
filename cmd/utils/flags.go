@@ -1000,6 +1000,11 @@ var (
 		Usage: "disable blob pruning in caplin",
 		Value: false,
 	}
+	CaplinDisableCheckpointSyncFlag = cli.BoolFlag{
+		Name:  "caplin.checkpoint-sync.disable",
+		Usage: "disable checkpoint sync in caplin",
+		Value: false,
+	}
 	CaplinArchiveFlag = cli.BoolFlag{
 		Name:  "caplin.archive",
 		Usage: "enables archival node in caplin",
@@ -1695,6 +1700,7 @@ func setCaplin(ctx *cli.Context, cfg *ethconfig.Config) {
 	// More granularity here.
 	cfg.CaplinConfig.BlobBackfilling = ctx.Bool(CaplinBlobBackfillingFlag.Name)
 	cfg.CaplinConfig.BlobPruningDisabled = ctx.Bool(CaplinDisableBlobPruningFlag.Name)
+	cfg.CaplinConfig.DisabledCheckpointSync = ctx.Bool(CaplinDisableCheckpointSyncFlag.Name)
 	cfg.CaplinConfig.Archive = ctx.Bool(CaplinArchiveFlag.Name)
 	cfg.CaplinConfig.MevRelayUrl = ctx.String(CaplinMevRelayUrl.Name)
 	cfg.CaplinConfig.EnableValidatorMonitor = ctx.Bool(CaplinValidatorMonitorFlag.Name)

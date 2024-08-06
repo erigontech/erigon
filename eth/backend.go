@@ -83,7 +83,7 @@ import (
 	"github.com/erigontech/erigon-lib/wrap"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/persistence/format/snapshot_format/getters"
-	clcore "github.com/erigontech/erigon/cl/phase1/core"
+	"github.com/erigontech/erigon/cl/phase1/core/checkpoint_sync"
 	executionclient "github.com/erigontech/erigon/cl/phase1/execution_client"
 	"github.com/erigontech/erigon/cl/utils/eth_clock"
 	"github.com/erigontech/erigon/cmd/caplin/caplin1"
@@ -547,7 +547,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 
 		if config.PolygonSync {
 			polygonBridge = bridge.Assemble(config.Dirs.DataDir, logger, consensusConfig.(*borcfg.BorConfig), heimdallClient.FetchStateSyncEvents, bor.GenesisContractStateReceiverABI())
-			heimdallService = heimdall.AssembleService(config.HeimdallURL, dirs.DataDir, tmpdir, logger)
+			heimdallService = heimdall.AssembleService(chainConfig.Bor.(*borcfg.BorConfig), config.HeimdallURL, dirs.DataDir, tmpdir, logger)
 		}
 
 		flags.Milestone = config.WithHeimdallMilestones
@@ -941,7 +941,9 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 		if err != nil {
 			return nil, err
 		}
-		state, err := clcore.RetrieveBeaconState(ctx, beaconCfg, clparams.NetworkType(config.NetworkID))
+
+		config.CaplinConfig.NetworkId = clparams.NetworkType(config.NetworkID)
+		state, err := checkpoint_sync.ReadOrFetchLatestBeaconState(ctx, dirs, beaconCfg, config.CaplinConfig)
 		if err != nil {
 			return nil, err
 		}
@@ -1336,8 +1338,11 @@ func (s *Ethereum) StartMining(ctx context.Context, db kv.RwDB, stateDiffClient 
 func loadSnapshotsEitherFromDiskIfNeeded(dirs datadir.Dirs, chainName string) error {
 	preverifiedToml := filepath.Join(dirs.Snap, "preverified.toml")
 
-	if _, err := os.Stat(preverifiedToml); err == nil {
-		// It exists case
+	exists, err := dir.FileExist(preverifiedToml)
+	if err != nil {
+		return err
+	}
+	if exists {
 		// Read the preverified.toml and load the snapshots
 		haveToml, err := os.ReadFile(preverifiedToml)
 		if err != nil {
@@ -1346,8 +1351,7 @@ func loadSnapshotsEitherFromDiskIfNeeded(dirs datadir.Dirs, chainName string) er
 		snapcfg.SetToml(chainName, haveToml)
 		return nil
 	}
-	// Doesn't exist case
-	return os.WriteFile(preverifiedToml, snapcfg.GetToml(chainName), 0644)
+	return dir.WriteFileWithFsync(preverifiedToml, snapcfg.GetToml(chainName), 0644)
 }
 
 func (s *Ethereum) IsMining() bool { return s.config.Miner.Enabled }

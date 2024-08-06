@@ -20,6 +20,7 @@ import (
 	"context"
 	"time"
 
+	"github.com/erigontech/erigon-lib/common/datadir"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon/cl/antiquary"
 	"github.com/erigontech/erigon/cl/beacon/beaconevents"
@@ -53,7 +54,7 @@ type Cfg struct {
 	gossipManager           *network2.GossipManager
 	forkChoice              *forkchoice.ForkChoiceStore
 	indiciesDB              kv.RwDB
-	tmpdir                  string
+	dirs                    datadir.Dirs
 	blockReader             freezeblocks.BeaconSnapshotReader
 	antiquary               *antiquary.Antiquary
 	syncedData              *synced_data.SyncedDataManager
@@ -88,7 +89,7 @@ func ClStagesCfg(
 	indiciesDB kv.RwDB,
 	sn *freezeblocks.CaplinSnapshots,
 	blockReader freezeblocks.BeaconSnapshotReader,
-	tmpdir string,
+	dirs datadir.Dirs,
 	syncBackLoopLimit uint64,
 	backfilling bool,
 	blobBackfilling bool,
@@ -107,7 +108,7 @@ func ClStagesCfg(
 		executionClient:         executionClient,
 		gossipManager:           gossipManager,
 		forkChoice:              forkChoice,
-		tmpdir:                  tmpdir,
+		dirs:                    dirs,
 		indiciesDB:              indiciesDB,
 		sn:                      sn,
 		blockReader:             blockReader,
@@ -115,7 +116,7 @@ func ClStagesCfg(
 		syncedData:              syncedData,
 		emitter:                 emitters,
 		blobStore:               blobStore,
-		blockCollector:          block_collector.NewBlockCollector(log.Root(), executionClient, beaconCfg, syncBackLoopLimit, tmpdir),
+		blockCollector:          block_collector.NewBlockCollector(log.Root(), executionClient, beaconCfg, syncBackLoopLimit, dirs.Tmp),
 		blobBackfilling:         blobBackfilling,
 		attestationDataProducer: attestationDataProducer,
 		validatorMonitor:        validatorMonitor,
@@ -226,6 +227,9 @@ func ConsensusClStages(ctx context.Context,
 					return ChainTipSync
 				},
 				ActionFunc: func(ctx context.Context, logger log.Logger, cfg *Cfg, args Args) error {
+					if err := saveHeadStateOnDiskIfNeeded(cfg, cfg.state); err != nil {
+						return err
+					}
 					// We only download historical blocks once
 					cfg.hasDownloaded = true
 					startingRoot, err := cfg.state.BlockRoot()
@@ -236,10 +240,11 @@ func ConsensusClStages(ctx context.Context,
 					startingSlot := cfg.state.LatestBlockHeader().Slot
 					downloader := network2.NewBackwardBeaconDownloader(ctx, cfg.rpc, cfg.executionClient, cfg.indiciesDB)
 
-					if err := SpawnStageHistoryDownload(StageHistoryReconstruction(downloader, cfg.antiquary, cfg.sn, cfg.indiciesDB, cfg.executionClient, cfg.beaconCfg, cfg.backfilling, cfg.blobBackfilling, false, startingRoot, startingSlot, cfg.tmpdir, 600*time.Millisecond, cfg.blockCollector, cfg.blockReader, cfg.blobStore, logger), context.Background(), logger); err != nil {
+					if err := SpawnStageHistoryDownload(StageHistoryReconstruction(downloader, cfg.antiquary, cfg.sn, cfg.indiciesDB, cfg.executionClient, cfg.beaconCfg, cfg.backfilling, cfg.blobBackfilling, false, startingRoot, startingSlot, cfg.dirs.Tmp, 600*time.Millisecond, cfg.blockCollector, cfg.blockReader, cfg.blobStore, logger), context.Background(), logger); err != nil {
 						cfg.hasDownloaded = false
 						return err
 					}
+					cfg.state = nil // Release the state
 					return nil
 				},
 			},

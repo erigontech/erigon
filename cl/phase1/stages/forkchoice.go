@@ -3,6 +3,7 @@ package stages
 import (
 	"context"
 	"fmt"
+	"os"
 	"runtime"
 	"strconv"
 
@@ -10,9 +11,11 @@ import (
 	"github.com/erigontech/erigon-lib/common/dbg"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/persistence/beacon_indicies"
 	state_accessors "github.com/erigontech/erigon/cl/persistence/state"
 	"github.com/erigontech/erigon/cl/phase1/core/state"
+	"github.com/erigontech/erigon/cl/utils"
 )
 
 // computeAndNotifyServicesOfNewForkChoice calculates the new head of the fork choice and notifies relevant services.
@@ -168,6 +171,32 @@ func emitHeadEvent(cfg *Cfg, headSlot uint64, headRoot common.Hash, headState *s
 	return nil
 }
 
+// saveHeadStateOnDiskIfNeeded saves the head state on disk for eventual node restarts without checkpoint sync.
+func saveHeadStateOnDiskIfNeeded(cfg *Cfg, headState *state.CachingBeaconState) error {
+	epochFrequency := uint64(5)
+	if headState.Slot()%(cfg.beaconCfg.SlotsPerEpoch*epochFrequency) == 0 {
+		dat, err := utils.EncodeSSZSnappy(headState)
+		if err != nil {
+			return fmt.Errorf("failed to encode ssz snappy: %w", err)
+		}
+		// Write the head state to disk
+		fileToWriteTo := fmt.Sprintf("%s/%s", cfg.dirs.CaplinLatest, clparams.LatestStateFileName)
+
+		// Create the directory if it doesn't exist
+		err = os.MkdirAll(cfg.dirs.CaplinLatest, 0755)
+		if err != nil {
+			return fmt.Errorf("failed to create directory: %w", err)
+		}
+
+		// Write the data to the file
+		err = os.WriteFile(fileToWriteTo, dat, 0644)
+		if err != nil {
+			return fmt.Errorf("failed to write head state to disk: %w", err)
+		}
+	}
+	return nil
+}
+
 // postForkchoiceOperations performs the post fork choice operations such as updating the head state, producing and caching attestation data,
 // these sets of operations can take as long as they need to run, as by-now we are already synced.
 func postForkchoiceOperations(ctx context.Context, tx kv.RwTx, logger log.Logger, cfg *Cfg, headSlot uint64, headRoot common.Hash) error {
@@ -196,6 +225,11 @@ func postForkchoiceOperations(ctx context.Context, tx kv.RwTx, logger log.Logger
 	// Dump the head state on disk for ease of chain reorgs
 	if err := cfg.forkChoice.DumpBeaconStateOnDisk(headState); err != nil {
 		return fmt.Errorf("failed to dump beacon state on disk: %w", err)
+	}
+
+	// Save the head state on disk for eventual node restarts without checkpoint sync
+	if err := saveHeadStateOnDiskIfNeeded(cfg, headState); err != nil {
+		return fmt.Errorf("failed to save head state on disk: %w", err)
 	}
 	// Lastly, emit the head event
 	return emitHeadEvent(cfg, headSlot, headRoot, headState)
