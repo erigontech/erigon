@@ -1385,9 +1385,6 @@ func (c *MdbxCursor) getBoth(k, v []byte) ([]byte, error) {
 	_, v, err := c.c.Get(k, v, mdbx.GetBoth)
 	return v, err
 }
-func (c *MdbxCursor) setRange(k []byte) ([]byte, []byte, error) {
-	return c.c.Get(k, nil, mdbx.SetRange)
-}
 func (c *MdbxCursor) getBothRange(k, v []byte) ([]byte, error) {
 	_, v, err := c.c.Get(k, v, mdbx.GetBothRange)
 	return v, err
@@ -1441,7 +1438,7 @@ func (c *MdbxCursor) Seek(seek []byte) (k, v []byte, err error) {
 		return k, v, nil
 	}
 
-	k, v, err = c.setRange(seek)
+	k, v, err = c.c.Get(seek, nil, mdbx.SetRange)
 	if err != nil {
 		if mdbx.IsNotFound(err) {
 			return nil, nil, nil
@@ -1478,7 +1475,7 @@ func (c *MdbxCursor) seekDupSort(seek []byte) (k, v []byte, err error) {
 	} else {
 		seek1 = seek
 	}
-	k, v, err = c.setRange(seek1)
+	k, v, err = c.c.Get(seek1, nil, mdbx.SetRange)
 	if err != nil {
 		if mdbx.IsNotFound(err) {
 			return nil, nil, nil
