@@ -66,7 +66,8 @@ func collectInfo(cliCtx *cli.Context) error {
 
 	var builder strings.Builder
 	builder.WriteString("Disk info:\n")
-	builder.WriteString(fmt.Sprintf("%s\n\n", data.Disk.Details))
+	builder.WriteString(data.Disk.Details)
+	builder.WriteString("\n\n")
 	builder.WriteString("CPU info:\n")
 	writeCPUToStringBuilder(data.CPU, &builder)
 
@@ -119,7 +120,8 @@ func writeStringToBuilder(result *strings.Builder, name string, value string, sp
 	writeSpacesToBuilder(result, marging)
 	result.WriteString(fmt.Sprintf("%s:", name))
 	writeSpacesToBuilder(result, spacing-len(name)-1)
-	result.WriteString(fmt.Sprintf("%s\n", value))
+	result.WriteString(value)
+	result.WriteString("\n")
 }
 
 func writeSpacesToBuilder(result *strings.Builder, spaces int) {
