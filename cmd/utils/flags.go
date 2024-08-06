@@ -1000,6 +1000,11 @@ var (
 		Usage: "disable blob pruning in caplin",
 		Value: false,
 	}
+	CaplinDisableCheckpointSyncFlag = cli.BoolFlag{
+		Name:  "caplin.checkpoint-sync.disable",
+		Usage: "disable checkpoint sync in caplin",
+		Value: false,
+	}
 	CaplinArchiveFlag = cli.BoolFlag{
 		Name:  "caplin.archive",
 		Usage: "enables archival node in caplin",
@@ -1401,27 +1406,14 @@ func SetNodeConfigCobra(cmd *cobra.Command, cfg *nodecfg.Config) {
 	setDataDirCobra(flags, cfg)
 }
 
-func setupSnapCfg(dirs datadir.Dirs) {
-	snapshotsDir := dirs.Snap // <-- snapshots directory
-	// Check if there any .torrent files in the snapshots directory
-	torrentFiles, err := filepath.Glob(filepath.Join(snapshotsDir, "*.torrent"))
-	if err != nil {
-		panic(fmt.Errorf("error checking .torrent files: %s", err))
-	}
-	// If there are, do not load remote preverified snapshots
-	if len(torrentFiles) > 0 {
-		return
-	}
-	snapcfg.LoadRemotePreverified()
-}
-
 func setDataDir(ctx *cli.Context, cfg *nodecfg.Config) {
 	if ctx.IsSet(DataDirFlag.Name) {
 		cfg.Dirs = datadir.New(ctx.String(DataDirFlag.Name))
 	} else {
 		cfg.Dirs = datadir.New(paths.DataDirForNetwork(paths.DefaultDataDir(), ctx.String(ChainFlag.Name)))
 	}
-	setupSnapCfg(cfg.Dirs)
+	snapcfg.LoadRemotePreverified()
+
 	cfg.MdbxPageSize = flags.DBPageSizeFlagUnmarshal(ctx, DbPageSizeFlag.Name, DbPageSizeFlag.Usage)
 	if err := cfg.MdbxDBSizeLimit.UnmarshalText([]byte(ctx.String(DbSizeLimitFlag.Name))); err != nil {
 		panic(err)
@@ -1708,6 +1700,7 @@ func setCaplin(ctx *cli.Context, cfg *ethconfig.Config) {
 	// More granularity here.
 	cfg.CaplinConfig.BlobBackfilling = ctx.Bool(CaplinBlobBackfillingFlag.Name)
 	cfg.CaplinConfig.BlobPruningDisabled = ctx.Bool(CaplinDisableBlobPruningFlag.Name)
+	cfg.CaplinConfig.DisabledCheckpointSync = ctx.Bool(CaplinDisableCheckpointSyncFlag.Name)
 	cfg.CaplinConfig.Archive = ctx.Bool(CaplinArchiveFlag.Name)
 	cfg.CaplinConfig.MevRelayUrl = ctx.String(CaplinMevRelayUrl.Name)
 	cfg.CaplinConfig.EnableValidatorMonitor = ctx.Bool(CaplinValidatorMonitorFlag.Name)

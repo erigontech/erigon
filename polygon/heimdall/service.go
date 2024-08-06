@@ -20,7 +20,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"slices"
 	"time"
 
 	"golang.org/x/sync/errgroup"
@@ -34,17 +33,18 @@ import (
 
 type Service interface {
 	Span(ctx context.Context, id uint64) (*Span, bool, error)
-	LatestSpans(ctx context.Context, count uint) ([]*Span, error)
 	CheckpointsFromBlock(ctx context.Context, startBlock uint64) (Waypoints, error)
 	MilestonesFromBlock(ctx context.Context, startBlock uint64) (Waypoints, error)
 	Producers(ctx context.Context, blockNum uint64) (*valset.ValidatorSet, error)
 	RegisterMilestoneObserver(callback func(*Milestone), opts ...ObserverOption) polygoncommon.UnregisterFunc
-	RegisterSpanObserver(callback func(*Span), opts ...ObserverOption) polygoncommon.UnregisterFunc
 	Run(ctx context.Context) error
-	Synchronize(ctx context.Context) error
+	SynchronizeCheckpoints(ctx context.Context) error
+	SynchronizeMilestones(ctx context.Context) error
+	SynchronizeSpans(ctx context.Context, blockNum uint64) error
 }
 
 type service struct {
+	logger                    log.Logger
 	store                     ServiceStore
 	checkpointScraper         *scraper[*Checkpoint]
 	milestoneScraper          *scraper[*Milestone]
@@ -85,6 +85,7 @@ func NewService(borConfig *borcfg.BorConfig, client HeimdallClient, store Servic
 	)
 
 	return &service{
+		logger:                    logger,
 		store:                     store,
 		checkpointScraper:         checkpointScraper,
 		milestoneScraper:          milestoneScraper,
@@ -145,49 +146,6 @@ func newSpanFetcher(client HeimdallClient, logger log.Logger) entityFetcher[*Spa
 	)
 }
 
-func (s *service) LatestSpan(ctx context.Context) (*Span, bool, error) {
-	return s.store.Spans().LastEntity(ctx)
-}
-
-func (s *service) LatestSpans(ctx context.Context, count uint) ([]*Span, error) {
-	if count == 0 {
-		return nil, errors.New("can't fetch 0 latest spans")
-	}
-
-	span, ok, err := s.LatestSpan(ctx)
-	if err != nil {
-		return nil, err
-	}
-	if !ok {
-		return nil, errors.New("can't fetch latest span")
-	}
-
-	latestSpans := make([]*Span, 0, count)
-	latestSpans = append(latestSpans, span)
-	count--
-
-	for count > 0 {
-		prevSpanRawId := span.RawId()
-		if prevSpanRawId == 0 {
-			break
-		}
-
-		span, ok, err = s.store.Spans().Entity(ctx, prevSpanRawId-1)
-		if err != nil {
-			return nil, err
-		}
-		if !ok {
-			return nil, errors.New(fmt.Sprintf("can't fetch span %v", prevSpanRawId-1))
-		}
-
-		latestSpans = append(latestSpans, span)
-		count--
-	}
-
-	slices.Reverse(latestSpans)
-	return latestSpans, nil
-}
-
 func (s *service) Span(ctx context.Context, id uint64) (*Span, bool, error) {
 	return s.store.Spans().Entity(ctx, id)
 }
@@ -196,19 +154,51 @@ func castEntityToWaypoint[TEntity Waypoint](entity TEntity) Waypoint {
 	return entity
 }
 
-func (s *service) Synchronize(ctx context.Context) error {
-	if err := s.checkpointScraper.Synchronize(ctx); err != nil {
+func (s *service) SynchronizeCheckpoints(ctx context.Context) error {
+	s.logger.Debug(heimdallLogPrefix("synchronizing checkpoints..."))
+	return s.checkpointScraper.Synchronize(ctx)
+}
+
+func (s *service) SynchronizeMilestones(ctx context.Context) error {
+	s.logger.Debug(heimdallLogPrefix("synchronizing milestones..."))
+	return s.milestoneScraper.Synchronize(ctx)
+}
+
+func (s *service) SynchronizeSpans(ctx context.Context, blockNum uint64) error {
+	s.logger.Debug(heimdallLogPrefix("synchronizing spans..."), "blockNum", blockNum)
+
+	lastSpan, ok, err := s.store.Spans().LastEntity(ctx)
+	if err != nil {
 		return err
 	}
-	if err := s.milestoneScraper.Synchronize(ctx); err != nil {
+	if !ok {
+		return s.synchronizeSpans(ctx)
+	}
+
+	lastProducerSelection, ok, err := s.store.SpanBlockProducerSelections().LastEntity(ctx)
+	if err != nil {
 		return err
 	}
+	if !ok {
+		return s.synchronizeSpans(ctx)
+	}
+
+	if lastSpan.EndBlock < blockNum || lastProducerSelection.EndBlock < blockNum {
+		return s.synchronizeSpans(ctx)
+	}
+
+	return nil
+}
+
+func (s *service) synchronizeSpans(ctx context.Context) error {
 	if err := s.spanScraper.Synchronize(ctx); err != nil {
 		return err
 	}
+
 	if err := s.spanBlockProducersTracker.Synchronize(ctx); err != nil {
 		return err
 	}
+
 	return nil
 }
 
@@ -268,17 +258,27 @@ func (s *service) Run(ctx context.Context) error {
 }
 
 func (s *service) replayUntrackedSpans(ctx context.Context) error {
-	lastSpanId, _, err := s.store.Spans().LastEntityId(ctx)
+	lastSpanId, ok, err := s.store.Spans().LastEntityId(ctx)
+	if err != nil {
+		return err
+	}
+	if !ok {
+		return nil
+	}
+
+	lastProducerSelectionId, ok, err := s.store.SpanBlockProducerSelections().LastEntityId(ctx)
 	if err != nil {
 		return err
 	}
 
-	lastProducerSelectionId, _, err := s.store.SpanBlockProducerSelections().LastEntityId(ctx)
-	if err != nil {
-		return err
+	var start uint64
+	if ok {
+		start = lastProducerSelectionId + 1
+	} else {
+		start = lastProducerSelectionId
 	}
 
-	for id := lastProducerSelectionId + 1; id <= lastSpanId; id++ {
+	for id := start; id <= lastSpanId; id++ {
 		span, ok, err := s.store.Spans().Entity(ctx, id)
 		if err != nil {
 			return err

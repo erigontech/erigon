@@ -109,7 +109,6 @@ func NewPolygonSyncStageCfg(
 		syncStore,
 		blockLimit,
 	)
-	spansCache := polygonsync.NewSpansCache()
 	events := polygonsync.NewTipEvents(logger, p2pService, heimdallService)
 	sync := polygonsync.NewSync(
 		syncStore,
@@ -118,9 +117,9 @@ func NewPolygonSyncStageCfg(
 		blocksVerifier,
 		p2pService,
 		blockDownloader,
-		polygonsync.NewCanonicalChainBuilderFactory(chainConfig, borConfig, spansCache),
-		spansCache,
-		heimdallService.LatestSpans,
+		polygonsync.NewCanonicalChainBuilderFactory(chainConfig, borConfig, heimdallService),
+		heimdallService,
+		&polygonSyncStageBridge{},
 		events.Events(),
 		logger,
 	)
@@ -293,6 +292,13 @@ func (s *polygonSyncStageService) runBgComponentsOnce(ctx context.Context) {
 	}()
 }
 
+// TODO will integrate in subsequent PR as part of https://github.com/erigontech/erigon/issues/11195
+type polygonSyncStageBridge struct{}
+
+func (p *polygonSyncStageBridge) Synchronize(context.Context, uint64) error {
+	return nil
+}
+
 type polygonSyncStageSyncStore struct {
 	executionEngine *polygonSyncStageExecutionEngine
 }
@@ -301,7 +307,7 @@ func (s *polygonSyncStageSyncStore) InsertBlocks(ctx context.Context, blocks []*
 	return s.executionEngine.InsertBlocks(ctx, blocks)
 }
 
-func (s *polygonSyncStageSyncStore) Flush(context.Context, *types.Header) error {
+func (s *polygonSyncStageSyncStore) Flush(context.Context) error {
 	return nil
 }
 

@@ -14,17 +14,26 @@
 // You should have received a copy of the GNU Lesser General Public License
 // along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
-package sync
+package diagnostics
 
 import (
-	"context"
+	"net/http"
 
-	"github.com/erigontech/erigon/polygon/heimdall"
+	diaglib "github.com/erigontech/erigon-lib/diagnostics"
 )
 
-//go:generate mockgen -typed=true -source=./heimdall_waypoints_fetcher.go -destination=./heimdall_waypoints_fetcher_mock.go -package=sync
-type heimdallWaypointsFetcher interface {
-	Synchronize(ctx context.Context) error
-	CheckpointsFromBlock(ctx context.Context, startBlock uint64) (heimdall.Waypoints, error)
-	MilestonesFromBlock(ctx context.Context, startBlock uint64) (heimdall.Waypoints, error)
+func SetupSysInfoAccess(metricsMux *http.ServeMux, diag *diaglib.DiagnosticClient) {
+	if metricsMux == nil {
+		return
+	}
+
+	metricsMux.HandleFunc("/hardware-info", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Access-Control-Allow-Origin", "*")
+		w.Header().Set("Content-Type", "application/json")
+		writeHardwareInfo(w, diag)
+	})
+}
+
+func writeHardwareInfo(w http.ResponseWriter, diag *diaglib.DiagnosticClient) {
+	diag.HardwareInfoJson(w)
 }

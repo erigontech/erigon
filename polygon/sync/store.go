@@ -32,25 +32,19 @@ type Store interface {
 	// InsertBlocks queues blocks for writing into the local canonical chain.
 	InsertBlocks(ctx context.Context, blocks []*types.Block) error
 	// Flush makes sure that all queued blocks have been written.
-	Flush(ctx context.Context, newTip *types.Header) error
+	Flush(ctx context.Context) error
 	// Run performs the block writing.
 	Run(ctx context.Context) error
 }
 
 type bridgeStore interface {
-	Synchronize(ctx context.Context, tip *types.Header) error
 	ProcessNewBlocks(ctx context.Context, blocks []*types.Block) error
-}
-
-type heimdallStore interface {
-	Synchronize(ctx context.Context) error
 }
 
 type executionClientStore struct {
 	logger    log.Logger
 	execution ExecutionClient
 	bridge    bridgeStore
-	heimdall  heimdallStore
 	queue     chan []*types.Block
 	// tasksCount includes both tasks pending in the queue and a task that was taken and hasn't finished yet
 	tasksCount atomic.Int32
@@ -58,12 +52,11 @@ type executionClientStore struct {
 	tasksDoneSignal chan bool
 }
 
-func NewStore(logger log.Logger, execution ExecutionClient, bridge bridgeStore, heimdall heimdallStore) Store {
+func NewStore(logger log.Logger, execution ExecutionClient, bridge bridgeStore) Store {
 	return &executionClientStore{
 		logger:          logger,
 		execution:       execution,
 		bridge:          bridge,
-		heimdall:        heimdall,
 		queue:           make(chan []*types.Block),
 		tasksDoneSignal: make(chan bool, 1),
 	}
@@ -81,7 +74,7 @@ func (s *executionClientStore) InsertBlocks(ctx context.Context, blocks []*types
 	}
 }
 
-func (s *executionClientStore) Flush(ctx context.Context, newTip *types.Header) error {
+func (s *executionClientStore) Flush(ctx context.Context) error {
 	for s.tasksCount.Load() > 0 {
 		select {
 		case _, ok := <-s.tasksDoneSignal:
@@ -91,16 +84,6 @@ func (s *executionClientStore) Flush(ctx context.Context, newTip *types.Header) 
 		case <-ctx.Done():
 			return ctx.Err()
 		}
-	}
-
-	err := s.heimdall.Synchronize(ctx)
-	if err != nil {
-		return err
-	}
-
-	err = s.bridge.Synchronize(ctx, newTip)
-	if err != nil {
-		return err
 	}
 
 	return nil
@@ -133,11 +116,6 @@ func (s *executionClientStore) insertBlocks(ctx context.Context, blocks []*types
 
 	insertStartTime := time.Now()
 	err := s.execution.InsertBlocks(ctx, blocks)
-	if err != nil {
-		return err
-	}
-
-	err = s.bridge.Synchronize(ctx, blocks[len(blocks)-1].Header())
 	if err != nil {
 		return err
 	}

@@ -343,7 +343,7 @@ func RunCaplinPhase1(ctx context.Context, engine execution_client.ExecutionEngin
 		indexDB,
 		csn,
 		rcsn,
-		dirs.Tmp,
+		dirs,
 		uint64(config.LoopBlockLimit),
 		backfilling,
 		blobBackfilling,
