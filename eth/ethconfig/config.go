@@ -216,6 +216,8 @@ type Config struct {
 	DeprecatedTxPool DeprecatedTxPoolConfig
 	TxPool           txpoolcfg.Config
 
+	YieldSize uint64
+
 	// Gas Price Oracle options
 	GPO gaspricecfg.Config
 

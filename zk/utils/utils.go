@@ -4,7 +4,6 @@ import (
 	"fmt"
 
 	"github.com/ledgerwatch/erigon-lib/chain"
-	"github.com/ledgerwatch/erigon-lib/common"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/core/state"
@@ -81,7 +80,7 @@ type ForkConfigWriter interface {
 }
 
 type DbReader interface {
-	GetLocalExitRootForBatchNo(batchNo uint64) (common.Hash, error)
+	GetLocalExitRootForBatchNo(batchNo uint64) (libcommon.Hash, error)
 	GetHighestBlockInBatch(batchNo uint64) (uint64, error)
 }
 

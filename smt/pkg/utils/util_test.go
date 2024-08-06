@@ -42,6 +42,13 @@ func TestBinaryStringToInt64(t *testing.T) {
 	}
 }
 
+func BenchmarkConvertBigIntToHex(b *testing.B) {
+	b.ReportAllocs()
+	for n := 0; n < b.N; n++ {
+		ConvertBigIntToHex(big.NewInt(int64(n)))
+	}
+}
+
 func TestConvertBigIntToHex(t *testing.T) {
 	testCases := []struct {
 		name     string

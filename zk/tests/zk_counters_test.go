@@ -348,6 +348,8 @@ func runTest(t *testing.T, blockReader services.FullBlockReader, test vector, er
 			if err = txCounters.ProcessTx(ibs, result.ReturnData); err != nil {
 				t.Fatal(err)
 			}
+
+			batchCollector.UpdateExecutionAndProcessingCountersCache(txCounters)
 		}
 	}
 

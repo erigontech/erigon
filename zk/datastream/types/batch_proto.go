@@ -41,6 +41,7 @@ func (b *BatchStartProto) Type() EntryType {
 }
 
 type BatchEnd struct {
+	Number        uint64
 	LocalExitRoot libcommon.Hash
 	StateRoot     libcommon.Hash
 	Debug         Debug
@@ -76,6 +77,7 @@ func UnmarshalBatchEnd(data []byte) (*BatchEnd, error) {
 	}
 
 	return &BatchEnd{
+		Number:        batchEnd.Number,
 		LocalExitRoot: libcommon.BytesToHash(batchEnd.LocalExitRoot),
 		StateRoot:     libcommon.BytesToHash(batchEnd.StateRoot),
 		Debug:         ProcessDebug(batchEnd.Debug),

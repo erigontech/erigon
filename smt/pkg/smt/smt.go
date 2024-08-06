@@ -294,7 +294,7 @@ func (s *SMT) insert(k utils.NodeKey, v utils.NodeValue8, newValH [4]uint64, old
 				if newValH == [4]uint64{} {
 					newValH, err = s.hashcalcAndSave(v.ToUintArray(), utils.BranchCapacity)
 				} else {
-					newValH, err = s.hashSave(v.ToUintArray(), utils.BranchCapacity, newValH)
+					err = s.hashSave(v.ToUintArray(), utils.BranchCapacity, newValH)
 				}
 				if err != nil {
 					return nil, err
@@ -342,7 +342,7 @@ func (s *SMT) insert(k utils.NodeKey, v utils.NodeValue8, newValH [4]uint64, old
 				if newValH == [4]uint64{} {
 					newValH, err = s.hashcalcAndSave(v.ToUintArray(), utils.BranchCapacity)
 				} else {
-					newValH, err = s.hashSave(v.ToUintArray(), utils.BranchCapacity, newValH)
+					err = s.hashSave(v.ToUintArray(), utils.BranchCapacity, newValH)
 				}
 
 				if err != nil {
@@ -407,7 +407,7 @@ func (s *SMT) insert(k utils.NodeKey, v utils.NodeValue8, newValH [4]uint64, old
 			if newValH == [4]uint64{} {
 				newValH, err = s.hashcalcAndSave(v.ToUintArray(), utils.BranchCapacity)
 			} else {
-				newValH, err = s.hashSave(v.ToUintArray(), utils.BranchCapacity, newValH)
+				err = s.hashSave(v.ToUintArray(), utils.BranchCapacity, newValH)
 			}
 			if err != nil {
 				return nil, err
@@ -537,24 +537,27 @@ func (s *SMT) insert(k utils.NodeKey, v utils.NodeValue8, newValH [4]uint64, old
 	return smtResponse, nil
 }
 
-func (s *SMT) hashSave(in [8]uint64, capacity, h [4]uint64) ([4]uint64, error) {
-	if !s.noSaveOnInsert {
-		var sl []uint64
-		sl = append(sl, in[:]...)
-		sl = append(sl, capacity[:]...)
+func prepareHashValueForSave(in [8]uint64, capacity [4]uint64) utils.NodeValue12 {
+	var sl []uint64
+	sl = append(sl, in[:]...)
+	sl = append(sl, capacity[:]...)
 
-		v := utils.NodeValue12{}
-		for i, val := range sl {
-			b := new(big.Int)
-			v[i] = b.SetUint64(val)
-		}
-
-		err := s.Db.Insert(h, v)
-		if err != nil {
-			return [4]uint64{}, err
-		}
+	v := utils.NodeValue12{}
+	for i, val := range sl {
+		b := new(big.Int)
+		v[i] = b.SetUint64(val)
 	}
-	return h, nil
+
+	return v
+}
+
+func (s *SMT) hashSave(in [8]uint64, capacity, h [4]uint64) error {
+	if s.noSaveOnInsert {
+		return nil
+	}
+	v := prepareHashValueForSave(in, capacity)
+
+	return s.Db.Insert(h, v)
 }
 
 func (s *SMT) hashcalcAndSave(in [8]uint64, capacity [4]uint64) ([4]uint64, error) {
@@ -563,11 +566,16 @@ func (s *SMT) hashcalcAndSave(in [8]uint64, capacity [4]uint64) ([4]uint64, erro
 		return [4]uint64{}, err
 	}
 
-	return s.hashSave(in, capacity, h)
+	return h, s.hashSave(in, capacity, h)
 }
 
-func (s *SMT) hashcalc(in [8]uint64, capacity [4]uint64) ([4]uint64, error) {
-	return utils.Hash(in, capacity)
+func hashCalcAndPrepareForSave(in [8]uint64, capacity [4]uint64) ([4]uint64, utils.NodeValue12, error) {
+	h, err := utils.Hash(in, capacity)
+	if err != nil {
+		return [4]uint64{}, utils.NodeValue12{}, err
+	}
+
+	return h, prepareHashValueForSave(in, capacity), nil
 }
 
 func (s *RoSMT) getLastRoot() (utils.NodeKey, error) {

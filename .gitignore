@@ -48,6 +48,9 @@ profile.cov
 # VS Code
 .vscode
 
+# PYTHON ENV
+.python-env
+
 # dashboard
 /dashboard/assets/flow-typed
 /dashboard/assets/node_modules

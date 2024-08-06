@@ -61,7 +61,7 @@ func SpawnStageDataStreamCatchup(
 		createdTx = true
 	}
 
-	finalBlockNumber, err := CatchupDatastream(logPrefix, tx, stream, cfg.chainId, cfg.streamVersion, cfg.hasExecutors)
+	finalBlockNumber, err := CatchupDatastream(ctx, logPrefix, tx, stream, cfg.chainId, cfg.streamVersion, cfg.hasExecutors)
 	if err != nil {
 		return err
 	}
@@ -77,7 +77,7 @@ func SpawnStageDataStreamCatchup(
 	return err
 }
 
-func CatchupDatastream(logPrefix string, tx kv.RwTx, stream *datastreamer.StreamServer, chainId uint64, streamVersion int, hasExecutors bool) (uint64, error) {
+func CatchupDatastream(ctx context.Context, logPrefix string, tx kv.RwTx, stream *datastreamer.StreamServer, chainId uint64, streamVersion int, hasExecutors bool) (uint64, error) {
 	srv := server.NewDataStreamServer(stream, chainId)
 	reader := hermez_db.NewHermezDbReader(tx)
 
@@ -143,7 +143,7 @@ func CatchupDatastream(logPrefix string, tx kv.RwTx, stream *datastreamer.Stream
 		}
 	}
 
-	if err = srv.WriteBlocksToStream(tx, reader, previousProgress+1, finalBlockNumber, logPrefix); err != nil {
+	if err = srv.WriteBlocksToStreamConsecutively(ctx, logPrefix, tx, reader, previousProgress+1, finalBlockNumber); err != nil {
 		return 0, err
 	}
 

@@ -34,6 +34,7 @@ type IEtherman interface {
 	FilterLogs(ctx context.Context, query ethereum.FilterQuery) ([]ethTypes.Log, error)
 	CallContract(ctx context.Context, msg ethereum.CallMsg, blockNumber *big.Int) ([]byte, error)
 	TransactionByHash(ctx context.Context, hash common.Hash) (ethTypes.Transaction, bool, error)
+	TransactionReceipt(ctx context.Context, txHash common.Hash) (*ethTypes.Receipt, error)
 }
 
 type fetchJob struct {
@@ -48,6 +49,7 @@ type jobResult struct {
 }
 
 type L1Syncer struct {
+	ctx                 context.Context
 	etherMans           []IEtherman
 	ethermanIndex       uint8
 	ethermanMtx         *sync.Mutex
@@ -71,8 +73,9 @@ type L1Syncer struct {
 	highestBlockType string // finalized, latest, safe
 }
 
-func NewL1Syncer(etherMans []IEtherman, l1ContractAddresses []common.Address, topics [][]common.Hash, blockRange, queryDelay uint64, highestBlockType string) *L1Syncer {
+func NewL1Syncer(ctx context.Context, etherMans []IEtherman, l1ContractAddresses []common.Address, topics [][]common.Hash, blockRange, queryDelay uint64, highestBlockType string) *L1Syncer {
 	return &L1Syncer{
+		ctx:                 ctx,
 		etherMans:           etherMans,
 		ethermanIndex:       0,
 		ethermanMtx:         &sync.Mutex{},
@@ -223,6 +226,21 @@ func (s *L1Syncer) GetOldAccInputHash(ctx context.Context, addr *common.Address,
 	}
 }
 
+func (s *L1Syncer) GetL1BlockTimeStampByTxHash(ctx context.Context, txHash common.Hash) (uint64, error) {
+	em := s.getNextEtherman()
+	r, err := em.TransactionReceipt(ctx, txHash)
+	if err != nil {
+		return 0, err
+	}
+
+	header, err := em.HeaderByNumber(context.Background(), r.BlockNumber)
+	if err != nil {
+		return 0, err
+	}
+
+	return header.Time, nil
+}
+
 func (s *L1Syncer) L1QueryHeaders(logs []ethTypes.Log) (map[uint64]*ethTypes.Header, error) {
 	logsSize := len(logs)
 
@@ -302,9 +320,12 @@ func (s *L1Syncer) getLatestL1Block() (uint64, error) {
 }
 
 func (s *L1Syncer) queryBlocks() error {
-	startBlock := s.lastCheckedL1Block.Load()
+	// Fixed receiving duplicate log events.
+	// lastCheckedL1Block means that it has already been checked in the previous cycle.
+	// It should not be checked again in the new cycle, so +1 is added here.
+	startBlock := s.lastCheckedL1Block.Load() + 1
 
-	log.Debug("GetHighestSequence", "startBlock", s.lastCheckedL1Block.Load())
+	log.Debug("GetHighestSequence", "startBlock", startBlock)
 
 	// define the blocks we're going to fetch up front
 	fetches := make([]fetchJob, 0)
@@ -347,6 +368,9 @@ func (s *L1Syncer) queryBlocks() error {
 loop:
 	for {
 		select {
+		case <-s.ctx.Done():
+			close(stop)
+			break loop
 		case res := <-results:
 			complete++
 			if res.Error != nil {

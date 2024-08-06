@@ -565,7 +565,7 @@ func TestCompareAllTreesInsertTimesAndFinalHashesUsingInMemoryDb(t *testing.T) {
 
 func compareAllTreesInsertTimesAndFinalHashes(t *testing.T, smtIncremental, smtBulk, smtBatch *smt.SMT) {
 	batchInsertDataHolders, totalInserts := prepareData()
-
+	ctx := context.Background()
 	var incrementalError error
 
 	accChanges := make(map[libcommon.Address]*accounts.Account)
@@ -601,7 +601,7 @@ func compareAllTreesInsertTimesAndFinalHashes(t *testing.T, smtIncremental, smtB
 	t.Logf("Incremental insert %d values in %v\n", totalInserts, time.Since(startTime))
 
 	startTime = time.Now()
-	keyPointers, valuePointers, err := smtBatch.SetStorage(context.Background(), "", accChanges, codeChanges, storageChanges)
+	keyPointers, valuePointers, err := smtBatch.SetStorage(ctx, "", accChanges, codeChanges, storageChanges)
 	assert.NilError(t, err)
 	t.Logf("Batch insert %d values in %v\n", totalInserts, time.Since(startTime))
 
@@ -614,7 +614,7 @@ func compareAllTreesInsertTimesAndFinalHashes(t *testing.T, smtIncremental, smtB
 		}
 	}
 	startTime = time.Now()
-	smtBulk.GenerateFromKVBulk("", keys)
+	smtBulk.GenerateFromKVBulk(ctx, "", keys)
 	t.Logf("Bulk insert %d values in %v\n", totalInserts, time.Since(startTime))
 
 	smtIncrementalRootHash, _ := smtIncremental.Db.GetLastRoot()

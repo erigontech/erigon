@@ -152,14 +152,14 @@ func (sdb *IntraBlockState) scalableSetBlockHash(blockNum uint64, blockHash *lib
 	sdb.SetState(ADDRESS_SCALABLE_L2, &mkh, *hashAsBigU)
 }
 
-func (sdb *IntraBlockState) GetBlockStateRoot(blockNum uint64) libcommon.Hash {
-	d1 := common.LeftPadBytes(uint256.NewInt(blockNum).Bytes(), 32)
+func (sdb *IntraBlockState) GetBlockStateRoot(blockNum *uint256.Int) *uint256.Int {
+	d1 := common.LeftPadBytes(blockNum.Bytes(), 32)
 	d2 := common.LeftPadBytes(STATE_ROOT_STORAGE_POS.Bytes(), 32)
 	mapKey := keccak256.Hash(d1, d2)
 	mkh := libcommon.BytesToHash(mapKey)
 	hash := uint256.NewInt(0)
 	sdb.GetState(ADDRESS_SCALABLE_L2, &mkh, hash)
-	return libcommon.BytesToHash(hash.Bytes())
+	return hash
 }
 
 func (sdb *IntraBlockState) ScalableSetSmtRootHash(roHermezDb ReadOnlyHermezDb) error {

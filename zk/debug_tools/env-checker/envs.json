@@ -1,19 +1,19 @@
 {
   "groups": [
     {
-      "groupName": "Integration 5",
+      "groupName": "Integration 8",
       "nodes": [
         {
-          "nodeName": "Integration 5 - Legacy",
-          "rpcURL": "http://34.175.214.161:8505"
+          "nodeName": "Integration 8 - Legacy",
+          "rpcURL": "http://34.175.214.161:18505"
         },
         {
-          "nodeName": "Integration 5 - Erigon RPC",
-          "rpcURL": "http://34.175.214.161:8500"
+          "nodeName": "Integration 8 - Erigon RPC",
+          "rpcURL": "http://34.175.214.161:18124"
         },
         {
-          "nodeName": "Integration 5 - Erigon Sequencer",
-          "rpcURL": "http://34.175.214.161:8005"
+          "nodeName": "Integration 8 - Erigon Sequencer",
+          "rpcURL": "http://34.175.214.161:18123"
         }
       ]
     }

@@ -134,6 +134,16 @@ func (c *Counters) GetPoseidonPaddings() *Counter {
 	return (*c)[D]
 }
 
+func (cc Counters) Clone() Counters {
+	var clonedCounters Counters = Counters{}
+
+	for k, v := range cc {
+		clonedCounters[k] = v.Clone()
+	}
+
+	return clonedCounters
+}
+
 type CounterKey string
 
 var (
@@ -152,6 +162,15 @@ type CounterCollector struct {
 	smtLevels   int
 	isDeploy    bool
 	transaction types.Transaction
+}
+
+func (cc *CounterCollector) isOverflown() bool {
+	for _, v := range cc.counters {
+		if v.remaining < 0 {
+			return true
+		}
+	}
+	return false
 }
 
 func calculateSmtLevels(smtMaxLevel int, minValue int, mcpReduction float64) int {
@@ -223,9 +242,8 @@ func (cc *CounterCollector) SetTransaction(transaction types.Transaction) {
 func WrapJumpTableWithZkCounters(originalTable *JumpTable, counterCalls *[256]executionFunc) *JumpTable {
 	wrapper := func(original, counter executionFunc) executionFunc {
 		return func(p *uint64, i *EVMInterpreter, s *ScopeContext) ([]byte, error) {
-			b, err := counter(p, i, s)
-			if err != nil {
-				return b, err
+			if _, err := counter(p, i, s); err != nil {
+				return nil, err
 			}
 			return original(p, i, s)
 		}
@@ -821,6 +839,15 @@ func (cc *CounterCollector) preModExpLoop() {
 
 func (cc *CounterCollector) multiCall(call func(), times int) {
 	for i := 0; i < times; i++ {
+		// if there is a case with a huge amount ot iterations
+		// it will overflow after several thousand iterations
+		// so we can just stop it early and not hang the node
+		// check each 1000 itearations so the overhead is not too much in the normal case
+		if i%1000 == 0 {
+			if cc.isOverflown() {
+				break
+			}
+		}
 		call()
 	}
 }

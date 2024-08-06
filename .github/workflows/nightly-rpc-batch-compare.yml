@@ -16,9 +16,9 @@ jobs:
           - name: bali
             legacy: "https://rpc.zkevm-internal.com"
             erigon: "https://rpc.internal.zkevm-rpc.com"
-          - name: integration5
-            legacy: "http://34.175.214.161:8505"
-            erigon: "http://34.175.214.161:8500"
+          - name: integration8
+            legacy: "http://34.175.214.161:18505"
+            erigon: "http://34.175.214.161:18124"
 
     steps:
       - name: Checkout repository

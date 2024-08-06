@@ -85,7 +85,7 @@ func (f *DirectoryFlag) String() string  { return cli.FlagStringer(f) }
 // Apply called by cli library, grabs variable from environment (if in env)
 // and adds variable to flag set for parsing.
 func (f *DirectoryFlag) Apply(set *flag.FlagSet) error {
-	eachName(f, func(name string) {
+	EachName(f, func(name string) {
 		set.Var(&f.Value, f.Name, f.Usage)
 	})
 	return nil
@@ -171,7 +171,7 @@ func (f *TextMarshalerFlag) IsSet() bool     { return f.HasBeenSet }
 func (f *TextMarshalerFlag) String() string  { return cli.FlagStringer(f) }
 
 func (f *TextMarshalerFlag) Apply(set *flag.FlagSet) error {
-	eachName(f, func(name string) {
+	EachName(f, func(name string) {
 		set.Var(textMarshalerVal{f.Value}, f.Name, f.Usage)
 	})
 	return nil
@@ -252,7 +252,7 @@ func (f *BigFlag) IsSet() bool     { return f.HasBeenSet }
 func (f *BigFlag) String() string  { return cli.FlagStringer(f) }
 
 func (f *BigFlag) Apply(set *flag.FlagSet) error {
-	eachName(f, func(name string) {
+	EachName(f, func(name string) {
 		f.Value = new(big.Int)
 		set.Var((*bigValue)(f.Value), f.Name, f.Usage)
 	})
@@ -346,7 +346,7 @@ func HomeDir() string {
 	return ""
 }
 
-func eachName(f cli.Flag, fn func(string)) {
+func EachName(f cli.Flag, fn func(string)) {
 	for _, name := range f.Names() {
 		name = strings.Trim(name, " ")
 		fn(name)

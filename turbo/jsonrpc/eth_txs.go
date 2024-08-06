@@ -18,6 +18,7 @@ import (
 	types2 "github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/rpc"
 	"github.com/ledgerwatch/erigon/turbo/rpchelper"
+	"github.com/ledgerwatch/erigon/zk/sequencer"
 )
 
 // GetTransactionByHash implements eth_getTransactionByHash. Returns information about a transaction given the transaction's hash.
@@ -79,6 +80,10 @@ func (api *APIImpl) GetTransactionByHash(ctx context.Context, txnHash common.Has
 		}
 
 		return NewRPCTransaction(txn, blockHash, blockNum, txnIndex, baseFee), nil
+	}
+
+	if !sequencer.IsSequencer() {
+		return nil, nil
 	}
 
 	curHeader := rawdb.ReadCurrentHeader(tx)

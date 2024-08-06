@@ -10,4 +10,3 @@ cmd/prometheus
 vendor
 
 cache.db
-.git

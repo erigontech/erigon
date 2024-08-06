@@ -1,0 +1,61 @@
+services:
+  cache:
+    image: golang:1.19
+    command: ["go", "run", "cmd/hack/rpc_cache/main.go", "-file", "/cache/network8-cache.db"]
+    volumes:
+      - ../../../:/repo
+      - l1-cache:/cache
+    working_dir: /repo
+    networks:
+      - erigon-net
+
+  erigon:
+    build:
+      context: ../../../
+      dockerfile: Dockerfile
+    command: ["--config", "/config/network8-config.yaml", "--zkevm.l1-sync-stop-batch", "100"]
+    environment:
+      - CDK_ERIGON_SEQUENCER=1
+    volumes:
+      - ./:/config
+      - datadir:/datadir
+    networks:
+      - erigon-net
+    depends_on:
+      - cache
+
+  erigon-sync:
+    build:
+      context: ../../../
+      dockerfile: Dockerfile
+    command: [ "--config", "/config/network8-sync-config.yaml" ]
+    volumes:
+      - ./:/config
+      - datadir-syncer:/datadir
+    networks:
+      - erigon-net
+    depends_on:
+      - cache
+      - erigon
+
+  block-checker:
+    image: golang:1.19
+    command: ["go", "run", "/repo/zk/debug_tools/nightly-block-compare-wait/main.go", "--compare=http://34.175.214.161:18505", "--compare2=http://erigon-sync:8123", "--duration=3h", "--interval=10s"]
+    volumes:
+      - ../../../:/repo
+    working_dir: /repo
+    networks:
+      - erigon-net
+    depends_on:
+      - erigon
+      - cache
+      - erigon-sync
+
+networks:
+  erigon-net:
+    driver: bridge
+
+volumes:
+  datadir:
+  datadir-syncer:
+  l1-cache:

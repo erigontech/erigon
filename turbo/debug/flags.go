@@ -290,7 +290,16 @@ func RaiseFdLimit() {
 }
 
 var (
-	metricsConfigs = []string{metricsEnabledFlag.Name, metricsAddrFlag.Name, metricsPortFlag.Name}
+	metricsConfigs = []string{
+		metricsEnabledFlag.Name,
+		metricsAddrFlag.Name,
+		metricsPortFlag.Name,
+		traceFlag.Name,
+		cpuprofileFlag.Name,
+		pprofFlag.Name,
+		pprofAddrFlag.Name,
+		pprofPortFlag.Name,
+	}
 )
 
 func SetFlagsFromConfigFile(ctx *cli.Context) error {

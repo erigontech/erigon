@@ -4,16 +4,22 @@ cdk-erigon is a fork of Erigon, currently in Alpha, optimized for syncing with t
 
 ***
 ## Release Roadmap
-- **v0.9.x**: Support for Cardona testnet
-- **v1.x.x**: Support for Mainnet
+- **v1.1.x**: RPC (full support)
+- **v2.x.x**: Sequencer (full support)
 - **v3.x.x**: Erigon 3 based (snapshot support)
 
 ***
 
+## Hardware requirements
+
+* A Linux-based OS (e.g., Ubuntu Server 22.04 LTS).
+* At least 32GB RAM with a 4-core CPU.
+* Both Apple Silicon and AMD64 are supported.
+
 ## Chain/Fork Support
 Current status of cdk-erigon's support for running various chains and fork ids:
 
-- zkEVM Cardona testnet — beta support
+- zkEVM Cardona testnet — full support
 - zkEVM mainnet — beta support
 - CDK Chains - beta support (forkid.9 and above)
 
@@ -57,6 +63,16 @@ Due to dependency requirements Go 1.21 is required to build.
 In order to retrieve data from the L1, the L1 syncer must be configured to know how to request the highest block, this can be configured by flag:
 
 - `zkevm.l1-highest-block-type` which defaults to retrieving the 'finalized' block, however there are cases where you may wish to pass 'safe' or 'latest'.
+
+### L1 Cache
+The node can cache the L1 requests/responses to speed up the sync and enable quicker responses to RPC requests requiring for example OldAccInputHash from the L1. This is enabled by default,
+but can be controlled via the following flags:
+
+- `zkevm.l1-cache-enabled` - defaults to true, set to false to disable the cache
+- `zkevm.l1-cache-port` - the port the cache server will run on, defaults to 6969
+
+To transplant the cache between datadirs, the `l1cache` dir can be copied. To use an upstream cdk-erigon node's L1 cache, the zkevm.l1-cache-enabled can be set to false, and the node provided the endpoint of the cache,
+instead of a regular L1 URL. e.g. `zkevm.l1-rpc-url=http://myerigonnode:6969?endpoint=http%3A%2F%2Fsepolia-rpc.com&chainid=2440`. NB: this node must be syncing the same network for any benefit!
 
 ## Sequencer (WIP)
 

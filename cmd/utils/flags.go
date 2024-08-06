@@ -430,6 +430,16 @@ var (
 		Usage: "Ethereum L1 RPC endpoint",
 		Value: "",
 	}
+	L1CacheEnabledFlag = cli.BoolFlag{
+		Name:  "zkevm.l1-cache-enabled",
+		Usage: "Enable the L1 cache",
+		Value: true,
+	}
+	L1CachePortFlag = cli.UintFlag{
+		Name:  "zkevm.l1-cache-port",
+		Usage: "The port used for the L1 cache",
+		Value: 6969,
+	}
 	AddressSequencerFlag = cli.StringFlag{
 		Name:  "zkevm.address-sequencer",
 		Usage: "Sequencer address",
@@ -516,6 +526,11 @@ var (
 		Usage: "Batch seal time. Defaults to 3s",
 		Value: "3s",
 	}
+	SequencerHaltOnBatchNumber = cli.Uint64Flag{
+		Name:  "zkevm.sequencer-halt-on-batch-number",
+		Usage: "Halt the sequencer on this batch number",
+		Value: 0,
+	}
 	ExecutorUrls = cli.StringFlag{
 		Name:  "zkevm.executor-urls",
 		Usage: "A comma separated list of grpc addresses that host executors",
@@ -535,6 +550,12 @@ var (
 		Name:  "zkevm.datastream-new-block-timeout",
 		Usage: "The timeout for the executor request",
 		Value: 500 * time.Millisecond,
+	}
+
+	WitnessMemdbSize = DatasizeFlag{
+		Name:  "zkevm.witness-memdb-size",
+		Usage: "A size of the memdb used on witness generation in format \"2GB\". Might fail generation for older batches if not enough for the unwind.",
+		Value: datasizeFlagValue(2 * datasize.GB),
 	}
 	ExecutorMaxConcurrentRequests = cli.IntFlag{
 		Name:  "zkevm.executor-max-concurrent-requests",
@@ -1308,6 +1329,11 @@ var (
 		Name:  "diagnostics.speedtest",
 		Usage: "Enable speed test",
 		Value: false,
+	}
+	YieldSizeFlag = cli.Uint64Flag{
+		Name:  "yieldsize",
+		Usage: "transaction count fetched from txpool each time",
+		Value: 1000,
 	}
 )
 
@@ -2091,6 +2117,7 @@ func SetEthConfig(ctx *cli.Context, nodeConfig *nodecfg.Config, cfg *ethconfig.C
 	setTxPool(ctx, cfg)
 	cfg.TxPool = ethconfig.DefaultTxPool2Config(cfg)
 	cfg.TxPool.DBDir = nodeConfig.Dirs.TxPool
+	cfg.YieldSize = ctx.Uint64(YieldSizeFlag.Name)
 
 	setEthash(ctx, nodeConfig.Dirs.DataDir, cfg)
 	setClique(ctx, &cfg.Clique, nodeConfig.Dirs.DataDir)

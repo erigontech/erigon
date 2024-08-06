@@ -66,6 +66,26 @@ func NewMemoryBatch(tx kv.Tx, tmpDir string, logger log.Logger) *MemoryMutation 
 	}
 }
 
+func NewMemoryBatchWithSize(tx kv.Tx, tmpDir string, mapSize datasize.ByteSize) *MemoryMutation {
+	tmpDB := mdbx.NewMDBX(log.New()).InMem(tmpDir).MapSize(mapSize).MustOpen()
+	memTx, err := tmpDB.BeginRw(context.Background())
+	if err != nil {
+		panic(err)
+	}
+	if err := initSequences(tx, memTx); err != nil {
+		return nil
+	}
+
+	return &MemoryMutation{
+		db:             tx,
+		memDb:          tmpDB,
+		memTx:          memTx,
+		deletedEntries: make(map[string]map[string]struct{}),
+		deletedDups:    map[string]map[string]map[string]struct{}{},
+		clearedTables:  make(map[string]struct{}),
+	}
+}
+
 func NewMemoryBatchWithCustomDB(tx kv.Tx, db kv.RwDB, uTx kv.RwTx, tmpDir string) *MemoryMutation {
 	return &MemoryMutation{
 		db:             tx,

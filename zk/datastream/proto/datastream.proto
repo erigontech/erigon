@@ -36,6 +36,11 @@ message L2Block {
   Debug debug = 14;
 }
 
+
+message L2BlockEnd {
+  uint64 number = 1;
+}
+
 message Transaction {
   uint64 l2block_number = 1;
   uint64 index = 2;
@@ -79,6 +84,7 @@ enum EntryType {
   ENTRY_TYPE_TRANSACTION = 3;
   ENTRY_TYPE_BATCH_END = 4;
   ENTRY_TYPE_UPDATE_GER = 5;
+  ENTRY_TYPE_L2_BLOCK_END = 6;
 }
 
 enum BatchType {

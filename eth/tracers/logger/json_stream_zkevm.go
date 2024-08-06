@@ -161,12 +161,10 @@ func (l *JsonStreamLogger_ZkEvm) writeOpSnapshot(pc uint64, op vm.OpCode, gas, c
 }
 
 func (l *JsonStreamLogger_ZkEvm) writeError(err error) {
-	if err == nil {
+	if err != nil {
 		l.stream.WriteMore()
 		l.stream.WriteObjectField("error")
-		l.stream.WriteObjectStart()
-		l.stream.WriteObjectEnd()
-		//l.stream.WriteString(err.Error())
+		l.stream.WriteString(err.Error())
 	}
 }
 
@@ -222,6 +220,9 @@ func (l *JsonStreamLogger_ZkEvm) writeMemory(memory *vm.Memory) {
 			}
 		}
 
+		if len(filteredByteLines) == 0 {
+			return
+		}
 		l.stream.WriteMore()
 		l.stream.WriteObjectField("memory")
 		l.stream.WriteArrayStart()
