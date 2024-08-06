@@ -22,8 +22,9 @@ import (
 	"github.com/erigontech/erigon/polygon/heimdall"
 )
 
-//go:generate mockgen -typed=true -source=./waypoint_reader.go -destination=./waypoint_reader_mock.go -package=sync
-type waypointReader interface {
+//go:generate mockgen -typed=true -source=./heimdall_waypoints_fetcher.go -destination=./heimdall_waypoints_fetcher_mock.go -package=sync
+type heimdallWaypointsFetcher interface {
+	Synchronize(ctx context.Context) error
 	CheckpointsFromBlock(ctx context.Context, startBlock uint64) (heimdall.Waypoints, error)
 	MilestonesFromBlock(ctx context.Context, startBlock uint64) (heimdall.Waypoints, error)
 }

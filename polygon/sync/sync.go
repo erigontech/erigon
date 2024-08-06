@@ -29,16 +29,6 @@ import (
 
 type latestSpanFetcher func(ctx context.Context, count uint) ([]*heimdall.Span, error)
 
-type heimdallSynchronizer interface {
-	SynchronizeSpans(ctx context.Context) error
-	SynchronizeCheckpoints(ctx context.Context) error
-	SynchronizeMilestones(ctx context.Context) error
-}
-
-type bridgeSynchronizer interface {
-	Synchronize(ctx context.Context, tip *types.Header) error
-}
-
 type Sync struct {
 	store             Store
 	execution         ExecutionClient
@@ -47,8 +37,6 @@ type Sync struct {
 	p2pService        p2p.Service
 	blockDownloader   BlockDownloader
 	ccBuilderFactory  CanonicalChainBuilderFactory
-	heimdallSync      heimdallSynchronizer
-	bridgeSync        bridgeSynchronizer
 	spansCache        *SpansCache
 	fetchLatestSpans  latestSpanFetcher
 	events            <-chan Event
@@ -63,8 +51,6 @@ func NewSync(
 	p2pService p2p.Service,
 	blockDownloader BlockDownloader,
 	ccBuilderFactory CanonicalChainBuilderFactory,
-	heimdallSync heimdallSynchronizer,
-	bridgeSync bridgeSynchronizer,
 	spansCache *SpansCache,
 	fetchLatestSpans latestSpanFetcher,
 	events <-chan Event,
@@ -78,8 +64,6 @@ func NewSync(
 		p2pService:        p2pService,
 		blockDownloader:   blockDownloader,
 		ccBuilderFactory:  ccBuilderFactory,
-		heimdallSync:      heimdallSync,
-		bridgeSync:        bridgeSync,
 		spansCache:        spansCache,
 		fetchLatestSpans:  fetchLatestSpans,
 		events:            events,
@@ -88,18 +72,9 @@ func NewSync(
 }
 
 func (s *Sync) commitExecution(ctx context.Context, newTip *types.Header, finalizedHeader *types.Header) error {
-	if err := s.store.Flush(ctx); err != nil {
+	if err := s.store.Flush(ctx, newTip); err != nil {
 		return err
 	}
-
-	if err := s.heimdallSync.SynchronizeSpans(ctx); err != nil {
-		return err
-	}
-
-	if err := s.bridgeSync.Synchronize(ctx, newTip); err != nil {
-		return err
-	}
-
 	return s.execution.UpdateForkChoice(ctx, newTip, finalizedHeader)
 }
 
@@ -325,32 +300,17 @@ func (s *Sync) syncToTip(ctx context.Context) (*types.Header, error) {
 		return nil, err
 	}
 
-	err = s.heimdallSync.SynchronizeSpans(ctx)
-	if err != nil {
-		return nil, err
-	}
-
 	return tip, nil
 }
 
 func (s *Sync) syncToTipUsingCheckpoints(ctx context.Context, tip *types.Header) (*types.Header, error) {
 	return s.sync(ctx, tip, func(ctx context.Context, startBlockNum uint64) (*types.Header, error) {
-		err := s.heimdallSync.SynchronizeCheckpoints(ctx)
-		if err != nil {
-			return nil, err
-		}
-
 		return s.blockDownloader.DownloadBlocksUsingCheckpoints(ctx, startBlockNum)
 	})
 }
 
 func (s *Sync) syncToTipUsingMilestones(ctx context.Context, tip *types.Header) (*types.Header, error) {
 	return s.sync(ctx, tip, func(ctx context.Context, startBlockNum uint64) (*types.Header, error) {
-		err := s.heimdallSync.SynchronizeMilestones(ctx)
-		if err != nil {
-			return nil, err
-		}
-
 		return s.blockDownloader.DownloadBlocksUsingMilestones(ctx, startBlockNum)
 	})
 }
