@@ -686,7 +686,7 @@ func (p *TxPool) getCachedBlobTxnLocked(tx kv.Tx, hash []byte) (*metaTx, error) 
 	}
 	has, err := tx.Has(kv.PoolTransaction, hash)
 	if err != nil {
-		return nil, fmt.Errorf("TxPool.getCachedBlobTxnLocked: Has: %w", err)
+		return nil, fmt.Errorf("TxPool.getCachedBlobTxnLocked: Has: %d, %w", len(hash), err)
 	}
 	if !has {
 		return nil, nil
@@ -694,7 +694,7 @@ func (p *TxPool) getCachedBlobTxnLocked(tx kv.Tx, hash []byte) (*metaTx, error) 
 
 	v, err := tx.GetOne(kv.PoolTransaction, hash)
 	if err != nil {
-		return nil, fmt.Errorf("TxPool.getCachedBlobTxnLocked: Get: %w", err)
+		return nil, fmt.Errorf("TxPool.getCachedBlobTxnLocked: Get: %d, %w", len(hash), err)
 	}
 	txRlp := common.Copy(v[20:])
 	parseCtx := types.NewTxParseContext(p.chainID)

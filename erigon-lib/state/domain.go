@@ -843,8 +843,13 @@ func (dt *DomainRoTx) DebugEFKey(k []byte) error {
 // [WARN] [08-06|04:48:24.323] [dbg] lEachCache                         a=storage hit=664 total=1664 Collisions=29 Evictions=0 Inserts=1000 limit=16384 ratio=0.40
 // [WARN] [08-06|04:38:55.350] [dbg] lEachCache                         a=code hit=61861 total=77861 Collisions=5779 Evictions=0 Inserts=16000 limit=16384 ratio=0.79
 // [WARN] [08-06|04:38:54.774] [dbg] lEachCache                         a=accounts hit=74395 total=154395 Collisions=46260 Evictions=63616 Inserts=80000 limit=16384 ratio=0.48
+//  mgas/s=65.67 average mgas/s=71.09
 
-// [WARN] [08-06|04:39:04.125] [fetch] onNewBlock                       err="failed MdbxKV cursor.seekInFiles(): mdbx_cursor_get: MDBX_BAD_VALSIZE: Invalid size or alignment of key or data for target database, either invalid subDB name, bucket: PoolTransaction,  key: ce69d36636e24a48d87ffd9c4f05505917dbccbf1f8ab976840583d7003852f5"
+// mainnet chain tip: l0_cache_1_all - 8K items
+//
+//
+//
+//
 
 func (d *Domain) collectFilesStats() (datsz, idxsz, files uint64) {
 	d.History.dirtyFiles.Walk(func(items []*filesItem) bool {
