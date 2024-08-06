@@ -1185,19 +1185,19 @@ func (hph *HexPatriciaHashed) deleteCell(hashedKey []byte) {
 			}
 			return
 		}
-		col := int(hashedKey[hph.currentKeyLen])
-		cell = &hph.grid[row][col]
-		nib := uint16(1) << col
-		if hph.afterMap[row]&nib != 0 {
+		nibble := int(hashedKey[hph.currentKeyLen])
+		cell = &hph.grid[row][nibble]
+		col := uint16(1) << nibble
+		if hph.afterMap[row]&col != 0 {
 			// Prevent "spurios deletions", i.e. deletion of absent items
-			hph.touchMap[row] |= nib
-			hph.afterMap[row] &^= nib
+			hph.touchMap[row] |= col
+			hph.afterMap[row] &^= col
 			if hph.trace {
-				fmt.Printf("deleteCell setting (%d, %x)\n", row, col)
+				fmt.Printf("deleteCell setting (%d, %x)\n", row, nibble)
 			}
 		} else {
 			if hph.trace {
-				fmt.Printf("deleteCell ignoring (%d, %x)\n", row, col)
+				fmt.Printf("deleteCell ignoring (%d, %x)\n", row, nibble)
 			}
 		}
 	}
