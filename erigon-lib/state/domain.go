@@ -714,7 +714,7 @@ type DomainRoTx struct {
 	latestStateCache *freelru.LRU[uint64, fileCacheItem]
 }
 
-const latestStateCachePerDomain = 16 * 1024
+var latestStateCachePerDomain = dbg.EnvInt("LRU_LIMIT", 16*1024)
 
 type fileCacheItem struct {
 	lvl uint8
@@ -840,16 +840,16 @@ func (dt *DomainRoTx) DebugEFKey(k []byte) error {
 // - mgas/s=48.79 average mgas/s=60.01
 
 // mainnet chain tip: l0_cache_1_all - 16K items
-// [WARN] [08-06|04:48:24.323] [dbg] lEachCache                         a=storage hit=664 total=1664 Collisions=29 Evictions=0 Inserts=1000 limit=16384 ratio=0.40
-// [WARN] [08-06|04:38:55.350] [dbg] lEachCache                         a=code hit=61861 total=77861 Collisions=5779 Evictions=0 Inserts=16000 limit=16384 ratio=0.79
-// [WARN] [08-06|04:38:54.774] [dbg] lEachCache                         a=accounts hit=74395 total=154395 Collisions=46260 Evictions=63616 Inserts=80000 limit=16384 ratio=0.48
+// a=storage hit=664 total=1664 Collisions=29 Evictions=0 Inserts=1000 limit=16384 ratio=0.40
+// a=code hit=61861 total=77861 Collisions=5779 Evictions=0 Inserts=16000 limit=16384 ratio=0.79
+// a=accounts hit=74395 total=154395 Collisions=46260 Evictions=63616 Inserts=80000 limit=16384 ratio=0.48
 //  mgas/s=65.67 average mgas/s=71.09
 
 // mainnet chain tip: l0_cache_1_all - 8K items
-//
-//
-//
-//
+// a=storage hit=313 total=1213 Collisions=17 Evictions=0 Inserts=900 limit=16384 ratio=0.26
+// a=code hit=169 total=369 Collisions=2 Evictions=0 Inserts=200 limit=16384 ratio=0.46
+// a=accounts hit=42 total=142 Collisions=0 Evictions=0 Inserts=100 limit=16384 ratio=0.30
+// ?
 
 func (d *Domain) collectFilesStats() (datsz, idxsz, files uint64) {
 	d.History.dirtyFiles.Walk(func(items []*filesItem) bool {
