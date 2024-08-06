@@ -23,11 +23,8 @@ import (
 	"github.com/erigontech/erigon-lib/log/v3"
 
 	"github.com/erigontech/erigon/core/types"
-	"github.com/erigontech/erigon/polygon/heimdall"
 	"github.com/erigontech/erigon/polygon/p2p"
 )
-
-type latestSpanFetcher func(ctx context.Context, count uint) ([]*heimdall.Span, error)
 
 type Sync struct {
 	store             Store
@@ -37,8 +34,6 @@ type Sync struct {
 	p2pService        p2p.Service
 	blockDownloader   BlockDownloader
 	ccBuilderFactory  CanonicalChainBuilderFactory
-	spansCache        *SpansCache
-	fetchLatestSpans  latestSpanFetcher
 	events            <-chan Event
 	logger            log.Logger
 }
@@ -51,8 +46,6 @@ func NewSync(
 	p2pService p2p.Service,
 	blockDownloader BlockDownloader,
 	ccBuilderFactory CanonicalChainBuilderFactory,
-	spansCache *SpansCache,
-	fetchLatestSpans latestSpanFetcher,
 	events <-chan Event,
 	logger log.Logger,
 ) *Sync {
@@ -64,8 +57,6 @@ func NewSync(
 		p2pService:        p2pService,
 		blockDownloader:   blockDownloader,
 		ccBuilderFactory:  ccBuilderFactory,
-		spansCache:        spansCache,
-		fetchLatestSpans:  fetchLatestSpans,
 		events:            events,
 		logger:            logger,
 	}
@@ -178,7 +169,7 @@ func (s *Sync) onNewBlockEvent(
 	}
 
 	oldTip := ccBuilder.Tip()
-	if err = ccBuilder.Connect(newHeaders); err != nil {
+	if err = ccBuilder.Connect(ctx, newHeaders); err != nil {
 		s.logger.Debug(syncLogPrefix("onNewBlockEvent: couldn't connect a header to the local chain tip, ignoring"), "err", err)
 		return nil
 	}
@@ -248,15 +239,6 @@ func (s *Sync) Run(ctx context.Context) error {
 		return err
 	}
 
-	latestSpans, err := s.fetchLatestSpans(ctx, 2)
-	if err != nil {
-		return err
-	}
-
-	for _, span := range latestSpans {
-		s.spansCache.Add(span)
-	}
-
 	ccBuilder := s.ccBuilderFactory(tip)
 
 	for {
@@ -275,8 +257,6 @@ func (s *Sync) Run(ctx context.Context) error {
 				if err = s.onNewBlockHashesEvent(ctx, event.AsNewBlockHashes(), ccBuilder); err != nil {
 					return err
 				}
-			case EventTypeNewSpan:
-				s.spansCache.Add(event.AsNewSpan())
 			}
 		case <-ctx.Done():
 			return ctx.Err()
