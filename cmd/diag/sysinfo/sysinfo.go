@@ -17,6 +17,7 @@
 package sysinfo
 
 import (
+	"fmt"
 	"strings"
 
 	"github.com/urfave/cli/v2"
@@ -63,13 +64,14 @@ func collectInfo(cliCtx *cli.Context) error {
 		util.RenderError(err)
 	}
 
-	stringToSave := "Disk info:\n"
-	stringToSave += data.Disk.Details + "\n"
-	stringToSave += "CPU info:\n"
-	stringToSave += cpuToString(data.CPU) + "\n"
+	var builder strings.Builder
+	builder.WriteString("Disk info:\n")
+	builder.WriteString(fmt.Sprintf("%s\n\n", data.Disk.Details))
+	builder.WriteString("CPU info:\n")
+	writeCPUToStringBuilder(data.CPU, &builder)
 
 	// Save data to file
-	err = util.SaveDataToFile(cliCtx.String(ExportPathFlag.Name), cliCtx.String(ExportFileNameFlag.Name), stringToSave)
+	err = util.SaveDataToFile(cliCtx.String(ExportPathFlag.Name), cliCtx.String(ExportFileNameFlag.Name), builder.String())
 	if err != nil {
 		util.RenderError(err)
 	}
@@ -77,28 +79,24 @@ func collectInfo(cliCtx *cli.Context) error {
 	return nil
 }
 
-func cpuToString(cpuInfo []diagnostics.CPUInfo) string {
-	result := ""
-
+func writeCPUToStringBuilder(cpuInfo []diagnostics.CPUInfo, builder *strings.Builder) {
 	spacing := calculateSpacing([]string{"CPU", "VendorID", "Family", "Model", "Stepping", "PhysicalID", "CoreID", "Cores", "ModelName", "Mhz", "CacheSize", "Flags", "Microcode"})
 
 	for _, cpu := range cpuInfo {
-		addStringToResult(&result, "CPU", util.Int32ToString(cpu.CPU), spacing)
-		addStringToResult(&result, "VendorID", cpu.VendorID, spacing)
-		addStringToResult(&result, "Family", cpu.Family, spacing)
-		addStringToResult(&result, "Model", cpu.Model, spacing)
-		addStringToResult(&result, "Stepping", util.Int32ToString(cpu.Stepping), spacing)
-		addStringToResult(&result, "PhysicalID", cpu.PhysicalID, spacing)
-		addStringToResult(&result, "CoreID", cpu.CoreID, spacing)
-		addStringToResult(&result, "Cores", util.Int32ToString(cpu.Cores), spacing)
-		addStringToResult(&result, "ModelName", cpu.ModelName, spacing)
-		addStringToResult(&result, "Mhz", util.Float64ToString(cpu.Mhz), spacing)
-		addStringToResult(&result, "CacheSize", util.Int32ToString(cpu.CacheSize), spacing)
-		addStringToResult(&result, "Flags", strings.Join(cpu.Flags, ", "), spacing)
-		addStringToResult(&result, "Microcode", cpu.Microcode, spacing)
+		writeStringToBuilder(builder, "CPU", fmt.Sprintf("%d", cpu.CPU), spacing)
+		writeStringToBuilder(builder, "VendorID", cpu.VendorID, spacing)
+		writeStringToBuilder(builder, "Family", cpu.Family, spacing)
+		writeStringToBuilder(builder, "Model", cpu.Model, spacing)
+		writeStringToBuilder(builder, "Stepping", fmt.Sprintf("%d", cpu.Stepping), spacing)
+		writeStringToBuilder(builder, "PhysicalID", cpu.PhysicalID, spacing)
+		writeStringToBuilder(builder, "CoreID", cpu.CoreID, spacing)
+		writeStringToBuilder(builder, "Cores", fmt.Sprintf("%d", cpu.Cores), spacing)
+		writeStringToBuilder(builder, "ModelName", cpu.ModelName, spacing)
+		writeStringToBuilder(builder, "Mhz", fmt.Sprintf("%g", cpu.Mhz), spacing)
+		writeStringToBuilder(builder, "CacheSize", fmt.Sprintf("%d", cpu.CacheSize), spacing)
+		writeStringToBuilder(builder, "Flags", strings.Join(cpu.Flags, ", "), spacing)
+		writeStringToBuilder(builder, "Microcode", cpu.Microcode, spacing)
 	}
-
-	return result
 }
 
 func calculateSpacing(keysArray []string) int {
@@ -112,13 +110,20 @@ func calculateSpacing(keysArray []string) int {
 	return max + 3
 }
 
-func addStringToResult(result *string, name string, value string, spacing int) {
+func writeStringToBuilder(result *strings.Builder, name string, value string, spacing int) {
 	marging := 3
 	if value == "" {
 		value = "N/A"
 	}
 
-	*result += strings.Repeat(" ", marging) + name + ":" + strings.Repeat(" ", spacing-len(name)) + value + "\n"
+	writeSpacesToBuilder(result, marging)
+	result.WriteString(fmt.Sprintf("%s:", name))
+	writeSpacesToBuilder(result, spacing-len(name)-1)
+	result.WriteString(fmt.Sprintf("%s\n", value))
+}
+
+func writeSpacesToBuilder(result *strings.Builder, spaces int) {
+	result.WriteString(strings.Repeat(" ", spaces))
 }
 
 func getData(cliCtx *cli.Context) (diagnostics.HardwareInfo, error) {
