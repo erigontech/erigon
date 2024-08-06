@@ -28,9 +28,7 @@ import (
 	"github.com/holiman/uint256"
 	"golang.org/x/net/context"
 
-	"github.com/erigontech/erigon-lib/kv/membatchwithdb"
 	"github.com/erigontech/erigon-lib/log/v3"
-	state2 "github.com/erigontech/erigon-lib/state"
 	"github.com/erigontech/erigon-lib/wrap"
 
 	"github.com/erigontech/erigon-lib/chain"
@@ -103,7 +101,6 @@ func SpawnMiningExecStage(s *StageState, txc wrap.TxContainer, cfg MiningExecCfg
 	current := cfg.miningState.MiningBlock
 	txs := current.PreparedTxs
 	noempty := true
-	var domains *state2.SharedDomains
 	var (
 		stateReader state.StateReader
 	)
@@ -138,16 +135,8 @@ func SpawnMiningExecStage(s *StageState, txc wrap.TxContainer, cfg MiningExecCfg
 			yielded := mapset.NewSet[[32]byte]()
 			var simStateReader state.StateReader
 			var simStateWriter state.StateWriter
-			m := membatchwithdb.NewMemoryBatch(txc.Tx, cfg.tmpdir, logger)
-			defer m.Rollback()
-			var err error
-			domains, err = state2.NewSharedDomains(m, logger)
-			if err != nil {
-				return err
-			}
-			defer domains.Close()
-			simStateReader = state.NewReaderV4(domains)
-			simStateWriter = state.NewWriterV4(domains)
+			simStateReader = state.NewReaderV4(txc.Doms)
+			simStateWriter = state.NewWriterV4(txc.Doms)
 
 			executionAt, err := s.ExecutionAt(txc.Tx)
 			if err != nil {
