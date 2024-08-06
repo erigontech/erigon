@@ -390,6 +390,16 @@ var (
 		Usage: "Ethereum L1 RPC endpoint",
 		Value: "",
 	}
+	L1CacheEnabledFlag = cli.BoolFlag{
+		Name:  "zkevm.l1-cache-enabled",
+		Usage: "Enable the L1 cache",
+		Value: true,
+	}
+	L1CachePortFlag = cli.UintFlag{
+		Name:  "zkevm.l1-cache-port",
+		Usage: "The port used for the L1 cache",
+		Value: 6969,
+	}
 	AddressSequencerFlag = cli.StringFlag{
 		Name:  "zkevm.address-sequencer",
 		Usage: "Sequencer address",

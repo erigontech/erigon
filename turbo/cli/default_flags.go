@@ -173,6 +173,8 @@ var DefaultFlags = []cli.Flag{
 	&utils.L1SyncStopBatch,
 	&utils.L1ChainIdFlag,
 	&utils.L1RpcUrlFlag,
+	&utils.L1CacheEnabledFlag,
+	&utils.L1CachePortFlag,
 	&utils.AddressSequencerFlag,
 	&utils.AddressAdminFlag,
 	&utils.AddressRollupFlag,

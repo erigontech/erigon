@@ -110,6 +110,8 @@ func ApplyFlagsForZkConfig(ctx *cli.Context, cfg *ethconfig.Config) {
 		L1SyncStopBatch:                        ctx.Uint64(utils.L1SyncStopBatch.Name),
 		L1ChainId:                              ctx.Uint64(utils.L1ChainIdFlag.Name),
 		L1RpcUrl:                               ctx.String(utils.L1RpcUrlFlag.Name),
+		L1CacheEnabled:                         ctx.Bool(utils.L1CacheEnabledFlag.Name),
+		L1CachePort:                            ctx.Uint(utils.L1CachePortFlag.Name),
 		AddressSequencer:                       libcommon.HexToAddress(ctx.String(utils.AddressSequencerFlag.Name)),
 		AddressAdmin:                           libcommon.HexToAddress(ctx.String(utils.AddressAdminFlag.Name)),
 		AddressRollup:                          libcommon.HexToAddress(ctx.String(utils.AddressRollupFlag.Name)),
