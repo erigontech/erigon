@@ -80,12 +80,12 @@ func (b *Bridge) Run(ctx context.Context) error {
 	defer b.Close()
 
 	// get last known sync ID
-	lastEventID, err := b.store.GetLatestEventID(ctx)
+	lastEventID, err := b.store.LatestEventID(ctx)
 	if err != nil {
 		return err
 	}
 
-	lastProcessedEventID, err := b.store.GetLastProcessedEventID(ctx)
+	lastProcessedEventID, err := b.store.LastProcessedEventID(ctx)
 	if err != nil {
 		return err
 	}
@@ -111,7 +111,7 @@ func (b *Bridge) Run(ctx context.Context) error {
 
 		if len(events) != 0 {
 			b.ready.Store(false)
-			if err := b.store.AddEvents(ctx, events, b.stateReceiverABI); err != nil {
+			if err := b.store.PutEvents(ctx, events, b.stateReceiverABI); err != nil {
 				return err
 			}
 
@@ -156,7 +156,7 @@ func (b *Bridge) ProcessNewBlocks(ctx context.Context, blocks []*types.Block) er
 
 		prevSprintTime = time.Unix(int64(block.Time()), 0)
 
-		lastDBID, err := b.store.GetSprintLastEventID(ctx, b.lastProcessedEventID.Load(), timeLimit, b.stateReceiverABI)
+		lastDBID, err := b.store.SprintLastEventID(ctx, b.lastProcessedEventID.Load(), timeLimit, b.stateReceiverABI)
 		if err != nil {
 			return err
 		}
@@ -174,12 +174,12 @@ func (b *Bridge) ProcessNewBlocks(ctx context.Context, blocks []*types.Block) er
 		b.lastProcessedBlockNumber.Store(blockNum)
 	}
 
-	err := b.store.StoreEventID(ctx, eventMap)
+	err := b.store.PutEventIDs(ctx, eventMap)
 	if err != nil {
 		return err
 	}
 
-	err = b.store.StoreEventTxnToBlockNum(ctx, txMap)
+	err = b.store.PutEventTxnToBlockNum(ctx, txMap)
 	if err != nil {
 		return err
 	}
@@ -208,7 +208,7 @@ func (b *Bridge) Unwind(ctx context.Context, tip *types.Header) error {
 
 // Events returns all sync events at blockNum
 func (b *Bridge) Events(ctx context.Context, blockNum uint64) ([]*types.Message, error) {
-	start, end, err := b.store.GetEventIDRange(ctx, blockNum)
+	start, end, err := b.store.EventIDRange(ctx, blockNum)
 	if err != nil {
 		return nil, err
 	}
@@ -220,7 +220,7 @@ func (b *Bridge) Events(ctx context.Context, blockNum uint64) ([]*types.Message,
 	eventsRaw := make([]*types.Message, 0, end-start+1)
 
 	// get events from DB
-	events, err := b.store.GetEvents(ctx, start+1, end+1)
+	events, err := b.store.Events(ctx, start+1, end+1)
 	if err != nil {
 		return nil, err
 	}
