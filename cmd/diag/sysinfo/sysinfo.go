@@ -18,6 +18,7 @@ package sysinfo
 
 import (
 	"fmt"
+	"strconv"
 	"strings"
 
 	"github.com/urfave/cli/v2"
@@ -84,17 +85,17 @@ func writeCPUToStringBuilder(cpuInfo []diagnostics.CPUInfo, builder *strings.Bui
 	spacing := calculateSpacing([]string{"CPU", "VendorID", "Family", "Model", "Stepping", "PhysicalID", "CoreID", "Cores", "ModelName", "Mhz", "CacheSize", "Flags", "Microcode"})
 
 	for _, cpu := range cpuInfo {
-		writeStringToBuilder(builder, "CPU", fmt.Sprintf("%d", cpu.CPU), spacing)
+		writeStringToBuilder(builder, "CPU", strconv.Itoa(int(cpu.CPU)), spacing)
 		writeStringToBuilder(builder, "VendorID", cpu.VendorID, spacing)
 		writeStringToBuilder(builder, "Family", cpu.Family, spacing)
 		writeStringToBuilder(builder, "Model", cpu.Model, spacing)
-		writeStringToBuilder(builder, "Stepping", fmt.Sprintf("%d", cpu.Stepping), spacing)
+		writeStringToBuilder(builder, "Stepping", strconv.Itoa(int(cpu.Stepping)), spacing)
 		writeStringToBuilder(builder, "PhysicalID", cpu.PhysicalID, spacing)
 		writeStringToBuilder(builder, "CoreID", cpu.CoreID, spacing)
-		writeStringToBuilder(builder, "Cores", fmt.Sprintf("%d", cpu.Cores), spacing)
+		writeStringToBuilder(builder, "Cores", strconv.Itoa(int(cpu.Cores)), spacing)
 		writeStringToBuilder(builder, "ModelName", cpu.ModelName, spacing)
 		writeStringToBuilder(builder, "Mhz", fmt.Sprintf("%g", cpu.Mhz), spacing)
-		writeStringToBuilder(builder, "CacheSize", fmt.Sprintf("%d", cpu.CacheSize), spacing)
+		writeStringToBuilder(builder, "CacheSize", strconv.Itoa(int(cpu.CacheSize)), spacing)
 		writeStringToBuilder(builder, "Flags", strings.Join(cpu.Flags, ", "), spacing)
 		writeStringToBuilder(builder, "Microcode", cpu.Microcode, spacing)
 	}
@@ -118,7 +119,8 @@ func writeStringToBuilder(result *strings.Builder, name string, value string, sp
 	}
 
 	writeSpacesToBuilder(result, marging)
-	result.WriteString(fmt.Sprintf("%s:", name))
+	result.WriteString(name)
+	result.WriteString(":")
 	writeSpacesToBuilder(result, spacing-len(name)-1)
 	result.WriteString(value)
 	result.WriteString("\n")
