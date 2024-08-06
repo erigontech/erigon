@@ -150,7 +150,7 @@ func TestBlockServiceSuccess(t *testing.T) {
 	fcu.FinalizedCheckpointVal = post.FinalizedCheckpoint()
 	fcu.Headers[blocks[1].Block.ParentRoot] = blocks[0].SignedBeaconBlockHeader().Header.Copy()
 	blocks[1].Block.Body.BlobKzgCommitments = solid.NewStaticListSSZ[*cltypes.KZGCommitment](100, 48)
-	validatorMonitor.EXPECT().OnNewBlock(blocks[1].Block).Return(nil).Times(1)
+	validatorMonitor.EXPECT().OnNewBlock(gomock.Any(), blocks[1].Block).Return(nil).Times(1)
 
 	require.NoError(t, blockService.ProcessMessage(context.Background(), nil, blocks[1]))
 }

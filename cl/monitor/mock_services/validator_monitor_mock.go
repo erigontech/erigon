@@ -13,6 +13,7 @@ import (
 	reflect "reflect"
 
 	cltypes "github.com/erigontech/erigon/cl/cltypes"
+	state "github.com/erigontech/erigon/cl/phase1/core/state"
 	gomock "go.uber.org/mock/gomock"
 )
 
@@ -76,17 +77,17 @@ func (c *MockValidatorMonitorObserveValidatorCall) DoAndReturn(f func(uint64)) *
 }
 
 // OnNewBlock mocks base method.
-func (m *MockValidatorMonitor) OnNewBlock(arg0 *cltypes.BeaconBlock) error {
+func (m *MockValidatorMonitor) OnNewBlock(arg0 *state.CachingBeaconState, arg1 *cltypes.BeaconBlock) error {
 	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "OnNewBlock", arg0)
+	ret := m.ctrl.Call(m, "OnNewBlock", arg0, arg1)
 	ret0, _ := ret[0].(error)
 	return ret0
 }
 
 // OnNewBlock indicates an expected call of OnNewBlock.
-func (mr *MockValidatorMonitorMockRecorder) OnNewBlock(arg0 any) *MockValidatorMonitorOnNewBlockCall {
+func (mr *MockValidatorMonitorMockRecorder) OnNewBlock(arg0, arg1 any) *MockValidatorMonitorOnNewBlockCall {
 	mr.mock.ctrl.T.Helper()
-	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "OnNewBlock", reflect.TypeOf((*MockValidatorMonitor)(nil).OnNewBlock), arg0)
+	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "OnNewBlock", reflect.TypeOf((*MockValidatorMonitor)(nil).OnNewBlock), arg0, arg1)
 	return &MockValidatorMonitorOnNewBlockCall{Call: call}
 }
 
@@ -102,13 +103,13 @@ func (c *MockValidatorMonitorOnNewBlockCall) Return(arg0 error) *MockValidatorMo
 }
 
 // Do rewrite *gomock.Call.Do
-func (c *MockValidatorMonitorOnNewBlockCall) Do(f func(*cltypes.BeaconBlock) error) *MockValidatorMonitorOnNewBlockCall {
+func (c *MockValidatorMonitorOnNewBlockCall) Do(f func(*state.CachingBeaconState, *cltypes.BeaconBlock) error) *MockValidatorMonitorOnNewBlockCall {
 	c.Call = c.Call.Do(f)
 	return c
 }
 
 // DoAndReturn rewrite *gomock.Call.DoAndReturn
-func (c *MockValidatorMonitorOnNewBlockCall) DoAndReturn(f func(*cltypes.BeaconBlock) error) *MockValidatorMonitorOnNewBlockCall {
+func (c *MockValidatorMonitorOnNewBlockCall) DoAndReturn(f func(*state.CachingBeaconState, *cltypes.BeaconBlock) error) *MockValidatorMonitorOnNewBlockCall {
 	c.Call = c.Call.DoAndReturn(f)
 	return c
 }
