@@ -330,7 +330,7 @@ type Bor struct {
 	GenesisContractsClient GenesisContracts
 	HeimdallClient         heimdall.HeimdallClient
 	spanReader             spanReader
-	BridgeReader           bridgeReader
+	bridgeReader           bridgeReader
 
 	// scope event.SubscriptionScope
 	// The fields below are for testing only
@@ -386,7 +386,7 @@ func New(
 		execCtx:                context.Background(),
 		logger:                 logger,
 		closeCh:                make(chan struct{}),
-		BridgeReader:           bridgeReader,
+		bridgeReader:           bridgeReader,
 		spanReader:             spanReader,
 	}
 
@@ -1510,8 +1510,8 @@ func (c *Bor) CommitStates(
 ) error {
 	blockNum := header.Number.Uint64()
 
-	if c.BridgeReader != nil {
-		events, err := c.BridgeReader.Events(c.execCtx, blockNum)
+	if c.bridgeReader != nil {
+		events, err := c.bridgeReader.Events(c.execCtx, blockNum)
 		if err != nil {
 			if errors.Is(err, bridge.ErrMapNotAvailable) {
 				return nil
