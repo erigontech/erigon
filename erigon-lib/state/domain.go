@@ -839,6 +839,9 @@ func (dt *DomainRoTx) DebugEFKey(k []byte) error {
 // - mgas/s=107.56 average mgas/s=86.65
 // - mgas/s=48.79 average mgas/s=60.01
 
+// mainnet
+//
+
 func (d *Domain) collectFilesStats() (datsz, idxsz, files uint64) {
 	d.History.dirtyFiles.Walk(func(items []*filesItem) bool {
 		for _, item := range items {
@@ -1426,7 +1429,7 @@ func (dt *DomainRoTx) getFromFiles(filekey []byte) (v []byte, found bool, fileSt
 	hi, _ := dt.ht.iit.hashKey(filekey)
 	if dt.name != kv.CommitmentDomain {
 		if dt.latestStateCache == nil {
-			dt.latestStateCache, err = freelru.New[uint64, fileCacheItem](latestStateCachePerDomain, nil)
+			dt.latestStateCache, err = freelru.New[uint64, fileCacheItem](latestStateCachePerDomain, u64h)
 			if err != nil {
 				panic(err)
 			}
