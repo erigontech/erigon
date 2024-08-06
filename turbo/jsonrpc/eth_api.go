@@ -340,7 +340,7 @@ func (api *BaseAPI) pruneMode(tx kv.Tx) (*prune.Mode, error) {
 
 type bridgeReader interface {
 	Events(ctx context.Context, blockNum uint64) ([]*types.Message, error)
-	TxLookup(ctx context.Context, borTxHash common.Hash) (uint64, bool, error)
+	EventTxnLookup(ctx context.Context, borTxHash common.Hash) (uint64, bool, error)
 }
 
 // APIImpl is implementation of the EthAPI interface based on remote Db access

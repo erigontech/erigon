@@ -119,7 +119,7 @@ func (api *PrivateDebugAPIImpl) traceBlock(ctx context.Context, blockNrOrHash rp
 
 		var ok bool
 		if api.bridgeReader != nil {
-			_, ok, err = api.bridgeReader.TxLookup(ctx, borStateSyncTxHash)
+			_, ok, err = api.bridgeReader.EventTxnLookup(ctx, borStateSyncTxHash)
 		} else {
 			_, ok, err = api._blockReader.EventLookup(ctx, tx, borStateSyncTxHash)
 		}
@@ -246,7 +246,7 @@ func (api *PrivateDebugAPIImpl) TraceTransaction(ctx context.Context, hash commo
 
 		// otherwise this may be a bor state sync transaction - check
 		if api.bridgeReader != nil {
-			blockNum, ok, err = api.bridgeReader.TxLookup(ctx, hash)
+			blockNum, ok, err = api.bridgeReader.EventTxnLookup(ctx, hash)
 		} else {
 			blockNum, ok, err = api._blockReader.EventLookup(ctx, tx, hash)
 		}
