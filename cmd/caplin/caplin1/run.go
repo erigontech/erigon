@@ -18,6 +18,7 @@ package caplin1
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"math"
 	"os"
@@ -58,9 +59,11 @@ import (
 	"github.com/erigontech/erigon/cl/persistence/beacon_indicies"
 	"github.com/erigontech/erigon/cl/persistence/blob_storage"
 	"github.com/erigontech/erigon/cl/persistence/format/snapshot_format"
+	"github.com/erigontech/erigon/cl/persistence/genesisdb"
 	state_accessors "github.com/erigontech/erigon/cl/persistence/state"
 	"github.com/erigontech/erigon/cl/persistence/state/historical_states_reader"
 	"github.com/erigontech/erigon/cl/phase1/core/checkpoint_sync"
+	"github.com/erigontech/erigon/cl/phase1/core/state"
 	"github.com/erigontech/erigon/cl/phase1/execution_client"
 	"github.com/erigontech/erigon/cl/phase1/forkchoice"
 	"github.com/erigontech/erigon/cl/phase1/forkchoice/fork_graph"
@@ -119,6 +122,14 @@ func OpenCaplinDatabase(ctx context.Context,
 	return db, blob_storage.NewBlobStore(blobDB, afero.NewBasePathFs(afero.NewOsFs(), blobDir), blobPruneDistance, beaconConfig, ethClock), nil
 }
 
+func shouldConnectToDevnet(config clparams.CaplinConfig) bool {
+	return config.DevnetConfigPath != "" || config.DevnetGensisStatePath != ""
+}
+
+func haveValidDevnetParams(config clparams.CaplinConfig) bool {
+	return config.DevnetConfigPath == "" || config.DevnetGensisStatePath == ""
+}
+
 func RunCaplinService(ctx context.Context, engine execution_client.ExecutionEngine, config clparams.CaplinConfig,
 	dirs datadir.Dirs, eth1Getter snapshot_format.ExecutionBlockReaderByNumber,
 	snDownloader proto_downloader.DownloaderClient, creds credentials.TransportCredentials, snBuildSema *semaphore.Weighted) error {
@@ -128,12 +139,53 @@ func RunCaplinService(ctx context.Context, engine execution_client.ExecutionEngi
 		blobBackfilling = config.BlobBackfilling
 		states          = config.Archive
 	)
+	var networkConfig *clparams.NetworkConfig
+	var beaconConfig *clparams.BeaconChainConfig
 
-	// Take some parameters from the main config and pass them to the embedded consensus layer.
+	var err error
 
-	networkConfig, beaconConfig := clparams.GetConfigsByNetwork(clparams.NetworkType(config.NetworkId))
+	var genesisState *state.CachingBeaconState
+	genesisDb := genesisdb.NewGenesisDB(beaconConfig, dirs.CaplinGenesis)
 
-	state, err := checkpoint_sync.ReadOrFetchLatestBeaconState(ctx, dirs, beaconConfig, config)
+	isGenesisDBInitialized, err := genesisDb.IsInitialized()
+	if err != nil {
+		return err
+	}
+
+	if shouldConnectToDevnet(config) {
+		if !haveValidDevnetParams(config) {
+			return errors.New("devnet config and genesis state paths must be set together")
+		}
+		networkConfig, _ = clparams.GetConfigsByNetwork(clparams.MainnetNetwork)
+		tmp, err := clparams.CustomConfig(config.DevnetConfigPath)
+		if err != nil {
+			return err
+		}
+		beaconConfig = &tmp
+		stateBytes, err := os.ReadFile(config.DevnetGensisStatePath)
+		if err != nil {
+			return fmt.Errorf("could not read provided genesis state file: %s", err)
+		}
+		genesisState = state.New(beaconConfig)
+
+		if genesisState.DecodeSSZ(stateBytes, int(beaconConfig.GetCurrentStateVersion(beaconConfig.GenesisEpoch))); err != nil {
+			return fmt.Errorf("could not decode genesis state: %s", err)
+		}
+	} else {
+		networkConfig, beaconConfig = clparams.GetConfigsByNetwork(clparams.NetworkType(config.NetworkId))
+
+		// If genesis state is provided and is hardcoded, use it
+		if initial_state.IsGenesisStateSupported(config.NetworkId) && !isGenesisDBInitialized {
+			genesisState, err = initial_state.GetGenesisState(config.NetworkId)
+			if err != nil {
+				return err
+			}
+		}
+	}
+
+	genesisDb.Initialize(genesisState)
+
+	state, err := checkpoint_sync.ReadOrFetchLatestBeaconState(ctx, dirs, beaconConfig, config, genesisDb)
 	if err != nil {
 		return err
 	}
@@ -308,11 +360,7 @@ func RunCaplinService(ctx context.Context, engine execution_client.ExecutionEngi
 			return err
 		}
 	}
-	// get the initial state
-	genesisState, err := initial_state.GetGenesisState(clparams.NetworkType(beaconConfig.DepositNetworkID))
-	if err != nil {
-		return err
-	}
+
 	antiq := antiquary.NewAntiquary(ctx, blobStorage, genesisState, vTables, beaconConfig, dirs, snDownloader, indexDB, csn, rcsn, logger, states, backfilling, blobBackfilling, snBuildSema)
 	// Create the antiquary
 	go func() {

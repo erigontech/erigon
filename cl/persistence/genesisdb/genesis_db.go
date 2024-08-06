@@ -38,7 +38,7 @@ func (g *genesisDB) Initialize(state *state.CachingBeaconState) error {
 		return err
 	}
 	// No need to initialize.
-	if initialized {
+	if initialized || state == nil {
 		return nil
 	}
 	enc, err := utils.EncodeSSZSnappy(state)
