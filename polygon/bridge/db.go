@@ -168,12 +168,7 @@ func (s *MdbxStore) TxMap(ctx context.Context, borTxHash libcommon.Hash) (uint64
 	}
 	defer tx.Rollback()
 
-	cursor, err := tx.Cursor(kv.BorTxLookup)
-	if err != nil {
-		return blockNum, false, err
-	}
-
-	_, v, err := cursor.SeekExact(borTxHash.Bytes())
+	v, err := tx.GetOne(kv.BorTxLookup, borTxHash.Bytes())
 	if err != nil {
 		return blockNum, false, err
 	}
@@ -181,11 +176,7 @@ func (s *MdbxStore) TxMap(ctx context.Context, borTxHash libcommon.Hash) (uint64
 		return blockNum, false, nil
 	}
 
-	err = binary.Read(bytes.NewReader(v), binary.BigEndian, &blockNum)
-	if err != nil {
-		return blockNum, false, err
-	}
-
+	blockNum = binary.BigEndian.Uint64(v)
 	return blockNum, true, nil
 }
 
