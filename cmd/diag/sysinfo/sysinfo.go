@@ -17,6 +17,10 @@
 package sysinfo
 
 import (
+	"fmt"
+	"strconv"
+	"strings"
+
 	"github.com/urfave/cli/v2"
 
 	"github.com/erigontech/erigon-lib/diagnostics"
@@ -61,13 +65,69 @@ func collectInfo(cliCtx *cli.Context) error {
 		util.RenderError(err)
 	}
 
+	var builder strings.Builder
+	builder.WriteString("Disk info:\n")
+	builder.WriteString(data.Disk.Details)
+	builder.WriteString("\n\n")
+	builder.WriteString("CPU info:\n")
+	writeCPUToStringBuilder(data.CPU, &builder)
+
 	// Save data to file
-	err = util.SaveDataToFile(cliCtx.String(ExportPathFlag.Name), cliCtx.String(ExportFileNameFlag.Name), data.Disk.Details)
+	err = util.SaveDataToFile(cliCtx.String(ExportPathFlag.Name), cliCtx.String(ExportFileNameFlag.Name), builder.String())
 	if err != nil {
 		util.RenderError(err)
 	}
 
 	return nil
+}
+
+func writeCPUToStringBuilder(cpuInfo []diagnostics.CPUInfo, builder *strings.Builder) {
+	spacing := calculateSpacing([]string{"CPU", "VendorID", "Family", "Model", "Stepping", "PhysicalID", "CoreID", "Cores", "ModelName", "Mhz", "CacheSize", "Flags", "Microcode"})
+
+	for _, cpu := range cpuInfo {
+		writeStringToBuilder(builder, "CPU", strconv.Itoa(int(cpu.CPU)), spacing)
+		writeStringToBuilder(builder, "VendorID", cpu.VendorID, spacing)
+		writeStringToBuilder(builder, "Family", cpu.Family, spacing)
+		writeStringToBuilder(builder, "Model", cpu.Model, spacing)
+		writeStringToBuilder(builder, "Stepping", strconv.Itoa(int(cpu.Stepping)), spacing)
+		writeStringToBuilder(builder, "PhysicalID", cpu.PhysicalID, spacing)
+		writeStringToBuilder(builder, "CoreID", cpu.CoreID, spacing)
+		writeStringToBuilder(builder, "Cores", strconv.Itoa(int(cpu.Cores)), spacing)
+		writeStringToBuilder(builder, "ModelName", cpu.ModelName, spacing)
+		writeStringToBuilder(builder, "Mhz", fmt.Sprintf("%g", cpu.Mhz), spacing)
+		writeStringToBuilder(builder, "CacheSize", strconv.Itoa(int(cpu.CacheSize)), spacing)
+		writeStringToBuilder(builder, "Flags", strings.Join(cpu.Flags, ", "), spacing)
+		writeStringToBuilder(builder, "Microcode", cpu.Microcode, spacing)
+	}
+}
+
+func calculateSpacing(keysArray []string) int {
+	max := 0
+	for _, key := range keysArray {
+		if len(key) > max {
+			max = len(key)
+		}
+	}
+
+	return max + 3
+}
+
+func writeStringToBuilder(result *strings.Builder, name string, value string, spacing int) {
+	marging := 3
+	if value == "" {
+		value = "N/A"
+	}
+
+	writeSpacesToBuilder(result, marging)
+	result.WriteString(name)
+	result.WriteString(":")
+	writeSpacesToBuilder(result, spacing-len(name)-1)
+	result.WriteString(value)
+	result.WriteString("\n")
+}
+
+func writeSpacesToBuilder(result *strings.Builder, spaces int) {
+	result.WriteString(strings.Repeat(" ", spaces))
 }
 
 func getData(cliCtx *cli.Context) (diagnostics.HardwareInfo, error) {
