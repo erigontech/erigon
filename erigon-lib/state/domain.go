@@ -1437,10 +1437,6 @@ func (dt *DomainRoTx) getFromFiles(filekey []byte) (v []byte, found bool, fileSt
 		return
 	}
 
-	if len(dt.files) == 0 {
-		return nil, false, 0, 0, err
-	}
-
 	hi, _ := dt.ht.iit.hashKey(filekey)
 	if dt.name != kv.CommitmentDomain {
 		if dt.latestStateCache == nil {
