@@ -17,6 +17,8 @@
 package sysinfo
 
 import (
+	"strings"
+
 	"github.com/urfave/cli/v2"
 
 	"github.com/erigontech/erigon-lib/diagnostics"
@@ -61,13 +63,62 @@ func collectInfo(cliCtx *cli.Context) error {
 		util.RenderError(err)
 	}
 
+	stringToSave := "Disk info:\n"
+	stringToSave += data.Disk.Details + "\n"
+	stringToSave += "CPU info:\n"
+	stringToSave += cpuToString(data.CPU) + "\n"
+
 	// Save data to file
-	err = util.SaveDataToFile(cliCtx.String(ExportPathFlag.Name), cliCtx.String(ExportFileNameFlag.Name), data.Disk.Details)
+	err = util.SaveDataToFile(cliCtx.String(ExportPathFlag.Name), cliCtx.String(ExportFileNameFlag.Name), stringToSave)
 	if err != nil {
 		util.RenderError(err)
 	}
 
 	return nil
+}
+
+func cpuToString(cpuInfo []diagnostics.CPUInfo) string {
+	result := ""
+
+	spacing := calculateSpacing([]string{"CPU", "VendorID", "Family", "Model", "Stepping", "PhysicalID", "CoreID", "Cores", "ModelName", "Mhz", "CacheSize", "Flags", "Microcode"})
+
+	for _, cpu := range cpuInfo {
+		addStringToResult(&result, "CPU", util.Int32ToString(cpu.CPU), spacing)
+		addStringToResult(&result, "VendorID", cpu.VendorID, spacing)
+		addStringToResult(&result, "Family", cpu.Family, spacing)
+		addStringToResult(&result, "Model", cpu.Model, spacing)
+		addStringToResult(&result, "Stepping", util.Int32ToString(cpu.Stepping), spacing)
+		addStringToResult(&result, "PhysicalID", cpu.PhysicalID, spacing)
+		addStringToResult(&result, "CoreID", cpu.CoreID, spacing)
+		addStringToResult(&result, "Cores", util.Int32ToString(cpu.Cores), spacing)
+		addStringToResult(&result, "ModelName", cpu.ModelName, spacing)
+		addStringToResult(&result, "Mhz", util.Float64ToString(cpu.Mhz), spacing)
+		addStringToResult(&result, "CacheSize", util.Int32ToString(cpu.CacheSize), spacing)
+		addStringToResult(&result, "Flags", strings.Join(cpu.Flags, ", "), spacing)
+		addStringToResult(&result, "Microcode", cpu.Microcode, spacing)
+	}
+
+	return result
+}
+
+func calculateSpacing(keysArray []string) int {
+	max := 0
+	for _, key := range keysArray {
+		if len(key) > max {
+			max = len(key)
+		}
+	}
+
+	return max + 3
+}
+
+func addStringToResult(result *string, name string, value string, spacing int) {
+	marging := 3
+	if value == "" {
+		value = "N/A"
+	}
+
+	*result += strings.Repeat(" ", marging) + name + ":" + strings.Repeat(" ", spacing-len(name)) + value + "\n"
 }
 
 func getData(cliCtx *cli.Context) (diagnostics.HardwareInfo, error) {

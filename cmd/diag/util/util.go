@@ -24,6 +24,7 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 
@@ -144,4 +145,12 @@ func MakePath(filePath string, fileName string) string {
 	}
 
 	return fmt.Sprintf("%s/%s", filePath, fileName)
+}
+
+func Int32ToString(value int32) string {
+	return strconv.FormatInt(int64(value), 10)
+}
+
+func Float64ToString(value float64) string {
+	return strconv.FormatFloat(value, 'f', -1, 64)
 }
