@@ -852,6 +852,9 @@ func (dt *DomainRoTx) DebugEFKey(k []byte) error {
 // mgas/s=63.94 average mgas/s=65.08
 
 // mainnet chain tip: l0_cache_1_all - 1K items
+// a=code hit=441 total=841 Collisions=69 Evictions=0 Inserts=400 limit=1000 ratio=0.52
+// a=storage hit=189 total=589 Collisions=64 Evictions=0 Inserts=400 limit=1000 ratio=0.32
+// a=accounts hit=64 total=164 Collisions=4 Evictions=0 Inserts=100 limit=1000 ratio=0.39
 //
 
 func (d *Domain) collectFilesStats() (datsz, idxsz, files uint64) {
