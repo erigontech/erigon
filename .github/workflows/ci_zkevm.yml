@@ -92,7 +92,7 @@ jobs:
         run: docker build -t cdk-erigon:local --file Dockerfile .
 
       - name: Remove unused flags
-        working-directory: ./cdk-erigon
+        working-directory: ./kurtosis-cdk
         run: |
           sed -i '/zkevm.sequencer-batch-seal-time:/d' templates/cdk-erigon/config.yml
 
