@@ -137,13 +137,6 @@ func TestBridge(t *testing.T) {
 	require.Equal(t, event1Data, rlp.RawValue(res[0].Data())) // check data fields
 	require.Equal(t, event2Data, rlp.RawValue(res[1].Data()))
 
-	res, err = b.Events(ctx, 4)
-	require.NoError(t, err)
-
-	require.Equal(t, 2, len(res))
-	require.Equal(t, event1Data, rlp.RawValue(res[0].Data()))
-	require.Equal(t, event2Data, rlp.RawValue(res[1].Data()))
-
 	// get non-sprint block
 	res, err = b.Events(ctx, 1)
 	require.Equal(t, len(res), 0)

@@ -219,6 +219,7 @@ type Ethereum struct {
 	silkwormSentryService    *silkworm.SentryService
 
 	polygonSyncService polygonsync.Service
+	polygonBridge      bridge.PolygonBridge
 	stopNode           func() error
 }
 
@@ -547,7 +548,9 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 
 		if config.PolygonSync {
 			polygonBridge = bridge.Assemble(config.Dirs.DataDir, logger, consensusConfig.(*borcfg.BorConfig), heimdallClient.FetchStateSyncEvents, bor.GenesisContractStateReceiverABI())
-			heimdallService = heimdall.AssembleService(chainConfig.Bor.(*borcfg.BorConfig), config.HeimdallURL, dirs.DataDir, tmpdir, logger)
+			heimdallService = heimdall.AssembleService(consensusConfig.(*borcfg.BorConfig), config.HeimdallURL, dirs.DataDir, tmpdir, logger)
+
+			backend.polygonBridge = polygonBridge
 		}
 
 		flags.Milestone = config.WithHeimdallMilestones
@@ -1046,7 +1049,7 @@ func (s *Ethereum) Init(stack *node.Node, config *ethconfig.Config, chainConfig 
 		}
 	}
 
-	s.apiList = jsonrpc.APIList(chainKv, ethRpcClient, txPoolRpcClient, miningRpcClient, ff, stateCache, blockReader, &httpRpcCfg, s.engine, s.logger)
+	s.apiList = jsonrpc.APIList(chainKv, ethRpcClient, txPoolRpcClient, miningRpcClient, ff, stateCache, blockReader, &httpRpcCfg, s.engine, s.logger, s.polygonBridge)
 
 	if config.SilkwormRpcDaemon && httpRpcCfg.Enabled {
 		interface_log_settings := silkworm.RpcInterfaceLogSettings{

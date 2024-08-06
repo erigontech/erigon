@@ -776,7 +776,12 @@ func (api *TraceAPIImpl) ReplayTransaction(ctx context.Context, txHash libcommon
 		}
 
 		// otherwise this may be a bor state sync transaction - check
-		blockNum, ok, err = api._blockReader.EventLookup(ctx, tx, txHash)
+		if api.bridgeReader != nil {
+			blockNum, ok, err = api.bridgeReader.EventTxnLookup(ctx, txHash)
+		} else {
+			blockNum, ok, err = api._blockReader.EventLookup(ctx, tx, txHash)
+		}
+
 		if err != nil {
 			return nil, err
 		}
