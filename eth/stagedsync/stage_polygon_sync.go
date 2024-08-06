@@ -292,7 +292,7 @@ func (s *polygonSyncStageService) runBgComponentsOnce(ctx context.Context) {
 	}()
 }
 
-// TODO will integrate in subsequent PR
+// TODO will integrate in subsequent PR as part of https://github.com/erigontech/erigon/issues/11195
 type polygonSyncStageBridge struct{}
 
 func (p *polygonSyncStageBridge) Synchronize(context.Context, uint64) error {
