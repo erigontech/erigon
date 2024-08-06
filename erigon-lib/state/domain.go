@@ -840,16 +840,22 @@ func (dt *DomainRoTx) DebugEFKey(k []byte) error {
 // - mgas/s=48.79 average mgas/s=60.01
 
 // mainnet chain tip: l0_cache_1_all - 16K items
-// a=storage hit=664 total=1664 Collisions=29 Evictions=0 Inserts=1000 limit=16384 ratio=0.40
 // a=code hit=61861 total=77861 Collisions=5779 Evictions=0 Inserts=16000 limit=16384 ratio=0.79
+// a=storage hit=664 total=1664 Collisions=29 Evictions=0 Inserts=1000 limit=16384 ratio=0.40
 // a=accounts hit=74395 total=154395 Collisions=46260 Evictions=63616 Inserts=80000 limit=16384 ratio=0.48
 //  mgas/s=65.67 average mgas/s=71.09
 
 // mainnet chain tip: l0_cache_1_all - 8K items
-// a=code hit=403 total=903 Collisions=18 Evictions=0 Inserts=500 limit=8000 ratio=0.45
-// a=storage hit=505 total=3305 Collisions=432 Evictions=0 Inserts=2800 limit=8000 ratio=0.15
+// a=code hit=339 total=739 Collisions=6 Evictions=0 Inserts=400 limit=8000 ratio=0.46
+// a=storage hit=846 total=6446 Collisions=1527 Evictions=0 Inserts=5600 limit=8000 ratio=0.13
 // a=accounts hit=59 total=159 Collisions=1 Evictions=0 Inserts=100 limit=8000 ratio=0.37
-// mgas/s=64.77 average mgas/s=63.85
+// mgas/s=63.94 average mgas/s=65.08
+
+// mainnet chain tip: l0_cache_1_all - 1K items
+// a=code hit=339 total=739 Collisions=6 Evictions=0 Inserts=400 limit=8000 ratio=0.46
+// a=storage hit=846 total=6446 Collisions=1527 Evictions=0 Inserts=5600 limit=8000 ratio=0.13
+// a=accounts hit=59 total=159 Collisions=1 Evictions=0 Inserts=100 limit=8000 ratio=0.37
+// mgas/s=63.94 average mgas/s=65.08
 
 func (d *Domain) collectFilesStats() (datsz, idxsz, files uint64) {
 	d.History.dirtyFiles.Walk(func(items []*filesItem) bool {
