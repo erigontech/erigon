@@ -25,7 +25,6 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
-	"math"
 	"math/big"
 	"net"
 	"os"
@@ -83,9 +82,7 @@ import (
 	"github.com/erigontech/erigon-lib/wrap"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/persistence/format/snapshot_format/getters"
-	"github.com/erigontech/erigon/cl/phase1/core/checkpoint_sync"
 	executionclient "github.com/erigontech/erigon/cl/phase1/execution_client"
-	"github.com/erigontech/erigon/cl/utils/eth_clock"
 	"github.com/erigontech/erigon/cmd/caplin/caplin1"
 	"github.com/erigontech/erigon/cmd/rpcdaemon/cli"
 	"github.com/erigontech/erigon/common/debug"
@@ -937,43 +934,11 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 
 	// If we choose not to run a consensus layer, run our embedded.
 	if config.InternalCL && clparams.EmbeddedSupported(config.NetworkID) {
-		networkCfg, beaconCfg := clparams.GetConfigsByNetwork(clparams.NetworkType(config.NetworkID))
-		if err != nil {
-			return nil, err
-		}
-
 		config.CaplinConfig.NetworkId = clparams.NetworkType(config.NetworkID)
-		state, err := checkpoint_sync.ReadOrFetchLatestBeaconState(ctx, dirs, beaconCfg, config.CaplinConfig)
-		if err != nil {
-			return nil, err
-		}
-		ethClock := eth_clock.NewEthereumClock(state.GenesisTime(), state.GenesisValidatorsRoot(), beaconCfg)
-
-		pruneBlobDistance := uint64(128600)
-		if config.CaplinConfig.BlobBackfilling || config.CaplinConfig.BlobPruningDisabled {
-			pruneBlobDistance = math.MaxUint64
-		}
-
-		indiciesDB, blobStorage, err := caplin1.OpenCaplinDatabase(ctx, beaconCfg, ethClock, dirs.CaplinIndexing, dirs.CaplinBlobs, executionEngine, false, pruneBlobDistance)
-		if err != nil {
-			return nil, err
-		}
-
+		config.CaplinConfig.LoopBlockLimit = uint64(config.LoopBlockLimit)
 		go func() {
-			caplinOpt := []caplin1.CaplinOption{}
-			if config.BeaconRouter.Builder {
-				if config.CaplinConfig.RelayUrlExist() {
-					caplinOpt = append(caplinOpt, caplin1.WithBuilder(config.CaplinConfig.MevRelayUrl, beaconCfg))
-				} else {
-					log.Warn("builder api enable but relay url not set. Skipping builder mode")
-					config.BeaconRouter.Builder = false
-				}
-			}
-			log.Info("Starting caplin")
-			eth1Getter := getters.NewExecutionSnapshotReader(ctx, beaconCfg, blockReader, backend.chainDB)
-			if err := caplin1.RunCaplinPhase1(ctx, executionEngine, config, networkCfg, beaconCfg, ethClock,
-				state, dirs, eth1Getter, backend.downloaderClient, indiciesDB, blobStorage, creds,
-				blockSnapBuildSema, caplinOpt...); err != nil {
+			eth1Getter := getters.NewExecutionSnapshotReader(ctx, blockReader, backend.chainDB)
+			if err := caplin1.RunCaplinService(ctx, executionEngine, config.CaplinConfig, dirs, eth1Getter, backend.downloaderClient, creds, blockSnapBuildSema); err != nil {
 				logger.Error("could not start caplin", "err", err)
 			}
 			ctxCancel()

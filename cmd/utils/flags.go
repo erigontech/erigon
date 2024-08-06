@@ -1679,18 +1679,18 @@ func setWhitelist(ctx *cli.Context, cfg *ethconfig.Config) {
 
 func setBeaconAPI(ctx *cli.Context, cfg *ethconfig.Config) error {
 	allowed := ctx.StringSlice(BeaconAPIFlag.Name)
-	if err := cfg.BeaconRouter.UnwrapEndpointsList(allowed); err != nil {
+	if err := cfg.CaplinConfig.BeaconAPIRouter.UnwrapEndpointsList(allowed); err != nil {
 		return err
 	}
 
-	cfg.BeaconRouter.Protocol = ctx.String(BeaconApiProtocolFlag.Name)
-	cfg.BeaconRouter.Address = fmt.Sprintf("%s:%d", ctx.String(BeaconApiAddrFlag.Name), ctx.Int(BeaconApiPortFlag.Name))
-	cfg.BeaconRouter.ReadTimeTimeout = time.Duration(ctx.Uint64(BeaconApiReadTimeoutFlag.Name)) * time.Second
-	cfg.BeaconRouter.WriteTimeout = time.Duration(ctx.Uint64(BeaconApiWriteTimeoutFlag.Name)) * time.Second
-	cfg.BeaconRouter.IdleTimeout = time.Duration(ctx.Uint64(BeaconApiIdleTimeoutFlag.Name)) * time.Second
-	cfg.BeaconRouter.AllowedMethods = ctx.StringSlice(BeaconApiAllowMethodsFlag.Name)
-	cfg.BeaconRouter.AllowedOrigins = ctx.StringSlice(BeaconApiAllowOriginsFlag.Name)
-	cfg.BeaconRouter.AllowCredentials = ctx.Bool(BeaconApiAllowCredentialsFlag.Name)
+	cfg.CaplinConfig.BeaconAPIRouter.Protocol = ctx.String(BeaconApiProtocolFlag.Name)
+	cfg.CaplinConfig.BeaconAPIRouter.Address = fmt.Sprintf("%s:%d", ctx.String(BeaconApiAddrFlag.Name), ctx.Int(BeaconApiPortFlag.Name))
+	cfg.CaplinConfig.BeaconAPIRouter.ReadTimeTimeout = time.Duration(ctx.Uint64(BeaconApiReadTimeoutFlag.Name)) * time.Second
+	cfg.CaplinConfig.BeaconAPIRouter.WriteTimeout = time.Duration(ctx.Uint64(BeaconApiWriteTimeoutFlag.Name)) * time.Second
+	cfg.CaplinConfig.BeaconAPIRouter.IdleTimeout = time.Duration(ctx.Uint64(BeaconApiIdleTimeoutFlag.Name)) * time.Second
+	cfg.CaplinConfig.BeaconAPIRouter.AllowedMethods = ctx.StringSlice(BeaconApiAllowMethodsFlag.Name)
+	cfg.CaplinConfig.BeaconAPIRouter.AllowedOrigins = ctx.StringSlice(BeaconApiAllowOriginsFlag.Name)
+	cfg.CaplinConfig.BeaconAPIRouter.AllowCredentials = ctx.Bool(BeaconApiAllowCredentialsFlag.Name)
 	return nil
 }
 
@@ -1767,11 +1767,11 @@ func CheckExclusive(ctx *cli.Context, args ...interface{}) {
 
 // SetEthConfig applies eth-related command line flags to the config.
 func SetEthConfig(ctx *cli.Context, nodeConfig *nodecfg.Config, cfg *ethconfig.Config, logger log.Logger) {
-	cfg.CaplinDiscoveryAddr = ctx.String(CaplinDiscoveryAddrFlag.Name)
-	cfg.CaplinDiscoveryPort = ctx.Uint64(CaplinDiscoveryPortFlag.Name)
-	cfg.CaplinDiscoveryTCPPort = ctx.Uint64(CaplinDiscoveryTCPPortFlag.Name)
-	cfg.SentinelAddr = ctx.String(SentinelAddrFlag.Name)
-	cfg.SentinelPort = ctx.Uint64(SentinelPortFlag.Name)
+	cfg.CaplinConfig.CaplinDiscoveryAddr = ctx.String(CaplinDiscoveryAddrFlag.Name)
+	cfg.CaplinConfig.CaplinDiscoveryPort = ctx.Uint64(CaplinDiscoveryPortFlag.Name)
+	cfg.CaplinConfig.CaplinDiscoveryTCPPort = ctx.Uint64(CaplinDiscoveryTCPPortFlag.Name)
+	cfg.CaplinConfig.SentinelAddr = ctx.String(SentinelAddrFlag.Name)
+	cfg.CaplinConfig.SentinelPort = ctx.Uint64(SentinelPortFlag.Name)
 
 	chain := ctx.String(ChainFlag.Name) // mainnet by default
 	if ctx.IsSet(NetworkIdFlag.Name) {

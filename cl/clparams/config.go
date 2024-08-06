@@ -33,6 +33,7 @@ import (
 	"github.com/erigontech/erigon-lib/chain/networkname"
 	libcommon "github.com/erigontech/erigon-lib/common"
 
+	"github.com/erigontech/erigon/cl/beacon/beacon_router_configuration"
 	"github.com/erigontech/erigon/cl/utils"
 )
 
@@ -51,6 +52,21 @@ type CaplinConfig struct {
 	MevRelayUrl string
 	// EnableValidatorMonitor is used to enable the validator monitor metrics and corresponding logs
 	EnableValidatorMonitor bool
+
+	// Devnets config
+	DevnetConfigPath      string
+	DevnetGensisStatePath string
+
+	// Network stuff
+	CaplinDiscoveryAddr    string
+	CaplinDiscoveryPort    uint64
+	CaplinDiscoveryTCPPort uint64
+	SentinelAddr           string
+	SentinelPort           uint64
+	// Erigon Sync
+	LoopBlockLimit uint64
+	// Beacon API router configuration
+	BeaconAPIRouter beacon_router_configuration.RouterConfiguration
 }
 
 func (c CaplinConfig) RelayUrlExist() bool {

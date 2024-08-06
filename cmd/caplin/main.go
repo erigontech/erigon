@@ -30,11 +30,7 @@ import (
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/cl/beacon/beacon_router_configuration"
 	"github.com/erigontech/erigon/cl/clparams"
-	"github.com/erigontech/erigon/cl/phase1/core/checkpoint_sync"
-	"github.com/erigontech/erigon/cl/phase1/core/state"
 	execution_client2 "github.com/erigontech/erigon/cl/phase1/execution_client"
-	"github.com/erigontech/erigon/cl/utils/eth_clock"
-	"github.com/erigontech/erigon/eth/ethconfig"
 
 	"github.com/erigontech/erigon/cmd/caplin/caplin1"
 	"github.com/erigontech/erigon/cmd/caplin/caplincli"
@@ -89,39 +85,6 @@ func runCaplinNode(cliCtx *cli.Context) error {
 	// Either start from genesis or a checkpoint
 	ctx, cn := context.WithCancel(cliCtx.Context)
 	defer cn()
-	var state *state.CachingBeaconState
-	if cfg.InitialSync {
-		state = cfg.InitalState
-	} else {
-		state, err = checkpoint_sync.NewRemoteCheckpointSync(cfg.BeaconCfg, cfg.NetworkType).GetLatestBeaconState(ctx)
-		if err != nil {
-			return err
-		}
-	}
-
-	ethClock := eth_clock.NewEthereumClock(state.GenesisTime(), state.GenesisValidatorsRoot(), cfg.BeaconCfg)
-
-	// sentinel, err := service.StartSentinelService(&sentinel.SentinelConfig{
-	// 	IpAddr:        cfg.Addr,
-	// 	Port:          int(cfg.Port),
-	// 	TCPPort:       cfg.ServerTcpPort,
-	// 	GenesisConfig: cfg.GenesisCfg,
-	// 	NetworkConfig: cfg.NetworkCfg,
-	// 	BeaconConfig:  cfg.BeaconCfg,
-	// 	NoDiscovery:   cfg.NoDiscovery,
-	// 	EnableBlocks:  true,
-	// }, nil, nil, &service.ServerConfig{Network: cfg.ServerProtocol, Addr: cfg.ServerAddr}, nil, &cltypes.Status{
-	// 	ForkDigest:     forkDigest,
-	// 	FinalizedRoot:  state.FinalizedCheckpoint().BlockRoot(),
-	// 	FinalizedEpoch: state.FinalizedCheckpoint().Epoch(),
-	// 	HeadSlot:       state.FinalizedCheckpoint().Epoch() * cfg.BeaconCfg.SlotsPerEpoch,
-	// 	HeadRoot:       state.FinalizedCheckpoint().BlockRoot(),
-	// }, log.Root())
-	// if err != nil {
-	// 	log.Error("Could not start sentinel", "err", err)
-	// }
-
-	// log.Info("Sentinel started", "addr", cfg.ServerAddr)
 
 	if err != nil {
 		log.Error("[Checkpoint Sync] Failed", "reason", err)
@@ -137,30 +100,14 @@ func runCaplinNode(cliCtx *cli.Context) error {
 		executionEngine = cc
 	}
 
-	indiciesDB, blobStorage, err := caplin1.OpenCaplinDatabase(ctx, cfg.BeaconCfg, ethClock, cfg.Dirs.CaplinIndexing, cfg.Dirs.CaplinBlobs, executionEngine, false, 100_000)
-	if err != nil {
-		return err
-	}
-
 	blockSnapBuildSema := semaphore.NewWeighted(int64(dbg.BuildSnapshotAllowance))
 
-	var options []caplin1.CaplinOption
-	// builder option
-	if rcfg.Builder {
-		if cfg.MevRelayUrl == "" {
-			log.Warn("builder mode requires mev_relay_url, but it is not set. Skipping builder mode")
-			rcfg.Builder = false
-		} else {
-			log.Info("Starting with builder mode")
-			options = append(options, caplin1.WithBuilder(cfg.MevRelayUrl, cfg.BeaconCfg))
-		}
-	}
-
-	return caplin1.RunCaplinPhase1(ctx, executionEngine, &ethconfig.Config{
+	return caplin1.RunCaplinService(ctx, executionEngine, clparams.CaplinConfig{
 		CaplinDiscoveryAddr:    cfg.Addr,
 		CaplinDiscoveryPort:    uint64(cfg.Port),
 		CaplinDiscoveryTCPPort: uint64(cfg.ServerTcpPort),
-		BeaconRouter:           rcfg,
-		CaplinConfig:           clparams.CaplinConfig{},
-	}, cfg.NetworkCfg, cfg.BeaconCfg, ethClock, state, cfg.Dirs, nil, nil, indiciesDB, blobStorage, nil, blockSnapBuildSema, options...)
+		BeaconAPIRouter:        rcfg,
+		NetworkId:              cfg.NetworkType,
+		MevRelayUrl:            cfg.MevRelayUrl,
+	}, cfg.Dirs, nil, nil, nil, blockSnapBuildSema)
 }
