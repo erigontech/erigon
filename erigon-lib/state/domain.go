@@ -714,7 +714,7 @@ type DomainRoTx struct {
 	latestStateCache *freelru.LRU[uint64, fileCacheItem]
 }
 
-const latestStateCachePerDomain = 1024
+var latestStateCachePerDomain = uint32(dbg.EnvInt("LRU_LIMIT", 1024))
 
 type fileCacheItem struct {
 	lvl uint8
@@ -1448,12 +1448,12 @@ func (dt *DomainRoTx) getFromFiles(filekey []byte) (v []byte, found bool, fileSt
 		}
 		cv, ok := dt.latestStateCache.Get(hi)
 		if ok {
-			//if dbg.KVReadLevelledMetrics {
-			//	m := dt.latestStateCache.Metrics()
-			//	if m.Hits%1000 == 0 {
-			//		log.Warn("[dbg] lEachCache", "a", dt.name.String(), "hit", m.Hits, "total", m.Hits+m.Misses, "Collisions", m.Collisions, "Evictions", m.Evictions, "Inserts", m.Inserts, "limit", latestStateCachePerDomain, "ratio", fmt.Sprintf("%.2f", float64(m.Hits)/float64(m.Hits+m.Misses)))
-			//	}
-			//}
+			if dbg.KVReadLevelledMetrics {
+				m := dt.latestStateCache.Metrics()
+				if m.Hits%1000 == 0 {
+					log.Warn("[dbg] lEachCache", "a", dt.name.String(), "hit", m.Hits, "total", m.Hits+m.Misses, "Collisions", m.Collisions, "Evictions", m.Evictions, "Inserts", m.Inserts, "limit", latestStateCachePerDomain, "ratio", fmt.Sprintf("%.2f", float64(m.Hits)/float64(m.Hits+m.Misses)))
+				}
+			}
 			return cv.v, true, dt.files[cv.lvl].startTxNum, dt.files[cv.lvl].endTxNum, nil
 		}
 	}
