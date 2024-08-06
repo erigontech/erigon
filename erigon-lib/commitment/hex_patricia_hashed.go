@@ -127,24 +127,7 @@ func (cell *Cell) reset() {
 	cell.Update.Reset()
 }
 
-func (cell *Cell) setFromUpdate(update *Update) {
-	if update.Flags == DeleteUpdate {
-		cell.Update.Flags = DeleteUpdate
-		return
-	}
-	if update.Flags&BalanceUpdate != 0 {
-		cell.Balance.Set(&update.Balance)
-	}
-	if update.Flags&NonceUpdate != 0 {
-		cell.Nonce = update.Nonce
-	}
-	if update.Flags&CodeUpdate != 0 {
-		copy(cell.CodeHash[:], update.CodeHash[:])
-	}
-	if update.Flags&StorageUpdate != 0 {
-		cell.setStorage(update.Storage[:update.StorageLen])
-	}
-}
+func (cell *Cell) setFromUpdate(update *Update) { cell.Update.Merge(update) }
 
 func (cell *Cell) fillFromUpperCell(upCell *Cell, depth, depthIncrement int) {
 	if upCell.downHashedLen >= depthIncrement {
@@ -391,13 +374,6 @@ func (cell *Cell) fillFromFields(data []byte, pos int, fieldBits PartFlags) (int
 		cell.hashLen = 0
 	}
 	return pos, nil
-}
-
-func (cell *Cell) setStorage(value []byte) {
-	cell.StorageLen = len(value)
-	if len(value) > 0 {
-		copy(cell.Storage[:], value)
-	}
 }
 
 func (cell *Cell) accountForHashing(buffer []byte, storageRootHash [length.Hash]byte) int {

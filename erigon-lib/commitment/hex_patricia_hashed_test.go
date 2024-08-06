@@ -1044,3 +1044,84 @@ func TestUpdate_Merge(t *testing.T) {
 		require.EqualValues(t, encE, encA, i)
 	}
 }
+
+func TestCell_setFromUpdate(t *testing.T) {
+	rnd := rand.New(rand.NewSource(42))
+
+	b := uint256.NewInt(rnd.Uint64())
+	update := Update{}
+	update.Reset()
+
+	update.Balance = *b
+	update.Nonce = rand.Uint64()
+	rnd.Read(update.CodeHash[:])
+	update.Flags = BalanceUpdate | NonceUpdate | CodeUpdate
+
+	target := new(Cell)
+	target.setFromUpdate(&update)
+	require.True(t, update.Balance.Eq(&target.Balance))
+	require.EqualValues(t, update.Nonce, target.Nonce)
+	require.EqualValues(t, update.CodeHash, target.CodeHash)
+	require.EqualValues(t, 0, target.StorageLen)
+
+	update.Reset()
+
+	update.Balance.SetUint64(0)
+	update.Nonce = rand.Uint64()
+	rnd.Read(update.CodeHash[:])
+	update.Flags = NonceUpdate | CodeUpdate
+
+	target.reset()
+	target.setFromUpdate(&update)
+
+	require.True(t, update.Balance.Eq(&target.Balance))
+	require.EqualValues(t, update.Nonce, target.Nonce)
+	require.EqualValues(t, update.CodeHash, target.CodeHash)
+	require.EqualValues(t, 0, target.StorageLen)
+
+	update.Reset()
+
+	update.Balance.SetUint64(rnd.Uint64() + rnd.Uint64())
+	update.Nonce = rand.Uint64()
+	rnd.Read(update.Storage[:])
+	update.StorageLen = len(update.Storage)
+	update.Flags = NonceUpdate | BalanceUpdate | StorageUpdate
+
+	target.reset()
+	target.setFromUpdate(&update)
+
+	require.True(t, update.Balance.Eq(&target.Balance))
+	require.EqualValues(t, update.Nonce, target.Nonce)
+	require.EqualValues(t, update.CodeHash, target.CodeHash)
+	require.EqualValues(t, update.StorageLen, target.StorageLen)
+	require.EqualValues(t, update.Storage[:update.StorageLen], target.Storage[:target.StorageLen])
+
+	update.Reset()
+
+	update.Balance.SetUint64(rnd.Uint64() + rnd.Uint64())
+	update.Nonce = rand.Uint64()
+	rnd.Read(update.Storage[:rnd.Intn(len(update.Storage))])
+	update.StorageLen = len(update.Storage)
+	update.Flags = NonceUpdate | BalanceUpdate | StorageUpdate
+
+	target.reset()
+	target.setFromUpdate(&update)
+
+	require.True(t, update.Balance.Eq(&target.Balance))
+	require.EqualValues(t, update.Nonce, target.Nonce)
+	require.EqualValues(t, update.CodeHash, target.CodeHash)
+	require.EqualValues(t, EmptyCodeHashArray[:], target.CodeHash)
+	require.EqualValues(t, update.StorageLen, target.StorageLen)
+	require.EqualValues(t, update.Storage[:update.StorageLen], target.Storage[:target.StorageLen])
+
+	update.Reset()
+	update.Flags = DeleteUpdate
+	target.reset()
+	target.setFromUpdate(&update)
+
+	require.True(t, update.Balance.Eq(&target.Balance))
+	require.EqualValues(t, update.Nonce, target.Nonce)
+	require.EqualValues(t, EmptyCodeHashArray[:], target.CodeHash)
+	require.EqualValues(t, update.StorageLen, target.StorageLen)
+	require.EqualValues(t, update.Storage[:update.StorageLen], target.Storage[:target.StorageLen])
+}
