@@ -47,7 +47,7 @@ type Bridge struct {
 	lastProcessedBlockNumber atomic.Uint64
 	lastProcessedEventID     atomic.Uint64
 
-	log                log.Logger
+	logger             log.Logger
 	borConfig          *borcfg.BorConfig
 	stateReceiverABI   abi.ABI
 	stateClientAddress libcommon.Address
@@ -63,7 +63,7 @@ func Assemble(dataDir string, logger log.Logger, borConfig *borcfg.BorConfig, fe
 func NewBridge(store Store, logger log.Logger, borConfig *borcfg.BorConfig, fetchSyncEvents fetchSyncEventsType, stateReceiverABI abi.ABI) *Bridge {
 	return &Bridge{
 		store:              store,
-		log:                logger,
+		logger:             logger,
 		borConfig:          borConfig,
 		fetchSyncEvents:    fetchSyncEvents,
 		stateReceiverABI:   stateReceiverABI,
@@ -92,7 +92,7 @@ func (b *Bridge) Run(ctx context.Context) error {
 	b.lastProcessedEventID.Store(lastProcessedEventID)
 
 	// start syncing
-	b.log.Debug(bridgeLogPrefix("Bridge is running"), "lastEventID", lastEventID)
+	b.logger.Debug(bridgeLogPrefix("Bridge is running"), "lastEventID", lastEventID)
 
 	for {
 		select {
@@ -122,7 +122,7 @@ func (b *Bridge) Run(ctx context.Context) error {
 			}
 		}
 
-		b.log.Debug(bridgeLogPrefix(fmt.Sprintf("got %v new events, last event ID: %v, ready: %v", len(events), lastEventID, b.ready.Load())))
+		b.logger.Debug(bridgeLogPrefix(fmt.Sprintf("got %v new events, last event ID: %v, ready: %v", len(events), lastEventID, b.ready.Load())))
 	}
 }
 
@@ -167,7 +167,7 @@ func (b *Bridge) ProcessNewBlocks(ctx context.Context, blocks []*types.Block) er
 		}
 
 		if lastDBID > b.lastProcessedEventID.Load() {
-			b.log.Debug(bridgeLogPrefix(fmt.Sprintf("Creating map for block %d, start ID %d, end ID %d", block.NumberU64(), b.lastProcessedEventID.Load(), lastDBID)))
+			b.logger.Debug(bridgeLogPrefix(fmt.Sprintf("Creating map for block %d, start ID %d, end ID %d", block.NumberU64(), b.lastProcessedEventID.Load(), lastDBID)))
 			eventMap[block.NumberU64()] = b.lastProcessedEventID.Load()
 
 			b.lastProcessedEventID.Store(lastDBID)
@@ -186,6 +186,8 @@ func (b *Bridge) ProcessNewBlocks(ctx context.Context, blocks []*types.Block) er
 
 // Synchronize blocks till bridge has map at tip
 func (b *Bridge) Synchronize(ctx context.Context, blockNum uint64) error {
+	b.logger.Debug(bridgeLogPrefix("synchronizing events..."), "blockNum", blockNum)
+
 	for {
 		select {
 		case <-ctx.Done():
@@ -226,7 +228,7 @@ func (b *Bridge) Events(ctx context.Context, blockNum uint64) ([]*types.Message,
 		return nil, err
 	}
 
-	b.log.Debug(bridgeLogPrefix(fmt.Sprintf("got %v events for block %v", len(events), blockNum)))
+	b.logger.Debug(bridgeLogPrefix(fmt.Sprintf("got %v events for block %v", len(events), blockNum)))
 
 	// convert to message
 	for _, event := range events {
