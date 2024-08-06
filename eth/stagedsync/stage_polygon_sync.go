@@ -109,7 +109,6 @@ func NewPolygonSyncStageCfg(
 		syncStore,
 		blockLimit,
 	)
-	spansCache := polygonsync.NewSpansCache()
 	events := polygonsync.NewTipEvents(logger, p2pService, heimdallService)
 	sync := polygonsync.NewSync(
 		syncStore,
@@ -118,11 +117,9 @@ func NewPolygonSyncStageCfg(
 		blocksVerifier,
 		p2pService,
 		blockDownloader,
-		polygonsync.NewCanonicalChainBuilderFactory(chainConfig, borConfig, spansCache),
+		polygonsync.NewCanonicalChainBuilderFactory(chainConfig, borConfig, heimdallService),
 		heimdallService,
 		&polygonSyncStageBridge{},
-		spansCache,
-		heimdallService.LatestSpans,
 		events.Events(),
 		logger,
 	)

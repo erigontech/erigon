@@ -37,12 +37,12 @@ type Service interface {
 }
 
 type service struct {
-	sync       *Sync
-	p2pService p2p.Service
-	store      Store
-	events     *TipEvents
-	heimdall   heimdall.Service
-	bridge     bridge.Service
+	sync            *Sync
+	p2pService      p2p.Service
+	store           Store
+	events          *TipEvents
+	heimdallService heimdall.Service
+	bridgeService   bridge.Service
 }
 
 func NewService(
@@ -73,8 +73,7 @@ func NewService(
 		store,
 		blockLimit,
 	)
-	spansCache := NewSpansCache()
-	ccBuilderFactory := NewCanonicalChainBuilderFactory(chainConfig, borConfig, spansCache)
+	ccBuilderFactory := NewCanonicalChainBuilderFactory(chainConfig, borConfig, heimdallService)
 	events := NewTipEvents(logger, p2pService, heimdallService)
 	sync := NewSync(
 		store,
@@ -86,18 +85,16 @@ func NewService(
 		ccBuilderFactory,
 		heimdallService,
 		bridgeService,
-		spansCache,
-		heimdallService.LatestSpans,
 		events.Events(),
 		logger,
 	)
 	return &service{
-		sync:       sync,
-		p2pService: p2pService,
-		store:      store,
-		events:     events,
-		heimdall:   heimdallService,
-		bridge:     bridgeService,
+		sync:            sync,
+		p2pService:      p2pService,
+		store:           store,
+		events:          events,
+		heimdallService: heimdallService,
+		bridgeService:   bridgeService,
 	}
 }
 
@@ -107,8 +104,8 @@ func (s *service) Run(parentCtx context.Context) error {
 	group.Go(func() error { s.p2pService.Run(ctx); return nil })
 	group.Go(func() error { return s.store.Run(ctx) })
 	group.Go(func() error { return s.events.Run(ctx) })
-	group.Go(func() error { return s.heimdall.Run(ctx) })
-	group.Go(func() error { return s.bridge.Run(ctx) })
+	group.Go(func() error { return s.heimdallService.Run(ctx) })
+	group.Go(func() error { return s.bridgeService.Run(ctx) })
 	group.Go(func() error { return s.sync.Run(ctx) })
 
 	return group.Wait()
