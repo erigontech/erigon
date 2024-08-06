@@ -1369,7 +1369,6 @@ func (tx *MdbxTx) CursorDupSort(bucket string) (kv.CursorDupSort, error) {
 // methods here help to see better pprof picture
 func (c *MdbxCursor) set(k []byte) ([]byte, []byte, error) { return c.c.Get(k, nil, mdbx.Set) }
 func (c *MdbxCursor) getCurrent() ([]byte, []byte, error)  { return c.c.Get(nil, nil, mdbx.GetCurrent) }
-func (c *MdbxCursor) first() ([]byte, []byte, error)       { return c.c.Get(nil, nil, mdbx.First) }
 func (c *MdbxCursor) next() ([]byte, []byte, error)        { return c.c.Get(nil, nil, mdbx.Next) }
 func (c *MdbxCursor) nextDup() ([]byte, []byte, error)     { return c.c.Get(nil, nil, mdbx.NextDup) }
 func (c *MdbxCursor) nextNoDup() ([]byte, []byte, error)   { return c.c.Get(nil, nil, mdbx.NextNoDup) }
@@ -1432,7 +1431,7 @@ func (c *MdbxCursor) Seek(seek []byte) (k, v []byte, err error) {
 	}
 
 	if len(seek) == 0 {
-		k, v, err = c.first()
+		k, v, err = c.c.Get(nil, nil, mdbx.First)
 		if err != nil {
 			if mdbx.IsNotFound(err) {
 				return nil, nil, nil
@@ -1456,7 +1455,7 @@ func (c *MdbxCursor) seekDupSort(seek []byte) (k, v []byte, err error) {
 	b := c.bucketCfg
 	from, to := b.DupFromLen, b.DupToLen
 	if len(seek) == 0 {
-		k, v, err = c.first()
+		k, v, err = c.c.Get(nil, nil, mdbx.First)
 		if err != nil {
 			if mdbx.IsNotFound(err) {
 				return nil, nil, nil
