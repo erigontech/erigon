@@ -855,7 +855,7 @@ func (dt *DomainRoTx) DebugEFKey(k []byte) error {
 // a=code hit=441 total=841 Collisions=69 Evictions=0 Inserts=400 limit=1000 ratio=0.52
 // a=storage hit=189 total=589 Collisions=64 Evictions=0 Inserts=400 limit=1000 ratio=0.32
 // a=accounts hit=64 total=164 Collisions=4 Evictions=0 Inserts=100 limit=1000 ratio=0.39
-//
+// mgas/s=45.93 average mgas/s=59.59
 
 func (d *Domain) collectFilesStats() (datsz, idxsz, files uint64) {
 	d.History.dirtyFiles.Walk(func(items []*filesItem) bool {
