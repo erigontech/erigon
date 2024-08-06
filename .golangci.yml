@@ -17,7 +17,7 @@ linters:
     - musttag
     - contextcheck
     - wrapcheck
-    - goerr113
+    - err113
     - unparam
     - makezero #TODO: enable me
     - noctx #TODO: enable me
