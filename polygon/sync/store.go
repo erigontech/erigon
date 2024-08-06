@@ -25,6 +25,7 @@ import (
 	"github.com/erigontech/erigon-lib/log/v3"
 
 	"github.com/erigontech/erigon/core/types"
+	"github.com/erigontech/erigon/polygon/bridge"
 )
 
 //go:generate mockgen -typed=true -destination=./store_mock.go -package=sync . Store
@@ -37,33 +38,24 @@ type Store interface {
 	Run(ctx context.Context) error
 }
 
-type bridgeStore interface {
-	Synchronize(ctx context.Context, tip *types.Header) error
-	ProcessNewBlocks(ctx context.Context, blocks []*types.Block) error
-}
-
-type heimdallStore interface {
-	Synchronize(ctx context.Context) error
-}
-
 type executionClientStore struct {
-	logger    log.Logger
-	execution ExecutionClient
-	bridge    bridgeStore
-	heimdall  heimdallStore
-	queue     chan []*types.Block
+	logger        log.Logger
+	execution     ExecutionClient
+	polygonBridge bridge.Service
+	queue         chan []*types.Block
+
 	// tasksCount includes both tasks pending in the queue and a task that was taken and hasn't finished yet
 	tasksCount atomic.Int32
+
 	// tasksDoneSignal gets sent a value when tasksCount becomes 0
 	tasksDoneSignal chan bool
 }
 
-func NewStore(logger log.Logger, execution ExecutionClient, bridge bridgeStore, heimdall heimdallStore) Store {
+func NewStore(logger log.Logger, execution ExecutionClient, polygonBridge bridge.Service) Store {
 	return &executionClientStore{
 		logger:          logger,
 		execution:       execution,
-		bridge:          bridge,
-		heimdall:        heimdall,
+		polygonBridge:   polygonBridge,
 		queue:           make(chan []*types.Block),
 		tasksDoneSignal: make(chan bool, 1),
 	}
@@ -93,12 +85,7 @@ func (s *executionClientStore) Flush(ctx context.Context, newTip *types.Header) 
 		}
 	}
 
-	err := s.heimdall.Synchronize(ctx)
-	if err != nil {
-		return err
-	}
-
-	err = s.bridge.Synchronize(ctx, newTip)
+	err := s.polygonBridge.Synchronize(ctx, newTip)
 	if err != nil {
 		return err
 	}
@@ -137,12 +124,12 @@ func (s *executionClientStore) insertBlocks(ctx context.Context, blocks []*types
 		return err
 	}
 
-	err = s.bridge.Synchronize(ctx, blocks[len(blocks)-1].Header())
+	err = s.polygonBridge.Synchronize(ctx, blocks[len(blocks)-1].Header())
 	if err != nil {
 		return err
 	}
 
-	err = s.bridge.ProcessNewBlocks(ctx, blocks)
+	err = s.polygonBridge.ProcessNewBlocks(ctx, blocks)
 	if err != nil {
 		return err
 	}

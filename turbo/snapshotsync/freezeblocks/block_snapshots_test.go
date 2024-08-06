@@ -344,9 +344,9 @@ func TestOpenAllSnapshot(t *testing.T) {
 		defer s.Close()
 		err := s.ReopenFolder()
 		require.NoError(err)
-		require.NotNil(s.segments[coresnaptype.Enums.Headers])
+		require.NotNil(s.segments.Get(coresnaptype.Enums.Headers))
 		getSegs := func(e snaptype.Enum) *segments {
-			res, _ := s.segments[e]
+			res, _ := s.segments.Get(e)
 			return res
 		}
 		require.Equal(0, len(getSegs(coresnaptype.Enums.Headers).segments))

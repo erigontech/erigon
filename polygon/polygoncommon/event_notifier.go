@@ -51,7 +51,7 @@ func (en *EventNotifier) SetAndBroadcast() {
 
 // Wait for the "signaled" state.
 // If the event is already "signaled" it returns immediately.
-func (en *EventNotifier) Wait(ctx context.Context) error {
+func (en *EventNotifier) Wait(ctx context.Context) {
 	waitCtx, waitCancel := context.WithCancel(ctx)
 	defer waitCancel()
 
@@ -79,5 +79,4 @@ func (en *EventNotifier) Wait(ctx context.Context) error {
 	en.cond.Broadcast()
 
 	wg.Wait()
-	return ctx.Err()
 }

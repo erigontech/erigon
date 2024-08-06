@@ -373,7 +373,7 @@ var knownTypes = map[string][]snaptype.Type{}
 
 func Seedable(networkName string, info snaptype.FileInfo) bool {
 	if networkName == "" {
-		panic("empty network name")
+		return false
 	}
 	return KnownCfg(networkName).Seedable(info)
 }

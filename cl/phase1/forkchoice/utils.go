@@ -62,8 +62,8 @@ func (f *ForkChoiceStore) onNewFinalized(newFinalized solid.Checkpoint) {
 		}
 		return true
 	})
-
-	f.forkGraph.Prune(newFinalized.Epoch() * f.beaconCfg.SlotsPerEpoch)
+	slotToPrune := ((newFinalized.Epoch() - 1) * f.beaconCfg.SlotsPerEpoch) - 1
+	f.forkGraph.Prune(slotToPrune)
 }
 
 // updateCheckpoints updates the justified and finalized checkpoints if new checkpoints have higher epochs.

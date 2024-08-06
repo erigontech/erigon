@@ -359,7 +359,7 @@ neighbours are 1 and 3. Therefore, this key will emit the opcode
 prefix group).
 
 The following, optional, part of the step only happens if the common prefix of the current key and the preceding key is
-longer or equal than the common prefix of the current key and the succeeding key, in other words, if at least one prefix
+longer than the common prefix of the current key and the succeeding key, in other words, if at least one prefix
 group needs to be "closed". Closing a prefix group means first emitting opcode `BRANCH` or `BRANCHHASH`. The value for
 the operand is taken from the item in the `groups` slice, which corresponds to the length of the prefix for this group.
 Once value is taken, `groups` slice is trimmed to remove the used item. Secondly, closing a prefix groups means invoking
