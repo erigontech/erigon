@@ -715,7 +715,7 @@ type DomainRoTx struct {
 	//latestStateCacheHit, latestStateCacheTotal int
 }
 
-const latestStateCachePerDomain = 64 * 1024
+const latestStateCachePerDomain = 16 * 1024
 
 type fileCacheItem struct {
 	lvl uint8
