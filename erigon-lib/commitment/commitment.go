@@ -267,7 +267,7 @@ func (be *BranchEncoder) EncodeBranch(bitmap, touchMap, afterMap uint16, readCel
 			if cell.hashLen > 0 {
 				fieldBits |= HashPart
 			}
-			if cell.lhLen > 0 {
+			if cell.lhLen > 0 && (cell.spl > 0 || cell.apl > 0) {
 				fieldBits |= AccLeafHashPart
 			}
 
