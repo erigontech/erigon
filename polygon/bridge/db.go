@@ -17,7 +17,6 @@
 package bridge
 
 import (
-	"bytes"
 	"context"
 	"encoding/binary"
 	"time"
@@ -339,10 +338,7 @@ func (s *MdbxStore) GetEventIDRange(ctx context.Context, blockNum uint64) (uint6
 		return start, end, ErrMapNotAvailable
 	}
 
-	err = binary.Read(bytes.NewReader(v), binary.BigEndian, &start)
-	if err != nil {
-		return start, end, err
-	}
+	start = binary.BigEndian.Uint64(v)
 
 	_, v, err = cursor.Next()
 	if err != nil {
@@ -350,10 +346,7 @@ func (s *MdbxStore) GetEventIDRange(ctx context.Context, blockNum uint64) (uint6
 	}
 
 	if v != nil { // may be empty if blockNum is the last entry
-		err = binary.Read(bytes.NewReader(v), binary.BigEndian, &end)
-		if err != nil {
-			return start, end, err
-		}
+		end = binary.BigEndian.Uint64(v)
 	}
 
 	return start, end, nil
