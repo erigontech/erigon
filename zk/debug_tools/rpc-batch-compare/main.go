@@ -59,7 +59,7 @@ func getBatchByNumber(url string, number *big.Int) (map[string]interface{}, erro
 	requestBody, _ := json.Marshal(map[string]interface{}{
 		"jsonrpc": "2.0",
 		"method":  "zkevm_getBatchByNumber",
-		"params":  []interface{}{number.String(), true},
+		"params":  []interface{}{number.String(), false},
 		"id":      1,
 	})
 
@@ -105,12 +105,10 @@ func compareBatches(erigonURL, legacyURL string, batchNumber *big.Int) (string, 
 	// ignore list
 	il := []string{
 		"timestamp",
-		"verifyBatchTxHash",
-		"sendSequencesTxHash",
 		"accInputHash",
-		"globalExitRoot",
-		"mainnetExitRoot",
+		"transactions",
 		"rollupExitRoot",
+		"mainnetExitRoot",
 	}
 	for _, i := range il {
 		delete(batch1, i)
