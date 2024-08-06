@@ -714,7 +714,7 @@ type DomainRoTx struct {
 	latestStateCache *freelru.LRU[uint64, fileCacheItem]
 }
 
-var latestStateCachePerDomain = uint32(dbg.EnvInt("LRU_LIMIT", 16*1024))
+const latestStateCachePerDomain = 1024
 
 type fileCacheItem struct {
 	lvl uint8
@@ -852,10 +852,7 @@ func (dt *DomainRoTx) DebugEFKey(k []byte) error {
 // mgas/s=63.94 average mgas/s=65.08
 
 // mainnet chain tip: l0_cache_1_all - 1K items
-// a=code hit=339 total=739 Collisions=6 Evictions=0 Inserts=400 limit=8000 ratio=0.46
-// a=storage hit=846 total=6446 Collisions=1527 Evictions=0 Inserts=5600 limit=8000 ratio=0.13
-// a=accounts hit=59 total=159 Collisions=1 Evictions=0 Inserts=100 limit=8000 ratio=0.37
-// mgas/s=63.94 average mgas/s=65.08
+//
 
 func (d *Domain) collectFilesStats() (datsz, idxsz, files uint64) {
 	d.History.dirtyFiles.Walk(func(items []*filesItem) bool {
@@ -1451,12 +1448,12 @@ func (dt *DomainRoTx) getFromFiles(filekey []byte) (v []byte, found bool, fileSt
 		}
 		cv, ok := dt.latestStateCache.Get(hi)
 		if ok {
-			if dbg.KVReadLevelledMetrics {
-				m := dt.latestStateCache.Metrics()
-				if m.Hits%1000 == 0 {
-					log.Warn("[dbg] lEachCache", "a", dt.name.String(), "hit", m.Hits, "total", m.Hits+m.Misses, "Collisions", m.Collisions, "Evictions", m.Evictions, "Inserts", m.Inserts, "limit", latestStateCachePerDomain, "ratio", fmt.Sprintf("%.2f", float64(m.Hits)/float64(m.Hits+m.Misses)))
-				}
-			}
+			//if dbg.KVReadLevelledMetrics {
+			//	m := dt.latestStateCache.Metrics()
+			//	if m.Hits%1000 == 0 {
+			//		log.Warn("[dbg] lEachCache", "a", dt.name.String(), "hit", m.Hits, "total", m.Hits+m.Misses, "Collisions", m.Collisions, "Evictions", m.Evictions, "Inserts", m.Inserts, "limit", latestStateCachePerDomain, "ratio", fmt.Sprintf("%.2f", float64(m.Hits)/float64(m.Hits+m.Misses)))
+			//	}
+			//}
 			return cv.v, true, dt.files[cv.lvl].startTxNum, dt.files[cv.lvl].endTxNum, nil
 		}
 	}
