@@ -16,7 +16,10 @@
 
 package state
 
-import "github.com/erigontech/erigon-lib/metrics"
+import (
+	"github.com/erigontech/erigon-lib/kv"
+	"github.com/erigontech/erigon-lib/metrics"
+)
 
 var (
 	//LatestStateReadWarm          = metrics.GetOrCreateSummary(`latest_state_read{type="warm",found="yes"}`)  //nolint
@@ -56,12 +59,11 @@ var (
 	mxFlushTook            = metrics.GetOrCreateSummary("domain_flush_took")
 	mxCommitmentRunning    = metrics.GetOrCreateGauge("domain_running_commitment")
 	mxCommitmentTook       = metrics.GetOrCreateSummary("domain_commitment_took")
-	mxFileReadTime         = metrics.GetOrCreateHistogram("domain_file_read_time")
 )
 
 var (
-	mxsKVGet = map[string][]metrics.Summary{
-		"accounts": {
+	mxsKVGet = [kv.DomainLen][]metrics.Summary{
+		kv.AccountsDomain: {
 			metrics.GetOrCreateSummary(`kv_get{level="L0",domain="account"}`),
 			metrics.GetOrCreateSummary(`kv_get{level="L1",domain="account"}`),
 			metrics.GetOrCreateSummary(`kv_get{level="L2",domain="account"}`),
@@ -69,7 +71,7 @@ var (
 			metrics.GetOrCreateSummary(`kv_get{level="L4",domain="account"}`),
 			metrics.GetOrCreateSummary(`kv_get{level="recent",domain="account"}`),
 		},
-		"storage": {
+		kv.StorageDomain: {
 			metrics.GetOrCreateSummary(`kv_get{level="L0",domain="storage"}`),
 			metrics.GetOrCreateSummary(`kv_get{level="L1",domain="storage"}`),
 			metrics.GetOrCreateSummary(`kv_get{level="L2",domain="storage"}`),
@@ -77,7 +79,7 @@ var (
 			metrics.GetOrCreateSummary(`kv_get{level="L4",domain="storage"}`),
 			metrics.GetOrCreateSummary(`kv_get{level="recent",domain="storage"}`),
 		},
-		"code": {
+		kv.CodeDomain: {
 			metrics.GetOrCreateSummary(`kv_get{level="L0",domain="code"}`),
 			metrics.GetOrCreateSummary(`kv_get{level="L1",domain="code"}`),
 			metrics.GetOrCreateSummary(`kv_get{level="L2",domain="code"}`),
@@ -85,7 +87,7 @@ var (
 			metrics.GetOrCreateSummary(`kv_get{level="L4",domain="code"}`),
 			metrics.GetOrCreateSummary(`kv_get{level="recent",domain="code"}`),
 		},
-		"commitment": {
+		kv.CommitmentDomain: {
 			metrics.GetOrCreateSummary(`kv_get{level="L0",domain="commitment"}`),
 			metrics.GetOrCreateSummary(`kv_get{level="L1",domain="commitment"}`),
 			metrics.GetOrCreateSummary(`kv_get{level="L2",domain="commitment"}`),
