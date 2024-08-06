@@ -19,7 +19,7 @@ package diagnostics
 import (
 	"net/http"
 
-	diaglib "github.com/ledgerwatch/erigon-lib/diagnostics"
+	diaglib "github.com/erigontech/erigon-lib/diagnostics"
 )
 
 func SetupStagesAccess(metricsMux *http.ServeMux, diag *diaglib.DiagnosticClient) {
@@ -37,12 +37,6 @@ func SetupStagesAccess(metricsMux *http.ServeMux, diag *diaglib.DiagnosticClient
 		w.Header().Set("Access-Control-Allow-Origin", "*")
 		w.Header().Set("Content-Type", "application/json")
 		writeFilesList(w, diag)
-	})
-
-	metricsMux.HandleFunc("/hardware-info", func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Access-Control-Allow-Origin", "*")
-		w.Header().Set("Content-Type", "application/json")
-		writeHardwareInfo(w, diag)
 	})
 
 	metricsMux.HandleFunc("/resources-usage", func(w http.ResponseWriter, r *http.Request) {
@@ -78,10 +72,6 @@ func writeStages(w http.ResponseWriter, diag *diaglib.DiagnosticClient) {
 
 func writeFilesList(w http.ResponseWriter, diag *diaglib.DiagnosticClient) {
 	diag.SnapshotFilesListJson(w)
-}
-
-func writeHardwareInfo(w http.ResponseWriter, diag *diaglib.DiagnosticClient) {
-	diag.HardwareInfoJson(w)
 }
 
 func writeSyncStages(w http.ResponseWriter, diag *diaglib.DiagnosticClient) {

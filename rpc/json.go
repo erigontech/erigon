@@ -205,6 +205,11 @@ func (c *jsonCodec) remoteAddr() string {
 	return c.remote
 }
 
+func (c *jsonCodec) peerInfo() PeerInfo {
+	// This returns "ipc" because all other built-in transports have a separate codec type.
+	return PeerInfo{Transport: "ipc", RemoteAddr: c.remote}
+}
+
 func (c *jsonCodec) ReadBatch() (messages []*jsonrpcMessage, batch bool, err error) {
 	// Decode the next JSON object in the input stream.
 	// This verifies basic syntax, etc.

@@ -17,12 +17,10 @@
 package state
 
 import (
-	"bytes"
+	"github.com/erigontech/erigon-lib/common"
 
-	"github.com/ledgerwatch/erigon-lib/common"
-
-	"github.com/ledgerwatch/erigon/core/types/accounts"
-	"github.com/ledgerwatch/erigon/turbo/shards"
+	"github.com/erigontech/erigon/core/types/accounts"
+	"github.com/erigontech/erigon/turbo/shards"
 )
 
 // CachedReader is a wrapper for an instance of type StateReader
@@ -76,7 +74,7 @@ func (cr *CachedReader) ReadAccountStorage(address common.Address, incarnation u
 // ReadAccountCode is called when code of an account needs to be fetched from the state
 // Usually, one of (address;incarnation) or codeHash is enough to uniquely identify the code
 func (cr *CachedReader) ReadAccountCode(address common.Address, incarnation uint64, codeHash common.Hash) ([]byte, error) {
-	if bytes.Equal(codeHash[:], emptyCodeHash) {
+	if codeHash == emptyCodeHashH {
 		return nil, nil
 	}
 	if c, ok := cr.cache.GetCode(address.Bytes(), incarnation); ok {

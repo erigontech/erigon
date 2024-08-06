@@ -21,11 +21,11 @@ import (
 	"encoding/json"
 	"strconv"
 
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/common/length"
-	"github.com/ledgerwatch/erigon-lib/types/clonable"
-	"github.com/ledgerwatch/erigon/cl/merkle_tree"
-	"github.com/ledgerwatch/erigon/cl/utils"
+	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common/length"
+	"github.com/erigontech/erigon-lib/types/clonable"
+	"github.com/erigontech/erigon/cl/merkle_tree"
+	"github.com/erigontech/erigon/cl/utils"
 )
 
 type RawUint64List struct {
@@ -126,7 +126,7 @@ func (arr *RawUint64List) SetReusableHashBuffer(buf []byte) {
 }
 
 func (arr *RawUint64List) hashBufLength() int {
-	return (((len(arr.u) * 4) + 3) / 4) * length.Hash
+	return ((len(arr.u) + 3) / 4) * length.Hash
 }
 
 func (arr *RawUint64List) HashSSZ() ([32]byte, error) {

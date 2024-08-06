@@ -28,10 +28,10 @@ import (
 
 	"github.com/c2h5oh/datasize"
 
-	"github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/common/dir"
-	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon-lib/log/v3"
+	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common/dir"
+	"github.com/erigontech/erigon-lib/kv"
+	"github.com/erigontech/erigon-lib/log/v3"
 )
 
 type LoadNextFunc func(originalK, k, v []byte) error
@@ -255,6 +255,10 @@ func (c *Collector) Load(db kv.RwTx, toBucket string, loadFunc LoadFunc, args Tr
 			return fmt.Errorf("%s: put: k=%x, %w", c.logPrefix, k, err)
 		}
 		return nil
+	}
+
+	if bucket == "" {
+		loadNextFunc = func(_, k, v []byte) error { return nil }
 	}
 
 	currentTable := &currentTableReader{db, bucket}

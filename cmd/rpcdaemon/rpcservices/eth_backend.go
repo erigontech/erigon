@@ -29,20 +29,20 @@ import (
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/types/known/emptypb"
 
-	"github.com/ledgerwatch/erigon-lib/log/v3"
+	"github.com/erigontech/erigon-lib/log/v3"
 
-	"github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/downloader/snaptype"
-	"github.com/ledgerwatch/erigon-lib/gointerfaces"
-	remote "github.com/ledgerwatch/erigon-lib/gointerfaces/remoteproto"
-	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon/core/rawdb"
-	"github.com/ledgerwatch/erigon/core/types"
-	"github.com/ledgerwatch/erigon/eth/ethconfig"
-	"github.com/ledgerwatch/erigon/ethdb/privateapi"
-	"github.com/ledgerwatch/erigon/p2p"
-	"github.com/ledgerwatch/erigon/rlp"
-	"github.com/ledgerwatch/erigon/turbo/services"
+	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/downloader/snaptype"
+	"github.com/erigontech/erigon-lib/gointerfaces"
+	remote "github.com/erigontech/erigon-lib/gointerfaces/remoteproto"
+	"github.com/erigontech/erigon-lib/kv"
+	"github.com/erigontech/erigon/core/rawdb"
+	"github.com/erigontech/erigon/core/types"
+	"github.com/erigontech/erigon/eth/ethconfig"
+	"github.com/erigontech/erigon/ethdb/privateapi"
+	"github.com/erigontech/erigon/p2p"
+	"github.com/erigontech/erigon/rlp"
+	"github.com/erigontech/erigon/turbo/services"
 )
 
 var _ services.FullBlockReader = &RemoteBackend{}
@@ -327,7 +327,7 @@ func (back *RemoteBackend) Span(ctx context.Context, tx kv.Getter, spanId uint64
 }
 
 func (r *RemoteBackend) LastMilestoneId(ctx context.Context, tx kv.Tx) (uint64, bool, error) {
-	return 0, false, fmt.Errorf("not implemented")
+	return 0, false, errors.New("not implemented")
 }
 
 func (r *RemoteBackend) Milestone(ctx context.Context, tx kv.Getter, spanId uint64) ([]byte, error) {
@@ -335,7 +335,7 @@ func (r *RemoteBackend) Milestone(ctx context.Context, tx kv.Getter, spanId uint
 }
 
 func (r *RemoteBackend) LastCheckpointId(ctx context.Context, tx kv.Tx) (uint64, bool, error) {
-	return 0, false, fmt.Errorf("not implemented")
+	return 0, false, errors.New("not implemented")
 }
 
 func (r *RemoteBackend) Checkpoint(ctx context.Context, tx kv.Getter, spanId uint64) ([]byte, error) {

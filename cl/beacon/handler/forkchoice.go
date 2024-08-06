@@ -18,16 +18,16 @@ package handler
 
 import (
 	"encoding/json"
-	"fmt"
+	"errors"
 	"net/http"
 	"strconv"
 
-	"github.com/ledgerwatch/erigon/cl/beacon/beaconhttp"
+	"github.com/erigontech/erigon/cl/beacon/beaconhttp"
 )
 
 func (a *ApiHandler) GetEthV2DebugBeaconHeads(w http.ResponseWriter, r *http.Request) (*beaconhttp.BeaconResponse, error) {
 	if a.syncedData.Syncing() {
-		return nil, beaconhttp.NewEndpointError(http.StatusServiceUnavailable, fmt.Errorf("beacon node is syncing"))
+		return nil, beaconhttp.NewEndpointError(http.StatusServiceUnavailable, errors.New("beacon node is syncing"))
 	}
 	hash, slotNumber, err := a.forkchoiceStore.GetHead()
 	if err != nil {

@@ -28,13 +28,12 @@ import (
 	"github.com/c2h5oh/datasize"
 	lru "github.com/hashicorp/golang-lru/v2"
 
-	"github.com/ledgerwatch/erigon-lib/log/v3"
-
-	"github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon/core/types"
-	"github.com/ledgerwatch/erigon/eth/ethconfig/estimate"
-	"github.com/ledgerwatch/erigon/polygon/heimdall"
-	"github.com/ledgerwatch/erigon/polygon/p2p"
+	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/core/types"
+	"github.com/erigontech/erigon/eth/ethconfig/estimate"
+	"github.com/erigontech/erigon/polygon/heimdall"
+	"github.com/erigontech/erigon/polygon/p2p"
 )
 
 const (
@@ -52,7 +51,7 @@ type BlockDownloader interface {
 func NewBlockDownloader(
 	logger log.Logger,
 	p2pService p2p.Service,
-	heimdall heimdall.Heimdall,
+	heimdall heimdallWaypointsFetcher,
 	checkpointVerifier WaypointHeadersVerifier,
 	milestoneVerifier WaypointHeadersVerifier,
 	blocksVerifier BlocksVerifier,
@@ -76,7 +75,7 @@ func NewBlockDownloader(
 func newBlockDownloader(
 	logger log.Logger,
 	p2pService p2p.Service,
-	heimdall heimdall.Heimdall,
+	heimdall heimdallWaypointsFetcher,
 	checkpointVerifier WaypointHeadersVerifier,
 	milestoneVerifier WaypointHeadersVerifier,
 	blocksVerifier BlocksVerifier,
@@ -102,7 +101,7 @@ func newBlockDownloader(
 type blockDownloader struct {
 	logger                        log.Logger
 	p2pService                    p2p.Service
-	heimdall                      heimdall.Heimdall
+	heimdall                      heimdallWaypointsFetcher
 	checkpointVerifier            WaypointHeadersVerifier
 	milestoneVerifier             WaypointHeadersVerifier
 	blocksVerifier                BlocksVerifier
@@ -113,7 +112,7 @@ type blockDownloader struct {
 }
 
 func (d *blockDownloader) DownloadBlocksUsingCheckpoints(ctx context.Context, start uint64) (*types.Header, error) {
-	waypoints, err := d.heimdall.FetchCheckpointsFromBlock(ctx, start)
+	waypoints, err := d.heimdall.CheckpointsFromBlock(ctx, start)
 	if err != nil {
 		return nil, err
 	}
@@ -122,7 +121,7 @@ func (d *blockDownloader) DownloadBlocksUsingCheckpoints(ctx context.Context, st
 }
 
 func (d *blockDownloader) DownloadBlocksUsingMilestones(ctx context.Context, start uint64) (*types.Header, error) {
-	waypoints, err := d.heimdall.FetchMilestonesFromBlock(ctx, start)
+	waypoints, err := d.heimdall.MilestonesFromBlock(ctx, start)
 	if err != nil {
 		return nil, err
 	}
@@ -203,7 +202,7 @@ func (d *blockDownloader) downloadBlocksUsingWaypoints(
 				"peerCount", len(peers),
 				"maxWorkers", d.maxWorkers,
 				"blk/s", fmt.Sprintf("%.2f", float64(blockCount.Load())/time.Since(fetchStartTime).Seconds()),
-				"bytes/s", fmt.Sprintf("%s", common.ByteCount(uint64(float64(blocksTotalSize.Load())/time.Since(fetchStartTime).Seconds()))),
+				"bytes/s", common.ByteCount(uint64(float64(blocksTotalSize.Load())/time.Since(fetchStartTime).Seconds())),
 			)
 
 			blockCount.Store(0)

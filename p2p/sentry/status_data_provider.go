@@ -24,16 +24,16 @@ import (
 
 	"github.com/holiman/uint256"
 
-	"github.com/ledgerwatch/erigon-lib/log/v3"
+	"github.com/erigontech/erigon-lib/log/v3"
 
-	"github.com/ledgerwatch/erigon-lib/chain"
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/gointerfaces"
-	proto_sentry "github.com/ledgerwatch/erigon-lib/gointerfaces/sentryproto"
-	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon/core/forkid"
-	"github.com/ledgerwatch/erigon/core/rawdb"
-	"github.com/ledgerwatch/erigon/core/types"
+	"github.com/erigontech/erigon-lib/chain"
+	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/gointerfaces"
+	proto_sentry "github.com/erigontech/erigon-lib/gointerfaces/sentryproto"
+	"github.com/erigontech/erigon-lib/kv"
+	"github.com/erigontech/erigon/core/forkid"
+	"github.com/erigontech/erigon/core/rawdb"
+	"github.com/erigontech/erigon/core/types"
 )
 
 var ErrNoHead = errors.New("ReadChainHead: ReadCurrentHeader error")
@@ -84,7 +84,7 @@ func uint256FromBigInt(num *big.Int) (*uint256.Int, error) {
 	num256 := new(uint256.Int)
 	overflow := num256.SetFromBig(num)
 	if overflow {
-		return nil, fmt.Errorf("uint256FromBigInt: big.Int greater than 2^256-1")
+		return nil, errors.New("uint256FromBigInt: big.Int greater than 2^256-1")
 	}
 	return num256, nil
 }

@@ -19,17 +19,25 @@ package heimdall
 import (
 	"context"
 	"errors"
+	"fmt"
+	"slices"
 	"time"
 
 	"golang.org/x/sync/errgroup"
 
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/log/v3"
-	"github.com/ledgerwatch/erigon/polygon/polygoncommon"
+	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/polygon/polygoncommon"
 )
 
 type Service interface {
-	Heimdall
+	Span(ctx context.Context, id uint64) (*Span, bool, error)
+	LatestSpans(ctx context.Context, count uint) ([]*Span, error)
+	CheckpointsFromBlock(ctx context.Context, startBlock uint64) (Waypoints, error)
+	MilestonesFromBlock(ctx context.Context, startBlock uint64) (Waypoints, error)
+
+	RegisterMilestoneObserver(callback func(*Milestone), opts ...ObserverOption) polygoncommon.UnregisterFunc
+	RegisterSpanObserver(callback func(*Span), opts ...ObserverOption) polygoncommon.UnregisterFunc
 	Run(ctx context.Context) error
 }
 
@@ -38,10 +46,6 @@ type service struct {
 	checkpointScraper *scraper[*Checkpoint]
 	milestoneScraper  *scraper[*Milestone]
 	spanScraper       *scraper[*Span]
-}
-
-func makeType[T any]() *T {
-	return new(T)
 }
 
 func AssembleService(heimdallUrl string, dataDir string, tmpDir string, logger log.Logger) Service {
@@ -132,19 +136,22 @@ func newSpanFetcher(client HeimdallClient, logger log.Logger) entityFetcher[*Spa
 	)
 }
 
-func (s *service) FetchLatestSpan(ctx context.Context) (*Span, error) {
+func (s *service) FetchLatestSpan(ctx context.Context) (*Span, bool, error) {
 	s.checkpointScraper.Synchronize(ctx)
-	return s.store.Spans().GetLastEntity(ctx)
+	return s.store.Spans().LastEntity(ctx)
 }
 
-func (s *service) FetchLatestSpans(ctx context.Context, count uint) ([]*Span, error) {
+func (s *service) LatestSpans(ctx context.Context, count uint) ([]*Span, error) {
 	if count == 0 {
 		return nil, errors.New("can't fetch 0 latest spans")
 	}
 
-	span, err := s.FetchLatestSpan(ctx)
+	span, ok, err := s.FetchLatestSpan(ctx)
 	if err != nil {
 		return nil, err
+	}
+	if !ok {
+		return nil, errors.New("can't fetch latest span")
 	}
 
 	latestSpans := make([]*Span, 0, count)
@@ -157,17 +164,29 @@ func (s *service) FetchLatestSpans(ctx context.Context, count uint) ([]*Span, er
 			break
 		}
 
-		span, err = s.store.Spans().GetEntity(ctx, prevSpanRawId-1)
+		span, ok, err = s.store.Spans().Entity(ctx, prevSpanRawId-1)
 		if err != nil {
 			return nil, err
+		}
+		if !ok {
+			return nil, errors.New(fmt.Sprintf("can't fetch span %v", prevSpanRawId-1))
 		}
 
 		latestSpans = append(latestSpans, span)
 		count--
 	}
 
-	libcommon.SliceReverse(latestSpans)
+	slices.Reverse(latestSpans)
 	return latestSpans, nil
+}
+
+func (s *service) Span(ctx context.Context, id uint64) (*Span, bool, error) {
+	span, ok, err := s.store.Spans().Entity(ctx, id)
+	if err != nil || !ok {
+		return nil, ok, err
+	}
+
+	return span, ok, nil
 }
 
 func castEntityToWaypoint[TEntity Waypoint](entity TEntity) Waypoint {
@@ -180,33 +199,31 @@ func (s *service) synchronizeScrapers(ctx context.Context) {
 	s.spanScraper.Synchronize(ctx)
 }
 
-func (s *service) FetchCheckpointsFromBlock(ctx context.Context, startBlock uint64) (Waypoints, error) {
+func (s *service) CheckpointsFromBlock(ctx context.Context, startBlock uint64) (Waypoints, error) {
 	s.synchronizeScrapers(ctx)
 	entities, err := s.store.Checkpoints().RangeFromBlockNum(ctx, startBlock)
 	return libcommon.SliceMap(entities, castEntityToWaypoint[*Checkpoint]), err
 }
 
-func (s *service) FetchMilestonesFromBlock(ctx context.Context, startBlock uint64) (Waypoints, error) {
+func (s *service) MilestonesFromBlock(ctx context.Context, startBlock uint64) (Waypoints, error) {
 	s.synchronizeScrapers(ctx)
 	entities, err := s.store.Milestones().RangeFromBlockNum(ctx, startBlock)
 	return libcommon.SliceMap(entities, castEntityToWaypoint[*Milestone]), err
 }
 
-// TODO: this limit is a temporary solution to avoid piping thousands of events
-// during the first sync. Let's discuss alternatives. Hopefully we can remove this limit.
-const maxEntityEvents = 5
-
-func (s *service) RegisterMilestoneObserver(callback func(*Milestone)) polygoncommon.UnregisterFunc {
+func (s *service) RegisterMilestoneObserver(callback func(*Milestone), opts ...ObserverOption) polygoncommon.UnregisterFunc {
+	options := NewObserverOptions(opts...)
 	return s.milestoneScraper.RegisterObserver(func(entities []*Milestone) {
-		for _, entity := range libcommon.SliceTakeLast(entities, maxEntityEvents) {
+		for _, entity := range libcommon.SliceTakeLast(entities, options.eventsLimit) {
 			callback(entity)
 		}
 	})
 }
 
-func (s *service) RegisterSpanObserver(callback func(*Span)) polygoncommon.UnregisterFunc {
+func (s *service) RegisterSpanObserver(callback func(*Span), opts ...ObserverOption) polygoncommon.UnregisterFunc {
+	options := NewObserverOptions(opts...)
 	return s.spanScraper.RegisterObserver(func(entities []*Span) {
-		for _, entity := range libcommon.SliceTakeLast(entities, maxEntityEvents) {
+		for _, entity := range libcommon.SliceTakeLast(entities, options.eventsLimit) {
 			callback(entity)
 		}
 	})

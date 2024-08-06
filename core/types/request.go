@@ -23,9 +23,9 @@ import (
 	"io"
 	"math/bits"
 
-	"github.com/ledgerwatch/erigon-lib/common"
-	rlp2 "github.com/ledgerwatch/erigon-lib/rlp"
-	"github.com/ledgerwatch/erigon/rlp"
+	"github.com/erigontech/erigon-lib/common"
+	rlp2 "github.com/erigontech/erigon-lib/rlp"
+	"github.com/erigontech/erigon/rlp"
 )
 
 const WithdrawalRequestType byte = 0x01
@@ -42,7 +42,7 @@ type Request interface {
 
 func decode(data []byte) (Request, error) {
 	if len(data) <= 1 {
-		return nil, fmt.Errorf("error: too short type request")
+		return nil, errors.New("error: too short type request")
 	}
 	var req Request
 	switch data[0] {
@@ -81,9 +81,9 @@ func (r *Requests) DecodeRLP(s *rlp.Stream) (err error) {
 		}
 		switch kind {
 		case rlp.List:
-			return fmt.Errorf("error: untyped request (unexpected lit)")
+			return errors.New("error: untyped request (unexpected lit)")
 		case rlp.Byte:
-			return fmt.Errorf("error: too short request")
+			return errors.New("error: too short request")
 		default:
 			var buf []byte
 			if buf, err = s.Bytes(); err != nil {

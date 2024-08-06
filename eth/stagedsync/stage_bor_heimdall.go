@@ -30,29 +30,28 @@ import (
 	lru "github.com/hashicorp/golang-lru/arc/v2"
 	"golang.org/x/sync/errgroup"
 
-	"github.com/ledgerwatch/erigon-lib/log/v3"
+	"github.com/erigontech/erigon-lib/chain"
+	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common/dbg"
+	"github.com/erigontech/erigon-lib/kv"
+	"github.com/erigontech/erigon-lib/log/v3"
 
-	"github.com/ledgerwatch/erigon-lib/chain"
-	"github.com/ledgerwatch/erigon-lib/chain/networkname"
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon/accounts/abi"
-	"github.com/ledgerwatch/erigon/common/math"
-	"github.com/ledgerwatch/erigon/consensus"
-	"github.com/ledgerwatch/erigon/core/types"
-	"github.com/ledgerwatch/erigon/dataflow"
-	"github.com/ledgerwatch/erigon/eth/ethconfig/estimate"
-	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
-	"github.com/ledgerwatch/erigon/polygon/bor"
-	"github.com/ledgerwatch/erigon/polygon/bor/borcfg"
-	"github.com/ledgerwatch/erigon/polygon/bor/finality"
-	"github.com/ledgerwatch/erigon/polygon/bor/finality/whitelist"
-	borsnaptype "github.com/ledgerwatch/erigon/polygon/bor/snaptype"
-	"github.com/ledgerwatch/erigon/polygon/bor/valset"
-	"github.com/ledgerwatch/erigon/polygon/heimdall"
-	"github.com/ledgerwatch/erigon/polygon/sync"
-	"github.com/ledgerwatch/erigon/turbo/services"
-	"github.com/ledgerwatch/erigon/turbo/stages/headerdownload"
+	"github.com/erigontech/erigon/accounts/abi"
+	"github.com/erigontech/erigon/consensus"
+	"github.com/erigontech/erigon/core/types"
+	"github.com/erigontech/erigon/dataflow"
+	"github.com/erigontech/erigon/eth/ethconfig/estimate"
+	"github.com/erigontech/erigon/eth/stagedsync/stages"
+	"github.com/erigontech/erigon/polygon/bor"
+	"github.com/erigontech/erigon/polygon/bor/borcfg"
+	"github.com/erigontech/erigon/polygon/bor/finality"
+	"github.com/erigontech/erigon/polygon/bor/finality/whitelist"
+	borsnaptype "github.com/erigontech/erigon/polygon/bor/snaptype"
+	"github.com/erigontech/erigon/polygon/bor/valset"
+	"github.com/erigontech/erigon/polygon/heimdall"
+	"github.com/erigontech/erigon/polygon/sync"
+	"github.com/erigontech/erigon/turbo/services"
+	"github.com/erigontech/erigon/turbo/stages/headerdownload"
 )
 
 const (
@@ -71,7 +70,6 @@ type BorHeimdallCfg struct {
 	hd               *headerdownload.HeaderDownload
 	penalize         func(context.Context, []headerdownload.PenaltyItem)
 	stateReceiverABI abi.ABI
-	loopBreakCheck   func(int) bool
 	recents          *lru.ARCCache[libcommon.Hash, *bor.Snapshot]
 	signatures       *lru.ARCCache[libcommon.Hash, libcommon.Address]
 	recordWaypoints  bool
@@ -87,7 +85,6 @@ func StageBorHeimdallCfg(
 	blockReader services.FullBlockReader,
 	hd *headerdownload.HeaderDownload,
 	penalize func(context.Context, []headerdownload.PenaltyItem),
-	loopBreakCheck func(int) bool,
 	recents *lru.ARCCache[libcommon.Hash, *bor.Snapshot],
 	signatures *lru.ARCCache[libcommon.Hash, libcommon.Address],
 	recordWaypoints bool,
@@ -109,15 +106,12 @@ func StageBorHeimdallCfg(
 		hd:               hd,
 		penalize:         penalize,
 		stateReceiverABI: bor.GenesisContractStateReceiverABI(),
-		loopBreakCheck:   loopBreakCheck,
 		recents:          recents,
 		signatures:       signatures,
 		recordWaypoints:  recordWaypoints,
 		unwindTypes:      unwindTypes,
 	}
 }
-
-var lastMumbaiEventRecord *heimdall.EventRecordWithTime
 
 func BorHeimdallForward(
 	s *StageState,
@@ -269,6 +263,7 @@ func BorHeimdallForward(
 			return err
 		}
 		if header == nil {
+			_, _ = cfg.blockReader.HeaderByNumber(dbg.ContextWithDebug(ctx, true), tx, blockNum)
 			return fmt.Errorf("header not found: %d", blockNum)
 		}
 
@@ -364,15 +359,6 @@ func BorHeimdallForward(
 
 		var endStateSyncEventId uint64
 
-		// mumbai event records have stopped being produced as of march 2024
-		// as part of the goerli decom - so there is no point trying to
-		// fetch them
-		if cfg.chainConfig.ChainName == networkname.MumbaiChainName {
-			if nextEventRecord == nil {
-				nextEventRecord = lastMumbaiEventRecord
-			}
-		}
-
 		if nextEventRecord == nil || header.Time > uint64(nextEventRecord.Time.Unix()) {
 			var records int
 
@@ -408,16 +394,6 @@ func BorHeimdallForward(
 						if !errors.Is(err, heimdall.ErrEventRecordNotFound) {
 							return err
 						}
-
-						if cfg.chainConfig.ChainName == networkname.MumbaiChainName && lastStateSyncEventID == 276850 {
-							lastMumbaiEventRecord = &heimdall.EventRecordWithTime{
-								EventRecord: heimdall.EventRecord{
-									ID: 276851,
-								},
-								Time: time.Unix(math.MaxInt64, 0),
-							}
-						}
-
 						endStateSyncEventId = lastStateSyncEventID
 					}
 				}
@@ -427,10 +403,6 @@ func BorHeimdallForward(
 		fetchTime += callTime
 		syncEventTime = syncEventTime + time.Since(syncEventStart)
 
-		if cfg.loopBreakCheck != nil && cfg.loopBreakCheck(int(blockNum-lastBlockNum)) {
-			headNumber = blockNum
-			break
-		}
 	}
 
 	if err = s.Update(tx, headNumber); err != nil {
@@ -702,7 +674,7 @@ func initValidatorSets(
 				}
 
 				if zeroSpanBytes == nil {
-					return nil, fmt.Errorf("zero span not found")
+					return nil, errors.New("zero span not found")
 				}
 
 				var zeroSpan heimdall.Span

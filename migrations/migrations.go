@@ -20,16 +20,17 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"path/filepath"
 
-	"github.com/ledgerwatch/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common"
 
-	"github.com/ledgerwatch/erigon-lib/common/datadir"
-	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon-lib/log/v3"
-	"github.com/ledgerwatch/erigon/core/rawdb"
-	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
+	"github.com/erigontech/erigon-lib/common/datadir"
+	"github.com/erigontech/erigon-lib/kv"
+	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/core/rawdb"
+	"github.com/erigontech/erigon/eth/stagedsync/stages"
 )
 
 // migrations apply sequentially in order of this array, skips applied migrations
@@ -65,9 +66,9 @@ type Migration struct {
 }
 
 var (
-	ErrMigrationNonUniqueName   = fmt.Errorf("please provide unique migration name")
-	ErrMigrationCommitNotCalled = fmt.Errorf("migration before-commit function was not called")
-	ErrMigrationETLFilesDeleted = fmt.Errorf(
+	ErrMigrationNonUniqueName   = errors.New("please provide unique migration name")
+	ErrMigrationCommitNotCalled = errors.New("migration before-commit function was not called")
+	ErrMigrationETLFilesDeleted = errors.New(
 		"db migration progress was interrupted after extraction step and ETL files was deleted, please contact development team for help or re-sync from scratch",
 	)
 )

@@ -17,16 +17,17 @@
 package cltypes
 
 import (
+	"errors"
 	"fmt"
 
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/types/clonable"
-	"github.com/ledgerwatch/erigon-lib/types/ssz"
+	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/types/clonable"
+	"github.com/erigontech/erigon-lib/types/ssz"
 
-	"github.com/ledgerwatch/erigon/cl/clparams"
-	"github.com/ledgerwatch/erigon/cl/cltypes/solid"
-	"github.com/ledgerwatch/erigon/cl/merkle_tree"
-	ssz2 "github.com/ledgerwatch/erigon/cl/ssz"
+	"github.com/erigontech/erigon/cl/clparams"
+	"github.com/erigontech/erigon/cl/cltypes/solid"
+	"github.com/erigontech/erigon/cl/merkle_tree"
+	ssz2 "github.com/erigontech/erigon/cl/ssz"
 )
 
 // make sure that the type implements the interface ssz2.ObjectSSZ
@@ -76,7 +77,7 @@ func (b *SignedBlindedBeaconBlock) Clone() clonable.Clonable {
 
 func (b *SignedBlindedBeaconBlock) Unblind(blockPayload *Eth1Block) (*SignedBeaconBlock, error) {
 	if b == nil {
-		return nil, fmt.Errorf("nil block")
+		return nil, errors.New("nil block")
 	}
 	// check root
 	blindedRoot := b.Block.Body.ExecutionPayload.StateRoot

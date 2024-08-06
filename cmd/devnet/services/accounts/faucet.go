@@ -18,18 +18,19 @@ package accounts
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"math/big"
 	"strings"
 	"sync"
 
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon/accounts/abi/bind"
-	"github.com/ledgerwatch/erigon/cmd/devnet/accounts"
-	"github.com/ledgerwatch/erigon/cmd/devnet/blocks"
-	"github.com/ledgerwatch/erigon/cmd/devnet/contracts"
-	"github.com/ledgerwatch/erigon/cmd/devnet/devnet"
-	"github.com/ledgerwatch/erigon/rpc"
+	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon/accounts/abi/bind"
+	"github.com/erigontech/erigon/cmd/devnet/accounts"
+	"github.com/erigontech/erigon/cmd/devnet/blocks"
+	"github.com/erigontech/erigon/cmd/devnet/contracts"
+	"github.com/erigontech/erigon/cmd/devnet/devnet"
+	"github.com/erigontech/erigon/rpc"
 )
 
 type Faucet struct {
@@ -173,7 +174,7 @@ func (f *Faucet) Send(ctx context.Context, destination *accounts.Account, eth fl
 	}
 
 	if f.transactOpts == nil {
-		return nil, libcommon.Hash{}, fmt.Errorf("faucet not initialized")
+		return nil, libcommon.Hash{}, errors.New("faucet not initialized")
 	}
 
 	node := devnet.SelectNode(ctx)

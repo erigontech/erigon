@@ -26,8 +26,8 @@ import (
 	"testing"
 
 	"github.com/davecgh/go-spew/spew"
-	"github.com/ledgerwatch/erigon/crypto"
-	"github.com/ledgerwatch/erigon/rlp"
+	"github.com/erigontech/erigon/crypto"
+	"github.com/erigontech/erigon/rlp"
 )
 
 // EIP-8 test vectors.

@@ -25,36 +25,35 @@ import (
 	"sync"
 	"time"
 
-	"github.com/ledgerwatch/erigon-lib/chain"
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/common/hexutil"
-	"github.com/ledgerwatch/erigon-lib/common/hexutility"
-	"github.com/ledgerwatch/erigon-lib/gointerfaces"
-	execution "github.com/ledgerwatch/erigon-lib/gointerfaces/executionproto"
-	txpool "github.com/ledgerwatch/erigon-lib/gointerfaces/txpoolproto"
-	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon-lib/kv/kvcache"
-	"github.com/ledgerwatch/erigon-lib/log/v3"
-	libstate "github.com/ledgerwatch/erigon-lib/state"
+	"github.com/erigontech/erigon-lib/chain"
+	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common/hexutil"
+	"github.com/erigontech/erigon-lib/common/hexutility"
+	"github.com/erigontech/erigon-lib/gointerfaces"
+	execution "github.com/erigontech/erigon-lib/gointerfaces/executionproto"
+	txpool "github.com/erigontech/erigon-lib/gointerfaces/txpoolproto"
+	"github.com/erigontech/erigon-lib/kv"
+	"github.com/erigontech/erigon-lib/kv/kvcache"
+	"github.com/erigontech/erigon-lib/log/v3"
 
-	"github.com/ledgerwatch/erigon/cl/clparams"
-	"github.com/ledgerwatch/erigon/cmd/rpcdaemon/cli"
-	"github.com/ledgerwatch/erigon/cmd/rpcdaemon/cli/httpcfg"
-	"github.com/ledgerwatch/erigon/common"
-	"github.com/ledgerwatch/erigon/common/math"
-	"github.com/ledgerwatch/erigon/consensus"
-	"github.com/ledgerwatch/erigon/consensus/merge"
-	"github.com/ledgerwatch/erigon/core/types"
-	"github.com/ledgerwatch/erigon/eth/ethutils"
-	"github.com/ledgerwatch/erigon/rpc"
-	"github.com/ledgerwatch/erigon/turbo/engineapi/engine_block_downloader"
-	"github.com/ledgerwatch/erigon/turbo/engineapi/engine_helpers"
-	"github.com/ledgerwatch/erigon/turbo/engineapi/engine_types"
-	"github.com/ledgerwatch/erigon/turbo/execution/eth1/eth1_chain_reader.go"
-	"github.com/ledgerwatch/erigon/turbo/jsonrpc"
-	"github.com/ledgerwatch/erigon/turbo/rpchelper"
-	"github.com/ledgerwatch/erigon/turbo/services"
-	"github.com/ledgerwatch/erigon/turbo/stages/headerdownload"
+	"github.com/erigontech/erigon/cl/clparams"
+	"github.com/erigontech/erigon/cmd/rpcdaemon/cli"
+	"github.com/erigontech/erigon/cmd/rpcdaemon/cli/httpcfg"
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/math"
+	"github.com/erigontech/erigon/consensus"
+	"github.com/erigontech/erigon/consensus/merge"
+	"github.com/erigontech/erigon/core/types"
+	"github.com/erigontech/erigon/eth/ethutils"
+	"github.com/erigontech/erigon/rpc"
+	"github.com/erigontech/erigon/turbo/engineapi/engine_block_downloader"
+	"github.com/erigontech/erigon/turbo/engineapi/engine_helpers"
+	"github.com/erigontech/erigon/turbo/engineapi/engine_types"
+	"github.com/erigontech/erigon/turbo/execution/eth1/eth1_chain_reader.go"
+	"github.com/erigontech/erigon/turbo/jsonrpc"
+	"github.com/erigontech/erigon/turbo/rpchelper"
+	"github.com/erigontech/erigon/turbo/services"
+	"github.com/erigontech/erigon/turbo/stages/headerdownload"
 )
 
 var caplinEnabledLog = "Caplin is enabled, so the engine API cannot be used. for external CL use --externalcl"
@@ -100,13 +99,12 @@ func (e *EngineServer) Start(
 	blockReader services.FullBlockReader,
 	filters *rpchelper.Filters,
 	stateCache kvcache.Cache,
-	agg *libstate.Aggregator,
 	engineReader consensus.EngineReader,
 	eth rpchelper.ApiBackend,
 	txPool txpool.TxpoolClient,
 	mining txpool.MiningClient,
 ) {
-	base := jsonrpc.NewBaseApi(filters, stateCache, blockReader, httpConfig.WithDatadir, httpConfig.EvmCallTimeout, engineReader)
+	base := jsonrpc.NewBaseApi(filters, stateCache, blockReader, httpConfig.WithDatadir, httpConfig.EvmCallTimeout, engineReader, httpConfig.Dirs)
 
 	ethImpl := jsonrpc.NewEthAPI(base, db, eth, txPool, mining, httpConfig.Gascap, httpConfig.Feecap, httpConfig.ReturnDataLimit, httpConfig.AllowUnprotectedTxs, httpConfig.MaxGetProofRewindBlockCount, httpConfig.WebsocketSubscribeLogsChannelSize, e.logger)
 
@@ -140,12 +138,16 @@ func (s *EngineServer) checkWithdrawalsPresence(time uint64, withdrawals types.W
 	return nil
 }
 
-func (s *EngineServer) checkRequestsPresence(time uint64, requests types.Requests) error {
-	if !s.config.IsPrague(time) && requests != nil {
-		return &rpc.InvalidParamsError{Message: "requests before Prague"}
+func (s *EngineServer) checkRequestsPresence(time uint64, payload *engine_types.ExecutionPayload) error {
+	if !s.config.IsPrague(time) {
+		if payload.DepositRequests != nil || payload.WithdrawalRequests != nil || payload.ConsolidationRequests != nil {
+			return &rpc.InvalidParamsError{Message: "requests before Prague"}
+		}
 	}
-	if s.config.IsPrague(time) && requests == nil {
-		return &rpc.InvalidParamsError{Message: "missing requests list"}
+	if s.config.IsPrague(time) {
+		if payload.DepositRequests == nil || payload.WithdrawalRequests == nil || payload.ConsolidationRequests == nil {
+			return &rpc.InvalidParamsError{Message: "missing requests list"}
+		}
 	}
 	return nil
 }
@@ -202,17 +204,18 @@ func (s *EngineServer) newPayload(ctx context.Context, req *engine_types.Executi
 	}
 
 	var requests types.Requests
-	if version >= clparams.ElectraVersion && req.DepositRequests != nil {
+	if err := s.checkRequestsPresence(header.Time, req); err != nil {
+		return nil, err
+	}
+	if version >= clparams.ElectraVersion {
+		requests = make(types.Requests, 0)
 		requests = append(requests, req.DepositRequests.Requests()...)
 		requests = append(requests, req.WithdrawalRequests.Requests()...)
 		requests = append(requests, req.ConsolidationRequests.Requests()...)
-	}
-	if err := s.checkRequestsPresence(header.Time, requests); err != nil {
-		return nil, err
-	}
-	if requests != nil {
-		rh := types.DeriveSha(requests)
-		header.RequestsRoot = &rh
+		if requests != nil {
+			rh := types.DeriveSha(requests)
+			header.RequestsRoot = &rh
+		}
 	}
 
 	if version <= clparams.CapellaVersion {
@@ -336,11 +339,11 @@ func (s *EngineServer) getQuickPayloadStatusIfPossible(ctx context.Context, bloc
 	}
 	if s.config.TerminalTotalDifficulty == nil {
 		s.logger.Error(fmt.Sprintf("[%s] not a proof-of-stake chain", prefix))
-		return nil, fmt.Errorf("not a proof-of-stake chain")
+		return nil, errors.New("not a proof-of-stake chain")
 	}
 
 	if s.hd == nil {
-		return nil, fmt.Errorf("headerdownload is nil")
+		return nil, errors.New("headerdownload is nil")
 	}
 
 	headHash, finalizedHash, safeHash, err := s.chainRW.GetForkChoice(ctx)
@@ -449,11 +452,11 @@ func (s *EngineServer) getPayload(ctx context.Context, payloadId uint64, version
 		return nil, errCaplinEnabled
 	}
 	if !s.proposing {
-		return nil, fmt.Errorf("execution layer not running as a proposer. enable proposer by taking out the --proposer.disable flag on startup")
+		return nil, errors.New("execution layer not running as a proposer. enable proposer by taking out the --proposer.disable flag on startup")
 	}
 
 	if s.config.TerminalTotalDifficulty == nil {
-		return nil, fmt.Errorf("not a proof-of-stake chain")
+		return nil, errors.New("not a proof-of-stake chain")
 	}
 
 	s.logger.Debug("[GetPayload] acquiring lock")
@@ -550,7 +553,7 @@ func (s *EngineServer) forkchoiceUpdated(ctx context.Context, forkchoiceState *e
 	}
 
 	if !s.proposing {
-		return nil, fmt.Errorf("execution layer not running as a proposer. enable proposer by taking out the --proposer.disable flag on startup")
+		return nil, errors.New("execution layer not running as a proposer. enable proposer by taking out the --proposer.disable flag on startup")
 	}
 
 	headHeader := s.chainRW.GetHeaderByHash(ctx, forkchoiceState.HeadHash)

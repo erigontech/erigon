@@ -22,40 +22,38 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
-	lru "github.com/hashicorp/golang-lru/v2"
-	"github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon/turbo/jsonrpc/receipts"
-	"golang.org/x/sync/semaphore"
 	"math/rand"
 	"sort"
 	"sync"
 	"time"
 
 	"github.com/c2h5oh/datasize"
+	"golang.org/x/sync/semaphore"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/backoff"
 	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/keepalive"
 	"google.golang.org/protobuf/types/known/emptypb"
 
-	"github.com/ledgerwatch/erigon-lib/log/v3"
+	"github.com/erigontech/erigon-lib/chain"
+	"github.com/erigontech/erigon-lib/common/dbg"
+	"github.com/erigontech/erigon-lib/direct"
+	"github.com/erigontech/erigon-lib/gointerfaces/grpcutil"
+	proto_sentry "github.com/erigontech/erigon-lib/gointerfaces/sentryproto"
+	proto_types "github.com/erigontech/erigon-lib/gointerfaces/typesproto"
+	"github.com/erigontech/erigon-lib/kv"
+	"github.com/erigontech/erigon-lib/log/v3"
 
-	"github.com/ledgerwatch/erigon-lib/chain"
-	"github.com/ledgerwatch/erigon-lib/common/dbg"
-	"github.com/ledgerwatch/erigon-lib/direct"
-	"github.com/ledgerwatch/erigon-lib/gointerfaces/grpcutil"
-	proto_sentry "github.com/ledgerwatch/erigon-lib/gointerfaces/sentryproto"
-	proto_types "github.com/ledgerwatch/erigon-lib/gointerfaces/typesproto"
-	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon/consensus"
-	"github.com/ledgerwatch/erigon/core/types"
-	"github.com/ledgerwatch/erigon/eth/ethconfig"
-	"github.com/ledgerwatch/erigon/eth/protocols/eth"
-	"github.com/ledgerwatch/erigon/p2p/sentry"
-	"github.com/ledgerwatch/erigon/rlp"
-	"github.com/ledgerwatch/erigon/turbo/services"
-	"github.com/ledgerwatch/erigon/turbo/stages/bodydownload"
-	"github.com/ledgerwatch/erigon/turbo/stages/headerdownload"
+	"github.com/erigontech/erigon/consensus"
+	"github.com/erigontech/erigon/core/types"
+	"github.com/erigontech/erigon/eth/ethconfig"
+	"github.com/erigontech/erigon/eth/protocols/eth"
+	"github.com/erigontech/erigon/p2p/sentry"
+	"github.com/erigontech/erigon/rlp"
+	"github.com/erigontech/erigon/turbo/jsonrpc/receipts"
+	"github.com/erigontech/erigon/turbo/services"
+	"github.com/erigontech/erigon/turbo/stages/bodydownload"
+	"github.com/erigontech/erigon/turbo/stages/headerdownload"
 )
 
 type (
@@ -350,14 +348,6 @@ func NewMultiClient(
 		bd = &bodydownload.BodyDownload{}
 	}
 
-	receiptsCacheLimit := 32
-	receiptsCache, err := lru.New[common.Hash, []*types.Receipt](receiptsCacheLimit)
-	if err != nil {
-		return nil, err
-	}
-
-	receiptsGenerator := receipts.NewGenerator(receiptsCache, blockReader, engine)
-
 	cs := &MultiClient{
 		Hd:                                hd,
 		Bd:                                bd,
@@ -373,7 +363,7 @@ func NewMultiClient(
 		disableBlockDownload:              disableBlockDownload,
 		logger:                            logger,
 		getReceiptsActiveGoroutineNumber:  semaphore.NewWeighted(1),
-		ethApiWrapper:                     receiptsGenerator,
+		ethApiWrapper:                     receipts.NewGenerator(32, blockReader, engine),
 	}
 
 	return cs, nil

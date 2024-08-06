@@ -30,33 +30,33 @@ import (
 
 	"github.com/holiman/uint256"
 
-	"github.com/ledgerwatch/erigon-lib/chain"
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/common/hexutility"
-	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon-lib/log/v3"
-	state2 "github.com/ledgerwatch/erigon-lib/state"
-	types2 "github.com/ledgerwatch/erigon-lib/types"
+	"github.com/erigontech/erigon-lib/chain"
+	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common/hexutility"
+	"github.com/erigontech/erigon-lib/kv"
+	"github.com/erigontech/erigon-lib/log/v3"
+	state2 "github.com/erigontech/erigon-lib/state"
+	types2 "github.com/erigontech/erigon-lib/types"
 
-	ethereum "github.com/ledgerwatch/erigon"
-	"github.com/ledgerwatch/erigon/accounts/abi"
-	"github.com/ledgerwatch/erigon/accounts/abi/bind"
-	"github.com/ledgerwatch/erigon/common/math"
-	"github.com/ledgerwatch/erigon/common/u256"
-	"github.com/ledgerwatch/erigon/consensus"
-	"github.com/ledgerwatch/erigon/consensus/ethash"
-	"github.com/ledgerwatch/erigon/consensus/misc"
-	"github.com/ledgerwatch/erigon/core"
-	"github.com/ledgerwatch/erigon/core/rawdb"
-	"github.com/ledgerwatch/erigon/core/state"
-	"github.com/ledgerwatch/erigon/core/tracing"
-	"github.com/ledgerwatch/erigon/core/types"
-	"github.com/ledgerwatch/erigon/core/vm"
-	"github.com/ledgerwatch/erigon/core/vm/evmtypes"
-	"github.com/ledgerwatch/erigon/event"
-	"github.com/ledgerwatch/erigon/params"
-	"github.com/ledgerwatch/erigon/turbo/services"
-	"github.com/ledgerwatch/erigon/turbo/stages/mock"
+	ethereum "github.com/erigontech/erigon"
+	"github.com/erigontech/erigon/accounts/abi"
+	"github.com/erigontech/erigon/accounts/abi/bind"
+	"github.com/erigontech/erigon/common/math"
+	"github.com/erigontech/erigon/common/u256"
+	"github.com/erigontech/erigon/consensus"
+	"github.com/erigontech/erigon/consensus/ethash"
+	"github.com/erigontech/erigon/consensus/misc"
+	"github.com/erigontech/erigon/core"
+	"github.com/erigontech/erigon/core/rawdb"
+	"github.com/erigontech/erigon/core/state"
+	"github.com/erigontech/erigon/core/tracing"
+	"github.com/erigontech/erigon/core/types"
+	"github.com/erigontech/erigon/core/vm"
+	"github.com/erigontech/erigon/core/vm/evmtypes"
+	"github.com/erigontech/erigon/event"
+	"github.com/erigontech/erigon/params"
+	"github.com/erigontech/erigon/turbo/services"
+	"github.com/erigontech/erigon/turbo/stages/mock"
 )
 
 // This nil assignment ensures at compile time that SimulatedBackend implements bind.ContractBackend.
@@ -99,6 +99,7 @@ func NewSimulatedBackendWithConfig(t *testing.T, alloc types.GenesisAlloc, confi
 	engine := ethash.NewFaker()
 	checkStateRoot := true
 	m := mock.MockWithGenesisEngine(t, &genesis, engine, false, checkStateRoot)
+
 	backend := &SimulatedBackend{
 		m:            m,
 		prependBlock: m.Genesis,
@@ -264,6 +265,7 @@ func (b *SimulatedBackend) TransactionReceipt(ctx context.Context, txHash libcom
 		return nil, err
 	}
 	defer tx.Rollback()
+
 	// Retrieve the context of the receipt based on the transaction hash
 	blockNumber, err := rawdb.ReadTxLookupEntry(tx, txHash)
 	if err != nil {
@@ -276,8 +278,12 @@ func (b *SimulatedBackend) TransactionReceipt(ctx context.Context, txHash libcom
 	if err != nil {
 		return nil, err
 	}
+
 	// Read all the receipts from the block and return the one with the matching hash
-	receipts := rawdb.ReadReceipts(tx, block, nil)
+	receipts, err := b.m.ReceiptsReader.GetReceipts(ctx, b.m.ChainConfig, tx, block)
+	if err != nil {
+		panic(err)
+	}
 	for _, receipt := range receipts {
 		if receipt.TxHash == txHash {
 			return receipt, nil

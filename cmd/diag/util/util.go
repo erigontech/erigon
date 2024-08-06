@@ -19,6 +19,7 @@ package util
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -43,7 +44,7 @@ func MakeHttpGetCall(ctx context.Context, url string, data interface{}) error {
 	resp, err := client.Do(req)
 	if err != nil {
 		if strings.Contains(err.Error(), "connection refused") {
-			return fmt.Errorf("it looks like the Erigon node is not running, is running incorrectly, or you have specified the wrong diagnostics URL. If you run the Erigon node with the '--diagnostics.endpoint.addr' or '--diagnostics.endpoint.port' flags, you must also specify the '--debug.addr' flag with the same address and port")
+			return errors.New("it looks like the Erigon node is not running, is running incorrectly, or you have specified the wrong diagnostics URL. If you run the Erigon node with the '--diagnostics.endpoint.addr' or '--diagnostics.endpoint.port' flags, you must also specify the '--debug.addr' flag with the same address and port")
 		}
 		return err
 	}
@@ -57,7 +58,7 @@ func MakeHttpGetCall(ctx context.Context, url string, data interface{}) error {
 	err = json.Unmarshal(body, &data)
 	if err != nil {
 		if err.Error() == "invalid character 'p' after top-level value" {
-			return fmt.Errorf("diagnostics was not initialized yet. Please try again in a few seconds")
+			return errors.New("diagnostics was not initialized yet. Please try again in a few seconds")
 		}
 
 		return err
@@ -110,4 +111,37 @@ func RenderUseDiagUI() {
 func RenderError(err error) {
 	txt := text.Colors{text.FgWhite, text.BgRed}
 	fmt.Printf("%s %s\n", txt.Sprint("[ERROR]"), err)
+}
+
+func SaveDataToFile(filePath string, fileName string, data string) error {
+	//check is folder exists
+	if _, err := os.Stat(filePath); os.IsNotExist(err) {
+		err := os.MkdirAll(filePath, 0755)
+		if err != nil {
+			return err
+		}
+	}
+
+	fullPath := MakePath(filePath, fileName)
+
+	file, err := os.Create(fullPath)
+	if err != nil {
+		return err
+	}
+	defer file.Close()
+
+	_, err = file.WriteString(fmt.Sprintf("%v\n", data))
+	if err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func MakePath(filePath string, fileName string) string {
+	if filePath[len(filePath)-1] == '/' {
+		filePath = filePath[:len(filePath)-1]
+	}
+
+	return fmt.Sprintf("%s/%s", filePath, fileName)
 }

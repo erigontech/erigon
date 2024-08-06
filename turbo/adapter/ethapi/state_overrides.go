@@ -17,14 +17,16 @@
 package ethapi
 
 import (
+	"errors"
 	"fmt"
 	"math/big"
 
 	"github.com/holiman/uint256"
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
 
-	"github.com/ledgerwatch/erigon/core/state"
-	"github.com/ledgerwatch/erigon/core/tracing"
+	libcommon "github.com/erigontech/erigon-lib/common"
+
+	"github.com/erigontech/erigon/core/state"
+	"github.com/erigontech/erigon/core/tracing"
 )
 
 type StateOverrides map[libcommon.Address]Account
@@ -44,7 +46,7 @@ func (overrides *StateOverrides) Override(state *state.IntraBlockState) error {
 		if account.Balance != nil {
 			balance, overflow := uint256.FromBig((*big.Int)(*account.Balance))
 			if overflow {
-				return fmt.Errorf("account.Balance higher than 2^256-1")
+				return errors.New("account.Balance higher than 2^256-1")
 			}
 			state.SetBalance(addr, balance, tracing.BalanceChangeUnspecified)
 		}
@@ -53,13 +55,19 @@ func (overrides *StateOverrides) Override(state *state.IntraBlockState) error {
 		}
 		// Replace entire state if caller requires.
 		if account.State != nil {
-			state.SetStorage(addr, *account.State)
+			intState := map[libcommon.Hash]uint256.Int{}
+			for key, value := range *account.State {
+				intValue := new(uint256.Int).SetBytes32(value.Bytes())
+				intState[key] = *intValue
+			}
+			state.SetStorage(addr, intState)
 		}
 		// Apply state diff into specified accounts.
 		if account.StateDiff != nil {
 			for key, value := range *account.StateDiff {
 				key := key
-				state.SetState(addr, &key, value)
+				intValue := new(uint256.Int).SetBytes32(value.Bytes())
+				state.SetState(addr, &key, *intValue)
 			}
 		}
 	}

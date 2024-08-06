@@ -17,14 +17,14 @@
 package forkchoice
 
 import (
-	"fmt"
+	"errors"
 
-	"github.com/ledgerwatch/erigon/cl/transition"
+	"github.com/erigontech/erigon/cl/transition"
 
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/log/v3"
-	"github.com/ledgerwatch/erigon/cl/cltypes/solid"
-	"github.com/ledgerwatch/erigon/cl/phase1/core/state"
+	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/cl/cltypes/solid"
+	"github.com/erigontech/erigon/cl/phase1/core/state"
 )
 
 // Slot calculates the current slot number using the time and genesis slot.
@@ -62,8 +62,8 @@ func (f *ForkChoiceStore) onNewFinalized(newFinalized solid.Checkpoint) {
 		}
 		return true
 	})
-
-	f.forkGraph.Prune(newFinalized.Epoch() * f.beaconCfg.SlotsPerEpoch)
+	slotToPrune := ((newFinalized.Epoch() - 1) * f.beaconCfg.SlotsPerEpoch) - 1
+	f.forkGraph.Prune(slotToPrune)
 }
 
 // updateCheckpoints updates the justified and finalized checkpoints if new checkpoints have higher epochs.
@@ -124,7 +124,7 @@ func (f *ForkChoiceStore) getCheckpointState(checkpoint solid.Checkpoint) (*chec
 		return nil, err
 	}
 	if baseState == nil {
-		return nil, fmt.Errorf("getCheckpointState: baseState not found in graph")
+		return nil, errors.New("getCheckpointState: baseState not found in graph")
 	}
 	// By default use the no change encoding to signal that there is no future epoch here.
 	if baseState.Slot() < f.computeStartSlotAtEpoch(checkpoint.Epoch()) {

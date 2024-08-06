@@ -20,7 +20,6 @@
 package state
 
 import (
-	"bytes"
 	"fmt"
 	"io"
 	"maps"
@@ -28,13 +27,13 @@ import (
 
 	"github.com/holiman/uint256"
 
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	libcommon "github.com/erigontech/erigon-lib/common"
 
-	"github.com/ledgerwatch/erigon/core/tracing"
-	"github.com/ledgerwatch/erigon/core/types/accounts"
-	"github.com/ledgerwatch/erigon/crypto"
-	"github.com/ledgerwatch/erigon/rlp"
-	"github.com/ledgerwatch/erigon/turbo/trie"
+	"github.com/erigontech/erigon/core/tracing"
+	"github.com/erigontech/erigon/core/types/accounts"
+	"github.com/erigontech/erigon/crypto"
+	"github.com/erigontech/erigon/rlp"
+	"github.com/erigontech/erigon/turbo/trie"
 )
 
 var emptyCodeHash = crypto.Keccak256(nil)
@@ -95,7 +94,7 @@ type stateObject struct {
 
 // empty returns whether the account is considered empty.
 func (so *stateObject) empty() bool {
-	return so.data.Nonce == 0 && so.data.Balance.IsZero() && bytes.Equal(so.data.CodeHash[:], emptyCodeHash)
+	return so.data.Nonce == 0 && so.data.Balance.IsZero() && (so.data.CodeHash == emptyCodeHashH)
 }
 
 // newObject creates a state object.
@@ -327,12 +326,12 @@ func (so *stateObject) Code() []byte {
 	if so.code != nil {
 		return so.code
 	}
-	if bytes.Equal(so.CodeHash(), emptyCodeHash) {
+	if so.data.CodeHash == emptyCodeHashH {
 		return nil
 	}
-	code, err := so.db.stateReader.ReadAccountCode(so.Address(), so.data.Incarnation, libcommon.BytesToHash(so.CodeHash()))
+	code, err := so.db.stateReader.ReadAccountCode(so.Address(), so.data.Incarnation, so.data.CodeHash)
 	if err != nil {
-		so.setError(fmt.Errorf("can't load code hash %x: %w", so.CodeHash(), err))
+		so.setError(fmt.Errorf("can't load code hash %x: %w", so.data.CodeHash, err))
 	}
 	so.code = code
 	return code
@@ -364,10 +363,6 @@ func (so *stateObject) SetNonce(nonce uint64) {
 
 func (so *stateObject) setNonce(nonce uint64) {
 	so.data.Nonce = nonce
-}
-
-func (so *stateObject) CodeHash() []byte {
-	return so.data.CodeHash[:]
 }
 
 func (so *stateObject) Balance() *uint256.Int {

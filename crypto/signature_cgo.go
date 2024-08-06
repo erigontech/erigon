@@ -24,10 +24,12 @@ package crypto
 import (
 	"crypto/ecdsa"
 	"crypto/elliptic"
+	"errors"
 	"fmt"
 
-	"github.com/ledgerwatch/erigon/common/math"
-	"github.com/ledgerwatch/secp256k1"
+	"github.com/erigontech/secp256k1"
+
+	"github.com/erigontech/erigon/common/math"
 )
 
 // Ecrecover returns the uncompressed public key that created the given signature.
@@ -79,7 +81,7 @@ func VerifySignature(pubkey, digestHash, signature []byte) bool {
 func DecompressPubkey(pubkey []byte) (*ecdsa.PublicKey, error) {
 	x, y := secp256k1.DecompressPubkey(pubkey)
 	if x == nil {
-		return nil, fmt.Errorf("invalid public key")
+		return nil, errors.New("invalid public key")
 	}
 	return &ecdsa.PublicKey{X: x, Y: y, Curve: S256()}, nil
 }

@@ -24,14 +24,15 @@ import (
 	"sync"
 	"time"
 
-	"github.com/ledgerwatch/erigonwatch"
-
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
 	"github.com/go-chi/cors"
 	"github.com/jedib0t/go-pretty/v6/text"
-	"github.com/ledgerwatch/erigon/cmd/diag/flags"
 	"github.com/urfave/cli/v2"
+
+	"github.com/erigontech/erigonwatch"
+
+	"github.com/erigontech/erigon/cmd/diag/flags"
 )
 
 var (
@@ -127,8 +128,8 @@ func runUI(cli *cli.Context) error {
 		}
 	}()
 
-	uiUrl := fmt.Sprintf("http://%s", listenUrl)
-	fmt.Println(text.Hyperlink(uiUrl, fmt.Sprintf("UI running on %s", uiUrl)))
+	uiUrl := "http://" + listenUrl
+	fmt.Println(text.Hyperlink(uiUrl, "UI running on "+uiUrl))
 
 	wg.Wait() // Wait for the server goroutine to finish
 	return nil

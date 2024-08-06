@@ -18,7 +18,7 @@ package sentinel
 
 import (
 	"context"
-	"fmt"
+	"errors"
 	"time"
 
 	"github.com/libp2p/go-libp2p/core/network"
@@ -26,10 +26,10 @@ import (
 	"github.com/multiformats/go-multiaddr"
 	"github.com/prysmaticlabs/go-bitfield"
 
-	"github.com/ledgerwatch/erigon-lib/log/v3"
-	"github.com/ledgerwatch/erigon/cl/clparams"
-	"github.com/ledgerwatch/erigon/p2p/enode"
-	"github.com/ledgerwatch/erigon/p2p/enr"
+	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/cl/clparams"
+	"github.com/erigontech/erigon/p2p/enode"
+	"github.com/erigontech/erigon/p2p/enr"
 )
 
 const peerSubnetTarget = 4
@@ -42,7 +42,7 @@ func (s *Sentinel) ConnectWithPeer(ctx context.Context, info peer.AddrInfo) (err
 		return nil
 	}
 	if s.peers.BanStatus(info.ID) {
-		return fmt.Errorf("refused to connect to bad peer")
+		return errors.New("refused to connect to bad peer")
 	}
 	ctxWithTimeout, cancel := context.WithTimeout(ctx, clparams.MaxDialTimeout)
 	defer cancel()
@@ -122,9 +122,12 @@ func (s *Sentinel) listenForPeers() {
 			continue
 		}
 
-		if err := s.ConnectWithPeer(s.ctx, *peerInfo); err != nil {
-			log.Trace("[Sentinel] Could not connect with peer", "err", err)
-		}
+		go func() {
+			if err := s.ConnectWithPeer(s.ctx, *peerInfo); err != nil {
+				log.Trace("[Sentinel] Could not connect with peer", "err", err)
+			}
+		}()
+
 	}
 }
 

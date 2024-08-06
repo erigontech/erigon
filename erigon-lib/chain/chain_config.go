@@ -22,8 +22,8 @@ import (
 	"math/big"
 	"strconv"
 
-	"github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/common/fixedgas"
+	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common/fixedgas"
 )
 
 // Config is the core config which determines the blockchain settings.
@@ -80,7 +80,7 @@ type Config struct {
 
 	// (Optional) deposit contract of PoS chains
 	// See also EIP-6110: Supply validator deposits on chain
-	DepositContract common.Address `json:"depositContract,omitempty"`
+	DepositContract common.Address `json:"depositContractAddress,omitempty"`
 
 	// Various consensus engines
 	Ethash *EthashConfig `json:"ethash,omitempty"`

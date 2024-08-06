@@ -23,10 +23,10 @@ import (
 	"math/big"
 	"time"
 
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/common/hexutility"
-	"github.com/ledgerwatch/erigon/accounts/abi"
-	"github.com/ledgerwatch/erigon/rlp"
+	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common/hexutility"
+	"github.com/erigontech/erigon/accounts/abi"
+	"github.com/erigontech/erigon/rlp"
 )
 
 // EventRecord represents state record
@@ -44,7 +44,7 @@ type EventRecordWithTime struct {
 	Time time.Time `json:"record_time" yaml:"record_time"`
 }
 
-var ErrEventRecordNotFound = fmt.Errorf("event record not found")
+var ErrEventRecordNotFound = errors.New("event record not found")
 
 // String returns the string representation of a state record
 func (e *EventRecordWithTime) String() string {

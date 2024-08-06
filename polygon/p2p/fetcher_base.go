@@ -25,9 +25,10 @@ import (
 
 	"github.com/cenkalti/backoff/v4"
 
-	"github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon/core/types"
-	"github.com/ledgerwatch/erigon/eth/protocols/eth"
+	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common/generics"
+	"github.com/erigontech/erigon/core/types"
+	"github.com/erigontech/erigon/eth/protocols/eth"
 )
 
 type RequestIdGenerator func() uint64
@@ -332,21 +333,19 @@ func fetchWithRetry[TData any](config FetcherConfig, fetch func() (TData, error)
 	data, err := backoff.RetryWithData(func() (TData, error) {
 		data, err := fetch()
 		if err != nil {
-			var nilData TData
 			// retry timeouts
 			if errors.Is(err, context.DeadlineExceeded) {
-				return nilData, err
+				return generics.Zero[TData](), err
 			}
 
 			// permanent errors are not retried
-			return nilData, backoff.Permanent(err)
+			return generics.Zero[TData](), backoff.Permanent(err)
 		}
 
 		return data, nil
 	}, backoff.WithMaxRetries(backoff.NewConstantBackOff(config.retryBackOff), config.maxRetries))
 	if err != nil {
-		var nilData TData
-		return nilData, err
+		return generics.Zero[TData](), err
 	}
 
 	return data, nil
@@ -364,8 +363,8 @@ func awaitResponse[TPacket any](
 	for {
 		select {
 		case <-ctx.Done():
-			var nilPacket TPacket
-			return nilPacket, 0, fmt.Errorf("await %v response interrupted: %w", reflect.TypeOf(nilPacket), ctx.Err())
+			packet := generics.Zero[TPacket]()
+			return packet, 0, fmt.Errorf("await %v response interrupted: %w", reflect.TypeOf(packet), ctx.Err())
 		case message := <-messages:
 			if filter(message) {
 				continue

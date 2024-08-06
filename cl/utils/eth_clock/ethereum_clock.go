@@ -21,9 +21,9 @@ import (
 	"sort"
 	"time"
 
-	"github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon/cl/clparams"
-	"github.com/ledgerwatch/erigon/cl/utils"
+	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon/cl/clparams"
+	"github.com/erigontech/erigon/cl/utils"
 )
 
 var maximumClockDisparity = 500 * time.Millisecond
@@ -32,6 +32,7 @@ var maximumClockDisparity = 500 * time.Millisecond
 type EthereumClock interface {
 	GetSlotTime(slot uint64) time.Time
 	GetCurrentSlot() uint64
+	GetEpochAtSlot(slot uint64) uint64
 	IsSlotCurrentSlotWithMaximumClockDisparity(slot uint64) bool
 	GetSlotByTime(time time.Time) uint64
 	GetCurrentEpoch() uint64
@@ -87,6 +88,10 @@ func (t *ethereumClockImpl) GetCurrentSlot() uint64 {
 	}
 
 	return (now - t.genesisTime) / t.beaconCfg.SecondsPerSlot
+}
+
+func (t *ethereumClockImpl) GetEpochAtSlot(slot uint64) uint64 {
+	return slot / t.beaconCfg.SlotsPerEpoch
 }
 
 func (t *ethereumClockImpl) IsSlotCurrentSlotWithMaximumClockDisparity(slot uint64) bool {

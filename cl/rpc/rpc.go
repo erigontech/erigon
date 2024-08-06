@@ -20,27 +20,28 @@ import (
 	"bytes"
 	"context"
 	"encoding/binary"
+	"errors"
 	"fmt"
 	"io"
 	"time"
 
-	"github.com/ledgerwatch/erigon/cl/sentinel/communication"
-	"github.com/ledgerwatch/erigon/cl/sentinel/communication/ssz_snappy"
-	"github.com/ledgerwatch/erigon/cl/utils/eth_clock"
+	"github.com/erigontech/erigon/cl/sentinel/communication"
+	"github.com/erigontech/erigon/cl/sentinel/communication/ssz_snappy"
+	"github.com/erigontech/erigon/cl/utils/eth_clock"
 
 	"github.com/c2h5oh/datasize"
 	"github.com/golang/snappy"
 	"go.uber.org/zap/buffer"
 
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/gointerfaces"
-	sentinel "github.com/ledgerwatch/erigon-lib/gointerfaces/sentinelproto"
-	"github.com/ledgerwatch/erigon-lib/log/v3"
+	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/gointerfaces"
+	sentinel "github.com/erigontech/erigon-lib/gointerfaces/sentinelproto"
+	"github.com/erigontech/erigon-lib/log/v3"
 
-	"github.com/ledgerwatch/erigon/cl/clparams"
-	"github.com/ledgerwatch/erigon/cl/cltypes"
-	"github.com/ledgerwatch/erigon/cl/cltypes/solid"
-	"github.com/ledgerwatch/erigon/cl/utils"
+	"github.com/erigontech/erigon/cl/clparams"
+	"github.com/erigontech/erigon/cl/cltypes"
+	"github.com/erigontech/erigon/cl/cltypes/solid"
+	"github.com/erigontech/erigon/cl/utils"
 )
 
 const maxMessageLength = 18 * datasize.MB
@@ -105,7 +106,7 @@ func (b *BeaconRpcP2P) sendBlocksRequest(ctx context.Context, topic string, reqD
 		}
 		// Sanity check for message size.
 		if encodedLn > uint64(maxMessageLength) {
-			return nil, message.Peer.Pid, fmt.Errorf("received message too big")
+			return nil, message.Peer.Pid, errors.New("received message too big")
 		}
 
 		// Read bytes using snappy into a new raw buffer of side encodedLn.
@@ -122,7 +123,7 @@ func (b *BeaconRpcP2P) sendBlocksRequest(ctx context.Context, topic string, reqD
 		// Fork digests
 		respForkDigest := binary.BigEndian.Uint32(forkDigest)
 		if respForkDigest == 0 {
-			return nil, message.Peer.Pid, fmt.Errorf("null fork digest")
+			return nil, message.Peer.Pid, errors.New("null fork digest")
 		}
 
 		version, err := b.ethClock.StateVersionByForkDigest(utils.Uint32ToBytes4(respForkDigest))
@@ -179,7 +180,7 @@ func (b *BeaconRpcP2P) sendBlobsSidecar(ctx context.Context, topic string, reqDa
 		}
 		// Sanity check for message size.
 		if encodedLn > uint64(maxMessageLength) {
-			return nil, message.Peer.Pid, fmt.Errorf("received message too big")
+			return nil, message.Peer.Pid, errors.New("received message too big")
 		}
 
 		// Read bytes using snappy into a new raw buffer of side encodedLn.
@@ -196,7 +197,7 @@ func (b *BeaconRpcP2P) sendBlobsSidecar(ctx context.Context, topic string, reqDa
 		// Fork digests
 		respForkDigest := binary.BigEndian.Uint32(forkDigest)
 		if respForkDigest == 0 {
-			return nil, message.Peer.Pid, fmt.Errorf("null fork digest")
+			return nil, message.Peer.Pid, errors.New("null fork digest")
 		}
 
 		version, err := b.ethClock.StateVersionByForkDigest(utils.Uint32ToBytes4(respForkDigest))

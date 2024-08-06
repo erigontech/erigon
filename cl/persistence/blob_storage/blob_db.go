@@ -28,14 +28,14 @@ import (
 	"sync/atomic"
 
 	gokzg4844 "github.com/crate-crypto/go-kzg-4844"
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/crypto/kzg"
-	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon/cl/clparams"
-	"github.com/ledgerwatch/erigon/cl/cltypes"
-	"github.com/ledgerwatch/erigon/cl/cltypes/solid"
-	"github.com/ledgerwatch/erigon/cl/sentinel/communication/ssz_snappy"
-	"github.com/ledgerwatch/erigon/cl/utils/eth_clock"
+	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/crypto/kzg"
+	"github.com/erigontech/erigon-lib/kv"
+	"github.com/erigontech/erigon/cl/clparams"
+	"github.com/erigontech/erigon/cl/cltypes"
+	"github.com/erigontech/erigon/cl/cltypes/solid"
+	"github.com/erigontech/erigon/cl/sentinel/communication/ssz_snappy"
+	"github.com/erigontech/erigon/cl/utils/eth_clock"
 	"github.com/spf13/afero"
 )
 
@@ -236,7 +236,7 @@ func VerifyAgainstIdentifiersAndInsertIntoTheBlobStore(ctx context.Context, stor
 		return 0, 0, nil
 	}
 	if len(sidecars) > identifiers.Len() {
-		return 0, 0, fmt.Errorf("sidecars length is greater than identifiers length")
+		return 0, 0, errors.New("sidecars length is greater than identifiers length")
 	}
 	prevBlockRoot := identifiers.Get(0).BlockRoot
 	totalProcessed := 0
@@ -261,7 +261,7 @@ func VerifyAgainstIdentifiersAndInsertIntoTheBlobStore(ctx context.Context, stor
 		}
 
 		if !cltypes.VerifyCommitmentInclusionProof(sidecar.KzgCommitment, sidecar.CommitmentInclusionProof, sidecar.Index, clparams.DenebVersion, sidecar.SignedBlockHeader.Header.BodyRoot) {
-			return 0, 0, fmt.Errorf("could not verify blob's inclusion proof")
+			return 0, 0, errors.New("could not verify blob's inclusion proof")
 		}
 		if verifySignatureFn != nil {
 			// verify the signature of the sidecar head, we leave this step up to the caller to define
@@ -305,7 +305,7 @@ func VerifyAgainstIdentifiersAndInsertIntoTheBlobStore(ctx context.Context, stor
 				kzgProofs[i] = gokzg4844.KZGProof(sidecar.KzgProof)
 			}
 			if err := kzgCtx.VerifyBlobKZGProofBatch(blobs, kzgCommitments, kzgProofs); err != nil {
-				errAtomic.Store(fmt.Errorf("sidecar is wrong"))
+				errAtomic.Store(errors.New("sidecar is wrong"))
 				return
 			}
 			if err := storage.WriteBlobSidecars(ctx, sds.blockRoot, sds.sidecars); err != nil {

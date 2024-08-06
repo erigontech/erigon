@@ -28,7 +28,7 @@ var (
 
 func checkMinPeers(minPeerCount uint, api NetAPI) error {
 	if api == nil {
-		return fmt.Errorf("no connection to the Erigon server or `net` namespace isn't enabled")
+		return errors.New("no connection to the Erigon server or `net` namespace isn't enabled")
 	}
 
 	peerCount, err := api.PeerCount(context.TODO())

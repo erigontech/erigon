@@ -35,37 +35,37 @@ import (
 	"github.com/spf13/pflag"
 	"github.com/urfave/cli/v2"
 
-	"github.com/ledgerwatch/erigon-lib/log/v3"
+	"github.com/erigontech/erigon-lib/log/v3"
 
-	"github.com/ledgerwatch/erigon-lib/chain/networkname"
-	"github.com/ledgerwatch/erigon-lib/chain/snapcfg"
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/common/datadir"
-	"github.com/ledgerwatch/erigon-lib/common/metrics"
-	libkzg "github.com/ledgerwatch/erigon-lib/crypto/kzg"
-	"github.com/ledgerwatch/erigon-lib/direct"
-	downloadercfg2 "github.com/ledgerwatch/erigon-lib/downloader/downloadercfg"
-	"github.com/ledgerwatch/erigon-lib/txpool/txpoolcfg"
+	"github.com/erigontech/erigon-lib/chain/networkname"
+	"github.com/erigontech/erigon-lib/chain/snapcfg"
+	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common/datadir"
+	"github.com/erigontech/erigon-lib/common/metrics"
+	libkzg "github.com/erigontech/erigon-lib/crypto/kzg"
+	"github.com/erigontech/erigon-lib/direct"
+	downloadercfg2 "github.com/erigontech/erigon-lib/downloader/downloadercfg"
+	"github.com/erigontech/erigon-lib/txpool/txpoolcfg"
 
-	"github.com/ledgerwatch/erigon/cl/clparams"
-	"github.com/ledgerwatch/erigon/cmd/downloader/downloadernat"
-	"github.com/ledgerwatch/erigon/cmd/utils/flags"
-	common2 "github.com/ledgerwatch/erigon/common"
-	"github.com/ledgerwatch/erigon/common/paths"
-	"github.com/ledgerwatch/erigon/consensus/ethash/ethashcfg"
-	"github.com/ledgerwatch/erigon/core"
-	"github.com/ledgerwatch/erigon/crypto"
-	"github.com/ledgerwatch/erigon/eth/ethconfig"
-	"github.com/ledgerwatch/erigon/eth/gasprice/gaspricecfg"
-	"github.com/ledgerwatch/erigon/node/nodecfg"
-	"github.com/ledgerwatch/erigon/p2p"
-	"github.com/ledgerwatch/erigon/p2p/enode"
-	"github.com/ledgerwatch/erigon/p2p/nat"
-	"github.com/ledgerwatch/erigon/p2p/netutil"
-	"github.com/ledgerwatch/erigon/params"
-	borsnaptype "github.com/ledgerwatch/erigon/polygon/bor/snaptype"
-	"github.com/ledgerwatch/erigon/rpc/rpccfg"
-	"github.com/ledgerwatch/erigon/turbo/logging"
+	"github.com/erigontech/erigon/cl/clparams"
+	"github.com/erigontech/erigon/cmd/downloader/downloadernat"
+	"github.com/erigontech/erigon/cmd/utils/flags"
+	common2 "github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/paths"
+	"github.com/erigontech/erigon/consensus/ethash/ethashcfg"
+	"github.com/erigontech/erigon/core"
+	"github.com/erigontech/erigon/crypto"
+	"github.com/erigontech/erigon/eth/ethconfig"
+	"github.com/erigontech/erigon/eth/gasprice/gaspricecfg"
+	"github.com/erigontech/erigon/node/nodecfg"
+	"github.com/erigontech/erigon/p2p"
+	"github.com/erigontech/erigon/p2p/enode"
+	"github.com/erigontech/erigon/p2p/nat"
+	"github.com/erigontech/erigon/p2p/netutil"
+	"github.com/erigontech/erigon/params"
+	borsnaptype "github.com/erigontech/erigon/polygon/bor/snaptype"
+	"github.com/erigontech/erigon/rpc/rpccfg"
+	"github.com/erigontech/erigon/turbo/logging"
 )
 
 // These are all the command line flags we support.
@@ -712,7 +712,7 @@ var (
 	TorrentDownloadSlotsFlag = cli.IntFlag{
 		Name:  "torrent.download.slots",
 		Value: 128,
-		Usage: "Amount of files to download in parallel. If network has enough seeders 1-3 slot enough, if network has lack of seeders increase to 5-7 (too big value will slow down everything).",
+		Usage: "Amount of files to download in parallel.",
 	}
 	TorrentStaticPeersFlag = cli.StringFlag{
 		Name:  "torrent.staticpeers",
@@ -765,7 +765,7 @@ var (
 	}
 	DbWriteMapFlag = cli.BoolFlag{
 		Name:  "db.writemap",
-		Usage: "Enable WRITE_MAP feauture for fast database writes and fast commit times",
+		Usage: "Enable WRITE_MAP feature for fast database writes and fast commit times",
 		Value: true,
 	}
 
@@ -854,6 +854,11 @@ var (
 		Name:  "caplin.mev-relay-url",
 		Usage: "MEV relay endpoint. Caplin runs in builder mode if this is set",
 		Value: "",
+	}
+	CaplinValidatorMonitorFlag = cli.BoolFlag{
+		Name:  "caplin.validator-monitor",
+		Usage: "Enable caplin validator monitoring metrics",
+		Value: false,
 	}
 
 	SentinelAddrFlag = cli.StringFlag{
@@ -995,6 +1000,11 @@ var (
 		Usage: "disable blob pruning in caplin",
 		Value: false,
 	}
+	CaplinDisableCheckpointSyncFlag = cli.BoolFlag{
+		Name:  "caplin.checkpoint-sync.disable",
+		Usage: "disable checkpoint sync in caplin",
+		Value: false,
+	}
 	CaplinArchiveFlag = cli.BoolFlag{
 		Name:  "caplin.archive",
 		Usage: "enables archival node in caplin",
@@ -1023,7 +1033,7 @@ var (
 	DiagEndpointAddrFlag = cli.StringFlag{
 		Name:  "diagnostics.endpoint.addr",
 		Usage: "Diagnostics HTTP server listening interface",
-		Value: "0.0.0.0",
+		Value: "127.0.0.1",
 	}
 	DiagEndpointPortFlag = cli.UintFlag{
 		Name:  "diagnostics.endpoint.port",
@@ -1402,6 +1412,8 @@ func setDataDir(ctx *cli.Context, cfg *nodecfg.Config) {
 	} else {
 		cfg.Dirs = datadir.New(paths.DataDirForNetwork(paths.DefaultDataDir(), ctx.String(ChainFlag.Name)))
 	}
+	snapcfg.LoadRemotePreverified()
+
 	cfg.MdbxPageSize = flags.DBPageSizeFlagUnmarshal(ctx, DbPageSizeFlag.Name, DbPageSizeFlag.Usage)
 	if err := cfg.MdbxDBSizeLimit.UnmarshalText([]byte(ctx.String(DbSizeLimitFlag.Name))); err != nil {
 		panic(err)
@@ -1516,6 +1528,9 @@ func setTxPool(ctx *cli.Context, fullCfg *ethconfig.Config) {
 	}
 	if ctx.IsSet(TxPoolBlobPriceBumpFlag.Name) {
 		fullCfg.TxPool.BlobPriceBump = ctx.Uint64(TxPoolBlobPriceBumpFlag.Name)
+	}
+	if ctx.IsSet(DbWriteMapFlag.Name) {
+		fullCfg.TxPool.MdbxWriteMap = ctx.Bool(DbWriteMapFlag.Name)
 	}
 	cfg.CommitEvery = common2.RandomizeDuration(ctx.Duration(TxPoolCommitEveryFlag.Name))
 }
@@ -1685,8 +1700,10 @@ func setCaplin(ctx *cli.Context, cfg *ethconfig.Config) {
 	// More granularity here.
 	cfg.CaplinConfig.BlobBackfilling = ctx.Bool(CaplinBlobBackfillingFlag.Name)
 	cfg.CaplinConfig.BlobPruningDisabled = ctx.Bool(CaplinDisableBlobPruningFlag.Name)
+	cfg.CaplinConfig.DisabledCheckpointSync = ctx.Bool(CaplinDisableCheckpointSyncFlag.Name)
 	cfg.CaplinConfig.Archive = ctx.Bool(CaplinArchiveFlag.Name)
 	cfg.CaplinConfig.MevRelayUrl = ctx.String(CaplinMevRelayUrl.Name)
+	cfg.CaplinConfig.EnableValidatorMonitor = ctx.Bool(CaplinValidatorMonitorFlag.Name)
 	if checkpointUrls := ctx.StringSlice(CaplinCheckpointSyncUrlFlag.Name); len(checkpointUrls) > 0 {
 		clparams.ConfigurableCheckpointsURLs = checkpointUrls
 	}
@@ -1885,6 +1902,7 @@ func SetEthConfig(ctx *cli.Context, nodeConfig *nodecfg.Config, cfg *ethconfig.C
 
 	if ctx.IsSet(OverridePragueFlag.Name) {
 		cfg.OverridePragueTime = flags.GlobalBig(ctx, OverridePragueFlag.Name)
+		cfg.TxPool.OverridePragueTime = cfg.OverridePragueTime
 	}
 
 	if clparams.EmbeddedSupported(cfg.NetworkID) {

@@ -30,14 +30,14 @@ import (
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/emptypb"
 
-	"github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/common/dbg"
-	remote "github.com/ledgerwatch/erigon-lib/gointerfaces/remoteproto"
-	types "github.com/ledgerwatch/erigon-lib/gointerfaces/typesproto"
-	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon-lib/kv/order"
-	"github.com/ledgerwatch/erigon-lib/kv/stream"
-	"github.com/ledgerwatch/erigon-lib/log/v3"
+	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common/dbg"
+	remote "github.com/erigontech/erigon-lib/gointerfaces/remoteproto"
+	types "github.com/erigontech/erigon-lib/gointerfaces/typesproto"
+	"github.com/erigontech/erigon-lib/kv"
+	"github.com/erigontech/erigon-lib/kv/order"
+	"github.com/erigontech/erigon-lib/kv/stream"
+	"github.com/erigontech/erigon-lib/log/v3"
 )
 
 // MaxTxTTL - kv interface provide high-consistancy guaranties: Serializable Isolations Level https://en.wikipedia.org/wiki/Isolation_(database_systems)
@@ -535,7 +535,7 @@ func (s *KvServer) DomainGet(_ context.Context, req *remote.DomainGetReq) (reply
 	if err := s.with(req.TxId, func(tx kv.Tx) error {
 		ttx, ok := tx.(kv.TemporalTx)
 		if !ok {
-			return fmt.Errorf("server DB doesn't implement kv.Temporal interface")
+			return errors.New("server DB doesn't implement kv.Temporal interface")
 		}
 		if req.Latest {
 			reply.V, _, err = ttx.DomainGet(domainName, req.K, req.K2)
@@ -559,7 +559,7 @@ func (s *KvServer) HistorySeek(_ context.Context, req *remote.HistorySeekReq) (r
 	if err := s.with(req.TxId, func(tx kv.Tx) error {
 		ttx, ok := tx.(kv.TemporalTx)
 		if !ok {
-			return fmt.Errorf("server DB doesn't implement kv.Temporal interface")
+			return errors.New("server DB doesn't implement kv.Temporal interface")
 		}
 		reply.V, reply.Ok, err = ttx.HistorySeek(kv.History(req.Table), req.K, req.Ts)
 		if err != nil {
@@ -591,7 +591,7 @@ func (s *KvServer) IndexRange(_ context.Context, req *remote.IndexRangeReq) (*re
 	if err := s.with(req.TxId, func(tx kv.Tx) error {
 		ttx, ok := tx.(kv.TemporalTx)
 		if !ok {
-			return fmt.Errorf("server DB doesn't implement kv.Temporal interface")
+			return errors.New("server DB doesn't implement kv.Temporal interface")
 		}
 		it, err := ttx.IndexRange(kv.InvertedIdx(req.Table), req.K, from, int(req.ToTs), order.By(req.OrderAscend), limit)
 		if err != nil {
@@ -615,6 +615,37 @@ func (s *KvServer) IndexRange(_ context.Context, req *remote.IndexRangeReq) (*re
 			if err != nil {
 				return err
 			}
+		}
+		return nil
+	}); err != nil {
+		return nil, err
+	}
+	return reply, nil
+}
+
+func (s *KvServer) HistoryRange(_ context.Context, req *remote.HistoryRangeReq) (*remote.Pairs, error) {
+	reply := &remote.Pairs{}
+	fromTs, limit := int(req.FromTs), int(req.Limit)
+	if err := s.with(req.TxId, func(tx kv.Tx) error {
+		ttx, ok := tx.(kv.TemporalTx)
+		if !ok {
+			return fmt.Errorf("server DB doesn't implement kv.Temporal interface")
+		}
+		it, err := ttx.HistoryRange(kv.History(req.Table), fromTs, int(req.ToTs), order.By(req.OrderAscend), limit)
+		if err != nil {
+			return err
+		}
+		defer it.Close()
+		for it.HasNext() {
+			k, v, err := it.Next()
+			if err != nil {
+				return err
+			}
+			key := bytesCopy(k)
+			value := bytesCopy(v)
+			reply.Keys = append(reply.Keys, key)
+			reply.Values = append(reply.Values, value)
+			limit--
 		}
 		return nil
 	}); err != nil {

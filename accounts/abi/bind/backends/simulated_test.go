@@ -31,18 +31,19 @@ import (
 	"time"
 
 	"github.com/holiman/uint256"
-	ethereum "github.com/ledgerwatch/erigon"
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon/accounts/abi"
-	"github.com/ledgerwatch/erigon/accounts/abi/bind"
-	"github.com/ledgerwatch/erigon/common"
-	"github.com/ledgerwatch/erigon/common/u256"
-	"github.com/ledgerwatch/erigon/core/rawdb"
-	"github.com/ledgerwatch/erigon/core/types"
-	"github.com/ledgerwatch/erigon/crypto"
-	"github.com/ledgerwatch/erigon/params"
 	"github.com/stretchr/testify/require"
+
+	ethereum "github.com/erigontech/erigon"
+	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/kv"
+	"github.com/erigontech/erigon/accounts/abi"
+	"github.com/erigontech/erigon/accounts/abi/bind"
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/u256"
+	"github.com/erigontech/erigon/core/rawdb"
+	"github.com/erigontech/erigon/core/types"
+	"github.com/erigontech/erigon/crypto"
+	"github.com/erigontech/erigon/params"
 )
 
 func TestSimulatedBackend(t *testing.T) {
@@ -862,9 +863,6 @@ func TestSimulatedBackend_TransactionReceipt(t *testing.T) {
 	}
 	sim.Commit()
 
-	if sim.m.HistoryV3 {
-		return
-	}
 	receipt, err := sim.TransactionReceipt(bgCtx, signedTx.Hash())
 	if err != nil {
 		t.Errorf("could not get transaction receipt: %v", err)

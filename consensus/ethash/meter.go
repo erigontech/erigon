@@ -22,7 +22,7 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/ledgerwatch/erigon/common/debug"
+	"github.com/erigontech/erigon/common/debug"
 )
 
 func newHashRateMeter() *hashRateMeter {

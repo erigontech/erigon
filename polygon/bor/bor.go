@@ -38,36 +38,38 @@ import (
 	"golang.org/x/crypto/sha3"
 	"golang.org/x/sync/errgroup"
 
-	"github.com/ledgerwatch/erigon-lib/log/v3"
+	"github.com/erigontech/erigon-lib/common/dbg"
+	"github.com/erigontech/erigon/polygon/bridge"
 
-	"github.com/ledgerwatch/erigon-lib/chain"
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/common/length"
-	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon/common"
-	"github.com/ledgerwatch/erigon/consensus"
-	"github.com/ledgerwatch/erigon/consensus/misc"
-	"github.com/ledgerwatch/erigon/core/rawdb"
-	"github.com/ledgerwatch/erigon/core/state"
-	"github.com/ledgerwatch/erigon/core/tracing"
-	"github.com/ledgerwatch/erigon/core/types"
-	"github.com/ledgerwatch/erigon/core/types/accounts"
-	"github.com/ledgerwatch/erigon/core/vm/evmtypes"
-	"github.com/ledgerwatch/erigon/crypto"
-	"github.com/ledgerwatch/erigon/crypto/cryptopool"
-	"github.com/ledgerwatch/erigon/eth/ethconfig/estimate"
-	"github.com/ledgerwatch/erigon/params"
-	"github.com/ledgerwatch/erigon/polygon/bor/borcfg"
-	"github.com/ledgerwatch/erigon/polygon/bor/finality"
-	"github.com/ledgerwatch/erigon/polygon/bor/finality/flags"
-	"github.com/ledgerwatch/erigon/polygon/bor/finality/whitelist"
-	"github.com/ledgerwatch/erigon/polygon/bor/statefull"
-	"github.com/ledgerwatch/erigon/polygon/bor/valset"
-	"github.com/ledgerwatch/erigon/polygon/bridge"
-	"github.com/ledgerwatch/erigon/polygon/heimdall"
-	"github.com/ledgerwatch/erigon/rlp"
-	"github.com/ledgerwatch/erigon/rpc"
-	"github.com/ledgerwatch/erigon/turbo/services"
+	"github.com/erigontech/erigon-lib/log/v3"
+
+	"github.com/erigontech/erigon-lib/chain"
+	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common/length"
+	"github.com/erigontech/erigon-lib/kv"
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/consensus"
+	"github.com/erigontech/erigon/consensus/misc"
+	"github.com/erigontech/erigon/core/rawdb"
+	"github.com/erigontech/erigon/core/state"
+	"github.com/erigontech/erigon/core/tracing"
+	"github.com/erigontech/erigon/core/types"
+	"github.com/erigontech/erigon/core/types/accounts"
+	"github.com/erigontech/erigon/core/vm/evmtypes"
+	"github.com/erigontech/erigon/crypto"
+	"github.com/erigontech/erigon/crypto/cryptopool"
+	"github.com/erigontech/erigon/eth/ethconfig/estimate"
+	"github.com/erigontech/erigon/params"
+	"github.com/erigontech/erigon/polygon/bor/borcfg"
+	"github.com/erigontech/erigon/polygon/bor/finality"
+	"github.com/erigontech/erigon/polygon/bor/finality/flags"
+	"github.com/erigontech/erigon/polygon/bor/finality/whitelist"
+	"github.com/erigontech/erigon/polygon/bor/statefull"
+	"github.com/erigontech/erigon/polygon/bor/valset"
+	"github.com/erigontech/erigon/polygon/heimdall"
+	"github.com/erigontech/erigon/rlp"
+	"github.com/erigontech/erigon/rpc"
+	"github.com/erigontech/erigon/turbo/services"
 )
 
 const (
@@ -254,6 +256,14 @@ type ValidateHeaderTimeSignerSuccessionNumber interface {
 	GetSignerSuccessionNumber(signer libcommon.Address, number uint64) (int, error)
 }
 
+type spanReader interface {
+	Span(ctx context.Context, id uint64) (*heimdall.Span, bool, error)
+}
+
+type bridgeReader interface {
+	Events(ctx context.Context, blockNum uint64) ([]*types.Message, error)
+}
+
 func ValidateHeaderTime(
 	header *types.Header,
 	now time.Time,
@@ -318,6 +328,8 @@ type Bor struct {
 	spanner                Spanner
 	GenesisContractsClient GenesisContracts
 	HeimdallClient         heimdall.HeimdallClient
+	spanReader             spanReader
+	bridgeReader           bridgeReader
 
 	// scope event.SubscriptionScope
 	// The fields below are for testing only
@@ -329,7 +341,6 @@ type Bor struct {
 	frozenSnapshotsInit sync.Once
 	rootHashCache       *lru.ARCCache[string, string]
 	headerProgress      HeaderProgress
-	polygonBridge       bridge.PolygonBridge
 }
 
 type signer struct {
@@ -346,7 +357,8 @@ func New(
 	heimdallClient heimdall.HeimdallClient,
 	genesisContracts GenesisContracts,
 	logger log.Logger,
-	polygonBridge bridge.Service,
+	bridgeReader bridgeReader,
+	spanReader spanReader,
 ) *Bor {
 	// get bor config
 	borConfig := chainConfig.Bor.(*borcfg.BorConfig)
@@ -373,7 +385,8 @@ func New(
 		execCtx:                context.Background(),
 		logger:                 logger,
 		closeCh:                make(chan struct{}),
-		polygonBridge:          polygonBridge,
+		bridgeReader:           bridgeReader,
+		spanReader:             spanReader,
 	}
 
 	c.authorizedSigner.Store(&signer{
@@ -399,19 +412,19 @@ type rwWrapper struct {
 }
 
 func (w rwWrapper) Update(ctx context.Context, f func(tx kv.RwTx) error) error {
-	return fmt.Errorf("Update not implemented")
+	return errors.New("Update not implemented")
 }
 
 func (w rwWrapper) UpdateNosync(ctx context.Context, f func(tx kv.RwTx) error) error {
-	return fmt.Errorf("UpdateNosync not implemented")
+	return errors.New("UpdateNosync not implemented")
 }
 
 func (w rwWrapper) BeginRw(ctx context.Context) (kv.RwTx, error) {
-	return nil, fmt.Errorf("BeginRw not implemented")
+	return nil, errors.New("BeginRw not implemented")
 }
 
 func (w rwWrapper) BeginRwNosync(ctx context.Context) (kv.RwTx, error) {
-	return nil, fmt.Errorf("BeginRwNosync not implemented")
+	return nil, errors.New("BeginRwNosync not implemented")
 }
 
 // This is used by the rpcdaemon and tests which need read only access to the provided data services
@@ -1383,6 +1396,16 @@ func (c *Bor) fetchAndCommitSpan(
 		}
 
 		heimdallSpan = *s
+	} else if c.spanReader != nil {
+		span, ok, err := c.spanReader.Span(context.Background(), newSpanID)
+		if err != nil {
+			return err
+		}
+		if !ok {
+			return errors.New(fmt.Sprintf("error fetching span %v", newSpanID))
+		}
+
+		heimdallSpan = *span
 	} else {
 		spanJson := chain.Chain.BorSpan(newSpanID)
 		if err := json.Unmarshal(spanJson, &heimdallSpan); err != nil {
@@ -1471,6 +1494,7 @@ func (c *Bor) getHeaderByNumber(ctx context.Context, tx kv.Tx, number uint64) (*
 		return nil, err
 	}
 	if header == nil {
+		_, _ = c.blockReader.HeaderByNumber(dbg.ContextWithDebug(ctx, true), tx, number)
 		return nil, fmt.Errorf("[bor] header not found: %d", number)
 	}
 	return header, nil
@@ -1485,9 +1509,13 @@ func (c *Bor) CommitStates(
 ) error {
 	blockNum := header.Number.Uint64()
 
-	if c.polygonBridge != nil {
-		events, err := c.polygonBridge.GetEvents(c.execCtx, blockNum)
+	if c.bridgeReader != nil {
+		events, err := c.bridgeReader.Events(c.execCtx, blockNum)
 		if err != nil {
+			if errors.Is(err, bridge.ErrMapNotAvailable) {
+				return nil
+			}
+
 			return err
 		}
 
@@ -1606,45 +1634,6 @@ func (c *Bor) getNextHeimdallSpanForTest(
 	heimdallSpan.ChainID = c.chainConfig.ChainID.String()
 
 	return &heimdallSpan, nil
-}
-
-func validatorContains(a []*valset.Validator, x *valset.Validator) (*valset.Validator, bool) {
-	for _, n := range a {
-		if bytes.Equal(n.Address.Bytes(), x.Address.Bytes()) {
-			return n, true
-		}
-	}
-
-	return nil, false
-}
-
-func getUpdatedValidatorSet(oldValidatorSet *valset.ValidatorSet, newVals []*valset.Validator, logger log.Logger) *valset.ValidatorSet {
-	v := oldValidatorSet
-	oldVals := v.Validators
-
-	changes := make([]*valset.Validator, 0, len(oldVals))
-
-	for _, ov := range oldVals {
-		if f, ok := validatorContains(newVals, ov); ok {
-			ov.VotingPower = f.VotingPower
-		} else {
-			ov.VotingPower = 0
-		}
-
-		changes = append(changes, ov)
-	}
-
-	for _, nv := range newVals {
-		if _, ok := validatorContains(changes, nv); !ok {
-			changes = append(changes, nv)
-		}
-	}
-
-	if err := v.UpdateWithChangeSet(changes); err != nil {
-		logger.Error("[bor] Error while updating change set", "error", err)
-	}
-
-	return v
 }
 
 func isSprintStart(number, sprint uint64) bool {

@@ -24,24 +24,25 @@ import (
 	"github.com/urfave/cli/v2"
 	"golang.org/x/sync/semaphore"
 
-	"github.com/ledgerwatch/erigon-lib/common/dbg"
-	"github.com/ledgerwatch/erigon-lib/common/disk"
-	"github.com/ledgerwatch/erigon-lib/common/mem"
-	"github.com/ledgerwatch/erigon-lib/log/v3"
-	"github.com/ledgerwatch/erigon/cl/beacon/beacon_router_configuration"
-	"github.com/ledgerwatch/erigon/cl/phase1/core"
-	"github.com/ledgerwatch/erigon/cl/phase1/core/state"
-	execution_client2 "github.com/ledgerwatch/erigon/cl/phase1/execution_client"
-	"github.com/ledgerwatch/erigon/cl/utils/eth_clock"
-	"github.com/ledgerwatch/erigon/eth/ethconfig"
+	"github.com/erigontech/erigon-lib/common/dbg"
+	"github.com/erigontech/erigon-lib/common/disk"
+	"github.com/erigontech/erigon-lib/common/mem"
+	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/cl/beacon/beacon_router_configuration"
+	"github.com/erigontech/erigon/cl/clparams"
+	"github.com/erigontech/erigon/cl/phase1/core/checkpoint_sync"
+	"github.com/erigontech/erigon/cl/phase1/core/state"
+	execution_client2 "github.com/erigontech/erigon/cl/phase1/execution_client"
+	"github.com/erigontech/erigon/cl/utils/eth_clock"
+	"github.com/erigontech/erigon/eth/ethconfig"
 
-	"github.com/ledgerwatch/erigon/cmd/caplin/caplin1"
-	"github.com/ledgerwatch/erigon/cmd/caplin/caplincli"
-	"github.com/ledgerwatch/erigon/cmd/caplin/caplinflags"
-	"github.com/ledgerwatch/erigon/cmd/sentinel/sentinelflags"
-	"github.com/ledgerwatch/erigon/cmd/utils"
-	"github.com/ledgerwatch/erigon/turbo/app"
-	"github.com/ledgerwatch/erigon/turbo/debug"
+	"github.com/erigontech/erigon/cmd/caplin/caplin1"
+	"github.com/erigontech/erigon/cmd/caplin/caplincli"
+	"github.com/erigontech/erigon/cmd/caplin/caplinflags"
+	"github.com/erigontech/erigon/cmd/sentinel/sentinelflags"
+	"github.com/erigontech/erigon/cmd/utils"
+	"github.com/erigontech/erigon/turbo/app"
+	"github.com/erigontech/erigon/turbo/debug"
 )
 
 func main() {
@@ -92,7 +93,7 @@ func runCaplinNode(cliCtx *cli.Context) error {
 	if cfg.InitialSync {
 		state = cfg.InitalState
 	} else {
-		state, err = core.RetrieveBeaconState(ctx, cfg.BeaconCfg, cfg.NetworkType)
+		state, err = checkpoint_sync.NewRemoteCheckpointSync(cfg.BeaconCfg, cfg.NetworkType).GetLatestBeaconState(ctx)
 		if err != nil {
 			return err
 		}
@@ -160,5 +161,6 @@ func runCaplinNode(cliCtx *cli.Context) error {
 		CaplinDiscoveryPort:    uint64(cfg.Port),
 		CaplinDiscoveryTCPPort: uint64(cfg.ServerTcpPort),
 		BeaconRouter:           rcfg,
-	}, cfg.NetworkCfg, cfg.BeaconCfg, ethClock, state, cfg.Dirs, nil, nil, false, false, false, indiciesDB, blobStorage, nil, blockSnapBuildSema, options...)
+		CaplinConfig:           clparams.CaplinConfig{},
+	}, cfg.NetworkCfg, cfg.BeaconCfg, ethClock, state, cfg.Dirs, nil, nil, indiciesDB, blobStorage, nil, blockSnapBuildSema, options...)
 }

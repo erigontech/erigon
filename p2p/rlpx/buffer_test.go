@@ -23,7 +23,7 @@ import (
 	"bytes"
 	"testing"
 
-	"github.com/ledgerwatch/erigon-lib/common/hexutil"
+	"github.com/erigontech/erigon-lib/common/hexutil"
 
 	"github.com/stretchr/testify/assert"
 )

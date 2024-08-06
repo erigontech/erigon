@@ -17,13 +17,14 @@
 package eth2
 
 import (
+	"errors"
 	"fmt"
 
 	"github.com/Giulio2002/bls"
-	"github.com/ledgerwatch/erigon/cl/abstract"
-	"github.com/ledgerwatch/erigon/cl/cltypes"
-	"github.com/ledgerwatch/erigon/cl/fork"
-	"github.com/ledgerwatch/erigon/cl/phase1/core/state"
+	"github.com/erigontech/erigon/cl/abstract"
+	"github.com/erigontech/erigon/cl/cltypes"
+	"github.com/erigontech/erigon/cl/fork"
+	"github.com/erigontech/erigon/cl/phase1/core/state"
 )
 
 func (I *impl) VerifyTransition(s abstract.BeaconState, currentBlock *cltypes.BeaconBlock) error {
@@ -49,7 +50,7 @@ func (I *impl) VerifyBlockSignature(s abstract.BeaconState, block *cltypes.Signe
 		return fmt.Errorf("error validating block signature: %v", err)
 	}
 	if !valid {
-		return fmt.Errorf("block not valid")
+		return errors.New("block not valid")
 	}
 	return nil
 }

@@ -25,7 +25,7 @@ import (
 	"sort"
 	"testing"
 
-	"github.com/ledgerwatch/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common"
 
 	"github.com/stretchr/testify/require"
 )
@@ -37,21 +37,21 @@ func generateCellRow(tb testing.TB, size int) (row []*Cell, bitmap uint16) {
 	var bm uint16
 	for i := 0; i < len(row); i++ {
 		row[i] = new(Cell)
-		row[i].hl = 32
-		n, err := rand.Read(row[i].h[:])
+		row[i].HashLen = 32
+		n, err := rand.Read(row[i].hash[:])
 		require.NoError(tb, err)
-		require.EqualValues(tb, row[i].hl, n)
+		require.EqualValues(tb, row[i].HashLen, n)
 
 		th := rand.Intn(120)
 		switch {
 		case th > 70:
-			n, err = rand.Read(row[i].apk[:])
+			n, err = rand.Read(row[i].accountPlainKey[:])
 			require.NoError(tb, err)
-			row[i].apl = n
+			row[i].accountPlainKeyLen = n
 		case th > 20 && th <= 70:
-			n, err = rand.Read(row[i].spk[:])
+			n, err = rand.Read(row[i].storagePlainKey[:])
 			require.NoError(tb, err)
-			row[i].spl = n
+			row[i].storagePlainKeyLen = n
 		case th <= 20:
 			n, err = rand.Read(row[i].extension[:th])
 			row[i].extLen = n
@@ -92,10 +92,10 @@ func TestBranchData_MergeHexBranches2(t *testing.T) {
 		}
 		require.EqualValues(t, row[i].extLen, c.extLen)
 		require.EqualValues(t, row[i].extension, c.extension)
-		require.EqualValues(t, row[i].apl, c.apl)
-		require.EqualValues(t, row[i].apk, c.apk)
-		require.EqualValues(t, row[i].spl, c.spl)
-		require.EqualValues(t, row[i].spk, c.spk)
+		require.EqualValues(t, row[i].accountPlainKeyLen, c.accountPlainKeyLen)
+		require.EqualValues(t, row[i].accountPlainKey, c.accountPlainKey)
+		require.EqualValues(t, row[i].storagePlainKeyLen, c.storagePlainKeyLen)
+		require.EqualValues(t, row[i].storagePlainKey, c.storagePlainKey)
 		i++
 	}
 }
@@ -201,13 +201,13 @@ func TestBranchData_ReplacePlainKeys(t *testing.T) {
 		if c == nil {
 			continue
 		}
-		if c.apl > 0 {
-			offt, _ := binary.Uvarint(c.apk[:c.apl])
-			t.Logf("%d apk %x, offt %d\n", i, c.apk[:c.apl], offt)
+		if c.accountPlainKeyLen > 0 {
+			offt, _ := binary.Uvarint(c.accountPlainKey[:c.accountPlainKeyLen])
+			t.Logf("%d apk %x, offt %d\n", i, c.accountPlainKey[:c.accountPlainKeyLen], offt)
 		}
-		if c.spl > 0 {
-			offt, _ := binary.Uvarint(c.spk[:c.spl])
-			t.Logf("%d spk %x offt %d\n", i, c.spk[:c.spl], offt)
+		if c.storagePlainKeyLen > 0 {
+			offt, _ := binary.Uvarint(c.storagePlainKey[:c.storagePlainKeyLen])
+			t.Logf("%d spk %x offt %d\n", i, c.storagePlainKey[:c.storagePlainKeyLen], offt)
 		}
 
 	}
@@ -305,9 +305,9 @@ func TestBranchData_ReplacePlainKeys_WithEmpty(t *testing.T) {
 	})
 }
 
-func TestNewUpdateTree(t *testing.T) {
+func TestNewUpdates(t *testing.T) {
 	t.Run("ModeUpdate", func(t *testing.T) {
-		ut := NewUpdateTree(ModeUpdate, t.TempDir(), keyHasherNoop)
+		ut := NewUpdates(ModeUpdate, t.TempDir(), keyHasherNoop)
 
 		require.NotNil(t, ut.tree)
 		require.NotNil(t, ut.keccak)
@@ -316,7 +316,7 @@ func TestNewUpdateTree(t *testing.T) {
 	})
 
 	t.Run("ModeDirect", func(t *testing.T) {
-		ut := NewUpdateTree(ModeDirect, t.TempDir(), keyHasherNoop)
+		ut := NewUpdates(ModeDirect, t.TempDir(), keyHasherNoop)
 
 		require.NotNil(t, ut.keccak)
 		require.NotNil(t, ut.keys)
@@ -325,11 +325,11 @@ func TestNewUpdateTree(t *testing.T) {
 
 }
 
-func TestUpdateTree_TouchPlainKey(t *testing.T) {
-	utUpdate := NewUpdateTree(ModeUpdate, t.TempDir(), keyHasherNoop)
-	utDirect := NewUpdateTree(ModeDirect, t.TempDir(), keyHasherNoop)
-	utUpdate1 := NewUpdateTree(ModeUpdate, t.TempDir(), keyHasherNoop)
-	utDirect1 := NewUpdateTree(ModeDirect, t.TempDir(), keyHasherNoop)
+func TestUpdates_TouchPlainKey(t *testing.T) {
+	utUpdate := NewUpdates(ModeUpdate, t.TempDir(), keyHasherNoop)
+	utDirect := NewUpdates(ModeDirect, t.TempDir(), keyHasherNoop)
+	utUpdate1 := NewUpdates(ModeUpdate, t.TempDir(), keyHasherNoop)
+	utDirect1 := NewUpdates(ModeDirect, t.TempDir(), keyHasherNoop)
 
 	type tc struct {
 		key []byte

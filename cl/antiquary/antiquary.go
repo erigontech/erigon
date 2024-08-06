@@ -18,24 +18,26 @@ package antiquary
 
 import (
 	"context"
+	"io/ioutil"
 	"math"
+	"strings"
 	"sync/atomic"
 	"time"
 
 	"golang.org/x/sync/semaphore"
 
-	"github.com/ledgerwatch/erigon-lib/log/v3"
+	"github.com/erigontech/erigon-lib/log/v3"
 
-	"github.com/ledgerwatch/erigon-lib/common/datadir"
-	"github.com/ledgerwatch/erigon-lib/downloader/snaptype"
-	proto_downloader "github.com/ledgerwatch/erigon-lib/gointerfaces/downloaderproto"
-	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon/cl/clparams"
-	"github.com/ledgerwatch/erigon/cl/persistence/beacon_indicies"
-	"github.com/ledgerwatch/erigon/cl/persistence/blob_storage"
-	state_accessors "github.com/ledgerwatch/erigon/cl/persistence/state"
-	"github.com/ledgerwatch/erigon/cl/phase1/core/state"
-	"github.com/ledgerwatch/erigon/turbo/snapshotsync/freezeblocks"
+	"github.com/erigontech/erigon-lib/common/datadir"
+	"github.com/erigontech/erigon-lib/downloader/snaptype"
+	proto_downloader "github.com/erigontech/erigon-lib/gointerfaces/downloaderproto"
+	"github.com/erigontech/erigon-lib/kv"
+	"github.com/erigontech/erigon/cl/clparams"
+	"github.com/erigontech/erigon/cl/persistence/beacon_indicies"
+	"github.com/erigontech/erigon/cl/persistence/blob_storage"
+	state_accessors "github.com/erigontech/erigon/cl/persistence/state"
+	"github.com/erigontech/erigon/cl/phase1/core/state"
+	"github.com/erigontech/erigon/turbo/snapshotsync/freezeblocks"
 )
 
 const safetyMargin = 2_000 // We retire snapshots 2k blocks after the finalized head
@@ -88,6 +90,25 @@ func NewAntiquary(ctx context.Context, blobStorage blob_storage.BlobStorage, gen
 	}
 }
 
+// Check if the snapshot directory has beacon blocks files aka "contains beaconblock" and has a ".seg" extension over its first layer
+func doesSnapshotDirHaveBeaconBlocksFiles(snapshotDir string) bool {
+	// Iterate over the files in the snapshot directory
+	files, err := ioutil.ReadDir(snapshotDir)
+	if err != nil {
+		return false
+	}
+	for _, file := range files {
+		// Check if the file has a ".seg" extension
+		if file.IsDir() {
+			continue
+		}
+		if strings.Contains(file.Name(), "beaconblock") && strings.HasSuffix(file.Name(), ".seg") {
+			return true
+		}
+	}
+	return false
+}
+
 // Antiquate is the function that starts transactions seeding and shit, very cool but very shit too as a name.
 func (a *Antiquary) Loop() error {
 	if a.downloader == nil || !a.blocks {
@@ -103,8 +124,9 @@ func (a *Antiquary) Loop() error {
 	}
 	reCheckTicker := time.NewTicker(3 * time.Second)
 	defer reCheckTicker.Stop()
+
 	// Fist part of the antiquate is to download caplin snapshots
-	for !statsReply.Completed {
+	for (!statsReply.Completed || !doesSnapshotDirHaveBeaconBlocksFiles(a.dirs.Snap)) && !a.backfilled.Load() {
 		select {
 		case <-reCheckTicker.C:
 			statsReply, err = a.downloader.Stats(a.ctx, &proto_downloader.StatsRequest{})
@@ -208,6 +230,7 @@ func (a *Antiquary) Loop() error {
 			if !a.backfilled.Load() {
 				continue
 			}
+
 			var (
 				from uint64
 				to   uint64

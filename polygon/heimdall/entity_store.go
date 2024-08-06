@@ -22,9 +22,10 @@ import (
 	"encoding/json"
 	"sync"
 
-	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon-lib/kv/stream"
-	"github.com/ledgerwatch/erigon/polygon/polygoncommon"
+	"github.com/erigontech/erigon-lib/common/generics"
+	"github.com/erigontech/erigon-lib/kv"
+	"github.com/erigontech/erigon-lib/kv/stream"
+	"github.com/erigontech/erigon/polygon/polygoncommon"
 )
 
 var databaseTablesCfg = kv.TableCfg{
@@ -36,24 +37,19 @@ var databaseTablesCfg = kv.TableCfg{
 type EntityStore[TEntity Entity] interface {
 	Prepare(ctx context.Context) error
 	Close()
-	GetLastEntityId(ctx context.Context) (uint64, bool, error)
-	GetLastEntity(ctx context.Context) (TEntity, error)
-	GetEntity(ctx context.Context, id uint64) (TEntity, error)
+	LastEntityId(ctx context.Context) (uint64, bool, error)
+	LastEntity(ctx context.Context) (TEntity, bool, error)
+	Entity(ctx context.Context, id uint64) (TEntity, bool, error)
 	PutEntity(ctx context.Context, id uint64, entity TEntity) error
-	FindByBlockNum(ctx context.Context, blockNum uint64) (TEntity, error)
-	RangeFromId(ctx context.Context, startId uint64) ([]TEntity, error)
 	RangeFromBlockNum(ctx context.Context, startBlockNum uint64) ([]TEntity, error)
 }
 
 type RangeIndexFactory func(ctx context.Context) (*RangeIndex, error)
 
 type mdbxEntityStore[TEntity Entity] struct {
-	db    *polygoncommon.Database
-	label kv.Label
-	table string
-
-	makeEntity func() TEntity
-
+	db                       *polygoncommon.Database
+	table                    string
+	makeEntity               func() TEntity
 	blockNumToIdIndexFactory RangeIndexFactory
 	blockNumToIdIndex        *RangeIndex
 	prepareOnce              sync.Once
@@ -61,18 +57,14 @@ type mdbxEntityStore[TEntity Entity] struct {
 
 func newMdbxEntityStore[TEntity Entity](
 	db *polygoncommon.Database,
-	label kv.Label,
 	table string,
 	makeEntity func() TEntity,
 	blockNumToIdIndexFactory RangeIndexFactory,
 ) *mdbxEntityStore[TEntity] {
 	return &mdbxEntityStore[TEntity]{
-		db:    db,
-		label: label,
-		table: table,
-
-		makeEntity: makeEntity,
-
+		db:                       db,
+		table:                    table,
+		makeEntity:               makeEntity,
 		blockNumToIdIndexFactory: blockNumToIdIndexFactory,
 	}
 }
@@ -80,7 +72,7 @@ func newMdbxEntityStore[TEntity Entity](
 func (s *mdbxEntityStore[TEntity]) Prepare(ctx context.Context) error {
 	var err error
 	s.prepareOnce.Do(func() {
-		err = s.db.OpenOnce(ctx, s.label, databaseTablesCfg)
+		err = s.db.OpenOnce(ctx)
 		if err != nil {
 			return
 		}
@@ -98,7 +90,7 @@ func (s *mdbxEntityStore[TEntity]) Close() {
 	s.blockNumToIdIndex.Close()
 }
 
-func (s *mdbxEntityStore[TEntity]) GetLastEntityId(ctx context.Context) (uint64, bool, error) {
+func (s *mdbxEntityStore[TEntity]) LastEntityId(ctx context.Context) (uint64, bool, error) {
 	tx, err := s.db.BeginRo(ctx)
 	if err != nil {
 		return 0, false, err
@@ -123,24 +115,16 @@ func (s *mdbxEntityStore[TEntity]) GetLastEntityId(ctx context.Context) (uint64,
 	return entityStoreKeyParse(lastKey), true, nil
 }
 
-// Zero value of any type T
-// https://stackoverflow.com/questions/70585852/return-default-value-for-generic-type)
-// https://go.dev/ref/spec#The_zero_value
-func Zero[T any]() T {
-	var value T
-	return value
-}
-
-func (s *mdbxEntityStore[TEntity]) GetLastEntity(ctx context.Context) (TEntity, error) {
-	id, ok, err := s.GetLastEntityId(ctx)
+func (s *mdbxEntityStore[TEntity]) LastEntity(ctx context.Context) (TEntity, bool, error) {
+	id, ok, err := s.LastEntityId(ctx)
 	if err != nil {
-		return Zero[TEntity](), err
+		return generics.Zero[TEntity](), false, err
 	}
 	// not found
 	if !ok {
-		return Zero[TEntity](), nil
+		return generics.Zero[TEntity](), false, nil
 	}
-	return s.GetEntity(ctx, id)
+	return s.Entity(ctx, id)
 }
 
 func entityStoreKey(id uint64) [8]byte {
@@ -156,29 +140,30 @@ func entityStoreKeyParse(key []byte) uint64 {
 func (s *mdbxEntityStore[TEntity]) entityUnmarshalJSON(jsonBytes []byte) (TEntity, error) {
 	entity := s.makeEntity()
 	if err := json.Unmarshal(jsonBytes, entity); err != nil {
-		return Zero[TEntity](), err
+		return generics.Zero[TEntity](), err
 	}
 	return entity, nil
 }
 
-func (s *mdbxEntityStore[TEntity]) GetEntity(ctx context.Context, id uint64) (TEntity, error) {
+func (s *mdbxEntityStore[TEntity]) Entity(ctx context.Context, id uint64) (TEntity, bool, error) {
 	tx, err := s.db.BeginRo(ctx)
 	if err != nil {
-		return Zero[TEntity](), err
+		return generics.Zero[TEntity](), false, err
 	}
 	defer tx.Rollback()
 
 	key := entityStoreKey(id)
 	jsonBytes, err := tx.GetOne(s.table, key[:])
 	if err != nil {
-		return Zero[TEntity](), err
+		return generics.Zero[TEntity](), false, err
 	}
 	// not found
 	if jsonBytes == nil {
-		return Zero[TEntity](), nil
+		return generics.Zero[TEntity](), false, nil
 	}
 
-	return s.entityUnmarshalJSON(jsonBytes)
+	val, err := s.entityUnmarshalJSON(jsonBytes)
+	return val, true, err
 }
 
 func (s *mdbxEntityStore[TEntity]) PutEntity(ctx context.Context, id uint64, entity TEntity) error {
@@ -203,19 +188,6 @@ func (s *mdbxEntityStore[TEntity]) PutEntity(ctx context.Context, id uint64, ent
 
 	// update blockNumToIdIndex
 	return s.blockNumToIdIndex.Put(ctx, entity.BlockNumRange(), id)
-}
-
-func (s *mdbxEntityStore[TEntity]) FindByBlockNum(ctx context.Context, blockNum uint64) (TEntity, error) {
-	id, err := s.blockNumToIdIndex.Lookup(ctx, blockNum)
-	if err != nil {
-		return Zero[TEntity](), err
-	}
-	// not found
-	if id == 0 {
-		return Zero[TEntity](), nil
-	}
-
-	return s.GetEntity(ctx, id)
 }
 
 func (s *mdbxEntityStore[TEntity]) RangeFromId(ctx context.Context, startId uint64) ([]TEntity, error) {

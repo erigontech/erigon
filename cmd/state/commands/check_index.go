@@ -17,8 +17,8 @@
 package commands
 
 import (
-	"github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon/cmd/state/verify"
+	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon/cmd/state/verify"
 	"github.com/spf13/cobra"
 )
 

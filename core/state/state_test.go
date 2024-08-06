@@ -28,21 +28,21 @@ import (
 	"github.com/stretchr/testify/require"
 	checker "gopkg.in/check.v1"
 
-	"github.com/ledgerwatch/erigon-lib/chain"
-	"github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/common/datadir"
-	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon-lib/kv/memdb"
-	"github.com/ledgerwatch/erigon-lib/kv/rawdbv3"
-	"github.com/ledgerwatch/erigon-lib/kv/temporal"
-	"github.com/ledgerwatch/erigon-lib/log/v3"
-	"github.com/ledgerwatch/erigon-lib/state"
-	stateLib "github.com/ledgerwatch/erigon-lib/state"
+	"github.com/erigontech/erigon-lib/chain"
+	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common/datadir"
+	"github.com/erigontech/erigon-lib/kv"
+	"github.com/erigontech/erigon-lib/kv/memdb"
+	"github.com/erigontech/erigon-lib/kv/rawdbv3"
+	"github.com/erigontech/erigon-lib/kv/temporal"
+	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon-lib/state"
+	stateLib "github.com/erigontech/erigon-lib/state"
 
-	"github.com/ledgerwatch/erigon/core/rawdb"
-	"github.com/ledgerwatch/erigon/core/tracing"
-	"github.com/ledgerwatch/erigon/core/types/accounts"
-	"github.com/ledgerwatch/erigon/crypto"
+	"github.com/erigontech/erigon/core/rawdb"
+	"github.com/erigontech/erigon/core/tracing"
+	"github.com/erigontech/erigon/core/types/accounts"
+	"github.com/erigontech/erigon/crypto"
 )
 
 var toAddr = common.BytesToAddress
@@ -339,8 +339,8 @@ func compareStateObjects(so0, so1 *stateObject, t *testing.T) {
 	if so0.data.Root != so1.data.Root {
 		t.Errorf("Root mismatch: have %x, want %x", so0.data.Root[:], so1.data.Root[:])
 	}
-	if !bytes.Equal(so0.CodeHash(), so1.CodeHash()) {
-		t.Fatalf("CodeHash mismatch: have %v, want %v", so0.CodeHash(), so1.CodeHash())
+	if so0.data.CodeHash != so1.data.CodeHash {
+		t.Fatalf("CodeHash mismatch: have %v, want %v", so0.data.CodeHash, so1.data.CodeHash)
 	}
 	if !bytes.Equal(so0.code, so1.code) {
 		t.Fatalf("Code mismatch: have %v, want %v", so0.code, so1.code)

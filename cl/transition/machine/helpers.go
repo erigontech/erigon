@@ -17,9 +17,9 @@
 package machine
 
 import (
-	"github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon/cl/abstract"
-	"github.com/ledgerwatch/erigon/cl/phase1/core/state"
+	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon/cl/abstract"
+	"github.com/erigontech/erigon/cl/phase1/core/state"
 )
 
 func executionEnabled(s abstract.BeaconState, blockHash common.Hash) bool {

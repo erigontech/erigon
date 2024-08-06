@@ -26,16 +26,16 @@ import (
 
 	"golang.org/x/sync/semaphore"
 
-	"github.com/ledgerwatch/erigon-lib/log/v3"
+	"github.com/erigontech/erigon-lib/log/v3"
 
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon/cmd/observer/database"
-	"github.com/ledgerwatch/erigon/cmd/observer/observer/node_utils"
-	"github.com/ledgerwatch/erigon/cmd/observer/observer/sentry_candidates"
-	"github.com/ledgerwatch/erigon/cmd/observer/utils"
-	"github.com/ledgerwatch/erigon/core/forkid"
-	"github.com/ledgerwatch/erigon/p2p/enode"
-	"github.com/ledgerwatch/erigon/params"
+	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon/cmd/observer/database"
+	"github.com/erigontech/erigon/cmd/observer/observer/node_utils"
+	"github.com/erigontech/erigon/cmd/observer/observer/sentry_candidates"
+	"github.com/erigontech/erigon/cmd/observer/utils"
+	"github.com/erigontech/erigon/core/forkid"
+	"github.com/erigontech/erigon/p2p/enode"
+	"github.com/erigontech/erigon/params"
 )
 
 type Crawler struct {

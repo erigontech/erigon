@@ -25,27 +25,26 @@ import (
 	"sync"
 	"time"
 
-	"github.com/ledgerwatch/secp256k1"
+	"github.com/erigontech/secp256k1"
 
-	"github.com/ledgerwatch/erigon-lib/log/v3"
+	"github.com/erigontech/erigon-lib/chain"
+	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common/hexutility"
+	"github.com/erigontech/erigon-lib/common/length"
+	"github.com/erigontech/erigon-lib/etl"
+	"github.com/erigontech/erigon-lib/kv"
+	"github.com/erigontech/erigon-lib/kv/dbutils"
+	"github.com/erigontech/erigon-lib/log/v3"
 
-	"github.com/ledgerwatch/erigon-lib/chain"
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/common/hexutility"
-	"github.com/ledgerwatch/erigon-lib/common/length"
-	"github.com/ledgerwatch/erigon-lib/etl"
-	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon-lib/kv/dbutils"
-
-	"github.com/ledgerwatch/erigon/common/debug"
-	"github.com/ledgerwatch/erigon/consensus"
-	"github.com/ledgerwatch/erigon/core/rawdb"
-	"github.com/ledgerwatch/erigon/core/types"
-	"github.com/ledgerwatch/erigon/eth/ethconfig"
-	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
-	"github.com/ledgerwatch/erigon/ethdb/prune"
-	"github.com/ledgerwatch/erigon/turbo/services"
-	"github.com/ledgerwatch/erigon/turbo/stages/headerdownload"
+	"github.com/erigontech/erigon/common/debug"
+	"github.com/erigontech/erigon/consensus"
+	"github.com/erigontech/erigon/core/rawdb"
+	"github.com/erigontech/erigon/core/types"
+	"github.com/erigontech/erigon/eth/ethconfig"
+	"github.com/erigontech/erigon/eth/stagedsync/stages"
+	"github.com/erigontech/erigon/ethdb/prune"
+	"github.com/erigontech/erigon/turbo/services"
+	"github.com/erigontech/erigon/turbo/stages/headerdownload"
 )
 
 type SendersCfg struct {
@@ -61,11 +60,10 @@ type SendersCfg struct {
 	chainConfig     *chain.Config
 	hd              *headerdownload.HeaderDownload
 	blockReader     services.FullBlockReader
-	loopBreakCheck  func(int) bool
 	syncCfg         ethconfig.Sync
 }
 
-func StageSendersCfg(db kv.RwDB, chainCfg *chain.Config, syncCfg ethconfig.Sync, badBlockHalt bool, tmpdir string, prune prune.Mode, blockReader services.FullBlockReader, hd *headerdownload.HeaderDownload, loopBreakCheck func(int) bool) SendersCfg {
+func StageSendersCfg(db kv.RwDB, chainCfg *chain.Config, syncCfg ethconfig.Sync, badBlockHalt bool, tmpdir string, prune prune.Mode, blockReader services.FullBlockReader, hd *headerdownload.HeaderDownload) SendersCfg {
 	const sendersBatchSize = 10000
 	const sendersBlockSize = 4096
 
@@ -82,13 +80,12 @@ func StageSendersCfg(db kv.RwDB, chainCfg *chain.Config, syncCfg ethconfig.Sync,
 		prune:           prune,
 		hd:              hd,
 		blockReader:     blockReader,
-		loopBreakCheck:  loopBreakCheck,
 		syncCfg:         syncCfg,
 	}
 }
 
 func SpawnRecoverSendersStage(cfg SendersCfg, s *StageState, u Unwinder, tx kv.RwTx, toBlock uint64, ctx context.Context, logger log.Logger) error {
-	if cfg.blockReader.FreezingCfg().Enabled && s.BlockNumber < cfg.blockReader.FrozenBlocks() {
+	if s.BlockNumber < cfg.blockReader.FrozenBlocks() {
 		s.BlockNumber = cfg.blockReader.FrozenBlocks()
 	}
 
@@ -215,10 +212,6 @@ Loop:
 		blockHash := libcommon.BytesToHash(v)
 
 		if blockNumber > to {
-			break
-		}
-
-		if cfg.loopBreakCheck != nil && cfg.loopBreakCheck(int(blockNumber-startFrom)) {
 			break
 		}
 
@@ -414,14 +407,8 @@ func PruneSendersStage(s *PruneState, tx kv.RwTx, cfg SendersCfg, ctx context.Co
 		}
 		defer tx.Rollback()
 	}
-	if cfg.blockReader.FreezingCfg().Enabled {
-		// noop. in this case senders will be deleted by BlockRetire.PruneAncientBlocks after data-freezing.
-	} else if cfg.prune.TxIndex.Enabled() {
-		to := cfg.prune.TxIndex.PruneTo(s.ForwardProgress)
-		if err = rawdb.PruneTable(tx, kv.Senders, to, ctx, 100); err != nil {
-			return err
-		}
-	}
+
+	// noop. in this case senders will be deleted by BlockRetire.PruneAncientBlocks after data-freezing.
 
 	if !useExternalTx {
 		if err = tx.Commit(); err != nil {

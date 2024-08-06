@@ -24,13 +24,13 @@ import (
 
 	"github.com/holiman/uint256"
 
-	"github.com/ledgerwatch/erigon-lib/chain"
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/common/fixedgas"
-	rlp2 "github.com/ledgerwatch/erigon-lib/rlp"
-	types2 "github.com/ledgerwatch/erigon-lib/types"
+	"github.com/erigontech/erigon-lib/chain"
+	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common/fixedgas"
+	rlp2 "github.com/erigontech/erigon-lib/rlp"
+	types2 "github.com/erigontech/erigon-lib/types"
 
-	"github.com/ledgerwatch/erigon/rlp"
+	"github.com/erigontech/erigon/rlp"
 )
 
 type BlobTx struct {
@@ -82,7 +82,7 @@ func (stx *BlobTx) AsMessage(s Signer, baseFee *big.Int, rules *chain.Rules) (Me
 	if baseFee != nil {
 		overflow := msg.gasPrice.SetFromBig(baseFee)
 		if overflow {
-			return msg, fmt.Errorf("gasPrice higher than 2^256-1")
+			return msg, errors.New("gasPrice higher than 2^256-1")
 		}
 	}
 	msg.gasPrice.Add(&msg.gasPrice, stx.Tip)
@@ -361,7 +361,7 @@ func (stx *BlobTx) DecodeRLP(s *rlp.Stream) error {
 		return err
 	}
 	if len(stx.BlobVersionedHashes) == 0 {
-		return fmt.Errorf("a blob stx must contain at least one blob")
+		return errors.New("a blob stx must contain at least one blob")
 	}
 	// decode V
 	if b, err = s.Uint256Bytes(); err != nil {

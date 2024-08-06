@@ -20,25 +20,26 @@
 package eth_test
 
 import (
+	"github.com/erigontech/erigon/turbo/jsonrpc/receipts"
 	"math/big"
 	"testing"
 
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
 
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/direct"
-	sentry "github.com/ledgerwatch/erigon-lib/gointerfaces/sentryproto"
-	"github.com/ledgerwatch/erigon-lib/kv"
+	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/direct"
+	sentry "github.com/erigontech/erigon-lib/gointerfaces/sentryproto"
+	"github.com/erigontech/erigon-lib/kv"
 
-	"github.com/ledgerwatch/erigon/core"
-	"github.com/ledgerwatch/erigon/core/rawdb"
-	"github.com/ledgerwatch/erigon/core/types"
-	"github.com/ledgerwatch/erigon/crypto"
-	"github.com/ledgerwatch/erigon/eth/protocols/eth"
-	"github.com/ledgerwatch/erigon/params"
-	"github.com/ledgerwatch/erigon/rlp"
-	"github.com/ledgerwatch/erigon/turbo/stages/mock"
+	"github.com/erigontech/erigon/core"
+	"github.com/erigontech/erigon/core/rawdb"
+	"github.com/erigontech/erigon/core/types"
+	"github.com/erigontech/erigon/crypto"
+	"github.com/erigontech/erigon/eth/protocols/eth"
+	"github.com/erigontech/erigon/params"
+	"github.com/erigontech/erigon/rlp"
+	"github.com/erigontech/erigon/turbo/stages/mock"
 )
 
 var (
@@ -87,7 +88,7 @@ func TestGetBlockReceipts(t *testing.T) {
 	}
 	// Assemble the test environment
 	m := mockWithGenerator(t, 4, generator)
-
+	receiptsGetter := receipts.NewGenerator(32, m.BlockReader, m.Engine)
 	// Collect the hashes to request, and the response to expect
 	var (
 		hashes   []libcommon.Hash
@@ -100,13 +101,16 @@ func TestGetBlockReceipts(t *testing.T) {
 
 			hashes = append(hashes, block.Hash())
 			// If known, encode and queue for response packet
-			r := rawdb.ReadReceipts(tx, block, nil)
+
+			r, err := receiptsGetter.GetReceipts(m.Ctx, m.ChainConfig, tx, block)
+			require.NoError(t, err)
 			encoded, err := rlp.EncodeToBytes(r)
 			require.NoError(t, err)
 			receipts = append(receipts, encoded)
 		}
 		return nil
 	})
+
 	require.NoError(t, err)
 	b, err := rlp.EncodeToBytes(eth.GetReceiptsPacket66{RequestId: 1, GetReceiptsPacket: hashes})
 	require.NoError(t, err)
@@ -121,14 +125,10 @@ func TestGetBlockReceipts(t *testing.T) {
 
 	expect, err := rlp.EncodeToBytes(eth.ReceiptsRLPPacket66{RequestId: 1, ReceiptsRLPPacket: receipts})
 	require.NoError(t, err)
-	if m.HistoryV3 {
-		// GetReceiptsMsg disabled for historyV3
-	} else {
-		m.ReceiveWg.Wait()
-		sent := m.SentMessage(0)
-		require.Equal(t, eth.ToProto[m.SentryClient.Protocol()][eth.ReceiptsMsg], sent.Id)
-		require.Equal(t, expect, sent.Data)
-	}
+	m.ReceiveWg.Wait()
+	sent := m.SentMessage(0)
+	require.Equal(t, eth.ToProto[m.SentryClient.Protocol()][eth.ReceiptsMsg], sent.Id)
+	require.Equal(t, expect, sent.Data)
 }
 
 // newTestBackend creates a chain with a number of explicitly defined blocks and

@@ -20,17 +20,17 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/ledgerwatch/erigon-lib/chain"
-	"github.com/ledgerwatch/erigon-lib/common/datadir"
-	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon-lib/kv/backup"
-	"github.com/ledgerwatch/erigon-lib/log/v3"
-	"github.com/ledgerwatch/erigon-lib/state"
-	"github.com/ledgerwatch/erigon/core/rawdb"
-	"github.com/ledgerwatch/erigon/core/rawdb/blockio"
-	"github.com/ledgerwatch/erigon/eth/stagedsync"
-	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
-	"github.com/ledgerwatch/erigon/turbo/services"
+	"github.com/erigontech/erigon-lib/chain"
+	"github.com/erigontech/erigon-lib/common/datadir"
+	"github.com/erigontech/erigon-lib/kv"
+	"github.com/erigontech/erigon-lib/kv/backup"
+	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon-lib/state"
+	"github.com/erigontech/erigon/core/rawdb"
+	"github.com/erigontech/erigon/core/rawdb/blockio"
+	"github.com/erigontech/erigon/eth/stagedsync"
+	"github.com/erigontech/erigon/eth/stagedsync/stages"
+	"github.com/erigontech/erigon/turbo/services"
 )
 
 func ResetState(db kv.RwDB, ctx context.Context, chain string, tmpDir string, logger log.Logger) error {
@@ -86,7 +86,7 @@ func ResetBlocks(tx kv.RwTx, db kv.RoDB, agg *state.Aggregator, br services.Full
 		return err
 	}
 
-	if br.FreezingCfg().Enabled && br.FrozenBlocks() > 0 {
+	if br.FrozenBlocks() > 0 {
 		logger.Info("filling db from snapshots", "blocks", br.FrozenBlocks())
 		if err := stagedsync.FillDBFromSnapshots("filling_db_from_snapshots", context.Background(), tx, dirs, br, agg, logger); err != nil {
 			return err
@@ -136,7 +136,7 @@ func ResetExec(ctx context.Context, db kv.RwDB, chain string, tmpDir string, log
 	cleanupList = append(cleanupList, stateV3Buckets...)
 
 	return db.Update(ctx, func(tx kv.RwTx) error {
-		if err := clearStageProgress(tx, stages.Execution, stages.HashState, stages.IntermediateHashes); err != nil {
+		if err := clearStageProgress(tx, stages.Execution); err != nil {
 			return err
 		}
 
@@ -162,10 +162,8 @@ func ResetTxLookup(tx kv.RwTx) error {
 }
 
 var Tables = map[stages.SyncStage][]string{
-	stages.HashState:          {kv.HashedAccounts, kv.HashedStorage, kv.ContractCode},
-	stages.IntermediateHashes: {kv.TrieOfAccounts, kv.TrieOfStorage},
-	stages.CustomTrace:        {},
-	stages.Finish:             {},
+	stages.CustomTrace: {},
+	stages.Finish:      {},
 }
 var stateBuckets = []string{
 	kv.Epoch, kv.PendingEpoch, kv.BorReceipts,

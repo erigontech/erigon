@@ -18,16 +18,17 @@ package cltypes
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/types/clonable"
-	"github.com/ledgerwatch/erigon-lib/types/ssz"
+	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/types/clonable"
+	"github.com/erigontech/erigon-lib/types/ssz"
 
-	"github.com/ledgerwatch/erigon/cl/clparams"
-	"github.com/ledgerwatch/erigon/cl/cltypes/solid"
-	"github.com/ledgerwatch/erigon/cl/merkle_tree"
-	ssz2 "github.com/ledgerwatch/erigon/cl/ssz"
+	"github.com/erigontech/erigon/cl/clparams"
+	"github.com/erigontech/erigon/cl/cltypes/solid"
+	"github.com/erigontech/erigon/cl/merkle_tree"
+	ssz2 "github.com/erigontech/erigon/cl/ssz"
 )
 
 var (
@@ -369,7 +370,7 @@ func (b *BeaconBody) ExecutionPayloadMerkleProof() ([][32]byte, error) {
 
 func (b *BeaconBody) KzgCommitmentMerkleProof(index int) ([][32]byte, error) {
 	if index >= b.BlobKzgCommitments.Len() {
-		return nil, fmt.Errorf("index out of range")
+		return nil, errors.New("index out of range")
 	}
 	kzgCommitmentsProof, err := merkle_tree.MerkleProof(4, 11, b.getSchema(false)...)
 	if err != nil {

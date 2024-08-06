@@ -19,6 +19,7 @@ package commitment
 import (
 	"encoding/binary"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"slices"
 	"testing"
@@ -26,8 +27,8 @@ import (
 	"github.com/holiman/uint256"
 	"golang.org/x/crypto/sha3"
 
-	"github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/common/length"
+	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common/length"
 )
 
 // In memory commitment and state to use with the tests
@@ -84,7 +85,7 @@ func (ms *MockState) GetAccount(plainKey []byte, cell *Cell) error {
 	}
 	if ex.Flags&StorageUpdate != 0 {
 		ms.t.Logf("GetAccount reading storage item for key [%x]", plainKey)
-		return fmt.Errorf("storage read by GetAccount")
+		return errors.New("storage read by GetAccount")
 	}
 	if ex.Flags&DeleteUpdate != 0 {
 		ms.t.Fatalf("GetAccount reading deleted account for key [%x]", plainKey)

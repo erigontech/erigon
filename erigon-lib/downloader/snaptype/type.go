@@ -28,14 +28,14 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/ledgerwatch/erigon-lib/chain"
-	"github.com/ledgerwatch/erigon-lib/common/background"
-	"github.com/ledgerwatch/erigon-lib/common/dbg"
-	"github.com/ledgerwatch/erigon-lib/common/dir"
-	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon-lib/log/v3"
-	"github.com/ledgerwatch/erigon-lib/recsplit"
-	"github.com/ledgerwatch/erigon-lib/seg"
+	"github.com/erigontech/erigon-lib/chain"
+	"github.com/erigontech/erigon-lib/common/background"
+	"github.com/erigontech/erigon-lib/common/dbg"
+	"github.com/erigontech/erigon-lib/common/dir"
+	"github.com/erigontech/erigon-lib/kv"
+	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon-lib/recsplit"
+	"github.com/erigontech/erigon-lib/seg"
 )
 
 type Version uint8
@@ -52,7 +52,7 @@ func ParseVersion(v string) (Version, error) {
 	}
 
 	if len(v) == 0 {
-		return 0, fmt.Errorf("invalid version: no prefix")
+		return 0, errors.New("invalid version: no prefix")
 	}
 
 	return 0, fmt.Errorf("invalid version prefix: %s", v[0:1])

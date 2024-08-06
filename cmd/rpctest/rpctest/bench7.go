@@ -17,11 +17,12 @@
 package rpctest
 
 import (
+	"errors"
 	"fmt"
 	"net/http"
 	"time"
 
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	libcommon "github.com/erigontech/erigon-lib/common"
 )
 
 func Bench7(erigonURL, gethURL string) error {
@@ -90,7 +91,7 @@ func Bench7(erigonURL, gethURL string) error {
 		printStorageRange(sm)
 		fmt.Printf("================smg\n")
 		printStorageRange(smg)
-		return fmt.Errorf("storage are different")
+		return errors.New("storage are different")
 	}
 	fmt.Printf("storageRanges: %d\n", len(sm))
 	return nil

@@ -29,14 +29,14 @@ import (
 
 	"github.com/tidwall/btree"
 
-	"github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/common/background"
-	"github.com/ledgerwatch/erigon-lib/common/dir"
-	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon-lib/log/v3"
-	"github.com/ledgerwatch/erigon-lib/recsplit"
-	"github.com/ledgerwatch/erigon-lib/recsplit/eliasfano32"
-	"github.com/ledgerwatch/erigon-lib/seg"
+	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common/background"
+	"github.com/erigontech/erigon-lib/common/dir"
+	"github.com/erigontech/erigon-lib/kv"
+	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon-lib/recsplit"
+	"github.com/erigontech/erigon-lib/recsplit/eliasfano32"
+	"github.com/erigontech/erigon-lib/seg"
 )
 
 func (d *Domain) dirtyFilesEndTxNumMinimax() uint64 {
@@ -1189,7 +1189,7 @@ func (iit *InvertedIndexRoTx) garbage(merged *filesItem) (outs []*filesItem) {
 	return garbage(iit.ii.dirtyFiles, iit.files, merged)
 }
 
-func garbage(dirtyFiles *btree.BTreeG[*filesItem], visibleFiles []ctxItem, merged *filesItem) (outs []*filesItem) {
+func garbage(dirtyFiles *btree.BTreeG[*filesItem], visibleFiles []visibleFile, merged *filesItem) (outs []*filesItem) {
 	if merged == nil {
 		return
 	}
@@ -1212,7 +1212,7 @@ func garbage(dirtyFiles *btree.BTreeG[*filesItem], visibleFiles []ctxItem, merge
 	})
 	return outs
 }
-func hasCoverVisibleFile(visibleFiles []ctxItem, item *filesItem) bool {
+func hasCoverVisibleFile(visibleFiles []visibleFile, item *filesItem) bool {
 	for _, f := range visibleFiles {
 		if item.isSubsetOf(f.src) {
 			return true

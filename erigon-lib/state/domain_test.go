@@ -33,21 +33,21 @@ import (
 	"testing"
 	"time"
 
-	datadir2 "github.com/ledgerwatch/erigon-lib/common/datadir"
-	"github.com/ledgerwatch/erigon-lib/kv/order"
-	"github.com/ledgerwatch/erigon-lib/kv/stream"
-	"github.com/ledgerwatch/erigon-lib/log/v3"
-	"github.com/ledgerwatch/erigon-lib/types"
+	datadir2 "github.com/erigontech/erigon-lib/common/datadir"
+	"github.com/erigontech/erigon-lib/kv/order"
+	"github.com/erigontech/erigon-lib/kv/stream"
+	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon-lib/types"
 
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
 	btree2 "github.com/tidwall/btree"
 
-	"github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/common/background"
-	"github.com/ledgerwatch/erigon-lib/common/length"
-	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon-lib/kv/mdbx"
+	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common/background"
+	"github.com/erigontech/erigon-lib/common/length"
+	"github.com/erigontech/erigon-lib/kv"
+	"github.com/erigontech/erigon-lib/kv/mdbx"
 )
 
 func testDbAndDomain(t *testing.T, logger log.Logger) (kv.RwDB, *Domain) {
@@ -83,7 +83,7 @@ func testDbAndDomainOfStep(t *testing.T, aggStep uint64, logger log.Logger) (kv.
 			iiCfg:             iiCfg{salt: &salt, dirs: dirs, db: db},
 			withLocalityIndex: false, withExistenceIndex: false, compression: CompressNone, historyLargeValues: true,
 		}}
-	d, err := NewDomain(cfg, aggStep, kv.AccountsDomain.String(), valsTable, historyKeysTable, historyValsTable, indexTable, nil, logger)
+	d, err := NewDomain(cfg, aggStep, kv.AccountsDomain, valsTable, historyKeysTable, historyValsTable, indexTable, nil, logger)
 	require.NoError(t, err)
 	d.DisableFsync()
 	d.compressWorkers = 1
@@ -1479,7 +1479,7 @@ func TestDomain_CanPruneAfterAggregation(t *testing.T) {
 
 	dc = d.BeginFilesRo()
 	can, untilStep = dc.canPruneDomainTables(tx, aggStep*stepToPrune)
-	require.False(t, can, "lattter step is not yet pruned")
+	require.False(t, can, "latter step is not yet pruned")
 	require.EqualValues(t, stepToPrune, untilStep)
 	dc.Close()
 

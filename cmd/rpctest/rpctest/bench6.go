@@ -21,7 +21,7 @@ import (
 	"net/http"
 	"time"
 
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	libcommon "github.com/erigontech/erigon-lib/common"
 )
 
 func Bench6(erigon_url string) error {

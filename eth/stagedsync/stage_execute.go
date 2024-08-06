@@ -18,36 +18,37 @@ package stagedsync
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
 	"github.com/c2h5oh/datasize"
 	"golang.org/x/sync/errgroup"
 
-	"github.com/ledgerwatch/erigon-lib/chain"
-	"github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/common/datadir"
-	"github.com/ledgerwatch/erigon-lib/common/dbg"
-	"github.com/ledgerwatch/erigon-lib/config3"
-	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon-lib/kv/rawdbv3"
-	"github.com/ledgerwatch/erigon-lib/kv/temporal"
-	"github.com/ledgerwatch/erigon-lib/log/v3"
-	libstate "github.com/ledgerwatch/erigon-lib/state"
-	"github.com/ledgerwatch/erigon-lib/wrap"
+	"github.com/erigontech/erigon-lib/chain"
+	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common/datadir"
+	"github.com/erigontech/erigon-lib/common/dbg"
+	"github.com/erigontech/erigon-lib/config3"
+	"github.com/erigontech/erigon-lib/kv"
+	"github.com/erigontech/erigon-lib/kv/rawdbv3"
+	"github.com/erigontech/erigon-lib/kv/temporal"
+	"github.com/erigontech/erigon-lib/log/v3"
+	libstate "github.com/erigontech/erigon-lib/state"
+	"github.com/erigontech/erigon-lib/wrap"
 
-	"github.com/ledgerwatch/erigon/consensus"
-	"github.com/ledgerwatch/erigon/core/rawdb"
-	"github.com/ledgerwatch/erigon/core/rawdb/rawdbhelpers"
-	"github.com/ledgerwatch/erigon/core/state"
-	"github.com/ledgerwatch/erigon/core/types"
-	"github.com/ledgerwatch/erigon/core/vm"
-	"github.com/ledgerwatch/erigon/eth/ethconfig"
-	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
-	"github.com/ledgerwatch/erigon/ethdb/prune"
-	"github.com/ledgerwatch/erigon/turbo/services"
-	"github.com/ledgerwatch/erigon/turbo/shards"
-	"github.com/ledgerwatch/erigon/turbo/silkworm"
+	"github.com/erigontech/erigon/consensus"
+	"github.com/erigontech/erigon/core/rawdb"
+	"github.com/erigontech/erigon/core/rawdb/rawdbhelpers"
+	"github.com/erigontech/erigon/core/state"
+	"github.com/erigontech/erigon/core/types"
+	"github.com/erigontech/erigon/core/vm"
+	"github.com/erigontech/erigon/eth/ethconfig"
+	"github.com/erigontech/erigon/eth/stagedsync/stages"
+	"github.com/erigontech/erigon/ethdb/prune"
+	"github.com/erigontech/erigon/turbo/services"
+	"github.com/erigontech/erigon/turbo/shards"
+	"github.com/erigontech/erigon/turbo/silkworm"
 )
 
 const (
@@ -80,7 +81,6 @@ type ExecuteBlockCfg struct {
 	historyV3 bool
 	syncCfg   ethconfig.Sync
 	genesis   *types.Genesis
-	agg       *libstate.Aggregator
 
 	silkworm        *silkworm.Silkworm
 	blockProduction bool
@@ -102,9 +102,12 @@ func StageExecuteBlocksCfg(
 	hd headerDownloader,
 	genesis *types.Genesis,
 	syncCfg ethconfig.Sync,
-	agg *libstate.Aggregator,
 	silkworm *silkworm.Silkworm,
 ) ExecuteBlockCfg {
+	if dirs.SnapDomain == "" {
+		panic("empty `dirs` variable")
+	}
+
 	return ExecuteBlockCfg{
 		db:           db,
 		prune:        pm,
@@ -121,7 +124,6 @@ func StageExecuteBlocksCfg(
 		genesis:      genesis,
 		historyV3:    true,
 		syncCfg:      syncCfg,
-		agg:          agg,
 		silkworm:     silkworm,
 	}
 }
@@ -154,7 +156,7 @@ func ExecBlockV3(s *StageState, u Unwinder, txc wrap.TxContainer, toBlock uint64
 	return nil
 }
 
-var ErrTooDeepUnwind = fmt.Errorf("too deep unwind")
+var ErrTooDeepUnwind = errors.New("too deep unwind")
 
 func unwindExec3(u *UnwindState, s *StageState, txc wrap.TxContainer, ctx context.Context, accumulator *shards.Accumulator, logger log.Logger) (err error) {
 	var domains *libstate.SharedDomains

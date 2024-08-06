@@ -38,13 +38,13 @@ import (
 	"golang.org/x/exp/maps"
 	"golang.org/x/sync/semaphore"
 
-	"github.com/ledgerwatch/erigon-lib/common/dbg"
-	"github.com/ledgerwatch/erigon-lib/common/dir"
-	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon-lib/kv/order"
-	"github.com/ledgerwatch/erigon-lib/kv/stream"
-	"github.com/ledgerwatch/erigon-lib/log/v3"
-	"github.com/ledgerwatch/erigon-lib/mmap"
+	"github.com/erigontech/erigon-lib/common/dbg"
+	"github.com/erigontech/erigon-lib/common/dir"
+	"github.com/erigontech/erigon-lib/kv"
+	"github.com/erigontech/erigon-lib/kv/order"
+	"github.com/erigontech/erigon-lib/kv/stream"
+	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon-lib/mmap"
 )
 
 const NonExistingDBI kv.DBI = 999_999_999
@@ -188,8 +188,10 @@ func (opts MdbxOpts) MapSize(sz datasize.ByteSize) MdbxOpts {
 	return opts
 }
 
-func (opts MdbxOpts) WriteMap() MdbxOpts {
-	opts.flags |= mdbx.WriteMap
+func (opts MdbxOpts) WriteMap(flag bool) MdbxOpts {
+	if flag {
+		opts.flags |= mdbx.WriteMap
+	}
 	return opts
 }
 func (opts MdbxOpts) LifoReclaim() MdbxOpts {
@@ -228,12 +230,10 @@ func PathDbMap() map[string]kv.RoDB {
 	return maps.Clone(pathDbMap)
 }
 
-var ErrDBDoesNotExists = fmt.Errorf("can't create database - because opening in `Accede` mode. probably another (main) process can create it")
+var ErrDBDoesNotExists = errors.New("can't create database - because opening in `Accede` mode. probably another (main) process can create it")
 
 func (opts MdbxOpts) Open(ctx context.Context) (kv.RwDB, error) {
-	if dbg.WriteMap() {
-		opts = opts.WriteMap() //nolint
-	}
+	opts = opts.WriteMap(dbg.WriteMap())
 	if dbg.DirtySpace() > 0 {
 		opts = opts.DirtySpace(dbg.DirtySpace()) //nolint
 	}
@@ -759,7 +759,7 @@ func (db *MdbxKV) BeginRo(ctx context.Context) (txn kv.Tx, err error) {
 	}
 
 	if !db.trackTxBegin() {
-		return nil, fmt.Errorf("db closed")
+		return nil, errors.New("db closed")
 	}
 
 	// will return nil err if context is cancelled (may appear to acquire the semaphore)
@@ -806,7 +806,7 @@ func (db *MdbxKV) beginRw(ctx context.Context, flags uint) (txn kv.RwTx, err err
 	}
 
 	if !db.trackTxBegin() {
-		return nil, fmt.Errorf("db closed")
+		return nil, errors.New("db closed")
 	}
 
 	runtime.LockOSThread()
@@ -1007,7 +1007,7 @@ func (tx *MdbxTx) CreateBucket(name string) error {
 		flags ^= kv.DupSort
 	}
 	if flags != 0 {
-		return fmt.Errorf("some not supported flag provided for bucket")
+		return errors.New("some not supported flag provided for bucket")
 	}
 
 	dbi, err = tx.tx.OpenDBI(name, nativeFlags, nil, nil)
@@ -1320,6 +1320,9 @@ func (tx *MdbxTx) DBSize() (uint64, error) {
 
 func (tx *MdbxTx) RwCursor(bucket string) (kv.RwCursor, error) {
 	b := tx.db.buckets[bucket]
+	if b.AutoDupSortKeysConversion {
+		return tx.stdCursor(bucket)
+	}
 
 	if b.Flags&kv.DupSort != 0 {
 		return tx.RwCursorDupSort(bucket)
@@ -1334,7 +1337,7 @@ func (tx *MdbxTx) Cursor(bucket string) (kv.Cursor, error) {
 
 func (tx *MdbxTx) stdCursor(bucket string) (kv.RwCursor, error) {
 	b := tx.db.buckets[bucket]
-	c := &MdbxCursor{bucketName: bucket, tx: tx, id: tx.ID, bucketCfg: b}
+	c := &MdbxCursor{bucketName: bucket, tx: tx, bucketCfg: b, id: tx.ID}
 	tx.ID++
 
 	var err error
@@ -1366,7 +1369,6 @@ func (tx *MdbxTx) CursorDupSort(bucket string) (kv.CursorDupSort, error) {
 // methods here help to see better pprof picture
 func (c *MdbxCursor) set(k []byte) ([]byte, []byte, error) { return c.c.Get(k, nil, mdbx.Set) }
 func (c *MdbxCursor) getCurrent() ([]byte, []byte, error)  { return c.c.Get(nil, nil, mdbx.GetCurrent) }
-func (c *MdbxCursor) first() ([]byte, []byte, error)       { return c.c.Get(nil, nil, mdbx.First) }
 func (c *MdbxCursor) next() ([]byte, []byte, error)        { return c.c.Get(nil, nil, mdbx.Next) }
 func (c *MdbxCursor) nextDup() ([]byte, []byte, error)     { return c.c.Get(nil, nil, mdbx.NextDup) }
 func (c *MdbxCursor) nextNoDup() ([]byte, []byte, error)   { return c.c.Get(nil, nil, mdbx.NextNoDup) }
@@ -1382,19 +1384,8 @@ func (c *MdbxCursor) getBoth(k, v []byte) ([]byte, error) {
 	_, v, err := c.c.Get(k, v, mdbx.GetBoth)
 	return v, err
 }
-func (c *MdbxCursor) setRange(k []byte) ([]byte, []byte, error) {
-	return c.c.Get(k, nil, mdbx.SetRange)
-}
 func (c *MdbxCursor) getBothRange(k, v []byte) ([]byte, error) {
 	_, v, err := c.c.Get(k, v, mdbx.GetBothRange)
-	return v, err
-}
-func (c *MdbxCursor) firstDup() ([]byte, error) {
-	_, v, err := c.c.Get(nil, nil, mdbx.FirstDup)
-	return v, err
-}
-func (c *MdbxCursor) lastDup() ([]byte, error) {
-	_, v, err := c.c.Get(nil, nil, mdbx.LastDup)
 	return v, err
 }
 
@@ -1417,16 +1408,22 @@ func (c *MdbxCursor) Last() ([]byte, []byte, error) {
 
 func (c *MdbxCursor) Seek(seek []byte) (k, v []byte, err error) {
 	if len(seek) == 0 {
-		k, v, err = c.first()
-	} else {
-		k, v, err = c.setRange(seek)
+		k, v, err = c.c.Get(nil, nil, mdbx.First)
+		if err != nil {
+			if mdbx.IsNotFound(err) {
+				return nil, nil, nil
+			}
+			return []byte{}, nil, fmt.Errorf("cursor.First: %w, bucket: %s, key: %x", err, c.bucketName, seek)
+		}
+		return k, v, nil
 	}
+
+	k, v, err = c.c.Get(seek, nil, mdbx.SetRange)
 	if err != nil {
 		if mdbx.IsNotFound(err) {
 			return nil, nil, nil
 		}
-		err = fmt.Errorf("failed MdbxKV cursor.seekInFiles(): %w, bucket: %s,  key: %x", err, c.bucketName, seek)
-		return []byte{}, nil, err
+		return []byte{}, nil, fmt.Errorf("cursor.SetRange: %w, bucket: %s, key: %x", err, c.bucketName, seek)
 	}
 
 	return k, v, nil
@@ -1577,7 +1574,7 @@ func (c *MdbxDupSortCursor) SeekBothRange(key, value []byte) ([]byte, error) {
 }
 
 func (c *MdbxDupSortCursor) FirstDup() ([]byte, error) {
-	v, err := c.firstDup()
+	_, v, err := c.c.Get(nil, nil, mdbx.FirstDup)
 	if err != nil {
 		if mdbx.IsNotFound(err) {
 			return nil, nil
@@ -1634,7 +1631,7 @@ func (c *MdbxDupSortCursor) PrevNoDup() ([]byte, []byte, error) {
 }
 
 func (c *MdbxDupSortCursor) LastDup() ([]byte, error) {
-	v, err := c.lastDup()
+	_, v, err := c.c.Get(nil, nil, mdbx.LastDup)
 	if err != nil {
 		if mdbx.IsNotFound(err) {
 			return nil, nil

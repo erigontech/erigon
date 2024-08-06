@@ -22,9 +22,9 @@ import (
 	"fmt"
 	"io"
 
-	"github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon-lib/log/v3"
+	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/kv"
+	"github.com/erigontech/erigon-lib/log/v3"
 )
 
 var (
@@ -177,6 +177,12 @@ func (d *DiagnosticClient) runSubStageListener(rootCtx context.Context) {
 }
 
 func (d *DiagnosticClient) GetCurrentSyncIdxs() CurrentSyncStagesIdxs {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	return d.getCurrentSyncIdxs()
+}
+
+func (d *DiagnosticClient) getCurrentSyncIdxs() CurrentSyncStagesIdxs {
 	currentIdxs := CurrentSyncStagesIdxs{
 		Stage:    -1,
 		SubStage: -1,

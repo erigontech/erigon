@@ -31,8 +31,8 @@ import (
 
 	"github.com/urfave/cli/v2"
 
-	"github.com/ledgerwatch/erigon-lib/common/dir"
-	"github.com/ledgerwatch/erigon/turbo/logging"
+	"github.com/erigontech/erigon-lib/common/dir"
+	"github.com/erigontech/erigon/turbo/logging"
 )
 
 func SetupLogsAccess(ctx *cli.Context, metricsMux *http.ServeMux) {
@@ -119,7 +119,7 @@ func writeLogsRead(w http.ResponseWriter, r *http.Request, dirPath string) {
 	}
 
 	if fileInfo.IsDir() {
-		http.Error(w, fmt.Sprintf("%s is a directory, needs to be a file", file), http.StatusInternalServerError)
+		http.Error(w, file+" is a directory, needs to be a file", http.StatusInternalServerError)
 		return
 	}
 

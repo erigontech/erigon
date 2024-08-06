@@ -18,10 +18,10 @@ package membatchwithdb
 
 import (
 	"bytes"
-	"fmt"
+	"errors"
 
-	"github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/kv"
 )
 
 type NextType int
@@ -107,7 +107,7 @@ func (m *memoryMutationCursor) getNextOnDb(t NextType) (key []byte, value []byte
 			return
 		}
 	default:
-		err = fmt.Errorf("invalid next type")
+		err = errors.New("invalid next type")
 		return
 	}
 
@@ -129,7 +129,7 @@ func (m *memoryMutationCursor) getNextOnDb(t NextType) (key []byte, value []byte
 				return
 			}
 		default:
-			err = fmt.Errorf("invalid next type")
+			err = errors.New("invalid next type")
 			return
 		}
 	}

@@ -20,13 +20,13 @@ import (
 	"context"
 	"testing"
 
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/gointerfaces"
-	remote "github.com/ledgerwatch/erigon-lib/gointerfaces/remoteproto"
-	types2 "github.com/ledgerwatch/erigon-lib/gointerfaces/typesproto"
+	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/gointerfaces"
+	remote "github.com/erigontech/erigon-lib/gointerfaces/remoteproto"
+	types2 "github.com/erigontech/erigon-lib/gointerfaces/typesproto"
 	"google.golang.org/grpc"
 
-	"github.com/ledgerwatch/erigon/turbo/shards"
+	"github.com/erigontech/erigon/turbo/shards"
 )
 
 var (

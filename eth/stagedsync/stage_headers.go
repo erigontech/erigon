@@ -26,27 +26,25 @@ import (
 
 	"github.com/c2h5oh/datasize"
 
-	"github.com/ledgerwatch/erigon-lib/log/v3"
+	"github.com/erigontech/erigon-lib/log/v3"
 
-	"github.com/ledgerwatch/erigon-lib/chain"
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/common/dbg"
-	"github.com/ledgerwatch/erigon-lib/common/hexutility"
-	"github.com/ledgerwatch/erigon-lib/diagnostics"
-	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon-lib/state"
-	"github.com/ledgerwatch/erigon/core/rawdb/blockio"
-	"github.com/ledgerwatch/erigon/eth/ethconfig"
-	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
-
-	"github.com/ledgerwatch/erigon/common"
-	"github.com/ledgerwatch/erigon/core/rawdb"
-	"github.com/ledgerwatch/erigon/core/types"
-	"github.com/ledgerwatch/erigon/rlp"
-	"github.com/ledgerwatch/erigon/turbo/services"
-	"github.com/ledgerwatch/erigon/turbo/shards"
-	"github.com/ledgerwatch/erigon/turbo/stages/bodydownload"
-	"github.com/ledgerwatch/erigon/turbo/stages/headerdownload"
+	"github.com/erigontech/erigon-lib/chain"
+	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common/dbg"
+	"github.com/erigontech/erigon-lib/common/hexutility"
+	"github.com/erigontech/erigon-lib/diagnostics"
+	"github.com/erigontech/erigon-lib/kv"
+	"github.com/erigontech/erigon-lib/state"
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/core/rawdb"
+	"github.com/erigontech/erigon/core/rawdb/blockio"
+	"github.com/erigontech/erigon/core/types"
+	"github.com/erigontech/erigon/eth/ethconfig"
+	"github.com/erigontech/erigon/rlp"
+	"github.com/erigontech/erigon/turbo/services"
+	"github.com/erigontech/erigon/turbo/shards"
+	"github.com/erigontech/erigon/turbo/stages/bodydownload"
+	"github.com/erigontech/erigon/turbo/stages/headerdownload"
 )
 
 // The number of blocks we should be able to re-org sub-second on commodity hardware.
@@ -69,8 +67,7 @@ type HeadersCfg struct {
 	blockWriter   *blockio.BlockWriter
 	notifications *shards.Notifications
 
-	syncConfig     ethconfig.Sync
-	loopBreakCheck func(int) bool
+	syncConfig ethconfig.Sync
 }
 
 func StageHeadersCfg(
@@ -88,7 +85,7 @@ func StageHeadersCfg(
 	blockWriter *blockio.BlockWriter,
 	tmpdir string,
 	notifications *shards.Notifications,
-	loopBreakCheck func(int) bool) HeadersCfg {
+) HeadersCfg {
 	return HeadersCfg{
 		db:                db,
 		hd:                headerDownload,
@@ -104,7 +101,6 @@ func StageHeadersCfg(
 		blockReader:       blockReader,
 		blockWriter:       blockWriter,
 		notifications:     notifications,
-		loopBreakCheck:    loopBreakCheck,
 	}
 }
 
@@ -118,7 +114,7 @@ func SpawnStageHeaders(s *StageState, u Unwinder, ctx context.Context, tx kv.RwT
 		}
 		defer tx.Rollback()
 	}
-	if s.CurrentSyncCycle.IsInitialCycle && cfg.blockReader.FreezingCfg().Enabled {
+	if s.CurrentSyncCycle.IsInitialCycle {
 		if err := cfg.hd.AddHeadersFromSnapshot(tx, cfg.blockReader); err != nil {
 			return err
 		}
@@ -267,15 +263,8 @@ Loop:
 			}
 		}
 
-		if cfg.syncConfig.LoopBlockLimit > 0 {
-			if bodyProgress, err := stages.GetStageProgress(tx, stages.Bodies); err == nil {
-				if cfg.hd.Progress() > bodyProgress && cfg.hd.Progress()-bodyProgress > uint64(cfg.syncConfig.LoopBlockLimit*2) {
-					break
-				}
-			}
-		}
-
-		if cfg.loopBreakCheck != nil && cfg.loopBreakCheck(int(cfg.hd.Progress()-startProgress)) {
+		loopBlockLimit := uint64(cfg.syncConfig.LoopBlockLimit)
+		if loopBlockLimit > 0 && cfg.hd.Progress() > startProgress+loopBlockLimit {
 			break
 		}
 

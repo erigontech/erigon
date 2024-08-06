@@ -21,20 +21,22 @@
 package state
 
 import (
+	"errors"
 	"fmt"
 	"sort"
 
 	"github.com/holiman/uint256"
-	"github.com/ledgerwatch/erigon-lib/chain"
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	types2 "github.com/ledgerwatch/erigon-lib/types"
-	"github.com/ledgerwatch/erigon/common/u256"
-	"github.com/ledgerwatch/erigon/core/tracing"
-	"github.com/ledgerwatch/erigon/core/types"
-	"github.com/ledgerwatch/erigon/core/types/accounts"
-	"github.com/ledgerwatch/erigon/core/vm/evmtypes"
-	"github.com/ledgerwatch/erigon/crypto"
-	"github.com/ledgerwatch/erigon/turbo/trie"
+
+	"github.com/erigontech/erigon-lib/chain"
+	libcommon "github.com/erigontech/erigon-lib/common"
+	types2 "github.com/erigontech/erigon-lib/types"
+	"github.com/erigontech/erigon/common/u256"
+	"github.com/erigontech/erigon/core/tracing"
+	"github.com/erigontech/erigon/core/types"
+	"github.com/erigontech/erigon/core/types/accounts"
+	"github.com/erigontech/erigon/core/vm/evmtypes"
+	"github.com/erigontech/erigon/crypto"
+	"github.com/erigontech/erigon/turbo/trie"
 )
 
 var _ evmtypes.IntraBlockState = new(IntraBlockState) // compile-time interface-check
@@ -194,7 +196,7 @@ func (sdb *IntraBlockState) AddRefund(gas uint64) {
 func (sdb *IntraBlockState) SubRefund(gas uint64) {
 	sdb.journal.append(refundChange{prev: sdb.refund})
 	if gas > sdb.refund {
-		sdb.setErrorUnsafe(fmt.Errorf("refund counter below zero"))
+		sdb.setErrorUnsafe(errors.New("refund counter below zero"))
 	}
 	sdb.refund -= gas
 }
@@ -275,7 +277,7 @@ func (sdb *IntraBlockState) GetCodeHash(addr libcommon.Address) libcommon.Hash {
 	if stateObject == nil || stateObject.deleted {
 		return libcommon.Hash{}
 	}
-	return libcommon.BytesToHash(stateObject.CodeHash())
+	return stateObject.data.CodeHash
 }
 
 // GetState retrieves a value from the given account's storage trie.
@@ -663,7 +665,7 @@ func printAccount(EIP161Enabled bool, addr libcommon.Address, stateObject *state
 	if isDirty && (stateObject.createdContract || !stateObject.selfdestructed) && !emptyRemoval {
 		// Write any contract code associated with the state object
 		if stateObject.code != nil && stateObject.dirtyCode {
-			fmt.Printf("UpdateCode: %x,%x\n", addr, stateObject.CodeHash())
+			fmt.Printf("UpdateCode: %x,%x\n", addr, stateObject.data.CodeHash)
 		}
 		if stateObject.createdContract {
 			fmt.Printf("CreateContract: %x\n", addr)

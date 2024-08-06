@@ -25,32 +25,33 @@ import (
 	"context"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"math/big"
 	"reflect"
 	"testing"
 
-	"github.com/ledgerwatch/erigon-lib/common/hexutil"
+	"github.com/erigontech/erigon-lib/common/hexutil"
 
 	"github.com/holiman/uint256"
 
-	"github.com/ledgerwatch/erigon-lib/chain"
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/common/hexutility"
-	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon/turbo/services"
-	"github.com/ledgerwatch/erigon/turbo/stages/mock"
+	"github.com/erigontech/erigon-lib/chain"
+	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common/hexutility"
+	"github.com/erigontech/erigon-lib/kv"
+	"github.com/erigontech/erigon/turbo/services"
+	"github.com/erigontech/erigon/turbo/stages/mock"
 
-	"github.com/ledgerwatch/erigon-lib/log/v3"
+	"github.com/erigontech/erigon-lib/log/v3"
 
-	"github.com/ledgerwatch/erigon/common"
-	"github.com/ledgerwatch/erigon/common/math"
-	"github.com/ledgerwatch/erigon/core"
-	"github.com/ledgerwatch/erigon/core/rawdb"
-	"github.com/ledgerwatch/erigon/core/state"
-	"github.com/ledgerwatch/erigon/core/types"
-	"github.com/ledgerwatch/erigon/eth/ethconsensusconfig"
-	"github.com/ledgerwatch/erigon/rlp"
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/math"
+	"github.com/erigontech/erigon/core"
+	"github.com/erigontech/erigon/core/rawdb"
+	"github.com/erigontech/erigon/core/state"
+	"github.com/erigontech/erigon/core/types"
+	"github.com/erigontech/erigon/eth/ethconsensusconfig"
+	"github.com/erigontech/erigon/rlp"
 )
 
 // A BlockTest checks handling of entire blocks.
@@ -178,6 +179,7 @@ func (bt *BlockTest) genesis(config *chain.Config) *types.Genesis {
 		BlobGasUsed:           bt.json.Genesis.BlobGasUsed,
 		ExcessBlobGas:         bt.json.Genesis.ExcessBlobGas,
 		ParentBeaconBlockRoot: bt.json.Genesis.ParentBeaconBlockRoot,
+		RequestsRoot:          bt.json.Genesis.RequestsRoot,
 	}
 }
 
@@ -244,10 +246,10 @@ func (bt *BlockTest) insertBlocks(m *mock.MockSentry) ([]btBlock, error) {
 
 func validateHeader(h *btHeader, h2 *types.Header) error {
 	if h == nil {
-		return fmt.Errorf("validateHeader: h == nil")
+		return errors.New("validateHeader: h == nil")
 	}
 	if h2 == nil {
-		return fmt.Errorf("validateHeader: h2 == nil")
+		return errors.New("validateHeader: h2 == nil")
 	}
 	if h.Bloom != h2.Bloom {
 		return fmt.Errorf("bloom: want: %x have: %x", h.Bloom, h2.Bloom)

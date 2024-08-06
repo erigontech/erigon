@@ -18,30 +18,31 @@ package jsonrpc
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
 	"github.com/holiman/uint256"
 	jsoniter "github.com/json-iterator/go"
 
-	"github.com/ledgerwatch/erigon-lib/log/v3"
+	"github.com/erigontech/erigon-lib/log/v3"
 
-	"github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/common/hexutil"
+	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common/hexutil"
 
-	"github.com/ledgerwatch/erigon/common/math"
-	"github.com/ledgerwatch/erigon/core"
-	"github.com/ledgerwatch/erigon/core/state"
-	"github.com/ledgerwatch/erigon/core/types"
-	"github.com/ledgerwatch/erigon/core/vm"
-	"github.com/ledgerwatch/erigon/core/vm/evmtypes"
-	tracersConfig "github.com/ledgerwatch/erigon/eth/tracers/config"
-	bortypes "github.com/ledgerwatch/erigon/polygon/bor/types"
-	polygontracer "github.com/ledgerwatch/erigon/polygon/tracer"
-	"github.com/ledgerwatch/erigon/rpc"
-	"github.com/ledgerwatch/erigon/turbo/adapter/ethapi"
-	"github.com/ledgerwatch/erigon/turbo/rpchelper"
-	"github.com/ledgerwatch/erigon/turbo/transactions"
+	"github.com/erigontech/erigon/common/math"
+	"github.com/erigontech/erigon/core"
+	"github.com/erigontech/erigon/core/state"
+	"github.com/erigontech/erigon/core/types"
+	"github.com/erigontech/erigon/core/vm"
+	"github.com/erigontech/erigon/core/vm/evmtypes"
+	tracersConfig "github.com/erigontech/erigon/eth/tracers/config"
+	bortypes "github.com/erigontech/erigon/polygon/bor/types"
+	polygontracer "github.com/erigontech/erigon/polygon/tracer"
+	"github.com/erigontech/erigon/rpc"
+	"github.com/erigontech/erigon/turbo/adapter/ethapi"
+	"github.com/erigontech/erigon/turbo/rpchelper"
+	"github.com/erigontech/erigon/turbo/transactions"
 )
 
 // TraceBlockByNumber implements debug_traceBlockByNumber. Returns Geth style block traces.
@@ -370,7 +371,7 @@ func (api *PrivateDebugAPIImpl) TraceCall(ctx context.Context, args ethapi.CallA
 		var overflow bool
 		baseFee, overflow = uint256.FromBig(header.BaseFee)
 		if overflow {
-			return fmt.Errorf("header.BaseFee uint256 overflow")
+			return errors.New("header.BaseFee uint256 overflow")
 		}
 	}
 	msg, err := args.ToMessage(api.GasCap, baseFee)
@@ -412,7 +413,7 @@ func (api *PrivateDebugAPIImpl) TraceCallMany(ctx context.Context, bundles []Bun
 	}
 	if len(bundles) == 0 {
 		stream.WriteNil()
-		return fmt.Errorf("empty bundles")
+		return errors.New("empty bundles")
 	}
 	empty := true
 	for _, bundle := range bundles {
@@ -423,7 +424,7 @@ func (api *PrivateDebugAPIImpl) TraceCallMany(ctx context.Context, bundles []Bun
 
 	if empty {
 		stream.WriteNil()
-		return fmt.Errorf("empty bundles")
+		return errors.New("empty bundles")
 	}
 
 	defer func(start time.Time) { log.Trace("Tracing CallMany finished", "runtime", time.Since(start)) }(time.Now())
