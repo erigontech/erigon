@@ -974,7 +974,7 @@ func (hph *HexPatriciaHashed) fold() (err error) {
 		return errors.New("cannot fold - no active rows")
 	}
 	if hph.trace {
-		fmt.Printf("fold: activeRows: %d, currentKey: [%x], touchMap: %016b, afterMap: %016b\n", hph.activeRows, hph.currentKey[:hph.currentKeyLen], hph.touchMap[hph.activeRows-1], hph.afterMap[hph.activeRows-1])
+		fmt.Printf("fold [%x] activeRows: %d touchMap: %016b afterMap: %016b\n", hph.currentKey[:hph.currentKeyLen], hph.activeRows, hph.touchMap[hph.activeRows-1], hph.afterMap[hph.activeRows-1])
 	}
 	// Move information to the row above
 	var upCell *cell
@@ -989,7 +989,7 @@ func (hph *HexPatriciaHashed) fold() (err error) {
 		upDepth = hph.depths[hph.activeRows-2]
 		nibble = int(hph.currentKey[upDepth-1])
 		if hph.trace {
-			fmt.Printf("upcell is (%d x %x), upDepth=%d\n", row-1, nibble, upDepth)
+			fmt.Printf("upCell is (%d, %x, upDepth=%d)\n", row-1, nibble, upDepth)
 		}
 		upCell = &hph.grid[row-1][nibble]
 	}
@@ -1002,7 +1002,7 @@ func (hph *HexPatriciaHashed) fold() (err error) {
 	partsCount := bits.OnesCount16(hph.afterMap[row])
 
 	if hph.trace {
-		fmt.Printf("current key %x touchMap[%d]=%016b, afterMap[%d]=%016b\n", hph.currentKey[:hph.currentKeyLen], row, hph.touchMap[row], row, hph.afterMap[row])
+		fmt.Printf("current key %x touchMap[%d]=%016b afterMap[%d]=%016b\n", hph.currentKey[:hph.currentKeyLen], row, hph.touchMap[row], row, hph.afterMap[row])
 	}
 	switch partsCount {
 	case 0:
