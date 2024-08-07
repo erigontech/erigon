@@ -49,6 +49,8 @@ type CaplinCliCfg struct {
 	EngineAPIAddr         string        `json:"engine_api_addr"`
 	EngineAPIPort         int           `json:"engine_api_port"`
 	MevRelayUrl           string        `json:"mev_relay_url"`
+	CustomConfig          string        `json:"custom_config"`
+	CustomGenesisState    string        `json:"custom_genesis_state"`
 	JwtSecret             []byte
 
 	AllowedMethods   []string `json:"allowed_methods"`
@@ -100,6 +102,10 @@ func SetupCaplinCli(ctx *cli.Context) (cfg *CaplinCliCfg, err error) {
 	cfg.Chaindata = ctx.String(caplinflags.ChaindataFlag.Name)
 
 	cfg.MevRelayUrl = ctx.String(caplinflags.MevRelayUrl.Name)
+
+	// Custom Chain
+	cfg.CustomConfig = ctx.String(caplinflags.CustomConfig.Name)
+	cfg.CustomGenesisState = ctx.String(caplinflags.CustomGenesisState.Name)
 
 	return cfg, err
 }

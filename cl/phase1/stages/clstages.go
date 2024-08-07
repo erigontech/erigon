@@ -236,6 +236,10 @@ func ConsensusClStages(ctx context.Context,
 					if err != nil {
 						return err
 					}
+					if cfg.state.Slot() == 0 {
+						cfg.state = nil // Release the state
+						return nil
+					}
 
 					startingSlot := cfg.state.LatestBlockHeader().Slot
 					downloader := network2.NewBackwardBeaconDownloader(ctx, cfg.rpc, cfg.executionClient, cfg.indiciesDB)

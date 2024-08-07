@@ -99,6 +99,12 @@ func runCaplinNode(cliCtx *cli.Context) error {
 		log.Info("Started Engine API RPC Client", "addr", cfg.EngineAPIAddr)
 		executionEngine = cc
 	}
+	chainName := cliCtx.String(utils.ChainFlag.Name)
+	_, _, networkId, err := clparams.GetConfigsByNetworkName(chainName)
+	if err != nil {
+		log.Info("Could not get network id from chain name, setting it to custom network id")
+		networkId = clparams.CustomNetwork
+	}
 
 	blockSnapBuildSema := semaphore.NewWeighted(int64(dbg.BuildSnapshotAllowance))
 
@@ -107,7 +113,9 @@ func runCaplinNode(cliCtx *cli.Context) error {
 		CaplinDiscoveryPort:    uint64(cfg.Port),
 		CaplinDiscoveryTCPPort: uint64(cfg.ServerTcpPort),
 		BeaconAPIRouter:        rcfg,
-		NetworkId:              cfg.NetworkType,
+		NetworkId:              networkId,
 		MevRelayUrl:            cfg.MevRelayUrl,
+		DevnetConfigPath:       cfg.CustomConfig,
+		DevnetGensisStatePath:  cfg.CustomGenesisState,
 	}, cfg.Dirs, nil, nil, nil, blockSnapBuildSema)
 }

@@ -122,14 +122,6 @@ func OpenCaplinDatabase(ctx context.Context,
 	return db, blob_storage.NewBlobStore(blobDB, afero.NewBasePathFs(afero.NewOsFs(), blobDir), blobPruneDistance, beaconConfig, ethClock), nil
 }
 
-func shouldConnectToDevnet(config clparams.CaplinConfig) bool {
-	return config.DevnetConfigPath != "" || config.DevnetGensisStatePath != ""
-}
-
-func haveValidDevnetParams(config clparams.CaplinConfig) bool {
-	return config.DevnetConfigPath == "" || config.DevnetGensisStatePath == ""
-}
-
 func RunCaplinService(ctx context.Context, engine execution_client.ExecutionEngine, config clparams.CaplinConfig,
 	dirs datadir.Dirs, eth1Getter snapshot_format.ExecutionBlockReaderByNumber,
 	snDownloader proto_downloader.DownloaderClient, creds credentials.TransportCredentials, snBuildSema *semaphore.Weighted) error {
@@ -145,15 +137,11 @@ func RunCaplinService(ctx context.Context, engine execution_client.ExecutionEngi
 	var err error
 
 	var genesisState *state.CachingBeaconState
-	genesisDb := genesisdb.NewGenesisDB(beaconConfig, dirs.CaplinGenesis)
+	var genesisDb genesisdb.GenesisDB
 
-	isGenesisDBInitialized, err := genesisDb.IsInitialized()
-	if err != nil {
-		return err
-	}
-
-	if shouldConnectToDevnet(config) {
-		if !haveValidDevnetParams(config) {
+	if config.IsDevnet() {
+		config.NetworkId = clparams.CustomNetwork // Force custom network
+		if config.HaveInvalidDevnetParams() {
 			return errors.New("devnet config and genesis state paths must be set together")
 		}
 		networkConfig, _ = clparams.GetConfigsByNetwork(clparams.MainnetNetwork)
@@ -162,6 +150,8 @@ func RunCaplinService(ctx context.Context, engine execution_client.ExecutionEngi
 			return err
 		}
 		beaconConfig = &tmp
+		genesisDb = genesisdb.NewGenesisDB(beaconConfig, dirs.CaplinGenesis)
+
 		stateBytes, err := os.ReadFile(config.DevnetGensisStatePath)
 		if err != nil {
 			return fmt.Errorf("could not read provided genesis state file: %s", err)
@@ -171,8 +161,16 @@ func RunCaplinService(ctx context.Context, engine execution_client.ExecutionEngi
 		if genesisState.DecodeSSZ(stateBytes, int(beaconConfig.GetCurrentStateVersion(beaconConfig.GenesisEpoch))); err != nil {
 			return fmt.Errorf("could not decode genesis state: %s", err)
 		}
+		h, _ := genesisState.BlockRoot()
+		fmt.Printf("Genesis state hash: %x\n", h)
 	} else {
 		networkConfig, beaconConfig = clparams.GetConfigsByNetwork(clparams.NetworkType(config.NetworkId))
+		genesisDb = genesisdb.NewGenesisDB(beaconConfig, dirs.CaplinGenesis)
+
+		isGenesisDBInitialized, err := genesisDb.IsInitialized()
+		if err != nil {
+			return err
+		}
 
 		// If genesis state is provided and is hardcoded, use it
 		if initial_state.IsGenesisStateSupported(config.NetworkId) && !isGenesisDBInitialized {
@@ -181,6 +179,18 @@ func RunCaplinService(ctx context.Context, engine execution_client.ExecutionEngi
 				return err
 			}
 		}
+	}
+
+	if config.NetworkId == clparams.CustomNetwork {
+		config.NetworkId = clparams.NetworkType(beaconConfig.DepositNetworkID)
+	}
+
+	if len(config.BootstrapNodes) > 0 {
+		networkConfig.BootNodes = config.BootstrapNodes
+	}
+
+	if len(config.StaticPeers) > 0 {
+		networkConfig.StaticPeers = config.StaticPeers
 	}
 
 	genesisDb.Initialize(genesisState)

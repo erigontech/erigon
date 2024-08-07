@@ -34,6 +34,8 @@ var CliFlags = []cli.Flag{
 	&EngineApiPortFlag,
 	&MevRelayUrl,
 	&JwtSecret,
+	&CustomConfig,
+	&CustomGenesisState,
 	&utils.DataDirFlag,
 	&utils.BeaconApiAllowCredentialsFlag,
 	&utils.BeaconApiAllowMethodsFlag,
@@ -102,6 +104,16 @@ var (
 	MevRelayUrl = cli.StringFlag{
 		Name:  "mev-relay-url",
 		Usage: "Http URL of the MEV relay",
+		Value: "",
+	}
+	CustomConfig = cli.StringFlag{
+		Name:  "custom-config",
+		Usage: "Path to custom config file",
+		Value: "",
+	}
+	CustomGenesisState = cli.StringFlag{
+		Name:  "custom-genesis-state",
+		Usage: "Path to custom genesis state file",
 		Value: "",
 	}
 )
