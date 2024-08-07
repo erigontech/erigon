@@ -115,7 +115,7 @@ func runCaplinNode(cliCtx *cli.Context) error {
 		BeaconAPIRouter:        rcfg,
 		NetworkId:              networkId,
 		MevRelayUrl:            cfg.MevRelayUrl,
-		DevnetConfigPath:       cfg.CustomConfig,
-		DevnetGensisStatePath:  cfg.CustomGenesisState,
+		CustomConfigPath:       cfg.CustomConfig,
+		CustomGenesisStatePath: cfg.CustomGenesisState,
 	}, cfg.Dirs, nil, nil, nil, blockSnapBuildSema)
 }
