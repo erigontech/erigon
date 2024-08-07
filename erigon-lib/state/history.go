@@ -974,7 +974,7 @@ type HistoryRoTx struct {
 
 	_bufTs []byte
 
-	historyStateCache *freelru.LRU[uint64, []byte]
+	historyStateCache *freelru.LRU[u192, []byte]
 }
 
 func (h *History) BeginFilesRo() *HistoryRoTx {
@@ -1192,11 +1192,11 @@ func (ht *HistoryRoTx) historySeekInFiles(key []byte, txNum uint64) ([]byte, boo
 
 	hi, lo := ht.iit.hashKey(key)
 
-	cacheKey := hi ^ fmix64(txNum)
+	cacheKey := u192{hi: hi, lo: lo, ext: txNum}
 	const limit = 128
 	if ht.historyStateCache == nil {
 		var err error
-		ht.historyStateCache, err = freelru.New[uint64, []byte](128, u64h)
+		ht.historyStateCache, err = freelru.New[u192, []byte](128, u192h)
 		if err != nil {
 			panic(err)
 		}
