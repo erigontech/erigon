@@ -80,6 +80,7 @@ func (r *IndexReader) TwoLayerLookup(key []byte) (uint64, bool) {
 	bucketHash, fingerprint := r.Sum(key)
 	id, ok := r.index.Lookup(bucketHash, fingerprint)
 	if !ok {
+		return 0, false
 	}
 	return r.OrdinalLookup(id), true
 }
