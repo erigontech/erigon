@@ -26,7 +26,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/spaolacci/murmur3"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -40,42 +39,7 @@ import (
 	"github.com/erigontech/erigon-lib/recsplit"
 	"github.com/erigontech/erigon-lib/recsplit/eliasfano32"
 	"github.com/erigontech/erigon-lib/seg"
-	mm "github.com/twmb/murmur3"
 )
-
-func BenchmarkName(b *testing.B) {
-	data := []byte("563e653a3388b1e66ab841b480c77e8ffa6c41f38ca6a239dfa6b79dd48db229563e653a3388b1e66ab841b480c77e8ffa6c41f38ca6a239dfa6b79dd48db229")
-	b.Run("1.1", func(b *testing.B) {
-		seed3 := uint32(128)
-		for i := 0; i < b.N; i++ {
-			_, _ = murmur3.Sum128WithSeed(data, seed3)
-		}
-	})
-	b.Run("1.2", func(b *testing.B) {
-		seed2 := uint32(128)
-		seed := uint64(seed2)
-		for i := 0; i < b.N; i++ {
-			_, _ = mm.SeedSum128(seed, seed, data)
-		}
-	})
-	b.Run("3", func(b *testing.B) {
-		for i := 0; i < b.N; i++ {
-			_, _ = hashKey(data)
-		}
-	})
-
-	seed2 := uint32(128)
-	kk := &InvertedIndexRoTx{ii: &InvertedIndex{iiCfg: iiCfg{salt: &seed2}}}
-	b.Run("4", func(b *testing.B) {
-		for i := 0; i < b.N; i++ {
-			_, _ = kk.hashKey(data)
-		}
-	})
-}
-
-func hashKey(k []byte) (hi, lo uint64) {
-	return mm.SeedSum128(1, 1, k)
-}
 
 func testDbAndInvertedIndex(tb testing.TB, aggStep uint64, logger log.Logger) (kv.RwDB, *InvertedIndex) {
 	tb.Helper()
