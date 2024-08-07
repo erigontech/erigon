@@ -5,7 +5,7 @@ package mem
 import (
 	"errors"
 
-	"github.com/shirou/gopsutil/v3/process"
+	"github.com/shirou/gopsutil/v4/process"
 )
 
 func ReadVirtualMemStats() (process.MemoryMapsStat, error) {
