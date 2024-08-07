@@ -414,24 +414,19 @@ func (tx *DynamicFeeTransaction) cachedSender() (sender libcommon.Address, ok bo
 	if s == nil {
 		return sender, false
 	}
-	return s.from, true
+	return *s, true
 }
 func (tx *DynamicFeeTransaction) Sender(signer Signer) (libcommon.Address, error) {
-	if sigCache := tx.from.Load(); sigCache != nil {
-		// If the signer used to derive from in a previous
-		// call is not the same as used current, invalidate
-		// the cache.
-		if sigCache.signer.Equal(signer) {
-			if sigCache.from != zeroAddr { // Sender address can never be zero in a transaction with a valid signer
-				return sigCache.from, nil
-			}
+	if from := tx.from.Load(); from != nil {
+		if *from != zeroAddr { // Sender address can never be zero in a transaction with a valid signer
+			return *from, nil
 		}
 	}
 	addr, err := signer.Sender(tx)
 	if err != nil {
 		return libcommon.Address{}, err
 	}
-	tx.from.Store(&sigCache{signer: signer, from: addr})
+	tx.from.Store(&addr)
 	return addr, nil
 }
 
