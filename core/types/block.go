@@ -114,6 +114,8 @@ type Header struct {
 	Verkle        bool
 	VerkleProof   []byte
 	VerkleKeyVals []verkle.KeyValuePair
+
+	_hash atomic.Pointer[libcommon.Hash]
 }
 
 func (h *Header) EncodingSize() int {
@@ -567,8 +569,13 @@ type headerMarshaling struct {
 
 // Hash returns the block hash of the header, which is simply the keccak256 hash of its
 // RLP encoding.
-func (h *Header) Hash() libcommon.Hash {
-	return rlpHash(h)
+func (h *Header) Hash() (hash libcommon.Hash) {
+	if hash := h._hash.Load(); hash != nil {
+		return *hash
+	}
+	hash = rlpHash(h)
+	h._hash.Store(&hash)
+	return hash
 }
 
 var headerSize = common.StorageSize(reflect.TypeOf(Header{}).Size())
@@ -719,7 +726,6 @@ type Block struct {
 	requests     Requests
 
 	// caches
-	hash atomic.Pointer[libcommon.Hash]
 	size atomic.Uint64
 }
 
@@ -1099,8 +1105,8 @@ func NewBlock(header *Header, txs []Transaction, uncles []*Header, receipts []*R
 // NewBlockFromStorage like NewBlock but used to create Block object when read it from DB
 // in this case no reason to copy parts, or re-calculate headers fields - they are all stored in DB
 func NewBlockFromStorage(hash libcommon.Hash, header *Header, txs []Transaction, uncles []*Header, withdrawals []*Withdrawal, requests Requests) *Block {
+	header._hash.Store(&hash)
 	b := &Block{header: header, transactions: txs, uncles: uncles, withdrawals: withdrawals, requests: requests}
-	b.hash.Store(&hash)
 	return b
 }
 
@@ -1126,7 +1132,7 @@ func NewBlockFromNetwork(header *Header, body *Body) *Block {
 // CopyHeader creates a deep copy of a block header to prevent side effects from
 // modifying a header variable.
 func CopyHeader(h *Header) *Header {
-	cpy := *h
+	cpy := *h //nolint
 	if cpy.Difficulty = new(big.Int); h.Difficulty != nil {
 		cpy.Difficulty.Set(h.Difficulty)
 	}
@@ -1165,6 +1171,7 @@ func CopyHeader(h *Header) *Header {
 		cpy.RequestsRoot = new(libcommon.Hash)
 		cpy.RequestsRoot.SetBytes(h.RequestsRoot.Bytes())
 	}
+	cpy._hash.Store(nil)
 	return &cpy
 }
 
@@ -1492,10 +1499,6 @@ func (b *Block) Copy() *Block {
 		withdrawals:  withdrawals,
 		requests:     requests,
 	}
-	if h := b.hash.Load(); h != nil {
-		hashCopy := *h
-		newB.hash.Store(&hashCopy)
-	}
 	szCopy := b.size.Load()
 	newB.size.Store(szCopy)
 	return newB
@@ -1517,14 +1520,7 @@ func (b *Block) WithSeal(header *Header) *Block {
 
 // Hash returns the keccak256 hash of b's header.
 // The hash is computed on the first call and cached thereafter.
-func (b *Block) Hash() libcommon.Hash {
-	if hash := b.hash.Load(); hash != nil {
-		return *hash
-	}
-	h := b.header.Hash()
-	b.hash.Store(&h)
-	return h
-}
+func (b *Block) Hash() libcommon.Hash { return b.header.Hash() }
 
 type Blocks []*Block
 
