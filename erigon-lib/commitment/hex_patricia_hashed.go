@@ -1261,7 +1261,7 @@ func (hph *HexPatriciaHashed) RootHash() ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	return rootHash[1:], nil // first byte is 128+hash_len
+	return rootHash[1:], nil // first byte is 128+hash_len=160
 }
 
 func (hph *HexPatriciaHashed) ProcessTree(ctx context.Context, tree *Updates, logPrefix string) (rootHash []byte, err error) {
@@ -1275,7 +1275,7 @@ func (hph *HexPatriciaHashed) ProcessTree(ctx context.Context, tree *Updates, lo
 	)
 	defer logEvery.Stop()
 
-	err = tree.HashSort(ctx, func(hashedKey, plainKey []byte) error {
+	err = tree.HashSort(ctx, func(hashedKey, plainKey []byte, stateUpdate *Update) error {
 		select {
 		case <-logEvery.C:
 			dbg.ReadMemStats(&m)
@@ -1301,15 +1301,24 @@ func (hph *HexPatriciaHashed) ProcessTree(ctx context.Context, tree *Updates, lo
 		}
 
 		// Update the cell
-		if len(plainKey) == hph.accountKeyLen {
-			update, err = hph.ctx.GetAccount(plainKey)
-			if err != nil {
-				return fmt.Errorf("GetAccount for key %x failed: %w", plainKey, err)
+		if stateUpdate == nil {
+			if len(plainKey) == hph.accountKeyLen {
+				update, err = hph.ctx.GetAccount(plainKey)
+				if err != nil {
+					return fmt.Errorf("GetAccount for key %x failed: %w", plainKey, err)
+				}
+			} else {
+				update, err = hph.ctx.GetStorage(plainKey)
+				if err != nil {
+					return fmt.Errorf("GetStorage for key %x failed: %w", plainKey, err)
+				}
 			}
 		} else {
-			update, err = hph.ctx.GetStorage(plainKey)
-			if err != nil {
-				return fmt.Errorf("GetStorage for key %x failed: %w", plainKey, err)
+			if update == nil {
+				update = stateUpdate
+			} else {
+				update.Reset()
+				update.Merge(stateUpdate)
 			}
 		}
 		hph.updateCell(plainKey, hashedKey, update)
@@ -1975,7 +1984,7 @@ func (uf UpdateFlags) String() string {
 
 type Update struct {
 	hashedKey  []byte
-	plainKey   []byte
+	plainKey   []byte // todo remove
 	CodeHash   [length.Hash]byte
 	Storage    [length.Hash]byte
 	StorageLen int
@@ -2040,7 +2049,7 @@ func (u *Update) Encode(buf []byte, numBuf []byte) []byte {
 }
 
 func (u *Update) Deleted() bool {
-	return u.Flags == DeleteUpdate
+	return u.Flags&DeleteUpdate > 0
 }
 
 func (u *Update) Decode(buf []byte, pos int) (int, error) {

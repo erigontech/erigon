@@ -385,7 +385,7 @@ func TestUpdates_TouchPlainKey(t *testing.T) {
 	}
 
 	i := 0
-	err := utUpdate1.HashSort(context.Background(), func(hk, pk []byte) error {
+	err := utUpdate1.HashSort(context.Background(), func(hk, pk []byte, _ *Update) error {
 		require.EqualValues(t, sortedUniqUpds[i].key, pk)
 		i++
 		return nil
@@ -393,7 +393,7 @@ func TestUpdates_TouchPlainKey(t *testing.T) {
 	require.NoError(t, err)
 
 	i = 0
-	err = utDirect1.HashSort(context.Background(), func(hk, pk []byte) error {
+	err = utDirect1.HashSort(context.Background(), func(hk, pk []byte, _ *Update) error {
 		require.EqualValues(t, sortedUniqUpds[i].key, pk)
 		i++
 		return nil

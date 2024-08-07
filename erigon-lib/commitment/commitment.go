@@ -915,7 +915,7 @@ func (t *Updates) TouchAccount(c *KeyUpdate, val []byte) {
 		return
 	}
 	if c.update.Flags&DeleteUpdate != 0 {
-		c.update.Flags ^= DeleteUpdate
+		c.update.Flags = 0
 	}
 	nonce, balance, chash := types.DecodeAccountBytesV3(val)
 	if c.update.Nonce != nonce {
@@ -949,7 +949,7 @@ func (t *Updates) TouchStorage(c *KeyUpdate, val []byte) {
 func (t *Updates) TouchCode(c *KeyUpdate, val []byte) {
 	c.update.Flags |= CodeUpdate
 	if len(val) == 0 {
-		if c.update.Flags == 0 || c.update.Flags == DeleteUpdate {
+		if c.update.Flags == 0 {
 			c.update.Flags = DeleteUpdate
 		}
 		copy(c.update.CodeHash[:], EmptyCodeHash)
@@ -974,13 +974,13 @@ func (t *Updates) Close() {
 }
 
 // HashSort sorts and applies fn to each key-value pair in the order of hashed keys.
-func (t *Updates) HashSort(ctx context.Context, fn func(hk, pk []byte) error) error {
+func (t *Updates) HashSort(ctx context.Context, fn func(hk, pk []byte, update *Update) error) error {
 	switch t.mode {
 	case ModeDirect:
 		clear(t.keys)
 
 		err := t.etl.Load(nil, "", func(k, v []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) error {
-			return fn(k, v)
+			return fn(k, v, nil)
 		}, etl.TransformArgs{Quit: ctx.Done()})
 		if err != nil {
 			return err
@@ -995,7 +995,7 @@ func (t *Updates) HashSort(ctx context.Context, fn func(hk, pk []byte) error) er
 			default:
 			}
 
-			if err := fn(item.update.hashedKey, item.plainKey); err != nil {
+			if err := fn(item.update.hashedKey, item.plainKey, item.update); err != nil {
 				return false
 			}
 			return true
@@ -1014,7 +1014,7 @@ func (t *Updates) List(clear bool) ([][]byte, []Update) {
 	switch t.mode {
 	case ModeDirect:
 		plainKeys := make([][]byte, 0, len(t.keys))
-		err := t.HashSort(context.Background(), func(hk, pk []byte) error {
+		err := t.HashSort(context.Background(), func(hk, pk []byte, _ *Update) error {
 			plainKeys = append(plainKeys, common.Copy(pk))
 			return nil
 		})
