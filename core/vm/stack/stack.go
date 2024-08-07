@@ -82,7 +82,7 @@ func (st *Stack) Dup(n int) {
 }
 
 func (st *Stack) DupN(n int) { // TODO(racytech): See if it's correct and find a better name
-	st.Data = append(st.Data, st.Data[n])
+	st.Data = append(st.Data, st.Data[len(st.Data)-n-1])
 }
 
 func (st *Stack) Peek() *uint256.Int {

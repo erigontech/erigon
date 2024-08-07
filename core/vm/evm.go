@@ -181,8 +181,6 @@ func (evm *EVM) Interpreter() Interpreter {
 }
 
 func (evm *EVM) call(typ OpCode, caller ContractRef, addr libcommon.Address, input []byte, gas uint64, value *uint256.Int, bailout bool) (ret []byte, leftOverGas uint64, err error) {
-	fmt.Println("---- Calling Call")
-	fmt.Println("start gas: ", gas)
 	depth := evm.interpreter.Depth()
 
 	if evm.config.NoRecursion && depth > 0 {
@@ -263,9 +261,7 @@ func (evm *EVM) call(typ OpCode, caller ContractRef, addr libcommon.Address, inp
 	fmt.Println("isPrecompile: ", isPrecompile)
 	// It is allowed to call precompiles, even via delegatecall
 	if isPrecompile {
-		fmt.Printf("input: 0x%x, gas: %v\n", input, gas)
 		ret, gas, err = RunPrecompiledContract(p, input, gas)
-		fmt.Printf("output: 0x%x, gasLeft: %v, ERR: %v\n", ret, gas, err)
 	} else if len(code) == 0 {
 		// If the account has no code, we can abort here
 		// The depth-check is already done, and precompiles handled above
@@ -293,25 +289,6 @@ func (evm *EVM) call(typ OpCode, caller ContractRef, addr libcommon.Address, inp
 			readOnly = true
 		}
 
-		// isInitcodeEOF := hasEOFMagic(codeAndHash.code)
-		// if evm.chainRules.IsPrague {
-		// 	// TODO(racytech): revisit this part and double check!
-		// 	if isInitcodeEOF {
-		// 		// If the initcode is EOF, verify it is well-formed.
-		// 		var c Container
-		// 		if err := c.UnmarshalBinary(codeAndHash.code); err != nil {
-		// 			return nil, libcommon.Address{}, gasRemaining, fmt.Errorf("%w: %v", ErrInvalidEOFInitcode, err)
-		// 		}
-		// 		if err := c.ValidateCode(evm.config.JumpTableEOF); err != nil {
-		// 			return nil, libcommon.Address{}, gasRemaining, fmt.Errorf("%w: %v", ErrInvalidEOFInitcode, err)
-		// 		}
-		// 		contract.Container = &c
-		// 	} else if fromEOF {
-		// 		// Don't allow EOF contract to execute legacy initcode.
-		// 		return nil, libcommon.Address{}, gasRemaining, ErrLegacyCode
-		// 	}
-		// }
-
 		ret, err = run(evm, contract, input, readOnly)
 		gas = contract.Gas
 	}
@@ -319,6 +296,7 @@ func (evm *EVM) call(typ OpCode, caller ContractRef, addr libcommon.Address, inp
 	// above we revert to the snapshot and consume any gas remaining. Additionally
 	// when we're in Homestead this also counts for code storage gas errors.
 	if err != nil || evm.config.RestoreState {
+		fmt.Println("Reverting to snanshot")
 		evm.intraBlockState.RevertToSnapshot(snapshot)
 		if err != ErrExecutionReverted {
 			gas = 0
@@ -327,7 +305,6 @@ func (evm *EVM) call(typ OpCode, caller ContractRef, addr libcommon.Address, inp
 		//} else {
 		//	evm.StateDB.DiscardSnapshot(snapshot)
 	}
-	fmt.Println("end gas: ", gas)
 	return ret, gas, err
 }
 

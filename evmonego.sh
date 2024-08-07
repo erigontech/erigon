@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 
-cmake -S . -B build -DEVMONE_TESTING=OFF
+# cmake -S . -B build -DEVMONE_TESTING=OFF
 cmake --build build --parallel
 
 

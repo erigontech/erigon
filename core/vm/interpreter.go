@@ -246,7 +246,7 @@ func (in *EVMInterpreter) Run(contract *Contract, input []byte, readOnly bool) (
 	mem.Reset()
 
 	contract.Input = input
-	var initcode []byte // TODO(racytech): temp solution, condsider a better way
+	var initcode []byte // TODO(racytech): temp solution, condsider a better way, this will not work with JUMPF
 	if contract.IsEOF() {
 		jt = in.cfg.JumpTableEOF
 		initcode = contract.Container.Code[0]
@@ -303,7 +303,7 @@ func (in *EVMInterpreter) Run(contract *Contract, input []byte, readOnly bool) (
 		op = OpCode(initcode[_pc])
 		operation := jt[op]
 		cost = operation.constantGas // For tracing
-		fmt.Printf("%v ", op)
+		// fmt.Printf("%v ", op)
 		// Validate stack
 		if sLen := locStack.Len(); sLen < operation.numPop {
 			return nil, &ErrStackUnderflow{stackLen: sLen, required: operation.numPop}
@@ -339,7 +339,7 @@ func (in *EVMInterpreter) Run(contract *Contract, input []byte, readOnly bool) (
 			if err != nil || !contract.UseGas(dynamicCost, tracing.GasChangeIgnored) {
 				return nil, ErrOutOfGas
 			}
-			fmt.Println("COST: ", cost)
+			// fmt.Println("COST: ", cost)
 			// Do tracing before memory expansion
 			if in.cfg.Debug {
 				in.cfg.Tracer.CaptureState(_pc, op, gasCopy, cost, callContext, in.returnData, in.depth, err) //nolint:errcheck
@@ -355,7 +355,7 @@ func (in *EVMInterpreter) Run(contract *Contract, input []byte, readOnly bool) (
 		// execute the operation
 		res, err = operation.execute(pc, in, callContext)
 		if err != nil {
-			// fmt.Println("ERR: ", err)
+			fmt.Println("INTERPRETER ERR: ", err)
 			break
 		}
 		_pc++

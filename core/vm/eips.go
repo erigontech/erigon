@@ -580,7 +580,7 @@ func opDupN(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]byt
 		idx  = int(code[*pc+1])
 	)
 	scope.Stack.DupN(idx)
-	*pc += 2
+	*pc += 1
 	return nil, nil
 }
 
@@ -590,7 +590,7 @@ func opSwapN(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]by
 		idx  = int(code[*pc+1]) + 1
 	)
 	scope.Stack.SwapWith(0, idx)
-	*pc += 2
+	*pc += 1
 	return nil, nil
 }
 
@@ -600,9 +600,8 @@ func opExchange(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([
 		n    = (int(code[*pc+1]) >> 4) + 1
 		m    = (int(code[*pc+1]) & 0x0f) + 1
 	)
-
 	scope.Stack.SwapWith(n, n+m)
-	*pc += 2
+	*pc += 1
 	return nil, nil
 }
 
