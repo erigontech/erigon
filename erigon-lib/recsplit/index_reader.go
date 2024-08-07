@@ -24,46 +24,39 @@ import (
 
 // IndexReader encapsulates Hash128 to allow concurrent access to Index
 type IndexReader struct {
-	hasher murmur3.Hash128
-	index  *Index
-	mu     sync.RWMutex
+	index *Index
+	salt  uint32
+
+	bufLock sync.RWMutex
+	buf     []byte
 }
 
 // NewIndexReader creates new IndexReader
 func NewIndexReader(index *Index) *IndexReader {
 	return &IndexReader{
-		hasher: murmur3.New128WithSeed(index.salt),
-		index:  index,
+		salt:  index.salt,
+		index: index,
 	}
 }
 
-func (r *IndexReader) sum(key []byte) (hi uint64, lo uint64) {
-	r.mu.Lock()
-	r.hasher.Reset()
-	r.hasher.Write(key) //nolint:errcheck
-	hi, lo = r.hasher.Sum128()
-	r.mu.Unlock()
-	return hi, lo
-}
-
-func (r *IndexReader) sum2(key1, key2 []byte) (hi uint64, lo uint64) {
-	r.mu.Lock()
-	r.hasher.Reset()
-	r.hasher.Write(key1) //nolint:errcheck
-	r.hasher.Write(key2) //nolint:errcheck
-	hi, lo = r.hasher.Sum128()
-	r.mu.Unlock()
-	return hi, lo
+func (r *IndexReader) Sum(key []byte) (uint64, uint64) {
+	// this inlinable alloc-free version, it's faster than pre-allocated `hasher` object
+	// because `hasher` object is interface and need call many methods on it
+	return murmur3.Sum128WithSeed(key, r.salt)
 }
 
 // Lookup wraps index Lookup
 func (r *IndexReader) Lookup(key []byte) (uint64, bool) {
-	bucketHash, fingerprint := r.sum(key)
+	bucketHash, fingerprint := r.Sum(key)
 	return r.index.Lookup(bucketHash, fingerprint)
 }
 
 func (r *IndexReader) Lookup2(key1, key2 []byte) (uint64, bool) {
-	bucketHash, fingerprint := r.sum2(key1, key2)
+	r.bufLock.Lock()
+	// hash of 2 concatenated keys is equal to 2 separated calls of `.Write`
+	r.buf = append(append(r.buf[:0], key1...), key2...)
+	bucketHash, fingerprint := murmur3.Sum128WithSeed(r.buf, r.salt)
+	r.bufLock.Unlock()
 	return r.index.Lookup(bucketHash, fingerprint)
 }
 
@@ -78,14 +71,13 @@ func (r *IndexReader) Close() {
 	r.index.readers.Put(r)
 }
 
-func (r *IndexReader) Sum(key []byte) (uint64, uint64)         { return r.sum(key) }
 func (r *IndexReader) LookupHash(hi, lo uint64) (uint64, bool) { return r.index.Lookup(hi, lo) }
 func (r *IndexReader) OrdinalLookup(id uint64) uint64          { return r.index.OrdinalLookup(id) }
 func (r *IndexReader) TwoLayerLookup(key []byte) (uint64, bool) {
 	if r.index.Empty() {
 		return 0, false
 	}
-	bucketHash, fingerprint := r.sum(key)
+	bucketHash, fingerprint := r.Sum(key)
 	id, ok := r.index.Lookup(bucketHash, fingerprint)
 	if !ok {
 		return 0, false

@@ -38,7 +38,10 @@ func TestBucketCRUD(t *testing.T) {
 	db, tx := memdb.NewTestTx(t)
 
 	normalBucket := kv.ChaindataTables[15]
-	deprecatedBucket := kv.ChaindataDeprecatedTables[0]
+	deprecatedBucket := "none"
+	if len(kv.ChaindataDeprecatedTables) > 0 {
+		deprecatedBucket = kv.ChaindataDeprecatedTables[0]
+	}
 	migrator := tx
 
 	// check thad buckets have unique DBI's
@@ -63,8 +66,10 @@ func TestBucketCRUD(t *testing.T) {
 	require.NoError(migrator.CreateBucket(deprecatedBucket))
 	require.True(migrator.ExistsBucket(deprecatedBucket))
 
-	require.NoError(migrator.DropBucket(deprecatedBucket))
-	require.False(migrator.ExistsBucket(deprecatedBucket))
+	if deprecatedBucket != "none" {
+		require.NoError(migrator.DropBucket(deprecatedBucket))
+		require.False(migrator.ExistsBucket(deprecatedBucket))
+	}
 
 	require.NoError(migrator.CreateBucket(deprecatedBucket))
 	require.True(migrator.ExistsBucket(deprecatedBucket))
