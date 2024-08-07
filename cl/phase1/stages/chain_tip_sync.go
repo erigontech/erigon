@@ -2,11 +2,11 @@ package stages
 
 import (
 	"context"
-	"strconv"
 	"time"
 
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/cl/beacon/beaconevents"
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/persistence/blob_storage"
 	network2 "github.com/erigontech/erigon/cl/phase1/network"
@@ -209,10 +209,10 @@ MainLoop:
 				}
 
 				// Publish the block to the event handler
-				cfg.emitter.Publish("block", map[string]any{
-					"slot":                 strconv.Itoa(int(block.Block.Slot)),
-					"block":                common.Hash(blockRoot),
-					"execution_optimistic": false, // TODO: i don't know what to put here. i see other places doing false, leaving false for now
+				cfg.emitter.State().SendBlock(&beaconevents.BlockData{
+					Slot:                block.Block.Slot,
+					Block:               blockRoot,
+					ExecutionOptimistic: false, // todo: fix this
 				})
 
 				// Notify the validator monitor of the new block

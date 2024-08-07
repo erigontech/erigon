@@ -25,9 +25,10 @@ import (
 	"math/big"
 	"testing"
 
+	"github.com/holiman/uint256"
+
 	"github.com/erigontech/erigon-lib/kv/kvcache"
 	"github.com/erigontech/erigon/rpc/rpccfg"
-	"github.com/holiman/uint256"
 
 	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/log/v3"
@@ -82,7 +83,7 @@ func TestSuggestPrice(t *testing.T) {
 	}
 
 	m := newTestBackend(t) //, big.NewInt(16), c.pending)
-	baseApi := jsonrpc.NewBaseApi(nil, kvcache.NewDummy(), m.BlockReader, false, rpccfg.DefaultEvmCallTimeout, m.Engine, m.Dirs)
+	baseApi := jsonrpc.NewBaseApi(nil, kvcache.NewDummy(), m.BlockReader, false, rpccfg.DefaultEvmCallTimeout, m.Engine, m.Dirs, nil)
 
 	tx, _ := m.DB.BeginRo(m.Ctx)
 	defer tx.Rollback()

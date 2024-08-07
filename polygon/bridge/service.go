@@ -19,6 +19,7 @@ package bridge
 import (
 	"context"
 
+	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon/core/types"
 )
 
@@ -27,6 +28,7 @@ type PolygonBridge interface {
 	Synchronize(ctx context.Context, tip *types.Header) error
 	Unwind(ctx context.Context, tip *types.Header) error
 	Events(ctx context.Context, blockNum uint64) ([]*types.Message, error)
+	EventTxnLookup(ctx context.Context, borTxHash libcommon.Hash) (uint64, bool, error)
 }
 
 type Service interface {
