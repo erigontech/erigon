@@ -212,6 +212,7 @@ func (m *mdbxPieceCompletion) putFlushed(tx kv.RwTx, infoHash infohash.T, flushe
 }
 
 func (m *mdbxPieceCompletion) Close() error {
+	fmt.Println("PC CLS")
 	m.db.Close()
 	return nil
 }
