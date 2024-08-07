@@ -1492,8 +1492,12 @@ func (b *Block) Copy() *Block {
 		withdrawals:  withdrawals,
 		requests:     requests,
 	}
-	newB.hash.Store(b.hash.Load())
-	newB.size.Store(b.size.Load())
+	if h := b.hash.Load(); h != nil {
+		hashCopy := *h
+		newB.hash.Store(&hashCopy)
+	}
+	szCopy := b.size.Load()
+	newB.size.Store(szCopy)
 	return newB
 }
 
