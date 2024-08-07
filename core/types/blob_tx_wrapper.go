@@ -328,10 +328,6 @@ func (txw *BlobTxWrapper) WithSignature(signer Signer, sig []byte) (Transaction,
 	return txw.Tx.WithSignature(signer, sig)
 }
 
-func (txw *BlobTxWrapper) FakeSign(address libcommon.Address) Transaction {
-	return txw.Tx.FakeSign(address)
-}
-
 func (txw *BlobTxWrapper) Hash() libcommon.Hash { return txw.Tx.Hash() }
 
 func (txw *BlobTxWrapper) SigningHash(chainID *big.Int) libcommon.Hash {
