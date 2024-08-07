@@ -26,6 +26,16 @@ import (
 	"github.com/erigontech/erigon/polygon/p2p"
 )
 
+type heimdallSynchronizer interface {
+	SynchronizeCheckpoints(ctx context.Context) error
+	SynchronizeMilestones(ctx context.Context) error
+	SynchronizeSpans(ctx context.Context, blockNum uint64) error
+}
+
+type bridgeSynchronizer interface {
+	Synchronize(ctx context.Context, blockNum uint64) error
+}
+
 type Sync struct {
 	store             Store
 	execution         ExecutionClient
@@ -34,6 +44,8 @@ type Sync struct {
 	p2pService        p2p.Service
 	blockDownloader   BlockDownloader
 	ccBuilderFactory  CanonicalChainBuilderFactory
+	heimdallSync      heimdallSynchronizer
+	bridgeSync        bridgeSynchronizer
 	events            <-chan Event
 	logger            log.Logger
 }
@@ -46,6 +58,8 @@ func NewSync(
 	p2pService p2p.Service,
 	blockDownloader BlockDownloader,
 	ccBuilderFactory CanonicalChainBuilderFactory,
+	heimdallSync heimdallSynchronizer,
+	bridgeSync bridgeSynchronizer,
 	events <-chan Event,
 	logger log.Logger,
 ) *Sync {
@@ -57,15 +71,28 @@ func NewSync(
 		p2pService:        p2pService,
 		blockDownloader:   blockDownloader,
 		ccBuilderFactory:  ccBuilderFactory,
+		heimdallSync:      heimdallSync,
+		bridgeSync:        bridgeSync,
 		events:            events,
 		logger:            logger,
 	}
 }
 
 func (s *Sync) commitExecution(ctx context.Context, newTip *types.Header, finalizedHeader *types.Header) error {
-	if err := s.store.Flush(ctx, newTip); err != nil {
+	if err := s.store.Flush(ctx); err != nil {
 		return err
 	}
+
+	blockNum := newTip.Number.Uint64()
+
+	if err := s.heimdallSync.SynchronizeSpans(ctx, blockNum); err != nil {
+		return err
+	}
+
+	if err := s.bridgeSync.Synchronize(ctx, blockNum); err != nil {
+		return err
+	}
+
 	return s.execution.UpdateForkChoice(ctx, newTip, finalizedHeader)
 }
 
@@ -285,12 +312,22 @@ func (s *Sync) syncToTip(ctx context.Context) (*types.Header, error) {
 
 func (s *Sync) syncToTipUsingCheckpoints(ctx context.Context, tip *types.Header) (*types.Header, error) {
 	return s.sync(ctx, tip, func(ctx context.Context, startBlockNum uint64) (*types.Header, error) {
+		err := s.heimdallSync.SynchronizeCheckpoints(ctx)
+		if err != nil {
+			return nil, err
+		}
+
 		return s.blockDownloader.DownloadBlocksUsingCheckpoints(ctx, startBlockNum)
 	})
 }
 
 func (s *Sync) syncToTipUsingMilestones(ctx context.Context, tip *types.Header) (*types.Header, error) {
 	return s.sync(ctx, tip, func(ctx context.Context, startBlockNum uint64) (*types.Header, error) {
+		err := s.heimdallSync.SynchronizeMilestones(ctx)
+		if err != nil {
+			return nil, err
+		}
+
 		return s.blockDownloader.DownloadBlocksUsingMilestones(ctx, startBlockNum)
 	})
 }
