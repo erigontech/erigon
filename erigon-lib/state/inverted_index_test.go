@@ -52,7 +52,8 @@ func BenchmarkName(b *testing.B) {
 		}
 	})
 	b.Run("1.2", func(b *testing.B) {
-		seed := uint64(128)
+		seed2 := uint32(128)
+		seed := uint64(seed2)
 		for i := 0; i < b.N; i++ {
 			_, _ = mm.SeedSum128(seed, seed, data)
 		}
