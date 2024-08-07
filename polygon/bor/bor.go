@@ -75,9 +75,9 @@ const (
 )
 
 const (
-	snapshotPersistInterval = 1024 // Number of blocks after which to persist the vote snapshot to the database
-	inmemorySnapshots       = 128  // Number of recent vote snapshots to keep in memory
-	inmemorySignatures      = 4096 // Number of recent block signatures to keep in memory
+	snapshotPersistInterval = 1024       // Number of blocks after which to persist the vote snapshot to the database
+	inmemorySnapshots       = 128        // Number of recent vote snapshots to keep in memory
+	inmemorySignatures      = 1_000_4096 // Number of recent block signatures to keep in memory
 )
 
 // Bor protocol constants.
