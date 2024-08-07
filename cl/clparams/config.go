@@ -54,8 +54,8 @@ type CaplinConfig struct {
 	EnableValidatorMonitor bool
 
 	// Devnets config
-	DevnetConfigPath      string
-	DevnetGensisStatePath string
+	CustomConfigPath       string
+	CustomGenesisStatePath string
 
 	// Network stuff
 	CaplinDiscoveryAddr    string
@@ -73,11 +73,11 @@ type CaplinConfig struct {
 }
 
 func (c CaplinConfig) IsDevnet() bool {
-	return c.DevnetConfigPath != "" || c.DevnetGensisStatePath != ""
+	return c.CustomConfigPath != "" || c.CustomGenesisStatePath != ""
 }
 
 func (c CaplinConfig) HaveInvalidDevnetParams() bool {
-	return c.DevnetConfigPath == "" || c.DevnetGensisStatePath == ""
+	return c.CustomConfigPath == "" || c.CustomGenesisStatePath == ""
 }
 
 func (c CaplinConfig) RelayUrlExist() bool {

@@ -871,6 +871,11 @@ var (
 		Usage: "Port for sentinel",
 		Value: 7777,
 	}
+	SentinelBootnodes = cli.StringSliceFlag{
+		Name:  "sentinel.bootnodes",
+		Usage: "Comma separated enode URLs for P2P discovery bootstrap",
+		Value: cli.NewStringSlice(),
+	}
 
 	OtsSearchMaxCapFlag = cli.Uint64Flag{
 		Name:  "ots.search.max.pagesize",
@@ -1024,6 +1029,16 @@ var (
 		Name:  "beacon.api.cors.allow-origins",
 		Usage: "set the cors' allow origins",
 		Value: cli.NewStringSlice(),
+	}
+	CaplinCustomConfigFlag = cli.StringFlag{
+		Name:  "caplin.custom-config",
+		Usage: "set the custom config for caplin",
+		Value: "",
+	}
+	CaplinCustomGenesisFlag = cli.StringFlag{
+		Name:  "caplin.custom-genesis",
+		Usage: "set the custom genesis for caplin",
+		Value: "",
 	}
 	DiagDisabledFlag = cli.BoolFlag{
 		Name:  "diagnostics.disabled",
@@ -1707,6 +1722,8 @@ func setCaplin(ctx *cli.Context, cfg *ethconfig.Config) {
 	if checkpointUrls := ctx.StringSlice(CaplinCheckpointSyncUrlFlag.Name); len(checkpointUrls) > 0 {
 		clparams.ConfigurableCheckpointsURLs = checkpointUrls
 	}
+	cfg.CaplinConfig.CustomConfigPath = ctx.String(CaplinCustomConfigFlag.Name)
+	cfg.CaplinConfig.CustomGenesisStatePath = ctx.String(CaplinCustomGenesisFlag.Name)
 }
 
 func setSilkworm(ctx *cli.Context, cfg *ethconfig.Config) {
@@ -1772,6 +1789,7 @@ func SetEthConfig(ctx *cli.Context, nodeConfig *nodecfg.Config, cfg *ethconfig.C
 	cfg.CaplinConfig.CaplinDiscoveryTCPPort = ctx.Uint64(CaplinDiscoveryTCPPortFlag.Name)
 	cfg.CaplinConfig.SentinelAddr = ctx.String(SentinelAddrFlag.Name)
 	cfg.CaplinConfig.SentinelPort = ctx.Uint64(SentinelPortFlag.Name)
+	cfg.CaplinConfig.BootstrapNodes = ctx.StringSlice(SentinelBootnodes.Name)
 
 	chain := ctx.String(ChainFlag.Name) // mainnet by default
 	if ctx.IsSet(NetworkIdFlag.Name) {
@@ -1905,7 +1923,7 @@ func SetEthConfig(ctx *cli.Context, nodeConfig *nodecfg.Config, cfg *ethconfig.C
 		cfg.TxPool.OverridePragueTime = cfg.OverridePragueTime
 	}
 
-	if clparams.EmbeddedSupported(cfg.NetworkID) {
+	if clparams.EmbeddedSupported(cfg.NetworkID) || cfg.CaplinConfig.IsDevnet() {
 		cfg.InternalCL = !ctx.Bool(ExternalConsensusFlag.Name)
 	}
 
