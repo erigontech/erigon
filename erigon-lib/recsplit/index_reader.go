@@ -24,10 +24,11 @@ import (
 
 // IndexReader encapsulates Hash128 to allow concurrent access to Index
 type IndexReader struct {
-	hasher murmur3.Hash128
-	index  *Index
-	mu     sync.RWMutex
-	salt   uint32
+	index *Index
+	salt  uint32
+
+	mu  sync.RWMutex
+	buf []byte
 }
 
 // NewIndexReader creates new IndexReader
@@ -40,19 +41,6 @@ func NewIndexReader(index *Index) *IndexReader {
 
 func (r *IndexReader) Sum(key []byte) (uint64, uint64) { return murmur3.Sum128WithSeed(key, r.salt) }
 
-func (r *IndexReader) sum2(key1, key2 []byte) (hi uint64, lo uint64) {
-	r.mu.Lock()
-	if r.hasher == nil {
-		r.hasher = murmur3.New128WithSeed(r.salt)
-	}
-	r.hasher.Reset()
-	r.hasher.Write(key1) //nolint:errcheck
-	r.hasher.Write(key2) //nolint:errcheck
-	hi, lo = r.hasher.Sum128()
-	r.mu.Unlock()
-	return hi, lo
-}
-
 // Lookup wraps index Lookup
 func (r *IndexReader) Lookup(key []byte) (uint64, bool) {
 	bucketHash, fingerprint := r.Sum(key)
@@ -60,7 +48,10 @@ func (r *IndexReader) Lookup(key []byte) (uint64, bool) {
 }
 
 func (r *IndexReader) Lookup2(key1, key2 []byte) (uint64, bool) {
-	bucketHash, fingerprint := r.sum2(key1, key2)
+	r.mu.Lock()
+	r.buf = append(append(r.buf[:0], key1...), key2...)
+	bucketHash, fingerprint := murmur3.Sum128WithSeed(r.buf, r.salt)
+	r.mu.Unlock()
 	return r.index.Lookup(bucketHash, fingerprint)
 }
 
