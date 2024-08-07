@@ -14,18 +14,19 @@
 // You should have received a copy of the GNU Lesser General Public License
 // along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
-//go:build !linux
+package heimdall
 
-package mem
+// cmpBlockRange returns 0 if blockNum is inside [startBlockNum, endBlockNum] range.
+// returns -1 if before range.
+// returns 1 if after range.
+func cmpBlockRange(startBlockNum, endBlockNum, blockNum uint64) int {
+	if blockNum < startBlockNum {
+		return -1
+	}
 
-import (
-	"errors"
+	if blockNum > endBlockNum {
+		return 1
+	}
 
-	"github.com/shirou/gopsutil/v4/process"
-)
-
-func ReadVirtualMemStats() (process.MemoryMapsStat, error) { //nolint
-	return process.MemoryMapsStat{}, errors.New("unsupported platform")
+	return 0
 }
-
-func UpdatePrometheusVirtualMemStats(p process.MemoryMapsStat) {}

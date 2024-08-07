@@ -108,7 +108,6 @@ var bucketLabels = map[string]string{
 	kv.StorageChangeSet:  "Storage Changes",
 	kv.IncarnationMap:    "Incarnations",
 	kv.Senders:           "Transaction Senders",
-	kv.ContractTEVMCode:  "Contract TEVM code",
 }
 
 /*dbutils.PlainContractCode,
