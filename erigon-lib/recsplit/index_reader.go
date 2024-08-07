@@ -39,7 +39,11 @@ func NewIndexReader(index *Index) *IndexReader {
 	}
 }
 
-func (r *IndexReader) Sum(key []byte) (uint64, uint64) { return murmur3.Sum128WithSeed(key, r.salt) }
+func (r *IndexReader) Sum(key []byte) (uint64, uint64) {
+	// this inlinable alloc-free version, it's faster than pre-allocated `hasher` object
+	// because `hasher` object is interface and need call many methods on it
+	return murmur3.Sum128WithSeed(key, r.salt)
+}
 
 // Lookup wraps index Lookup
 func (r *IndexReader) Lookup(key []byte) (uint64, bool) {
@@ -49,6 +53,7 @@ func (r *IndexReader) Lookup(key []byte) (uint64, bool) {
 
 func (r *IndexReader) Lookup2(key1, key2 []byte) (uint64, bool) {
 	r.mu.Lock()
+	// hash of 2 concatenated keys is equal to 2 separated calls of `.Write`
 	r.buf = append(append(r.buf[:0], key1...), key2...)
 	bucketHash, fingerprint := murmur3.Sum128WithSeed(r.buf, r.salt)
 	r.mu.Unlock()
