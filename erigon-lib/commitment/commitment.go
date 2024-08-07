@@ -60,13 +60,8 @@ type Trie interface {
 	// Set context for state IO
 	ResetContext(ctx PatriciaContext)
 
-	ProcessTree(ctx context.Context, tree *Updates, logPrefix string) (rootHash []byte, err error)
-
-	// Reads updates from storage
-	ProcessKeys(ctx context.Context, pk [][]byte, logPrefix string) (rootHash []byte, err error)
-
-	// Process already gathered updates
-	ProcessUpdates(ctx context.Context, pk [][]byte, updates []Update) (rootHash []byte, err error)
+	// Process updates
+	Process(ctx context.Context, updates *Updates, logPrefix string) (rootHash []byte, err error)
 }
 
 type PatriciaContext interface {

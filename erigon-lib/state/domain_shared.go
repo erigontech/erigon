@@ -1017,8 +1017,7 @@ func (sd *SharedDomains) AppendablePut(name kv.Appendable, ts kv.TxnId, v []byte
 
 type SharedDomainsCommitmentContext struct {
 	sharedDomains *SharedDomains
-	discard       bool
-	mode          commitment.Mode
+	discard       bool // could be replaced with using ModeDisabled
 	branches      map[string]cachedBranch
 	keccak        cryptozerocopy.KeccakState
 	updates       *commitment.Updates
@@ -1029,7 +1028,6 @@ type SharedDomainsCommitmentContext struct {
 func NewSharedDomainsCommitmentContext(sd *SharedDomains, mode commitment.Mode, trieVariant commitment.TrieVariant) *SharedDomainsCommitmentContext {
 	ctx := &SharedDomainsCommitmentContext{
 		sharedDomains: sd,
-		mode:          mode,
 		discard:       dbg.DiscardCommitment(),
 		branches:      make(map[string]cachedBranch),
 		keccak:        sha3.NewLegacyKeccak256().(cryptozerocopy.KeccakState),
@@ -1199,7 +1197,7 @@ func (sdc *SharedDomainsCommitmentContext) ComputeCommitment(ctx context.Context
 
 	updateCount := sdc.updates.Size()
 	if sdc.sharedDomains.trace {
-		defer sdc.sharedDomains.logger.Trace("ComputeCommitment", "block", blockNum, "keys", updateCount, "mode", sdc.mode)
+		defer sdc.sharedDomains.logger.Trace("ComputeCommitment", "block", blockNum, "keys", updateCount, "mode", sdc.updates.Mode())
 	}
 	if updateCount == 0 {
 		rootHash, err = sdc.patriciaTrie.RootHash()
@@ -1210,22 +1208,9 @@ func (sdc *SharedDomainsCommitmentContext) ComputeCommitment(ctx context.Context
 	sdc.patriciaTrie.SetTrace(sdc.sharedDomains.trace)
 	sdc.Reset()
 
-	switch sdc.mode {
-	case commitment.ModeDirect:
-		rootHash, err = sdc.patriciaTrie.ProcessTree(ctx, sdc.updates, logPrefix)
-		if err != nil {
-			return nil, err
-		}
-	case commitment.ModeUpdate:
-		touchedKeys, updates := sdc.updates.List(true)
-		rootHash, err = sdc.patriciaTrie.ProcessUpdates(ctx, touchedKeys, updates)
-		if err != nil {
-			return nil, err
-		}
-	case commitment.ModeDisabled:
-		return nil, nil
-	default:
-		return nil, fmt.Errorf("invalid commitment mode: %s", sdc.mode)
+	rootHash, err = sdc.patriciaTrie.Process(ctx, sdc.updates, logPrefix)
+	if err != nil {
+		return nil, err
 	}
 	sdc.justRestored.Store(false)
 

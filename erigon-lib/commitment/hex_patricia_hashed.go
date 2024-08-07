@@ -28,7 +28,6 @@ import (
 	"math/bits"
 	"path/filepath"
 	"runtime"
-	"sort"
 	"strings"
 	"time"
 
@@ -1264,7 +1263,7 @@ func (hph *HexPatriciaHashed) RootHash() ([]byte, error) {
 	return rootHash[1:], nil // first byte is 128+hash_len=160
 }
 
-func (hph *HexPatriciaHashed) ProcessTree(ctx context.Context, tree *Updates, logPrefix string) (rootHash []byte, err error) {
+func (hph *HexPatriciaHashed) Process(ctx context.Context, tree *Updates, logPrefix string) (rootHash []byte, err error) {
 	var (
 		m      runtime.MemStats
 		ki     uint64
@@ -1344,143 +1343,6 @@ func (hph *HexPatriciaHashed) ProcessTree(ctx context.Context, tree *Updates, lo
 	}
 	if hph.trace {
 		fmt.Printf("root hash %x updates %d\n", rootHash, updatesCount)
-	}
-	err = hph.branchEncoder.Load(hph.ctx, etl.TransformArgs{Quit: ctx.Done()})
-	if err != nil {
-		return nil, fmt.Errorf("branch update failed: %w", err)
-	}
-	return rootHash, nil
-}
-
-// Process keys and updates in a single pass. Branch updates are written to PatriciaContext if no error occurs.
-func (hph *HexPatriciaHashed) ProcessKeys(ctx context.Context, plainKeys [][]byte, logPrefix string) (rootHash []byte, err error) {
-	pks := make(map[string]int, len(plainKeys))
-	hashedKeys := make([][]byte, len(plainKeys))
-	for i, pk := range plainKeys {
-		hashedKeys[i] = hph.hashAndNibblizeKey(pk)
-		pks[string(hashedKeys[i])] = i
-	}
-
-	sort.Slice(hashedKeys, func(i, j int) bool {
-		return bytes.Compare(hashedKeys[i], hashedKeys[j]) < 0
-	})
-
-	logEvery := time.NewTicker(20 * time.Second)
-	defer logEvery.Stop()
-	var m runtime.MemStats
-
-	//stagedCell := new(Cell)
-	var update *Update
-	for i, hashedKey := range hashedKeys {
-		select {
-		case <-ctx.Done():
-			return nil, ctx.Err()
-		case <-logEvery.C:
-			dbg.ReadMemStats(&m)
-			log.Info(fmt.Sprintf("[%s][agg] computing trie", logPrefix), "progress", fmt.Sprintf("%dk/%dk", i/1000, len(hashedKeys)/1000), "alloc", common.ByteCount(m.Alloc), "sys", common.ByteCount(m.Sys))
-		default:
-		}
-		plainKey := plainKeys[pks[string(hashedKey)]]
-		if hph.trace {
-			fmt.Printf("\n%d/%d) plainKey=[%x], hashedKey=[%x], currentKey=[%x]\n", i+1, len(hashedKeys), plainKey, hashedKey, hph.currentKey[:hph.currentKeyLen])
-		}
-		// Keep folding until the currentKey is the prefix of the key we modify
-		for hph.needFolding(hashedKey) {
-			if err := hph.fold(); err != nil {
-				return nil, fmt.Errorf("fold: %w", err)
-			}
-		}
-		// Now unfold until we step on an empty cell
-		for unfolding := hph.needUnfolding(hashedKey); unfolding > 0; unfolding = hph.needUnfolding(hashedKey) {
-			if err := hph.unfold(hashedKey, unfolding); err != nil {
-				return nil, fmt.Errorf("unfold: %w", err)
-			}
-		}
-
-		// Update the cell
-		if len(plainKey) == hph.accountKeyLen {
-			update, err = hph.ctx.GetAccount(plainKey)
-			if err != nil {
-				return nil, fmt.Errorf("GetAccount for key %x failed: %w", plainKey, err)
-			}
-		} else {
-			update, err = hph.ctx.GetStorage(plainKey)
-			if err != nil {
-				return nil, fmt.Errorf("GetStorage for key %x failed: %w", plainKey, err)
-			}
-		}
-		hph.updateCell(plainKey, hashedKey, update)
-		mxKeys.Inc()
-	}
-	// Folding everything up to the root
-	for hph.activeRows > 0 {
-		if err := hph.fold(); err != nil {
-			return nil, fmt.Errorf("final fold: %w", err)
-		}
-	}
-
-	rootHash, err = hph.RootHash()
-	if err != nil {
-		return nil, fmt.Errorf("root hash evaluation failed: %w", err)
-	}
-	if hph.trace {
-		fmt.Printf("root hash %x updates %d\n", rootHash, len(plainKeys))
-	}
-	err = hph.branchEncoder.Load(hph.ctx, etl.TransformArgs{Quit: ctx.Done()})
-	if err != nil {
-		return nil, fmt.Errorf("branch update failed: %w", err)
-	}
-	return rootHash, nil
-}
-
-func (hph *HexPatriciaHashed) ProcessUpdates(ctx context.Context, plainKeys [][]byte, updates []Update) (rootHash []byte, err error) {
-	for i, pk := range plainKeys {
-		updates[i].hashedKey = hph.hashAndNibblizeKey(pk)
-		updates[i].plainKey = pk
-	}
-
-	sort.Slice(updates, func(i, j int) bool {
-		return bytes.Compare(updates[i].hashedKey, updates[j].hashedKey) < 0
-	})
-
-	for i, update := range updates {
-		select {
-		case <-ctx.Done():
-			return nil, ctx.Err()
-		default:
-		}
-
-		if hph.trace {
-			fmt.Printf("(%d/%d) key=[%x] %s hashedKey=[%x] currentKey=[%x]\n",
-				i+1, len(updates), update.plainKey, update.String(), update.hashedKey, hph.currentKey[:hph.currentKeyLen])
-		}
-		// Keep folding until the currentKey is the prefix of the key we modify
-		for hph.needFolding(update.hashedKey) {
-			if err := hph.fold(); err != nil {
-				return nil, fmt.Errorf("fold: %w", err)
-			}
-		}
-		// Now unfold until we step on an empty cell
-		for unfolding := hph.needUnfolding(update.hashedKey); unfolding > 0; unfolding = hph.needUnfolding(update.hashedKey) {
-			if err := hph.unfold(update.hashedKey, unfolding); err != nil {
-				return nil, fmt.Errorf("unfold: %w", err)
-			}
-		}
-
-		hph.updateCell(update.plainKey, update.hashedKey, &updates[i])
-
-		mxKeys.Inc()
-	}
-	// Folding everything up to the root
-	for hph.activeRows > 0 {
-		if err := hph.fold(); err != nil {
-			return nil, fmt.Errorf("final fold: %w", err)
-		}
-	}
-
-	rootHash, err = hph.RootHash()
-	if err != nil {
-		return nil, fmt.Errorf("root hash evaluation failed: %w", err)
 	}
 	err = hph.branchEncoder.Load(hph.ctx, etl.TransformArgs{Quit: ctx.Done()})
 	if err != nil {
