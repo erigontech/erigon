@@ -330,8 +330,6 @@ const (
 	Epoch        = "DevEpoch"        // block_num_u64+block_hash->transition_proof
 	PendingEpoch = "DevPendingEpoch" // block_num_u64+block_hash->transition_proof
 
-	Issuance = "Issuance" // block_num_u64->RLP(issuance+burnt[0 if < london])
-
 	// BOR
 	BorReceipts           = "BorReceipt"
 	BorFinality           = "BorFinality"
@@ -536,7 +534,6 @@ var ChaindataTables = []string{
 	HeaderTD,
 	Epoch,
 	PendingEpoch,
-	Issuance,
 	BorReceipts,
 	BorFinality,
 	BorTxLookup,
