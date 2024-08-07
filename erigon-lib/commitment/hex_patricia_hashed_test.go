@@ -479,7 +479,7 @@ func Test_HexPatriciaHashed_Sepolia(t *testing.T) {
 
 func Test_Cell_EncodeDecode(t *testing.T) {
 	rnd := rand.New(rand.NewSource(time.Now().UnixMilli()))
-	first := &Cell{
+	first := &cell{
 		hashLen:            length.Hash,
 		accountPlainKeyLen: length.Addr,
 		storagePlainKeyLen: length.Addr + length.Hash,
@@ -500,7 +500,7 @@ func Test_Cell_EncodeDecode(t *testing.T) {
 	rnd.Read(first.accountPlainKey[:])
 	rnd.Read(first.hash[:])
 
-	second := new(Cell)
+	second := new(cell)
 	err := second.Decode(first.Encode())
 	require.NoError(t, err)
 
@@ -1061,7 +1061,7 @@ func TestCell_setFromUpdate(t *testing.T) {
 	rnd.Read(update.CodeHash[:])
 	update.Flags = BalanceUpdate | NonceUpdate | CodeUpdate
 
-	target := new(Cell)
+	target := new(cell)
 	target.setFromUpdate(&update)
 	require.True(t, update.Balance.Eq(&target.Balance))
 	require.EqualValues(t, update.Nonce, target.Nonce)

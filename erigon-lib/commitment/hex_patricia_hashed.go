@@ -57,7 +57,7 @@ type keccakState interface {
 // HexPatriciaHashed implements commitment based on patricia merkle tree with radix 16,
 // with keys pre-hashed by keccak256
 type HexPatriciaHashed struct {
-	root Cell // Root cell of the tree
+	root cell // Root cell of the tree
 	// How many rows (starting from row 0) are currently active and have corresponding selected columns
 	// Last active row does not have selected column
 	activeRows int
@@ -67,7 +67,7 @@ type HexPatriciaHashed struct {
 	accountKeyLen int
 	// Rows of the grid correspond to the level of depth in the patricia tree
 	// Columns of the grid correspond to pointers to the nodes further from the root
-	grid          [128][16]Cell // First 64 rows of this grid are for account trie, and next 64 rows are for storage trie
+	grid          [128][16]cell // First 64 rows of this grid are for account trie, and next 64 rows are for storage trie
 	currentKey    [128]byte     // For each row indicates which column is currently selected
 	depths        [128]int      // For each row, the depth of cells in that row
 	branchBefore  [128]bool     // For each row, whether there was a branch node in the database loaded in unfold
@@ -97,7 +97,7 @@ func NewHexPatriciaHashed(accountKeyLen int, ctx PatriciaContext, tmpdir string)
 	return hph
 }
 
-type Cell struct {
+type cell struct {
 	downHashedKey      [128]byte
 	extension          [64]byte
 	accountPlainKey    [length.Addr]byte               // account plain key
@@ -117,7 +117,7 @@ var (
 	EmptyCodeHashArray = *(*[length.Hash]byte)(EmptyCodeHash)
 )
 
-func (cell *Cell) reset() {
+func (cell *cell) reset() {
 	cell.accountPlainKeyLen = 0
 	cell.storagePlainKeyLen = 0
 	cell.downHashedLen = 0
@@ -126,9 +126,9 @@ func (cell *Cell) reset() {
 	cell.Update.Reset()
 }
 
-func (cell *Cell) setFromUpdate(update *Update) { cell.Update.Merge(update) }
+func (cell *cell) setFromUpdate(update *Update) { cell.Update.Merge(update) }
 
-func (cell *Cell) fillFromUpperCell(upCell *Cell, depth, depthIncrement int) {
+func (cell *cell) fillFromUpperCell(upCell *cell, depth, depthIncrement int) {
 	if upCell.downHashedLen >= depthIncrement {
 		cell.downHashedLen = upCell.downHashedLen - depthIncrement
 	} else {
@@ -174,7 +174,7 @@ func (cell *Cell) fillFromUpperCell(upCell *Cell, depth, depthIncrement int) {
 	}
 }
 
-func (cell *Cell) fillFromLowerCell(lowCell *Cell, lowDepth int, preExtension []byte, nibble int) {
+func (cell *cell) fillFromLowerCell(lowCell *cell, lowDepth int, preExtension []byte, nibble int) {
 	if lowCell.accountPlainKeyLen > 0 || lowDepth < 64 {
 		cell.accountPlainKeyLen = lowCell.accountPlainKeyLen
 	}
@@ -250,7 +250,7 @@ func minInt(a, b int) int {
 	return b
 }
 
-func (cell *Cell) deriveHashedKeys(depth int, keccak keccakState, accountKeyLen int) error {
+func (cell *cell) deriveHashedKeys(depth int, keccak keccakState, accountKeyLen int) error {
 	extraLen := 0
 	if cell.accountPlainKeyLen > 0 {
 		if depth > 64 {
@@ -292,7 +292,7 @@ func (cell *Cell) deriveHashedKeys(depth int, keccak keccakState, accountKeyLen 
 	return nil
 }
 
-func (cell *Cell) fillFromFields(data []byte, pos int, fieldBits PartFlags) (int, error) {
+func (cell *cell) fillFromFields(data []byte, pos int, fieldBits PartFlags) (int, error) {
 	if fieldBits&HashedKeyPart != 0 {
 		l, n := binary.Uvarint(data[pos:])
 		if n == 0 {
@@ -375,7 +375,7 @@ func (cell *Cell) fillFromFields(data []byte, pos int, fieldBits PartFlags) (int
 	return pos, nil
 }
 
-func (cell *Cell) accountForHashing(buffer []byte, storageRootHash [length.Hash]byte) int {
+func (cell *cell) accountForHashing(buffer []byte, storageRootHash [length.Hash]byte) int {
 	balanceBytes := 0
 	if !cell.Balance.LtUint64(128) {
 		balanceBytes = cell.Balance.ByteLen()
@@ -618,7 +618,7 @@ func (hph *HexPatriciaHashed) extensionHash(key []byte, hash []byte) ([length.Ha
 	return hashBuf, nil
 }
 
-func (hph *HexPatriciaHashed) computeCellHashLen(cell *Cell, depth int) int {
+func (hph *HexPatriciaHashed) computeCellHashLen(cell *cell, depth int) int {
 	if cell.storagePlainKeyLen > 0 && depth >= 64 {
 		keyLen := 128 - depth + 1 // Length of hex key with terminator character
 		var kp, kl int
@@ -640,7 +640,7 @@ func (hph *HexPatriciaHashed) computeCellHashLen(cell *Cell, depth int) int {
 	return length.Hash + 1
 }
 
-func (hph *HexPatriciaHashed) computeCellHash(cell *Cell, depth int, buf []byte) ([]byte, error) {
+func (hph *HexPatriciaHashed) computeCellHash(cell *cell, depth int, buf []byte) ([]byte, error) {
 	var err error
 	var storageRootHash [length.Hash]byte
 	storageRootHashIsSet := false
@@ -737,7 +737,7 @@ func (hph *HexPatriciaHashed) computeCellHash(cell *Cell, depth int, buf []byte)
 }
 
 func (hph *HexPatriciaHashed) needUnfolding(hashedKey []byte) int {
-	var cell *Cell
+	var cell *cell
 	var depth int
 	if hph.activeRows == 0 {
 		if hph.trace {
@@ -868,7 +868,7 @@ func (hph *HexPatriciaHashed) unfold(hashedKey []byte, unfolding int) error {
 	if hph.trace {
 		fmt.Printf("unfold %d: activeRows: %d\n", unfolding, hph.activeRows)
 	}
-	var upCell *Cell
+	var upCell *cell
 	var touched, present bool
 	var col byte
 	var upDepth, depth int
@@ -977,7 +977,7 @@ func (hph *HexPatriciaHashed) fold() (err error) {
 		fmt.Printf("fold: activeRows: %d, currentKey: [%x], touchMap: %016b, afterMap: %016b\n", hph.activeRows, hph.currentKey[:hph.currentKeyLen], hph.touchMap[hph.activeRows-1], hph.afterMap[hph.activeRows-1])
 	}
 	// Move information to the row above
-	var upCell *Cell
+	var upCell *cell
 	var col, upDepth int
 	row := hph.activeRows - 1
 	if row == 0 {
@@ -1101,7 +1101,7 @@ func (hph *HexPatriciaHashed) fold() (err error) {
 		}
 
 		b := [...]byte{0x80}
-		cellGetter := func(nibble int, skip bool) (*Cell, error) {
+		cellGetter := func(nibble int, skip bool) (*cell, error) {
 			if skip {
 				if _, err := hph.keccak2.Write(b[:]); err != nil {
 					return nil, fmt.Errorf("failed to write empty nibble to hash: %w", err)
@@ -1172,7 +1172,7 @@ func (hph *HexPatriciaHashed) deleteCell(hashedKey []byte) {
 	if hph.trace {
 		fmt.Printf("deleteCell, activeRows = %d\n", hph.activeRows)
 	}
-	var cell *Cell
+	var cell *cell
 	if hph.activeRows == 0 { // Remove the root
 		cell = &hph.root
 		hph.rootTouched, hph.rootPresent = true, false
@@ -1204,13 +1204,13 @@ func (hph *HexPatriciaHashed) deleteCell(hashedKey []byte) {
 }
 
 // fetches cell by key and set touch/after maps
-func (hph *HexPatriciaHashed) updateCell(plainKey, hashedKey []byte, u *Update) *Cell {
+func (hph *HexPatriciaHashed) updateCell(plainKey, hashedKey []byte, u *Update) *cell {
 	if u.Deleted() {
 		hph.deleteCell(hashedKey)
 		return nil
 	}
 
-	var cell *Cell
+	var cell *cell
 	var col, depth int
 	if hph.activeRows == 0 {
 		cell = &hph.root
@@ -1502,7 +1502,7 @@ func (s *state) Decode(buf []byte) error {
 	return nil
 }
 
-func (cell *Cell) Encode() []byte {
+func (cell *cell) Encode() []byte {
 	var pos = 1
 	size := pos + 5 + cell.hashLen + cell.accountPlainKeyLen + cell.storagePlainKeyLen + cell.downHashedLen + cell.extLen // max size
 	buf := make([]byte, size)
@@ -1559,9 +1559,9 @@ const (
 	cellFlagDelete
 )
 
-func (cell *Cell) Decode(buf []byte) error {
+func (cell *cell) Decode(buf []byte) error {
 	if len(buf) < 1 {
-		return errors.New("invalid buffer size to contain Cell (at least 1 byte expected)")
+		return errors.New("invalid buffer size to contain cell (at least 1 byte expected)")
 	}
 	cell.reset()
 

@@ -123,7 +123,7 @@ func (branchData BranchData) String() string {
 	afterMap := binary.BigEndian.Uint16(branchData[2:])
 	pos := 4
 	var sb strings.Builder
-	var cell Cell
+	var cell cell
 	fmt.Fprintf(&sb, "touchMap %016b, afterMap %016b\n", touchMap, afterMap)
 	for bitset, j := touchMap, 0; bitset != 0; j++ {
 		bit := bitset & -bitset
@@ -218,7 +218,7 @@ func (be *BranchEncoder) CollectUpdate(
 	ctx PatriciaContext,
 	prefix []byte,
 	bitmap, touchMap, afterMap uint16,
-	readCell func(nibble int, skip bool) (*Cell, error),
+	readCell func(nibble int, skip bool) (*cell, error),
 ) (lastNibble int, err error) {
 
 	var update []byte
@@ -251,7 +251,7 @@ func (be *BranchEncoder) CollectUpdate(
 }
 
 // Encoded result should be copied before next call to EncodeBranch, underlying slice is reused
-func (be *BranchEncoder) EncodeBranch(bitmap, touchMap, afterMap uint16, readCell func(nibble int, skip bool) (*Cell, error)) (BranchData, int, error) {
+func (be *BranchEncoder) EncodeBranch(bitmap, touchMap, afterMap uint16, readCell func(nibble int, skip bool) (*cell, error)) (BranchData, int, error) {
 	be.buf.Reset()
 
 	if err := binary.Write(be.buf, binary.BigEndian, touchMap); err != nil {
@@ -340,7 +340,7 @@ func (be *BranchEncoder) EncodeBranch(bitmap, touchMap, afterMap uint16, readCel
 	return be.buf.Bytes(), lastNibble, nil
 }
 
-func RetrieveCellNoop(nibble int, skip bool) (*Cell, error) { return nil, nil }
+func RetrieveCellNoop(nibble int, skip bool) (*cell, error) { return nil, nil }
 
 // if fn returns nil, the original key will be copied from branchData
 func (branchData BranchData) ReplacePlainKeys(newData []byte, fn func(key []byte, isStorage bool) (newKey []byte, err error)) (BranchData, error) {
@@ -557,7 +557,7 @@ func (branchData BranchData) MergeHexBranches(branchData2 BranchData, newData []
 	return newData, nil
 }
 
-func (branchData BranchData) DecodeCells() (touchMap, afterMap uint16, row [16]*Cell, err error) {
+func (branchData BranchData) decodeCells() (touchMap, afterMap uint16, row [16]*cell, err error) {
 	touchMap = binary.BigEndian.Uint16(branchData[0:])
 	afterMap = binary.BigEndian.Uint16(branchData[2:])
 	pos := 4
@@ -567,7 +567,7 @@ func (branchData BranchData) DecodeCells() (touchMap, afterMap uint16, row [16]*
 		if afterMap&bit != 0 {
 			fieldBits := PartFlags(branchData[pos])
 			pos++
-			row[nibble] = new(Cell)
+			row[nibble] = new(cell)
 			if pos, err = row[nibble].fillFromFields(branchData, pos, fieldBits); err != nil {
 				err = fmt.Errorf("failed to fill cell at nibble %x: %w", nibble, err)
 				return
@@ -744,7 +744,7 @@ func DecodeBranchAndCollectStat(key, branch []byte, tv TrieVariant) *BranchStat 
 	if !bytes.Equal(key, []byte("state")) {
 		stat.IsRoot = false
 
-		tm, am, cells, err := BranchData(branch).DecodeCells()
+		tm, am, cells, err := BranchData(branch).decodeCells()
 		if err != nil {
 			return nil
 		}
