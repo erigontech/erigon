@@ -766,7 +766,6 @@ func BuildBtreeIndexWithDecompressor(indexPath string, kv *seg.Decompressor, com
 	if noFsync {
 		bloom.DisableFsync()
 	}
-	hasher := murmur3.New128WithSeed(salt)
 
 	args := BtIndexWriterArgs{
 		IndexFile: indexPath,
@@ -791,9 +790,7 @@ func BuildBtreeIndexWithDecompressor(indexPath string, kv *seg.Decompressor, com
 		if err != nil {
 			return err
 		}
-		hasher.Reset()
-		hasher.Write(key) //nolint:errcheck
-		hi, _ := hasher.Sum128()
+		hi, _ := murmur3.Sum128WithSeed(key, salt)
 		bloom.AddHash(hi)
 		pos, _ = getter.Skip()
 

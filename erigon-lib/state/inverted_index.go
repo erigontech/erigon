@@ -34,8 +34,8 @@ import (
 	"time"
 
 	"github.com/RoaringBitmap/roaring/roaring64"
+	"github.com/spaolacci/murmur3"
 	btree2 "github.com/tidwall/btree"
-	"github.com/twmb/murmur3"
 	"golang.org/x/sync/errgroup"
 
 	"github.com/erigontech/erigon-lib/common"
@@ -531,8 +531,9 @@ type InvertedIndexRoTx struct {
 	readers []*recsplit.IndexReader
 }
 
+// hashKey - change of salt will require re-gen of indices
 func (iit *InvertedIndexRoTx) hashKey(k []byte) (uint64, uint64) {
-	return murmur3.SeedSum128(uint64(*iit.ii.salt), uint64(*iit.ii.salt), k)
+	return murmur3.Sum128WithSeed(k, *iit.ii.salt)
 }
 
 func (iit *InvertedIndexRoTx) statelessGetter(i int) ArchiveGetter {
