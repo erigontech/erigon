@@ -171,4 +171,5 @@ type IntraBlockState interface {
 	Snapshot() int
 
 	AddLog(*types.Log)
+	PrintNonceOfTestAddr()
 }

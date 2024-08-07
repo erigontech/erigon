@@ -22,6 +22,7 @@ package state
 import (
 	"bytes"
 	"fmt"
+	"github.com/erigontech/erigon-lib/common/dbg"
 	"io"
 	"maps"
 	"math/big"
@@ -119,7 +120,6 @@ func newObject(db *IntraBlockState, address libcommon.Address, data, original *a
 		so.data.Root = trie.EmptyRoot
 	}
 	so.original.Copy(original)
-
 	return &so
 }
 
@@ -363,6 +363,9 @@ func (so *stateObject) SetNonce(nonce uint64) {
 }
 
 func (so *stateObject) setNonce(nonce uint64) {
+	if so.address == libcommon.HexToAddress("0x71562b71999873DB5b286dF957af199Ec94617F7") {
+		println("set it higher", nonce, dbg.Stack())
+	}
 	so.data.Nonce = nonce
 }
 

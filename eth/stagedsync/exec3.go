@@ -169,6 +169,7 @@ func ExecV3(ctx context.Context,
 	maxBlockNum uint64,
 	logger log.Logger,
 	initialCycle bool,
+	isMining bool,
 ) error {
 	// TODO: e35 doesn't support parallel-exec yet
 	parallel = false //nolint
@@ -356,7 +357,7 @@ func ExecV3(ctx context.Context,
 	rwsConsumed := make(chan struct{}, 1)
 	defer close(rwsConsumed)
 
-	execWorkers, applyWorker, rws, stopWorkers, waitWorkers := exec3.NewWorkersPool(lock.RLocker(), accumulator, logger, ctx, parallel, chainDb, rs, in, blockReader, chainConfig, genesis, engine, workerCount+1, cfg.dirs)
+	execWorkers, applyWorker, rws, stopWorkers, waitWorkers := exec3.NewWorkersPool(lock.RLocker(), accumulator, logger, ctx, parallel, chainDb, rs, in, blockReader, chainConfig, genesis, engine, workerCount+1, cfg.dirs, isMining)
 	defer stopWorkers()
 	applyWorker.DiscardReadList()
 
@@ -386,7 +387,7 @@ func ExecV3(ctx context.Context,
 				return err
 			}
 
-			processedTxNum, conflicts, triggers, processedBlockNum, stoppedAtBlockEnd, err := processResultQueue(ctx, in, rws, outputTxNum.Load(), rs, agg, tx, rwsConsumed, applyWorker, true, false)
+			processedTxNum, conflicts, triggers, processedBlockNum, stoppedAtBlockEnd, err := processResultQueue(ctx, in, rws, outputTxNum.Load(), rs, agg, tx, rwsConsumed, applyWorker, true, false, isMining)
 			if err != nil {
 				return err
 			}
@@ -488,7 +489,7 @@ func ExecV3(ctx context.Context,
 							rws.DrainNonBlocking()
 							applyWorker.ResetTx(tx)
 
-							processedTxNum, conflicts, triggers, processedBlockNum, stoppedAtBlockEnd, err := processResultQueue(ctx, in, rws, outputTxNum.Load(), rs, agg, tx, nil, applyWorker, false, true)
+							processedTxNum, conflicts, triggers, processedBlockNum, stoppedAtBlockEnd, err := processResultQueue(ctx, in, rws, outputTxNum.Load(), rs, agg, tx, nil, applyWorker, false, true, isMining)
 							if err != nil {
 								return err
 							}
@@ -793,7 +794,7 @@ Loop:
 			if txTask.Error != nil {
 				break Loop
 			}
-			applyWorker.RunTxTaskNoLock(txTask)
+			applyWorker.RunTxTaskNoLock(txTask, isMining)
 			if err := func() error {
 				if errors.Is(txTask.Error, context.Canceled) {
 					return err
@@ -830,13 +831,17 @@ Loop:
 					return err
 				}
 				if errors.Is(err, consensus.ErrInvalidBlock) {
-					fmt.Printf("[dbg] in unwindTo %T/n", applyTx)
-					if err := u.UnwindTo(blockNum-1, BadBlock(header.Hash(), err), applyTx); err != nil {
-						return err
+					fmt.Printf("[dbg] in unwindTo %T\n", applyTx)
+					if u != nil {
+						if err := u.UnwindTo(blockNum-1, BadBlock(header.Hash(), err), applyTx); err != nil {
+							return err
+						}
 					}
 				} else {
-					if err := u.UnwindTo(blockNum-1, ExecUnwind, applyTx); err != nil {
-						return err
+					if u != nil {
+						if err := u.UnwindTo(blockNum-1, ExecUnwind, applyTx); err != nil {
+							return err
+						}
 					}
 				}
 				break Loop
@@ -1164,7 +1169,7 @@ func blockWithSenders(ctx context.Context, db kv.RoDB, tx kv.Tx, blockReader ser
 	return b, err
 }
 
-func processResultQueue(ctx context.Context, in *state.QueueWithRetry, rws *state.ResultsQueue, outputTxNumIn uint64, rs *state.StateV3, agg *state2.Aggregator, applyTx kv.Tx, backPressure chan struct{}, applyWorker *exec3.Worker, canRetry, forceStopAtBlockEnd bool) (outputTxNum uint64, conflicts, triggers int, processedBlockNum uint64, stopedAtBlockEnd bool, err error) {
+func processResultQueue(ctx context.Context, in *state.QueueWithRetry, rws *state.ResultsQueue, outputTxNumIn uint64, rs *state.StateV3, agg *state2.Aggregator, applyTx kv.Tx, backPressure chan struct{}, applyWorker *exec3.Worker, canRetry, forceStopAtBlockEnd bool, isMining bool) (outputTxNum uint64, conflicts, triggers int, processedBlockNum uint64, stopedAtBlockEnd bool, err error) {
 	rwsIt := rws.Iter()
 	defer rwsIt.Close()
 
@@ -1182,7 +1187,7 @@ func processResultQueue(ctx context.Context, in *state.QueueWithRetry, rws *stat
 			}
 
 			// resolve first conflict right here: it's faster and conflict-free
-			applyWorker.RunTxTask(txTask)
+			applyWorker.RunTxTask(txTask, isMining)
 			if txTask.Error != nil {
 				return outputTxNum, conflicts, triggers, processedBlockNum, false, fmt.Errorf("%w: %v", consensus.ErrInvalidBlock, txTask.Error)
 			}

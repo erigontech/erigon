@@ -19,6 +19,8 @@ package stagedsync
 import (
 	"errors"
 	"fmt"
+	"github.com/erigontech/erigon-lib/kv/membatchwithdb"
+	state2 "github.com/erigontech/erigon-lib/state"
 	"io"
 	"math/big"
 	"sync/atomic"
@@ -136,7 +138,16 @@ func SpawnMiningExecStage(s *StageState, txc wrap.TxContainer, cfg MiningExecCfg
 			var simStateReader state.StateReader
 			var simStateWriter state.StateWriter
 			simStateReader = state.NewReaderV4(txc.Doms)
-			simStateWriter = state.NewWriterV4(txc.Doms)
+			//simStateWriter = state.NewWriterV4(txc.Doms)
+			mb := membatchwithdb.NewMemoryBatch(txc.Tx, "", logger) //TODO: change tmp dir
+			defer mb.Rollback()
+
+			sd, err := state2.NewSharedDomains(mb, logger)
+			if err != nil {
+				return err
+			}
+			defer sd.Close()
+			simStateWriter = state.NewWriterV4(sd)
 
 			executionAt, err := s.ExecutionAt(txc.Tx)
 			if err != nil {
@@ -228,7 +239,7 @@ func SpawnMiningExecStage(s *StageState, txc wrap.TxContainer, cfg MiningExecCfg
 	// This flag will skip checking the state root
 	execCfg.blockProduction = true
 	execS := &StageState{state: s.state, ID: stages.Execution, BlockNumber: blockHeight - 1}
-	if err = ExecBlockV3(execS, u, txc, blockHeight, context.Background(), execCfg, false, logger); err != nil {
+	if err = ExecBlockV3(execS, u, txc, blockHeight, context.Background(), execCfg, false, logger, true); err != nil {
 		logger.Error("cannot execute block execution", "err", err)
 		return err
 	}
@@ -413,6 +424,9 @@ func filterBadTransactions(transactions []types.Transaction, config chain.Config
 		// Updates account in the simulation
 		newAccount.Nonce++
 		newAccount.Balance.Sub(&account.Balance, want)
+		if sender == libcommon.HexToAddress("0x71562b71999873DB5b286dF957af199Ec94617F7") {
+			println("FILTERED NONCE IS", newAccount.Nonce)
+		}
 		if err := simStateWriter.UpdateAccountData(sender, account, newAccount); err != nil {
 			return nil, err
 		}
@@ -439,6 +453,8 @@ func addTransactionsToMiningBlock(logPrefix string, current *MiningBlock, chainC
 	noop := state.NewNoopWriter()
 
 	var miningCommitTx = func(txn types.Transaction, coinbase libcommon.Address, vmConfig *vm.Config, chainConfig chain.Config, ibs *state.IntraBlockState, current *MiningBlock) ([]*types.Log, error) {
+		println("IN MINING COMMIT")
+		ibs.PrintNonceOfTestAddr()
 		ibs.SetTxContext(txn.Hash(), libcommon.Hash{}, tcount)
 		gasSnap := gasPool.Gas()
 		blobGasSnap := gasPool.BlobGas()
@@ -523,7 +539,7 @@ LOOP:
 			txs.Pop()
 		} else if errors.Is(err, core.ErrNonceTooLow) {
 			// New head notification data race between the transaction pool and miner, shift
-			logger.Debug(fmt.Sprintf("[%s] Skipping transaction with low nonce", logPrefix), "hash", txn.Hash(), "sender", from, "nonce", txn.GetNonce())
+			logger.Debug(fmt.Sprintf("[%s] Skipping transaction with low nonce", logPrefix), "hash", txn.Hash(), "sender", from, "nonce", txn.GetNonce(), "err", err)
 			txs.Shift()
 		} else if errors.Is(err, core.ErrNonceTooHigh) {
 			// Reorg notification data race between the transaction pool and miner, skip account =
