@@ -28,6 +28,7 @@ import (
 	"github.com/erigontech/erigon-lib/types/ssz"
 	"github.com/erigontech/erigon/cl/abstract"
 	mockState "github.com/erigontech/erigon/cl/abstract/mock_services"
+	"github.com/erigontech/erigon/cl/beacon/beaconevents"
 	mockSync "github.com/erigontech/erigon/cl/beacon/synced_data/mock_services"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
@@ -73,11 +74,12 @@ func (t *attestationTestSuite) SetupTest() {
 	t.ethClock = eth_clock.NewMockEthereumClock(t.gomockCtrl)
 	t.beaconConfig = &clparams.BeaconChainConfig{SlotsPerEpoch: mockSlotsPerEpoch}
 	netConfig := &clparams.NetworkConfig{}
+	emitters := beaconevents.NewEventEmitter()
 	computeSigningRoot = func(obj ssz.HashableSSZ, domain []byte) ([32]byte, error) { return [32]byte{}, nil }
 	blsVerify = func(sig []byte, msg []byte, pubKeys []byte) (bool, error) { return true, nil }
 	ctx, cn := context.WithCancel(context.Background())
 	cn()
-	t.attService = NewAttestationService(ctx, t.mockForkChoice, t.committeeSubscibe, t.ethClock, t.syncedData, t.beaconConfig, netConfig)
+	t.attService = NewAttestationService(ctx, t.mockForkChoice, t.committeeSubscibe, t.ethClock, t.syncedData, t.beaconConfig, netConfig, emitters)
 }
 
 func (t *attestationTestSuite) TearDownTest() {

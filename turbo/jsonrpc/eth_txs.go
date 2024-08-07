@@ -55,7 +55,12 @@ func (api *APIImpl) GetTransactionByHash(ctx context.Context, txnHash common.Has
 	}
 	// Private API returns 0 if transaction is not found.
 	if blockNum == 0 && chainConfig.Bor != nil {
-		blockNum, ok, err = api._blockReader.EventLookup(ctx, tx, txnHash)
+		if api.bridgeReader != nil {
+			blockNum, ok, err = api.bridgeReader.EventTxnLookup(ctx, txnHash)
+		} else {
+			blockNum, ok, err = api._blockReader.EventLookup(ctx, tx, txnHash)
+		}
+
 		if err != nil {
 			return nil, err
 		}

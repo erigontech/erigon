@@ -503,9 +503,11 @@ func Test_HexPatriciaHashed_Sepolia(t *testing.T) {
 func Test_Cell_EncodeDecode(t *testing.T) {
 	rnd := rand.New(rand.NewSource(time.Now().UnixMilli()))
 	first := &Cell{
-		Nonce:              rnd.Uint64(),
-		HashLen:            length.Hash,
-		StorageLen:         rnd.Intn(33),
+		//Nonce:              rnd.Uint64(),
+		//StorageLen:         rnd.Intn(33),
+		//CodeHash:           [32]byte{},
+		//Storage:            [32]byte{},
+		hashLen:            length.Hash,
 		accountPlainKeyLen: length.Addr,
 		storagePlainKeyLen: length.Addr + length.Hash,
 		downHashedLen:      rnd.Intn(129),
@@ -514,8 +516,6 @@ func Test_Cell_EncodeDecode(t *testing.T) {
 		extension:          [64]byte{},
 		storagePlainKey:    [52]byte{},
 		hash:               [32]byte{},
-		CodeHash:           [32]byte{},
-		Storage:            [32]byte{},
 		accountPlainKey:    [20]byte{},
 	}
 	b := uint256.NewInt(rnd.Uint64())
@@ -528,9 +528,9 @@ func Test_Cell_EncodeDecode(t *testing.T) {
 	rnd.Read(first.hash[:])
 	rnd.Read(first.CodeHash[:])
 	rnd.Read(first.Storage[:first.StorageLen])
-	if rnd.Intn(100) > 50 {
-		first.Delete = true
-	}
+	//if rnd.Intn(100) > 50 {
+	//	first.Delete = true
+	//}
 
 	second := &Cell{}
 	second.Decode(first.Encode())
@@ -539,13 +539,13 @@ func Test_Cell_EncodeDecode(t *testing.T) {
 	require.EqualValues(t, first.downHashedKey[:], second.downHashedKey[:])
 	require.EqualValues(t, first.accountPlainKeyLen, second.accountPlainKeyLen)
 	require.EqualValues(t, first.storagePlainKeyLen, second.storagePlainKeyLen)
-	require.EqualValues(t, first.HashLen, second.HashLen)
+	require.EqualValues(t, first.hashLen, second.hashLen)
 	require.EqualValues(t, first.accountPlainKey[:], second.accountPlainKey[:])
 	require.EqualValues(t, first.storagePlainKey[:], second.storagePlainKey[:])
 	require.EqualValues(t, first.hash[:], second.hash[:])
 	require.EqualValues(t, first.extension[:first.extLen], second.extension[:second.extLen])
 	// encode doesn't code Nonce, Balance, CodeHash and Storage
-	require.EqualValues(t, first.Delete, second.Delete)
+	//require.EqualValues(t, first.Delete, second.Delete)
 }
 
 func Test_HexPatriciaHashed_StateEncode(t *testing.T) {
@@ -965,4 +965,163 @@ func Test_HexPatriciaHashed_ProcessUpdates_UniqueRepresentationInTheMiddle(t *te
 	require.EqualValues(t, batchRoot, roots[len(roots)-1],
 		"expected equal roots, got sequential [%v] != batch [%v]", hex.EncodeToString(roots[len(roots)-1]), hex.EncodeToString(batchRoot))
 	require.Lenf(t, batchRoot, 32, "root hash length should be equal to 32 bytes")
+}
+
+func TestUpdate_EncodeDecode(t *testing.T) {
+	updates := []Update{
+		{Flags: BalanceUpdate, Balance: *uint256.NewInt(123), CodeHash: [32]byte(EmptyCodeHash)},
+		{Flags: BalanceUpdate | NonceUpdate, Balance: *uint256.NewInt(45639015), Nonce: 123, CodeHash: [32]byte(EmptyCodeHash)},
+		{Flags: BalanceUpdate | NonceUpdate | CodeUpdate, Balance: *uint256.NewInt(45639015), Nonce: 123,
+			CodeHash: [length.Hash]byte{
+				0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08,
+				0x09, 0x0A, 0x0B, 0x0C, 0x0D, 0x0E, 0x0F, 0x10,
+				0x11, 0x12, 0x13, 0x14, 0x15, 0x16, 0x17, 0x18,
+				0x19, 0x1A, 0x1B, 0x1C, 0x1D, 0x1E, 0x1F, 0x20}},
+		{Flags: StorageUpdate, Storage: [length.Hash]byte{0x21, 0x22, 0x23, 0x24}, StorageLen: 4, CodeHash: [32]byte(EmptyCodeHash)},
+		{Flags: DeleteUpdate, CodeHash: [32]byte(EmptyCodeHash)},
+	}
+
+	var numBuf [10]byte
+	for i, update := range updates {
+		encoded := update.Encode(nil, numBuf[:])
+
+		decoded := Update{}
+		n, err := decoded.Decode(encoded, 0)
+		require.NoError(t, err, i)
+		require.Equal(t, len(encoded), n, i)
+
+		require.Equal(t, update.Flags, decoded.Flags, i)
+		require.Equal(t, update.Balance, decoded.Balance, i)
+		require.Equal(t, update.Nonce, decoded.Nonce, i)
+		require.Equal(t, update.CodeHash, decoded.CodeHash, i)
+		require.Equal(t, update.Storage, decoded.Storage, i)
+		require.Equal(t, update.StorageLen, decoded.StorageLen, i)
+	}
+}
+
+func TestUpdate_Merge(t *testing.T) {
+	type tcase struct {
+		a, b, e Update
+	}
+
+	updates := []tcase{
+		{
+			a: Update{Flags: BalanceUpdate, Balance: *uint256.NewInt(123), CodeHash: [32]byte(EmptyCodeHash)},
+			b: Update{Flags: BalanceUpdate | NonceUpdate, Balance: *uint256.NewInt(45639015), Nonce: 123, CodeHash: [32]byte(EmptyCodeHash)},
+			e: Update{Flags: BalanceUpdate | NonceUpdate, Balance: *uint256.NewInt(45639015), Nonce: 123, CodeHash: [32]byte(EmptyCodeHash)},
+		},
+		{
+			a: Update{Flags: BalanceUpdate | NonceUpdate, Balance: *uint256.NewInt(45639015), Nonce: 123, CodeHash: [32]byte(EmptyCodeHash)},
+			b: Update{Flags: BalanceUpdate | NonceUpdate | CodeUpdate, Balance: *uint256.NewInt(1000000), Nonce: 547, CodeHash: [32]byte(EmptyCodeHash)},
+			e: Update{Flags: BalanceUpdate | NonceUpdate | CodeUpdate, Balance: *uint256.NewInt(1000000), Nonce: 547, CodeHash: [32]byte(EmptyCodeHash)},
+		},
+		{
+			a: Update{Flags: BalanceUpdate | NonceUpdate | CodeUpdate, Balance: *uint256.NewInt(4568314), Nonce: 123, CodeHash: [32]byte(EmptyCodeHash)},
+			b: Update{Flags: BalanceUpdate | NonceUpdate | CodeUpdate, Balance: *uint256.NewInt(45639015), Nonce: 124,
+				CodeHash: [length.Hash]byte{
+					0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08,
+					0x09, 0x0A, 0x0B, 0x0C, 0x0D, 0x0E, 0x0F, 0x10,
+					0x11, 0x12, 0x13, 0x14, 0x15, 0x16, 0x17, 0x18,
+					0x19, 0x1A, 0x1B, 0x1C, 0x1D, 0x1E, 0x1F, 0x20}},
+			e: Update{Flags: BalanceUpdate | NonceUpdate | CodeUpdate, Balance: *uint256.NewInt(45639015), Nonce: 124, CodeHash: [length.Hash]byte{
+				0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08,
+				0x09, 0x0A, 0x0B, 0x0C, 0x0D, 0x0E, 0x0F, 0x10,
+				0x11, 0x12, 0x13, 0x14, 0x15, 0x16, 0x17, 0x18,
+				0x19, 0x1A, 0x1B, 0x1C, 0x1D, 0x1E, 0x1F, 0x20}},
+		},
+		{
+			a: Update{Flags: StorageUpdate, Storage: [length.Hash]byte{0x21, 0x22, 0x23, 0x24}, StorageLen: 4, CodeHash: [32]byte(EmptyCodeHash)},
+			b: Update{Flags: DeleteUpdate, CodeHash: [32]byte(EmptyCodeHash)},
+			e: Update{Flags: DeleteUpdate, CodeHash: [32]byte(EmptyCodeHash)},
+		},
+	}
+
+	var numBuf [10]byte
+	for i, tc := range updates {
+		tc.a.Merge(&tc.b)
+		encA := tc.a.Encode(nil, numBuf[:])
+		encE := tc.e.Encode(nil, numBuf[:])
+		require.EqualValues(t, encE, encA, i)
+	}
+}
+
+func TestCell_setFromUpdate(t *testing.T) {
+	rnd := rand.New(rand.NewSource(42))
+
+	b := uint256.NewInt(rnd.Uint64())
+	update := Update{}
+	update.Reset()
+
+	update.Balance = *b
+	update.Nonce = rand.Uint64()
+	rnd.Read(update.CodeHash[:])
+	update.Flags = BalanceUpdate | NonceUpdate | CodeUpdate
+
+	target := new(Cell)
+	target.setFromUpdate(&update)
+	require.True(t, update.Balance.Eq(&target.Balance))
+	require.EqualValues(t, update.Nonce, target.Nonce)
+	require.EqualValues(t, update.CodeHash, target.CodeHash)
+	require.EqualValues(t, 0, target.StorageLen)
+
+	update.Reset()
+
+	update.Balance.SetUint64(0)
+	update.Nonce = rand.Uint64()
+	rnd.Read(update.CodeHash[:])
+	update.Flags = NonceUpdate | CodeUpdate
+
+	target.reset()
+	target.setFromUpdate(&update)
+
+	require.True(t, update.Balance.Eq(&target.Balance))
+	require.EqualValues(t, update.Nonce, target.Nonce)
+	require.EqualValues(t, update.CodeHash, target.CodeHash)
+	require.EqualValues(t, 0, target.StorageLen)
+
+	update.Reset()
+
+	update.Balance.SetUint64(rnd.Uint64() + rnd.Uint64())
+	update.Nonce = rand.Uint64()
+	rnd.Read(update.Storage[:])
+	update.StorageLen = len(update.Storage)
+	update.Flags = NonceUpdate | BalanceUpdate | StorageUpdate
+
+	target.reset()
+	target.setFromUpdate(&update)
+
+	require.True(t, update.Balance.Eq(&target.Balance))
+	require.EqualValues(t, update.Nonce, target.Nonce)
+	require.EqualValues(t, update.CodeHash, target.CodeHash)
+	require.EqualValues(t, update.StorageLen, target.StorageLen)
+	require.EqualValues(t, update.Storage[:update.StorageLen], target.Storage[:target.StorageLen])
+
+	update.Reset()
+
+	update.Balance.SetUint64(rnd.Uint64() + rnd.Uint64())
+	update.Nonce = rand.Uint64()
+	rnd.Read(update.Storage[:rnd.Intn(len(update.Storage))])
+	update.StorageLen = len(update.Storage)
+	update.Flags = NonceUpdate | BalanceUpdate | StorageUpdate
+
+	target.reset()
+	target.setFromUpdate(&update)
+
+	require.True(t, update.Balance.Eq(&target.Balance))
+	require.EqualValues(t, update.Nonce, target.Nonce)
+	require.EqualValues(t, update.CodeHash, target.CodeHash)
+	require.EqualValues(t, EmptyCodeHashArray[:], target.CodeHash)
+	require.EqualValues(t, update.StorageLen, target.StorageLen)
+	require.EqualValues(t, update.Storage[:update.StorageLen], target.Storage[:target.StorageLen])
+
+	update.Reset()
+	update.Flags = DeleteUpdate
+	target.reset()
+	target.setFromUpdate(&update)
+
+	require.True(t, update.Balance.Eq(&target.Balance))
+	require.EqualValues(t, update.Nonce, target.Nonce)
+	require.EqualValues(t, EmptyCodeHashArray[:], target.CodeHash)
+	require.EqualValues(t, update.StorageLen, target.StorageLen)
+	require.EqualValues(t, update.Storage[:update.StorageLen], target.Storage[:target.StorageLen])
 }

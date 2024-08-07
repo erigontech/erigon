@@ -33,7 +33,6 @@ import (
 	"time"
 
 	"github.com/erigontech/erigon-lib/metrics"
-
 	btree2 "github.com/tidwall/btree"
 	"golang.org/x/sync/errgroup"
 

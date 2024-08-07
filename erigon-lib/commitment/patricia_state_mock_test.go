@@ -66,90 +66,67 @@ func (ms *MockState) GetBranch(prefix []byte) ([]byte, uint64, error) {
 	return nil, 0, nil
 }
 
-func (ms *MockState) GetAccount(plainKey []byte, cell *Cell) error {
+func (ms *MockState) GetAccount(plainKey []byte) (*Update, error) {
 	exBytes, ok := ms.sm[string(plainKey[:])]
 	if !ok {
 		ms.t.Logf("GetAccount not found key [%x]", plainKey)
-		cell.Delete = true
-		return nil
+		u := new(Update)
+		u.Flags = DeleteUpdate
+		return u, nil
 	}
+
 	var ex Update
 	pos, err := ex.Decode(exBytes, 0)
 	if err != nil {
 		ms.t.Fatalf("GetAccount decode existing [%x], bytes: [%x]: %v", plainKey, exBytes, err)
-		return nil
+		return nil, nil
 	}
 	if pos != len(exBytes) {
 		ms.t.Fatalf("GetAccount key [%x] leftover %d bytes in [%x], comsumed %x", plainKey, len(exBytes)-pos, exBytes, pos)
-		return nil
+		return nil, nil
 	}
 	if ex.Flags&StorageUpdate != 0 {
 		ms.t.Logf("GetAccount reading storage item for key [%x]", plainKey)
-		return errors.New("storage read by GetAccount")
+		return nil, errors.New("storage read by GetAccount")
 	}
 	if ex.Flags&DeleteUpdate != 0 {
 		ms.t.Fatalf("GetAccount reading deleted account for key [%x]", plainKey)
-		return nil
+		return nil, nil
 	}
-	if ex.Flags&BalanceUpdate != 0 {
-		cell.Balance.Set(&ex.Balance)
-	} else {
-		cell.Balance.Clear()
-	}
-	if ex.Flags&NonceUpdate != 0 {
-		cell.Nonce = ex.Nonce
-	} else {
-		cell.Nonce = 0
-	}
-	if ex.Flags&CodeUpdate != 0 {
-		copy(cell.CodeHash[:], ex.CodeHashOrStorage[:])
-	} else {
-		copy(cell.CodeHash[:], EmptyCodeHash)
-	}
-	return nil
+	return &ex, nil
 }
 
-func (ms *MockState) GetStorage(plainKey []byte, cell *Cell) error {
+func (ms *MockState) GetStorage(plainKey []byte) (*Update, error) {
 	exBytes, ok := ms.sm[string(plainKey[:])]
 	if !ok {
 		ms.t.Logf("GetStorage not found key [%x]", plainKey)
-		cell.Delete = true
-		return nil
+		u := new(Update)
+		u.Flags = DeleteUpdate
+		return u, nil
 	}
 	var ex Update
 	pos, err := ex.Decode(exBytes, 0)
 	if err != nil {
 		ms.t.Fatalf("GetStorage decode existing [%x], bytes: [%x]: %v", plainKey, exBytes, err)
-		return nil
+		return nil, nil
 	}
 	if pos != len(exBytes) {
 		ms.t.Fatalf("GetStorage key [%x] leftover bytes in [%x], comsumed %x", plainKey, exBytes, pos)
-		return nil
+		return nil, nil
 	}
 	if ex.Flags&BalanceUpdate != 0 {
 		ms.t.Logf("GetStorage reading balance for key [%x]", plainKey)
-		return nil
+		return nil, nil
 	}
 	if ex.Flags&NonceUpdate != 0 {
 		ms.t.Fatalf("GetStorage reading nonce for key [%x]", plainKey)
-		return nil
+		return nil, nil
 	}
 	if ex.Flags&CodeUpdate != 0 {
 		ms.t.Fatalf("GetStorage reading codeHash for key [%x]", plainKey)
-		return nil
+		return nil, nil
 	}
-	if ex.Flags&DeleteUpdate != 0 {
-		ms.t.Fatalf("GetStorage reading deleted item for key [%x]", plainKey)
-		return nil
-	}
-	if ex.Flags&StorageUpdate != 0 {
-		copy(cell.Storage[:], ex.CodeHashOrStorage[:])
-		cell.StorageLen = len(ex.CodeHashOrStorage)
-	} else {
-		cell.StorageLen = 0
-		cell.Storage = [length.Hash]byte{}
-	}
-	return nil
+	return &ex, nil
 }
 
 func (ms *MockState) applyPlainUpdates(plainKeys [][]byte, updates []Update) error {
@@ -177,12 +154,12 @@ func (ms *MockState) applyPlainUpdates(plainKeys [][]byte, updates []Update) err
 				}
 				if update.Flags&CodeUpdate != 0 {
 					ex.Flags |= CodeUpdate
-					copy(ex.CodeHashOrStorage[:], update.CodeHashOrStorage[:])
+					copy(ex.CodeHash[:], update.CodeHash[:])
 				}
 				if update.Flags&StorageUpdate != 0 {
 					ex.Flags |= StorageUpdate
-					copy(ex.CodeHashOrStorage[:], update.CodeHashOrStorage[:])
-					ex.ValLength = update.ValLength
+					copy(ex.Storage[:], update.Storage[:])
+					ex.StorageLen = update.StorageLen
 				}
 				ms.sm[string(key)] = ex.Encode(nil, ms.numBuf[:])
 			} else {
@@ -422,7 +399,7 @@ func (ub *UpdateBuilder) Build() (plainKeys [][]byte, updates []Update) {
 			}
 			if codeHash, ok := ub.codeHashes[string(key)]; ok {
 				u.Flags |= CodeUpdate
-				copy(u.CodeHashOrStorage[:], codeHash[:])
+				copy(u.CodeHash[:], codeHash[:])
 			}
 			if _, del := ub.deletes[string(key)]; del {
 				u.Flags = DeleteUpdate
@@ -438,9 +415,9 @@ func (ub *UpdateBuilder) Build() (plainKeys [][]byte, updates []Update) {
 			if sm, ok1 := ub.storages[string(key)]; ok1 {
 				if storage, ok2 := sm[string(key2)]; ok2 {
 					u.Flags |= StorageUpdate
-					u.CodeHashOrStorage = [length.Hash]byte{}
-					u.ValLength = len(storage)
-					copy(u.CodeHashOrStorage[:], storage)
+					u.CodeHash = [length.Hash]byte{}
+					u.StorageLen = len(storage)
+					copy(u.CodeHash[:], storage)
 				}
 			}
 		}
