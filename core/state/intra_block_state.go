@@ -25,7 +25,6 @@ import (
 	"fmt"
 	"github.com/erigontech/erigon-lib/chain"
 	libcommon "github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/common/dbg"
 	types2 "github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon/common/u256"
 	"github.com/erigontech/erigon/core/tracing"
@@ -111,14 +110,6 @@ func New(stateReader StateReader) *IntraBlockState {
 		transientStorage:  newTransientStorage(),
 		balanceInc:        map[libcommon.Address]*BalanceIncrease{},
 		//trace:             true,
-	}
-}
-
-func (sdb *IntraBlockState) PrintNonceOfTestAddr() {
-	if obj, ok := sdb.stateObjects[libcommon.HexToAddress("0x71562b71999873DB5b286dF957af199Ec94617F7")]; !ok {
-		println("NO NONCE FOR TEST ADDRESS")
-	} else {
-		println("NONCE IS:", obj.Nonce())
 	}
 }
 
@@ -236,9 +227,6 @@ func (sdb *IntraBlockState) GetBalance(addr libcommon.Address) *uint256.Int {
 func (sdb *IntraBlockState) GetNonce(addr libcommon.Address) uint64 {
 	stateObject := sdb.getStateObject(addr)
 	if stateObject != nil && !stateObject.deleted {
-		if addr == libcommon.HexToAddress("0x71562b71999873DB5b286dF957af199Ec94617F7") && stateObject.Nonce() < 60 {
-			println("get nonce", stateObject.Nonce(), dbg.Stack())
-		}
 		return stateObject.Nonce()
 	}
 
@@ -518,13 +506,10 @@ func (sdb *IntraBlockState) getStateObject(addr libcommon.Address) (stateObject 
 		}
 		return nil
 	}
-	println("ACCOUNT NONCE IS", account.Nonce)
 
 	// Insert into the live set.
 	obj := newObject(sdb, addr, account, account)
 	sdb.setStateObject(addr, obj)
-	println("IN THE END OF GET STATE OBJECT")
-	sdb.PrintNonceOfTestAddr()
 	return obj
 }
 

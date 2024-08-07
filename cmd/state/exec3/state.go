@@ -18,7 +18,6 @@ package exec3
 
 import (
 	"context"
-	"fmt"
 	"sync"
 
 	"golang.org/x/sync/errgroup"
@@ -167,13 +166,9 @@ func (rw *Worker) RunTxTaskNoLock(txTask *state.TxTask, isMining bool) {
 		// in case if we cancelled execution and commitment happened in the middle of the block, we have to process block
 		// from the beginning until committed txNum and only then disable history mode.
 		// Needed to correctly evaluate spent gas and other things.
-		println("history mode not enabled")
 		rw.SetReader(state.NewHistoryReaderV3())
 	} else if !txTask.HistoryExecution && rw.historyMode {
-		println("history mode enabled")
 		rw.SetReader(state.NewStateReaderV3(rw.rs.Domains()))
-	} else {
-		rw.logger.Error("RunTxTaskNoLock", "HistoryExecution", txTask.HistoryExecution, "HistoryMode", rw.historyMode, "reader", rw.stateReader)
 	}
 	if rw.background && rw.chainTx == nil {
 		var err error
@@ -184,7 +179,7 @@ func (rw *Worker) RunTxTaskNoLock(txTask *state.TxTask, isMining bool) {
 		rw.stateWriter.SetTx(rw.chainTx)
 		rw.chain = consensuschain.NewReader(rw.chainConfig, rw.chainTx, rw.blockReader, rw.logger)
 	}
-	fmt.Printf("[dbg] in RunTxTaskNoLock %T\n", rw.chainTx)
+
 	txTask.Error = nil
 
 	rw.stateReader.SetTxNum(txTask.TxNum)
@@ -234,7 +229,7 @@ func (rw *Worker) RunTxTaskNoLock(txTask *state.TxTask, isMining bool) {
 		}
 
 		if isMining {
-			_, _, _, err = rw.engine.FinalizeAndAssemble(rw.chainConfig, types.CopyHeader(header), ibs, txTask.Txs, txTask.Uncles, txTask.BlockReceipts, txTask.Withdrawals, txTask.Requests, rw.chain, syscall, nil, rw.logger)
+			_, txTask.Txs, txTask.BlockReceipts, err = rw.engine.FinalizeAndAssemble(rw.chainConfig, types.CopyHeader(header), ibs, txTask.Txs, txTask.Uncles, txTask.BlockReceipts, txTask.Withdrawals, txTask.Requests, rw.chain, syscall, nil, rw.logger)
 		} else {
 			_, _, _, err = rw.engine.Finalize(rw.chainConfig, types.CopyHeader(header), ibs, txTask.Txs, txTask.Uncles, txTask.BlockReceipts, txTask.Withdrawals, txTask.Requests, rw.chain, syscall, rw.logger)
 		}

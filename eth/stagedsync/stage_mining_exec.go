@@ -137,9 +137,8 @@ func SpawnMiningExecStage(s *StageState, txc wrap.TxContainer, cfg MiningExecCfg
 			yielded := mapset.NewSet[[32]byte]()
 			var simStateReader state.StateReader
 			var simStateWriter state.StateWriter
-			simStateReader = state.NewReaderV4(txc.Doms)
 			//simStateWriter = state.NewWriterV4(txc.Doms)
-			mb := membatchwithdb.NewMemoryBatch(txc.Tx, "", logger) //TODO: change tmp dir
+			mb := membatchwithdb.NewMemoryBatch(txc.Tx, cfg.tmpdir, logger)
 			defer mb.Rollback()
 
 			sd, err := state2.NewSharedDomains(mb, logger)
@@ -148,6 +147,7 @@ func SpawnMiningExecStage(s *StageState, txc wrap.TxContainer, cfg MiningExecCfg
 			}
 			defer sd.Close()
 			simStateWriter = state.NewWriterV4(sd)
+			simStateReader = state.NewReaderV4(sd)
 
 			executionAt, err := s.ExecutionAt(txc.Tx)
 			if err != nil {
@@ -424,9 +424,6 @@ func filterBadTransactions(transactions []types.Transaction, config chain.Config
 		// Updates account in the simulation
 		newAccount.Nonce++
 		newAccount.Balance.Sub(&account.Balance, want)
-		if sender == libcommon.HexToAddress("0x71562b71999873DB5b286dF957af199Ec94617F7") {
-			println("FILTERED NONCE IS", newAccount.Nonce)
-		}
 		if err := simStateWriter.UpdateAccountData(sender, account, newAccount); err != nil {
 			return nil, err
 		}
@@ -453,8 +450,6 @@ func addTransactionsToMiningBlock(logPrefix string, current *MiningBlock, chainC
 	noop := state.NewNoopWriter()
 
 	var miningCommitTx = func(txn types.Transaction, coinbase libcommon.Address, vmConfig *vm.Config, chainConfig chain.Config, ibs *state.IntraBlockState, current *MiningBlock) ([]*types.Log, error) {
-		println("IN MINING COMMIT")
-		ibs.PrintNonceOfTestAddr()
 		ibs.SetTxContext(txn.Hash(), libcommon.Hash{}, tcount)
 		gasSnap := gasPool.Gas()
 		blobGasSnap := gasPool.BlobGas()

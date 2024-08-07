@@ -315,11 +315,7 @@ func (st *StateTransition) preCheck(gasBailout bool) error {
 // nil evm execution result.
 func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (*evmtypes.ExecutionResult, error) {
 	coinbase := st.evm.Context.Coinbase
-	println("IN TRANSITION DB BEFORE GETBALANCE")
-	st.state.PrintNonceOfTestAddr()
 	senderInitBalance := st.state.GetBalance(st.msg.From()).Clone()
-	println("IN TRANSITION DB AFTER GETBALANCE")
-	st.state.PrintNonceOfTestAddr()
 	coinbaseInitBalance := st.state.GetBalance(coinbase).Clone()
 
 	// First check this message satisfies all consensus rules before
@@ -448,7 +444,6 @@ func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (*evmtype
 		ret, _, st.gasRemaining, vmerr = st.evm.Create(sender, st.data, st.gasRemaining, st.value, bailout)
 	} else {
 		// Increment the nonce for the next transaction
-		println("incrementing nonce:", msg.From().Hex(), st.state.GetNonce(sender.Address()))
 		st.state.SetNonce(msg.From(), st.state.GetNonce(sender.Address())+1)
 		ret, st.gasRemaining, vmerr = st.evm.Call(sender, st.to(), st.data, st.gasRemaining, st.value, bailout)
 	}

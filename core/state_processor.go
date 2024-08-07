@@ -60,8 +60,6 @@ func applyTransaction(config *chain.Config, engine consensus.EngineReader, gp *G
 
 	// Update the evm with the new transaction context.
 	evm.Reset(txContext, ibs)
-	println("IN ApplyTransaction")
-	ibs.PrintNonceOfTestAddr()
 	result, err := ApplyMessage(evm, msg, gp, true /* refunds */, false /* gasBailout */)
 	if err != nil {
 		return nil, nil, err
