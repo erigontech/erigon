@@ -1,7 +1,6 @@
 package stages
 
 import (
-	"context"
 	"time"
 
 	"github.com/c2h5oh/datasize"
@@ -18,7 +17,6 @@ import (
 	"github.com/ledgerwatch/erigon/chain"
 	"github.com/ledgerwatch/erigon/common/math"
 	"github.com/ledgerwatch/erigon/consensus"
-	"github.com/ledgerwatch/erigon/core"
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/state"
 	"github.com/ledgerwatch/erigon/core/types"
@@ -27,13 +25,12 @@ import (
 	"github.com/ledgerwatch/erigon/eth/stagedsync"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 	"github.com/ledgerwatch/erigon/ethdb/prune"
-	db2 "github.com/ledgerwatch/erigon/smt/pkg/db"
-	smtNs "github.com/ledgerwatch/erigon/smt/pkg/smt"
 	"github.com/ledgerwatch/erigon/turbo/services"
 	"github.com/ledgerwatch/erigon/turbo/shards"
 	"github.com/ledgerwatch/erigon/turbo/stages/headerdownload"
 	"github.com/ledgerwatch/erigon/zk/datastream/server"
 	"github.com/ledgerwatch/erigon/zk/hermez_db"
+	verifier "github.com/ledgerwatch/erigon/zk/legacy_executor_verifier"
 	"github.com/ledgerwatch/erigon/zk/tx"
 	zktx "github.com/ledgerwatch/erigon/zk/tx"
 	"github.com/ledgerwatch/erigon/zk/txpool"
@@ -43,22 +40,14 @@ import (
 )
 
 const (
-	logInterval = 20 * time.Second
-
-	// stateStreamLimit - don't accumulate state changes if jump is bigger than this amount of blocks
-	stateStreamLimit uint64 = 1_000
-
+	logInterval         = 20 * time.Second
 	transactionGasLimit = 30000000
-
-	// this is the max number of send transactions that can be included in a block without overflowing counters
-	// this is for simple send transactions, any other type would consume more counters
-	//
-	preForkId11TxLimit = 444
 )
 
 var (
-	noop            = state.NewNoopWriter()
-	blockDifficulty = new(big.Int).SetUint64(0)
+	noop                 = state.NewNoopWriter()
+	blockDifficulty      = new(big.Int).SetUint64(0)
+	SpecialZeroIndexHash = common.HexToHash("0x27AE5BA08D7291C96C8CBDDCC148BF48A6D68C7974B94356F53754EF6171D757")
 )
 
 type HasChangeSetWriter interface {
@@ -90,7 +79,8 @@ type SequenceBlockCfg struct {
 	txPool   *txpool.TxPool
 	txPoolDb kv.RwDB
 
-	yieldSize uint16
+	legacyVerifier *verifier.LegacyExecutorVerifier
+	yieldSize      uint16
 }
 
 func StageSequenceBlocksCfg(
@@ -116,6 +106,7 @@ func StageSequenceBlocksCfg(
 
 	txPool *txpool.TxPool,
 	txPoolDb kv.RwDB,
+	legacyVerifier *verifier.LegacyExecutorVerifier,
 	yieldSize uint16,
 ) SequenceBlockCfg {
 
@@ -141,6 +132,7 @@ func StageSequenceBlocksCfg(
 		zk:               zk,
 		txPool:           txPool,
 		txPoolDb:         txPoolDb,
+		legacyVerifier:   legacyVerifier,
 		yieldSize:        yieldSize,
 	}
 }
@@ -166,36 +158,6 @@ func (sCfg *SequenceBlockCfg) toErigonExecuteBlockCfg() stagedsync.ExecuteBlockC
 		sCfg.agg,
 		sCfg.zk,
 	)
-}
-
-type stageDb struct {
-	tx          kv.RwTx
-	hermezDb    *hermez_db.HermezDb
-	eridb       *db2.EriDb
-	stateReader *state.PlainStateReader
-	smt         *smtNs.SMT
-}
-
-func newStageDb(tx kv.RwTx) *stageDb {
-	sdb := &stageDb{}
-	sdb.SetTx(tx)
-	return sdb
-}
-
-func (sdb *stageDb) SetTx(tx kv.RwTx) {
-	sdb.tx = tx
-	sdb.hermezDb = hermez_db.NewHermezDb(tx)
-	sdb.eridb = db2.NewEriDb(tx)
-	sdb.stateReader = state.NewPlainStateReader(tx)
-	sdb.smt = smtNs.NewSMT(sdb.eridb, false)
-}
-
-type nextBatchL1Data struct {
-	DecodedData     []zktx.DecodedBatchL2Data
-	Coinbase        common.Address
-	L1InfoRoot      common.Hash
-	IsWorkRemaining bool
-	LimitTimestamp  uint64
 }
 
 type forkDb interface {
@@ -277,7 +239,7 @@ func prepareHeader(tx kv.RwTx, previousBlockNumber, deltaTimestamp, forcedTimest
 	}, parentBlock, nil
 }
 
-func prepareL1AndInfoTreeRelatedStuff(sdb *stageDb, decodedBlock *zktx.DecodedBatchL2Data, l1Recovery bool, proposedTimestamp uint64) (
+func prepareL1AndInfoTreeRelatedStuff(sdb *stageDb, batchState *BatchState, proposedTimestamp uint64) (
 	infoTreeIndexProgress uint64,
 	l1TreeUpdate *zktypes.L1InfoTreeUpdate,
 	l1TreeUpdateIndex uint64,
@@ -291,12 +253,12 @@ func prepareL1AndInfoTreeRelatedStuff(sdb *stageDb, decodedBlock *zktx.DecodedBa
 	// we keep track of this here
 	shouldWriteGerToContract = true
 
-	if infoTreeIndexProgress, err = stages.GetStageProgress(sdb.tx, stages.HighestUsedL1InfoIndex); err != nil {
+	if _, infoTreeIndexProgress, err = sdb.hermezDb.GetLatestBlockL1InfoTreeIndexProgress(); err != nil {
 		return
 	}
 
-	if l1Recovery {
-		l1TreeUpdateIndex = uint64(decodedBlock.L1InfoTreeIndex)
+	if batchState.isL1Recovery() {
+		l1TreeUpdateIndex = uint64(batchState.blockState.blockL1RecoveryData.L1InfoTreeIndex)
 		if l1TreeUpdate, err = sdb.hermezDb.GetL1InfoTreeUpdate(l1TreeUpdateIndex); err != nil {
 			return
 		}
@@ -321,6 +283,14 @@ func prepareL1AndInfoTreeRelatedStuff(sdb *stageDb, decodedBlock *zktx.DecodedBa
 	return
 }
 
+func prepareTickers(cfg *SequenceBlockCfg) (*time.Ticker, *time.Ticker, *time.Ticker) {
+	batchTicker := time.NewTicker(cfg.zk.SequencerBatchSealTime)
+	logTicker := time.NewTicker(10 * time.Second)
+	blockTicker := time.NewTicker(cfg.zk.SequencerBlockSealTime)
+
+	return batchTicker, logTicker, blockTicker
+}
+
 // will be called at the start of every new block created within a batch to figure out if there is a new GER
 // we can use or not.  In the special case that this is the first block we just return 0 as we need to use the
 // 0 index first before we can use 1+
@@ -342,7 +312,7 @@ func calculateNextL1TreeUpdateToUse(lastInfoIndex uint64, hermezDb *hermez_db.He
 	return nextL1Index, l1Info, nil
 }
 
-func updateSequencerProgress(tx kv.RwTx, newHeight uint64, newBatch uint64, l1InfoIndex uint64) error {
+func updateSequencerProgress(tx kv.RwTx, newHeight uint64, newBatch uint64, unwinding bool) error {
 	// now update stages that will be used later on in stageloop.go and other stages. As we're the sequencer
 	// we won't have headers stage for example as we're already writing them here
 	if err := stages.SaveStageProgress(tx, stages.Execution, newHeight); err != nil {
@@ -354,56 +324,31 @@ func updateSequencerProgress(tx kv.RwTx, newHeight uint64, newBatch uint64, l1In
 	if err := stages.SaveStageProgress(tx, stages.HighestSeenBatchNumber, newBatch); err != nil {
 		return err
 	}
-	if err := stages.SaveStageProgress(tx, stages.HighestUsedL1InfoIndex, l1InfoIndex); err != nil {
-		return err
+
+	if !unwinding {
+		if err := stages.SaveStageProgress(tx, stages.IntermediateHashes, newHeight); err != nil {
+			return err
+		}
+
+		if err := stages.SaveStageProgress(tx, stages.AccountHistoryIndex, newHeight); err != nil {
+			return err
+		}
+
+		if err := stages.SaveStageProgress(tx, stages.StorageHistoryIndex, newHeight); err != nil {
+			return err
+		}
 	}
 
 	return nil
 }
 
-func doFinishBlockAndUpdateState(
-	ctx context.Context,
-	cfg SequenceBlockCfg,
-	s *stagedsync.StageState,
-	sdb *stageDb,
-	ibs *state.IntraBlockState,
-	header *types.Header,
-	parentBlock *types.Block,
-	forkId uint64,
-	thisBatch uint64,
-	ger common.Hash,
-	l1BlockHash common.Hash,
-	transactions []types.Transaction,
-	receipts types.Receipts,
-	execResults []*core.ExecutionResult,
-	effectiveGases []uint8,
-	l1InfoIndex uint64,
-	l1Recovery bool,
-) (*types.Block, error) {
-	thisBlockNumber := header.Number.Uint64()
-
-	if cfg.accumulator != nil {
-		cfg.accumulator.StartChange(thisBlockNumber, header.Hash(), nil, false)
-	}
-
-	block, err := finaliseBlock(ctx, cfg, s, sdb, ibs, header, parentBlock, forkId, thisBatch, cfg.accumulator, ger, l1BlockHash, transactions, receipts, execResults, effectiveGases, l1Recovery)
-	if err != nil {
-		return nil, err
-	}
-
-	if err := updateSequencerProgress(sdb.tx, thisBlockNumber, thisBatch, l1InfoIndex); err != nil {
-		return nil, err
-	}
-
-	if cfg.accumulator != nil {
-		txs, err := rawdb.RawTransactionsRange(sdb.tx, thisBlockNumber, thisBlockNumber)
-		if err != nil {
-			return nil, err
+func tryHaltSequencer(batchContext *BatchContext, thisBatch uint64) {
+	if batchContext.cfg.zk.SequencerHaltOnBatchNumber != 0 && batchContext.cfg.zk.SequencerHaltOnBatchNumber == thisBatch {
+		for {
+			log.Info(fmt.Sprintf("[%s] Halt sequencer on batch %d...", batchContext.s.LogPrefix(), thisBatch))
+			time.Sleep(5 * time.Second) //nolint:gomnd
 		}
-		cfg.accumulator.ChangeTransactions(txs)
 	}
-
-	return block, nil
 }
 
 type batchChecker interface {
@@ -467,7 +412,7 @@ type BlockDataChecker struct {
 	counter uint64 // counter amount of bytes
 }
 
-func NewBlockDataChecker() *BlockDataChecker {
+func newBlockDataChecker() *BlockDataChecker {
 	return &BlockDataChecker{
 		limit:   LIMIT_120_KB,
 		counter: 0,
@@ -476,7 +421,7 @@ func NewBlockDataChecker() *BlockDataChecker {
 
 // adds bytes amounting to the block data and checks if the limit is reached
 // if the limit is reached, the data is not added, so this can be reused again for next check
-func (bdc *BlockDataChecker) AddBlockStartData(deltaTimestamp, l1InfoTreeIndex uint32) bool {
+func (bdc *BlockDataChecker) AddBlockStartData() bool {
 	blockStartBytesAmount := tx.START_BLOCK_BATCH_L2_DATA_SIZE // tx.GenerateStartBlockBatchL2Data(deltaTimestamp, l1InfoTreeIndex) returns 65 long byte array
 	// add in the changeL2Block transaction
 	if bdc.counter+blockStartBytesAmount > bdc.limit {

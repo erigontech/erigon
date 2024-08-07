@@ -76,10 +76,10 @@ func ApplyFlagsForZkConfig(ctx *cli.Context, cfg *ethconfig.Config) {
 		panic(fmt.Sprintf("could not parse sequencer batch seal time timeout value %s", sequencerBatchSealTimeVal))
 	}
 
-	sequencerNonEmptyBatchSealTimeVal := ctx.String(utils.SequencerNonEmptyBatchSealTime.Name)
-	sequencerNonEmptyBatchSealTime, err := time.ParseDuration(sequencerNonEmptyBatchSealTimeVal)
+	sequencerBatchVerificationTimeoutVal := ctx.String(utils.SequencerBatchVerificationTimeout.Name)
+	sequencerBatchVerificationTimeout, err := time.ParseDuration(sequencerBatchVerificationTimeoutVal)
 	if err != nil {
-		panic(fmt.Sprintf("could not parse sequencer batch seal time timeout value %s", sequencerNonEmptyBatchSealTimeVal))
+		panic(fmt.Sprintf("could not parse sequencer batch seal time timeout value %s", sequencerBatchSealTimeVal))
 	}
 
 	effectiveGasPriceForEthTransferVal := ctx.Float64(utils.EffectiveGasPriceForEthTransfer.Name)
@@ -130,7 +130,7 @@ func ApplyFlagsForZkConfig(ctx *cli.Context, cfg *ethconfig.Config) {
 		SmtRegenerateInMemory:                  ctx.Bool(utils.SmtRegenerateInMemory.Name),
 		SequencerBlockSealTime:                 sequencerBlockSealTime,
 		SequencerBatchSealTime:                 sequencerBatchSealTime,
-		SequencerNonEmptyBatchSealTime:         sequencerNonEmptyBatchSealTime,
+		SequencerBatchVerificationTimeout:      sequencerBatchVerificationTimeout,
 		SequencerHaltOnBatchNumber:             ctx.Uint64(utils.SequencerHaltOnBatchNumber.Name),
 		ExecutorUrls:                           strings.Split(strings.ReplaceAll(ctx.String(utils.ExecutorUrls.Name), " ", ""), ","),
 		ExecutorStrictMode:                     ctx.Bool(utils.ExecutorStrictMode.Name),

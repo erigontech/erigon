@@ -296,37 +296,6 @@ func PrepareBlockTxExecution(
 	return &blockContextImpl, excessDataGas, &blockGer, &blockL1BlockHash, nil
 }
 
-func FinalizeBlockExecutionWithHistoryWrite(
-	engine consensus.Engine, stateReader state.StateReader,
-	header *types.Header, txs types.Transactions, uncles []*types.Header,
-	stateWriter state.WriterWithChangeSets, cc *chain.Config,
-	ibs *state.IntraBlockState, receipts types.Receipts,
-	withdrawals []*types.Withdrawal, headerReader consensus.ChainHeaderReader,
-	isMining bool, excessDataGas *big.Int,
-) (newBlock *types.Block, newTxs types.Transactions, newReceipt types.Receipts, err error) {
-	newBlock, newTxs, newReceipt, err = FinalizeBlockExecution(
-		engine,
-		stateReader,
-		header,
-		txs,
-		uncles,
-		stateWriter,
-		cc,
-		ibs,
-		receipts,
-		withdrawals,
-		headerReader,
-		isMining,
-		excessDataGas,
-	)
-
-	if err := stateWriter.WriteHistory(); err != nil {
-		return nil, nil, nil, fmt.Errorf("writing history for block %d failed: %w", header.Number.Uint64(), err)
-	}
-
-	return newBlock, newTxs, newReceipt, nil
-}
-
 func CreateReceiptForBlockInfoTree(receipt *types.Receipt, chainConfig *chain.Config, blockNum uint64, execResult *ExecutionResult) *types.Receipt {
 	// [hack]TODO: remove this after bug is fixed
 	localReceipt := receipt.Clone()

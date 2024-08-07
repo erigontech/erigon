@@ -75,11 +75,11 @@ func (srv *DataStreamServer) WriteWholeBatchToStream(
 		return err
 	}
 
-	if err = srv.CommitEntriesToStreamProto(entries.Entries(), &toBlockNum, &batchNum); err != nil {
+	if err = srv.commitEntriesToStreamProto(entries.Entries()); err != nil {
 		return err
 	}
 
-	if err = srv.stream.CommitAtomicOp(); err != nil {
+	if err = srv.commitAtomicOp(&toBlockNum, &batchNum, &batchNum); err != nil {
 		return err
 	}
 
@@ -188,18 +188,18 @@ LOOP:
 		// basically commit once 80% of the entries array is filled
 		if len(entries) >= commitEntryCountLimit {
 			log.Info(fmt.Sprintf("[%s] Commit count reached, committing entries", logPrefix), "block", currentBlockNumber)
-			if err = srv.CommitEntriesToStreamProto(entries, &currentBlockNumber, &batchNum); err != nil {
+			if err = srv.commitEntriesToStreamProto(entries); err != nil {
 				return err
 			}
 			entries = make([]DataStreamEntryProto, 0, insertEntryCount)
 		}
 	}
 
-	if err = srv.CommitEntriesToStreamProto(entries, &to, &latestbatchNum); err != nil {
+	if err = srv.commitEntriesToStreamProto(entries); err != nil {
 		return err
 	}
 
-	if err = srv.stream.CommitAtomicOp(); err != nil {
+	if err = srv.commitAtomicOp(&to, &batchNum, &latestbatchNum); err != nil {
 		return err
 	}
 
@@ -257,16 +257,16 @@ func (srv *DataStreamServer) WriteBlockWithBatchStartToStream(
 	}
 
 	if batchStartEntries != nil {
-		if err = srv.CommitEntriesToStreamProto(batchStartEntries.Entries(), &blockNum, &batchNum); err != nil {
+		if err = srv.commitEntriesToStreamProto(batchStartEntries.Entries()); err != nil {
 			return err
 		}
 	}
 
-	if err = srv.CommitEntriesToStreamProto(blockEntries.Entries(), &blockNum, &batchNum); err != nil {
+	if err = srv.commitEntriesToStreamProto(blockEntries.Entries()); err != nil {
 		return err
 	}
 
-	if err = srv.stream.CommitAtomicOp(); err != nil {
+	if err = srv.commitAtomicOp(&blockNum, &batchNum, nil); err != nil {
 		return err
 	}
 
@@ -317,11 +317,15 @@ func (srv *DataStreamServer) UnwindIfNecessary(logPrefix string, reader DbReader
 
 func (srv *DataStreamServer) WriteBatchEnd(
 	reader DbReader,
-	batchNumber,
-	lastBatchNumber uint64,
+	batchNumber uint64,
 	stateRoot *common.Hash,
 	localExitRoot *common.Hash,
 ) (err error) {
+	lastBatchNumber, err := srv.GetHighestClosedBatch()
+	if err != nil {
+		return err
+	}
+
 	gers, err := reader.GetBatchGlobalExitRootsProto(lastBatchNumber, batchNumber)
 	if err != nil {
 		return err
@@ -337,11 +341,12 @@ func (srv *DataStreamServer) WriteBatchEnd(
 		return err
 	}
 
-	if err = srv.CommitEntriesToStreamProto(batchEndEntries, nil, nil); err != nil {
+	if err = srv.commitEntriesToStreamProto(batchEndEntries); err != nil {
 		return err
 	}
 
-	if err = srv.stream.CommitAtomicOp(); err != nil {
+	// we write only batch end, so dont't update latest block and batch
+	if err = srv.commitAtomicOp(nil, nil, &batchNumber); err != nil {
 		return err
 	}
 
@@ -381,12 +386,12 @@ func (srv *DataStreamServer) WriteGenesisToStream(
 	}
 	batchEnd := newBatchEndProto(ler, genesis.Root(), 0)
 
-	blockNum := uint64(0)
-	if err = srv.CommitEntriesToStreamProto([]DataStreamEntryProto{batchBookmark, batchStart, l2BlockBookmark, l2Block, batchEnd}, &blockNum, &batchNo); err != nil {
+	if err = srv.commitEntriesToStreamProto([]DataStreamEntryProto{batchBookmark, batchStart, l2BlockBookmark, l2Block, batchEnd}); err != nil {
 		return err
 	}
 
-	err = srv.stream.CommitAtomicOp()
+	// should be okay to write just zeroes here, but it is a single time in a node start, so no use to risk
+	err = srv.commitAtomicOp(nil, nil, nil)
 	if err != nil {
 		return err
 	}

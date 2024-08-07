@@ -6,15 +6,16 @@ import (
 	"fmt"
 	"strings"
 
+	"encoding/binary"
+
 	"github.com/gateway-fm/cdk-erigon-lib/common"
+	"github.com/gateway-fm/cdk-erigon-lib/common/length"
 	"github.com/ledgerwatch/erigon/accounts/abi"
 	"github.com/ledgerwatch/erigon/crypto"
 	"github.com/ledgerwatch/erigon/zk/contracts"
 	"github.com/ledgerwatch/erigon/zk/da"
 	"github.com/ledgerwatch/erigon/zk/hermez_db"
 	zktx "github.com/ledgerwatch/erigon/zk/tx"
-	"github.com/gateway-fm/cdk-erigon-lib/common/length"
-	"encoding/binary"
 )
 
 type RollupBaseEtrogBatchData struct {
@@ -168,8 +169,8 @@ type DecodedL1Data struct {
 	LimitTimestamp  uint64
 }
 
-func BreakDownL1DataByBatch(batchNo uint64, forkId uint64, reader *hermez_db.HermezDbReader) (DecodedL1Data, error) {
-	decoded := DecodedL1Data{}
+func BreakDownL1DataByBatch(batchNo uint64, forkId uint64, reader *hermez_db.HermezDbReader) (*DecodedL1Data, error) {
+	decoded := &DecodedL1Data{}
 	// we expect that the batch we're going to load in next should be in the db already because of the l1 block sync
 	// stage, if it is not there we need to panic as we're in a bad state
 	batchData, err := reader.GetL1BatchData(batchNo)

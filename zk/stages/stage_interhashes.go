@@ -218,7 +218,7 @@ func UnwindZkIntermediateHashesStage(u *stagedsync.UnwindState, s *stagedsync.St
 		expectedRootHash = syncHeadHeader.Root
 	}
 
-	root, err := unwindZkSMT(ctx, s.LogPrefix(), s.BlockNumber, u.UnwindPoint, tx, true, &expectedRootHash, quit)
+	root, err := unwindZkSMT(ctx, s.LogPrefix(), s.BlockNumber, u.UnwindPoint, tx, cfg.checkRoot, &expectedRootHash, quit)
 	if err != nil {
 		return err
 	}

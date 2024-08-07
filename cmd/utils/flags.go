@@ -481,10 +481,10 @@ var (
 		Usage: "Batch seal time. Defaults to 12s",
 		Value: "12s",
 	}
-	SequencerNonEmptyBatchSealTime = cli.StringFlag{
-		Name:  "zkevm.sequencer-non-empty-batch-seal-time",
-		Usage: "Batch seal time. Defaults to 3s",
-		Value: "3s",
+	SequencerBatchVerificationTimeout = cli.StringFlag{
+		Name:  "zkevm.sequencer-batch-verification-timeout",
+		Usage: "This is a maximum time that a batch verification could take. Including retries. This could be interpreted as maximum that that the sequencer can run without executor. Setting it to 0s will mean infinite timeout. Defaults to 30min",
+		Value: "30m",
 	}
 	SequencerHaltOnBatchNumber = cli.Uint64Flag{
 		Name:  "zkevm.sequencer-halt-on-batch-number",

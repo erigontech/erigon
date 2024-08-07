@@ -193,7 +193,7 @@ var DefaultFlags = []cli.Flag{
 	&utils.SmtRegenerateInMemory,
 	&utils.SequencerBlockSealTime,
 	&utils.SequencerBatchSealTime,
-	&utils.SequencerNonEmptyBatchSealTime,
+	&utils.SequencerBatchVerificationTimeout,
 	&utils.SequencerHaltOnBatchNumber,
 	&utils.ExecutorUrls,
 	&utils.ExecutorStrictMode,

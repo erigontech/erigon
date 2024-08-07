@@ -28,7 +28,7 @@ var (
 	ForkId                      SyncStage = "ForkId"
 	L1SequencerSync             SyncStage = "L1SequencerSync"
 	L1InfoTree                  SyncStage = "L1InfoTree"
-	HighestUsedL1InfoIndex      SyncStage = "HighestUsedL1InfoTree"
-	SequenceExecutorVerify      SyncStage = "SequenceExecutorVerify"
-	L1BlockSync                 SyncStage = "L1BlockSync"
+	// HighestUsedL1InfoIndex      SyncStage = "HighestUsedL1InfoTree"
+	SequenceExecutorVerify SyncStage = "SequenceExecutorVerify"
+	L1BlockSync            SyncStage = "L1BlockSync"
 )

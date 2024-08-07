@@ -72,7 +72,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           repository: 0xPolygon/kurtosis-cdk
-          ref: main
+          ref: 7643bbc4b6bfc44e499015ab229fba087bf79d4c
           path: kurtosis-cdk
 
       - name: Install Kurtosis CDK tools
@@ -99,13 +99,13 @@ jobs:
       - name: Configure Kurtosis CDK
         working-directory: ./kurtosis-cdk
         run: |
-          /usr/local/bin/yq -i '.args.data_availability_mode = "rollup"' cdk-erigon-sequencer-params.yml
-          /usr/local/bin/yq -i '.args.cdk_erigon_node_image = "cdk-erigon:local"' cdk-erigon-sequencer-params.yml
-          /usr/local/bin/yq -i '.args.zkevm_bridge_service_image = "hermeznetwork/zkevm-bridge-service:v0.5.0-RC8"' cdk-erigon-sequencer-params.yml
+          /usr/local/bin/yq -i '.args.data_availability_mode = "rollup"' params.yml
+          /usr/local/bin/yq -i '.args.cdk_erigon_node_image = "cdk-erigon:local"' params.yml
+          /usr/local/bin/yq -i '.args.zkevm_bridge_service_image = "hermeznetwork/zkevm-bridge-service:v0.5.0-RC8"' params.yml
 
       - name: Deploy Kurtosis CDK package
         working-directory: ./kurtosis-cdk
-        run: kurtosis run --enclave cdk-v1 --args-file cdk-erigon-sequencer-params.yml --image-download always .
+        run: kurtosis run --enclave cdk-v1 --args-file params.yml --image-download always .
 
       - name: Override gas limit for test transactions
         working-directory: ./kurtosis-cdk

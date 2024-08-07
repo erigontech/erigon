@@ -43,6 +43,7 @@ type DataStreamServer struct {
 	stream  *datastreamer.StreamServer
 	chainId uint64
 	highestBlockWritten,
+	highestClosedBatchWritten,
 	highestBatchWritten *uint64
 }
 
@@ -118,7 +119,33 @@ func NewDataStreamEntries(size int) *DataStreamEntries {
 	}
 }
 
-func (srv *DataStreamServer) CommitEntriesToStreamProto(entries []DataStreamEntryProto, latestBlockNum, latestBatchNum *uint64) error {
+func (srv *DataStreamServer) commitAtomicOp(latestBlockNum, latestBatchNum, latestClosedBatch *uint64) error {
+	if err := srv.stream.CommitAtomicOp(); err != nil {
+		return err
+	}
+
+	// copy the values in case they are changed outside the function
+	// pointers are used for easier check if we should set check them from the DS or not
+	// since 0 is a valid number, we can't use it
+	if latestBlockNum != nil {
+		a := *latestBlockNum
+		srv.highestBlockWritten = &a
+	}
+
+	if latestBatchNum != nil {
+		a := *latestBatchNum
+		srv.highestBatchWritten = &a
+	}
+
+	if latestClosedBatch != nil {
+		a := *latestClosedBatch
+		srv.highestClosedBatchWritten = &a
+	}
+
+	return nil
+}
+
+func (srv *DataStreamServer) commitEntriesToStreamProto(entries []DataStreamEntryProto) error {
 	for _, entry := range entries {
 		entryType := entry.Type()
 
@@ -136,16 +163,6 @@ func (srv *DataStreamServer) CommitEntriesToStreamProto(entries []DataStreamEntr
 				return err
 			}
 		}
-	}
-
-	if latestBlockNum != nil {
-		a := *latestBlockNum
-		srv.highestBlockWritten = &a
-	}
-
-	if latestBatchNum != nil {
-		a := *latestBatchNum
-		srv.highestBatchWritten = &a
 	}
 	return nil
 }
@@ -454,24 +471,12 @@ func (srv *DataStreamServer) GetHighestBatchNumber() (uint64, error) {
 		return *srv.highestBatchWritten, nil
 	}
 
-	header := srv.stream.GetHeader()
-
-	if header.TotalEntries == 0 {
-		return 0, nil
+	entry, found, err := srv.getLastEntryOfType(datastreamer.EntryType(types.EntryTypeBatchStart))
+	if err != nil {
+		return 0, err
 	}
-
-	entryNum := header.TotalEntries - 1
-	var err error
-	var entry datastreamer.FileEntry
-	for {
-		entry, err = srv.stream.GetEntry(entryNum)
-		if err != nil {
-			return 0, err
-		}
-		if entry.Type == datastreamer.EntryType(1) {
-			break
-		}
-		entryNum -= 1
+	if !found {
+		return 0, nil
 	}
 
 	batch, err := types.UnmarshalBatchStart(entry.Data)
@@ -480,6 +485,28 @@ func (srv *DataStreamServer) GetHighestBatchNumber() (uint64, error) {
 	}
 
 	srv.highestBatchWritten = &batch.Number
+
+	return batch.Number, nil
+}
+
+func (srv *DataStreamServer) GetHighestClosedBatch() (uint64, error) {
+	if srv.highestClosedBatchWritten != nil {
+		return *srv.highestClosedBatchWritten, nil
+	}
+	entry, found, err := srv.getLastEntryOfType(datastreamer.EntryType(types.EntryTypeBatchEnd))
+	if err != nil {
+		return 0, err
+	}
+	if !found {
+		return 0, nil
+	}
+
+	batch, err := types.UnmarshalBatchEnd(entry.Data)
+	if err != nil {
+		return 0, err
+	}
+
+	srv.highestClosedBatchWritten = &batch.Number
 
 	return batch.Number, nil
 }
@@ -522,4 +549,22 @@ func (srv *DataStreamServer) UnwindToBatchStart(batchNumber uint64) error {
 	}
 
 	return srv.stream.TruncateFile(entryNum)
+}
+
+func (srv *DataStreamServer) getLastEntryOfType(entryType datastreamer.EntryType) (datastreamer.FileEntry, bool, error) {
+	header := srv.stream.GetHeader()
+	emtryEntry := datastreamer.FileEntry{}
+
+	// loop will become infinite if using unsigned type
+	for entryNum := int64(header.TotalEntries - 1); entryNum >= 0; entryNum-- {
+		entry, err := srv.stream.GetEntry(uint64(entryNum))
+		if err != nil {
+			return emtryEntry, false, err
+		}
+		if entry.Type == entryType {
+			return entry, true, nil
+		}
+	}
+
+	return emtryEntry, false, nil
 }

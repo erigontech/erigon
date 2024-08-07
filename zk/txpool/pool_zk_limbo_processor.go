@@ -83,11 +83,12 @@ func (_this *LimboSubPoolProcessor) run() {
 		unlimitedCounters[k] = math.MaxInt32
 	}
 
+	blockNumbers := []uint64{1} // let's assume that there is a just single block number 1, because the number itself does not matter
 	invalidTxs := []*string{}
 
 	for _, limboBatch := range limboBatchDetails {
 		for _, limboTx := range limboBatch.Transactions {
-			request := legacy_executor_verifier.NewVerifierRequest(limboBatch.BatchNumber, limboBatch.ForkId, limboTx.Root, unlimitedCounters)
+			request := legacy_executor_verifier.NewVerifierRequest(limboBatch.ForkId, limboBatch.BatchNumber, blockNumbers, limboTx.Root, unlimitedCounters)
 			err := _this.verifier.VerifySync(tx, request, limboBatch.Witness, limboTx.StreamBytes, limboBatch.TimestampLimit, limboBatch.FirstBlockNumber, limboBatch.L1InfoTreeMinTimestamps)
 			if err != nil {
 				idHash := hexutils.BytesToHex(limboTx.Hash[:])
@@ -101,5 +102,4 @@ func (_this *LimboSubPoolProcessor) run() {
 	}
 
 	_this.txPool.MarkProcessedLimboDetails(size, invalidTxs)
-
 }

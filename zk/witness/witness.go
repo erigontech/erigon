@@ -192,7 +192,7 @@ func (g *Generator) generateWitness(tx kv.Tx, ctx context.Context, blocks []*eri
 
 	batch := memdb.NewMemoryBatchWithSize(tx, g.dirs.Tmp, g.zkConfig.WitnessMemdbSize)
 	defer batch.Rollback()
-	if err = populateDbTables(batch); err != nil {
+	if err = zkUtils.PopulateMemoryMutationTables(batch); err != nil {
 		return nil, err
 	}
 
@@ -349,37 +349,4 @@ func getWitnessBytes(witness *trie.Witness, debug bool) ([]byte, error) {
 		return nil, err
 	}
 	return buf.Bytes(), nil
-}
-
-func populateDbTables(batch kv.RwTx) error {
-	tables := []string{
-		db2.TableSmt,
-		db2.TableAccountValues,
-		db2.TableMetadata,
-		db2.TableHashKey,
-		db2.TableStats,
-		hermez_db.TX_PRICE_PERCENTAGE,
-		hermez_db.BLOCKBATCHES,
-		hermez_db.BATCH_BLOCKS,
-		hermez_db.BLOCK_GLOBAL_EXIT_ROOTS,
-		hermez_db.GLOBAL_EXIT_ROOTS_BATCHES,
-		hermez_db.STATE_ROOTS,
-		hermez_db.BATCH_WITNESSES,
-		hermez_db.L1_BLOCK_HASHES,
-		hermez_db.BLOCK_L1_BLOCK_HASHES,
-		hermez_db.INTERMEDIATE_TX_STATEROOTS,
-		hermez_db.REUSED_L1_INFO_TREE_INDEX,
-		hermez_db.LATEST_USED_GER,
-		hermez_db.L1_INFO_TREE_UPDATES_BY_GER,
-		hermez_db.SMT_DEPTHS,
-		hermez_db.INVALID_BATCHES,
-	}
-
-	for _, t := range tables {
-		if err := batch.CreateBucket(t); err != nil {
-			return err
-		}
-	}
-
-	return nil
 }

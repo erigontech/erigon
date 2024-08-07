@@ -4,13 +4,10 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/gateway-fm/cdk-erigon-lib/common"
 	"github.com/gateway-fm/cdk-erigon-lib/common/hexutility"
 	"github.com/gateway-fm/cdk-erigon-lib/kv"
 	"github.com/ledgerwatch/log/v3"
 
-	"github.com/ledgerwatch/erigon/common/dbutils"
-	"github.com/ledgerwatch/erigon/core/types/accounts"
 	"github.com/ledgerwatch/erigon/eth/stagedsync"
 	"github.com/ledgerwatch/erigon/zk/hermez_db"
 )
@@ -47,6 +44,9 @@ func UnwindSequenceExecutionStage(u *stagedsync.UnwindState, s *stagedsync.Stage
 func unwindSequenceExecutionStage(u *stagedsync.UnwindState, s *stagedsync.StageState, tx kv.RwTx, ctx context.Context, cfg SequenceBlockCfg, initialCycle bool) error {
 	hermezDb := hermez_db.NewHermezDb(tx)
 	fromBatch, err := hermezDb.GetBatchNoByL2Block(u.UnwindPoint)
+	if err != nil {
+		return err
+	}
 
 	if err := stagedsync.UnwindExecutionStageErigon(u, s, tx, ctx, cfg.toErigonExecuteBlockCfg(), initialCycle); err != nil {
 		return err
@@ -60,7 +60,7 @@ func unwindSequenceExecutionStage(u *stagedsync.UnwindState, s *stagedsync.Stage
 		return err
 	}
 
-	if err = updateSequencerProgress(tx, u.UnwindPoint, fromBatch, 1); err != nil {
+	if err = updateSequencerProgress(tx, u.UnwindPoint, fromBatch, true); err != nil {
 		return err
 	}
 
@@ -96,20 +96,33 @@ func UnwindSequenceExecutionStageDbWrites(ctx context.Context, u *stagedsync.Unw
 		return fmt.Errorf("get toBatch no by l2 block error: %v", err)
 	}
 
+	lastBatchToKeepBeforeFrom, err := hermezDb.GetBatchNoByL2Block(u.UnwindPoint)
+	if err != nil {
+		return fmt.Errorf("get fromBatch no by l2 block error: %v", err)
+	}
+	fromBatchForForkIdDeletion := fromBatch
+	if lastBatchToKeepBeforeFrom == fromBatch {
+		fromBatchForForkIdDeletion++
+	}
+
 	// only seq
-	if err = hermezDb.TruncateLatestUsedGers(fromBatch); err != nil {
+	if err = hermezDb.DeleteLatestUsedGers(u.UnwindPoint+1, s.BlockNumber); err != nil {
 		return fmt.Errorf("truncate latest used gers error: %v", err)
 	}
 	// only seq
-	if err = hermezDb.TruncateBlockGlobalExitRoot(u.UnwindPoint+1, s.BlockNumber); err != nil {
+	if err = hermezDb.DeleteBlockGlobalExitRoots(u.UnwindPoint+1, s.BlockNumber); err != nil {
 		return fmt.Errorf("truncate block ger error: %v", err)
 	}
 	// only seq
-	if err = hermezDb.TruncateBlockL1BlockHash(u.UnwindPoint+1, s.BlockNumber); err != nil {
+	if err = hermezDb.DeleteBlockL1BlockHashes(u.UnwindPoint+1, s.BlockNumber); err != nil {
 		return fmt.Errorf("truncate block l1 block hash error: %v", err)
 	}
 	// only seq
-	if err = hermezDb.TruncateBlockL1InfoTreeIndex(u.UnwindPoint+1, s.BlockNumber); err != nil {
+	if err = hermezDb.DeleteBlockL1InfoTreeIndexes(u.UnwindPoint+1, s.BlockNumber); err != nil {
+		return fmt.Errorf("truncate block l1 info tree index error: %v", err)
+	}
+	// only seq
+	if err = hermezDb.DeleteBlockL1InfoTreeIndexesProgress(u.UnwindPoint+1, s.BlockNumber); err != nil {
 		return fmt.Errorf("truncate block l1 info tree index error: %v", err)
 	}
 	// only seq
@@ -117,19 +130,22 @@ func UnwindSequenceExecutionStageDbWrites(ctx context.Context, u *stagedsync.Unw
 		return fmt.Errorf("truncate block batches error: %v", err)
 	}
 	// only seq
-	if err = hermezDb.TruncateForkId(fromBatch, toBatch); err != nil {
+	if err = hermezDb.DeleteForkIds(fromBatchForForkIdDeletion, toBatch); err != nil {
 		return fmt.Errorf("truncate fork id error: %v", err)
+	}
+	// only seq
+	if err = hermezDb.DeleteBatchCounters(u.UnwindPoint+1, s.BlockNumber); err != nil {
+		return fmt.Errorf("truncate block batches error: %v", err)
+	}
+	// only seq
+	if err = hermezDb.TruncateIsBatchPartiallyProcessed(fromBatch, toBatch); err != nil {
+		return fmt.Errorf("truncate fork id error: %v", err)
+	}
+	if lastBatchToKeepBeforeFrom == fromBatch {
+		if err = hermezDb.WriteIsBatchPartiallyProcessed(lastBatchToKeepBeforeFrom); err != nil {
+			return fmt.Errorf("truncate fork id error: %v", err)
+		}
 	}
 
 	return nil
-}
-
-func recoverCodeHashPlain(acc *accounts.Account, db kv.Tx, key []byte) {
-	var address common.Address
-	copy(address[:], key)
-	if acc.Incarnation > 0 && acc.IsEmptyCodeHash() {
-		if codeHash, err2 := db.GetOne(kv.PlainContractCode, dbutils.PlainGenerateStoragePrefix(address[:], acc.Incarnation)); err2 == nil {
-			copy(acc.CodeHash[:], codeHash)
-		}
-	}
 }
