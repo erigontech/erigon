@@ -110,12 +110,10 @@ func (m *Milestone) MarshalJSON() ([]byte, error) {
 }
 
 func (m *Milestone) UnmarshalJSON(b []byte) error {
-	// TODO - do we want to handle milestone_id ?
-	// (example format: 043353d6-d83f-47f8-a38f-f5062e82a6d4 - 0x142987cad41cf7111b2f186da6ab89e460037f7f)
 	dto := struct {
 		WaypointFields
 		RootHash libcommon.Hash `json:"hash"`
-		Id       MilestoneId    `json:"id"`
+		Id       MilestoneId    `json:"milestone_id"`
 	}{}
 
 	if err := json.Unmarshal(b, &dto); err != nil {

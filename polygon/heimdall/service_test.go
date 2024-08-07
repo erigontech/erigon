@@ -17,18 +17,22 @@
 package heimdall
 
 import (
+	"cmp"
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
+	"math"
 	"os"
 	"regexp"
+	"slices"
 	"sort"
 	"strconv"
 	"testing"
 
 	"github.com/stretchr/testify/require"
+	"github.com/stretchr/testify/suite"
 	"go.uber.org/mock/gomock"
+	"golang.org/x/sync/errgroup"
 
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/dir"
@@ -38,133 +42,178 @@ import (
 	"github.com/erigontech/erigon/turbo/testlog"
 )
 
-const spanTestDataDir = "testdata/amoy/spans"
-const proposerSequenceTestDataDir = "testdata/amoy/getSnapshotProposerSequence"
+const (
+	testDataDir                 = "testdata/amoy"
+	spanTestDataDir             = testDataDir + "/spans"
+	checkpointsTestDataDir      = testDataDir + "/checkpoints"
+	milestonesTestDataDir       = testDataDir + "/milestones"
+	proposerSequenceTestDataDir = testDataDir + "/getSnapshotProposerSequence"
+)
 
 func TestService(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
-	t.Cleanup(cancel)
-	ctrl := gomock.NewController(t)
-	tempDir := t.TempDir()
+	suite.Run(t, new(ServiceTestSuite))
+}
+
+type ServiceTestSuite struct {
+	suite.Suite
+	ctx                context.Context
+	cancel             context.CancelFunc
+	eg                 errgroup.Group
+	client             *MockHeimdallClient
+	service            *service
+	observedMilestones []*Milestone
+	observedSpans      []*Span
+}
+
+func (suite *ServiceTestSuite) SetupSuite() {
+	ctrl := gomock.NewController(suite.T())
+	tempDir := suite.T().TempDir()
 	dataDir := fmt.Sprintf("%s/datadir", tempDir)
-	logger := testlog.Logger(t, log.LvlDebug)
-	borConfig := params.AmoyChainConfig.Bor.(*borcfg.BorConfig)
-	client := NewMockHeimdallClient(ctrl)
-	client.EXPECT().
-		FetchSpan(gomock.Any(), gomock.Any()).
-		DoAndReturn(func(ctx context.Context, id uint64) (*Span, error) {
-			bytes, err := os.ReadFile(fmt.Sprintf("%s/span_%d.json", spanTestDataDir, id))
-			if err != nil {
-				return nil, err
-			}
-
-			var span Span
-			err = json.Unmarshal(bytes, &span)
-			if err != nil {
-				return nil, err
-			}
-
-			return &span, nil
-		}).
-		AnyTimes()
-	client.EXPECT().
-		FetchLatestSpan(gomock.Any()).
-		DoAndReturn(func(ctx context.Context) (*Span, error) {
-			files, err := dir.ReadDir(spanTestDataDir)
-			if err != nil {
-				return nil, err
-			}
-
-			sort.Slice(files, func(i, j int) bool {
-				r := regexp.MustCompile("span_([0-9]+).json")
-				matchI := r.FindStringSubmatch(files[i].Name())
-				matchJ := r.FindStringSubmatch(files[j].Name())
-				spanIdI, err := strconv.ParseInt(matchI[1], 10, 64)
-				if err != nil {
-					panic(fmt.Errorf("could not parse span id from file name: %w", err))
-				}
-				spanIdJ, err := strconv.ParseInt(matchJ[1], 10, 64)
-				if err != nil {
-					panic(fmt.Errorf("could not parse span id from file name: %w", err))
-				}
-				return spanIdI < spanIdJ
-			})
-
-			bytes, err := os.ReadFile(fmt.Sprintf("%s/%s", spanTestDataDir, files[len(files)-1].Name()))
-			if err != nil {
-				return nil, err
-			}
-
-			var span Span
-			err = json.Unmarshal(bytes, &span)
-			if err != nil {
-				return nil, err
-			}
-
-			return &span, nil
-		}).
-		AnyTimes()
-	client.EXPECT().
-		FetchCheckpointCount(gomock.Any()).
-		Return(0, nil).
-		AnyTimes()
-	client.EXPECT().
-		FetchMilestoneCount(gomock.Any()).
-		Return(0, nil).
-		AnyTimes()
-	client.EXPECT().
-		FetchFirstMilestoneNum(gomock.Any()).
-		Return(1, nil).
-		AnyTimes()
+	logger := testlog.Logger(suite.T(), log.LvlDebug)
 	store := NewMdbxServiceStore(logger, dataDir, tempDir)
-	svc := NewService(borConfig, client, store, logger)
-	go func() {
-		err := svc.Run(ctx)
-		if err != nil && !errors.Is(err, context.Canceled) {
-			panic(fmt.Errorf("service err: %w", err))
-		}
-	}()
+	borConfig := params.AmoyChainConfig.Bor.(*borcfg.BorConfig)
+	suite.ctx, suite.cancel = context.WithCancel(context.Background())
+	suite.client = NewMockHeimdallClient(ctrl)
+	suite.setupSpans()
+	suite.setupCheckpoints()
+	suite.setupMilestones()
+	suite.service = newService(borConfig, suite.client, store, logger)
 
-	err := svc.Synchronize(ctx)
-	require.NoError(t, err)
+	err := suite.service.store.Prepare(suite.ctx)
+	require.NoError(suite.T(), err)
 
-	t.Run("FetchLatestSpans", func(t *testing.T) {
-		spans, err := svc.LatestSpans(ctx, 3)
-		require.NoError(t, err)
-		require.Equal(t, spans[0].Id, SpanId(1278))
-		require.Equal(t, spans[1].Id, SpanId(1279))
-		require.Equal(t, spans[2].Id, SpanId(1280))
+	suite.service.RegisterMilestoneObserver(func(milestone *Milestone) {
+		suite.observedMilestones = append(suite.observedMilestones, milestone)
 	})
 
-	t.Run("Producers", func(t *testing.T) {
-		// span 0
-		producersTest(ctx, t, svc, 1)   // start
-		producersTest(ctx, t, svc, 255) // end
-		// span 167
-		producersTest(ctx, t, svc, 1062656) // start
-		producersTest(ctx, t, svc, 1069055) // end
-		// span 168 - first span that has changes to selected producers
-		producersTest(ctx, t, svc, 1069056) // start
-		producersTest(ctx, t, svc, 1072256) // middle
-		producersTest(ctx, t, svc, 1075455) // end
-		// span 169
-		producersTest(ctx, t, svc, 1075456) // start
-		producersTest(ctx, t, svc, 1081855) // end
-		// span 182 - second span that has changes to selected producers
-		producersTest(ctx, t, svc, 1158656) // start
-		producersTest(ctx, t, svc, 1165055) // end
-		// span 1279
-		producersTest(ctx, t, svc, 8179456) // start
-		producersTest(ctx, t, svc, 8185855) // end
-		// span 1280 - span where we discovered the need for this API
-		producersTest(ctx, t, svc, 8185856) // start
-		producersTest(ctx, t, svc, 8187309) // middle where we discovered error
-		producersTest(ctx, t, svc, 8192255) // end
+	suite.service.RegisterSpanObserver(func(span *Span) {
+		suite.observedSpans = append(suite.observedSpans, span)
+	})
+
+	suite.eg.Go(func() error {
+		return suite.service.Run(suite.ctx)
 	})
 }
 
-func producersTest(ctx context.Context, t *testing.T, svc Service, blockNum uint64) {
-	t.Run(fmt.Sprintf("blockNum_%d", blockNum), func(t *testing.T) {
+func (suite *ServiceTestSuite) TearDownSuite() {
+	suite.cancel()
+	err := suite.eg.Wait()
+	require.ErrorIs(suite.T(), err, context.Canceled)
+}
+
+func (suite *ServiceTestSuite) TestMilestones() {
+	ctx := suite.ctx
+	t := suite.T()
+	svc := suite.service
+
+	err := svc.SynchronizeMilestones(ctx)
+	require.NoError(t, err)
+
+	id, ok, err := svc.store.Milestones().LastEntityId(ctx)
+	require.NoError(t, err)
+	require.True(t, ok)
+	require.Equal(t, uint64(285050), id)
+
+	for id := uint64(284951); id <= 285050; id++ {
+		entity, ok, err := svc.store.Milestones().Entity(ctx, id)
+		require.NoError(t, err)
+		require.True(t, ok)
+		require.Equal(t, id, uint64(entity.Id))
+	}
+}
+
+func (suite *ServiceTestSuite) TestRegisterMilestoneObserver() {
+	err := suite.service.SynchronizeMilestones(suite.ctx)
+	require.NoError(suite.T(), err)
+	require.Len(suite.T(), suite.observedMilestones, 100)
+}
+
+func (suite *ServiceTestSuite) TestCheckpoints() {
+	ctx := suite.ctx
+	t := suite.T()
+	svc := suite.service
+
+	err := svc.SynchronizeCheckpoints(ctx)
+	require.NoError(t, err)
+
+	id, ok, err := svc.store.Checkpoints().LastEntityId(ctx)
+	require.NoError(t, err)
+	require.True(t, ok)
+	require.Equal(t, uint64(150), id)
+
+	for id := uint64(1); id <= 150; id++ {
+		entity, ok, err := svc.store.Checkpoints().Entity(ctx, id)
+		require.NoError(t, err)
+		require.True(t, ok)
+		require.Equal(t, id, uint64(entity.Id))
+	}
+}
+
+func (suite *ServiceTestSuite) TestSpans() {
+	ctx := suite.ctx
+	t := suite.T()
+	svc := suite.service
+
+	err := svc.SynchronizeSpans(ctx, math.MaxInt)
+	require.NoError(t, err)
+
+	id, ok, err := svc.store.Spans().LastEntityId(ctx)
+	require.NoError(t, err)
+	require.True(t, ok)
+	require.Equal(t, uint64(1280), id)
+
+	for id := uint64(0); id <= 1280; id++ {
+		entity, ok, err := svc.store.Spans().Entity(ctx, id)
+		require.NoError(t, err)
+		require.True(t, ok)
+		require.Equal(t, id, uint64(entity.Id))
+	}
+}
+
+func (suite *ServiceTestSuite) TestRegisterSpanObserver() {
+	err := suite.service.SynchronizeSpans(suite.ctx, math.MaxInt)
+	require.NoError(suite.T(), err)
+	require.Len(suite.T(), suite.observedSpans, 1281)
+}
+
+func (suite *ServiceTestSuite) TestProducers() {
+	ctx := suite.ctx
+	t := suite.T()
+	svc := suite.service
+
+	err := svc.SynchronizeSpans(ctx, math.MaxInt)
+	require.NoError(t, err)
+	// span 0
+	suite.producersSubTest(1)   // start
+	suite.producersSubTest(255) // end
+	// span 167
+	suite.producersSubTest(1062656) // start
+	suite.producersSubTest(1069055) // end
+	// span 168 - first span that has changes to selected producers
+	suite.producersSubTest(1069056) // start
+	suite.producersSubTest(1072256) // middle
+	suite.producersSubTest(1075455) // end
+	// span 169
+	suite.producersSubTest(1075456) // start
+	suite.producersSubTest(1081855) // end
+	// span 182 - second span that has changes to selected producers
+	suite.producersSubTest(1158656) // start
+	suite.producersSubTest(1165055) // end
+	// span 1279
+	suite.producersSubTest(8179456) // start
+	suite.producersSubTest(8185855) // end
+	// span 1280 - span where we discovered the need for this API
+	suite.producersSubTest(8185856) // start
+	suite.producersSubTest(8187309) // middle where we discovered error
+	suite.producersSubTest(8192255) // end
+}
+
+func (suite *ServiceTestSuite) producersSubTest(blockNum uint64) {
+	suite.Run(fmt.Sprintf("%d", blockNum), func() {
+		t := suite.T()
+		ctx := suite.ctx
+		svc := suite.service
+
 		b, err := os.ReadFile(fmt.Sprintf("%s/blockNum_%d.json", proposerSequenceTestDataDir, blockNum))
 		require.NoError(t, err)
 		var proposerSequenceResponse getSnapshotProposerSequenceResponse
@@ -184,6 +233,116 @@ func producersTest(ctx context.Context, t *testing.T, svc Service, blockNum uint
 			require.Equal(t, signer.Difficulty, producerDifficulty, errInfoMsgArgs...)
 		}
 	})
+}
+
+func (suite *ServiceTestSuite) setupSpans() {
+	files, err := dir.ReadDir(spanTestDataDir)
+	require.NoError(suite.T(), err)
+
+	slices.SortFunc(files, func(a, b os.DirEntry) int {
+		idA := extractIdFromFileName(suite.T(), a.Name(), "span")
+		idB := extractIdFromFileName(suite.T(), b.Name(), "span")
+		return cmp.Compare(idA, idB)
+	})
+
+	latestSpanFileName := files[len(files)-1].Name()
+
+	suite.client.EXPECT().
+		FetchLatestSpan(gomock.Any()).
+		DoAndReturn(func(ctx context.Context) (*Span, error) {
+			return readEntityFromFile[Span](suite.T(), fmt.Sprintf("%s/%s", spanTestDataDir, latestSpanFileName)), nil
+		}).
+		AnyTimes()
+
+	suite.client.EXPECT().
+		FetchSpan(gomock.Any(), gomock.Any()).
+		DoAndReturn(func(ctx context.Context, id uint64) (*Span, error) {
+			return readEntityFromFile[Span](suite.T(), fmt.Sprintf("%s/span_%d.json", spanTestDataDir, id)), nil
+		}).
+		AnyTimes()
+}
+
+func (suite *ServiceTestSuite) setupCheckpoints() {
+	files, err := dir.ReadDir(checkpointsTestDataDir)
+	require.NoError(suite.T(), err)
+
+	checkpoints := make(Checkpoints, len(files))
+	for i, file := range files {
+		checkpoints[i] = readEntityFromFile[Checkpoint](
+			suite.T(),
+			fmt.Sprintf("%s/%s", checkpointsTestDataDir, file.Name()),
+		)
+	}
+
+	sort.Sort(checkpoints)
+
+	suite.client.EXPECT().
+		FetchCheckpointCount(gomock.Any()).
+		Return(int64(len(files)), nil).
+		AnyTimes()
+
+	gomock.InOrder(
+		suite.client.EXPECT().
+			FetchCheckpoints(gomock.Any(), gomock.Any(), gomock.Any()).
+			Return(checkpoints, nil).
+			Times(1),
+		suite.client.EXPECT().
+			FetchCheckpoints(gomock.Any(), gomock.Any(), gomock.Any()).
+			Return(nil, nil).
+			Times(1),
+	)
+}
+
+func (suite *ServiceTestSuite) setupMilestones() {
+	files, err := dir.ReadDir(milestonesTestDataDir)
+	require.NoError(suite.T(), err)
+
+	slices.SortFunc(files, func(a, b os.DirEntry) int {
+		idA := extractIdFromFileName(suite.T(), a.Name(), "milestone")
+		idB := extractIdFromFileName(suite.T(), b.Name(), "milestone")
+		return cmp.Compare(idA, idB)
+	})
+
+	firstMilestoneId := extractIdFromFileName(suite.T(), files[0].Name(), "milestone")
+	lastMilestoneId := extractIdFromFileName(suite.T(), files[len(files)-1].Name(), "milestone")
+
+	suite.client.EXPECT().
+		FetchMilestoneCount(gomock.Any()).
+		Return(lastMilestoneId, nil).
+		AnyTimes()
+
+	suite.client.EXPECT().
+		FetchFirstMilestoneNum(gomock.Any()).
+		Return(firstMilestoneId, nil).
+		AnyTimes()
+
+	suite.client.EXPECT().
+		FetchMilestone(gomock.Any(), gomock.Any()).
+		DoAndReturn(func(ctx context.Context, id int64) (*Milestone, error) {
+			milestone := readEntityFromFile[Milestone](
+				suite.T(),
+				fmt.Sprintf("%s/milestone_%d.json", milestonesTestDataDir, id),
+			)
+			return milestone, nil
+		}).
+		AnyTimes()
+}
+
+func extractIdFromFileName(t *testing.T, fileName string, entityType string) int64 {
+	r := regexp.MustCompile(fmt.Sprintf("%s_([0-9]+).json", entityType))
+	match := r.FindStringSubmatch(fileName)
+	id, err := strconv.ParseInt(match[1], 10, 64)
+	require.NoError(t, err)
+	return id
+}
+
+func readEntityFromFile[T any](t *testing.T, filePath string) *T {
+	bytes, err := os.ReadFile(filePath)
+	require.NoError(t, err)
+	var entity T
+	err = json.Unmarshal(bytes, &entity)
+	require.NoError(t, err)
+	return &entity
 }
 
 // getSnapshotProposerSequenceResponse is reflecting the result from BOR API bor_getSnapshotProposerSequence for testing
