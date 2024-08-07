@@ -68,13 +68,13 @@ type PatriciaContext interface {
 	// GetBranch load branch node and fill up the cells
 	// For each cell, it sets the cell type, clears the modified flag, fills the hash,
 	// and for the extension, account, and leaf type, the `l` and `k`
-	GetBranch(prefix []byte) ([]byte, uint64, error)
+	Branch(prefix []byte) ([]byte, uint64, error)
 	// store branch data
 	PutBranch(prefix []byte, data []byte, prevData []byte, prevStep uint64) error
 	// fetch account with given plain key
-	GetAccount(plainKey []byte) (*Update, error)
+	Account(plainKey []byte) (*Update, error)
 	// fetch storage with given plain key
-	GetStorage(plainKey []byte) (*Update, error)
+	Storage(plainKey []byte) (*Update, error)
 }
 
 type TrieVariant string
@@ -196,7 +196,7 @@ func (be *BranchEncoder) Load(pc PatriciaContext, args etl.TransformArgs) error 
 	}
 
 	if err := be.updates.Load(nil, "", func(prefix, update []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) error {
-		stateValue, stateStep, err := pc.GetBranch(prefix)
+		stateValue, stateStep, err := pc.Branch(prefix)
 		if err != nil {
 			return err
 		}
@@ -227,7 +227,7 @@ func (be *BranchEncoder) CollectUpdate(
 		return 0, err
 	}
 
-	prev, prevStep, err := ctx.GetBranch(prefix)
+	prev, prevStep, err := ctx.Branch(prefix)
 	_ = prevStep
 	if err != nil {
 		return 0, err

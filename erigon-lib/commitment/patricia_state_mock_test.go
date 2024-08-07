@@ -58,7 +58,7 @@ func (ms *MockState) PutBranch(prefix []byte, data []byte, prevData []byte, prev
 	return nil
 }
 
-func (ms *MockState) GetBranch(prefix []byte) ([]byte, uint64, error) {
+func (ms *MockState) Branch(prefix []byte) ([]byte, uint64, error) {
 	if exBytes, ok := ms.cm[string(prefix)]; ok {
 		//fmt.Printf("GetBranch prefix %x, exBytes (%d) %x [%v]\n", prefix, len(exBytes), []byte(exBytes), BranchData(exBytes).String())
 		return exBytes, 0, nil
@@ -66,7 +66,7 @@ func (ms *MockState) GetBranch(prefix []byte) ([]byte, uint64, error) {
 	return nil, 0, nil
 }
 
-func (ms *MockState) GetAccount(plainKey []byte) (*Update, error) {
+func (ms *MockState) Account(plainKey []byte) (*Update, error) {
 	exBytes, ok := ms.sm[string(plainKey[:])]
 	if !ok {
 		//ms.t.Logf("%p GetAccount not found key [%x]", ms, plainKey)
@@ -96,7 +96,7 @@ func (ms *MockState) GetAccount(plainKey []byte) (*Update, error) {
 	return &ex, nil
 }
 
-func (ms *MockState) GetStorage(plainKey []byte) (*Update, error) {
+func (ms *MockState) Storage(plainKey []byte) (*Update, error) {
 	exBytes, ok := ms.sm[string(plainKey[:])]
 	if !ok {
 		ms.t.Logf("GetStorage not found key [%x]", plainKey)
