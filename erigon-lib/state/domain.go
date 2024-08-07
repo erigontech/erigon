@@ -1566,20 +1566,12 @@ func (dt *DomainRoTx) valsCursor(tx kv.Tx) (c kv.Cursor, err error) {
 	if dt.valsC != nil {
 		return dt.valsC, nil
 	}
-
 	if dt.d.largeVals {
 		dt.valsC, err = tx.Cursor(dt.d.valsTable)
-		if err != nil {
-			return nil, fmt.Errorf("valsCursor: %w", err)
-		}
-	} else {
-		dt.valsC, err = tx.CursorDupSort(dt.d.valsTable)
-		if err != nil {
-			return nil, fmt.Errorf("valsCursor: %w", err)
-		}
+		return dt.valsC, err
 	}
-
-	return dt.valsC, nil
+	dt.valsC, err = tx.CursorDupSort(dt.d.valsTable)
+	return dt.valsC, err
 }
 
 func (dt *DomainRoTx) getLatestFromDb(key []byte, roTx kv.Tx) ([]byte, uint64, bool, error) {
