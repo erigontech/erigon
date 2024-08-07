@@ -33,13 +33,12 @@ import (
 	"sync"
 	"time"
 
-	"github.com/erigontech/erigon-lib/common"
-
 	"github.com/RoaringBitmap/roaring/roaring64"
-	"github.com/spaolacci/murmur3"
 	btree2 "github.com/tidwall/btree"
+	"github.com/twmb/murmur3"
 	"golang.org/x/sync/errgroup"
 
+	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/assert"
 	"github.com/erigontech/erigon-lib/common/background"
 	"github.com/erigontech/erigon-lib/common/datadir"
@@ -532,6 +531,10 @@ type InvertedIndexRoTx struct {
 	readers []*recsplit.IndexReader
 }
 
+func (iit *InvertedIndexRoTx) hashKey(k []byte) (uint64, uint64) {
+	return murmur3.SeedSum128(uint64(*iit.ii.salt), uint64(*iit.ii.salt), k)
+}
+
 func (iit *InvertedIndexRoTx) statelessGetter(i int) ArchiveGetter {
 	if iit.getters == nil {
 		iit.getters = make([]ArchiveGetter, len(iit.files))
@@ -561,7 +564,7 @@ func (iit *InvertedIndexRoTx) seekInFiles(key []byte, txNum uint64) (found bool,
 		return false, 0
 	}
 
-	hi, lo := murmur3.Sum128WithSeed(key, *iit.ii.salt)
+	hi, lo := iit.hashKey(key)
 
 	for i := 0; i < len(iit.files); i++ {
 		if iit.files[i].endTxNum <= txNum {

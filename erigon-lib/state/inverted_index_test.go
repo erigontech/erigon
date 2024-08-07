@@ -40,33 +40,40 @@ import (
 	"github.com/erigontech/erigon-lib/recsplit"
 	"github.com/erigontech/erigon-lib/recsplit/eliasfano32"
 	"github.com/erigontech/erigon-lib/seg"
+	mm "github.com/twmb/murmur3"
 )
 
 func BenchmarkName(b *testing.B) {
-	data := []byte("alex")
-	seed := uint32(128)
-	b.Run("1", func(b *testing.B) {
+	data := []byte("563e653a3388b1e66ab841b480c77e8ffa6c41f38ca6a239dfa6b79dd48db229563e653a3388b1e66ab841b480c77e8ffa6c41f38ca6a239dfa6b79dd48db229")
+	seed := uint64(128)
+	seed3 := uint32(128)
+	b.Run("1.1", func(b *testing.B) {
 		for i := 0; i < b.N; i++ {
-			_, _ = murmur3.Sum128WithSeed(data, seed)
+			_, _ = murmur3.Sum128WithSeed(data, seed3)
 		}
 	})
-	b.Run("2", func(b *testing.B) {
-		h := murmur3.New128WithSeed(seed)
+	b.Run("1.2", func(b *testing.B) {
 		for i := 0; i < b.N; i++ {
-			h.Reset()
-			h.Write(data)
-			_, _ = h.Sum128()
+			_, _ = mm.SeedSum128(seed, seed, data)
 		}
 	})
 	b.Run("3", func(b *testing.B) {
 		for i := 0; i < b.N; i++ {
-			hashKey(data)
+			_, _ = hashKey(data)
+		}
+	})
+
+	seed2 := uint32(seed)
+	kk := &InvertedIndexRoTx{ii: &InvertedIndex{iiCfg: iiCfg{salt: &seed2}}}
+	b.Run("4", func(b *testing.B) {
+		for i := 0; i < b.N; i++ {
+			_, _ = kk.hashKey(data)
 		}
 	})
 }
 
 func hashKey(k []byte) (hi, lo uint64) {
-	return murmur3.Sum128WithSeed(k, 1)
+	return mm.SeedSum128(1, 1, k)
 }
 
 func testDbAndInvertedIndex(tb testing.TB, aggStep uint64, logger log.Logger) (kv.RwDB, *InvertedIndex) {

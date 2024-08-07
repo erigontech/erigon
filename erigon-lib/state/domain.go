@@ -33,8 +33,6 @@ import (
 	"time"
 
 	"github.com/erigontech/erigon-lib/metrics"
-	"github.com/spaolacci/murmur3"
-
 	btree2 "github.com/tidwall/btree"
 	"golang.org/x/sync/errgroup"
 
@@ -1390,7 +1388,7 @@ func (dt *DomainRoTx) getFromFiles(filekey []byte) (v []byte, found bool, fileSt
 		return nil, false, 0, 0, err
 	}
 
-	hi, _ := murmur3.Sum128WithSeed(filekey, *dt.d.salt)
+	hi, _ := dt.ht.iit.hashKey(filekey)
 
 	for i := len(dt.files) - 1; i >= 0; i-- {
 		if dt.d.indexList&withExistence != 0 {

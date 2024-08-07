@@ -39,6 +39,7 @@ require (
 	github.com/spaolacci/murmur3 v1.1.0
 	github.com/stretchr/testify v1.9.0
 	github.com/tidwall/btree v1.6.0
+	github.com/twmb/murmur3 v1.1.8
 	go.uber.org/mock v0.4.0
 	golang.org/x/crypto v0.25.0
 	golang.org/x/exp v0.0.0-20231226003508-02704c960a9b
