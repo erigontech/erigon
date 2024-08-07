@@ -908,7 +908,7 @@ Loop:
 					t1, t2, t3 time.Duration
 				)
 
-				if ok, err := flushAndCheckCommitmentV3(ctx, b.HeaderNoCopy(), applyTx, doms, cfg, execStage, stageProgress, parallel, logger, u, inMemExec); err != nil {
+				if ok, err := flushAndCheckCommitmentV3(ctx, b.HeaderNoCopy(), applyTx, doms, cfg, execStage, stageProgress, parallel, logger, u, inMemExec, isMining); err != nil {
 					return err
 				} else if !ok {
 					break Loop
@@ -994,7 +994,7 @@ Loop:
 
 	if u != nil && !u.HasUnwindPoint() {
 		if b != nil {
-			_, err := flushAndCheckCommitmentV3(ctx, b.HeaderNoCopy(), applyTx, doms, cfg, execStage, stageProgress, parallel, logger, u, inMemExec)
+			_, err := flushAndCheckCommitmentV3(ctx, b.HeaderNoCopy(), applyTx, doms, cfg, execStage, stageProgress, parallel, logger, u, inMemExec, isMining)
 			if err != nil {
 				return err
 			}
@@ -1068,7 +1068,7 @@ func dumpPlainStateDebug(tx kv.RwTx, doms *state2.SharedDomains) {
 }
 
 // flushAndCheckCommitmentV3 - does write state to db and then check commitment
-func flushAndCheckCommitmentV3(ctx context.Context, header *types.Header, applyTx kv.RwTx, doms *state2.SharedDomains, cfg ExecuteBlockCfg, e *StageState, maxBlockNum uint64, parallel bool, logger log.Logger, u Unwinder, inMemExec bool) (bool, error) {
+func flushAndCheckCommitmentV3(ctx context.Context, header *types.Header, applyTx kv.RwTx, doms *state2.SharedDomains, cfg ExecuteBlockCfg, e *StageState, maxBlockNum uint64, parallel bool, logger log.Logger, u Unwinder, inMemExec bool, isMining bool) (bool, error) {
 
 	// E2 state root check was in another stage - means we did flush state even if state root will not match
 	// And Unwind expecting it
@@ -1099,7 +1099,7 @@ func flushAndCheckCommitmentV3(ctx context.Context, header *types.Header, applyT
 	if cfg.blockProduction {
 		return true, nil
 	}
-	if bytes.Equal(rh, header.Root.Bytes()) {
+	if !isMining || bytes.Equal(rh, header.Root.Bytes()) {
 		if !inMemExec {
 			if err := doms.Flush(ctx, applyTx); err != nil {
 				return false, err
