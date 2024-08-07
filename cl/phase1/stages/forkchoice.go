@@ -121,9 +121,9 @@ func updateCanonicalChainInTheDatabase(ctx context.Context, tx kv.RwTx, headSlot
 		return fmt.Errorf("failed to mark root canonical: %w", err)
 	}
 
-	log.Info("[test] Canonical chain updated", "head_slot", headSlot, "cur_slot", currentSlot)
+	log.Info("[test] Canonical chain updated", "head_slot", headSlot, "cur_slot", currentSlot, "len", len(reconnectionRoots))
 	// check reorg
-	if headSlot != currentSlot {
+	if len(reconnectionRoots) > 2 {
 		oldStateRoot, err := beacon_indicies.ReadStateRootByBlockRoot(ctx, tx, oldCanonical)
 		if err != nil {
 			log.Warn("failed to read state root by block root", "err", err, "block_root", oldCanonical)
