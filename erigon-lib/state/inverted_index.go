@@ -530,21 +530,6 @@ type InvertedIndexRoTx struct {
 	files   visibleFiles
 	getters []ArchiveGetter
 	readers []*recsplit.IndexReader
-
-	_hasher murmur3.Hash128
-}
-
-func (iit *InvertedIndexRoTx) statelessHasher() murmur3.Hash128 {
-	if iit._hasher == nil {
-		iit._hasher = murmur3.New128WithSeed(*iit.ii.salt)
-	}
-	return iit._hasher
-}
-func (iit *InvertedIndexRoTx) hashKey(k []byte) (hi, lo uint64) {
-	hasher := iit.statelessHasher()
-	iit._hasher.Reset()
-	_, _ = hasher.Write(k) //nolint:errcheck
-	return hasher.Sum128()
 }
 
 func (iit *InvertedIndexRoTx) statelessGetter(i int) ArchiveGetter {
@@ -576,7 +561,7 @@ func (iit *InvertedIndexRoTx) seekInFiles(key []byte, txNum uint64) (found bool,
 		return false, 0
 	}
 
-	hi, lo := iit.hashKey(key)
+	hi, lo := murmur3.Sum128WithSeed(key, *iit.ii.salt)
 
 	for i := 0; i < len(iit.files); i++ {
 		if iit.files[i].endTxNum <= txNum {
