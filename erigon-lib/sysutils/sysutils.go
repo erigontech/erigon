@@ -69,24 +69,25 @@ func averageProceses(procs []*process.Process) []*ProcessInfo {
 
 	// Calculate average stats.
 	averageProcs := mergeProcesses(allProcsRepeats)
-	averageProcs = removeProcessesAboveThreshold(averageProcs, usageThreshold)
+	averageProcs = removeProcessesBelowThreshold(averageProcs, usageThreshold)
 
 	return averageProcs
 }
 
-func RemoveProcessesAboveThreshold(processes []*ProcessInfo, treshold float64) []*ProcessInfo {
-	return removeProcessesAboveThreshold(processes, treshold)
+func RemoveProcessesBelowThreshold(processes []*ProcessInfo, treshold float64) []*ProcessInfo {
+	return removeProcessesBelowThreshold(processes, treshold)
 }
 
-func removeProcessesAboveThreshold(processes []*ProcessInfo, treshold float64) []*ProcessInfo {
+func removeProcessesBelowThreshold(processes []*ProcessInfo, treshold float64) []*ProcessInfo {
 	// remove processes with CPU or Memory usage less than threshold
-	for i := 0; i < len(processes); i++ {
-		if processes[i].CPUUsage < treshold && processes[i].Memory < float32(treshold) {
-			processes = append(processes[:i], processes[i+1:]...)
-			i--
+	filtered := make([]*ProcessInfo, 0, len(processes))
+	for _, p := range processes {
+		if p.CPUUsage >= treshold || p.Memory >= float32(treshold) {
+			filtered = append(filtered, p)
 		}
 	}
-	return processes
+
+	return filtered
 }
 
 func MergeProcesses(allProcsRepeats [][]*ProcessInfo) []*ProcessInfo {

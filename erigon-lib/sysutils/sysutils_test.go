@@ -36,7 +36,7 @@ func TestMergeProcesses(t *testing.T) {
 	}
 }
 
-func TestRemoveProcessesAboveThreshold(t *testing.T) {
+func TestRemoveProcessesBelowThreshold(t *testing.T) {
 	initaldata := [][]*sysutils.ProcessInfo{
 		{
 			{Pid: 1, Name: "test1", CPUUsage: 1.0, Memory: 1.0},
@@ -61,7 +61,7 @@ func TestRemoveProcessesAboveThreshold(t *testing.T) {
 	}
 
 	result := sysutils.MergeProcesses(initaldata)
-	result = sysutils.RemoveProcessesAboveThreshold(result, 0.01)
+	result = sysutils.RemoveProcessesBelowThreshold(result, 0.01)
 	for _, proc := range result {
 		require.Contains(t, expected, proc)
 	}
