@@ -1204,7 +1204,7 @@ func (bb *Block) DecodeRLP(s *rlp.Stream) error {
 	return s.ListEnd()
 }
 
-func (bb Block) payloadSize() (payloadSize int, txsLen, unclesLen, withdrawalsLen, requestsLen int) {
+func (bb *Block) payloadSize() (payloadSize int, txsLen, unclesLen, withdrawalsLen, requestsLen int) {
 	// size of Header
 	headerLen := bb.header.EncodingSize()
 	payloadSize += rlp2.ListPrefixLen(headerLen) + headerLen
@@ -1233,13 +1233,13 @@ func (bb Block) payloadSize() (payloadSize int, txsLen, unclesLen, withdrawalsLe
 	return payloadSize, txsLen, unclesLen, withdrawalsLen, requestsLen
 }
 
-func (bb Block) EncodingSize() int {
+func (bb *Block) EncodingSize() int {
 	payloadSize, _, _, _, _ := bb.payloadSize()
 	return payloadSize
 }
 
 // EncodeRLP serializes b into the Ethereum RLP block format.
-func (bb Block) EncodeRLP(w io.Writer) error {
+func (bb *Block) EncodeRLP(w io.Writer) error {
 	payloadSize, txsLen, unclesLen, withdrawalsLen, _ /* requestsLen */ := bb.payloadSize()
 	var b [33]byte
 	// prefix

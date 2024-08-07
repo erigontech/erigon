@@ -273,8 +273,7 @@ func (c KZGCommitment) ComputeVersionedHash() libcommon.Hash {
 
 // validateBlobTransactionWrapper implements validate_blob_transaction_wrapper from EIP-4844
 func (txw *BlobTxWrapper) ValidateBlobTransactionWrapper() error {
-	blobTx := txw.Tx
-	l1 := len(blobTx.BlobVersionedHashes)
+	l1 := len(txw.Tx.BlobVersionedHashes)
 	if l1 == 0 {
 		return errors.New("a blob txn must contain at least one blob")
 	}
@@ -295,7 +294,7 @@ func (txw *BlobTxWrapper) ValidateBlobTransactionWrapper() error {
 	if err != nil {
 		return fmt.Errorf("error during proof verification: %v", err)
 	}
-	for i, h := range blobTx.BlobVersionedHashes {
+	for i, h := range txw.Tx.BlobVersionedHashes {
 		if computed := txw.Commitments[i].ComputeVersionedHash(); computed != h {
 			return fmt.Errorf("versioned hash %d supposedly %s but does not match computed %s", i, h, computed)
 		}

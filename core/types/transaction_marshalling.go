@@ -494,12 +494,9 @@ func (tx *SetCodeTransaction) UnmarshalJSON(input []byte) error {
 		return err
 	}
 
-	dTx := DynamicFeeTransaction{}
-	if err := dTx.unmarshalJson(dec); err != nil {
+	if err := tx.DynamicFeeTransaction.unmarshalJson(dec); err != nil {
 		return err
 	}
-
-	tx.DynamicFeeTransaction = dTx
 	tx.Authorizations = make([]Authorization, len(*dec.Authorizations))
 	for i, auth := range *dec.Authorizations {
 		tx.Authorizations[i] = auth.ToAuthorization()
