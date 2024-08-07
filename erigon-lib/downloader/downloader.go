@@ -2033,7 +2033,7 @@ func (d *Downloader) ReCalcStats(interval time.Duration) {
 
 		if torrentComplete {
 			tComplete++
-			bytesCompleted = t.Length()
+			bytesCompleted = tLen
 			delete(downloading, torrentName)
 		} else {
 			bytesCompleted = t.BytesCompleted()
@@ -2047,7 +2047,7 @@ func (d *Downloader) ReCalcStats(interval time.Duration) {
 			}
 		}
 
-		//stats.BytesCompleted += uint64(bytesCompleted)
+		stats.BytesCompleted += uint64(bytesCompleted)
 		stats.BytesTotal += uint64(tLen)
 
 		for _, peer := range peersOfThisFile {
