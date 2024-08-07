@@ -126,7 +126,7 @@ func (al accessList) accessListSorted() types2.AccessList {
 			storageKeys = append(storageKeys, slot)
 		}
 		sort.Slice(storageKeys, func(i, j int) bool {
-			return storageKeys[i].String() < storageKeys[j].String()
+			return storageKeys[i].Cmp(storageKeys[j]) < 0
 		})
 		acl = append(acl, types2.AccessTuple{
 			Address:     addr,
