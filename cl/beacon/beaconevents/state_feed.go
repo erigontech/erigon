@@ -47,3 +47,17 @@ func (f *stateFeed) SendFinalizedCheckpoint(value *FinalizedCheckpointData) int 
 		Data:  value,
 	})
 }
+
+func (f *stateFeed) SendLightClientFinalityUpdate(value *LightClientFinalityUpdateData) int {
+	return f.feed.Send(&EventStream{
+		Event: StateLightClientFinalityUpdate,
+		Data:  value,
+	})
+}
+
+func (f *stateFeed) SendLightClientOptimisticUpdate(value *LightClientOptimisticUpdateData) int {
+	return f.feed.Send(&EventStream{
+		Event: StateLightClientOptimisticUpdate,
+		Data:  value,
+	})
+}

@@ -156,7 +156,9 @@ func RunCaplinPhase1(ctx context.Context, engine execution_client.ExecutionEngin
 	emitters := beaconevents.NewEventEmitter()
 	aggregationPool := aggregation.NewAggregationPool(ctx, beaconConfig, networkConfig, ethClock)
 	validatorMonitor := monitor.NewValidatorMonitor(config.CaplinConfig.EnableValidatorMonitor, ethClock, beaconConfig, syncedDataManager)
-	forkChoice, err := forkchoice.NewForkChoiceStore(ethClock, state, engine, pool, fork_graph.NewForkGraphDisk(state, fcuFs, config.BeaconRouter), emitters, syncedDataManager, blobStorage, validatorMonitor)
+	forkChoice, err := forkchoice.NewForkChoiceStore(
+		ethClock, state, engine, pool, fork_graph.NewForkGraphDisk(state, fcuFs, config.BeaconRouter, emitters),
+		emitters, syncedDataManager, blobStorage, validatorMonitor)
 	if err != nil {
 		logger.Error("Could not create forkchoice", "err", err)
 		return err

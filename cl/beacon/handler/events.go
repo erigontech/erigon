@@ -37,14 +37,14 @@ var validTopics = map[event.EventTopic]struct{}{
 	event.OpProposerSlashing:  {},
 	event.OpVoluntaryExit:     {},
 	// state events
-	event.StateBlock:               {},
-	event.StateBlockGossip:         {},
-	event.StateChainReorg:          {},
-	event.StateFinalityUpdate:      {},
-	event.StateFinalizedCheckpoint: {},
-	event.StateHead:                {},
-	event.StateOptimisticUpdate:    {},
-	event.StatePayloadAttributes:   {},
+	event.StateBlock:                       {},
+	event.StateBlockGossip:                 {},
+	event.StateChainReorg:                  {},
+	event.StateLightClientFinalityUpdate:   {},
+	event.StateFinalizedCheckpoint:         {},
+	event.StateHead:                        {},
+	event.StateLightClientOptimisticUpdate: {},
+	event.StatePayloadAttributes:           {},
 }
 
 func (a *ApiHandler) EventSourceGetV1Events(w http.ResponseWriter, r *http.Request) {

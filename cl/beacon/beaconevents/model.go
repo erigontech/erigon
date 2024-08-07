@@ -37,14 +37,14 @@ type (
 
 // State event topics
 const (
-	StateHead                EventTopic = "head"
-	StateBlock               EventTopic = "block"
-	StateBlockGossip         EventTopic = "block_gossip"
-	StateFinalizedCheckpoint EventTopic = "finalized_checkpoint"
-	StateChainReorg          EventTopic = "chain_reorg"
-	StateFinalityUpdate      EventTopic = "light_client_finality_update"
-	StateOptimisticUpdate    EventTopic = "light_client_optimistic_update"
-	StatePayloadAttributes   EventTopic = "payload_attributes"
+	StateHead                        EventTopic = "head"
+	StateBlock                       EventTopic = "block"
+	StateBlockGossip                 EventTopic = "block_gossip"
+	StateFinalizedCheckpoint         EventTopic = "finalized_checkpoint"
+	StateChainReorg                  EventTopic = "chain_reorg"
+	StateLightClientFinalityUpdate   EventTopic = "light_client_finality_update"
+	StateLightClientOptimisticUpdate EventTopic = "light_client_optimistic_update"
+	StatePayloadAttributes           EventTopic = "payload_attributes"
 )
 
 // State event data types
