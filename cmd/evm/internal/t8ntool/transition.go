@@ -429,7 +429,7 @@ func getTransaction(txJson jsonrpc.RPCTransaction) (types.Transaction, error) {
 	commonTx.S.SetFromBig(txJson.S.ToInt())
 	if txJson.Type == types.LegacyTxType || txJson.Type == types.AccessListTxType {
 		legacyTx := types.LegacyTx{
-			CommonTx: commonTx,
+			CommonTx: commonTx, //nolint:govet it's ok to copy here - because it's constructor of object - no parallel access yet
 			GasPrice: gasPrice,
 		}
 
@@ -438,7 +438,7 @@ func getTransaction(txJson jsonrpc.RPCTransaction) (types.Transaction, error) {
 		}
 
 		return &types.AccessListTx{
-			LegacyTx:   legacyTx,
+			LegacyTx:   legacyTx, //nolint:govet it's ok to copy here - because it's constructor of object - no parallel access yet
 			ChainID:    chainId,
 			AccessList: *txJson.Accesses,
 		}, nil
@@ -460,7 +460,7 @@ func getTransaction(txJson jsonrpc.RPCTransaction) (types.Transaction, error) {
 		}
 
 		dynamicFeeTx := types.DynamicFeeTransaction{
-			CommonTx:   commonTx,
+			CommonTx:   commonTx, //nolint:govet it's ok to copy here - because it's constructor of object - no parallel access yet
 			ChainID:    chainId,
 			Tip:        tip,
 			FeeCap:     feeCap,
@@ -477,7 +477,7 @@ func getTransaction(txJson jsonrpc.RPCTransaction) (types.Transaction, error) {
 		}
 
 		return &types.SetCodeTransaction{
-			DynamicFeeTransaction: dynamicFeeTx,
+			DynamicFeeTransaction: dynamicFeeTx, //nolint:govet it's ok to copy here - because it's constructor of object - no parallel access yet
 			Authorizations:        auths,
 		}, nil
 	} else {
