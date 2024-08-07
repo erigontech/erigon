@@ -324,6 +324,19 @@ func BenchmarkEncodeBlock(b *testing.B) {
 	}
 }
 
+func BenchmarkName(b *testing.B) {
+	header := &Header{
+		Difficulty: math.BigPow(11, 11),
+		Number:     math.BigPow(2, 9),
+		GasLimit:   12345678,
+		GasUsed:    1476322,
+		Time:       9876543,
+		Extra:      []byte("coolest block on chain"),
+	}
+	for i := 0; i < b.N; i++ {
+		header.Hash()
+	}
+}
 func makeBenchBlock() *Block {
 	var (
 		key, _   = crypto.GenerateKey()
