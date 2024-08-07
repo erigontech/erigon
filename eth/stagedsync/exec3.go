@@ -744,7 +744,7 @@ Loop:
 				HistoryExecution: offsetFromBlockBeginning > 0 && txIndex < int(offsetFromBlockBeginning),
 
 				BlockReceipts: receipts,
-				Config:        cfg.genesis.Config,
+				Config:        chainConfig,
 			}
 			if txTask.TxNum <= txNumInDB && txTask.TxNum > 0 {
 				inputTxNum++

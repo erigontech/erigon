@@ -299,6 +299,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 				return err
 			}
 			config.Genesis = genesisConfig
+			fmt.Println(config.Genesis)
 		}
 
 		h, err := rawdb.ReadCanonicalHash(tx, 0)
@@ -347,8 +348,11 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 	}
 	chainKv = backend.chainDB //nolint
 
-	if err := backend.setUpSnapDownloader(ctx, config.Downloader); err != nil {
-		return nil, err
+	// Can happen in some configurations
+	if config.Downloader.ChainName != "" {
+		if err := backend.setUpSnapDownloader(ctx, config.Downloader); err != nil {
+			return nil, err
+		}
 	}
 
 	kvRPC := remotedbserver.NewKvServer(ctx, backend.chainDB, allSnapshots, allBorSnapshots, agg, logger)
