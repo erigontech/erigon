@@ -61,3 +61,10 @@ func (f *stateFeed) SendLightClientOptimisticUpdate(value *LightClientOptimistic
 		Data:  value,
 	})
 }
+
+func (f *stateFeed) SendChainReorg(value *ChainReorgData) int {
+	return f.feed.Send(&EventStream{
+		Event: StateChainReorg,
+		Data:  value,
+	})
+}

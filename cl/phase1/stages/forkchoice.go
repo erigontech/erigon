@@ -58,12 +58,11 @@ func computeAndNotifyServicesOfNewForkChoice(ctx context.Context, logger log.Log
 // updateCanonicalChainInTheDatabase updates the canonical chain in the database by marking the given head slot and root as canonical.
 // It traces back through parent block roots to find the common ancestor with the existing canonical chain, truncates the chain,
 // and then marks the new chain segments as canonical.
-func updateCanonicalChainInTheDatabase(ctx context.Context, tx kv.RwTx, headSlot uint64, headRoot common.Hash) error {
+func updateCanonicalChainInTheDatabase(ctx context.Context, tx kv.RwTx, headSlot uint64, headRoot common.Hash, cfg *Cfg) error {
 	type canonicalEntry struct {
 		slot uint64
 		root common.Hash
 	}
-
 	currentRoot := headRoot
 	currentSlot := headSlot
 	// Read the current canonical block root for the given slot
@@ -71,6 +70,7 @@ func updateCanonicalChainInTheDatabase(ctx context.Context, tx kv.RwTx, headSlot
 	if err != nil {
 		return fmt.Errorf("failed to read canonical block root: %w", err)
 	}
+	oldCanonical := common.Hash(currentCanonical[:])
 
 	// List of new canonical chain entries
 	reconnectionRoots := []canonicalEntry{{currentSlot, currentRoot}}
@@ -119,6 +119,32 @@ func updateCanonicalChainInTheDatabase(ctx context.Context, tx kv.RwTx, headSlot
 	// Mark the head slot and root as canonical
 	if err := beacon_indicies.MarkRootCanonical(ctx, tx, headSlot, headRoot); err != nil {
 		return fmt.Errorf("failed to mark root canonical: %w", err)
+	}
+
+	log.Info("[test] Canonical chain updated", "head_slot", headSlot, "cur_slot", currentSlot)
+	// check reorg
+	if headSlot != currentSlot {
+		oldStateRoot, err := beacon_indicies.ReadStateRootByBlockRoot(ctx, tx, oldCanonical)
+		if err != nil {
+			log.Warn("failed to read state root by block root", "err", err, "block_root", oldCanonical)
+			return nil
+		}
+		newStateRoot, err := beacon_indicies.ReadStateRootByBlockRoot(ctx, tx, headRoot)
+		if err != nil {
+			log.Warn("failed to read state root by block root", "err", err, "block_root", headRoot)
+			return nil
+		}
+		reorgEvent := &beaconevents.ChainReorgData{
+			Slot:                headSlot,
+			Depth:               currentSlot - headSlot,
+			OldHeadBlock:        oldCanonical,
+			NewHeadBlock:        headRoot,
+			OldHeadState:        oldStateRoot,
+			NewHeadState:        newStateRoot,
+			Epoch:               headSlot / cfg.beaconCfg.SlotsPerEpoch,
+			ExecutionOptimistic: cfg.forkChoice.IsRootOptimistic(headRoot),
+		}
+		cfg.emitter.State().SendChainReorg(reorgEvent)
 	}
 
 	return nil
@@ -252,7 +278,7 @@ func doForkchoiceRoutine(ctx context.Context, logger log.Logger, cfg *Cfg, args 
 	}
 	defer tx.Rollback()
 
-	if err := updateCanonicalChainInTheDatabase(ctx, tx, headSlot, headRoot); err != nil {
+	if err := updateCanonicalChainInTheDatabase(ctx, tx, headSlot, headRoot, cfg); err != nil {
 		return fmt.Errorf("failed to update canonical chain in the database: %w", err)
 	}
 
