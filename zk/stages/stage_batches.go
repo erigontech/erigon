@@ -2,6 +2,7 @@ package stages
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"math/big"
 	"sync/atomic"
@@ -152,7 +153,7 @@ func SpawnStageBatches(
 
 	highestVerifiedBatch, err := stages.GetStageProgress(tx, stages.L1VerificationsBatchNo)
 	if err != nil {
-		return fmt.Errorf("could not retrieve l1 verifications batch no progress")
+		return errors.New("could not retrieve l1 verifications batch no progress")
 	}
 
 	startSyncTime := time.Now()
@@ -530,7 +531,7 @@ func UnwindBatchesStage(u *stagedsync.UnwindState, tx kv.RwTx, cfg BatchesCfg, c
 	//////////////////////////////////
 	highestVerifiedBatch, err := stages.GetStageProgress(tx, stages.L1VerificationsBatchNo)
 	if err != nil {
-		return fmt.Errorf("could not retrieve l1 verifications batch no progress")
+		return errors.New("could not retrieve l1 verifications batch no progress")
 	}
 
 	fromBatchPrev, err := hermezDb.GetBatchNoByL2Block(fromBlock - 1)
@@ -662,14 +663,14 @@ func UnwindBatchesStage(u *stagedsync.UnwindState, tx kv.RwTx, cfg BatchesCfg, c
 	/////////////////////////////////////////////
 	// iterate until a block with lower batch number is found
 	// this is the last block of the previous batch and the highest hashable block for verifications
-	highestHashableL2BlockNo := uint64(fromBlock)
+	highestHashableL2BlockNo := fromBlock
 	for i := fromBlock; i > 0; i-- {
 		batchNo, err := hermezDb.GetBatchNoByL2Block(i)
 		if err != nil {
 			return fmt.Errorf("get batch no by l2 block error: %v", err)
 		}
 		if batchNo == fromBatch-1 {
-			highestHashableL2BlockNo = uint64(i)
+			highestHashableL2BlockNo = i
 			break
 		}
 	}
@@ -884,11 +885,11 @@ func writeL2Block(eriDb ErigonDb, hermezDb HermezDb, l2Block *types.FullL2Block,
 		return fmt.Errorf("write body error: %v", err)
 	}
 
-	if err := hermezDb.WriteForkId(l2Block.BatchNumber, uint64(l2Block.ForkId)); err != nil {
+	if err := hermezDb.WriteForkId(l2Block.BatchNumber, l2Block.ForkId); err != nil {
 		return fmt.Errorf("write block batch error: %v", err)
 	}
 
-	if err := hermezDb.WriteForkIdBlockOnce(uint64(l2Block.ForkId), l2Block.L2BlockNumber); err != nil {
+	if err := hermezDb.WriteForkIdBlockOnce(l2Block.ForkId, l2Block.L2BlockNumber); err != nil {
 		return fmt.Errorf("write fork id block error: %v", err)
 	}
 

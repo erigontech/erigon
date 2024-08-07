@@ -435,7 +435,7 @@ func (bdc *BlockDataChecker) AddBlockStartData() bool {
 
 func (bdc *BlockDataChecker) AddTransactionData(txL2Data []byte) bool {
 	encodedLen := uint64(len(txL2Data))
-	if bdc.counter+uint64(encodedLen) > bdc.limit {
+	if bdc.counter+encodedLen > bdc.limit {
 		return true
 	}
 

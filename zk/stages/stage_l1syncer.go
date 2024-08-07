@@ -41,7 +41,7 @@ type IL1Syncer interface {
 	Stop()
 }
 
-var ErrStateRootMismatch = fmt.Errorf("state root mismatch")
+var ErrStateRootMismatch = errors.New("state root mismatch")
 
 type L1SyncerCfg struct {
 	db     kv.RwDB
@@ -122,16 +122,13 @@ Loop:
 	for {
 		select {
 		case logs := <-logsChan:
-			logsForQueryBlocks := make([]ethTypes.Log, 0, len(logs))
 			infos := make([]*types.L1BatchInfo, 0, len(logs))
 			batchLogTypes := make([]BatchLogType, 0, len(logs))
 			for _, l := range logs {
+				l := l
 				info, batchLogType := parseLogType(cfg.zkCfg.L1RollupId, &l)
 				infos = append(infos, &info)
 				batchLogTypes = append(batchLogTypes, batchLogType)
-				if batchLogType == logL1InfoTreeUpdate {
-					logsForQueryBlocks = append(logsForQueryBlocks, l)
-				}
 			}
 
 			for i, l := range logs {
@@ -218,8 +215,10 @@ func parseLogType(l1RollupId uint64, log *ethTypes.Log) (l1BatchInfo types.L1Bat
 	bigRollupId := new(big.Int).SetUint64(l1RollupId)
 	isRollupIdMatching := log.Topics[1] == common.BigToHash(bigRollupId)
 
-	var batchNum uint64
-	var stateRoot, l1InfoRoot common.Hash
+	var (
+		batchNum              uint64
+		stateRoot, l1InfoRoot common.Hash
+	)
 
 	switch log.Topics[0] {
 	case contracts.SequencedBatchTopicPreEtrog:

@@ -2,8 +2,9 @@ package stages
 
 import (
 	"testing"
-	zktypes "github.com/ledgerwatch/erigon/zk/types"
+
 	zktx "github.com/ledgerwatch/erigon/zk/tx"
+	zktypes "github.com/ledgerwatch/erigon/zk/types"
 )
 
 type mockChecker struct {

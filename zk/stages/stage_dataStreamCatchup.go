@@ -82,9 +82,12 @@ func CatchupDatastream(ctx context.Context, logPrefix string, tx kv.RwTx, stream
 	reader := hermez_db.NewHermezDbReader(tx)
 
 	// get the latest verified batch number
-	var err error
-	var latestBatch uint64
-	var finalBlockNumber uint64
+	var (
+		err              error
+		latestBatch      uint64
+		finalBlockNumber uint64
+	)
+
 	if sequencer.IsSequencer() {
 		if hasExecutors {
 			latestBatch, err = stages.GetStageProgress(tx, stages.SequenceExecutorVerify)
@@ -99,10 +102,6 @@ func CatchupDatastream(ctx context.Context, logPrefix string, tx kv.RwTx, stream
 			// without execution we save progress block by block and can populate an unfinished batch to stream
 			// otherwise we get a batch gap in the stream because a few blocks don't get written to the stream
 			// and then execution continues from the middle of the batch
-			latestBatch, err = stages.GetStageProgress(tx, stages.HighestSeenBatchNumber)
-			if err != nil {
-				return 0, err
-			}
 			finalBlockNumber, err = stages.GetStageProgress(tx, stages.Execution)
 			if err != nil {
 				return 0, err

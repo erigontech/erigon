@@ -1,6 +1,7 @@
 package stages
 
 import (
+	"errors"
 	"fmt"
 
 	"github.com/gateway-fm/cdk-erigon-lib/common"
@@ -303,7 +304,7 @@ func regenerateIntermediateHashes(ctx context.Context, logPrefix string, db kv.R
 			sk := fmt.Sprintf("0x%032x", key)
 			v := fmt.Sprintf("0x%032x", acc)
 
-			as[sk] = fmt.Sprint(TrimHexString(v))
+			as[sk] = TrimHexString(v)
 		}
 		return nil
 	})
@@ -518,7 +519,7 @@ func unwindZkSMT(ctx context.Context, logPrefix string, from, to uint64, db kv.R
 	for i := from; i >= to+1; i-- {
 		select {
 		case <-ctx.Done():
-			return trie.EmptyRoot, fmt.Errorf(fmt.Sprintf("[%s] Context done", logPrefix))
+			return trie.EmptyRoot, errors.New(fmt.Sprintf("[%s] Context done", logPrefix))
 		default:
 		}
 

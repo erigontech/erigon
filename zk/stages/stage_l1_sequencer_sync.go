@@ -2,6 +2,7 @@ package stages
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
@@ -172,11 +173,11 @@ Loop:
 
 func CreateL1InfoTreeUpdate(l ethTypes.Log, header *ethTypes.Header) (*types.L1InfoTreeUpdate, error) {
 	if len(l.Topics) != 3 {
-		return nil, fmt.Errorf("received log for info tree that did not have 3 topics")
+		return nil, errors.New("received log for info tree that did not have 3 topics")
 	}
 
 	if l.BlockNumber != header.Number.Uint64() {
-		return nil, fmt.Errorf("received log for info tree that did not match the block number")
+		return nil, errors.New("received log for info tree that did not match the block number")
 	}
 
 	mainnetExitRoot := l.Topics[1]
