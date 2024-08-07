@@ -1507,10 +1507,8 @@ func (b *Block) Copy() *Block {
 // WithSeal returns a new block with the data from b but the header replaced with
 // the sealed one.
 func (b *Block) WithSeal(header *Header) *Block {
-	cpy := *header
-
 	return &Block{
-		header:       &cpy,
+		header:       CopyHeader(header),
 		transactions: b.transactions,
 		uncles:       b.uncles,
 		withdrawals:  b.withdrawals,

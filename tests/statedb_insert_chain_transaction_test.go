@@ -256,11 +256,11 @@ func TestInsertIncorrectStateRootAllFundsRoot(t *testing.T) {
 	}
 
 	// BLOCK 1
-	incorrectHeader := *chain.Headers[0] // Copy header, not just pointer
+	incorrectHeader := chain.Headers[0] // Copy header, not just pointer
 	incorrectHeader.Root = chain.Headers[1].Root
 
-	incorrectBlock := types.NewBlock(&incorrectHeader, chain.Blocks[0].Transactions(), chain.Blocks[0].Uncles(), chain.Receipts[0], nil, nil)
-	incorrectChain := &core.ChainPack{Blocks: []*types.Block{incorrectBlock}, Headers: []*types.Header{&incorrectHeader}, TopBlock: incorrectBlock}
+	incorrectBlock := types.NewBlock(incorrectHeader, chain.Blocks[0].Transactions(), chain.Blocks[0].Uncles(), chain.Receipts[0], nil, nil)
+	incorrectChain := &core.ChainPack{Blocks: []*types.Block{incorrectBlock}, Headers: []*types.Header{incorrectHeader}, TopBlock: incorrectBlock}
 	if err = m.InsertChain(incorrectChain); err == nil {
 		t.Fatal("should fail")
 	}
