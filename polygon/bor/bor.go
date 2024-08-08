@@ -1048,10 +1048,6 @@ func (c *Bor) Finalize(config *chain.Config, header *types.Header, state *state.
 		return nil, types.Receipts{}, nil, err
 	}
 
-	// No block rewards in PoA, so the state remains as is and uncles are dropped
-	// header.Root = state.IntermediateRoot(chain.Config().IsSpuriousDragon(header.Number.Uint64()))
-	header.UncleHash = types.CalcUncleHash(nil)
-
 	// Set state sync data to blockchain
 	// bc := chain.(*core.BlockChain)
 	// bc.SetStateSync(stateSyncData)

@@ -1190,7 +1190,11 @@ func CopyHeader(h *Header) *Header {
 		cpy.RequestsRoot = new(libcommon.Hash)
 		cpy.RequestsRoot.SetBytes(h.RequestsRoot.Bytes())
 	}
-	cpy.hash.Store(nil)
+	cpy.mutable = h.mutable
+	if hash := h.hash.Load(); hash != nil {
+		hashCopy := *hash
+		cpy.hash.Store(&hashCopy)
+	}
 	return &cpy
 }
 
