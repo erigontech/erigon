@@ -587,7 +587,7 @@ func checkIfStateSnapshotsPublishable(dir datadir.Dirs) error {
 			return err
 		}
 		if info.IsDir() && path != dir.SnapDomain {
-			return fmt.Errorf("unexpected directory %s", path)
+			return fmt.Errorf("unexpected directory in domain (%s) check %s", dir.SnapDomain, path)
 		}
 		if path == dir.SnapDomain {
 			return nil
@@ -646,12 +646,10 @@ func checkIfStateSnapshotsPublishable(dir datadir.Dirs) error {
 		if err != nil {
 			return err
 		}
-		if info.IsDir() {
-			return fmt.Errorf("unexpected directory %s", path)
-		}
 
 		if info.IsDir() && path != dir.SnapIdx {
-			return fmt.Errorf("unexpected directory %s", path)
+			return fmt.Errorf("unexpected directory in idx (%s) check %s", dir.SnapIdx, path)
+
 		}
 		if path == dir.SnapIdx {
 			return nil
