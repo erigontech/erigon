@@ -74,7 +74,8 @@ func updateCanonicalChainInTheDatabase(ctx context.Context, tx kv.RwTx, headSlot
 	if err != nil {
 		return fmt.Errorf("failed to read canonical block root: %w", err)
 	}
-	oldCanonical := common.Hash(currentCanonical[:])
+	oldCanonical := common.Hash{}
+	copy(oldCanonical[:], currentCanonical[:])
 
 	// List of new canonical chain entries
 	reconnectionRoots := []canonicalEntry{{currentSlot, currentRoot}}
