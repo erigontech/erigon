@@ -1016,8 +1016,7 @@ func (sd *SharedDomains) AppendablePut(name kv.Appendable, ts kv.TxnId, v []byte
 
 type SharedDomainsCommitmentContext struct {
 	sharedDomains *SharedDomains
-	discard       bool
-	mode          commitment.Mode
+	discard       bool // could be replaced with using ModeDisabled
 	branches      map[string]cachedBranch
 	keccak        cryptozerocopy.KeccakState
 	updates       *commitment.Updates
@@ -1028,7 +1027,6 @@ type SharedDomainsCommitmentContext struct {
 func NewSharedDomainsCommitmentContext(sd *SharedDomains, mode commitment.Mode, trieVariant commitment.TrieVariant) *SharedDomainsCommitmentContext {
 	ctx := &SharedDomainsCommitmentContext{
 		sharedDomains: sd,
-		mode:          mode,
 		discard:       dbg.DiscardCommitment(),
 		branches:      make(map[string]cachedBranch),
 		keccak:        sha3.NewLegacyKeccak256().(cryptozerocopy.KeccakState),
@@ -1053,7 +1051,7 @@ func (sdc *SharedDomainsCommitmentContext) ResetBranchCache() {
 	clear(sdc.branches)
 }
 
-func (sdc *SharedDomainsCommitmentContext) GetBranch(pref []byte) ([]byte, uint64, error) {
+func (sdc *SharedDomainsCommitmentContext) Branch(pref []byte) ([]byte, uint64, error) {
 	cached, ok := sdc.branches[string(pref)]
 	if ok {
 		// cached value is already transformed/clean to read.
@@ -1063,10 +1061,10 @@ func (sdc *SharedDomainsCommitmentContext) GetBranch(pref []byte) ([]byte, uint6
 
 	v, step, err := sdc.sharedDomains.LatestCommitment(pref)
 	if err != nil {
-		return nil, 0, fmt.Errorf("GetBranch failed: %w", err)
+		return nil, 0, fmt.Errorf("Branch failed: %w", err)
 	}
 	if sdc.sharedDomains.trace {
-		fmt.Printf("[SDC] GetBranch: %x: %x\n", pref, v)
+		fmt.Printf("[SDC] Branch: %x: %x\n", pref, v)
 	}
 	// Trie reads prefix during unfold and after everything is ready reads it again to Merge update, if any, so
 	// cache branch until ResetBranchCache called
@@ -1087,7 +1085,7 @@ func (sdc *SharedDomainsCommitmentContext) PutBranch(prefix []byte, data []byte,
 	return sdc.sharedDomains.updateCommitmentData(prefix, data, prevData, prevStep)
 }
 
-func (sdc *SharedDomainsCommitmentContext) GetAccount(plainKey []byte) (*commitment.Update, error) {
+func (sdc *SharedDomainsCommitmentContext) Account(plainKey []byte) (*commitment.Update, error) {
 	encAccount, _, err := sdc.sharedDomains.DomainGet(kv.AccountsDomain, plainKey, nil)
 	if err != nil {
 		return nil, fmt.Errorf("GetAccount failed: %w", err)
@@ -1133,7 +1131,7 @@ func (sdc *SharedDomainsCommitmentContext) GetAccount(plainKey []byte) (*commitm
 	return u, nil
 }
 
-func (sdc *SharedDomainsCommitmentContext) GetStorage(plainKey []byte) (*commitment.Update, error) {
+func (sdc *SharedDomainsCommitmentContext) Storage(plainKey []byte) (*commitment.Update, error) {
 	// Look in the summary table first
 	enc, _, err := sdc.sharedDomains.DomainGet(kv.StorageDomain, plainKey, nil)
 	if err != nil {
@@ -1198,7 +1196,7 @@ func (sdc *SharedDomainsCommitmentContext) ComputeCommitment(ctx context.Context
 
 	updateCount := sdc.updates.Size()
 	if sdc.sharedDomains.trace {
-		defer sdc.sharedDomains.logger.Trace("ComputeCommitment", "block", blockNum, "keys", updateCount, "mode", sdc.mode)
+		defer sdc.sharedDomains.logger.Trace("ComputeCommitment", "block", blockNum, "keys", updateCount, "mode", sdc.updates.Mode())
 	}
 	if updateCount == 0 {
 		rootHash, err = sdc.patriciaTrie.RootHash()
@@ -1209,22 +1207,9 @@ func (sdc *SharedDomainsCommitmentContext) ComputeCommitment(ctx context.Context
 	sdc.patriciaTrie.SetTrace(sdc.sharedDomains.trace)
 	sdc.Reset()
 
-	switch sdc.mode {
-	case commitment.ModeDirect:
-		rootHash, err = sdc.patriciaTrie.ProcessTree(ctx, sdc.updates, logPrefix)
-		if err != nil {
-			return nil, err
-		}
-	case commitment.ModeUpdate:
-		touchedKeys, updates := sdc.updates.List(true)
-		rootHash, err = sdc.patriciaTrie.ProcessUpdates(ctx, touchedKeys, updates)
-		if err != nil {
-			return nil, err
-		}
-	case commitment.ModeDisabled:
-		return nil, nil
-	default:
-		return nil, fmt.Errorf("invalid commitment mode: %s", sdc.mode)
+	rootHash, err = sdc.patriciaTrie.Process(ctx, sdc.updates, logPrefix)
+	if err != nil {
+		return nil, err
 	}
 	sdc.justRestored.Store(false)
 
@@ -1245,7 +1230,7 @@ func (sdc *SharedDomainsCommitmentContext) storeCommitmentState(blockNum uint64,
 	if err != nil {
 		return err
 	}
-	prevState, prevStep, err := sdc.GetBranch(keyCommitmentState)
+	prevState, prevStep, err := sdc.Branch(keyCommitmentState)
 	if err != nil {
 		return err
 	}
@@ -1308,7 +1293,7 @@ func (sdc *SharedDomainsCommitmentContext) LatestCommitmentState() (blockNum, tx
 	if sdc.patriciaTrie.Variant() != commitment.VariantHexPatriciaTrie {
 		return 0, 0, nil, fmt.Errorf("state storing is only supported hex patricia trie")
 	}
-	state, _, err = sdc.GetBranch(keyCommitmentState)
+	state, _, err = sdc.Branch(keyCommitmentState)
 	if err != nil {
 		return 0, 0, nil, err
 	}

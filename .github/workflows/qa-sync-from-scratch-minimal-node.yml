@@ -2,18 +2,18 @@ name: QA - Sync from scratch (minimal node)
 
 on:
   schedule:
-    - cron: '0 0 * * 6'  # Run on Saturday at 00:00 AM UTC
+    - cron: '0 0 * * *'  # Run every night at 00:00 AM UTC
   workflow_dispatch:     # Run manually
 
 jobs:
   minimal-node-sync-from-scratch-test:
     runs-on: self-hosted
-    timeout-minutes: 1500 # 25 hours
+    timeout-minutes: 360 # 6 hours
     env:
       ERIGON_DATA_DIR: ${{ github.workspace }}/erigon_data
       ERIGON_QA_PATH: /home/qarunner/erigon-qa
       TRACKING_TIME_SECONDS: 7200 # 2 hours
-      TOTAL_TIME_SECONDS: 86400 # 24 hours
+      TOTAL_TIME_SECONDS: 18000 # 5 hours
       CHAIN: mainnet
 
     steps:

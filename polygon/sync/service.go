@@ -37,12 +37,10 @@ type Service interface {
 }
 
 type service struct {
-	sync *Sync
-
-	p2pService p2p.Service
-	store      Store
-	events     *TipEvents
-
+	sync            *Sync
+	p2pService      p2p.Service
+	store           Store
+	events          *TipEvents
 	heimdallService heimdall.Service
 	bridgeService   bridge.Service
 }
@@ -85,6 +83,8 @@ func NewService(
 		p2pService,
 		blockDownloader,
 		ccBuilderFactory,
+		heimdallService,
+		bridgeService,
 		events.Events(),
 		logger,
 	)

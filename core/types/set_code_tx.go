@@ -12,7 +12,6 @@ import (
 	libcommon "github.com/erigontech/erigon-lib/common"
 	rlp2 "github.com/erigontech/erigon-lib/rlp"
 	types2 "github.com/erigontech/erigon-lib/types"
-	"github.com/erigontech/erigon/common/u256"
 	"github.com/erigontech/erigon/rlp"
 )
 
@@ -79,15 +78,6 @@ func (tx *SetCodeTransaction) WithSignature(signer Signer, sig []byte) (Transact
 	return cpy, nil
 }
 
-func (tx *SetCodeTransaction) FakeSign(address libcommon.Address) Transaction {
-	cpy := tx.copy()
-	cpy.R.Set(u256.Num1)
-	cpy.S.Set(u256.Num1)
-	cpy.V.Set(u256.Num4)
-	cpy.from.Store(address)
-	return cpy
-}
-
 func (tx *SetCodeTransaction) MarshalBinary(w io.Writer) error {
 	payloadSize, nonceLen, gasLen, accessListLen, authorizationsLen := tx.payloadSize()
 	var b [33]byte
@@ -117,7 +107,7 @@ func (tx *SetCodeTransaction) AsMessage(s Signer, baseFee *big.Int, rules *chain
 
 func (tx *SetCodeTransaction) Hash() libcommon.Hash {
 	if hash := tx.hash.Load(); hash != nil {
-		return *hash.(*libcommon.Hash)
+		return *hash
 	}
 	hash := prefixedRlpHash(SetCodeTxType, []interface{}{
 		tx.ChainID,

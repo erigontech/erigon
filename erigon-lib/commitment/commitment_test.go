@@ -30,13 +30,13 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func generateCellRow(tb testing.TB, size int) (row []*Cell, bitmap uint16) {
+func generateCellRow(tb testing.TB, size int) (row []*cell, bitmap uint16) {
 	tb.Helper()
 
-	row = make([]*Cell, size)
+	row = make([]*cell, size)
 	var bm uint16
 	for i := 0; i < len(row); i++ {
-		row[i] = new(Cell)
+		row[i] = new(cell)
 		row[i].hashLen = 32
 		n, err := rand.Read(row[i].hash[:])
 		require.NoError(tb, err)
@@ -67,7 +67,7 @@ func TestBranchData_MergeHexBranches2(t *testing.T) {
 	row, bm := generateCellRow(t, 16)
 
 	be := NewBranchEncoder(1024, t.TempDir())
-	enc, _, err := be.EncodeBranch(bm, bm, bm, func(i int, skip bool) (*Cell, error) {
+	enc, _, err := be.EncodeBranch(bm, bm, bm, func(i int, skip bool) (*cell, error) {
 		return row[i], nil
 	})
 
@@ -80,7 +80,7 @@ func TestBranchData_MergeHexBranches2(t *testing.T) {
 	require.NoError(t, err)
 	require.EqualValues(t, enc, res)
 
-	tm, am, origins, err := res.DecodeCells()
+	tm, am, origins, err := res.decodeCells()
 	require.NoError(t, err)
 	require.EqualValues(t, tm, am)
 	require.EqualValues(t, bm, am)
@@ -105,7 +105,7 @@ func TestBranchData_MergeHexBranches_ValueAliveAfterNewMerges(t *testing.T) {
 	row, bm := generateCellRow(t, 16)
 
 	be := NewBranchEncoder(1024, t.TempDir())
-	enc, _, err := be.EncodeBranch(bm, bm, bm, func(i int, skip bool) (*Cell, error) {
+	enc, _, err := be.EncodeBranch(bm, bm, bm, func(i int, skip bool) (*cell, error) {
 		return row[i], nil
 	})
 	require.NoError(t, err)
@@ -121,7 +121,7 @@ func TestBranchData_MergeHexBranches_ValueAliveAfterNewMerges(t *testing.T) {
 	for i := 15; i >= 0; i-- {
 		row[i] = nil
 		tm, bm, am = uint16(1<<i), bm>>1, am>>1
-		enc1, _, err := be.EncodeBranch(bm, tm, am, func(i int, skip bool) (*Cell, error) {
+		enc1, _, err := be.EncodeBranch(bm, tm, am, func(i int, skip bool) (*cell, error) {
 			return row[i], nil
 		})
 		require.NoError(t, err)
@@ -162,7 +162,7 @@ func TestBranchData_MergeHexBranches3(t *testing.T) {
 	enc, err := hex.DecodeString(encs)
 	require.NoError(t, err)
 
-	//tm, am, origins, err := BranchData(enc).DecodeCells()
+	//tm, am, origins, err := BranchData(enc).decodeCells()
 	require.NoError(t, err)
 	t.Logf("%s", BranchData(enc).String())
 	//require.EqualValues(t, tm, am)
@@ -170,7 +170,7 @@ func TestBranchData_MergeHexBranches3(t *testing.T) {
 }
 
 // helper to decode row of cells from string
-func unfoldBranchDataFromString(tb testing.TB, encs string) (row []*Cell, am uint16) {
+func unfoldBranchDataFromString(tb testing.TB, encs string) (row []*cell, am uint16) {
 	tb.Helper()
 
 	//encs := "0405040b04080f0b080d030204050b0502090805050d01060e060d070f0903090c04070a0d0a000e090b060b0c040c0700020e0b0c060b0106020c0607050a0b0209070d06040808"
@@ -178,7 +178,7 @@ func unfoldBranchDataFromString(tb testing.TB, encs string) (row []*Cell, am uin
 	enc, err := hex.DecodeString(encs)
 	require.NoError(tb, err)
 
-	tm, am, origins, err := BranchData(enc).DecodeCells()
+	tm, am, origins, err := BranchData(enc).decodeCells()
 	require.NoError(tb, err)
 	_, _ = tm, am
 
@@ -214,7 +214,7 @@ func TestBranchData_ReplacePlainKeys(t *testing.T) {
 	_ = cells
 	_ = am
 
-	cg := func(nibble int, skip bool) (*Cell, error) {
+	cg := func(nibble int, skip bool) (*cell, error) {
 		return row[nibble], nil
 	}
 
@@ -261,7 +261,7 @@ func TestBranchData_ReplacePlainKeys(t *testing.T) {
 func TestBranchData_ReplacePlainKeys_WithEmpty(t *testing.T) {
 	row, bm := generateCellRow(t, 16)
 
-	cg := func(nibble int, skip bool) (*Cell, error) {
+	cg := func(nibble int, skip bool) (*cell, error) {
 		return row[nibble], nil
 	}
 
@@ -385,7 +385,7 @@ func TestUpdates_TouchPlainKey(t *testing.T) {
 	}
 
 	i := 0
-	err := utUpdate1.HashSort(context.Background(), func(hk, pk []byte) error {
+	err := utUpdate1.HashSort(context.Background(), func(hk, pk []byte, _ *Update) error {
 		require.EqualValues(t, sortedUniqUpds[i].key, pk)
 		i++
 		return nil
@@ -393,7 +393,7 @@ func TestUpdates_TouchPlainKey(t *testing.T) {
 	require.NoError(t, err)
 
 	i = 0
-	err = utDirect1.HashSort(context.Background(), func(hk, pk []byte) error {
+	err = utDirect1.HashSort(context.Background(), func(hk, pk []byte, _ *Update) error {
 		require.EqualValues(t, sortedUniqUpds[i].key, pk)
 		i++
 		return nil
