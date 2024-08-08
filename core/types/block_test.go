@@ -453,7 +453,7 @@ func TestAuRaHeaderEncoding(t *testing.T) {
 	difficulty, ok := new(big.Int).SetString("8398142613866510000000000000000000000000000000", 10)
 	require.True(t, ok)
 
-	header := &Header{
+	header := Header{
 		ParentHash:  libcommon.HexToHash("0x8b00fcf1e541d371a3a1b79cc999a85cc3db5ee5637b5159646e1acd3613fd15"),
 		UncleHash:   libcommon.HexToHash("1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347"),
 		Coinbase:    libcommon.HexToAddress("0x571846e42308df2dad8ed792f44a8bfddf0acb4d"),
@@ -471,11 +471,11 @@ func TestAuRaHeaderEncoding(t *testing.T) {
 		AuRaSeal:    common.FromHex("0x75bda30f85541be059646e1acd3613fd100846e42308df2dad8ed79b9a9e91c9db994386599a683820a1394684d41fc139c4805684142e6b15a722a2e9cc51f7ee"),
 	}
 
-	encoded, err := rlp.EncodeToBytes(header)
+	encoded, err := rlp.EncodeToBytes(&header)
 	require.NoError(t, err)
 
-	decoded := &Header{}
-	require.NoError(t, rlp.DecodeBytes(encoded, decoded))
+	var decoded Header
+	require.NoError(t, rlp.DecodeBytes(encoded, &decoded))
 
 	assert.Equal(t, header, decoded)
 }
