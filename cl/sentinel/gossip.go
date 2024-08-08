@@ -193,7 +193,6 @@ func (s *Sentinel) forkWatcher() {
 		return
 	}
 	iterationInterval := time.NewTicker(30 * time.Millisecond)
-	time.Sleep(10 * time.Second)
 	for {
 		select {
 		case <-s.ctx.Done():
