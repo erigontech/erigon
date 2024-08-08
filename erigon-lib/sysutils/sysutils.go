@@ -46,7 +46,7 @@ type CPUUsageInfo struct {
 
 const (
 	iterations     = 5
-	sleepSeconds   = 1
+	sleepSeconds   = 2
 	usageThreshold = 0.05
 )
 
