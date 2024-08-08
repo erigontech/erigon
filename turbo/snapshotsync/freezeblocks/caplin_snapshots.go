@@ -286,6 +286,7 @@ Loop:
 	return nil
 }
 
+// TODO@steven: refactor this function and where it's used
 func (s *CaplinSnapshots) idxAvailability() uint64 {
 	var beaconBlocks uint64
 	for _, seg := range s.BeaconBlocks.segments {
