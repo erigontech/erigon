@@ -505,28 +505,28 @@ func Test_HexPatriciaHashed_Sepolia(t *testing.T) {
 func Test_Cell_EncodeDecode(t *testing.T) {
 	rnd := rand.New(rand.NewSource(time.Now().UnixMilli()))
 	first := &Cell{
-		Nonce:         rnd.Uint64(),
-		hashLen:       length.Hash,
-		StorageLen:    rnd.Intn(33),
-		apl:           length.Addr,
-		spl:           length.Addr + length.Hash,
-		downHashedLen: rnd.Intn(129),
-		extLen:        rnd.Intn(65),
-		downHashedKey: [128]byte{},
-		extension:     [64]byte{},
-		spk:           [52]byte{},
-		hash:          [32]byte{},
-		CodeHash:      [32]byte{},
-		Storage:       [32]byte{},
-		apk:           [20]byte{},
+		Nonce:              rnd.Uint64(),
+		hashLen:            length.Hash,
+		StorageLen:         rnd.Intn(33),
+		accountPlainKeyLen: length.Addr,
+		storagePlainKeyLen: length.Addr + length.Hash,
+		downHashedLen:      rnd.Intn(129),
+		extLen:             rnd.Intn(65),
+		downHashedKey:      [128]byte{},
+		extension:          [64]byte{},
+		storagePlainKey:    [52]byte{},
+		hash:               [32]byte{},
+		CodeHash:           [32]byte{},
+		Storage:            [32]byte{},
+		accountPlainKey:    [20]byte{},
 	}
 	b := uint256.NewInt(rnd.Uint64())
 	first.Balance = *b
 
 	rnd.Read(first.downHashedKey[:first.downHashedLen])
 	rnd.Read(first.extension[:first.extLen])
-	rnd.Read(first.spk[:])
-	rnd.Read(first.apk[:])
+	rnd.Read(first.storagePlainKey[:])
+	rnd.Read(first.accountPlainKey[:])
 	rnd.Read(first.hash[:])
 	rnd.Read(first.CodeHash[:])
 	rnd.Read(first.Storage[:first.StorageLen])
@@ -539,11 +539,11 @@ func Test_Cell_EncodeDecode(t *testing.T) {
 
 	require.EqualValues(t, first.downHashedLen, second.downHashedLen)
 	require.EqualValues(t, first.downHashedKey[:], second.downHashedKey[:])
-	require.EqualValues(t, first.apl, second.apl)
-	require.EqualValues(t, first.spl, second.spl)
+	require.EqualValues(t, first.accountPlainKeyLen, second.accountPlainKeyLen)
+	require.EqualValues(t, first.storagePlainKeyLen, second.storagePlainKeyLen)
 	require.EqualValues(t, first.hashLen, second.hashLen)
-	require.EqualValues(t, first.apk[:], second.apk[:])
-	require.EqualValues(t, first.spk[:], second.spk[:])
+	require.EqualValues(t, first.accountPlainKey[:], second.accountPlainKey[:])
+	require.EqualValues(t, first.storagePlainKey[:], second.storagePlainKey[:])
 	require.EqualValues(t, first.hash[:], second.hash[:])
 	require.EqualValues(t, first.extension[:first.extLen], second.extension[:second.extLen])
 	// encode doesn't code Nonce, Balance, CodeHash and Storage

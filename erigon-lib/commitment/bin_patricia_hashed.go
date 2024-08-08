@@ -159,12 +159,12 @@ func (cell *BinaryCell) unwrapToHexCell() (cl *Cell) {
 	cl.Balance = *cell.Balance.Clone()
 	cl.Nonce = cell.Nonce
 	cl.StorageLen = cell.StorageLen
-	cl.apl = cell.apl
-	cl.spl = cell.spl
+	cl.accountPlainKeyLen = cell.apl
+	cl.storagePlainKeyLen = cell.spl
 	cl.hashLen = cell.hl
 
-	copy(cl.apk[:], cell.apk[:])
-	copy(cl.spk[:], cell.spk[:])
+	copy(cl.accountPlainKey[:], cell.apk[:])
+	copy(cl.storagePlainKey[:], cell.spk[:])
 	copy(cl.hash[:], cell.h[:])
 
 	if cell.extLen > 0 {
@@ -1676,11 +1676,11 @@ func wrapAccountStorageFn(fn func([]byte, *Cell) error) func(pk []byte, bc *Bina
 		bc.Balance = *cl.Balance.Clone()
 		bc.Nonce = cl.Nonce
 		bc.StorageLen = cl.StorageLen
-		bc.apl = cl.apl
-		bc.spl = cl.spl
+		bc.apl = cl.accountPlainKeyLen
+		bc.spl = cl.storagePlainKeyLen
 		bc.hl = cl.hashLen
-		copy(bc.apk[:], cl.apk[:])
-		copy(bc.spk[:], cl.spk[:])
+		copy(bc.apk[:], cl.accountPlainKey[:])
+		copy(bc.spk[:], cl.storagePlainKey[:])
 		copy(bc.h[:], cl.hash[:])
 
 		if cl.extLen > 0 {
