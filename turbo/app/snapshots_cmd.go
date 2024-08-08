@@ -586,9 +586,7 @@ func checkIfStateSnapshotsPublishable(dir datadir.Dirs) error {
 		if err != nil {
 			return err
 		}
-		if info.IsDir() {
-			return fmt.Errorf("unexpected directory %s", path)
-		}
+
 		rangeString := strings.Split(info.Name(), ".")[1]
 		rangeNums := strings.Split(rangeString, "-")
 		// convert the range to uint64
@@ -643,9 +641,7 @@ func checkIfStateSnapshotsPublishable(dir datadir.Dirs) error {
 		if err != nil {
 			return err
 		}
-		if info.IsDir() {
-			return fmt.Errorf("unexpected directory %s", path)
-		}
+
 		rangeString := strings.Split(info.Name(), ".")[1]
 		rangeNums := strings.Split(rangeString, "-")
 
