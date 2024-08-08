@@ -19,8 +19,6 @@ package downloader
 import (
 	"context"
 	"encoding/binary"
-	"fmt"
-	dbg "runtime/debug"
 	"sync"
 
 	"github.com/RoaringBitmap/roaring"
@@ -166,7 +164,7 @@ func (m *mdbxPieceCompletion) Flushed(infoHash infohash.T, flushed *roaring.Bitm
 	tx, err := m.db.BeginRw(context.Background())
 
 	if err != nil {
-		m.logger.Warn("[snapshots] failed to flush piece completions", "hash", infoHash, "err", err, "stack", fmt.Sprintf("%s", dbg.Stack()))
+		m.logger.Warn("[snapshots] failed to flush piece completions", "hash", infoHash, "err", err)
 		return
 	}
 
@@ -177,7 +175,7 @@ func (m *mdbxPieceCompletion) Flushed(infoHash infohash.T, flushed *roaring.Bitm
 	err = tx.Commit()
 
 	if err != nil {
-		m.logger.Warn("[snapshots] failed to flush piece completions", "hash", infoHash, "err", err, "stack", fmt.Sprintf("%s", dbg.Stack()))
+		m.logger.Warn("[snapshots] failed to flush piece completions", "hash", infoHash, "err", err)
 	}
 }
 
