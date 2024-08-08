@@ -249,7 +249,7 @@ func (in *EVMInterpreter) Run(contract *Contract, input []byte, readOnly bool) (
 	var initcode []byte // TODO(racytech): temp solution, condsider a better way, this will not work with JUMPF
 	if contract.IsEOF() {
 		jt = in.cfg.JumpTableEOF
-		initcode = contract.Container.Code[0]
+		initcode = contract.Container.Code[callContext.CodeSection]
 	} else {
 		jt = in.cfg.JumpTable
 		initcode = contract.Code
@@ -358,13 +358,11 @@ func (in *EVMInterpreter) Run(contract *Contract, input []byte, readOnly bool) (
 		}
 		// execute the operation
 		res, err = operation.execute(pc, in, callContext)
-		if err != nil && err != errPCincrement {
+		if err != nil {
 			fmt.Println("INTERPRETER ERR: ", err)
 			break
 		}
-		if err != errPCincrement { // TODO(racytech): re-do this, find a better way, creates extra if check
-			_pc++
-		}
+		_pc++
 	}
 	fmt.Println("")
 

@@ -526,30 +526,6 @@ func opRjumpv(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]b
 
 // opCallf implements the CALLF opcode
 func opCallf(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]byte, error) {
-	// const auto index = read_uint16_be(&pos[1]);
-	// const auto& header = state.analysis.baseline->eof_header;
-	// const auto stack_size = &stack.top() - state.stack_space.bottom();
-
-	// const auto callee_required_stack_size =
-	//     header.types[index].max_stack_height - header.types[index].inputs;
-	// if (stack_size + callee_required_stack_size > StackSpace::limit)
-	// {
-	//     state.status = EVMC_STACK_OVERFLOW;
-	//     return nullptr;
-	// }
-
-	// if (state.call_stack.size() >= StackSpace::limit)
-	// {
-	//     // TODO: Add different error code.
-	//     state.status = EVMC_STACK_OVERFLOW;
-	//     return nullptr;
-	// }
-	// state.call_stack.push_back(pos + 3);
-
-	// const auto offset = header.code_offsets[index] - header.code_offsets[0];
-	// auto code = state.analysis.baseline->executable_code;
-	// return code.data() + offset;
-
 	var (
 		code = scope.Contract.CodeAt(scope.CodeSection)
 		idx  = binary.BigEndian.Uint16(code[*pc+1:])
@@ -557,7 +533,7 @@ func opCallf(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]by
 	)
 	// fmt.Printf("StackLen: %v, typ.MaxStackHeight: %v, typ.Inputs: %v\n", scope.Stack.Len(), typ.MaxStackHeight, typ.Inputs)
 	if scope.Stack.Len()+int(typ.MaxStackHeight)-int(typ.Inputs) > 1024 {
-		return nil, fmt.Errorf("stack overflow")
+		return nil, fmt.Errorf("CALLF stack overflow: StackLen: %v, typ.MaxStackHeight: %v, typ.Inputs: %v", scope.Stack.Len(), typ.MaxStackHeight, typ.Inputs)
 	}
 	retCtx := &ReturnContext{
 		Section:     scope.CodeSection,
@@ -566,8 +542,8 @@ func opCallf(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]by
 	}
 	scope.ReturnStack = append(scope.ReturnStack, retCtx)
 	scope.CodeSection = uint64(idx)
-	*pc = 0
-	return nil, errPCincrement
+	*pc = 0xFFFFFFFF_FFFFFFFF // set all bits, so when we increment pc in the loop -> pc = 0
+	return nil, nil
 }
 
 // opRetf implements the RETF opcode
@@ -589,15 +565,15 @@ func opRetf(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]byt
 
 func opJumpf(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]byte, error) {
 	var (
-		code    = scope.Contract.CodeAt(scope.CodeSection)
-		section = binary.BigEndian.Uint16(code[*pc+1:])
-		typ     = scope.Contract.Container.Types[scope.CodeSection]
+		code = scope.Contract.CodeAt(scope.CodeSection)
+		idx  = binary.BigEndian.Uint16(code[*pc+1:])
+		typ  = scope.Contract.Container.Types[idx]
 	)
-	if scope.Stack.Len()+int(typ.MaxStackHeight) >= 1024 {
-		return nil, fmt.Errorf("stack overflow")
+	if scope.Stack.Len()+int(typ.MaxStackHeight)-int(typ.Inputs) > 1024 {
+		return nil, fmt.Errorf("JUMPF stack overflow: StackLen: %v, typ.MaxStackHeight: %v, typ.Inputs: %v", scope.Stack.Len(), typ.MaxStackHeight, typ.Inputs)
 	}
-	scope.CodeSection = uint64(section)
-	*pc = 0
+	scope.CodeSection = uint64(idx)
+	*pc = 0xFFFFFFFF_FFFFFFFF
 	return nil, nil
 }
 

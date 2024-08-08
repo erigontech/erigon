@@ -185,7 +185,6 @@ type Capability uint32
 const (
 	CapabilityEVM1  Capability = C.EVMC_CAPABILITY_EVM1
 	CapabilityEWASM Capability = C.EVMC_CAPABILITY_EWASM
-	// CapabilityPrecompiles Capability = C.EVMC_CAPABILITY_PRECOMPILES // is not supported
 )
 
 func (h *HostImpl) HasCapability(capability Capability) bool {

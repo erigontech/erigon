@@ -134,8 +134,8 @@ func (h *HostImpl) SetStorage(addr common.Address, key common.Hash, value common
 			status = StorageModifiedRestored
 		}
 	}
-	fmt.Printf("KEY: %v\n", key)
-	fmt.Printf("VAL: %v\n", value)
+	// fmt.Printf("KEY: %v\n", key)
+	// fmt.Printf("VAL: %v\n", value)
 	h.ibs.SetState(addr, &key, _value)
 	return status
 }
@@ -223,7 +223,7 @@ func (h *HostImpl) handleCall(kind CallKind,
 	static bool,
 	salt common.Hash,
 	codeAddress common.Address) ([]byte, int64, int64, common.Address, error) {
-	// fmt.Println("---- Calling Call EVMONE")
+	fmt.Println("---- Calling Call EVMONE")
 	var output []byte
 	var err error
 	gasLeft := int64(gas)
@@ -302,7 +302,7 @@ func (h *HostImpl) handleCreate(kind CallKind,
 	static bool,
 	salt common.Hash,
 	codeAddress common.Address) ([]byte, int64, int64, common.Address, error) {
-	// fmt.Println("---- Calling Create EVMONE")
+	fmt.Println("---- Calling Create EVMONE")
 
 	var code []byte
 	var createAddr common.Address

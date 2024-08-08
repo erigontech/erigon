@@ -443,7 +443,7 @@ func (evm *EVM) create(caller ContractRef, codeAndHash *codeAndHash, gasRemainin
 
 	contract := NewContract(caller, address, value, gasRemaining, evm.config.SkipAnalysis)
 	contract.SetCodeOptionalHash(&address, codeAndHash)
-
+	// contract.SetCallCode(&address, codeAndHash.hash, codeAndHash.code, evm.parseContainer(codeAndHash.code))
 	isInitcodeEOF := hasEOFMagic(codeAndHash.code)
 	if evm.chainRules.IsPrague {
 		// TODO(racytech): revisit this part and double check!
@@ -466,7 +466,7 @@ func (evm *EVM) create(caller ContractRef, codeAndHash *codeAndHash, gasRemainin
 	if evm.config.NoRecursion && depth > 0 {
 		return nil, address, gasRemaining, nil
 	}
-	// fmt.Println("contract.Gas: ", contract.Gas)
+	fmt.Println("contract.Gas: ", contract.Gas)
 	ret, err = run(evm, contract, nil, false)
 
 	// EIP-170: Contract code size limit
