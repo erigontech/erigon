@@ -734,6 +734,14 @@ func doClearIndexing(cliCtx *cli.Context) error {
 		return fmt.Errorf("failed to delete files in snapDir: %w", err)
 	}
 
+	// remove salt-state.txt and salt-block.txt
+	if err := os.Remove(filepath.Join(snapDir, "salt-state.txt")); err != nil {
+		return fmt.Errorf("failed to remove salt-state.txt: %w", err)
+	}
+	if err := os.Remove(filepath.Join(snapDir, "salt-block.txt")); err != nil {
+		return fmt.Errorf("failed to remove salt-block.txt: %w", err)
+	}
+
 	return nil
 }
 
