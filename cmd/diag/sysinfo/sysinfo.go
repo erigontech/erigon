@@ -84,8 +84,12 @@ func collectInfo(cliCtx *cli.Context) error {
 	writeCPUToStringBuilder(data.CPU, &builder)
 
 	processes := sysutils.GetProcessesInfo()
+	cpuusage := sysutils.CPUUsage()
+	totalMemory := sysutils.TotalMemoryUsage()
 	builder.WriteString("\n\nProcesses info:\n")
-	writeProcessesToStringBuilder(processes, &builder)
+	writeProcessesToStringBuilder(processes, cpuusage.Total, totalMemory, &builder)
+	builder.WriteString("\n\nCPU usage details:\n")
+	writeCPUUsageToStringBuilder(cpuusage.Cores, &builder)
 
 	// Save data to file
 	err = util.SaveDataToFile(cliCtx.String(ExportPathFlag.Name), cliCtx.String(ExportFileNameFlag.Name), builder.String())
@@ -116,14 +120,38 @@ func writeCPUToStringBuilder(cpuInfo []diagnostics.CPUInfo, builder *strings.Bui
 	}
 }
 
-func writeProcessesToStringBuilder(prcInfo []*sysutils.ProcessInfo, builder *strings.Builder) {
+func writeProcessesToStringBuilder(prcInfo []*sysutils.ProcessInfo, cpuUsage float64, totalMemory float64, builder *strings.Builder) {
 	prcInfo = sortProcessesByCPU(prcInfo)
 	rows := make([]table.Row, 0)
 	header := table.Row{"PID", "Name", "% CPU", "% Memory"}
+
 	for _, process := range prcInfo {
 		cpu := fmt.Sprintf("%.2f", process.CPUUsage)
 		memory := fmt.Sprintf("%.2f", process.Memory)
 		rows = append(rows, table.Row{process.Pid, process.Name, cpu, memory})
+	}
+
+	rows = append(rows, table.Row{})
+	rows = append(rows, table.Row{"Totals", "", fmt.Sprintf("%.2f", cpuUsage), fmt.Sprintf("%.2f", totalMemory)})
+
+	t := table.NewWriter()
+
+	t.AppendHeader(header)
+	if len(rows) > 0 {
+		t.AppendRows(rows)
+	}
+
+	t.AppendSeparator()
+	result := t.Render()
+	builder.WriteString(result)
+}
+
+func writeCPUUsageToStringBuilder(cpuUsage []float64, builder *strings.Builder) {
+	rows := make([]table.Row, 0)
+	header := table.Row{"Core #", "% CPU"}
+
+	for idx, core := range cpuUsage {
+		rows = append(rows, table.Row{idx + 1, fmt.Sprintf("%.2f", core)})
 	}
 
 	t := table.NewWriter()
