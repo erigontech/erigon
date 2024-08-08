@@ -264,7 +264,6 @@ func emitNextPaylodAttributesEvent(cfg *Cfg, headSlot uint64, headRoot common.Ha
 			PayloadAttributes: payloadAttributes,
 		},
 	}
-	log.Info("[test] emitNextPaylodAttributesEvent", "event", e)
 	cfg.emitter.State().SendPayloadAttributes(e)
 	return nil
 }
