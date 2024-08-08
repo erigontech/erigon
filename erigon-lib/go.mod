@@ -21,6 +21,7 @@ require (
 	github.com/crate-crypto/go-kzg-4844 v0.7.0
 	github.com/deckarep/golang-set/v2 v2.3.1
 	github.com/edsrzf/mmap-go v1.1.0
+	github.com/elastic/go-freelru v0.13.0
 	github.com/erigontech/speedtest v0.0.2
 	github.com/go-stack/stack v1.8.1
 	github.com/gofrs/flock v0.12.0
