@@ -215,30 +215,30 @@ func emitHeadEvent(cfg *Cfg, headSlot uint64, headRoot common.Hash, headState *s
 	return nil
 }
 
-func emitNextPaylodAttributesEvent(cfg *Cfg, s *state.CachingBeaconState) error {
-	headBlock := s.LatestBlockHeader()
+func emitNextPaylodAttributesEvent(cfg *Cfg, headSlot uint64, headRoot common.Hash, s *state.CachingBeaconState) error {
 	headPayload := s.LatestExecutionPayloadHeader()
+	nextSlot := headSlot + 1
 	headState, err := s.Copy()
 	if err != nil {
 		log.Warn("failed to copy state", "err", err)
 		return err
 	}
-	if err := transition.DefaultMachine.ProcessSlots(headState, headState.Slot()+1); err != nil {
-		log.Warn("failed to process slots", "err", err, "next_slot", headState.Slot()+1)
+	if err := transition.DefaultMachine.ProcessSlots(headState, nextSlot); err != nil {
+		log.Warn("failed to process slots", "err", err, "next_slot", nextSlot)
 		return err
 	}
 	lastExecPayload := headState.LatestExecutionPayloadHeader()
-	epoch := cfg.ethClock.GetEpochAtSlot(headState.Slot())
+	epoch := cfg.ethClock.GetEpochAtSlot(nextSlot)
 	randaoMix := headState.GetRandaoMixes(epoch)
 
-	proposerIndex, err := headState.GetBeaconProposerIndexForSlot(headState.Slot())
+	proposerIndex, err := headState.GetBeaconProposerIndexForSlot(nextSlot)
 	if err != nil {
 		log.Warn("failed to get proposer index", "err", err)
 		return err
 	}
 	feeRecipient := headState.LatestExecutionPayloadHeader().FeeRecipient
 	withdrawals := []*types.Withdrawal{}
-	for _, w := range state.ExpectedWithdrawals(headState, cfg.ethClock.GetEpochAtSlot(headState.Slot())) {
+	for _, w := range state.ExpectedWithdrawals(headState, cfg.ethClock.GetEpochAtSlot(nextSlot)) {
 		withdrawals = append(withdrawals, &types.Withdrawal{
 			Amount:    w.Amount,
 			Index:     w.Index,
@@ -250,17 +250,17 @@ func emitNextPaylodAttributesEvent(cfg *Cfg, s *state.CachingBeaconState) error 
 		Timestamp:             hexutil.Uint64(lastExecPayload.Time + cfg.beaconCfg.SecondsPerSlot),
 		PrevRandao:            randaoMix,
 		SuggestedFeeRecipient: feeRecipient,
-		ParentBeaconBlockRoot: &headBlock.Root,
+		ParentBeaconBlockRoot: &headRoot,
 		Withdrawals:           withdrawals,
 	}
 	e := &beaconevents.PayloadAttributesData{
 		Version: headState.Version().String(),
 		Data: beaconevents.PayloadAttributesContent{
 			ProposerIndex:     proposerIndex,
-			ProposalSlot:      headState.Slot(),
+			ProposalSlot:      nextSlot,
 			ParentBlockNumber: headPayload.BlockNumber,
 			ParentBlockHash:   headPayload.StateRoot,
-			ParentBlockRoot:   headBlock.Root,
+			ParentBlockRoot:   headRoot,
 			PayloadAttributes: payloadAttributes,
 		},
 	}
@@ -331,7 +331,7 @@ func postForkchoiceOperations(ctx context.Context, tx kv.RwTx, logger log.Logger
 	}
 	// Lastly, emit the head event
 	emitHeadEvent(cfg, headSlot, headRoot, headState)
-	emitNextPaylodAttributesEvent(cfg, headState)
+	emitNextPaylodAttributesEvent(cfg, headSlot, headRoot, headState)
 	return nil
 }
 
