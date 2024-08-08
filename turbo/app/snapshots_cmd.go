@@ -738,7 +738,7 @@ func doClearIndexing(cliCtx *cli.Context) error {
 	}
 
 	// Delete all files in domainDir with extensions .bt and .bt.torrent
-	if err := deleteFilesWithExtensions(domainDir, []string{".bt", ".bt.torrent"}); err != nil {
+	if err := deleteFilesWithExtensions(domainDir, []string{".bt", ".bt.torrent", ".kvei", ".kvei.torrent"}); err != nil {
 		return fmt.Errorf("failed to delete files in domainDir: %w", err)
 	}
 
