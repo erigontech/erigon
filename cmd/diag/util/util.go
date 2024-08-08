@@ -103,6 +103,53 @@ func RenderTableWithHeader(title string, header table.Row, rows []table.Row) {
 	fmt.Print("\n")
 }
 
+func ExportTable(title string, header table.Row, rows []table.Row, footer table.Row) string {
+	if len(rows) > 0 {
+		t := CreateTable(title, header, rows, footer)
+		return t.Render()
+	}
+
+	return ""
+}
+
+func PrintTable(title string, header table.Row, rows []table.Row, footer table.Row) {
+	if title != "" {
+		txt := text.Colors{text.FgBlue, text.Bold}
+		fmt.Println(txt.Sprint(title))
+
+		if len(rows) == 0 {
+			txt := text.Colors{text.FgRed, text.Bold}
+			fmt.Println(txt.Sprint("No data to show"))
+		}
+	}
+
+	if len(rows) > 0 {
+		t := CreateTable(title, header, rows, footer)
+		t.SetOutputMirror(os.Stdout)
+		t.Render()
+	}
+
+	fmt.Print("\n")
+}
+
+func CreateTable(title string, header table.Row, rows []table.Row, footer table.Row) table.Writer {
+	t := table.NewWriter()
+
+	if header != nil {
+		t.AppendHeader(header)
+	}
+
+	if len(rows) > 0 {
+		t.AppendRows(rows)
+	}
+
+	if footer != nil {
+		t.AppendFooter(footer)
+	}
+
+	return t
+}
+
 func RenderUseDiagUI() {
 	txt := text.Colors{text.BgGreen, text.Bold}
 	fmt.Println(txt.Sprint("To get detailed info about Erigon node state use 'diag ui' command."))
