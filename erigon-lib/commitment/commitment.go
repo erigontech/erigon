@@ -22,6 +22,7 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
+	"github.com/holiman/uint256"
 	"math/bits"
 	"strings"
 
@@ -888,8 +889,7 @@ func (t *Updates) TouchPlainKey(key, val []byte, fn func(c *KeyUpdate, val []byt
 			return false
 		})
 		if !updated {
-			pivot.update.plainKey = pivot.plainKey
-			pivot.update.hashedKey = t.hasher(pivot.plainKey)
+			pivot.hashedKey = t.hasher(pivot.plainKey)
 			fn(pivot, val)
 			t.tree.ReplaceOrInsert(pivot)
 		}
@@ -990,7 +990,7 @@ func (t *Updates) HashSort(ctx context.Context, fn func(hk, pk []byte, update *U
 			default:
 			}
 
-			if err := fn(item.update.hashedKey, item.plainKey, item.update); err != nil {
+			if err := fn(item.hashedKey, item.plainKey, item.update); err != nil {
 				return false
 			}
 			return true
@@ -1002,44 +1002,201 @@ func (t *Updates) HashSort(ctx context.Context, fn func(hk, pk []byte, update *U
 	return nil
 }
 
-// Returns list of both plain and hashed keys. If .mode is ModeUpdate, updates also returned.
-// No ordering guarantees is provided.
-// TODO replace with Clear function. HashSort perfectly dumps all keys.
-func (t *Updates) List(clear bool) ([][]byte, []Update) {
+// Reset clears all updates
+func (t *Updates) Reset() {
 	switch t.mode {
 	case ModeDirect:
-		plainKeys := make([][]byte, 0, len(t.keys))
-		err := t.HashSort(context.Background(), func(hk, pk []byte, _ *Update) error {
-			plainKeys = append(plainKeys, common.Copy(pk))
-			return nil
-		})
-		if err != nil {
-			return nil, nil
-		}
-		return plainKeys, nil
+		t.keys = nil
+		t.keys = make(map[string]struct{})
+		t.initCollector()
 	case ModeUpdate:
-		plainKeys := make([][]byte, t.tree.Len())
-		updates := make([]Update, t.tree.Len())
-		i := 0
-		t.tree.Ascend(func(item *KeyUpdate) bool {
-			plainKeys[i], updates[i] = item.plainKey, *item.update
-			i++
-			return true
-		})
-		if clear {
-			t.tree.Clear(true)
-		}
-		return plainKeys, updates
+		t.tree.Clear(true)
 	default:
-		return nil, nil
 	}
 }
 
 type KeyUpdate struct {
-	plainKey []byte
-	update   *Update
+	plainKey  []byte
+	hashedKey []byte
+	update    *Update
 }
 
 func keyUpdateLessFn(i, j *KeyUpdate) bool {
 	return bytes.Compare(i.plainKey, j.plainKey) < 0
+}
+
+type UpdateFlags uint8
+
+const (
+	CodeUpdate    UpdateFlags = 1
+	DeleteUpdate  UpdateFlags = 2
+	BalanceUpdate UpdateFlags = 4
+	NonceUpdate   UpdateFlags = 8
+	StorageUpdate UpdateFlags = 16
+)
+
+func (uf UpdateFlags) String() string {
+	var sb strings.Builder
+	if uf&DeleteUpdate != 0 {
+		sb.WriteString("Delete")
+	}
+	if uf&BalanceUpdate != 0 {
+		sb.WriteString("+Balance")
+	}
+	if uf&NonceUpdate != 0 {
+		sb.WriteString("+Nonce")
+	}
+	if uf&CodeUpdate != 0 {
+		sb.WriteString("+Code")
+	}
+	if uf&StorageUpdate != 0 {
+		sb.WriteString("+Storage")
+	}
+	return sb.String()
+}
+
+type Update struct {
+	CodeHash   [length.Hash]byte
+	Storage    [length.Hash]byte
+	StorageLen int
+	Flags      UpdateFlags
+	Balance    uint256.Int
+	Nonce      uint64
+}
+
+func (u *Update) Reset() {
+	u.Flags = 0
+	u.Balance.Clear()
+	u.Nonce = 0
+	u.StorageLen = 0
+	copy(u.CodeHash[:], EmptyCodeHash)
+}
+
+func (u *Update) Merge(b *Update) {
+	if b.Flags == DeleteUpdate {
+		u.Flags = DeleteUpdate
+		return
+	}
+	if b.Flags&BalanceUpdate != 0 {
+		u.Flags |= BalanceUpdate
+		u.Balance.Set(&b.Balance)
+	}
+	if b.Flags&NonceUpdate != 0 {
+		u.Flags |= NonceUpdate
+		u.Nonce = b.Nonce
+	}
+	if b.Flags&CodeUpdate != 0 {
+		u.Flags |= CodeUpdate
+		copy(u.CodeHash[:], b.CodeHash[:])
+	}
+	if b.Flags&StorageUpdate != 0 {
+		u.Flags |= StorageUpdate
+		copy(u.Storage[:], b.Storage[:b.StorageLen])
+		u.StorageLen = b.StorageLen
+	}
+}
+
+func (u *Update) Encode(buf []byte, numBuf []byte) []byte {
+	buf = append(buf, byte(u.Flags))
+	if u.Flags&BalanceUpdate != 0 {
+		buf = append(buf, byte(u.Balance.ByteLen()))
+		buf = append(buf, u.Balance.Bytes()...)
+	}
+	if u.Flags&NonceUpdate != 0 {
+		n := binary.PutUvarint(numBuf, u.Nonce)
+		buf = append(buf, numBuf[:n]...)
+	}
+	if u.Flags&CodeUpdate != 0 {
+		buf = append(buf, u.CodeHash[:]...)
+	}
+	if u.Flags&StorageUpdate != 0 {
+		n := binary.PutUvarint(numBuf, uint64(u.StorageLen))
+		buf = append(buf, numBuf[:n]...)
+		if u.StorageLen > 0 {
+			buf = append(buf, u.Storage[:u.StorageLen]...)
+		}
+	}
+	return buf
+}
+
+func (u *Update) Deleted() bool {
+	return u.Flags&DeleteUpdate > 0
+}
+
+func (u *Update) Decode(buf []byte, pos int) (int, error) {
+	if len(buf) < pos+1 {
+		return 0, errors.New("decode Update: buffer too small for flags")
+	}
+	u.Reset()
+
+	u.Flags = UpdateFlags(buf[pos])
+	pos++
+	if u.Flags&BalanceUpdate != 0 {
+		if len(buf) < pos+1 {
+			return 0, errors.New("decode Update: buffer too small for balance len")
+		}
+		balanceLen := int(buf[pos])
+		pos++
+		if len(buf) < pos+balanceLen {
+			return 0, errors.New("decode Update: buffer too small for balance")
+		}
+		u.Balance.SetBytes(buf[pos : pos+balanceLen])
+		pos += balanceLen
+	}
+	if u.Flags&NonceUpdate != 0 {
+		var n int
+		u.Nonce, n = binary.Uvarint(buf[pos:])
+		if n == 0 {
+			return 0, errors.New("decode Update: buffer too small for nonce")
+		}
+		if n < 0 {
+			return 0, errors.New("decode Update: nonce overflow")
+		}
+		pos += n
+	}
+	if u.Flags&CodeUpdate != 0 {
+		if len(buf) < pos+length.Hash {
+			return 0, errors.New("decode Update: buffer too small for codeHash")
+		}
+		copy(u.CodeHash[:], buf[pos:pos+32])
+		pos += length.Hash
+	}
+	if u.Flags&StorageUpdate != 0 {
+		l, n := binary.Uvarint(buf[pos:])
+		if n == 0 {
+			return 0, errors.New("decode Update: buffer too small for storage len")
+		}
+		if n < 0 {
+			return 0, errors.New("decode Update: storage pos overflow")
+		}
+		pos += n
+		if len(buf) < pos+int(l) {
+			return 0, errors.New("decode Update: buffer too small for storage")
+		}
+		u.StorageLen = int(l)
+		copy(u.Storage[:], buf[pos:pos+u.StorageLen])
+		pos += u.StorageLen
+	}
+	return pos, nil
+}
+
+func (u *Update) String() string {
+	var sb strings.Builder
+	sb.WriteString(fmt.Sprintf("Flags: [%s]", u.Flags))
+	if u.Deleted() {
+		sb.WriteString(", DELETED")
+	}
+	if u.Flags&BalanceUpdate != 0 {
+		sb.WriteString(fmt.Sprintf(", Balance: [%d]", &u.Balance))
+	}
+	if u.Flags&NonceUpdate != 0 {
+		sb.WriteString(fmt.Sprintf(", Nonce: [%d]", u.Nonce))
+	}
+	if u.Flags&CodeUpdate != 0 {
+		sb.WriteString(fmt.Sprintf(", CodeHash: [%x]", u.CodeHash))
+	}
+	if u.Flags&StorageUpdate != 0 {
+		sb.WriteString(fmt.Sprintf(", Storage: [%x]", u.Storage[:u.StorageLen]))
+	}
+	return sb.String()
 }
