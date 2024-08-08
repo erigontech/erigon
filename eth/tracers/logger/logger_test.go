@@ -23,6 +23,7 @@ import (
 	"math/big"
 	"testing"
 
+	"github.com/hashicorp/golang-lru/v2/simplelru"
 	"github.com/holiman/uint256"
 
 	libcommon "github.com/erigontech/erigon-lib/common"
@@ -58,12 +59,13 @@ type dummyStatedb struct {
 func (*dummyStatedb) GetRefund() uint64 { return 1337 }
 
 func TestStoreCapture(t *testing.T) {
+	c, _ := simplelru.NewLRU[libcommon.Hash, []uint64](1, nil)
 	var (
 		env      = vm.NewEVM(evmtypes.BlockContext{}, evmtypes.TxContext{}, &dummyStatedb{}, params.TestChainConfig, vm.Config{})
 		logger   = NewStructLogger(nil)
 		mem      = vm.NewMemory()
 		stack    = stack.New()
-		contract = vm.NewContract(&dummyContractRef{}, libcommon.Address{}, new(uint256.Int), 0, false /* skipAnalysis */)
+		contract = vm.NewContract(&dummyContractRef{}, libcommon.Address{}, new(uint256.Int), 0, false /* skipAnalysis */, c)
 	)
 	stack.Push(uint256.NewInt(1))
 	stack.Push(uint256.NewInt(0))
