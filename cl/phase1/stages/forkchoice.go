@@ -216,14 +216,13 @@ func emitHeadEvent(cfg *Cfg, headSlot uint64, headRoot common.Hash, headState *s
 }
 
 func emitNextPaylodAttributesEvent(cfg *Cfg, s *state.CachingBeaconState) error {
+	headBlock := s.LatestBlockHeader()
+	headPayload := s.LatestExecutionPayloadHeader()
 	headState, err := s.Copy()
 	if err != nil {
 		log.Warn("failed to copy state", "err", err)
 		return err
 	}
-	headBlock := headState.LatestBlockHeader()
-	headPayload := headState.LatestExecutionPayloadHeader()
-
 	if err := transition.DefaultMachine.ProcessSlots(headState, headState.Slot()+1); err != nil {
 		log.Warn("failed to process slots", "err", err, "next_slot", headState.Slot()+1)
 		return err
