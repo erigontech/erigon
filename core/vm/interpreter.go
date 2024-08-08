@@ -303,7 +303,7 @@ func (in *EVMInterpreter) Run(contract *Contract, input []byte, readOnly bool) (
 		op = OpCode(initcode[_pc])
 		operation := jt[op]
 		cost = operation.constantGas // For tracing
-		// fmt.Printf("%v ", op)
+		fmt.Printf("%v ", op)
 		// Validate stack
 		if sLen := locStack.Len(); sLen < operation.numPop {
 			return nil, &ErrStackUnderflow{stackLen: sLen, required: operation.numPop}

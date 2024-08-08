@@ -102,3 +102,5 @@ node_modules
 vendor
 
 /core/evmone-go/lib
+cmp.py
+/tests/__tests

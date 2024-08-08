@@ -506,18 +506,21 @@ func opRjumpi(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]b
 // opRjumpv implements the RJUMPV opcode
 func opRjumpv(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]byte, error) {
 	var (
-		code  = scope.Contract.CodeAt(scope.CodeSection)
-		count = uint64(code[*pc+1])
-		idx   = scope.Stack.Pop()
+		code   = scope.Contract.CodeAt(scope.CodeSection)
+		maxIdx = uint64(code[*pc+1])
+		_case  = scope.Stack.Pop()
 	)
-	if idx, overflow := idx.Uint64WithOverflow(); overflow || idx >= count {
+	// pc + 1 + 1 /* max_index */ + (max_index + 1) * REL_OFFSET_SIZE /* tbl */;
+	pcPost := *pc + 1 + 1 + (maxIdx+1)*2 - 1 // we do pc++ in interperter Run
+
+	if case64, overflow := _case.Uint64WithOverflow(); overflow || case64 > maxIdx {
 		// Index out-of-bounds, don't branch, just skip over immediate
 		// argument.
-		*pc += 1 + count*2
+		*pc = pcPost
 		return nil, nil
 	}
-	offset := parseInt16(code[*pc+2+2*idx.Uint64():])
-	*pc = uint64(int64(*pc+2+count*2) + int64(offset) - 1)
+	relOffset := parseInt16(code[*pc+2+2*_case.Uint64():])
+	*pc = pcPost + uint64(relOffset)
 	return nil, nil
 }
 
