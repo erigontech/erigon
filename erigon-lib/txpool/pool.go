@@ -684,23 +684,23 @@ func (p *TxPool) getCachedBlobTxnLocked(tx kv.Tx, hash []byte) (*metaTx, error) 
 	if mt, ok := p.byHash[hashS]; ok {
 		return mt, nil
 	}
+	has, err := tx.Has(kv.PoolTransaction, hash)
+	if err != nil {
+		return nil, err
+	}
+	if !has {
+		return nil, nil
+	}
+
 	v, err := tx.GetOne(kv.PoolTransaction, hash)
 	if err != nil {
-		return nil, fmt.Errorf("TxPool.getCachedBlobTxnLocked: Get: %d, %w", len(hash), err)
-	}
-	if len(v) == 0 {
-		return nil, nil
+		return nil, err
 	}
 	txRlp := common.Copy(v[20:])
 	parseCtx := types.NewTxParseContext(p.chainID)
 	parseCtx.WithSender(false)
 	txSlot := &types.TxSlot{}
-
-	_, err = parseCtx.ParseTransaction(txRlp, 0, txSlot, nil, false, true, nil)
-	if err != nil {
-		log.Warn("[dbg] getCachedBlobTxnLocked", "err", err, "len(v)", len(v))
-	}
-
+	parseCtx.ParseTransaction(txRlp, 0, txSlot, nil, false, true, nil)
 	return newMetaTx(txSlot, false, 0), nil
 }
 
