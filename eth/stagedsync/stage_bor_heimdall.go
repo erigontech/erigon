@@ -844,11 +844,3 @@ func BorHeimdallUnwind(u *UnwindState, ctx context.Context, _ *StageState, tx kv
 
 	return
 }
-
-func BorHeimdallPrune(_ *PruneState, _ context.Context, _ kv.RwTx, cfg BorHeimdallCfg) (err error) {
-	if cfg.borConfig == nil {
-		return
-	}
-
-	return
-}

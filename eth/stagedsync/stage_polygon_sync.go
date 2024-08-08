@@ -381,11 +381,6 @@ func UnwindMilestones(tx kv.RwTx, u *UnwindState, unwindTypes []string) error {
 	return err
 }
 
-func PrunePolygonSyncStage() error {
-	// TODO - headers, bodies (including txnums index), checkpoints, milestones, spans, state sync events
-	return nil
-}
-
 type polygonSyncStageTxAction struct {
 	apply func(tx kv.RwTx) error
 }

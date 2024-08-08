@@ -84,7 +84,7 @@ func DefaultStages(ctx context.Context,
 				return BorHeimdallUnwind(u, ctx, s, txc.Tx, borHeimdallCfg)
 			},
 			Prune: func(p *PruneState, tx kv.RwTx, logger log.Logger) error {
-				return BorHeimdallPrune(p, ctx, tx, borHeimdallCfg)
+				return nil
 			},
 		},
 		{
@@ -482,7 +482,7 @@ func PolygonSyncStages(
 				return UnwindPolygonSyncStage(ctx, txc.Tx, u, polygonSyncStageCfg)
 			},
 			Prune: func(p *PruneState, tx kv.RwTx, logger log.Logger) error {
-				return PrunePolygonSyncStage()
+				return nil
 			},
 		},
 		{
