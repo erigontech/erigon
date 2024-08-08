@@ -103,9 +103,9 @@ func RenderTableWithHeader(title string, header table.Row, rows []table.Row) {
 	fmt.Print("\n")
 }
 
-func ExportTable(title string, header table.Row, rows []table.Row, footer table.Row) string {
+func ExportTable(header table.Row, rows []table.Row, footer table.Row) string {
 	if len(rows) > 0 {
-		t := CreateTable(title, header, rows, footer)
+		t := CreateTable(header, rows, footer)
 		return t.Render()
 	}
 
@@ -124,7 +124,7 @@ func PrintTable(title string, header table.Row, rows []table.Row, footer table.R
 	}
 
 	if len(rows) > 0 {
-		t := CreateTable(title, header, rows, footer)
+		t := CreateTable(header, rows, footer)
 		t.SetOutputMirror(os.Stdout)
 		t.Render()
 	}
@@ -132,7 +132,7 @@ func PrintTable(title string, header table.Row, rows []table.Row, footer table.R
 	fmt.Print("\n")
 }
 
-func CreateTable(title string, header table.Row, rows []table.Row, footer table.Row) table.Writer {
+func CreateTable(header table.Row, rows []table.Row, footer table.Row) table.Writer {
 	t := table.NewWriter()
 
 	if header != nil {

@@ -81,15 +81,37 @@ func collectInfo(cliCtx *cli.Context) error {
 	builder.WriteString(data.Disk.Details)
 	builder.WriteString("\n\n")
 	builder.WriteString("CPU info:\n")
-	writeCPUToStringBuilder(data.CPU, &builder)
 
-	processes := sysutils.GetProcessesInfo()
+	// Create table for CPU data
+	header := table.Row{"CPU", "VendorID", "Family", "Model", "Stepping", "PhysicalID", "CoreID", "Cores", "ModelName", "Mhz", "CacheSize", "Flags", "Microcode"}
+	rows := make([]table.Row, 0, len(data.CPU))
+	for _, cpu := range data.CPU {
+		rows = append(rows, table.Row{cpu.CPU, cpu.VendorID, cpu.Family, cpu.Model, cpu.Stepping, cpu.PhysicalID, cpu.CoreID, cpu.Cores, cpu.ModelName, cpu.Mhz, cpu.CacheSize, strings.Join(cpu.Flags, ", "), cpu.Microcode})
+	}
+
+	cpuDataTable := util.ExportTable(header, rows, nil)
+	builder.WriteString(cpuDataTable)
+
+	builder.WriteString("\n\n")
 	cpuusage := sysutils.CPUUsage()
-	totalMemory := sysutils.TotalMemoryUsage()
-	builder.WriteString("\n\nProcesses info:\n")
-	writeProcessesToStringBuilder(processes, cpuusage.Total, totalMemory, &builder)
-	builder.WriteString("\n\nCPU usage details:\n")
-	writeCPUUsageToStringBuilder(cpuusage.Cores, &builder)
+
+	header = table.Row{"Core #", "% CPU"}
+	rows = make([]table.Row, 0, len(cpuusage.Cores))
+	for idx, core := range cpuusage.Cores {
+		rows = append(rows, table.Row{idx + 1, core})
+	}
+
+	cpuUsageDataTable := util.ExportTable(header, rows, nil)
+	builder.WriteString(cpuUsageDataTable)
+
+	//writeCPUToStringBuilder(data.CPU, &builder)
+
+	//processes := sysutils.GetProcessesInfo()
+	//totalMemory := sysutils.TotalMemoryUsage()
+	//builder.WriteString("\n\nProcesses info:\n")
+	//writeProcessesToStringBuilder(processes, cpuusage.Total, totalMemory, &builder)
+	//builder.WriteString("\n\nCPU usage details:\n")
+	//writeCPUUsageToStringBuilder(cpuusage.Cores, &builder)
 
 	// Save data to file
 	err = util.SaveDataToFile(cliCtx.String(ExportPathFlag.Name), cliCtx.String(ExportFileNameFlag.Name), builder.String())
