@@ -290,7 +290,7 @@ require (
 )
 
 replace (
-	github.com/anacrolix/torrent => github.com/erigontech/torrent v1.54.2-alpha-34
+	github.com/anacrolix/torrent => github.com/erigontech/torrent v1.54.2-alpha-35
 	github.com/holiman/bloomfilter/v2 => github.com/AskAlexSharov/bloomfilter/v2 v2.0.8
 	google.golang.org/genproto => google.golang.org/genproto v0.0.0-20240805194559-2c9e96a0b5d4
 )

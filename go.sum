@@ -567,8 +567,8 @@ github.com/erigontech/silkworm-go v0.18.0 h1:j56p61xZHBFhZGH1OixlGU8KcfjHzcw9pjA
 github.com/erigontech/silkworm-go v0.18.0/go.mod h1:O50ux0apICEVEGyRWiE488K8qz8lc3PA/SXbQQAc8SU=
 github.com/erigontech/speedtest v0.0.2 h1:W9Cvky/8AMUtUONwkLA/dZjeQ2XfkBdYfJzvhMZUO+U=
 github.com/erigontech/speedtest v0.0.2/go.mod h1:vulsRNiM51BmSTbVtch4FWxKxx53pS2D35lZTtao0bw=
-github.com/erigontech/torrent v1.54.2-alpha-34 h1:jBQRWUbLd0i+d0yBZtsKO1R+jaOIMMpfNJhgQtbFfNc=
-github.com/erigontech/torrent v1.54.2-alpha-34/go.mod h1:MsIikhT44vf1MpylScIy9q1cbtgFvr+fNCLV28SG5D8=
+github.com/erigontech/torrent v1.54.2-alpha-35 h1:uQ689KRAty7yBiSZ3sTUYCdtTl9dmccleLfRkYBGJgw=
+github.com/erigontech/torrent v1.54.2-alpha-35/go.mod h1:QtK2WLdEz1Iy1Dh/325UltdHU0nA1xujh2rN6aov6y0=
 github.com/ettle/strcase v0.1.1/go.mod h1:hzDLsPC7/lwKyBOywSHEP89nt2pDgdy+No1NBA9o9VY=
 github.com/fatih/color v1.10.0/go.mod h1:ELkj/draVOlAH/xkhN6mQ50Qd0MPOk5AAr3maGEBuJM=
 github.com/fatih/color v1.13.0/go.mod h1:kLAiJbzzSOZDVNGyDpeOxJ47H46qBXwg5ILebYFFOfk=
