@@ -68,3 +68,10 @@ func (f *stateFeed) SendChainReorg(value *ChainReorgData) int {
 		Data:  value,
 	})
 }
+
+func (f *stateFeed) SendPayloadAttributes(value *PayloadAttributesData) int {
+	return f.feed.Send(&EventStream{
+		Event: StatePayloadAttributes,
+		Data:  value,
+	})
+}

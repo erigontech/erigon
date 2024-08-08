@@ -78,21 +78,21 @@ func (a *ApiHandler) EventSourceGetV1Events(w http.ResponseWriter, r *http.Reque
 
 	for {
 		select {
-		case event := <-eventCh:
-			if !subscribeTopics.Contains(event.Event) {
+		case e := <-eventCh:
+			if !subscribeTopics.Contains(e.Event) {
 				continue
 			}
-			if event.Data == nil {
-				log.Warn("event data is nil", "event", event)
+			if e.Data == nil {
+				log.Warn("event data is nil", "event", e)
 				continue
 			}
 			// marshal and send
-			buf, err := json.Marshal(event.Data)
+			buf, err := json.Marshal(e.Data)
 			if err != nil {
-				log.Warn("failed to encode data", "err", err, "topic", event.Event)
+				log.Warn("failed to encode data", "err", err, "topic", e.Event)
 				continue
 			}
-			if _, err := fmt.Fprintf(w, "event: %s\ndata: %s\n\n", event.Event, string(buf)); err != nil {
+			if _, err := fmt.Fprintf(w, "event: %s\ndata: %s\n\n", e.Event, string(buf)); err != nil {
 				log.Warn("failed to write event", "err", err)
 				continue
 			}

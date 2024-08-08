@@ -8,6 +8,7 @@ import (
 
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/dbg"
+	"github.com/erigontech/erigon-lib/common/hexutil"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/cl/beacon/beaconevents"
@@ -15,7 +16,10 @@ import (
 	"github.com/erigontech/erigon/cl/persistence/beacon_indicies"
 	state_accessors "github.com/erigontech/erigon/cl/persistence/state"
 	"github.com/erigontech/erigon/cl/phase1/core/state"
+	"github.com/erigontech/erigon/cl/transition"
 	"github.com/erigontech/erigon/cl/utils"
+	"github.com/erigontech/erigon/core/types"
+	"github.com/erigontech/erigon/turbo/engineapi/engine_types"
 )
 
 // computeAndNotifyServicesOfNewForkChoice calculates the new head of the fork choice and notifies relevant services.
@@ -121,9 +125,9 @@ func updateCanonicalChainInTheDatabase(ctx context.Context, tx kv.RwTx, headSlot
 		return fmt.Errorf("failed to mark root canonical: %w", err)
 	}
 
-	log.Info("[test] Canonical chain updated", "head_slot", headSlot, "cur_slot", currentSlot, "len", len(reconnectionRoots))
 	// check reorg
 	if len(reconnectionRoots) > 2 {
+		log.Info("cl reorg", "new_head_slot", headSlot, "fork_slot", currentSlot)
 		oldStateRoot, err := beacon_indicies.ReadStateRootByBlockRoot(ctx, tx, oldCanonical)
 		if err != nil {
 			log.Warn("failed to read state root by block root", "err", err, "block_root", oldCanonical)
@@ -197,6 +201,60 @@ func emitHeadEvent(cfg *Cfg, headSlot uint64, headRoot common.Hash, headState *s
 	return nil
 }
 
+func emitNextPaylodAttributesEvent(cfg *Cfg, s *state.CachingBeaconState) error {
+	headState, err := s.Copy()
+	if err != nil {
+		log.Warn("failed to copy state", "err", err)
+		return err
+	}
+	headBlock := headState.LatestBlockHeader()
+	headPayload := headState.LatestExecutionPayloadHeader()
+
+	if err := transition.DefaultMachine.ProcessSlots(headState, headState.Slot()+1); err != nil {
+		log.Warn("failed to process slots", "err", err, "next_slot", headState.Slot()+1)
+		return err
+	}
+	lastExecPayload := headState.LatestExecutionPayloadHeader()
+	epoch := cfg.ethClock.GetEpochAtSlot(headState.Slot())
+	randaoMix := headState.GetRandaoMixes(epoch)
+
+	proposerIndex, err := headState.GetBeaconProposerIndexForSlot(headState.Slot())
+	if err != nil {
+		log.Warn("failed to get proposer index", "err", err)
+		return err
+	}
+	feeRecipient := headState.LatestExecutionPayloadHeader().FeeRecipient
+	withdrawals := []*types.Withdrawal{}
+	for _, w := range state.ExpectedWithdrawals(headState, cfg.ethClock.GetEpochAtSlot(headState.Slot())) {
+		withdrawals = append(withdrawals, &types.Withdrawal{
+			Amount:    w.Amount,
+			Index:     w.Index,
+			Validator: w.Validator,
+			Address:   w.Address,
+		})
+	}
+	payloadAttributes := engine_types.PayloadAttributes{
+		Timestamp:             hexutil.Uint64(lastExecPayload.Time + cfg.beaconCfg.SecondsPerSlot),
+		PrevRandao:            randaoMix,
+		SuggestedFeeRecipient: feeRecipient,
+		ParentBeaconBlockRoot: &headBlock.Root,
+		Withdrawals:           withdrawals,
+	}
+	e := &beaconevents.PayloadAttributesData{
+		Version: headState.Version().String(),
+		Data: beaconevents.PayloadAttributesContent{
+			ProposerIndex:     proposerIndex,
+			ProposalSlot:      headState.Slot(),
+			ParentBlockNumber: headPayload.BlockNumber,
+			ParentBlockHash:   headPayload.StateRoot,
+			ParentBlockRoot:   headBlock.Root,
+			PayloadAttributes: payloadAttributes,
+		},
+	}
+	cfg.emitter.State().SendPayloadAttributes(e)
+	return nil
+}
+
 // saveHeadStateOnDiskIfNeeded saves the head state on disk for eventual node restarts without checkpoint sync.
 func saveHeadStateOnDiskIfNeeded(cfg *Cfg, headState *state.CachingBeaconState) error {
 	epochFrequency := uint64(5)
@@ -258,7 +316,9 @@ func postForkchoiceOperations(ctx context.Context, tx kv.RwTx, logger log.Logger
 		return fmt.Errorf("failed to save head state on disk: %w", err)
 	}
 	// Lastly, emit the head event
-	return emitHeadEvent(cfg, headSlot, headRoot, headState)
+	emitHeadEvent(cfg, headSlot, headRoot, headState)
+	emitNextPaylodAttributesEvent(cfg, headState)
+	return nil
 }
 
 // doForkchoiceRoutine performs the fork choice routine by computing the new fork choice, updating the canonical chain in the database,
