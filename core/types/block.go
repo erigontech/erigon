@@ -583,10 +583,6 @@ type headerMarshaling struct {
 func (h *Header) Hash() (hash libcommon.Hash) {
 	if !h.mutable {
 		if hash := h.hash.Load(); hash != nil {
-			empty := libcommon.Hash{}
-			if empty == *hash {
-				panic(1)
-			}
 			return *hash
 		}
 	}
