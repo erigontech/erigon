@@ -265,6 +265,7 @@ func emitNextPaylodAttributesEvent(cfg *Cfg, s *state.CachingBeaconState) error 
 			PayloadAttributes: payloadAttributes,
 		},
 	}
+	log.Info("[test] emitNextPaylodAttributesEvent", "event", e)
 	cfg.emitter.State().SendPayloadAttributes(e)
 	return nil
 }
