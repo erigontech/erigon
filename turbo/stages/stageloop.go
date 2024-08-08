@@ -222,7 +222,6 @@ func StageLoopIteration(ctx context.Context, db kv.RwDB, txc wrap.TxContainer, s
 	}() // avoid crash because Erigon's core does many things
 
 	externalTx := txc.Tx != nil
-	println("externalTx", externalTx)
 	finishProgressBefore, borProgressBefore, headersProgressBefore, err := stagesHeadersAndFinish(db, txc.Tx)
 	if err != nil {
 		return err
@@ -271,14 +270,11 @@ func StageLoopIteration(ctx context.Context, db kv.RwDB, txc wrap.TxContainer, s
 			logger.Error("BeforeRun err", "err", err)
 			return err
 		}
-		logger.Error("BeforeRun hook", "hook", hook.chainConfig.ChainID.String())
 	}
-	logger.Error("start sync")
 	_, err = sync.Run(db, txc, initialCycle, firstCycle)
 	if err != nil {
 		return err
 	}
-	logger.Error("finish sync")
 	logCtx := sync.PrintTimings()
 	//var tableSizes []interface{}
 	var commitTime time.Duration
@@ -295,7 +291,6 @@ func StageLoopIteration(ctx context.Context, db kv.RwDB, txc wrap.TxContainer, s
 	}
 
 	// -- send notifications START
-	logger.Error("trying to after run", "hook nil?", hook == nil)
 	if hook != nil {
 		if err = hook.AfterRun(txc.Tx, finishProgressBefore); err != nil {
 			return err
@@ -397,7 +392,6 @@ func (h *Hook) AfterRun(tx kv.Tx, finishProgressBefore uint64) error {
 }
 func (h *Hook) afterRun(tx kv.Tx, finishProgressBefore uint64) error {
 	// Update sentry status for peers to see our sync status
-	h.logger.Error("after run", "finishProgressBefore", finishProgressBefore)
 	if h.updateHead != nil {
 		h.updateHead(h.ctx)
 	}
@@ -409,7 +403,6 @@ func (h *Hook) afterRun(tx kv.Tx, finishProgressBefore uint64) error {
 func (h *Hook) sendNotifications(notifications *shards.Notifications, tx kv.Tx, finishProgressBefore uint64) error {
 	// update the accumulator with a new plain state version so the cache can be notified that
 	// state has moved on
-	h.logger.Error("starting to send")
 	if notifications.Accumulator != nil {
 		plainStateVersion, err := rawdb.GetStateVersion(tx)
 		if err != nil {
@@ -451,7 +444,6 @@ func (h *Hook) sendNotifications(notifications *shards.Notifications, tx kv.Tx, 
 			finalizedBlock = *fb
 		}
 
-		h.logger.Error("[hook] Sending state changes", "currentBlock", currentHeader.Number.Uint64(), "finalizedBlock", finalizedBlock)
 		notifications.Accumulator.SendAndReset(h.ctx, notifications.StateChangesConsumer, pendingBaseFee.Uint64(), pendingBlobFee, currentHeader.GasLimit, finalizedBlock)
 	}
 	return nil

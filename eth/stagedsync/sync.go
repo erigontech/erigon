@@ -392,7 +392,6 @@ func (s *Sync) Run(db kv.RwDB, txc wrap.TxContainer, initialCycle, firstCycle bo
 		if badBlockUnwind {
 			// If there was a bad block, the current step needs to complete, to send the corresponding reply to the Consensus Layer
 			// Otherwise, the staged sync will get stuck in the Headers stage with "Waiting for Consensus Layer..."
-			s.logger.Error("I've breaked here btw")
 			break
 		}
 
@@ -409,7 +408,7 @@ func (s *Sync) Run(db kv.RwDB, txc wrap.TxContainer, initialCycle, firstCycle bo
 			s.NextStage()
 			continue
 		}
-		s.logger.Error("current stage now is", "stage", stage.ID, "stack", dbg.Stack())
+
 		if err := s.runStage(stage, db, txc, initialCycle, firstCycle, badBlockUnwind); err != nil {
 			return false, err
 		}
@@ -444,7 +443,6 @@ func (s *Sync) Run(db kv.RwDB, txc wrap.TxContainer, initialCycle, firstCycle bo
 
 		s.NextStage()
 	}
-	s.logger.Error("MINING IS OVER!!!!")
 
 	if err := s.SetCurrentStage(s.stages[0].ID); err != nil {
 		return false, err

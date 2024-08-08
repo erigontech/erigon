@@ -1194,26 +1194,28 @@ func (sdc *SharedDomainsCommitmentContext) ComputeCommitment(ctx context.Context
 	// data accessing functions should be set when domain is opened/shared context updated
 	sdc.patriciaTrie.SetTrace(sdc.sharedDomains.trace)
 	sdc.Reset()
-	println("patricia mode:", sdc.mode.String(), sdc.sharedDomains.trace)
+	//println("patricia mode:", sdc.mode.String(), sdc.sharedDomains.trace)
 	switch sdc.mode {
 	case commitment.ModeDirect:
-		if blockNum == 3 {
+		//sdc.updates.List(false)
+		if blockNum >= 3 {
 			println("in patricia tree", logPrefix)
 			println("size", sdc.updates.Size())
-			list, upd := sdc.updates.List(false)
-			println("list")
-			for i := range list {
-				for j := range list[i] {
-					print(list[i][j], "/")
-				}
-				println()
-			}
-			println("upd")
-			for _, u := range upd {
-				println(u.String())
-			}
+			//list, upd := sdc.updates.List(false)
+			//println("list")
+			//for i := range list {
+			//	for j := range list[i] {
+			//		print(list[i][j], "/")
+			//	}
+			//	println()
+			//}
+			//println("upd")
+			//for _, u := range upd {
+			//	println(u.String())
+			//}
 		}
 		rootHash, err = sdc.patriciaTrie.ProcessTree(ctx, sdc.updates, logPrefix)
+		//println("calculated rootHash:", common.BytesToHash(rootHash).Hex())
 		if err != nil {
 			return nil, err
 		}

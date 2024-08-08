@@ -392,7 +392,6 @@ func (hd *HeaderDownload) RequestMoreHeaders(currentTime time.Time) (*HeaderRequ
 	defer hd.lock.Unlock()
 	var penalties []PenaltyItem
 	var req *HeaderRequest
-	hd.logger.Error("[downloader] RequestMoreHeaders", "currentTime", currentTime)
 
 	hd.anchorTree.Ascend(func(anchor *Anchor) bool {
 		hd.logger.Error("in request more", "anch hash", anchor.parentHash.Hex())
