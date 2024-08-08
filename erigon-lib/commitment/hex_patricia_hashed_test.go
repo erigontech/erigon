@@ -339,11 +339,11 @@ func Test_HexPatriciaHashed_BrokenUniqueRepr(t *testing.T) {
 	// Same PLAIN prefix is not necessary while HASHED CPL>0 is required
 	t.Run("InsertStorageWhenCPL==0", func(t *testing.T) {
 		// ordering of keys differs
-		uniqTest(t, true, true)
+		uniqTest(t, true, false)
 	})
 	t.Run("InsertStorageWhenCPL>0", func(t *testing.T) {
 		// ordering of keys differs
-		uniqTest(t, false, true)
+		uniqTest(t, false, false)
 	})
 }
 
