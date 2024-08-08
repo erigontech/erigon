@@ -61,6 +61,7 @@ func TestInterpreterReadonly(t *testing.T) {
 			new(uint256.Int),
 			0,
 			false,
+			evm.jumpDestCache,
 		)
 
 		newTestSequential(env, currentIdx, readOnlySliceTest, isEVMSliceTest).Run(dummyContract, nil, false)

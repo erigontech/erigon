@@ -20,6 +20,10 @@
 package vm
 
 import (
+	"encoding/binary"
+
+	lru "github.com/hashicorp/golang-lru/v2"
+	"github.com/hashicorp/golang-lru/v2/simplelru"
 	"github.com/holiman/uint256"
 
 	libcommon "github.com/erigontech/erigon-lib/common"
@@ -53,8 +57,9 @@ type Contract struct {
 	CallerAddress libcommon.Address
 	caller        ContractRef
 	self          libcommon.Address
-	jumpdests     map[libcommon.Hash][]uint64 // Aggregated result of JUMPDEST analysis.
-	analysis      []uint64                    // Locally cached result of JUMPDEST analysis
+	jumpdests     map[libcommon.Hash][]uint64              // Aggregated result of JUMPDEST analysis.
+	jumpdests2    *simplelru.LRU[libcommon.Hash, []uint64] // Aggregated result of JUMPDEST analysis.
+	analysis      []uint64                                 // Locally cached result of JUMPDEST analysis
 	skipAnalysis  bool
 
 	Code     []byte
@@ -67,15 +72,16 @@ type Contract struct {
 }
 
 // NewContract returns a new contract environment for the execution of EVM.
-func NewContract(caller ContractRef, addr libcommon.Address, value *uint256.Int, gas uint64, skipAnalysis bool) *Contract {
+func NewContract(caller ContractRef, addr libcommon.Address, value *uint256.Int, gas uint64, skipAnalysis bool, jumpDestCache *simplelru.LRU[libcommon.Hash, []uint64]) *Contract {
 	c := &Contract{CallerAddress: caller.Address(), caller: caller, self: addr}
 
-	if parent, ok := caller.(*Contract); ok {
-		// Reuse JUMPDEST analysis from parent context if available.
-		c.jumpdests = parent.jumpdests
-	} else {
-		c.jumpdests = make(map[libcommon.Hash][]uint64)
-	}
+	c.jumpdests2 = jumpDestCache
+	//if parent, ok := caller.(*Contract); ok {
+	//	// Reuse JUMPDEST analysis from parent context if available.
+	//	c.jumpdests = parent.jumpdests
+	//} else {
+	//	c.jumpdests = make(map[libcommon.Hash][]uint64)
+	//}
 
 	// Gas should be a pointer so it can safely be reduced through the run
 	// This pointer will be off the state transition
@@ -111,6 +117,12 @@ func isCodeFromAnalysis(analysis []uint64, udest uint64) bool {
 	return analysis[udest/64]&(uint64(1)<<(udest&63)) == 0
 }
 
+var jumpdests2 = make(map[libcommon.Hash][]uint64, 1024)
+var jumpdests4, _ = lru.New[libcommon.Hash, []uint64](1024)
+var jumpdests3, _ = freelru.New[libcommon.Hash, []uint64](1024, func(hash libcommon.Hash) uint32 {
+	return binary.BigEndian.Uint32(hash[:8])
+})
+
 // isCode returns true if the provided PC location is an actual opcode, as
 // opposed to a data-segment following a PUSHN operation.
 func (c *Contract) isCode(udest uint64) bool {
@@ -119,12 +131,18 @@ func (c *Contract) isCode(udest uint64) bool {
 	// contracts ( not temporary initcode), we store the analysis in a map
 	if c.CodeHash != (libcommon.Hash{}) {
 		// Does parent context have the analysis?
-		analysis, exist := c.jumpdests[c.CodeHash]
+		//analysis, exist := jumpdests2[c.CodeHash]
+		//analysis, exist := jumpdests3.Get(c.CodeHash)
+		//analysis, exist := jumpdests3.Get(c.CodeHash)
+		//analysis, exist := c.jumpdests[c.CodeHash]
+		analysis, exist := c.jumpdests2.Get(c.CodeHash)
 		if !exist {
 			// Do the analysis and save in parent context
 			// We do not need to store it in c.analysis
 			analysis = codeBitmap(c.Code)
-			c.jumpdests[c.CodeHash] = analysis
+			//jumpdests2[c.CodeHash] = analysis
+			//jumpdests3.Add(c.CodeHash, analysis)
+			c.jumpdests2.Add(c.CodeHash, analysis)
 		}
 		// Also stash it in current contract for faster access
 		c.analysis = analysis
