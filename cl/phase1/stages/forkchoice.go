@@ -74,9 +74,16 @@ func updateCanonicalChainInTheDatabase(ctx context.Context, tx kv.RwTx, headSlot
 	if err != nil {
 		return fmt.Errorf("failed to read canonical block root: %w", err)
 	}
-	oldCanonical, err := beacon_indicies.ReadCanonicalBlockRoot(tx, currentSlot-1)
-	if err != nil {
-		return fmt.Errorf("failed to read canonical block root: %w", err)
+
+	oldCanonical := common.Hash{}
+	for i := currentSlot - 1; i > 0; i-- {
+		oldCanonical, err := beacon_indicies.ReadCanonicalBlockRoot(tx, i)
+		if err != nil {
+			return fmt.Errorf("failed to read canonical block root: %w", err)
+		}
+		if oldCanonical != (common.Hash{}) {
+			break
+		}
 	}
 
 	// List of new canonical chain entries
