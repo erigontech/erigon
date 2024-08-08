@@ -807,9 +807,9 @@ Loop:
 					blobGasUsed += txTask.Tx.GetBlobGas()
 				}
 				if txTask.Final {
-					checkReceipts := !cfg.vmConfig.StatelessExec && chainConfig.IsByzantium(txTask.BlockNum) && !cfg.vmConfig.NoReceipts && !isMining
-					if txTask.BlockNum > 0 && !skipPostEvaluation { //Disable check for genesis. Maybe need somehow improve it in future - to satisfy TestExecutionSpec
-						if err := core.BlockPostValidation(usedGas, blobGasUsed, checkReceipts, receipts, txTask.Header); err != nil {
+					checkReceipts := !cfg.vmConfig.StatelessExec && chainConfig.IsByzantium(txTask.BlockNum) && !cfg.vmConfig.NoReceipts // && !isMining
+					if txTask.BlockNum > 0 && !skipPostEvaluation {                                                                      //Disable check for genesis. Maybe need somehow improve it in future - to satisfy TestExecutionSpec
+						if err := core.BlockPostValidation(usedGas, blobGasUsed, checkReceipts, receipts, txTask.Header, isMining); err != nil {
 							return fmt.Errorf("%w, txnIdx=%d, %v", consensus.ErrInvalidBlock, txTask.TxIndex, err) //same as in stage_exec.go
 						}
 					}
@@ -992,7 +992,7 @@ Loop:
 		waitWorkers()
 	}
 
-	if u != nil && !u.HasUnwindPoint() {
+	if isMining || u != nil && !u.HasUnwindPoint() {
 		if b != nil {
 			_, err := flushAndCheckCommitmentV3(ctx, b.HeaderNoCopy(), applyTx, doms, cfg, execStage, stageProgress, parallel, logger, u, inMemExec, isMining)
 			if err != nil {
@@ -1091,15 +1091,20 @@ func flushAndCheckCommitmentV3(ctx context.Context, header *types.Header, applyT
 	if doms.BlockNum() != header.Number.Uint64() {
 		panic(fmt.Errorf("%d != %d", doms.BlockNum(), header.Number.Uint64()))
 	}
-
-	rh, err := doms.ComputeCommitment(ctx, true, header.Number.Uint64(), u.LogPrefix())
+	logPrefix := "mining"
+	if u != nil {
+		logPrefix = u.LogPrefix()
+	}
+	rh, err := doms.ComputeCommitment(ctx, true, header.Number.Uint64(), logPrefix)
 	if err != nil {
 		return false, fmt.Errorf("StateV3.Apply: %w", err)
 	}
 	if cfg.blockProduction {
+		println("HEADER ROOT IS2", header.Root.Hex(), common.BytesToHash(rh).Hex())
+		header.Root = common.BytesToHash(rh)
 		return true, nil
 	}
-	if isMining || bytes.Equal(rh, header.Root.Bytes()) {
+	if bytes.Equal(rh, header.Root.Bytes()) {
 		if !inMemExec {
 			if err := doms.Flush(ctx, applyTx); err != nil {
 				return false, err
@@ -1142,8 +1147,10 @@ func flushAndCheckCommitmentV3(ctx context.Context, header *types.Header, applyT
 		return false, fmt.Errorf("%w: requested=%d, minAllowed=%d", ErrTooDeepUnwind, unwindTo, allowedUnwindTo)
 	}
 	logger.Warn("Unwinding due to incorrect root hash", "to", unwindTo)
-	if err := u.UnwindTo(allowedUnwindTo, BadBlock(header.Hash(), ErrInvalidStateRootHash), applyTx); err != nil {
-		return false, err
+	if u != nil {
+		if err := u.UnwindTo(allowedUnwindTo, BadBlock(header.Hash(), ErrInvalidStateRootHash), applyTx); err != nil {
+			return false, err
+		}
 	}
 	return false, nil
 }
