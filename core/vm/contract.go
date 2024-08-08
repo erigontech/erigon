@@ -20,8 +20,6 @@
 package vm
 
 import (
-	"fmt"
-
 	"github.com/holiman/uint256"
 
 	libcommon "github.com/erigontech/erigon-lib/common"
@@ -209,7 +207,6 @@ func (c *Contract) Value() *uint256.Int {
 
 // IsEOF returns whether the contract is EOF.
 func (c *Contract) IsEOF() bool {
-	fmt.Println("Contract isEOF: ", c.Container != nil)
 	return c.Container != nil
 }
 

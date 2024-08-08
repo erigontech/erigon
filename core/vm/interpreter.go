@@ -286,6 +286,10 @@ func (in *EVMInterpreter) Run(contract *Contract, input []byte, readOnly bool) (
 	// parent context.
 	steps := 0
 	for {
+		if contract.IsEOF() { // TODO(racytech): re-do this, find a better way, creates extra if check
+			initcode = contract.Container.Code[callContext.CodeSection]
+		}
+
 		steps++
 		if steps%1000 == 0 && in.evm.Cancelled() {
 			break
@@ -354,11 +358,13 @@ func (in *EVMInterpreter) Run(contract *Contract, input []byte, readOnly bool) (
 		}
 		// execute the operation
 		res, err = operation.execute(pc, in, callContext)
-		if err != nil {
+		if err != nil && err != errPCincrement {
 			fmt.Println("INTERPRETER ERR: ", err)
 			break
 		}
-		_pc++
+		if err != errPCincrement { // TODO(racytech): re-do this, find a better way, creates extra if check
+			_pc++
+		}
 	}
 	fmt.Println("")
 
