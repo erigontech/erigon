@@ -20,6 +20,8 @@ import (
 	"time"
 
 	"github.com/ledgerwatch/log/v3"
+	"github.com/shirou/gopsutil/v4/cpu"
+	"github.com/shirou/gopsutil/v4/mem"
 	"github.com/shirou/gopsutil/v4/process"
 )
 
@@ -35,6 +37,11 @@ type ProcessMerge struct {
 	Memory   float32
 	Times    int
 	Name     string
+}
+
+type CPUUsageInfo struct {
+	Total float64
+	Cores []float64
 }
 
 const (
@@ -168,4 +175,38 @@ func allProcesses(procs []*process.Process) []*ProcessInfo {
 	}
 
 	return processes
+}
+
+func TotalCPUUsage() float64 {
+	totalCPUPercent, err := cpu.Percent(time.Second, false)
+	if err != nil {
+		log.Debug("[Sysutil] Error retrieving total CPU usage: %v", err)
+	}
+
+	return float64(totalCPUPercent[0])
+}
+
+func CPUUsageByCores() []float64 {
+	cpuPercent, err := cpu.Percent(time.Second, true)
+	if err != nil {
+		log.Debug("[Sysutil] Error retrieving CPU usage by cores: %v", err)
+	}
+
+	return cpuPercent
+}
+
+func CPUUsage() CPUUsageInfo {
+	cpuPercent := CPUUsageByCores()
+	totalCPU := TotalCPUUsage()
+
+	return CPUUsageInfo{Total: totalCPU, Cores: cpuPercent}
+}
+
+func TotalMemoryUsage() float64 {
+	totalMemory, err := mem.VirtualMemory()
+	if err != nil {
+		log.Debug("[Sysutil] Error retrieving total memory usage: %v", err)
+	}
+
+	return float64(totalMemory.UsedPercent)
 }
