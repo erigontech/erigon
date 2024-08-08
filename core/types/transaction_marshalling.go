@@ -466,12 +466,9 @@ func (tx *SetCodeTransaction) UnmarshalJSON(input []byte) error {
 		return err
 	}
 
-	dTx := DynamicFeeTransaction{}
-	if err := dTx.unmarshalJson(dec); err != nil {
+	if err := tx.DynamicFeeTransaction.unmarshalJson(dec); err != nil {
 		return err
 	}
-
-	tx.DynamicFeeTransaction = dTx
 	tx.Authorizations = make([]Authorization, len(*dec.Authorizations))
 	for i, auth := range *dec.Authorizations {
 		tx.Authorizations[i] = auth.ToAuthorization()
@@ -580,7 +577,8 @@ func UnmarshalBlobTxJSON(input []byte) (Transaction, error) {
 	}
 
 	btx := BlobTxWrapper{
-		Tx:          tx,
+		// it's ok to copy here - because it's constructor of object - no parallel access yet
+		Tx:          tx, //nolint
 		Commitments: dec.Commitments,
 		Blobs:       dec.Blobs,
 		Proofs:      dec.Proofs,

@@ -690,10 +690,10 @@ func newRandBlobs(size int) Blobs {
 }
 
 func newRandBlobWrapper() *BlobTxWrapper {
-	btxw := *newRandBlobTx()
+	btxw := newRandBlobTx()
 	l := len(btxw.BlobVersionedHashes)
 	return &BlobTxWrapper{
-		Tx:          btxw,
+		Tx:          *btxw, //nolint
 		Commitments: newRandCommitments(l),
 		Blobs:       newRandBlobs(l),
 		Proofs:      newRandProofs(l),
