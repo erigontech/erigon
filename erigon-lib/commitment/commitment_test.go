@@ -101,42 +101,6 @@ func TestBranchData_MergeHexBranches2(t *testing.T) {
 	}
 }
 
-func TestBranchData_MergeHexBranches_ValueAliveAfterNewMerges(t *testing.T) {
-	t.Skip()
-	row, bm := generateCellRow(t, 16)
-
-	be := NewBranchEncoder(1024, t.TempDir())
-	enc, _, err := be.EncodeBranch(bm, bm, bm, func(i int, skip bool) (*cell, error) {
-		return row[i], nil
-	})
-	require.NoError(t, err)
-
-	copies := make([][]byte, 16)
-	values := make([][]byte, len(copies))
-
-	merger := NewHexBranchMerger(8192)
-
-	var tm uint16
-	am := bm
-
-	for i := 15; i >= 0; i-- {
-		row[i] = nil
-		tm, bm, am = uint16(1<<i), bm>>1, am>>1
-		enc1, _, err := be.EncodeBranch(bm, tm, am, func(i int, skip bool) (*cell, error) {
-			return row[i], nil
-		})
-		require.NoError(t, err)
-		merged, err := merger.Merge(enc, enc1)
-		require.NoError(t, err)
-
-		copies[i] = common.Copy(merged)
-		values[i] = merged
-	}
-	for i := 0; i < len(copies); i++ {
-		require.EqualValues(t, copies[i], values[i])
-	}
-}
-
 func TestBranchData_MergeHexBranchesEmptyBranches(t *testing.T) {
 	// Create a BranchMerger instance with sufficient capacity for testing.
 	merger := NewHexBranchMerger(1024)
