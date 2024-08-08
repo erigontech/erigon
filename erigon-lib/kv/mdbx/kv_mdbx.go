@@ -1437,6 +1437,7 @@ func (c *MdbxCursor) Seek(seek []byte) (k, v []byte, err error) {
 		}
 		return []byte{}, nil, fmt.Errorf("cursor.SetRange: %w, bucket: %s, key: %x", err, c.bucketName, seek)
 	}
+
 	return k, v, nil
 }
 

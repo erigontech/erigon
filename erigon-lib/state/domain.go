@@ -1397,11 +1397,11 @@ var (
 
 // func u32h(u uint32) uint32 { return u }
 func u64h(u uint64) uint32 { return uint32(u) }
-func u128h(u u128) uint32  { return uint32(u.hi) }
-func u192h(u u192) uint32  { return uint32(u.hi) }
 
-type u128 struct{ hi, lo uint64 }
-type u192 struct{ hi, lo, ext uint64 }
+//func u128h(u u128) uint32  { return uint32(u.hi) }
+//func u192h(u u192) uint32  { return uint32(u.hi) }
+//type u128 struct{ hi, lo uint64 }
+//type u192 struct{ hi, lo, ext uint64 }
 
 func (dt *DomainRoTx) getFromFiles(filekey []byte) (v []byte, found bool, fileStartTxNum uint64, fileEndTxNum uint64, err error) {
 	if len(dt.files) == 0 {
@@ -1418,12 +1418,12 @@ func (dt *DomainRoTx) getFromFiles(filekey []byte) (v []byte, found bool, fileSt
 		}
 		cv, ok := dt.latestStateCache.Get(hi)
 		if ok {
-			if dbg.KVReadLevelledMetrics {
-				m := dt.latestStateCache.Metrics()
-				if m.Hits%1000 == 0 {
-					log.Warn("[dbg] lEachCache", "a", dt.name.String(), "hit", m.Hits, "total", m.Hits+m.Misses, "Collisions", m.Collisions, "Evictions", m.Evictions, "Inserts", m.Inserts, "limit", latestStateCachePerDomain, "ratio", fmt.Sprintf("%.2f", float64(m.Hits)/float64(m.Hits+m.Misses)))
-				}
-			}
+			//if dbg.KVReadLevelledMetrics {
+			//m := dt.latestStateCache.Metrics()
+			//if m.Hits%1000 == 0 {
+			//	log.Warn("[dbg] lEachCache", "a", dt.name.String(), "hit", m.Hits, "total", m.Hits+m.Misses, "Collisions", m.Collisions, "Evictions", m.Evictions, "Inserts", m.Inserts, "limit", latestStateCachePerDomain, "ratio", fmt.Sprintf("%.2f", float64(m.Hits)/float64(m.Hits+m.Misses)))
+			//}
+			//}
 			return cv.v, true, dt.files[cv.lvl].startTxNum, dt.files[cv.lvl].endTxNum, nil
 		}
 	}
@@ -1568,6 +1568,7 @@ func (dt *DomainRoTx) valsCursor(tx kv.Tx) (c kv.Cursor, err error) {
 	if dt.valsC != nil {
 		return dt.valsC, nil
 	}
+
 	if dt.d.largeVals {
 		dt.valsC, err = tx.Cursor(dt.d.valsTable)
 		return dt.valsC, err
