@@ -223,12 +223,6 @@ func (b *BlockGen) OffsetTime(seconds int64) {
 func (b *BlockGen) GetHeader() *types.Header {
 	return b.header
 }
-func (b *BlockGen) SetCurrentHeaderParenHash(hash libcommon.Hash) {
-	// preserve immutability of Header object
-	cpy := types.CopyHeader(b.header)
-	cpy.ParentHash = hash
-	b.header = cpy
-}
 
 func (b *BlockGen) GetParent() *types.Block {
 	return b.parent
@@ -373,6 +367,7 @@ func GenerateChain(config *chain.Config, parent *types.Block, engine consensus.E
 		}
 		txNumIncrement()
 		if b.engine != nil {
+
 			// Finalize and seal the block
 			if _, _, _, err := b.engine.FinalizeAndAssemble(config, b.header, ibs, b.txs, b.uncles, b.receipts, nil, nil, nil, nil, nil, logger); err != nil {
 				return nil, nil, fmt.Errorf("call to FinaliseAndAssemble: %w", err)

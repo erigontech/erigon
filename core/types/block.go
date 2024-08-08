@@ -588,7 +588,7 @@ func (h *Header) Hash() (hash libcommon.Hash) {
 	}
 	hash = rlpHash(h)
 	if !h.mutable {
-		h.hash.Store(&hash)
+		//h.hash.Store(&hash)
 	}
 	return hash
 }
