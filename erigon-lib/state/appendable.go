@@ -21,6 +21,7 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
+	"github.com/erigontech/erigon-lib/common"
 	"math"
 	"path"
 	"path/filepath"
@@ -579,7 +580,7 @@ func (is *AppendablePruneStat) String() string {
 	if is.MinTxNum == math.MaxUint64 && is.PruneCountTx == 0 {
 		return ""
 	}
-	return fmt.Sprintf("ap %d txs in %.2fM-%.2fM", is.PruneCountTx, float64(is.MinTxNum)/1_000_000.0, float64(is.MaxTxNum)/1_000_000.0)
+	return fmt.Sprintf("ap %d txs in %s-%s", is.PruneCountTx, common.PrettyCounter(is.MinTxNum), common.PrettyCounter(is.MaxTxNum))
 }
 
 func (is *AppendablePruneStat) Accumulate(other *AppendablePruneStat) {

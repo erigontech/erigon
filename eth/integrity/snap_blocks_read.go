@@ -19,6 +19,7 @@ package integrity
 import (
 	"context"
 	"fmt"
+	"github.com/erigontech/erigon-lib/common"
 	"time"
 
 	"github.com/erigontech/erigon-lib/kv"
@@ -54,7 +55,7 @@ func SnapBlocksRead(db kv.RoDB, blockReader services.FullBlockReader, ctx contex
 		case <-ctx.Done():
 			return nil
 		case <-logEvery.C:
-			log.Info("[integrity] SnapBlocksRead", "blockNum", fmt.Sprintf("%dK/%dK", i/1000, maxBlockNum/1000))
+			log.Info("[integrity] SnapBlocksRead", "blockNum", fmt.Sprintf("%s/%s", common.PrettyCounter(i), common.PrettyCounter(maxBlockNum)))
 		default:
 		}
 	}
