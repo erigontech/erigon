@@ -53,6 +53,7 @@ func (a *ApiHandler) EventSourceGetV1Events(w http.ResponseWriter, r *http.Reque
 		return
 	}
 	w.Header().Set("Content-Type", "text/event-stream")
+	w.Header().Set("Cache-Control", "no-cache")
 	w.Header().Set("Connection", "keep-alive")
 
 	topics := r.URL.Query()["topics"]
@@ -65,7 +66,7 @@ func (a *ApiHandler) EventSourceGetV1Events(w http.ResponseWriter, r *http.Reque
 		}
 		subscribeTopics.Add(topic)
 	}
-	log.Info("Subscribed to topics", "topics", subscribeTopics)
+	log.Info("Subscribed to event stream topics", "topics", subscribeTopics)
 
 	eventCh := make(chan *event.EventStream, 128)
 	opSub := a.emitters.Operation().Subscribe(eventCh)
@@ -112,7 +113,7 @@ func (a *ApiHandler) EventSourceGetV1Events(w http.ResponseWriter, r *http.Reque
 			http.Error(w, fmt.Sprintf("event error %v", err), http.StatusInternalServerError)
 			return
 		case <-r.Context().Done():
-			log.Info("Client disconnected")
+			log.Info("Client disconnected from event stream")
 			return
 		}
 	}
