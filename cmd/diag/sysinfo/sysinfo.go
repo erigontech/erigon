@@ -18,12 +18,15 @@ package sysinfo
 
 import (
 	"fmt"
+	"sort"
 	"strconv"
 	"strings"
 
+	"github.com/jedib0t/go-pretty/v6/table"
 	"github.com/urfave/cli/v2"
 
 	"github.com/erigontech/erigon-lib/diagnostics"
+	"github.com/erigontech/erigon-lib/sysutils"
 	"github.com/erigontech/erigon/cmd/diag/flags"
 	"github.com/erigontech/erigon/cmd/diag/util"
 )
@@ -59,6 +62,14 @@ var Command = cli.Command{
 	Description: "Collect information about system and save it to file in order to provide to support person",
 }
 
+type SortType int
+
+const (
+	SortByCPU SortType = iota
+	SortByMemory
+	SortByPID
+)
+
 func collectInfo(cliCtx *cli.Context) error {
 	data, err := getData(cliCtx)
 	if err != nil {
@@ -71,6 +82,10 @@ func collectInfo(cliCtx *cli.Context) error {
 	builder.WriteString("\n\n")
 	builder.WriteString("CPU info:\n")
 	writeCPUToStringBuilder(data.CPU, &builder)
+
+	processes := sysutils.GetProcessesInfo()
+	builder.WriteString("\n\nProcesses info:\n")
+	writeProcessesToStringBuilder(processes, &builder)
 
 	// Save data to file
 	err = util.SaveDataToFile(cliCtx.String(ExportPathFlag.Name), cliCtx.String(ExportFileNameFlag.Name), builder.String())
@@ -99,6 +114,56 @@ func writeCPUToStringBuilder(cpuInfo []diagnostics.CPUInfo, builder *strings.Bui
 		writeStringToBuilder(builder, "Flags", strings.Join(cpu.Flags, ", "), spacing)
 		writeStringToBuilder(builder, "Microcode", cpu.Microcode, spacing)
 	}
+}
+
+func writeProcessesToStringBuilder(prcInfo []*sysutils.ProcessInfo, builder *strings.Builder) {
+	prcInfo = sortProcessesByCPU(prcInfo)
+	rows := make([]table.Row, 0)
+	header := table.Row{"PID", "Name", "% CPU", "% Memory"}
+	for _, process := range prcInfo {
+		cpu := fmt.Sprintf("%.2f", process.CPUUsage)
+		memory := fmt.Sprintf("%.2f", process.Memory)
+		rows = append(rows, table.Row{process.Pid, process.Name, cpu, memory})
+	}
+
+	t := table.NewWriter()
+
+	t.AppendHeader(header)
+	if len(rows) > 0 {
+		t.AppendRows(rows)
+	}
+
+	t.AppendSeparator()
+	result := t.Render()
+	builder.WriteString(result)
+}
+
+func sortProcesses(prcInfo []*sysutils.ProcessInfo, sorting SortType) []*sysutils.ProcessInfo {
+	sort.Slice(prcInfo, func(i, j int) bool {
+		switch sorting {
+		case SortByCPU:
+			return prcInfo[i].CPUUsage > prcInfo[j].CPUUsage
+		case SortByMemory:
+			return prcInfo[i].Memory > prcInfo[j].Memory
+		default:
+			return prcInfo[i].Pid < prcInfo[j].Pid
+		}
+
+	})
+
+	return prcInfo
+}
+
+func sortProcessesByCPU(prcInfo []*sysutils.ProcessInfo) []*sysutils.ProcessInfo {
+	return sortProcesses(prcInfo, SortByCPU)
+}
+
+func sortProcessesByMemory(prcInfo []*sysutils.ProcessInfo) []*sysutils.ProcessInfo {
+	return sortProcesses(prcInfo, SortByMemory)
+}
+
+func sortProcessesByPID(prcInfo []*sysutils.ProcessInfo) []*sysutils.ProcessInfo {
+	return sortProcesses(prcInfo, SortByPID)
 }
 
 func calculateSpacing(keysArray []string) int {
