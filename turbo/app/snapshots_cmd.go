@@ -714,7 +714,51 @@ func doPublishable(cliCtx *cli.Context) error {
 }
 
 func doClearIndexing(cliCtx *cli.Context) error {
+	dat := datadir.New(cliCtx.String(utils.DataDirFlag.Name))
+	accessorsDir := dat.SnapAccessors
+	domainDir := dat.SnapDomain
+	snapDir := dat.Snap
+
+	// Delete accessorsDir
+	if err := os.RemoveAll(accessorsDir); err != nil {
+		return fmt.Errorf("failed to delete accessorsDir: %w", err)
+	}
+
+	// Delete all files in domainDir with extensions .bt and .bt.torrent
+	if err := deleteFilesWithExtensions(domainDir, []string{".bt", ".bt.torrent"}); err != nil {
+		return fmt.Errorf("failed to delete files in domainDir: %w", err)
+	}
+
+	// Delete all files in snapDir with extensions .idx and .idx.torrent
+	if err := deleteFilesWithExtensions(snapDir, []string{".idx", ".idx.torrent"}); err != nil {
+		return fmt.Errorf("failed to delete files in snapDir: %w", err)
+	}
+
 	return nil
+}
+
+func deleteFilesWithExtensions(dir string, extensions []string) error {
+	return filepath.Walk(dir, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return err
+		}
+
+		// Skip directories
+		if info.IsDir() {
+			return nil
+		}
+
+		// Check file extensions and delete matching files
+		for _, ext := range extensions {
+			if strings.HasSuffix(info.Name(), ext) {
+				if err := os.Remove(path); err != nil {
+					return err
+				}
+			}
+		}
+
+		return nil
+	})
 }
 
 func doDiff(cliCtx *cli.Context) error {
