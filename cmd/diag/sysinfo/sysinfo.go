@@ -131,17 +131,16 @@ func writeProcessesToStringBuilder(prcInfo []*sysutils.ProcessInfo, cpuUsage flo
 		rows = append(rows, table.Row{process.Pid, process.Name, cpu, memory})
 	}
 
-	rows = append(rows, table.Row{})
-	rows = append(rows, table.Row{"Totals", "", fmt.Sprintf("%.2f", cpuUsage), fmt.Sprintf("%.2f", totalMemory)})
-
 	t := table.NewWriter()
 
 	t.AppendHeader(header)
 	if len(rows) > 0 {
 		t.AppendRows(rows)
 	}
-
 	t.AppendSeparator()
+	t.AppendRow(table.Row{"Totals", "", fmt.Sprintf("%.2f", cpuUsage), fmt.Sprintf("%.2f", totalMemory)})
+	t.AppendSeparator()
+
 	result := t.Render()
 	builder.WriteString(result)
 }
