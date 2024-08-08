@@ -220,9 +220,6 @@ func (l *JsonStreamLogger_ZkEvm) writeMemory(memory *vm.Memory) {
 			}
 		}
 
-		if len(filteredByteLines) == 0 {
-			return
-		}
 		l.stream.WriteMore()
 		l.stream.WriteObjectField("memory")
 		l.stream.WriteArrayStart()
