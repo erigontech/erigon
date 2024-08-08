@@ -164,7 +164,7 @@ func RunCaplinService(ctx context.Context, engine execution_client.ExecutionEngi
 		h, _ := genesisState.BlockRoot()
 		fmt.Printf("Genesis state hash: %x\n", h)
 	} else {
-		networkConfig, beaconConfig = clparams.GetConfigsByNetwork(clparams.NetworkType(config.NetworkId))
+		networkConfig, beaconConfig = clparams.GetConfigsByNetwork(config.NetworkId)
 		genesisDb = genesisdb.NewGenesisDB(beaconConfig, dirs.CaplinGenesis)
 
 		isGenesisDBInitialized, err := genesisDb.IsInitialized()
@@ -438,7 +438,7 @@ func RunCaplinService(ctx context.Context, engine execution_client.ExecutionEngi
 		csn,
 		rcsn,
 		dirs,
-		uint64(config.LoopBlockLimit),
+		config.LoopBlockLimit,
 		backfilling,
 		blobBackfilling,
 		syncedDataManager,
