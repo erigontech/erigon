@@ -570,13 +570,12 @@ func CalcHashRootForTests(tx kv.RwTx, header *types.Header, histV4, trace bool) 
 }
 
 func MakeEmptyHeader(parent *types.Header, chainConfig *chain.Config, timestamp uint64, targetGasLimit *uint64) *types.Header {
-	header := &types.Header{
-		Root:       parent.Root,
-		ParentHash: parent.Hash(),
-		Number:     new(big.Int).Add(parent.Number, libcommon.Big1),
-		Difficulty: libcommon.Big0,
-		Time:       timestamp,
-	}
+	header := types.NewEmptyHeaderForAssembling()
+	header.Root = parent.Root
+	header.ParentHash = parent.Hash()
+	header.Number = new(big.Int).Add(parent.Number, libcommon.Big1)
+	header.Difficulty = libcommon.Big0
+	header.Time = timestamp
 
 	parentGasLimit := parent.GasLimit
 	// Set baseFee and GasLimit if we are on an EIP-1559 chain

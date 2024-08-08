@@ -1153,7 +1153,7 @@ func (c *Bor) Authorize(currentSigner libcommon.Address, signFn SignerFn) {
 // Seal implements consensus.Engine, attempting to create a sealed block using
 // the local signing credentials.
 func (c *Bor) Seal(chain consensus.ChainHeaderReader, block *types.Block, results chan<- *types.Block, stop <-chan struct{}) error {
-	header := block.Header()
+	header := block.HeaderNoCopy()
 	// Sealing the genesis block is not supported
 	number := header.Number.Uint64()
 

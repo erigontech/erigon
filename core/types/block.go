@@ -115,7 +115,18 @@ type Header struct {
 	VerkleProof   []byte
 	VerkleKeyVals []verkle.KeyValuePair
 
-	hash atomic.Pointer[libcommon.Hash]
+	// by default all headers are immutable
+	// but assembling/mining may use `NewEmptyHeaderForAssembling` to create temporary mutable Header object
+	// then pass it to `block.WithSeal(header)` - to produce new block with immutable `Header`
+	mutable bool
+	hash    atomic.Pointer[libcommon.Hash]
+}
+
+// NewEmptyHeaderForAssembling - returns mutable header object - for assembling/sealing/etc...
+// when sealing done - `block.WithSeal(header)` called - which producing new block with immutable `Header`
+// by default all headers are immutable
+func NewEmptyHeaderForAssembling() *Header {
+	return &Header{mutable: true}
 }
 
 func (h *Header) EncodingSize() int {
@@ -570,16 +581,19 @@ type headerMarshaling struct {
 // Hash returns the block hash of the header, which is simply the keccak256 hash of its
 // RLP encoding.
 func (h *Header) Hash() (hash libcommon.Hash) {
-	if hash := h.hash.Load(); hash != nil {
-		empty := libcommon.Hash{}
-		if empty == *hash {
-			panic(1)
+	if !h.mutable {
+		if hash := h.hash.Load(); hash != nil {
+			empty := libcommon.Hash{}
+			if empty == *hash {
+				panic(1)
+			}
+			return *hash
 		}
-		return *hash
 	}
 	hash = rlpHash(h)
-	h.hash.Store(&hash)
-	fmt.Printf("h: hash %d %x\n", h.Number.Uint64(), hash)
+	if !h.mutable {
+		h.hash.Store(&hash)
+	}
 	return hash
 }
 
@@ -1512,8 +1526,10 @@ func (b *Block) Copy() *Block {
 // WithSeal returns a new block with the data from b but the header replaced with
 // the sealed one.
 func (b *Block) WithSeal(header *Header) *Block {
+	headerCopy := CopyHeader(header)
+	headerCopy.mutable = false
 	return &Block{
-		header:       CopyHeader(header),
+		header:       headerCopy,
 		transactions: b.transactions,
 		uncles:       b.uncles,
 		withdrawals:  b.withdrawals,
