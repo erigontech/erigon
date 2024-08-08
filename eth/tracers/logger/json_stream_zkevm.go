@@ -96,6 +96,8 @@ func (l *JsonStreamLogger_ZkEvm) CaptureState(pc uint64, op vm.OpCode, gas, cost
 
 	l.writeStack(scope.Stack)
 
+	l.writeReturnData(rData)
+
 	l.writeMemory(scope.Memory)
 
 	if outputStorage {
@@ -231,6 +233,14 @@ func (l *JsonStreamLogger_ZkEvm) writeMemory(memory *vm.Memory) {
 		}
 
 		l.stream.WriteArrayEnd()
+	}
+}
+
+func (l *JsonStreamLogger_ZkEvm) writeReturnData(rData []byte) {
+	if !l.cfg.DisableReturnData && len(rData) > 0 {
+		l.stream.WriteMore()
+		l.stream.WriteObjectField("returnData")
+		l.stream.WriteString("0x" + hex.EncodeToString(rData))
 	}
 }
 
