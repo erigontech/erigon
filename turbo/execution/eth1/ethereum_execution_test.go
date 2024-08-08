@@ -37,6 +37,7 @@ import (
 	stages2 "github.com/ledgerwatch/erigon/turbo/stages"
 	"github.com/ledgerwatch/log/v3"
 	"github.com/stretchr/testify/require"
+	"google.golang.org/protobuf/types/known/emptypb"
 )
 
 func SilkwormForkValidatorTestSettings() silkworm.ForkValidatorSettings {
@@ -187,10 +188,16 @@ func setup(t TestingCtrl, useSilkworm bool) (*EthereumExecutionModule, *types.Bl
 		silkwormInstance
 }
 
-// func TestExecutionModuleInitialization(t *testing.T) {
-// 	executionModule, _ := setup(t.TempDir(), t)
-// 	require.NotNil(t, executionModule)
-// }
+func teardown(executionModule *EthereumExecutionModule, silkwormInstance *silkworm.Silkworm) {
+	if executionModule != nil && executionModule.silkwormForkValidator != nil {
+
+		executionModule.silkwormForkValidator.Stop()
+	}
+
+	if silkwormInstance != nil {
+		silkwormInstance.Close()
+	}
+}
 
 var (
 	block1RootHash = libcommon.HexToHash("34eca9cd7324e3a1df317e439a18119ad9a3c988fbf4d20783bb7bee56bafd64")
@@ -214,357 +221,415 @@ func SampleBlock(parent *types.Header, rootHash libcommon.Hash) *types.Block {
 	})
 }
 
-// func TestExecutionModuleBlockInsertion(t *testing.T) {
-// 	executionModule, genesisBlock := setup(t.TempDir(), t)
+var testCases = map[string]struct {
+	useSilkworm bool
+}{
+	"silkworm on":  {useSilkworm: true},
+	"silkworm off": {useSilkworm: false},
+}
 
-// 	newBlock := SampleBlock(genesisBlock.Header(), block1RootHash)
+func TestExecutionModuleInitialization(t *testing.T) {
+	for name, tc := range testCases {
+		t.Run(name, func(t *testing.T) {
+			executionModule, _, silkwormInstance := setup(t, tc.useSilkworm)
+			require.NotNil(t, executionModule)
 
-// 	request := &execution.InsertBlocksRequest{
-// 		Blocks: eth1_utils.ConvertBlocksToRPC([]*types.Block{newBlock}),
-// 	}
+			teardown(executionModule, silkwormInstance)
+		})
+	}
+}
 
-// 	result, err := executionModule.InsertBlocks(executionModule.bacgroundCtx, request)
-// 	require.NoError(t, err)
-// 	require.NotNil(t, result)
-// 	require.Equal(t, result.Result, execution.ExecutionStatus_Success)
-// }
+func TestExecutionModuleBlockInsertion(t *testing.T) {
+	for name, tc := range testCases {
+		t.Run(name, func(t *testing.T) {
+			executionModule, genesisBlock, silkwormInstance := setup(t, tc.useSilkworm)
 
-// func TestExecutionModuleValidateChainSingleBlock(t *testing.T) {
-// 	executionModule, genesisBlock := setup(t.TempDir(), t)
+			newBlock := SampleBlock(genesisBlock.Header(), block1RootHash)
 
-// 	newBlock := SampleBlock(genesisBlock.Header(), block1RootHash)
+			request := &execution.InsertBlocksRequest{
+				Blocks: eth1_utils.ConvertBlocksToRPC([]*types.Block{newBlock}),
+			}
 
-// 	request := &execution.InsertBlocksRequest{
-// 		Blocks: eth1_utils.ConvertBlocksToRPC([]*types.Block{newBlock}),
-// 	}
+			result, err := executionModule.InsertBlocks(executionModule.bacgroundCtx, request)
+			require.NoError(t, err)
+			require.NotNil(t, result)
+			require.Equal(t, result.Result, execution.ExecutionStatus_Success)
 
-// 	result, err := executionModule.InsertBlocks(executionModule.bacgroundCtx, request)
-// 	require.NoError(t, err)
-// 	require.NotNil(t, result)
-// 	require.Equal(t, result.Result, execution.ExecutionStatus_Success)
+			teardown(executionModule, silkwormInstance)
+		})
+	}
+}
 
-// 	validationRequest := &execution.ValidationRequest{
-// 		Hash:   gointerfaces.ConvertHashToH256(newBlock.Hash()),
-// 		Number: newBlock.Number().Uint64(),
-// 	}
+func TestExecutionModuleValidateChainSingleBlock(t *testing.T) {
+	for name, tc := range testCases {
+		t.Run(name, func(t *testing.T) {
+			executionModule, genesisBlock, silkwormInstance := setup(t, tc.useSilkworm)
 
-// 	validationResult, err := executionModule.ValidateChain(executionModule.bacgroundCtx, validationRequest)
-// 	require.NoError(t, err)
-// 	require.NotNil(t, validationResult)
-// 	require.Equal(t, validationResult.ValidationStatus, execution.ExecutionStatus_Success)
-// }
+			newBlock := SampleBlock(genesisBlock.Header(), block1RootHash)
 
-// func TestExecutionModuleForkchoiceUpdateSingleBlock(t *testing.T) {
-// 	executionModule, genesisBlock := setup(t.TempDir(), t)
+			request := &execution.InsertBlocksRequest{
+				Blocks: eth1_utils.ConvertBlocksToRPC([]*types.Block{newBlock}),
+			}
 
-// 	newBlock := SampleBlock(genesisBlock.Header(), block1RootHash)
+			result, err := executionModule.InsertBlocks(executionModule.bacgroundCtx, request)
+			require.NoError(t, err)
+			require.NotNil(t, result)
+			require.Equal(t, result.Result, execution.ExecutionStatus_Success)
 
-// 	request := &execution.InsertBlocksRequest{
-// 		Blocks: eth1_utils.ConvertBlocksToRPC([]*types.Block{newBlock}),
-// 	}
+			validationRequest := &execution.ValidationRequest{
+				Hash:   gointerfaces.ConvertHashToH256(newBlock.Hash()),
+				Number: newBlock.Number().Uint64(),
+			}
 
-// 	result, err := executionModule.InsertBlocks(executionModule.bacgroundCtx, request)
-// 	require.NoError(t, err)
-// 	require.NotNil(t, result)
-// 	require.Equal(t, result.Result, execution.ExecutionStatus_Success)
+			validationResult, err := executionModule.ValidateChain(executionModule.bacgroundCtx, validationRequest)
+			require.NoError(t, err)
+			require.NotNil(t, validationResult)
+			require.Equal(t, validationResult.ValidationStatus, execution.ExecutionStatus_Success)
 
-// 	validationRequest := &execution.ValidationRequest{
-// 		Hash:   gointerfaces.ConvertHashToH256(newBlock.Hash()),
-// 		Number: newBlock.Number().Uint64(),
-// 	}
+			teardown(executionModule, silkwormInstance)
+		})
+	}
+}
 
-// 	validationResult, err := executionModule.ValidateChain(executionModule.bacgroundCtx, validationRequest)
-// 	require.NoError(t, err)
-// 	require.NotNil(t, validationResult)
-// 	require.Equal(t, validationResult.ValidationStatus, execution.ExecutionStatus_Success)
+func TestExecutionModuleForkchoiceUpdateSingleBlock(t *testing.T) {
+	for name, tc := range testCases {
+		t.Run(name, func(t *testing.T) {
+			executionModule, genesisBlock, silkwormInstance := setup(t, tc.useSilkworm)
 
-// 	forkchoiceRequest := &execution.ForkChoice{
-// 		HeadBlockHash:      gointerfaces.ConvertHashToH256(newBlock.Hash()),
-// 		Timeout:            10_000,
-// 		FinalizedBlockHash: gointerfaces.ConvertHashToH256(genesisBlock.Hash()),
-// 		SafeBlockHash:      gointerfaces.ConvertHashToH256(genesisBlock.Hash()),
-// 	}
+			newBlock := SampleBlock(genesisBlock.Header(), block1RootHash)
 
-// 	fcuReceipt, err := executionModule.UpdateForkChoice(executionModule.bacgroundCtx, forkchoiceRequest)
-// 	require.NoError(t, err)
-// 	require.NotNil(t, fcuReceipt)
-// 	require.Equal(t, fcuReceipt.Status, execution.ExecutionStatus_Success)
-// 	require.Equal(t, "", fcuReceipt.ValidationError)
-// 	require.Equal(t, fcuReceipt.LatestValidHash, gointerfaces.ConvertHashToH256(newBlock.Hash()))
-// }
+			request := &execution.InsertBlocksRequest{
+				Blocks: eth1_utils.ConvertBlocksToRPC([]*types.Block{newBlock}),
+			}
 
-// func TestExecutionModuleForkchoiceUpdateNoPreviousVerify(t *testing.T) {
-// 	executionModule, genesisBlock := setup(t.TempDir(), t)
+			result, err := executionModule.InsertBlocks(executionModule.bacgroundCtx, request)
+			require.NoError(t, err)
+			require.NotNil(t, result)
+			require.Equal(t, result.Result, execution.ExecutionStatus_Success)
 
-// 	newBlock := SampleBlock(genesisBlock.Header(), block1RootHash)
+			validationRequest := &execution.ValidationRequest{
+				Hash:   gointerfaces.ConvertHashToH256(newBlock.Hash()),
+				Number: newBlock.Number().Uint64(),
+			}
 
-// 	request := &execution.InsertBlocksRequest{
-// 		Blocks: eth1_utils.ConvertBlocksToRPC([]*types.Block{newBlock}),
-// 	}
+			validationResult, err := executionModule.ValidateChain(executionModule.bacgroundCtx, validationRequest)
+			require.NoError(t, err)
+			require.NotNil(t, validationResult)
+			require.Equal(t, validationResult.ValidationStatus, execution.ExecutionStatus_Success)
 
-// 	result, err := executionModule.InsertBlocks(executionModule.bacgroundCtx, request)
-// 	require.NoError(t, err)
-// 	require.NotNil(t, result)
-// 	require.Equal(t, result.Result, execution.ExecutionStatus_Success)
+			forkchoiceRequest := &execution.ForkChoice{
+				HeadBlockHash:      gointerfaces.ConvertHashToH256(newBlock.Hash()),
+				Timeout:            10_000,
+				FinalizedBlockHash: gointerfaces.ConvertHashToH256(genesisBlock.Hash()),
+				SafeBlockHash:      gointerfaces.ConvertHashToH256(genesisBlock.Hash()),
+			}
 
-// 	forkchoiceRequest := &execution.ForkChoice{
-// 		HeadBlockHash:      gointerfaces.ConvertHashToH256(newBlock.Hash()),
-// 		Timeout:            10_000,
-// 		FinalizedBlockHash: gointerfaces.ConvertHashToH256(genesisBlock.Hash()),
-// 		SafeBlockHash:      gointerfaces.ConvertHashToH256(genesisBlock.Hash()),
-// 	}
+			fcuReceipt, err := executionModule.UpdateForkChoice(executionModule.bacgroundCtx, forkchoiceRequest)
+			require.NoError(t, err)
+			require.NotNil(t, fcuReceipt)
+			require.Equal(t, fcuReceipt.Status, execution.ExecutionStatus_Success)
+			require.Equal(t, "", fcuReceipt.ValidationError)
+			require.Equal(t, fcuReceipt.LatestValidHash, gointerfaces.ConvertHashToH256(newBlock.Hash()))
 
-// 	fcuReceipt, err := executionModule.UpdateForkChoice(executionModule.bacgroundCtx, forkchoiceRequest)
-// 	require.NoError(t, err)
-// 	require.NotNil(t, fcuReceipt)
-// 	require.Equal(t, fcuReceipt.Status, execution.ExecutionStatus_Success)
-// }
+			teardown(executionModule, silkwormInstance)
+		})
+	}
+}
 
-// func TestExecutionModuleForkchoiceUpdateMultipleBlocksFirst(t *testing.T) {
-// 	executionModule, genesisBlock := setup(t.TempDir(), t)
+func TestExecutionModuleForkchoiceUpdateNoPreviousVerify(t *testing.T) {
+	for name, tc := range testCases {
+		t.Run(name, func(t *testing.T) {
+			executionModule, genesisBlock, silkwormInstance := setup(t, tc.useSilkworm)
 
-// 	blocks := []*types.Block{
-// 		SampleBlock(genesisBlock.Header(), block1RootHash),
-// 		SampleBlock(genesisBlock.Header(), block1RootHash),
-// 		SampleBlock(genesisBlock.Header(), block1RootHash),
-// 	}
+			newBlock := SampleBlock(genesisBlock.Header(), block1RootHash)
 
-// 	for _, block := range blocks {
-// 		request := &execution.InsertBlocksRequest{
-// 			Blocks: eth1_utils.ConvertBlocksToRPC([]*types.Block{block}),
-// 		}
+			request := &execution.InsertBlocksRequest{
+				Blocks: eth1_utils.ConvertBlocksToRPC([]*types.Block{newBlock}),
+			}
 
-// 		result, err := executionModule.InsertBlocks(executionModule.bacgroundCtx, request)
-// 		require.NoError(t, err)
-// 		require.NotNil(t, result)
-// 		require.Equal(t, result.Result, execution.ExecutionStatus_Success)
+			result, err := executionModule.InsertBlocks(executionModule.bacgroundCtx, request)
+			require.NoError(t, err)
+			require.NotNil(t, result)
+			require.Equal(t, result.Result, execution.ExecutionStatus_Success)
 
-// 	}
+			forkchoiceRequest := &execution.ForkChoice{
+				HeadBlockHash:      gointerfaces.ConvertHashToH256(newBlock.Hash()),
+				Timeout:            10_000,
+				FinalizedBlockHash: gointerfaces.ConvertHashToH256(genesisBlock.Hash()),
+				SafeBlockHash:      gointerfaces.ConvertHashToH256(genesisBlock.Hash()),
+			}
 
-// 	for _, block := range blocks {
-// 		validationRequest := &execution.ValidationRequest{
-// 			Hash:   gointerfaces.ConvertHashToH256(block.Hash()),
-// 			Number: block.Number().Uint64(),
-// 		}
+			fcuReceipt, err := executionModule.UpdateForkChoice(executionModule.bacgroundCtx, forkchoiceRequest)
+			require.NoError(t, err)
+			require.NotNil(t, fcuReceipt)
+			require.Equal(t, fcuReceipt.Status, execution.ExecutionStatus_Success)
 
-// 		validationResult, err := executionModule.ValidateChain(executionModule.bacgroundCtx, validationRequest)
-// 		require.NoError(t, err)
-// 		require.NotNil(t, validationResult)
-// 		require.Equal(t, validationResult.ValidationStatus, execution.ExecutionStatus_Success)
-// 	}
+			teardown(executionModule, silkwormInstance)
+		})
+	}
+}
 
-// 	forkchoiceRequest := &execution.ForkChoice{
-// 		HeadBlockHash:      gointerfaces.ConvertHashToH256(blocks[0].Hash()),
-// 		Timeout:            10_000,
-// 		FinalizedBlockHash: gointerfaces.ConvertHashToH256(genesisBlock.Hash()),
-// 		SafeBlockHash:      gointerfaces.ConvertHashToH256(genesisBlock.Hash()),
-// 	}
+func TestExecutionModuleForkchoiceUpdateMultipleBlocksFirst(t *testing.T) {
+	for name, tc := range testCases {
+		t.Run(name, func(t *testing.T) {
+			executionModule, genesisBlock, silkwormInstance := setup(t, tc.useSilkworm)
 
-// 	fcuReceipt, err := executionModule.UpdateForkChoice(executionModule.bacgroundCtx, forkchoiceRequest)
-// 	require.NoError(t, err)
-// 	require.NotNil(t, fcuReceipt)
-// 	require.Equal(t, fcuReceipt.Status, execution.ExecutionStatus_Success)
-// }
+			blocks := []*types.Block{
+				SampleBlock(genesisBlock.Header(), block1RootHash),
+				SampleBlock(genesisBlock.Header(), block1RootHash),
+				SampleBlock(genesisBlock.Header(), block1RootHash),
+			}
 
-// func TestExecutionModuleForkchoiceUpdateMultipleBlocksLast(t *testing.T) {
-// 	executionModule, genesisBlock := setup(t.TempDir(), t)
+			for _, block := range blocks {
+				request := &execution.InsertBlocksRequest{
+					Blocks: eth1_utils.ConvertBlocksToRPC([]*types.Block{block}),
+				}
 
-// 	blocks := []*types.Block{
-// 		SampleBlock(genesisBlock.Header(), block1RootHash),
-// 		SampleBlock(genesisBlock.Header(), block1RootHash),
-// 		SampleBlock(genesisBlock.Header(), block1RootHash),
-// 	}
+				result, err := executionModule.InsertBlocks(executionModule.bacgroundCtx, request)
+				require.NoError(t, err)
+				require.NotNil(t, result)
+				require.Equal(t, result.Result, execution.ExecutionStatus_Success)
 
-// 	for _, block := range blocks {
-// 		request := &execution.InsertBlocksRequest{
-// 			Blocks: eth1_utils.ConvertBlocksToRPC([]*types.Block{block}),
-// 		}
+			}
 
-// 		result, err := executionModule.InsertBlocks(executionModule.bacgroundCtx, request)
-// 		require.NoError(t, err)
-// 		require.NotNil(t, result)
-// 		require.Equal(t, result.Result, execution.ExecutionStatus_Success)
+			for _, block := range blocks {
+				validationRequest := &execution.ValidationRequest{
+					Hash:   gointerfaces.ConvertHashToH256(block.Hash()),
+					Number: block.Number().Uint64(),
+				}
 
-// 	}
+				validationResult, err := executionModule.ValidateChain(executionModule.bacgroundCtx, validationRequest)
+				require.NoError(t, err)
+				require.NotNil(t, validationResult)
+				require.Equal(t, validationResult.ValidationStatus, execution.ExecutionStatus_Success)
+			}
 
-// 	for _, block := range blocks {
-// 		validationRequest := &execution.ValidationRequest{
-// 			Hash:   gointerfaces.ConvertHashToH256(block.Hash()),
-// 			Number: block.Number().Uint64(),
-// 		}
+			forkchoiceRequest := &execution.ForkChoice{
+				HeadBlockHash:      gointerfaces.ConvertHashToH256(blocks[0].Hash()),
+				Timeout:            10_000,
+				FinalizedBlockHash: gointerfaces.ConvertHashToH256(genesisBlock.Hash()),
+				SafeBlockHash:      gointerfaces.ConvertHashToH256(genesisBlock.Hash()),
+			}
 
-// 		validationResult, err := executionModule.ValidateChain(executionModule.bacgroundCtx, validationRequest)
-// 		require.NoError(t, err)
-// 		require.NotNil(t, validationResult)
-// 		require.Equal(t, validationResult.ValidationStatus, execution.ExecutionStatus_Success)
-// 	}
+			fcuReceipt, err := executionModule.UpdateForkChoice(executionModule.bacgroundCtx, forkchoiceRequest)
+			require.NoError(t, err)
+			require.NotNil(t, fcuReceipt)
+			require.Equal(t, fcuReceipt.Status, execution.ExecutionStatus_Success)
 
-// 	forkchoiceRequest := &execution.ForkChoice{
-// 		HeadBlockHash:      gointerfaces.ConvertHashToH256(blocks[2].Hash()),
-// 		Timeout:            10_000,
-// 		FinalizedBlockHash: gointerfaces.ConvertHashToH256(genesisBlock.Hash()),
-// 		SafeBlockHash:      gointerfaces.ConvertHashToH256(genesisBlock.Hash()),
-// 	}
+			teardown(executionModule, silkwormInstance)
+		})
+	}
+}
 
-// 	fcuReceipt, err := executionModule.UpdateForkChoice(executionModule.bacgroundCtx, forkchoiceRequest)
-// 	require.NoError(t, err)
-// 	require.NotNil(t, fcuReceipt)
-// 	require.Equal(t, fcuReceipt.Status, execution.ExecutionStatus_Success)
-// }
+func TestExecutionModuleForkchoiceUpdateMultipleBlocksLast(t *testing.T) {
+	for name, tc := range testCases {
+		t.Run(name, func(t *testing.T) {
+			executionModule, genesisBlock, silkwormInstance := setup(t, tc.useSilkworm)
 
-// func TestExecutionModuleForkchoiceUpdateLongChain(t *testing.T) {
-// 	executionModule, genesisBlock := setup(t.TempDir(), t)
+			blocks := []*types.Block{
+				SampleBlock(genesisBlock.Header(), block1RootHash),
+				SampleBlock(genesisBlock.Header(), block1RootHash),
+				SampleBlock(genesisBlock.Header(), block1RootHash),
+			}
 
-// 	newBlock1 := SampleBlock(genesisBlock.Header(), block1RootHash)
-// 	newBlock2 := SampleBlock(newBlock1.Header(), block2RootHash)
-// 	newBlock3 := SampleBlock(newBlock2.Header(), block3RootHash)
-// 	newBlock4 := SampleBlock(newBlock3.Header(), block4RootHash)
+			for _, block := range blocks {
+				request := &execution.InsertBlocksRequest{
+					Blocks: eth1_utils.ConvertBlocksToRPC([]*types.Block{block}),
+				}
 
-// 	blocks := []*types.Block{
-// 		newBlock1,
-// 		newBlock2,
-// 		newBlock3,
-// 		newBlock4,
-// 	}
+				result, err := executionModule.InsertBlocks(executionModule.bacgroundCtx, request)
+				require.NoError(t, err)
+				require.NotNil(t, result)
+				require.Equal(t, result.Result, execution.ExecutionStatus_Success)
 
-// 	for _, block := range blocks {
-// 		request := &execution.InsertBlocksRequest{
-// 			Blocks: eth1_utils.ConvertBlocksToRPC([]*types.Block{block}),
-// 		}
+			}
 
-// 		result, err := executionModule.InsertBlocks(executionModule.bacgroundCtx, request)
-// 		require.NoError(t, err)
-// 		require.NotNil(t, result)
-// 		require.Equal(t, result.Result, execution.ExecutionStatus_Success)
-// 	}
+			for _, block := range blocks {
+				validationRequest := &execution.ValidationRequest{
+					Hash:   gointerfaces.ConvertHashToH256(block.Hash()),
+					Number: block.Number().Uint64(),
+				}
 
-// 	validationRequest := &execution.ValidationRequest{
-// 		Hash:   gointerfaces.ConvertHashToH256(newBlock4.Hash()),
-// 		Number: newBlock4.Number().Uint64(),
-// 	}
+				validationResult, err := executionModule.ValidateChain(executionModule.bacgroundCtx, validationRequest)
+				require.NoError(t, err)
+				require.NotNil(t, validationResult)
+				require.Equal(t, validationResult.ValidationStatus, execution.ExecutionStatus_Success)
+			}
 
-// 	validationResult, err := executionModule.ValidateChain(executionModule.bacgroundCtx, validationRequest)
-// 	require.NoError(t, err)
-// 	require.NotNil(t, validationResult)
-// 	require.Equal(t, validationResult.ValidationStatus, execution.ExecutionStatus_Success)
+			forkchoiceRequest := &execution.ForkChoice{
+				HeadBlockHash:      gointerfaces.ConvertHashToH256(blocks[2].Hash()),
+				Timeout:            10_000,
+				FinalizedBlockHash: gointerfaces.ConvertHashToH256(genesisBlock.Hash()),
+				SafeBlockHash:      gointerfaces.ConvertHashToH256(genesisBlock.Hash()),
+			}
 
-// 	forkchoiceRequest := &execution.ForkChoice{
-// 		HeadBlockHash:      gointerfaces.ConvertHashToH256(newBlock4.Hash()),
-// 		Timeout:            10_000,
-// 		FinalizedBlockHash: gointerfaces.ConvertHashToH256(genesisBlock.Hash()),
-// 		SafeBlockHash:      gointerfaces.ConvertHashToH256(genesisBlock.Hash()),
-// 	}
+			fcuReceipt, err := executionModule.UpdateForkChoice(executionModule.bacgroundCtx, forkchoiceRequest)
+			require.NoError(t, err)
+			require.NotNil(t, fcuReceipt)
+			require.Equal(t, fcuReceipt.Status, execution.ExecutionStatus_Success)
 
-// 	fcuReceipt, err := executionModule.UpdateForkChoice(executionModule.bacgroundCtx, forkchoiceRequest)
-// 	require.NoError(t, err)
-// 	require.NotNil(t, fcuReceipt)
-// 	require.Equal(t, fcuReceipt.Status, execution.ExecutionStatus_Success)
-// }
+			teardown(executionModule, silkwormInstance)
+		})
+	}
+}
+
+func TestExecutionModuleForkchoiceUpdateLongChain(t *testing.T) {
+	for name, tc := range testCases {
+		t.Run(name, func(t *testing.T) {
+			executionModule, genesisBlock, silkwormInstance := setup(t, tc.useSilkworm)
+
+			newBlock1 := SampleBlock(genesisBlock.Header(), block1RootHash)
+			newBlock2 := SampleBlock(newBlock1.Header(), block2RootHash)
+			newBlock3 := SampleBlock(newBlock2.Header(), block3RootHash)
+			newBlock4 := SampleBlock(newBlock3.Header(), block4RootHash)
+
+			blocks := []*types.Block{
+				newBlock1,
+				newBlock2,
+				newBlock3,
+				newBlock4,
+			}
+
+			for _, block := range blocks {
+				request := &execution.InsertBlocksRequest{
+					Blocks: eth1_utils.ConvertBlocksToRPC([]*types.Block{block}),
+				}
+
+				result, err := executionModule.InsertBlocks(executionModule.bacgroundCtx, request)
+				require.NoError(t, err)
+				require.NotNil(t, result)
+				require.Equal(t, result.Result, execution.ExecutionStatus_Success)
+			}
+
+			validationRequest := &execution.ValidationRequest{
+				Hash:   gointerfaces.ConvertHashToH256(newBlock4.Hash()),
+				Number: newBlock4.Number().Uint64(),
+			}
+
+			validationResult, err := executionModule.ValidateChain(executionModule.bacgroundCtx, validationRequest)
+			require.NoError(t, err)
+			require.NotNil(t, validationResult)
+			require.Equal(t, validationResult.ValidationStatus, execution.ExecutionStatus_Success)
+
+			forkchoiceRequest := &execution.ForkChoice{
+				HeadBlockHash:      gointerfaces.ConvertHashToH256(newBlock4.Hash()),
+				Timeout:            10_000,
+				FinalizedBlockHash: gointerfaces.ConvertHashToH256(genesisBlock.Hash()),
+				SafeBlockHash:      gointerfaces.ConvertHashToH256(genesisBlock.Hash()),
+			}
+
+			fcuReceipt, err := executionModule.UpdateForkChoice(executionModule.bacgroundCtx, forkchoiceRequest)
+			require.NoError(t, err)
+			require.NotNil(t, fcuReceipt)
+			require.Equal(t, fcuReceipt.Status, execution.ExecutionStatus_Success)
+
+			teardown(executionModule, silkwormInstance)
+		})
+	}
+}
 
 func BenchmarkExecutionModuleValidateSingleBlock(b *testing.B) {
-	executionModule, genesisBlock, silkwormInstance := setup(b, true)
+	for name, tc := range testCases {
+		b.Run(name, func(b *testing.B) {
+			executionModule, genesisBlock, silkwormInstance := setup(b, tc.useSilkworm)
 
-	blocks := []*types.Block{
-		SampleBlock(genesisBlock.Header(), block1RootHash),
-		SampleBlock(genesisBlock.Header(), block1RootHash),
-		SampleBlock(genesisBlock.Header(), block1RootHash),
-		SampleBlock(genesisBlock.Header(), block1RootHash),
-		SampleBlock(genesisBlock.Header(), block1RootHash),
-		SampleBlock(genesisBlock.Header(), block1RootHash),
-		SampleBlock(genesisBlock.Header(), block1RootHash),
-		SampleBlock(genesisBlock.Header(), block1RootHash),
-		SampleBlock(genesisBlock.Header(), block1RootHash),
-		SampleBlock(genesisBlock.Header(), block1RootHash),
-	}
+			blocks := []*types.Block{
+				SampleBlock(genesisBlock.Header(), block1RootHash),
+				SampleBlock(genesisBlock.Header(), block1RootHash),
+				SampleBlock(genesisBlock.Header(), block1RootHash),
+				SampleBlock(genesisBlock.Header(), block1RootHash),
+				SampleBlock(genesisBlock.Header(), block1RootHash),
+				SampleBlock(genesisBlock.Header(), block1RootHash),
+				SampleBlock(genesisBlock.Header(), block1RootHash),
+				SampleBlock(genesisBlock.Header(), block1RootHash),
+				SampleBlock(genesisBlock.Header(), block1RootHash),
+				SampleBlock(genesisBlock.Header(), block1RootHash),
+			}
 
-	for _, block := range blocks {
-		request := &execution.InsertBlocksRequest{
-			Blocks: eth1_utils.ConvertBlocksToRPC([]*types.Block{block}),
-		}
+			for _, block := range blocks {
+				request := &execution.InsertBlocksRequest{
+					Blocks: eth1_utils.ConvertBlocksToRPC([]*types.Block{block}),
+				}
 
-		result, err := executionModule.InsertBlocks(executionModule.bacgroundCtx, request)
-		require.NoError(b, err)
-		require.NotNil(b, result)
-		require.Equal(b, result.Result, execution.ExecutionStatus_Success)
-	}
+				result, err := executionModule.InsertBlocks(executionModule.bacgroundCtx, request)
+				require.NoError(b, err)
+				require.NotNil(b, result)
+				require.Equal(b, result.Result, execution.ExecutionStatus_Success)
+			}
 
-	b.ResetTimer()
+			b.ResetTimer()
 
-	for i := 0; i < b.N; i++ {
+			for i := 0; i < b.N; i++ {
 
-		selectedBlockNo := i % len(blocks)
+				selectedBlockNo := i % len(blocks)
 
-		validationRequest := &execution.ValidationRequest{
-			Hash:   gointerfaces.ConvertHashToH256(blocks[selectedBlockNo].Hash()),
-			Number: blocks[0].Number().Uint64(),
-		}
+				validationRequest := &execution.ValidationRequest{
+					Hash:   gointerfaces.ConvertHashToH256(blocks[selectedBlockNo].Hash()),
+					Number: blocks[0].Number().Uint64(),
+				}
 
-		validationResult, err := executionModule.ValidateChain(executionModule.bacgroundCtx, validationRequest)
-		require.NoError(b, err)
-		require.NotNil(b, validationResult)
-		require.Equal(b, validationResult.ValidationStatus, execution.ExecutionStatus_Success)
-	}
+				validationResult, err := executionModule.ValidateChain(executionModule.bacgroundCtx, validationRequest)
+				require.NoError(b, err)
+				require.NotNil(b, validationResult)
+				require.Equal(b, validationResult.ValidationStatus, execution.ExecutionStatus_Success)
+			}
 
-	teardown(executionModule, silkwormInstance)
-}
-
-func teardown(executionModule *EthereumExecutionModule, silkwormInstance *silkworm.Silkworm) {
-	if executionModule != nil && executionModule.silkwormForkValidator != nil {
-
-		executionModule.silkwormForkValidator.Stop()
-	}
-
-	if silkwormInstance != nil {
-		silkwormInstance.Close()
+			teardown(executionModule, silkwormInstance)
+		})
 	}
 }
 
-// func BenchmarkExecutionModuleInsertValidateFcu(b *testing.B) {
-// 	executionModule, genesisBlock := setup(b.TempDir(), b)
+func BenchmarkExecutionModuleInsertValidateFcu(b *testing.B) {
+	for name, tc := range testCases {
+		b.Run(name, func(b *testing.B) {
+			executionModule, genesisBlock, silkwormInstance := setup(b, tc.useSilkworm)
 
-// 	b.ResetTimer()
+			b.ResetTimer()
 
-// 	for i := 0; i < b.N; i++ {
-// 		//insert block
-// 		block := SampleBlock(genesisBlock.Header(), block1RootHash)
-// 		request := &execution.InsertBlocksRequest{
-// 			Blocks: eth1_utils.ConvertBlocksToRPC([]*types.Block{block}),
-// 		}
-// 		result, err := executionModule.InsertBlocks(executionModule.bacgroundCtx, request)
-// 		require.NoError(b, err)
-// 		require.NotNil(b, result)
-// 		require.Equal(b, execution.ExecutionStatus_Success, result.Result)
+			for i := 0; i < b.N; i++ {
+				//insert block
+				block := SampleBlock(genesisBlock.Header(), block1RootHash)
+				request := &execution.InsertBlocksRequest{
+					Blocks: eth1_utils.ConvertBlocksToRPC([]*types.Block{block}),
+				}
+				result, err := executionModule.InsertBlocks(executionModule.bacgroundCtx, request)
+				require.NoError(b, err)
+				require.NotNil(b, result)
+				require.Equal(b, execution.ExecutionStatus_Success, result.Result)
 
-// 		//validate block
-// 		validationRequest := &execution.ValidationRequest{
-// 			Hash:   gointerfaces.ConvertHashToH256(block.Hash()),
-// 			Number: block.Number().Uint64(),
-// 		}
-// 		validationResult, err := executionModule.ValidateChain(executionModule.bacgroundCtx, validationRequest)
-// 		require.NoError(b, err)
-// 		require.NotNil(b, validationResult)
-// 		require.Equal(b, execution.ExecutionStatus_Success, validationResult.ValidationStatus)
+				//validate block
+				validationRequest := &execution.ValidationRequest{
+					Hash:   gointerfaces.ConvertHashToH256(block.Hash()),
+					Number: block.Number().Uint64(),
+				}
+				validationResult, err := executionModule.ValidateChain(executionModule.bacgroundCtx, validationRequest)
+				require.NoError(b, err)
+				require.NotNil(b, validationResult)
+				require.Equal(b, execution.ExecutionStatus_Success, validationResult.ValidationStatus)
 
-// 		//update forkchoice
-// 		forkchoiceRequest := &execution.ForkChoice{
-// 			HeadBlockHash:      gointerfaces.ConvertHashToH256(block.Hash()),
-// 			Timeout:            10_000,
-// 			FinalizedBlockHash: gointerfaces.ConvertHashToH256(genesisBlock.Hash()),
-// 			SafeBlockHash:      gointerfaces.ConvertHashToH256(genesisBlock.Hash()),
-// 		}
+				//update forkchoice
+				forkchoiceRequest := &execution.ForkChoice{
+					HeadBlockHash:      gointerfaces.ConvertHashToH256(block.Hash()),
+					Timeout:            10_000,
+					FinalizedBlockHash: gointerfaces.ConvertHashToH256(genesisBlock.Hash()),
+					SafeBlockHash:      gointerfaces.ConvertHashToH256(genesisBlock.Hash()),
+				}
 
-// 		fcuReceipt, err := executionModule.UpdateForkChoice(executionModule.bacgroundCtx, forkchoiceRequest)
-// 		require.NoError(b, err)
-// 		require.NotNil(b, fcuReceipt)
-// 		require.Equal(b, execution.ExecutionStatus_Success, fcuReceipt.Status)
+				fcuReceipt, err := executionModule.UpdateForkChoice(executionModule.bacgroundCtx, forkchoiceRequest)
+				require.NoError(b, err)
+				require.NotNil(b, fcuReceipt)
+				require.Equal(b, execution.ExecutionStatus_Success, fcuReceipt.Status)
 
-// 		//wait until execution module is ready
-// 		for {
-// 			ready, err := executionModule.Ready(executionModule.bacgroundCtx, &emptypb.Empty{})
-// 			require.NoError(b, err)
-// 			if ready.Ready {
-// 				break
-// 			}
-// 		}
-// 	}
-// }
+				//wait until execution module is ready
+				for {
+					ready, err := executionModule.Ready(executionModule.bacgroundCtx, &emptypb.Empty{})
+					require.NoError(b, err)
+					if ready.Ready {
+						break
+					}
+				}
+			}
+			teardown(executionModule, silkwormInstance)
+		})
+	}
+}
