@@ -89,4 +89,5 @@ func (s *MdbxServiceStore) Close() {
 	s.checkpoints.Close()
 	s.milestones.Close()
 	s.spans.Close()
+	s.spanBlockProducerSelections.Close()
 }
