@@ -343,6 +343,22 @@ var snapshotCommand = cli.Command{
 				&cli.Uint64Flag{Name: "fromStep", Value: 0, Usage: "skip files before given step"},
 			}),
 		},
+		{
+			Name:        "publishable",
+			Action:      doPublishable,
+			Description: "Check if snapshot is publishable by a webseed client",
+			Flags: joinFlags([]cli.Flag{
+				&utils.DataDirFlag,
+			}),
+		},
+		{
+			Name:        "clearIndexing",
+			Action:      doClearIndexing,
+			Description: "Clear all indexing data",
+			Flags: joinFlags([]cli.Flag{
+				&utils.DataDirFlag,
+			}),
+		},
 	},
 }
 
@@ -501,6 +517,79 @@ func doIntegrity(cliCtx *cli.Context) error {
 		}
 	}
 
+	return nil
+}
+
+func checkIfBlockSnapshotsPublishable(snapDir string) error {
+	var sum uint64
+	var maxTo uint64
+	// Check block sanity
+	if err := filepath.Walk(snapDir, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return err
+		}
+
+		// Skip directories
+		if info.IsDir() {
+			return nil
+		}
+		// Skip CL files
+		if !strings.Contains(info.Name(), "headers") || !strings.HasSuffix(info.Name(), ".seg") {
+			return nil
+		}
+		// Do the range check
+		res, _, ok := snaptype.ParseFileName(snapDir, info.Name())
+		if !ok {
+			return nil
+		}
+		sum += res.To - res.From
+		headerSegName := info.Name()
+		// check that all files exist
+		for _, snapType := range []string{"transactions", "bodies"} {
+			segName := strings.Replace(headerSegName, "headers", snapType, 1)
+			// check that the file exist
+			if _, err := os.Stat(filepath.Join(snapDir, segName)); err != nil {
+				return fmt.Errorf("missing file %s", segName)
+			}
+			// check that the index file exist
+			idxName := strings.Replace(segName, ".seg", ".idx", 1)
+			if _, err := os.Stat(filepath.Join(snapDir, idxName)); err != nil {
+				return fmt.Errorf("missing index file %s", idxName)
+			}
+			if snapType == "transactions" {
+				// check that the tx index file exist
+				txIdxName := strings.Replace(segName, "transactions.seg", "transactions-to-block.idx", 1)
+				if _, err := os.Stat(filepath.Join(snapDir, txIdxName)); err != nil {
+					return fmt.Errorf("missing tx index file %s", txIdxName)
+				}
+			}
+		}
+
+		maxTo = max(maxTo, res.To)
+
+		return nil
+	}); err != nil {
+		return err
+	}
+	if sum != maxTo {
+		return fmt.Errorf("sum %d != maxTo %d", sum, maxTo)
+	}
+	// Iterate over all fies in snapDir
+	return nil
+}
+
+func doPublishable(cliCtx *cli.Context) error {
+	dat := datadir.New(cliCtx.String(utils.DataDirFlag.Name))
+	// Check block snapshots sanity
+	if err := checkIfBlockSnapshotsPublishable(dat.Snap); err != nil {
+		return err
+	}
+	// Iterate over all fies in dat.Snap
+
+	return nil
+}
+
+func doClearIndexing(cliCtx *cli.Context) error {
 	return nil
 }
 
