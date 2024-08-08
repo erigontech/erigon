@@ -1,0 +1,9 @@
+{
+  "id": 120,
+  "proposer": "0x6ab3d36c46ecfb9b9c0bd51cb1c3da5a2c81cea6",
+  "start_block": 106867,
+  "end_block": 107634,
+  "root_hash": "0xbf1729cc791dc4181bd95568e2daed382c4f4b2e1e79c495e58a498192ad9c78",
+  "bor_chain_id": "80002",
+  "timestamp": 1700625041
+}

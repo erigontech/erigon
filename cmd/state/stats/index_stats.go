@@ -63,7 +63,7 @@ func IndexStats(chaindata string, indexBucket string, statsFile string) error {
 	defer tx.Rollback()
 	if err = tx.ForEach(indexBucket, []byte{}, func(k, v []byte) error {
 		if i%100_000 == 0 {
-			fmt.Printf("Processed %dK, %s\n", i/1000, time.Since(startTime))
+			fmt.Printf("Processed %s, %s\n", libcommon.PrettyCounter(i), time.Since(startTime))
 		}
 		if bytes.Equal(k[:lenOfKey], prevKey) {
 			count++

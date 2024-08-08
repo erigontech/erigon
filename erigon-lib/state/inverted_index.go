@@ -754,10 +754,10 @@ func (is *InvertedIndexPruneStat) String() string {
 	}
 	vstr := ""
 	if is.PruneCountValues > 0 {
-		vstr = fmt.Sprintf("values: %d,", is.PruneCountValues)
+		vstr = fmt.Sprintf("values: %s,", common.PrettyCounter(is.PruneCountValues))
 	}
-	return fmt.Sprintf("%s txns: %d from %.2fM-%.2fM",
-		vstr, is.PruneCountTx, float64(is.MinTxNum)/1_000_000.0, float64(is.MaxTxNum)/1_000_000.0)
+	return fmt.Sprintf("%s txns: %d from %s-%s",
+		vstr, is.PruneCountTx, common.PrettyCounter(is.MinTxNum), common.PrettyCounter(is.MaxTxNum))
 }
 
 func (is *InvertedIndexPruneStat) Accumulate(other *InvertedIndexPruneStat) {

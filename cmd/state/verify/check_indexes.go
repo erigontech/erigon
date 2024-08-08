@@ -19,6 +19,7 @@ package verify
 import (
 	"context"
 	"fmt"
+	libcommon "github.com/erigontech/erigon-lib/common"
 	"time"
 
 	"github.com/erigontech/erigon-lib/kv/dbutils"
@@ -44,7 +45,7 @@ func CheckIndex(ctx context.Context, chaindata string, changeSetBucket string, i
 	if err := historyv2.ForEach(tx, changeSetBucket, nil, func(blockN uint64, k, v []byte) error {
 		i++
 		if i%100_000 == 0 {
-			fmt.Printf("Processed %dK, %s\n", blockN/1000, time.Since(startTime))
+			fmt.Printf("Processed %s, %s\n", libcommon.PrettyCounter(blockN), time.Since(startTime))
 		}
 		select {
 		default:

@@ -1,0 +1,22 @@
+{
+  "jsonrpc": "2.0",
+  "id": 1,
+  "result": {
+    "Signers": [
+      {
+        "Signer": "0x6ab3d36c46ecfb9b9c0bd51cb1c3da5a2c81cea6",
+        "Difficulty": 3
+      },
+      {
+        "Signer": "0x8247698a31154dfa38fff6443cbeed4225ed06d6",
+        "Difficulty": 2
+      },
+      {
+        "Signer": "0x6406a542cc2e0b4c7b2ae5ea0d9cf8160a640c62",
+        "Difficulty": 1
+      }
+    ],
+    "Diff": 3,
+    "Author": "0x6ab3d36c46ecfb9b9c0bd51cb1c3da5a2c81cea6"
+  }
+}
