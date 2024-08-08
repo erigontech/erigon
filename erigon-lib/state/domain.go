@@ -711,7 +711,7 @@ type DomainRoTx struct {
 	valsC kv.Cursor
 
 	// latestStateCache can be very big if .kv is not compressed - because can store pointer to `mmap` instead of data
-	latestStateCache *freelru.LRU[uint64, fileCacheItem]
+	latestStateCache *freelru.LRU[u128, fileCacheItem]
 }
 
 const latestStateCachePerDomain = 128
@@ -1395,28 +1395,27 @@ var (
 	UseBtree = true // if true, will use btree for all files
 )
 
-// func u32h(u uint32) uint32 { return u }
-func u64h(u uint64) uint32 { return uint32(u) }
-
-//func u128h(u u128) uint32  { return uint32(u.hi) }
-//func u192h(u u192) uint32  { return uint32(u.hi) }
-//type u128 struct{ hi, lo uint64 }
-//type u192 struct{ hi, lo, ext uint64 }
+func u32noHash(u uint32) uint32        { return u }            //nolint
+func u64noHash(u uint64) uint32        { return uint32(u) }    //nolint
+func u128noHash(u u128) uint32         { return uint32(u.hi) } //nolint
+func u192noHash(u u192) uint32         { return uint32(u.hi) } //nolint
+type u128 struct{ hi, lo uint64 }      //nolint
+type u192 struct{ hi, lo, ext uint64 } //nolint
 
 func (dt *DomainRoTx) getFromFiles(filekey []byte) (v []byte, found bool, fileStartTxNum uint64, fileEndTxNum uint64, err error) {
 	if len(dt.files) == 0 {
 		return
 	}
 
-	hi, _ := dt.ht.iit.hashKey(filekey)
+	hi, lo := dt.ht.iit.hashKey(filekey)
 	if dt.name != kv.CommitmentDomain {
 		if dt.latestStateCache == nil {
-			dt.latestStateCache, err = freelru.New[uint64, fileCacheItem](latestStateCachePerDomain, u64h)
+			dt.latestStateCache, err = freelru.New[u128, fileCacheItem](latestStateCachePerDomain, u128noHash)
 			if err != nil {
 				panic(err)
 			}
 		}
-		cv, ok := dt.latestStateCache.Get(hi)
+		cv, ok := dt.latestStateCache.Get(u128{hi: hi, lo: lo})
 		if ok {
 			//if dbg.KVReadLevelledMetrics {
 			//m := dt.latestStateCache.Metrics()
@@ -1463,7 +1462,7 @@ func (dt *DomainRoTx) getFromFiles(filekey []byte) (v []byte, found bool, fileSt
 		}
 
 		if dt.name != kv.CommitmentDomain {
-			dt.latestStateCache.Add(hi, fileCacheItem{lvl: uint8(i), v: v})
+			dt.latestStateCache.Add(u128{hi: hi, lo: lo}, fileCacheItem{lvl: uint8(i), v: v})
 		}
 		return v, true, dt.files[i].startTxNum, dt.files[i].endTxNum, nil
 	}
@@ -1472,7 +1471,7 @@ func (dt *DomainRoTx) getFromFiles(filekey []byte) (v []byte, found bool, fileSt
 	}
 
 	if dt.name != kv.CommitmentDomain {
-		dt.latestStateCache.Add(hi, fileCacheItem{lvl: 0, v: nil})
+		dt.latestStateCache.Add(u128{hi: hi, lo: lo}, fileCacheItem{lvl: 0, v: nil})
 	}
 	return nil, false, 0, 0, nil
 }
