@@ -223,6 +223,12 @@ func (b *BlockGen) OffsetTime(seconds int64) {
 func (b *BlockGen) GetHeader() *types.Header {
 	return b.header
 }
+func (b *BlockGen) SetCurrentHeaderParenHash(hash libcommon.Hash) {
+	// preserve immutability of Header object
+	cpy := types.CopyHeader(b.header)
+	cpy.ParentHash = hash
+	b.header = cpy
+}
 
 func (b *BlockGen) GetParent() *types.Block {
 	return b.parent

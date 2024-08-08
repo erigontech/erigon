@@ -1887,8 +1887,8 @@ func DumpHeaders(ctx context.Context, db kv.RoDB, _ *chain.Config, blockFrom, bl
 		if dataRLP == nil {
 			return false, fmt.Errorf("header missed in db: block_num=%d,  hash=%x", blockNum, v)
 		}
-		h := types.Header{}
-		if err := rlp.DecodeBytes(dataRLP, &h); err != nil {
+		h := &types.Header{}
+		if err := rlp.DecodeBytes(dataRLP, h); err != nil {
 			return false, err
 		}
 

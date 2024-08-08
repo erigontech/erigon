@@ -438,7 +438,7 @@ func (h *Harness) generateChain(ctx context.Context, t *testing.T, ctrl *gomock.
 			}
 
 			h.logger.Info("Preparing mock header", "headerNum", gen.GetHeader().Number)
-			gen.GetHeader().ParentHash = h.sealedHeaders[gen.GetParent().Number().Uint64()].Hash()
+			gen.SetCurrentHeaderParenHash(h.sealedHeaders[gen.GetParent().Number().Uint64()].Hash())
 			if err := consensusEngine.Prepare(mockChainHR, gen.GetHeader(), nil); err != nil {
 				t.Fatal(err)
 			}

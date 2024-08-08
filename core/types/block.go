@@ -115,7 +115,7 @@ type Header struct {
 	VerkleProof   []byte
 	VerkleKeyVals []verkle.KeyValuePair
 
-	_hash atomic.Pointer[libcommon.Hash]
+	hash atomic.Pointer[libcommon.Hash]
 }
 
 func (h *Header) EncodingSize() int {
@@ -570,11 +570,16 @@ type headerMarshaling struct {
 // Hash returns the block hash of the header, which is simply the keccak256 hash of its
 // RLP encoding.
 func (h *Header) Hash() (hash libcommon.Hash) {
-	if hash := h._hash.Load(); hash != nil {
+	if hash := h.hash.Load(); hash != nil {
+		empty := libcommon.Hash{}
+		if empty == *hash {
+			panic(1)
+		}
 		return *hash
 	}
 	hash = rlpHash(h)
-	h._hash.Store(&hash)
+	h.hash.Store(&hash)
+	fmt.Printf("h: hash %d %x\n", h.Number.Uint64(), hash)
 	return hash
 }
 
@@ -1105,7 +1110,7 @@ func NewBlock(header *Header, txs []Transaction, uncles []*Header, receipts []*R
 // NewBlockFromStorage like NewBlock but used to create Block object when read it from DB
 // in this case no reason to copy parts, or re-calculate headers fields - they are all stored in DB
 func NewBlockFromStorage(hash libcommon.Hash, header *Header, txs []Transaction, uncles []*Header, withdrawals []*Withdrawal, requests Requests) *Block {
-	header._hash.Store(&hash)
+	header.hash.Store(&hash)
 	b := &Block{header: header, transactions: txs, uncles: uncles, withdrawals: withdrawals, requests: requests}
 	return b
 }
@@ -1171,10 +1176,7 @@ func CopyHeader(h *Header) *Header {
 		cpy.RequestsRoot = new(libcommon.Hash)
 		cpy.RequestsRoot.SetBytes(h.RequestsRoot.Bytes())
 	}
-	if hash := h._hash.Load(); hash != nil {
-		hashCopy := *hash
-		cpy._hash.Store(&hashCopy)
-	}
+	cpy.hash.Store(nil)
 	return &cpy
 }
 

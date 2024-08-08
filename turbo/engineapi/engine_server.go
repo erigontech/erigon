@@ -172,7 +172,7 @@ func (s *EngineServer) newPayload(ctx context.Context, req *engine_types.Executi
 		txs = append(txs, transaction)
 	}
 
-	header := types.Header{
+	header := &types.Header{
 		ParentHash:  req.ParentHash,
 		Coinbase:    req.FeeRecipient,
 		Root:        req.StateRoot,
@@ -305,7 +305,7 @@ func (s *EngineServer) newPayload(ctx context.Context, req *engine_types.Executi
 	defer s.lock.Unlock()
 
 	s.logger.Debug("[NewPayload] sending block", "height", header.Number, "hash", blockHash)
-	block := types.NewBlockFromStorage(blockHash, &header, transactions, nil /* uncles */, withdrawals, requests)
+	block := types.NewBlockFromStorage(blockHash, header, transactions, nil /* uncles */, withdrawals, requests)
 
 	payloadStatus, err := s.HandleNewPayload(ctx, "NewPayload", block, expectedBlobHashes)
 	if err != nil {

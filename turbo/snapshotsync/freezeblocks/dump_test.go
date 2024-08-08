@@ -175,7 +175,7 @@ func TestDump(t *testing.T) {
 			require := require.New(t)
 			var nonceList []uint64
 			_, err := freezeblocks.DumpHeaders(m.Ctx, m.DB, m.ChainConfig, 0, uint64(2*test.chainSize), nil, func(v []byte) error {
-				h := types.Header{}
+				h := &types.Header{}
 				if err := rlp.DecodeBytes(v[1:], &h); err != nil {
 					return err
 				}
@@ -189,7 +189,7 @@ func TestDump(t *testing.T) {
 			require := require.New(t)
 			var nonceList []uint64
 			_, err := freezeblocks.DumpHeaders(m.Ctx, m.DB, m.ChainConfig, 2, uint64(test.chainSize), nil, func(v []byte) error {
-				h := types.Header{}
+				h := &types.Header{}
 				if err := rlp.DecodeBytes(v[1:], &h); err != nil {
 					return err
 				}

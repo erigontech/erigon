@@ -308,7 +308,7 @@ func BenchmarkEVM_CREATE2_1200(bench *testing.B) {
 }
 
 func fakeHeader(n uint64, parentHash libcommon.Hash) *types.Header {
-	header := types.Header{
+	return &types.Header{
 		Coinbase:   libcommon.HexToAddress("0x00000000000000000000000000000000deadbeef"),
 		Number:     new(big.Int).SetUint64(n),
 		ParentHash: parentHash,
@@ -318,7 +318,6 @@ func fakeHeader(n uint64, parentHash libcommon.Hash) *types.Header {
 		Difficulty: big.NewInt(0),
 		GasLimit:   100000,
 	}
-	return &header
 }
 
 // FakeChainHeaderReader implements consensus.ChainHeaderReader interface
