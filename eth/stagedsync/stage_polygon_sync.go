@@ -38,10 +38,12 @@ import (
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/accounts/abi"
 	"github.com/erigontech/erigon/core/rawdb"
+	"github.com/erigontech/erigon/core/rawdb/blockio"
 	"github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/eth/stagedsync/stages"
 	"github.com/erigontech/erigon/p2p/sentry"
 	"github.com/erigontech/erigon/polygon/bor/borcfg"
+	borsnaptype "github.com/erigontech/erigon/polygon/bor/snaptype"
 	"github.com/erigontech/erigon/polygon/heimdall"
 	"github.com/erigontech/erigon/polygon/p2p"
 	polygonsync "github.com/erigontech/erigon/polygon/sync"
@@ -134,14 +136,18 @@ func NewPolygonSyncStageCfg(
 		stopNode:        stopNode,
 	}
 	return PolygonSyncStageCfg{
-		db:      db,
-		service: syncService,
+		db:          db,
+		service:     syncService,
+		blockReader: blockReader,
+		blockWriter: blockio.NewBlockWriter(),
 	}
 }
 
 type PolygonSyncStageCfg struct {
-	db      kv.RwDB
-	service *polygonSyncStageService
+	db          kv.RwDB
+	service     *polygonSyncStageService
+	blockReader services.FullBlockReader
+	blockWriter *blockio.BlockWriter
 }
 
 func SpawnPolygonSyncStage(
@@ -165,20 +171,214 @@ func SpawnPolygonSyncStage(
 		return err
 	}
 
-	if useExternalTx {
-		return nil
+	if !useExternalTx {
+		return tx.Commit()
 	}
 
-	if err := tx.Commit(); err != nil {
+	return nil
+}
+
+func UnwindPolygonSyncStage(ctx context.Context, tx kv.RwTx, u *UnwindState, cfg PolygonSyncStageCfg) error {
+	u.UnwindPoint = max(u.UnwindPoint, cfg.blockReader.FrozenBlocks()) // protect from unwind behind files
+
+	useExternalTx := tx != nil
+	if !useExternalTx {
+		var err error
+		tx, err = cfg.db.BeginRw(ctx)
+		if err != nil {
+			return err
+		}
+
+		defer tx.Rollback()
+	}
+
+	// headers
+	unwindBlock := u.Reason.Block != nil
+	if err := rawdb.TruncateCanonicalHash(tx, u.UnwindPoint+1, unwindBlock); err != nil {
+		return err
+	}
+
+	canonicalHash, err := rawdb.ReadCanonicalHash(tx, u.UnwindPoint)
+	if err != nil {
+		return err
+	}
+
+	if err = rawdb.WriteHeadHeaderHash(tx, canonicalHash); err != nil {
+		return err
+	}
+
+	// bodies
+	if err = cfg.blockWriter.MakeBodiesNonCanonical(tx, u.UnwindPoint+1); err != nil {
+		return err
+	}
+
+	// heimdall
+	if err = UnwindHeimdall(tx, u, nil); err != nil {
+		return err
+	}
+
+	if err = u.Done(tx); err != nil {
+		return err
+	}
+
+	if !useExternalTx {
+		return tx.Commit()
+	}
+
+	return nil
+}
+
+func UnwindHeimdall(tx kv.RwTx, u *UnwindState, unwindTypes []string) error {
+	if err := UnwindEvents(tx, u, unwindTypes); err != nil {
+		return err
+	}
+
+	if err := UnwindSpans(tx, u, unwindTypes); err != nil {
+		return err
+	}
+
+	if err := UnwindCheckpoints(tx, u, unwindTypes); err != nil {
+		return err
+	}
+
+	if err := UnwindMilestones(tx, u, unwindTypes); err != nil {
 		return err
 	}
 
 	return nil
 }
 
-func UnwindPolygonSyncStage() error {
-	// TODO - headers, bodies (including txnums index), checkpoints, milestones, spans, state sync events
-	return nil
+func UnwindEvents(tx kv.RwTx, u *UnwindState, unwindTypes []string) error {
+	if len(unwindTypes) > 0 && !slices.Contains(unwindTypes, "events") {
+		return nil
+	}
+
+	cursor, err := tx.RwCursor(kv.BorEventNums)
+	if err != nil {
+		return err
+	}
+
+	defer cursor.Close()
+	var blockNumBuf [8]byte
+	binary.BigEndian.PutUint64(blockNumBuf[:], u.UnwindPoint+1)
+	k, v, err := cursor.Seek(blockNumBuf[:])
+	if err != nil {
+		return err
+	}
+	if k != nil {
+		// v is the encoding of the first eventId to be removed
+		eventCursor, err := tx.RwCursor(kv.BorEvents)
+		if err != nil {
+			return err
+		}
+		defer eventCursor.Close()
+		for v, _, err = eventCursor.Seek(v); err == nil && v != nil; v, _, err = eventCursor.Next() {
+			if err = eventCursor.DeleteCurrent(); err != nil {
+				return err
+			}
+		}
+		if err != nil {
+			return err
+		}
+	}
+
+	for ; err == nil && k != nil; k, _, err = cursor.Next() {
+		if err = cursor.DeleteCurrent(); err != nil {
+			return err
+		}
+	}
+	return err
+}
+
+func UnwindSpans(tx kv.RwTx, u *UnwindState, unwindTypes []string) error {
+	if len(unwindTypes) > 0 && !slices.Contains(unwindTypes, "spans") {
+		return nil
+	}
+
+	cursor, err := tx.RwCursor(kv.BorSpans)
+	if err != nil {
+		return err
+	}
+
+	defer cursor.Close()
+	lastSpanToKeep := heimdall.SpanIdAt(u.UnwindPoint)
+	var spanIdBytes [8]byte
+	binary.BigEndian.PutUint64(spanIdBytes[:], uint64(lastSpanToKeep+1))
+	var k []byte
+	for k, _, err = cursor.Seek(spanIdBytes[:]); err == nil && k != nil; k, _, err = cursor.Next() {
+		if err = cursor.DeleteCurrent(); err != nil {
+			return err
+		}
+	}
+	return err
+}
+
+func UnwindCheckpoints(tx kv.RwTx, u *UnwindState, unwindTypes []string) error {
+	if !borsnaptype.CheckpointsEnabled() {
+		return nil
+	}
+
+	if len(unwindTypes) > 0 && !slices.Contains(unwindTypes, "checkpoints") {
+		return nil
+	}
+
+	cursor, err := tx.RwCursor(kv.BorCheckpoints)
+	if err != nil {
+		return err
+	}
+
+	defer cursor.Close()
+	lastCheckpointToKeep, err := heimdall.CheckpointIdAt(tx, u.UnwindPoint)
+	if errors.Is(err, heimdall.ErrCheckpointNotFound) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+
+	var checkpointIdBytes [8]byte
+	binary.BigEndian.PutUint64(checkpointIdBytes[:], uint64(lastCheckpointToKeep+1))
+	var k []byte
+	for k, _, err = cursor.Seek(checkpointIdBytes[:]); err == nil && k != nil; k, _, err = cursor.Next() {
+		if err = cursor.DeleteCurrent(); err != nil {
+			return err
+		}
+	}
+	return err
+}
+
+func UnwindMilestones(tx kv.RwTx, u *UnwindState, unwindTypes []string) error {
+	if !borsnaptype.MilestonesEnabled() {
+		return nil
+	}
+
+	if len(unwindTypes) > 0 && !slices.Contains(unwindTypes, "milestones") {
+		return nil
+	}
+
+	cursor, err := tx.RwCursor(kv.BorMilestones)
+	if err != nil {
+		return err
+	}
+
+	defer cursor.Close()
+	lastMilestoneToKeep, err := heimdall.MilestoneIdAt(tx, u.UnwindPoint)
+	if errors.Is(err, heimdall.ErrMilestoneNotFound) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+
+	var milestoneIdBytes [8]byte
+	binary.BigEndian.PutUint64(milestoneIdBytes[:], uint64(lastMilestoneToKeep+1))
+	var k []byte
+	for k, _, err = cursor.Seek(milestoneIdBytes[:]); err == nil && k != nil; k, _, err = cursor.Next() {
+		if err = cursor.DeleteCurrent(); err != nil {
+			return err
+		}
+	}
+	return err
 }
 
 func PrunePolygonSyncStage() error {

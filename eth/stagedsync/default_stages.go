@@ -479,7 +479,7 @@ func PolygonSyncStages(
 				return SpawnPolygonSyncStage(ctx, txc.Tx, s, u, polygonSyncStageCfg)
 			},
 			Unwind: func(u *UnwindState, s *StageState, txc wrap.TxContainer, logger log.Logger) error {
-				return UnwindPolygonSyncStage()
+				return UnwindPolygonSyncStage(ctx, txc.Tx, u, polygonSyncStageCfg)
 			},
 			Prune: func(p *PruneState, tx kv.RwTx, logger log.Logger) error {
 				return PrunePolygonSyncStage()
