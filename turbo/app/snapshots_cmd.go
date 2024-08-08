@@ -29,6 +29,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -578,6 +579,118 @@ func checkIfBlockSnapshotsPublishable(snapDir string) error {
 	return nil
 }
 
+func checkIfStateSnapshotsPublishable(dir datadir.Dirs) error {
+	var stepSum uint64
+	var maxStep uint64
+	if err := filepath.Walk(dir.SnapDomain, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return err
+		}
+		if info.IsDir() {
+			return fmt.Errorf("unexpected directory %s", path)
+		}
+		rangeString := strings.Split(info.Name(), ".")[1]
+		rangeNums := strings.Split(rangeString, "-")
+		// convert the range to uint64
+		from, err := strconv.ParseUint(rangeNums[0], 10, 64)
+		if err != nil {
+			return fmt.Errorf("failed to parse to %s: %w", rangeNums[1], err)
+		}
+
+		to, err := strconv.ParseUint(rangeNums[1], 10, 64)
+		if err != nil {
+			return fmt.Errorf("failed to parse to %s: %w", rangeNums[1], err)
+		}
+		maxStep = max(maxStep, to)
+
+		if !strings.HasSuffix(info.Name(), ".kv") || !strings.Contains(info.Name(), "accounts") {
+			return nil
+		}
+
+		stepSum += to - from
+		// do a range check over all snapshots types (sanitizes domain and history folder)
+		for _, snapType := range []string{"accounts", "storage", "code", "commitment"} {
+			expectedFileName := strings.Replace(info.Name(), "accounts", snapType, 1)
+			if _, err := os.Stat(filepath.Join(dir.SnapDomain, expectedFileName)); err != nil {
+				return fmt.Errorf("missing file %s at path %s", expectedFileName, filepath.Join(dir.SnapDomain, expectedFileName))
+			}
+			// check that the index file exist
+			btFileName := strings.Replace(expectedFileName, ".kv", ".bt", 1)
+			if _, err := os.Stat(filepath.Join(dir.SnapDomain, btFileName)); err != nil {
+				return fmt.Errorf("missing file %s at path %s", btFileName, filepath.Join(dir.SnapDomain, btFileName))
+			}
+			if snapType == "commitment" {
+				continue
+			}
+			// check that .v
+			vFileName := strings.Replace(expectedFileName, ".kv", ".v", 1)
+			if _, err := os.Stat(filepath.Join(dir.SnapHistory, vFileName)); err != nil {
+				return fmt.Errorf("missing file %s at path %s", vFileName, filepath.Join(dir.SnapHistory, vFileName))
+			}
+			// check for idx/*.ef
+			efFileName := strings.Replace(expectedFileName, ".kv", ".ef", 1)
+			if _, err := os.Stat(filepath.Join(dir.SnapIdx, efFileName)); err != nil {
+				return fmt.Errorf("missing file %s at path %s", efFileName, filepath.Join(dir.SnapIdx, efFileName))
+			}
+
+		}
+		return nil
+	}); err != nil {
+		return err
+	}
+
+	if err := filepath.Walk(dir.SnapIdx, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return err
+		}
+		if info.IsDir() {
+			return fmt.Errorf("unexpected directory %s", path)
+		}
+		rangeString := strings.Split(info.Name(), ".")[1]
+		rangeNums := strings.Split(rangeString, "-")
+
+		to, err := strconv.ParseUint(rangeNums[1], 10, 64)
+		if err != nil {
+			return fmt.Errorf("failed to parse to %s: %w", rangeNums[1], err)
+		}
+		maxStep = max(maxStep, to)
+
+		if !strings.HasSuffix(info.Name(), ".ef") || !strings.Contains(info.Name(), "accounts") {
+			return nil
+		}
+
+		viTypes := []string{"accounts", "storage", "code"}
+
+		// do a range check over all snapshots types (sanitizes domain and history folder)
+		for _, snapType := range []string{"accounts", "storage", "code", "logtopics", "logaddrs", "tracesfrom", "tracesto"} {
+			expectedFileName := strings.Replace(info.Name(), "accounts", snapType, 1)
+			if _, err := os.Stat(filepath.Join(dir.SnapIdx, expectedFileName)); err != nil {
+				return fmt.Errorf("missing file %s at path %s", expectedFileName, filepath.Join(dir.SnapIdx, expectedFileName))
+			}
+			// Check accessors
+			efiFileName := strings.Replace(expectedFileName, ".ef", ".efi", 1)
+			if _, err := os.Stat(filepath.Join(dir.SnapAccessors, efiFileName)); err != nil {
+				return fmt.Errorf("missing file %s at path %s", efiFileName, filepath.Join(dir.SnapAccessors, efiFileName))
+			}
+			if !slices.Contains(viTypes, snapType) {
+				continue
+			}
+			viFileName := strings.Replace(expectedFileName, ".ef", ".vi", 1)
+			if _, err := os.Stat(filepath.Join(dir.SnapAccessors, viFileName)); err != nil {
+				return fmt.Errorf("missing file %s at path %s", viFileName, filepath.Join(dir.SnapAccessors, viFileName))
+			}
+		}
+		return nil
+	}); err != nil {
+		return err
+	}
+
+	if stepSum != maxStep {
+		return fmt.Errorf("stepSum %d != maxStep %d", stepSum, maxStep)
+	}
+	return nil
+}
+
 func doPublishable(cliCtx *cli.Context) error {
 	dat := datadir.New(cliCtx.String(utils.DataDirFlag.Name))
 	// Check block snapshots sanity
@@ -585,7 +698,10 @@ func doPublishable(cliCtx *cli.Context) error {
 		return err
 	}
 	// Iterate over all fies in dat.Snap
-
+	if err := checkIfStateSnapshotsPublishable(dat); err != nil {
+		return err
+	}
+	log.Info("All snapshots are publishable")
 	return nil
 }
 
