@@ -150,7 +150,7 @@ type PolygonSyncStageCfg struct {
 	blockWriter *blockio.BlockWriter
 }
 
-func SpawnPolygonSyncStage(
+func ForwardPolygonSyncStage(
 	ctx context.Context,
 	tx kv.RwTx,
 	stageState *StageState,
@@ -405,7 +405,7 @@ func (s *polygonSyncStageService) Run(ctx context.Context, tx kv.RwTx, stageStat
 	s.executionEngine.appendLogPrefix = s.appendLogPrefix
 	s.executionEngine.stageState = stageState
 	s.executionEngine.unwinder = unwinder
-	s.logger.Info(s.appendLogPrefix("begin..."), "progress", stageState.BlockNumber)
+	s.logger.Info(s.appendLogPrefix("forward"), "progress", stageState.BlockNumber)
 
 	s.runBgComponentsOnce(ctx)
 
