@@ -1,6 +1,8 @@
 module github.com/erigontech/erigon
 
-go 1.21.5
+go 1.22
+
+toolchain go1.22.2
 
 require (
 	github.com/erigontech/erigonwatch v0.0.0-20240718131902-b6576bde1116
@@ -287,6 +289,6 @@ require (
 )
 
 replace (
-	github.com/anacrolix/torrent => github.com/erigontech/torrent v1.54.2-alpha-33
+	github.com/anacrolix/torrent => github.com/erigontech/torrent v1.54.2-alpha-34
 	github.com/holiman/bloomfilter/v2 => github.com/AskAlexSharov/bloomfilter/v2 v2.0.8
 )
