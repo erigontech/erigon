@@ -112,9 +112,9 @@ func (suite *ServiceTestSuite) TestMilestones() {
 	id, ok, err := svc.store.Milestones().LastEntityId(ctx)
 	require.NoError(t, err)
 	require.True(t, ok)
-	require.Equal(t, uint64(285050), id)
+	require.Equal(t, uint64(285641), id)
 
-	for id := uint64(284951); id <= 285050; id++ {
+	for id := uint64(285542); id <= 285641; id++ {
 		entity, ok, err := svc.store.Milestones().Entity(ctx, id)
 		require.NoError(t, err)
 		require.True(t, ok)
