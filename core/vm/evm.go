@@ -102,8 +102,6 @@ type EVM struct {
 	jumpDestCache *simplelru.LRU[libcommon.Hash, []uint64]
 }
 
-var jumpDestCache, _ = simplelru.NewLRU[libcommon.Hash, []uint64](128, nil)
-
 // NewEVM returns a new EVM. The returned EVM is not thread safe and should
 // only ever be used *once*.
 func NewEVM(blockCtx evmtypes.BlockContext, txCtx evmtypes.TxContext, state evmtypes.IntraBlockState, chainConfig *chain.Config, vmConfig Config) *EVM {
@@ -112,7 +110,7 @@ func NewEVM(blockCtx evmtypes.BlockContext, txCtx evmtypes.TxContext, state evmt
 			blockCtx.BaseFee = new(uint256.Int)
 		}
 	}
-	//jumpDestCache, _ := simplelru.NewLRU[libcommon.Hash, []uint64](128, nil)
+	jumpDestCache, _ := simplelru.NewLRU[libcommon.Hash, []uint64](128, nil)
 
 	evm := &EVM{
 		Context:         blockCtx,
