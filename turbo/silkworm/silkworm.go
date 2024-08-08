@@ -6,6 +6,8 @@ import (
 	"unsafe"
 
 	silkworm_go "github.com/erigontech/silkworm-go"
+	"github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/gointerfaces/execution"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/consensus"
 	"github.com/ledgerwatch/log/v3"
@@ -16,6 +18,8 @@ type SilkwormLogLevel = silkworm_go.SilkwormLogLevel
 type SentrySettings = silkworm_go.SentrySettings
 type RpcDaemonSettings = silkworm_go.RpcDaemonSettings
 type RpcInterfaceLogSettings = silkworm_go.RpcInterfaceLogSettings
+type ForkValidatorSettings = silkworm_go.ForkValidatorSettings
+type Hash = silkworm_go.Hash
 type MappedHeaderSnapshot = silkworm_go.MappedHeaderSnapshot
 type MappedBodySnapshot = silkworm_go.MappedBodySnapshot
 type MappedTxnSnapshot = silkworm_go.MappedTxnSnapshot
@@ -67,6 +71,50 @@ func (service RpcDaemonService) Start() error {
 
 func (service RpcDaemonService) Stop() error {
 	return service.silkworm.StopRpcDaemon()
+}
+
+type ForkValidatorService struct {
+	silkworm *Silkworm
+	db       kv.RwDB
+	settings ForkValidatorSettings
+}
+
+type ForkValidatorValidationResult struct {
+	ExecutionStatus execution.ExecutionStatus
+	LastValidHash   common.Hash
+	ErrorMessage    string
+}
+
+func NewForkValidatorService(s *Silkworm, db kv.RwDB, settings ForkValidatorSettings) *ForkValidatorService {
+	return &ForkValidatorService{
+		silkworm: s,
+		db:       db,
+		settings: settings,
+	}
+}
+
+func (service ForkValidatorService) Start() error {
+	return service.silkworm.StartForkValidator(service.db.CHandle(), service.settings)
+}
+
+func (service ForkValidatorService) Stop() error {
+	return service.silkworm.StopForkValidator()
+}
+
+func (service ForkValidatorService) VerifyChain(headHash common.Hash) (ForkValidatorValidationResult, error) {
+	rawResult, err := service.silkworm.VerifyChain(silkworm_go.Hash(headHash))
+
+	result := ForkValidatorValidationResult{
+		ExecutionStatus: execution.ExecutionStatus(rawResult.ExecutionStatus),
+		LastValidHash:   common.Hash(rawResult.LastValidHash),
+		ErrorMessage:    rawResult.ErrorMessage,
+	}
+
+	return result, err
+}
+
+func (service ForkValidatorService) ForkChoiceUpdate(headHash common.Hash, finalizedHash common.Hash, safeHash common.Hash) error {
+	return service.silkworm.ForkChoiceUpdate(silkworm_go.Hash(headHash), silkworm_go.Hash(finalizedHash), silkworm_go.Hash(safeHash))
 }
 
 type SentryService struct {

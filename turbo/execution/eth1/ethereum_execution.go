@@ -28,6 +28,7 @@ import (
 	"github.com/ledgerwatch/erigon/turbo/engineapi/engine_types"
 	"github.com/ledgerwatch/erigon/turbo/services"
 	"github.com/ledgerwatch/erigon/turbo/shards"
+	"github.com/ledgerwatch/erigon/turbo/silkworm"
 	"github.com/ledgerwatch/erigon/turbo/stages"
 )
 
@@ -40,10 +41,11 @@ type EthereumExecutionModule struct {
 	blockReader services.FullBlockReader
 
 	// MDBX database
-	db                kv.RwDB // main database
-	semaphore         *semaphore.Weighted
-	executionPipeline *stagedsync.Sync
-	forkValidator     *engine_helpers.ForkValidator
+	db                    kv.RwDB // main database
+	semaphore             *semaphore.Weighted
+	executionPipeline     *stagedsync.Sync
+	forkValidator         *engine_helpers.ForkValidator
+	silkwormForkValidator *silkworm.ForkValidatorService
 
 	logger log.Logger
 	// Block building
@@ -68,6 +70,7 @@ type EthereumExecutionModule struct {
 
 func NewEthereumExecutionModule(blockReader services.FullBlockReader, db kv.RwDB,
 	executionPipeline *stagedsync.Sync, forkValidator *engine_helpers.ForkValidator,
+	silkwormForkValidatorService *silkworm.ForkValidatorService,
 	config *chain.Config, builderFunc builder.BlockBuilderFunc,
 	hook *stages.Hook, accumulator *shards.Accumulator,
 	stateChangeConsumer shards.StateChangeConsumer,
@@ -75,20 +78,21 @@ func NewEthereumExecutionModule(blockReader services.FullBlockReader, db kv.RwDB
 	historyV3 bool, ctx context.Context,
 ) *EthereumExecutionModule {
 	return &EthereumExecutionModule{
-		blockReader:         blockReader,
-		db:                  db,
-		executionPipeline:   executionPipeline,
-		logger:              logger,
-		forkValidator:       forkValidator,
-		builders:            make(map[uint64]*builder.BlockBuilder),
-		builderFunc:         builderFunc,
-		config:              config,
-		semaphore:           semaphore.NewWeighted(1),
-		hook:                hook,
-		accumulator:         accumulator,
-		stateChangeConsumer: stateChangeConsumer,
-		engine:              engine,
-		bacgroundCtx:        ctx,
+		blockReader:           blockReader,
+		db:                    db,
+		executionPipeline:     executionPipeline,
+		logger:                logger,
+		forkValidator:         forkValidator,
+		silkwormForkValidator: silkwormForkValidatorService,
+		builders:              make(map[uint64]*builder.BlockBuilder),
+		builderFunc:           builderFunc,
+		config:                config,
+		semaphore:             semaphore.NewWeighted(1),
+		hook:                  hook,
+		accumulator:           accumulator,
+		stateChangeConsumer:   stateChangeConsumer,
+		engine:                engine,
+		bacgroundCtx:          ctx,
 	}
 }
 
@@ -158,6 +162,20 @@ func (e *EthereumExecutionModule) ValidateChain(ctx context.Context, req *execut
 		}, nil
 	}
 	defer e.semaphore.Release(1)
+
+	if e.silkwormForkValidator != nil {
+		result, err := e.silkwormForkValidator.VerifyChain(gointerfaces.ConvertH256ToHash(req.Hash))
+		if err != nil {
+			return nil, err
+		}
+
+		return &execution.ValidationReceipt{
+			LatestValidHash:  gointerfaces.ConvertHashToH256(result.LastValidHash),
+			ValidationStatus: execution.ExecutionStatus(result.ExecutionStatus),
+			ValidationError:  result.ErrorMessage,
+		}, nil
+	}
+
 	tx, err := e.db.BeginRw(ctx)
 	if err != nil {
 		return nil, err
