@@ -562,10 +562,12 @@ func (iit *InvertedIndexRoTx) statelessIdxReader(i int) *recsplit.IndexReader {
 	return r
 }
 
-func (iit *InvertedIndexRoTx) seekInFiles(hi, lo uint64, key []byte, txNum uint64) (found bool, equalOrHigherTxNum uint64) {
+func (iit *InvertedIndexRoTx) seekInFiles(key []byte, txNum uint64) (found bool, equalOrHigherTxNum uint64) {
 	if len(iit.files) == 0 {
 		return false, 0
 	}
+
+	hi, lo := iit.hashKey(key)
 
 	for i := 0; i < len(iit.files); i++ {
 		if iit.files[i].endTxNum <= txNum {

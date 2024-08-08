@@ -30,8 +30,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/elastic/go-freelru"
-	"github.com/erigontech/erigon-lib/common/dbg"
 	btree2 "github.com/tidwall/btree"
 	"golang.org/x/sync/errgroup"
 
@@ -973,8 +971,6 @@ type HistoryRoTx struct {
 	valsCDup kv.CursorDupSort
 
 	_bufTs []byte
-
-	historyStateCache *freelru.LRU[u192, []byte]
 }
 
 func (h *History) BeginFilesRo() *HistoryRoTx {
@@ -1176,53 +1172,15 @@ func (ht *HistoryRoTx) getFile(txNum uint64) (it visibleFile, ok bool) {
 	return it, false
 }
 
-func fmix64(k uint64) uint64 {
-	k ^= k >> 33
-	k *= 0xff51afd7ed558ccd
-	k ^= k >> 33
-	k *= 0xc4ceb9fe1a85ec53
-	k ^= k >> 33
-	return k
-}
-
 func (ht *HistoryRoTx) historySeekInFiles(key []byte, txNum uint64) ([]byte, bool, error) {
-	if len(ht.files) == 0 || len(ht.iit.files) == 0 {
-		return nil, false, nil
-	}
-
-	hi, lo := ht.iit.hashKey(key)
-
-	cacheKey := u192{hi: hi, lo: lo, ext: txNum}
-	const limit = 128
-	if ht.historyStateCache == nil {
-		var err error
-		ht.historyStateCache, err = freelru.New[u192, []byte](128, u192h)
-		if err != nil {
-			panic(err)
-		}
-	}
-
-	v, ok := ht.historyStateCache.Get(cacheKey)
-	if ok {
-		if dbg.KVReadLevelledMetrics {
-			m := ht.historyStateCache.Metrics()
-			if m.Misses%10 == 0 {
-				log.Warn("[dbg] lEachCache", "a", ht.h.filenameBase, "hit", m.Hits, "total", m.Hits+m.Misses, "Collisions", m.Collisions, "Evictions", m.Evictions, "Inserts", m.Inserts, "limit", limit, "ratio", fmt.Sprintf("%.2f", float64(m.Hits)/float64(m.Hits+m.Misses)))
-			}
-		}
-		return v, v != nil, nil
-	}
-
 	// Files list of II and History is different
 	// it means II can't return index of file, but can return TxNum which History will use to find own file
-	ok, histTxNum := ht.iit.seekInFiles(hi, lo, key, txNum)
+	ok, histTxNum := ht.iit.seekInFiles(key, txNum)
 	if !ok {
-		ht.historyStateCache.Add(cacheKey, nil)
 		return nil, false, nil
 	}
 	historyItem, ok := ht.getFile(histTxNum)
 	if !ok {
-		ht.historyStateCache.Add(cacheKey, nil)
 		return nil, false, fmt.Errorf("hist file not found: key=%x, %s.%d-%d", key, ht.h.filenameBase, histTxNum/ht.h.aggregationStep, histTxNum/ht.h.aggregationStep)
 	}
 	reader := ht.statelessIdxReader(historyItem.i)
@@ -1231,19 +1189,15 @@ func (ht *HistoryRoTx) historySeekInFiles(key []byte, txNum uint64) ([]byte, boo
 	}
 	offset, ok := reader.Lookup2(ht.encodeTs(histTxNum), key)
 	if !ok {
-		ht.historyStateCache.Add(cacheKey, nil)
 		return nil, false, nil
 	}
 	g := ht.statelessGetter(historyItem.i)
 	g.Reset(offset)
 
-	v, _ = g.Next(nil)
+	v, _ := g.Next(nil)
 	if traceGetAsOf == ht.h.filenameBase {
 		fmt.Printf("GetAsOf(%s, %x, %d) -> %s, histTxNum=%d, isNil(v)=%t\n", ht.h.filenameBase, key, txNum, g.FileName(), histTxNum, v == nil)
 	}
-
-	ht.historyStateCache.Add(cacheKey, v)
-
 	return v, true, nil
 }
 
