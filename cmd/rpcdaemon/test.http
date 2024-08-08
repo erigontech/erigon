@@ -71,7 +71,7 @@ Content-Type: application/json
 
 ###
 
-# curl -X POST -H "Content-Type: application/json" --data '{"jsonrpc":"2.0","method":"eth_getLogs", "params": [{"fromBlock": "0x24ADC0","toBlock": "0x24AED0"}], "id":1}' localhost:8545
+# curl -X POST -H "Content-Type: application/json" --data '{"jsonrpc":"2.0","method":"eth_getTransactionByHash", "params": ["0x63bfccae773d89450ae52f0634ff6fe862f6b9ffd0fb7bd9aaa49ae78b0ca0f4"], "id":1}' localhost:8545
 # curl -X POST -H "Content-Type: application/json" --data '{"jsonrpc":"2.0","method":"eth_getTransactionByHash", "params": ["0x2afd9cb16967822f7eb9178f01031272fe16ddd0e7665bd82aac9c69dddfc55e"], "id":1}' localhost:8545
 POST localhost:8545
 Content-Type: application/json
@@ -221,8 +221,8 @@ Content-Type: application/json
   "method": "eth_getLogs",
   "params": [
     {
-      "fromBlock": "0x24ADC0",
-      "toBlock": "0x24AEC0"
+      "fromBlock": "0x14ADC0",
+      "toBlock": "0x14AEC0"
     }
   ],
   "id": 537758
