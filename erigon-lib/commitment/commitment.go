@@ -60,26 +60,21 @@ type Trie interface {
 	// Set context for state IO
 	ResetContext(ctx PatriciaContext)
 
-	ProcessTree(ctx context.Context, tree *Updates, logPrefix string) (rootHash []byte, err error)
-
-	// Reads updates from storage
-	ProcessKeys(ctx context.Context, pk [][]byte, logPrefix string) (rootHash []byte, err error)
-
-	// Process already gathered updates
-	ProcessUpdates(ctx context.Context, pk [][]byte, updates []Update) (rootHash []byte, err error)
+	// Process updates
+	Process(ctx context.Context, updates *Updates, logPrefix string) (rootHash []byte, err error)
 }
 
 type PatriciaContext interface {
 	// GetBranch load branch node and fill up the cells
 	// For each cell, it sets the cell type, clears the modified flag, fills the hash,
 	// and for the extension, account, and leaf type, the `l` and `k`
-	GetBranch(prefix []byte) ([]byte, uint64, error)
-	// fetch account with given plain key
-	GetAccount(plainKey []byte, cell *Cell) error
-	// fetch storage with given plain key
-	GetStorage(plainKey []byte, cell *Cell) error
+	Branch(prefix []byte) ([]byte, uint64, error)
 	// store branch data
 	PutBranch(prefix []byte, data []byte, prevData []byte, prevStep uint64) error
+	// fetch account with given plain key
+	Account(plainKey []byte) (*Update, error)
+	// fetch storage with given plain key
+	Storage(plainKey []byte) (*Update, error)
 }
 
 type TrieVariant string
@@ -94,10 +89,11 @@ const (
 func InitializeTrieAndUpdates(tv TrieVariant, mode Mode, tmpdir string) (Trie, *Updates) {
 	switch tv {
 	case VariantBinPatriciaTrie:
-		trie := NewBinPatriciaHashed(length.Addr, nil, tmpdir)
-		fn := func(key []byte) []byte { return hexToBin(key) }
-		tree := NewUpdates(mode, tmpdir, fn)
-		return trie, tree
+		//trie := NewBinPatriciaHashed(length.Addr, nil, tmpdir)
+		//fn := func(key []byte) []byte { return hexToBin(key) }
+		//tree := NewUpdateTree(mode, tmpdir, fn)
+		//return trie, tree
+		panic("omg its not supported")
 	case VariantHexPatriciaTrie:
 		fallthrough
 	default:
@@ -127,7 +123,7 @@ func (branchData BranchData) String() string {
 	afterMap := binary.BigEndian.Uint16(branchData[2:])
 	pos := 4
 	var sb strings.Builder
-	var cell Cell
+	var cell cell
 	fmt.Fprintf(&sb, "touchMap %016b, afterMap %016b\n", touchMap, afterMap)
 	for bitset, j := touchMap, 0; bitset != 0; j++ {
 		bit := bitset & -bitset
@@ -157,8 +153,8 @@ func (branchData BranchData) String() string {
 				fmt.Fprintf(&sb, "%sstoragePlainKey=[%x]", comma, cell.storagePlainKey[:cell.storagePlainKeyLen])
 				comma = ","
 			}
-			if cell.HashLen > 0 {
-				fmt.Fprintf(&sb, "%shash=[%x]", comma, cell.hash[:cell.HashLen])
+			if cell.hashLen > 0 {
+				fmt.Fprintf(&sb, "%shash=[%x]", comma, cell.hash[:cell.hashLen])
 			}
 			sb.WriteString("}\n")
 		}
@@ -200,7 +196,7 @@ func (be *BranchEncoder) Load(pc PatriciaContext, args etl.TransformArgs) error 
 	}
 
 	if err := be.updates.Load(nil, "", func(prefix, update []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) error {
-		stateValue, stateStep, err := pc.GetBranch(prefix)
+		stateValue, stateStep, err := pc.Branch(prefix)
 		if err != nil {
 			return err
 		}
@@ -222,7 +218,7 @@ func (be *BranchEncoder) CollectUpdate(
 	ctx PatriciaContext,
 	prefix []byte,
 	bitmap, touchMap, afterMap uint16,
-	readCell func(nibble int, skip bool) (*Cell, error),
+	readCell func(nibble int, skip bool) (*cell, error),
 ) (lastNibble int, err error) {
 
 	var update []byte
@@ -231,7 +227,7 @@ func (be *BranchEncoder) CollectUpdate(
 		return 0, err
 	}
 
-	prev, prevStep, err := ctx.GetBranch(prefix)
+	prev, prevStep, err := ctx.Branch(prefix)
 	_ = prevStep
 	if err != nil {
 		return 0, err
@@ -255,7 +251,7 @@ func (be *BranchEncoder) CollectUpdate(
 }
 
 // Encoded result should be copied before next call to EncodeBranch, underlying slice is reused
-func (be *BranchEncoder) EncodeBranch(bitmap, touchMap, afterMap uint16, readCell func(nibble int, skip bool) (*Cell, error)) (BranchData, int, error) {
+func (be *BranchEncoder) EncodeBranch(bitmap, touchMap, afterMap uint16, readCell func(nibble int, skip bool) (*cell, error)) (BranchData, int, error) {
 	be.buf.Reset()
 
 	if err := binary.Write(be.buf, binary.BigEndian, touchMap); err != nil {
@@ -311,7 +307,7 @@ func (be *BranchEncoder) EncodeBranch(bitmap, touchMap, afterMap uint16, readCel
 			if cell.storagePlainKeyLen > 0 {
 				fieldBits |= StoragePlainPart
 			}
-			if cell.HashLen > 0 {
+			if cell.hashLen > 0 {
 				fieldBits |= HashPart
 			}
 			if err := be.buf.WriteByte(byte(fieldBits)); err != nil {
@@ -333,7 +329,7 @@ func (be *BranchEncoder) EncodeBranch(bitmap, touchMap, afterMap uint16, readCel
 				}
 			}
 			if fieldBits&HashPart != 0 {
-				if err := putUvarAndVal(uint64(cell.HashLen), cell.hash[:cell.HashLen]); err != nil {
+				if err := putUvarAndVal(uint64(cell.hashLen), cell.hash[:cell.hashLen]); err != nil {
 					return nil, 0, err
 				}
 			}
@@ -344,7 +340,7 @@ func (be *BranchEncoder) EncodeBranch(bitmap, touchMap, afterMap uint16, readCel
 	return be.buf.Bytes(), lastNibble, nil
 }
 
-func RetrieveCellNoop(nibble int, skip bool) (*Cell, error) { return nil, nil }
+func RetrieveCellNoop(nibble int, skip bool) (*cell, error) { return nil, nil }
 
 // if fn returns nil, the original key will be copied from branchData
 func (branchData BranchData) ReplacePlainKeys(newData []byte, fn func(key []byte, isStorage bool) (newKey []byte, err error)) (BranchData, error) {
@@ -561,7 +557,7 @@ func (branchData BranchData) MergeHexBranches(branchData2 BranchData, newData []
 	return newData, nil
 }
 
-func (branchData BranchData) DecodeCells() (touchMap, afterMap uint16, row [16]*Cell, err error) {
+func (branchData BranchData) decodeCells() (touchMap, afterMap uint16, row [16]*cell, err error) {
 	touchMap = binary.BigEndian.Uint16(branchData[0:])
 	afterMap = binary.BigEndian.Uint16(branchData[2:])
 	pos := 4
@@ -571,7 +567,7 @@ func (branchData BranchData) DecodeCells() (touchMap, afterMap uint16, row [16]*
 		if afterMap&bit != 0 {
 			fieldBits := PartFlags(branchData[pos])
 			pos++
-			row[nibble] = new(Cell)
+			row[nibble] = new(cell)
 			if pos, err = row[nibble].fillFromFields(branchData, pos, fieldBits); err != nil {
 				err = fmt.Errorf("failed to fill cell at nibble %x: %w", nibble, err)
 				return
@@ -748,7 +744,7 @@ func DecodeBranchAndCollectStat(key, branch []byte, tv TrieVariant) *BranchStat 
 	if !bytes.Equal(key, []byte("state")) {
 		stat.IsRoot = false
 
-		tm, am, cells, err := BranchData(branch).DecodeCells()
+		tm, am, cells, err := BranchData(branch).decodeCells()
 		if err != nil {
 			return nil
 		}
@@ -768,8 +764,8 @@ func DecodeBranchAndCollectStat(key, branch []byte, tv TrieVariant) *BranchStat 
 			case c.storagePlainKeyLen > 0:
 				stat.SPKSize += uint64(c.storagePlainKeyLen)
 				stat.SPKCount++
-			case c.HashLen > 0:
-				stat.HashSize += uint64(c.HashLen)
+			case c.hashLen > 0:
+				stat.HashSize += uint64(c.hashLen)
 				stat.HashCount++
 			default:
 				panic("no plain key" + fmt.Sprintf("#+%v", c))
@@ -882,7 +878,7 @@ func (t *Updates) initCollector() {
 func (t *Updates) TouchPlainKey(key, val []byte, fn func(c *KeyUpdate, val []byte)) {
 	switch t.mode {
 	case ModeUpdate:
-		pivot, updated := &KeyUpdate{plainKey: key}, false
+		pivot, updated := &KeyUpdate{plainKey: key, update: new(Update)}, false
 
 		t.tree.DescendLessOrEqual(pivot, func(item *KeyUpdate) bool {
 			if bytes.Equal(item.plainKey, pivot.plainKey) {
@@ -914,7 +910,7 @@ func (t *Updates) TouchAccount(c *KeyUpdate, val []byte) {
 		return
 	}
 	if c.update.Flags&DeleteUpdate != 0 {
-		c.update.Flags ^= DeleteUpdate
+		c.update.Flags = 0
 	}
 	nonce, balance, chash := types.DecodeAccountBytesV3(val)
 	if c.update.Nonce != nonce {
@@ -925,41 +921,38 @@ func (t *Updates) TouchAccount(c *KeyUpdate, val []byte) {
 		c.update.Balance.Set(balance)
 		c.update.Flags |= BalanceUpdate
 	}
-	if !bytes.Equal(chash, c.update.CodeHashOrStorage[:]) {
+	if !bytes.Equal(chash, c.update.CodeHash[:]) {
 		if len(chash) == 0 {
-			c.update.ValLength = length.Hash
-			copy(c.update.CodeHashOrStorage[:], EmptyCodeHash)
+			copy(c.update.CodeHash[:], EmptyCodeHash)
 		} else {
-			copy(c.update.CodeHashOrStorage[:], chash)
-			c.update.ValLength = length.Hash
 			c.update.Flags |= CodeUpdate
+			copy(c.update.CodeHash[:], chash)
 		}
 	}
 }
 
 func (t *Updates) TouchStorage(c *KeyUpdate, val []byte) {
-	c.update.ValLength = len(val)
+	c.update.StorageLen = len(val)
 	if len(val) == 0 {
 		c.update.Flags = DeleteUpdate
 	} else {
 		c.update.Flags |= StorageUpdate
-		copy(c.update.CodeHashOrStorage[:], val)
+		copy(c.update.Storage[:], val)
 	}
 }
 
 func (t *Updates) TouchCode(c *KeyUpdate, val []byte) {
-	t.keccak.Reset()
-	t.keccak.Write(val)
-	t.keccak.Read(c.update.CodeHashOrStorage[:])
-	if c.update.Flags == DeleteUpdate && len(val) == 0 {
-		c.update.Flags = DeleteUpdate
-		c.update.ValLength = 0
+	c.update.Flags |= CodeUpdate
+	if len(val) == 0 {
+		if c.update.Flags == 0 {
+			c.update.Flags = DeleteUpdate
+		}
+		copy(c.update.CodeHash[:], EmptyCodeHash)
 		return
 	}
-	c.update.ValLength = length.Hash
-	if len(val) != 0 {
-		c.update.Flags |= CodeUpdate
-	}
+	t.keccak.Reset()
+	t.keccak.Write(val)
+	t.keccak.Read(c.update.CodeHash[:])
 }
 
 func (t *Updates) Close() {
@@ -976,13 +969,13 @@ func (t *Updates) Close() {
 }
 
 // HashSort sorts and applies fn to each key-value pair in the order of hashed keys.
-func (t *Updates) HashSort(ctx context.Context, fn func(hk, pk []byte) error) error {
+func (t *Updates) HashSort(ctx context.Context, fn func(hk, pk []byte, update *Update) error) error {
 	switch t.mode {
 	case ModeDirect:
 		clear(t.keys)
 
 		err := t.etl.Load(nil, "", func(k, v []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) error {
-			return fn(k, v)
+			return fn(k, v, nil)
 		}, etl.TransformArgs{Quit: ctx.Done()})
 		if err != nil {
 			return err
@@ -997,7 +990,7 @@ func (t *Updates) HashSort(ctx context.Context, fn func(hk, pk []byte) error) er
 			default:
 			}
 
-			if err := fn(item.update.hashedKey, item.plainKey); err != nil {
+			if err := fn(item.update.hashedKey, item.plainKey, item.update); err != nil {
 				return false
 			}
 			return true
@@ -1016,7 +1009,7 @@ func (t *Updates) List(clear bool) ([][]byte, []Update) {
 	switch t.mode {
 	case ModeDirect:
 		plainKeys := make([][]byte, 0, len(t.keys))
-		err := t.HashSort(context.Background(), func(hk, pk []byte) error {
+		err := t.HashSort(context.Background(), func(hk, pk []byte, _ *Update) error {
 			plainKeys = append(plainKeys, common.Copy(pk))
 			return nil
 		})
@@ -1029,7 +1022,7 @@ func (t *Updates) List(clear bool) ([][]byte, []Update) {
 		updates := make([]Update, t.tree.Len())
 		i := 0
 		t.tree.Ascend(func(item *KeyUpdate) bool {
-			plainKeys[i], updates[i] = item.plainKey, item.update
+			plainKeys[i], updates[i] = item.plainKey, *item.update
 			i++
 			return true
 		})
@@ -1044,7 +1037,7 @@ func (t *Updates) List(clear bool) ([][]byte, []Update) {
 
 type KeyUpdate struct {
 	plainKey []byte
-	update   Update
+	update   *Update
 }
 
 func keyUpdateLessFn(i, j *KeyUpdate) bool {

@@ -29,7 +29,7 @@ func BenchmarkBranchMerger_Merge(b *testing.B) {
 	row, bm := generateCellRow(b, 16)
 
 	be := NewBranchEncoder(1024, b.TempDir())
-	enc, _, err := be.EncodeBranch(bm, bm, bm, func(i int, skip bool) (*Cell, error) {
+	enc, _, err := be.EncodeBranch(bm, bm, bm, func(i int, skip bool) (*cell, error) {
 		return row[i], nil
 	})
 	require.NoError(b, err)
@@ -41,7 +41,7 @@ func BenchmarkBranchMerger_Merge(b *testing.B) {
 	for i := 15; i >= 0; i-- {
 		row[i] = nil
 		tm, bm, am = uint16(1<<i), bm>>1, am>>1
-		enc1, _, err := be.EncodeBranch(bm, tm, am, func(i int, skip bool) (*Cell, error) {
+		enc1, _, err := be.EncodeBranch(bm, tm, am, func(i int, skip bool) (*cell, error) {
 			return row[i], nil
 		})
 		require.NoError(b, err)
@@ -85,7 +85,7 @@ func BenchmarkBranchData_ReplacePlainKeys(b *testing.B) {
 	_ = cells
 	_ = am
 
-	cg := func(nibble int, skip bool) (*Cell, error) {
+	cg := func(nibble int, skip bool) (*cell, error) {
 		return row[nibble], nil
 	}
 
