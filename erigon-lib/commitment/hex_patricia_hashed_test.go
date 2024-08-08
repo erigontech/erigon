@@ -241,20 +241,22 @@ func Test_HexPatriciaHashed_UniqueRepresentation2(t *testing.T) {
 func sortUpdatesByHashIncrease(t *testing.T, hph *HexPatriciaHashed, plainKeys [][]byte, updates []Update) ([][]byte, []Update) {
 	t.Helper()
 
+	ku := make([]*KeyUpdate, len(plainKeys))
 	for i, pk := range plainKeys {
-		updates[i].hashedKey = hph.hashAndNibblizeKey(pk)
-		updates[i].plainKey = pk
+		ku[i] = &KeyUpdate{plainKey: pk, hashedKey: hph.hashAndNibblizeKey(pk), update: &updates[i]}
 	}
 
 	sort.Slice(updates, func(i, j int) bool {
-		return bytes.Compare(updates[i].hashedKey, updates[j].hashedKey) < 0
+		return bytes.Compare(ku[i].hashedKey, ku[j].hashedKey) < 0
 	})
 
 	pks := make([][]byte, len(updates))
-	for i, u := range updates {
+	upds := make([]Update, len(updates))
+	for i, u := range ku {
 		pks[i] = u.plainKey
+		upds[i] = *u.update
 	}
-	return pks, updates
+	return pks, upds
 }
 
 func Test_HexPatriciaHashed_BrokenUniqueRepr(t *testing.T) {
