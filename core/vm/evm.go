@@ -22,7 +22,6 @@ package vm
 import (
 	"sync/atomic"
 
-	"github.com/hashicorp/golang-lru/v2/simplelru"
 	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon-lib/chain"
@@ -99,7 +98,7 @@ type EVM struct {
 	// applied in opCall*.
 	callGasTemp uint64
 
-	jumpDestCache *simplelru.LRU[libcommon.Hash, []uint64]
+	jumpDestCache *JumpDestCache
 }
 
 // NewEVM returns a new EVM. The returned EVM is not thread safe and should
@@ -110,8 +109,6 @@ func NewEVM(blockCtx evmtypes.BlockContext, txCtx evmtypes.TxContext, state evmt
 			blockCtx.BaseFee = new(uint256.Int)
 		}
 	}
-	jumpDestCache, _ := simplelru.NewLRU[libcommon.Hash, []uint64](128, nil)
-
 	evm := &EVM{
 		Context:         blockCtx,
 		TxContext:       txCtx,
@@ -119,7 +116,7 @@ func NewEVM(blockCtx evmtypes.BlockContext, txCtx evmtypes.TxContext, state evmt
 		config:          vmConfig,
 		chainConfig:     chainConfig,
 		chainRules:      chainConfig.Rules(blockCtx.BlockNumber, blockCtx.Time),
-		jumpDestCache:   jumpDestCache,
+		jumpDestCache:   NewJumpDestCache(),
 	}
 
 	evm.interpreter = NewEVMInterpreter(evm, vmConfig)

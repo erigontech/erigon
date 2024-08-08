@@ -54,8 +54,8 @@ type Contract struct {
 	CallerAddress libcommon.Address
 	caller        ContractRef
 	self          libcommon.Address
-	jumpdests     *simplelru.LRU[libcommon.Hash, []uint64] // Aggregated result of JUMPDEST analysis.
-	analysis      []uint64                                 // Locally cached result of JUMPDEST analysis
+	jumpdests     *JumpDestCache // Aggregated result of JUMPDEST analysis.
+	analysis      []uint64       // Locally cached result of JUMPDEST analysis
 	skipAnalysis  bool
 
 	Code     []byte
@@ -67,8 +67,20 @@ type Contract struct {
 	value *uint256.Int
 }
 
+type JumpDestCache struct {
+	*simplelru.LRU[libcommon.Hash, []uint64]
+}
+
+func NewJumpDestCache() *JumpDestCache {
+	c, err := simplelru.NewLRU[libcommon.Hash, []uint64](128, nil)
+	if err != nil {
+		panic(err)
+	}
+	return &JumpDestCache{c}
+}
+
 // NewContract returns a new contract environment for the execution of EVM.
-func NewContract(caller ContractRef, addr libcommon.Address, value *uint256.Int, gas uint64, skipAnalysis bool, jumpDestCache *simplelru.LRU[libcommon.Hash, []uint64]) *Contract {
+func NewContract(caller ContractRef, addr libcommon.Address, value *uint256.Int, gas uint64, skipAnalysis bool, jumpDest *JumpDestCache) *Contract {
 	return &Contract{
 		CallerAddress: caller.Address(), caller: caller, self: addr,
 		value:        value,
@@ -76,7 +88,7 @@ func NewContract(caller ContractRef, addr libcommon.Address, value *uint256.Int,
 		// Gas should be a pointer so it can safely be reduced through the run
 		// This pointer will be off the state transition
 		Gas:       gas,
-		jumpdests: jumpDestCache,
+		jumpdests: jumpDest,
 	}
 }
 

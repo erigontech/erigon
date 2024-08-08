@@ -22,7 +22,6 @@ package vm
 import (
 	"testing"
 
-	"github.com/hashicorp/golang-lru/v2/simplelru"
 	"github.com/holiman/uint256"
 
 	libcommon "github.com/erigontech/erigon-lib/common"
@@ -93,7 +92,7 @@ func BenchmarkJumpDest(b *testing.B) {
 
 	contractRef := dummyContractRef{}
 
-	c, _ := simplelru.NewLRU[libcommon.Hash, []uint64](1, nil)
+	c := NewJumpDestCache()
 	b.ResetTimer()
 	for n := 0; n < b.N; n++ {
 		contract := NewContract(contractRef, libcommon.Address{}, nil, 0, false /* skipAnalysis */, c)
