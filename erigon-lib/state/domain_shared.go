@@ -318,7 +318,7 @@ func (sd *SharedDomains) ClearRam(resetCommitment bool) {
 		sd.domains[i] = map[string]dataWithPrevStep{}
 	}
 	if resetCommitment {
-		sd.sdCtx.updates.List(true)
+		sd.sdCtx.updates.Reset()
 		sd.sdCtx.Reset()
 	}
 
@@ -1185,7 +1185,7 @@ func (sdc *SharedDomainsCommitmentContext) TouchKey(d kv.Domain, key string, val
 // Evaluates commitment for processed state.
 func (sdc *SharedDomainsCommitmentContext) ComputeCommitment(ctx context.Context, saveState bool, blockNum uint64, logPrefix string) (rootHash []byte, err error) {
 	if dbg.DiscardCommitment() {
-		sdc.updates.List(true)
+		sdc.updates.Reset()
 		return nil, nil
 	}
 	sdc.ResetBranchCache()

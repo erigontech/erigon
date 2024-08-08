@@ -21,6 +21,7 @@ import (
 	"context"
 	"encoding/binary"
 	"encoding/hex"
+	"fmt"
 	"math/rand"
 	"sort"
 	"testing"
@@ -97,42 +98,6 @@ func TestBranchData_MergeHexBranches2(t *testing.T) {
 		require.EqualValues(t, row[i].storagePlainKeyLen, c.storagePlainKeyLen)
 		require.EqualValues(t, row[i].storagePlainKey, c.storagePlainKey)
 		i++
-	}
-}
-
-func TestBranchData_MergeHexBranches_ValueAliveAfterNewMerges(t *testing.T) {
-	t.Skip()
-	row, bm := generateCellRow(t, 16)
-
-	be := NewBranchEncoder(1024, t.TempDir())
-	enc, _, err := be.EncodeBranch(bm, bm, bm, func(i int, skip bool) (*cell, error) {
-		return row[i], nil
-	})
-	require.NoError(t, err)
-
-	copies := make([][]byte, 16)
-	values := make([][]byte, len(copies))
-
-	merger := NewHexBranchMerger(8192)
-
-	var tm uint16
-	am := bm
-
-	for i := 15; i >= 0; i-- {
-		row[i] = nil
-		tm, bm, am = uint16(1<<i), bm>>1, am>>1
-		enc1, _, err := be.EncodeBranch(bm, tm, am, func(i int, skip bool) (*cell, error) {
-			return row[i], nil
-		})
-		require.NoError(t, err)
-		merged, err := merger.Merge(enc, enc1)
-		require.NoError(t, err)
-
-		copies[i] = common.Copy(merged)
-		values[i] = merged
-	}
-	for i := 0; i < len(copies); i++ {
-		require.EqualValues(t, copies[i], values[i])
 	}
 }
 
@@ -328,8 +293,6 @@ func TestNewUpdates(t *testing.T) {
 func TestUpdates_TouchPlainKey(t *testing.T) {
 	utUpdate := NewUpdates(ModeUpdate, t.TempDir(), keyHasherNoop)
 	utDirect := NewUpdates(ModeDirect, t.TempDir(), keyHasherNoop)
-	utUpdate1 := NewUpdates(ModeUpdate, t.TempDir(), keyHasherNoop)
-	utDirect1 := NewUpdates(ModeDirect, t.TempDir(), keyHasherNoop)
 
 	type tc struct {
 		key []byte
@@ -339,18 +302,32 @@ func TestUpdates_TouchPlainKey(t *testing.T) {
 	upds := []tc{
 		{common.FromHex("c17fa85f22306d37cec90b0ec74c5623dbbac68f"), []byte("value1")},
 		{common.FromHex("553bba1d92398a69fbc9f01593bbc51b58862366"), []byte("value0")},
-		{common.FromHex("553bba1d92398a69fbc9f01593bbc51b58862366"), []byte("value1")},
+		{common.FromHex("553bba1d92398a69fbc9f01593bbc51b58862366"), []byte("value8")},
+		{common.FromHex("2452345febefe553bba1d92398a69fbc9f01593b"), []byte("value8")},
+		{common.FromHex("ffffffffffff8a69fbc9f01593bbc51b58862366"), []byte("value8")},
+		{common.FromHex("553bba1d92398a69fbc9f01593bbceeeeeeeee66"), []byte("value8")},
+		{common.FromHex("553bba1d9239aaaaaaaaa01593bbc51b58862366"), []byte("value8")},
+		{common.FromHex("553bba1d92398a69fbc9f01593bb777777777777"), []byte("value8")},
+		{common.FromHex("5cccccccccccca69fbc9f01593bbc51b58862366"), []byte("value8")},
+		{common.FromHex("553bba1d92398a69fbc9feeeeeeee51b58862366"), []byte("value8")},
+		{common.FromHex("553bba1d9bbbbbbbbbbbbb1593bbc51b58862366"), []byte("value8")},
+		{common.FromHex("553bba1d9ffffffffffff01593bbc51b5aaaaaaa"), []byte("value8")},
 		{common.FromHex("97c780315e7820752006b7a918ce7ec023df263a87a715b64d5ab445e1782a760a974f8810551f81dfb7f1425f7d8358332af195"), []byte("value1")},
+		{common.FromHex("97c780315e7820752006b7a918ce7ec023df263a87a715b64d5ab445e1782a760a974f881055fffffffff1425f7d8358332af195"), []byte("value1")},
+		{common.FromHex("97c780315e7820752006b7a918ce7ec023df263a87a715b64d5ab445e1782a760a974f8810551f81dfb7eeeeeeeeeeeeeeeeee95"), []byte("value1")},
+		{common.FromHex("97c780315e7820752006b7a918ce7ec023df263a87a715b64d5ab445e1782a760a974aaaaaaa1f81dfb7f1425f7d8358332af195"), []byte("value1")},
+		{common.FromHex("97c780315e7820752006b7a918ce7ec023df263a87a715b64d5ab445e1782a760a974f8810551f81dfb7f1425f7d835838888885"), []byte("value1")},
 	}
 	for i := 0; i < len(upds); i++ {
 		utUpdate.TouchPlainKey(upds[i].key, upds[i].val, utUpdate.TouchStorage)
 		utDirect.TouchPlainKey(upds[i].key, upds[i].val, utDirect.TouchStorage)
-		utUpdate1.TouchPlainKey(upds[i].key, upds[i].val, utUpdate.TouchStorage)
-		utDirect1.TouchPlainKey(upds[i].key, upds[i].val, utDirect.TouchStorage)
 	}
 
 	uniqUpds := make(map[string]tc)
 	for i := 0; i < len(upds); i++ {
+		if _, exist := uniqUpds[string(upds[i].key)]; exist {
+			fmt.Printf("deduped %x\n", upds[i].key)
+		}
 		uniqUpds[string(upds[i].key)] = upds[i]
 	}
 	sortedUniqUpds := make([]tc, 0, len(uniqUpds))
@@ -362,41 +339,28 @@ func TestUpdates_TouchPlainKey(t *testing.T) {
 	})
 
 	sz := utUpdate.Size()
-	require.EqualValues(t, 3, sz)
+	require.EqualValues(t, len(uniqUpds), sz)
 
 	sz = utDirect.Size()
-	require.EqualValues(t, 3, sz)
-
-	pk, upd := utUpdate.List(true)
-	require.Len(t, pk, 3)
-	require.NotNil(t, upd)
-
-	for i := 0; i < len(sortedUniqUpds); i++ {
-		require.EqualValues(t, sortedUniqUpds[i].key, pk[i])
-		require.EqualValues(t, sortedUniqUpds[i].val, upd[i].Storage[:upd[i].StorageLen])
-	}
-
-	pk, upd = utDirect.List(true)
-	require.Len(t, pk, 3)
-	require.Nil(t, upd)
-
-	for i := 0; i < len(sortedUniqUpds); i++ {
-		require.EqualValues(t, sortedUniqUpds[i].key, pk[i])
-	}
+	require.EqualValues(t, len(uniqUpds), sz)
 
 	i := 0
-	err := utUpdate1.HashSort(context.Background(), func(hk, pk []byte, _ *Update) error {
+	// keyHasherNoop is used so ordering is going by plainKey
+	err := utUpdate.HashSort(context.Background(), func(hk, pk []byte, upd *Update) error {
 		require.EqualValues(t, sortedUniqUpds[i].key, pk)
+		require.EqualValues(t, sortedUniqUpds[i].val, upd.Storage[:upd.StorageLen])
 		i++
 		return nil
 	})
 	require.NoError(t, err)
+	require.EqualValues(t, len(uniqUpds), i)
 
 	i = 0
-	err = utDirect1.HashSort(context.Background(), func(hk, pk []byte, _ *Update) error {
+	err = utDirect.HashSort(context.Background(), func(hk, pk []byte, _ *Update) error {
 		require.EqualValues(t, sortedUniqUpds[i].key, pk)
 		i++
 		return nil
 	})
 	require.NoError(t, err)
+	require.EqualValues(t, len(uniqUpds), i)
 }
