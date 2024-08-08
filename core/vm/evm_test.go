@@ -23,15 +23,13 @@ import (
 	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon/core/vm/evmtypes"
 	"github.com/erigontech/erigon/params"
-	"github.com/hashicorp/golang-lru/v2/simplelru"
-
 	"github.com/holiman/uint256"
 	"pgregory.net/rapid"
 )
 
 func TestInterpreterReadonly(t *testing.T) {
 	t.Parallel()
-	c, _ := simplelru.NewLRU[libcommon.Hash, []uint64](1, nil)
+	c := NewJumpDestCache()
 	rapid.Check(t, func(t *rapid.T) {
 		env := NewEVM(evmtypes.BlockContext{}, evmtypes.TxContext{}, &dummyStatedb{}, params.TestChainConfig, Config{})
 
@@ -139,7 +137,7 @@ func TestInterpreterReadonly(t *testing.T) {
 
 func TestReadonlyBasicCases(t *testing.T) {
 	t.Parallel()
-	c, _ := simplelru.NewLRU[libcommon.Hash, []uint64](1, nil)
+	c := NewJumpDestCache()
 
 	cases := []struct {
 		testName          string
@@ -407,7 +405,7 @@ func newTestSequential(env *EVM, currentIdx *int, readonlies []bool, isEVMCalled
 
 func (st *testSequential) Run(_ *Contract, _ []byte, _ bool) ([]byte, error) {
 	*st.currentIdx++
-	c, _ := simplelru.NewLRU[libcommon.Hash, []uint64](1, nil)
+	c := NewJumpDestCache()
 	nextContract := NewContract(
 		&dummyContractRef{},
 		libcommon.Address{},

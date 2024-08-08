@@ -28,7 +28,6 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/hashicorp/golang-lru/v2/simplelru"
 	"github.com/holiman/uint256"
 
 	libcommon "github.com/erigontech/erigon-lib/common"
@@ -586,7 +585,6 @@ func BenchmarkOpMstore(bench *testing.B) {
 
 func TestOpTstore(t *testing.T) {
 	t.Parallel()
-	c, _ := simplelru.NewLRU[libcommon.Hash, []uint64](1, nil)
 	var (
 		state          = state.New(nil)
 		env            = NewEVM(evmtypes.BlockContext{}, evmtypes.TxContext{}, state, params.TestChainConfig, Config{})
@@ -596,7 +594,7 @@ func TestOpTstore(t *testing.T) {
 		caller         = libcommon.Address{}
 		to             = libcommon.Address{1}
 		contractRef    = contractRef{caller}
-		contract       = NewContract(contractRef, to, u256.Num0, 0, false, c)
+		contract       = NewContract(contractRef, to, u256.Num0, 0, false, NewJumpDestCache())
 		scopeContext   = ScopeContext{mem, stack, contract}
 		value          = libcommon.Hex2Bytes("abcdef00000000000000abba000000000deaf000000c0de00100000000133700")
 	)
