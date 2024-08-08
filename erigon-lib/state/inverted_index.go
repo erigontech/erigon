@@ -588,31 +588,24 @@ func (iit *InvertedIndexRoTx) seekInFiles(key []byte, txNum uint64) (found bool,
 		}
 	}
 
+	//if dbg.KVReadLevelledMetrics {
+	//	m := iit.iiNotFoundCache.Metrics()
+	//	if iit.hit%10_000 == 0 {
+	//		log.Warn("[dbg] lEachCache", "a", iit.ii.filenameBase, "hit", iit.hit, "total", iit.hit+iit.miss, "Collisions", m.Collisions, "Evictions", m.Evictions, "Inserts", m.Inserts, "limit", limit, "ratio", fmt.Sprintf("%.2f", float64(m.Hits)/float64(m.Hits+m.Misses)))
+	//	}
+	//}
+
 	fromCache, ok := iit.iiNotFoundCache.Get(hi)
 	if ok && fromCache.requested <= txNum {
 		if txNum <= fromCache.found {
-			//hit++
-			//if dbg.KVReadLevelledMetrics {
-			//if iit.ii.filenameBase != "accounts" {
-			//	m := iit.iiNotFoundCache.Metrics()
-			//	if hit%10_000 == 0 {
-			//		log.Warn("[dbg] lEachCache", "a", iit.ii.filenameBase, "hit", hit, "total", hit+miss, "Collisions", m.Collisions, "Evictions", m.Evictions, "Inserts", m.Inserts, "limit", limit, "ratio", fmt.Sprintf("%.2f", float64(m.Hits)/float64(m.Hits+m.Misses)))
-			//	}
-			//}
-			//}
+			iit.hit++
 			return true, fromCache.found
 		} else if fromCache.found == 0 {
-			//if iit.ii.filenameBase != "accounts" {
-			//	m := iit.iiNotFoundCache.Metrics()
-			//	if hit%10_000 == 0 {
-			//		log.Warn("[dbg] lEachCache", "a", iit.ii.filenameBase, "hit", hit, "total", hit+miss, "Collisions", m.Collisions, "Evictions", m.Evictions, "Inserts", m.Inserts, "limit", limit, "ratio", fmt.Sprintf("%.2f", float64(m.Hits)/float64(m.Hits+m.Misses)))
-			//	}
-			//}
-			//hit++
+			iit.hit++
 			return false, 0
 		}
 	}
-	miss++
+	iit.miss++
 
 	for i := 0; i < len(iit.files); i++ {
 		if iit.files[i].endTxNum <= txNum {
