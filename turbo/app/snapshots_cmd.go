@@ -622,6 +622,12 @@ func checkIfStateSnapshotsPublishable(dir datadir.Dirs) error {
 			if _, err := os.Stat(filepath.Join(dir.SnapDomain, btFileName)); err != nil {
 				return fmt.Errorf("missing file %s at path %s", btFileName, filepath.Join(dir.SnapDomain, btFileName))
 			}
+
+			kveiFileName := strings.Replace(expectedFileName, ".kv", ".kvei", 1)
+			if _, err := os.Stat(filepath.Join(dir.SnapDomain, kveiFileName)); err != nil {
+				return fmt.Errorf("missing file %s at path %s", kveiFileName, filepath.Join(dir.SnapDomain, kveiFileName))
+			}
+
 			if snapType == "commitment" {
 				continue
 			}
