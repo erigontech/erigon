@@ -126,8 +126,12 @@ func updateCanonicalChainInTheDatabase(ctx context.Context, tx kv.RwTx, headSlot
 	}
 
 	// check reorg
-	if len(reconnectionRoots) > 2 {
-		log.Info("cl reorg", "new_head_slot", headSlot, "fork_slot", currentSlot)
+	parentRoot, err := beacon_indicies.ReadParentBlockRoot(ctx, tx, headRoot)
+	if err != nil {
+		return fmt.Errorf("failed to read parent block root: %w", err)
+	}
+	if parentRoot != oldCanonical {
+		log.Info("cl reorg", "new_head_slot", headSlot, "fork_slot", currentSlot, "old_canonical", oldCanonical, "new_canonical", headRoot)
 		oldStateRoot, err := beacon_indicies.ReadStateRootByBlockRoot(ctx, tx, oldCanonical)
 		if err != nil {
 			log.Warn("failed to read state root by block root", "err", err, "block_root", oldCanonical)
