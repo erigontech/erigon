@@ -185,6 +185,7 @@ func ExecV3(ctx context.Context,
 	if !useExternalTx {
 		if !parallel {
 			var err error
+			println("new tx")
 			applyTx, err = chainDb.BeginRw(ctx) //nolint
 			if err != nil {
 				return err
@@ -213,6 +214,7 @@ func ExecV3(ctx context.Context,
 		doms = txc.Doms
 	} else {
 		var err error
+		println("new sd")
 		doms, err = state2.NewSharedDomains(applyTx, log.New())
 		// if we are behind the commitment, we can't execute anything
 		// this can heppen if progress in domain is higher than progress in blocks

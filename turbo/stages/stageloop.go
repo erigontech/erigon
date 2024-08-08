@@ -87,7 +87,7 @@ func StageLoop(
 		}
 	}
 
-	//tx, err := db.BeginRw(ctx)
+	//tx, err := db.BeginRwNosync(ctx)
 	//if err != nil {
 	//	logger.Error("BeginRw err", "err", err)
 	//	return
@@ -250,7 +250,7 @@ func StageLoopIteration(ctx context.Context, db kv.RwDB, txc wrap.TxContainer, s
 	//       send notifications Now and do write to disks Later.
 	// - Send Notifications: about new blocks, new receipts, state changes, etc...
 	// - Prune(limited time)+Commit(sync). Write to disk happening here.
-
+	//logger.Error("in stageLooopIT", "canRunCycleInOneTransaction", canRunCycleInOneTransaction)
 	if canRunCycleInOneTransaction && !externalTx {
 		txc.Tx, err = db.BeginRwNosync(ctx)
 		if err != nil {

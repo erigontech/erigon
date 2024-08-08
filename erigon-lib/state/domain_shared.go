@@ -1215,7 +1215,7 @@ func (sdc *SharedDomainsCommitmentContext) ComputeCommitment(ctx context.Context
 			//}
 		}
 		rootHash, err = sdc.patriciaTrie.ProcessTree(ctx, sdc.updates, logPrefix)
-		//println("calculated rootHash:", common.BytesToHash(rootHash).Hex())
+		println("calculated rootHash:", common.BytesToHash(rootHash).Hex())
 		if err != nil {
 			return nil, err
 		}
