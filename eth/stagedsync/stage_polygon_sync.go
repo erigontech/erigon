@@ -233,30 +233,34 @@ func UnwindPolygonSyncStage(ctx context.Context, tx kv.RwTx, u *UnwindState, cfg
 }
 
 func UnwindHeimdall(tx kv.RwTx, u *UnwindState, unwindTypes []string) error {
-	if err := UnwindEvents(tx, u, unwindTypes); err != nil {
-		return err
+	if len(unwindTypes) == 0 || slices.Contains(unwindTypes, "events") {
+		if err := UnwindEvents(tx, u.UnwindPoint); err != nil {
+			return err
+		}
 	}
 
-	if err := UnwindSpans(tx, u, unwindTypes); err != nil {
-		return err
+	if len(unwindTypes) == 0 || slices.Contains(unwindTypes, "spans") {
+		if err := UnwindSpans(tx, u.UnwindPoint); err != nil {
+			return err
+		}
 	}
 
-	if err := UnwindCheckpoints(tx, u, unwindTypes); err != nil {
-		return err
+	if borsnaptype.CheckpointsEnabled() && (len(unwindTypes) == 0 || slices.Contains(unwindTypes, "checkpoints")) {
+		if err := UnwindCheckpoints(tx, u.UnwindPoint); err != nil {
+			return err
+		}
 	}
 
-	if err := UnwindMilestones(tx, u, unwindTypes); err != nil {
-		return err
+	if borsnaptype.MilestonesEnabled() && (len(unwindTypes) == 0 || slices.Contains(unwindTypes, "milestones")) {
+		if err := UnwindMilestones(tx, u.UnwindPoint); err != nil {
+			return err
+		}
 	}
 
 	return nil
 }
 
-func UnwindEvents(tx kv.RwTx, u *UnwindState, unwindTypes []string) error {
-	if len(unwindTypes) > 0 && !slices.Contains(unwindTypes, "events") {
-		return nil
-	}
-
+func UnwindEvents(tx kv.RwTx, unwindPoint uint64) error {
 	cursor, err := tx.RwCursor(kv.BorEventNums)
 	if err != nil {
 		return err
@@ -264,19 +268,18 @@ func UnwindEvents(tx kv.RwTx, u *UnwindState, unwindTypes []string) error {
 
 	defer cursor.Close()
 	var blockNumBuf [8]byte
-	binary.BigEndian.PutUint64(blockNumBuf[:], u.UnwindPoint+1)
-	k, v, err := cursor.Seek(blockNumBuf[:])
+	binary.BigEndian.PutUint64(blockNumBuf[:], unwindPoint+1)
+	k, eventId, err := cursor.Seek(blockNumBuf[:])
 	if err != nil {
 		return err
 	}
 	if k != nil {
-		// v is the encoding of the first eventId to be removed
 		eventCursor, err := tx.RwCursor(kv.BorEvents)
 		if err != nil {
 			return err
 		}
 		defer eventCursor.Close()
-		for v, _, err = eventCursor.Seek(v); err == nil && v != nil; v, _, err = eventCursor.Next() {
+		for eventId, _, err = eventCursor.Seek(eventId); err == nil && eventId != nil; eventId, _, err = eventCursor.Next() {
 			if err = eventCursor.DeleteCurrent(); err != nil {
 				return err
 			}
@@ -294,18 +297,14 @@ func UnwindEvents(tx kv.RwTx, u *UnwindState, unwindTypes []string) error {
 	return err
 }
 
-func UnwindSpans(tx kv.RwTx, u *UnwindState, unwindTypes []string) error {
-	if len(unwindTypes) > 0 && !slices.Contains(unwindTypes, "spans") {
-		return nil
-	}
-
+func UnwindSpans(tx kv.RwTx, unwindPoint uint64) error {
 	cursor, err := tx.RwCursor(kv.BorSpans)
 	if err != nil {
 		return err
 	}
 
 	defer cursor.Close()
-	lastSpanToKeep := heimdall.SpanIdAt(u.UnwindPoint)
+	lastSpanToKeep := heimdall.SpanIdAt(unwindPoint)
 	var spanIdBytes [8]byte
 	binary.BigEndian.PutUint64(spanIdBytes[:], uint64(lastSpanToKeep+1))
 	var k []byte
@@ -317,22 +316,14 @@ func UnwindSpans(tx kv.RwTx, u *UnwindState, unwindTypes []string) error {
 	return err
 }
 
-func UnwindCheckpoints(tx kv.RwTx, u *UnwindState, unwindTypes []string) error {
-	if !borsnaptype.CheckpointsEnabled() {
-		return nil
-	}
-
-	if len(unwindTypes) > 0 && !slices.Contains(unwindTypes, "checkpoints") {
-		return nil
-	}
-
+func UnwindCheckpoints(tx kv.RwTx, unwindPoint uint64) error {
 	cursor, err := tx.RwCursor(kv.BorCheckpoints)
 	if err != nil {
 		return err
 	}
 
 	defer cursor.Close()
-	lastCheckpointToKeep, err := heimdall.CheckpointIdAt(tx, u.UnwindPoint)
+	lastCheckpointToKeep, err := heimdall.CheckpointIdAt(tx, unwindPoint)
 	if errors.Is(err, heimdall.ErrCheckpointNotFound) {
 		return nil
 	}
@@ -351,22 +342,14 @@ func UnwindCheckpoints(tx kv.RwTx, u *UnwindState, unwindTypes []string) error {
 	return err
 }
 
-func UnwindMilestones(tx kv.RwTx, u *UnwindState, unwindTypes []string) error {
-	if !borsnaptype.MilestonesEnabled() {
-		return nil
-	}
-
-	if len(unwindTypes) > 0 && !slices.Contains(unwindTypes, "milestones") {
-		return nil
-	}
-
+func UnwindMilestones(tx kv.RwTx, unwindPoint uint64) error {
 	cursor, err := tx.RwCursor(kv.BorMilestones)
 	if err != nil {
 		return err
 	}
 
 	defer cursor.Close()
-	lastMilestoneToKeep, err := heimdall.MilestoneIdAt(tx, u.UnwindPoint)
+	lastMilestoneToKeep, err := heimdall.MilestoneIdAt(tx, unwindPoint)
 	if errors.Is(err, heimdall.ErrMilestoneNotFound) {
 		return nil
 	}
