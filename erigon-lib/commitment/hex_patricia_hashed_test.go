@@ -511,21 +511,6 @@ func Test_Cell_EncodeDecode(t *testing.T) {
 	cellMustEqual(t, first, second)
 }
 
-func cellMustEqual(t testing.TB, first, second *cell) {
-	require.EqualValues(t, first.downHashedLen, second.downHashedLen)
-	require.EqualValues(t, first.downHashedKey[:], second.downHashedKey[:])
-	require.EqualValues(t, first.hashLen, second.hashLen)
-	require.EqualValues(t, first.hash[:], second.hash[:])
-	require.EqualValues(t, first.accountPlainKeyLen, second.accountPlainKeyLen)
-	require.EqualValues(t, first.storagePlainKeyLen, second.storagePlainKeyLen)
-	require.EqualValues(t, first.accountPlainKey[:], second.accountPlainKey[:])
-	require.EqualValues(t, first.storagePlainKey[:], second.storagePlainKey[:])
-	require.EqualValues(t, first.extension[:first.extLen], second.extension[:second.extLen])
-	require.EqualValues(t, first.leafHash[:first.lhLen], second.leafHash[:second.lhLen])
-
-	// encode doesn't code Nonce, Balance, CodeHash and Storage, Delete fields
-}
-
 func Test_HexPatriciaHashed_StateEncode(t *testing.T) {
 	//trie := NewHexPatriciaHashed(length.Hash, nil, nil, nil)
 	var s state
@@ -1167,4 +1152,19 @@ func TestCell_fillFromFields(t *testing.T) {
 	for i := 0; i < len(decRow); i++ {
 		cellMustEqual(t, row[i], decRow[i])
 	}
+}
+
+func cellMustEqual(t testing.TB, first, second *cell) {
+	require.EqualValues(t, first.downHashedLen, second.downHashedLen)
+	require.EqualValues(t, first.downHashedKey[:], second.downHashedKey[:])
+	require.EqualValues(t, first.hashLen, second.hashLen)
+	require.EqualValues(t, first.hash[:], second.hash[:])
+	require.EqualValues(t, first.accountPlainKeyLen, second.accountPlainKeyLen)
+	require.EqualValues(t, first.storagePlainKeyLen, second.storagePlainKeyLen)
+	require.EqualValues(t, first.accountPlainKey[:], second.accountPlainKey[:])
+	require.EqualValues(t, first.storagePlainKey[:], second.storagePlainKey[:])
+	require.EqualValues(t, first.extension[:first.extLen], second.extension[:second.extLen])
+	require.EqualValues(t, first.leafHash[:first.lhLen], second.leafHash[:second.lhLen])
+
+	// encode doesn't code Nonce, Balance, CodeHash and Storage, Delete fields
 }
