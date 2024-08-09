@@ -904,6 +904,16 @@ func (hi *HeaderInserter) FeedHeaderPoW(db kv.StatelessRwTx, headerReader servic
 		// Skip duplicates
 		return nil, nil
 	}
+
+	isCanonical, err := rawdb.IsCanonicalHash(db, hash, blockHeight)
+	if err != nil {
+		return nil, fmt.Errorf("[%s] failed to check if hash %x is canonical: %w", hi.logPrefix, hash, err)
+	}
+	if isCanonical {
+		// Already inserted, skip
+		return nil, nil
+	}
+
 	oldH, err := headerReader.Header(context.Background(), db, hash, blockHeight)
 	if err != nil {
 		return nil, err
@@ -954,6 +964,7 @@ func (hi *HeaderInserter) FeedHeaderPoW(db kv.StatelessRwTx, headerReader servic
 			hi.highestHash = hash
 			hi.highestTimestamp = header.Time
 			hi.canonicalCache.Add(blockHeight, hash)
+
 			// See if the forking point affects the unwindPoint (the block number to which other stages will need to unwind before the new canonical chain is applied)
 			if forkingPoint < hi.unwindPoint {
 				hi.SetUnwindPoint(forkingPoint)
