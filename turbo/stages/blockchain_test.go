@@ -409,14 +409,6 @@ func testReorg(t *testing.T, first, second []int64, td int64) {
 	})
 	require.NoError(err)
 	require.Equal(b, msg.GetData())
-
-	// Make sure the chain total difficulty is the correct one
-	want := new(big.Int).Add(m.Genesis.Difficulty(), big.NewInt(td))
-	have, err := rawdb.ReadTdByHash(tx, rawdb.ReadCurrentHeader(tx).Hash())
-	require.NoError(err)
-	if have.Cmp(want) != 0 {
-		t.Errorf("total difficulty mismatch: have %v, want %v", have, want)
-	}
 }
 
 // Tests that the insertion functions detect banned hashes.

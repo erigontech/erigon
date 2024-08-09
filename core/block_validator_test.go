@@ -81,7 +81,7 @@ func TestHeaderVerification(t *testing.T) {
 			t.Fatalf("test %d: error inserting the block: %v", i, err)
 		}
 
-		engine.Close()
+		_ = engine.Close()
 	}
 }
 
@@ -131,6 +131,6 @@ func TestHeaderWithSealVerification(t *testing.T) {
 			t.Fatalf("test %d: error inserting the block: %v", i, err)
 		}
 
-		engine.Close()
+		_ = engine.Close()
 	}
 }
