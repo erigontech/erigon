@@ -62,6 +62,13 @@ var Command = cli.Command{
 	Description: "Collect information about system and save it to file in order to provide to support person",
 }
 
+type Flag struct {
+	Name    string      `json:"name"`
+	Value   interface{} `json:"value"`
+	Usage   string      `json:"usage"`
+	Default bool        `json:"default"`
+}
+
 type SortType int
 
 const (
@@ -76,7 +83,16 @@ func collectInfo(cliCtx *cli.Context) error {
 		util.RenderError(err)
 	}
 
+	flagsData, err := getFlagsData(cliCtx)
+	if err != nil {
+		util.RenderError(err)
+	}
+
 	var builder strings.Builder
+	builder.WriteString("Flags applied by launch command:\n")
+	writeFlagsInfoToStringBuilder(flagsData, &builder)
+	builder.WriteString("\n\n")
+
 	builder.WriteString("Disk info:\n")
 	builder.WriteString(data.Disk.Details)
 	builder.WriteString("\n\n")
@@ -98,6 +114,15 @@ func collectInfo(cliCtx *cli.Context) error {
 	}
 
 	return nil
+}
+
+func writeFlagsInfoToStringBuilder(flags []Flag, builder *strings.Builder) {
+	flagsRows := make([]table.Row, 0, len(flags))
+	for _, flag := range flags {
+		flagsRows = append(flagsRows, table.Row{flag.Name, flag.Value})
+	}
+	flagsTableData := util.ExportTable("", table.Row{"Flag", "Value"}, flagsRows, nil)
+	builder.WriteString(flagsTableData)
 }
 
 func writeCPUToStringBuilder(cpuInfo []diagnostics.CPUInfo, builder *strings.Builder) {
@@ -233,4 +258,32 @@ func getData(cliCtx *cli.Context) (diagnostics.HardwareInfo, error) {
 	}
 
 	return data, nil
+}
+
+func getFlagsData(cliCtx *cli.Context) ([]Flag, error) {
+	var rawData map[string]map[string]interface{}
+	url := "http://" + cliCtx.String(flags.DebugURLFlag.Name) + flags.ApiPath + "/flags"
+
+	err := util.MakeHttpGetCall(cliCtx.Context, url, &rawData)
+
+	if err != nil {
+		return nil, err
+	}
+
+	var flagItems []Flag
+	for name, item := range rawData {
+		if item["default"].(bool) {
+			continue
+		}
+
+		flagItem := Flag{
+			Name:    name,
+			Value:   item["value"],
+			Usage:   item["usage"].(string),
+			Default: item["default"].(bool),
+		}
+		flagItems = append(flagItems, flagItem)
+	}
+
+	return flagItems, nil
 }
