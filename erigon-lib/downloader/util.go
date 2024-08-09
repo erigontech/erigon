@@ -76,19 +76,24 @@ type torrentInfo struct {
 }
 
 func seedableSegmentFiles(dir string, chainName string, skipSeedableCheck bool) ([]string, error) {
-	files, err := dir2.ListFiles(dir, snaptype.SeedableV2Extensions()...)
+	extensions := snaptype.SeedableV2Extensions()
+	if skipSeedableCheck {
+		extensions = snaptype.AllV2Extensions()
+	}
+	files, err := dir2.ListFiles(dir, extensions...)
 	if err != nil {
 		return nil, err
 	}
+
 	res := make([]string, 0, len(files))
 	for _, fPath := range files {
 
 		_, name := filepath.Split(fPath)
-		if !snaptype.IsCorrectFileName(name) {
+		if !skipSeedableCheck && !snaptype.IsCorrectFileName(name) {
 			continue
 		}
 		ff, isStateFile, ok := snaptype.ParseFileName(dir, name)
-		if !ok || isStateFile {
+		if !skipSeedableCheck && (!ok || isStateFile) {
 			continue
 		}
 		if !skipSeedableCheck && !snapcfg.Seedable(chainName, ff) {
@@ -99,17 +104,21 @@ func seedableSegmentFiles(dir string, chainName string, skipSeedableCheck bool) 
 	return res, nil
 }
 
-func seedableStateFilesBySubDir(dir, subDir string, skipSeedable bool) ([]string, error) {
+func seedableStateFilesBySubDir(dir, subDir string, skipSeedableCheck bool) ([]string, error) {
 	historyDir := filepath.Join(dir, subDir)
 	dir2.MustExist(historyDir)
-	files, err := dir2.ListFiles(historyDir, snaptype.SeedableV3Extensions()...)
+	extensions := snaptype.SeedableV3Extensions()
+	if skipSeedableCheck {
+		extensions = snaptype.AllV3Extensions()
+	}
+	files, err := dir2.ListFiles(historyDir, extensions...)
 	if err != nil {
 		return nil, err
 	}
 	res := make([]string, 0, len(files))
 	for _, fPath := range files {
 		_, name := filepath.Split(fPath)
-		if !skipSeedable && !snaptype.E3Seedable(name) {
+		if !skipSeedableCheck && !snaptype.E3Seedable(name) {
 			continue
 		}
 		res = append(res, filepath.Join(subDir, name))

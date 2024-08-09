@@ -2657,7 +2657,14 @@ func SeedableFiles(dirs datadir.Dirs, chainName string, all bool) ([]string, err
 	if err != nil {
 		return nil, err
 	}
-	files = append(append(append(files, l1...), l2...), l3...)
+	var l4 []string
+	if all {
+		l4, err = seedableStateFilesBySubDir(dirs.Snap, "accessor", all)
+		if err != nil {
+			return nil, err
+		}
+	}
+	files = append(append(append(append(files, l1...), l2...), l3...), l4...)
 	return files, nil
 }
 
