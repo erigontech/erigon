@@ -18,6 +18,7 @@ package solid
 
 import (
 	"encoding/json"
+	"io"
 
 	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/length"
@@ -387,4 +388,25 @@ func (v *ValidatorSet) UnmarshalJSON(data []byte) error {
 		v.Append(val)
 	}
 	return nil
+}
+
+func (arr *ValidatorSet) ReadMerkleTree(r io.Reader) error {
+	if arr.MerkleTree == nil {
+		arr.MerkleTree = &merkle_tree.MerkleTree{}
+	}
+	return arr.MerkleTree.ReadMerkleTree(r)
+}
+
+func (arr *ValidatorSet) WriteMerkleTree(w io.Writer) error {
+	if arr.MerkleTree == nil {
+		arr.MerkleTree = &merkle_tree.MerkleTree{}
+		cap := uint64(arr.c)
+		arr.MerkleTree.Initialize(arr.l, merkle_tree.OptimalMaxTreeCacheDepth, func(idx int, out []byte) {
+			validator := arr.Get(idx)
+			if err := validator.CopyHashBufferTo(out); err != nil {
+				panic(err)
+			}
+		}, &cap)
+	}
+	return arr.MerkleTree.WriteMerkleTree(w)
 }
