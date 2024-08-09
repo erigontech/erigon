@@ -361,9 +361,11 @@ func Test_HexPatriciaHashed_UniqueRepresentation(t *testing.T) {
 		Balance("b13363d527cdc18173c54ac5d4a54af05dbec22e", 4*1e17).
 		Balance("d995768ab23a0a333eb9584df006da740e66f0aa", 5).
 		Balance("eabf041afbb6c6059fbd25eab0d3202db84e842d", 6).
+		Balance("8e5476fc5990638a4fb0b5fd3f61bb4b5c5f395e", 1237).
 		Balance("93fe03620e4d70ea39ab6e8c0e04dd0d83e041f2", 7).
 		Balance("ba7a3b7b095d3370c022ca655c790f0c0ead66f5", 5*1e17).
 		Storage("ba7a3b7b095d3370c022ca655c790f0c0ead66f5", "0fa41642c48ecf8f2059c275353ce4fee173b3a8ce5480f040c4d2901603d14e", "050505").
+		CodeHash("ba7a3b7b095d3370c022ca655c790f0c0ead66f5", "24f3a02dc65eda502dbf75919e795458413d3c45b38bb35b51235432707900ed").
 		Balance("a8f8d73af90eee32dc9729ce8d5bb762f30d21a4", 9*1e16).
 		Storage("93fe03620e4d70ea39ab6e8c0e04dd0d83e041f2", "de3fea338c95ca16954e80eb603cd81a261ed6e2b10a03d0c86cf953fe8769a4", "060606").
 		Balance("14c4d3bba7f5009599257d3701785d34c7f2aa27", 6*1e18).
@@ -508,6 +510,7 @@ func Test_Cell_EncodeDecode(t *testing.T) {
 
 	require.EqualValues(t, first.downHashedLen, second.downHashedLen)
 	require.EqualValues(t, first.downHashedKey[:], second.downHashedKey[:])
+
 	require.EqualValues(t, first.accountPlainKeyLen, second.accountPlainKeyLen)
 	require.EqualValues(t, first.storagePlainKeyLen, second.storagePlainKeyLen)
 	require.EqualValues(t, first.hashLen, second.hashLen)

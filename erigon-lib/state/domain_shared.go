@@ -1116,6 +1116,7 @@ func (sdc *SharedDomainsCommitmentContext) Account(plainKey []byte) (*commitment
 	if err != nil {
 		return nil, fmt.Errorf("GetAccount/Code: failed to read latest code: %w", err)
 	}
+
 	if len(code) > 0 {
 		sdc.keccak.Reset()
 		sdc.keccak.Write(code)

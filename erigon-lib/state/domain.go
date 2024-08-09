@@ -716,7 +716,6 @@ func domainReadMetric(name kv.Domain, level int) metrics.Summary {
 	}
 	return mxsKVGet[name][level]
 }
-
 func (dt *DomainRoTx) getFromFile(i int, filekey []byte) ([]byte, bool, error) {
 	if dbg.KVReadLevelledMetrics {
 		defer domainReadMetric(dt.name, i).ObserveDuration(time.Now())

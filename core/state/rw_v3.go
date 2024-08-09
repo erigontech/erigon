@@ -668,12 +668,12 @@ func (r *StateReaderV3) ReadAccountCodeSize(address common.Address, incarnation 
 	if err != nil {
 		return 0, err
 	}
-	var sizebuf [8]byte
-	binary.BigEndian.PutUint64(sizebuf[:], uint64(len(enc)))
+	size := len(enc)
 	if !r.discardReadList {
+		var sizebuf [8]byte
+		binary.BigEndian.PutUint64(sizebuf[:], uint64(size))
 		r.readLists[libstate.CodeSizeTableFake].Push(string(address[:]), sizebuf[:])
 	}
-	size := len(enc)
 	if r.trace {
 		fmt.Printf("ReadAccountCodeSize [%x] => [%d], txNum: %d\n", address, size, r.txNum)
 	}
