@@ -40,8 +40,12 @@ func NewPromise[T any](task func() (T, error)) *Promise[T] {
 	return p
 }
 
-func (p *Promise[T]) Get() (T, error) {
+func (p *Promise[T]) Wait() {
 	p.wg.Wait() // .Wait ensures that all memory operations before .Done are visible after .Wait => no need to lock/unlock the mutex
+}
+
+func (p *Promise[T]) Get() (T, error) {
+	p.Wait()
 	return p.result, p.err
 }
 
@@ -55,4 +59,8 @@ func (p *Promise[T]) Cancel() {
 	p.mutex.Lock()
 	defer p.mutex.Unlock()
 	p.cancelled = true
+}
+
+func (p *Promise[T]) CloneAndRerun() *Promise[T] {
+	return NewPromise[T](p.task)
 }

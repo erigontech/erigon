@@ -134,6 +134,12 @@ func AllComponents(ctx context.Context, cfg txpoolcfg.Config, ethCfg *ethconfig.
 		return nil, nil, nil, nil, nil, err
 	}
 
+	if err = txPoolDB.Update(ctx, func(tx kv.RwTx) error {
+		return txpool.CreateTxPoolBuckets(tx)
+	}); err != nil {
+		return nil, nil, nil, nil, nil, err
+	}
+
 	fetch := txpool.NewFetch(ctx, sentryClients, txPool, stateChangesClient, chainDB, txPoolDB, *chainID)
 	//fetch.ConnectCore()
 	//fetch.ConnectSentries()

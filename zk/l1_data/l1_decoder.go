@@ -169,8 +169,8 @@ type DecodedL1Data struct {
 	LimitTimestamp  uint64
 }
 
-func BreakDownL1DataByBatch(batchNo uint64, forkId uint64, reader *hermez_db.HermezDbReader) (DecodedL1Data, error) {
-	decoded := DecodedL1Data{}
+func BreakDownL1DataByBatch(batchNo uint64, forkId uint64, reader *hermez_db.HermezDbReader) (*DecodedL1Data, error) {
+	decoded := &DecodedL1Data{}
 	// we expect that the batch we're going to load in next should be in the db already because of the l1 block sync
 	// stage, if it is not there we need to panic as we're in a bad state
 	batchData, err := reader.GetL1BatchData(batchNo)

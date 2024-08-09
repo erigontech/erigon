@@ -234,7 +234,7 @@ func (bcc *BatchCounterCollector) CombineCollectors(verifyMerkleProof bool) (Cou
 // rlp level counters and execution level counters
 // this one returns the counters as they are so far, without adding processBatchLevelData, processChangeL2Block and decodeChangeL2BlockTx
 // used to save batch counter progress without adding the said counters twice
-func (bcc *BatchCounterCollector) CombineCollectorsNoChanges(verifyMerkleProof bool) Counters {
+func (bcc *BatchCounterCollector) CombineCollectorsNoChanges() Counters {
 	// combine all the counters we have so far
 
 	// if we have external coutners use them, otherwise create new

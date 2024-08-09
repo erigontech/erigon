@@ -30,6 +30,8 @@ const TableAccountValues = "HermezSmtAccountValues"
 const TableMetadata = "HermezSmtMetadata"
 const TableHashKey = "HermezSmtHashKey"
 
+var HermezSmtTables = []string{TableSmt, TableStats, TableAccountValues, TableMetadata, TableHashKey}
+
 type EriDb struct {
 	kvTx kv.RwTx
 	tx   SmtDbTx

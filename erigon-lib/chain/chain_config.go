@@ -29,6 +29,9 @@ import (
 // this needs to always be in descending order
 // add new forkIds at the beginning of the array
 var ForkIdsOrdered = []ForkId{
+	ForkID12Banana,
+	ForkID11,
+	ForkID10,
 	ForkID9Elderberry2,
 	ForkID8Elderberry,
 	ForkID7Etrog,
@@ -109,6 +112,8 @@ type Config struct {
 	ForkID7EtrogBlock       *big.Int `json:"forkID7EtrogBlock,omitempty"`
 	ForkID88ElderberryBlock *big.Int `json:"forkID88ElderberryBlock,omitempty"`
 	ForkID9Elderberry2Block *big.Int `json:"forkID9FeijoaBlock,omitempty"`
+	ForkID10                *big.Int `json:"forkID10,omitempty"`
+	ForkID11                *big.Int `json:"forkID11,omitempty"`
 	ForkID12BananaBlock     *big.Int `json:"forkID12BananaBlock,omitempty"`
 	NormalcyBlock           *big.Int `json:"normalcyBlock,omitempty"`
 
@@ -358,6 +363,12 @@ func (c *Config) IsForkID8Elderberry(num uint64) bool {
 func (c *Config) IsForkId9Elderberry2(num uint64) bool {
 	return isForked(c.ForkID9Elderberry2Block, num)
 }
+func (c *Config) IsForkID10(num uint64) bool {
+	return isForked(c.ForkID10, num)
+}
+func (c *Config) IsForkID11(num uint64) bool {
+	return isForked(c.ForkID11, num)
+}
 
 func (c *Config) IsForkID12Banana(num uint64) bool {
 	return isForked(c.ForkID12BananaBlock, num)
@@ -600,15 +611,15 @@ func borKeyValueConfigHelper[T uint64 | common.Address](field map[string]T, numb
 // Rules is a one time interface meaning that it shouldn't be used in between transition
 // phases.
 type Rules struct {
-	ChainID                                                                                  *big.Int
-	IsHomestead, IsTangerineWhistle, IsSpuriousDragon                                        bool
-	IsByzantium, IsConstantinople, IsPetersburg                                              bool
-	IsIstanbul, IsBerlin, IsLondon, IsShanghai                                               bool
-	IsCancun, IsNapoli                                                                       bool
-	IsPrague, isOsaka                                                                        bool
-	IsAura                                                                                   bool
-	IsNormalcy                                                                               bool
-	IsForkID4, IsForkID5Dragonfruit, IsForkID6IncaBerry, IsForkID7Etrog, IsForkID8Elderberry bool
+	ChainID                                                                                                                            *big.Int
+	IsHomestead, IsTangerineWhistle, IsSpuriousDragon                                                                                  bool
+	IsByzantium, IsConstantinople, IsPetersburg                                                                                        bool
+	IsIstanbul, IsBerlin, IsLondon, IsShanghai                                                                                         bool
+	IsCancun, IsNapoli                                                                                                                 bool
+	IsPrague, isOsaka                                                                                                                  bool
+	IsAura                                                                                                                             bool
+	IsNormalcy                                                                                                                         bool
+	IsForkID4, IsForkID5Dragonfruit, IsForkID6IncaBerry, IsForkID7Etrog, IsForkID8Elderberry, IsForkId10, IsForkId11, IsForkID12Banana bool
 }
 
 // Rules ensures c's ChainID is not nil and returns a new Rules instance
@@ -641,6 +652,9 @@ func (c *Config) Rules(num uint64, time uint64) *Rules {
 		IsForkID6IncaBerry:   c.IsForkID6IncaBerry(num),
 		IsForkID7Etrog:       c.IsForkID7Etrog(num),
 		IsForkID8Elderberry:  c.IsForkID8Elderberry(num),
+		IsForkId10:           c.IsForkID10(num),
+		IsForkId11:           c.IsForkID11(num),
+		IsForkID12Banana:     c.IsForkID12Banana(num),
 	}
 }
 

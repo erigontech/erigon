@@ -499,14 +499,14 @@ func (p *TxPool) fromDBLimbo(ctx context.Context, tx kv.Tx, cacheView kvcache.Ca
 		return nil
 	}
 
+	p.limbo.limboSlots = &types.TxSlots{}
+	parseCtx := types.NewTxParseContext(p.chainID)
+	parseCtx.WithSender(false)
+
 	it, err := tx.Range(TablePoolLimbo, nil, nil)
 	if err != nil {
 		return err
 	}
-
-	p.limbo.limboSlots = &types.TxSlots{}
-	parseCtx := types.NewTxParseContext(p.chainID)
-	parseCtx.WithSender(false)
 
 	for it.HasNext() {
 		k, v, err := it.Next()

@@ -90,7 +90,9 @@ func compareValuesString(client *ethclient.Client, blockNumber *big.Int, account
 	rpcValue = strings.TrimLeft(rpcValue, "0x")
 	rpcValue = strings.TrimLeft(rpcValue, "0")
 	rpcValue = "0x" + rpcValue
-
+	localValue = strings.TrimLeft(localValue, "0x")
+	localValue = strings.TrimLeft(localValue, "0")
+	localValue = "0x" + localValue
 	if !strings.HasSuffix(rpcValue, localValue) {
 		fmt.Printf("Mismatch detected for %s and key %s. Local: %s, Rpc: %s\n", accountHash, key, localValue, rpcValue)
 	}

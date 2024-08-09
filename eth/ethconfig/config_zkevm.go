@@ -33,7 +33,7 @@ type Zk struct {
 	DatastreamVersion                      int
 	SequencerBlockSealTime                 time.Duration
 	SequencerBatchSealTime                 time.Duration
-	SequencerNonEmptyBatchSealTime         time.Duration
+	SequencerBatchVerificationTimeout      time.Duration
 	SequencerHaltOnBatchNumber             uint64
 	ExecutorUrls                           []string
 	ExecutorStrictMode                     bool
