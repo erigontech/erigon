@@ -484,24 +484,24 @@ func Test_HexPatriciaHashed_Sepolia(t *testing.T) {
 func Test_Cell_EncodeDecode(t *testing.T) {
 	rnd := rand.New(rand.NewSource(time.Now().UnixMilli()))
 	first := &cell{
-		hashLen:            length.Hash,
-		accountPlainKeyLen: length.Addr,
-		storagePlainKeyLen: length.Addr + length.Hash,
-		downHashedLen:      rnd.Intn(129),
-		extLen:             rnd.Intn(65),
-		downHashedKey:      [128]byte{},
-		extension:          [64]byte{},
-		storagePlainKey:    [52]byte{},
-		hash:               [32]byte{},
-		accountPlainKey:    [20]byte{},
+		hashLen:         length.Hash,
+		accountAddrLen:  length.Addr,
+		storageAddrLen:  length.Addr + length.Hash,
+		hashedExtLen:    rnd.Intn(129),
+		extLen:          rnd.Intn(65),
+		hashedExtension: [128]byte{},
+		extension:       [64]byte{},
+		storageAddr:     [52]byte{},
+		hash:            [32]byte{},
+		accountAddr:     [20]byte{},
 	}
 	b := uint256.NewInt(rnd.Uint64())
 	first.Balance = *b
 
-	rnd.Read(first.downHashedKey[:first.downHashedLen])
+	rnd.Read(first.hashedExtension[:first.hashedExtLen])
 	rnd.Read(first.extension[:first.extLen])
-	rnd.Read(first.storagePlainKey[:])
-	rnd.Read(first.accountPlainKey[:])
+	rnd.Read(first.storageAddr[:])
+	rnd.Read(first.accountAddr[:])
 	rnd.Read(first.hash[:])
 
 	second := new(cell)
@@ -1130,7 +1130,7 @@ func TestCell_fillFromFields(t *testing.T) {
 
 	cg := func(nibble int, skip bool) (*cell, error) {
 		c := row[nibble]
-		if c.storagePlainKeyLen > 0 || c.accountPlainKeyLen > 0 {
+		if c.storageAddrLen > 0 || c.accountAddrLen > 0 {
 			rnd.Read(c.leafHash[:])
 			c.lhLen = 32
 		}
@@ -1154,17 +1154,17 @@ func TestCell_fillFromFields(t *testing.T) {
 	for i := 0; i < len(decRow); i++ {
 		t.Logf("cell %d\n", i)
 		first, second := row[i], decRow[i]
-		// after decoding extension == downHashedKey, dhk will be derived from extension
-		require.EqualValues(t, second.extLen, second.downHashedLen)
-		require.EqualValues(t, first.extLen, second.downHashedLen)
-		require.EqualValues(t, second.extension[:second.extLen], second.downHashedKey[:second.downHashedLen])
+		// after decoding extension == hashedExtension, dhk will be derived from extension
+		require.EqualValues(t, second.extLen, second.hashedExtLen)
+		require.EqualValues(t, first.extLen, second.hashedExtLen)
+		require.EqualValues(t, second.extension[:second.extLen], second.hashedExtension[:second.hashedExtLen])
 
 		require.EqualValues(t, first.hashLen, second.hashLen)
 		require.EqualValues(t, first.hash[:first.hashLen], second.hash[:second.hashLen])
-		require.EqualValues(t, first.accountPlainKeyLen, second.accountPlainKeyLen)
-		require.EqualValues(t, first.storagePlainKeyLen, second.storagePlainKeyLen)
-		require.EqualValues(t, first.accountPlainKey[:], second.accountPlainKey[:])
-		require.EqualValues(t, first.storagePlainKey[:], second.storagePlainKey[:])
+		require.EqualValues(t, first.accountAddrLen, second.accountAddrLen)
+		require.EqualValues(t, first.storageAddrLen, second.storageAddrLen)
+		require.EqualValues(t, first.accountAddr[:], second.accountAddr[:])
+		require.EqualValues(t, first.storageAddr[:], second.storageAddr[:])
 		require.EqualValues(t, first.extension[:first.extLen], second.extension[:second.extLen])
 		require.EqualValues(t, first.leafHash[:first.lhLen], second.leafHash[:second.lhLen])
 	}
@@ -1172,14 +1172,14 @@ func TestCell_fillFromFields(t *testing.T) {
 
 func cellMustEqual(tb testing.TB, first, second *cell) {
 	tb.Helper()
-	require.EqualValues(tb, first.downHashedLen, second.downHashedLen)
-	require.EqualValues(tb, first.downHashedKey[:first.downHashedLen], second.downHashedKey[:second.downHashedLen])
+	require.EqualValues(tb, first.hashedExtLen, second.hashedExtLen)
+	require.EqualValues(tb, first.hashedExtension[:first.hashedExtLen], second.hashedExtension[:second.hashedExtLen])
 	require.EqualValues(tb, first.hashLen, second.hashLen)
 	require.EqualValues(tb, first.hash[:first.hashLen], second.hash[:second.hashLen])
-	require.EqualValues(tb, first.accountPlainKeyLen, second.accountPlainKeyLen)
-	require.EqualValues(tb, first.storagePlainKeyLen, second.storagePlainKeyLen)
-	require.EqualValues(tb, first.accountPlainKey[:], second.accountPlainKey[:])
-	require.EqualValues(tb, first.storagePlainKey[:], second.storagePlainKey[:])
+	require.EqualValues(tb, first.accountAddrLen, second.accountAddrLen)
+	require.EqualValues(tb, first.storageAddrLen, second.storageAddrLen)
+	require.EqualValues(tb, first.accountAddr[:], second.accountAddr[:])
+	require.EqualValues(tb, first.storageAddr[:], second.storageAddr[:])
 	require.EqualValues(tb, first.extension[:first.extLen], second.extension[:second.extLen])
 	require.EqualValues(tb, first.leafHash[:first.lhLen], second.leafHash[:second.lhLen])
 

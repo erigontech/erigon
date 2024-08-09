@@ -272,19 +272,19 @@ func (be *BranchEncoder) EncodeBranch(bitmap, touchMap, afterMap uint16, readCel
 
 		if bitmap&bit != 0 {
 			var fieldBits PartFlags
-			if cell.extLen > 0 && cell.storagePlainKeyLen == 0 {
+			if cell.extLen > 0 && cell.storageAddrLen == 0 {
 				fieldBits |= HashedKeyPart
 			}
-			if cell.accountPlainKeyLen > 0 {
+			if cell.accountAddrLen > 0 {
 				fieldBits |= AccountPlainPart
 			}
-			if cell.storagePlainKeyLen > 0 {
+			if cell.storageAddrLen > 0 {
 				fieldBits |= StoragePlainPart
 			}
 			if cell.hashLen > 0 {
 				fieldBits |= HashPart
 			}
-			if cell.lhLen > 0 && (cell.accountPlainKeyLen > 0 || cell.storagePlainKeyLen > 0) {
+			if cell.lhLen > 0 && (cell.accountAddrLen > 0 || cell.storageAddrLen > 0) {
 				fieldBits |= LeafHashPart
 			}
 			if err := be.buf.WriteByte(byte(fieldBits)); err != nil {
@@ -296,12 +296,12 @@ func (be *BranchEncoder) EncodeBranch(bitmap, touchMap, afterMap uint16, readCel
 				}
 			}
 			if fieldBits&AccountPlainPart != 0 {
-				if err := putUvarAndVal(uint64(cell.accountPlainKeyLen), cell.accountPlainKey[:cell.accountPlainKeyLen]); err != nil {
+				if err := putUvarAndVal(uint64(cell.accountAddrLen), cell.accountAddr[:cell.accountAddrLen]); err != nil {
 					return nil, 0, err
 				}
 			}
 			if fieldBits&StoragePlainPart != 0 {
-				if err := putUvarAndVal(uint64(cell.storagePlainKeyLen), cell.storagePlainKey[:cell.storagePlainKeyLen]); err != nil {
+				if err := putUvarAndVal(uint64(cell.storageAddrLen), cell.storageAddr[:cell.storageAddrLen]); err != nil {
 					return nil, 0, err
 				}
 			}
@@ -353,16 +353,16 @@ func (branchData BranchData) String() string {
 			}
 			sb.WriteString("{")
 			var comma string
-			if cell.downHashedLen > 0 {
-				fmt.Fprintf(&sb, "hashedKey=[%x]", cell.downHashedKey[:cell.downHashedLen])
+			if cell.hashedExtLen > 0 {
+				fmt.Fprintf(&sb, "hashedExtension=[%x]", cell.hashedExtension[:cell.hashedExtLen])
 				comma = ","
 			}
-			if cell.accountPlainKeyLen > 0 {
-				fmt.Fprintf(&sb, "%saccountPlainKey=[%x]", comma, cell.accountPlainKey[:cell.accountPlainKeyLen])
+			if cell.accountAddrLen > 0 {
+				fmt.Fprintf(&sb, "%saccountAddr=[%x]", comma, cell.accountAddr[:cell.accountAddrLen])
 				comma = ","
 			}
-			if cell.storagePlainKeyLen > 0 {
-				fmt.Fprintf(&sb, "%sstoragePlainKey=[%x]", comma, cell.storagePlainKey[:cell.storagePlainKeyLen])
+			if cell.storageAddrLen > 0 {
+				fmt.Fprintf(&sb, "%sstorageAddr=[%x]", comma, cell.storageAddr[:cell.storageAddrLen])
 				comma = ","
 			}
 			if cell.hashLen > 0 {
@@ -417,13 +417,13 @@ func (branchData BranchData) ReplacePlainKeys(newData []byte, fn func(key []byte
 		if fieldBits&AccountPlainPart != 0 {
 			l, n := binary.Uvarint(branchData[pos:])
 			if n == 0 {
-				return nil, errors.New("replacePlainKeys buffer too small for accountPlainKey len")
+				return nil, errors.New("replacePlainKeys buffer too small for accountAddr len")
 			} else if n < 0 {
-				return nil, errors.New("replacePlainKeys value overflow for accountPlainKey len")
+				return nil, errors.New("replacePlainKeys value overflow for accountAddr len")
 			}
 			pos += n
 			if len(branchData) < pos+int(l) {
-				return nil, fmt.Errorf("replacePlainKeys buffer too small for accountPlainKey: expected %d got %d", pos+int(l), len(branchData))
+				return nil, fmt.Errorf("replacePlainKeys buffer too small for accountAddr: expected %d got %d", pos+int(l), len(branchData))
 			}
 			if l > 0 {
 				pos += int(l)
@@ -450,13 +450,13 @@ func (branchData BranchData) ReplacePlainKeys(newData []byte, fn func(key []byte
 		if fieldBits&StoragePlainPart != 0 {
 			l, n := binary.Uvarint(branchData[pos:])
 			if n == 0 {
-				return nil, errors.New("replacePlainKeys buffer too small for storagePlainKey len")
+				return nil, errors.New("replacePlainKeys buffer too small for storageAddr len")
 			} else if n < 0 {
-				return nil, errors.New("replacePlainKeys value overflow for storagePlainKey len")
+				return nil, errors.New("replacePlainKeys value overflow for storageAddr len")
 			}
 			pos += n
 			if len(branchData) < pos+int(l) {
-				return nil, fmt.Errorf("replacePlainKeys buffer too small for storagePlainKey: expected %d got %d", pos+int(l), len(branchData))
+				return nil, fmt.Errorf("replacePlainKeys buffer too small for storageAddr: expected %d got %d", pos+int(l), len(branchData))
 			}
 			if l > 0 {
 				pos += int(l)
@@ -812,11 +812,11 @@ func DecodeBranchAndCollectStat(key, branch []byte, tv TrieVariant) *BranchStat 
 			stat.MinCellSize = min(stat.MinCellSize, enc)
 			stat.MaxCellSize = max(stat.MaxCellSize, enc)
 			switch {
-			case c.accountPlainKeyLen > 0:
-				stat.APKSize += uint64(c.accountPlainKeyLen)
+			case c.accountAddrLen > 0:
+				stat.APKSize += uint64(c.accountAddrLen)
 				stat.APKCount++
-			case c.storagePlainKeyLen > 0:
-				stat.SPKSize += uint64(c.storagePlainKeyLen)
+			case c.storageAddrLen > 0:
+				stat.SPKSize += uint64(c.storageAddrLen)
 				stat.SPKCount++
 			case c.hashLen > 0:
 				stat.HashSize += uint64(c.hashLen)
