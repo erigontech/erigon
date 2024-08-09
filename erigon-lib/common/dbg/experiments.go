@@ -18,17 +18,22 @@ package dbg
 
 import (
 	"os"
+	"path/filepath"
 	"runtime"
+	"runtime/pprof"
 	"strconv"
 	"sync"
 	"time"
 
 	"github.com/ledgerwatch/log/v3"
+
+	"github.com/ledgerwatch/erigon-lib/mmap"
 )
 
 var (
 	// force skipping of any non-Erigon2 .torrent files
 	DownloaderOnlyBlocks = EnvBool("DOWNLOADER_ONLY_BLOCKS", false)
+	saveHeapProfile      = EnvBool("SAVE_HEAP_PROFILE", false)
 )
 
 var StagesOnlyBlocks = EnvBool("STAGES_ONLY_BLOCKS", false)
@@ -319,4 +324,28 @@ func LogHashMismatchReason() bool {
 		}
 	})
 	return logHashMismatchReason
+}
+
+func SaveHeapProfileNearOOM() {
+	if !saveHeapProfile {
+		return
+	}
+
+	var m runtime.MemStats
+	ReadMemStats(&m)
+	if m.Alloc < (mmap.TotalMemory()/100)*45 {
+		return
+	}
+
+	// above 45%
+	filePath := filepath.Join(os.TempDir(), "erigon-mem.prof")
+	log.Info("[Experiment] saving heap profile as near OOM", "alloc", m.Alloc, "filePath", filePath)
+
+	f, _ := os.Create(filePath)
+	defer func() {
+		_ = f.Close()
+	}()
+
+	runtime.GC()
+	_ = pprof.WriteHeapProfile(f)
 }
