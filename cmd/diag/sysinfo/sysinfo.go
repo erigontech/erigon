@@ -225,7 +225,7 @@ func getFlagsData(cliCtx *cli.Context) ([]Flag, error) {
 		return nil, err
 	}
 
-	var flagItems []Flag
+	flagItems := make([]Flag, 0, len(rawData))
 	for name, item := range rawData {
 		if item["default"].(bool) {
 			continue
