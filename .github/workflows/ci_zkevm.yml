@@ -193,7 +193,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           repository: 0xPolygon/kurtosis-cdk
-          ref: v0.2.3
+          ref: v0.2.4
           path: kurtosis-cdk
 
       - name: Install Kurtosis CDK tools
@@ -218,14 +218,19 @@ jobs:
         working-directory: ./cdk-erigon
         run: docker build -t cdk-erigon:local --file Dockerfile .
 
+      - name: Modify cdk-erigon flags
+        working-directory: ./kurtosis-cdk
+        run: |
+          sed -i '/zkevm.sequencer-batch-seal-time:/d' templates/cdk-erigon/config.yml
+          sed -i '/zkevm.sequencer-non-empty-batch-seal-time:/d' templates/cdk-erigon/config.yml
+          sed -i '/zkevm\.sequencer-initial-fork-id/d' ./templates/cdk-erigon/config.yml
+          sed -i '$a\zkevm.disable-virtual-counters: true' ./templates/cdk-erigon/config.yml
+
       - name: Configure Kurtosis CDK
         working-directory: ./kurtosis-cdk
         run: |
-          /usr/local/bin/yq -i '.args.cdk_erigon_node_image = "cdk-erigon:local"' cdk-erigon-sequencer-params.yml
-          /usr/local/bin/yq -i '.args.zkevm_bridge_service_image = "hermeznetwork/zkevm-bridge-service:v0.5.0-RC8"' cdk-erigon-sequencer-params.yml
-          sed -i '/zkevm\.sequencer-initial-fork-id/d' ./templates/cdk-erigon/config-sequencer.yaml
-          sed -i '$a\zkevm.disable-virtual-counters: true' ./templates/cdk-erigon/config-sequencer.yaml
-          sed -i '$a\zkevm.disable-virtual-counters: true' ./templates/cdk-erigon/config.yaml
+          /usr/local/bin/yq -i '.args.cdk_erigon_node_image = "cdk-erigon:local"' params.yml
+          /usr/local/bin/yq -i '.args.zkevm_bridge_service_image = "hermeznetwork/zkevm-bridge-service:v0.5.0-RC8"' params.yml
           sed -i 's/"londonBlock": [0-9]\+/"londonBlock": 0/' ./templates/cdk-erigon/chainspec.json
           sed -i 's/"normalcyBlock": [0-9]\+/"normalcyBlock": 0/' ./templates/cdk-erigon/chainspec.json
           sed -i 's/"shanghaiTime": [0-9]\+/"shanghaiTime": 0/' ./templates/cdk-erigon/chainspec.json
@@ -234,7 +239,7 @@ jobs:
           
       - name: Deploy Kurtosis CDK package
         working-directory: ./kurtosis-cdk
-        run: kurtosis run --enclave cdk-v1 --args-file cdk-erigon-sequencer-params.yml --image-download always .
+        run: kurtosis run --enclave cdk-v1 --args-file params.yml --image-download always .
   
       - name: Dynamic gas fee tx load test
         working-directory: ./kurtosis-cdk

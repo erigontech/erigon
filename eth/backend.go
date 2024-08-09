@@ -65,6 +65,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/downloader"
 	"github.com/ledgerwatch/erigon-lib/downloader/downloadercfg"
 	"github.com/ledgerwatch/erigon-lib/downloader/downloadergrpc"
+	"github.com/ledgerwatch/erigon-lib/downloader/snaptype"
 	protodownloader "github.com/ledgerwatch/erigon-lib/gointerfaces/downloader"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/grpcutil"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/remote"
@@ -115,6 +116,7 @@ import (
 	"github.com/ledgerwatch/erigon/smt/pkg/db"
 	"github.com/ledgerwatch/erigon/turbo/builder"
 	"github.com/ledgerwatch/erigon/turbo/engineapi"
+	"github.com/ledgerwatch/erigon/turbo/engineapi/engine_block_downloader"
 	"github.com/ledgerwatch/erigon/turbo/engineapi/engine_helpers"
 	"github.com/ledgerwatch/erigon/turbo/execution/eth1"
 	"github.com/ledgerwatch/erigon/turbo/jsonrpc"
@@ -692,6 +694,29 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 		ethashApi = casted.APIs(nil)[1].Service.(*ethash.API)
 	}
 
+	// proof-of-stake mining
+	assembleBlockPOS := func(param *core.BlockBuilderParameters, interrupt *int32) (*types.BlockWithReceipts, error) {
+		miningStatePos := stagedsync.NewProposingState(&config.Miner)
+		miningStatePos.MiningConfig.Etherbase = param.SuggestedFeeRecipient
+		proposingSync := stagedsync.New(
+			config.Sync,
+			stagedsync.MiningStages(backend.sentryCtx,
+				stagedsync.StageMiningCreateBlockCfg(backend.chainDB, miningStatePos, *backend.chainConfig, backend.engine, backend.txPool2DB, param, tmpdir, backend.blockReader),
+				stagedsync.StageBorHeimdallCfg(backend.chainDB, snapDb, miningStatePos, *backend.chainConfig, heimdallClient, backend.blockReader, nil, nil, nil, recents, signatures, false, nil),
+				stagedsync.StageMiningExecCfg(backend.chainDB, miningStatePos, backend.notifications.Events, *backend.chainConfig, backend.engine, &vm.Config{}, tmpdir, interrupt, param.PayloadId, backend.txPool2, backend.txPool2DB, blockReader),
+				stagedsync.StageHashStateCfg(backend.chainDB, dirs, config.HistoryV3, agg),
+				stagedsync.StageTrieCfg(backend.chainDB, false, true, true, tmpdir, blockReader, nil, config.HistoryV3, backend.agg),
+				stagedsync.StageMiningFinishCfg(backend.chainDB, *backend.chainConfig, backend.engine, miningStatePos, backend.miningSealingQuit, backend.blockReader, latestBlockBuiltStore),
+			), stagedsync.MiningUnwindOrder, stagedsync.MiningPruneOrder,
+			logger)
+		// We start the mining step
+		if err := stages2.MiningStep(ctx, backend.chainDB, proposingSync, tmpdir, logger); err != nil {
+			return nil, err
+		}
+		block := <-miningStatePos.MiningResultPOSCh
+		return block, nil
+	}
+
 	// Initialize ethbackend
 	ethBackendRPC := privateapi.NewEthBackendServer(ctx, backend, backend.chainDB, backend.notifications.Events, blockReader, logger, latestBlockBuiltStore)
 	// initialize engine backend
@@ -804,6 +829,124 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 	}
 
 	backend.ethBackendRPC, backend.miningRPC, backend.stateChangesClient = ethBackendRPC, miningRPC, stateDiffClient
+
+	// backend.syncStages = stages2.NewDefaultStages(backend.sentryCtx, backend.chainDB, snapDb, p2pConfig, config, backend.sentriesClient, backend.notifications, backend.downloaderClient,
+	// 	blockReader, blockRetire, backend.agg, backend.silkworm, backend.forkValidator, heimdallClient, recents, signatures, logger)
+	// backend.syncUnwindOrder = stagedsync.DefaultUnwindOrder
+	// backend.syncPruneOrder = stagedsync.DefaultPruneOrder
+	// backend.stagedSync = stagedsync.New(config.Sync, backend.syncStages, backend.syncUnwindOrder, backend.syncPruneOrder, logger)
+
+	hook := stages2.NewHook(backend.sentryCtx, backend.chainDB, backend.notifications, backend.stagedSync, backend.blockReader, backend.chainConfig, backend.logger, backend.sentriesClient.SetStatus)
+
+	if !config.Sync.UseSnapshots && backend.downloaderClient != nil {
+		for _, p := range blockReader.AllTypes() {
+			backend.downloaderClient.ProhibitNewDownloads(ctx, &protodownloader.ProhibitNewDownloadsRequest{
+				Type: p.Name(),
+			})
+		}
+
+		for _, p := range snaptype.CaplinSnapshotTypes {
+			backend.downloaderClient.ProhibitNewDownloads(ctx, &protodownloader.ProhibitNewDownloadsRequest{
+				Type: p.Name(),
+			})
+		}
+
+	}
+
+	checkStateRoot := true
+	pipelineStages := stages2.NewPipelineStages(ctx, chainKv, config, p2pConfig, backend.sentriesClient, backend.notifications, backend.downloaderClient, blockReader, blockRetire, backend.agg, backend.silkworm, backend.forkValidator, logger, checkStateRoot)
+	backend.pipelineStagedSync = stagedsync.New(config.Sync, pipelineStages, stagedsync.PipelineUnwindOrder, stagedsync.PipelinePruneOrder, logger)
+	backend.eth1ExecutionServer = eth1.NewEthereumExecutionModule(blockReader, chainKv, backend.pipelineStagedSync, backend.forkValidator, chainConfig, assembleBlockPOS, hook, backend.notifications.Accumulator, backend.notifications.StateChangesConsumer, logger, backend.engine, config.HistoryV3, ctx)
+	executionRpc := direct.NewExecutionClientDirect(backend.eth1ExecutionServer)
+	engineBackendRPC := engineapi.NewEngineServer(
+		logger,
+		chainConfig,
+		executionRpc,
+		backend.sentriesClient.Hd,
+		engine_block_downloader.NewEngineBlockDownloader(ctx,
+			logger, backend.sentriesClient.Hd, executionRpc,
+			backend.sentriesClient.Bd, backend.sentriesClient.BroadcastNewBlock, backend.sentriesClient.SendBodyRequest, blockReader,
+			chainKv, chainConfig, tmpdir, config.Sync.BodyDownloadTimeoutSeconds),
+		false,
+		config.Miner.EnabledPOS)
+	backend.engineBackendRPC = engineBackendRPC
+
+	// var executionEngine executionclient.ExecutionEngine
+	// // Gnosis has too few blocks on his network for phase2 to work. Once we have proper snapshot automation, it can go back to normal.
+	// if config.NetworkID == uint64(clparams.GnosisNetwork) || config.NetworkID == uint64(clparams.HoleskyNetwork) || config.NetworkID == uint64(clparams.GoerliNetwork) {
+	// 	// Read the jwt secret
+	// 	jwtSecret, err := cli.ObtainJWTSecret(&stack.Config().Http, logger)
+	// 	if err != nil {
+	// 		return nil, err
+	// 	}
+	// 	executionEngine, err = executionclient.NewExecutionClientRPC(jwtSecret, stack.Config().Http.AuthRpcHTTPListenAddress, stack.Config().Http.AuthRpcPort)
+	// 	if err != nil {
+	// 		return nil, err
+	// 	}
+	// } else {
+	// 	executionEngine, err = executionclient.NewExecutionClientDirect(eth1_chain_reader.NewChainReaderEth1(chainConfig, executionRpc, 1000))
+	// 	if err != nil {
+	// 		return nil, err
+	// 	}
+	// }
+
+	// // If we choose not to run a consensus layer, run our embedded.
+	// if config.InternalCL && clparams.EmbeddedSupported(config.NetworkID) {
+	// 	genesisCfg, networkCfg, beaconCfg := clparams.GetConfigsByNetwork(clparams.NetworkType(config.NetworkID))
+	// 	if err != nil {
+	// 		return nil, err
+	// 	}
+	// 	state, err := clcore.RetrieveBeaconState(ctx, beaconCfg, genesisCfg,
+	// 		clparams.GetCheckpointSyncEndpoint(clparams.NetworkType(config.NetworkID)))
+	// 	if err != nil {
+	// 		return nil, err
+	// 	}
+
+	// 	pruneBlobDistance := uint64(128600)
+	// 	if config.CaplinConfig.BlobBackfilling || config.CaplinConfig.BlobPruningDisabled {
+	// 		pruneBlobDistance = math.MaxUint64
+	// 	}
+
+	// 	indiciesDB, blobStorage, err := caplin1.OpenCaplinDatabase(ctx, db_config.DefaultDatabaseConfiguration, beaconCfg, genesisCfg, dirs.CaplinIndexing, dirs.CaplinBlobs, executionEngine, false, pruneBlobDistance)
+	// 	if err != nil {
+	// 		return nil, err
+	// 	}
+
+	// 	go func() {
+	// 		eth1Getter := getters.NewExecutionSnapshotReader(ctx, beaconCfg, blockReader, backend.chainDB)
+	// 		if err := caplin1.RunCaplinPhase1(ctx, executionEngine, config, networkCfg, beaconCfg, genesisCfg, state, dirs, eth1Getter, backend.downloaderClient, config.CaplinConfig.Backfilling, config.CaplinConfig.BlobBackfilling, config.CaplinConfig.Archive, indiciesDB, blobStorage, creds); err != nil {
+	// 			logger.Error("could not start caplin", "err", err)
+	// 		}
+	// 		ctxCancel()
+	// 	}()
+	// }
+
+	// if config.PolygonSync {
+	// 	// TODO - pending sentry multi client refactor
+	// 	//      - sentry multi client should conform to the SentryClient interface and internally
+	// 	//        multiplex
+	// 	//      - for now we just use 1 sentry
+	// 	var sentryClient direct.SentryClient
+	// 	for _, client := range sentries {
+	// 		if client.Protocol() == direct.ETH68 {
+	// 			sentryClient = client
+	// 			break
+	// 		}
+	// 	}
+	// 	if sentryClient == nil {
+	// 		return nil, errors.New("nil sentryClient for polygon sync")
+	// 	}
+
+	// 	backend.polygonSyncService = polygonsync.NewService(
+	// 		logger,
+	// 		chainConfig,
+	// 		sentryClient,
+	// 		p2pConfig.MaxPeers,
+	// 		statusDataProvider,
+	// 		config.HeimdallURL,
+	// 		executionEngine,
+	// 	)
+	// }
 
 	// create buckets
 	if err := createBuckets(tx); err != nil {
