@@ -186,8 +186,11 @@ func (h *hashList) Pop() libcommon.Hash {
 }
 
 func (h *hashList) ReadMerkleTree(r io.Reader) error {
-	if h.MerkleTree != nil {
+	if h.MerkleTree == nil {
 		h.MerkleTree = &merkle_tree.MerkleTree{}
+		h.MerkleTree.Initialize(h.l, merkle_tree.OptimalMaxTreeCacheDepth, func(idx int, out []byte) {
+			copy(out, h.u[idx*length.Hash:(idx+1)*length.Hash])
+		}, /*limit=*/ nil)
 	}
 	return h.MerkleTree.ReadMerkleTree(r)
 }

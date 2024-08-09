@@ -230,6 +230,9 @@ func (arr *byteBasedUint64Slice) EncodingSizeSSZ() int {
 func (arr *byteBasedUint64Slice) ReadMerkleTree(r io.Reader) error {
 	if arr.MerkleTree == nil {
 		arr.MerkleTree = &merkle_tree.MerkleTree{}
+		arr.MerkleTree.Initialize((arr.l+3)/4, merkle_tree.OptimalMaxTreeCacheDepth, func(idx int, out []byte) {
+			copy(out, arr.u[idx*length.Hash:])
+		}, nil)
 	}
 	return arr.MerkleTree.ReadMerkleTree(r)
 }
