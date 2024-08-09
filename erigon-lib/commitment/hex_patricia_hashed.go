@@ -165,6 +165,7 @@ func (cell *cell) reset() {
 	cell.extLen = 0
 	cell.hashLen = 0
 	cell.lhLen = 0
+	cell.loaded = cellLoadNone
 	cell.Update.Reset()
 }
 
@@ -406,107 +407,66 @@ func (cell *cell) deriveHashedKeys(depth int, keccak keccakState, accountKeyLen 
 }
 
 func (cell *cell) fillFromFields(data []byte, pos int, fieldBits PartFlags) (int, error) {
-	if fieldBits&HashedKeyPart != 0 {
-		l, n := binary.Uvarint(data[pos:])
-		if n == 0 {
-			return 0, errors.New("fillFromFields buffer too small for hashedKey len")
-		} else if n < 0 {
-			return 0, errors.New("fillFromFields value overflow for hashedKey len")
-		}
-		pos += n
-		if len(data) < pos+int(l) {
-			return 0, fmt.Errorf("fillFromFields buffer too small for hashedKey exp %d got %d", pos+int(l), len(data))
-		}
-		cell.downHashedLen = int(l)
-		cell.extLen = int(l)
-		if l > 0 {
-			copy(cell.downHashedKey[:], data[pos:pos+int(l)])
-			copy(cell.extension[:], data[pos:pos+int(l)])
-			pos += int(l)
-		}
-	} else {
-		cell.downHashedLen = 0
-		cell.extLen = 0
+	fields := []struct {
+		flag      PartFlags
+		lenField  *int
+		dataField []byte
+		extraFunc func(int)
+	}{
+		{HashedKeyPart, &cell.downHashedLen, cell.downHashedKey[:], func(l int) {
+			cell.extLen = l
+			if l > 0 {
+				copy(cell.extension[:], cell.downHashedKey[:l])
+			}
+		}},
+		{AccountPlainPart, &cell.accountPlainKeyLen, cell.accountPlainKey[:], nil},
+		{StoragePlainPart, &cell.storagePlainKeyLen, cell.storagePlainKey[:], nil},
+		{HashPart, &cell.hashLen, cell.hash[:], nil},
+		{LeafHashPart, &cell.lhLen, cell.leafHash[:], nil},
 	}
+
+	for _, f := range fields {
+		if fieldBits&f.flag != 0 {
+			l, n, err := readUvarint(data[pos:])
+			if err != nil {
+				return 0, err
+			}
+			pos += n
+
+			if len(data) < pos+int(l) {
+				return 0, fmt.Errorf("buffer too small for %v", f.flag)
+			}
+
+			*f.lenField = int(l)
+			if l > 0 {
+				copy(f.dataField, data[pos:pos+int(l)])
+				pos += int(l)
+			}
+			if f.extraFunc != nil {
+				f.extraFunc(int(l))
+			}
+		} else {
+			*f.lenField = 0
+			if f.flag == HashedKeyPart {
+				cell.extLen = 0
+			}
+		}
+	}
+
 	if fieldBits&AccountPlainPart != 0 {
-		l, n := binary.Uvarint(data[pos:])
-		if n == 0 {
-			return 0, errors.New("fillFromFields buffer too small for accountPlainKey len")
-		} else if n < 0 {
-			return 0, errors.New("fillFromFields value overflow for accountPlainKey len")
-		}
-		pos += n
-		if len(data) < pos+int(l) {
-			return 0, errors.New("fillFromFields buffer too small for accountPlainKey")
-		}
-		cell.accountPlainKeyLen = int(l)
-		if l > 0 {
-			copy(cell.accountPlainKey[:], data[pos:pos+int(l)])
-			pos += int(l)
-		}
 		copy(cell.CodeHash[:], EmptyCodeHash)
-	} else {
-		cell.accountPlainKeyLen = 0
-	}
-	if fieldBits&StoragePlainPart != 0 {
-		l, n := binary.Uvarint(data[pos:])
-		if n == 0 {
-			return 0, errors.New("fillFromFields buffer too small for storagePlainKey len")
-		} else if n < 0 {
-			return 0, errors.New("fillFromFields value overflow for storagePlainKey len")
-		}
-		pos += n
-		if len(data) < pos+int(l) {
-			return 0, errors.New("fillFromFields buffer too small for storagePlainKey")
-		}
-		cell.storagePlainKeyLen = int(l)
-		if l > 0 {
-			copy(cell.storagePlainKey[:], data[pos:pos+int(l)])
-			pos += int(l)
-		}
-	} else {
-		cell.storagePlainKeyLen = 0
-	}
-	if fieldBits&HashPart != 0 {
-		l, n := binary.Uvarint(data[pos:])
-		if n == 0 {
-			return 0, errors.New("fillFromFields buffer too small for hash len")
-		} else if n < 0 {
-			return 0, errors.New("fillFromFields value overflow for hash len")
-		}
-		pos += n
-		if len(data) < pos+int(l) {
-			return 0, errors.New("fillFromFields buffer too small for hash")
-		}
-		cell.hashLen = int(l)
-		if l > 0 {
-			copy(cell.hash[:], data[pos:pos+int(l)])
-			pos += int(l)
-		}
-	} else {
-		cell.hashLen = 0
-	}
-	if fieldBits&LeafHashPart != 0 {
-		l, n := binary.Uvarint(data[pos:])
-		if n == 0 {
-			return 0, fmt.Errorf("fillFromFields buffer too small for accountLeafHash len")
-		} else if n < 0 {
-			return 0, fmt.Errorf("fillFromFields value overflow for accountLeafHash len")
-		}
-		pos += n
-		if len(data) < pos+int(l) {
-			return 0, fmt.Errorf("fillFromFields buffer too small for accountLeafHash exp %d got %d", pos+int(l), len(data))
-		}
-		if l > 0 {
-			//fmt.Printf("alh decoded %x\n", data[pos:pos+int(l)])
-			copy(cell.leafHash[:], data[pos:pos+int(l)])
-			cell.lhLen = int(l)
-			pos += int(l)
-		}
-	} else {
-		cell.lhLen = 0
 	}
 	return pos, nil
+}
+
+func readUvarint(data []byte) (uint64, int, error) {
+	l, n := binary.Uvarint(data)
+	if n == 0 {
+		return 0, 0, errors.New("buffer too small for length")
+	} else if n < 0 {
+		return 0, 0, errors.New("value overflow for length")
+	}
+	return l, n, nil
 }
 
 func (cell *cell) accountForHashing(buffer []byte, storageRootHash [length.Hash]byte) int {
@@ -1039,26 +999,29 @@ func (hph *HexPatriciaHashed) unfoldBranchNode(row, depth int, deleted bool) (bo
 		if pos, err = cell.fillFromFields(branchData, pos, PartFlags(fieldBits)); err != nil {
 			return false, fmt.Errorf("prefix [%x] branchData[%x]: %w", hph.currentKey[:hph.currentKeyLen], branchData, err)
 		}
-		if hph.trace {
-			fmt.Printf("cell (%d, %x, depth=%d) %s\n", row, nibble, depth, cell.FullString())
-		}
 		//if cell.accountPlainKeyLen > 0 {
 		//	update, err := hph.ctx.Account(cell.accountPlainKey[:cell.accountPlainKeyLen])
 		//	if err != nil {
-		//		return false, fmt.Errorf("unfoldBranchNode GetAccount: %w", err)
+		//		return false, fmt.Errorf("unfoldBranchNode Account: %w", err)
 		//	}
 		//	cell.setFromUpdate(update)
 		//	if hph.trace {
-		//		fmt.Printf("GetAccount[%x] return balance=%d, nonce=%d code=%x\n", cell.accountPlainKey[:cell.accountPlainKeyLen], &cell.Balance, cell.Nonce, cell.CodeHash[:])
+		//		fmt.Printf("Account[%x] %s\n", cell.accountPlainKey[:cell.accountPlainKeyLen], update.String())
 		//	}
 		//}
 		//if cell.storagePlainKeyLen > 0 {
 		//	update, err := hph.ctx.Storage(cell.storagePlainKey[:cell.storagePlainKeyLen])
 		//	if err != nil {
-		//		return false, fmt.Errorf("unfoldBranchNode GetAccount: %w", err)
+		//		return false, fmt.Errorf("unfoldBranchNode Storage: %w", err)
 		//	}
 		//	cell.setFromUpdate(update)
+		//	if hph.trace {
+		//		fmt.Printf("Storage[%x] %s\n", cell.storagePlainKey[:cell.storagePlainKeyLen], update.String())
+		//	}
 		//}
+		if hph.trace {
+			fmt.Printf("cell (%d, %x, depth=%d) %s\n", row, nibble, depth, cell.FullString())
+		}
 
 		// relies on plain account/storage key so need to be dereferenced before hashing
 		if err = cell.deriveHashedKeys(depth, hph.keccak, hph.accountKeyLen); err != nil {
@@ -1509,6 +1472,7 @@ func (hph *HexPatriciaHashed) Process(ctx context.Context, updates *Updates, log
 		logEvery     = time.NewTicker(20 * time.Second)
 	)
 	defer logEvery.Stop()
+	//hph.trace = true
 
 	err = updates.HashSort(ctx, func(hashedKey, plainKey []byte, stateUpdate *Update) error {
 		select {
