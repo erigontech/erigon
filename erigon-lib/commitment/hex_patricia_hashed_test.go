@@ -1156,16 +1156,18 @@ func TestCell_fillFromFields(t *testing.T) {
 	}
 }
 
-func cellMustEqual(t testing.TB, first, second *cell) {
-	require.EqualValues(t, first.downHashedLen, second.downHashedLen)
-	require.EqualValues(t, first.downHashedKey[:], second.downHashedKey[:])
-	require.EqualValues(t, first.hashLen, second.hashLen)
-	require.EqualValues(t, first.hash[:], second.hash[:])
-	require.EqualValues(t, first.accountPlainKeyLen, second.accountPlainKeyLen)
-	require.EqualValues(t, first.storagePlainKeyLen, second.storagePlainKeyLen)
-	require.EqualValues(t, first.accountPlainKey[:], second.accountPlainKey[:])
-	require.EqualValues(t, first.storagePlainKey[:], second.storagePlainKey[:])
-	require.EqualValues(t, first.extension[:first.extLen], second.extension[:second.extLen])
+func cellMustEqual(tb testing.TB, first, second *cell) {
+	tb.Helper()
+
+	require.EqualValues(tb, first.downHashedLen, second.downHashedLen)
+	require.EqualValues(tb, first.downHashedKey[:], second.downHashedKey[:])
+	require.EqualValues(tb, first.hashLen, second.hashLen)
+	require.EqualValues(tb, first.hash[:], second.hash[:])
+	require.EqualValues(tb, first.accountPlainKeyLen, second.accountPlainKeyLen)
+	require.EqualValues(tb, first.storagePlainKeyLen, second.storagePlainKeyLen)
+	require.EqualValues(tb, first.accountPlainKey[:], second.accountPlainKey[:])
+	require.EqualValues(tb, first.storagePlainKey[:], second.storagePlainKey[:])
+	require.EqualValues(tb, first.extension[:first.extLen], second.extension[:second.extLen])
 
 	// encode doesn't code Nonce, Balance, CodeHash and Storage, Delete fields
 }
