@@ -291,86 +291,53 @@ func (cell *cell) deriveHashedKeys(depth int, keccak keccakState, accountKeyLen 
 }
 
 func (cell *cell) fillFromFields(data []byte, pos int, fieldBits PartFlags) (int, error) {
-	if fieldBits&HashedKeyPart != 0 {
-		l, n := binary.Uvarint(data[pos:])
-		if n == 0 {
-			return 0, errors.New("fillFromFields buffer too small for hashedKey len")
-		} else if n < 0 {
-			return 0, errors.New("fillFromFields value overflow for hashedKey len")
-		}
-		pos += n
-		if len(data) < pos+int(l) {
-			return 0, fmt.Errorf("fillFromFields buffer too small for hashedKey exp %d got %d", pos+int(l), len(data))
-		}
-		cell.downHashedLen = int(l)
-		cell.extLen = int(l)
-		if l > 0 {
-			copy(cell.downHashedKey[:], data[pos:pos+int(l)])
-			copy(cell.extension[:], data[pos:pos+int(l)])
-			pos += int(l)
-		}
-	} else {
-		cell.downHashedLen = 0
-		cell.extLen = 0
+	fields := []struct {
+		flag      PartFlags
+		lenField  *int
+		dataField []byte
+	}{
+		{HashedKeyPart, &cell.extLen, cell.extension[:]},
+		{AccountPlainPart, &cell.accountPlainKeyLen, cell.accountPlainKey[:]},
+		{StoragePlainPart, &cell.storagePlainKeyLen, cell.storagePlainKey[:]},
+		{HashPart, &cell.hashLen, cell.hash[:]},
 	}
+
+	for _, f := range fields {
+		if fieldBits&f.flag != 0 {
+			l, n, err := readUvarint(data[pos:])
+			if err != nil {
+				return 0, err
+			}
+			pos += n
+
+			if len(data) < pos+int(l) {
+				return 0, fmt.Errorf("buffer too small for %v", f.flag)
+			}
+
+			*f.lenField = int(l)
+			if l > 0 {
+				copy(f.dataField, data[pos:pos+int(l)])
+				pos += int(l)
+			}
+		} else {
+			*f.lenField = 0
+		}
+	}
+
 	if fieldBits&AccountPlainPart != 0 {
-		l, n := binary.Uvarint(data[pos:])
-		if n == 0 {
-			return 0, errors.New("fillFromFields buffer too small for accountPlainKey len")
-		} else if n < 0 {
-			return 0, errors.New("fillFromFields value overflow for accountPlainKey len")
-		}
-		pos += n
-		if len(data) < pos+int(l) {
-			return 0, errors.New("fillFromFields buffer too small for accountPlainKey")
-		}
-		cell.accountPlainKeyLen = int(l)
-		if l > 0 {
-			copy(cell.accountPlainKey[:], data[pos:pos+int(l)])
-			pos += int(l)
-		}
-	} else {
-		cell.accountPlainKeyLen = 0
-	}
-	if fieldBits&StoragePlainPart != 0 {
-		l, n := binary.Uvarint(data[pos:])
-		if n == 0 {
-			return 0, errors.New("fillFromFields buffer too small for storagePlainKey len")
-		} else if n < 0 {
-			return 0, errors.New("fillFromFields value overflow for storagePlainKey len")
-		}
-		pos += n
-		if len(data) < pos+int(l) {
-			return 0, errors.New("fillFromFields buffer too small for storagePlainKey")
-		}
-		cell.storagePlainKeyLen = int(l)
-		if l > 0 {
-			copy(cell.storagePlainKey[:], data[pos:pos+int(l)])
-			pos += int(l)
-		}
-	} else {
-		cell.storagePlainKeyLen = 0
-	}
-	if fieldBits&HashPart != 0 {
-		l, n := binary.Uvarint(data[pos:])
-		if n == 0 {
-			return 0, errors.New("fillFromFields buffer too small for hash len")
-		} else if n < 0 {
-			return 0, errors.New("fillFromFields value overflow for hash len")
-		}
-		pos += n
-		if len(data) < pos+int(l) {
-			return 0, errors.New("fillFromFields buffer too small for hash")
-		}
-		cell.hashLen = int(l)
-		if l > 0 {
-			copy(cell.hash[:], data[pos:pos+int(l)])
-			pos += int(l)
-		}
-	} else {
-		cell.hashLen = 0
+		copy(cell.CodeHash[:], EmptyCodeHash)
 	}
 	return pos, nil
+}
+
+func readUvarint(data []byte) (uint64, int, error) {
+	l, n := binary.Uvarint(data)
+	if n == 0 {
+		return 0, 0, errors.New("buffer too small for length")
+	} else if n < 0 {
+		return 0, 0, errors.New("value overflow for length")
+	}
+	return l, n, nil
 }
 
 func (cell *cell) accountForHashing(buffer []byte, storageRootHash [length.Hash]byte) int {
