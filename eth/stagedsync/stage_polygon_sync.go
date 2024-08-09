@@ -64,7 +64,11 @@ func NewPolygonSyncStageCfg(
 	stateReceiverABI abi.ABI,
 	blockLimit uint,
 ) PolygonSyncStageCfg {
-	txActionStream := make(chan polygonSyncStageTxAction)
+	// using a buffered channel to preserve order of tx actions,
+	// do not expect to ever have more than 50 goroutines blocking on this channel
+	// realistically 6: 4 scrapper goroutines in heimdall.Service, 1 in bridge.Service, 1 in sync.Sync,
+	// but does not hurt to leave some extra buffer
+	txActionStream := make(chan polygonSyncStageTxAction, 50)
 	executionEngine := &polygonSyncStageExecutionEngine{
 		blockReader:      blockReader,
 		txActionStream:   txActionStream,
