@@ -47,7 +47,7 @@ import (
 	types2 "github.com/erigontech/erigon-lib/types"
 
 	"github.com/erigontech/erigon/common/u256"
-	"github.com/erigontech/erigon/consensus/ethash"
+	"github.com/erigontech/erigon/consensus/mainnet"
 	"github.com/erigontech/erigon/core"
 	"github.com/erigontech/erigon/core/rawdb"
 	"github.com/erigontech/erigon/core/state"
@@ -2199,7 +2199,7 @@ func TestEIP1559Transition(t *testing.T) {
 		actual := statedb.GetBalance(block.Coinbase())
 		expected := new(uint256.Int).Add(
 			new(uint256.Int).SetUint64(block.GasUsed()*block.Transactions()[0].GetPrice().Uint64()),
-			ethash.ConstantinopleBlockReward,
+			mainnet.ConstantinopleBlockReward,
 		)
 		if actual.Cmp(expected) != 0 {
 			t.Fatalf("miner balance incorrect: expected %d, got %d", expected, actual)
@@ -2241,7 +2241,7 @@ func TestEIP1559Transition(t *testing.T) {
 		actual := statedb.GetBalance(block.Coinbase())
 		expected := new(uint256.Int).Add(
 			new(uint256.Int).SetUint64(block.GasUsed()*effectiveTip),
-			ethash.ConstantinopleBlockReward,
+			mainnet.ConstantinopleBlockReward,
 		)
 		if actual.Cmp(expected) != 0 {
 			t.Fatalf("miner balance incorrect: expected %d, got %d", expected, actual)
