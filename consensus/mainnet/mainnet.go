@@ -17,7 +17,7 @@
 // You should have received a copy of the GNU Lesser General Public License
 // along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
-package ethash
+package mainnet
 
 import (
 	"errors"
@@ -38,45 +38,42 @@ import (
 	"github.com/erigontech/erigon/core/state"
 	"github.com/erigontech/erigon/core/tracing"
 	"github.com/erigontech/erigon/core/types"
+	"github.com/erigontech/erigon/core/vm/evmtypes"
 	"github.com/erigontech/erigon/params"
+	"github.com/erigontech/erigon/rpc"
 )
 
-// Ethash proof-of-work protocol constants.
 var (
+	// Ethash proof-of-work protocol constants.
 	maxUncles                     = 2         // Maximum number of uncles allowed in a single block
 	allowedFutureBlockTimeSeconds = int64(15) // Max seconds from current time allowed for blocks, before they're considered future blocks
 
-)
-
-// Various error messages to mark blocks invalid. These should be private to
-// prevent engine specific errors from being referenced in the remainder of the
-// codebase, inherently breaking if the engine is swapped out. Please put common
-// error types into the consensus package.
-var (
-	errOlderBlockTime = errors.New("timestamp older than parent")
-	errInvalidPoW     = errors.New("invalid proof-of-work")
+	// Various error messages to mark blocks invalid.
+	errOlderBlockTime   = errors.New("timestamp older than parent")
+	errInvalidPoW       = errors.New("invalid proof-of-work")
+	ErrInvalidDumpMagic = errors.New("invalid dump magic")
 )
 
 // Ethash is a consensus engine based on proof-of-work implementing the ethash
 // algorithm.
-type BaseFake struct {
+type baseMainnet struct {
 }
 
 // Type returns underlying consensus engine
-func (BaseFake) Type() chain.ConsensusName {
+func (baseMainnet) Type() chain.ConsensusName {
 	return chain.EtHashConsensus
 }
 
 // Author implements consensus.Engine, returning the header's coinbase as the
 // proof-of-work verified author of the block.
 // This is thread-safe (only access the header.Coinbase)
-func (BaseFake) Author(header *types.Header) (libcommon.Address, error) {
+func (baseMainnet) Author(header *types.Header) (libcommon.Address, error) {
 	return header.Coinbase, nil
 }
 
 // VerifyHeader checks whether a header conforms to the consensus rules of the
 // stock Ethereum ethash engine.
-func (b BaseFake) VerifyHeader(chain consensus.ChainHeaderReader, header *types.Header, seal bool) error {
+func (b baseMainnet) VerifyHeader(chain consensus.ChainHeaderReader, header *types.Header, seal bool) error {
 	// Short circuit if the header is known, or its parent not
 	number := header.Number.Uint64()
 	if chain.GetHeader(header.Hash(), number) != nil {
@@ -96,11 +93,11 @@ func (b BaseFake) VerifyHeader(chain consensus.ChainHeaderReader, header *types.
 
 // VerifyUncles verifies that the given block's uncles conform to the consensus
 // rules of the stock Ethereum ethash engine.
-func (BaseFake) VerifyUncles(chain consensus.ChainReader, header *types.Header, uncles []*types.Header) error {
+func (baseMainnet) VerifyUncles(chain consensus.ChainReader, header *types.Header, uncles []*types.Header) error {
 	return nil
 }
 
-func (BaseFake) VerifyUncle(chain consensus.ChainHeaderReader, header *types.Header, uncle *types.Header, uncles mapset.Set[libcommon.Hash], ancestors map[libcommon.Hash]*types.Header, seal bool) error {
+func (baseMainnet) VerifyUncle(chain consensus.ChainHeaderReader, header *types.Header, uncle *types.Header, uncles mapset.Set[libcommon.Hash], ancestors map[libcommon.Hash]*types.Header, seal bool) error {
 	return nil
 }
 
@@ -170,37 +167,37 @@ func VerifyHeaderBasics(chain consensus.ChainHeaderReader, header, parent *types
 // verifyHeader checks whether a header conforms to the consensus rules of the
 // stock Ethereum ethash engine.
 // See YP section 4.3.4. "Block Header Validity"
-func (ethash BaseFake) verifyHeader(chain consensus.ChainHeaderReader, header, parent *types.Header, uncle bool, seal bool) error {
+func (ethash baseMainnet) verifyHeader(chain consensus.ChainHeaderReader, header, parent *types.Header, uncle bool, seal bool) error {
 	if err := VerifyHeaderBasics(chain, header, parent, !uncle /*checkTimestamp*/, false /*skipGasLimit*/); err != nil {
 		return err
 	}
 	return nil
 }
 
-func (ethash BaseFake) GenerateSeal(chain consensus.ChainHeaderReader, currnt, parent *types.Header, call consensus.Call) []byte {
+func (ethash baseMainnet) GenerateSeal(chain consensus.ChainHeaderReader, currnt, parent *types.Header, call consensus.Call) []byte {
 	return nil
 }
 
 // CalcDifficulty is the difficulty adjustment algorithm. It returns
 // the difficulty that a new block should have when created at time
 // given the parent block's time and difficulty.
-func (ethash BaseFake) CalcDifficulty(chain consensus.ChainHeaderReader, time, parentTime uint64, parentDifficulty *big.Int, parentNumber uint64, _, parentUncleHash libcommon.Hash, _ uint64) *big.Int {
-	return common.Big0
+func (ethash baseMainnet) CalcDifficulty(chain consensus.ChainHeaderReader, time, parentTime uint64, parentDifficulty *big.Int, parentNumber uint64, _, parentUncleHash libcommon.Hash, _ uint64) *big.Int {
+	return common.Big1 // Just a placeholder, guaranteed to be valid since td will always increase
 }
 
 // VerifySeal implements consensus.Engine, checking whether the given block satisfies
 // the PoW difficulty requirements.
-func (ethash BaseFake) VerifySeal(_ consensus.ChainHeaderReader, header *types.Header) error {
+func (ethash baseMainnet) VerifySeal(_ consensus.ChainHeaderReader, header *types.Header) error {
 	return nil
 }
 
 // Prepare implements consensus.Engine, initializing the difficulty field of a
 // header to conform to the ethash protocol. The changes are done inline.
-func (ethash BaseFake) Prepare(chain consensus.ChainHeaderReader, header *types.Header, state *state.IntraBlockState) error {
+func (ethash baseMainnet) Prepare(chain consensus.ChainHeaderReader, header *types.Header, state *state.IntraBlockState) error {
 	return nil
 }
 
-func (ethash BaseFake) Initialize(config *chain.Config, chain consensus.ChainHeaderReader, header *types.Header,
+func (ethash baseMainnet) Initialize(config *chain.Config, chain consensus.ChainHeaderReader, header *types.Header,
 	state *state.IntraBlockState, syscall consensus.SysCallCustom, logger log.Logger, tracer *tracing.Hooks) {
 	if config.DAOForkBlock != nil && config.DAOForkBlock.Cmp(header.Number) == 0 {
 		misc.ApplyDAOHardFork(state)
@@ -209,7 +206,7 @@ func (ethash BaseFake) Initialize(config *chain.Config, chain consensus.ChainHea
 
 // Finalize implements consensus.Engine, accumulating the block and uncle rewards,
 // setting the final state on the header
-func (ethash BaseFake) Finalize(config *chain.Config, header *types.Header, state *state.IntraBlockState,
+func (ethash baseMainnet) Finalize(config *chain.Config, header *types.Header, state *state.IntraBlockState,
 	txs types.Transactions, uncles []*types.Header, r types.Receipts, withdrawals []*types.Withdrawal, requests types.Requests,
 	chain consensus.ChainReader, syscall consensus.SystemCall, logger log.Logger,
 ) (types.Transactions, types.Receipts, types.Requests, error) {
@@ -219,7 +216,7 @@ func (ethash BaseFake) Finalize(config *chain.Config, header *types.Header, stat
 
 // FinalizeAndAssemble implements consensus.Engine, accumulating the block and
 // uncle rewards, setting the final state and assembling the block.
-func (ethash BaseFake) FinalizeAndAssemble(chainConfig *chain.Config, header *types.Header, state *state.IntraBlockState,
+func (ethash baseMainnet) FinalizeAndAssemble(chainConfig *chain.Config, header *types.Header, state *state.IntraBlockState,
 	txs types.Transactions, uncles []*types.Header, r types.Receipts, withdrawals []*types.Withdrawal, requests types.Requests,
 	chain consensus.ChainReader, syscall consensus.SystemCall, call consensus.Call, logger log.Logger,
 ) (*types.Block, types.Transactions, types.Receipts, error) {
@@ -240,9 +237,151 @@ func AccumulateRewards(config *chain.Config, header *types.Header, uncles []*typ
 	return *uint256.NewInt(0), nil
 }
 
-func (BaseFake) CalculateRewards(config *chain.Config, header *types.Header, uncles []*types.Header, syscall consensus.SystemCall) ([]consensus.Reward, error) {
+func (baseMainnet) CalculateRewards(config *chain.Config, header *types.Header, uncles []*types.Header, syscall consensus.SystemCall) ([]consensus.Reward, error) {
 	return nil, nil
 }
 
-type BaseFakeConfig struct {
+type MainnetConfig struct {
+}
+
+// Seal implements consensus.Engine, attempting to find a nonce that satisfies
+// the block's difficulty requirements.
+func (baseMainnet) Seal(chain consensus.ChainHeaderReader, block *types.Block, results chan<- *types.Block, stop <-chan struct{}) error {
+	return nil
+}
+
+// SealHash returns the hash of a block prior to it being sealed.
+func (baseMainnet) SealHash(header *types.Header) libcommon.Hash {
+	return header.Hash()
+}
+
+// APIs implements consensus.Engine, returning the user facing RPC API to allow
+// controlling the signer voting.
+func (c baseMainnet) APIs(chain consensus.ChainHeaderReader) []rpc.API {
+	return []rpc.API{
+		//{
+		//Namespace: "clique",
+		//Version:   "1.0",
+		//Service:   &API{chain: chain, clique: c},
+		//Public:    false,
+		//}
+	}
+}
+
+func (baseMainnet) Close() error {
+	return nil
+}
+
+func (baseMainnet) GetPostApplyMessageFunc() evmtypes.PostApplyMessageFunc {
+	return nil
+}
+
+func (baseMainnet) GetTransferFunc() evmtypes.TransferFunc {
+	return consensus.Transfer
+}
+
+func (baseMainnet) IsServiceTransaction(sender libcommon.Address, syscall consensus.SystemCall) bool {
+	return false
+}
+
+type MainnetConsensus struct {
+	baseMainnet
+	fakeFail  uint64        // Block number which fails PoW check even in fake mode
+	fakeDelay time.Duration // Time delay to sleep for before returning from verify
+}
+
+// NewFakeFailer creates an ethash consensus engine with a fake PoW scheme that
+// accepts all blocks as valid apart from the single one specified, though they
+// still have to conform to the Ethereum consensus rules.
+func NewFakeFailer(fail uint64) *MainnetConsensus {
+	return &MainnetConsensus{fakeFail: fail}
+}
+
+// NewMainnetConsensus creates an ethash consensus engine with a fake PoW scheme
+// that accepts all blocks' seal as valid, though they still have to conform to
+// the Ethereum consensus rules.
+func NewMainnetConsensus() *MainnetConsensus {
+	return &MainnetConsensus{}
+}
+
+// NewFakeDelayer creates an ethash consensus engine with a fake PoW scheme that
+// accepts all blocks as valid, but delays verifications by some time, though
+// they still have to conform to the Ethereum consensus rules.
+func NewFakeDelayer(delay time.Duration) *MainnetConsensus {
+	return &MainnetConsensus{
+		fakeDelay: delay,
+	}
+}
+
+func (f *MainnetConsensus) VerifyHeader(chain consensus.ChainHeaderReader, header *types.Header, seal bool) error {
+	err := f.baseMainnet.VerifyHeader(chain, header, false)
+	if err != nil {
+		return err
+	}
+
+	if seal {
+		return f.VerifySeal(chain, header)
+	}
+
+	return nil
+}
+
+func (f *MainnetConsensus) VerifyUncles(chain consensus.ChainReader, header *types.Header, uncles []*types.Header) error {
+	return nil
+}
+
+func (f *MainnetConsensus) VerifyUncle(chain consensus.ChainHeaderReader, block *types.Header, uncle *types.Header, uncles mapset.Set[libcommon.Hash], ancestors map[libcommon.Hash]*types.Header, seal bool) error {
+	err := f.baseMainnet.VerifyUncle(chain, block, uncle, uncles, ancestors, false)
+	if err != nil {
+		return err
+	}
+
+	if seal {
+		return f.VerifySeal(chain, uncle)
+	}
+	return nil
+}
+
+// If we're running a fake PoW, accept any seal as valid
+func (f *MainnetConsensus) VerifySeal(_ consensus.ChainHeaderReader, header *types.Header) error {
+	if f.fakeDelay > 0 {
+		time.Sleep(f.fakeDelay)
+	}
+
+	if f.fakeFail == header.Number.Uint64() {
+		return errInvalidPoW
+	}
+
+	return nil
+}
+
+// If we're running a fake PoW, simply return a 0 nonce immediately
+func (f *MainnetConsensus) Seal(_ consensus.ChainHeaderReader, block *types.Block, results chan<- *types.Block, stop <-chan struct{}) error {
+	header := block.Header()
+	header.Nonce, header.MixDigest = types.BlockNonce{}, libcommon.Hash{}
+
+	select {
+	case results <- block.WithSeal(header):
+	default:
+		log.Warn("Sealing result is not read by miner", "mode", "fake", "sealhash", block.Hash())
+	}
+
+	return nil
+}
+
+type FullFakeEthash MainnetConsensus
+
+// NewFullFaker creates an ethash consensus engine with a full fake scheme that
+// accepts all blocks as valid, without checking any consensus rules whatsoever.
+func NewFullFaker() *FullFakeEthash {
+	return &FullFakeEthash{}
+}
+
+// If we're running a full engine faking, accept any input as valid
+func (f *FullFakeEthash) VerifyHeader(_ consensus.ChainHeaderReader, _ *types.Header, _ bool) error {
+	return nil
+}
+
+func (f *FullFakeEthash) VerifyUncles(_ consensus.ChainReader, _ *types.Header, _ []*types.Header) error {
+	return nil
 }

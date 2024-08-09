@@ -45,7 +45,7 @@ import (
 	"github.com/erigontech/erigon-lib/kv"
 	libstate "github.com/erigontech/erigon-lib/state"
 	"github.com/erigontech/erigon/common/math"
-	"github.com/erigontech/erigon/consensus/ethash"
+	"github.com/erigontech/erigon/consensus/mainnet"
 	"github.com/erigontech/erigon/consensus/merge"
 	"github.com/erigontech/erigon/core"
 	"github.com/erigontech/erigon/core/state"
@@ -309,7 +309,7 @@ func Main(ctx *cli.Context) error {
 	reader, writer := MakePreState(chainConfig.Rules(0, 0), tx, sd, prestate.Pre)
 	// Merge engine can be used for pre-merge blocks as well, as it
 	// redirects to the ethash engine based on the block number
-	engine := merge.New(&ethash.FakeEthash{})
+	engine := merge.New(&mainnet.MainnetConsensus{})
 
 	t8logger := log.New("t8ntool")
 	chainReader := consensuschain.NewReader(chainConfig, tx, nil, t8logger)

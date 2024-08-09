@@ -27,7 +27,7 @@ import (
 
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon/consensus"
-	"github.com/erigontech/erigon/consensus/ethash"
+	"github.com/erigontech/erigon/consensus/mainnet"
 	"github.com/erigontech/erigon/core"
 	"github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/eth/stagedsync"
@@ -42,7 +42,7 @@ func TestHeaderVerification(t *testing.T) {
 	// Create a simple chain to verify
 	var (
 		gspec  = &types.Genesis{Config: params.TestChainConfig}
-		engine = ethash.NewFaker()
+		engine = mainnet.NewMainnetConsensus()
 	)
 	logger := testlog.Logger(t, log.LvlInfo)
 	checkStateRoot := true
@@ -64,9 +64,9 @@ func TestHeaderVerification(t *testing.T) {
 				}
 				var engine consensus.Engine
 				if valid {
-					engine = ethash.NewFaker()
+					engine = mainnet.NewMainnetConsensus()
 				} else {
-					engine = ethash.NewFakeFailer(chain.Headers[i].Number.Uint64())
+					engine = mainnet.NewFakeFailer(chain.Headers[i].Number.Uint64())
 				}
 				err = engine.VerifyHeader(chainReader, chain.Headers[i], true)
 				if (err == nil) != valid {
@@ -91,7 +91,7 @@ func TestHeaderWithSealVerification(t *testing.T) {
 	// Create a simple chain to verify
 	var (
 		gspec  = &types.Genesis{Config: params.TestChainAuraConfig}
-		engine = ethash.NewFaker()
+		engine = mainnet.NewMainnetConsensus()
 	)
 	logger := testlog.Logger(t, log.LvlInfo)
 	checkStateRoot := true
@@ -114,9 +114,9 @@ func TestHeaderWithSealVerification(t *testing.T) {
 				}
 				var engine consensus.Engine
 				if valid {
-					engine = ethash.NewFaker()
+					engine = mainnet.NewMainnetConsensus()
 				} else {
-					engine = ethash.NewFakeFailer(chain.Headers[i].Number.Uint64())
+					engine = mainnet.NewFakeFailer(chain.Headers[i].Number.Uint64())
 				}
 				err = engine.VerifyHeader(chainReader, chain.Headers[i], true)
 				if (err == nil) != valid {
