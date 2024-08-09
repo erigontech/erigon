@@ -20,6 +20,7 @@
 package vm
 
 import (
+	"github.com/hashicorp/golang-lru/v2/simplelru"
 	"github.com/holiman/uint256"
 
 	libcommon "github.com/erigontech/erigon-lib/common"
@@ -53,8 +54,8 @@ type Contract struct {
 	CallerAddress libcommon.Address
 	caller        ContractRef
 	self          libcommon.Address
-	jumpdests     map[libcommon.Hash][]uint64 // Aggregated result of JUMPDEST analysis.
-	analysis      []uint64                    // Locally cached result of JUMPDEST analysis
+	jumpdests     *JumpDestCache // Aggregated result of JUMPDEST analysis.
+	analysis      []uint64       // Locally cached result of JUMPDEST analysis
 	skipAnalysis  bool
 
 	Code     []byte
@@ -66,26 +67,29 @@ type Contract struct {
 	value *uint256.Int
 }
 
-// NewContract returns a new contract environment for the execution of EVM.
-func NewContract(caller ContractRef, addr libcommon.Address, value *uint256.Int, gas uint64, skipAnalysis bool) *Contract {
-	c := &Contract{CallerAddress: caller.Address(), caller: caller, self: addr}
+type JumpDestCache struct {
+	*simplelru.LRU[libcommon.Hash, []uint64]
+}
 
-	if parent, ok := caller.(*Contract); ok {
-		// Reuse JUMPDEST analysis from parent context if available.
-		c.jumpdests = parent.jumpdests
-	} else {
-		c.jumpdests = make(map[libcommon.Hash][]uint64)
+func NewJumpDestCache() *JumpDestCache {
+	c, err := simplelru.NewLRU[libcommon.Hash, []uint64](128, nil)
+	if err != nil {
+		panic(err)
 	}
+	return &JumpDestCache{c}
+}
 
-	// Gas should be a pointer so it can safely be reduced through the run
-	// This pointer will be off the state transition
-	c.Gas = gas
-	// ensures a value is set
-	c.value = value
-
-	c.skipAnalysis = skipAnalysis
-
-	return c
+// NewContract returns a new contract environment for the execution of EVM.
+func NewContract(caller ContractRef, addr libcommon.Address, value *uint256.Int, gas uint64, skipAnalysis bool, jumpDest *JumpDestCache) *Contract {
+	return &Contract{
+		CallerAddress: caller.Address(), caller: caller, self: addr,
+		value:        value,
+		skipAnalysis: skipAnalysis,
+		// Gas should be a pointer so it can safely be reduced through the run
+		// This pointer will be off the state transition
+		Gas:       gas,
+		jumpdests: jumpDest,
+	}
 }
 
 // First result tells us if the destination is valid
@@ -119,12 +123,12 @@ func (c *Contract) isCode(udest uint64) bool {
 	// contracts ( not temporary initcode), we store the analysis in a map
 	if c.CodeHash != (libcommon.Hash{}) {
 		// Does parent context have the analysis?
-		analysis, exist := c.jumpdests[c.CodeHash]
+		analysis, exist := c.jumpdests.Get(c.CodeHash)
 		if !exist {
 			// Do the analysis and save in parent context
 			// We do not need to store it in c.analysis
 			analysis = codeBitmap(c.Code)
-			c.jumpdests[c.CodeHash] = analysis
+			c.jumpdests.Add(c.CodeHash, analysis)
 		}
 		// Also stash it in current contract for faster access
 		c.analysis = analysis
