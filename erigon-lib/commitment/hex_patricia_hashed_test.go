@@ -1131,3 +1131,41 @@ func TestCell_setFromUpdate(t *testing.T) {
 	require.EqualValues(t, update.StorageLen, target.StorageLen)
 	require.EqualValues(t, update.Storage[:update.StorageLen], target.Storage[:target.StorageLen])
 }
+func TestCell_fillFromFields(t *testing.T) {
+	row, bm := generateCellRow(t, 16)
+
+	cg := func(nibble int, skip bool) (*cell, error) {
+		c := row[nibble]
+		return c, nil
+	}
+
+	be := NewBranchEncoder(1024, t.TempDir())
+	enc, _, err := be.EncodeBranch(bm, bm, bm, cg)
+	require.NoError(t, err)
+
+	//original := common.Copy(enc)
+	fmt.Printf("%s\n", enc.String())
+
+	tm, am, decRow, err := enc.decodeCells()
+	require.NoError(t, err)
+	require.EqualValues(t, bm, am)
+	require.EqualValues(t, bm, tm)
+
+	for i := 0; i < len(decRow); i++ {
+		cellMustEqual(t, row[i], decRow[i])
+	}
+}
+
+func cellMustEqual(t testing.TB, first, second *cell) {
+	require.EqualValues(t, first.downHashedLen, second.downHashedLen)
+	require.EqualValues(t, first.downHashedKey[:], second.downHashedKey[:])
+	require.EqualValues(t, first.hashLen, second.hashLen)
+	require.EqualValues(t, first.hash[:], second.hash[:])
+	require.EqualValues(t, first.accountPlainKeyLen, second.accountPlainKeyLen)
+	require.EqualValues(t, first.storagePlainKeyLen, second.storagePlainKeyLen)
+	require.EqualValues(t, first.accountPlainKey[:], second.accountPlainKey[:])
+	require.EqualValues(t, first.storagePlainKey[:], second.storagePlainKey[:])
+	require.EqualValues(t, first.extension[:first.extLen], second.extension[:second.extLen])
+
+	// encode doesn't code Nonce, Balance, CodeHash and Storage, Delete fields
+}
