@@ -59,7 +59,7 @@ func RenderJson(data interface{}) {
 	}
 }
 
-func ExportTable(title string, header table.Row, rows []table.Row, footer table.Row) string {
+func ExportTable(header table.Row, rows []table.Row, footer table.Row) string {
 	if len(rows) > 0 {
 		t := CreateTable(header, rows, footer)
 		return t.Render()
