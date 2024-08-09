@@ -411,18 +411,12 @@ func (cell *cell) fillFromFields(data []byte, pos int, fieldBits PartFlags) (int
 		flag      PartFlags
 		lenField  *int
 		dataField []byte
-		extraFunc func(int)
 	}{
-		{HashedKeyPart, &cell.downHashedLen, cell.downHashedKey[:], func(l int) {
-			cell.extLen = l
-			if l > 0 {
-				copy(cell.extension[:], cell.downHashedKey[:l])
-			}
-		}},
-		{AccountPlainPart, &cell.accountPlainKeyLen, cell.accountPlainKey[:], nil},
-		{StoragePlainPart, &cell.storagePlainKeyLen, cell.storagePlainKey[:], nil},
-		{HashPart, &cell.hashLen, cell.hash[:], nil},
-		{LeafHashPart, &cell.lhLen, cell.leafHash[:], nil},
+		{HashedKeyPart, &cell.extLen, cell.extension[:]},
+		{AccountPlainPart, &cell.accountPlainKeyLen, cell.accountPlainKey[:]},
+		{StoragePlainPart, &cell.storagePlainKeyLen, cell.storagePlainKey[:]},
+		{HashPart, &cell.hashLen, cell.hash[:]},
+		{LeafHashPart, &cell.lhLen, cell.leafHash[:]},
 	}
 
 	for _, f := range fields {
@@ -442,14 +436,8 @@ func (cell *cell) fillFromFields(data []byte, pos int, fieldBits PartFlags) (int
 				copy(f.dataField, data[pos:pos+int(l)])
 				pos += int(l)
 			}
-			if f.extraFunc != nil {
-				f.extraFunc(int(l))
-			}
 		} else {
 			*f.lenField = 0
-			if f.flag == HashedKeyPart {
-				cell.extLen = 0
-			}
 		}
 	}
 

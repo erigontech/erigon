@@ -277,15 +277,15 @@ func (be *BranchEncoder) EncodeBranch(bitmap, touchMap, afterMap uint16, readCel
 			}
 			if cell.accountPlainKeyLen > 0 {
 				fieldBits |= AccountPlainPart
-				if cell.lhLen > 0 {
-					fieldBits |= LeafHashPart
-				}
 			}
 			if cell.storagePlainKeyLen > 0 {
 				fieldBits |= StoragePlainPart
 			}
 			if cell.hashLen > 0 {
 				fieldBits |= HashPart
+			}
+			if cell.lhLen > 0 && (cell.accountPlainKeyLen > 0 || cell.storagePlainKeyLen > 0) {
+				fieldBits |= LeafHashPart
 			}
 			if err := be.buf.WriteByte(byte(fieldBits)); err != nil {
 				return nil, 0, err
