@@ -52,18 +52,60 @@ func TestStateLogger(t *testing.T) {
 				state.AddBalance(libcommon.Address{}, uint256.NewInt(2), tracing.BalanceChangeUnspecified)
 				state.AddBalance(libcommon.Address{}, uint256.NewInt(1), tracing.BalanceChangeUnspecified)
 			},
-			checker: func(t *testing.T, state *IntraBlockState) {
-				bi, ok := state.balanceInc[libcommon.Address{}]
+			checker: func(t *testing.T, stateDB *IntraBlockState) {
+				bi, ok := stateDB.balanceInc[libcommon.Address{}]
 				if !ok {
 					t.Errorf("%s isn't present in balanceInc", libcommon.Address{})
 				}
 
 				if !reflect.DeepEqual(&bi.increase, uint256.NewInt(3)) {
-					t.Errorf("Incorrect Balance for  %s expectedBalance: %s, got:%s", libcommon.Address{}, uint256.NewInt(3), &bi.increase)
+					t.Errorf("Incorrect BalanceInc for  %s expectedBalance: %s, got:%s", libcommon.Address{}, uint256.NewInt(3), &bi.increase)
 				}
 
 				if bi.count != 2 {
-					t.Errorf("Incorrect BalanceIncCount for %s expected: %d, got:%d", libcommon.Address{}, 2, bi.count)
+					t.Errorf("Incorrect BalanceInc count for %s expected: %d, got:%d", libcommon.Address{}, 2, bi.count)
+				}
+
+				if len(stateDB.journal.entries) != 2 {
+					t.Errorf("Incorrect number of jounal entries expectedBalance: %d, got:%d", 2, len(stateDB.journal.entries))
+				}
+				for i := range stateDB.journal.entries {
+					switch balanceInc := stateDB.journal.entries[i].(type) {
+					case balanceIncrease:
+						var expectedInc *uint256.Int
+						if i == 0 {
+							expectedInc = uint256.NewInt(2)
+						} else {
+							expectedInc = uint256.NewInt(1)
+						}
+						if !reflect.DeepEqual(&balanceInc.increase, expectedInc) {
+							t.Errorf("Incorrect BalanceInc in jounal for  %s expectedBalance: %s, got:%s", libcommon.Address{}, expectedInc, &balanceInc.increase)
+						}
+					default:
+						t.Errorf("Invalid journal entry found:  %s", reflect.TypeOf(stateDB.journal.entries[i]))
+					}
+				}
+
+				so := stateDB.GetOrNewStateObject(libcommon.Address{})
+				if !reflect.DeepEqual(so.Balance(), uint256.NewInt(3)) {
+					t.Errorf("Incorrect Balance for  %s expectedBalance: %s, got:%s", libcommon.Address{}, uint256.NewInt(3), so.Balance())
+				}
+			},
+		},
+		{
+			name: "sub balance",
+			prepare: func(mockTracer *mocks.Mocktracer) {
+				mockTracer.EXPECT().BalanceChangeHook(libcommon.Address{}, uint256.NewInt(0), uint256.NewInt(2), tracing.BalanceChangeUnspecified)
+				mockTracer.EXPECT().BalanceChangeHook(libcommon.Address{}, uint256.NewInt(2), uint256.NewInt(1), tracing.BalanceChangeUnspecified)
+			},
+			run: func(state *IntraBlockState) {
+				state.AddBalance(libcommon.Address{}, uint256.NewInt(2), tracing.BalanceChangeUnspecified)
+				state.SubBalance(libcommon.Address{}, uint256.NewInt(1), tracing.BalanceChangeUnspecified)
+			},
+			checker: func(t *testing.T, stateDB *IntraBlockState) {
+				so := stateDB.GetOrNewStateObject(libcommon.Address{})
+				if !reflect.DeepEqual(so.Balance(), uint256.NewInt(1)) {
+					t.Errorf("Incorrect Balance for  %s expectedBalance: %s, got:%s", libcommon.Address{}, uint256.NewInt(1), so.Balance())
 				}
 			},
 		},
