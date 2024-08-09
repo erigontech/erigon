@@ -71,7 +71,10 @@ var execRepeats = metrics.NewCounter(`exec_repeats`)     //nolint
 var execTriggers = metrics.NewCounter(`exec_triggers`)   //nolint
 const changesetBlockRange = 1_000                        // Generate changeset only if execution of blocks <= changesetBlockRange
 
-func NewProgress(prevOutputBlockNum, commitThreshold uint64, workersCount int, logPrefix string, logger log.Logger) *Progress {
+var exexTxPerSec = metrics.NewSummary(`exec_tps`)
+var execMgasPerSec = metrics.NewSummary(`exec_mgass`)
+
+func NewProgress(prevOutputBlockNum, commitThreshold uint64, workersCount int, updateMetrics bool, logPrefix string, logger log.Logger) *Progress {
 	return &Progress{prevTime: time.Now(), prevOutputBlockNum: prevOutputBlockNum, commitThreshold: commitThreshold, workersCount: workersCount, logPrefix: logPrefix, logger: logger}
 }
 
@@ -82,9 +85,10 @@ type Progress struct {
 	prevRepeatCount    uint64
 	commitThreshold    uint64
 
-	workersCount int
-	logPrefix    string
-	logger       log.Logger
+	workersCount  int
+	logPrefix     string
+	logger        log.Logger
+	updateMetrics bool
 }
 
 func (p *Progress) Log(suffix string, rs *state.StateV3, in *state.QueueWithRetry, rws *state.ResultsQueue, doneCount, gas, blobGas, inputBlockNum, outputBlockNum, outTxNum, repeatCount uint64, idxStepsAmountInDB float64, shouldGenerateChangesets bool) {
@@ -94,7 +98,7 @@ func (p *Progress) Log(suffix string, rs *state.StateV3, in *state.QueueWithRetr
 	sizeEstimate := rs.SizeEstimate()
 	currentTime := time.Now()
 	interval := currentTime.Sub(p.prevTime)
-	speedTx := float64(doneCount-p.prevCount) / (float64(interval) / float64(time.Second))
+	speedTx := float64(doneCount-p.prevCount) / interval.Seconds()
 	//var repeatRatio float64
 	//if doneCount > p.prevCount {
 	//	repeatRatio = 100.0 * float64(repeatCount-p.prevRepeatCount) / float64(doneCount-p.prevCount)
@@ -109,8 +113,13 @@ func (p *Progress) Log(suffix string, rs *state.StateV3, in *state.QueueWithRetr
 	}
 
 	gasUsedMgas := float64(gas) / 1e6
-	mgasPerSec := (gasUsedMgas / float64(interval)) * (float64(time.Second) / float64(interval))
+	mgasPerSec := gasUsedMgas / interval.Seconds()
 	//avgMgasSec = ((e.avgMgasSec * (float64(e.recordedMgasSec))) + mgasPerSec) / float64(e.recordedMgasSec+1)
+
+	if p.updateMetrics {
+		execMgasPerSec.Observe(mgasPerSec)
+		exexTxPerSec.Observe(speedTx)
+	}
 
 	p.logger.Info(fmt.Sprintf("[%s]"+suffix, p.logPrefix),
 		//"workers", workerCount,
@@ -370,16 +379,20 @@ func ExecV3(ctx context.Context,
 	applyWorker.DiscardReadList()
 
 	commitThreshold := batchSize.Bytes()
-	progress := NewProgress(blockNum, commitThreshold, workerCount, execStage.LogPrefix(), logger)
+	progress := NewProgress(blockNum, commitThreshold, workerCount, false, execStage.LogPrefix(), logger)
 	logEvery := time.NewTicker(20 * time.Second)
 	defer logEvery.Stop()
 	pruneEvery := time.NewTicker(2 * time.Second)
 	defer pruneEvery.Stop()
 
 	var logGas, logBlobGas uint64
+	var txCount uint64
 	var stepsInDB float64
 
-	defer progress.Log("Done", rs, in, rws, rs.DoneCount(), logGas, logBlobGas, inputBlockNum.Load(), outputBlockNum.GetValueUint64(), outputTxNum.Load(), execRepeats.GetValueUint64(), stepsInDB, shouldGenerateChangesets)
+	processed := NewProgress(blockNum, commitThreshold, workerCount, true, execStage.LogPrefix(), logger)
+	defer func() {
+		processed.Log("Done", rs, in, rws, txCount, logGas, logBlobGas, inputBlockNum.Load(), outputBlockNum.GetValueUint64(), outputTxNum.Load(), execRepeats.GetValueUint64(), stepsInDB, shouldGenerateChangesets)
+	}()
 
 	applyLoopWg := sync.WaitGroup{} // to wait for finishing of applyLoop after applyCtx cancel
 	defer applyLoopWg.Wait()
@@ -817,6 +830,7 @@ Loop:
 				}
 				usedGas += txTask.UsedGas
 				logGas += txTask.UsedGas
+				txCount++
 
 				if txTask.Tx != nil {
 					blobGasUsed += txTask.Tx.GetBlobGas()
