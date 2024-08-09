@@ -259,7 +259,7 @@ func SaveHeapProfileNearOOM() {
 
 	// above 45%
 	filePath := filepath.Join(os.TempDir(), "erigon-mem.prof")
-	log.Info("[Experiment] saving heap profile as near OOM", "filePath", filePath)
+	log.Info("[Experiment] saving heap profile as near OOM", "alloc", m.Alloc, "filePath", filePath)
 
 	f, _ := os.Create(filePath)
 	defer func() {
