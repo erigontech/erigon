@@ -422,7 +422,6 @@ type HeaderInserter struct {
 	unwindPoint      uint64
 	highest          uint64
 	highestTimestamp uint64
-	canonicalCache   *lru.Cache[uint64, common.Hash]
 	headerReader     services.HeaderAndCanonicalReader
 }
 
@@ -433,7 +432,6 @@ func NewHeaderInserter(logPrefix string, localTd *big.Int, headerProgress uint64
 		unwindPoint:  headerProgress,
 		headerReader: headerReader,
 	}
-	hi.canonicalCache, _ = lru.New[uint64, common.Hash](1000)
 	return hi
 }
 
