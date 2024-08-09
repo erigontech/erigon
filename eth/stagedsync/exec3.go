@@ -359,8 +359,8 @@ func ExecV3(ctx context.Context,
 	execWorkers, _, rws, stopWorkers, waitWorkers := exec3.NewWorkersPool(lock.RLocker(), accumulator, logger, ctx, parallel, chainDb, rs, in, blockReader, chainConfig, genesis, engine, workerCount+1, cfg.dirs)
 	defer stopWorkers()
 	applyWorker := cfg.applyWorker
-	applyWorker.DiscardReadList()
 	applyWorker.ResetState(rs, accumulator)
+	applyWorker.DiscardReadList()
 
 	commitThreshold := batchSize.Bytes()
 	progress := NewProgress(blockNum, commitThreshold, workerCount, execStage.LogPrefix(), logger)
