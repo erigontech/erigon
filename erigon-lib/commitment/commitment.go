@@ -434,13 +434,13 @@ func (branchData BranchData) ReplacePlainKeys(newData []byte, fn func(key []byte
 			}
 			if newKey == nil {
 				newData = append(newData, branchData[pos-int(l)-n:pos]...)
-				if l != length.Addr {
-					fmt.Printf("COPY %x LEN %d\n", []byte(branchData[pos-int(l):pos]), l)
-				}
+				//if l != length.Addr {
+				//	fmt.Printf("COPY %x LEN %d\n", []byte(branchData[pos-int(l):pos]), l)
+				//}
 			} else {
-				if len(newKey) > 8 && len(newKey) != length.Addr {
-					fmt.Printf("SHORT %x LEN %d\n", newKey, len(newKey))
-				}
+				//if len(newKey) > 8 && len(newKey) != length.Addr {
+				//	fmt.Printf("SHORT %x LEN %d\n", newKey, len(newKey))
+				//}
 
 				n = binary.PutUvarint(numBuf[:], uint64(len(newKey)))
 				newData = append(newData, numBuf[:n]...)
