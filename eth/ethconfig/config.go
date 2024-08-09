@@ -22,8 +22,6 @@ package ethconfig
 
 import (
 	"math/big"
-	"os"
-	"os/user"
 	"strings"
 	"time"
 
@@ -97,16 +95,6 @@ var Defaults = Config{
 		ProduceE2:  true,
 		ProduceE3:  true,
 	},
-}
-
-func init() {
-	home := os.Getenv("HOME")
-	if home == "" {
-		if user, err := user.Current(); err == nil {
-			home = user.HomeDir
-		}
-	}
-
 }
 
 //go:generate gencodec -dir . -type Config -formats toml -out gen_config.go
