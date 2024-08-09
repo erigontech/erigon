@@ -19,7 +19,6 @@ package sysinfo
 import (
 	"fmt"
 	"sort"
-	"strconv"
 	"strings"
 
 	"github.com/jedib0t/go-pretty/v6/table"
@@ -88,24 +87,19 @@ func collectInfo(cliCtx *cli.Context) error {
 		util.RenderError(err)
 	}
 
+	cpuusage := sysutils.CPUUsage()
+	processes := sysutils.GetProcessesInfo()
+	totalMemory := sysutils.TotalMemoryUsage()
+
 	var builder strings.Builder
 	builder.WriteString("Flags applied by launch command:\n")
 	writeFlagsInfoToStringBuilder(flagsData, &builder)
 	builder.WriteString("\n\n")
 
-	builder.WriteString("Disk info:\n")
-	builder.WriteString(data.Disk.Details)
-	builder.WriteString("\n\n")
-	builder.WriteString("CPU info:\n")
-	writeCPUToStringBuilder(data.CPU, &builder)
+	writeDiskInfoToStringBuilder(data.Disk, &builder)
+	writeCPUInfoToStringBuilder(data.CPU, cpuusage, &builder)
 
-	processes := sysutils.GetProcessesInfo()
-	cpuusage := sysutils.CPUUsage()
-	totalMemory := sysutils.TotalMemoryUsage()
-	builder.WriteString("\n\nProcesses info:\n")
 	writeProcessesToStringBuilder(processes, cpuusage.Total, totalMemory, &builder)
-	builder.WriteString("\n\nCPU usage details:\n")
-	writeCPUUsageToStringBuilder(cpuusage.Cores, &builder)
 
 	// Save data to file
 	err = util.SaveDataToFile(cliCtx.String(ExportPathFlag.Name), cliCtx.String(ExportFileNameFlag.Name), builder.String())
@@ -121,31 +115,49 @@ func writeFlagsInfoToStringBuilder(flags []Flag, builder *strings.Builder) {
 	for _, flag := range flags {
 		flagsRows = append(flagsRows, table.Row{flag.Name, flag.Value})
 	}
-	flagsTableData := util.ExportTable("", table.Row{"Flag", "Value"}, flagsRows, nil)
+	flagsTableData := util.ExportTable(table.Row{"Flag", "Value"}, flagsRows, nil)
 	builder.WriteString(flagsTableData)
 }
 
-func writeCPUToStringBuilder(cpuInfo []diagnostics.CPUInfo, builder *strings.Builder) {
-	spacing := calculateSpacing([]string{"CPU", "VendorID", "Family", "Model", "Stepping", "PhysicalID", "CoreID", "Cores", "ModelName", "Mhz", "CacheSize", "Flags", "Microcode"})
+func writeDiskInfoToStringBuilder(diskInfo diagnostics.DiskInfo, builder *strings.Builder) {
+	builder.WriteString("Disk info:\n")
+	builder.WriteString(diskInfo.Details)
+	builder.WriteString("\n\n")
+}
 
+func writeCPUInfoToStringBuilder(cpuInfo []diagnostics.CPUInfo, cpuusage sysutils.CPUUsageInfo, builder *strings.Builder) {
+	writeOweralCPUInfoToStringBuilder(cpuInfo, builder)
+	writeCPUUsageToStringBuilder(cpuusage.Cores, builder)
+}
+
+func writeOweralCPUInfoToStringBuilder(cpuInfo []diagnostics.CPUInfo, builder *strings.Builder) {
+	builder.WriteString("CPU info:\n")
+	header := table.Row{"CPU", "VendorID", "Family", "Model", "Stepping", "PhysicalID", "CoreID", "Cores", "ModelName", "Mhz", "CacheSize", "Flags", "Microcode"}
+	rows := make([]table.Row, 0, len(cpuInfo))
 	for _, cpu := range cpuInfo {
-		writeStringToBuilder(builder, "CPU", strconv.Itoa(int(cpu.CPU)), spacing)
-		writeStringToBuilder(builder, "VendorID", cpu.VendorID, spacing)
-		writeStringToBuilder(builder, "Family", cpu.Family, spacing)
-		writeStringToBuilder(builder, "Model", cpu.Model, spacing)
-		writeStringToBuilder(builder, "Stepping", strconv.Itoa(int(cpu.Stepping)), spacing)
-		writeStringToBuilder(builder, "PhysicalID", cpu.PhysicalID, spacing)
-		writeStringToBuilder(builder, "CoreID", cpu.CoreID, spacing)
-		writeStringToBuilder(builder, "Cores", strconv.Itoa(int(cpu.Cores)), spacing)
-		writeStringToBuilder(builder, "ModelName", cpu.ModelName, spacing)
-		writeStringToBuilder(builder, "Mhz", fmt.Sprintf("%g", cpu.Mhz), spacing)
-		writeStringToBuilder(builder, "CacheSize", strconv.Itoa(int(cpu.CacheSize)), spacing)
-		writeStringToBuilder(builder, "Flags", strings.Join(cpu.Flags, ", "), spacing)
-		writeStringToBuilder(builder, "Microcode", cpu.Microcode, spacing)
+		rows = append(rows, table.Row{cpu.CPU, cpu.VendorID, cpu.Family, cpu.Model, cpu.Stepping, cpu.PhysicalID, cpu.CoreID, cpu.Cores, cpu.ModelName, cpu.Mhz, cpu.CacheSize, strings.Join(cpu.Flags, ", "), cpu.Microcode})
 	}
+
+	cpuDataTable := util.ExportTable(header, rows, nil)
+	builder.WriteString(cpuDataTable)
+	builder.WriteString("\n\n")
+}
+
+func writeCPUUsageToStringBuilder(cpuUsage []float64, builder *strings.Builder) {
+	builder.WriteString("CPU usage:\n")
+	header := table.Row{"Core #", "% CPU"}
+	rows := make([]table.Row, 0, len(cpuUsage))
+	for idx, core := range cpuUsage {
+		rows = append(rows, table.Row{idx + 1, fmt.Sprintf("%.2f", core)})
+	}
+
+	cpuUsageDataTable := util.ExportTable(header, rows, nil)
+	builder.WriteString(cpuUsageDataTable)
 }
 
 func writeProcessesToStringBuilder(prcInfo []*sysutils.ProcessInfo, cpuUsage float64, totalMemory float64, builder *strings.Builder) {
+	builder.WriteString("\n\nProcesses info:\n")
+
 	prcInfo = sortProcessesByCPU(prcInfo)
 	rows := make([]table.Row, 0)
 	header := table.Row{"PID", "Name", "% CPU", "% Memory"}
@@ -156,38 +168,10 @@ func writeProcessesToStringBuilder(prcInfo []*sysutils.ProcessInfo, cpuUsage flo
 		rows = append(rows, table.Row{process.Pid, process.Name, cpu, memory})
 	}
 
-	t := table.NewWriter()
+	footer := table.Row{"Totals", "", fmt.Sprintf("%.2f", cpuUsage), fmt.Sprintf("%.2f", totalMemory)}
 
-	t.AppendHeader(header)
-	if len(rows) > 0 {
-		t.AppendRows(rows)
-	}
-	t.AppendSeparator()
-	t.AppendRow(table.Row{"Totals", "", fmt.Sprintf("%.2f", cpuUsage), fmt.Sprintf("%.2f", totalMemory)})
-	t.AppendSeparator()
-
-	result := t.Render()
-	builder.WriteString(result)
-}
-
-func writeCPUUsageToStringBuilder(cpuUsage []float64, builder *strings.Builder) {
-	rows := make([]table.Row, 0)
-	header := table.Row{"Core #", "% CPU"}
-
-	for idx, core := range cpuUsage {
-		rows = append(rows, table.Row{idx + 1, fmt.Sprintf("%.2f", core)})
-	}
-
-	t := table.NewWriter()
-
-	t.AppendHeader(header)
-	if len(rows) > 0 {
-		t.AppendRows(rows)
-	}
-
-	t.AppendSeparator()
-	result := t.Render()
-	builder.WriteString(result)
+	processesTable := util.ExportTable(header, rows, footer)
+	builder.WriteString(processesTable)
 }
 
 func sortProcesses(prcInfo []*sysutils.ProcessInfo, sorting SortType) []*sysutils.ProcessInfo {
@@ -216,35 +200,6 @@ func sortProcessesByMemory(prcInfo []*sysutils.ProcessInfo) []*sysutils.ProcessI
 
 func sortProcessesByPID(prcInfo []*sysutils.ProcessInfo) []*sysutils.ProcessInfo {
 	return sortProcesses(prcInfo, SortByPID)
-}
-
-func calculateSpacing(keysArray []string) int {
-	max := 0
-	for _, key := range keysArray {
-		if len(key) > max {
-			max = len(key)
-		}
-	}
-
-	return max + 3
-}
-
-func writeStringToBuilder(result *strings.Builder, name string, value string, spacing int) {
-	marging := 3
-	if value == "" {
-		value = "N/A"
-	}
-
-	writeSpacesToBuilder(result, marging)
-	result.WriteString(name)
-	result.WriteString(":")
-	writeSpacesToBuilder(result, spacing-len(name)-1)
-	result.WriteString(value)
-	result.WriteString("\n")
-}
-
-func writeSpacesToBuilder(result *strings.Builder, spaces int) {
-	result.WriteString(strings.Repeat(" ", spaces))
 }
 
 func getData(cliCtx *cli.Context) (diagnostics.HardwareInfo, error) {
