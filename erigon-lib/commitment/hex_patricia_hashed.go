@@ -1551,11 +1551,11 @@ func (hph *HexPatriciaHashed) Process(ctx context.Context, updates *Updates, log
 		return nil, fmt.Errorf("branch update failed: %w", err)
 	}
 	log.Warn("commitment finished, counters updated (no reset)",
-		"hadToLoad", hadToLoad.Load(), "skippedLoad", skippedLoad.Load(),
-		"hadToReset", hadToReset.Load(),
+		"hadToLoad", common.PrettyCounter(hadToLoad.Load()), "skippedLoad", common.PrettyCounter(skippedLoad.Load()),
+		"hadToReset", common.PrettyCounter(hadToReset.Load()),
 		"skip ratio", float64(skippedLoad.Load())/float64(hadToLoad.Load()+skippedLoad.Load()),
 		"reset ratio", float64(hadToReset.Load())/float64(hadToLoad.Load()),
-		"keys", ki, "spent", time.Since(start),
+		"keys", common.PrettyCounter(ki), "spent", time.Since(start),
 	)
 	return rootHash, nil
 }
