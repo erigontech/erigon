@@ -65,7 +65,7 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/paths"
 	"github.com/erigontech/erigon/consensus"
-	"github.com/erigontech/erigon/consensus/ethash"
+	"github.com/erigontech/erigon/consensus/mainnet"
 	"github.com/erigontech/erigon/core/rawdb"
 	"github.com/erigontech/erigon/core/state"
 	"github.com/erigontech/erigon/core/types"
@@ -82,6 +82,7 @@ import (
 	"github.com/erigontech/erigon/turbo/rpchelper"
 	"github.com/erigontech/erigon/turbo/services"
 	"github.com/erigontech/erigon/turbo/snapshotsync/freezeblocks"
+
 	// Force-load native and js packages, to trigger registration
 	_ "github.com/erigontech/erigon/eth/tracers/js"
 	_ "github.com/erigontech/erigon/eth/tracers/native"
@@ -517,11 +518,11 @@ func RemoteServices(ctx context.Context, cfg *httpcfg.HttpCfg, logger log.Logger
 					bor.NewGenesisContractsClient(cc, borConfig.ValidatorContract, borConfig.StateReceiverContract, logger), logger)
 
 			default:
-				engine = ethash.NewFaker()
+				engine = mainnet.NewMainnetConsensus()
 			}
 
 		default:
-			engine = ethash.NewFaker()
+			engine = mainnet.NewMainnetConsensus()
 		}
 	} else {
 		remoteCE = &remoteConsensusEngine{}
@@ -940,7 +941,7 @@ func (e *remoteConsensusEngine) init(db kv.RoDB, blockReader services.FullBlockR
 			bor.NewChainSpanner(bor.GenesisContractValidatorSetABI(), cc, true, logger),
 			bor.NewGenesisContractsClient(cc, borConfig.ValidatorContract, borConfig.StateReceiverContract, logger), logger)
 	} else {
-		e.engine = ethash.NewFaker()
+		e.engine = mainnet.NewMainnetConsensus()
 	}
 
 	return true
