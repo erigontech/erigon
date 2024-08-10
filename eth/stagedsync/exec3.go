@@ -911,7 +911,7 @@ Loop:
 					t1, t2, t3 time.Duration
 				)
 
-				if ok, err := flushAndCheckCommitmentV3(ctx, b, b.HeaderNoCopy(), applyTx, doms, cfg, execStage, stageProgress, parallel, logger, u, inMemExec, isMining); err != nil {
+				if ok, err := flushAndCheckCommitmentV3(ctx, b.HeaderNoCopy(), applyTx, doms, cfg, execStage, stageProgress, parallel, logger, u, inMemExec); err != nil {
 					return err
 				} else if !ok {
 					break Loop
@@ -997,7 +997,7 @@ Loop:
 
 	if isMining || u != nil && !u.HasUnwindPoint() {
 		if b != nil {
-			_, err := flushAndCheckCommitmentV3(ctx, b, b.HeaderNoCopy(), applyTx, doms, cfg, execStage, stageProgress, parallel, logger, u, inMemExec, isMining)
+			_, err := flushAndCheckCommitmentV3(ctx, b.HeaderNoCopy(), applyTx, doms, cfg, execStage, stageProgress, parallel, logger, u, inMemExec)
 			if err != nil {
 				return err
 			}
@@ -1071,7 +1071,7 @@ func dumpPlainStateDebug(tx kv.RwTx, doms *state2.SharedDomains) {
 }
 
 // flushAndCheckCommitmentV3 - does write state to db and then check commitment
-func flushAndCheckCommitmentV3(ctx context.Context, b *types.Block, header *types.Header, applyTx kv.RwTx, doms *state2.SharedDomains, cfg ExecuteBlockCfg, e *StageState, maxBlockNum uint64, parallel bool, logger log.Logger, u Unwinder, inMemExec bool, isMining bool) (bool, error) {
+func flushAndCheckCommitmentV3(ctx context.Context, header *types.Header, applyTx kv.RwTx, doms *state2.SharedDomains, cfg ExecuteBlockCfg, e *StageState, maxBlockNum uint64, parallel bool, logger log.Logger, u Unwinder, inMemExec bool) (bool, error) {
 
 	// E2 state root check was in another stage - means we did flush state even if state root will not match
 	// And Unwind expecting it
@@ -1094,11 +1094,8 @@ func flushAndCheckCommitmentV3(ctx context.Context, b *types.Block, header *type
 	if doms.BlockNum() != header.Number.Uint64() {
 		panic(fmt.Errorf("%d != %d", doms.BlockNum(), header.Number.Uint64()))
 	}
-	logPrefix := "mining"
-	if u != nil {
-		logPrefix = u.LogPrefix()
-	}
-	rh, err := doms.ComputeCommitment(ctx, true, header.Number.Uint64(), logPrefix)
+
+	rh, err := doms.ComputeCommitment(ctx, true, header.Number.Uint64(), e.LogPrefix())
 	if err != nil {
 		return false, fmt.Errorf("StateV3.Apply: %w", err)
 	}
