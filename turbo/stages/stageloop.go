@@ -72,7 +72,6 @@ func StageLoop(
 	hook *Hook,
 ) {
 	defer close(waitForDone)
-	logger.Error("stageLoop start")
 	if err := ProcessFrozenBlocks(ctx, db, blockReader, sync, hook, false); err != nil {
 		if err != nil {
 			if errors.Is(err, libcommon.ErrStopped) || errors.Is(err, context.Canceled) {

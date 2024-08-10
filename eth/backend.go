@@ -457,7 +457,6 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 
 		var pi int // points to next port to be picked from refCfg.AllowedPorts
 		for _, protocol := range p2pConfig.ProtocolVersion {
-			logger.Error("in sentry:", "protocol", protocol)
 			cfg := p2pConfig
 			cfg.NodeDatabase = filepath.Join(stack.Config().Dirs.Nodes, eth.ProtocolToString[protocol])
 
@@ -794,7 +793,6 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 	// 2) we cannot propose for block 1 regardless.
 
 	if !config.DeprecatedTxPool.Disable {
-		println("connected to backend core")
 		backend.txPoolFetch.ConnectCore()
 		backend.txPoolFetch.ConnectSentries()
 		var newTxsBroadcaster *txpool.NewSlotsStreams
@@ -820,7 +818,6 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 				// will trigger the staged sync which will require headers and blocks to be available
 				// in their respective cache in the download stage. If not found, it would cause a
 				// liveness issue for the chain.
-				logger.Error("mined", "header", b.Header().Number.String())
 				if err := backend.sentriesClient.Hd.AddMinedHeader(b.Header()); err != nil {
 					logger.Error("add mined block to header downloader", "err", err)
 				}
@@ -1255,7 +1252,6 @@ func (s *Ethereum) StartMining(ctx context.Context, db kv.RwDB, stateDiffClient 
 		miner.MiningConfig.Recommit = time.Second * 30
 		mineEvery := time.NewTicker(miner.MiningConfig.Recommit)
 
-		s.logger.Error("mine every loop", "every", miner.MiningConfig.Recommit.Seconds())
 		defer mineEvery.Stop()
 
 		s.logger.Info("Starting to mine", "etherbase", eb)
@@ -1281,7 +1277,6 @@ func (s *Ethereum) StartMining(ctx context.Context, db kv.RwDB, stateDiffClient 
 			if working || !hasWork {
 				select {
 				case stateChanges := <-stateChangeCh:
-					log.Warn("[dbg] stateChangeCh")
 					block := stateChanges.BlockHeight
 					s.logger.Debug("Start mining based on previous block", "block", block)
 					// TODO - can do mining clean up here as we have previous
@@ -1303,8 +1298,6 @@ func (s *Ethereum) StartMining(ctx context.Context, db kv.RwDB, stateDiffClient 
 					}
 					hasWork = !(working || waiting.Load())
 				case err := <-errc:
-					log.Warn("[dbg] errc", "err", err)
-
 					working = false
 					hasWork = false
 					if errors.Is(err, libcommon.ErrStopped) {
@@ -1317,21 +1310,16 @@ func (s *Ethereum) StartMining(ctx context.Context, db kv.RwDB, stateDiffClient 
 					return
 				}
 			}
-			if hasWork != false {
-				s.logger.Error("in loop of mining", "working", working, "hasWork", hasWork)
-			}
+
 			if !working && hasWork {
-				s.logger.Error("Started working")
 				working = true
 				hasWork = false
 				mineEvery.Reset(miner.MiningConfig.Recommit)
 				go func() {
-					s.logger.Error("come from goroutine in StartMining")
 					err = stages2.MiningStep(ctx, db, mining, tmpDir, logger)
 
 					waiting.Store(true)
 					defer func() {
-						s.logger.Error("out of mining", "err", err)
 						waiting.Store(false)
 					}()
 

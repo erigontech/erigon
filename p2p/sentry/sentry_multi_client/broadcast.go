@@ -63,7 +63,6 @@ func (cs *MultiClient) PropagateNewBlockHashes(ctx context.Context, announces []
 		if err != nil {
 			log.Error("propagateNewBlockHashes", "err", err)
 		}
-		cs.logger.Error("sended msg")
 	}
 }
 

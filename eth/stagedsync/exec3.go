@@ -182,10 +182,10 @@ func ExecV3(ctx context.Context,
 
 	applyTx := txc.Tx
 	useExternalTx := applyTx != nil
+
 	if !useExternalTx {
 		if !parallel {
 			var err error
-			println("new tx")
 			applyTx, err = chainDb.BeginRw(ctx) //nolint
 			if err != nil {
 				return err
@@ -206,7 +206,6 @@ func ExecV3(ctx context.Context,
 	}
 
 	pruneNonEssentials := cfg.prune.History.Enabled() && cfg.prune.History.PruneTo(execStage.BlockNumber) == execStage.BlockNumber
-
 	var err error
 	inMemExec := txc.Doms != nil
 	var doms *state2.SharedDomains
@@ -214,7 +213,6 @@ func ExecV3(ctx context.Context,
 		doms = txc.Doms
 	} else {
 		var err error
-		println("new sd")
 		doms, err = state2.NewSharedDomains(applyTx, log.New())
 		// if we are behind the commitment, we can't execute anything
 		// this can heppen if progress in domain is higher than progress in blocks
@@ -910,7 +908,7 @@ Loop:
 					t1, t2, t3 time.Duration
 				)
 
-				if ok, err := flushAndCheckCommitmentV3(ctx, b.HeaderNoCopy(), applyTx, doms, cfg, execStage, stageProgress, parallel, logger, u, inMemExec, isMining); err != nil {
+				if ok, err := flushAndCheckCommitmentV3(ctx, b, b.HeaderNoCopy(), applyTx, doms, cfg, execStage, stageProgress, parallel, logger, u, inMemExec, isMining); err != nil {
 					return err
 				} else if !ok {
 					break Loop
@@ -996,7 +994,7 @@ Loop:
 
 	if isMining || u != nil && !u.HasUnwindPoint() {
 		if b != nil {
-			_, err := flushAndCheckCommitmentV3(ctx, b.HeaderNoCopy(), applyTx, doms, cfg, execStage, stageProgress, parallel, logger, u, inMemExec, isMining)
+			_, err := flushAndCheckCommitmentV3(ctx, b, b.HeaderNoCopy(), applyTx, doms, cfg, execStage, stageProgress, parallel, logger, u, inMemExec, isMining)
 			if err != nil {
 				return err
 			}
@@ -1070,7 +1068,7 @@ func dumpPlainStateDebug(tx kv.RwTx, doms *state2.SharedDomains) {
 }
 
 // flushAndCheckCommitmentV3 - does write state to db and then check commitment
-func flushAndCheckCommitmentV3(ctx context.Context, header *types.Header, applyTx kv.RwTx, doms *state2.SharedDomains, cfg ExecuteBlockCfg, e *StageState, maxBlockNum uint64, parallel bool, logger log.Logger, u Unwinder, inMemExec bool, isMining bool) (bool, error) {
+func flushAndCheckCommitmentV3(ctx context.Context, b *types.Block, header *types.Header, applyTx kv.RwTx, doms *state2.SharedDomains, cfg ExecuteBlockCfg, e *StageState, maxBlockNum uint64, parallel bool, logger log.Logger, u Unwinder, inMemExec bool, isMining bool) (bool, error) {
 
 	// E2 state root check was in another stage - means we did flush state even if state root will not match
 	// And Unwind expecting it
@@ -1102,7 +1100,6 @@ func flushAndCheckCommitmentV3(ctx context.Context, header *types.Header, applyT
 		return false, fmt.Errorf("StateV3.Apply: %w", err)
 	}
 	if cfg.blockProduction {
-		println("HEADER ROOT IS2", header.Root.Hex(), common.BytesToHash(rh).Hex())
 		header.Root = common.BytesToHash(rh)
 		return true, nil
 	}
