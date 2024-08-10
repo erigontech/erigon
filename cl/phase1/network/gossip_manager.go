@@ -50,7 +50,7 @@ type GossipManager struct {
 	beaconConfig *clparams.BeaconChainConfig
 	ethClock     eth_clock.EthereumClock
 
-	emitters     *beaconevents.Emitters
+	emitters     *beaconevents.EventEmitter
 	committeeSub *committee_subscription.CommitteeSubscribeMgmt
 
 	// Services for processing messages from the network
@@ -70,7 +70,7 @@ func NewGossipReceiver(
 	forkChoice *forkchoice.ForkChoiceStore,
 	beaconConfig *clparams.BeaconChainConfig,
 	ethClock eth_clock.EthereumClock,
-	emitters *beaconevents.Emitters,
+	emitters *beaconevents.EventEmitter,
 	comitteeSub *committee_subscription.CommitteeSubscribeMgmt,
 	blockService services.BlockService,
 	blobService services.BlobSidecarsService,
