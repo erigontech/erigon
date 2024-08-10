@@ -85,7 +85,7 @@ func StageSendersCfg(db kv.RwDB, chainCfg *chain.Config, syncCfg ethconfig.Sync,
 }
 
 func SpawnRecoverSendersStage(cfg SendersCfg, s *StageState, u Unwinder, tx kv.RwTx, toBlock uint64, ctx context.Context, logger log.Logger) error {
-	if cfg.blockReader.FreezingCfg().Enabled && s.BlockNumber < cfg.blockReader.FrozenBlocks() {
+	if s.BlockNumber < cfg.blockReader.FrozenBlocks() {
 		s.BlockNumber = cfg.blockReader.FrozenBlocks()
 	}
 
@@ -407,14 +407,8 @@ func PruneSendersStage(s *PruneState, tx kv.RwTx, cfg SendersCfg, ctx context.Co
 		}
 		defer tx.Rollback()
 	}
-	if cfg.blockReader.FreezingCfg().Enabled {
-		// noop. in this case senders will be deleted by BlockRetire.PruneAncientBlocks after data-freezing.
-	} else if cfg.prune.History.Enabled() {
-		to := cfg.prune.History.PruneTo(s.ForwardProgress)
-		if err = rawdb.PruneTable(tx, kv.Senders, to, ctx, 100); err != nil {
-			return err
-		}
-	}
+
+	// noop. in this case senders will be deleted by BlockRetire.PruneAncientBlocks after data-freezing.
 
 	if !useExternalTx {
 		if err = tx.Commit(); err != nil {

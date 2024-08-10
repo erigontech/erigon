@@ -69,7 +69,7 @@ func MiningStages(
 				return BorHeimdallUnwind(u, ctx, s, txc.Tx, borHeimdallCfg)
 			},
 			Prune: func(p *PruneState, tx kv.RwTx, logger log.Logger) error {
-				return BorHeimdallPrune(p, ctx, tx, borHeimdallCfg)
+				return nil
 			},
 		},
 		{

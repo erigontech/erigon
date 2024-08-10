@@ -745,8 +745,11 @@ Loop:
 				HistoryExecution: offsetFromBlockBeginning > 0 && txIndex < int(offsetFromBlockBeginning),
 
 				BlockReceipts: receipts,
-				Config:        cfg.genesis.Config,
 			}
+			if cfg.genesis != nil {
+				txTask.Config = cfg.genesis.Config
+			}
+
 			if txTask.TxNum <= txNumInDB && txTask.TxNum > 0 {
 				inputTxNum++
 				skipPostEvaluation = true
@@ -898,7 +901,7 @@ Loop:
 				//}
 				// If we skip post evaluation, then we should compute root hash ASAP for fail-fast
 				aggregatorRo := applyTx.(state2.HasAggTx).AggTx().(*state2.AggregatorRoTx)
-				if !skipPostEvaluation && (rs.SizeEstimate() < commitThreshold || inMemExec) && !aggregatorRo.CanPrune(applyTx, outputTxNum.Load()) {
+				if (!skipPostEvaluation && rs.SizeEstimate() < commitThreshold && !aggregatorRo.CanPrune(applyTx, outputTxNum.Load())) || inMemExec {
 					break
 				}
 				var (

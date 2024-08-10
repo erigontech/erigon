@@ -85,6 +85,10 @@ type EthereumExecutionModule struct {
 
 	doingPostForkchoice atomic.Bool
 
+	// metrics for average mgas/sec
+	avgMgasSec      float64
+	recordedMgasSec uint64
+
 	execution.UnimplementedExecutionServer
 }
 

@@ -328,8 +328,7 @@ func (s *RoSnapshots) LogStat(label string) {
 	var m runtime.MemStats
 	dbg.ReadMemStats(&m)
 	s.logger.Info(fmt.Sprintf("[snapshots:%s] Stat", label),
-		"blocks", fmt.Sprintf("%dk", (s.SegmentsMax()+1)/1000),
-		"indices", fmt.Sprintf("%dk", (s.IndicesMax()+1)/1000),
+		"blocks", common2.PrettyCounter(s.SegmentsMax()+1), "indices", common2.PrettyCounter(s.IndicesMax()+1),
 		"alloc", common2.ByteCount(m.Alloc), "sys", common2.ByteCount(m.Sys))
 }
 
@@ -994,7 +993,7 @@ func buildIdx(ctx context.Context, sn snaptype.FileInfo, chainConfig *chain.Conf
 
 func notifySegmentIndexingFinished(name string) {
 	dts := []diagnostics.SnapshotSegmentIndexingStatistics{
-		diagnostics.SnapshotSegmentIndexingStatistics{
+		{
 			SegmentName: name,
 			Percent:     100,
 			Alloc:       0,
@@ -1397,7 +1396,8 @@ func (br *BlockRetire) retireBlocks(ctx context.Context, minBlockNum uint64, max
 		} else if !has {
 			return false, nil
 		}
-		logger.Log(lvl, "[snapshots] Retire Blocks", "range", fmt.Sprintf("%dk-%dk", blockFrom/1000, blockTo/1000))
+		logger.Log(lvl, "[snapshots] Retire Blocks", "range",
+			fmt.Sprintf("%s-%s", common2.PrettyCounter(blockFrom), common2.PrettyCounter(blockTo)))
 		// in future we will do it in background
 		if err := DumpBlocks(ctx, blockFrom, blockTo, br.chainConfig, tmpDir, snapshots.Dir(), db, workers, lvl, logger, blockReader); err != nil {
 			return ok, fmt.Errorf("DumpBlocks: %w", err)

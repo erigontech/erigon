@@ -32,13 +32,13 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/erigontech/erigon-lib/common/dbg"
 	lru "github.com/hashicorp/golang-lru/arc/v2"
 	"github.com/holiman/uint256"
 	"github.com/xsleonard/go-merkle"
 	"golang.org/x/crypto/sha3"
 	"golang.org/x/sync/errgroup"
 
+	"github.com/erigontech/erigon-lib/common/dbg"
 	"github.com/erigontech/erigon-lib/log/v3"
 
 	"github.com/erigontech/erigon-lib/chain"
@@ -64,7 +64,6 @@ import (
 	"github.com/erigontech/erigon/polygon/bor/finality/whitelist"
 	"github.com/erigontech/erigon/polygon/bor/statefull"
 	"github.com/erigontech/erigon/polygon/bor/valset"
-	"github.com/erigontech/erigon/polygon/bridge"
 	"github.com/erigontech/erigon/polygon/heimdall"
 	"github.com/erigontech/erigon/rlp"
 	"github.com/erigontech/erigon/rpc"
@@ -255,6 +254,15 @@ type ValidateHeaderTimeSignerSuccessionNumber interface {
 	GetSignerSuccessionNumber(signer libcommon.Address, number uint64) (int, error)
 }
 
+type spanReader interface {
+	Span(ctx context.Context, id uint64) (*heimdall.Span, bool, error)
+}
+
+type bridgeReader interface {
+	Events(ctx context.Context, blockNum uint64) ([]*types.Message, error)
+	EventTxnLookup(ctx context.Context, borTxHash libcommon.Hash) (uint64, bool, error)
+}
+
 func ValidateHeaderTime(
 	header *types.Header,
 	now time.Time,
@@ -319,6 +327,8 @@ type Bor struct {
 	spanner                Spanner
 	GenesisContractsClient GenesisContracts
 	HeimdallClient         heimdall.HeimdallClient
+	spanReader             spanReader
+	bridgeReader           bridgeReader
 
 	// scope event.SubscriptionScope
 	// The fields below are for testing only
@@ -330,7 +340,6 @@ type Bor struct {
 	frozenSnapshotsInit sync.Once
 	rootHashCache       *lru.ARCCache[string, string]
 	headerProgress      HeaderProgress
-	polygonBridge       bridge.PolygonBridge
 }
 
 type signer struct {
@@ -347,7 +356,8 @@ func New(
 	heimdallClient heimdall.HeimdallClient,
 	genesisContracts GenesisContracts,
 	logger log.Logger,
-	polygonBridge bridge.Service,
+	bridgeReader bridgeReader,
+	spanReader spanReader,
 ) *Bor {
 	// get bor config
 	borConfig := chainConfig.Bor.(*borcfg.BorConfig)
@@ -374,7 +384,8 @@ func New(
 		execCtx:                context.Background(),
 		logger:                 logger,
 		closeCh:                make(chan struct{}),
-		polygonBridge:          polygonBridge,
+		bridgeReader:           bridgeReader,
+		spanReader:             spanReader,
 	}
 
 	c.authorizedSigner.Store(&signer{
@@ -1384,6 +1395,16 @@ func (c *Bor) fetchAndCommitSpan(
 		}
 
 		heimdallSpan = *s
+	} else if c.spanReader != nil {
+		span, ok, err := c.spanReader.Span(context.Background(), newSpanID)
+		if err != nil {
+			return err
+		}
+		if !ok {
+			return errors.New(fmt.Sprintf("error fetching span %v", newSpanID))
+		}
+
+		heimdallSpan = *span
 	} else {
 		spanJson := chain.Chain.BorSpan(newSpanID)
 		if err := json.Unmarshal(spanJson, &heimdallSpan); err != nil {
@@ -1487,8 +1508,8 @@ func (c *Bor) CommitStates(
 ) error {
 	blockNum := header.Number.Uint64()
 
-	if c.polygonBridge != nil {
-		events, err := c.polygonBridge.GetEvents(c.execCtx, blockNum)
+	if c.bridgeReader != nil {
+		events, err := c.bridgeReader.Events(c.execCtx, blockNum)
 		if err != nil {
 			return err
 		}

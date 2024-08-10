@@ -134,14 +134,16 @@ func (arr *byteBasedUint64Slice) Pop() uint64 {
 // Append adds a new element to the end of the slice.
 func (arr *byteBasedUint64Slice) Append(v uint64) {
 	if len(arr.u) <= arr.l*8 {
-		arr.u = append(arr.u, make([]byte, 32)...)
+		arr.u = append(arr.u, merkle_tree.ZeroHashes[0][:]...)
 		if arr.MerkleTree != nil {
 			arr.MerkleTree.AppendLeaf()
 		}
 	}
 	offset := arr.l * 8
 	binary.LittleEndian.PutUint64(arr.u[offset:offset+8], v)
-
+	if arr.MerkleTree != nil {
+		arr.MerkleTree.MarkLeafAsDirty(arr.l / 4)
+	}
 	arr.l++
 }
 

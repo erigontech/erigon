@@ -21,6 +21,7 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
+	"github.com/erigontech/erigon-lib/common"
 	"math"
 	"path"
 	"path/filepath"
@@ -69,7 +70,7 @@ type Appendable struct {
 
 	// _visibleFiles - underscore in name means: don't use this field directly, use BeginFilesRo()
 	// underlying array is immutable - means it's ready for zero-copy use
-	_visibleFiles []ctxItem
+	_visibleFiles []visibleFile
 
 	table           string // txnNum_u64 -> key (k+auto_increment)
 	filenameBase    string
@@ -112,7 +113,7 @@ func NewAppendable(cfg AppendableCfg, aggregationStep uint64, filenameBase, tabl
 		compression:     CompressNone, //CompressKeys | CompressVals,
 	}
 	ap.indexList = withHashMap
-	ap._visibleFiles = []ctxItem{}
+	ap._visibleFiles = []visibleFile{}
 
 	return &ap, nil
 }
@@ -579,7 +580,7 @@ func (is *AppendablePruneStat) String() string {
 	if is.MinTxNum == math.MaxUint64 && is.PruneCountTx == 0 {
 		return ""
 	}
-	return fmt.Sprintf("ap %d txs in %.2fM-%.2fM", is.PruneCountTx, float64(is.MinTxNum)/1_000_000.0, float64(is.MaxTxNum)/1_000_000.0)
+	return fmt.Sprintf("ap %d txs in %s-%s", is.PruneCountTx, common.PrettyCounter(is.MinTxNum), common.PrettyCounter(is.MaxTxNum))
 }
 
 func (is *AppendablePruneStat) Accumulate(other *AppendablePruneStat) {

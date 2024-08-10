@@ -623,6 +623,37 @@ func (s *KvServer) IndexRange(_ context.Context, req *remote.IndexRangeReq) (*re
 	return reply, nil
 }
 
+func (s *KvServer) HistoryRange(_ context.Context, req *remote.HistoryRangeReq) (*remote.Pairs, error) {
+	reply := &remote.Pairs{}
+	fromTs, limit := int(req.FromTs), int(req.Limit)
+	if err := s.with(req.TxId, func(tx kv.Tx) error {
+		ttx, ok := tx.(kv.TemporalTx)
+		if !ok {
+			return fmt.Errorf("server DB doesn't implement kv.Temporal interface")
+		}
+		it, err := ttx.HistoryRange(kv.History(req.Table), fromTs, int(req.ToTs), order.By(req.OrderAscend), limit)
+		if err != nil {
+			return err
+		}
+		defer it.Close()
+		for it.HasNext() {
+			k, v, err := it.Next()
+			if err != nil {
+				return err
+			}
+			key := bytesCopy(k)
+			value := bytesCopy(v)
+			reply.Keys = append(reply.Keys, key)
+			reply.Values = append(reply.Values, value)
+			limit--
+		}
+		return nil
+	}); err != nil {
+		return nil, err
+	}
+	return reply, nil
+}
+
 func (s *KvServer) Range(_ context.Context, req *remote.RangeReq) (*remote.Pairs, error) {
 	from, limit := req.FromPrefix, int(req.Limit)
 	if req.PageToken != "" {

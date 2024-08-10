@@ -18,16 +18,20 @@ package dbg
 
 import (
 	"os"
+	"path/filepath"
 	"runtime"
+	"runtime/pprof"
 	"strconv"
 	"sync"
 	"time"
 
 	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon-lib/mmap"
 )
 
 var (
 	doMemstat        = EnvBool("NO_MEMSTAT", true)
+	saveHeapProfile  = EnvBool("SAVE_HEAP_PROFILE", false)
 	writeMap         = EnvBool("WRITE_MAP", false)
 	noSync           = EnvBool("NO_SYNC", false)
 	mdbxReadahead    = EnvBool("MDBX_READAHEAD", false)
@@ -47,6 +51,9 @@ var (
 
 	// force skipping of any non-Erigon2 .torrent files
 	DownloaderOnlyBlocks = EnvBool("DOWNLOADER_ONLY_BLOCKS", false)
+
+	// allows to collect reading metrics for kv by file level
+	KVReadLevelledMetrics = EnvBool("KV_READ_METRICS", false)
 
 	// run prune on flush with given timeout. If timeout is 0, no prune on flush will be performed
 	PruneOnFlushTimeout = EnvDuration("PRUNE_ON_FLUSH_TIMEOUT", time.Duration(0))
@@ -237,4 +244,28 @@ func LogHashMismatchReason() bool {
 		}
 	})
 	return logHashMismatchReason
+}
+
+func SaveHeapProfileNearOOM() {
+	if !saveHeapProfile {
+		return
+	}
+
+	var m runtime.MemStats
+	ReadMemStats(&m)
+	if m.Alloc < (mmap.TotalMemory()/100)*45 {
+		return
+	}
+
+	// above 45%
+	filePath := filepath.Join(os.TempDir(), "erigon-mem.prof")
+	log.Info("[Experiment] saving heap profile as near OOM", "alloc", m.Alloc, "filePath", filePath)
+
+	f, _ := os.Create(filePath)
+	defer func() {
+		_ = f.Close()
+	}()
+
+	runtime.GC()
+	_ = pprof.WriteHeapProfile(f)
 }

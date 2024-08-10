@@ -42,13 +42,13 @@ import (
 )
 
 // getReceipts - checking in-mem cache, or else fallback to db, or else fallback to re-exec of block to re-gen receipts
-func (api *BaseAPI) getReceipts(ctx context.Context, tx kv.Tx, block *types.Block, senders []common.Address) (types.Receipts, error) {
+func (api *BaseAPI) getReceipts(ctx context.Context, tx kv.Tx, block *types.Block) (types.Receipts, error) {
 	chainConfig, err := api.chainConfig(ctx, tx)
 	if err != nil {
 		return nil, err
 	}
 
-	return api.receiptsGenerator.GetReceipts(ctx, chainConfig, tx, block, senders)
+	return api.receiptsGenerator.GetReceipts(ctx, chainConfig, tx, block)
 }
 
 // GetLogs implements eth_getLogs. Returns an array of logs matching a given filter object.
@@ -426,7 +426,11 @@ func (api *APIImpl) GetTransactionReceipt(ctx context.Context, txnHash common.Ha
 	}
 	// Private API returns 0 if transaction is not found.
 	if blockNum == 0 && cc.Bor != nil {
-		blockNum, ok, err = api._blockReader.EventLookup(ctx, tx, txnHash)
+		if api.bridgeReader != nil {
+			blockNum, ok, err = api.bridgeReader.EventTxnLookup(ctx, txnHash)
+		} else {
+			blockNum, ok, err = api._blockReader.EventLookup(ctx, tx, txnHash)
+		}
 		if err != nil {
 			return nil, err
 		}
@@ -461,7 +465,7 @@ func (api *APIImpl) GetTransactionReceipt(ctx context.Context, txnHash common.Ha
 			borTx = bortypes.NewBorTransaction()
 		}
 	}
-	receipts, err := api.getReceipts(ctx, tx, block, block.Body().SendersFromTxs())
+	receipts, err := api.getReceipts(ctx, tx, block)
 	if err != nil {
 		return nil, fmt.Errorf("getReceipts error: %w", err)
 	}
@@ -507,7 +511,7 @@ func (api *APIImpl) GetBlockReceipts(ctx context.Context, numberOrHash rpc.Block
 	if err != nil {
 		return nil, err
 	}
-	receipts, err := api.getReceipts(ctx, tx, block, block.Body().SendersFromTxs())
+	receipts, err := api.getReceipts(ctx, tx, block)
 	if err != nil {
 		return nil, fmt.Errorf("getReceipts error: %w", err)
 	}

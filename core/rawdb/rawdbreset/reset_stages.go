@@ -86,7 +86,7 @@ func ResetBlocks(tx kv.RwTx, db kv.RoDB, agg *state.Aggregator, br services.Full
 		return err
 	}
 
-	if br.FreezingCfg().Enabled && br.FrozenBlocks() > 0 {
+	if br.FrozenBlocks() > 0 {
 		logger.Info("filling db from snapshots", "blocks", br.FrozenBlocks())
 		if err := stagedsync.FillDBFromSnapshots("filling_db_from_snapshots", context.Background(), tx, dirs, br, agg, logger); err != nil {
 			return err

@@ -114,7 +114,7 @@ func SpawnStageHeaders(s *StageState, u Unwinder, ctx context.Context, tx kv.RwT
 		}
 		defer tx.Rollback()
 	}
-	if s.CurrentSyncCycle.IsInitialCycle && cfg.blockReader.FreezingCfg().Enabled {
+	if s.CurrentSyncCycle.IsInitialCycle {
 		if err := cfg.hd.AddHeadersFromSnapshot(tx, cfg.blockReader); err != nil {
 			return err
 		}
@@ -299,6 +299,7 @@ Loop:
 				logger.Info("Req/resp stats", "req", stats.Requests, "reqMin", stats.ReqMinBlock, "reqMax", stats.ReqMaxBlock,
 					"skel", stats.SkeletonRequests, "skelMin", stats.SkeletonReqMinBlock, "skelMax", stats.SkeletonReqMaxBlock,
 					"resp", stats.Responses, "respMin", stats.RespMinBlock, "respMax", stats.RespMaxBlock, "dups", stats.Duplicates, "alloc", libcommon.ByteCount(m.Alloc), "sys", libcommon.ByteCount(m.Sys))
+				dbg.SaveHeapProfileNearOOM()
 				cfg.hd.LogAnchorState()
 				if wasProgress {
 					logger.Warn("Looks like chain is not progressing, moving to the next stage")

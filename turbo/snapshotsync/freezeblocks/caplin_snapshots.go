@@ -109,8 +109,7 @@ func (s *CaplinSnapshots) SegmentsMax() uint64 { return s.segmentsMax.Load() }
 
 func (s *CaplinSnapshots) LogStat(str string) {
 	s.logger.Info(fmt.Sprintf("[snapshots:%s] Stat", str),
-		"blocks", fmt.Sprintf("%dk", (s.SegmentsMax()+1)/1000),
-		"indices", fmt.Sprintf("%dk", (s.IndicesMax()+1)/1000))
+		"blocks", libcommon.PrettyCounter(s.SegmentsMax()+1), "indices", libcommon.PrettyCounter(s.IndicesMax()+1))
 }
 
 func (s *CaplinSnapshots) LS() {
@@ -569,6 +568,7 @@ func (s *CaplinSnapshots) BuildMissingIndices(ctx context.Context, logger log.Lo
 	if err != nil {
 		return err
 	}
+	noneDone := true
 	for index := range segments {
 		segment := segments[index]
 		// The same slot=>offset mapping is used for both beacon blocks and blob sidecars.
@@ -579,10 +579,13 @@ func (s *CaplinSnapshots) BuildMissingIndices(ctx context.Context, logger log.Lo
 			continue
 		}
 		p := &background.Progress{}
-
+		noneDone = false
 		if err := BeaconSimpleIdx(ctx, segment, s.Salt, s.tmpdir, p, log.LvlDebug, logger); err != nil {
 			return err
 		}
+	}
+	if noneDone {
+		return nil
 	}
 
 	return s.ReopenFolder()

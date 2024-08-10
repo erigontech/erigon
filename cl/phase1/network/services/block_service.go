@@ -18,10 +18,10 @@ package services
 
 import (
 	"context"
-	"strconv"
 	"sync"
 	"time"
 
+	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/cl/beacon/beaconevents"
@@ -34,8 +34,6 @@ import (
 	"github.com/erigontech/erigon/cl/phase1/core/state/lru"
 	"github.com/erigontech/erigon/cl/phase1/forkchoice"
 	"github.com/erigontech/erigon/cl/utils/eth_clock"
-
-	libcommon "github.com/erigontech/erigon-lib/common"
 )
 
 type proposerIndexAndSlot struct {
@@ -58,7 +56,7 @@ type blockService struct {
 	seenBlocksCache *lru.Cache[proposerIndexAndSlot, struct{}]
 
 	// blocks that should be scheduled for later execution (e.g missing blobs).
-	emitter                          *beaconevents.Emitters
+	emitter                          *beaconevents.EventEmitter
 	blocksScheduledForLaterExecution sync.Map
 	// store the block in db
 	db               kv.RwDB
@@ -73,7 +71,7 @@ func NewBlockService(
 	syncedData *synced_data.SyncedDataManager,
 	ethClock eth_clock.EthereumClock,
 	beaconCfg *clparams.BeaconChainConfig,
-	emitter *beaconevents.Emitters,
+	emitter *beaconevents.EventEmitter,
 	validatorMonitor monitor.ValidatorMonitor,
 ) Service[*cltypes.SignedBeaconBlock] {
 	seenBlocksCache, err := lru.New[proposerIndexAndSlot, struct{}]("seenblocks", seenBlockCacheSize)
@@ -164,10 +162,10 @@ func (b *blockService) publishBlockEvent(block *cltypes.SignedBeaconBlock) {
 		return
 	}
 	// publish block to event handler
-	b.emitter.Publish("block", map[string]any{
-		"slot":                 strconv.Itoa(int(block.Block.Slot)),
-		"block":                libcommon.Hash(blockRoot),
-		"execution_optimistic": false,
+	b.emitter.State().SendBlock(&beaconevents.BlockData{
+		Slot:                block.Block.Slot,
+		Block:               libcommon.Hash(blockRoot),
+		ExecutionOptimistic: false,
 	})
 }
 
