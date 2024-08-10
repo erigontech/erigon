@@ -384,8 +384,6 @@ func (sn *Segment) mappedTxnSnapshot() *silkworm.MappedTxnSnapshot {
 // transaction_hash  -> block_number
 
 type segments struct {
-	segments []*Segment // keep it for caplin
-
 	lock            sync.RWMutex // can divide into 2 locks once caplin switch to dirty/visible segments mode
 	dirtySegments   []*Segment
 	visibleSegments []*Segment
