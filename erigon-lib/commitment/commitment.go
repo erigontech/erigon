@@ -74,12 +74,12 @@ type PatriciaContext interface {
 	// For each cell, it sets the cell type, clears the modified flag, fills the hash,
 	// and for the extension, account, and leaf type, the `l` and `k`
 	GetBranch(prefix []byte) ([]byte, uint64, error)
-	// fetch account with given plain key
-	GetAccount(plainKey []byte, cell *Cell) error
-	// fetch storage with given plain key
-	GetStorage(plainKey []byte, cell *Cell) error
 	// store branch data
 	PutBranch(prefix []byte, data []byte, prevData []byte, prevStep uint64) error
+	// fetch account with given plain key
+	GetAccount(plainKey []byte) (*Update, error)
+	// fetch storage with given plain key
+	GetStorage(plainKey []byte) (*Update, error)
 }
 
 type TrieVariant string
@@ -94,10 +94,11 @@ const (
 func InitializeTrieAndUpdates(tv TrieVariant, mode Mode, tmpdir string) (Trie, *Updates) {
 	switch tv {
 	case VariantBinPatriciaTrie:
-		trie := NewBinPatriciaHashed(length.Addr, nil, tmpdir)
-		fn := func(key []byte) []byte { return hexToBin(key) }
-		tree := NewUpdates(mode, tmpdir, fn)
-		return trie, tree
+		//trie := NewBinPatriciaHashed(length.Addr, nil, tmpdir)
+		//fn := func(key []byte) []byte { return hexToBin(key) }
+		//tree := NewUpdateTree(mode, tmpdir, fn)
+		//return trie, tree
+		panic("omg its not supported")
 	case VariantHexPatriciaTrie:
 		fallthrough
 	default:
@@ -157,8 +158,8 @@ func (branchData BranchData) String() string {
 				fmt.Fprintf(&sb, "%sstoragePlainKey=[%x]", comma, cell.storagePlainKey[:cell.storagePlainKeyLen])
 				comma = ","
 			}
-			if cell.HashLen > 0 {
-				fmt.Fprintf(&sb, "%shash=[%x]", comma, cell.hash[:cell.HashLen])
+			if cell.hashLen > 0 {
+				fmt.Fprintf(&sb, "%shash=[%x]", comma, cell.hash[:cell.hashLen])
 			}
 			sb.WriteString("}\n")
 		}
@@ -311,7 +312,7 @@ func (be *BranchEncoder) EncodeBranch(bitmap, touchMap, afterMap uint16, readCel
 			if cell.storagePlainKeyLen > 0 {
 				fieldBits |= StoragePlainPart
 			}
-			if cell.HashLen > 0 {
+			if cell.hashLen > 0 {
 				fieldBits |= HashPart
 			}
 			if err := be.buf.WriteByte(byte(fieldBits)); err != nil {
@@ -333,7 +334,7 @@ func (be *BranchEncoder) EncodeBranch(bitmap, touchMap, afterMap uint16, readCel
 				}
 			}
 			if fieldBits&HashPart != 0 {
-				if err := putUvarAndVal(uint64(cell.HashLen), cell.hash[:cell.HashLen]); err != nil {
+				if err := putUvarAndVal(uint64(cell.hashLen), cell.hash[:cell.hashLen]); err != nil {
 					return nil, 0, err
 				}
 			}
@@ -768,8 +769,8 @@ func DecodeBranchAndCollectStat(key, branch []byte, tv TrieVariant) *BranchStat 
 			case c.storagePlainKeyLen > 0:
 				stat.SPKSize += uint64(c.storagePlainKeyLen)
 				stat.SPKCount++
-			case c.HashLen > 0:
-				stat.HashSize += uint64(c.HashLen)
+			case c.hashLen > 0:
+				stat.HashSize += uint64(c.hashLen)
 				stat.HashCount++
 			default:
 				panic("no plain key" + fmt.Sprintf("#+%v", c))
@@ -882,7 +883,7 @@ func (t *Updates) initCollector() {
 func (t *Updates) TouchPlainKey(key, val []byte, fn func(c *KeyUpdate, val []byte)) {
 	switch t.mode {
 	case ModeUpdate:
-		pivot, updated := &KeyUpdate{plainKey: key}, false
+		pivot, updated := &KeyUpdate{plainKey: key, update: new(Update)}, false
 
 		t.tree.DescendLessOrEqual(pivot, func(item *KeyUpdate) bool {
 			if bytes.Equal(item.plainKey, pivot.plainKey) {
@@ -925,41 +926,38 @@ func (t *Updates) TouchAccount(c *KeyUpdate, val []byte) {
 		c.update.Balance.Set(balance)
 		c.update.Flags |= BalanceUpdate
 	}
-	if !bytes.Equal(chash, c.update.CodeHashOrStorage[:]) {
+	if !bytes.Equal(chash, c.update.CodeHash[:]) {
 		if len(chash) == 0 {
-			c.update.ValLength = length.Hash
-			copy(c.update.CodeHashOrStorage[:], EmptyCodeHash)
+			copy(c.update.CodeHash[:], EmptyCodeHash)
 		} else {
-			copy(c.update.CodeHashOrStorage[:], chash)
-			c.update.ValLength = length.Hash
 			c.update.Flags |= CodeUpdate
+			copy(c.update.CodeHash[:], chash)
 		}
 	}
 }
 
 func (t *Updates) TouchStorage(c *KeyUpdate, val []byte) {
-	c.update.ValLength = len(val)
+	c.update.StorageLen = len(val)
 	if len(val) == 0 {
 		c.update.Flags = DeleteUpdate
 	} else {
 		c.update.Flags |= StorageUpdate
-		copy(c.update.CodeHashOrStorage[:], val)
+		copy(c.update.Storage[:], val)
 	}
 }
 
 func (t *Updates) TouchCode(c *KeyUpdate, val []byte) {
-	t.keccak.Reset()
-	t.keccak.Write(val)
-	t.keccak.Read(c.update.CodeHashOrStorage[:])
-	if c.update.Flags == DeleteUpdate && len(val) == 0 {
-		c.update.Flags = DeleteUpdate
-		c.update.ValLength = 0
+	c.update.Flags |= CodeUpdate
+	if len(val) == 0 {
+		if c.update.Flags == 0 || c.update.Flags == DeleteUpdate {
+			c.update.Flags = DeleteUpdate
+		}
+		copy(c.update.CodeHash[:], EmptyCodeHash)
 		return
 	}
-	c.update.ValLength = length.Hash
-	if len(val) != 0 {
-		c.update.Flags |= CodeUpdate
-	}
+	t.keccak.Reset()
+	t.keccak.Write(val)
+	t.keccak.Read(c.update.CodeHash[:])
 }
 
 func (t *Updates) Close() {
@@ -1029,7 +1027,7 @@ func (t *Updates) List(clear bool) ([][]byte, []Update) {
 		updates := make([]Update, t.tree.Len())
 		i := 0
 		t.tree.Ascend(func(item *KeyUpdate) bool {
-			plainKeys[i], updates[i] = item.plainKey, item.update
+			plainKeys[i], updates[i] = item.plainKey, *item.update
 			i++
 			return true
 		})
@@ -1044,7 +1042,7 @@ func (t *Updates) List(clear bool) ([][]byte, []Update) {
 
 type KeyUpdate struct {
 	plainKey []byte
-	update   Update
+	update   *Update
 }
 
 func keyUpdateLessFn(i, j *KeyUpdate) bool {

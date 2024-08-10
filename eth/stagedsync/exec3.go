@@ -774,8 +774,11 @@ Loop:
 				HistoryExecution: offsetFromBlockBeginning > 0 && txIndex < int(offsetFromBlockBeginning),
 
 				BlockReceipts: receipts,
-				Config:        cfg.genesis.Config,
 			}
+			if cfg.genesis != nil {
+				txTask.Config = cfg.genesis.Config
+			}
+
 			if txTask.TxNum <= txNumInDB && txTask.TxNum > 0 {
 				inputTxNum++
 				skipPostEvaluation = true

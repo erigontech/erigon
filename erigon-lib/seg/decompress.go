@@ -555,14 +555,14 @@ func (g *Getter) nextPos(clean bool) (pos uint64) {
 		g.dataP++
 		g.dataBit = 0
 	}
-	table := g.posDict
+	table, dataLen, data := g.posDict, len(g.data), g.data
 	if table.bitLen == 0 {
 		return table.pos[0]
 	}
 	for l := byte(0); l == 0; {
-		code := uint16(g.data[g.dataP]) >> g.dataBit
-		if 8-g.dataBit < table.bitLen && int(g.dataP)+1 < len(g.data) {
-			code |= uint16(g.data[g.dataP+1]) << (8 - g.dataBit)
+		code := uint16(data[g.dataP]) >> g.dataBit
+		if 8-g.dataBit < table.bitLen && int(g.dataP)+1 < dataLen {
+			code |= uint16(data[g.dataP+1]) << (8 - g.dataBit)
 		}
 		code &= (uint16(1) << table.bitLen) - 1
 		l = table.lens[code]
