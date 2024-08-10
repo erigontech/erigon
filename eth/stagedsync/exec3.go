@@ -1085,7 +1085,7 @@ func flushAndCheckCommitmentV3(ctx context.Context, header *types.Header, applyT
 	}
 
 	if header == nil {
-		return false, fmt.Errorf("header is nil")
+		return false, errors.New("header is nil")
 	}
 
 	if dbg.DiscardCommitment() {
