@@ -231,8 +231,8 @@ func SpawnStageHistoryDownload(cfg StageHistoryReconstructionCfg, ctx context.Co
 				if err := downloadBlobHistoryWorker(cfg, ctx, logger); err != nil {
 					logger.Error("Error downloading blobs", "err", err)
 				}
-				// set a timer every 1 hour as a failsafe
-				ticker := time.NewTicker(time.Hour)
+				// set a timer every 15 minutes as a failsafe
+				ticker := time.NewTicker(15 * time.Minute)
 				defer ticker.Stop()
 				for {
 					select {
@@ -287,7 +287,8 @@ func downloadBlobHistoryWorker(cfg StageHistoryReconstructionCfg, ctx context.Co
 	prevLogSlot := currentSlot
 	prevTime := time.Now()
 	targetSlot := cfg.beaconCfg.DenebForkEpoch * cfg.beaconCfg.SlotsPerEpoch
-	cfg.logger.Info("Downloading blobs backwards", "from", currentSlot, "to", targetSlot)
+	shouldLog := false
+
 	for currentSlot >= targetSlot {
 		if currentSlot <= cfg.sn.FrozenBlobs() {
 			break
@@ -326,6 +327,7 @@ func downloadBlobHistoryWorker(cfg StageHistoryReconstructionCfg, ctx context.Co
 				continue
 			}
 			batch = append(batch, block)
+			shouldLog = true
 		}
 		if len(batch) == 0 {
 			currentSlot -= visited
@@ -336,7 +338,9 @@ func downloadBlobHistoryWorker(cfg StageHistoryReconstructionCfg, ctx context.Co
 		case <-ctx.Done():
 			return ctx.Err()
 		case <-logInterval.C:
-
+			if !shouldLog {
+				continue
+			}
 			blkSec := float64(prevLogSlot-currentSlot) / time.Since(prevTime).Seconds()
 			blkSecStr := fmt.Sprintf("%.1f", blkSec)
 			// round to 1 decimal place  and convert to string
@@ -377,7 +381,9 @@ func downloadBlobHistoryWorker(cfg StageHistoryReconstructionCfg, ctx context.Co
 			continue
 		}
 	}
-	log.Info("Blob history download finished successfully")
+	if shouldLog {
+		logger.Info("Blob history download finished successfully")
+	}
 	cfg.antiquary.NotifyBlobBackfilled()
 	return nil
 }
