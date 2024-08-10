@@ -224,7 +224,7 @@ func (api *APIImpl) GetBlockByNumber(ctx context.Context, number rpc.BlockNumber
 	if b == nil {
 		return nil, nil
 	}
-	fmt.Println(b.Hash())
+
 	additionalFields := make(map[string]interface{})
 
 	chainConfig, err := api.chainConfig(ctx, tx)
