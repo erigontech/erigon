@@ -224,14 +224,8 @@ func (api *APIImpl) GetBlockByNumber(ctx context.Context, number rpc.BlockNumber
 	if b == nil {
 		return nil, nil
 	}
+	fmt.Println(b.Hash())
 	additionalFields := make(map[string]interface{})
-	td, err := rawdb.ReadTd(tx, b.Hash(), b.NumberU64())
-	if err != nil {
-		return nil, err
-	}
-	if td != nil {
-		additionalFields["totalDifficulty"] = (*hexutil.Big)(td)
-	}
 
 	chainConfig, err := api.chainConfig(ctx, tx)
 	if err != nil {

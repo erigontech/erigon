@@ -40,6 +40,7 @@ import (
 	"github.com/erigontech/erigon/accounts/abi/bind/backends"
 	"github.com/erigontech/erigon/common/u256"
 	"github.com/erigontech/erigon/consensus"
+	"github.com/erigontech/erigon/consensus/merge"
 	"github.com/erigontech/erigon/core"
 	"github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/core/vm"
@@ -303,7 +304,8 @@ func CreateTestGrpcConn(t *testing.T, m *mock.MockSentry) (context.Context, *grp
 	ctx, cancel := context.WithCancel(context.Background())
 
 	apis := m.Engine.APIs(nil)
-	if len(apis) < 1 {
+	_, isEngineAPI := m.Engine.(*merge.Merge)
+	if len(apis) < 1 && isEngineAPI {
 		t.Fatal("couldn't instantiate Engine api")
 	}
 
