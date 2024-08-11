@@ -19,7 +19,6 @@ package stagedsync
 import (
 	"errors"
 	"fmt"
-	"github.com/erigontech/erigon-lib/kv/membatchwithdb"
 	state2 "github.com/erigontech/erigon-lib/state"
 	"io"
 	"math/big"
@@ -137,11 +136,8 @@ func SpawnMiningExecStage(s *StageState, txc wrap.TxContainer, cfg MiningExecCfg
 			yielded := mapset.NewSet[[32]byte]()
 			var simStateReader state.StateReader
 			var simStateWriter state.StateWriter
-			//simStateWriter = state.NewWriterV4(txc.Doms)
-			mb := membatchwithdb.NewMemoryBatch(txc.Tx, cfg.tmpdir, logger)
-			defer mb.Rollback()
 
-			sd, err := state2.NewSharedDomains(mb, logger)
+			sd, err := state2.NewSharedDomains(txc.Tx, logger)
 			if err != nil {
 				return err
 			}

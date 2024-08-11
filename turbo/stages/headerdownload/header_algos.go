@@ -395,7 +395,6 @@ func (hd *HeaderDownload) RequestMoreHeaders(currentTime time.Time) (*HeaderRequ
 	var req *HeaderRequest
 
 	hd.anchorTree.Ascend(func(anchor *Anchor) bool {
-		hd.logger.Error("in request more", "anch hash", anchor.parentHash.Hex())
 		if anchor.blockHeight == 0 { //has no parent
 			return true
 		}

@@ -32,7 +32,6 @@ import (
 	"github.com/erigontech/erigon-lib/direct"
 	proto_downloader "github.com/erigontech/erigon-lib/gointerfaces/downloaderproto"
 	"github.com/erigontech/erigon-lib/kv"
-	"github.com/erigontech/erigon-lib/kv/membatchwithdb"
 	"github.com/erigontech/erigon-lib/kv/rawdbv3"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/state"
@@ -454,20 +453,14 @@ func MiningStep(ctx context.Context, db kv.RwDB, mining *stagedsync.Sync, tmpDir
 		}
 	}() // avoid crash because Erigon's core does many things
 
-	tx, err := db.BeginRo(ctx)
+	tx, err := db.BeginRw(ctx)
 	if err != nil {
 		return err
 	}
 	defer tx.Rollback()
 
-	var miningBatch kv.RwTx
-
-	mb := membatchwithdb.NewMemoryBatch(tx, tmpDir, logger)
-	defer mb.Rollback()
-	miningBatch = mb
-
-	txc := wrap.TxContainer{Tx: miningBatch}
-	sd, err := state.NewSharedDomains(mb, logger)
+	txc := wrap.TxContainer{Tx: tx}
+	sd, err := state.NewSharedDomains(tx, logger)
 	if err != nil {
 		return err
 	}

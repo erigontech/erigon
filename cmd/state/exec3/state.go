@@ -128,7 +128,7 @@ func (rw *Worker) ResetTx(chainTx kv.Tx) {
 
 func (rw *Worker) Run() error {
 	for txTask, ok := rw.in.Next(rw.ctx); ok; txTask, ok = rw.in.Next(rw.ctx) {
-		rw.RunTxTask(txTask, false)
+		rw.RunTxTask(txTask, rw.isMining)
 		if err := rw.resultCh.Add(rw.ctx, txTask); err != nil {
 			return err
 		}

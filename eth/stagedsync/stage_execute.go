@@ -305,7 +305,6 @@ func blocksReadAheadFunc(ctx context.Context, tx kv.Tx, cfg *ExecuteBlockCfg, bl
 }
 
 func UnwindExecutionStage(u *UnwindState, s *StageState, txc wrap.TxContainer, ctx context.Context, cfg ExecuteBlockCfg, logger log.Logger) (err error) {
-	fmt.Printf("unwind: %d -> %d, %T, %T\n", u.CurrentBlockNumber, u.UnwindPoint, txc.Tx, txc.Doms)
 	if u.UnwindPoint >= s.BlockNumber {
 		return nil
 	}

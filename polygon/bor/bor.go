@@ -898,7 +898,7 @@ func (c *Bor) verifySeal(chain consensus.ChainHeaderReader, header *types.Header
 // header for running the transactions on top.
 func (c *Bor) Prepare(chain consensus.ChainHeaderReader, header *types.Header, state *state.IntraBlockState) error {
 	// If the block isn't a checkpoint, cast a random vote (good enough for now)
-	//header.Coinbase = libcommon.Address{}
+	//header.Coinbase = libcommon.Address{} TODO: not sure that it's right
 	header.Nonce = types.BlockNonce{}
 
 	number := header.Number.Uint64()
