@@ -1,0 +1,42 @@
+{
+  "jsonrpc": "2.0",
+  "id": 1,
+  "result": {
+    "Signers": [
+      {
+        "Signer": "0xede32b0c9587b92ede83665477f7ec261fd85f0a",
+        "Difficulty": 8
+      },
+      {
+        "Signer": "0x22b64229c41429a023549fdab3385893b579327a",
+        "Difficulty": 7
+      },
+      {
+        "Signer": "0x4631753190f2f5a15a7ba172bbac102b7d95fa22",
+        "Difficulty": 6
+      },
+      {
+        "Signer": "0x6ab3d36c46ecfb9b9c0bd51cb1c3da5a2c81cea6",
+        "Difficulty": 5
+      },
+      {
+        "Signer": "0x6c095a53250dd250797ff915a716cca690ad8842",
+        "Difficulty": 4
+      },
+      {
+        "Signer": "0x6dc2dd54f24979ec26212794c71afefed722280c",
+        "Difficulty": 3
+      },
+      {
+        "Signer": "0x915a2284d28bd93de7d6f31173b981204bb666e6",
+        "Difficulty": 2
+      },
+      {
+        "Signer": "0xac75d6efec891724b88b916b36e2ef38bcbec73f",
+        "Difficulty": 1
+      }
+    ],
+    "Diff": 8,
+    "Author": "0xede32b0c9587b92ede83665477f7ec261fd85f0a"
+  }
+}

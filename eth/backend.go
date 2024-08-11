@@ -91,7 +91,7 @@ import (
 	"github.com/erigontech/erigon/common/debug"
 	"github.com/erigontech/erigon/consensus"
 	"github.com/erigontech/erigon/consensus/clique"
-	"github.com/erigontech/erigon/consensus/ethash"
+	"github.com/erigontech/erigon/consensus/mainnet"
 	"github.com/erigontech/erigon/consensus/merge"
 	"github.com/erigontech/erigon/consensus/misc"
 	"github.com/erigontech/erigon/core"
@@ -219,6 +219,7 @@ type Ethereum struct {
 	silkwormSentryService    *silkworm.SentryService
 
 	polygonSyncService polygonsync.Service
+	polygonBridge      bridge.PolygonBridge
 	stopNode           func() error
 }
 
@@ -533,7 +534,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 	} else if chainConfig.Bor != nil {
 		consensusConfig = chainConfig.Bor
 	} else {
-		consensusConfig = &config.Ethash
+		consensusConfig = &mainnet.MainnetConfig{}
 	}
 
 	var heimdallClient heimdall.HeimdallClient
@@ -547,7 +548,9 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 
 		if config.PolygonSync {
 			polygonBridge = bridge.Assemble(config.Dirs.DataDir, logger, consensusConfig.(*borcfg.BorConfig), heimdallClient.FetchStateSyncEvents, bor.GenesisContractStateReceiverABI())
-			heimdallService = heimdall.AssembleService(config.HeimdallURL, dirs.DataDir, tmpdir, logger)
+			heimdallService = heimdall.AssembleService(consensusConfig.(*borcfg.BorConfig), config.HeimdallURL, dirs.DataDir, tmpdir, logger)
+
+			backend.polygonBridge = polygonBridge
 		}
 
 		flags.Milestone = config.WithHeimdallMilestones
@@ -693,11 +696,6 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 		), stagedsync.MiningUnwindOrder, stagedsync.MiningPruneOrder,
 		logger)
 
-	var ethashApi *ethash.API
-	if casted, ok := backend.engine.(*ethash.Ethash); ok {
-		ethashApi = casted.APIs(nil)[1].Service.(*ethash.API)
-	}
-
 	// setup snapcfg
 	if err := loadSnapshotsEitherFromDiskIfNeeded(dirs, chainConfig.ChainName); err != nil {
 		return nil, err
@@ -749,7 +747,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 	agg.SetSnapshotBuildSema(blockSnapBuildSema)
 	blockRetire := freezeblocks.NewBlockRetire(1, dirs, blockReader, blockWriter, backend.chainDB, backend.chainConfig, backend.notifications.Events, blockSnapBuildSema, logger)
 
-	miningRPC = privateapi.NewMiningServer(ctx, backend, ethashApi, logger)
+	miningRPC = privateapi.NewMiningServer(ctx, backend, logger)
 
 	var creds credentials.TransportCredentials
 	if stack.Config().PrivateApiAddr != "" {
@@ -1046,7 +1044,7 @@ func (s *Ethereum) Init(stack *node.Node, config *ethconfig.Config, chainConfig 
 		}
 	}
 
-	s.apiList = jsonrpc.APIList(chainKv, ethRpcClient, txPoolRpcClient, miningRpcClient, ff, stateCache, blockReader, &httpRpcCfg, s.engine, s.logger)
+	s.apiList = jsonrpc.APIList(chainKv, ethRpcClient, txPoolRpcClient, miningRpcClient, ff, stateCache, blockReader, &httpRpcCfg, s.engine, s.logger, s.polygonBridge)
 
 	if config.SilkwormRpcDaemon && httpRpcCfg.Enabled {
 		interface_log_settings := silkworm.RpcInterfaceLogSettings{

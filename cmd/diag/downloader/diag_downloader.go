@@ -91,10 +91,11 @@ func printDownloadStatus(cliCtx *cli.Context) error {
 		util.RenderJson(snapshotDownloadStatus)
 
 	case "text":
-		util.RenderTableWithHeader(
+		util.PrintTable(
 			"Snapshot download info:",
 			table.Row{"Status", "Progress", "Downloaded", "Total", "Time Left", "Total Time", "Download Rate", "Upload Rate", "Peers", "Files", "Connections", "Alloc", "Sys"},
 			[]table.Row{snapshotDownloadStatus},
+			nil,
 		)
 	}
 
@@ -132,17 +133,19 @@ func printFiles(cliCtx *cli.Context) error {
 		util.RenderJson(filteredRows)
 	case "text":
 		//Print overall status
-		util.RenderTableWithHeader(
+		util.PrintTable(
 			"Snapshot download info:",
 			table.Row{"Status", "Progress", "Downloaded", "Total", "Time Left", "Total Time", "Download Rate", "Upload Rate", "Peers", "Files", "Connections", "Alloc", "Sys"},
 			[]table.Row{snapshotDownloadStatus},
+			nil,
 		)
 
 		//Print files status
-		util.RenderTableWithHeader(
+		util.PrintTable(
 			"Files download info:",
 			table.Row{"File", "Progress", "Total", "Downloaded", "Peers", "Peers Download Rate", "Webseeds", "Webseeds Download Rate", "Time Left", "Active"},
 			filteredRows,
+			nil,
 		)
 	}
 
@@ -167,10 +170,11 @@ func printFile(cliCtx *cli.Context) error {
 				util.RenderJson(fileRow)
 			case "text":
 				//Print file status
-				util.RenderTableWithHeader(
+				util.PrintTable(
 					"File download info:",
 					table.Row{"File", "Size", "Average Download Rate", "Time Took"},
 					[]table.Row{fileRow},
+					nil,
 				)
 			}
 		} else {
@@ -185,23 +189,26 @@ func printFile(cliCtx *cli.Context) error {
 				util.RenderJson(fileWebseeds)
 			case "text":
 				//Print file status
-				util.RenderTableWithHeader(
+				util.PrintTable(
 					"file download info:",
 					table.Row{"File", "Progress", "Total", "Downloaded", "Peers", "Peers Download Rate", "Webseeds", "Webseeds Download Rate", "Time Left", "Active"},
 					[]table.Row{fileRow},
+					nil,
 				)
 
 				//Print peers and webseeds status
-				util.RenderTableWithHeader(
+				util.PrintTable(
 					"",
 					table.Row{"Peer", "Download Rate"},
 					filePeers,
+					nil,
 				)
 
-				util.RenderTableWithHeader(
+				util.PrintTable(
 					"",
 					table.Row{"Webseed", "Download Rate"},
 					fileWebseeds,
+					nil,
 				)
 			}
 		}

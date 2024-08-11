@@ -19,6 +19,7 @@ package forkchoice
 import (
 	"errors"
 
+	"github.com/erigontech/erigon/cl/beacon/beaconevents"
 	"github.com/erigontech/erigon/cl/transition"
 
 	libcommon "github.com/erigontech/erigon-lib/common"
@@ -38,9 +39,22 @@ func (f *ForkChoiceStore) updateCheckpoints(justifiedCheckpoint, finalizedCheckp
 		f.justifiedCheckpoint.Store(justifiedCheckpoint)
 	}
 	if finalizedCheckpoint.Epoch() > f.finalizedCheckpoint.Load().(solid.Checkpoint).Epoch() {
-		f.emitters.Publish("finalized_checkpoint", finalizedCheckpoint)
 		f.onNewFinalized(finalizedCheckpoint)
 		f.finalizedCheckpoint.Store(finalizedCheckpoint)
+
+		// prepare and send the finalized checkpoint event
+		blockRoot := finalizedCheckpoint.BlockRoot()
+		blockHeader, ok := f.forkGraph.GetHeader(blockRoot)
+		if !ok {
+			log.Warn("Finalized block header not found", "blockRoot", blockRoot)
+			return
+		}
+		f.emitters.State().SendFinalizedCheckpoint(&beaconevents.FinalizedCheckpointData{
+			Block:               finalizedCheckpoint.BlockRoot(),
+			Epoch:               finalizedCheckpoint.Epoch(),
+			State:               blockHeader.Root,
+			ExecutionOptimistic: false,
+		})
 	}
 }
 
