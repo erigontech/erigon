@@ -40,8 +40,7 @@ func NewEVMBlockContext(header *types.Header, blockHashFunc func(n uint64) libco
 	// If we don't have an explicit author (i.e. not mining), extract from the header
 	var beneficiary libcommon.Address
 	if author == nil {
-		beneficiary = header.Coinbase
-		//beneficiary, _ = engine.Author(header) // Ignore error, we're past header validation
+		beneficiary, _ = engine.Author(header) // Ignore error, we're past header validation
 	} else {
 		beneficiary = *author
 	}

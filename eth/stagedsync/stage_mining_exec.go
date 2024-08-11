@@ -108,9 +108,10 @@ func SpawnMiningExecStage(s *StageState, txc wrap.TxContainer, cfg MiningExecCfg
 	stateReader = state.NewReaderV4(txc.Doms)
 	ibs := state.New(stateReader)
 	// Clique consensus needs forced author in the evm context
-	if cfg.chainConfig.Consensus == chain.CliqueConsensus {
-		execCfg.author = &cfg.miningState.MiningConfig.Etherbase
-	}
+	//if cfg.chainConfig.Consensus == chain.CliqueConsensus {
+	//	execCfg.author = &cfg.miningState.MiningConfig.Etherbase
+	//}
+	execCfg.author = &cfg.miningState.MiningConfig.Etherbase
 
 	// Create an empty block based on temporary copied state for
 	// sealing in advance without waiting block execution finished.

@@ -1242,8 +1242,7 @@ func (s *Ethereum) StartMining(ctx context.Context, db kv.RwDB, stateDiffClient 
 		defer debug.LogPanic()
 		defer close(s.waitForMiningStop)
 		defer streamCancel()
-		//TODO: remove
-		miner.MiningConfig.Recommit = time.Second * 30
+
 		mineEvery := time.NewTicker(miner.MiningConfig.Recommit)
 
 		defer mineEvery.Stop()
