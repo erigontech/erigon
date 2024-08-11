@@ -20,6 +20,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"math"
 	"math/big"
@@ -132,7 +133,7 @@ func GenerateSyncEvents(ctx context.Context, senderName string, numberOfTransfer
 			}
 
 			if !sendConfirmed {
-				return fmt.Errorf("No post sync log received")
+				return errors.New("No post sync log received")
 			}
 
 			auth.Nonce = (&big.Int{}).Add(auth.Nonce, big.NewInt(1))

@@ -296,21 +296,21 @@ func (tx *LegacyTx) UnmarshalJSON(input []byte) error {
 	}
 	overflow = tx.V.SetFromBig(dec.V.ToInt())
 	if overflow {
-		return fmt.Errorf("dec.V higher than 2^256-1")
+		return errors.New("dec.V higher than 2^256-1")
 	}
 	if dec.R == nil {
 		return errors.New("missing required field 'r' in transaction")
 	}
 	overflow = tx.R.SetFromBig(dec.R.ToInt())
 	if overflow {
-		return fmt.Errorf("dec.R higher than 2^256-1")
+		return errors.New("dec.R higher than 2^256-1")
 	}
 	if dec.S == nil {
 		return errors.New("missing required field 's' in transaction")
 	}
 	overflow = tx.S.SetFromBig(dec.S.ToInt())
 	if overflow {
-		return fmt.Errorf("dec.S higher than 2^256-1")
+		return errors.New("dec.S higher than 2^256-1")
 	}
 	if overflow {
 		return errors.New("'s' in transaction does not fit in 256 bits")
@@ -375,21 +375,21 @@ func (tx *AccessListTx) UnmarshalJSON(input []byte) error {
 	}
 	overflow = tx.V.SetFromBig(dec.V.ToInt())
 	if overflow {
-		return fmt.Errorf("dec.V higher than 2^256-1")
+		return errors.New("dec.V higher than 2^256-1")
 	}
 	if dec.R == nil {
 		return errors.New("missing required field 'r' in transaction")
 	}
 	overflow = tx.R.SetFromBig(dec.R.ToInt())
 	if overflow {
-		return fmt.Errorf("dec.R higher than 2^256-1")
+		return errors.New("dec.R higher than 2^256-1")
 	}
 	if dec.S == nil {
 		return errors.New("missing required field 's' in transaction")
 	}
 	overflow = tx.S.SetFromBig(dec.S.ToInt())
 	if overflow {
-		return fmt.Errorf("dec.S higher than 2^256-1")
+		return errors.New("dec.S higher than 2^256-1")
 	}
 	withSignature := !tx.V.IsZero() || !tx.R.IsZero() || !tx.S.IsZero()
 	if withSignature {
@@ -451,21 +451,21 @@ func (tx *DynamicFeeTransaction) unmarshalJson(dec txJSON) error {
 	}
 	overflow = tx.V.SetFromBig(dec.V.ToInt())
 	if overflow {
-		return fmt.Errorf("dec.V higher than 2^256-1")
+		return errors.New("dec.V higher than 2^256-1")
 	}
 	if dec.R == nil {
 		return errors.New("missing required field 'r' in transaction")
 	}
 	overflow = tx.R.SetFromBig(dec.R.ToInt())
 	if overflow {
-		return fmt.Errorf("dec.R higher than 2^256-1")
+		return errors.New("dec.R higher than 2^256-1")
 	}
 	if dec.S == nil {
 		return errors.New("missing required field 's' in transaction")
 	}
 	overflow = tx.S.SetFromBig(dec.S.ToInt())
 	if overflow {
-		return fmt.Errorf("dec.S higher than 2^256-1")
+		return errors.New("dec.S higher than 2^256-1")
 	}
 	if overflow {
 		return errors.New("'s' in transaction does not fit in 256 bits")
@@ -494,12 +494,9 @@ func (tx *SetCodeTransaction) UnmarshalJSON(input []byte) error {
 		return err
 	}
 
-	dTx := DynamicFeeTransaction{}
-	if err := dTx.unmarshalJson(dec); err != nil {
+	if err := tx.DynamicFeeTransaction.unmarshalJson(dec); err != nil {
 		return err
 	}
-
-	tx.DynamicFeeTransaction = dTx
 	tx.Authorizations = make([]Authorization, len(*dec.Authorizations))
 	for i, auth := range *dec.Authorizations {
 		tx.Authorizations[i] = auth.ToAuthorization()
@@ -581,21 +578,21 @@ func UnmarshalBlobTxJSON(input []byte) (Transaction, error) {
 	}
 	overflow = tx.V.SetFromBig(dec.V.ToInt())
 	if overflow {
-		return nil, fmt.Errorf("dec.V higher than 2^256-1")
+		return nil, errors.New("dec.V higher than 2^256-1")
 	}
 	if dec.R == nil {
 		return nil, errors.New("missing required field 'r' in transaction")
 	}
 	overflow = tx.R.SetFromBig(dec.R.ToInt())
 	if overflow {
-		return nil, fmt.Errorf("dec.R higher than 2^256-1")
+		return nil, errors.New("dec.R higher than 2^256-1")
 	}
 	if dec.S == nil {
 		return nil, errors.New("missing required field 's' in transaction")
 	}
 	overflow = tx.S.SetFromBig(dec.S.ToInt())
 	if overflow {
-		return nil, fmt.Errorf("dec.S higher than 2^256-1")
+		return nil, errors.New("dec.S higher than 2^256-1")
 	}
 
 	withSignature := !tx.V.IsZero() || !tx.R.IsZero() || !tx.S.IsZero()
@@ -611,7 +608,8 @@ func UnmarshalBlobTxJSON(input []byte) (Transaction, error) {
 	}
 
 	btx := BlobTxWrapper{
-		Tx:          tx,
+		// it's ok to copy here - because it's constructor of object - no parallel access yet
+		Tx:          tx, //nolint
 		Commitments: dec.Commitments,
 		Blobs:       dec.Blobs,
 		Proofs:      dec.Proofs,

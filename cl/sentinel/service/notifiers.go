@@ -17,7 +17,7 @@
 package service
 
 import (
-	"fmt"
+	"errors"
 	"sync"
 )
 
@@ -58,7 +58,7 @@ func (g *gossipNotifier) addSubscriber() (chan gossipObject, int, error) {
 	defer g.mu.Unlock()
 
 	if len(g.notifiers) >= maxSubscribers {
-		return nil, -1, fmt.Errorf("too many subsribers, try again later")
+		return nil, -1, errors.New("too many subsribers, try again later")
 	}
 	ch := make(chan gossipObject, 1<<16)
 	g.notifiers = append(g.notifiers, ch)
@@ -70,7 +70,7 @@ func (g *gossipNotifier) removeSubscriber(id int) error {
 	defer g.mu.Unlock()
 
 	if len(g.notifiers) <= id {
-		return fmt.Errorf("invalid id, no subscription exist with this id")
+		return errors.New("invalid id, no subscription exist with this id")
 	}
 	close(g.notifiers[id])
 	g.notifiers = append(g.notifiers[:id], g.notifiers[id+1:]...)

@@ -82,7 +82,7 @@ func (g *GolombRice) appendFixed(v uint64, log2golomb int) {
 	g.bitCount += log2golomb
 }
 
-// Bits returns currrent number of bits in the compact encoding of the hash function representation
+// Bits returns current number of bits in the compact encoding of the hash function representation
 func (g *GolombRice) Bits() int {
 	return g.bitCount
 }

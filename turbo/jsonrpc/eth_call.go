@@ -22,9 +22,6 @@ import (
 	"fmt"
 	"math/big"
 
-	"github.com/holiman/uint256"
-	"google.golang.org/grpc"
-
 	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/hexutil"
 	"github.com/erigontech/erigon-lib/common/hexutility"
@@ -33,6 +30,8 @@ import (
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/log/v3"
 	types2 "github.com/erigontech/erigon-lib/types"
+	"github.com/holiman/uint256"
+	"google.golang.org/grpc"
 
 	"github.com/erigontech/erigon/core"
 	"github.com/erigontech/erigon/core/state"
@@ -202,7 +201,7 @@ func (api *APIImpl) EstimateGas(ctx context.Context, argsOrNil *ethapi2.CallArgs
 		stateReader := rpchelper.CreateLatestCachedStateReader(cacheView, dbtx)
 		state := state.New(stateReader)
 		if state == nil {
-			return 0, fmt.Errorf("can't get the current state")
+			return 0, errors.New("can't get the current state")
 		}
 
 		balance := state.GetBalance(*args.From) // from can't be nil
@@ -254,7 +253,7 @@ func (api *APIImpl) EstimateGas(ctx context.Context, argsOrNil *ethapi2.CallArgs
 		}
 	}
 	if block == nil {
-		return 0, fmt.Errorf("could not find latest block in cache or db")
+		return 0, errors.New("could not find latest block in cache or db")
 	}
 
 	stateReader, err := rpchelper.CreateStateReaderFromBlockNumber(ctx, dbtx, latestCanBlockNumber, isLatest, 0, api.stateCache, chainConfig.ChainName)
@@ -332,7 +331,7 @@ func (api *APIImpl) EstimateGas(ctx context.Context, argsOrNil *ethapi2.CallArgs
 // GetProof is partially implemented; no Storage proofs, and proofs must be for
 // blocks within maxGetProofRewindBlockCount blocks of the head.
 func (api *APIImpl) GetProof(ctx context.Context, address libcommon.Address, storageKeys []libcommon.Hash, blockNrOrHash rpc.BlockNumberOrHash) (*accounts.AccProofResult, error) {
-	return nil, fmt.Errorf("not supported by Erigon3")
+	return nil, errors.New("not supported by Erigon3")
 	/*
 		tx, err := api.db.BeginRo(ctx)
 		if err != nil {

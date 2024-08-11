@@ -32,8 +32,7 @@ import (
 	"github.com/erigontech/erigon/consensus"
 	"github.com/erigontech/erigon/consensus/aura"
 	"github.com/erigontech/erigon/consensus/clique"
-	"github.com/erigontech/erigon/consensus/ethash"
-	"github.com/erigontech/erigon/consensus/ethash/ethashcfg"
+	"github.com/erigontech/erigon/consensus/mainnet"
 	"github.com/erigontech/erigon/consensus/merge"
 	"github.com/erigontech/erigon/node"
 	"github.com/erigontech/erigon/node/nodecfg"
@@ -45,32 +44,14 @@ import (
 
 func CreateConsensusEngine(ctx context.Context, nodeConfig *nodecfg.Config, chainConfig *chain.Config, config interface{}, notify []string, noVerify bool,
 	heimdallClient heimdall.HeimdallClient, withoutHeimdall bool, blockReader services.FullBlockReader, readonly bool,
-	logger log.Logger, polygonBridge bridge.Service,
+	logger log.Logger, polygonBridge bridge.Service, heimdallService heimdall.Service,
 ) consensus.Engine {
 	var eng consensus.Engine
 
 	switch consensusCfg := config.(type) {
-	case *ethashcfg.Config:
-		switch consensusCfg.PowMode {
-		case ethashcfg.ModeFake:
-			logger.Warn("Ethash used in fake mode")
-			eng = ethash.NewFaker()
-		case ethashcfg.ModeTest:
-			logger.Warn("Ethash used in test mode")
-			eng = ethash.NewTester(nil, noVerify)
-		case ethashcfg.ModeShared:
-			logger.Warn("Ethash used in shared mode")
-			eng = ethash.NewShared()
-		default:
-			eng = ethash.New(ethashcfg.Config{
-				CachesInMem:      consensusCfg.CachesInMem,
-				CachesLockMmap:   consensusCfg.CachesLockMmap,
-				DatasetDir:       consensusCfg.DatasetDir,
-				DatasetsInMem:    consensusCfg.DatasetsInMem,
-				DatasetsOnDisk:   consensusCfg.DatasetsOnDisk,
-				DatasetsLockMmap: consensusCfg.DatasetsLockMmap,
-			}, notify, noVerify)
-		}
+	case *mainnet.MainnetConfig:
+		logger.Warn("Ethash used in fake mode")
+		eng = mainnet.NewMainnetConsensus()
 	case *params.ConsensusSnapshotConfig:
 		if chainConfig.Clique != nil {
 			if consensusCfg.InMemory {
@@ -129,7 +110,7 @@ func CreateConsensusEngine(ctx context.Context, nodeConfig *nodecfg.Config, chai
 				panic(err)
 			}
 
-			eng = bor.New(chainConfig, db, blockReader, spanner, heimdallClient, genesisContractsClient, logger, polygonBridge)
+			eng = bor.New(chainConfig, db, blockReader, spanner, heimdallClient, genesisContractsClient, logger, polygonBridge, heimdallService)
 		}
 	}
 
@@ -154,11 +135,9 @@ func CreateConsensusEngineBareBones(ctx context.Context, chainConfig *chain.Conf
 	} else if chainConfig.Bor != nil {
 		consensusConfig = chainConfig.Bor
 	} else {
-		var ethashCfg ethashcfg.Config
-		ethashCfg.PowMode = ethashcfg.ModeFake
-		consensusConfig = &ethashCfg
+		consensusConfig = &mainnet.MainnetConfig{}
 	}
 
 	return CreateConsensusEngine(ctx, &nodecfg.Config{}, chainConfig, consensusConfig, nil /* notify */, true, /* noVerify */
-		nil /* heimdallClient */, true /* withoutHeimdall */, nil /* blockReader */, false /* readonly */, logger, nil)
+		nil /* heimdallClient */, true /* withoutHeimdall */, nil /* blockReader */, false /* readonly */, logger, nil, nil)
 }

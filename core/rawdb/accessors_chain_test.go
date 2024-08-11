@@ -257,7 +257,7 @@ func TestBlockStorage(t *testing.T) {
 	}
 
 	// prune: [1: N)
-	deleted := 0
+	var deleted int
 	deleted, err = bw.PruneBlocks(ctx, tx, 0, 1)
 	require.NoError(err)
 	require.Equal(0, deleted)
@@ -732,7 +732,7 @@ func TestBlockWithdrawalsStorage(t *testing.T) {
 		t.Fatalf("Could not write block: %v", err)
 	}
 	// prune: [1: N)
-	deleted := 0
+	var deleted int
 	deleted, err = bw.PruneBlocks(ctx, tx, 0, 1)
 	require.NoError(err)
 	require.Equal(0, deleted)

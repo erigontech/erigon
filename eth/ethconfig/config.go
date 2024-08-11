@@ -22,10 +22,6 @@ package ethconfig
 
 import (
 	"math/big"
-	"os"
-	"os/user"
-	"path/filepath"
-	"runtime"
 	"strings"
 	"time"
 
@@ -38,7 +34,6 @@ import (
 	"github.com/erigontech/erigon-lib/txpool/txpoolcfg"
 	"github.com/erigontech/erigon/cl/beacon/beacon_router_configuration"
 	"github.com/erigontech/erigon/cl/clparams"
-	"github.com/erigontech/erigon/consensus/ethash/ethashcfg"
 	"github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/eth/ethconfig/estimate"
 	"github.com/erigontech/erigon/eth/gasprice/gaspricecfg"
@@ -74,20 +69,12 @@ var LightClientGPO = gaspricecfg.Config{
 // Defaults contains default settings for use on the Ethereum main net.
 var Defaults = Config{
 	Sync: Sync{
-		UseSnapshots:               true,
 		ExecWorkerCount:            estimate.ReconstituteState.WorkersHalf(), //only half of CPU, other half will spend for snapshots build/merge/prune
 		ReconWorkerCount:           estimate.ReconstituteState.Workers(),
 		BodyCacheLimit:             256 * 1024 * 1024,
 		BodyDownloadTimeoutSeconds: 2,
 		//LoopBlockLimit:             100_000,
 		PruneLimit: 100,
-	},
-	Ethash: ethashcfg.Config{
-		CachesInMem:      2,
-		CachesLockMmap:   false,
-		DatasetsInMem:    1,
-		DatasetsOnDisk:   2,
-		DatasetsLockMmap: false,
 	},
 	NetworkID: 1,
 	Prune:     prune.DefaultMode,
@@ -104,41 +91,15 @@ var Defaults = Config{
 
 	ImportMode: false,
 	Snapshot: BlocksFreezing{
-		Enabled:    true,
 		KeepBlocks: false,
 		ProduceE2:  true,
 		ProduceE3:  true,
 	},
 }
 
-func init() {
-	home := os.Getenv("HOME")
-	if home == "" {
-		if user, err := user.Current(); err == nil {
-			home = user.HomeDir
-		}
-	}
-	if runtime.GOOS == "darwin" {
-		Defaults.Ethash.DatasetDir = filepath.Join(home, "Library", "erigon-ethash")
-	} else if runtime.GOOS == "windows" {
-		localappdata := os.Getenv("LOCALAPPDATA")
-		if localappdata != "" {
-			Defaults.Ethash.DatasetDir = filepath.Join(localappdata, "erigon-thash")
-		} else {
-			Defaults.Ethash.DatasetDir = filepath.Join(home, "AppData", "Local", "erigon-ethash")
-		}
-	} else {
-		if xdgDataDir := os.Getenv("XDG_DATA_HOME"); xdgDataDir != "" {
-			Defaults.Ethash.DatasetDir = filepath.Join(xdgDataDir, "erigon-ethash")
-		}
-		Defaults.Ethash.DatasetDir = filepath.Join(home, ".local/share/erigon-ethash") //nolint:gocritic
-	}
-}
-
 //go:generate gencodec -dir . -type Config -formats toml -out gen_config.go
 
 type BlocksFreezing struct {
-	Enabled        bool
 	KeepBlocks     bool // produce new snapshots of blocks but don't remove blocks from DB
 	ProduceE2      bool // produce new block files
 	ProduceE3      bool // produce new state files
@@ -150,9 +111,6 @@ type BlocksFreezing struct {
 
 func (s BlocksFreezing) String() string {
 	var out []string
-	if s.Enabled {
-		out = append(out, "--snapshots=true")
-	}
 	if s.KeepBlocks {
 		out = append(out, "--"+FlagSnapKeepBlocks+"=true")
 	}
@@ -168,8 +126,8 @@ var (
 	FlagSnapStateStop  = "snap.state.stop"
 )
 
-func NewSnapCfg(enabled, keepBlocks, produceE2, produceE3 bool, chainName string) BlocksFreezing {
-	return BlocksFreezing{Enabled: enabled, KeepBlocks: keepBlocks, ProduceE2: produceE2, ProduceE3: produceE3, ChainName: chainName}
+func NewSnapCfg(keepBlocks, produceE2, produceE3 bool, chainName string) BlocksFreezing {
+	return BlocksFreezing{KeepBlocks: keepBlocks, ProduceE2: produceE2, ProduceE3: produceE3}
 }
 
 // Config contains configuration options for ETH protocol.
@@ -210,9 +168,6 @@ type Config struct {
 
 	// Mining options
 	Miner params.MiningConfig
-
-	// Ethash options
-	Ethash ethashcfg.Config
 
 	Clique params.ConsensusSnapshotConfig
 	Aura   chain.AuRaConfig
@@ -275,8 +230,6 @@ type Config struct {
 }
 
 type Sync struct {
-	UseSnapshots bool
-
 	// LoopThrottle sets a minimum time between staged loop iterations
 	LoopThrottle     time.Duration
 	ExecWorkerCount  int
@@ -292,5 +245,3 @@ type Sync struct {
 	UploadFrom       rpc.BlockNumber
 	FrozenBlockLimit uint64
 }
-
-func UseSnapshotsByChainName(chain string) bool { return true }

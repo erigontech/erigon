@@ -187,6 +187,10 @@ Loop:
 		}
 		// set expected root to the segment parent root
 		b.expectedRoot = segment.Block.ParentRoot
+		if segment.Block.Slot == 0 {
+			b.finished.Store(true)
+			return nil
+		}
 		b.slotToDownload.Store(segment.Block.Slot - 1) // update slot (might be inexact but whatever)
 	}
 	if !b.neverSkip {

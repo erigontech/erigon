@@ -33,7 +33,7 @@ import (
 
 type voluntaryExitService struct {
 	operationsPool    pool.OperationsPool
-	emitters          *beaconevents.Emitters
+	emitters          *beaconevents.EventEmitter
 	syncedDataManager synced_data.SyncedData
 	beaconCfg         *clparams.BeaconChainConfig
 	ethClock          eth_clock.EthereumClock
@@ -41,7 +41,7 @@ type voluntaryExitService struct {
 
 func NewVoluntaryExitService(
 	operationsPool pool.OperationsPool,
-	emitters *beaconevents.Emitters,
+	emitters *beaconevents.EventEmitter,
 	syncedDataManager synced_data.SyncedData,
 	beaconCfg *clparams.BeaconChainConfig,
 	ethClock eth_clock.EthereumClock,
@@ -58,7 +58,6 @@ func NewVoluntaryExitService(
 func (s *voluntaryExitService) ProcessMessage(ctx context.Context, subnet *uint64, msg *cltypes.SignedVoluntaryExit) error {
 	// ref: https://github.com/ethereum/consensus-specs/blob/dev/specs/phase0/p2p-interface.md#voluntary_exit
 	voluntaryExit := msg.VoluntaryExit
-	defer s.emitters.Publish("voluntary_exit", voluntaryExit)
 
 	// [IGNORE] The voluntary exit is the first valid voluntary exit received for the validator with index signed_voluntary_exit.message.validator_index.
 	if s.operationsPool.VoluntaryExitsPool.Has(voluntaryExit.ValidatorIndex) {
@@ -80,7 +79,7 @@ func (s *voluntaryExitService) ProcessMessage(ctx context.Context, subnet *uint6
 	// Verify the validator is active
 	// assert is_active_validator(validator, get_current_epoch(state))
 	if !val.Active(curEpoch) {
-		return fmt.Errorf("validator is not active")
+		return errors.New("validator is not active")
 	}
 
 	// Verify exit has not been initiated
@@ -92,13 +91,13 @@ func (s *voluntaryExitService) ProcessMessage(ctx context.Context, subnet *uint6
 	// Exits must specify an epoch when they become valid; they are not valid before then
 	// assert get_current_epoch(state) >= voluntary_exit.epoch
 	if !(curEpoch >= voluntaryExit.Epoch) {
-		return fmt.Errorf("exits must specify an epoch when they become valid; they are not valid before then")
+		return errors.New("exits must specify an epoch when they become valid; they are not valid before then")
 	}
 
 	// Verify the validator has been active long enough
 	// assert get_current_epoch(state) >= validator.activation_epoch + SHARD_COMMITTEE_PERIOD
 	if !(curEpoch >= val.ActivationEpoch()+s.beaconCfg.ShardCommitteePeriod) {
-		return fmt.Errorf("verify the validator has been active long enough")
+		return errors.New("verify the validator has been active long enough")
 	}
 
 	// Verify signature
@@ -127,6 +126,6 @@ func (s *voluntaryExitService) ProcessMessage(ctx context.Context, subnet *uint6
 	}
 
 	s.operationsPool.VoluntaryExitsPool.Insert(voluntaryExit.ValidatorIndex, msg)
-
+	s.emitters.Operation().SendVoluntaryExit(msg)
 	return nil
 }

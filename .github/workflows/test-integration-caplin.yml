@@ -24,7 +24,7 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-go@v4
+      - uses: actions/setup-go@v5
         with:
           go-version: '1.21'
       - name: Install dependencies on Linux
@@ -42,11 +42,11 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-go@v4
+      - uses: actions/setup-go@v5
         with:
           go-version: '1.21'
 
-      - uses: actions/cache@v3
+      - uses: actions/cache@v4
         with:
           path: |
             C:\ProgramData\chocolatey\lib\mingw

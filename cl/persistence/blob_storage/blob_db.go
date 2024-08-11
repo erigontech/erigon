@@ -236,7 +236,7 @@ func VerifyAgainstIdentifiersAndInsertIntoTheBlobStore(ctx context.Context, stor
 		return 0, 0, nil
 	}
 	if len(sidecars) > identifiers.Len() {
-		return 0, 0, fmt.Errorf("sidecars length is greater than identifiers length")
+		return 0, 0, errors.New("sidecars length is greater than identifiers length")
 	}
 	prevBlockRoot := identifiers.Get(0).BlockRoot
 	totalProcessed := 0
@@ -261,7 +261,7 @@ func VerifyAgainstIdentifiersAndInsertIntoTheBlobStore(ctx context.Context, stor
 		}
 
 		if !cltypes.VerifyCommitmentInclusionProof(sidecar.KzgCommitment, sidecar.CommitmentInclusionProof, sidecar.Index, clparams.DenebVersion, sidecar.SignedBlockHeader.Header.BodyRoot) {
-			return 0, 0, fmt.Errorf("could not verify blob's inclusion proof")
+			return 0, 0, errors.New("could not verify blob's inclusion proof")
 		}
 		if verifySignatureFn != nil {
 			// verify the signature of the sidecar head, we leave this step up to the caller to define
@@ -305,7 +305,7 @@ func VerifyAgainstIdentifiersAndInsertIntoTheBlobStore(ctx context.Context, stor
 				kzgProofs[i] = gokzg4844.KZGProof(sidecar.KzgProof)
 			}
 			if err := kzgCtx.VerifyBlobKZGProofBatch(blobs, kzgCommitments, kzgProofs); err != nil {
-				errAtomic.Store(fmt.Errorf("sidecar is wrong"))
+				errAtomic.Store(errors.New("sidecar is wrong"))
 				return
 			}
 			if err := storage.WriteBlobSidecars(ctx, sds.blockRoot, sds.sidecars); err != nil {

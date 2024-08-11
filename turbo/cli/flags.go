@@ -274,7 +274,7 @@ func ApplyFlagsForEthConfig(ctx *cli.Context, cfg *ethconfig.Config, logger log.
 	}
 	// Sanitize prune flag
 	if ctx.String(PruneModeFlag.Name) != "archive" && (ctx.IsSet(PruneBlocksDistanceFlag.Name) || ctx.IsSet(PruneDistanceFlag.Name)) {
-		utils.Fatalf(fmt.Sprintf("error: --prune.distance and --prune.distance.blocks are only allowed with --prune.mode=archive"))
+		utils.Fatalf("error: --prune.distance and --prune.distance.blocks are only allowed with --prune.mode=archive")
 	}
 	distance := ctx.Uint64(PruneDistanceFlag.Name)
 	blockDistance := ctx.Uint64(PruneBlocksDistanceFlag.Name)
@@ -399,7 +399,7 @@ func ApplyFlagsForEthConfigCobra(f *pflag.FlagSet, cfg *ethconfig.Config) {
 
 	chainId := cfg.NetworkID
 	if *pruneMode != "archive" && (pruneBlockDistance != nil || pruneDistance != nil) {
-		utils.Fatalf(fmt.Sprintf("error: --prune.distance and --prune.distance.blocks are only allowed with --prune.mode=archive"))
+		utils.Fatalf("error: --prune.distance and --prune.distance.blocks are only allowed with --prune.mode=archive")
 	}
 	var distance, blockDistance uint64 = math.MaxUint64, math.MaxUint64
 	if pruneBlockDistance != nil {

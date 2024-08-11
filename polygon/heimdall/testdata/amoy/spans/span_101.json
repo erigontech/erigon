@@ -1,0 +1,30 @@
+{
+  "span_id": 101,
+  "start_block": 640256,
+  "end_block": 646655,
+  "validator_set": {
+    "validators": [
+      {
+        "ID": 1,
+        "signer": "0x6ab3d36c46ecfb9b9c0bd51cb1c3da5a2c81cea6",
+        "power": 10000,
+        "accum": 0
+      }
+    ],
+    "proposer": {
+      "ID": 1,
+      "signer": "0x6ab3d36c46ecfb9b9c0bd51cb1c3da5a2c81cea6",
+      "power": 10000,
+      "accum": 0
+    }
+  },
+  "selected_producers": [
+    {
+      "ID": 1,
+      "signer": "0x6ab3d36c46ecfb9b9c0bd51cb1c3da5a2c81cea6",
+      "power": 10000,
+      "accum": 0
+    }
+  ],
+  "bor_chain_id": "80002"
+}

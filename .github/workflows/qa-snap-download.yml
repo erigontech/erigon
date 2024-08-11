@@ -2,17 +2,17 @@ name: QA - Snapshot Download
 
 on:
   schedule:
-    - cron: '0 5 * * 1-6'  # Run every day at 05:00 AM UTC except Sunday
+    - cron: '0 0 * * 1-6'  # Run every night at 00:00 AM UTC except Sunday
   workflow_dispatch:     # Run manually
 
 jobs:
   snap-download-test:
     runs-on: self-hosted
-    timeout-minutes: 800
+    timeout-minutes: 500
     env:
       ERIGON_DATA_DIR: ${{ github.workspace }}/erigon_data
       ERIGON_QA_PATH: /home/qarunner/erigon-qa
-      TOTAL_TIME_SECONDS: 43200 # 12 hours
+      TOTAL_TIME_SECONDS: 28800 # 8 hours
       CHAIN: mainnet
 
     steps:

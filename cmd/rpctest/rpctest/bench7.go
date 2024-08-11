@@ -17,6 +17,7 @@
 package rpctest
 
 import (
+	"errors"
 	"fmt"
 	"net/http"
 	"time"
@@ -90,7 +91,7 @@ func Bench7(erigonURL, gethURL string) error {
 		printStorageRange(sm)
 		fmt.Printf("================smg\n")
 		printStorageRange(smg)
-		return fmt.Errorf("storage are different")
+		return errors.New("storage are different")
 	}
 	fmt.Printf("storageRanges: %d\n", len(sm))
 	return nil

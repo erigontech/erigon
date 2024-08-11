@@ -47,7 +47,7 @@ import (
 	types2 "github.com/erigontech/erigon-lib/types"
 
 	"github.com/erigontech/erigon/common/u256"
-	"github.com/erigontech/erigon/consensus/ethash"
+	"github.com/erigontech/erigon/consensus/mainnet"
 	"github.com/erigontech/erigon/core"
 	"github.com/erigontech/erigon/core/rawdb"
 	"github.com/erigontech/erigon/core/state"
@@ -56,7 +56,6 @@ import (
 	"github.com/erigontech/erigon/crypto"
 	"github.com/erigontech/erigon/ethdb/prune"
 	"github.com/erigontech/erigon/params"
-	"github.com/erigontech/erigon/turbo/services"
 	"github.com/erigontech/erigon/turbo/stages/mock"
 )
 
@@ -410,14 +409,6 @@ func testReorg(t *testing.T, first, second []int64, td int64) {
 	})
 	require.NoError(err)
 	require.Equal(b, msg.GetData())
-
-	// Make sure the chain total difficulty is the correct one
-	want := new(big.Int).Add(m.Genesis.Difficulty(), big.NewInt(td))
-	have, err := rawdb.ReadTdByHash(tx, rawdb.ReadCurrentHeader(tx).Hash())
-	require.NoError(err)
-	if have.Cmp(want) != 0 {
-		t.Errorf("total difficulty mismatch: have %v, want %v", have, want)
-	}
 }
 
 // Tests that the insertion functions detect banned hashes.
@@ -546,7 +537,7 @@ func TestChainTxReorgs(t *testing.T) {
 		if bn, _ := rawdb.ReadTxLookupEntry(tx, txn.Hash()); bn != nil {
 			t.Errorf("drop %d: tx %v found while shouldn't have been", i, txn)
 		}
-		if rcpt, _, _, _, _ := readReceipt(tx, txn.Hash(), m.BlockReader); rcpt != nil {
+		if rcpt, _, _, _, _ := readReceipt(tx, txn.Hash(), m); rcpt != nil {
 			t.Errorf("drop %d: receipt %v found while shouldn't have been", i, rcpt)
 		}
 	}
@@ -558,12 +549,8 @@ func TestChainTxReorgs(t *testing.T) {
 		require.NoError(t, err)
 		require.True(t, found)
 
-		if m.HistoryV3 {
-			// m.HistoryV3 doesn't store
-		} else {
-			if rcpt, _, _, _, _ := readReceipt(tx, txn.Hash(), m.BlockReader); rcpt == nil {
-				t.Errorf("add %d: expected receipt to be found", i)
-			}
+		if rcpt, _, _, _, _ := readReceipt(tx, txn.Hash(), m); rcpt == nil {
+			t.Errorf("add %d: expected receipt to be found", i)
 		}
 	}
 	// shared tx
@@ -572,17 +559,14 @@ func TestChainTxReorgs(t *testing.T) {
 		if bn, _ := rawdb.ReadTxLookupEntry(tx, txn.Hash()); bn == nil {
 			t.Errorf("drop %d: tx %v found while shouldn't have been", i, txn)
 		}
-		if m.HistoryV3 {
-			// m.HistoryV3 doesn't store
-		} else {
-			if rcpt, _, _, _, _ := readReceipt(tx, txn.Hash(), m.BlockReader); rcpt == nil {
-				t.Errorf("share %d: expected receipt to be found", i)
-			}
+
+		if rcpt, _, _, _, _ := readReceipt(tx, txn.Hash(), m); rcpt == nil {
+			t.Errorf("share %d: expected receipt to be found", i)
 		}
 	}
 }
 
-func readReceipt(db kv.Tx, txHash libcommon.Hash, br services.FullBlockReader) (*types.Receipt, libcommon.Hash, uint64, uint64, error) {
+func readReceipt(db kv.Tx, txHash libcommon.Hash, m *mock.MockSentry) (*types.Receipt, libcommon.Hash, uint64, uint64, error) {
 	// Retrieve the context of the receipt based on the transaction hash
 	blockNumber, err := rawdb.ReadTxLookupEntry(db, txHash)
 	if err != nil {
@@ -591,19 +575,23 @@ func readReceipt(db kv.Tx, txHash libcommon.Hash, br services.FullBlockReader) (
 	if blockNumber == nil {
 		return nil, libcommon.Hash{}, 0, 0, nil
 	}
-	blockHash, err := br.CanonicalHash(context.Background(), db, *blockNumber)
+	blockHash, err := m.BlockReader.CanonicalHash(context.Background(), db, *blockNumber)
 	if err != nil {
 		return nil, libcommon.Hash{}, 0, 0, err
 	}
 	if blockHash == (libcommon.Hash{}) {
 		return nil, libcommon.Hash{}, 0, 0, nil
 	}
-	b, senders, err := br.BlockWithSenders(context.Background(), db, blockHash, *blockNumber)
+	b, _, err := m.BlockReader.BlockWithSenders(context.Background(), db, blockHash, *blockNumber)
 	if err != nil {
 		return nil, libcommon.Hash{}, 0, 0, err
 	}
+
 	// Read all the receipts from the block and return the one with the matching hash
-	receipts := rawdb.ReadReceipts(db, b, senders)
+	receipts, err := m.ReceiptsReader.GetReceipts(context.Background(), m.ChainConfig, db, b)
+	if err != nil {
+		return nil, libcommon.Hash{}, 0, 0, err
+	}
 	for receiptIndex, receipt := range receipts {
 		if receipt.TxHash == txHash {
 			return receipt, blockHash, *blockNumber, uint64(receiptIndex), nil
@@ -2203,7 +2191,7 @@ func TestEIP1559Transition(t *testing.T) {
 		actual := statedb.GetBalance(block.Coinbase())
 		expected := new(uint256.Int).Add(
 			new(uint256.Int).SetUint64(block.GasUsed()*block.Transactions()[0].GetPrice().Uint64()),
-			ethash.ConstantinopleBlockReward,
+			mainnet.ConstantinopleBlockReward,
 		)
 		if actual.Cmp(expected) != 0 {
 			t.Fatalf("miner balance incorrect: expected %d, got %d", expected, actual)
@@ -2245,7 +2233,7 @@ func TestEIP1559Transition(t *testing.T) {
 		actual := statedb.GetBalance(block.Coinbase())
 		expected := new(uint256.Int).Add(
 			new(uint256.Int).SetUint64(block.GasUsed()*effectiveTip),
-			ethash.ConstantinopleBlockReward,
+			mainnet.ConstantinopleBlockReward,
 		)
 		if actual.Cmp(expected) != 0 {
 			t.Fatalf("miner balance incorrect: expected %d, got %d", expected, actual)

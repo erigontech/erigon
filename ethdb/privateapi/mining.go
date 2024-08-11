@@ -19,19 +19,14 @@ package privateapi
 import (
 	"bytes"
 	"context"
-	"errors"
 	"sync"
-
-	"github.com/erigontech/erigon-lib/common/hexutil"
 
 	"google.golang.org/protobuf/types/known/emptypb"
 
-	libcommon "github.com/erigontech/erigon-lib/common"
 	proto_txpool "github.com/erigontech/erigon-lib/gointerfaces/txpoolproto"
 	types2 "github.com/erigontech/erigon-lib/gointerfaces/typesproto"
 	"github.com/erigontech/erigon-lib/log/v3"
 
-	"github.com/erigontech/erigon/consensus/ethash"
 	"github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/rlp"
 )
@@ -46,7 +41,6 @@ type MiningServer struct {
 	pendingLogsStreams  PendingLogsStreams
 	pendingBlockStreams PendingBlockStreams
 	minedBlockStreams   MinedBlockStreams
-	ethash              *ethash.API
 	isMining            IsMining
 	logger              log.Logger
 }
@@ -55,55 +49,12 @@ type IsMining interface {
 	IsMining() bool
 }
 
-func NewMiningServer(ctx context.Context, isMining IsMining, ethashApi *ethash.API, logger log.Logger) *MiningServer {
-	return &MiningServer{ctx: ctx, isMining: isMining, ethash: ethashApi, logger: logger}
+func NewMiningServer(ctx context.Context, isMining IsMining, logger log.Logger) *MiningServer {
+	return &MiningServer{ctx: ctx, isMining: isMining, logger: logger}
 }
 
 func (s *MiningServer) Version(context.Context, *emptypb.Empty) (*types2.VersionReply, error) {
 	return MiningAPIVersion, nil
-}
-
-func (s *MiningServer) GetWork(context.Context, *proto_txpool.GetWorkRequest) (*proto_txpool.GetWorkReply, error) {
-	if s.ethash == nil {
-		return nil, errors.New("not supported, consensus engine is not ethash")
-	}
-	res, err := s.ethash.GetWork()
-	if err != nil {
-		return nil, err
-	}
-	return &proto_txpool.GetWorkReply{HeaderHash: res[0], SeedHash: res[1], Target: res[2], BlockNumber: res[3]}, nil
-}
-
-func (s *MiningServer) SubmitWork(_ context.Context, req *proto_txpool.SubmitWorkRequest) (*proto_txpool.SubmitWorkReply, error) {
-	if s.ethash == nil {
-		return nil, errors.New("not supported, consensus engine is not ethash")
-	}
-	var nonce types.BlockNonce
-	copy(nonce[:], req.BlockNonce)
-	ok := s.ethash.SubmitWork(nonce, libcommon.BytesToHash(req.PowHash), libcommon.BytesToHash(req.Digest))
-	return &proto_txpool.SubmitWorkReply{Ok: ok}, nil
-}
-
-func (s *MiningServer) SubmitHashRate(_ context.Context, req *proto_txpool.SubmitHashRateRequest) (*proto_txpool.SubmitHashRateReply, error) {
-	if s.ethash == nil {
-		return nil, errors.New("not supported, consensus engine is not ethash")
-	}
-	ok := s.ethash.SubmitHashRate(hexutil.Uint64(req.Rate), libcommon.BytesToHash(req.Id))
-	return &proto_txpool.SubmitHashRateReply{Ok: ok}, nil
-}
-
-func (s *MiningServer) GetHashRate(_ context.Context, req *proto_txpool.HashRateRequest) (*proto_txpool.HashRateReply, error) {
-	if s.ethash == nil {
-		return nil, errors.New("not supported, consensus engine is not ethash")
-	}
-	return &proto_txpool.HashRateReply{HashRate: s.ethash.GetHashrate()}, nil
-}
-
-func (s *MiningServer) Mining(_ context.Context, req *proto_txpool.MiningRequest) (*proto_txpool.MiningReply, error) {
-	if s.ethash == nil {
-		return nil, errors.New("not supported, consensus engine is not ethash")
-	}
-	return &proto_txpool.MiningReply{Enabled: s.isMining.IsMining(), Running: true}, nil
 }
 
 func (s *MiningServer) OnPendingLogs(req *proto_txpool.OnPendingLogsRequest, reply proto_txpool.Mining_OnPendingLogsServer) error {

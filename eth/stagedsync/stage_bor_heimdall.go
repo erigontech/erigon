@@ -23,21 +23,18 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"slices"
 	"sort"
 	"time"
 
 	lru "github.com/hashicorp/golang-lru/arc/v2"
 	"golang.org/x/sync/errgroup"
 
-	"github.com/erigontech/erigon-lib/log/v3"
-
 	"github.com/erigontech/erigon-lib/chain"
-	"github.com/erigontech/erigon-lib/chain/networkname"
 	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common/dbg"
 	"github.com/erigontech/erigon-lib/kv"
+	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/accounts/abi"
-	"github.com/erigontech/erigon/common/math"
 	"github.com/erigontech/erigon/consensus"
 	"github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/dataflow"
@@ -47,7 +44,6 @@ import (
 	"github.com/erigontech/erigon/polygon/bor/borcfg"
 	"github.com/erigontech/erigon/polygon/bor/finality"
 	"github.com/erigontech/erigon/polygon/bor/finality/whitelist"
-	borsnaptype "github.com/erigontech/erigon/polygon/bor/snaptype"
 	"github.com/erigontech/erigon/polygon/bor/valset"
 	"github.com/erigontech/erigon/polygon/heimdall"
 	"github.com/erigontech/erigon/polygon/sync"
@@ -71,7 +67,6 @@ type BorHeimdallCfg struct {
 	hd               *headerdownload.HeaderDownload
 	penalize         func(context.Context, []headerdownload.PenaltyItem)
 	stateReceiverABI abi.ABI
-	loopBreakCheck   func(int) bool
 	recents          *lru.ARCCache[libcommon.Hash, *bor.Snapshot]
 	signatures       *lru.ARCCache[libcommon.Hash, libcommon.Address]
 	recordWaypoints  bool
@@ -87,7 +82,6 @@ func StageBorHeimdallCfg(
 	blockReader services.FullBlockReader,
 	hd *headerdownload.HeaderDownload,
 	penalize func(context.Context, []headerdownload.PenaltyItem),
-	loopBreakCheck func(int) bool,
 	recents *lru.ARCCache[libcommon.Hash, *bor.Snapshot],
 	signatures *lru.ARCCache[libcommon.Hash, libcommon.Address],
 	recordWaypoints bool,
@@ -109,15 +103,12 @@ func StageBorHeimdallCfg(
 		hd:               hd,
 		penalize:         penalize,
 		stateReceiverABI: bor.GenesisContractStateReceiverABI(),
-		loopBreakCheck:   loopBreakCheck,
 		recents:          recents,
 		signatures:       signatures,
 		recordWaypoints:  recordWaypoints,
 		unwindTypes:      unwindTypes,
 	}
 }
-
-var lastMumbaiEventRecord *heimdall.EventRecordWithTime
 
 func BorHeimdallForward(
 	s *StageState,
@@ -235,7 +226,7 @@ func BorHeimdallForward(
 		return err
 	}
 
-	chain := NewChainReaderImpl(cfg.chainConfig, tx, cfg.blockReader, logger)
+	chainReader := NewChainReaderImpl(cfg.chainConfig, tx, cfg.blockReader, logger)
 	logTimer := time.NewTicker(logInterval)
 	defer logTimer.Stop()
 
@@ -269,11 +260,12 @@ func BorHeimdallForward(
 			return err
 		}
 		if header == nil {
+			_, _ = cfg.blockReader.HeaderByNumber(dbg.ContextWithDebug(ctx, true), tx, blockNum)
 			return fmt.Errorf("header not found: %d", blockNum)
 		}
 
-		// Whitelist whitelistService is called to check if the bor chain is
-		// on the cannonical chain according to milestones
+		// Whitelist whitelistService is called to check if the bor chainReader is
+		// on the cannonical chainReader according to milestones
 		if whitelistService != nil && !whitelistService.IsValidChain(blockNum, []*types.Header{header}) {
 			logger.Debug(
 				fmt.Sprintf("[%s] Verification failed for header", s.LogPrefix()),
@@ -302,7 +294,7 @@ func BorHeimdallForward(
 			// avoid calling this if block for blockNums <= SegmentsMin to avoid reinsertion of snapshots
 			snap := loadSnapshot(blockNum, header.Hash(), cfg.borConfig, recents, signatures, cfg.snapDb, logger)
 
-			lastPersistedBlockNum, err := lastPersistedSnapshotBlock(ctx, cfg.snapDb)
+			lastPersistedBlockNum, err := lastPersistedSnapshotBlock(cfg.snapDb)
 			if err != nil {
 				return err
 			}
@@ -317,7 +309,7 @@ func BorHeimdallForward(
 					cfg.blockReader,
 					cfg.borConfig,
 					cfg.heimdallClient,
-					chain,
+					chainReader,
 					blockNum,
 					lastPersistedBlockNum,
 					recents,
@@ -338,7 +330,7 @@ func BorHeimdallForward(
 				u,
 				tx,
 				cfg.borConfig,
-				chain,
+				chainReader,
 				blockNum,
 				header.Hash(),
 				recents,
@@ -353,7 +345,7 @@ func BorHeimdallForward(
 
 		snapTime = snapTime + time.Since(snapStart)
 
-		if err := checkBorHeaderExtraDataIfRequired(chain, header, cfg.borConfig); err != nil {
+		if err := checkBorHeaderExtraDataIfRequired(chainReader, header, cfg.borConfig); err != nil {
 			return err
 		}
 
@@ -363,15 +355,6 @@ func BorHeimdallForward(
 		var callTime time.Duration
 
 		var endStateSyncEventId uint64
-
-		// mumbai event records have stopped being produced as of march 2024
-		// as part of the goerli decom - so there is no point trying to
-		// fetch them
-		if cfg.chainConfig.ChainName == networkname.MumbaiChainName {
-			if nextEventRecord == nil {
-				nextEventRecord = lastMumbaiEventRecord
-			}
-		}
 
 		if nextEventRecord == nil || header.Time > uint64(nextEventRecord.Time.Unix()) {
 			var records int
@@ -408,16 +391,6 @@ func BorHeimdallForward(
 						if !errors.Is(err, heimdall.ErrEventRecordNotFound) {
 							return err
 						}
-
-						if cfg.chainConfig.ChainName == networkname.MumbaiChainName && lastStateSyncEventID == 276850 {
-							lastMumbaiEventRecord = &heimdall.EventRecordWithTime{
-								EventRecord: heimdall.EventRecord{
-									ID: 276851,
-								},
-								Time: time.Unix(math.MaxInt64, 0),
-							}
-						}
-
 						endStateSyncEventId = lastStateSyncEventID
 					}
 				}
@@ -427,10 +400,6 @@ func BorHeimdallForward(
 		fetchTime += callTime
 		syncEventTime = syncEventTime + time.Since(syncEventStart)
 
-		if cfg.loopBreakCheck != nil && cfg.loopBreakCheck(int(blockNum-lastBlockNum)) {
-			headNumber = blockNum
-			break
-		}
 	}
 
 	if err = s.Update(tx, headNumber); err != nil {
@@ -630,7 +599,7 @@ func persistValidatorSets(
 	return nil
 }
 
-func lastPersistedSnapshotBlock(ctx context.Context, snapDb kv.RwDB) (uint64, error) {
+func lastPersistedSnapshotBlock(snapDb kv.RwDB) (uint64, error) {
 	var lastPersistedBlockNum uint64
 
 	err := snapDb.View(context.Background(), func(tx kv.Tx) error {
@@ -702,7 +671,7 @@ func initValidatorSets(
 				}
 
 				if zeroSpanBytes == nil {
-					return nil, fmt.Errorf("zero span not found")
+					return nil, errors.New("zero span not found")
 				}
 
 				var zeroSpan heimdall.Span
@@ -859,129 +828,8 @@ func BorHeimdallUnwind(u *UnwindState, ctx context.Context, _ *StageState, tx kv
 		defer tx.Rollback()
 	}
 
-	if len(cfg.unwindTypes) == 0 || slices.Contains(cfg.unwindTypes, "events") {
-		cursor, err := tx.RwCursor(kv.BorEventNums)
-		if err != nil {
-			return err
-		}
-
-		defer cursor.Close()
-
-		var blockNumBuf [8]byte
-		binary.BigEndian.PutUint64(blockNumBuf[:], u.UnwindPoint+1)
-		k, v, err := cursor.Seek(blockNumBuf[:])
-		if err != nil {
-			return err
-		}
-		if k != nil {
-			// v is the encoding of the first eventId to be removed
-			eventCursor, err := tx.RwCursor(kv.BorEvents)
-			if err != nil {
-				return err
-			}
-			defer eventCursor.Close()
-			for v, _, err = eventCursor.Seek(v); err == nil && v != nil; v, _, err = eventCursor.Next() {
-				if err = eventCursor.DeleteCurrent(); err != nil {
-					return err
-				}
-			}
-			if err != nil {
-				return err
-			}
-		}
-
-		for ; err == nil && k != nil; k, _, err = cursor.Next() {
-			if err = cursor.DeleteCurrent(); err != nil {
-				return err
-			}
-		}
-		if err != nil {
-			return err
-		}
-	}
-
-	// Removing spans
-	if len(cfg.unwindTypes) == 0 || slices.Contains(cfg.unwindTypes, "spans") {
-		spanCursor, err := tx.RwCursor(kv.BorSpans)
-		if err != nil {
-			return err
-		}
-
-		defer spanCursor.Close()
-		lastSpanToKeep := heimdall.SpanIdAt(u.UnwindPoint)
-		var spanIdBytes [8]byte
-		binary.BigEndian.PutUint64(spanIdBytes[:], uint64(lastSpanToKeep+1))
-		for k, _, err := spanCursor.Seek(spanIdBytes[:]); err == nil && k != nil; k, _, err = spanCursor.Next() {
-			if err = spanCursor.DeleteCurrent(); err != nil {
-				return err
-			}
-		}
-	}
-
-	// Removing checkpoints
-	if borsnaptype.CheckpointsEnabled() {
-		if len(cfg.unwindTypes) == 0 || slices.Contains(cfg.unwindTypes, "checkpoints") {
-			checkpointCursor, err := tx.RwCursor(kv.BorCheckpoints)
-
-			if err != nil {
-				return err
-			}
-
-			defer checkpointCursor.Close()
-			lastCheckpointToKeep, err := heimdall.CheckpointIdAt(tx, u.UnwindPoint)
-			hasCheckpoints := true
-
-			if err != nil {
-				if !errors.Is(err, heimdall.ErrCheckpointNotFound) {
-					return err
-				}
-
-				hasCheckpoints = false
-			}
-
-			if hasCheckpoints {
-				var checkpointIdBytes [8]byte
-				binary.BigEndian.PutUint64(checkpointIdBytes[:], uint64(lastCheckpointToKeep+1))
-				for k, _, err := checkpointCursor.Seek(checkpointIdBytes[:]); err == nil && k != nil; k, _, err = checkpointCursor.Next() {
-					if err = checkpointCursor.DeleteCurrent(); err != nil {
-						return err
-					}
-				}
-			}
-		}
-	}
-
-	if borsnaptype.MilestonesEnabled() {
-		// Removing milestones
-		if len(cfg.unwindTypes) == 0 || slices.Contains(cfg.unwindTypes, "milestones") {
-			milestoneCursor, err := tx.RwCursor(kv.BorMilestones)
-
-			if err != nil {
-				return err
-			}
-
-			defer milestoneCursor.Close()
-			lastMilestoneToKeep, err := heimdall.MilestoneIdAt(tx, u.UnwindPoint)
-			hasMilestones := true
-
-			if err != nil {
-				if !errors.Is(err, heimdall.ErrMilestoneNotFound) {
-					return err
-				}
-
-				hasMilestones = false
-			}
-
-			if hasMilestones {
-				var milestoneIdBytes [8]byte
-				binary.BigEndian.PutUint64(milestoneIdBytes[:], uint64(lastMilestoneToKeep+1))
-				for k, _, err := milestoneCursor.Seek(milestoneIdBytes[:]); err == nil && k != nil; k, _, err = milestoneCursor.Next() {
-					if err = milestoneCursor.DeleteCurrent(); err != nil {
-						return err
-					}
-				}
-			}
-		}
+	if err = UnwindHeimdall(tx, u, cfg.unwindTypes); err != nil {
+		return err
 	}
 
 	if err = u.Done(tx); err != nil {
@@ -992,14 +840,6 @@ func BorHeimdallUnwind(u *UnwindState, ctx context.Context, _ *StageState, tx kv
 		if err = tx.Commit(); err != nil {
 			return err
 		}
-	}
-
-	return
-}
-
-func BorHeimdallPrune(_ *PruneState, _ context.Context, _ kv.RwTx, cfg BorHeimdallCfg) (err error) {
-	if cfg.borConfig == nil {
-		return
 	}
 
 	return
