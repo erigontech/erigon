@@ -414,15 +414,18 @@ func (s *RoSnapshots) idxAvailability() uint64 {
 
 		for _, seg := range value.segments {
 			if !seg.IsIndexed() {
+				fmt.Println(seg.FilePath())
 				break
 			}
 
 			maximums[i] = seg.to - 1
 		}
+		fmt.Println(segtype.Type(), maximums[i], value.segments)
 
 		i++
 		return true
 	})
+	fmt.Println(maximums)
 
 	if len(maximums) == 0 {
 		return 0
@@ -1168,9 +1171,9 @@ func Segments(dir string, minBlock uint64) (res []snaptype.FileInfo, missingSnap
 }
 
 func typedSegments(dir string, minBlock uint64, types []snaptype.Type, allowGaps bool) (res []snaptype.FileInfo, missingSnapshots []Range, err error) {
-	segmentsTypeCheck := func(dir string, in []snaptype.FileInfo) (res []snaptype.FileInfo) {
-		return typeOfSegmentsMustExist(dir, in, types)
-	}
+	// segmentsTypeCheck := func(dir string, in []snaptype.FileInfo) (res []snaptype.FileInfo) {
+	// 	return typeOfSegmentsMustExist(dir, in, types)
+	// }
 
 	list, err := snaptype.Segments(dir)
 
@@ -1190,9 +1193,9 @@ func typedSegments(dir string, minBlock uint64, types []snaptype.Type, allowGaps
 			}
 
 			if allowGaps {
-				l = noOverlaps(segmentsTypeCheck(dir, l))
+				l = noOverlaps(l)
 			} else {
-				l, m = noGaps(noOverlaps(segmentsTypeCheck(dir, l)))
+				l, m = noGaps(noOverlaps(l))
 			}
 			if len(m) > 0 {
 				lst := m[len(m)-1]
