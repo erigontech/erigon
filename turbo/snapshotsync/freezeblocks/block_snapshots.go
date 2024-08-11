@@ -528,7 +528,7 @@ func (s *RoSnapshots) EnableMadvWillNeed() *RoSnapshots {
 }
 
 // lock is hold by caller
-func (s *RoSnapshots) calculateVisibleSegments() {
+func (s *RoSnapshots) divideSegmentsIntoDirtyAndVisible() {
 	var maxIndexs []int
 	s.segments.Scan(func(segtype snaptype.Enum, value *segments) bool {
 		if !s.HasType(segtype.Type()) {
@@ -537,17 +537,6 @@ func (s *RoSnapshots) calculateVisibleSegments() {
 		var maxIndex = -1
 		if len(value.dirtySegments) == 0 {
 			maxIndexs = append(maxIndexs, maxIndex)
-			return true
-		}
-		slices.SortFunc(value.dirtySegments, func(i, j *Segment) int {
-			return cmp.Compare(i.from, j.from)
-		})
-
-		// check :
-		// 1. maxVisibleBlock + 1 == dirtySegments[0].from
-		// 2. no overlaps or gaps between dirtySegments
-		if value.maxVisibleBlock.Load() != 0 && value.maxVisibleBlock.Load()+1 != value.dirtySegments[0].from {
-			log.Warn("[snapshots] gap between visible and dirty segments", "type", segtype, "maxVisibleBlock", value.maxVisibleBlock.Load(), "dirtySegmentFrom", value.dirtySegments[0].from)
 			return true
 		}
 
@@ -563,6 +552,12 @@ func (s *RoSnapshots) calculateVisibleSegments() {
 			}
 		}
 		value.dirtySegments = dirtySegments
+
+		// check if there's gap between existing visible segments and reopened dirty segments
+		curMaxVisibleBlock := value.maxVisibleBlock.Load()
+		if curMaxVisibleBlock != 0 && curMaxVisibleBlock+1 != value.dirtySegments[0].from {
+			log.Warn("[snapshots] gap between visible and dirty segments", "type", segtype, "maxVisibleBlock", curMaxVisibleBlock, "dirtySegmentFrom", value.dirtySegments[0].from)
+		}
 
 		for i, sn := range value.dirtySegments {
 			if sn.Decompressor == nil {
@@ -800,7 +795,7 @@ func (s *RoSnapshots) rebuildSegments(fileNames []string, open bool, optimistic 
 	}
 	s.segmentsReady.Store(true)
 
-	s.calculateVisibleSegments()
+	s.divideSegmentsIntoDirtyAndVisible()
 
 	s.idxMax.Store(s.idxAvailability())
 	s.indicesReady.Store(true)

@@ -18,7 +18,6 @@ package freezeblocks
 
 import (
 	"bytes"
-	"cmp"
 	"context"
 	"encoding/binary"
 	"errors"
@@ -26,7 +25,6 @@ import (
 	"math"
 	"os"
 	"path/filepath"
-	"slices"
 	"sync/atomic"
 
 	"github.com/klauspost/compress/zstd"
@@ -283,26 +281,17 @@ Loop:
 	}
 	s.segmentsReady.Store(true)
 
-	s.calculateVisibleSegments()
+	s.divideSegmentsIntoDirtyAndVisible()
 	s.idxMax.Store(s.idxAvailability())
 	s.indicesReady.Store(true)
 
 	return nil
 }
 
-func (s *CaplinSnapshots) calculateVisibleSegments() {
+func (s *CaplinSnapshots) divideSegmentsIntoDirtyAndVisible() {
 	var maxIndex = -1
 	var maxBlockNum uint64
 	if len(s.BeaconBlocks.dirtySegments) == 0 {
-		return
-	}
-	slices.SortFunc(s.BeaconBlocks.dirtySegments, func(i, j *Segment) int {
-		return cmp.Compare(i.from, j.from)
-	})
-
-	if s.BeaconBlocks.maxVisibleBlock.Load() != 0 &&
-		s.BeaconBlocks.maxVisibleBlock.Load()+1 != s.BeaconBlocks.dirtySegments[0].from {
-		s.logger.Warn("gap in beacon blocks snapshots", "from", s.BeaconBlocks.maxVisibleBlock.Load(), "to", s.BeaconBlocks.dirtySegments[0].from)
 		return
 	}
 
@@ -318,6 +307,15 @@ func (s *CaplinSnapshots) calculateVisibleSegments() {
 		}
 	}
 	s.BeaconBlocks.dirtySegments = dirtySegments
+
+	// check if there's gap between existing visible segments and reopened dirty segments
+	curMaxVisibleBlock := s.BeaconBlocks.maxVisibleBlock.Load()
+	if curMaxVisibleBlock != 0 &&
+		curMaxVisibleBlock+1 != s.BeaconBlocks.dirtySegments[0].from {
+		s.logger.Warn("gap in beacon blocks snapshots", "from", curMaxVisibleBlock, "to", s.BeaconBlocks.dirtySegments[0].from)
+		return
+	}
+
 	for i, sn := range s.BeaconBlocks.dirtySegments {
 		if sn.Decompressor == nil {
 			break
