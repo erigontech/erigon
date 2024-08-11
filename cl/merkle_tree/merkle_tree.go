@@ -278,7 +278,7 @@ func (m *MerkleTree) WriteMerkleTree(w io.Writer) error {
 		return err
 	}
 	if m.limit != nil {
-		if err := binary.Write(w, binary.BigEndian, uint64(*m.limit)); err != nil {
+		if err := binary.Write(w, binary.BigEndian, *m.limit); err != nil {
 			return err
 		}
 	} else {
