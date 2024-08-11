@@ -6,7 +6,6 @@ import (
 
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon/cl/beacon/beaconevents"
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/persistence/blob_storage"
 	network2 "github.com/erigontech/erigon/cl/phase1/network"
@@ -207,16 +206,6 @@ MainLoop:
 					log.Debug("bad blocks segment received", "err", err)
 					continue
 				}
-
-				// Publish the block to the event handler
-				cfg.emitter.State().SendBlock(&beaconevents.BlockData{
-					Slot:                block.Block.Slot,
-					Block:               blockRoot,
-					ExecutionOptimistic: false, // todo: fix this
-				})
-
-				// Notify the validator monitor of the new block
-				cfg.validatorMonitor.OnNewBlock(block.Block)
 
 				// Check if the block slot is greater than or equal to the target slot
 				if block.Block.Slot >= args.targetSlot {
