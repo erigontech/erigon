@@ -414,13 +414,11 @@ func (s *RoSnapshots) idxAvailability() uint64 {
 
 		for _, seg := range value.segments {
 			if !seg.IsIndexed() {
-				fmt.Println(seg.FilePath())
 				break
 			}
 
 			maximums[i] = seg.to - 1
 		}
-		fmt.Println(segtype.Type(), maximums[i], value.segments)
 
 		i++
 		return true
