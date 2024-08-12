@@ -95,3 +95,36 @@ func RenderError(err error) {
 	txt := text.Colors{text.FgWhite, text.BgRed}
 	fmt.Printf("%s %s\n", txt.Sprint("[ERROR]"), err)
 }
+
+func SaveDataToFile(filePath string, fileName string, data string) error {
+	//check is folder exists
+	if _, err := os.Stat(filePath); os.IsNotExist(err) {
+		err := os.MkdirAll(filePath, 0755)
+		if err != nil {
+			return err
+		}
+	}
+
+	fullPath := MakePath(filePath, fileName)
+
+	file, err := os.Create(fullPath)
+	if err != nil {
+		return err
+	}
+	defer file.Close()
+
+	_, err = file.WriteString(fmt.Sprintf("%v\n", data))
+	if err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func MakePath(filePath string, fileName string) string {
+	if filePath[len(filePath)-1] == '/' {
+		filePath = filePath[:len(filePath)-1]
+	}
+
+	return fmt.Sprintf("%s/%s", filePath, fileName)
+}
