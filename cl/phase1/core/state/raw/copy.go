@@ -17,6 +17,8 @@
 package raw
 
 import (
+	"sync/atomic"
+
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
@@ -79,9 +81,10 @@ func (b *BeaconState) CopyInto(dst *BeaconState) error {
 	dst.version = b.version
 	// Now sync internals
 	copy(dst.leaves, b.leaves)
-	dst.touchedLeaves = make(map[StateLeafIndex]bool)
-	for leafIndex, touchedVal := range b.touchedLeaves {
-		dst.touchedLeaves[leafIndex] = touchedVal
+	dst.touchedLeaves = make([]atomic.Uint32, StateLeafSize)
+	for leafIndex := range b.touchedLeaves {
+		// Copy the value
+		dst.touchedLeaves[leafIndex].Store(b.touchedLeaves[leafIndex].Load())
 	}
 	return nil
 }
