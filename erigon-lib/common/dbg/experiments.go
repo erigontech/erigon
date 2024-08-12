@@ -246,26 +246,73 @@ func LogHashMismatchReason() bool {
 	return logHashMismatchReason
 }
 
-func SaveHeapProfileNearOOM() {
+type saveHeapOptions struct {
+	memStats *runtime.MemStats
+	logger   *log.Logger
+}
+
+type SaveHeapOption func(options *saveHeapOptions)
+
+func SaveHeapWithMemStats(memStats *runtime.MemStats) SaveHeapOption {
+	return func(options *saveHeapOptions) {
+		options.memStats = memStats
+	}
+}
+
+func SaveHeapWithLogger(logger *log.Logger) SaveHeapOption {
+	return func(options *saveHeapOptions) {
+		options.logger = logger
+	}
+}
+
+func SaveHeapProfileNearOOM(opts ...SaveHeapOption) {
+	var options saveHeapOptions
+	for _, opt := range opts {
+		opt(&options)
+	}
+
 	if !saveHeapProfile {
 		return
 	}
 
-	var m runtime.MemStats
-	ReadMemStats(&m)
-	if m.Alloc < (mmap.TotalMemory()/100)*45 {
+	if options.memStats == nil {
+		ReadMemStats(options.memStats)
+	}
+
+	if options.memStats.Alloc < (mmap.TotalMemory()/100)*45 {
 		return
+	}
+
+	var logger log.Logger
+	if options.logger != nil {
+		logger = *options.logger
 	}
 
 	// above 45%
 	filePath := filepath.Join(os.TempDir(), "erigon-mem.prof")
-	log.Info("[Experiment] saving heap profile as near OOM", "alloc", m.Alloc, "filePath", filePath)
+	if logger != nil {
+		logger.Info(
+			"[Experiment] saving heap profile as near OOM",
+			"alloc", options.memStats.Alloc,
+			"filePath", filePath,
+		)
+	}
 
-	f, _ := os.Create(filePath)
+	f, err := os.Create(filePath)
+	if err != nil && logger != nil {
+		logger.Warn("[Experiment] could not create heap profile file", "err", err)
+	}
+
 	defer func() {
-		_ = f.Close()
+		err := f.Close()
+		if err != nil && logger != nil {
+			logger.Warn("[Experiment] could not close heap profile file", "err", err)
+		}
 	}()
 
 	runtime.GC()
-	_ = pprof.WriteHeapProfile(f)
+	err = pprof.WriteHeapProfile(f)
+	if err != nil && logger != nil {
+		logger.Warn("[Experiment] could not write heap profile file", "err", err)
+	}
 }
