@@ -8,6 +8,7 @@ import (
 	"reflect"
 
 	"github.com/ledgerwatch/erigon/zk/datastream/client"
+	"github.com/ledgerwatch/erigon/zk/datastream/types"
 	"github.com/nsf/jsondiff"
 )
 
@@ -80,13 +81,14 @@ func readFromClient(client *client.StreamClient, total int) ([]interface{}, erro
 
 LOOP:
 	for {
-		select {
-		case d := <-client.GetL2BlockChan():
-			data = append(data, d)
+		entry := <-client.GetEntryChan()
+
+		switch entry.(type) {
+		case types.FullL2Block:
+		case types.GerUpdate:
+			data = append(data, entry)
 			count++
-		case d := <-client.GetGerUpdatesChan():
-			data = append(data, d)
-			count++
+		default:
 		}
 
 		if count == total {

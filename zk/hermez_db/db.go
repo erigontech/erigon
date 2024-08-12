@@ -841,7 +841,7 @@ func (db *HermezDbReader) GetBlockL1BlockHashes(fromBlockNo, toBlockNo uint64) (
 	return l1BlockHashes, nil
 }
 
-func (db *HermezDb) WriteBatchGlobalExitRoot(batchNumber uint64, ger dstypes.GerUpdate) error {
+func (db *HermezDb) WriteBatchGlobalExitRoot(batchNumber uint64, ger *dstypes.GerUpdate) error {
 	return db.tx.Put(GLOBAL_EXIT_ROOTS_BATCHES, Uint64ToBytes(batchNumber), ger.EncodeToBytes())
 }
 
