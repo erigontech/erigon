@@ -291,7 +291,7 @@ func SaveHeapProfileNearOOM(opts ...SaveHeapOption) {
 	if logger != nil {
 		logger.Info("[Experiment] heap profile threshold check", "alloc", memStats.Alloc, "total", totalMemory)
 	}
-	if options.memStats.Alloc < (totalMemory/100)*45 {
+	if memStats.Alloc < (totalMemory/100)*45 {
 		return
 	}
 
@@ -300,7 +300,7 @@ func SaveHeapProfileNearOOM(opts ...SaveHeapOption) {
 	if logger != nil {
 		logger.Info(
 			"[Experiment] saving heap profile as near OOM",
-			"alloc", options.memStats.Alloc,
+			"alloc", memStats.Alloc,
 			"filePath", filePath,
 		)
 	}
