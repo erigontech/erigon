@@ -17,7 +17,7 @@
 package peers
 
 import (
-	"fmt"
+	"errors"
 	"sync"
 	"sync/atomic"
 
@@ -151,7 +151,7 @@ func (p *Pool) Request() (pid *Item, done func(), err error) {
 	//grab a peer from our ringbuffer
 	val, ok := p.queue.PopFront()
 	if !ok {
-		return nil, nil, fmt.Errorf("no peers? (  :(  > ")
+		return nil, nil, errors.New("no peers? (  :(  > ")
 	}
 	return val, func() {
 		p.mu.Lock()

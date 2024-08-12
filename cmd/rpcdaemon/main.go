@@ -22,12 +22,13 @@ import (
 	"fmt"
 	"os"
 
+	"github.com/spf13/cobra"
+
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon/cmd/rpcdaemon/cli"
 	"github.com/erigontech/erigon/rpc"
 	"github.com/erigontech/erigon/turbo/debug"
 	"github.com/erigontech/erigon/turbo/jsonrpc"
-	"github.com/spf13/cobra"
 
 	_ "github.com/erigontech/erigon/core/snaptype"        //hack
 	_ "github.com/erigontech/erigon/polygon/bor/snaptype" //hack
@@ -49,7 +50,7 @@ func main() {
 		defer db.Close()
 		defer engine.Close()
 
-		apiList := jsonrpc.APIList(db, backend, txPool, mining, ff, stateCache, blockReader, cfg, engine, logger)
+		apiList := jsonrpc.APIList(db, backend, txPool, mining, ff, stateCache, blockReader, cfg, engine, logger, nil)
 		rpc.PreAllocateRPCMetricLabels(apiList)
 		if err := cli.StartRpcServer(ctx, cfg, apiList, logger); err != nil {
 			logger.Error(err.Error())

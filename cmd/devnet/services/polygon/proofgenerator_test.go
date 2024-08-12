@@ -20,6 +20,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/ecdsa"
+	"errors"
 	"fmt"
 	"math"
 	"math/big"
@@ -200,7 +201,7 @@ func (rg *requestGenerator) GetTransactionReceipt(ctx context.Context, hash libc
 		}
 	}
 
-	return nil, fmt.Errorf("tx not found in block")
+	return nil, errors.New("tx not found in block")
 }
 
 type blockReader struct {
@@ -213,7 +214,7 @@ func (reader blockReader) BlockByNumber(ctx context.Context, db kv.Tx, number ui
 		return reader.chain.Blocks[number], nil
 	}
 
-	return nil, fmt.Errorf("block not found")
+	return nil, errors.New("block not found")
 }
 
 func (reader blockReader) HeaderByNumber(ctx context.Context, txn kv.Getter, blockNum uint64) (*types.Header, error) {
@@ -221,7 +222,7 @@ func (reader blockReader) HeaderByNumber(ctx context.Context, txn kv.Getter, blo
 		return reader.chain.Headers[blockNum], nil
 	}
 
-	return nil, fmt.Errorf("header not found")
+	return nil, errors.New("header not found")
 }
 
 func TestMerkle(t *testing.T) {

@@ -122,12 +122,16 @@ type AggStats struct {
 	Progress  float32
 
 	BytesCompleted, BytesTotal     uint64
+	CompletionRate                 uint64
 	DroppedCompleted, DroppedTotal uint64
 
 	BytesDownload, BytesUpload uint64
 	UploadRate, DownloadRate   uint64
 	LocalFileHashes            int
 	LocalFileHashTime          time.Duration
+
+	BytesHashed, BytesFlushed uint64
+	HashRate, FlushRate       uint64
 
 	WebseedActiveTrips    *atomic.Int64
 	WebseedMaxActiveTrips *atomic.Int64
@@ -505,13 +509,12 @@ func initSnapshotLock(ctx context.Context, cfg *downloadercfg.Cfg, db kv.RoDB, s
 		Chain: cfg.ChainName,
 	}
 
-	files, err := SeedableFiles(cfg.Dirs, cfg.ChainName)
+	files, err := SeedableFiles(cfg.Dirs, cfg.ChainName, false)
 	if err != nil {
 		return nil, err
 	}
 
 	snapCfg := cfg.SnapshotConfig
-
 	if snapCfg == nil {
 		snapCfg = snapcfg.KnownCfg(cfg.ChainName)
 	}
@@ -815,13 +818,14 @@ type seedHash struct {
 
 func (d *Downloader) mainLoop(silent bool) error {
 	if d.webseedsDiscover {
+
 		// CornerCase: no peers -> no anoncments to trackers -> no magnetlink resolution (but magnetlink has filename)
 		// means we can start adding weebseeds without waiting for `<-t.GotInfo()`
 		d.wg.Add(1)
 		go func() {
 			defer d.wg.Done()
 			// webseeds.Discover may create new .torrent files on disk
-			d.webseeds.Discover(d.ctx, d.cfg.WebSeedFiles, d.cfg.Dirs.Snap)
+			d.webseeds.Discover(d.ctx, d.cfg.WebSeedFileProviders, d.cfg.Dirs.Snap)
 			// apply webseeds to existing torrents
 			if err := d.addTorrentFilesFromDisk(true); err != nil && !errors.Is(err, context.Canceled) {
 				d.logger.Warn("[snapshots] addTorrentFilesFromDisk", "err", err)
@@ -939,7 +943,7 @@ func (d *Downloader) mainLoop(silent bool) error {
 										} else {
 											downloadComplete <- downloadStatus{
 												name: fileInfo.Name(),
-												err:  fmt.Errorf("hash check failed"),
+												err:  errors.New("hash check failed"),
 											}
 
 											d.logger.Warn("[snapshots] Torrent hash does not match file", "file", fileInfo.Name(), "torrent-hash", infoHash, "file-hash", hex.EncodeToString(fileHashBytes))
@@ -1172,7 +1176,7 @@ func (d *Downloader) mainLoop(silent bool) error {
 					alist = append(alist, t.Name())
 				}
 
-				d.logger.Debug("[snapshot] download status", "pending", plist, "availible", alist, "downloading", dlist, "complete", clist, "failed", flist)
+				d.logger.Trace("[snapshot] download status", "pending", plist, "availible", alist, "downloading", dlist, "complete", clist, "failed", flist)
 			}
 
 			for _, t := range available {
@@ -1605,7 +1609,7 @@ func (d *Downloader) torrentDownload(t *torrent.Torrent, statusChan chan downloa
 
 func (d *Downloader) webDownload(peerUrls []*url.URL, t *torrent.Torrent, i *webDownloadInfo, statusChan chan downloadStatus) (*RCloneSession, error) {
 	if d.webDownloadClient == nil {
-		return nil, fmt.Errorf("webdownload client not enabled")
+		return nil, errors.New("webdownload client not enabled")
 	}
 
 	peerUrl, err := selectDownloadPeer(d.ctx, peerUrls, t)
@@ -1739,7 +1743,7 @@ func (d *Downloader) webDownload(peerUrls []*url.URL, t *torrent.Torrent, i *web
 func selectDownloadPeer(ctx context.Context, peerUrls []*url.URL, t *torrent.Torrent) (string, error) {
 	switch len(peerUrls) {
 	case 0:
-		return "", fmt.Errorf("no download peers")
+		return "", errors.New("no download peers")
 
 	case 1:
 		downloadUrl := peerUrls[0].JoinPath(t.Name())
@@ -1771,7 +1775,7 @@ func selectDownloadPeer(ctx context.Context, peerUrls []*url.URL, t *torrent.Tor
 		}
 	}
 
-	return "", fmt.Errorf("can't find download peer")
+	return "", errors.New("can't find download peer")
 }
 
 func availableTorrents(ctx context.Context, pending []*torrent.Torrent, downloading map[string]*downloadInfo, fileSlots int, pieceSlots int) []*torrent.Torrent {
@@ -1980,11 +1984,14 @@ func (d *Downloader) ReCalcStats(interval time.Duration) {
 	stats.Completed = true
 	stats.BytesDownload = uint64(connStats.BytesReadUsefulIntendedData.Int64())
 	stats.BytesUpload = uint64(connStats.BytesWrittenData.Int64())
+	stats.BytesHashed = uint64(connStats.BytesHashed.Int64())
+	stats.BytesFlushed = uint64(connStats.BytesFlushed.Int64())
+	stats.BytesCompleted = uint64(connStats.BytesCompleted.Int64()) - stats.DroppedCompleted
 
 	lastMetadataReady := stats.MetadataReady
 
-	stats.BytesTotal, stats.BytesCompleted, stats.ConnectionsTotal, stats.MetadataReady =
-		atomic.LoadUint64(&stats.DroppedTotal), atomic.LoadUint64(&stats.DroppedCompleted), 0, 0
+	stats.BytesTotal, stats.ConnectionsTotal, stats.MetadataReady =
+		atomic.LoadUint64(&stats.DroppedTotal), 0, 0
 
 	var zeroProgress []string
 	var noMetadata []string
@@ -2040,7 +2047,7 @@ func (d *Downloader) ReCalcStats(interval time.Duration) {
 			}
 		}
 
-		stats.BytesCompleted += uint64(bytesCompleted)
+		//stats.BytesCompleted += uint64(bytesCompleted)
 		stats.BytesTotal += uint64(tLen)
 
 		for _, peer := range peersOfThisFile {
@@ -2173,6 +2180,12 @@ func (d *Downloader) ReCalcStats(interval time.Duration) {
 			"torrent", torrentInfo,
 			"db", dbInfo,
 			"t-complete", tComplete,
+			"hashed", common.ByteCount(stats.BytesHashed),
+			"hash-rate", fmt.Sprintf("%s/s", common.ByteCount(stats.HashRate)),
+			"completed", common.ByteCount(stats.BytesCompleted),
+			"completion-rate", fmt.Sprintf("%s/s", common.ByteCount(stats.CompletionRate)),
+			"flushed", common.ByteCount(stats.BytesFlushed),
+			"flush-rate", fmt.Sprintf("%s/s", common.ByteCount(stats.FlushRate)),
 			"webseed-trips", stats.WebseedTripCount.Load(),
 			"webseed-active", stats.WebseedActiveTrips.Load(),
 			"webseed-max-active", stats.WebseedMaxActiveTrips.Load(),
@@ -2243,16 +2256,51 @@ func (d *Downloader) ReCalcStats(interval time.Duration) {
 		}
 	}
 
+	decay := func(prev uint64) uint64 {
+		switch {
+		case prev < 1000:
+			return prev / 16
+		case stats.FlushRate < 10000:
+			return prev / 8
+		case stats.FlushRate < 100000:
+			return prev / 4
+		default:
+			return prev / 2
+		}
+	}
+
 	if stats.BytesDownload > prevStats.BytesDownload {
 		stats.DownloadRate = (stats.BytesDownload - prevStats.BytesDownload) / uint64(interval.Seconds())
 	} else {
-		stats.DownloadRate = prevStats.DownloadRate / 2
+		stats.DownloadRate = decay(prevStats.DownloadRate)
+	}
+
+	if stats.BytesHashed > prevStats.BytesHashed {
+		stats.HashRate = (stats.BytesHashed - prevStats.BytesHashed) / uint64(interval.Seconds())
+	} else {
+		stats.HashRate = decay(prevStats.HashRate)
+	}
+
+	if stats.BytesCompleted > stats.BytesTotal {
+		stats.BytesCompleted = stats.BytesTotal
+	}
+
+	if stats.BytesCompleted > prevStats.BytesCompleted {
+		stats.CompletionRate = (stats.BytesCompleted - prevStats.BytesCompleted) / uint64(interval.Seconds())
+	} else {
+		stats.CompletionRate = decay(prevStats.CompletionRate)
+	}
+
+	if stats.BytesFlushed > prevStats.BytesFlushed {
+		stats.FlushRate = (stats.BytesFlushed - prevStats.BytesFlushed) / uint64(interval.Seconds())
+	} else {
+		stats.FlushRate = decay(prevStats.FlushRate)
 	}
 
 	if stats.BytesUpload > prevStats.BytesUpload {
 		stats.UploadRate = (stats.BytesUpload - prevStats.BytesUpload) / uint64(interval.Seconds())
 	} else {
-		stats.UploadRate = prevStats.UploadRate / 2
+		stats.UploadRate = decay(prevStats.UploadRate)
 	}
 
 	if stats.BytesTotal == 0 {
@@ -2592,20 +2640,20 @@ func (d *Downloader) AddMagnetLink(ctx context.Context, infoHash metainfo.Hash, 
 	return nil
 }
 
-func SeedableFiles(dirs datadir.Dirs, chainName string) ([]string, error) {
-	files, err := seedableSegmentFiles(dirs.Snap, chainName)
+func SeedableFiles(dirs datadir.Dirs, chainName string, all bool) ([]string, error) {
+	files, err := seedableSegmentFiles(dirs.Snap, chainName, all)
 	if err != nil {
 		return nil, fmt.Errorf("seedableSegmentFiles: %w", err)
 	}
-	l1, err := seedableStateFilesBySubDir(dirs.Snap, "idx")
+	l1, err := seedableStateFilesBySubDir(dirs.Snap, "idx", all)
 	if err != nil {
 		return nil, err
 	}
-	l2, err := seedableStateFilesBySubDir(dirs.Snap, "history")
+	l2, err := seedableStateFilesBySubDir(dirs.Snap, "history", all)
 	if err != nil {
 		return nil, err
 	}
-	l3, err := seedableStateFilesBySubDir(dirs.Snap, "domain")
+	l3, err := seedableStateFilesBySubDir(dirs.Snap, "domain", all)
 	if err != nil {
 		return nil, err
 	}
@@ -2701,7 +2749,7 @@ func (d *Downloader) addTorrentFilesFromDisk(quiet bool) error {
 	return eg.Wait()
 }
 func (d *Downloader) BuildTorrentFilesIfNeed(ctx context.Context, chain string, ignore snapcfg.Preverified) error {
-	_, err := BuildTorrentFilesIfNeed(ctx, d.cfg.Dirs, d.torrentFS, chain, ignore)
+	_, err := BuildTorrentFilesIfNeed(ctx, d.cfg.Dirs, d.torrentFS, chain, ignore, false)
 	return err
 }
 func (d *Downloader) Stats() AggStats {

@@ -37,10 +37,10 @@ func generateCellRow(tb testing.TB, size int) (row []*Cell, bitmap uint16) {
 	var bm uint16
 	for i := 0; i < len(row); i++ {
 		row[i] = new(Cell)
-		row[i].HashLen = 32
+		row[i].hashLen = 32
 		n, err := rand.Read(row[i].hash[:])
 		require.NoError(tb, err)
-		require.EqualValues(tb, row[i].HashLen, n)
+		require.EqualValues(tb, row[i].hashLen, n)
 
 		th := rand.Intn(120)
 		switch {
@@ -305,9 +305,9 @@ func TestBranchData_ReplacePlainKeys_WithEmpty(t *testing.T) {
 	})
 }
 
-func TestNewUpdateTree(t *testing.T) {
+func TestNewUpdates(t *testing.T) {
 	t.Run("ModeUpdate", func(t *testing.T) {
-		ut := NewUpdateTree(ModeUpdate, t.TempDir(), keyHasherNoop)
+		ut := NewUpdates(ModeUpdate, t.TempDir(), keyHasherNoop)
 
 		require.NotNil(t, ut.tree)
 		require.NotNil(t, ut.keccak)
@@ -316,7 +316,7 @@ func TestNewUpdateTree(t *testing.T) {
 	})
 
 	t.Run("ModeDirect", func(t *testing.T) {
-		ut := NewUpdateTree(ModeDirect, t.TempDir(), keyHasherNoop)
+		ut := NewUpdates(ModeDirect, t.TempDir(), keyHasherNoop)
 
 		require.NotNil(t, ut.keccak)
 		require.NotNil(t, ut.keys)
@@ -325,11 +325,11 @@ func TestNewUpdateTree(t *testing.T) {
 
 }
 
-func TestUpdateTree_TouchPlainKey(t *testing.T) {
-	utUpdate := NewUpdateTree(ModeUpdate, t.TempDir(), keyHasherNoop)
-	utDirect := NewUpdateTree(ModeDirect, t.TempDir(), keyHasherNoop)
-	utUpdate1 := NewUpdateTree(ModeUpdate, t.TempDir(), keyHasherNoop)
-	utDirect1 := NewUpdateTree(ModeDirect, t.TempDir(), keyHasherNoop)
+func TestUpdates_TouchPlainKey(t *testing.T) {
+	utUpdate := NewUpdates(ModeUpdate, t.TempDir(), keyHasherNoop)
+	utDirect := NewUpdates(ModeDirect, t.TempDir(), keyHasherNoop)
+	utUpdate1 := NewUpdates(ModeUpdate, t.TempDir(), keyHasherNoop)
+	utDirect1 := NewUpdates(ModeDirect, t.TempDir(), keyHasherNoop)
 
 	type tc struct {
 		key []byte
@@ -373,7 +373,7 @@ func TestUpdateTree_TouchPlainKey(t *testing.T) {
 
 	for i := 0; i < len(sortedUniqUpds); i++ {
 		require.EqualValues(t, sortedUniqUpds[i].key, pk[i])
-		require.EqualValues(t, sortedUniqUpds[i].val, upd[i].CodeHashOrStorage[:upd[i].ValLength])
+		require.EqualValues(t, sortedUniqUpds[i].val, upd[i].Storage[:upd[i].StorageLen])
 	}
 
 	pk, upd = utDirect.List(true)

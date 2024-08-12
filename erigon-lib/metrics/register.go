@@ -209,12 +209,3 @@ func GetOrCreateHistogram(name string) Histogram {
 
 	return &histogram{h}
 }
-
-func GetOrCreateHistogramWithBuckets(name string) Histogram {
-	h, err := defaultSet.GetOrCreateHistogram(name)
-	if err != nil {
-		panic(fmt.Errorf("could not get or create new histogram: %w", err))
-	}
-
-	return &histogram{h}
-}

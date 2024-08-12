@@ -17,7 +17,6 @@
 package solid
 
 import (
-	"bytes"
 	"encoding/json"
 
 	libcommon "github.com/erigontech/erigon-lib/common"
@@ -37,10 +36,7 @@ const (
 	IsPreviousMatchingHeadAttesterBit   = 0x5
 )
 
-const (
-	validatorSetCapacityMultiplier = 1.01 // allocate 20% to the validator set when re-allocation is needed.
-	validatorTreeCacheGroupLayer   = 3    // It will cache group validatorTreeCacheGroupLayer^2 accordingly
-)
+const validatorSetCapacityMultiplier = 1.01 // allocate 20% to the validator set when re-allocation is needed.)
 
 // This is all stuff used by phase0 state transition. It makes many operations faster.
 type Phase0Data struct {
@@ -50,8 +46,8 @@ type Phase0Data struct {
 }
 
 type ValidatorSet struct {
-	buffer          []byte
-	treeCacheBuffer []byte
+	*merkle_tree.MerkleTree
+	buffer []byte
 
 	l, c int
 
@@ -70,12 +66,11 @@ func NewValidatorSet(c int) *ValidatorSet {
 
 func NewValidatorSetWithLength(c int, l int) *ValidatorSet {
 	return &ValidatorSet{
-		c:               c,
-		l:               l,
-		buffer:          make([]byte, l*validatorSize),
-		treeCacheBuffer: make([]byte, getTreeCacheSize(l, validatorTreeCacheGroupLayer)*length.Hash),
-		phase0Data:      make([]Phase0Data, l),
-		attesterBits:    make([]byte, l),
+		c:            c,
+		l:            l,
+		buffer:       make([]byte, l*validatorSize),
+		phase0Data:   make([]Phase0Data, l),
+		attesterBits: make([]byte, l),
 	}
 }
 
@@ -85,19 +80,14 @@ func (v *ValidatorSet) Bytes() []byte {
 
 func (v *ValidatorSet) expandBuffer(newValidatorSetLength int) {
 	size := newValidatorSetLength * validatorSize
-	treeCacheSize := getTreeCacheSize(newValidatorSetLength, validatorTreeCacheGroupLayer) * length.Hash
 
 	if size <= cap(v.buffer) {
-		v.treeCacheBuffer = v.treeCacheBuffer[:treeCacheSize]
 		v.buffer = v.buffer[:size]
 		return
 	}
 	increasedValidatorsCapacity := uint64(float64(newValidatorSetLength)*validatorSetCapacityMultiplier) + 1
 	buffer := make([]byte, size, increasedValidatorsCapacity*validatorSize)
-	cacheBuffer := make([]byte, treeCacheSize, increasedValidatorsCapacity*length.Hash)
 	copy(buffer, v.buffer)
-	copy(cacheBuffer, v.treeCacheBuffer)
-	v.treeCacheBuffer = cacheBuffer
 	v.buffer = buffer
 }
 
@@ -113,6 +103,9 @@ func (v *ValidatorSet) Append(val Validator) {
 	v.phase0Data[v.l] = Phase0Data{} // initialize to empty.
 	v.attesterBits = append(v.attesterBits, 0x0)
 	v.l++
+	if v.MerkleTree != nil {
+		v.MerkleTree.AppendLeaf()
+	}
 }
 
 func (v *ValidatorSet) Cap() int {
@@ -130,6 +123,7 @@ func (v *ValidatorSet) Pop() Validator {
 func (v *ValidatorSet) Clear() {
 	v.l = 0
 	v.attesterBits = v.attesterBits[:0]
+	v.MerkleTree = nil
 }
 
 func (v *ValidatorSet) Clone() clonable.Clonable {
@@ -144,10 +138,15 @@ func (v *ValidatorSet) CopyTo(t *ValidatorSet) {
 		t.expandBuffer(v.l)
 		t.attesterBits = make([]byte, len(v.attesterBits))
 	}
+	if v.MerkleTree != nil {
+		if t.MerkleTree == nil {
+			t.MerkleTree = &merkle_tree.MerkleTree{}
+		}
+		v.MerkleTree.CopyInto(t.MerkleTree)
+	}
 	// skip copying (unsupported for phase0)
 	t.phase0Data = make([]Phase0Data, t.l)
 	copy(t.buffer, v.buffer)
-	copy(t.treeCacheBuffer, v.treeCacheBuffer)
 	copy(t.attesterBits, v.attesterBits)
 	t.attesterBits = t.attesterBits[:v.l]
 }
@@ -189,60 +188,24 @@ func (v *ValidatorSet) Get(idx int) Validator {
 
 func (v *ValidatorSet) HashSSZ() ([32]byte, error) {
 	// generate root list
-	validatorsLeafChunkSize := convertDepthToChunkSize(validatorTreeCacheGroupLayer)
-	hashBuffer := make([]byte, 8*32)
-	depth := GetDepth(uint64(v.c))
-	lengthRoot := merkle_tree.Uint64Root(uint64(v.l))
-
-	if v.l == 0 {
-		return utils.Sha256(merkle_tree.ZeroHashes[depth][:], lengthRoot[:]), nil
-	}
-
-	emptyHashBytes := make([]byte, length.Hash)
-
-	layerBuffer := make([]byte, validatorsLeafChunkSize*length.Hash)
-	for i := 0; i < v.l; i += validatorsLeafChunkSize {
-		from := uint64(i)
-		to := min(from+uint64(validatorsLeafChunkSize), uint64(v.l))
-		offset := (i / validatorsLeafChunkSize) * length.Hash
-
-		if !bytes.Equal(v.treeCacheBuffer[offset:offset+length.Hash], emptyHashBytes) {
-			continue
-		}
-		for i := from; i < to; i++ {
-			validator := v.Get(int(i))
+	if v.MerkleTree == nil {
+		v.MerkleTree = &merkle_tree.MerkleTree{}
+		cap := uint64(v.c)
+		hashBuffer := make([]byte, 8*32)
+		v.MerkleTree.Initialize(v.l, merkle_tree.OptimalMaxTreeCacheDepth, func(idx int, out []byte) {
+			validator := v.Get(idx)
 			if err := validator.CopyHashBufferTo(hashBuffer); err != nil {
-				return [32]byte{}, err
+				panic(err)
 			}
 			hashBuffer = hashBuffer[:(8 * 32)]
-			if err := merkle_tree.MerkleRootFromFlatLeaves(hashBuffer, layerBuffer[(i-from)*length.Hash:]); err != nil {
-				return [32]byte{}, err
+			if err := merkle_tree.MerkleRootFromFlatLeaves(hashBuffer, out); err != nil {
+				panic(err)
 			}
-		}
-		endOffset := (to - from) * length.Hash
-		if err := computeFlatRootsToBuffer(validatorTreeCacheGroupLayer, layerBuffer[:endOffset], v.treeCacheBuffer[offset:]); err != nil {
-			return [32]byte{}, err
-		}
-
+		}, &cap)
 	}
-
-	offset := length.Hash * ((v.l + validatorsLeafChunkSize - 1) / validatorsLeafChunkSize)
-	v.makeBuf(offset)
-	copy(v.buf, v.treeCacheBuffer[:offset])
-	elements := v.buf
-	for i := uint8(validatorTreeCacheGroupLayer); i < depth; i++ {
-		// Sequential
-		if len(elements)%64 != 0 {
-			elements = append(elements, merkle_tree.ZeroHashes[i][:]...)
-		}
-		outputLen := len(elements) / 2
-		if err := merkle_tree.HashByteSlice(elements, elements); err != nil {
-			return [32]byte{}, err
-		}
-		elements = elements[:outputLen]
-	}
-
-	return utils.Sha256(elements[:length.Hash], lengthRoot[:]), nil
+	lengthRoot := merkle_tree.Uint64Root(uint64(v.l))
+	coreRoot := v.MerkleTree.ComputeRoot()
+	return utils.Sha256(coreRoot[:], lengthRoot[:]), nil
 }
 
 func computeFlatRootsToBuffer(depth uint8, layerBuffer, output []byte) error {
@@ -302,9 +265,8 @@ func (v *ValidatorSet) Range(fn func(int, Validator, int) bool) {
 }
 
 func (v *ValidatorSet) zeroTreeHash(idx int) {
-	iNodeIdx := (idx / (1 << validatorTreeCacheGroupLayer)) * length.Hash
-	for i := iNodeIdx; i < iNodeIdx+length.Hash; i++ {
-		v.treeCacheBuffer[i] = 0
+	if v.MerkleTree != nil {
+		v.MerkleTree.MarkLeafAsDirty(idx)
 	}
 }
 

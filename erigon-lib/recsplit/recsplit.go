@@ -21,6 +21,7 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/binary"
+	"errors"
 	"fmt"
 	"io"
 	"math"
@@ -39,7 +40,7 @@ import (
 	"github.com/erigontech/erigon-lib/recsplit/eliasfano32"
 )
 
-var ErrCollision = fmt.Errorf("duplicate key")
+var ErrCollision = errors.New("duplicate key")
 
 const RecSplitLogPrefix = "recsplit"
 
@@ -64,8 +65,7 @@ func remix(z uint64) uint64 {
 // Recsplit: Minimal perfect hashing via recursive splitting. In 2020 Proceedings of the Symposium on Algorithm Engineering and Experiments (ALENEX),
 // pages 175−185. SIAM, 2020.
 type RecSplit struct {
-	hasher          murmur3.Hash128 // Salted hash function to use for splitting into initial buckets and mapping to 64-bit fingerprints
-	offsetCollector *etl.Collector  // Collector that sorts by offsets
+	offsetCollector *etl.Collector // Collector that sorts by offsets
 
 	indexW          *bufio.Writer
 	indexF          *os.File
@@ -167,7 +167,6 @@ func NewRecSplit(args RecSplitArgs, logger log.Logger) (*RecSplit, error) {
 	} else {
 		rs.salt = *args.Salt
 	}
-	rs.hasher = murmur3.New128WithSeed(rs.salt)
 	rs.etlBufLimit = args.EtlBufLimit
 	if rs.etlBufLimit == 0 {
 		// reduce ram pressure, because:
@@ -259,7 +258,6 @@ func (rs *RecSplit) ResetNextSalt() {
 	rs.collision = false
 	rs.keysAdded = 0
 	rs.salt++
-	rs.hasher = murmur3.New128WithSeed(rs.salt)
 	if rs.bucketCollector != nil {
 		rs.bucketCollector.Close()
 	}
@@ -349,11 +347,9 @@ func (rs *RecSplit) golombParam(m uint16) int {
 // the slice underlying key is not getting accessed by RecSplit after this invocation.
 func (rs *RecSplit) AddKey(key []byte, offset uint64) error {
 	if rs.built {
-		return fmt.Errorf("cannot add keys after perfect hash function had been built")
+		return errors.New("cannot add keys after perfect hash function had been built")
 	}
-	rs.hasher.Reset()
-	rs.hasher.Write(key) //nolint:errcheck
-	hi, lo := rs.hasher.Sum128()
+	hi, lo := murmur3.Sum128WithSeed(key, rs.salt)
 	binary.BigEndian.PutUint64(rs.bucketKeyBuf[:], remap(hi, rs.bucketCount))
 	binary.BigEndian.PutUint64(rs.bucketKeyBuf[8:], lo)
 	binary.BigEndian.PutUint64(rs.numBuf[:], offset)
@@ -582,7 +578,7 @@ func (rs *RecSplit) loadFuncOffset(k, _ []byte, _ etl.CurrentTableReader, _ etl.
 // of building the perfect hash function and writing index into a file
 func (rs *RecSplit) Build(ctx context.Context) error {
 	if rs.built {
-		return fmt.Errorf("already built")
+		return errors.New("already built")
 	}
 	if rs.keysAdded != rs.keyExpectedCount {
 		return fmt.Errorf("rs %s expected keys %d, got %d", rs.indexFileName, rs.keyExpectedCount, rs.keysAdded)

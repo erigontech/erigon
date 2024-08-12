@@ -69,7 +69,7 @@ type Appendable struct {
 
 	// _visibleFiles - underscore in name means: don't use this field directly, use BeginFilesRo()
 	// underlying array is immutable - means it's ready for zero-copy use
-	_visibleFiles []ctxItem
+	_visibleFiles []visibleFile
 
 	table           string // txnNum_u64 -> key (k+auto_increment)
 	filenameBase    string
@@ -112,7 +112,7 @@ func NewAppendable(cfg AppendableCfg, aggregationStep uint64, filenameBase, tabl
 		compression:     CompressNone, //CompressKeys | CompressVals,
 	}
 	ap.indexList = withHashMap
-	ap._visibleFiles = []ctxItem{}
+	ap._visibleFiles = []visibleFile{}
 
 	return &ap, nil
 }
@@ -685,6 +685,7 @@ func (ap *Appendable) collate(ctx context.Context, step uint64, roTx kv.Tx) (App
 			coll.Close()
 		}
 	}()
+
 	comp, err := seg.NewCompressor(ctx, "collate "+ap.filenameBase, coll.iiPath, ap.cfg.Dirs.Tmp, seg.MinPatternScore, ap.compressWorkers, log.LvlTrace, ap.logger)
 	if err != nil {
 		return coll, fmt.Errorf("create %s compressor: %w", ap.filenameBase, err)

@@ -155,7 +155,7 @@ func testCallTracer(tracerName string, dirPath string, t *testing.T) {
 			dbTx, err := m.DB.BeginRw(m.Ctx)
 			require.NoError(t, err)
 			defer dbTx.Rollback()
-			statedb, err := tests.MakePreState(rules, dbTx, test.Genesis.Alloc, uint64(test.Context.Number), m.HistoryV3)
+			statedb, err := tests.MakePreState(rules, dbTx, test.Genesis.Alloc, uint64(test.Context.Number))
 			require.NoError(t, err)
 			tracer, err := tracers.New(tracerName, new(tracers.Context), test.TracerConfig)
 			if err != nil {
@@ -263,7 +263,7 @@ func benchTracer(b *testing.B, tracerName string, test *callTracerTest) {
 	dbTx, err := m.DB.BeginRw(m.Ctx)
 	require.NoError(b, err)
 	defer dbTx.Rollback()
-	statedb, _ := tests.MakePreState(rules, dbTx, test.Genesis.Alloc, uint64(test.Context.Number), m.HistoryV3)
+	statedb, _ := tests.MakePreState(rules, dbTx, test.Genesis.Alloc, uint64(test.Context.Number))
 
 	b.ReportAllocs()
 	b.ResetTimer()
@@ -340,7 +340,7 @@ func TestZeroValueToNotExitCall(t *testing.T) {
 	require.NoError(t, err)
 	defer dbTx.Rollback()
 
-	statedb, _ := tests.MakePreState(rules, dbTx, alloc, context.BlockNumber, m.HistoryV3)
+	statedb, _ := tests.MakePreState(rules, dbTx, alloc, context.BlockNumber)
 	// Create the tracer, the EVM environment and run it
 	tracer, err := tracers.New("callTracer", nil, nil)
 	if err != nil {

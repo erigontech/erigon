@@ -20,7 +20,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"math/big"
 	"net"
 	"net/http"
@@ -178,7 +177,7 @@ func (h *Heimdall) FetchSpan(ctx context.Context, spanID uint64) (*heimdall.Span
 		nextSpan.StartBlock = 1 //256
 	} else {
 		if spanID != uint64(h.currentSpan.Id+1) {
-			return nil, fmt.Errorf("can't initialize span: non consecutive span")
+			return nil, errors.New("can't initialize span: non consecutive span")
 		}
 
 		nextSpan.StartBlock = h.currentSpan.EndBlock + 1
@@ -202,7 +201,7 @@ func (h *Heimdall) FetchSpan(ctx context.Context, spanID uint64) (*heimdall.Span
 }
 
 func (h *Heimdall) FetchLatestSpan(ctx context.Context) (*heimdall.Span, error) {
-	return nil, fmt.Errorf("TODO")
+	return nil, errors.New("TODO")
 }
 
 func (h *Heimdall) currentSprintLength() int {
@@ -216,51 +215,50 @@ func (h *Heimdall) currentSprintLength() int {
 func (h *Heimdall) getSpanOverrideHeight() uint64 {
 	return 0
 	//MainChain: 8664000
-	//MumbaiChain: 10205000
 }
 
 func (h *Heimdall) FetchCheckpoint(ctx context.Context, number int64) (*heimdall.Checkpoint, error) {
-	return nil, fmt.Errorf("TODO")
+	return nil, errors.New("TODO")
 }
 
 func (h *Heimdall) FetchCheckpointCount(ctx context.Context) (int64, error) {
-	return 0, fmt.Errorf("TODO")
+	return 0, errors.New("TODO")
 }
 
 func (h *Heimdall) FetchCheckpoints(ctx context.Context, page uint64, limit uint64) ([]*heimdall.Checkpoint, error) {
-	return nil, fmt.Errorf("TODO")
+	return nil, errors.New("TODO")
 }
 
 func (h *Heimdall) FetchMilestone(ctx context.Context, number int64) (*heimdall.Milestone, error) {
-	return nil, fmt.Errorf("TODO")
+	return nil, errors.New("TODO")
 }
 
 func (h *Heimdall) FetchMilestoneCount(ctx context.Context) (int64, error) {
-	return 0, fmt.Errorf("TODO")
+	return 0, errors.New("TODO")
 }
 
 func (h *Heimdall) FetchFirstMilestoneNum(ctx context.Context) (int64, error) {
-	return 0, fmt.Errorf("TODO")
+	return 0, errors.New("TODO")
 }
 
 func (h *Heimdall) FetchNoAckMilestone(ctx context.Context, milestoneID string) error {
-	return fmt.Errorf("TODO")
+	return errors.New("TODO")
 }
 
 func (h *Heimdall) FetchLastNoAckMilestone(ctx context.Context) (string, error) {
-	return "", fmt.Errorf("TODO")
+	return "", errors.New("TODO")
 }
 
 func (h *Heimdall) FetchMilestoneID(ctx context.Context, milestoneID string) error {
-	return fmt.Errorf("TODO")
+	return errors.New("TODO")
 }
 
 func (h *Heimdall) FetchStateSyncEvents(ctx context.Context, fromID uint64, to time.Time, limit int) ([]*heimdall.EventRecordWithTime, error) {
-	return nil, fmt.Errorf("TODO")
+	return nil, errors.New("TODO")
 }
 
 func (h *Heimdall) FetchStateSyncEvent(ctx context.Context, id uint64) (*heimdall.EventRecordWithTime, error) {
-	return nil, fmt.Errorf("TODO")
+	return nil, errors.New("TODO")
 }
 
 func (h *Heimdall) Close() {

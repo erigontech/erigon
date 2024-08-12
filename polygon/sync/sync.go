@@ -23,11 +23,18 @@ import (
 	"github.com/erigontech/erigon-lib/log/v3"
 
 	"github.com/erigontech/erigon/core/types"
-	"github.com/erigontech/erigon/polygon/heimdall"
 	"github.com/erigontech/erigon/polygon/p2p"
 )
 
-type latestSpanFetcher func(ctx context.Context, count uint) ([]*heimdall.Span, error)
+type heimdallSynchronizer interface {
+	SynchronizeCheckpoints(ctx context.Context) error
+	SynchronizeMilestones(ctx context.Context) error
+	SynchronizeSpans(ctx context.Context, blockNum uint64) error
+}
+
+type bridgeSynchronizer interface {
+	Synchronize(ctx context.Context, blockNum uint64) error
+}
 
 type Sync struct {
 	store             Store
@@ -37,8 +44,8 @@ type Sync struct {
 	p2pService        p2p.Service
 	blockDownloader   BlockDownloader
 	ccBuilderFactory  CanonicalChainBuilderFactory
-	spansCache        *SpansCache
-	fetchLatestSpans  latestSpanFetcher
+	heimdallSync      heimdallSynchronizer
+	bridgeSync        bridgeSynchronizer
 	events            <-chan Event
 	logger            log.Logger
 }
@@ -51,8 +58,8 @@ func NewSync(
 	p2pService p2p.Service,
 	blockDownloader BlockDownloader,
 	ccBuilderFactory CanonicalChainBuilderFactory,
-	spansCache *SpansCache,
-	fetchLatestSpans latestSpanFetcher,
+	heimdallSync heimdallSynchronizer,
+	bridgeSync bridgeSynchronizer,
 	events <-chan Event,
 	logger log.Logger,
 ) *Sync {
@@ -64,17 +71,28 @@ func NewSync(
 		p2pService:        p2pService,
 		blockDownloader:   blockDownloader,
 		ccBuilderFactory:  ccBuilderFactory,
-		spansCache:        spansCache,
-		fetchLatestSpans:  fetchLatestSpans,
+		heimdallSync:      heimdallSync,
+		bridgeSync:        bridgeSync,
 		events:            events,
 		logger:            logger,
 	}
 }
 
 func (s *Sync) commitExecution(ctx context.Context, newTip *types.Header, finalizedHeader *types.Header) error {
-	if err := s.store.Flush(ctx, newTip); err != nil {
+	if err := s.store.Flush(ctx); err != nil {
 		return err
 	}
+
+	blockNum := newTip.Number.Uint64()
+
+	if err := s.heimdallSync.SynchronizeSpans(ctx, blockNum); err != nil {
+		return err
+	}
+
+	if err := s.bridgeSync.Synchronize(ctx, blockNum); err != nil {
+		return err
+	}
+
 	return s.execution.UpdateForkChoice(ctx, newTip, finalizedHeader)
 }
 
@@ -178,7 +196,7 @@ func (s *Sync) onNewBlockEvent(
 	}
 
 	oldTip := ccBuilder.Tip()
-	if err = ccBuilder.Connect(newHeaders); err != nil {
+	if err = ccBuilder.Connect(ctx, newHeaders); err != nil {
 		s.logger.Debug(syncLogPrefix("onNewBlockEvent: couldn't connect a header to the local chain tip, ignoring"), "err", err)
 		return nil
 	}
@@ -248,15 +266,6 @@ func (s *Sync) Run(ctx context.Context) error {
 		return err
 	}
 
-	latestSpans, err := s.fetchLatestSpans(ctx, 2)
-	if err != nil {
-		return err
-	}
-
-	for _, span := range latestSpans {
-		s.spansCache.Add(span)
-	}
-
 	ccBuilder := s.ccBuilderFactory(tip)
 
 	for {
@@ -275,8 +284,6 @@ func (s *Sync) Run(ctx context.Context) error {
 				if err = s.onNewBlockHashesEvent(ctx, event.AsNewBlockHashes(), ccBuilder); err != nil {
 					return err
 				}
-			case EventTypeNewSpan:
-				s.spansCache.Add(event.AsNewSpan())
 			}
 		case <-ctx.Done():
 			return ctx.Err()
@@ -305,12 +312,22 @@ func (s *Sync) syncToTip(ctx context.Context) (*types.Header, error) {
 
 func (s *Sync) syncToTipUsingCheckpoints(ctx context.Context, tip *types.Header) (*types.Header, error) {
 	return s.sync(ctx, tip, func(ctx context.Context, startBlockNum uint64) (*types.Header, error) {
+		err := s.heimdallSync.SynchronizeCheckpoints(ctx)
+		if err != nil {
+			return nil, err
+		}
+
 		return s.blockDownloader.DownloadBlocksUsingCheckpoints(ctx, startBlockNum)
 	})
 }
 
 func (s *Sync) syncToTipUsingMilestones(ctx context.Context, tip *types.Header) (*types.Header, error) {
 	return s.sync(ctx, tip, func(ctx context.Context, startBlockNum uint64) (*types.Header, error) {
+		err := s.heimdallSync.SynchronizeMilestones(ctx)
+		if err != nil {
+			return nil, err
+		}
+
 		return s.blockDownloader.DownloadBlocksUsingMilestones(ctx, startBlockNum)
 	})
 }

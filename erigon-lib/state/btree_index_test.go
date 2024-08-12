@@ -34,8 +34,8 @@ import (
 )
 
 func Test_BtreeIndex_Init2(t *testing.T) {
-	//mainnnet: storage.128-160.kv  110mil keys, 100mb bloomfilter of 0.01 (1%) miss-probability
-	//no much reason to merge bloomfilter - can merge them on starup
+	//mainnet: storage.128-160.kv  110mil keys, 100mb bloomfilter of 0.01 (1%) miss-probability
+	//no much reason to merge bloomfilter - can merge them on startup
 	//1B keys: 1Gb
 
 	sizes := []int{54, 74, 135, 139, 109, 105, 144}
@@ -133,7 +133,7 @@ func Test_BtreeIndex_Seek(t *testing.T) {
 	for i := 0; i < len(keys); i++ {
 		cur, err := bt.Seek(getter, keys[i])
 		require.NoErrorf(t, err, "i=%d", i)
-		require.EqualValues(t, keys[i], cur.key)
+		require.EqualValuesf(t, keys[i], cur.key, "i=%d", i)
 		require.NotEmptyf(t, cur.Value(), "i=%d", i)
 		// require.EqualValues(t, uint64(i), cur.Value())
 	}
@@ -175,6 +175,7 @@ func Test_BtreeIndex_Build(t *testing.T) {
 
 	c, err := bt.Seek(getter, nil)
 	require.NoError(t, err)
+	require.NotNil(t, c)
 	for i := 0; i < len(keys); i++ {
 		k := c.Key()
 		if !bytes.Equal(keys[i], k) {
@@ -302,7 +303,7 @@ func TestBpsTree_Seek(t *testing.T) {
 	//tr := newTrie()
 	ef := eliasfano32.NewEliasFano(uint64(keyCount), ps[len(ps)-1])
 	for i := 0; i < len(ps); i++ {
-		//tr.insert(Node{i: uint64(i), prefix: common.Copy(keys[i]), off: ps[i]})
+		//tr.insert(Node{i: uint64(i), key: common.Copy(keys[i]), off: ps[i]})
 		ef.AddOffset(ps[i])
 	}
 	ef.Build()
@@ -315,7 +316,7 @@ func TestBpsTree_Seek(t *testing.T) {
 
 	for i := 0; i < len(keys); i++ {
 		sk := keys[i]
-		k, di, found, err := bp.Seek(g, sk[:len(sk)/2])
+		k, _, di, found, err := bp.Seek(g, sk[:len(sk)/2])
 		_ = di
 		_ = found
 		require.NoError(t, err)

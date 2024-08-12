@@ -20,6 +20,7 @@
 package vm
 
 import (
+	"errors"
 	"fmt"
 	"math"
 
@@ -205,21 +206,13 @@ func opByte(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]byt
 
 func opAddmod(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]byte, error) {
 	x, y, z := scope.Stack.Pop(), scope.Stack.Pop(), scope.Stack.Peek()
-	if z.IsZero() {
-		z.Clear()
-	} else {
-		z.AddMod(&x, &y, z)
-	}
+	z.AddMod(&x, &y, z)
 	return nil, nil
 }
 
 func opMulmod(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]byte, error) {
 	x, y, z := scope.Stack.Pop(), scope.Stack.Pop(), scope.Stack.Peek()
-	if z.IsZero() {
-		z.Clear()
-	} else {
-		z.MulMod(&x, &y, z)
-	}
+	z.MulMod(&x, &y, z)
 	return nil, nil
 }
 
@@ -518,7 +511,7 @@ func opDifficulty(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) 
 		var overflow bool
 		v, overflow = uint256.FromBig(interpreter.evm.Context.Difficulty)
 		if overflow {
-			return nil, fmt.Errorf("interpreter.evm.Context.Difficulty higher than 2^256-1")
+			return nil, errors.New("interpreter.evm.Context.Difficulty higher than 2^256-1")
 		}
 	}
 	scope.Stack.Push(v)

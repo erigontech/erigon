@@ -101,6 +101,7 @@ var (
 	disableIPV4                    bool
 	seedbox                        bool
 	dbWritemap                     bool
+	all                            bool
 )
 
 func init() {
@@ -132,6 +133,7 @@ func init() {
 	withFile(createTorrent)
 	withChainFlag(createTorrent)
 	rootCmd.AddCommand(createTorrent)
+	createTorrent.Flags().BoolVar(&all, "all", false, "Produce all possible .torrent files")
 
 	rootCmd.AddCommand(torrentCat)
 	rootCmd.AddCommand(torrentMagnet)
@@ -252,6 +254,10 @@ func Downloader(ctx context.Context, logger log.Logger) error {
 
 	cfg.AddTorrentsFromDisk = true // always true unless using uploader - which wants control of torrent files
 
+	if seedbox {
+		snapcfg.LoadRemotePreverified()
+	}
+
 	d, err := downloader.New(ctx, cfg, logger, log.LvlInfo, seedbox)
 	if err != nil {
 		return err
@@ -299,10 +305,10 @@ func Downloader(ctx context.Context, logger log.Logger) error {
 
 var createTorrent = &cobra.Command{
 	Use:     "torrent_create",
-	Example: "go run ./cmd/downloader torrent_create --datadir=<your_datadir> --file=<relative_file_path>",
+	Example: "go run ./cmd/downloader torrent_create --datadir=<your_datadir> --file=<relative_file_path> ",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		dirs := datadir.New(datadirCli)
-		createdAmount, err := downloader.BuildTorrentFilesIfNeed(cmd.Context(), dirs, downloader.NewAtomicTorrentFS(dirs.Snap), chain, nil)
+		createdAmount, err := downloader.BuildTorrentFilesIfNeed(cmd.Context(), dirs, downloader.NewAtomicTorrentFS(dirs.Snap), chain, nil, all)
 		if err != nil {
 			return err
 		}
@@ -353,7 +359,7 @@ var torrentCat = &cobra.Command{
 	Example: "go run ./cmd/downloader torrent_cat <path_to_torrent_file>",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		if len(args) == 0 {
-			return fmt.Errorf("please pass .torrent file path by first argument")
+			return errors.New("please pass .torrent file path by first argument")
 		}
 		fPath := args[0]
 		mi, err := metainfo.LoadFromFile(fPath)
@@ -413,7 +419,7 @@ var torrentMagnet = &cobra.Command{
 	Example: "go run ./cmd/downloader torrent_magnet <path_to_torrent_file>",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		if len(args) == 0 {
-			return fmt.Errorf("please pass .torrent file path by first argument")
+			return errors.New("please pass .torrent file path by first argument")
 		}
 		fPath := args[0]
 		mi, err := metainfo.LoadFromFile(fPath)
@@ -486,7 +492,7 @@ func manifestVerify(ctx context.Context, logger log.Logger) error {
 func manifest(ctx context.Context, logger log.Logger) error {
 	dirs := datadir.New(datadirCli)
 
-	files, err := downloader.SeedableFiles(dirs, chain)
+	files, err := downloader.SeedableFiles(dirs, chain, all)
 	if err != nil {
 		return err
 	}
@@ -552,7 +558,7 @@ func doPrintTorrentHashes(ctx context.Context, logger log.Logger) error {
 				return err
 			}
 		}
-		createdAmount, err := downloader.BuildTorrentFilesIfNeed(ctx, dirs, tf, chain, nil)
+		createdAmount, err := downloader.BuildTorrentFilesIfNeed(ctx, dirs, tf, chain, nil, all)
 		if err != nil {
 			return fmt.Errorf("BuildTorrentFilesIfNeed: %w", err)
 		}

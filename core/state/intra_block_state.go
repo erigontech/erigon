@@ -21,6 +21,7 @@
 package state
 
 import (
+	"errors"
 	"fmt"
 	"sort"
 
@@ -195,7 +196,7 @@ func (sdb *IntraBlockState) AddRefund(gas uint64) {
 func (sdb *IntraBlockState) SubRefund(gas uint64) {
 	sdb.journal.append(refundChange{prev: sdb.refund})
 	if gas > sdb.refund {
-		sdb.setErrorUnsafe(fmt.Errorf("refund counter below zero"))
+		sdb.setErrorUnsafe(errors.New("refund counter below zero"))
 	}
 	sdb.refund -= gas
 }
@@ -276,7 +277,7 @@ func (sdb *IntraBlockState) GetCodeHash(addr libcommon.Address) libcommon.Hash {
 	if stateObject == nil || stateObject.deleted {
 		return libcommon.Hash{}
 	}
-	return libcommon.BytesToHash(stateObject.CodeHash())
+	return stateObject.data.CodeHash
 }
 
 // GetState retrieves a value from the given account's storage trie.
@@ -664,7 +665,7 @@ func printAccount(EIP161Enabled bool, addr libcommon.Address, stateObject *state
 	if isDirty && (stateObject.createdContract || !stateObject.selfdestructed) && !emptyRemoval {
 		// Write any contract code associated with the state object
 		if stateObject.code != nil && stateObject.dirtyCode {
-			fmt.Printf("UpdateCode: %x,%x\n", addr, stateObject.CodeHash())
+			fmt.Printf("UpdateCode: %x,%x\n", addr, stateObject.data.CodeHash)
 		}
 		if stateObject.createdContract {
 			fmt.Printf("CreateContract: %x\n", addr)

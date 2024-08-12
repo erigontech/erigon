@@ -198,7 +198,7 @@ func (ot *opcodeTracer) captureStartOrEnter(from, to libcommon.Address, create b
 	ot.txsInDepth = append(ot.txsInDepth, 0)
 
 	ls := len(ot.stack)
-	txnAddr := ""
+	var txnAddr string
 	if ls > 0 {
 		txnAddr = ot.stack[ls-1].TxnAddr + "-" + strconv.Itoa(int(ot.txsInDepth[ot.depth])) // fmt.Sprintf("%s-%d", ot.stack[ls-1].TxAddr, ot.txsInDepth[depth])
 	} else {
@@ -248,7 +248,7 @@ func (ot *opcodeTracer) captureEndOrExit(err error) {
 		}
 	}
 
-	errstr := ""
+	var errstr string
 	if err != nil {
 		errstr = err.Error()
 		currentEntry.Fault = errstr
@@ -439,7 +439,7 @@ func OpcodeTracer(genesis *types.Genesis, blockNum uint64, chaindata string, num
 	defer historyTx.Rollback()
 
 	dirs := datadir2.New(filepath.Dir(chainDb.(*mdbx.MdbxKV).Path()))
-	blockReader := freezeblocks.NewBlockReader(freezeblocks.NewRoSnapshots(ethconfig.BlocksFreezing{Enabled: false}, dirs.Snap, 0, log.New()), nil /* BorSnapshots */)
+	blockReader := freezeblocks.NewBlockReader(freezeblocks.NewRoSnapshots(ethconfig.BlocksFreezing{}, dirs.Snap, 0, log.New()), nil /* BorSnapshots */)
 
 	chainConfig := genesis.Config
 	vmConfig := vm.Config{Tracer: ot, Debug: true}
@@ -489,7 +489,6 @@ func OpcodeTracer(genesis *types.Genesis, blockNum uint64, chaindata string, num
 			if fopsWriter != nil {
 				fopsWriter.Flush()
 				fops.Close()
-				fops = nil
 			}
 
 			lo := len(chanOpcodes)
@@ -560,7 +559,6 @@ func OpcodeTracer(genesis *types.Genesis, blockNum uint64, chaindata string, num
 				}
 				fWriter.Flush()
 				f.Close()
-				f = nil
 			}
 
 			lsp := len(chanSegPrefix)

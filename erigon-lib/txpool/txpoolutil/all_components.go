@@ -18,7 +18,7 @@ package txpoolutil
 
 import (
 	"context"
-	"fmt"
+	"errors"
 	"math/big"
 	"time"
 
@@ -52,7 +52,7 @@ func SaveChainConfigIfNeed(ctx context.Context, coreDB kv.RoDB, txPoolDB kv.RwDB
 	}
 	if cc != nil && !force {
 		if cc.ChainID.Uint64() == 0 {
-			return nil, 0, fmt.Errorf("wrong chain config")
+			return nil, 0, errors.New("wrong chain config")
 		}
 		return cc, blockNum, nil
 	}
@@ -95,7 +95,7 @@ func SaveChainConfigIfNeed(ctx context.Context, coreDB kv.RoDB, txPoolDB kv.RwDB
 		return nil, 0, err
 	}
 	if cc.ChainID.Uint64() == 0 {
-		return nil, 0, fmt.Errorf("wrong chain config")
+		return nil, 0, errors.New("wrong chain config")
 	}
 	return cc, blockNum, nil
 }
@@ -108,7 +108,8 @@ func AllComponents(ctx context.Context, cfg txpoolcfg.Config, cache kvcache.Cach
 		PageSize(uint64(16 * datasize.KB)).
 		GrowthStep(16 * datasize.MB).
 		DirtySpace(uint64(128 * datasize.MB)).
-		MapSize(1 * datasize.TB)
+		MapSize(1 * datasize.TB).
+		WriteMap(cfg.MdbxWriteMap)
 
 	if cfg.MdbxPageSize.Bytes() > 0 {
 		opts = opts.PageSize(cfg.MdbxPageSize.Bytes())

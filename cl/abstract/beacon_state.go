@@ -219,4 +219,5 @@ type BeaconStateReader interface {
 	ValidatorForValidatorIndex(index int) (solid.Validator, error)
 	Version() clparams.StateVersion
 	GenesisValidatorsRoot() common.Hash
+	GetBeaconProposerIndexForSlot(slot uint64) (uint64, error)
 }

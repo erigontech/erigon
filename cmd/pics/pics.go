@@ -22,6 +22,7 @@ import (
 	"os"
 	"os/exec"
 	"sort"
+	"strconv"
 
 	libcommon "github.com/erigontech/erigon-lib/common"
 
@@ -61,7 +62,7 @@ func prefixGroups1() {
 	visual.StartGraph(f, false)
 	for i, key := range keys {
 		visual.QuadVertical(f, []byte(key), len(key), fmt.Sprintf("q_%x", key))
-		visual.Circle(f, fmt.Sprintf("e_%d", i), fmt.Sprintf("%d", i), false)
+		visual.Circle(f, fmt.Sprintf("e_%d", i), strconv.Itoa(i), false)
 		fmt.Fprintf(f,
 			`q_%x -> e_%d;
 `, key, i)
@@ -90,7 +91,7 @@ func prefixGroups2() {
 	visual.StartGraph(f, false)
 	for i, key := range keys {
 		visual.QuadVertical(f, []byte(key), len(key), fmt.Sprintf("q_%x", key))
-		visual.Circle(f, fmt.Sprintf("e_%d", i), fmt.Sprintf("%d", i), false)
+		visual.Circle(f, fmt.Sprintf("e_%d", i), strconv.Itoa(i), false)
 		fmt.Fprintf(f,
 			`q_%x -> e_%d;
 `, key, i)
@@ -176,7 +177,7 @@ q_%x->q_%x;
 		}
 		// Display the key
 		visual.QuadVertical(f, []byte(key), len(key), fmt.Sprintf("q_%x", key))
-		visual.Circle(f, fmt.Sprintf("e_%d", i), fmt.Sprintf("%d", i), false)
+		visual.Circle(f, fmt.Sprintf("e_%d", i), strconv.Itoa(i), false)
 		fmt.Fprintf(f,
 			`q_%x -> e_%d;
 `, key, i)
@@ -218,7 +219,7 @@ func prefixGroups4() {
 		for j := 0; j < len(hexKey); j++ {
 			hexKey[j] = key[2*j+1] | (key[2*j] << 4)
 		}
-		vs := fmt.Sprintf("%d", i)
+		vs := strconv.Itoa(i)
 		tr.Update(hexKey, []byte(vs))
 		hightlights = append(hightlights, []byte(key))
 	}
@@ -258,7 +259,7 @@ func prefixGroups5() {
 		for j := 0; j < len(hexKey); j++ {
 			hexKey[j] = key[2*j+1] | (key[2*j] << 4)
 		}
-		vs := fmt.Sprintf("%d", i)
+		vs := strconv.Itoa(i)
 		tr.Update(hexKey, []byte(vs))
 		hightlights = append(hightlights, []byte(key))
 		folds = append(folds, hexKey)
@@ -300,7 +301,7 @@ func prefixGroups6() {
 		for j := 0; j < len(hexKey); j++ {
 			hexKey[j] = key[2*j+1] | (key[2*j] << 4)
 		}
-		vs := fmt.Sprintf("%d", i)
+		vs := strconv.Itoa(i)
 		tr.Update(hexKey, []byte(vs))
 		hightlights = append(hightlights, []byte(key))
 		folds = append(folds, hexKey)
@@ -343,7 +344,7 @@ func prefixGroups7() {
 		for j := 0; j < len(hexKey); j++ {
 			hexKey[j] = key[2*j+1] | (key[2*j] << 4)
 		}
-		vs := fmt.Sprintf("%d", i)
+		vs := strconv.Itoa(i)
 		tr.Update(hexKey, []byte(vs))
 		hightlights = append(hightlights, []byte(key))
 		folds = append(folds, hexKey)
@@ -388,7 +389,7 @@ func prefixGroups8() {
 		for j := 0; j < len(hexKey); j++ {
 			hexKey[j] = key[2*j+1] | (key[2*j] << 4)
 		}
-		vs := fmt.Sprintf("%d", i)
+		vs := strconv.Itoa(i)
 		tr.Update(hexKey, []byte(vs))
 		hightlights = append(hightlights, []byte(key))
 		switch i {

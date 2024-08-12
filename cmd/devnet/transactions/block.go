@@ -18,6 +18,7 @@ package transactions
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
@@ -67,7 +68,7 @@ func searchBlockForHashes(
 	logger := devnet.Logger(ctx)
 
 	if len(hashmap) == 0 {
-		return nil, fmt.Errorf("no hashes to search for")
+		return nil, errors.New("no hashes to search for")
 	}
 
 	txToBlock := make(map[libcommon.Hash]uint64, len(hashmap))
@@ -76,7 +77,7 @@ func searchBlockForHashes(
 
 	// get a block from the new heads channel
 	if headsSub == nil {
-		return nil, fmt.Errorf("no block heads subscription")
+		return nil, errors.New("no block heads subscription")
 	}
 
 	var blockCount int
@@ -104,7 +105,7 @@ func searchBlockForHashes(
 				logger.Error("Missing Tx", "txHash", h)
 			}
 
-			return nil, fmt.Errorf("timeout when searching for tx")
+			return nil, errors.New("timeout when searching for tx")
 		}
 	}
 }

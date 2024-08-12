@@ -29,7 +29,8 @@ import (
 	"github.com/erigontech/erigon-lib/common/mem"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/cl/beacon/beacon_router_configuration"
-	"github.com/erigontech/erigon/cl/phase1/core"
+	"github.com/erigontech/erigon/cl/clparams"
+	"github.com/erigontech/erigon/cl/phase1/core/checkpoint_sync"
 	"github.com/erigontech/erigon/cl/phase1/core/state"
 	execution_client2 "github.com/erigontech/erigon/cl/phase1/execution_client"
 	"github.com/erigontech/erigon/cl/utils/eth_clock"
@@ -92,7 +93,7 @@ func runCaplinNode(cliCtx *cli.Context) error {
 	if cfg.InitialSync {
 		state = cfg.InitalState
 	} else {
-		state, err = core.RetrieveBeaconState(ctx, cfg.BeaconCfg, cfg.NetworkType)
+		state, err = checkpoint_sync.NewRemoteCheckpointSync(cfg.BeaconCfg, cfg.NetworkType).GetLatestBeaconState(ctx)
 		if err != nil {
 			return err
 		}
@@ -160,5 +161,6 @@ func runCaplinNode(cliCtx *cli.Context) error {
 		CaplinDiscoveryPort:    uint64(cfg.Port),
 		CaplinDiscoveryTCPPort: uint64(cfg.ServerTcpPort),
 		BeaconRouter:           rcfg,
-	}, cfg.NetworkCfg, cfg.BeaconCfg, ethClock, state, cfg.Dirs, nil, nil, false, false, false, indiciesDB, blobStorage, nil, blockSnapBuildSema, options...)
+		CaplinConfig:           clparams.CaplinConfig{},
+	}, cfg.NetworkCfg, cfg.BeaconCfg, ethClock, state, cfg.Dirs, nil, nil, indiciesDB, blobStorage, nil, blockSnapBuildSema, options...)
 }

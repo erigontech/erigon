@@ -257,7 +257,7 @@ var (
 						// TODO review this code, test pass with lhs+1 <= baseTxnID.U64()+ti
 						for body.BaseTxnID.LastSystemTx(body.TxCount) < baseTxnID.U64()+ti { // skip empty blocks; ti here is not transaction index in one block, but total transaction index counter
 							if !bodyGetter.HasNext() {
-								return fmt.Errorf("not enough bodies")
+								return errors.New("not enough bodies")
 							}
 
 							bodyBuf, _ = bodyGetter.Next(bodyBuf[:0])

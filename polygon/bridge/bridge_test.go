@@ -19,7 +19,6 @@ import (
 	"github.com/erigontech/erigon/polygon/bor/borcfg"
 	"github.com/erigontech/erigon/polygon/bridge"
 	"github.com/erigontech/erigon/polygon/heimdall"
-	"github.com/erigontech/erigon/polygon/polygoncommon"
 	"github.com/erigontech/erigon/rlp"
 	"github.com/erigontech/erigon/turbo/testlog"
 )
@@ -33,9 +32,7 @@ func setup(t *testing.T, abi abi.ABI) (*heimdall.MockHeimdallClient, *bridge.Bri
 	}
 
 	heimdallClient := heimdall.NewMockHeimdallClient(ctrl)
-	polygonBridgeDB := polygoncommon.NewDatabase(t.TempDir(), logger)
-	store := bridge.NewStore(polygonBridgeDB)
-	b := bridge.NewBridge(store, logger, &borConfig, heimdallClient.FetchStateSyncEvents, abi)
+	b := bridge.Assemble(t.TempDir(), logger, &borConfig, heimdallClient.FetchStateSyncEvents, abi)
 
 	return heimdallClient, b
 }
@@ -76,7 +73,7 @@ func TestBridge(t *testing.T) {
 	event1 := &heimdall.EventRecordWithTime{
 		EventRecord: heimdall.EventRecord{
 			ID:      1,
-			ChainID: "80001",
+			ChainID: "80002",
 			Data:    hexutil.MustDecode("0x01"),
 		},
 		Time: time.Unix(50, 0), // block 2
@@ -84,7 +81,7 @@ func TestBridge(t *testing.T) {
 	event2 := &heimdall.EventRecordWithTime{
 		EventRecord: heimdall.EventRecord{
 			ID:      2,
-			ChainID: "80001",
+			ChainID: "80002",
 			Data:    hexutil.MustDecode("0x02"),
 		},
 		Time: time.Unix(100, 0), // block 2
@@ -92,7 +89,7 @@ func TestBridge(t *testing.T) {
 	event3 := &heimdall.EventRecordWithTime{
 		EventRecord: heimdall.EventRecord{
 			ID:      3,
-			ChainID: "80001",
+			ChainID: "80002",
 			Data:    hexutil.MustDecode("0x03"),
 		},
 		Time: time.Unix(200, 0), // block 4
@@ -119,7 +116,7 @@ func TestBridge(t *testing.T) {
 		}
 	}(b)
 
-	err := b.Synchronize(ctx, &types.Header{Number: big.NewInt(100)}) // hack to wait for b.ready
+	err := b.Synchronize(ctx, 100) // hack to wait for b.ready
 	require.NoError(t, err)
 
 	blocks := getBlocks(t, 5)
@@ -127,7 +124,7 @@ func TestBridge(t *testing.T) {
 	err = b.ProcessNewBlocks(ctx, blocks)
 	require.NoError(t, err)
 
-	res, err := b.GetEvents(ctx, 2)
+	res, err := b.Events(ctx, 4)
 	require.NoError(t, err)
 
 	event1Data, err := event1.Pack(stateReceiverABI)
@@ -140,25 +137,19 @@ func TestBridge(t *testing.T) {
 	require.Equal(t, event1Data, rlp.RawValue(res[0].Data())) // check data fields
 	require.Equal(t, event2Data, rlp.RawValue(res[1].Data()))
 
-	res, err = b.GetEvents(ctx, 4)
-	require.NoError(t, err)
-
-	event3Data, err := event3.Pack(stateReceiverABI)
-	require.NoError(t, err)
-
-	require.Equal(t, 1, len(res))
-	require.Equal(t, event3Data, rlp.RawValue(res[0].Data()))
-
 	// get non-sprint block
-	_, err = b.GetEvents(ctx, 1)
-	require.Error(t, err)
+	res, err = b.Events(ctx, 1)
+	require.Equal(t, len(res), 0)
+	require.NoError(t, err)
 
-	_, err = b.GetEvents(ctx, 3)
-	require.Error(t, err)
+	res, err = b.Events(ctx, 3)
+	require.Equal(t, len(res), 0)
+	require.NoError(t, err)
 
 	// check block 0
-	_, err = b.GetEvents(ctx, 0)
-	require.Error(t, err)
+	res, err = b.Events(ctx, 0)
+	require.Equal(t, len(res), 0)
+	require.NoError(t, err)
 
 	cancel()
 	wg.Wait()
@@ -174,7 +165,7 @@ func TestBridge_Unwind(t *testing.T) {
 	event1 := &heimdall.EventRecordWithTime{
 		EventRecord: heimdall.EventRecord{
 			ID:      1,
-			ChainID: "80001",
+			ChainID: "80002",
 			Data:    hexutil.MustDecode("0x01"),
 		},
 		Time: time.Unix(50, 0), // block 2
@@ -182,7 +173,7 @@ func TestBridge_Unwind(t *testing.T) {
 	event2 := &heimdall.EventRecordWithTime{
 		EventRecord: heimdall.EventRecord{
 			ID:      2,
-			ChainID: "80001",
+			ChainID: "80002",
 			Data:    hexutil.MustDecode("0x02"),
 		},
 		Time: time.Unix(100, 0), // block 2
@@ -190,7 +181,7 @@ func TestBridge_Unwind(t *testing.T) {
 	event3 := &heimdall.EventRecordWithTime{
 		EventRecord: heimdall.EventRecord{
 			ID:      3,
-			ChainID: "80001",
+			ChainID: "80002",
 			Data:    hexutil.MustDecode("0x03"),
 		},
 		Time: time.Unix(200, 0), // block 4
@@ -198,7 +189,7 @@ func TestBridge_Unwind(t *testing.T) {
 	event4 := &heimdall.EventRecordWithTime{
 		EventRecord: heimdall.EventRecord{
 			ID:      4,
-			ChainID: "80001",
+			ChainID: "80002",
 			Data:    hexutil.MustDecode("0x03"),
 		},
 		Time: time.Unix(300, 0), // block 6
@@ -225,7 +216,7 @@ func TestBridge_Unwind(t *testing.T) {
 		}
 	}(b)
 
-	err := b.Synchronize(ctx, &types.Header{Number: big.NewInt(100)}) // hack to wait for b.ready
+	err := b.Synchronize(ctx, 100) // hack to wait for b.ready
 	require.NoError(t, err)
 
 	blocks := getBlocks(t, 8)
@@ -233,18 +224,19 @@ func TestBridge_Unwind(t *testing.T) {
 	err = b.ProcessNewBlocks(ctx, blocks)
 	require.NoError(t, err)
 
-	event3Data, err := event3.Pack(stateReceiverABI)
+	event1Data, err := event1.Pack(stateReceiverABI)
 	require.NoError(t, err)
 
-	res, err := b.GetEvents(ctx, 4)
-	require.Equal(t, event3Data, rlp.RawValue(res[0].Data()))
+	res, err := b.Events(ctx, 4)
+	require.Equal(t, event1Data, rlp.RawValue(res[0].Data()))
 	require.NoError(t, err)
 
-	err = b.Unwind(ctx, &types.Header{Number: big.NewInt(3)})
+	err = b.Unwind(ctx, 3)
 	require.NoError(t, err)
 
-	_, err = b.GetEvents(ctx, 4)
-	require.Error(t, err)
+	res, err = b.Events(ctx, 4)
+	require.Equal(t, len(res), 0)
+	require.NoError(t, err)
 
 	cancel()
 	wg.Wait()

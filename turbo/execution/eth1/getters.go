@@ -292,7 +292,7 @@ func (e *EthereumExecutionModule) CurrentHeader(ctx context.Context, _ *emptypb.
 		return nil, fmt.Errorf("ethereumExecutionModule.CurrentHeader: blockReader.Header error %w", err)
 	}
 	if h == nil {
-		return nil, fmt.Errorf("ethereumExecutionModule.CurrentHeader: no current header yet - probabably node not synced yet")
+		return nil, errors.New("ethereumExecutionModule.CurrentHeader: no current header yet - probabably node not synced yet")
 	}
 	return &execution.GetHeaderResponse{
 		Header: eth1_utils.HeaderToHeaderRPC(h),
