@@ -1,14 +1,11 @@
 participants_matrix:
   el:
     - el_type: geth
-#      el_image: ethpandaops/geth:master
     - el_type: erigon
       el_image: <<ERIGON_IMAGE_PLACEHOLDER>>
   cl:
     - cl_type: lighthouse
-      #cl_image: ethpandaops/lighthouse:stable
     - cl_type: teku
-      #cl_image: ethpandaops/teku:master
 network_params:
   electra_fork_epoch: 1
   min_validator_withdrawability_delay: 1
@@ -22,16 +19,16 @@ assertoor_params:
   run_stability_check: false
   run_block_proposal_check: false
   tests:
-    # - https://raw.githubusercontent.com/ethpandaops/assertoor-test/master/assertoor-tests/all-opcodes-test.yaml
-    # - https://raw.githubusercontent.com/ethpandaops/assertoor-test/master/assertoor-tests/blob-transactions-test.yaml
-    # - https://raw.githubusercontent.com/ethpandaops/assertoor-test/master/assertoor-tests/dencun-opcodes-test.yaml
+    - https://raw.githubusercontent.com/ethpandaops/assertoor-test/master/assertoor-tests/all-opcodes-test.yaml
+    - https://raw.githubusercontent.com/ethpandaops/assertoor-test/master/assertoor-tests/blob-transactions-test.yaml
+    - https://raw.githubusercontent.com/ethpandaops/assertoor-test/master/assertoor-tests/dencun-opcodes-test.yaml
     - https://raw.githubusercontent.com/ethpandaops/assertoor-test/master/assertoor-tests/eoa-transactions-test.yaml
-    # - https://raw.githubusercontent.com/ethpandaops/assertoor-test/master/assertoor-tests/stability-check.yaml
-    # - https://raw.githubusercontent.com/ethpandaops/assertoor-test/master/assertoor-tests/synchronized-check.yaml
-    # - https://raw.githubusercontent.com/ethpandaops/assertoor-test/master/assertoor-tests/vaidator-exit-test.yaml
-    # - https://raw.githubusercontent.com/ethpandaops/assertoor-test/master/assertoor-tests/vaidator-lifecycle-test-v2.yaml
-    # - https://raw.githubusercontent.com/ethpandaops/assertoor-test/master/assertoor-tests/vaidator-lifecycle-test.yaml
-    # - https://raw.githubusercontent.com/ethpandaops/assertoor-test/master/assertoor-tests/vaidator-proposer-slashing-test.yaml
-    # - https://raw.githubusercontent.com/ethpandaops/assertoor-test/master/assertoor-tests/vaidator-withdrawal-test.yaml
-    # - https://raw.githubusercontent.com/ethpandaops/assertoor-test/master/assertoor-tests/vaidator-withdrawal-test-v2.yaml
-    # - https://raw.githubusercontent.com/ethpandaops/assertoor-test/master/assertoor-tests/block-proposal-check.yaml
+    - https://raw.githubusercontent.com/ethpandaops/assertoor-test/master/assertoor-tests/stability-check.yaml
+    - https://raw.githubusercontent.com/ethpandaops/assertoor-test/master/assertoor-tests/synchronized-check.yaml
+    - https://raw.githubusercontent.com/ethpandaops/assertoor-test/master/assertoor-tests/vaidator-exit-test.yaml
+    - https://raw.githubusercontent.com/ethpandaops/assertoor-test/master/assertoor-tests/vaidator-lifecycle-test-v2.yaml
+    - https://raw.githubusercontent.com/ethpandaops/assertoor-test/master/assertoor-tests/vaidator-lifecycle-test.yaml
+    - https://raw.githubusercontent.com/ethpandaops/assertoor-test/master/assertoor-tests/vaidator-proposer-slashing-test.yaml
+    - https://raw.githubusercontent.com/ethpandaops/assertoor-test/master/assertoor-tests/vaidator-withdrawal-test.yaml
+    - https://raw.githubusercontent.com/ethpandaops/assertoor-test/master/assertoor-tests/vaidator-withdrawal-test-v2.yaml
+    - https://raw.githubusercontent.com/ethpandaops/assertoor-test/master/assertoor-tests/block-proposal-check.yaml

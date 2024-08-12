@@ -1,17 +1,9 @@
 name: Kurtosis Assertoor GitHub Action
 
 on:
-  pull_request:
-    branches:
-      - kurtosis_assertoor
-    types:
-      - opened
-      - reopened
-      - synchronize
-      - ready_for_review
-  push:
-    branches:
-      - kurtosis_assertoor
+  schedule:
+    - cron: "0 2,14 * * *" # runs at 2am and 2pm UTC
+  workflow_dispatch:
 
 
 jobs:
@@ -21,7 +13,6 @@ jobs:
         # list of os: https://github.com/actions/virtual-environments
         os:
           - { id: ubuntu-22.04, name: ubuntu } 
-          #- macos-14
     runs-on: ${{ matrix.os.id }}
 
     steps:
