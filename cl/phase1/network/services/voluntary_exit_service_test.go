@@ -39,7 +39,7 @@ type voluntaryExitTestSuite struct {
 	suite.Suite
 	gomockCtrl           *gomock.Controller
 	operationsPool       *pool.OperationsPool
-	emitters             *beaconevents.Emitters
+	emitters             *beaconevents.EventEmitter
 	syncedData           *mockSync.MockSyncedData
 	ethClock             *eth_clock.MockEthereumClock
 	beaconCfg            *clparams.BeaconChainConfig
@@ -53,7 +53,7 @@ func (t *voluntaryExitTestSuite) SetupTest() {
 		return [32]byte{}, nil
 	}
 	t.gomockCtrl = gomock.NewController(t.T())
-	t.emitters = beaconevents.NewEmitters()
+	t.emitters = beaconevents.NewEventEmitter()
 	t.operationsPool = &pool.OperationsPool{
 		VoluntaryExitsPool: pool.NewOperationPool[uint64, *cltypes.SignedVoluntaryExit](10, "voluntaryExitsPool"),
 	}

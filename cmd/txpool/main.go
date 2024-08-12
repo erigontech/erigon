@@ -195,7 +195,7 @@ func doTxpool(ctx context.Context, logger log.Logger) error {
 	fetch.ConnectCore()
 	fetch.ConnectSentries()
 
-	miningGrpcServer := privateapi.NewMiningServer(ctx, &rpcdaemontest.IsMiningMock{}, nil, logger)
+	miningGrpcServer := privateapi.NewMiningServer(ctx, &rpcdaemontest.IsMiningMock{}, logger)
 
 	grpcServer, err := txpool.StartGrpc(txpoolGrpcServer, miningGrpcServer, txpoolApiAddr, nil, logger)
 	if err != nil {

@@ -5,17 +5,21 @@ import (
 	"fmt"
 	"os"
 	"runtime"
-	"strconv"
 
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/dbg"
+	"github.com/erigontech/erigon-lib/common/hexutil"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/cl/beacon/beaconevents"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/persistence/beacon_indicies"
 	state_accessors "github.com/erigontech/erigon/cl/persistence/state"
 	"github.com/erigontech/erigon/cl/phase1/core/state"
+	"github.com/erigontech/erigon/cl/transition"
 	"github.com/erigontech/erigon/cl/utils"
+	"github.com/erigontech/erigon/core/types"
+	"github.com/erigontech/erigon/turbo/engineapi/engine_types"
 )
 
 // computeAndNotifyServicesOfNewForkChoice calculates the new head of the fork choice and notifies relevant services.
@@ -58,18 +62,28 @@ func computeAndNotifyServicesOfNewForkChoice(ctx context.Context, logger log.Log
 // updateCanonicalChainInTheDatabase updates the canonical chain in the database by marking the given head slot and root as canonical.
 // It traces back through parent block roots to find the common ancestor with the existing canonical chain, truncates the chain,
 // and then marks the new chain segments as canonical.
-func updateCanonicalChainInTheDatabase(ctx context.Context, tx kv.RwTx, headSlot uint64, headRoot common.Hash) error {
+func updateCanonicalChainInTheDatabase(ctx context.Context, tx kv.RwTx, headSlot uint64, headRoot common.Hash, cfg *Cfg) error {
 	type canonicalEntry struct {
 		slot uint64
 		root common.Hash
 	}
-
 	currentRoot := headRoot
 	currentSlot := headSlot
 	// Read the current canonical block root for the given slot
 	currentCanonical, err := beacon_indicies.ReadCanonicalBlockRoot(tx, currentSlot)
 	if err != nil {
 		return fmt.Errorf("failed to read canonical block root: %w", err)
+	}
+
+	oldCanonical := common.Hash{}
+	for i := currentSlot - 1; i > 0; i-- {
+		oldCanonical, err = beacon_indicies.ReadCanonicalBlockRoot(tx, i)
+		if err != nil {
+			return fmt.Errorf("failed to read canonical block root: %w", err)
+		}
+		if oldCanonical != (common.Hash{}) {
+			break
+		}
 	}
 
 	// List of new canonical chain entries
@@ -121,6 +135,36 @@ func updateCanonicalChainInTheDatabase(ctx context.Context, tx kv.RwTx, headSlot
 		return fmt.Errorf("failed to mark root canonical: %w", err)
 	}
 
+	// check reorg
+	parentRoot, err := beacon_indicies.ReadParentBlockRoot(ctx, tx, headRoot)
+	if err != nil {
+		return fmt.Errorf("failed to read parent block root: %w", err)
+	}
+	if parentRoot != oldCanonical {
+		log.Info("cl reorg", "new_head_slot", headSlot, "fork_slot", currentSlot, "old_canonical", oldCanonical, "new_canonical", headRoot)
+		oldStateRoot, err := beacon_indicies.ReadStateRootByBlockRoot(ctx, tx, oldCanonical)
+		if err != nil {
+			log.Warn("failed to read state root by block root", "err", err, "block_root", oldCanonical)
+			return nil
+		}
+		newStateRoot, err := beacon_indicies.ReadStateRootByBlockRoot(ctx, tx, headRoot)
+		if err != nil {
+			log.Warn("failed to read state root by block root", "err", err, "block_root", headRoot)
+			return nil
+		}
+		reorgEvent := &beaconevents.ChainReorgData{
+			Slot:                headSlot,
+			Depth:               currentSlot - headSlot,
+			OldHeadBlock:        oldCanonical,
+			NewHeadBlock:        headRoot,
+			OldHeadState:        oldStateRoot,
+			NewHeadState:        newStateRoot,
+			Epoch:               headSlot / cfg.beaconCfg.SlotsPerEpoch,
+			ExecutionOptimistic: cfg.forkChoice.IsRootOptimistic(headRoot),
+		}
+		cfg.emitter.State().SendChainReorg(reorgEvent)
+	}
+
 	return nil
 }
 
@@ -159,15 +203,67 @@ func emitHeadEvent(cfg *Cfg, headSlot uint64, headRoot common.Hash, headState *s
 		return fmt.Errorf("failed to hash ssz: %w", err)
 	}
 	// emit the head event
-	cfg.emitter.Publish("head", map[string]any{
-		"slot":                         strconv.Itoa(int(headSlot)),
-		"block":                        headRoot,
-		"state":                        common.Hash(stateRoot),
-		"epoch_transition":             true,
-		"previous_duty_dependent_root": previous_duty_dependent_root,
-		"current_duty_dependent_root":  current_duty_dependent_root,
-		"execution_optimistic":         false,
+	cfg.emitter.State().SendHead(&beaconevents.HeadData{
+		Slot:                      headSlot,
+		Block:                     headRoot,
+		State:                     stateRoot,
+		EpochTransition:           true,
+		PreviousDutyDependentRoot: previous_duty_dependent_root,
+		CurrentDutyDependentRoot:  current_duty_dependent_root,
+		ExecutionOptimistic:       false,
 	})
+	return nil
+}
+
+func emitNextPaylodAttributesEvent(cfg *Cfg, headSlot uint64, headRoot common.Hash, s *state.CachingBeaconState) error {
+	headPayloadHeader := s.LatestExecutionPayloadHeader().Copy()
+	nextSlotState, err := s.Copy()
+	if err != nil {
+		log.Warn("failed to copy state", "err", err, "slot", headSlot)
+		return err
+	}
+	nextSlot := headSlot + 1
+	if err := transition.DefaultMachine.ProcessSlots(nextSlotState, nextSlot); err != nil {
+		log.Warn("failed to process slots", "err", err, "next_slot", nextSlot)
+		return err
+	}
+	epoch := cfg.ethClock.GetEpochAtSlot(nextSlot)
+	randaoMix := nextSlotState.GetRandaoMixes(epoch)
+
+	proposerIndex, err := nextSlotState.GetBeaconProposerIndexForSlot(nextSlot)
+	if err != nil {
+		log.Warn("failed to get proposer index", "err", err)
+		return err
+	}
+	feeRecipient := nextSlotState.LatestExecutionPayloadHeader().FeeRecipient
+	withdrawals := []*types.Withdrawal{}
+	for _, w := range state.ExpectedWithdrawals(nextSlotState, cfg.ethClock.GetEpochAtSlot(nextSlot)) {
+		withdrawals = append(withdrawals, &types.Withdrawal{
+			Amount:    w.Amount,
+			Index:     w.Index,
+			Validator: w.Validator,
+			Address:   w.Address,
+		})
+	}
+	payloadAttributes := engine_types.PayloadAttributes{
+		Timestamp:             hexutil.Uint64(headPayloadHeader.Time + cfg.beaconCfg.SecondsPerSlot),
+		PrevRandao:            randaoMix,
+		SuggestedFeeRecipient: feeRecipient,
+		ParentBeaconBlockRoot: &headRoot,
+		Withdrawals:           withdrawals,
+	}
+	e := &beaconevents.PayloadAttributesData{
+		Version: nextSlotState.Version().String(),
+		Data: beaconevents.PayloadAttributesContent{
+			ProposerIndex:     proposerIndex,
+			ProposalSlot:      nextSlot,
+			ParentBlockNumber: headPayloadHeader.BlockNumber,
+			ParentBlockHash:   headPayloadHeader.StateRoot,
+			ParentBlockRoot:   headRoot,
+			PayloadAttributes: payloadAttributes,
+		},
+	}
+	cfg.emitter.State().SendPayloadAttributes(e)
 	return nil
 }
 
@@ -232,7 +328,9 @@ func postForkchoiceOperations(ctx context.Context, tx kv.RwTx, logger log.Logger
 		return fmt.Errorf("failed to save head state on disk: %w", err)
 	}
 	// Lastly, emit the head event
-	return emitHeadEvent(cfg, headSlot, headRoot, headState)
+	emitHeadEvent(cfg, headSlot, headRoot, headState)
+	emitNextPaylodAttributesEvent(cfg, headSlot, headRoot, headState)
+	return nil
 }
 
 // doForkchoiceRoutine performs the fork choice routine by computing the new fork choice, updating the canonical chain in the database,
@@ -252,7 +350,7 @@ func doForkchoiceRoutine(ctx context.Context, logger log.Logger, cfg *Cfg, args 
 	}
 	defer tx.Rollback()
 
-	if err := updateCanonicalChainInTheDatabase(ctx, tx, headSlot, headRoot); err != nil {
+	if err := updateCanonicalChainInTheDatabase(ctx, tx, headSlot, headRoot, cfg); err != nil {
 		return fmt.Errorf("failed to update canonical chain in the database: %w", err)
 	}
 
