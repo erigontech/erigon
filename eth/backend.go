@@ -784,8 +784,11 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 		isSequencer := sequencer.IsSequencer()
 
 		// if the L1 block sync is set we're in recovery so can't run as a sequencer
-		if cfg.L1SyncStartBlock > 0 && !isSequencer {
-			panic("you cannot launch in l1 sync mode as an RPC node")
+		if cfg.L1SyncStartBlock > 0 {
+			if !isSequencer {
+				panic("you cannot launch in l1 sync mode as an RPC node")
+			}
+			log.Info("Starting sequencer in L1 recovery mode", "startBlock", cfg.L1SyncStartBlock)
 		}
 
 		seqAndVerifTopics := [][]libcommon.Hash{{
