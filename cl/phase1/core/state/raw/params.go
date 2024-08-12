@@ -55,4 +55,8 @@ const (
 
 const (
 	StateLeafSize = 28
+
+	LeafInitValue  = 0
+	LeafCleanValue = 1
+	LeafDirtyValue = 2
 )

@@ -73,8 +73,8 @@ type BeaconState struct {
 	currentEpochAttestations  *solid.ListSSZ[*solid.PendingAttestation]
 
 	//  leaves for computing hashes
-	leaves        []byte        // Pre-computed leaves.
-	touchedLeaves []atomic.Bool // Maps each leaf to whether they were touched or not.
+	leaves        []byte          // Pre-computed leaves.
+	touchedLeaves []atomic.Uint32 // Maps each leaf to whether they were touched or not.
 
 	// cl version
 	version      clparams.StateVersion // State version
@@ -119,7 +119,7 @@ func New(cfg *clparams.BeaconChainConfig) *BeaconState {
 
 func (b *BeaconState) init() error {
 	if b.touchedLeaves == nil {
-		b.touchedLeaves = make([]atomic.Bool, StateLeafSize)
+		b.touchedLeaves = make([]atomic.Uint32, StateLeafSize)
 	}
 	return nil
 }
