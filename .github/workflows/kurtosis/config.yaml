@@ -25,10 +25,11 @@ assertoor_params:
     - https://raw.githubusercontent.com/ethpandaops/assertoor-test/master/assertoor-tests/eoa-transactions-test.yaml
     - https://raw.githubusercontent.com/ethpandaops/assertoor-test/master/assertoor-tests/stability-check.yaml
     - https://raw.githubusercontent.com/ethpandaops/assertoor-test/master/assertoor-tests/synchronized-check.yaml
-    - https://raw.githubusercontent.com/ethpandaops/assertoor-test/master/assertoor-tests/vaidator-exit-test.yaml
-    - https://raw.githubusercontent.com/ethpandaops/assertoor-test/master/assertoor-tests/vaidator-lifecycle-test-v2.yaml
-    - https://raw.githubusercontent.com/ethpandaops/assertoor-test/master/assertoor-tests/vaidator-lifecycle-test.yaml
-    - https://raw.githubusercontent.com/ethpandaops/assertoor-test/master/assertoor-tests/vaidator-proposer-slashing-test.yaml
-    - https://raw.githubusercontent.com/ethpandaops/assertoor-test/master/assertoor-tests/vaidator-withdrawal-test.yaml
-    - https://raw.githubusercontent.com/ethpandaops/assertoor-test/master/assertoor-tests/vaidator-withdrawal-test-v2.yaml
+    - https://raw.githubusercontent.com/ethpandaops/assertoor-test/master/assertoor-tests/validator-exit-test.yaml
+    - https://raw.githubusercontent.com/ethpandaops/assertoor-test/master/assertoor-tests/validator-lifecycle-test-v2.yaml
+    - https://raw.githubusercontent.com/ethpandaops/assertoor-test/master/assertoor-tests/validator-lifecycle-test.yaml
+    - https://raw.githubusercontent.com/ethpandaops/assertoor-test/master/assertoor-tests/validator-proposer-slashing-test.yaml
+    - https://raw.githubusercontent.com/ethpandaops/assertoor-test/master/assertoor-tests/validator-withdrawal-test.yaml
+    - https://raw.githubusercontent.com/ethpandaops/assertoor-test/master/assertoor-tests/validator-withdrawal-test-v2.yaml
+    - https://raw.githubusercontent.com/ethpandaops/assertoor-test/master/assertoor-tests/validator-slashing-test.yaml
     - https://raw.githubusercontent.com/ethpandaops/assertoor-test/master/assertoor-tests/block-proposal-check.yaml
