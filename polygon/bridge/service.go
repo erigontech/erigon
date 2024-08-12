@@ -33,7 +33,7 @@ type PolygonBridge interface {
 
 type PolygonBridgeReader interface {
 	Events(ctx context.Context, blockNum uint64) ([]*types.Message, error)
-	TxLookup(ctx context.Context, borTxHash libcommon.Hash) (uint64, bool, error)
+	EventTxnLookup(ctx context.Context, borTxHash libcommon.Hash) (uint64, bool, error)
 }
 
 type Service interface {

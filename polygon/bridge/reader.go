@@ -41,13 +41,13 @@ func NewReader(store Store, log log.Logger) *Reader {
 
 // Events returns all sync events at blockNum
 func (r *Reader) Events(ctx context.Context, blockNum uint64) ([]*types.Message, error) {
-	start, end, err := r.store.GetEventIDRange(ctx, blockNum)
+	start, end, err := r.store.EventIDRange(ctx, blockNum)
 	if err != nil {
 		return nil, err
 	}
 
 	if end == 0 { // exception for tip processing
-		end, err = r.store.GetLastProcessedEventID(ctx)
+		end, err = r.store.LastProcessedEventID(ctx)
 		if err != nil {
 			return nil, err
 		}
@@ -56,7 +56,7 @@ func (r *Reader) Events(ctx context.Context, blockNum uint64) ([]*types.Message,
 	eventsRaw := make([]*types.Message, 0, end-start+1)
 
 	// get events from DB
-	events, err := r.store.GetEvents(ctx, start+1, end+1)
+	events, err := r.store.Events(ctx, start+1, end+1)
 	if err != nil {
 		return nil, err
 	}
@@ -85,8 +85,8 @@ func (r *Reader) Events(ctx context.Context, blockNum uint64) ([]*types.Message,
 	return eventsRaw, nil
 }
 
-func (r *Reader) TxLookup(ctx context.Context, borTxHash libcommon.Hash) (uint64, bool, error) {
-	return r.store.TxMap(ctx, borTxHash)
+func (r *Reader) EventTxnLookup(ctx context.Context, borTxHash libcommon.Hash) (uint64, bool, error) {
+	return r.store.EventTxnToBlockNum(ctx, borTxHash)
 }
 
 func (r *Reader) Close() {
