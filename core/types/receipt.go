@@ -495,3 +495,12 @@ func (r Receipts) DeriveFields(hash libcommon.Hash, number uint64, txs Transacti
 	}
 	return nil
 }
+
+// ToSlice converts Receipts into slice of value type Receipt
+func (r Receipts) ToSlice() []Receipt {
+	result := make([]Receipt, 0, r.Len())
+	for _, receipt := range r {
+		result = append(result, *receipt)
+	}
+	return result
+}
