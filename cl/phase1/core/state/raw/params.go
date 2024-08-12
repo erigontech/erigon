@@ -52,3 +52,7 @@ const (
 	NextWithdrawalValidatorIndexLeafIndex StateLeafIndex = 26
 	HistoricalSummariesLeafIndex          StateLeafIndex = 27
 )
+
+const (
+	StateLeafSize = 28
+)
