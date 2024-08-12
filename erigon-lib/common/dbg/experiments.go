@@ -266,26 +266,33 @@ func SaveHeapWithLogger(logger *log.Logger) SaveHeapOption {
 }
 
 func SaveHeapProfileNearOOM(opts ...SaveHeapOption) {
+	if !saveHeapProfile {
+		return
+	}
+
 	var options saveHeapOptions
 	for _, opt := range opts {
 		opt(&options)
 	}
 
-	if !saveHeapProfile {
-		return
-	}
-
-	if options.memStats == nil {
-		ReadMemStats(options.memStats)
-	}
-
-	if options.memStats.Alloc < (mmap.TotalMemory()/100)*45 {
-		return
-	}
-
 	var logger log.Logger
 	if options.logger != nil {
 		logger = *options.logger
+	}
+
+	var memStats runtime.MemStats
+	if options.memStats != nil {
+		memStats = *options.memStats
+	} else {
+		ReadMemStats(&memStats)
+	}
+
+	totalMemory := mmap.TotalMemory()
+	if logger != nil {
+		logger.Info("[Experiment] heap profile threshold check", "alloc", memStats.Alloc, "total", totalMemory)
+	}
+	if options.memStats.Alloc < (totalMemory/100)*45 {
+		return
 	}
 
 	// above 45%
