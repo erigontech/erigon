@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"math/big"
+	"math/rand"
 	"testing"
 
 	"github.com/c2h5oh/datasize"
@@ -183,6 +184,9 @@ func setup(t TestingCtrl, useSilkworm bool) (*EthereumExecutionModule, *types.Bl
 		require.NoError(t, err)
 	}
 
+	// Globals
+	globalSigner = types.LatestSigner(chainConfig)
+
 	return NewEthereumExecutionModule(blockReader, db, stagedSync, forkValidator, silkwormForkValidator, chainConfig, nil /*builderFunc*/, nil /*hook*/, notifications.Accumulator, notifications.StateChangesConsumer, logger, engine, false /*historyV3*/, ctx),
 		genesisBlock,
 		silkwormInstance
@@ -206,10 +210,13 @@ var (
 	block4RootHash = libcommon.HexToHash("e8d36b208e37daa1be5893d4806dcce4573fc9d275271c1f569e399c77d0c157")
 )
 
+var globalSigner *types.Signer
+
 func SampleBlock(parent *types.Header, rootHash libcommon.Hash) *types.Block {
+
 	return types.NewBlockWithHeader(&types.Header{
 		Number:     new(big.Int).Add(parent.Number, big.NewInt(1)),
-		Difficulty: new(big.Int).Add(parent.Number, big.NewInt(17000000000)),
+		Difficulty: new(big.Int).Add(parent.Number, big.NewInt(17000000000+rand.Int63n(1000000))),
 		ParentHash: parent.Hash(),
 		//Beneficiary: crypto.PubkeyToAddress(crypto.MustGenerateKey().PublicKey),
 		TxHash:      types.EmptyRootHash,
@@ -219,6 +226,46 @@ func SampleBlock(parent *types.Header, rootHash libcommon.Hash) *types.Block {
 		Time:        parent.Time + 12,
 		Root:        rootHash,
 	})
+
+	// key, _ := crypto.GenerateKey()
+	// addr := crypto.PubkeyToAddress(key.PublicKey)
+
+	// amount := uint256.NewInt(1)
+	// gasPrice := uint256.NewInt(300000)
+
+	// gasFeeCap := uint256.NewInt(100000)
+	// chainId := uint256.NewInt(0)
+	// transaction := types.NewEIP1559Transaction(*chainId, 1, addr, amount, uint64(210_000), gasPrice, new(uint256.Int), gasFeeCap, nil)
+
+	// transaction := types.NewTransaction(1, addr, amount, 123457, gasPrice, make([]byte, 100))
+
+	// signedTx, _ := types.SignTx(transaction, *globalSigner, key)
+	// signedTx, _ := transaction.FakeSign(addr)
+
+	// if signedTx.Protected() {
+	// 	log.Info("Transaction is protected")
+	// }
+
+	// return types.NewBlock(
+	// 	&types.Header{
+	// 		Number: new(big.Int).Add(parent.Number, big.NewInt(1)),
+	// 		// add random difficulty
+	// 		Difficulty: new(big.Int).Add(parent.Number, big.NewInt(17000000000+rand.Int63n(1000000))),
+	// 		ParentHash: parent.Hash(),
+	// 		//Beneficiary: crypto.PubkeyToAddress(crypto.MustGenerateKey().PublicKey),
+	// 		TxHash:      types.EmptyRootHash,
+	// 		ReceiptHash: types.EmptyRootHash,
+	// 		GasLimit:    10000000,
+	// 		GasUsed:     0,
+	// 		Time:        parent.Time + 12,
+	// 		Root:        rootHash,
+	// 	},
+	// 	[]types.Transaction{
+	// 		// transaction,
+	// 	},
+	// 	[]*types.Header{},
+	// 	[]*types.Receipt{},
+	// 	[]*types.Withdrawal{})
 }
 
 var testCases = map[string]struct {
