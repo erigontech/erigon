@@ -25,6 +25,7 @@ import (
 	"sync"
 	"time"
 
+	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/mmap"
 )
@@ -289,7 +290,11 @@ func SaveHeapProfileNearOOM(opts ...SaveHeapOption) {
 
 	totalMemory := mmap.TotalMemory()
 	if logger != nil {
-		logger.Info("[Experiment] heap profile threshold check", "alloc", memStats.Alloc, "total", totalMemory)
+		logger.Info(
+			"[Experiment] heap profile threshold check",
+			"alloc", libcommon.ByteCount(memStats.Alloc),
+			"total", libcommon.ByteCount(totalMemory),
+		)
 	}
 	if memStats.Alloc < (totalMemory/100)*45 {
 		return
@@ -298,11 +303,7 @@ func SaveHeapProfileNearOOM(opts ...SaveHeapOption) {
 	// above 45%
 	filePath := filepath.Join(os.TempDir(), "erigon-mem.prof")
 	if logger != nil {
-		logger.Info(
-			"[Experiment] saving heap profile as near OOM",
-			"alloc", memStats.Alloc,
-			"filePath", filePath,
-		)
+		logger.Info("[Experiment] saving heap profile as near OOM", "filePath", filePath)
 	}
 
 	f, err := os.Create(filePath)
