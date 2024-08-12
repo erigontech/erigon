@@ -938,7 +938,6 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 		false,
 		config.Miner.EnabledPOS)
 	backend.engineBackendRPC = engineBackendRPC
-	fmt.Println(config.InternalCL, clparams.EmbeddedSupported(config.NetworkID), config.CaplinConfig.IsDevnet())
 	// If we choose not to run a consensus layer, run our embedded.
 	if config.InternalCL && (clparams.EmbeddedSupported(config.NetworkID) || config.CaplinConfig.IsDevnet()) {
 		config.CaplinConfig.NetworkId = clparams.NetworkType(config.NetworkID)
