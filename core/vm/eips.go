@@ -22,6 +22,7 @@ package vm
 import (
 	"encoding/binary"
 	"fmt"
+	"math/big"
 	"sort"
 	"strconv"
 
@@ -411,7 +412,7 @@ func enableEOF(jt *JumpTable) {
 		numPush:     1,
 	}
 	jt[DATALOADN] = &operation{
-		execute:       opDataLoad,
+		execute:       opDataLoadN,
 		constantGas:   GasFastestStep,
 		numPush:       1,
 		immediateSize: 2,
@@ -424,7 +425,7 @@ func enableEOF(jt *JumpTable) {
 	jt[DATACOPY] = &operation{
 		execute:     opDataCopy,
 		constantGas: GasFastestStep,
-		dynamicGas:  gasDataCopyEIP7480,
+		dynamicGas:  gasDataCopy,
 		numPop:      3,
 		memorySize:  memoryDataCopy,
 	}
@@ -542,7 +543,7 @@ func opCallf(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]by
 	}
 	scope.ReturnStack = append(scope.ReturnStack, retCtx)
 	scope.CodeSection = uint64(idx)
-	*pc = 0xFFFFFFFF_FFFFFFFF // set all bits, so when we increment pc in the loop -> pc = 0
+	*pc = 0xFFFFFFFF_FFFFFFFF // set all bits, so when we increment pc it will become pc = 0
 	return nil, nil
 }
 
@@ -610,15 +611,39 @@ func opExchange(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([
 
 func opDataLoad(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]byte, error) {
 	var (
-		index  = scope.Stack.Pop()
+		index  = scope.Stack.Peek()
 		data   = scope.Contract.Data()
 		offset = int(index.Uint64()) // with overflow maybe?
 	)
-	if len(data) < 32 || len(data)-32 < offset {
-		return nil, ErrInvalidMemoryAccess
+	// fmt.Printf("len(data): %v, OFFSET: %v, index: 0x%x\n", len(data), offset, index.Bytes32())
+	if len(data) < offset {
+		// return nil, ErrInvalidMemoryAccess
+		index.SetFromBig(big.NewInt(0))
+	} else {
+		b := [32]byte{}
+		end := min(offset+32, len(data))
+		for i := 0; i < end-offset; i++ {
+			b[i] = data[offset+i]
+		}
+
+		index.SetBytes32(b[:])
 	}
-	val := new(uint256.Int).SetBytes(data[offset : offset+32])
-	scope.Stack.Push(val)
+
+	// auto& index = stack.top();
+
+	// if (state.data.size() < index)
+	//     index = 0;
+	// else
+	// {
+	//     const auto begin = static_cast<size_t>(index);
+	//     const auto end = std::min(begin + 32, state.data.size());
+
+	//     uint8_t data[32] = {};
+	//     for (size_t i = 0; i < (end - begin); ++i)
+	//         data[i] = state.data[begin + i];
+
+	//     index = intx::be::unsafe::load<uint256>(data);
+	// }
 	return nil, nil
 }
 
@@ -628,11 +653,18 @@ func opDataLoadN(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) (
 		data   = scope.Contract.Data()
 		offset = int(binary.BigEndian.Uint16(code[*pc+1:]))
 	)
-	if len(data) < 32 || len(data)-32 < offset {
-		return nil, ErrInvalidMemoryAccess
-	}
+	// if len(data) < 32 || len(data)-32 < offset {
+	// 	return nil, ErrInvalidMemoryAccess
+	// }
+	fmt.Printf("DataSize: %v, OFFSET: %v\n", len(data), offset)
 	val := new(uint256.Int).SetBytes(data[offset : offset+32])
 	scope.Stack.Push(val)
+
+	// const auto index = read_uint16_be(&pos[1]);
+
+	// stack.push(intx::be::unsafe::load<uint256>(&state.data[index]));
+	// return pos + 3;
+	*pc += 2 // one more +1 we do in the interpreter loop
 	return nil, nil
 }
 
@@ -649,19 +681,27 @@ func opDataCopy(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([
 		dataIndex256 = scope.Stack.Pop()
 		size256      = scope.Stack.Pop()
 
-		data    = scope.Contract.Data()
-		dataLen = uint64(len(data))
-		src     = dataIndex256.Uint64()
-		dst     = memOffset256.Uint64()
-		size    = size256.Uint64()
+		data               = scope.Contract.Data()
+		dataLen            = uint64(len(data))
+		dataIndex          = dataIndex256.Uint64()
+		dst, src, copySize uint64
 	)
 
-	if dataLen < size || dataLen-size < src {
-		return nil, ErrInvalidMemoryAccess
+	dst = memOffset256.Uint64()
+	if dataLen < dataIndex {
+		src = dataLen
+	} else {
+		src = dataIndex
+	}
+	s := size256.Uint64()
+	copySize = min(s, dataLen-src)
+
+	if copySize > 0 {
+		scope.Memory.CopyFromData(dst, data, src, copySize)
 	}
 
-	if size > 0 {
-		scope.Memory.Copy(dst, src, size)
+	if s-copySize > 0 {
+		scope.Memory.SetZero(dst+copySize, s-copySize)
 	}
 
 	return nil, nil

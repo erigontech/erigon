@@ -133,3 +133,19 @@ func (m *Memory) Copy(dst, src, len uint64) {
 	}
 	copy(m.store[dst:], m.store[src:src+len])
 }
+
+func (m *Memory) CopyFromData(dst uint64, src []byte, offset, len uint64) {
+	if len == 0 {
+		return
+	}
+	copy(m.store[dst:], src[offset:offset+len])
+}
+
+func (m *Memory) SetZero(dst uint64, len uint64) {
+	if len == 0 {
+		return
+	}
+	for i := 0; i < int(len); i++ {
+		m.store[int(dst)+i] = 0
+	}
+}

@@ -243,6 +243,7 @@ func (h *HostImpl) handleCall(kind CallKind,
 	if !isPrecompile {
 		code = h.ibs.GetCode(codeAddress)
 	}
+	// fmt.Printf("code: 0x%x\n", code)
 	// fmt.Println("isPrecompile: ", isPrecompile)
 	snapshot := h.ibs.Snapshot()
 

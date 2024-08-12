@@ -957,7 +957,7 @@ func makePush(size uint64, pushByteSize int) executionFunc {
 	return func(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]byte, error) {
 		code := scope.Contract.CodeAt(scope.CodeSection)
 		codeLen := len(code)
-
+		// fmt.Printf("scope.CodeSection: %v, len(code): %v, code: 0x%x\n", scope.CodeSection, codeLen, code)
 		startMin := int(*pc + 1)
 		if startMin >= codeLen {
 			startMin = codeLen

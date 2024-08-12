@@ -282,7 +282,7 @@ func (evm *EVM) call(typ OpCode, caller ContractRef, addr libcommon.Address, inp
 		} else {
 			contract = NewContract(caller, addrCopy, value, gas, evm.config.SkipAnalysis)
 		}
-
+		fmt.Println("LEN CODE: ", len(code))
 		contract.SetCallCode(&addrCopy, codeHash, code, evm.parseContainer(code))
 		readOnly := false
 		if typ == STATICCALL {

@@ -442,7 +442,7 @@ func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (*evmtype
 	)
 	fmt.Println("----------------> Start Transition")
 	fmt.Println("----------------> Start Gas: ", st.gasRemaining)
-	fmt.Println("Refundsaaa: ", refunds)
+	fmt.Println("Refunds: ", refunds)
 
 	// host := evmonego.NewEvmOneHost(st, bailout) // TODO: may be we shouldn't recreate it and destroy it every time we do transition?
 	// err = host.SetOption("validate_eof", "true")

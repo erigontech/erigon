@@ -343,7 +343,7 @@ func (in *EVMInterpreter) Run(contract *Contract, input []byte, readOnly bool) (
 			if err != nil || !contract.UseGas(dynamicCost, tracing.GasChangeIgnored) {
 				return nil, ErrOutOfGas
 			}
-			// fmt.Println("COST: ", cost)
+
 			// Do tracing before memory expansion
 			if in.cfg.Debug {
 				in.cfg.Tracer.CaptureState(_pc, op, gasCopy, cost, callContext, in.returnData, in.depth, err) //nolint:errcheck
@@ -356,6 +356,7 @@ func (in *EVMInterpreter) Run(contract *Contract, input []byte, readOnly bool) (
 			in.cfg.Tracer.CaptureState(_pc, op, gasCopy, cost, callContext, in.returnData, in.depth, err) //nolint:errcheck
 			logged = true
 		}
+		fmt.Printf("-> COST: %v, ", cost)
 		// execute the operation
 		res, err = operation.execute(pc, in, callContext)
 		if err != nil {

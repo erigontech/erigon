@@ -21,7 +21,6 @@ package vm
 
 import (
 	"errors"
-	"fmt"
 
 	"github.com/holiman/uint256"
 
@@ -218,7 +217,7 @@ var (
 	// Replace `SSTORE_CLEARS_SCHEDULE` with `SSTORE_RESET_GAS + ACCESS_LIST_STORAGE_KEY_COST` (4,800)
 	gasSStoreEIP3529 = makeGasSStoreFunc(params.SstoreClearsScheduleRefundEIP3529)
 
-	gasDataCopyEIP7480 = makeGasDataCopyFunc()
+	// gasDataCopyEIP7480 = makeGasDataCopyFunc() // TODO(racytech): make sure this one is correct
 )
 
 // makeSelfdestructGasFn can create the selfdestruct dynamic gas function for EIP-2929 and EIP-2539
@@ -240,26 +239,6 @@ func makeSelfdestructGasFn(refundsEnabled bool) gasFunc {
 			evm.IntraBlockState().AddRefund(params.SelfdestructRefundGas)
 		}
 		return gas, nil
-	}
-	return gasFunc
-}
-
-func makeGasDataCopyFunc() gasFunc {
-	gasFunc := func(evm *EVM, contract *Contract, stack *stack.Stack, mem *Memory, memorySize uint64) (uint64, error) {
-		// TODO(racytech): make sure this one is correct
-		var (
-			gas uint64
-		)
-		if stack.Len() < 3 {
-			return gas, fmt.Errorf("makeGasDataCopyFunc: Expected stack size of at least 3")
-		}
-		size256 := stack.Back(2) // get the size
-		size, overflow := size256.Uint64WithOverflow()
-		if overflow {
-			return gas, fmt.Errorf("makeGasDataCopyFunc: Size uin256 overflow")
-		}
-
-		return 3 * ((size + 31) / 32), nil
 	}
 	return gasFunc
 }
