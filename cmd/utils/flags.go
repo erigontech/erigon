@@ -547,6 +547,16 @@ var (
 		Usage: "Define the TCP write timeout when sending data to a datastream client",
 		Value: 5 * time.Second,
 	}
+	DataStreamInactivityTimeout = cli.DurationFlag{
+		Name:  "zkevm.data-stream-inactivity-timeout",
+		Usage: "Define the inactivity timeout when interacting with a data stream server",
+		Value: 10 * time.Second,
+	}
+	DataStreamInactivityCheckInterval = cli.DurationFlag{
+		Name:  "zkevm.data-stream-inactivity-check-interval",
+		Usage: "Define the inactivity check interval timeout when interacting with a data stream server",
+		Value: 2 * time.Second,
+	}
 	Limbo = cli.BoolFlag{
 		Name:  "zkevm.limbo",
 		Usage: "Enable limbo processing on batches that failed verification",

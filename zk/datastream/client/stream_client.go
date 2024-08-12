@@ -111,6 +111,9 @@ func (c *StreamClient) Start() error {
 }
 
 func (c *StreamClient) Stop() {
+	if err := c.sendStopCmd(); err != nil {
+		log.Warn(fmt.Sprintf("Failed to send the stop command to the data stream server: %s", err))
+	}
 	c.conn.Close()
 
 	close(c.entryChan)

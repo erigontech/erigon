@@ -23,7 +23,7 @@ func main() {
 		Outputs:     []string{"stdout"},
 	}
 
-	stream, err := datastreamer.NewServer(uint16(6900), uint8(3), 1, datastreamer.StreamType(1), file, 5*time.Second, logConfig)
+	stream, err := datastreamer.NewServer(uint16(6900), uint8(3), 1, datastreamer.StreamType(1), file, 5*time.Second, 10*time.Second, 2*time.Second, logConfig)
 	if err != nil {
 		fmt.Println("Error creating datastream server:", err)
 		return
