@@ -146,6 +146,10 @@ func (c *Config) SetForkIdBlock(forkIdNumber constants.ForkId, blockNum uint64) 
 		c.ForkID88ElderberryBlock = new(big.Int).SetUint64(blockNum)
 	case constants.ForkID9Elderberry2:
 		c.ForkID9Elderberry2Block = new(big.Int).SetUint64(blockNum)
+	case constants.ForkID10:
+		c.ForkID10 = new(big.Int).SetUint64(blockNum)
+	case constants.ForkID11:
+		c.ForkID11 = new(big.Int).SetUint64(blockNum)
 	case constants.ForkID12Banana:
 		c.ForkID12BananaBlock = new(big.Int).SetUint64(blockNum)
 	default:
