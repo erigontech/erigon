@@ -423,7 +423,6 @@ func (s *RoSnapshots) idxAvailability() uint64 {
 		i++
 		return true
 	})
-	fmt.Println(maximums)
 
 	if len(maximums) == 0 {
 		return 0
