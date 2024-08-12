@@ -638,20 +638,6 @@ func checkIfStateSnapshotsPublishable(dir datadir.Dirs) error {
 				return fmt.Errorf("missing file %s at path %s", kveiFileName, filepath.Join(dir.SnapDomain, kveiFileName))
 			}
 
-			if snapType == "commitment" {
-				continue
-			}
-			// check that .v
-			vFileName := strings.Replace(expectedFileName, ".kv", ".v", 1)
-			if _, err := os.Stat(filepath.Join(dir.SnapHistory, vFileName)); err != nil {
-				return fmt.Errorf("missing file %s at path %s", vFileName, filepath.Join(dir.SnapHistory, vFileName))
-			}
-			// check for idx/*.ef
-			efFileName := strings.Replace(expectedFileName, ".kv", ".ef", 1)
-			if _, err := os.Stat(filepath.Join(dir.SnapIdx, efFileName)); err != nil {
-				return fmt.Errorf("missing file %s at path %s", efFileName, filepath.Join(dir.SnapIdx, efFileName))
-			}
-
 		}
 		return nil
 	}); err != nil {
@@ -702,6 +688,11 @@ func checkIfStateSnapshotsPublishable(dir datadir.Dirs) error {
 			viFileName := strings.Replace(expectedFileName, ".ef", ".vi", 1)
 			if _, err := os.Stat(filepath.Join(dir.SnapAccessors, viFileName)); err != nil {
 				return fmt.Errorf("missing file %s at path %s", viFileName, filepath.Join(dir.SnapAccessors, viFileName))
+			}
+			// check that .v
+			vFileName := strings.Replace(expectedFileName, ".ef", ".v", 1)
+			if _, err := os.Stat(filepath.Join(dir.SnapHistory, vFileName)); err != nil {
+				return fmt.Errorf("missing file %s at path %s", vFileName, filepath.Join(dir.SnapHistory, vFileName))
 			}
 		}
 		return nil
