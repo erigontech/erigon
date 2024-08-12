@@ -16,8 +16,8 @@ additional_services:
   - assertoor
 snooper_enabled: true
 assertoor_params:
-  run_stability_check: false
-  run_block_proposal_check: false
+  run_stability_check: true
+  run_block_proposal_check: true
   tests:
     - https://raw.githubusercontent.com/ethpandaops/assertoor-test/master/assertoor-tests/all-opcodes-test.yaml
     - https://raw.githubusercontent.com/ethpandaops/assertoor-test/master/assertoor-tests/blob-transactions-test.yaml
