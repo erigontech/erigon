@@ -3,7 +3,7 @@ participants_matrix:
     - el_type: geth
 #      el_image: ethpandaops/geth:master
     - el_type: erigon
-      el_image: thorax/erigon:latest
+      el_image: <<ERIGON_IMAGE_PLACEHOLDER>>
   cl:
     - cl_type: lighthouse
       #cl_image: ethpandaops/lighthouse:stable
