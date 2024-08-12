@@ -141,16 +141,10 @@ func (s *Sync) onMilestoneEvent(
 			"err", err,
 		)
 
-		if err := s.handleMilestoneMismatch(ctx, ccBuilder); err != nil {
-			return err
-		}
+		return s.handleMilestoneMismatch(ctx, ccBuilder)
 	}
 
-	if err = ccBuilder.Prune(milestone.EndBlock().Uint64()); err != nil {
-		return err
-	}
-
-	return nil
+	return ccBuilder.Prune(milestone.EndBlock().Uint64())
 }
 
 func (s *Sync) onNewBlockEvent(
