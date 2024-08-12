@@ -96,6 +96,33 @@ func (s *Sync) commitExecution(ctx context.Context, newTip *types.Header, finali
 	return s.execution.UpdateForkChoice(ctx, newTip, finalizedHeader)
 }
 
+func (s *Sync) handleMilestoneMismatch(ctx context.Context, ccBuilder CanonicalChainBuilder) error {
+	// the milestone doesn't correspond to the tip of the chain
+	// unwind to the previous verified milestone
+	oldTip := ccBuilder.Root()
+	oldTipNum := oldTip.Number.Uint64()
+
+	if err := s.execution.UpdateForkChoice(ctx, oldTip, oldTip); err != nil {
+		return err
+	}
+
+	newTip, err := s.blockDownloader.DownloadBlocksUsingMilestones(ctx, oldTipNum)
+	if err != nil {
+		return err
+	}
+	if newTip == nil {
+		return errors.New("sync.Sync.handleMilestoneMismatch: unexpected to have no milestone headers since the last milestone after receiving a new milestone event")
+	}
+
+	if err = s.commitExecution(ctx, newTip, newTip); err != nil {
+		return err
+	}
+
+	ccBuilder.Reset(newTip)
+
+	return nil
+}
+
 func (s *Sync) onMilestoneEvent(
 	ctx context.Context,
 	event EventNewMilestone,
@@ -108,38 +135,20 @@ func (s *Sync) onMilestoneEvent(
 
 	milestoneHeaders := ccBuilder.HeadersInRange(milestone.StartBlock().Uint64(), milestone.Length())
 	err := s.milestoneVerifier(milestone, milestoneHeaders)
-	if err == nil {
-		if err = ccBuilder.Prune(milestone.EndBlock().Uint64()); err != nil {
+	if err != nil {
+		s.logger.Debug(
+			syncLogPrefix("onMilestoneEvent: local chain tip does not match the milestone, unwinding to the previous verified milestone"),
+			"err", err,
+		)
+
+		if err := s.handleMilestoneMismatch(ctx, ccBuilder); err != nil {
 			return err
 		}
 	}
 
-	s.logger.Debug(
-		syncLogPrefix("onMilestoneEvent: local chain tip does not match the milestone, unwinding to the previous verified milestone"),
-		"err", err,
-	)
-
-	// the milestone doesn't correspond to the tip of the chain
-	// unwind to the previous verified milestone
-	oldTip := ccBuilder.Root()
-	oldTipNum := oldTip.Number.Uint64()
-	if err = s.execution.UpdateForkChoice(ctx, oldTip, oldTip); err != nil {
+	if err = ccBuilder.Prune(milestone.EndBlock().Uint64()); err != nil {
 		return err
 	}
-
-	newTip, err := s.blockDownloader.DownloadBlocksUsingMilestones(ctx, oldTipNum)
-	if err != nil {
-		return err
-	}
-	if newTip == nil {
-		return errors.New("sync.Sync.onMilestoneEvent: unexpected to have no milestone headers since the last milestone after receiving a new milestone event")
-	}
-
-	if err = s.commitExecution(ctx, newTip, newTip); err != nil {
-		return err
-	}
-
-	ccBuilder.Reset(newTip)
 
 	return nil
 }
