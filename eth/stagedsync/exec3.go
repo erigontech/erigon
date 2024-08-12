@@ -81,7 +81,6 @@ func NewProgress(prevOutputBlockNum, commitThreshold uint64, workersCount int, u
 type Progress struct {
 	prevTime           time.Time
 	prevTxCount        uint64
-	prevBlkCount       uint64
 	prevOutputBlockNum uint64
 	prevRepeatCount    uint64
 	commitThreshold    uint64
@@ -92,7 +91,7 @@ type Progress struct {
 	updateMetrics bool
 }
 
-func (p *Progress) Log(suffix string, rs *state.StateV3, in *state.QueueWithRetry, rws *state.ResultsQueue, blkCount, txCount, gas, blobGas, inputBlockNum, outputBlockNum, outTxNum, repeatCount uint64, idxStepsAmountInDB float64, shouldGenerateChangesets bool) {
+func (p *Progress) Log(suffix string, rs *state.StateV3, in *state.QueueWithRetry, rws *state.ResultsQueue, txCount, gas, blobGas, inputBlockNum, outputBlockNum, outTxNum, repeatCount uint64, idxStepsAmountInDB float64, shouldGenerateChangesets bool) {
 	execStepsInDB.Set(idxStepsAmountInDB * 100)
 	var m runtime.MemStats
 	dbg.ReadMemStats(&m)
@@ -125,8 +124,8 @@ func (p *Progress) Log(suffix string, rs *state.StateV3, in *state.QueueWithRetr
 	p.logger.Info(fmt.Sprintf("[%s]"+suffix, p.logPrefix),
 		//"workers", workerCount,
 		"blk", outputBlockNum,
-		"blks", blkCount-p.prevBlkCount,
-		"blk/s", fmt.Sprintf("%.1f", float64(blkCount-p.prevBlkCount)/interval.Seconds()),
+		"blks", outputBlockNum-p.prevOutputBlockNum+1,
+		"blk/s", fmt.Sprintf("%.1f", float64(outputBlockNum-p.prevOutputBlockNum+1)/interval.Seconds()),
 		"txs", txCount-p.prevTxCount,
 		"tx/s", fmt.Sprintf("%.1f", speedTx),
 		"mgas/s", fmt.Sprintf("%.1f", mgasPerSec),
@@ -141,7 +140,6 @@ func (p *Progress) Log(suffix string, rs *state.StateV3, in *state.QueueWithRetr
 
 	p.prevTime = currentTime
 	p.prevTxCount = txCount
-	p.prevBlkCount = blkCount
 	p.prevOutputBlockNum = outputBlockNum
 	p.prevRepeatCount = repeatCount
 }
@@ -394,11 +392,9 @@ func ExecV3(ctx context.Context,
 	var txCount uint64
 	var stepsInDB float64
 
-	initialProgress := execStage.BlockNumber
-
 	processed := NewProgress(blockNum, commitThreshold, workerCount, true, execStage.LogPrefix(), logger)
 	defer func() {
-		processed.Log("Done", rs, in, rws, execStage.BlockNumber-initialProgress, txCount, logGas, logBlobGas, inputBlockNum.Load(), outputBlockNum.GetValueUint64(), outputTxNum.Load(), execRepeats.GetValueUint64(), stepsInDB, shouldGenerateChangesets)
+		processed.Log("Done", rs, in, rws, txCount, logGas, logBlobGas, inputBlockNum.Load(), outputBlockNum.GetValueUint64(), outputTxNum.Load(), execRepeats.GetValueUint64(), stepsInDB, shouldGenerateChangesets)
 	}()
 
 	applyLoopWg := sync.WaitGroup{} // to wait for finishing of applyLoop after applyCtx cancel
@@ -480,7 +476,7 @@ func ExecV3(ctx context.Context,
 
 				case <-logEvery.C:
 					stepsInDB = rawdbhelpers.IdxStepsCountV3(tx)
-					progress.Log("", rs, in, rws, execStage.BlockNumber-initialProgress, rs.DoneCount(), logGas, logBlobGas, inputBlockNum.Load(), outputBlockNum.GetValueUint64(), outputTxNum.Load(), execRepeats.GetValueUint64(), stepsInDB, shouldGenerateChangesets)
+					progress.Log("", rs, in, rws, rs.DoneCount(), logGas, logBlobGas, inputBlockNum.Load(), outputBlockNum.GetValueUint64(), outputTxNum.Load(), execRepeats.GetValueUint64(), stepsInDB, shouldGenerateChangesets)
 					if agg.HasBackgroundFilesBuild() {
 						logger.Info(fmt.Sprintf("[%s] Background files build", execStage.LogPrefix()), "progress", agg.BackgroundProgress())
 					}
@@ -924,7 +920,7 @@ Loop:
 			select {
 			case <-logEvery.C:
 				stepsInDB := rawdbhelpers.IdxStepsCountV3(applyTx)
-				progress.Log("", rs, in, rws, execStage.BlockNumber-initialProgress, count, logGas, logBlobGas, inputBlockNum.Load(), outputBlockNum.GetValueUint64(), outputTxNum.Load(), execRepeats.GetValueUint64(), stepsInDB, shouldGenerateChangesets)
+				progress.Log("", rs, in, rws, count, logGas, logBlobGas, inputBlockNum.Load(), outputBlockNum.GetValueUint64(), outputTxNum.Load(), execRepeats.GetValueUint64(), stepsInDB, shouldGenerateChangesets)
 				//if applyTx.(state2.HasAggTx).AggTx().(*state2.AggregatorRoTx).CanPrune(applyTx, outputTxNum.Load()) {
 				//	//small prune cause MDBX_TXN_FULL
 				//	if _, err := applyTx.(state2.HasAggTx).AggTx().(*state2.AggregatorRoTx).PruneSmallBatches(ctx, 10*time.Hour, applyTx); err != nil {
