@@ -23,6 +23,7 @@ import (
 	"encoding/binary"
 	"fmt"
 	"math"
+	"os"
 	"path"
 	"path/filepath"
 	"strings"
@@ -453,7 +454,7 @@ func (dt *DomainRoTx) mergeFiles(ctx context.Context, domainFiles, indexFiles, h
 	}
 
 	fromStep, toStep := r.values.from/r.aggStep, r.values.to/r.aggStep
-	kvFilePath := dt.d.kvFilePath(fromStep, toStep)
+	kvFilePath := dt.d.kvDirtyFilePath(fromStep, toStep)
 	kvFile, err := seg.NewCompressor(ctx, "merge domain "+dt.d.filenameBase, kvFilePath, dt.d.dirs.Tmp, seg.MinPatternScore, dt.d.compressWorkers, log.LvlTrace, dt.d.logger)
 	if err != nil {
 		return nil, nil, nil, fmt.Errorf("merge %s compressor: %w", dt.d.filenameBase, err)
@@ -936,9 +937,33 @@ func (ht *HistoryRoTx) mergeFiles(ctx context.Context, indexFiles, historyFiles 
 	return
 }
 
-func (d *Domain) integrateMergedDirtyFiles(valuesOuts, indexOuts, historyOuts []*filesItem, valuesIn, indexIn, historyIn *filesItem) {
+func (d *Domain) moveDirtyFileToCleanDir(valuesIn *filesItem) error {
+	valuesIn.decompressor.Close()
+
+	// move file from Dirty directory into SnapDomains
+	item := valuesIn
+	dirtyPath := item.decompressor.FilePath()
+	fileName := item.decompressor.FileName()
+	cleanPath := filepath.Join(d.dirs.SnapDomain, fileName)
+
+	item.decompressor.Close()
+	err := os.Rename(dirtyPath, cleanPath)
+	if err != nil {
+		return fmt.Errorf("move after merge %s: %w", fileName, err)
+	}
+	if item.decompressor, err = seg.NewDecompressor(cleanPath); err != nil {
+		return fmt.Errorf("open after move %s: %w", fileName, err)
+	}
+	return nil
+}
+
+func (d *Domain) integrateMergedDirtyFiles(valuesOuts, indexOuts, historyOuts []*filesItem, valuesIn, indexIn, historyIn *filesItem) error {
 	d.History.integrateMergedDirtyFiles(indexOuts, historyOuts, indexIn, historyIn)
 	if valuesIn != nil {
+		if err := d.moveDirtyFileToCleanDir(valuesIn); err != nil {
+			return err
+		}
+
 		d.dirtyFiles.Set(valuesIn)
 
 		// `kill -9` may leave some garbage
@@ -969,6 +994,7 @@ func (d *Domain) integrateMergedDirtyFiles(valuesOuts, indexOuts, historyOuts []
 		d.dirtyFiles.Delete(out)
 		out.canDelete.Store(true)
 	}
+	return nil
 }
 
 func (tx *AppendableRoTx) mergeFiles(ctx context.Context, files []*filesItem, startTxNum, endTxNum uint64, ps *background.ProgressSet) (*filesItem, error) {

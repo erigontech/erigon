@@ -331,7 +331,8 @@ func TestDomain_AfterPrune(t *testing.T) {
 	sf, err := d.buildFiles(ctx, 0, c, background.NewProgressSet())
 	require.NoError(t, err)
 
-	d.integrateDirtyFiles(sf, 0, 16)
+	err = d.integrateDirtyFiles(sf, 0, 16)
+	require.NoError(t, err)
 	d.reCalcVisibleFiles()
 	var v []byte
 	dc = d.BeginFilesRo()
@@ -484,7 +485,8 @@ func collateAndMerge(t *testing.T, db kv.RwDB, tx kv.RwTx, d *Domain, txs uint64
 		require.NoError(t, err)
 		sf, err := d.buildFiles(ctx, step, c, background.NewProgressSet())
 		require.NoError(t, err)
-		d.integrateDirtyFiles(sf, step*d.aggregationStep, (step+1)*d.aggregationStep)
+		err = d.integrateDirtyFiles(sf, step*d.aggregationStep, (step+1)*d.aggregationStep)
+		require.NoError(t, err)
 		d.reCalcVisibleFiles()
 
 		dc := d.BeginFilesRo()
@@ -509,7 +511,8 @@ func collateAndMerge(t *testing.T, db kv.RwDB, tx kv.RwTx, d *Domain, txs uint64
 			if valuesIn != nil && valuesIn.decompressor != nil {
 				fmt.Printf("merge: %s\n", valuesIn.decompressor.FileName())
 			}
-			d.integrateMergedDirtyFiles(valuesOuts, indexOuts, historyOuts, valuesIn, indexIn, historyIn)
+			err = d.integrateMergedDirtyFiles(valuesOuts, indexOuts, historyOuts, valuesIn, indexIn, historyIn)
+			require.NoError(t, err)
 			d.reCalcVisibleFiles()
 			return false
 		}(); stop {
@@ -534,7 +537,8 @@ func collateAndMergeOnce(t *testing.T, d *Domain, tx kv.RwTx, step uint64, prune
 
 	sf, err := d.buildFiles(ctx, step, c, background.NewProgressSet())
 	require.NoError(t, err)
-	d.integrateDirtyFiles(sf, txFrom, txTo)
+	err = d.integrateDirtyFiles(sf, txFrom, txTo)
+	require.NoError(t, err)
 	d.reCalcVisibleFiles()
 
 	if prune {
@@ -557,7 +561,8 @@ func collateAndMergeOnce(t *testing.T, d *Domain, tx kv.RwTx, step uint64, prune
 		valuesIn, indexIn, historyIn, err := dc.mergeFiles(ctx, valuesOuts, indexOuts, historyOuts, r, nil, background.NewProgressSet())
 		require.NoError(t, err)
 
-		d.integrateMergedDirtyFiles(valuesOuts, indexOuts, historyOuts, valuesIn, indexIn, historyIn)
+		err = d.integrateMergedDirtyFiles(valuesOuts, indexOuts, historyOuts, valuesIn, indexIn, historyIn)
+		require.NoError(t, err)
 		d.reCalcVisibleFiles()
 		dc.Close()
 	}
@@ -844,7 +849,8 @@ func TestDomain_OpenFilesWithDeletions(t *testing.T) {
 			require.NoError(t, err)
 			sf, err := dom.buildFiles(ctx, step, c, background.NewProgressSet())
 			require.NoError(t, err)
-			dom.integrateDirtyFiles(sf, s, ns)
+			err = dom.integrateDirtyFiles(sf, s, ns)
+			require.NoError(t, err)
 			dom.reCalcVisibleFiles()
 
 			dc := dom.BeginFilesRo()
@@ -1092,7 +1098,8 @@ func TestDomainContext_getFromFiles(t *testing.T) {
 		sf, err := d.buildFiles(ctx, step, collation, ps)
 		require.NoError(t, err)
 
-		d.integrateDirtyFiles(sf, txFrom, txTo)
+		err = d.integrateDirtyFiles(sf, txFrom, txTo)
+		require.NoError(t, err)
 		d.reCalcVisibleFiles()
 		collation.Close()
 
@@ -1107,7 +1114,8 @@ func TestDomainContext_getFromFiles(t *testing.T) {
 		dv, di, dh, err := dc.mergeFiles(ctx, vl, il, hl, ranges, nil, ps)
 		require.NoError(t, err)
 
-		d.integrateMergedDirtyFiles(vl, il, hl, dv, di, dh)
+		err = d.integrateMergedDirtyFiles(vl, il, hl, dv, di, dh)
+		require.NoError(t, err)
 		d.reCalcVisibleFiles()
 
 		logEvery.Stop()
@@ -1691,7 +1699,8 @@ func TestDomain_PruneProgress(t *testing.T) {
 
 		sf, err := d.buildFiles(ctx, step, c, background.NewProgressSet())
 		require.NoError(t, err)
-		d.integrateDirtyFiles(sf, txFrom, txTo)
+		err = d.integrateDirtyFiles(sf, txFrom, txTo)
+		require.NoError(t, err)
 		d.reCalcVisibleFiles()
 	}
 	require.NoError(t, rwTx.Commit())
@@ -2153,7 +2162,8 @@ func TestDomain_PruneSimple(t *testing.T) {
 		require.NoError(t, err)
 		sf, err := d.buildFiles(ctx, 0, c, background.NewProgressSet())
 		require.NoError(t, err)
-		d.integrateDirtyFiles(sf, pruneFrom, pruneTo)
+		err = d.integrateDirtyFiles(sf, pruneFrom, pruneTo)
+		require.NoError(t, err)
 		d.reCalcVisibleFiles()
 		rotx.Rollback()
 

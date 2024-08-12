@@ -141,6 +141,10 @@ func NewDomain(cfg domainCfg, aggregationStep uint64, name kv.Domain, valsTable,
 
 	return d, nil
 }
+
+func (d *Domain) kvDirtyFilePath(fromStep, toStep uint64) string {
+	return filepath.Join(d.dirs.SnapDomainDirty, fmt.Sprintf("v1-%s.%d-%d.kv", d.filenameBase, fromStep, toStep))
+}
 func (d *Domain) kvFilePath(fromStep, toStep uint64) string {
 	return filepath.Join(d.dirs.SnapDomain, fmt.Sprintf("v1-%s.%d-%d.kv", d.filenameBase, fromStep, toStep))
 }
@@ -910,7 +914,7 @@ func (d *Domain) collate(ctx context.Context, step, txFrom, txTo uint64, roTx kv
 		}
 	}()
 
-	coll.valuesPath = d.kvFilePath(step, step+1)
+	coll.valuesPath = d.kvDirtyFilePath(step, step+1)
 	if coll.valuesComp, err = seg.NewCompressor(ctx, d.filenameBase+".domain.collate", coll.valuesPath, d.dirs.Tmp, seg.MinPatternScore, d.compressWorkers, log.LvlTrace, d.logger); err != nil {
 		return Collation{}, fmt.Errorf("create %s values compressor: %w", d.filenameBase, err)
 	}
@@ -1297,7 +1301,7 @@ func buildAccessor(ctx context.Context, d *seg.Decompressor, compressed FileComp
 	return nil
 }
 
-func (d *Domain) integrateDirtyFiles(sf StaticFiles, txNumFrom, txNumTo uint64) {
+func (d *Domain) integrateDirtyFiles(sf StaticFiles, txNumFrom, txNumTo uint64) error {
 	d.History.integrateDirtyFiles(sf.HistoryFiles, txNumFrom, txNumTo)
 
 	fi := newFilesItem(txNumFrom, txNumTo, d.aggregationStep)
@@ -1306,7 +1310,11 @@ func (d *Domain) integrateDirtyFiles(sf StaticFiles, txNumFrom, txNumTo uint64) 
 	fi.index = sf.valuesIdx
 	fi.bindex = sf.valuesBt
 	fi.existence = sf.bloom
+	if err := d.moveDirtyFileToCleanDir(fi); err != nil {
+		return err
+	}
 	d.dirtyFiles.Set(fi)
+	return nil
 }
 
 // unwind is similar to prune but the difference is that it restores domain values from the history as of txFrom

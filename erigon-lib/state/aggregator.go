@@ -295,6 +295,18 @@ func (a *Aggregator) OpenFolder() error {
 	a.dirtyFilesLock.Lock()
 	defer a.dirtyFilesLock.Unlock()
 	eg := &errgroup.Group{}
+	eg.Go(func() error {
+		dirtyDomainFiles, dErr := filesFromDir(a.dirs.SnapDomainDirty)
+		if dErr == nil {
+			for _, fn := range dirtyDomainFiles {
+				rmDirsErr := os.Remove(filepath.Join(a.dirs.SnapDomainDirty, fn))
+				if rmDirsErr != nil {
+					a.logger.Warn("failed to remove dirty domain file", "name", fn, "err", rmDirsErr)
+				}
+			}
+		}
+		return nil
+	})
 	for _, d := range a.d {
 		d := d
 		eg.Go(func() error {
@@ -743,7 +755,10 @@ func (a *Aggregator) buildFiles(ctx context.Context, step uint64) error {
 		return fmt.Errorf("domain collate-build: %w", err)
 	}
 	mxStepTook.ObserveDuration(stepStartedAt)
-	a.integrateDirtyFiles(static, txFrom, txTo)
+	if err := a.integrateDirtyFiles(static, txFrom, txTo); err != nil {
+		static.CleanupOnError()
+		return err
+	}
 	a.logger.Info("[snapshots] aggregated", "step", step, "took", time.Since(stepStartedAt))
 
 	return nil
@@ -812,7 +827,10 @@ func (a *Aggregator) mergeLoopStep(ctx context.Context) (somethingDone bool, err
 			in.Close()
 		}
 	}()
-	a.integrateMergedDirtyFiles(outs, in)
+	err = a.integrateMergedDirtyFiles(outs, in)
+	if err != nil {
+		return true, err
+	}
 	a.cleanAfterMerge(in)
 
 	a.needSaveFilesListInDB.Store(true)
@@ -834,7 +852,7 @@ func (a *Aggregator) MergeLoop(ctx context.Context) error {
 	}
 }
 
-func (a *Aggregator) integrateDirtyFiles(sf AggV3StaticFiles, txNumFrom, txNumTo uint64) {
+func (a *Aggregator) integrateDirtyFiles(sf AggV3StaticFiles, txNumFrom, txNumTo uint64) (err error) {
 	defer a.needSaveFilesListInDB.Store(true)
 	defer a.recalcVisibleFiles()
 
@@ -842,11 +860,14 @@ func (a *Aggregator) integrateDirtyFiles(sf AggV3StaticFiles, txNumFrom, txNumTo
 	defer a.dirtyFilesLock.Unlock()
 
 	for id, d := range a.d {
-		d.integrateDirtyFiles(sf.d[id], txNumFrom, txNumTo)
+		if err = d.integrateDirtyFiles(sf.d[id], txNumFrom, txNumTo); err != nil {
+			return err
+		}
 	}
 	for id, ii := range a.iis {
 		ii.integrateDirtyFiles(sf.ivfs[id], txNumFrom, txNumTo)
 	}
+	return nil
 }
 
 func (a *Aggregator) HasNewFrozenFiles() bool {
@@ -1759,7 +1780,7 @@ func (ac *AggregatorRoTx) mergeFiles(ctx context.Context, files SelectedStaticFi
 	return mf, err
 }
 
-func (a *Aggregator) integrateMergedDirtyFiles(outs SelectedStaticFilesV3, in MergedFilesV3) {
+func (a *Aggregator) integrateMergedDirtyFiles(outs SelectedStaticFilesV3, in MergedFilesV3) (err error) {
 	defer a.needSaveFilesListInDB.Store(true)
 	defer a.recalcVisibleFiles()
 
@@ -1767,7 +1788,10 @@ func (a *Aggregator) integrateMergedDirtyFiles(outs SelectedStaticFilesV3, in Me
 	defer a.dirtyFilesLock.Unlock()
 
 	for id, d := range a.d {
-		d.integrateMergedDirtyFiles(outs.d[id], outs.dIdx[id], outs.dHist[id], in.d[id], in.dIdx[id], in.dHist[id])
+		err = d.integrateMergedDirtyFiles(outs.d[id], outs.dIdx[id], outs.dHist[id], in.d[id], in.dIdx[id], in.dHist[id])
+		if err != nil {
+			return err
+		}
 	}
 
 	for id, ii := range a.iis {
@@ -1777,6 +1801,7 @@ func (a *Aggregator) integrateMergedDirtyFiles(outs SelectedStaticFilesV3, in Me
 	for id, ap := range a.ap {
 		ap.integrateMergedDirtyFiles(outs.appendable[id], in.appendable[id])
 	}
+	return nil
 }
 
 func (a *Aggregator) cleanAfterMerge(in MergedFilesV3) {
