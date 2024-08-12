@@ -27,11 +27,11 @@ func prepareBatchCounters(batchContext *BatchContext, batchState *BatchState, is
 		if err != nil {
 			return nil, err
 		}
-		if !found {
-			return nil, fmt.Errorf("intermediate counters not found for batch %d", batchState.batchNumber)
+		if found {
+			intermediateUsedCounters = vm.NewCountersFromUsedMap(intermediateCountersMap)
+		} else {
+			log.Warn("intermediate counters not found for batch, initialising with empty counters", "batch", batchState.batchNumber)
 		}
-
-		intermediateUsedCounters = vm.NewCountersFromUsedMap(intermediateCountersMap)
 	}
 
 	return vm.NewBatchCounterCollector(batchContext.sdb.smt.GetDepth(), uint16(batchState.forkId), batchContext.cfg.zk.VirtualCountersSmtReduction, batchContext.cfg.zk.ShouldCountersBeUnlimited(batchState.isL1Recovery()), intermediateUsedCounters), nil
