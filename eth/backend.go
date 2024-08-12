@@ -300,7 +300,6 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 				return err
 			}
 			config.Genesis = genesisConfig
-			fmt.Println(config.Genesis)
 		}
 
 		h, err := rawdb.ReadCanonicalHash(tx, 0)
