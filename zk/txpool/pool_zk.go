@@ -260,6 +260,8 @@ func (p *TxPool) MarkForDiscardFromPendingBest(txHash common.Hash) {
 }
 
 func (p *TxPool) StartIfNotStarted(ctx context.Context, txPoolDb kv.RoDB, coreTx kv.Tx) error {
+	p.lock.Lock()
+	defer p.lock.Unlock()
 	if !p.started.Load() {
 		txPoolDbTx, err := txPoolDb.BeginRo(ctx)
 		if err != nil {
@@ -269,6 +271,9 @@ func (p *TxPool) StartIfNotStarted(ctx context.Context, txPoolDb kv.RoDB, coreTx
 
 		if err := p.fromDB(ctx, txPoolDbTx, coreTx); err != nil {
 			return fmt.Errorf("loading txs from DB: %w", err)
+		}
+		if p.started.CompareAndSwap(false, true) {
+			log.Info("[txpool] Start if not started")
 		}
 	}
 
