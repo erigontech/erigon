@@ -164,7 +164,7 @@ func (m *mdbxPieceCompletion) Flushed(infoHash infohash.T, flushed *roaring.Bitm
 	tx, err := m.db.BeginRw(context.Background())
 
 	if err != nil {
-		m.logger.Warn("[snapshots] failed to flush piece completions", "hash", infoHash, err, err)
+		m.logger.Warn("[snapshots] failed to flush piece completions", "hash", infoHash, "err", err)
 		return
 	}
 
@@ -175,7 +175,7 @@ func (m *mdbxPieceCompletion) Flushed(infoHash infohash.T, flushed *roaring.Bitm
 	err = tx.Commit()
 
 	if err != nil {
-		m.logger.Warn("[snapshots] failed to flush piece completions", "hash", infoHash, err, err)
+		m.logger.Warn("[snapshots] failed to flush piece completions", "hash", infoHash, "err", err)
 	}
 }
 
