@@ -11,12 +11,11 @@ import (
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
-	"github.com/erigontech/erigon/cl/phase1/forkchoice"
+	"github.com/erigontech/erigon/cl/phase1/core/state"
 	"github.com/erigontech/erigon/cl/utils/eth_clock"
 )
 
-type ValidatorMonitorImpl struct {
-	fc               forkchoice.ForkChoiceStorageReader
+type validatorMonitorImpl struct {
 	syncedData       *synced_data.SyncedDataManager
 	ethClock         eth_clock.EthereumClock
 	beaconCfg        *clparams.BeaconChainConfig
@@ -25,7 +24,6 @@ type ValidatorMonitorImpl struct {
 
 func NewValidatorMonitor(
 	enableMonitor bool,
-	fc forkchoice.ForkChoiceStorageReader,
 	ethClock eth_clock.EthereumClock,
 	beaconConfig *clparams.BeaconChainConfig,
 	syncedData *synced_data.SyncedDataManager,
@@ -34,8 +32,7 @@ func NewValidatorMonitor(
 		return &dummyValdatorMonitor{}
 	}
 
-	m := &ValidatorMonitorImpl{
-		fc:               fc,
+	m := &validatorMonitorImpl{
 		ethClock:         ethClock,
 		beaconCfg:        beaconConfig,
 		syncedData:       syncedData,
@@ -46,15 +43,15 @@ func NewValidatorMonitor(
 	return m
 }
 
-func (m *ValidatorMonitorImpl) ObserveValidator(vid uint64) {
+func (m *validatorMonitorImpl) ObserveValidator(vid uint64) {
 	m.vaidatorStatuses.addValidator(vid)
 }
 
-func (m *ValidatorMonitorImpl) RemoveValidator(vid uint64) {
+func (m *validatorMonitorImpl) RemoveValidator(vid uint64) {
 	m.vaidatorStatuses.removeValidator(vid)
 }
 
-func (m *ValidatorMonitorImpl) OnNewBlock(block *cltypes.BeaconBlock) error {
+func (m *validatorMonitorImpl) OnNewBlock(state *state.CachingBeaconState, block *cltypes.BeaconBlock) error {
 	var (
 		atts         = block.Body.Attestations
 		blockEpoch   = m.ethClock.GetEpochAtSlot(block.Slot)
@@ -62,21 +59,6 @@ func (m *ValidatorMonitorImpl) OnNewBlock(block *cltypes.BeaconBlock) error {
 	)
 	if blockEpoch+2 < currentEpoch {
 		// skip old blocks
-		return nil
-	}
-
-	blockRoot, err := block.HashSSZ()
-	if err != nil {
-		log.Warn("failed to hash block", "err", err, "slot", block.Slot)
-		return err
-	}
-
-	state, err := m.fc.GetStateAtBlockRoot(blockRoot, false)
-	if err != nil {
-		log.Warn("failed to get state at block root", "err", err, "slot", block.Slot, "blockRoot", blockRoot)
-		return err
-	} else if state == nil {
-		log.Info("state is nil. syncing", "slot", block.Slot, "blockRoot", blockRoot)
 		return nil
 	}
 
@@ -108,7 +90,7 @@ func (m *ValidatorMonitorImpl) OnNewBlock(block *cltypes.BeaconBlock) error {
 	return nil
 }
 
-func (m *ValidatorMonitorImpl) runReportAttesterStatus() {
+func (m *validatorMonitorImpl) runReportAttesterStatus() {
 	// every epoch seconds
 	epochDuration := time.Duration(m.beaconCfg.SlotsPerEpoch) * time.Duration(m.beaconCfg.SecondsPerSlot) * time.Second
 	ticker := time.NewTicker(epochDuration)
@@ -136,7 +118,7 @@ func (m *ValidatorMonitorImpl) runReportAttesterStatus() {
 
 }
 
-func (m *ValidatorMonitorImpl) runReportProposerStatus() {
+func (m *validatorMonitorImpl) runReportProposerStatus() {
 	// check proposer in previous slot every slot duration
 	ticker := time.NewTicker(time.Duration(m.beaconCfg.SecondsPerSlot) * time.Second)
 	defer ticker.Stop()
