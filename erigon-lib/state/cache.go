@@ -39,20 +39,21 @@ var iiGetFromFileCacheLimit = uint32(dbg.EnvInt("II_LRU", 512))
 type IISeekInFilesCache struct {
 	*freelru.LRU[u128, iiSeekInFilesCacheItem]
 	hit, total int
+	trace      bool
 }
 type iiSeekInFilesCacheItem struct {
 	requested, found uint64
 }
 
-func NewIISeekInFilesCache() *IISeekInFilesCache {
+func NewIISeekInFilesCache(trace bool) *IISeekInFilesCache {
 	c, err := freelru.New[u128, iiSeekInFilesCacheItem](iiGetFromFileCacheLimit, u128noHash)
 	if err != nil {
 		panic(err)
 	}
-	return &IISeekInFilesCache{LRU: c}
+	return &IISeekInFilesCache{LRU: c, trace: trace}
 }
 func (c *IISeekInFilesCache) LogStats(fileBaseName string) {
-	if c == nil {
+	if c == nil || !c.trace {
 		return
 	}
 	m := c.Metrics()
