@@ -34,7 +34,6 @@ import (
 	"time"
 
 	"github.com/RoaringBitmap/roaring/roaring64"
-	"github.com/elastic/go-freelru"
 	"github.com/spaolacci/murmur3"
 	btree2 "github.com/tidwall/btree"
 	"golang.org/x/sync/errgroup"
@@ -532,10 +531,7 @@ type InvertedIndexRoTx struct {
 	readers []*recsplit.IndexReader
 
 	hit, miss       int
-	iiNotFoundCache *freelru.LRU[uint64, r]
-}
-type r struct {
-	requested, found uint64
+	iiNotFoundCache *IISeekInFilesCache
 }
 
 // hashKey - change of salt will require re-gen of indices
@@ -579,13 +575,8 @@ func (iit *InvertedIndexRoTx) seekInFiles(key []byte, txNum uint64) (found bool,
 
 	hi, lo := iit.hashKey(key)
 
-	const limit = 512
 	if iit.iiNotFoundCache == nil {
-		var err error
-		iit.iiNotFoundCache, err = freelru.New[uint64, r](limit, u64noHash)
-		if err != nil {
-			panic(err)
-		}
+		iit.iiNotFoundCache = NewIISeekInFilesCache()
 	}
 
 	//if dbg.KVReadLevelledMetrics {
@@ -595,7 +586,7 @@ func (iit *InvertedIndexRoTx) seekInFiles(key []byte, txNum uint64) (found bool,
 	//	}
 	//}
 
-	fromCache, ok := iit.iiNotFoundCache.Get(hi)
+	fromCache, ok := iit.iiNotFoundCache.Get(u128{hi: hi, lo: lo})
 	if ok && fromCache.requested <= txNum {
 		if txNum <= fromCache.found {
 			iit.hit++
@@ -626,12 +617,12 @@ func (iit *InvertedIndexRoTx) seekInFiles(key []byte, txNum uint64) (found bool,
 		equalOrHigherTxNum, found = eliasfano32.Seek(eliasVal, txNum)
 
 		if found {
-			iit.iiNotFoundCache.Add(hi, r{requested: txNum, found: equalOrHigherTxNum})
+			iit.iiNotFoundCache.Add(u128{hi: hi, lo: lo}, iiSeekInFilesCacheItem{requested: txNum, found: equalOrHigherTxNum})
 			return true, equalOrHigherTxNum
 		}
 	}
 
-	iit.iiNotFoundCache.Add(hi, r{requested: txNum, found: 0})
+	iit.iiNotFoundCache.Add(u128{hi: hi, lo: lo}, iiSeekInFilesCacheItem{requested: txNum, found: 0})
 	return false, 0
 }
 
