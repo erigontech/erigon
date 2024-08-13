@@ -412,6 +412,7 @@ func aggregatorV3_RestartOnDatadir(t *testing.T, rc runCfg) {
 }
 
 func TestAggregatorV3_PruneSmallBatches(t *testing.T) {
+
 	aggStep := uint64(10)
 	db, agg := testDbAndAggregatorv3(t, aggStep)
 
