@@ -849,6 +849,7 @@ Loop:
 				return err
 			}
 
+			execTriggers.AddInt(rs.CommitTxNum(txTask.Sender, txTask.TxNum, in))
 			outputTxNum.Add(1)
 
 			stageProgress = blockNum
