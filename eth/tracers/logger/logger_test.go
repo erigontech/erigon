@@ -58,12 +58,13 @@ type dummyStatedb struct {
 func (*dummyStatedb) GetRefund() uint64 { return 1337 }
 
 func TestStoreCapture(t *testing.T) {
+	c := vm.NewJumpDestCache()
 	var (
 		env      = vm.NewEVM(evmtypes.BlockContext{}, evmtypes.TxContext{}, &dummyStatedb{}, params.TestChainConfig, vm.Config{})
 		logger   = NewStructLogger(nil)
 		mem      = vm.NewMemory()
 		stack    = stack.New()
-		contract = vm.NewContract(&dummyContractRef{}, libcommon.Address{}, new(uint256.Int), 0, false /* skipAnalysis */)
+		contract = vm.NewContract(&dummyContractRef{}, libcommon.Address{}, new(uint256.Int), 0, false /* skipAnalysis */, c)
 	)
 	stack.Push(uint256.NewInt(1))
 	stack.Push(uint256.NewInt(0))

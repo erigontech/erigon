@@ -1299,8 +1299,8 @@ func (ac *AggregatorRoTx) LogStats(tx kv.Tx, tx2block func(endTxNumMinimax uint6
 	var m runtime.MemStats
 	dbg.ReadMemStats(&m)
 	ac.a.logger.Info("[snapshots:history] Stat",
-		"blocks", fmt.Sprintf("%dk", (domainBlockNumProgress+1)/1000),
-		"txs", fmt.Sprintf("%dm", ac.a.visibleFilesMinimaxTxNum.Load()/1_000_000),
+		"blocks", common2.PrettyCounter(domainBlockNumProgress+1),
+		"txs", common2.PrettyCounter(ac.a.visibleFilesMinimaxTxNum.Load()),
 		"txNum2blockNum", strings.Join(str, ","),
 		"first_history_idx_in_db", firstHistoryIndexBlockInDB,
 		"last_comitment_block", lastCommitmentBlockNum,

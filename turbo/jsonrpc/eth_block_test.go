@@ -46,7 +46,7 @@ func TestGetBlockByNumberWithLatestTag(t *testing.T) {
 	m, _, _ := rpcdaemontest.CreateTestSentry(t)
 	api := NewEthAPI(newBaseApiForTest(m), m.DB, nil, nil, nil, 5000000, 1e18, 100_000, false, 100_000, 128, log.New())
 	b, err := api.GetBlockByNumber(context.Background(), rpc.LatestBlockNumber, false)
-	expected := common.HexToHash("0x5883164d4100b95e1d8e931b8b9574586a1dea7507941e6ad3c1e3a2591485fd")
+	expected := common.HexToHash("0xe99e4072055929794042a257bdb34787aba52ee220f4e60867acc57d56474dab")
 	if err != nil {
 		t.Errorf("error getting block number with latest tag: %s", err)
 	}
@@ -60,7 +60,7 @@ func TestGetBlockByNumberWithLatestTag_WithHeadHashInDb(t *testing.T) {
 	if err != nil {
 		t.Errorf("could not begin read write transaction: %s", err)
 	}
-	latestBlockHash := common.HexToHash("0x6804117de2f3e6ee32953e78ced1db7b20214e0d8c745a03b8fecf7cc8ee76ef")
+	latestBlockHash := common.HexToHash("0xe99e4072055929794042a257bdb34787aba52ee220f4e60867acc57d56474dab")
 	latestBlock, err := m.BlockReader.BlockByHash(ctx, tx, latestBlockHash)
 	if err != nil {
 		tx.Rollback()
@@ -128,7 +128,7 @@ func TestGetBlockByNumber_WithFinalizedTag_WithFinalizedBlockInDb(t *testing.T) 
 	if err != nil {
 		t.Errorf("could not begin read write transaction: %s", err)
 	}
-	latestBlockHash := common.HexToHash("0x6804117de2f3e6ee32953e78ced1db7b20214e0d8c745a03b8fecf7cc8ee76ef")
+	latestBlockHash := common.HexToHash("0xe99e4072055929794042a257bdb34787aba52ee220f4e60867acc57d56474dab")
 	latestBlock, err := m.BlockReader.BlockByHash(ctx, tx, latestBlockHash)
 	if err != nil {
 		tx.Rollback()
@@ -167,7 +167,7 @@ func TestGetBlockByNumber_WithSafeTag_WithSafeBlockInDb(t *testing.T) {
 	if err != nil {
 		t.Errorf("could not begin read write transaction: %s", err)
 	}
-	latestBlockHash := common.HexToHash("0x6804117de2f3e6ee32953e78ced1db7b20214e0d8c745a03b8fecf7cc8ee76ef")
+	latestBlockHash := common.HexToHash("0xe99e4072055929794042a257bdb34787aba52ee220f4e60867acc57d56474dab")
 	latestBlock, err := m.BlockReader.BlockByHash(ctx, tx, latestBlockHash)
 	if err != nil {
 		tx.Rollback()
@@ -195,7 +195,7 @@ func TestGetBlockTransactionCountByHash(t *testing.T) {
 	ctx := context.Background()
 
 	api := NewEthAPI(newBaseApiForTest(m), m.DB, nil, nil, nil, 5000000, 1e18, 100_000, false, 100_000, 128, log.New())
-	blockHash := common.HexToHash("0x6804117de2f3e6ee32953e78ced1db7b20214e0d8c745a03b8fecf7cc8ee76ef")
+	blockHash := common.HexToHash("0xe99e4072055929794042a257bdb34787aba52ee220f4e60867acc57d56474dab")
 
 	tx, err := m.DB.BeginRw(ctx)
 	if err != nil {
@@ -227,7 +227,7 @@ func TestGetBlockTransactionCountByHash_ZeroTx(t *testing.T) {
 	m, _, _ := rpcdaemontest.CreateTestSentry(t)
 	ctx := context.Background()
 	api := NewEthAPI(newBaseApiForTest(m), m.DB, nil, nil, nil, 5000000, 1e18, 100_000, false, 100_000, 128, log.New())
-	blockHash := common.HexToHash("0x5883164d4100b95e1d8e931b8b9574586a1dea7507941e6ad3c1e3a2591485fd")
+	blockHash := common.HexToHash("0xe99e4072055929794042a257bdb34787aba52ee220f4e60867acc57d56474dab")
 
 	tx, err := m.DB.BeginRw(ctx)
 	if err != nil {
@@ -259,7 +259,7 @@ func TestGetBlockTransactionCountByNumber(t *testing.T) {
 	m, _, _ := rpcdaemontest.CreateTestSentry(t)
 	ctx := context.Background()
 	api := NewEthAPI(newBaseApiForTest(m), m.DB, nil, nil, nil, 5000000, 1e18, 100_000, false, 100_000, 128, log.New())
-	blockHash := common.HexToHash("0x6804117de2f3e6ee32953e78ced1db7b20214e0d8c745a03b8fecf7cc8ee76ef")
+	blockHash := common.HexToHash("0xe99e4072055929794042a257bdb34787aba52ee220f4e60867acc57d56474dab")
 
 	tx, err := m.DB.BeginRw(ctx)
 	if err != nil {
@@ -292,7 +292,7 @@ func TestGetBlockTransactionCountByNumber_ZeroTx(t *testing.T) {
 	ctx := context.Background()
 	api := NewEthAPI(newBaseApiForTest(m), m.DB, nil, nil, nil, 5000000, 1e18, 100_000, false, 100_000, 128, log.New())
 
-	blockHash := common.HexToHash("0x5883164d4100b95e1d8e931b8b9574586a1dea7507941e6ad3c1e3a2591485fd")
+	blockHash := common.HexToHash("0xe99e4072055929794042a257bdb34787aba52ee220f4e60867acc57d56474dab")
 
 	tx, err := m.DB.BeginRw(ctx)
 	if err != nil {

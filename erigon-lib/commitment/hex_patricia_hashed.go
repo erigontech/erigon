@@ -28,7 +28,6 @@ import (
 	"math/bits"
 	"path/filepath"
 	"runtime"
-	"strings"
 	"time"
 
 	"github.com/erigontech/erigon-lib/etl"
@@ -36,7 +35,6 @@ import (
 
 	"github.com/erigontech/erigon-lib/common/dbg"
 
-	"github.com/holiman/uint256"
 	"golang.org/x/crypto/sha3"
 
 	"github.com/erigontech/erigon-lib/common/hexutility"
@@ -1278,12 +1276,14 @@ func (hph *HexPatriciaHashed) Process(ctx context.Context, updates *Updates, log
 		case <-logEvery.C:
 			dbg.ReadMemStats(&m)
 			log.Info(fmt.Sprintf("[%s][agg] computing trie", logPrefix),
-				"progress", fmt.Sprintf("%dk/%dk", ki/1000, updatesCount/1000), "alloc", common.ByteCount(m.Alloc), "sys", common.ByteCount(m.Sys))
+				"progress", fmt.Sprintf("%s/%s", common.PrettyCounter(ki), common.PrettyCounter(updatesCount)),
+				"alloc", common.ByteCount(m.Alloc), "sys", common.ByteCount(m.Sys))
+
 		default:
 		}
 
 		if hph.trace {
-			fmt.Printf("\n%d/%d) plainKey=[%x], hashedKey=[%x], currentKey=[%x]\n", ki+1, updatesCount, plainKey, hashedKey, hph.currentKey[:hph.currentKeyLen])
+			fmt.Printf("\n%d/%d) plainKey [%x] hashedKey [%x] currentKey [%x]\n", ki+1, updatesCount, plainKey, hashedKey, hph.currentKey[:hph.currentKeyLen])
 		}
 		// Keep folding until the currentKey is the prefix of the key we modify
 		for hph.needFolding(hashedKey) {
@@ -1810,183 +1810,4 @@ func (hph *HexPatriciaHashed) hashAndNibblizeKey(key []byte) []byte {
 		nibblized[i*2+1] = b & 0xf
 	}
 	return nibblized
-}
-
-type UpdateFlags uint8
-
-const (
-	CodeUpdate    UpdateFlags = 1
-	DeleteUpdate  UpdateFlags = 2
-	BalanceUpdate UpdateFlags = 4
-	NonceUpdate   UpdateFlags = 8
-	StorageUpdate UpdateFlags = 16
-)
-
-func (uf UpdateFlags) String() string {
-	var sb strings.Builder
-	if uf == DeleteUpdate {
-		sb.WriteString("Delete")
-	} else {
-		if uf&BalanceUpdate != 0 {
-			sb.WriteString("+Balance")
-		}
-		if uf&NonceUpdate != 0 {
-			sb.WriteString("+Nonce")
-		}
-		if uf&CodeUpdate != 0 {
-			sb.WriteString("+Code")
-		}
-		if uf&StorageUpdate != 0 {
-			sb.WriteString("+Storage")
-		}
-	}
-	return sb.String()
-}
-
-type Update struct {
-	hashedKey  []byte
-	plainKey   []byte // todo remove
-	CodeHash   [length.Hash]byte
-	Storage    [length.Hash]byte
-	StorageLen int
-	Flags      UpdateFlags
-	Balance    uint256.Int
-	Nonce      uint64
-}
-
-func (u *Update) Reset() {
-	u.Flags = 0
-	u.Balance.Clear()
-	u.Nonce = 0
-	u.StorageLen = 0
-	copy(u.CodeHash[:], EmptyCodeHash)
-}
-
-func (u *Update) Merge(b *Update) {
-	if b.Flags == DeleteUpdate {
-		u.Flags = DeleteUpdate
-		return
-	}
-	if b.Flags&BalanceUpdate != 0 {
-		u.Flags |= BalanceUpdate
-		u.Balance.Set(&b.Balance)
-	}
-	if b.Flags&NonceUpdate != 0 {
-		u.Flags |= NonceUpdate
-		u.Nonce = b.Nonce
-	}
-	if b.Flags&CodeUpdate != 0 {
-		u.Flags |= CodeUpdate
-		copy(u.CodeHash[:], b.CodeHash[:])
-	}
-	if b.Flags&StorageUpdate != 0 {
-		u.Flags |= StorageUpdate
-		copy(u.Storage[:], b.Storage[:b.StorageLen])
-		u.StorageLen = b.StorageLen
-	}
-}
-
-func (u *Update) Encode(buf []byte, numBuf []byte) []byte {
-	buf = append(buf, byte(u.Flags))
-	if u.Flags&BalanceUpdate != 0 {
-		buf = append(buf, byte(u.Balance.ByteLen()))
-		buf = append(buf, u.Balance.Bytes()...)
-	}
-	if u.Flags&NonceUpdate != 0 {
-		n := binary.PutUvarint(numBuf, u.Nonce)
-		buf = append(buf, numBuf[:n]...)
-	}
-	if u.Flags&CodeUpdate != 0 {
-		buf = append(buf, u.CodeHash[:]...)
-	}
-	if u.Flags&StorageUpdate != 0 {
-		n := binary.PutUvarint(numBuf, uint64(u.StorageLen))
-		buf = append(buf, numBuf[:n]...)
-		if u.StorageLen > 0 {
-			buf = append(buf, u.Storage[:u.StorageLen]...)
-		}
-	}
-	return buf
-}
-
-func (u *Update) Deleted() bool {
-	return u.Flags&DeleteUpdate > 0
-}
-
-func (u *Update) Decode(buf []byte, pos int) (int, error) {
-	if len(buf) < pos+1 {
-		return 0, errors.New("decode Update: buffer too small for flags")
-	}
-	u.Reset()
-
-	u.Flags = UpdateFlags(buf[pos])
-	pos++
-	if u.Flags&BalanceUpdate != 0 {
-		if len(buf) < pos+1 {
-			return 0, errors.New("decode Update: buffer too small for balance len")
-		}
-		balanceLen := int(buf[pos])
-		pos++
-		if len(buf) < pos+balanceLen {
-			return 0, errors.New("decode Update: buffer too small for balance")
-		}
-		u.Balance.SetBytes(buf[pos : pos+balanceLen])
-		pos += balanceLen
-	}
-	if u.Flags&NonceUpdate != 0 {
-		var n int
-		u.Nonce, n = binary.Uvarint(buf[pos:])
-		if n == 0 {
-			return 0, errors.New("decode Update: buffer too small for nonce")
-		}
-		if n < 0 {
-			return 0, errors.New("decode Update: nonce overflow")
-		}
-		pos += n
-	}
-	if u.Flags&CodeUpdate != 0 {
-		if len(buf) < pos+length.Hash {
-			return 0, errors.New("decode Update: buffer too small for codeHash")
-		}
-		copy(u.CodeHash[:], buf[pos:pos+32])
-		pos += length.Hash
-	}
-	if u.Flags&StorageUpdate != 0 {
-		l, n := binary.Uvarint(buf[pos:])
-		if n == 0 {
-			return 0, errors.New("decode Update: buffer too small for storage len")
-		}
-		if n < 0 {
-			return 0, errors.New("decode Update: storage pos overflow")
-		}
-		pos += n
-		if len(buf) < pos+int(l) {
-			return 0, errors.New("decode Update: buffer too small for storage")
-		}
-		u.StorageLen = int(l)
-		copy(u.Storage[:], buf[pos:pos+u.StorageLen])
-		pos += u.StorageLen
-	}
-	return pos, nil
-}
-
-func (u *Update) String() string {
-	var sb strings.Builder
-	sb.WriteString(fmt.Sprintf("Flags: [%s]", u.Flags))
-	if u.Deleted() {
-		sb.WriteString(", DELETED")
-	}
-	if u.Flags&BalanceUpdate != 0 {
-		sb.WriteString(fmt.Sprintf(", Balance: [%d]", &u.Balance))
-	}
-	if u.Flags&NonceUpdate != 0 {
-		sb.WriteString(fmt.Sprintf(", Nonce: [%d]", u.Nonce))
-	}
-	if u.Flags&CodeUpdate != 0 {
-		sb.WriteString(fmt.Sprintf(", CodeHash: [%x]", u.CodeHash))
-	}
-	if u.Flags&StorageUpdate != 0 {
-		sb.WriteString(fmt.Sprintf(", Storage: [%x]", u.Storage[:u.StorageLen]))
-	}
-	return sb.String()
 }

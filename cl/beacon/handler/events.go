@@ -37,14 +37,14 @@ var validTopics = map[event.EventTopic]struct{}{
 	event.OpProposerSlashing:  {},
 	event.OpVoluntaryExit:     {},
 	// state events
-	event.StateBlock:               {},
-	event.StateBlockGossip:         {},
-	event.StateChainReorg:          {},
-	event.StateFinalityUpdate:      {},
-	event.StateFinalizedCheckpoint: {},
-	event.StateHead:                {},
-	event.StateOptimisticUpdate:    {},
-	event.StatePayloadAttributes:   {},
+	event.StateBlock:                       {},
+	event.StateBlockGossip:                 {},
+	event.StateChainReorg:                  {},
+	event.StateLightClientFinalityUpdate:   {},
+	event.StateFinalizedCheckpoint:         {},
+	event.StateHead:                        {},
+	event.StateLightClientOptimisticUpdate: {},
+	event.StatePayloadAttributes:           {},
 }
 
 func (a *ApiHandler) EventSourceGetV1Events(w http.ResponseWriter, r *http.Request) {
@@ -53,6 +53,7 @@ func (a *ApiHandler) EventSourceGetV1Events(w http.ResponseWriter, r *http.Reque
 		return
 	}
 	w.Header().Set("Content-Type", "text/event-stream")
+	w.Header().Set("Cache-Control", "no-cache")
 	w.Header().Set("Connection", "keep-alive")
 
 	topics := r.URL.Query()["topics"]
@@ -65,7 +66,7 @@ func (a *ApiHandler) EventSourceGetV1Events(w http.ResponseWriter, r *http.Reque
 		}
 		subscribeTopics.Add(topic)
 	}
-	log.Info("Subscribed to topics", "topics", subscribeTopics)
+	log.Info("Subscribed to event stream topics", "topics", subscribeTopics)
 
 	eventCh := make(chan *event.EventStream, 128)
 	opSub := a.emitters.Operation().Subscribe(eventCh)
@@ -78,21 +79,21 @@ func (a *ApiHandler) EventSourceGetV1Events(w http.ResponseWriter, r *http.Reque
 
 	for {
 		select {
-		case event := <-eventCh:
-			if !subscribeTopics.Contains(event.Event) {
+		case e := <-eventCh:
+			if !subscribeTopics.Contains(e.Event) {
 				continue
 			}
-			if event.Data == nil {
-				log.Warn("event data is nil", "event", event)
+			if e.Data == nil {
+				log.Warn("event data is nil", "event", e)
 				continue
 			}
 			// marshal and send
-			buf, err := json.Marshal(event.Data)
+			buf, err := json.Marshal(e.Data)
 			if err != nil {
-				log.Warn("failed to encode data", "err", err, "topic", event.Event)
+				log.Warn("failed to encode data", "err", err, "topic", e.Event)
 				continue
 			}
-			if _, err := fmt.Fprintf(w, "event: %s\ndata: %s\n\n", event.Event, string(buf)); err != nil {
+			if _, err := fmt.Fprintf(w, "event: %s\ndata: %s\n\n", e.Event, string(buf)); err != nil {
 				log.Warn("failed to write event", "err", err)
 				continue
 			}
@@ -112,7 +113,7 @@ func (a *ApiHandler) EventSourceGetV1Events(w http.ResponseWriter, r *http.Reque
 			http.Error(w, fmt.Sprintf("event error %v", err), http.StatusInternalServerError)
 			return
 		case <-r.Context().Done():
-			log.Info("Client disconnected")
+			log.Info("Client disconnected from event stream")
 			return
 		}
 	}
