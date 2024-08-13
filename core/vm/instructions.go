@@ -20,6 +20,7 @@
 package vm
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
 	"math"
@@ -372,7 +373,9 @@ func opReturnDataCopy(pc *uint64, interpreter *EVMInterpreter, scope *ScopeConte
 
 func opExtCodeSize(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]byte, error) {
 	slot := scope.Stack.Peek()
-	slot.SetUint64(uint64(interpreter.evm.IntraBlockState().GetCodeSize(slot.Bytes20())))
+	address := slot.Bytes20()
+	_, _, codesize, _ := delegatedDesignationHandler(interpreter, libcommon.BytesToAddress(address[:]))
+	slot.SetUint64(codesize)
 	return nil, nil
 }
 
@@ -408,7 +411,13 @@ func opExtCodeCopy(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext)
 	)
 	addr := libcommon.Address(a.Bytes20())
 	len64 := length.Uint64()
-	codeCopy := getDataBig(interpreter.evm.IntraBlockState().GetCode(addr), &codeOffset, len64)
+	var code []byte
+	if _, ddCode, _, ddPresent := delegatedDesignationHandler(interpreter, addr); ddPresent {
+		code = ddCode
+	} else {
+		code = interpreter.evm.IntraBlockState().GetCode(addr)
+	}
+	codeCopy := getDataBig(code, &codeOffset, len64)
 	scope.Memory.Set(memOffset.Uint64(), len64, codeCopy)
 	return nil, nil
 }
@@ -449,6 +458,11 @@ func opExtCodeCopy(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext)
 func opExtCodeHash(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]byte, error) {
 	slot := scope.Stack.Peek()
 	address := libcommon.Address(slot.Bytes20())
+
+	if dd, _, _, ddPresent := delegatedDesignationHandler(interpreter, address); ddPresent {
+		address = dd
+	}
+
 	if interpreter.evm.IntraBlockState().Empty(address) {
 		slot.Clear()
 	} else {
@@ -991,4 +1005,27 @@ func makeSwap(size int64) executionFunc {
 		scope.Stack.Swap(int(size))
 		return nil, nil
 	}
+}
+
+// return the delegated info (code, codesize) if delegated designation is present at the address's code
+// populates ddCodeSize even in case of non-delegated designation
+func delegatedDesignationHandler(interpreter *EVMInterpreter, address libcommon.Address) (designatedDelegation libcommon.Address, ddCode []byte, ddCodeSize uint64, ddPresent bool) {
+	ddPresent = false
+	codesize := uint64(interpreter.evm.IntraBlockState().GetCodeSize(address))
+	if codesize == 23 {
+		// potentially delegated designation
+		// get code and check
+		code := interpreter.evm.IntraBlockState().GetCode(address)
+		if bytes.Equal(code[0:3], params.DelegatedDesignationPrexix[:]) {
+			// delegated designation
+			ddPresent = true
+			designatedDelegation = libcommon.BytesToAddress(code[3:23])
+			ddCode = interpreter.evm.IntraBlockState().GetCode(designatedDelegation)
+			ddCodeSize = uint64(interpreter.evm.IntraBlockState().GetCodeSize(designatedDelegation))
+		}
+	} else {
+		// optimization for non-delegated designation (to be used by callers)
+		ddCodeSize = codesize
+	}
+	return
 }

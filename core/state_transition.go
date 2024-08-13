@@ -28,6 +28,7 @@ import (
 
 	"github.com/erigontech/erigon-lib/common"
 	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common/fixedgas"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/txpool/txpoolcfg"
 	types2 "github.com/erigontech/erigon-lib/types"
@@ -371,10 +372,14 @@ func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (*evmtype
 				continue
 			}
 
-			// 3. authority code should be empty or already delegated
+			// 3. add authority account to accesses_addresses
+			verifiedAuthorities = append(verifiedAuthorities, authority)
+			// authority is added to accessed_address in prepare step
+
+			// 4. authority code should be empty or already delegated
 			if codeHash := st.state.GetCodeHash(authority); codeHash != emptyCodeHash && codeHash != (libcommon.Hash{}) {
 				// check for delegation
-				if code := st.state.GetCode(authority); len(code) > 3 && bytes.Equal(code[0:3], []byte{0xef, 0x01, 0x00}) {
+				if code := st.state.GetCode(authority); len(code) > 3 && bytes.Equal(code[0:3], params.DelegatedDesignationPrexix[:]) {
 					// noop: has designated delegation, can be replaced
 				} else {
 					log.Debug("authority code is not empty or not delegated, skipping", "auth index", i)
@@ -382,31 +387,23 @@ func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (*evmtype
 				}
 			}
 
-			// 4. nonce check
-			if st.state.GetNonce(authority) != auth.Nonce {
+			// 5. nonce check
+			authorityNonce := st.state.GetNonce(authority)
+			if authorityNonce != auth.Nonce {
 				log.Debug("invalid nonce, skipping", "auth index", i)
 				continue
 			}
 
-			// 5. set code of authority to code associated with address
-			st.state.SetCode(authority, st.state.GetCode(auth.Address))
-
-			// 6. add authority account to accesses_addresses
-			verifiedAuthorities = append(verifiedAuthorities, authority)
-			// authority is added to accessed_address in prepare step
-		}
-	}
-
-	if len(verifiedAuthorities) > 0 {
-		oldPostApplyMessage := st.evm.Context.PostApplyMessage
-		st.evm.Context.PostApplyMessage = func(ibs evmtypes.IntraBlockState, sender common.Address, coinbase common.Address, result *evmtypes.ExecutionResult) {
-			for _, authority := range verifiedAuthorities {
-				ibs.SetCode(authority, nil)
+			// 6. Add PER_EMPTY_ACCOUNT_COST - PER_AUTH_BASE_COST gas to the global refund counter if authority exists in the trie.
+			if st.state.Exist(authority) {
+				st.state.AddRefund(fixedgas.PerEmptyAccountCost - fixedgas.PerAuthBaseCost)
 			}
 
-			if oldPostApplyMessage != nil {
-				oldPostApplyMessage(ibs, sender, coinbase, result)
-			}
+			// 7. set authority code
+			st.state.SetCode(authority, bytes.Join([][]byte{params.DelegatedDesignationPrexix[:], auth.Address.Bytes()}, nil))
+
+			// 8. increase the nonce of authority
+			st.state.SetNonce(authority, authorityNonce+1)
 		}
 	}
 

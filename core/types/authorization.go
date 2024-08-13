@@ -94,8 +94,8 @@ func (ath *Authorization) RecoverSigner(data *bytes.Buffer, b []byte) (*libcommo
 
 func authorizationSize(auth Authorization) (authLen int) {
 	authLen = 1 + rlp.Uint256LenExcludingHead(auth.ChainID)
-	authLen += (1 + length.Addr)
 	authLen += rlp2.U64Len(auth.Nonce)
+	authLen += (1 + length.Addr)
 
 	authLen += (1 + rlp.Uint256LenExcludingHead(&auth.YParity)) + (1 + rlp.Uint256LenExcludingHead(&auth.R)) + (1 + rlp.Uint256LenExcludingHead(&auth.S))
 
@@ -125,6 +125,10 @@ func decodeAuthorizations(auths *[]Authorization, s *rlp.Stream) error {
 		}
 		auth.ChainID = new(uint256.Int).SetBytes(b)
 
+		if auth.Nonce, err = s.Uint(); err != nil {
+			return err
+		}
+
 		if b, err = s.Bytes(); err != nil {
 			return err
 		}
@@ -133,10 +137,6 @@ func decodeAuthorizations(auths *[]Authorization, s *rlp.Stream) error {
 			return fmt.Errorf("wrong size for Address: %d", len(b))
 		}
 		auth.Address = libcommon.BytesToAddress(b)
-
-		if auth.Nonce, err = s.Uint(); err != nil {
-			return err
-		}
 
 		if b, err = s.Uint256Bytes(); err != nil {
 			return err
@@ -181,12 +181,12 @@ func encodeAuthorizations(authorizations []Authorization, w io.Writer, b []byte)
 		if err := auth.ChainID.EncodeRLP(w); err != nil {
 			return err
 		}
-		// 2. encode Address
-		if err := rlp.EncodeOptionalAddress(&auth.Address, w, b); err != nil {
+		// 2. encode Nonce
+		if err := rlp.EncodeInt(auth.Nonce, w, b); err != nil {
 			return err
 		}
-		// 3. encode Nonce
-		if err := rlp.EncodeInt(auth.Nonce, w, b); err != nil {
+		// 3. encode Address
+		if err := rlp.EncodeOptionalAddress(&auth.Address, w, b); err != nil {
 			return err
 		}
 
