@@ -530,7 +530,6 @@ type InvertedIndexRoTx struct {
 	getters []ArchiveGetter
 	readers []*recsplit.IndexReader
 
-	hit, miss       int
 	iiNotFoundCache *IISeekInFilesCache
 }
 
@@ -586,17 +585,17 @@ func (iit *InvertedIndexRoTx) seekInFiles(key []byte, txNum uint64) (found bool,
 	//	}
 	//}
 
+	iit.iiNotFoundCache.total++
 	fromCache, ok := iit.iiNotFoundCache.Get(u128{hi: hi, lo: lo})
 	if ok && fromCache.requested <= txNum {
 		if txNum <= fromCache.found {
-			iit.hit++
+			iit.iiNotFoundCache.hit++
 			return true, fromCache.found
 		} else if fromCache.found == 0 {
-			iit.hit++
+			iit.iiNotFoundCache.hit++
 			return false, 0
 		}
 	}
-	iit.miss++
 
 	for i := 0; i < len(iit.files); i++ {
 		if iit.files[i].endTxNum <= txNum {

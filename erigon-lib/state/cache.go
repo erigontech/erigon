@@ -1,8 +1,11 @@
 package state
 
 import (
+	"fmt"
+
 	"github.com/elastic/go-freelru"
 	"github.com/erigontech/erigon-lib/common/dbg"
+	"github.com/erigontech/erigon-lib/log/v3"
 )
 
 func u32noHash(u uint32) uint32        { return u }            //nolint
@@ -35,6 +38,7 @@ var iiGetFromFileCacheLimit = uint32(dbg.EnvInt("II_LRU", 512))
 
 type IISeekInFilesCache struct {
 	*freelru.LRU[u128, iiSeekInFilesCacheItem]
+	hit, total int
 }
 type iiSeekInFilesCacheItem struct {
 	requested, found uint64
@@ -45,5 +49,11 @@ func NewIISeekInFilesCache() *IISeekInFilesCache {
 	if err != nil {
 		panic(err)
 	}
-	return &IISeekInFilesCache{c}
+	return &IISeekInFilesCache{LRU: c}
+}
+func (c *IISeekInFilesCache) LogStats(fileBaseName string) {
+	if c.total%10_000 == 0 {
+		m := c.Metrics()
+		log.Warn("[dbg] lEachCache", "a", fileBaseName, "hit", c.hit, "total", c.total, "Collisions", m.Collisions, "Evictions", m.Evictions, "Inserts", m.Inserts, "limit", iiGetFromFileCacheLimit, "ratio", fmt.Sprintf("%.2f", float64(m.Hits)/float64(m.Hits+m.Misses)))
+	}
 }
