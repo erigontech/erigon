@@ -29,7 +29,6 @@ import (
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
-	"github.com/erigontech/erigon/cl/monitor"
 	"github.com/erigontech/erigon/cl/persistence/beacon_indicies"
 	"github.com/erigontech/erigon/cl/phase1/core/state/lru"
 	"github.com/erigontech/erigon/cl/phase1/forkchoice"
@@ -59,8 +58,7 @@ type blockService struct {
 	emitter                          *beaconevents.EventEmitter
 	blocksScheduledForLaterExecution sync.Map
 	// store the block in db
-	db               kv.RwDB
-	validatorMonitor monitor.ValidatorMonitor
+	db kv.RwDB
 }
 
 // NewBlockService creates a new block service
@@ -72,21 +70,19 @@ func NewBlockService(
 	ethClock eth_clock.EthereumClock,
 	beaconCfg *clparams.BeaconChainConfig,
 	emitter *beaconevents.EventEmitter,
-	validatorMonitor monitor.ValidatorMonitor,
 ) Service[*cltypes.SignedBeaconBlock] {
 	seenBlocksCache, err := lru.New[proposerIndexAndSlot, struct{}]("seenblocks", seenBlockCacheSize)
 	if err != nil {
 		panic(err)
 	}
 	b := &blockService{
-		forkchoiceStore:  forkchoiceStore,
-		syncedData:       syncedData,
-		ethClock:         ethClock,
-		beaconCfg:        beaconCfg,
-		seenBlocksCache:  seenBlocksCache,
-		emitter:          emitter,
-		db:               db,
-		validatorMonitor: validatorMonitor,
+		forkchoiceStore: forkchoiceStore,
+		syncedData:      syncedData,
+		ethClock:        ethClock,
+		beaconCfg:       beaconCfg,
+		seenBlocksCache: seenBlocksCache,
+		emitter:         emitter,
+		db:              db,
 	}
 	go b.loop(ctx)
 	return b
@@ -138,7 +134,7 @@ func (b *blockService) ProcessMessage(ctx context.Context, _ *uint64, msg *cltyp
 	if msg.Block.Body.BlobKzgCommitments.Len() > int(b.beaconCfg.MaxBlobsPerBlock) {
 		return ErrInvalidCommitmentsCount
 	}
-	b.publishBlockEvent(msg)
+	b.publishBlockGossipEvent(msg)
 
 	// the rest of the validation is done in the forkchoice store
 	if err := b.processAndStoreBlock(ctx, msg); err != nil {
@@ -151,8 +147,8 @@ func (b *blockService) ProcessMessage(ctx context.Context, _ *uint64, msg *cltyp
 	return nil
 }
 
-// publishBlockEvent publishes a block event
-func (b *blockService) publishBlockEvent(block *cltypes.SignedBeaconBlock) {
+// publishBlockGossipEvent publishes a block event which has not been processed yet
+func (b *blockService) publishBlockGossipEvent(block *cltypes.SignedBeaconBlock) {
 	if b.emitter == nil {
 		return
 	}
@@ -162,10 +158,9 @@ func (b *blockService) publishBlockEvent(block *cltypes.SignedBeaconBlock) {
 		return
 	}
 	// publish block to event handler
-	b.emitter.State().SendBlock(&beaconevents.BlockData{
-		Slot:                block.Block.Slot,
-		Block:               libcommon.Hash(blockRoot),
-		ExecutionOptimistic: false,
+	b.emitter.State().SendBlockGossip(&beaconevents.BlockGossipData{
+		Slot:  block.Block.Slot,
+		Block: libcommon.Hash(blockRoot),
 	})
 }
 
@@ -200,7 +195,6 @@ func (b *blockService) processAndStoreBlock(ctx context.Context, block *cltypes.
 	}); err != nil {
 		return err
 	}
-	b.validatorMonitor.OnNewBlock(block.Block)
 	return nil
 }
 

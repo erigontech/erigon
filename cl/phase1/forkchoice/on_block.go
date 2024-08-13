@@ -28,6 +28,7 @@ import (
 	"github.com/erigontech/erigon-lib/common"
 	libcommon "github.com/erigontech/erigon-lib/common"
 
+	"github.com/erigontech/erigon/cl/beacon/beaconevents"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
@@ -233,6 +234,14 @@ func (f *ForkChoiceStore) OnBlock(ctx context.Context, block *cltypes.SignedBeac
 	currentEpoch := f.computeEpochAtSlot(f.Slot())
 	if blockEpoch < currentEpoch {
 		f.updateCheckpoints(lastProcessedState.CurrentJustifiedCheckpoint().Copy(), lastProcessedState.FinalizedCheckpoint().Copy())
+	}
+	f.emitters.State().SendBlock(&beaconevents.BlockData{
+		Slot:                block.Block.Slot,
+		Block:               blockRoot,
+		ExecutionOptimistic: f.optimisticStore.IsOptimistic(blockRoot),
+	})
+	if f.validatorMonitor != nil {
+		f.validatorMonitor.OnNewBlock(lastProcessedState, block.Block)
 	}
 	log.Debug("OnBlock", "elapsed", time.Since(start))
 	return nil
