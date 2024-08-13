@@ -115,3 +115,22 @@ func codeBitmapInternal(code, bits bitvec) {
 		}
 	}
 }
+
+func codeBitmapInternal2(code []byte, bits []uint64) {
+	for pc := 0; pc < len(code); {
+		op := OpCode(code[pc])
+		pc++
+		if op >= PUSH1 && op <= PUSH32 {
+			numbits := int(op - PUSH1 + 1)
+			x := uint64(1) << (op - PUSH1)
+			x = x | (x - 1) // Smear the bit to the right
+			idx := pc / 64
+			shift := pc & 63
+			bits[idx] |= x << shift
+			if shift+shift > 64 {
+				bits[idx+1] |= x >> (64 - shift)
+			}
+			pc += numbits
+		}
+	}
+}
