@@ -1250,9 +1250,6 @@ func (s *Ethereum) StartMining(ctx context.Context, db kv.RwDB, stateDiffClient 
 		hasWork := true // Start mining immediately
 		errc := make(chan error, 1)
 
-		workCtx, workCancel := context.WithCancel(ctx)
-		defer workCancel()
-
 		for {
 			// Only reset if some work was done previously as we'd like to rely
 			// on the `miner.recommit` as backup.
@@ -1288,6 +1285,7 @@ func (s *Ethereum) StartMining(ctx context.Context, db kv.RwDB, stateDiffClient 
 				case err := <-errc:
 					working = false
 					hasWork = false
+					logger.Debug("in errc", "err", err)
 					if errors.Is(err, libcommon.ErrStopped) {
 						return
 					}
@@ -1309,6 +1307,7 @@ func (s *Ethereum) StartMining(ctx context.Context, db kv.RwDB, stateDiffClient 
 					waiting.Store(true)
 					defer func() {
 						waiting.Store(false)
+						logger.Debug("Setted waiting to false", waiting.Load())
 					}()
 
 					errc <- err
@@ -1325,8 +1324,8 @@ func (s *Ethereum) StartMining(ctx context.Context, db kv.RwDB, stateDiffClient 
 								s.minedBlocks <- block
 							}
 							return
-						case <-workCtx.Done():
-							errc <- workCtx.Err()
+						case <-ctx.Done():
+							errc <- ctx.Err()
 							return
 						}
 					}
