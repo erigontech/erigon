@@ -397,7 +397,7 @@ func (c *Clique) FinalizeAndAssemble(chainConfig *chain.Config, header *types.He
 	// No block rewards in PoA, so the state remains as is and uncles are dropped
 	header.UncleHash = types.CalcUncleHash(nil)
 	// Assemble and return the final block for sealing
-	return types.NewBlock(header, txs, nil, receipts, withdrawals, requests), txs, receipts, nil
+	return types.NewBlockForAsembling(header, txs, nil, receipts, withdrawals, requests), txs, receipts, nil
 }
 
 // Authorize injects a private key into the consensus engine to mint new blocks

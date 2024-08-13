@@ -1119,7 +1119,7 @@ func (c *Bor) FinalizeAndAssemble(chainConfig *chain.Config, header *types.Heade
 	header.UncleHash = types.CalcUncleHash(nil)
 
 	// Assemble block
-	block := types.NewBlock(header, txs, nil, receipts, withdrawals, requests)
+	block := types.NewBlockForAsembling(header, txs, nil, receipts, withdrawals, requests)
 
 	// set state sync
 	// bc := chain.(*core.BlockChain)

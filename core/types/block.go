@@ -1118,6 +1118,12 @@ func NewBlock(header *Header, txs []Transaction, uncles []*Header, receipts []*R
 	return b
 }
 
+func NewBlockForAsembling(header *Header, txs []Transaction, uncles []*Header, receipts []*Receipt, withdrawals []*Withdrawal, requests Requests) *Block {
+	b := NewBlock(header, txs, uncles, receipts, withdrawals, requests)
+	b.header.mutable = true
+	return b
+}
+
 // NewBlockFromStorage like NewBlock but used to create Block object when read it from DB
 // in this case no reason to copy parts, or re-calculate headers fields - they are all stored in DB
 func NewBlockFromStorage(hash libcommon.Hash, header *Header, txs []Transaction, uncles []*Header, withdrawals []*Withdrawal, requests Requests) *Block {
