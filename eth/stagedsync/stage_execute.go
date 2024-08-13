@@ -85,7 +85,8 @@ type ExecuteBlockCfg struct {
 
 	silkworm        *silkworm.Silkworm
 	blockProduction bool
-	applyWorker     *exec3.Worker
+
+	applyWorker, applyWorkerMining *exec3.Worker
 }
 
 func StageExecuteBlocksCfg(
@@ -111,23 +112,24 @@ func StageExecuteBlocksCfg(
 	}
 
 	return ExecuteBlockCfg{
-		db:           db,
-		prune:        pm,
-		batchSize:    batchSize,
-		chainConfig:  chainConfig,
-		engine:       engine,
-		vmConfig:     vmConfig,
-		dirs:         dirs,
-		accumulator:  accumulator,
-		stateStream:  stateStream,
-		badBlockHalt: badBlockHalt,
-		blockReader:  blockReader,
-		hd:           hd,
-		genesis:      genesis,
-		historyV3:    true,
-		syncCfg:      syncCfg,
-		silkworm:     silkworm,
-		applyWorker:  exec3.NewWorker(nil, log.Root(), context.Background(), false, db, nil, blockReader, chainConfig, genesis, nil, engine, dirs, false),
+		db:                db,
+		prune:             pm,
+		batchSize:         batchSize,
+		chainConfig:       chainConfig,
+		engine:            engine,
+		vmConfig:          vmConfig,
+		dirs:              dirs,
+		accumulator:       accumulator,
+		stateStream:       stateStream,
+		badBlockHalt:      badBlockHalt,
+		blockReader:       blockReader,
+		hd:                hd,
+		genesis:           genesis,
+		historyV3:         true,
+		syncCfg:           syncCfg,
+		silkworm:          silkworm,
+		applyWorker:       exec3.NewWorker(nil, log.Root(), context.Background(), false, db, nil, blockReader, chainConfig, genesis, nil, engine, dirs, false),
+		applyWorkerMining: exec3.NewWorker(nil, log.Root(), context.Background(), false, db, nil, blockReader, chainConfig, genesis, nil, engine, dirs, true),
 	}
 }
 
@@ -308,6 +310,7 @@ func blocksReadAheadFunc(ctx context.Context, tx kv.Tx, cfg *ExecuteBlockCfg, bl
 }
 
 func UnwindExecutionStage(u *UnwindState, s *StageState, txc wrap.TxContainer, ctx context.Context, cfg ExecuteBlockCfg, logger log.Logger) (err error) {
+	//fmt.Printf("unwind: %d -> %d\n", u.CurrentBlockNumber, u.UnwindPoint)
 	if u.UnwindPoint >= s.BlockNumber {
 		return nil
 	}

@@ -381,6 +381,9 @@ func ExecV3(ctx context.Context,
 	execWorkers, _, rws, stopWorkers, waitWorkers := exec3.NewWorkersPool(lock.RLocker(), accumulator, logger, ctx, parallel, chainDb, rs, in, blockReader, chainConfig, genesis, engine, workerCount+1, cfg.dirs, isMining)
 	defer stopWorkers()
 	applyWorker := cfg.applyWorker
+	if isMining {
+		applyWorker = cfg.applyWorkerMining
+	}
 	applyWorker.ResetState(rs, accumulator)
 	applyWorker.DiscardReadList()
 

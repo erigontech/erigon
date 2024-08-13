@@ -19,8 +19,6 @@ package stagedsync
 import (
 	"errors"
 	"fmt"
-	"github.com/erigontech/erigon-lib/kv/membatchwithdb"
-	state2 "github.com/erigontech/erigon-lib/state"
 	"io"
 	"math/big"
 	"sync/atomic"
@@ -30,7 +28,9 @@ import (
 	"github.com/holiman/uint256"
 	"golang.org/x/net/context"
 
+	"github.com/erigontech/erigon-lib/kv/membatchwithdb"
 	"github.com/erigontech/erigon-lib/log/v3"
+	state2 "github.com/erigontech/erigon-lib/state"
 	"github.com/erigontech/erigon-lib/wrap"
 
 	"github.com/erigontech/erigon-lib/chain"
@@ -251,6 +251,7 @@ func SpawnMiningExecStage(s *StageState, txc wrap.TxContainer, cfg MiningExecCfg
 	current.Header.Root = libcommon.BytesToHash(rh)
 
 	logger.Info("FinalizeBlockExecution", "block", current.Header.Number, "txn", current.Txs.Len(), "gas", current.Header.GasUsed, "receipt", current.Receipts.Len(), "payload", cfg.payloadId)
+
 	return nil
 }
 
