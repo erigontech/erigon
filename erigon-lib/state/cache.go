@@ -19,6 +19,7 @@ type DomainGetFromFileCache struct {
 	*freelru.LRU[u128, domainGetFromFileCacheItem]
 }
 
+// nolint
 type domainGetFromFileCacheItem struct {
 	lvl uint8
 	v   []byte // pointer to `mmap` - if .kv file is not compressed
