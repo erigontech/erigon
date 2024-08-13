@@ -1118,6 +1118,7 @@ func NewBlock(header *Header, txs []Transaction, uncles []*Header, receipts []*R
 	return b
 }
 
+// NewBlockForAsembling - creating new block - which allow mutation of fileds. Use it for block-assembly
 func NewBlockForAsembling(header *Header, txs []Transaction, uncles []*Header, receipts []*Receipt, withdrawals []*Withdrawal, requests Requests) *Block {
 	b := NewBlock(header, txs, uncles, receipts, withdrawals, requests)
 	b.header.mutable = true
