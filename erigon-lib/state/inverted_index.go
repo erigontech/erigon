@@ -577,7 +577,7 @@ func (iit *InvertedIndexRoTx) seekInFiles(key []byte, txNum uint64) (found bool,
 	hi, lo := iit.hashKey(key)
 
 	if iit.seekInFilesCache == nil {
-		iit.seekInFilesCache = NewIISeekInFilesCache()
+		iit.seekInFilesCache = NewIISeekInFilesCache(false)
 	}
 
 	iit.seekInFilesCache.total++
