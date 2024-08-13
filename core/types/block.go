@@ -1114,7 +1114,7 @@ func NewBlock(header *Header, txs []Transaction, uncles []*Header, receipts []*R
 		}
 	}
 
-	b.header.mutable = false
+	b.header.mutable = false //Force immutability of block and header. Use `NewBlockForAsembling` if you need mutable block
 	return b
 }
 
