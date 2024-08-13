@@ -83,7 +83,7 @@ import (
 	"github.com/erigontech/erigon-lib/wrap"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/persistence/format/snapshot_format/getters"
-	clcore "github.com/erigontech/erigon/cl/phase1/core"
+	"github.com/erigontech/erigon/cl/phase1/core/checkpoint_sync"
 	executionclient "github.com/erigontech/erigon/cl/phase1/execution_client"
 	"github.com/erigontech/erigon/cl/utils/eth_clock"
 	"github.com/erigontech/erigon/cmd/caplin/caplin1"
@@ -91,7 +91,7 @@ import (
 	"github.com/erigontech/erigon/common/debug"
 	"github.com/erigontech/erigon/consensus"
 	"github.com/erigontech/erigon/consensus/clique"
-	"github.com/erigontech/erigon/consensus/ethash"
+	"github.com/erigontech/erigon/consensus/mainnet"
 	"github.com/erigontech/erigon/consensus/merge"
 	"github.com/erigontech/erigon/consensus/misc"
 	"github.com/erigontech/erigon/core"
@@ -219,6 +219,7 @@ type Ethereum struct {
 	silkwormSentryService    *silkworm.SentryService
 
 	polygonSyncService polygonsync.Service
+	polygonBridge      bridge.PolygonBridge
 	stopNode           func() error
 }
 
@@ -533,7 +534,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 	} else if chainConfig.Bor != nil {
 		consensusConfig = chainConfig.Bor
 	} else {
-		consensusConfig = &config.Ethash
+		consensusConfig = &mainnet.MainnetConfig{}
 	}
 
 	var heimdallClient heimdall.HeimdallClient
@@ -547,7 +548,9 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 
 		if config.PolygonSync {
 			polygonBridge = bridge.Assemble(config.Dirs.DataDir, logger, consensusConfig.(*borcfg.BorConfig), heimdallClient.FetchStateSyncEvents, bor.GenesisContractStateReceiverABI())
-			heimdallService = heimdall.AssembleService(config.HeimdallURL, dirs.DataDir, tmpdir, logger)
+			heimdallService = heimdall.AssembleService(consensusConfig.(*borcfg.BorConfig), config.HeimdallURL, dirs.DataDir, tmpdir, logger)
+
+			backend.polygonBridge = polygonBridge
 		}
 
 		flags.Milestone = config.WithHeimdallMilestones
@@ -693,11 +696,6 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 		), stagedsync.MiningUnwindOrder, stagedsync.MiningPruneOrder,
 		logger)
 
-	var ethashApi *ethash.API
-	if casted, ok := backend.engine.(*ethash.Ethash); ok {
-		ethashApi = casted.APIs(nil)[1].Service.(*ethash.API)
-	}
-
 	// setup snapcfg
 	if err := loadSnapshotsEitherFromDiskIfNeeded(dirs, chainConfig.ChainName); err != nil {
 		return nil, err
@@ -749,7 +747,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 	agg.SetSnapshotBuildSema(blockSnapBuildSema)
 	blockRetire := freezeblocks.NewBlockRetire(1, dirs, blockReader, blockWriter, backend.chainDB, backend.chainConfig, backend.notifications.Events, blockSnapBuildSema, logger)
 
-	miningRPC = privateapi.NewMiningServer(ctx, backend, ethashApi, logger)
+	miningRPC = privateapi.NewMiningServer(ctx, backend, logger)
 
 	var creds credentials.TransportCredentials
 	if stack.Config().PrivateApiAddr != "" {
@@ -941,7 +939,9 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 		if err != nil {
 			return nil, err
 		}
-		state, err := clcore.RetrieveBeaconState(ctx, beaconCfg, clparams.NetworkType(config.NetworkID))
+
+		config.CaplinConfig.NetworkId = clparams.NetworkType(config.NetworkID)
+		state, err := checkpoint_sync.ReadOrFetchLatestBeaconState(ctx, dirs, beaconCfg, config.CaplinConfig)
 		if err != nil {
 			return nil, err
 		}
@@ -1044,7 +1044,7 @@ func (s *Ethereum) Init(stack *node.Node, config *ethconfig.Config, chainConfig 
 		}
 	}
 
-	s.apiList = jsonrpc.APIList(chainKv, ethRpcClient, txPoolRpcClient, miningRpcClient, ff, stateCache, blockReader, &httpRpcCfg, s.engine, s.logger)
+	s.apiList = jsonrpc.APIList(chainKv, ethRpcClient, txPoolRpcClient, miningRpcClient, ff, stateCache, blockReader, &httpRpcCfg, s.engine, s.logger, s.polygonBridge)
 
 	if config.SilkwormRpcDaemon && httpRpcCfg.Enabled {
 		interface_log_settings := silkworm.RpcInterfaceLogSettings{
@@ -1336,8 +1336,11 @@ func (s *Ethereum) StartMining(ctx context.Context, db kv.RwDB, stateDiffClient 
 func loadSnapshotsEitherFromDiskIfNeeded(dirs datadir.Dirs, chainName string) error {
 	preverifiedToml := filepath.Join(dirs.Snap, "preverified.toml")
 
-	if _, err := os.Stat(preverifiedToml); err == nil {
-		// It exists case
+	exists, err := dir.FileExist(preverifiedToml)
+	if err != nil {
+		return err
+	}
+	if exists {
 		// Read the preverified.toml and load the snapshots
 		haveToml, err := os.ReadFile(preverifiedToml)
 		if err != nil {
@@ -1346,7 +1349,6 @@ func loadSnapshotsEitherFromDiskIfNeeded(dirs datadir.Dirs, chainName string) er
 		snapcfg.SetToml(chainName, haveToml)
 		return nil
 	}
-	// Doesn't exist case
 	return dir.WriteFileWithFsync(preverifiedToml, snapcfg.GetToml(chainName), 0644)
 }
 

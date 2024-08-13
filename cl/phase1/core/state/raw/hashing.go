@@ -204,17 +204,17 @@ func (b *BeaconState) updateLeaf(idx StateLeafIndex, leaf libcommon.Hash) {
 	// Update leaf with new value.
 	copy(b.leaves[idx*32:], leaf[:])
 	// Now leaf is clean :).
-	b.touchedLeaves[idx] = false
+	b.touchedLeaves[idx].Store(LeafCleanValue)
 }
 
 func (b *BeaconState) isLeafDirty(idx StateLeafIndex) bool {
 	// If leaf is non-initialized or if it was touched then we change it.
-	touched, isInitialized := b.touchedLeaves[idx]
-	return !isInitialized || touched // change only if the leaf was touched or root is non-initialized.
+	v := b.touchedLeaves[idx].Load()
+	return v == LeafInitValue || v == LeafDirtyValue
 }
 
 func (b *BeaconState) markLeaf(idxs ...StateLeafIndex) {
 	for _, idx := range idxs {
-		b.touchedLeaves[idx] = true
+		b.touchedLeaves[idx].Store(LeafDirtyValue)
 	}
 }

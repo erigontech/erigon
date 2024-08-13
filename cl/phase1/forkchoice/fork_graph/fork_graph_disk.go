@@ -29,6 +29,7 @@ import (
 	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/cl/beacon/beacon_router_configuration"
+	"github.com/erigontech/erigon/cl/beacon/beaconevents"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/cltypes/lightclient_utils"
@@ -153,11 +154,12 @@ type forkGraphDisk struct {
 	sszBuffer       bytes.Buffer
 	sszSnappyBuffer bytes.Buffer
 
-	rcfg beacon_router_configuration.RouterConfiguration
+	rcfg    beacon_router_configuration.RouterConfiguration
+	emitter *beaconevents.EventEmitter
 }
 
 // Initialize fork graph with a new state
-func NewForkGraphDisk(anchorState *state.CachingBeaconState, aferoFs afero.Fs, rcfg beacon_router_configuration.RouterConfiguration) ForkGraph {
+func NewForkGraphDisk(anchorState *state.CachingBeaconState, aferoFs afero.Fs, rcfg beacon_router_configuration.RouterConfiguration, emitter *beaconevents.EventEmitter) ForkGraph {
 	farthestExtendingPath := make(map[libcommon.Hash]bool)
 	anchorRoot, err := anchorState.BlockRoot()
 	if err != nil {
@@ -186,6 +188,7 @@ func NewForkGraphDisk(anchorState *state.CachingBeaconState, aferoFs afero.Fs, r
 		validatorSetStorage:     validatorSetStorage,
 		inactivityScoresStorage: inactivityScoresStorage,
 		rcfg:                    rcfg,
+		emitter:                 emitter,
 	}
 	f.lowestAvaiableBlock.Store(anchorState.Slot())
 	f.headers.Store(libcommon.Hash(anchorRoot), &anchorHeader)
@@ -242,18 +245,37 @@ func (f *forkGraphDisk) AddChainSegment(signedBlock *cltypes.SignedBeaconBlock, 
 		if err != nil {
 			return nil, LogisticError, err
 		}
-		lightclientUpdate, err := lightclient_utils.CreateLightClientUpdate(f.beaconCfg, signedBlock, finalizedBlock, parentBlock, newState.Slot(),
+		lcUpdate, err := lightclient_utils.CreateLightClientUpdate(f.beaconCfg, signedBlock, finalizedBlock, parentBlock, newState.Slot(),
 			newState.NextSyncCommittee(), newState.FinalizedCheckpoint(), convertHashSliceToHashList(nextSyncCommitteeBranch), convertHashSliceToHashList(finalityBranch))
 		if err != nil {
 			log.Debug("Could not create light client update", "err", err)
 		} else {
-			f.newestLightClientUpdate.Store(lightclientUpdate)
+			f.newestLightClientUpdate.Store(lcUpdate)
 			period := f.beaconCfg.SyncCommitteePeriod(newState.Slot())
 			_, hasPeriod := f.lightClientUpdates.Load(period)
 			if !hasPeriod {
 				log.Info("Adding light client update", "period", period)
-				f.lightClientUpdates.Store(period, lightclientUpdate)
+				f.lightClientUpdates.Store(period, lcUpdate)
 			}
+			// light client events
+			f.emitter.State().SendLightClientFinalityUpdate(&beaconevents.LightClientFinalityUpdateData{
+				Version: block.Version().String(),
+				Data: cltypes.LightClientFinalityUpdate{
+					AttestedHeader:  lcUpdate.AttestedHeader,
+					FinalizedHeader: lcUpdate.FinalizedHeader,
+					FinalityBranch:  lcUpdate.FinalityBranch,
+					SyncAggregate:   lcUpdate.SyncAggregate,
+					SignatureSlot:   lcUpdate.SignatureSlot,
+				},
+			})
+			f.emitter.State().SendLightClientOptimisticUpdate(&beaconevents.LightClientOptimisticUpdateData{
+				Version: block.Version().String(),
+				Data: cltypes.LightClientOptimisticUpdate{
+					AttestedHeader: lcUpdate.AttestedHeader,
+					SyncAggregate:  lcUpdate.SyncAggregate,
+					SignatureSlot:  lcUpdate.SignatureSlot,
+				},
+			})
 		}
 	}
 
@@ -417,28 +439,24 @@ func (f *forkGraphDisk) MarkHeaderAsInvalid(blockRoot libcommon.Hash) {
 }
 
 func (f *forkGraphDisk) hasBeaconState(blockRoot libcommon.Hash) bool {
-	_, err := f.fs.Stat(getBeaconStateFilename(blockRoot))
-	return err == nil
+	exists, err := afero.Exists(f.fs, getBeaconStateFilename(blockRoot))
+	return err == nil && exists
 }
 
 func (f *forkGraphDisk) Prune(pruneSlot uint64) (err error) {
-	pruneSlot -= f.beaconCfg.SlotsPerEpoch * 2
 	oldRoots := make([]libcommon.Hash, 0, f.beaconCfg.SlotsPerEpoch)
 	highestStoredBeaconStateSlot := uint64(0)
 	f.blocks.Range(func(key, value interface{}) bool {
 		hash := key.(libcommon.Hash)
 		signedBlock := value.(*cltypes.SignedBeaconBlock)
-		if signedBlock.Block.Slot < highestStoredBeaconStateSlot {
-			return true
-		}
-		if f.hasBeaconState(hash) {
+		if f.hasBeaconState(hash) && highestStoredBeaconStateSlot < signedBlock.Block.Slot {
 			highestStoredBeaconStateSlot = signedBlock.Block.Slot
 		}
 		if signedBlock.Block.Slot >= pruneSlot {
 			return true
 		}
-		oldRoots = append(oldRoots, hash)
 
+		oldRoots = append(oldRoots, hash)
 		return true
 	})
 	if pruneSlot >= highestStoredBeaconStateSlot {

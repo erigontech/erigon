@@ -30,6 +30,7 @@ import (
 	"github.com/erigontech/erigon/cl/beacon/beaconevents"
 	"github.com/erigontech/erigon/cl/beacon/synced_data"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
+	"github.com/erigontech/erigon/cl/monitor"
 	"github.com/erigontech/erigon/cl/phase1/core/state"
 	"github.com/erigontech/erigon/cl/phase1/forkchoice"
 	"github.com/erigontech/erigon/cl/phase1/forkchoice/fork_graph"
@@ -77,8 +78,9 @@ func TestForkChoiceBasic(t *testing.T) {
 	anchorState := state.New(&clparams.MainnetBeaconConfig)
 	require.NoError(t, utils.DecodeSSZSnappy(anchorState, anchorStateEncoded, int(clparams.AltairVersion)))
 	pool := pool.NewOperationsPool(&clparams.MainnetBeaconConfig)
-	emitters := beaconevents.NewEmitters()
-	store, err := forkchoice.NewForkChoiceStore(nil, anchorState, nil, pool, fork_graph.NewForkGraphDisk(anchorState, afero.NewMemMapFs(), beacon_router_configuration.RouterConfiguration{}), emitters, sd, nil)
+	emitters := beaconevents.NewEventEmitter()
+	validatorMonitor := monitor.NewValidatorMonitor(false, nil, nil, nil)
+	store, err := forkchoice.NewForkChoiceStore(nil, anchorState, nil, pool, fork_graph.NewForkGraphDisk(anchorState, afero.NewMemMapFs(), beacon_router_configuration.RouterConfiguration{}, emitters), emitters, sd, nil, validatorMonitor)
 	require.NoError(t, err)
 	// first steps
 	store.OnTick(0)
@@ -142,11 +144,11 @@ func TestForkChoiceChainBellatrix(t *testing.T) {
 	}
 	// Initialize forkchoice store
 	pool := pool.NewOperationsPool(&clparams.MainnetBeaconConfig)
-	emitters := beaconevents.NewEmitters()
+	emitters := beaconevents.NewEventEmitter()
 	sd := synced_data.NewSyncedDataManager(true, &clparams.MainnetBeaconConfig)
 	store, err := forkchoice.NewForkChoiceStore(nil, anchorState, nil, pool, fork_graph.NewForkGraphDisk(anchorState, afero.NewMemMapFs(), beacon_router_configuration.RouterConfiguration{
 		Beacon: true,
-	}), emitters, sd, nil)
+	}, emitters), emitters, sd, nil, nil)
 	store.OnTick(2000)
 	require.NoError(t, err)
 	for _, block := range blocks {

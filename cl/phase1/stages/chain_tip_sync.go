@@ -2,7 +2,6 @@ package stages
 
 import (
 	"context"
-	"strconv"
 	"time"
 
 	"github.com/erigontech/erigon-lib/common"
@@ -207,16 +206,6 @@ MainLoop:
 					log.Debug("bad blocks segment received", "err", err)
 					continue
 				}
-
-				// Publish the block to the event handler
-				cfg.emitter.Publish("block", map[string]any{
-					"slot":                 strconv.Itoa(int(block.Block.Slot)),
-					"block":                common.Hash(blockRoot),
-					"execution_optimistic": false, // TODO: i don't know what to put here. i see other places doing false, leaving false for now
-				})
-
-				// Notify the validator monitor of the new block
-				cfg.validatorMonitor.OnNewBlock(block.Block)
 
 				// Check if the block slot is greater than or equal to the target slot
 				if block.Block.Slot >= args.targetSlot {

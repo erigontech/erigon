@@ -32,7 +32,6 @@ import (
 	rlp2 "github.com/erigontech/erigon-lib/rlp"
 	types2 "github.com/erigontech/erigon-lib/types"
 
-	"github.com/erigontech/erigon/common/u256"
 	"github.com/erigontech/erigon/rlp"
 )
 
@@ -73,13 +72,13 @@ func (ct *CommonTx) GetData() []byte {
 
 func (ct *CommonTx) GetSender() (libcommon.Address, bool) {
 	if sc := ct.from.Load(); sc != nil {
-		return sc.(libcommon.Address), true
+		return *sc, true
 	}
 	return libcommon.Address{}, false
 }
 
 func (ct *CommonTx) SetSender(addr libcommon.Address) {
-	ct.from.Store(addr)
+	ct.from.Store(&addr)
 }
 
 func (ct *CommonTx) Protected() bool {
@@ -376,19 +375,10 @@ func (tx *LegacyTx) WithSignature(signer Signer, sig []byte) (Transaction, error
 	return cpy, nil
 }
 
-func (tx *LegacyTx) FakeSign(address libcommon.Address) Transaction {
-	cpy := tx.copy()
-	cpy.R.Set(u256.Num1)
-	cpy.S.Set(u256.Num1)
-	cpy.V.Set(u256.Num4)
-	cpy.from.Store(address)
-	return cpy
-}
-
 // Hash computes the hash (but not for signatures!)
 func (tx *LegacyTx) Hash() libcommon.Hash {
 	if hash := tx.hash.Load(); hash != nil {
-		return *hash.(*libcommon.Hash)
+		return *hash
 	}
 	hash := rlpHash([]interface{}{
 		tx.Nonce,
@@ -440,19 +430,19 @@ func (tx *LegacyTx) cachedSender() (sender libcommon.Address, ok bool) {
 	if s == nil {
 		return sender, false
 	}
-	return s.(libcommon.Address), true
+	return *s, true
 }
 func (tx *LegacyTx) Sender(signer Signer) (libcommon.Address, error) {
-	if sc := tx.from.Load(); sc != nil {
-		zeroAddr := libcommon.Address{}
-		if sc.(libcommon.Address) != zeroAddr { // Sender address can never be zero in a transaction with a valid signer
-			return sc.(libcommon.Address), nil
+	if from := tx.from.Load(); from != nil {
+		if *from != zeroAddr { // Sender address can never be zero in a transaction with a valid signer
+			return *from, nil
 		}
 	}
+
 	addr, err := signer.Sender(tx)
 	if err != nil {
 		return libcommon.Address{}, err
 	}
-	tx.from.Store(addr)
+	tx.from.Store(&addr)
 	return addr, nil
 }

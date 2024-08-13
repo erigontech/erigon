@@ -123,9 +123,8 @@ type EthAPI interface {
 
 type BaseAPI struct {
 	// all caches are thread-safe
-	stateCache    kvcache.Cache
-	blocksLRU     *lru.Cache[common.Hash, *types.Block]
-	receiptsCache *lru.Cache[common.Hash, []*types.Receipt]
+	stateCache kvcache.Cache
+	blocksLRU  *lru.Cache[common.Hash, *types.Block]
 
 	filters      *rpchelper.Filters
 	_chainConfig atomic.Pointer[chain.Config]
@@ -136,12 +135,14 @@ type BaseAPI struct {
 	_txnReader   services.TxnReader
 	_engine      consensus.EngineReader
 
+	bridgeReader bridgeReader
+
 	evmCallTimeout    time.Duration
 	dirs              datadir.Dirs
 	receiptsGenerator *receipts.Generator
 }
 
-func NewBaseApi(f *rpchelper.Filters, stateCache kvcache.Cache, blockReader services.FullBlockReader, singleNodeMode bool, evmCallTimeout time.Duration, engine consensus.EngineReader, dirs datadir.Dirs) *BaseAPI {
+func NewBaseApi(f *rpchelper.Filters, stateCache kvcache.Cache, blockReader services.FullBlockReader, singleNodeMode bool, evmCallTimeout time.Duration, engine consensus.EngineReader, dirs datadir.Dirs, bridgeReader bridgeReader) *BaseAPI {
 	var (
 		blocksLRUSize      = 128 // ~32Mb
 		receiptsCacheLimit = 32
@@ -155,24 +156,18 @@ func NewBaseApi(f *rpchelper.Filters, stateCache kvcache.Cache, blockReader serv
 	if err != nil {
 		panic(err)
 	}
-	receiptsCache, err := lru.New[common.Hash, []*types.Receipt](receiptsCacheLimit)
-	if err != nil {
-		panic(err)
-	}
-
-	receiptsGenerator := receipts.NewGenerator(receiptsCache, blockReader, engine)
 
 	return &BaseAPI{
 		filters:           f,
 		stateCache:        stateCache,
 		blocksLRU:         blocksLRU,
-		receiptsCache:     receiptsCache,
 		_blockReader:      blockReader,
 		_txnReader:        blockReader,
 		evmCallTimeout:    evmCallTimeout,
 		_engine:           engine,
-		receiptsGenerator: receiptsGenerator,
+		receiptsGenerator: receipts.NewGenerator(receiptsCacheLimit, blockReader, engine),
 		dirs:              dirs,
+		bridgeReader:      bridgeReader,
 	}
 }
 
@@ -339,6 +334,11 @@ func (api *BaseAPI) pruneMode(tx kv.Tx) (*prune.Mode, error) {
 	return p, nil
 }
 
+type bridgeReader interface {
+	Events(ctx context.Context, blockNum uint64) ([]*types.Message, error)
+	EventTxnLookup(ctx context.Context, borTxHash common.Hash) (uint64, bool, error)
+}
+
 // APIImpl is implementation of the EthAPI interface based on remote Db access
 type APIImpl struct {
 	*BaseAPI
@@ -360,6 +360,10 @@ type APIImpl struct {
 func NewEthAPI(base *BaseAPI, db kv.RoDB, eth rpchelper.ApiBackend, txPool txpool.TxpoolClient, mining txpool.MiningClient, gascap uint64, feecap float64, returnDataLimit int, allowUnprotectedTxs bool, maxGetProofRewindBlockCount int, subscribeLogsChannelSize int, logger log.Logger) *APIImpl {
 	if gascap == 0 {
 		gascap = uint64(math.MaxUint64 / 2)
+	}
+
+	if base.bridgeReader != nil {
+		logger.Info("starting rpc with polygon bridge")
 	}
 
 	return &APIImpl{

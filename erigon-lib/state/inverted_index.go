@@ -34,13 +34,12 @@ import (
 	"sync"
 	"time"
 
-	"github.com/erigontech/erigon-lib/common"
-
 	"github.com/RoaringBitmap/roaring/roaring64"
 	"github.com/spaolacci/murmur3"
 	btree2 "github.com/tidwall/btree"
 	"golang.org/x/sync/errgroup"
 
+	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/assert"
 	"github.com/erigontech/erigon-lib/common/background"
 	"github.com/erigontech/erigon-lib/common/datadir"
@@ -534,21 +533,13 @@ type InvertedIndexRoTx struct {
 	files   visibleFiles
 	getters []ArchiveGetter
 	readers []*recsplit.IndexReader
-
-	_hasher murmur3.Hash128
 }
 
-func (iit *InvertedIndexRoTx) statelessHasher() murmur3.Hash128 {
-	if iit._hasher == nil {
-		iit._hasher = murmur3.New128WithSeed(*iit.ii.salt)
-	}
-	return iit._hasher
-}
-func (iit *InvertedIndexRoTx) hashKey(k []byte) (hi, lo uint64) {
-	hasher := iit.statelessHasher()
-	iit._hasher.Reset()
-	_, _ = hasher.Write(k) //nolint:errcheck
-	return hasher.Sum128()
+// hashKey - change of salt will require re-gen of indices
+func (iit *InvertedIndexRoTx) hashKey(k []byte) (uint64, uint64) {
+	// this inlinable alloc-free version, it's faster than pre-allocated `hasher` object
+	// because `hasher` object is interface and need call many methods on it
+	return murmur3.Sum128WithSeed(k, *iit.ii.salt)
 }
 
 func (iit *InvertedIndexRoTx) statelessGetter(i int) ArchiveGetter {
@@ -576,6 +567,10 @@ func (iit *InvertedIndexRoTx) statelessIdxReader(i int) *recsplit.IndexReader {
 }
 
 func (iit *InvertedIndexRoTx) seekInFiles(key []byte, txNum uint64) (found bool, equalOrHigherTxNum uint64) {
+	if len(iit.files) == 0 {
+		return false, 0
+	}
+
 	hi, lo := iit.hashKey(key)
 
 	for i := 0; i < len(iit.files); i++ {
@@ -763,10 +758,10 @@ func (is *InvertedIndexPruneStat) String() string {
 	}
 	vstr := ""
 	if is.PruneCountValues > 0 {
-		vstr = fmt.Sprintf("values: %d,", is.PruneCountValues)
+		vstr = fmt.Sprintf("values: %s,", common.PrettyCounter(is.PruneCountValues))
 	}
-	return fmt.Sprintf("%s txns: %d from %.2fM-%.2fM",
-		vstr, is.PruneCountTx, float64(is.MinTxNum)/1_000_000.0, float64(is.MaxTxNum)/1_000_000.0)
+	return fmt.Sprintf("%s txns: %d from %s-%s",
+		vstr, is.PruneCountTx, common.PrettyCounter(is.MinTxNum), common.PrettyCounter(is.MaxTxNum))
 }
 
 func (is *InvertedIndexPruneStat) Accumulate(other *InvertedIndexPruneStat) {

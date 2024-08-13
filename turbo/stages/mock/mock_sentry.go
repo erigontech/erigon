@@ -28,6 +28,8 @@ import (
 	"time"
 
 	"github.com/c2h5oh/datasize"
+	"github.com/erigontech/erigon/consensus/mainnet"
+	"github.com/erigontech/erigon/turbo/jsonrpc/receipts"
 	lru "github.com/hashicorp/golang-lru/arc/v2"
 	"github.com/holiman/uint256"
 	"go.uber.org/mock/gomock"
@@ -58,7 +60,6 @@ import (
 	types2 "github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon-lib/wrap"
 	"github.com/erigontech/erigon/consensus"
-	"github.com/erigontech/erigon/consensus/ethash"
 	"github.com/erigontech/erigon/core"
 	"github.com/erigontech/erigon/core/rawdb"
 	"github.com/erigontech/erigon/core/rawdb/blockio"
@@ -134,6 +135,7 @@ type MockSentry struct {
 	agg            *libstate.Aggregator
 	BlockSnapshots *freezeblocks.RoSnapshots
 	BlockReader    services.FullBlockReader
+	ReceiptsReader *receipts.Generator
 	posStagedSync  *stagedsync.Sync
 }
 
@@ -253,7 +255,7 @@ func MockWithGenesisPruneMode(tb testing.TB, gspec *types.Genesis, key *ecdsa.Pr
 	case gspec.Config.Bor != nil:
 		engine = bor.NewFaker()
 	default:
-		engine = ethash.NewFaker()
+		engine = mainnet.NewMainnetConsensus()
 	}
 
 	checkStateRoot := true
@@ -288,6 +290,8 @@ func MockWithEverything(tb testing.TB, gspec *types.Genesis, key *ecdsa.PrivateK
 	erigonGrpcServeer := remotedbserver.NewKvServer(ctx, db, nil, nil, nil, logger)
 	allSnapshots := freezeblocks.NewRoSnapshots(ethconfig.Defaults.Snapshot, dirs.Snap, 0, logger)
 	allBorSnapshots := freezeblocks.NewBorRoSnapshots(ethconfig.Defaults.Snapshot, dirs.Snap, 0, logger)
+	br := freezeblocks.NewBlockReader(allSnapshots, allBorSnapshots)
+
 	mock := &MockSentry{
 		Ctx: ctx, cancel: ctxCancel, DB: db, agg: agg,
 		tb:          tb,
@@ -304,9 +308,11 @@ func MockWithEverything(tb testing.TB, gspec *types.Genesis, key *ecdsa.PrivateK
 		},
 		PeerId:         gointerfaces.ConvertHashToH512([64]byte{0x12, 0x34, 0x50}), // "12345"
 		BlockSnapshots: allSnapshots,
-		BlockReader:    freezeblocks.NewBlockReader(allSnapshots, allBorSnapshots),
+		BlockReader:    br,
+		ReceiptsReader: receipts.NewGenerator(16, br, engine),
 		HistoryV3:      true,
 	}
+
 	if tb != nil {
 		tb.Cleanup(mock.Close)
 	}
@@ -626,7 +632,7 @@ func MockWithTxPool(t *testing.T) *MockSentry {
 	}
 
 	checkStateRoot := true
-	return MockWithEverything(t, gspec, key, prune.DefaultMode, ethash.NewFaker(), blockBufferSize, true, false, checkStateRoot)
+	return MockWithEverything(t, gspec, key, prune.DefaultMode, mainnet.NewMainnetConsensus(), blockBufferSize, true, false, checkStateRoot)
 }
 
 func MockWithZeroTTD(t *testing.T, withPosDownloader bool) *MockSentry {

@@ -23,6 +23,8 @@ import (
 	"path/filepath"
 	"reflect"
 
+	"github.com/erigontech/erigon-lib/common"
+
 	"github.com/erigontech/erigon-lib/common/dbg"
 	"github.com/erigontech/erigon-lib/downloader/snaptype"
 	"github.com/erigontech/erigon-lib/log/v3"
@@ -72,7 +74,8 @@ func (br *BlockRetire) retireBorBlocks(ctx context.Context, minBlockNum uint64, 
 				return false, nil
 			}
 
-			logger.Log(lvl, "[bor snapshots] Retire Bor Blocks", "type", snaptype, "range", fmt.Sprintf("%dk-%dk", blockFrom/1000, blockTo/1000))
+			logger.Log(lvl, "[bor snapshots] Retire Bor Blocks", "type", snaptype,
+				"range", fmt.Sprintf("%s-%s", common.PrettyCounter(blockFrom), common.PrettyCounter(blockTo)))
 
 			for i := blockFrom; i < blockTo; i = chooseSegmentEnd(i, blockTo, snaptype.Enum(), chainConfig) {
 				end := chooseSegmentEnd(i, blockTo, snaptype.Enum(), chainConfig)

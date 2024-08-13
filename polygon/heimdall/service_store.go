@@ -31,6 +31,7 @@ type ServiceStore interface {
 	Checkpoints() EntityStore[*Checkpoint]
 	Milestones() EntityStore[*Milestone]
 	Spans() EntityStore[*Span]
+	SpanBlockProducerSelections() EntityStore[*SpanBlockProducerSelection]
 	Prepare(ctx context.Context) error
 	Close()
 }
@@ -42,18 +43,20 @@ func NewMdbxServiceStore(logger log.Logger, dataDir string, tmpDir string) *Mdbx
 	}
 
 	return &MdbxServiceStore{
-		db:          db,
-		checkpoints: newMdbxEntityStore(db, kv.BorCheckpoints, generics.New[Checkpoint], blockNumToIdIndexFactory),
-		milestones:  newMdbxEntityStore(db, kv.BorMilestones, generics.New[Milestone], blockNumToIdIndexFactory),
-		spans:       newMdbxEntityStore(db, kv.BorSpans, generics.New[Span], blockNumToIdIndexFactory),
+		db:                          db,
+		checkpoints:                 newMdbxEntityStore(db, kv.BorCheckpoints, generics.New[Checkpoint], blockNumToIdIndexFactory),
+		milestones:                  newMdbxEntityStore(db, kv.BorMilestones, generics.New[Milestone], blockNumToIdIndexFactory),
+		spans:                       newMdbxEntityStore(db, kv.BorSpans, generics.New[Span], blockNumToIdIndexFactory),
+		spanBlockProducerSelections: newMdbxEntityStore(db, kv.BorProducerSelections, generics.New[SpanBlockProducerSelection], blockNumToIdIndexFactory),
 	}
 }
 
 type MdbxServiceStore struct {
-	db          *polygoncommon.Database
-	checkpoints EntityStore[*Checkpoint]
-	milestones  EntityStore[*Milestone]
-	spans       EntityStore[*Span]
+	db                          *polygoncommon.Database
+	checkpoints                 EntityStore[*Checkpoint]
+	milestones                  EntityStore[*Milestone]
+	spans                       EntityStore[*Span]
+	spanBlockProducerSelections EntityStore[*SpanBlockProducerSelection]
 }
 
 func (s *MdbxServiceStore) Checkpoints() EntityStore[*Checkpoint] {
@@ -68,11 +71,16 @@ func (s *MdbxServiceStore) Spans() EntityStore[*Span] {
 	return s.spans
 }
 
+func (s *MdbxServiceStore) SpanBlockProducerSelections() EntityStore[*SpanBlockProducerSelection] {
+	return s.spanBlockProducerSelections
+}
+
 func (s *MdbxServiceStore) Prepare(ctx context.Context) error {
 	eg, ctx := errgroup.WithContext(ctx)
 	eg.Go(func() error { return s.checkpoints.Prepare(ctx) })
 	eg.Go(func() error { return s.milestones.Prepare(ctx) })
 	eg.Go(func() error { return s.spans.Prepare(ctx) })
+	eg.Go(func() error { return s.spanBlockProducerSelections.Prepare(ctx) })
 	return eg.Wait()
 }
 
@@ -81,4 +89,5 @@ func (s *MdbxServiceStore) Close() {
 	s.checkpoints.Close()
 	s.milestones.Close()
 	s.spans.Close()
+	s.spanBlockProducerSelections.Close()
 }

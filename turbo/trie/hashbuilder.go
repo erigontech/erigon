@@ -37,7 +37,7 @@ import (
 
 const hashStackStride = length2.Hash + 1 // + 1 byte for RLP encoding
 
-var EmptyCodeHash = crypto.Keccak256Hash(nil)
+var EmptyCodeHash = crypto.Keccak256Hash(nil) //c5d2460186f7233c927e7db2dcc703c0e500b653ca82273b7bfad8045d85a470
 
 // HashBuilder implements the interface `structInfoReceiver` and opcodes that the structural information of the trie
 // is comprised of
