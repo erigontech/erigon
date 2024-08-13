@@ -272,8 +272,13 @@ func (st *StateTransition) preCheck(gasBailout bool) error {
 			// libcommon.Hash{} means that the sender is not in the state.
 			// Historically there were transactions with 0 gas price and non-existing sender,
 			// so we have to allow that.
-			return fmt.Errorf("%w: address %v, codehash: %s", ErrSenderNoEOA,
-				st.msg.From().Hex(), codeHash)
+			code := st.state.GetCode(st.msg.From())
+
+			// eip-7702 allows tx origination from accounts having delegated designation deployed code.
+			if len(code) != 23 || !bytes.Equal(code[0:3], params.DelegatedDesignationPrexix[:]) {
+				return fmt.Errorf("%w: address %v, codehash: %s", ErrSenderNoEOA,
+					st.msg.From().Hex(), codeHash)
+			}
 		}
 	}
 
