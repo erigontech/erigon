@@ -194,12 +194,10 @@ func (evm *EVM) call(typ OpCode, caller ContractRef, addr libcommon.Address, inp
 	p, isPrecompile := evm.precompile(addr)
 	var code []byte
 	if !isPrecompile {
-		if evmInterpreter, ok := evm.interpreter.(*EVMInterpreter); ok {
-			if _, ddCode, _, ddPresent := delegatedDesignationHandler(evmInterpreter, addr); ddPresent {
-				code = ddCode
-			} else {
-				code = evm.intraBlockState.GetCode(addr)
-			}
+		if _, ddCode, _, ddPresent := delegatedDesignationHandler(evm.IntraBlockState(), addr); ddPresent {
+			code = ddCode
+		} else {
+			code = evm.intraBlockState.GetCode(addr)
 		}
 	}
 

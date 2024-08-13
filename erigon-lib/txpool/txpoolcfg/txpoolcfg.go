@@ -259,7 +259,7 @@ func CalcIntrinsicGas(dataLen, dataNonZeroLen, authorizationsLen uint64, accessL
 	}
 
 	// Add the cost of authorizations
-	product, overflow := emath.SafeMul(authorizationsLen, fixedgas.PerAuthBaseCost)
+	product, overflow := emath.SafeMul(authorizationsLen, fixedgas.PerEmptyAccountCost)
 	if overflow {
 		return 0, GasUintOverflow
 	}

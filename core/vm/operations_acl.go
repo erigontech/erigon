@@ -172,6 +172,24 @@ func makeCallVariantGasCallEIP2929(oldCalculator gasFunc) gasFunc {
 				return 0, ErrOutOfGas
 			}
 		}
+
+		// delegated designation costs
+		if evm.chainRules.IsPrague {
+			if dd, _, _, ddPresent := delegatedDesignationHandler(evm.IntraBlockState(), addr); ddPresent {
+				// If the caller cannot afford the cost, this change will be rolled back
+				ddCost := params.WarmStorageReadCostEIP2929
+				if evm.IntraBlockState().AddAddressToAccessList(dd) {
+					ddCost = params.ColdAccountAccessCostEIP2929
+				}
+
+				if !contract.UseGas(ddCost, tracing.GasChangeUnspecified) {
+					return 0, ErrOutOfGas
+				}
+
+				coldCost += ddCost
+			}
+		}
+
 		// Now call the old calculator, which takes into account
 		// - create new account
 		// - transfer value
