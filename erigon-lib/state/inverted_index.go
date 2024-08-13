@@ -506,9 +506,7 @@ func (iit *InvertedIndexRoTx) Close() {
 		r.Close()
 	}
 
-	if iit.iiNotFoundCache != nil {
-		iit.iiNotFoundCache.LogStats(iit.ii.filenameBase)
-	}
+	iit.seekInFilesCache.LogStats(iit.ii.filenameBase)
 }
 
 type MergeRange struct {
@@ -534,7 +532,7 @@ type InvertedIndexRoTx struct {
 	getters []ArchiveGetter
 	readers []*recsplit.IndexReader
 
-	iiNotFoundCache *IISeekInFilesCache
+	seekInFilesCache *IISeekInFilesCache
 }
 
 // hashKey - change of salt will require re-gen of indices
@@ -578,18 +576,18 @@ func (iit *InvertedIndexRoTx) seekInFiles(key []byte, txNum uint64) (found bool,
 
 	hi, lo := iit.hashKey(key)
 
-	if iit.iiNotFoundCache == nil {
-		iit.iiNotFoundCache = NewIISeekInFilesCache()
+	if iit.seekInFilesCache == nil {
+		iit.seekInFilesCache = NewIISeekInFilesCache()
 	}
 
-	iit.iiNotFoundCache.total++
-	fromCache, ok := iit.iiNotFoundCache.Get(u128{hi: hi, lo: lo})
+	iit.seekInFilesCache.total++
+	fromCache, ok := iit.seekInFilesCache.Get(u128{hi: hi, lo: lo})
 	if ok && fromCache.requested <= txNum {
 		if txNum <= fromCache.found {
-			iit.iiNotFoundCache.hit++
+			iit.seekInFilesCache.hit++
 			return true, fromCache.found
 		} else if fromCache.found == 0 {
-			iit.iiNotFoundCache.hit++
+			iit.seekInFilesCache.hit++
 			return false, 0
 		}
 	}
@@ -613,12 +611,12 @@ func (iit *InvertedIndexRoTx) seekInFiles(key []byte, txNum uint64) (found bool,
 		equalOrHigherTxNum, found = eliasfano32.Seek(eliasVal, txNum)
 
 		if found {
-			iit.iiNotFoundCache.Add(u128{hi: hi, lo: lo}, iiSeekInFilesCacheItem{requested: txNum, found: equalOrHigherTxNum})
+			iit.seekInFilesCache.Add(u128{hi: hi, lo: lo}, iiSeekInFilesCacheItem{requested: txNum, found: equalOrHigherTxNum})
 			return true, equalOrHigherTxNum
 		}
 	}
 
-	iit.iiNotFoundCache.Add(u128{hi: hi, lo: lo}, iiSeekInFilesCacheItem{requested: txNum, found: 0})
+	iit.seekInFilesCache.Add(u128{hi: hi, lo: lo}, iiSeekInFilesCacheItem{requested: txNum, found: 0})
 	return false, 0
 }
 

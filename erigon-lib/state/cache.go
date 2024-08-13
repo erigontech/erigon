@@ -52,6 +52,9 @@ func NewIISeekInFilesCache() *IISeekInFilesCache {
 	return &IISeekInFilesCache{LRU: c}
 }
 func (c *IISeekInFilesCache) LogStats(fileBaseName string) {
+	if c == nil {
+		return
+	}
 	m := c.Metrics()
 	log.Warn("[dbg] lEachCache", "a", fileBaseName, "hit", c.hit, "total", c.total, "Collisions", m.Collisions, "Evictions", m.Evictions, "Inserts", m.Inserts, "limit", iiGetFromFileCacheLimit, "ratio", fmt.Sprintf("%.2f", float64(m.Hits)/float64(m.Hits+m.Misses)))
 }
