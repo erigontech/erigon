@@ -642,6 +642,11 @@ var (
 		Usage: "The URL of the data availability service",
 		Value: "",
 	}
+	VirtualCountersSmtReduction = cli.Float64Flag{
+		Name:  "zkevm.virtual-counters-smt-reduction",
+		Usage: "The multiplier to reduce the SMT depth by when calculating virtual counters",
+		Value: 0.6,
+	}
 	DebugTimers = cli.BoolFlag{
 		Name:  "debug.timers",
 		Usage: "Enable debug timers",

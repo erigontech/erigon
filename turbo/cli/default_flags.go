@@ -228,4 +228,5 @@ var DefaultFlags = []cli.Flag{
 	&utils.PoolManagerUrl,
 	&utils.DisableVirtualCounters,
 	&utils.DAUrl,
+	&utils.VirtualCountersSmtReduction,
 }
