@@ -32,7 +32,6 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/elastic/go-freelru"
 	"github.com/erigontech/erigon-lib/metrics"
 	btree2 "github.com/tidwall/btree"
 	"golang.org/x/sync/errgroup"
@@ -710,15 +709,7 @@ type DomainRoTx struct {
 
 	valsC kv.Cursor
 
-	// latestStateCache can be very big if .kv is not compressed - because can store pointer to `mmap` instead of data
-	latestStateCache *freelru.LRU[u128, fileCacheItem]
-}
-
-const latestStateCachePerDomain = 128
-
-type fileCacheItem struct {
-	lvl uint8
-	v   []byte // pointer to `mmap` - if .kv file is not compressed
+	getFromFileCache *DomainGetFromFileCache
 }
 
 func domainReadMetric(name kv.Domain, level int) metrics.Summary {
@@ -1395,13 +1386,6 @@ var (
 	UseBtree = true // if true, will use btree for all files
 )
 
-func u32noHash(u uint32) uint32        { return u }            //nolint
-func u64noHash(u uint64) uint32        { return uint32(u) }    //nolint
-func u128noHash(u u128) uint32         { return uint32(u.hi) } //nolint
-func u192noHash(u u192) uint32         { return uint32(u.hi) } //nolint
-type u128 struct{ hi, lo uint64 }      //nolint
-type u192 struct{ hi, lo, ext uint64 } //nolint
-
 func (dt *DomainRoTx) getFromFiles(filekey []byte) (v []byte, found bool, fileStartTxNum uint64, fileEndTxNum uint64, err error) {
 	if len(dt.files) == 0 {
 		return
@@ -1409,16 +1393,13 @@ func (dt *DomainRoTx) getFromFiles(filekey []byte) (v []byte, found bool, fileSt
 
 	hi, lo := dt.ht.iit.hashKey(filekey)
 	if dt.name != kv.CommitmentDomain {
-		if dt.latestStateCache == nil {
-			dt.latestStateCache, err = freelru.New[u128, fileCacheItem](latestStateCachePerDomain, u128noHash)
-			if err != nil {
-				panic(err)
-			}
+		if dt.getFromFileCache == nil {
+			dt.getFromFileCache = NewDomainGetFromFileCache()
 		}
-		cv, ok := dt.latestStateCache.Get(u128{hi: hi, lo: lo})
+		cv, ok := dt.getFromFileCache.Get(u128{hi: hi, lo: lo})
 		if ok {
 			//if dbg.KVReadLevelledMetrics {
-			//m := dt.latestStateCache.Metrics()
+			//m := dt.getFromFileCache.Metrics()
 			//if m.Hits%1000 == 0 {
 			//	log.Warn("[dbg] lEachCache", "a", dt.name.String(), "hit", m.Hits, "total", m.Hits+m.Misses, "Collisions", m.Collisions, "Evictions", m.Evictions, "Inserts", m.Inserts, "limit", latestStateCachePerDomain, "ratio", fmt.Sprintf("%.2f", float64(m.Hits)/float64(m.Hits+m.Misses)))
 			//}
@@ -1462,7 +1443,7 @@ func (dt *DomainRoTx) getFromFiles(filekey []byte) (v []byte, found bool, fileSt
 		}
 
 		if dt.name != kv.CommitmentDomain {
-			dt.latestStateCache.Add(u128{hi: hi, lo: lo}, fileCacheItem{lvl: uint8(i), v: v})
+			dt.getFromFileCache.Add(u128{hi: hi, lo: lo}, domainGetFromFileCacheItem{lvl: uint8(i), v: v})
 		}
 		return v, true, dt.files[i].startTxNum, dt.files[i].endTxNum, nil
 	}
@@ -1471,7 +1452,7 @@ func (dt *DomainRoTx) getFromFiles(filekey []byte) (v []byte, found bool, fileSt
 	}
 
 	if dt.name != kv.CommitmentDomain {
-		dt.latestStateCache.Add(u128{hi: hi, lo: lo}, fileCacheItem{lvl: 0, v: nil})
+		dt.getFromFileCache.Add(u128{hi: hi, lo: lo}, domainGetFromFileCacheItem{lvl: 0, v: nil})
 	}
 	return nil, false, 0, 0, nil
 }
