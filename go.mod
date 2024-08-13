@@ -2,7 +2,7 @@ module github.com/erigontech/erigon
 
 go 1.22
 
-toolchain go1.22.2
+toolchain go1.22.6
 
 require (
 	github.com/erigontech/erigonwatch v0.0.0-20240718131902-b6576bde1116

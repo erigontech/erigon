@@ -1,8 +1,6 @@
 module github.com/erigontech/erigon-lib
 
-go 1.22
-
-toolchain go1.22.2
+go 1.21.5
 
 require (
 	github.com/erigontech/erigon-snapshot v1.3.1-0.20240801141542-7a7b08ebd406
