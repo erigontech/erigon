@@ -1394,16 +1394,10 @@ func (dt *DomainRoTx) getFromFiles(filekey []byte) (v []byte, found bool, fileSt
 	hi, lo := dt.ht.iit.hashKey(filekey)
 	if dt.name != kv.CommitmentDomain {
 		if dt.getFromFileCache == nil {
-			dt.getFromFileCache = NewDomainGetFromFileCache()
+			dt.getFromFileCache = NewDomainGetFromFileCache(true)
 		}
 		cv, ok := dt.getFromFileCache.Get(u128{hi: hi, lo: lo})
 		if ok {
-			//if dbg.KVReadLevelledMetrics {
-			//m := dt.getFromFileCache.Metrics()
-			//if m.Hits%1000 == 0 {
-			//	log.Warn("[dbg] lEachCache", "a", dt.name.String(), "hit", m.Hits, "total", m.Hits+m.Misses, "Collisions", m.Collisions, "Evictions", m.Evictions, "Inserts", m.Inserts, "limit", latestStateCachePerDomain, "ratio", fmt.Sprintf("%.2f", float64(m.Hits)/float64(m.Hits+m.Misses)))
-			//}
-			//}
 			return cv.v, true, dt.files[cv.lvl].startTxNum, dt.files[cv.lvl].endTxNum, nil
 		}
 	}
@@ -1506,6 +1500,8 @@ func (dt *DomainRoTx) Close() {
 		}
 	}
 	dt.ht.Close()
+
+	dt.getFromFileCache.LogStats(dt.name)
 }
 
 func (dt *DomainRoTx) statelessGetter(i int) ArchiveGetter {

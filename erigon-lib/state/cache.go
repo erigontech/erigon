@@ -1,7 +1,12 @@
 package state
 
 import (
+	"fmt"
+
 	"github.com/elastic/go-freelru"
+	"github.com/erigontech/erigon-lib/common/dbg"
+	"github.com/erigontech/erigon-lib/kv"
+	"github.com/erigontech/erigon-lib/log/v3"
 )
 
 func u32noHash(u uint32) uint32        { return u }            //nolint
@@ -13,6 +18,7 @@ type u192 struct{ hi, lo, ext uint64 } //nolint
 
 type DomainGetFromFileCache struct {
 	*freelru.LRU[u128, domainGetFromFileCacheItem]
+	trace bool
 }
 
 type domainGetFromFileCacheItem struct {
@@ -20,12 +26,21 @@ type domainGetFromFileCacheItem struct {
 	v   []byte // pointer to `mmap` - if .kv file is not compressed
 }
 
-const latestStateCachePerDomain = 128
+var domainGetFromFileCacheLimit = uint32(dbg.EnvInt("D_LRU", 128))
 
-func NewDomainGetFromFileCache() *DomainGetFromFileCache {
-	c, err := freelru.New[u128, domainGetFromFileCacheItem](latestStateCachePerDomain, u128noHash)
+func NewDomainGetFromFileCache(trace bool) *DomainGetFromFileCache {
+	c, err := freelru.New[u128, domainGetFromFileCacheItem](domainGetFromFileCacheLimit, u128noHash)
 	if err != nil {
 		panic(err)
 	}
-	return &DomainGetFromFileCache{c}
+	return &DomainGetFromFileCache{LRU: c, trace: trace}
+}
+
+func (c *DomainGetFromFileCache) LogStats(dt kv.Domain) {
+	if c == nil || !c.trace {
+		return
+	}
+
+	m := c.Metrics()
+	log.Warn("[dbg] lEachCache", "a", dt.String(), "hit", m.Hits, "total", m.Hits+m.Misses, "Collisions", m.Collisions, "Evictions", m.Evictions, "Inserts", m.Inserts, "limit", domainGetFromFileCacheLimit, "ratio", fmt.Sprintf("%.2f", float64(m.Hits)/float64(m.Hits+m.Misses)))
 }
