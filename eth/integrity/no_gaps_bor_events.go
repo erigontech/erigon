@@ -115,7 +115,9 @@ func checkBlockEvents(ctx context.Context, config *borcfg.BorConfig, blockReader
 }
 
 func NoGapsInBorEvents(ctx context.Context, db kv.RoDB, blockReader services.FullBlockReader, from, to uint64, failFast bool) (err error) {
-	defer log.Info("[integrity] NoGapsInBorEvents: done", "err", err)
+	defer func() {
+		log.Info("[integrity] NoGapsInBorEvents: done", "err", err)
+	}()
 
 	var cc *chain.Config
 
@@ -197,12 +199,22 @@ func NoGapsInBorEvents(ctx context.Context, db kv.RoDB, blockReader services.Ful
 				log.Error("[integrity] NoGapsInBorEvents: invalid event id", "block", block, "event", recordId, "expected", eventId)
 			}
 
-			if prevEventId > 0 && eventId != prevEventId+1 {
-				if failFast {
-					return fmt.Errorf("missing bor event %d at block=%d", eventId, block)
-				}
+			if prevEventId > 0 {
+				switch {
+				case eventId < prevEventId:
+					if failFast {
+						return fmt.Errorf("invaid bor event %d (prev=%d) at block=%d", eventId, prevEventId, block)
+					}
 
-				log.Error("[integrity] NoGapsInBorEvents: missing bor event", "event", eventId, "prev", prevEventId, "block", block)
+					log.Error("[integrity] NoGapsInBorEvents: invalid bor event", "event", eventId, "prev", prevEventId, "block", block)
+
+				case eventId != prevEventId+1:
+					if failFast {
+						return fmt.Errorf("missing bor event %d (prev=%d) at block=%d", eventId, prevEventId, block)
+					}
+
+					log.Error("[integrity] NoGapsInBorEvents: missing bor event", "event", eventId, "prev", prevEventId, "block", block)
+				}
 			}
 
 			if prevEventId == 0 {
@@ -212,10 +224,6 @@ func NoGapsInBorEvents(ctx context.Context, db kv.RoDB, blockReader services.Ful
 			if prevBlock != 0 && prevBlock != block {
 				var err error
 
-				if block>8660000 {
-					fmt.Println("BLK", block, "E", eventId)
-				}
-				
 				if db != nil {
 					err = db.View(ctx, func(tx kv.Tx) error {
 						prevEventTime, err = checkBlockEvents(ctx, config, blockReader, block, prevBlock, eventId, prevBlockStartId, prevEventTime, tx, failFast)
