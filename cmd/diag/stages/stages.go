@@ -152,10 +152,11 @@ func printData(cliCtx *cli.Context, data []table.Row) {
 		util.RenderJson(data)
 
 	case "text":
-		util.RenderTableWithHeader(
+		util.PrintTable(
 			"",
 			table.Row{"Stage", "SubStage", "Status", "Time Elapsed", "Progress"},
 			data,
+			nil,
 		)
 	}
 }

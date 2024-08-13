@@ -59,6 +59,10 @@ func AssembleService(borConfig *borcfg.BorConfig, heimdallUrl string, dataDir st
 }
 
 func NewService(borConfig *borcfg.BorConfig, client HeimdallClient, store ServiceStore, logger log.Logger) Service {
+	return newService(borConfig, client, store, logger)
+}
+
+func newService(borConfig *borcfg.BorConfig, client HeimdallClient, store ServiceStore, logger log.Logger) *service {
 	checkpointFetcher := newCheckpointFetcher(client, logger)
 	milestoneFetcher := newMilestoneFetcher(client, logger)
 	spanFetcher := newSpanFetcher(client, logger)

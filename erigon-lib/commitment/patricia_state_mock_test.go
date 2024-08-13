@@ -58,7 +58,7 @@ func (ms *MockState) PutBranch(prefix []byte, data []byte, prevData []byte, prev
 	return nil
 }
 
-func (ms *MockState) GetBranch(prefix []byte) ([]byte, uint64, error) {
+func (ms *MockState) Branch(prefix []byte) ([]byte, uint64, error) {
 	if exBytes, ok := ms.cm[string(prefix)]; ok {
 		//fmt.Printf("GetBranch prefix %x, exBytes (%d) %x [%v]\n", prefix, len(exBytes), []byte(exBytes), BranchData(exBytes).String())
 		return exBytes, 0, nil
@@ -66,10 +66,10 @@ func (ms *MockState) GetBranch(prefix []byte) ([]byte, uint64, error) {
 	return nil, 0, nil
 }
 
-func (ms *MockState) GetAccount(plainKey []byte) (*Update, error) {
+func (ms *MockState) Account(plainKey []byte) (*Update, error) {
 	exBytes, ok := ms.sm[string(plainKey[:])]
 	if !ok {
-		ms.t.Logf("GetAccount not found key [%x]", plainKey)
+		//ms.t.Logf("%p GetAccount not found key [%x]", ms, plainKey)
 		u := new(Update)
 		u.Flags = DeleteUpdate
 		return u, nil
@@ -96,7 +96,7 @@ func (ms *MockState) GetAccount(plainKey []byte) (*Update, error) {
 	return &ex, nil
 }
 
-func (ms *MockState) GetStorage(plainKey []byte) (*Update, error) {
+func (ms *MockState) Storage(plainKey []byte) (*Update, error) {
 	exBytes, ok := ms.sm[string(plainKey[:])]
 	if !ok {
 		ms.t.Logf("GetStorage not found key [%x]", plainKey)
@@ -144,23 +144,7 @@ func (ms *MockState) applyPlainUpdates(plainKeys [][]byte, updates []Update) err
 				if pos != len(exBytes) {
 					return fmt.Errorf("applyPlainUpdates key [%x] leftover bytes in [%x], comsumed %x", key, exBytes, pos)
 				}
-				if update.Flags&BalanceUpdate != 0 {
-					ex.Flags |= BalanceUpdate
-					ex.Balance.Set(&update.Balance)
-				}
-				if update.Flags&NonceUpdate != 0 {
-					ex.Flags |= NonceUpdate
-					ex.Nonce = update.Nonce
-				}
-				if update.Flags&CodeUpdate != 0 {
-					ex.Flags |= CodeUpdate
-					copy(ex.CodeHash[:], update.CodeHash[:])
-				}
-				if update.Flags&StorageUpdate != 0 {
-					ex.Flags |= StorageUpdate
-					copy(ex.Storage[:], update.Storage[:])
-					ex.StorageLen = update.StorageLen
-				}
+				ex.Merge(&update)
 				ms.sm[string(key)] = ex.Encode(nil, ms.numBuf[:])
 			} else {
 				ms.sm[string(key)] = update.Encode(nil, ms.numBuf[:])
@@ -415,12 +399,36 @@ func (ub *UpdateBuilder) Build() (plainKeys [][]byte, updates []Update) {
 			if sm, ok1 := ub.storages[string(key)]; ok1 {
 				if storage, ok2 := sm[string(key2)]; ok2 {
 					u.Flags |= StorageUpdate
-					u.CodeHash = [length.Hash]byte{}
+					u.Storage = [length.Hash]byte{}
 					u.StorageLen = len(storage)
-					copy(u.CodeHash[:], storage)
+					copy(u.Storage[:], storage)
 				}
 			}
 		}
 	}
 	return
+}
+
+func WrapKeyUpdates(tb testing.TB, mode Mode, hasher keyHasher, keys [][]byte, updates []Update) *Updates {
+	tb.Helper()
+
+	upd := NewUpdates(mode, tb.TempDir(), hasher)
+	for i, key := range keys {
+		upd.TouchPlainKey(key, nil, func(c *KeyUpdate, _ []byte) {
+			c.plainKey = key
+			c.hashedKey = hasher(key)
+			c.update = &updates[i]
+		})
+	}
+	return upd
+}
+
+// it's caller problem to keep track of upd contents. If given Updates is not empty, it will NOT be cleared before adding new keys
+func WrapKeyUpdatesInto(tb testing.TB, upd *Updates, keys [][]byte, updates []Update) {
+	tb.Helper()
+	for i, key := range keys {
+		upd.TouchPlainKey(key, nil, func(c *KeyUpdate, _ []byte) {
+			c.update = &updates[i]
+		})
+	}
 }

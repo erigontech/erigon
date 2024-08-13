@@ -23,6 +23,7 @@ import (
 	"time"
 
 	"github.com/c2h5oh/datasize"
+	"github.com/erigontech/erigon/cmd/state/exec3"
 	"golang.org/x/sync/errgroup"
 
 	"github.com/erigontech/erigon-lib/chain"
@@ -84,6 +85,7 @@ type ExecuteBlockCfg struct {
 
 	silkworm        *silkworm.Silkworm
 	blockProduction bool
+	applyWorker     *exec3.Worker
 }
 
 func StageExecuteBlocksCfg(
@@ -125,6 +127,7 @@ func StageExecuteBlocksCfg(
 		historyV3:    true,
 		syncCfg:      syncCfg,
 		silkworm:     silkworm,
+		applyWorker:  exec3.NewWorker(nil, log.Root(), context.Background(), false, db, nil, blockReader, chainConfig, genesis, nil, engine, dirs),
 	}
 }
 
@@ -389,7 +392,10 @@ func PruneExecutionStage(s *PruneState, tx kv.RwTx, cfg ExecuteBlockCfg, ctx con
 	logEvery := time.NewTicker(logInterval)
 	defer logEvery.Stop()
 
-	pruneTimeout := 1 * time.Second
+	// on chain-tip:
+	//  - can prune only between blocks (without blocking blocks processing)
+	//  - need also leave some time to prune blocks
+	pruneTimeout := 500 * time.Millisecond
 	if s.CurrentSyncCycle.IsInitialCycle {
 		pruneTimeout = 12 * time.Hour
 	}

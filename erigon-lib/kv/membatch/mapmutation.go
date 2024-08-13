@@ -21,6 +21,7 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
+	"github.com/erigontech/erigon-lib/common"
 	"sync"
 	"time"
 	"unsafe"
@@ -305,8 +306,8 @@ func (m *Mapmutation) Delete(table string, k []byte) error {
 func (m *Mapmutation) doCommit(tx kv.RwTx) error {
 	logEvery := time.NewTicker(30 * time.Second)
 	defer logEvery.Stop()
-	count := 0
-	total := float64(m.count)
+
+	keyCount, total := 0, m.count
 	for table, bucket := range m.puts {
 		collector := etl.NewCollector("", m.tmpdir, etl.NewSortableBuffer(etl.BufferOptimalSize/2), m.logger)
 		defer collector.Close()
@@ -315,11 +316,11 @@ func (m *Mapmutation) doCommit(tx kv.RwTx) error {
 			if err := collector.Collect([]byte(key), value); err != nil {
 				return err
 			}
-			count++
+			keyCount++
 			select {
 			default:
 			case <-logEvery.C:
-				progress := fmt.Sprintf("%.1fM/%.1fM", float64(count)/1_000_000, total/1_000_000)
+				progress := fmt.Sprintf("%s/%s", common.PrettyCounter(keyCount), common.PrettyCounter(total))
 				m.logger.Info("Write to db", "progress", progress, "current table", table)
 				tx.CollectMetrics()
 			}

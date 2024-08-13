@@ -22,6 +22,7 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
+	"github.com/holiman/uint256"
 	"math/bits"
 	"strings"
 
@@ -60,26 +61,21 @@ type Trie interface {
 	// Set context for state IO
 	ResetContext(ctx PatriciaContext)
 
-	ProcessTree(ctx context.Context, tree *Updates, logPrefix string) (rootHash []byte, err error)
-
-	// Reads updates from storage
-	ProcessKeys(ctx context.Context, pk [][]byte, logPrefix string) (rootHash []byte, err error)
-
-	// Process already gathered updates
-	ProcessUpdates(ctx context.Context, pk [][]byte, updates []Update) (rootHash []byte, err error)
+	// Process updates
+	Process(ctx context.Context, updates *Updates, logPrefix string) (rootHash []byte, err error)
 }
 
 type PatriciaContext interface {
 	// GetBranch load branch node and fill up the cells
 	// For each cell, it sets the cell type, clears the modified flag, fills the hash,
 	// and for the extension, account, and leaf type, the `l` and `k`
-	GetBranch(prefix []byte) ([]byte, uint64, error)
+	Branch(prefix []byte) ([]byte, uint64, error)
 	// store branch data
 	PutBranch(prefix []byte, data []byte, prevData []byte, prevStep uint64) error
 	// fetch account with given plain key
-	GetAccount(plainKey []byte) (*Update, error)
+	Account(plainKey []byte) (*Update, error)
 	// fetch storage with given plain key
-	GetStorage(plainKey []byte) (*Update, error)
+	Storage(plainKey []byte) (*Update, error)
 }
 
 type TrieVariant string
@@ -128,7 +124,7 @@ func (branchData BranchData) String() string {
 	afterMap := binary.BigEndian.Uint16(branchData[2:])
 	pos := 4
 	var sb strings.Builder
-	var cell Cell
+	var cell cell
 	fmt.Fprintf(&sb, "touchMap %016b, afterMap %016b\n", touchMap, afterMap)
 	for bitset, j := touchMap, 0; bitset != 0; j++ {
 		bit := bitset & -bitset
@@ -201,7 +197,7 @@ func (be *BranchEncoder) Load(pc PatriciaContext, args etl.TransformArgs) error 
 	}
 
 	if err := be.updates.Load(nil, "", func(prefix, update []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) error {
-		stateValue, stateStep, err := pc.GetBranch(prefix)
+		stateValue, stateStep, err := pc.Branch(prefix)
 		if err != nil {
 			return err
 		}
@@ -223,7 +219,7 @@ func (be *BranchEncoder) CollectUpdate(
 	ctx PatriciaContext,
 	prefix []byte,
 	bitmap, touchMap, afterMap uint16,
-	readCell func(nibble int, skip bool) (*Cell, error),
+	readCell func(nibble int, skip bool) (*cell, error),
 ) (lastNibble int, err error) {
 
 	var update []byte
@@ -232,7 +228,7 @@ func (be *BranchEncoder) CollectUpdate(
 		return 0, err
 	}
 
-	prev, prevStep, err := ctx.GetBranch(prefix)
+	prev, prevStep, err := ctx.Branch(prefix)
 	_ = prevStep
 	if err != nil {
 		return 0, err
@@ -256,7 +252,7 @@ func (be *BranchEncoder) CollectUpdate(
 }
 
 // Encoded result should be copied before next call to EncodeBranch, underlying slice is reused
-func (be *BranchEncoder) EncodeBranch(bitmap, touchMap, afterMap uint16, readCell func(nibble int, skip bool) (*Cell, error)) (BranchData, int, error) {
+func (be *BranchEncoder) EncodeBranch(bitmap, touchMap, afterMap uint16, readCell func(nibble int, skip bool) (*cell, error)) (BranchData, int, error) {
 	be.buf.Reset()
 
 	if err := binary.Write(be.buf, binary.BigEndian, touchMap); err != nil {
@@ -345,7 +341,7 @@ func (be *BranchEncoder) EncodeBranch(bitmap, touchMap, afterMap uint16, readCel
 	return be.buf.Bytes(), lastNibble, nil
 }
 
-func RetrieveCellNoop(nibble int, skip bool) (*Cell, error) { return nil, nil }
+func RetrieveCellNoop(nibble int, skip bool) (*cell, error) { return nil, nil }
 
 // if fn returns nil, the original key will be copied from branchData
 func (branchData BranchData) ReplacePlainKeys(newData []byte, fn func(key []byte, isStorage bool) (newKey []byte, err error)) (BranchData, error) {
@@ -562,7 +558,7 @@ func (branchData BranchData) MergeHexBranches(branchData2 BranchData, newData []
 	return newData, nil
 }
 
-func (branchData BranchData) DecodeCells() (touchMap, afterMap uint16, row [16]*Cell, err error) {
+func (branchData BranchData) decodeCells() (touchMap, afterMap uint16, row [16]*cell, err error) {
 	touchMap = binary.BigEndian.Uint16(branchData[0:])
 	afterMap = binary.BigEndian.Uint16(branchData[2:])
 	pos := 4
@@ -572,7 +568,7 @@ func (branchData BranchData) DecodeCells() (touchMap, afterMap uint16, row [16]*
 		if afterMap&bit != 0 {
 			fieldBits := PartFlags(branchData[pos])
 			pos++
-			row[nibble] = new(Cell)
+			row[nibble] = new(cell)
 			if pos, err = row[nibble].fillFromFields(branchData, pos, fieldBits); err != nil {
 				err = fmt.Errorf("failed to fill cell at nibble %x: %w", nibble, err)
 				return
@@ -749,7 +745,7 @@ func DecodeBranchAndCollectStat(key, branch []byte, tv TrieVariant) *BranchStat 
 	if !bytes.Equal(key, []byte("state")) {
 		stat.IsRoot = false
 
-		tm, am, cells, err := BranchData(branch).DecodeCells()
+		tm, am, cells, err := BranchData(branch).decodeCells()
 		if err != nil {
 			return nil
 		}
@@ -893,8 +889,7 @@ func (t *Updates) TouchPlainKey(key, val []byte, fn func(c *KeyUpdate, val []byt
 			return false
 		})
 		if !updated {
-			pivot.update.plainKey = pivot.plainKey
-			pivot.update.hashedKey = t.hasher(pivot.plainKey)
+			pivot.hashedKey = t.hasher(pivot.plainKey)
 			fn(pivot, val)
 			t.tree.ReplaceOrInsert(pivot)
 		}
@@ -915,7 +910,7 @@ func (t *Updates) TouchAccount(c *KeyUpdate, val []byte) {
 		return
 	}
 	if c.update.Flags&DeleteUpdate != 0 {
-		c.update.Flags ^= DeleteUpdate
+		c.update.Flags = 0
 	}
 	nonce, balance, chash := types.DecodeAccountBytesV3(val)
 	if c.update.Nonce != nonce {
@@ -949,7 +944,7 @@ func (t *Updates) TouchStorage(c *KeyUpdate, val []byte) {
 func (t *Updates) TouchCode(c *KeyUpdate, val []byte) {
 	c.update.Flags |= CodeUpdate
 	if len(val) == 0 {
-		if c.update.Flags == 0 || c.update.Flags == DeleteUpdate {
+		if c.update.Flags == 0 {
 			c.update.Flags = DeleteUpdate
 		}
 		copy(c.update.CodeHash[:], EmptyCodeHash)
@@ -974,13 +969,13 @@ func (t *Updates) Close() {
 }
 
 // HashSort sorts and applies fn to each key-value pair in the order of hashed keys.
-func (t *Updates) HashSort(ctx context.Context, fn func(hk, pk []byte) error) error {
+func (t *Updates) HashSort(ctx context.Context, fn func(hk, pk []byte, update *Update) error) error {
 	switch t.mode {
 	case ModeDirect:
 		clear(t.keys)
 
 		err := t.etl.Load(nil, "", func(k, v []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) error {
-			return fn(k, v)
+			return fn(k, v, nil)
 		}, etl.TransformArgs{Quit: ctx.Done()})
 		if err != nil {
 			return err
@@ -995,7 +990,7 @@ func (t *Updates) HashSort(ctx context.Context, fn func(hk, pk []byte) error) er
 			default:
 			}
 
-			if err := fn(item.update.hashedKey, item.plainKey); err != nil {
+			if err := fn(item.hashedKey, item.plainKey, item.update); err != nil {
 				return false
 			}
 			return true
@@ -1007,44 +1002,201 @@ func (t *Updates) HashSort(ctx context.Context, fn func(hk, pk []byte) error) er
 	return nil
 }
 
-// Returns list of both plain and hashed keys. If .mode is ModeUpdate, updates also returned.
-// No ordering guarantees is provided.
-// TODO replace with Clear function. HashSort perfectly dumps all keys.
-func (t *Updates) List(clear bool) ([][]byte, []Update) {
+// Reset clears all updates
+func (t *Updates) Reset() {
 	switch t.mode {
 	case ModeDirect:
-		plainKeys := make([][]byte, 0, len(t.keys))
-		err := t.HashSort(context.Background(), func(hk, pk []byte) error {
-			plainKeys = append(plainKeys, common.Copy(pk))
-			return nil
-		})
-		if err != nil {
-			return nil, nil
-		}
-		return plainKeys, nil
+		t.keys = nil
+		t.keys = make(map[string]struct{})
+		t.initCollector()
 	case ModeUpdate:
-		plainKeys := make([][]byte, t.tree.Len())
-		updates := make([]Update, t.tree.Len())
-		i := 0
-		t.tree.Ascend(func(item *KeyUpdate) bool {
-			plainKeys[i], updates[i] = item.plainKey, *item.update
-			i++
-			return true
-		})
-		if clear {
-			t.tree.Clear(true)
-		}
-		return plainKeys, updates
+		t.tree.Clear(true)
 	default:
-		return nil, nil
 	}
 }
 
 type KeyUpdate struct {
-	plainKey []byte
-	update   *Update
+	plainKey  []byte
+	hashedKey []byte
+	update    *Update
 }
 
 func keyUpdateLessFn(i, j *KeyUpdate) bool {
 	return bytes.Compare(i.plainKey, j.plainKey) < 0
+}
+
+type UpdateFlags uint8
+
+const (
+	CodeUpdate    UpdateFlags = 1
+	DeleteUpdate  UpdateFlags = 2
+	BalanceUpdate UpdateFlags = 4
+	NonceUpdate   UpdateFlags = 8
+	StorageUpdate UpdateFlags = 16
+)
+
+func (uf UpdateFlags) String() string {
+	var sb strings.Builder
+	if uf&DeleteUpdate != 0 {
+		sb.WriteString("Delete")
+	}
+	if uf&BalanceUpdate != 0 {
+		sb.WriteString("+Balance")
+	}
+	if uf&NonceUpdate != 0 {
+		sb.WriteString("+Nonce")
+	}
+	if uf&CodeUpdate != 0 {
+		sb.WriteString("+Code")
+	}
+	if uf&StorageUpdate != 0 {
+		sb.WriteString("+Storage")
+	}
+	return sb.String()
+}
+
+type Update struct {
+	CodeHash   [length.Hash]byte
+	Storage    [length.Hash]byte
+	StorageLen int
+	Flags      UpdateFlags
+	Balance    uint256.Int
+	Nonce      uint64
+}
+
+func (u *Update) Reset() {
+	u.Flags = 0
+	u.Balance.Clear()
+	u.Nonce = 0
+	u.StorageLen = 0
+	copy(u.CodeHash[:], EmptyCodeHash)
+}
+
+func (u *Update) Merge(b *Update) {
+	if b.Flags == DeleteUpdate {
+		u.Flags = DeleteUpdate
+		return
+	}
+	if b.Flags&BalanceUpdate != 0 {
+		u.Flags |= BalanceUpdate
+		u.Balance.Set(&b.Balance)
+	}
+	if b.Flags&NonceUpdate != 0 {
+		u.Flags |= NonceUpdate
+		u.Nonce = b.Nonce
+	}
+	if b.Flags&CodeUpdate != 0 {
+		u.Flags |= CodeUpdate
+		copy(u.CodeHash[:], b.CodeHash[:])
+	}
+	if b.Flags&StorageUpdate != 0 {
+		u.Flags |= StorageUpdate
+		copy(u.Storage[:], b.Storage[:b.StorageLen])
+		u.StorageLen = b.StorageLen
+	}
+}
+
+func (u *Update) Encode(buf []byte, numBuf []byte) []byte {
+	buf = append(buf, byte(u.Flags))
+	if u.Flags&BalanceUpdate != 0 {
+		buf = append(buf, byte(u.Balance.ByteLen()))
+		buf = append(buf, u.Balance.Bytes()...)
+	}
+	if u.Flags&NonceUpdate != 0 {
+		n := binary.PutUvarint(numBuf, u.Nonce)
+		buf = append(buf, numBuf[:n]...)
+	}
+	if u.Flags&CodeUpdate != 0 {
+		buf = append(buf, u.CodeHash[:]...)
+	}
+	if u.Flags&StorageUpdate != 0 {
+		n := binary.PutUvarint(numBuf, uint64(u.StorageLen))
+		buf = append(buf, numBuf[:n]...)
+		if u.StorageLen > 0 {
+			buf = append(buf, u.Storage[:u.StorageLen]...)
+		}
+	}
+	return buf
+}
+
+func (u *Update) Deleted() bool {
+	return u.Flags&DeleteUpdate > 0
+}
+
+func (u *Update) Decode(buf []byte, pos int) (int, error) {
+	if len(buf) < pos+1 {
+		return 0, errors.New("decode Update: buffer too small for flags")
+	}
+	u.Reset()
+
+	u.Flags = UpdateFlags(buf[pos])
+	pos++
+	if u.Flags&BalanceUpdate != 0 {
+		if len(buf) < pos+1 {
+			return 0, errors.New("decode Update: buffer too small for balance len")
+		}
+		balanceLen := int(buf[pos])
+		pos++
+		if len(buf) < pos+balanceLen {
+			return 0, errors.New("decode Update: buffer too small for balance")
+		}
+		u.Balance.SetBytes(buf[pos : pos+balanceLen])
+		pos += balanceLen
+	}
+	if u.Flags&NonceUpdate != 0 {
+		var n int
+		u.Nonce, n = binary.Uvarint(buf[pos:])
+		if n == 0 {
+			return 0, errors.New("decode Update: buffer too small for nonce")
+		}
+		if n < 0 {
+			return 0, errors.New("decode Update: nonce overflow")
+		}
+		pos += n
+	}
+	if u.Flags&CodeUpdate != 0 {
+		if len(buf) < pos+length.Hash {
+			return 0, errors.New("decode Update: buffer too small for codeHash")
+		}
+		copy(u.CodeHash[:], buf[pos:pos+32])
+		pos += length.Hash
+	}
+	if u.Flags&StorageUpdate != 0 {
+		l, n := binary.Uvarint(buf[pos:])
+		if n == 0 {
+			return 0, errors.New("decode Update: buffer too small for storage len")
+		}
+		if n < 0 {
+			return 0, errors.New("decode Update: storage pos overflow")
+		}
+		pos += n
+		if len(buf) < pos+int(l) {
+			return 0, errors.New("decode Update: buffer too small for storage")
+		}
+		u.StorageLen = int(l)
+		copy(u.Storage[:], buf[pos:pos+u.StorageLen])
+		pos += u.StorageLen
+	}
+	return pos, nil
+}
+
+func (u *Update) String() string {
+	var sb strings.Builder
+	sb.WriteString(fmt.Sprintf("Flags: [%s]", u.Flags))
+	if u.Deleted() {
+		sb.WriteString(", DELETED")
+	}
+	if u.Flags&BalanceUpdate != 0 {
+		sb.WriteString(fmt.Sprintf(", Balance: [%d]", &u.Balance))
+	}
+	if u.Flags&NonceUpdate != 0 {
+		sb.WriteString(fmt.Sprintf(", Nonce: [%d]", u.Nonce))
+	}
+	if u.Flags&CodeUpdate != 0 {
+		sb.WriteString(fmt.Sprintf(", CodeHash: [%x]", u.CodeHash))
+	}
+	if u.Flags&StorageUpdate != 0 {
+		sb.WriteString(fmt.Sprintf(", Storage: [%x]", u.Storage[:u.StorageLen]))
+	}
+	return sb.String()
 }
