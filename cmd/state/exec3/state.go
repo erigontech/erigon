@@ -100,7 +100,11 @@ func NewWorker(lock sync.Locker, logger log.Logger, ctx context.Context, backgro
 
 func (rw *Worker) ResetState(rs *state.StateV3, accumulator *shards.Accumulator) {
 	rw.rs = rs
-	rw.SetReader(state.NewStateReaderV3(rs.Domains()))
+	if rw.background {
+		rw.SetReader(state.NewStateReaderParallelV3(rs.Domains()))
+	} else {
+		rw.SetReader(state.NewStateReaderV3(rs.Domains()))
+	}
 	rw.stateWriter = state.NewStateWriterV3(rs, accumulator)
 }
 
