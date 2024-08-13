@@ -404,12 +404,19 @@ func (a *ApiHandler) GetEthV1BeaconStatesValidator(w http.ResponseWriter, r *htt
 		if err != nil {
 			return nil, err
 		}
+		if validatorSet == nil {
+			return nil, beaconhttp.NewEndpointError(http.StatusNotFound, errors.New("validators not found"))
+		}
 		balances, err := a.stateReader.ReadValidatorsBalances(tx, *slot)
 		if err != nil {
 			return nil, err
 		}
+		if balances == nil {
+			return nil, beaconhttp.NewEndpointError(http.StatusNotFound, errors.New("balances not found"))
+		}
 		return responseValidator(validatorIndex, stateEpoch, balances, validatorSet, true)
 	}
+
 	balances, err := a.forkchoiceStore.GetBalances(blockRoot)
 	if err != nil {
 		return nil, err
