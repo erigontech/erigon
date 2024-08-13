@@ -1114,6 +1114,7 @@ func NewBlock(header *Header, txs []Transaction, uncles []*Header, receipts []*R
 		}
 	}
 
+	b.header.mutable = false
 	return b
 }
 
