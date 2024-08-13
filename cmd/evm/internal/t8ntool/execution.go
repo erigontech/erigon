@@ -31,7 +31,6 @@ import (
 	state3 "github.com/erigontech/erigon-lib/state"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/math"
-	"github.com/erigontech/erigon/consensus/ethash"
 	"github.com/erigontech/erigon/core/state"
 	"github.com/erigontech/erigon/core/tracing"
 	"github.com/erigontech/erigon/core/types"
@@ -116,24 +115,4 @@ func MakePreState(chainRules *chain.Rules, tx kv.RwTx, sd *state3.SharedDomains,
 		panic(err)
 	}
 	return stateReader, stateWriter
-}
-
-// calcDifficulty is based on ethash.CalcDifficulty. This method is used in case
-// the caller does not provide an explicit difficulty, but instead provides only
-// parent timestamp + difficulty.
-// Note: this method only works for ethash engine.
-func calcDifficulty(config *chain.Config, number, currentTime, parentTime uint64,
-	parentDifficulty *big.Int, parentUncleHash libcommon.Hash) *big.Int {
-	uncleHash := parentUncleHash
-	if uncleHash == (libcommon.Hash{}) {
-		uncleHash = types.EmptyUncleHash
-	}
-	parent := &types.Header{
-		ParentHash: libcommon.Hash{},
-		UncleHash:  uncleHash,
-		Difficulty: parentDifficulty,
-		Number:     new(big.Int).SetUint64(number - 1),
-		Time:       parentTime,
-	}
-	return ethash.CalcDifficulty(config, currentTime, parent.Time, parent.Difficulty, number-1, parent.UncleHash)
 }

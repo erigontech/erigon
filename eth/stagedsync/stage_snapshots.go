@@ -36,6 +36,8 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/erigontech/erigon-lib/common"
+
 	"github.com/anacrolix/torrent"
 	"golang.org/x/sync/errgroup"
 
@@ -393,7 +395,8 @@ func FillDBFromSnapshots(logPrefix string, ctx context.Context, tx kv.RwTx, dirs
 						},
 						TimeElapsed: time.Since(startTime).Seconds(),
 					})
-					logger.Info(fmt.Sprintf("[%s] Total difficulty index: %dk/%dk", logPrefix, header.Number.Uint64()/1000, blockReader.FrozenBlocks()/1000))
+					logger.Info(fmt.Sprintf("[%s] Total difficulty index: %s/%s", logPrefix,
+						common.PrettyCounter(header.Number.Uint64()), common.PrettyCounter(blockReader.FrozenBlocks())))
 				default:
 				}
 				return nil
@@ -438,7 +441,7 @@ func FillDBFromSnapshots(logPrefix string, ctx context.Context, tx kv.RwTx, dirs
 						},
 						TimeElapsed: time.Since(startTime).Seconds(),
 					})
-					logger.Info(fmt.Sprintf("[%s] MaxTxNums index: %dk/%dk", logPrefix, blockNum/1000, blockReader.FrozenBlocks()/1000))
+					logger.Info(fmt.Sprintf("[%s] MaxTxNums index: %s/%s", logPrefix, common.PrettyCounter(blockNum), common.PrettyCounter(blockReader.FrozenBlocks())))
 				default:
 				}
 				if baseTxNum+txAmount == 0 {

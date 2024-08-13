@@ -1514,8 +1514,6 @@ func (c *Bor) CommitStates(
 			return err
 		}
 
-		c.logger.Debug("using polygon bridge", "len(events)", len(events), "blockNum", blockNum)
-
 		for _, event := range events {
 			_, err := syscall(*event.To(), event.Data())
 			if err != nil {

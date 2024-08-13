@@ -25,6 +25,8 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/erigontech/erigon-lib/common"
+
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/kv/mdbx"
 	historyv22 "github.com/erigontech/erigon-lib/kv/temporal/historyv2"
@@ -105,8 +107,8 @@ func CheckEnc(chaindata string) error {
 			return tx.ForEach(kv.StorageChangeSet, []byte{}, func(k, v []byte) error {
 				if i%100_000 == 0 {
 					blockNum := binary.BigEndian.Uint64(k)
-					fmt.Printf("Processed %dK, block number %d, current %d, new %d, time %s\n",
-						i/1000,
+					fmt.Printf("Processed %s, block number %d, current %d, new %d, time %s\n",
+						common.PrettyCounter(i),
 						blockNum,
 						atomic.LoadUint64(&currentSize),
 						atomic.LoadUint64(&newSize),

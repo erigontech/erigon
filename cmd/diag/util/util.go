@@ -76,7 +76,16 @@ func RenderJson(data interface{}) {
 	}
 }
 
-func RenderTableWithHeader(title string, header table.Row, rows []table.Row) {
+func ExportTable(header table.Row, rows []table.Row, footer table.Row) string {
+	if len(rows) > 0 {
+		t := CreateTable(header, rows, footer)
+		return t.Render()
+	}
+
+	return ""
+}
+
+func PrintTable(title string, header table.Row, rows []table.Row, footer table.Row) {
 	if title != "" {
 		txt := text.Colors{text.FgBlue, text.Bold}
 		fmt.Println(txt.Sprint(title))
@@ -88,19 +97,30 @@ func RenderTableWithHeader(title string, header table.Row, rows []table.Row) {
 	}
 
 	if len(rows) > 0 {
-		t := table.NewWriter()
+		t := CreateTable(header, rows, footer)
 		t.SetOutputMirror(os.Stdout)
-
-		t.AppendHeader(header)
-		if len(rows) > 0 {
-			t.AppendRows(rows)
-		}
-
-		t.AppendSeparator()
 		t.Render()
 	}
 
 	fmt.Print("\n")
+}
+
+func CreateTable(header table.Row, rows []table.Row, footer table.Row) table.Writer {
+	t := table.NewWriter()
+
+	if header != nil {
+		t.AppendHeader(header)
+	}
+
+	if len(rows) > 0 {
+		t.AppendRows(rows)
+	}
+
+	if footer != nil {
+		t.AppendFooter(footer)
+	}
+
+	return t
 }
 
 func RenderUseDiagUI() {

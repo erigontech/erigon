@@ -13,7 +13,6 @@ import (
 	"github.com/erigontech/erigon-lib/txpool/txpoolcfg"
 	"github.com/erigontech/erigon/cl/beacon/beacon_router_configuration"
 	"github.com/erigontech/erigon/cl/clparams"
-	"github.com/erigontech/erigon/consensus/ethash/ethashcfg"
 	"github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/eth/gasprice/gaspricecfg"
 	"github.com/erigontech/erigon/ethdb/prune"
@@ -38,7 +37,6 @@ func (c Config) MarshalTOML() (interface{}, error) {
 		ExternalSnapshotDownloaderAddr string
 		Whitelist                      map[uint64]common.Hash `toml:"-"`
 		Miner                          params.MiningConfig
-		Ethash                         ethashcfg.Config
 		Clique                         params.ConsensusSnapshotConfig
 		Aura                           chain.AuRaConfig
 		DeprecatedTxPool               DeprecatedTxPoolConfig
@@ -91,7 +89,6 @@ func (c Config) MarshalTOML() (interface{}, error) {
 	enc.ExternalSnapshotDownloaderAddr = c.ExternalSnapshotDownloaderAddr
 	enc.Whitelist = c.Whitelist
 	enc.Miner = c.Miner
-	enc.Ethash = c.Ethash
 	enc.Clique = c.Clique
 	enc.Aura = c.Aura
 	enc.DeprecatedTxPool = c.DeprecatedTxPool
@@ -148,7 +145,6 @@ func (c *Config) UnmarshalTOML(unmarshal func(interface{}) error) error {
 		ExternalSnapshotDownloaderAddr *string
 		Whitelist                      map[uint64]common.Hash `toml:"-"`
 		Miner                          *params.MiningConfig
-		Ethash                         *ethashcfg.Config
 		Clique                         *params.ConsensusSnapshotConfig
 		Aura                           *chain.AuRaConfig
 		DeprecatedTxPool               *DeprecatedTxPoolConfig
@@ -234,9 +230,7 @@ func (c *Config) UnmarshalTOML(unmarshal func(interface{}) error) error {
 	if dec.Miner != nil {
 		c.Miner = *dec.Miner
 	}
-	if dec.Ethash != nil {
-		c.Ethash = *dec.Ethash
-	}
+
 	if dec.Clique != nil {
 		c.Clique = *dec.Clique
 	}
