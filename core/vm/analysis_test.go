@@ -143,26 +143,3 @@ func BenchmarkJumpdestOpAnalysis_New(bench *testing.B) {
 	op = STOP
 	bench.Run(op.String(), bencher)
 }
-func BenchmarkJumpdestOpAnalysis_Old(bench *testing.B) {
-	var op OpCode
-	bencher := func(b *testing.B) {
-		code := make([]byte, analysisCodeSize)
-		b.SetBytes(analysisCodeSize)
-		for i := range code {
-			code[i] = byte(op)
-		}
-		bits := make([]uint64, (len(code)+32+63)/64)
-		b.ResetTimer()
-		for i := 0; i < b.N; i++ {
-			clear(bits)
-			codeBitmapInternal2(code, bits)
-		}
-	}
-	for op = PUSH1; op <= PUSH32; op++ {
-		bench.Run(op.String(), bencher)
-	}
-	op = JUMPDEST
-	bench.Run(op.String(), bencher)
-	op = STOP
-	bench.Run(op.String(), bencher)
-}
