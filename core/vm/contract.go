@@ -20,6 +20,10 @@
 package vm
 
 import (
+	"fmt"
+
+	"github.com/erigontech/erigon-lib/common/dbg"
+	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/hashicorp/golang-lru/v2/simplelru"
 	"github.com/holiman/uint256"
 
@@ -69,14 +73,28 @@ type Contract struct {
 
 type JumpDestCache struct {
 	*simplelru.LRU[libcommon.Hash, bitvec]
+	hit, total int
+	trace      bool
 }
 
-func NewJumpDestCache() *JumpDestCache {
-	c, err := simplelru.NewLRU[libcommon.Hash, bitvec](128, nil)
+var (
+	jumpDestCacheLimit = dbg.EnvInt("JD_LRU", 128)
+	jumpDestCacheTrace = dbg.EnvBool("JD_LRU_TRACE", false)
+)
+
+func NewJumpDestCache(trace bool) *JumpDestCache {
+	c, err := simplelru.NewLRU[libcommon.Hash, bitvec](jumpDestCacheLimit, nil)
 	if err != nil {
 		panic(err)
 	}
-	return &JumpDestCache{c}
+	return &JumpDestCache{LRU: c, trace: trace || jumpDestCacheTrace}
+}
+
+func (c *JumpDestCache) LogStats() {
+	if c == nil || !c.trace {
+		return
+	}
+	log.Warn("[dbg] JumpDestCache", "hit", c.hit, "total", c.total, "limit", jumpDestCacheLimit, "ratio", fmt.Sprintf("%.2f", float64(c.hit)/float64(c.total)))
 }
 
 // NewContract returns a new contract environment for the execution of EVM.
@@ -119,12 +137,15 @@ func (c *Contract) isCode(udest uint64) bool {
 	// contracts ( not temporary initcode), we store the analysis in a map
 	if c.CodeHash != (libcommon.Hash{}) {
 		// Does parent context have the analysis?
+		c.jumpdests.total++
 		analysis, exist := c.jumpdests.Get(c.CodeHash)
 		if !exist {
 			// Do the analysis and save in parent context
 			// We do not need to store it in c.analysis
 			analysis = codeBitmap(c.Code)
 			c.jumpdests.Add(c.CodeHash, analysis)
+		} else {
+			c.jumpdests.hit++
 		}
 		// Also stash it in current contract for faster access
 		c.analysis = analysis

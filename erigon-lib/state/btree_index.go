@@ -843,7 +843,7 @@ func OpenBtreeIndexWithDecompressor(indexPath string, M uint64, kv *seg.Decompre
 
 	idx.ef, _ = eliasfano32.ReadEliasFano(idx.data[pos:])
 
-	defer kv.EnableReadAhead().DisableReadAhead()
+	defer kv.EnableMadvNormal().DisableReadAhead()
 	kvGetter := NewArchiveGetter(kv.MakeGetter(), compress)
 
 	//fmt.Printf("open btree index %s with %d keys b+=%t data compressed %t\n", indexPath, idx.ef.Count(), UseBpsTree, idx.compressed)
