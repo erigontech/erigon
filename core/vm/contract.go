@@ -94,7 +94,7 @@ func (c *JumpDestCache) LogStats() {
 	if c == nil || !c.trace {
 		return
 	}
-	log.Warn("[dbg] JumpDestCache", "hit", c.hit, "total", c.total, "limit", 256, "ratio", fmt.Sprintf("%.2f", float64(c.hit)/float64(c.total)))
+	log.Warn("[dbg] JumpDestCache", "hit", c.hit, "total", c.total, "limit", jumpDestCacheLimit, "ratio", fmt.Sprintf("%.2f", float64(c.hit)/float64(c.total)))
 }
 
 // NewContract returns a new contract environment for the execution of EVM.
