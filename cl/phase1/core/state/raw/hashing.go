@@ -19,7 +19,6 @@ package raw
 import (
 	"sync"
 
-	"github.com/erigontech/erigon-lib/common"
 	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/types/ssz"
 	"github.com/erigontech/erigon/cl/clparams"
@@ -77,14 +76,6 @@ func (b *BeaconState) FinalityRootBranch() ([][32]byte, error) {
 
 	proof = append([][32]byte{merkle_tree.Uint64Root(b.finalizedCheckpoint.Epoch())}, proof...)
 	return proof, nil
-}
-
-func preparateRootsForHashing(roots []common.Hash) [][32]byte {
-	ret := make([][32]byte, len(roots))
-	for i := range roots {
-		copy(ret[i][:], roots[i][:])
-	}
-	return ret
 }
 
 type beaconStateHasher struct {
