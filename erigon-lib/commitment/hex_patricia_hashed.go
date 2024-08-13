@@ -1177,8 +1177,8 @@ func (hph *HexPatriciaHashed) fold() (err error) {
 	partsCount := bits.OnesCount16(hph.afterMap[row])
 
 	if hph.trace {
-		fmt.Printf("fold: row: %d updated: %s current prefix: [%x] touchMap: %016b afterMap: %016b \n",
-			row, updatedNibs(hph.touchMap[row]&hph.afterMap[row]), hph.currentKey[:hph.currentKeyLen], hph.touchMap[row], hph.afterMap[row])
+		fmt.Printf("fold: row: %d depth: %d updated: %s current prefix: [%x] touchMap: %016b afterMap: %016b \n",
+			row, depth, updatedNibs(hph.touchMap[row]&hph.afterMap[row]), hph.currentKey[:hph.currentKeyLen], hph.touchMap[row], hph.afterMap[row])
 	}
 	switch partsCount {
 	case 0: // Everything deleted
@@ -1264,7 +1264,7 @@ func (hph *HexPatriciaHashed) fold() (err error) {
 			if hph.touchMap[row]&hph.afterMap[row]&uint16(1<<nibble) > 0 && cell.lhLen > 0 ||
 				depth <= 64 && cell.storageAddrLen > 0 {
 				if hph.trace {
-					fmt.Printf("DROP hash for row %d nibble %x, depth=%d %s\n", row, 1<<nibble, depth, cell.FullString())
+					fmt.Printf("DROP hash for row %d nibble %x, depth=%d %s\n", row, nibble, depth, cell.FullString())
 				}
 				cell.lhLen = 0
 				hadToReset.Add(1)
