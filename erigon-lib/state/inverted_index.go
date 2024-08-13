@@ -505,6 +505,10 @@ func (iit *InvertedIndexRoTx) Close() {
 	for _, r := range iit.readers {
 		r.Close()
 	}
+
+	if iit.iiNotFoundCache != nil {
+		iit.iiNotFoundCache.LogStats(iit.ii.filenameBase)
+	}
 }
 
 type MergeRange struct {
@@ -577,8 +581,6 @@ func (iit *InvertedIndexRoTx) seekInFiles(key []byte, txNum uint64) (found bool,
 	if iit.iiNotFoundCache == nil {
 		iit.iiNotFoundCache = NewIISeekInFilesCache()
 	}
-
-	iit.iiNotFoundCache.LogStats(iit.ii.filenameBase)
 
 	iit.iiNotFoundCache.total++
 	fromCache, ok := iit.iiNotFoundCache.Get(u128{hi: hi, lo: lo})
