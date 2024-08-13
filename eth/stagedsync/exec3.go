@@ -190,6 +190,7 @@ func ExecV3(ctx context.Context,
 	maxBlockNum uint64,
 	logger log.Logger,
 	initialCycle bool,
+	isMining bool,
 ) error {
 	// TODO: e35 doesn't support parallel-exec yet
 	parallel = false //nolint
@@ -380,6 +381,9 @@ func ExecV3(ctx context.Context,
 	execWorkers, _, rws, stopWorkers, waitWorkers := exec3.NewWorkersPool(lock.RLocker(), accumulator, logger, ctx, parallel, chainDb, rs, in, blockReader, chainConfig, genesis, engine, workerCount+1, cfg.dirs)
 	defer stopWorkers()
 	applyWorker := cfg.applyWorker
+	if isMining {
+		applyWorker = cfg.applyWorkerMining
+	}
 	applyWorker.ResetState(rs, accumulator)
 	applyWorker.DiscardReadList()
 
