@@ -25,6 +25,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/stretchr/testify/require"
 	"go.uber.org/mock/gomock"
 
 	"github.com/erigontech/erigon/polygon/bor/borcfg"
@@ -231,7 +232,7 @@ func (c *spanner) CommitSpan(heimdallSpan heimdall.Span, syscall consensus.Syste
 	return nil
 }
 
-func (c *spanner) GetCurrentValidators(spanId uint64, signer libcommon.Address, chain consensus.ChainHeaderReader) ([]*valset.Validator, error) {
+func (c *spanner) GetCurrentValidators(spanId uint64, chain consensus.ChainHeaderReader) ([]*valset.Validator, error) {
 	return []*valset.Validator{
 		{
 			ID:               1,
@@ -305,7 +306,8 @@ func newValidator(t *testing.T, heimdall *test_heimdall, blocks map[uint64]*type
 	ctrl := gomock.NewController(t)
 	stateReceiver := bor.NewMockStateReceiver(ctrl)
 	stateReceiver.EXPECT().CommitState(gomock.Any(), gomock.Any()).AnyTimes()
-	validatorKey, _ := crypto.GenerateKey()
+	validatorKey, err := crypto.GenerateKey()
+	require.NoError(t, err)
 	validatorAddress := crypto.PubkeyToAddress(validatorKey.PublicKey)
 	bor := bor.New(
 		heimdall.chainConfig,
