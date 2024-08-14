@@ -106,7 +106,7 @@ func SpawnMiningExecStage(s *StageState, txc wrap.TxContainer, cfg MiningExecCfg
 	var (
 		stateReader state.StateReader
 	)
-	stateReader = state.NewReaderV4(txc.Doms)
+	stateReader = state.NewReaderV3(txc.Doms)
 	ibs := state.New(stateReader)
 	// Clique consensus needs forced author in the evm context
 	//if cfg.chainConfig.Consensus == chain.CliqueConsensus {
@@ -147,7 +147,7 @@ func SpawnMiningExecStage(s *StageState, txc wrap.TxContainer, cfg MiningExecCfg
 			}
 			defer sd.Close()
 			simStateWriter = state.NewWriterV4(sd)
-			simStateReader = state.NewReaderV4(sd)
+			simStateReader = state.NewReaderV3(sd)
 
 			executionAt, err := s.ExecutionAt(mb)
 			if err != nil {

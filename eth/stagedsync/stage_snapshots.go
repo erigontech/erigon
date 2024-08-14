@@ -23,7 +23,6 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
-	"github.com/erigontech/erigon-lib/common"
 	"io"
 	"io/fs"
 	"math/big"
@@ -36,6 +35,8 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+
+	"github.com/erigontech/erigon-lib/common"
 
 	"github.com/anacrolix/torrent"
 	"golang.org/x/sync/errgroup"
@@ -561,7 +562,7 @@ func SnapshotsPrune(s *PruneState, cfg SnapshotsCfg, ctx context.Context, tx kv.
 
 	}
 
-	pruneLimit := 100
+	pruneLimit := 10
 	if s.CurrentSyncCycle.IsInitialCycle {
 		pruneLimit = 10_000
 	}

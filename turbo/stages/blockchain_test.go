@@ -30,6 +30,7 @@ import (
 
 	protosentry "github.com/erigontech/erigon-lib/gointerfaces/sentryproto"
 	"github.com/erigontech/erigon/eth/protocols/eth"
+	"github.com/erigontech/erigon/p2p/sentry/sentry_multi_client"
 	"github.com/erigontech/erigon/rlp"
 
 	"github.com/erigontech/erigon-lib/common/hexutil"
@@ -374,41 +375,43 @@ func testReorg(t *testing.T, first, second []int64, td int64) {
 		}
 	}
 
-	b, err := rlp.EncodeToBytes(&eth.GetReceiptsPacket66{
-		RequestId:         1,
-		GetReceiptsPacket: hashPacket,
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	m.ReceiveWg.Add(1)
-	for _, err = range m.Send(&protosentry.InboundMessage{Id: protosentry.MessageId_GET_RECEIPTS_66, Data: b, PeerId: m.PeerId}) {
+	if sentry_multi_client.EnableP2PReceipts {
+		b, err := rlp.EncodeToBytes(&eth.GetReceiptsPacket66{
+			RequestId:         1,
+			GetReceiptsPacket: hashPacket,
+		})
 		if err != nil {
 			t.Fatal(err)
 		}
+
+		m.ReceiveWg.Add(1)
+		for _, err = range m.Send(&protosentry.InboundMessage{Id: protosentry.MessageId_GET_RECEIPTS_66, Data: b, PeerId: m.PeerId}) {
+			if err != nil {
+				t.Fatal(err)
+			}
+		}
+
+		m.ReceiveWg.Wait()
+
+		msg := m.SentMessage(0)
+
+		require.Equal(protosentry.MessageId_RECEIPTS_66, msg.Id)
+
+		encoded, err := rlp.EncodeToBytes(types.Receipts{})
+		require.NoError(err)
+
+		res := make([]rlp.RawValue, 0, queryNum)
+		for i := 0; i < queryNum; i++ {
+			res = append(res, encoded)
+		}
+
+		b, err = rlp.EncodeToBytes(&eth.ReceiptsRLPPacket66{
+			RequestId:         1,
+			ReceiptsRLPPacket: res,
+		})
+		require.NoError(err)
+		require.Equal(b, msg.GetData())
 	}
-
-	m.ReceiveWg.Wait()
-
-	msg := m.SentMessage(0)
-
-	require.Equal(protosentry.MessageId_RECEIPTS_66, msg.Id)
-
-	encoded, err := rlp.EncodeToBytes(types.Receipts{})
-	require.NoError(err)
-
-	res := make([]rlp.RawValue, 0, queryNum)
-	for i := 0; i < queryNum; i++ {
-		res = append(res, encoded)
-	}
-
-	b, err = rlp.EncodeToBytes(&eth.ReceiptsRLPPacket66{
-		RequestId:         1,
-		ReceiptsRLPPacket: res,
-	})
-	require.NoError(err)
-	require.Equal(b, msg.GetData())
 }
 
 // Tests that the insertion functions detect banned hashes.
