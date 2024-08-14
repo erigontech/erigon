@@ -23,10 +23,11 @@ import (
 	"context"
 	"encoding/binary"
 	"encoding/hex"
-	"github.com/holiman/uint256"
 	"math"
 	"math/rand"
 	"testing"
+
+	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon-lib/common/length"
 	"github.com/stretchr/testify/require"

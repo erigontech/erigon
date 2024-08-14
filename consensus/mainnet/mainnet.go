@@ -234,7 +234,7 @@ func (b baseMainnet) FinalizeAndAssemble(chainConfig *chain.Config, header *type
 		return nil, nil, nil, err
 	}
 	// Header seems complete, assemble into a block and return
-	return types.NewBlock(header, outTxs, uncles, outR, withdrawals, requests), outTxs, outR, nil
+	return types.NewBlockForAsembling(header, outTxs, uncles, outR, withdrawals, requests), outTxs, outR, nil
 }
 
 // AccumulateRewards returns rewards for a given block. The mining reward consists
