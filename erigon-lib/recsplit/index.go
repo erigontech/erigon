@@ -115,7 +115,7 @@ func OpenIndex(indexFilePath string) (id *Index, err error) {
 		// recover from panic if one occurred. Set err to nil if no panic
 		if r := recover(); r != nil {
 			// do r with only the stack trace
-			err = fmt.Errorf("incomplete file %s %w", indexFilePath, dbg.Stack())
+			err = fmt.Errorf("incomplete file %s %v", indexFilePath, dbg.Stack())
 		}
 	}()
 
