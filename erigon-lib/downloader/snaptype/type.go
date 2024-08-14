@@ -130,12 +130,14 @@ func ReadAndCreateSaltIfNeeded(baseDir string) (uint32, error) {
 // if db is Read-Only (for example remote RPCDaemon or utilities) - we will not create new indices -
 // and existing indices have salt in metadata.
 func GetIndexSalt(baseDir string) (uint32, error) {
-	saltLock.Lock()
+	saltLock.RLock()
 	salt, ok := saltMap[baseDir]
+	saltLock.RUnlock()
 	if ok {
 		return salt, nil
 	}
 
+	saltLock.Lock()
 	salt, err := ReadAndCreateSaltIfNeeded(baseDir)
 	if err != nil {
 		return 0, err
