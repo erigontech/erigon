@@ -349,8 +349,6 @@ type StateWriterBufferedV3 struct {
 	storagePrevs map[string][]byte
 	codePrevs    map[string]uint64
 	accumulator  *shards.Accumulator
-
-	tx kv.Tx
 }
 
 func NewStateWriterBufferedV3(rs *StateV3, accumulator *shards.Accumulator) *StateWriterBufferedV3 {
@@ -365,7 +363,7 @@ func NewStateWriterBufferedV3(rs *StateV3, accumulator *shards.Accumulator) *Sta
 func (w *StateWriterBufferedV3) SetTxNum(ctx context.Context, txNum uint64) {
 	w.rs.domains.SetTxNum(txNum)
 }
-func (w *StateWriterBufferedV3) SetTx(tx kv.Tx) { w.tx = tx }
+func (w *StateWriterBufferedV3) SetTx(tx kv.Tx) {}
 
 func (w *StateWriterBufferedV3) ResetWriteSet() {
 	w.writeLists = newWriteList()
@@ -468,8 +466,6 @@ type StateWriterV3 struct {
 	rs          *StateV3
 	trace       bool
 	accumulator *shards.Accumulator
-
-	tx kv.Tx
 }
 
 func NewStateWriterV3(rs *StateV3, accumulator *shards.Accumulator) *StateWriterV3 {
@@ -479,11 +475,6 @@ func NewStateWriterV3(rs *StateV3, accumulator *shards.Accumulator) *StateWriter
 		//trace: true,
 	}
 }
-
-func (w *StateWriterV3) SetTxNum(ctx context.Context, txNum uint64) {
-	w.rs.domains.SetTxNum(txNum)
-}
-func (w *StateWriterV3) SetTx(tx kv.Tx) { w.tx = tx }
 
 func (w *StateWriterV3) ResetWriteSet() {}
 

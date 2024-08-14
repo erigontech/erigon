@@ -118,7 +118,6 @@ func (rw *Worker) ResetTx(chainTx kv.Tx) {
 	if chainTx != nil {
 		rw.chainTx = chainTx
 		rw.stateReader.SetTx(rw.chainTx)
-		rw.stateWriter.SetTx(rw.chainTx)
 		rw.chain = consensuschain.NewReader(rw.chainConfig, rw.chainTx, rw.blockReader, rw.logger)
 	}
 }
@@ -177,13 +176,12 @@ func (rw *Worker) RunTxTaskNoLock(txTask *state.TxTask) {
 			panic(err)
 		}
 		rw.stateReader.SetTx(rw.chainTx)
-		rw.stateWriter.SetTx(rw.chainTx)
 		rw.chain = consensuschain.NewReader(rw.chainConfig, rw.chainTx, rw.blockReader, rw.logger)
 	}
 	txTask.Error = nil
 
 	rw.stateReader.SetTxNum(txTask.TxNum)
-	rw.stateWriter.SetTxNum(rw.ctx, txTask.TxNum)
+	rw.rs.Domains().SetTxNum(txTask.TxNum)
 	rw.stateReader.ResetReadSet()
 	rw.stateWriter.ResetWriteSet()
 
