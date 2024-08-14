@@ -587,14 +587,14 @@ func (h *Harness) setHeimdallNextMockSpan() {
 func (h *Harness) mockBorSpanner() {
 	h.borSpanner.
 		EXPECT().
-		GetCurrentValidators(gomock.Any(), gomock.Any(), gomock.Any()).
+		GetCurrentValidators(gomock.Any(), gomock.Any()).
 		Return(h.heimdallNextMockSpan.ValidatorSet.Validators, nil).
 		AnyTimes()
 
 	h.borSpanner.
 		EXPECT().
-		GetCurrentProducers(gomock.Any(), gomock.Any(), gomock.Any()).
-		DoAndReturn(func(_ uint64, _ libcommon.Address, _ consensus.ChainHeaderReader) ([]*valset.Validator, error) {
+		GetCurrentProducers(gomock.Any(), gomock.Any()).
+		DoAndReturn(func(_ uint64, _ consensus.ChainHeaderReader) ([]*valset.Validator, error) {
 			res := make([]*valset.Validator, len(h.heimdallNextMockSpan.SelectedProducers))
 			for i := range h.heimdallNextMockSpan.SelectedProducers {
 				res[i] = &h.heimdallNextMockSpan.SelectedProducers[i]
