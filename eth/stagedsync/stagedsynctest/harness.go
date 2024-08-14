@@ -491,20 +491,14 @@ func (h *Harness) seal(t *testing.T, chr consensus.ChainHeaderReader, eng consen
 
 func (h *Harness) consensusEngine(t *testing.T, cfg HarnessCfg) consensus.Engine {
 	if h.chainConfig.Bor != nil {
-		genesisContracts := bor.NewGenesisContractsClient(
-			h.chainConfig,
-			h.borConfig.ValidatorContract,
-			h.borConfig.StateReceiverContract,
-			h.logger,
-		)
-
+		stateReceiver := bor.NewStateReceiver(h.borConfig.StateReceiverContract)
 		borConsensusEng := bor.New(
 			h.chainConfig,
 			h.borConsensusDB,
 			nil,
 			h.borSpanner,
 			h.heimdallClient,
-			genesisContracts,
+			stateReceiver,
 			h.logger,
 			nil,
 			nil,
