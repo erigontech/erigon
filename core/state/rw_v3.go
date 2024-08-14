@@ -629,6 +629,9 @@ func (r *ReaderV3) ReadAccountStorage(address common.Address, incarnation uint64
 }
 
 func (r *ReaderV3) ReadAccountCode(address common.Address, incarnation uint64, codeHash common.Hash) ([]byte, error) {
+	//if codeHash == emptyCodeHashH { // TODO: how often do we have this case?
+	//	return nil, nil
+	//}
 	enc, _, err := r.tx.DomainGet(kv.CodeDomain, address[:], nil)
 	if err != nil {
 		return nil, err
