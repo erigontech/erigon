@@ -1106,7 +1106,6 @@ func (s polygonSyncStageBridgeStore) LastProcessedEventID(ctx context.Context) (
 	if r.err != nil {
 		return 0, r.err
 	}
-
 	if r.id == 0 {
 		return s.eventReader.LastFrozenEventId(), nil
 	}
