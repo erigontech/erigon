@@ -100,7 +100,11 @@ func NewWorker(lock sync.Locker, logger log.Logger, ctx context.Context, backgro
 
 func (rw *Worker) ResetState(rs *state.StateV3, accumulator *shards.Accumulator) {
 	rw.rs = rs
-	rw.SetReader(state.NewStateReaderV3(rs.Domains()))
+	if rw.background {
+		rw.SetReader(state.NewStateReaderParallelV3(rs.Domains()))
+	} else {
+		rw.SetReader(state.NewStateReaderV3(rs.Domains()))
+	}
 	rw.stateWriter = state.NewStateWriterV3(rs, accumulator)
 }
 
@@ -161,7 +165,11 @@ func (rw *Worker) RunTxTaskNoLock(txTask *state.TxTask) {
 		// Needed to correctly evaluate spent gas and other things.
 		rw.SetReader(state.NewHistoryReaderV3())
 	} else if !txTask.HistoryExecution && rw.historyMode {
-		rw.SetReader(state.NewStateReaderV3(rw.rs.Domains()))
+		if rw.background {
+			rw.SetReader(state.NewStateReaderParallelV3(rw.rs.Domains()))
+		} else {
+			rw.SetReader(state.NewStateReaderV3(rw.rs.Domains()))
+		}
 	}
 	if rw.background && rw.chainTx == nil {
 		var err error

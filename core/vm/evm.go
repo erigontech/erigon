@@ -98,7 +98,7 @@ type EVM struct {
 	// applied in opCall*.
 	callGasTemp uint64
 
-	jumpDestCache *JumpDestCache
+	JumpDestCache *JumpDestCache
 }
 
 // NewEVM returns a new EVM. The returned EVM is not thread safe and should
@@ -116,7 +116,7 @@ func NewEVM(blockCtx evmtypes.BlockContext, txCtx evmtypes.TxContext, state evmt
 		config:          vmConfig,
 		chainConfig:     chainConfig,
 		chainRules:      chainConfig.Rules(blockCtx.BlockNumber, blockCtx.Time),
-		jumpDestCache:   NewJumpDestCache(),
+		JumpDestCache:   NewJumpDestCache(false),
 	}
 
 	evm.interpreter = NewEVMInterpreter(evm, vmConfig)
@@ -269,11 +269,11 @@ func (evm *EVM) call(typ OpCode, caller ContractRef, addr libcommon.Address, inp
 		codeHash := evm.intraBlockState.GetCodeHash(addrCopy)
 		var contract *Contract
 		if typ == CALLCODE {
-			contract = NewContract(caller, caller.Address(), value, gas, evm.config.SkipAnalysis, evm.jumpDestCache)
+			contract = NewContract(caller, caller.Address(), value, gas, evm.config.SkipAnalysis, evm.JumpDestCache)
 		} else if typ == DELEGATECALL {
-			contract = NewContract(caller, caller.Address(), value, gas, evm.config.SkipAnalysis, evm.jumpDestCache).AsDelegate()
+			contract = NewContract(caller, caller.Address(), value, gas, evm.config.SkipAnalysis, evm.JumpDestCache).AsDelegate()
 		} else {
-			contract = NewContract(caller, addrCopy, value, gas, evm.config.SkipAnalysis, evm.jumpDestCache)
+			contract = NewContract(caller, addrCopy, value, gas, evm.config.SkipAnalysis, evm.JumpDestCache)
 		}
 		contract.SetCallCode(&addrCopy, codeHash, code)
 		readOnly := false
@@ -416,7 +416,7 @@ func (evm *EVM) create(caller ContractRef, codeAndHash *codeAndHash, gasRemainin
 
 	// Initialise a new contract and set the code that is to be used by the EVM.
 	// The contract is a scoped environment for this execution context only.
-	contract := NewContract(caller, address, value, gasRemaining, evm.config.SkipAnalysis, evm.jumpDestCache)
+	contract := NewContract(caller, address, value, gasRemaining, evm.config.SkipAnalysis, evm.JumpDestCache)
 	contract.SetCodeOptionalHash(&address, codeAndHash)
 
 	if evm.config.NoRecursion && depth > 0 {
