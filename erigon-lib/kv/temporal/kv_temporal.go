@@ -204,6 +204,15 @@ func (tx *Tx) DomainRange(name kv.Domain, fromKey, toKey []byte, asOfTs uint64, 
 	return it, nil
 }
 
+func (tx *Tx) DomainRangeLatest(name kv.Domain, fromKey, toKey []byte, limit int) (stream.KV, error) {
+	it, err := tx.filesTx.DomainRangeLatest(tx.MdbxTx, name, fromKey, toKey, limit)
+	if err != nil {
+		return nil, err
+	}
+	tx.resourcesToClose = append(tx.resourcesToClose, it)
+	return it, nil
+}
+
 func (tx *Tx) DomainGet(name kv.Domain, k, k2 []byte) (v []byte, step uint64, err error) {
 	v, step, ok, err := tx.filesTx.GetLatest(name, k, k2, tx.MdbxTx)
 	if err != nil {

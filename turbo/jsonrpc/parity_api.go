@@ -24,9 +24,6 @@ import (
 	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/hexutility"
 	"github.com/erigontech/erigon-lib/kv"
-	"github.com/erigontech/erigon-lib/kv/order"
-	"github.com/erigontech/erigon-lib/kv/rawdbv3"
-	"github.com/erigontech/erigon/core/rawdb"
 	"github.com/erigontech/erigon/turbo/rpchelper"
 
 	"github.com/erigontech/erigon/rpc"
@@ -74,18 +71,12 @@ func (api *ParityAPIImpl) ListStorageKeys(ctx context.Context, account libcommon
 		return nil, errors.New("acc not found")
 	}
 
-	bn := rawdb.ReadCurrentBlockNumber(tx)
-	minTxNum, err := rawdbv3.TxNums.Min(tx, *bn)
-	if err != nil {
-		return nil, err
-	}
-
 	from := account[:]
 	if offset != nil {
 		from = append(from, *offset...)
 	}
 	to, _ := kv.NextSubtree(account[:])
-	r, err := tx.(kv.TemporalTx).DomainRange(kv.StorageDomain, from, to, minTxNum, order.Asc, quantity)
+	r, err := tx.(kv.TemporalTx).DomainRangeLatest(kv.StorageDomain, from, to, quantity)
 	if err != nil {
 		return nil, err
 	}
