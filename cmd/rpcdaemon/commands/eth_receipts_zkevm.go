@@ -14,6 +14,6 @@ func (api *APIImpl) addEffectiveGasPercentage(fields map[string]interface{}, tx 
 	if err != nil {
 		return nil, err
 	}
-	fields["effectiveGasPrice"] = core.CalculateEffectiveGas(txn.GetPrice(), effectiveGasPricePercentage)
+	fields["effectiveGasPrice"] = core.CalculateEffectiveGas(txn.GetPrice().Clone(), effectiveGasPricePercentage)
 	return fields, nil
 }
