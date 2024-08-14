@@ -580,11 +580,11 @@ func (w *StateWriterV3) CreateContract(address common.Address) error {
 type StateReaderV3 struct {
 	txNum     uint64
 	trace     bool
-	tx        kv.TemporalTx
+	tx        kv.TemporalGetter
 	composite []byte
 }
 
-func NewStateReaderV3(tx kv.TemporalTx) *StateReaderV3 {
+func NewStateReaderV3(tx kv.TemporalGetter) *StateReaderV3 {
 	return &StateReaderV3{
 		//trace:     true,
 		tx:        tx,
