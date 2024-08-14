@@ -337,10 +337,6 @@ func (s *Merge) Seal(chain consensus.ChainHeaderReader, block *types.Block, resu
 	return nil
 }
 
-func (s *Merge) GenerateSeal(chain consensus.ChainHeaderReader, currnt, parent *types.Header, call consensus.Call) []byte {
-	return nil
-}
-
 func (s *Merge) IsServiceTransaction(sender libcommon.Address, syscall consensus.SystemCall) bool {
 	return s.eth1Engine.IsServiceTransaction(sender, syscall)
 }

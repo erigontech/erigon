@@ -180,10 +180,6 @@ func (b baseMainnet) verifyHeader(chain consensus.ChainHeaderReader, header, par
 	return nil
 }
 
-func (b baseMainnet) GenerateSeal(chain consensus.ChainHeaderReader, currnt, parent *types.Header, call consensus.Call) []byte {
-	return nil
-}
-
 // CalcDifficulty is the difficulty adjustment algorithm. It returns
 // the difficulty that a new block should have when created at time
 // given the parent block's time and difficulty.
