@@ -180,7 +180,7 @@ func (b baseMainnet) verifyHeader(chain consensus.ChainHeaderReader, header, par
 	return nil
 }
 
-func (b baseMainnet) GenerateSeal(chain consensus.ChainHeaderReader, currnt, parent *types.Header, call consensus.Call) []byte {
+func (b baseMainnet) GenerateAuRaSeal(chain consensus.ChainHeaderReader, currnt, parent *types.Header, call consensus.Call) []byte {
 	return nil
 }
 

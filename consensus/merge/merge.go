@@ -337,7 +337,7 @@ func (s *Merge) Seal(chain consensus.ChainHeaderReader, block *types.Block, resu
 	return nil
 }
 
-func (s *Merge) GenerateSeal(chain consensus.ChainHeaderReader, currnt, parent *types.Header, call consensus.Call) []byte {
+func (s *Merge) GenerateAuRaSeal(chain consensus.ChainHeaderReader, currnt, parent *types.Header, call consensus.Call) []byte {
 	return nil
 }
 
