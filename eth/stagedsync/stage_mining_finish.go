@@ -80,10 +80,6 @@ func SpawnMiningFinishStage(s *StageState, tx kv.RwTx, cfg MiningFinishCfg, quit
 	//}
 	//prev = sealHash
 	cfg.latestBlockBuiltStore.AddBlockBuilt(block)
-	if cfg.miningState.MiningResultPOSCh != nil {
-		cfg.miningState.MiningResultPOSCh <- blockWithReceipts
-		return nil
-	}
 
 	// Tests may set pre-calculated nonce
 	if block.NonceU64() != 0 {

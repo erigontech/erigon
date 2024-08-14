@@ -64,7 +64,7 @@ func InitHarness(ctx context.Context, t *testing.T, cfg HarnessCfg) Harness {
 	borConsensusDB := memdb.NewTestDB(t)
 	ctrl := gomock.NewController(t)
 	heimdallClient := heimdall.NewMockHeimdallClient(ctrl)
-	miningState := stagedsync.NewProposingState(&ethconfig.Defaults.Miner)
+	miningState := stagedsync.NewMiningState(&ethconfig.Defaults.Miner)
 	bhCfg := stagedsync.StageBorHeimdallCfg(
 		chainDataDB,
 		borConsensusDB,
