@@ -334,6 +334,16 @@ func (s *Merge) Seal(chain consensus.ChainHeaderReader, block *types.Block, resu
 	if !misc.IsPoSHeader(block.HeaderNoCopy()) {
 		return s.eth1Engine.Seal(chain, block, results, stop)
 	}
+
+	header := block.Header()
+	header.Nonce = ProofOfStakeNonce
+
+	select {
+	case results <- block.WithSeal(header):
+	default:
+		log.Warn("Sealing result is not read", "sealhash", block.Hash())
+	}
+
 	return nil
 }
 
