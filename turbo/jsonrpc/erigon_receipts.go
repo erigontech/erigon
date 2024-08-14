@@ -191,6 +191,7 @@ func (api *ErigonImpl) GetLatestLogs(ctx context.Context, crit filters.FilterCri
 		return nil, err
 	}
 	exec := exec3.NewTraceWorker(tx, chainConfig, api.engine(), api._blockReader, nil)
+	defer exec.Close()
 
 	txNumbers, err := applyFiltersV3(tx, begin, end, crit)
 	if err != nil {

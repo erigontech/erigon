@@ -35,7 +35,7 @@ import (
 
 	"github.com/erigontech/erigon/consensus"
 	"github.com/erigontech/erigon/consensus/clique"
-	"github.com/erigontech/erigon/consensus/ethash"
+	"github.com/erigontech/erigon/consensus/mainnet"
 	"github.com/erigontech/erigon/core/state"
 	"github.com/erigontech/erigon/core/tracing"
 	"github.com/erigontech/erigon/core/types"
@@ -371,7 +371,7 @@ func (c *AuRa) VerifyHeader(chain consensus.ChainHeaderReader, header *types.Hea
 		log.Error("consensus.ErrUnknownAncestor", "parentNum", number-1, "hash", header.ParentHash.String())
 		return consensus.ErrUnknownAncestor
 	}
-	return ethash.VerifyHeaderBasics(chain, header, parent, true /*checkTimestamp*/, c.HasGasLimitContract() /*skipGasLimit*/)
+	return mainnet.VerifyHeaderBasics(chain, header, parent, true /*checkTimestamp*/, c.HasGasLimitContract() /*skipGasLimit*/)
 }
 
 // nolint
@@ -852,7 +852,7 @@ func (c *AuRa) FinalizeAndAssemble(config *chain.Config, header *types.Header, s
 	}
 
 	// Assemble and return the final block for sealing
-	return types.NewBlock(header, outTxs, uncles, outReceipts, withdrawals, requests), outTxs, outReceipts, nil
+	return types.NewBlockForAsembling(header, outTxs, uncles, outReceipts, withdrawals, requests), outTxs, outReceipts, nil
 }
 
 // Authorize injects a private key into the consensus engine to mint new blocks

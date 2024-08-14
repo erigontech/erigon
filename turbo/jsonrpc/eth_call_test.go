@@ -79,8 +79,8 @@ func TestEthCallNonCanonical(t *testing.T) {
 	if _, err := api.Call(context.Background(), ethapi.CallArgs{
 		From: &from,
 		To:   &to,
-	}, rpc.BlockNumberOrHashWithHash(libcommon.HexToHash("0x3fcb7c0d4569fddc89cbea54b42f163e0c789351d98810a513895ab44b47020b"), true), nil); err != nil {
-		if fmt.Sprintf("%v", err) != "hash 3fcb7c0d4569fddc89cbea54b42f163e0c789351d98810a513895ab44b47020b is not currently canonical" {
+	}, rpc.BlockNumberOrHashWithHash(libcommon.HexToHash("0x94b548e36d4363fc189627d454867d70902c2ffdd97347fd91bf9f1725177c43"), true), nil); err != nil {
+		if fmt.Sprintf("%v", err) != "hash 94b548e36d4363fc189627d454867d70902c2ffdd97347fd91bf9f1725177c43 is not currently canonical" {
 			t.Errorf("wrong error: %v", err)
 		}
 	}

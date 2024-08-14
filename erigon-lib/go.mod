@@ -21,6 +21,7 @@ require (
 	github.com/crate-crypto/go-kzg-4844 v0.7.0
 	github.com/deckarep/golang-set/v2 v2.3.1
 	github.com/edsrzf/mmap-go v1.1.0
+	github.com/elastic/go-freelru v0.13.0
 	github.com/erigontech/speedtest v0.0.2
 	github.com/go-stack/stack v1.8.1
 	github.com/gofrs/flock v0.12.1
@@ -150,7 +151,7 @@ require (
 )
 
 replace (
-	github.com/anacrolix/torrent => github.com/erigontech/torrent v1.54.2-alpha-33
+	github.com/anacrolix/torrent => github.com/erigontech/torrent v1.54.2-alpha-35
 	github.com/holiman/bloomfilter/v2 => github.com/AskAlexSharov/bloomfilter/v2 v2.0.8
 	github.com/tidwall/btree => github.com/AskAlexSharov/btree v1.6.2
 )

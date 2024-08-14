@@ -71,43 +71,64 @@ var execRepeats = metrics.NewCounter(`exec_repeats`)     //nolint
 var execTriggers = metrics.NewCounter(`exec_triggers`)   //nolint
 const changesetBlockRange = 1_000                        // Generate changeset only if execution of blocks <= changesetBlockRange
 
-func NewProgress(prevOutputBlockNum, commitThreshold uint64, workersCount int, logPrefix string, logger log.Logger) *Progress {
+var exexTxPerSec = metrics.NewSummary(`exec_tps`)
+var execMgasPerSec = metrics.NewSummary(`exec_mgass`)
+
+func NewProgress(prevOutputBlockNum, commitThreshold uint64, workersCount int, updateMetrics bool, logPrefix string, logger log.Logger) *Progress {
 	return &Progress{prevTime: time.Now(), prevOutputBlockNum: prevOutputBlockNum, commitThreshold: commitThreshold, workersCount: workersCount, logPrefix: logPrefix, logger: logger}
 }
 
 type Progress struct {
 	prevTime           time.Time
-	prevCount          uint64
+	prevTxCount        uint64
 	prevOutputBlockNum uint64
 	prevRepeatCount    uint64
 	commitThreshold    uint64
 
-	workersCount int
-	logPrefix    string
-	logger       log.Logger
+	workersCount  int
+	logPrefix     string
+	logger        log.Logger
+	updateMetrics bool
 }
 
-func (p *Progress) Log(rs *state.StateV3, in *state.QueueWithRetry, rws *state.ResultsQueue, doneCount, inputBlockNum, outputBlockNum, outTxNum, repeatCount uint64, idxStepsAmountInDB float64, shouldGenerateChangesets bool) {
+func (p *Progress) Log(suffix string, rs *state.StateV3, in *state.QueueWithRetry, rws *state.ResultsQueue, txCount, gas, blobGas, inputBlockNum, outputBlockNum, outTxNum, repeatCount uint64, idxStepsAmountInDB float64, shouldGenerateChangesets bool) {
 	execStepsInDB.Set(idxStepsAmountInDB * 100)
 	var m runtime.MemStats
 	dbg.ReadMemStats(&m)
 	sizeEstimate := rs.SizeEstimate()
 	currentTime := time.Now()
 	interval := currentTime.Sub(p.prevTime)
-	speedTx := float64(doneCount-p.prevCount) / (float64(interval) / float64(time.Second))
+	speedTx := float64(txCount-p.prevTxCount) / interval.Seconds()
 	//var repeatRatio float64
 	//if doneCount > p.prevCount {
 	//	repeatRatio = 100.0 * float64(repeatCount-p.prevRepeatCount) / float64(doneCount-p.prevCount)
 	//}
 
-	var suffix string
-	if shouldGenerateChangesets {
-		suffix = " Commit every block"
+	if len(suffix) > 0 {
+		suffix = " " + suffix
 	}
+
+	if shouldGenerateChangesets {
+		suffix += " Commit every block"
+	}
+
+	gasUsedMgas := float64(gas) / 1e6
+	mgasPerSec := gasUsedMgas / interval.Seconds()
+	//avgMgasSec = ((e.avgMgasSec * (float64(e.recordedMgasSec))) + mgasPerSec) / float64(e.recordedMgasSec+1)
+
+	if p.updateMetrics {
+		execMgasPerSec.Observe(mgasPerSec)
+		exexTxPerSec.Observe(speedTx)
+	}
+
 	p.logger.Info(fmt.Sprintf("[%s]"+suffix, p.logPrefix),
 		//"workers", workerCount,
 		"blk", outputBlockNum,
+		"blks", outputBlockNum-p.prevOutputBlockNum+1,
+		"blk/s", fmt.Sprintf("%.1f", float64(outputBlockNum-p.prevOutputBlockNum+1)/interval.Seconds()),
+		"txs", txCount-p.prevTxCount,
 		"tx/s", fmt.Sprintf("%.1f", speedTx),
+		"mgas/s", fmt.Sprintf("%.1f", mgasPerSec),
 		//"pipe", fmt.Sprintf("(%d+%d)->%d/%d->%d/%d", in.NewTasksLen(), in.RetriesLen(), rws.ResultChLen(), rws.ResultChCap(), rws.Len(), rws.Limit()),
 		//"repeatRatio", fmt.Sprintf("%.2f%%", repeatRatio),
 		//"workers", p.workersCount,
@@ -118,7 +139,7 @@ func (p *Progress) Log(rs *state.StateV3, in *state.QueueWithRetry, rws *state.R
 	)
 
 	p.prevTime = currentTime
-	p.prevCount = doneCount
+	p.prevTxCount = txCount
 	p.prevOutputBlockNum = outputBlockNum
 	p.prevRepeatCount = repeatCount
 }
@@ -147,8 +168,8 @@ flush changes from TxTask to lower-level-of-abstraction).
 - StateV3 - it's all updates which are stored in RAM - all parallel workers can see this updates.
 Execution of txs always done on Valid version of state (no partial-updates of state).
 Flush of updates to lower-level-of-abstractions done by method `StateV3.Flush`.
-On this level-of-abstraction also exists StateReaderV3.
-IntraBlockState does call StateReaderV3, and StateReaderV3 call StateV3(in-mem-cache) or DB (RoTx).
+On this level-of-abstraction also exists ReaderV3.
+IntraBlockState does call ReaderV3, and ReaderV3 call StateV3(in-mem-cache) or DB (RoTx).
 WAL - also on this level-of-abstraction - agg.ApplyHistory does write updates from TxTask to WAL.
 WAL it's like StateV3 just without reading api (can only write there). WAL flush to disk periodically (doesn't need much RAM).
 
@@ -169,6 +190,7 @@ func ExecV3(ctx context.Context,
 	maxBlockNum uint64,
 	logger log.Logger,
 	initialCycle bool,
+	isMining bool,
 ) error {
 	// TODO: e35 doesn't support parallel-exec yet
 	parallel = false //nolint
@@ -356,16 +378,29 @@ func ExecV3(ctx context.Context,
 	rwsConsumed := make(chan struct{}, 1)
 	defer close(rwsConsumed)
 
-	execWorkers, applyWorker, rws, stopWorkers, waitWorkers := exec3.NewWorkersPool(lock.RLocker(), accumulator, logger, ctx, parallel, chainDb, rs, in, blockReader, chainConfig, genesis, engine, workerCount+1, cfg.dirs)
+	execWorkers, _, rws, stopWorkers, waitWorkers := exec3.NewWorkersPool(lock.RLocker(), accumulator, logger, ctx, parallel, chainDb, rs, in, blockReader, chainConfig, genesis, engine, workerCount+1, cfg.dirs)
 	defer stopWorkers()
-	applyWorker.DiscardReadList()
+	applyWorker := cfg.applyWorker
+	if isMining {
+		applyWorker = cfg.applyWorkerMining
+	}
+	applyWorker.ResetState(rs, accumulator)
 
 	commitThreshold := batchSize.Bytes()
-	progress := NewProgress(blockNum, commitThreshold, workerCount, execStage.LogPrefix(), logger)
+	progress := NewProgress(blockNum, commitThreshold, workerCount, false, execStage.LogPrefix(), logger)
 	logEvery := time.NewTicker(20 * time.Second)
 	defer logEvery.Stop()
 	pruneEvery := time.NewTicker(2 * time.Second)
 	defer pruneEvery.Stop()
+
+	var logGas, logBlobGas uint64
+	var txCount uint64
+	var stepsInDB float64
+
+	processed := NewProgress(blockNum, commitThreshold, workerCount, true, execStage.LogPrefix(), logger)
+	defer func() {
+		processed.Log("Done", rs, in, rws, txCount, logGas, logBlobGas, inputBlockNum.Load(), outputBlockNum.GetValueUint64(), outputTxNum.Load(), execRepeats.GetValueUint64(), stepsInDB, shouldGenerateChangesets)
+	}()
 
 	applyLoopWg := sync.WaitGroup{} // to wait for finishing of applyLoop after applyCtx cancel
 	defer applyLoopWg.Wait()
@@ -445,9 +480,8 @@ func ExecV3(ctx context.Context,
 					return ctx.Err()
 
 				case <-logEvery.C:
-					stepsInDB := rawdbhelpers.IdxStepsCountV3(tx)
-
-					progress.Log(rs, in, rws, rs.DoneCount(), inputBlockNum.Load(), outputBlockNum.GetValueUint64(), outputTxNum.Load(), execRepeats.GetValueUint64(), stepsInDB, shouldGenerateChangesets)
+					stepsInDB = rawdbhelpers.IdxStepsCountV3(tx)
+					progress.Log("", rs, in, rws, rs.DoneCount(), logGas, logBlobGas, inputBlockNum.Load(), outputBlockNum.GetValueUint64(), outputTxNum.Load(), execRepeats.GetValueUint64(), stepsInDB, shouldGenerateChangesets)
 					if agg.HasBackgroundFilesBuild() {
 						logger.Info(fmt.Sprintf("[%s] Background files build", execStage.LogPrefix()), "progress", agg.BackgroundProgress())
 					}
@@ -637,6 +671,7 @@ func ExecV3(ctx context.Context,
 	//fmt.Printf("exec blocks: %d -> %d\n", blockNum, maxBlockNum)
 
 	var b *types.Block
+
 Loop:
 	for ; blockNum <= maxBlockNum; blockNum++ {
 		changeset := &state2.StateChangeSet{}
@@ -805,8 +840,12 @@ Loop:
 					return fmt.Errorf("%w, txnIdx=%d, %v", consensus.ErrInvalidBlock, txTask.TxIndex, txTask.Error) //same as in stage_exec.go
 				}
 				usedGas += txTask.UsedGas
+				logGas += txTask.UsedGas
+				txCount++
+
 				if txTask.Tx != nil {
 					blobGasUsed += txTask.Tx.GetBlobGas()
+					logBlobGas += txTask.Tx.GetBlobGas()
 				}
 				if txTask.Final {
 					checkReceipts := !cfg.vmConfig.StatelessExec && chainConfig.IsByzantium(txTask.BlockNum) && !cfg.vmConfig.NoReceipts
@@ -886,7 +925,7 @@ Loop:
 			select {
 			case <-logEvery.C:
 				stepsInDB := rawdbhelpers.IdxStepsCountV3(applyTx)
-				progress.Log(rs, in, rws, count, inputBlockNum.Load(), outputBlockNum.GetValueUint64(), outputTxNum.Load(), execRepeats.GetValueUint64(), stepsInDB, shouldGenerateChangesets)
+				progress.Log("", rs, in, rws, count, logGas, logBlobGas, inputBlockNum.Load(), outputBlockNum.GetValueUint64(), outputTxNum.Load(), execRepeats.GetValueUint64(), stepsInDB, shouldGenerateChangesets)
 				//if applyTx.(state2.HasAggTx).AggTx().(*state2.AggregatorRoTx).CanPrune(applyTx, outputTxNum.Load()) {
 				//	//small prune cause MDBX_TXN_FULL
 				//	if _, err := applyTx.(state2.HasAggTx).AggTx().(*state2.AggregatorRoTx).PruneSmallBatches(ctx, 10*time.Hour, applyTx); err != nil {
