@@ -121,10 +121,10 @@ func TestBridge(t *testing.T) {
 	res, err := b.Events(ctx, 4)
 	require.NoError(t, err)
 
-	event1Data, err := event1.MarshallValue()
+	event1Data, err := event1.MarshallBytes()
 	require.NoError(t, err)
 
-	event2Data, err := event2.MarshallValue()
+	event2Data, err := event2.MarshallBytes()
 	require.NoError(t, err)
 
 	require.Equal(t, 2, len(res))               // have first two events
@@ -217,7 +217,7 @@ func TestBridge_Unwind(t *testing.T) {
 	err = b.ProcessNewBlocks(ctx, blocks)
 	require.NoError(t, err)
 
-	event1Data, err := event1.MarshallValue()
+	event1Data, err := event1.MarshallBytes()
 	require.NoError(t, err)
 
 	res, err := b.Events(ctx, 4)

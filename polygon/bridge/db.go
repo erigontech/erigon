@@ -224,7 +224,7 @@ func LastEventIDWithinWindow(tx kv.Tx, fromID uint64, toTime time.Time) (uint64,
 		}
 
 		var event heimdall.EventRecordWithTime
-		if err := event.UnmarshallValue(v); err != nil {
+		if err := event.UnmarshallBytes(v); err != nil {
 			return 0, err
 		}
 
@@ -253,13 +253,12 @@ func (s *MdbxStore) PutEvents(ctx context.Context, events []*heimdall.EventRecor
 
 func PutEvents(tx kv.RwTx, events []*heimdall.EventRecordWithTime) error {
 	for _, event := range events {
-		v, err := event.MarshallValue()
+		v, err := event.MarshallBytes()
 		if err != nil {
 			return err
 		}
 
-		k := make([]byte, 8)
-		binary.BigEndian.PutUint64(k, event.ID)
+		k := event.MarshallIdBytes()
 		err = tx.Put(kv.BorEvents, k, v)
 		if err != nil {
 			return err

@@ -496,13 +496,13 @@ func fetchAndWriteHeimdallStateSyncEvents(
 			)
 		}
 
-		data, err := eventRecord.MarshallValue()
+		data, err := eventRecord.MarshallBytes()
 		if err != nil {
 			logger.Error(fmt.Sprintf("[%s] Unable to pack txn for commitState", logPrefix), "err", err)
 			return lastStateSyncEventID, i, time.Since(fetchStart), err
 		}
 
-		eventIdBuf := eventRecord.MarshallKey()
+		eventIdBuf := eventRecord.MarshallIdBytes()
 		if err = tx.Put(kv.BorEvents, eventIdBuf[:], data); err != nil {
 			return lastStateSyncEventID, i, time.Since(fetchStart), err
 		}
@@ -510,7 +510,7 @@ func fetchAndWriteHeimdallStateSyncEvents(
 		if !wroteIndex {
 			var blockNumBuf [8]byte
 			binary.BigEndian.PutUint64(blockNumBuf[:], blockNum)
-			eventIdBuf = eventRecord.MarshallKey()
+			eventIdBuf = eventRecord.MarshallIdBytes()
 			if err = tx.Put(kv.BorEventNums, blockNumBuf[:], eventIdBuf[:]); err != nil {
 				return lastStateSyncEventID, i, time.Since(fetchStart), err
 			}

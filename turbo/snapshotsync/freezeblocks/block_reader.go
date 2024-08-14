@@ -1423,7 +1423,7 @@ func (r *BlockReader) EventsByIdFromSnapshot(from uint64, to time.Time, limit in
 
 			raw := rlp.RawValue(common.Copy(buf[length.Hash+length.BlockNum+8:]))
 			var event heimdall.EventRecordWithTime
-			if err := event.UnmarshallValue(raw); err != nil {
+			if err := event.UnmarshallBytes(raw); err != nil {
 				return nil, false, err
 			}
 

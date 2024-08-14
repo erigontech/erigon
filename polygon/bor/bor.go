@@ -1544,7 +1544,7 @@ func (c *Bor) CommitStates(
 			}
 
 			for _, ev := range merged {
-				data, err := ev.MarshallValue()
+				data, err := ev.MarshallBytes()
 				if err != nil {
 					panic(err)
 				}

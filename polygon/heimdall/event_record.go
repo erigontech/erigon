@@ -72,13 +72,13 @@ func (e *EventRecordWithTime) BuildEventRecord() *EventRecord {
 	}
 }
 
-func (e *EventRecordWithTime) MarshallKey() []byte {
+func (e *EventRecordWithTime) MarshallIdBytes() []byte {
 	var id [8]byte
 	binary.BigEndian.PutUint64(id[:], e.ID)
 	return id[:]
 }
 
-func (e *EventRecordWithTime) MarshallValue() ([]byte, error) {
+func (e *EventRecordWithTime) MarshallBytes() ([]byte, error) {
 	eventRecordWithoutTime := e.BuildEventRecord()
 	rlpBytes, err := rlp.EncodeToBytes(eventRecordWithoutTime)
 	if err != nil {
@@ -94,7 +94,7 @@ func (e *EventRecordWithTime) MarshallValue() ([]byte, error) {
 	return packedBytes, nil
 }
 
-func (e *EventRecordWithTime) UnmarshallValue(v []byte) error {
+func (e *EventRecordWithTime) UnmarshallBytes(v []byte) error {
 	stateContract := borabi.StateReceiverContractABI()
 	commitStateInputs := stateContract.Methods["commitState"].Inputs
 	methodId := stateContract.Methods["commitState"].ID
