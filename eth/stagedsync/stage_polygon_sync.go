@@ -1115,11 +1115,21 @@ func (s polygonSyncStageBridgeStore) LastProcessedEventID(ctx context.Context) (
 
 func (s polygonSyncStageBridgeStore) LastEventIDWithinWindow(ctx context.Context, fromID uint64, toTime time.Time, stateContract abi.ABI) (uint64, error) {
 	type response struct {
-		id  uint64
-		err error
+		id    uint64
+		empty bool
+		err   error
 	}
 
 	r, err := awaitTxAction(ctx, s.txActionStream, func(tx kv.RwTx, responseStream chan<- response) error {
+		count, err := tx.Count(kv.BorEvents)
+		if err != nil {
+			responseStream <- response{err: err}
+			return nil
+		}
+		if count == 0 {
+			responseStream <- response{empty: true}
+			return nil
+		}
 		id, err := bridge.LastEventIDWithinWindow(tx, fromID, toTime, stateContract)
 		responseStream <- response{id: id, err: err}
 		return nil
@@ -1130,7 +1140,7 @@ func (s polygonSyncStageBridgeStore) LastEventIDWithinWindow(ctx context.Context
 	if r.err != nil {
 		return 0, err
 	}
-	if r.id == 0 {
+	if r.empty {
 		return s.eventReader.LastFrozenEventId(), nil
 	}
 
