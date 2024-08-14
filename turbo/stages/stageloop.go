@@ -73,7 +73,7 @@ func StageLoop(
 ) {
 	defer close(waitForDone)
 
-	if err := ProcessFrozenBlocks(ctx, db, blockReader, sync, hook, inSynced); err != nil {
+	if err := ProcessFrozenBlocks(ctx, db, blockReader, sync, hook); err != nil {
 		if err != nil {
 			if errors.Is(err, libcommon.ErrStopped) || errors.Is(err, context.Canceled) {
 				return
@@ -133,13 +133,13 @@ func StageLoop(
 }
 
 // ProcessFrozenBlocks - withuot global rwtx
-func ProcessFrozenBlocks(ctx context.Context, db kv.RwDB, blockReader services.FullBlockReader, sync *stagedsync.Sync, hook *Hook, inSync bool) error {
+func ProcessFrozenBlocks(ctx context.Context, db kv.RwDB, blockReader services.FullBlockReader, sync *stagedsync.Sync, hook *Hook) error {
 	sawZeroBlocksTimes := 0
 	initialCycle, firstCycle := true, true
 	for {
 		if hook != nil {
 			if err := db.View(ctx, func(tx kv.Tx) (err error) {
-				err = hook.BeforeRun(tx, inSync)
+				err = hook.BeforeRun(tx, false)
 				return err
 			}); err != nil {
 				return err
