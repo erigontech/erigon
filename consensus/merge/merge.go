@@ -214,7 +214,7 @@ func (s *Merge) FinalizeAndAssemble(config *chain.Config, header *types.Header, 
 			rs = make(types.Requests, 0)
 		}
 	}
-	return types.NewBlock(header, outTxs, uncles, outReceipts, withdrawals, rs), outTxs, outReceipts, nil
+	return types.NewBlockForAsembling(header, outTxs, uncles, outReceipts, withdrawals, rs), outTxs, outReceipts, nil
 }
 
 func (s *Merge) SealHash(header *types.Header) (hash libcommon.Hash) {
@@ -307,7 +307,7 @@ func (s *Merge) verifyHeader(chain consensus.ChainHeaderReader, header, parent *
 }
 
 func (s *Merge) Seal(chain consensus.ChainHeaderReader, block *types.Block, results chan<- *types.Block, stop <-chan struct{}) error {
-	if !misc.IsPoSHeader(block.Header()) {
+	if !misc.IsPoSHeader(block.HeaderNoCopy()) {
 		return s.eth1Engine.Seal(chain, block, results, stop)
 	}
 	return nil
