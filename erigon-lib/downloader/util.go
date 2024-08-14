@@ -301,7 +301,7 @@ func AllTorrentSpecs(dirs datadir.Dirs, torrentFiles *AtomicTorrentFS) (res []*t
 // if $DOWNLOADER_ONLY_BLOCKS!="" filters out all non-v1 snapshots
 func IsSnapNameAllowed(name string) bool {
 	if dbg.DownloaderOnlyBlocks {
-		for _, p := range []string{"domain", "history", "idx"} {
+		for _, p := range []string{"domain", "history", "idx", "accessor"} {
 			if strings.HasPrefix(name, p) {
 				return false
 			}

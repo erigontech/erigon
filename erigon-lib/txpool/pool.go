@@ -513,7 +513,13 @@ func (p *TxPool) OnNewBlock(ctx context.Context, stateChanges *remote.StateChang
 	return nil
 }
 
-func (p *TxPool) processRemoteTxs(ctx context.Context) error {
+func (p *TxPool) processRemoteTxs(ctx context.Context) (err error) {
+	defer func() {
+		if r := recover(); r != nil {
+			err = fmt.Errorf("panic: %v\n%s", r, stack.Trace().String())
+		}
+	}()
+
 	if !p.Started() {
 		return errors.New("txpool not started yet")
 	}
