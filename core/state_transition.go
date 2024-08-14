@@ -26,7 +26,6 @@ import (
 
 	"github.com/holiman/uint256"
 
-	"github.com/erigontech/erigon-lib/common"
 	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/fixedgas"
 	"github.com/erigontech/erigon-lib/log/v3"
@@ -357,7 +356,7 @@ func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (*evmtype
 
 	// set code tx
 	auths := msg.Authorizations()
-	verifiedAuthorities := make([]common.Address, 0)
+	verifiedAuthorities := make([]libcommon.Address, 0)
 	if len(auths) > 0 {
 		var b [33]byte
 		data := bytes.NewBuffer(nil)
