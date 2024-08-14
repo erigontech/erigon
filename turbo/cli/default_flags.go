@@ -187,6 +187,7 @@ var DefaultFlags = []cli.Flag{
 	&utils.L1MaticContractAddressFlag,
 	&utils.L1FirstBlockFlag,
 	&utils.RpcRateLimitsFlag,
+	&utils.RpcGetBatchWitnessConcurrencyLimitFlag,
 	&utils.DatastreamVersionFlag,
 	&utils.RebuildTreeAfterFlag,
 	&utils.IncrementTreeAlways,

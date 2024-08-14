@@ -65,6 +65,8 @@ type ZkEvmAPI interface {
 	GetExitRootTable(ctx context.Context) ([]l1InfoTreeData, error)
 }
 
+const getBatchWitness = "getBatchWitness"
+
 // APIImpl is implementation of the ZkEvmAPI interface based on remote Db access
 type ZkEvmAPIImpl struct {
 	ethApi *APIImpl
@@ -74,6 +76,17 @@ type ZkEvmAPIImpl struct {
 	config          *ethconfig.Config
 	l1Syncer        *syncer.L1Syncer
 	l2SequencerUrl  string
+	semaphores      map[string]chan struct{}
+}
+
+func (api *ZkEvmAPIImpl) initializeSemaphores(functionLimits map[string]int) {
+	api.semaphores = make(map[string]chan struct{})
+
+	for funcName, limit := range functionLimits {
+		if limit != 0 {
+			api.semaphores[funcName] = make(chan struct{}, limit)
+		}
+	}
 }
 
 // NewEthAPI returns ZkEvmAPIImpl instance
@@ -85,7 +98,8 @@ func NewZkEvmAPI(
 	l1Syncer *syncer.L1Syncer,
 	l2SequencerUrl string,
 ) *ZkEvmAPIImpl {
-	return &ZkEvmAPIImpl{
+
+	a := &ZkEvmAPIImpl{
 		ethApi:          base,
 		db:              db,
 		ReturnDataLimit: returnDataLimit,
@@ -93,6 +107,12 @@ func NewZkEvmAPI(
 		l1Syncer:        l1Syncer,
 		l2SequencerUrl:  l2SequencerUrl,
 	}
+
+	a.initializeSemaphores(map[string]int{
+		getBatchWitness: zkConfig.Zk.RpcGetBatchWitnessConcurrencyLimit,
+	})
+
+	return a
 }
 
 // ConsolidatedBlockNumber returns the latest consolidated block number
@@ -836,6 +856,18 @@ func (api *ZkEvmAPIImpl) GetBlockRangeWitness(ctx context.Context, startBlockNrO
 }
 
 func (api *ZkEvmAPIImpl) getBatchWitness(ctx context.Context, tx kv.Tx, batchNum uint64, debug bool, mode WitnessMode) (hexutility.Bytes, error) {
+
+	// limit in-flight requests by name
+	semaphore := api.semaphores[getBatchWitness]
+	if semaphore != nil {
+		select {
+		case semaphore <- struct{}{}:
+			defer func() { <-semaphore }()
+		default:
+			return nil, fmt.Errorf("busy")
+		}
+	}
+
 	if api.ethApi.historyV3(tx) {
 		return nil, fmt.Errorf("not supported by Erigon3")
 	}

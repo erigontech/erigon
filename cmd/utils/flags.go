@@ -527,6 +527,11 @@ var (
 		Usage: "RPC rate limit in requests per second.",
 		Value: 0,
 	}
+	RpcGetBatchWitnessConcurrencyLimitFlag = cli.IntFlag{
+		Name:  "zkevm.rpc-get-batch-witness-concurrency-limit",
+		Usage: "The maximum number of concurrent requests to the executor for getBatchWitness.",
+		Value: 1,
+	}
 	DatastreamVersionFlag = cli.IntFlag{
 		Name:  "zkevm.datastream-version",
 		Usage: "Stream version indicator 1: PreBigEndian, 2: BigEndian.",
