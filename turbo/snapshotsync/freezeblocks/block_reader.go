@@ -1407,7 +1407,7 @@ func (r *BlockReader) EventsByIdFromSnapshot(from uint64, to time.Time, limit in
 
 	var buf []byte
 	var result []*heimdall.EventRecordWithTime
-	stateContract := borabi.StateReceiverContract()
+	stateContract := borabi.StateReceiverContractABI()
 	maxTime := false
 
 	for _, sn := range segments {

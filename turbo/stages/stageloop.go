@@ -735,7 +735,7 @@ func NewPolygonSyncStages(
 			statusDataProvider,
 			blockReader,
 			stopNode,
-			borabi.StateReceiverContract(),
+			borabi.StateReceiverContractABI(),
 			config.LoopBlockLimit,
 		),
 		stagedsync.StageSendersCfg(db, chainConfig, config.Sync, false, config.Dirs.Tmp, config.Prune, blockReader, nil),

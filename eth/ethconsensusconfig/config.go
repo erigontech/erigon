@@ -100,7 +100,7 @@ func CreateConsensusEngine(ctx context.Context, nodeConfig *nodecfg.Config, chai
 		// Then, bor != nil will also be enabled for ethash and clique. Only enable Bor for real if there is a validator contract present.
 		if chainConfig.Bor != nil && consensusCfg.ValidatorContract != "" {
 			stateReceiver := bor.NewStateReceiver(consensusCfg.StateReceiverContract)
-			spanner := bor.NewChainSpanner(borabi.ValidatorSetContract(), chainConfig, withoutHeimdall, logger)
+			spanner := bor.NewChainSpanner(borabi.ValidatorSetContractABI(), chainConfig, withoutHeimdall, logger)
 
 			var err error
 			var db kv.RwDB

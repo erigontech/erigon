@@ -103,7 +103,7 @@ func StageBorHeimdallCfg(
 		blockReader:      blockReader,
 		hd:               hd,
 		penalize:         penalize,
-		stateReceiverABI: borabi.StateReceiverContract(),
+		stateReceiverABI: borabi.StateReceiverContractABI(),
 		recents:          recents,
 		signatures:       signatures,
 		recordWaypoints:  recordWaypoints,

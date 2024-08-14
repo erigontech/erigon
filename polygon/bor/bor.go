@@ -1546,7 +1546,7 @@ func (c *Bor) CommitStates(
 			}
 
 			for _, ev := range merged {
-				data, err := ev.Pack(borabi.StateReceiverContract())
+				data, err := ev.Pack(borabi.StateReceiverContractABI())
 				if err != nil {
 					panic(err)
 				}

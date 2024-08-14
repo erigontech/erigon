@@ -315,7 +315,7 @@ func newValidator(t *testing.T, heimdall *test_heimdall, blocks map[uint64]*type
 		memdb.New(""),
 		nil, /* blockReader */
 		&spanner{
-			ChainSpanner:     bor.NewChainSpanner(borabi.ValidatorSetContract(), heimdall.chainConfig, false, logger),
+			ChainSpanner:     bor.NewChainSpanner(borabi.ValidatorSetContractABI(), heimdall.chainConfig, false, logger),
 			validatorAddress: validatorAddress,
 		},
 		heimdall,

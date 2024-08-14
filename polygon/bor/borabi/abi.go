@@ -28,26 +28,26 @@ const (
 )
 
 var (
-	validatorSet  abi.ABI
-	stateReceiver abi.ABI
+	validatorSetABI  abi.ABI
+	stateReceiverABI abi.ABI
 )
 
 func init() {
 	var err error
 
-	if validatorSet, err = abi.JSON(strings.NewReader(validatorSetABIJSON)); err != nil {
+	if validatorSetABI, err = abi.JSON(strings.NewReader(validatorSetABIJSON)); err != nil {
 		panic(err)
 	}
 
-	if stateReceiver, err = abi.JSON(strings.NewReader(stateReceiverABIJSON)); err != nil {
+	if stateReceiverABI, err = abi.JSON(strings.NewReader(stateReceiverABIJSON)); err != nil {
 		panic(err)
 	}
 }
 
-func ValidatorSetContract() abi.ABI {
-	return validatorSet
+func ValidatorSetContractABI() abi.ABI {
+	return validatorSetABI
 }
 
-func StateReceiverContract() abi.ABI {
-	return stateReceiver
+func StateReceiverContractABI() abi.ABI {
+	return stateReceiverABI
 }

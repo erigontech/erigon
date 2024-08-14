@@ -67,7 +67,7 @@ func TestBridge(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)
 
-	stateReceiverABI := borabi.StateReceiverContract()
+	stateReceiverABI := borabi.StateReceiverContractABI()
 	heimdallClient, b := setup(t, stateReceiverABI)
 
 	event1 := &heimdall.EventRecordWithTime{
@@ -159,7 +159,7 @@ func TestBridge_Unwind(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)
 
-	stateReceiverABI := borabi.StateReceiverContract()
+	stateReceiverABI := borabi.StateReceiverContractABI()
 	heimdallClient, b := setup(t, stateReceiverABI)
 
 	event1 := &heimdall.EventRecordWithTime{
