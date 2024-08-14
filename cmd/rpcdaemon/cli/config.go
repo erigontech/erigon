@@ -74,7 +74,6 @@ import (
 	"github.com/erigontech/erigon/node"
 	"github.com/erigontech/erigon/node/nodecfg"
 	"github.com/erigontech/erigon/polygon/bor"
-	"github.com/erigontech/erigon/polygon/bor/borcfg"
 	"github.com/erigontech/erigon/rpc"
 	"github.com/erigontech/erigon/rpc/rpccfg"
 	"github.com/erigontech/erigon/turbo/debug"
@@ -510,13 +509,7 @@ func RemoteServices(ctx context.Context, cfg *httpcfg.HttpCfg, logger log.Logger
 					return nil, nil, nil, nil, nil, nil, nil, ff, err
 				}
 				// Skip the compatibility check, until we have a schema in erigon-lib
-
-				borConfig := cc.Bor.(*borcfg.BorConfig)
-
-				engine = bor.NewRo(cc, borKv, blockReader,
-					bor.NewChainSpanner(bor.GenesisContractValidatorSetABI(), cc, true, logger),
-					bor.NewGenesisContractsClient(cc, borConfig.ValidatorContract, borConfig.StateReceiverContract, logger), logger)
-
+				engine = bor.NewRo(cc, borKv, blockReader, logger)
 			default:
 				engine = mainnet.NewMainnetConsensus()
 			}
@@ -935,11 +928,7 @@ func (e *remoteConsensusEngine) init(db kv.RoDB, blockReader services.FullBlockR
 			return false
 		}
 
-		borConfig := cc.Bor.(*borcfg.BorConfig)
-
-		e.engine = bor.NewRo(cc, borKv, blockReader,
-			bor.NewChainSpanner(bor.GenesisContractValidatorSetABI(), cc, true, logger),
-			bor.NewGenesisContractsClient(cc, borConfig.ValidatorContract, borConfig.StateReceiverContract, logger), logger)
+		e.engine = bor.NewRo(cc, borKv, blockReader, logger)
 	} else {
 		e.engine = mainnet.NewMainnetConsensus()
 	}
