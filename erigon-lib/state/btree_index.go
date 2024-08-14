@@ -810,7 +810,14 @@ func BuildBtreeIndexWithDecompressor(indexPath string, kv *seg.Decompressor, com
 }
 
 // For now, M is not stored inside index file.
-func OpenBtreeIndexWithDecompressor(indexPath string, M uint64, kv *seg.Decompressor, compress FileCompression) (*BtIndex, error) {
+func OpenBtreeIndexWithDecompressor(indexPath string, M uint64, kv *seg.Decompressor, compress FileCompression) (bt *BtIndex, err error) {
+	defer func() {
+		// recover from panic if one occurred. Set err to nil if no panic
+		if r := recover(); r != nil {
+			err = fmt.Errorf("panic: %v", r)
+		}
+	}()
+
 	s, err := os.Stat(indexPath)
 	if err != nil {
 		return nil, err
