@@ -103,7 +103,7 @@ func (rw *Worker) ResetState(rs *state.StateV3, accumulator *shards.Accumulator)
 	if rw.background {
 		rw.SetReader(state.NewStateReaderParallelV3(rs.Domains()))
 	} else {
-		rw.SetReader(state.NewStateReaderV3(rs.Domains()))
+		rw.SetReader(state.NewReaderV3(rs.Domains()))
 	}
 	rw.stateWriter = state.NewStateWriterV3(rs, accumulator)
 }
@@ -150,7 +150,7 @@ func (rw *Worker) SetReader(reader state.ResettableStateReader) {
 	switch reader.(type) {
 	case *state.HistoryReaderV3:
 		rw.historyMode = true
-	case *state.StateReaderV3:
+	case *state.ReaderV3:
 		rw.historyMode = false
 	default:
 		rw.historyMode = false
@@ -168,7 +168,7 @@ func (rw *Worker) RunTxTaskNoLock(txTask *state.TxTask) {
 		if rw.background {
 			rw.SetReader(state.NewStateReaderParallelV3(rw.rs.Domains()))
 		} else {
-			rw.SetReader(state.NewStateReaderV3(rw.rs.Domains()))
+			rw.SetReader(state.NewReaderV3(rw.rs.Domains()))
 		}
 	}
 	if rw.background && rw.chainTx == nil {

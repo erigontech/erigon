@@ -156,7 +156,7 @@ func CreateHistoryStateReader(tx kv.Tx, blockNumber uint64, txnIndex int, chainN
 }
 
 func NewLatestStateReader(tx kv.Tx) state.StateReader {
-	return state.NewStateReaderV3(tx.(kv.TemporalGetter))
+	return state.NewReaderV3(tx.(kv.TemporalGetter))
 }
 func NewLatestStateWriter(txc wrap.TxContainer, blockNum uint64) state.StateWriter {
 	domains := txc.Doms

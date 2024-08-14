@@ -577,29 +577,29 @@ func (w *StateWriterV3) CreateContract(address common.Address) error {
 	return nil
 }
 
-type StateReaderV3 struct {
+type ReaderV3 struct {
 	txNum     uint64
 	trace     bool
 	tx        kv.TemporalGetter
 	composite []byte
 }
 
-func NewStateReaderV3(tx kv.TemporalGetter) *StateReaderV3 {
-	return &StateReaderV3{
+func NewReaderV3(tx kv.TemporalGetter) *ReaderV3 {
+	return &ReaderV3{
 		//trace:     true,
 		tx:        tx,
 		composite: make([]byte, 20+32),
 	}
 }
 
-func (r *StateReaderV3) DiscardReadList()                     {}
-func (r *StateReaderV3) SetTxNum(txNum uint64)                { r.txNum = txNum }
-func (r *StateReaderV3) SetTx(tx kv.Tx)                       {}
-func (r *StateReaderV3) ReadSet() map[string]*libstate.KvList { return nil }
-func (r *StateReaderV3) SetTrace(trace bool)                  { r.trace = trace }
-func (r *StateReaderV3) ResetReadSet()                        {}
+func (r *ReaderV3) DiscardReadList()                     {}
+func (r *ReaderV3) SetTxNum(txNum uint64)                { r.txNum = txNum }
+func (r *ReaderV3) SetTx(tx kv.Tx)                       {}
+func (r *ReaderV3) ReadSet() map[string]*libstate.KvList { return nil }
+func (r *ReaderV3) SetTrace(trace bool)                  { r.trace = trace }
+func (r *ReaderV3) ResetReadSet()                        {}
 
-func (r *StateReaderV3) ReadAccountData(address common.Address) (*accounts.Account, error) {
+func (r *ReaderV3) ReadAccountData(address common.Address) (*accounts.Account, error) {
 	enc, _, err := r.tx.DomainGet(kv.AccountsDomain, address[:], nil)
 	if err != nil {
 		return nil, err
@@ -621,7 +621,7 @@ func (r *StateReaderV3) ReadAccountData(address common.Address) (*accounts.Accou
 	return &acc, nil
 }
 
-func (r *StateReaderV3) ReadAccountStorage(address common.Address, incarnation uint64, key *common.Hash) ([]byte, error) {
+func (r *ReaderV3) ReadAccountStorage(address common.Address, incarnation uint64, key *common.Hash) ([]byte, error) {
 	r.composite = append(append(r.composite[:0], address[:]...), key.Bytes()...)
 	enc, _, err := r.tx.DomainGet(kv.StorageDomain, r.composite, nil)
 	if err != nil {
@@ -637,7 +637,7 @@ func (r *StateReaderV3) ReadAccountStorage(address common.Address, incarnation u
 	return enc, nil
 }
 
-func (r *StateReaderV3) ReadAccountCode(address common.Address, incarnation uint64, codeHash common.Hash) ([]byte, error) {
+func (r *ReaderV3) ReadAccountCode(address common.Address, incarnation uint64, codeHash common.Hash) ([]byte, error) {
 	enc, _, err := r.tx.DomainGet(kv.CodeDomain, address[:], nil)
 	if err != nil {
 		return nil, err
@@ -648,7 +648,7 @@ func (r *StateReaderV3) ReadAccountCode(address common.Address, incarnation uint
 	return enc, nil
 }
 
-func (r *StateReaderV3) ReadAccountCodeSize(address common.Address, incarnation uint64, codeHash common.Hash) (int, error) {
+func (r *ReaderV3) ReadAccountCodeSize(address common.Address, incarnation uint64, codeHash common.Hash) (int, error) {
 	enc, _, err := r.tx.DomainGet(kv.CodeDomain, address[:], nil)
 	if err != nil {
 		return 0, err
@@ -660,7 +660,7 @@ func (r *StateReaderV3) ReadAccountCodeSize(address common.Address, incarnation 
 	return size, nil
 }
 
-func (r *StateReaderV3) ReadAccountIncarnation(address common.Address) (uint64, error) {
+func (r *ReaderV3) ReadAccountIncarnation(address common.Address) (uint64, error) {
 	return 0, nil
 }
 
