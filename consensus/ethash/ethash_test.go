@@ -17,12 +17,12 @@
 package ethash
 
 import (
-	"github.com/ledgerwatch/erigon-lib/common/hexutil"
 	"math/big"
 	"testing"
 	"time"
 
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/common/hexutil"
 
 	"github.com/ledgerwatch/erigon/core/types"
 )
@@ -37,11 +37,12 @@ func TestRemoteSealer(t *testing.T) {
 	}
 	header := &types.Header{Number: big.NewInt(1), Difficulty: big.NewInt(100)}
 	block := types.NewBlockWithHeader(header)
+	blockWithReceipts := &types.BlockWithReceipts{Block: block}
 	sealhash := ethash.SealHash(header)
 
 	// Push new work.
-	results := make(chan *types.Block)
-	if err := ethash.Seal(nil, block, results, nil); err != nil {
+	results := make(chan *types.BlockWithReceipts)
+	if err := ethash.Seal(nil, blockWithReceipts, results, nil); err != nil {
 		t.Fatal(err)
 	}
 	var (
@@ -58,8 +59,9 @@ func TestRemoteSealer(t *testing.T) {
 	// Push new block with same block number to replace the original one.
 	header = &types.Header{Number: big.NewInt(1), Difficulty: big.NewInt(1000)}
 	block = types.NewBlockWithHeader(header)
+	blockWithReceipts = &types.BlockWithReceipts{Block: block}
 	sealhash = ethash.SealHash(header)
-	err = ethash.Seal(nil, block, results, nil)
+	err = ethash.Seal(nil, blockWithReceipts, results, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

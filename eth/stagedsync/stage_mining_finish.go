@@ -64,16 +64,12 @@ func SpawnMiningFinishStage(s *StageState, tx kv.RwTx, cfg MiningFinishCfg, quit
 	//}
 	//prev = sealHash
 	cfg.latestBlockBuiltStore.AddBlockBuilt(block)
-	if cfg.miningState.MiningResultPOSCh != nil {
-		cfg.miningState.MiningResultPOSCh <- blockWithReceipts
-		return nil
-	}
 
 	// Tests may set pre-calculated nonce
 	if block.NonceU64() != 0 {
 		// Note: To propose a new signer for Clique consensus, the block nonce should be set to 0xFFFFFFFFFFFFFFFF.
 		if cfg.engine.Type() != chain.CliqueConsensus {
-			cfg.miningState.MiningResultCh <- block
+			cfg.miningState.MiningResultCh <- blockWithReceipts
 			return nil
 		}
 	}
@@ -96,7 +92,7 @@ func SpawnMiningFinishStage(s *StageState, tx kv.RwTx, cfg MiningFinishCfg, quit
 		logger.Trace("No in-flight sealing task.")
 	}
 	chain := ChainReader{Cfg: cfg.chainConfig, Db: tx, BlockReader: cfg.blockReader, Logger: logger}
-	if err := cfg.engine.Seal(chain, block, cfg.miningState.MiningResultCh, cfg.sealCancel); err != nil {
+	if err := cfg.engine.Seal(chain, blockWithReceipts, cfg.miningState.MiningResultCh, cfg.sealCancel); err != nil {
 		logger.Warn("Block sealing failed", "err", err)
 	}
 
