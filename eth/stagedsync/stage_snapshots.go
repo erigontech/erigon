@@ -562,7 +562,7 @@ func SnapshotsPrune(s *PruneState, cfg SnapshotsCfg, ctx context.Context, tx kv.
 
 	}
 
-	pruneLimit := 100
+	pruneLimit := 10
 	if s.CurrentSyncCycle.IsInitialCycle {
 		pruneLimit = 10_000
 	}

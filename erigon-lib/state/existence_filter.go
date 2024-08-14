@@ -121,7 +121,13 @@ func (b *ExistenceFilter) fsync(f *os.File) error {
 	return nil
 }
 
-func OpenExistenceFilter(filePath string) (*ExistenceFilter, error) {
+func OpenExistenceFilter(filePath string) (exFilder *ExistenceFilter, err error) {
+	defer func() {
+		if recover() != nil {
+			err = fmt.Errorf("OpenExistenceFilter: panic, %s", filePath)
+		}
+	}()
+
 	_, fileName := filepath.Split(filePath)
 	f := &ExistenceFilter{FilePath: filePath, FileName: fileName}
 	exists, err := dir.FileExist(filePath)

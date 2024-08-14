@@ -206,11 +206,11 @@ func (s *Sync) onNewBlockEvent(
 
 	newTip := ccBuilder.Tip()
 	if newTip != oldTip {
-		if err = s.execution.InsertBlocks(ctx, newBlocks); err != nil {
+		if err = s.store.InsertBlocks(ctx, newBlocks); err != nil {
 			return err
 		}
 
-		if err = s.execution.UpdateForkChoice(ctx, newTip, ccBuilder.Root()); err != nil {
+		if err = s.commitExecution(ctx, newTip, ccBuilder.Root()); err != nil {
 			return err
 		}
 	}

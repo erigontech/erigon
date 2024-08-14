@@ -45,6 +45,8 @@ func (api *OtterscanAPIImpl) buildSearchResults(ctx context.Context, tx kv.Tempo
 	}
 
 	exec := exec3.NewTraceWorker(tx, chainConfig, api.engine(), api._blockReader, nil)
+	defer exec.Close()
+
 	var blockHash common.Hash
 	var header *types.Header
 	txs := make([]*RPCTransaction, 0, pageSize)
