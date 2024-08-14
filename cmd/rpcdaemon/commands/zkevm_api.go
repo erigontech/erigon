@@ -378,7 +378,12 @@ func generateBatchData(
 	batchBlocks []*eritypes.Block,
 	forkId uint64,
 ) (batchL2Data []byte, err error) {
-	lastBlockNoInPreviousBatch := batchBlocks[0].NumberU64() - 1
+
+	lastBlockNoInPreviousBatch := uint64(0)
+	if batchBlocks[0].NumberU64() != 0 {
+		lastBlockNoInPreviousBatch = batchBlocks[0].NumberU64() - 1
+	}
+
 	lastBlockInPreviousBatch, err := rawdb.ReadBlockByNumber(tx, lastBlockNoInPreviousBatch)
 	if err != nil {
 		return nil, err
@@ -469,7 +474,7 @@ func (api *ZkEvmAPIImpl) GetBatchByNumber(ctx context.Context, batchNumber rpc.B
 	if err != nil {
 		return nil, err
 	}
-	if !found {
+	if !found && batchNo != 0 {
 		return nil, nil
 	}
 
@@ -1408,12 +1413,10 @@ func populateBatchDetails(batch *types.Batch) (json.RawMessage, error) {
 	jBatch["localExitRoot"] = batch.LocalExitRoot
 	jBatch["sendSequencesTxHash"] = batch.SendSequencesTxHash
 	jBatch["verifyBatchTxHash"] = batch.VerifyBatchTxHash
+	jBatch["accInputHash"] = batch.AccInputHash
 
 	if batch.ForcedBatchNumber != nil {
 		jBatch["forcedBatchNumber"] = batch.ForcedBatchNumber
-	}
-	if batch.AccInputHash != (common.Hash{}) {
-		jBatch["accInputHash"] = batch.AccInputHash
 	}
 	jBatch["closed"] = batch.Closed
 	if len(batch.BatchL2Data) > 0 {
