@@ -1032,10 +1032,6 @@ func (e *remoteConsensusEngine) CalcDifficulty(_ consensus.ChainHeaderReader, _ 
 	panic("remoteConsensusEngine.CalcDifficulty not supported")
 }
 
-func (e *remoteConsensusEngine) GenerateSeal(_ consensus.ChainHeaderReader, _ *types.Header, _ *types.Header, _ consensus.Call) []byte {
-	panic("remoteConsensusEngine.GenerateSeal not supported")
-}
-
 func (e *remoteConsensusEngine) APIs(_ consensus.ChainHeaderReader) []rpc.API {
 	panic("remoteConsensusEngine.APIs not supported")
 }

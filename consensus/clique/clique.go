@@ -481,10 +481,6 @@ func (c *Clique) Seal(chain consensus.ChainHeaderReader, blockWithReceipts *type
 	return nil
 }
 
-func (c *Clique) GenerateSeal(chain consensus.ChainHeaderReader, currnt, parent *types.Header, call consensus.Call) []byte {
-	return nil
-}
-
 // CalcDifficulty is the difficulty adjustment algorithm. It returns the difficulty
 // that a new block should have:
 // * DIFF_NOTURN(2) if BLOCK_NUMBER % SIGNER_COUNT != SIGNER_INDEX

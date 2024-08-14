@@ -612,7 +612,6 @@ func makeHeader(chain consensus.ChainReader, parent *types.Block, state *state.I
 		parent.UncleHash(),
 		parent.Header().AuRaStep,
 	)
-	header.AuRaSeal = engine.GenerateSeal(chain, header, parent.Header(), nil)
 
 	return header
 }

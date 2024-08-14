@@ -195,8 +195,6 @@ type EngineWriter interface {
 	CalcDifficulty(chain ChainHeaderReader, time, parentTime uint64, parentDifficulty *big.Int, parentNumber uint64,
 		parentHash, parentUncleHash libcommon.Hash, parentAuRaStep uint64) *big.Int
 
-	GenerateSeal(chain ChainHeaderReader, currnt, parent *types.Header, call Call) []byte
-
 	// APIs returns the RPC APIs this consensus engine provides.
 	APIs(chain ChainHeaderReader) []rpc.API
 }
