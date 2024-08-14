@@ -13,6 +13,7 @@ import (
 	dstypes "github.com/ledgerwatch/erigon/zk/datastream/types"
 	"github.com/ledgerwatch/erigon/zk/types"
 	"github.com/ledgerwatch/log/v3"
+	"time"
 )
 
 const L1VERIFICATIONS = "hermez_l1Verifications"                        // l1blockno, batchno -> l1txhash
@@ -50,6 +51,7 @@ const LOCAL_EXIT_ROOTS = "local_exit_roots"                             // batch
 const ROllUP_TYPES_FORKS = "rollup_types_forks"                         // rollup type id -> fork id
 const FORK_HISTORY = "fork_history"                                     // index -> fork id + last verified batch
 const JUST_UNWOUND = "just_unwound"                                     // batch number -> true
+const ERIGON_VERSIONS = "erigon_versions"                               // erigon version -> timestamp of startup
 
 var HermezDbTables = []string{
 	L1VERIFICATIONS,
@@ -87,6 +89,7 @@ var HermezDbTables = []string{
 	ROllUP_TYPES_FORKS,
 	FORK_HISTORY,
 	JUST_UNWOUND,
+	ERIGON_VERSIONS,
 }
 
 type HermezDb struct {
@@ -1704,4 +1707,38 @@ func (db *HermezDbReader) GetAllForkHistory() ([]uint64, []uint64, error) {
 	}
 
 	return forks, batches, nil
+}
+
+func (db *HermezDbReader) GetVersionHistory() (map[string]time.Time, error) {
+	c, err := db.tx.Cursor(ERIGON_VERSIONS)
+	if err != nil {
+		return nil, nil
+	}
+	defer c.Close()
+
+	versions := make(map[string]time.Time)
+	for k, v, err := c.First(); k != nil; k, v, err = c.Next() {
+		if err != nil {
+			return nil, err
+		}
+		tsInt := BytesToUint64(v)
+		versions[string(k)] = time.Unix(int64(tsInt), 0)
+	}
+
+	return versions, nil
+}
+
+// WriteErigonVersion adds the erigon version to the db, returning true if written, false if already exists
+func (db *HermezDb) WriteErigonVersion(version string, timestamp time.Time) (bool, error) {
+	// check if already exists
+	v, err := db.tx.GetOne(ERIGON_VERSIONS, []byte(version))
+	if err != nil {
+		return false, err
+	}
+	if v != nil {
+		return false, nil
+	}
+
+	// write new version
+	return true, db.tx.Put(ERIGON_VERSIONS, []byte(version), Uint64ToBytes(uint64(timestamp.Unix())))
 }

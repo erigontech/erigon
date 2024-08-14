@@ -124,6 +124,7 @@ import (
 	txpool2 "github.com/ledgerwatch/erigon/zk/txpool"
 	"github.com/ledgerwatch/erigon/zk/witness"
 	"github.com/ledgerwatch/erigon/zkevm/etherman"
+	"github.com/ledgerwatch/erigon/zk/utils"
 )
 
 // Config contains the configuration options of the ETH protocol.
@@ -718,6 +719,12 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 		return nil, err
 	}
 
+	// record erigon version
+	err = recordStartupVersionInDb(tx)
+	if err != nil {
+		log.Warn("failed to record erigon version in db", "err", err)
+	}
+
 	executionProgress, err := stages.GetStageProgress(tx, stages.Execution)
 	if err != nil {
 		return nil, err
@@ -999,6 +1006,23 @@ func createBuckets(tx kv.RwTx) error {
 		return err
 	}
 
+	return nil
+}
+
+func recordStartupVersionInDb(tx kv.RwTx) error {
+	version := utils.GetVersion()
+
+	hdb := hermez_db.NewHermezDb(tx)
+	written, err := hdb.WriteErigonVersion(version, time.Now())
+	if err != nil {
+		return err
+	}
+
+	if !written {
+		log.Info(fmt.Sprintf("Erigon started at version %s, version already run", version))
+	} else {
+		log.Info(fmt.Sprintf("Erigon started at version %s, for the first time", version))
+	}
 	return nil
 }
 

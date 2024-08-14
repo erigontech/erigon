@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"math/big"
 	"reflect"
-	"strings"
 	"sync"
 	"time"
 
@@ -27,7 +26,6 @@ import (
 	"github.com/ledgerwatch/erigon/core"
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/types"
-	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/rlp"
 	"github.com/ledgerwatch/erigon/rpc"
 	"github.com/ledgerwatch/erigon/turbo/builder"
@@ -35,6 +33,7 @@ import (
 	"github.com/ledgerwatch/erigon/turbo/services"
 	"github.com/ledgerwatch/erigon/turbo/shards"
 	"github.com/ledgerwatch/erigon/turbo/stages/headerdownload"
+	"github.com/ledgerwatch/erigon/zk/utils"
 )
 
 // EthBackendAPIVersion
@@ -196,16 +195,7 @@ func (s *EthBackendServer) ProtocolVersion(_ context.Context, _ *remote.Protocol
 }
 
 func (s *EthBackendServer) ClientVersion(_ context.Context, _ *remote.ClientVersionRequest) (*remote.ClientVersionReply, error) {
-	var version string
-	if strings.Contains(params.GitTag, "tags") || strings.Contains(params.GitTag, "release") {
-		version = params.GitTag[strings.LastIndex(params.GitTag, "/")+1:]
-	} else {
-		if params.GitBranch != "" {
-			version = fmt.Sprintf("2.0-%s-%s", params.GitBranch, params.GitCommit)
-		} else {
-			version = "2.0-dev"
-		}
-	}
+	version := utils.GetVersion()
 	return &remote.ClientVersionReply{NodeName: common.MakeName("cdk-erigon", version)}, nil
 }
 

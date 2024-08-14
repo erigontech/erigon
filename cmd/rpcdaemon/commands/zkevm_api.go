@@ -64,6 +64,7 @@ type ZkEvmAPI interface {
 	TraceTransactionCounters(ctx context.Context, hash common.Hash, config *tracers.TraceConfig_ZkEvm, stream *jsoniter.Stream) error
 	GetBatchCountersByNumber(ctx context.Context, batchNumRpc rpc.BlockNumber) (res json.RawMessage, err error)
 	GetExitRootTable(ctx context.Context) ([]l1InfoTreeData, error)
+	GetVersionHistory(ctx context.Context) (json.RawMessage, error)
 }
 
 const getBatchWitness = "getBatchWitness"
@@ -1060,6 +1061,28 @@ func (api *ZkEvmAPIImpl) GetLatestGlobalExitRoot(ctx context.Context) (common.Ha
 	}
 
 	return ger, nil
+}
+
+func (api *ZkEvmAPIImpl) GetVersionHistory(ctx context.Context) (json.RawMessage, error) {
+	// get values from the db
+	tx, err := api.db.BeginRo(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback()
+
+	hermezDb := hermez_db.NewHermezDbReader(tx)
+	versions, err := hermezDb.GetVersionHistory()
+	if err != nil {
+		return nil, err
+	}
+
+	versionsJson, err := json.Marshal(versions)
+	if err != nil {
+		return nil, err
+	}
+
+	return versionsJson, nil
 }
 
 type l1InfoTreeData struct {
