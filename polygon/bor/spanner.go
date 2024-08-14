@@ -53,6 +53,7 @@ type ChainSpanner struct {
 	withoutHeimdall bool
 }
 
+// TODO is it used?
 func NewChainSpanner(validatorSet ABI, chainConfig *chain.Config, withoutHeimdall bool, logger log.Logger) *ChainSpanner {
 	borConfig := chainConfig.Bor.(*borcfg.BorConfig)
 	return &ChainSpanner{

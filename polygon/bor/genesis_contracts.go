@@ -60,6 +60,7 @@ type GenesisContractsClient struct {
 	logger                log.Logger
 }
 
+// TODO is it used?
 func NewGenesisContractsClient(
 	chainConfig *chain.Config,
 	validatorContract,
