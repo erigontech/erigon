@@ -581,13 +581,100 @@ type StateReaderV3 struct {
 	trace     bool
 	sd        *libstate.SharedDomains
 	composite []byte
+}
+
+func NewStateReaderV3(sd *libstate.SharedDomains) *StateReaderV3 {
+	return &StateReaderV3{
+		//trace:     true,
+		sd:        sd,
+		composite: make([]byte, 20+32),
+	}
+}
+
+func (r *StateReaderV3) DiscardReadList()                     {}
+func (r *StateReaderV3) SetTxNum(txNum uint64)                { r.txNum = txNum }
+func (r *StateReaderV3) SetTx(tx kv.Tx)                       {}
+func (r *StateReaderV3) ReadSet() map[string]*libstate.KvList { return nil }
+func (r *StateReaderV3) SetTrace(trace bool)                  { r.trace = trace }
+func (r *StateReaderV3) ResetReadSet()                        {}
+
+func (r *StateReaderV3) ReadAccountData(address common.Address) (*accounts.Account, error) {
+	enc, _, err := r.sd.DomainGet(kv.AccountsDomain, address[:], nil)
+	if err != nil {
+		return nil, err
+	}
+	if len(enc) == 0 {
+		if r.trace {
+			fmt.Printf("ReadAccountData [%x] => [empty], txNum: %d\n", address, r.txNum)
+		}
+		return nil, nil
+	}
+
+	var acc accounts.Account
+	if err := accounts.DeserialiseV3(&acc, enc); err != nil {
+		return nil, err
+	}
+	if r.trace {
+		fmt.Printf("ReadAccountData [%x] => [nonce: %d, balance: %d, codeHash: %x], txNum: %d\n", address, acc.Nonce, &acc.Balance, acc.CodeHash, r.txNum)
+	}
+	return &acc, nil
+}
+
+func (r *StateReaderV3) ReadAccountStorage(address common.Address, incarnation uint64, key *common.Hash) ([]byte, error) {
+	r.composite = append(append(r.composite[:0], address[:]...), key.Bytes()...)
+	enc, _, err := r.sd.DomainGet(kv.StorageDomain, r.composite, nil)
+	if err != nil {
+		return nil, err
+	}
+	if r.trace {
+		if enc == nil {
+			fmt.Printf("ReadAccountStorage [%x] => [empty], txNum: %d\n", r.composite, r.txNum)
+		} else {
+			fmt.Printf("ReadAccountStorage [%x] => [%x], txNum: %d\n", r.composite, enc, r.txNum)
+		}
+	}
+	return enc, nil
+}
+
+func (r *StateReaderV3) ReadAccountCode(address common.Address, incarnation uint64, codeHash common.Hash) ([]byte, error) {
+	enc, _, err := r.sd.DomainGet(kv.CodeDomain, address[:], nil)
+	if err != nil {
+		return nil, err
+	}
+	if r.trace {
+		fmt.Printf("ReadAccountCode [%x] => [%x], txNum: %d\n", address, enc, r.txNum)
+	}
+	return enc, nil
+}
+
+func (r *StateReaderV3) ReadAccountCodeSize(address common.Address, incarnation uint64, codeHash common.Hash) (int, error) {
+	enc, _, err := r.sd.DomainGet(kv.CodeDomain, address[:], nil)
+	if err != nil {
+		return 0, err
+	}
+	size := len(enc)
+	if r.trace {
+		fmt.Printf("ReadAccountCodeSize [%x] => [%d], txNum: %d\n", address, size, r.txNum)
+	}
+	return size, nil
+}
+
+func (r *StateReaderV3) ReadAccountIncarnation(address common.Address) (uint64, error) {
+	return 0, nil
+}
+
+type StateReaderParallelV3 struct {
+	txNum     uint64
+	trace     bool
+	sd        *libstate.SharedDomains
+	composite []byte
 
 	discardReadList bool
 	readLists       map[string]*libstate.KvList
 }
 
-func NewStateReaderV3(sd *libstate.SharedDomains) *StateReaderV3 {
-	return &StateReaderV3{
+func NewStateReaderParallelV3(sd *libstate.SharedDomains) *StateReaderParallelV3 {
+	return &StateReaderParallelV3{
 		//trace:     true,
 		sd:        sd,
 		readLists: newReadList(),
@@ -595,14 +682,14 @@ func NewStateReaderV3(sd *libstate.SharedDomains) *StateReaderV3 {
 	}
 }
 
-func (r *StateReaderV3) DiscardReadList()                     { r.discardReadList = true }
-func (r *StateReaderV3) SetTxNum(txNum uint64)                { r.txNum = txNum }
-func (r *StateReaderV3) SetTx(tx kv.Tx)                       {}
-func (r *StateReaderV3) ReadSet() map[string]*libstate.KvList { return r.readLists }
-func (r *StateReaderV3) SetTrace(trace bool)                  { r.trace = trace }
-func (r *StateReaderV3) ResetReadSet()                        { r.readLists = newReadList() }
+func (r *StateReaderParallelV3) DiscardReadList()                     { r.discardReadList = true }
+func (r *StateReaderParallelV3) SetTxNum(txNum uint64)                { r.txNum = txNum }
+func (r *StateReaderParallelV3) SetTx(tx kv.Tx)                       {}
+func (r *StateReaderParallelV3) ReadSet() map[string]*libstate.KvList { return r.readLists }
+func (r *StateReaderParallelV3) SetTrace(trace bool)                  { r.trace = trace }
+func (r *StateReaderParallelV3) ResetReadSet()                        { r.readLists = newReadList() }
 
-func (r *StateReaderV3) ReadAccountData(address common.Address) (*accounts.Account, error) {
+func (r *StateReaderParallelV3) ReadAccountData(address common.Address) (*accounts.Account, error) {
 	enc, _, err := r.sd.DomainGet(kv.AccountsDomain, address[:], nil)
 	if err != nil {
 		return nil, err
@@ -628,7 +715,7 @@ func (r *StateReaderV3) ReadAccountData(address common.Address) (*accounts.Accou
 	return &acc, nil
 }
 
-func (r *StateReaderV3) ReadAccountStorage(address common.Address, incarnation uint64, key *common.Hash) ([]byte, error) {
+func (r *StateReaderParallelV3) ReadAccountStorage(address common.Address, incarnation uint64, key *common.Hash) ([]byte, error) {
 	r.composite = append(append(r.composite[:0], address[:]...), key.Bytes()...)
 	enc, _, err := r.sd.DomainGet(kv.StorageDomain, r.composite, nil)
 	if err != nil {
@@ -647,7 +734,7 @@ func (r *StateReaderV3) ReadAccountStorage(address common.Address, incarnation u
 	return enc, nil
 }
 
-func (r *StateReaderV3) ReadAccountCode(address common.Address, incarnation uint64, codeHash common.Hash) ([]byte, error) {
+func (r *StateReaderParallelV3) ReadAccountCode(address common.Address, incarnation uint64, codeHash common.Hash) ([]byte, error) {
 	enc, _, err := r.sd.DomainGet(kv.CodeDomain, address[:], nil)
 	if err != nil {
 		return nil, err
@@ -662,14 +749,14 @@ func (r *StateReaderV3) ReadAccountCode(address common.Address, incarnation uint
 	return enc, nil
 }
 
-func (r *StateReaderV3) ReadAccountCodeSize(address common.Address, incarnation uint64, codeHash common.Hash) (int, error) {
+func (r *StateReaderParallelV3) ReadAccountCodeSize(address common.Address, incarnation uint64, codeHash common.Hash) (int, error) {
 	enc, _, err := r.sd.DomainGet(kv.CodeDomain, address[:], nil)
 	if err != nil {
 		return 0, err
 	}
-	var sizebuf [8]byte
-	binary.BigEndian.PutUint64(sizebuf[:], uint64(len(enc)))
 	if !r.discardReadList {
+		var sizebuf [8]byte
+		binary.BigEndian.PutUint64(sizebuf[:], uint64(len(enc)))
 		r.readLists[libstate.CodeSizeTableFake].Push(string(address[:]), sizebuf[:])
 	}
 	size := len(enc)
@@ -679,7 +766,7 @@ func (r *StateReaderV3) ReadAccountCodeSize(address common.Address, incarnation 
 	return size, nil
 }
 
-func (r *StateReaderV3) ReadAccountIncarnation(address common.Address) (uint64, error) {
+func (r *StateReaderParallelV3) ReadAccountIncarnation(address common.Address) (uint64, error) {
 	return 0, nil
 }
 

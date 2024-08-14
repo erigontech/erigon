@@ -1187,7 +1187,7 @@ func (ht *HistoryRoTx) historySeekInFiles(key []byte, txNum uint64) ([]byte, boo
 	if reader.Empty() {
 		return nil, false, nil
 	}
-	offset, ok := reader.Lookup2(ht.encodeTs(histTxNum), key)
+	offset, ok := reader.Lookup(ht.encodeTs(histTxNum, key))
 	if !ok {
 		return nil, false, nil
 	}
@@ -1259,12 +1259,13 @@ func (hs *HistoryStep) MaxTxNum(key []byte) (bool, uint64) {
 	return true, eliasfano32.Max(eliasVal)
 }
 
-func (ht *HistoryRoTx) encodeTs(txNum uint64) []byte {
+func (ht *HistoryRoTx) encodeTs(txNum uint64, key []byte) []byte {
 	if ht._bufTs == nil {
-		ht._bufTs = make([]byte, 8)
+		ht._bufTs = make([]byte, 8+len(key))
 	}
 	binary.BigEndian.PutUint64(ht._bufTs, txNum)
-	return ht._bufTs
+	ht._bufTs = append(ht._bufTs[:8], key...)
+	return ht._bufTs[:8+len(key)]
 }
 
 // HistorySeek searches history for a value of specified key before txNum
@@ -1326,7 +1327,7 @@ func (ht *HistoryRoTx) historySeekInDB(key []byte, txNum uint64, tx kv.Tx) ([]by
 	if err != nil {
 		return nil, false, err
 	}
-	val, err := c.SeekBothRange(key, ht.encodeTs(txNum))
+	val, err := c.SeekBothRange(key, ht.encodeTs(txNum, nil))
 	if err != nil {
 		return nil, false, err
 	}
