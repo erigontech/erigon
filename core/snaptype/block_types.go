@@ -97,7 +97,17 @@ var (
 				hasher := crypto.NewKeccakState()
 				defer cryptopool.ReturnToPoolKeccak256(hasher)
 				var h common.Hash
-				if err := snaptype.BuildIndex(ctx, info, salt, info.From, tmpDir, log.LvlDebug, p, func(idx *recsplit.RecSplit, i, offset uint64, word []byte) error {
+
+				cfg := recsplit.RecSplitArgs{
+					Enums:              true,
+					BucketSize:         2000,
+					LeafSize:           8,
+					TmpDir:             tmpDir,
+					Salt:               &salt,
+					BaseDataID:         info.From,
+					LessFalsePositives: true,
+				}
+				if err := snaptype.BuildIndex(ctx, info, cfg, log.LvlDebug, p, func(idx *recsplit.RecSplit, i, offset uint64, word []byte) error {
 					if p != nil {
 						p.Processed.Add(1)
 					}
@@ -130,7 +140,15 @@ var (
 			func(ctx context.Context, info snaptype.FileInfo, salt uint32, _ *chain.Config, tmpDir string, p *background.Progress, lvl log.Lvl, logger log.Logger) (err error) {
 				num := make([]byte, binary.MaxVarintLen64)
 
-				if err := snaptype.BuildIndex(ctx, info, salt, info.From, tmpDir, log.LvlDebug, p, func(idx *recsplit.RecSplit, i, offset uint64, _ []byte) error {
+				cfg := recsplit.RecSplitArgs{
+					Enums:      true,
+					BucketSize: 2000,
+					LeafSize:   8,
+					TmpDir:     tmpDir,
+					Salt:       &salt,
+					BaseDataID: info.From,
+				}
+				if err := snaptype.BuildIndex(ctx, info, cfg, log.LvlDebug, p, func(idx *recsplit.RecSplit, i, offset uint64, _ []byte) error {
 					if p != nil {
 						p.Processed.Add(1)
 					}
