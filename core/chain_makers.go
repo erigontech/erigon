@@ -327,7 +327,7 @@ func GenerateChain(config *chain.Config, parent *types.Block, engine consensus.E
 		return nil, err
 	}
 	defer domains.Close()
-	stateReader := state.NewReaderV4(domains)
+	stateReader := state.NewReaderV3(domains)
 	stateWriter := state.NewWriterV4(domains)
 
 	txNum := -1

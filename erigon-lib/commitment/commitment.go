@@ -22,9 +22,10 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
-	"github.com/holiman/uint256"
 	"math/bits"
 	"strings"
+
+	"github.com/holiman/uint256"
 
 	"github.com/google/btree"
 	"golang.org/x/crypto/sha3"
