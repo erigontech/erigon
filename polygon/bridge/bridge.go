@@ -32,7 +32,6 @@ import (
 	"github.com/erigontech/erigon/polygon/polygoncommon"
 
 	libcommon "github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon/accounts/abi"
 	"github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/polygon/bor/borcfg"
 	"github.com/erigontech/erigon/polygon/heimdall"
@@ -42,19 +41,18 @@ type eventFetcher interface {
 	FetchStateSyncEvents(ctx context.Context, fromId uint64, to time.Time, limit int) ([]*heimdall.EventRecordWithTime, error)
 }
 
-func Assemble(dataDir string, logger log.Logger, borConfig *borcfg.BorConfig, eventFetcher eventFetcher, stateReceiverABI abi.ABI) *Bridge {
+func Assemble(dataDir string, logger log.Logger, borConfig *borcfg.BorConfig, eventFetcher eventFetcher) *Bridge {
 	bridgeDB := polygoncommon.NewDatabase(dataDir, kv.PolygonBridgeDB, databaseTablesCfg, logger)
 	bridgeStore := NewStore(bridgeDB)
-	return NewBridge(bridgeStore, logger, borConfig, eventFetcher, stateReceiverABI)
+	return NewBridge(bridgeStore, logger, borConfig, eventFetcher)
 }
 
-func NewBridge(store Store, logger log.Logger, borConfig *borcfg.BorConfig, eventFetcher eventFetcher, stateReceiverABI abi.ABI) *Bridge {
+func NewBridge(store Store, logger log.Logger, borConfig *borcfg.BorConfig, eventFetcher eventFetcher) *Bridge {
 	return &Bridge{
 		store:              store,
 		logger:             logger,
 		borConfig:          borConfig,
 		eventFetcher:       eventFetcher,
-		stateReceiverABI:   stateReceiverABI,
 		stateClientAddress: libcommon.HexToAddress(borConfig.StateReceiverContract),
 	}
 }
@@ -64,7 +62,6 @@ type Bridge struct {
 	logger             log.Logger
 	borConfig          *borcfg.BorConfig
 	eventFetcher       eventFetcher
-	stateReceiverABI   abi.ABI
 	stateClientAddress libcommon.Address
 	// internal state
 	ready                    atomic.Bool
@@ -111,7 +108,7 @@ func (b *Bridge) Run(ctx context.Context) error {
 
 		if len(events) != 0 {
 			b.ready.Store(false)
-			if err := b.store.PutEvents(ctx, events, b.stateReceiverABI); err != nil {
+			if err := b.store.PutEvents(ctx, events); err != nil {
 				return err
 			}
 
@@ -162,7 +159,7 @@ func (b *Bridge) ProcessNewBlocks(ctx context.Context, blocks []*types.Block) er
 
 		prevSprintTime = time.Unix(int64(block.Time()), 0)
 
-		lastID, err := b.store.LastEventIDWithinWindow(ctx, b.lastProcessedEventID.Load(), timeLimit, b.stateReceiverABI)
+		lastID, err := b.store.LastEventIDWithinWindow(ctx, b.lastProcessedEventID.Load(), timeLimit)
 		if err != nil {
 			return err
 		}
