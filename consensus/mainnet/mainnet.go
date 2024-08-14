@@ -298,7 +298,7 @@ type MainnetConfig struct {
 
 // Seal implements consensus.Engine, attempting to find a nonce that satisfies
 // the block's difficulty requirements.
-func (baseMainnet) Seal(chain consensus.ChainHeaderReader, block *types.Block, results chan<- *types.Block, stop <-chan struct{}) error {
+func (baseMainnet) Seal(chain consensus.ChainHeaderReader, block *types.BlockWithReceipts, results chan<- *types.BlockWithReceipts, stop <-chan struct{}) error {
 	return nil
 }
 
@@ -408,12 +408,14 @@ func (f *MainnetConsensus) VerifySeal(_ consensus.ChainHeaderReader, header *typ
 }
 
 // If we're running a fake PoW, simply return a 0 nonce immediately
-func (f *MainnetConsensus) Seal(_ consensus.ChainHeaderReader, block *types.Block, results chan<- *types.Block, stop <-chan struct{}) error {
+func (f *MainnetConsensus) Seal(_ consensus.ChainHeaderReader, blockWithReceipts *types.BlockWithReceipts, results chan<- *types.BlockWithReceipts, stop <-chan struct{}) error {
+	block := blockWithReceipts.Block
+	receipts := blockWithReceipts.Receipts
 	header := block.Header()
 	header.Nonce, header.MixDigest = types.BlockNonce{}, libcommon.Hash{}
 
 	select {
-	case results <- block.WithSeal(header):
+	case results <- &types.BlockWithReceipts{Block: block.WithSeal(header), Receipts: receipts}:
 	default:
 		log.Warn("Sealing result is not read by miner", "mode", "fake", "sealhash", block.Hash())
 	}
