@@ -1045,11 +1045,6 @@ var (
 		Usage: "Enable speed test",
 		Value: false,
 	}
-	CustomGenesisFileFlag = cli.StringFlag{
-		Name:  "custom.genesis.file",
-		Usage: "Custom genesis file path (use when you've done init with custom genesis",
-		Value: "",
-	}
 )
 
 var MetricFlags = []cli.Flag{&MetricsEnabledFlag, &MetricsHTTPFlag, &MetricsPortFlag, &DiagDisabledFlag, &DiagEndpointAddrFlag, &DiagEndpointPortFlag, &DiagSpeedTestFlag}
@@ -1898,11 +1893,7 @@ func SetEthConfig(ctx *cli.Context, nodeConfig *nodecfg.Config, cfg *ethconfig.C
 		logger.Info("Using developer account", "address", developer)
 
 		// Create a new developer genesis block or reuse existing one
-		var err error
-		cfg.Genesis, err = core.DeveloperGenesisBlock(uint64(ctx.Int(DeveloperPeriodFlag.Name)), developer, ctx.String(CustomGenesisFileFlag.Name))
-		if err != nil {
-			Fatalf(err.Error())
-		}
+		cfg.Genesis = core.DeveloperGenesisBlock(uint64(ctx.Int(DeveloperPeriodFlag.Name)), developer)
 		logger.Info("Using custom developer period", "seconds", cfg.Genesis.Config.Clique.Period)
 		if !ctx.IsSet(MinerGasPriceFlag.Name) {
 			cfg.Miner.GasPrice = big.NewInt(1)

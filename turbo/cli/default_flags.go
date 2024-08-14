@@ -225,6 +225,4 @@ var DefaultFlags = []cli.Flag{
 	&SyncLoopBlockLimitFlag,
 	&SyncLoopBreakAfterFlag,
 	&SyncLoopPruneLimitFlag,
-
-	&utils.CustomGenesisFileFlag,
 }

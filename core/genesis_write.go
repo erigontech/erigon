@@ -27,7 +27,6 @@ import (
 	"errors"
 	"fmt"
 	"math/big"
-	"os"
 	"slices"
 
 	"github.com/c2h5oh/datasize"
@@ -409,24 +408,10 @@ var DevnetSignKey = func(address libcommon.Address) *ecdsa.PrivateKey {
 }
 
 // DeveloperGenesisBlock returns the 'geth --dev' genesis block.
-func DeveloperGenesisBlock(period uint64, faucet libcommon.Address, customGenesisPath string) (*types.Genesis, error) {
+func DeveloperGenesisBlock(period uint64, faucet libcommon.Address) *types.Genesis {
 	// Override the default period to the user requested one
 	config := *params.AllCliqueProtocolChanges
 	config.Clique.Period = period
-	if customGenesisPath != "" {
-		file, err := os.Open(customGenesisPath)
-		if err != nil {
-			return nil, fmt.Errorf("failed to read genesis file: %v", err)
-		}
-		defer file.Close()
-
-		genesis := new(types.Genesis)
-		if err := json.NewDecoder(file).Decode(genesis); err != nil {
-			return nil, fmt.Errorf("invalid genesis file: %v", err)
-		}
-		genesis.Config = &config
-		return genesis, nil
-	}
 
 	// Assemble and return the genesis with the precompiles and faucet pre-funded
 	return &types.Genesis{
@@ -435,7 +420,7 @@ func DeveloperGenesisBlock(period uint64, faucet libcommon.Address, customGenesi
 		GasLimit:   11500000,
 		Difficulty: big.NewInt(1),
 		Alloc:      readPrealloc("allocs/dev.json"),
-	}, nil
+	}
 }
 
 // ToBlock creates the genesis block and writes state of a genesis specification

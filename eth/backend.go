@@ -297,11 +297,12 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 	var genesis *types.Block
 	if err := backend.chainDB.Update(context.Background(), func(tx kv.RwTx) error {
 
-		if config.Genesis == nil {
-			genesisConfig, err := rawdb.ReadGenesis(tx)
-			if err != nil {
-				return err
-			}
+		genesisConfig, err := rawdb.ReadGenesis(tx)
+		if err != nil {
+			return err
+		}
+
+		if genesisConfig != nil {
 			config.Genesis = genesisConfig
 		}
 
