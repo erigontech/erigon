@@ -1017,7 +1017,7 @@ func delegatedDesignationHandler(ibs evmtypes.IntraBlockState, address libcommon
 		// potentially delegated designation
 		// get code and check
 		code := ibs.GetCode(address)
-		if bytes.Equal(code[0:3], params.DelegatedDesignationPrexix[:]) {
+		if bytes.Equal(code[0:3], params.DelegatedDesignationPrefix[:]) {
 			// delegated designation
 			ddPresent = true
 			designatedDelegation = libcommon.BytesToAddress(code[3:23])

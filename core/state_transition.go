@@ -273,9 +273,10 @@ func (st *StateTransition) preCheck(gasBailout bool) error {
 			// Historically there were transactions with 0 gas price and non-existing sender,
 			// so we have to allow that.
 			code := st.state.GetCode(st.msg.From())
+			codeSize := st.state.GetCodeSize(st.msg.From())
 
-			// eip-7702 allows tx origination from accounts having delegated designation deployed code.
-			if len(code) != 23 || !bytes.Equal(code[0:3], params.DelegatedDesignationPrexix[:]) {
+			// eip-7702 allows tx origination from accounts having delegated designation code.
+			if codeSize != 23 || !bytes.Equal(code[0:3], params.DelegatedDesignationPrefix[:]) {
 				return fmt.Errorf("%w: address %v, codehash: %s", ErrSenderNoEOA,
 					st.msg.From().Hex(), codeHash)
 			}
@@ -384,7 +385,7 @@ func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (*evmtype
 			// 4. authority code should be empty or already delegated
 			if codeHash := st.state.GetCodeHash(authority); codeHash != emptyCodeHash && codeHash != (libcommon.Hash{}) {
 				// check for delegation
-				if code := st.state.GetCode(authority); len(code) > 3 && bytes.Equal(code[0:3], params.DelegatedDesignationPrexix[:]) {
+				if code := st.state.GetCode(authority); len(code) > 3 && bytes.Equal(code[0:3], params.DelegatedDesignationPrefix[:]) {
 					// noop: has designated delegation, can be replaced
 				} else {
 					log.Debug("authority code is not empty or not delegated, skipping", "auth index", i)
@@ -405,7 +406,7 @@ func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (*evmtype
 			}
 
 			// 7. set authority code
-			st.state.SetCode(authority, bytes.Join([][]byte{params.DelegatedDesignationPrexix[:], auth.Address.Bytes()}, nil))
+			st.state.SetCode(authority, bytes.Join([][]byte{params.DelegatedDesignationPrefix[:], auth.Address.Bytes()}, nil))
 
 			// 8. increase the nonce of authority
 			st.state.SetNonce(authority, authorityNonce+1)
