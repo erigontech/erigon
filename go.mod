@@ -107,6 +107,7 @@ require (
 
 require (
 	github.com/edsrzf/mmap-go v1.1.0 // indirect
+	github.com/elastic/go-freelru v0.13.0 // indirect
 	github.com/erigontech/speedtest v0.0.2 // indirect
 	github.com/go-ole/go-ole v1.2.6 // indirect
 	github.com/google/uuid v1.6.0 // indirect
