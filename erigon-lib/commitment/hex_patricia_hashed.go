@@ -716,8 +716,12 @@ func (hph *HexPatriciaHashed) extensionHash(key []byte, hash []byte) ([length.Ha
 func (hph *HexPatriciaHashed) computeCellHashLen(cell *cell, depth int) int {
 	if cell.storageAddrLen > 0 && depth >= 64 {
 		if cell.lhLen > 0 {
+			if cell.lhLen == length.Hash {
+				return cell.lhLen + 1
+			}
 			return cell.lhLen
 		}
+
 		keyLen := 128 - depth + 1 // Length of hex key with terminator character
 		var kp, kl int
 		compactLen := (keyLen-1)/2 + 1

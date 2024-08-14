@@ -1185,3 +1185,96 @@ func cellMustEqual(tb testing.TB, first, second *cell) {
 
 	// encode doesn't code Nonce, Balance, CodeHash and Storage, Delete fields
 }
+
+func Test_HexPatriciaHashed_ProcessWithDozensOfStorageKeys(t *testing.T) {
+	ctx := context.Background()
+	msOne := NewMockState(t)
+	msTwo := NewMockState(t)
+
+	plainKeys, updates := NewUpdateBuilder().
+		Balance("00000000000000000000000000000000000000f5", 4).
+		Balance("00000000000000000000000000000000000000ff", 900234).
+		Balance("0000000000000000000000000000000000000004", 1233).
+		Storage("0000000000000000000000000000000000000004", "01", "0401").
+		Balance("00000000000000000000000000000000000000ba", 065606).
+		Balance("0000000000000000000000000000000000000000", 4).
+		Balance("0000000000000000000000000000000000000001", 5).
+		Balance("0000000000000000000000000000000000000002", 6).
+		Balance("0000000000000000000000000000000000000003", 7).
+		Storage("0000000000000000000000000000000000000003", "56", "050505").
+		Balance("0000000000000000000000000000000000000005", 9).
+		Storage("0000000000000000000000000000000000000003", "87", "060606").
+		Balance("00000000000000000000000000000000000000b9", 6).
+		Nonce("00000000000000000000000000000000000000ff", 169356).
+		Storage("0000000000000000000000000000000000000005", "02", "8989").
+		Storage("00000000000000000000000000000000000000f5", "04", "9898").
+		Storage("00000000000000000000000000000000000000f5", "05", "1234").
+		Storage("00000000000000000000000000000000000000f5", "06", "5678").
+		Storage("00000000000000000000000000000000000000f5", "07", "9abc").
+		Storage("00000000000000000000000000000000000000f5", "08", "def0").
+		Storage("00000000000000000000000000000000000000f5", "09", "1111").
+		Storage("00000000000000000000000000000000000000f5", "0a", "2222").
+		Storage("00000000000000000000000000000000000000f5", "0b", "3333").
+		Storage("00000000000000000000000000000000000000f5", "0c", "4444").
+		Storage("00000000000000000000000000000000000000f5", "0d", "5555").
+		Storage("00000000000000000000000000000000000000f5", "0e", "6666").
+		Storage("00000000000000000000000000000000000000f5", "0f", "7777").
+		Storage("00000000000000000000000000000000000000f5", "10", "8888").
+		Storage("00000000000000000000000000000000000000f5", "11", "9999").
+		Storage("00000000000000000000000000000000000000f5", "12", "aaaa").
+		Storage("00000000000000000000000000000000000000f5", "13", "bbbb").
+		Storage("00000000000000000000000000000000000000f5", "14", "cccc").
+		Storage("00000000000000000000000000000000000000f5", "15", "dddd").
+		Storage("00000000000000000000000000000000000000f5", "16", "eeee").
+		Storage("00000000000000000000000000000000000000f5", "17", "ffff").
+		Storage("00000000000000000000000000000000000000f5", "18", "0000").
+		Storage("00000000000000000000000000000000000000f5", "19", "1111").
+		Storage("00000000000000000000000000000000000000f5", "1a", "2222").
+		Storage("00000000000000000000000000000000000000f5", "1b", "4444").
+		Storage("00000000000000000000000000000000000000f5", "1c", "ffff").
+		Storage("00000000000000000000000000000000000000f5", "1d", "aaaa").
+		Storage("00000000000000000000000000000000000000f5", "1e", "eeee").
+		Storage("00000000000000000000000000000000000000f5", "1f00000000000000000000000000000000000000f5", "00000000000000000000000000000000000000f5").
+		Build()
+
+	trieOne := NewHexPatriciaHashed(length.Addr, msOne, msOne.TempDir())
+	trieTwo := NewHexPatriciaHashed(length.Addr, msTwo, msTwo.TempDir())
+
+	//trieOne.SetTrace(true)
+	//trieTwo.SetTrace(true)
+
+	var rSeq, rBatch []byte
+	{
+		fmt.Printf("1. Trie sequential update (%d updates)\n", len(updates))
+		for i := 0; i < len(updates); i++ {
+			err := msOne.applyPlainUpdates(plainKeys[i:i+1], updates[i:i+1])
+			require.NoError(t, err)
+
+			updsOne := WrapKeyUpdates(t, ModeDirect, trieOne.hashAndNibblizeKey, plainKeys[i:i+1], updates[i:i+1])
+
+			sequentialRoot, err := trieOne.Process(ctx, updsOne, "")
+			require.NoError(t, err)
+
+			t.Logf("sequential root @%d hash %x\n", i, sequentialRoot)
+			rSeq = common.Copy(sequentialRoot)
+
+			updsOne.Close()
+		}
+	}
+	{
+		err := msTwo.applyPlainUpdates(plainKeys, updates)
+		require.NoError(t, err)
+
+		updsTwo := WrapKeyUpdates(t, ModeDirect, trieTwo.hashAndNibblizeKey, plainKeys, updates)
+
+		fmt.Printf("\n2. Trie batch update (%d updates)\n", len(updates))
+		rh, err := trieTwo.Process(ctx, updsTwo, "")
+		require.NoError(t, err)
+		t.Logf("batch of %d root hash %x\n", len(updates), rh)
+
+		updsTwo.Close()
+
+		rBatch = common.Copy(rh)
+	}
+	require.EqualValues(t, rBatch, rSeq, "sequential and batch root should match")
+}
