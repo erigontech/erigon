@@ -881,7 +881,7 @@ func (c *AuRa) GenesisEpochData(header *types.Header, caller consensus.SystemCal
 }
 
 func (c *AuRa) Seal(chain consensus.ChainHeaderReader, block *types.Block, results chan<- *types.Block, stop <-chan struct{}) error {
-	panic("AuRa block production is not implemented")
+	return nil
 	//header := block.Header()
 	//
 	/// Sealing the genesis block is not supported
@@ -959,11 +959,11 @@ func stepProposer(validators ValidatorSet, blockHash libcommon.Hash, step uint64
 	return validators.getWithCaller(blockHash, uint(step), call)
 }
 
-// GenerateAuRaSeal - Attempt to seal the block internally.
+// GenerateSeal - Attempt to seal the block internally.
 //
 // This operation is synchronous and may (quite reasonably) not be available, in which case
 // `Seal::None` will be returned.
-func (c *AuRa) GenerateAuRaSeal(chain consensus.ChainHeaderReader, current, parent *types.Header, call consensus.Call) []byte {
+func (c *AuRa) GenerateSeal(chain consensus.ChainHeaderReader, current, parent *types.Header, call consensus.Call) []byte {
 	// first check to avoid generating signature most of the time
 	// (but there's still a race to the `compare_exchange`)
 	if !c.step.canPropose.Load() {
