@@ -516,7 +516,7 @@ func (p *TxPool) OnNewBlock(ctx context.Context, stateChanges *remote.StateChang
 func (p *TxPool) processRemoteTxs(ctx context.Context) (err error) {
 	defer func() {
 		if r := recover(); r != nil {
-			p.logger.Debug("[txpool] processRemoteTxs recovered", "err", r)
+			err = fmt.Errorf("panic: %v\n%s", r, stack.Trace().String())
 		}
 	}()
 
