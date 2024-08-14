@@ -38,6 +38,7 @@ import (
 	"time"
 
 	"github.com/erigontech/erigon-lib/common/dir"
+	"github.com/erigontech/erigon/polygon/bor/borabi"
 
 	"github.com/erigontech/mdbx-go/mdbx"
 	lru "github.com/hashicorp/golang-lru/arc/v2"
@@ -547,7 +548,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 		}
 
 		if config.PolygonSync {
-			polygonBridge = bridge.Assemble(config.Dirs.DataDir, logger, consensusConfig.(*borcfg.BorConfig), heimdallClient, bor.GenesisContractStateReceiverABI())
+			polygonBridge = bridge.Assemble(config.Dirs.DataDir, logger, consensusConfig.(*borcfg.BorConfig), heimdallClient, borabi.StateReceiverContract())
 			heimdallService = heimdall.AssembleService(consensusConfig.(*borcfg.BorConfig), config.HeimdallURL, dirs.DataDir, tmpdir, logger)
 
 			backend.polygonBridge = polygonBridge

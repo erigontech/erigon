@@ -28,6 +28,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"go.uber.org/mock/gomock"
 
+	"github.com/erigontech/erigon/polygon/bor/borabi"
 	"github.com/erigontech/erigon/polygon/bor/borcfg"
 	"github.com/erigontech/erigon/polygon/heimdall"
 
@@ -314,7 +315,7 @@ func newValidator(t *testing.T, heimdall *test_heimdall, blocks map[uint64]*type
 		memdb.New(""),
 		nil, /* blockReader */
 		&spanner{
-			ChainSpanner:     bor.NewChainSpanner(bor.GenesisContractValidatorSetABI(), heimdall.chainConfig, false, logger),
+			ChainSpanner:     bor.NewChainSpanner(borabi.ValidatorSetContract(), heimdall.chainConfig, false, logger),
 			validatorAddress: validatorAddress,
 		},
 		heimdall,

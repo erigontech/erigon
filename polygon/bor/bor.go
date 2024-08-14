@@ -40,6 +40,7 @@ import (
 
 	"github.com/erigontech/erigon-lib/common/dbg"
 	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/polygon/bor/borabi"
 
 	"github.com/erigontech/erigon-lib/chain"
 	libcommon "github.com/erigontech/erigon-lib/common"
@@ -1545,7 +1546,7 @@ func (c *Bor) CommitStates(
 			}
 
 			for _, ev := range merged {
-				data, err := ev.Pack(stateReceiverABI)
+				data, err := ev.Pack(borabi.StateReceiverContract())
 				if err != nil {
 					panic(err)
 				}
