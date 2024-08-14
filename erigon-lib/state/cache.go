@@ -3,6 +3,7 @@ package state
 import (
 	"fmt"
 
+	"github.com/elastic/go-freelru"
 	"github.com/erigontech/erigon-lib/common/dbg"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/log/v3"
