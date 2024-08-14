@@ -34,6 +34,7 @@ type zkevmRPCTransaction struct {
 	Input    hexutility.Bytes `json:"input"`
 	Nonce    hexutil.Uint64   `json:"nonce"`
 	To       *common.Address  `json:"to"`
+	From     *common.Address  `json:"from"`
 	Value    *hexutil.Big     `json:"value"`
 	V        *hexutil.Big     `json:"v"`
 	R        *hexutil.Big     `json:"r"`
@@ -70,6 +71,10 @@ func (tx *zkevmRPCTransaction) Tx() types.Transaction {
 		)
 	}
 
+	if tx.From != nil {
+		legacy.SetSender(*tx.From)
+	}
+
 	if tx.V != nil && tx.R != nil && tx.S != nil {
 		// parse signature raw values V, R, S from local hex strings
 		legacy.V = *uint256.MustFromBig(tx.V.ToInt())
@@ -89,6 +94,11 @@ func (zkapi *ZkEvmAPIImpl) EstimateCounters(ctx context.Context, rpcTx *zkevmRPC
 		return nil, err
 	}
 	defer dbtx.Rollback()
+
+	if rpcTx.Value == nil {
+		// set this to something non nil
+		rpcTx.Value = &hexutil.Big{}
+	}
 
 	tx := rpcTx.Tx()
 
@@ -133,6 +143,10 @@ func (zkapi *ZkEvmAPIImpl) EstimateCounters(ctx context.Context, rpcTx *zkevmRPC
 	if err != nil {
 		return nil, err
 	}
+
+	// we don't care about the nonce value for this check on counters
+	msg.SetCheckNonce(false)
+
 	txCtx := core.NewEVMTxContext(msg)
 
 	eriDb := db2.NewRoEriDb(dbtx)
