@@ -428,6 +428,10 @@ func (s *RoSnapshots) idxAvailability() uint64 {
 		return 0
 	}
 
+	if len(maximums) != len(s.types) {
+		return 0
+	}
+
 	return slices.Min(maximums)
 }
 
@@ -609,7 +613,6 @@ func (s *RoSnapshots) rebuildSegments(fileNames []string, open bool, optimistic 
 		}
 		segmentsMaxSet = true
 	}
-
 	if segmentsMaxSet {
 		s.segmentsMax.Store(segmentsMax)
 	}

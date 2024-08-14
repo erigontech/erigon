@@ -40,6 +40,7 @@ import (
 	"github.com/erigontech/erigon-lib/kv/rawdbv3"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/state"
+	"github.com/erigontech/erigon/turbo/snapshotsync/freezeblocks"
 
 	"github.com/erigontech/erigon/core/rawdb"
 	coresnaptype "github.com/erigontech/erigon/core/snaptype"
@@ -210,7 +211,12 @@ func buildBlackListForPruning(pruneMode bool, stepPrune, minBlockToDownload, blo
 
 // getMinimumBlocksToDownload - get the minimum number of blocks to download
 func getMinimumBlocksToDownload(tx kv.Tx, blockReader services.FullBlockReader, minStep uint64, blockPruneTo, historyPruneTo uint64) (uint64, uint64, error) {
-	frozenBlocks := blockReader.Snapshots().SegmentsMax()
+	var frozenBlocks uint64
+	headers, clean := blockReader.Snapshots().(*freezeblocks.RoSnapshots).ViewType(snaptype2.Headers)
+	defer clean()
+	if len(headers) > 0 {
+		frozenBlocks = headers[len(headers)-1].To() - 1
+	}
 	minToDownload := uint64(math.MaxUint64)
 	minStepToDownload := uint64(math.MaxUint32)
 	stateTxNum := minStep * config3.HistoryV3AggregationStep
