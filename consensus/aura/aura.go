@@ -881,7 +881,7 @@ func (c *AuRa) GenesisEpochData(header *types.Header, caller consensus.SystemCal
 }
 
 func (c *AuRa) Seal(chain consensus.ChainHeaderReader, block *types.Block, results chan<- *types.Block, stop <-chan struct{}) error {
-	return nil
+	panic("AuRa block production is not implemented")
 	//header := block.Header()
 	//
 	/// Sealing the genesis block is not supported
