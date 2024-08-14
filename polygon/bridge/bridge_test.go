@@ -32,7 +32,7 @@ func setup(t *testing.T, abi abi.ABI) (*heimdall.MockHeimdallClient, *bridge.Bri
 	}
 
 	heimdallClient := heimdall.NewMockHeimdallClient(ctrl)
-	b := bridge.Assemble(t.TempDir(), logger, &borConfig, heimdallClient.FetchStateSyncEvents, abi)
+	b := bridge.Assemble(t.TempDir(), logger, &borConfig, heimdallClient, abi)
 
 	return heimdallClient, b
 }
