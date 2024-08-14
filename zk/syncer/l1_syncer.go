@@ -27,6 +27,10 @@ var errorShortResponseLT32 = fmt.Errorf("response too short to contain hash data
 var errorShortResponseLT96 = fmt.Errorf("response too short to contain last batch number data")
 
 const rollupSequencedBatchesSignature = "0x25280169" // hardcoded abi signature
+const globalExitRootManager = "0xd02103ca"
+const rollupManager = "0x49b7b802"
+const admin = "0xf851a440"
+const trustedSequencer = "0xcfa8ed47"
 
 type IEtherman interface {
 	HeaderByNumber(ctx context.Context, blockNumber *big.Int) (*ethTypes.Header, error)
@@ -470,4 +474,38 @@ func (s *L1Syncer) callGetRollupSequencedBatches(ctx context.Context, addr *comm
 	lastBatchNumber := binary.BigEndian.Uint64(resp[88:96])
 
 	return h, lastBatchNumber, nil
+}
+
+func (s *L1Syncer) CallAdmin(ctx context.Context, addr *common.Address) (common.Address, error) {
+	return s.callGetAddress(ctx, addr, admin)
+}
+
+func (s *L1Syncer) CallRollupManager(ctx context.Context, addr *common.Address) (common.Address, error) {
+	return s.callGetAddress(ctx, addr, rollupManager)
+}
+
+func (s *L1Syncer) CallGlobalExitRootManager(ctx context.Context, addr *common.Address) (common.Address, error) {
+	return s.callGetAddress(ctx, addr, globalExitRootManager)
+}
+
+func (s *L1Syncer) CallTrustedSequencer(ctx context.Context, addr *common.Address) (common.Address, error) {
+	return s.callGetAddress(ctx, addr, trustedSequencer)
+}
+
+func (s *L1Syncer) callGetAddress(ctx context.Context, addr *common.Address, data string) (common.Address, error) {
+	em := s.getNextEtherman()
+	resp, err := em.CallContract(ctx, ethereum.CallMsg{
+		To:   addr,
+		Data: common.FromHex(data),
+	}, nil)
+
+	if err != nil {
+		return common.Address{}, err
+	}
+
+	if len(resp) < 20 {
+		return common.Address{}, errorShortResponseLT32
+	}
+
+	return common.BytesToAddress(resp[len(resp)-20:]), nil
 }

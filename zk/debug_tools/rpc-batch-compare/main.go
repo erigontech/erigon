@@ -105,10 +105,6 @@ func compareBatches(erigonURL, legacyURL string, batchNumber *big.Int) (string, 
 	// ignore list
 	il := []string{
 		"timestamp",
-		"accInputHash",
-		"transactions",
-		"rollupExitRoot",
-		"mainnetExitRoot",
 	}
 	for _, i := range il {
 		delete(batch1, i)

@@ -118,6 +118,7 @@ func SpawnStageL1Syncer(
 
 	newVerificationsCount := 0
 	newSequencesCount := 0
+	highestWrittenL1BlockNo := uint64(0)
 Loop:
 	for {
 		select {
@@ -139,6 +140,9 @@ Loop:
 					if err := hermezDb.WriteSequence(info.L1BlockNo, info.BatchNo, info.L1TxHash, info.StateRoot); err != nil {
 						return fmt.Errorf("failed to write batch info, %w", err)
 					}
+					if info.L1BlockNo > highestWrittenL1BlockNo {
+						highestWrittenL1BlockNo = info.L1BlockNo
+					}
 					newSequencesCount++
 				case logVerify:
 					if info.BatchNo > highestVerification.BatchNo {
@@ -146,6 +150,9 @@ Loop:
 					}
 					if err := hermezDb.WriteVerification(info.L1BlockNo, info.BatchNo, info.L1TxHash, info.StateRoot); err != nil {
 						return fmt.Errorf("failed to write verification for block %d, %w", info.L1BlockNo, err)
+					}
+					if info.L1BlockNo > highestWrittenL1BlockNo {
+						highestWrittenL1BlockNo = info.L1BlockNo
 					}
 					newVerificationsCount++
 				case logIncompatible:
@@ -165,10 +172,10 @@ Loop:
 	}
 
 	latestCheckedBlock := cfg.syncer.GetLastCheckedL1Block()
-	if latestCheckedBlock > l1BlockProgress {
-		log.Info(fmt.Sprintf("[%s] Saving L1 syncer progress", logPrefix), "latestCheckedBlock", latestCheckedBlock, "newVerificationsCount", newVerificationsCount, "newSequencesCount", newSequencesCount)
+	if highestWrittenL1BlockNo > l1BlockProgress {
+		log.Info(fmt.Sprintf("[%s] Saving L1 syncer progress", logPrefix), "latestCheckedBlock", latestCheckedBlock, "newVerificationsCount", newVerificationsCount, "newSequencesCount", newSequencesCount, "highestWrittenL1BlockNo", highestWrittenL1BlockNo)
 
-		if err := stages.SaveStageProgress(tx, stages.L1Syncer, latestCheckedBlock); err != nil {
+		if err := stages.SaveStageProgress(tx, stages.L1Syncer, highestWrittenL1BlockNo); err != nil {
 			return fmt.Errorf("failed to save stage progress, %w", err)
 		}
 		if highestVerification.BatchNo > 0 {

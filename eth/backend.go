@@ -842,6 +842,14 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 			cfg.L1HighestBlockType,
 		)
 
+		// check contract addresses in config against L1
+		success, err := l1ContractAddressCheck(ctx, cfg.Zk, backend.l1Syncer)
+		if !success || err != nil {
+			//log.Warn("Contract address check failed", "success", success, "err", err)
+			panic("Contract address check failed")
+		}
+		log.Info("Contract address check passed")
+
 		l1InfoTreeSyncer := syncer.NewL1Syncer(
 			ctx,
 			ethermanClients,
@@ -1533,4 +1541,43 @@ func checkPortIsFree(addr string) (free bool) {
 	}
 	c.Close()
 	return false
+}
+
+func l1ContractAddressCheck(ctx context.Context, cfg *ethconfig.Zk, l1BlockSyncer *syncer.L1Syncer) (bool, error) {
+	l1AddrRollup, err := l1BlockSyncer.CallRollupManager(ctx, &cfg.AddressZkevm)
+	if err != nil {
+		return false, err
+	}
+	if l1AddrRollup != cfg.AddressRollup {
+		log.Warn("L1 contract address check failed (AddressRollup)", "expected", cfg.AddressRollup, "actual", l1AddrRollup)
+		return false, nil
+	}
+
+	l1AddrAdmin, err := l1BlockSyncer.CallAdmin(ctx, &cfg.AddressZkevm)
+	if err != nil {
+		return false, err
+	}
+	if l1AddrAdmin != cfg.AddressAdmin {
+		log.Warn("L1 contract address check failed (AddressAdmin)", "expected", cfg.AddressAdmin, "actual", l1AddrAdmin)
+		return false, nil
+	}
+
+	l1AddrGerManager, err := l1BlockSyncer.CallGlobalExitRootManager(ctx, &cfg.AddressZkevm)
+	if err != nil {
+		return false, err
+	}
+	if l1AddrGerManager != cfg.AddressGerManager {
+		log.Warn("L1 contract address check failed (AddressGerManager)", "expected", cfg.AddressGerManager, "actual", l1AddrGerManager)
+		return false, nil
+	}
+
+	l1AddrSequencer, err := l1BlockSyncer.CallTrustedSequencer(ctx, &cfg.AddressZkevm)
+	if err != nil {
+		return false, err
+	}
+	if l1AddrSequencer != cfg.AddressSequencer {
+		log.Warn("L1 contract address check failed (AddressSequencer)", "expected", cfg.AddressSequencer, "actual", l1AddrSequencer)
+		return false, nil
+	}
+	return true, nil
 }
