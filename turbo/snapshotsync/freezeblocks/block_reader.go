@@ -40,7 +40,6 @@ import (
 	coresnaptype "github.com/erigontech/erigon/core/snaptype"
 	"github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/eth/ethconfig"
-	"github.com/erigontech/erigon/polygon/bor/borabi"
 	borsnaptype "github.com/erigontech/erigon/polygon/bor/snaptype"
 	bortypes "github.com/erigontech/erigon/polygon/bor/types"
 	"github.com/erigontech/erigon/polygon/heimdall"
@@ -1407,7 +1406,6 @@ func (r *BlockReader) EventsByIdFromSnapshot(from uint64, to time.Time, limit in
 
 	var buf []byte
 	var result []*heimdall.EventRecordWithTime
-	stateContract := borabi.StateReceiverContractABI()
 	maxTime := false
 
 	for _, sn := range segments {
@@ -1424,8 +1422,8 @@ func (r *BlockReader) EventsByIdFromSnapshot(from uint64, to time.Time, limit in
 			buf, _ = gg.Next(buf[:0])
 
 			raw := rlp.RawValue(common.Copy(buf[length.Hash+length.BlockNum+8:]))
-			event, err := heimdall.UnpackEventRecordWithTime(stateContract, raw)
-			if err != nil {
+			var event heimdall.EventRecordWithTime
+			if err := event.UnmarshallBytes(raw); err != nil {
 				return nil, false, err
 			}
 
@@ -1437,7 +1435,7 @@ func (r *BlockReader) EventsByIdFromSnapshot(from uint64, to time.Time, limit in
 				goto BREAK
 			}
 
-			result = append(result, event)
+			result = append(result, &event)
 
 			if len(result) == limit {
 				goto BREAK

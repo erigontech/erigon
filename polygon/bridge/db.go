@@ -26,7 +26,6 @@ import (
 
 	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/kv"
-	"github.com/erigontech/erigon/accounts/abi"
 	"github.com/erigontech/erigon/polygon/heimdall"
 	"github.com/erigontech/erigon/polygon/polygoncommon"
 )
@@ -60,8 +59,8 @@ type Store interface {
 	LastProcessedEventID(ctx context.Context) (uint64, error)
 	PutEventTxnToBlockNum(ctx context.Context, txMap map[libcommon.Hash]uint64) error
 	EventTxnToBlockNum(ctx context.Context, borTxHash libcommon.Hash) (uint64, bool, error)
-	LastEventIDWithinWindow(ctx context.Context, fromID uint64, toTime time.Time, stateContract abi.ABI) (uint64, error)
-	PutEvents(ctx context.Context, events []*heimdall.EventRecordWithTime, stateContract abi.ABI) error
+	LastEventIDWithinWindow(ctx context.Context, fromID uint64, toTime time.Time) (uint64, error)
+	PutEvents(ctx context.Context, events []*heimdall.EventRecordWithTime) error
 	Events(ctx context.Context, start, end uint64) ([][]byte, error)
 	PutEventIDs(ctx context.Context, eventMap map[uint64]uint64) error
 	EventIDRange(ctx context.Context, blockNum uint64) (uint64, uint64, error)
@@ -189,17 +188,17 @@ func (s *MdbxStore) EventTxnToBlockNum(ctx context.Context, borTxHash libcommon.
 }
 
 // LastEventIDWithinWindow gets the last event id where event.ID >= fromID and event.Time <= toTime
-func (s *MdbxStore) LastEventIDWithinWindow(ctx context.Context, fromID uint64, toTime time.Time, stateContract abi.ABI) (uint64, error) {
+func (s *MdbxStore) LastEventIDWithinWindow(ctx context.Context, fromID uint64, toTime time.Time) (uint64, error) {
 	tx, err := s.db.BeginRo(ctx)
 	if err != nil {
 		return 0, err
 	}
 	defer tx.Rollback()
 
-	return LastEventIDWithinWindow(tx, fromID, toTime, stateContract)
+	return LastEventIDWithinWindow(tx, fromID, toTime)
 }
 
-func LastEventIDWithinWindow(tx kv.Tx, fromID uint64, toTime time.Time, stateContract abi.ABI) (uint64, error) {
+func LastEventIDWithinWindow(tx kv.Tx, fromID uint64, toTime time.Time) (uint64, error) {
 	count, err := tx.Count(kv.BorEvents)
 	if err != nil {
 		return 0, err
@@ -224,8 +223,8 @@ func LastEventIDWithinWindow(tx kv.Tx, fromID uint64, toTime time.Time, stateCon
 			return 0, err
 		}
 
-		event, err := heimdall.UnpackEventRecordWithTime(stateContract, v)
-		if err != nil {
+		var event heimdall.EventRecordWithTime
+		if err := event.UnmarshallBytes(v); err != nil {
 			return 0, err
 		}
 
@@ -242,25 +241,24 @@ func LastEventIDWithinWindow(tx kv.Tx, fromID uint64, toTime time.Time, stateCon
 	return eventID, nil
 }
 
-func (s *MdbxStore) PutEvents(ctx context.Context, events []*heimdall.EventRecordWithTime, stateContract abi.ABI) error {
+func (s *MdbxStore) PutEvents(ctx context.Context, events []*heimdall.EventRecordWithTime) error {
 	tx, err := s.db.BeginRw(ctx)
 	if err != nil {
 		return err
 	}
 	defer tx.Rollback()
 
-	return PutEvents(tx, events, stateContract)
+	return PutEvents(tx, events)
 }
 
-func PutEvents(tx kv.RwTx, events []*heimdall.EventRecordWithTime, stateContract abi.ABI) error {
+func PutEvents(tx kv.RwTx, events []*heimdall.EventRecordWithTime) error {
 	for _, event := range events {
-		v, err := event.Pack(stateContract)
+		v, err := event.MarshallBytes()
 		if err != nil {
 			return err
 		}
 
-		k := make([]byte, 8)
-		binary.BigEndian.PutUint64(k, event.ID)
+		k := event.MarshallIdBytes()
 		err = tx.Put(kv.BorEvents, k, v)
 		if err != nil {
 			return err
