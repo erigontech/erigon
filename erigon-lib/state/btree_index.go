@@ -814,7 +814,8 @@ func OpenBtreeIndexWithDecompressor(indexPath string, M uint64, kv *seg.Decompre
 	defer func() {
 		// recover from panic if one occurred. Set err to nil if no panic
 		if r := recover(); r != nil {
-			err = fmt.Errorf("panic: %v", r)
+			// do r with only the stack trace
+			err = fmt.Errorf("incomplete or not-fully downloaded file %s", indexPath)
 		}
 	}()
 
