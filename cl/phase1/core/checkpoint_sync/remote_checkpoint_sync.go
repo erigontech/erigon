@@ -2,7 +2,6 @@ package checkpoint_sync
 
 import (
 	"context"
-	"encoding/binary"
 	"errors"
 	"fmt"
 	"io"
@@ -11,6 +10,7 @@ import (
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/phase1/core/state"
+	"github.com/erigontech/erigon/cl/utils"
 )
 
 // RemoteCheckpointSync is a CheckpointSyncer that fetches the checkpoint state from a remote endpoint.
@@ -24,13 +24,6 @@ func NewRemoteCheckpointSync(beaconConfig *clparams.BeaconChainConfig, net clpar
 		beaconConfig: beaconConfig,
 		net:          net,
 	}
-}
-
-func extractSlotFromSerializedBeaconState(beaconState []byte) (uint64, error) {
-	if len(beaconState) < 48 {
-		return 0, errors.New("checkpoint sync read failed, too short")
-	}
-	return binary.LittleEndian.Uint64(beaconState[40:48]), nil
 }
 
 func (r *RemoteCheckpointSync) GetLatestBeaconState(ctx context.Context) (*state.CachingBeaconState, error) {
@@ -65,7 +58,7 @@ func (r *RemoteCheckpointSync) GetLatestBeaconState(ctx context.Context) (*state
 			return nil, fmt.Errorf("checkpoint sync read failed %s", err)
 		}
 
-		epoch, err := extractSlotFromSerializedBeaconState(marshaled)
+		epoch, err := utils.ExtractSlotFromSerializedBeaconState(marshaled)
 		if err != nil {
 			return nil, fmt.Errorf("checkpoint sync read failed %s", err)
 		}

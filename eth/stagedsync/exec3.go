@@ -779,6 +779,8 @@ Loop:
 				HistoryExecution: offsetFromBlockBeginning > 0 && txIndex < int(offsetFromBlockBeginning),
 
 				BlockReceipts: receipts,
+
+				Config: chainConfig,
 			}
 			if cfg.genesis != nil {
 				txTask.Config = cfg.genesis.Config

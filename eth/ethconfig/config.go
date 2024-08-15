@@ -36,7 +36,6 @@ import (
 	"github.com/erigontech/erigon-lib/common/datadir"
 	"github.com/erigontech/erigon-lib/downloader/downloadercfg"
 	"github.com/erigontech/erigon-lib/txpool/txpoolcfg"
-	"github.com/erigontech/erigon/cl/beacon/beacon_router_configuration"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/consensus/ethash/ethashcfg"
 	"github.com/erigontech/erigon/core/types"
@@ -189,7 +188,6 @@ type Config struct {
 
 	Snapshot     BlocksFreezing
 	Downloader   *downloadercfg.Cfg
-	BeaconRouter beacon_router_configuration.RouterConfiguration
 	CaplinConfig clparams.CaplinConfig
 
 	Dirs datadir.Dirs
@@ -241,12 +239,7 @@ type Config struct {
 	// Ethstats service
 	Ethstats string
 	// Consensus layer
-	InternalCL             bool
-	CaplinDiscoveryAddr    string
-	CaplinDiscoveryPort    uint64
-	CaplinDiscoveryTCPPort uint64
-	SentinelAddr           string
-	SentinelPort           uint64
+	InternalCL bool
 
 	OverridePragueTime *big.Int `toml:",omitempty"`
 
