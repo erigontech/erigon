@@ -392,7 +392,7 @@ func ParseEnum(s string) (Enum, bool) {
 }
 
 // Idx - iterate over segment and building .idx file
-func BuildIndex(ctx context.Context, info FileInfo, salt uint32, firstDataId uint64, tmpDir string, lvl log.Lvl, p *background.Progress, walker func(idx *recsplit.RecSplit, i, offset uint64, word []byte) error, logger log.Logger) (err error) {
+func BuildIndex(ctx context.Context, info FileInfo, cfg recsplit.RecSplitArgs, lvl log.Lvl, p *background.Progress, walker func(idx *recsplit.RecSplit, i, offset uint64, word []byte) error, logger log.Logger) (err error) {
 	defer func() {
 		if rec := recover(); rec != nil {
 			err = fmt.Errorf("index panic: at=%s, %v, %s", info.Name(), rec, dbg.Stack())
@@ -400,11 +400,9 @@ func BuildIndex(ctx context.Context, info FileInfo, salt uint32, firstDataId uin
 	}()
 
 	d, err := seg.NewDecompressor(info.Path)
-
 	if err != nil {
 		return fmt.Errorf("can't open %s for indexing: %w", info.Name(), err)
 	}
-
 	defer d.Close()
 
 	if p != nil {
@@ -412,21 +410,13 @@ func BuildIndex(ctx context.Context, info FileInfo, salt uint32, firstDataId uin
 		p.Name.Store(&fname)
 		p.Total.Store(uint64(d.Count()))
 	}
-
-	rs, err := recsplit.NewRecSplit(recsplit.RecSplitArgs{
-		KeyCount:   d.Count(),
-		Enums:      true,
-		BucketSize: 2000,
-		LeafSize:   8,
-		TmpDir:     tmpDir,
-		IndexFile:  filepath.Join(info.Dir(), info.Type.IdxFileName(info.Version, info.From, info.To)),
-		BaseDataID: firstDataId,
-		Salt:       &salt,
-	}, logger)
+	cfg.KeyCount = d.Count()
+	cfg.IndexFile = filepath.Join(info.Dir(), info.Type.IdxFileName(info.Version, info.From, info.To))
+	rs, err := recsplit.NewRecSplit(cfg, logger)
 	if err != nil {
 		return err
 	}
-	rs.LogLvl(log.LvlDebug)
+	rs.LogLvl(lvl)
 
 	defer d.EnableReadAhead().DisableReadAhead()
 
