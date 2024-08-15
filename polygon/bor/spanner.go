@@ -35,8 +35,8 @@ import (
 //go:generate mockgen -typed=true -destination=./spanner_mock.go -package=bor . Spanner
 type Spanner interface {
 	GetCurrentSpan(syscall consensus.SystemCall) (*heimdall.Span, error)
-	GetCurrentValidators(spanId uint64, signer libcommon.Address, chain consensus.ChainHeaderReader) ([]*valset.Validator, error)
-	GetCurrentProducers(spanId uint64, signer libcommon.Address, chain consensus.ChainHeaderReader) ([]*valset.Validator, error)
+	GetCurrentValidators(spanId uint64, chain consensus.ChainHeaderReader) ([]*valset.Validator, error)
+	GetCurrentProducers(spanId uint64, chain consensus.ChainHeaderReader) ([]*valset.Validator, error)
 	CommitSpan(heimdallSpan heimdall.Span, syscall consensus.SystemCall) error
 }
 
@@ -66,7 +66,6 @@ func NewChainSpanner(validatorSet ABI, chainConfig *chain.Config, withoutHeimdal
 
 // GetCurrentSpan get current span from contract
 func (c *ChainSpanner) GetCurrentSpan(syscall consensus.SystemCall) (*heimdall.Span, error) {
-
 	// method
 	const method = "getCurrentSpan"
 
@@ -102,7 +101,7 @@ func (c *ChainSpanner) GetCurrentSpan(syscall consensus.SystemCall) (*heimdall.S
 	return &span, nil
 }
 
-func (c *ChainSpanner) GetCurrentValidators(spanId uint64, signer libcommon.Address, chain consensus.ChainHeaderReader) ([]*valset.Validator, error) {
+func (c *ChainSpanner) GetCurrentValidators(spanId uint64, chain consensus.ChainHeaderReader) ([]*valset.Validator, error) {
 	// Use hardcoded bor devnet valset if chain-name = bor-devnet
 	if NetworkNameVals[c.chainConfig.ChainName] != nil && c.withoutHeimdall {
 		return NetworkNameVals[c.chainConfig.ChainName], nil
@@ -117,7 +116,7 @@ func (c *ChainSpanner) GetCurrentValidators(spanId uint64, signer libcommon.Addr
 	return span.ValidatorSet.Validators, nil
 }
 
-func (c *ChainSpanner) GetCurrentProducers(spanId uint64, signer libcommon.Address, chain consensus.ChainHeaderReader) ([]*valset.Validator, error) {
+func (c *ChainSpanner) GetCurrentProducers(spanId uint64, chain consensus.ChainHeaderReader) ([]*valset.Validator, error) {
 	// Use hardcoded bor devnet valset if chain-name = bor-devnet
 	if NetworkNameVals[c.chainConfig.ChainName] != nil && c.withoutHeimdall {
 		return NetworkNameVals[c.chainConfig.ChainName], nil
@@ -138,7 +137,6 @@ func (c *ChainSpanner) GetCurrentProducers(spanId uint64, signer libcommon.Addre
 }
 
 func (c *ChainSpanner) CommitSpan(heimdallSpan heimdall.Span, syscall consensus.SystemCall) error {
-
 	// method
 	const method = "commitSpan"
 

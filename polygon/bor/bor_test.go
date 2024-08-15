@@ -25,6 +25,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/stretchr/testify/require"
+	"go.uber.org/mock/gomock"
+
 	"github.com/erigontech/erigon/polygon/bor/borcfg"
 	"github.com/erigontech/erigon/polygon/heimdall"
 
@@ -166,17 +169,6 @@ func (h test_heimdall) FetchLatestSpan(ctx context.Context) (*heimdall.Span, err
 
 func (h test_heimdall) Close() {}
 
-type test_genesisContract struct {
-}
-
-func (g test_genesisContract) CommitState(event rlp.RawValue, syscall consensus.SystemCall) error {
-	return nil
-}
-
-func (g test_genesisContract) LastStateId(syscall consensus.SystemCall) (*big.Int, error) {
-	return big.NewInt(0), nil
-}
-
 type headerReader struct {
 	validator validator
 }
@@ -240,7 +232,7 @@ func (c *spanner) CommitSpan(heimdallSpan heimdall.Span, syscall consensus.Syste
 	return nil
 }
 
-func (c *spanner) GetCurrentValidators(spanId uint64, signer libcommon.Address, chain consensus.ChainHeaderReader) ([]*valset.Validator, error) {
+func (c *spanner) GetCurrentValidators(spanId uint64, chain consensus.ChainHeaderReader) ([]*valset.Validator, error) {
 	return []*valset.Validator{
 		{
 			ID:               1,
@@ -311,8 +303,11 @@ func (v validator) verifyBlocks(blocks []*types.Block) error {
 
 func newValidator(t *testing.T, heimdall *test_heimdall, blocks map[uint64]*types.Block) validator {
 	logger := log.Root()
-
-	validatorKey, _ := crypto.GenerateKey()
+	ctrl := gomock.NewController(t)
+	stateReceiver := bor.NewMockStateReceiver(ctrl)
+	stateReceiver.EXPECT().CommitState(gomock.Any(), gomock.Any()).AnyTimes()
+	validatorKey, err := crypto.GenerateKey()
+	require.NoError(t, err)
 	validatorAddress := crypto.PubkeyToAddress(validatorKey.PublicKey)
 	bor := bor.New(
 		heimdall.chainConfig,
@@ -323,7 +318,7 @@ func newValidator(t *testing.T, heimdall *test_heimdall, blocks map[uint64]*type
 			validatorAddress: validatorAddress,
 		},
 		heimdall,
-		test_genesisContract{},
+		stateReceiver,
 		logger,
 		nil,
 		nil,
