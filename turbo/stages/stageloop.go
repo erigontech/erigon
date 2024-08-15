@@ -71,10 +71,10 @@ func StageLoop(
 	hook *Hook,
 ) {
 	defer close(waitForDone)
+
 	if err := ProcessFrozenBlocks(ctx, db, blockReader, sync, hook); err != nil {
 		if err != nil {
 			if errors.Is(err, libcommon.ErrStopped) || errors.Is(err, context.Canceled) {
-				println("what")
 				return
 			}
 
@@ -84,20 +84,6 @@ func StageLoop(
 			}
 		}
 	}
-
-	//tx, err := db.BeginRwNosync(ctx)
-	//if err != nil {
-	//	logger.Error("BeginRw err", "err", err)
-	//	return
-	//}
-	//defer tx.Rollback()
-	//
-	//sd, err := state.NewSharedDomains(tx, logger)
-	//if err != nil {
-	//	logger.Error("NewSharedDomains err", "err", err)
-	//	return
-	//}
-	//defer sd.Close()
 
 	initialCycle := true
 	for {
@@ -248,6 +234,7 @@ func StageLoopIteration(ctx context.Context, db kv.RwDB, txc wrap.TxContainer, s
 	//       send notifications Now and do write to disks Later.
 	// - Send Notifications: about new blocks, new receipts, state changes, etc...
 	// - Prune(limited time)+Commit(sync). Write to disk happening here.
+
 	if canRunCycleInOneTransaction && !externalTx {
 		txc.Tx, err = db.BeginRwNosync(ctx)
 		if err != nil {
@@ -441,6 +428,7 @@ func (h *Hook) sendNotifications(notifications *shards.Notifications, tx kv.Tx, 
 			finalizedBlock = *fb
 		}
 
+		//h.logger.Debug("[hook] Sending state changes", "currentBlock", currentHeader.Number.Uint64(), "finalizedBlock", finalizedBlock)
 		notifications.Accumulator.SendAndReset(h.ctx, notifications.StateChangesConsumer, pendingBaseFee.Uint64(), pendingBlobFee, currentHeader.GasLimit, finalizedBlock)
 	}
 	return nil

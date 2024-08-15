@@ -98,19 +98,17 @@ func CreateConsensusEngine(ctx context.Context, nodeConfig *nodecfg.Config, chai
 		// In order to pass the ethereum transaction tests, we need to set the burn contract which is in the bor config
 		// Then, bor != nil will also be enabled for ethash and clique. Only enable Bor for real if there is a validator contract present.
 		if chainConfig.Bor != nil && consensusCfg.ValidatorContract != "" {
-			genesisContractsClient := bor.NewGenesisContractsClient(chainConfig, consensusCfg.ValidatorContract, consensusCfg.StateReceiverContract, logger)
-
+			stateReceiver := bor.NewStateReceiver(consensusCfg.StateReceiverContract)
 			spanner := bor.NewChainSpanner(bor.GenesisContractValidatorSetABI(), chainConfig, withoutHeimdall, logger)
 
 			var err error
 			var db kv.RwDB
-
 			db, err = node.OpenDatabase(ctx, nodeConfig, kv.ConsensusDB, "bor", readonly, logger)
 			if err != nil {
 				panic(err)
 			}
 
-			eng = bor.New(chainConfig, db, blockReader, spanner, heimdallClient, genesisContractsClient, logger, polygonBridge, heimdallService)
+			eng = bor.New(chainConfig, db, blockReader, spanner, heimdallClient, stateReceiver, logger, polygonBridge, heimdallService)
 		}
 	}
 

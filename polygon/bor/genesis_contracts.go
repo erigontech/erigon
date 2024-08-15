@@ -17,16 +17,9 @@
 package bor
 
 import (
-	"math/big"
 	"strings"
 
-	"github.com/erigontech/erigon-lib/log/v3"
-
-	"github.com/erigontech/erigon-lib/chain"
-	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon/accounts/abi"
-	"github.com/erigontech/erigon/consensus"
-	"github.com/erigontech/erigon/rlp"
 )
 
 const (
@@ -42,62 +35,7 @@ var (
 func GenesisContractValidatorSetABI() abi.ABI {
 	return validatorSetABI
 }
+
 func GenesisContractStateReceiverABI() abi.ABI {
 	return stateReceiverABI
-}
-
-type GenesisContracts interface {
-	CommitState(event rlp.RawValue, syscall consensus.SystemCall) error
-	LastStateId(syscall consensus.SystemCall) (*big.Int, error)
-}
-
-type GenesisContractsClient struct {
-	validatorSetABI       abi.ABI
-	stateReceiverABI      abi.ABI
-	ValidatorContract     libcommon.Address
-	StateReceiverContract libcommon.Address
-	chainConfig           *chain.Config
-	logger                log.Logger
-}
-
-func NewGenesisContractsClient(
-	chainConfig *chain.Config,
-	validatorContract,
-	stateReceiverContract string,
-	logger log.Logger,
-) *GenesisContractsClient {
-	return &GenesisContractsClient{
-		validatorSetABI:       GenesisContractValidatorSetABI(),
-		stateReceiverABI:      GenesisContractStateReceiverABI(),
-		ValidatorContract:     libcommon.HexToAddress(validatorContract),
-		StateReceiverContract: libcommon.HexToAddress(stateReceiverContract),
-		chainConfig:           chainConfig,
-		logger:                logger,
-	}
-}
-
-func (gc *GenesisContractsClient) CommitState(event rlp.RawValue, syscall consensus.SystemCall) error {
-	_, err := syscall(gc.StateReceiverContract, event)
-	return err
-}
-
-func (gc *GenesisContractsClient) LastStateId(syscall consensus.SystemCall) (*big.Int, error) {
-	const method = "lastStateId"
-
-	data, err := gc.stateReceiverABI.Pack(method)
-	if err != nil {
-		gc.logger.Error("[bor] Unable to pack txn for LastStateId", "err", err)
-		return nil, err
-	}
-
-	result, err := syscall(gc.StateReceiverContract, data)
-	if err != nil {
-		return nil, err
-	}
-
-	var ret = new(*big.Int)
-	if err := gc.stateReceiverABI.UnpackIntoInterface(ret, method, result); err != nil {
-		return nil, err
-	}
-	return *ret, nil
 }

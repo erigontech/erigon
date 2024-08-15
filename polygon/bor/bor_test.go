@@ -25,6 +25,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/stretchr/testify/require"
+	"go.uber.org/mock/gomock"
+
 	"github.com/erigontech/erigon/polygon/bor/borcfg"
 	"github.com/erigontech/erigon/polygon/heimdall"
 
@@ -166,17 +169,6 @@ func (h test_heimdall) FetchLatestSpan(ctx context.Context) (*heimdall.Span, err
 
 func (h test_heimdall) Close() {}
 
-type test_genesisContract struct {
-}
-
-func (g test_genesisContract) CommitState(event rlp.RawValue, syscall consensus.SystemCall) error {
-	return nil
-}
-
-func (g test_genesisContract) LastStateId(syscall consensus.SystemCall) (*big.Int, error) {
-	return big.NewInt(0), nil
-}
-
 type headerReader struct {
 	validator validator
 }
@@ -240,7 +232,7 @@ func (c *spanner) CommitSpan(heimdallSpan heimdall.Span, syscall consensus.Syste
 	return nil
 }
 
-func (c *spanner) GetCurrentValidators(spanId uint64, signer libcommon.Address, chain consensus.ChainHeaderReader) ([]*valset.Validator, error) {
+func (c *spanner) GetCurrentValidators(spanId uint64, chain consensus.ChainHeaderReader) ([]*valset.Validator, error) {
 	return []*valset.Validator{
 		{
 			ID:               1,
@@ -266,12 +258,12 @@ func (v validator) IsProposer(block *types.Block) (bool, error) {
 	return v.Engine.(*bor.Bor).IsProposer(block.Header())
 }
 
-func (v validator) sealBlocks(blocks []*types.Block) ([]*types.Block, error) {
+func (v validator) sealBlocks(blocks []*types.Block, receipts []types.Receipts) ([]*types.Block, error) {
 	sealedBlocks := make([]*types.Block, 0, len(blocks))
 
 	hr := headerReader{v}
 
-	for _, block := range blocks {
+	for i, block := range blocks {
 		header := block.HeaderNoCopy()
 
 		if err := v.Engine.Prepare(hr, header, nil); err != nil {
@@ -282,15 +274,16 @@ func (v validator) sealBlocks(blocks []*types.Block) ([]*types.Block, error) {
 			header.ParentHash = parent.Hash()
 		}
 
-		sealResults := make(chan *types.Block, 1)
+		sealResults := make(chan *types.BlockWithReceipts, 1)
 
-		if err := v.Engine.Seal(hr, block, sealResults, nil); err != nil {
+		blockWithReceipts := &types.BlockWithReceipts{Block: block, Receipts: receipts[i]}
+		if err := v.Engine.Seal(hr, blockWithReceipts, sealResults, nil); err != nil {
 			return nil, err
 		}
 
 		sealedBlock := <-sealResults
-		v.blocks[sealedBlock.NumberU64()] = sealedBlock
-		sealedBlocks = append(sealedBlocks, sealedBlock)
+		v.blocks[sealedBlock.Block.NumberU64()] = sealedBlock.Block
+		sealedBlocks = append(sealedBlocks, sealedBlock.Block)
 	}
 
 	return sealedBlocks, nil
@@ -310,8 +303,11 @@ func (v validator) verifyBlocks(blocks []*types.Block) error {
 
 func newValidator(t *testing.T, heimdall *test_heimdall, blocks map[uint64]*types.Block) validator {
 	logger := log.Root()
-
-	validatorKey, _ := crypto.GenerateKey()
+	ctrl := gomock.NewController(t)
+	stateReceiver := bor.NewMockStateReceiver(ctrl)
+	stateReceiver.EXPECT().CommitState(gomock.Any(), gomock.Any()).AnyTimes()
+	validatorKey, err := crypto.GenerateKey()
+	require.NoError(t, err)
 	validatorAddress := crypto.PubkeyToAddress(validatorKey.PublicKey)
 	bor := bor.New(
 		heimdall.chainConfig,
@@ -322,7 +318,7 @@ func newValidator(t *testing.T, heimdall *test_heimdall, blocks map[uint64]*type
 			validatorAddress: validatorAddress,
 		},
 		heimdall,
-		test_genesisContract{},
+		stateReceiver,
 		logger,
 		nil,
 		nil,
@@ -378,7 +374,7 @@ func TestVerifyHeader(t *testing.T) {
 		t.Fatalf("generate blocks failed: %v", err)
 	}
 
-	sealedBlocks, err := v.sealBlocks(chain.Blocks)
+	sealedBlocks, err := v.sealBlocks(chain.Blocks, chain.Receipts)
 
 	if err != nil {
 		t.Fatalf("seal block failed: %v", err)
@@ -432,6 +428,7 @@ func testVerify(t *testing.T, noValidators int, chainLength int) {
 	for bi := 0; bi < chainLength; bi++ {
 		for vi, v := range validators {
 			block := chains[vi].Blocks[bi]
+			receipts := chains[vi].Receipts[bi]
 
 			isProposer, err := v.IsProposer(block)
 
@@ -449,7 +446,7 @@ func testVerify(t *testing.T, noValidators int, chainLength int) {
 					lastProposerIndex = vi
 				}
 
-				sealedBlocks, err := v.sealBlocks([]*types.Block{block})
+				sealedBlocks, err := v.sealBlocks([]*types.Block{block}, []types.Receipts{receipts})
 
 				if err != nil {
 					t.Fatalf("seal block failed: %v", err)
@@ -478,7 +475,7 @@ func TestSendBlock(t *testing.T) {
 		t.Fatalf("generate blocks failed: %v", err)
 	}
 
-	sealedBlocks, err := s.sealBlocks(chain.Blocks)
+	sealedBlocks, err := s.sealBlocks(chain.Blocks, chain.Receipts)
 
 	if err != nil {
 		t.Fatalf("seal block failed: %v", err)
