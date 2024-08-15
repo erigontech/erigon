@@ -168,8 +168,8 @@ flush changes from TxTask to lower-level-of-abstraction).
 - StateV3 - it's all updates which are stored in RAM - all parallel workers can see this updates.
 Execution of txs always done on Valid version of state (no partial-updates of state).
 Flush of updates to lower-level-of-abstractions done by method `StateV3.Flush`.
-On this level-of-abstraction also exists StateReaderV3.
-IntraBlockState does call StateReaderV3, and StateReaderV3 call StateV3(in-mem-cache) or DB (RoTx).
+On this level-of-abstraction also exists ReaderV3.
+IntraBlockState does call ReaderV3, and ReaderV3 call StateV3(in-mem-cache) or DB (RoTx).
 WAL - also on this level-of-abstraction - agg.ApplyHistory does write updates from TxTask to WAL.
 WAL it's like StateV3 just without reading api (can only write there). WAL flush to disk periodically (doesn't need much RAM).
 

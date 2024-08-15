@@ -31,7 +31,17 @@ type PolygonBridge interface {
 	EventTxnLookup(ctx context.Context, borTxHash libcommon.Hash) (uint64, bool, error)
 }
 
+type PolygonBridgeReader interface {
+	Events(ctx context.Context, blockNum uint64) ([]*types.Message, error)
+	EventTxnLookup(ctx context.Context, borTxHash libcommon.Hash) (uint64, bool, error)
+}
+
 type Service interface {
 	PolygonBridge
 	Run(ctx context.Context) error
+}
+
+type ReaderService interface {
+	PolygonBridgeReader
+	Close()
 }

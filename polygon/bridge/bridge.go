@@ -38,38 +38,38 @@ import (
 	"github.com/erigontech/erigon/polygon/heimdall"
 )
 
-var ErrMapNotAvailable = errors.New("map not available")
-
-type fetchSyncEventsType func(ctx context.Context, fromId uint64, to time.Time, limit int) ([]*heimdall.EventRecordWithTime, error)
-
-type Bridge struct {
-	store                    Store
-	ready                    atomic.Bool
-	lastProcessedBlockNumber atomic.Uint64
-	lastProcessedEventID     atomic.Uint64
-
-	logger             log.Logger
-	borConfig          *borcfg.BorConfig
-	stateReceiverABI   abi.ABI
-	stateClientAddress libcommon.Address
-	fetchSyncEvents    fetchSyncEventsType
+type eventFetcher interface {
+	FetchStateSyncEvents(ctx context.Context, fromId uint64, to time.Time, limit int) ([]*heimdall.EventRecordWithTime, error)
 }
 
-func Assemble(dataDir string, logger log.Logger, borConfig *borcfg.BorConfig, fetchSyncEvents fetchSyncEventsType, stateReceiverABI abi.ABI) *Bridge {
+func Assemble(dataDir string, logger log.Logger, borConfig *borcfg.BorConfig, eventFetcher eventFetcher, stateReceiverABI abi.ABI) *Bridge {
 	bridgeDB := polygoncommon.NewDatabase(dataDir, kv.PolygonBridgeDB, databaseTablesCfg, logger)
 	bridgeStore := NewStore(bridgeDB)
-	return NewBridge(bridgeStore, logger, borConfig, fetchSyncEvents, stateReceiverABI)
+	return NewBridge(bridgeStore, logger, borConfig, eventFetcher, stateReceiverABI)
 }
 
-func NewBridge(store Store, logger log.Logger, borConfig *borcfg.BorConfig, fetchSyncEvents fetchSyncEventsType, stateReceiverABI abi.ABI) *Bridge {
+func NewBridge(store Store, logger log.Logger, borConfig *borcfg.BorConfig, eventFetcher eventFetcher, stateReceiverABI abi.ABI) *Bridge {
 	return &Bridge{
 		store:              store,
 		logger:             logger,
 		borConfig:          borConfig,
-		fetchSyncEvents:    fetchSyncEvents,
+		eventFetcher:       eventFetcher,
 		stateReceiverABI:   stateReceiverABI,
 		stateClientAddress: libcommon.HexToAddress(borConfig.StateReceiverContract),
 	}
+}
+
+type Bridge struct {
+	store              Store
+	logger             log.Logger
+	borConfig          *borcfg.BorConfig
+	eventFetcher       eventFetcher
+	stateReceiverABI   abi.ABI
+	stateClientAddress libcommon.Address
+	// internal state
+	ready                    atomic.Bool
+	lastProcessedBlockNumber atomic.Uint64
+	lastProcessedEventID     atomic.Uint64
 }
 
 func (b *Bridge) Run(ctx context.Context) error {
@@ -104,7 +104,7 @@ func (b *Bridge) Run(ctx context.Context) error {
 
 		// get all events from last sync ID to now
 		to := time.Now()
-		events, err := b.fetchSyncEvents(ctx, lastEventID+1, to, 0)
+		events, err := b.eventFetcher.FetchStateSyncEvents(ctx, lastEventID+1, to, 0)
 		if err != nil {
 			return err
 		}
@@ -130,8 +130,6 @@ func (b *Bridge) Run(ctx context.Context) error {
 func (b *Bridge) Close() {
 	b.store.Close()
 }
-
-// EngineService interface implementations
 
 // ProcessNewBlocks iterates through all blocks and constructs a map from block number to sync events
 func (b *Bridge) ProcessNewBlocks(ctx context.Context, blocks []*types.Block) error {
@@ -164,19 +162,19 @@ func (b *Bridge) ProcessNewBlocks(ctx context.Context, blocks []*types.Block) er
 
 		prevSprintTime = time.Unix(int64(block.Time()), 0)
 
-		lastDBID, err := b.store.SprintLastEventID(ctx, b.lastProcessedEventID.Load(), timeLimit, b.stateReceiverABI)
+		lastID, err := b.store.LastEventIDWithinWindow(ctx, b.lastProcessedEventID.Load(), timeLimit, b.stateReceiverABI)
 		if err != nil {
 			return err
 		}
 
-		if lastDBID > b.lastProcessedEventID.Load() {
-			b.logger.Debug(bridgeLogPrefix(fmt.Sprintf("Creating map for block %d, start ID %d, end ID %d", blockNum, b.lastProcessedEventID.Load(), lastDBID)))
+		if lastID > b.lastProcessedEventID.Load() {
+			b.logger.Debug(bridgeLogPrefix(fmt.Sprintf("Creating map for block %d, start ID %d, end ID %d", blockNum, b.lastProcessedEventID.Load(), lastID)))
 
 			k := bortypes.ComputeBorTxHash(blockNum, block.Hash())
 			eventMap[blockNum] = b.lastProcessedEventID.Load()
 			txMap[k] = blockNum
 
-			b.lastProcessedEventID.Store(lastDBID)
+			b.lastProcessedEventID.Store(lastID)
 		}
 
 		b.lastProcessedBlockNumber.Store(blockNum)
@@ -220,7 +218,7 @@ func (b *Bridge) Unwind(ctx context.Context, blockNum uint64) error {
 func (b *Bridge) Events(ctx context.Context, blockNum uint64) ([]*types.Message, error) {
 	start, end, err := b.store.EventIDRange(ctx, blockNum)
 	if err != nil {
-		if errors.Is(err, ErrMapNotAvailable) {
+		if errors.Is(err, ErrEventIDRangeNotFound) {
 			return nil, nil
 		}
 

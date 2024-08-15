@@ -153,7 +153,7 @@ func (s *StateSuite) SetUpTest(c *checker.C) {
 	}
 	s.tx = tx
 	//s.r = NewWriterV4(s.tx)
-	s.r = NewReaderV4(domains)
+	s.r = NewReaderV3(domains)
 	s.w = NewWriterV4(domains)
 	s.state = New(s.r)
 }
@@ -263,7 +263,7 @@ func TestSnapshot2(t *testing.T) {
 
 	w := NewWriterV4(domains)
 
-	state := New(NewReaderV4(domains))
+	state := New(NewReaderV3(domains))
 
 	stateobjaddr0 := toAddr([]byte("so0"))
 	stateobjaddr1 := toAddr([]byte("so1"))
@@ -411,7 +411,7 @@ func TestDump(t *testing.T) {
 	err = rawdbv3.TxNums.Append(tx, 1, 1)
 	require.NoError(t, err)
 
-	st := New(NewReaderV4(domains))
+	st := New(NewReaderV3(domains))
 
 	// generate a few entries
 	obj1 := st.GetOrNewStateObject(toAddr([]byte{0x01}))

@@ -820,6 +820,10 @@ func (s *RoSnapshots) buildMissedIndices(logPrefix string, ctx context.Context, 
 		return nil
 	}
 
+	if _, err := snaptype.ReadAndCreateSaltIfNeeded(dirs.Snap); err != nil {
+		return err
+	}
+
 	dir, tmpDir := dirs.Snap, dirs.Tmp
 	//log.Log(lvl, "[snapshots] Build indices", "from", min)
 
