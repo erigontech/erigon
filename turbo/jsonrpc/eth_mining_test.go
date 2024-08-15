@@ -21,6 +21,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/erigontech/erigon/consensus/ethash"
 	"github.com/erigontech/erigon/rpc/rpccfg"
 
 	"github.com/stretchr/testify/require"
@@ -42,7 +43,8 @@ func TestPendingBlock(t *testing.T) {
 	mining := txpool.NewMiningClient(conn)
 	ff := rpchelper.New(ctx, rpchelper.DefaultFiltersConfig, nil, nil, mining, func() {}, m.Log)
 	stateCache := kvcache.New(kvcache.DefaultCoherentConfig)
-	api := NewEthAPI(NewBaseApi(ff, stateCache, m.BlockReader, false, rpccfg.DefaultEvmCallTimeout, nil, m.Dirs, nil), nil, nil, nil, mining, 5000000, 1e18, 100_000, false, 100_000, 128, log.New())
+	engine := ethash.NewFaker()
+	api := NewEthAPI(NewBaseApi(ff, stateCache, m.BlockReader, false, rpccfg.DefaultEvmCallTimeout, engine, m.Dirs, nil), nil, nil, nil, mining, 5000000, 1e18, 100_000, false, 100_000, 128, log.New())
 	expect := uint64(12345)
 	b, err := rlp.EncodeToBytes(types.NewBlockWithHeader(&types.Header{Number: new(big.Int).SetUint64(expect)}))
 	require.NoError(t, err)

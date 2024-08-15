@@ -14,26 +14,37 @@
 // You should have received a copy of the GNU Lesser General Public License
 // along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
-package bodydownload_test
+package ethashcfg
 
 import (
-	"testing"
-
-	"github.com/erigontech/erigon/turbo/stages/bodydownload"
-	"github.com/erigontech/erigon/turbo/stages/mock"
-	"github.com/stretchr/testify/require"
-
-	"github.com/erigontech/erigon/consensus/ethash"
+	"github.com/erigontech/erigon-lib/log/v3"
 )
 
-func TestCreateBodyDownload(t *testing.T) {
-	t.Parallel()
-	m := mock.Mock(t)
-	tx, err := m.DB.BeginRo(m.Ctx)
-	require.NoError(t, err)
-	defer tx.Rollback()
-	bd := bodydownload.NewBodyDownload(ethash.NewFaker(), 128, 100, m.BlockReader, m.Log)
-	if _, _, _, _, err := bd.UpdateFromDb(tx); err != nil {
-		t.Fatalf("update from db: %v", err)
-	}
+// Config are the configuration parameters of the ethash.
+type Config struct {
+	CachesInMem      int
+	CachesLockMmap   bool
+	DatasetDir       string
+	DatasetsInMem    int
+	DatasetsOnDisk   int
+	DatasetsLockMmap bool
+	PowMode          Mode
+
+	// When set, notifications sent by the remote sealer will
+	// be block header JSON objects instead of work package arrays.
+	NotifyFull bool
+
+	Log log.Logger `toml:"-"`
 }
+
+// Mode defines the type and amount of PoW verification an ethash engine makes.
+type Mode uint
+
+const (
+	ModeNormal Mode = iota
+	ModeShared
+	ModeTest
+
+	ModeFake
+	ModeFullFake
+)
