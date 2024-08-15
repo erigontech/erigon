@@ -162,7 +162,6 @@ func RunCaplinService(ctx context.Context, engine execution_client.ExecutionEngi
 			return fmt.Errorf("could not decode genesis state: %s", err)
 		}
 		h, _ := genesisState.BlockRoot()
-		fmt.Printf("Genesis state hash: %x\n", h)
 	} else {
 		networkConfig, beaconConfig = clparams.GetConfigsByNetwork(config.NetworkId)
 		genesisDb = genesisdb.NewGenesisDB(beaconConfig, dirs.CaplinGenesis)
