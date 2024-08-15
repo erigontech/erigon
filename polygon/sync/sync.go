@@ -109,7 +109,7 @@ func (s *Sync) handleMilestoneTipMismatch(
 
 	s.logger.Debug(
 		syncLogPrefix("local chain tip does not match the milestone, unwinding to the previous verified milestone"),
-		"oldTip", oldTip,
+		"oldTipNum", oldTipNum,
 		"milestoneId", milestone.Id,
 		"milestoneStart", milestone.StartBlock(),
 		"milestoneEnd", milestone.EndBlock(),
