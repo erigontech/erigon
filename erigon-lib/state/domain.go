@@ -1247,7 +1247,7 @@ func buildAccessor(ctx context.Context, d *seg.Decompressor, compressed FileComp
 	p := ps.AddNew(fileName, uint64(count))
 	defer ps.Delete(p)
 
-	defer d.EnableReadAhead().DisableReadAhead()
+	defer d.EnableMadvNormal().DisableReadAhead()
 
 	g := NewArchiveGetter(d.MakeGetter(), compressed)
 	var rs *recsplit.RecSplit
@@ -1723,7 +1723,7 @@ func (dc *DomainPruneStat) String() (kvstr string) {
 		return ""
 	}
 	if dc.Values > 0 {
-		kvstr = fmt.Sprintf("kv: %d from steps %d-%d", dc.Values, dc.MinStep, dc.MaxStep)
+		kvstr = fmt.Sprintf("kv: %s from steps %d-%d", common.PrettyCounter(dc.Values), dc.MinStep, dc.MaxStep)
 	}
 	if dc.History != nil {
 		if kvstr != "" {

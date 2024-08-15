@@ -24,7 +24,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"github.com/erigontech/erigon-lib/common/datadir"
 	"io"
 	"math/big"
 	"os"
@@ -32,6 +31,8 @@ import (
 	"runtime/pprof"
 	"testing"
 	"time"
+
+	"github.com/erigontech/erigon-lib/common/datadir"
 
 	"github.com/holiman/uint256"
 	"github.com/urfave/cli/v2"
@@ -176,7 +177,7 @@ func runCmd(ctx *cli.Context) error {
 		return err
 	}
 	defer sd.Close()
-	stateReader := state.NewStateReaderV3(sd)
+	stateReader := state.NewReaderV3(sd)
 	statedb = state.New(stateReader)
 	if ctx.String(SenderFlag.Name) != "" {
 		sender = libcommon.HexToAddress(ctx.String(SenderFlag.Name))

@@ -4,6 +4,7 @@ import (
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
+	"github.com/erigontech/erigon/turbo/engineapi/engine_types"
 )
 
 type EventStream struct {
@@ -37,14 +38,14 @@ type (
 
 // State event topics
 const (
-	StateHead                EventTopic = "head"
-	StateBlock               EventTopic = "block"
-	StateBlockGossip         EventTopic = "block_gossip"
-	StateFinalizedCheckpoint EventTopic = "finalized_checkpoint"
-	StateChainReorg          EventTopic = "chain_reorg"
-	StateFinalityUpdate      EventTopic = "light_client_finality_update"
-	StateOptimisticUpdate    EventTopic = "light_client_optimistic_update"
-	StatePayloadAttributes   EventTopic = "payload_attributes"
+	StateHead                        EventTopic = "head"
+	StateBlock                       EventTopic = "block"
+	StateBlockGossip                 EventTopic = "block_gossip"
+	StateFinalizedCheckpoint         EventTopic = "finalized_checkpoint"
+	StateChainReorg                  EventTopic = "chain_reorg"
+	StateLightClientFinalityUpdate   EventTopic = "light_client_finality_update"
+	StateLightClientOptimisticUpdate EventTopic = "light_client_optimistic_update"
+	StatePayloadAttributes           EventTopic = "payload_attributes"
 )
 
 // State event data types
@@ -103,17 +104,17 @@ type PayloadAttributesData struct {
 }
 
 type PayloadAttributesContent struct {
-	ProposerIndex     uint64            `json:"proposer_index,string"`
-	ProposalSlot      uint64            `json:"proposal_slot,string"`
-	ParentBlockNumber uint64            `json:"parent_block_number,string"`
-	ParentBlockRoot   common.Hash       `json:"parent_block_root"`
-	ParentBlockHash   common.Hash       `json:"parent_block_hash"`
-	PayloadAttributes PayloadAttributes `json:"payload_attributes"`
-}
-
-type PayloadAttributes struct {
-	Timestamp             uint64                              `json:"timestamp,string"`
-	PrevRandao            common.Hash                         `json:"prev_randao"`
-	SuggestedFeeRecipient common.Address                      `json:"suggested_fee_recipient"`
-	Withdrawals           *solid.ListSSZ[*cltypes.Withdrawal] `json:"withdrawals,omitempty"`
+	/*
+		proposal_slot: the slot at which a block using these payload attributes may be built.
+		parent_block_root: the beacon block root of the parent block to be built upon.
+		parent_block_number: the execution block number of the parent block.
+		parent_block_hash: the execution block hash of the parent block.
+		proposer_index: the validator index of the proposer at proposal_slot on the chain identified by parent_block_root.
+	*/
+	ProposerIndex     uint64                         `json:"proposer_index,string"`
+	ProposalSlot      uint64                         `json:"proposal_slot,string"`
+	ParentBlockNumber uint64                         `json:"parent_block_number,string"`
+	ParentBlockRoot   common.Hash                    `json:"parent_block_root"`
+	ParentBlockHash   common.Hash                    `json:"parent_block_hash"`
+	PayloadAttributes engine_types.PayloadAttributes `json:"payload_attributes"`
 }

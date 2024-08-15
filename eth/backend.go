@@ -88,7 +88,7 @@ import (
 	"github.com/erigontech/erigon/common/debug"
 	"github.com/erigontech/erigon/consensus"
 	"github.com/erigontech/erigon/consensus/clique"
-	"github.com/erigontech/erigon/consensus/ethash"
+	"github.com/erigontech/erigon/consensus/mainnet"
 	"github.com/erigontech/erigon/consensus/merge"
 	"github.com/erigontech/erigon/consensus/misc"
 	"github.com/erigontech/erigon/core"
@@ -535,7 +535,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 	} else if chainConfig.Bor != nil {
 		consensusConfig = chainConfig.Bor
 	} else {
-		consensusConfig = &config.Ethash
+		consensusConfig = &mainnet.MainnetConfig{}
 	}
 
 	var heimdallClient heimdall.HeimdallClient
@@ -548,7 +548,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 		}
 
 		if config.PolygonSync {
-			polygonBridge = bridge.Assemble(config.Dirs.DataDir, logger, consensusConfig.(*borcfg.BorConfig), heimdallClient.FetchStateSyncEvents, bor.GenesisContractStateReceiverABI())
+			polygonBridge = bridge.Assemble(config.Dirs.DataDir, logger, consensusConfig.(*borcfg.BorConfig), heimdallClient, bor.GenesisContractStateReceiverABI())
 			heimdallService = heimdall.AssembleService(consensusConfig.(*borcfg.BorConfig), config.HeimdallURL, dirs.DataDir, tmpdir, logger)
 
 			backend.polygonBridge = polygonBridge
@@ -697,11 +697,6 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 		), stagedsync.MiningUnwindOrder, stagedsync.MiningPruneOrder,
 		logger)
 
-	var ethashApi *ethash.API
-	if casted, ok := backend.engine.(*ethash.Ethash); ok {
-		ethashApi = casted.APIs(nil)[1].Service.(*ethash.API)
-	}
-
 	// setup snapcfg
 	if err := loadSnapshotsEitherFromDiskIfNeeded(dirs, chainConfig.ChainName); err != nil {
 		return nil, err
@@ -709,7 +704,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 
 	// proof-of-stake mining
 	assembleBlockPOS := func(param *core.BlockBuilderParameters, interrupt *int32) (*types.BlockWithReceipts, error) {
-		miningStatePos := stagedsync.NewProposingState(&config.Miner)
+		miningStatePos := stagedsync.NewMiningState(&config.Miner)
 		miningStatePos.MiningConfig.Etherbase = param.SuggestedFeeRecipient
 		proposingSync := stagedsync.New(
 			config.Sync,
@@ -740,7 +735,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 		if err := stages2.MiningStep(ctx, backend.chainDB, proposingSync, tmpdir, logger); err != nil {
 			return nil, err
 		}
-		block := <-miningStatePos.MiningResultPOSCh
+		block := <-miningStatePos.MiningResultCh
 		return block, nil
 	}
 
@@ -753,7 +748,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 	agg.SetSnapshotBuildSema(blockSnapBuildSema)
 	blockRetire := freezeblocks.NewBlockRetire(1, dirs, blockReader, blockWriter, backend.chainDB, backend.chainConfig, backend.notifications.Events, blockSnapBuildSema, logger)
 
-	miningRPC = privateapi.NewMiningServer(ctx, backend, ethashApi, logger)
+	miningRPC = privateapi.NewMiningServer(ctx, backend, logger)
 
 	var creds credentials.TransportCredentials
 	if stack.Config().PrivateApiAddr != "" {
@@ -1289,8 +1284,8 @@ func (s *Ethereum) StartMining(ctx context.Context, db kv.RwDB, stateDiffClient 
 						select {
 						case block := <-miner.MiningResultCh:
 							if block != nil {
-								s.logger.Debug("Mined block", "block", block.Number())
-								s.minedBlocks <- block
+								s.logger.Debug("Mined block", "block", block.Block.Number())
+								s.minedBlocks <- block.Block
 							}
 							return
 						case <-workCtx.Done():

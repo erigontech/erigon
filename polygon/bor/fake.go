@@ -20,19 +20,19 @@ import (
 	"github.com/erigontech/erigon-lib/chain"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/consensus"
-	"github.com/erigontech/erigon/consensus/ethash"
+	"github.com/erigontech/erigon/consensus/mainnet"
 	"github.com/erigontech/erigon/core/state"
 	"github.com/erigontech/erigon/core/types"
 )
 
 type FakeBor struct {
-	*ethash.FakeEthash
+	*mainnet.MainnetConsensus
 }
 
 // NewFaker creates a bor consensus engine with a FakeEthash
 func NewFaker() *FakeBor {
 	return &FakeBor{
-		FakeEthash: ethash.NewFaker(),
+		MainnetConsensus: mainnet.NewMainnetConsensus(),
 	}
 }
 
@@ -40,5 +40,5 @@ func (f *FakeBor) Finalize(config *chain.Config, header *types.Header, state *st
 	txs types.Transactions, uncles []*types.Header, r types.Receipts, withdrawals []*types.Withdrawal, requests types.Requests,
 	chain consensus.ChainReader, syscall consensus.SystemCall, logger log.Logger,
 ) (types.Transactions, types.Receipts, types.Requests, error) {
-	return f.FakeEthash.Finalize(config, header, state, txs, uncles, r, withdrawals, requests, chain, syscall, logger)
+	return f.MainnetConsensus.Finalize(config, header, state, txs, uncles, r, withdrawals, requests, chain, syscall, logger)
 }

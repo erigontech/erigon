@@ -19,7 +19,6 @@ package raw
 import (
 	"sync"
 
-	"github.com/erigontech/erigon-lib/common"
 	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/types/ssz"
 	"github.com/erigontech/erigon/cl/clparams"
@@ -79,18 +78,9 @@ func (b *BeaconState) FinalityRootBranch() ([][32]byte, error) {
 	return proof, nil
 }
 
-func preparateRootsForHashing(roots []common.Hash) [][32]byte {
-	ret := make([][32]byte, len(roots))
-	for i := range roots {
-		copy(ret[i][:], roots[i][:])
-	}
-	return ret
-}
-
 type beaconStateHasher struct {
-	b       *BeaconState
-	jobs    map[StateLeafIndex]any
-	results sync.Map
+	b    *BeaconState
+	jobs map[StateLeafIndex]any
 }
 
 func (p *beaconStateHasher) run() {
@@ -109,22 +99,16 @@ func (p *beaconStateHasher) run() {
 				if err != nil {
 					panic(err)
 				}
-				p.results.Store(idx, root)
+				p.b.updateLeaf(idx, root)
 			case uint64:
-				p.results.Store(idx, [32]byte(merkle_tree.Uint64Root(obj)))
+				p.b.updateLeaf(idx, merkle_tree.Uint64Root(obj))
 			case libcommon.Hash:
-				p.results.Store(idx, [32]byte(obj))
+				p.b.updateLeaf(idx, obj)
 			}
 
 		}(idx, job)
 	}
 	wg.Wait()
-	p.results.Range(func(key, value any) bool {
-		idx := key.(StateLeafIndex)
-		root := value.([32]byte)
-		p.b.updateLeaf(idx, root)
-		return true
-	})
 }
 
 func (p *beaconStateHasher) add(idx StateLeafIndex, job any) {
@@ -200,21 +184,22 @@ func (b *BeaconState) computeDirtyLeaves() error {
 	return nil
 }
 
+// updateLeaf updates the leaf with the new value and marks it as clean. It's safe to call this function concurrently.
 func (b *BeaconState) updateLeaf(idx StateLeafIndex, leaf libcommon.Hash) {
 	// Update leaf with new value.
 	copy(b.leaves[idx*32:], leaf[:])
 	// Now leaf is clean :).
-	b.touchedLeaves[idx] = false
+	b.touchedLeaves[idx].Store(LeafCleanValue)
 }
 
 func (b *BeaconState) isLeafDirty(idx StateLeafIndex) bool {
 	// If leaf is non-initialized or if it was touched then we change it.
-	touched, isInitialized := b.touchedLeaves[idx]
-	return !isInitialized || touched // change only if the leaf was touched or root is non-initialized.
+	v := b.touchedLeaves[idx].Load()
+	return v == LeafInitValue || v == LeafDirtyValue
 }
 
 func (b *BeaconState) markLeaf(idxs ...StateLeafIndex) {
 	for _, idx := range idxs {
-		b.touchedLeaves[idx] = true
+		b.touchedLeaves[idx].Store(LeafDirtyValue)
 	}
 }

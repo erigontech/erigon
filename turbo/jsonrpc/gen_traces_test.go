@@ -157,7 +157,7 @@ func TestGeneratedTraceApi(t *testing.T) {
 			"to": "0x00000000000000000000000000000000000002ff",
 			"value": "0x0"
 		  },
-		  "blockHash": "0x2c7ee9236a9eb58cbaf6473f458ddb41716c6735f4a63eacf0f8b759685f1dbc",
+		  "blockHash": "0x017dcc421ef89fbc067cac073e05ef76a1a22df7ab62e7210ec885a537705062",
 		  "blockNumber": 1,
 		  "result": {
 			"gasUsed": "0x161c",
@@ -178,7 +178,7 @@ func TestGeneratedTraceApi(t *testing.T) {
 			"to": "0x00000000000000000000000000000000000001ff",
 			"value": "0x0"
 		  },
-		  "blockHash": "0x2c7ee9236a9eb58cbaf6473f458ddb41716c6735f4a63eacf0f8b759685f1dbc",
+		  "blockHash": "0x017dcc421ef89fbc067cac073e05ef76a1a22df7ab62e7210ec885a537705062",
 		  "blockNumber": 1,
 		  "result": {
 			"gasUsed": "0xa7b",
@@ -201,7 +201,7 @@ func TestGeneratedTraceApi(t *testing.T) {
 			"to": "0x00000000000000000000000000000000000000ff",
 			"value": "0x0"
 		  },
-		  "blockHash": "0x2c7ee9236a9eb58cbaf6473f458ddb41716c6735f4a63eacf0f8b759685f1dbc",
+		  "blockHash": "0x017dcc421ef89fbc067cac073e05ef76a1a22df7ab62e7210ec885a537705062",
 		  "blockNumber": 1,
 		  "result": {
 			"gasUsed": "0x16",
@@ -225,7 +225,7 @@ func TestGeneratedTraceApi(t *testing.T) {
 			"to": "0x00000000000000000000000000000000000001ff",
 			"value": "0x0"
 		  },
-		  "blockHash": "0x2c7ee9236a9eb58cbaf6473f458ddb41716c6735f4a63eacf0f8b759685f1dbc",
+		  "blockHash": "0x017dcc421ef89fbc067cac073e05ef76a1a22df7ab62e7210ec885a537705062",
 		  "blockNumber": 1,
 		  "result": {
 			"gasUsed": "0xb1",
@@ -248,7 +248,7 @@ func TestGeneratedTraceApi(t *testing.T) {
 			"to": "0x00000000000000000000000000000000000000ff",
 			"value": "0x0"
 		  },
-		  "blockHash": "0x2c7ee9236a9eb58cbaf6473f458ddb41716c6735f4a63eacf0f8b759685f1dbc",
+		  "blockHash": "0x017dcc421ef89fbc067cac073e05ef76a1a22df7ab62e7210ec885a537705062",
 		  "blockNumber": 1,
 		  "result": {
 			"gasUsed": "0x10",
@@ -269,7 +269,7 @@ func TestGeneratedTraceApi(t *testing.T) {
 			"rewardType": "block",
 			"value": "0x1bc16d674ec80000"
 		  },
-		  "blockHash": "0x2c7ee9236a9eb58cbaf6473f458ddb41716c6735f4a63eacf0f8b759685f1dbc",
+		  "blockHash": "0x017dcc421ef89fbc067cac073e05ef76a1a22df7ab62e7210ec885a537705062",
 		  "blockNumber": 1,
 		  "result": null,
 		  "subtraces": 0,
@@ -312,7 +312,7 @@ func TestGeneratedTraceApiCollision(t *testing.T) {
             "to": "0x000000000000000000000000000000000000bbbb",
             "value": "0x0"
         },
-        "blockHash": "0xc78e9674685b04e1300d62cafdae0708d030a9bc0ff7aa9eb9315da23de650dc",
+        "blockHash": "0x3941891beac58fdeafe9c76a031d52983b7f7cc06decfb3a37a67ebd6f58c72f",
         "blockNumber": 1,
         "result": {
             "gasUsed": "0x131bb",
@@ -331,7 +331,7 @@ func TestGeneratedTraceApiCollision(t *testing.T) {
             "init": "0x600360035560046004556158ff6000526002601ef3",
             "value": "0x0"
         },
-        "blockHash": "0xc78e9674685b04e1300d62cafdae0708d030a9bc0ff7aa9eb9315da23de650dc",
+        "blockHash": "0x3941891beac58fdeafe9c76a031d52983b7f7cc06decfb3a37a67ebd6f58c72f",
         "blockNumber": 1,
         "error": "contract address collision",
         "result": null,
