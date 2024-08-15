@@ -49,20 +49,20 @@ func Assemble(dataDir string, logger log.Logger, borConfig *borcfg.BorConfig, ev
 
 func NewBridge(store Store, logger log.Logger, borConfig *borcfg.BorConfig, eventFetcher eventFetcher) *Bridge {
 	return &Bridge{
-		store:              store,
-		logger:             logger,
-		borConfig:          borConfig,
-		eventFetcher:       eventFetcher,
-		stateClientAddress: libcommon.HexToAddress(borConfig.StateReceiverContract),
+		store:                        store,
+		logger:                       logger,
+		borConfig:                    borConfig,
+		eventFetcher:                 eventFetcher,
+		stateReceiverContractAddress: libcommon.HexToAddress(borConfig.StateReceiverContract),
 	}
 }
 
 type Bridge struct {
-	store              Store
-	logger             log.Logger
-	borConfig          *borcfg.BorConfig
-	eventFetcher       eventFetcher
-	stateClientAddress libcommon.Address
+	store                        Store
+	logger                       log.Logger
+	borConfig                    *borcfg.BorConfig
+	eventFetcher                 eventFetcher
+	stateReceiverContractAddress libcommon.Address
 	// internal state
 	ready                    atomic.Bool
 	lastProcessedBlockNumber atomic.Uint64
@@ -240,7 +240,7 @@ func (b *Bridge) Events(ctx context.Context, blockNum uint64) ([]*types.Message,
 	for _, event := range events {
 		msg := types.NewMessage(
 			state.SystemAddress,
-			&b.stateClientAddress,
+			&b.stateReceiverContractAddress,
 			0, u256.Num0,
 			core.SysCallGasLimit,
 			u256.Num0,
