@@ -201,6 +201,7 @@ func (be *BranchEncoder) CollectUpdate(
 	if err != nil {
 		return 0, err
 	}
+	//fmt.Printf("\ncollectBranchUpdate [%x] -> %s\n", prefix, BranchData(update).String())
 
 	prev, prevStep, err := ctx.Branch(prefix)
 	_ = prevStep
@@ -209,6 +210,7 @@ func (be *BranchEncoder) CollectUpdate(
 	}
 	if len(prev) > 0 {
 		if bytes.Equal(prev, update) {
+			fmt.Printf("skip collectBranchUpdate [%x]\n", prefix)
 			return lastNibble, nil // do not write the same data for prefix
 		}
 		update, err = be.merger.Merge(prev, update)
@@ -216,7 +218,7 @@ func (be *BranchEncoder) CollectUpdate(
 			return 0, err
 		}
 	}
-	//fmt.Printf("collectBranchUpdate [%x] -> [%x]\n", prefix, update)
+	fmt.Printf("\ncollectBranchUpdate [%x] -> %s\n", prefix, BranchData(update).String())
 	// has to copy :(
 	if err = ctx.PutBranch(common.Copy(prefix), common.Copy(update), prev, prevStep); err != nil {
 		return 0, err
@@ -312,7 +314,7 @@ func (be *BranchEncoder) EncodeBranch(bitmap, touchMap, afterMap uint16, readCel
 				}
 			}
 			if fieldBits&LeafHashPart != 0 {
-				//fmt.Printf("LH encoded %x\n", cell.leafHash[:cell.lhLen])
+				fmt.Printf("LH encoded %x\n", cell.leafHash[:cell.lhLen])
 				if err := putUvarAndVal(uint64(cell.lhLen), cell.leafHash[:cell.lhLen]); err != nil {
 					return nil, 0, err
 				}
