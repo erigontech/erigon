@@ -313,7 +313,7 @@ func (be *BranchEncoder) EncodeBranch(bitmap, touchMap, afterMap uint16, readCel
 				}
 			}
 			if fieldBits&LeafHashPart != 0 {
-				fmt.Printf("LH encoded %x\n", cell.leafHash[:cell.lhLen])
+				//fmt.Printf("LH encoded %x\n", cell.leafHash[:cell.lhLen])
 				if err := putUvarAndVal(uint64(cell.lhLen), cell.leafHash[:cell.lhLen]); err != nil {
 					return nil, 0, err
 				}
