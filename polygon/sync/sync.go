@@ -127,7 +127,7 @@ func (s *Sync) handleMilestoneTipMismatch(
 	if newTip == nil {
 		err = errors.New("unexpected empty headers from p2p since new milestone")
 		return fmt.Errorf(
-			"%w: oldTipNum=%d, milestoneId=%, milestoneStart=%d, milestoneEnd=%d, milestoneRootHash=%s",
+			"%w: oldTipNum=%d, milestoneId=%d, milestoneStart=%d, milestoneEnd=%d, milestoneRootHash=%s",
 			err, oldTipNum, milestone.Id, milestone.StartBlock(), milestone.EndBlock(), milestone.RootHash(),
 		)
 	}
