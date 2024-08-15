@@ -48,7 +48,7 @@ import (
 	types2 "github.com/erigontech/erigon-lib/types"
 
 	"github.com/erigontech/erigon/common/u256"
-	"github.com/erigontech/erigon/consensus/mainnet"
+	"github.com/erigontech/erigon/consensus/ethash"
 	"github.com/erigontech/erigon/core"
 	"github.com/erigontech/erigon/core/rawdb"
 	"github.com/erigontech/erigon/core/state"
@@ -411,6 +411,14 @@ func testReorg(t *testing.T, first, second []int64, td int64) {
 		})
 		require.NoError(err)
 		require.Equal(b, msg.GetData())
+
+		// Make sure the chain total difficulty is the correct one
+		want := new(big.Int).Add(m.Genesis.Difficulty(), big.NewInt(td))
+		have, err := rawdb.ReadTdByHash(tx, rawdb.ReadCurrentHeader(tx).Hash())
+		require.NoError(err)
+		if have.Cmp(want) != 0 {
+			t.Errorf("total difficulty mismatch: have %v, want %v", have, want)
+		}
 	}
 }
 
@@ -2194,7 +2202,7 @@ func TestEIP1559Transition(t *testing.T) {
 		actual := statedb.GetBalance(block.Coinbase())
 		expected := new(uint256.Int).Add(
 			new(uint256.Int).SetUint64(block.GasUsed()*block.Transactions()[0].GetPrice().Uint64()),
-			mainnet.ConstantinopleBlockReward,
+			ethash.ConstantinopleBlockReward,
 		)
 		if actual.Cmp(expected) != 0 {
 			t.Fatalf("miner balance incorrect: expected %d, got %d", expected, actual)
@@ -2236,7 +2244,7 @@ func TestEIP1559Transition(t *testing.T) {
 		actual := statedb.GetBalance(block.Coinbase())
 		expected := new(uint256.Int).Add(
 			new(uint256.Int).SetUint64(block.GasUsed()*effectiveTip),
-			mainnet.ConstantinopleBlockReward,
+			ethash.ConstantinopleBlockReward,
 		)
 		if actual.Cmp(expected) != 0 {
 			t.Fatalf("miner balance incorrect: expected %d, got %d", expected, actual)
