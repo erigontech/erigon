@@ -716,7 +716,6 @@ func (hph *HexPatriciaHashed) extensionHash(key []byte, hash []byte) ([length.Ha
 func (hph *HexPatriciaHashed) computeCellHashLen(cell *cell, depth int) int {
 	if cell.storageAddrLen > 0 && depth >= 64 {
 		if cell.lhLen > 0 {
-			fmt.Printf("SHL %d\n", cell.lhLen)
 			if cell.lhLen == length.Hash {
 				return cell.lhLen + 1
 			}
@@ -1288,7 +1287,7 @@ func (hph *HexPatriciaHashed) fold() (err error) {
 		upCell.fillFromLowerCell(cell, depth, hph.currentKey[upDepth:hph.currentKeyLen], nibble)
 		// Delete if it existed
 		if hph.branchBefore[row] {
-			fmt.Printf("delete existed row %d prefix %x\n", row, updateKey)
+			//fmt.Printf("delete existed row %d prefix %x\n", row, updateKey)
 			_, err := hph.branchEncoder.CollectUpdate(hph.ctx, updateKey, 0, hph.touchMap[row], 0, RetrieveCellNoop)
 			if err != nil {
 				return fmt.Errorf("failed to encode leaf node update: %w", err)
@@ -1517,7 +1516,6 @@ func (hph *HexPatriciaHashed) updateCell(plainKey, hashedKey []byte, u *Update) 
 
 func (hph *HexPatriciaHashed) RootHash() ([]byte, error) {
 	hph.root.lhLen = 0
-	fmt.Printf("root cell %s\n", hph.root.FullString())
 	rootHash, err := hph.computeCellHash(&hph.root, 0, nil)
 	if err != nil {
 		return nil, err
