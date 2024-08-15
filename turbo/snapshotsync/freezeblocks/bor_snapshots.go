@@ -19,12 +19,12 @@ package freezeblocks
 import (
 	"context"
 	"fmt"
-	"github.com/erigontech/erigon-lib/common"
 	"os"
 	"path/filepath"
 	"reflect"
 
-	"github.com/erigontech/erigon-lib/common/dbg"
+	"github.com/erigontech/erigon-lib/common"
+
 	"github.com/erigontech/erigon-lib/downloader/snaptype"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/cmd/hack/tool/fromdb"
@@ -33,17 +33,11 @@ import (
 	"github.com/erigontech/erigon/turbo/services"
 )
 
-var BorProduceFiles = dbg.EnvBool("BOR_PRODUCE_FILES", false)
-
 func (br *BlockRetire) dbHasEnoughDataForBorRetire(ctx context.Context) (bool, error) {
 	return true, nil
 }
 
 func (br *BlockRetire) retireBorBlocks(ctx context.Context, minBlockNum uint64, maxBlockNum uint64, lvl log.Lvl, seedNewSnapshots func(downloadRequest []services.DownloadRequest) error, onDelete func(l []string) error) (bool, error) {
-	if !BorProduceFiles {
-		return false, nil
-	}
-
 	select {
 	case <-ctx.Done():
 		return false, ctx.Err()

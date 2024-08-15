@@ -143,7 +143,7 @@ var (
 					return 0, err
 				}
 
-				if startEventId > 0 {
+				if lastEventId > 0 {
 					// if we have reached the last entry in kv.BorEventNums we will have a start event
 					// but no end - so we assume that the last event is going to be the last recorded
 					// event in the db
@@ -168,12 +168,6 @@ var (
 						}); err != nil {
 							return 0, err
 						}
-					}
-
-					fmt.Println("LKID", startEventId, lastEventId)
-
-					if lastEventId == 16 {
-						fmt.Println("LKID 16")
 					}
 
 					if lastEventId >= startEventId {
