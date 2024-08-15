@@ -371,7 +371,7 @@ var (
 		nil,
 	)
 
-	Accessor = snaptype.RegisterType(
+	Accessors = snaptype.RegisterType(
 		Enums.InvertedIndicies,
 		"accessor",
 		snaptype.Versions{
@@ -383,7 +383,7 @@ var (
 		nil,
 	)
 	BlockSnapshotTypes = []snaptype.Type{Headers, Bodies, Transactions}
-	E3StateTypes       = []snaptype.Type{Domains, Histories, InvertedIndicies, Accessor}
+	E3StateTypes       = []snaptype.Type{Domains, Histories, InvertedIndicies, Accessors}
 )
 
 func txsAmountBasedOnBodiesSnapshots(bodiesSegment *seg.Decompressor, len uint64) (baseTxID types.BaseTxnID, expectedCount int, err error) {
