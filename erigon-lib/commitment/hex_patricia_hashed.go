@@ -737,7 +737,7 @@ func (hph *HexPatriciaHashed) computeCellHashLen(cell *cell, depth int) int {
 		var lenPrefix [4]byte
 		pt := rlp.GenerateStructLen(lenPrefix[:], totalLen)
 		if totalLen+pt < length.Hash {
-			fmt.Printf("HL: %d+%d\n", totalLen, pt)
+			//fmt.Printf("HL: %d+%d\n", totalLen, pt)
 			return totalLen + pt
 		}
 	}
