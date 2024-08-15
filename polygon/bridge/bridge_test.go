@@ -154,7 +154,6 @@ func TestBridge_Unwind(t *testing.T) {
 	t.Cleanup(cancel)
 
 	heimdallClient, b := setup(t)
-
 	event1 := &heimdall.EventRecordWithTime{
 		EventRecord: heimdall.EventRecord{
 			ID:      1,
