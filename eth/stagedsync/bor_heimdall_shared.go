@@ -498,16 +498,16 @@ func fetchAndWriteHeimdallStateSyncEvents(
 			return lastStateSyncEventID, i, time.Since(fetchStart), err
 		}
 
-		eventIdBuf := eventRecord.MarshallIdBytes()
-		if err = tx.Put(kv.BorEvents, eventIdBuf[:], data); err != nil {
+		eventIdBytes := eventRecord.MarshallIdBytes()
+		if err = tx.Put(kv.BorEvents, eventIdBytes[:], data); err != nil {
 			return lastStateSyncEventID, i, time.Since(fetchStart), err
 		}
 
 		if !wroteIndex {
 			var blockNumBuf [8]byte
 			binary.BigEndian.PutUint64(blockNumBuf[:], blockNum)
-			eventIdBuf = eventRecord.MarshallIdBytes()
-			if err = tx.Put(kv.BorEventNums, blockNumBuf[:], eventIdBuf[:]); err != nil {
+			eventIdBytes = eventRecord.MarshallIdBytes()
+			if err = tx.Put(kv.BorEventNums, blockNumBuf[:], eventIdBytes); err != nil {
 				return lastStateSyncEventID, i, time.Since(fetchStart), err
 			}
 
