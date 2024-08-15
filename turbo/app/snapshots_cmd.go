@@ -525,10 +525,15 @@ func doIntegrity(cliCtx *cli.Context) error {
 func checkIfBlockSnapshotsPublishable(snapDir string) error {
 	var sum uint64
 	var maxTo uint64
+
+	hasBorEvents := false
 	// Check block sanity
 	if err := filepath.Walk(snapDir, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
 			return err
+		}
+		if !hasBorEvents {
+			hasBorEvents = strings.Contains(info.Name(), "borevents")
 		}
 
 		// Skip directories
@@ -546,8 +551,12 @@ func checkIfBlockSnapshotsPublishable(snapDir string) error {
 		}
 		sum += res.To - res.From
 		headerSegName := info.Name()
+		types := []string{"transactions", "bodies"}
+		if hasBorEvents {
+			types = append(types, "borevents")
+		}
 		// check that all files exist
-		for _, snapType := range []string{"transactions", "bodies"} {
+		for _, snapType := range types {
 			segName := strings.Replace(headerSegName, "headers", snapType, 1)
 			// check that the file exist
 			if _, err := os.Stat(filepath.Join(snapDir, segName)); err != nil {
