@@ -34,11 +34,10 @@ import (
 	"github.com/erigontech/erigon/core/vm/evmtypes"
 	"github.com/erigontech/erigon/crypto"
 	"github.com/erigontech/erigon/params"
+	"github.com/erigontech/erigon/turbo/trie"
 )
 
-// emptyCodeHash is used by create to ensure deployment is disallowed to already
-// deployed contract addresses (relevant after the account abstraction).
-var emptyCodeHash = crypto.Keccak256Hash(nil)
+var emptyHash = libcommon.Hash{}
 
 func (evm *EVM) Precompile(addr libcommon.Address) (PrecompiledContract, bool) {
 	return evm.precompile(addr)
@@ -104,6 +103,8 @@ type EVM struct {
 	// available gas is calculated in gasCall* according to the 63/64 rule and later
 	// applied in opCall*.
 	callGasTemp uint64
+
+	JumpDestCache *JumpDestCache
 }
 
 // NewEVM returns a new EVM. The returned EVM is not thread safe and should
@@ -114,7 +115,6 @@ func NewEVM(blockCtx evmtypes.BlockContext, txCtx evmtypes.TxContext, state evmt
 			blockCtx.BaseFee = new(uint256.Int)
 		}
 	}
-
 	evm := &EVM{
 		Context:         blockCtx,
 		TxContext:       txCtx,
@@ -122,6 +122,7 @@ func NewEVM(blockCtx evmtypes.BlockContext, txCtx evmtypes.TxContext, state evmt
 		config:          vmConfig,
 		chainConfig:     chainConfig,
 		chainRules:      chainConfig.Rules(blockCtx.BlockNumber, blockCtx.Time),
+		JumpDestCache:   NewJumpDestCache(false),
 	}
 
 	interpreter := NewEVMInterpreter(evm, vmConfig)
@@ -276,11 +277,11 @@ func (evm *EVM) call(typ OpCode, caller ContractRef, addr libcommon.Address, inp
 		codeHash := evm.intraBlockState.GetCodeHash(addrCopy)
 		var contract *Contract
 		if typ == CALLCODE {
-			contract = NewContract(caller, caller.Address(), value, gas, evm.config.SkipAnalysis)
+			contract = NewContract(caller, caller.Address(), value, gas, evm.config.SkipAnalysis, evm.JumpDestCache)
 		} else if typ == DELEGATECALL {
-			contract = NewContract(caller, caller.Address(), value, gas, evm.config.SkipAnalysis).AsDelegate()
+			contract = NewContract(caller, caller.Address(), value, gas, evm.config.SkipAnalysis, evm.JumpDestCache).AsDelegate()
 		} else {
-			contract = NewContract(caller, addrCopy, value, gas, evm.config.SkipAnalysis)
+			contract = NewContract(caller, addrCopy, value, gas, evm.config.SkipAnalysis, evm.JumpDestCache)
 		}
 		fmt.Println("LEN CODE: ", len(code))
 		contract.SetCallCode(&addrCopy, codeHash, code, evm.parseContainer(code))
@@ -364,7 +365,7 @@ func NewCodeAndHash(code []byte) *codeAndHash {
 }
 
 func (c *codeAndHash) Hash() libcommon.Hash {
-	if c.hash == (libcommon.Hash{}) {
+	if c.hash == emptyHash {
 		c.hash = crypto.Keccak256Hash(c.code)
 	}
 	return c.hash
@@ -423,7 +424,7 @@ func (evm *EVM) create(caller ContractRef, codeAndHash *codeAndHash, gasRemainin
 	}
 	// Ensure there's no existing contract already at the designated address
 	contractHash := evm.intraBlockState.GetCodeHash(address)
-	if evm.intraBlockState.GetNonce(address) != 0 || (contractHash != (libcommon.Hash{}) && contractHash != emptyCodeHash) {
+	if evm.intraBlockState.GetNonce(address) != 0 || (contractHash != (libcommon.Hash{}) && contractHash != trie.EmptyCodeHash) {
 		err = ErrContractAddressCollision
 		return nil, libcommon.Address{}, 0, err
 	}
@@ -436,12 +437,9 @@ func (evm *EVM) create(caller ContractRef, codeAndHash *codeAndHash, gasRemainin
 	}
 	evm.Context.Transfer(evm.intraBlockState, caller.Address(), address, value, bailout)
 
-	// // Initialise a new contract and set the code that is to be used by the EVM.
-	// // The contract is a scoped environment for this execution context only.
-	// contract := NewContract(caller, address, value, gasRemaining, evm.config.SkipAnalysis)
-	// contract.SetCodeOptionalHash(&address, codeAndHash) // TODO(racytech): find out which way is the right way
-
-	contract := NewContract(caller, address, value, gasRemaining, evm.config.SkipAnalysis)
+	// Initialise a new contract and set the code that is to be used by the EVM.
+	// The contract is a scoped environment for this execution context only.
+	contract := NewContract(caller, address, value, gasRemaining, evm.config.SkipAnalysis, evm.JumpDestCache)
 	contract.SetCodeOptionalHash(&address, codeAndHash)
 	// contract.SetCallCode(&address, codeAndHash.hash, codeAndHash.code, evm.parseContainer(codeAndHash.code))
 	isInitcodeEOF := hasEOFMagic(codeAndHash.code)

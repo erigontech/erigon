@@ -217,7 +217,7 @@ func NewDecompressor(compressedFilePath string) (*Decompressor, error) {
 	}
 	// read patterns from file
 	d.data = d.mmapHandle1[:d.size]
-	defer d.EnableReadAhead().DisableReadAhead() //speedup opening on slow drives
+	defer d.EnableMadvNormal().DisableReadAhead() //speedup opening on slow drives
 
 	d.wordsCount = binary.BigEndian.Uint64(d.data[:8])
 	d.emptyWordsCount = binary.BigEndian.Uint64(d.data[8:16])
@@ -526,6 +526,14 @@ func (d *Decompressor) EnableReadAhead() *Decompressor {
 	_ = mmap.MadviseSequential(d.mmapHandle1)
 	return d
 }
+func (d *Decompressor) EnableMadvNormal() *Decompressor {
+	if d == nil || d.mmapHandle1 == nil {
+		return d
+	}
+	d.readAheadRefcnt.Add(1)
+	_ = mmap.MadviseNormal(d.mmapHandle1)
+	return d
+}
 func (d *Decompressor) EnableMadvWillNeed() *Decompressor {
 	if d == nil || d.mmapHandle1 == nil {
 		return d
@@ -555,14 +563,14 @@ func (g *Getter) nextPos(clean bool) (pos uint64) {
 		g.dataP++
 		g.dataBit = 0
 	}
-	table := g.posDict
+	table, dataLen, data := g.posDict, len(g.data), g.data
 	if table.bitLen == 0 {
 		return table.pos[0]
 	}
 	for l := byte(0); l == 0; {
-		code := uint16(g.data[g.dataP]) >> g.dataBit
-		if 8-g.dataBit < table.bitLen && int(g.dataP)+1 < len(g.data) {
-			code |= uint16(g.data[g.dataP+1]) << (8 - g.dataBit)
+		code := uint16(data[g.dataP]) >> g.dataBit
+		if 8-g.dataBit < table.bitLen && int(g.dataP)+1 < dataLen {
+			code |= uint16(data[g.dataP+1]) << (8 - g.dataBit)
 		}
 		code &= (uint16(1) << table.bitLen) - 1
 		l = table.lens[code]

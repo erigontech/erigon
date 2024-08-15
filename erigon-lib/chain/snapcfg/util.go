@@ -95,7 +95,7 @@ func (p Preverified) Typed(types []snaptype.Type) Preverified {
 
 		parts := strings.Split(name, "-")
 		if len(parts) < 3 {
-			if strings.HasPrefix(p.Name, "domain") || strings.HasPrefix(p.Name, "history") || strings.HasPrefix(p.Name, "idx") {
+			if strings.HasPrefix(p.Name, "domain") || strings.HasPrefix(p.Name, "history") || strings.HasPrefix(p.Name, "idx") || strings.HasPrefix(p.Name, "accessor") {
 				bestVersions.Set(p.Name, p)
 				continue
 			}
@@ -158,7 +158,7 @@ func (p Preverified) Versioned(preferredVersion snaptype.Version, minVersion sna
 	for _, p := range p {
 		v, name, ok := strings.Cut(p.Name, "-")
 		if !ok {
-			if strings.HasPrefix(p.Name, "domain") || strings.HasPrefix(p.Name, "history") || strings.HasPrefix(p.Name, "idx") {
+			if strings.HasPrefix(p.Name, "domain") || strings.HasPrefix(p.Name, "history") || strings.HasPrefix(p.Name, "idx") || strings.HasPrefix(p.Name, "accessor") {
 				bestVersions.Set(p.Name, p)
 				continue
 			}
@@ -167,7 +167,7 @@ func (p Preverified) Versioned(preferredVersion snaptype.Version, minVersion sna
 
 		parts := strings.Split(name, "-")
 		if len(parts) < 3 {
-			if strings.HasPrefix(p.Name, "domain") || strings.HasPrefix(p.Name, "history") || strings.HasPrefix(p.Name, "idx") {
+			if strings.HasPrefix(p.Name, "domain") || strings.HasPrefix(p.Name, "history") || strings.HasPrefix(p.Name, "idx") || strings.HasPrefix(p.Name, "accessor") {
 				bestVersions.Set(p.Name, p)
 				continue
 			}
@@ -373,7 +373,7 @@ var knownTypes = map[string][]snaptype.Type{}
 
 func Seedable(networkName string, info snaptype.FileInfo) bool {
 	if networkName == "" {
-		panic("empty network name")
+		return false
 	}
 	return KnownCfg(networkName).Seedable(info)
 }
@@ -451,6 +451,7 @@ func webseedsParse(in []byte) (res []string) {
 
 func LoadRemotePreverified() bool {
 	couldFetch := snapshothashes.LoadSnapshots()
+
 	// Re-load the preverified hashes
 	Mainnet = fromToml(snapshothashes.Mainnet)
 	Holesky = fromToml(snapshothashes.Holesky)
@@ -479,6 +480,33 @@ func LoadRemotePreverified() bool {
 		networkname.GnosisChainName:     Gnosis,
 		networkname.ChiadoChainName:     Chiado,
 	}
-
 	return couldFetch
+}
+
+func SetToml(networkName string, toml []byte) {
+	if _, ok := knownPreverified[networkName]; !ok {
+		return
+	}
+	knownPreverified[networkName] = fromToml(toml)
+}
+
+func GetToml(networkName string) []byte {
+	switch networkName {
+	case networkname.MainnetChainName:
+		return snapshothashes.Mainnet
+	case networkname.HoleskyChainName:
+		return snapshothashes.Holesky
+	case networkname.SepoliaChainName:
+		return snapshothashes.Sepolia
+	case networkname.AmoyChainName:
+		return snapshothashes.Amoy
+	case networkname.BorMainnetChainName:
+		return snapshothashes.BorMainnet
+	case networkname.GnosisChainName:
+		return snapshothashes.Gnosis
+	case networkname.ChiadoChainName:
+		return snapshothashes.Chiado
+	default:
+		return nil
+	}
 }

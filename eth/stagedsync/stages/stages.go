@@ -37,8 +37,8 @@ var (
 	BlockHashes     SyncStage = "BlockHashes"     // Headers Number are written, fills blockHash => number bucket
 	Bodies          SyncStage = "Bodies"          // Block bodies are downloaded, TxHash and UncleHash are getting verified
 	Senders         SyncStage = "Senders"         // "From" recovered from signatures, bodies re-written
-	Execution       SyncStage = "Execution"       // Executing each block w/o buildinf a trie
-	CustomTrace     SyncStage = "CustomTrace"     // Executing each block w/o buildinf a trie
+	Execution       SyncStage = "Execution"       // Executing each block w/o building a trie
+	CustomTrace     SyncStage = "CustomTrace"     // Executing each block w/o building a trie
 	Translation     SyncStage = "Translation"     // Translation each marked for translation contract (from EVM to TEVM)
 	VerkleTrie      SyncStage = "VerkleTrie"
 	TxLookup        SyncStage = "TxLookup" // Generating transactions lookup index

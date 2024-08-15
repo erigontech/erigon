@@ -25,7 +25,6 @@ import (
 	"github.com/erigontech/erigon-lib/log/v3"
 
 	"github.com/erigontech/erigon/core/types"
-	"github.com/erigontech/erigon/polygon/bridge"
 )
 
 //go:generate mockgen -typed=true -destination=./store_mock.go -package=sync . Store
@@ -33,29 +32,31 @@ type Store interface {
 	// InsertBlocks queues blocks for writing into the local canonical chain.
 	InsertBlocks(ctx context.Context, blocks []*types.Block) error
 	// Flush makes sure that all queued blocks have been written.
-	Flush(ctx context.Context, newTip *types.Header) error
+	Flush(ctx context.Context) error
 	// Run performs the block writing.
 	Run(ctx context.Context) error
 }
 
-type executionClientStore struct {
-	logger        log.Logger
-	execution     ExecutionClient
-	polygonBridge bridge.Service
-	queue         chan []*types.Block
+type bridgeStore interface {
+	ProcessNewBlocks(ctx context.Context, blocks []*types.Block) error
+}
 
+type executionClientStore struct {
+	logger    log.Logger
+	execution ExecutionClient
+	bridge    bridgeStore
+	queue     chan []*types.Block
 	// tasksCount includes both tasks pending in the queue and a task that was taken and hasn't finished yet
 	tasksCount atomic.Int32
-
 	// tasksDoneSignal gets sent a value when tasksCount becomes 0
 	tasksDoneSignal chan bool
 }
 
-func NewStore(logger log.Logger, execution ExecutionClient, polygonBridge bridge.Service) Store {
+func NewStore(logger log.Logger, execution ExecutionClient, bridge bridgeStore) Store {
 	return &executionClientStore{
 		logger:          logger,
 		execution:       execution,
-		polygonBridge:   polygonBridge,
+		bridge:          bridge,
 		queue:           make(chan []*types.Block),
 		tasksDoneSignal: make(chan bool, 1),
 	}
@@ -73,7 +74,7 @@ func (s *executionClientStore) InsertBlocks(ctx context.Context, blocks []*types
 	}
 }
 
-func (s *executionClientStore) Flush(ctx context.Context, newTip *types.Header) error {
+func (s *executionClientStore) Flush(ctx context.Context) error {
 	for s.tasksCount.Load() > 0 {
 		select {
 		case _, ok := <-s.tasksDoneSignal:
@@ -83,11 +84,6 @@ func (s *executionClientStore) Flush(ctx context.Context, newTip *types.Header) 
 		case <-ctx.Done():
 			return ctx.Err()
 		}
-	}
-
-	err := s.polygonBridge.Synchronize(ctx, newTip)
-	if err != nil {
-		return err
 	}
 
 	return nil
@@ -124,12 +120,7 @@ func (s *executionClientStore) insertBlocks(ctx context.Context, blocks []*types
 		return err
 	}
 
-	err = s.polygonBridge.Synchronize(ctx, blocks[len(blocks)-1].Header())
-	if err != nil {
-		return err
-	}
-
-	err = s.polygonBridge.ProcessNewBlocks(ctx, blocks)
+	err = s.bridge.ProcessNewBlocks(ctx, blocks)
 	if err != nil {
 		return err
 	}

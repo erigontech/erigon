@@ -164,9 +164,12 @@ type RAMInfo struct {
 }
 
 type DiskInfo struct {
-	FsType string `json:"fsType"`
-	Total  uint64 `json:"total"`
-	Free   uint64 `json:"free"`
+	FsType     string `json:"fsType"`
+	Total      uint64 `json:"total"`
+	Free       uint64 `json:"free"`
+	MountPoint string `json:"mountPoint"`
+	Device     string `json:"device"`
+	Details    string `json:"details"`
 }
 
 type CPUInfo struct {

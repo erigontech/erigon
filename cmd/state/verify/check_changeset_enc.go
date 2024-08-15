@@ -21,6 +21,7 @@ import (
 	"context"
 	"encoding/binary"
 	"fmt"
+	"github.com/erigontech/erigon-lib/common"
 	"runtime"
 	"sync/atomic"
 	"time"
@@ -105,8 +106,8 @@ func CheckEnc(chaindata string) error {
 			return tx.ForEach(kv.StorageChangeSet, []byte{}, func(k, v []byte) error {
 				if i%100_000 == 0 {
 					blockNum := binary.BigEndian.Uint64(k)
-					fmt.Printf("Processed %dK, block number %d, current %d, new %d, time %s\n",
-						i/1000,
+					fmt.Printf("Processed %s, block number %d, current %d, new %d, time %s\n",
+						common.PrettyCounter(i),
 						blockNum,
 						atomic.LoadUint64(&currentSize),
 						atomic.LoadUint64(&newSize),

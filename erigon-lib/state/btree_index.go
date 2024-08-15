@@ -766,7 +766,6 @@ func BuildBtreeIndexWithDecompressor(indexPath string, kv *seg.Decompressor, com
 	if noFsync {
 		bloom.DisableFsync()
 	}
-	hasher := murmur3.New128WithSeed(salt)
 
 	args := BtIndexWriterArgs{
 		IndexFile: indexPath,
@@ -791,9 +790,7 @@ func BuildBtreeIndexWithDecompressor(indexPath string, kv *seg.Decompressor, com
 		if err != nil {
 			return err
 		}
-		hasher.Reset()
-		hasher.Write(key) //nolint:errcheck
-		hi, _ := hasher.Sum128()
+		hi, _ := murmur3.Sum128WithSeed(key, salt)
 		bloom.AddHash(hi)
 		pos, _ = getter.Skip()
 
@@ -813,7 +810,15 @@ func BuildBtreeIndexWithDecompressor(indexPath string, kv *seg.Decompressor, com
 }
 
 // For now, M is not stored inside index file.
-func OpenBtreeIndexWithDecompressor(indexPath string, M uint64, kv *seg.Decompressor, compress FileCompression) (*BtIndex, error) {
+func OpenBtreeIndexWithDecompressor(indexPath string, M uint64, kv *seg.Decompressor, compress FileCompression) (bt *BtIndex, err error) {
+	defer func() {
+		// recover from panic if one occurred. Set err to nil if no panic
+		if r := recover(); r != nil {
+			// do r with only the stack trace
+			err = fmt.Errorf("incomplete or not-fully downloaded file %s", indexPath)
+		}
+	}()
+
 	s, err := os.Stat(indexPath)
 	if err != nil {
 		return nil, err
@@ -846,7 +851,7 @@ func OpenBtreeIndexWithDecompressor(indexPath string, M uint64, kv *seg.Decompre
 
 	idx.ef, _ = eliasfano32.ReadEliasFano(idx.data[pos:])
 
-	defer kv.EnableReadAhead().DisableReadAhead()
+	defer kv.EnableMadvNormal().DisableReadAhead()
 	kvGetter := NewArchiveGetter(kv.MakeGetter(), compress)
 
 	//fmt.Printf("open btree index %s with %d keys b+=%t data compressed %t\n", indexPath, idx.ef.Count(), UseBpsTree, idx.compressed)

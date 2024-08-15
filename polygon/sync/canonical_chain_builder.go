@@ -18,6 +18,7 @@ package sync
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"fmt"
 	"slices"
@@ -36,7 +37,7 @@ type CanonicalChainBuilder interface {
 	Root() *types.Header
 	HeadersInRange(start uint64, count uint64) []*types.Header
 	Prune(newRootNum uint64) error
-	Connect(headers []*types.Header) error
+	Connect(ctx context.Context, headers []*types.Header) error
 }
 
 type producerSlotIndex uint64
@@ -51,25 +52,29 @@ type forkTreeNode struct {
 	totalDifficulty uint64
 }
 
-type canonicalChainBuilder struct {
-	root *forkTreeNode
-	tip  *forkTreeNode
+type difficultyCalculator interface {
+	HeaderDifficulty(ctx context.Context, header *types.Header) (uint64, error)
+}
 
-	difficultyCalc  DifficultyCalculator
-	headerValidator HeaderValidator
-	spansCache      *SpansCache
+type headerValidator interface {
+	ValidateHeader(ctx context.Context, header *types.Header, parent *types.Header, now time.Time) error
+}
+
+type canonicalChainBuilder struct {
+	root            *forkTreeNode
+	tip             *forkTreeNode
+	difficultyCalc  difficultyCalculator
+	headerValidator headerValidator
 }
 
 func NewCanonicalChainBuilder(
 	root *types.Header,
-	difficultyCalc DifficultyCalculator,
-	headerValidator HeaderValidator,
-	spansCache *SpansCache,
+	difficultyCalc difficultyCalculator,
+	headerValidator headerValidator,
 ) CanonicalChainBuilder {
 	ccb := &canonicalChainBuilder{
 		difficultyCalc:  difficultyCalc,
 		headerValidator: headerValidator,
-		spansCache:      spansCache,
 	}
 	ccb.Reset(root)
 	return ccb
@@ -82,9 +87,6 @@ func (ccb *canonicalChainBuilder) Reset(root *types.Header) {
 		headerHash: root.Hash(),
 	}
 	ccb.tip = ccb.root
-	if ccb.spansCache != nil {
-		ccb.spansCache.Prune(root.Number.Uint64())
-	}
 }
 
 // depth-first search
@@ -163,11 +165,8 @@ func (ccb *canonicalChainBuilder) Prune(newRootNum uint64) error {
 	for newRoot.header.Number.Uint64() > newRootNum {
 		newRoot = newRoot.parent
 	}
-	ccb.root = newRoot
 
-	if ccb.spansCache != nil {
-		ccb.spansCache.Prune(newRootNum)
-	}
+	ccb.root = newRoot
 	return nil
 }
 
@@ -196,7 +195,7 @@ func (ccb *canonicalChainBuilder) updateTipIfNeeded(tipCandidate *forkTreeNode) 
 	}
 }
 
-func (ccb *canonicalChainBuilder) Connect(headers []*types.Header) error {
+func (ccb *canonicalChainBuilder) Connect(ctx context.Context, headers []*types.Header) error {
 	if (len(headers) > 0) && (headers[0].Number != nil) && (headers[0].Number.Cmp(ccb.root.header.Number) == 0) {
 		headers = headers[1:]
 	}
@@ -249,13 +248,11 @@ func (ccb *canonicalChainBuilder) Connect(headers []*types.Header) error {
 			return errors.New("canonicalChainBuilder.Connect: invalid header.Number")
 		}
 
-		if ccb.headerValidator != nil {
-			if err := ccb.headerValidator.ValidateHeader(header, parent.header, time.Now()); err != nil {
-				return fmt.Errorf("canonicalChainBuilder.Connect: invalid header error %w", err)
-			}
+		if err := ccb.headerValidator.ValidateHeader(ctx, header, parent.header, time.Now()); err != nil {
+			return fmt.Errorf("canonicalChainBuilder.Connect: invalid header error %w", err)
 		}
 
-		difficulty, err := ccb.difficultyCalc.HeaderDifficulty(header)
+		difficulty, err := ccb.difficultyCalc.HeaderDifficulty(ctx, header)
 		if err != nil {
 			return fmt.Errorf("canonicalChainBuilder.Connect: header difficulty error %w", err)
 		}

@@ -40,7 +40,7 @@ type blsToExecutionChangeTestSuite struct {
 	suite.Suite
 	gomockCtrl     *gomock.Controller
 	operationsPool *pool.OperationsPool
-	emitters       *beaconevents.Emitters
+	emitters       *beaconevents.EventEmitter
 	syncedData     *mockSync.MockSyncedData
 	beaconCfg      *clparams.BeaconChainConfig
 
@@ -54,7 +54,7 @@ func (t *blsToExecutionChangeTestSuite) SetupTest() {
 		BLSToExecutionChangesPool: pool.NewOperationPool[common.Bytes96, *cltypes.SignedBLSToExecutionChange](10, "blsToExecutionChangesPool"),
 	}
 	t.syncedData = mockSync.NewMockSyncedData(t.gomockCtrl)
-	t.emitters = beaconevents.NewEmitters()
+	t.emitters = beaconevents.NewEventEmitter()
 	t.beaconCfg = &clparams.BeaconChainConfig{}
 	t.service = NewBLSToExecutionChangeService(*t.operationsPool, t.emitters, t.syncedData, t.beaconCfg)
 	// mock global functions

@@ -51,6 +51,7 @@ type Config struct {
 	JumpTableEOF *JumpTable // EOF EVM instruction table
 
 	ExtraEips []int // Additional EIPS that are to be enabled
+
 }
 
 var pool = sync.Pool{

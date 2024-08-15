@@ -37,7 +37,7 @@ func (s *Span) RawId() uint64 {
 	return uint64(s.Id)
 }
 
-func (s *Span) SetRawId(id uint64) {
+func (s *Span) SetRawId(_ uint64) {
 	panic("unimplemented")
 }
 
@@ -58,15 +58,17 @@ func (s *Span) Less(other btree.Item) bool {
 }
 
 func (s *Span) CmpRange(n uint64) int {
-	if n < s.StartBlock {
-		return -1
+	return cmpBlockRange(s.StartBlock, s.EndBlock, n)
+}
+
+func (s *Span) Producers() []*valset.Validator {
+	res := make([]*valset.Validator, len(s.SelectedProducers))
+	for i, p := range s.SelectedProducers {
+		pCopy := p
+		res[i] = &pCopy
 	}
 
-	if n > s.EndBlock {
-		return 1
-	}
-
-	return 0
+	return res
 }
 
 type SpanResponse struct {

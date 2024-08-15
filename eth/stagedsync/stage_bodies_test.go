@@ -25,7 +25,6 @@ import (
 
 	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/u256"
-	"github.com/erigontech/erigon-lib/config3"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/kv/rawdbv3"
 	"github.com/erigontech/erigon-lib/log/v3"
@@ -91,11 +90,9 @@ func TestBodiesCanonical(t *testing.T) {
 	var e1 rawdbv3.ErrTxNumsAppendWithGap
 	require.True(errors.As(err, &e1))
 
-	if config3.EnableHistoryV4InTest {
-		// this should see same error inside then retry from last block available, therefore return no error
-		err = bw.MakeBodiesCanonical(tx, 5)
-		require.NoError(err)
-	}
+	// this should see same error inside then retry from last block available, therefore return no error
+	err = bw.MakeBodiesCanonical(tx, 5)
+	require.NoError(err)
 }
 
 func TestBodiesUnwind(t *testing.T) {
@@ -131,12 +128,10 @@ func TestBodiesUnwind(t *testing.T) {
 		require.NoError(err)
 		require.Equal(2+10*(3+2), int(n)) // genesis 2 system txs + from 1, 10 block with 3 txn in each
 
-		if m.HistoryV3 {
-			lastBlockNum, lastTxNum, err := rawdbv3.TxNums.Last(tx)
-			require.NoError(err)
-			require.Equal(10, int(lastBlockNum))
-			require.Equal(1+10*(3+2), int(lastTxNum))
-		}
+		lastBlockNum, lastTxNum, err := rawdbv3.TxNums.Last(tx)
+		require.NoError(err)
+		require.Equal(10, int(lastBlockNum))
+		require.Equal(1+10*(3+2), int(lastTxNum))
 
 		err = bw.MakeBodiesNonCanonical(tx, 5+1) // block 5 already canonical, start from next one
 		require.NoError(err)
@@ -145,12 +140,10 @@ func TestBodiesUnwind(t *testing.T) {
 		require.NoError(err)
 		require.Equal(2+10*(3+2), int(n)) // genesis 2 system txs + from 1, 5 block with 3 txn in each
 
-		if m.HistoryV3 {
-			lastBlockNum, lastTxNum, err := rawdbv3.TxNums.Last(tx)
-			require.NoError(err)
-			require.Equal(5, int(lastBlockNum))
-			require.Equal(1+5*(3+2), int(lastTxNum))
-		}
+		lastBlockNum, lastTxNum, err = rawdbv3.TxNums.Last(tx)
+		require.NoError(err)
+		require.Equal(5, int(lastBlockNum))
+		require.Equal(1+5*(3+2), int(lastTxNum))
 	}
 	{
 		_, err = rawdb.WriteRawBodyIfNotExists(tx, libcommon.Hash{11}, 11, b)
@@ -168,12 +161,10 @@ func TestBodiesUnwind(t *testing.T) {
 		require.NoError(err)
 		require.Equal(2+11*(3+2), int(n))
 
-		if m.HistoryV3 {
-			lastBlockNum, lastTxNum, err := rawdbv3.TxNums.Last(tx)
-			require.NoError(err)
-			require.Equal(11, int(lastBlockNum))
-			require.Equal(1+11*(3+2), int(lastTxNum))
-		}
+		lastBlockNum, lastTxNum, err := rawdbv3.TxNums.Last(tx)
+		require.NoError(err)
+		require.Equal(11, int(lastBlockNum))
+		require.Equal(1+11*(3+2), int(lastTxNum))
 	}
 
 	{
@@ -185,12 +176,10 @@ func TestBodiesUnwind(t *testing.T) {
 		require.NoError(err)
 		require.Equal(2+11*(3+2), int(n)) // from 0, 5 block with 3 txn in each
 
-		if m.HistoryV3 {
-			lastBlockNum, lastTxNum, err := rawdbv3.TxNums.Last(tx)
-			require.NoError(err)
-			require.Equal(5, int(lastBlockNum))
-			require.Equal(1+5*(3+2), int(lastTxNum))
-		}
+		lastBlockNum, lastTxNum, err := rawdbv3.TxNums.Last(tx)
+		require.NoError(err)
+		require.Equal(5, int(lastBlockNum))
+		require.Equal(1+5*(3+2), int(lastTxNum))
 
 		err = bw.MakeBodiesCanonical(tx, 5+1) // block 5 already canonical, start from next one
 		require.NoError(err)
@@ -198,11 +187,9 @@ func TestBodiesUnwind(t *testing.T) {
 		require.NoError(err)
 		require.Equal(2+11*(3+2), int(n))
 
-		if m.HistoryV3 {
-			lastBlockNum, lastTxNum, err := rawdbv3.TxNums.Last(tx)
-			require.NoError(err)
-			require.Equal(11, int(lastBlockNum))
-			require.Equal(1+11*(3+2), int(lastTxNum))
-		}
+		lastBlockNum, lastTxNum, err = rawdbv3.TxNums.Last(tx)
+		require.NoError(err)
+		require.Equal(11, int(lastBlockNum))
+		require.Equal(1+11*(3+2), int(lastTxNum))
 	}
 }
