@@ -14,7 +14,7 @@
 // You should have received a copy of the GNU Lesser General Public License
 // along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
-package bor
+package borabi
 
 import (
 	"strings"
@@ -28,14 +28,26 @@ const (
 )
 
 var (
-	validatorSetABI, _  = abi.JSON(strings.NewReader(validatorSetABIJSON))
-	stateReceiverABI, _ = abi.JSON(strings.NewReader(stateReceiverABIJSON))
+	validatorSetABI  abi.ABI
+	stateReceiverABI abi.ABI
 )
 
-func GenesisContractValidatorSetABI() abi.ABI {
+func init() {
+	var err error
+
+	if validatorSetABI, err = abi.JSON(strings.NewReader(validatorSetABIJSON)); err != nil {
+		panic(err)
+	}
+
+	if stateReceiverABI, err = abi.JSON(strings.NewReader(stateReceiverABIJSON)); err != nil {
+		panic(err)
+	}
+}
+
+func ValidatorSetContractABI() abi.ABI {
 	return validatorSetABI
 }
 
-func GenesisContractStateReceiverABI() abi.ABI {
+func StateReceiverContractABI() abi.ABI {
 	return stateReceiverABI
 }

@@ -41,6 +41,7 @@ import (
 	"github.com/erigontech/erigon/eth/ethconfig/estimate"
 	"github.com/erigontech/erigon/eth/stagedsync/stages"
 	"github.com/erigontech/erigon/polygon/bor"
+	"github.com/erigontech/erigon/polygon/bor/borabi"
 	"github.com/erigontech/erigon/polygon/bor/borcfg"
 	"github.com/erigontech/erigon/polygon/bor/finality"
 	"github.com/erigontech/erigon/polygon/bor/finality/whitelist"
@@ -102,7 +103,7 @@ func StageBorHeimdallCfg(
 		blockReader:      blockReader,
 		hd:               hd,
 		penalize:         penalize,
-		stateReceiverABI: bor.GenesisContractStateReceiverABI(),
+		stateReceiverABI: borabi.StateReceiverContractABI(),
 		recents:          recents,
 		signatures:       signatures,
 		recordWaypoints:  recordWaypoints,

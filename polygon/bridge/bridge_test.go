@@ -15,7 +15,7 @@ import (
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/accounts/abi"
 	"github.com/erigontech/erigon/core/types"
-	"github.com/erigontech/erigon/polygon/bor"
+	"github.com/erigontech/erigon/polygon/bor/borabi"
 	"github.com/erigontech/erigon/polygon/bor/borcfg"
 	"github.com/erigontech/erigon/polygon/bridge"
 	"github.com/erigontech/erigon/polygon/heimdall"
@@ -67,7 +67,7 @@ func TestBridge(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)
 
-	stateReceiverABI := bor.GenesisContractStateReceiverABI()
+	stateReceiverABI := borabi.StateReceiverContractABI()
 	heimdallClient, b := setup(t, stateReceiverABI)
 
 	event1 := &heimdall.EventRecordWithTime{
@@ -159,7 +159,7 @@ func TestBridge_Unwind(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)
 
-	stateReceiverABI := bor.GenesisContractStateReceiverABI()
+	stateReceiverABI := borabi.StateReceiverContractABI()
 	heimdallClient, b := setup(t, stateReceiverABI)
 
 	event1 := &heimdall.EventRecordWithTime{
