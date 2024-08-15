@@ -30,6 +30,7 @@ import (
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon/accounts/abi"
 	"github.com/erigontech/erigon/core/types"
+	"github.com/erigontech/erigon/polygon/bor"
 	"github.com/erigontech/erigon/polygon/bor/borcfg"
 	"github.com/erigontech/erigon/polygon/heimdall"
 	"github.com/erigontech/erigon/turbo/services"
@@ -416,11 +417,7 @@ func fetchAndWriteHeimdallStateSyncEvents(
 	logger log.Logger) (uint64, int, time.Duration, error) {
 	fetchStart := time.Now()
 	// Find out the latest eventId
-	var (
-		fromId uint64
-		to     time.Time
-		from   time.Time
-	)
+	var fromId uint64
 
 	blockNum := header.Number.Uint64()
 
@@ -429,25 +426,10 @@ func fetchAndWriteHeimdallStateSyncEvents(
 		return lastStateSyncEventID, 0, 0, nil
 	}
 
-	prevHeader, err := blockReader.HeaderByNumber(ctx, tx, blockNum-config.CalculateSprintLength(blockNum))
+	from, to, err := bor.CalculateEventWIndow(ctx, config, header, tx, blockReader)
 
 	if err != nil {
 		return lastStateSyncEventID, 0, time.Since(fetchStart), err
-	}
-
-	if config.IsIndore(blockNum) {
-		stateSyncDelay := config.CalculateStateSyncDelay(blockNum)
-		to = time.Unix(int64(header.Time-stateSyncDelay), 0)
-		from = time.Unix(int64(prevHeader.Time-stateSyncDelay), 0)
-	} else {
-		to = time.Unix(int64(prevHeader.Time), 0)
-		prevHeader, err := blockReader.HeaderByNumber(ctx, tx, blockNum-config.CalculateSprintLength(prevHeader.Number.Uint64()))
-
-		if err != nil {
-			return lastStateSyncEventID, 0, time.Since(fetchStart), err
-		}
-
-		from = time.Unix(int64(prevHeader.Time), 0)
 	}
 
 	fetchTo := to
