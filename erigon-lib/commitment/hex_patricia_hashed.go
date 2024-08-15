@@ -719,6 +719,7 @@ func (hph *HexPatriciaHashed) computeCellHashLen(cell *cell, depth int) int {
 			if cell.lhLen == length.Hash {
 				return cell.lhLen + 1
 			}
+			fmt.Printf("leafHashLen %d\n", cell.lhLen)
 			return cell.lhLen
 		}
 
