@@ -58,6 +58,7 @@ func TestMiningBenchmark(t *testing.T) {
 	//if config3.EnableHistoryV4InTest {
 	//	t.Skip("TODO: [e4] implement me")
 	//}
+	t.Log("AAAAAAAAAAAAAAA_BBBBBBBBBBBBB")
 
 	log.Root().SetHandler(log.LvlFilterHandler(log.LvlDebug, log.StreamHandler(os.Stderr, log.TerminalFormat())))
 	fdlimit.Raise(2048)
