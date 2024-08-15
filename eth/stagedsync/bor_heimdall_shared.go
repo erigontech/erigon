@@ -499,7 +499,7 @@ func fetchAndWriteHeimdallStateSyncEvents(
 		}
 
 		eventIdBytes := eventRecord.MarshallIdBytes()
-		if err = tx.Put(kv.BorEvents, eventIdBytes[:], data); err != nil {
+		if err = tx.Put(kv.BorEvents, eventIdBytes, data); err != nil {
 			return lastStateSyncEventID, i, time.Since(fetchStart), err
 		}
 
