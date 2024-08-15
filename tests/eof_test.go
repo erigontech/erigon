@@ -52,7 +52,7 @@ func TestEOFStateTest(t *testing.T) {
 
 	st := new(testMatcher)
 
-	dir := filepath.Join(".", "state_tests/prague/eip7692_eof_v1/eip7480_data_section/data_opcodes")
+	dir := filepath.Join(".", "state_tests/prague/eip7692_eof_v1/eip7480_data_section/datacopy_memory_expansion")
 
 	dirs := datadir.New(t.TempDir())
 	db, _ := temporaltest.NewTestDB(t, dirs)

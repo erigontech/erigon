@@ -254,7 +254,7 @@ func (in *EVMInterpreter) Run(contract *Contract, input []byte, readOnly bool) (
 		jt = in.cfg.JumpTable
 		initcode = contract.Code
 	}
-
+	fmt.Printf("initcode: 0x%x\n", initcode)
 	// Make sure the readOnly is only set if we aren't in readOnly yet.
 	// This makes also sure that the readOnly flag isn't removed for child calls.
 	restoreReadonly := readOnly && !in.readOnly
@@ -304,10 +304,14 @@ func (in *EVMInterpreter) Run(contract *Contract, input []byte, readOnly bool) (
 		// if contract.IsEOF() {
 		// 	op = contract.GetOp(_pc)
 		// }
-		op = OpCode(initcode[_pc])
+		if len(initcode) > int(_pc) {
+			op = OpCode(initcode[_pc])
+		} else {
+			op = STOP
+		}
 		operation := jt[op]
 		cost = operation.constantGas // For tracing
-		fmt.Printf("%v ", op)
+		fmt.Printf("pc: %v - %v ", _pc, op)
 		// Validate stack
 		if sLen := locStack.Len(); sLen < operation.numPop {
 			return nil, &ErrStackUnderflow{stackLen: sLen, required: operation.numPop}
@@ -326,7 +330,9 @@ func (in *EVMInterpreter) Run(contract *Contract, input []byte, readOnly bool) (
 			// to detect calculation overflows
 			if operation.memorySize != nil {
 				memSize, overflow := operation.memorySize(locStack)
+				fmt.Printf("memSize: %v, overflow: %v | ", memSize, overflow)
 				if overflow {
+					fmt.Println("returning: ErrGasUintOverflow")
 					return nil, ErrGasUintOverflow
 				}
 				// memory is expanded in words of 32 bytes. Gas
@@ -343,7 +349,6 @@ func (in *EVMInterpreter) Run(contract *Contract, input []byte, readOnly bool) (
 			if err != nil || !contract.UseGas(dynamicCost, tracing.GasChangeIgnored) {
 				return nil, ErrOutOfGas
 			}
-
 			// Do tracing before memory expansion
 			if in.cfg.Debug {
 				in.cfg.Tracer.CaptureState(_pc, op, gasCopy, cost, callContext, in.returnData, in.depth, err) //nolint:errcheck

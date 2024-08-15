@@ -686,7 +686,7 @@ func opDataCopy(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([
 		dataIndex          = dataIndex256.Uint64()
 		dst, src, copySize uint64
 	)
-
+	fmt.Println("DATACOPY CALLED")
 	dst = memOffset256.Uint64()
 	if dataLen < dataIndex {
 		src = dataLen
@@ -697,13 +697,15 @@ func opDataCopy(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([
 	copySize = min(s, dataLen-src)
 
 	if copySize > 0 {
+		fmt.Println("CopyFromData")
 		scope.Memory.CopyFromData(dst, data, src, copySize)
 	}
 
 	if s-copySize > 0 {
+		fmt.Println("Setting Zero")
 		scope.Memory.SetZero(dst+copySize, s-copySize)
 	}
-
+	fmt.Println("Exiting")
 	return nil, nil
 }
 
