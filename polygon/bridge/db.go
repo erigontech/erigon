@@ -248,7 +248,11 @@ func (s *MdbxStore) PutEvents(ctx context.Context, events []*heimdall.EventRecor
 	}
 	defer tx.Rollback()
 
-	return PutEvents(tx, events)
+	if err = PutEvents(tx, events); err != nil {
+		return err
+	}
+
+	return tx.Commit()
 }
 
 func PutEvents(tx kv.RwTx, events []*heimdall.EventRecordWithTime) error {
@@ -265,7 +269,7 @@ func PutEvents(tx kv.RwTx, events []*heimdall.EventRecordWithTime) error {
 		}
 	}
 
-	return tx.Commit()
+	return nil
 }
 
 // Events gets raw events, start inclusive, end exclusive
@@ -308,7 +312,11 @@ func (s *MdbxStore) PutEventIDs(ctx context.Context, eventMap map[uint64]uint64)
 	}
 	defer tx.Rollback()
 
-	return PutEventsIDs(tx, eventMap)
+	if err = PutEventsIDs(tx, eventMap); err != nil {
+		return err
+	}
+
+	return tx.Commit()
 }
 
 func PutEventsIDs(tx kv.RwTx, eventMap map[uint64]uint64) error {
@@ -325,7 +333,7 @@ func PutEventsIDs(tx kv.RwTx, eventMap map[uint64]uint64) error {
 		}
 	}
 
-	return tx.Commit()
+	return nil
 }
 
 // EventIDRange returns the state sync event ID range for the given block number.
