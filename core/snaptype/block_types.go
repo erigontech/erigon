@@ -60,7 +60,8 @@ var Enums = struct {
 	Domains,
 	Histories,
 	InvertedIndicies,
-	Accessor snaptype.Enum
+	Accessor,
+	Txt snaptype.Enum
 }{
 	Enums:            snaptype.Enums{},
 	Headers:          snaptype.MinCoreEnum,
@@ -70,6 +71,7 @@ var Enums = struct {
 	Histories:        snaptype.MinCoreEnum + 4,
 	InvertedIndicies: snaptype.MinCoreEnum + 5,
 	Accessor:         snaptype.MinCoreEnum + 6,
+	Txt:              snaptype.MinCoreEnum + 7,
 }
 
 var Indexes = struct {
@@ -372,7 +374,7 @@ var (
 	)
 
 	Accessors = snaptype.RegisterType(
-		Enums.InvertedIndicies,
+		Enums.Accessor,
 		"accessor",
 		snaptype.Versions{
 			Current:      1, //2,
@@ -382,8 +384,20 @@ var (
 		nil,
 		nil,
 	)
+
+	Txt = snaptype.RegisterType(
+		Enums.Txt,
+		"txt",
+		snaptype.Versions{
+			Current:      1, //2,
+			MinSupported: 1,
+		},
+		nil,
+		nil,
+		nil,
+	)
 	BlockSnapshotTypes = []snaptype.Type{Headers, Bodies, Transactions}
-	E3StateTypes       = []snaptype.Type{Domains, Histories, InvertedIndicies, Accessors}
+	E3StateTypes       = []snaptype.Type{Domains, Histories, InvertedIndicies, Accessors, Txt}
 )
 
 func txsAmountBasedOnBodiesSnapshots(bodiesSegment *seg.Decompressor, len uint64) (baseTxID types.BaseTxnID, expectedCount int, err error) {
