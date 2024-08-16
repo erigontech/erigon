@@ -72,8 +72,6 @@ var (
 	NonceAuthVote = hexutil.MustDecode("0xffffffffffffffff") // Magic nonce number to vote on adding a new signer
 	nonceDropVote = hexutil.MustDecode("0x0000000000000000") // Magic nonce number to vote on removing a signer.
 
-	uncleHash = types.CalcUncleHash(nil) // Always Keccak256(RLP([])) as uncles are meaningless outside of PoW.
-
 	DiffInTurn = big.NewInt(2) // Block difficulty for in-turn signatures
 	diffNoTurn = big.NewInt(1) // Block difficulty for out-of-turn signatures
 )
@@ -386,8 +384,6 @@ func (c *Clique) Finalize(config *chain.Config, header *types.Header, state *sta
 	txs types.Transactions, uncles []*types.Header, r types.Receipts, withdrawals []*types.Withdrawal, requests types.Requests,
 	chain consensus.ChainReader, syscall consensus.SystemCall, logger log.Logger,
 ) (types.Transactions, types.Receipts, types.Requests, error) {
-	// No block rewards in PoA, so the state remains as is and uncles are dropped
-	header.UncleHash = types.CalcUncleHash(nil)
 	return txs, r, nil, nil
 }
 
@@ -396,11 +392,8 @@ func (c *Clique) Finalize(config *chain.Config, header *types.Header, state *sta
 func (c *Clique) FinalizeAndAssemble(chainConfig *chain.Config, header *types.Header, state *state.IntraBlockState,
 	txs types.Transactions, uncles []*types.Header, receipts types.Receipts, withdrawals []*types.Withdrawal, requests types.Requests, chain consensus.ChainReader, syscall consensus.SystemCall, call consensus.Call, logger log.Logger,
 ) (*types.Block, types.Transactions, types.Receipts, error) {
-	// No block rewards in PoA, so the state remains as is and uncles are dropped
-	header.UncleHash = types.CalcUncleHash(nil)
-
 	// Assemble and return the final block for sealing
-	return types.NewBlock(header, txs, nil, receipts, withdrawals, requests), txs, receipts, nil
+	return types.NewBlockForAsembling(header, txs, nil, receipts, withdrawals, requests), txs, receipts, nil
 }
 
 // Authorize injects a private key into the consensus engine to mint new blocks
@@ -415,8 +408,9 @@ func (c *Clique) Authorize(signer libcommon.Address, signFn SignerFn) {
 
 // Seal implements consensus.Engine, attempting to create a sealed block using
 // the local signing credentials.
-func (c *Clique) Seal(chain consensus.ChainHeaderReader, block *types.Block, results chan<- *types.Block, stop <-chan struct{}) error {
-
+func (c *Clique) Seal(chain consensus.ChainHeaderReader, blockWithReceipts *types.BlockWithReceipts, results chan<- *types.BlockWithReceipts, stop <-chan struct{}) error {
+	block := blockWithReceipts.Block
+	receipts := blockWithReceipts.Receipts
 	header := block.Header()
 
 	// Sealing the genesis block is not supported
@@ -478,16 +472,12 @@ func (c *Clique) Seal(chain consensus.ChainHeaderReader, block *types.Block, res
 		}
 
 		select {
-		case results <- block.WithSeal(header):
+		case results <- &types.BlockWithReceipts{Block: block.WithSeal(header), Receipts: receipts}:
 		default:
 			c.logger.Warn("Sealing result is not read by miner", "sealhash", SealHash(header))
 		}
 	}()
 
-	return nil
-}
-
-func (c *Clique) GenerateSeal(chain consensus.ChainHeaderReader, currnt, parent *types.Header, call consensus.Call) []byte {
 	return nil
 }
 
