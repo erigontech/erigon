@@ -54,6 +54,8 @@ func NewBridge(store Store, logger log.Logger, borConfig *borcfg.BorConfig, even
 		borConfig:                    borConfig,
 		eventFetcher:                 eventFetcher,
 		stateReceiverContractAddress: libcommon.HexToAddress(borConfig.StateReceiverContract),
+		fetchedEventsSignal:          make(chan struct{}),
+		processedBlockSignal:         make(chan struct{}),
 	}
 }
 
@@ -64,12 +66,19 @@ type Bridge struct {
 	eventFetcher                 eventFetcher
 	stateReceiverContractAddress libcommon.Address
 	// internal state
-	ready                    atomic.Bool
+	reachedTip               atomic.Bool
+	fetchedEventsSignal      chan struct{}
+	lastFetchedEventTime     atomic.Uint64
+	processedBlockSignal     chan struct{}
 	lastProcessedBlockNumber atomic.Uint64
+	lastProcessedBlockTime   atomic.Uint64
 	lastProcessedEventID     atomic.Uint64
 }
 
 func (b *Bridge) Run(ctx context.Context) error {
+	defer close(b.fetchedEventsSignal)
+	defer close(b.processedBlockSignal)
+
 	err := b.store.Prepare(ctx)
 	if err != nil {
 		return err
@@ -77,7 +86,7 @@ func (b *Bridge) Run(ctx context.Context) error {
 	defer b.Close()
 
 	// get last known sync ID
-	lastEventID, err := b.store.LatestEventID(ctx)
+	lastFetchedEventID, err := b.store.LatestEventID(ctx)
 	if err != nil {
 		return err
 	}
@@ -90,7 +99,11 @@ func (b *Bridge) Run(ctx context.Context) error {
 	b.lastProcessedEventID.Store(lastProcessedEventID)
 
 	// start syncing
-	b.logger.Debug(bridgeLogPrefix("Bridge is running"), "lastEventID", lastEventID)
+	b.logger.Debug(
+		bridgeLogPrefix("Bridge is running"),
+		"lastFetchedEventID", lastFetchedEventID,
+		"lastProcessedEventID", lastProcessedEventID,
+	)
 
 	for {
 		select {
@@ -99,28 +112,49 @@ func (b *Bridge) Run(ctx context.Context) error {
 		default:
 		}
 
-		// get all events from last sync ID to now
+		// start scrapping events
 		to := time.Now()
-		events, err := b.eventFetcher.FetchStateSyncEvents(ctx, lastEventID+1, to, 0)
+		events, err := b.eventFetcher.FetchStateSyncEvents(ctx, lastFetchedEventID+1, to, 50)
 		if err != nil {
 			return err
 		}
 
-		if len(events) != 0 {
-			b.ready.Store(false)
-			if err := b.store.PutEvents(ctx, events); err != nil {
+		if len(events) == 0 {
+			// we've reached the tip
+			b.reachedTip.Store(true)
+			b.signalFetchedEvents()
+			if err := libcommon.Sleep(ctx, time.Second); err != nil {
 				return err
 			}
 
-			lastEventID = events[len(events)-1].ID
-		} else {
-			b.ready.Store(true)
-			if err := libcommon.Sleep(ctx, 30*time.Second); err != nil {
-				return err
-			}
+			continue
 		}
 
-		b.logger.Debug(bridgeLogPrefix(fmt.Sprintf("got %v new events, last event ID: %v, ready: %v", len(events), lastEventID, b.ready.Load())))
+		// we've received new events
+		b.reachedTip.Store(false)
+		if err := b.store.PutEvents(ctx, events); err != nil {
+			return err
+		}
+
+		lastFetchedEvent := events[len(events)-1]
+		lastFetchedEventID = lastFetchedEvent.ID
+
+		lastFetchedEventTime := lastFetchedEvent.Time.Unix()
+		if lastFetchedEventTime < 0 {
+			// be defensive when casting from int64 to uint64
+			panic(errors.New("lastFetchedEventTime cannot be negative"))
+		}
+
+		b.lastFetchedEventTime.Store(uint64(lastFetchedEventTime))
+
+		b.logger.Debug(
+			bridgeLogPrefix("fetched new events"),
+			"count", len(events),
+			"lastFetchedEventID", lastFetchedEventID,
+			"lastFetchedEventTime", lastFetchedEvent.Time.Format(time.RFC3339),
+		)
+
+		b.signalFetchedEvents()
 	}
 }
 
@@ -134,14 +168,8 @@ func (b *Bridge) ProcessNewBlocks(ctx context.Context, blocks []*types.Block) er
 		return nil
 	}
 
-	if err := b.Synchronize(ctx, blocks[len(blocks)-1].NumberU64()); err != nil {
-		return err
-	}
-
-	eventMap := make(map[uint64]uint64)
-	txMap := make(map[libcommon.Hash]uint64)
-	var prevSprintTime time.Time
-
+	blockNumToEventId := make(map[uint64]uint64)
+	eventTxnToBlockNum := make(map[libcommon.Hash]uint64)
 	for _, block := range blocks {
 		// check if block is start of span
 		blockNum := block.NumberU64()
@@ -149,40 +177,47 @@ func (b *Bridge) ProcessNewBlocks(ctx context.Context, blocks []*types.Block) er
 			continue
 		}
 
-		var timeLimit time.Time
-		if b.borConfig.IsIndore(blockNum) {
-			stateSyncDelay := b.borConfig.CalculateStateSyncDelay(blockNum)
-			timeLimit = time.Unix(int64(block.Time()-stateSyncDelay), 0)
-		} else {
-			timeLimit = prevSprintTime
-		}
-
-		prevSprintTime = time.Unix(int64(block.Time()), 0)
-
-		lastID, err := b.store.LastEventIDWithinWindow(ctx, b.lastProcessedEventID.Load(), timeLimit)
+		blockTime := block.Time()
+		toTime, err := b.blockEventsWindowTimeEnd(blockNum, blockTime)
 		if err != nil {
 			return err
 		}
 
-		if lastID > b.lastProcessedEventID.Load() {
-			b.logger.Debug(bridgeLogPrefix(fmt.Sprintf("Creating map for block %d, start ID %d, end ID %d", blockNum, b.lastProcessedEventID.Load(), lastID)))
+		if err = b.waitForScrapper(ctx, toTime); err != nil {
+			return err
+		}
 
-			k := bortypes.ComputeBorTxHash(blockNum, block.Hash())
-			eventMap[blockNum] = b.lastProcessedEventID.Load()
-			txMap[k] = blockNum
+		startID := b.lastProcessedEventID.Load() + 1
+		endID, err := b.store.LastEventIDWithinWindow(ctx, startID, time.Unix(int64(toTime), 0))
+		if err != nil {
+			return err
+		}
 
-			b.lastProcessedEventID.Store(lastID)
+		if endID > 0 {
+			b.logger.Debug(
+				bridgeLogPrefix("mapping events to block"),
+				"blockNum", blockNum,
+				"start", startID,
+				"end", endID,
+			)
+
+			eventTxnHash := bortypes.ComputeBorTxHash(blockNum, block.Hash())
+			eventTxnToBlockNum[eventTxnHash] = blockNum
+			blockNumToEventId[blockNum] = startID
+			b.lastProcessedEventID.Store(endID)
 		}
 
 		b.lastProcessedBlockNumber.Store(blockNum)
+		b.lastProcessedBlockTime.Store(blockTime)
+		b.signalProcessedBlock()
 	}
 
-	err := b.store.PutEventIDs(ctx, eventMap)
+	err := b.store.PutBlockNumToEventID(ctx, blockNumToEventId)
 	if err != nil {
 		return err
 	}
 
-	err = b.store.PutEventTxnToBlockNum(ctx, txMap)
+	err = b.store.PutEventTxnToBlockNum(ctx, eventTxnToBlockNum)
 	if err != nil {
 		return err
 	}
@@ -190,20 +225,15 @@ func (b *Bridge) ProcessNewBlocks(ctx context.Context, blocks []*types.Block) er
 	return nil
 }
 
-// Synchronize blocks till bridge has map at tip
+// Synchronize blocks until events up to a given block are processed.
 func (b *Bridge) Synchronize(ctx context.Context, blockNum uint64) error {
-	b.logger.Debug(bridgeLogPrefix("synchronizing events..."), "blockNum", blockNum)
+	b.logger.Debug(
+		bridgeLogPrefix("synchronizing events..."),
+		"blockNum", blockNum,
+		"lastProcessedBlockNumber", b.lastProcessedBlockNumber.Load(),
+	)
 
-	for {
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		default:
-		}
-		if b.ready.Load() || b.lastProcessedBlockNumber.Load() >= blockNum {
-			return nil
-		}
-	}
+	return b.waitForProcessedBlock(ctx, blockNum)
 }
 
 // Unwind deletes map entries till tip
@@ -260,7 +290,121 @@ func (b *Bridge) EventTxnLookup(ctx context.Context, borTxHash libcommon.Hash) (
 	return b.store.EventTxnToBlockNum(ctx, borTxHash)
 }
 
-// Helper functions
+func (b *Bridge) blockEventsWindowTimeEnd(blockNum uint64, blockTime uint64) (uint64, error) {
+	if b.borConfig.IsIndore(blockNum) {
+		stateSyncDelay := b.borConfig.CalculateStateSyncDelay(blockNum)
+		return blockTime - stateSyncDelay, nil
+	}
+
+	lastProcessedBlockTime := b.lastProcessedBlockTime.Load()
+	if lastProcessedBlockTime == 0 {
+		return 0, errors.New("unknown last processed block time")
+	}
+
+	return lastProcessedBlockTime, nil
+}
+
+func (b *Bridge) waitForScrapper(ctx context.Context, toTime uint64) error {
+	logTicker := time.NewTicker(5 * time.Second)
+	defer logTicker.Stop()
+
+	shouldLog := true
+	reachedTip := b.reachedTip.Load()
+	lastFetchedEventTime := b.lastFetchedEventTime.Load()
+	for !reachedTip && toTime > lastFetchedEventTime {
+		if shouldLog {
+			b.logger.Debug(
+				bridgeLogPrefix("waiting for event scrapping to catch up"),
+				"reachedTip", reachedTip,
+				"lastFetchedEventTime", lastFetchedEventTime,
+				"toTime", toTime,
+			)
+		}
+
+		if err := b.waitFetchedEventsSignal(ctx); err != nil {
+			return err
+		}
+
+		reachedTip = b.reachedTip.Load()
+		lastFetchedEventTime = b.lastFetchedEventTime.Load()
+
+		select {
+		case <-logTicker.C:
+			shouldLog = true
+		default:
+			shouldLog = false
+		}
+	}
+
+	return nil
+}
+
+func (b *Bridge) waitForProcessedBlock(ctx context.Context, blockNum uint64) error {
+	logTicker := time.NewTicker(5 * time.Second)
+	defer logTicker.Stop()
+
+	sprintLen := b.borConfig.CalculateSprintLength(blockNum)
+	blockNum -= blockNum % sprintLen // we only process events at sprint start
+	shouldLog := true
+	lastProcessedBlockNumber := b.lastProcessedBlockNumber.Load()
+	for blockNum > lastProcessedBlockNumber {
+		if shouldLog {
+			b.logger.Debug(
+				bridgeLogPrefix("waiting for block processing to catch up"),
+				"blockNum", blockNum,
+				"lastProcessedBlockNumber", lastProcessedBlockNumber,
+			)
+		}
+
+		if err := b.waitProcessedBlockSignal(ctx); err != nil {
+			return err
+		}
+
+		lastProcessedBlockNumber = b.lastProcessedBlockNumber.Load()
+
+		select {
+		case <-logTicker.C:
+			shouldLog = true
+		default:
+			shouldLog = false
+		}
+	}
+
+	return nil
+}
+
+func (b *Bridge) signalFetchedEvents() {
+	select {
+	case b.fetchedEventsSignal <- struct{}{}:
+	default: // no-op, signal already queued
+	}
+}
+
+func (b *Bridge) waitFetchedEventsSignal(ctx context.Context) error {
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-b.fetchedEventsSignal:
+		return nil
+	}
+}
+
+func (b *Bridge) signalProcessedBlock() {
+	select {
+	case b.processedBlockSignal <- struct{}{}:
+	default: // no-op, signal already queued
+	}
+}
+
+func (b *Bridge) waitProcessedBlockSignal(ctx context.Context) error {
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-b.processedBlockSignal:
+		return nil
+	}
+}
+
 func (b *Bridge) isSprintStart(headerNum uint64) bool {
 	if headerNum%b.borConfig.CalculateSprintLength(headerNum) != 0 || headerNum == 0 {
 		return false

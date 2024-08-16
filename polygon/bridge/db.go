@@ -62,7 +62,7 @@ type Store interface {
 	LastEventIDWithinWindow(ctx context.Context, fromID uint64, toTime time.Time) (uint64, error)
 	PutEvents(ctx context.Context, events []*heimdall.EventRecordWithTime) error
 	Events(ctx context.Context, start, end uint64) ([][]byte, error)
-	PutEventIDs(ctx context.Context, eventMap map[uint64]uint64) error
+	PutBlockNumToEventID(ctx context.Context, blockNumToEventId map[uint64]uint64) error
 	EventIDRange(ctx context.Context, blockNum uint64) (uint64, uint64, error)
 	PruneEventIDs(ctx context.Context, blockNum uint64) error
 }
@@ -305,25 +305,25 @@ func (s *MdbxStore) Events(ctx context.Context, start, end uint64) ([][]byte, er
 	return events, err
 }
 
-func (s *MdbxStore) PutEventIDs(ctx context.Context, eventMap map[uint64]uint64) error {
+func (s *MdbxStore) PutBlockNumToEventID(ctx context.Context, blockNumToEventId map[uint64]uint64) error {
 	tx, err := s.db.BeginRw(ctx)
 	if err != nil {
 		return err
 	}
 	defer tx.Rollback()
 
-	if err = PutEventsIDs(tx, eventMap); err != nil {
+	if err = PutBlockNumToEventID(tx, blockNumToEventId); err != nil {
 		return err
 	}
 
 	return tx.Commit()
 }
 
-func PutEventsIDs(tx kv.RwTx, eventMap map[uint64]uint64) error {
+func PutBlockNumToEventID(tx kv.RwTx, blockNumToEventId map[uint64]uint64) error {
 	kByte := make([]byte, 8)
 	vByte := make([]byte, 8)
 
-	for k, v := range eventMap {
+	for k, v := range blockNumToEventId {
 		binary.BigEndian.PutUint64(kByte, k)
 		binary.BigEndian.PutUint64(vByte, v)
 

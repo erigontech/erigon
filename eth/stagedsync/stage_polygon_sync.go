@@ -1132,13 +1132,13 @@ func (s polygonSyncStageBridgeStore) LastEventIDWithinWindow(ctx context.Context
 	return r.id, nil
 }
 
-func (s polygonSyncStageBridgeStore) PutEventIDs(ctx context.Context, eventMap map[uint64]uint64) error {
+func (s polygonSyncStageBridgeStore) PutBlockNumToEventID(ctx context.Context, blockNumToEventId map[uint64]uint64) error {
 	type response struct {
 		err error
 	}
 
 	r, err := awaitTxAction(ctx, s.txActionStream, func(tx kv.RwTx, responseStream chan<- response) error {
-		responseStream <- response{err: bridge.PutEventsIDs(tx, eventMap)}
+		responseStream <- response{err: bridge.PutBlockNumToEventID(tx, blockNumToEventId)}
 		return nil
 	})
 	if err != nil {
