@@ -102,6 +102,8 @@ func NewWorker(lock sync.Locker, logger log.Logger, ctx context.Context, backgro
 	return w
 }
 
+func (rw *Worker) LogLRUStats() { rw.evm.JumpDestCache.LogStats() }
+
 func (rw *Worker) ResetState(rs *state.StateV3, accumulator *shards.Accumulator) {
 	rw.rs = rs
 	if rw.background {

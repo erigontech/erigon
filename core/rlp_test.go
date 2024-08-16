@@ -29,11 +29,11 @@ import (
 
 	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon/consensus/mainnet"
 	"github.com/erigontech/erigon/core"
 	"github.com/erigontech/erigon/turbo/stages/mock"
 
 	"github.com/erigontech/erigon/common/u256"
+	"github.com/erigontech/erigon/consensus/ethash"
 	"github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/crypto"
 	"github.com/erigontech/erigon/params"
@@ -44,7 +44,7 @@ func getBlock(tb testing.TB, transactions int, uncles int, dataSize int, tmpDir 
 	var (
 		aa = libcommon.HexToAddress("0x000000000000000000000000000000000000aaaa")
 		// Generate a canonical chain to act as the main dataset
-		engine = mainnet.NewMainnetConsensus()
+		engine = ethash.NewFaker()
 		// A sender who makes transactions, has some funds
 		key, _  = crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
 		address = crypto.PubkeyToAddress(key.PublicKey)

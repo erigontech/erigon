@@ -52,6 +52,7 @@ import (
 	"github.com/erigontech/erigon/cmd/utils/flags"
 	common2 "github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/paths"
+	"github.com/erigontech/erigon/consensus/ethash/ethashcfg"
 	"github.com/erigontech/erigon/core"
 	"github.com/erigontech/erigon/crypto"
 	"github.com/erigontech/erigon/eth/ethconfig"
@@ -119,6 +120,25 @@ var (
 	TrustedSetupFile = cli.StringFlag{
 		Name:  "trusted-setup-file",
 		Usage: "Absolute path to trusted_setup.json file",
+	}
+	// Ethash settings
+	EthashCachesInMemoryFlag = cli.IntFlag{
+		Name:  "ethash.cachesinmem",
+		Usage: "Number of recent ethash caches to keep in memory (16MB each)",
+		Value: ethconfig.Defaults.Ethash.CachesInMem,
+	}
+	EthashCachesLockMmapFlag = cli.BoolFlag{
+		Name:  "ethash.cacheslockmmap",
+		Usage: "Lock memory maps of recent ethash caches",
+	}
+	EthashDatasetDirFlag = flags.DirectoryFlag{
+		Name:  "ethash.dagdir",
+		Usage: "Directory to store the ethash mining DAGs",
+		Value: flags.DirectoryString(ethconfig.Defaults.Ethash.DatasetDir),
+	}
+	EthashDatasetsLockMmapFlag = cli.BoolFlag{
+		Name:  "ethash.dagslockmmap",
+		Usage: "Lock memory maps for recent ethash mining DAGs",
 	}
 	ExternalConsensusFlag = cli.BoolFlag{
 		Name:  "externalcl",
@@ -851,6 +871,11 @@ var (
 		Usage: "Port for sentinel",
 		Value: 7777,
 	}
+	SentinelBootnodes = cli.StringSliceFlag{
+		Name:  "sentinel.bootnodes",
+		Usage: "Comma separated enode URLs for P2P discovery bootstrap",
+		Value: cli.NewStringSlice(),
+	}
 
 	OtsSearchMaxCapFlag = cli.Uint64Flag{
 		Name:  "ots.search.max.pagesize",
@@ -1004,6 +1029,16 @@ var (
 		Name:  "beacon.api.cors.allow-origins",
 		Usage: "set the cors' allow origins",
 		Value: cli.NewStringSlice(),
+	}
+	CaplinCustomConfigFlag = cli.StringFlag{
+		Name:  "caplin.custom-config",
+		Usage: "set the custom config for caplin",
+		Value: "",
+	}
+	CaplinCustomGenesisFlag = cli.StringFlag{
+		Name:  "caplin.custom-genesis",
+		Usage: "set the custom genesis for caplin",
+		Value: "",
 	}
 	DiagDisabledFlag = cli.BoolFlag{
 		Name:  "diagnostics.disabled",
@@ -1515,6 +1550,26 @@ func setTxPool(ctx *cli.Context, fullCfg *ethconfig.Config) {
 	cfg.CommitEvery = common2.RandomizeDuration(ctx.Duration(TxPoolCommitEveryFlag.Name))
 }
 
+func setEthash(ctx *cli.Context, datadir string, cfg *ethconfig.Config) {
+	if ctx.IsSet(EthashDatasetDirFlag.Name) {
+		cfg.Ethash.DatasetDir = ctx.String(EthashDatasetDirFlag.Name)
+	} else {
+		cfg.Ethash.DatasetDir = filepath.Join(datadir, "ethash-dags")
+	}
+	if ctx.IsSet(EthashCachesInMemoryFlag.Name) {
+		cfg.Ethash.CachesInMem = ctx.Int(EthashCachesInMemoryFlag.Name)
+	}
+	if ctx.IsSet(EthashCachesLockMmapFlag.Name) {
+		cfg.Ethash.CachesLockMmap = ctx.Bool(EthashCachesLockMmapFlag.Name)
+	}
+	if ctx.IsSet(FakePoWFlag.Name) {
+		cfg.Ethash.PowMode = ethashcfg.ModeFake
+	}
+	if ctx.IsSet(EthashDatasetsLockMmapFlag.Name) {
+		cfg.Ethash.DatasetsLockMmap = ctx.Bool(EthashDatasetsLockMmapFlag.Name)
+	}
+}
+
 func SetupMinerCobra(cmd *cobra.Command, cfg *params.MiningConfig) {
 	flags := cmd.Flags()
 	var err error
@@ -1639,18 +1694,18 @@ func setWhitelist(ctx *cli.Context, cfg *ethconfig.Config) {
 
 func setBeaconAPI(ctx *cli.Context, cfg *ethconfig.Config) error {
 	allowed := ctx.StringSlice(BeaconAPIFlag.Name)
-	if err := cfg.BeaconRouter.UnwrapEndpointsList(allowed); err != nil {
+	if err := cfg.CaplinConfig.BeaconAPIRouter.UnwrapEndpointsList(allowed); err != nil {
 		return err
 	}
 
-	cfg.BeaconRouter.Protocol = ctx.String(BeaconApiProtocolFlag.Name)
-	cfg.BeaconRouter.Address = fmt.Sprintf("%s:%d", ctx.String(BeaconApiAddrFlag.Name), ctx.Int(BeaconApiPortFlag.Name))
-	cfg.BeaconRouter.ReadTimeTimeout = time.Duration(ctx.Uint64(BeaconApiReadTimeoutFlag.Name)) * time.Second
-	cfg.BeaconRouter.WriteTimeout = time.Duration(ctx.Uint64(BeaconApiWriteTimeoutFlag.Name)) * time.Second
-	cfg.BeaconRouter.IdleTimeout = time.Duration(ctx.Uint64(BeaconApiIdleTimeoutFlag.Name)) * time.Second
-	cfg.BeaconRouter.AllowedMethods = ctx.StringSlice(BeaconApiAllowMethodsFlag.Name)
-	cfg.BeaconRouter.AllowedOrigins = ctx.StringSlice(BeaconApiAllowOriginsFlag.Name)
-	cfg.BeaconRouter.AllowCredentials = ctx.Bool(BeaconApiAllowCredentialsFlag.Name)
+	cfg.CaplinConfig.BeaconAPIRouter.Protocol = ctx.String(BeaconApiProtocolFlag.Name)
+	cfg.CaplinConfig.BeaconAPIRouter.Address = fmt.Sprintf("%s:%d", ctx.String(BeaconApiAddrFlag.Name), ctx.Int(BeaconApiPortFlag.Name))
+	cfg.CaplinConfig.BeaconAPIRouter.ReadTimeTimeout = time.Duration(ctx.Uint64(BeaconApiReadTimeoutFlag.Name)) * time.Second
+	cfg.CaplinConfig.BeaconAPIRouter.WriteTimeout = time.Duration(ctx.Uint64(BeaconApiWriteTimeoutFlag.Name)) * time.Second
+	cfg.CaplinConfig.BeaconAPIRouter.IdleTimeout = time.Duration(ctx.Uint64(BeaconApiIdleTimeoutFlag.Name)) * time.Second
+	cfg.CaplinConfig.BeaconAPIRouter.AllowedMethods = ctx.StringSlice(BeaconApiAllowMethodsFlag.Name)
+	cfg.CaplinConfig.BeaconAPIRouter.AllowedOrigins = ctx.StringSlice(BeaconApiAllowOriginsFlag.Name)
+	cfg.CaplinConfig.BeaconAPIRouter.AllowCredentials = ctx.Bool(BeaconApiAllowCredentialsFlag.Name)
 	return nil
 }
 
@@ -1667,6 +1722,8 @@ func setCaplin(ctx *cli.Context, cfg *ethconfig.Config) {
 	if checkpointUrls := ctx.StringSlice(CaplinCheckpointSyncUrlFlag.Name); len(checkpointUrls) > 0 {
 		clparams.ConfigurableCheckpointsURLs = checkpointUrls
 	}
+	cfg.CaplinConfig.CustomConfigPath = ctx.String(CaplinCustomConfigFlag.Name)
+	cfg.CaplinConfig.CustomGenesisStatePath = ctx.String(CaplinCustomGenesisFlag.Name)
 }
 
 func setSilkworm(ctx *cli.Context, cfg *ethconfig.Config) {
@@ -1727,11 +1784,12 @@ func CheckExclusive(ctx *cli.Context, args ...interface{}) {
 
 // SetEthConfig applies eth-related command line flags to the config.
 func SetEthConfig(ctx *cli.Context, nodeConfig *nodecfg.Config, cfg *ethconfig.Config, logger log.Logger) {
-	cfg.CaplinDiscoveryAddr = ctx.String(CaplinDiscoveryAddrFlag.Name)
-	cfg.CaplinDiscoveryPort = ctx.Uint64(CaplinDiscoveryPortFlag.Name)
-	cfg.CaplinDiscoveryTCPPort = ctx.Uint64(CaplinDiscoveryTCPPortFlag.Name)
-	cfg.SentinelAddr = ctx.String(SentinelAddrFlag.Name)
-	cfg.SentinelPort = ctx.Uint64(SentinelPortFlag.Name)
+	cfg.CaplinConfig.CaplinDiscoveryAddr = ctx.String(CaplinDiscoveryAddrFlag.Name)
+	cfg.CaplinConfig.CaplinDiscoveryPort = ctx.Uint64(CaplinDiscoveryPortFlag.Name)
+	cfg.CaplinConfig.CaplinDiscoveryTCPPort = ctx.Uint64(CaplinDiscoveryTCPPortFlag.Name)
+	cfg.CaplinConfig.SentinelAddr = ctx.String(SentinelAddrFlag.Name)
+	cfg.CaplinConfig.SentinelPort = ctx.Uint64(SentinelPortFlag.Name)
+	cfg.CaplinConfig.BootstrapNodes = ctx.StringSlice(SentinelBootnodes.Name)
 
 	chain := ctx.String(ChainFlag.Name) // mainnet by default
 	if ctx.IsSet(NetworkIdFlag.Name) {
@@ -1794,6 +1852,7 @@ func SetEthConfig(ctx *cli.Context, nodeConfig *nodecfg.Config, cfg *ethconfig.C
 	cfg.TxPool = ethconfig.DefaultTxPool2Config(cfg)
 	cfg.TxPool.DBDir = nodeConfig.Dirs.TxPool
 
+	setEthash(ctx, nodeConfig.Dirs.DataDir, cfg)
 	setClique(ctx, &cfg.Clique, nodeConfig.Dirs.DataDir)
 	setMiner(ctx, &cfg.Miner)
 	setWhitelist(ctx, cfg)
@@ -1864,7 +1923,7 @@ func SetEthConfig(ctx *cli.Context, nodeConfig *nodecfg.Config, cfg *ethconfig.C
 		cfg.TxPool.OverridePragueTime = cfg.OverridePragueTime
 	}
 
-	if clparams.EmbeddedSupported(cfg.NetworkID) {
+	if clparams.EmbeddedSupported(cfg.NetworkID) || cfg.CaplinConfig.IsDevnet() {
 		cfg.InternalCL = !ctx.Bool(ExternalConsensusFlag.Name)
 	}
 
