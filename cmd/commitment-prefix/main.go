@@ -308,11 +308,11 @@ func fileContentsMapChart(fileName string, data *overallStat) *charts.TreeMap {
 			Value: int(data.branches.ExtSize),
 		},
 		{
-			Name:  "account",
+			Name:  "accountKey",
 			Value: int(data.branches.APKSize),
 		},
 		{
-			Name:  "storage",
+			Name:  "storageKey",
 			Value: int(data.branches.SPKSize),
 		},
 		{
@@ -336,8 +336,6 @@ func fileContentsMapChart(fileName string, data *overallStat) *charts.TreeMap {
 		SetSeriesOptions(
 			charts.WithTreeMapOpts(
 				opts.TreeMapChart{
-					Animation: true,
-					//Roam:       true,
 					UpperLabel: &opts.UpperLabel{Show: true, Color: "#fff"},
 					Levels: &[]opts.TreeMapLevel{
 						{ // Series
