@@ -178,7 +178,7 @@ test: test-erigon-lib
 ## test-integration:                  run integration tests with a 30m timeout
 test-integration: #test-erigon-lib //TODO: debug purposes only
 ##	$(GOTEST) --timeout 240m -tags $(BUILD_TAGS),integration
-	$(GOTEST) -v --timeout 130m -tags $(BUILD_TAGS),integration
+	$(GOTEST) --timeout 130m -tags $(BUILD_TAGS),integration
 
 ## lint-deps:                         install lint dependencies
 lint-deps:

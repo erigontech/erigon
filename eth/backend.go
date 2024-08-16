@@ -1255,7 +1255,7 @@ func (s *Ethereum) StartMining(ctx context.Context, db kv.RwDB, stateDiffClient 
 					}
 					hasWork = !(working || waiting.Load())
 				case err := <-errc:
-					working = false
+					//working = false
 					hasWork = false
 					logger.Debug("in errc", "err", err)
 					if errors.Is(err, libcommon.ErrStopped) {
@@ -1274,6 +1274,7 @@ func (s *Ethereum) StartMining(ctx context.Context, db kv.RwDB, stateDiffClient 
 				hasWork = false
 				mineEvery.Reset(miner.MiningConfig.Recommit)
 				go func() {
+					logger.Debug("started mining step")
 					err = stages2.MiningStep(ctx, db, mining, tmpDir, logger)
 
 					waiting.Store(true)
@@ -1281,6 +1282,7 @@ func (s *Ethereum) StartMining(ctx context.Context, db kv.RwDB, stateDiffClient 
 						waiting.Store(false)
 						logger.Debug("Setted waiting to false", waiting.Load())
 						errc <- err
+						working = false
 					}()
 
 					if err != nil {
