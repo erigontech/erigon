@@ -39,7 +39,7 @@ func (l *LocalCheckpointSyncer) GetLatestBeaconState(ctx context.Context) (*stat
 
 	beaconCfg := l.genesisState.BeaconConfig()
 	bs := state.New(beaconCfg)
-	slot, err := extractSlotFromSerializedBeaconState(decompressedSnappy)
+	slot, err := utils.ExtractSlotFromSerializedBeaconState(decompressedSnappy)
 	if err != nil {
 		return nil, fmt.Errorf("could not deserialize state slot: %s", err)
 	}

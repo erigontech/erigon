@@ -32,6 +32,7 @@ require (
 	github.com/deckarep/golang-set v1.8.0
 	github.com/deckarep/golang-set/v2 v2.3.1
 	github.com/dop251/goja v0.0.0-20220405120441-9037c2b61cbf
+	github.com/edsrzf/mmap-go v1.1.0
 	github.com/emicklei/dot v1.6.2
 	github.com/erigontech/erigon-lib v0.0.0-00010101000000-000000000000
 	github.com/fjl/gencodec v0.0.0-20220412091415-8bb9e558978c
@@ -39,6 +40,7 @@ require (
 	github.com/go-chi/chi/v5 v5.1.0
 	github.com/go-chi/cors v1.2.1
 	github.com/go-echarts/go-echarts/v2 v2.3.3
+	github.com/go-test/deep v1.1.1
 	github.com/goccy/go-json v0.9.11
 	github.com/gofrs/flock v0.12.1
 	github.com/golang-jwt/jwt/v4 v4.5.0
@@ -106,7 +108,7 @@ require (
 )
 
 require (
-	github.com/edsrzf/mmap-go v1.1.0 // indirect
+	github.com/elastic/go-freelru v0.13.0 // indirect
 	github.com/erigontech/speedtest v0.0.2 // indirect
 	github.com/go-ole/go-ole v1.2.6 // indirect
 	github.com/google/uuid v1.6.0 // indirect
@@ -160,7 +162,7 @@ require (
 	github.com/docker/go-units v0.5.0 // indirect
 	github.com/dustin/go-humanize v1.0.1 // indirect
 	github.com/elastic/gosigar v0.14.2 // indirect
-	github.com/erigontech/erigon-snapshot v1.3.1-0.20240813184804-389f531456cb // indirect
+	github.com/erigontech/erigon-snapshot v1.3.1-0.20240814160410-2ce37904b978 // indirect
 	github.com/flynn/noise v1.1.0 // indirect
 	github.com/francoispqt/gojay v1.2.13 // indirect
 	github.com/fsnotify/fsnotify v1.6.0 // indirect

@@ -37,7 +37,6 @@ import (
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/state"
 	"github.com/erigontech/erigon-lib/wrap"
-
 	"github.com/erigontech/erigon/consensus"
 	"github.com/erigontech/erigon/consensus/misc"
 	"github.com/erigontech/erigon/core/rawdb"
@@ -73,7 +72,7 @@ func StageLoop(
 ) {
 	defer close(waitForDone)
 
-	if err := ProcessFrozenBlocks(ctx, db, blockReader, sync); err != nil {
+	if err := ProcessFrozenBlocks(ctx, db, blockReader, sync, hook); err != nil {
 		if err != nil {
 			if errors.Is(err, libcommon.ErrStopped) || errors.Is(err, context.Canceled) {
 				return
@@ -133,14 +132,35 @@ func StageLoop(
 }
 
 // ProcessFrozenBlocks - withuot global rwtx
-func ProcessFrozenBlocks(ctx context.Context, db kv.RwDB, blockReader services.FullBlockReader, sync *stagedsync.Sync) error {
+func ProcessFrozenBlocks(ctx context.Context, db kv.RwDB, blockReader services.FullBlockReader, sync *stagedsync.Sync, hook *Hook) error {
 	sawZeroBlocksTimes := 0
 	initialCycle, firstCycle := true, true
 	for {
-		// run stages first time - it will download blocks
+		if hook != nil {
+			if err := db.View(ctx, func(tx kv.Tx) (err error) {
+				err = hook.BeforeRun(tx, false)
+				return err
+			}); err != nil {
+				return err
+			}
+		}
+
 		more, err := sync.Run(db, wrap.TxContainer{}, initialCycle, firstCycle)
 		if err != nil {
 			return err
+		}
+
+		if hook != nil {
+			if err := db.View(ctx, func(tx kv.Tx) (err error) {
+				finishProgressBefore, _, _, err := stagesHeadersAndFinish(db, tx)
+				if err != nil {
+					return err
+				}
+				err = hook.AfterRun(tx, finishProgressBefore)
+				return err
+			}); err != nil {
+				return err
+			}
 		}
 
 		if err := sync.RunPrune(db, nil, initialCycle); err != nil {
@@ -713,7 +733,6 @@ func NewPolygonSyncStages(
 			statusDataProvider,
 			blockReader,
 			stopNode,
-			bor.GenesisContractStateReceiverABI(),
 			config.LoopBlockLimit,
 		),
 		stagedsync.StageSendersCfg(db, chainConfig, config.Sync, false, config.Dirs.Tmp, config.Prune, blockReader, nil),

@@ -120,7 +120,7 @@ func BlockWaiter(ctx context.Context, handler BlockHandler) (Waiter, context.Can
 
 	var err error
 
-	headers := make(chan types.Header)
+	headers := make(chan *types.Header)
 	waiter.headersSub, err = node.Subscribe(ctx, requests.Methods.ETHNewHeads, headers)
 
 	if err != nil {
@@ -133,7 +133,7 @@ func BlockWaiter(ctx context.Context, handler BlockHandler) (Waiter, context.Can
 	return wait{waiter}, cancel
 }
 
-func (c *blockWaiter) receive(ctx context.Context, node devnet.Node, headers chan types.Header) {
+func (c *blockWaiter) receive(ctx context.Context, node devnet.Node, headers chan *types.Header) {
 	blockMap := map[libcommon.Hash]*requests.Block{}
 
 	defer close(c.result)

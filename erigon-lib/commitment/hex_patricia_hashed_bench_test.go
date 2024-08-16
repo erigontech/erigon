@@ -19,9 +19,10 @@ package commitment
 import (
 	"context"
 	"encoding/hex"
-	"github.com/stretchr/testify/require"
 	"math/rand"
 	"testing"
+
+	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon-lib/common/length"
 )
