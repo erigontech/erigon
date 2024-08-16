@@ -116,6 +116,7 @@ func (t *prestateTracer) CaptureStart(env *vm.EVM, from libcommon.Address, to li
 		// The sender balance is after reducing: value.
 		// We need to re-add it to get the pre-tx balance.
 		fromBal.Add(fromBal, valueBig)
+		fromBal.Add(fromBal, env.BlobFee.ToBig())
 
 		// Nonce has been incremented before reaching here
 		// when txn is not a "create".
