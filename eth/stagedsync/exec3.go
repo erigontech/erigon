@@ -384,6 +384,7 @@ func ExecV3(ctx context.Context,
 		applyWorker = cfg.applyWorkerMining
 	}
 	applyWorker.ResetState(rs, accumulator)
+	defer applyWorker.LogLRUStats()
 
 	commitThreshold := batchSize.Bytes()
 	progress := NewProgress(blockNum, commitThreshold, workerCount, false, execStage.LogPrefix(), logger)
@@ -785,6 +786,8 @@ Loop:
 				HistoryExecution: offsetFromBlockBeginning > 0 && txIndex < int(offsetFromBlockBeginning),
 
 				BlockReceipts: receiptsForConsensus,
+
+				Config: chainConfig,
 			}
 			if cfg.genesis != nil {
 				txTask.Config = cfg.genesis.Config

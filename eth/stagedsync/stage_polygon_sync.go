@@ -36,7 +36,6 @@ import (
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/kv/dbutils"
 	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon/accounts/abi"
 	"github.com/erigontech/erigon/core/rawdb"
 	"github.com/erigontech/erigon/core/rawdb/blockio"
 	"github.com/erigontech/erigon/core/types"
@@ -64,7 +63,6 @@ func NewPolygonSyncStageCfg(
 	statusDataProvider *sentry.StatusDataProvider,
 	blockReader services.FullBlockReader,
 	stopNode func() error,
-	stateReceiverABI abi.ABI,
 	blockLimit uint,
 ) PolygonSyncStageCfg {
 	// using a buffered channel to preserve order of tx actions,
@@ -118,7 +116,7 @@ func NewPolygonSyncStageCfg(
 		eventReader:    blockReader,
 		txActionStream: txActionStream,
 	}
-	bridgeService := bridge.NewBridge(bridgeStore, logger, borConfig, heimdallClient, stateReceiverABI)
+	bridgeService := bridge.NewBridge(bridgeStore, logger, borConfig, heimdallClient)
 	sync := polygonsync.NewSync(
 		syncStore,
 		executionEngine,
@@ -1073,13 +1071,13 @@ func (s polygonSyncStageBridgeStore) LatestEventID(ctx context.Context) (uint64,
 	return r.id, r.err
 }
 
-func (s polygonSyncStageBridgeStore) PutEvents(ctx context.Context, events []*heimdall.EventRecordWithTime, stateContract abi.ABI) error {
+func (s polygonSyncStageBridgeStore) PutEvents(ctx context.Context, events []*heimdall.EventRecordWithTime) error {
 	type response struct {
 		err error
 	}
 
 	r, err := awaitTxAction(ctx, s.txActionStream, func(tx kv.RwTx, responseStream chan<- response) error {
-		responseStream <- response{err: bridge.PutEvents(tx, events, stateContract)}
+		responseStream <- response{err: bridge.PutEvents(tx, events)}
 		return nil
 	})
 	if err != nil {
@@ -1113,14 +1111,14 @@ func (s polygonSyncStageBridgeStore) LastProcessedEventID(ctx context.Context) (
 	return r.id, nil
 }
 
-func (s polygonSyncStageBridgeStore) LastEventIDWithinWindow(ctx context.Context, fromID uint64, toTime time.Time, stateContract abi.ABI) (uint64, error) {
+func (s polygonSyncStageBridgeStore) LastEventIDWithinWindow(ctx context.Context, fromID uint64, toTime time.Time) (uint64, error) {
 	type response struct {
 		id  uint64
 		err error
 	}
 
 	r, err := awaitTxAction(ctx, s.txActionStream, func(tx kv.RwTx, responseStream chan<- response) error {
-		id, err := bridge.LastEventIDWithinWindow(tx, fromID, toTime, stateContract)
+		id, err := bridge.LastEventIDWithinWindow(tx, fromID, toTime)
 		responseStream <- response{id: id, err: err}
 		return nil
 	})
