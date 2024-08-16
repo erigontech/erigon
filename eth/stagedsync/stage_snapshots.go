@@ -74,6 +74,8 @@ import (
 	"github.com/erigontech/erigon/turbo/snapshotsync/freezeblocks"
 )
 
+const pruneMarkerSafeThreshold = 1000 // Keep 1000 blocks of markers in the DB below snapshot available blocks
+
 type SnapshotsCfg struct {
 	db          kv.RwDB
 	chainConfig chain.Config
@@ -334,11 +336,21 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 	return nil
 }
 
+func getPruneMarkerSafeThreshold(blockReader services.FullBlockReader) uint64 {
+	snapProgress := min(blockReader.FrozenBorBlocks(), blockReader.FrozenBlocks())
+	if snapProgress < pruneMarkerSafeThreshold {
+		return 0
+	}
+	return snapProgress - pruneMarkerSafeThreshold
+}
+
 func FillDBFromSnapshots(logPrefix string, ctx context.Context, tx kv.RwTx, dirs datadir.Dirs, blockReader services.FullBlockReader, agg *state.Aggregator, logger log.Logger) error {
 	startTime := time.Now()
 	blocksAvailable := blockReader.FrozenBlocks()
 	logEvery := time.NewTicker(logInterval)
 	defer logEvery.Stop()
+	pruneMarkerBlockThreshold := getPruneMarkerSafeThreshold(blockReader)
+
 	// updating the progress of further stages (but only forward) that are contained inside of snapshots
 	for _, stage := range []stages.SyncStage{stages.Headers, stages.Bodies, stages.BlockHashes, stages.Senders} {
 		progress, err := stages.GetStageProgress(tx, stage)
@@ -376,12 +388,15 @@ func FillDBFromSnapshots(logPrefix string, ctx context.Context, tx kv.RwTx, dirs
 				if err := rawdb.WriteTd(tx, blockHash, blockNum, td); err != nil {
 					return err
 				}
-				if err := rawdb.WriteCanonicalHash(tx, blockHash, blockNum); err != nil {
-					return err
-				}
-				binary.BigEndian.PutUint64(blockNumBytes, blockNum)
-				if err := h2n.Collect(blockHash[:], blockNumBytes); err != nil {
-					return err
+				// Write marker for pruning only if we are above our safe threshold
+				if blockNum >= pruneMarkerBlockThreshold {
+					if err := rawdb.WriteCanonicalHash(tx, blockHash, blockNum); err != nil {
+						return err
+					}
+					binary.BigEndian.PutUint64(blockNumBytes, blockNum)
+					if err := h2n.Collect(blockHash[:], blockNumBytes); err != nil {
+						return err
+					}
 				}
 				select {
 				case <-ctx.Done():
