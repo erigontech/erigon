@@ -1194,6 +1194,8 @@ func updatedNibs(num uint16) string {
 	return strings.Join(nibbles, ",")
 }
 
+const DepthWithoutNodeHashes = 35
+
 // The purpose of fold is to reduce hph.currentKey[:hph.currentKeyLen]. It should be invoked
 // until that current key becomes a prefix of hashedKey that we will proccess next
 // (in other words until the needFolding function returns 0)
@@ -1368,7 +1370,7 @@ func (hph *HexPatriciaHashed) fold() (err error) {
 			if cell.storageAddrLen > 0 && cell.lhLen == 0 && !cell.loaded.storage() && !cell.Deleted() {
 				panic("storage not loaded" + fmt.Sprintf("%x", cell.storageAddr[:cell.storageAddrLen]))
 			}
-			if len(updateKey) > 32 {
+			if len(updateKey) > DepthWithoutNodeHashes {
 				cell.hashLen = 0 // do not write hashes for storages in the branch node
 			}
 			cellHash, err := hph.computeCellHash(cell, depth, hph.hashAuxBuffer[:0])
