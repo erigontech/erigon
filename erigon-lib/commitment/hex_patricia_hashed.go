@@ -709,11 +709,7 @@ func (hph *HexPatriciaHashed) extensionHash(key []byte, hash []byte) ([length.Ha
 func (hph *HexPatriciaHashed) computeCellHashLen(cell *cell, depth int) int {
 	if cell.storageAddrLen > 0 && depth >= 64 {
 		if cell.lhLen > 0 {
-			if cell.lhLen == length.Hash {
-				return cell.lhLen + 1
-			}
-			fmt.Printf("leafHashLen %d\n", cell.lhLen)
-			return cell.lhLen
+			return cell.lhLen + 1
 		}
 
 		keyLen := 128 - depth + 1 // Length of hex key with terminator character
@@ -1312,12 +1308,20 @@ func (hph *HexPatriciaHashed) fold() (err error) {
 			bit := bitset & -bitset
 			nibble := bits.TrailingZeros16(bit)
 			cell := &hph.grid[row][nibble]
-			if cell.lhLen > 0 && hph.touchMap[row]&hph.afterMap[row]&uint16(1<<nibble) > 0 { /*|| depth <= 64 && cell.storageAddrLen > 0 */
+			if cell.lhLen > 0 && hph.touchMap[row]&hph.afterMap[row]&uint16(1<<nibble) > 0 {
 				if hph.trace {
-					fmt.Printf("DROP hash for row %d nibble %x, depth=%d %s\n", row, nibble, depth, cell.FullString())
+					fmt.Printf("DROP hash for (%d, %x, depth=%d) %s\n", row, nibble, depth, cell.FullString())
 				}
 				cell.lhLen = 0
 				hadToReset.Add(1)
+			}
+			if cell.lhLen > 0 && cell.lhLen != length.Hash {
+				if hph.trace {
+					fmt.Printf("DROP uneven hash for (%d, %x, depth=%d) %s\n", row, nibble, depth, cell.FullString())
+				}
+				cell.lhLen = 0
+				hadToReset.Add(1)
+
 			}
 			if cell.lhLen == 0 {
 				if !cell.loaded.account() && cell.accountAddrLen > 0 {
@@ -1366,7 +1370,7 @@ func (hph *HexPatriciaHashed) fold() (err error) {
 				panic("storage not loaded" + fmt.Sprintf("%x", cell.storageAddr[:cell.storageAddrLen]))
 			}
 			//if len(updateKey) > DepthWithoutNodeHashes {
-			//	cell.hashLen = 0 // do not write hashes for storages in the branch node
+			//	cell.hashLen = 0 // do not write hashes for storages in the branch node, should reset ext as well which can break unfolding.. -
 			//}
 			cellHash, err := hph.computeCellHash(cell, depth, hph.hashAuxBuffer[:0])
 			if err != nil {
