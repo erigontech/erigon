@@ -42,7 +42,7 @@ import (
 
 	"github.com/erigontech/erigon/common/debug"
 	"github.com/erigontech/erigon/consensus"
-	"github.com/erigontech/erigon/consensus/mainnet"
+	"github.com/erigontech/erigon/consensus/ethash"
 	"github.com/erigontech/erigon/core"
 	"github.com/erigontech/erigon/core/rawdb"
 	"github.com/erigontech/erigon/core/state"
@@ -603,7 +603,7 @@ func OpcodeTracer(genesis *types.Genesis, blockNum uint64, chaindata string, num
 		getHeader := func(hash libcommon.Hash, number uint64) *types.Header {
 			return rawdb.ReadHeader(historyTx, hash, number)
 		}
-		receipts, err1 := runBlock(mainnet.NewFullFaker(), intraBlockState, noOpWriter, noOpWriter, chainConfig, getHeader, block, vmConfig, false, logger)
+		receipts, err1 := runBlock(ethash.NewFullFaker(), intraBlockState, noOpWriter, noOpWriter, chainConfig, getHeader, block, vmConfig, false, logger)
 		if err1 != nil {
 			return err1
 		}

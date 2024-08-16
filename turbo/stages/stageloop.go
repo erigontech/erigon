@@ -37,7 +37,6 @@ import (
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/state"
 	"github.com/erigontech/erigon-lib/wrap"
-
 	"github.com/erigontech/erigon/consensus"
 	"github.com/erigontech/erigon/consensus/misc"
 	"github.com/erigontech/erigon/core/rawdb"
@@ -734,7 +733,6 @@ func NewPolygonSyncStages(
 			statusDataProvider,
 			blockReader,
 			stopNode,
-			bor.GenesisContractStateReceiverABI(),
 			config.LoopBlockLimit,
 		),
 		stagedsync.StageSendersCfg(db, chainConfig, config.Sync, false, config.Dirs.Tmp, config.Prune, blockReader, nil),

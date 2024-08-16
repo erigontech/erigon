@@ -38,13 +38,12 @@ import (
 	"golang.org/x/crypto/sha3"
 	"golang.org/x/sync/errgroup"
 
-	"github.com/erigontech/erigon-lib/common/dbg"
-	"github.com/erigontech/erigon-lib/log/v3"
-
 	"github.com/erigontech/erigon-lib/chain"
 	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common/dbg"
 	"github.com/erigontech/erigon-lib/common/length"
 	"github.com/erigontech/erigon-lib/kv"
+	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/consensus"
 	"github.com/erigontech/erigon/consensus/misc"
@@ -322,11 +321,11 @@ type Bor struct {
 
 	execCtx context.Context // context of caller execution stage
 
-	spanner                Spanner
-	GenesisContractsClient GenesisContracts
-	HeimdallClient         heimdall.HeimdallClient
-	spanReader             spanReader
-	bridgeReader           bridgeReader
+	spanner        Spanner
+	stateReceiver  StateReceiver
+	HeimdallClient heimdall.HeimdallClient
+	spanReader     spanReader
+	bridgeReader   bridgeReader
 
 	// scope event.SubscriptionScope
 	// The fields below are for testing only
@@ -352,7 +351,7 @@ func New(
 	blockReader services.FullBlockReader,
 	spanner Spanner,
 	heimdallClient heimdall.HeimdallClient,
-	genesisContracts GenesisContracts,
+	genesisContracts StateReceiver,
 	logger log.Logger,
 	bridgeReader bridgeReader,
 	spanReader spanReader,
@@ -370,20 +369,20 @@ func New(
 	signatures, _ := lru.NewARC[libcommon.Hash, libcommon.Address](inmemorySignatures)
 
 	c := &Bor{
-		chainConfig:            chainConfig,
-		config:                 borConfig,
-		DB:                     db,
-		blockReader:            blockReader,
-		Recents:                recents,
-		Signatures:             signatures,
-		spanner:                spanner,
-		GenesisContractsClient: genesisContracts,
-		HeimdallClient:         heimdallClient,
-		execCtx:                context.Background(),
-		logger:                 logger,
-		closeCh:                make(chan struct{}),
-		bridgeReader:           bridgeReader,
-		spanReader:             spanReader,
+		chainConfig:    chainConfig,
+		config:         borConfig,
+		DB:             db,
+		blockReader:    blockReader,
+		Recents:        recents,
+		Signatures:     signatures,
+		spanner:        spanner,
+		stateReceiver:  genesisContracts,
+		HeimdallClient: heimdallClient,
+		execCtx:        context.Background(),
+		logger:         logger,
+		closeCh:        make(chan struct{}),
+		bridgeReader:   bridgeReader,
+		spanReader:     spanReader,
 	}
 
 	c.authorizedSigner.Store(&signer{
@@ -670,7 +669,7 @@ func (c *Bor) initFrozenSnapshot(chain consensus.ChainHeaderReader, number uint6
 		// get validators and current span
 		var validators []*valset.Validator
 
-		validators, err = c.spanner.GetCurrentValidators(0, c.authorizedSigner.Load().signer, chain)
+		validators, err = c.spanner.GetCurrentValidators(0, chain)
 
 		if err != nil {
 			return nil, err
@@ -922,7 +921,7 @@ func (c *Bor) Prepare(chain consensus.ChainHeaderReader, header *types.Header, s
 	// in Erigon, use directly the `GetCurrentProducers` function.
 	if isSprintStart(number+1, c.config.CalculateSprintLength(number)) {
 		spanID := uint64(heimdall.SpanIdAt(number + 1))
-		newValidators, err := c.spanner.GetCurrentProducers(spanID, c.authorizedSigner.Load().signer, chain)
+		newValidators, err := c.spanner.GetCurrentProducers(spanID, chain)
 		if err != nil {
 			return errUnknownValidators
 		}
@@ -1545,7 +1544,7 @@ func (c *Bor) CommitStates(
 			}
 
 			for _, ev := range merged {
-				data, err := ev.Pack(stateReceiverABI)
+				data, err := ev.MarshallBytes()
 				if err != nil {
 					panic(err)
 				}
@@ -1556,7 +1555,7 @@ func (c *Bor) CommitStates(
 	}
 
 	for _, event := range events {
-		if err := c.GenesisContractsClient.CommitState(event, syscall); err != nil {
+		if err := c.stateReceiver.CommitState(event, syscall); err != nil {
 			return err
 		}
 	}

@@ -22,6 +22,10 @@ package ethconfig
 
 import (
 	"math/big"
+	"os"
+	"os/user"
+	"path/filepath"
+	"runtime"
 	"strings"
 	"time"
 
@@ -32,8 +36,8 @@ import (
 	"github.com/erigontech/erigon-lib/common/datadir"
 	"github.com/erigontech/erigon-lib/downloader/downloadercfg"
 	"github.com/erigontech/erigon-lib/txpool/txpoolcfg"
-	"github.com/erigontech/erigon/cl/beacon/beacon_router_configuration"
 	"github.com/erigontech/erigon/cl/clparams"
+	"github.com/erigontech/erigon/consensus/ethash/ethashcfg"
 	"github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/eth/ethconfig/estimate"
 	"github.com/erigontech/erigon/eth/gasprice/gaspricecfg"
@@ -76,6 +80,13 @@ var Defaults = Config{
 		//LoopBlockLimit:             100_000,
 		PruneLimit: 100,
 	},
+	Ethash: ethashcfg.Config{
+		CachesInMem:      2,
+		CachesLockMmap:   false,
+		DatasetsInMem:    1,
+		DatasetsOnDisk:   2,
+		DatasetsLockMmap: false,
+	},
 	NetworkID: 1,
 	Prune:     prune.DefaultMode,
 	Miner: params.MiningConfig{
@@ -95,6 +106,30 @@ var Defaults = Config{
 		ProduceE2:  true,
 		ProduceE3:  true,
 	},
+}
+
+func init() {
+	home := os.Getenv("HOME")
+	if home == "" {
+		if user, err := user.Current(); err == nil {
+			home = user.HomeDir
+		}
+	}
+	if runtime.GOOS == "darwin" {
+		Defaults.Ethash.DatasetDir = filepath.Join(home, "Library", "erigon-ethash")
+	} else if runtime.GOOS == "windows" {
+		localappdata := os.Getenv("LOCALAPPDATA")
+		if localappdata != "" {
+			Defaults.Ethash.DatasetDir = filepath.Join(localappdata, "erigon-thash")
+		} else {
+			Defaults.Ethash.DatasetDir = filepath.Join(home, "AppData", "Local", "erigon-ethash")
+		}
+	} else {
+		if xdgDataDir := os.Getenv("XDG_DATA_HOME"); xdgDataDir != "" {
+			Defaults.Ethash.DatasetDir = filepath.Join(xdgDataDir, "erigon-ethash")
+		}
+		Defaults.Ethash.DatasetDir = filepath.Join(home, ".local/share/erigon-ethash") //nolint:gocritic
+	}
 }
 
 //go:generate gencodec -dir . -type Config -formats toml -out gen_config.go
@@ -153,7 +188,6 @@ type Config struct {
 
 	Snapshot     BlocksFreezing
 	Downloader   *downloadercfg.Cfg
-	BeaconRouter beacon_router_configuration.RouterConfiguration
 	CaplinConfig clparams.CaplinConfig
 
 	Dirs datadir.Dirs
@@ -167,6 +201,9 @@ type Config struct {
 
 	// Mining options
 	Miner params.MiningConfig
+
+	// Ethash options
+	Ethash ethashcfg.Config
 
 	Clique params.ConsensusSnapshotConfig
 	Aura   chain.AuRaConfig
@@ -202,12 +239,7 @@ type Config struct {
 	// Ethstats service
 	Ethstats string
 	// Consensus layer
-	InternalCL             bool
-	CaplinDiscoveryAddr    string
-	CaplinDiscoveryPort    uint64
-	CaplinDiscoveryTCPPort uint64
-	SentinelAddr           string
-	SentinelPort           uint64
+	InternalCL bool
 
 	OverridePragueTime *big.Int `toml:",omitempty"`
 

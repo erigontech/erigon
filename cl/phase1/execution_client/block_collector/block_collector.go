@@ -114,6 +114,10 @@ func (b *blockCollector) Flush(ctx context.Context) error {
 			b.logger.Warn("bad blocks segment received", "err", err)
 			return err
 		}
+		// We expect the genesis to be present in DB already
+		if executionPayload.BlockNumber == 0 {
+			return nil
+		}
 		header, err := executionPayload.RlpHeader(&parentRoot)
 		if err != nil {
 			b.logger.Warn("bad blocks segment received", "err", err)
