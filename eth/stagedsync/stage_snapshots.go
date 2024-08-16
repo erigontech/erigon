@@ -509,6 +509,58 @@ func FillDBFromSnapshots(logPrefix string, ctx context.Context, tx kv.RwTx, dirs
 	return nil
 }
 
+func pruneHeaderNumberIndex(ctx context.Context, tx kv.RwTx, blockReader services.FullBlockReader, logger log.Logger) error {
+	pruneThreshold := getPruneMarkerSafeThreshold(blockReader)
+	if pruneThreshold == 0 {
+		return nil
+	}
+
+	c, err := tx.RwCursor(kv.HeaderNumber) // Hash -> Number
+	if err != nil {
+		return err
+	}
+	defer c.Close()
+	for k, v, err := c.First(); k != nil && err == nil; k, v, err = c.Next() {
+		blockNum := binary.BigEndian.Uint64(v)
+		if blockNum == 0 { // Do not prune genesis marker
+			continue
+		}
+		if blockNum >= pruneThreshold {
+			break
+		}
+		if err := c.DeleteCurrent(); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func pruneCanonicalHashIndex(ctx context.Context, tx kv.RwTx, blockReader services.FullBlockReader, logger log.Logger) error {
+	pruneThreshold := getPruneMarkerSafeThreshold(blockReader)
+	if pruneThreshold == 0 {
+		return nil
+	}
+
+	c, err := tx.RwCursor(kv.HeaderCanonical) // Number -> Hash
+	if err != nil {
+		return err
+	}
+	defer c.Close()
+	for k, _, err := c.First(); k != nil && err == nil; k, _, err = c.Next() {
+		blockNum := binary.BigEndian.Uint64(k)
+		if blockNum == 0 { // Do not prune genesis marker
+			continue
+		}
+		if blockNum >= pruneThreshold {
+			break
+		}
+		if err := c.DeleteCurrent(); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 /* ====== PRUNING ====== */
 // snapshots pruning sections works more as a retiring of blocks
 // retiring blocks means moving block data from db into snapshots
@@ -585,6 +637,12 @@ func SnapshotsPrune(s *PruneState, cfg SnapshotsCfg, ctx context.Context, tx kv.
 		pruneLimit = 10_000
 	}
 	if _, err := cfg.blockRetire.PruneAncientBlocks(tx, pruneLimit); err != nil {
+		return err
+	}
+	if err := pruneHeaderNumberIndex(ctx, tx, cfg.blockReader, logger); err != nil {
+		return err
+	}
+	if err := pruneCanonicalHashIndex(ctx, tx, cfg.blockReader, logger); err != nil {
 		return err
 	}
 
