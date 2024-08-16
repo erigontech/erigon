@@ -397,7 +397,12 @@ func PruneExecutionStage(s *PruneState, tx kv.RwTx, cfg ExecuteBlockCfg, ctx con
 	// on chain-tip:
 	//  - can prune only between blocks (without blocking blocks processing)
 	//  - need also leave some time to prune blocks
-	pruneTimeout := 500 * time.Millisecond
+	//  - need keep "fsync" time of db fast
+	// Means - the best is:
+	//  - stop prune when `tx.SpaceDirty()` is big
+	//  - and set ~500ms timeout
+	// because on slow disks - prune is slower. but for now - let's tune for nvme first, and add `tx.SpaceDirty()` check later https://github.com/erigontech/erigon/issues/11635
+	pruneTimeout := 250 * time.Millisecond
 	if s.CurrentSyncCycle.IsInitialCycle {
 		pruneTimeout = 12 * time.Hour
 	}

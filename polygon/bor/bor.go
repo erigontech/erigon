@@ -38,13 +38,12 @@ import (
 	"golang.org/x/crypto/sha3"
 	"golang.org/x/sync/errgroup"
 
-	"github.com/erigontech/erigon-lib/common/dbg"
-	"github.com/erigontech/erigon-lib/log/v3"
-
 	"github.com/erigontech/erigon-lib/chain"
 	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common/dbg"
 	"github.com/erigontech/erigon-lib/common/length"
 	"github.com/erigontech/erigon-lib/kv"
+	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/consensus"
 	"github.com/erigontech/erigon/consensus/misc"
@@ -85,8 +84,6 @@ var (
 	defaultSprintLength = map[string]uint64{
 		"0": 64,
 	} // Default number of blocks after which to checkpoint and reset the pending votes
-
-	emptyUncleHash = types.CalcUncleHash(nil) // Always Keccak256(RLP([])) as uncles are meaningless outside of PoW.
 
 	// diffInTurn = big.NewInt(2) // Block difficulty for in-turn signatures
 	// diffNoTurn = big.NewInt(1) // Block difficulty for out-of-turn signatures
@@ -324,11 +321,11 @@ type Bor struct {
 
 	execCtx context.Context // context of caller execution stage
 
-	spanner                Spanner
-	GenesisContractsClient GenesisContracts
-	HeimdallClient         heimdall.HeimdallClient
-	spanReader             spanReader
-	bridgeReader           bridgeReader
+	spanner        Spanner
+	stateReceiver  StateReceiver
+	HeimdallClient heimdall.HeimdallClient
+	spanReader     spanReader
+	bridgeReader   bridgeReader
 
 	// scope event.SubscriptionScope
 	// The fields below are for testing only
@@ -354,7 +351,7 @@ func New(
 	blockReader services.FullBlockReader,
 	spanner Spanner,
 	heimdallClient heimdall.HeimdallClient,
-	genesisContracts GenesisContracts,
+	genesisContracts StateReceiver,
 	logger log.Logger,
 	bridgeReader bridgeReader,
 	spanReader spanReader,
@@ -372,20 +369,20 @@ func New(
 	signatures, _ := lru.NewARC[libcommon.Hash, libcommon.Address](inmemorySignatures)
 
 	c := &Bor{
-		chainConfig:            chainConfig,
-		config:                 borConfig,
-		DB:                     db,
-		blockReader:            blockReader,
-		Recents:                recents,
-		Signatures:             signatures,
-		spanner:                spanner,
-		GenesisContractsClient: genesisContracts,
-		HeimdallClient:         heimdallClient,
-		execCtx:                context.Background(),
-		logger:                 logger,
-		closeCh:                make(chan struct{}),
-		bridgeReader:           bridgeReader,
-		spanReader:             spanReader,
+		chainConfig:    chainConfig,
+		config:         borConfig,
+		DB:             db,
+		blockReader:    blockReader,
+		Recents:        recents,
+		Signatures:     signatures,
+		spanner:        spanner,
+		stateReceiver:  genesisContracts,
+		HeimdallClient: heimdallClient,
+		execCtx:        context.Background(),
+		logger:         logger,
+		closeCh:        make(chan struct{}),
+		bridgeReader:   bridgeReader,
+		spanReader:     spanReader,
 	}
 
 	c.authorizedSigner.Store(&signer{
@@ -426,9 +423,8 @@ func (w rwWrapper) BeginRwNosync(ctx context.Context) (kv.RwTx, error) {
 	return nil, errors.New("BeginRwNosync not implemented")
 }
 
-// This is used by the rpcdaemon and tests which need read only access to the provided data services
-func NewRo(chainConfig *chain.Config, db kv.RoDB, blockReader services.FullBlockReader, spanner Spanner,
-	genesisContracts GenesisContracts, logger log.Logger) *Bor {
+// NewRo is used by the rpcdaemon and tests which need read only access to the provided data services
+func NewRo(chainConfig *chain.Config, db kv.RoDB, blockReader services.FullBlockReader, logger log.Logger) *Bor {
 	// get bor config
 	borConfig := chainConfig.Bor.(*borcfg.BorConfig)
 
@@ -578,7 +574,7 @@ func ValidateHeaderUnusedFields(header *types.Header) error {
 	}
 
 	// Ensure that the block doesn't contain any uncles which are meaningless in PoA
-	if header.UncleHash != emptyUncleHash {
+	if header.UncleHash != types.EmptyUncleHash {
 		return errInvalidUncleHash
 	}
 
@@ -673,7 +669,7 @@ func (c *Bor) initFrozenSnapshot(chain consensus.ChainHeaderReader, number uint6
 		// get validators and current span
 		var validators []*valset.Validator
 
-		validators, err = c.spanner.GetCurrentValidators(0, c.authorizedSigner.Load().signer, chain)
+		validators, err = c.spanner.GetCurrentValidators(0, chain)
 
 		if err != nil {
 			return nil, err
@@ -925,7 +921,7 @@ func (c *Bor) Prepare(chain consensus.ChainHeaderReader, header *types.Header, s
 	// in Erigon, use directly the `GetCurrentProducers` function.
 	if isSprintStart(number+1, c.config.CalculateSprintLength(number)) {
 		spanID := uint64(heimdall.SpanIdAt(number + 1))
-		newValidators, err := c.spanner.GetCurrentProducers(spanID, c.authorizedSigner.Load().signer, chain)
+		newValidators, err := c.spanner.GetCurrentProducers(spanID, chain)
 		if err != nil {
 			return errUnknownValidators
 		}
@@ -1125,10 +1121,6 @@ func (c *Bor) FinalizeAndAssemble(chainConfig *chain.Config, header *types.Heade
 	return block, txs, receipts, nil
 }
 
-func (c *Bor) GenerateSeal(chain consensus.ChainHeaderReader, currnt, parent *types.Header, call consensus.Call) []byte {
-	return nil
-}
-
 func (c *Bor) Initialize(config *chain.Config, chain consensus.ChainHeaderReader, header *types.Header,
 	state *state.IntraBlockState, syscall consensus.SysCallCustom, logger log.Logger, tracer *tracing.Hooks) {
 }
@@ -1144,7 +1136,9 @@ func (c *Bor) Authorize(currentSigner libcommon.Address, signFn SignerFn) {
 
 // Seal implements consensus.Engine, attempting to create a sealed block using
 // the local signing credentials.
-func (c *Bor) Seal(chain consensus.ChainHeaderReader, block *types.Block, results chan<- *types.Block, stop <-chan struct{}) error {
+func (c *Bor) Seal(chain consensus.ChainHeaderReader, blockWithReceipts *types.BlockWithReceipts, results chan<- *types.BlockWithReceipts, stop <-chan struct{}) error {
+	block := blockWithReceipts.Block
+	receipts := blockWithReceipts.Receipts
 	header := block.HeaderNoCopy()
 	// Sealing the genesis block is not supported
 	number := header.Number.Uint64()
@@ -1222,7 +1216,7 @@ func (c *Bor) Seal(chain consensus.ChainHeaderReader, block *types.Block, result
 			}
 		}
 		select {
-		case results <- block.WithSeal(header):
+		case results <- &types.BlockWithReceipts{Block: block.WithSeal(header), Receipts: receipts}:
 		default:
 			c.logger.Warn("Sealing result was not read by miner", "number", number, "sealhash", SealHash(header, c.config))
 		}
@@ -1550,7 +1544,7 @@ func (c *Bor) CommitStates(
 			}
 
 			for _, ev := range merged {
-				data, err := ev.Pack(stateReceiverABI)
+				data, err := ev.MarshallBytes()
 				if err != nil {
 					panic(err)
 				}
@@ -1561,7 +1555,7 @@ func (c *Bor) CommitStates(
 	}
 
 	for _, event := range events {
-		if err := c.GenesisContractsClient.CommitState(event, syscall); err != nil {
+		if err := c.stateReceiver.CommitState(event, syscall); err != nil {
 			return err
 		}
 	}

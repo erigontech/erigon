@@ -84,9 +84,12 @@ Loop:
 				if len(atomicResp.Load().(peerAndBlocks).blocks) > 0 {
 					return
 				}
+				var reqSlot uint64
+				if f.highestSlotProcessed > 2 {
+					reqSlot = f.highestSlotProcessed - 2
+				}
 				// this is so we do not get stuck on a side-fork
-				responses, peerId, err := f.rpc.SendBeaconBlocksByRangeReq(ctx, f.highestSlotProcessed-2, count)
-
+				responses, peerId, err := f.rpc.SendBeaconBlocksByRangeReq(ctx, reqSlot, count)
 				if err != nil {
 					return
 				}

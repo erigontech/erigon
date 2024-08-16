@@ -428,6 +428,10 @@ func (s *RoSnapshots) idxAvailability() uint64 {
 		return 0
 	}
 
+	if len(maximums) != len(s.types) {
+		return 0
+	}
+
 	return slices.Min(maximums)
 }
 
@@ -609,7 +613,6 @@ func (s *RoSnapshots) rebuildSegments(fileNames []string, open bool, optimistic 
 		}
 		segmentsMaxSet = true
 	}
-
 	if segmentsMaxSet {
 		s.segmentsMax.Store(segmentsMax)
 	}
@@ -818,6 +821,10 @@ func (s *RoSnapshots) Delete(fileName string) error {
 func (s *RoSnapshots) buildMissedIndices(logPrefix string, ctx context.Context, dirs datadir.Dirs, chainConfig *chain.Config, workers int, logger log.Logger) error {
 	if s == nil {
 		return nil
+	}
+
+	if _, err := snaptype.ReadAndCreateSaltIfNeeded(dirs.Snap); err != nil {
+		return err
 	}
 
 	dir, tmpDir := dirs.Snap, dirs.Tmp
