@@ -20,6 +20,7 @@ import (
 	"context"
 	"net/http"
 	"path/filepath"
+	"runtime"
 	"sync"
 	"time"
 
@@ -27,6 +28,7 @@ import (
 	"golang.org/x/sync/semaphore"
 
 	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common/dbg"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/kv/mdbx"
 	"github.com/erigontech/erigon-lib/log/v3"
@@ -122,6 +124,13 @@ func (d *DiagnosticClient) Setup() {
 	d.runSaveProcess(rootCtx)
 
 	//d.logDiagMsgs()
+	d.test()
+}
+
+func (d *DiagnosticClient) test() {
+	var m runtime.MemStats
+	dbg.ReadMemStats(&m)
+	dbg.SaveHeapProfileNearOOM(dbg.SaveHeapWithMemStats(&m))
 }
 
 // Save diagnostic data by time interval to reduce save events
