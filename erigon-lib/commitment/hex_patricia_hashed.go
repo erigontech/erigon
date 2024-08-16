@@ -801,8 +801,9 @@ func (hph *HexPatriciaHashed) computeCellHash(cell *cell, depth int, buf []byte)
 				if err != nil {
 					return nil, err
 				}
+
 				copy(cell.leafHash[:], leafHash[1:])
-				cell.lhLen = length.Hash
+				cell.lhLen = len(leafHash) - 1
 				if hph.trace {
 					fmt.Printf("LEAF HASH storage memoized %x spk %x\n", leafHash, cell.storageAddr[:cell.storageAddrLen])
 				}
