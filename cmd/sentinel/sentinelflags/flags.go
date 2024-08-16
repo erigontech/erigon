@@ -31,8 +31,6 @@ var CliFlags = []cli.Flag{
 	&SentinelTcpPort,
 	&NoDiscovery,
 	&BootnodesFlag,
-	&BeaconConfigFlag,
-	&GenesisSSZFlag,
 	&SentinelStaticPeersFlag,
 }
 
@@ -77,16 +75,7 @@ var (
 		Usage: "Comma separated enode URLs for P2P discovery bootstrap",
 		Value: "",
 	}
-	BeaconConfigFlag = cli.StringFlag{
-		Name:  "beacon-config",
-		Usage: "Path to beacon config",
-		Value: "",
-	}
-	GenesisSSZFlag = cli.StringFlag{
-		Name:  "genesis-ssz",
-		Usage: "Path to genesis ssz",
-		Value: "",
-	}
+
 	SentinelStaticPeersFlag = cli.StringFlag{
 		Name:  "sentinel.staticpeers",
 		Usage: "connect to comma-separated Consensus static peers",

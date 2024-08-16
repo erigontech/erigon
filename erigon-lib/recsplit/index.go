@@ -110,13 +110,20 @@ func MustOpen(indexFile string) *Index {
 	return idx
 }
 
-func OpenIndex(indexFilePath string) (*Index, error) {
+func OpenIndex(indexFilePath string) (id *Index, err error) {
+	defer func() {
+		// recover from panic if one occurred. Set err to nil if no panic
+		if r := recover(); r != nil {
+			// do r with only the stack trace
+			err = fmt.Errorf("incomplete file %s %v", indexFilePath, dbg.Stack())
+		}
+	}()
+
 	_, fName := filepath.Split(indexFilePath)
 	idx := &Index{
 		filePath: indexFilePath,
 		fileName: fName,
 	}
-	var err error
 	idx.f, err = os.Open(indexFilePath)
 	if err != nil {
 		return nil, err

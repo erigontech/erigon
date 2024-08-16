@@ -34,11 +34,11 @@ import (
 	"github.com/erigontech/erigon-lib/chain"
 	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon/consensus/ethash/ethashcfg"
 
 	"github.com/erigontech/erigon/common/math"
 	"github.com/erigontech/erigon/common/u256"
 	"github.com/erigontech/erigon/consensus"
+	"github.com/erigontech/erigon/consensus/ethash/ethashcfg"
 	"github.com/erigontech/erigon/consensus/misc"
 	"github.com/erigontech/erigon/core/state"
 	"github.com/erigontech/erigon/core/tracing"
@@ -286,10 +286,6 @@ func (ethash *Ethash) verifyHeader(chain consensus.ChainHeaderReader, header, pa
 			return err
 		}
 	}
-	return nil
-}
-
-func (ethash *Ethash) GenerateSeal(chain consensus.ChainHeaderReader, currnt, parent *types.Header, call consensus.Call) []byte {
 	return nil
 }
 

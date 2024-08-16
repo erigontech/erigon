@@ -349,8 +349,6 @@ type StateWriterBufferedV3 struct {
 	storagePrevs map[string][]byte
 	codePrevs    map[string]uint64
 	accumulator  *shards.Accumulator
-
-	tx kv.Tx
 }
 
 func NewStateWriterBufferedV3(rs *StateV3, accumulator *shards.Accumulator) *StateWriterBufferedV3 {
@@ -365,7 +363,7 @@ func NewStateWriterBufferedV3(rs *StateV3, accumulator *shards.Accumulator) *Sta
 func (w *StateWriterBufferedV3) SetTxNum(ctx context.Context, txNum uint64) {
 	w.rs.domains.SetTxNum(txNum)
 }
-func (w *StateWriterBufferedV3) SetTx(tx kv.Tx) { w.tx = tx }
+func (w *StateWriterBufferedV3) SetTx(tx kv.Tx) {}
 
 func (w *StateWriterBufferedV3) ResetWriteSet() {
 	w.writeLists = newWriteList()
@@ -468,8 +466,6 @@ type StateWriterV3 struct {
 	rs          *StateV3
 	trace       bool
 	accumulator *shards.Accumulator
-
-	tx kv.Tx
 }
 
 func NewStateWriterV3(rs *StateV3, accumulator *shards.Accumulator) *StateWriterV3 {
@@ -479,11 +475,6 @@ func NewStateWriterV3(rs *StateV3, accumulator *shards.Accumulator) *StateWriter
 		//trace: true,
 	}
 }
-
-func (w *StateWriterV3) SetTxNum(ctx context.Context, txNum uint64) {
-	w.rs.domains.SetTxNum(txNum)
-}
-func (w *StateWriterV3) SetTx(tx kv.Tx) { w.tx = tx }
 
 func (w *StateWriterV3) ResetWriteSet() {}
 
@@ -577,7 +568,97 @@ func (w *StateWriterV3) CreateContract(address common.Address) error {
 	return nil
 }
 
-type StateReaderV3 struct {
+type ReaderV3 struct {
+	txNum     uint64
+	trace     bool
+	tx        kv.TemporalGetter
+	composite []byte
+}
+
+func NewReaderV3(tx kv.TemporalGetter) *ReaderV3 {
+	return &ReaderV3{
+		//trace:     true,
+		tx:        tx,
+		composite: make([]byte, 20+32),
+	}
+}
+
+func (r *ReaderV3) DiscardReadList()                     {}
+func (r *ReaderV3) SetTxNum(txNum uint64)                { r.txNum = txNum }
+func (r *ReaderV3) SetTx(tx kv.Tx)                       {}
+func (r *ReaderV3) ReadSet() map[string]*libstate.KvList { return nil }
+func (r *ReaderV3) SetTrace(trace bool)                  { r.trace = trace }
+func (r *ReaderV3) ResetReadSet()                        {}
+
+func (r *ReaderV3) ReadAccountData(address common.Address) (*accounts.Account, error) {
+	enc, _, err := r.tx.DomainGet(kv.AccountsDomain, address[:], nil)
+	if err != nil {
+		return nil, err
+	}
+	if len(enc) == 0 {
+		if r.trace {
+			fmt.Printf("ReadAccountData [%x] => [empty], txNum: %d\n", address, r.txNum)
+		}
+		return nil, nil
+	}
+
+	var acc accounts.Account
+	if err := accounts.DeserialiseV3(&acc, enc); err != nil {
+		return nil, err
+	}
+	if r.trace {
+		fmt.Printf("ReadAccountData [%x] => [nonce: %d, balance: %d, codeHash: %x], txNum: %d\n", address, acc.Nonce, &acc.Balance, acc.CodeHash, r.txNum)
+	}
+	return &acc, nil
+}
+
+func (r *ReaderV3) ReadAccountStorage(address common.Address, incarnation uint64, key *common.Hash) ([]byte, error) {
+	r.composite = append(append(r.composite[:0], address[:]...), key.Bytes()...)
+	enc, _, err := r.tx.DomainGet(kv.StorageDomain, r.composite, nil)
+	if err != nil {
+		return nil, err
+	}
+	if r.trace {
+		if enc == nil {
+			fmt.Printf("ReadAccountStorage [%x] => [empty], txNum: %d\n", r.composite, r.txNum)
+		} else {
+			fmt.Printf("ReadAccountStorage [%x] => [%x], txNum: %d\n", r.composite, enc, r.txNum)
+		}
+	}
+	return enc, nil
+}
+
+func (r *ReaderV3) ReadAccountCode(address common.Address, incarnation uint64, codeHash common.Hash) ([]byte, error) {
+	//if codeHash == emptyCodeHashH { // TODO: how often do we have this case on mainnet/bor-mainnet?
+	//	return nil, nil
+	//}
+	enc, _, err := r.tx.DomainGet(kv.CodeDomain, address[:], nil)
+	if err != nil {
+		return nil, err
+	}
+	if r.trace {
+		fmt.Printf("ReadAccountCode [%x] => [%x], txNum: %d\n", address, enc, r.txNum)
+	}
+	return enc, nil
+}
+
+func (r *ReaderV3) ReadAccountCodeSize(address common.Address, incarnation uint64, codeHash common.Hash) (int, error) {
+	enc, _, err := r.tx.DomainGet(kv.CodeDomain, address[:], nil)
+	if err != nil {
+		return 0, err
+	}
+	size := len(enc)
+	if r.trace {
+		fmt.Printf("ReadAccountCodeSize [%x] => [%d], txNum: %d\n", address, size, r.txNum)
+	}
+	return size, nil
+}
+
+func (r *ReaderV3) ReadAccountIncarnation(address common.Address) (uint64, error) {
+	return 0, nil
+}
+
+type ReaderParallelV3 struct {
 	txNum     uint64
 	trace     bool
 	sd        *libstate.SharedDomains
@@ -587,8 +668,8 @@ type StateReaderV3 struct {
 	readLists       map[string]*libstate.KvList
 }
 
-func NewStateReaderV3(sd *libstate.SharedDomains) *StateReaderV3 {
-	return &StateReaderV3{
+func NewReaderParallelV3(sd *libstate.SharedDomains) *ReaderParallelV3 {
+	return &ReaderParallelV3{
 		//trace:     true,
 		sd:        sd,
 		readLists: newReadList(),
@@ -596,14 +677,14 @@ func NewStateReaderV3(sd *libstate.SharedDomains) *StateReaderV3 {
 	}
 }
 
-func (r *StateReaderV3) DiscardReadList()                     { r.discardReadList = true }
-func (r *StateReaderV3) SetTxNum(txNum uint64)                { r.txNum = txNum }
-func (r *StateReaderV3) SetTx(tx kv.Tx)                       {}
-func (r *StateReaderV3) ReadSet() map[string]*libstate.KvList { return r.readLists }
-func (r *StateReaderV3) SetTrace(trace bool)                  { r.trace = trace }
-func (r *StateReaderV3) ResetReadSet()                        { r.readLists = newReadList() }
+func (r *ReaderParallelV3) DiscardReadList()                     { r.discardReadList = true }
+func (r *ReaderParallelV3) SetTxNum(txNum uint64)                { r.txNum = txNum }
+func (r *ReaderParallelV3) SetTx(tx kv.Tx)                       {}
+func (r *ReaderParallelV3) ReadSet() map[string]*libstate.KvList { return r.readLists }
+func (r *ReaderParallelV3) SetTrace(trace bool)                  { r.trace = trace }
+func (r *ReaderParallelV3) ResetReadSet()                        { r.readLists = newReadList() }
 
-func (r *StateReaderV3) ReadAccountData(address common.Address) (*accounts.Account, error) {
+func (r *ReaderParallelV3) ReadAccountData(address common.Address) (*accounts.Account, error) {
 	enc, _, err := r.sd.DomainGet(kv.AccountsDomain, address[:], nil)
 	if err != nil {
 		return nil, err
@@ -629,7 +710,7 @@ func (r *StateReaderV3) ReadAccountData(address common.Address) (*accounts.Accou
 	return &acc, nil
 }
 
-func (r *StateReaderV3) ReadAccountStorage(address common.Address, incarnation uint64, key *common.Hash) ([]byte, error) {
+func (r *ReaderParallelV3) ReadAccountStorage(address common.Address, incarnation uint64, key *common.Hash) ([]byte, error) {
 	r.composite = append(append(r.composite[:0], address[:]...), key.Bytes()...)
 	enc, _, err := r.sd.DomainGet(kv.StorageDomain, r.composite, nil)
 	if err != nil {
@@ -648,7 +729,7 @@ func (r *StateReaderV3) ReadAccountStorage(address common.Address, incarnation u
 	return enc, nil
 }
 
-func (r *StateReaderV3) ReadAccountCode(address common.Address, incarnation uint64, codeHash common.Hash) ([]byte, error) {
+func (r *ReaderParallelV3) ReadAccountCode(address common.Address, incarnation uint64, codeHash common.Hash) ([]byte, error) {
 	enc, _, err := r.sd.DomainGet(kv.CodeDomain, address[:], nil)
 	if err != nil {
 		return nil, err
@@ -663,14 +744,14 @@ func (r *StateReaderV3) ReadAccountCode(address common.Address, incarnation uint
 	return enc, nil
 }
 
-func (r *StateReaderV3) ReadAccountCodeSize(address common.Address, incarnation uint64, codeHash common.Hash) (int, error) {
+func (r *ReaderParallelV3) ReadAccountCodeSize(address common.Address, incarnation uint64, codeHash common.Hash) (int, error) {
 	enc, _, err := r.sd.DomainGet(kv.CodeDomain, address[:], nil)
 	if err != nil {
 		return 0, err
 	}
-	var sizebuf [8]byte
-	binary.BigEndian.PutUint64(sizebuf[:], uint64(len(enc)))
 	if !r.discardReadList {
+		var sizebuf [8]byte
+		binary.BigEndian.PutUint64(sizebuf[:], uint64(len(enc)))
 		r.readLists[libstate.CodeSizeTableFake].Push(string(address[:]), sizebuf[:])
 	}
 	size := len(enc)
@@ -680,7 +761,7 @@ func (r *StateReaderV3) ReadAccountCodeSize(address common.Address, incarnation 
 	return size, nil
 }
 
-func (r *StateReaderV3) ReadAccountIncarnation(address common.Address) (uint64, error) {
+func (r *ReaderParallelV3) ReadAccountIncarnation(address common.Address) (uint64, error) {
 	return 0, nil
 }
 

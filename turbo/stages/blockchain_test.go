@@ -30,6 +30,7 @@ import (
 
 	protosentry "github.com/erigontech/erigon-lib/gointerfaces/sentryproto"
 	"github.com/erigontech/erigon/eth/protocols/eth"
+	"github.com/erigontech/erigon/p2p/sentry/sentry_multi_client"
 	"github.com/erigontech/erigon/rlp"
 
 	"github.com/erigontech/erigon-lib/common/hexutil"
@@ -374,48 +375,50 @@ func testReorg(t *testing.T, first, second []int64, td int64) {
 		}
 	}
 
-	b, err := rlp.EncodeToBytes(&eth.GetReceiptsPacket66{
-		RequestId:         1,
-		GetReceiptsPacket: hashPacket,
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	m.ReceiveWg.Add(1)
-	for _, err = range m.Send(&protosentry.InboundMessage{Id: protosentry.MessageId_GET_RECEIPTS_66, Data: b, PeerId: m.PeerId}) {
+	if sentry_multi_client.EnableP2PReceipts {
+		b, err := rlp.EncodeToBytes(&eth.GetReceiptsPacket66{
+			RequestId:         1,
+			GetReceiptsPacket: hashPacket,
+		})
 		if err != nil {
 			t.Fatal(err)
 		}
-	}
 
-	m.ReceiveWg.Wait()
+		m.ReceiveWg.Add(1)
+		for _, err = range m.Send(&protosentry.InboundMessage{Id: protosentry.MessageId_GET_RECEIPTS_66, Data: b, PeerId: m.PeerId}) {
+			if err != nil {
+				t.Fatal(err)
+			}
+		}
 
-	msg := m.SentMessage(0)
+		m.ReceiveWg.Wait()
 
-	require.Equal(protosentry.MessageId_RECEIPTS_66, msg.Id)
+		msg := m.SentMessage(0)
 
-	encoded, err := rlp.EncodeToBytes(types.Receipts{})
-	require.NoError(err)
+		require.Equal(protosentry.MessageId_RECEIPTS_66, msg.Id)
 
-	res := make([]rlp.RawValue, 0, queryNum)
-	for i := 0; i < queryNum; i++ {
-		res = append(res, encoded)
-	}
+		encoded, err := rlp.EncodeToBytes(types.Receipts{})
+		require.NoError(err)
 
-	b, err = rlp.EncodeToBytes(&eth.ReceiptsRLPPacket66{
-		RequestId:         1,
-		ReceiptsRLPPacket: res,
-	})
-	require.NoError(err)
-	require.Equal(b, msg.GetData())
+		res := make([]rlp.RawValue, 0, queryNum)
+		for i := 0; i < queryNum; i++ {
+			res = append(res, encoded)
+		}
 
-	// Make sure the chain total difficulty is the correct one
-	want := new(big.Int).Add(m.Genesis.Difficulty(), big.NewInt(td))
-	have, err := rawdb.ReadTdByHash(tx, rawdb.ReadCurrentHeader(tx).Hash())
-	require.NoError(err)
-	if have.Cmp(want) != 0 {
-		t.Errorf("total difficulty mismatch: have %v, want %v", have, want)
+		b, err = rlp.EncodeToBytes(&eth.ReceiptsRLPPacket66{
+			RequestId:         1,
+			ReceiptsRLPPacket: res,
+		})
+		require.NoError(err)
+		require.Equal(b, msg.GetData())
+
+		// Make sure the chain total difficulty is the correct one
+		want := new(big.Int).Add(m.Genesis.Difficulty(), big.NewInt(td))
+		have, err := rawdb.ReadTdByHash(tx, rawdb.ReadCurrentHeader(tx).Hash())
+		require.NoError(err)
+		if have.Cmp(want) != 0 {
+			t.Errorf("total difficulty mismatch: have %v, want %v", have, want)
+		}
 	}
 }
 

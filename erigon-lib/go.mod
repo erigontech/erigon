@@ -3,7 +3,7 @@ module github.com/erigontech/erigon-lib
 go 1.21.5
 
 require (
-	github.com/erigontech/erigon-snapshot v1.3.1-0.20240801141542-7a7b08ebd406
+	github.com/erigontech/erigon-snapshot v1.3.1-0.20240814160410-2ce37904b978
 	github.com/erigontech/interfaces v0.0.0-20240723225543-c6b574058f8c
 	github.com/erigontech/mdbx-go v0.38.4
 	github.com/erigontech/secp256k1 v1.1.0
@@ -21,6 +21,7 @@ require (
 	github.com/crate-crypto/go-kzg-4844 v0.7.0
 	github.com/deckarep/golang-set/v2 v2.3.1
 	github.com/edsrzf/mmap-go v1.1.0
+	github.com/elastic/go-freelru v0.13.0
 	github.com/erigontech/speedtest v0.0.2
 	github.com/go-stack/stack v1.8.1
 	github.com/gofrs/flock v0.12.1
@@ -150,7 +151,7 @@ require (
 )
 
 replace (
-	github.com/anacrolix/torrent => github.com/erigontech/torrent v1.54.2-alpha-33
+	github.com/anacrolix/torrent => github.com/erigontech/torrent v1.54.2-alpha-35
 	github.com/holiman/bloomfilter/v2 => github.com/AskAlexSharov/bloomfilter/v2 v2.0.8
 	github.com/tidwall/btree => github.com/AskAlexSharov/btree v1.6.2
 )

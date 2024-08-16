@@ -14,27 +14,30 @@
 // You should have received a copy of the GNU Lesser General Public License
 // along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
-package persistence
+package bor
 
 import (
-	"context"
-
-	"github.com/erigontech/erigon-lib/kv"
-	"github.com/erigontech/erigon/cl/cltypes"
-	"github.com/erigontech/erigon/cl/sentinel/peers"
+	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon/consensus"
+	"github.com/erigontech/erigon/rlp"
 )
 
-type BlockSource interface {
-	GetRange(ctx context.Context, tx kv.Tx, from uint64, count uint64) (*peers.PeeredObject[[]*cltypes.SignedBeaconBlock], error)
-	PurgeRange(ctx context.Context, tx kv.Tx, from uint64, count uint64) error
-	GetBlock(ctx context.Context, tx kv.Tx, slot uint64) (*peers.PeeredObject[*cltypes.SignedBeaconBlock], error)
+//go:generate mockgen -typed=true -destination=./state_receiver_mock.go -package=bor . StateReceiver
+type StateReceiver interface {
+	CommitState(event rlp.RawValue, syscall consensus.SystemCall) error
 }
 
-type BeaconChainWriter interface {
-	WriteBlock(ctx context.Context, tx kv.RwTx, block *cltypes.SignedBeaconBlock, canonical bool) error
+type ChainStateReceiver struct {
+	contractAddress libcommon.Address
 }
 
-type BeaconChainDatabase interface {
-	BlockSource
-	BeaconChainWriter
+func NewStateReceiver(contractAddress string) *ChainStateReceiver {
+	return &ChainStateReceiver{
+		contractAddress: libcommon.HexToAddress(contractAddress),
+	}
+}
+
+func (gc *ChainStateReceiver) CommitState(event rlp.RawValue, syscall consensus.SystemCall) error {
+	_, err := syscall(gc.contractAddress, event)
+	return err
 }
