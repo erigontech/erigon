@@ -89,7 +89,6 @@ func MiningBorHeimdallForward(
 		cfg.blockReader,
 		cfg.heimdallClient,
 		cfg.chainConfig.ChainID.String(),
-		cfg.stateReceiverABI,
 		logPrefix,
 		logger,
 		lastStateSyncEventID,
