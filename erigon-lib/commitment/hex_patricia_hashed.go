@@ -1365,9 +1365,9 @@ func (hph *HexPatriciaHashed) fold() (err error) {
 			if cell.storageAddrLen > 0 && cell.lhLen == 0 && !cell.loaded.storage() && !cell.Deleted() {
 				panic("storage not loaded" + fmt.Sprintf("%x", cell.storageAddr[:cell.storageAddrLen]))
 			}
-			if len(updateKey) > DepthWithoutNodeHashes {
-				cell.hashLen = 0 // do not write hashes for storages in the branch node
-			}
+			//if len(updateKey) > DepthWithoutNodeHashes {
+			//	cell.hashLen = 0 // do not write hashes for storages in the branch node
+			//}
 			cellHash, err := hph.computeCellHash(cell, depth, hph.hashAuxBuffer[:0])
 			if err != nil {
 				return nil, err
