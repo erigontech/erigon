@@ -453,7 +453,7 @@ func MiningStep(ctx context.Context, db kv.RwDB, mining *stagedsync.Sync, tmpDir
 	}
 	defer sd.Close()
 	txc.Doms = sd
-
+	logger.Error("started mining run")
 	if _, err = mining.Run(nil, txc, false /* firstCycle */, false); err != nil {
 		return err
 	}

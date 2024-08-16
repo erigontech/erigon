@@ -392,6 +392,7 @@ func (s *Sync) Run(db kv.RwDB, txc wrap.TxContainer, initialCycle, firstCycle bo
 		if badBlockUnwind {
 			// If there was a bad block, the current step needs to complete, to send the corresponding reply to the Consensus Layer
 			// Otherwise, the staged sync will get stuck in the Headers stage with "Waiting for Consensus Layer..."
+			s.logger.Error("bad block unwind")
 			break
 		}
 
@@ -403,12 +404,12 @@ func (s *Sync) Run(db kv.RwDB, txc wrap.TxContainer, initialCycle, firstCycle bo
 		}
 
 		if stage.Disabled || stage.Forward == nil {
-			s.logger.Trace(fmt.Sprintf("%s disabled. %s", stage.ID, stage.DisabledDescription))
-
+			//s.logger.Trace(fmt.Sprintf("%s disabled. %s", stage.ID, stage.DisabledDescription))
+			s.logger.Error(fmt.Sprintf("%s disabled. %s", stage.ID, stage.DisabledDescription))
 			s.NextStage()
 			continue
 		}
-
+		s.logger.Error("started runStage", "stage", stage.ID, "description", stage.Description)
 		if err := s.runStage(stage, db, txc, initialCycle, firstCycle, badBlockUnwind); err != nil {
 			return false, err
 		}
