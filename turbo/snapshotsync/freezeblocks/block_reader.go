@@ -150,7 +150,11 @@ func (r *RemoteBlockReader) HeaderByHash(ctx context.Context, tx kv.Getter, hash
 }
 
 func (r *RemoteBlockReader) CanonicalHash(ctx context.Context, tx kv.Getter, blockHeight uint64) (common.Hash, error) {
-	return rawdb.ReadCanonicalHash(tx, blockHeight)
+	resp, err := r.client.CanonicalHash(ctx, &remote.CanonicalHashRequest{BlockNumber: blockHeight})
+	if err != nil {
+		return common.Hash{}, err
+	}
+	return gointerfaces.ConvertH256ToHash(resp.Hash), nil
 }
 
 var _ services.FullBlockReader = &RemoteBlockReader{}
@@ -258,7 +262,14 @@ func (r *RemoteBlockReader) BodyWithTransactions(ctx context.Context, tx kv.Gett
 	return block.Body(), nil
 }
 func (r *RemoteBlockReader) HeaderNumber(ctx context.Context, tx kv.Getter, hash common.Hash) (*uint64, error) {
-	return rawdb.ReadHeaderNumber(tx, hash), nil
+	resp, err := r.client.HeaderNumber(ctx, &remote.HeaderNumberRequest{Hash: gointerfaces.ConvertHashToH256(hash)})
+	if err != nil {
+		return nil, err
+	}
+	if resp == nil {
+		return nil, nil
+	}
+	return resp.Number, nil
 }
 func (r *RemoteBlockReader) BodyRlp(ctx context.Context, tx kv.Getter, hash common.Hash, blockHeight uint64) (bodyRlp rlp.RawValue, err error) {
 	body, err := r.BodyWithTransactions(ctx, tx, hash, blockHeight)
