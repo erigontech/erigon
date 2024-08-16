@@ -384,8 +384,11 @@ func (b *Bridge) waitFetchedEventsSignal(ctx context.Context) error {
 	select {
 	case <-ctx.Done():
 		return ctx.Err()
-	case <-b.fetchedEventsSignal:
-		return nil
+	case _, ok := <-b.fetchedEventsSignal:
+		if ok {
+			return nil
+		}
+		return errors.New("fetchedEventsSignal channel closed")
 	}
 }
 
@@ -400,8 +403,11 @@ func (b *Bridge) waitProcessedBlockSignal(ctx context.Context) error {
 	select {
 	case <-ctx.Done():
 		return ctx.Err()
-	case <-b.processedBlockSignal:
-		return nil
+	case _, ok := <-b.processedBlockSignal:
+		if ok {
+			return nil
+		}
+		return errors.New("processedBlockSignal channel closed")
 	}
 }
 

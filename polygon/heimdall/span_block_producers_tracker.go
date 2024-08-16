@@ -82,8 +82,11 @@ func (t *spanBlockProducersTracker) Synchronize(ctx context.Context) error {
 	select {
 	case <-ctx.Done():
 		return ctx.Err()
-	case <-t.idleSignal:
-		return nil
+	case _, ok := <-t.idleSignal:
+		if ok {
+			return nil
+		}
+		return errors.New("idleSignal channel closed")
 	}
 }
 
