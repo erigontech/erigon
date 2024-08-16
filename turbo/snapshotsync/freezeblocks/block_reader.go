@@ -245,7 +245,7 @@ func (r *RemoteBlockReader) Body(ctx context.Context, tx kv.Getter, hash common.
 	return block.Body(), uint32(len(block.Body().Transactions)), nil
 }
 func (r *RemoteBlockReader) IsCanonical(ctx context.Context, tx kv.Getter, hash common.Hash, blockHeight uint64) (bool, error) {
-	expected, err := rawdb.ReadCanonicalHash(tx, blockHeight)
+	expected, err := r.CanonicalHash(ctx, tx, blockHeight)
 	if err != nil {
 		return false, err
 	}
