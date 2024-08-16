@@ -23,6 +23,7 @@ import (
 	"errors"
 	"fmt"
 	"math/bits"
+	"sort"
 	"strings"
 
 	"github.com/holiman/uint256"
@@ -748,21 +749,28 @@ func ParseTrieVariant(s string) TrieVariant {
 }
 
 type BranchStat struct {
-	KeySize     uint64
-	ValSize     uint64
-	MinCellSize uint64
-	MaxCellSize uint64
-	CellCount   uint64
-	APKSize     uint64
-	SPKSize     uint64
-	ExtSize     uint64
-	HashSize    uint64
-	APKCount    uint64
-	SPKCount    uint64
-	HashCount   uint64
-	ExtCount    uint64
-	TAMapsSize  uint64
-	IsRoot      bool
+	KeySize       uint64
+	ValSize       uint64
+	MinCellSize   uint64
+	MaxCellSize   uint64
+	CellCount     uint64
+	APKSize       uint64
+	SPKSize       uint64
+	ExtSize       uint64
+	HashSize      uint64
+	APKCount      uint64
+	SPKCount      uint64
+	HashCount     uint64
+	ExtCount      uint64
+	TAMapsSize    uint64
+	LeafHashSize  uint64
+	LeafHashCount uint64
+	MedianAPK     uint64
+	MedianSPK     uint64
+	MedianHash    uint64
+	MedianExt     uint64
+	MedianLH      uint64
+	IsRoot        bool
 }
 
 // do not add stat of root node to other branch stat
@@ -784,6 +792,15 @@ func (bs *BranchStat) Collect(other *BranchStat) {
 	bs.SPKCount += other.SPKCount
 	bs.HashCount += other.HashCount
 	bs.ExtCount += other.ExtCount
+
+	bs.MedianExt = (bs.MedianExt + other.MedianExt) / 2
+	bs.MedianHash = (bs.MedianHash + other.MedianHash) / 2
+	bs.MedianAPK = (bs.MedianAPK + other.MedianAPK) / 2
+	bs.MedianSPK = (bs.MedianSPK + other.MedianSPK) / 2
+	bs.MedianLH = (bs.MedianLH + other.MedianLH) / 2
+	bs.TAMapsSize += other.TAMapsSize
+	bs.LeafHashSize += other.LeafHashSize
+	bs.LeafHashCount += other.LeafHashCount
 }
 
 func DecodeBranchAndCollectStat(key, branch []byte, tv TrieVariant) *BranchStat {
@@ -806,6 +823,8 @@ func DecodeBranchAndCollectStat(key, branch []byte, tv TrieVariant) *BranchStat 
 		}
 		stat.TAMapsSize = uint64(2 + 2) // touchMap + afterMap
 		stat.CellCount = uint64(bits.OnesCount16(tm & am))
+
+		medians := make(map[string][]int)
 		for _, c := range cells {
 			if c == nil {
 				continue
@@ -817,15 +836,25 @@ func DecodeBranchAndCollectStat(key, branch []byte, tv TrieVariant) *BranchStat 
 			case c.accountAddrLen > 0:
 				stat.APKSize += uint64(c.accountAddrLen)
 				stat.APKCount++
+				medians["apk"] = append(medians["apk"], c.accountAddrLen)
 			case c.storageAddrLen > 0:
 				stat.SPKSize += uint64(c.storageAddrLen)
 				stat.SPKCount++
+				medians["spk"] = append(medians["spk"], c.storageAddrLen)
 			case c.hashLen > 0:
 				stat.HashSize += uint64(c.hashLen)
 				stat.HashCount++
+				medians["hash"] = append(medians["hash"], c.hashLen)
+			case c.lhLen > 0:
+				stat.LeafHashSize += uint64(c.lhLen)
+				stat.LeafHashCount++
+				medians["lh"] = append(medians["lh"], c.lhLen)
+			case c.extLen > 0:
+				stat.ExtSize += uint64(c.extLen)
+				stat.ExtCount++
+				medians["ext"] = append(medians["ext"], c.extLen)
 			default:
-				panic("no plain key" + fmt.Sprintf("#+%v", c))
-				//case c.extLen > 0:
+				panic("unexpected cell " + fmt.Sprintf("%s", c.FullString()))
 			}
 			if c.extLen > 0 {
 				switch tv {
@@ -835,6 +864,22 @@ func DecodeBranchAndCollectStat(key, branch []byte, tv TrieVariant) *BranchStat 
 					stat.ExtSize += uint64(c.extLen)
 				}
 				stat.ExtCount++
+			}
+		}
+
+		for k, v := range medians {
+			sort.Ints(v)
+			switch k {
+			case "apk":
+				stat.MedianAPK = uint64(v[len(v)/2])
+			case "spk":
+				stat.MedianSPK = uint64(v[len(v)/2])
+			case "hash":
+				stat.MedianHash = uint64(v[len(v)/2])
+			case "ext":
+				stat.MedianExt = uint64(v[len(v)/2])
+			case "lh":
+				stat.MedianLH = uint64(v[len(v)/2])
 			}
 		}
 	}

@@ -43,6 +43,7 @@ var (
 	flagConcurrency     = flag.Int("j", 4, "amount of concurrently proceeded files")
 	flagTrieVariant     = flag.String("trie", "hex", "commitment trie variant (values are hex and bin)")
 	flagCompression     = flag.String("compression", "none", "compression type (none, k, v, kv)")
+	flagDepth           = flag.Int("depth", 0, "depth of the prefixes to analyze")
 )
 
 func main() {
@@ -181,14 +182,17 @@ func extractKVPairFromCompressed(filename string, keysSink chan commitment.Branc
 	size := dec.Size()
 	paris := dec.Count() / 2
 	cpair := 0
-
+	depth := *flagDepth
+	var afterValPos uint64
+	var key, val []byte
 	getter := state.NewArchiveGetter(dec.MakeGetter(), fc)
+
 	for getter.HasNext() {
-		key, _ := getter.Next(nil)
+		key, _ = getter.Next(key[:0])
 		if !getter.HasNext() {
 			return errors.New("invalid key/value pair during decompression")
 		}
-		val, afterValPos := getter.Next(nil)
+		val, afterValPos = getter.Next(val[:0])
 		cpair++
 
 		if cpair%100000 == 0 {
@@ -196,6 +200,9 @@ func extractKVPairFromCompressed(filename string, keysSink chan commitment.Branc
 				datasize.ByteSize(afterValPos).HumanReadable(), datasize.ByteSize(size).HumanReadable())
 		}
 
+		if depth > len(key) {
+			continue
+		}
 		stat := commitment.DecodeBranchAndCollectStat(key, val, tv)
 		if stat == nil {
 			fmt.Printf("failed to decode branch: %x %x\n", key, val)
@@ -286,12 +293,16 @@ func fileContentsMapChart(fileName string, data *overallStat) *charts.TreeMap {
 			Value: int(data.branches.ExtSize),
 		},
 		{
-			Name:  "apk",
+			Name:  "account",
 			Value: int(data.branches.APKSize),
 		},
 		{
-			Name:  "spk",
+			Name:  "storage",
 			Value: int(data.branches.SPKSize),
+		},
+		{
+			Name:  "leafHashes",
+			Value: int(data.branches.LeafHashSize),
 		},
 	}
 
@@ -384,9 +395,6 @@ func countersChart(fname string, data *overallStat) *charts.Sankey {
 	sankey.SetGlobalOptions(
 		charts.WithLegendOpts(opts.Legend{Show: true}),
 		charts.WithTooltipOpts(opts.Tooltip{Show: true}),
-		//charts.WithTitleOpts(opts.Title{
-		//	Title: "Sankey-basic-example",
-		//}),
 	)
 
 	nodes := []opts.SankeyNode{
@@ -395,12 +403,50 @@ func countersChart(fname string, data *overallStat) *charts.Sankey {
 		{Name: "SPK"},
 		{Name: "Hashes"},
 		{Name: "Extensions"},
+		{Name: "LeafHashes"},
 	}
 	sankeyLink := []opts.SankeyLink{
 		{Source: nodes[0].Name, Target: nodes[1].Name, Value: float32(data.branches.APKCount)},
 		{Source: nodes[0].Name, Target: nodes[2].Name, Value: float32(data.branches.SPKCount)},
 		{Source: nodes[0].Name, Target: nodes[3].Name, Value: float32(data.branches.HashCount)},
 		{Source: nodes[0].Name, Target: nodes[4].Name, Value: float32(data.branches.ExtCount)},
+		{Source: nodes[0].Name, Target: nodes[5].Name, Value: float32(data.branches.LeafHashCount)},
+	}
+
+	sankey.AddSeries(fname, nodes, sankeyLink).
+		SetSeriesOptions(
+			charts.WithLineStyleOpts(opts.LineStyle{
+				Color:     "source",
+				Curveness: 0.5,
+			}),
+			charts.WithLabelOpts(opts.Label{
+				Show: true,
+			}),
+		)
+	return sankey
+}
+
+func mediansChart(fname string, data *overallStat) *charts.Sankey {
+	sankey := charts.NewSankey()
+	sankey.SetGlobalOptions(
+		charts.WithLegendOpts(opts.Legend{Show: true}),
+		charts.WithTooltipOpts(opts.Tooltip{Show: true}),
+	)
+
+	nodes := []opts.SankeyNode{
+		{Name: "Cells"},
+		{Name: "Addr"},
+		{Name: "Addr+Storage"},
+		{Name: "Hashes"},
+		{Name: "Extensions"},
+		{Name: "LeafHashes"},
+	}
+	sankeyLink := []opts.SankeyLink{
+		{Source: nodes[0].Name, Target: nodes[1].Name, Value: float32(data.branches.MedianAPK)},
+		{Source: nodes[0].Name, Target: nodes[2].Name, Value: float32(data.branches.MedianSPK)},
+		{Source: nodes[0].Name, Target: nodes[3].Name, Value: float32(data.branches.MedianHash)},
+		{Source: nodes[0].Name, Target: nodes[4].Name, Value: float32(data.branches.MedianExt)},
+		{Source: nodes[0].Name, Target: nodes[5].Name, Value: float32(data.branches.MedianLH)},
 	}
 
 	sankey.AddSeries(fname, nodes, sankeyLink).
