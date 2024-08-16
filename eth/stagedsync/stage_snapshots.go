@@ -338,6 +338,9 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 
 func getPruneMarkerSafeThreshold(blockReader services.FullBlockReader) uint64 {
 	snapProgress := min(blockReader.FrozenBorBlocks(), blockReader.FrozenBlocks())
+	if blockReader.BorSnapshots() == nil {
+		snapProgress = blockReader.FrozenBlocks()
+	}
 	if snapProgress < pruneMarkerSafeThreshold {
 		return 0
 	}
@@ -389,7 +392,7 @@ func FillDBFromSnapshots(logPrefix string, ctx context.Context, tx kv.RwTx, dirs
 					return err
 				}
 				// Write marker for pruning only if we are above our safe threshold
-				if blockNum >= pruneMarkerBlockThreshold {
+				if blockNum >= pruneMarkerBlockThreshold || blockNum == 0 {
 					if err := rawdb.WriteCanonicalHash(tx, blockHash, blockNum); err != nil {
 						return err
 					}
