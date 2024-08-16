@@ -76,9 +76,6 @@ func proceedFiles(files []string) {
 	page.SetLayout(components.PageFlexLayout)
 	page.PageTitle = "Commitment Analysis"
 
-	mpg := NewMultiProgressBar(prog, os.Stdout)
-	defer mpg.End()
-
 	for i, fp := range files {
 		fpath, pos := fp, i
 		_ = pos
@@ -91,7 +88,7 @@ func proceedFiles(files []string) {
 			defer wg.Done()
 			defer func() { sema <- struct{}{} }()
 
-			stat, err := processCommitmentFile(fpath, mpg.Bars[mapping[filepath.Base(fpath)]])
+			stat, err := processCommitmentFile(fpath, prog[mapping[filepath.Base(fpath)]])
 			if err != nil {
 				fmt.Printf("processing failed: %v", err)
 				return
@@ -275,7 +272,7 @@ func prefixLenCountChart(fname string, data *overallStat) *charts.Pie {
 	pie := charts.NewPie()
 	pie.SetGlobalOptions(
 		charts.WithTooltipOpts(opts.Tooltip{Show: true}),
-		charts.WithTitleOpts(opts.Title{Subtitle: fname, Title: "key prefix length distribution (bytes)", Top: "25"}),
+		charts.WithTitleOpts(opts.Title{Subtitle: filepath.Base(fname), Title: "key prefix length distribution (bytes)", Top: "25"}),
 	)
 
 	pie.AddSeries("prefixLen/count", items)
@@ -332,7 +329,7 @@ func fileContentsMapChart(fileName string, data *overallStat) *charts.TreeMap {
 	)
 
 	// Add initialized data to graph.
-	graph.AddSeries(fileName, TreeMap).
+	graph.AddSeries(filepath.Base(fileName), TreeMap).
 		SetSeriesOptions(
 			charts.WithTreeMapOpts(
 				opts.TreeMapChart{
@@ -473,57 +470,4 @@ func mediansChart(fname string, data *overallStat) *charts.Sankey {
 			}),
 		)
 	return sankey
-}
-
-type LineWriter struct {
-	*MultiProgressBar
-	id int
-}
-
-func (lw *LineWriter) Write(p []byte) (n int, err error) {
-	lw.guard.Lock()
-	defer lw.guard.Unlock()
-	lw.move(lw.id, lw.output)
-	return lw.output.Write(p)
-}
-
-type MultiProgressBar struct {
-	output  io.Writer
-	curLine int
-	Bars    []*progressbar.ProgressBar
-	guard   sync.Mutex
-}
-
-func NewMultiProgressBar(pBars []*progressbar.ProgressBar, output io.Writer) *MultiProgressBar {
-	mpb := &MultiProgressBar{
-		curLine: 0,
-		Bars:    pBars,
-		guard:   sync.Mutex{},
-		output:  output,
-	}
-	for id, pb := range mpb.Bars {
-		progressbar.OptionSetWriter(&LineWriter{
-			MultiProgressBar: mpb,
-			id:               id,
-		})(pb)
-	}
-
-	return mpb
-}
-
-func (mpb *MultiProgressBar) move(id int, writer io.Writer) (int, error) {
-	bias := mpb.curLine - id
-	mpb.curLine = id
-	if bias > 0 {
-		// move up
-		return fmt.Fprintf(writer, "\r\033[%dA", bias)
-	} else if bias < 0 {
-		// move down
-		return fmt.Fprintf(writer, "\r\033[%dB", -bias)
-	}
-	return 0, nil
-}
-
-func (mpb *MultiProgressBar) End() {
-	mpb.move(len(mpb.Bars), mpb.output)
 }
