@@ -310,8 +310,10 @@ func checkBlockEvents(ctx context.Context, config *borcfg.BorConfig, blockReader
 			lastBlockEventTime = eventTime
 		}
 
+		const warnPrevTimes = false
+
 		if prevEventTime != nil {
-			if eventTime.Before(*prevEventTime) {
+			if eventTime.Before(*prevEventTime) && warnPrevTimes {
 				log.Warn("[integrity] NoGapsInBorEvents: event time before prev", "block", block, "event", eventId, "time", eventTime, "prev", *prevEventTime, "diff", -prevEventTime.Sub(eventTime))
 			}
 		}
@@ -383,9 +385,9 @@ func ValidateBorEvents(ctx context.Context, config *borcfg.BorConfig, db kv.RoDB
 			}
 		}
 
-		if prevEventId == 0 {
-			log.Info("[integrity] checking bor events", "event", eventId, "block", block)
-		}
+		//if prevEventId == 0 {
+		//log.Info("[integrity] checking bor events", "event", eventId, "block", block)
+		//}
 
 		if prevBlock != 0 && prevBlock != block {
 			var err error

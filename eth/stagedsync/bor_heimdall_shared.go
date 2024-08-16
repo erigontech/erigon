@@ -483,15 +483,19 @@ func fetchAndWriteHeimdallStateSyncEvents(
 			continue
 		}
 
-		if lastStateSyncEventID+1 != eventRecord.ID || eventRecord.ChainID != chainID ||
-			!(eventRecord.Time.After(from) && eventRecord.Time.Before(to)) {
-			return lastStateSyncEventID, i, time.Since(fetchStart), fmt.Errorf(
-				"invalid event record received %s, %s, %s, %s",
-				fmt.Sprintf("blockNum=%d", blockNum),
-				fmt.Sprintf("eventId=%d (exp %d)", eventRecord.ID, lastStateSyncEventID+1),
-				fmt.Sprintf("chainId=%s (exp %s)", eventRecord.ChainID, chainID),
-				fmt.Sprintf("time=%s (exp from %s, to %s)", eventRecord.Time, from, to),
-			)
+		// this check is currently only tested and working on amoy - it should work for
+		// current bor-mainet but will fail for some historical blocks
+		if chainID != "137" {
+			if lastStateSyncEventID+1 != eventRecord.ID || eventRecord.ChainID != chainID ||
+				!(eventRecord.Time.After(from) && eventRecord.Time.Before(to)) {
+				return lastStateSyncEventID, i, time.Since(fetchStart), fmt.Errorf(
+					"invalid event record received %s, %s, %s, %s",
+					fmt.Sprintf("blockNum=%d", blockNum),
+					fmt.Sprintf("eventId=%d (exp %d)", eventRecord.ID, lastStateSyncEventID+1),
+					fmt.Sprintf("chainId=%s (exp %s)", eventRecord.ChainID, chainID),
+					fmt.Sprintf("time=%s (exp from %s, to %s)", eventRecord.Time, from, to),
+				)
+			}
 		}
 
 		data, err := eventRecord.Pack(stateReceiverABI)

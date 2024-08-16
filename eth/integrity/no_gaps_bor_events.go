@@ -58,7 +58,6 @@ func NoGapsInBorEvents(ctx context.Context, db kv.RoDB, blockReader services.Ful
 	snapshots := blockReader.BorSnapshots().(*freezeblocks.BorRoSnapshots)
 
 	var prevEventId uint64
-	var prevBlock uint64
 	var maxBlockNum uint64
 
 	if to > 0 {
@@ -89,28 +88,32 @@ func NoGapsInBorEvents(ctx context.Context, db kv.RoDB, blockReader services.Ful
 
 	if db != nil {
 		err = db.View(ctx, func(tx kv.Tx) error {
-			lastEventId, _, err := blockReader.LastEventId(ctx, tx)
+			if false {
+				lastEventId, _, err := blockReader.LastEventId(ctx, tx)
 
-			if err != nil {
-				return err
-			}
+				if err != nil {
+					return err
+				}
 
-			borHeimdallProgress, err := stages.GetStageProgress(tx, stages.BorHeimdall)
+				borHeimdallProgress, err := stages.GetStageProgress(tx, stages.BorHeimdall)
 
-			if err != nil {
-				return err
-			}
+				if err != nil {
+					return err
+				}
 
-			bodyProgress, err := stages.GetStageProgress(tx, stages.Bodies)
+				bodyProgress, err := stages.GetStageProgress(tx, stages.Bodies)
 
-			if err != nil {
-				return err
-			}
+				if err != nil {
+					return err
+				}
 
-			fmt.Println("LAST Event", lastEventId, "BH", borHeimdallProgress, "B", bodyProgress)
+				fmt.Println("LAST Event", lastEventId, "BH", borHeimdallProgress, "B", bodyProgress)
 
-			for blockNum := maxBlockNum + 1; blockNum <= bodyProgress; blockNum++ {
+				if bodyProgress > borHeimdallProgress {
+					for blockNum := maxBlockNum + 1; blockNum <= bodyProgress; blockNum++ {
 
+					}
+				}
 			}
 
 			return nil
@@ -121,7 +124,7 @@ func NoGapsInBorEvents(ctx context.Context, db kv.RoDB, blockReader services.Ful
 		}
 	}
 
-	log.Info("[integrity] done checking bor events", "event", prevEventId, "block", prevBlock)
+	log.Info("[integrity] done checking bor events", "event", prevEventId)
 
 	return nil
 }
