@@ -30,7 +30,6 @@ import (
 	"github.com/erigontech/erigon-lib/kv/order"
 	"github.com/erigontech/erigon-lib/kv/rawdbv3"
 
-	"github.com/erigontech/erigon/core/rawdb"
 	"github.com/erigontech/erigon/core/state"
 	"github.com/erigontech/erigon/core/types/accounts"
 	"github.com/erigontech/erigon/eth/stagedsync/stages"
@@ -88,7 +87,10 @@ func (api *PrivateDebugAPIImpl) StorageRangeAt(ctx context.Context, blockHash co
 	}
 	defer tx.Rollback()
 
-	number := rawdb.ReadHeaderNumber(tx, blockHash)
+	number, err := api._blockReader.HeaderNumber(ctx, tx, blockHash)
+	if err != nil {
+		return StorageRangeResult{}, err
+	}
 	if number == nil {
 		return StorageRangeResult{}, errors.New("block not found")
 	}
@@ -296,9 +298,9 @@ func (api *PrivateDebugAPIImpl) AccountAt(ctx context.Context, blockHash common.
 	}
 	defer tx.Rollback()
 
-	number := rawdb.ReadHeaderNumber(tx, blockHash)
-	if number == nil {
-		return nil, nil
+	number, err := api._blockReader.HeaderNumber(ctx, tx, blockHash)
+	if err != nil {
+		return &AccountResult{}, err
 	}
 	canonicalHash, _ := api._blockReader.CanonicalHash(ctx, tx, *number)
 	isCanonical := canonicalHash == blockHash

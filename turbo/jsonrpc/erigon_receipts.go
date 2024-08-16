@@ -331,9 +331,9 @@ func (api *ErigonImpl) GetBlockReceiptsByBlockHash(ctx context.Context, cannonic
 	defer tx.Rollback()
 
 	{
-		blockNum := rawdb.ReadHeaderNumber(tx, cannonicalBlockHash)
-		if blockNum == nil {
-			return nil, fmt.Errorf("the hash %s is not cannonical", cannonicalBlockHash)
+		blockNum, err := api._blockReader.HeaderNumber(ctx, tx, cannonicalBlockHash)
+		if err != nil {
+			return nil, err
 		}
 		isCanonicalHash, err := api._blockReader.IsCanonical(ctx, tx, cannonicalBlockHash, *blockNum)
 		if err != nil {

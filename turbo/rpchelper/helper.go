@@ -108,7 +108,10 @@ func _GetBlockNumber(ctx context.Context, requireCanonical bool, blockNrOrHash r
 			return 0, libcommon.Hash{}, false, err
 		}
 	} else {
-		number := rawdb.ReadHeaderNumber(tx, hash)
+		number, err := br.HeaderNumber(ctx, tx, hash)
+		if err != nil {
+			return 0, libcommon.Hash{}, false, err
+		}
 		if number == nil {
 			return 0, libcommon.Hash{}, false, fmt.Errorf("block %x not found", hash)
 		}

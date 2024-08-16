@@ -597,13 +597,7 @@ func (cr ChainReaderImpl) CurrentFinalizedHeader() *types.Header {
 	if hash == (libcommon.Hash{}) {
 		return nil
 	}
-
-	number := rawdb.ReadHeaderNumber(cr.tx, hash)
-	if number == nil {
-		return nil
-	}
-
-	return rawdb.ReadHeader(cr.tx, hash, *number)
+	return cr.GetHeaderByHash(hash)
 }
 func (cr ChainReaderImpl) CurrentSafeHeader() *types.Header {
 	hash := rawdb.ReadForkchoiceSafe(cr.tx)
@@ -611,12 +605,7 @@ func (cr ChainReaderImpl) CurrentSafeHeader() *types.Header {
 		return nil
 	}
 
-	number := rawdb.ReadHeaderNumber(cr.tx, hash)
-	if number == nil {
-		return nil
-	}
-
-	return rawdb.ReadHeader(cr.tx, hash, *number)
+	return cr.GetHeaderByHash(hash)
 }
 func (cr ChainReaderImpl) GetHeader(hash libcommon.Hash, number uint64) *types.Header {
 	if cr.blockReader != nil {
@@ -634,11 +623,7 @@ func (cr ChainReaderImpl) GetHeaderByNumber(number uint64) *types.Header {
 }
 func (cr ChainReaderImpl) GetHeaderByHash(hash libcommon.Hash) *types.Header {
 	if cr.blockReader != nil {
-		number := rawdb.ReadHeaderNumber(cr.tx, hash)
-		if number == nil {
-			return nil
-		}
-		return cr.GetHeader(hash, *number)
+		return cr.GetHeaderByHash(hash)
 	}
 	h, _ := rawdb.ReadHeaderByHash(cr.tx, hash)
 	return h

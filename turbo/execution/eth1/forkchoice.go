@@ -82,9 +82,18 @@ func (e *EthereumExecutionModule) verifyForkchoiceHashes(ctx context.Context, tx
 	// Client software MUST return -38002: Invalid forkchoice state error if the payload referenced by
 	// forkchoiceState.headBlockHash is VALID and a payload referenced by either forkchoiceState.finalizedBlockHash or
 	// forkchoiceState.safeBlockHash does not belong to the chain defined by forkchoiceState.headBlockHash
-	headNumber := rawdb.ReadHeaderNumber(tx, blockHash)
-	finalizedNumber := rawdb.ReadHeaderNumber(tx, finalizedHash)
-	safeNumber := rawdb.ReadHeaderNumber(tx, safeHash)
+	headNumber, err := e.blockReader.HeaderNumber(ctx, tx, blockHash)
+	if err != nil {
+		return false, err
+	}
+	finalizedNumber, err := e.blockReader.HeaderNumber(ctx, tx, finalizedHash)
+	if err != nil {
+		return false, err
+	}
+	safeNumber, err := e.blockReader.HeaderNumber(ctx, tx, safeHash)
+	if err != nil {
+		return false, err
+	}
 
 	if finalizedHash != (common.Hash{}) && finalizedHash != blockHash {
 		canonical, err := e.isCanonicalHash(ctx, tx, finalizedHash)
@@ -165,9 +174,9 @@ func (e *EthereumExecutionModule) updateForkChoice(ctx context.Context, original
 	// Update the last new block seen.
 	// This is used by eth_syncing as an heuristic to determine if the node is syncing or not.
 	if err := e.db.Update(ctx, func(tx kv.RwTx) error {
-		num := rawdb.ReadHeaderNumber(tx, originalBlockHash)
-		if num == nil {
-			return nil
+		num, err := e.blockReader.HeaderNumber(ctx, tx, originalBlockHash)
+		if err != nil {
+			return err
 		}
 		return rawdb.WriteLastNewBlockSeen(tx, *num)
 	}); err != nil {
@@ -413,7 +422,12 @@ func (e *EthereumExecutionModule) updateForkChoice(ctx context.Context, original
 
 	// if head hash was set then success otherwise no
 	headHash := rawdb.ReadHeadBlockHash(tx)
-	headNumber := rawdb.ReadHeaderNumber(tx, headHash)
+	headNumber, err := e.blockReader.HeaderNumber(ctx, tx, headHash)
+	if err != nil {
+		sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, err, flushExtendingFork)
+		return
+	}
+
 	log := headNumber != nil && e.logger != nil
 	// Update forks...
 	writeForkChoiceHashes(tx, blockHash, safeHash, finalizedHash)

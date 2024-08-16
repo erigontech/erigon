@@ -60,7 +60,10 @@ func (r *RemoteBlockReader) CanPruneTo(uint64) uint64 {
 }
 func (r *RemoteBlockReader) CurrentBlock(db kv.Tx) (*types.Block, error) {
 	headHash := rawdb.ReadHeadBlockHash(db)
-	headNumber := rawdb.ReadHeaderNumber(db, headHash)
+	headNumber, err := r.HeaderNumber(context.Background(), db, headHash)
+	if err != nil {
+		return nil, fmt.Errorf("failed ReadCanonicalHash: %w", err)
+	}
 	if headNumber == nil {
 		return nil, nil
 	}
@@ -102,7 +105,10 @@ func (r *RemoteBlockReader) BlockByNumber(ctx context.Context, db kv.Tx, number 
 	return block, err
 }
 func (r *RemoteBlockReader) BlockByHash(ctx context.Context, db kv.Tx, hash common.Hash) (*types.Block, error) {
-	number := rawdb.ReadHeaderNumber(db, hash)
+	number, err := r.HeaderNumber(ctx, db, hash)
+	if err != nil {
+		return nil, err
+	}
 	if number == nil {
 		return nil, nil
 	}
@@ -129,7 +135,10 @@ func (r *RemoteBlockReader) FrozenFiles() (list []string)          { panic("not 
 func (r *RemoteBlockReader) FreezingCfg() ethconfig.BlocksFreezing { panic("not supported") }
 
 func (r *RemoteBlockReader) HeaderByHash(ctx context.Context, tx kv.Getter, hash common.Hash) (*types.Header, error) {
-	blockNum := rawdb.ReadHeaderNumber(tx, hash)
+	blockNum, err := r.HeaderNumber(ctx, tx, hash)
+	if err != nil {
+		return nil, err
+	}
 	if blockNum == nil {
 		return nil, nil
 	}
@@ -248,7 +257,9 @@ func (r *RemoteBlockReader) BodyWithTransactions(ctx context.Context, tx kv.Gett
 	}
 	return block.Body(), nil
 }
-
+func (r *RemoteBlockReader) HeaderNumber(ctx context.Context, tx kv.Getter, hash common.Hash) (*uint64, error) {
+	return r.HeaderNumber(ctx, tx, hash)
+}
 func (r *RemoteBlockReader) BodyRlp(ctx context.Context, tx kv.Getter, hash common.Hash, blockHeight uint64) (bodyRlp rlp.RawValue, err error) {
 	body, err := r.BodyWithTransactions(ctx, tx, hash, blockHeight)
 	if err != nil {
@@ -431,7 +442,22 @@ func (r *BlockReader) HeaderByNumber(ctx context.Context, tx kv.Getter, blockHei
 	}
 	return h, nil
 }
-
+func (r *BlockReader) HeaderNumber(ctx context.Context, tx kv.Getter, hash common.Hash) (*uint64, error) {
+	if r == nil {
+		ret := rawdb.ReadHeaderNumber(tx, hash)
+		return ret, nil
+	}
+	h, err := r.HeaderByHash(ctx, tx, hash)
+	if err != nil {
+		return nil, err
+	}
+	if h == nil {
+		return nil, nil
+	}
+	ret := new(uint64)
+	*ret = h.Number.Uint64()
+	return ret, nil
+}
 func (r *BlockReader) IsCanonical(ctx context.Context, tx kv.Getter, hash common.Hash, blockHeight uint64) (bool, error) {
 	expected, err := r.CanonicalHash(ctx, tx, blockHeight)
 	if err != nil {
@@ -1149,7 +1175,10 @@ func (r *BlockReader) BlockByNumber(ctx context.Context, db kv.Tx, number uint64
 	return block, err
 }
 func (r *BlockReader) BlockByHash(ctx context.Context, db kv.Tx, hash common.Hash) (*types.Block, error) {
-	number := rawdb.ReadHeaderNumber(db, hash)
+	number, err := r.HeaderNumber(ctx, db, hash)
+	if err != nil {
+		return nil, fmt.Errorf("failed HeaderNumber: %w", err)
+	}
 	if number == nil {
 		return nil, nil
 	}
@@ -1158,9 +1187,9 @@ func (r *BlockReader) BlockByHash(ctx context.Context, db kv.Tx, hash common.Has
 }
 func (r *BlockReader) CurrentBlock(db kv.Tx) (*types.Block, error) {
 	headHash := rawdb.ReadHeadBlockHash(db)
-	headNumber := rawdb.ReadHeaderNumber(db, headHash)
-	if headNumber == nil {
-		return nil, nil
+	headNumber, err := r.HeaderNumber(context.Background(), db, headHash)
+	if err != nil {
+		return nil, fmt.Errorf("failed HeaderNumber: %w", err)
 	}
 	block, _, err := r.blockWithSenders(context.Background(), db, headHash, *headNumber, true)
 	return block, err
