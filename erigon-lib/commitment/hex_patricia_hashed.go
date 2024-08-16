@@ -811,23 +811,21 @@ func (hph *HexPatriciaHashed) computeCellHash(cell *cell, depth int, buf []byte)
 		}
 		cell.hashedExtension[64-depth] = 16 // Add terminator
 		if !storageRootHashIsSet {
-			if cell.extLen > 0 {
-				// Extension
-				if cell.hashLen > 0 {
-					if hph.trace {
-						fmt.Printf("extensionHash for [%x]=>[%x]\n", cell.extension[:cell.extLen], cell.hash[:cell.hashLen])
-					}
-					if storageRootHash, err = hph.extensionHash(cell.extension[:cell.extLen], cell.hash[:cell.hashLen]); err != nil {
-						return nil, err
-					}
-					if hph.trace {
-						fmt.Printf("EXTENSION HASH %x DROPS LEAF\n", storageRootHash)
-					}
-					cell.lhLen = 0
-					hadToReset.Add(1)
-				} else {
+			if cell.extLen > 0 { // Extension
+				if cell.hashLen == 0 {
 					return nil, errors.New("computeCellHash extension without hash")
 				}
+				if hph.trace {
+					fmt.Printf("extensionHash for [%x]=>[%x]\n", cell.extension[:cell.extLen], cell.hash[:cell.hashLen])
+				}
+				if storageRootHash, err = hph.extensionHash(cell.extension[:cell.extLen], cell.hash[:cell.hashLen]); err != nil {
+					return nil, err
+				}
+				if hph.trace {
+					fmt.Printf("EXTENSION HASH %x DROPS LEAF\n", storageRootHash)
+				}
+				cell.lhLen = 0
+				hadToReset.Add(1)
 			} else if cell.hashLen > 0 {
 				storageRootHash = cell.hash
 			} else {
@@ -849,9 +847,6 @@ func (hph *HexPatriciaHashed) computeCellHash(cell *cell, depth int, buf []byte)
 				return nil, err
 			}
 			cell.setFromUpdate(update)
-			if hph.trace {
-				fmt.Printf("ACCOUNT WAS NOT LOADED, now %s\n", cell.FullString())
-			}
 		}
 
 		var valBuf [128]byte
@@ -867,7 +862,7 @@ func (hph *HexPatriciaHashed) computeCellHash(cell *cell, depth int, buf []byte)
 			fmt.Printf("LEAF HASH account memoized %x\n", leafHash)
 		}
 		copy(cell.leafHash[:], leafHash[1:])
-		cell.lhLen = length.Hash
+		cell.lhLen = len(leafHash) - 1
 		return leafHash, nil
 	}
 
