@@ -443,10 +443,11 @@ func (r *BlockReader) HeaderByNumber(ctx context.Context, tx kv.Getter, blockHei
 	return h, nil
 }
 func (r *BlockReader) HeaderNumber(ctx context.Context, tx kv.Getter, hash common.Hash) (*uint64, error) {
-	if r == nil {
-		ret := rawdb.ReadHeaderNumber(tx, hash)
+	ret := rawdb.ReadHeaderNumber(tx, hash)
+	if ret != nil {
 		return ret, nil
 	}
+
 	h, err := r.HeaderByHash(ctx, tx, hash)
 	if err != nil {
 		return nil, err
@@ -454,7 +455,7 @@ func (r *BlockReader) HeaderNumber(ctx context.Context, tx kv.Getter, hash commo
 	if h == nil {
 		return nil, nil
 	}
-	ret := new(uint64)
+	ret = new(uint64)
 	*ret = h.Number.Uint64()
 	return ret, nil
 }
