@@ -1280,9 +1280,8 @@ func (s *Ethereum) StartMining(ctx context.Context, db kv.RwDB, stateDiffClient 
 					defer func() {
 						waiting.Store(false)
 						logger.Debug("Setted waiting to false", waiting.Load())
+						errc <- err
 					}()
-
-					errc <- err
 
 					if err != nil {
 						return
