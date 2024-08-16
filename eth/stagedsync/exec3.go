@@ -91,6 +91,12 @@ type Progress struct {
 	updateMetrics bool
 }
 
+var (
+	mxMgasPerSec = metrics.NewGauge("progress_mgas_per_sec")
+	mxTxnPerSec  = metrics.NewGauge("progress_txn_per_sec")
+	mxBlkPerSec  = metrics.NewGauge("progress_blk_per_sec")
+)
+
 func (p *Progress) Log(suffix string, rs *state.StateV3, in *state.QueueWithRetry, rws *state.ResultsQueue, txCount, gas, blobGas, inputBlockNum, outputBlockNum, outTxNum, repeatCount uint64, idxStepsAmountInDB float64, shouldGenerateChangesets bool) {
 	execStepsInDB.Set(idxStepsAmountInDB * 100)
 	var m runtime.MemStats
@@ -121,11 +127,12 @@ func (p *Progress) Log(suffix string, rs *state.StateV3, in *state.QueueWithRetr
 		exexTxPerSec.Observe(speedTx)
 	}
 
+	blks := float64(outputBlockNum-p.prevOutputBlockNum+1) / interval.Seconds()
 	p.logger.Info(fmt.Sprintf("[%s]"+suffix, p.logPrefix),
 		//"workers", workerCount,
 		"blk", outputBlockNum,
 		"blks", outputBlockNum-p.prevOutputBlockNum+1,
-		"blk/s", fmt.Sprintf("%.1f", float64(outputBlockNum-p.prevOutputBlockNum+1)/interval.Seconds()),
+		"blk/s", fmt.Sprintf("%.1f", blks),
 		"txs", txCount-p.prevTxCount,
 		"tx/s", fmt.Sprintf("%.1f", speedTx),
 		"mgas/s", fmt.Sprintf("%.1f", mgasPerSec),
@@ -137,6 +144,10 @@ func (p *Progress) Log(suffix string, rs *state.StateV3, in *state.QueueWithRetr
 		"step", fmt.Sprintf("%.1f", float64(outTxNum)/float64(config3.HistoryV3AggregationStep)),
 		"alloc", common.ByteCount(m.Alloc), "sys", common.ByteCount(m.Sys),
 	)
+
+	mxBlkPerSec.Set(blks)
+	mxTxnPerSec.Set(speedTx)
+	mxMgasPerSec.Set(mgasPerSec)
 
 	p.prevTime = currentTime
 	p.prevTxCount = txCount

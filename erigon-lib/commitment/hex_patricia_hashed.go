@@ -1369,9 +1369,6 @@ func (hph *HexPatriciaHashed) fold() (err error) {
 			if cell.storageAddrLen > 0 && cell.lhLen == 0 && !cell.loaded.storage() && !cell.Deleted() {
 				panic("storage not loaded" + fmt.Sprintf("%x", cell.storageAddr[:cell.storageAddrLen]))
 			}
-			//if len(updateKey) > DepthWithoutNodeHashes {
-			//	cell.hashLen = 0 // do not write hashes for storages in the branch node, should reset ext as well which can break unfolding.. -
-			//}
 			cellHash, err := hph.computeCellHash(cell, depth, hph.hashAuxBuffer[:0])
 			if err != nil {
 				return nil, err
@@ -1379,6 +1376,9 @@ func (hph *HexPatriciaHashed) fold() (err error) {
 			if hph.trace {
 				fmt.Printf("  %x: computeCellHash(%d, %x, depth=%d)=[%x]\n", nibble, row, nibble, depth, cellHash)
 			}
+			//if len(updateKey) > DepthWithoutNodeHashes {
+			//	cell.hashLen = 0 // do not write hashes for storages in the branch node, should reset ext as well which can break unfolding.. -
+			//}
 			if _, err := hph.keccak2.Write(cellHash); err != nil {
 				return nil, err
 			}
