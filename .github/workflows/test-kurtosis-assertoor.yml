@@ -39,7 +39,7 @@ jobs:
 
       - name: download kurtosis config
         run: |
-          wget -O kurtosis_config_with_p.yaml https://raw.githubusercontent.com/erigontech/erigon/kurtosis_assertoor/.github/workflows/kurtosis/config.yaml
+          wget -O kurtosis_config_with_p.yaml https://raw.githubusercontent.com/erigontech/erigon/sudeep/kurtosis_assertoor/.github/workflows/kurtosis/config.yaml
           sed 's/<<ERIGON_IMAGE_PLACEHOLDER>>/thorax\/erigon:ci-'$GITHUB_SHA'/' kurtosis_config_with_p.yaml > kurtosis_config.yaml
 
       - name: Run Kurtosis + assertoor tests

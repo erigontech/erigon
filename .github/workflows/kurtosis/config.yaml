@@ -35,3 +35,4 @@ assertoor_params:
     # - https://raw.githubusercontent.com/ethpandaops/assertoor-test/master/assertoor-tests/validator-withdrawal-test-v2.yaml
     # - https://raw.githubusercontent.com/ethpandaops/assertoor-test/master/assertoor-tests/validator-slashing-test.yaml
     # - https://raw.githubusercontent.com/ethpandaops/assertoor-test/master/assertoor-tests/block-proposal-check.yaml
+    - { file: "https://raw.githubusercontent.com/ethpandaops/assertoor-test/master/assertoor-tests/block-proposal-check.yaml" }
