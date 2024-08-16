@@ -439,9 +439,7 @@ func MiningStep(ctx context.Context, db kv.RwDB, mining *stagedsync.Sync, tmpDir
 		if rec := recover(); rec != nil {
 			err = fmt.Errorf("%+v, trace: %s", rec, dbg.Stack())
 		}
-		logger.Error("mining step end", "err", err)
 	}() // avoid crash because Erigon's core does many things
-	logger.Error("ms start")
 	tx, err := db.BeginRo(ctx)
 	if err != nil {
 		return err
@@ -451,7 +449,6 @@ func MiningStep(ctx context.Context, db kv.RwDB, mining *stagedsync.Sync, tmpDir
 	mb := membatchwithdb.NewMemoryBatch(tx, tmpDir, logger)
 	defer mb.Close()
 
-	logger.Error("miningstep tx begin")
 	txc := wrap.TxContainer{Tx: mb}
 	sd, err := state.NewSharedDomains(mb, logger)
 	if err != nil {
@@ -459,7 +456,7 @@ func MiningStep(ctx context.Context, db kv.RwDB, mining *stagedsync.Sync, tmpDir
 	}
 	defer sd.Close()
 	txc.Doms = sd
-	logger.Error("started mining run")
+
 	if _, err = mining.Run(nil, txc, false /* firstCycle */, false); err != nil {
 		return err
 	}

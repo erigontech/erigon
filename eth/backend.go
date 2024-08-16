@@ -1249,15 +1249,14 @@ func (s *Ethereum) StartMining(ctx context.Context, db kv.RwDB, stateDiffClient 
 						s.logger.Debug("Start mining based on txpool notif")
 					}
 				case <-mineEvery.C:
-					log.Warn("[dbg] mineEvery", "working", working, "waiting", waiting.Load())
+					//log.Warn("[dbg] mineEvery", "working", working, "waiting", waiting.Load())
 					if !(working || waiting.Load()) {
 						s.logger.Debug("Start mining based on miner.recommit", "duration", miner.MiningConfig.Recommit)
 					}
 					hasWork = !(working || waiting.Load())
 				case err := <-errc:
-					//working = false
+					working = false
 					hasWork = false
-					logger.Debug("in errc", "err", err)
 					if errors.Is(err, libcommon.ErrStopped) {
 						return
 					}
@@ -1274,15 +1273,12 @@ func (s *Ethereum) StartMining(ctx context.Context, db kv.RwDB, stateDiffClient 
 				hasWork = false
 				mineEvery.Reset(miner.MiningConfig.Recommit)
 				go func() {
-					logger.Debug("started mining step")
 					err = stages2.MiningStep(ctx, db, mining, tmpDir, logger)
 
 					waiting.Store(true)
 					defer func() {
 						waiting.Store(false)
-						logger.Debug("Setted waiting to false", waiting.Load())
 						errc <- err
-						working = false
 					}()
 
 					if err != nil {
