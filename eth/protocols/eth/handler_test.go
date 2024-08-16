@@ -20,9 +20,11 @@
 package eth_test
 
 import (
-	"github.com/erigontech/erigon/turbo/jsonrpc/receipts"
 	"math/big"
 	"testing"
+
+	"github.com/erigontech/erigon/p2p/sentry/sentry_multi_client"
+	"github.com/erigontech/erigon/turbo/jsonrpc/receipts"
 
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
@@ -51,6 +53,9 @@ var (
 )
 
 func TestGetBlockReceipts(t *testing.T) {
+	if !sentry_multi_client.EnableP2PReceipts {
+		t.Skip("")
+	}
 	// Define three accounts to simulate transactions with
 	acc1Key, _ := crypto.HexToECDSA("8a1f9a8f95be41cd7ccb6168179afb4504aefe388d1e14474d32c45c72ce7b7a")
 	acc2Key, _ := crypto.HexToECDSA("49a7b37aa6f6645917e7b807e9d1c00d4fa71f18343b0d4122a4d2df64dd6fee")

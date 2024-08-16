@@ -26,21 +26,22 @@ func codeBitmap(code []byte) []uint64 {
 	// bitvector outside the bounds of the actual code.
 	bits := make([]uint64, (len(code)+32+63)/64)
 
-	for pc := 0; pc < len(code); {
+	for pc := uint64(0); pc < uint64(len(code)); {
 		op := OpCode(code[pc])
 		pc++
-		if op >= PUSH1 && op <= PUSH32 {
-			numbits := int(op - PUSH1 + 1)
-			x := uint64(1) << (op - PUSH1)
-			x = x | (x - 1) // Smear the bit to the right
-			idx := pc / 64
-			shift := pc & 63
-			bits[idx] |= x << shift
-			if shift+shift > 64 {
-				bits[idx+1] |= x >> (64 - shift)
-			}
-			pc += numbits
+		if int8(op) < int8(PUSH1) { // If not PUSH (the int8(op) > int(PUSH32) is always false).
+			continue
 		}
+		numbits := uint64(op - PUSH1)
+		x := uint64(1) << numbits
+		x = x | (x - 1) // Smear the bit to the right
+		idx := pc / 64
+		shift := pc & 63
+		bits[idx] |= x << shift
+		if shift+shift > 64 {
+			bits[idx+1] |= x >> (64 - shift)
+		}
+		pc += numbits + 1
 	}
 	return bits
 }

@@ -1,4 +1,4 @@
-package bridge_test
+package bridge
 
 import (
 	"context"
@@ -13,17 +13,13 @@ import (
 
 	"github.com/erigontech/erigon-lib/common/hexutil"
 	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon/accounts/abi"
 	"github.com/erigontech/erigon/core/types"
-	"github.com/erigontech/erigon/polygon/bor"
 	"github.com/erigontech/erigon/polygon/bor/borcfg"
-	"github.com/erigontech/erigon/polygon/bridge"
 	"github.com/erigontech/erigon/polygon/heimdall"
-	"github.com/erigontech/erigon/rlp"
 	"github.com/erigontech/erigon/turbo/testlog"
 )
 
-func setup(t *testing.T, abi abi.ABI) (*heimdall.MockHeimdallClient, *bridge.Bridge) {
+func setup(t *testing.T) (*heimdall.MockHeimdallClient, *Bridge) {
 	ctrl := gomock.NewController(t)
 	logger := testlog.Logger(t, log.LvlDebug)
 	borConfig := borcfg.BorConfig{
@@ -32,7 +28,7 @@ func setup(t *testing.T, abi abi.ABI) (*heimdall.MockHeimdallClient, *bridge.Bri
 	}
 
 	heimdallClient := heimdall.NewMockHeimdallClient(ctrl)
-	b := bridge.Assemble(t.TempDir(), logger, &borConfig, heimdallClient.FetchStateSyncEvents, abi)
+	b := Assemble(t.TempDir(), logger, &borConfig, heimdallClient)
 
 	return heimdallClient, b
 }
@@ -67,9 +63,7 @@ func TestBridge(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)
 
-	stateReceiverABI := bor.GenesisContractStateReceiverABI()
-	heimdallClient, b := setup(t, stateReceiverABI)
-
+	heimdallClient, b := setup(t)
 	event1 := &heimdall.EventRecordWithTime{
 		EventRecord: heimdall.EventRecord{
 			ID:      1,
@@ -103,7 +97,7 @@ func TestBridge(t *testing.T) {
 	var wg sync.WaitGroup
 	wg.Add(1)
 
-	go func(bridge bridge.Service) {
+	go func(bridge Service) {
 		defer wg.Done()
 
 		err := bridge.Run(ctx)
@@ -127,15 +121,15 @@ func TestBridge(t *testing.T) {
 	res, err := b.Events(ctx, 4)
 	require.NoError(t, err)
 
-	event1Data, err := event1.Pack(stateReceiverABI)
+	event1Data, err := event1.MarshallBytes()
 	require.NoError(t, err)
 
-	event2Data, err := event2.Pack(stateReceiverABI)
+	event2Data, err := event2.MarshallBytes()
 	require.NoError(t, err)
 
-	require.Equal(t, 2, len(res))                             // have first two events
-	require.Equal(t, event1Data, rlp.RawValue(res[0].Data())) // check data fields
-	require.Equal(t, event2Data, rlp.RawValue(res[1].Data()))
+	require.Equal(t, 2, len(res))               // have first two events
+	require.Equal(t, event1Data, res[0].Data()) // check data fields
+	require.Equal(t, event2Data, res[1].Data())
 
 	// get non-sprint block
 	res, err = b.Events(ctx, 1)
@@ -159,9 +153,7 @@ func TestBridge_Unwind(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)
 
-	stateReceiverABI := bor.GenesisContractStateReceiverABI()
-	heimdallClient, b := setup(t, stateReceiverABI)
-
+	heimdallClient, b := setup(t)
 	event1 := &heimdall.EventRecordWithTime{
 		EventRecord: heimdall.EventRecord{
 			ID:      1,
@@ -203,7 +195,7 @@ func TestBridge_Unwind(t *testing.T) {
 	var wg sync.WaitGroup
 	wg.Add(1)
 
-	go func(bridge bridge.Service) {
+	go func(bridge Service) {
 		defer wg.Done()
 
 		err := bridge.Run(ctx)
@@ -224,11 +216,11 @@ func TestBridge_Unwind(t *testing.T) {
 	err = b.ProcessNewBlocks(ctx, blocks)
 	require.NoError(t, err)
 
-	event1Data, err := event1.Pack(stateReceiverABI)
+	event1Data, err := event1.MarshallBytes()
 	require.NoError(t, err)
 
 	res, err := b.Events(ctx, 4)
-	require.Equal(t, event1Data, rlp.RawValue(res[0].Data()))
+	require.Equal(t, event1Data, res[0].Data())
 	require.NoError(t, err)
 
 	err = b.Unwind(ctx, 3)

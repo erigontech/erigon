@@ -123,12 +123,18 @@ func (i *filesItem) closeFilesAndRemove() {
 			if err := os.Remove(i.index.FilePath()); err != nil {
 				log.Trace("remove after close", "err", err, "file", i.index.FileName())
 			}
+			if err := os.Remove(i.index.FilePath() + ".torrent"); err != nil {
+				log.Trace("remove after close", "err", err, "file", i.index.FileName())
+			}
 		}
 		i.index = nil
 	}
 	if i.bindex != nil {
 		i.bindex.Close()
 		if err := os.Remove(i.bindex.FilePath()); err != nil {
+			log.Trace("remove after close", "err", err, "file", i.bindex.FileName())
+		}
+		if err := os.Remove(i.bindex.FilePath() + ".torrent"); err != nil {
 			log.Trace("remove after close", "err", err, "file", i.bindex.FileName())
 		}
 		i.bindex = nil
@@ -138,12 +144,18 @@ func (i *filesItem) closeFilesAndRemove() {
 		if err := os.Remove(i.bm.FilePath()); err != nil {
 			log.Trace("remove after close", "err", err, "file", i.bm.FileName())
 		}
+		if err := os.Remove(i.bm.FilePath() + ".torrent"); err != nil {
+			log.Trace("remove after close", "err", err, "file", i.bm.FileName())
+		}
 		i.bm = nil
 	}
 	if i.existence != nil {
 		i.existence.Close()
 		if err := os.Remove(i.existence.FilePath); err != nil {
 			log.Trace("remove after close", "err", err, "file", i.existence.FileName)
+		}
+		if err := os.Remove(i.existence.FilePath + ".torrent"); err != nil {
+			log.Trace("remove after close", "err", err, "file", i.existence.FilePath)
 		}
 		i.existence = nil
 	}

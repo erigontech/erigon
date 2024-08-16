@@ -41,10 +41,10 @@ func (a *ApiHandler) getDepositContract(w http.ResponseWriter, r *http.Request) 
 func (a *ApiHandler) getForkSchedule(w http.ResponseWriter, r *http.Request) (*beaconhttp.BeaconResponse, error) {
 	response := []cltypes.Fork{}
 	// create first response (unordered and incomplete)
-	for currentVersion, epoch := range a.beaconChainCfg.ForkVersionSchedule {
+	for currentVersion, entry := range a.beaconChainCfg.ForkVersionSchedule {
 		response = append(response, cltypes.Fork{
 			CurrentVersion: currentVersion,
-			Epoch:          epoch,
+			Epoch:          entry.Epoch,
 		})
 	}
 	// Sort the responses by epoch

@@ -14,22 +14,13 @@
 // You should have received a copy of the GNU Lesser General Public License
 // along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
-package bor
+package borabi
 
 import (
-	"bytes"
-	"math/big"
 	"strings"
 	"time"
 
-	"github.com/erigontech/erigon-lib/log/v3"
-
-	"github.com/erigontech/erigon-lib/chain"
-	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon/accounts/abi"
-	"github.com/erigontech/erigon/consensus"
-	"github.com/erigontech/erigon/polygon/heimdall"
-	"github.com/erigontech/erigon/rlp"
 )
 
 const (
@@ -38,96 +29,26 @@ const (
 )
 
 var (
-	validatorSetABI, _  = abi.JSON(strings.NewReader(validatorSetABIJSON))
-	stateReceiverABI, _ = abi.JSON(strings.NewReader(stateReceiverABIJSON))
+	validatorSetABI  abi.ABI
+	stateReceiverABI abi.ABI
 )
 
-func GenesisContractValidatorSetABI() abi.ABI {
+func init() {
+	var err error
+
+	if validatorSetABI, err = abi.JSON(strings.NewReader(validatorSetABIJSON)); err != nil {
+		panic(err)
+	}
+
+	if stateReceiverABI, err = abi.JSON(strings.NewReader(stateReceiverABIJSON)); err != nil {
+		panic(err)
+	}
+}
+
+func ValidatorSetContractABI() abi.ABI {
 	return validatorSetABI
 }
 
-func GenesisContractStateReceiverABI() abi.ABI {
+func StateReceiverContractABI() abi.ABI {
 	return stateReceiverABI
-}
-
-var methodId []byte = stateReceiverABI.Methods["commitState"].ID
-
-func EventTime(encodedEvent rlp.RawValue) time.Time {
-	if bytes.Equal(methodId, encodedEvent[0:4]) {
-		return time.Unix((&big.Int{}).SetBytes(encodedEvent[4:36]).Int64(), 0)
-	}
-
-	return time.Time{}
-}
-
-var commitStateInputs = stateReceiverABI.Methods["commitState"].Inputs
-
-func EventId(encodedEvent rlp.RawValue) uint64 {
-	if bytes.Equal(methodId, encodedEvent[0:4]) {
-		args, _ := commitStateInputs.Unpack(encodedEvent[4:])
-
-		if len(args) == 2 {
-			var eventRecord heimdall.EventRecord
-			if err := rlp.DecodeBytes(args[1].([]byte), &eventRecord); err == nil {
-				return eventRecord.ID
-			}
-		}
-	}
-	return 0
-}
-
-type GenesisContracts interface {
-	CommitState(event rlp.RawValue, syscall consensus.SystemCall) error
-	LastStateId(syscall consensus.SystemCall) (*big.Int, error)
-}
-
-type GenesisContractsClient struct {
-	validatorSetABI       abi.ABI
-	stateReceiverABI      abi.ABI
-	ValidatorContract     libcommon.Address
-	StateReceiverContract libcommon.Address
-	chainConfig           *chain.Config
-	logger                log.Logger
-}
-
-func NewGenesisContractsClient(
-	chainConfig *chain.Config,
-	validatorContract,
-	stateReceiverContract string,
-	logger log.Logger,
-) *GenesisContractsClient {
-	return &GenesisContractsClient{
-		validatorSetABI:       GenesisContractValidatorSetABI(),
-		stateReceiverABI:      GenesisContractStateReceiverABI(),
-		ValidatorContract:     libcommon.HexToAddress(validatorContract),
-		StateReceiverContract: libcommon.HexToAddress(stateReceiverContract),
-		chainConfig:           chainConfig,
-		logger:                logger,
-	}
-}
-
-func (gc *GenesisContractsClient) CommitState(event rlp.RawValue, syscall consensus.SystemCall) error {
-	_, err := syscall(gc.StateReceiverContract, event)
-	return err
-}
-
-func (gc *GenesisContractsClient) LastStateId(syscall consensus.SystemCall) (*big.Int, error) {
-	const method = "lastStateId"
-
-	data, err := gc.stateReceiverABI.Pack(method)
-	if err != nil {
-		gc.logger.Error("[bor] Unable to pack txn for LastStateId", "err", err)
-		return nil, err
-	}
-
-	result, err := syscall(gc.StateReceiverContract, data)
-	if err != nil {
-		return nil, err
-	}
-
-	var ret = new(*big.Int)
-	if err := gc.stateReceiverABI.UnpackIntoInterface(ret, method, result); err != nil {
-		return nil, err
-	}
-	return *ret, nil
 }

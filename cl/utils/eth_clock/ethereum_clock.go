@@ -48,15 +48,19 @@ type EthereumClock interface {
 }
 
 type forkNode struct {
-	epoch   uint64
-	version [4]byte
+	epoch        uint64
+	stateVersion clparams.StateVersion
+	version      [4]byte
 }
 
-func forkList(schedule map[common.Bytes4]uint64) (f []forkNode) {
-	for version, epoch := range schedule {
-		f = append(f, forkNode{epoch: epoch, version: version})
+func forkList(schedule map[common.Bytes4]clparams.VersionScheduleEntry) (f []forkNode) {
+	for version, entry := range schedule {
+		f = append(f, forkNode{epoch: entry.Epoch, version: version, stateVersion: entry.StateVersion})
 	}
 	sort.Slice(f, func(i, j int) bool {
+		if f[i].epoch == f[j].epoch {
+			return f[i].stateVersion < f[j].stateVersion
+		}
 		return f[i].epoch < f[j].epoch
 	})
 	return

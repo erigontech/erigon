@@ -98,9 +98,15 @@ func NewWorker(lock sync.Locker, logger log.Logger, ctx context.Context, backgro
 	return w
 }
 
+func (rw *Worker) LogLRUStats() { rw.evm.JumpDestCache.LogStats() }
+
 func (rw *Worker) ResetState(rs *state.StateV3, accumulator *shards.Accumulator) {
 	rw.rs = rs
-	rw.SetReader(state.NewStateReaderV3(rs.Domains()))
+	if rw.background {
+		rw.SetReader(state.NewReaderParallelV3(rs.Domains()))
+	} else {
+		rw.SetReader(state.NewReaderV3(rs.Domains()))
+	}
 	rw.stateWriter = state.NewStateWriterV3(rs, accumulator)
 }
 
@@ -114,7 +120,6 @@ func (rw *Worker) ResetTx(chainTx kv.Tx) {
 	if chainTx != nil {
 		rw.chainTx = chainTx
 		rw.stateReader.SetTx(rw.chainTx)
-		rw.stateWriter.SetTx(rw.chainTx)
 		rw.chain = consensuschain.NewReader(rw.chainConfig, rw.chainTx, rw.blockReader, rw.logger)
 	}
 }
@@ -146,7 +151,7 @@ func (rw *Worker) SetReader(reader state.ResettableStateReader) {
 	switch reader.(type) {
 	case *state.HistoryReaderV3:
 		rw.historyMode = true
-	case *state.StateReaderV3:
+	case *state.ReaderV3:
 		rw.historyMode = false
 	default:
 		rw.historyMode = false
@@ -161,7 +166,11 @@ func (rw *Worker) RunTxTaskNoLock(txTask *state.TxTask) {
 		// Needed to correctly evaluate spent gas and other things.
 		rw.SetReader(state.NewHistoryReaderV3())
 	} else if !txTask.HistoryExecution && rw.historyMode {
-		rw.SetReader(state.NewStateReaderV3(rw.rs.Domains()))
+		if rw.background {
+			rw.SetReader(state.NewReaderParallelV3(rw.rs.Domains()))
+		} else {
+			rw.SetReader(state.NewReaderV3(rw.rs.Domains()))
+		}
 	}
 	if rw.background && rw.chainTx == nil {
 		var err error
@@ -169,13 +178,12 @@ func (rw *Worker) RunTxTaskNoLock(txTask *state.TxTask) {
 			panic(err)
 		}
 		rw.stateReader.SetTx(rw.chainTx)
-		rw.stateWriter.SetTx(rw.chainTx)
 		rw.chain = consensuschain.NewReader(rw.chainConfig, rw.chainTx, rw.blockReader, rw.logger)
 	}
 	txTask.Error = nil
 
 	rw.stateReader.SetTxNum(txTask.TxNum)
-	rw.stateWriter.SetTxNum(rw.ctx, txTask.TxNum)
+	rw.rs.Domains().SetTxNum(txTask.TxNum)
 	rw.stateReader.ResetReadSet()
 	rw.stateWriter.ResetWriteSet()
 

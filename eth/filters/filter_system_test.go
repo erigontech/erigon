@@ -37,7 +37,7 @@ func TestBlockSubscription(t *testing.T) {
 		backend     = &testBackend{db: db}
 		api         = NewPublicFilterAPI(backend, deadline)
 		genesis     = (&core.Genesis{Config: params.TestChainConfig}).MustCommitDeprecated(db)
-		chain, _    = core.GenerateChain(params.TestChainConfig, genesis, mainnet.NewMainnetConsensus(), db.RwKV(), 10, func(i int, gen *core.BlockGen) {}, false)
+		chain, _    = core.GenerateChain(params.TestChainConfig, genesis, ethash.NewFaker(), db.RwKV(), 10, func(i int, gen *core.BlockGen) {}, false)
 		chainEvents = []core.ChainEvent{}
 	)
 

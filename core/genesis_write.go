@@ -94,7 +94,7 @@ func CommitGenesisBlockWithOverride(db kv.RwDB, genesis *types.Genesis, override
 }
 
 func WriteGenesisBlock(tx kv.RwTx, genesis *types.Genesis, overridePragueTime *big.Int, dirs datadir.Dirs, logger log.Logger) (*chain.Config, *types.Block, error) {
-	if err := rawdb.WriteGenesis(tx, genesis); err != nil {
+	if err := rawdb.WriteGenesisIfNotExist(tx, genesis); err != nil {
 		return nil, nil, err
 	}
 
@@ -535,7 +535,7 @@ func GenesisToBlock(g *types.Genesis, dirs datadir.Dirs, logger log.Logger) (*ty
 		defer sd.Close()
 
 		//r, w := state.NewDbStateReader(tx), state.NewDbStateWriter(tx, 0)
-		r, w := state.NewReaderV4(sd), state.NewWriterV4(sd)
+		r, w := state.NewReaderV3(sd), state.NewWriterV4(sd)
 		statedb = state.New(r)
 		statedb.SetTrace(false)
 
