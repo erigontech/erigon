@@ -438,14 +438,16 @@ func MiningStep(ctx context.Context, db kv.RwDB, mining *stagedsync.Sync, tmpDir
 		if rec := recover(); rec != nil {
 			err = fmt.Errorf("%+v, trace: %s", rec, dbg.Stack())
 		}
+		logger.Error("mining step end", "err", err)
 	}() // avoid crash because Erigon's core does many things
-
+	logger.Error("ms start")
 	tx, err := db.BeginRw(ctx)
 	if err != nil {
 		return err
 	}
 	defer tx.Rollback()
 
+	logger.Error("miningstep tx begin")
 	txc := wrap.TxContainer{Tx: tx}
 	sd, err := state.NewSharedDomains(tx, logger)
 	if err != nil {
