@@ -20,6 +20,7 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"github.com/schollz/progressbar/v3"
 	"io"
 	"os"
 	"path"
@@ -27,7 +28,6 @@ import (
 	"strconv"
 	"sync"
 
-	"github.com/c2h5oh/datasize"
 	"github.com/go-echarts/go-echarts/v2/charts"
 	"github.com/go-echarts/go-echarts/v2/components"
 	"github.com/go-echarts/go-echarts/v2/opts"
@@ -180,25 +180,32 @@ func extractKVPairFromCompressed(filename string, keysSink chan commitment.Branc
 		return err
 	}
 	size := dec.Size()
-	paris := dec.Count() / 2
-	cpair := 0
+	//paris := dec.Count() / 2
+	//cpair := 0
 	depth := *flagDepth
-	var afterValPos uint64
+	//var afterValPos uint64
 	var key, val []byte
 	getter := state.NewArchiveGetter(dec.MakeGetter(), fc)
+
+	pg := progressbar.DefaultBytes(
+		size,
+		filepath.Base(filename),
+	)
+	defer pg.Close()
 
 	for getter.HasNext() {
 		key, _ = getter.Next(key[:0])
 		if !getter.HasNext() {
 			return errors.New("invalid key/value pair during decompression")
 		}
-		val, afterValPos = getter.Next(val[:0])
-		cpair++
+		val, _ = getter.Next(val[:0])
+		//cpair++
 
-		if cpair%100000 == 0 {
-			fmt.Printf("\r%s pair %d/%d %s/%s", filename, cpair, paris,
-				datasize.ByteSize(afterValPos).HumanReadable(), datasize.ByteSize(size).HumanReadable())
-		}
+		//if cpair%100000 == 0 {
+		//	fmt.Printf("\r%s pair %d/%d %s/%s", filename, cpair, paris,
+		//		datasize.ByteSize(afterValPos).HumanReadable(), datasize.ByteSize(size).HumanReadable())
+		//}
+		pg.Add(len(key) + len(val))
 
 		if depth > len(key) {
 			continue
