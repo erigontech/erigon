@@ -258,7 +258,7 @@ func (r *RemoteBlockReader) BodyWithTransactions(ctx context.Context, tx kv.Gett
 	return block.Body(), nil
 }
 func (r *RemoteBlockReader) HeaderNumber(ctx context.Context, tx kv.Getter, hash common.Hash) (*uint64, error) {
-	return r.HeaderNumber(ctx, tx, hash)
+	return rawdb.ReadHeaderNumber(tx, hash), nil
 }
 func (r *RemoteBlockReader) BodyRlp(ctx context.Context, tx kv.Getter, hash common.Hash, blockHeight uint64) (bodyRlp rlp.RawValue, err error) {
 	body, err := r.BodyWithTransactions(ctx, tx, hash, blockHeight)
@@ -500,13 +500,17 @@ func (r *BlockReader) HeaderByHash(ctx context.Context, tx kv.Getter, hash commo
 var emptyHash = common.Hash{}
 
 func (r *BlockReader) CanonicalHash(ctx context.Context, tx kv.Getter, blockHeight uint64) (h common.Hash, err error) {
-	// Handle nil case with db hit
-	if r == nil {
-		return rawdb.ReadCanonicalHash(tx, blockHeight) // Fallback to db if not found in snapshots
+	h, err = rawdb.ReadCanonicalHash(tx, blockHeight)
+	if err != nil {
+		return emptyHash, err
 	}
+	if h != emptyHash {
+		return h, nil
+	}
+
 	seg, ok, release := r.sn.ViewSingleFile(coresnaptype.Headers, blockHeight)
 	if !ok {
-		return rawdb.ReadCanonicalHash(tx, blockHeight) // Fallback to db if not found in snapshots
+		return h, nil
 	}
 	defer release()
 
