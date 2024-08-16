@@ -18,7 +18,6 @@ package borabi
 
 import (
 	"strings"
-	"time"
 
 	"github.com/erigontech/erigon/accounts/abi"
 )
