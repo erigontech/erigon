@@ -23,7 +23,6 @@ import (
 	"time"
 
 	"github.com/erigontech/erigon/accounts/abi"
-	"github.com/erigontech/erigon/polygon/heimdall"
 	"github.com/erigontech/erigon/rlp"
 )
 
@@ -65,20 +64,4 @@ func EventTime(encodedEvent rlp.RawValue) time.Time {
 	}
 
 	return time.Time{}
-}
-
-var commitStateInputs = stateReceiverABI.Methods["commitState"].Inputs
-
-func EventId(encodedEvent rlp.RawValue) uint64 {
-	if bytes.Equal(methodId, encodedEvent[0:4]) {
-		args, _ := commitStateInputs.Unpack(encodedEvent[4:])
-
-		if len(args) == 2 {
-			var eventRecord heimdall.EventRecord
-			if err := rlp.DecodeBytes(args[1].([]byte), &eventRecord); err == nil {
-				return eventRecord.ID
-			}
-		}
-	}
-	return 0
 }

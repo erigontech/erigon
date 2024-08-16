@@ -37,6 +37,7 @@ import (
 	"github.com/erigontech/erigon/polygon/bor"
 	"github.com/erigontech/erigon/polygon/bor/borcfg"
 	borsnaptype "github.com/erigontech/erigon/polygon/bor/snaptype"
+	"github.com/erigontech/erigon/polygon/heimdall"
 	"github.com/erigontech/erigon/turbo/services"
 )
 
@@ -285,7 +286,7 @@ func checkBlockEvents(ctx context.Context, config *borcfg.BorConfig, blockReader
 		var eventId uint64
 
 		if prevBlockStartId != 0 {
-			eventId = bor.EventId(event)
+			eventId = heimdall.EventId(event)
 
 			if eventId != prevBlockStartId+uint64(i) {
 				if failFast {
@@ -298,7 +299,7 @@ func checkBlockEvents(ctx context.Context, config *borcfg.BorConfig, blockReader
 			eventId = prevBlockStartId + uint64(i)
 		}
 
-		eventTime := bor.EventTime(event)
+		eventTime := heimdall.EventTime(event)
 
 		//if i != 0 {
 		//	if eventTime.Before(lastBlockEventTime) {
@@ -357,7 +358,7 @@ func ValidateBorEvents(ctx context.Context, config *borcfg.BorConfig, db kv.RoDB
 		eventId := binary.BigEndian.Uint64(word[length.Hash+length.BlockNum : length.Hash+length.BlockNum+8])
 		event := word[length.Hash+length.BlockNum+8:]
 
-		recordId := bor.EventId(event)
+		recordId := heimdall.EventId(event)
 
 		if recordId != eventId {
 			if failFast {
