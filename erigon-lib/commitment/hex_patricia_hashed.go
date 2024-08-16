@@ -1202,14 +1202,11 @@ func (hph *HexPatriciaHashed) fold() (err error) {
 	var upCell *cell
 	var nibble, upDepth int
 	row := hph.activeRows - 1
-	var underRoot bool
-	_ = underRoot
 	if row == 0 {
 		if hph.trace {
 			fmt.Printf("fold: parent is root %s\n", hph.root.FullString())
 		}
 		upCell = &hph.root
-		underRoot = true
 	} else {
 		upDepth = hph.depths[hph.activeRows-2]
 		nibble = int(hph.currentKey[upDepth-1])
