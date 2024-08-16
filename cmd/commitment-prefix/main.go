@@ -20,11 +20,11 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"github.com/c2h5oh/datasize"
 	"github.com/go-echarts/go-echarts/v2/charts"
 	"github.com/go-echarts/go-echarts/v2/components"
 	"github.com/go-echarts/go-echarts/v2/opts"
 	"github.com/go-echarts/go-echarts/v2/types"
-	"github.com/schollz/progressbar/v3"
 	"io"
 	"os"
 	"path"
@@ -57,16 +57,8 @@ func main() {
 
 func proceedFiles(files []string) {
 	sema := make(chan struct{}, *flagConcurrency)
-
-	prog := make([]*progressbar.ProgressBar, len(files))
-	mapping := make(map[string]int)
 	for i := 0; i < cap(sema); i++ {
 		sema <- struct{}{}
-	}
-	for i := 0; i < len(files); i++ {
-		fb := filepath.Base(files[i])
-		prog[i] = progressbar.DefaultBytes(0, fb)
-		mapping[fb] = i
 	}
 
 	var wg sync.WaitGroup
@@ -81,14 +73,14 @@ func proceedFiles(files []string) {
 		_ = pos
 		<-sema
 
-		//fmt.Printf("\r[%d/%d] - %s..", pos+1, len(files), path.Base(fpath))
+		fmt.Printf("[%d/%d] - %s..", pos+1, len(files), path.Base(fpath))
 
 		wg.Add(1)
 		go func(wg *sync.WaitGroup, mu *sync.Mutex) {
 			defer wg.Done()
 			defer func() { sema <- struct{}{} }()
 
-			stat, err := processCommitmentFile(fpath, prog[mapping[filepath.Base(fpath)]])
+			stat, err := processCommitmentFile(fpath)
 			if err != nil {
 				fmt.Printf("processing failed: %v", err)
 				return
@@ -174,7 +166,7 @@ func (s *overallStat) Collect(other *overallStat) {
 	}
 }
 
-func extractKVPairFromCompressed(filename string, keysSink chan commitment.BranchStat, pg *progressbar.ProgressBar) error {
+func extractKVPairFromCompressed(filename string, keysSink chan commitment.BranchStat) error {
 	defer close(keysSink)
 	dec, err := seg.NewDecompressor(filename)
 	if err != nil {
@@ -188,15 +180,12 @@ func extractKVPairFromCompressed(filename string, keysSink chan commitment.Branc
 		return err
 	}
 	size := dec.Size()
-	//paris := dec.Count() / 2
-	//cpair := 0
+	paris := dec.Count() / 2
+	cpair := 0
 	depth := *flagDepth
-	//var afterValPos uint64
+	var afterValPos uint64
 	var key, val []byte
 	getter := state.NewArchiveGetter(dec.MakeGetter(), fc)
-
-	pg.ChangeMax64(size)
-	defer pg.Close()
 
 	for getter.HasNext() {
 		key, _ = getter.Next(key[:0])
@@ -204,13 +193,12 @@ func extractKVPairFromCompressed(filename string, keysSink chan commitment.Branc
 			return errors.New("invalid key/value pair during decompression")
 		}
 		val, _ = getter.Next(val[:0])
-		//cpair++
+		cpair++
 
-		//if cpair%100000 == 0 {
-		//	fmt.Printf("\r%s pair %d/%d %s/%s", filename, cpair, paris,
-		//		datasize.ByteSize(afterValPos).HumanReadable(), datasize.ByteSize(size).HumanReadable())
-		//}
-		pg.Add(len(key) + len(val))
+		if cpair%100000 == 0 {
+			fmt.Printf("\r%s pair %d/%d %s/%s", filename, cpair, paris,
+				datasize.ByteSize(afterValPos).HumanReadable(), datasize.ByteSize(size).HumanReadable())
+		}
 
 		if depth > len(key) {
 			continue
@@ -224,11 +212,11 @@ func extractKVPairFromCompressed(filename string, keysSink chan commitment.Branc
 	return nil
 }
 
-func processCommitmentFile(fpath string, pg *progressbar.ProgressBar) (*overallStat, error) {
+func processCommitmentFile(fpath string) (*overallStat, error) {
 	stats := make(chan commitment.BranchStat, 8)
 	errch := make(chan error)
 	go func() {
-		err := extractKVPairFromCompressed(fpath, stats, pg)
+		err := extractKVPairFromCompressed(fpath, stats)
 		if err != nil {
 			errch <- err
 		}
