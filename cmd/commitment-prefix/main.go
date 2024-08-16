@@ -20,6 +20,10 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"github.com/go-echarts/go-echarts/v2/charts"
+	"github.com/go-echarts/go-echarts/v2/components"
+	"github.com/go-echarts/go-echarts/v2/opts"
+	"github.com/go-echarts/go-echarts/v2/types"
 	"github.com/schollz/progressbar/v3"
 	"io"
 	"os"
@@ -27,11 +31,6 @@ import (
 	"path/filepath"
 	"strconv"
 	"sync"
-
-	"github.com/go-echarts/go-echarts/v2/charts"
-	"github.com/go-echarts/go-echarts/v2/components"
-	"github.com/go-echarts/go-echarts/v2/opts"
-	"github.com/go-echarts/go-echarts/v2/types"
 
 	"github.com/erigontech/erigon-lib/commitment"
 	"github.com/erigontech/erigon-lib/seg"
@@ -58,8 +57,16 @@ func main() {
 
 func proceedFiles(files []string) {
 	sema := make(chan struct{}, *flagConcurrency)
+
+	prog := make([]*progressbar.ProgressBar, len(files))
+	mapping := make(map[string]int)
 	for i := 0; i < cap(sema); i++ {
 		sema <- struct{}{}
+	}
+	for i := 0; i < len(files); i++ {
+		fb := filepath.Base(files[i])
+		prog[i] = progressbar.DefaultBytes(0, fb)
+		mapping[fb] = i
 	}
 
 	var wg sync.WaitGroup
@@ -69,18 +76,22 @@ func proceedFiles(files []string) {
 	page.SetLayout(components.PageFlexLayout)
 	page.PageTitle = "Commitment Analysis"
 
+	mpg := NewMultiProgressBar(prog, os.Stdout)
+	defer mpg.End()
+
 	for i, fp := range files {
 		fpath, pos := fp, i
+		_ = pos
 		<-sema
 
-		fmt.Printf("\r[%d/%d] - %s..", pos+1, len(files), path.Base(fpath))
+		//fmt.Printf("\r[%d/%d] - %s..", pos+1, len(files), path.Base(fpath))
 
 		wg.Add(1)
 		go func(wg *sync.WaitGroup, mu *sync.Mutex) {
 			defer wg.Done()
 			defer func() { sema <- struct{}{} }()
 
-			stat, err := processCommitmentFile(fpath)
+			stat, err := processCommitmentFile(fpath, prog[mapping[filepath.Base(fpath)]])
 			if err != nil {
 				fmt.Printf("processing failed: %v", err)
 				return
@@ -88,9 +99,9 @@ func proceedFiles(files []string) {
 
 			mu.Lock()
 			page.AddCharts(
-
 				prefixLenCountChart(fpath, stat),
 				countersChart(fpath, stat),
+				mediansChart(fpath, stat),
 				fileContentsMapChart(fpath, stat),
 			)
 			mu.Unlock()
@@ -166,7 +177,7 @@ func (s *overallStat) Collect(other *overallStat) {
 	}
 }
 
-func extractKVPairFromCompressed(filename string, keysSink chan commitment.BranchStat) error {
+func extractKVPairFromCompressed(filename string, keysSink chan commitment.BranchStat, pg *progressbar.ProgressBar) error {
 	defer close(keysSink)
 	dec, err := seg.NewDecompressor(filename)
 	if err != nil {
@@ -187,10 +198,7 @@ func extractKVPairFromCompressed(filename string, keysSink chan commitment.Branc
 	var key, val []byte
 	getter := state.NewArchiveGetter(dec.MakeGetter(), fc)
 
-	pg := progressbar.DefaultBytes(
-		size,
-		filepath.Base(filename),
-	)
+	pg.ChangeMax64(size)
 	defer pg.Close()
 
 	for getter.HasNext() {
@@ -219,11 +227,11 @@ func extractKVPairFromCompressed(filename string, keysSink chan commitment.Branc
 	return nil
 }
 
-func processCommitmentFile(fpath string) (*overallStat, error) {
+func processCommitmentFile(fpath string, pg *progressbar.ProgressBar) (*overallStat, error) {
 	stats := make(chan commitment.BranchStat, 8)
 	errch := make(chan error)
 	go func() {
-		err := extractKVPairFromCompressed(fpath, stats)
+		err := extractKVPairFromCompressed(fpath, stats, pg)
 		if err != nil {
 			errch <- err
 		}
@@ -420,7 +428,7 @@ func countersChart(fname string, data *overallStat) *charts.Sankey {
 		{Source: nodes[0].Name, Target: nodes[5].Name, Value: float32(data.branches.LeafHashCount)},
 	}
 
-	sankey.AddSeries(fname, nodes, sankeyLink).
+	sankey.AddSeries("Counts "+filepath.Base(fname), nodes, sankeyLink).
 		SetSeriesOptions(
 			charts.WithLineStyleOpts(opts.LineStyle{
 				Color:     "source",
@@ -456,7 +464,7 @@ func mediansChart(fname string, data *overallStat) *charts.Sankey {
 		{Source: nodes[0].Name, Target: nodes[5].Name, Value: float32(data.branches.MedianLH)},
 	}
 
-	sankey.AddSeries(fname, nodes, sankeyLink).
+	sankey.AddSeries("Medians "+filepath.Base(fname), nodes, sankeyLink).
 		SetSeriesOptions(
 			charts.WithLineStyleOpts(opts.LineStyle{
 				Color:     "source",
@@ -467,4 +475,57 @@ func mediansChart(fname string, data *overallStat) *charts.Sankey {
 			}),
 		)
 	return sankey
+}
+
+type LineWriter struct {
+	*MultiProgressBar
+	id int
+}
+
+func (lw *LineWriter) Write(p []byte) (n int, err error) {
+	lw.guard.Lock()
+	defer lw.guard.Unlock()
+	lw.move(lw.id, lw.output)
+	return lw.output.Write(p)
+}
+
+type MultiProgressBar struct {
+	output  io.Writer
+	curLine int
+	Bars    []*progressbar.ProgressBar
+	guard   sync.Mutex
+}
+
+func NewMultiProgressBar(pBars []*progressbar.ProgressBar, output io.Writer) *MultiProgressBar {
+	mpb := &MultiProgressBar{
+		curLine: 0,
+		Bars:    pBars,
+		guard:   sync.Mutex{},
+		output:  output,
+	}
+	for id, pb := range mpb.Bars {
+		progressbar.OptionSetWriter(&LineWriter{
+			MultiProgressBar: mpb,
+			id:               id,
+		})(pb)
+	}
+
+	return mpb
+}
+
+func (mpb *MultiProgressBar) move(id int, writer io.Writer) (int, error) {
+	bias := mpb.curLine - id
+	mpb.curLine = id
+	if bias > 0 {
+		// move up
+		return fmt.Fprintf(writer, "\r\033[%dA", bias)
+	} else if bias < 0 {
+		// move down
+		return fmt.Fprintf(writer, "\r\033[%dB", -bias)
+	}
+	return 0, nil
+}
+
+func (mpb *MultiProgressBar) End() {
+	mpb.move(len(mpb.Bars), mpb.output)
 }
