@@ -20,6 +20,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/erigontech/erigon-lib/kv/membatchwithdb"
 	"runtime"
 	"time"
 
@@ -441,15 +442,18 @@ func MiningStep(ctx context.Context, db kv.RwDB, mining *stagedsync.Sync, tmpDir
 		logger.Error("mining step end", "err", err)
 	}() // avoid crash because Erigon's core does many things
 	logger.Error("ms start")
-	tx, err := db.BeginRw(ctx)
+	tx, err := db.BeginRo(ctx)
 	if err != nil {
 		return err
 	}
 	defer tx.Rollback()
 
+	mb := membatchwithdb.NewMemoryBatch(tx, tmpDir, logger)
+	defer mb.Close()
+
 	logger.Error("miningstep tx begin")
-	txc := wrap.TxContainer{Tx: tx}
-	sd, err := state.NewSharedDomains(tx, logger)
+	txc := wrap.TxContainer{Tx: mb}
+	sd, err := state.NewSharedDomains(mb, logger)
 	if err != nil {
 		return err
 	}
