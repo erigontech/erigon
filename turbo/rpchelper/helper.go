@@ -32,6 +32,7 @@ import (
 	borfinality "github.com/erigontech/erigon/polygon/bor/finality"
 	"github.com/erigontech/erigon/polygon/bor/finality/whitelist"
 	"github.com/erigontech/erigon/rpc"
+	"github.com/erigontech/erigon/turbo/services"
 )
 
 // unable to decode supplied params, or an invalid number of parameters
@@ -43,15 +44,15 @@ func (e nonCanonocalHashError) Error() string {
 	return fmt.Sprintf("hash %x is not currently canonical", e.hash)
 }
 
-func GetBlockNumber(blockNrOrHash rpc.BlockNumberOrHash, tx kv.Tx, filters *Filters) (uint64, libcommon.Hash, bool, error) {
-	return _GetBlockNumber(blockNrOrHash.RequireCanonical, blockNrOrHash, tx, filters)
+func GetBlockNumber(ctx context.Context, blockNrOrHash rpc.BlockNumberOrHash, tx kv.Tx, br services.FullBlockReader, filters *Filters) (uint64, libcommon.Hash, bool, error) {
+	return _GetBlockNumber(ctx, blockNrOrHash.RequireCanonical, blockNrOrHash, tx, br, filters)
 }
 
-func GetCanonicalBlockNumber(blockNrOrHash rpc.BlockNumberOrHash, tx kv.Tx, filters *Filters) (uint64, libcommon.Hash, bool, error) {
-	return _GetBlockNumber(true, blockNrOrHash, tx, filters)
+func GetCanonicalBlockNumber(ctx context.Context, blockNrOrHash rpc.BlockNumberOrHash, tx kv.Tx, br services.FullBlockReader, filters *Filters) (uint64, libcommon.Hash, bool, error) {
+	return _GetBlockNumber(ctx, true, blockNrOrHash, tx, br, filters)
 }
 
-func _GetBlockNumber(requireCanonical bool, blockNrOrHash rpc.BlockNumberOrHash, tx kv.Tx, filters *Filters) (blockNumber uint64, hash libcommon.Hash, latest bool, err error) {
+func _GetBlockNumber(ctx context.Context, requireCanonical bool, blockNrOrHash rpc.BlockNumberOrHash, tx kv.Tx, br services.FullBlockReader, filters *Filters) (blockNumber uint64, hash libcommon.Hash, latest bool, err error) {
 	// Due to changed semantics of `lastest` block in RPC request, it is now distinct
 	// from the block number corresponding to the plain state
 	var plainStateBlockNumber uint64
@@ -102,7 +103,7 @@ func _GetBlockNumber(requireCanonical bool, blockNrOrHash rpc.BlockNumberOrHash,
 		default:
 			blockNumber = uint64(number.Int64())
 		}
-		hash, err = rawdb.ReadCanonicalHash(tx, blockNumber)
+		hash, err = br.CanonicalHash(ctx, tx, blockNumber)
 		if err != nil {
 			return 0, libcommon.Hash{}, false, err
 		}
@@ -113,7 +114,7 @@ func _GetBlockNumber(requireCanonical bool, blockNrOrHash rpc.BlockNumberOrHash,
 		}
 		blockNumber = *number
 
-		ch, err := rawdb.ReadCanonicalHash(tx, blockNumber)
+		ch, err := br.CanonicalHash(ctx, tx, blockNumber)
 		if err != nil {
 			return 0, libcommon.Hash{}, false, err
 		}
@@ -124,8 +125,8 @@ func _GetBlockNumber(requireCanonical bool, blockNrOrHash rpc.BlockNumberOrHash,
 	return blockNumber, hash, blockNumber == plainStateBlockNumber, nil
 }
 
-func CreateStateReader(ctx context.Context, tx kv.Tx, blockNrOrHash rpc.BlockNumberOrHash, txnIndex int, filters *Filters, stateCache kvcache.Cache, chainName string) (state.StateReader, error) {
-	blockNumber, _, latest, err := _GetBlockNumber(true, blockNrOrHash, tx, filters)
+func CreateStateReader(ctx context.Context, tx kv.Tx, br services.FullBlockReader, blockNrOrHash rpc.BlockNumberOrHash, txnIndex int, filters *Filters, stateCache kvcache.Cache, chainName string) (state.StateReader, error) {
+	blockNumber, _, latest, err := _GetBlockNumber(ctx, true, blockNrOrHash, tx, br, filters)
 	if err != nil {
 		return nil, err
 	}

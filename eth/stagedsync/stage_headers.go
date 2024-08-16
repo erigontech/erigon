@@ -427,7 +427,7 @@ func fixCanonicalChain(logPrefix string, logEvery *time.Ticker, height uint64, h
 	return newNodes, badNodes, nil
 }
 
-func HeadersUnwind(u *UnwindState, s *StageState, tx kv.RwTx, cfg HeadersCfg, test bool) (err error) {
+func HeadersUnwind(ctx context.Context, u *UnwindState, s *StageState, tx kv.RwTx, cfg HeadersCfg, test bool) (err error) {
 	u.UnwindPoint = max(u.UnwindPoint, cfg.blockReader.FrozenBlocks()) // protect from unwind behind files
 
 	useExternalTx := tx != nil
@@ -517,7 +517,7 @@ func HeadersUnwind(u *UnwindState, s *StageState, tx kv.RwTx, cfg HeadersCfg, te
 		*/
 		if maxNum == 0 {
 			maxNum = u.UnwindPoint
-			if maxHash, err = rawdb.ReadCanonicalHash(tx, maxNum); err != nil {
+			if maxHash, err = cfg.blockReader.CanonicalHash(ctx, tx, maxNum); err != nil {
 				return err
 			}
 		}
@@ -631,7 +631,6 @@ func (cr ChainReaderImpl) GetHeaderByNumber(number uint64) *types.Header {
 		return h
 	}
 	return rawdb.ReadHeaderByNumber(cr.tx, number)
-
 }
 func (cr ChainReaderImpl) GetHeaderByHash(hash libcommon.Hash) *types.Header {
 	if cr.blockReader != nil {

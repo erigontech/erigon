@@ -110,7 +110,7 @@ func (r *RemoteBlockReader) BlockByHash(ctx context.Context, db kv.Tx, hash comm
 	return block, err
 }
 func (r *RemoteBlockReader) HeaderByNumber(ctx context.Context, tx kv.Getter, blockHeight uint64) (*types.Header, error) {
-	canonicalHash, err := rawdb.ReadCanonicalHash(tx, blockHeight)
+	canonicalHash, err := r.CanonicalHash(ctx, tx, blockHeight)
 	if err != nil {
 		return nil, err
 	}
@@ -230,6 +230,13 @@ func (r *RemoteBlockReader) Body(ctx context.Context, tx kv.Getter, hash common.
 		return nil, 0, nil
 	}
 	return block.Body(), uint32(len(block.Body().Transactions)), nil
+}
+func (r *RemoteBlockReader) IsCanonical(ctx context.Context, tx kv.Getter, hash common.Hash, blockHeight uint64) (bool, error) {
+	expected, err := rawdb.ReadCanonicalHash(tx, blockHeight)
+	if err != nil {
+		return false, err
+	}
+	return expected == hash, nil
 }
 func (r *RemoteBlockReader) BodyWithTransactions(ctx context.Context, tx kv.Getter, hash common.Hash, blockHeight uint64) (body *types.Body, err error) {
 	block, _, err := r.BlockWithSenders(ctx, tx, hash, blockHeight)
@@ -379,7 +386,7 @@ func (r *BlockReader) HeaderByNumber(ctx context.Context, tx kv.Getter, blockHei
 	}
 
 	if tx != nil {
-		blockHash, err := rawdb.ReadCanonicalHash(tx, blockHeight)
+		blockHash, err := r.CanonicalHash(ctx, tx, blockHeight)
 		if err != nil {
 			return nil, err
 		}
@@ -425,6 +432,14 @@ func (r *BlockReader) HeaderByNumber(ctx context.Context, tx kv.Getter, blockHei
 	return h, nil
 }
 
+func (r *BlockReader) IsCanonical(ctx context.Context, tx kv.Getter, hash common.Hash, blockHeight uint64) (bool, error) {
+	expected, err := r.CanonicalHash(ctx, tx, blockHeight)
+	if err != nil {
+		return false, err
+	}
+	return expected == hash, nil
+}
+
 // HeaderByHash - will search header in all snapshots starting from recent
 func (r *BlockReader) HeaderByHash(ctx context.Context, tx kv.Getter, hash common.Hash) (h *types.Header, err error) {
 	h, err = rawdb.ReadHeaderByHash(tx, hash)
@@ -458,17 +473,13 @@ func (r *BlockReader) HeaderByHash(ctx context.Context, tx kv.Getter, hash commo
 var emptyHash = common.Hash{}
 
 func (r *BlockReader) CanonicalHash(ctx context.Context, tx kv.Getter, blockHeight uint64) (h common.Hash, err error) {
-	h, err = rawdb.ReadCanonicalHash(tx, blockHeight)
-	if err != nil {
-		return h, err
+	// Handle nil case with db hit
+	if r == nil {
+		return rawdb.ReadCanonicalHash(tx, blockHeight) // Fallback to db if not found in snapshots
 	}
-	if h != emptyHash {
-		return h, nil
-	}
-
 	seg, ok, release := r.sn.ViewSingleFile(coresnaptype.Headers, blockHeight)
 	if !ok {
-		return
+		return rawdb.ReadCanonicalHash(tx, blockHeight) // Fallback to db if not found in snapshots
 	}
 	defer release()
 
@@ -656,7 +667,7 @@ func (r *BlockReader) blockWithSenders(ctx context.Context, tx kv.Getter, hash c
 			return nil, nil, nil
 		}
 		if forceCanonical {
-			canonicalHash, err := rawdb.ReadCanonicalHash(tx, blockHeight)
+			canonicalHash, err := r.CanonicalHash(ctx, tx, blockHeight)
 			if err != nil {
 				return nil, nil, fmt.Errorf("requested non-canonical hash %x. canonical=%x", hash, canonicalHash)
 			}
@@ -1005,7 +1016,7 @@ func (r *BlockReader) txnByHash(txnHash common.Hash, segments []*Segment, buf []
 func (r *BlockReader) TxnByIdxInBlock(ctx context.Context, tx kv.Getter, blockNum uint64, txIdxInBlock int) (txn types.Transaction, err error) {
 	maxBlockNumInFiles := r.sn.BlocksAvailable()
 	if maxBlockNumInFiles == 0 || blockNum > maxBlockNumInFiles {
-		canonicalHash, err := rawdb.ReadCanonicalHash(tx, blockNum)
+		canonicalHash, err := r.CanonicalHash(ctx, tx, blockNum)
 		if err != nil {
 			return nil, err
 		}
@@ -1130,7 +1141,7 @@ func (r *BlockReader) BadHeaderNumber(ctx context.Context, tx kv.Getter, hash co
 	return rawdb.ReadBadHeaderNumber(tx, hash)
 }
 func (r *BlockReader) BlockByNumber(ctx context.Context, db kv.Tx, number uint64) (*types.Block, error) {
-	hash, err := rawdb.ReadCanonicalHash(db, number)
+	hash, err := r.CanonicalHash(ctx, db, number)
 	if err != nil {
 		return nil, fmt.Errorf("failed ReadCanonicalHash: %w", err)
 	}

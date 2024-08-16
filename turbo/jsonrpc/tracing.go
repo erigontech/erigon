@@ -63,7 +63,7 @@ func (api *PrivateDebugAPIImpl) traceBlock(ctx context.Context, blockNrOrHash rp
 	}
 	defer tx.Rollback()
 
-	blockNumber, hash, _, err := rpchelper.GetCanonicalBlockNumber(blockNrOrHash, tx, api.filters)
+	blockNumber, hash, _, err := rpchelper.GetCanonicalBlockNumber(ctx, blockNrOrHash, tx, api._blockReader, api.filters)
 	if err != nil {
 		stream.WriteNil()
 		return err
@@ -80,7 +80,7 @@ func (api *PrivateDebugAPIImpl) traceBlock(ctx context.Context, blockNrOrHash rp
 
 	// if we've pruned this history away for this block then just return early
 	// to save any red herring errors
-	err = api.BaseAPI.checkPruneHistory(tx, block.NumberU64())
+	err = api.BaseAPI.checkPruneHistory(ctx, tx, block.NumberU64())
 	if err != nil {
 		stream.WriteNil()
 		return err
@@ -267,7 +267,7 @@ func (api *PrivateDebugAPIImpl) TraceTransaction(ctx context.Context, hash commo
 	}
 
 	// check pruning to ensure we have history at this block level
-	err = api.BaseAPI.checkPruneHistory(tx, blockNum)
+	err = api.BaseAPI.checkPruneHistory(ctx, tx, blockNum)
 	if err != nil {
 		stream.WriteNil()
 		return err
@@ -342,19 +342,19 @@ func (api *PrivateDebugAPIImpl) TraceCall(ctx context.Context, args ethapi.CallA
 	}
 	engine := api.engine()
 
-	blockNumber, hash, isLatest, err := rpchelper.GetBlockNumber(blockNrOrHash, dbtx, api.filters)
+	blockNumber, hash, isLatest, err := rpchelper.GetBlockNumber(ctx, blockNrOrHash, dbtx, api._blockReader, api.filters)
 	if err != nil {
 		return fmt.Errorf("get block number: %v", err)
 	}
 
-	err = api.BaseAPI.checkPruneHistory(dbtx, blockNumber)
+	err = api.BaseAPI.checkPruneHistory(ctx, dbtx, blockNumber)
 	if err != nil {
 		return err
 	}
 
 	var stateReader state.StateReader
 	if config == nil || config.TxIndex == nil || isLatest {
-		stateReader, err = rpchelper.CreateStateReader(ctx, dbtx, blockNrOrHash, 0, api.filters, api.stateCache, chainConfig.ChainName)
+		stateReader, err = rpchelper.CreateStateReader(ctx, dbtx, api._blockReader, blockNrOrHash, 0, api.filters, api.stateCache, chainConfig.ChainName)
 	} else {
 		stateReader, err = rpchelper.CreateHistoryStateReader(dbtx, blockNumber, int(*config.TxIndex), chainConfig.ChainName)
 	}
@@ -439,13 +439,13 @@ func (api *PrivateDebugAPIImpl) TraceCallMany(ctx context.Context, bundles []Bun
 
 	defer func(start time.Time) { log.Trace("Tracing CallMany finished", "runtime", time.Since(start)) }(time.Now())
 
-	blockNum, hash, _, err := rpchelper.GetBlockNumber(simulateContext.BlockNumber, tx, api.filters)
+	blockNum, hash, _, err := rpchelper.GetBlockNumber(ctx, simulateContext.BlockNumber, tx, api._blockReader, api.filters)
 	if err != nil {
 		stream.WriteNil()
 		return err
 	}
 
-	err = api.BaseAPI.checkPruneHistory(tx, blockNum)
+	err = api.BaseAPI.checkPruneHistory(ctx, tx, blockNum)
 	if err != nil {
 		return err
 	}
@@ -474,7 +474,7 @@ func (api *PrivateDebugAPIImpl) TraceCallMany(ctx context.Context, bundles []Bun
 
 	replayTransactions = block.Transactions()[:transactionIndex]
 
-	stateReader, err := rpchelper.CreateStateReader(ctx, tx, rpc.BlockNumberOrHashWithNumber(rpc.BlockNumber(blockNum-1)), 0, api.filters, api.stateCache, chainConfig.ChainName)
+	stateReader, err := rpchelper.CreateStateReader(ctx, tx, api._blockReader, rpc.BlockNumberOrHashWithNumber(rpc.BlockNumber(blockNum-1)), 0, api.filters, api.stateCache, chainConfig.ChainName)
 	if err != nil {
 		stream.WriteNil()
 		return err

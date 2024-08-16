@@ -185,7 +185,7 @@ func (e *EthereumExecutionModule) GetBodiesByRange(ctx context.Context, req *exe
 	bodies := make([]*execution.BlockBody, 0, req.Count)
 
 	for i := uint64(0); i < req.Count; i++ {
-		hash, err := rawdb.ReadCanonicalHash(tx, req.Start+i)
+		hash, err := e.canonicalHash(ctx, tx, req.Start+i)
 		if err != nil {
 			return nil, fmt.Errorf("ethereumExecutionModule.GetBodiesByRange: ReadCanonicalHash error %w", err)
 		}

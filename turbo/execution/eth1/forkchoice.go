@@ -218,7 +218,7 @@ func (e *EthereumExecutionModule) updateForkChoice(ctx context.Context, original
 		log.Info("[sync] limited big jump", "from", finishProgressBefore, "amount", uint64(e.syncCfg.LoopBlockLimit))
 	}
 
-	canonicalHash, err := rawdb.ReadCanonicalHash(tx, fcuHeader.Number.Uint64())
+	canonicalHash, err := e.canonicalHash(ctx, tx, fcuHeader.Number.Uint64())
 	if err != nil {
 		sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, err, false)
 		return
@@ -257,7 +257,7 @@ func (e *EthereumExecutionModule) updateForkChoice(ctx context.Context, original
 
 		currentParentHash := fcuHeader.ParentHash
 		currentParentNumber := fcuHeader.Number.Uint64() - 1
-		isCanonicalHash, err := rawdb.IsCanonicalHash(tx, currentParentHash, currentParentNumber)
+		isCanonicalHash, err := e.isCanonicalHash(ctx, tx, currentParentHash)
 		if err != nil {
 			sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, err, false)
 			return
@@ -290,7 +290,7 @@ func (e *EthereumExecutionModule) updateForkChoice(ctx context.Context, original
 				panic("assert:uint64 underflow") //uint-underflow
 			}
 			currentParentNumber = currentHeader.Number.Uint64() - 1
-			isCanonicalHash, err = rawdb.IsCanonicalHash(tx, currentParentHash, currentParentNumber)
+			isCanonicalHash, err = e.isCanonicalHash(ctx, tx, currentParentHash)
 			if err != nil {
 				sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, err, false)
 				return
