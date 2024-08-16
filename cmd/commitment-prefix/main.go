@@ -91,7 +91,7 @@ func proceedFiles(files []string) {
 			defer wg.Done()
 			defer func() { sema <- struct{}{} }()
 
-			stat, err := processCommitmentFile(fpath, prog[mapping[filepath.Base(fpath)]])
+			stat, err := processCommitmentFile(fpath, mpg.Bars[mapping[filepath.Base(fpath)]])
 			if err != nil {
 				fmt.Printf("processing failed: %v", err)
 				return
