@@ -19,7 +19,6 @@ package bridge
 import (
 	"context"
 	"errors"
-	"fmt"
 	"sync/atomic"
 	"time"
 
@@ -100,7 +99,7 @@ func (b *Bridge) Run(ctx context.Context) error {
 
 	// start syncing
 	b.logger.Debug(
-		bridgeLogPrefix("Bridge is running"),
+		bridgeLogPrefix("running bridge component"),
 		"lastFetchedEventID", lastFetchedEventID,
 		"lastProcessedEventID", lastProcessedEventID,
 	)
@@ -264,7 +263,7 @@ func (b *Bridge) Events(ctx context.Context, blockNum uint64) ([]*types.Message,
 		return nil, err
 	}
 
-	b.logger.Debug(bridgeLogPrefix(fmt.Sprintf("got %v events for block %v", len(events), blockNum)))
+	b.logger.Debug(bridgeLogPrefix("events query db result"), "blockNum", blockNum, "eventCount", len(events))
 
 	// convert to message
 	for _, event := range events {
