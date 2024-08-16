@@ -793,7 +793,18 @@ func (bs *BranchStat) Collect(other *BranchStat) {
 	bs.HashCount += other.HashCount
 	bs.ExtCount += other.ExtCount
 
-	bs.MedianExt = (bs.MedianExt + other.MedianExt) / 2
+	setMedian := func(median *uint64, otherMedian uint64) {
+		if *median == 0 {
+			*median = otherMedian
+		} else {
+			*median = (*median + otherMedian) / 2
+		}
+	}
+	setMedian(&bs.MedianExt, other.MedianExt)
+	setMedian(&bs.MedianAPK, other.MedianAPK)
+	setMedian(&bs.MedianSPK, other.MedianSPK)
+	setMedian(&bs.MedianHash, other.MedianHash)
+	setMedian(&bs.MedianLH, other.MedianLH)
 	bs.MedianHash = (bs.MedianHash + other.MedianHash) / 2
 	bs.MedianAPK = (bs.MedianAPK + other.MedianAPK) / 2
 	bs.MedianSPK = (bs.MedianSPK + other.MedianSPK) / 2
