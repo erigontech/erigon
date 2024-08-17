@@ -329,9 +329,9 @@ func (api *OverlayAPIImpl) GetLogs(ctx context.Context, crit filters.FilterCrite
 					results[task.idx] = &blockReplayResult{BlockNumber: task.BlockNumber, Error: err.Error()}
 					continue
 				}
-				log.Debug("[GetLogs]", "len(blockLogs)", len(blockLogs))
+				log.Debug("[GetRawLogs]", "len(blockLogs)", len(blockLogs))
 				logs := filterLogs(blockLogs, crit.Addresses, crit.Topics)
-				log.Debug("[GetLogs]", "len(logs)", len(logs))
+				log.Debug("[GetRawLogs]", "len(logs)", len(logs))
 
 				results[task.idx] = &blockReplayResult{BlockNumber: task.BlockNumber, Logs: logs}
 			}
@@ -382,7 +382,7 @@ blockLoop:
 
 	// If execution failed in between, abort
 	if failed != nil {
-		log.Error("[GetLogs]", "failed", failed)
+		log.Error("[GetRawLogs]", "failed", failed)
 		return nil, failed
 	}
 
