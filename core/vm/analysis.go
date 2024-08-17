@@ -20,7 +20,7 @@
 package vm
 
 // codeBitmap collects data locations in code.
-func codeBitmap(code []byte) []uint64 {
+func codeBitmap(code []byte) bitvec {
 	// The bitmap is 4 bytes longer than necessary, in case the code
 	// ends with a PUSH32, the algorithm will push zeroes onto the
 	// bitvector outside the bounds of the actual code.
@@ -63,5 +63,5 @@ func (bits bitvec) setN(flag uint64, pc uint64) {
 
 // codeSegment checks if the position is in a code segment.
 func (bits bitvec) codeSegment(pos uint64) bool {
-	return bits[pos/64]&(uint64(1)<<(pos%64)) == 0
+	return ((bits[pos/64] >> (pos % 64)) & 1) == 0
 }
