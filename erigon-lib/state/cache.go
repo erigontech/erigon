@@ -32,19 +32,19 @@ var (
 	domainGetFromFileCacheTrace = dbg.EnvBool("D_LRU_TRACE", false)
 )
 
-func NewDomainGetFromFileCache(trace bool) *DomainGetFromFileCache {
+func NewDomainGetFromFileCache() *DomainGetFromFileCache {
 	c, err := freelru.New[u128, domainGetFromFileCacheItem](domainGetFromFileCacheLimit, u128noHash)
 	if err != nil {
 		panic(err)
 	}
-	return &DomainGetFromFileCache{LRU: c, trace: trace || domainGetFromFileCacheTrace}
+	return &DomainGetFromFileCache{LRU: c, trace: domainGetFromFileCacheTrace}
 }
 
+func (c *DomainGetFromFileCache) SetTrace(v bool) { c.trace = v }
 func (c *DomainGetFromFileCache) LogStats(dt kv.Domain) {
 	if c == nil || !c.trace {
 		return
 	}
-
 	m := c.Metrics()
 	log.Warn("[dbg] DomainGetFromFileCache", "a", dt.String(), "hit", m.Hits, "total", m.Hits+m.Misses, "Collisions", m.Collisions, "Evictions", m.Evictions, "Inserts", m.Inserts, "limit", domainGetFromFileCacheLimit, "ratio", fmt.Sprintf("%.2f", float64(m.Hits)/float64(m.Hits+m.Misses)))
 }
