@@ -141,7 +141,7 @@ func (bits bitvec2) setN(flag uint64, pc uint64) {
 	shift := pc % 64
 	bits[pc/64] |= flag << shift
 	if shift > 32 {
-		bits[pc/64+1] = flag >> (64 - shift)
+		bits[pc/64+1] |= flag >> (64 - shift)
 	}
 }
 
