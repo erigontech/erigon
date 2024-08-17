@@ -388,9 +388,12 @@ func FillDBFromSnapshots(logPrefix string, ctx context.Context, tx kv.RwTx, dirs
 				if blockNum > blocksAvailable {
 					return nil // This can actually happen as FrozenBlocks() is SegmentIdMax() and not the last .seg
 				}
-				if err := rawdb.WriteTd(tx, blockHash, blockNum, td); err != nil {
-					return err
+				if !dbg.PruneTotalDifficulty() {
+					if err := rawdb.WriteTd(tx, blockHash, blockNum, td); err != nil {
+						return err
+					}
 				}
+
 				// Write marker for pruning only if we are above our safe threshold
 				if blockNum >= pruneMarkerBlockThreshold || blockNum == 0 {
 					if err := rawdb.WriteCanonicalHash(tx, blockHash, blockNum); err != nil {
@@ -399,6 +402,11 @@ func FillDBFromSnapshots(logPrefix string, ctx context.Context, tx kv.RwTx, dirs
 					binary.BigEndian.PutUint64(blockNumBytes, blockNum)
 					if err := h2n.Collect(blockHash[:], blockNumBytes); err != nil {
 						return err
+					}
+					if dbg.PruneTotalDifficulty() {
+						if err := rawdb.WriteTd(tx, blockHash, blockNum, td); err != nil {
+							return err
+						}
 					}
 				}
 				select {
