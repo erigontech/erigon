@@ -88,7 +88,7 @@ type Domain struct {
 
 	// _visibleFiles - underscore in name means: don't use this field directly, use BeginFilesRo()
 	// underlying array is immutable - means it's ready for zero-copy use
-	_visibleFiles []visibleFile
+	_visibleFiles *domainVisible
 
 	integrityCheck func(name kv.Domain, fromStep, toStep uint64) bool
 
@@ -113,6 +113,29 @@ type domainCfg struct {
 	replaceKeysInValues         bool
 	restrictSubsetFileDeletions bool
 }
+type domainVisible struct {
+	files  []visibleFile
+	name   kv.Domain
+	caches *sync.Pool
+}
+
+func newDomainVisible(name kv.Domain, files []visibleFile) *domainVisible {
+	return &domainVisible{
+		name:  name,
+		files: files,
+		caches: &sync.Pool{New: func() interface{} {
+			return NewDomainGetFromFileCache(false)
+		},
+		},
+	}
+}
+func (v *domainVisible) newGetFromFileCache() *DomainGetFromFileCache {
+	return v.caches.New().(*DomainGetFromFileCache)
+}
+func (v *domainVisible) returnGetFromFileCache(c *DomainGetFromFileCache) {
+	c.LogStats(v.name)
+	v.caches.Put(c)
+}
 
 func NewDomain(cfg domainCfg, aggregationStep uint64, name kv.Domain, valsTable, indexKeysTable, historyValsTable, indexTable string, integrityCheck func(name kv.Domain, fromStep, toStep uint64) bool, logger log.Logger) (*Domain, error) {
 	if cfg.hist.iiCfg.dirs.SnapDomain == "" {
@@ -132,7 +155,7 @@ func NewDomain(cfg domainCfg, aggregationStep uint64, name kv.Domain, valsTable,
 		integrityCheck:              integrityCheck,
 	}
 
-	d._visibleFiles = []visibleFile{}
+	d._visibleFiles = newDomainVisible(d.name, []visibleFile{})
 
 	var err error
 	if d.History, err = NewHistory(cfg.hist, aggregationStep, name.String(), indexKeysTable, indexTable, historyValsTable, nil, logger); err != nil {
@@ -439,7 +462,7 @@ func (d *Domain) closeWhatNotInList(fNames []string) {
 }
 
 func (d *Domain) reCalcVisibleFiles() {
-	d._visibleFiles = calcVisibleFiles(d.dirtyFiles, d.indexList, false)
+	d._visibleFiles = newDomainVisible(d.name, calcVisibleFiles(d.dirtyFiles, d.indexList, false))
 	d.History.reCalcVisibleFiles()
 }
 
@@ -852,7 +875,7 @@ func (d *Domain) collectFilesStats() (datsz, idxsz, files uint64) {
 }
 
 func (d *Domain) BeginFilesRo() *DomainRoTx {
-	files := d._visibleFiles
+	files := d._visibleFiles.files
 	for i := 0; i < len(files); i++ {
 		if !files[i].src.frozen {
 			files[i].src.refcount.Add(1)
@@ -1394,7 +1417,7 @@ func (dt *DomainRoTx) getFromFiles(filekey []byte) (v []byte, found bool, fileSt
 	hi, lo := dt.ht.iit.hashKey(filekey)
 	if dt.name != kv.CommitmentDomain {
 		if dt.getFromFileCache == nil {
-			dt.getFromFileCache = NewDomainGetFromFileCache(true)
+			dt.getFromFileCache = dt.d._visibleFiles.newGetFromFileCache()
 		}
 		cv, ok := dt.getFromFileCache.Get(u128{hi: hi, lo: lo})
 		if ok {
@@ -1501,7 +1524,7 @@ func (dt *DomainRoTx) Close() {
 	}
 	dt.ht.Close()
 
-	dt.getFromFileCache.LogStats(dt.name)
+	dt.d._visibleFiles.returnGetFromFileCache(dt.getFromFileCache)
 }
 
 func (dt *DomainRoTx) statelessGetter(i int) ArchiveGetter {
