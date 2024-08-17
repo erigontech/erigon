@@ -511,7 +511,7 @@ func (iit *InvertedIndexRoTx) Close() {
 		r.Close()
 	}
 
-	iit.ii._visibleFiles.returnGetFromFileCache(iit.seekInFilesCache)
+	iit.ii._visibleFiles.returnSeekInFilesCache(iit.seekInFilesCache)
 }
 
 type MergeRange struct {
