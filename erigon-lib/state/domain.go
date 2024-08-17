@@ -1394,7 +1394,7 @@ func (dt *DomainRoTx) getFromFiles(filekey []byte) (v []byte, found bool, fileSt
 	hi, lo := dt.ht.iit.hashKey(filekey)
 	if dt.name != kv.CommitmentDomain {
 		if dt.getFromFileCache == nil {
-			dt.getFromFileCache = NewDomainGetFromFileCache(true)
+			dt.getFromFileCache = NewDomainGetFromFileCache(false)
 		}
 		cv, ok := dt.getFromFileCache.Get(u128{hi: hi, lo: lo})
 		if ok {
