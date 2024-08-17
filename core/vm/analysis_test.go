@@ -20,7 +20,6 @@
 package vm
 
 import (
-	"fmt"
 	"math/bits"
 	"testing"
 
@@ -32,12 +31,6 @@ import (
 )
 
 func TestJumpDestAnalysis(t *testing.T) {
-	pc, numbits := 63, 3
-	x := uint64(1) << numbits
-	x = x | (x - 1) // Smear the bit to the right
-	shift := pc & 63
-	fmt.Printf("1: %b,%b,%b,%b\n", x, x<<shift, x>>(64-shift), ^x)
-
 	t.Parallel()
 	tests := []struct {
 		code  []byte
@@ -186,7 +179,7 @@ func BenchmarkJumpdestOpAnalysis(bench *testing.B) {
 				codeBitmapInternal3(code, bits)
 			}
 		}
-		for op = PUSH1; op <= PUSH2; op++ {
+		for op = PUSH1; op <= PUSH9; op++ {
 			bench.Run(op.String(), bencher)
 		}
 		op = JUMPDEST
@@ -209,7 +202,7 @@ func BenchmarkJumpdestOpAnalysis(bench *testing.B) {
 				codeBitmapInternal(code, bits)
 			}
 		}
-		for op = PUSH1; op <= PUSH2; op++ {
+		for op = PUSH1; op <= PUSH9; op++ {
 			bench.Run(op.String(), bencher)
 		}
 		op = JUMPDEST
@@ -232,7 +225,7 @@ func BenchmarkJumpdestOpAnalysis(bench *testing.B) {
 				codeBitmapInternal2(code, bits)
 			}
 		}
-		for op = PUSH1; op <= PUSH2; op++ {
+		for op = PUSH1; op <= PUSH9; op++ {
 			bench.Run(op.String(), bencher)
 		}
 		op = JUMPDEST

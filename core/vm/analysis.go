@@ -24,26 +24,53 @@ func codeBitmap3(code []byte) []uint64 {
 	// The bitmap is 4 bytes longer than necessary, in case the code
 	// ends with a PUSH32, the algorithm will push zeroes onto the
 	// bitvector outside the bounds of the actual code.
-	bits := make([]uint64, (len(code)+32+63)/64)
+	bits := make(bitvec2, (len(code)+32+63)/64)
 	codeBitmapInternal3(code, bits)
 	return bits
 }
 
-func codeBitmapInternal3(code []byte, bits []uint64) {
+func codeBitmapInternal3(code []byte, bits bitvec2) {
+	_ = bits[(len(code)+32+63)/64-1]
 	for pc := uint64(0); pc < uint64(len(code)); {
 		op := OpCode(code[pc])
 		pc++
 		if int8(op) < int8(PUSH1) { // If not PUSH (the int8(op) > int(PUSH32) is always false).
 			continue
 		}
-		numbits := uint64(op - PUSH1)
-		x := uint64(1)<<numbits | (uint64(1)<<numbits - 1)
-		shift := pc & 63
-		bits[pc/64] |= x << shift
-		if shift > 32 {
-			bits[pc/64+1] = x >> (64 - shift)
+		switch op {
+		case PUSH1:
+			bits.set1(pc)
+			pc += 1
+			continue
+		case PUSH2:
+			bits.setN(uint64(set2BitsMask), pc)
+			pc += 2
+			continue
+		case PUSH3:
+			bits.setN(uint64(set3BitsMask), pc)
+			pc += 3
+			continue
+		case PUSH4:
+			bits.setN(uint64(set4BitsMask), pc)
+			pc += 4
+			continue
+		case PUSH5:
+			bits.setN(uint64(set5BitsMask), pc)
+			pc += 5
+			continue
+		case PUSH6:
+			bits.setN(uint64(set6BitsMask), pc)
+			pc += 5
+			continue
+		case PUSH7:
+			bits.setN(uint64(set7BitsMask), pc)
+			pc += 5
+			continue
 		}
-		pc += numbits + 1
+
+		numbits := uint64(op - PUSH1 + 1)
+		bits.setN(uint64(1)<<numbits-1, pc)
+		pc += numbits
 	}
 }
 
@@ -53,33 +80,33 @@ func codeBitmap(code []byte) []uint64 {
 	// ends with a PUSH32, the algorithm will push zeroes onto the
 	// bitvector outside the bounds of the actual code.
 	bits := make(bitvec2, (len(code)+32+63)/64)
-	codeBitmapInternal(code, bits)
-	return bits
-}
-
-func codeBitmapInternal(code []byte, bits bitvec2) {
 	for pc := uint64(0); pc < uint64(len(code)); {
 		op := OpCode(code[pc])
 		pc++
 		if int8(op) < int8(PUSH1) { // If not PUSH (the int8(op) > int(PUSH32) is always false).
 			continue
 		}
-		switch op {
-		case PUSH1:
+		if op == PUSH1 {
 			bits[pc/64] |= 1 << (pc % 64)
 			pc += 1
 			continue
 		}
 
 		numbits := uint64(op - PUSH1 + 1)
-		x := uint64(1)<<numbits - 1
-		idx, shift := pc/64, pc&63
-		bits[idx] |= x << shift
+		x := uint64(1)<<numbits - 1 // Set N first bits
+		shift := pc % 64
+		bits[pc/64] |= x << shift
 		if shift > 32 {
-			bits[idx+1] = x >> (64 - shift)
+			bits[pc/64+1] = x >> (64 - shift)
 		}
 		pc += numbits
 	}
+	return bits
+}
+
+func codeBitmapInternal(code []byte, bits bitvec2) {
+	_ = bits[(len(code)+32+63)/64-1]
+
 }
 
 const (
@@ -110,24 +137,12 @@ func (bits bitvec2) set1(pos uint64) {
 	bits[pos/64] |= 1 << (pos % 64)
 }
 
-func (bits bitvec2) setN(flag uint16, pos uint64) {
-	shift := pos & 63
-	bits[pos/64] |= uint64(flag) << shift
+func (bits bitvec2) setN(flag uint64, pc uint64) {
+	shift := pc % 64
+	bits[pc/64] |= flag << shift
 	if shift > 32 {
-		bits[pos/64+1] = uint64(flag) >> (64 - shift)
+		bits[pc/64+1] = flag >> (64 - shift)
 	}
-}
-
-func (bits bitvec2) set8(pos uint64) {
-	a := uint64(0xFF << (pos % 64))
-	bits[pos/64] |= a
-	//bits[pos/64+1] = ^a
-}
-
-func (bits bitvec2) set16(pos uint64) {
-	a := uint64(0xFFFF << (pos % 64))
-	bits[pos/64] |= a
-	//bits[pos/64+1] = ^a
 }
 
 // codeSegment checks if the position is in a code segment.
@@ -170,6 +185,7 @@ func (bits bitvec) codeSegment(pos uint64) bool {
 	return ((bits[pos/8] >> (pos % 8)) & 1) == 0
 }
 func codeBitmapInternal2(code, bits bitvec) {
+	_ = bits[(len(code)/8+1+4)-1]
 	for pc := uint64(0); pc < uint64(len(code)); {
 		op := OpCode(code[pc])
 		pc++
