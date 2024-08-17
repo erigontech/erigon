@@ -124,6 +124,7 @@ func newDomainVisible(name kv.Domain, files []visibleFile) *domainVisible {
 		name:  name,
 		files: files,
 		caches: &sync.Pool{New: func() interface{} {
+			log.Warn("[dbg] new cache object")
 			return NewDomainGetFromFileCache(false)
 		},
 		},
@@ -1415,10 +1416,10 @@ func (dt *DomainRoTx) getFromFiles(filekey []byte) (v []byte, found bool, fileSt
 	}
 
 	hi, lo := dt.ht.iit.hashKey(filekey)
-	if dt.name != kv.CommitmentDomain {
-		if dt.getFromFileCache == nil {
-			dt.getFromFileCache = dt.d._visibleFiles.newGetFromFileCache()
-		}
+	if dt.getFromFileCache == nil {
+		dt.getFromFileCache = dt.d._visibleFiles.newGetFromFileCache()
+	}
+	if dt.getFromFileCache != nil {
 		cv, ok := dt.getFromFileCache.Get(u128{hi: hi, lo: lo})
 		if ok {
 			return cv.v, true, dt.files[cv.lvl].startTxNum, dt.files[cv.lvl].endTxNum, nil
@@ -1459,7 +1460,7 @@ func (dt *DomainRoTx) getFromFiles(filekey []byte) (v []byte, found bool, fileSt
 			fmt.Printf("GetLatest(%s, %x) -> found in file %s\n", dt.name.String(), filekey, dt.files[i].src.decompressor.FileName())
 		}
 
-		if dt.name != kv.CommitmentDomain {
+		if dt.getFromFileCache != nil {
 			dt.getFromFileCache.Add(u128{hi: hi, lo: lo}, domainGetFromFileCacheItem{lvl: uint8(i), v: v})
 		}
 		return v, true, dt.files[i].startTxNum, dt.files[i].endTxNum, nil
@@ -1468,7 +1469,7 @@ func (dt *DomainRoTx) getFromFiles(filekey []byte) (v []byte, found bool, fileSt
 		fmt.Printf("GetLatest(%s, %x) -> not found in %d files\n", dt.name.String(), filekey, len(dt.files))
 	}
 
-	if dt.name != kv.CommitmentDomain {
+	if dt.getFromFileCache != nil {
 		dt.getFromFileCache.Add(u128{hi: hi, lo: lo}, domainGetFromFileCacheItem{lvl: 0, v: nil})
 	}
 	return nil, false, 0, 0, nil
