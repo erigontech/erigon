@@ -362,10 +362,10 @@ func (api *PublicFilterAPI) NewFilter(crit FilterCriteria) (rpc.ID, error) {
 	return logsSub.ID, nil
 }
 
-// GetRawLogs returns logs matching the given argument that are stored within the state.
+// GetLogs returns logs matching the given argument that are stored within the state.
 //
 // https://eth.wiki/json-rpc/API#eth_getlogs
-func (api *PublicFilterAPI) GetRawLogs(ctx context.Context, crit FilterCriteria) ([]*types.Log, error) {
+func (api *PublicFilterAPI) GetLogs(ctx context.Context, crit FilterCriteria) ([]*types.Log, error) {
 	var filter *Filter
 	if crit.BlockHash != nil {
 		// Block filter requested, construct a single-shot filter

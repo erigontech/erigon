@@ -219,7 +219,7 @@ func TestInvalidGetLogsRequest(t *testing.T) {
 	}
 
 	for i, test := range testCases {
-		if _, err := api.GetRawLogs(context.Background(), test); err == nil {
+		if _, err := api.GetLogs(context.Background(), test); err == nil {
 			t.Errorf("Expected Logs for case #%d to fail", i)
 		}
 	}
