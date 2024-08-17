@@ -187,7 +187,7 @@ func (b *EthAPIBackend) tryGetReceiptsFromDb(block *types.Block) types.Receipts 
 	)
 }
 
-func (b *EthAPIBackend) GetRawLogs(ctx context.Context, hash libcommon.Hash) ([][]*types.Log, error) {
+func (b *EthAPIBackend) GetLogs(ctx context.Context, hash libcommon.Hash) ([][]*types.Log, error) {
 	number := rawdb.ReadHeaderNumber(b.eth.chainDb, hash)
 	if number == nil {
 		return nil, nil
