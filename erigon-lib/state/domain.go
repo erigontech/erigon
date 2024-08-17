@@ -124,14 +124,17 @@ func newDomainVisible(name kv.Domain, files []visibleFile) *domainVisible {
 		name:  name,
 		files: files,
 		caches: &sync.Pool{New: func() interface{} {
-			log.Warn("[dbg] new cache object")
 			return NewDomainGetFromFileCache(false)
 		},
 		},
 	}
 }
 func (v *domainVisible) newGetFromFileCache() *DomainGetFromFileCache {
-	return v.caches.New().(*DomainGetFromFileCache)
+	c := v.caches.New().(*DomainGetFromFileCache)
+	if c.Metrics().Hits > 0 {
+		log.Warn("[dbg] got existing cache object!!!", "name", v.name)
+	}
+	return c
 }
 func (v *domainVisible) returnGetFromFileCache(c *DomainGetFromFileCache) {
 	c.LogStats(v.name)
