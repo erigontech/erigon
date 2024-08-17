@@ -100,7 +100,7 @@ func (e *TraceWorker) ChangeBlock(header *types.Header) {
 }
 
 func (e *TraceWorker) GetLogs(txIdx int, txn types.Transaction) types.Logs {
-	return e.ibs.GetLogs(txn.Hash())
+	return e.ibs.GetLogs(txn.Hash(), e.blockNum, e.header.Hash())
 }
 
 func (e *TraceWorker) ExecTxn(txNum uint64, txIndex int, txn types.Transaction) (*evmtypes.ExecutionResult, error) {
