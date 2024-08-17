@@ -59,6 +59,9 @@ func (api *OtterscanAPIImpl) GetBlockDetailsByHash(ctx context.Context, hash com
 	if err != nil {
 		return nil, err
 	}
+	if blockNumber == nil {
+		return nil, fmt.Errorf("couldn't find block number for hash %v", hash.Bytes())
+	}
 	b, err := api.blockWithSenders(ctx, tx, hash, *blockNumber)
 	if err != nil {
 		return nil, err

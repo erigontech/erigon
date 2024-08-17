@@ -212,6 +212,9 @@ func (api *BaseAPI) blockByHashWithSenders(ctx context.Context, tx kv.Tx, hash c
 	if err != nil {
 		return nil, err
 	}
+	if number == nil {
+		return nil, nil
+	}
 
 	return api.blockWithSenders(ctx, tx, hash, *number)
 }

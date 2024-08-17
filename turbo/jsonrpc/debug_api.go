@@ -302,6 +302,9 @@ func (api *PrivateDebugAPIImpl) AccountAt(ctx context.Context, blockHash common.
 	if err != nil {
 		return &AccountResult{}, err
 	}
+	if number == nil {
+		return nil, nil // not error, see https://github.com/erigontech/erigon/issues/1645
+	}
 	canonicalHash, _ := api._blockReader.CanonicalHash(ctx, tx, *number)
 	isCanonical := canonicalHash == blockHash
 	if !isCanonical {

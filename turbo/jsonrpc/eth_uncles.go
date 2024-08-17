@@ -138,6 +138,9 @@ func (api *APIImpl) GetUncleCountByBlockHash(ctx context.Context, hash common.Ha
 	if err != nil {
 		return nil, err
 	}
+	if number == nil {
+		return nil, nil // not error, see https://github.com/erigontech/erigon/issues/1645
+	}
 
 	block, err := api.blockWithSenders(ctx, tx, hash, *number)
 	if err != nil {
