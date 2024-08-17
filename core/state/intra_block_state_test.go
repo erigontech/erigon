@@ -359,9 +359,9 @@ func (test *snapshotTest) checkEqual(state, checkstate *IntraBlockState) error {
 		return fmt.Errorf("got GetRefund() == %d, want GetRefund() == %d",
 			state.GetRefund(), checkstate.GetRefund())
 	}
-	if !reflect.DeepEqual(state.GetLogs(0, 0, libcommon.Hash{}), checkstate.GetLogs(0, 0, libcommon.Hash{})) {
+	if !reflect.DeepEqual(state.GetRawLogs(0), checkstate.GetRawLogs(0)) {
 		return fmt.Errorf("got GetLogs(libcommon.Hash{}) == %v, want GetLogs(libcommon.Hash{}) == %v",
-			state.GetLogs(0, 0, libcommon.Hash{}), checkstate.GetLogs(0, 0, libcommon.Hash{}))
+			state.GetRawLogs(0), checkstate.GetRawLogs(0))
 	}
 	return nil
 }

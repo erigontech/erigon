@@ -206,7 +206,7 @@ func (rw *HistoricalTraceWorker) RunTxTask(txTask *state.TxTask) {
 			txTask.UsedGas = applyRes.UsedGas
 			// Update the state with pending changes
 			ibs.SoftFinalise()
-			txTask.Logs = ibs.GetLogs(txTask.TxIndex, rw.blockNum, rw.blockHash)
+			txTask.Logs = ibs.GetRawLogs(txTask.TxIndex)
 		}
 		//txTask.Tracer = tracer
 	}

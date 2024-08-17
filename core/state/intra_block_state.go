@@ -168,10 +168,14 @@ func (sdb *IntraBlockState) AddLog(log2 *types.Log) {
 	sdb.logSize++
 }
 
-func (sdb *IntraBlockState) GetLogs(txIndex int, blockNumber uint64, blockHash libcommon.Hash) []*types.Log {
+func (sdb *IntraBlockState) GetRawLogs(txIndex int) []*types.Log {
+	return sdb.logs[txIndex]
+}
+
+func (sdb *IntraBlockState) GetLogs(txIndex int, txnHash libcommon.Hash, blockNumber uint64, blockHash libcommon.Hash) []*types.Log {
 	logs := sdb.logs[txIndex]
 	for _, l := range logs {
-		//log2.TxHash = sdb.thash
+		l.TxHash = txnHash
 		l.BlockNumber = blockNumber
 		l.BlockHash = blockHash
 	}
