@@ -25,6 +25,12 @@ func codeBitmap(code []byte) []uint64 {
 	// ends with a PUSH32, the algorithm will push zeroes onto the
 	// bitvector outside the bounds of the actual code.
 	bits := make(bitvec2, (len(code)+32+63)/64)
+	codeBitmapInternal(code, bits)
+	return bits
+}
+
+func codeBitmapInternal(code []byte, bits bitvec2) {
+	_ = bits[(len(code)+32+63)/64-1]
 	for pc := uint64(0); pc < uint64(len(code)); {
 		op := OpCode(code[pc])
 		pc++
@@ -32,26 +38,15 @@ func codeBitmap(code []byte) []uint64 {
 			continue
 		}
 		if op == PUSH1 {
-			bits[pc/64] |= 1 << (pc % 64)
+			bits.set1(pc)
 			pc += 1
 			continue
 		}
 
 		numbits := uint64(op - PUSH1 + 1)
-		x := uint64(1)<<numbits - 1 // Set N first bits
-		shift := pc % 64
-		bits[pc/64] |= x << shift
-		if shift > 32 {
-			bits[pc/64+1] = x >> (64 - shift)
-		}
+		bits.setN(uint64(1)<<numbits-1, pc)
 		pc += numbits
 	}
-	return bits
-}
-
-func codeBitmapInternal(code []byte, bits bitvec2) {
-	_ = bits[(len(code)+32+63)/64-1]
-
 }
 
 const (
@@ -130,7 +125,6 @@ func (bits bitvec) codeSegment(pos uint64) bool {
 	return ((bits[pos/8] >> (pos % 8)) & 1) == 0
 }
 func codeBitmapInternal2(code, bits bitvec) {
-	_ = bits[(len(code)/8+1+4)-1]
 	for pc := uint64(0); pc < uint64(len(code)); {
 		op := OpCode(code[pc])
 		pc++
