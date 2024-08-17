@@ -52,12 +52,25 @@ func (c *DomainGetFromFileCache) LogStats(dt kv.Domain) {
 
 func NewDomainGetFromFileCacheAny() any { return NewDomainGetFromFileCache() }
 func newDomainVisible(name kv.Domain, files []visibleFile) *domainVisible {
-	return &domainVisible{
+	d := &domainVisible{
 		name:   name,
 		files:  files,
 		caches: &sync.Pool{New: NewDomainGetFromFileCacheAny},
 	}
+	// Not on hot-path: better pre-alloc here
+	d.preAlloc()
+	return d
 }
+func (v *domainVisible) preAlloc() {
+	var preAlloc [10]any
+	for i := 0; i < len(preAlloc); i++ {
+		preAlloc[i] = v.caches.Get()
+	}
+	for i := 0; i < len(preAlloc); i++ {
+		v.caches.Put(preAlloc[i])
+	}
+}
+
 func (v *domainVisible) newGetFromFileCache() *DomainGetFromFileCache {
 	if v.name == kv.CommitmentDomain {
 		return nil
@@ -104,10 +117,22 @@ func (c *IISeekInFilesCache) LogStats(fileBaseName string) {
 
 func NewIISeekInFilesCacheAny() any { return NewIISeekInFilesCache() }
 func newIIVisible(name string, files []visibleFile) *iiVisible {
-	return &iiVisible{
+	ii := &iiVisible{
 		name:   name,
 		files:  files,
 		caches: &sync.Pool{New: NewIISeekInFilesCacheAny},
+	}
+	// Not on hot-path: better pre-alloc here
+	ii.preAlloc()
+	return ii
+}
+func (v *iiVisible) preAlloc() {
+	var preAlloc [10]any
+	for i := 0; i < len(preAlloc); i++ {
+		preAlloc[i] = v.caches.Get()
+	}
+	for i := 0; i < len(preAlloc); i++ {
+		v.caches.Put(preAlloc[i])
 	}
 }
 func (v *iiVisible) newSeekInFilesCache() *IISeekInFilesCache {
