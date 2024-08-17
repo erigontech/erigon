@@ -60,7 +60,7 @@ func TestJumpDestAnalysis(t *testing.T) {
 		{[]byte{byte(PUSH32)}, 0b0000_0001, 4},
 	}
 	for _, test := range tests {
-		ret := codeBitmap(test.code)
+		ret := codeBitmap2(test.code)
 		if ret[test.which] != test.exp {
 			t.Fatalf("expected %x, got %02x", test.exp, ret[test.which])
 		}
@@ -120,7 +120,7 @@ func BenchmarkJumpDest(b *testing.B) {
 
 const analysisCodeSize = 1200 * 1024
 
-func BenchmarkJumpdestOpAnalysis_New(bench *testing.B) {
+func BenchmarkJumpdestOpAnalysis(bench *testing.B) {
 	var op OpCode
 	bencher := func(b *testing.B) {
 		code := make([]byte, analysisCodeSize)
@@ -132,7 +132,7 @@ func BenchmarkJumpdestOpAnalysis_New(bench *testing.B) {
 		b.ResetTimer()
 		for i := 0; i < b.N; i++ {
 			clear(bits)
-			codeBitmapInternal(code, bits)
+			codeBitmapInternal2(code, bits)
 		}
 	}
 	for op = PUSH1; op <= PUSH32; op++ {
