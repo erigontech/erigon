@@ -168,10 +168,6 @@ func (sdb *IntraBlockState) AddLog(log2 *types.Log) {
 	sdb.logSize++
 }
 
-func (sdb *IntraBlockState) GetRawLogs(txIndex int) []*types.Log {
-	return sdb.logs[txIndex]
-}
-
 func (sdb *IntraBlockState) GetLogs(txIndex int, txnHash libcommon.Hash, blockNumber uint64, blockHash libcommon.Hash) []*types.Log {
 	logs := sdb.logs[txIndex]
 	for _, l := range logs {
@@ -180,6 +176,12 @@ func (sdb *IntraBlockState) GetLogs(txIndex int, txnHash libcommon.Hash, blockNu
 		l.BlockHash = blockHash
 	}
 	return logs
+}
+
+// GetRawLogs - is like GetLogs, but allow postpone calculation of `txn.Hash()`.
+// Example: if you need filter logs and only then set `txn.Hash()` for filtered logs - then no reason to calc for all transactions.
+func (sdb *IntraBlockState) GetRawLogs(txIndex int) []*types.Log {
+	return sdb.logs[txIndex]
 }
 
 func (sdb *IntraBlockState) Logs() []*types.Log {
