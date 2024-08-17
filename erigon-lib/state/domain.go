@@ -127,11 +127,10 @@ func newDomainVisible(name kv.Domain, files []visibleFile) *domainVisible {
 	}
 }
 func (v *domainVisible) newGetFromFileCache() *DomainGetFromFileCache {
-	c := v.caches.Get().(*DomainGetFromFileCache)
-	if c.Metrics().Hits > 0 {
-		log.Warn("[dbg] got existing cache object!!!", "name", v.name)
+	if v.name == kv.CommitmentDomain {
+		return nil
 	}
-	return c
+	return v.caches.Get().(*DomainGetFromFileCache)
 }
 func (v *domainVisible) returnGetFromFileCache(c *DomainGetFromFileCache) {
 	if c == nil {
