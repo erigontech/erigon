@@ -138,6 +138,9 @@ func (v *domainVisible) newGetFromFileCache() *DomainGetFromFileCache {
 }
 func (v *domainVisible) returnGetFromFileCache(c *DomainGetFromFileCache) {
 	c.LogStats(v.name)
+	if c.Metrics().Hits > 0 {
+		log.Warn("[dbg] put non-empty cache object!!!", "name", v.name)
+	}
 	v.caches.Put(c)
 }
 
