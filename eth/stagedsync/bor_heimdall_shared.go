@@ -481,7 +481,7 @@ func fetchAndWriteHeimdallStateSyncEvents(
 
 		// this check is currently only tested and working on amoy - it should work for
 		// current bor-mainet but will fail for some historical blocks
-		if chainID != "137" {
+		if !(chainID == "137" || chainID == "1337") {
 			if lastStateSyncEventID+1 != eventRecord.ID || eventRecord.ChainID != chainID ||
 				!(eventRecord.Time.After(from) && eventRecord.Time.Before(to)) {
 				return lastStateSyncEventID, i, time.Since(fetchStart), fmt.Errorf(
