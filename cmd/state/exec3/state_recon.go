@@ -353,7 +353,7 @@ func (rw *ReconWorker) runTxTask(txTask *state.TxTask) error {
 	} else {
 		gp := new(core.GasPool).AddGas(txTask.Tx.GetGas()).AddBlobGas(txTask.Tx.GetBlobGas())
 		vmConfig := vm.Config{NoReceipts: true, SkipAnalysis: txTask.SkipAnalysis}
-		ibs.SetTxContext(txTask.Tx.Hash(), txTask.TxIndex)
+		ibs.SetTxContext(txTask.TxIndex)
 		msg := txTask.TxAsMessage
 
 		rw.evm.ResetBetweenBlocks(txTask.EvmBlockContext, core.NewEVMTxContext(msg), ibs, vmConfig, txTask.Rules)
