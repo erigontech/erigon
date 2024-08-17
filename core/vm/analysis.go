@@ -20,16 +20,16 @@
 package vm
 
 // codeBitmap collects data locations in code.
-func codeBitmap(code []byte) []uint64 {
+func codeBitmap3(code []byte) []uint64 {
 	// The bitmap is 4 bytes longer than necessary, in case the code
 	// ends with a PUSH32, the algorithm will push zeroes onto the
 	// bitvector outside the bounds of the actual code.
 	bits := make([]uint64, (len(code)+32+63)/64)
-	codeBitmapInternal(code, bits)
+	codeBitmapInternal3(code, bits)
 	return bits
 }
 
-func codeBitmapInternal(code []byte, bits []uint64) {
+func codeBitmapInternal3(code []byte, bits []uint64) {
 	for pc := uint64(0); pc < uint64(len(code)); {
 		op := OpCode(code[pc])
 		pc++
@@ -37,15 +37,48 @@ func codeBitmapInternal(code []byte, bits []uint64) {
 			continue
 		}
 		numbits := uint64(op - PUSH1)
-		x := uint64(1) << numbits
-		x = x | (x - 1) // Smear the bit to the right
-		idx := pc / 64
+		x := uint64(1)<<numbits | (uint64(1)<<numbits - 1)
 		shift := pc & 63
-		bits[idx] |= x << shift
-		if shift+shift > 64 {
-			bits[idx+1] |= x >> (64 - shift)
+		bits[pc/64] |= x << shift
+		if shift > 32 {
+			bits[pc/64+1] = x >> (64 - shift)
 		}
 		pc += numbits + 1
+	}
+}
+
+// codeBitmap collects data locations in code.
+func codeBitmap(code []byte) []uint64 {
+	// The bitmap is 4 bytes longer than necessary, in case the code
+	// ends with a PUSH32, the algorithm will push zeroes onto the
+	// bitvector outside the bounds of the actual code.
+	bits := make(bitvec2, (len(code)+32+63)/64)
+	codeBitmapInternal(code, bits)
+	return bits
+}
+
+func codeBitmapInternal(code []byte, bits bitvec2) {
+	for pc := uint64(0); pc < uint64(len(code)); {
+		op := OpCode(code[pc])
+		pc++
+		if int8(op) < int8(PUSH1) { // If not PUSH (the int8(op) > int(PUSH32) is always false).
+			continue
+		}
+		switch op {
+		case PUSH1:
+			bits[pc/64] |= 1 << (pc % 64)
+			pc += 1
+			continue
+		}
+
+		numbits := uint64(op - PUSH1 + 1)
+		x := uint64(1)<<numbits - 1
+		idx, shift := pc/64, pc&63
+		bits[idx] |= x << shift
+		if shift > 32 {
+			bits[idx+1] = x >> (64 - shift)
+		}
+		pc += numbits
 	}
 }
 
@@ -66,6 +99,40 @@ func codeBitmap2(code []byte) bitvec {
 	bits := make(bitvec, len(code)/8+1+4)
 	codeBitmapInternal2(code, bits)
 	return bits
+}
+
+// bitvec is a bit vector which maps bytes in a program.
+// An unset bit means the byte is an opcode, a set bit means
+// it's data (i.e. argument of PUSHxx).
+type bitvec2 []uint64
+
+func (bits bitvec2) set1(pos uint64) {
+	bits[pos/64] |= 1 << (pos % 64)
+}
+
+func (bits bitvec2) setN(flag uint16, pos uint64) {
+	shift := pos & 63
+	bits[pos/64] |= uint64(flag) << shift
+	if shift > 32 {
+		bits[pos/64+1] = uint64(flag) >> (64 - shift)
+	}
+}
+
+func (bits bitvec2) set8(pos uint64) {
+	a := uint64(0xFF << (pos % 64))
+	bits[pos/64] |= a
+	//bits[pos/64+1] = ^a
+}
+
+func (bits bitvec2) set16(pos uint64) {
+	a := uint64(0xFFFF << (pos % 64))
+	bits[pos/64] |= a
+	//bits[pos/64+1] = ^a
+}
+
+// codeSegment checks if the position is in a code segment.
+func (bits bitvec2) codeSegment(pos uint64) bool {
+	return bits[pos/64]&(uint64(1)<<(pos&63)) == 0
 }
 
 // bitvec is a bit vector which maps bytes in a program.

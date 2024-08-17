@@ -20,6 +20,7 @@
 package vm
 
 import (
+	"fmt"
 	"math/bits"
 	"testing"
 
@@ -31,6 +32,43 @@ import (
 )
 
 func TestJumpDestAnalysis(t *testing.T) {
+	pc, numbits := 63, 3
+	x := uint64(1) << numbits
+	x = x | (x - 1) // Smear the bit to the right
+	shift := pc & 63
+	fmt.Printf("1: %b,%b,%b,%b\n", x, x<<shift, x>>(64-shift), ^x)
+
+	t.Parallel()
+	tests := []struct {
+		code  []byte
+		exp   uint64
+		which int
+	}{
+		//{[]byte{byte(PUSH1), 0x01, 0x01, 0x01}, 0x02, 0},
+		//{[]byte{byte(PUSH1), byte(PUSH1), byte(PUSH1), byte(PUSH1)}, 0x0a, 0},
+		{[]byte{byte(PUSH8), byte(PUSH8), byte(PUSH8), byte(PUSH8), byte(PUSH8), byte(PUSH8), byte(PUSH8), byte(PUSH8), 0x01, 0x01, 0x01}, 0x01fe, 0},
+		{[]byte{byte(PUSH8), 0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01}, 0x01fe, 0},
+		{[]byte{0x01, 0x01, 0x01, 0x01, 0x01, byte(PUSH2), byte(PUSH2), byte(PUSH2), 0x01, 0x01, 0x01}, 0xc0, 0},
+		{[]byte{0x01, 0x01, 0x01, 0x01, 0x01, byte(PUSH2), 0x01, 0x01, 0x01, 0x01, 0x01}, 0xc0, 0},
+		{[]byte{byte(PUSH3), 0x01, 0x01, 0x01, byte(PUSH1), 0x01, 0x01, 0x01, 0x01, 0x01, 0x01}, 0x2e, 0},
+		{[]byte{0x01, byte(PUSH8), 0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01}, 0x03fc, 0},
+		{[]byte{byte(PUSH16), 0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01}, 0x01fffe, 0},
+		{[]byte{byte(PUSH8), 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, byte(PUSH1), 0x01}, 0x05fe, 0},
+		{[]byte{byte(PUSH32)}, 0x01fffffffe, 0},
+		//{[]byte{byte(PUSH32)}, 0b1111_1110, 0},
+		//{[]byte{byte(PUSH32)}, 0b1111_1111, 1},
+		//{[]byte{byte(PUSH32)}, 0b1111_1111, 2},
+		//{[]byte{byte(PUSH32)}, 0b1111_1111, 3},
+		//{[]byte{byte(PUSH32)}, 0b0000_0001, 4},
+	}
+	for i, test := range tests {
+		ret := codeBitmap(test.code)
+		if ret[test.which] != test.exp {
+			t.Fatalf("%d: expected %b, got %b", i, test.exp, ret[test.which])
+		}
+	}
+}
+func TestJumpDestAnalysis2(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
 		code  []byte
@@ -59,10 +97,10 @@ func TestJumpDestAnalysis(t *testing.T) {
 		{[]byte{byte(PUSH32)}, 0b1111_1111, 3},
 		{[]byte{byte(PUSH32)}, 0b0000_0001, 4},
 	}
-	for _, test := range tests {
+	for i, test := range tests {
 		ret := codeBitmap2(test.code)
 		if ret[test.which] != test.exp {
-			t.Fatalf("expected %x, got %02x", test.exp, ret[test.which])
+			t.Fatalf("%d: expected %x, got %02x", i, test.exp, ret[test.which])
 		}
 	}
 }
@@ -120,26 +158,87 @@ func BenchmarkJumpDest(b *testing.B) {
 
 const analysisCodeSize = 1200 * 1024
 
-func BenchmarkJumpdestOpAnalysis(bench *testing.B) {
-	var op OpCode
-	bencher := func(b *testing.B) {
-		code := make([]byte, analysisCodeSize)
-		b.SetBytes(analysisCodeSize)
-		for i := range code {
-			code[i] = byte(op)
-		}
-		bits := make(bitvec, len(code)/8+1+4)
-		b.ResetTimer()
+func BenchmarkName(b *testing.B) {
+	b.Run("1", func(b *testing.B) {
 		for i := 0; i < b.N; i++ {
-			clear(bits)
-			codeBitmapInternal2(code, bits)
+			_ = i % 64
 		}
-	}
-	for op = PUSH1; op <= PUSH32; op++ {
+	})
+	b.Run("2", func(b *testing.B) {
+		for i := 0; i < b.N; i++ {
+			_ = i & 63
+		}
+	})
+}
+func BenchmarkJumpdestOpAnalysis(bench *testing.B) {
+	bench.Run("0", func(b *testing.B) {
+		var op OpCode
+		bencher := func(b *testing.B) {
+			code := make([]byte, analysisCodeSize)
+			b.SetBytes(analysisCodeSize)
+			for i := range code {
+				code[i] = byte(op)
+			}
+			bits := make([]uint64, (len(code)+32+63)/64)
+			b.ResetTimer()
+			for i := 0; i < b.N; i++ {
+				clear(bits)
+				codeBitmapInternal3(code, bits)
+			}
+		}
+		for op = PUSH1; op <= PUSH2; op++ {
+			bench.Run(op.String(), bencher)
+		}
+		op = JUMPDEST
 		bench.Run(op.String(), bencher)
-	}
-	op = JUMPDEST
-	bench.Run(op.String(), bencher)
-	op = STOP
-	bench.Run(op.String(), bencher)
+		op = STOP
+		bench.Run(op.String(), bencher)
+	})
+	bench.Run("1", func(b *testing.B) {
+		var op OpCode
+		bencher := func(b *testing.B) {
+			code := make([]byte, analysisCodeSize)
+			b.SetBytes(analysisCodeSize)
+			for i := range code {
+				code[i] = byte(op)
+			}
+			bits := make([]uint64, (len(code)+32+63)/64)
+			b.ResetTimer()
+			for i := 0; i < b.N; i++ {
+				clear(bits)
+				codeBitmapInternal(code, bits)
+			}
+		}
+		for op = PUSH1; op <= PUSH2; op++ {
+			bench.Run(op.String(), bencher)
+		}
+		op = JUMPDEST
+		bench.Run(op.String(), bencher)
+		op = STOP
+		bench.Run(op.String(), bencher)
+	})
+	bench.Run("2", func(b *testing.B) {
+		var op OpCode
+		bencher := func(b *testing.B) {
+			code := make([]byte, analysisCodeSize)
+			b.SetBytes(analysisCodeSize)
+			for i := range code {
+				code[i] = byte(op)
+			}
+			bits := make(bitvec, len(code)/8+1+4)
+			b.ResetTimer()
+			for i := 0; i < b.N; i++ {
+				clear(bits)
+				codeBitmapInternal2(code, bits)
+			}
+		}
+		for op = PUSH1; op <= PUSH2; op++ {
+			bench.Run(op.String(), bencher)
+		}
+		op = JUMPDEST
+		bench.Run(op.String(), bencher)
+		op = STOP
+		bench.Run(op.String(), bencher)
+	})
+
 }

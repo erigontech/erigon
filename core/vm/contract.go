@@ -142,7 +142,7 @@ func (c *Contract) isCode(udest uint64) bool {
 		if !exist {
 			// Do the analysis and save in parent context
 			// We do not need to store it in c.analysis
-			analysis = codeBitmap(c.Code)
+			analysis = codeBitmap2(c.Code)
 			c.jumpdests.Add(c.CodeHash, analysis)
 		} else {
 			c.jumpdests.hit++
@@ -157,7 +157,7 @@ func (c *Contract) isCode(udest uint64) bool {
 	// we don't have to recalculate it for every JUMP instruction in the execution
 	// However, we don't save it within the parent context
 	if c.analysis == nil {
-		c.analysis = codeBitmap(c.Code)
+		c.analysis = codeBitmap2(c.Code)
 	}
 
 	return c.analysis.codeSegment(udest)
