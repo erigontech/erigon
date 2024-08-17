@@ -121,12 +121,9 @@ type domainVisible struct {
 
 func newDomainVisible(name kv.Domain, files []visibleFile) *domainVisible {
 	return &domainVisible{
-		name:  name,
-		files: files,
-		caches: &sync.Pool{New: func() interface{} {
-			return NewDomainGetFromFileCache(false)
-		},
-		},
+		name:   name,
+		files:  files,
+		caches: &sync.Pool{New: NewDomainGetFromFileCacheAny},
 	}
 }
 func (v *domainVisible) newGetFromFileCache() *DomainGetFromFileCache {

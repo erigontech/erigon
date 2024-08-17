@@ -32,6 +32,8 @@ var (
 	domainGetFromFileCacheTrace = dbg.EnvBool("D_LRU_TRACE", false)
 )
 
+func NewDomainGetFromFileCacheAny() any { return NewDomainGetFromFileCache() }
+
 func NewDomainGetFromFileCache() *DomainGetFromFileCache {
 	c, err := freelru.New[u128, domainGetFromFileCacheItem](domainGetFromFileCacheLimit, u128noHash)
 	if err != nil {
