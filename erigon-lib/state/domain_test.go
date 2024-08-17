@@ -106,7 +106,7 @@ func TestDomain_OpenFolder(t *testing.T) {
 
 	collateAndMerge(t, db, nil, d, txs)
 
-	list := d._visibleFiles
+	list := d._visibleFiles.files
 	require.NotEmpty(t, list)
 	ff := list[len(list)-1]
 	fn := ff.src.decompressor.FilePath()
@@ -858,8 +858,8 @@ func TestDomain_OpenFilesWithDeletions(t *testing.T) {
 	require.NoError(t, err)
 
 	run1Doms, run1Hist := make([]string, 0), make([]string, 0)
-	for i := 0; i < len(dom._visibleFiles); i++ {
-		run1Doms = append(run1Doms, dom._visibleFiles[i].src.decompressor.FileName())
+	for i := 0; i < len(dom._visibleFiles.files); i++ {
+		run1Doms = append(run1Doms, dom._visibleFiles.files[i].src.decompressor.FileName())
 		// should be equal length
 		run1Hist = append(run1Hist, dom.History._visibleFiles[i].src.decompressor.FileName())
 	}
@@ -879,11 +879,11 @@ func TestDomain_OpenFilesWithDeletions(t *testing.T) {
 
 	// domain files for same range should not be available so lengths should match
 	require.Len(t, dom._visibleFiles, len(run1Doms)-len(removedHist))
-	require.Len(t, dom.History._visibleFiles, len(dom._visibleFiles))
+	require.Len(t, dom.History._visibleFiles, len(dom._visibleFiles.files))
 	require.Len(t, dom.History._visibleFiles, len(run1Hist)-len(removedHist))
 
-	for i := 0; i < len(dom._visibleFiles); i++ {
-		require.EqualValuesf(t, run1Doms[i], dom._visibleFiles[i].src.decompressor.FileName(), "kv i=%d", i)
+	for i := 0; i < len(dom._visibleFiles.files); i++ {
+		require.EqualValuesf(t, run1Doms[i], dom._visibleFiles.files[i].src.decompressor.FileName(), "kv i=%d", i)
 		require.EqualValuesf(t, run1Hist[i], dom.History._visibleFiles[i].src.decompressor.FileName(), " v i=%d", i)
 	}
 
