@@ -20,61 +20,6 @@
 package vm
 
 // codeBitmap collects data locations in code.
-func codeBitmap3(code []byte) []uint64 {
-	// The bitmap is 4 bytes longer than necessary, in case the code
-	// ends with a PUSH32, the algorithm will push zeroes onto the
-	// bitvector outside the bounds of the actual code.
-	bits := make(bitvec2, (len(code)+32+63)/64)
-	codeBitmapInternal3(code, bits)
-	return bits
-}
-
-func codeBitmapInternal3(code []byte, bits bitvec2) {
-	_ = bits[(len(code)+32+63)/64-1]
-	for pc := uint64(0); pc < uint64(len(code)); {
-		op := OpCode(code[pc])
-		pc++
-		if int8(op) < int8(PUSH1) { // If not PUSH (the int8(op) > int(PUSH32) is always false).
-			continue
-		}
-		switch op {
-		case PUSH1:
-			bits.set1(pc)
-			pc += 1
-			continue
-		case PUSH2:
-			bits.setN(uint64(set2BitsMask), pc)
-			pc += 2
-			continue
-		case PUSH3:
-			bits.setN(uint64(set3BitsMask), pc)
-			pc += 3
-			continue
-		case PUSH4:
-			bits.setN(uint64(set4BitsMask), pc)
-			pc += 4
-			continue
-		case PUSH5:
-			bits.setN(uint64(set5BitsMask), pc)
-			pc += 5
-			continue
-		case PUSH6:
-			bits.setN(uint64(set6BitsMask), pc)
-			pc += 5
-			continue
-		case PUSH7:
-			bits.setN(uint64(set7BitsMask), pc)
-			pc += 5
-			continue
-		}
-
-		numbits := uint64(op - PUSH1 + 1)
-		bits.setN(uint64(1)<<numbits-1, pc)
-		pc += numbits
-	}
-}
-
-// codeBitmap collects data locations in code.
 func codeBitmap(code []byte) []uint64 {
 	// The bitmap is 4 bytes longer than necessary, in case the code
 	// ends with a PUSH32, the algorithm will push zeroes onto the
