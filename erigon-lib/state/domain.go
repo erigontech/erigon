@@ -113,31 +113,11 @@ type domainCfg struct {
 	replaceKeysInValues         bool
 	restrictSubsetFileDeletions bool
 }
+
 type domainVisible struct {
 	files  []visibleFile
 	name   kv.Domain
 	caches *sync.Pool
-}
-
-func newDomainVisible(name kv.Domain, files []visibleFile) *domainVisible {
-	return &domainVisible{
-		name:   name,
-		files:  files,
-		caches: &sync.Pool{New: NewDomainGetFromFileCacheAny},
-	}
-}
-func (v *domainVisible) newGetFromFileCache() *DomainGetFromFileCache {
-	if v.name == kv.CommitmentDomain {
-		return nil
-	}
-	return v.caches.Get().(*DomainGetFromFileCache)
-}
-func (v *domainVisible) returnGetFromFileCache(c *DomainGetFromFileCache) {
-	if c == nil {
-		return
-	}
-	c.LogStats(v.name)
-	v.caches.Put(c)
 }
 
 func NewDomain(cfg domainCfg, aggregationStep uint64, name kv.Domain, valsTable, indexKeysTable, historyValsTable, indexTable string, integrityCheck func(name kv.Domain, fromStep, toStep uint64) bool, logger log.Logger) (*Domain, error) {

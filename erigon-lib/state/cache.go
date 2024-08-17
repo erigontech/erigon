@@ -2,6 +2,7 @@ package state
 
 import (
 	"fmt"
+	"sync"
 
 	"github.com/elastic/go-freelru"
 	"github.com/erigontech/erigon-lib/common/dbg"
@@ -39,7 +40,6 @@ func NewDomainGetFromFileCache() *DomainGetFromFileCache {
 	}
 	return &DomainGetFromFileCache{LRU: c, trace: domainGetFromFileCacheTrace}
 }
-func NewDomainGetFromFileCacheAny() any { return NewDomainGetFromFileCache() }
 
 func (c *DomainGetFromFileCache) SetTrace(v bool) { c.trace = v }
 func (c *DomainGetFromFileCache) LogStats(dt kv.Domain) {
@@ -48,6 +48,28 @@ func (c *DomainGetFromFileCache) LogStats(dt kv.Domain) {
 	}
 	m := c.Metrics()
 	log.Warn("[dbg] DomainGetFromFileCache", "a", dt.String(), "hit", m.Hits, "total", m.Hits+m.Misses, "Collisions", m.Collisions, "Evictions", m.Evictions, "Inserts", m.Inserts, "limit", domainGetFromFileCacheLimit, "ratio", fmt.Sprintf("%.2f", float64(m.Hits)/float64(m.Hits+m.Misses)))
+}
+
+func NewDomainGetFromFileCacheAny() any { return NewDomainGetFromFileCache() }
+func newDomainVisible(name kv.Domain, files []visibleFile) *domainVisible {
+	return &domainVisible{
+		name:   name,
+		files:  files,
+		caches: &sync.Pool{New: NewDomainGetFromFileCacheAny},
+	}
+}
+func (v *domainVisible) newGetFromFileCache() *DomainGetFromFileCache {
+	if v.name == kv.CommitmentDomain {
+		return nil
+	}
+	return v.caches.Get().(*DomainGetFromFileCache)
+}
+func (v *domainVisible) returnGetFromFileCache(c *DomainGetFromFileCache) {
+	if c == nil {
+		return
+	}
+	c.LogStats(v.name)
+	v.caches.Put(c)
 }
 
 var (
@@ -64,17 +86,37 @@ type iiSeekInFilesCacheItem struct {
 	requested, found uint64
 }
 
-func NewIISeekInFilesCache(trace bool) *IISeekInFilesCache {
+func NewIISeekInFilesCache() *IISeekInFilesCache {
 	c, err := freelru.New[u128, iiSeekInFilesCacheItem](iiGetFromFileCacheLimit, u128noHash)
 	if err != nil {
 		panic(err)
 	}
-	return &IISeekInFilesCache{LRU: c, trace: trace || iiGetFromFileCacheTrace}
+	return &IISeekInFilesCache{LRU: c, trace: iiGetFromFileCacheTrace}
 }
+func (c *IISeekInFilesCache) SetTrace(v bool) { c.trace = v }
 func (c *IISeekInFilesCache) LogStats(fileBaseName string) {
 	if c == nil || !c.trace {
 		return
 	}
 	m := c.Metrics()
 	log.Warn("[dbg] IISeekInFilesCache", "a", fileBaseName, "hit", c.hit, "total", c.total, "Collisions", m.Collisions, "Evictions", m.Evictions, "Inserts", m.Inserts, "limit", iiGetFromFileCacheLimit, "ratio", fmt.Sprintf("%.2f", float64(c.hit)/float64(c.total)))
+}
+
+func NewIISeekInFilesCacheAny() any { return NewIISeekInFilesCache() }
+func newIIVisible(name string, files []visibleFile) *iiVisible {
+	return &iiVisible{
+		name:   name,
+		files:  files,
+		caches: &sync.Pool{New: NewIISeekInFilesCacheAny},
+	}
+}
+func (v *iiVisible) newSeekInFilesCache() *IISeekInFilesCache {
+	return v.caches.Get().(*IISeekInFilesCache)
+}
+func (v *iiVisible) returnSeekInFilesCache(c *IISeekInFilesCache) {
+	if c == nil {
+		return
+	}
+	c.LogStats(v.name)
+	v.caches.Put(c)
 }
