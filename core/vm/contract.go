@@ -129,10 +129,6 @@ func (c *Contract) validJumpdest(dest *uint256.Int) (bool, bool) {
 	return c.isCode(udest), true
 }
 
-func isCodeFromAnalysis(analysis []uint64, udest uint64) bool {
-	return analysis[udest/64]&(uint64(1)<<(udest&63)) == 0
-}
-
 // isCode returns true if the provided PC location is an actual opcode, as
 // opposed to a data-segment following a PUSHN operation.
 func (c *Contract) isCode(udest uint64) bool {
