@@ -539,10 +539,7 @@ func (api *OverlayAPIImpl) replayBlock(ctx context.Context, blockNum uint64, sta
 			log.Debug("[replayBlock] discarding txLogs because txn has status=failed", "transactionHash", txn.Hash())
 		} else {
 			//append logs only if txn has not reverted
-			txLogs := statedb.GetLogs(statedb.TxIndex(), blockNum, header.Hash())
-			for i := 0; i < len(txLogs); i++ {
-				txLogs[i].TxHash = txn.Hash()
-			}
+			txLogs := statedb.GetLogs(statedb.TxIndex(), txn.Hash(), blockNum, header.Hash())
 			log.Debug("[replayBlock]", "len(txLogs)", len(txLogs), "transactionHash", txn.Hash())
 			blockLogs = append(blockLogs, txLogs...)
 		}
