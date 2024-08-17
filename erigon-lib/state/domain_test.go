@@ -878,7 +878,7 @@ func TestDomain_OpenFilesWithDeletions(t *testing.T) {
 	require.NoError(t, err)
 
 	// domain files for same range should not be available so lengths should match
-	require.Len(t, dom._visibleFiles, len(run1Doms)-len(removedHist))
+	require.Len(t, dom._visibleFiles.files, len(run1Doms)-len(removedHist))
 	require.Len(t, dom.History._visibleFiles, len(dom._visibleFiles.files))
 	require.Len(t, dom.History._visibleFiles, len(run1Hist)-len(removedHist))
 
