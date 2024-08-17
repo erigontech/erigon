@@ -422,7 +422,7 @@ func fetchAndWriteHeimdallStateSyncEvents(
 		return lastStateSyncEventID, 0, 0, nil
 	}
 
-	from, to, err := bor.CalculateEventWIndow(ctx, config, header, tx, blockReader)
+	from, to, err := bor.CalculateEventWindow(ctx, config, header, tx, blockReader)
 
 	if err != nil {
 		return lastStateSyncEventID, 0, time.Since(fetchStart), err

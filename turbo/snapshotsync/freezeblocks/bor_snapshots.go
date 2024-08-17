@@ -322,7 +322,7 @@ func checkBlockEvents(ctx context.Context, config *borcfg.BorConfig, blockReader
 		prevEventTime = &eventTime
 
 		if !checkBlockWindow(ctx, eventTime, config, header, tx, blockReader) {
-			from, to, _ := bor.CalculateEventWIndow(ctx, config, header, tx, blockReader)
+			from, to, _ := bor.CalculateEventWindow(ctx, config, header, tx, blockReader)
 
 			var diff time.Duration
 
@@ -431,7 +431,7 @@ func ValidateBorEvents(ctx context.Context, config *borcfg.BorConfig, db kv.RoDB
 }
 
 func checkBlockWindow(ctx context.Context, eventTime time.Time, config *borcfg.BorConfig, header *types.Header, tx kv.Getter, headerReader services.HeaderReader) bool {
-	from, to, err := bor.CalculateEventWIndow(ctx, config, header, tx, headerReader)
+	from, to, err := bor.CalculateEventWindow(ctx, config, header, tx, headerReader)
 
 	if err != nil {
 		return false
