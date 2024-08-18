@@ -491,8 +491,8 @@ func fetchAndWriteHeimdallStateSyncEvents(
 			return initialTime.After(from)
 		}
 
-		// this check is currently only tested and working on amoy - it should work for
-		// current bor-mainet but will fail for some historical blocks
+		// don't apply this for devnets we may have looser state event constraints
+		// (TODO these probably needs fixing)
 		if !(chainID == "1337") {
 			if lastStateSyncEventID+1 != eventRecord.ID || eventRecord.ChainID != chainID ||
 				!(afterCheck(from, eventRecord.Time, initialRecordTime) && eventRecord.Time.Before(to)) {
