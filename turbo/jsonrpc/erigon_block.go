@@ -56,7 +56,7 @@ func (api *ErigonImpl) GetHeaderByNumber(ctx context.Context, blockNumber rpc.Bl
 	}
 	defer tx.Rollback()
 
-	blockNum, _, _, err := rpchelper.GetBlockNumber(rpc.BlockNumberOrHashWithNumber(blockNumber), tx, api.filters)
+	blockNum, _, _, err := rpchelper.GetBlockNumber(ctx, rpc.BlockNumberOrHashWithNumber(blockNumber), tx, api._blockReader, api.filters)
 	if err != nil {
 		return nil, err
 	}
@@ -223,12 +223,12 @@ func (api *ErigonImpl) GetBalanceChangesInBlock(ctx context.Context, blockNrOrHa
 	defer tx.Rollback()
 
 	balancesMapping := make(map[common.Address]*hexutil.Big)
-	latestState, err := rpchelper.CreateStateReader(ctx, tx, blockNrOrHash, 0, api.filters, api.stateCache, "")
+	latestState, err := rpchelper.CreateStateReader(ctx, tx, api._blockReader, blockNrOrHash, 0, api.filters, api.stateCache, "")
 	if err != nil {
 		return nil, err
 	}
 
-	blockNumber, _, _, err := rpchelper.GetBlockNumber(blockNrOrHash, tx, api.filters)
+	blockNumber, _, _, err := rpchelper.GetBlockNumber(ctx, blockNrOrHash, tx, api._blockReader, api.filters)
 	if err != nil {
 		return nil, err
 	}

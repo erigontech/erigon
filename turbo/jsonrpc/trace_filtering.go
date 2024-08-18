@@ -32,7 +32,7 @@ import (
 	"github.com/erigontech/erigon-lib/kv/stream"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/consensus"
-	"github.com/erigontech/erigon/consensus/mainnet"
+	"github.com/erigontech/erigon/consensus/ethash"
 	"github.com/erigontech/erigon/core"
 	"github.com/erigontech/erigon/core/rawdb"
 	"github.com/erigontech/erigon/core/state"
@@ -189,7 +189,7 @@ func (api *TraceAPIImpl) Block(ctx context.Context, blockNr rpc.BlockNumber, gas
 		return nil, err
 	}
 	defer tx.Rollback()
-	blockNum, hash, _, err := rpchelper.GetBlockNumber(rpc.BlockNumberOrHashWithNumber(blockNr), tx, api.filters)
+	blockNum, hash, _, err := rpchelper.GetBlockNumber(ctx, rpc.BlockNumberOrHashWithNumber(blockNr), tx, api._blockReader, api.filters)
 	if err != nil {
 		return nil, err
 	}
@@ -323,7 +323,10 @@ func (api *TraceAPIImpl) Filter(ctx context.Context, req TraceFilterRequest, gas
 	}
 
 	if req.ToBlock == nil {
-		headNumber := rawdb.ReadHeaderNumber(dbtx, rawdb.ReadHeadHeaderHash(dbtx))
+		headNumber, err := api._blockReader.HeaderNumber(ctx, dbtx, rawdb.ReadHeadHeaderHash(dbtx))
+		if err != nil {
+			return err
+		}
 		toBlock = *headNumber
 	} else {
 		toBlock = uint64(*req.ToBlock)
@@ -458,7 +461,7 @@ func (api *TraceAPIImpl) filterV3(ctx context.Context, dbtx kv.TemporalTx, fromB
 				continue
 			}
 			// Block reward section, handle specially
-			minerReward, uncleRewards := mainnet.AccumulateRewards(chainConfig, lastHeader, body.Uncles)
+			minerReward, uncleRewards := ethash.AccumulateRewards(chainConfig, lastHeader, body.Uncles)
 			if _, ok := toAddresses[lastHeader.Coinbase]; ok || includeAll {
 				nSeen++
 				var tr ParityTrace

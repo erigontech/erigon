@@ -21,7 +21,6 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
-	"github.com/erigontech/erigon-lib/common"
 	"math"
 	"path"
 	"path/filepath"
@@ -30,6 +29,8 @@ import (
 	"strconv"
 	"sync"
 	"time"
+
+	"github.com/erigontech/erigon-lib/common"
 
 	btree2 "github.com/tidwall/btree"
 	"golang.org/x/sync/errgroup"

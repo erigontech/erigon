@@ -14,27 +14,37 @@
 // You should have received a copy of the GNU Lesser General Public License
 // along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
-package persistence
+package ethashcfg
 
 import (
-	"context"
-
-	"github.com/erigontech/erigon-lib/kv"
-	"github.com/erigontech/erigon/cl/cltypes"
-	"github.com/erigontech/erigon/cl/sentinel/peers"
+	"github.com/erigontech/erigon-lib/log/v3"
 )
 
-type BlockSource interface {
-	GetRange(ctx context.Context, tx kv.Tx, from uint64, count uint64) (*peers.PeeredObject[[]*cltypes.SignedBeaconBlock], error)
-	PurgeRange(ctx context.Context, tx kv.Tx, from uint64, count uint64) error
-	GetBlock(ctx context.Context, tx kv.Tx, slot uint64) (*peers.PeeredObject[*cltypes.SignedBeaconBlock], error)
+// Config are the configuration parameters of the ethash.
+type Config struct {
+	CachesInMem      int
+	CachesLockMmap   bool
+	DatasetDir       string
+	DatasetsInMem    int
+	DatasetsOnDisk   int
+	DatasetsLockMmap bool
+	PowMode          Mode
+
+	// When set, notifications sent by the remote sealer will
+	// be block header JSON objects instead of work package arrays.
+	NotifyFull bool
+
+	Log log.Logger `toml:"-"`
 }
 
-type BeaconChainWriter interface {
-	WriteBlock(ctx context.Context, tx kv.RwTx, block *cltypes.SignedBeaconBlock, canonical bool) error
-}
+// Mode defines the type and amount of PoW verification an ethash engine makes.
+type Mode uint
 
-type BeaconChainDatabase interface {
-	BlockSource
-	BeaconChainWriter
-}
+const (
+	ModeNormal Mode = iota
+	ModeShared
+	ModeTest
+
+	ModeFake
+	ModeFullFake
+)

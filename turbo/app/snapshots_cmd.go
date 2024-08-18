@@ -30,6 +30,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"slices"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -576,6 +577,15 @@ func checkIfBlockSnapshotsPublishable(snapDir string) error {
 	if sum != maxTo {
 		return fmt.Errorf("sum %d != maxTo %d", sum, maxTo)
 	}
+	if err := doBlockSnapshotsRangeCheck(snapDir, "headers"); err != nil {
+		return err
+	}
+	if err := doBlockSnapshotsRangeCheck(snapDir, "bodies"); err != nil {
+		return err
+	}
+	if err := doBlockSnapshotsRangeCheck(snapDir, "transactions"); err != nil {
+		return err
+	}
 	// Iterate over all fies in snapDir
 	return nil
 }
@@ -629,20 +639,6 @@ func checkIfStateSnapshotsPublishable(dir datadir.Dirs) error {
 				return fmt.Errorf("missing file %s at path %s", kveiFileName, filepath.Join(dir.SnapDomain, kveiFileName))
 			}
 
-			if snapType == "commitment" {
-				continue
-			}
-			// check that .v
-			vFileName := strings.Replace(expectedFileName, ".kv", ".v", 1)
-			if _, err := os.Stat(filepath.Join(dir.SnapHistory, vFileName)); err != nil {
-				return fmt.Errorf("missing file %s at path %s", vFileName, filepath.Join(dir.SnapHistory, vFileName))
-			}
-			// check for idx/*.ef
-			efFileName := strings.Replace(expectedFileName, ".kv", ".ef", 1)
-			if _, err := os.Stat(filepath.Join(dir.SnapIdx, efFileName)); err != nil {
-				return fmt.Errorf("missing file %s at path %s", efFileName, filepath.Join(dir.SnapIdx, efFileName))
-			}
-
 		}
 		return nil
 	}); err != nil {
@@ -694,6 +690,11 @@ func checkIfStateSnapshotsPublishable(dir datadir.Dirs) error {
 			if _, err := os.Stat(filepath.Join(dir.SnapAccessors, viFileName)); err != nil {
 				return fmt.Errorf("missing file %s at path %s", viFileName, filepath.Join(dir.SnapAccessors, viFileName))
 			}
+			// check that .v
+			vFileName := strings.Replace(expectedFileName, ".ef", ".v", 1)
+			if _, err := os.Stat(filepath.Join(dir.SnapHistory, vFileName)); err != nil {
+				return fmt.Errorf("missing file %s at path %s", vFileName, filepath.Join(dir.SnapHistory, vFileName))
+			}
 		}
 		return nil
 	}); err != nil {
@@ -704,6 +705,48 @@ func checkIfStateSnapshotsPublishable(dir datadir.Dirs) error {
 		return fmt.Errorf("stepSum %d != maxStep %d", stepSum, maxStep)
 	}
 	return nil
+}
+
+func doBlockSnapshotsRangeCheck(snapDir string, snapType string) error {
+	type interval struct {
+		from uint64
+		to   uint64
+	}
+	intervals := []interval{}
+	if err := filepath.Walk(snapDir, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return err
+		}
+		if !strings.HasSuffix(info.Name(), ".seg") || !strings.Contains(info.Name(), snapType) {
+			return nil
+		}
+		res, _, ok := snaptype.ParseFileName(snapDir, info.Name())
+		if !ok {
+			return nil
+		}
+		intervals = append(intervals, interval{from: res.From, to: res.To})
+		return nil
+	}); err != nil {
+		return err
+	}
+	sort.Slice(intervals, func(i, j int) bool {
+		return intervals[i].from < intervals[j].from
+	})
+	// Check that there are no gaps
+	for i := 1; i < len(intervals); i++ {
+		if intervals[i].from != intervals[i-1].to {
+			return fmt.Errorf("gap between %d and %d. snaptype: %s", intervals[i-1].to, intervals[i].from, snapType)
+		}
+	}
+	// Check that there are no overlaps
+	for i := 1; i < len(intervals); i++ {
+		if intervals[i].from < intervals[i-1].to {
+			return fmt.Errorf("overlap between %d and %d. snaptype: %s", intervals[i-1].to, intervals[i].from, snapType)
+		}
+	}
+
+	return nil
+
 }
 
 func doPublishable(cliCtx *cli.Context) error {

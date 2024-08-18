@@ -28,7 +28,6 @@ import (
 	"github.com/erigontech/erigon-lib/log/v3"
 
 	"github.com/erigontech/erigon-lib/kv"
-	"github.com/erigontech/erigon/accounts/abi"
 	"github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/polygon/bor/borcfg"
 	"github.com/erigontech/erigon/polygon/heimdall"
@@ -375,7 +374,6 @@ func fetchRequiredHeimdallStateSyncEventsIfNeeded(
 	blockReader services.FullBlockReader,
 	heimdallClient heimdall.HeimdallClient,
 	chainID string,
-	stateReceiverABI abi.ABI,
 	logPrefix string,
 	logger log.Logger,
 	lastStateSyncEventID uint64,
@@ -396,7 +394,6 @@ func fetchRequiredHeimdallStateSyncEventsIfNeeded(
 		blockReader,
 		heimdallClient,
 		chainID,
-		stateReceiverABI,
 		logPrefix,
 		logger,
 	)
@@ -411,7 +408,6 @@ func fetchAndWriteHeimdallStateSyncEvents(
 	blockReader services.FullBlockReader,
 	heimdallClient heimdall.HeimdallClient,
 	chainID string,
-	stateReceiverABI abi.ABI,
 	logPrefix string,
 	logger log.Logger,
 ) (uint64, int, time.Duration, error) {
@@ -496,23 +492,22 @@ func fetchAndWriteHeimdallStateSyncEvents(
 			)
 		}
 
-		data, err := eventRecord.Pack(stateReceiverABI)
+		data, err := eventRecord.MarshallBytes()
 		if err != nil {
 			logger.Error(fmt.Sprintf("[%s] Unable to pack txn for commitState", logPrefix), "err", err)
 			return lastStateSyncEventID, i, time.Since(fetchStart), err
 		}
 
-		var eventIdBuf [8]byte
-		binary.BigEndian.PutUint64(eventIdBuf[:], eventRecord.ID)
-		if err = tx.Put(kv.BorEvents, eventIdBuf[:], data); err != nil {
+		eventIdBytes := eventRecord.MarshallIdBytes()
+		if err = tx.Put(kv.BorEvents, eventIdBytes, data); err != nil {
 			return lastStateSyncEventID, i, time.Since(fetchStart), err
 		}
 
 		if !wroteIndex {
 			var blockNumBuf [8]byte
 			binary.BigEndian.PutUint64(blockNumBuf[:], blockNum)
-			binary.BigEndian.PutUint64(eventIdBuf[:], eventRecord.ID)
-			if err = tx.Put(kv.BorEventNums, blockNumBuf[:], eventIdBuf[:]); err != nil {
+			eventIdBytes = eventRecord.MarshallIdBytes()
+			if err = tx.Put(kv.BorEventNums, blockNumBuf[:], eventIdBytes); err != nil {
 				return lastStateSyncEventID, i, time.Since(fetchStart), err
 			}
 

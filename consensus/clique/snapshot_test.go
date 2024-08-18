@@ -490,7 +490,7 @@ func TestClique(t *testing.T) {
 				}
 			}
 			if failed {
-				_ = engine.Close()
+				engine.Close()
 				return
 			}
 			chainX := &core.ChainPack{Blocks: batches[len(batches)-1]}
@@ -507,7 +507,7 @@ func TestClique(t *testing.T) {
 				t.Errorf("test %d: unexpected failure: %v", i, err)
 			}
 			if tt.failure != nil {
-				_ = engine.Close()
+				engine.Close()
 				return
 			}
 			// No failure was produced or requested, generate the final voting snapshot
@@ -529,7 +529,7 @@ func TestClique(t *testing.T) {
 			}); err != nil {
 				t.Errorf("test %d: failed to retrieve voting snapshot %d(%s): %v",
 					i, head.NumberU64(), head.Hash().Hex(), err)
-				_ = engine.Close()
+				engine.Close()
 				return
 			}
 
@@ -548,7 +548,7 @@ func TestClique(t *testing.T) {
 			result := snap.GetSigners()
 			if len(result) != len(signers) {
 				t.Errorf("test %d: signers mismatch: have %x, want %x", i, result, signers)
-				_ = engine.Close()
+				engine.Close()
 				return
 			}
 			for j := 0; j < len(result); j++ {
@@ -556,7 +556,7 @@ func TestClique(t *testing.T) {
 					t.Errorf("test %d, signer %d: signer mismatch: have %x, want %x", i, j, result[j], signers[j])
 				}
 			}
-			_ = engine.Close()
+			engine.Close()
 		})
 	}
 }

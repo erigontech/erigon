@@ -135,7 +135,7 @@ func TestEIP2200(t *testing.T) {
 			tx, sd := testTemporalTxSD(t, testTemporalDB(t))
 			defer tx.Rollback()
 
-			r, w := state.NewReaderV4(sd), state.NewWriterV4(sd)
+			r, w := state.NewReaderV3(sd), state.NewWriterV4(sd)
 			s := state.New(r)
 
 			address := libcommon.BytesToAddress([]byte("contract"))

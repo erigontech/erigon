@@ -296,7 +296,7 @@ Loop:
 				logger.Info("Req/resp stats", "req", stats.Requests, "reqMin", stats.ReqMinBlock, "reqMax", stats.ReqMaxBlock,
 					"skel", stats.SkeletonRequests, "skelMin", stats.SkeletonReqMinBlock, "skelMax", stats.SkeletonReqMaxBlock,
 					"resp", stats.Responses, "respMin", stats.RespMinBlock, "respMax", stats.RespMaxBlock, "dups", stats.Duplicates, "alloc", libcommon.ByteCount(m.Alloc), "sys", libcommon.ByteCount(m.Sys))
-				dbg.SaveHeapProfileNearOOM()
+				dbg.SaveHeapProfileNearOOM(dbg.SaveHeapWithLogger(&logger), dbg.SaveHeapWithMemStats(&m))
 				cfg.hd.LogAnchorState()
 				if wasProgress {
 					logger.Warn("Looks like chain is not progressing, moving to the next stage")
@@ -427,7 +427,7 @@ func fixCanonicalChain(logPrefix string, logEvery *time.Ticker, height uint64, h
 	return newNodes, badNodes, nil
 }
 
-func HeadersUnwind(u *UnwindState, s *StageState, tx kv.RwTx, cfg HeadersCfg, test bool) (err error) {
+func HeadersUnwind(ctx context.Context, u *UnwindState, s *StageState, tx kv.RwTx, cfg HeadersCfg, test bool) (err error) {
 	u.UnwindPoint = max(u.UnwindPoint, cfg.blockReader.FrozenBlocks()) // protect from unwind behind files
 
 	useExternalTx := tx != nil
@@ -517,7 +517,7 @@ func HeadersUnwind(u *UnwindState, s *StageState, tx kv.RwTx, cfg HeadersCfg, te
 		*/
 		if maxNum == 0 {
 			maxNum = u.UnwindPoint
-			if maxHash, err = rawdb.ReadCanonicalHash(tx, maxNum); err != nil {
+			if maxHash, err = cfg.blockReader.CanonicalHash(ctx, tx, maxNum); err != nil {
 				return err
 			}
 		}
@@ -597,13 +597,7 @@ func (cr ChainReaderImpl) CurrentFinalizedHeader() *types.Header {
 	if hash == (libcommon.Hash{}) {
 		return nil
 	}
-
-	number := rawdb.ReadHeaderNumber(cr.tx, hash)
-	if number == nil {
-		return nil
-	}
-
-	return rawdb.ReadHeader(cr.tx, hash, *number)
+	return cr.GetHeaderByHash(hash)
 }
 func (cr ChainReaderImpl) CurrentSafeHeader() *types.Header {
 	hash := rawdb.ReadForkchoiceSafe(cr.tx)
@@ -611,12 +605,7 @@ func (cr ChainReaderImpl) CurrentSafeHeader() *types.Header {
 		return nil
 	}
 
-	number := rawdb.ReadHeaderNumber(cr.tx, hash)
-	if number == nil {
-		return nil
-	}
-
-	return rawdb.ReadHeader(cr.tx, hash, *number)
+	return cr.GetHeaderByHash(hash)
 }
 func (cr ChainReaderImpl) GetHeader(hash libcommon.Hash, number uint64) *types.Header {
 	if cr.blockReader != nil {
@@ -631,15 +620,10 @@ func (cr ChainReaderImpl) GetHeaderByNumber(number uint64) *types.Header {
 		return h
 	}
 	return rawdb.ReadHeaderByNumber(cr.tx, number)
-
 }
 func (cr ChainReaderImpl) GetHeaderByHash(hash libcommon.Hash) *types.Header {
 	if cr.blockReader != nil {
-		number := rawdb.ReadHeaderNumber(cr.tx, hash)
-		if number == nil {
-			return nil
-		}
-		return cr.GetHeader(hash, *number)
+		return cr.GetHeaderByHash(hash)
 	}
 	h, _ := rawdb.ReadHeaderByHash(cr.tx, hash)
 	return h

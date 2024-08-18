@@ -45,7 +45,6 @@ type ServerConfig struct {
 	Network       string
 	Addr          string
 	Creds         credentials.TransportCredentials
-	Validator     bool
 	InitialStatus *cltypes.Status
 }
 
@@ -76,7 +75,6 @@ func createSentinel(
 	indiciesDB kv.RwDB,
 	forkChoiceReader forkchoice.ForkChoiceStorageReader,
 	ethClock eth_clock.EthereumClock,
-	validatorTopics bool,
 	logger log.Logger) (*sentinel.Sentinel, error) {
 	sent, err := sentinel.New(
 		context.Background(),
@@ -156,7 +154,6 @@ func StartSentinelService(
 		indiciesDB,
 		forkChoiceReader,
 		ethClock,
-		srvCfg.Validator,
 		logger,
 	)
 	if err != nil {

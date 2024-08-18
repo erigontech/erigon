@@ -71,7 +71,7 @@ type InvertedIndex struct {
 
 	// _visibleFiles - underscore in name means: don't use this field directly, use BeginFilesRo()
 	// underlying array is immutable - means it's ready for zero-copy use
-	_visibleFiles []visibleFile
+	_visibleFiles *iiVisible
 
 	indexKeysTable  string // txnNum_u64 -> key (k+auto_increment)
 	indexTable      string // k -> txnNum_u64 , Needs to be table with DupSort
@@ -96,6 +96,11 @@ type iiCfg struct {
 	dirs datadir.Dirs
 	db   kv.RoDB // global db pointer. mostly for background warmup.
 }
+type iiVisible struct {
+	files  []visibleFile
+	name   string
+	caches *sync.Pool
+}
 
 func NewInvertedIndex(cfg iiCfg, aggregationStep uint64, filenameBase, indexKeysTable, indexTable string, integrityCheck func(fromStep uint64, toStep uint64) bool, logger log.Logger) (*InvertedIndex, error) {
 	if cfg.dirs.SnapDomain == "" {
@@ -115,7 +120,7 @@ func NewInvertedIndex(cfg iiCfg, aggregationStep uint64, filenameBase, indexKeys
 	}
 	ii.indexList = withHashMap
 
-	ii._visibleFiles = []visibleFile{}
+	ii._visibleFiles = newIIVisible(ii.filenameBase, []visibleFile{})
 
 	return &ii, nil
 }
@@ -225,7 +230,7 @@ var (
 )
 
 func (ii *InvertedIndex) reCalcVisibleFiles() {
-	ii._visibleFiles = calcVisibleFiles(ii.dirtyFiles, ii.indexList, false)
+	ii._visibleFiles = newIIVisible(ii.filenameBase, calcVisibleFiles(ii.dirtyFiles, ii.indexList, false))
 }
 
 func (ii *InvertedIndex) missedAccessors() (l []*filesItem) {
@@ -470,7 +475,7 @@ func (w *invertedIndexBufferedWriter) add(key, indexKey []byte) error {
 }
 
 func (ii *InvertedIndex) BeginFilesRo() *InvertedIndexRoTx {
-	files := ii._visibleFiles
+	files := ii._visibleFiles.files
 	for i := 0; i < len(files); i++ {
 		if !files[i].src.frozen {
 			files[i].src.refcount.Add(1)
@@ -505,6 +510,8 @@ func (iit *InvertedIndexRoTx) Close() {
 	for _, r := range iit.readers {
 		r.Close()
 	}
+
+	iit.ii._visibleFiles.returnSeekInFilesCache(iit.seekInFilesCache)
 }
 
 type MergeRange struct {
@@ -529,6 +536,8 @@ type InvertedIndexRoTx struct {
 	files   visibleFiles
 	getters []ArchiveGetter
 	readers []*recsplit.IndexReader
+
+	seekInFilesCache *IISeekInFilesCache
 }
 
 // hashKey - change of salt will require re-gen of indices
@@ -566,8 +575,29 @@ func (iit *InvertedIndexRoTx) seekInFiles(key []byte, txNum uint64) (found bool,
 	if len(iit.files) == 0 {
 		return false, 0
 	}
+	if iit.files[len(iit.files)-1].endTxNum <= txNum {
+		return false, 0
+	}
 
 	hi, lo := iit.hashKey(key)
+
+	if iit.seekInFilesCache == nil {
+		iit.seekInFilesCache = iit.ii._visibleFiles.newSeekInFilesCache()
+	}
+
+	if iit.seekInFilesCache != nil {
+		iit.seekInFilesCache.total++
+		fromCache, ok := iit.seekInFilesCache.Get(u128{hi: hi, lo: lo})
+		if ok && fromCache.requested <= txNum {
+			if txNum <= fromCache.found {
+				iit.seekInFilesCache.hit++
+				return true, fromCache.found
+			} else if fromCache.found == 0 {
+				iit.seekInFilesCache.hit++
+				return false, 0
+			}
+		}
+	}
 
 	for i := 0; i < len(iit.files); i++ {
 		if iit.files[i].endTxNum <= txNum {
@@ -588,8 +618,15 @@ func (iit *InvertedIndexRoTx) seekInFiles(key []byte, txNum uint64) (found bool,
 		equalOrHigherTxNum, found = eliasfano32.Seek(eliasVal, txNum)
 
 		if found {
+			if iit.seekInFilesCache != nil {
+				iit.seekInFilesCache.Add(u128{hi: hi, lo: lo}, iiSeekInFilesCacheItem{requested: txNum, found: equalOrHigherTxNum})
+			}
 			return true, equalOrHigherTxNum
 		}
+	}
+
+	if iit.seekInFilesCache != nil {
+		iit.seekInFilesCache.Add(u128{hi: hi, lo: lo}, iiSeekInFilesCacheItem{requested: txNum, found: 0})
 	}
 	return false, 0
 }

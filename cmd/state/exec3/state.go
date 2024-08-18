@@ -71,18 +71,14 @@ type Worker struct {
 	dirs datadir.Dirs
 }
 
-func NewWorker(lock sync.Locker, logger log.Logger, accumulator *shards.Accumulator, ctx context.Context, background bool, chainDb kv.RoDB, rs *state.StateV3, in *state.QueueWithRetry, blockReader services.FullBlockReader, chainConfig *chain.Config, genesis *types.Genesis, results *state.ResultsQueue, engine consensus.Engine, dirs datadir.Dirs) *Worker {
-
+func NewWorker(lock sync.Locker, logger log.Logger, ctx context.Context, background bool, chainDb kv.RoDB, in *state.QueueWithRetry, blockReader services.FullBlockReader, chainConfig *chain.Config, genesis *types.Genesis, results *state.ResultsQueue, engine consensus.Engine, dirs datadir.Dirs) *Worker {
 	w := &Worker{
 		lock:        lock,
 		logger:      logger,
 		chainDb:     chainDb,
 		in:          in,
-		rs:          rs,
 		background:  background,
 		blockReader: blockReader,
-		stateWriter: state.NewStateWriterV3(rs, accumulator),
-		stateReader: state.NewStateReaderV3(rs.Domains()),
 		chainConfig: chainConfig,
 
 		ctx:      ctx,
@@ -102,9 +98,15 @@ func NewWorker(lock sync.Locker, logger log.Logger, accumulator *shards.Accumula
 	return w
 }
 
+func (rw *Worker) LogLRUStats() { rw.evm.JumpDestCache.LogStats() }
+
 func (rw *Worker) ResetState(rs *state.StateV3, accumulator *shards.Accumulator) {
 	rw.rs = rs
-	rw.SetReader(state.NewStateReaderV3(rs.Domains()))
+	if rw.background {
+		rw.SetReader(state.NewReaderParallelV3(rs.Domains()))
+	} else {
+		rw.SetReader(state.NewReaderV3(rs.Domains()))
+	}
 	rw.stateWriter = state.NewStateWriterV3(rs, accumulator)
 }
 
@@ -118,7 +120,6 @@ func (rw *Worker) ResetTx(chainTx kv.Tx) {
 	if chainTx != nil {
 		rw.chainTx = chainTx
 		rw.stateReader.SetTx(rw.chainTx)
-		rw.stateWriter.SetTx(rw.chainTx)
 		rw.chain = consensuschain.NewReader(rw.chainConfig, rw.chainTx, rw.blockReader, rw.logger)
 	}
 }
@@ -150,7 +151,7 @@ func (rw *Worker) SetReader(reader state.ResettableStateReader) {
 	switch reader.(type) {
 	case *state.HistoryReaderV3:
 		rw.historyMode = true
-	case *state.StateReaderV3:
+	case *state.ReaderV3:
 		rw.historyMode = false
 	default:
 		rw.historyMode = false
@@ -165,7 +166,11 @@ func (rw *Worker) RunTxTaskNoLock(txTask *state.TxTask) {
 		// Needed to correctly evaluate spent gas and other things.
 		rw.SetReader(state.NewHistoryReaderV3())
 	} else if !txTask.HistoryExecution && rw.historyMode {
-		rw.SetReader(state.NewStateReaderV3(rw.rs.Domains()))
+		if rw.background {
+			rw.SetReader(state.NewReaderParallelV3(rw.rs.Domains()))
+		} else {
+			rw.SetReader(state.NewReaderV3(rw.rs.Domains()))
+		}
 	}
 	if rw.background && rw.chainTx == nil {
 		var err error
@@ -173,13 +178,12 @@ func (rw *Worker) RunTxTaskNoLock(txTask *state.TxTask) {
 			panic(err)
 		}
 		rw.stateReader.SetTx(rw.chainTx)
-		rw.stateWriter.SetTx(rw.chainTx)
 		rw.chain = consensuschain.NewReader(rw.chainConfig, rw.chainTx, rw.blockReader, rw.logger)
 	}
 	txTask.Error = nil
 
 	rw.stateReader.SetTxNum(txTask.TxNum)
-	rw.stateWriter.SetTxNum(rw.ctx, txTask.TxNum)
+	rw.rs.Domains().SetTxNum(txTask.TxNum)
 	rw.stateReader.ResetReadSet()
 	rw.stateWriter.ResetWriteSet()
 
@@ -298,7 +302,8 @@ func NewWorkersPool(lock sync.Locker, accumulator *shards.Accumulator, logger lo
 		ctx, cancel := context.WithCancel(ctx)
 		g, ctx := errgroup.WithContext(ctx)
 		for i := 0; i < workerCount; i++ {
-			reconWorkers[i] = NewWorker(lock, logger, accumulator, ctx, background, chainDb, rs, in, blockReader, chainConfig, genesis, rws, engine, dirs)
+			reconWorkers[i] = NewWorker(lock, logger, ctx, background, chainDb, in, blockReader, chainConfig, genesis, rws, engine, dirs)
+			reconWorkers[i].ResetState(rs, accumulator)
 		}
 		if background {
 			for i := 0; i < workerCount; i++ {
@@ -324,7 +329,7 @@ func NewWorkersPool(lock sync.Locker, accumulator *shards.Accumulator, logger lo
 			//applyWorker.ResetTx(nil)
 		}
 	}
-	applyWorker = NewWorker(lock, logger, accumulator, ctx, false, chainDb, rs, in, blockReader, chainConfig, genesis, rws, engine, dirs)
+	applyWorker = NewWorker(lock, logger, ctx, false, chainDb, in, blockReader, chainConfig, genesis, rws, engine, dirs)
 
 	return reconWorkers, applyWorker, rws, clear, wait
 }
