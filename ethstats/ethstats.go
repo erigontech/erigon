@@ -595,7 +595,7 @@ func (s *Service) reportHistory(conn *connWrapper, list []uint64) error {
 	} else {
 		// No indexes requested, send back the top ones
 		headHash := rawdb.ReadHeadBlockHash(roTx)
-		headNumber := rawdb.ReadHeaderNumber(roTx, headHash)
+		headNumber, _ := s.blockReader.HeaderNumber(context.Background(), roTx, headHash)
 		if headNumber == nil {
 			return nil
 		}
