@@ -280,6 +280,7 @@ func checkBlockEvents(ctx context.Context, config *borcfg.BorConfig, blockReader
 	}
 
 	var lastBlockEventTime time.Time
+	var firstBlockEventTime *time.Time
 
 	for i, event := range events {
 
@@ -321,7 +322,7 @@ func checkBlockEvents(ctx context.Context, config *borcfg.BorConfig, blockReader
 
 		prevEventTime = &eventTime
 
-		if !checkBlockWindow(ctx, eventTime, config, header, tx, blockReader) {
+		if !checkBlockWindow(ctx, eventTime, firstBlockEventTime, config, header, tx, blockReader) {
 			from, to, _ := bor.CalculateEventWindow(ctx, config, header, tx, blockReader)
 
 			var diff time.Duration
@@ -337,6 +338,10 @@ func checkBlockEvents(ctx context.Context, config *borcfg.BorConfig, blockReader
 			}
 
 			log.Error(fmt.Sprintf("[integrity] NoGapsInBorEvents: invalid event time at %d of %d", i, len(events)), "block", block, "event", eventId, "time", eventTime, "diff", diff, "expected", fmt.Sprintf("%s-%s", from, to), "block-start", prevBlockStartId, "first-time", lastBlockEventTime, "timestamps", fmt.Sprintf("%d-%d", from.Unix(), to.Unix()))
+		}
+
+		if firstBlockEventTime == nil {
+			firstBlockEventTime = &eventTime
 		}
 	}
 
@@ -430,14 +435,22 @@ func ValidateBorEvents(ctx context.Context, config *borcfg.BorConfig, db kv.RoDB
 	return prevEventId, nil
 }
 
-func checkBlockWindow(ctx context.Context, eventTime time.Time, config *borcfg.BorConfig, header *types.Header, tx kv.Getter, headerReader services.HeaderReader) bool {
+func checkBlockWindow(ctx context.Context, eventTime time.Time, firstBlockEventTime *time.Time, config *borcfg.BorConfig, header *types.Header, tx kv.Getter, headerReader services.HeaderReader) bool {
 	from, to, err := bor.CalculateEventWindow(ctx, config, header, tx, headerReader)
 
 	if err != nil {
 		return false
 	}
 
-	return !(eventTime.Before(from) || eventTime.After(to))
+	var afterCheck = func(limitTime time.Time, eventTime time.Time, initialTime *time.Time) bool {
+		if initialTime == nil {
+			return eventTime.After(from)
+		}
+
+		return initialTime.After(from)
+	}
+
+	return !(afterCheck(from, eventTime, firstBlockEventTime) || eventTime.After(to))
 }
 
 type BorView struct {

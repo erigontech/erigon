@@ -485,7 +485,7 @@ func fetchAndWriteHeimdallStateSyncEvents(
 		// Note: this check is only valid for events with eventRecord.ID > lastStateSyncEventID
 		var afterCheck = func(limitTime time.Time, eventTime time.Time, initialTime *time.Time) bool {
 			if initialTime == nil {
-				return eventRecord.Time.After(from)
+				return eventTime.After(from)
 			}
 
 			return initialTime.After(from)
