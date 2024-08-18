@@ -1398,6 +1398,7 @@ func (dt *DomainRoTx) getFromFiles(filekey []byte) (v []byte, found bool, fileSt
 	}
 
 	hi, lo := dt.ht.iit.hashKey(filekey)
+
 	if dt.getFromFileCache == nil {
 		dt.getFromFileCache = dt.d._visibleFiles.newGetFromFileCache()
 	}
