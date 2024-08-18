@@ -156,7 +156,7 @@ func TestMergeSnapshots(t *testing.T) {
 		merger := NewMerger(dir, 1, log.LvlInfo, nil, params.MainnetChainConfig, logger)
 		merger.DisableFsync()
 		s.ReopenSegments(coresnaptype.BlockSnapshotTypes, false)
-		ranges := merger.FindMergeRanges(s.DirtyRanges(), s.SegmentsMax())
+		ranges := merger.FindMergeRanges(s.Ranges(), s.SegmentsMax())
 		require.Equal(3, len(ranges))
 		err := merger.Merge(context.Background(), s, coresnaptype.BlockSnapshotTypes, ranges, s.Dir(), false, nil, nil)
 		require.NoError(err)
@@ -268,6 +268,12 @@ func TestRemoveOverlaps(t *testing.T) {
 		}
 	}
 
+	// 0 - 10_000, ... , 40_000 - 50_000 => 5 files
+	// 0 - 100_000 => 1 file
+	// 130_000 - 140_000, ... , 180_000 - 190_000 => 5 files
+	// 100_000 - 200_000 => 1 file
+	// 200_000 - 210_000, ... , 220_000 - 230_000 => 3 files
+
 	for i := uint64(0); i < 5; i++ {
 		createFile(i*10_000, (i+1)*10_000)
 	}
@@ -352,14 +358,14 @@ func TestOpenAllSnapshot(t *testing.T) {
 			res, _ := s.segments.Get(e)
 			return res
 		}
-		require.Equal(0, len(getSegs(coresnaptype.Enums.Headers).visibleSegments))
+		require.Equal(0, len(getSegs(coresnaptype.Enums.Headers).VisibleSegments))
 		s.Close()
 
 		createFile(step, step*2, coresnaptype.Bodies)
 		s = NewRoSnapshots(cfg, dir, 0, logger)
 		defer s.Close()
 		require.NotNil(getSegs(coresnaptype.Enums.Bodies))
-		require.Equal(0, len(getSegs(coresnaptype.Enums.Bodies).visibleSegments))
+		require.Equal(0, len(getSegs(coresnaptype.Enums.Bodies).VisibleSegments))
 		s.Close()
 
 		createFile(step, step*2, coresnaptype.Headers)
@@ -381,7 +387,7 @@ func TestOpenAllSnapshot(t *testing.T) {
 		err = s.ReopenFolder()
 		require.NoError(err)
 		require.NotNil(getSegs(coresnaptype.Enums.Headers))
-		require.Equal(2, len(getSegs(coresnaptype.Enums.Headers).visibleSegments))
+		require.Equal(2, len(getSegs(coresnaptype.Enums.Headers).VisibleSegments))
 
 		view := s.View()
 		defer view.Close()
@@ -405,7 +411,7 @@ func TestOpenAllSnapshot(t *testing.T) {
 		require.NoError(err)
 		defer s.Close()
 		require.NotNil(getSegs(coresnaptype.Enums.Headers))
-		require.Equal(2, len(getSegs(coresnaptype.Enums.Headers).visibleSegments))
+		require.Equal(2, len(getSegs(coresnaptype.Enums.Headers).VisibleSegments))
 
 		createFile(step, step*2-step/5, coresnaptype.Headers)
 		createFile(step, step*2-step/5, coresnaptype.Bodies)
@@ -487,13 +493,13 @@ func TestCalculateVisibleSegments(t *testing.T) {
 		idx := s.idxAvailability()
 		require.Equal(2_500_000-1, int(idx))
 
-		require.Equal(5, len(getSeg(s, coresnaptype.Enums.Headers).visibleSegments))
-		require.Equal(5, len(getSeg(s, coresnaptype.Enums.Bodies).visibleSegments))
-		require.Equal(5, len(getSeg(s, coresnaptype.Enums.Transactions).visibleSegments))
+		require.Equal(5, len(getSeg(s, coresnaptype.Enums.Headers).VisibleSegments))
+		require.Equal(5, len(getSeg(s, coresnaptype.Enums.Bodies).VisibleSegments))
+		require.Equal(5, len(getSeg(s, coresnaptype.Enums.Transactions).VisibleSegments))
 
-		require.Equal(2, len(getSeg(s, coresnaptype.Enums.Headers).dirtySegments))
-		require.Equal(1, len(getSeg(s, coresnaptype.Enums.Bodies).dirtySegments))
-		require.Equal(0, len(getSeg(s, coresnaptype.Enums.Transactions).dirtySegments))
+		require.Equal(7, getSeg(s, coresnaptype.Enums.Headers).DirtySegments.Len())
+		require.Equal(6, getSeg(s, coresnaptype.Enums.Bodies).DirtySegments.Len())
+		require.Equal(5, getSeg(s, coresnaptype.Enums.Transactions).DirtySegments.Len())
 	}
 
 	// gap in transactions: [5*500_000 - 6*500_000]
@@ -504,13 +510,13 @@ func TestCalculateVisibleSegments(t *testing.T) {
 		idx := s.idxAvailability()
 		require.Equal(2_500_000-1, int(idx))
 
-		require.Equal(5, len(getSeg(s, coresnaptype.Enums.Headers).visibleSegments))
-		require.Equal(5, len(getSeg(s, coresnaptype.Enums.Bodies).visibleSegments))
-		require.Equal(5, len(getSeg(s, coresnaptype.Enums.Transactions).visibleSegments))
+		require.Equal(5, len(getSeg(s, coresnaptype.Enums.Headers).VisibleSegments))
+		require.Equal(5, len(getSeg(s, coresnaptype.Enums.Bodies).VisibleSegments))
+		require.Equal(5, len(getSeg(s, coresnaptype.Enums.Transactions).VisibleSegments))
 
-		require.Equal(2, len(getSeg(s, coresnaptype.Enums.Headers).dirtySegments))
-		require.Equal(1, len(getSeg(s, coresnaptype.Enums.Bodies).dirtySegments))
-		require.Equal(0, len(getSeg(s, coresnaptype.Enums.Transactions).dirtySegments))
+		require.Equal(7, getSeg(s, coresnaptype.Enums.Headers).DirtySegments.Len())
+		require.Equal(6, getSeg(s, coresnaptype.Enums.Bodies).DirtySegments.Len())
+		require.Equal(5, getSeg(s, coresnaptype.Enums.Transactions).DirtySegments.Len())
 	}
 
 	// overlap in transactions: [4*500_000 - 4.5*500_000]
@@ -521,12 +527,12 @@ func TestCalculateVisibleSegments(t *testing.T) {
 		idx := s.idxAvailability()
 		require.Equal(2_500_000-1, int(idx))
 
-		require.Equal(5, len(getSeg(s, coresnaptype.Enums.Headers).visibleSegments))
-		require.Equal(5, len(getSeg(s, coresnaptype.Enums.Bodies).visibleSegments))
-		require.Equal(5, len(getSeg(s, coresnaptype.Enums.Transactions).visibleSegments))
+		require.Equal(5, len(getSeg(s, coresnaptype.Enums.Headers).VisibleSegments))
+		require.Equal(5, len(getSeg(s, coresnaptype.Enums.Bodies).VisibleSegments))
+		require.Equal(5, len(getSeg(s, coresnaptype.Enums.Transactions).VisibleSegments))
 
-		require.Equal(2, len(getSeg(s, coresnaptype.Enums.Headers).dirtySegments))
-		require.Equal(1, len(getSeg(s, coresnaptype.Enums.Bodies).dirtySegments))
-		require.Equal(0, len(getSeg(s, coresnaptype.Enums.Transactions).dirtySegments))
+		require.Equal(7, getSeg(s, coresnaptype.Enums.Headers).DirtySegments.Len())
+		require.Equal(6, getSeg(s, coresnaptype.Enums.Bodies).DirtySegments.Len())
+		require.Equal(5, getSeg(s, coresnaptype.Enums.Transactions).DirtySegments.Len())
 	}
 }
