@@ -34,6 +34,8 @@ import (
 	"github.com/erigontech/erigon-lib/gointerfaces"
 	remote "github.com/erigontech/erigon-lib/gointerfaces/remoteproto"
 	"github.com/erigontech/erigon-lib/kv"
+	"github.com/erigontech/erigon-lib/kv/dbutils"
+	"github.com/erigontech/erigon-lib/kv/rawdbv3"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/recsplit"
 	"github.com/erigontech/erigon/core/rawdb"
@@ -341,7 +343,9 @@ func (r *RemoteBlockReader) Milestone(ctx context.Context, tx kv.Getter, spanId 
 func (r *RemoteBlockReader) LastCheckpointId(ctx context.Context, tx kv.Tx) (uint64, bool, error) {
 	return 0, false, errors.New("not implemented")
 }
-
+func (r *RemoteBlockReader) BodyForStorage(ctx context.Context, tx kv.Getter, hash common.Hash, blockNum uint64) (body *types.BodyForStorage, err error) {
+	panic("not implemented")
+}
 func (r *RemoteBlockReader) Checkpoint(ctx context.Context, tx kv.Getter, spanId uint64) ([]byte, error) {
 	return nil, nil
 }
@@ -692,6 +696,31 @@ func (r *BlockReader) HasSenders(ctx context.Context, tx kv.Getter, hash common.
 
 func (r *BlockReader) BlockWithSenders(ctx context.Context, tx kv.Getter, hash common.Hash, blockHeight uint64) (block *types.Block, senders []common.Address, err error) {
 	return r.blockWithSenders(ctx, tx, hash, blockHeight, false)
+}
+func (r *BlockReader) BodyForStorage(ctx context.Context, tx kv.Getter, hash common.Hash, blockNum uint64) (body *types.BodyForStorage, err error) {
+	b, err := rawdb.ReadBodyForStorageByKey(tx, dbutils.BlockBodyKey(blockNum, hash))
+	if err != nil {
+		return nil, err
+	}
+	if b != nil {
+		return b, nil
+	}
+
+	bodySeg, ok, release := r.sn.ViewSingleFile(coresnaptype.Bodies, blockNum)
+	if !ok {
+		return nil, nil
+	}
+	defer release()
+
+	var buf []byte
+	b, _, err = r.bodyForStorageFromSnapshot(blockNum, bodySeg, buf)
+	if err != nil {
+		return nil, err
+	}
+	if b == nil {
+		return nil, nil
+	}
+	return b, nil
 }
 func (r *BlockReader) blockWithSenders(ctx context.Context, tx kv.Getter, hash common.Hash, blockHeight uint64, forceCanonical bool) (block *types.Block, senders []common.Address, err error) {
 	var dbgPrefix string
@@ -1817,4 +1846,27 @@ func (r *BlockReader) Integrity(ctx context.Context) error {
 		}
 	}
 	return nil
+}
+
+func ReadTxNumFuncFromBlockReader(ctx context.Context, tx kv.Tx, r services.FullBlockReader) rawdbv3.ReadTxNumFunc {
+	return func(c kv.Cursor, blockNum uint64) (maxTxNum uint64, ok bool, err error) {
+		maxTxNum, ok, err = rawdbv3.DefaultReadTxNumFunc(c, blockNum)
+		if err != nil {
+			return
+		}
+		if ok {
+			return
+		}
+		hash, err := r.CanonicalHash(ctx, tx, blockNum)
+		if err != nil {
+			return 0, false, err
+		}
+		b, err := r.BodyForStorage(ctx, tx, hash, blockNum)
+		if err != nil {
+			return 0, false, err
+		}
+
+		return b.BaseTxnID.U64() + uint64(b.TxCount) - 1, true, nil
+	}
+
 }
