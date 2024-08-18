@@ -76,7 +76,7 @@ func (api *APIImpl) GetLogs(ctx context.Context, crit filters.FilterCriteria) (t
 		end = num
 	} else {
 		// Convert the RPC block numbers into internal representations
-		latest, _, _, err := rpchelper.GetBlockNumber(rpc.BlockNumberOrHashWithNumber(rpc.LatestExecutedBlockNumber), tx, nil)
+		latest, _, _, err := rpchelper.GetBlockNumber(ctx, rpc.BlockNumberOrHashWithNumber(rpc.LatestExecutedBlockNumber), tx, api._blockReader, nil)
 		if err != nil {
 			return nil, err
 		}
@@ -88,7 +88,7 @@ func (api *APIImpl) GetLogs(ctx context.Context, crit filters.FilterCriteria) (t
 				begin = uint64(fromBlock)
 			} else {
 				blockNum := rpc.BlockNumber(fromBlock)
-				begin, _, _, err = rpchelper.GetBlockNumber(rpc.BlockNumberOrHashWithNumber(blockNum), tx, api.filters)
+				begin, _, _, err = rpchelper.GetBlockNumber(ctx, rpc.BlockNumberOrHashWithNumber(blockNum), tx, api._blockReader, api.filters)
 				if err != nil {
 					return nil, err
 				}
@@ -102,7 +102,7 @@ func (api *APIImpl) GetLogs(ctx context.Context, crit filters.FilterCriteria) (t
 				end = uint64(toBlock)
 			} else {
 				blockNum := rpc.BlockNumber(toBlock)
-				end, _, _, err = rpchelper.GetBlockNumber(rpc.BlockNumberOrHashWithNumber(blockNum), tx, api.filters)
+				end, _, _, err = rpchelper.GetBlockNumber(ctx, rpc.BlockNumberOrHashWithNumber(blockNum), tx, api._blockReader, api.filters)
 				if err != nil {
 					return nil, err
 				}
@@ -506,7 +506,7 @@ func (api *APIImpl) GetBlockReceipts(ctx context.Context, numberOrHash rpc.Block
 	}
 	defer tx.Rollback()
 
-	blockNum, blockHash, _, err := rpchelper.GetBlockNumber(numberOrHash, tx, api.filters)
+	blockNum, blockHash, _, err := rpchelper.GetBlockNumber(ctx, numberOrHash, tx, api._blockReader, api.filters)
 	if err != nil {
 		return nil, err
 	}

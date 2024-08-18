@@ -45,7 +45,7 @@ func NoGapsInCanonicalHeaders(tx kv.Tx, ctx context.Context, br services.FullBlo
 	}
 
 	for i := firstBlockInDB; i < lastBlockNum; i++ {
-		hash, err := rawdb.ReadCanonicalHash(tx, i)
+		hash, err := br.CanonicalHash(ctx, tx, i)
 		if err != nil {
 			panic(err)
 		}
