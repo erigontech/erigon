@@ -767,6 +767,13 @@ func (hph *HexPatriciaHashed) computeCellHash(cell *cell, depth int, buf []byte)
 				storageRootHash = *(*[length.Hash]byte)(res[1:])
 			}
 		} else {
+			if !cell.loaded.storage() {
+				update, err := hph.ctx.Storage(cell.storageAddr[koffset:cell.storageAddrLen])
+				if err != nil {
+					return nil, err
+				}
+				cell.setFromUpdate(update)
+			}
 			if singleton {
 				if hph.trace {
 					fmt.Printf("leafHashWithKeyVal(singleton) for [%x]=>[%x]\n", cell.hashedExtension[:64-hashedKeyOffset+1], cell.Storage[:cell.StorageLen])
@@ -1361,10 +1368,12 @@ func (hph *HexPatriciaHashed) fold() (err error) {
 			}
 			cell := &hph.grid[row][nibble]
 			if cell.accountAddrLen > 0 && cell.lhLen == 0 && !cell.loaded.account() && !cell.Deleted() {
-				panic("account not loaded" + fmt.Sprintf("%x", cell.accountAddr[:cell.accountAddrLen]))
+				//panic("account not loaded" + fmt.Sprintf("%x", cell.accountAddr[:cell.accountAddrLen]))
+				log.Warn("account not loaded", "pref", updateKey, "c", fmt.Sprintf("(%d, %x, depth=%d", row, nibble, depth), "cell", cell.String())
 			}
 			if cell.storageAddrLen > 0 && cell.lhLen == 0 && !cell.loaded.storage() && !cell.Deleted() {
-				panic("storage not loaded" + fmt.Sprintf("%x", cell.storageAddr[:cell.storageAddrLen]))
+				//panic("storage not loaded" + fmt.Sprintf("%x", cell.storageAddr[:cell.storageAddrLen]))
+				log.Warn("storage not loaded", "pref", updateKey, "c", fmt.Sprintf("(%d, %x, depth=%d", row, nibble, depth), "cell", cell.String())
 			}
 			cellHash, err := hph.computeCellHash(cell, depth, hph.hashAuxBuffer[:0])
 			if err != nil {
@@ -1375,6 +1384,7 @@ func (hph *HexPatriciaHashed) fold() (err error) {
 			}
 			//if len(updateKey) > DepthWithoutNodeHashes {
 			//	cell.hashLen = 0 // do not write hashes for storages in the branch node, should reset ext as well which can break unfolding.. -
+			//cell.extLen = 0
 			//}
 			if _, err := hph.keccak2.Write(cellHash); err != nil {
 				return nil, err
