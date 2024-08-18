@@ -327,8 +327,9 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 
 	{
 		cfg.blockReader.Snapshots().LogStat("download")
+		txNumsReader := rawdbv3.TxNums.WithCustomReadTxNumFunc(freezeblocks.ReadTxNumFuncFromBlockReader(ctx, cfg.blockReader))
 		tx.(state.HasAggTx).AggTx().(*state.AggregatorRoTx).LogStats(tx, func(endTxNumMinimax uint64) (uint64, error) {
-			_, histBlockNumProgress, err := rawdbv3.TxNums.FindBlockNum(tx, endTxNumMinimax)
+			_, histBlockNumProgress, err := txNumsReader.FindBlockNum(tx, endTxNumMinimax)
 			return histBlockNumProgress, err
 		})
 	}

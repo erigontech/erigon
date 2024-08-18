@@ -34,6 +34,7 @@ import (
 	"github.com/erigontech/erigon-lib/common/hexutil"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/kv/memdb"
+	"github.com/erigontech/erigon-lib/kv/rawdbv3"
 	"github.com/erigontech/erigon-lib/kv/temporal"
 	"github.com/erigontech/erigon-lib/kv/temporal/temporaltest"
 	"github.com/erigontech/erigon-lib/log/v3"
@@ -200,7 +201,7 @@ func TestCreateGas(t *testing.T) {
 		txc.Doms = domains
 
 		stateReader = rpchelper.NewLatestStateReader(tx)
-		stateWriter = rpchelper.NewLatestStateWriter(txc, 0)
+		stateWriter = rpchelper.NewLatestStateWriter(txc, rawdbv3.TxNums, 0)
 
 		s := state.New(stateReader)
 		s.CreateAccount(address, true)

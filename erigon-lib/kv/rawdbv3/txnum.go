@@ -50,13 +50,13 @@ func (e ErrTxNumsAppendWithGap) Is(err error) bool {
 	return errors.As(err, &target)
 }
 
-type ReadTxNumFunc func(c kv.Cursor, blockNum uint64) (maxTxNum uint64, ok bool, err error)
+type ReadTxNumFunc func(tx kv.Tx, c kv.Cursor, blockNum uint64) (maxTxNum uint64, ok bool, err error)
 
-type txNums struct {
+type TxNumsReader struct {
 	readTxNumFunc ReadTxNumFunc
 }
 
-func DefaultReadTxNumFunc(c kv.Cursor, blockNum uint64) (maxTxNum uint64, ok bool, err error) {
+func DefaultReadTxNumFunc(tx kv.Tx, c kv.Cursor, blockNum uint64) (maxTxNum uint64, ok bool, err error) {
 	var k [8]byte
 	binary.BigEndian.PutUint64(k[:], blockNum)
 	_, v, err := c.SeekExact(k[:])
@@ -73,16 +73,16 @@ func DefaultReadTxNumFunc(c kv.Cursor, blockNum uint64) (maxTxNum uint64, ok boo
 }
 
 // DefaultTxNums - default implementation of TxNums
-var TxNums txNums = txNums{
+var TxNums TxNumsReader = TxNumsReader{
 	readTxNumFunc: DefaultReadTxNumFunc,
 }
 
-func (txNums) WithCustomReadTxNumFunc(f ReadTxNumFunc) txNums {
-	return txNums{readTxNumFunc: f}
+func (TxNumsReader) WithCustomReadTxNumFunc(f ReadTxNumFunc) TxNumsReader {
+	return TxNumsReader{readTxNumFunc: f}
 }
 
 // Min - returns maxTxNum in given block. If block not found - return last available value (`latest`/`pending` state)
-func (t txNums) Max(tx kv.Tx, blockNum uint64) (maxTxNum uint64, err error) {
+func (t TxNumsReader) Max(tx kv.Tx, blockNum uint64) (maxTxNum uint64, err error) {
 	var k [8]byte
 	binary.BigEndian.PutUint64(k[:], blockNum)
 	c, err := tx.Cursor(kv.MaxTxNum)
@@ -91,7 +91,7 @@ func (t txNums) Max(tx kv.Tx, blockNum uint64) (maxTxNum uint64, err error) {
 	}
 	defer c.Close()
 
-	maxTxNum, ok, err := t.readTxNumFunc(c, blockNum)
+	maxTxNum, ok, err := t.readTxNumFunc(tx, c, blockNum)
 	if !ok {
 		_, v, err := c.Last()
 		if err != nil {
@@ -105,7 +105,7 @@ func (t txNums) Max(tx kv.Tx, blockNum uint64) (maxTxNum uint64, err error) {
 }
 
 // Min = `max(blockNum-1)+1` returns minTxNum in given block. If block not found - return last available value (`latest`/`pending` state)
-func (t txNums) Min(tx kv.Tx, blockNum uint64) (maxTxNum uint64, err error) {
+func (t TxNumsReader) Min(tx kv.Tx, blockNum uint64) (maxTxNum uint64, err error) {
 	if blockNum == 0 {
 		return 0, nil
 	}
@@ -117,7 +117,7 @@ func (t txNums) Min(tx kv.Tx, blockNum uint64) (maxTxNum uint64, err error) {
 	}
 	defer c.Close()
 
-	maxTxNum, ok, err := t.readTxNumFunc(c, blockNum-1)
+	maxTxNum, ok, err := t.readTxNumFunc(tx, c, blockNum-1)
 	if err != nil {
 		return 0, err
 	}
@@ -134,7 +134,7 @@ func (t txNums) Min(tx kv.Tx, blockNum uint64) (maxTxNum uint64, err error) {
 	return maxTxNum + 1, nil
 }
 
-func (t txNums) Append(tx kv.RwTx, blockNum, maxTxNum uint64) (err error) {
+func (t TxNumsReader) Append(tx kv.RwTx, blockNum, maxTxNum uint64) (err error) {
 	lastK, err := LastKey(tx, kv.MaxTxNum)
 	if err != nil {
 		return err
@@ -154,13 +154,13 @@ func (t txNums) Append(tx kv.RwTx, blockNum, maxTxNum uint64) (err error) {
 	}
 	return nil
 }
-func (txNums) ForcedWrite(tx kv.RwTx, blockNum, maxTxNum uint64) (err error) {
+func (TxNumsReader) ForcedWrite(tx kv.RwTx, blockNum, maxTxNum uint64) (err error) {
 	var k, v [8]byte
 	binary.BigEndian.PutUint64(k[:], blockNum)
 	binary.BigEndian.PutUint64(v[:], maxTxNum)
 	return tx.Put(kv.MaxTxNum, k[:], v[:])
 }
-func (txNums) Truncate(tx kv.RwTx, blockNum uint64) (err error) {
+func (TxNumsReader) Truncate(tx kv.RwTx, blockNum uint64) (err error) {
 	var seek [8]byte
 	binary.BigEndian.PutUint64(seek[:], blockNum)
 	c, err := tx.RwCursor(kv.MaxTxNum)
@@ -181,7 +181,7 @@ func (txNums) Truncate(tx kv.RwTx, blockNum uint64) (err error) {
 	}
 	return nil
 }
-func (t txNums) FindBlockNum(tx kv.Tx, endTxNumMinimax uint64) (ok bool, blockNum uint64, err error) {
+func (t TxNumsReader) FindBlockNum(tx kv.Tx, endTxNumMinimax uint64) (ok bool, blockNum uint64, err error) {
 	var seek [8]byte
 	c, err := tx.Cursor(kv.MaxTxNum)
 	if err != nil {
@@ -206,7 +206,7 @@ func (t txNums) FindBlockNum(tx kv.Tx, endTxNumMinimax uint64) (ok bool, blockNu
 			return true
 		}
 		var maxTxNum uint64
-		maxTxNum, ok, err = t.readTxNumFunc(c, uint64(i))
+		maxTxNum, ok, err = t.readTxNumFunc(tx, c, uint64(i))
 		if err != nil {
 			return true
 		}
@@ -226,7 +226,7 @@ func (t txNums) FindBlockNum(tx kv.Tx, endTxNumMinimax uint64) (ok bool, blockNu
 	}
 	return true, blockNum, nil
 }
-func (txNums) Last(tx kv.Tx) (blockNum, txNum uint64, err error) {
+func (TxNumsReader) Last(tx kv.Tx) (blockNum, txNum uint64, err error) {
 	c, err := tx.Cursor(kv.MaxTxNum)
 	if err != nil {
 		return 0, 0, err
@@ -242,7 +242,7 @@ func (txNums) Last(tx kv.Tx) (blockNum, txNum uint64, err error) {
 	}
 	return binary.BigEndian.Uint64(lastK), binary.BigEndian.Uint64(lastV), nil
 }
-func (txNums) First(tx kv.Tx) (blockNum, txNum uint64, err error) {
+func (TxNumsReader) First(tx kv.Tx) (blockNum, txNum uint64, err error) {
 	c, err := tx.Cursor(kv.MaxTxNum)
 	if err != nil {
 		return 0, 0, err

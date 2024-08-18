@@ -33,6 +33,7 @@ import (
 	"github.com/erigontech/erigon/polygon/bor/finality/whitelist"
 	"github.com/erigontech/erigon/rpc"
 	"github.com/erigontech/erigon/turbo/services"
+	"github.com/erigontech/erigon/turbo/snapshotsync/freezeblocks"
 )
 
 // unable to decode supplied params, or an invalid number of parameters
@@ -133,10 +134,10 @@ func CreateStateReader(ctx context.Context, tx kv.Tx, br services.FullBlockReade
 	if err != nil {
 		return nil, err
 	}
-	return CreateStateReaderFromBlockNumber(ctx, tx, blockNumber, latest, txnIndex, stateCache, chainName)
+	return CreateStateReaderFromBlockNumber(ctx, tx, rawdbv3.TxNums.WithCustomReadTxNumFunc(freezeblocks.ReadTxNumFuncFromBlockReader(ctx, br)), blockNumber, latest, txnIndex, stateCache, chainName)
 }
 
-func CreateStateReaderFromBlockNumber(ctx context.Context, tx kv.Tx, blockNumber uint64, latest bool, txnIndex int, stateCache kvcache.Cache, chainName string) (state.StateReader, error) {
+func CreateStateReaderFromBlockNumber(ctx context.Context, tx kv.Tx, txNumsReader rawdbv3.TxNumsReader, blockNumber uint64, latest bool, txnIndex int, stateCache kvcache.Cache, chainName string) (state.StateReader, error) {
 	if latest {
 		cacheView, err := stateCache.View(ctx, tx)
 		if err != nil {
@@ -144,14 +145,14 @@ func CreateStateReaderFromBlockNumber(ctx context.Context, tx kv.Tx, blockNumber
 		}
 		return CreateLatestCachedStateReader(cacheView, tx), nil
 	}
-	return CreateHistoryStateReader(tx, blockNumber+1, txnIndex, chainName)
+	return CreateHistoryStateReader(tx, txNumsReader, blockNumber+1, txnIndex, chainName)
 }
 
-func CreateHistoryStateReader(tx kv.Tx, blockNumber uint64, txnIndex int, chainName string) (state.StateReader, error) {
+func CreateHistoryStateReader(tx kv.Tx, txNumsReader rawdbv3.TxNumsReader, blockNumber uint64, txnIndex int, chainName string) (state.StateReader, error) {
 	r := state.NewHistoryReaderV3()
 	r.SetTx(tx)
 	//r.SetTrace(true)
-	minTxNum, err := rawdbv3.TxNums.Min(tx, blockNumber)
+	minTxNum, err := txNumsReader.Min(tx, blockNumber)
 	if err != nil {
 		return nil, err
 	}
@@ -162,9 +163,9 @@ func CreateHistoryStateReader(tx kv.Tx, blockNumber uint64, txnIndex int, chainN
 func NewLatestStateReader(tx kv.Tx) state.StateReader {
 	return state.NewReaderV3(tx.(kv.TemporalGetter))
 }
-func NewLatestStateWriter(txc wrap.TxContainer, blockNum uint64) state.StateWriter {
+func NewLatestStateWriter(txc wrap.TxContainer, txNumsReader rawdbv3.TxNumsReader, blockNum uint64) state.StateWriter {
 	domains := txc.Doms
-	minTxNum, err := rawdbv3.TxNums.Min(domains.Tx(), blockNum)
+	minTxNum, err := txNumsReader.Min(domains.Tx(), blockNum)
 	if err != nil {
 		panic(err)
 	}

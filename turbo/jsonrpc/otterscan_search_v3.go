@@ -29,6 +29,7 @@ import (
 	"github.com/erigontech/erigon/cmd/state/exec3"
 	"github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/eth/ethutils"
+	"github.com/erigontech/erigon/turbo/snapshotsync/freezeblocks"
 )
 
 type txNumsIterFactory func(tx kv.TemporalTx, addr common.Address, fromTxNum int) (*rawdbv3.MapTxNum2BlockNumIter, error)
@@ -157,11 +158,13 @@ func (api *OtterscanAPIImpl) searchTransactionsBeforeV3(tx kv.TemporalTx, ctx co
 		// Internal search code considers blockNum [including], so adjust the value
 		fromBlockNum--
 	}
+	txNumsReader := rawdbv3.TxNums.WithCustomReadTxNumFunc(freezeblocks.ReadTxNumFuncFromBlockReader(ctx, api._blockReader))
+
 	fromTxNum := -1
 	if fromBlockNum != 0 {
 		// from == 0 == magic number which means last; reproduce bug-compatibility for == 1
 		// with e2 for now
-		_txNum, err := rawdbv3.TxNums.Max(tx, fromBlockNum)
+		_txNum, err := txNumsReader.Max(tx, fromBlockNum)
 		if err != nil {
 			return nil, err
 		}
@@ -194,11 +197,13 @@ func createForwardTxNumIter(tx kv.TemporalTx, addr common.Address, fromTxNum int
 func (api *OtterscanAPIImpl) searchTransactionsAfterV3(tx kv.TemporalTx, ctx context.Context, addr common.Address, fromBlockNum uint64, pageSize uint16) (*TransactionsWithReceipts, error) {
 	isLastPage := false
 	fromTxNum := -1
+	txNumsReader := rawdbv3.TxNums.WithCustomReadTxNumFunc(freezeblocks.ReadTxNumFuncFromBlockReader(ctx, api._blockReader))
+
 	if fromBlockNum == 0 {
 		isLastPage = true
 	} else {
 		// Internal search code considers blockNum [including], so adjust the value
-		_txNum, err := rawdbv3.TxNums.Min(tx, fromBlockNum+1)
+		_txNum, err := txNumsReader.Min(tx, fromBlockNum+1)
 		if err != nil {
 			return nil, err
 		}

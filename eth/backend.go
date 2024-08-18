@@ -46,6 +46,7 @@ import (
 	"google.golang.org/protobuf/types/known/emptypb"
 
 	"github.com/erigontech/erigon-lib/common/dir"
+	"github.com/erigontech/erigon-lib/config3"
 
 	"github.com/erigontech/erigon-lib/chain"
 	"github.com/erigontech/erigon-lib/chain/networkname"
@@ -55,7 +56,6 @@ import (
 	"github.com/erigontech/erigon-lib/common/dbg"
 	"github.com/erigontech/erigon-lib/common/disk"
 	"github.com/erigontech/erigon-lib/common/mem"
-	"github.com/erigontech/erigon-lib/config3"
 	"github.com/erigontech/erigon-lib/diagnostics"
 	"github.com/erigontech/erigon-lib/direct"
 	"github.com/erigontech/erigon-lib/downloader"
@@ -71,6 +71,7 @@ import (
 	prototypes "github.com/erigontech/erigon-lib/gointerfaces/typesproto"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/kv/kvcache"
+	"github.com/erigontech/erigon-lib/kv/rawdbv3"
 	"github.com/erigontech/erigon-lib/kv/remotedbserver"
 	"github.com/erigontech/erigon-lib/kv/temporal"
 	"github.com/erigontech/erigon-lib/log/v3"
@@ -1431,13 +1432,6 @@ func setUpBlockReader(ctx context.Context, db kv.RwDB, dirs datadir.Dirs, snConf
 	if isBor {
 		allBorSnapshots = freezeblocks.NewBorRoSnapshots(snConfig.Snapshot, dirs.Snap, minFrozenBlock, logger)
 	}
-	cr := rawdb.NewCanonicalReader()
-	agg, err := libstate.NewAggregator(ctx, dirs, config3.HistoryV3AggregationStep, db, cr, logger)
-	if err != nil {
-		return nil, nil, nil, nil, nil, err
-	}
-
-	agg.SetProduceMod(snConfig.Snapshot.ProduceE3)
 
 	g := &errgroup.Group{}
 	g.Go(func() error {
@@ -1450,6 +1444,15 @@ func setUpBlockReader(ctx context.Context, db kv.RwDB, dirs datadir.Dirs, snConf
 		}
 		return nil
 	})
+
+	blockReader := freezeblocks.NewBlockReader(allSnapshots, allBorSnapshots)
+	cr := rawdb.NewCanonicalReader(rawdbv3.TxNums.WithCustomReadTxNumFunc(freezeblocks.ReadTxNumFuncFromBlockReader(ctx, blockReader)))
+	agg, err := libstate.NewAggregator(ctx, dirs, config3.HistoryV3AggregationStep, db, cr, logger)
+	if err != nil {
+		return nil, nil, nil, nil, nil, err
+	}
+	agg.SetProduceMod(snConfig.Snapshot.ProduceE3)
+
 	g.Go(func() error {
 		return agg.OpenFolder()
 	})
@@ -1457,7 +1460,6 @@ func setUpBlockReader(ctx context.Context, db kv.RwDB, dirs datadir.Dirs, snConf
 		return nil, nil, nil, nil, nil, err
 	}
 
-	blockReader := freezeblocks.NewBlockReader(allSnapshots, allBorSnapshots)
 	blockWriter := blockio.NewBlockWriter()
 
 	return blockReader, blockWriter, allSnapshots, allBorSnapshots, agg, nil

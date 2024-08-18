@@ -39,6 +39,8 @@ import (
 	bortypes "github.com/erigontech/erigon/polygon/bor/types"
 	"github.com/erigontech/erigon/rpc"
 	"github.com/erigontech/erigon/turbo/rpchelper"
+	"github.com/erigontech/erigon/turbo/services"
+	"github.com/erigontech/erigon/turbo/snapshotsync/freezeblocks"
 )
 
 // getReceipts - checking in-mem cache, or else fallback to db, or else fallback to re-exec of block to re-gen receipts
@@ -223,16 +225,18 @@ func applyFilters(out *roaring.Bitmap, tx kv.Tx, begin, end uint64, crit filters
 	return nil
 }
 
-func applyFiltersV3(tx kv.TemporalTx, begin, end uint64, crit filters.FilterCriteria) (out stream.U64, err error) {
+func applyFiltersV3(ctx context.Context, br services.FullBlockReader, tx kv.TemporalTx, begin, end uint64, crit filters.FilterCriteria) (out stream.U64, err error) {
 	//[from,to)
+	txNumsReader := rawdbv3.TxNums.WithCustomReadTxNumFunc(freezeblocks.ReadTxNumFuncFromBlockReader(ctx, br))
+
 	var fromTxNum, toTxNum uint64
 	if begin > 0 {
-		fromTxNum, err = rawdbv3.TxNums.Min(tx, begin)
+		fromTxNum, err = txNumsReader.Min(tx, begin)
 		if err != nil {
 			return out, err
 		}
 	}
-	toTxNum, err = rawdbv3.TxNums.Max(tx, end)
+	toTxNum, err = txNumsReader.Max(tx, end)
 	if err != nil {
 		return out, err
 	}
@@ -280,7 +284,7 @@ func (api *BaseAPI) getLogsV3(ctx context.Context, tx kv.TemporalTx, begin, end 
 	var blockHash common.Hash
 	var header *types.Header
 
-	txNumbers, err := applyFiltersV3(tx, begin, end, crit)
+	txNumbers, err := applyFiltersV3(ctx, api._blockReader, tx, begin, end, crit)
 	if err != nil {
 		return logs, err
 	}
@@ -554,13 +558,15 @@ type MapTxNum2BlockNumIter struct {
 
 	blockNum                         uint64
 	minTxNumInBlock, maxTxNumInBlock uint64
+
+	txNumsReader rawdbv3.TxNumsReader
 }
 
-func MapTxNum2BlockNum(tx kv.Tx, it stream.U64) *MapTxNum2BlockNumIter {
-	return &MapTxNum2BlockNumIter{tx: tx, it: it, orderAscend: true}
+func MapTxNum2BlockNum(tx kv.Tx, txNumsReader rawdbv3.TxNumsReader, it stream.U64) *MapTxNum2BlockNumIter {
+	return &MapTxNum2BlockNumIter{tx: tx, it: it, orderAscend: true, txNumsReader: txNumsReader}
 }
-func MapDescendTxNum2BlockNum(tx kv.Tx, it stream.U64) *MapTxNum2BlockNumIter {
-	return &MapTxNum2BlockNumIter{tx: tx, it: it, orderAscend: false}
+func MapDescendTxNum2BlockNum(tx kv.Tx, txNumsReader rawdbv3.TxNumsReader, it stream.U64) *MapTxNum2BlockNumIter {
+	return &MapTxNum2BlockNumIter{tx: tx, it: it, orderAscend: false, txNumsReader: txNumsReader}
 }
 func (i *MapTxNum2BlockNumIter) HasNext() bool { return i.it.HasNext() }
 func (i *MapTxNum2BlockNumIter) Next() (txNum, blockNum uint64, txIndex int, isFinalTxn, blockNumChanged bool, err error) {
@@ -574,7 +580,7 @@ func (i *MapTxNum2BlockNumIter) Next() (txNum, blockNum uint64, txIndex int, isF
 		blockNumChanged = true
 
 		var ok bool
-		ok, i.blockNum, err = rawdbv3.TxNums.FindBlockNum(i.tx, txNum)
+		ok, i.blockNum, err = i.txNumsReader.FindBlockNum(i.tx, txNum)
 		if err != nil {
 			return
 		}
@@ -586,11 +592,11 @@ func (i *MapTxNum2BlockNumIter) Next() (txNum, blockNum uint64, txIndex int, isF
 
 	// if block number changed, calculate all related field
 	if blockNumChanged {
-		i.minTxNumInBlock, err = rawdbv3.TxNums.Min(i.tx, blockNum)
+		i.minTxNumInBlock, err = i.txNumsReader.Min(i.tx, blockNum)
 		if err != nil {
 			return
 		}
-		i.maxTxNumInBlock, err = rawdbv3.TxNums.Max(i.tx, blockNum)
+		i.maxTxNumInBlock, err = i.txNumsReader.Max(i.tx, blockNum)
 		if err != nil {
 			return
 		}

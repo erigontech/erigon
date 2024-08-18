@@ -457,7 +457,9 @@ func doDebugKey(cliCtx *cli.Context) error {
 	dirs := datadir.New(cliCtx.String(utils.DataDirFlag.Name))
 	chainDB := dbCfg(kv.ChainDB, dirs.Chaindata).MustOpen()
 	defer chainDB.Close()
-	agg := openAgg(ctx, dirs, chainDB, logger)
+
+	cr := rawdb.NewCanonicalReader(rawdbv3.TxNums)
+	agg := openAgg(ctx, dirs, chainDB, cr, logger)
 
 	view := agg.BeginFilesRo()
 	defer view.Close()
@@ -511,7 +513,7 @@ func doIntegrity(cliCtx *cli.Context) error {
 				return err
 			}
 		case integrity.HistoryNoSystemTxs:
-			if err := integrity.E3HistoryNoSystemTxs(ctx, chainDB, agg); err != nil {
+			if err := integrity.E3HistoryNoSystemTxs(ctx, chainDB, blockReader, agg); err != nil {
 				return err
 			}
 		default:
@@ -1029,12 +1031,16 @@ func openSnaps(ctx context.Context, cfg ethconfig.BlocksFreezing, dirs datadir.D
 	}
 
 	borSnaps.LogStat("bor")
-	agg = openAgg(ctx, dirs, chainDB, logger)
+	blockReader := freezeblocks.NewBlockReader(blockSnaps, borSnaps)
+
+	cr := rawdb.NewCanonicalReader(rawdbv3.TxNums.WithCustomReadTxNumFunc(freezeblocks.ReadTxNumFuncFromBlockReader(ctx, blockReader)))
+	agg = openAgg(ctx, dirs, chainDB, cr, logger)
 	err = chainDB.View(ctx, func(tx kv.Tx) error {
 		ac := agg.BeginFilesRo()
 		defer ac.Close()
 		ac.LogStats(tx, func(endTxNumMinimax uint64) (uint64, error) {
-			_, histBlockNumProgress, err := rawdbv3.TxNums.FindBlockNum(tx, endTxNumMinimax)
+			blockReader, _ := br.IO()
+			_, histBlockNumProgress, err := rawdbv3.TxNums.WithCustomReadTxNumFunc(freezeblocks.ReadTxNumFuncFromBlockReader(ctx, blockReader)).FindBlockNum(tx, endTxNumMinimax)
 			return histBlockNumProgress, err
 		})
 		return nil
@@ -1050,7 +1056,6 @@ func openSnaps(ctx context.Context, cfg ethconfig.BlocksFreezing, dirs datadir.D
 	}
 	logger.Info("[downloads]", "locked", er == nil, "at", mtime.Format("02 Jan 06 15:04 2006"))
 
-	blockReader := freezeblocks.NewBlockReader(blockSnaps, borSnaps)
 	blockWriter := blockio.NewBlockWriter()
 
 	blockSnapBuildSema := semaphore.NewWeighted(int64(dbg.BuildSnapshotAllowance))
@@ -1223,8 +1228,8 @@ func doRetireCommand(cliCtx *cli.Context, dirs datadir.Dirs) error {
 		return err
 	}
 
+	blockReader, _ := br.IO()
 	if err := db.Update(ctx, func(tx kv.RwTx) error {
-		blockReader, _ := br.IO()
 		ac := agg.BeginFilesRo()
 		defer ac.Close()
 		if err := rawdb.WriteSnapshots(tx, blockReader.FrozenFiles(), ac.Files()); err != nil {
@@ -1277,10 +1282,11 @@ func doRetireCommand(cliCtx *cli.Context, dirs datadir.Dirs) error {
 		return err
 	}
 
+	txNumsReader := rawdbv3.TxNums.WithCustomReadTxNumFunc(freezeblocks.ReadTxNumFuncFromBlockReader(ctx, blockReader))
 	var lastTxNum uint64
 	if err := db.Update(ctx, func(tx kv.RwTx) error {
 		execProgress, _ := stages.GetStageProgress(tx, stages.Execution)
-		lastTxNum, err = rawdbv3.TxNums.Max(tx, execProgress)
+		lastTxNum, err = txNumsReader.Max(tx, execProgress)
 		if err != nil {
 			return err
 		}
@@ -1400,8 +1406,7 @@ func dbCfg(label kv.Label, path string) mdbx.MdbxOpts {
 	opts = opts.Accede()
 	return opts
 }
-func openAgg(ctx context.Context, dirs datadir.Dirs, chainDB kv.RwDB, logger log.Logger) *libstate.Aggregator {
-	cr := rawdb.NewCanonicalReader()
+func openAgg(ctx context.Context, dirs datadir.Dirs, chainDB kv.RwDB, cr *rawdb.CanonicalReader, logger log.Logger) *libstate.Aggregator {
 	agg, err := libstate.NewAggregator(ctx, dirs, config3.HistoryV3AggregationStep, chainDB, cr, logger)
 	if err != nil {
 		panic(err)

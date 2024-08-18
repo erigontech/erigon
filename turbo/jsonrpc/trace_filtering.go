@@ -45,6 +45,7 @@ import (
 	bortypes "github.com/erigontech/erigon/polygon/bor/types"
 	"github.com/erigontech/erigon/rpc"
 	"github.com/erigontech/erigon/turbo/rpchelper"
+	"github.com/erigontech/erigon/turbo/snapshotsync/freezeblocks"
 	"github.com/erigontech/erigon/turbo/transactions"
 )
 
@@ -341,13 +342,15 @@ func (api *TraceAPIImpl) Filter(ctx context.Context, req TraceFilterRequest, gas
 func (api *TraceAPIImpl) filterV3(ctx context.Context, dbtx kv.TemporalTx, fromBlock, toBlock uint64, req TraceFilterRequest, stream *jsoniter.Stream, gasBailOut bool, traceConfig *config.TraceConfig) error {
 	var fromTxNum, toTxNum uint64
 	var err error
+	txNumsReader := rawdbv3.TxNums.WithCustomReadTxNumFunc(freezeblocks.ReadTxNumFuncFromBlockReader(ctx, api._blockReader))
+
 	if fromBlock > 0 {
-		fromTxNum, err = rawdbv3.TxNums.Min(dbtx, fromBlock)
+		fromTxNum, err = txNumsReader.Min(dbtx, fromBlock)
 		if err != nil {
 			return err
 		}
 	}
-	toTxNum, err = rawdbv3.TxNums.Max(dbtx, toBlock) // toBlock is an inclusive bound
+	toTxNum, err = txNumsReader.Max(dbtx, toBlock) // toBlock is an inclusive bound
 	if err != nil {
 		return err
 	}
@@ -753,7 +756,8 @@ func (api *TraceAPIImpl) callManyTransactions(
 	}
 
 	callParams := make([]TraceCallParam, 0, len(txs))
-	reader, err := rpchelper.CreateHistoryStateReader(dbtx, blockNumber, txIndex, cfg.ChainName)
+	txNumsReader := rawdbv3.TxNums.WithCustomReadTxNumFunc(freezeblocks.ReadTxNumFuncFromBlockReader(ctx, api._blockReader))
+	reader, err := rpchelper.CreateHistoryStateReader(dbtx, txNumsReader, blockNumber, txIndex, cfg.ChainName)
 	if err != nil {
 		return nil, nil, err
 	}

@@ -116,6 +116,9 @@ func (back *RemoteBackend) AllTypes() []snaptype.Type             { panic("not i
 func (back *RemoteBackend) FrozenBlocks() uint64                  { return back.blockReader.FrozenBlocks() }
 func (back *RemoteBackend) FrozenBorBlocks() uint64               { return back.blockReader.FrozenBorBlocks() }
 func (back *RemoteBackend) FrozenFiles() (list []string)          { return back.blockReader.FrozenFiles() }
+func (back *RemoteBackend) BodyForStorage(ctx context.Context, tx kv.Getter, hash common.Hash, blockNum uint64) (body *types.BodyForStorage, err error) {
+	return back.blockReader.BodyForStorage(ctx, tx, hash, blockNum)
+}
 func (back *RemoteBackend) FreezingCfg() ethconfig.BlocksFreezing {
 	return back.blockReader.FreezingCfg()
 }

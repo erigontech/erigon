@@ -1848,9 +1848,9 @@ func (r *BlockReader) Integrity(ctx context.Context) error {
 	return nil
 }
 
-func ReadTxNumFuncFromBlockReader(ctx context.Context, tx kv.Tx, r services.FullBlockReader) rawdbv3.ReadTxNumFunc {
-	return func(c kv.Cursor, blockNum uint64) (maxTxNum uint64, ok bool, err error) {
-		maxTxNum, ok, err = rawdbv3.DefaultReadTxNumFunc(c, blockNum)
+func ReadTxNumFuncFromBlockReader(ctx context.Context, r services.FullBlockReader) rawdbv3.ReadTxNumFunc {
+	return func(tx kv.Tx, c kv.Cursor, blockNum uint64) (maxTxNum uint64, ok bool, err error) {
+		maxTxNum, ok, err = rawdbv3.DefaultReadTxNumFunc(tx, c, blockNum)
 		if err != nil {
 			return
 		}
