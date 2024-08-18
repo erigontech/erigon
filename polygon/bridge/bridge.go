@@ -66,13 +66,13 @@ type Bridge struct {
 	eventFetcher                 eventFetcher
 	stateReceiverContractAddress libcommon.Address
 	// internal state
-	reachedTip               atomic.Bool
-	fetchedEventsSignal      chan struct{}
-	lastFetchedEventTime     atomic.Uint64
-	processedBlockSignal     chan struct{}
-	lastProcessedBlockNumber atomic.Uint64
-	lastProcessedBlockTime   atomic.Uint64
-	lastProcessedEventID     atomic.Uint64
+	reachedTip             atomic.Bool
+	fetchedEventsSignal    chan struct{}
+	lastFetchedEventTime   atomic.Uint64
+	processedBlockSignal   chan struct{}
+	lastProcessedBlockNum  atomic.Uint64
+	lastProcessedBlockTime atomic.Uint64
+	lastProcessedEventID   atomic.Uint64
 }
 
 func (b *Bridge) Run(ctx context.Context) error {
@@ -207,7 +207,7 @@ func (b *Bridge) ProcessNewBlocks(ctx context.Context, blocks []*types.Block) er
 			b.lastProcessedEventID.Store(endID)
 		}
 
-		b.lastProcessedBlockNumber.Store(blockNum)
+		b.lastProcessedBlockNum.Store(blockNum)
 		b.lastProcessedBlockTime.Store(blockTime)
 		b.signalProcessedBlock()
 	}
@@ -230,7 +230,7 @@ func (b *Bridge) Synchronize(ctx context.Context, blockNum uint64) error {
 	b.logger.Debug(
 		bridgeLogPrefix("synchronizing events..."),
 		"blockNum", blockNum,
-		"lastProcessedBlockNumber", b.lastProcessedBlockNumber.Load(),
+		"lastProcessedBlockNum", b.lastProcessedBlockNum.Load(),
 	)
 
 	return b.waitForProcessedBlock(ctx, blockNum)
@@ -346,13 +346,13 @@ func (b *Bridge) waitForProcessedBlock(ctx context.Context, blockNum uint64) err
 	sprintLen := b.borConfig.CalculateSprintLength(blockNum)
 	blockNum -= blockNum % sprintLen // we only process events at sprint start
 	shouldLog := true
-	lastProcessedBlockNumber := b.lastProcessedBlockNumber.Load()
-	for blockNum > lastProcessedBlockNumber {
+	lastProcessedBlockNum := b.lastProcessedBlockNum.Load()
+	for blockNum > lastProcessedBlockNum {
 		if shouldLog {
 			b.logger.Debug(
 				bridgeLogPrefix("waiting for block processing to catch up"),
 				"blockNum", blockNum,
-				"lastProcessedBlockNumber", lastProcessedBlockNumber,
+				"lastProcessedBlockNum", lastProcessedBlockNum,
 			)
 		}
 
@@ -360,7 +360,7 @@ func (b *Bridge) waitForProcessedBlock(ctx context.Context, blockNum uint64) err
 			return err
 		}
 
-		lastProcessedBlockNumber = b.lastProcessedBlockNumber.Load()
+		lastProcessedBlockNum = b.lastProcessedBlockNum.Load()
 
 		select {
 		case <-logTicker.C:
