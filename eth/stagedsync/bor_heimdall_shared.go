@@ -474,16 +474,27 @@ func fetchAndWriteHeimdallStateSyncEvents(
 	}
 
 	wroteIndex := false
+
+	var initialRecordTime *time.Time
+
 	for i, eventRecord := range eventRecords {
 		if eventRecord.ID <= lastStateSyncEventID {
 			continue
 		}
 
+		var afterCheck = func(limitTime time.Time, eventTime time.Time, initialTime *time.Time) bool {
+			if initialTime == nil {
+				return eventRecord.Time.After(from)
+			}
+
+			return initialTime.After(from)
+		}
+
 		// this check is currently only tested and working on amoy - it should work for
 		// current bor-mainet but will fail for some historical blocks
-		if !(chainID == "137" || chainID == "1337") {
+		if !(chainID == "1337") {
 			if lastStateSyncEventID+1 != eventRecord.ID || eventRecord.ChainID != chainID ||
-				!(eventRecord.Time.After(from) && eventRecord.Time.Before(to)) {
+				!(afterCheck(from, eventRecord.Time, initialRecordTime) && eventRecord.Time.Before(to)) {
 				return lastStateSyncEventID, i, time.Since(fetchStart), fmt.Errorf(
 					"invalid event record received %s, %s, %s, %s",
 					fmt.Sprintf("blockNum=%d", blockNum),
@@ -514,6 +525,11 @@ func fetchAndWriteHeimdallStateSyncEvents(
 			}
 
 			wroteIndex = true
+		}
+
+		if initialRecordTime == nil {
+			eventTime := eventRecord.Time
+			initialRecordTime = &eventTime
 		}
 
 		lastStateSyncEventID++
