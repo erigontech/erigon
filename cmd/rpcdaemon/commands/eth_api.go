@@ -52,7 +52,7 @@ type EthAPI interface {
 	GetBlockTransactionCountByHash(ctx context.Context, blockHash common.Hash) (*hexutil.Uint, error)
 
 	// Transaction related (see ./eth_txs.go)
-	GetTransactionByHash(ctx context.Context, hash common.Hash) (*RPCTransaction, error)
+	GetTransactionByHash(ctx context.Context, hash common.Hash) (interface{}, error)
 	GetTransactionByBlockHashAndIndex(ctx context.Context, blockHash common.Hash, txIndex hexutil.Uint64) (*RPCTransaction, error)
 	GetTransactionByBlockNumberAndIndex(ctx context.Context, blockNr rpc.BlockNumber, txIndex hexutil.Uint) (*RPCTransaction, error)
 	GetRawTransactionByBlockNumberAndIndex(ctx context.Context, blockNr rpc.BlockNumber, index hexutil.Uint) (hexutility.Bytes, error)

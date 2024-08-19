@@ -21,7 +21,7 @@ import (
 )
 
 // GetTransactionByHash implements eth_getTransactionByHash. Returns information about a transaction given the transaction's hash.
-func (api *APIImpl) GetTransactionByHash(ctx context.Context, txnHash common.Hash) (*RPCTransaction, error) {
+func (api *APIImpl) GetTransactionByHash(ctx context.Context, txnHash common.Hash) (interface{}, error) {
 	tx, err := api.db.BeginRo(ctx)
 	if err != nil {
 		return nil, err
@@ -90,7 +90,8 @@ func (api *APIImpl) GetTransactionByHash(ctx context.Context, txnHash common.Has
 	}
 
 	if !sequencer.IsSequencer() {
-		return nil, nil
+		// forward the request on to the sequencer at this point as it is the only node with an active txpool
+		return api.forwardGetTransactionByHash(api.l2RpcUrl, txnHash)
 	}
 
 	curHeader := rawdb.ReadCurrentHeader(tx)
