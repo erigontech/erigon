@@ -840,6 +840,7 @@ Loop:
 
 				txCount++
 				usedGas += txTask.UsedGas
+				logGas += txTask.UsedGas
 				mxExecGas.Add(float64(txTask.UsedGas))
 				mxExecTransactions.Add(1)
 
@@ -928,6 +929,7 @@ Loop:
 				stepsInDB := rawdbhelpers.IdxStepsCountV3(applyTx)
 
 				progress.Log("", rs, in, rws, count, logGas, inputBlockNum.Load(), outputBlockNum.GetValueUint64(), outputTxNum.Load(), mxExecRepeats.GetValueUint64(), stepsInDB, shouldGenerateChangesets)
+				logGas = 0
 				//if applyTx.(state2.HasAggTx).AggTx().(*state2.AggregatorRoTx).CanPrune(applyTx, outputTxNum.Load()) {
 				//	//small prune cause MDBX_TXN_FULL
 				//	if _, err := applyTx.(state2.HasAggTx).AggTx().(*state2.AggregatorRoTx).PruneSmallBatches(ctx, 10*time.Hour, applyTx); err != nil {
