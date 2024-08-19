@@ -880,7 +880,7 @@ func extractPatternsInSuperstrings(ctx context.Context, superstringCh chan []byt
 					//	dictKey[s] = superstring[(int(filtered[i])+s)*2+1]
 					//}
 					//fmt.Printf("break: %s\n", dictKey)
-					//break
+					break
 				}
 
 				window := i - j + 2
@@ -917,7 +917,7 @@ func extractPatternsInSuperstrings(ctx context.Context, superstringCh chan []byt
 					logger.Error("extractPatternsInSuperstrings", "collect", err)
 				}
 				prevSkipped = false //nolint
-				//break
+				break
 			}
 		}
 	}
