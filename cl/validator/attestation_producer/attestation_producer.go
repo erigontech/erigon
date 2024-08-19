@@ -63,14 +63,14 @@ func New(ctx context.Context, beaconCfg *clparams.BeaconChainConfig) Attestation
 		beaconCfg:         beaconCfg,
 		attestationsCache: attestationsCache,
 	}
-	go p.genStateAtSlotManager(ctx)
+	go p.genStateAtSlot(ctx)
 	return p
 }
 
-// genStateAtSlotManager generates beacon state at slot in background and also notify all ch in waiting list. This is used to avoid over-copying of
+// genStateAtSlot generates beacon state at slot in background and also notify all ch in waiting list. This is used to avoid over-copying of
 // beacon state in case of multiple requests for the same slot. (e.g. 10k validators requesting attestation data for the same slot almost at the same time,
 // which might lead to 10k copies of the same state in memory)
-func (ap *attestationProducer) genStateAtSlotManager(ctx context.Context) {
+func (ap *attestationProducer) genStateAtSlot(ctx context.Context) {
 	// beaconStateCache *lru.CacheWithTTL[uint64, *state.CachingBeaconState] // Slot => BeaconState
 	beaconStateCache := lru.NewWithTTL[uint64, *state.CachingBeaconState]("attestaion_producer_beacon_state_cpy", 128, time.Minute)
 	generatingWaitList := map[uint64][]chan<- stateAcquireResp{}
@@ -147,6 +147,8 @@ func (ap *attestationProducer) acquireBeaconStateAtSlot(baseState *state.Caching
 }
 
 func (ap *attestationProducer) ProduceAndCacheAttestationData(baseState *state.CachingBeaconState, slot uint64, committeeIndex uint64) (solid.AttestationData, error) {
+	begin := time.Now()
+	defer log.Info("[AttestationProducer] ProduceAndCacheAttestationData", "slot", slot, "committeeIndex", committeeIndex, "duration", time.Since(begin))
 	epoch := slot / ap.beaconCfg.SlotsPerEpoch
 	baseStateBlockRoot, err := baseState.BlockRoot()
 	if err != nil {
