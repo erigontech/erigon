@@ -1137,6 +1137,7 @@ func doCompress(cliCtx *cli.Context) error {
 	compressCfg.Workers = estimate.CompressSnapshot.Workers()
 	compressCfg.MinPatternLen = 20
 	compressCfg.MaxPatternLen = 32
+	compressCfg.SamplingFactor = 1
 	c, err := seg.NewCompressor(ctx, "compress", f, dirs.Tmp, compressCfg, log.LvlInfo, logger)
 	if err != nil {
 		return err
