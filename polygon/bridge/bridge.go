@@ -177,7 +177,7 @@ func (b *Bridge) ProcessNewBlocks(ctx context.Context, blocks []*types.Block) er
 		}
 
 		blockTime := block.Time()
-		toTime, err := b.blockEventsWindowTimeEnd(blockNum, blockTime)
+		toTime, err := b.blockEventsTimeWindowEnd(blockNum, blockTime)
 		if err != nil {
 			return err
 		}
@@ -289,7 +289,7 @@ func (b *Bridge) EventTxnLookup(ctx context.Context, borTxHash libcommon.Hash) (
 	return b.store.EventTxnToBlockNum(ctx, borTxHash)
 }
 
-func (b *Bridge) blockEventsWindowTimeEnd(blockNum uint64, blockTime uint64) (uint64, error) {
+func (b *Bridge) blockEventsTimeWindowEnd(blockNum uint64, blockTime uint64) (uint64, error) {
 	if b.borConfig.IsIndore(blockNum) {
 		stateSyncDelay := b.borConfig.CalculateStateSyncDelay(blockNum)
 		return blockTime - stateSyncDelay, nil
@@ -384,10 +384,10 @@ func (b *Bridge) waitFetchedEventsSignal(ctx context.Context) error {
 	case <-ctx.Done():
 		return ctx.Err()
 	case _, ok := <-b.fetchedEventsSignal:
-		if ok {
-			return nil
+		if !ok {
+			return errors.New("fetchedEventsSignal channel closed")
 		}
-		return errors.New("fetchedEventsSignal channel closed")
+		return nil
 	}
 }
 
@@ -403,10 +403,10 @@ func (b *Bridge) waitProcessedBlockSignal(ctx context.Context) error {
 	case <-ctx.Done():
 		return ctx.Err()
 	case _, ok := <-b.processedBlockSignal:
-		if ok {
-			return nil
+		if !ok {
+			return errors.New("processedBlockSignal channel closed")
 		}
-		return errors.New("processedBlockSignal channel closed")
+		return nil
 	}
 }
 
