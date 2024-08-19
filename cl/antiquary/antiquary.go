@@ -255,6 +255,7 @@ func (a *Antiquary) Loop() error {
 			if from >= to {
 				continue
 			}
+			from = (from / snaptype.Erigon2MergeLimit) * snaptype.Erigon2MergeLimit
 			to = min(to, to-safetyMargin) // We don't want to retire snapshots that are too close to the finalized head
 			to = (to / snaptype.Erigon2MergeLimit) * snaptype.Erigon2MergeLimit
 			if to-from < snaptype.Erigon2MergeLimit {
