@@ -53,29 +53,18 @@ type MiningBlock struct {
 }
 
 type MiningState struct {
-	MiningConfig      *params.MiningConfig
-	PendingResultCh   chan *types.Block
-	MiningResultCh    chan *types.Block
-	MiningResultPOSCh chan *types.BlockWithReceipts
-	MiningBlock       *MiningBlock
+	MiningConfig    *params.MiningConfig
+	PendingResultCh chan *types.Block
+	MiningResultCh  chan *types.BlockWithReceipts
+	MiningBlock     *MiningBlock
 }
 
 func NewMiningState(cfg *params.MiningConfig) MiningState {
 	return MiningState{
 		MiningConfig:    cfg,
 		PendingResultCh: make(chan *types.Block, 1),
-		MiningResultCh:  make(chan *types.Block, 1),
+		MiningResultCh:  make(chan *types.BlockWithReceipts, 1),
 		MiningBlock:     &MiningBlock{},
-	}
-}
-
-func NewProposingState(cfg *params.MiningConfig) MiningState {
-	return MiningState{
-		MiningConfig:      cfg,
-		PendingResultCh:   make(chan *types.Block, 1),
-		MiningResultCh:    make(chan *types.Block, 1),
-		MiningResultPOSCh: make(chan *types.BlockWithReceipts, 1),
-		MiningBlock:       &MiningBlock{},
 	}
 }
 
@@ -134,7 +123,7 @@ func SpawnMiningCreateBlockStage(s *StageState, tx kv.RwTx, cfg MiningCreateBloc
 
 	if cfg.miner.MiningConfig.Etherbase == (libcommon.Address{}) {
 		if cfg.blockBuilderParameters == nil {
-			return fmt.Errorf("refusing to mine without etherbase")
+			return errors.New("refusing to mine without etherbase")
 		}
 		// If we do not have an etherbase, let's use the suggested one
 		coinbase = cfg.blockBuilderParameters.SuggestedFeeRecipient
@@ -148,7 +137,7 @@ func SpawnMiningCreateBlockStage(s *StageState, tx kv.RwTx, cfg MiningCreateBloc
 	}
 	chain := ChainReader{Cfg: cfg.chainConfig, Db: tx, BlockReader: cfg.blockReader, Logger: logger}
 	var GetBlocksFromHash = func(hash libcommon.Hash, n int) (blocks []*types.Block) {
-		number := rawdb.ReadHeaderNumber(tx, hash)
+		number, _ := cfg.blockReader.HeaderNumber(context.Background(), tx, hash)
 		if number == nil {
 			return nil
 		}

@@ -515,7 +515,6 @@ func initSnapshotLock(ctx context.Context, cfg *downloadercfg.Cfg, db kv.RoDB, s
 	}
 
 	snapCfg := cfg.SnapshotConfig
-
 	if snapCfg == nil {
 		snapCfg = snapcfg.KnownCfg(cfg.ChainName)
 	}
@@ -819,13 +818,14 @@ type seedHash struct {
 
 func (d *Downloader) mainLoop(silent bool) error {
 	if d.webseedsDiscover {
+
 		// CornerCase: no peers -> no anoncments to trackers -> no magnetlink resolution (but magnetlink has filename)
 		// means we can start adding weebseeds without waiting for `<-t.GotInfo()`
 		d.wg.Add(1)
 		go func() {
 			defer d.wg.Done()
 			// webseeds.Discover may create new .torrent files on disk
-			d.webseeds.Discover(d.ctx, d.cfg.WebSeedFiles, d.cfg.Dirs.Snap)
+			d.webseeds.Discover(d.ctx, d.cfg.WebSeedFileProviders, d.cfg.Dirs.Snap)
 			// apply webseeds to existing torrents
 			if err := d.addTorrentFilesFromDisk(true); err != nil && !errors.Is(err, context.Canceled) {
 				d.logger.Warn("[snapshots] addTorrentFilesFromDisk", "err", err)
@@ -943,7 +943,7 @@ func (d *Downloader) mainLoop(silent bool) error {
 										} else {
 											downloadComplete <- downloadStatus{
 												name: fileInfo.Name(),
-												err:  fmt.Errorf("hash check failed"),
+												err:  errors.New("hash check failed"),
 											}
 
 											d.logger.Warn("[snapshots] Torrent hash does not match file", "file", fileInfo.Name(), "torrent-hash", infoHash, "file-hash", hex.EncodeToString(fileHashBytes))
@@ -1609,7 +1609,7 @@ func (d *Downloader) torrentDownload(t *torrent.Torrent, statusChan chan downloa
 
 func (d *Downloader) webDownload(peerUrls []*url.URL, t *torrent.Torrent, i *webDownloadInfo, statusChan chan downloadStatus) (*RCloneSession, error) {
 	if d.webDownloadClient == nil {
-		return nil, fmt.Errorf("webdownload client not enabled")
+		return nil, errors.New("webdownload client not enabled")
 	}
 
 	peerUrl, err := selectDownloadPeer(d.ctx, peerUrls, t)
@@ -1743,7 +1743,7 @@ func (d *Downloader) webDownload(peerUrls []*url.URL, t *torrent.Torrent, i *web
 func selectDownloadPeer(ctx context.Context, peerUrls []*url.URL, t *torrent.Torrent) (string, error) {
 	switch len(peerUrls) {
 	case 0:
-		return "", fmt.Errorf("no download peers")
+		return "", errors.New("no download peers")
 
 	case 1:
 		downloadUrl := peerUrls[0].JoinPath(t.Name())
@@ -1775,7 +1775,7 @@ func selectDownloadPeer(ctx context.Context, peerUrls []*url.URL, t *torrent.Tor
 		}
 	}
 
-	return "", fmt.Errorf("can't find download peer")
+	return "", errors.New("can't find download peer")
 }
 
 func availableTorrents(ctx context.Context, pending []*torrent.Torrent, downloading map[string]*downloadInfo, fileSlots int, pieceSlots int) []*torrent.Torrent {
@@ -2033,7 +2033,7 @@ func (d *Downloader) ReCalcStats(interval time.Duration) {
 
 		if torrentComplete {
 			tComplete++
-			bytesCompleted = t.Length()
+			bytesCompleted = tLen
 			delete(downloading, torrentName)
 		} else {
 			bytesCompleted = t.BytesCompleted()
@@ -2047,7 +2047,7 @@ func (d *Downloader) ReCalcStats(interval time.Duration) {
 			}
 		}
 
-		//stats.BytesCompleted += uint64(bytesCompleted)
+		stats.BytesCompleted += uint64(bytesCompleted)
 		stats.BytesTotal += uint64(tLen)
 
 		for _, peer := range peersOfThisFile {
@@ -2657,7 +2657,14 @@ func SeedableFiles(dirs datadir.Dirs, chainName string, all bool) ([]string, err
 	if err != nil {
 		return nil, err
 	}
-	files = append(append(append(files, l1...), l2...), l3...)
+	var l4 []string
+	if all {
+		l4, err = seedableStateFilesBySubDir(dirs.Snap, "accessor", all)
+		if err != nil {
+			return nil, err
+		}
+	}
+	files = append(append(append(append(files, l1...), l2...), l3...), l4...)
 	return files, nil
 }
 
@@ -2759,10 +2766,10 @@ func (d *Downloader) Stats() AggStats {
 }
 
 func (d *Downloader) Close() {
-	d.logger.Debug("[snapshots] stopping downloader")
+	d.logger.Info("[snapshots] stopping downloader", "files", len(d.torrentClient.Torrents()))
 	d.stopMainLoop()
 	d.wg.Wait()
-	d.logger.Debug("[snapshots] closing torrents")
+	d.logger.Info("[snapshots] closing torrents")
 	d.torrentClient.Close()
 	if err := d.folder.Close(); err != nil {
 		d.logger.Warn("[snapshots] folder.close", "err", err)
@@ -2770,9 +2777,9 @@ func (d *Downloader) Close() {
 	if err := d.pieceCompletionDB.Close(); err != nil {
 		d.logger.Warn("[snapshots] pieceCompletionDB.close", "err", err)
 	}
-	d.logger.Debug("[snapshots] closing db")
+	d.logger.Info("[snapshots] closing db")
 	d.db.Close()
-	d.logger.Debug("[snapshots] downloader stopped")
+	d.logger.Info("[snapshots] downloader stopped")
 }
 
 func (d *Downloader) PeerID() []byte {

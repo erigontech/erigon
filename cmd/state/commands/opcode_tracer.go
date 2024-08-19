@@ -439,7 +439,7 @@ func OpcodeTracer(genesis *types.Genesis, blockNum uint64, chaindata string, num
 	defer historyTx.Rollback()
 
 	dirs := datadir2.New(filepath.Dir(chainDb.(*mdbx.MdbxKV).Path()))
-	blockReader := freezeblocks.NewBlockReader(freezeblocks.NewRoSnapshots(ethconfig.BlocksFreezing{Enabled: false}, dirs.Snap, 0, log.New()), nil /* BorSnapshots */)
+	blockReader := freezeblocks.NewBlockReader(freezeblocks.NewRoSnapshots(ethconfig.BlocksFreezing{}, dirs.Snap, 0, log.New()), nil /* BorSnapshots */)
 
 	chainConfig := genesis.Config
 	vmConfig := vm.Config{Tracer: ot, Debug: true}
@@ -724,7 +724,7 @@ func runBlock(engine consensus.Engine, ibs *state.IntraBlockState, txnWriter sta
 	core.InitializeBlockExecution(engine, nil, header, chainConfig, ibs, logger, nil)
 	rules := chainConfig.Rules(block.NumberU64(), block.Time())
 	for i, txn := range block.Transactions() {
-		ibs.SetTxContext(txn.Hash(), block.Hash(), i)
+		ibs.SetTxContext(txn.Hash(), i)
 		receipt, _, err := core.ApplyTransaction(chainConfig, core.GetHashFn(header, getHeader), engine, nil, gp, ibs, txnWriter, header, txn, usedGas, usedBlobGas, vmConfig)
 		if err != nil {
 			return nil, fmt.Errorf("could not apply txn %d [%x] failed: %w", i, txn.Hash(), err)

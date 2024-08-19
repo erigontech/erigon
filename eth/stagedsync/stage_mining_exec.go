@@ -107,7 +107,7 @@ func SpawnMiningExecStage(s *StageState, txc wrap.TxContainer, cfg MiningExecCfg
 	var (
 		stateReader state.StateReader
 	)
-	stateReader = state.NewReaderV4(txc.Doms)
+	stateReader = state.NewReaderV3(txc.Doms)
 	ibs := state.New(stateReader)
 	// Clique consensus needs forced author in the evm context
 	if cfg.chainConfig.Consensus == chain.CliqueConsensus {
@@ -146,7 +146,7 @@ func SpawnMiningExecStage(s *StageState, txc wrap.TxContainer, cfg MiningExecCfg
 				return err
 			}
 			defer domains.Close()
-			simStateReader = state.NewReaderV4(domains)
+			simStateReader = state.NewReaderV3(domains)
 			simStateWriter = state.NewWriterV4(domains)
 
 			executionAt, err := s.ExecutionAt(txc.Tx)
@@ -239,7 +239,7 @@ func SpawnMiningExecStage(s *StageState, txc wrap.TxContainer, cfg MiningExecCfg
 	// This flag will skip checking the state root
 	execCfg.blockProduction = true
 	execS := &StageState{state: s.state, ID: stages.Execution, BlockNumber: blockHeight - 1}
-	if err := ExecBlockV3(execS, nil, txc, blockHeight, context.Background(), execCfg, false, logger); err != nil {
+	if err := ExecBlockV3(execS, nil, txc, blockHeight, context.Background(), execCfg, false, logger, true); err != nil {
 		return err
 	}
 
@@ -448,7 +448,7 @@ func addTransactionsToMiningBlock(logPrefix string, current *MiningBlock, chainC
 	noop := state.NewNoopWriter()
 
 	var miningCommitTx = func(txn types.Transaction, coinbase libcommon.Address, vmConfig *vm.Config, chainConfig chain.Config, ibs *state.IntraBlockState, current *MiningBlock) ([]*types.Log, error) {
-		ibs.SetTxContext(txn.Hash(), libcommon.Hash{}, tcount)
+		ibs.SetTxContext(txn.Hash(), tcount)
 		gasSnap := gasPool.Gas()
 		blobGasSnap := gasPool.BlobGas()
 		snap := ibs.Snapshot()

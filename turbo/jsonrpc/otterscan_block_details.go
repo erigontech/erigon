@@ -25,7 +25,6 @@ import (
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/kv"
 
-	"github.com/erigontech/erigon/core/rawdb"
 	"github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/rpc"
 )
@@ -56,7 +55,10 @@ func (api *OtterscanAPIImpl) GetBlockDetailsByHash(ctx context.Context, hash com
 	defer tx.Rollback()
 
 	// b, senders, err := rawdb.ReadBlockByHashWithSenders(tx, hash)
-	blockNumber := rawdb.ReadHeaderNumber(tx, hash)
+	blockNumber, err := api._blockReader.HeaderNumber(ctx, tx, hash)
+	if err != nil {
+		return nil, err
+	}
 	if blockNumber == nil {
 		return nil, fmt.Errorf("couldn't find block number for hash %v", hash.Bytes())
 	}
@@ -86,7 +88,7 @@ func (api *OtterscanAPIImpl) getBlockDetailsImpl(ctx context.Context, tx kv.Tx, 
 	if err != nil {
 		return nil, err
 	}
-	receipts, err := api.getReceipts(ctx, tx, b, senders)
+	receipts, err := api.getReceipts(ctx, tx, b)
 	if err != nil {
 		return nil, fmt.Errorf("getReceipts error: %v", err)
 	}

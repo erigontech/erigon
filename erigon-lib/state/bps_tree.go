@@ -20,8 +20,10 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
-	"github.com/c2h5oh/datasize"
+	"time"
 	"unsafe"
+
+	"github.com/c2h5oh/datasize"
 
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/log/v3"
@@ -77,7 +79,7 @@ func (it *BpsTreeIterator) Di() uint64 {
 
 func (it *BpsTreeIterator) KVFromGetter(g ArchiveGetter) ([]byte, []byte, error) {
 	if it == nil {
-		return nil, nil, fmt.Errorf("iterator is nil")
+		return nil, nil, errors.New("iterator is nil")
 	}
 	//fmt.Printf("kv from %p getter %p tree %p offt %d\n", it, g, it.t, it.i)
 	k, v, err := it.t.dataLookupFunc(it.i, g)
@@ -133,6 +135,7 @@ type Node struct {
 }
 
 func (b *BpsTree) WarmUp(kv ArchiveGetter) error {
+	t := time.Now()
 	N := b.offt.Count()
 	if N == 0 {
 		return nil
@@ -162,7 +165,8 @@ func (b *BpsTree) WarmUp(kv ArchiveGetter) error {
 
 	log.Root().Debug("WarmUp finished", "file", kv.FileName(), "M", b.M, "N", N,
 		"cached", fmt.Sprintf("%d %%%.5f", len(b.mx), float64(len(b.mx))/float64(N)*100),
-		"cacheSize", datasize.ByteSize(cachedBytes).HR(), "fileSize", datasize.ByteSize(kv.Size()).HR())
+		"cacheSize", datasize.ByteSize(cachedBytes).HR(), "fileSize", datasize.ByteSize(kv.Size()).HR(),
+		"took", time.Since(t))
 	return nil
 }
 

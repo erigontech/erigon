@@ -2,7 +2,7 @@ name: QA - Tip tracking
 
 on:
   schedule:
-    - cron: '0 0 * * 1-6'  # Run every day at 00:00 AM UTC except Sunday
+    - cron: '0 0 * * 1-6'  # Run every night at 00:00 AM UTC except Sunday
   workflow_dispatch:     # Run manually
 
 jobs:
@@ -71,15 +71,6 @@ jobs:
           echo "TEST_RESULT=failure" >> "$GITHUB_OUTPUT"
         fi
 
-    - name: Delete Erigon Testbed Data Directory
-      if: always()
-      run: |
-        rm -rf $ERIGON_TESTBED_DATA_DIR
-
-    - name: Resume the Erigon instance dedicated to db maintenance
-      run: |
-        python3 $ERIGON_QA_PATH/test_system/db-producer/resume_production.py || true
-
     - name: Save test results
       if: steps.test_step.outputs.test_executed == 'true'
       env:
@@ -106,7 +97,18 @@ jobs:
       uses: actions/upload-artifact@v4
       with:
         name: test-results
-        path: ${{ github.workspace }}/result-${{ env.CHAIN }}.json
+        path: |
+          ${{ github.workspace }}/result-${{ env.CHAIN }}.json
+          ${{ env.ERIGON_TESTBED_DATA_DIR }}/logs/erigon.log
+
+    - name: Delete Erigon Testbed Data Directory
+      if: always()
+      run: |
+        rm -rf $ERIGON_TESTBED_DATA_DIR
+
+    - name: Resume the Erigon instance dedicated to db maintenance
+      run: |
+        python3 $ERIGON_QA_PATH/test_system/db-producer/resume_production.py || true
 
     - name: Action for Success
       if: steps.test_step.outputs.TEST_RESULT == 'success'

@@ -19,9 +19,7 @@ package sentinelcli
 import (
 	"fmt"
 
-	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cmd/sentinel/sentinelflags"
-	"github.com/erigontech/erigon/cmd/utils"
 
 	"github.com/erigontech/erigon-lib/common"
 
@@ -33,37 +31,21 @@ import (
 )
 
 type SentinelCliCfg struct {
-	BeaconCfg      *clparams.BeaconChainConfig
-	NetworkCfg     *clparams.NetworkConfig
-	NetworkType    clparams.NetworkType
-	Port           uint   `json:"port"`
-	Addr           string `json:"address"`
-	ServerAddr     string `json:"server_addr"`
-	ServerProtocol string `json:"server_protocol"`
-	ServerTcpPort  uint   `json:"server_tcp_port"`
-	LogLvl         uint   `json:"log_level"`
-	NoDiscovery    bool   `json:"no_discovery"`
-	LocalDiscovery bool   `json:"local_discovery"`
+	Port           uint     `json:"port"`
+	Addr           string   `json:"address"`
+	ServerAddr     string   `json:"server_addr"`
+	ServerProtocol string   `json:"server_protocol"`
+	ServerTcpPort  uint     `json:"server_tcp_port"`
+	LogLvl         uint     `json:"log_level"`
+	NoDiscovery    bool     `json:"no_discovery"`
+	LocalDiscovery bool     `json:"local_discovery"`
+	Bootnodes      []string `json:"bootnodes"`
+	StaticPeers    []string `json:"static_peers"`
 }
 
 func SetupSentinelCli(ctx *cli.Context) (*SentinelCliCfg, error) {
 	cfg := &SentinelCliCfg{}
-	chainName := ctx.String(utils.ChainFlag.Name)
-	var err error
-	cfg.NetworkCfg, cfg.BeaconCfg, cfg.NetworkType, err = clparams.GetConfigsByNetworkName(chainName)
-	if err != nil {
-		return nil, err
-	}
-	if ctx.String(sentinelflags.BeaconConfigFlag.Name) != "" {
-		cfg.BeaconCfg = new(clparams.BeaconChainConfig)
-		if *cfg.BeaconCfg, err = clparams.CustomConfig(ctx.String(sentinelflags.BeaconConfigFlag.Name)); err != nil {
-			return nil, err
-		}
-		if ctx.String(sentinelflags.GenesisSSZFlag.Name) == "" {
-			return nil, fmt.Errorf("no genesis file provided")
-		}
 
-	}
 	cfg.ServerAddr = fmt.Sprintf("%s:%d", ctx.String(sentinelflags.SentinelServerAddr.Name), ctx.Int(sentinelflags.SentinelServerPort.Name))
 	cfg.ServerProtocol = "tcp"
 
@@ -79,10 +61,10 @@ func SetupSentinelCli(ctx *cli.Context) (*SentinelCliCfg, error) {
 
 	// Process bootnodes
 	if ctx.String(sentinelflags.BootnodesFlag.Name) != "" {
-		cfg.NetworkCfg.BootNodes = common.CliString2Array(ctx.String(sentinelflags.BootnodesFlag.Name))
+		cfg.Bootnodes = common.CliString2Array(ctx.String(sentinelflags.BootnodesFlag.Name))
 	}
 	if ctx.String(sentinelflags.SentinelStaticPeersFlag.Name) != "" {
-		cfg.NetworkCfg.StaticPeers = common.CliString2Array(ctx.String(sentinelflags.SentinelStaticPeersFlag.Name))
+		cfg.StaticPeers = common.CliString2Array(ctx.String(sentinelflags.SentinelStaticPeersFlag.Name))
 	}
 	return cfg, nil
 }

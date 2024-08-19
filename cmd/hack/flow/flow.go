@@ -286,11 +286,11 @@ func batchServer() {
 }
 
 func si64(n int64) string {
-	return fmt.Sprintf("%v", n)
+	return strconv.FormatInt(n, 10)
 }
 
 func sui64(n uint64) string {
-	return fmt.Sprintf("%v", n)
+	return strconv.FormatUint(n, 10)
 }
 
 /*
@@ -742,11 +742,11 @@ type cfgJobResult struct {
 }
 
 func sb(b bool) string {
-	return fmt.Sprintf("%v", b)
+	return strconv.FormatBool(b)
 }
 
 func si(i int) string {
-	return fmt.Sprintf("%v", i)
+	return strconv.Itoa(i)
 }
 
 func percent(n int, d int) string {

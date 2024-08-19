@@ -72,7 +72,7 @@ func (api *GraphQLAPIImpl) GetBlockDetails(ctx context.Context, blockNumber rpc.
 	}
 	defer tx.Rollback()
 
-	block, senders, err := api.getBlockWithSenders(ctx, blockNumber, tx)
+	block, _, err := api.getBlockWithSenders(ctx, blockNumber, tx)
 	if err != nil {
 		return nil, err
 	}
@@ -90,7 +90,7 @@ func (api *GraphQLAPIImpl) GetBlockDetails(ctx context.Context, blockNumber rpc.
 		return nil, err
 	}
 
-	receipts, err := api.getReceipts(ctx, tx, block, senders)
+	receipts, err := api.getReceipts(ctx, tx, block)
 	if err != nil {
 		return nil, fmt.Errorf("getReceipts error: %w", err)
 	}
@@ -133,7 +133,7 @@ func (api *GraphQLAPIImpl) getBlockWithSenders(ctx context.Context, number rpc.B
 		return api.pendingBlock(), nil, nil
 	}
 
-	blockHeight, blockHash, _, err := rpchelper.GetBlockNumber(rpc.BlockNumberOrHashWithNumber(number), tx, api.filters)
+	blockHeight, blockHash, _, err := rpchelper.GetBlockNumber(ctx, rpc.BlockNumberOrHashWithNumber(number), tx, api._blockReader, api.filters)
 	if err != nil {
 		return nil, nil, err
 	}

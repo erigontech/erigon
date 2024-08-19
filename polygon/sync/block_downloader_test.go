@@ -44,7 +44,7 @@ func newBlockDownloaderTest(t *testing.T) *blockDownloaderTest {
 
 func newBlockDownloaderTestWithOpts(t *testing.T, opts blockDownloaderTestOpts) *blockDownloaderTest {
 	ctrl := gomock.NewController(t)
-	heimdall := NewMockheimdallWaypointsFetcher(ctrl)
+	waypointReader := NewMockwaypointReader(ctrl)
 	p2pService := p2p.NewMockService(ctrl)
 	p2pService.EXPECT().MaxPeers().Return(100).Times(1)
 	logger := testlog.Logger(t, log.LvlDebug)
@@ -55,7 +55,7 @@ func newBlockDownloaderTestWithOpts(t *testing.T, opts blockDownloaderTestOpts) 
 	headerDownloader := newBlockDownloader(
 		logger,
 		p2pService,
-		heimdall,
+		waypointReader,
 		checkpointVerifier,
 		milestoneVerifier,
 		blocksVerifier,
@@ -65,7 +65,7 @@ func newBlockDownloaderTestWithOpts(t *testing.T, opts blockDownloaderTestOpts) 
 		opts.getOrCreateDefaultBlockLimit(),
 	)
 	return &blockDownloaderTest{
-		heimdall:        heimdall,
+		waypointReader:  waypointReader,
 		p2pService:      p2pService,
 		blockDownloader: headerDownloader,
 		store:           store,
@@ -123,7 +123,7 @@ func (opts blockDownloaderTestOpts) getOrCreateDefaultBlockLimit() uint {
 }
 
 type blockDownloaderTest struct {
-	heimdall        *MockheimdallWaypointsFetcher
+	waypointReader  *MockwaypointReader
 	p2pService      *p2p.MockService
 	blockDownloader *blockDownloader
 	store           *MockStore
@@ -235,8 +235,8 @@ func (hdt blockDownloaderTest) defaultInsertBlocksMock(capture *[]*types.Block) 
 
 func TestBlockDownloaderDownloadBlocksUsingMilestones(t *testing.T) {
 	test := newBlockDownloaderTest(t)
-	test.heimdall.EXPECT().
-		FetchMilestonesFromBlock(gomock.Any(), gomock.Any()).
+	test.waypointReader.EXPECT().
+		MilestonesFromBlock(gomock.Any(), gomock.Any()).
 		Return(test.fakeMilestones(4), nil).
 		Times(1)
 	test.p2pService.EXPECT().
@@ -271,8 +271,8 @@ func TestBlockDownloaderDownloadBlocksUsingMilestones(t *testing.T) {
 
 func TestBlockDownloaderDownloadBlocksUsingCheckpoints(t *testing.T) {
 	test := newBlockDownloaderTest(t)
-	test.heimdall.EXPECT().
-		FetchCheckpointsFromBlock(gomock.Any(), gomock.Any()).
+	test.waypointReader.EXPECT().
+		CheckpointsFromBlock(gomock.Any(), gomock.Any()).
 		Return(test.fakeCheckpoints(8), nil).
 		Times(1)
 	test.p2pService.EXPECT().
@@ -322,8 +322,8 @@ func TestBlockDownloaderDownloadBlocksWhenInvalidHeadersThenPenalizePeerAndReDow
 			return nil
 		},
 	})
-	test.heimdall.EXPECT().
-		FetchCheckpointsFromBlock(gomock.Any(), gomock.Any()).
+	test.waypointReader.EXPECT().
+		CheckpointsFromBlock(gomock.Any(), gomock.Any()).
 		Return(test.fakeCheckpoints(6), nil).
 		Times(1)
 	test.p2pService.EXPECT().
@@ -377,8 +377,8 @@ func TestBlockDownloaderDownloadBlocksWhenInvalidHeadersThenPenalizePeerAndReDow
 
 func TestBlockDownloaderDownloadBlocksWhenZeroPeersTriesAgain(t *testing.T) {
 	test := newBlockDownloaderTest(t)
-	test.heimdall.EXPECT().
-		FetchCheckpointsFromBlock(gomock.Any(), gomock.Any()).
+	test.waypointReader.EXPECT().
+		CheckpointsFromBlock(gomock.Any(), gomock.Any()).
 		Return(test.fakeCheckpoints(8), nil).
 		Times(1)
 	test.p2pService.EXPECT().
@@ -426,8 +426,8 @@ func TestBlockDownloaderDownloadBlocksWhenInvalidBodiesThenPenalizePeerAndReDown
 			return nil
 		},
 	})
-	test.heimdall.EXPECT().
-		FetchCheckpointsFromBlock(gomock.Any(), gomock.Any()).
+	test.waypointReader.EXPECT().
+		CheckpointsFromBlock(gomock.Any(), gomock.Any()).
 		Return(test.fakeCheckpoints(6), nil).
 		Times(1)
 	test.p2pService.EXPECT().
@@ -481,8 +481,8 @@ func TestBlockDownloaderDownloadBlocksWhenInvalidBodiesThenPenalizePeerAndReDown
 
 func TestBlockDownloaderDownloadBlocksWhenMissingBodiesThenPenalizePeerAndReDownload(t *testing.T) {
 	test := newBlockDownloaderTestWithOpts(t, blockDownloaderTestOpts{})
-	test.heimdall.EXPECT().
-		FetchCheckpointsFromBlock(gomock.Any(), gomock.Any()).
+	test.waypointReader.EXPECT().
+		CheckpointsFromBlock(gomock.Any(), gomock.Any()).
 		Return(test.fakeCheckpoints(6), nil).
 		Times(1)
 	test.p2pService.EXPECT().
@@ -544,8 +544,8 @@ func TestBlockDownloaderDownloadBlocksRespectsMaxWorkers(t *testing.T) {
 	test := newBlockDownloaderTestWithOpts(t, blockDownloaderTestOpts{
 		maxWorkers: 1,
 	})
-	test.heimdall.EXPECT().
-		FetchCheckpointsFromBlock(gomock.Any(), gomock.Any()).
+	test.waypointReader.EXPECT().
+		CheckpointsFromBlock(gomock.Any(), gomock.Any()).
 		Return(test.fakeCheckpoints(2), nil).
 		Times(1)
 	test.p2pService.EXPECT().
@@ -628,8 +628,8 @@ func TestBlockDownloaderDownloadBlocksRespectsBlockLimit(t *testing.T) {
 			test := newBlockDownloaderTestWithOpts(t, blockDownloaderTestOpts{
 				blockLimit: tc.blockLimit,
 			})
-			test.heimdall.EXPECT().
-				FetchCheckpointsFromBlock(gomock.Any(), gomock.Any()).
+			test.waypointReader.EXPECT().
+				CheckpointsFromBlock(gomock.Any(), gomock.Any()).
 				Return(test.fakeCheckpoints(tc.numCheckpoints), nil).
 				Times(1)
 			test.p2pService.EXPECT().

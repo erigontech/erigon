@@ -35,13 +35,11 @@ import (
 	"github.com/erigontech/erigon-lib/diagnostics"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/state"
-	"github.com/erigontech/erigon/core/rawdb/blockio"
-	"github.com/erigontech/erigon/eth/ethconfig"
-	"github.com/erigontech/erigon/eth/stagedsync/stages"
-
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/core/rawdb"
+	"github.com/erigontech/erigon/core/rawdb/blockio"
 	"github.com/erigontech/erigon/core/types"
+	"github.com/erigontech/erigon/eth/ethconfig"
 	"github.com/erigontech/erigon/rlp"
 	"github.com/erigontech/erigon/turbo/services"
 	"github.com/erigontech/erigon/turbo/shards"
@@ -69,8 +67,7 @@ type HeadersCfg struct {
 	blockWriter   *blockio.BlockWriter
 	notifications *shards.Notifications
 
-	syncConfig     ethconfig.Sync
-	loopBreakCheck func(int) bool
+	syncConfig ethconfig.Sync
 }
 
 func StageHeadersCfg(
@@ -88,7 +85,7 @@ func StageHeadersCfg(
 	blockWriter *blockio.BlockWriter,
 	tmpdir string,
 	notifications *shards.Notifications,
-	loopBreakCheck func(int) bool) HeadersCfg {
+) HeadersCfg {
 	return HeadersCfg{
 		db:                db,
 		hd:                headerDownload,
@@ -104,7 +101,6 @@ func StageHeadersCfg(
 		blockReader:       blockReader,
 		blockWriter:       blockWriter,
 		notifications:     notifications,
-		loopBreakCheck:    loopBreakCheck,
 	}
 }
 
@@ -118,7 +114,7 @@ func SpawnStageHeaders(s *StageState, u Unwinder, ctx context.Context, tx kv.RwT
 		}
 		defer tx.Rollback()
 	}
-	if s.CurrentSyncCycle.IsInitialCycle && cfg.blockReader.FreezingCfg().Enabled {
+	if s.CurrentSyncCycle.IsInitialCycle {
 		if err := cfg.hd.AddHeadersFromSnapshot(tx, cfg.blockReader); err != nil {
 			return err
 		}
@@ -267,15 +263,8 @@ Loop:
 			}
 		}
 
-		if cfg.syncConfig.LoopBlockLimit > 0 {
-			if bodyProgress, err := stages.GetStageProgress(tx, stages.Bodies); err == nil {
-				if cfg.hd.Progress() > bodyProgress && cfg.hd.Progress()-bodyProgress > uint64(cfg.syncConfig.LoopBlockLimit*2) {
-					break
-				}
-			}
-		}
-
-		if cfg.loopBreakCheck != nil && cfg.loopBreakCheck(int(cfg.hd.Progress()-startProgress)) {
+		loopBlockLimit := uint64(cfg.syncConfig.LoopBlockLimit)
+		if loopBlockLimit > 0 && cfg.hd.Progress() > startProgress+loopBlockLimit {
 			break
 		}
 
@@ -307,6 +296,7 @@ Loop:
 				logger.Info("Req/resp stats", "req", stats.Requests, "reqMin", stats.ReqMinBlock, "reqMax", stats.ReqMaxBlock,
 					"skel", stats.SkeletonRequests, "skelMin", stats.SkeletonReqMinBlock, "skelMax", stats.SkeletonReqMaxBlock,
 					"resp", stats.Responses, "respMin", stats.RespMinBlock, "respMax", stats.RespMaxBlock, "dups", stats.Duplicates, "alloc", libcommon.ByteCount(m.Alloc), "sys", libcommon.ByteCount(m.Sys))
+				dbg.SaveHeapProfileNearOOM(dbg.SaveHeapWithLogger(&logger), dbg.SaveHeapWithMemStats(&m))
 				cfg.hd.LogAnchorState()
 				if wasProgress {
 					logger.Warn("Looks like chain is not progressing, moving to the next stage")
@@ -437,7 +427,7 @@ func fixCanonicalChain(logPrefix string, logEvery *time.Ticker, height uint64, h
 	return newNodes, badNodes, nil
 }
 
-func HeadersUnwind(u *UnwindState, s *StageState, tx kv.RwTx, cfg HeadersCfg, test bool) (err error) {
+func HeadersUnwind(ctx context.Context, u *UnwindState, s *StageState, tx kv.RwTx, cfg HeadersCfg, test bool) (err error) {
 	u.UnwindPoint = max(u.UnwindPoint, cfg.blockReader.FrozenBlocks()) // protect from unwind behind files
 
 	useExternalTx := tx != nil
@@ -527,7 +517,7 @@ func HeadersUnwind(u *UnwindState, s *StageState, tx kv.RwTx, cfg HeadersCfg, te
 		*/
 		if maxNum == 0 {
 			maxNum = u.UnwindPoint
-			if maxHash, err = rawdb.ReadCanonicalHash(tx, maxNum); err != nil {
+			if maxHash, err = cfg.blockReader.CanonicalHash(ctx, tx, maxNum); err != nil {
 				return err
 			}
 		}
@@ -607,13 +597,7 @@ func (cr ChainReaderImpl) CurrentFinalizedHeader() *types.Header {
 	if hash == (libcommon.Hash{}) {
 		return nil
 	}
-
-	number := rawdb.ReadHeaderNumber(cr.tx, hash)
-	if number == nil {
-		return nil
-	}
-
-	return rawdb.ReadHeader(cr.tx, hash, *number)
+	return cr.GetHeaderByHash(hash)
 }
 func (cr ChainReaderImpl) CurrentSafeHeader() *types.Header {
 	hash := rawdb.ReadForkchoiceSafe(cr.tx)
@@ -621,12 +605,7 @@ func (cr ChainReaderImpl) CurrentSafeHeader() *types.Header {
 		return nil
 	}
 
-	number := rawdb.ReadHeaderNumber(cr.tx, hash)
-	if number == nil {
-		return nil
-	}
-
-	return rawdb.ReadHeader(cr.tx, hash, *number)
+	return cr.GetHeaderByHash(hash)
 }
 func (cr ChainReaderImpl) GetHeader(hash libcommon.Hash, number uint64) *types.Header {
 	if cr.blockReader != nil {
@@ -641,15 +620,10 @@ func (cr ChainReaderImpl) GetHeaderByNumber(number uint64) *types.Header {
 		return h
 	}
 	return rawdb.ReadHeaderByNumber(cr.tx, number)
-
 }
 func (cr ChainReaderImpl) GetHeaderByHash(hash libcommon.Hash) *types.Header {
 	if cr.blockReader != nil {
-		number := rawdb.ReadHeaderNumber(cr.tx, hash)
-		if number == nil {
-			return nil
-		}
-		return cr.GetHeader(hash, *number)
+		return cr.GetHeaderByHash(hash)
 	}
 	h, _ := rawdb.ReadHeaderByHash(cr.tx, hash)
 	return h

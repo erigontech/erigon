@@ -74,7 +74,6 @@ import (
 	"github.com/erigontech/erigon/node"
 	"github.com/erigontech/erigon/node/nodecfg"
 	"github.com/erigontech/erigon/polygon/bor"
-	"github.com/erigontech/erigon/polygon/bor/borcfg"
 	"github.com/erigontech/erigon/rpc"
 	"github.com/erigontech/erigon/rpc/rpccfg"
 	"github.com/erigontech/erigon/turbo/debug"
@@ -82,8 +81,6 @@ import (
 	"github.com/erigontech/erigon/turbo/rpchelper"
 	"github.com/erigontech/erigon/turbo/services"
 	"github.com/erigontech/erigon/turbo/snapshotsync/freezeblocks"
-	"github.com/erigontech/erigon/turbo/snapshotsync/snap"
-
 	// Force-load native and js packages, to trigger registration
 	_ "github.com/erigontech/erigon/eth/tracers/js"
 	_ "github.com/erigontech/erigon/eth/tracers/native"
@@ -324,7 +321,7 @@ func RemoteServices(ctx context.Context, cfg *httpcfg.HttpCfg, logger log.Logger
 	stateCache kvcache.Cache, blockReader services.FullBlockReader, engine consensus.EngineReader,
 	ff *rpchelper.Filters, err error) {
 	if !cfg.WithDatadir && cfg.PrivateApiAddr == "" {
-		return nil, nil, nil, nil, nil, nil, nil, ff, fmt.Errorf("either remote db or local db must be specified")
+		return nil, nil, nil, nil, nil, nil, nil, ff, errors.New("either remote db or local db must be specified")
 	}
 	creds, err := grpcutil.TLS(cfg.TLSCACert, cfg.TLSCertfile, cfg.TLSKeyFile)
 	if err != nil {
@@ -380,20 +377,12 @@ func RemoteServices(ctx context.Context, cfg *httpcfg.HttpCfg, logger log.Logger
 			if err != nil {
 				return err
 			}
-			cfg.Snap.Enabled, err = snap.Enabled(tx)
-			if err != nil {
-				return err
-			}
 			return nil
 		}); err != nil {
 			return nil, nil, nil, nil, nil, nil, nil, ff, err
 		}
 		if cc == nil {
-			return nil, nil, nil, nil, nil, nil, nil, ff, fmt.Errorf("chain config not found in db. Need start erigon at least once on this db")
-		}
-		cfg.Snap.Enabled = cfg.Snap.Enabled || cfg.Sync.UseSnapshots
-		if !cfg.Snap.Enabled {
-			logger.Info("Use --snapshots=false")
+			return nil, nil, nil, nil, nil, nil, nil, ff, errors.New("chain config not found in db. Need start erigon at least once on this db")
 		}
 
 		// Configure sapshots
@@ -519,13 +508,7 @@ func RemoteServices(ctx context.Context, cfg *httpcfg.HttpCfg, logger log.Logger
 					return nil, nil, nil, nil, nil, nil, nil, ff, err
 				}
 				// Skip the compatibility check, until we have a schema in erigon-lib
-
-				borConfig := cc.Bor.(*borcfg.BorConfig)
-
-				engine = bor.NewRo(cc, borKv, blockReader,
-					bor.NewChainSpanner(bor.GenesisContractValidatorSetABI(), cc, true, logger),
-					bor.NewGenesisContractsClient(cc, borConfig.ValidatorContract, borConfig.StateReceiverContract, logger), logger)
-
+				engine = bor.NewRo(cc, borKv, blockReader, logger)
 			default:
 				engine = ethash.NewFaker()
 			}
@@ -944,11 +927,7 @@ func (e *remoteConsensusEngine) init(db kv.RoDB, blockReader services.FullBlockR
 			return false
 		}
 
-		borConfig := cc.Bor.(*borcfg.BorConfig)
-
-		e.engine = bor.NewRo(cc, borKv, blockReader,
-			bor.NewChainSpanner(bor.GenesisContractValidatorSetABI(), cc, true, logger),
-			bor.NewGenesisContractsClient(cc, borConfig.ValidatorContract, borConfig.StateReceiverContract, logger), logger)
+		e.engine = bor.NewRo(cc, borKv, blockReader, logger)
 	} else {
 		e.engine = ethash.NewFaker()
 	}
@@ -1040,7 +1019,7 @@ func (e *remoteConsensusEngine) FinalizeAndAssemble(_ *chain.Config, _ *types.He
 	panic("remoteConsensusEngine.FinalizeAndAssemble not supported")
 }
 
-func (e *remoteConsensusEngine) Seal(_ consensus.ChainHeaderReader, _ *types.Block, _ chan<- *types.Block, _ <-chan struct{}) error {
+func (e *remoteConsensusEngine) Seal(_ consensus.ChainHeaderReader, _ *types.BlockWithReceipts, _ chan<- *types.BlockWithReceipts, _ <-chan struct{}) error {
 	panic("remoteConsensusEngine.Seal not supported")
 }
 
@@ -1050,10 +1029,6 @@ func (e *remoteConsensusEngine) SealHash(_ *types.Header) libcommon.Hash {
 
 func (e *remoteConsensusEngine) CalcDifficulty(_ consensus.ChainHeaderReader, _ uint64, _ uint64, _ *big.Int, _ uint64, _ libcommon.Hash, _ libcommon.Hash, _ uint64) *big.Int {
 	panic("remoteConsensusEngine.CalcDifficulty not supported")
-}
-
-func (e *remoteConsensusEngine) GenerateSeal(_ consensus.ChainHeaderReader, _ *types.Header, _ *types.Header, _ consensus.Call) []byte {
-	panic("remoteConsensusEngine.GenerateSeal not supported")
 }
 
 func (e *remoteConsensusEngine) APIs(_ consensus.ChainHeaderReader) []rpc.API {

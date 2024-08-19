@@ -23,12 +23,14 @@ import (
 
 	"github.com/erigontech/erigon-lib/common/disk"
 	"github.com/erigontech/erigon-lib/common/mem"
-	"github.com/erigontech/erigon/cl/phase1/core"
+	"github.com/erigontech/erigon/cl/clparams"
+	"github.com/erigontech/erigon/cl/phase1/core/checkpoint_sync"
 	"github.com/erigontech/erigon/cl/sentinel"
 	"github.com/erigontech/erigon/cl/sentinel/service"
 	"github.com/erigontech/erigon/cl/utils/eth_clock"
 	"github.com/erigontech/erigon/cmd/sentinel/sentinelcli"
 	"github.com/erigontech/erigon/cmd/sentinel/sentinelflags"
+	"github.com/erigontech/erigon/cmd/utils"
 
 	"github.com/urfave/cli/v2"
 
@@ -56,11 +58,24 @@ func runSentinelNode(cliCtx *cli.Context) error {
 	log.Root().SetHandler(log.LvlFilterHandler(log.Lvl(cfg.LogLvl), log.StderrHandler))
 	log.Info("[Sentinel] running sentinel with configuration", "cfg", cfg)
 
+	chainName := cliCtx.String(utils.ChainFlag.Name)
+	networkCfg, beaconCfg, networkType, err := clparams.GetConfigsByNetworkName(chainName)
+	if err != nil {
+		return err
+	}
+
+	if len(cfg.Bootnodes) > 0 {
+		networkCfg.BootNodes = cfg.Bootnodes
+	}
+	if len(cfg.StaticPeers) > 0 {
+		networkCfg.StaticPeers = cfg.StaticPeers
+	}
+
 	// setup periodic logging and prometheus updates
 	go mem.LogMemStats(cliCtx.Context, log.Root())
 	go disk.UpdateDiskStats(cliCtx.Context, log.Root())
 
-	bs, err := core.RetrieveBeaconState(context.Background(), cfg.BeaconCfg, cfg.NetworkType)
+	bs, err := checkpoint_sync.NewRemoteCheckpointSync(beaconCfg, networkType).GetLatestBeaconState(cliCtx.Context)
 	if err != nil {
 		return err
 	}
@@ -68,12 +83,12 @@ func runSentinelNode(cliCtx *cli.Context) error {
 		IpAddr:         cfg.Addr,
 		Port:           int(cfg.Port),
 		TCPPort:        cfg.ServerTcpPort,
-		NetworkConfig:  cfg.NetworkCfg,
-		BeaconConfig:   cfg.BeaconCfg,
+		NetworkConfig:  networkCfg,
+		BeaconConfig:   beaconCfg,
 		NoDiscovery:    cfg.NoDiscovery,
 		LocalDiscovery: cfg.LocalDiscovery,
 		EnableBlocks:   false,
-	}, nil, nil, nil, &service.ServerConfig{Network: cfg.ServerProtocol, Addr: cfg.ServerAddr}, eth_clock.NewEthereumClock(bs.GenesisTime(), bs.GenesisValidatorsRoot(), cfg.BeaconCfg), nil, log.Root())
+	}, nil, nil, nil, &service.ServerConfig{Network: cfg.ServerProtocol, Addr: cfg.ServerAddr}, eth_clock.NewEthereumClock(bs.GenesisTime(), bs.GenesisValidatorsRoot(), beaconCfg), nil, log.Root())
 	if err != nil {
 		log.Error("[Sentinel] Could not start sentinel", "err", err)
 		return err

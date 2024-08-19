@@ -22,9 +22,6 @@ import (
 	"fmt"
 	"math/big"
 
-	"github.com/holiman/uint256"
-	"google.golang.org/grpc"
-
 	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/hexutil"
 	"github.com/erigontech/erigon-lib/common/hexutility"
@@ -33,6 +30,8 @@ import (
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/log/v3"
 	types2 "github.com/erigontech/erigon-lib/types"
+	"github.com/holiman/uint256"
+	"google.golang.org/grpc"
 
 	"github.com/erigontech/erigon/core"
 	"github.com/erigontech/erigon/core/state"
@@ -69,7 +68,7 @@ func (api *APIImpl) Call(ctx context.Context, args ethapi2.CallArgs, blockNrOrHa
 		args.Gas = (*hexutil.Uint64)(&api.GasCap)
 	}
 
-	blockNumber, hash, _, err := rpchelper.GetCanonicalBlockNumber(blockNrOrHash, tx, api.filters) // DoCall cannot be executed on non-canonical blocks
+	blockNumber, hash, _, err := rpchelper.GetCanonicalBlockNumber(ctx, blockNrOrHash, tx, api._blockReader, api.filters) // DoCall cannot be executed on non-canonical blocks
 	if err != nil {
 		return nil, err
 	}
@@ -81,7 +80,7 @@ func (api *APIImpl) Call(ctx context.Context, args ethapi2.CallArgs, blockNrOrHa
 		return nil, nil
 	}
 
-	stateReader, err := rpchelper.CreateStateReader(ctx, tx, blockNrOrHash, 0, api.filters, api.stateCache, chainConfig.ChainName)
+	stateReader, err := rpchelper.CreateStateReader(ctx, tx, api._blockReader, blockNrOrHash, 0, api.filters, api.stateCache, chainConfig.ChainName)
 	if err != nil {
 		return nil, err
 	}
@@ -105,7 +104,7 @@ func (api *APIImpl) Call(ctx context.Context, args ethapi2.CallArgs, blockNrOrHa
 
 // headerByNumberOrHash - intent to read recent headers only, tries from the lru cache before reading from the db
 func headerByNumberOrHash(ctx context.Context, tx kv.Tx, blockNrOrHash rpc.BlockNumberOrHash, api *APIImpl) (*types.Header, error) {
-	_, bNrOrHashHash, _, err := rpchelper.GetCanonicalBlockNumber(blockNrOrHash, tx, api.filters)
+	_, bNrOrHashHash, _, err := rpchelper.GetCanonicalBlockNumber(ctx, blockNrOrHash, tx, api._blockReader, api.filters)
 	if err != nil {
 		return nil, err
 	}
@@ -114,7 +113,7 @@ func headerByNumberOrHash(ctx context.Context, tx kv.Tx, blockNrOrHash rpc.Block
 		return block.Header(), nil
 	}
 
-	blockNum, _, _, err := rpchelper.GetBlockNumber(blockNrOrHash, tx, api.filters)
+	blockNum, _, _, err := rpchelper.GetBlockNumber(ctx, blockNrOrHash, tx, api._blockReader, api.filters)
 	if err != nil {
 		return nil, err
 	}
@@ -202,7 +201,7 @@ func (api *APIImpl) EstimateGas(ctx context.Context, argsOrNil *ethapi2.CallArgs
 		stateReader := rpchelper.CreateLatestCachedStateReader(cacheView, dbtx)
 		state := state.New(stateReader)
 		if state == nil {
-			return 0, fmt.Errorf("can't get the current state")
+			return 0, errors.New("can't get the current state")
 		}
 
 		balance := state.GetBalance(*args.From) // from can't be nil
@@ -240,7 +239,7 @@ func (api *APIImpl) EstimateGas(ctx context.Context, argsOrNil *ethapi2.CallArgs
 	}
 	engine := api.engine()
 
-	latestCanBlockNumber, latestCanHash, isLatest, err := rpchelper.GetCanonicalBlockNumber(latestNumOrHash, dbtx, api.filters) // DoCall cannot be executed on non-canonical blocks
+	latestCanBlockNumber, latestCanHash, isLatest, err := rpchelper.GetCanonicalBlockNumber(ctx, latestNumOrHash, dbtx, api._blockReader, api.filters) // DoCall cannot be executed on non-canonical blocks
 	if err != nil {
 		return 0, err
 	}
@@ -254,7 +253,7 @@ func (api *APIImpl) EstimateGas(ctx context.Context, argsOrNil *ethapi2.CallArgs
 		}
 	}
 	if block == nil {
-		return 0, fmt.Errorf("could not find latest block in cache or db")
+		return 0, errors.New("could not find latest block in cache or db")
 	}
 
 	stateReader, err := rpchelper.CreateStateReaderFromBlockNumber(ctx, dbtx, latestCanBlockNumber, isLatest, 0, api.stateCache, chainConfig.ChainName)
@@ -332,7 +331,7 @@ func (api *APIImpl) EstimateGas(ctx context.Context, argsOrNil *ethapi2.CallArgs
 // GetProof is partially implemented; no Storage proofs, and proofs must be for
 // blocks within maxGetProofRewindBlockCount blocks of the head.
 func (api *APIImpl) GetProof(ctx context.Context, address libcommon.Address, storageKeys []libcommon.Hash, blockNrOrHash rpc.BlockNumberOrHash) (*accounts.AccProofResult, error) {
-	return nil, fmt.Errorf("not supported by Erigon3")
+	return nil, errors.New("not supported by Erigon3")
 	/*
 		tx, err := api.db.BeginRo(ctx)
 		if err != nil {
@@ -456,7 +455,7 @@ func (api *APIImpl) CreateAccessList(ctx context.Context, args ethapi2.CallArgs,
 	}
 	engine := api.engine()
 
-	blockNumber, hash, latest, err := rpchelper.GetCanonicalBlockNumber(bNrOrHash, tx, api.filters) // DoCall cannot be executed on non-canonical blocks
+	blockNumber, hash, latest, err := rpchelper.GetCanonicalBlockNumber(ctx, bNrOrHash, tx, api._blockReader, api.filters) // DoCall cannot be executed on non-canonical blocks
 	if err != nil {
 		return nil, err
 	}

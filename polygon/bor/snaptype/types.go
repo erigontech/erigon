@@ -54,7 +54,6 @@ func initTypes() {
 	borTypes := append(coresnaptype.BlockSnapshotTypes, BorSnapshotTypes()...)
 	borTypes = append(borTypes, coresnaptype.E3StateTypes...)
 
-	snapcfg.RegisterKnownTypes(networkname.MumbaiChainName, borTypes)
 	snapcfg.RegisterKnownTypes(networkname.AmoyChainName, borTypes)
 	snapcfg.RegisterKnownTypes(networkname.BorMainnetChainName, borTypes)
 }
@@ -103,6 +102,7 @@ var (
 				var prevBlockNum uint64
 				var startEventId uint64
 				var lastEventId uint64
+
 				if err := kv.BigChunks(db, kv.BorEventNums, from, func(tx kv.Tx, blockNumBytes, eventIdBytes []byte) (bool, error) {
 					blockNum := binary.BigEndian.Uint64(blockNumBytes)
 					if first {
@@ -142,15 +142,44 @@ var (
 				}); err != nil {
 					return 0, err
 				}
-				if lastEventId > startEventId {
-					if err := db.View(ctx, func(tx kv.Tx) error {
-						blockHash, e := rawdb.ReadCanonicalHash(tx, prevBlockNum)
-						if e != nil {
-							return e
+
+				if lastEventId > 0 {
+					// if we have reached the last entry in kv.BorEventNums we will have a start event
+					// but no end - so we assume that the last event is going to be the last recorded
+					// event in the db
+					if startEventId == lastEventId {
+						if err := db.View(ctx, func(tx kv.Tx) error {
+							cursor, err := tx.Cursor(kv.BorEvents)
+							if err != nil {
+								return err
+							}
+
+							defer cursor.Close()
+							k, _, err := cursor.Last()
+							if err != nil {
+								return err
+							}
+
+							if k != nil {
+								lastEventId = binary.BigEndian.Uint64(k)
+							}
+
+							return nil
+						}); err != nil {
+							return 0, err
 						}
-						return extractEventRange(startEventId, lastEventId+1, tx, prevBlockNum, blockHash, collect)
-					}); err != nil {
-						return 0, err
+					}
+
+					if lastEventId >= startEventId {
+						if err := db.View(ctx, func(tx kv.Tx) error {
+							blockHash, e := rawdb.ReadCanonicalHash(tx, prevBlockNum)
+							if e != nil {
+								return e
+							}
+							return extractEventRange(startEventId, lastEventId+1, tx, prevBlockNum, blockHash, collect)
+						}); err != nil {
+							return 0, err
+						}
 					}
 				}
 

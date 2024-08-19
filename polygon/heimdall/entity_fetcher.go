@@ -19,7 +19,6 @@ package heimdall
 import (
 	"cmp"
 	"context"
-	"fmt"
 	"slices"
 	"time"
 
@@ -69,21 +68,21 @@ func newEntityFetcher[TEntity Entity](
 }
 
 func (f *entityFetcherImpl[TEntity]) FetchEntityIdRange(ctx context.Context) (ClosedRange, error) {
-	var idRange ClosedRange
-
-	if f.fetchFirstEntityId == nil {
-		idRange.Start = 1
-	} else {
-		first, err := f.fetchFirstEntityId(ctx)
-		if err != nil {
-			return idRange, err
-		}
-		idRange.Start = uint64(first)
+	first, err := f.fetchFirstEntityId(ctx)
+	if err != nil {
+		return ClosedRange{}, err
 	}
 
 	last, err := f.fetchLastEntityId(ctx)
-	idRange.End = uint64(last)
-	return idRange, err
+	if err != nil {
+		return ClosedRange{}, err
+	}
+
+	res := ClosedRange{
+		Start: uint64(first),
+		End:   uint64(last),
+	}
+	return res, nil
 }
 
 const entityFetcherBatchFetchThreshold = 100
@@ -138,7 +137,7 @@ func (f *entityFetcherImpl[TEntity]) FetchAllEntities(ctx context.Context) ([]TE
 		select {
 		case <-progressLogTicker.C:
 			f.logger.Debug(
-				heimdallLogPrefix(fmt.Sprintf("%s progress", f.name)),
+				heimdallLogPrefix(f.name+" progress"),
 				"page", page,
 				"len", len(entities),
 			)
@@ -158,7 +157,7 @@ func (f *entityFetcherImpl[TEntity]) FetchAllEntities(ctx context.Context) ([]TE
 	}
 
 	f.logger.Debug(
-		heimdallLogPrefix(fmt.Sprintf("%s done", f.name)),
+		heimdallLogPrefix(f.name+" done"),
 		"len", len(entities),
 		"duration", time.Since(fetchStartTime),
 	)

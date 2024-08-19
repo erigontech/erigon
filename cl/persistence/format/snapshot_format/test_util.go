@@ -18,6 +18,7 @@ package snapshot_format
 
 import (
 	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
 )
@@ -32,4 +33,7 @@ func (t *MockBlockReader) Withdrawals(number uint64, hash libcommon.Hash) (*soli
 
 func (t *MockBlockReader) Transactions(number uint64, hash libcommon.Hash) (*solid.TransactionsSSZ, error) {
 	return t.Block.Transactions, nil
+}
+
+func (t *MockBlockReader) SetBeaconChainConfig(*clparams.BeaconChainConfig) {
 }

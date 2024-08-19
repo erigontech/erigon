@@ -17,7 +17,7 @@
 package handler
 
 import (
-	"fmt"
+	"errors"
 	"net/http"
 
 	"github.com/erigontech/erigon-lib/common"
@@ -84,32 +84,32 @@ func (a *ApiHandler) GetLighthouseValidatorInclusionGlobal(w http.ResponseWriter
 		}
 		activeBalance, ok := a.forkchoiceStore.TotalActiveBalance(root)
 		if !ok {
-			return nil, beaconhttp.NewEndpointError(http.StatusNotFound, fmt.Errorf("active balance not found for current epoch"))
+			return nil, beaconhttp.NewEndpointError(http.StatusNotFound, errors.New("active balance not found for current epoch"))
 		}
 		prevActiveBalance, ok := a.forkchoiceStore.TotalActiveBalance(prevRoot)
 		if !ok {
-			return nil, beaconhttp.NewEndpointError(http.StatusNotFound, fmt.Errorf("active balance not found for previous epoch"))
+			return nil, beaconhttp.NewEndpointError(http.StatusNotFound, errors.New("active balance not found for previous epoch"))
 		}
 		validatorSet, err := a.forkchoiceStore.GetValidatorSet(root)
 		if err != nil {
 			return nil, err
 		}
 		if validatorSet == nil {
-			return nil, beaconhttp.NewEndpointError(http.StatusNotFound, fmt.Errorf("validator set not found for current epoch"))
+			return nil, beaconhttp.NewEndpointError(http.StatusNotFound, errors.New("validator set not found for current epoch"))
 		}
 		currentEpochPartecipation, err := a.forkchoiceStore.GetCurrentPartecipationIndicies(root)
 		if err != nil {
 			return nil, err
 		}
 		if currentEpochPartecipation == nil {
-			return nil, beaconhttp.NewEndpointError(http.StatusNotFound, fmt.Errorf("partecipation not found for current epoch"))
+			return nil, beaconhttp.NewEndpointError(http.StatusNotFound, errors.New("partecipation not found for current epoch"))
 		}
 		previousEpochPartecipation, err := a.forkchoiceStore.GetPreviousPartecipationIndicies(root)
 		if err != nil {
 			return nil, err
 		}
 		if previousEpochPartecipation == nil {
-			return nil, beaconhttp.NewEndpointError(http.StatusNotFound, fmt.Errorf("partecipation not found for previous epoch"))
+			return nil, beaconhttp.NewEndpointError(http.StatusNotFound, errors.New("partecipation not found for previous epoch"))
 		}
 		return newBeaconResponse(a.computeLighthouseValidatorInclusionGlobal(epoch, activeBalance, prevActiveBalance, validatorSet, currentEpochPartecipation, previousEpochPartecipation)), nil
 	}
@@ -120,14 +120,14 @@ func (a *ApiHandler) GetLighthouseValidatorInclusionGlobal(w http.ResponseWriter
 		return nil, err
 	}
 	if epochData == nil {
-		return nil, beaconhttp.NewEndpointError(http.StatusNotFound, fmt.Errorf("epoch data not found for current epoch"))
+		return nil, beaconhttp.NewEndpointError(http.StatusNotFound, errors.New("epoch data not found for current epoch"))
 	}
 	prevEpochData, err := state_accessors.ReadEpochData(tx, prevEpoch*a.beaconChainCfg.SlotsPerEpoch)
 	if err != nil {
 		return nil, err
 	}
 	if prevEpochData == nil {
-		return nil, beaconhttp.NewEndpointError(http.StatusNotFound, fmt.Errorf("epoch data not found for previous epoch"))
+		return nil, beaconhttp.NewEndpointError(http.StatusNotFound, errors.New("epoch data not found for previous epoch"))
 	}
 	// read the validator set
 	validatorSet, err := a.stateReader.ReadValidatorsForHistoricalState(tx, slot)
@@ -135,17 +135,17 @@ func (a *ApiHandler) GetLighthouseValidatorInclusionGlobal(w http.ResponseWriter
 		return nil, err
 	}
 	if validatorSet == nil {
-		return nil, beaconhttp.NewEndpointError(http.StatusNotFound, fmt.Errorf("validator set not found for current epoch"))
+		return nil, beaconhttp.NewEndpointError(http.StatusNotFound, errors.New("validator set not found for current epoch"))
 	}
 	currentEpochPartecipation, previousEpochPartecipation, err := a.stateReader.ReadPartecipations(tx, slot+(a.beaconChainCfg.SlotsPerEpoch-1))
 	if err != nil {
 		return nil, err
 	}
 	if currentEpochPartecipation == nil {
-		return nil, beaconhttp.NewEndpointError(http.StatusNotFound, fmt.Errorf("partecipation not found for current epoch"))
+		return nil, beaconhttp.NewEndpointError(http.StatusNotFound, errors.New("partecipation not found for current epoch"))
 	}
 	if previousEpochPartecipation == nil {
-		return nil, beaconhttp.NewEndpointError(http.StatusNotFound, fmt.Errorf("partecipation not found for previous epoch"))
+		return nil, beaconhttp.NewEndpointError(http.StatusNotFound, errors.New("partecipation not found for previous epoch"))
 	}
 	return newBeaconResponse(a.computeLighthouseValidatorInclusionGlobal(epoch, epochData.TotalActiveBalance, prevEpochData.TotalActiveBalance, validatorSet, currentEpochPartecipation, previousEpochPartecipation)), nil
 }
@@ -242,32 +242,32 @@ func (a *ApiHandler) GetLighthouseValidatorInclusion(w http.ResponseWriter, r *h
 		}
 		activeBalance, ok := a.forkchoiceStore.TotalActiveBalance(root)
 		if !ok {
-			return nil, beaconhttp.NewEndpointError(http.StatusNotFound, fmt.Errorf("active balance not found for current epoch"))
+			return nil, beaconhttp.NewEndpointError(http.StatusNotFound, errors.New("active balance not found for current epoch"))
 		}
 		prevActiveBalance, ok := a.forkchoiceStore.TotalActiveBalance(prevRoot)
 		if !ok {
-			return nil, beaconhttp.NewEndpointError(http.StatusNotFound, fmt.Errorf("active balance not found for previous epoch"))
+			return nil, beaconhttp.NewEndpointError(http.StatusNotFound, errors.New("active balance not found for previous epoch"))
 		}
 		validatorSet, err := a.forkchoiceStore.GetValidatorSet(root)
 		if err != nil {
 			return nil, err
 		}
 		if validatorSet == nil {
-			return nil, beaconhttp.NewEndpointError(http.StatusNotFound, fmt.Errorf("validator set not found for current epoch"))
+			return nil, beaconhttp.NewEndpointError(http.StatusNotFound, errors.New("validator set not found for current epoch"))
 		}
 		currentEpochPartecipation, err := a.forkchoiceStore.GetCurrentPartecipationIndicies(root)
 		if err != nil {
 			return nil, err
 		}
 		if currentEpochPartecipation == nil {
-			return nil, beaconhttp.NewEndpointError(http.StatusNotFound, fmt.Errorf("partecipation not found for current epoch"))
+			return nil, beaconhttp.NewEndpointError(http.StatusNotFound, errors.New("partecipation not found for current epoch"))
 		}
 		previousEpochPartecipation, err := a.forkchoiceStore.GetPreviousPartecipationIndicies(root)
 		if err != nil {
 			return nil, err
 		}
 		if previousEpochPartecipation == nil {
-			return nil, beaconhttp.NewEndpointError(http.StatusNotFound, fmt.Errorf("partecipation not found for previous epoch"))
+			return nil, beaconhttp.NewEndpointError(http.StatusNotFound, errors.New("partecipation not found for previous epoch"))
 		}
 		return newBeaconResponse(a.computeLighthouseValidatorInclusion(int(validatorIndex), prevEpoch, epoch, activeBalance, prevActiveBalance, validatorSet, currentEpochPartecipation, previousEpochPartecipation)), nil
 	}
@@ -278,14 +278,14 @@ func (a *ApiHandler) GetLighthouseValidatorInclusion(w http.ResponseWriter, r *h
 		return nil, err
 	}
 	if epochData == nil {
-		return nil, beaconhttp.NewEndpointError(http.StatusNotFound, fmt.Errorf("epoch data not found for current epoch"))
+		return nil, beaconhttp.NewEndpointError(http.StatusNotFound, errors.New("epoch data not found for current epoch"))
 	}
 	prevEpochData, err := state_accessors.ReadEpochData(tx, prevEpoch*a.beaconChainCfg.SlotsPerEpoch)
 	if err != nil {
 		return nil, err
 	}
 	if prevEpochData == nil {
-		return nil, beaconhttp.NewEndpointError(http.StatusNotFound, fmt.Errorf("epoch data not found for previous epoch"))
+		return nil, beaconhttp.NewEndpointError(http.StatusNotFound, errors.New("epoch data not found for previous epoch"))
 	}
 	// read the validator set
 	validatorSet, err := a.stateReader.ReadValidatorsForHistoricalState(tx, slot)
@@ -293,17 +293,17 @@ func (a *ApiHandler) GetLighthouseValidatorInclusion(w http.ResponseWriter, r *h
 		return nil, err
 	}
 	if validatorSet == nil {
-		return nil, beaconhttp.NewEndpointError(http.StatusNotFound, fmt.Errorf("validator set not found for current epoch"))
+		return nil, beaconhttp.NewEndpointError(http.StatusNotFound, errors.New("validator set not found for current epoch"))
 	}
 	currentEpochPartecipation, previousEpochPartecipation, err := a.stateReader.ReadPartecipations(tx, slot+(a.beaconChainCfg.SlotsPerEpoch-1))
 	if err != nil {
 		return nil, err
 	}
 	if currentEpochPartecipation == nil {
-		return nil, beaconhttp.NewEndpointError(http.StatusNotFound, fmt.Errorf("partecipation not found for current epoch"))
+		return nil, beaconhttp.NewEndpointError(http.StatusNotFound, errors.New("partecipation not found for current epoch"))
 	}
 	if previousEpochPartecipation == nil {
-		return nil, beaconhttp.NewEndpointError(http.StatusNotFound, fmt.Errorf("partecipation not found for previous epoch"))
+		return nil, beaconhttp.NewEndpointError(http.StatusNotFound, errors.New("partecipation not found for previous epoch"))
 	}
 	return newBeaconResponse(a.computeLighthouseValidatorInclusion(int(validatorIndex), prevEpoch, epoch, epochData.TotalActiveBalance, prevEpochData.TotalActiveBalance, validatorSet, currentEpochPartecipation, previousEpochPartecipation)), nil
 }

@@ -85,6 +85,10 @@ type EthereumExecutionModule struct {
 
 	doingPostForkchoice atomic.Bool
 
+	// metrics for average mgas/sec
+	avgMgasSec      float64
+	recordedMgasSec uint64
+
 	execution.UnimplementedExecutionServer
 }
 
@@ -307,7 +311,10 @@ func (e *EthereumExecutionModule) ValidateChain(ctx context.Context, req *execut
 }
 
 func (e *EthereumExecutionModule) purgeBadChain(ctx context.Context, tx kv.RwTx, latestValidHash, headHash libcommon.Hash) error {
-	tip := rawdb.ReadHeaderNumber(tx, headHash)
+	tip, err := e.blockReader.HeaderNumber(ctx, tx, headHash)
+	if err != nil {
+		return err
+	}
 
 	currentHash := headHash
 	currentNumber := *tip
@@ -327,7 +334,7 @@ func (e *EthereumExecutionModule) Start(ctx context.Context) {
 	e.semaphore.Acquire(ctx, 1)
 	defer e.semaphore.Release(1)
 
-	if err := stages.ProcessFrozenBlocks(ctx, e.db, e.blockReader, e.executionPipeline); err != nil {
+	if err := stages.ProcessFrozenBlocks(ctx, e.db, e.blockReader, e.executionPipeline, nil); err != nil {
 		if !errors.Is(err, context.Canceled) {
 			e.logger.Error("Could not start execution service", "err", err)
 		}
@@ -354,7 +361,7 @@ func (e *EthereumExecutionModule) HasBlock(ctx context.Context, in *execution.Ge
 	}
 	blockHash := gointerfaces.ConvertH256ToHash(in.BlockHash)
 
-	num := rawdb.ReadHeaderNumber(tx, blockHash)
+	num, _ := e.blockReader.HeaderNumber(ctx, tx, blockHash)
 	if num == nil {
 		return &execution.HasBlockResponse{HasBlock: false}, nil
 	}

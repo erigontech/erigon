@@ -251,11 +251,11 @@ func NewAuRa(spec *chain.AuRaConfig, db kv.RwDB) (*AuRa, error) {
 	}
 
 	if _, ok := auraParams.StepDurations[0]; !ok {
-		return nil, fmt.Errorf("authority Round step 0 duration is undefined")
+		return nil, errors.New("authority Round step 0 duration is undefined")
 	}
 	for _, v := range auraParams.StepDurations {
 		if v == 0 {
-			return nil, fmt.Errorf("authority Round step duration cannot be 0")
+			return nil, errors.New("authority Round step duration cannot be 0")
 		}
 	}
 	//shouldTimeout := auraParams.StartStep == nil
@@ -276,7 +276,7 @@ func NewAuRa(spec *chain.AuRaConfig, db kv.RwDB) (*AuRa, error) {
 		dur := auraParams.StepDurations[time]
 		step, t, ok := nextStepTimeDuration(durInfo, time)
 		if !ok {
-			return nil, fmt.Errorf("timestamp overflow")
+			return nil, errors.New("timestamp overflow")
 		}
 		durInfo.TransitionStep = step
 		durInfo.TransitionTimestamp = t
@@ -852,7 +852,7 @@ func (c *AuRa) FinalizeAndAssemble(config *chain.Config, header *types.Header, s
 	}
 
 	// Assemble and return the final block for sealing
-	return types.NewBlock(header, outTxs, uncles, outReceipts, withdrawals, requests), outTxs, outReceipts, nil
+	return types.NewBlockForAsembling(header, outTxs, uncles, outReceipts, withdrawals, requests), outTxs, outReceipts, nil
 }
 
 // Authorize injects a private key into the consensus engine to mint new blocks
@@ -880,8 +880,8 @@ func (c *AuRa) GenesisEpochData(header *types.Header, caller consensus.SystemCal
 	return res, nil
 }
 
-func (c *AuRa) Seal(chain consensus.ChainHeaderReader, block *types.Block, results chan<- *types.Block, stop <-chan struct{}) error {
-	return nil
+func (c *AuRa) Seal(chain consensus.ChainHeaderReader, block *types.BlockWithReceipts, results chan<- *types.BlockWithReceipts, stop <-chan struct{}) error {
+	panic("AuRa block production is not implemented")
 	//header := block.Header()
 	//
 	/// Sealing the genesis block is not supported
@@ -959,97 +959,6 @@ func stepProposer(validators ValidatorSet, blockHash libcommon.Hash, step uint64
 	return validators.getWithCaller(blockHash, uint(step), call)
 }
 
-// GenerateSeal - Attempt to seal the block internally.
-//
-// This operation is synchronous and may (quite reasonably) not be available, in which case
-// `Seal::None` will be returned.
-func (c *AuRa) GenerateSeal(chain consensus.ChainHeaderReader, current, parent *types.Header, call consensus.Call) []byte {
-	// first check to avoid generating signature most of the time
-	// (but there's still a race to the `compare_exchange`)
-	if !c.step.canPropose.Load() {
-		log.Trace("[aura] Aborting seal generation. Can't propose.")
-		return nil
-	}
-	parentStep := parent.AuRaStep
-	step := c.step.inner.inner.Load()
-
-	// filter messages from old and future steps and different parents
-	expectedDiff := calculateScore(parentStep, step, 0)
-	if current.Difficulty.Cmp(expectedDiff.ToBig()) != 0 {
-		log.Trace(fmt.Sprintf("[aura] Aborting seal generation. The step or empty_steps have changed in the meantime. %d != %d", current.Difficulty, expectedDiff))
-		return nil
-	}
-
-	if parentStep > step {
-		log.Warn(fmt.Sprintf("[aura] Aborting seal generation for invalid step: %d > %d", parentStep, step))
-		return nil
-	}
-
-	validators, setNumber, err := c.epochSet(chain, nil, current, nil)
-	if err != nil {
-		log.Warn("[aura] Unable to generate seal", "err", err)
-		return nil
-	}
-
-	stepProposerAddr, err := stepProposer(validators, current.ParentHash, step, call)
-	if err != nil {
-		log.Warn("[aura] Unable to get stepProposer", "err", err)
-		return nil
-	}
-	if stepProposerAddr != current.Coinbase {
-		return nil
-	}
-
-	// this is guarded against by `can_propose` unless the block was signed
-	// on the same step (implies same key) and on a different node.
-	if parentStep == step {
-		log.Warn("Attempted to seal block on the same step as parent. Is this authority sealing with more than one node?")
-		return nil
-	}
-
-	// TODO(yperbasis) re-enable the rest
-
-	_ = setNumber
-	/*
-		signature, err := c.sign(current.bareHash())
-			if err != nil {
-				log.Warn("[aura] generate_seal: FAIL: Accounts secret key unavailable.", "err", err)
-				return nil
-			}
-	*/
-
-	/*
-		  // only issue the seal if we were the first to reach the compare_exchange.
-		  if self
-			  .step
-			  .can_propose
-			  .compare_exchange(true, false, AtomicOrdering::SeqCst, AtomicOrdering::SeqCst)
-			  .is_ok()
-		  {
-			  // we can drop all accumulated empty step messages that are
-			  // older than the parent step since we're including them in
-			  // the seal
-			  self.clear_empty_steps(parent_step);
-
-			  // report any skipped primaries between the parent block and
-			  // the block we're sealing, unless we have empty steps enabled
-			  if header.number() < self.empty_steps_transition {
-				  self.report_skipped(header, step, parent_step, &*validators, set_number);
-			  }
-
-			  let mut fields =
-				  vec![encode(&step), encode(&(H520::from(signature).as_bytes()))];
-
-			  if let Some(empty_steps_rlp) = empty_steps_rlp {
-				  fields.push(empty_steps_rlp);
-			  }
-
-			  return Seal::Regular(fields);
-		  }
-	*/
-	return nil
-}
-
 // epochSet fetch correct validator set for epoch at header, taking into account
 // finality of previous transitions.
 func (c *AuRa) epochSet(chain consensus.ChainHeaderReader, e *NonTransactionalEpochReader, h *types.Header, call consensus.SystemCall) (ValidatorSet, uint64, error) {
@@ -1059,7 +968,7 @@ func (c *AuRa) epochSet(chain consensus.ChainHeaderReader, e *NonTransactionalEp
 
 	finalityChecker, epochTransitionNumber, ok := c.EpochManager.zoomToAfter(chain, e, c.cfg.Validators, h.ParentHash, call)
 	if !ok {
-		return nil, 0, fmt.Errorf("unable to zoomToAfter to epoch")
+		return nil, 0, errors.New("unable to zoomToAfter to epoch")
 	}
 	return finalityChecker.signers, epochTransitionNumber, nil
 }

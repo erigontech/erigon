@@ -61,7 +61,7 @@ func Setup(ctx *cli.Context, node *node.ErigonNode, metricsMux *http.ServeMux, p
 	pprofPort := ctx.Int(pprofPortFlag)
 	pprofAddress := fmt.Sprintf("%s:%d", pprofHost, pprofPort)
 
-	if diagAddress == metricsAddress {
+	if diagAddress == metricsAddress && metricsMux != nil {
 		diagMux = SetupDiagnosticsEndpoint(metricsMux, diagAddress)
 	} else if diagAddress == pprofAddress && pprofMux != nil {
 		diagMux = SetupDiagnosticsEndpoint(pprofMux, diagAddress)
@@ -133,4 +133,5 @@ func SetupEndpoints(ctx *cli.Context, node *node.ErigonNode, diagMux *http.Serve
 	SetupMemAccess(diagMux)
 	SetupHeadersAccess(diagMux, diagnostic)
 	SetupBodiesAccess(diagMux, diagnostic)
+	SetupSysInfoAccess(diagMux, diagnostic)
 }

@@ -2,18 +2,18 @@ name: QA - Sync from scratch (minimal node)
 
 on:
   schedule:
-    - cron: '0 0 * * 6'  # Run on Saturday at 00:00 AM UTC
+    - cron: '0 0 * * *'  # Run every night at 00:00 AM UTC
   workflow_dispatch:     # Run manually
 
 jobs:
   minimal-node-sync-from-scratch-test:
     runs-on: self-hosted
-    timeout-minutes: 1500 # 25 hours
+    timeout-minutes: 360 # 6 hours
     env:
       ERIGON_DATA_DIR: ${{ github.workspace }}/erigon_data
       ERIGON_QA_PATH: /home/qarunner/erigon-qa
       TRACKING_TIME_SECONDS: 7200 # 2 hours
-      TOTAL_TIME_SECONDS: 86400 # 24 hours
+      TOTAL_TIME_SECONDS: 18000 # 5 hours
       CHAIN: mainnet
 
     steps:
@@ -65,15 +65,6 @@ jobs:
           echo "TEST_RESULT=failure" >> "$GITHUB_OUTPUT"
         fi
 
-    - name: Clean up Erigon data directory
-      if: always()
-      run: |
-        rm -rf $ERIGON_DATA_DIR
-
-    - name: Resume the Erigon instance dedicated to db maintenance
-      run: |
-        python3 $ERIGON_QA_PATH/test_system/db-producer/resume_production.py || true
-
     - name: Save test results
       if: steps.test_step.outputs.test_executed == 'true'
       env:
@@ -94,7 +85,18 @@ jobs:
       uses: actions/upload-artifact@v4
       with:
         name: test-results
-        path: ${{ github.workspace }}/result-${{ env.CHAIN }}.json
+        path: |
+          ${{ github.workspace }}/result-${{ env.CHAIN }}.json
+          ${{ github.workspace }}/erigon_data/logs/erigon.log
+
+    - name: Clean up Erigon data directory
+      if: always()
+      run: |
+        rm -rf $ERIGON_DATA_DIR
+
+    - name: Resume the Erigon instance dedicated to db maintenance
+      run: |
+        python3 $ERIGON_QA_PATH/test_system/db-producer/resume_production.py || true
 
     - name: Action for Success
       if: steps.test_step.outputs.TEST_RESULT == 'success'

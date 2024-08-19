@@ -74,7 +74,11 @@ func (api *TraceAPIImpl) Transaction(ctx context.Context, txHash common.Hash, ga
 		}
 
 		// otherwise this may be a bor state sync transaction - check
-		blockNumber, ok, err = api._blockReader.EventLookup(ctx, tx, txHash)
+		if api.bridgeReader != nil {
+			blockNumber, ok, err = api.bridgeReader.EventTxnLookup(ctx, txHash)
+		} else {
+			blockNumber, ok, err = api._blockReader.EventLookup(ctx, tx, txHash)
+		}
 		if err != nil {
 			return nil, err
 		}
@@ -185,7 +189,7 @@ func (api *TraceAPIImpl) Block(ctx context.Context, blockNr rpc.BlockNumber, gas
 		return nil, err
 	}
 	defer tx.Rollback()
-	blockNum, hash, _, err := rpchelper.GetBlockNumber(rpc.BlockNumberOrHashWithNumber(blockNr), tx, api.filters)
+	blockNum, hash, _, err := rpchelper.GetBlockNumber(ctx, rpc.BlockNumberOrHashWithNumber(blockNr), tx, api._blockReader, api.filters)
 	if err != nil {
 		return nil, err
 	}
@@ -319,13 +323,16 @@ func (api *TraceAPIImpl) Filter(ctx context.Context, req TraceFilterRequest, gas
 	}
 
 	if req.ToBlock == nil {
-		headNumber := rawdb.ReadHeaderNumber(dbtx, rawdb.ReadHeadHeaderHash(dbtx))
+		headNumber, err := api._blockReader.HeaderNumber(ctx, dbtx, rawdb.ReadHeadHeaderHash(dbtx))
+		if err != nil {
+			return err
+		}
 		toBlock = *headNumber
 	} else {
 		toBlock = uint64(*req.ToBlock)
 	}
 	if fromBlock > toBlock {
-		return fmt.Errorf("invalid parameters: fromBlock cannot be greater than toBlock")
+		return errors.New("invalid parameters: fromBlock cannot be greater than toBlock")
 	}
 
 	return api.filterV3(ctx, dbtx.(kv.TemporalTx), fromBlock, toBlock, req, stream, *gasBailOut, traceConfig)
@@ -425,7 +432,7 @@ func (api *TraceAPIImpl) filterV3(ctx context.Context, dbtx kv.TemporalTx, fromB
 
 			if !isPos && chainConfig.TerminalTotalDifficulty != nil {
 				header := lastHeader
-				isPos = header.Difficulty.Cmp(common.Big0) == 0 || header.Difficulty.Cmp(chainConfig.TerminalTotalDifficulty) >= 0
+				isPos = header.Difficulty.Sign() == 0 || header.Difficulty.Cmp(chainConfig.TerminalTotalDifficulty) >= 0
 			}
 
 			lastBlockHash = lastHeader.Hash()
@@ -598,7 +605,7 @@ func (api *TraceAPIImpl) filterV3(ctx context.Context, dbtx kv.TemporalTx, fromB
 		evm := vm.NewEVM(blockCtx, txCtx, ibs, chainConfig, vmConfig)
 
 		gp := new(core.GasPool).AddGas(msg.Gas()).AddBlobGas(msg.BlobGas())
-		ibs.SetTxContext(txHash, lastBlockHash, txIndex)
+		ibs.SetTxContext(txHash, txIndex)
 		var execResult *evmtypes.ExecutionResult
 		execResult, err = core.ApplyMessage(evm, msg, gp, true /* refunds */, gasBailOut)
 		if err != nil {
@@ -726,7 +733,16 @@ func (api *TraceAPIImpl) callManyTransactions(
 		// check if this block has state sync txn
 		blockHash := block.Hash()
 		borStateSyncTxnHash = bortypes.ComputeBorTxHash(blockNumber, blockHash)
-		_, ok, err := api._blockReader.EventLookup(ctx, dbtx, borStateSyncTxnHash)
+
+		var ok bool
+		var err error
+
+		if api.bridgeReader != nil {
+			_, ok, err = api.bridgeReader.EventTxnLookup(ctx, borStateSyncTxnHash)
+
+		} else {
+			_, ok, err = api._blockReader.EventLookup(ctx, dbtx, borStateSyncTxnHash)
+		}
 		if err != nil {
 			return nil, nil, err
 		}

@@ -21,6 +21,7 @@
 package state
 
 import (
+	"errors"
 	"fmt"
 	"sort"
 
@@ -78,10 +79,10 @@ type IntraBlockState struct {
 	// The refund counter, also used by state transitioning.
 	refund uint64
 
-	thash, bhash libcommon.Hash
-	txIndex      int
-	logs         map[libcommon.Hash][]*types.Log
-	logSize      uint
+	thash   libcommon.Hash
+	txIndex int
+	logs    map[libcommon.Hash][]*types.Log
+	logSize uint
 
 	// Per-transaction access list
 	accessList *accessList
@@ -157,7 +158,6 @@ func (sdb *IntraBlockState) Reset() {
 	sdb.balanceInc = make(map[libcommon.Address]*BalanceIncrease)
 	//clear(sdb.balanceInc)
 	sdb.thash = libcommon.Hash{}
-	sdb.bhash = libcommon.Hash{}
 	sdb.txIndex = 0
 	sdb.logSize = 0
 }
@@ -165,15 +165,19 @@ func (sdb *IntraBlockState) Reset() {
 func (sdb *IntraBlockState) AddLog(log2 *types.Log) {
 	sdb.journal.append(addLogChange{txhash: sdb.thash})
 	log2.TxHash = sdb.thash
-	log2.BlockHash = sdb.bhash
 	log2.TxIndex = uint(sdb.txIndex)
 	log2.Index = sdb.logSize
 	sdb.logs[sdb.thash] = append(sdb.logs[sdb.thash], log2)
 	sdb.logSize++
 }
 
-func (sdb *IntraBlockState) GetLogs(hash libcommon.Hash) []*types.Log {
-	return sdb.logs[hash]
+func (sdb *IntraBlockState) GetLogs(hash libcommon.Hash, blockNumber uint64, blockHash libcommon.Hash) []*types.Log {
+	logs := sdb.logs[hash]
+	for _, l := range logs {
+		l.BlockNumber = blockNumber
+		l.BlockHash = blockHash
+	}
+	return logs
 }
 
 func (sdb *IntraBlockState) Logs() []*types.Log {
@@ -195,7 +199,7 @@ func (sdb *IntraBlockState) AddRefund(gas uint64) {
 func (sdb *IntraBlockState) SubRefund(gas uint64) {
 	sdb.journal.append(refundChange{prev: sdb.refund})
 	if gas > sdb.refund {
-		sdb.setErrorUnsafe(fmt.Errorf("refund counter below zero"))
+		sdb.setErrorUnsafe(errors.New("refund counter below zero"))
 	}
 	sdb.refund -= gas
 }
@@ -276,7 +280,7 @@ func (sdb *IntraBlockState) GetCodeHash(addr libcommon.Address) libcommon.Hash {
 	if stateObject == nil || stateObject.deleted {
 		return libcommon.Hash{}
 	}
-	return libcommon.BytesToHash(stateObject.CodeHash())
+	return stateObject.data.CodeHash
 }
 
 // GetState retrieves a value from the given account's storage trie.
@@ -664,7 +668,7 @@ func printAccount(EIP161Enabled bool, addr libcommon.Address, stateObject *state
 	if isDirty && (stateObject.createdContract || !stateObject.selfdestructed) && !emptyRemoval {
 		// Write any contract code associated with the state object
 		if stateObject.code != nil && stateObject.dirtyCode {
-			fmt.Printf("UpdateCode: %x,%x\n", addr, stateObject.CodeHash())
+			fmt.Printf("UpdateCode: %x,%x\n", addr, stateObject.data.CodeHash)
 		}
 		if stateObject.createdContract {
 			fmt.Printf("CreateContract: %x\n", addr)
@@ -776,9 +780,8 @@ func (sdb *IntraBlockState) Print(chainRules chain.Rules) {
 // SetTxContext sets the current transaction hash and index and block hash which are
 // used when the EVM emits new state logs. It should be invoked before
 // transaction execution.
-func (sdb *IntraBlockState) SetTxContext(thash, bhash libcommon.Hash, ti int) {
+func (sdb *IntraBlockState) SetTxContext(thash libcommon.Hash, ti int) {
 	sdb.thash = thash
-	sdb.bhash = bhash
 	sdb.txIndex = ti
 }
 

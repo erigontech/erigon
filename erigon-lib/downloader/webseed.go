@@ -445,8 +445,8 @@ func (d *WebSeeds) ByFileName(name string) (metainfo.UrlList, bool) {
 	return v, ok
 }
 
-var ErrInvalidEtag = fmt.Errorf("invalid etag")
-var ErrEtagNotFound = fmt.Errorf("not found")
+var ErrInvalidEtag = errors.New("invalid etag")
+var ErrEtagNotFound = errors.New("not found")
 
 func (d *WebSeeds) retrieveFileEtag(ctx context.Context, file *url.URL) (string, error) {
 	request, err := http.NewRequestWithContext(ctx, http.MethodHead, file.String(), nil)
@@ -563,7 +563,13 @@ func (d *WebSeeds) downloadTorrentFilesFromProviders(ctx context.Context, rootDi
 		whiteListed := strings.HasSuffix(name, ".seg.torrent") ||
 			strings.HasSuffix(name, ".kv.torrent") ||
 			strings.HasSuffix(name, ".v.torrent") ||
-			strings.HasSuffix(name, ".ef.torrent")
+			strings.HasSuffix(name, ".ef.torrent") ||
+			strings.HasSuffix(name, ".idx.torrent") ||
+			strings.HasSuffix(name, ".kvei.torrent") ||
+			strings.HasSuffix(name, ".bt.torrent") ||
+			strings.HasSuffix(name, ".vi.torrent") ||
+			strings.HasSuffix(name, ".txt.torrent") ||
+			strings.HasSuffix(name, ".efi.torrent")
 		if !whiteListed {
 			_, fName := filepath.Split(name)
 			d.logger.Log(d.verbosity, "[snapshots] webseed has .torrent, but we skip it because this file-type not supported yet", "name", fName)

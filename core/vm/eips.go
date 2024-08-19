@@ -22,6 +22,7 @@ package vm
 import (
 	"fmt"
 	"sort"
+	"strconv"
 
 	"github.com/holiman/uint256"
 
@@ -66,7 +67,7 @@ func ValidEip(eipNum int) bool {
 func ActivateableEips() []string {
 	var nums []string //nolint:prealloc
 	for k := range activators {
-		nums = append(nums, fmt.Sprintf("%d", k))
+		nums = append(nums, strconv.Itoa(k))
 	}
 	sort.Strings(nums)
 	return nums

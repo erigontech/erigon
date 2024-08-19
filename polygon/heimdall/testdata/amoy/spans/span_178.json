@@ -1,0 +1,54 @@
+{
+  "span_id": 178,
+  "start_block": 1133056,
+  "end_block": 1139455,
+  "validator_set": {
+    "validators": [
+      {
+        "ID": 2,
+        "signer": "0x6406a542cc2e0b4c7b2ae5ea0d9cf8160a640c62",
+        "power": 1000,
+        "accum": 6313
+      },
+      {
+        "ID": 1,
+        "signer": "0x6ab3d36c46ecfb9b9c0bd51cb1c3da5a2c81cea6",
+        "power": 10000,
+        "accum": -5312
+      },
+      {
+        "ID": 3,
+        "signer": "0x8247698a31154dfa38fff6443cbeed4225ed06d6",
+        "power": 1000,
+        "accum": -1000
+      }
+    ],
+    "proposer": {
+      "ID": 1,
+      "signer": "0x6ab3d36c46ecfb9b9c0bd51cb1c3da5a2c81cea6",
+      "power": 10000,
+      "accum": -5312
+    }
+  },
+  "selected_producers": [
+    {
+      "ID": 2,
+      "signer": "0x6406a542cc2e0b4c7b2ae5ea0d9cf8160a640c62",
+      "power": 1000,
+      "accum": 0
+    },
+    {
+      "ID": 1,
+      "signer": "0x6ab3d36c46ecfb9b9c0bd51cb1c3da5a2c81cea6",
+      "power": 10000,
+      "accum": 0
+    },
+    {
+      "ID": 3,
+      "signer": "0x8247698a31154dfa38fff6443cbeed4225ed06d6",
+      "power": 1000,
+      "accum": 0
+    }
+  ],
+  "bor_chain_id": "80002"
+}

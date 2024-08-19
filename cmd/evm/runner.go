@@ -32,6 +32,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/erigontech/erigon-lib/common/datadir"
+
 	"github.com/holiman/uint256"
 	"github.com/urfave/cli/v2"
 
@@ -158,7 +160,7 @@ func runCmd(ctx *cli.Context) error {
 	defer db.Close()
 	if ctx.String(GenesisFlag.Name) != "" {
 		gen := readGenesis(ctx.String(GenesisFlag.Name))
-		core.MustCommitGenesis(gen, db, "", log.Root())
+		core.MustCommitGenesis(gen, db, datadir.New(""), log.Root())
 		genesisConfig = gen
 		chainConfig = gen.Config
 	} else {
@@ -175,7 +177,7 @@ func runCmd(ctx *cli.Context) error {
 		return err
 	}
 	defer sd.Close()
-	stateReader := state.NewStateReaderV3(sd)
+	stateReader := state.NewReaderV3(sd)
 	statedb = state.New(stateReader)
 	if ctx.String(SenderFlag.Name) != "" {
 		sender = libcommon.HexToAddress(ctx.String(SenderFlag.Name))

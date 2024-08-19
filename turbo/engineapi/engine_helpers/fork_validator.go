@@ -202,7 +202,7 @@ func (fv *ForkValidator) ValidatePayload(tx kv.RwTx, header *types.Header, body 
 		return
 	}
 	var foundCanonical bool
-	foundCanonical, criticalError = rawdb.IsCanonicalHash(tx, hash, number)
+	foundCanonical, criticalError = fv.blockReader.IsCanonical(fv.ctx, tx, hash, number)
 	if criticalError != nil {
 		return
 	}
@@ -214,7 +214,7 @@ func (fv *ForkValidator) ValidatePayload(tx kv.RwTx, header *types.Header, body 
 	// Let's assemble the side fork backwards
 	currentHash := header.ParentHash
 	unwindPoint := number - 1
-	foundCanonical, criticalError = rawdb.IsCanonicalHash(tx, currentHash, unwindPoint)
+	foundCanonical, criticalError = fv.blockReader.IsCanonical(fv.ctx, tx, currentHash, unwindPoint)
 	if criticalError != nil {
 		return
 	}
@@ -251,7 +251,7 @@ func (fv *ForkValidator) ValidatePayload(tx kv.RwTx, header *types.Header, body 
 
 		currentHash = header.ParentHash
 		unwindPoint = header.Number.Uint64() - 1
-		foundCanonical, criticalError = rawdb.IsCanonicalHash(tx, currentHash, unwindPoint)
+		foundCanonical, criticalError = fv.blockReader.IsCanonical(fv.ctx, tx, currentHash, unwindPoint)
 		if criticalError != nil {
 			return
 		}
@@ -322,7 +322,7 @@ func (fv *ForkValidator) validateAndStorePayload(txc wrap.TxContainer, header *t
 		if criticalError != nil {
 			return
 		}
-		latestValidHash, criticalError = rawdb.ReadCanonicalHash(txc.Tx, latestValidNumber)
+		latestValidHash, criticalError = fv.blockReader.CanonicalHash(fv.ctx, txc.Tx, latestValidNumber)
 		if criticalError != nil {
 			return
 		}

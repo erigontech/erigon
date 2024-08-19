@@ -54,9 +54,17 @@ var sidecarSSZSize = (&cltypes.BlobSidecar{}).EncodingSizeSSZ()
 
 func BeaconSimpleIdx(ctx context.Context, sn snaptype.FileInfo, salt uint32, tmpDir string, p *background.Progress, lvl log.Lvl, logger log.Logger) (err error) {
 	num := make([]byte, binary.MaxVarintLen64)
-	if err := snaptype.BuildIndex(ctx, sn, salt, sn.From, tmpDir, log.LvlDebug, p, func(idx *recsplit.RecSplit, i, offset uint64, word []byte) error {
+	cfg := recsplit.RecSplitArgs{
+		Enums:      true,
+		BucketSize: 2000,
+		LeafSize:   8,
+		TmpDir:     tmpDir,
+		Salt:       &salt,
+		BaseDataID: sn.From,
+	}
+	if err := snaptype.BuildIndex(ctx, sn, cfg, log.LvlDebug, p, func(idx *recsplit.RecSplit, i, offset uint64, word []byte) error {
 		if i%20_000 == 0 {
-			logger.Log(lvl, fmt.Sprintf("Generating idx for %s", sn.Type.Name()), "progress", i)
+			logger.Log(lvl, "Generating idx for "+sn.Type.Name(), "progress", i)
 		}
 		p.Processed.Add(1)
 		n := binary.PutUvarint(num, i)
@@ -109,8 +117,7 @@ func (s *CaplinSnapshots) SegmentsMax() uint64 { return s.segmentsMax.Load() }
 
 func (s *CaplinSnapshots) LogStat(str string) {
 	s.logger.Info(fmt.Sprintf("[snapshots:%s] Stat", str),
-		"blocks", fmt.Sprintf("%dk", (s.SegmentsMax()+1)/1000),
-		"indices", fmt.Sprintf("%dk", (s.IndicesMax()+1)/1000))
+		"blocks", libcommon.PrettyCounter(s.SegmentsMax()+1), "indices", libcommon.PrettyCounter(s.IndicesMax()+1))
 }
 
 func (s *CaplinSnapshots) LS() {
@@ -414,7 +421,9 @@ func dumpBeaconBlocksRange(ctx context.Context, db kv.RoDB, fromSlot uint64, toS
 	segName := snaptype.BeaconBlocks.FileName(0, fromSlot, toSlot)
 	f, _, _ := snaptype.ParseFileName(snapDir, segName)
 
-	sn, err := seg.NewCompressor(ctx, "Snapshot BeaconBlocks", f.Path, tmpDir, seg.MinPatternScore, workers, lvl, logger)
+	compressCfg := seg.DefaultCfg
+	compressCfg.Workers = workers
+	sn, err := seg.NewCompressor(ctx, "Snapshot BeaconBlocks", f.Path, tmpDir, compressCfg, lvl, logger)
 	if err != nil {
 		return err
 	}
@@ -460,7 +469,9 @@ func dumpBlobSidecarsRange(ctx context.Context, db kv.RoDB, storage blob_storage
 	segName := snaptype.BlobSidecars.FileName(0, fromSlot, toSlot)
 	f, _, _ := snaptype.ParseFileName(snapDir, segName)
 
-	sn, err := seg.NewCompressor(ctx, "Snapshot BlobSidecars", f.Path, tmpDir, seg.MinPatternScore, workers, lvl, logger)
+	compressCfg := seg.DefaultCfg
+	compressCfg.Workers = workers
+	sn, err := seg.NewCompressor(ctx, "Snapshot BlobSidecars", f.Path, tmpDir, compressCfg, lvl, logger)
 	if err != nil {
 		return err
 	}
@@ -569,6 +580,7 @@ func (s *CaplinSnapshots) BuildMissingIndices(ctx context.Context, logger log.Lo
 	if err != nil {
 		return err
 	}
+	noneDone := true
 	for index := range segments {
 		segment := segments[index]
 		// The same slot=>offset mapping is used for both beacon blocks and blob sidecars.
@@ -579,10 +591,13 @@ func (s *CaplinSnapshots) BuildMissingIndices(ctx context.Context, logger log.Lo
 			continue
 		}
 		p := &background.Progress{}
-
+		noneDone = false
 		if err := BeaconSimpleIdx(ctx, segment, s.Salt, s.tmpdir, p, log.LvlDebug, logger); err != nil {
 			return err
 		}
+	}
+	if noneDone {
+		return nil
 	}
 
 	return s.ReopenFolder()
@@ -665,7 +680,7 @@ func (s *CaplinSnapshots) ReadBlobSidecars(slot uint64) ([]*cltypes.BlobSidecar,
 		return nil, nil
 	}
 	if len(buf)%sidecarSSZSize != 0 {
-		return nil, fmt.Errorf("invalid sidecar list length")
+		return nil, errors.New("invalid sidecar list length")
 	}
 	sidecars := make([]*cltypes.BlobSidecar, len(buf)/sidecarSSZSize)
 	for i := 0; i < len(buf); i += sidecarSSZSize {

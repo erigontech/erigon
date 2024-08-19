@@ -93,7 +93,7 @@ func (api *OtterscanAPIImpl) traceBlock(dbtx kv.Tx, ctx context.Context, blockNu
 	}
 	engine := api.engine()
 
-	blockReceipts, err := api.getReceipts(ctx, dbtx, block, block.Body().SendersFromTxs())
+	blockReceipts, err := api.getReceipts(ctx, dbtx, block)
 	if err != nil {
 		return false, nil, err
 	}
@@ -106,7 +106,7 @@ func (api *OtterscanAPIImpl) traceBlock(dbtx kv.Tx, ctx context.Context, blockNu
 			return false, nil, ctx.Err()
 		default:
 		}
-		ibs.SetTxContext(txn.Hash(), block.Hash(), idx)
+		ibs.SetTxContext(txn.Hash(), idx)
 
 		msg, _ := txn.AsMessage(*signer, header.BaseFee, rules)
 

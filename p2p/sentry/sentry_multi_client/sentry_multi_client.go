@@ -28,7 +28,6 @@ import (
 	"time"
 
 	"github.com/c2h5oh/datasize"
-	lru "github.com/hashicorp/golang-lru/v2"
 	"golang.org/x/sync/semaphore"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/backoff"
@@ -37,7 +36,6 @@ import (
 	"google.golang.org/protobuf/types/known/emptypb"
 
 	"github.com/erigontech/erigon-lib/chain"
-	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/dbg"
 	"github.com/erigontech/erigon-lib/direct"
 	"github.com/erigontech/erigon-lib/gointerfaces/grpcutil"
@@ -350,14 +348,6 @@ func NewMultiClient(
 		bd = &bodydownload.BodyDownload{}
 	}
 
-	receiptsCacheLimit := 32
-	receiptsCache, err := lru.New[common.Hash, []*types.Receipt](receiptsCacheLimit)
-	if err != nil {
-		return nil, err
-	}
-
-	receiptsGenerator := receipts.NewGenerator(receiptsCache, blockReader, engine)
-
 	cs := &MultiClient{
 		Hd:                                hd,
 		Bd:                                bd,
@@ -373,7 +363,7 @@ func NewMultiClient(
 		disableBlockDownload:              disableBlockDownload,
 		logger:                            logger,
 		getReceiptsActiveGoroutineNumber:  semaphore.NewWeighted(1),
-		ethApiWrapper:                     receiptsGenerator,
+		ethApiWrapper:                     receipts.NewGenerator(32, blockReader, engine),
 	}
 
 	return cs, nil
@@ -714,7 +704,15 @@ func (cs *MultiClient) getBlockBodies66(ctx context.Context, inreq *proto_sentry
 	return nil
 }
 
+var (
+	EnableP2PReceipts = dbg.EnvBool("P2P_RECEIPTS", false)
+)
+
 func (cs *MultiClient) getReceipts66(ctx context.Context, inreq *proto_sentry.InboundMessage, sentryClient direct.SentryClient) error {
+	if !EnableP2PReceipts {
+		return nil
+	}
+
 	err := cs.getReceiptsActiveGoroutineNumber.Acquire(ctx, 1)
 	if err != nil {
 		return err

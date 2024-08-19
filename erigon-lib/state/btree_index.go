@@ -50,7 +50,7 @@ const BtreeLogPrefix = "btree"
 
 // DefaultBtreeM - amount of keys on leaf of BTree
 // It will do log2(M) co-located-reads from data file - for binary-search inside leaf
-var DefaultBtreeM = uint64(256)
+var DefaultBtreeM = uint64(dbg.EnvInt("BT_M", 256))
 
 const DefaultBtreeStartSkip = uint64(4) // defines smallest shard available for scan instead of binsearch
 
@@ -614,7 +614,7 @@ func NewBtIndexWriter(args BtIndexWriterArgs, logger log.Logger) (*BtIndexWriter
 
 func (btw *BtIndexWriter) AddKey(key []byte, offset uint64) error {
 	if btw.built {
-		return fmt.Errorf("cannot add keys after perfect hash function had been built")
+		return errors.New("cannot add keys after perfect hash function had been built")
 	}
 
 	binary.BigEndian.PutUint64(btw.numBuf[:], offset)
@@ -646,7 +646,7 @@ func (btw *BtIndexWriter) loadFuncBucket(k, v []byte, _ etl.CurrentTableReader, 
 // of building the perfect hash function and writing index into a file
 func (btw *BtIndexWriter) Build() error {
 	if btw.built {
-		return fmt.Errorf("already built")
+		return errors.New("already built")
 	}
 	var err error
 	if btw.indexF, err = os.Create(btw.tmpFilePath); err != nil {
@@ -766,7 +766,6 @@ func BuildBtreeIndexWithDecompressor(indexPath string, kv *seg.Decompressor, com
 	if noFsync {
 		bloom.DisableFsync()
 	}
-	hasher := murmur3.New128WithSeed(salt)
 
 	args := BtIndexWriterArgs{
 		IndexFile: indexPath,
@@ -791,9 +790,7 @@ func BuildBtreeIndexWithDecompressor(indexPath string, kv *seg.Decompressor, com
 		if err != nil {
 			return err
 		}
-		hasher.Reset()
-		hasher.Write(key) //nolint:errcheck
-		hi, _ := hasher.Sum128()
+		hi, _ := murmur3.Sum128WithSeed(key, salt)
 		bloom.AddHash(hi)
 		pos, _ = getter.Skip()
 
@@ -813,7 +810,15 @@ func BuildBtreeIndexWithDecompressor(indexPath string, kv *seg.Decompressor, com
 }
 
 // For now, M is not stored inside index file.
-func OpenBtreeIndexWithDecompressor(indexPath string, M uint64, kv *seg.Decompressor, compress FileCompression) (*BtIndex, error) {
+func OpenBtreeIndexWithDecompressor(indexPath string, M uint64, kv *seg.Decompressor, compress FileCompression) (bt *BtIndex, err error) {
+	defer func() {
+		// recover from panic if one occurred. Set err to nil if no panic
+		if r := recover(); r != nil {
+			// do r with only the stack trace
+			err = fmt.Errorf("incomplete or not-fully downloaded file %s", indexPath)
+		}
+	}()
+
 	s, err := os.Stat(indexPath)
 	if err != nil {
 		return nil, err
@@ -846,7 +851,7 @@ func OpenBtreeIndexWithDecompressor(indexPath string, M uint64, kv *seg.Decompre
 
 	idx.ef, _ = eliasfano32.ReadEliasFano(idx.data[pos:])
 
-	defer kv.EnableReadAhead().DisableReadAhead()
+	defer kv.EnableMadvNormal().DisableReadAhead()
 	kvGetter := NewArchiveGetter(kv.MakeGetter(), compress)
 
 	//fmt.Printf("open btree index %s with %d keys b+=%t data compressed %t\n", indexPath, idx.ef.Count(), UseBpsTree, idx.compressed)
