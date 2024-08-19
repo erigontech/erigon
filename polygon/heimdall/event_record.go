@@ -131,3 +131,29 @@ type StateSyncEventResponse struct {
 	Height string              `json:"height"`
 	Result EventRecordWithTime `json:"result"`
 }
+
+var methodId []byte = borabi.StateReceiverContractABI().Methods["commitState"].ID
+
+func EventTime(encodedEvent rlp.RawValue) time.Time {
+	if bytes.Equal(methodId, encodedEvent[0:4]) {
+		return time.Unix((&big.Int{}).SetBytes(encodedEvent[4:36]).Int64(), 0)
+	}
+
+	return time.Time{}
+}
+
+var commitStateInputs = borabi.StateReceiverContractABI().Methods["commitState"].Inputs
+
+func EventId(encodedEvent rlp.RawValue) uint64 {
+	if bytes.Equal(methodId, encodedEvent[0:4]) {
+		args, _ := commitStateInputs.Unpack(encodedEvent[4:])
+
+		if len(args) == 2 {
+			var eventRecord EventRecord
+			if err := rlp.DecodeBytes(args[1].([]byte), &eventRecord); err == nil {
+				return eventRecord.ID
+			}
+		}
+	}
+	return 0
+}
