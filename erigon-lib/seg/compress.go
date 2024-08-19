@@ -141,7 +141,7 @@ func NewCompressor(ctx context.Context, logPrefix, outputFile, tmpDir string, cf
 	wg.Add(workers)
 	suffixCollectors := make([]*etl.Collector, workers)
 	for i := 0; i < workers; i++ {
-		collector := etl.NewCollector(logPrefix+"_dict", tmpDir, etl.NewSortableBuffer(etl.BufferOptimalSize/2), logger) //nolint:gocritic
+		collector := etl.NewCollector(logPrefix+"_dict", tmpDir, etl.NewSortableBuffer(etl.BufferOptimalSize/4), logger) //nolint:gocritic
 		collector.LogLvl(lvl)
 
 		suffixCollectors[i] = collector
@@ -771,7 +771,7 @@ func (da *DictAggregator) aggLoadFunc(k, v []byte, table etl.CurrentTableReader,
 	}
 	da.dist[len(k)]++
 
-	score, _ := binary.Uvarint(v)
+	score := binary.BigEndian.Uint64(v)
 	if bytes.Equal(k, da.lastWord) {
 		da.lastWordScore += score
 	} else {

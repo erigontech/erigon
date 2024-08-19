@@ -907,10 +907,8 @@ func extractPatternsInSuperstrings(ctx context.Context, superstringCh chan []byt
 				for s := 0; s < l; s++ {
 					dictKey[s] = superstring[(int(filtered[i])+s)*2+1]
 				}
-				wr := binary.PutUvarint(dictVal, score)
-				//binary.BigEndian.PutUint64(dictVal, score)
-				//fmt.Printf("Adding pattern %d %x with score %d\n", len(dictKey), dictKey, score)
-				if err := dictCollector.Collect(dictKey, dictVal[:wr]); err != nil {
+				binary.BigEndian.PutUint64(dictVal, score)
+				if err := dictCollector.Collect(dictKey, dictVal); err != nil {
 					logger.Error("extractPatternsInSuperstrings", "collect", err)
 				}
 				prevSkipped = false //nolint
@@ -927,8 +925,12 @@ func DictionaryBuilderFromCollectors(ctx context.Context, cfg Cfg, logPrefix, tm
 
 	var m runtime.MemStats
 	dbg.ReadMemStats(&m)
-	logger.Info("Before dict", "alloc", common.ByteCount(m.Alloc), "sys", common.ByteCount(m.Sys))
+	logger.Info("Before dict1", "alloc", common.ByteCount(m.Alloc), "sys", common.ByteCount(m.Sys))
 
+	runtime.GC()
+
+	dbg.ReadMemStats(&m)
+	logger.Info("Before dict2", "alloc", common.ByteCount(m.Alloc), "sys", common.ByteCount(m.Sys))
 	dictAggregator := &DictAggregator{collector: dictCollector, dist: map[int]int{}}
 	for _, collector := range collectors {
 		if err := collector.Load(nil, "", dictAggregator.aggLoadFunc, etl.TransformArgs{Quit: ctx.Done()}); err != nil {
@@ -939,15 +941,19 @@ func DictionaryBuilderFromCollectors(ctx context.Context, cfg Cfg, logPrefix, tm
 	if err := dictAggregator.finish(); err != nil {
 		return nil, err
 	}
+	runtime.GC()
 
 	dbg.ReadMemStats(&m)
-	logger.Info("After dict", "alloc", common.ByteCount(m.Alloc), "sys", common.ByteCount(m.Sys))
+	logger.Info("Before dict3", "alloc", common.ByteCount(m.Alloc), "sys", common.ByteCount(m.Sys))
 	// We need `maxDictPatterns` words with highest score - but input is not sorted by score (it's sorted by `word`)
 	// so, then let's just put to heap more items and then shrink at `finish()`
 	db := &DictionaryBuilder{softLimit: cfg.MaxDictPatterns * cfg.DictReducerSoftLimit}
 	if err := dictCollector.Load(nil, "", db.loadFunc, etl.TransformArgs{Quit: ctx.Done()}); err != nil {
 		return nil, err
 	}
+	dbg.ReadMemStats(&m)
+	logger.Info("After dict", "alloc", common.ByteCount(m.Alloc), "sys", common.ByteCount(m.Sys))
+
 	db.finish(cfg.MaxDictPatterns)
 
 	db.Sort()
