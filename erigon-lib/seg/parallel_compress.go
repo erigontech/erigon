@@ -25,6 +25,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"runtime"
 	"slices"
 	"strconv"
 	"sync"
@@ -33,6 +34,7 @@ import (
 
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/assert"
+	"github.com/erigontech/erigon-lib/common/dbg"
 	"github.com/erigontech/erigon-lib/etl"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/seg/patricia"
@@ -905,8 +907,10 @@ func extractPatternsInSuperstrings(ctx context.Context, superstringCh chan []byt
 				for s := 0; s < l; s++ {
 					dictKey[s] = superstring[(int(filtered[i])+s)*2+1]
 				}
-				binary.BigEndian.PutUint64(dictVal, score)
-				if err := dictCollector.Collect(dictKey, dictVal); err != nil {
+				wr := binary.PutUvarint(dictVal, score)
+				//binary.BigEndian.PutUint64(dictVal, score)
+				//fmt.Printf("Adding pattern %d %x with score %d\n", len(dictKey), dictKey, score)
+				if err := dictCollector.Collect(dictKey, dictVal[:wr]); err != nil {
 					logger.Error("extractPatternsInSuperstrings", "collect", err)
 				}
 				prevSkipped = false //nolint
@@ -916,10 +920,14 @@ func extractPatternsInSuperstrings(ctx context.Context, superstringCh chan []byt
 	}
 }
 
-func DictionaryBuilderFromCollectors(ctx context.Context, maxDictPatterns int, logPrefix, tmpDir string, collectors []*etl.Collector, lvl log.Lvl, logger log.Logger) (*DictionaryBuilder, error) {
+func DictionaryBuilderFromCollectors(ctx context.Context, cfg Cfg, logPrefix, tmpDir string, collectors []*etl.Collector, lvl log.Lvl, logger log.Logger) (*DictionaryBuilder, error) {
 	dictCollector := etl.NewCollector(logPrefix+"_collectDict", tmpDir, etl.NewSortableBuffer(etl.BufferOptimalSize), logger)
 	defer dictCollector.Close()
 	dictCollector.LogLvl(lvl)
+
+	var m runtime.MemStats
+	dbg.ReadMemStats(&m)
+	logger.Info("Before dict", "alloc", common.ByteCount(m.Alloc), "sys", common.ByteCount(m.Sys))
 
 	dictAggregator := &DictAggregator{collector: dictCollector, dist: map[int]int{}}
 	for _, collector := range collectors {
@@ -931,11 +939,16 @@ func DictionaryBuilderFromCollectors(ctx context.Context, maxDictPatterns int, l
 	if err := dictAggregator.finish(); err != nil {
 		return nil, err
 	}
-	db := &DictionaryBuilder{limit: maxDictPatterns} // Only collect 1m words with highest scores
+
+	dbg.ReadMemStats(&m)
+	logger.Info("After dict", "alloc", common.ByteCount(m.Alloc), "sys", common.ByteCount(m.Sys))
+	// We need `maxDictPatterns` words with highest score - but input is not sorted by score (it's sorted by `word`)
+	// so, then let's just put to heap more items and then shrink at `finish()`
+	db := &DictionaryBuilder{softLimit: cfg.MaxDictPatterns * cfg.DictReducerSoftLimit}
 	if err := dictCollector.Load(nil, "", db.loadFunc, etl.TransformArgs{Quit: ctx.Done()}); err != nil {
 		return nil, err
 	}
-	db.finish()
+	db.finish(cfg.MaxDictPatterns)
 
 	db.Sort()
 	return db, nil

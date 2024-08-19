@@ -1135,10 +1135,10 @@ func doCompress(cliCtx *cli.Context) error {
 	logger.Info("file", "datadir", dirs.DataDir, "f", f)
 	compressCfg := seg.DefaultCfg
 	compressCfg.Workers = estimate.CompressSnapshot.Workers()
-	compressCfg.MinPatternLen = 20
-	compressCfg.MaxPatternLen = 32
-	compressCfg.SamplingFactor = 1
-	//compressCfg.MaxDictPattens = 64 * 1024 * 2
+	compressCfg.MinPatternLen = dbg.EnvInt("MinPatternLen", 5)
+	compressCfg.MaxPatternLen = dbg.EnvInt("MaxPatternLen", 128)
+	compressCfg.SamplingFactor = uint64(dbg.EnvInt("SamplingFactor", 1))
+	compressCfg.MaxDictPatterns = 64 * 1024 * 4
 	c, err := seg.NewCompressor(ctx, "compress", f, dirs.Tmp, compressCfg, log.LvlInfo, logger)
 	if err != nil {
 		return err
