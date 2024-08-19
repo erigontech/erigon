@@ -113,8 +113,8 @@ func (p *Progress) Log(suffix string, rs *state.StateV3, in *state.QueueWithRetr
 		suffix += " Commit every block"
 	}
 
-	gasSec := gas / uint64(interval.Seconds())
-	txSec := (txCount - p.prevTxCount) / uint64(interval.Seconds())
+	gasSec := uint64(float64(gas) / interval.Seconds())
+	txSec := uint64(float64(txCount-p.prevTxCount) / interval.Seconds())
 
 	blks := float64(outputBlockNum-p.prevOutputBlockNum+1) / interval.Seconds()
 	p.logger.Info(fmt.Sprintf("[%s]"+suffix, p.logPrefix),
