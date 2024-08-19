@@ -100,7 +100,7 @@ func DefaultStages(ctx context.Context, snapshots SnapshotsCfg, headers HeadersC
 				return SpawnHashStateStage(s, tx, hashState, ctx, quiet)
 			},
 			Unwind: func(firstCycle bool, u *UnwindState, s *StageState, tx kv.RwTx) error {
-				return UnwindHashStateStage(u, s, tx, hashState, ctx)
+				return UnwindHashStateStage(u, s, tx, hashState, ctx, false)
 			},
 			Prune: func(firstCycle bool, p *PruneState, tx kv.RwTx) error {
 				return PruneHashStateStage(p, tx, hashState, ctx)
@@ -274,7 +274,7 @@ func StateStages(ctx context.Context, headers HeadersCfg, bodies BodiesCfg, bloc
 				return SpawnHashStateStage(s, tx, hashState, ctx, quiet)
 			},
 			Unwind: func(firstCycle bool, u *UnwindState, s *StageState, tx kv.RwTx) error {
-				return UnwindHashStateStage(u, s, tx, hashState, ctx)
+				return UnwindHashStateStage(u, s, tx, hashState, ctx, false)
 			},
 		},
 		{

@@ -134,7 +134,7 @@ func SequencerZkStages(
 				return stages.SpawnHashStateStage(s, tx, hashState, ctx, quiet)
 			},
 			Unwind: func(firstCycle bool, u *stages.UnwindState, s *stages.StageState, tx kv.RwTx) error {
-				return stages.UnwindHashStateStage(u, s, tx, hashState, ctx)
+				return stages.UnwindHashStateStage(u, s, tx, hashState, ctx, false)
 			},
 			Prune: func(firstCycle bool, p *stages.PruneState, tx kv.RwTx) error {
 				return stages.PruneHashStateStage(p, tx, hashState, ctx)
@@ -354,7 +354,7 @@ func DefaultZkStages(
 				return stages.SpawnHashStateStage(s, tx, hashState, ctx, quiet)
 			},
 			Unwind: func(firstCycle bool, u *stages.UnwindState, s *stages.StageState, tx kv.RwTx) error {
-				return stages.UnwindHashStateStage(u, s, tx, hashState, ctx)
+				return stages.UnwindHashStateStage(u, s, tx, hashState, ctx, false)
 			},
 			Prune: func(firstCycle bool, p *stages.PruneState, tx kv.RwTx) error {
 				return stages.PruneHashStateStage(p, tx, hashState, ctx)
@@ -369,7 +369,7 @@ func DefaultZkStages(
 				return err
 			},
 			Unwind: func(firstCycle bool, u *stages.UnwindState, s *stages.StageState, tx kv.RwTx) error {
-				return UnwindZkIntermediateHashesStage(u, s, tx, zkInterHashesCfg, ctx)
+				return UnwindZkIntermediateHashesStage(u, s, tx, zkInterHashesCfg, ctx, false)
 			},
 			Prune: func(firstCycle bool, p *stages.PruneState, tx kv.RwTx) error {
 				// TODO: implement this in zk interhashes

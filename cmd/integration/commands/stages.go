@@ -884,7 +884,7 @@ func stageHashState(db kv.RwDB, ctx context.Context) error {
 	cfg := stagedsync.StageHashStateCfg(db, dirs, historyV3, agg)
 	if unwind > 0 {
 		u := sync.NewUnwindState(stages.HashState, s.BlockNumber-unwind, s.BlockNumber)
-		err = stagedsync.UnwindHashStateStage(u, s, tx, cfg, ctx)
+		err = stagedsync.UnwindHashStateStage(u, s, tx, cfg, ctx, false)
 		if err != nil {
 			return err
 		}

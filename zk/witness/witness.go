@@ -34,6 +34,7 @@ import (
 	zkStages "github.com/ledgerwatch/erigon/zk/stages"
 	zkUtils "github.com/ledgerwatch/erigon/zk/utils"
 	"github.com/ledgerwatch/log/v3"
+	"time"
 )
 
 var (
@@ -126,7 +127,7 @@ func (g *Generator) GetWitnessByBatch(tx kv.Tx, ctx context.Context, batchNum ui
 			blocks[i] = block
 		}
 
-		return g.generateWitness(tx, ctx, blocks, debug, witnessFull)
+		return g.generateWitness(tx, ctx, batchNum, blocks, debug, witnessFull)
 	} else {
 		blockNumbers, err := reader.GetL2BlockNosByBatch(batchNum)
 		if err != nil {
@@ -145,7 +146,7 @@ func (g *Generator) GetWitnessByBatch(tx kv.Tx, ctx context.Context, batchNum ui
 			blocks[idx] = block
 			idx++
 		}
-		return g.generateWitness(tx, ctx, blocks, debug, witnessFull)
+		return g.generateWitness(tx, ctx, batchNum, blocks, debug, witnessFull)
 	}
 }
 
@@ -160,10 +161,16 @@ func (g *Generator) GetWitnessByBlockRange(tx kv.Tx, ctx context.Context, startB
 		witness := trie.NewWitness([]trie.WitnessOperator{})
 		return getWitnessBytes(witness, debug)
 	}
+	hermezDb := hermez_db.NewHermezDbReader(tx)
 	idx := 0
 	blocks := make([]*eritypes.Block, endBlock-startBlock+1)
+	var firstBatch uint64 = 0
 	for blockNum := startBlock; blockNum <= endBlock; blockNum++ {
 		block, err := rawdb.ReadBlockByNumber(tx, blockNum)
+		if err != nil {
+			return nil, err
+		}
+		firstBatch, err = hermezDb.GetBatchNoByL2Block(block.NumberU64())
 		if err != nil {
 			return nil, err
 		}
@@ -171,12 +178,18 @@ func (g *Generator) GetWitnessByBlockRange(tx kv.Tx, ctx context.Context, startB
 		idx++
 	}
 
-	return g.generateWitness(tx, ctx, blocks, debug, witnessFull)
+	return g.generateWitness(tx, ctx, firstBatch, blocks, debug, witnessFull)
 }
 
-func (g *Generator) generateWitness(tx kv.Tx, ctx context.Context, blocks []*eritypes.Block, debug, witnessFull bool) ([]byte, error) {
-	t := zkUtils.StartTimer("witness", "generatewitness")
-	defer t.LogTimer()
+func (g *Generator) generateWitness(tx kv.Tx, ctx context.Context, batchNum uint64, blocks []*eritypes.Block, debug, witnessFull bool) ([]byte, error) {
+	now := time.Now()
+	defer func() {
+		diff := time.Since(now)
+		if len(blocks) == 0 {
+			return
+		}
+		log.Info("Generating witness timing", "batch", batchNum, "blockFrom", blocks[0].NumberU64(), "blockTo", blocks[len(blocks)-1].NumberU64(), "taken", diff)
+	}()
 
 	endBlock := blocks[len(blocks)-1].NumberU64()
 	startBlock := blocks[0].NumberU64()
@@ -211,13 +224,13 @@ func (g *Generator) generateWitness(tx kv.Tx, ctx context.Context, blocks []*eri
 
 		hashStageCfg := stagedsync.StageHashStateCfg(nil, g.dirs, g.historyV3, g.agg)
 		hashStageCfg.SetQuiet(true)
-		if err := stagedsync.UnwindHashStateStage(unwindState, stageState, batch, hashStageCfg, ctx); err != nil {
+		if err := stagedsync.UnwindHashStateStage(unwindState, stageState, batch, hashStageCfg, ctx, true); err != nil {
 			return nil, fmt.Errorf("unwind hash state: %w", err)
 		}
 
 		interHashStageCfg := zkStages.StageZkInterHashesCfg(nil, true, true, false, g.dirs.Tmp, g.blockReader, nil, g.historyV3, g.agg, nil)
 
-		if err = zkStages.UnwindZkIntermediateHashesStage(unwindState, stageState, batch, interHashStageCfg, ctx); err != nil {
+		if err = zkStages.UnwindZkIntermediateHashesStage(unwindState, stageState, batch, interHashStageCfg, ctx, true); err != nil {
 			return nil, fmt.Errorf("unwind intermediate hashes: %w", err)
 		}
 

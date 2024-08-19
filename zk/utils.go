@@ -12,7 +12,7 @@ var ErrLimboState = errors.New("Calculating limbo state")
 
 // prints progress every 10 seconds
 // returns a channel to send progress to, and a function to stop the printer routine
-func ProgressPrinter(message string, total uint64) (chan uint64, func()) {
+func ProgressPrinter(message string, total uint64, quiet bool) (chan uint64, func()) {
 	progress := make(chan uint64)
 	ctDone := make(chan bool)
 
@@ -34,7 +34,7 @@ func ProgressPrinter(message string, total uint64) (chan uint64, func()) {
 					pct = (pc * 100) / total
 				}
 			case <-ticker.C:
-				if pc > 0 {
+				if pc > 0 && !quiet {
 					log.Info(fmt.Sprintf("%s: %d/%d (%d%%)", message, pc, total, pct))
 				}
 			case <-ctDone:
