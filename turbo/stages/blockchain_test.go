@@ -158,7 +158,10 @@ func testFork(t *testing.T, m *mock.MockSentry, i, n int, comparator func(td1, t
 	}
 	currentBlockHash := blockChainB.TopBlock.Hash()
 	err = m.DB.View(context.Background(), func(tx kv.Tx) error {
-		number := rawdb.ReadHeaderNumber(tx, currentBlockHash)
+		number, err := m.BlockReader.HeaderNumber(context.Background(), tx, currentBlockHash)
+		if err != nil {
+			return err
+		}
 		currentBlock, _, _ := m.BlockReader.BlockWithSenders(ctx, tx, currentBlockHash, *number)
 		tdPost, err = rawdb.ReadTd(tx, currentBlockHash, currentBlock.NumberU64())
 		if err != nil {
