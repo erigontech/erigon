@@ -161,6 +161,10 @@ func (s *CaplinSnapshots) BlocksAvailable() uint64 {
 	return min(s.segmentsMax.Load(), s.idxMax.Load())
 }
 
+func (s *CaplinSnapshots) BlocksSegsAvailable() uint64 {
+	return min(s.segmentsMax.Load(), s.idxMax.Load())
+}
+
 func (s *CaplinSnapshots) Close() {
 	if s == nil {
 		return

@@ -146,10 +146,7 @@ func (a *Antiquary) Loop() error {
 	}
 	defer tx.Rollback()
 	// read the last beacon snapshots
-	from, err := beacon_indicies.ReadLastBeaconSnapshot(tx)
-	if err != nil {
-		return err
-	}
+	from := a.sn.BlocksSegsAvailable()
 	logInterval := time.NewTicker(30 * time.Second)
 	if err := a.sn.ReopenFolder(); err != nil {
 		return err
@@ -213,10 +210,6 @@ func (a *Antiquary) Loop() error {
 		go a.loopBlobs(a.ctx)
 	}
 
-	// write the indicies
-	if err := beacon_indicies.WriteLastBeaconSnapshot(tx, frozenSlots); err != nil {
-		return err
-	}
 	log.Info("[Antiquary] Restarting Caplin")
 	if err := tx.Commit(); err != nil {
 		return err
@@ -237,11 +230,7 @@ func (a *Antiquary) Loop() error {
 			)
 			if err := a.mainDB.View(a.ctx, func(roTx kv.Tx) error {
 				// read the last beacon snapshots
-				from, err = beacon_indicies.ReadLastBeaconSnapshot(roTx)
-				if err != nil {
-					return err
-				}
-				from += 1
+				from = a.sn.BlocksSegsAvailable()
 				// read the finalized head
 				to, err = beacon_indicies.ReadHighestFinalized(roTx)
 				if err != nil {
@@ -296,9 +285,6 @@ func (a *Antiquary) antiquate(from, to uint64) error {
 	defer tx.Rollback()
 
 	if err := beacon_indicies.PruneBlocks(a.ctx, tx, to); err != nil {
-		return err
-	}
-	if err := beacon_indicies.WriteLastBeaconSnapshot(tx, to-1); err != nil {
 		return err
 	}
 	if err := tx.Commit(); err != nil {
