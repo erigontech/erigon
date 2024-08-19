@@ -67,11 +67,12 @@ import (
 )
 
 var (
-	mxExecStepsInDB = metrics.NewGauge(`exec_steps_in_db`) //nolint
-	mxExecRepeats   = metrics.NewCounter(`exec_repeats`)   //nolint
-	mxExecTriggers  = metrics.NewCounter(`exec_triggers`)  //nolint
-	mxExecTxnPerSec = metrics.NewCounter(`exec_tps`)
-	mxExecGasPerSec = metrics.NewCounter(`exec_mgass`)
+	mxExecStepsInDB    = metrics.NewGauge(`exec_steps_in_db`) //nolint
+	mxExecRepeats      = metrics.NewCounter(`exec_repeats`)   //nolint
+	mxExecTriggers     = metrics.NewCounter(`exec_triggers`)  //nolint
+	mxExecTransactions = metrics.NewCounter(`exec_txns`)
+	mxExecGas          = metrics.NewCounter(`exec_gas`)
+	mxExecBlocks       = metrics.NewGauge("exec_blocks")
 )
 
 const changesetBlockRange = 1_000 // Generate changeset only if execution of blocks <= changesetBlockRange
@@ -838,12 +839,11 @@ Loop:
 
 				txCount++
 				usedGas += txTask.UsedGas
-				mxExecGasPerSec.Add(float64(txTask.UsedGas))
-				mxExecTxnPerSec.Add(1)
+				mxExecGas.Add(float64(txTask.UsedGas))
+				mxExecTransactions.Add(1)
 
 				if txTask.Tx != nil {
 					blobGasUsed += txTask.Tx.GetBlobGas()
-					mxExecGasPerSec.Add(float64(txTask.Tx.GetBlobGas()))
 				}
 				if txTask.Final {
 					checkReceipts := !cfg.vmConfig.StatelessExec && chainConfig.IsByzantium(txTask.BlockNum) && !cfg.vmConfig.NoReceipts
@@ -881,16 +881,16 @@ Loop:
 				break Loop
 			}
 
-			// MA applystate
-			if err := rs.ApplyState4(ctx, txTask); err != nil {
+			if err = rs.ApplyState4(ctx, txTask); err != nil {
 				return err
 			}
 
-			outputTxNum.Add(1)
-
 			stageProgress = blockNum
+			outputTxNum.Add(1)
 			inputTxNum++
 		}
+		mxExecBlocks.Add(1)
+
 		if shouldGenerateChangesets {
 			aggTx := applyTx.(state2.HasAggTx).AggTx().(*state2.AggregatorRoTx)
 			aggTx.RestrictSubsetFileDeletions(true)
