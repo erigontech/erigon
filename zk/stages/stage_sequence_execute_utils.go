@@ -188,7 +188,8 @@ func prepareForkId(lastBatch, executionAt uint64, hermezDb forkDb) (uint64, erro
 	}
 
 	if latest == 0 {
-		return 0, fmt.Errorf("could not find a suitable fork for batch %v, cannot start sequencer, check contract configuration", lastBatch+1)
+		// not an error, need to wait for the block to finalize on the L1
+		return 0, nil
 	}
 
 	// now we need to check the last batch to see if we need to update the fork id

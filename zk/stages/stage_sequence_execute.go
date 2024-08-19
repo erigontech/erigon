@@ -56,6 +56,13 @@ func SpawnSequencingStage(
 		return err
 	}
 
+	// stage loop should continue until we get the forkid from the L1 in a finalised block
+	if forkId == 0 {
+		log.Warn(fmt.Sprintf("[%s] ForkId is 0. Waiting for L1 to finalise a block...", logPrefix))
+		time.Sleep(10 * time.Second)
+		return nil
+	}
+
 	var block *types.Block
 	runLoopBlocks := true
 	batchContext := newBatchContext(ctx, &cfg, &historyCfg, s, sdb)
