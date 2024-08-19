@@ -163,7 +163,7 @@ func ExecBlockV3(s *StageState, u Unwinder, txc wrap.TxContainer, toBlock uint64
 
 var ErrTooDeepUnwind = errors.New("too deep unwind")
 
-func unwindExec3(u *UnwindState, s *StageState, txc wrap.TxContainer, ctx context.Context, accumulator *shards.Accumulator, logger log.Logger) (err error) {
+func unwindExec3(u *UnwindState, s *StageState, txc wrap.TxContainer, ctx context.Context, br services.FullBlockReader, accumulator *shards.Accumulator, logger log.Logger) (err error) {
 	var domains *libstate.SharedDomains
 	if txc.Doms == nil {
 		domains, err = libstate.NewSharedDomains(txc.Tx, logger)
@@ -180,10 +180,11 @@ func unwindExec3(u *UnwindState, s *StageState, txc wrap.TxContainer, ctx contex
 	if err != nil {
 		return err
 	}
+
 	t := time.Now()
 	var changeset *[kv.DomainLen][]libstate.DomainEntryDiff
 	for currentBlock := u.CurrentBlockNumber; currentBlock > u.UnwindPoint; currentBlock-- {
-		currentHash, err := rawdb.ReadCanonicalHash(txc.Tx, currentBlock)
+		currentHash, err := br.CanonicalHash(ctx, txc.Tx, currentBlock)
 		if err != nil {
 			return err
 		}
@@ -365,7 +366,7 @@ func unwindExecutionStage(u *UnwindState, s *StageState, txc wrap.TxContainer, c
 		accumulator.StartChange(u.UnwindPoint, hash, txs, true)
 	}
 
-	return unwindExec3(u, s, txc, ctx, accumulator, logger)
+	return unwindExec3(u, s, txc, ctx, cfg.blockReader, accumulator, logger)
 }
 
 func PruneExecutionStage(s *PruneState, tx kv.RwTx, cfg ExecuteBlockCfg, ctx context.Context) (err error) {

@@ -45,6 +45,7 @@ type BlockReader interface {
 type HeaderReader interface {
 	Header(ctx context.Context, tx kv.Getter, hash common.Hash, blockNum uint64) (*types.Header, error)
 	HeaderByNumber(ctx context.Context, tx kv.Getter, blockNum uint64) (*types.Header, error)
+	HeaderNumber(ctx context.Context, tx kv.Getter, hash common.Hash) (*uint64, error)
 	HeaderByHash(ctx context.Context, tx kv.Getter, hash common.Hash) (*types.Header, error)
 	ReadAncestor(db kv.Getter, hash common.Hash, number, ancestor uint64, maxNonCanonical *uint64) (common.Hash, uint64)
 
@@ -79,6 +80,7 @@ type BorCheckpointReader interface {
 
 type CanonicalReader interface {
 	CanonicalHash(ctx context.Context, tx kv.Getter, blockNum uint64) (common.Hash, error)
+	IsCanonical(ctx context.Context, tx kv.Getter, hash common.Hash, blockNum uint64) (bool, error)
 	BadHeaderNumber(ctx context.Context, tx kv.Getter, hash common.Hash) (blockHeight *uint64, err error)
 }
 

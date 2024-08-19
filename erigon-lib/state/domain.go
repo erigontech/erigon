@@ -88,7 +88,7 @@ type Domain struct {
 
 	// _visibleFiles - underscore in name means: don't use this field directly, use BeginFilesRo()
 	// underlying array is immutable - means it's ready for zero-copy use
-	_visibleFiles []visibleFile
+	_visibleFiles *domainVisible
 
 	integrityCheck func(name kv.Domain, fromStep, toStep uint64) bool
 
@@ -99,10 +99,12 @@ type Domain struct {
 	restrictSubsetFileDeletions bool
 	largeVals                   bool
 
-	valsTable   string // key -> inverted_step + values (Dupsort)
-	stats       DomainStats
+	compressCfg seg.Cfg
 	compression FileCompression
-	indexList   idxList
+
+	valsTable string // key -> inverted_step + values (Dupsort)
+	stats     DomainStats
+	indexList idxList
 }
 
 type domainCfg struct {
@@ -114,16 +116,28 @@ type domainCfg struct {
 	restrictSubsetFileDeletions bool
 }
 
+type domainVisible struct {
+	files  []visibleFile
+	name   kv.Domain
+	caches *sync.Pool
+}
+
 func NewDomain(cfg domainCfg, aggregationStep uint64, name kv.Domain, valsTable, indexKeysTable, historyValsTable, indexTable string, integrityCheck func(name kv.Domain, fromStep, toStep uint64) bool, logger log.Logger) (*Domain, error) {
 	if cfg.hist.iiCfg.dirs.SnapDomain == "" {
 		panic("empty `dirs` variable")
 	}
+
+	compressCfg := seg.DefaultCfg
+	compressCfg.Workers = 1
 	d := &Domain{
-		name:        name,
-		valsTable:   valsTable,
+		name:      name,
+		valsTable: valsTable,
+
+		compressCfg: compressCfg,
 		compression: cfg.compress,
-		dirtyFiles:  btree2.NewBTreeGOptions[*filesItem](filesItemLess, btree2.Options{Degree: 128, NoLocks: false}),
-		stats:       DomainStats{FilesQueries: &atomic.Uint64{}, TotalQueries: &atomic.Uint64{}},
+
+		dirtyFiles: btree2.NewBTreeGOptions[*filesItem](filesItemLess, btree2.Options{Degree: 128, NoLocks: false}),
+		stats:      DomainStats{FilesQueries: &atomic.Uint64{}, TotalQueries: &atomic.Uint64{}},
 
 		indexList:                   withBTree | withExistence,
 		replaceKeysInValues:         cfg.replaceKeysInValues,         // for commitment domain only
@@ -132,7 +146,7 @@ func NewDomain(cfg domainCfg, aggregationStep uint64, name kv.Domain, valsTable,
 		integrityCheck:              integrityCheck,
 	}
 
-	d._visibleFiles = []visibleFile{}
+	d._visibleFiles = newDomainVisible(d.name, []visibleFile{})
 
 	var err error
 	if d.History, err = NewHistory(cfg.hist, aggregationStep, name.String(), indexKeysTable, indexTable, historyValsTable, nil, logger); err != nil {
@@ -439,7 +453,7 @@ func (d *Domain) closeWhatNotInList(fNames []string) {
 }
 
 func (d *Domain) reCalcVisibleFiles() {
-	d._visibleFiles = calcVisibleFiles(d.dirtyFiles, d.indexList, false)
+	d._visibleFiles = newDomainVisible(d.name, calcVisibleFiles(d.dirtyFiles, d.indexList, false))
 	d.History.reCalcVisibleFiles()
 }
 
@@ -851,7 +865,7 @@ func (d *Domain) collectFilesStats() (datsz, idxsz, files uint64) {
 }
 
 func (d *Domain) BeginFilesRo() *DomainRoTx {
-	files := d._visibleFiles
+	files := d._visibleFiles.files
 	for i := 0; i < len(files); i++ {
 		if !files[i].src.frozen {
 			files[i].src.refcount.Add(1)
@@ -913,10 +927,13 @@ func (d *Domain) collate(ctx context.Context, step, txFrom, txTo uint64, roTx kv
 	}()
 
 	coll.valuesPath = d.kvFilePath(step, step+1)
-	if coll.valuesComp, err = seg.NewCompressor(ctx, d.filenameBase+".domain.collate", coll.valuesPath, d.dirs.Tmp, seg.MinPatternScore, d.compressWorkers, log.LvlTrace, d.logger); err != nil {
+	if coll.valuesComp, err = seg.NewCompressor(ctx, d.filenameBase+".domain.collate", coll.valuesPath, d.dirs.Tmp, d.compressCfg, log.LvlTrace, d.logger); err != nil {
 		return Collation{}, fmt.Errorf("create %s values compressor: %w", d.filenameBase, err)
 	}
-	comp := NewArchiveWriter(coll.valuesComp, d.compression)
+
+	// Don't use `d.compress` config in collate. Because collat+build must be very-very fast (to keep db small).
+	// Compress files only in `merge` which ok to be slow.
+	comp := NewArchiveWriter(coll.valuesComp, CompressNone)
 
 	stepBytes := make([]byte, 8)
 	binary.BigEndian.PutUint64(stepBytes, ^step)
@@ -936,9 +953,9 @@ func (d *Domain) collate(ctx context.Context, step, txFrom, txTo uint64, roTx kv
 	}
 	defer valsCursor.Close()
 
-	kvs := []struct {
+	kvs := make([]struct {
 		k, v []byte
-	}{}
+	}, 0, 128)
 
 	var stepInDB []byte
 	for k, v, err := valsCursor.First(); k != nil; {
@@ -959,7 +976,7 @@ func (d *Domain) collate(ctx context.Context, step, txFrom, txTo uint64, roTx kv
 		if d.largeVals {
 			kvs = append(kvs, struct {
 				k, v []byte
-			}{common.Copy(k[:len(k)-8]), common.Copy(v)})
+			}{k[:len(k)-8], v})
 			k, v, err = valsCursor.Next()
 		} else {
 			if err = comp.AddWord(k); err != nil {
@@ -1391,10 +1408,11 @@ func (dt *DomainRoTx) getFromFiles(filekey []byte) (v []byte, found bool, fileSt
 	}
 
 	hi, lo := dt.ht.iit.hashKey(filekey)
-	if dt.name != kv.CommitmentDomain {
-		if dt.getFromFileCache == nil {
-			dt.getFromFileCache = NewDomainGetFromFileCache(false)
-		}
+
+	if dt.getFromFileCache == nil {
+		dt.getFromFileCache = dt.d._visibleFiles.newGetFromFileCache()
+	}
+	if dt.getFromFileCache != nil {
 		cv, ok := dt.getFromFileCache.Get(u128{hi: hi, lo: lo})
 		if ok {
 			return cv.v, true, dt.files[cv.lvl].startTxNum, dt.files[cv.lvl].endTxNum, nil
@@ -1435,7 +1453,7 @@ func (dt *DomainRoTx) getFromFiles(filekey []byte) (v []byte, found bool, fileSt
 			fmt.Printf("GetLatest(%s, %x) -> found in file %s\n", dt.name.String(), filekey, dt.files[i].src.decompressor.FileName())
 		}
 
-		if dt.name != kv.CommitmentDomain {
+		if dt.getFromFileCache != nil {
 			dt.getFromFileCache.Add(u128{hi: hi, lo: lo}, domainGetFromFileCacheItem{lvl: uint8(i), v: v})
 		}
 		return v, true, dt.files[i].startTxNum, dt.files[i].endTxNum, nil
@@ -1444,7 +1462,7 @@ func (dt *DomainRoTx) getFromFiles(filekey []byte) (v []byte, found bool, fileSt
 		fmt.Printf("GetLatest(%s, %x) -> not found in %d files\n", dt.name.String(), filekey, len(dt.files))
 	}
 
-	if dt.name != kv.CommitmentDomain {
+	if dt.getFromFileCache != nil {
 		dt.getFromFileCache.Add(u128{hi: hi, lo: lo}, domainGetFromFileCacheItem{lvl: 0, v: nil})
 	}
 	return nil, false, 0, 0, nil
@@ -1500,7 +1518,7 @@ func (dt *DomainRoTx) Close() {
 	}
 	dt.ht.Close()
 
-	dt.getFromFileCache.LogStats(dt.name)
+	dt.d._visibleFiles.returnGetFromFileCache(dt.getFromFileCache)
 }
 
 func (dt *DomainRoTx) statelessGetter(i int) ArchiveGetter {
