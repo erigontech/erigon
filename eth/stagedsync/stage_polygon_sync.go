@@ -267,31 +267,57 @@ func UnwindEvents(tx kv.RwTx, unwindPoint uint64) error {
 	if err != nil {
 		return err
 	}
-
 	defer cursor.Close()
+
 	var blockNumBuf [8]byte
 	binary.BigEndian.PutUint64(blockNumBuf[:], unwindPoint+1)
-	k, eventId, err := cursor.Seek(blockNumBuf[:])
+
+	kOriginal, _, err := cursor.Seek(blockNumBuf[:]) // TODO: find better name
 	if err != nil {
 		return err
 	}
-	if k != nil {
-		eventCursor, err := tx.RwCursor(kv.BorEvents)
+
+	k, prevLastIDBytes, err := cursor.Prev() // get last event ID of previous block
+	if err != nil {
+		return err
+	}
+
+	// we are unwinding beyond the first entry, delete the database
+	if k == nil || prevLastIDBytes == nil {
+		err = tx.ClearBucket(kv.BorEventNums)
 		if err != nil {
 			return err
 		}
-		defer eventCursor.Close()
-		for eventId, _, err = eventCursor.Seek(eventId); err == nil && eventId != nil; eventId, _, err = eventCursor.Next() {
-			if err = eventCursor.DeleteCurrent(); err != nil {
-				return err
-			}
-		}
+
+		err = tx.ClearBucket(kv.BorEvents)
 		if err != nil {
+			return err
+		}
+
+		return nil
+	}
+
+	prevLastID := binary.BigEndian.Uint64(prevLastIDBytes)
+
+	var eventId []byte
+	binary.BigEndian.PutUint64(eventId[:], prevLastID+1)
+
+	eventCursor, err := tx.RwCursor(kv.BorEvents)
+	if err != nil {
+		return err
+	}
+	defer eventCursor.Close()
+
+	for eventId, _, err = eventCursor.Seek(eventId); err == nil && eventId != nil; eventId, _, err = eventCursor.Next() {
+		if err = eventCursor.DeleteCurrent(); err != nil {
 			return err
 		}
 	}
+	if err != nil {
+		return err
+	}
 
-	for ; err == nil && k != nil; k, _, err = cursor.Next() {
+	for ; err == nil && kOriginal != nil; kOriginal, _, err = cursor.Next() {
 		if err = cursor.DeleteCurrent(); err != nil {
 			return err
 		}

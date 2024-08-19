@@ -98,11 +98,12 @@ var (
 				defer logEvery.Stop()
 
 				from := hexutility.EncodeTs(blockFrom)
-				var first bool = true
+				var first = true
 				var prevBlockNum uint64
 				var startEventId uint64
 				var lastEventId uint64
 
+				// TODO: update usage
 				if err := kv.BigChunks(db, kv.BorEventNums, from, func(tx kv.Tx, blockNumBytes, eventIdBytes []byte) (bool, error) {
 					blockNum := binary.BigEndian.Uint64(blockNumBytes)
 					if first {

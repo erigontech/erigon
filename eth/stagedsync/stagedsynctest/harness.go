@@ -345,6 +345,7 @@ func (h *Harness) ReadStateSyncEventsFromDB(ctx context.Context) (eventIDs []uin
 }
 
 func (h *Harness) ReadFirstStateSyncEventNumPerBlockFromDB(ctx context.Context) (nums map[uint64]uint64, err error) {
+	// TODO: update to send last event and update test
 	nums = map[uint64]uint64{}
 	err = h.chainDataDB.View(ctx, func(tx kv.Tx) error {
 		eventNumsIter, err := tx.Range(kv.BorEventNums, nil, nil)
