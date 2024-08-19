@@ -86,9 +86,10 @@ type InvertedIndex struct {
 
 	noFsync bool // fsync is enabled by default, but tests can manually disable
 
-	compression     FileCompression
-	compressWorkers int
-	indexList       idxList
+	compression FileCompression
+
+	compressCfg seg.Cfg
+	indexList   idxList
 }
 
 type iiCfg struct {
@@ -106,6 +107,8 @@ func NewInvertedIndex(cfg iiCfg, aggregationStep uint64, filenameBase, indexKeys
 	if cfg.dirs.SnapDomain == "" {
 		panic("empty `dirs` varialbe")
 	}
+	compressCfg := seg.DefaultCfg
+	compressCfg.Workers = 1
 	ii := InvertedIndex{
 		iiCfg:           cfg,
 		dirtyFiles:      btree2.NewBTreeGOptions[*filesItem](filesItemLess, btree2.Options{Degree: 128, NoLocks: false}),
@@ -113,7 +116,7 @@ func NewInvertedIndex(cfg iiCfg, aggregationStep uint64, filenameBase, indexKeys
 		filenameBase:    filenameBase,
 		indexKeysTable:  indexKeysTable,
 		indexTable:      indexTable,
-		compressWorkers: 1,
+		compressCfg:     compressCfg,
 		integrityCheck:  integrityCheck,
 		logger:          logger,
 		compression:     CompressNone,
@@ -1473,7 +1476,7 @@ func (ii *InvertedIndex) collate(ctx context.Context, step uint64, roTx kv.Tx) (
 		}
 	}()
 
-	comp, err := seg.NewCompressor(ctx, "collate idx "+ii.filenameBase, coll.iiPath, ii.dirs.Tmp, seg.MinPatternScore, ii.compressWorkers, log.LvlTrace, ii.logger)
+	comp, err := seg.NewCompressor(ctx, "collate idx "+ii.filenameBase, coll.iiPath, ii.dirs.Tmp, ii.compressCfg, log.LvlTrace, ii.logger)
 	if err != nil {
 		return InvertedIndexCollation{}, fmt.Errorf("create %s compressor: %w", ii.filenameBase, err)
 	}

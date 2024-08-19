@@ -205,13 +205,14 @@ func TestBlockReaderLastFrozenEventIdReturnsZeroWhenAllSegmentsDoNotHaveIdx(t *t
 }
 
 func createTestBorEventSegmentFile(t *testing.T, from, to, eventId uint64, dir string, logger log.Logger) {
+	compressCfg := seg.DefaultCfg
+	compressCfg.MinPatternScore = 100
 	compressor, err := seg.NewCompressor(
 		context.Background(),
 		"test",
 		filepath.Join(dir, snaptype.SegmentFileName(1, from, to, borsnaptype.Enums.BorEvents)),
 		dir,
-		100,
-		1,
+		compressCfg,
 		log.LvlDebug,
 		logger,
 	)

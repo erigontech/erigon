@@ -34,12 +34,51 @@ import (
 	"time"
 
 	"github.com/c2h5oh/datasize"
-
 	"github.com/erigontech/erigon-lib/common"
 	dir2 "github.com/erigontech/erigon-lib/common/dir"
 	"github.com/erigontech/erigon-lib/etl"
 	"github.com/erigontech/erigon-lib/log/v3"
 )
+
+type Cfg struct {
+	MinPatternScore uint64
+
+	// minPatternLen is minimum length of pattern we consider to be included into the dictionary
+	MinPatternLen, MaxPatternLen int
+
+	// maxDictPatterns is the maximum number of patterns allowed in the initial (not reduced dictionary)
+	// Large values increase memory consumption of dictionary reduction phase
+	/*
+	   Experiments on 74Gb uncompressed file (bsc 012500-013000-transactions.seg)
+	   Ram - needed just to open compressed file (Huff tables, etc...)
+	   dec_speed - loop with `word, _ = g.Next(word[:0])`
+	   skip_speed - loop with `g.Skip()`
+	   | DictSize | Ram  | file_size | dec_speed | skip_speed |
+	   | -------- | ---- | --------- | --------- | ---------- |
+	   | 1M       | 70Mb | 35871Mb   | 4m06s     | 1m58s      |
+	   | 512K     | 42Mb | 36496Mb   | 3m49s     | 1m51s      |
+	   | 256K     | 21Mb | 37100Mb   | 3m44s     | 1m48s      |
+	   | 128K     | 11Mb | 37782Mb   | 3m25s     | 1m44s      |
+	   | 64K      | 7Mb  | 38597Mb   | 3m16s     | 1m34s      |
+	   | 32K      | 5Mb  | 39626Mb   | 3m0s      | 1m29s      |
+
+	*/
+	MaxDictPattens int
+
+	// samplingFactor - skip superstrings if `superstringNumber % samplingFactor != 0`
+	SamplingFactor uint64
+
+	Workers int
+}
+
+var DefaultCfg = Cfg{
+	MinPatternScore: 1024,
+	MinPatternLen:   5,
+	MaxPatternLen:   128,
+	SamplingFactor:  4,
+	MaxDictPattens:  64 * 1024,
+	Workers:         1,
+}
 
 // Compressor is the main operating type for performing per-word compression
 // After creating a compression, one needs to add superstrings to it, using `AddWord` function
@@ -50,6 +89,7 @@ import (
 // After that, `Compress` function needs to be called to perform the compression
 // and eventually create output file
 type Compressor struct {
+	Cfg
 	ctx              context.Context
 	wg               *sync.WaitGroup
 	superstrings     chan []byte
@@ -67,7 +107,6 @@ type Compressor struct {
 	wordsCount       uint64
 	superstringCount uint64
 	superstringLen   int
-	workers          int
 	Ratio            CompressionRatio
 	lvl              log.Lvl
 	trace            bool
@@ -75,7 +114,8 @@ type Compressor struct {
 	noFsync          bool // fsync is enabled by default, but tests can manually disable
 }
 
-func NewCompressor(ctx context.Context, logPrefix, outputFile, tmpDir string, minPatternScore uint64, workers int, lvl log.Lvl, logger log.Logger) (*Compressor, error) {
+func NewCompressor(ctx context.Context, logPrefix, outputFile, tmpDir string, cfg Cfg, lvl log.Lvl, logger log.Logger) (*Compressor, error) {
+	workers := cfg.Workers
 	dir2.MustExist(tmpDir)
 	dir, fileName := filepath.Split(outputFile)
 
@@ -99,16 +139,16 @@ func NewCompressor(ctx context.Context, logPrefix, outputFile, tmpDir string, mi
 		collector.LogLvl(lvl)
 
 		suffixCollectors[i] = collector
-		go extractPatternsInSuperstrings(ctx, superstrings, collector, minPatternScore, wg, logger)
+		go extractPatternsInSuperstrings(ctx, superstrings, collector, cfg, wg, logger)
 	}
 
 	return &Compressor{
+		Cfg:              cfg,
 		uncompressedFile: uncompressedFile,
 		tmpOutFilePath:   tmpOutFilePath,
 		outputFile:       outputFile,
 		tmpDir:           tmpDir,
 		logPrefix:        logPrefix,
-		workers:          workers,
 		ctx:              ctx,
 		superstrings:     superstrings,
 		suffixCollectors: suffixCollectors,
@@ -127,7 +167,7 @@ func (c *Compressor) Close() {
 }
 
 func (c *Compressor) SetTrace(trace bool) { c.trace = trace }
-func (c *Compressor) Workers() int        { return c.workers }
+func (c *Compressor) WorkersAmount() int  { return c.Workers }
 
 func (c *Compressor) Count() int { return int(c.wordsCount) }
 
@@ -141,7 +181,7 @@ func (c *Compressor) AddWord(word []byte) error {
 	c.wordsCount++
 	l := 2*len(word) + 2
 	if c.superstringLen+l > superstringLimit {
-		if c.superstringCount%samplingFactor == 0 {
+		if c.superstringCount%c.SamplingFactor == 0 {
 			c.superstrings <- c.superstring
 		}
 		c.superstringCount++
@@ -150,7 +190,7 @@ func (c *Compressor) AddWord(word []byte) error {
 	}
 	c.superstringLen += l
 
-	if c.superstringCount%samplingFactor == 0 {
+	if c.superstringCount%c.SamplingFactor == 0 {
 		for _, a := range word {
 			c.superstring = append(c.superstring, 1, a)
 		}
@@ -185,10 +225,10 @@ func (c *Compressor) Compress() error {
 	c.wg.Wait()
 
 	if c.lvl < log.LvlTrace {
-		c.logger.Log(c.lvl, fmt.Sprintf("[%s] BuildDict start", c.logPrefix), "workers", c.workers)
+		c.logger.Log(c.lvl, fmt.Sprintf("[%s] BuildDict start", c.logPrefix), "workers", c.Workers)
 	}
 	t := time.Now()
-	db, err := DictionaryBuilderFromCollectors(c.ctx, compressLogPrefix, c.tmpDir, c.suffixCollectors, c.lvl, c.logger)
+	db, err := DictionaryBuilderFromCollectors(c.ctx, c.MaxDictPattens, c.logPrefix, c.tmpDir, c.suffixCollectors, c.lvl, c.logger)
 	if err != nil {
 
 		return err
@@ -210,7 +250,7 @@ func (c *Compressor) Compress() error {
 	}
 	defer cf.Close()
 	t = time.Now()
-	if err := compressWithPatternCandidates(c.ctx, c.trace, c.logPrefix, c.tmpOutFilePath, cf, c.uncompressedFile, c.workers, db, c.lvl, c.logger); err != nil {
+	if err := compressWithPatternCandidates(c.ctx, c.trace, c.Cfg, c.logPrefix, c.tmpOutFilePath, cf, c.uncompressedFile, db, c.lvl, c.logger); err != nil {
 		return err
 	}
 	if err = c.fsync(cf); err != nil {
@@ -255,35 +295,6 @@ func (c *Compressor) fsync(f *os.File) error {
 // CompressorSequential allocates 7 bytes for each uint of superstringLimit. For example,
 // superstingLimit 16m will result in 112Mb being allocated for various arrays
 const superstringLimit = 16 * 1024 * 1024
-
-// minPatternLen is minimum length of pattern we consider to be included into the dictionary
-const minPatternLen = 5
-const maxPatternLen = 128
-
-// maxDictPatterns is the maximum number of patterns allowed in the initial (not reduced dictionary)
-// Large values increase memory consumption of dictionary reduction phase
-/*
-Experiments on 74Gb uncompressed file (bsc 012500-013000-transactions.seg)
-Ram - needed just to open compressed file (Huff tables, etc...)
-dec_speed - loop with `word, _ = g.Next(word[:0])`
-skip_speed - loop with `g.Skip()`
-| DictSize | Ram  | file_size | dec_speed | skip_speed |
-| -------- | ---- | --------- | --------- | ---------- |
-| 1M       | 70Mb | 35871Mb   | 4m06s     | 1m58s      |
-| 512K     | 42Mb | 36496Mb   | 3m49s     | 1m51s      |
-| 256K     | 21Mb | 37100Mb   | 3m44s     | 1m48s      |
-| 128K     | 11Mb | 37782Mb   | 3m25s     | 1m44s      |
-| 64K      | 7Mb  | 38597Mb   | 3m16s     | 1m34s      |
-| 32K      | 5Mb  | 39626Mb   | 3m0s      | 1m29s      |
-
-*/
-const maxDictPatterns = 64 * 1024
-
-// samplingFactor - skip superstrings if `superstringNumber % samplingFactor != 0`
-const samplingFactor = 4
-
-// nolint
-const compressLogPrefix = "compress"
 
 type DictionaryBuilder struct {
 	lastWord      []byte

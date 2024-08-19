@@ -454,7 +454,8 @@ func (dt *DomainRoTx) mergeFiles(ctx context.Context, domainFiles, indexFiles, h
 
 	fromStep, toStep := r.values.from/r.aggStep, r.values.to/r.aggStep
 	kvFilePath := dt.d.kvFilePath(fromStep, toStep)
-	kvFile, err := seg.NewCompressor(ctx, "merge domain "+dt.d.filenameBase, kvFilePath, dt.d.dirs.Tmp, seg.MinPatternScore, dt.d.compressWorkers, log.LvlTrace, dt.d.logger)
+
+	kvFile, err := seg.NewCompressor(ctx, "merge domain "+dt.d.filenameBase, kvFilePath, dt.d.dirs.Tmp, dt.d.compressCfg, log.LvlTrace, dt.d.logger)
 	if err != nil {
 		return nil, nil, nil, fmt.Errorf("merge %s compressor: %w", dt.d.filenameBase, err)
 	}
@@ -622,7 +623,7 @@ func (iit *InvertedIndexRoTx) mergeFiles(ctx context.Context, files []*filesItem
 	fromStep, toStep := startTxNum/iit.ii.aggregationStep, endTxNum/iit.ii.aggregationStep
 
 	datPath := iit.ii.efFilePath(fromStep, toStep)
-	if comp, err = seg.NewCompressor(ctx, "merge idx "+iit.ii.filenameBase, datPath, iit.ii.dirs.Tmp, seg.MinPatternScore, iit.ii.compressWorkers, log.LvlTrace, iit.ii.logger); err != nil {
+	if comp, err = seg.NewCompressor(ctx, "merge idx "+iit.ii.filenameBase, datPath, iit.ii.dirs.Tmp, iit.ii.compressCfg, log.LvlTrace, iit.ii.logger); err != nil {
 		return nil, fmt.Errorf("merge %s inverted index compressor: %w", iit.ii.filenameBase, err)
 	}
 	if iit.ii.noFsync {
@@ -779,7 +780,7 @@ func (ht *HistoryRoTx) mergeFiles(ctx context.Context, indexFiles, historyFiles 
 		fromStep, toStep := r.history.from/ht.h.aggregationStep, r.history.to/ht.h.aggregationStep
 		datPath := ht.h.vFilePath(fromStep, toStep)
 		idxPath := ht.h.vAccessorFilePath(fromStep, toStep)
-		if comp, err = seg.NewCompressor(ctx, "merge hist "+ht.h.filenameBase, datPath, ht.h.dirs.Tmp, seg.MinPatternScore, ht.h.compressWorkers, log.LvlTrace, ht.h.logger); err != nil {
+		if comp, err = seg.NewCompressor(ctx, "merge hist "+ht.h.filenameBase, datPath, ht.h.dirs.Tmp, ht.h.compressCfg, log.LvlTrace, ht.h.logger); err != nil {
 			return nil, nil, fmt.Errorf("merge %s history compressor: %w", ht.h.filenameBase, err)
 		}
 		compr := NewArchiveWriter(comp, ht.h.compression)
@@ -996,7 +997,7 @@ func (tx *AppendableRoTx) mergeFiles(ctx context.Context, files []*filesItem, st
 	fromStep, toStep := startTxNum/tx.ap.aggregationStep, endTxNum/tx.ap.aggregationStep
 
 	datPath := tx.ap.apFilePath(fromStep, toStep)
-	if comp, err = seg.NewCompressor(ctx, "merge fk "+tx.ap.filenameBase, datPath, tx.ap.cfg.Dirs.Tmp, seg.MinPatternScore, tx.ap.compressWorkers, log.LvlTrace, tx.ap.logger); err != nil {
+	if comp, err = seg.NewCompressor(ctx, "merge fk "+tx.ap.filenameBase, datPath, tx.ap.cfg.Dirs.Tmp, tx.ap.compressCfg, log.LvlTrace, tx.ap.logger); err != nil {
 		return nil, fmt.Errorf("merge %s inverted index compressor: %w", tx.ap.filenameBase, err)
 	}
 	defer comp.Close()
