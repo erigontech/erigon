@@ -1138,6 +1138,7 @@ func doCompress(cliCtx *cli.Context) error {
 	compressCfg.MinPatternLen = 20
 	compressCfg.MaxPatternLen = 32
 	compressCfg.SamplingFactor = 1
+	//compressCfg.MaxDictPattens = 64 * 1024 * 2
 	c, err := seg.NewCompressor(ctx, "compress", f, dirs.Tmp, compressCfg, log.LvlInfo, logger)
 	if err != nil {
 		return err
