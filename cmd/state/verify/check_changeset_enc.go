@@ -21,10 +21,11 @@ import (
 	"context"
 	"encoding/binary"
 	"fmt"
-	"github.com/erigontech/erigon-lib/common"
 	"runtime"
 	"sync/atomic"
 	"time"
+
+	"github.com/erigontech/erigon-lib/common"
 
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/kv/mdbx"

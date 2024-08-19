@@ -163,7 +163,7 @@ func ExecBlockV3(s *StageState, u Unwinder, txc wrap.TxContainer, toBlock uint64
 
 var ErrTooDeepUnwind = errors.New("too deep unwind")
 
-func unwindExec3(u *UnwindState, s *StageState, txc wrap.TxContainer, ctx context.Context, accumulator *shards.Accumulator, logger log.Logger) (err error) {
+func unwindExec3(u *UnwindState, s *StageState, txc wrap.TxContainer, ctx context.Context, br services.FullBlockReader, accumulator *shards.Accumulator, logger log.Logger) (err error) {
 	var domains *libstate.SharedDomains
 	if txc.Doms == nil {
 		domains, err = libstate.NewSharedDomains(txc.Tx, logger)
@@ -180,10 +180,11 @@ func unwindExec3(u *UnwindState, s *StageState, txc wrap.TxContainer, ctx contex
 	if err != nil {
 		return err
 	}
+
 	t := time.Now()
 	var changeset *[kv.DomainLen][]libstate.DomainEntryDiff
 	for currentBlock := u.CurrentBlockNumber; currentBlock > u.UnwindPoint; currentBlock-- {
-		currentHash, err := rawdb.ReadCanonicalHash(txc.Tx, currentBlock)
+		currentHash, err := br.CanonicalHash(ctx, txc.Tx, currentBlock)
 		if err != nil {
 			return err
 		}
@@ -365,7 +366,7 @@ func unwindExecutionStage(u *UnwindState, s *StageState, txc wrap.TxContainer, c
 		accumulator.StartChange(u.UnwindPoint, hash, txs, true)
 	}
 
-	return unwindExec3(u, s, txc, ctx, accumulator, logger)
+	return unwindExec3(u, s, txc, ctx, cfg.blockReader, accumulator, logger)
 }
 
 func PruneExecutionStage(s *PruneState, tx kv.RwTx, cfg ExecuteBlockCfg, ctx context.Context) (err error) {
@@ -397,7 +398,12 @@ func PruneExecutionStage(s *PruneState, tx kv.RwTx, cfg ExecuteBlockCfg, ctx con
 	// on chain-tip:
 	//  - can prune only between blocks (without blocking blocks processing)
 	//  - need also leave some time to prune blocks
-	pruneTimeout := 500 * time.Millisecond
+	//  - need keep "fsync" time of db fast
+	// Means - the best is:
+	//  - stop prune when `tx.SpaceDirty()` is big
+	//  - and set ~500ms timeout
+	// because on slow disks - prune is slower. but for now - let's tune for nvme first, and add `tx.SpaceDirty()` check later https://github.com/erigontech/erigon/issues/11635
+	pruneTimeout := 250 * time.Millisecond
 	if s.CurrentSyncCycle.IsInitialCycle {
 		pruneTimeout = 12 * time.Hour
 	}
