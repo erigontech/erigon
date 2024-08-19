@@ -151,10 +151,12 @@ func (s *executionClientStore) insertBlocks(ctx context.Context, blocks []*types
 	return nil
 }
 
-// bridgeReplayInitialBlockIfNeeded is only needed on node startup to replay
-// the last processed block by the Bridge. The Bridge needs that to set internal
-// state which it cannot fully infer on its own since it has no access to the
-// block information via the execution engine. This is a conscious design decision.
+// bridgeReplayInitialBlockIfNeeded is only needed on node startup and just before
+// the first call to ProcessNewBlocks.
+//
+// The Bridge needs that to set internal state which it cannot fully infer on its own
+// since it has no access to the block information via the execution engine. This is
+// a conscious design decision.
 //
 // The bridge store is in control of determining when and which block replay is needed.
 func (s *executionClientStore) bridgeReplayInitialBlockIfNeeded(ctx context.Context) error {
