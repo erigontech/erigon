@@ -940,14 +940,13 @@ func DictionaryBuilderFromCollectors(ctx context.Context, cfg Cfg, logPrefix, tm
 	if err := dictAggregator.finish(); err != nil {
 		return nil, err
 	}
-	runtime.GC()
-
-	dbg.ReadMemStats(&m)
-	logger.Info("Before dict2", "alloc", common.ByteCount(m.Alloc), "sys", common.ByteCount(m.Sys))
-
 	// We need `maxDictPatterns` words with highest score - but input is not sorted by score (it's sorted by `word`)
 	// so, then let's just put to heap more items and then shrink at `finish()`
 	db := &DictionaryBuilder{softLimit: cfg.DictReducerSoftLimit}
+	runtime.GC()
+	dbg.ReadMemStats(&m)
+	logger.Info("Before dict2", "alloc", common.ByteCount(m.Alloc), "sys", common.ByteCount(m.Sys))
+
 	if err := dictCollector.Load(nil, "", db.loadFunc, etl.TransformArgs{Quit: ctx.Done()}); err != nil {
 		return nil, err
 	}

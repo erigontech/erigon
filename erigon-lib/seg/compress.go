@@ -231,12 +231,12 @@ func (c *Compressor) Compress() error {
 	close(c.superstrings)
 	runtime.GC()
 	c.wg.Wait()
+	runtime.GC()
 	fmt.Printf("produced: %d\n", produced)
 
 	if c.lvl < log.LvlTrace {
 		c.logger.Log(c.lvl, fmt.Sprintf("[%s] BuildDict start", c.logPrefix), "workers", c.Workers)
 	}
-	runtime.GC()
 	t := time.Now()
 	db, err := DictionaryBuilderFromCollectors(c.ctx, c.Cfg, c.logPrefix, c.tmpDir, c.suffixCollectors, c.lvl, c.logger)
 	if err != nil {
