@@ -69,6 +69,8 @@ type Cfg struct {
 	SamplingFactor uint64
 
 	Workers int
+
+	LogPrefix string
 }
 
 var DefaultCfg = Cfg{
@@ -78,6 +80,7 @@ var DefaultCfg = Cfg{
 	SamplingFactor:  4,
 	MaxDictPattens:  64 * 1024,
 	Workers:         1,
+	LogPrefix:       "compress",
 }
 
 // Compressor is the main operating type for performing per-word compression
@@ -95,7 +98,6 @@ type Compressor struct {
 	superstrings     chan []byte
 	uncompressedFile *RawWordsFile
 	tmpDir           string // temporary directory to use for ETL when building dictionary
-	logPrefix        string
 	outputFile       string // File where to output the dictionary and compressed data
 	tmpOutFilePath   string // File where to output the dictionary and compressed data
 	suffixCollectors []*etl.Collector
@@ -114,8 +116,9 @@ type Compressor struct {
 	noFsync          bool // fsync is enabled by default, but tests can manually disable
 }
 
-func NewCompressor(ctx context.Context, logPrefix, outputFile, tmpDir string, cfg Cfg, lvl log.Lvl, logger log.Logger) (*Compressor, error) {
+func NewCompressor(ctx context.Context, outputFile, tmpDir string, cfg Cfg, lvl log.Lvl, logger log.Logger) (*Compressor, error) {
 	workers := cfg.Workers
+	logPrefix := cfg.LogPrefix
 	dir2.MustExist(tmpDir)
 	dir, fileName := filepath.Split(outputFile)
 
@@ -148,7 +151,6 @@ func NewCompressor(ctx context.Context, logPrefix, outputFile, tmpDir string, cf
 		tmpOutFilePath:   tmpOutFilePath,
 		outputFile:       outputFile,
 		tmpDir:           tmpDir,
-		logPrefix:        logPrefix,
 		ctx:              ctx,
 		superstrings:     superstrings,
 		suffixCollectors: suffixCollectors,
@@ -225,10 +227,10 @@ func (c *Compressor) Compress() error {
 	c.wg.Wait()
 
 	if c.lvl < log.LvlTrace {
-		c.logger.Log(c.lvl, fmt.Sprintf("[%s] BuildDict start", c.logPrefix), "workers", c.Workers)
+		c.logger.Log(c.lvl, fmt.Sprintf("[%s] BuildDict start", c.LogPrefix), "workers", c.Workers)
 	}
 	t := time.Now()
-	db, err := DictionaryBuilderFromCollectors(c.ctx, c.MaxDictPattens, compressLogPrefix, c.tmpDir, c.suffixCollectors, c.lvl, c.logger)
+	db, err := DictionaryBuilderFromCollectors(c.ctx, c.MaxDictPattens, c.Cfg.LogPrefix, c.tmpDir, c.suffixCollectors, c.lvl, c.logger)
 	if err != nil {
 
 		return err
@@ -241,7 +243,7 @@ func (c *Compressor) Compress() error {
 	}
 	defer os.Remove(c.tmpOutFilePath)
 	if c.lvl < log.LvlTrace {
-		c.logger.Log(c.lvl, fmt.Sprintf("[%s] BuildDict", c.logPrefix), "took", time.Since(t))
+		c.logger.Log(c.lvl, fmt.Sprintf("[%s] BuildDict", c.LogPrefix), "took", time.Since(t))
 	}
 
 	cf, err := os.Create(c.tmpOutFilePath)
@@ -250,7 +252,7 @@ func (c *Compressor) Compress() error {
 	}
 	defer cf.Close()
 	t = time.Now()
-	if err := compressWithPatternCandidates(c.ctx, c.trace, c.Cfg, c.logPrefix, c.tmpOutFilePath, cf, c.uncompressedFile, db, c.lvl, c.logger); err != nil {
+	if err := compressWithPatternCandidates(c.ctx, c.trace, c.Cfg, c.LogPrefix, c.tmpOutFilePath, cf, c.uncompressedFile, db, c.lvl, c.logger); err != nil {
 		return err
 	}
 	if err = c.fsync(cf); err != nil {
@@ -270,7 +272,7 @@ func (c *Compressor) Compress() error {
 
 	_, fName := filepath.Split(c.outputFile)
 	if c.lvl < log.LvlTrace {
-		c.logger.Log(c.lvl, fmt.Sprintf("[%s] Compress", c.logPrefix), "took", time.Since(t), "ratio", c.Ratio, "file", fName)
+		c.logger.Log(c.lvl, fmt.Sprintf("[%s] Compress", c.LogPrefix), "took", time.Since(t), "ratio", c.Ratio, "file", fName)
 	}
 	return nil
 }
@@ -295,9 +297,6 @@ func (c *Compressor) fsync(f *os.File) error {
 // CompressorSequential allocates 7 bytes for each uint of superstringLimit. For example,
 // superstingLimit 16m will result in 112Mb being allocated for various arrays
 const superstringLimit = 16 * 1024 * 1024
-
-// nolint
-const compressLogPrefix = "compress"
 
 type DictionaryBuilder struct {
 	lastWord      []byte
