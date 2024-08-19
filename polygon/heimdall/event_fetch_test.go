@@ -2,6 +2,7 @@ package heimdall
 
 import (
 	"context"
+	"os"
 	"testing"
 	"time"
 
@@ -9,6 +10,12 @@ import (
 )
 
 func TestOver50EventBlockFetch(t *testing.T) {
+	if _, ok := os.LookupEnv("ENABLE_TEST_OVER_50_EVENT_BLOCK_FETCH"); !ok {
+		// this test is intended only for manual runs, since it takes a long time to finish,
+		// and it uses an externally hosted service
+		return
+	}
+
 	heimdallClient := NewHeimdallClient("https://heimdall-api.polygon.technology/", log.New())
 
 	// block      := 48077376

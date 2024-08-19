@@ -57,6 +57,7 @@ type Store interface {
 
 	LatestEventID(ctx context.Context) (uint64, error)
 	LastProcessedEventID(ctx context.Context) (uint64, error)
+	LastProcessedBlockNum(ctx context.Context) (uint64, error)
 	PutEventTxnToBlockNum(ctx context.Context, txMap map[libcommon.Hash]uint64) error
 	EventTxnToBlockNum(ctx context.Context, borTxHash libcommon.Hash) (uint64, bool, error)
 	LastEventIDWithinWindow(ctx context.Context, fromID uint64, toTime time.Time) (uint64, error)
@@ -143,6 +144,35 @@ func LastProcessedEventID(tx kv.Tx) (uint64, error) {
 	}
 
 	return binary.BigEndian.Uint64(v), err
+}
+
+func (s *MdbxStore) LastProcessedBlockNum(ctx context.Context) (uint64, error) {
+	tx, err := s.db.BeginRo(ctx)
+	if err != nil {
+		return 0, err
+	}
+
+	defer tx.Rollback()
+	return LastProcessedBlockNum(tx)
+}
+
+func LastProcessedBlockNum(tx kv.Tx) (uint64, error) {
+	cursor, err := tx.Cursor(kv.BorEventNums)
+	if err != nil {
+		return 0, err
+	}
+
+	defer cursor.Close()
+	k, _, err := cursor.Last()
+	if err != nil {
+		return 0, err
+	}
+
+	if len(k) == 0 {
+		return 0, nil
+	}
+
+	return binary.BigEndian.Uint64(k), nil
 }
 
 func (s *MdbxStore) PutEventTxnToBlockNum(ctx context.Context, txMap map[libcommon.Hash]uint64) error {
@@ -339,7 +369,10 @@ func PutBlockNumToEventID(tx kv.RwTx, blockNumToEventId map[uint64]uint64) error
 // BlockEventIDRange returns the state sync event ID range for the given block number.
 // ErrEventIDRangeNotFound is thrown if the block number is not found in the database.
 // If the given block number is the last in the database, then the second uint64 (representing end ID) is 0.
-func (s *MdbxStore) BlockEventIDRange(ctx context.Context, blockNum uint64) (start uint64, end uint64, err error) {
+// The range is [start, end).
+func (s *MdbxStore) BlockEventIDRange(ctx context.Context, blockNum uint64) (uint64, uint64, error) {
+	var start, end uint64
+
 	tx, err := s.db.BeginRo(ctx)
 	if err != nil {
 		return start, end, err

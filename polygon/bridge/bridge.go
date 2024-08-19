@@ -95,7 +95,13 @@ func (b *Bridge) Run(ctx context.Context) error {
 		return err
 	}
 
+	lastProcessedBlockNum, err := b.store.LastProcessedBlockNum(ctx)
+	if err != nil {
+		return err
+	}
+
 	b.lastProcessedEventID.Store(lastProcessedEventID)
+	b.lastProcessedBlockNum.Store(lastProcessedBlockNum)
 
 	// start syncing
 	b.logger.Debug(
@@ -141,7 +147,7 @@ func (b *Bridge) Run(ctx context.Context) error {
 		lastFetchedEventTime := lastFetchedEvent.Time.Unix()
 		if lastFetchedEventTime < 0 {
 			// be defensive when casting from int64 to uint64
-			panic(errors.New("lastFetchedEventTime cannot be negative"))
+			return errors.New("lastFetchedEventTime cannot be negative")
 		}
 
 		b.lastFetchedEventTime.Store(uint64(lastFetchedEventTime))
@@ -159,6 +165,28 @@ func (b *Bridge) Run(ctx context.Context) error {
 
 func (b *Bridge) Close() {
 	b.store.Close()
+}
+
+func (b *Bridge) InitialBlockReplayNeeded(ctx context.Context) (uint64, bool, error) {
+	if b.lastProcessedBlockTime.Load() > 0 {
+		return 0, false, nil
+	}
+
+	lastProcessedBlockNum, err := b.store.LastProcessedBlockNum(ctx)
+	if err != nil {
+		return 0, false, err
+	}
+
+	if b.borConfig.IsIndore(lastProcessedBlockNum) {
+		// we do not need to keep track of lastProcessedBlockTime if we are past indore
+		return 0, false, nil
+	}
+
+	return lastProcessedBlockNum, true, nil
+}
+
+func (b *Bridge) ReplayInitialBlock(block *types.Header) {
+	b.lastProcessedBlockTime.Store(block.Time)
 }
 
 // ProcessNewBlocks iterates through all blocks and constructs a map from block number to sync events
@@ -252,13 +280,13 @@ func (b *Bridge) Events(ctx context.Context, blockNum uint64) ([]*types.Message,
 	}
 
 	if end == 0 { // exception for tip processing
-		end = b.lastProcessedEventID.Load()
+		end = b.lastProcessedEventID.Load() + 1
 	}
 
-	eventsRaw := make([]*types.Message, 0, end-start+1)
+	eventsRaw := make([]*types.Message, 0, end-start)
 
 	// get events from DB
-	events, err := b.store.Events(ctx, start+1, end+1)
+	events, err := b.store.Events(ctx, start, end)
 	if err != nil {
 		return nil, err
 	}

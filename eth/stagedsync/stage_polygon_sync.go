@@ -1111,6 +1111,24 @@ func (s polygonSyncStageBridgeStore) LastProcessedEventID(ctx context.Context) (
 	return r.id, nil
 }
 
+func (s polygonSyncStageBridgeStore) LastProcessedBlockNum(ctx context.Context) (uint64, error) {
+	type response struct {
+		blockNum uint64
+		err      error
+	}
+
+	r, err := awaitTxAction(ctx, s.txActionStream, func(tx kv.RwTx, responseStream chan<- response) error {
+		blockNum, err := bridge.LastProcessedBlockNum(tx)
+		responseStream <- response{blockNum: blockNum, err: err}
+		return nil
+	})
+	if err != nil {
+		return 0, err
+	}
+
+	return r.blockNum, r.err
+}
+
 func (s polygonSyncStageBridgeStore) LastEventIDWithinWindow(ctx context.Context, fromID uint64, toTime time.Time) (uint64, error) {
 	type response struct {
 		id  uint64
@@ -1156,7 +1174,7 @@ func (s polygonSyncStageBridgeStore) Events(context.Context, uint64, uint64) ([]
 	panic("polygonSyncStageBridgeStore.Events not supported")
 }
 
-func (s polygonSyncStageBridgeStore) BlockEventIDRange(context.Context, uint64) (start uint64, end uint64, err error) {
+func (s polygonSyncStageBridgeStore) BlockEventIDRange(context.Context, uint64) (uint64, uint64, error) {
 	// used for accessing events in execution
 	// astrid stage integration intends to use the bridge only for scrapping
 	// not for reading which remains the same in execution (via BlockReader)
@@ -1201,6 +1219,24 @@ type polygonSyncStageExecutionEngine struct {
 	stageState       *StageState
 	unwinder         Unwinder
 	cachedForkChoice *types.Header
+}
+
+func (e *polygonSyncStageExecutionEngine) GetHeader(ctx context.Context, blockNum uint64) (*types.Header, error) {
+	type response struct {
+		header *types.Header
+		err    error
+	}
+
+	r, err := awaitTxAction(ctx, e.txActionStream, func(tx kv.RwTx, responseStream chan<- response) error {
+		header, err := e.blockReader.HeaderByNumber(ctx, tx, blockNum)
+		responseStream <- response{header: header, err: err}
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	return r.header, r.err
 }
 
 func (e *polygonSyncStageExecutionEngine) InsertBlocks(ctx context.Context, blocks []*types.Block) error {

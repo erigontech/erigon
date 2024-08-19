@@ -23,8 +23,10 @@ func setup(t *testing.T) (*heimdall.MockHeimdallClient, *Bridge) {
 	ctrl := gomock.NewController(t)
 	logger := testlog.Logger(t, log.LvlDebug)
 	borConfig := borcfg.BorConfig{
-		Sprint:                map[string]uint64{"0": 2},
-		StateReceiverContract: "0x0000000000000000000000000000000000001001",
+		Sprint:                     map[string]uint64{"0": 2},
+		StateReceiverContract:      "0x0000000000000000000000000000000000001001",
+		IndoreBlock:                big.NewInt(0),
+		StateSyncConfirmationDelay: map[string]uint64{"0": 1},
 	}
 
 	heimdallClient := heimdall.NewMockHeimdallClient(ctrl)
@@ -110,15 +112,22 @@ func TestBridge(t *testing.T) {
 		}
 	}(b)
 
-	err := b.Synchronize(ctx, 100) // hack to wait for b.ready
+	err := b.store.Prepare(ctx)
 	require.NoError(t, err)
 
-	blocks := getBlocks(t, 5)
+	replayBlockNum, replayNeeded, err := b.InitialBlockReplayNeeded(ctx)
+	require.NoError(t, err)
+	require.False(t, replayNeeded)
+	require.Equal(t, uint64(0), replayBlockNum)
 
+	blocks := getBlocks(t, 5)
 	err = b.ProcessNewBlocks(ctx, blocks)
 	require.NoError(t, err)
 
-	res, err := b.Events(ctx, 4)
+	err = b.Synchronize(ctx, 4)
+	require.NoError(t, err)
+
+	res, err := b.Events(ctx, 2)
 	require.NoError(t, err)
 
 	event1Data, err := event1.MarshallBytes()
@@ -130,6 +139,13 @@ func TestBridge(t *testing.T) {
 	require.Equal(t, 2, len(res))               // have first two events
 	require.Equal(t, event1Data, res[0].Data()) // check data fields
 	require.Equal(t, event2Data, res[1].Data())
+
+	res, err = b.Events(ctx, 4)
+	require.NoError(t, err)
+	require.Len(t, res, 1)
+	event3Data, err := event3.MarshallBytes()
+	require.NoError(t, err)
+	require.Equal(t, event3Data, res[0].Data())
 
 	// get non-sprint block
 	res, err = b.Events(ctx, 1)
@@ -208,20 +224,20 @@ func TestBridge_Unwind(t *testing.T) {
 		}
 	}(b)
 
-	err := b.Synchronize(ctx, 100) // hack to wait for b.ready
-	require.NoError(t, err)
-
 	blocks := getBlocks(t, 8)
-
-	err = b.ProcessNewBlocks(ctx, blocks)
+	err := b.ProcessNewBlocks(ctx, blocks)
 	require.NoError(t, err)
 
-	event1Data, err := event1.MarshallBytes()
+	err = b.Synchronize(ctx, 7)
+	require.NoError(t, err)
+
+	event3Data, err := event3.MarshallBytes()
 	require.NoError(t, err)
 
 	res, err := b.Events(ctx, 4)
-	require.Equal(t, event1Data, res[0].Data())
 	require.NoError(t, err)
+	require.Len(t, res, 1)
+	require.Equal(t, event3Data, res[0].Data())
 
 	err = b.Unwind(ctx, 3)
 	require.NoError(t, err)
@@ -232,4 +248,24 @@ func TestBridge_Unwind(t *testing.T) {
 
 	cancel()
 	wg.Wait()
+}
+
+func TestBridge_InitialBlockReplayNeeded_BeforeIndore(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+
+	_, b := setup(t)
+	b.borConfig.IndoreBlock = big.NewInt(1_000_000)
+
+	err := b.store.Prepare(ctx)
+	require.NoError(t, err)
+
+	replayBlockNum, replayNeeded, err := b.InitialBlockReplayNeeded(ctx)
+	require.NoError(t, err)
+	require.True(t, replayNeeded)
+	require.Equal(t, uint64(0), replayBlockNum)
+
+	genesis := &types.Header{Time: 1}
+	b.ReplayInitialBlock(genesis)
+	require.Equal(t, uint64(1), b.lastProcessedBlockTime.Load())
 }

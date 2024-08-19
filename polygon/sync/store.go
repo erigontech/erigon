@@ -22,8 +22,9 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/erigontech/erigon-lib/log/v3"
+	"golang.org/x/sync/errgroup"
 
+	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/core/types"
 )
 
@@ -37,26 +38,34 @@ type Store interface {
 	Run(ctx context.Context) error
 }
 
+type executionStore interface {
+	InsertBlocks(ctx context.Context, blocks []*types.Block) error
+	GetHeader(ctx context.Context, blockNum uint64) (*types.Header, error)
+}
+
 type bridgeStore interface {
 	ProcessNewBlocks(ctx context.Context, blocks []*types.Block) error
+	InitialBlockReplayNeeded(ctx context.Context) (uint64, bool, error)
+	ReplayInitialBlock(block *types.Header)
 }
 
 type executionClientStore struct {
-	logger    log.Logger
-	execution ExecutionClient
-	bridge    bridgeStore
-	queue     chan []*types.Block
+	logger         log.Logger
+	executionStore executionStore
+	bridgeStore    bridgeStore
+	queue          chan []*types.Block
 	// tasksCount includes both tasks pending in the queue and a task that was taken and hasn't finished yet
 	tasksCount atomic.Int32
 	// tasksDoneSignal gets sent a value when tasksCount becomes 0
 	tasksDoneSignal chan bool
+	blockReplayDone bool
 }
 
-func NewStore(logger log.Logger, execution ExecutionClient, bridge bridgeStore) Store {
+func NewStore(logger log.Logger, executionStore executionStore, bridgeStore bridgeStore) Store {
 	return &executionClientStore{
 		logger:          logger,
-		execution:       execution,
-		bridge:          bridge,
+		executionStore:  executionStore,
+		bridgeStore:     bridgeStore,
 		queue:           make(chan []*types.Block),
 		tasksDoneSignal: make(chan bool, 1),
 	}
@@ -115,17 +124,58 @@ func (s *executionClientStore) insertBlocks(ctx context.Context, blocks []*types
 	defer s.tasksCount.Add(-1)
 
 	insertStartTime := time.Now()
-	err := s.execution.InsertBlocks(ctx, blocks)
-	if err != nil {
-		return err
+
+	if !s.blockReplayDone {
+		if err := s.bridgeReplayInitialBlockIfNeeded(ctx); err != nil {
+			return err
+		}
+
+		s.blockReplayDone = true
 	}
 
-	err = s.bridge.ProcessNewBlocks(ctx, blocks)
-	if err != nil {
+	var eg errgroup.Group
+
+	eg.Go(func() error {
+		return s.executionStore.InsertBlocks(ctx, blocks)
+	})
+
+	eg.Go(func() error {
+		return s.bridgeStore.ProcessNewBlocks(ctx, blocks)
+	})
+
+	if err := eg.Wait(); err != nil {
 		return err
 	}
 
 	s.logger.Debug(syncLogPrefix("inserted blocks"), "len", len(blocks), "duration", time.Since(insertStartTime))
+	return nil
+}
 
+// bridgeReplayInitialBlockIfNeeded is only needed on node startup to replay
+// the last processed block by the Bridge. The Bridge needs that to set internal
+// state which it cannot fully infer on its own since it has no access to the
+// block information via the execution engine. This is a conscious design decision.
+//
+// The bridge store is in control of determining when and which block replay is needed.
+func (s *executionClientStore) bridgeReplayInitialBlockIfNeeded(ctx context.Context) error {
+	blockNum, replayNeeded, err := s.bridgeStore.InitialBlockReplayNeeded(ctx)
+	if err != nil {
+		return err
+	}
+	if !replayNeeded {
+		return nil
+	}
+
+	header, err := s.executionStore.GetHeader(ctx, blockNum)
+	if err != nil {
+		return err
+	}
+
+	s.logger.Debug(
+		syncLogPrefix("replaying initial block for bridgeStore store"),
+		"blockNum", header.Number.Uint64(),
+	)
+
+	s.bridgeStore.ReplayInitialBlock(header)
 	return nil
 }
