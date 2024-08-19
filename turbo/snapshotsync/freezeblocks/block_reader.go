@@ -1193,7 +1193,7 @@ func (r *BlockReader) IntegrityTxnID(failFast bool) error {
 				log.Error(err.Error())
 			}
 		}
-		expectedFirstTxnID = b.BaseTxnID.LastSystemTx(uint32(sn.Count())) + 1 // +1 to move to first baseTxId of next block aka its first system tx
+		expectedFirstTxnID = expectedFirstTxnID + uint64(sn.Count())
 	}
 	return nil
 }
@@ -1507,18 +1507,17 @@ func (r *BlockReader) EventsByIdFromSnapshot(from uint64, to time.Time, limit in
 			}
 			if event.Time.After(to) {
 				maxTime = true
-				goto BREAK
+				return result, maxTime, nil
 			}
 
 			result = append(result, &event)
 
 			if len(result) == limit {
-				goto BREAK
+				return result, maxTime, nil
 			}
 		}
 	}
 
-BREAK:
 	return result, maxTime, nil
 }
 
@@ -1564,8 +1563,11 @@ func (r *BlockReader) LastFrozenEventId() uint64 {
 	var lastSegment *Segment
 	for i := len(segments) - 1; i >= 0; i-- {
 		if segments[i].Index() != nil {
-			lastSegment = segments[i]
-			break
+			gg := segments[i].MakeGetter()
+			if gg.HasNext() {
+				lastSegment = segments[i]
+				break
+			}
 		}
 	}
 	if lastSegment == nil {

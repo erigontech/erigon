@@ -99,10 +99,12 @@ type Domain struct {
 	restrictSubsetFileDeletions bool
 	largeVals                   bool
 
-	valsTable   string // key -> inverted_step + values (Dupsort)
-	stats       DomainStats
+	compressCfg seg.Cfg
 	compression FileCompression
-	indexList   idxList
+
+	valsTable string // key -> inverted_step + values (Dupsort)
+	stats     DomainStats
+	indexList idxList
 }
 
 type domainCfg struct {
@@ -124,12 +126,18 @@ func NewDomain(cfg domainCfg, aggregationStep uint64, name kv.Domain, valsTable,
 	if cfg.hist.iiCfg.dirs.SnapDomain == "" {
 		panic("empty `dirs` variable")
 	}
+
+	compressCfg := seg.DefaultCfg
+	compressCfg.Workers = 1
 	d := &Domain{
-		name:        name,
-		valsTable:   valsTable,
+		name:      name,
+		valsTable: valsTable,
+
+		compressCfg: compressCfg,
 		compression: cfg.compress,
-		dirtyFiles:  btree2.NewBTreeGOptions[*filesItem](filesItemLess, btree2.Options{Degree: 128, NoLocks: false}),
-		stats:       DomainStats{FilesQueries: &atomic.Uint64{}, TotalQueries: &atomic.Uint64{}},
+
+		dirtyFiles: btree2.NewBTreeGOptions[*filesItem](filesItemLess, btree2.Options{Degree: 128, NoLocks: false}),
+		stats:      DomainStats{FilesQueries: &atomic.Uint64{}, TotalQueries: &atomic.Uint64{}},
 
 		indexList:                   withBTree | withExistence,
 		replaceKeysInValues:         cfg.replaceKeysInValues,         // for commitment domain only
@@ -920,10 +928,13 @@ func (d *Domain) collate(ctx context.Context, step, txFrom, txTo uint64, roTx kv
 	}()
 
 	coll.valuesPath = d.kvFilePath(step, step+1)
-	if coll.valuesComp, err = seg.NewCompressor(ctx, d.filenameBase+".domain.collate", coll.valuesPath, d.dirs.Tmp, seg.MinPatternScore, d.compressWorkers, log.LvlTrace, d.logger); err != nil {
+	if coll.valuesComp, err = seg.NewCompressor(ctx, d.filenameBase+".domain.collate", coll.valuesPath, d.dirs.Tmp, d.compressCfg, log.LvlTrace, d.logger); err != nil {
 		return Collation{}, fmt.Errorf("create %s values compressor: %w", d.filenameBase, err)
 	}
-	comp := NewArchiveWriter(coll.valuesComp, d.compression)
+
+	// Don't use `d.compress` config in collate. Because collat+build must be very-very fast (to keep db small).
+	// Compress files only in `merge` which ok to be slow.
+	comp := NewArchiveWriter(coll.valuesComp, CompressNone)
 
 	stepBytes := make([]byte, 8)
 	binary.BigEndian.PutUint64(stepBytes, ^step)
@@ -943,9 +954,9 @@ func (d *Domain) collate(ctx context.Context, step, txFrom, txTo uint64, roTx kv
 	}
 	defer valsCursor.Close()
 
-	kvs := []struct {
+	kvs := make([]struct {
 		k, v []byte
-	}{}
+	}, 0, 128)
 
 	var stepInDB []byte
 	for k, v, err := valsCursor.First(); k != nil; {
@@ -966,7 +977,7 @@ func (d *Domain) collate(ctx context.Context, step, txFrom, txTo uint64, roTx kv
 		if d.largeVals {
 			kvs = append(kvs, struct {
 				k, v []byte
-			}{common.Copy(k[:len(k)-8]), common.Copy(v)})
+			}{k[:len(k)-8], v})
 			k, v, err = valsCursor.Next()
 		} else {
 			if err = comp.AddWord(k); err != nil {

@@ -229,6 +229,7 @@ func (st *StateTransition) buyGas(gasBailout bool) error {
 	}
 	st.gasRemaining += st.msg.Gas()
 	st.initialGas = st.msg.Gas()
+	st.evm.BlobFee = blobGasVal
 
 	if subBalance {
 		st.state.SubBalance(st.msg.From(), gasVal, tracing.BalanceDecreaseGasBuy)
