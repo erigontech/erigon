@@ -242,7 +242,7 @@ func (b *Bridge) Unwind(ctx context.Context, blockNum uint64) error {
 
 // Events returns all sync events at blockNum
 func (b *Bridge) Events(ctx context.Context, blockNum uint64) ([]*types.Message, error) {
-	start, end, err := b.store.EventIDRange(ctx, blockNum)
+	start, end, err := b.store.BlockEventIDRange(ctx, blockNum)
 	if err != nil {
 		if errors.Is(err, ErrEventIDRangeNotFound) {
 			return nil, nil

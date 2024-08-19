@@ -63,7 +63,7 @@ type Store interface {
 	PutEvents(ctx context.Context, events []*heimdall.EventRecordWithTime) error
 	Events(ctx context.Context, start, end uint64) ([][]byte, error)
 	PutBlockNumToEventID(ctx context.Context, blockNumToEventId map[uint64]uint64) error
-	EventIDRange(ctx context.Context, blockNum uint64) (uint64, uint64, error)
+	BlockEventIDRange(ctx context.Context, blockNum uint64) (start uint64, end uint64, err error)
 	PruneEventIDs(ctx context.Context, blockNum uint64) error
 }
 
@@ -336,12 +336,10 @@ func PutBlockNumToEventID(tx kv.RwTx, blockNumToEventId map[uint64]uint64) error
 	return nil
 }
 
-// EventIDRange returns the state sync event ID range for the given block number.
+// BlockEventIDRange returns the state sync event ID range for the given block number.
 // ErrEventIDRangeNotFound is thrown if the block number is not found in the database.
 // If the given block number is the last in the database, then the second uint64 (representing end ID) is 0.
-func (s *MdbxStore) EventIDRange(ctx context.Context, blockNum uint64) (uint64, uint64, error) {
-	var start, end uint64
-
+func (s *MdbxStore) BlockEventIDRange(ctx context.Context, blockNum uint64) (start uint64, end uint64, err error) {
 	tx, err := s.db.BeginRo(ctx)
 	if err != nil {
 		return start, end, err
