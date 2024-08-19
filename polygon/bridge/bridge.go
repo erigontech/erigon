@@ -110,6 +110,9 @@ func (b *Bridge) Run(ctx context.Context) error {
 		"lastProcessedEventID", lastProcessedEventID,
 	)
 
+	logTicker := time.NewTicker(30 * time.Second)
+	defer logTicker.Stop()
+
 	for {
 		select {
 		case <-ctx.Done():
@@ -152,12 +155,16 @@ func (b *Bridge) Run(ctx context.Context) error {
 
 		b.lastFetchedEventTime.Store(uint64(lastFetchedEventTime))
 
-		b.logger.Debug(
-			bridgeLogPrefix("fetched new events"),
-			"count", len(events),
-			"lastFetchedEventID", lastFetchedEventID,
-			"lastFetchedEventTime", lastFetchedEvent.Time.Format(time.RFC3339),
-		)
+		select {
+		case <-logTicker.C:
+			b.logger.Debug(
+				bridgeLogPrefix("fetched new events"),
+				"count", len(events),
+				"lastFetchedEventID", lastFetchedEventID,
+				"lastFetchedEventTime", lastFetchedEvent.Time.Format(time.RFC3339),
+			)
+		default: // continue
+		}
 
 		b.signalFetchedEvents()
 	}
