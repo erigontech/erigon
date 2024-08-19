@@ -268,7 +268,7 @@ func compressWithPatternCandidates(ctx context.Context, trace bool, cfg Cfg, log
 			c.Close()
 		}
 	}()
-	out := make(chan *CompressionWord, 1024)
+	out := make(chan *CompressionWord, 10_000)
 	var compressionQueue CompressionQueue
 	heap.Init(&compressionQueue)
 	queueLimit := 128 * 1024
@@ -874,7 +874,13 @@ func extractPatternsInSuperstrings(ctx context.Context, superstringCh chan []byt
 				}
 
 				if !isNew && !prevSkipped {
-					break
+					//
+					//dictKey = dictKey[:l]
+					//for s := 0; s < l; s++ {
+					//	dictKey[s] = superstring[(int(filtered[i])+s)*2+1]
+					//}
+					//fmt.Printf("break: %s\n", dictKey)
+					//break
 				}
 
 				window := i - j + 2
@@ -905,12 +911,13 @@ func extractPatternsInSuperstrings(ctx context.Context, superstringCh chan []byt
 					dictKey[s] = superstring[(int(filtered[i])+s)*2+1]
 				}
 				produced++
+				//fmt.Printf("a: %s, %d\n", dictKey, score)
 				binary.BigEndian.PutUint64(dictVal, score)
 				if err := dictCollector.Collect(dictKey, dictVal); err != nil {
 					logger.Error("extractPatternsInSuperstrings", "collect", err)
 				}
 				prevSkipped = false //nolint
-				break
+				//break
 			}
 		}
 	}
