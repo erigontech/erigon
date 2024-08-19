@@ -137,7 +137,7 @@ func SpawnMiningCreateBlockStage(s *StageState, tx kv.RwTx, cfg MiningCreateBloc
 	}
 	chain := ChainReader{Cfg: cfg.chainConfig, Db: tx, BlockReader: cfg.blockReader, Logger: logger}
 	var GetBlocksFromHash = func(hash libcommon.Hash, n int) (blocks []*types.Block) {
-		number := rawdb.ReadHeaderNumber(tx, hash)
+		number, _ := cfg.blockReader.HeaderNumber(context.Background(), tx, hash)
 		if number == nil {
 			return nil
 		}
