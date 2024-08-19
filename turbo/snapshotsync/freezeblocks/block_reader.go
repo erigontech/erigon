@@ -1844,20 +1844,17 @@ func ReadTxNumFuncFromBlockReader(ctx context.Context, r services.FullBlockReade
 		if err != nil {
 			return
 		}
-		if ok {
-			fmt.Println("Henlo3", blockNum)
+		if ok || r == nil {
 			return
 		}
 		b, err := r.CanonicalBodyForStorage(ctx, tx, blockNum)
 		if err != nil {
 			return 0, false, err
 		}
-		fmt.Println("Henlo2", b, blockNum)
 		if b == nil {
 			return 0, false, nil
 		}
 		ret := b.BaseTxnID.U64() + uint64(b.TxCount) - 1
-		fmt.Println("Henlo", ret)
 		return ret, true, nil
 	}
 
