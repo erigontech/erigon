@@ -147,8 +147,6 @@ func (ap *attestationProducer) acquireBeaconStateAtSlot(baseState *state.Caching
 }
 
 func (ap *attestationProducer) ProduceAndCacheAttestationData(baseState *state.CachingBeaconState, slot uint64, committeeIndex uint64) (solid.AttestationData, error) {
-	begin := time.Now()
-	defer log.Info("[AttestationProducer] ProduceAndCacheAttestationData", "slot", slot, "committeeIndex", committeeIndex, "duration", time.Since(begin))
 	epoch := slot / ap.beaconCfg.SlotsPerEpoch
 	baseStateBlockRoot, err := baseState.BlockRoot()
 	if err != nil {
