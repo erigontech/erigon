@@ -146,7 +146,7 @@ func (a *Antiquary) Loop() error {
 	}
 	defer tx.Rollback()
 	// read the last beacon snapshots
-	from := a.sn.BlocksSegsAvailable()
+	from := a.sn.BlocksSegsAvailable() + 1
 	logInterval := time.NewTicker(30 * time.Second)
 	if err := a.sn.ReopenFolder(); err != nil {
 		return err
@@ -230,7 +230,7 @@ func (a *Antiquary) Loop() error {
 			)
 			if err := a.mainDB.View(a.ctx, func(roTx kv.Tx) error {
 				// read the last beacon snapshots
-				from = a.sn.BlocksSegsAvailable()
+				from = a.sn.BlocksSegsAvailable() + 1
 				// read the finalized head
 				to, err = beacon_indicies.ReadHighestFinalized(roTx)
 				if err != nil {
@@ -278,6 +278,9 @@ func (a *Antiquary) antiquate(from, to uint64) error {
 	if err := freezeblocks.DumpBeaconBlocks(a.ctx, a.mainDB, from, to, a.sn.Salt, a.dirs, 1, log.LvlDebug, a.logger); err != nil {
 		return err
 	}
+	if err := a.sn.ReopenFolder(); err != nil {
+		return err
+	}
 	tx, err := a.mainDB.BeginRw(a.ctx)
 	if err != nil {
 		return err
@@ -288,10 +291,6 @@ func (a *Antiquary) antiquate(from, to uint64) error {
 		return err
 	}
 	if err := tx.Commit(); err != nil {
-		return err
-	}
-
-	if err := a.sn.ReopenFolder(); err != nil {
 		return err
 	}
 
