@@ -1555,10 +1555,8 @@ func (ac *AggregatorRoTx) SqueezeCommitmentFiles() error {
 			originalPath := cf.decompressor.FilePath()
 			squeezedTmpPath := originalPath + sqExt + ".tmp"
 
-			compressCfg := seg.DefaultCfg
-			compressCfg.Workers = commitment.d.compressCfg.Workers
 			squeezedCompr, err := seg.NewCompressor(context.Background(), "squeeze", squeezedTmpPath, ac.a.dirs.Tmp,
-				compressCfg, log.LvlTrace, commitment.d.logger)
+				commitment.d.compressCfg, log.LvlTrace, commitment.d.logger)
 
 			if err != nil {
 				return err
