@@ -242,12 +242,12 @@ func (c *Compressor) Compress() error {
 
 		return err
 	}
-	if c.trace {
-		_, fileName := filepath.Split(c.outputFile)
-		if err := PersistDictionary(filepath.Join(c.tmpDir, fileName)+".dictionary.txt", db); err != nil {
-			return err
-		}
+	//if c.trace {
+	_, fileName := filepath.Split(c.outputFile)
+	if err := PersistDictionary(filepath.Join(c.tmpDir, fileName)+".dictionary.txt", db); err != nil {
+		return err
 	}
+	//}
 	defer os.Remove(c.tmpOutFilePath)
 	if c.lvl < log.LvlTrace {
 		c.logger.Log(c.lvl, fmt.Sprintf("[%s] BuildDict", c.logPrefix), "took", time.Since(t))
