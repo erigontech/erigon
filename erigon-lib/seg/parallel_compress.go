@@ -916,9 +916,10 @@ func extractPatternsInSuperstrings(ctx context.Context, superstringCh chan []byt
 	}
 }
 
-func DictionaryBuilderFromCollectors(ctx context.Context, maxDictPatterns int, logPrefix, tmpDir string, collectors []*etl.Collector, lvl log.Lvl, logger log.Logger) (*DictionaryBuilder, error) {
-	dictCollector := etl.NewCollector(logPrefix+"_collectDict", tmpDir, etl.NewSortableBuffer(etl.BufferOptimalSize), logger)
+func DictionaryBuilderFromCollectors(ctx context.Context, cfg Cfg, logPrefix, tmpDir string, collectors []*etl.Collector, lvl log.Lvl, logger log.Logger) (*DictionaryBuilder, error) {
+	dictCollector := etl.NewCollector(logPrefix+"_collectDict", tmpDir, etl.NewSortableBuffer(etl.BufferOptimalSize/4), logger)
 	defer dictCollector.Close()
+	dictCollector.SortAndFlushInBackground(true)
 	dictCollector.LogLvl(lvl)
 
 	dictAggregator := &DictAggregator{collector: dictCollector, dist: map[int]int{}}
@@ -931,11 +932,13 @@ func DictionaryBuilderFromCollectors(ctx context.Context, maxDictPatterns int, l
 	if err := dictAggregator.finish(); err != nil {
 		return nil, err
 	}
-	db := &DictionaryBuilder{limit: maxDictPatterns} // Only collect 1m words with highest scores
+	// We need `maxDictPatterns` words with highest score - but input is not sorted by score (it's sorted by `word`)
+	// so, then let's just put to heap more items and then shrink at `finish()`
+	db := &DictionaryBuilder{softLimit: cfg.DictReducerSoftLimit}
 	if err := dictCollector.Load(nil, "", db.loadFunc, etl.TransformArgs{Quit: ctx.Done()}); err != nil {
 		return nil, err
 	}
-	db.finish()
+	db.finish(cfg.MaxDictPatterns)
 
 	db.Sort()
 	return db, nil
