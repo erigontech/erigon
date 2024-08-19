@@ -296,8 +296,6 @@ func (c *Compressor) fsync(f *os.File) error {
 // superstingLimit 16m will result in 112Mb being allocated for various arrays
 const superstringLimit = 16 * 1024 * 1024
 
-const maxPatternLen = 32
-
 // nolint
 const compressLogPrefix = "compress"
 
