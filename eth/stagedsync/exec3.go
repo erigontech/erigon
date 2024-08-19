@@ -113,8 +113,8 @@ func (p *Progress) Log(suffix string, rs *state.StateV3, in *state.QueueWithRetr
 		suffix += " Commit every block"
 	}
 
-	gasSec := gas / uint64(interval.Seconds())
-	txSec := (txCount - p.prevTxCount) / uint64(interval.Seconds())
+	gasSec := uint64(float64(gas) / interval.Seconds())
+	txSec := uint64(float64(txCount-p.prevTxCount) / interval.Seconds())
 
 	p.logger.Info(fmt.Sprintf("[%s]"+suffix, p.logPrefix),
 		"blk", outputBlockNum,
@@ -477,7 +477,6 @@ func ExecV3(ctx context.Context,
 				case <-logEvery.C:
 					stepsInDB = rawdbhelpers.IdxStepsCountV3(tx)
 					progress.Log("", rs, in, rws, rs.DoneCount(), logGas, inputBlockNum.Load(), outputBlockNum.GetValueUint64(), outputTxNum.Load(), mxExecRepeats.GetValueUint64(), stepsInDB, shouldGenerateChangesets)
-					logGas = 0
 					if agg.HasBackgroundFilesBuild() {
 						logger.Info(fmt.Sprintf("[%s] Background files build", execStage.LogPrefix()), "progress", agg.BackgroundProgress())
 					}
