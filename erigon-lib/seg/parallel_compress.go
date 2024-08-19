@@ -402,7 +402,7 @@ func compressWithPatternCandidates(ctx context.Context, trace bool, cfg Cfg, log
 		select {
 		case <-logEvery.C:
 			if lvl < log.LvlTrace {
-				logger.Log(lvl, fmt.Sprintf("[%s] Replacement preprocessing", logPrefix), "processed", fmt.Sprintf("%.2f%%", 100*float64(outCount)/float64(totalWords)), "ch", len(ch), "workers", cfg.Workers)
+				logger.Log(lvl, fmt.Sprintf("[%s] Replacement preprocessing", logPrefix), "processed", fmt.Sprintf("%.2f%%", 100*float64(outCount)/float64(totalWords)), "ch", len(ch), "queue", compressionQueue.Len(), "workers", cfg.Workers)
 			}
 		default:
 		}
