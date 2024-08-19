@@ -231,6 +231,7 @@ func (c *Compressor) Compress() error {
 	close(c.superstrings)
 	runtime.GC()
 	c.wg.Wait()
+	fmt.Printf("produced: %d\n", produced)
 
 	if c.lvl < log.LvlTrace {
 		c.logger.Log(c.lvl, fmt.Sprintf("[%s] BuildDict start", c.logPrefix), "workers", c.Workers)

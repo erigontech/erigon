@@ -907,6 +907,7 @@ func extractPatternsInSuperstrings(ctx context.Context, superstringCh chan []byt
 				for s := 0; s < l; s++ {
 					dictKey[s] = superstring[(int(filtered[i])+s)*2+1]
 				}
+				produced++
 				binary.BigEndian.PutUint64(dictVal, score)
 				if err := dictCollector.Collect(dictKey, dictVal); err != nil {
 					logger.Error("extractPatternsInSuperstrings", "collect", err)
@@ -918,6 +919,8 @@ func extractPatternsInSuperstrings(ctx context.Context, superstringCh chan []byt
 	}
 }
 
+var produced int
+
 func DictionaryBuilderFromCollectors(ctx context.Context, cfg Cfg, logPrefix, tmpDir string, collectors []*etl.Collector, lvl log.Lvl, logger log.Logger) (*DictionaryBuilder, error) {
 	dictCollector := etl.NewCollector(logPrefix+"_collectDict", tmpDir, etl.NewSortableBuffer(etl.BufferOptimalSize/4), logger)
 	defer dictCollector.Close()
@@ -926,12 +929,7 @@ func DictionaryBuilderFromCollectors(ctx context.Context, cfg Cfg, logPrefix, tm
 
 	var m runtime.MemStats
 	dbg.ReadMemStats(&m)
-	logger.Info("Before dict1", "alloc", common.ByteCount(m.Alloc), "sys", common.ByteCount(m.Sys))
-
-	runtime.GC()
-
-	dbg.ReadMemStats(&m)
-	logger.Info("Before dict2", "alloc", common.ByteCount(m.Alloc), "sys", common.ByteCount(m.Sys))
+	logger.Info("Before dict", "alloc", common.ByteCount(m.Alloc), "sys", common.ByteCount(m.Sys))
 	dictAggregator := &DictAggregator{collector: dictCollector, dist: map[int]int{}}
 	for _, collector := range collectors {
 		if err := collector.Load(nil, "", dictAggregator.aggLoadFunc, etl.TransformArgs{Quit: ctx.Done()}); err != nil {
@@ -945,7 +943,8 @@ func DictionaryBuilderFromCollectors(ctx context.Context, cfg Cfg, logPrefix, tm
 	runtime.GC()
 
 	dbg.ReadMemStats(&m)
-	logger.Info("Before dict3", "alloc", common.ByteCount(m.Alloc), "sys", common.ByteCount(m.Sys))
+	logger.Info("Before dict2", "alloc", common.ByteCount(m.Alloc), "sys", common.ByteCount(m.Sys))
+
 	// We need `maxDictPatterns` words with highest score - but input is not sorted by score (it's sorted by `word`)
 	// so, then let's just put to heap more items and then shrink at `finish()`
 	db := &DictionaryBuilder{softLimit: cfg.DictReducerSoftLimit}
