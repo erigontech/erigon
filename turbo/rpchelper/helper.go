@@ -151,11 +151,13 @@ func CreateStateReaderFromBlockNumber(ctx context.Context, tx kv.Tx, txNumsReade
 func CreateHistoryStateReader(tx kv.Tx, txNumsReader rawdbv3.TxNumsReader, blockNumber uint64, txnIndex int, chainName string) (state.StateReader, error) {
 	r := state.NewHistoryReaderV3()
 	r.SetTx(tx)
+	fmt.Println("X")
 	//r.SetTrace(true)
 	minTxNum, err := txNumsReader.Min(tx, blockNumber)
 	if err != nil {
 		return nil, err
 	}
+	fmt.Println("Y")
 	r.SetTxNum(uint64(int(minTxNum) + txnIndex + /* 1 system txNum in beginning of block */ 1))
 	return r, nil
 }
@@ -163,9 +165,9 @@ func CreateHistoryStateReader(tx kv.Tx, txNumsReader rawdbv3.TxNumsReader, block
 func NewLatestStateReader(tx kv.Tx) state.StateReader {
 	return state.NewReaderV3(tx.(kv.TemporalGetter))
 }
-func NewLatestStateWriter(txc wrap.TxContainer, txNumsReader rawdbv3.TxNumsReader, blockNum uint64) state.StateWriter {
+func NewLatestStateWriter(txc wrap.TxContainer, blockReader services.FullBlockReader, blockNum uint64) state.StateWriter {
 	domains := txc.Doms
-	minTxNum, err := txNumsReader.Min(domains.Tx(), blockNum)
+	minTxNum, err := rawdbv3.TxNums.WithCustomReadTxNumFunc(freezeblocks.ReadTxNumFuncFromBlockReader(context.Background(), blockReader)).Min(domains.Tx(), blockNum)
 	if err != nil {
 		panic(err)
 	}

@@ -343,7 +343,7 @@ func (r *RemoteBlockReader) Milestone(ctx context.Context, tx kv.Getter, spanId 
 func (r *RemoteBlockReader) LastCheckpointId(ctx context.Context, tx kv.Tx) (uint64, bool, error) {
 	return 0, false, errors.New("not implemented")
 }
-func (r *RemoteBlockReader) BodyForStorage(ctx context.Context, tx kv.Getter, hash common.Hash, blockNum uint64) (body *types.BodyForStorage, err error) {
+func (r *RemoteBlockReader) CanonicalBodyForStorage(ctx context.Context, tx kv.Getter, blockNum uint64) (body *types.BodyForStorage, err error) {
 	panic("not implemented")
 }
 func (r *RemoteBlockReader) Checkpoint(ctx context.Context, tx kv.Getter, spanId uint64) ([]byte, error) {
@@ -697,30 +697,20 @@ func (r *BlockReader) HasSenders(ctx context.Context, tx kv.Getter, hash common.
 func (r *BlockReader) BlockWithSenders(ctx context.Context, tx kv.Getter, hash common.Hash, blockHeight uint64) (block *types.Block, senders []common.Address, err error) {
 	return r.blockWithSenders(ctx, tx, hash, blockHeight, false)
 }
-func (r *BlockReader) BodyForStorage(ctx context.Context, tx kv.Getter, hash common.Hash, blockNum uint64) (body *types.BodyForStorage, err error) {
-	b, err := rawdb.ReadBodyForStorageByKey(tx, dbutils.BlockBodyKey(blockNum, hash))
-	if err != nil {
-		return nil, err
-	}
-	if b != nil {
-		return b, nil
-	}
-
+func (r *BlockReader) CanonicalBodyForStorage(ctx context.Context, tx kv.Getter, blockNum uint64) (body *types.BodyForStorage, err error) {
 	bodySeg, ok, release := r.sn.ViewSingleFile(coresnaptype.Bodies, blockNum)
 	if !ok {
-		return nil, nil
+		hash, err := r.CanonicalHash(ctx, tx, blockNum)
+		if err != nil {
+			return nil, err
+		}
+		return rawdb.ReadBodyForStorageByKey(tx, dbutils.BlockBodyKey(blockNum, hash))
 	}
 	defer release()
 
 	var buf []byte
-	b, _, err = r.bodyForStorageFromSnapshot(blockNum, bodySeg, buf)
-	if err != nil {
-		return nil, err
-	}
-	if b == nil {
-		return nil, nil
-	}
-	return b, nil
+	b, _, err := r.bodyForStorageFromSnapshot(blockNum, bodySeg, buf)
+	return b, err
 }
 func (r *BlockReader) blockWithSenders(ctx context.Context, tx kv.Getter, hash common.Hash, blockHeight uint64, forceCanonical bool) (block *types.Block, senders []common.Address, err error) {
 	var dbgPrefix string
@@ -1855,18 +1845,20 @@ func ReadTxNumFuncFromBlockReader(ctx context.Context, r services.FullBlockReade
 			return
 		}
 		if ok {
+			fmt.Println("Henlo3", blockNum)
 			return
 		}
-		hash, err := r.CanonicalHash(ctx, tx, blockNum)
+		b, err := r.CanonicalBodyForStorage(ctx, tx, blockNum)
 		if err != nil {
 			return 0, false, err
 		}
-		b, err := r.BodyForStorage(ctx, tx, hash, blockNum)
-		if err != nil {
-			return 0, false, err
+		fmt.Println("Henlo2", b, blockNum)
+		if b == nil {
+			return 0, false, nil
 		}
-
-		return b.BaseTxnID.U64() + uint64(b.TxCount) - 1, true, nil
+		ret := b.BaseTxnID.U64() + uint64(b.TxCount) - 1
+		fmt.Println("Henlo", ret)
+		return ret, true, nil
 	}
 
 }

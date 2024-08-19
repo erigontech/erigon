@@ -130,7 +130,7 @@ func TxnIdsOfCanonicalBlocks(tx kv.Tx, txNumsReader rawdbv3.TxNumsReader, fromTx
 		return nil, fmt.Errorf("fromTxNum <= toTxNum: %d, %d", fromTxNum, toTxNum)
 	}
 
-	it := &CanonicalTxnIds{tx: tx, fromTxNum: fromTxNum, toTxNum: toTxNum, orderAscend: asc, limit: limit, currentTxNum: -1}
+	it := &CanonicalTxnIds{tx: tx, txNumsReader: txNumsReader, fromTxNum: fromTxNum, toTxNum: toTxNum, orderAscend: asc, limit: limit, currentTxNum: -1}
 	if err := it.init(); err != nil {
 		it.Close() //it's responsibility of constructor (our) to close resource on error
 		return nil, err
