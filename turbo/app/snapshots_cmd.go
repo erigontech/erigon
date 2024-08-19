@@ -1128,9 +1128,9 @@ func doUncompress(cliCtx *cli.Context) error {
 	return nil
 }
 func doCompress(cliCtx *cli.Context) error {
-	var err error
-	var logger log.Logger
-	if logger, _, _, err = debug.Setup(cliCtx, true /* rootLogger */); err != nil {
+	dirs := datadir.New(cliCtx.String(utils.DataDirFlag.Name))
+	logger, _, _, err := debug.Setup(cliCtx, true /* rootLogger */)
+	if err != nil {
 		return err
 	}
 	ctx := cliCtx.Context
@@ -1140,8 +1140,7 @@ func doCompress(cliCtx *cli.Context) error {
 		return errors.New("expecting file path as a first argument")
 	}
 	f := args.First()
-	dirs := datadir.New(cliCtx.String(utils.DataDirFlag.Name))
-	logger.Info("file", "datadir", dirs.DataDir, "f", f)
+	logger.Info("[compress] file", "datadir", dirs.DataDir, "f", f)
 	compressCfg := seg.DefaultCfg
 	compressCfg.Workers = estimate.CompressSnapshot.Workers()
 	compressCfg.MinPatternLen = dbg.EnvInt("MinPatternLen", 5)
