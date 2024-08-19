@@ -1148,6 +1148,7 @@ func doCompress(cliCtx *cli.Context) error {
 	compressCfg.SamplingFactor = uint64(dbg.EnvInt("SamplingFactor", int(compressCfg.SamplingFactor)))
 	compressCfg.DictReducerSoftLimit = dbg.EnvInt("DictReducerSoftLimit", compressCfg.DictReducerSoftLimit)
 	compressCfg.MaxDictPatterns = dbg.EnvInt("MaxDictPatterns", compressCfg.MaxDictPatterns)
+	onlyKeys := dbg.EnvBool("onlyKeys", false)
 
 	logger.Info("[compress] file", "datadir", dirs.DataDir, "f", f, "cfg", compressCfg)
 	c, err := seg.NewCompressor(ctx, "compress", f, dirs.Tmp, compressCfg, log.LvlInfo, logger)
@@ -1158,6 +1159,7 @@ func doCompress(cliCtx *cli.Context) error {
 	r := bufio.NewReaderSize(os.Stdin, int(128*datasize.MB))
 	buf := make([]byte, 0, int(1*datasize.MB))
 	var l uint64
+	var i int
 	for l, err = binary.ReadUvarint(r); err == nil; l, err = binary.ReadUvarint(r) {
 		if cap(buf) < int(l) {
 			buf = make([]byte, l)
@@ -1167,9 +1169,16 @@ func doCompress(cliCtx *cli.Context) error {
 		if _, err = io.ReadFull(r, buf); err != nil {
 			return err
 		}
-		if err = c.AddWord(buf); err != nil {
-			return err
+		if onlyKeys && i%2 == 1 {
+			if err = c.AddUncompressedWord(buf); err != nil {
+				return err
+			}
+		} else {
+			if err = c.AddWord(buf); err != nil {
+				return err
+			}
 		}
+		i++
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
