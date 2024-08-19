@@ -250,7 +250,7 @@ func (c *Compressor) Compress() error {
 	}
 	defer cf.Close()
 	t = time.Now()
-	if err := compressWithPatternCandidates(c.ctx, c.trace, c.logPrefix, c.tmpOutFilePath, cf, c.uncompressedFile, c.Workers, db, c.lvl, c.logger); err != nil {
+	if err := compressWithPatternCandidates(c.ctx, c.trace, c.Cfg, c.logPrefix, c.tmpOutFilePath, cf, c.uncompressedFile, db, c.lvl, c.logger); err != nil {
 		return err
 	}
 	if err = c.fsync(cf); err != nil {
@@ -296,8 +296,6 @@ func (c *Compressor) fsync(f *os.File) error {
 // superstingLimit 16m will result in 112Mb being allocated for various arrays
 const superstringLimit = 16 * 1024 * 1024
 
-// minPatternLen is minimum length of pattern we consider to be included into the dictionary
-const minPatternLen = 20
 const maxPatternLen = 32
 
 // nolint

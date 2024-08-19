@@ -238,7 +238,7 @@ func (cq *CompressionQueue) Pop() interface{} {
 	return x
 }
 
-func compressWithPatternCandidates(ctx context.Context, trace bool, logPrefix, segmentFilePath string, cf *os.File, uncompressedFile *RawWordsFile, workers int, dictBuilder *DictionaryBuilder, lvl log.Lvl, logger log.Logger) error {
+func compressWithPatternCandidates(ctx context.Context, trace bool, cfg Cfg, logPrefix, segmentFilePath string, cf *os.File, uncompressedFile *RawWordsFile, dictBuilder *DictionaryBuilder, lvl log.Lvl, logger log.Logger) error {
 	logEvery := time.NewTicker(60 * time.Second)
 	defer logEvery.Stop()
 
@@ -285,8 +285,8 @@ func compressWithPatternCandidates(ctx context.Context, trace bool, logPrefix, s
 	uncompPosMap := make(map[uint64]uint64) // For the uncompressed words
 	posMaps = append(posMaps, uncompPosMap)
 	var wg sync.WaitGroup
-	if workers > 1 {
-		for i := 0; i < workers; i++ {
+	if cfg.Workers > 1 {
+		for i := 0; i < cfg.Workers; i++ {
 			posMap := make(map[uint64]uint64)
 			posMaps = append(posMaps, posMap)
 			wg.Add(1)
@@ -315,7 +315,7 @@ func compressWithPatternCandidates(ctx context.Context, trace bool, logPrefix, s
 			return ctx.Err()
 		default:
 		}
-		if workers > 1 {
+		if cfg.Workers > 1 {
 			// take processed words in non-blocking way and push them to the queue
 		outer:
 			for {
@@ -403,7 +403,7 @@ func compressWithPatternCandidates(ctx context.Context, trace bool, logPrefix, s
 		select {
 		case <-logEvery.C:
 			if lvl < log.LvlTrace {
-				logger.Log(lvl, fmt.Sprintf("[%s] Replacement preprocessing", logPrefix), "processed", fmt.Sprintf("%.2f%%", 100*float64(outCount)/float64(totalWords)), "ch", len(ch), "workers", workers)
+				logger.Log(lvl, fmt.Sprintf("[%s] Replacement preprocessing", logPrefix), "processed", fmt.Sprintf("%.2f%%", 100*float64(outCount)/float64(totalWords)), "ch", len(ch), "workers", cfg.Workers)
 			}
 		default:
 		}
@@ -462,7 +462,7 @@ func compressWithPatternCandidates(ctx context.Context, trace bool, logPrefix, s
 	}
 	//fmt.Printf("posMap = %v\n", posMap)
 	var patternList PatternList
-	distribution := make([]int, maxPatternLen+1)
+	distribution := make([]int, cfg.MaxPatternLen+1)
 	for _, p := range code2pattern {
 		if p.uses > 0 {
 			patternList = append(patternList, p)
