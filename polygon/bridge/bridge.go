@@ -54,7 +54,7 @@ func NewBridge(store Store, logger log.Logger, borConfig *borcfg.BorConfig, even
 		eventFetcher:                 eventFetcher,
 		stateReceiverContractAddress: libcommon.HexToAddress(borConfig.StateReceiverContract),
 		fetchedEventsSignal:          make(chan struct{}),
-		processedBlockSignal:         make(chan struct{}),
+		processedBlocksSignal:        make(chan struct{}),
 	}
 }
 
@@ -68,7 +68,7 @@ type Bridge struct {
 	reachedTip             atomic.Bool
 	fetchedEventsSignal    chan struct{}
 	lastFetchedEventTime   atomic.Uint64
-	processedBlockSignal   chan struct{}
+	processedBlocksSignal  chan struct{}
 	lastProcessedBlockNum  atomic.Uint64
 	lastProcessedBlockTime atomic.Uint64
 	lastProcessedEventID   atomic.Uint64
@@ -76,7 +76,7 @@ type Bridge struct {
 
 func (b *Bridge) Run(ctx context.Context) error {
 	defer close(b.fetchedEventsSignal)
-	defer close(b.processedBlockSignal)
+	defer close(b.processedBlocksSignal)
 
 	err := b.store.Prepare(ctx)
 	if err != nil {
@@ -154,6 +154,7 @@ func (b *Bridge) Run(ctx context.Context) error {
 		}
 
 		b.lastFetchedEventTime.Store(uint64(lastFetchedEventTime))
+		b.signalFetchedEvents()
 
 		select {
 		case <-logTicker.C:
@@ -165,8 +166,6 @@ func (b *Bridge) Run(ctx context.Context) error {
 			)
 		default: // continue
 		}
-
-		b.signalFetchedEvents()
 	}
 }
 
@@ -202,6 +201,7 @@ func (b *Bridge) ProcessNewBlocks(ctx context.Context, blocks []*types.Block) er
 		return nil
 	}
 
+	var lastProcessedBlock *types.Block
 	blockNumToEventId := make(map[uint64]uint64)
 	eventTxnToBlockNum := make(map[libcommon.Hash]uint64)
 	for _, block := range blocks {
@@ -239,27 +239,30 @@ func (b *Bridge) ProcessNewBlocks(ctx context.Context, blocks []*types.Block) er
 			eventTxnToBlockNum[eventTxnHash] = blockNum
 			blockNumToEventId[blockNum] = startID
 			b.lastProcessedEventID.Store(endID)
+			lastProcessedBlock = block
 		}
-
-		b.lastProcessedBlockNum.Store(blockNum)
-		b.lastProcessedBlockTime.Store(blockTime)
-		b.signalProcessedBlock()
 	}
 
-	err := b.store.PutBlockNumToEventID(ctx, blockNumToEventId)
-	if err != nil {
+	if lastProcessedBlock == nil {
+		return nil
+	}
+
+	if err := b.store.PutBlockNumToEventID(ctx, blockNumToEventId); err != nil {
 		return err
 	}
 
-	err = b.store.PutEventTxnToBlockNum(ctx, eventTxnToBlockNum)
-	if err != nil {
+	if err := b.store.PutEventTxnToBlockNum(ctx, eventTxnToBlockNum); err != nil {
 		return err
 	}
 
+	b.lastProcessedBlockNum.Store(lastProcessedBlock.NumberU64())
+	b.lastProcessedBlockTime.Store(lastProcessedBlock.Time())
+	b.signalProcessedBlocks()
 	return nil
 }
 
 // Synchronize blocks until events up to a given block are processed.
+// NOTE: should not be called by more than 1 goroutine at a time.
 func (b *Bridge) Synchronize(ctx context.Context, blockNum uint64) error {
 	b.logger.Debug(
 		bridgeLogPrefix("synchronizing events..."),
@@ -277,7 +280,7 @@ func (b *Bridge) Unwind(ctx context.Context, blockNum uint64) error {
 
 // Events returns all sync events at blockNum
 func (b *Bridge) Events(ctx context.Context, blockNum uint64) ([]*types.Message, error) {
-	start, end, err := b.store.BlockEventIDRange(ctx, blockNum)
+	start, end, err := b.store.BlockEventIDsRange(ctx, blockNum)
 	if err != nil {
 		if errors.Is(err, ErrEventIDRangeNotFound) {
 			return nil, nil
@@ -390,7 +393,7 @@ func (b *Bridge) waitForProcessedBlock(ctx context.Context, blockNum uint64) err
 			)
 		}
 
-		if err := b.waitProcessedBlockSignal(ctx); err != nil {
+		if err := b.waitProcessedBlocksSignal(ctx); err != nil {
 			return err
 		}
 
@@ -426,20 +429,20 @@ func (b *Bridge) waitFetchedEventsSignal(ctx context.Context) error {
 	}
 }
 
-func (b *Bridge) signalProcessedBlock() {
+func (b *Bridge) signalProcessedBlocks() {
 	select {
-	case b.processedBlockSignal <- struct{}{}:
+	case b.processedBlocksSignal <- struct{}{}:
 	default: // no-op, signal already queued
 	}
 }
 
-func (b *Bridge) waitProcessedBlockSignal(ctx context.Context) error {
+func (b *Bridge) waitProcessedBlocksSignal(ctx context.Context) error {
 	select {
 	case <-ctx.Done():
 		return ctx.Err()
-	case _, ok := <-b.processedBlockSignal:
+	case _, ok := <-b.processedBlocksSignal:
 		if !ok {
-			return errors.New("processedBlockSignal channel closed")
+			return errors.New("processedBlocksSignal channel closed")
 		}
 		return nil
 	}
