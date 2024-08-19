@@ -1170,7 +1170,7 @@ func doCompress(cliCtx *cli.Context) error {
 			return err
 		}
 		if i%2 == 0 {
-			if err = c.AddUncompressedWord(buf); err != nil {
+			if err = c.AddWord(buf); err != nil {
 				return err
 			}
 		} else {
