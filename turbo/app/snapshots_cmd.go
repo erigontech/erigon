@@ -1143,11 +1143,11 @@ func doCompress(cliCtx *cli.Context) error {
 
 	compressCfg := seg.DefaultCfg
 	compressCfg.Workers = estimate.CompressSnapshot.Workers()
-	compressCfg.MinPatternLen = dbg.EnvInt("MinPatternLen", 5)
-	compressCfg.MaxPatternLen = dbg.EnvInt("MaxPatternLen", 32)
-	compressCfg.SamplingFactor = uint64(dbg.EnvInt("SamplingFactor", 4))
-	compressCfg.DictReducerSoftLimit = dbg.EnvInt("DictReducerSoftLimit", 10_000_000)
-	compressCfg.MaxDictPatterns = dbg.EnvInt("MaxDictPatterns", 64*1024)
+	compressCfg.MinPatternLen = dbg.EnvInt("MinPatternLen", compressCfg.MinPatternLen)
+	compressCfg.MaxPatternLen = dbg.EnvInt("MaxPatternLen", compressCfg.MaxPatternLen)
+	compressCfg.SamplingFactor = uint64(dbg.EnvInt("SamplingFactor", int(compressCfg.SamplingFactor)))
+	compressCfg.DictReducerSoftLimit = dbg.EnvInt("DictReducerSoftLimit", compressCfg.DictReducerSoftLimit)
+	compressCfg.MaxDictPatterns = dbg.EnvInt("MaxDictPatterns", compressCfg.MaxDictPatterns)
 
 	logger.Info("[compress] file", "datadir", dirs.DataDir, "f", f, "cfg", compressCfg)
 	c, err := seg.NewCompressor(ctx, "compress", f, dirs.Tmp, compressCfg, log.LvlInfo, logger)
