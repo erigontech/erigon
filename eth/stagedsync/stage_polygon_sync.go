@@ -92,15 +92,18 @@ func NewPolygonSyncStageCfg(
 			txActionStream: txActionStream,
 		},
 	}
+	bridgeStore := &polygonSyncStageBridgeStore{
+		eventReader:    blockReader,
+		txActionStream: txActionStream,
+	}
 	borConfig := chainConfig.Bor.(*borcfg.BorConfig)
 	heimdallService := heimdall.NewService(borConfig, heimdallClient, heimdallStore, logger)
+	bridgeService := bridge.NewBridge(bridgeStore, logger, borConfig, heimdallClient)
 	p2pService := p2p.NewService(maxPeers, logger, sentry, statusDataProvider.GetStatusData)
 	checkpointVerifier := polygonsync.VerifyCheckpointHeaders
 	milestoneVerifier := polygonsync.VerifyMilestoneHeaders
 	blocksVerifier := polygonsync.VerifyBlocks
-	syncStore := &polygonSyncStageSyncStore{
-		executionEngine: executionEngine,
-	}
+	syncStore := polygonsync.NewStore(logger, executionEngine, bridgeService)
 	blockDownloader := polygonsync.NewBlockDownloader(
 		logger,
 		p2pService,
@@ -112,11 +115,6 @@ func NewPolygonSyncStageCfg(
 		blockLimit,
 	)
 	events := polygonsync.NewTipEvents(logger, p2pService, heimdallService)
-	bridgeStore := &polygonSyncStageBridgeStore{
-		eventReader:    blockReader,
-		txActionStream: txActionStream,
-	}
-	bridgeService := bridge.NewBridge(bridgeStore, logger, borConfig, heimdallClient)
 	sync := polygonsync.NewSync(
 		syncStore,
 		executionEngine,
@@ -133,6 +131,7 @@ func NewPolygonSyncStageCfg(
 	syncService := &polygonSyncStageService{
 		logger:          logger,
 		sync:            sync,
+		syncStore:       syncStore,
 		events:          events,
 		p2p:             p2pService,
 		executionEngine: executionEngine,
@@ -377,6 +376,7 @@ type polygonSyncStageTxAction struct {
 type polygonSyncStageService struct {
 	logger          log.Logger
 	sync            *polygonsync.Sync
+	syncStore       polygonsync.Store
 	events          *polygonsync.TipEvents
 	p2p             p2p.Service
 	executionEngine *polygonSyncStageExecutionEngine
@@ -472,6 +472,10 @@ func (s *polygonSyncStageService) runBgComponentsOnce(ctx context.Context) {
 		})
 
 		eg.Go(func() error {
+			return s.syncStore.Run(ctx)
+		})
+
+		eg.Go(func() error {
 			return s.sync.Run(ctx)
 		})
 
@@ -479,22 +483,6 @@ func (s *polygonSyncStageService) runBgComponentsOnce(ctx context.Context) {
 			s.bgComponentsErr <- err
 		}
 	}()
-}
-
-type polygonSyncStageSyncStore struct {
-	executionEngine *polygonSyncStageExecutionEngine
-}
-
-func (s *polygonSyncStageSyncStore) InsertBlocks(ctx context.Context, blocks []*types.Block) error {
-	return s.executionEngine.InsertBlocks(ctx, blocks)
-}
-
-func (s *polygonSyncStageSyncStore) Flush(context.Context) error {
-	return nil
-}
-
-func (s *polygonSyncStageSyncStore) Run(context.Context) error {
-	return nil
 }
 
 type polygonSyncStageHeimdallStore struct {
