@@ -107,7 +107,7 @@ func NoGapsInBorEvents(ctx context.Context, db kv.RoDB, blockReader services.Ful
 					return err
 				}
 
-				fmt.Println("LAST Event", lastEventId, "BH", borHeimdallProgress, "B", bodyProgress)
+				log.Info("[integrity] LAST Event", "event", lastEventId, "bor-progress", borHeimdallProgress, "body-progress", bodyProgress)
 
 				if bodyProgress > borHeimdallProgress {
 					for blockNum := maxBlockNum + 1; blockNum <= bodyProgress; blockNum++ {
