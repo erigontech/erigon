@@ -142,7 +142,7 @@ func (ap *attestationProducer) acquireBeaconStateAtSlot(baseState *state.Caching
 	case resp := <-respCh:
 		return resp.state, resp.err
 	case <-time.After(5 * time.Second):
-		return nil, ErrHeadStateNotAvailable
+		return nil, errors.New("timeout waiting for state generation")
 	}
 }
 
