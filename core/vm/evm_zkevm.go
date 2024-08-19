@@ -112,6 +112,14 @@ func (evm *EVM) createZkEvm(caller ContractRef, codeAndHash *codeAndHash, gas ui
 		evm.intraBlockState.SetNonce(caller.Address(), nonce+1)
 	}
 
+	if evm.chainConfig.IsForkID12Banana(evm.context.BlockNumber) {
+		// add the address to the access list before taking a snapshot so that it will stay
+		// in warm storage even if the create call fails
+		if evm.chainRules.IsBerlin {
+			evm.intraBlockState.AddAddressToAccessList(address)
+		}
+	}
+
 	// Ensure there's no existing contract already at the designated address
 	contractHash := evm.intraBlockState.GetCodeHash(address)
 	if evm.intraBlockState.GetNonce(address) != 0 || (contractHash != (libcommon.Hash{}) && contractHash != emptyCodeHash) {
@@ -122,8 +130,12 @@ func (evm *EVM) createZkEvm(caller ContractRef, codeAndHash *codeAndHash, gas ui
 	// Create a new account on the state
 	snapshot := evm.intraBlockState.Snapshot()
 
-	if evm.chainRules.IsBerlin {
-		evm.intraBlockState.AddAddressToAccessList(address)
+	if !evm.chainConfig.IsForkID12Banana(evm.context.BlockNumber) {
+		// if we aren't at fork 12 then we haven't already added this address to the list so we
+		// need to add it now.  If the create call fails it will be removed from warm storage
+		if evm.chainRules.IsBerlin {
+			evm.intraBlockState.AddAddressToAccessList(address)
+		}
 	}
 
 	evm.intraBlockState.CreateAccount(address, true)
