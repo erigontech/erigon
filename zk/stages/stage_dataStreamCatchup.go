@@ -11,7 +11,6 @@ import (
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 	"github.com/ledgerwatch/erigon/zk/datastream/server"
 	"github.com/ledgerwatch/erigon/zk/hermez_db"
-	"github.com/ledgerwatch/erigon/zk/sequencer"
 	"github.com/ledgerwatch/log/v3"
 )
 
@@ -61,7 +60,7 @@ func SpawnStageDataStreamCatchup(
 		createdTx = true
 	}
 
-	finalBlockNumber, err := CatchupDatastream(ctx, logPrefix, tx, stream, cfg.chainId, cfg.streamVersion, cfg.hasExecutors)
+	finalBlockNumber, err := CatchupDatastream(ctx, logPrefix, tx, stream, cfg.chainId)
 	if err != nil {
 		return err
 	}
@@ -77,42 +76,13 @@ func SpawnStageDataStreamCatchup(
 	return err
 }
 
-func CatchupDatastream(ctx context.Context, logPrefix string, tx kv.RwTx, stream *datastreamer.StreamServer, chainId uint64, streamVersion int, hasExecutors bool) (uint64, error) {
+func CatchupDatastream(ctx context.Context, logPrefix string, tx kv.RwTx, stream *datastreamer.StreamServer, chainId uint64) (uint64, error) {
 	srv := server.NewDataStreamServer(stream, chainId)
 	reader := hermez_db.NewHermezDbReader(tx)
 
-	// get the latest verified batch number
-	var (
-		err              error
-		latestBatch      uint64
-		finalBlockNumber uint64
-	)
-
-	if sequencer.IsSequencer() {
-		if hasExecutors {
-			latestBatch, err = stages.GetStageProgress(tx, stages.SequenceExecutorVerify)
-			if err != nil {
-				return 0, err
-			}
-			finalBlockNumber, err = reader.GetHighestBlockInBatch(latestBatch)
-			if err != nil {
-				return 0, err
-			}
-		} else {
-			// without execution we save progress block by block and can populate an unfinished batch to stream
-			// otherwise we get a batch gap in the stream because a few blocks don't get written to the stream
-			// and then execution continues from the middle of the batch
-			finalBlockNumber, err = stages.GetStageProgress(tx, stages.Execution)
-			if err != nil {
-				return 0, err
-			}
-
-		}
-	} else {
-		finalBlockNumber, err = stages.GetStageProgress(tx, stages.Execution)
-		if err != nil {
-			return 0, err
-		}
+	finalBlockNumber, err := stages.GetStageProgress(tx, stages.Execution)
+	if err != nil {
+		return 0, err
 	}
 
 	previousProgress, err := stages.GetStageProgress(tx, stages.DataStream)
