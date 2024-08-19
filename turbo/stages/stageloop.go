@@ -167,7 +167,7 @@ func StageLoopStep(ctx context.Context, chainConfig *chain.Config, db kv.RwDB, s
 	}
 
 	if notifications != nil && notifications.Accumulator != nil && canRunCycleInOneTransaction {
-		stateVersion, err := rawdb.GetStateVersion(tx)
+		_, stateVersion, err := rawdb.GetLatestStateVersion(tx)
 		if err != nil {
 			log.Error("problem reading plain state version", "err", err)
 		}
@@ -214,7 +214,7 @@ func StageLoopStep(ctx context.Context, chainConfig *chain.Config, db kv.RwDB, s
 
 		// update the accumulator with a new plain state version so the cache can be notified that
 		// state has moved on
-		if plainStateVersion, err = rawdb.GetStateVersion(tx); err != nil {
+		if _, plainStateVersion, err = rawdb.GetLatestStateVersion(tx); err != nil {
 			return err
 		}
 		notifications.Accumulator.SetStateID(plainStateVersion)

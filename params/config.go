@@ -228,6 +228,28 @@ func DynamicChainConfig(ch string) *chain.Config {
 	return spec
 }
 
+func DynamicChainTimestamp(ch string) uint64 {
+	filename := path.Join(DynamicChainConfigPath, ch+"-conf.json")
+
+	f, err := os.Open(filename)
+	if err != nil {
+		panic(fmt.Sprintf("could not open timestamp for %s: %v", filename, err))
+	}
+	defer f.Close()
+	decoder := json.NewDecoder(f)
+	type confFile struct {
+		Timestamp uint64 `json:"timestamp"`
+	}
+	var conf confFile
+	err = decoder.Decode(&conf)
+	if err != nil {
+		panic(fmt.Sprintf("could not parse timestamp for %s: %v", filename, err))
+	}
+
+	return conf.Timestamp
+
+}
+
 func NewSnapshotConfig(checkpointInterval uint64, inmemorySnapshots int, inmemorySignatures int, inmemory bool, dbPath string) *ConsensusSnapshotConfig {
 	if len(dbPath) == 0 {
 		dbPath = paths.DefaultDataDir()

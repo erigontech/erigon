@@ -185,6 +185,12 @@ func runBatchLastSteps(
 		return err
 	}
 
+	// the unwind of this value is handed by UnwindExecutionStageDbWrites
+	_, err = rawdb.IncrementStateVersionByBlockNumberIfNeeded(batchContext.sdb.tx, lastBlock)
+	if err != nil {
+		return fmt.Errorf("writing plain state version: %w", err)
+	}
+
 	log.Info(fmt.Sprintf("[%s] Finish batch %d...", batchContext.s.LogPrefix(), thisBatch))
 
 	return nil

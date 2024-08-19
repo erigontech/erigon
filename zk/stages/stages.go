@@ -492,7 +492,6 @@ var AllStagesZk = []stages2.SyncStage{
 }
 
 var ZkSequencerUnwindOrder = stages.UnwindOrder{
-	stages2.Finish,
 	stages2.TxLookup,
 	stages2.LogIndex,
 	stages2.HashState,
@@ -503,10 +502,10 @@ var ZkSequencerUnwindOrder = stages.UnwindOrder{
 	stages2.CallTraces,
 	stages2.Execution, // need to happen after history and calltraces
 	stages2.L1Syncer,
+	stages2.Finish,
 }
 
 var ZkUnwindOrder = stages.UnwindOrder{
-	stages2.Finish,
 	stages2.TxLookup,
 	stages2.LogIndex,
 	stages2.HashState,
@@ -515,8 +514,10 @@ var ZkUnwindOrder = stages.UnwindOrder{
 	stages2.AccountHistoryIndex,
 	stages2.CallTraces,
 	stages2.Execution, // need to happen after history and calltraces
+	stages2.CumulativeIndex,
 	stages2.Senders,
 	stages2.BlockHashes,
 	stages2.Batches,
 	stages2.L1Syncer,
+	stages2.Finish,
 }

@@ -74,3 +74,9 @@ make all
 ./build/bin/integration stage_trie --datadir=<datadir> --reset
 # Then run TurobGeth as usually. It will take 2-3 hours to re-calculate dropped db tables
 ```
+
+## ZKEVM concerns
+The approach when unwinding zkevm chains is slightly different as it is batch based.  For this to work we read the last
+block of the batch passed as a flag and then this becomes the unwind point.  We then delete all data for this block + 1.
+The logic for this varies from stage to stage as some deletes are inclusive so bear this in mind when working around unwinds
+in zkevm stages.

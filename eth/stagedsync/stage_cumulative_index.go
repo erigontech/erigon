@@ -142,7 +142,7 @@ func UnwindCumulativeIndexStage(u *UnwindState, cfg CumulativeIndexCfg, tx kv.Rw
 	}
 	log.Debug("Unwinding Cumulative Index")
 
-	if err := rawdb.DeleteCumulativeGasUsed(tx, u.UnwindPoint); err != nil {
+	if err := rawdb.DeleteCumulativeGasUsed(tx, u.UnwindPoint+1); err != nil {
 		return fmt.Errorf("failed to delete cumulative gas used: %w", err)
 	}
 

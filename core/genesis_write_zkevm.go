@@ -139,7 +139,7 @@ func processAccount(s *smt.SMT, root *big.Int, a *types.GenesisAccount, addr lib
 func DynamicGenesisBlock(chain string) *types.Genesis {
 	return &types.Genesis{
 		Config:     params.DynamicChainConfig(chain),
-		Timestamp:  0x0,
+		Timestamp:  params.DynamicChainTimestamp(chain),
 		GasLimit:   0x0,
 		Difficulty: big.NewInt(0x0),
 		Alloc:      dynamicPrealloc(chain),

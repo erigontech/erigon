@@ -33,6 +33,8 @@ import (
 	"github.com/ledgerwatch/log/v3"
 	"golang.org/x/exp/slices"
 
+	"path"
+
 	hackdb "github.com/ledgerwatch/erigon/cmd/hack/db"
 	"github.com/ledgerwatch/erigon/cmd/hack/flow"
 	"github.com/ledgerwatch/erigon/cmd/hack/tool"
@@ -65,6 +67,7 @@ var (
 	chaindata  = flag.String("chaindata", "chaindata", "path to the chaindata database file")
 	bucket     = flag.String("bucket", "", "bucket in the database")
 	hash       = flag.String("hash", "0x00", "image for preimage or state root for testBlockHashes action")
+	output     = flag.String("output", "", "output path")
 )
 
 func dbSlice(chaindata string, bucket string, prefix []byte) {
@@ -310,6 +313,57 @@ func dumpStorage() {
 	}); err != nil {
 		panic(err)
 	}
+}
+
+func dumpAll(chaindata, output string) error {
+	db := mdbx.MustOpen(chaindata)
+	defer db.Close()
+
+	if output == "" {
+		// use the chaindata path as a relative path for the datadir dump
+		path := filepath.Dir(chaindata)
+		path += "-dump"
+		output = path
+	}
+
+	// check if the dumps folder exists or not
+	if _, err := os.Stat(output); os.IsNotExist(err) {
+		err := os.Mkdir(output, 0755)
+		if err != nil {
+			return err
+		}
+	}
+
+	return db.View(context.Background(), func(tx kv.Tx) error {
+		buckets, err := tx.ListBuckets()
+		if err != nil {
+			return err
+		}
+
+		for _, buc := range buckets {
+			if buc == "HermezSmtLastRoot" { // this is old and deleted table
+				continue
+			}
+
+			// create a file to dump the contents to
+			fileName := buc + ".txt"
+			file, err := os.Create(path.Join(output, fileName))
+			if err != nil {
+				return err
+			}
+			err = tx.ForEach(buc, nil, func(k, v []byte) error {
+				if _, err = file.WriteString(fmt.Sprintf("%x,%x\n", k, v)); err != nil {
+					return err
+				}
+				return nil
+			})
+			if err != nil {
+				return err
+			}
+		}
+
+		return nil
+	})
 }
 
 func printBucket(chaindata, bucket string) {
@@ -1516,6 +1570,8 @@ func main() {
 		err = readAccountAtVersion(*chaindata, *account, uint64(*block))
 	case "getOldAccInputHash":
 		err = getOldAccInputHash(uint64(*block))
+	case "dumpAll":
+		err = dumpAll(*chaindata, *output)
 	}
 
 	if err != nil {

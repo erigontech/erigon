@@ -15,6 +15,8 @@ import (
 	"github.com/gateway-fm/cdk-erigon-lib/kv"
 	"github.com/ledgerwatch/log/v3"
 
+	"math"
+
 	common2 "github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/dbutils"
 	"github.com/ledgerwatch/erigon/core/rawdb"
@@ -22,7 +24,6 @@ import (
 	"github.com/ledgerwatch/erigon/ethdb/cbor"
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/turbo/engineapi"
-	"math"
 )
 
 type FinishCfg struct {
@@ -95,6 +96,10 @@ func UnwindFinish(u *UnwindState, tx kv.RwTx, cfg FinishCfg, ctx context.Context
 			return err
 		}
 		defer tx.Rollback()
+	}
+
+	if err := unwindFinishZk(u, tx, cfg, ctx); err != nil {
+		return err
 	}
 
 	if err = u.Done(tx); err != nil {

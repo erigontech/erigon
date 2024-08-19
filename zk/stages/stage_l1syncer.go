@@ -321,9 +321,6 @@ func UnwindL1SyncerStage(u *stagedsync.UnwindState, tx kv.RwTx, cfg L1SyncerCfg,
 		return fmt.Errorf("failed to save stage progress, %w", err)
 	}
 
-	if err := u.Done(tx); err != nil {
-		return err
-	}
 	if !useExternalTx {
 		if err := tx.Commit(); err != nil {
 			return err

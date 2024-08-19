@@ -53,10 +53,6 @@ func (db ErigonDb) WriteHeader(
 	return h, nil
 }
 
-func (db ErigonDb) DeleteHeaders(blockFrom uint64) error {
-	return rawdb.TruncateCanonicalHash(db.tx, blockFrom+1, true)
-}
-
 func (db ErigonDb) WriteBody(blockNo *big.Int, headerHash common.Hash, txs []ethTypes.Transaction) error {
 	b := &ethTypes.Body{
 		Transactions: txs,
@@ -68,10 +64,6 @@ func (db ErigonDb) WriteBody(blockNo *big.Int, headerHash common.Hash, txs []eth
 
 func (db ErigonDb) GetBodyTransactions(fromBlockNo, toBlockNo uint64) (*[]ethTypes.Transaction, error) {
 	return rawdb.GetBodyTransactions(db.tx, fromBlockNo, toBlockNo)
-}
-
-func (db ErigonDb) DeleteBodies(blockFrom uint64) error {
-	return rawdb.TruncateBodies(db.tx, blockFrom+1)
 }
 
 func (db ErigonDb) ReadCanonicalHash(blockNo uint64) (common.Hash, error) {
