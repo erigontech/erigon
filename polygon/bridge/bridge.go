@@ -113,7 +113,7 @@ func (b *Bridge) Run(ctx context.Context) error {
 
 		// start scrapping events
 		to := time.Now()
-		events, err := b.eventFetcher.FetchStateSyncEvents(ctx, lastFetchedEventID+1, to, 50)
+		events, err := b.eventFetcher.FetchStateSyncEvents(ctx, lastFetchedEventID+1, to, heimdall.StateEventsFetchLimit)
 		if err != nil {
 			return err
 		}
@@ -182,7 +182,7 @@ func (b *Bridge) ProcessNewBlocks(ctx context.Context, blocks []*types.Block) er
 			return err
 		}
 
-		if err = b.waitForScrapper(ctx, toTime); err != nil {
+		if err = b.waitForScraper(ctx, toTime); err != nil {
 			return err
 		}
 
@@ -303,7 +303,7 @@ func (b *Bridge) blockEventsTimeWindowEnd(blockNum uint64, blockTime uint64) (ui
 	return lastProcessedBlockTime, nil
 }
 
-func (b *Bridge) waitForScrapper(ctx context.Context, toTime uint64) error {
+func (b *Bridge) waitForScraper(ctx context.Context, toTime uint64) error {
 	logTicker := time.NewTicker(5 * time.Second)
 	defer logTicker.Stop()
 
