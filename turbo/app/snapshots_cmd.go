@@ -1138,7 +1138,9 @@ func doCompress(cliCtx *cli.Context) error {
 	compressCfg.MinPatternLen = dbg.EnvInt("MinPatternLen", 5)
 	compressCfg.MaxPatternLen = dbg.EnvInt("MaxPatternLen", 128)
 	compressCfg.SamplingFactor = uint64(dbg.EnvInt("SamplingFactor", 1))
-	compressCfg.MaxDictPatterns = 64 * 1024 * 4
+	compressCfg.DictReducerSoftLimit = dbg.EnvInt("DictReducerSoftLimit", 10)
+	compressCfg.MaxDictPatterns = dbg.EnvInt("MaxDictPatterns", 64*1024)
+	log.Info("[compress] cfg", "cfg", compressCfg)
 	c, err := seg.NewCompressor(ctx, "compress", f, dirs.Tmp, compressCfg, log.LvlInfo, logger)
 	if err != nil {
 		return err
