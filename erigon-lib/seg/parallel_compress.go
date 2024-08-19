@@ -41,9 +41,6 @@ import (
 	"github.com/erigontech/erigon-lib/seg/sais"
 )
 
-// MinPatternScore is minimum score (per superstring) required to consider including pattern into the dictionary
-const MinPatternScore = 1024
-
 func coverWordByPatterns(trace bool, input []byte, mf2 *patricia.MatchFinder2, output []byte, uncovered []int, patterns []int, cellRing *Ring, posMap map[uint64]uint64) ([]byte, []int, []int) {
 	matches := mf2.FindLongestMatches(input)
 
