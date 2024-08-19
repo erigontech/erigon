@@ -23,31 +23,39 @@ import (
 	"fmt"
 	"math/big"
 
+	"github.com/c2h5oh/datasize"
 	"github.com/holiman/uint256"
 	"google.golang.org/grpc"
 
 	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/hexutil"
 	"github.com/erigontech/erigon-lib/common/hexutility"
+	"github.com/erigontech/erigon-lib/config3"
 	"github.com/erigontech/erigon-lib/gointerfaces"
 	txpool_proto "github.com/erigontech/erigon-lib/gointerfaces/txpoolproto"
 	"github.com/erigontech/erigon-lib/kv"
-	"github.com/erigontech/erigon-lib/kv/rawdbv3"
-	"github.com/erigontech/erigon-lib/log/v3"
-	types2 "github.com/erigontech/erigon-lib/types"
-
 	"github.com/erigontech/erigon-lib/kv/membatchwithdb"
+	"github.com/erigontech/erigon-lib/kv/rawdbv3"
+	"github.com/erigontech/erigon-lib/kv/temporal"
+	"github.com/erigontech/erigon-lib/log/v3"
+	libstate "github.com/erigontech/erigon-lib/state"
+	types2 "github.com/erigontech/erigon-lib/types"
+	"github.com/erigontech/erigon-lib/wrap"
+	"github.com/erigontech/erigon/common/math"
 	"github.com/erigontech/erigon/consensus"
 	"github.com/erigontech/erigon/core"
+	"github.com/erigontech/erigon/core/rawdb"
 	"github.com/erigontech/erigon/core/state"
 	"github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/core/types/accounts"
 	"github.com/erigontech/erigon/core/vm"
 	"github.com/erigontech/erigon/core/vm/evmtypes"
 	"github.com/erigontech/erigon/crypto"
-	"github.com/erigontech/erigon/eth/consensuschain"
+	"github.com/erigontech/erigon/eth/ethconfig"
 	"github.com/erigontech/erigon/eth/stagedsync"
+	"github.com/erigontech/erigon/eth/stagedsync/stages"
 	"github.com/erigontech/erigon/eth/tracers/logger"
+	"github.com/erigontech/erigon/ethdb/prune"
 	"github.com/erigontech/erigon/params"
 	"github.com/erigontech/erigon/rpc"
 	ethapi2 "github.com/erigontech/erigon/turbo/adapter/ethapi"
@@ -530,71 +538,77 @@ func (api *BaseAPI) getWitness(ctx context.Context, db kv.RoDB, blockNrOrHash rp
 
 	_ = store
 
-	// cr := rawdb.NewCanonicalReader()
-	// agg, err := libstate.NewAggregator(ctx, api.dirs, config3.HistoryV3AggregationStep, db, cr, logger)
-	// if err != nil {
-	// 	return nil, err
-	// }
+	cr := rawdb.NewCanonicalReader()
+	agg, err := libstate.NewAggregator(ctx, api.dirs, config3.HistoryV3AggregationStep, txBatch.MemDB(), cr, logger)
+	if err != nil {
+		return nil, err
+	}
 
-	// txc := wrap.TxContainer{Tx: txBatch.MemTx()}
-	// batchSizeStr := "512M"
-	// var batchSize datasize.ByteSize
-	// err = batchSize.UnmarshalText([]byte(batchSizeStr))
-	// if err != nil {
-	// 	return nil, err
-	// }
+	temporalDB, err := temporal.New(txBatch.MemDB(), agg)
+	if err != nil {
+		return nil, err
+	}
 
-	// pruneMode := prune.Mode{
-	// 	Initialised: false,
-	// }
-	// vmConfig := &vm.Config{}
-	// syncCfg := ethconfig.Defaults.Sync
+	txc := wrap.TxContainer{Tx: txBatch}
+	batchSizeStr := "512M"
+	var batchSize datasize.ByteSize
+	err = batchSize.UnmarshalText([]byte(batchSizeStr))
+	if err != nil {
+		return nil, err
+	}
 
-	// execCfg := stagedsync.StageExecuteBlocksCfg(txBatch.MemDB(), pruneMode, batchSize, chainConfig, engine, vmConfig, nil,
-	// 	/*stateStream=*/ false,
-	// 	/*badBlockHalt=*/ true, api.dirs, api._blockReader, nil, nil, syncCfg, nil)
+	pruneMode := prune.Mode{
+		Initialised: false,
+		History:     prune.Distance(math.MaxUint64),
+	}
+	vmConfig := &vm.Config{}
+	syncCfg := ethconfig.Defaults.Sync
 
-	// stateSyncStages := stagedsync.DefaultStages(ctx, stagedsync.SnapshotsCfg{}, stagedsync.HeadersCfg{}, stagedsync.BorHeimdallCfg{}, stagedsync.BlockHashesCfg{}, stagedsync.BodiesCfg{}, stagedsync.SendersCfg{}, stagedsync.ExecuteBlockCfg{}, stagedsync.TxLookupCfg{}, stagedsync.FinishCfg{}, true)
-	// stateSync := stagedsync.New(
-	// 	ethconfig.Defaults.Sync,
-	// 	stateSyncStages,
-	// 	stagedsync.DefaultUnwindOrder,
-	// 	stagedsync.DefaultPruneOrder,
-	// 	logger,
-	// )
-	// stageState := &stagedsync.StageState{ID: stages.Execution, BlockNumber: blockNr}
+	execCfg := stagedsync.StageExecuteBlocksCfg(temporalDB, pruneMode, batchSize, chainConfig, engine, vmConfig, nil,
+		/*stateStream=*/ false,
+		/*badBlockHalt=*/ true, api.dirs, api._blockReader, nil, nil, syncCfg, nil)
+
+	stateSyncStages := stagedsync.DefaultStages(ctx, stagedsync.SnapshotsCfg{}, stagedsync.HeadersCfg{}, stagedsync.BorHeimdallCfg{}, stagedsync.BlockHashesCfg{}, stagedsync.BodiesCfg{}, stagedsync.SendersCfg{}, stagedsync.ExecuteBlockCfg{}, stagedsync.TxLookupCfg{}, stagedsync.FinishCfg{}, true)
+	stateSync := stagedsync.New(
+		ethconfig.Defaults.Sync,
+		stateSyncStages,
+		stagedsync.DefaultUnwindOrder,
+		stagedsync.DefaultPruneOrder,
+		logger,
+	)
+	stageState := &stagedsync.StageState{ID: stages.Execution, BlockNumber: blockNr}
 	// Re-execute block
-	// err = stagedsync.ExecBlockV3(stageState, stateSync, txc, stageState.BlockNumber, ctx, execCfg, false, logger)
+	err = stagedsync.ExecBlockV3(stageState, stateSync, txc, stageState.BlockNumber, ctx, execCfg, false, logger)
+	if err != nil {
+		return nil, err
+	}
+
+	// // execute block ephemerally
+	// chainReader := consensuschain.NewReader(chainConfig, txBatch, api._blockReader, logger)
+	// // var getTracer func(txIndex int, txHash libcommon.Hash) (vm.EVMLogger, error)
+	// // stateReader := rpchelper.NewLatestStateReader(txBatch)
+	// stateReader, err := rpchelper.CreateHistoryStateReader(roTx, blockNr, 0, "")
+	// // stateReader := state.NewHistoryReaderV3()
 	// if err != nil {
 	// 	return nil, err
 	// }
+	// execResult, err := core.ExecuteBlockEphemerally(chainConfig, &vm.Config{}, store.GetHashFn, engine, block, stateReader, store.TrieStateWriter, chainReader, nil, logger)
+	// if err != nil {
+	// 	return nil, err
+	// }
+	// _ = execResult
 
-	// execute block ephemerally
-	chainReader := consensuschain.NewReader(chainConfig, txBatch, api._blockReader, logger)
-	// var getTracer func(txIndex int, txHash libcommon.Hash) (vm.EVMLogger, error)
-	// stateReader := rpchelper.NewLatestStateReader(txBatch)
-	stateReader, err := rpchelper.CreateHistoryStateReader(roTx, blockNr, 0, "")
-	// stateReader := state.NewHistoryReaderV3()
-	if err != nil {
-		return nil, err
-	}
-	execResult, err := core.ExecuteBlockEphemerally(chainConfig, &vm.Config{}, store.GetHashFn, engine, block, stateReader, store.TrieStateWriter, chainReader, nil, logger)
-	if err != nil {
-		return nil, err
-	}
-	_ = execResult
+	// if execResult.TxRoot.String() != block.Header().TxHash.String() {
+	// 	return nil, fmt.Errorf("transaction root mismatch , from execResult %s, from header %s", execResult.TxRoot.String(), block.Header().TxHash.String())
+	// }
 
-	if execResult.TxRoot.String() != block.Header().TxHash.String() {
-		return nil, fmt.Errorf("transaction root mismatch , from execResult %s, from header %s", execResult.TxRoot.String(), block.Header().TxHash.String())
-	}
+	// preStateRootHash := store.Tds.LastRoot()
+	// preStateRoot := preStateRootHash[:]
+	// preStateRootInHeader := prevHeader.Root[:]
 
-	preStateRootHash := store.Tds.LastRoot()
-	preStateRoot := preStateRootHash[:]
-	preStateRootInHeader := prevHeader.Root[:]
-
-	if !bytes.Equal(preStateRoot, preStateRootInHeader) {
-		return nil, fmt.Errorf("state root mismatch, from witness store %s, from block header %s", string(preStateRoot), string(preStateRootInHeader))
-	}
+	// if !bytes.Equal(preStateRoot, preStateRootInHeader) {
+	// 	return nil, fmt.Errorf("state root mismatch, from witness store %s, from block header %s", string(preStateRoot), string(preStateRootInHeader))
+	// }
 
 	// w, txTds, err := stagedsync.GenerateWitness(roTx, block, prevHeader, fullBlock, uint64(txIndex), store.Tds, store.TrieStateWriter, store.Statedb, store.GetHashFn, &cfg, regenerateHash, ctx, logger)
 	// if err != nil {
