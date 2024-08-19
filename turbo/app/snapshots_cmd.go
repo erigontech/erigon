@@ -1169,13 +1169,19 @@ func doCompress(cliCtx *cli.Context) error {
 		if _, err = io.ReadFull(r, buf); err != nil {
 			return err
 		}
-		if onlyKeys && i%2 == 1 {
+		if i%2 == 0 {
 			if err = c.AddUncompressedWord(buf); err != nil {
 				return err
 			}
 		} else {
-			if err = c.AddWord(buf); err != nil {
-				return err
+			if onlyKeys {
+				if err = c.AddUncompressedWord(buf); err != nil {
+					return err
+				}
+			} else {
+				if err = c.AddWord(buf); err != nil {
+					return err
+				}
 			}
 		}
 		i++
