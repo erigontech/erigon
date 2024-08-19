@@ -29,6 +29,7 @@ import (
 	"math/bits"
 	"os"
 	"path/filepath"
+	"runtime"
 	"slices"
 	"sync"
 	"time"
@@ -65,7 +66,7 @@ type Cfg struct {
 	MaxDictPatterns int
 
 	// DictReducerSoftLimit - Before creating dict of size MaxDictPatterns - need order patterns by score, but with limited RAM usage.
-	// Worst case of Ram: `MaxDictPatterns * MaxPatternLen * DictReducerSoftLimit`
+	// Worst case of Ram: `MaxPatternLen * DictReducerSoftLimit`
 	DictReducerSoftLimit int
 
 	// samplingFactor - skip superstrings if `superstringNumber % samplingFactor != 0`
@@ -81,7 +82,7 @@ var DefaultCfg = Cfg{
 	SamplingFactor:  4,
 	MaxDictPatterns: 64 * 1024,
 
-	DictReducerSoftLimit: 10,
+	DictReducerSoftLimit: 1_000_000,
 
 	Workers: 1,
 }
@@ -228,11 +229,13 @@ func (c *Compressor) Compress() error {
 		c.superstrings <- c.superstring
 	}
 	close(c.superstrings)
+	runtime.GC()
 	c.wg.Wait()
 
 	if c.lvl < log.LvlTrace {
 		c.logger.Log(c.lvl, fmt.Sprintf("[%s] BuildDict start", c.logPrefix), "workers", c.Workers)
 	}
+	runtime.GC()
 	t := time.Now()
 	db, err := DictionaryBuilderFromCollectors(c.ctx, c.Cfg, c.logPrefix, c.tmpDir, c.suffixCollectors, c.lvl, c.logger)
 	if err != nil {
