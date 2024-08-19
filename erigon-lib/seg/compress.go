@@ -240,7 +240,6 @@ func (c *Compressor) Compress() error {
 	t := time.Now()
 	db, err := DictionaryBuilderFromCollectors(c.ctx, c.Cfg, c.logPrefix, c.tmpDir, c.suffixCollectors, c.lvl, c.logger)
 	if err != nil {
-
 		return err
 	}
 	//if c.trace {
