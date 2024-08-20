@@ -236,7 +236,6 @@ func (c *Compressor) Compress() error {
 	if c.lvl < log.LvlTrace {
 		c.logger.Log(c.lvl, fmt.Sprintf("[%s] BuildDict start", c.logPrefix), "workers", c.Workers)
 	}
-	t := time.Now()
 	db, err := DictionaryBuilderFromCollectors(c.ctx, c.Cfg, c.logPrefix, c.tmpDir, c.suffixCollectors, c.lvl, c.logger)
 	if err != nil {
 		return err
@@ -248,16 +247,13 @@ func (c *Compressor) Compress() error {
 		}
 	}
 	defer os.Remove(c.tmpOutFilePath)
-	if c.lvl < log.LvlTrace {
-		c.logger.Log(c.lvl, fmt.Sprintf("[%s] BuildDict", c.logPrefix), "took", time.Since(t))
-	}
 
 	cf, err := os.Create(c.tmpOutFilePath)
 	if err != nil {
 		return err
 	}
 	defer cf.Close()
-	t = time.Now()
+	t := time.Now()
 	if err := compressWithPatternCandidates(c.ctx, c.trace, c.Cfg, c.logPrefix, c.tmpOutFilePath, cf, c.uncompressedFile, db, c.lvl, c.logger); err != nil {
 		return err
 	}
@@ -752,6 +748,7 @@ func (r *Ring) Truncate(i int) {
 type DictAggregator struct {
 	collector     *etl.Collector
 	dist          map[int]int
+	receivedWords int
 	lastWord      []byte
 	lastWordScore uint64
 }
@@ -772,6 +769,7 @@ func (da *DictAggregator) aggLoadFunc(k, v []byte, table etl.CurrentTableReader,
 		da.dist[len(k)] = 0
 	}
 	da.dist[len(k)]++
+	da.receivedWords++
 
 	score := binary.BigEndian.Uint64(v)
 	if bytes.Equal(k, da.lastWord) {

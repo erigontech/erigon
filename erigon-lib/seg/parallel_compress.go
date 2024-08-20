@@ -926,6 +926,7 @@ func extractPatternsInSuperstrings(ctx context.Context, superstringCh chan []byt
 var produced int
 
 func DictionaryBuilderFromCollectors(ctx context.Context, cfg Cfg, logPrefix, tmpDir string, collectors []*etl.Collector, lvl log.Lvl, logger log.Logger) (*DictionaryBuilder, error) {
+	t := time.Now()
 	dictCollector := etl.NewCollector(logPrefix+"_collectDict", tmpDir, etl.NewSortableBuffer(etl.BufferOptimalSize/4), logger)
 	defer dictCollector.Close()
 	dictCollector.SortAndFlushInBackground(true)
@@ -960,6 +961,10 @@ func DictionaryBuilderFromCollectors(ctx context.Context, cfg Cfg, logPrefix, tm
 	db.finish(cfg.MaxDictPatterns)
 
 	db.Sort()
+	if lvl < log.LvlTrace {
+		logger.Log(lvl, fmt.Sprintf("[%s] BuildDict", logPrefix), "took", time.Since(t), "rev_total", dictAggregator.receivedWords, "recv_distribution", dictAggregator.dist)
+	}
+
 	return db, nil
 }
 
