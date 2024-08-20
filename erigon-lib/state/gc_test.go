@@ -117,10 +117,10 @@ func TestDomainGCReadAfterRemoveFile(t *testing.T) {
 	defer logEvery.Stop()
 	ctx := context.Background()
 
-	test := func(t *testing.T, d *Domain, db kv.RwDB, txs uint64) {
+	test := func(t *testing.T, h *Domain, db kv.RwDB, txs uint64) {
 		t.Helper()
 		require := require.New(t)
-		collateAndMerge(t, db, nil, d, txs)
+		collateAndMerge(t, db, nil, h, txs)
 
 		t.Run("read after: remove when have reader", func(t *testing.T) {
 			tx, err := db.BeginRo(ctx)
@@ -133,14 +133,13 @@ func TestDomainGCReadAfterRemoveFile(t *testing.T) {
 			// - close view
 			// - open new view
 			// - make sure there is no canDelete file
-			hc := d.BeginFilesRo()
+			hc := h.BeginFilesRo()
 			_ = hc
-			lastOnFs, _ := d.dirtyFiles.Max()
+			lastOnFs, _ := h.dirtyFiles.Max()
 			require.False(lastOnFs.frozen) // prepared dataset must have some non-frozen files. or it's bad dataset.
-			err = d.integrateMergedDirtyFiles([]*filesItem{lastOnFs}, nil, nil, nil, nil, nil)
-			require.NoError(err)
+			h.integrateMergedDirtyFiles([]*filesItem{lastOnFs}, nil, nil, nil, nil, nil)
 			require.NotNil(lastOnFs.decompressor)
-			d.reCalcVisibleFiles()
+			h.reCalcVisibleFiles()
 
 			lastInView := hc.files[len(hc.files)-1]
 			g := lastInView.src.decompressor.MakeGetter()
@@ -157,11 +156,11 @@ func TestDomainGCReadAfterRemoveFile(t *testing.T) {
 			hc.Close()
 			require.Nil(lastOnFs.decompressor)
 
-			nonDeletedOnFs, _ := d.dirtyFiles.Max()
+			nonDeletedOnFs, _ := h.dirtyFiles.Max()
 			require.False(nonDeletedOnFs.frozen)
 			require.NotNil(nonDeletedOnFs.decompressor) // non-canDelete files are not closed
 
-			hc = d.BeginFilesRo()
+			hc = h.BeginFilesRo()
 			newLastInView := hc.files[len(hc.files)-1]
 			require.False(lastOnFs.frozen)
 			require.False(lastInView.startTxNum == newLastInView.startTxNum && lastInView.endTxNum == newLastInView.endTxNum)
@@ -176,12 +175,11 @@ func TestDomainGCReadAfterRemoveFile(t *testing.T) {
 
 			// - del cold file
 			// - new reader must not see canDelete file
-			hc := d.BeginFilesRo()
-			lastOnFs, _ := d.dirtyFiles.Max()
+			hc := h.BeginFilesRo()
+			lastOnFs, _ := h.dirtyFiles.Max()
 			require.False(lastOnFs.frozen) // prepared dataset must have some non-frozen files. or it's bad dataset.
-			err = d.integrateMergedDirtyFiles([]*filesItem{lastOnFs}, nil, nil, nil, nil, nil)
-			require.NoError(err)
-			d.reCalcVisibleFiles()
+			h.integrateMergedDirtyFiles([]*filesItem{lastOnFs}, nil, nil, nil, nil, nil)
+			h.reCalcVisibleFiles()
 
 			require.NotNil(lastOnFs.decompressor)
 			hc.Close()
