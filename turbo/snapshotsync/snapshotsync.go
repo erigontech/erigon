@@ -549,7 +549,7 @@ func logStats(ctx context.Context, stats *proto_downloader.StatsReply, startTime
 			"upload", common.ByteCount(stats.UploadRate)+"/s",
 			"peers", stats.PeersUnique,
 			"files", stats.FilesTotal,
-			"no-metadata", fmt.Sprintf("%d", stats.FilesTotal-stats.MetadataReady),
+			"no-metadata", strconv.Itoa(int(stats.FilesTotal-stats.MetadataReady)),
 			"connections", stats.ConnectionsTotal,
 			"alloc", common.ByteCount(m.Alloc), "sys", common.ByteCount(m.Sys),
 		)
