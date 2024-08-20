@@ -507,20 +507,20 @@ func RemoteServices(ctx context.Context, cfg *httpcfg.HttpCfg, logger log.Logger
 					if err != nil {
 						return nil, nil, nil, nil, nil, nil, nil, ff, nil, err
 					}
-					engine = ethash.NewFaker()
-				} else {
-					var borKv kv.RoDB
-
-					// bor (consensus) specific db
-					borDbPath := filepath.Join(cfg.DataDir, "bor")
-					logger.Warn("[rpc] Opening Bor db", "path", borDbPath)
-					borKv, err = kv2.NewMDBX(logger).Path(borDbPath).Label(kv.ConsensusDB).Accede().Open(ctx)
-					if err != nil {
-						return nil, nil, nil, nil, nil, nil, nil, ff, nil, err
-					}
-					// Skip the compatibility check, until we have a schema in erigon-lib
-					engine = bor.NewRo(cc, borKv, blockReader, logger)
 				}
+
+				// NOTE: bor_* RPCs are not fully supported when using polygon.sync (https://github.com/erigontech/erigon/issues/11171)
+				var borKv kv.RoDB
+
+				// bor (consensus) specific db
+				borDbPath := filepath.Join(cfg.DataDir, "bor")
+				logger.Warn("[rpc] Opening Bor db", "path", borDbPath)
+				borKv, err = kv2.NewMDBX(logger).Path(borDbPath).Label(kv.ConsensusDB).Accede().Open(ctx)
+				if err != nil {
+					return nil, nil, nil, nil, nil, nil, nil, ff, nil, err
+				}
+				// Skip the compatibility check, until we have a schema in erigon-lib
+				engine = bor.NewRo(cc, borKv, blockReader, logger)
 			default:
 				engine = ethash.NewFaker()
 			}
