@@ -2657,8 +2657,83 @@ func SeedableFiles(dirs datadir.Dirs, chainName string, all bool) ([]string, err
 	if err != nil {
 		return nil, err
 	}
+	if err := checkDomainRangesCovered(dirs.Snap, l3); err != nil {
+		return nil, err
+	}
 	files = append(append(append(files, l1...), l2...), l3...)
 	return files, nil
+}
+
+func checkDomainRangesCovered(dir string, files []string) error {
+	ranges := make(map[string]map[string]struct{})
+	for _, f := range files {
+		df, _, ok := snaptype.ParseFileName(dir, f)
+		if !ok {
+			continue
+		}
+		parts := strings.Split(df.Name(), ".")
+		//rest := strings.Join(parts[1:], ".")
+		rng, ok := ranges[parts[1]]
+		if !ok {
+			ranges[parts[1]] = make(map[string]struct{})
+		}
+		_ = rng
+		ranges[parts[1]][parts[0]] = struct{}{} // 0-64.kv -> v1-account, v1-storage..
+	}
+
+	lengths := make(map[int][]string)
+	minL := math.MaxInt
+	maxL := 0
+	// all ranges should have same length
+	for rng, doms := range ranges {
+		lengths[len(doms)] = append(lengths[len(doms)], rng)
+		minL = min(minL, len(doms))
+		maxL = max(maxL, len(doms))
+	}
+	if minL != maxL && len(ranges) > 0 {
+		allDoms := ranges[lengths[maxL][0]]
+		haveDoms := ranges[lengths[minL][0]]
+		for d := range haveDoms {
+			delete(allDoms, d)
+		}
+
+		fmt.Printf("All ranges should be equal amongst domains, missing:\n")
+		for d := range allDoms {
+			fmt.Printf("  %s.%s.kv\n", d, lengths[minL][0])
+		}
+		if len(lengths) > 2 {
+			fmt.Printf("Other problematic ranges are:\n")
+			pr := ""
+			for l, rngs := range lengths {
+				if l == minL || l == maxL {
+					continue
+				}
+				for _, r := range rngs {
+					pr += r + ", "
+				}
+			}
+			fmt.Printf("	%s\n", pr)
+		}
+		fmt.Printf("Can fix with `erigon snapshots retire --datadir <> --chain <>`\n")
+		return errors.New("different number of domains in ranges")
+	}
+
+	// check gaps in correct range
+	from, to, prevTo := 0, 0, 0
+	for _, r := range lengths[maxL] {
+		_, err := fmt.Sscanf(r, "%d-%d", &from, &to)
+		if err != nil {
+			return err
+		}
+		if from != prevTo {
+			fmt.Printf("gap between %d and %d\n", prevTo, from)
+			fmt.Printf("Can fix with `erigon snapshots retire --datadir <> --chain <>`\n")
+			return fmt.Errorf("gap between %d and %d", prevTo, from)
+		}
+		prevTo = to
+	}
+
+	return nil
 }
 
 const ParallelVerifyFiles = 4 // keep it small, to allow big `PieceHashersPerTorrent`. More `PieceHashersPerTorrent` - faster handling of big files.
