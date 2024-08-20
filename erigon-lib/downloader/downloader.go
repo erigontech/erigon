@@ -2027,11 +2027,14 @@ func (d *Downloader) ReCalcStats(interval time.Duration) {
 		weebseedPeersOfThisFile := t.WebseedPeerConns()
 
 		tLen := t.Length()
-		bytesCompleted := t.BytesCompleted()
+		var bytesCompleted int64
 
 		if torrentComplete {
 			tComplete++
+			bytesCompleted = tLen
 			delete(downloading, torrentName)
+		} else {
+			bytesCompleted = t.BytesCompleted()
 		}
 
 		progress := float32(float64(100) * (float64(bytesCompleted) / float64(tLen)))
