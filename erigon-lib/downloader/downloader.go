@@ -1982,11 +1982,10 @@ func (d *Downloader) ReCalcStats(interval time.Duration) {
 	connStats := torrentClient.ConnStats()
 
 	stats.Completed = true
-	stats.BytesDownload = uint64(connStats.BytesReadUsefulIntendedData.Int64())
 	stats.BytesUpload = uint64(connStats.BytesWrittenData.Int64())
 	stats.BytesHashed = uint64(connStats.BytesHashed.Int64())
 	stats.BytesFlushed = uint64(connStats.BytesFlushed.Int64())
-	stats.BytesCompleted = uint64(connStats.BytesCompleted.Int64()) - stats.DroppedCompleted
+	stats.BytesDownload = uint64(connStats.BytesReadData.Int64())
 
 	lastMetadataReady := stats.MetadataReady
 
@@ -2009,6 +2008,9 @@ func (d *Downloader) ReCalcStats(interval time.Duration) {
 	var tComplete int
 	var torrentInfo int
 
+	downloadedBytes := int64(0)
+	totalBytes := int64(0)
+
 	for _, t := range torrents {
 		select {
 		case <-t.GotInfo():
@@ -2028,16 +2030,13 @@ func (d *Downloader) ReCalcStats(interval time.Duration) {
 		weebseedPeersOfThisFile := t.WebseedPeerConns()
 
 		tLen := t.Length()
-
-		var bytesCompleted int64
+		bytesCompleted := t.BytesCompleted()
 
 		if torrentComplete {
 			tComplete++
-			bytesCompleted = tLen
 			delete(downloading, torrentName)
-		} else {
-			bytesCompleted = t.BytesCompleted()
 		}
+
 		progress := float32(float64(100) * (float64(bytesCompleted) / float64(tLen)))
 
 		if info, ok := downloading[torrentName]; ok {
@@ -2047,8 +2046,8 @@ func (d *Downloader) ReCalcStats(interval time.Duration) {
 			}
 		}
 
-		stats.BytesCompleted += uint64(bytesCompleted)
-		stats.BytesTotal += uint64(tLen)
+		downloadedBytes += bytesCompleted
+		totalBytes += tLen
 
 		for _, peer := range peersOfThisFile {
 			stats.ConnectionsTotal++
@@ -2101,6 +2100,9 @@ func (d *Downloader) ReCalcStats(interval time.Duration) {
 		stats.Completed = stats.Completed && torrentComplete
 	}
 
+	stats.BytesCompleted = uint64(downloadedBytes)
+	stats.BytesTotal = uint64(totalBytes)
+
 	var webTransfers int32
 
 	if webDownloadClient != nil {
@@ -2126,6 +2128,7 @@ func (d *Downloader) ReCalcStats(interval time.Duration) {
 				}
 
 				stats.BytesCompleted += bytesCompleted
+				fmt.Println("BytesCompleted 3", stats.BytesCompleted)
 				stats.BytesTotal += tLen
 
 				stats.BytesDownload += bytesCompleted
