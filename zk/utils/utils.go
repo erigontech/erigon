@@ -2,6 +2,7 @@ package utils
 
 import (
 	"fmt"
+
 	libcommon "github.com/gateway-fm/cdk-erigon-lib/common"
 	"github.com/gateway-fm/cdk-erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/chain"

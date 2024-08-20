@@ -1,0 +1,46 @@
+name: Unwinds tests
+on:
+  pull_request:
+    branches:
+      - zkevm
+  workflow_dispatch:
+
+jobs:
+  fixing-unwinds-tests:
+    runs-on: ubuntu-20.04
+
+    steps:
+      - name: Checkout cdk-erigon
+        uses: actions/checkout@v4
+        with:
+          path: cdk-erigon
+
+      - uses: actions/setup-go@v4
+        with:
+          go-version: '1.19'
+
+      - name: Build
+        run: |
+          cd ./cdk-erigon
+          make cdk-erigon
+
+      - name: Prepare configs
+        run: |
+          cd ./cdk-erigon
+          cp ./zk/tests/unwinds/config/dynamic-integration8.yaml ./
+          cp ./zk/tests/unwinds/config/dynamic-integration-allocs.json ./
+          cp ./zk/tests/unwinds/config/dynamic-integration-chainspec.json ./
+          cp ./zk/tests/unwinds/config/dynamic-integration-conf.json ./
+
+      - name: Prepare data stream
+        run: |
+          cd ./cdk-erigon/zk/tests/unwinds/datastream
+          tar -xzf ./datastream-net8-upto-11318-101.zip ./
+
+      - name: Run tests
+        run: |
+          cd ./cdk-erigon
+          chmod +x ./zk/tests/unwinds/unwind.sh
+          ./zk/tests/unwinds/unwind.sh
+
+  
