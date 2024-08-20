@@ -901,8 +901,8 @@ func (b *BtIndex) keyCmp(k []byte, di uint64, g ArchiveGetter) (int, []byte, err
 		return 0, nil, fmt.Errorf("key at %d/%d not found, file: %s", di, b.ef.Count(), b.FileName())
 	}
 
-	//var res []byte
-	res, _ := g.Next(nil)
+	var res []byte
+	res, _ = g.Next(res[:0])
 
 	//TODO: use `b.getter.Match` after https://github.com/erigontech/erigon/issues/7855
 	return bytes.Compare(res, k), res, nil
