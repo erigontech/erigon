@@ -374,11 +374,6 @@ func (iit *InvertedIndexRoTx) Files() (res []string) {
 	return res
 }
 
-// Add - !NotThreadSafe. Must use WalRLock/BatchHistoryWriteEnd
-func (w *invertedIndexBufferedWriter) Add(key []byte) error {
-	return w.add(key, key)
-}
-
 func (iit *InvertedIndexRoTx) NewWriter() *invertedIndexBufferedWriter {
 	return iit.newWriter(iit.ii.dirs.Tmp, false)
 }
@@ -405,6 +400,24 @@ func loadFunc(k, v []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) 
 func (w *invertedIndexBufferedWriter) SetTxNum(txNum uint64) {
 	w.txNum = txNum
 	binary.BigEndian.PutUint64(w.txNumBytes[:], w.txNum)
+}
+
+// Add - !NotThreadSafe. Must use WalRLock/BatchHistoryWriteEnd
+func (w *invertedIndexBufferedWriter) Add(key []byte) error {
+	return w.add(key, key)
+}
+
+func (w *invertedIndexBufferedWriter) add(key, indexKey []byte) error {
+	if w.discard {
+		return nil
+	}
+	if err := w.indexKeys.Collect(w.txNumBytes[:], key); err != nil {
+		return err
+	}
+	if err := w.index.Collect(indexKey, w.txNumBytes[:]); err != nil {
+		return err
+	}
+	return nil
 }
 
 func (w *invertedIndexBufferedWriter) Flush(ctx context.Context, tx kv.RwTx) error {
@@ -454,19 +467,6 @@ func (iit *InvertedIndexRoTx) newWriter(tmpdir string, discard bool) *invertedIn
 	w.indexKeys.SortAndFlushInBackground(true)
 	w.index.SortAndFlushInBackground(true)
 	return w
-}
-
-func (w *invertedIndexBufferedWriter) add(key, indexKey []byte) error {
-	if w.discard {
-		return nil
-	}
-	if err := w.indexKeys.Collect(w.txNumBytes[:], key); err != nil {
-		return err
-	}
-	if err := w.index.Collect(indexKey, w.txNumBytes[:]); err != nil {
-		return err
-	}
-	return nil
 }
 
 func (ii *InvertedIndex) BeginFilesRo() *InvertedIndexRoTx {

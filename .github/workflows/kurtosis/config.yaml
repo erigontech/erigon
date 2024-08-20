@@ -3,9 +3,10 @@ participants_matrix:
     - el_type: geth
     - el_type: erigon
       el_image: <<ERIGON_IMAGE_PLACEHOLDER>>
+    - el_type: nethermind
   cl:
     - cl_type: lighthouse
-    - cl_type: teku
+    - cl_type: nimbus
 network_params:
   electra_fork_epoch: 1
   min_validator_withdrawability_delay: 1
@@ -19,13 +20,13 @@ assertoor_params:
   run_stability_check: false
   run_block_proposal_check: false
   tests:
-    - { file: "https://raw.githubusercontent.com/ethpandaops/assertoor-test/master/assertoor-tests/pectra-dev/wait-for-slot.yaml", id: "wait1", config: { slot: 34 }}
+    - { file: "https://raw.githubusercontent.com/ethpandaops/assertoor-test/master/assertoor-tests/pectra-dev/wait-for-slot.yaml", id: "wait1", config: { slot: 5 }}
     - https://raw.githubusercontent.com/ethpandaops/assertoor-test/master/assertoor-tests/all-opcodes-test.yaml
     #- https://raw.githubusercontent.com/ethpandaops/assertoor-test/master/assertoor-tests/blob-transactions-test.yaml
     #- https://raw.githubusercontent.com/ethpandaops/assertoor-test/master/assertoor-tests/dencun-opcodes-test.yaml
     #- https://raw.githubusercontent.com/ethpandaops/assertoor-test/master/assertoor-tests/eoa-transactions-test.yaml
     #- https://raw.githubusercontent.com/ethpandaops/assertoor-test/master/assertoor-tests/stability-check.yaml
-    - { file: "https://raw.githubusercontent.com/ethpandaops/assertoor-test/master/assertoor-tests/pectra-dev/wait-for-slot.yaml", id: "wait2", config: { slot: 38 }}
+    - { file: "https://raw.githubusercontent.com/ethpandaops/assertoor-test/master/assertoor-tests/pectra-dev/wait-for-slot.yaml", id: "wait2", config: { slot: 10 }}
     - https://raw.githubusercontent.com/ethpandaops/assertoor-test/master/assertoor-tests/synchronized-check.yaml
     #- https://raw.githubusercontent.com/ethpandaops/assertoor-test/master/assertoor-tests/validator-exit-test.yaml
     # - https://raw.githubusercontent.com/ethpandaops/assertoor-test/master/assertoor-tests/validator-lifecycle-test-v2.yaml
