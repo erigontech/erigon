@@ -2007,7 +2007,6 @@ func (d *Downloader) ReCalcStats(interval time.Duration) {
 	var torrentInfo int
 
 	downloadedBytes := int64(0)
-	totalBytes := int64(0)
 
 	for _, t := range torrents {
 		select {
@@ -2045,7 +2044,7 @@ func (d *Downloader) ReCalcStats(interval time.Duration) {
 		}
 
 		downloadedBytes += bytesCompleted
-		totalBytes += tLen
+		stats.BytesTotal += uint64(tLen)
 
 		for _, peer := range peersOfThisFile {
 			stats.ConnectionsTotal++
@@ -2099,7 +2098,6 @@ func (d *Downloader) ReCalcStats(interval time.Duration) {
 	}
 
 	stats.BytesCompleted = uint64(downloadedBytes)
-	stats.BytesTotal = uint64(totalBytes)
 
 	var webTransfers int32
 
