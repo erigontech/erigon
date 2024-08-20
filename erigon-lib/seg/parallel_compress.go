@@ -933,8 +933,11 @@ func DictionaryBuilderFromCollectors(ctx context.Context, cfg Cfg, logPrefix, tm
 	dictCollector.LogLvl(lvl)
 
 	var m runtime.MemStats
-	dbg.ReadMemStats(&m)
-	logger.Info("Before dict", "alloc", common.ByteCount(m.Alloc), "sys", common.ByteCount(m.Sys))
+	if lvl < log.LvlTrace {
+		runtime.GC()
+		dbg.ReadMemStats(&m)
+		logger.Log(lvl, "[dbg] RAM Before dict", "alloc", common.ByteCount(m.Alloc), "sys", common.ByteCount(m.Sys))
+	}
 	dictAggregator := &DictAggregator{collector: dictCollector, dist: map[int]int{}}
 	for _, collector := range collectors {
 		if err := collector.Load(nil, "", dictAggregator.aggLoadFunc, etl.TransformArgs{Quit: ctx.Done()}); err != nil {
@@ -948,15 +951,19 @@ func DictionaryBuilderFromCollectors(ctx context.Context, cfg Cfg, logPrefix, tm
 	// We need `maxDictPatterns` words with highest score - but input is not sorted by score (it's sorted by `word`)
 	// so, then let's just put to heap more items and then shrink at `finish()`
 	db := &DictionaryBuilder{softLimit: cfg.DictReducerSoftLimit}
-	runtime.GC()
-	dbg.ReadMemStats(&m)
-	logger.Info("Before dict2", "alloc", common.ByteCount(m.Alloc), "sys", common.ByteCount(m.Sys))
-
+	if lvl < log.LvlTrace {
+		runtime.GC()
+		dbg.ReadMemStats(&m)
+		logger.Log(lvl, "[dbg] RAM Before dict2", "alloc", common.ByteCount(m.Alloc), "sys", common.ByteCount(m.Sys))
+	}
 	if err := dictCollector.Load(nil, "", db.loadFunc, etl.TransformArgs{Quit: ctx.Done()}); err != nil {
 		return nil, err
 	}
-	dbg.ReadMemStats(&m)
-	logger.Info("After dict", "alloc", common.ByteCount(m.Alloc), "sys", common.ByteCount(m.Sys))
+	if lvl < log.LvlTrace {
+		runtime.GC()
+		dbg.ReadMemStats(&m)
+		logger.Log(lvl, "[dbg] RAM After dict", "alloc", common.ByteCount(m.Alloc), "sys", common.ByteCount(m.Sys))
+	}
 
 	db.finish(cfg.MaxDictPatterns)
 
