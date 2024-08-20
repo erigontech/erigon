@@ -969,7 +969,7 @@ func DictionaryBuilderFromCollectors(ctx context.Context, cfg Cfg, logPrefix, tm
 
 	db.Sort()
 	if lvl < log.LvlTrace {
-		logger.Log(lvl, fmt.Sprintf("[%s] BuildDict", logPrefix), "took", time.Since(t), "rev_total", dictAggregator.receivedWords, "recv_distribution", dictAggregator.dist)
+		logger.Log(lvl, fmt.Sprintf("[%s] BuildDict", logPrefix), "took", time.Since(t), "rev_total", dictAggregator.receivedWords, "recv_distribution", dictAggregator.dist, "hard_limit", cfg.MaxDictPatterns, "soft_limit", cfg.DictReducerSoftLimit)
 	}
 
 	return db, nil
