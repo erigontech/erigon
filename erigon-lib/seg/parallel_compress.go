@@ -268,7 +268,7 @@ func compressWithPatternCandidates(ctx context.Context, trace bool, cfg Cfg, log
 			c.Close()
 		}
 	}()
-	out := make(chan *CompressionWord, 10_000)
+	out := make(chan *CompressionWord, 1024)
 	var compressionQueue CompressionQueue
 	heap.Init(&compressionQueue)
 	queueLimit := 128 * 1024
