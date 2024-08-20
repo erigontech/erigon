@@ -42,7 +42,7 @@ type eventFetcher interface {
 }
 
 func Assemble(dataDir string, logger log.Logger, borConfig *borcfg.BorConfig, eventFetcher eventFetcher) *Bridge {
-	bridgeDB := polygoncommon.NewDatabase(dataDir, kv.PolygonBridgeDB, databaseTablesCfg, logger)
+	bridgeDB := polygoncommon.NewDatabase(dataDir, kv.PolygonBridgeDB, databaseTablesCfg, logger, false)
 	bridgeStore := NewStore(bridgeDB)
 	return NewBridge(bridgeStore, logger, borConfig, eventFetcher)
 }

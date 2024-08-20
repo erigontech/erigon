@@ -21,7 +21,7 @@ type Reader struct {
 }
 
 func AssembleReader(ctx context.Context, dataDir string, logger log.Logger, stateReceiverContractAddress string) (*Reader, error) {
-	bridgeDB := polygoncommon.NewDatabase(dataDir, kv.PolygonBridgeDB, databaseTablesCfg, logger)
+	bridgeDB := polygoncommon.NewDatabase(dataDir, kv.PolygonBridgeDB, databaseTablesCfg, logger, true)
 	bridgeStore := NewStore(bridgeDB)
 
 	err := bridgeStore.Prepare(ctx)
