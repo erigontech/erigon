@@ -29,6 +29,7 @@ import (
 	"math/bits"
 	"os"
 	"path/filepath"
+	"runtime"
 	"slices"
 	"sync"
 	"time"
@@ -63,7 +64,11 @@ type Cfg struct {
 	   | 32K      | 5Mb  | 39626Mb   | 3m0s      | 1m29s      |
 
 	*/
-	MaxDictPattens int
+	MaxDictPatterns int
+
+	// DictReducerSoftLimit - Before creating dict of size MaxDictPatterns - need order patterns by score, but with limited RAM usage.
+	// Worst case of Ram: `MaxPatternLen * DictReducerSoftLimit`
+	DictReducerSoftLimit int
 
 	// samplingFactor - skip superstrings if `superstringNumber % samplingFactor != 0`
 	SamplingFactor uint64
@@ -76,8 +81,10 @@ var DefaultCfg = Cfg{
 	MinPatternLen:   5,
 	MaxPatternLen:   128,
 	SamplingFactor:  4,
-	MaxDictPattens:  64 * 1024,
-	Workers:         1,
+	MaxDictPatterns: 64 * 1024,
+
+	DictReducerSoftLimit: 1_000_000,
+	Workers:              1,
 }
 
 // Compressor is the main operating type for performing per-word compression
@@ -222,15 +229,15 @@ func (c *Compressor) Compress() error {
 		c.superstrings <- c.superstring
 	}
 	close(c.superstrings)
+	runtime.GC()
 	c.wg.Wait()
+	runtime.GC()
 
 	if c.lvl < log.LvlTrace {
 		c.logger.Log(c.lvl, fmt.Sprintf("[%s] BuildDict start", c.logPrefix), "workers", c.Workers)
 	}
-	t := time.Now()
-	db, err := DictionaryBuilderFromCollectors(c.ctx, c.MaxDictPattens, c.logPrefix, c.tmpDir, c.suffixCollectors, c.lvl, c.logger)
+	db, err := DictionaryBuilderFromCollectors(c.ctx, c.Cfg, c.logPrefix, c.tmpDir, c.suffixCollectors, c.lvl, c.logger)
 	if err != nil {
-
 		return err
 	}
 	if c.trace {
@@ -240,16 +247,13 @@ func (c *Compressor) Compress() error {
 		}
 	}
 	defer os.Remove(c.tmpOutFilePath)
-	if c.lvl < log.LvlTrace {
-		c.logger.Log(c.lvl, fmt.Sprintf("[%s] BuildDict", c.logPrefix), "took", time.Since(t))
-	}
 
 	cf, err := os.Create(c.tmpOutFilePath)
 	if err != nil {
 		return err
 	}
 	defer cf.Close()
-	t = time.Now()
+	t := time.Now()
 	if err := compressWithPatternCandidates(c.ctx, c.trace, c.Cfg, c.logPrefix, c.tmpOutFilePath, cf, c.uncompressedFile, db, c.lvl, c.logger); err != nil {
 		return err
 	}
@@ -299,12 +303,12 @@ const superstringLimit = 16 * 1024 * 1024
 type DictionaryBuilder struct {
 	lastWord      []byte
 	items         []*Pattern
-	limit         int
+	softLimit     int
 	lastWordScore uint64
 }
 
-func (db *DictionaryBuilder) Reset(limit int) {
-	db.limit = limit
+func (db *DictionaryBuilder) Reset(softLimit int) {
+	db.softLimit = softLimit
 	db.items = db.items[:0]
 }
 
@@ -343,7 +347,7 @@ func (db *DictionaryBuilder) Pop() interface{} {
 
 func (db *DictionaryBuilder) processWord(chars []byte, score uint64) {
 	heap.Push(db, &Pattern{word: common.Copy(chars), score: score})
-	if db.Len() > db.limit {
+	if db.Len() > db.softLimit {
 		// Remove the element with smallest score
 		heap.Pop(db)
 	}
@@ -363,9 +367,14 @@ func (db *DictionaryBuilder) loadFunc(k, v []byte, table etl.CurrentTableReader,
 	return nil
 }
 
-func (db *DictionaryBuilder) finish() {
+func (db *DictionaryBuilder) finish(hardLimit int) {
 	if db.lastWord != nil {
 		db.processWord(db.lastWord, db.lastWordScore)
+	}
+
+	if db.Len() > hardLimit {
+		// Remove the element with smallest score
+		heap.Pop(db)
 	}
 }
 
@@ -739,6 +748,7 @@ func (r *Ring) Truncate(i int) {
 type DictAggregator struct {
 	collector     *etl.Collector
 	dist          map[int]int
+	receivedWords int
 	lastWord      []byte
 	lastWordScore uint64
 }
@@ -759,6 +769,7 @@ func (da *DictAggregator) aggLoadFunc(k, v []byte, table etl.CurrentTableReader,
 		da.dist[len(k)] = 0
 	}
 	da.dist[len(k)]++
+	da.receivedWords++
 
 	score := binary.BigEndian.Uint64(v)
 	if bytes.Equal(k, da.lastWord) {
