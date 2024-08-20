@@ -60,12 +60,12 @@ func (br *BlockRetire) retireBorBlocks(ctx context.Context, minBlockNum uint64, 
 	blocksRetired := false
 
 	minBlockNum = max(blockReader.FrozenBorBlocks(), minBlockNum)
-	for _, snaptype := range blockReader.BorSnapshots().Types() {
+	for _, snap := range blockReader.BorSnapshots().Types() {
 		if maxBlockNum <= minBlockNum {
 			continue
 		}
 
-		blockFrom, blockTo, ok := CanRetire(maxBlockNum, minBlockNum, snaptype.Enum(), br.chainConfig)
+		blockFrom, blockTo, ok := CanRetire(maxBlockNum, minBlockNum, snap.Enum(), br.chainConfig)
 		if ok {
 			blocksRetired = true
 
@@ -75,12 +75,20 @@ func (br *BlockRetire) retireBorBlocks(ctx context.Context, minBlockNum uint64, 
 				return false, nil
 			}
 
-			logger.Log(lvl, "[bor snapshots] Retire Bor Blocks", "type", snaptype,
+			logger.Log(lvl, "[bor snapshots] Retire Bor Blocks", "type", snap,
 				"range", fmt.Sprintf("%s-%s", common.PrettyCounter(blockFrom), common.PrettyCounter(blockTo)))
 
-			for i := blockFrom; i < blockTo; i = chooseSegmentEnd(i, blockTo, snaptype.Enum(), chainConfig) {
-				end := chooseSegmentEnd(i, blockTo, snaptype.Enum(), chainConfig)
-				if _, err := snaptype.ExtractRange(ctx, snaptype.FileInfo(snapshots.Dir(), i, end), nil, db, chainConfig, tmpDir, workers, lvl, logger); err != nil {
+			var firstKeyGetter snaptype.FirstKeyGetter
+
+			if snap.Enum() == borsnaptype.BorEvents.Enum() {
+				firstKeyGetter = func(ctx context.Context) uint64 {
+					return max(1, blockReader.LastFrozenEventId())
+				}
+			}
+
+			for i := blockFrom; i < blockTo; i = chooseSegmentEnd(i, blockTo, snap.Enum(), chainConfig) {
+				end := chooseSegmentEnd(i, blockTo, snap.Enum(), chainConfig)
+				if _, err := snap.ExtractRange(ctx, snap.FileInfo(snapshots.Dir(), i, end), firstKeyGetter, db, chainConfig, tmpDir, workers, lvl, logger); err != nil {
 					return ok, fmt.Errorf("ExtractRange: %d-%d: %w", i, end, err)
 				}
 			}
