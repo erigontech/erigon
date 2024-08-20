@@ -121,9 +121,8 @@ type AggStats struct {
 	Completed bool
 	Progress  float32
 
-	BytesCompleted, BytesTotal     uint64
-	CompletionRate                 uint64
-	DroppedCompleted, DroppedTotal uint64
+	BytesCompleted, BytesTotal uint64
+	CompletionRate             uint64
 
 	BytesDownload, BytesUpload uint64
 	UploadRate, DownloadRate   uint64
@@ -1989,8 +1988,7 @@ func (d *Downloader) ReCalcStats(interval time.Duration) {
 
 	lastMetadataReady := stats.MetadataReady
 
-	stats.BytesTotal, stats.ConnectionsTotal, stats.MetadataReady =
-		atomic.LoadUint64(&stats.DroppedTotal), 0, 0
+	stats.BytesTotal, stats.ConnectionsTotal, stats.MetadataReady = 0, 0, 0
 
 	var zeroProgress []string
 	var noMetadata []string
