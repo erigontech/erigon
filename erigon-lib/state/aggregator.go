@@ -173,7 +173,7 @@ func NewAggregator(ctx context.Context, dirs datadir.Dirs, aggregationStep uint6
 			withLocalityIndex: false, withExistenceIndex: false, compression: CompressNone, historyLargeValues: false,
 		},
 		restrictSubsetFileDeletions: a.commitmentValuesTransform,
-		compress:                    CompressKeys | CompressVals,
+		compress:                    CompressNone,
 	}
 	if a.d[kv.StorageDomain], err = NewDomain(cfg, aggregationStep, kv.StorageDomain, kv.TblStorageVals, kv.TblStorageHistoryKeys, kv.TblStorageHistoryVals, kv.TblStorageIdx, integrityCheck, logger); err != nil {
 		return nil, err
@@ -196,7 +196,7 @@ func NewAggregator(ctx context.Context, dirs datadir.Dirs, aggregationStep uint6
 		},
 		replaceKeysInValues:         a.commitmentValuesTransform,
 		restrictSubsetFileDeletions: a.commitmentValuesTransform,
-		compress:                    CompressNone,
+		compress:                    CompressKeys,
 	}
 	if a.d[kv.CommitmentDomain], err = NewDomain(cfg, aggregationStep, kv.CommitmentDomain, kv.TblCommitmentVals, kv.TblCommitmentHistoryKeys, kv.TblCommitmentHistoryVals, kv.TblCommitmentIdx, integrityCheck, logger); err != nil {
 		return nil, err
