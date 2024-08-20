@@ -251,6 +251,35 @@ type ValidateHeaderTimeSignerSuccessionNumber interface {
 	GetSignerSuccessionNumber(signer libcommon.Address, number uint64) (int, error)
 }
 
+func CalculateEventWindow(ctx context.Context, config *borcfg.BorConfig, header *types.Header, tx kv.Getter, headerReader services.HeaderReader) (from time.Time, to time.Time, err error) {
+
+	blockNum := header.Number.Uint64()
+	blockNum += blockNum % config.CalculateSprintLength(blockNum)
+
+	prevHeader, err := headerReader.HeaderByNumber(ctx, tx, blockNum-config.CalculateSprintLength(blockNum))
+
+	if err != nil {
+		return time.Time{}, time.Time{}, fmt.Errorf("window calculation failed: %w", err)
+	}
+
+	if config.IsIndore(blockNum) {
+		stateSyncDelay := config.CalculateStateSyncDelay(blockNum)
+		to = time.Unix(int64(header.Time-stateSyncDelay), 0)
+		from = time.Unix(int64(prevHeader.Time-stateSyncDelay), 0)
+	} else {
+		to = time.Unix(int64(prevHeader.Time), 0)
+		prevHeader, err := headerReader.HeaderByNumber(ctx, tx, prevHeader.Number.Uint64()-config.CalculateSprintLength(prevHeader.Number.Uint64()))
+
+		if err != nil {
+			return time.Time{}, time.Time{}, fmt.Errorf("window calculation failed: %w", err)
+		}
+
+		from = time.Unix(int64(prevHeader.Time), 0)
+	}
+
+	return from, to, nil
+}
+
 type spanReader interface {
 	Span(ctx context.Context, id uint64) (*heimdall.Span, bool, error)
 }
@@ -1510,49 +1539,6 @@ func (c *Bor) CommitStates(
 	}
 
 	events := chain.Chain.BorEventsByBlock(header.Hash(), blockNum)
-
-	//if len(events) == 50 || len(events) == 0 { // we still sometime could get 0 events from borevent file
-	if blockNum <= chain.Chain.FrozenBorBlocks() && len(events) == 50 { // we still sometime could get 0 events from borevent file
-		var to time.Time
-		if c.config.IsIndore(blockNum) {
-			stateSyncDelay := c.config.CalculateStateSyncDelay(blockNum)
-			to = time.Unix(int64(header.Time-stateSyncDelay), 0)
-		} else {
-			pHeader := chain.Chain.GetHeaderByNumber(blockNum - c.config.CalculateSprintLength(blockNum))
-			to = time.Unix(int64(pHeader.Time), 0)
-		}
-
-		startEventID := chain.Chain.BorStartEventID(header.Hash(), blockNum)
-		log.Warn("[dbg] fallback to remote bor events", "blockNum", blockNum, "startEventID", startEventID, "events_from_db_or_snaps", len(events))
-		remote, err := c.HeimdallClient.FetchStateSyncEvents(context.Background(), startEventID, to, 0)
-		if err != nil {
-			return err
-		}
-		if len(remote) > 0 {
-			chainID := c.chainConfig.ChainID.String()
-
-			var merged []*heimdall.EventRecordWithTime
-			events = events[:0]
-			for _, event := range remote {
-				if event.ChainID != chainID {
-					continue
-				}
-				if event.Time.After(to) {
-					continue
-				}
-				merged = append(merged, event)
-			}
-
-			for _, ev := range merged {
-				data, err := ev.MarshallBytes()
-				if err != nil {
-					panic(err)
-				}
-
-				events = append(events, data)
-			}
-		}
-	}
 
 	for _, event := range events {
 		if err := c.stateReceiver.CommitState(event, syscall); err != nil {

@@ -29,6 +29,7 @@ import (
 
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon/core/types"
+	"github.com/erigontech/erigon/polygon/bor"
 	"github.com/erigontech/erigon/polygon/bor/borcfg"
 	"github.com/erigontech/erigon/polygon/heimdall"
 	"github.com/erigontech/erigon/turbo/services"
@@ -409,26 +410,22 @@ func fetchAndWriteHeimdallStateSyncEvents(
 	heimdallClient heimdall.HeimdallClient,
 	chainID string,
 	logPrefix string,
-	logger log.Logger,
-) (uint64, int, time.Duration, error) {
+	logger log.Logger) (uint64, int, time.Duration, error) {
 	fetchStart := time.Now()
 	// Find out the latest eventId
-	var (
-		from uint64
-		to   time.Time
-	)
+	var fromId uint64
 
 	blockNum := header.Number.Uint64()
 
-	if config.IsIndore(blockNum) {
-		stateSyncDelay := config.CalculateStateSyncDelay(blockNum)
-		to = time.Unix(int64(header.Time-stateSyncDelay), 0)
-	} else {
-		pHeader, err := blockReader.HeaderByNumber(ctx, tx, blockNum-config.CalculateSprintLength(blockNum))
-		if err != nil {
-			return lastStateSyncEventID, 0, time.Since(fetchStart), err
-		}
-		to = time.Unix(int64(pHeader.Time), 0)
+	if blockNum%config.CalculateSprintLength(blockNum) != 0 || blockNum == 0 {
+		// we fetch events only at beginning of each sprint
+		return lastStateSyncEventID, 0, 0, nil
+	}
+
+	from, to, err := bor.CalculateEventWindow(ctx, config, header, tx, blockReader)
+
+	if err != nil {
+		return lastStateSyncEventID, 0, time.Since(fetchStart), err
 	}
 
 	fetchTo := to
@@ -450,15 +447,15 @@ func fetchAndWriteHeimdallStateSyncEvents(
 	}
 	*/
 
-	from = lastStateSyncEventID + 1
+	fromId = lastStateSyncEventID + 1
 
 	logger.Trace(
 		fmt.Sprintf("[%s] Fetching state updates from Heimdall", logPrefix),
-		"fromID", from,
+		"fromId", fromId,
 		"to", to.Format(time.RFC3339),
 	)
 
-	eventRecords, err := heimdallClient.FetchStateSyncEvents(ctx, from, fetchTo, fetchLimit)
+	eventRecords, err := heimdallClient.FetchStateSyncEvents(ctx, fromId, fetchTo, fetchLimit)
 
 	if err != nil {
 		return lastStateSyncEventID, 0, time.Since(fetchStart), err
@@ -477,19 +474,36 @@ func fetchAndWriteHeimdallStateSyncEvents(
 	}
 
 	wroteIndex := false
+
+	var initialRecordTime *time.Time
+
 	for i, eventRecord := range eventRecords {
 		if eventRecord.ID <= lastStateSyncEventID {
 			continue
 		}
 
-		if lastStateSyncEventID+1 != eventRecord.ID || eventRecord.ChainID != chainID || !eventRecord.Time.Before(to) {
-			return lastStateSyncEventID, i, time.Since(fetchStart), fmt.Errorf(
-				"invalid event record received %s, %s, %s, %s",
-				fmt.Sprintf("blockNum=%d", blockNum),
-				fmt.Sprintf("eventId=%d (exp %d)", eventRecord.ID, lastStateSyncEventID+1),
-				fmt.Sprintf("chainId=%s (exp %s)", eventRecord.ChainID, chainID),
-				fmt.Sprintf("time=%s (exp to %s)", eventRecord.Time, to),
-			)
+		// Note: this check is only valid for events with eventRecord.ID > lastStateSyncEventID
+		var afterCheck = func(limitTime time.Time, eventTime time.Time, initialTime *time.Time) bool {
+			if initialTime == nil {
+				return eventTime.After(from)
+			}
+
+			return initialTime.After(from)
+		}
+
+		// don't apply this for devnets we may have looser state event constraints
+		// (TODO these probably needs fixing)
+		if !(chainID == "1337") {
+			if lastStateSyncEventID+1 != eventRecord.ID || eventRecord.ChainID != chainID ||
+				!(afterCheck(from, eventRecord.Time, initialRecordTime) && eventRecord.Time.Before(to)) {
+				return lastStateSyncEventID, i, time.Since(fetchStart), fmt.Errorf(
+					"invalid event record received %s, %s, %s, %s",
+					fmt.Sprintf("blockNum=%d", blockNum),
+					fmt.Sprintf("eventId=%d (exp %d)", eventRecord.ID, lastStateSyncEventID+1),
+					fmt.Sprintf("chainId=%s (exp %s)", eventRecord.ChainID, chainID),
+					fmt.Sprintf("time=%s (exp from %s, to %s)", eventRecord.Time, from, to),
+				)
+			}
 		}
 
 		data, err := eventRecord.MarshallBytes()
@@ -512,6 +526,11 @@ func fetchAndWriteHeimdallStateSyncEvents(
 			}
 
 			wroteIndex = true
+		}
+
+		if initialRecordTime == nil {
+			eventTime := eventRecord.Time
+			initialRecordTime = &eventTime
 		}
 
 		lastStateSyncEventID++

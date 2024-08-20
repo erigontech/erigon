@@ -85,9 +85,9 @@ type Appendable struct {
 
 	noFsync bool // fsync is enabled by default, but tests can manually disable
 
-	compression     FileCompression
-	compressWorkers int
-	indexList       idxList
+	compressCfg seg.Cfg
+	compression FileCompression
+	indexList   idxList
 }
 
 type AppendableCfg struct {
@@ -102,16 +102,19 @@ func NewAppendable(cfg AppendableCfg, aggregationStep uint64, filenameBase, tabl
 	if cfg.Dirs.SnapHistory == "" {
 		panic("empty `dirs` varialbe")
 	}
+	compressCfg := seg.DefaultCfg
+	compressCfg.Workers = 1
 	ap := Appendable{
 		cfg:             cfg,
 		dirtyFiles:      btree2.NewBTreeGOptions[*filesItem](filesItemLess, btree2.Options{Degree: 128, NoLocks: false}),
 		aggregationStep: aggregationStep,
 		filenameBase:    filenameBase,
 		table:           table,
-		compressWorkers: 1,
-		integrityCheck:  integrityCheck,
-		logger:          logger,
+		compressCfg:     compressCfg,
 		compression:     CompressNone, //CompressKeys | CompressVals,
+
+		integrityCheck: integrityCheck,
+		logger:         logger,
 	}
 	ap.indexList = withHashMap
 	ap._visibleFiles = []visibleFile{}
@@ -690,7 +693,7 @@ func (ap *Appendable) collate(ctx context.Context, step uint64, roTx kv.Tx) (App
 		}
 	}()
 
-	comp, err := seg.NewCompressor(ctx, "collate "+ap.filenameBase, coll.iiPath, ap.cfg.Dirs.Tmp, seg.MinPatternScore, ap.compressWorkers, log.LvlTrace, ap.logger)
+	comp, err := seg.NewCompressor(ctx, "collate "+ap.filenameBase, coll.iiPath, ap.cfg.Dirs.Tmp, ap.compressCfg, log.LvlTrace, ap.logger)
 	if err != nil {
 		return coll, fmt.Errorf("create %s compressor: %w", ap.filenameBase, err)
 	}

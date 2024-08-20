@@ -1177,7 +1177,7 @@ func (r *BlockReader) IntegrityTxnID(failFast bool) error {
 				log.Error(err.Error())
 			}
 		}
-		expectedFirstTxnID = b.BaseTxnID.LastSystemTx(uint32(sn.src.Count())) + 1 // +1 to move to first baseTxId of next block aka its first system tx
+		expectedFirstTxnID = expectedFirstTxnID + uint64(sn.src.Count())
 	}
 	return nil
 }
@@ -1491,18 +1491,17 @@ func (r *BlockReader) EventsByIdFromSnapshot(from uint64, to time.Time, limit in
 			}
 			if event.Time.After(to) {
 				maxTime = true
-				goto BREAK
+				return result, maxTime, nil
 			}
 
 			result = append(result, &event)
 
 			if len(result) == limit {
-				goto BREAK
+				return result, maxTime, nil
 			}
 		}
 	}
 
-BREAK:
 	return result, maxTime, nil
 }
 
@@ -1546,10 +1545,14 @@ func (r *BlockReader) LastFrozenEventId() uint64 {
 	}
 	// find the last segment which has a built index
 	var lastSegment *VisibleSegment
-	for i := len(segments.VisibleSegments) - 1; i >= 0; i-- {
-		if segments.VisibleSegments[i].src.Index() != nil {
-			lastSegment = segments.VisibleSegments[i]
-			break
+	visibleSegments := segments.VisibleSegments
+	for i := len(visibleSegments) - 1; i >= 0; i-- {
+		if visibleSegments[i].src.Index() != nil {
+			gg := visibleSegments[i].src.MakeGetter()
+			if gg.HasNext() {
+				lastSegment = visibleSegments[i]
+				break
+			}
 		}
 	}
 	if lastSegment == nil {
