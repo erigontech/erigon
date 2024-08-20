@@ -20,6 +20,7 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
+	"time"
 	"unsafe"
 
 	"github.com/c2h5oh/datasize"
@@ -134,6 +135,7 @@ type Node struct {
 }
 
 func (b *BpsTree) WarmUp(kv ArchiveGetter) error {
+	t := time.Now()
 	N := b.offt.Count()
 	if N == 0 {
 		return nil
@@ -163,7 +165,8 @@ func (b *BpsTree) WarmUp(kv ArchiveGetter) error {
 
 	log.Root().Debug("WarmUp finished", "file", kv.FileName(), "M", b.M, "N", N,
 		"cached", fmt.Sprintf("%d %%%.5f", len(b.mx), float64(len(b.mx))/float64(N)*100),
-		"cacheSize", datasize.ByteSize(cachedBytes).HR(), "fileSize", datasize.ByteSize(kv.Size()).HR())
+		"cacheSize", datasize.ByteSize(cachedBytes).HR(), "fileSize", datasize.ByteSize(kv.Size()).HR(),
+		"took", time.Since(t))
 	return nil
 }
 
