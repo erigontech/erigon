@@ -61,17 +61,17 @@ type InvertedIndex struct {
 	// dirtyFiles - list of ALL files - including: un-indexed-yet, garbage, merged-into-bigger-one, ...
 	// thread-safe, but maybe need 1 RWLock for all trees in Aggregator
 	//
-	// _visibleFiles derivative from field `file`, but without garbage:
+	// _visible derivative from field `file`, but without garbage:
 	//  - no files with `canDelete=true`
 	//  - no overlaps
 	//  - no un-indexed files (`power-off` may happen between .ef and .efi creation)
 	//
-	// BeginRo() using _visibleFiles in zero-copy way
+	// BeginRo() using _visible in zero-copy way
 	dirtyFiles *btree2.BTreeG[*filesItem]
 
-	// _visibleFiles - underscore in name means: don't use this field directly, use BeginFilesRo()
+	// `_visible.files` - underscore in name means: don't use this field directly, use BeginFilesRo()
 	// underlying array is immutable - means it's ready for zero-copy use
-	_visibleFiles *iiVisible
+	_visible *iiVisible
 
 	indexKeysTable  string // txnNum_u64 -> key (k+auto_increment)
 	indexTable      string // k -> txnNum_u64 , Needs to be table with DupSort
@@ -123,7 +123,7 @@ func NewInvertedIndex(cfg iiCfg, aggregationStep uint64, filenameBase, indexKeys
 	}
 	ii.indexList = withHashMap
 
-	ii._visibleFiles = newIIVisible(ii.filenameBase, []visibleFile{})
+	ii._visible = newIIVisible(ii.filenameBase, []visibleFile{})
 
 	return &ii, nil
 }
@@ -233,7 +233,7 @@ var (
 )
 
 func (ii *InvertedIndex) reCalcVisibleFiles() {
-	ii._visibleFiles = newIIVisible(ii.filenameBase, calcVisibleFiles(ii.dirtyFiles, ii.indexList, false))
+	ii._visible = newIIVisible(ii.filenameBase, calcVisibleFiles(ii.dirtyFiles, ii.indexList, false))
 }
 
 func (ii *InvertedIndex) missedAccessors() (l []*filesItem) {
@@ -478,15 +478,16 @@ func (w *invertedIndexBufferedWriter) add(key, indexKey []byte) error {
 }
 
 func (ii *InvertedIndex) BeginFilesRo() *InvertedIndexRoTx {
-	files := ii._visibleFiles.files
+	files := ii._visible.files
 	for i := 0; i < len(files); i++ {
 		if !files[i].src.frozen {
 			files[i].src.refcount.Add(1)
 		}
 	}
 	return &InvertedIndexRoTx{
-		ii:    ii,
-		files: files,
+		ii:      ii,
+		visible: ii._visible,
+		files:   files,
 	}
 }
 func (iit *InvertedIndexRoTx) Close() {
@@ -514,7 +515,7 @@ func (iit *InvertedIndexRoTx) Close() {
 		r.Close()
 	}
 
-	iit.ii._visibleFiles.returnSeekInFilesCache(iit.seekInFilesCache)
+	iit.visible.returnSeekInFilesCache(iit.seekInFilesCache)
 }
 
 type MergeRange struct {
@@ -537,6 +538,7 @@ func (mr *MergeRange) Equal(other *MergeRange) bool {
 type InvertedIndexRoTx struct {
 	ii      *InvertedIndex
 	files   visibleFiles
+	visible *iiVisible
 	getters []ArchiveGetter
 	readers []*recsplit.IndexReader
 
@@ -585,7 +587,7 @@ func (iit *InvertedIndexRoTx) seekInFiles(key []byte, txNum uint64) (found bool,
 	hi, lo := iit.hashKey(key)
 
 	if iit.seekInFilesCache == nil {
-		iit.seekInFilesCache = iit.ii._visibleFiles.newSeekInFilesCache()
+		iit.seekInFilesCache = iit.visible.newSeekInFilesCache()
 	}
 
 	if iit.seekInFilesCache != nil {
