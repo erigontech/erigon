@@ -400,7 +400,7 @@ func (h *History) buildVI(ctx context.Context, historyIdxPath string, hist, efHi
 
 	var keyBuf, valBuf []byte
 	histReader := NewArchiveGetter(hist.MakeGetter(), h.compression)
-	efHistReader := NewArchiveGetter(efHist.MakeGetter(), CompressNone)
+	efHistReader := NewArchiveGetter(efHist.MakeGetter(), h.InvertedIndex.compression)
 
 	for {
 		histReader.Reset(0)
