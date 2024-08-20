@@ -256,7 +256,7 @@ func New(
 	opts = append(opts, libp2p.ConnectionGater(gater))
 
 	host, err := libp2p.New(opts...)
-	signal.Reset(syscall.SIGINT, syscall.SIGTERM)
+	signal.Reset(syscall.SIGINT)
 	if err != nil {
 		return nil, err
 	}
