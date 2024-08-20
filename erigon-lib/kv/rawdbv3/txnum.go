@@ -90,10 +90,12 @@ func (t TxNumsReader) Max(tx kv.Tx, blockNum uint64) (maxTxNum uint64, err error
 		return 0, err
 	}
 	defer c.Close()
-
-	maxTxNum, ok, err := t.readTxNumFunc(tx, c, blockNum)
-	if !ok {
-		_, v, err := c.Last()
+	_, v, err := c.SeekExact(k[:])
+	if err != nil {
+		return 0, err
+	}
+	if len(v) == 0 {
+		_, v, err = c.Last()
 		if err != nil {
 			return 0, err
 		}
@@ -101,7 +103,7 @@ func (t TxNumsReader) Max(tx kv.Tx, blockNum uint64) (maxTxNum uint64, err error
 			return 0, nil
 		}
 	}
-	return maxTxNum, nil
+	return binary.BigEndian.Uint64(v), nil
 }
 
 // Min = `max(blockNum-1)+1` returns minTxNum in given block. If block not found - return last available value (`latest`/`pending` state)
@@ -109,8 +111,6 @@ func (t TxNumsReader) Min(tx kv.Tx, blockNum uint64) (maxTxNum uint64, err error
 	if blockNum == 0 {
 		return 0, nil
 	}
-	var k [8]byte
-	binary.BigEndian.PutUint64(k[:], blockNum-1)
 	c, err := tx.Cursor(kv.MaxTxNum)
 	if err != nil {
 		return 0, err
@@ -130,6 +130,7 @@ func (t TxNumsReader) Min(tx kv.Tx, blockNum uint64) (maxTxNum uint64, err error
 		if len(v) == 0 {
 			return 0, nil
 		}
+		return binary.BigEndian.Uint64(v) + 1, nil
 	}
 	return maxTxNum + 1, nil
 }

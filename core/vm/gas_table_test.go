@@ -201,7 +201,7 @@ func TestCreateGas(t *testing.T) {
 		txc.Doms = domains
 
 		stateReader = rpchelper.NewLatestStateReader(tx)
-		stateWriter = rpchelper.NewLatestStateWriter(txc, rawdbv3.TxNums, 0)
+		stateWriter = rpchelper.NewLatestStateWriter(txc, nil, 0)
 
 		s := state.New(stateReader)
 		s.CreateAccount(address, true)

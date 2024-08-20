@@ -344,7 +344,19 @@ func (r *RemoteBlockReader) LastCheckpointId(ctx context.Context, tx kv.Tx) (uin
 	return 0, false, errors.New("not implemented")
 }
 func (r *RemoteBlockReader) CanonicalBodyForStorage(ctx context.Context, tx kv.Getter, blockNum uint64) (body *types.BodyForStorage, err error) {
-	panic("not implemented")
+	bdRaw, err := r.client.CanonicalBodyForStorage(ctx, &remote.CanonicalBodyForStorageRequest{BlockNumber: blockNum})
+	if err != nil {
+		return nil, err
+	}
+	if len(bdRaw.Body) == 0 {
+		return nil, nil
+	}
+	body = &types.BodyForStorage{}
+	err = rlp.Decode(bytes.NewReader(bdRaw.Body), body)
+	if err != nil {
+		return nil, err
+	}
+	return body, nil
 }
 func (r *RemoteBlockReader) Checkpoint(ctx context.Context, tx kv.Getter, spanId uint64) ([]byte, error) {
 	return nil, nil
@@ -1846,20 +1858,17 @@ func ReadTxNumFuncFromBlockReader(ctx context.Context, r services.FullBlockReade
 		if err != nil {
 			return
 		}
-		if ok {
-			fmt.Println("Henlo3", blockNum)
+		if ok || r == nil {
 			return
 		}
 		b, err := r.CanonicalBodyForStorage(ctx, tx, blockNum)
 		if err != nil {
 			return 0, false, err
 		}
-		fmt.Println("Henlo2", b, blockNum)
 		if b == nil {
 			return 0, false, nil
 		}
 		ret := b.BaseTxnID.U64() + uint64(b.TxCount) - 1
-		fmt.Println("Henlo", ret)
 		return ret, true, nil
 	}
 

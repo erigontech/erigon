@@ -154,7 +154,7 @@ func (d *Dumper) DumpToCollector(c DumpCollector, excludeCode, excludeStorage bo
 	if err != nil {
 		return nil, err
 	}
-	txNumForStorage, err := d.txNumsReader.Min(ttx, d.blockNumber)
+	txNumForStorage, err := d.txNumsReader.Min(ttx, d.blockNumber+1)
 	if err != nil {
 		return nil, err
 	}
