@@ -66,13 +66,16 @@ import (
 	"github.com/erigontech/erigon/turbo/shards"
 )
 
-var execStepsInDB = metrics.NewGauge(`exec_steps_in_db`) //nolint
-var execRepeats = metrics.NewCounter(`exec_repeats`)     //nolint
-var execTriggers = metrics.NewCounter(`exec_triggers`)   //nolint
-const changesetBlockRange = 1_000                        // Generate changeset only if execution of blocks <= changesetBlockRange
+var (
+	mxExecStepsInDB    = metrics.NewGauge(`exec_steps_in_db`) //nolint
+	mxExecRepeats      = metrics.NewCounter(`exec_repeats`)   //nolint
+	mxExecTriggers     = metrics.NewCounter(`exec_triggers`)  //nolint
+	mxExecTransactions = metrics.NewCounter(`exec_txns`)
+	mxExecGas          = metrics.NewCounter(`exec_gas`)
+	mxExecBlocks       = metrics.NewGauge("exec_blocks")
+)
 
-var exexTxPerSec = metrics.NewSummary(`exec_tps`)
-var execMgasPerSec = metrics.NewSummary(`exec_mgass`)
+const changesetBlockRange = 1_000 // Generate changeset only if execution of blocks <= changesetBlockRange
 
 func NewProgress(prevOutputBlockNum, commitThreshold uint64, workersCount int, updateMetrics bool, logPrefix string, logger log.Logger) *Progress {
 	return &Progress{prevTime: time.Now(), prevOutputBlockNum: prevOutputBlockNum, commitThreshold: commitThreshold, workersCount: workersCount, logPrefix: logPrefix, logger: logger}
@@ -86,20 +89,18 @@ type Progress struct {
 	prevRepeatCount    uint64
 	commitThreshold    uint64
 
-	workersCount  int
-	logPrefix     string
-	logger        log.Logger
-	updateMetrics bool
+	workersCount int
+	logPrefix    string
+	logger       log.Logger
 }
 
-func (p *Progress) Log(suffix string, rs *state.StateV3, in *state.QueueWithRetry, rws *state.ResultsQueue, txCount, gas, blobGas, inputBlockNum, outputBlockNum, outTxNum, repeatCount uint64, idxStepsAmountInDB float64, shouldGenerateChangesets bool) {
-	execStepsInDB.Set(idxStepsAmountInDB * 100)
+func (p *Progress) Log(suffix string, rs *state.StateV3, in *state.QueueWithRetry, rws *state.ResultsQueue, txCount uint64, gas uint64, inputBlockNum uint64, outputBlockNum uint64, outTxNum uint64, repeatCount uint64, idxStepsAmountInDB float64, shouldGenerateChangesets bool) {
+	mxExecStepsInDB.Set(idxStepsAmountInDB * 100)
 	var m runtime.MemStats
 	dbg.ReadMemStats(&m)
 	sizeEstimate := rs.SizeEstimate()
 	currentTime := time.Now()
 	interval := currentTime.Sub(p.prevTime)
-	speedTx := float64(txCount-p.prevTxCount) / interval.Seconds()
 	//var repeatRatio float64
 	//if doneCount > p.prevCount {
 	//	repeatRatio = 100.0 * float64(repeatCount-p.prevRepeatCount) / float64(doneCount-p.prevCount)
@@ -113,23 +114,16 @@ func (p *Progress) Log(suffix string, rs *state.StateV3, in *state.QueueWithRetr
 		suffix += " Commit every block"
 	}
 
-	gasUsedMgas := float64(gas-p.prevGasUsed) / 1e6
-	mgasPerSec := gasUsedMgas / interval.Seconds()
-	//avgMgasSec = ((e.avgMgasSec * (float64(e.recordedMgasSec))) + mgasPerSec) / float64(e.recordedMgasSec+1)
-
-	if p.updateMetrics {
-		execMgasPerSec.Observe(mgasPerSec)
-		exexTxPerSec.Observe(speedTx)
-	}
+	gasSec := uint64(float64(gas-p.prevGasUsed) / interval.Seconds())
+	txSec := uint64(float64(txCount-p.prevTxCount) / interval.Seconds())
 
 	p.logger.Info(fmt.Sprintf("[%s]"+suffix, p.logPrefix),
-		//"workers", workerCount,
 		"blk", outputBlockNum,
 		"blks", outputBlockNum-p.prevOutputBlockNum+1,
 		"blk/s", fmt.Sprintf("%.1f", float64(outputBlockNum-p.prevOutputBlockNum+1)/interval.Seconds()),
 		"txs", txCount-p.prevTxCount,
-		"tx/s", fmt.Sprintf("%.1f", speedTx),
-		"mgas/s", fmt.Sprintf("%.1f", mgasPerSec),
+		"tx/s", common.PrettyCounter(txSec),
+		"gas/s", common.PrettyCounter(gasSec),
 		//"pipe", fmt.Sprintf("(%d+%d)->%d/%d->%d/%d", in.NewTasksLen(), in.RetriesLen(), rws.ResultChLen(), rws.ResultChCap(), rws.Len(), rws.Limit()),
 		//"repeatRatio", fmt.Sprintf("%.2f%%", repeatRatio),
 		//"workers", p.workersCount,
@@ -396,13 +390,13 @@ func ExecV3(ctx context.Context,
 	pruneEvery := time.NewTicker(2 * time.Second)
 	defer pruneEvery.Stop()
 
-	var logGas, logBlobGas uint64
+	var logGas uint64
 	var txCount uint64
 	var stepsInDB float64
 
 	processed := NewProgress(blockNum, commitThreshold, workerCount, true, execStage.LogPrefix(), logger)
 	defer func() {
-		processed.Log("Done", rs, in, rws, txCount, logGas, logBlobGas, inputBlockNum.Load(), outputBlockNum.GetValueUint64(), outputTxNum.Load(), execRepeats.GetValueUint64(), stepsInDB, shouldGenerateChangesets)
+		processed.Log("Done", rs, in, rws, txCount, logGas, inputBlockNum.Load(), outputBlockNum.GetValueUint64(), outputTxNum.Load(), mxExecRepeats.GetValueUint64(), stepsInDB, shouldGenerateChangesets)
 	}()
 
 	applyLoopWg := sync.WaitGroup{} // to wait for finishing of applyLoop after applyCtx cancel
@@ -429,8 +423,8 @@ func ExecV3(ctx context.Context,
 				return err
 			}
 
-			execRepeats.AddInt(conflicts)
-			execTriggers.AddInt(triggers)
+			mxExecRepeats.AddInt(conflicts)
+			mxExecTriggers.AddInt(triggers)
 			if processedBlockNum > lastBlockNum {
 				outputBlockNum.SetUint64(processedBlockNum)
 				lastBlockNum = processedBlockNum
@@ -484,7 +478,7 @@ func ExecV3(ctx context.Context,
 
 				case <-logEvery.C:
 					stepsInDB = rawdbhelpers.IdxStepsCountV3(tx)
-					progress.Log("", rs, in, rws, rs.DoneCount(), logGas, logBlobGas, inputBlockNum.Load(), outputBlockNum.GetValueUint64(), outputTxNum.Load(), execRepeats.GetValueUint64(), stepsInDB, shouldGenerateChangesets)
+					progress.Log("", rs, in, rws, rs.DoneCount(), logGas, inputBlockNum.Load(), outputBlockNum.GetValueUint64(), outputTxNum.Load(), mxExecRepeats.GetValueUint64(), stepsInDB, shouldGenerateChangesets)
 					if agg.HasBackgroundFilesBuild() {
 						logger.Info(fmt.Sprintf("[%s] Background files build", execStage.LogPrefix()), "progress", agg.BackgroundProgress())
 					}
@@ -530,8 +524,8 @@ func ExecV3(ctx context.Context,
 								return err
 							}
 
-							execRepeats.AddInt(conflicts)
-							execTriggers.AddInt(triggers)
+							mxExecRepeats.AddInt(conflicts)
+							mxExecTriggers.AddInt(triggers)
 							if processedBlockNum > 0 {
 								outputBlockNum.SetUint64(processedBlockNum)
 							}
@@ -844,13 +838,15 @@ Loop:
 				if txTask.Error != nil {
 					return fmt.Errorf("%w, txnIdx=%d, %v", consensus.ErrInvalidBlock, txTask.TxIndex, txTask.Error) //same as in stage_exec.go
 				}
+
+				txCount++
 				usedGas += txTask.UsedGas
 				logGas += txTask.UsedGas
-				txCount++
+				mxExecGas.Add(float64(txTask.UsedGas))
+				mxExecTransactions.Add(1)
 
 				if txTask.Tx != nil {
 					blobGasUsed += txTask.Tx.GetBlobGas()
-					logBlobGas += txTask.Tx.GetBlobGas()
 				}
 				if txTask.Final {
 					checkReceipts := !cfg.vmConfig.StatelessExec && chainConfig.IsByzantium(txTask.BlockNum) && !cfg.vmConfig.NoReceipts
@@ -892,16 +888,16 @@ Loop:
 				break Loop
 			}
 
-			// MA applystate
-			if err := rs.ApplyState4(ctx, txTask); err != nil {
+			if err = rs.ApplyState4(ctx, txTask); err != nil {
 				return err
 			}
 
-			outputTxNum.Add(1)
-
 			stageProgress = blockNum
+			outputTxNum.Add(1)
 			inputTxNum++
 		}
+		mxExecBlocks.Add(1)
+
 		if shouldGenerateChangesets {
 			aggTx := applyTx.(state2.HasAggTx).AggTx().(*state2.AggregatorRoTx)
 			aggTx.RestrictSubsetFileDeletions(true)
@@ -934,7 +930,7 @@ Loop:
 			select {
 			case <-logEvery.C:
 				stepsInDB := rawdbhelpers.IdxStepsCountV3(applyTx)
-				progress.Log("", rs, in, rws, count, logGas, logBlobGas, inputBlockNum.Load(), outputBlockNum.GetValueUint64(), outputTxNum.Load(), execRepeats.GetValueUint64(), stepsInDB, shouldGenerateChangesets)
+				progress.Log("", rs, in, rws, count, logGas, inputBlockNum.Load(), outputBlockNum.GetValueUint64(), outputTxNum.Load(), mxExecRepeats.GetValueUint64(), stepsInDB, shouldGenerateChangesets)
 				//if applyTx.(state2.HasAggTx).AggTx().(*state2.AggregatorRoTx).CanPrune(applyTx, outputTxNum.Load()) {
 				//	//small prune cause MDBX_TXN_FULL
 				//	if _, err := applyTx.(state2.HasAggTx).AggTx().(*state2.AggregatorRoTx).PruneSmallBatches(ctx, 10*time.Hour, applyTx); err != nil {
@@ -1027,7 +1023,7 @@ Loop:
 		}
 	}
 
-	//log.Info("Executed", "blocks", inputBlockNum.Load(), "txs", outputTxNum.Load(), "repeats", execRepeats.GetValueUint64())
+	//log.Info("Executed", "blocks", inputBlockNum.Load(), "txs", outputTxNum.Load(), "repeats", mxExecRepeats.GetValueUint64())
 
 	if parallel {
 		logger.Warn("[dbg] all txs sent")

@@ -390,7 +390,7 @@ func PruneExecutionStage(s *PruneState, tx kv.RwTx, cfg ExecuteBlockCfg, ctx con
 		}
 	}
 
-	execStepsInDB.Set(rawdbhelpers.IdxStepsCountV3(tx) * 100)
+	mxExecStepsInDB.Set(rawdbhelpers.IdxStepsCountV3(tx) * 100)
 
 	logEvery := time.NewTicker(logInterval)
 	defer logEvery.Stop()
