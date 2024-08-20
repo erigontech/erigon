@@ -908,7 +908,6 @@ func extractPatternsInSuperstrings(ctx context.Context, superstringCh chan []byt
 				for s := 0; s < l; s++ {
 					dictKey[s] = superstring[(int(filtered[i])+s)*2+1]
 				}
-				produced++
 				//fmt.Printf("a: %s, %d\n", dictKey, score)
 				binary.BigEndian.PutUint64(dictVal, score)
 				if err := dictCollector.Collect(dictKey, dictVal); err != nil {
