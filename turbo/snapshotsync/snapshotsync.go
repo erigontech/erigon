@@ -523,6 +523,10 @@ func logStats(ctx context.Context, stats *proto_downloader.StatsReply, startTime
 		log.Info(fmt.Sprintf("[%s] %s", logPrefix, logEnd), "time", time.Since(startTime).String())
 	} else {
 
+		if stats.MetadataReady < stats.FilesTotal && stats.BytesTotal == 0 {
+			log.Info(fmt.Sprintf("[%s] Waiting for torrents metadata: %d/%d", logPrefix, stats.MetadataReady, stats.FilesTotal))
+		}
+
 		dbg.ReadMemStats(&m)
 
 		var remainingBytes uint64
@@ -533,19 +537,8 @@ func logStats(ctx context.Context, stats *proto_downloader.StatsReply, startTime
 
 		downloadTimeLeft := calculateTime(remainingBytes, stats.CompletionRate)
 
-		progressStr := fmt.Sprintf("%.2f%% %s/%s", stats.Progress, common.ByteCount(stats.BytesCompleted), common.ByteCount(stats.BytesTotal))
-
-		if stats.MetadataReady < stats.FilesTotal {
-			progressStr = common.ByteCount(stats.BytesCompleted) + "/Estimating..."
-			downloadTimeLeft = "Estimating..."
-
-			if stats.BytesTotal == 0 {
-				log.Info(fmt.Sprintf("[%s] Waiting for torrents metadata: %d/%d", logPrefix, stats.MetadataReady, stats.FilesTotal))
-			}
-		}
-
 		log.Info(fmt.Sprintf("[%s] %s", logPrefix, logReason),
-			"progress", progressStr,
+			"progress", fmt.Sprintf("(%d/%d files) %.2f%% %s/%s", stats.MetadataReady, stats.FilesTotal, stats.Progress, common.ByteCount(stats.BytesCompleted), common.ByteCount(stats.BytesTotal)),
 			// TODO: "downloading", stats.Downloading,
 			"time-left", downloadTimeLeft,
 			"total-time", time.Since(startTime).Round(time.Second).String(),
@@ -556,7 +549,7 @@ func logStats(ctx context.Context, stats *proto_downloader.StatsReply, startTime
 			"upload", common.ByteCount(stats.UploadRate)+"/s",
 			"peers", stats.PeersUnique,
 			"files", stats.FilesTotal,
-			"metadata", fmt.Sprintf("%d/%d", stats.MetadataReady, stats.FilesTotal),
+			"no-metadata", fmt.Sprintf("%d", stats.FilesTotal-stats.MetadataReady),
 			"connections", stats.ConnectionsTotal,
 			"alloc", common.ByteCount(m.Alloc), "sys", common.ByteCount(m.Sys),
 		)
