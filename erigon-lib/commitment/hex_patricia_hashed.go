@@ -768,7 +768,7 @@ func (hph *HexPatriciaHashed) computeCellHash(cell *cell, depth int, buf []byte)
 			}
 		} else {
 			if !cell.loaded.storage() {
-				update, err := hph.ctx.Storage(cell.storageAddr[koffset:cell.storageAddrLen])
+				update, err := hph.ctx.Storage(cell.storageAddr[:cell.storageAddrLen])
 				if err != nil {
 					return nil, err
 				}
@@ -904,18 +904,11 @@ func (hph *HexPatriciaHashed) needUnfolding(hashedKey []byte) int {
 		}
 		if hph.root.hashedExtLen == 64 && hph.root.accountAddrLen > 0 && hph.root.storageAddrLen > 0 {
 			// in case if root is a leaf node with storage and account, we need to derive storage part of a key
-			depth = 64
-			copy(hph.currentKey[:depth-1], hashedKey[:depth-1])
-			hph.currentKeyLen = depth - 1
-
 			if err := hph.root.deriveHashedKeys(depth, hph.keccak, hph.accountKeyLen); err != nil {
 				log.Warn("deriveHashedKeys for root with storage", "err", err, "cell", hph.root.FullString())
 				return 0
 			}
-			hph.root.hashedExtLen = depth
-			hph.depths[0] = depth
-			hph.root.accountAddrLen = 0
-			hph.activeRows++
+			//copy(hph.currentKey[:], hph.root.hashedExtension[:])
 			if hph.trace {
 				fmt.Printf("derived prefix %x\n", hph.currentKey[:hph.currentKeyLen])
 			}
@@ -1002,7 +995,6 @@ func (hph *HexPatriciaHashed) unfoldBranchNode(row, depth int, deleted bool) (bo
 		cell := &hph.grid[row][nibble]
 		fieldBits := branchData[pos]
 		pos++
-		var err error
 		if pos, err = cell.fillFromFields(branchData, pos, PartFlags(fieldBits)); err != nil {
 			return false, fmt.Errorf("prefix [%x] branchData[%x]: %w", hph.currentKey[:hph.currentKeyLen], branchData, err)
 		}
@@ -1017,16 +1009,16 @@ func (hph *HexPatriciaHashed) unfoldBranchNode(row, depth int, deleted bool) (bo
 		//		fmt.Printf("Account[%x] %s\n", cell.accountAddr[:cell.accountAddrLen], update.String())
 		//	}
 		//}
-		if cell.storageAddrLen > 0 {
-			update, err := hph.ctx.Storage(cell.storageAddr[:cell.storageAddrLen])
-			if err != nil {
-				return false, fmt.Errorf("unfoldBranchNode Storage: %w", err)
-			}
-			cell.setFromUpdate(update)
-			if hph.trace {
-				fmt.Printf("Storage[%x] %s\n", cell.storageAddr[:cell.storageAddrLen], update.String())
-			}
-		}
+		//if cell.storageAddrLen > 0 {
+		//	update, err := hph.ctx.Storage(cell.storageAddr[:cell.storageAddrLen])
+		//	if err != nil {
+		//		return false, fmt.Errorf("unfoldBranchNode Storage: %w", err)
+		//	}
+		//	cell.setFromUpdate(update)
+		//	if hph.trace {
+		//		fmt.Printf("Storage[%x] %s\n", cell.storageAddr[:cell.storageAddrLen], update.String())
+		//	}
+		//}
 		if hph.trace {
 			fmt.Printf("cell (%d, %x, depth=%d) %s\n", row, nibble, depth, cell.FullString())
 		}
@@ -1056,52 +1048,9 @@ func (hph *HexPatriciaHashed) unfold(hashedKey []byte, unfolding int) error {
 		upCell = &hph.root
 		touched = hph.rootTouched
 		present = hph.rootPresent
-		//upCell.deriveHashedKeys(hph.currentKeyLen, hph.keccak, hph.accountKeyLen)
 		if hph.trace {
 			fmt.Printf("unfold root: touched: %t present: %t %s\n", touched, present, upCell.FullString())
 		}
-		//upDepth = hph.depths[0]
-		if upCell.accountAddrLen > 0 && upCell.storageAddrLen > 0 {
-			hph.depths[0] = 64
-			//hph.activeRows++
-			upCell.accountAddrLen = 0
-			//return nil
-		}
-		//if /*upCell.accountAddrLen > 0 &&*/ upCell.storageAddrLen > 0 {
-		//	//hph.depths[0] = 64
-		//	//hph.activeRows++
-		//	//return nil
-		//
-		//	upDepth = 64 // - unfolding //eq to =0
-		//	//if upCell.hashedExtLen == 0 {
-		//	//	upCell.deriveHashedKeys(0, hph.keccak, hph.accountKeyLen)
-		//	//}
-		//}
-		//rb, _, err := hph.ctx.Branch(hexToCompact(hph.currentKey[:hph.currentKeyLen]))
-		//if err != nil {
-		//	panic(err)
-		//}
-		//if len(rb) > 0 {
-		//	fmt.Printf("root branch data %x unfolding %d\n", rb, unfolding)
-		//	tm, am, row, err := BranchData(rb).decodeCells()
-		//	if err != nil {
-		//		panic(err)
-		//	}
-		//	if tm != 0 {
-		//		touched = true
-		//	}
-		//	if am != 0 {
-		//		present = hph.rootPresent
-		//	}
-		//	hph.root = *row[0]
-		//	//hph.root.deriveHashedKeys(unfolding-1, hph.keccak, hph.accountKeyLen)
-		//	//hph.depths[hph.activeRows] = unfolding - 1
-		//	//copy(hph.currentKey[:], hph.root.hashedExtension)
-		//	//hph.activeRows++
-		//	return nil
-		//
-		//}
-
 	} else {
 		upDepth = hph.depths[hph.activeRows-1]
 		nib := hashedKey[upDepth-1]
