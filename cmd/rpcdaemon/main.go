@@ -58,7 +58,7 @@ func main() {
 		}
 
 		var bridgeReader bridge.ReaderService
-		if polygonSync {
+		if cfg.WithDatadir && polygonSync {
 			stateReceiverContractAddress := params.BorMainnetChainConfig.Bor.GetStateReceiverContract() // mainnet and amoy share the same address
 			bridgeReader, err = bridge.AssembleReader(ctx, cfg.DataDir, logger, stateReceiverContractAddress)
 			if err != nil {
