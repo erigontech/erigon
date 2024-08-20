@@ -2033,7 +2033,7 @@ func (d *Downloader) ReCalcStats(interval time.Duration) {
 
 		if torrentComplete {
 			tComplete++
-			bytesCompleted = t.Length()
+			bytesCompleted = tLen
 			delete(downloading, torrentName)
 		} else {
 			bytesCompleted = t.BytesCompleted()
@@ -2047,7 +2047,7 @@ func (d *Downloader) ReCalcStats(interval time.Duration) {
 			}
 		}
 
-		//stats.BytesCompleted += uint64(bytesCompleted)
+		stats.BytesCompleted += uint64(bytesCompleted)
 		stats.BytesTotal += uint64(tLen)
 
 		for _, peer := range peersOfThisFile {
@@ -2660,7 +2660,14 @@ func SeedableFiles(dirs datadir.Dirs, chainName string, all bool) ([]string, err
 	if err := checkDomainRangesCovered(dirs.Snap, l3); err != nil {
 		return nil, err
 	}
-	files = append(append(append(files, l1...), l2...), l3...)
+	var l4 []string
+	if all {
+		l4, err = seedableStateFilesBySubDir(dirs.Snap, "accessor", all)
+		if err != nil {
+			return nil, err
+		}
+	}
+	files = append(append(append(append(files, l1...), l2...), l3...), l4...)
 	return files, nil
 }
 
@@ -2834,10 +2841,10 @@ func (d *Downloader) Stats() AggStats {
 }
 
 func (d *Downloader) Close() {
-	d.logger.Debug("[snapshots] stopping downloader")
+	d.logger.Info("[snapshots] stopping downloader", "files", len(d.torrentClient.Torrents()))
 	d.stopMainLoop()
 	d.wg.Wait()
-	d.logger.Debug("[snapshots] closing torrents")
+	d.logger.Info("[snapshots] closing torrents")
 	d.torrentClient.Close()
 	if err := d.folder.Close(); err != nil {
 		d.logger.Warn("[snapshots] folder.close", "err", err)
@@ -2845,9 +2852,9 @@ func (d *Downloader) Close() {
 	if err := d.pieceCompletionDB.Close(); err != nil {
 		d.logger.Warn("[snapshots] pieceCompletionDB.close", "err", err)
 	}
-	d.logger.Debug("[snapshots] closing db")
+	d.logger.Info("[snapshots] closing db")
 	d.db.Close()
-	d.logger.Debug("[snapshots] downloader stopped")
+	d.logger.Info("[snapshots] downloader stopped")
 }
 
 func (d *Downloader) PeerID() []byte {

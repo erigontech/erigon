@@ -713,7 +713,7 @@ func TestInvIndex_OpenFolder(t *testing.T) {
 
 	mergeInverted(t, db, ii, txs)
 
-	list := ii._visibleFiles
+	list := ii._visible.files
 	require.NotEmpty(t, list)
 	ff := list[len(list)-1]
 	fn := ff.src.decompressor.FilePath()

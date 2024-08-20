@@ -20,6 +20,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/erigontech/erigon-lib/kv/membatchwithdb"
 	"runtime"
 	"time"
 
@@ -32,12 +33,10 @@ import (
 	"github.com/erigontech/erigon-lib/direct"
 	proto_downloader "github.com/erigontech/erigon-lib/gointerfaces/downloaderproto"
 	"github.com/erigontech/erigon-lib/kv"
-	"github.com/erigontech/erigon-lib/kv/membatchwithdb"
 	"github.com/erigontech/erigon-lib/kv/rawdbv3"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/state"
 	"github.com/erigontech/erigon-lib/wrap"
-
 	"github.com/erigontech/erigon/consensus"
 	"github.com/erigontech/erigon/consensus/misc"
 	"github.com/erigontech/erigon/core/rawdb"
@@ -73,7 +72,7 @@ func StageLoop(
 ) {
 	defer close(waitForDone)
 
-	if err := ProcessFrozenBlocks(ctx, db, blockReader, sync); err != nil {
+	if err := ProcessFrozenBlocks(ctx, db, blockReader, sync, hook); err != nil {
 		if err != nil {
 			if errors.Is(err, libcommon.ErrStopped) || errors.Is(err, context.Canceled) {
 				return
@@ -99,7 +98,8 @@ func StageLoop(
 
 		t := time.Now()
 		// Estimate the current top height seen from the peer
-		err := StageLoopIteration(ctx, db, wrap.TxContainer{}, sync, initialCycle, false, logger, blockReader, hook)
+
+		err := StageLoopIteration(ctx, db, wrap.TxContainer{ /*Tx: tx, Doms: sd*/ }, sync, initialCycle, false, logger, blockReader, hook)
 		if err != nil {
 			if errors.Is(err, libcommon.ErrStopped) || errors.Is(err, context.Canceled) {
 				return
@@ -133,14 +133,36 @@ func StageLoop(
 }
 
 // ProcessFrozenBlocks - withuot global rwtx
-func ProcessFrozenBlocks(ctx context.Context, db kv.RwDB, blockReader services.FullBlockReader, sync *stagedsync.Sync) error {
+func ProcessFrozenBlocks(ctx context.Context, db kv.RwDB, blockReader services.FullBlockReader, sync *stagedsync.Sync, hook *Hook) error {
 	sawZeroBlocksTimes := 0
 	initialCycle, firstCycle := true, true
 	for {
 		// run stages first time - it will download blocks
+		if hook != nil {
+			if err := db.View(ctx, func(tx kv.Tx) (err error) {
+				err = hook.BeforeRun(tx, false)
+				return err
+			}); err != nil {
+				return err
+			}
+		}
+
 		more, err := sync.Run(db, wrap.TxContainer{}, initialCycle, firstCycle)
 		if err != nil {
 			return err
+		}
+
+		if hook != nil {
+			if err := db.View(ctx, func(tx kv.Tx) (err error) {
+				finishProgressBefore, _, _, err := stagesHeadersAndFinish(db, tx)
+				if err != nil {
+					return err
+				}
+				err = hook.AfterRun(tx, finishProgressBefore)
+				return err
+			}); err != nil {
+				return err
+			}
 		}
 
 		if err := sync.RunPrune(db, nil, initialCycle); err != nil {
@@ -178,6 +200,7 @@ func ProcessFrozenBlocks(ctx context.Context, db kv.RwDB, blockReader services.F
 func StageLoopIteration(ctx context.Context, db kv.RwDB, txc wrap.TxContainer, sync *stagedsync.Sync, initialCycle, firstCycle bool, logger log.Logger, blockReader services.FullBlockReader, hook *Hook) (err error) {
 	defer func() {
 		if rec := recover(); rec != nil {
+			logger.Error("panic", "err", dbg.Stack())
 			err = fmt.Errorf("%+v, trace: %s", rec, dbg.Stack())
 		}
 	}() // avoid crash because Erigon's core does many things
@@ -218,10 +241,17 @@ func StageLoopIteration(ctx context.Context, db kv.RwDB, txc wrap.TxContainer, s
 			return err
 		}
 		defer txc.Tx.Rollback()
+		txc.Doms, err = state.NewSharedDomains(txc.Tx, logger)
+		if err != nil {
+			logger.Error("NewSharedDomains err", "err", err)
+			return err
+		}
+		defer txc.Doms.Close()
 	}
 
 	if hook != nil {
 		if err = hook.BeforeRun(txc.Tx, isSynced); err != nil {
+			logger.Error("BeforeRun err", "err", err)
 			return err
 		}
 	}
@@ -240,6 +270,7 @@ func StageLoopIteration(ctx context.Context, db kv.RwDB, txc wrap.TxContainer, s
 		if errTx != nil {
 			return errTx
 		}
+		txc.Doms = nil
 		commitTime = time.Since(commitStart)
 	}
 
@@ -409,20 +440,16 @@ func MiningStep(ctx context.Context, db kv.RwDB, mining *stagedsync.Sync, tmpDir
 			err = fmt.Errorf("%+v, trace: %s", rec, dbg.Stack())
 		}
 	}() // avoid crash because Erigon's core does many things
-
 	tx, err := db.BeginRo(ctx)
 	if err != nil {
 		return err
 	}
 	defer tx.Rollback()
 
-	var miningBatch kv.RwTx
-
 	mb := membatchwithdb.NewMemoryBatch(tx, tmpDir, logger)
-	defer mb.Rollback()
-	miningBatch = mb
+	defer mb.Close()
 
-	txc := wrap.TxContainer{Tx: miningBatch}
+	txc := wrap.TxContainer{Tx: mb}
 	sd, err := state.NewSharedDomains(mb, logger)
 	if err != nil {
 		return err
@@ -433,7 +460,6 @@ func MiningStep(ctx context.Context, db kv.RwDB, mining *stagedsync.Sync, tmpDir
 	if _, err = mining.Run(nil, txc, false /* firstCycle */, false); err != nil {
 		return err
 	}
-	tx.Rollback()
 	return nil
 }
 
@@ -713,7 +739,6 @@ func NewPolygonSyncStages(
 			statusDataProvider,
 			blockReader,
 			stopNode,
-			bor.GenesisContractStateReceiverABI(),
 			config.LoopBlockLimit,
 		),
 		stagedsync.StageSendersCfg(db, chainConfig, config.Sync, false, config.Dirs.Tmp, config.Prune, blockReader, nil),

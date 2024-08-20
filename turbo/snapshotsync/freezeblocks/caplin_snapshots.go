@@ -54,7 +54,15 @@ var sidecarSSZSize = (&cltypes.BlobSidecar{}).EncodingSizeSSZ()
 
 func BeaconSimpleIdx(ctx context.Context, sn snaptype.FileInfo, salt uint32, tmpDir string, p *background.Progress, lvl log.Lvl, logger log.Logger) (err error) {
 	num := make([]byte, binary.MaxVarintLen64)
-	if err := snaptype.BuildIndex(ctx, sn, salt, sn.From, tmpDir, log.LvlDebug, p, func(idx *recsplit.RecSplit, i, offset uint64, word []byte) error {
+	cfg := recsplit.RecSplitArgs{
+		Enums:      true,
+		BucketSize: 2000,
+		LeafSize:   8,
+		TmpDir:     tmpDir,
+		Salt:       &salt,
+		BaseDataID: sn.From,
+	}
+	if err := snaptype.BuildIndex(ctx, sn, cfg, log.LvlDebug, p, func(idx *recsplit.RecSplit, i, offset uint64, word []byte) error {
 		if i%20_000 == 0 {
 			logger.Log(lvl, "Generating idx for "+sn.Type.Name(), "progress", i)
 		}
@@ -413,7 +421,9 @@ func dumpBeaconBlocksRange(ctx context.Context, db kv.RoDB, fromSlot uint64, toS
 	segName := snaptype.BeaconBlocks.FileName(0, fromSlot, toSlot)
 	f, _, _ := snaptype.ParseFileName(snapDir, segName)
 
-	sn, err := seg.NewCompressor(ctx, "Snapshot BeaconBlocks", f.Path, tmpDir, seg.MinPatternScore, workers, lvl, logger)
+	compressCfg := seg.DefaultCfg
+	compressCfg.Workers = workers
+	sn, err := seg.NewCompressor(ctx, "Snapshot BeaconBlocks", f.Path, tmpDir, compressCfg, lvl, logger)
 	if err != nil {
 		return err
 	}
@@ -459,7 +469,9 @@ func dumpBlobSidecarsRange(ctx context.Context, db kv.RoDB, storage blob_storage
 	segName := snaptype.BlobSidecars.FileName(0, fromSlot, toSlot)
 	f, _, _ := snaptype.ParseFileName(snapDir, segName)
 
-	sn, err := seg.NewCompressor(ctx, "Snapshot BlobSidecars", f.Path, tmpDir, seg.MinPatternScore, workers, lvl, logger)
+	compressCfg := seg.DefaultCfg
+	compressCfg.Workers = workers
+	sn, err := seg.NewCompressor(ctx, "Snapshot BlobSidecars", f.Path, tmpDir, compressCfg, lvl, logger)
 	if err != nil {
 		return err
 	}

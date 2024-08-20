@@ -158,6 +158,16 @@ func processBlock(ctx context.Context, cfg *Cfg, db kv.RwDB, block *cltypes.Sign
 		return err
 	}
 
+	blockRoot, err := block.Block.HashSSZ()
+	if err != nil {
+		return err
+	}
+
+	_, hasHeaderInFCU := cfg.forkChoice.GetHeader(blockRoot)
+	if !checkDataAvaiability && hasHeaderInFCU {
+		return nil
+	}
+
 	return cfg.forkChoice.OnBlock(ctx, block, newPayload, fullValidation, checkDataAvaiability)
 }
 
@@ -235,6 +245,10 @@ func ConsensusClStages(ctx context.Context,
 					startingRoot, err := cfg.state.BlockRoot()
 					if err != nil {
 						return err
+					}
+					if cfg.state.Slot() == 0 {
+						cfg.state = nil // Release the state
+						return nil
 					}
 
 					startingSlot := cfg.state.LatestBlockHeader().Slot

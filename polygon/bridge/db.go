@@ -20,11 +20,12 @@ import (
 	"bytes"
 	"context"
 	"encoding/binary"
+	"errors"
+	"fmt"
 	"time"
 
 	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/kv"
-	"github.com/erigontech/erigon/accounts/abi"
 	"github.com/erigontech/erigon/polygon/heimdall"
 	"github.com/erigontech/erigon/polygon/polygoncommon"
 )
@@ -48,6 +49,8 @@ var databaseTablesCfg = kv.TableCfg{
 	kv.BorTxLookup:  {},
 }
 
+var ErrEventIDRangeNotFound = errors.New("event id range not found")
+
 type Store interface {
 	Prepare(ctx context.Context) error
 	Close()
@@ -56,8 +59,8 @@ type Store interface {
 	LastProcessedEventID(ctx context.Context) (uint64, error)
 	PutEventTxnToBlockNum(ctx context.Context, txMap map[libcommon.Hash]uint64) error
 	EventTxnToBlockNum(ctx context.Context, borTxHash libcommon.Hash) (uint64, bool, error)
-	SprintLastEventID(ctx context.Context, lastID uint64, timeLimit time.Time, stateContract abi.ABI) (uint64, error)
-	PutEvents(ctx context.Context, events []*heimdall.EventRecordWithTime, stateContract abi.ABI) error
+	LastEventIDWithinWindow(ctx context.Context, fromID uint64, toTime time.Time) (uint64, error)
+	PutEvents(ctx context.Context, events []*heimdall.EventRecordWithTime) error
 	Events(ctx context.Context, start, end uint64) ([][]byte, error)
 	PutEventIDs(ctx context.Context, eventMap map[uint64]uint64) error
 	EventIDRange(ctx context.Context, blockNum uint64) (uint64, uint64, error)
@@ -85,7 +88,7 @@ func (s *MdbxStore) Close() {
 	s.db.Close()
 }
 
-// GetLatestEventID the latest state sync event ID in given DB, 0 if DB is empty
+// LatestEventID the latest state sync event ID in given DB, 0 if DB is empty
 // NOTE: Polygon sync events start at index 1
 func (s *MdbxStore) LatestEventID(ctx context.Context) (uint64, error) {
 	tx, err := s.db.BeginRo(ctx)
@@ -112,7 +115,7 @@ func (s *MdbxStore) LatestEventID(ctx context.Context) (uint64, error) {
 	return binary.BigEndian.Uint64(k), err
 }
 
-// GetLastProcessedEventID gets the last seen event ID in the BorEventNums table
+// LastProcessedEventID gets the last seen event ID in the BorEventNums table
 func (s *MdbxStore) LastProcessedEventID(ctx context.Context) (uint64, error) {
 	tx, err := s.db.BeginRo(ctx)
 	if err != nil {
@@ -120,6 +123,10 @@ func (s *MdbxStore) LastProcessedEventID(ctx context.Context) (uint64, error) {
 	}
 	defer tx.Rollback()
 
+	return LastProcessedEventID(tx)
+}
+
+func LastProcessedEventID(tx kv.Tx) (uint64, error) {
 	cursor, err := tx.Cursor(kv.BorEventNums)
 	if err != nil {
 		return 0, err
@@ -180,48 +187,51 @@ func (s *MdbxStore) EventTxnToBlockNum(ctx context.Context, borTxHash libcommon.
 	return blockNum, true, nil
 }
 
-// GetSprintLastEventID gets the last event id where event.ID >= lastID and event.Time <= time
-func (s *MdbxStore) SprintLastEventID(ctx context.Context, lastID uint64, timeLimit time.Time, stateContract abi.ABI) (uint64, error) {
-	var eventID uint64
-
+// LastEventIDWithinWindow gets the last event id where event.ID >= fromID and event.Time <= toTime
+func (s *MdbxStore) LastEventIDWithinWindow(ctx context.Context, fromID uint64, toTime time.Time) (uint64, error) {
 	tx, err := s.db.BeginRo(ctx)
 	if err != nil {
-		return eventID, err
+		return 0, err
 	}
 	defer tx.Rollback()
 
+	return LastEventIDWithinWindow(tx, fromID, toTime)
+}
+
+func LastEventIDWithinWindow(tx kv.Tx, fromID uint64, toTime time.Time) (uint64, error) {
 	count, err := tx.Count(kv.BorEvents)
 	if err != nil {
-		return eventID, err
+		return 0, err
 	}
 	if count == 0 {
-		return eventID, nil
+		return 0, nil
 	}
 
 	kLastID := make([]byte, 8)
-	binary.BigEndian.PutUint64(kLastID, lastID)
+	binary.BigEndian.PutUint64(kLastID, fromID)
 
 	it, err := tx.RangeAscend(kv.BorEvents, kLastID, nil, -1)
 	if err != nil {
-		return eventID, err
+		return 0, err
 	}
 	defer it.Close()
 
+	var eventID uint64
 	for it.HasNext() {
 		_, v, err := it.Next()
 		if err != nil {
-			return eventID, err
+			return 0, err
 		}
 
-		event, err := heimdall.UnpackEventRecordWithTime(stateContract, v)
-		if err != nil {
-			return eventID, err
+		var event heimdall.EventRecordWithTime
+		if err := event.UnmarshallBytes(v); err != nil {
+			return 0, err
 		}
 
 		// The table stores the first event ID for the range. In the
 		// case where event.Time == block.Time, we would want the table to
 		// store the current ID instead of the previous one
-		if !event.Time.Before(timeLimit) {
+		if !event.Time.Before(toTime) {
 			return eventID, nil
 		}
 
@@ -231,31 +241,38 @@ func (s *MdbxStore) SprintLastEventID(ctx context.Context, lastID uint64, timeLi
 	return eventID, nil
 }
 
-func (s *MdbxStore) PutEvents(ctx context.Context, events []*heimdall.EventRecordWithTime, stateContract abi.ABI) error {
+func (s *MdbxStore) PutEvents(ctx context.Context, events []*heimdall.EventRecordWithTime) error {
 	tx, err := s.db.BeginRw(ctx)
 	if err != nil {
 		return err
 	}
 	defer tx.Rollback()
 
+	if err = PutEvents(tx, events); err != nil {
+		return err
+	}
+
+	return tx.Commit()
+}
+
+func PutEvents(tx kv.RwTx, events []*heimdall.EventRecordWithTime) error {
 	for _, event := range events {
-		v, err := event.Pack(stateContract)
+		v, err := event.MarshallBytes()
 		if err != nil {
 			return err
 		}
 
-		k := make([]byte, 8)
-		binary.BigEndian.PutUint64(k, event.ID)
+		k := event.MarshallIdBytes()
 		err = tx.Put(kv.BorEvents, k, v)
 		if err != nil {
 			return err
 		}
 	}
 
-	return tx.Commit()
+	return nil
 }
 
-// GetEvents gets raw events, start inclusive, end exclusive
+// Events gets raw events, start inclusive, end exclusive
 func (s *MdbxStore) Events(ctx context.Context, start, end uint64) ([][]byte, error) {
 	var events [][]byte
 
@@ -295,6 +312,14 @@ func (s *MdbxStore) PutEventIDs(ctx context.Context, eventMap map[uint64]uint64)
 	}
 	defer tx.Rollback()
 
+	if err = PutEventsIDs(tx, eventMap); err != nil {
+		return err
+	}
+
+	return tx.Commit()
+}
+
+func PutEventsIDs(tx kv.RwTx, eventMap map[uint64]uint64) error {
 	kByte := make([]byte, 8)
 	vByte := make([]byte, 8)
 
@@ -302,18 +327,18 @@ func (s *MdbxStore) PutEventIDs(ctx context.Context, eventMap map[uint64]uint64)
 		binary.BigEndian.PutUint64(kByte, k)
 		binary.BigEndian.PutUint64(vByte, v)
 
-		err = tx.Put(kv.BorEventNums, kByte, vByte)
+		err := tx.Put(kv.BorEventNums, kByte, vByte)
 		if err != nil {
 			return err
 		}
 	}
 
-	return tx.Commit()
+	return nil
 }
 
-// GetEventIDRange returns the state sync event ID range for the given block number.
-// An error is thrown if the block number is not found in the database. If the given block
-// number is the last in the database, then the second uint64 (representing end ID) is 0.
+// EventIDRange returns the state sync event ID range for the given block number.
+// ErrEventIDRangeNotFound is thrown if the block number is not found in the database.
+// If the given block number is the last in the database, then the second uint64 (representing end ID) is 0.
 func (s *MdbxStore) EventIDRange(ctx context.Context, blockNum uint64) (uint64, uint64, error) {
 	var start, end uint64
 
@@ -335,8 +360,8 @@ func (s *MdbxStore) EventIDRange(ctx context.Context, blockNum uint64) (uint64, 
 	if err != nil {
 		return start, end, err
 	}
-	if v == nil { // we don't have a map
-		return start, end, ErrMapNotAvailable
+	if v == nil {
+		return start, end, fmt.Errorf("%w: %d", ErrEventIDRangeNotFound, blockNum)
 	}
 
 	start = binary.BigEndian.Uint64(v)

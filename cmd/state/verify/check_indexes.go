@@ -19,8 +19,9 @@ package verify
 import (
 	"context"
 	"fmt"
-	libcommon "github.com/erigontech/erigon-lib/common"
 	"time"
+
+	libcommon "github.com/erigontech/erigon-lib/common"
 
 	"github.com/erigontech/erigon-lib/kv/dbutils"
 
