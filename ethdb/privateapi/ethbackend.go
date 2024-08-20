@@ -23,6 +23,7 @@ import (
 	"google.golang.org/protobuf/types/known/emptypb"
 
 	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/core/types"
 
 	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/direct"
@@ -38,6 +39,11 @@ import (
 	"github.com/erigontech/erigon/turbo/services"
 	"github.com/erigontech/erigon/turbo/shards"
 )
+
+type bridgeReader interface {
+	Events(ctx context.Context, blockNum uint64) ([]*types.Message, error)
+	EventTxnLookup(ctx context.Context, borTxHash libcommon.Hash) (uint64, bool, error)
+}
 
 // EthBackendAPIVersion
 // 2.0.0 - move all mining-related methods to 'txpool/mining' server
@@ -57,6 +63,7 @@ type EthBackendServer struct {
 	events                *shards.Events
 	db                    kv.RoDB
 	blockReader           services.FullBlockReader
+	bridgeReader          bridgeReader
 	latestBlockBuiltStore *builder.LatestBlockBuiltStore
 
 	logsFilter *LogsFilterAggregator
@@ -73,9 +80,15 @@ type EthBackend interface {
 }
 
 func NewEthBackendServer(ctx context.Context, eth EthBackend, db kv.RwDB, events *shards.Events, blockReader services.FullBlockReader,
-	logger log.Logger, latestBlockBuiltStore *builder.LatestBlockBuiltStore,
+	logger log.Logger, latestBlockBuiltStore *builder.LatestBlockBuiltStore, bridgeReader bridgeReader,
 ) *EthBackendServer {
-	s := &EthBackendServer{ctx: ctx, eth: eth, events: events, db: db, blockReader: blockReader,
+	s := &EthBackendServer{
+		ctx:                   ctx,
+		eth:                   eth,
+		events:                events,
+		db:                    db,
+		blockReader:           blockReader,
+		bridgeReader:          bridgeReader,
 		logsFilter:            NewLogsFilterAggregator(events),
 		logger:                logger,
 		latestBlockBuiltStore: latestBlockBuiltStore,
@@ -275,17 +288,64 @@ func (s *EthBackendServer) SubscribeLogs(server remote.ETHBACKEND_SubscribeLogsS
 }
 
 func (s *EthBackendServer) BorEvent(ctx context.Context, req *remote.BorEventRequest) (*remote.BorEventReply, error) {
+	if s.bridgeReader != nil {
+		borTxnHash := gointerfaces.ConvertH256ToHash(req.BorTxHash)
+		blockNum, ok, err := s.bridgeReader.EventTxnLookup(ctx, borTxnHash)
+		if err != nil {
+			return nil, err
+		}
+		if !ok {
+			return &remote.BorEventReply{}, nil
+		}
+
+		events, err := s.bridgeReader.Events(ctx, blockNum)
+		if err != nil {
+			return nil, err
+		}
+
+		eventsRaw := make([][]byte, 0, len(events))
+		for _, event := range events {
+			eventsRaw = append(eventsRaw, event.Data())
+		}
+
+		return &remote.BorEventReply{
+			Present:     true,
+			BlockNumber: blockNum,
+			EventRlps:   eventsRaw,
+		}, nil
+	}
+
 	tx, err := s.db.BeginRo(ctx)
 	if err != nil {
 		return nil, err
 	}
 	defer tx.Rollback()
-	_, ok, err := s.blockReader.EventLookup(ctx, tx, gointerfaces.ConvertH256ToHash(req.BorTxHash))
+	blockNum, ok, err := s.blockReader.EventLookup(ctx, tx, gointerfaces.ConvertH256ToHash(req.BorTxHash))
 	if err != nil {
 		return nil, err
 	}
 	if !ok {
 		return &remote.BorEventReply{}, nil
 	}
-	return &remote.BorEventReply{}, nil
+
+	blockHeader, err := s.blockReader.HeaderByNumber(ctx, tx, blockNum)
+	if err != nil {
+		return nil, err
+	}
+
+	events, err := s.blockReader.EventsByBlock(ctx, tx, blockHeader.Hash(), blockNum)
+	if err != nil {
+		return nil, err
+	}
+
+	eventsRaw := make([][]byte, 0, len(events))
+	for _, event := range events {
+		eventsRaw = append(eventsRaw, event)
+	}
+
+	return &remote.BorEventReply{
+		Present:     true,
+		BlockNumber: blockNum,
+		EventRlps:   eventsRaw,
+	}, nil
 }

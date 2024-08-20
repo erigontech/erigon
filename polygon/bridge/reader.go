@@ -5,14 +5,12 @@ import (
 	"fmt"
 
 	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/common/u256"
 	"github.com/erigontech/erigon/core"
 	"github.com/erigontech/erigon/core/state"
 	"github.com/erigontech/erigon/core/types"
-	"github.com/erigontech/erigon/polygon/bor/borcfg"
-
-	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon/polygon/polygoncommon"
 )
 
@@ -22,7 +20,7 @@ type Reader struct {
 	stateClientAddress libcommon.Address
 }
 
-func AssembleReader(ctx context.Context, dataDir string, logger log.Logger, borConfig *borcfg.BorConfig) (*Reader, error) {
+func AssembleReader(ctx context.Context, dataDir string, logger log.Logger, stateReceiverContractAddress string) (*Reader, error) {
 	bridgeDB := polygoncommon.NewDatabase(dataDir, kv.PolygonBridgeDB, databaseTablesCfg, logger)
 	bridgeStore := NewStore(bridgeDB)
 
@@ -31,7 +29,7 @@ func AssembleReader(ctx context.Context, dataDir string, logger log.Logger, borC
 		return nil, err
 	}
 
-	return NewReader(bridgeStore, logger, borConfig.StateReceiverContract), nil
+	return NewReader(bridgeStore, logger, stateReceiverContractAddress), nil
 }
 
 func NewReader(store Store, log log.Logger, stateReceiverContractAddress string) *Reader {

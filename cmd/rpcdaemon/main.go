@@ -26,6 +26,8 @@ import (
 
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon/cmd/rpcdaemon/cli"
+	"github.com/erigontech/erigon/params"
+	"github.com/erigontech/erigon/polygon/bridge"
 	"github.com/erigontech/erigon/rpc"
 	"github.com/erigontech/erigon/turbo/debug"
 	"github.com/erigontech/erigon/turbo/jsonrpc"
@@ -50,7 +52,22 @@ func main() {
 		defer db.Close()
 		defer engine.Close()
 
-		apiList := jsonrpc.APIList(db, backend, txPool, mining, ff, stateCache, blockReader, cfg, engine, logger, nil)
+		polygonSync, err := cmd.PersistentFlags().GetBool("polygon.sync")
+		if err != nil {
+			return err
+		}
+
+		var bridgeReader bridge.ReaderService
+		if polygonSync {
+			stateReceiverContractAddress := params.BorMainnetChainConfig.Bor.GetStateReceiverContract() // mainnet and amoy share the same address
+			bridgeReader, err = bridge.AssembleReader(ctx, cfg.DataDir, logger, stateReceiverContractAddress)
+			if err != nil {
+				return err
+			}
+			defer bridgeReader.Close()
+		}
+
+		apiList := jsonrpc.APIList(db, backend, txPool, mining, ff, stateCache, blockReader, cfg, engine, logger, bridgeReader)
 		rpc.PreAllocateRPCMetricLabels(apiList)
 		if err := cli.StartRpcServer(ctx, cfg, apiList, logger); err != nil {
 			logger.Error(err.Error())
