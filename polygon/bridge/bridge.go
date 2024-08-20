@@ -108,6 +108,7 @@ func (b *Bridge) Run(ctx context.Context) error {
 		bridgeLogPrefix("running bridge component"),
 		"lastFetchedEventID", lastFetchedEventID,
 		"lastProcessedEventID", lastProcessedEventID,
+		"lastProcessedBlockNum", lastProcessedBlockNum,
 	)
 
 	logTicker := time.NewTicker(30 * time.Second)
@@ -191,8 +192,8 @@ func (b *Bridge) InitialBlockReplayNeeded(ctx context.Context) (uint64, bool, er
 	return lastProcessedBlockNum, true, nil
 }
 
-func (b *Bridge) ReplayInitialBlock(block *types.Header) {
-	b.lastProcessedBlockTime.Store(block.Time)
+func (b *Bridge) ReplayInitialBlock(block *types.Block) {
+	b.lastProcessedBlockTime.Store(block.Time())
 }
 
 // ProcessNewBlocks iterates through all blocks and constructs a map from block number to sync events
@@ -201,7 +202,6 @@ func (b *Bridge) ProcessNewBlocks(ctx context.Context, blocks []*types.Block) er
 		return nil
 	}
 
-	var lastProcessedBlock *types.Block
 	blockNumToEventId := make(map[uint64]uint64)
 	eventTxnToBlockNum := make(map[libcommon.Hash]uint64)
 	for _, block := range blocks {
@@ -239,12 +239,7 @@ func (b *Bridge) ProcessNewBlocks(ctx context.Context, blocks []*types.Block) er
 			eventTxnToBlockNum[eventTxnHash] = blockNum
 			blockNumToEventId[blockNum] = startID
 			b.lastProcessedEventID.Store(endID)
-			lastProcessedBlock = block
 		}
-	}
-
-	if lastProcessedBlock == nil {
-		return nil
 	}
 
 	if err := b.store.PutBlockNumToEventID(ctx, blockNumToEventId); err != nil {
@@ -255,11 +250,14 @@ func (b *Bridge) ProcessNewBlocks(ctx context.Context, blocks []*types.Block) er
 		return err
 	}
 
-	b.lastProcessedBlockNum.Store(lastProcessedBlock.NumberU64())
-	b.lastProcessedBlockTime.Store(lastProcessedBlock.Time())
+	lastBlock := blocks[len(blocks)-1]
+	b.lastProcessedBlockNum.Store(lastBlock.NumberU64())
+	b.lastProcessedBlockTime.Store(lastBlock.Time())
 	b.signalProcessedBlocks()
 	return nil
 }
+
+// TODO actually this function is not needed anymore
 
 // Synchronize blocks until events up to a given block are processed.
 // NOTE: should not be called by more than 1 goroutine at a time.

@@ -265,7 +265,7 @@ func TestBridge_InitialBlockReplayNeeded_BeforeIndore(t *testing.T) {
 	require.True(t, replayNeeded)
 	require.Equal(t, uint64(0), replayBlockNum)
 
-	genesis := &types.Header{Time: 1}
+	genesis := types.NewBlock(&types.Header{Time: 1}, nil, nil, nil, nil, nil)
 	b.ReplayInitialBlock(genesis)
 	require.Equal(t, uint64(1), b.lastProcessedBlockTime.Load())
 }

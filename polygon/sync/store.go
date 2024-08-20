@@ -40,13 +40,14 @@ type Store interface {
 
 type executionStore interface {
 	InsertBlocks(ctx context.Context, blocks []*types.Block) error
+	CurrentHeader(ctx context.Context) (*types.Header, error)
 	GetHeader(ctx context.Context, blockNum uint64) (*types.Header, error)
 }
 
 type bridgeStore interface {
 	ProcessNewBlocks(ctx context.Context, blocks []*types.Block) error
 	InitialBlockReplayNeeded(ctx context.Context) (uint64, bool, error)
-	ReplayInitialBlock(block *types.Header)
+	ReplayInitialBlock(block *types.Block)
 }
 
 type executionClientStore struct {
@@ -126,7 +127,7 @@ func (s *executionClientStore) insertBlocks(ctx context.Context, blocks []*types
 	insertStartTime := time.Now()
 
 	if !s.blockReplayDone {
-		if err := s.bridgeReplayInitialBlockIfNeeded(ctx); err != nil {
+		if err := s.bridgeReplayBlocksIfNeeded(ctx); err != nil {
 			return err
 		}
 
@@ -151,16 +152,16 @@ func (s *executionClientStore) insertBlocks(ctx context.Context, blocks []*types
 	return nil
 }
 
-// bridgeReplayInitialBlockIfNeeded is only needed on node startup and just before
+// bridgeReplayBlocksIfNeeded is only needed on node startup and just before
 // the first call to ProcessNewBlocks.
 //
 // The Bridge needs that to set internal state which it cannot fully infer on its own
 // since it has no access to the block information via the execution engine. This is
 // a conscious design decision.
 //
-// The bridge store is in control of determining when and which block replay is needed.
-func (s *executionClientStore) bridgeReplayInitialBlockIfNeeded(ctx context.Context) error {
-	blockNum, replayNeeded, err := s.bridgeStore.InitialBlockReplayNeeded(ctx)
+// The bridge store is in control of determining when and which blocks need replaying.
+func (s *executionClientStore) bridgeReplayBlocksIfNeeded(ctx context.Context) error {
+	initialBlockNum, replayNeeded, err := s.bridgeStore.InitialBlockReplayNeeded(ctx)
 	if err != nil {
 		return err
 	}
@@ -168,16 +169,44 @@ func (s *executionClientStore) bridgeReplayInitialBlockIfNeeded(ctx context.Cont
 		return nil
 	}
 
-	header, err := s.executionStore.GetHeader(ctx, blockNum)
+	initialHeader, err := s.executionStore.GetHeader(ctx, initialBlockNum)
 	if err != nil {
 		return err
 	}
 
 	s.logger.Debug(
-		syncLogPrefix("replaying initial block for bridgeStore store"),
-		"blockNum", header.Number.Uint64(),
+		syncLogPrefix("replaying initial block for bridge store"),
+		"blockNum", initialHeader.Number.Uint64(),
 	)
 
-	s.bridgeStore.ReplayInitialBlock(header)
+	s.bridgeStore.ReplayInitialBlock(types.NewBlock(initialHeader, nil, nil, nil, nil, nil))
+
+	tip, err := s.executionStore.CurrentHeader(ctx)
+	if err != nil {
+		return err
+	}
+
+	tipNum := tip.Number.Uint64()
+	replayBlocks := make([]*types.Block, 0, tipNum-initialBlockNum)
+	for blockNum := initialBlockNum + 1; blockNum <= tipNum; blockNum++ {
+		header, err := s.executionStore.GetHeader(ctx, blockNum)
+		if err != nil {
+			return err
+		}
+
+		replayBlocks = append(replayBlocks, types.NewBlock(header, nil, nil, nil, nil, nil))
+	}
+
+	if len(replayBlocks) > 0 {
+		s.logger.Debug(
+			syncLogPrefix("replaying follow up blocks to tip for bridge store"),
+			"from", replayBlocks[0].NumberU64(),
+			"to", replayBlocks[len(replayBlocks)-1].NumberU64(),
+			"count", len(replayBlocks),
+		)
+
+		return s.bridgeStore.ProcessNewBlocks(ctx, replayBlocks)
+	}
+
 	return nil
 }
