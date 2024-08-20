@@ -872,12 +872,6 @@ func extractPatternsInSuperstrings(ctx context.Context, superstringCh chan []byt
 				}
 
 				if !isNew && !prevSkipped {
-					//
-					//dictKey = dictKey[:l]
-					//for s := 0; s < l; s++ {
-					//	dictKey[s] = superstring[(int(filtered[i])+s)*2+1]
-					//}
-					//fmt.Printf("break: %s\n", dictKey)
 					break
 				}
 
