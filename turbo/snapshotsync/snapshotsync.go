@@ -523,10 +523,6 @@ func logStats(ctx context.Context, stats *proto_downloader.StatsReply, startTime
 		log.Info(fmt.Sprintf("[%s] %s", logPrefix, logEnd), "time", time.Since(startTime).String())
 	} else {
 
-		if stats.MetadataReady < stats.FilesTotal && stats.BytesTotal == 0 {
-			log.Info(fmt.Sprintf("[%s] Waiting for torrents metadata: %d/%d", logPrefix, stats.MetadataReady, stats.FilesTotal))
-		}
-
 		dbg.ReadMemStats(&m)
 
 		var remainingBytes uint64
@@ -537,8 +533,19 @@ func logStats(ctx context.Context, stats *proto_downloader.StatsReply, startTime
 
 		downloadTimeLeft := calculateTime(remainingBytes, stats.CompletionRate)
 
+		progressStr := fmt.Sprintf("%.2f%% %s/%s", stats.Progress, common.ByteCount(stats.BytesCompleted), common.ByteCount(stats.BytesTotal))
+
+		if stats.MetadataReady < stats.FilesTotal {
+			progressStr = fmt.Sprintf("%s/Estimating...", common.ByteCount(stats.BytesCompleted))
+			downloadTimeLeft = "Estimating..."
+
+			if stats.BytesTotal == 0 {
+				log.Info(fmt.Sprintf("[%s] Waiting for torrents metadata: %d/%d", logPrefix, stats.MetadataReady, stats.FilesTotal))
+			}
+		}
+
 		log.Info(fmt.Sprintf("[%s] %s", logPrefix, logReason),
-			"progress", fmt.Sprintf("%.2f%% %s/%s", stats.Progress, common.ByteCount(stats.BytesCompleted), common.ByteCount(stats.BytesTotal)),
+			"progress", progressStr,
 			// TODO: "downloading", stats.Downloading,
 			"time-left", downloadTimeLeft,
 			"total-time", time.Since(startTime).Round(time.Second).String(),
