@@ -536,7 +536,7 @@ func logStats(ctx context.Context, stats *proto_downloader.StatsReply, startTime
 		progressStr := fmt.Sprintf("%.2f%% %s/%s", stats.Progress, common.ByteCount(stats.BytesCompleted), common.ByteCount(stats.BytesTotal))
 
 		if stats.MetadataReady < stats.FilesTotal {
-			progressStr = "%s/Estimating..." + common.ByteCount(stats.BytesCompleted)
+			progressStr = common.ByteCount(stats.BytesCompleted) + "/Estimating..."
 			downloadTimeLeft = "Estimating..."
 
 			if stats.BytesTotal == 0 {
