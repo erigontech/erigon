@@ -18,7 +18,6 @@ package antiquary
 
 import (
 	"context"
-	"fmt"
 	"io/ioutil"
 	"math"
 	"strings"
@@ -147,7 +146,11 @@ func (a *Antiquary) Loop() error {
 	}
 	defer tx.Rollback()
 	// read the last beacon snapshots
-	from := a.sn.BlocksSegsAvailable() + 1
+	from, err := beacon_indicies.ReadLastBeaconSnapshot(tx)
+	if err != nil {
+		return err
+	}
+
 	logInterval := time.NewTicker(30 * time.Second)
 	if err := a.sn.ReopenFolder(); err != nil {
 		return err
@@ -210,19 +213,21 @@ func (a *Antiquary) Loop() error {
 	if a.blobs {
 		go a.loopBlobs(a.ctx)
 	}
+	if err := beacon_indicies.WriteLastBeaconSnapshot(tx, frozenSlots); err != nil {
+		return err
+	}
 
 	log.Info("[Antiquary] Restarting Caplin")
 	if err := tx.Commit(); err != nil {
 		return err
 	}
 	// Check for snapshots retirement every 3 minutes
-	retirementTicker := time.NewTicker(10 * time.Second)
+	retirementTicker := time.NewTicker(3 * time.Minute)
 	defer retirementTicker.Stop()
 	for {
 		select {
 		case <-retirementTicker.C:
 			if !a.backfilled.Load() {
-				fmt.Println("not backfilled")
 				continue
 			}
 
@@ -232,7 +237,11 @@ func (a *Antiquary) Loop() error {
 			)
 			if err := a.mainDB.View(a.ctx, func(roTx kv.Tx) error {
 				// read the last beacon snapshots
-				from = a.sn.BlocksSegsAvailable() + 1
+				from, err = beacon_indicies.ReadLastBeaconSnapshot(roTx)
+				if err != nil {
+					return err
+				}
+				from += 1
 				// read the finalized head
 				to, err = beacon_indicies.ReadHighestFinalized(roTx)
 				if err != nil {
@@ -244,14 +253,12 @@ func (a *Antiquary) Loop() error {
 			}
 			// Sanity checks just to be safe.
 			if from >= to {
-				fmt.Println("from >= to", from, to)
 				continue
 			}
 			from = (from / snaptype.Erigon2MergeLimit) * snaptype.Erigon2MergeLimit
 			to = min(to, to-safetyMargin) // We don't want to retire snapshots that are too close to the finalized head
 			to = (to / snaptype.Erigon2MergeLimit) * snaptype.Erigon2MergeLimit
 			if to-from < snaptype.Erigon2MergeLimit {
-				fmt.Println("to-from < snaptype.Erigon2MergeLimit", from, to, to-from)
 				continue
 			}
 
@@ -295,7 +302,13 @@ func (a *Antiquary) antiquate(from, to uint64) error {
 	if err := beacon_indicies.PruneBlocks(a.ctx, tx, to); err != nil {
 		return err
 	}
+	if err := beacon_indicies.WriteLastBeaconSnapshot(tx, to-1); err != nil {
+		return err
+	}
 	if err := tx.Commit(); err != nil {
+		return err
+	}
+	if err := a.sn.ReopenFolder(); err != nil {
 		return err
 	}
 
