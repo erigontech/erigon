@@ -72,7 +72,7 @@ func New(ctx context.Context, beaconCfg *clparams.BeaconChainConfig) Attestation
 // which might lead to 10k copies of the same state in memory)
 func (ap *attestationProducer) listenOnCopyStateAtSlot(ctx context.Context) {
 	// beaconStateCache *lru.CacheWithTTL[uint64, *state.CachingBeaconState] // Slot => BeaconState
-	beaconStateCache := lru.NewWithTTL[uint64, *state.CachingBeaconState]("attestaion_producer_beacon_state_cpy", 128, time.Minute)
+	beaconStateCache := lru.NewWithTTL[uint64, *state.CachingBeaconState]("attestaion_producer_beacon_state_cpy", 32, time.Minute)
 	generatingWaitList := map[uint64][]chan<- stateAcquireResp{}
 	slotGenerateDone := make(chan uint64, 32)
 	for {
