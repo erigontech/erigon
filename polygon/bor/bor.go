@@ -1541,7 +1541,7 @@ func (c *Bor) CommitStates(
 	}
 
 	events := chain.Chain.BorEventsByBlock(header.Hash(), blockNum)
-	if enableBoreventsRemoteFallback && blockNum <= chain.Chain.FrozenBorBlocks() && (len(events) == 0 || len(events) == 50) {
+	if enableBoreventsRemoteFallback && blockNum <= chain.Chain.FrozenBorBlocks() && len(events) == 50 {
 		// we still sometime could get 0 events from borevent file
 		var to time.Time
 		if c.config.IsIndore(blockNum) {
