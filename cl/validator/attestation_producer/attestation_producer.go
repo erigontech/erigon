@@ -130,6 +130,7 @@ func (ap *attestationProducer) listenOnCopyStateAtSlot(ctx context.Context) {
 	}
 }
 
+// acquireBeaconStateAtSlot returns a copy of the beacon state at the given slot. Note the returned state should NOT be modified.
 func (ap *attestationProducer) acquireBeaconStateAtSlot(baseState *state.CachingBeaconState, slot uint64) (*state.CachingBeaconState, error) {
 	respCh := make(chan stateAcquireResp, 1)
 	ap.reqStateAtSlotCh <- struct {
