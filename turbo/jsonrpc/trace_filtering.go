@@ -359,7 +359,7 @@ func (api *TraceAPIImpl) filterV3(ctx context.Context, dbtx kv.TemporalTx, fromB
 	if err != nil {
 		return err
 	}
-	it := rawdbv3.TxNums2BlockNums(dbtx, allTxs, order.Asc)
+	it := rawdbv3.TxNums2BlockNums(dbtx, txNumsReader, allTxs, order.Asc)
 	defer it.Close()
 
 	chainConfig, err := api.chainConfig(ctx, dbtx)

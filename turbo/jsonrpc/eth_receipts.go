@@ -288,7 +288,9 @@ func (api *BaseAPI) getLogsV3(ctx context.Context, tx kv.TemporalTx, begin, end 
 	if err != nil {
 		return logs, err
 	}
-	it := rawdbv3.TxNums2BlockNums(tx, txNumbers, order.Asc)
+	it := rawdbv3.TxNums2BlockNums(tx,
+		rawdbv3.TxNums.WithCustomReadTxNumFunc(freezeblocks.ReadTxNumFuncFromBlockReader(ctx, api._blockReader)),
+		txNumbers, order.Asc)
 	defer it.Close()
 	var timestamp uint64
 	for it.HasNext() {

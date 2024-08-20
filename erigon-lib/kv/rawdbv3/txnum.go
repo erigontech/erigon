@@ -322,10 +322,12 @@ type MapTxNum2BlockNumIter struct {
 
 	blockNum                         uint64
 	minTxNumInBlock, maxTxNumInBlock uint64
+
+	txNumsReader TxNumsReader
 }
 
-func TxNums2BlockNums(tx kv.Tx, it stream.U64, by order.By) *MapTxNum2BlockNumIter {
-	return &MapTxNum2BlockNumIter{tx: tx, it: it, orderAscend: bool(by)}
+func TxNums2BlockNums(tx kv.Tx, txNumsReader TxNumsReader, it stream.U64, by order.By) *MapTxNum2BlockNumIter {
+	return &MapTxNum2BlockNumIter{tx: tx, txNumsReader: txNumsReader, it: it, orderAscend: bool(by)}
 }
 func (i *MapTxNum2BlockNumIter) Close() {
 	if i.it != nil {
@@ -345,7 +347,7 @@ func (i *MapTxNum2BlockNumIter) Next() (txNum, blockNum uint64, txIndex int, isF
 		blockNumChanged = true
 
 		var ok bool
-		ok, i.blockNum, err = TxNums.FindBlockNum(i.tx, txNum)
+		ok, i.blockNum, err = i.txNumsReader.FindBlockNum(i.tx, txNum)
 		if err != nil {
 			return
 		}
