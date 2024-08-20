@@ -494,7 +494,7 @@ func (e *EthereumExecutionModule) updateForkChoice(ctx context.Context, original
 		logArgs := []interface{}{"head", headHash, "hash", blockHash}
 		if flushExtendingFork {
 			totalTime := blockTimings[engine_helpers.BlockTimingsValidationIndex]
-			if e.syncCfg.ParallelStateFlushing {
+			if !e.syncCfg.ParallelStateFlushing {
 				totalTime += blockTimings[engine_helpers.BlockTimingsFlushExtendingFork]
 			}
 			gasUsedMgas := float64(fcuHeader.GasUsed) / 1e6
@@ -502,7 +502,7 @@ func (e *EthereumExecutionModule) updateForkChoice(ctx context.Context, original
 			e.avgMgasSec = ((e.avgMgasSec * (float64(e.recordedMgasSec))) + mgasPerSec) / float64(e.recordedMgasSec+1)
 			e.recordedMgasSec++
 			logArgs = append(logArgs, "number", fcuHeader.Number.Uint64(), "execution", blockTimings[engine_helpers.BlockTimingsValidationIndex], "mgas/s", fmt.Sprintf("%.2f", mgasPerSec), "average mgas/s", fmt.Sprintf("%.2f", e.avgMgasSec))
-			if e.syncCfg.ParallelStateFlushing {
+			if !e.syncCfg.ParallelStateFlushing {
 				logArgs = append(logArgs, "flushing", blockTimings[engine_helpers.BlockTimingsFlushExtendingFork])
 			}
 		}
