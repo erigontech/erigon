@@ -2127,7 +2127,6 @@ func (d *Downloader) ReCalcStats(interval time.Duration) {
 				}
 
 				stats.BytesCompleted += bytesCompleted
-				fmt.Println("BytesCompleted 3", stats.BytesCompleted)
 				stats.BytesTotal += tLen
 
 				stats.BytesDownload += bytesCompleted
