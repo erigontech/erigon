@@ -18,4 +18,4 @@ three for another, one each for the other three).
 The third file contains 12 test cases for the overlay API for CREATE and CREATE2.
 
 Another collection of related tests can be found
-here: https://github.com/Great-Hill-Corporation/trueblocks-core/tree/develop/src/other/trace_tests
+here: https://github.com/TrueBlocks/trueblocks-core/tree/1dd55cf1028837f5611b5b389a3272f776567d5d/src/other/trace_tests

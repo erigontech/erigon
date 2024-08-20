@@ -152,7 +152,7 @@ func (d *Dumper) DumpToCollector(c DumpCollector, excludeCode, excludeStorage bo
 	if err != nil {
 		return nil, err
 	}
-	txNumForStorage, err := rawdbv3.TxNums.Min(ttx, d.blockNumber)
+	txNumForStorage, err := rawdbv3.TxNums.Min(ttx, d.blockNumber+1)
 	if err != nil {
 		return nil, err
 	}

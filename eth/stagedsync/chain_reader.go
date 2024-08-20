@@ -47,8 +47,7 @@ func (cr ChainReader) Config() *chain.Config {
 // CurrentHeader retrieves the current header from the local chain.
 func (cr ChainReader) CurrentHeader() *types.Header {
 	hash := rawdb.ReadHeadHeaderHash(cr.Db)
-	number := rawdb.ReadHeaderNumber(cr.Db, hash)
-	h, _ := cr.BlockReader.Header(context.Background(), cr.Db, hash, *number)
+	h, _ := cr.BlockReader.HeaderByHash(context.Background(), cr.Db, hash)
 	return h
 }
 
@@ -59,12 +58,7 @@ func (cr ChainReader) CurrentFinalizedHeader() *types.Header {
 		return nil
 	}
 
-	number := rawdb.ReadHeaderNumber(cr.Db, hash)
-	if number == nil {
-		return nil
-	}
-
-	return rawdb.ReadHeader(cr.Db, hash, *number)
+	return cr.GetHeaderByHash(hash)
 }
 
 func (cr ChainReader) CurrentSafeHeader() *types.Header {
@@ -73,12 +67,7 @@ func (cr ChainReader) CurrentSafeHeader() *types.Header {
 		return nil
 	}
 
-	number := rawdb.ReadHeaderNumber(cr.Db, hash)
-	if number == nil {
-		return nil
-	}
-
-	return rawdb.ReadHeader(cr.Db, hash, *number)
+	return cr.GetHeaderByHash(hash)
 }
 
 // GetHeader retrieves a block header from the database by hash and number.
@@ -95,8 +84,7 @@ func (cr ChainReader) GetHeaderByNumber(number uint64) *types.Header {
 
 // GetHeaderByHash retrieves a block header from the database by its hash.
 func (cr ChainReader) GetHeaderByHash(hash libcommon.Hash) *types.Header {
-	number := rawdb.ReadHeaderNumber(cr.Db, hash)
-	h, _ := cr.BlockReader.Header(context.Background(), cr.Db, hash, *number)
+	h, _ := cr.BlockReader.HeaderByHash(context.Background(), cr.Db, hash)
 	return h
 }
 
