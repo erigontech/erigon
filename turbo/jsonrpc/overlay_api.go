@@ -511,7 +511,7 @@ func (api *OverlayAPIImpl) replayBlock(ctx context.Context, blockNum uint64, sta
 			}
 		}
 
-		statedb.SetTxContext(txn.Hash(), block.Hash(), idx)
+		statedb.SetTxContext(idx)
 		txCtx = core.NewEVMTxContext(msg)
 		evm.TxContext = txCtx
 
