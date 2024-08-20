@@ -97,6 +97,7 @@ type BorConfig interface {
 	GetAgraBlock() *big.Int
 	IsNapoli(num uint64) bool
 	GetNapoliBlock() *big.Int
+	GetStateReceiverContract() string
 }
 
 func (c *Config) String() string {

@@ -91,29 +91,21 @@ var rootCmd = &cobra.Command{
 	Short: "rpcdaemon is JSON RPC server that connects to Erigon node for remote DB access",
 }
 
-type PolygonRPCCfg struct {
-	Enabled                      bool
-	StateReceiverContractAddress string
-}
-
 var (
 	stateCacheStr string
+	polygonSync   bool
 )
 
-func RootCommand() (*cobra.Command, *httpcfg.HttpCfg, *PolygonRPCCfg) {
+func RootCommand() (*cobra.Command, *httpcfg.HttpCfg) {
 	utils.CobraFlags(rootCmd, debug.Flags, utils.MetricFlags, logging.Flags)
 
 	cfg := &httpcfg.HttpCfg{Sync: ethconfig.Defaults.Sync, Enabled: true, StateCache: kvcache.DefaultCoherentConfig}
-	polygonSyncCfg := &PolygonRPCCfg{Enabled: false}
-
 	rootCmd.PersistentFlags().StringVar(&cfg.PrivateApiAddr, "private.api.addr", "127.0.0.1:9090", "Erigon's components (txpool, rpcdaemon, sentry, downloader, ...) can be deployed as independent Processes on same/another server. Then components will connect to erigon by this internal grpc API. Example: 127.0.0.1:9090")
 	rootCmd.PersistentFlags().StringVar(&cfg.DataDir, "datadir", "", "path to Erigon working directory")
 	rootCmd.PersistentFlags().BoolVar(&cfg.GraphQLEnabled, "graphql", false, "enables graphql endpoint (disabled by default)")
 	rootCmd.PersistentFlags().Uint64Var(&cfg.Gascap, "rpc.gascap", 50_000_000, "Sets a cap on gas that can be used in eth_call/estimateGas")
 	rootCmd.PersistentFlags().Uint64Var(&cfg.MaxTraces, "trace.maxtraces", 200, "Sets a limit on traces that can be returned in trace_filter")
-
-	rootCmd.PersistentFlags().BoolVar(&polygonSyncCfg.Enabled, "polygon.sync", false, "Enable if Erigon has been synced using the new polygon sync component")
-	rootCmd.PersistentFlags().StringVar(&polygonSyncCfg.StateReceiverContractAddress, "polygon.sync.stateReceiverContractAddress", "0x0000000000000000000000000000000000001001", "State receiver contract for polygon sync component")
+	rootCmd.PersistentFlags().BoolVar(&polygonSync, "polygon.sync", false, "Enable if Erigon has been synced using the new polygon sync component")
 
 	rootCmd.PersistentFlags().StringVar(&cfg.RpcAllowListFilePath, utils.RpcAccessListFlag.Name, "", "Specify granular (method-by-method) API allowlist")
 	rootCmd.PersistentFlags().UintVar(&cfg.RpcBatchConcurrency, utils.RpcBatchConcurrencyFlag.Name, 2, utils.RpcBatchConcurrencyFlag.Usage)
@@ -215,7 +207,7 @@ func RootCommand() (*cobra.Command, *httpcfg.HttpCfg, *PolygonRPCCfg) {
 
 	cfg.StateCache.MetricsLabel = "rpc"
 
-	return rootCmd, cfg, polygonSyncCfg
+	return rootCmd, cfg
 }
 
 type StateChangesClient interface {
@@ -326,7 +318,7 @@ func EmbeddedServices(ctx context.Context,
 
 // RemoteServices - use when RPCDaemon run as independent process. Still it can use --datadir flag to enable
 // `cfg.WithDatadir` (mode when it on 1 machine with Erigon)
-func RemoteServices(ctx context.Context, cfg *httpcfg.HttpCfg, polygonCfg *PolygonRPCCfg, logger log.Logger, rootCancel context.CancelFunc) (
+func RemoteServices(ctx context.Context, cfg *httpcfg.HttpCfg, logger log.Logger, rootCancel context.CancelFunc) (
 	db kv.RoDB, eth rpchelper.ApiBackend, txPool txpool.TxpoolClient, mining txpool.MiningClient,
 	stateCache kvcache.Cache, blockReader services.FullBlockReader, engine consensus.EngineReader,
 	ff *rpchelper.Filters, err error) {
@@ -508,7 +500,7 @@ func RemoteServices(ctx context.Context, cfg *httpcfg.HttpCfg, polygonCfg *Polyg
 		switch {
 		case cc != nil:
 			switch {
-			case cc.Bor != nil && !polygonCfg.Enabled:
+			case cc.Bor != nil && !polygonSync:
 				var borKv kv.RoDB
 
 				// bor (consensus) specific db

@@ -26,6 +26,7 @@ import (
 
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon/cmd/rpcdaemon/cli"
+	"github.com/erigontech/erigon/params"
 	"github.com/erigontech/erigon/polygon/bridge"
 	"github.com/erigontech/erigon/rpc"
 	"github.com/erigontech/erigon/turbo/debug"
@@ -36,12 +37,12 @@ import (
 )
 
 func main() {
-	cmd, cfg, polygonRPCCfg := cli.RootCommand()
+	cmd, cfg := cli.RootCommand()
 	rootCtx, rootCancel := common.RootContext()
 	cmd.RunE = func(cmd *cobra.Command, args []string) error {
 		ctx := cmd.Context()
 		logger := debug.SetupCobra(cmd, "sentry")
-		db, backend, txPool, mining, stateCache, blockReader, engine, ff, err := cli.RemoteServices(ctx, cfg, polygonRPCCfg, logger, rootCancel)
+		db, backend, txPool, mining, stateCache, blockReader, engine, ff, err := cli.RemoteServices(ctx, cfg, logger, rootCancel)
 		if err != nil {
 			if !errors.Is(err, context.Canceled) {
 				logger.Error("Could not connect to DB", "err", err)
@@ -51,9 +52,15 @@ func main() {
 		defer db.Close()
 		defer engine.Close()
 
+		polygonSync, err := cmd.PersistentFlags().GetBool("polygon.sync")
+		if err != nil {
+			return err
+		}
+
 		var bridgeReader bridge.ReaderService
-		if cfg.WithDatadir && polygonRPCCfg.Enabled {
-			bridgeReader, err = bridge.AssembleReader(ctx, cfg.DataDir, logger, polygonRPCCfg.StateReceiverContractAddress)
+		if polygonSync {
+			stateReceiverContractAddress := params.BorMainnetChainConfig.Bor.GetStateReceiverContract() // mainnet and amoy share the same address
+			bridgeReader, err = bridge.AssembleReader(ctx, cfg.DataDir, logger, stateReceiverContractAddress)
 			if err != nil {
 				return err
 			}
