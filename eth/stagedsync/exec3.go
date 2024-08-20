@@ -81,6 +81,7 @@ func NewProgress(prevOutputBlockNum, commitThreshold uint64, workersCount int, u
 type Progress struct {
 	prevTime           time.Time
 	prevTxCount        uint64
+	prevGasUsed        uint64
 	prevOutputBlockNum uint64
 	prevRepeatCount    uint64
 	commitThreshold    uint64
@@ -112,7 +113,7 @@ func (p *Progress) Log(suffix string, rs *state.StateV3, in *state.QueueWithRetr
 		suffix += " Commit every block"
 	}
 
-	gasUsedMgas := float64(gas) / 1e6
+	gasUsedMgas := float64(gas-p.prevGasUsed) / 1e6
 	mgasPerSec := gasUsedMgas / interval.Seconds()
 	//avgMgasSec = ((e.avgMgasSec * (float64(e.recordedMgasSec))) + mgasPerSec) / float64(e.recordedMgasSec+1)
 
@@ -140,6 +141,7 @@ func (p *Progress) Log(suffix string, rs *state.StateV3, in *state.QueueWithRetr
 
 	p.prevTime = currentTime
 	p.prevTxCount = txCount
+	p.prevGasUsed = gas
 	p.prevOutputBlockNum = outputBlockNum
 	p.prevRepeatCount = repeatCount
 }
