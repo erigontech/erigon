@@ -222,6 +222,7 @@ func (a *Antiquary) Loop() error {
 		select {
 		case <-retirementTicker.C:
 			if !a.backfilled.Load() {
+				fmt.Println("not backfilled")
 				continue
 			}
 
