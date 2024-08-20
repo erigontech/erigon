@@ -328,6 +328,10 @@ func (back *RemoteBackend) LastFrozenEventId() uint64 {
 	panic("not implemented")
 }
 
+func (back *RemoteBackend) LastFrozenEventBlockNum() uint64 {
+	panic("not implemented")
+}
+
 func (back *RemoteBackend) Span(ctx context.Context, tx kv.Getter, spanId uint64) ([]byte, error) {
 	return back.blockReader.Span(ctx, tx, spanId)
 }

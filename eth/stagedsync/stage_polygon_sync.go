@@ -1113,6 +1113,12 @@ func (s polygonSyncStageBridgeStore) LastProcessedBlockNum(ctx context.Context) 
 	if err != nil {
 		return 0, err
 	}
+	if r.err != nil {
+		return 0, r.err
+	}
+	if r.blockNum == 0 {
+		return s.eventReader.LastFrozenEventBlockNum(), nil
+	}
 
 	return r.blockNum, r.err
 }
@@ -1162,12 +1168,12 @@ func (s polygonSyncStageBridgeStore) Events(context.Context, uint64, uint64) ([]
 	panic("polygonSyncStageBridgeStore.Events not supported")
 }
 
-func (s polygonSyncStageBridgeStore) BlockEventIDRange(context.Context, uint64) (uint64, uint64, error) {
+func (s polygonSyncStageBridgeStore) BlockEventIDsRange(context.Context, uint64) (uint64, uint64, error) {
 	// used for accessing events in execution
 	// astrid stage integration intends to use the bridge only for scrapping
 	// not for reading which remains the same in execution (via BlockReader)
 	// astrid standalone mode introduces its own reader
-	panic("polygonSyncStageBridgeStore.BlockEventIDRange not supported")
+	panic("polygonSyncStageBridgeStore.BlockEventIDsRange not supported")
 }
 
 func (s polygonSyncStageBridgeStore) EventTxnToBlockNum(context.Context, common.Hash) (uint64, bool, error) {
