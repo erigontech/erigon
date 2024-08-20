@@ -317,7 +317,7 @@ LOOP:
 		case *types.BatchStart:
 			c.currentFork = parsedProto.ForkId
 			c.entryChan <- parsedProto
-		case *types.GerUpdateProto:
+		case *types.GerUpdate:
 			c.entryChan <- parsedProto
 		case *types.BatchEnd:
 			c.entryChan <- parsedProto
