@@ -25,7 +25,6 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"runtime"
 	"slices"
 	"strconv"
 	"sync"
@@ -34,7 +33,6 @@ import (
 
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/assert"
-	"github.com/erigontech/erigon-lib/common/dbg"
 	"github.com/erigontech/erigon-lib/etl"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/seg/patricia"
@@ -923,8 +921,6 @@ func extractPatternsInSuperstrings(ctx context.Context, superstringCh chan []byt
 	}
 }
 
-var produced int
-
 func DictionaryBuilderFromCollectors(ctx context.Context, cfg Cfg, logPrefix, tmpDir string, collectors []*etl.Collector, lvl log.Lvl, logger log.Logger) (*DictionaryBuilder, error) {
 	t := time.Now()
 	dictCollector := etl.NewCollector(logPrefix+"_collectDict", tmpDir, etl.NewSortableBuffer(etl.BufferOptimalSize/4), logger)
@@ -932,12 +928,6 @@ func DictionaryBuilderFromCollectors(ctx context.Context, cfg Cfg, logPrefix, tm
 	dictCollector.SortAndFlushInBackground(true)
 	dictCollector.LogLvl(lvl)
 
-	var m runtime.MemStats
-	if lvl < log.LvlTrace {
-		runtime.GC()
-		dbg.ReadMemStats(&m)
-		logger.Log(lvl, "[dbg] RAM Before dict", "alloc", common.ByteCount(m.Alloc), "sys", common.ByteCount(m.Sys))
-	}
 	dictAggregator := &DictAggregator{collector: dictCollector, dist: map[int]int{}}
 	for _, collector := range collectors {
 		if err := collector.Load(nil, "", dictAggregator.aggLoadFunc, etl.TransformArgs{Quit: ctx.Done()}); err != nil {
@@ -951,20 +941,9 @@ func DictionaryBuilderFromCollectors(ctx context.Context, cfg Cfg, logPrefix, tm
 	// We need `maxDictPatterns` words with highest score - but input is not sorted by score (it's sorted by `word`)
 	// so, then let's just put to heap more items and then shrink at `finish()`
 	db := &DictionaryBuilder{softLimit: cfg.DictReducerSoftLimit}
-	if lvl < log.LvlTrace {
-		runtime.GC()
-		dbg.ReadMemStats(&m)
-		logger.Log(lvl, "[dbg] RAM Before dict2", "alloc", common.ByteCount(m.Alloc), "sys", common.ByteCount(m.Sys))
-	}
 	if err := dictCollector.Load(nil, "", db.loadFunc, etl.TransformArgs{Quit: ctx.Done()}); err != nil {
 		return nil, err
 	}
-	if lvl < log.LvlTrace {
-		runtime.GC()
-		dbg.ReadMemStats(&m)
-		logger.Log(lvl, "[dbg] RAM After dict", "alloc", common.ByteCount(m.Alloc), "sys", common.ByteCount(m.Sys))
-	}
-
 	db.finish(cfg.MaxDictPatterns)
 
 	db.Sort()
