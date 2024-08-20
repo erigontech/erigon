@@ -109,7 +109,7 @@ func (api *OtterscanAPIImpl) traceBlock(dbtx kv.Tx, ctx context.Context, blockNu
 			return false, nil, ctx.Err()
 		default:
 		}
-		ibs.SetTxContext(txn.Hash(), block.Hash(), idx)
+		ibs.SetTxContext(txn.Hash(), idx)
 
 		msg, _ := txn.AsMessage(*signer, header.BaseFee, rules)
 
