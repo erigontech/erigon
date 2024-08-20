@@ -99,6 +99,7 @@ func SpawnMiningFinishStage(s *StageState, tx kv.RwTx, cfg MiningFinishCfg, quit
 			"gasUsed", block.GasUsed(),
 			"gasLimit", block.GasLimit(),
 			"difficulty", block.Difficulty(),
+			"header", block.Header(),
 		)
 	}
 	// interrupt aborts the in-flight sealing task.

@@ -5,7 +5,7 @@ For the following tutorial, we will make references to https://github.com/Giulio
 
 We are going to build our daemon using golang and Erigon packages, so first of all we are going to create a file in which we are going to store our API methods and informations. (`api.go`).
 
-our daemon will only contain one method: `myNamespace_getBlockNumberByHash` which will return the block number associated to certain hash.
+our daemon will only contain one method: `myNamespace_getBlockNumberByHash` which will return the block number associated with a certain hash.
 
 .. code-block:: go
 
