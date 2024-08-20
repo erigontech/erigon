@@ -19,7 +19,7 @@ type u192 struct{ hi, lo, ext uint64 } //nolint
 
 type DomainGetFromFileCache struct {
 	*freelru.LRU[u128, domainGetFromFileCacheItem]
-	trace bool
+	enabled, trace bool
 }
 
 // nolint
@@ -29,8 +29,9 @@ type domainGetFromFileCacheItem struct {
 }
 
 var (
-	domainGetFromFileCacheLimit = uint32(dbg.EnvInt("D_LRU", 4096))
-	domainGetFromFileCacheTrace = dbg.EnvBool("D_LRU_TRACE", false)
+	domainGetFromFileCacheLimit   = uint32(dbg.EnvInt("D_LRU", 4096))
+	domainGetFromFileCacheTrace   = dbg.EnvBool("D_LRU_TRACE", false)
+	domainGetFromFileCacheEnabled = dbg.EnvBool("D_LRU_ENABLED", false)
 )
 
 func NewDomainGetFromFileCache() *DomainGetFromFileCache {
@@ -38,16 +39,16 @@ func NewDomainGetFromFileCache() *DomainGetFromFileCache {
 	if err != nil {
 		panic(err)
 	}
-	return &DomainGetFromFileCache{LRU: c, trace: domainGetFromFileCacheTrace}
+	return &DomainGetFromFileCache{LRU: c, enabled: domainGetFromFileCacheEnabled, trace: domainGetFromFileCacheTrace}
 }
 
 func (c *DomainGetFromFileCache) SetTrace(v bool) { c.trace = v }
 func (c *DomainGetFromFileCache) LogStats(dt kv.Domain) {
-	if c == nil || !c.trace {
+	if c == nil || !c.enabled || !c.trace {
 		return
 	}
 	m := c.Metrics()
-	log.Debug("[dbg] DomainGetFromFileCache", "a", dt.String(), "hit", m.Hits, "total", m.Hits+m.Misses, "Collisions", m.Collisions, "Evictions", m.Evictions, "Inserts", m.Inserts, "limit", domainGetFromFileCacheLimit, "ratio", fmt.Sprintf("%.2f", float64(m.Hits)/float64(m.Hits+m.Misses)))
+	log.Warn("[dbg] DomainGetFromFileCache", "a", dt.String(), "hit", m.Hits, "total", m.Hits+m.Misses, "Collisions", m.Collisions, "Evictions", m.Evictions, "Inserts", m.Inserts, "limit", domainGetFromFileCacheLimit, "ratio", fmt.Sprintf("%.2f", float64(m.Hits)/float64(m.Hits+m.Misses)))
 }
 
 func NewDomainGetFromFileCacheAny() any { return NewDomainGetFromFileCache() }
@@ -72,6 +73,9 @@ func (v *domainVisible) preAlloc() {
 }
 
 func (v *domainVisible) newGetFromFileCache() *DomainGetFromFileCache {
+	if !domainGetFromFileCacheEnabled {
+		return nil
+	}
 	if v.name == kv.CommitmentDomain {
 		return nil
 	}
