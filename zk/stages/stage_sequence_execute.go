@@ -142,7 +142,12 @@ func SpawnSequencingStage(
 		blockTicker.Reset(cfg.zk.SequencerBlockSealTime)
 
 		if batchState.isL1Recovery() {
-			didLoadedAnyDataForRecovery := batchState.loadBlockL1RecoveryData(blockNumber - (executionAt + 1))
+			blockNumbersInBatchSoFar, err := batchContext.sdb.hermezDb.GetL2BlockNosByBatch(batchState.batchNumber)
+			if err != nil {
+				return err
+			}
+
+			didLoadedAnyDataForRecovery := batchState.loadBlockL1RecoveryData(uint64(len(blockNumbersInBatchSoFar)))
 			if !didLoadedAnyDataForRecovery {
 				break
 			}
