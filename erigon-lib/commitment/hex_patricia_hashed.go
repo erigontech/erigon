@@ -28,6 +28,7 @@ import (
 	"math/bits"
 	"path/filepath"
 	"runtime"
+	"sort"
 	"strings"
 	"sync/atomic"
 	"time"
@@ -83,6 +84,8 @@ type HexPatriciaHashed struct {
 	hashAuxBuffer [128]byte     // buffer to compute cell hash or write hash-related things
 	auxBuffer     *bytes.Buffer // auxiliary buffer used during branch updates encoding
 	branchEncoder *BranchEncoder
+
+	depthsToTxNum [128]uint64 // endTxNum of file with branch data for that depth
 }
 
 func NewHexPatriciaHashed(accountKeyLen int, ctx PatriciaContext, tmpdir string) *HexPatriciaHashed {
@@ -748,7 +751,7 @@ func (hph *HexPatriciaHashed) computeCellHash(cell *cell, depth int, buf []byte)
 			// if account key is empty, then we need to hash storage key from the key beginning
 			koffset = 0
 		}
-		if err := hashKey(hph.keccak, cell.storageAddr[koffset:cell.storageAddrLen], cell.hashedExtension[:], hashedKeyOffset); err != nil {
+		if err = hashKey(hph.keccak, cell.storageAddr[koffset:cell.storageAddrLen], cell.hashedExtension[:], hashedKeyOffset); err != nil {
 			return nil, err
 		}
 		cell.hashedExtension[64-hashedKeyOffset] = 16 // Add terminator
@@ -957,10 +960,11 @@ func (hph *HexPatriciaHashed) needUnfolding(hashedKey []byte) int {
 // unfoldBranchNode returns true if unfolding has been done
 func (hph *HexPatriciaHashed) unfoldBranchNode(row, depth int, deleted bool) (bool, error) {
 	key := hexToCompact(hph.currentKey[:hph.currentKeyLen])
-	branchData, _, err := hph.ctx.Branch(key)
+	branchData, fileEndTxNum, err := hph.ctx.Branch(key)
 	if err != nil {
 		return false, err
 	}
+	hph.depthsToTxNum[depth] = fileEndTxNum
 	if len(branchData) >= 2 {
 		branchData = branchData[2:] // skip touch map and keep the rest
 	}
@@ -1129,6 +1133,7 @@ var (
 	hadToLoad   atomic.Uint64
 	skippedLoad atomic.Uint64
 	hadToReset  atomic.Uint64
+	hadToLoadL  map[uint64]struct{ accLoaded, accSkipped, accReset, storReset, storLoaded, storSkipped uint64 }
 )
 
 func updatedNibs(num uint16) string {
@@ -1175,10 +1180,11 @@ func (hph *HexPatriciaHashed) fold() (err error) {
 	depth := hph.depths[row]
 	updateKey := hexToCompact(hph.currentKey[:updateKeyLen])
 	partsCount := bits.OnesCount16(hph.afterMap[row])
+	defer func() { hph.depthsToTxNum[depth] = 0 }()
 
 	if hph.trace {
-		fmt.Printf("fold: row: %d depth: %d updated: %s current prefix: [%x] touchMap: %016b afterMap: %016b \n",
-			row, depth, updatedNibs(hph.touchMap[row]&hph.afterMap[row]), hph.currentKey[:hph.currentKeyLen], hph.touchMap[row], hph.afterMap[row])
+		fmt.Printf("fold: (row=%d, {%s}, depth=%d) prefix [%x] touchMap: %016b afterMap: %016b \n",
+			row, updatedNibs(hph.touchMap[row]&hph.afterMap[row]), depth, hph.currentKey[:hph.currentKeyLen], hph.touchMap[row], hph.afterMap[row])
 	}
 	switch partsCount {
 	case 0: // Everything deleted
@@ -1268,7 +1274,7 @@ func (hph *HexPatriciaHashed) fold() (err error) {
 				cell.lhLen = 0
 				hadToReset.Add(1)
 			}
-			if cell.lhLen > 0 && cell.lhLen != length.Hash {
+			if cell.lhLen > 0 && cell.lhLen != length.Hash { // corner case, may even not encode such leaf hashes
 				if hph.trace {
 					fmt.Printf("DROP uneven hash for (%d, %x, depth=%d) %s\n", row, nibble, depth, cell.FullString())
 				}
@@ -1324,6 +1330,9 @@ func (hph *HexPatriciaHashed) fold() (err error) {
 				//panic("storage not loaded" + fmt.Sprintf("%x", cell.storageAddr[:cell.storageAddrLen]))
 				log.Warn("storage not loaded", "pref", updateKey, "c", fmt.Sprintf("(%d, %x, depth=%d", row, nibble, depth), "cell", cell.String())
 			}
+
+			loadedBefore := cell.loaded
+
 			cellHash, err := hph.computeCellHash(cell, depth, hph.hashAuxBuffer[:0])
 			if err != nil {
 				return nil, err
@@ -1331,9 +1340,27 @@ func (hph *HexPatriciaHashed) fold() (err error) {
 			if hph.trace {
 				fmt.Printf("  %x: computeCellHash(%d, %x, depth=%d)=[%x]\n", nibble, row, nibble, depth, cellHash)
 			}
+			counters := hadToLoadL[hph.depthsToTxNum[depth]]
+			if cell.loaded.account() {
+				counters.accLoaded++
+				if !loadedBefore.account() {
+					counters.accReset++
+				}
+			} else {
+				counters.accSkipped++
+			}
+			if cell.loaded.storage() {
+				counters.storLoaded++
+			} else {
+				counters.storSkipped++
+				if !loadedBefore.storage() {
+					counters.storReset++
+				}
+			}
+			hadToLoadL[hph.depthsToTxNum[depth]] = counters
 			//if len(updateKey) > DepthWithoutNodeHashes {
 			//	cell.hashLen = 0 // do not write hashes for storages in the branch node, should reset ext as well which can break unfolding.. -
-			//cell.extLen = 0
+			//  cell.extLen = 0
 			//}
 			if _, err := hph.keccak2.Write(cellHash); err != nil {
 				return nil, err
@@ -1567,13 +1594,30 @@ func (hph *HexPatriciaHashed) Process(ctx context.Context, updates *Updates, log
 	if err != nil {
 		return nil, fmt.Errorf("branch update failed: %w", err)
 	}
+
 	log.Warn("commitment finished, counters updated (no reset)",
-		"hadToLoad", common.PrettyCounter(hadToLoad.Load()), "skippedLoad", common.PrettyCounter(skippedLoad.Load()),
-		"hadToReset", common.PrettyCounter(hadToReset.Load()),
-		"skip ratio", float64(skippedLoad.Load())/float64(hadToLoad.Load()+skippedLoad.Load()),
-		"reset ratio", float64(hadToReset.Load())/float64(hadToLoad.Load()),
+		//"hadToLoad", common.PrettyCounter(hadToLoad.Load()), "skippedLoad", common.PrettyCounter(skippedLoad.Load()),
+		//"hadToReset", common.PrettyCounter(hadToReset.Load()),
+		"skip ratio", fmt.Sprintf("%.1f%%", 100*(float64(skippedLoad.Load())/float64(hadToLoad.Load()+skippedLoad.Load()))),
+		"reset ratio", fmt.Sprintf("%.1f%%", 100*(float64(hadToReset.Load())/float64(hadToLoad.Load()))),
 		"keys", common.PrettyCounter(ki), "spent", time.Since(start),
 	)
+	ends := make([]uint64, 0, len(hadToLoadL))
+	for k := range hadToLoadL {
+		ends = append(ends, k)
+	}
+	sort.Slice(ends, func(i, j int) bool { return ends[i] < ends[j] })
+	var Li int
+	for _, k := range ends {
+		v := hadToLoadL[k]
+		accs := fmt.Sprintf("load=%s skip=%s (%.1f%%) reset %.1f%%", common.PrettyCounter(v.accLoaded), common.PrettyCounter(v.accSkipped), 100*(float64(v.accSkipped)/float64(v.accLoaded+v.accSkipped)), 100*(float64(v.accReset)/float64(v.accLoaded)))
+		stors := fmt.Sprintf("load=%s skip=%s (%.1f%%) reset %.1f%%", common.PrettyCounter(v.storLoaded), common.PrettyCounter(v.storSkipped), 100*(float64(v.storSkipped)/float64(v.storLoaded+v.storSkipped)), 100*(float64(v.storReset)/float64(v.storLoaded)))
+
+		log.Debug("branchData memoization", "L", Li, "accounts", accs, "storages", stors)
+		if Li < 5 {
+			Li++
+		}
+	}
 	return rootHash, nil
 }
 
