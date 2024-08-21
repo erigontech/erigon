@@ -419,7 +419,7 @@ func TestNewBtIndex(t *testing.T) {
 
 	indexPath := strings.TrimSuffix(kvPath, ".kv") + ".bt"
 
-	kv, bt, err := OpenBtreeIndexAndDataFile(indexPath, kvPath, uint64(DefaultBtreeM), CompressNone, false)
+	kv, bt, err := OpenBtreeIndexAndDataFile(indexPath, kvPath, DefaultBtreeM, CompressNone, false)
 	require.NoError(t, err)
 	defer bt.Close()
 	defer kv.Close()
