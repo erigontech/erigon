@@ -487,6 +487,7 @@ func (d *Decompressor) DisableReadAhead() {
 	}
 
 	if !dbg.SnapshotMadvRnd { // all files
+		fmt.Printf("[dbg] madv_normal: %s\n", d.FileName1)
 		_ = mmap.MadviseNormal(d.mmapHandle1)
 		return
 	}
@@ -496,6 +497,7 @@ func (d *Decompressor) DisableReadAhead() {
 			if !strings.Contains(d.FileName(), t) {
 				continue
 			}
+			fmt.Printf("[dbg] madv_normal: %s\n", d.FileName1)
 			_ = mmap.MadviseNormal(d.mmapHandle1)
 			return
 		}
@@ -509,12 +511,14 @@ func (d *Decompressor) DisableReadAhead() {
 			if strings.Contains(d.FileName(), t+".0-") {
 				continue
 			}
+			fmt.Printf("[dbg] madv_normal: %s\n", d.FileName1)
 			_ = mmap.MadviseNormal(d.mmapHandle1)
 			return
 		}
 		return
 	}
 
+	fmt.Printf("[dbg] madv_rnd: %s\n", d.FileName1)
 	_ = mmap.MadviseRandom(d.mmapHandle1)
 }
 
