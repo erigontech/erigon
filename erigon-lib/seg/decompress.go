@@ -535,6 +535,7 @@ func (d *Decompressor) EnableMadvNormal() *Decompressor {
 		return d
 	}
 	d.readAheadRefcnt.Add(1)
+	fmt.Printf("[dbg] madv_normal: %s\n", d.FileName1)
 	_ = mmap.MadviseNormal(d.mmapHandle1)
 	return d
 }
