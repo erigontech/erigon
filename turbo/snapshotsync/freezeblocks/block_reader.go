@@ -1517,12 +1517,10 @@ func (r *BlockReader) LastEventId(_ context.Context, tx kv.Tx) (uint64, bool, er
 	var ok bool
 	if k != nil {
 		lastEventId = binary.BigEndian.Uint64(k)
-		println("got from DB", lastEventId)
 		ok = true
 	}
 
 	snapshotLastEventId := r.LastFrozenEventId()
-	println("got from snapshot", snapshotLastEventId)
 	if snapshotLastEventId > lastEventId {
 		return snapshotLastEventId, true, nil
 	}
