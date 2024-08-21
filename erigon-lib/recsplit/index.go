@@ -430,7 +430,6 @@ func (idx *Index) DisableReadAhead() {
 	}
 	leftReaders := idx.readAheadRefcnt.Add(-1)
 	if leftReaders == 0 {
-		fmt.Printf("[dbg] madv_rnd: %s\n", idx.fileName)
 		_ = mmap.MadviseRandom(idx.mmapHandle1)
 	} else if leftReaders < 0 {
 		log.Warn("read-ahead negative counter", "file", idx.FileName())
