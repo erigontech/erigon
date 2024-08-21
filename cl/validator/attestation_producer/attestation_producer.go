@@ -65,7 +65,7 @@ func (ap *attestationProducer) ProduceAndCacheAttestationData(baseState *state.C
 	}
 
 	ap.attCacheMutex.RLock()
-	if baseAttestationData, ok := ap.attestationsCache.Get(epoch); ok {
+	if baseAttestationData, ok := ap.attestationsCache.Get(slot); ok {
 		ap.attCacheMutex.RUnlock()
 		beaconBlockRoot := baseStateBlockRoot
 		if baseState.Slot() > slot {
@@ -89,7 +89,7 @@ func (ap *attestationProducer) ProduceAndCacheAttestationData(baseState *state.C
 	ap.attCacheMutex.Lock()
 	defer ap.attCacheMutex.Unlock()
 	// check again if the target epoch is already generated
-	if baseAttestationData, ok := ap.attestationsCache.Get(epoch); ok {
+	if baseAttestationData, ok := ap.attestationsCache.Get(slot); ok {
 		beaconBlockRoot := baseStateBlockRoot
 		if baseState.Slot() > slot {
 			beaconBlockRoot, err = baseState.GetBlockRootAtSlot(slot)
@@ -116,7 +116,7 @@ func (ap *attestationProducer) ProduceAndCacheAttestationData(baseState *state.C
 			log.Warn("Failed to copy base state", "slot", slot, "err", err)
 			return solid.AttestationData{}, err
 		}
-		if err := transition.DefaultMachine.ProcessSlots(baseState, epoch*ap.beaconCfg.SlotsPerEpoch); err != nil {
+		if err := transition.DefaultMachine.ProcessSlots(baseState, slot); err != nil {
 			log.Warn("Failed to process slots", "slot", slot, "err", err)
 			return solid.AttestationData{}, err
 		}
@@ -150,7 +150,7 @@ func (ap *attestationProducer) ProduceAndCacheAttestationData(baseState *state.C
 			targetEpoch,
 		),
 	)
-	ap.attestationsCache.Add(epoch, baseAttestationData)
+	ap.attestationsCache.Add(slot, baseAttestationData)
 	return solid.NewAttestionDataFromParameters(
 		slot,
 		committeeIndex,

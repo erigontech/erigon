@@ -197,7 +197,7 @@ func (s *attestationService) ProcessMessage(ctx context.Context, subnet *uint64,
 	// get_checkpoint_block(store, attestation.data.beacon_block_root, attestation.data.target.epoch) == attestation.data.target.root
 	startSlotAtEpoch := targetEpoch * s.beaconCfg.SlotsPerEpoch
 	if s.forkchoiceStore.Ancestor(root, startSlotAtEpoch) != att.AttestantionData().Target().BlockRoot() {
-		return errors.New("invalid target block")
+		return fmt.Errorf("invalid target block. root %v targetEpoch %v targetBlockRoot %v", root.Hex(), targetEpoch, att.AttestantionData().Target().BlockRoot().Hex())
 	}
 	// [IGNORE] The current finalized_checkpoint is an ancestor of the block defined by attestation.data.beacon_block_root --
 	// i.e. get_checkpoint_block(store, attestation.data.beacon_block_root, store.finalized_checkpoint.epoch) == store.finalized_checkpoint.root
