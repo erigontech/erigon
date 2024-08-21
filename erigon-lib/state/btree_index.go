@@ -876,12 +876,16 @@ func OpenBtreeIndexWithDecompressor(indexPath string, M uint64, kv *seg.Decompre
 	//fmt.Printf("open btree index %s with %d keys b+=%t data compressed %t\n", indexPath, idx.ef.Count(), UseBpsTree, idx.compressed)
 	switch UseBpsTree {
 	case true:
-		nodes, err := decodeListNodes(idx.data[pos:])
-		if err != nil {
-			return nil, err
+		if len(idx.data[pos:]) == 0 {
+			idx.bplus = NewBpsTree(kvGetter, idx.ef, M, idx.dataLookup, idx.keyCmp)
+			// fallback for files without nodes encoded
+		} else {
+			nodes, err := decodeListNodes(idx.data[pos:])
+			if err != nil {
+				return nil, err
+			}
+			idx.bplus = NewBpsTreeWithNodes(kvGetter, idx.ef, M, idx.dataLookup, idx.keyCmp, nodes)
 		}
-		//idx.bplus = NewBpsTree(kvGetter, idx.ef, M, idx.dataLookup, idx.keyCmp)
-		idx.bplus = NewBpsTreeWithNodes(kvGetter, idx.ef, M, idx.dataLookup, idx.keyCmp, nodes)
 	default:
 		idx.alloc = newBtAlloc(idx.ef.Count(), M, false, idx.dataLookup, idx.keyCmp)
 		if idx.alloc != nil {
