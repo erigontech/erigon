@@ -324,7 +324,7 @@ loop:
 				}
 			}()
 
-			tab.log.Debug("[p2p] Discovery table", vals...)
+			//tab.log.Debug("[p2p] Discovery table", vals...)
 
 			if live != 0 {
 				if revalidateDone == nil {

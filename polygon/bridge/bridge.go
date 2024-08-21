@@ -19,6 +19,7 @@ package bridge
 import (
 	"context"
 	"errors"
+	"fmt"
 	"sync/atomic"
 	"time"
 
@@ -160,7 +161,7 @@ func (b *Bridge) Run(ctx context.Context) error {
 		select {
 		case <-logTicker.C:
 			b.logger.Debug(
-				bridgeLogPrefix("fetched new events"),
+				bridgeLogPrefix("fetched new events periodic progress"),
 				"count", len(events),
 				"lastFetchedEventID", lastFetchedEventID,
 				"lastFetchedEventTime", lastFetchedEvent.Time.Format(time.RFC3339),
@@ -202,6 +203,12 @@ func (b *Bridge) ProcessNewBlocks(ctx context.Context, blocks []*types.Block) er
 		return nil
 	}
 
+	b.logger.Debug(
+		bridgeLogPrefix("processing new blocks"),
+		"from", blocks[0].NumberU64(),
+		"to", blocks[len(blocks)-1].NumberU64(),
+	)
+
 	blockNumToEventId := make(map[uint64]uint64)
 	eventTxnToBlockNum := make(map[libcommon.Hash]uint64)
 	for _, block := range blocks {
@@ -240,6 +247,9 @@ func (b *Bridge) ProcessNewBlocks(ctx context.Context, blocks []*types.Block) er
 			blockNumToEventId[blockNum] = startID
 			b.lastProcessedEventID.Store(endID)
 		}
+
+		b.lastProcessedBlockNum.Store(blockNum)
+		b.lastProcessedBlockTime.Store(blockTime)
 	}
 
 	if err := b.store.PutBlockNumToEventID(ctx, blockNumToEventId); err != nil {
@@ -250,17 +260,11 @@ func (b *Bridge) ProcessNewBlocks(ctx context.Context, blocks []*types.Block) er
 		return err
 	}
 
-	lastBlock := blocks[len(blocks)-1]
-	b.lastProcessedBlockNum.Store(lastBlock.NumberU64())
-	b.lastProcessedBlockTime.Store(lastBlock.Time())
 	b.signalProcessedBlocks()
 	return nil
 }
 
-// TODO actually this function is not needed anymore
-
 // Synchronize blocks until events up to a given block are processed.
-// NOTE: should not be called by more than 1 goroutine at a time.
 func (b *Bridge) Synchronize(ctx context.Context, blockNum uint64) error {
 	b.logger.Debug(
 		bridgeLogPrefix("synchronizing events..."),
@@ -331,9 +335,24 @@ func (b *Bridge) blockEventsTimeWindowEnd(blockNum uint64, blockTime uint64) (ui
 		return blockTime - stateSyncDelay, nil
 	}
 
+	var wantLastBlock uint64
+	if sprintLen := b.borConfig.CalculateSprintLength(blockNum); blockNum >= sprintLen {
+		wantLastBlock = blockNum - sprintLen
+	}
+
+	lastProcessedBlockNum := b.lastProcessedBlockNum.Load()
+	if lastProcessedBlockNum != wantLastBlock {
+		return 0, fmt.Errorf(
+			"%w: for=%d, want=%d, have=%d", errors.New("unexpected code path - incorrect lastProcessedBlockNum"),
+			blockNum,
+			wantLastBlock,
+			lastProcessedBlockNum,
+		)
+	}
+
 	lastProcessedBlockTime := b.lastProcessedBlockTime.Load()
 	if lastProcessedBlockTime == 0 {
-		return 0, errors.New("unknown last processed block time")
+		return 0, errors.New("unexpected code path - unknown last processed block time")
 	}
 
 	return lastProcessedBlockTime, nil

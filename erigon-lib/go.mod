@@ -3,7 +3,7 @@ module github.com/erigontech/erigon-lib
 go 1.21.5
 
 require (
-	github.com/erigontech/erigon-snapshot v1.3.1-0.20240814160410-2ce37904b978
+	github.com/erigontech/erigon-snapshot v1.3.1-0.20240812193512-23de38bd995a
 	github.com/erigontech/interfaces v0.0.0-20240816222220-760b11456e56
 	github.com/erigontech/mdbx-go v0.38.4
 	github.com/erigontech/secp256k1 v1.1.0

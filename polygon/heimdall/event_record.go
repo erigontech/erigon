@@ -73,9 +73,9 @@ func (e *EventRecordWithTime) BuildEventRecord() *EventRecord {
 }
 
 func (e *EventRecordWithTime) MarshallIdBytes() []byte {
-	var id [8]byte
-	binary.BigEndian.PutUint64(id[:], e.ID)
-	return id[:]
+	id := make([]byte, 8)
+	binary.BigEndian.PutUint64(id, e.ID)
+	return id
 }
 
 func (e *EventRecordWithTime) MarshallBytes() ([]byte, error) {

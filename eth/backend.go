@@ -856,6 +856,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 	backend.ethBackendRPC, backend.miningRPC, backend.stateChangesClient = ethBackendRPC, miningRPC, stateDiffClient
 
 	if config.PolygonSyncStage {
+		chainConfig.Bor.(*borcfg.BorConfig).PolygonSyncStage = true
 		backend.syncStages = stages2.NewPolygonSyncStages(
 			backend.sentryCtx,
 			logger,

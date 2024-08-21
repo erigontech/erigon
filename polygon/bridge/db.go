@@ -128,6 +128,9 @@ func (s *MdbxStore) LastProcessedEventID(ctx context.Context) (uint64, error) {
 }
 
 func LastProcessedEventID(tx kv.Tx) (uint64, error) {
+	//
+	// TODO this is wrong - messes up things at restart, can fix in polygon sync stage store?
+	//
 	cursor, err := tx.Cursor(kv.BorEventNums)
 	if err != nil {
 		return 0, err
@@ -217,7 +220,7 @@ func (s *MdbxStore) EventTxnToBlockNum(ctx context.Context, borTxHash libcommon.
 	return blockNum, true, nil
 }
 
-// LastEventIDWithinWindow gets the last event id where event.ID >= fromID and event.Time <= toTime
+// LastEventIDWithinWindow gets the last event id where event.ID >= fromID and event.Time < toTime.
 func (s *MdbxStore) LastEventIDWithinWindow(ctx context.Context, fromID uint64, toTime time.Time) (uint64, error) {
 	tx, err := s.db.BeginRo(ctx)
 	if err != nil {
@@ -229,6 +232,8 @@ func (s *MdbxStore) LastEventIDWithinWindow(ctx context.Context, fromID uint64, 
 }
 
 func LastEventIDWithinWindow(tx kv.Tx, fromID uint64, toTime time.Time) (uint64, error) {
+	//println("I WAS HEREEE")
+
 	count, err := tx.Count(kv.BorEvents)
 	if err != nil {
 		return 0, err
@@ -237,36 +242,89 @@ func LastEventIDWithinWindow(tx kv.Tx, fromID uint64, toTime time.Time) (uint64,
 		return 0, nil
 	}
 
-	kLastID := make([]byte, 8)
-	binary.BigEndian.PutUint64(kLastID, fromID)
+	k := make([]byte, 8)
+	binary.BigEndian.PutUint64(k, fromID)
 
-	it, err := tx.RangeAscend(kv.BorEvents, kLastID, nil, -1)
+	//it, err := tx.RangeAscend(kv.BorEvents, k, nil, -1)
+	//if err != nil {
+	//	return 0, err
+	//}
+	//defer it.Close()
+	//
+	var eventID uint64
+	//
+	//var testCase bool
+	//if it.HasNext() {
+	//	if toTime.Unix() == 1702794007 {
+	//		testCase = true
+	//		println(fmt.Sprintf("trying to GetOne(BorEvents,%d)", binary.BigEndian.Uint64(k)))
+	//		v, err := tx.GetOne(kv.BorEvents, k)
+	//		if err != nil {
+	//			println(fmt.Sprintf("err: %s", err.Error()))
+	//			//return 0, err
+	//		} else if v == nil {
+	//			println("no value after tx.GetOne")
+	//		} else {
+	//			var e heimdall.EventRecordWithTime
+	//			if err := e.UnmarshallBytes(v); err != nil {
+	//				return 0, err
+	//			}
+	//			println(fmt.Sprintf("ID: %d", e.ID))
+	//			println(fmt.Sprintf("Time: %d", e.Time.Unix()))
+	//		}
+	//	}
+	//}
+
+	c, err := tx.Cursor(kv.BorEvents)
 	if err != nil {
 		return 0, err
 	}
-	defer it.Close()
 
-	var eventID uint64
-	for it.HasNext() {
-		_, v, err := it.Next()
-		if err != nil {
-			return 0, err
-		}
+	defer c.Close()
 
+	var v []byte
+	for k, v, err = c.Seek(k); err == nil && k != nil; k, v, err = c.Next() {
 		var event heimdall.EventRecordWithTime
 		if err := event.UnmarshallBytes(v); err != nil {
 			return 0, err
 		}
 
-		// The table stores the first event ID for the range. In the
-		// case where event.Time == block.Time, we would want the table to
-		// store the current ID instead of the previous one
+		if toTime.Unix() == 1702794007 {
+			println(fmt.Sprintf("cursor.Next is eventId=%d, fromID=%d", event.ID, fromID))
+			continue
+		}
+
 		if !event.Time.Before(toTime) {
 			return eventID, nil
 		}
 
 		eventID = event.ID
 	}
+	if err != nil {
+		return 0, err
+	}
+
+	//for it.HasNext() {
+	//	_, v, err := it.Next()
+	//	if err != nil {
+	//		return 0, err
+	//	}
+	//
+	//	var event heimdall.EventRecordWithTime
+	//	if err := event.UnmarshallBytes(v); err != nil {
+	//		return 0, err
+	//	}
+	//
+	//	if testCase {
+	//		println(fmt.Sprintf("it.Next is eventId=%d", event.ID))
+	//	}
+	//
+	//	if !event.Time.Before(toTime) {
+	//		return eventID, nil
+	//	}
+	//
+	//	eventID = event.ID
+	//}
 
 	return eventID, nil
 }
@@ -293,6 +351,15 @@ func PutEvents(tx kv.RwTx, events []*heimdall.EventRecordWithTime) error {
 		}
 
 		k := event.MarshallIdBytes()
+		actualId := binary.BigEndian.Uint64(k)
+
+		var actualEvent heimdall.EventRecordWithTime
+		if err := actualEvent.UnmarshallBytes(v); err != nil {
+			return err
+		}
+
+		println(fmt.Sprintf("putting eventId=%d,actualId=%d,actualEventId=%d,actualEventTime=%d", event.ID, actualId, actualEvent.ID, actualEvent.Time.Unix()))
+
 		err = tx.Put(kv.BorEvents, k, v)
 		if err != nil {
 			return err

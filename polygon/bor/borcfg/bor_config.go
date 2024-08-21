@@ -43,6 +43,8 @@ type BorConfig struct {
 	NapoliBlock                *big.Int          `json:"napoliBlock"`                // Napoli switch block (nil = no fork, 0 = already on Napoli)
 	StateSyncConfirmationDelay map[string]uint64 `json:"stateSyncConfirmationDelay"` // StateSync Confirmation Delay, in seconds, to calculate `to`
 
+	PolygonSyncStage bool `json:"-"` // TODO this is a temporary hack, remove after we finish task to store last event id in BorEventNums
+
 	sprints sprints
 }
 
