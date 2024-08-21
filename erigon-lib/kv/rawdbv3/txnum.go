@@ -359,11 +359,11 @@ func (i *MapTxNum2BlockNumIter) Next() (txNum, blockNum uint64, txIndex int, isF
 
 	// if block number changed, calculate all related field
 	if blockNumChanged {
-		i.minTxNumInBlock, err = TxNums.Min(i.tx, blockNum)
+		i.minTxNumInBlock, err = i.txNumsReader.Min(i.tx, blockNum)
 		if err != nil {
 			return
 		}
-		i.maxTxNumInBlock, err = TxNums.Max(i.tx, blockNum)
+		i.maxTxNumInBlock, err = i.txNumsReader.Max(i.tx, blockNum)
 		if err != nil {
 			return
 		}

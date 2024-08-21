@@ -387,7 +387,7 @@ type BeaconChainConfig struct {
 	MinAttestationInclusionDelay              uint64 `yaml:"MIN_ATTESTATION_INCLUSION_DELAY" spec:"true" json:"MIN_ATTESTATION_INCLUSION_DELAY,string"`         // MinAttestationInclusionDelay defines how many slots validator has to wait to include attestation for beacon block.
 	SecondsPerSlot                            uint64 `yaml:"SECONDS_PER_SLOT" spec:"true" json:"SECONDS_PER_SLOT,string"`                                       // SecondsPerSlot is how many seconds are in a single slot.
 	SlotsPerEpoch                             uint64 `yaml:"SLOTS_PER_EPOCH" spec:"true" json:"SLOTS_PER_EPOCH,string"`                                         // SlotsPerEpoch is the number of slots in an epoch.
-	MinSeedLookahead                          uint64 `yaml:"MIN_SEED_LOOKAHEAD" spec:"true" json:"MIN_SEED_LOOKAHEAD,string"`                                   // MinSeedLookahead is the duration of randao look ahead seed.
+	MinSeedLookahead                          uint64 `yaml:"MIN_SEED_LOOKAHEAD" spec:"true" json:"MIN_SEED_LOOKAHEAD,string"`                                   //  is the duration of randao look ahead seed.
 	MaxSeedLookahead                          uint64 `yaml:"MAX_SEED_LOOKAHEAD" spec:"true" json:"MAX_SEED_LOOKAHEAD,string"`                                   // MaxSeedLookahead is the duration a validator has to wait for entry and exit in epoch.
 	EpochsPerEth1VotingPeriod                 uint64 `yaml:"EPOCHS_PER_ETH1_VOTING_PERIOD" spec:"true" json:"EPOCHS_PER_ETH1_VOTING_PERIOD,string"`             // EpochsPerEth1VotingPeriod defines how often the merkle root of deposit receipts get updated in beacon node on per epoch basis.
 	SlotsPerHistoricalRoot                    uint64 `yaml:"SLOTS_PER_HISTORICAL_ROOT" spec:"true" json:"SLOTS_PER_HISTORICAL_ROOT,string"`                     // SlotsPerHistoricalRoot defines how often the historical root is saved.
@@ -632,7 +632,7 @@ var MainnetBeaconConfig BeaconChainConfig = BeaconChainConfig{
 	MinAttestationInclusionDelay:     1,
 	SecondsPerSlot:                   12,
 	SlotsPerEpoch:                    32,
-	MinSeedLookahead:                 1,
+	:                 1,
 	MaxSeedLookahead:                 4,
 	EpochsPerEth1VotingPeriod:        64,
 	SlotsPerHistoricalRoot:           8192,
