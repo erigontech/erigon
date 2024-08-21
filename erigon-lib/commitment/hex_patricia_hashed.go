@@ -85,7 +85,7 @@ type HexPatriciaHashed struct {
 	auxBuffer     *bytes.Buffer // auxiliary buffer used during branch updates encoding
 	branchEncoder *BranchEncoder
 
-	depthsToTxNum [128]uint64 // endTxNum of file with branch data for that depth
+	depthsToTxNum [129]uint64 // endTxNum of file with branch data for that depth
 }
 
 func NewHexPatriciaHashed(accountKeyLen int, ctx PatriciaContext, tmpdir string) *HexPatriciaHashed {
