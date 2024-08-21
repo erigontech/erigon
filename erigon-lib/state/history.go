@@ -400,7 +400,7 @@ func (h *History) buildVI(ctx context.Context, historyIdxPath string, hist, efHi
 
 	var keyBuf, valBuf []byte
 	histReader := NewArchiveGetter(hist.MakeGetter(), h.compression)
-	efHistReader := NewArchiveGetter(efHist.MakeGetter(), CompressNone)
+	efHistReader := NewArchiveGetter(efHist.MakeGetter(), h.InvertedIndex.compression)
 
 	for {
 		histReader.Reset(0)
@@ -691,7 +691,7 @@ func (h *History) collate(ctx context.Context, step, txFrom, txTo uint64, roTx k
 		prevKey     []byte
 		initialized bool
 	)
-	efHistoryComp = NewArchiveWriter(efComp, CompressNone)
+	efHistoryComp = NewArchiveWriter(efComp, CompressNone) // coll+build must be fast - no compression
 	collector.SortAndFlushInBackground(true)
 	defer bitmapdb.ReturnToPool64(bitmap)
 

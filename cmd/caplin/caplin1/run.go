@@ -177,6 +177,7 @@ func RunCaplinService(ctx context.Context, engine execution_client.ExecutionEngi
 				return err
 			}
 		}
+
 	}
 
 	if config.NetworkId == clparams.CustomNetwork {
@@ -190,8 +191,14 @@ func RunCaplinService(ctx context.Context, engine execution_client.ExecutionEngi
 	if len(config.StaticPeers) > 0 {
 		networkConfig.StaticPeers = config.StaticPeers
 	}
-
-	genesisDb.Initialize(genesisState)
+	if genesisState != nil {
+		genesisDb.Initialize(genesisState)
+	} else {
+		genesisState, err = genesisDb.ReadGenesisState()
+		if err != nil {
+			return err
+		}
+	}
 
 	state, err := checkpoint_sync.ReadOrFetchLatestBeaconState(ctx, dirs, beaconConfig, config, genesisDb)
 	if err != nil {
