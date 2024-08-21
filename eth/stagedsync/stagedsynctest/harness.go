@@ -344,8 +344,7 @@ func (h *Harness) ReadStateSyncEventsFromDB(ctx context.Context) (eventIDs []uin
 	return eventIDs, nil
 }
 
-func (h *Harness) ReadFirstStateSyncEventNumPerBlockFromDB(ctx context.Context) (nums map[uint64]uint64, err error) {
-	// TODO: update to send last event and update test
+func (h *Harness) ReadLastStateSyncEventNumPerBlockFromDB(ctx context.Context) (nums map[uint64]uint64, err error) {
 	nums = map[uint64]uint64{}
 	err = h.chainDataDB.View(ctx, func(tx kv.Tx) error {
 		eventNumsIter, err := tx.Range(kv.BorEventNums, nil, nil)
@@ -354,14 +353,14 @@ func (h *Harness) ReadFirstStateSyncEventNumPerBlockFromDB(ctx context.Context) 
 		}
 
 		for eventNumsIter.HasNext() {
-			blockNumBytes, firstEventNumBytes, err := eventNumsIter.Next()
+			blockNumBytes, lastEventNumBytes, err := eventNumsIter.Next()
 			if err != nil {
 				return err
 			}
 
 			blockNum := binary.BigEndian.Uint64(blockNumBytes)
-			firstEventNum := binary.BigEndian.Uint64(firstEventNumBytes)
-			nums[blockNum] = firstEventNum
+			lastEventNum := binary.BigEndian.Uint64(lastEventNumBytes)
+			nums[blockNum] = lastEventNum
 		}
 
 		return nil
