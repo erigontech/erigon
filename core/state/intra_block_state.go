@@ -781,7 +781,7 @@ func (sdb *IntraBlockState) Print(chainRules chain.Rules) {
 	}
 }
 
-// SetTxContext sets the current transaction hash and index and block hash which are
+// SetTxContext sets the current transaction index which
 // used when the EVM emits new state logs. It should be invoked before
 // transaction execution.
 func (sdb *IntraBlockState) SetTxContext(ti int) {
