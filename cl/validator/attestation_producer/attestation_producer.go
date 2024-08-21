@@ -19,7 +19,7 @@ package attestation_producer
 import (
 	"context"
 	"errors"
-	"time"
+	"sync"
 
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
@@ -40,17 +40,8 @@ const attestationsCacheSize = 21
 type attestationProducer struct {
 	beaconCfg *clparams.BeaconChainConfig
 
+	attCacheMutex     sync.RWMutex
 	attestationsCache *lru.Cache[uint64, solid.AttestationData] // Epoch => Base AttestationData
-	reqStateAtSlotCh  chan struct {
-		slot      uint64
-		baseState *state.CachingBeaconState
-		resp      chan<- stateAcquireResp
-	}
-}
-
-type stateAcquireResp struct {
-	state *state.CachingBeaconState
-	err   error
 }
 
 func New(ctx context.Context, beaconCfg *clparams.BeaconChainConfig) AttestationDataProducer {
@@ -63,88 +54,7 @@ func New(ctx context.Context, beaconCfg *clparams.BeaconChainConfig) Attestation
 		beaconCfg:         beaconCfg,
 		attestationsCache: attestationsCache,
 	}
-	go p.listenOnCopyStateAtSlot(ctx)
 	return p
-}
-
-// listenOnCopyStateAtSlot generates beacon state at slot in background and also notify all ch in waiting list. This is used to avoid over-copying of
-// beacon state in case of multiple requests for the same slot. (e.g. 10k validators requesting attestation data for the same slot almost at the same time,
-// which might lead to 10k copies of the same state in memory)
-func (ap *attestationProducer) listenOnCopyStateAtSlot(ctx context.Context) {
-	// beaconStateCache *lru.CacheWithTTL[uint64, *state.CachingBeaconState] // Slot => BeaconState
-	beaconStateCache := lru.NewWithTTL[uint64, *state.CachingBeaconState]("attestaion_producer_beacon_state_cpy", 32, time.Minute)
-	generatingWaitList := map[uint64][]chan<- stateAcquireResp{}
-	slotGenerateDone := make(chan uint64, 32)
-	for {
-		select {
-		case req := <-ap.reqStateAtSlotCh:
-			slot := req.slot
-			baseState := req.baseState
-			if state, ok := beaconStateCache.Get(slot); ok {
-				// if state is already generated, return it
-				req.resp <- stateAcquireResp{state: state, err: nil}
-				continue
-			}
-			if _, ok := generatingWaitList[slot]; ok {
-				// append to wait list
-				generatingWaitList[slot] = append(generatingWaitList[slot], req.resp)
-				continue
-			}
-			generatingWaitList[slot] = []chan<- stateAcquireResp{req.resp}
-
-			// generate state in background
-			go func() {
-				defer func() {
-					// notify all waiting requests
-					slotGenerateDone <- slot
-				}()
-				cpyBaseState, err := baseState.Copy()
-				if err != nil {
-					log.Warn("Failed to copy base state", "slot", slot, "err", err)
-					return
-				}
-				if err := transition.DefaultMachine.ProcessSlots(cpyBaseState, slot); err != nil {
-					log.Warn("Failed to process slots", "slot", slot, "err", err)
-					return
-				}
-				beaconStateCache.Add(slot, cpyBaseState)
-			}()
-		case slot := <-slotGenerateDone:
-			if reqChs, ok := generatingWaitList[slot]; ok {
-				delete(generatingWaitList, slot)
-				state, ok := beaconStateCache.Get(slot)
-				if !ok {
-					log.Warn("Failed to get generated state", "slot", slot)
-					for _, ch := range reqChs {
-						ch <- stateAcquireResp{state: nil, err: errors.New("failed to get generated state")}
-					}
-					continue
-				}
-				for _, ch := range reqChs {
-					ch <- stateAcquireResp{state: state, err: nil}
-				}
-			}
-		case <-ctx.Done():
-			return
-		}
-	}
-}
-
-// acquireBeaconStateAtSlot returns a copy of the beacon state at the given slot. Note the returned state should NOT be modified.
-func (ap *attestationProducer) acquireBeaconStateAtSlot(baseState *state.CachingBeaconState, slot uint64) (*state.CachingBeaconState, error) {
-	respCh := make(chan stateAcquireResp, 1)
-	ap.reqStateAtSlotCh <- struct {
-		slot      uint64
-		baseState *state.CachingBeaconState
-		resp      chan<- stateAcquireResp
-	}{slot: slot, baseState: baseState, resp: respCh}
-
-	select {
-	case resp := <-respCh:
-		return resp.state, resp.err
-	case <-time.After(5 * time.Second):
-		return nil, errors.New("timeout waiting for state generation")
-	}
 }
 
 func (ap *attestationProducer) ProduceAndCacheAttestationData(baseState *state.CachingBeaconState, slot uint64, committeeIndex uint64) (solid.AttestationData, error) {
@@ -153,7 +63,10 @@ func (ap *attestationProducer) ProduceAndCacheAttestationData(baseState *state.C
 	if err != nil {
 		return solid.AttestationData{}, err
 	}
-	if baseAttestationData, ok := ap.attestationsCache.Get(slot); ok {
+
+	ap.attCacheMutex.RLock()
+	if baseAttestationData, ok := ap.attestationsCache.Get(epoch); ok {
+		ap.attCacheMutex.RUnlock()
 		beaconBlockRoot := baseStateBlockRoot
 		if baseState.Slot() > slot {
 			beaconBlockRoot, err = baseState.GetBlockRootAtSlot(slot)
@@ -169,14 +82,44 @@ func (ap *attestationProducer) ProduceAndCacheAttestationData(baseState *state.C
 			baseAttestationData.Target(),
 		), nil
 	}
-	stateEpoch := state.Epoch(baseState)
+	ap.attCacheMutex.RUnlock()
 
+	// in case the target epoch is not found, let's generate it with lock to avoid everyone trying to generate it
+	// at the same time, which would be a waste of memory resources
+	ap.attCacheMutex.Lock()
+	defer ap.attCacheMutex.Unlock()
+	// check again if the target epoch is already generated
+	if baseAttestationData, ok := ap.attestationsCache.Get(epoch); ok {
+		beaconBlockRoot := baseStateBlockRoot
+		if baseState.Slot() > slot {
+			beaconBlockRoot, err = baseState.GetBlockRootAtSlot(slot)
+			if err != nil {
+				return solid.AttestationData{}, err
+			}
+		}
+		return solid.NewAttestionDataFromParameters(
+			slot,
+			committeeIndex,
+			beaconBlockRoot,
+			baseAttestationData.Source(),
+			baseAttestationData.Target(),
+		), nil
+	}
+
+	stateEpoch := state.Epoch(baseState)
 	if baseState.Slot() > slot {
 		return solid.AttestationData{}, errors.New("head state slot is bigger than requested slot, the attestation should have been cached, try again later")
 	}
-
 	if stateEpoch < epoch {
-		baseState, err = ap.acquireBeaconStateAtSlot(baseState, slot)
+		baseState, err = baseState.Copy()
+		if err != nil {
+			log.Warn("Failed to copy base state", "slot", slot, "err", err)
+			return solid.AttestationData{}, err
+		}
+		if err := transition.DefaultMachine.ProcessSlots(baseState, epoch*ap.beaconCfg.SlotsPerEpoch); err != nil {
+			log.Warn("Failed to process slots", "slot", slot, "err", err)
+			return solid.AttestationData{}, err
+		}
 		if err != nil {
 			return solid.AttestationData{}, err
 		}
@@ -198,16 +141,16 @@ func (ap *attestationProducer) ProduceAndCacheAttestationData(baseState *state.C
 	}
 
 	baseAttestationData := solid.NewAttestionDataFromParameters(
-		0,
-		0,
-		libcommon.Hash{},
+		0,                // slot will be filled in later
+		0,                // committee index will be filled in later
+		libcommon.Hash{}, // beacon block root will be filled in later
 		baseState.CurrentJustifiedCheckpoint(),
 		solid.NewCheckpointFromParameters(
 			targetRoot,
 			targetEpoch,
 		),
 	)
-	ap.attestationsCache.Add(slot, baseAttestationData)
+	ap.attestationsCache.Add(epoch, baseAttestationData)
 	return solid.NewAttestionDataFromParameters(
 		slot,
 		committeeIndex,
