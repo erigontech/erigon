@@ -564,6 +564,7 @@ func opSstore(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]b
 	}
 	loc := scope.Stack.Pop()
 	val := scope.Stack.Pop()
+	fmt.Printf("-> key: 0x%x, val: 0x%x\n", loc.Bytes32(), val.Bytes32())
 	interpreter.hasherBuf = loc.Bytes32()
 	interpreter.evm.IntraBlockState().SetState(scope.Contract.Address(), &interpreter.hasherBuf, val)
 	return nil, nil
@@ -943,6 +944,7 @@ func opPush1(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]by
 		codeLen = uint64(len(code))
 		integer = new(uint256.Int)
 	)
+	fmt.Printf("-> PUSH1: %v, ", code[*pc+1])
 	*pc++
 	if *pc < codeLen {
 		scope.Stack.Push(integer.SetUint64(uint64(code[*pc])))
@@ -957,6 +959,7 @@ func makePush(size uint64, pushByteSize int) executionFunc {
 	return func(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]byte, error) {
 		code := scope.Contract.CodeAt(scope.CodeSection)
 		codeLen := len(code)
+
 		// fmt.Printf("scope.CodeSection: %v, len(code): %v, code: 0x%x\n", scope.CodeSection, codeLen, code)
 		startMin := int(*pc + 1)
 		if startMin >= codeLen {
@@ -970,7 +973,7 @@ func makePush(size uint64, pushByteSize int) executionFunc {
 		integer := new(uint256.Int)
 		scope.Stack.Push(integer.SetBytes(common.RightPadBytes(
 			code[startMin:endMin], pushByteSize)))
-
+		fmt.Printf("-> pushing: 0x%x, ", code[startMin:endMin])
 		*pc += size
 		return nil, nil
 	}

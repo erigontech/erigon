@@ -81,7 +81,7 @@ func (st *Stack) Dup(n int) {
 	st.Data = append(st.Data, st.Data[len(st.Data)-n])
 }
 
-func (st *Stack) DupN(n int) { // TODO(racytech): See if it's correct and find a better name
+func (st *Stack) DupN(n int) { // TODO(racytech): See if it's correct
 	st.Data = append(st.Data, st.Data[len(st.Data)-n-1])
 }
 

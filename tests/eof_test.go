@@ -35,7 +35,7 @@ func TestEOFBlockchain(t *testing.T) {
 
 	bt := new(testMatcher)
 
-	dir := filepath.Join(".", "blockchain_tests/prague/eip7692_eof_v1/eip663_dupn_swapn_exchange/dupn")
+	dir := filepath.Join(".", "blockchain_tests/prague/eip7692_eof_v1/eip6206_jumpf")
 
 	bt.walk(t, dir, func(t *testing.T, name string, test *BlockTest) {
 		// import pre accounts & construct test genesis block & state root
@@ -52,7 +52,7 @@ func TestEOFStateTest(t *testing.T) {
 
 	st := new(testMatcher)
 
-	dir := filepath.Join(".", "state_tests/prague/eip7692_eof_v1/eip7480_data_section/datacopy_memory_expansion")
+	dir := filepath.Join(".", "state_tests/prague/eip7692_eof_v1/eip3540_eof_v1")
 
 	dirs := datadir.New(t.TempDir())
 	db, _ := temporaltest.NewTestDB(t, dirs)

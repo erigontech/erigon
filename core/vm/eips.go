@@ -458,20 +458,26 @@ func enableEOF(jt *JumpTable) {
 	jt[EXTCALL] = &operation{
 		execute:     opExtCall,
 		constantGas: 100,
+		dynamicGas:  gasExtCall,
 		numPop:      4,
 		numPush:     1,
+		memorySize:  memoryExtCall,
 	}
 	jt[EXTDELEGATECALL] = &operation{
 		execute:     opExtDelegateCall,
 		constantGas: 100,
+		dynamicGas:  gasExtDelegateCall,
 		numPop:      3,
 		numPush:     1,
+		memorySize:  memoryExtCall,
 	}
 	jt[EXTSTATICCALL] = &operation{
 		execute:     opExtStaticCall,
 		constantGas: 100,
+		dynamicGas:  gasExtStaticCall,
 		numPop:      3,
 		numPush:     1,
+		memorySize:  memoryExtCall,
 	}
 
 	immSize := uint8(1)
@@ -615,35 +621,16 @@ func opDataLoad(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([
 		data   = scope.Contract.Data()
 		offset = int(index.Uint64()) // with overflow maybe?
 	)
-	// fmt.Printf("len(data): %v, OFFSET: %v, index: 0x%x\n", len(data), offset, index.Bytes32())
+	b := [32]byte{}
 	if len(data) < offset {
-		// return nil, ErrInvalidMemoryAccess
-		index.SetFromBig(big.NewInt(0))
+		index.SetBytes32(b[:])
 	} else {
-		b := [32]byte{}
 		end := min(offset+32, len(data))
 		for i := 0; i < end-offset; i++ {
 			b[i] = data[offset+i]
 		}
-
 		index.SetBytes32(b[:])
 	}
-
-	// auto& index = stack.top();
-
-	// if (state.data.size() < index)
-	//     index = 0;
-	// else
-	// {
-	//     const auto begin = static_cast<size_t>(index);
-	//     const auto end = std::min(begin + 32, state.data.size());
-
-	//     uint8_t data[32] = {};
-	//     for (size_t i = 0; i < (end - begin); ++i)
-	//         data[i] = state.data[begin + i];
-
-	//     index = intx::be::unsafe::load<uint256>(data);
-	// }
 	return nil, nil
 }
 
@@ -860,23 +847,16 @@ func opReturnDataLoad(pc *uint64, interpreter *EVMInterpreter, scope *ScopeConte
 
 	var index256 = scope.Stack.Peek()
 	start := int(index256.Uint64())
-	end := int(start + 32)
-
+	b := [32]byte{}
 	if len(interpreter.returnData) < start {
-		return nil, fmt.Errorf("ReturnDataLoad: Invalid memory access: len(interpreter.returnData) < start")
+		index256.SetBytes32(b[:]) // set zero
+	} else {
+		end := min(start+32, len(interpreter.returnData))
+		for i := 0; i < end-start; i++ {
+			b[i] = interpreter.returnData[start+i]
+		}
+		index256.SetBytes32(b[:])
 	}
-	if len(interpreter.returnData) < end {
-		return nil, fmt.Errorf("ReturnDataLoad: Invalid memory access: len(interpreter.returnData) < end")
-	}
-
-	data := [32]byte{}
-	j := 0
-	for i := start; i < end; i++ {
-		data[j] = interpreter.returnData[i]
-		j++
-	}
-
-	index256 = index256.SetBytes32(data[:])
 	return nil, nil
 }
 
@@ -905,20 +885,24 @@ func opReturnDataLoad(pc *uint64, interpreter *EVMInterpreter, scope *ScopeConte
 // Gas not used by the callee is returned to the caller.
 func opExtCall(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]byte, error) {
 	var (
-		addr256   = scope.Stack.Pop()
+		dst256    = scope.Stack.Pop()
 		offset256 = scope.Stack.Pop()
 		size256   = scope.Stack.Pop()
 		value     = scope.Stack.Pop()
 
-		toAddr = addr256.Bytes20()
+		toAddr = dst256.Bytes20()
 		offset = int64(offset256.Uint64())
 		size   = int64(size256.Uint64())
 
 		gas = interpreter.evm.CallGasTemp()
 	)
-
+	fmt.Printf("dst: 0x%x, offset: 0x%x, size: 0x%x, value: 0x%x\n", dst256.Bytes32(), offset256.Bytes32(), size256.Bytes32(), value.Bytes32())
+	// gas_ := gas - max(gas/64, 5000)
+	fmt.Println("GAS -> ", gas)
 	// Get the arguments from the memory.
 	args := scope.Memory.GetPtr(offset, size)
+	// gasCall := gas - max(gas/64, 5000)
+	// gas += max((contract.Gas-gas)/64, 5000)
 
 	if !value.IsZero() {
 		if interpreter.readOnly {
@@ -930,18 +914,26 @@ func opExtCall(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]
 	ret, returnGas, err := interpreter.evm.ExtCall(scope.Contract, toAddr, args, gas, &value)
 
 	if err != nil {
-		addr256.Clear()
+		if err == ErrExecutionReverted {
+			dst256.SetOne()
+		} else {
+			dst256.SetFromBig(big.NewInt(2))
+		}
 	} else {
-		addr256.SetOne()
+		dst256.Clear()
 	}
-	scope.Stack.Push(&addr256)
+	scope.Stack.Push(&dst256)
 	if err == nil || err == ErrExecutionReverted {
 		ret = libcommon.CopyBytes(ret)
 		scope.Memory.Set(offset256.Uint64(), size256.Uint64(), ret)
 	}
-
+	fmt.Printf("CONTRACT GAS: %v, GAS START: %v,  RETURN GAS: %v\n", scope.Contract.Gas, gas, returnGas)
+	gasUsed := gas - returnGas
+	fmt.Println("GAS USED: ", gasUsed)
 	scope.Contract.RefundGas(returnGas, tracing.GasChangeCallLeftOverRefunded)
 
+	// const auto gas_used = msg.gas - result.gas_left;
+	// gas_left -= gas_used;
 	interpreter.returnData = ret
 
 	return nil, nil
@@ -962,11 +954,26 @@ func opExtDelegateCall(pc *uint64, interpreter *EVMInterpreter, scope *ScopeCont
 	// Get the arguments from the memory.
 	args := scope.Memory.GetPtr(offset, size)
 
+	// The code targeted by EXTDELEGATECALL must also be an EOF.
+	// This restriction has been added to EIP-3540 in
+	// https://github.com/ethereum/EIPs/pull/7131
+	code := interpreter.evm.intraBlockState.GetCode(toAddr)
+	if !hasEOFMagic(code) { // TODO(racytech): see if this part can be done better
+		addr256.SetOne()
+		scope.Stack.Push(&addr256)
+		scope.Contract.RefundGas(gas, tracing.GasChangeCallLeftOverRefunded)
+		return nil, nil
+	}
+
 	ret, returnGas, err := interpreter.evm.ExtDelegateCall(scope.Contract, toAddr, args, gas)
 	if err != nil {
-		addr256.Clear()
+		if err == ErrExecutionReverted {
+			addr256.SetOne()
+		} else {
+			addr256.SetFromBig(big.NewInt(2))
+		}
 	} else {
-		addr256.SetOne()
+		addr256.Clear()
 	}
 	scope.Stack.Push(&addr256)
 	if err == nil || err == ErrExecutionReverted {
@@ -997,9 +1004,13 @@ func opExtStaticCall(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContex
 	ret, returnGas, err := interpreter.evm.ExtStaticCall(scope.Contract, toAddr, args, gas)
 
 	if err != nil {
-		addr256.Clear()
+		if err == ErrExecutionReverted {
+			addr256.SetOne()
+		} else {
+			addr256.SetFromBig(big.NewInt(2))
+		}
 	} else {
-		addr256.SetOne()
+		addr256.Clear()
 	}
 	scope.Stack.Push(&addr256)
 	if err == nil || err == ErrExecutionReverted {

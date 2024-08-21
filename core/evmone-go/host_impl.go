@@ -82,19 +82,19 @@ func NewEvmOneHost(env ExecEnv, bailout bool) *HostImpl {
 }
 
 func (h *HostImpl) AccountExists(addr common.Address) bool {
-	// fmt.Println("calling 1")
+	fmt.Println("calling 1")
 	r := h.ibs.Exist(common.Address(addr))
 	return r
 }
 
 func (h *HostImpl) GetStorage(addr common.Address, key common.Hash) common.Hash {
-	// fmt.Println("calling 2")
+	fmt.Println("calling 2")
 	w := new(uint256.Int)
 	h.ibs.GetState(addr, &key, w)
 	return w.Bytes32()
 }
 func (h *HostImpl) SetStorage(addr common.Address, key common.Hash, value common.Hash) StorageStatus {
-	// fmt.Println("calling 3")
+	fmt.Println("calling 3")
 	var (
 		current  uint256.Int
 		original uint256.Int
@@ -110,7 +110,7 @@ func (h *HostImpl) SetStorage(addr common.Address, key common.Hash, value common
 	restored := original.Eq(&_value)
 	currentIsZero := current.IsZero()
 	valueIsZero := _value.IsZero()
-
+	fmt.Printf("current: 0x%x, key: 0x%x, value: 0x%x\n", current.Bytes32(), key, value)
 	if !dirty && !restored {
 		if currentIsZero {
 			status = StorageAdded
@@ -140,23 +140,23 @@ func (h *HostImpl) SetStorage(addr common.Address, key common.Hash, value common
 	return status
 }
 func (h *HostImpl) GetBalance(addr common.Address) common.Hash {
-	// fmt.Println("calling 4")
+	fmt.Println("calling 4")
 	return h.ibs.GetBalance(addr).Bytes32()
 }
 func (h *HostImpl) GetCodeSize(addr common.Address) int {
-	// fmt.Println("calling 5")
+	fmt.Println("calling 5")
 	return h.ibs.GetCodeSize(addr)
 }
 func (h *HostImpl) GetCodeHash(addr common.Address) common.Hash {
-	// fmt.Println("calling 6")
+	fmt.Println("calling 6")
 	return h.ibs.GetCodeHash(addr)
 }
 func (h *HostImpl) GetCode(addr common.Address) []byte {
-	// fmt.Println("calling 7")
+	fmt.Println("calling 7")
 	return h.ibs.GetCode(addr)
 }
 func (h *HostImpl) Selfdestruct(addr common.Address, beneficiary common.Address) bool {
-	// fmt.Println("calling 8")
+	fmt.Println("calling 8")
 	balance := *h.ibs.GetBalance(addr)
 	if h.rev >= Cancun {
 		h.ibs.SubBalance(addr, &balance, tracing.BalanceDecreaseSelfdestruct)
@@ -170,7 +170,7 @@ func (h *HostImpl) Selfdestruct(addr common.Address, beneficiary common.Address)
 	return h.ibs.HasSelfdestructed(addr)
 }
 func (h *HostImpl) GetTxContext() TxContext {
-	// fmt.Println("calling 9")
+	fmt.Println("calling 9")
 	chainID := new(uint256.Int)
 	chainID.SetFromBig(h.chainID)
 	hash := chainID.Bytes32()
@@ -200,11 +200,11 @@ func (h *HostImpl) GetTxContext() TxContext {
 	}
 }
 func (h *HostImpl) GetBlockHash(number int64) common.Hash {
-	// fmt.Println("calling 10")
+	fmt.Println("calling 10")
 	return h.blockCtx.GetHash(uint64(number))
 }
 func (h *HostImpl) EmitLog(addr common.Address, topics []common.Hash, data []byte) {
-	// fmt.Println("calling 11")
+	fmt.Println("calling 11")
 	h.ibs.AddLog(&types.Log{
 		Address:     addr,
 		Topics:      topics,
@@ -411,7 +411,7 @@ func (h *HostImpl) Call(kind CallKind,
 	salt common.Hash,
 	codeAddress common.Address) (output []byte, gasLeft int64, gasRefund int64,
 	createAddr common.Address, err error) {
-	// fmt.Println("calling 12")
+	fmt.Println("calling 12")
 
 	// // fmt.Println("--")
 	// // fmt.Println("kind: ", kind)
@@ -435,7 +435,7 @@ func (h *HostImpl) Call(kind CallKind,
 }
 
 func (h *HostImpl) AccessAccount(addr common.Address) AccessStatus {
-	// fmt.Println("calling 13")
+	fmt.Println("calling 13")
 	addrMod := h.ibs.AddAddressToAccessList(addr)
 	if addrMod {
 		return ColdAccess
@@ -443,22 +443,22 @@ func (h *HostImpl) AccessAccount(addr common.Address) AccessStatus {
 	return WarmAccess
 }
 func (h *HostImpl) AccessStorage(addr common.Address, key common.Hash) AccessStatus {
-	// fmt.Println("calling 14")
+	fmt.Println("calling 14")
 	_, slotMod := h.ibs.AddSlotToAccessList(addr, key)
 	if slotMod {
-		// fmt.Println("AccessStorage: ColdAccess")
+		fmt.Println("AccessStorage: ColdAccess")
 		return ColdAccess
 	}
-	// fmt.Println("AccessStorage: WarmAccess")
+	fmt.Println("AccessStorage: WarmAccess")
 	return WarmAccess
 }
 func (h *HostImpl) GetTransientStorage(addr common.Address, key common.Hash) common.Hash {
-	// fmt.Println("calling 15")
+	fmt.Println("calling 15")
 	w := h.ibs.GetTransientState(addr, key)
 	return w.Bytes32()
 }
 func (h *HostImpl) SetTransientStorage(addr common.Address, key common.Hash, value common.Hash) {
-	// fmt.Println("calling 16")
+	fmt.Println("calling 16")
 	w := new(uint256.Int)
 	w = w.SetBytes(value[:])
 	h.ibs.SetTransientState(addr, key, *w)

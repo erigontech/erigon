@@ -256,6 +256,7 @@ func (in *EVMInterpreter) Run(contract *Contract, input []byte, readOnly bool) (
 		initcode = contract.Code
 	}
 	fmt.Printf("initcode: 0x%x\n", initcode)
+	fmt.Println("contract.Gas: ", contract.Gas)
 	// Make sure the readOnly is only set if we aren't in readOnly yet.
 	// This makes also sure that the readOnly flag isn't removed for child calls.
 	restoreReadonly := readOnly && !in.readOnly
@@ -347,6 +348,9 @@ func (in *EVMInterpreter) Run(contract *Contract, input []byte, readOnly bool) (
 			var dynamicCost uint64
 			dynamicCost, err = operation.dynamicGas(in.evm, contract, locStack, mem, memorySize)
 			cost += dynamicCost // for tracing
+			if op == EXTCALL {
+				fmt.Printf("COST: %v, DYNAMIC COST: %v, UseGas: %v\n", cost, dynamicCost, contract.Gas-dynamicCost)
+			}
 			if err != nil || !contract.UseGas(dynamicCost, tracing.GasChangeIgnored) {
 				return nil, ErrOutOfGas
 			}
@@ -372,6 +376,7 @@ func (in *EVMInterpreter) Run(contract *Contract, input []byte, readOnly bool) (
 		_pc++
 	}
 	fmt.Println("")
+	fmt.Println("gas end: ", contract.Gas)
 
 	if err == errStopToken {
 		err = nil // clear stop token error

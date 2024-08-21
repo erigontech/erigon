@@ -217,6 +217,7 @@ func (c *Contract) RefundGas(gas uint64, reason tracing.GasChangeReason) {
 	if gas == 0 {
 		return
 	}
+	fmt.Printf("contract.Gas: %v, refunding: %v\n", c.Gas, gas)
 	c.Gas += gas
 }
 

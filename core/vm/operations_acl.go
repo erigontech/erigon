@@ -53,7 +53,7 @@ func makeGasSStoreFunc(clearingRefund uint64) gasFunc {
 		}
 		var value uint256.Int
 		value.Set(y)
-
+		// fmt.Printf("current: 0x%x, value: 0x%x\n", current.Bytes32(), value.Bytes32())
 		if current.Eq(&value) { // noop (1)
 			// EIP 2200 original clause:
 			//		return params.SloadGasEIP2200, nil

@@ -19,7 +19,11 @@
 
 package vm
 
-import "github.com/erigontech/erigon/core/vm/stack"
+import (
+	"fmt"
+
+	"github.com/erigontech/erigon/core/vm/stack"
+)
 
 func memoryKeccak256(stack *stack.Stack) (uint64, bool) {
 	return calcMemSize64(stack.Back(0), stack.Back(1))
@@ -127,4 +131,31 @@ func memoryLog(stack *stack.Stack) (uint64, bool) {
 
 func memoryDataCopy(stack *stack.Stack) (uint64, bool) {
 	return calcMemSize64(stack.Back(0), stack.Back(2))
+}
+
+func memoryExtCall(stack *stack.Stack) (uint64, bool) {
+	fmt.Println("len stack: ", stack.Len())
+	x, overflow := calcMemSize64(stack.Back(1), stack.Back(2))
+	if overflow {
+		return 0, true
+	}
+	return x, false
+}
+
+func memoryExtDelegateCall(stack *stack.Stack) (uint64, bool) {
+	fmt.Println("len stack: ", stack.Len())
+	x, overflow := calcMemSize64(stack.Back(1), stack.Back(2))
+	if overflow {
+		return 0, true
+	}
+	return x, false
+}
+
+func memoryExtStaticCall(stack *stack.Stack) (uint64, bool) {
+	fmt.Println("len stack: ", stack.Len())
+	x, overflow := calcMemSize64(stack.Back(1), stack.Back(2))
+	if overflow {
+		return 0, true
+	}
+	return x, false
 }
