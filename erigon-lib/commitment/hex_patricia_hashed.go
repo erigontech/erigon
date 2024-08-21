@@ -96,6 +96,7 @@ func NewHexPatriciaHashed(accountKeyLen int, ctx PatriciaContext, tmpdir string)
 		accountKeyLen: accountKeyLen,
 		auxBuffer:     bytes.NewBuffer(make([]byte, 8192)),
 	}
+	hadToLoadL = make(map[uint64]skipStat)
 	hph.branchEncoder = NewBranchEncoder(1024, filepath.Join(tmpdir, "branch-encoder"))
 	return hph
 }
@@ -1133,8 +1134,12 @@ var (
 	hadToLoad   atomic.Uint64
 	skippedLoad atomic.Uint64
 	hadToReset  atomic.Uint64
-	hadToLoadL  map[uint64]struct{ accLoaded, accSkipped, accReset, storReset, storLoaded, storSkipped uint64 }
+	hadToLoadL  map[uint64]skipStat
 )
+
+type skipStat struct {
+	accLoaded, accSkipped, accReset, storReset, storLoaded, storSkipped uint64
+}
 
 func updatedNibs(num uint16) string {
 	var nibbles []string
