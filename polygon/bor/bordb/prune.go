@@ -42,13 +42,13 @@ func PruneBorBlocks(tx kv.RwTx, blockTo uint64, blocksDeleteLimit int, SpanIdAt 
 	if err != nil {
 		return deleted, err
 	}
-	k, v, err = c.Next()
+	k, v, err = c.Prev()
 	if err != nil {
 		return deleted, err
 	}
 	var eventIdTo uint64 = math.MaxUint64
 	if k != nil {
-		eventIdTo = binary.BigEndian.Uint64(v)
+		eventIdTo = binary.BigEndian.Uint64(v) + 1
 	}
 
 	c1, err := tx.RwCursor(kv.BorEvents)
