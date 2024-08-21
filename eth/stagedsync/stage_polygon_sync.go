@@ -272,35 +272,26 @@ func UnwindEvents(tx kv.RwTx, unwindPoint uint64) error {
 	var blockNumBuf [8]byte
 	binary.BigEndian.PutUint64(blockNumBuf[:], unwindPoint+1)
 
-	kOriginal, _, err := cursor.Seek(blockNumBuf[:]) // TODO: find better name
+	_, _, err = cursor.Seek(blockNumBuf[:])
 	if err != nil {
 		return err
 	}
 
-	k, prevLastIDBytes, err := cursor.Prev() // get last event ID of previous block
+	_, prevSprintLastIDBytes, err := cursor.Prev() // last event ID of previous sprint
 	if err != nil {
 		return err
 	}
 
-	// we are unwinding beyond the first entry, delete the database
-	if k == nil || prevLastIDBytes == nil {
-		err = tx.ClearBucket(kv.BorEventNums)
-		if err != nil {
-			return err
-		}
-
-		err = tx.ClearBucket(kv.BorEvents)
-		if err != nil {
-			return err
-		}
-
-		return nil
+	var prevSprintLastID uint64
+	if prevSprintLastIDBytes == nil {
+		// we are unwinding the first entry, remove all items from BorEvents
+		prevSprintLastID = 0
+	} else {
+		prevSprintLastID = binary.BigEndian.Uint64(prevSprintLastIDBytes)
 	}
 
-	prevLastID := binary.BigEndian.Uint64(prevLastIDBytes)
-
-	eventId := make([]byte, 8)
-	binary.BigEndian.PutUint64(eventId[:], prevLastID+1)
+	eventId := make([]byte, 8) // first event ID for this sprint
+	binary.BigEndian.PutUint64(eventId[:], prevSprintLastID+1)
 
 	eventCursor, err := tx.RwCursor(kv.BorEvents)
 	if err != nil {
@@ -317,7 +308,12 @@ func UnwindEvents(tx kv.RwTx, unwindPoint uint64) error {
 		return err
 	}
 
-	for ; err == nil && kOriginal != nil; kOriginal, _, err = cursor.Next() {
+	k, _, err := cursor.Seek(blockNumBuf[:]) // move cursor back to this sprint
+	if err != nil {
+		return err
+	}
+
+	for ; err == nil && k != nil; k, _, err = cursor.Next() {
 		if err = cursor.DeleteCurrent(); err != nil {
 			return err
 		}
