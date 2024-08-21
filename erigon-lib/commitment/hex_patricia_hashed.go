@@ -1356,11 +1356,11 @@ func (hph *HexPatriciaHashed) fold() (err error) {
 			}
 			if cell.loaded.storage() {
 				counters.storLoaded++
-			} else {
-				counters.storSkipped++
 				if !loadedBefore.storage() {
 					counters.storReset++
 				}
+			} else {
+				counters.storSkipped++
 			}
 			hadToLoadL[hph.depthsToTxNum[depth]] = counters
 			//if len(updateKey) > DepthWithoutNodeHashes {
