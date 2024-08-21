@@ -583,6 +583,7 @@ type BtIndexWriter struct {
 type BtIndexWriterArgs struct {
 	IndexFile   string // File name where the index and the minimal perfect hash function will be written to
 	TmpDir      string
+	M           uint64
 	KeyCount    int
 	EtlBufLimit datasize.ByteSize
 	Lvl         log.Lvl
@@ -621,24 +622,26 @@ func (btw *BtIndexWriter) AddKey(key []byte, offset uint64) error {
 	if offset > btw.maxOffset {
 		btw.maxOffset = offset
 	}
+
+	keepKey := false
 	if btw.keysWritten > 0 {
 		delta := offset - btw.prevOffset
 		if btw.keysWritten == 1 || delta < btw.minDelta {
 			btw.minDelta = delta
 		}
+		keepKey = btw.keysWritten%btw.args.M == 0
 	}
 
-	if err := btw.collector.Collect(key, btw.numBuf[:]); err != nil {
+	var k []byte
+	if keepKey {
+		k = key
+	}
+
+	if err := btw.collector.Collect(btw.numBuf[:], k); err != nil {
 		return err
 	}
 	btw.keysWritten++
 	btw.prevOffset = offset
-	return nil
-}
-
-// loadFuncBucket is required to satisfy the type etl.LoadFunc type, to use with collector.Load
-func (btw *BtIndexWriter) loadFuncBucket(k, v []byte, _ etl.CurrentTableReader, _ etl.LoadNextFunc) error {
-	btw.ef.AddOffset(binary.BigEndian.Uint64(v))
 	return nil
 }
 
@@ -660,12 +663,27 @@ func (btw *BtIndexWriter) Build() error {
 
 	if btw.keysWritten > 0 {
 		btw.ef = eliasfano32.NewEliasFano(btw.keysWritten, btw.maxOffset)
-		if err := btw.collector.Load(nil, "", btw.loadFuncBucket, etl.TransformArgs{}); err != nil {
+
+		nodes := make([]Node, 0, btw.keysWritten/btw.args.M)
+		var ki uint64
+		if err = btw.collector.Load(nil, "", func(offt, k []byte, _ etl.CurrentTableReader, _ etl.LoadNextFunc) error {
+			btw.ef.AddOffset(binary.BigEndian.Uint64(offt))
+
+			if len(k) > 0 { // for every M-th key, keep the key
+				nodes = append(nodes, Node{key: common.Copy(k), di: ki})
+			}
+			ki++ // we need to keep key ordinal so count every key
+			return nil
+		}, etl.TransformArgs{}); err != nil {
 			return err
 		}
 		btw.ef.Build()
+
 		if err := btw.ef.Write(btw.indexW); err != nil {
 			return fmt.Errorf("[index] write ef: %w", err)
+		}
+		if err = encodeListNodes(nodes, btw.indexW); err != nil {
+			return fmt.Errorf("[index] write nodes: %w", err)
 		}
 	}
 
@@ -770,6 +788,7 @@ func BuildBtreeIndexWithDecompressor(indexPath string, kv *seg.Decompressor, com
 	args := BtIndexWriterArgs{
 		IndexFile: indexPath,
 		TmpDir:    tmpdir,
+		M:         DefaultBtreeM,
 	}
 
 	iw, err := NewBtIndexWriter(args, logger)
@@ -849,7 +868,7 @@ func OpenBtreeIndexWithDecompressor(indexPath string, M uint64, kv *seg.Decompre
 		return idx, nil
 	}
 
-	idx.ef, _ = eliasfano32.ReadEliasFano(idx.data[pos:])
+	idx.ef, pos = eliasfano32.ReadEliasFano(idx.data[pos:])
 
 	defer kv.EnableMadvNormal().DisableReadAhead()
 	kvGetter := NewArchiveGetter(kv.MakeGetter(), compress)
@@ -857,7 +876,12 @@ func OpenBtreeIndexWithDecompressor(indexPath string, M uint64, kv *seg.Decompre
 	//fmt.Printf("open btree index %s with %d keys b+=%t data compressed %t\n", indexPath, idx.ef.Count(), UseBpsTree, idx.compressed)
 	switch UseBpsTree {
 	case true:
-		idx.bplus = NewBpsTree(kvGetter, idx.ef, M, idx.dataLookup, idx.keyCmp)
+		nodes, err := decodeListNodes(idx.data[pos:])
+		if err != nil {
+			return nil, err
+		}
+		//idx.bplus = NewBpsTree(kvGetter, idx.ef, M, idx.dataLookup, idx.keyCmp)
+		idx.bplus = NewBpsTreeWithNodes(kvGetter, idx.ef, M, idx.dataLookup, idx.keyCmp, nodes)
 	default:
 		idx.alloc = newBtAlloc(idx.ef.Count(), M, false, idx.dataLookup, idx.keyCmp)
 		if idx.alloc != nil {
