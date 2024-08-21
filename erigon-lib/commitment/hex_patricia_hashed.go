@@ -1346,21 +1346,25 @@ func (hph *HexPatriciaHashed) fold() (err error) {
 				fmt.Printf("  %x: computeCellHash(%d, %x, depth=%d)=[%x]\n", nibble, row, nibble, depth, cellHash)
 			}
 			counters := hadToLoadL[hph.depthsToTxNum[depth]]
-			if cell.loaded.account() {
-				counters.accLoaded++
-				if !loadedBefore.account() {
-					counters.accReset++
+			if cell.accountAddrLen > 0 {
+				if cell.loaded.account() {
+					counters.accLoaded++
+					if !loadedBefore.account() {
+						counters.accReset++
+					}
+				} else {
+					counters.accSkipped++
 				}
-			} else {
-				counters.accSkipped++
 			}
-			if cell.loaded.storage() {
-				counters.storLoaded++
-				if !loadedBefore.storage() {
-					counters.storReset++
+			if cell.storageAddrLen > 0 {
+				if cell.loaded.storage() {
+					counters.storLoaded++
+					if !loadedBefore.storage() {
+						counters.storReset++
+					}
+				} else {
+					counters.storSkipped++
 				}
-			} else {
-				counters.storSkipped++
 			}
 			hadToLoadL[hph.depthsToTxNum[depth]] = counters
 			//if len(updateKey) > DepthWithoutNodeHashes {
