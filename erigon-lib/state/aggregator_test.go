@@ -414,7 +414,7 @@ func aggregatorV3_RestartOnDatadir(t *testing.T, rc runCfg) {
 }
 
 func TestNewBtIndex(t *testing.T) {
-	keyCount := 1000
+	keyCount := 10000
 	kvPath := generateKV(t, t.TempDir(), 20, 10, keyCount, log.New(), CompressNone)
 
 	indexPath := strings.TrimSuffix(kvPath, ".kv") + ".bt"
