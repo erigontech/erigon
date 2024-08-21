@@ -62,7 +62,6 @@ type Cfg struct {
 	   | 128K     | 11Mb | 37782Mb   | 3m25s     | 1m44s      |
 	   | 64K      | 7Mb  | 38597Mb   | 3m16s     | 1m34s      |
 	   | 32K      | 5Mb  | 39626Mb   | 3m0s      | 1m29s      |
-
 	*/
 	MaxDictPatterns int
 
@@ -84,7 +83,8 @@ var DefaultCfg = Cfg{
 	MaxDictPatterns: 64 * 1024,
 
 	DictReducerSoftLimit: 1_000_000,
-	Workers:              1,
+
+	Workers: 1,
 }
 
 // Compressor is the main operating type for performing per-word compression
@@ -142,7 +142,8 @@ func NewCompressor(ctx context.Context, logPrefix, outputFile, tmpDir string, cf
 	wg.Add(workers)
 	suffixCollectors := make([]*etl.Collector, workers)
 	for i := 0; i < workers; i++ {
-		collector := etl.NewCollector(logPrefix+"_dict", tmpDir, etl.NewSortableBuffer(etl.BufferOptimalSize/2), logger) //nolint:gocritic
+		collector := etl.NewCollector(logPrefix+"_dict", tmpDir, etl.NewSortableBuffer(etl.BufferOptimalSize/4), logger) //nolint:gocritic
+		collector.SortAndFlushInBackground(true)
 		collector.LogLvl(lvl)
 
 		suffixCollectors[i] = collector
