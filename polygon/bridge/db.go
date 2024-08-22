@@ -274,6 +274,23 @@ func LastEventIDWithinWindow(tx kv.Tx, fromID uint64, toTime time.Time) (uint64,
 	//		}
 	//	}
 	//}
+	//
+	//if toTime.Unix() == 1702794007 {
+	//	c2, err := tx.Cursor(kv.BorEvents)
+	//	if err != nil {
+	//		return 0, err
+	//	}
+	//
+	//	var k2 []byte
+	//	for k2, _, err = c2.First(); err == nil && k2 != nil; k2, _, err = c2.Next() {
+	//		println(fmt.Sprintf("k=%d", binary.BigEndian.Uint64(k2)))
+	//	}
+	//	if err != nil {
+	//		return 0, err
+	//	}
+	//
+	//	defer c2.Close()
+	//}
 
 	c, err := tx.Cursor(kv.BorEvents)
 	if err != nil {
