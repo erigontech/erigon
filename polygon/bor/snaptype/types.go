@@ -530,6 +530,7 @@ func buildValueIndex(ctx context.Context, sn snaptype.FileInfo, salt uint32, d *
 	}
 }
 
+// extractEventRange moves [startEventID, endEventID) to snapshots
 func extractEventRange(startEventId, endEventId uint64, tx kv.Tx, blockNum uint64, blockHash common.Hash, collect func([]byte) error) error {
 	var blockNumBuf [8]byte
 	var eventIdBuf [8]byte

@@ -82,7 +82,7 @@ func (br *BlockRetire) retireBorBlocks(ctx context.Context, minBlockNum uint64, 
 
 			if snap.Enum() == borsnaptype.BorEvents.Enum() {
 				firstKeyGetter = func(ctx context.Context) uint64 {
-					return max(1, blockReader.LastFrozenEventId())
+					return blockReader.LastFrozenEventId() + 1
 				}
 			}
 
