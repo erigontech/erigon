@@ -134,7 +134,6 @@ type Decompressor struct {
 	emptyWordsCount uint64
 
 	serializedDictSize uint64
-	dictWords          uint64
 
 	filePath, FileName1 string
 
@@ -447,7 +446,7 @@ func (d *Decompressor) DictWords() uint64 {
 	if d.dict.patterns == nil {
 		return 0
 	}
-	return len(d.dict.patterns)
+	return uint64(len(d.dict.patterns))
 }
 
 func (d *Decompressor) Size() int64 {
