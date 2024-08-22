@@ -134,6 +134,7 @@ type Decompressor struct {
 	emptyWordsCount uint64
 
 	serializedDictSize uint64
+	dictWords          int
 
 	filePath, FileName1 string
 
@@ -261,6 +262,7 @@ func NewDecompressor(compressedFilePath string) (*Decompressor, error) {
 		//fmt.Printf("depth = %d, pattern = [%x]\n", depth, data[dictPos:dictPos+l])
 		dictPos += l
 	}
+	d.dictWords = len(patterns)
 
 	if dictSize > 0 {
 		var bitLen int
@@ -328,6 +330,7 @@ func NewDecompressor(compressedFilePath string) (*Decompressor, error) {
 			lens:   make([]byte, tableSize),
 			ptrs:   make([]*posTable, tableSize),
 		}
+		fmt.Printf("newTable: %d\n", tableSize)
 		if _, err = buildPosTable(posDepths, poss, d.posDict, 0, 0, 0, posMaxDepth); err != nil {
 			return nil, &ErrCompressedFileCorrupted{FileName: fName, Reason: err.Error()}
 		}
@@ -419,6 +422,7 @@ func buildPosTable(depths []uint64, poss []uint64, table *posTable, code uint16,
 			lens:   make([]byte, tableSize),
 			ptrs:   make([]*posTable, tableSize),
 		}
+		fmt.Printf("newTable: %d\n", tableSize)
 		table.pos[code] = 0
 		table.lens[code] = byte(0)
 		table.ptrs[code] = newTable
@@ -440,6 +444,7 @@ func (d *Decompressor) DataHandle() unsafe.Pointer {
 }
 func (d *Decompressor) SerializedDictSize() uint64 { return d.serializedDictSize }
 func (d *Decompressor) DictWords() int {
+	return d.dictWords
 	if d.dict == nil {
 		return 0
 	}
