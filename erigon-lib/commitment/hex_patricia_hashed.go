@@ -86,6 +86,7 @@ type HexPatriciaHashed struct {
 	branchEncoder *BranchEncoder
 
 	depthsToTxNum [129]uint64 // endTxNum of file with branch data for that depth
+	hadToLoadL    map[uint64]skipStat
 }
 
 func NewHexPatriciaHashed(accountKeyLen int, ctx PatriciaContext, tmpdir string) *HexPatriciaHashed {
@@ -95,9 +96,7 @@ func NewHexPatriciaHashed(accountKeyLen int, ctx PatriciaContext, tmpdir string)
 		keccak2:       sha3.NewLegacyKeccak256().(keccakState),
 		accountKeyLen: accountKeyLen,
 		auxBuffer:     bytes.NewBuffer(make([]byte, 8192)),
-	}
-	if hadToLoadL == nil {
-		hadToLoadL = make(map[uint64]skipStat)
+		hadToLoadL:    make(map[uint64]skipStat),
 	}
 	hph.branchEncoder = NewBranchEncoder(1024, filepath.Join(tmpdir, "branch-encoder"))
 	return hph
@@ -1138,8 +1137,6 @@ var (
 	hadToLoad   atomic.Uint64
 	skippedLoad atomic.Uint64
 	hadToReset  atomic.Uint64
-
-	hadToLoadL map[uint64]skipStat
 )
 
 type skipStat struct {
@@ -1279,7 +1276,7 @@ func (hph *HexPatriciaHashed) fold() (err error) {
 			cell := &hph.grid[row][nibble]
 
 			/* memoization of state hashes*/
-			counters := hadToLoadL[hph.depthsToTxNum[depth]]
+			counters := hph.hadToLoadL[hph.depthsToTxNum[depth]]
 			if cell.stateHashLen > 0 && (hph.touchMap[row]&hph.afterMap[row]&uint16(1<<nibble) > 0 || cell.stateHashLen != length.Hash) {
 				// drop state hash if updated or hashLen < 32 (corner case, may even not encode such leaf hashes)
 				if hph.trace {
@@ -1316,7 +1313,7 @@ func (hph *HexPatriciaHashed) fold() (err error) {
 				}
 				// computeCellHash can reset hash as well so have to check if node has been skipped  right after computeCellHash.
 			}
-			hadToLoadL[hph.depthsToTxNum[depth]] = counters
+			hph.hadToLoadL[hph.depthsToTxNum[depth]] = counters
 			/* end of memoization */
 
 			totalBranchLen += hph.computeCellHashLen(cell, depth)
@@ -1362,7 +1359,7 @@ func (hph *HexPatriciaHashed) fold() (err error) {
 			}
 
 			if hashBefore != nil && (cell.accountAddrLen > 0 || cell.storageAddrLen > 0) {
-				counters := hadToLoadL[hph.depthsToTxNum[depth]]
+				counters := hph.hadToLoadL[hph.depthsToTxNum[depth]]
 				if !bytes.Equal(hashBefore, cell.stateHash[:cell.stateHashLen]) {
 					if cell.accountAddrLen > 0 {
 						counters.accReset++
@@ -1380,7 +1377,7 @@ func (hph *HexPatriciaHashed) fold() (err error) {
 						counters.storSkipped++
 					}
 				}
-				hadToLoadL[hph.depthsToTxNum[depth]] = counters
+				hph.hadToLoadL[hph.depthsToTxNum[depth]] = counters
 			}
 			//if len(updateKey) > DepthWithoutNodeHashes {
 			//	cell.hashLen = 0 // do not write hashes for storages in the branch node, should reset ext as well which can break unfolding.. -
@@ -1626,14 +1623,14 @@ func (hph *HexPatriciaHashed) Process(ctx context.Context, updates *Updates, log
 		"reset ratio", fmt.Sprintf("%.1f%%", 100*(float64(hadToReset.Load())/float64(hadToLoad.Load()))),
 		"keys", common.PrettyCounter(ki), "spent", time.Since(start),
 	)
-	ends := make([]uint64, 0, len(hadToLoadL))
-	for k := range hadToLoadL {
+	ends := make([]uint64, 0, len(hph.hadToLoadL))
+	for k := range hph.hadToLoadL {
 		ends = append(ends, k)
 	}
 	sort.Slice(ends, func(i, j int) bool { return ends[i] > ends[j] })
 	var Li int
 	for _, k := range ends {
-		v := hadToLoadL[k]
+		v := hph.hadToLoadL[k]
 		accs := fmt.Sprintf("load=%s skip=%s (%.1f%%) reset %.1f%%", common.PrettyCounter(v.accLoaded), common.PrettyCounter(v.accSkipped), 100*(float64(v.accSkipped)/float64(v.accLoaded+v.accSkipped)), 100*(float64(v.accReset)/float64(v.accLoaded)))
 		stors := fmt.Sprintf("load=%s skip=%s (%.1f%%) reset %.1f%%", common.PrettyCounter(v.storLoaded), common.PrettyCounter(v.storSkipped), 100*(float64(v.storSkipped)/float64(v.storLoaded+v.storSkipped)), 100*(float64(v.storReset)/float64(v.storLoaded)))
 		if k == 0 {
