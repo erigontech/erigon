@@ -175,28 +175,6 @@ func (b *Bridge) Close() {
 	b.store.Close()
 }
 
-func (b *Bridge) InitialBlockReplayNeeded(ctx context.Context) (uint64, bool, error) {
-	if b.lastProcessedBlockTime.Load() > 0 {
-		return 0, false, nil
-	}
-
-	lastProcessedBlockNum, err := b.store.LastProcessedBlockNum(ctx)
-	if err != nil {
-		return 0, false, err
-	}
-
-	if b.borConfig.IsIndore(lastProcessedBlockNum) {
-		// we do not need to keep track of lastProcessedBlockTime if we are past indore
-		return 0, false, nil
-	}
-
-	return lastProcessedBlockNum, true, nil
-}
-
-func (b *Bridge) ReplayInitialBlock(block *types.Block) {
-	b.lastProcessedBlockTime.Store(block.Time())
-}
-
 // ProcessNewBlocks iterates through all blocks and constructs a map from block number to sync events
 func (b *Bridge) ProcessNewBlocks(ctx context.Context, blocks []*types.Block) error {
 	if len(blocks) == 0 {
