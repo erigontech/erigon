@@ -20,6 +20,7 @@ import (
 	"context"
 	"time"
 
+	"github.com/erigontech/erigon-lib/common/dir"
 	"github.com/erigontech/erigon-lib/config3"
 	"github.com/erigontech/erigon-lib/log/v3"
 
@@ -57,9 +58,14 @@ var SqueezeCommitmentFiles = Migration{
 		ac := agg.BeginFilesRo()
 		defer ac.Close()
 
-		{
-			dirs2 := dirs
-			dirs2.SnapDomain += "_v2"
+		dirs2 := dirs
+		dirs2.SnapDomain += "_v2"
+		existsV2Dir, err := dir.Exist(dirs2.SnapDomain)
+		if err != nil {
+			return err
+		}
+
+		if existsV2Dir {
 			a2, err := libstate.NewAggregator(ctx, dirs2, config3.HistoryV3AggregationStep, db, nil, logger)
 			if err != nil {
 				panic(err)
@@ -68,6 +74,10 @@ var SqueezeCommitmentFiles = Migration{
 
 			ac2 := a2.BeginFilesRo()
 			defer ac2.Close()
+			if err = ac.SqueezeCommitmentFiles(ac); err != nil {
+				return err
+			}
+		} else {
 			if err = ac.SqueezeCommitmentFiles(ac); err != nil {
 				return err
 			}
