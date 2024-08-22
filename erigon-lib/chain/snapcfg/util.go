@@ -228,15 +228,14 @@ func (p Preverified) Versioned(preferredVersion snaptype.Version, minVersion sna
 
 func (p Preverified) MaxBlock(version snaptype.Version) (uint64, error) {
 	max := uint64(0)
-	var ext, fileName string
 	for _, p := range p {
-		_, fileName = filepath.Split(p.Name)
-		ext = filepath.Ext(fileName)
+		_, fileName := filepath.Split(p.Name)
+		ext := filepath.Ext(fileName)
 		if ext != ".seg" {
 			continue
 		}
 
-		to, err := NameToParts(fileName[:len(fileName)-len(ext)], version)
+		to, err := ExtractBlockFromName(fileName[:len(fileName)-len(ext)], version)
 		if err != nil {
 			if errors.Is(err, errWrongVersion) {
 				continue
@@ -258,7 +257,7 @@ func (p Preverified) MaxBlock(version snaptype.Version) (uint64, error) {
 
 var errWrongVersion = errors.New("wrong version")
 
-func NameToParts(name string, v snaptype.Version) (block uint64, err error) {
+func ExtractBlockFromName(name string, v snaptype.Version) (block uint64, err error) {
 	i := 0
 	for i < len(name) && name[i] != '-' {
 		i++

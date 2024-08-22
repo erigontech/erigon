@@ -73,13 +73,13 @@ func TestNameToParts(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			gotBlock, err := NameToParts(tt.args.name, tt.args.v)
+			gotBlock, err := ExtractBlockFromName(tt.args.name, tt.args.v)
 			if (err != nil) != tt.wantErr {
-				t.Errorf("NameToParts() error = %v, wantErr %v", err, tt.wantErr)
+				t.Errorf("ExtractBlockFromName() error = %v, wantErr %v", err, tt.wantErr)
 				return
 			}
 			if gotBlock != tt.wantBlock {
-				t.Errorf("NameToParts() gotBlock = %v, want %v", gotBlock, tt.wantBlock)
+				t.Errorf("ExtractBlockFromName() gotBlock = %v, want %v", gotBlock, tt.wantBlock)
 			}
 		})
 	}
