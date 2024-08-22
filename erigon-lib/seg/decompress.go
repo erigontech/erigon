@@ -428,7 +428,11 @@ func buildPosTable(depths []uint64, poss []uint64, table *posTable, code uint16,
 		table.pos[code] = 0
 		table.lens[code] = byte(0)
 		table.ptrs[code] = newTable
-		return buildPosTable(depths, poss, newTable, 0, 0, depth, maxDepth)
+		b0, globalTableSize0, err := buildPosTable(depths, poss, newTable, 0, 0, depth, maxDepth)
+		if err != nil {
+			return 0, 0, err
+		}
+		return b0, globalTableSize0 + globalTableSize, nil
 	}
 	if maxDepth == 0 {
 		return 0, 0, errors.New("buildPosTable: maxDepth reached zero")
