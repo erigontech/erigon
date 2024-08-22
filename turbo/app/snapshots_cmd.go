@@ -863,7 +863,7 @@ func doDiff(cliCtx *cli.Context) error {
 
 func doMeta(cliCtx *cli.Context) error {
 	fname := cliCtx.String("src")
-	if strings.HasSuffix(fname, ".seg") {
+	if strings.Contains(fname, ".seg") {
 		src, err := seg.NewDecompressor(fname)
 		if err != nil {
 			return err
