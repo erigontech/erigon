@@ -336,7 +336,7 @@ func NewDecompressor(compressedFilePath string) (*Decompressor, error) {
 		}
 	}
 	d.wordsStart = pos + dictSize
-	fmt.Printf("newTable: %d\n", globalTableSize)
+	fmt.Printf("newTable: %d, %s\n", globalTableSize, d.FileName1)
 
 	if d.Count() == 0 && dictSize == 0 && d.size > compressedMinSize {
 		return nil, &ErrCompressedFileCorrupted{
