@@ -19,6 +19,7 @@ package snapcfg
 import (
 	_ "embed"
 	"encoding/json"
+	"github.com/pkg/errors"
 	"path/filepath"
 	"slices"
 	"sort"
@@ -227,25 +228,33 @@ func (p Preverified) Versioned(preferredVersion snaptype.Version, minVersion sna
 
 func (p Preverified) MaxBlock(version snaptype.Version) (uint64, error) {
 	max := uint64(0)
-
+	var ext, fileName string
 	for _, p := range p {
-		_, fileName := filepath.Split(p.Name)
-		ext := filepath.Ext(fileName)
+		_, fileName = filepath.Split(p.Name)
+		ext = filepath.Ext(fileName)
 		if ext != ".seg" {
 			continue
 		}
-		onlyName := fileName[:len(fileName)-len(ext)]
-		parts := strings.Split(onlyName, "-")
+		//onlyName := fileName[:len(fileName)-len(ext)]
+		//parts := strings.Split(onlyName, "-")
+		//
+		//to, err := strconv.ParseUint(parts[2], 10, 64)
+		//if err != nil {
+		//	return 0, err
+		//}
+		//
+		//if version != 0 {
+		//	if v, err := snaptype.ParseVersion(parts[0]); err != nil || v != version {
+		//		continue
+		//	}
+		//}
 
-		to, err := strconv.ParseUint(parts[2], 10, 64)
+		to, err := NameToParts(fileName[:len(fileName)-len(ext)], version)
 		if err != nil {
-			return 0, err
-		}
-
-		if version != 0 {
-			if v, err := snaptype.ParseVersion(parts[0]); err != nil || v != version {
+			if errors.Is(err, errWrongVersion) {
 				continue
 			}
+			return 0, err
 		}
 
 		if max < to {
@@ -258,6 +267,53 @@ func (p Preverified) MaxBlock(version snaptype.Version) (uint64, error) {
 	}
 
 	return max*1_000 - 1, nil
+}
+
+var errWrongVersion = errors.New("wrong version")
+
+func NameToParts(name string, v snaptype.Version) (block uint64, err error) {
+	i := 0
+	for i < len(name) && name[i] != '-' {
+		i++
+	}
+
+	version, err := snaptype.ParseVersion(name[:i])
+	if err != nil {
+		return 0, err
+	}
+
+	if v != 0 && v != version {
+		return 0, errWrongVersion
+	}
+
+	i++
+
+	for i < len(name) && name[i] != '-' { // skipping parts[1]
+		i++
+	}
+
+	i++
+	start := i
+	if start > len(name)-1 {
+		return 0, errors.New("invalid name")
+	}
+
+	for i < len(name) && name[i] != '-' {
+		i++
+	}
+
+	end := i
+
+	if i > len(name) {
+		end = len(name)
+	}
+
+	block, err = strconv.ParseUint(name[start:end], 10, 64)
+	if err != nil {
+		return 0, err
+	}
+
+	return block, nil
 }
 
 func (p Preverified) MarshalJSON() ([]byte, error) {
