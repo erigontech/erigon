@@ -871,9 +871,7 @@ func doMeta(cliCtx *cli.Context) error {
 			return err
 		}
 		defer src.Close()
-		if datasize.ByteSize(src.DictSize()).MBytes() > 1 {
-			log.Info("meta", "count", src.Count(), "size", datasize.ByteSize(src.Size()).HumanReadable(), "dict_size", datasize.ByteSize(src.DictSize()).HumanReadable(), "name", src.FileName())
-		}
+		log.Info("meta", "count", src.Count(), "size", datasize.ByteSize(src.Size()).HumanReadable(), "serialized_dict", datasize.ByteSize(src.SerializedDictSize()).HumanReadable(), "dict_words", src.DictWords(), "name", src.FileName())
 	} else if strings.Contains(fname, ".bt") {
 		kvFPath := strings.TrimSuffix(fname, ".bt") + ".kv"
 		src, err := seg.NewDecompressor(kvFPath)

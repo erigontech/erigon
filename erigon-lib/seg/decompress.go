@@ -439,7 +439,16 @@ func buildPosTable(depths []uint64, poss []uint64, table *posTable, code uint16,
 func (d *Decompressor) DataHandle() unsafe.Pointer {
 	return unsafe.Pointer(&d.data[0])
 }
-func (d *Decompressor) DictSize() uint64 { return d.serializedDictSize }
+func (d *Decompressor) SerializedDictSize() uint64 { return d.serializedDictSize }
+func (d *Decompressor) DictWords() uint64 {
+	if d.dict == nil {
+		return 0
+	}
+	if d.dict.patterns == nil {
+		return 0
+	}
+	return len(d.dict.patterns)
+}
 
 func (d *Decompressor) Size() int64 {
 	return d.size
