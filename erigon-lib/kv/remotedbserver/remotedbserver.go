@@ -657,7 +657,7 @@ func (s *KvServer) HistoryRange(_ context.Context, req *remote.HistoryRangeReq) 
 func (s *KvServer) Range(_ context.Context, req *remote.RangeReq) (*remote.Pairs, error) {
 	from, limit := req.FromPrefix, int(req.Limit)
 	if req.PageToken != "" {
-		var pagination remote.ParisPagination
+		var pagination remote.PairsPagination
 		if err := unmarshalPagination(req.PageToken, &pagination); err != nil {
 			return nil, err
 		}
@@ -696,7 +696,7 @@ func (s *KvServer) Range(_ context.Context, req *remote.RangeReq) (*remote.Pairs
 			if err != nil {
 				return err
 			}
-			reply.NextPageToken, err = marshalPagination(&remote.ParisPagination{NextKey: nextK, Limit: int64(limit)})
+			reply.NextPageToken, err = marshalPagination(&remote.PairsPagination{NextKey: nextK, Limit: int64(limit)})
 			if err != nil {
 				return err
 			}
