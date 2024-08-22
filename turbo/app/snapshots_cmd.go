@@ -321,9 +321,7 @@ var snapshotCommand = cli.Command{
 		{
 			Name:   "meta",
 			Action: doMeta,
-			Flags: joinFlags([]cli.Flag{
-				&cli.PathFlag{Name: "src", Required: true},
-			}),
+			Flags:  joinFlags([]cli.Flag{}),
 		},
 		{
 			Name:   "debug",
@@ -862,7 +860,11 @@ func doDiff(cliCtx *cli.Context) error {
 }
 
 func doMeta(cliCtx *cli.Context) error {
-	fname := cliCtx.String("src")
+	args := cliCtx.Args()
+	if args.Len() < 1 {
+		return errors.New("expecting file path as a first argument")
+	}
+	fname := args.First()
 	if strings.Contains(fname, ".seg") {
 		src, err := seg.NewDecompressor(fname)
 		if err != nil {
