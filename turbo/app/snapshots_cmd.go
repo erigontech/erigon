@@ -865,7 +865,7 @@ func doMeta(cliCtx *cli.Context) error {
 		return errors.New("expecting file path as a first argument")
 	}
 	fname := args.First()
-	if strings.Contains(fname, ".seg") {
+	if strings.Contains(fname, ".seg") || strings.Contains(fname, ".kv") || strings.Contains(fname, ".v") || strings.Contains(fname, ".ef") {
 		src, err := seg.NewDecompressor(fname)
 		if err != nil {
 			return err
@@ -874,7 +874,7 @@ func doMeta(cliCtx *cli.Context) error {
 		if datasize.ByteSize(src.DictSize()).MBytes() > 1 {
 			log.Info("meta", "count", src.Count(), "size", datasize.ByteSize(src.Size()).HumanReadable(), "dict_size", datasize.ByteSize(src.DictSize()).HumanReadable(), "name", src.FileName())
 		}
-	} else if strings.HasSuffix(fname, ".bt") {
+	} else if strings.Contains(fname, ".bt") {
 		kvFPath := strings.TrimSuffix(fname, ".bt") + ".kv"
 		src, err := seg.NewDecompressor(kvFPath)
 		if err != nil {
