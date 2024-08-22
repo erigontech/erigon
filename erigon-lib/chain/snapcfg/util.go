@@ -433,10 +433,6 @@ func Seedable(networkName string, info snaptype.FileInfo) bool {
 	return KnownCfg(networkName).Seedable(info)
 }
 
-func MergeLimit(networkName string, snapType snaptype.Enum, fromBlock uint64) uint64 {
-	return KnownCfg(networkName).MergeLimit(snapType, fromBlock)
-}
-
 func MergeLimitFromCfg(cfg *Cfg, snapType snaptype.Enum, fromBlock uint64) uint64 {
 	return cfg.MergeLimit(snapType, fromBlock)
 }
