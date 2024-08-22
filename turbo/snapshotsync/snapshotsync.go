@@ -538,18 +538,18 @@ func logStats(ctx context.Context, stats *proto_downloader.StatsReply, startTime
 		downloadTimeLeft := calculateTime(remainingBytes, stats.CompletionRate)
 
 		log.Info(fmt.Sprintf("[%s] %s", logPrefix, logReason),
-			"progress", fmt.Sprintf("%.2f%% %s/%s", stats.Progress, common.ByteCount(stats.BytesCompleted), common.ByteCount(stats.BytesTotal)),
+			"progress", fmt.Sprintf("(%d/%d files) %.2f%% %s/%s", stats.MetadataReady, stats.FilesTotal, stats.Progress, common.ByteCount(stats.BytesCompleted), common.ByteCount(stats.BytesTotal)),
 			// TODO: "downloading", stats.Downloading,
+			"download-rate", common.ByteCount(stats.DownloadRate)+"/s",
 			"time-left", downloadTimeLeft,
 			"total-time", time.Since(startTime).Round(time.Second).String(),
-			"download", common.ByteCount(stats.DownloadRate)+"/s",
 			"flush", common.ByteCount(stats.FlushRate)+"/s",
 			"hash", common.ByteCount(stats.HashRate)+"/s",
 			"complete", common.ByteCount(stats.CompletionRate)+"/s",
 			"upload", common.ByteCount(stats.UploadRate)+"/s",
 			"peers", stats.PeersUnique,
 			"files", stats.FilesTotal,
-			"metadata", fmt.Sprintf("%d/%d", stats.MetadataReady, stats.FilesTotal),
+			"no-metadata", strconv.Itoa(int(stats.FilesTotal-stats.MetadataReady)),
 			"connections", stats.ConnectionsTotal,
 			"alloc", common.ByteCount(m.Alloc), "sys", common.ByteCount(m.Sys),
 		)
