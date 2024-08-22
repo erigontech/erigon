@@ -22,7 +22,7 @@ import (
 
 	"github.com/erigontech/erigon-lib/log/v3"
 
-	"github.com/erigontech/erigon-lib/direct"
+	"github.com/erigontech/erigon-lib/gointerfaces/sentryproto"
 	sentrymulticlient "github.com/erigontech/erigon/p2p/sentry/sentry_multi_client"
 )
 
@@ -38,7 +38,7 @@ type Service interface {
 func NewService(
 	maxPeers int,
 	logger log.Logger,
-	sentryClient direct.SentryClient,
+	sentryClient sentryproto.SentryClient,
 	statusDataFactory sentrymulticlient.StatusDataFactory,
 ) Service {
 	fetcherConfig := FetcherConfig{
@@ -54,7 +54,7 @@ func newService(
 	maxPeers int,
 	fetcherConfig FetcherConfig,
 	logger log.Logger,
-	sentryClient direct.SentryClient,
+	sentryClient sentryproto.SentryClient,
 	statusDataFactory sentrymulticlient.StatusDataFactory,
 	requestIdGenerator RequestIdGenerator,
 ) *service {

@@ -25,7 +25,6 @@ import (
 
 	"github.com/erigontech/erigon-lib/log/v3"
 
-	"github.com/erigontech/erigon-lib/direct"
 	sentry "github.com/erigontech/erigon-lib/gointerfaces/sentryproto"
 	"github.com/erigontech/erigon/eth/protocols/eth"
 	sentrymulticlient "github.com/erigontech/erigon/p2p/sentry/sentry_multi_client"
@@ -52,7 +51,7 @@ type MessageListener interface {
 
 func NewMessageListener(
 	logger log.Logger,
-	sentryClient direct.SentryClient,
+	sentryClient sentry.SentryClient,
 	statusDataFactory sentrymulticlient.StatusDataFactory,
 	peerPenalizer PeerPenalizer,
 ) MessageListener {
@@ -61,7 +60,7 @@ func NewMessageListener(
 
 func newMessageListener(
 	logger log.Logger,
-	sentryClient direct.SentryClient,
+	sentryClient sentry.SentryClient,
 	statusDataFactory sentrymulticlient.StatusDataFactory,
 	peerPenalizer PeerPenalizer,
 ) *messageListener {
@@ -81,7 +80,7 @@ func newMessageListener(
 type messageListener struct {
 	once                    sync.Once
 	logger                  log.Logger
-	sentryClient            direct.SentryClient
+	sentryClient            sentry.SentryClient
 	statusDataFactory       sentrymulticlient.StatusDataFactory
 	peerPenalizer           PeerPenalizer
 	newBlockObservers       *polygoncommon.Observers[*DecodedInboundMessage[*eth.NewBlockPacket]]
@@ -138,7 +137,7 @@ func (ml *messageListener) RegisterPeerEventObserver(observer polygoncommon.Obse
 }
 
 func (ml *messageListener) listenInboundMessages(ctx context.Context) {
-	streamFactory := func(ctx context.Context, sentryClient direct.SentryClient) (sentrymulticlient.SentryMessageStream, error) {
+	streamFactory := func(ctx context.Context, sentryClient sentry.SentryClient) (sentrymulticlient.SentryMessageStream, error) {
 		messagesRequest := sentry.MessagesRequest{
 			Ids: []sentry.MessageId{
 				sentry.MessageId_NEW_BLOCK_66,
@@ -168,7 +167,7 @@ func (ml *messageListener) listenInboundMessages(ctx context.Context) {
 }
 
 func (ml *messageListener) listenPeerEvents(ctx context.Context) {
-	streamFactory := func(ctx context.Context, sentryClient direct.SentryClient) (sentrymulticlient.SentryMessageStream, error) {
+	streamFactory := func(ctx context.Context, sentryClient sentry.SentryClient) (sentrymulticlient.SentryMessageStream, error) {
 		return sentryClient.PeerEvents(ctx, &sentry.PeerEventsRequest{}, grpc.WaitForReady(true))
 	}
 
@@ -191,7 +190,7 @@ func streamMessages[TMessage any](
 ) {
 	defer ml.stopWg.Done()
 
-	messageHandler := func(_ context.Context, event *TMessage, _ direct.SentryClient) error {
+	messageHandler := func(_ context.Context, event *TMessage, _ sentry.SentryClient) error {
 		return handler(event)
 	}
 
