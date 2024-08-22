@@ -383,7 +383,7 @@ func buildCondensedPatternTable(table *patternTable, depths []uint64, patterns [
 	return b0 + b1, err
 }
 
-var globalTableSize uint64
+var globalTableSize int
 
 func buildPosTable(depths []uint64, poss []uint64, table *posTable, code uint16, bits int, depth uint64, maxDepth uint64) (int, error) {
 	if maxDepth > maxAllowedDepth {
