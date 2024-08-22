@@ -33,6 +33,7 @@ type ExecutionClient interface {
 	InsertBlocks(ctx context.Context, blocks []*types.Block) error
 	UpdateForkChoice(ctx context.Context, tip *types.Header, finalizedHeader *types.Header) error
 	CurrentHeader(ctx context.Context) (*types.Header, error)
+	GetHeader(ctx context.Context, blockNum uint64) (*types.Header, error)
 }
 
 type executionClient struct {
@@ -106,4 +107,25 @@ func (e *executionClient) CurrentHeader(ctx context.Context) (*types.Header, err
 		return nil, nil
 	}
 	return eth1utils.HeaderRpcToHeader(response.Header)
+}
+
+func (e *executionClient) GetHeader(ctx context.Context, blockNum uint64) (*types.Header, error) {
+	response, err := e.client.GetHeader(ctx, &executionproto.GetSegmentRequest{
+		BlockNumber: &blockNum,
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	headerRpc := response.GetHeader()
+	if headerRpc == nil {
+		return nil, nil
+	}
+
+	header, err := eth1utils.HeaderRpcToHeader(headerRpc)
+	if err != nil {
+		return nil, err
+	}
+
+	return header, nil
 }
