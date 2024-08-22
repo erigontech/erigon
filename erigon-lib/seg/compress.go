@@ -373,7 +373,7 @@ func (db *DictionaryBuilder) finish(hardLimit int) {
 		db.processWord(db.lastWord, db.lastWordScore)
 	}
 
-	if db.Len() > hardLimit {
+	for db.Len() > hardLimit {
 		// Remove the element with smallest score
 		heap.Pop(db)
 	}
