@@ -8,7 +8,7 @@ participants_matrix:
     - cl_type: lighthouse
     - cl_type: nimbus
 network_params:
-  electra_fork_epoch: 1
+  #electra_fork_epoch: 1
   min_validator_withdrawability_delay: 1
   shard_committee_period: 1
 additional_services:
