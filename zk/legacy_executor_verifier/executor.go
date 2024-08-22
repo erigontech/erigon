@@ -158,7 +158,7 @@ func (e *Executor) CheckOnline() bool {
 	return true
 }
 
-func (e *Executor) Verify(p *Payload, request *VerifierRequest, oldStateRoot common.Hash) (bool, *executor.ProcessBatchResponseV2, error) {
+func (e *Executor) Verify(p *Payload, request *VerifierRequest, oldStateRoot common.Hash) (bool, *executor.ProcessBatchResponseV2, error, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
 
@@ -183,12 +183,12 @@ func (e *Executor) Verify(p *Payload, request *VerifierRequest, oldStateRoot com
 	if e.outputLocation != "" {
 		asJson, err := json.Marshal(grpcRequest)
 		if err != nil {
-			return false, nil, err
+			return false, nil, nil, err
 		}
 		file := path.Join(e.outputLocation, fmt.Sprintf("payload_%d.json", request.BatchNumber))
 		err = os.WriteFile(file, asJson, 0644)
 		if err != nil {
-			return false, nil, err
+			return false, nil, nil, err
 		}
 
 		// now save the witness as a hex string along with the datastream
@@ -197,20 +197,23 @@ func (e *Executor) Verify(p *Payload, request *VerifierRequest, oldStateRoot com
 		witnessAsHex := "0x" + hex.EncodeToString(p.Witness)
 		err = os.WriteFile(witnessHexFile, []byte(witnessAsHex), 0644)
 		if err != nil {
-			return false, nil, err
+			return false, nil, nil, err
 		}
 
 		dataStreamHexFile := path.Join(e.outputLocation, fmt.Sprintf("datastream_%d.hex", request.BatchNumber))
 		dataStreamAsHex := "0x" + hex.EncodeToString(p.DataStream)
 		err = os.WriteFile(dataStreamHexFile, []byte(dataStreamAsHex), 0644)
 		if err != nil {
-			return false, nil, err
+			return false, nil, nil, err
 		}
 	}
 
 	resp, err := e.client.ProcessStatelessBatchV2(ctx, grpcRequest, grpc.MaxCallSendMsgSize(size), grpc.MaxCallRecvMsgSize(size))
 	if err != nil {
-		return false, nil, fmt.Errorf("failed to process stateless batch: %w", err)
+		return false, nil, nil, fmt.Errorf("failed to process stateless batch: %w", err)
+	}
+	if resp == nil {
+		return false, nil, nil, fmt.Errorf("nil response")
 	}
 
 	counters := map[string]int{
@@ -266,14 +269,11 @@ func (e *Executor) Verify(p *Payload, request *VerifierRequest, oldStateRoot com
 
 	log.Debug("Received response from executor", "grpcUrl", e.grpcUrl, "response", resp)
 
-	return responseCheck(resp, request)
+	ok, executorResponse, executorErr := responseCheck(resp, request)
+	return ok, executorResponse, executorErr, nil
 }
 
 func responseCheck(resp *executor.ProcessBatchResponseV2, request *VerifierRequest) (bool, *executor.ProcessBatchResponseV2, error) {
-	if resp == nil {
-		return false, nil, fmt.Errorf("nil response")
-	}
-
 	if resp.ForkId != request.ForkId {
 		log.Warn("Executor fork id mismatch", "executor", resp.ForkId, "our", request.ForkId)
 	}

@@ -51,7 +51,7 @@ func TestExecutor_Verify(t *testing.T) {
 	}
 
 	for _, tt := range tests {
-		go func(tt struct {
+		func(tt struct {
 			name              string
 			expectedStateRoot *common.Hash
 			shouldError       bool
@@ -81,9 +81,9 @@ func TestExecutor_Verify(t *testing.T) {
 					ContextId:         "cdk-erigon-test",
 				}
 
-				_, _, err := executor.Verify(payload, &VerifierRequest{StateRoot: *tt.expectedStateRoot}, common.Hash{})
-				if (err != nil) != tt.wantErr {
-					t.Errorf("Executor.Verify() error = %v, wantErr %v", err, tt.wantErr)
+				_, _, executorErr, generalErr := executor.Verify(payload, &VerifierRequest{StateRoot: *tt.expectedStateRoot}, common.Hash{})
+				if (executorErr != nil || generalErr != nil) != tt.wantErr {
+					t.Errorf("Executor.Verify() executorErr = %v, generalErr = %v, wantErr %v", executorErr, generalErr, tt.wantErr)
 				}
 			})
 		}(tt)
