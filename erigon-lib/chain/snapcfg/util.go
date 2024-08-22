@@ -437,6 +437,10 @@ func MergeLimit(networkName string, snapType snaptype.Enum, fromBlock uint64) ui
 	return KnownCfg(networkName).MergeLimit(snapType, fromBlock)
 }
 
+func MergeLimitFromCfg(cfg *Cfg, snapType snaptype.Enum, fromBlock uint64) uint64 {
+	return cfg.MergeLimit(snapType, fromBlock)
+}
+
 func MaxSeedableSegment(chain string, dir string) uint64 {
 	var max uint64
 
@@ -453,8 +457,8 @@ func MaxSeedableSegment(chain string, dir string) uint64 {
 
 var oldMergeSteps = append([]uint64{snaptype.Erigon2OldMergeLimit}, snaptype.MergeSteps...)
 
-func MergeSteps(networkName string, snapType snaptype.Enum, fromBlock uint64) []uint64 {
-	mergeLimit := MergeLimit(networkName, snapType, fromBlock)
+func MergeStepsFromCfg(cfg *Cfg, snapType snaptype.Enum, fromBlock uint64) []uint64 {
+	mergeLimit := MergeLimitFromCfg(cfg, snapType, fromBlock)
 
 	if mergeLimit == snaptype.Erigon2OldMergeLimit {
 		return oldMergeSteps
