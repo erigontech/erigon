@@ -1287,9 +1287,7 @@ func allSnapshots(ctx context.Context, db kv.RoDB, logger log.Logger) (*freezebl
 			_allBorSnapshotsSingleton.OptimisticalyReopenFolder()
 			return nil
 		})
-		g.Go(func() error {
-			return _aggSingleton.OpenFolder()
-		})
+		g.Go(func() error { return _aggSingleton.OpenFolder() })
 		g.Go(func() error {
 			chainConfig := fromdb.ChainConfig(db)
 			var beaconConfig *clparams.BeaconChainConfig
