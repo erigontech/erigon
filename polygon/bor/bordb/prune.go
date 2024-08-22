@@ -20,7 +20,6 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
-	"math"
 
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon/polygon/bor/snaptype"
@@ -43,9 +42,13 @@ func PruneBorBlocks(tx kv.RwTx, blockTo uint64, blocksDeleteLimit int, SpanIdAt 
 	if err != nil {
 		return deleted, err
 	}
-	var eventIdTo uint64 = math.MaxUint64
+	k, v, err = c.Prev()
+	if err != nil {
+		return deleted, err
+	}
+	var eventIdTo uint64 = 0
 	if k != nil {
-		eventIdTo = binary.BigEndian.Uint64(v)
+		eventIdTo = binary.BigEndian.Uint64(v) + 1
 	}
 
 	c1, err := tx.RwCursor(kv.BorEvents)

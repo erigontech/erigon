@@ -456,7 +456,6 @@ func fetchAndWriteHeimdallStateSyncEvents(
 	)
 
 	eventRecords, err := heimdallClient.FetchStateSyncEvents(ctx, fromId, fetchTo, fetchLimit)
-
 	if err != nil {
 		return lastStateSyncEventID, 0, time.Since(fetchStart), err
 	}
@@ -473,9 +472,8 @@ func fetchAndWriteHeimdallStateSyncEvents(
 		binary.BigEndian.PutUint64(val[:], lastStateSyncEventID+1)
 	}
 
-	wroteIndex := false
-
 	var initialRecordTime *time.Time
+	var lastEventRecord *heimdall.EventRecordWithTime
 
 	for i, eventRecord := range eventRecords {
 		if eventRecord.ID <= lastStateSyncEventID {
@@ -517,23 +515,24 @@ func fetchAndWriteHeimdallStateSyncEvents(
 			return lastStateSyncEventID, i, time.Since(fetchStart), err
 		}
 
-		if !wroteIndex {
-			var blockNumBuf [8]byte
-			binary.BigEndian.PutUint64(blockNumBuf[:], blockNum)
-			eventIdBytes = eventRecord.MarshallIdBytes()
-			if err = tx.Put(kv.BorEventNums, blockNumBuf[:], eventIdBytes); err != nil {
-				return lastStateSyncEventID, i, time.Since(fetchStart), err
-			}
-
-			wroteIndex = true
-		}
-
 		if initialRecordTime == nil {
 			eventTime := eventRecord.Time
 			initialRecordTime = &eventTime
 		}
 
 		lastStateSyncEventID++
+		lastEventRecord = eventRecord
+	}
+
+	if lastEventRecord != nil {
+		logger.Info("putting state sync events", "blockNum", blockNum, "lastID", lastEventRecord.ID)
+
+		var blockNumBuf [8]byte
+		binary.BigEndian.PutUint64(blockNumBuf[:], blockNum)
+		eventIdBytes := lastEventRecord.MarshallIdBytes()
+		if err = tx.Put(kv.BorEventNums, blockNumBuf[:], eventIdBytes); err != nil {
+			return lastStateSyncEventID, len(eventRecords), time.Since(fetchStart), err
+		}
 	}
 
 	return lastStateSyncEventID, len(eventRecords), time.Since(fetchStart), nil
