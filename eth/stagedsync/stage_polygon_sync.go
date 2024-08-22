@@ -308,7 +308,7 @@ func UnwindEvents(tx kv.RwTx, unwindPoint uint64) error {
 		return err
 	}
 
-	k, _, err := cursor.Seek(blockNumBuf[:]) // move cursor back to this sprint
+	k, _, err := cursor.Next() // move cursor back to this sprint
 	if err != nil {
 		return err
 	}
