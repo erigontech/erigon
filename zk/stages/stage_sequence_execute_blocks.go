@@ -247,12 +247,6 @@ func finaliseBlock(
 		return nil, err
 	}
 
-	// write partially processed
-	err = batchContext.sdb.hermezDb.WriteIsBatchPartiallyProcessed(batchState.batchNumber)
-	if err != nil {
-		return nil, err
-	}
-
 	// this is actually account + storage indices stages
 	quitCh := batchContext.ctx.Done()
 	from := newNum.Uint64()

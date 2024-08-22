@@ -1610,31 +1610,6 @@ func (db *HermezDbReader) GetInvalidBatch(batchNo uint64) (bool, error) {
 	return len(v) > 0, nil
 }
 
-func (db *HermezDb) WriteIsBatchPartiallyProcessed(batchNo uint64) error {
-	return db.tx.Put(BATCH_PARTIALLY_PROCESSED, Uint64ToBytes(batchNo), []byte{1})
-}
-
-func (db *HermezDb) DeleteIsBatchPartiallyProcessed(batchNo uint64) error {
-	return db.tx.Delete(BATCH_PARTIALLY_PROCESSED, Uint64ToBytes(batchNo))
-}
-
-func (db *HermezDbReader) GetIsBatchPartiallyProcessed(batchNo uint64) (bool, error) {
-	v, err := db.tx.GetOne(BATCH_PARTIALLY_PROCESSED, Uint64ToBytes(batchNo))
-	if err != nil {
-		return false, err
-	}
-	return len(v) > 0, nil
-}
-
-func (db *HermezDb) TruncateIsBatchPartiallyProcessed(fromBatch, toBatch uint64) error {
-	for batch := fromBatch; batch <= toBatch; batch++ {
-		if err := db.DeleteIsBatchPartiallyProcessed(batch); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
 func (db *HermezDb) WriteLocalExitRootForBatchNo(batchNo uint64, root common.Hash) error {
 	return db.tx.Put(LOCAL_EXIT_ROOTS, Uint64ToBytes(batchNo), root.Bytes())
 }

@@ -12,28 +12,7 @@ import (
 	"github.com/ledgerwatch/log/v3"
 )
 
-func prepareBatchNumber(lastBatch uint64, isLastBatchPariallyProcessed bool) uint64 {
-	if isLastBatchPariallyProcessed {
-		return lastBatch
-	}
-
-	return lastBatch + 1
-}
-
-func prepareBatchCounters(batchContext *BatchContext, batchState *BatchState, isLastBatchPariallyProcessed bool) (*vm.BatchCounterCollector, error) {
-	var intermediateUsedCounters *vm.Counters
-	if isLastBatchPariallyProcessed {
-		intermediateCountersMap, found, err := batchContext.sdb.hermezDb.GetLatestBatchCounters(batchState.batchNumber)
-		if err != nil {
-			return nil, err
-		}
-		if found {
-			intermediateUsedCounters = vm.NewCountersFromUsedMap(intermediateCountersMap)
-		} else {
-			log.Warn("intermediate counters not found for batch, initialising with empty counters", "batch", batchState.batchNumber)
-		}
-	}
-
+func prepareBatchCounters(batchContext *BatchContext, batchState *BatchState, intermediateUsedCounters *vm.Counters) (*vm.BatchCounterCollector, error) {
 	return vm.NewBatchCounterCollector(batchContext.sdb.smt.GetDepth(), uint16(batchState.forkId), batchContext.cfg.zk.VirtualCountersSmtReduction, batchContext.cfg.zk.ShouldCountersBeUnlimited(batchState.isL1Recovery()), intermediateUsedCounters), nil
 }
 
@@ -64,9 +43,6 @@ func doCheckForBadBatch(batchContext *BatchContext, batchState *BatchState, this
 		return false, err
 	}
 	if err = batchContext.sdb.hermezDb.WriteBatchCounters(currentBlock.NumberU64(), map[string]int{}); err != nil {
-		return false, err
-	}
-	if err = batchContext.sdb.hermezDb.DeleteIsBatchPartiallyProcessed(batchState.batchNumber); err != nil {
 		return false, err
 	}
 	if err = stages.SaveStageProgress(batchContext.sdb.tx, stages.HighestSeenBatchNumber, batchState.batchNumber); err != nil {
@@ -156,9 +132,6 @@ func runBatchLastSteps(
 	log.Info(fmt.Sprintf("[%s] counters consumed", batchContext.s.LogPrefix()), "batch", thisBatch, "counts", counters.UsedAsString())
 
 	if err = batchContext.sdb.hermezDb.WriteBatchCounters(blockNumber, counters.UsedAsMap()); err != nil {
-		return err
-	}
-	if err := batchContext.sdb.hermezDb.DeleteIsBatchPartiallyProcessed(thisBatch); err != nil {
 		return err
 	}
 
