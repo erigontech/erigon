@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"math/big"
 	"math/rand"
+	"os"
 	"testing"
 
 	"github.com/c2h5oh/datasize"
@@ -16,7 +17,9 @@ import (
 	"github.com/ledgerwatch/erigon-lib/gointerfaces"
 	proto_downloader "github.com/ledgerwatch/erigon-lib/gointerfaces/downloader"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/execution"
-	"github.com/ledgerwatch/erigon-lib/kv/temporal/temporaltest"
+	"github.com/ledgerwatch/erigon-lib/kv"
+	mdbx2 "github.com/ledgerwatch/erigon-lib/kv/mdbx"
+	"github.com/ledgerwatch/erigon-lib/state"
 	"github.com/ledgerwatch/erigon-lib/wrap"
 	"github.com/ledgerwatch/erigon/consensus"
 	"github.com/ledgerwatch/erigon/core"
@@ -41,12 +44,19 @@ import (
 	"google.golang.org/protobuf/types/known/emptypb"
 )
 
+var testCases = map[string]struct {
+	useSilkworm bool
+}{
+	"silkworm on":  {useSilkworm: true},
+	"silkworm off": {useSilkworm: false},
+}
+
 func SilkwormForkValidatorTestSettings() silkworm.ForkValidatorSettings {
 	return silkworm.ForkValidatorSettings{
 		BatchSize:               512 * 1024 * 1024,
 		EtlBufferSize:           256 * 1024 * 1024,
 		SyncLoopThrottleSeconds: 0,
-		StopBeforeSendersStage:  true,
+		StopBeforeSendersStage:  false,
 	}
 }
 
@@ -59,14 +69,34 @@ type TestingCtrl interface {
 }
 
 func setup(t TestingCtrl, useSilkworm bool) (*EthereumExecutionModule, *types.Block, *silkworm.Silkworm) {
-	dirs := datadir.New(t.TempDir())
 
-	//	db := mdbx2.NewMDBX(log.New()).Path(dirs.DataDir).Exclusive().InMem(dirs.DataDir).Label(kv.ChainDB).MustOpen()
-	histV3, db, agg := temporaltest.NewTestDB(nil, dirs)
-
-	if histV3 {
-		panic("HistoryV3 is not supported")
+	var tempDir string
+	if useSilkworm {
+		tempDir = "/tmp/eth1test-silkworm"
+	} else {
+		tempDir = "/tmp/eth1test"
 	}
+
+	os.RemoveAll(tempDir)
+	os.MkdirAll(tempDir, os.ModePerm)
+
+	// tempDir := t.TempDir()
+	// log.Warn("TempDir", "dir", tempDir)
+
+	dirs := datadir.New(tempDir)
+	// log.Warn("DataDir", "dir", dirs.DataDir)
+
+	db := mdbx2.NewMDBX(log.New()).Path(dirs.DataDir).Exclusive().InMem(dirs.DataDir).Label(kv.ChainDB).MustOpen()
+	// db := mdbx2.NewMDBX(log.New()).Path(dirs.Chaindata).Exclusive().Label(kv.ChainDB).MustOpen()
+	agg, err := state.NewAggregator(context.Background(), dirs.SnapHistory, dirs.Tmp, 3_125_000, db, log.Root())
+	if err != nil {
+		panic(err)
+	}
+
+	// histV3, db, agg := temporaltest.NewTestDB(nil, dirs)
+	// if histV3 {
+	// 	panic("HistoryV3 is not supported")
+	// }
 
 	// Genesis block
 	network := "mainnet"
@@ -79,6 +109,7 @@ func setup(t TestingCtrl, useSilkworm bool) (*EthereumExecutionModule, *types.Bl
 	expect := params.GenesisHashByChainName(network)
 	require.NotNil(t, expect, network)
 	require.EqualValues(t, genesisBlock.Hash(), *expect, network)
+
 	tx.Commit()
 
 	// 0. Setup
@@ -110,7 +141,7 @@ func setup(t TestingCtrl, useSilkworm bool) (*EthereumExecutionModule, *types.Bl
 	ctx := context.Background()
 
 	// 12. Consensu Engine
-	engine := ethconsensusconfig.CreateConsensusEngineBareBones(ctx, chainConfig, log.New())
+	engine := ethconsensusconfig.CreateConsensusEngineBareBones(ctx, chainConfig, logger)
 	const blockBufferSize = 128
 
 	statusDataProvider := sentry.NewStatusDataProvider(
@@ -216,7 +247,7 @@ func SampleBlock(parent *types.Header, rootHash libcommon.Hash) *types.Block {
 
 	return types.NewBlockWithHeader(&types.Header{
 		Number:     new(big.Int).Add(parent.Number, big.NewInt(1)),
-		Difficulty: new(big.Int).Add(parent.Number, big.NewInt(17000000000+rand.Int63n(1000000))),
+		Difficulty: new(big.Int).Add(parent.Number, big.NewInt(17000000000+rand.Int63n(1000000000))),
 		ParentHash: parent.Hash(),
 		//Beneficiary: crypto.PubkeyToAddress(crypto.MustGenerateKey().PublicKey),
 		TxHash:      types.EmptyRootHash,
@@ -266,13 +297,6 @@ func SampleBlock(parent *types.Header, rootHash libcommon.Hash) *types.Block {
 	// 	[]*types.Header{},
 	// 	[]*types.Receipt{},
 	// 	[]*types.Withdrawal{})
-}
-
-var testCases = map[string]struct {
-	useSilkworm bool
-}{
-	"silkworm on":  {useSilkworm: true},
-	"silkworm off": {useSilkworm: false},
 }
 
 func TestExecutionModuleInitialization(t *testing.T) {
