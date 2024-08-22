@@ -94,15 +94,28 @@ func (p Preverified) Typed(types []snaptype.Type) Preverified {
 
 		var preferredVersion, minVersion snaptype.Version
 
-		parts := strings.Split(name, "-")
-		if len(parts) < 3 {
+		countSep := 0
+		var lastSep, dot int
+		for i := range name {
+			if name[i] == '-' {
+				countSep++
+				lastSep = i
+			}
+			if name[i] == '.' {
+				dot = i
+			}
+		}
+
+		if countSep < 2 {
 			if strings.HasPrefix(p.Name, "domain") || strings.HasPrefix(p.Name, "history") || strings.HasPrefix(p.Name, "idx") || strings.HasPrefix(p.Name, "accessor") {
 				bestVersions.Set(p.Name, p)
 				continue
 			}
 			continue
 		}
-		typeName, _ := strings.CutSuffix(parts[2], filepath.Ext(parts[2]))
+
+		//typeName, _ := strings.CutSuffix(parts[2], filepath.Ext(parts[2]))
+		typeName := name[lastSep+1 : dot]
 		include := false
 
 		for _, typ := range types {
