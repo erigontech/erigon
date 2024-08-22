@@ -640,6 +640,9 @@ func initValidatorSets(
 
 	if lastPersistedBlockNum > 0 {
 		parentHeader = chain.GetHeaderByNumber(lastPersistedBlockNum)
+		if parentHeader == nil {
+			return nil, fmt.Errorf("[%s] header not found: %d", logPrefix, lastPersistedBlockNum)
+		}
 		snap = loadSnapshot(lastPersistedBlockNum, parentHeader.Hash(), config, recents, signatures, snapDb, logger)
 		firstBlockNum = lastPersistedBlockNum + 1
 	} else {

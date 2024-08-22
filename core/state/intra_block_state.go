@@ -25,8 +25,6 @@ import (
 	"fmt"
 	"sort"
 
-	"github.com/holiman/uint256"
-
 	"github.com/erigontech/erigon-lib/chain"
 	libcommon "github.com/erigontech/erigon-lib/common"
 	types2 "github.com/erigontech/erigon-lib/types"
@@ -37,6 +35,7 @@ import (
 	"github.com/erigontech/erigon/core/vm/evmtypes"
 	"github.com/erigontech/erigon/crypto"
 	"github.com/erigontech/erigon/turbo/trie"
+	"github.com/holiman/uint256"
 )
 
 var _ evmtypes.IntraBlockState = new(IntraBlockState) // compile-time interface-check
