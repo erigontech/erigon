@@ -235,19 +235,6 @@ func (p Preverified) MaxBlock(version snaptype.Version) (uint64, error) {
 		if ext != ".seg" {
 			continue
 		}
-		//onlyName := fileName[:len(fileName)-len(ext)]
-		//parts := strings.Split(onlyName, "-")
-		//
-		//to, err := strconv.ParseUint(parts[2], 10, 64)
-		//if err != nil {
-		//	return 0, err
-		//}
-		//
-		//if version != 0 {
-		//	if v, err := snaptype.ParseVersion(parts[0]); err != nil || v != version {
-		//		continue
-		//	}
-		//}
 
 		to, err := NameToParts(fileName[:len(fileName)-len(ext)], version)
 		if err != nil {
