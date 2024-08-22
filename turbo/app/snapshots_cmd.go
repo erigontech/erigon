@@ -869,7 +869,7 @@ func doMeta(cliCtx *cli.Context) error {
 			return err
 		}
 		defer src.Close()
-		log.Info("meta", "count", src.Count(), "size", datasize.ByteSize(src.Size()).String(), "name", src.FileName())
+		log.Info("meta", "count", src.Count(), "size", datasize.ByteSize(src.Size()).MBytes(), "dict_size", datasize.ByteSize(src.DictSize()).MBytes(), "name", src.FileName())
 	} else if strings.HasSuffix(fname, ".bt") {
 		kvFPath := strings.TrimSuffix(fname, ".bt") + ".kv"
 		src, err := seg.NewDecompressor(kvFPath)
