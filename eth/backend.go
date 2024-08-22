@@ -122,9 +122,9 @@ import (
 	zkStages "github.com/ledgerwatch/erigon/zk/stages"
 	"github.com/ledgerwatch/erigon/zk/syncer"
 	txpool2 "github.com/ledgerwatch/erigon/zk/txpool"
+	"github.com/ledgerwatch/erigon/zk/utils"
 	"github.com/ledgerwatch/erigon/zk/witness"
 	"github.com/ledgerwatch/erigon/zkevm/etherman"
-	"github.com/ledgerwatch/erigon/zk/utils"
 )
 
 // Config contains the configuration options of the ETH protocol.
@@ -850,12 +850,16 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 		)
 
 		// check contract addresses in config against L1
-		success, err := l1ContractAddressCheck(ctx, cfg.Zk, backend.l1Syncer)
-		if !success || err != nil {
-			//log.Warn("Contract address check failed", "success", success, "err", err)
-			panic("Contract address check failed")
+		if cfg.Zk.L1ContractAddressCheck {
+			success, err := l1ContractAddressCheck(ctx, cfg.Zk, backend.l1Syncer)
+			if !success || err != nil {
+				//log.Warn("Contract address check failed", "success", success, "err", err)
+				panic("Contract address check failed")
+			}
+			log.Info("Contract address check passed")
+		} else {
+			log.Info("Contract address check skipped")
 		}
-		log.Info("Contract address check passed")
 
 		l1InfoTreeSyncer := syncer.NewL1Syncer(
 			ctx,

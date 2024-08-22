@@ -21,6 +21,7 @@ type Zk struct {
 	AddressRollup                          common.Address
 	AddressZkevm                           common.Address
 	AddressGerManager                      common.Address
+	L1ContractAddressCheck                 bool
 	L1RollupId                             uint64
 	L1BlockRange                           uint64
 	L1QueryDelay                           uint64
@@ -76,6 +77,8 @@ type Zk struct {
 	DisableVirtualCounters      bool
 	VirtualCountersSmtReduction float64
 	ExecutorPayloadOutput       string
+
+	TxPoolRejectSmartContractDeployments bool
 }
 
 var DefaultZkConfig = &Zk{}

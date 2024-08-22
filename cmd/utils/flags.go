@@ -456,6 +456,11 @@ var (
 		Usage: "First block to start syncing from on the L1",
 		Value: 0,
 	}
+	L1ContractAddressCheckFlag = cli.BoolFlag{
+		Name:  "zkevm.l1-contract-address-check",
+		Usage: "Check the contract address on the L1",
+		Value: true,
+	}
 	RebuildTreeAfterFlag = cli.Uint64Flag{
 		Name:  "zkevm.rebuild-tree-after",
 		Usage: "Rebuild the state tree after this many blocks behind",
@@ -626,6 +631,11 @@ var (
 		Name:  "zkevm.pool-manager-url",
 		Usage: "The URL of the pool manager. If set, eth_sendRawTransaction will be redirected there.",
 		Value: "",
+	}
+	TxPoolRejectSmartContractDeployments = cli.BoolFlag{
+		Name:  "zkevm.reject-smart-contract-deployments",
+		Usage: "Reject smart contract deployments",
+		Value: false,
 	}
 	DisableVirtualCounters = cli.BoolFlag{
 		Name:  "zkevm.disable-virtual-counters",
