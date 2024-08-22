@@ -769,9 +769,9 @@ func (hph *HexPatriciaHashed) computeCellHash(cell *cell, depth int, buf []byte)
 				return res, nil
 			} else {
 				storageRootHashIsSet = true
-				copy(storageRootHash[:], res[1:])
-
-				cell.lhLen = 0
+				storageRootHash = *(*[length.Hash]byte)(res[1:])
+				//copy(storageRootHash[:], res[1:])
+				//cell.lhLen = 0
 			}
 		} else {
 			if !cell.loaded.storage() {
