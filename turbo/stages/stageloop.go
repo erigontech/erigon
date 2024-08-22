@@ -20,9 +20,10 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"github.com/erigontech/erigon-lib/kv/membatchwithdb"
 	"runtime"
 	"time"
+
+	"github.com/erigontech/erigon-lib/kv/membatchwithdb"
 
 	lru "github.com/hashicorp/golang-lru/arc/v2"
 
