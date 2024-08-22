@@ -142,8 +142,8 @@ func TestDecodeBranchWithLeafHashes(t *testing.T) {
 
 	for i := 0; i < len(row); i++ {
 		if row[i].accountAddrLen > 0 {
-			rand.Read(row[i].leafHash[:])
-			row[i].lhLen = 32
+			rand.Read(row[i].stateHash[:])
+			row[i].stateHashLen = 32
 		}
 	}
 

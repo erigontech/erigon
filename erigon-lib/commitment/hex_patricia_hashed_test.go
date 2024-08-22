@@ -1131,8 +1131,8 @@ func TestCell_fillFromFields(t *testing.T) {
 	cg := func(nibble int, skip bool) (*cell, error) {
 		c := row[nibble]
 		if c.storageAddrLen > 0 || c.accountAddrLen > 0 {
-			rnd.Read(c.leafHash[:])
-			c.lhLen = 32
+			rnd.Read(c.stateHash[:])
+			c.stateHashLen = 32
 		}
 		fmt.Printf("enc cell %x %v\n", nibble, c.FullString())
 
@@ -1166,7 +1166,7 @@ func TestCell_fillFromFields(t *testing.T) {
 		require.EqualValues(t, first.accountAddr[:], second.accountAddr[:])
 		require.EqualValues(t, first.storageAddr[:], second.storageAddr[:])
 		require.EqualValues(t, first.extension[:first.extLen], second.extension[:second.extLen])
-		require.EqualValues(t, first.leafHash[:first.lhLen], second.leafHash[:second.lhLen])
+		require.EqualValues(t, first.stateHash[:first.stateHashLen], second.stateHash[:second.stateHashLen])
 	}
 }
 
@@ -1181,7 +1181,7 @@ func cellMustEqual(tb testing.TB, first, second *cell) {
 	require.EqualValues(tb, first.accountAddr[:], second.accountAddr[:])
 	require.EqualValues(tb, first.storageAddr[:], second.storageAddr[:])
 	require.EqualValues(tb, first.extension[:first.extLen], second.extension[:second.extLen])
-	require.EqualValues(tb, first.leafHash[:first.lhLen], second.leafHash[:second.lhLen])
+	require.EqualValues(tb, first.stateHash[:first.stateHashLen], second.stateHash[:second.stateHashLen])
 
 	// encode doesn't code Nonce, Balance, CodeHash and Storage, Delete fields
 }

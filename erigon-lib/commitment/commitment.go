@@ -114,7 +114,7 @@ const (
 	fieldAccountAddr cellFields = 2
 	fieldStorageAddr cellFields = 4
 	fieldHash        cellFields = 8
-	LeafHashPart     cellFields = 16
+	fieldStateHash   cellFields = 16
 )
 
 func (p cellFields) String() string {
@@ -131,7 +131,7 @@ func (p cellFields) String() string {
 	if p&fieldHash != 0 {
 		sb.WriteString("+Hash")
 	}
-	if p&LeafHashPart != 0 {
+	if p&fieldStateHash != 0 {
 		sb.WriteString("+LeafHash")
 	}
 	return sb.String()
@@ -286,8 +286,8 @@ func (be *BranchEncoder) EncodeBranch(bitmap, touchMap, afterMap uint16, readCel
 			if cell.hashLen > 0 {
 				fields |= fieldHash
 			}
-			if cell.lhLen == 32 && (cell.accountAddrLen > 0 || cell.storageAddrLen > 0) {
-				fieldBits |= LeafHashPart
+			if cell.stateHashLen == 32 && (cell.accountAddrLen > 0 || cell.storageAddrLen > 0) {
+				fields |= fieldStateHash
 			}
 			if err := be.buf.WriteByte(byte(fields)); err != nil {
 				return nil, 0, err
@@ -312,9 +312,8 @@ func (be *BranchEncoder) EncodeBranch(bitmap, touchMap, afterMap uint16, readCel
 					return nil, 0, err
 				}
 			}
-			if fieldBits&LeafHashPart != 0 {
-				//fmt.Printf("LH encoded %x\n", cell.leafHash[:cell.lhLen])
-				if err := putUvarAndVal(uint64(cell.lhLen), cell.leafHash[:cell.lhLen]); err != nil {
+			if fields&fieldStateHash != 0 {
+				if err := putUvarAndVal(uint64(cell.stateHashLen), cell.stateHash[:cell.stateHashLen]); err != nil {
 					return nil, 0, err
 				}
 			}
@@ -346,10 +345,10 @@ func (branchData BranchData) String() string {
 		if afterMap&bit == 0 {
 			sb.WriteString("{DELETED}\n")
 		} else {
-			fieldBits := cellFields(branchData[pos])
+			fields := cellFields(branchData[pos])
 			pos++
 			var err error
-			if pos, err = cell.fillFromFields(branchData, pos, fieldBits); err != nil {
+			if pos, err = cell.fillFromFields(branchData, pos, fields); err != nil {
 				// This is used for test output, so ok to panic
 				panic(err)
 			}
@@ -370,8 +369,8 @@ func (branchData BranchData) String() string {
 			if cell.hashLen > 0 {
 				fmt.Fprintf(&sb, "%shash=[%x]", comma, cell.hash[:cell.hashLen])
 			}
-			if cell.lhLen > 0 {
-				fmt.Fprintf(&sb, "%sleafHash=[%x]", comma, cell.leafHash[:cell.lhLen])
+			if cell.stateHashLen > 0 {
+				fmt.Fprintf(&sb, "%sleafHash=[%x]", comma, cell.stateHash[:cell.stateHashLen])
 			}
 			sb.WriteString("}\n")
 		}
@@ -396,10 +395,10 @@ func (branchData BranchData) ReplacePlainKeys(newData []byte, fn func(key []byte
 	newData = append(newData[:0], branchData[:4]...)
 	for bitset, j := touchMap&afterMap, 0; bitset != 0; j++ {
 		bit := bitset & -bitset
-		fieldBits := cellFields(branchData[pos])
-		newData = append(newData, byte(fieldBits))
+		fields := cellFields(branchData[pos])
+		newData = append(newData, byte(fields))
 		pos++
-		if fieldBits&fieldExtension != 0 {
+		if fields&fieldExtension != 0 {
 			l, n := binary.Uvarint(branchData[pos:])
 			if n == 0 {
 				return nil, errors.New("replacePlainKeys buffer too small for hashedKey len")
@@ -416,7 +415,7 @@ func (branchData BranchData) ReplacePlainKeys(newData []byte, fn func(key []byte
 				pos += int(l)
 			}
 		}
-		if fieldBits&fieldAccountAddr != 0 {
+		if fields&fieldAccountAddr != 0 {
 			l, n := binary.Uvarint(branchData[pos:])
 			if n == 0 {
 				return nil, errors.New("replacePlainKeys buffer too small for accountAddr len")
@@ -449,7 +448,7 @@ func (branchData BranchData) ReplacePlainKeys(newData []byte, fn func(key []byte
 				newData = append(newData, newKey...)
 			}
 		}
-		if fieldBits&fieldStorageAddr != 0 {
+		if fields&fieldStorageAddr != 0 {
 			l, n := binary.Uvarint(branchData[pos:])
 			if n == 0 {
 				return nil, errors.New("replacePlainKeys buffer too small for storageAddr len")
@@ -482,7 +481,7 @@ func (branchData BranchData) ReplacePlainKeys(newData []byte, fn func(key []byte
 				newData = append(newData, newKey...)
 			}
 		}
-		if fieldBits&fieldHash != 0 {
+		if fields&fieldHash != 0 {
 			l, n := binary.Uvarint(branchData[pos:])
 			if n == 0 {
 				return nil, errors.New("replacePlainKeys buffer too small for hash len")
@@ -499,7 +498,7 @@ func (branchData BranchData) ReplacePlainKeys(newData []byte, fn func(key []byte
 				pos += int(l)
 			}
 		}
-		if fieldBits&LeafHashPart != 0 {
+		if fields&fieldStateHash != 0 {
 			l, n := binary.Uvarint(branchData[pos:])
 			if n == 0 {
 				return nil, errors.New("replacePlainKeys buffer too small for acLeaf hash len")
@@ -558,10 +557,10 @@ func (branchData BranchData) MergeHexBranches(branchData2 BranchData, newData []
 		bit := bitset & -bitset
 		if bitmap2&bit != 0 {
 			// Add fields from branchData2
-			fieldBits := cellFields(branchData2[pos2])
-			newData = append(newData, byte(fieldBits))
+			fields := cellFields(branchData2[pos2])
+			newData = append(newData, byte(fields))
 			pos2++
-			for i := 0; i < bits.OnesCount8(byte(fieldBits)); i++ {
+			for i := 0; i < bits.OnesCount8(byte(fields)); i++ {
 				l, n := binary.Uvarint(branchData2[pos2:])
 				if n == 0 {
 					return nil, errors.New("MergeHexBranches buffer2 too small for field")
@@ -571,7 +570,7 @@ func (branchData BranchData) MergeHexBranches(branchData2 BranchData, newData []
 				newData = append(newData, branchData2[pos2:pos2+n]...)
 				pos2 += n
 				if len(branchData2) < pos2+int(l) {
-					return nil, fmt.Errorf("MergeHexBranches buffer2 too small for %s : expected %d got %d", fieldBits&cellFields(1<<i), pos2+int(l), len(branchData2))
+					return nil, fmt.Errorf("MergeHexBranches buffer2 too small for %s : expected %d got %d", fields&cellFields(1<<i), pos2+int(l), len(branchData2))
 				}
 				if l > 0 {
 					newData = append(newData, branchData2[pos2:pos2+int(l)]...)
@@ -581,12 +580,12 @@ func (branchData BranchData) MergeHexBranches(branchData2 BranchData, newData []
 		}
 		if bitmap1&bit != 0 {
 			add := (touchMap2&bit == 0) && (afterMap2&bit != 0) // Add fields from branchData1
-			fieldBits := cellFields(branchData[pos1])
+			fields := cellFields(branchData[pos1])
 			if add {
-				newData = append(newData, byte(fieldBits))
+				newData = append(newData, byte(fields))
 			}
 			pos1++
-			for i := 0; i < bits.OnesCount8(byte(fieldBits)); i++ {
+			for i := 0; i < bits.OnesCount8(byte(fields)); i++ {
 				l, n := binary.Uvarint(branchData[pos1:])
 				if n == 0 {
 					return nil, errors.New("MergeHexBranches buffer1 too small for field")
@@ -598,7 +597,7 @@ func (branchData BranchData) MergeHexBranches(branchData2 BranchData, newData []
 				}
 				pos1 += n
 				if len(branchData) < pos1+int(l) {
-					return nil, fmt.Errorf("MergeHexBranches buffer1 too small for %s : expected %d got %d", fieldBits&cellFields(1<<i), pos1+int(l), len(branchData))
+					return nil, fmt.Errorf("MergeHexBranches buffer1 too small for %s : expected %d got %d", fields&cellFields(1<<i), pos1+int(l), len(branchData))
 				}
 				if l > 0 {
 					if add {
@@ -621,10 +620,10 @@ func (branchData BranchData) decodeCells() (touchMap, afterMap uint16, row [16]*
 		bit := bitset & -bitset
 		nibble := bits.TrailingZeros16(bit)
 		if afterMap&bit != 0 {
-			fieldBits := cellFields(branchData[pos])
+			fields := cellFields(branchData[pos])
 			pos++
 			row[nibble] = new(cell)
-			if pos, err = row[nibble].fillFromFields(branchData, pos, fieldBits); err != nil {
+			if pos, err = row[nibble].fillFromFields(branchData, pos, fields); err != nil {
 				err = fmt.Errorf("failed to fill cell at nibble %x: %w", nibble, err)
 				return
 			}
@@ -672,11 +671,11 @@ func (m *BranchMerger) Merge(branch1 BranchData, branch2 BranchData) (BranchData
 		bit := bitset & -bitset
 		if bitmap2&bit != 0 {
 			// Add fields from branch2
-			fieldBits := cellFields(branch2[pos2])
-			m.buf = append(m.buf, byte(fieldBits))
+			fields := cellFields(branch2[pos2])
+			m.buf = append(m.buf, byte(fields))
 			pos2++
 
-			for i := 0; i < bits.OnesCount8(byte(fieldBits)); i++ {
+			for i := 0; i < bits.OnesCount8(byte(fields)); i++ {
 				l, n := binary.Uvarint(branch2[pos2:])
 				if n == 0 {
 					return nil, errors.New("MergeHexBranches branch2 is too small: expected node info size")
@@ -699,12 +698,12 @@ func (m *BranchMerger) Merge(branch1 BranchData, branch2 BranchData) (BranchData
 		}
 		if bitmap1&bit != 0 {
 			add := (touchMap2&bit == 0) && (afterMap2&bit != 0) // Add fields from branchData1
-			fieldBits := cellFields(branch1[pos1])
+			fields := cellFields(branch1[pos1])
 			if add {
-				m.buf = append(m.buf, byte(fieldBits))
+				m.buf = append(m.buf, byte(fields))
 			}
 			pos1++
-			for i := 0; i < bits.OnesCount8(byte(fieldBits)); i++ {
+			for i := 0; i < bits.OnesCount8(byte(fields)); i++ {
 				l, n := binary.Uvarint(branch1[pos1:])
 				if n == 0 {
 					return nil, errors.New("MergeHexBranches branch1 is too small: expected node info size")
@@ -855,10 +854,10 @@ func DecodeBranchAndCollectStat(key, branch []byte, tv TrieVariant) *BranchStat 
 				stat.HashSize += uint64(c.hashLen)
 				stat.HashCount++
 				medians["hash"] = append(medians["hash"], c.hashLen)
-			case c.lhLen > 0:
-				stat.LeafHashSize += uint64(c.lhLen)
+			case c.stateHashLen > 0:
+				stat.LeafHashSize += uint64(c.stateHashLen)
 				stat.LeafHashCount++
-				medians["lh"] = append(medians["lh"], c.lhLen)
+				medians["lh"] = append(medians["lh"], c.stateHashLen)
 			case c.extLen > 0:
 				stat.ExtSize += uint64(c.extLen)
 				stat.ExtCount++
