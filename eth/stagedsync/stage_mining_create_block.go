@@ -20,9 +20,10 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"github.com/erigontech/erigon-lib/wrap"
 	"math/big"
 	"time"
+
+	"github.com/erigontech/erigon-lib/wrap"
 
 	mapset "github.com/deckarep/golang-set/v2"
 

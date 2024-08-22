@@ -109,14 +109,14 @@ type cell struct {
 	storageAddr     [length.Addr + length.Hash]byte // storage plain key
 	hash            [length.Hash]byte               // cell hash
 	leafHash        [length.Hash]byte
-	hashedExtLen    int
-	extLen          int
+	hashedExtLen    int // length of the hashed extension, if any
+	extLen          int// length of the extension, if any
 	accountAddrLen  int       // length of account plain key
 	storageAddrLen  int       // length of the storage plain key
 	hashLen         int       // Length of the hash (or embedded)
 	lhLen           int       // leafHash length, if > 0 can reuse
 	loaded          loadFlags // folded Cell have only hash, unfolded have all fields
-	Update
+	Update   // state update
 }
 
 type loadFlags uint8
@@ -406,22 +406,22 @@ func (cell *cell) deriveHashedKeys(depth int, keccak keccakState, accountKeyLen 
 	return nil
 }
 
-func (cell *cell) fillFromFields(data []byte, pos int, fieldBits PartFlags) (int, error) {
+func (cell *cell) fillFromFields(data []byte, pos int, fieldBits cellFields) (int, error) {
 	fields := []struct {
-		flag      PartFlags
+		flag      cellFields
 		lenField  *int
 		dataField []byte
 		extraFunc func(int)
 	}{
-		{HashedKeyPart, &cell.hashedExtLen, cell.hashedExtension[:], func(l int) {
+		{fieldExtension, &cell.hashedExtLen, cell.hashedExtension[:], func(l int) {
 			cell.extLen = l
 			if l > 0 {
 				copy(cell.extension[:], cell.hashedExtension[:l])
 			}
 		}},
-		{AccountPlainPart, &cell.accountAddrLen, cell.accountAddr[:], nil},
-		{StoragePlainPart, &cell.storageAddrLen, cell.storageAddr[:], nil},
-		{HashPart, &cell.hashLen, cell.hash[:], nil},
+		{fieldAccountAddr, &cell.accountAddrLen, cell.accountAddr[:], nil},
+		{fieldStorageAddr, &cell.storageAddrLen, cell.storageAddr[:], nil},
+		{fieldHash, &cell.hashLen, cell.hash[:], nil},
 		{LeafHashPart, &cell.lhLen, cell.leafHash[:], nil},
 	}
 
@@ -447,13 +447,13 @@ func (cell *cell) fillFromFields(data []byte, pos int, fieldBits PartFlags) (int
 			}
 		} else {
 			*f.lenField = 0
-			if f.flag == HashedKeyPart {
+			if f.flag == fieldExtension {
 				cell.extLen = 0
 			}
 		}
 	}
 
-	if fieldBits&AccountPlainPart != 0 {
+	if fieldBits&fieldAccountAddr != 0 {
 		copy(cell.CodeHash[:], EmptyCodeHash)
 	}
 	return pos, nil
@@ -731,7 +731,6 @@ func (hph *HexPatriciaHashed) computeCellHashLen(cell *cell, depth int) int {
 		var lenPrefix [4]byte
 		pt := rlp.GenerateStructLen(lenPrefix[:], totalLen)
 		if totalLen+pt < length.Hash {
-			//fmt.Printf("HL: %d+%d\n", totalLen, pt)
 			return totalLen + pt
 		}
 	}
@@ -1005,7 +1004,7 @@ func (hph *HexPatriciaHashed) unfoldBranchNode(row, depth int, deleted bool) (bo
 		cell := &hph.grid[row][nibble]
 		fieldBits := branchData[pos]
 		pos++
-		if pos, err = cell.fillFromFields(branchData, pos, PartFlags(fieldBits)); err != nil {
+		if pos, err = cell.fillFromFields(branchData, pos, cellFields(fieldBits)); err != nil {
 			return false, fmt.Errorf("prefix [%x] branchData[%x]: %w", hph.currentKey[:hph.currentKeyLen], branchData, err)
 		}
 
@@ -1051,7 +1050,6 @@ func (hph *HexPatriciaHashed) unfold(hashedKey []byte, unfolding int) error {
 	var upDepth, depth int
 	if hph.activeRows == 0 {
 		if hph.rootChecked && hph.root.hashLen == 0 && hph.root.hashedExtLen == 0 {
-			fmt.Printf("no unfolding for empty root %s\n", hph.root.FullString())
 			// No unfolding for empty root
 			return nil
 		}

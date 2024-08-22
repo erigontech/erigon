@@ -66,7 +66,7 @@ var (
 
 	SnapshotMadvRnd       = EnvBool("SNAPSHOT_MADV_RND", true)
 	KvMadvNormalNoLastLvl = EnvString("KV_MADV_NORMAL_NO_LAST_LVL", "") //TODO: move this logic - from hacks to app-level
-	KvMadvNormal          = EnvString("KV_MADV_NORMAL", "accounts,storage,code,commitment")
+	KvMadvNormal          = EnvString("KV_MADV_NORMAL", "")
 	OnlyCreateDB          = EnvBool("ONLY_CREATE_DB", false)
 
 	CommitEachStage = EnvBool("COMMIT_EACH_STAGE", false)

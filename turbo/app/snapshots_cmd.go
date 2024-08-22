@@ -321,9 +321,7 @@ var snapshotCommand = cli.Command{
 		{
 			Name:   "meta",
 			Action: doMeta,
-			Flags: joinFlags([]cli.Flag{
-				&cli.PathFlag{Name: "src", Required: true},
-			}),
+			Flags:  joinFlags([]cli.Flag{}),
 		},
 		{
 			Name:   "debug",
@@ -862,15 +860,19 @@ func doDiff(cliCtx *cli.Context) error {
 }
 
 func doMeta(cliCtx *cli.Context) error {
-	fname := cliCtx.String("src")
-	if strings.HasSuffix(fname, ".seg") {
+	args := cliCtx.Args()
+	if args.Len() < 1 {
+		return errors.New("expecting file path as a first argument")
+	}
+	fname := args.First()
+	if strings.Contains(fname, ".seg") || strings.Contains(fname, ".kv") || strings.Contains(fname, ".v") || strings.Contains(fname, ".ef") {
 		src, err := seg.NewDecompressor(fname)
 		if err != nil {
 			return err
 		}
 		defer src.Close()
-		log.Info("meta", "count", src.Count(), "size", datasize.ByteSize(src.Size()).String(), "name", src.FileName())
-	} else if strings.HasSuffix(fname, ".bt") {
+		log.Info("meta", "count", src.Count(), "size", datasize.ByteSize(src.Size()).HumanReadable(), "serialized_dict", datasize.ByteSize(src.SerializedDictSize()).HumanReadable(), "dict_words", src.DictWords(), "name", src.FileName())
+	} else if strings.Contains(fname, ".bt") {
 		kvFPath := strings.TrimSuffix(fname, ".bt") + ".kv"
 		src, err := seg.NewDecompressor(kvFPath)
 		if err != nil {
@@ -1128,9 +1130,9 @@ func doUncompress(cliCtx *cli.Context) error {
 	return nil
 }
 func doCompress(cliCtx *cli.Context) error {
-	var err error
-	var logger log.Logger
-	if logger, _, _, err = debug.Setup(cliCtx, true /* rootLogger */); err != nil {
+	dirs := datadir.New(cliCtx.String(utils.DataDirFlag.Name))
+	logger, _, _, err := debug.Setup(cliCtx, true /* rootLogger */)
+	if err != nil {
 		return err
 	}
 	ctx := cliCtx.Context
@@ -1140,10 +1142,17 @@ func doCompress(cliCtx *cli.Context) error {
 		return errors.New("expecting file path as a first argument")
 	}
 	f := args.First()
-	dirs := datadir.New(cliCtx.String(utils.DataDirFlag.Name))
-	logger.Info("file", "datadir", dirs.DataDir, "f", f)
+
 	compressCfg := seg.DefaultCfg
 	compressCfg.Workers = estimate.CompressSnapshot.Workers()
+	compressCfg.MinPatternLen = dbg.EnvInt("MinPatternLen", compressCfg.MinPatternLen)
+	compressCfg.MaxPatternLen = dbg.EnvInt("MaxPatternLen", compressCfg.MaxPatternLen)
+	compressCfg.SamplingFactor = uint64(dbg.EnvInt("SamplingFactor", int(compressCfg.SamplingFactor)))
+	compressCfg.DictReducerSoftLimit = dbg.EnvInt("DictReducerSoftLimit", compressCfg.DictReducerSoftLimit)
+	compressCfg.MaxDictPatterns = dbg.EnvInt("MaxDictPatterns", compressCfg.MaxDictPatterns)
+	onlyKeys := dbg.EnvBool("OnlyKeys", false)
+
+	logger.Info("[compress] file", "datadir", dirs.DataDir, "f", f, "cfg", compressCfg)
 	c, err := seg.NewCompressor(ctx, "compress", f, dirs.Tmp, compressCfg, log.LvlInfo, logger)
 	if err != nil {
 		return err
@@ -1152,6 +1161,7 @@ func doCompress(cliCtx *cli.Context) error {
 	r := bufio.NewReaderSize(os.Stdin, int(128*datasize.MB))
 	buf := make([]byte, 0, int(1*datasize.MB))
 	var l uint64
+	var i int
 	for l, err = binary.ReadUvarint(r); err == nil; l, err = binary.ReadUvarint(r) {
 		if cap(buf) < int(l) {
 			buf = make([]byte, l)
@@ -1161,9 +1171,22 @@ func doCompress(cliCtx *cli.Context) error {
 		if _, err = io.ReadFull(r, buf); err != nil {
 			return err
 		}
-		if err = c.AddWord(buf); err != nil {
-			return err
+		if i%2 == 0 {
+			if err = c.AddWord(buf); err != nil {
+				return err
+			}
+		} else {
+			if onlyKeys {
+				if err = c.AddUncompressedWord(buf); err != nil {
+					return err
+				}
+			} else {
+				if err = c.AddWord(buf); err != nil {
+					return err
+				}
+			}
 		}
+		i++
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
