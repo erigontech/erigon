@@ -129,10 +129,12 @@ type Decompressor struct {
 	data            []byte // slice of correct size for the decompressor to work with
 	wordsStart      uint64 // Offset of whether the superstrings actually start
 	size            int64
-	dictSize        uint64
 	modTime         time.Time
 	wordsCount      uint64
 	emptyWordsCount uint64
+
+	serializedDictSize uint64
+	dictWords          uint64
 
 	filePath, FileName1 string
 
@@ -225,7 +227,7 @@ func NewDecompressor(compressedFilePath string) (*Decompressor, error) {
 
 	pos := uint64(24)
 	dictSize := binary.BigEndian.Uint64(d.data[16:pos])
-	d.dictSize = dictSize
+	d.serializedDictSize = dictSize
 
 	if pos+dictSize > uint64(d.size) {
 		return nil, &ErrCompressedFileCorrupted{
@@ -437,7 +439,7 @@ func buildPosTable(depths []uint64, poss []uint64, table *posTable, code uint16,
 func (d *Decompressor) DataHandle() unsafe.Pointer {
 	return unsafe.Pointer(&d.data[0])
 }
-func (d *Decompressor) DictSize() uint64 { return d.dictSize }
+func (d *Decompressor) DictSize() uint64 { return d.serializedDictSize }
 
 func (d *Decompressor) Size() int64 {
 	return d.size
