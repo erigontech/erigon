@@ -1041,14 +1041,23 @@ func openSnaps(ctx context.Context, cfg ethconfig.BlocksFreezing, dirs datadir.D
 
 	borSnaps.LogStat("bor")
 	blockReader := freezeblocks.NewBlockReader(blockSnaps, borSnaps)
+	blockWriter := blockio.NewBlockWriter()
+	blockSnapBuildSema := semaphore.NewWeighted(int64(dbg.BuildSnapshotAllowance))
+	br = freezeblocks.NewBlockRetire(estimate.CompressSnapshot.Workers(), dirs, blockReader, blockWriter, chainDB, chainConfig, nil, blockSnapBuildSema, logger)
 
 	cr := rawdb.NewCanonicalReader(rawdbv3.TxNums.WithCustomReadTxNumFunc(freezeblocks.ReadTxNumFuncFromBlockReader(ctx, blockReader)))
 	agg = openAgg(ctx, dirs, chainDB, cr, logger)
+	agg.SetSnapshotBuildSema(blockSnapBuildSema)
+	clean = func() {
+		defer blockSnaps.Close()
+		defer borSnaps.Close()
+		defer csn.Close()
+		defer agg.Close()
+	}
 	err = chainDB.View(ctx, func(tx kv.Tx) error {
 		ac := agg.BeginFilesRo()
 		defer ac.Close()
 		ac.LogStats(tx, func(endTxNumMinimax uint64) (uint64, error) {
-			blockReader, _ := br.IO()
 			_, histBlockNumProgress, err := rawdbv3.TxNums.WithCustomReadTxNumFunc(freezeblocks.ReadTxNumFuncFromBlockReader(ctx, blockReader)).FindBlockNum(tx, endTxNumMinimax)
 			return histBlockNumProgress, err
 		})
@@ -1064,18 +1073,6 @@ func openSnaps(ctx context.Context, cfg ethconfig.BlocksFreezing, dirs datadir.D
 		mtime = ls.ModTime()
 	}
 	logger.Info("[downloads]", "locked", er == nil, "at", mtime.Format("02 Jan 06 15:04 2006"))
-
-	blockWriter := blockio.NewBlockWriter()
-
-	blockSnapBuildSema := semaphore.NewWeighted(int64(dbg.BuildSnapshotAllowance))
-	agg.SetSnapshotBuildSema(blockSnapBuildSema)
-	br = freezeblocks.NewBlockRetire(estimate.CompressSnapshot.Workers(), dirs, blockReader, blockWriter, chainDB, chainConfig, nil, blockSnapBuildSema, logger)
-	clean = func() {
-		defer blockSnaps.Close()
-		defer borSnaps.Close()
-		defer csn.Close()
-		defer agg.Close()
-	}
 	return
 }
 
