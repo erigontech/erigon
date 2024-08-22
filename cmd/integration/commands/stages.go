@@ -1280,21 +1280,17 @@ func allSnapshots(ctx context.Context, db kv.RoDB, logger log.Logger) (*freezebl
 
 		g := &errgroup.Group{}
 		g.Go(func() error {
-			defer func(t time.Time) { fmt.Printf("_allSnapshotsSingleton.go:1283: %s\n", time.Since(t)) }(time.Now())
 			_allSnapshotsSingleton.OptimisticalyReopenFolder()
 			return nil
 		})
 		g.Go(func() error {
-			defer func(t time.Time) { fmt.Printf("_allBorSnapshotsSingleton.go:1288: %s\n", time.Since(t)) }(time.Now())
 			_allBorSnapshotsSingleton.OptimisticalyReopenFolder()
 			return nil
 		})
 		g.Go(func() error {
-			defer func(t time.Time) { fmt.Printf("_aggSingleton.go:1293: %s\n", time.Since(t)) }(time.Now())
 			return _aggSingleton.OpenFolder()
 		})
 		g.Go(func() error {
-			defer func(t time.Time) { fmt.Printf("_allCaplinSnapshotsSingleton.go:1297: %s\n", time.Since(t)) }(time.Now())
 			chainConfig := fromdb.ChainConfig(db)
 			var beaconConfig *clparams.BeaconChainConfig
 			_, beaconConfig, _, err = clparams.GetConfigsByNetworkName(chainConfig.ChainName)
