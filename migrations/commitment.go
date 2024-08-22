@@ -56,9 +56,23 @@ var SqueezeCommitmentFiles = Migration{
 
 		ac := agg.BeginFilesRo()
 		defer ac.Close()
-		if err = ac.SqueezeCommitmentFiles(); err != nil {
-			return err
+
+		{
+			dirs2 := dirs
+			dirs2.SnapDomain += "_v2"
+			a2, err := libstate.NewAggregator(ctx, dirs2, config3.HistoryV3AggregationStep, db, nil, logger)
+			if err != nil {
+				panic(err)
+			}
+			defer a2.Close()
+
+			ac2 := a2.BeginFilesRo()
+			defer ac2.Close()
+			if err = ac.SqueezeCommitmentFiles(ac); err != nil {
+				return err
+			}
 		}
+
 		return db.Update(ctx, func(tx kv.RwTx) error {
 			return BeforeCommit(tx, nil, true)
 		})
