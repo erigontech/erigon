@@ -330,12 +330,13 @@ func NewDecompressor(compressedFilePath string) (*Decompressor, error) {
 			lens:   make([]byte, tableSize),
 			ptrs:   make([]*posTable, tableSize),
 		}
-		fmt.Printf("newTable: %d\n", tableSize)
+		globalTableSize += tableSize
 		if _, err = buildPosTable(posDepths, poss, d.posDict, 0, 0, 0, posMaxDepth); err != nil {
 			return nil, &ErrCompressedFileCorrupted{FileName: fName, Reason: err.Error()}
 		}
 	}
 	d.wordsStart = pos + dictSize
+	fmt.Printf("newTable: %d\n", globalTableSize)
 
 	if d.Count() == 0 && dictSize == 0 && d.size > compressedMinSize {
 		return nil, &ErrCompressedFileCorrupted{
@@ -382,6 +383,8 @@ func buildCondensedPatternTable(table *patternTable, depths []uint64, patterns [
 	return b0 + b1, err
 }
 
+var globalTableSize uint64
+
 func buildPosTable(depths []uint64, poss []uint64, table *posTable, code uint16, bits int, depth uint64, maxDepth uint64) (int, error) {
 	if maxDepth > maxAllowedDepth {
 		return 0, fmt.Errorf("buildPosTable: maxDepth=%d is too deep", maxDepth)
@@ -422,7 +425,7 @@ func buildPosTable(depths []uint64, poss []uint64, table *posTable, code uint16,
 			lens:   make([]byte, tableSize),
 			ptrs:   make([]*posTable, tableSize),
 		}
-		fmt.Printf("newTable: %d\n", tableSize)
+		globalTableSize += tableSize
 		table.pos[code] = 0
 		table.lens[code] = byte(0)
 		table.ptrs[code] = newTable
