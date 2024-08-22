@@ -330,13 +330,13 @@ func NewDecompressor(compressedFilePath string) (*Decompressor, error) {
 			lens:   make([]byte, tableSize),
 			ptrs:   make([]*posTable, tableSize),
 		}
-		globalTableSize += tableSize
-		if _, err = buildPosTable(posDepths, poss, d.posDict, 0, 0, 0, posMaxDepth); err != nil {
+		_, globalTableSize, err := buildPosTable(posDepths, poss, d.posDict, 0, 0, 0, posMaxDepth)
+		if err != nil {
 			return nil, &ErrCompressedFileCorrupted{FileName: fName, Reason: err.Error()}
 		}
+		fmt.Printf("newTable: %d, %s\n", globalTableSize, d.FileName1)
 	}
 	d.wordsStart = pos + dictSize
-	fmt.Printf("newTable: %d, %s\n", globalTableSize, d.FileName1)
 
 	if d.Count() == 0 && dictSize == 0 && d.size > compressedMinSize {
 		return nil, &ErrCompressedFileCorrupted{
@@ -383,14 +383,13 @@ func buildCondensedPatternTable(table *patternTable, depths []uint64, patterns [
 	return b0 + b1, err
 }
 
-var globalTableSize int
-
-func buildPosTable(depths []uint64, poss []uint64, table *posTable, code uint16, bits int, depth uint64, maxDepth uint64) (int, error) {
+func buildPosTable(depths []uint64, poss []uint64, table *posTable, code uint16, bits int, depth uint64, maxDepth uint64) (int, int, error) {
+	var globalTableSize int
 	if maxDepth > maxAllowedDepth {
-		return 0, fmt.Errorf("buildPosTable: maxDepth=%d is too deep", maxDepth)
+		return 0, 0, fmt.Errorf("buildPosTable: maxDepth=%d is too deep", maxDepth)
 	}
 	if len(depths) == 0 {
-		return 0, nil
+		return 0, 0, nil
 	}
 	if depth == depths[0] {
 		p := poss[0]
@@ -409,7 +408,7 @@ func buildPosTable(depths []uint64, poss []uint64, table *posTable, code uint16,
 				table.ptrs[c] = nil
 			}
 		}
-		return 1, nil
+		return 1, globalTableSize, nil
 	}
 	if bits == 9 {
 		var bitLen int
@@ -432,14 +431,14 @@ func buildPosTable(depths []uint64, poss []uint64, table *posTable, code uint16,
 		return buildPosTable(depths, poss, newTable, 0, 0, depth, maxDepth)
 	}
 	if maxDepth == 0 {
-		return 0, errors.New("buildPosTable: maxDepth reached zero")
+		return 0, 0, errors.New("buildPosTable: maxDepth reached zero")
 	}
-	b0, err := buildPosTable(depths, poss, table, code, bits+1, depth+1, maxDepth-1)
+	b0, globalTableSize0, err := buildPosTable(depths, poss, table, code, bits+1, depth+1, maxDepth-1)
 	if err != nil {
-		return 0, err
+		return 0, 0, err
 	}
-	b1, err := buildPosTable(depths[b0:], poss[b0:], table, (uint16(1)<<bits)|code, bits+1, depth+1, maxDepth-1)
-	return b0 + b1, err
+	b1, globalTableSize1, err := buildPosTable(depths[b0:], poss[b0:], table, (uint16(1)<<bits)|code, bits+1, depth+1, maxDepth-1)
+	return b0 + b1, globalTableSize + globalTableSize0 + globalTableSize1, err
 }
 
 func (d *Decompressor) DataHandle() unsafe.Pointer {
