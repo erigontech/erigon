@@ -439,14 +439,14 @@ func (d *Decompressor) DataHandle() unsafe.Pointer {
 	return unsafe.Pointer(&d.data[0])
 }
 func (d *Decompressor) SerializedDictSize() uint64 { return d.serializedDictSize }
-func (d *Decompressor) DictWords() uint64 {
+func (d *Decompressor) DictWords() int {
 	if d.dict == nil {
 		return 0
 	}
 	if d.dict.patterns == nil {
 		return 0
 	}
-	return uint64(len(d.dict.patterns))
+	return len(d.dict.patterns)
 }
 
 func (d *Decompressor) Size() int64 {
