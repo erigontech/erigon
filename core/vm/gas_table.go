@@ -523,9 +523,6 @@ func gasExtCall(evm *EVM, contract *Contract, stack *stack.Stack, mem *Memory, m
 		fmt.Println("ADDR MOD")
 		gas += params.ColdAccountAccessCostEIP2929 - params.WarmStorageReadCostEIP2929
 	}
-	if !evm.IntraBlockState().Exist(address) { // TODO(racytech): do we need this?
-		gas += params.CallNewAccountGas
-	}
 	fmt.Println("GAS 1: ", gas)
 	if transfersValue {
 		gas += params.CallValueTransferGas

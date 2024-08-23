@@ -892,29 +892,21 @@ func opReturnDataLoad(pc *uint64, interpreter *EVMInterpreter, scope *ScopeConte
 	return nil, nil
 }
 
-// Charge WARM_STORAGE_READ_COST (100) gas.
-// Pop required arguments from stack, halt with exceptional failure on stack underflow.
-// NOTE: When implemented in EOF, stack underflow check is done during stack validation and runtime check is omitted.
-// If value is non-zero:
-// Halt with exceptional failure if the current frame is in static-mode.
-// Charge CALL_VALUE_COST gas.
-// If target_address has any of the high 12 bytes set to a non-zero value(i.e. it does not contain a 20-byte address) then halt with an exceptional failure.
-// Perform (and charge for) memory expansion using [input_offset, input_size].
-// If target_address is not in the warm_account_list, charge COLD_ACCOUNT_ACCESS - WARM_STORAGE_READ_COST (2500) gas.
-// If target_address is not in the state and the call configuration would result in account creation, charge ACCOUNT_CREATION_COST (25000) gas.
-// The only such case in this EIP is if value is non-zero.
-// Calculate the gas available to callee as caller’s remaining gas reduced by max(floor(gas/64), MIN_RETAINED_GAS).
-// Clear the returndata buffer.
-// Fail with status code 1 returned on stack if any of the following is true (only gas charged until this point is consumed):
-// Gas available to callee at this point is less than MIN_CALLEE_GAS.
-// Balance of the current account is less than value.
-// Current call stack depth equals 1024.
-// Perform the call with the available gas and configuration.
-// Push a status code on the stack:
-// 0 if the call was successful.
-// 1 if the call has reverted (also can be pushed earlier in a light failure scenario).
-// 2 if the call has failed.
-// Gas not used by the callee is returned to the caller.
+var maxAdress = [20]byte{
+	0xff, 0xff, 0xff, 0xff, 0xff,
+	0xff, 0xff, 0xff, 0xff, 0xff,
+	0xff, 0xff, 0xff, 0xff, 0xff,
+	0xff, 0xff, 0xff, 0xff, 0xff,
+}
+var MAX_ADDRESS = *(new(uint256.Int).SetBytes20(maxAdress[:])) // TODO(racytech):
+
+func validAddr(addr *uint256.Int) bool {
+	if addr.Gt(&MAX_ADDRESS) {
+		return false
+	}
+	return true
+}
+
 func opExtCall(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]byte, error) {
 	var (
 		dst256    = scope.Stack.Pop()
@@ -928,20 +920,15 @@ func opExtCall(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]
 
 		gas = interpreter.evm.CallGasTemp()
 	)
+	if !validAddr(&dst256) {
+		return nil, fmt.Errorf("argument out of range")
+	}
+
 	fmt.Printf("dst: 0x%x, offset: 0x%x, size: 0x%x, value: 0x%x\n", dst256.Bytes32(), offset256.Bytes32(), size256.Bytes32(), value.Bytes32())
 	// gas_ := gas - max(gas/64, 5000)
 	fmt.Println("GAS -> ", gas)
 	// Get the arguments from the memory.
 	args := scope.Memory.GetPtr(offset, size)
-	// gasCall := gas - max(gas/64, 5000)
-	// gas += max((contract.Gas-gas)/64, 5000)
-
-	// if !value.IsZero() {
-	// 	if interpreter.readOnly {
-	// 		return nil, ErrWriteProtection
-	// 	}
-	// 	// gas += params.CallStipend
-	// }
 
 	ret, returnGas, err := interpreter.evm.ExtCall(scope.Contract, toAddr, args, gas, &value)
 
@@ -982,7 +969,9 @@ func opExtDelegateCall(pc *uint64, interpreter *EVMInterpreter, scope *ScopeCont
 
 		gas = interpreter.evm.CallGasTemp()
 	)
-
+	if !validAddr(&addr256) {
+		return nil, fmt.Errorf("argument out of range")
+	}
 	// Get the arguments from the memory.
 	args := scope.Memory.GetPtr(offset, size)
 
@@ -1030,7 +1019,9 @@ func opExtStaticCall(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContex
 
 		gas = interpreter.evm.CallGasTemp()
 	)
-
+	if !validAddr(&addr256) {
+		return nil, fmt.Errorf("argument out of range")
+	}
 	// Get the arguments from the memory.
 	args := scope.Memory.GetPtr(offset, size)
 	ret, returnGas, err := interpreter.evm.ExtStaticCall(scope.Contract, toAddr, args, gas)
