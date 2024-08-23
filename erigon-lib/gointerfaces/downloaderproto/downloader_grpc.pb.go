@@ -25,6 +25,7 @@ const (
 	Downloader_Delete_FullMethodName               = "/downloader.Downloader/Delete"
 	Downloader_Verify_FullMethodName               = "/downloader.Downloader/Verify"
 	Downloader_Stats_FullMethodName                = "/downloader.Downloader/Stats"
+	Downloader_SetLogPrefix_FullMethodName         = "/downloader.Downloader/SetLogPrefix"
 )
 
 // DownloaderClient is the client API for Downloader service.
@@ -42,6 +43,8 @@ type DownloaderClient interface {
 	// If some part of file is bad - such part will be re-downloaded (without returning error)
 	Verify(ctx context.Context, in *VerifyRequest, opts ...grpc.CallOption) (*emptypb.Empty, error)
 	Stats(ctx context.Context, in *StatsRequest, opts ...grpc.CallOption) (*StatsReply, error)
+	// Set log prefix for downloader
+	SetLogPrefix(ctx context.Context, in *SetLogPrefixRequest, opts ...grpc.CallOption) (*emptypb.Empty, error)
 }
 
 type downloaderClient struct {
@@ -102,6 +105,16 @@ func (c *downloaderClient) Stats(ctx context.Context, in *StatsRequest, opts ...
 	return out, nil
 }
 
+func (c *downloaderClient) SetLogPrefix(ctx context.Context, in *SetLogPrefixRequest, opts ...grpc.CallOption) (*emptypb.Empty, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(emptypb.Empty)
+	err := c.cc.Invoke(ctx, Downloader_SetLogPrefix_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // DownloaderServer is the server API for Downloader service.
 // All implementations must embed UnimplementedDownloaderServer
 // for forward compatibility
@@ -117,6 +130,8 @@ type DownloaderServer interface {
 	// If some part of file is bad - such part will be re-downloaded (without returning error)
 	Verify(context.Context, *VerifyRequest) (*emptypb.Empty, error)
 	Stats(context.Context, *StatsRequest) (*StatsReply, error)
+	// Set log prefix for downloader
+	SetLogPrefix(context.Context, *SetLogPrefixRequest) (*emptypb.Empty, error)
 	mustEmbedUnimplementedDownloaderServer()
 }
 
@@ -138,6 +153,9 @@ func (UnimplementedDownloaderServer) Verify(context.Context, *VerifyRequest) (*e
 }
 func (UnimplementedDownloaderServer) Stats(context.Context, *StatsRequest) (*StatsReply, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method Stats not implemented")
+}
+func (UnimplementedDownloaderServer) SetLogPrefix(context.Context, *SetLogPrefixRequest) (*emptypb.Empty, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method SetLogPrefix not implemented")
 }
 func (UnimplementedDownloaderServer) mustEmbedUnimplementedDownloaderServer() {}
 
@@ -242,6 +260,24 @@ func _Downloader_Stats_Handler(srv interface{}, ctx context.Context, dec func(in
 	return interceptor(ctx, in, info, handler)
 }
 
+func _Downloader_SetLogPrefix_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(SetLogPrefixRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(DownloaderServer).SetLogPrefix(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Downloader_SetLogPrefix_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(DownloaderServer).SetLogPrefix(ctx, req.(*SetLogPrefixRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // Downloader_ServiceDesc is the grpc.ServiceDesc for Downloader service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -268,6 +304,10 @@ var Downloader_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "Stats",
 			Handler:    _Downloader_Stats_Handler,
+		},
+		{
+			MethodName: "SetLogPrefix",
+			Handler:    _Downloader_SetLogPrefix_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},
