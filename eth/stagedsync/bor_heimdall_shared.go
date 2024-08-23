@@ -465,13 +465,10 @@ func fetchAndWriteHeimdallStateSyncEvents(
 
 	var overrideCount int
 
-	fmt.Println("BLK", blockNum, "FROM ID", fromId, "FROM", from, "TO", to, "LEN", len(eventRecords), "SC", skipCount)
-
 	if config.OverrideStateSyncRecords != nil {
 		if val, ok := config.OverrideStateSyncRecords[strconv.FormatUint(blockNum, 10)]; ok {
 			overrideCount = len(eventRecords) - val
 			eventRecords = eventRecords[0:val]
-			fmt.Println("OVR", overrideCount, "LEN", len(eventRecords))
 		}
 	}
 
@@ -497,8 +494,6 @@ func fetchAndWriteHeimdallStateSyncEvents(
 
 			return initialTime.After(from)
 		}
-
-		fmt.Println("EV", i, eventRecord.ID, eventRecord.Time, "SC", skipCount)
 
 		// don't apply this for devnets we may have looser state event constraints
 		// (TODO these probably needs fixing)

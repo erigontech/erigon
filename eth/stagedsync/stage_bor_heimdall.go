@@ -233,7 +233,11 @@ func BorHeimdallForward(
 
 	// sometimes via config eveents are skipped from particular blocks and
 	// pushed into the next one, when this happens we need to skip validation
-	// as the times won't match the expected window
+	// as the times won't match the expected window. In practice it only affects 
+	// these blocks: 14949120,14949184, 14953472, 14953536, 14953600, 14953664,
+	// 14953728, 14953792, 14953856 so it seems keeping a local skip marker is good 
+	// enough - it will only impact sync from origin operations.  If
+	// this becomes more prevalent this will need to be re-thought
 	var skipCount int
 
 	for blockNum = lastBlockNum + 1; blockNum <= headNumber; blockNum++ {
