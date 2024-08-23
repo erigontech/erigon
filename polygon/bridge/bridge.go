@@ -279,15 +279,15 @@ func (b *Bridge) ProcessNewBlocks(ctx context.Context, blocks []*types.Block) er
 		return nil
 	}
 
-	if err := b.store.PutProcessedBlockInfo(ctx, *b.lastProcessedBlock.Load()); err != nil {
-		return err
-	}
-
 	if err := b.store.PutBlockNumToEventID(ctx, blockNumToEventId); err != nil {
 		return err
 	}
 
 	if err := b.store.PutEventTxnToBlockNum(ctx, eventTxnToBlockNum); err != nil {
+		return err
+	}
+
+	if err := b.store.PutProcessedBlockInfo(ctx, *b.lastProcessedBlock.Load()); err != nil {
 		return err
 	}
 
