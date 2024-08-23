@@ -116,7 +116,7 @@ func NewPolygonSyncStageCfg(
 		eventReader:    blockReader,
 		txActionStream: txActionStream,
 	}
-	bridgeService := bridge.NewBridge(bridgeStore, logger, borConfig, heimdallClient)
+	bridgeService := bridge.NewBridge(bridgeStore, logger, borConfig, heimdallClient, nil)
 	sync := polygonsync.NewSync(
 		syncStore,
 		executionEngine,
@@ -267,28 +267,50 @@ func UnwindEvents(tx kv.RwTx, unwindPoint uint64) error {
 	if err != nil {
 		return err
 	}
-
 	defer cursor.Close()
+
 	var blockNumBuf [8]byte
 	binary.BigEndian.PutUint64(blockNumBuf[:], unwindPoint+1)
-	k, eventId, err := cursor.Seek(blockNumBuf[:])
+
+	_, _, err = cursor.Seek(blockNumBuf[:])
 	if err != nil {
 		return err
 	}
-	if k != nil {
-		eventCursor, err := tx.RwCursor(kv.BorEvents)
-		if err != nil {
+
+	_, prevSprintLastIDBytes, err := cursor.Prev() // last event ID of previous sprint
+	if err != nil {
+		return err
+	}
+
+	var prevSprintLastID uint64
+	if prevSprintLastIDBytes == nil {
+		// we are unwinding the first entry, remove all items from BorEvents
+		prevSprintLastID = 0
+	} else {
+		prevSprintLastID = binary.BigEndian.Uint64(prevSprintLastIDBytes)
+	}
+
+	eventId := make([]byte, 8) // first event ID for this sprint
+	binary.BigEndian.PutUint64(eventId, prevSprintLastID+1)
+
+	eventCursor, err := tx.RwCursor(kv.BorEvents)
+	if err != nil {
+		return err
+	}
+	defer eventCursor.Close()
+
+	for eventId, _, err = eventCursor.Seek(eventId); err == nil && eventId != nil; eventId, _, err = eventCursor.Next() {
+		if err = eventCursor.DeleteCurrent(); err != nil {
 			return err
 		}
-		defer eventCursor.Close()
-		for eventId, _, err = eventCursor.Seek(eventId); err == nil && eventId != nil; eventId, _, err = eventCursor.Next() {
-			if err = eventCursor.DeleteCurrent(); err != nil {
-				return err
-			}
-		}
-		if err != nil {
-			return err
-		}
+	}
+	if err != nil {
+		return err
+	}
+
+	k, _, err := cursor.Next() // move cursor back to this sprint
+	if err != nil {
+		return err
 	}
 
 	for ; err == nil && k != nil; k, _, err = cursor.Next() {
