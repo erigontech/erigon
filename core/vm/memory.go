@@ -20,6 +20,8 @@
 package vm
 
 import (
+	"fmt"
+
 	"github.com/holiman/uint256"
 )
 
@@ -46,6 +48,7 @@ func (m *Memory) Set(offset, size uint64, value []byte) {
 		if offset+size > uint64(len(m.store)) {
 			panic("invalid memory: store empty")
 		}
+		fmt.Printf("\nMem.Set: 0x%x\n", value)
 		copy(m.store[offset:offset+size], value)
 	}
 }

@@ -323,6 +323,9 @@ func (in *EVMInterpreter) Run(contract *Contract, input []byte, readOnly bool) (
 		if !contract.UseGas(cost, tracing.GasChangeIgnored) {
 			return nil, ErrOutOfGas
 		}
+		if op == RETURNDATACOPY {
+			fmt.Printf("contract.Gas before: %v\n", contract.Gas)
+		}
 		if operation.dynamicGas != nil {
 			// All ops with a dynamic memory usage also has a dynamic gas cost.
 			var memorySize uint64
@@ -348,7 +351,7 @@ func (in *EVMInterpreter) Run(contract *Contract, input []byte, readOnly bool) (
 			var dynamicCost uint64
 			dynamicCost, err = operation.dynamicGas(in.evm, contract, locStack, mem, memorySize)
 			cost += dynamicCost // for tracing
-			if op == EXTCALL {
+			if op == RETURNDATACOPY {
 				fmt.Printf("COST: %v, DYNAMIC COST: %v, UseGas: %v\n", cost, dynamicCost, contract.Gas-dynamicCost)
 			}
 			if err != nil || !contract.UseGas(dynamicCost, tracing.GasChangeIgnored) {
@@ -365,6 +368,9 @@ func (in *EVMInterpreter) Run(contract *Contract, input []byte, readOnly bool) (
 		} else if in.cfg.Debug {
 			in.cfg.Tracer.CaptureState(_pc, op, gasCopy, cost, callContext, in.returnData, in.depth, err) //nolint:errcheck
 			logged = true
+		}
+		if op == RETURNDATACOPY {
+			fmt.Printf("contract.Gas after: %v\n", contract.Gas)
 		}
 		fmt.Printf("-> COST: %v, ", cost)
 		// execute the operation
