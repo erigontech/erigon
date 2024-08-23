@@ -21,23 +21,24 @@ import (
 const _ = grpc.SupportPackageIsVersion9
 
 const (
-	ETHBACKEND_Etherbase_FullMethodName       = "/remote.ETHBACKEND/Etherbase"
-	ETHBACKEND_NetVersion_FullMethodName      = "/remote.ETHBACKEND/NetVersion"
-	ETHBACKEND_NetPeerCount_FullMethodName    = "/remote.ETHBACKEND/NetPeerCount"
-	ETHBACKEND_Version_FullMethodName         = "/remote.ETHBACKEND/Version"
-	ETHBACKEND_ProtocolVersion_FullMethodName = "/remote.ETHBACKEND/ProtocolVersion"
-	ETHBACKEND_ClientVersion_FullMethodName   = "/remote.ETHBACKEND/ClientVersion"
-	ETHBACKEND_Subscribe_FullMethodName       = "/remote.ETHBACKEND/Subscribe"
-	ETHBACKEND_SubscribeLogs_FullMethodName   = "/remote.ETHBACKEND/SubscribeLogs"
-	ETHBACKEND_Block_FullMethodName           = "/remote.ETHBACKEND/Block"
-	ETHBACKEND_CanonicalHash_FullMethodName   = "/remote.ETHBACKEND/CanonicalHash"
-	ETHBACKEND_HeaderNumber_FullMethodName    = "/remote.ETHBACKEND/HeaderNumber"
-	ETHBACKEND_TxnLookup_FullMethodName       = "/remote.ETHBACKEND/TxnLookup"
-	ETHBACKEND_NodeInfo_FullMethodName        = "/remote.ETHBACKEND/NodeInfo"
-	ETHBACKEND_Peers_FullMethodName           = "/remote.ETHBACKEND/Peers"
-	ETHBACKEND_AddPeer_FullMethodName         = "/remote.ETHBACKEND/AddPeer"
-	ETHBACKEND_PendingBlock_FullMethodName    = "/remote.ETHBACKEND/PendingBlock"
-	ETHBACKEND_BorEvent_FullMethodName        = "/remote.ETHBACKEND/BorEvent"
+	ETHBACKEND_Etherbase_FullMethodName               = "/remote.ETHBACKEND/Etherbase"
+	ETHBACKEND_NetVersion_FullMethodName              = "/remote.ETHBACKEND/NetVersion"
+	ETHBACKEND_NetPeerCount_FullMethodName            = "/remote.ETHBACKEND/NetPeerCount"
+	ETHBACKEND_Version_FullMethodName                 = "/remote.ETHBACKEND/Version"
+	ETHBACKEND_ProtocolVersion_FullMethodName         = "/remote.ETHBACKEND/ProtocolVersion"
+	ETHBACKEND_ClientVersion_FullMethodName           = "/remote.ETHBACKEND/ClientVersion"
+	ETHBACKEND_Subscribe_FullMethodName               = "/remote.ETHBACKEND/Subscribe"
+	ETHBACKEND_SubscribeLogs_FullMethodName           = "/remote.ETHBACKEND/SubscribeLogs"
+	ETHBACKEND_Block_FullMethodName                   = "/remote.ETHBACKEND/Block"
+	ETHBACKEND_CanonicalBodyForStorage_FullMethodName = "/remote.ETHBACKEND/CanonicalBodyForStorage"
+	ETHBACKEND_CanonicalHash_FullMethodName           = "/remote.ETHBACKEND/CanonicalHash"
+	ETHBACKEND_HeaderNumber_FullMethodName            = "/remote.ETHBACKEND/HeaderNumber"
+	ETHBACKEND_TxnLookup_FullMethodName               = "/remote.ETHBACKEND/TxnLookup"
+	ETHBACKEND_NodeInfo_FullMethodName                = "/remote.ETHBACKEND/NodeInfo"
+	ETHBACKEND_Peers_FullMethodName                   = "/remote.ETHBACKEND/Peers"
+	ETHBACKEND_AddPeer_FullMethodName                 = "/remote.ETHBACKEND/AddPeer"
+	ETHBACKEND_PendingBlock_FullMethodName            = "/remote.ETHBACKEND/PendingBlock"
+	ETHBACKEND_BorEvent_FullMethodName                = "/remote.ETHBACKEND/BorEvent"
 )
 
 // ETHBACKENDClient is the client API for ETHBACKEND service.
@@ -60,6 +61,8 @@ type ETHBACKENDClient interface {
 	// it doesn't provide consistency
 	// Request fields are optional - it's ok to request block only by hash or only by number
 	Block(ctx context.Context, in *BlockRequest, opts ...grpc.CallOption) (*BlockReply, error)
+	// High-level method - can read block body (only storage metadata) from db, snapshots or apply any other logic
+	CanonicalBodyForStorage(ctx context.Context, in *CanonicalBodyForStorageRequest, opts ...grpc.CallOption) (*CanonicalBodyForStorageReply, error)
 	// High-level method - can find block hash by block number
 	CanonicalHash(ctx context.Context, in *CanonicalHashRequest, opts ...grpc.CallOption) (*CanonicalHashReply, error)
 	// High-level method - can find block number by block hash
@@ -187,6 +190,16 @@ func (c *eTHBACKENDClient) Block(ctx context.Context, in *BlockRequest, opts ...
 	return out, nil
 }
 
+func (c *eTHBACKENDClient) CanonicalBodyForStorage(ctx context.Context, in *CanonicalBodyForStorageRequest, opts ...grpc.CallOption) (*CanonicalBodyForStorageReply, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(CanonicalBodyForStorageReply)
+	err := c.cc.Invoke(ctx, ETHBACKEND_CanonicalBodyForStorage_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 func (c *eTHBACKENDClient) CanonicalHash(ctx context.Context, in *CanonicalHashRequest, opts ...grpc.CallOption) (*CanonicalHashReply, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(CanonicalHashReply)
@@ -287,6 +300,8 @@ type ETHBACKENDServer interface {
 	// it doesn't provide consistency
 	// Request fields are optional - it's ok to request block only by hash or only by number
 	Block(context.Context, *BlockRequest) (*BlockReply, error)
+	// High-level method - can read block body (only storage metadata) from db, snapshots or apply any other logic
+	CanonicalBodyForStorage(context.Context, *CanonicalBodyForStorageRequest) (*CanonicalBodyForStorageReply, error)
 	// High-level method - can find block hash by block number
 	CanonicalHash(context.Context, *CanonicalHashRequest) (*CanonicalHashReply, error)
 	// High-level method - can find block number by block hash
@@ -338,6 +353,9 @@ func (UnimplementedETHBACKENDServer) SubscribeLogs(grpc.BidiStreamingServer[Logs
 }
 func (UnimplementedETHBACKENDServer) Block(context.Context, *BlockRequest) (*BlockReply, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method Block not implemented")
+}
+func (UnimplementedETHBACKENDServer) CanonicalBodyForStorage(context.Context, *CanonicalBodyForStorageRequest) (*CanonicalBodyForStorageReply, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method CanonicalBodyForStorage not implemented")
 }
 func (UnimplementedETHBACKENDServer) CanonicalHash(context.Context, *CanonicalHashRequest) (*CanonicalHashReply, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method CanonicalHash not implemented")
@@ -528,6 +546,24 @@ func _ETHBACKEND_Block_Handler(srv interface{}, ctx context.Context, dec func(in
 	return interceptor(ctx, in, info, handler)
 }
 
+func _ETHBACKEND_CanonicalBodyForStorage_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(CanonicalBodyForStorageRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ETHBACKENDServer).CanonicalBodyForStorage(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: ETHBACKEND_CanonicalBodyForStorage_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ETHBACKENDServer).CanonicalBodyForStorage(ctx, req.(*CanonicalBodyForStorageRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 func _ETHBACKEND_CanonicalHash_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(CanonicalHashRequest)
 	if err := dec(in); err != nil {
@@ -706,6 +742,10 @@ var ETHBACKEND_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "Block",
 			Handler:    _ETHBACKEND_Block_Handler,
+		},
+		{
+			MethodName: "CanonicalBodyForStorage",
+			Handler:    _ETHBACKEND_CanonicalBodyForStorage_Handler,
 		},
 		{
 			MethodName: "CanonicalHash",
