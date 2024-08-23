@@ -129,6 +129,12 @@ func NewDomain(cfg domainCfg, aggregationStep uint64, name kv.Domain, valsTable,
 
 	compressCfg := seg.DefaultCfg
 	compressCfg.Workers = 1
+	compressCfg.DictReducerSoftLimit = 2000000
+	compressCfg.MinPatternLen = 20
+	compressCfg.MaxPatternLen = 32
+	compressCfg.SamplingFactor = 1
+	compressCfg.MaxDictPatterns = 64 * 1024 * 2
+
 	d := &Domain{
 		name:      name,
 		valsTable: valsTable,
