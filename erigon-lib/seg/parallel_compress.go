@@ -39,9 +39,6 @@ import (
 	"github.com/erigontech/erigon-lib/seg/sais"
 )
 
-// MinPatternScore is minimum score (per superstring) required to consider including pattern into the dictionary
-const MinPatternScore = 1024
-
 func coverWordByPatterns(trace bool, input []byte, mf2 *patricia.MatchFinder2, output []byte, uncovered []int, patterns []int, cellRing *Ring, posMap map[uint64]uint64) ([]byte, []int, []int) {
 	matches := mf2.FindLongestMatches(input)
 
@@ -238,7 +235,7 @@ func (cq *CompressionQueue) Pop() interface{} {
 	return x
 }
 
-func compressWithPatternCandidates(ctx context.Context, trace bool, logPrefix, segmentFilePath string, cf *os.File, uncompressedFile *RawWordsFile, workers int, dictBuilder *DictionaryBuilder, lvl log.Lvl, logger log.Logger) error {
+func compressWithPatternCandidates(ctx context.Context, trace bool, cfg Cfg, logPrefix, segmentFilePath string, cf *os.File, uncompressedFile *RawWordsFile, dictBuilder *DictionaryBuilder, lvl log.Lvl, logger log.Logger) error {
 	logEvery := time.NewTicker(60 * time.Second)
 	defer logEvery.Stop()
 
@@ -285,8 +282,8 @@ func compressWithPatternCandidates(ctx context.Context, trace bool, logPrefix, s
 	uncompPosMap := make(map[uint64]uint64) // For the uncompressed words
 	posMaps = append(posMaps, uncompPosMap)
 	var wg sync.WaitGroup
-	if workers > 1 {
-		for i := 0; i < workers; i++ {
+	if cfg.Workers > 1 {
+		for i := 0; i < cfg.Workers; i++ {
 			posMap := make(map[uint64]uint64)
 			posMaps = append(posMaps, posMap)
 			wg.Add(1)
@@ -315,7 +312,7 @@ func compressWithPatternCandidates(ctx context.Context, trace bool, logPrefix, s
 			return ctx.Err()
 		default:
 		}
-		if workers > 1 {
+		if cfg.Workers > 1 {
 			// take processed words in non-blocking way and push them to the queue
 		outer:
 			for {
@@ -403,7 +400,7 @@ func compressWithPatternCandidates(ctx context.Context, trace bool, logPrefix, s
 		select {
 		case <-logEvery.C:
 			if lvl < log.LvlTrace {
-				logger.Log(lvl, fmt.Sprintf("[%s] Replacement preprocessing", logPrefix), "processed", fmt.Sprintf("%.2f%%", 100*float64(outCount)/float64(totalWords)), "ch", len(ch), "workers", workers)
+				logger.Log(lvl, fmt.Sprintf("[%s] Replacement preprocessing", logPrefix), "processed", fmt.Sprintf("%.2f%%", 100*float64(outCount)/float64(totalWords)), "ch", len(ch), "queue", compressionQueue.Len(), "workers", cfg.Workers)
 			}
 		default:
 		}
@@ -462,7 +459,7 @@ func compressWithPatternCandidates(ctx context.Context, trace bool, logPrefix, s
 	}
 	//fmt.Printf("posMap = %v\n", posMap)
 	var patternList PatternList
-	distribution := make([]int, maxPatternLen+1)
+	distribution := make([]int, cfg.MaxPatternLen+1)
 	for _, p := range code2pattern {
 		if p.uses > 0 {
 			patternList = append(patternList, p)
@@ -744,7 +741,8 @@ func compressWithPatternCandidates(ctx context.Context, trace bool, logPrefix, s
 // into the collector, using lock to mutual exclusion. At the end (when the input channel is closed),
 // it notifies the waitgroup before exiting, so that the caller known when all work is done
 // No error channels for now
-func extractPatternsInSuperstrings(ctx context.Context, superstringCh chan []byte, dictCollector *etl.Collector, minPatternScore uint64, completion *sync.WaitGroup, logger log.Logger) {
+func extractPatternsInSuperstrings(ctx context.Context, superstringCh chan []byte, dictCollector *etl.Collector, cfg Cfg, completion *sync.WaitGroup, logger log.Logger) {
+	minPatternScore, minPatternLen, maxPatternLen := cfg.MinPatternScore, cfg.MinPatternLen, cfg.MaxPatternLen
 	defer completion.Done()
 	dictVal := make([]byte, 8)
 	dictKey := make([]byte, maxPatternLen)
@@ -915,9 +913,11 @@ func extractPatternsInSuperstrings(ctx context.Context, superstringCh chan []byt
 	}
 }
 
-func DictionaryBuilderFromCollectors(ctx context.Context, logPrefix, tmpDir string, collectors []*etl.Collector, lvl log.Lvl, logger log.Logger) (*DictionaryBuilder, error) {
-	dictCollector := etl.NewCollector(logPrefix+"_collectDict", tmpDir, etl.NewSortableBuffer(etl.BufferOptimalSize), logger)
+func DictionaryBuilderFromCollectors(ctx context.Context, cfg Cfg, logPrefix, tmpDir string, collectors []*etl.Collector, lvl log.Lvl, logger log.Logger) (*DictionaryBuilder, error) {
+	t := time.Now()
+	dictCollector := etl.NewCollector(logPrefix+"_collectDict", tmpDir, etl.NewSortableBuffer(etl.BufferOptimalSize/4), logger)
 	defer dictCollector.Close()
+	dictCollector.SortAndFlushInBackground(true)
 	dictCollector.LogLvl(lvl)
 
 	dictAggregator := &DictAggregator{collector: dictCollector, dist: map[int]int{}}
@@ -930,13 +930,19 @@ func DictionaryBuilderFromCollectors(ctx context.Context, logPrefix, tmpDir stri
 	if err := dictAggregator.finish(); err != nil {
 		return nil, err
 	}
-	db := &DictionaryBuilder{limit: maxDictPatterns} // Only collect 1m words with highest scores
+	// We need `maxDictPatterns` words with highest score - but input is not sorted by score (it's sorted by `word`)
+	// so, then let's just put to heap more items and then shrink at `finish()`
+	db := &DictionaryBuilder{softLimit: cfg.DictReducerSoftLimit}
 	if err := dictCollector.Load(nil, "", db.loadFunc, etl.TransformArgs{Quit: ctx.Done()}); err != nil {
 		return nil, err
 	}
-	db.finish()
+	db.finish(cfg.MaxDictPatterns)
 
 	db.Sort()
+	if lvl < log.LvlTrace {
+		logger.Log(lvl, fmt.Sprintf("[%s] BuildDict", logPrefix), "took", time.Since(t), "rev_total", dictAggregator.receivedWords, "recv_distribution", dictAggregator.dist, "hard_limit", cfg.MaxDictPatterns, "soft_limit", cfg.DictReducerSoftLimit)
+	}
+
 	return db, nil
 }
 

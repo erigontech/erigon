@@ -45,10 +45,11 @@ var (
 	mergeTr = EnvInt("MERGE_THRESHOLD", -1)
 
 	//state v3
-	noPrune           = EnvBool("NO_PRUNE", false)
-	noMerge           = EnvBool("NO_MERGE", false)
-	discardHistory    = EnvBool("DISCARD_HISTORY", false)
-	discardCommitment = EnvBool("DISCARD_COMMITMENT", false)
+	noPrune              = EnvBool("NO_PRUNE", false)
+	noMerge              = EnvBool("NO_MERGE", false)
+	discardHistory       = EnvBool("DISCARD_HISTORY", false)
+	discardCommitment    = EnvBool("DISCARD_COMMITMENT", false)
+	pruneTotalDifficulty = EnvBool("PRUNE_TOTAL_DIFFICULTY", false)
 
 	// force skipping of any non-Erigon2 .torrent files
 	DownloaderOnlyBlocks = EnvBool("DOWNLOADER_ONLY_BLOCKS", false)
@@ -65,7 +66,7 @@ var (
 
 	SnapshotMadvRnd       = EnvBool("SNAPSHOT_MADV_RND", true)
 	KvMadvNormalNoLastLvl = EnvString("KV_MADV_NORMAL_NO_LAST_LVL", "") //TODO: move this logic - from hacks to app-level
-	KvMadvNormal          = EnvString("KV_MADV_NORMAL", "accounts,storage,code,commitment")
+	KvMadvNormal          = EnvString("KV_MADV_NORMAL", "")
 	OnlyCreateDB          = EnvBool("ONLY_CREATE_DB", false)
 
 	CommitEachStage = EnvBool("COMMIT_EACH_STAGE", false)
@@ -82,10 +83,11 @@ func NoSync() bool        { return noSync }
 func MdbxReadAhead() bool { return mdbxReadahead }
 func MdbxLockInRam() bool { return mdbxLockInRam }
 
-func DiscardHistory() bool    { return discardHistory }
-func DiscardCommitment() bool { return discardCommitment }
-func NoPrune() bool           { return noPrune }
-func NoMerge() bool           { return noMerge }
+func DiscardHistory() bool       { return discardHistory }
+func DiscardCommitment() bool    { return discardCommitment }
+func NoPrune() bool              { return noPrune }
+func NoMerge() bool              { return noMerge }
+func PruneTotalDifficulty() bool { return pruneTotalDifficulty }
 
 var (
 	dirtySace     uint64

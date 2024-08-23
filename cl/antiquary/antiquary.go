@@ -150,12 +150,13 @@ func (a *Antiquary) Loop() error {
 	if err != nil {
 		return err
 	}
+
 	logInterval := time.NewTicker(30 * time.Second)
 	if err := a.sn.ReopenFolder(); err != nil {
 		return err
 	}
 	defer logInterval.Stop()
-	if from != a.sn.BlocksAvailable() {
+	if from != a.sn.BlocksAvailable() && a.sn.BlocksAvailable() != 0 {
 		log.Info("[Antiquary] Stopping Caplin to process historical indicies", "from", from, "to", a.sn.BlocksAvailable())
 	}
 
@@ -212,11 +213,10 @@ func (a *Antiquary) Loop() error {
 	if a.blobs {
 		go a.loopBlobs(a.ctx)
 	}
-
-	// write the indicies
 	if err := beacon_indicies.WriteLastBeaconSnapshot(tx, frozenSlots); err != nil {
 		return err
 	}
+
 	log.Info("[Antiquary] Restarting Caplin")
 	if err := tx.Commit(); err != nil {
 		return err
@@ -255,11 +255,13 @@ func (a *Antiquary) Loop() error {
 			if from >= to {
 				continue
 			}
+			from = (from / snaptype.Erigon2MergeLimit) * snaptype.Erigon2MergeLimit
 			to = min(to, to-safetyMargin) // We don't want to retire snapshots that are too close to the finalized head
 			to = (to / snaptype.Erigon2MergeLimit) * snaptype.Erigon2MergeLimit
 			if to-from < snaptype.Erigon2MergeLimit {
 				continue
 			}
+
 			if err := a.antiquate(from, to); err != nil {
 				return err
 			}
@@ -288,6 +290,9 @@ func (a *Antiquary) antiquate(from, to uint64) error {
 	if err := freezeblocks.DumpBeaconBlocks(a.ctx, a.mainDB, from, to, a.sn.Salt, a.dirs, 1, log.LvlDebug, a.logger); err != nil {
 		return err
 	}
+	if err := a.sn.ReopenFolder(); err != nil {
+		return err
+	}
 	tx, err := a.mainDB.BeginRw(a.ctx)
 	if err != nil {
 		return err
@@ -303,7 +308,6 @@ func (a *Antiquary) antiquate(from, to uint64) error {
 	if err := tx.Commit(); err != nil {
 		return err
 	}
-
 	if err := a.sn.ReopenFolder(); err != nil {
 		return err
 	}

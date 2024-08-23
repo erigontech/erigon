@@ -79,6 +79,8 @@ const (
 	inmemorySignatures      = 4096 // Number of recent block signatures to keep in memory
 )
 
+var enableBoreventsRemoteFallback = dbg.EnvBool("BOREVENTS_REMOTE_FALLBACK", false)
+
 // Bor protocol constants.
 var (
 	defaultSprintLength = map[string]uint64{
@@ -249,6 +251,35 @@ func MinNextBlockTime(parent *types.Header, succession int, config *borcfg.BorCo
 // ValidateHeaderTimeSignerSuccessionNumber - valset.ValidatorSet abstraction for unit tests
 type ValidateHeaderTimeSignerSuccessionNumber interface {
 	GetSignerSuccessionNumber(signer libcommon.Address, number uint64) (int, error)
+}
+
+func CalculateEventWindow(ctx context.Context, config *borcfg.BorConfig, header *types.Header, tx kv.Getter, headerReader services.HeaderReader) (from time.Time, to time.Time, err error) {
+
+	blockNum := header.Number.Uint64()
+	blockNum += blockNum % config.CalculateSprintLength(blockNum)
+
+	prevHeader, err := headerReader.HeaderByNumber(ctx, tx, blockNum-config.CalculateSprintLength(blockNum))
+
+	if err != nil {
+		return time.Time{}, time.Time{}, fmt.Errorf("window calculation failed: %w", err)
+	}
+
+	if config.IsIndore(blockNum) {
+		stateSyncDelay := config.CalculateStateSyncDelay(blockNum)
+		to = time.Unix(int64(header.Time-stateSyncDelay), 0)
+		from = time.Unix(int64(prevHeader.Time-stateSyncDelay), 0)
+	} else {
+		to = time.Unix(int64(prevHeader.Time), 0)
+		prevHeader, err := headerReader.HeaderByNumber(ctx, tx, prevHeader.Number.Uint64()-config.CalculateSprintLength(prevHeader.Number.Uint64()))
+
+		if err != nil {
+			return time.Time{}, time.Time{}, fmt.Errorf("window calculation failed: %w", err)
+		}
+
+		from = time.Unix(int64(prevHeader.Time), 0)
+	}
+
+	return from, to, nil
 }
 
 type spanReader interface {
@@ -1510,9 +1541,8 @@ func (c *Bor) CommitStates(
 	}
 
 	events := chain.Chain.BorEventsByBlock(header.Hash(), blockNum)
-
-	//if len(events) == 50 || len(events) == 0 { // we still sometime could get 0 events from borevent file
-	if blockNum <= chain.Chain.FrozenBorBlocks() && len(events) == 50 { // we still sometime could get 0 events from borevent file
+	if enableBoreventsRemoteFallback && blockNum <= chain.Chain.FrozenBorBlocks() && len(events) == 50 {
+		// we still sometime could get 0 events from borevent file
 		var to time.Time
 		if c.config.IsIndore(blockNum) {
 			stateSyncDelay := c.config.CalculateStateSyncDelay(blockNum)
