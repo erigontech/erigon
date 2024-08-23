@@ -66,7 +66,6 @@ type Bridge struct {
 	// internal state
 	ready                    atomic.Bool
 	lastProcessedBlockNumber atomic.Uint64
-	lastProcessedEventID     atomic.Uint64
 }
 
 func (b *Bridge) Run(ctx context.Context) error {
@@ -81,13 +80,6 @@ func (b *Bridge) Run(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-
-	lastProcessedEventID, err := b.store.LastProcessedEventID(ctx)
-	if err != nil {
-		return err
-	}
-
-	b.lastProcessedEventID.Store(lastProcessedEventID)
 
 	// start syncing
 	b.logger.Debug(bridgeLogPrefix("Bridge is running"), "lastEventID", lastEventID)
@@ -159,19 +151,22 @@ func (b *Bridge) ProcessNewBlocks(ctx context.Context, blocks []*types.Block) er
 
 		prevSprintTime = time.Unix(int64(block.Time()), 0)
 
-		lastID, err := b.store.LastEventIDWithinWindow(ctx, b.lastProcessedEventID.Load(), timeLimit)
+		lastProcessedEventID, err := b.store.LastProcessedEventID(ctx)
 		if err != nil {
 			return err
 		}
 
-		if lastID > b.lastProcessedEventID.Load() {
-			b.logger.Debug(bridgeLogPrefix(fmt.Sprintf("Creating map for block %d, start ID %d, end ID %d", blockNum, b.lastProcessedEventID.Load(), lastID)))
+		lastID, err := b.store.LastEventIDWithinWindow(ctx, lastProcessedEventID, timeLimit)
+		if err != nil {
+			return err
+		}
+
+		if lastID > 0 {
+			b.logger.Debug(bridgeLogPrefix(fmt.Sprintf("Creating map for block %d, end ID %d", blockNum, lastID)))
 
 			k := bortypes.ComputeBorTxHash(blockNum, block.Hash())
-			eventMap[blockNum] = b.lastProcessedEventID.Load()
+			eventMap[blockNum] = lastID
 			txMap[k] = blockNum
-
-			b.lastProcessedEventID.Store(lastID)
 		}
 
 		b.lastProcessedBlockNumber.Store(blockNum)
@@ -220,10 +215,6 @@ func (b *Bridge) Events(ctx context.Context, blockNum uint64) ([]*types.Message,
 		}
 
 		return nil, err
-	}
-
-	if end == 0 { // exception for tip processing
-		end = b.lastProcessedEventID.Load()
 	}
 
 	eventsRaw := make([]*types.Message, 0, end-start+1)
