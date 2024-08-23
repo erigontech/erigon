@@ -20,6 +20,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -66,13 +67,13 @@ type Bridge struct {
 	eventFetcher                 eventFetcher
 	stateReceiverContractAddress libcommon.Address
 	// internal state
-	reachedTip             atomic.Bool
-	fetchedEventsSignal    chan struct{}
-	lastFetchedEventTime   atomic.Uint64
-	processedBlocksSignal  chan struct{}
-	lastProcessedBlockNum  atomic.Uint64
-	lastProcessedBlockTime atomic.Uint64
-	lastProcessedEventID   atomic.Uint64
+	reachedTip            atomic.Bool
+	fetchedEventsSignal   chan struct{}
+	lastFetchedEventTime  atomic.Uint64
+	processedBlocksSignal chan struct{}
+	lastProcessedBlock    atomic.Pointer[ProcessedBlockInfo]
+	lastProcessedEventID  atomic.Uint64
+	synchronizeMu         sync.Mutex
 }
 
 func (b *Bridge) Run(ctx context.Context) error {
@@ -96,20 +97,23 @@ func (b *Bridge) Run(ctx context.Context) error {
 		return err
 	}
 
-	lastProcessedBlockNum, err := b.store.LastProcessedBlockNum(ctx)
+	b.lastProcessedEventID.Store(lastProcessedEventID)
+
+	lastProcessedBlockInfo, ok, err := b.store.LastProcessedBlockInfo(ctx)
 	if err != nil {
 		return err
 	}
-
-	b.lastProcessedEventID.Store(lastProcessedEventID)
-	b.lastProcessedBlockNum.Store(lastProcessedBlockNum)
+	if ok {
+		b.lastProcessedBlock.Store(&lastProcessedBlockInfo)
+	}
 
 	// start syncing
 	b.logger.Debug(
 		bridgeLogPrefix("running bridge component"),
 		"lastFetchedEventID", lastFetchedEventID,
 		"lastProcessedEventID", lastProcessedEventID,
-		"lastProcessedBlockNum", lastProcessedBlockNum,
+		"lastProcessedBlockNum", lastProcessedBlockInfo.BlockNum,
+		"lastProcessedBlockTime", lastProcessedBlockInfo.BlockTime,
 	)
 
 	logTicker := time.NewTicker(30 * time.Second)
@@ -176,25 +180,31 @@ func (b *Bridge) Close() {
 }
 
 func (b *Bridge) InitialBlockReplayNeeded(ctx context.Context) (uint64, bool, error) {
-	if b.lastProcessedBlockTime.Load() > 0 {
+	if b.lastProcessedBlock.Load() != nil {
 		return 0, false, nil
 	}
 
-	lastProcessedBlockNum, err := b.store.LastProcessedBlockNum(ctx)
+	_, ok, err := b.store.LastProcessedBlockInfo(ctx)
 	if err != nil {
 		return 0, false, err
 	}
-
-	if b.borConfig.IsIndore(lastProcessedBlockNum) {
-		// we do not need to keep track of lastProcessedBlockTime if we are past indore
+	if ok {
+		// we have all info, no need to replay
 		return 0, false, nil
 	}
 
-	return lastProcessedBlockNum, true, nil
+	// replay the last block we have in event snapshots
+	return b.store.LastFrozenEventBlockNum(), true, nil
 }
 
-func (b *Bridge) ReplayInitialBlock(block *types.Block) {
-	b.lastProcessedBlockTime.Store(block.Time())
+func (b *Bridge) ReplayInitialBlock(ctx context.Context, block *types.Block) error {
+	info := ProcessedBlockInfo{
+		BlockNum:  block.NumberU64(),
+		BlockTime: block.Time(),
+	}
+
+	b.lastProcessedBlock.Store(&info)
+	return b.store.PutProcessedBlockInfo(ctx, info)
 }
 
 // ProcessNewBlocks iterates through all blocks and constructs a map from block number to sync events
@@ -209,6 +219,7 @@ func (b *Bridge) ProcessNewBlocks(ctx context.Context, blocks []*types.Block) er
 		"to", blocks[len(blocks)-1].NumberU64(),
 	)
 
+	var processedBlock bool
 	blockNumToEventId := make(map[uint64]uint64)
 	eventTxnToBlockNum := make(map[libcommon.Hash]uint64)
 	for _, block := range blocks {
@@ -217,6 +228,11 @@ func (b *Bridge) ProcessNewBlocks(ctx context.Context, blocks []*types.Block) er
 		if !b.isSprintStart(blockNum) {
 			continue
 		}
+
+		//
+		// TODO add validation for gaps
+		// TODO add validation for older blocks
+		//
 
 		blockTime := block.Time()
 		toTime, err := b.blockEventsTimeWindowEnd(blockNum, blockTime)
@@ -244,12 +260,24 @@ func (b *Bridge) ProcessNewBlocks(ctx context.Context, blocks []*types.Block) er
 
 			eventTxnHash := bortypes.ComputeBorTxHash(blockNum, block.Hash())
 			eventTxnToBlockNum[eventTxnHash] = blockNum
-			blockNumToEventId[blockNum] = startID
+			blockNumToEventId[blockNum] = endID
 			b.lastProcessedEventID.Store(endID)
 		}
 
-		b.lastProcessedBlockNum.Store(blockNum)
-		b.lastProcessedBlockTime.Store(blockTime)
+		// need to update it for blockEventsTimeWindowEnd
+		b.lastProcessedBlock.Store(&ProcessedBlockInfo{
+			BlockNum:  blockNum,
+			BlockTime: blockTime,
+		})
+		processedBlock = true
+	}
+
+	if !processedBlock {
+		return nil
+	}
+
+	if err := b.store.PutProcessedBlockInfo(ctx, *b.lastProcessedBlock.Load()); err != nil {
+		return err
 	}
 
 	if err := b.store.PutBlockNumToEventID(ctx, blockNumToEventId); err != nil {
@@ -266,10 +294,15 @@ func (b *Bridge) ProcessNewBlocks(ctx context.Context, blocks []*types.Block) er
 
 // Synchronize blocks until events up to a given block are processed.
 func (b *Bridge) Synchronize(ctx context.Context, blockNum uint64) error {
+	// make Synchronize safe if unintentionally called by more than 1 goroutine at a time by using a lock
+	// waitForProcessedBlock relies on signal channel which is safe if 1 goroutine waits on it at a time
+	b.synchronizeMu.Lock()
+	defer b.synchronizeMu.Unlock()
+
 	b.logger.Debug(
 		bridgeLogPrefix("synchronizing events..."),
 		"blockNum", blockNum,
-		"lastProcessedBlockNum", b.lastProcessedBlockNum.Load(),
+		"lastProcessedBlockNum", b.lastProcessedBlock.Load().BlockNum,
 	)
 
 	return b.waitForProcessedBlock(ctx, blockNum)
@@ -277,6 +310,7 @@ func (b *Bridge) Synchronize(ctx context.Context, blockNum uint64) error {
 
 // Unwind deletes map entries till tip
 func (b *Bridge) Unwind(ctx context.Context, blockNum uint64) error {
+	// TODO need to handle unwinds via astrid - will do in separate PR
 	return b.store.PruneEventIDs(ctx, blockNum)
 }
 
@@ -340,7 +374,8 @@ func (b *Bridge) blockEventsTimeWindowEnd(blockNum uint64, blockTime uint64) (ui
 		wantLastBlock = blockNum - sprintLen
 	}
 
-	lastProcessedBlockNum := b.lastProcessedBlockNum.Load()
+	lastProcessedBlock := b.lastProcessedBlock.Load()
+	lastProcessedBlockNum := lastProcessedBlock.BlockNum
 	if lastProcessedBlockNum != wantLastBlock {
 		return 0, fmt.Errorf(
 			"%w: for=%d, want=%d, have=%d", errors.New("unexpected code path - incorrect lastProcessedBlockNum"),
@@ -350,7 +385,7 @@ func (b *Bridge) blockEventsTimeWindowEnd(blockNum uint64, blockTime uint64) (ui
 		)
 	}
 
-	lastProcessedBlockTime := b.lastProcessedBlockTime.Load()
+	lastProcessedBlockTime := lastProcessedBlock.BlockTime
 	if lastProcessedBlockTime == 0 {
 		return 0, errors.New("unexpected code path - unknown last processed block time")
 	}
@@ -400,7 +435,7 @@ func (b *Bridge) waitForProcessedBlock(ctx context.Context, blockNum uint64) err
 	sprintLen := b.borConfig.CalculateSprintLength(blockNum)
 	blockNum -= blockNum % sprintLen // we only process events at sprint start
 	shouldLog := true
-	lastProcessedBlockNum := b.lastProcessedBlockNum.Load()
+	lastProcessedBlockNum := b.lastProcessedBlock.Load().BlockNum
 	for blockNum > lastProcessedBlockNum {
 		if shouldLog {
 			b.logger.Debug(
@@ -414,7 +449,7 @@ func (b *Bridge) waitForProcessedBlock(ctx context.Context, blockNum uint64) err
 			return err
 		}
 
-		lastProcessedBlockNum = b.lastProcessedBlockNum.Load()
+		lastProcessedBlockNum = b.lastProcessedBlock.Load().BlockNum
 
 		select {
 		case <-logTicker.C:

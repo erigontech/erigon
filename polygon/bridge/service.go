@@ -26,7 +26,7 @@ import (
 type PolygonBridge interface {
 	PolygonBridgeReader
 	InitialBlockReplayNeeded(ctx context.Context) (uint64, bool, error)
-	ReplayInitialBlock(header *types.Block)
+	ReplayInitialBlock(ctx context.Context, block *types.Block) error
 	ProcessNewBlocks(ctx context.Context, blocks []*types.Block) error
 	Synchronize(ctx context.Context, blockNum uint64) error
 	Unwind(ctx context.Context, blockNum uint64) error

@@ -250,6 +250,10 @@ func TestBridge_Unwind(t *testing.T) {
 	wg.Wait()
 }
 
+//
+// TODO fix tests and add pre-indore test case analog for TestBridge
+//
+
 func TestBridge_InitialBlockReplayNeeded_BeforeIndore(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)
@@ -265,7 +269,9 @@ func TestBridge_InitialBlockReplayNeeded_BeforeIndore(t *testing.T) {
 	require.True(t, replayNeeded)
 	require.Equal(t, uint64(0), replayBlockNum)
 
-	genesis := types.NewBlock(&types.Header{Time: 1}, nil, nil, nil, nil, nil)
-	b.ReplayInitialBlock(genesis)
-	require.Equal(t, uint64(1), b.lastProcessedBlockTime.Load())
+	genesis := types.NewBlock(&types.Header{Time: 1, Number: big.NewInt(12)}, nil, nil, nil, nil, nil)
+	err = b.ReplayInitialBlock(ctx, genesis)
+	require.NoError(t, err)
+	require.Equal(t, uint64(12), b.lastProcessedBlock.Load().BlockNum)
+	require.Equal(t, uint64(1), b.lastProcessedBlock.Load().BlockTime)
 }

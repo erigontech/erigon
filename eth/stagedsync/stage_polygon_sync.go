@@ -317,6 +317,18 @@ func UnwindEvents(tx kv.RwTx, unwindPoint uint64) error {
 			return err
 		}
 	}
+
+	epbCursor, err := tx.RwCursor(kv.BorEventProcessedBlocks)
+	if err != nil {
+		return err
+	}
+
+	defer epbCursor.Close()
+	for k, _, err = epbCursor.Seek(blockNumBuf[:]); err == nil && k != nil; k, _, err = epbCursor.Next() {
+		if err = epbCursor.DeleteCurrent(); err != nil {
+			return err
+		}
+	}
 	return err
 }
 
@@ -1121,28 +1133,43 @@ func (s polygonSyncStageBridgeStore) LastProcessedEventID(ctx context.Context) (
 	return r.id, nil
 }
 
-func (s polygonSyncStageBridgeStore) LastProcessedBlockNum(ctx context.Context) (uint64, error) {
+func (s polygonSyncStageBridgeStore) LastProcessedBlockInfo(ctx context.Context) (bridge.ProcessedBlockInfo, bool, error) {
 	type response struct {
-		blockNum uint64
-		err      error
+		info bridge.ProcessedBlockInfo
+		ok   bool
+		err  error
 	}
 
 	r, err := awaitTxAction(ctx, s.txActionStream, func(tx kv.RwTx, responseStream chan<- response) error {
-		blockNum, err := bridge.LastProcessedBlockNum(tx)
-		responseStream <- response{blockNum: blockNum, err: err}
+		info, ok, err := bridge.LastProcessedBlockInfo(tx)
+		responseStream <- response{info: info, ok: ok, err: err}
 		return nil
 	})
 	if err != nil {
-		return 0, err
-	}
-	if r.err != nil {
-		return 0, r.err
-	}
-	if r.blockNum == 0 {
-		return s.eventReader.LastFrozenEventBlockNum(), nil
+		return bridge.ProcessedBlockInfo{}, false, err
 	}
 
-	return r.blockNum, r.err
+	return r.info, r.ok, r.err
+}
+
+func (s polygonSyncStageBridgeStore) PutProcessedBlockInfo(ctx context.Context, info bridge.ProcessedBlockInfo) error {
+	type response struct {
+		err error
+	}
+
+	r, err := awaitTxAction(ctx, s.txActionStream, func(tx kv.RwTx, responseStream chan<- response) error {
+		responseStream <- response{err: bridge.PutProcessedBlockInfo(tx, info)}
+		return nil
+	})
+	if err != nil {
+		return err
+	}
+
+	return r.err
+}
+
+func (s polygonSyncStageBridgeStore) LastFrozenEventBlockNum() uint64 {
+	return s.eventReader.LastFrozenEventBlockNum()
 }
 
 func (s polygonSyncStageBridgeStore) LastEventIDWithinWindow(ctx context.Context, fromID uint64, toTime time.Time) (uint64, error) {
