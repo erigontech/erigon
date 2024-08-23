@@ -2,6 +2,7 @@ package sentry_test
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"net"
@@ -13,6 +14,7 @@ import (
 	"github.com/erigontech/erigon-lib/gointerfaces/typesproto"
 	"github.com/erigontech/erigon-lib/p2p/sentry"
 	"github.com/erigontech/erigon/crypto"
+	"github.com/erigontech/erigon/p2p"
 	"github.com/erigontech/erigon/p2p/enode"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/mock/gomock"
@@ -20,10 +22,23 @@ import (
 	"google.golang.org/protobuf/types/known/emptypb"
 )
 
-func newClient(ctrl *gomock.Controller, i int) *direct.MockSentryClient {
+func newClient(ctrl *gomock.Controller, i int, protocols []p2p.Protocol) *direct.MockSentryClient {
 	client := direct.NewMockSentryClient(ctrl)
 	pk, _ := crypto.GenerateKey()
 	node := enode.NewV4(&pk.PublicKey, net.IPv4(127, 0, 0, byte(i)), 30001, 30001)
+
+	protocolMap := map[string]interface{}{}
+	for _, proto := range protocols {
+		protocolMap[proto.Name] = struct {
+			Name    string `json:"name"`
+			Version uint   `json:"version"`
+		}{
+			Name:    proto.Name,
+			Version: proto.Version,
+		}
+	}
+	marshaledProtocols, _ := json.Marshal(protocolMap)
+
 	client.EXPECT().NodeInfo(gomock.Any(), gomock.Any(), gomock.Any()).Return(&typesproto.NodeInfoReply{
 		Id:    node.ID().String(),
 		Name:  fmt.Sprintf("client-%d", i),
@@ -34,6 +49,7 @@ func newClient(ctrl *gomock.Controller, i int) *direct.MockSentryClient {
 			Listener:  uint32(30001),
 		},
 		ListenerAddr: fmt.Sprintf("127.0.0.%d", i),
+		Protocols:    marshaledProtocols,
 	}, nil).AnyTimes()
 
 	return client
@@ -46,7 +62,7 @@ func TestCreateMultiplexer(t *testing.T) {
 	var clients []sentryproto.SentryClient
 
 	for i := 0; i < 10; i++ {
-		clients = append(clients, newClient(ctrl, i))
+		clients = append(clients, newClient(ctrl, i, nil))
 	}
 
 	mux := sentry.NewSentryMultiplexer(clients)
@@ -75,7 +91,7 @@ func TestStatus(t *testing.T) {
 	var mu sync.Mutex
 
 	for i := 0; i < 10; i++ {
-		client := newClient(ctrl, i)
+		client := newClient(ctrl, i, nil)
 		client.EXPECT().SetStatus(gomock.Any(), gomock.Any(), gomock.Any()).DoAndReturn(
 			func(ctx context.Context, sd *sentryproto.StatusData, co ...grpc.CallOption) (*sentryproto.SetStatusReply, error) {
 				mu.Lock()
@@ -134,7 +150,7 @@ func TestSend(t *testing.T) {
 	var mu sync.Mutex
 
 	for i := 0; i < 10; i++ {
-		client := newClient(ctrl, i)
+		client := newClient(ctrl, i, nil)
 		client.EXPECT().SendMessageByMinBlock(gomock.Any(), gomock.Any(), gomock.Any()).DoAndReturn(
 			func(ctx context.Context, in *sentryproto.SendMessageByMinBlockRequest, opts ...grpc.CallOption) (*sentryproto.SentPeers, error) {
 				mu.Lock()
@@ -204,7 +220,7 @@ func TestMessages(t *testing.T) {
 	var clients []sentryproto.SentryClient
 
 	for i := 0; i < 10; i++ {
-		client := newClient(ctrl, i)
+		client := newClient(ctrl, i, nil)
 		client.EXPECT().Messages(gomock.Any(), gomock.Any(), gomock.Any()).DoAndReturn(
 			func(ctx context.Context, in *sentryproto.MessagesRequest, opts ...grpc.CallOption) (sentryproto.Sentry_MessagesClient, error) {
 				ch := make(chan sentry.StreamReply[*sentryproto.InboundMessage], 16384)
@@ -258,7 +274,7 @@ func TestPeers(t *testing.T) {
 	var mu sync.Mutex
 
 	for i := 0; i < 10; i++ {
-		client := newClient(ctrl, i)
+		client := newClient(ctrl, i, nil)
 		client.EXPECT().AddPeer(gomock.Any(), gomock.Any(), gomock.Any()).DoAndReturn(
 			func(ctx context.Context, in *sentryproto.AddPeerRequest, opts ...grpc.CallOption) (*sentryproto.AddPeerReply, error) {
 				mu.Lock()

@@ -2,6 +2,7 @@ package sentry
 
 import (
 	"context"
+	"encoding/json"
 	"strconv"
 	"strings"
 
@@ -29,25 +30,53 @@ func Protocols(sentry sentryproto.SentryClient, peer types.PeerID) []byte {
 		}
 	} else {
 		switch sentry := sentry.(type) {
-		case interface{ Protocol() byte }:
+		case interface{ Protocol() uint }:
 			return []byte{byte(sentry.Protocol())}
 		case *sentryMultiplexer:
 			if infos, err := sentry.NodeInfos(context.Background()); err == nil {
 				var protocols []byte
 				var seen map[byte]struct{} = map[byte]struct{}{}
 				for _, info := range infos {
-					for _, p := range info.Protocols {
-						if _, ok := seen[p]; !ok {
-							protocols = append(protocols, p)
-							seen[p] = struct{}{}
+					var rawProtocols map[string]json.RawMessage
+					json.Unmarshal(info.Protocols, &rawProtocols)
+
+					if rawJson, ok := rawProtocols["eth"]; ok {
+						protocol := struct {
+							Name    string `json:"name"`
+							Version uint   `json:"version"`
+						}{}
+
+						json.Unmarshal(rawJson, &protocol)
+
+						if protocol.Version > 0 {
+							p := byte(protocol.Version)
+							if _, ok := seen[p]; !ok {
+								protocols = append(protocols, p)
+								seen[p] = struct{}{}
+							}
 						}
 					}
+
 				}
 				return protocols
 			}
 		default:
 			if info, err := sentry.NodeInfo(context.Background(), &emptypb.Empty{}); err == nil {
-				return info.Protocols
+				var protocols map[string]json.RawMessage
+				json.Unmarshal(info.Protocols, &protocols)
+
+				if rawJson, ok := protocols["eth"]; ok {
+					protocol := struct {
+						Name    string `json:"name"`
+						Version uint   `json:"version"`
+					}{}
+
+					json.Unmarshal(rawJson, &protocol)
+
+					if protocol.Version > 0 {
+						return []byte{byte(protocol.Version)}
+					}
+				}
 			}
 		}
 	}
