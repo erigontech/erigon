@@ -30,6 +30,7 @@ import (
 	"github.com/erigontech/erigon-lib/kv/order"
 	"github.com/erigontech/erigon-lib/kv/rawdbv3"
 	"github.com/erigontech/erigon/turbo/services"
+	"github.com/erigontech/erigon/turbo/snapshotsync/freezeblocks"
 
 	"github.com/erigontech/erigon/core/rawdb"
 	"github.com/erigontech/erigon/core/types"
@@ -222,6 +223,7 @@ func (api *ErigonImpl) GetBalanceChangesInBlock(ctx context.Context, blockNrOrHa
 	}
 	defer tx.Rollback()
 
+	txNumsReader := rawdbv3.TxNums.WithCustomReadTxNumFunc(freezeblocks.ReadTxNumFuncFromBlockReader(ctx, api._blockReader))
 	balancesMapping := make(map[common.Address]*hexutil.Big)
 	latestState, err := rpchelper.CreateStateReader(ctx, tx, api._blockReader, blockNrOrHash, 0, api.filters, api.stateCache, "")
 	if err != nil {
@@ -233,7 +235,7 @@ func (api *ErigonImpl) GetBalanceChangesInBlock(ctx context.Context, blockNrOrHa
 		return nil, err
 	}
 
-	minTxNum, _ := rawdbv3.TxNums.Min(tx, blockNumber)
+	minTxNum, _ := txNumsReader.Min(tx, blockNumber)
 	it, err := tx.(kv.TemporalTx).HistoryRange(kv.AccountsHistory, int(minTxNum), -1, order.Asc, -1)
 	if err != nil {
 		return nil, err

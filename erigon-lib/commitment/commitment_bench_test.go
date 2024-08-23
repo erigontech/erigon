@@ -72,13 +72,13 @@ func BenchmarkBranchData_ReplacePlainKeys(b *testing.B) {
 		if c == nil {
 			continue
 		}
-		if c.accountPlainKeyLen > 0 {
-			offt, _ := binary.Uvarint(c.accountPlainKey[:c.accountPlainKeyLen])
-			b.Logf("%d apk %x, offt %d\n", i, c.accountPlainKey[:c.accountPlainKeyLen], offt)
+		if c.accountAddrLen > 0 {
+			offt, _ := binary.Uvarint(c.accountAddr[:c.accountAddrLen])
+			b.Logf("%d apk %x, offt %d\n", i, c.accountAddr[:c.accountAddrLen], offt)
 		}
-		if c.storagePlainKeyLen > 0 {
-			offt, _ := binary.Uvarint(c.storagePlainKey[:c.storagePlainKeyLen])
-			b.Logf("%d spk %x offt %d\n", i, c.storagePlainKey[:c.storagePlainKeyLen], offt)
+		if c.storageAddrLen > 0 {
+			offt, _ := binary.Uvarint(c.storageAddr[:c.storageAddrLen])
+			b.Logf("%d spk %x offt %d\n", i, c.storageAddr[:c.storageAddrLen], offt)
 		}
 
 	}
