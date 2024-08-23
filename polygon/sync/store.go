@@ -173,5 +173,5 @@ func (s *executionClientStore) bridgeReplayInitialBlockIfNeeded(ctx context.Cont
 		"blockNum", initialHeader.Number.Uint64(),
 	)
 
-	return s.bridgeStore.ReplayInitialBlock(ctx, types.NewBlock(initialHeader, nil, nil, nil, nil, nil))
+	return s.bridgeStore.ReplayInitialBlock(ctx, types.NewBlockWithHeader(initialHeader))
 }

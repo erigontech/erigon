@@ -338,6 +338,10 @@ func (b *Bridge) blockEventsTimeWindowEnd(blockNum uint64, blockTime uint64) (ui
 	}
 
 	lastProcessedBlock := b.lastProcessedBlock.Load()
+	if lastProcessedBlock == nil {
+		return 0, errors.New("lastProcessedBlock must be set")
+	}
+
 	lastProcessedBlockNum := lastProcessedBlock.BlockNum
 	if lastProcessedBlockNum != wantLastBlock {
 		return 0, fmt.Errorf(
