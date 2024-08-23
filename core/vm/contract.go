@@ -102,7 +102,10 @@ func (c *Contract) validJumpdest(dest *uint256.Int) (bool, bool) {
 	if c.skipAnalysis {
 		return true, false
 	}
-	return c.isCode(udest), true
+	/*
+	* zkEVM doesn't do dynamic jumpdest analysis. So PUSHN is not considered.
+	 */
+	return true, false
 }
 
 func isCodeFromAnalysis(analysis []uint64, udest uint64) bool {
