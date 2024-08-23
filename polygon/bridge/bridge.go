@@ -163,7 +163,7 @@ func (b *Bridge) ProcessNewBlocks(ctx context.Context, blocks []*types.Block) er
 		}
 
 		if lastID > lastProcessedEventID {
-			b.logger.Debug(bridgeLogPrefix(fmt.Sprintf("Creating map for block %d, end ID %d, lsatProcessedID %d", blockNum, lastID, lastProcessedEventID)))
+			b.logger.Debug(bridgeLogPrefix(fmt.Sprintf("Creating map for block %d, end ID %d", blockNum, lastID)))
 
 			k := bortypes.ComputeBorTxHash(blockNum, block.Hash())
 			eventMap[blockNum] = lastID
