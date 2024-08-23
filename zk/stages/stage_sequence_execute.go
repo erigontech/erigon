@@ -46,20 +46,22 @@ func SpawnSequencingStage(
 		return err
 	}
 
-	isLastBatchPariallyProcessed, err := sdb.hermezDb.GetIsBatchPartiallyProcessed(lastBatch)
-	if err != nil {
-		return err
-	}
-
 	forkId, err := prepareForkId(lastBatch, executionAt, sdb.hermezDb)
 	if err != nil {
 		return err
 	}
 
+	// stage loop should continue until we get the forkid from the L1 in a finalised block
+	if forkId == 0 {
+		log.Warn(fmt.Sprintf("[%s] ForkId is 0. Waiting for L1 to finalise a block...", logPrefix))
+		time.Sleep(10 * time.Second)
+		return nil
+	}
+
 	var block *types.Block
 	runLoopBlocks := true
 	batchContext := newBatchContext(ctx, &cfg, &historyCfg, s, sdb)
-	batchState := newBatchState(forkId, prepareBatchNumber(lastBatch, isLastBatchPariallyProcessed), !isLastBatchPariallyProcessed && cfg.zk.HasExecutors(), cfg.zk.L1SyncStartBlock > 0, cfg.txPool)
+	batchState := newBatchState(forkId, lastBatch+1, cfg.zk.HasExecutors(), cfg.zk.L1SyncStartBlock > 0, cfg.txPool)
 	blockDataSizeChecker := NewBlockDataChecker(cfg.zk.ShouldCountersBeUnlimited(batchState.isL1Recovery()))
 	streamWriter := newSequencerBatchStreamWriter(batchContext, batchState, lastBatch) // using lastBatch (rather than batchState.batchNumber) is not mistake
 
@@ -72,8 +74,22 @@ func SpawnSequencingStage(
 		if err = cfg.datastreamServer.WriteWholeBatchToStream(logPrefix, sdb.tx, sdb.hermezDb.HermezDbReader, lastBatch, injectedBatchBatchNumber); err != nil {
 			return err
 		}
+		if err = stages.SaveStageProgress(sdb.tx, stages.DataStream, 1); err != nil {
+			return err
+		}
 
 		return sdb.tx.Commit()
+	}
+
+	// handle cases where the last batch wasn't committed to the data stream.
+	// this could occur because we're migrating from an RPC node to a sequencer
+	// or because the sequencer was restarted and not all processes completed (like waiting from remote executor)
+	// we consider the data stream as verified by the executor so treat it as "safe" and unwind blocks beyond there
+	// if we identify any.  During normal operation this function will simply check and move on without performing
+	// any action.
+	isUnwinding, err := handleBatchEndChecks(batchContext, batchState, executionAt, u)
+	if err != nil || isUnwinding {
+		return err
 	}
 
 	tryHaltSequencer(batchContext, batchState.batchNumber)
@@ -82,19 +98,9 @@ func SpawnSequencingStage(
 		return err
 	}
 
-	batchCounters, err := prepareBatchCounters(batchContext, batchState, isLastBatchPariallyProcessed)
+	batchCounters, err := prepareBatchCounters(batchContext, batchState, nil)
 	if err != nil {
 		return err
-	}
-
-	if !isLastBatchPariallyProcessed {
-		// handle case where batch wasn't closed properly
-		// close it before starting a new one
-		// this occurs when sequencer was switched from syncer or sequencer datastream files were deleted
-		// and datastream was regenerated
-		if err = finalizeLastBatchInDatastreamIfNotFinalized(batchContext, batchState, executionAt); err != nil {
-			return err
-		}
 	}
 
 	if batchState.isL1Recovery() {
@@ -103,6 +109,8 @@ func SpawnSequencingStage(
 			time.Sleep(1 * time.Second)
 			return nil
 		}
+
+		log.Info(fmt.Sprintf("[%s] L1 recovery beginning for batch", logPrefix), "batch", batchState.batchNumber)
 
 		// let's check if we have any L1 data to recover
 		if err = batchState.batchL1RecoveryData.loadBatchData(sdb); err != nil {
@@ -133,7 +141,12 @@ func SpawnSequencingStage(
 		blockTicker.Reset(cfg.zk.SequencerBlockSealTime)
 
 		if batchState.isL1Recovery() {
-			didLoadedAnyDataForRecovery := batchState.loadBlockL1RecoveryData(blockNumber - (executionAt + 1))
+			blockNumbersInBatchSoFar, err := batchContext.sdb.hermezDb.GetL2BlockNosByBatch(batchState.batchNumber)
+			if err != nil {
+				return err
+			}
+
+			didLoadedAnyDataForRecovery := batchState.loadBlockL1RecoveryData(uint64(len(blockNumbersInBatchSoFar)))
 			if !didLoadedAnyDataForRecovery {
 				break
 			}

@@ -192,6 +192,12 @@ LOOP:
 				return err
 			}
 			entries = make([]DataStreamEntryProto, 0, insertEntryCount)
+			if err = srv.stream.CommitAtomicOp(); err != nil {
+				return err
+			}
+			if err = srv.stream.StartAtomicOp(); err != nil {
+				return err
+			}
 		}
 	}
 

@@ -175,8 +175,8 @@ func Test_readFileEntry(t *testing.T) {
 	for _, testCase := range testCases {
 		c := NewClient(context.Background(), "", 0, 0, 0)
 		server, conn := net.Pipe()
-		defer server.Close()
 		defer c.Stop()
+		defer server.Close()
 
 		c.conn = conn
 		t.Run(testCase.name, func(t *testing.T) {

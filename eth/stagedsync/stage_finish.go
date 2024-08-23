@@ -104,6 +104,10 @@ func UnwindFinish(u *UnwindState, tx kv.RwTx, cfg FinishCfg, ctx context.Context
 		defer tx.Rollback()
 	}
 
+	if err := unwindFinishZk(u, tx, cfg, ctx); err != nil {
+		return err
+	}
+
 	if err = u.Done(tx); err != nil {
 		return err
 	}

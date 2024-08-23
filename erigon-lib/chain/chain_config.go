@@ -172,6 +172,10 @@ func (c *Config) SetForkIdBlock(forkIdNumber ForkId, blockNum uint64) error {
 		c.ForkID88ElderberryBlock = new(big.Int).SetUint64(blockNum)
 	case ForkID9Elderberry2:
 		c.ForkID9Elderberry2Block = new(big.Int).SetUint64(blockNum)
+	case ForkID10:
+		c.ForkID10 = new(big.Int).SetUint64(blockNum)
+	case ForkID11:
+		c.ForkID11 = new(big.Int).SetUint64(blockNum)
 	case ForkID12Banana:
 		c.ForkID12BananaBlock = new(big.Int).SetUint64(blockNum)
 	default:

@@ -67,6 +67,14 @@ func getData(data []byte, start uint64, size uint64) []byte {
 // getDataBig returns a slice from the data based on the start and size and pads
 // up to size with zero's. This function is overflow safe.
 func getDataBig(data []byte, start *uint256.Int, size uint64) []byte {
+	/*
+	* zkEVM hack: we need to limit the size of the memory to 1GB
+	* for witness generation purpose we execute opcodes even if they are out of gas.
+	* that could lead to a huge memory allocation (in the reported case 400GB)
+	 */
+	if size >= 1*1024*1024*1024 {
+		size = 1 * 1024 * 1024 * 1024
+	}
 	start64, overflow := start.Uint64WithOverflow()
 	if overflow {
 		start64 = ^uint64(0)

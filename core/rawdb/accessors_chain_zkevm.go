@@ -10,6 +10,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/dbutils"
 	"github.com/ledgerwatch/erigon/core/types"
+	ethTypes "github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/rlp"
 	"github.com/ledgerwatch/erigon/zk/hermez_db"
 	"github.com/ledgerwatch/log/v3"
@@ -45,32 +46,43 @@ func DeleteTransactions(db kv.RwTx, txsCount, baseTxId uint64, blockHash *libcom
 	return nil
 }
 
-func TruncateBodies(tx kv.RwTx, fromBlockNum uint64) error {
-	if err := tx.ForEach(kv.BlockBody, hexutility.EncodeTs(fromBlockNum), func(k, v []byte) error {
-		blockNum := binary.BigEndian.Uint64(k[:8])
+func DeleteBodyAndTransactions(tx kv.RwTx, blockNum uint64, blockHash libcommon.Hash) error {
+	key := dbutils.BlockBodyKey(blockNum, blockHash)
 
-		var body types.BodyForStorage
-		if err := rlp.DecodeBytes(v, &body); err != nil {
-			return fmt.Errorf("failed to decode body: %w", err)
-		}
+	v, err := tx.GetOne(kv.BlockBody, key)
+	if err != nil {
+		return err
+	}
 
-		txs, err := CanonicalTransactions(tx, body.BaseTxId, body.TxAmount)
-		if err != nil {
-			return fmt.Errorf("failed to read txs: %w", err)
-		}
+	var body types.BodyForStorage
+	if err := rlp.DecodeBytes(v, &body); err != nil {
+		return fmt.Errorf("failed to decode body: %w", err)
+	}
 
-		blockhash := libcommon.BytesToHash(k[8:])
-		// delete body for storage
-		DeleteBody(tx, blockhash, blockNum)
+	txs, err := CanonicalTransactions(tx, body.BaseTxId, body.TxAmount)
+	if err != nil {
+		return fmt.Errorf("failed to read txs: %w", err)
+	}
 
-		// delete transactions
-		if err := DeleteTransactions(tx, uint64(len(txs)), body.BaseTxId+1, nil); err != nil {
-			return fmt.Errorf("failed to delete txs: %w", err)
-		}
+	// delete body for storage
+	DeleteBody(tx, blockHash, blockNum)
 
-		return nil
-	}); err != nil {
-		return fmt.Errorf("TruncateBodies: %w", err)
+	// delete transactions
+	if err := DeleteTransactions(tx, uint64(len(txs)), body.BaseTxId+1, nil); err != nil {
+		return fmt.Errorf("failed to delete txs: %w", err)
+	}
+
+	return nil
+}
+
+func WriteBodyAndTransactions(db kv.RwTx, hash libcommon.Hash, number uint64, txs []ethTypes.Transaction, data *types.BodyForStorage) error {
+	var err error
+	if err = WriteBodyForStorage(db, hash, number, data); err != nil {
+		return fmt.Errorf("failed to write body: %w", err)
+	}
+	err = WriteTransactions(db, txs, data.BaseTxId+1)
+	if err != nil {
+		return fmt.Errorf("failed to WriteTransactions: %w", err)
 	}
 	return nil
 }

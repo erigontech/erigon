@@ -182,7 +182,10 @@ func (v *LegacyExecutorVerifier) VerifySync(tx kv.Tx, request *VerifierRequest, 
 		return err
 	}
 
-	_, _, executorErr := e.Verify(payload, request, previousBlock.Root())
+	_, _, executorErr, generalErr := e.Verify(payload, request, previousBlock.Root())
+	if generalErr != nil {
+		return generalErr
+	}
 	return executorErr
 }
 
@@ -263,7 +266,10 @@ func (v *LegacyExecutorVerifier) VerifyAsync(request *VerifierRequest, blockNumb
 			return verifierBundle, err
 		}
 
-		ok, executorResponse, executorErr := e.Verify(payload, request, previousBlock.Root())
+		ok, executorResponse, executorErr, generalErr := e.Verify(payload, request, previousBlock.Root())
+		if generalErr != nil {
+			return verifierBundle, generalErr
+		}
 
 		if executorErr != nil {
 			if errors.Is(executorErr, ErrExecutorStateRootMismatch) {

@@ -80,8 +80,7 @@ func processInjectedInitialBatch(
 		return err
 	}
 
-	// deleting the partially processed flag
-	return batchContext.sdb.hermezDb.DeleteIsBatchPartiallyProcessed(injectedBatchBatchNumber)
+	return err
 }
 
 func handleInjectedBatch(

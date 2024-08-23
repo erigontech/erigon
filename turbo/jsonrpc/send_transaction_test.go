@@ -109,7 +109,9 @@ func TestSendRawTransaction(t *testing.T) {
 		t.Log("Timeout waiting for txn from channel")
 		jsonTx, err := api.GetTransactionByHash(ctx, txHash)
 		require.NoError(err)
-		require.Equal(expectedValue, jsonTx.Value.Uint64())
+		jsonTxRPCTransaction, ok := jsonTx.(jsonrpc.RPCTransaction)
+		require.True(ok)
+		require.Equal(expectedValue, jsonTxRPCTransaction.Value.Uint64())
 	}
 
 	//send same tx second time and expect error
@@ -164,7 +166,9 @@ func TestSendRawTransactionUnprotected(t *testing.T) {
 		t.Log("Timeout waiting for txn from channel")
 		jsonTx, err := api.GetTransactionByHash(ctx, txHash)
 		require.NoError(err)
-		require.Equal(expectedTxValue, jsonTx.Value.Uint64())
+		jsonTxRPCTransaction, ok := jsonTx.(jsonrpc.RPCTransaction)
+		require.True(ok)
+		require.Equal(expectedTxValue, jsonTxRPCTransaction.Value.Uint64())
 	}
 }
 

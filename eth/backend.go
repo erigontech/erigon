@@ -136,6 +136,7 @@ import (
 	"github.com/ledgerwatch/erigon/zk/syncer"
 	txpool2 "github.com/ledgerwatch/erigon/zk/txpool"
 	"github.com/ledgerwatch/erigon/zk/txpool/txpooluitl"
+	"github.com/ledgerwatch/erigon/zk/utils"
 	"github.com/ledgerwatch/erigon/zk/witness"
 	"github.com/ledgerwatch/erigon/zkevm/etherman"
 )
@@ -953,6 +954,12 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 		return nil, err
 	}
 
+	// record erigon version
+	err = recordStartupVersionInDb(tx)
+	if err != nil {
+		log.Warn("failed to record erigon version in db", "err", err)
+	}
+
 	executionProgress, err := stages.GetStageProgress(tx, stages.Execution)
 	if err != nil {
 		return nil, err
@@ -970,7 +977,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 				Outputs:     nil,
 			}
 			// todo [zkevm] read the stream version from config and figure out what system id is used for
-			backend.dataStream, err = datastreamer.NewServer(uint16(httpCfg.DataStreamPort), uint8(backend.config.DatastreamVersion), 1, datastreamer.StreamType(1), file, httpCfg.DataStreamWriteTimeout, logConfig)
+			backend.dataStream, err = datastreamer.NewServer(uint16(httpCfg.DataStreamPort), uint8(backend.config.DatastreamVersion), 1, datastreamer.StreamType(1), file, httpCfg.DataStreamWriteTimeout, httpCfg.DataStreamInactivityTimeout, httpCfg.DataStreamInactivityCheckInterval, logConfig)
 			if err != nil {
 				return nil, err
 			}
@@ -981,9 +988,6 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 			latestHeader := backend.dataStream.GetHeader()
 			if latestHeader.TotalEntries == 0 {
 				log.Info("[dataStream] setting the stream progress to 0")
-				if err := stages.SaveStageProgress(tx, stages.DataStream, 0); err != nil {
-					return nil, err
-				}
 				backend.preStartTasks.WarmUpDataStream = true
 			}
 		}
@@ -1020,8 +1024,11 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 		isSequencer := sequencer.IsSequencer()
 
 		// if the L1 block sync is set we're in recovery so can't run as a sequencer
-		if cfg.L1SyncStartBlock > 0 && !isSequencer {
-			panic("you cannot launch in l1 sync mode as an RPC node")
+		if cfg.L1SyncStartBlock > 0 {
+			if !isSequencer {
+				panic("you cannot launch in l1 sync mode as an RPC node")
+			}
+			log.Info("Starting sequencer in L1 recovery mode", "startBlock", cfg.L1SyncStartBlock)
 		}
 
 		seqAndVerifTopics := [][]libcommon.Hash{{
@@ -1073,6 +1080,18 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 			cfg.L1QueryDelay,
 			cfg.L1HighestBlockType,
 		)
+
+		// check contract addresses in config against L1
+		if cfg.Zk.L1ContractAddressCheck {
+			success, err := l1ContractAddressCheck(ctx, cfg.Zk, backend.l1Syncer)
+			if !success || err != nil {
+				//log.Warn("Contract address check failed", "success", success, "err", err)
+				panic("Contract address check failed")
+			}
+			log.Info("Contract address check passed")
+		} else {
+			log.Info("Contract address check skipped")
+		}
 
 		l1InfoTreeSyncer := syncer.NewL1Syncer(
 			ctx,
@@ -1226,6 +1245,23 @@ func createBuckets(tx kv.RwTx) error {
 	return nil
 }
 
+func recordStartupVersionInDb(tx kv.RwTx) error {
+	version := utils.GetVersion()
+
+	hdb := hermez_db.NewHermezDb(tx)
+	written, err := hdb.WriteErigonVersion(version, time.Now())
+	if err != nil {
+		return err
+	}
+
+	if !written {
+		log.Info(fmt.Sprintf("Erigon started at version %s, version already run", version))
+	} else {
+		log.Info(fmt.Sprintf("Erigon started at version %s, for the first time", version))
+	}
+	return nil
+}
+
 // creates an EtherMan instance with default parameters
 func newEtherMan(cfg *ethconfig.Config, l2ChainName, url string) *etherman.Client {
 	ethmanConf := etherman.Config{
@@ -1248,23 +1284,7 @@ func newEtherMan(cfg *ethconfig.Config, l2ChainName, url string) *etherman.Clien
 
 // creates a datastream client with default parameters
 func initDataStreamClient(ctx context.Context, cfg *ethconfig.Zk, latestForkId uint16) *client.StreamClient {
-	// datastream
-	// Create client
-	log.Info("Starting datastream client...")
-	// retry connection
-	datastreamClient := client.NewClient(ctx, cfg.L2DataStreamerUrl, cfg.DatastreamVersion, cfg.L2DataStreamerTimeout, latestForkId)
-
-	for i := 0; i < 30; i++ {
-		// Start client (connect to the server)
-		if err := datastreamClient.Start(); err != nil {
-			log.Warn(fmt.Sprintf("Error when starting datastream client, retrying... Error: %s", err))
-			time.Sleep(1 * time.Second)
-		} else {
-			log.Info("Datastream client initialized...")
-			return datastreamClient
-		}
-	}
-	panic("datastream client could not be initialized")
+	return client.NewClient(ctx, cfg.L2DataStreamerUrl, cfg.DatastreamVersion, cfg.L2DataStreamerTimeout, latestForkId)
 }
 
 func (s *Ethereum) Init(stack *node.Node, config *ethconfig.Config, chainConfig *chain.Config) error {
@@ -1375,7 +1395,7 @@ func (s *Ethereum) PreStart() error {
 		// so here we loop and take a brief pause waiting for it to be ready
 		attempts := 0
 		for {
-			_, err = zkStages.CatchupDatastream(s.sentryCtx, "stream-catchup", tx, s.dataStream, s.chainConfig.ChainID.Uint64(), s.config.DatastreamVersion, s.config.HasExecutors())
+			_, err = zkStages.CatchupDatastream(s.sentryCtx, "stream-catchup", tx, s.dataStream, s.chainConfig.ChainID.Uint64())
 			if err != nil {
 				if errors.Is(err, datastreamer.ErrAtomicOpNotAllowed) {
 					attempts++
@@ -2057,4 +2077,43 @@ func setBorDefaultTxPoolPriceLimit(chainConfig *chain.Config, config txpoolcfg.C
 		logger.Warn("Sanitizing invalid bor min fee cap", "provided", config.MinFeeCap, "updated", txpoolcfg.BorDefaultTxPoolPriceLimit)
 		config.MinFeeCap = txpoolcfg.BorDefaultTxPoolPriceLimit
 	}
+}
+
+func l1ContractAddressCheck(ctx context.Context, cfg *ethconfig.Zk, l1BlockSyncer *syncer.L1Syncer) (bool, error) {
+	l1AddrRollup, err := l1BlockSyncer.CallRollupManager(ctx, &cfg.AddressZkevm)
+	if err != nil {
+		return false, err
+	}
+	if l1AddrRollup != cfg.AddressRollup {
+		log.Warn("L1 contract address check failed (AddressRollup)", "expected", cfg.AddressRollup, "actual", l1AddrRollup)
+		return false, nil
+	}
+
+	l1AddrAdmin, err := l1BlockSyncer.CallAdmin(ctx, &cfg.AddressZkevm)
+	if err != nil {
+		return false, err
+	}
+	if l1AddrAdmin != cfg.AddressAdmin {
+		log.Warn("L1 contract address check failed (AddressAdmin)", "expected", cfg.AddressAdmin, "actual", l1AddrAdmin)
+		return false, nil
+	}
+
+	l1AddrGerManager, err := l1BlockSyncer.CallGlobalExitRootManager(ctx, &cfg.AddressZkevm)
+	if err != nil {
+		return false, err
+	}
+	if l1AddrGerManager != cfg.AddressGerManager {
+		log.Warn("L1 contract address check failed (AddressGerManager)", "expected", cfg.AddressGerManager, "actual", l1AddrGerManager)
+		return false, nil
+	}
+
+	l1AddrSequencer, err := l1BlockSyncer.CallTrustedSequencer(ctx, &cfg.AddressZkevm)
+	if err != nil {
+		return false, err
+	}
+	if l1AddrSequencer != cfg.AddressSequencer {
+		log.Warn("L1 contract address check failed (AddressSequencer)", "expected", cfg.AddressSequencer, "actual", l1AddrSequencer)
+		return false, nil
+	}
+	return true, nil
 }

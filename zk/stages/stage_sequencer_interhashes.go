@@ -29,7 +29,7 @@ func UnwindSequencerInterhashsStage(
 	ctx context.Context,
 	cfg ZkInterHashesCfg,
 ) error {
-	return UnwindZkIntermediateHashesStage(u, s, tx, cfg, ctx)
+	return UnwindZkIntermediateHashesStage(u, s, tx, cfg, ctx, false)
 }
 
 func PruneSequencerInterhashesStage(

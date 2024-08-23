@@ -108,6 +108,7 @@ type TxSlot struct {
 	Blobs       [][]byte
 	Commitments []gokzg4844.KZGCommitment
 	Proofs      []gokzg4844.KZGProof
+	To          common.Address
 }
 
 const (
@@ -224,6 +225,7 @@ func (ctx *TxParseContext) ParseTransaction(payload []byte, pos int, slot *TxSlo
 		}
 
 		dataPos, dataLen, err = rlp.List(payload, p)
+		slot.To = common.BytesToAddress(payload[dataPos : dataPos+dataLen])
 		if err != nil {
 			return 0, fmt.Errorf("%w: blobs len: %s", ErrParseTxn, err) //nolint
 		}

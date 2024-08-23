@@ -337,7 +337,7 @@ func DefaultZkStages(
 				return err
 			},
 			Unwind: func(firstCycle bool, u *stages.UnwindState, s *stages.StageState, txc wrap.TxContainer, logger log.Logger) error {
-				return UnwindZkIntermediateHashesStage(u, s, txc.Tx, zkInterHashesCfg, ctx)
+				return UnwindZkIntermediateHashesStage(u, s, txc.Tx, zkInterHashesCfg, ctx, false)
 			},
 			Prune: func(firstCycle bool, p *stages.PruneState, tx kv.RwTx, logger log.Logger) error {
 				// TODO: implement this in zk interhashes
@@ -459,7 +459,6 @@ var AllStagesZk = []stages2.SyncStage{
 }
 
 var ZkSequencerUnwindOrder = stages.UnwindOrder{
-	stages2.Finish,
 	stages2.TxLookup,
 	stages2.LogIndex,
 	stages2.HashState,
@@ -470,10 +469,10 @@ var ZkSequencerUnwindOrder = stages.UnwindOrder{
 	stages2.CallTraces,
 	stages2.Execution, // need to happen after history and calltraces
 	stages2.L1Syncer,
+	stages2.Finish,
 }
 
 var ZkUnwindOrder = stages.UnwindOrder{
-	stages2.Finish,
 	stages2.TxLookup,
 	stages2.LogIndex,
 	stages2.HashState,
@@ -486,4 +485,5 @@ var ZkUnwindOrder = stages.UnwindOrder{
 	stages2.BlockHashes,
 	stages2.Batches,
 	stages2.L1Syncer,
+	stages2.Finish,
 }

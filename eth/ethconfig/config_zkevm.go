@@ -21,6 +21,7 @@ type Zk struct {
 	AddressRollup                          common.Address
 	AddressZkevm                           common.Address
 	AddressGerManager                      common.Address
+	L1ContractAddressCheck                 bool
 	L1RollupId                             uint64
 	L1BlockRange                           uint64
 	L1QueryDelay                           uint64
@@ -30,6 +31,7 @@ type Zk struct {
 	L1CacheEnabled                         bool
 	L1CachePort                            uint
 	RpcRateLimits                          int
+	RpcGetBatchWitnessConcurrencyLimit     int
 	DatastreamVersion                      int
 	SequencerBlockSealTime                 time.Duration
 	SequencerBatchSealTime                 time.Duration
@@ -55,6 +57,8 @@ type Zk struct {
 	DataStreamHost                         string
 	DataStreamPort                         uint
 	DataStreamWriteTimeout                 time.Duration
+	DataStreamInactivityTimeout            time.Duration
+	DataStreamInactivityCheckInterval      time.Duration
 
 	RebuildTreeAfter      uint64
 	IncrementTreeAlways   bool
@@ -73,6 +77,8 @@ type Zk struct {
 	DisableVirtualCounters      bool
 	VirtualCountersSmtReduction float64
 	ExecutorPayloadOutput       string
+
+	TxPoolRejectSmartContractDeployments bool
 }
 
 var DefaultZkConfig = &Zk{}

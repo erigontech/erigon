@@ -33,6 +33,7 @@ import (
 	"github.com/ledgerwatch/erigon/zk/witness"
 	"github.com/ledgerwatch/erigon/zkevm/hex"
 	"github.com/ledgerwatch/erigon/zkevm/jsonrpc/client"
+	"github.com/ledgerwatch/log/v3"
 )
 
 var sha3UncleHash = common.HexToHash("0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347")
@@ -63,7 +64,10 @@ type ZkEvmAPI interface {
 	TraceTransactionCounters(ctx context.Context, hash common.Hash, config *tracers.TraceConfig_ZkEvm, stream *jsoniter.Stream) error
 	GetBatchCountersByNumber(ctx context.Context, batchNumRpc rpc.BlockNumber) (res json.RawMessage, err error)
 	GetExitRootTable(ctx context.Context) ([]l1InfoTreeData, error)
+	GetVersionHistory(ctx context.Context) (json.RawMessage, error)
 }
+
+const getBatchWitness = "getBatchWitness"
 
 // APIImpl is implementation of the ZkEvmAPI interface based on remote Db access
 type ZkEvmAPIImpl struct {
@@ -74,6 +78,17 @@ type ZkEvmAPIImpl struct {
 	config          *ethconfig.Config
 	l1Syncer        *syncer.L1Syncer
 	l2SequencerUrl  string
+	semaphores      map[string]chan struct{}
+}
+
+func (api *ZkEvmAPIImpl) initializeSemaphores(functionLimits map[string]int) {
+	api.semaphores = make(map[string]chan struct{})
+
+	for funcName, limit := range functionLimits {
+		if limit != 0 {
+			api.semaphores[funcName] = make(chan struct{}, limit)
+		}
+	}
 }
 
 // NewEthAPI returns ZkEvmAPIImpl instance
@@ -85,7 +100,8 @@ func NewZkEvmAPI(
 	l1Syncer *syncer.L1Syncer,
 	l2SequencerUrl string,
 ) *ZkEvmAPIImpl {
-	return &ZkEvmAPIImpl{
+
+	a := &ZkEvmAPIImpl{
 		ethApi:          base,
 		db:              db,
 		ReturnDataLimit: returnDataLimit,
@@ -93,6 +109,12 @@ func NewZkEvmAPI(
 		l1Syncer:        l1Syncer,
 		l2SequencerUrl:  l2SequencerUrl,
 	}
+
+	a.initializeSemaphores(map[string]int{
+		getBatchWitness: zkConfig.Zk.RpcGetBatchWitnessConcurrencyLimit,
+	})
+
+	return a
 }
 
 // ConsolidatedBlockNumber returns the latest consolidated block number
@@ -309,7 +331,6 @@ func (api *ZkEvmAPIImpl) GetBatchDataByNumbers(ctx context.Context, batchNumbers
 			return nil, err
 		}
 
-		// todo: max - take out shared logic with getBatchByNumber
 		// collect blocks in batch
 		var batchBlocks []*eritypes.Block
 		var batchTxs []eritypes.Transaction
@@ -357,7 +378,12 @@ func generateBatchData(
 	batchBlocks []*eritypes.Block,
 	forkId uint64,
 ) (batchL2Data []byte, err error) {
-	lastBlockNoInPreviousBatch := batchBlocks[0].NumberU64() - 1
+
+	lastBlockNoInPreviousBatch := uint64(0)
+	if batchBlocks[0].NumberU64() != 0 {
+		lastBlockNoInPreviousBatch = batchBlocks[0].NumberU64() - 1
+	}
+
 	lastBlockInPreviousBatch, err := rawdb.ReadBlockByNumber(tx, lastBlockNoInPreviousBatch)
 	if err != nil {
 		return nil, err
@@ -405,7 +431,7 @@ func (api *ZkEvmAPIImpl) GetBatchByNumber(ctx context.Context, batchNumber rpc.B
 	hermezDb := hermez_db.NewHermezDbReader(tx)
 
 	// use inbuilt rpc.BlockNumber type to implement the 'latest' behaviour
-	// highest block/batch tied to last block synced
+	// the highest block/batch is tied to last block synced
 	// unless the node is still syncing - in which case 'current block' is used
 	// this is the batch number of stage progress of the Finish stage
 
@@ -420,12 +446,12 @@ func (api *ZkEvmAPIImpl) GetBatchByNumber(ctx context.Context, batchNumber rpc.B
 	}
 
 	// check sync status of node
-	syncing, err := api.ethApi.Syncing(ctx)
+	syncStatus, err := api.ethApi.Syncing(ctx)
 	if err != nil {
 		return nil, err
 	}
-	if syncing != nil && syncing != false {
-		bn := syncing.(map[string]interface{})["currentBlock"]
+	if _, ok := syncStatus.(bool); !ok {
+		bn := syncStatus.(map[string]interface{})["currentBlock"]
 		highestBatchNo, err = hermezDb.GetBatchNoByL2Block(uint64(bn.(hexutil.Uint64)))
 	}
 	if batchNumber > rpc.BlockNumber(highestBatchNo) {
@@ -448,7 +474,7 @@ func (api *ZkEvmAPIImpl) GetBatchByNumber(ctx context.Context, batchNumber rpc.B
 	if err != nil {
 		return nil, err
 	}
-	if !found {
+	if !found && batchNo != 0 {
 		return nil, nil
 	}
 
@@ -608,27 +634,15 @@ func (api *ZkEvmAPIImpl) GetBatchByNumber(ctx context.Context, batchNumber rpc.B
 	}
 	if ver != nil {
 		batch.VerifyBatchTxHash = &ver.L1TxHash
+	}
 
-		verificationBatch := ver.BatchNo
-		verifiedBatchHighestBlock, err := hermezDb.GetHighestBlockInBatch(verificationBatch)
-		if err != nil {
-			return nil, err
-		}
-
-		verifiedBatchGer, err := hermezDb.GetBlockGlobalExitRoot(verifiedBatchHighestBlock)
-		if err != nil {
-			return nil, err
-		}
-
-		// exit roots (MainnetExitRoot, RollupExitRoot)
-		infoTreeUpdate, err := hermezDb.GetL1InfoTreeUpdateByGer(verifiedBatchGer)
-		if err != nil {
-			return nil, err
-		}
-		if infoTreeUpdate != nil {
-			batch.MainnetExitRoot = infoTreeUpdate.MainnetExitRoot
-			batch.RollupExitRoot = infoTreeUpdate.RollupExitRoot
-		}
+	itu, err := hermezDb.GetL1InfoTreeUpdateByGer(batchGer)
+	if err != nil {
+		return nil, err
+	}
+	if itu != nil {
+		batch.MainnetExitRoot = itu.MainnetExitRoot
+		batch.RollupExitRoot = itu.RollupExitRoot
 	}
 
 	// local exit root
@@ -652,7 +666,8 @@ func (api *ZkEvmAPIImpl) GetBatchByNumber(ctx context.Context, batchNumber rpc.B
 
 	oldAccInputHash, err := api.l1Syncer.GetOldAccInputHash(ctx, &api.config.AddressRollup, ApiRollupId, batchNo)
 	if err != nil {
-		return nil, err
+		log.Warn("Failed to get old acc input hash", "err", err)
+		batch.AccInputHash = common.Hash{}
 	}
 	batch.AccInputHash = oldAccInputHash
 
@@ -836,6 +851,18 @@ func (api *ZkEvmAPIImpl) GetBlockRangeWitness(ctx context.Context, startBlockNrO
 }
 
 func (api *ZkEvmAPIImpl) getBatchWitness(ctx context.Context, tx kv.Tx, batchNum uint64, debug bool, mode WitnessMode) (hexutility.Bytes, error) {
+
+	// limit in-flight requests by name
+	semaphore := api.semaphores[getBatchWitness]
+	if semaphore != nil {
+		select {
+		case semaphore <- struct{}{}:
+			defer func() { <-semaphore }()
+		default:
+			return nil, fmt.Errorf("busy")
+		}
+	}
+
 	if api.ethApi.historyV3(tx) {
 		return nil, fmt.Errorf("not supported by Erigon3")
 	}
@@ -1039,6 +1066,28 @@ func (api *ZkEvmAPIImpl) GetLatestGlobalExitRoot(ctx context.Context) (common.Ha
 	}
 
 	return ger, nil
+}
+
+func (api *ZkEvmAPIImpl) GetVersionHistory(ctx context.Context) (json.RawMessage, error) {
+	// get values from the db
+	tx, err := api.db.BeginRo(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback()
+
+	hermezDb := hermez_db.NewHermezDbReader(tx)
+	versions, err := hermezDb.GetVersionHistory()
+	if err != nil {
+		return nil, err
+	}
+
+	versionsJson, err := json.Marshal(versions)
+	if err != nil {
+		return nil, err
+	}
+
+	return versionsJson, nil
 }
 
 type l1InfoTreeData struct {
@@ -1364,12 +1413,10 @@ func populateBatchDetails(batch *types.Batch) (json.RawMessage, error) {
 	jBatch["localExitRoot"] = batch.LocalExitRoot
 	jBatch["sendSequencesTxHash"] = batch.SendSequencesTxHash
 	jBatch["verifyBatchTxHash"] = batch.VerifyBatchTxHash
+	jBatch["accInputHash"] = batch.AccInputHash
 
 	if batch.ForcedBatchNumber != nil {
 		jBatch["forcedBatchNumber"] = batch.ForcedBatchNumber
-	}
-	if batch.AccInputHash != (common.Hash{}) {
-		jBatch["accInputHash"] = batch.AccInputHash
 	}
 	jBatch["closed"] = batch.Closed
 	if len(batch.BatchL2Data) > 0 {

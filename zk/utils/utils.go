@@ -7,6 +7,7 @@ import (
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/core/state"
+	"github.com/ledgerwatch/erigon/core/systemcontracts"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 	"github.com/ledgerwatch/erigon/zk/hermez_db"
 	"github.com/ledgerwatch/log/v3"
@@ -145,33 +146,20 @@ func GetBatchLocalExitRoot(batchNo uint64, db DbReader, tx kv.Tx) (libcommon.Has
 }
 
 func GetBatchLocalExitRootFromSCStorage(batchNo uint64, db DbReader, tx kv.Tx) (libcommon.Hash, error) {
-	var localExitRoot libcommon.Hash
-
 	if batchNo > 0 {
-		checkBatch := batchNo
-
-		stateReader := state.NewPlainStateReadAccountStorage(tx, 0)
-		defer stateReader.Close()
-
-		for ; checkBatch > 0; checkBatch-- {
-			blockNo, err := db.GetHighestBlockInBatch(checkBatch)
-			if err != nil {
-				return libcommon.Hash{}, err
-			}
-
-			// stateReader := state.NewPlainStateReadAccountStorage(tx, blockNo)
-			// defer stateReader.Close()
-			stateReader.SetBlockNr(blockNo)
-			rawLer, err := stateReader.ReadAccountStorage(state.GER_MANAGER_ADDRESS, 1, &state.GLOBAL_EXIT_ROOT_POS_1)
-			if err != nil {
-				return libcommon.Hash{}, err
-			}
-			localExitRoot = libcommon.BytesToHash(rawLer)
-			if localExitRoot != (libcommon.Hash{}) {
-				break
-			}
+		blockNo, err := db.GetHighestBlockInBatch(batchNo)
+		if err != nil {
+			return libcommon.Hash{}, err
 		}
+
+		stateReader := state.NewPlainState(tx, blockNo+1, systemcontracts.SystemContractCodeLookup["hermez"])
+		defer stateReader.Close()
+		rawLer, err := stateReader.ReadAccountStorage(state.GER_MANAGER_ADDRESS, 1, &state.GLOBAL_EXIT_ROOT_POS_1)
+		if err != nil {
+			return libcommon.Hash{}, err
+		}
+		return libcommon.BytesToHash(rawLer), nil
 	}
 
-	return localExitRoot, nil
+	return libcommon.Hash{}, nil
 }

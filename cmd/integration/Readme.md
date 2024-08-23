@@ -78,21 +78,8 @@ make all
 # Then run TurobGeth as usually. It will take 2-3 hours to re-calculate dropped db tables
 ```
 
-## Copy data to another db
-
-```
-1. Stop Erigon
-2. Create new db, by starting erigon in new directory: with option --datadir /path/to/copy-to/
-(set new --db.pagesize option if need)
-3. Stop Erigon again after about 1 minute (Steps 2 and 3 create a new empty db in /path/to/copy-to/chaindata )
-4. Build integration: cd erigon; make integration
-5. Run: ./build/bin/integration mdbx_to_mdbx --chaindata /existing/erigon/path/chaindata/ --chaindata.to /path/to/copy-to/chaindata/
-6. cp -R /existing/erigon/path/snapshots /path/to/copy-to/snapshots
-7. start erigon in new datadir as usually
-```
-
-## Clear bad blocks markers table in the case some block was marked as invalid after some error 
-It allows to process this blocks again
-```
-1. ./build/bin/integration clear_bad_blocks --datadir=<datadir>
-```
+## ZKEVM concerns
+The approach when unwinding zkevm chains is slightly different as it is batch based.  For this to work we read the last
+block of the batch passed as a flag and then this becomes the unwind point.  We then delete all data for this block + 1.
+The logic for this varies from stage to stage as some deletes are inclusive so bear this in mind when working around unwinds
+in zkevm stages.
