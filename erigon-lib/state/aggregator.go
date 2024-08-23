@@ -1598,6 +1598,11 @@ func (ac *AggregatorRoTx) SqueezeCommitmentFiles(mergedAgg *AggregatorRoTx) erro
 			originalPath := cf.decompressor.FilePath()
 			squeezedTmpPath := originalPath + sqExt + ".tmp"
 
+			cfg := commitment.d.compressCfg
+			cfg.MinPatternLen = 20
+			cfg.MaxPatternLen = 32
+			cfg.SamplingFactor = 1
+			cfg.MaxDictPatterns = 64 * 1024 * 2
 			squeezedCompr, err := seg.NewCompressor(context.Background(), "squeeze", squeezedTmpPath, ac.a.dirs.Tmp,
 				commitment.d.compressCfg, log.LvlTrace, commitment.d.logger)
 			if err != nil {
