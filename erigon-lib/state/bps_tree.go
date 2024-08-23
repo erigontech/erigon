@@ -21,10 +21,11 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
-	"github.com/erigontech/erigon-lib/common/dbg"
 	"io"
 	"time"
 	"unsafe"
+
+	"github.com/erigontech/erigon-lib/common/dbg"
 
 	"github.com/c2h5oh/datasize"
 
@@ -66,7 +67,7 @@ var envAssertBTKeys = dbg.EnvBool("BT_ASSERT_OFFSETS", false)
 func NewBpsTreeWithNodes(kv ArchiveGetter, offt *eliasfano32.EliasFano, M uint64, dataLookup dataLookupFunc, keyCmp keyCmpFunc, nodes []Node) *BpsTree {
 	bt := &BpsTree{M: M, offt: offt, dataLookupFunc: dataLookup, keyCmpFunc: keyCmp, mx: nodes}
 
-	t := time.Now()
+	//t := time.Now()
 	nsz := uint64(unsafe.Sizeof(Node{}))
 	var cachedBytes uint64
 	for i := 0; i < len(nodes); i++ {
@@ -83,11 +84,11 @@ func NewBpsTreeWithNodes(kv ArchiveGetter, offt *eliasfano32.EliasFano, M uint64
 		nodes[i].off = offt.Get(nodes[i].di)
 	}
 
-	N := offt.Count()
-	log.Root().Debug("BtIndex opened", "file", kv.FileName(), "M", bt.M, "N", common.PrettyCounter(N),
-		"cached", fmt.Sprintf("%s %.2f%%", common.PrettyCounter(len(bt.mx)), 100*(float64(len(bt.mx))/float64(N))),
-		"cacheSize", datasize.ByteSize(cachedBytes).HR(), "fileSize", datasize.ByteSize(kv.Size()).HR(),
-		"took", time.Since(t))
+	//N := offt.Count()
+	//log.Root().Debug("BtIndex opened", "file", kv.FileName(), "M", bt.M, "N", common.PrettyCounter(N),
+	//	"cached", fmt.Sprintf("%s %.2f%%", common.PrettyCounter(len(bt.mx)), 100*(float64(len(bt.mx))/float64(N))),
+	//	"cacheSize", datasize.ByteSize(cachedBytes).HR(), "fileSize", datasize.ByteSize(kv.Size()).HR(),
+	//	"took", time.Since(t))
 	return bt
 }
 
