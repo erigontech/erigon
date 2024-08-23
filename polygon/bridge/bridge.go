@@ -67,12 +67,12 @@ type Bridge struct {
 	stateReceiverContractAddress libcommon.Address
 	reader                       *Reader
 	// internal state
-	reachedTip            atomic.Bool
-	fetchedEventsSignal   chan struct{}
-	lastFetchedEventTime  atomic.Uint64
-	processedBlocksSignal chan struct{}
-	lastProcessedBlock    atomic.Pointer[ProcessedBlockInfo]
-	synchronizeMu         sync.Mutex
+	reachedTip             atomic.Bool
+	fetchedEventsSignal    chan struct{}
+	lastFetchedEventTime   atomic.Uint64
+	processedBlocksSignal  chan struct{}
+	lastProcessedBlockInfo atomic.Pointer[ProcessedBlockInfo]
+	synchronizeMu          sync.Mutex
 }
 
 func (b *Bridge) Run(ctx context.Context) error {
@@ -101,7 +101,7 @@ func (b *Bridge) Run(ctx context.Context) error {
 		return err
 	}
 	if ok {
-		b.lastProcessedBlock.Store(&lastProcessedBlockInfo)
+		b.lastProcessedBlockInfo.Store(&lastProcessedBlockInfo)
 	}
 
 	// start syncing
@@ -177,7 +177,7 @@ func (b *Bridge) Close() {
 }
 
 func (b *Bridge) InitialBlockReplayNeeded(ctx context.Context) (uint64, bool, error) {
-	if b.lastProcessedBlock.Load() != nil {
+	if b.lastProcessedBlockInfo.Load() != nil {
 		return 0, false, nil
 	}
 
@@ -195,13 +195,13 @@ func (b *Bridge) InitialBlockReplayNeeded(ctx context.Context) (uint64, bool, er
 }
 
 func (b *Bridge) ReplayInitialBlock(ctx context.Context, block *types.Block) error {
-	info := ProcessedBlockInfo{
+	lastProcessedBlockInfo := ProcessedBlockInfo{
 		BlockNum:  block.NumberU64(),
 		BlockTime: block.Time(),
 	}
 
-	b.lastProcessedBlock.Store(&info)
-	return b.store.PutProcessedBlockInfo(ctx, info)
+	b.lastProcessedBlockInfo.Store(&lastProcessedBlockInfo)
+	return b.store.PutProcessedBlockInfo(ctx, lastProcessedBlockInfo)
 }
 
 // ProcessNewBlocks iterates through all blocks and constructs a map from block number to sync events
@@ -232,10 +232,15 @@ func (b *Bridge) ProcessNewBlocks(ctx context.Context, blocks []*types.Block) er
 			continue
 		}
 
-		//
-		// TODO add validation for gaps
-		// TODO add validation for older blocks
-		//
+		lastProcessedBlockInfo := b.lastProcessedBlockInfo.Load()
+		if lastProcessedBlockInfo == nil {
+			return errors.New("lastProcessedBlockInfo must be set before bridge processing")
+		}
+
+		expectedNextBlockNum := lastProcessedBlockInfo.BlockNum + b.borConfig.CalculateSprintLength(blockNum)
+		if blockNum != expectedNextBlockNum {
+			return fmt.Errorf("nonsequential block in bridge processing: %d != %d", blockNum, expectedNextBlockNum)
+		}
 
 		blockTime := block.Time()
 		toTime, err := b.blockEventsTimeWindowEnd(blockNum, blockTime)
@@ -268,7 +273,7 @@ func (b *Bridge) ProcessNewBlocks(ctx context.Context, blocks []*types.Block) er
 		}
 
 		// need to update it for blockEventsTimeWindowEnd
-		b.lastProcessedBlock.Store(&ProcessedBlockInfo{
+		b.lastProcessedBlockInfo.Store(&ProcessedBlockInfo{
 			BlockNum:  blockNum,
 			BlockTime: blockTime,
 		})
@@ -287,7 +292,7 @@ func (b *Bridge) ProcessNewBlocks(ctx context.Context, blocks []*types.Block) er
 		return err
 	}
 
-	if err := b.store.PutProcessedBlockInfo(ctx, *b.lastProcessedBlock.Load()); err != nil {
+	if err := b.store.PutProcessedBlockInfo(ctx, *b.lastProcessedBlockInfo.Load()); err != nil {
 		return err
 	}
 
@@ -305,7 +310,7 @@ func (b *Bridge) Synchronize(ctx context.Context, blockNum uint64) error {
 	b.logger.Debug(
 		bridgeLogPrefix("synchronizing events..."),
 		"blockNum", blockNum,
-		"lastProcessedBlockNum", b.lastProcessedBlock.Load().BlockNum,
+		"lastProcessedBlockNum", b.lastProcessedBlockInfo.Load().BlockNum,
 	)
 
 	return b.waitForProcessedBlock(ctx, blockNum)
@@ -337,9 +342,9 @@ func (b *Bridge) blockEventsTimeWindowEnd(blockNum uint64, blockTime uint64) (ui
 		wantLastBlock = blockNum - sprintLen
 	}
 
-	lastProcessedBlock := b.lastProcessedBlock.Load()
+	lastProcessedBlock := b.lastProcessedBlockInfo.Load()
 	if lastProcessedBlock == nil {
-		return 0, errors.New("lastProcessedBlock must be set")
+		return 0, errors.New("lastProcessedBlockInfo must be set")
 	}
 
 	lastProcessedBlockNum := lastProcessedBlock.BlockNum
@@ -402,7 +407,7 @@ func (b *Bridge) waitForProcessedBlock(ctx context.Context, blockNum uint64) err
 	sprintLen := b.borConfig.CalculateSprintLength(blockNum)
 	blockNum -= blockNum % sprintLen // we only process events at sprint start
 	shouldLog := true
-	lastProcessedBlockNum := b.lastProcessedBlock.Load().BlockNum
+	lastProcessedBlockNum := b.lastProcessedBlockInfo.Load().BlockNum
 	for blockNum > lastProcessedBlockNum {
 		if shouldLog {
 			b.logger.Debug(
@@ -416,7 +421,7 @@ func (b *Bridge) waitForProcessedBlock(ctx context.Context, blockNum uint64) err
 			return err
 		}
 
-		lastProcessedBlockNum = b.lastProcessedBlock.Load().BlockNum
+		lastProcessedBlockNum = b.lastProcessedBlockInfo.Load().BlockNum
 
 		select {
 		case <-logTicker.C:
