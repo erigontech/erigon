@@ -72,7 +72,6 @@ type Bridge struct {
 	lastFetchedEventTime  atomic.Uint64
 	processedBlocksSignal chan struct{}
 	lastProcessedBlock    atomic.Pointer[ProcessedBlockInfo]
-	lastProcessedEventID  atomic.Uint64
 	synchronizeMu         sync.Mutex
 }
 
@@ -96,8 +95,6 @@ func (b *Bridge) Run(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-
-	b.lastProcessedEventID.Store(lastProcessedEventID)
 
 	lastProcessedBlockInfo, ok, err := b.store.LastProcessedBlockInfo(ctx)
 	if err != nil {
@@ -213,10 +210,16 @@ func (b *Bridge) ProcessNewBlocks(ctx context.Context, blocks []*types.Block) er
 		return nil
 	}
 
+	lastProcessedEventID, err := b.store.LastProcessedEventID(ctx)
+	if err != nil {
+		return err
+	}
+
 	b.logger.Debug(
 		bridgeLogPrefix("processing new blocks"),
 		"from", blocks[0].NumberU64(),
 		"to", blocks[len(blocks)-1].NumberU64(),
+		"lastProcessedEventID", lastProcessedEventID,
 	)
 
 	var processedBlock bool
@@ -244,7 +247,7 @@ func (b *Bridge) ProcessNewBlocks(ctx context.Context, blocks []*types.Block) er
 			return err
 		}
 
-		startID := b.lastProcessedEventID.Load() + 1
+		startID := lastProcessedEventID + 1
 		endID, err := b.store.LastEventIDWithinWindow(ctx, startID, time.Unix(int64(toTime), 0))
 		if err != nil {
 			return err
@@ -261,7 +264,7 @@ func (b *Bridge) ProcessNewBlocks(ctx context.Context, blocks []*types.Block) er
 			eventTxnHash := bortypes.ComputeBorTxHash(blockNum, block.Hash())
 			eventTxnToBlockNum[eventTxnHash] = blockNum
 			blockNumToEventId[blockNum] = endID
-			b.lastProcessedEventID.Store(endID)
+			lastProcessedEventID = endID
 		}
 
 		// need to update it for blockEventsTimeWindowEnd
