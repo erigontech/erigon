@@ -20,13 +20,13 @@ import (
 	"context"
 	"time"
 
+	"github.com/erigontech/erigon-lib/common/datadir"
 	"github.com/erigontech/erigon-lib/common/dir"
 	"github.com/erigontech/erigon-lib/config3"
-	"github.com/erigontech/erigon-lib/log/v3"
-
-	"github.com/erigontech/erigon-lib/common/datadir"
 	"github.com/erigontech/erigon-lib/kv"
+	"github.com/erigontech/erigon-lib/log/v3"
 	libstate "github.com/erigontech/erigon-lib/state"
+	"github.com/erigontech/erigon/eth/ethconfig/estimate"
 )
 
 var EnableSqueezeCommitmentFiles = false
@@ -51,6 +51,7 @@ var SqueezeCommitmentFiles = Migration{
 			return err
 		}
 		defer agg.Close()
+		agg.SetCompressWorkers(estimate.CompressSnapshot.Workers())
 		if err = agg.OpenFolder(); err != nil {
 			return err
 		}
