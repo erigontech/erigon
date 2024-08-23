@@ -26,8 +26,6 @@ import (
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/core/rawdb"
 	"github.com/erigontech/erigon/core/types"
-	"github.com/erigontech/erigon/polygon/bor/borcfg"
-	"github.com/erigontech/erigon/polygon/heimdall"
 	"github.com/erigontech/erigon/rlp"
 	"github.com/erigontech/erigon/turbo/services"
 )
@@ -119,50 +117,6 @@ func (cr Reader) BorEventsByBlock(hash common.Hash, number uint64) []rlp.RawValu
 		cr.logger.Warn("BorEventsByBlock failed", "err", err)
 		return nil
 	}
-
-	// TODO - remove below: it is a hack to unblock myself until we switch to storing last event id in BorEventNums
-	// Instead of returning events up to the latest BorEvent for the last block in BorEventNums,
-	// filter out the events that are outside of that block time window
-	// Note: only doing this for when running Astrid as a stage integration for now, so we
-	// do not affected the existing flow in any way.
-	borConfig := cr.config.Bor.(*borcfg.BorConfig)
-	if !borConfig.PolygonSyncStage {
-		return events
-	}
-
-	header, err := cr.blockReader.Header(context.Background(), cr.tx, hash, number)
-	if err != nil {
-		cr.logger.Warn("BorEventsByBlock failed when getting header", "err", err)
-		return nil
-	}
-
-	var toTime uint64
-	if borConfig.IsIndore(number) {
-		toTime = header.Time - borConfig.CalculateStateSyncDelay(number)
-	} else {
-		prevSprintHeader, err := cr.blockReader.Header(context.Background(), cr.tx, hash, number)
-		if err != nil {
-			cr.logger.Warn("BorEventsByBlock failed when getting header", "err", err)
-			return nil
-		}
-
-		toTime = prevSprintHeader.Time
-	}
-
-	for i, eventBytes := range events {
-		var event heimdall.EventRecordWithTime
-		if err = event.UnmarshallBytes(eventBytes); err != nil {
-			cr.logger.Warn("BorEventsByBlock failed when unmarshalling event bytes", "err", err)
-			return nil
-		}
-
-		// toTime is exclusive, hence ignore events with eventTime >= toTime
-		if event.Time.Unix() >= int64(toTime) {
-			events = events[:i]
-			break
-		}
-	}
-
 	return events
 }
 
