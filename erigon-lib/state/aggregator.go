@@ -1509,22 +1509,22 @@ func (ac *AggregatorRoTx) SqueezeCommitmentFiles(mergedAgg *AggregatorRoTx) erro
 	mergedCommitFiles := mergedAgg.d[kv.CommitmentDomain].d.dirtyFiles.Items()
 
 	for _, f := range accounts.files {
-		f.src.decompressor.EnableReadAhead()
+		f.src.decompressor.EnableMadvNormal()
 	}
 	for _, f := range mergedAccountFiles {
-		f.decompressor.EnableReadAhead()
+		f.decompressor.EnableMadvNormal()
 	}
 	for _, f := range storage.files {
-		f.src.decompressor.EnableReadAhead()
+		f.src.decompressor.EnableMadvNormal()
 	}
 	for _, f := range mergedStorageFiles {
-		f.decompressor.EnableReadAhead()
+		f.decompressor.EnableMadvNormal()
 	}
 	for _, f := range commitment.files {
-		f.src.decompressor.EnableReadAhead()
+		f.src.decompressor.EnableMadvNormal()
 	}
 	for _, f := range mergedCommitFiles {
-		f.decompressor.EnableReadAhead()
+		f.decompressor.EnableMadvNormal()
 	}
 	defer func() {
 		for _, f := range accounts.files {
@@ -1588,9 +1588,10 @@ func (ac *AggregatorRoTx) SqueezeCommitmentFiles(mergedAgg *AggregatorRoTx) erro
 			ac.a.logger.Info("[sqeeze_migration] commitment file has no corresponding account or storage file", "commitment", cf.decompressor.FileName())
 			continue
 		}
-		af, sf := mergedAccountFiles[ai], mergedStorageFiles[si]
 
 		err := func() error {
+			af, sf := mergedAccountFiles[ai], mergedStorageFiles[si]
+
 			ac.a.logger.Info("[sqeeze_migration] file start", "original", cf.decompressor.FileName(),
 				"progress", fmt.Sprintf("%d/%d", ci+1, len(mergedAccountFiles)), "compress_cfg", commitment.d.compressCfg)
 
