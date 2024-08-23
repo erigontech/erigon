@@ -1546,13 +1546,13 @@ func (ac *AggregatorRoTx) SqueezeCommitmentFiles(mergedAgg *AggregatorRoTx) erro
 			}
 		}
 		if ai == len(mergedAccountFiles) || si == len(mergedStorageFiles) {
-			ac.a.logger.Info("SqueezeCommitmentFiles: commitment file has no corresponding account or storage file", "commitment", cf.decompressor.FileName())
+			ac.a.logger.Info("[sqeeze_migration] commitment file has no corresponding account or storage file", "commitment", cf.decompressor.FileName())
 			continue
 		}
 		af, sf := mergedAccountFiles[ai], mergedStorageFiles[si]
 
 		err := func() error {
-			ac.a.logger.Info("SqueezeCommitmentFiles: file start", "original", cf.decompressor.FileName(),
+			ac.a.logger.Info("[sqeeze_migration] file start", "original", cf.decompressor.FileName(),
 				"progress", fmt.Sprintf("%d/%d", ci+1, len(mergedAccountFiles)))
 
 			originalPath := cf.decompressor.FilePath()
@@ -1604,7 +1604,7 @@ func (ac *AggregatorRoTx) SqueezeCommitmentFiles(mergedAgg *AggregatorRoTx) erro
 
 				select {
 				case <-logEvery.C:
-					ac.a.logger.Info("SqueezeCommitmentFiles", "file", cf.decompressor.FileName(), "k", fmt.Sprintf("%x", k),
+					ac.a.logger.Info("[sqeeze_migration]", "file", cf.decompressor.FileName(), "k", fmt.Sprintf("%x", k),
 						"progress", fmt.Sprintf("%d/%d", i, cf.decompressor.Count()))
 				default:
 				}
@@ -1627,7 +1627,7 @@ func (ac *AggregatorRoTx) SqueezeCommitmentFiles(mergedAgg *AggregatorRoTx) erro
 			}
 			sizeDelta += delta
 
-			ac.a.logger.Info("SqueezeCommitmentFiles: file done", "original", filepath.Base(originalPath),
+			ac.a.logger.Info("[sqeeze_migration]: file done", "original", filepath.Base(originalPath),
 				"sizeDelta", fmt.Sprintf("%s (%.1f%%)", delta.HR(), deltaP))
 
 			fromStep, toStep := af.startTxNum/ac.a.StepSize(), af.endTxNum/ac.a.StepSize()
@@ -1647,23 +1647,23 @@ func (ac *AggregatorRoTx) SqueezeCommitmentFiles(mergedAgg *AggregatorRoTx) erro
 		}
 	}
 
-	ac.a.logger.Info("SqueezeCommitmentFiles: squeezed files has been produced, removing obsolete files",
+	ac.a.logger.Info("[sqeeze_migration] squeezed files has been produced, removing obsolete files",
 		"toRemove", len(obsoleteFiles), "processed", fmt.Sprintf("%d/%d", processedFiles, len(mergedCommitFiles)))
 	for _, path := range obsoleteFiles {
 		if err := os.Remove(path); err != nil && !errors.Is(err, os.ErrNotExist) {
 			return err
 		}
-		ac.a.logger.Debug("SqueezeCommitmentFiles: obsolete file removal", "path", path)
+		ac.a.logger.Debug("[sqeeze_migration] obsolete file removal", "path", path)
 	}
-	ac.a.logger.Info("SqueezeCommitmentFiles: indices removed, renaming temporal files ")
+	ac.a.logger.Info("[sqeeze_migration] indices removed, renaming temporal files ")
 
 	for _, path := range temporalFiles {
 		if err := os.Rename(path, strings.TrimSuffix(path, sqExt)); err != nil {
 			return err
 		}
-		ac.a.logger.Debug("SqueezeCommitmentFiles: temporal file renaming", "path", path)
+		ac.a.logger.Debug("[sqeeze_migration] temporal file renaming", "path", path)
 	}
-	ac.a.logger.Info("SqueezeCommitmentFiles: done", "sizeDelta", sizeDelta.HR(), "files", len(mergedAccountFiles))
+	ac.a.logger.Info("[sqeeze_migration] done", "sizeDelta", sizeDelta.HR(), "files", len(mergedAccountFiles))
 
 	return nil
 }
