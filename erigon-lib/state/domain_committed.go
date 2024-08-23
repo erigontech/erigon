@@ -241,12 +241,18 @@ func (dt *DomainRoTx) commitmentValTransformDomain(rng MergeRange, accounts, sto
 	accountFileMap := make(map[uint64]map[uint64]ArchiveGetter)
 	if accountList, _, _ := accounts.staticFilesInRange(dr); accountList != nil {
 		for _, f := range accountList {
+			if _, ok := accountFileMap[f.startTxNum]; !ok {
+				accountFileMap[f.startTxNum] = make(map[uint64]ArchiveGetter)
+			}
 			accountFileMap[f.startTxNum][f.endTxNum] = NewArchiveGetter(f.decompressor.MakeGetter(), accounts.d.compression)
 		}
 	}
 	storageFileMap := make(map[uint64]map[uint64]ArchiveGetter)
 	if storageList, _, _ := storage.staticFilesInRange(dr); storageList != nil {
 		for _, f := range storageList {
+			if _, ok := storageFileMap[f.startTxNum]; !ok {
+				storageFileMap[f.startTxNum] = make(map[uint64]ArchiveGetter)
+			}
 			storageFileMap[f.startTxNum][f.endTxNum] = NewArchiveGetter(f.decompressor.MakeGetter(), storage.d.compression)
 		}
 	}
