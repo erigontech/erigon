@@ -74,7 +74,7 @@ var SqueezeCommitmentFiles = Migration{
 
 			ac2 := a2.BeginFilesRo()
 			defer ac2.Close()
-			if err = ac.SqueezeCommitmentFiles(ac); err != nil {
+			if err = ac.SqueezeCommitmentFiles(ac2); err != nil {
 				return err
 			}
 		} else {
