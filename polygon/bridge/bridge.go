@@ -141,9 +141,9 @@ func (b *Bridge) ProcessNewBlocks(ctx context.Context, blocks []*types.Block) er
 	}
 
 	for _, block := range blocks {
-		// check if block is start of span
+		// check if block is start of span and > 0
 		blockNum := block.NumberU64()
-		if !b.isSprintStart(blockNum) {
+		if blockNum == 0 || !b.borConfig.IsSprintStart(blockNum) {
 			continue
 		}
 
@@ -215,13 +215,4 @@ func (b *Bridge) Events(ctx context.Context, blockNum uint64) ([]*types.Message,
 
 func (b *Bridge) EventTxnLookup(ctx context.Context, borTxHash libcommon.Hash) (uint64, bool, error) {
 	return b.reader.EventTxnLookup(ctx, borTxHash)
-}
-
-// Helper functions
-func (b *Bridge) isSprintStart(headerNum uint64) bool {
-	if headerNum%b.borConfig.CalculateSprintLength(headerNum) != 0 || headerNum == 0 {
-		return false
-	}
-
-	return true
 }
