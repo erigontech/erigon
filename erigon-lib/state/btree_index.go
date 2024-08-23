@@ -378,7 +378,7 @@ func (a *btAlloc) bsKey(x []byte, l, r uint64, g ArchiveGetter) (k []byte, di ui
 	for l <= r {
 		di = (l + r) >> 1
 
-		cmp, k, err = a.keyCmp(x, di, g)
+		cmp, k, err = a.keyCmp(x, di, g, k[:0])
 		a.naccess++
 
 		switch {
@@ -918,7 +918,7 @@ func (b *BtIndex) dataLookup(di uint64, g ArchiveGetter) ([]byte, []byte, error)
 }
 
 // comparing `k` with item of index `di`. using buffer `kBuf` to avoid allocations
-func (b *BtIndex) keyCmp(k []byte, di uint64, g ArchiveGetter) (int, []byte, error) {
+func (b *BtIndex) keyCmp(k []byte, di uint64, g ArchiveGetter, copyBuf []byte) (int, []byte, error) {
 	if di >= b.ef.Count() {
 		return 0, nil, fmt.Errorf("%w: keyCount=%d, but key %d requested. file: %s", ErrBtIndexLookupBounds, b.ef.Count(), di+1, b.FileName())
 	}
@@ -929,8 +929,7 @@ func (b *BtIndex) keyCmp(k []byte, di uint64, g ArchiveGetter) (int, []byte, err
 		return 0, nil, fmt.Errorf("key at %d/%d not found, file: %s", di, b.ef.Count(), b.FileName())
 	}
 
-	var res []byte
-	res, _ = g.Next(res[:0])
+	res, _ := g.Next(copyBuf)
 
 	//TODO: use `b.getter.Match` after https://github.com/erigontech/erigon/issues/7855
 	return bytes.Compare(res, k), res, nil

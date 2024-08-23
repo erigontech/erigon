@@ -357,7 +357,7 @@ func (b *mockIndexReader) dataLookup(di uint64, g ArchiveGetter) ([]byte, []byte
 }
 
 // comparing `k` with item of index `di`. using buffer `kBuf` to avoid allocations
-func (b *mockIndexReader) keyCmp(k []byte, di uint64, g ArchiveGetter) (int, []byte, error) {
+func (b *mockIndexReader) keyCmp(k []byte, di uint64, g ArchiveGetter, copyBuf []byte) (int, []byte, error) {
 	if di >= b.ef.Count() {
 		return 0, nil, fmt.Errorf("%w: keyCount=%d, but key %d requested. file: %s", ErrBtIndexLookupBounds, b.ef.Count(), di+1, g.FileName())
 	}
@@ -368,8 +368,7 @@ func (b *mockIndexReader) keyCmp(k []byte, di uint64, g ArchiveGetter) (int, []b
 		return 0, nil, fmt.Errorf("key at %d/%d not found, file: %s", di, b.ef.Count(), g.FileName())
 	}
 
-	var res []byte
-	res, _ = g.Next(res[:0])
+	res, _ := g.Next(copyBuf)
 
 	//TODO: use `b.getter.Match` after https://github.com/erigontech/erigon/issues/7855
 	return bytes.Compare(res, k), res, nil
