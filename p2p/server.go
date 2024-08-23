@@ -861,7 +861,7 @@ running:
 			vals := []interface{}{"protocol", srv.Config.Protocols[0].Version, "peers", len(peers), "trusted", len(trusted), "inbound", inboundCount}
 			vals = append(vals, srv.listErrors()...)
 
-			//srv.logger.Debug("[p2p] Server", vals...)
+			srv.logger.Debug("[p2p] Server", vals...)
 		}
 	}
 

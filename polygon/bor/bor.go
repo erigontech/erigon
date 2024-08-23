@@ -1585,14 +1585,6 @@ func (c *Bor) CommitStates(
 	}
 
 	for _, event := range events {
-		//
-		// TODO remove
-		//
-		var e heimdall.EventRecordWithTime
-		if err := e.UnmarshallBytes(event); err != nil {
-			return err
-		}
-		c.logger.Debug("committing event", "event", e.ID, "block", blockNum)
 		if err := c.stateReceiver.CommitState(event, syscall); err != nil {
 			return err
 		}

@@ -355,7 +355,7 @@ func (d *dialScheduler) logStats() {
 	}
 	d.mutex.Unlock()
 
-	//d.log.Debug("[p2p] Dial scheduler", vals...)
+	d.log.Debug("[p2p] Dial scheduler", vals...)
 }
 
 // rearmHistoryTimer configures d.historyTimer to fire when the
