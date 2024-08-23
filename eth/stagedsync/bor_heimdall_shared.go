@@ -465,10 +465,14 @@ func fetchAndWriteHeimdallStateSyncEvents(
 
 	var overrideCount int
 
+	fmt.Println("BLK", blockNum, "FROM ID", fromId, "FROM", from, "TO", to, "LEN", len(eventRecords))
+
 	if config.OverrideStateSyncRecords != nil {
 		if val, ok := config.OverrideStateSyncRecords[strconv.FormatUint(blockNum, 10)]; ok {
 			overrideCount = len(eventRecords) - val
 			eventRecords = eventRecords[0:val]
+			overrideCount = len(eventRecords) - val
+			fmt.Println("OVR", overrideCount, "LEN", len(eventRecords))
 		}
 	}
 
@@ -495,6 +499,8 @@ func fetchAndWriteHeimdallStateSyncEvents(
 			return initialTime.After(from)
 		}
 
+		fmt.Println("EV", i, eventRecord.ID, eventRecord.Time, "SC", skipCount)
+
 		// don't apply this for devnets we may have looser state event constraints
 		// (TODO these probably needs fixing)
 		if skipCount > 0 {
@@ -512,15 +518,17 @@ func fetchAndWriteHeimdallStateSyncEvents(
 			}
 		}
 
+		skipCount += overrideCount
+
 		data, err := eventRecord.MarshallBytes()
 		if err != nil {
 			logger.Error(fmt.Sprintf("[%s] Unable to pack txn for commitState", logPrefix), "err", err)
-			return lastStateSyncEventID, i, skipCount + overrideCount, time.Since(fetchStart), err
+			return lastStateSyncEventID, i, skipCount, time.Since(fetchStart), err
 		}
 
 		eventIdBytes := eventRecord.MarshallIdBytes()
 		if err = tx.Put(kv.BorEvents, eventIdBytes, data); err != nil {
-			return lastStateSyncEventID, i, skipCount + overrideCount, time.Since(fetchStart), err
+			return lastStateSyncEventID, i, skipCount, time.Since(fetchStart), err
 		}
 
 		if initialRecordTime == nil {
