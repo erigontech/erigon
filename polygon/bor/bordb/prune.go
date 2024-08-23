@@ -19,7 +19,6 @@ package bordb
 import (
 	"encoding/binary"
 	"errors"
-	"fmt"
 
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon/polygon/bor/snaptype"
@@ -63,7 +62,6 @@ func PruneBorBlocks(tx kv.RwTx, blockTo uint64, blocksDeleteLimit int, SpanIdAt 
 		if eventId >= eventIdTo {
 			break
 		}
-		println(fmt.Sprintf("pruning borevent=%d,blockTo=%d", eventId, blockTo))
 		if err = c1.DeleteCurrent(); err != nil {
 			return deleted, err
 		}
