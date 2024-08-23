@@ -202,8 +202,16 @@ Loop:
 		return err
 	}
 	defer tx.Rollback()
+	frozenBlocks := b.engine.FrozenBlocks(ctx)
+
+	updateFrozenBlocksTicker := time.NewTicker(5 * time.Second)
 	// it will stop if we end finding a gap or if we reach the maxIterations
 	for {
+		select {
+		case <-updateFrozenBlocksTicker.C:
+			frozenBlocks = b.engine.FrozenBlocks(ctx)
+		default:
+		}
 		// check if the expected root is in db
 		slot, err := beacon_indicies.ReadBlockSlotByBlockRoot(tx, b.expectedRoot)
 		if err != nil {
@@ -219,7 +227,6 @@ Loop:
 			if err != nil {
 				return err
 			}
-			frozenBlocks := b.engine.FrozenBlocks(ctx)
 			if blockHash != (libcommon.Hash{}) && *slot >= frozenBlocks {
 				has, err := b.engine.HasBlock(ctx, blockHash)
 				if err != nil {
