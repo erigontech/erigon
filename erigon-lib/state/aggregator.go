@@ -1578,9 +1578,10 @@ func (ac *AggregatorRoTx) SqueezeCommitmentFiles(mergedAgg *AggregatorRoTx) erro
 			}
 
 			i := 0
+			var k, v []byte
 			for reader.HasNext() {
-				k, _ := reader.Next(nil)
-				v, _ := reader.Next(nil)
+				k, _ = reader.Next(k[:0])
+				v, _ = reader.Next(v[:0])
 				i += 2
 
 				if k == nil {
