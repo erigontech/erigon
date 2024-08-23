@@ -76,6 +76,9 @@ var SqueezeCommitmentFiles = Migration{
 			if err != nil {
 				panic(err)
 			}
+			if err = a2.OpenFolder(); err != nil {
+				panic(err)
+			}
 			defer a2.Close()
 
 			ac2 := a2.BeginFilesRo()
