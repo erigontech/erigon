@@ -336,9 +336,9 @@ func PutEventsIDs(tx kv.RwTx, eventMap map[uint64]uint64) error {
 	return nil
 }
 
-// EventIDRange returns the state sync event ID range for the given block number.
+// EventIDRange returns the [start, end] event ID for the given block number.
 // ErrEventIDRangeNotFound is thrown if the block number is not found in the database.
-// If the given block number is the last in the database, then the second uint64 (representing end ID) is 0.
+// If the given block number is the first in the database, then the second uint64 (representing end ID) is 0.
 func (s *MdbxStore) EventIDRange(ctx context.Context, blockNum uint64) (uint64, uint64, error) {
 	var start, end uint64
 
@@ -364,15 +364,15 @@ func (s *MdbxStore) EventIDRange(ctx context.Context, blockNum uint64) (uint64, 
 		return start, end, fmt.Errorf("%w: %d", ErrEventIDRangeNotFound, blockNum)
 	}
 
-	start = binary.BigEndian.Uint64(v)
+	end = binary.BigEndian.Uint64(v)
 
-	_, v, err = cursor.Next()
+	_, v, err = cursor.Prev()
 	if err != nil {
 		return start, end, err
 	}
 
-	if v != nil { // may be empty if blockNum is the last entry
-		end = binary.BigEndian.Uint64(v)
+	if v != nil { // may be empty if blockNum is the first entry
+		start = binary.BigEndian.Uint64(v) + 1
 	}
 
 	return start, end, nil

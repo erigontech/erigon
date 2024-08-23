@@ -116,7 +116,7 @@ func NewPolygonSyncStageCfg(
 		eventReader:    blockReader,
 		txActionStream: txActionStream,
 	}
-	bridgeService := bridge.NewBridge(bridgeStore, logger, borConfig, heimdallClient)
+	bridgeService := bridge.NewBridge(bridgeStore, logger, borConfig, heimdallClient, nil)
 	sync := polygonsync.NewSync(
 		syncStore,
 		executionEngine,
