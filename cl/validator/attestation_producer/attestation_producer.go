@@ -65,7 +65,7 @@ func (ap *attestationProducer) ProduceAndCacheAttestationData(baseState *state.C
 	}
 
 	ap.attCacheMutex.RLock()
-	if baseAttestationData, ok := ap.attestationsCache.Get(slot); ok {
+	if baseAttestationData, ok := ap.attestationsCache.Get(epoch); ok {
 		ap.attCacheMutex.RUnlock()
 		beaconBlockRoot := baseStateBlockRoot
 		if baseState.Slot() > slot {
@@ -89,7 +89,7 @@ func (ap *attestationProducer) ProduceAndCacheAttestationData(baseState *state.C
 	ap.attCacheMutex.Lock()
 	defer ap.attCacheMutex.Unlock()
 	// check again if the target epoch is already generated
-	if baseAttestationData, ok := ap.attestationsCache.Get(slot); ok {
+	if baseAttestationData, ok := ap.attestationsCache.Get(epoch); ok {
 		beaconBlockRoot := baseStateBlockRoot
 		if baseState.Slot() > slot {
 			beaconBlockRoot, err = baseState.GetBlockRootAtSlot(slot)
@@ -150,7 +150,7 @@ func (ap *attestationProducer) ProduceAndCacheAttestationData(baseState *state.C
 			targetEpoch,
 		),
 	)
-	ap.attestationsCache.Add(slot, baseAttestationData)
+	ap.attestationsCache.Add(epoch, baseAttestationData)
 	return solid.NewAttestionDataFromParameters(
 		slot,
 		committeeIndex,
