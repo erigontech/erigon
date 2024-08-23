@@ -199,6 +199,37 @@ func (m *MockDownloaderClient) SetLogPrefix(arg0 context.Context, arg1 *SetLogPr
 	return ret0, ret1
 }
 
+// SetLogPrefix indicates an expected call of SetLogPrefix.
+func (mr *MockDownloaderClientMockRecorder) SetLogPrefix(arg0, arg1 any, arg2 ...any) *MockDownloaderClientSetLogPrefixCall {
+	mr.mock.ctrl.T.Helper()
+	varargs := append([]any{arg0, arg1}, arg2...)
+	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "SetLogPrefix", reflect.TypeOf((*MockDownloaderClient)(nil).SetLogPrefix), varargs...)
+	return &MockDownloaderClientSetLogPrefixCall{Call: call}
+}
+
+// MockDownloaderClientSetLogPrefixCall wrap *gomock.Call
+type MockDownloaderClientSetLogPrefixCall struct {
+	*gomock.Call
+}
+
+// Return rewrite *gomock.Call.Return
+func (c *MockDownloaderClientSetLogPrefixCall) Return(arg0 *emptypb.Empty, arg1 error) *MockDownloaderClientSetLogPrefixCall {
+	c.Call = c.Call.Return(arg0, arg1)
+	return c
+}
+
+// Do rewrite *gomock.Call.Do
+func (c *MockDownloaderClientSetLogPrefixCall) Do(f func(context.Context, *SetLogPrefixRequest, ...grpc.CallOption) (*emptypb.Empty, error)) *MockDownloaderClientSetLogPrefixCall {
+	c.Call = c.Call.Do(f)
+	return c
+}
+
+// DoAndReturn rewrite *gomock.Call.DoAndReturn
+func (c *MockDownloaderClientSetLogPrefixCall) DoAndReturn(f func(context.Context, *SetLogPrefixRequest, ...grpc.CallOption) (*emptypb.Empty, error)) *MockDownloaderClientSetLogPrefixCall {
+	c.Call = c.Call.DoAndReturn(f)
+	return c
+}
+
 // Stats indicates an expected call of Stats.
 func (mr *MockDownloaderClientMockRecorder) Stats(arg0, arg1 any, arg2 ...any) *MockDownloaderClientStatsCall {
 	mr.mock.ctrl.T.Helper()
