@@ -525,7 +525,7 @@ func fetchAndWriteHeimdallStateSyncEvents(
 	}
 
 	if lastEventRecord != nil {
-		logger.Info("putting state sync events", "blockNum", blockNum, "lastID", lastEventRecord.ID)
+		logger.Debug("putting state sync events", "blockNum", blockNum, "lastID", lastEventRecord.ID)
 
 		var blockNumBuf [8]byte
 		binary.BigEndian.PutUint64(blockNumBuf[:], blockNum)
