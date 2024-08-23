@@ -336,10 +336,6 @@ func (s *CaplinSnapshots) recalcVisibleFiles() {
 					newVisibleSegments[len(newVisibleSegments)-1].src = nil
 					newVisibleSegments = newVisibleSegments[:len(newVisibleSegments)-1]
 				}
-				//var indexReaders []*recsplit.IndexReader
-				//for _, index := range sn.indexes {
-				//	indexReaders = append(indexReaders, recsplit.NewIndexReader(index))
-				//}
 				newVisibleSegments = append(newVisibleSegments, &VisibleSegment{
 					Range:   sn.Range,
 					segType: sn.segType,
