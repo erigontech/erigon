@@ -186,6 +186,19 @@ func (m *MockDownloaderClient) Stats(arg0 context.Context, arg1 *StatsRequest, a
 	return ret0, ret1
 }
 
+//SetLogPrefix mocks base method.
+func (m *MockDownloaderClient) SetLogPrefix(arg0 context.Context, arg1 *SetLogPrefixRequest, arg2 ...grpc.CallOption) (*emptypb.Empty, error) {
+	m.ctrl.T.Helper()
+	varargs := []any{arg0, arg1}
+	for _, a := range arg2 {
+		varargs = append(varargs, a)
+	}
+	ret := m.ctrl.Call(m, "SetLogPrefix", varargs...)
+	ret0, _ := ret[0].(*emptypb.Empty)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
 // Stats indicates an expected call of Stats.
 func (mr *MockDownloaderClientMockRecorder) Stats(arg0, arg1 any, arg2 ...any) *MockDownloaderClientStatsCall {
 	mr.mock.ctrl.T.Helper()
