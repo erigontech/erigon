@@ -1599,7 +1599,7 @@ func (ac *AggregatorRoTx) SqueezeCommitmentFiles(mergedAgg *AggregatorRoTx) erro
 			squeezedTmpPath := originalPath + sqExt + ".tmp"
 
 			cfg := commitment.d.compressCfg
-			cfg.DictReducerSoftLimit = 1000000
+			cfg.DictReducerSoftLimit = 2000000
 			cfg.MinPatternLen = 20
 			cfg.MaxPatternLen = 32
 			cfg.SamplingFactor = 1
