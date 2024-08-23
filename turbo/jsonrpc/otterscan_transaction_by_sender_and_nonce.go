@@ -29,6 +29,7 @@ import (
 	"github.com/erigontech/erigon-lib/kv/rawdbv3"
 
 	"github.com/erigontech/erigon/core/types/accounts"
+	"github.com/erigontech/erigon/turbo/snapshotsync/freezeblocks"
 )
 
 func (api *OtterscanAPIImpl) GetTransactionBySenderAndNonce(ctx context.Context, addr common.Address, nonce uint64) (*common.Hash, error) {
@@ -125,20 +126,22 @@ func (api *OtterscanAPIImpl) GetTransactionBySenderAndNonce(ctx context.Context,
 		}
 		return true
 	})
+	txNumsReader := rawdbv3.TxNums.WithCustomReadTxNumFunc(freezeblocks.ReadTxNumFuncFromBlockReader(ctx, api._blockReader))
+
 	if searchErr != nil {
 		return nil, searchErr
 	}
 	if creationTxnID == 0 {
 		return nil, fmt.Errorf("binary search between %d-%d doesn't find anything", nextTxnID, prevTxnID)
 	}
-	ok, bn, err := rawdbv3.TxNums.FindBlockNum(tx, creationTxnID)
+	ok, bn, err := txNumsReader.FindBlockNum(tx, creationTxnID)
 	if err != nil {
 		return nil, err
 	}
 	if !ok {
 		return nil, fmt.Errorf("block not found by txnID=%d", creationTxnID)
 	}
-	minTxNum, err := rawdbv3.TxNums.Min(tx, bn)
+	minTxNum, err := txNumsReader.Min(tx, bn)
 	if err != nil {
 		return nil, err
 	}

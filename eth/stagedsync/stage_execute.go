@@ -50,6 +50,7 @@ import (
 	"github.com/erigontech/erigon/turbo/services"
 	"github.com/erigontech/erigon/turbo/shards"
 	"github.com/erigontech/erigon/turbo/silkworm"
+	"github.com/erigontech/erigon/turbo/snapshotsync/freezeblocks"
 )
 
 const (
@@ -175,8 +176,11 @@ func unwindExec3(u *UnwindState, s *StageState, txc wrap.TxContainer, ctx contex
 		domains = txc.Doms
 	}
 	rs := state.NewStateV3(domains, logger)
+
+	txNumsReader := rawdbv3.TxNums.WithCustomReadTxNumFunc(freezeblocks.ReadTxNumFuncFromBlockReader(ctx, br))
+
 	// unwind all txs of u.UnwindPoint block. 1 txn in begin/end of block - system txs
-	txNum, err := rawdbv3.TxNums.Min(txc.Tx, u.UnwindPoint+1)
+	txNum, err := txNumsReader.Min(txc.Tx, u.UnwindPoint+1)
 	if err != nil {
 		return err
 	}

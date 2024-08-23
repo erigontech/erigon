@@ -26,9 +26,6 @@ import (
 
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon/common/u256"
-	"github.com/erigontech/erigon/core"
-	"github.com/erigontech/erigon/core/state"
 	bortypes "github.com/erigontech/erigon/polygon/bor/types"
 	"github.com/erigontech/erigon/polygon/polygoncommon"
 
@@ -45,16 +42,18 @@ type eventFetcher interface {
 func Assemble(dataDir string, logger log.Logger, borConfig *borcfg.BorConfig, eventFetcher eventFetcher) *Bridge {
 	bridgeDB := polygoncommon.NewDatabase(dataDir, kv.PolygonBridgeDB, databaseTablesCfg, logger)
 	bridgeStore := NewStore(bridgeDB)
-	return NewBridge(bridgeStore, logger, borConfig, eventFetcher)
+	reader := NewReader(bridgeStore, logger, borConfig.StateReceiverContract)
+	return NewBridge(bridgeStore, logger, borConfig, eventFetcher, reader)
 }
 
-func NewBridge(store Store, logger log.Logger, borConfig *borcfg.BorConfig, eventFetcher eventFetcher) *Bridge {
+func NewBridge(store Store, logger log.Logger, borConfig *borcfg.BorConfig, eventFetcher eventFetcher, reader *Reader) *Bridge {
 	return &Bridge{
 		store:                        store,
 		logger:                       logger,
 		borConfig:                    borConfig,
 		eventFetcher:                 eventFetcher,
 		stateReceiverContractAddress: libcommon.HexToAddress(borConfig.StateReceiverContract),
+		reader:                       reader,
 		fetchedEventsSignal:          make(chan struct{}),
 		processedBlocksSignal:        make(chan struct{}),
 	}
@@ -66,6 +65,7 @@ type Bridge struct {
 	borConfig                    *borcfg.BorConfig
 	eventFetcher                 eventFetcher
 	stateReceiverContractAddress libcommon.Address
+	reader                       *Reader
 	// internal state
 	reachedTip            atomic.Bool
 	fetchedEventsSignal   chan struct{}
@@ -316,51 +316,11 @@ func (b *Bridge) Unwind(ctx context.Context, blockNum uint64) error {
 
 // Events returns all sync events at blockNum
 func (b *Bridge) Events(ctx context.Context, blockNum uint64) ([]*types.Message, error) {
-	start, end, err := b.store.BlockEventIDsRange(ctx, blockNum)
-	if err != nil {
-		if errors.Is(err, ErrEventIDRangeNotFound) {
-			return nil, nil
-		}
-
-		return nil, err
-	}
-
-	if end == 0 { // exception for tip processing
-		end = b.lastProcessedEventID.Load() + 1
-	}
-
-	eventsRaw := make([]*types.Message, 0, end-start)
-
-	// get events from DB
-	events, err := b.store.Events(ctx, start, end)
-	if err != nil {
-		return nil, err
-	}
-
-	b.logger.Debug(bridgeLogPrefix("events query db result"), "blockNum", blockNum, "eventCount", len(events))
-
-	// convert to message
-	for _, event := range events {
-		msg := types.NewMessage(
-			state.SystemAddress,
-			&b.stateReceiverContractAddress,
-			0, u256.Num0,
-			core.SysCallGasLimit,
-			u256.Num0,
-			nil, nil,
-			event, nil, false,
-			true,
-			nil,
-		)
-
-		eventsRaw = append(eventsRaw, &msg)
-	}
-
-	return eventsRaw, nil
+	return b.reader.Events(ctx, blockNum)
 }
 
 func (b *Bridge) EventTxnLookup(ctx context.Context, borTxHash libcommon.Hash) (uint64, bool, error) {
-	return b.store.EventTxnToBlockNum(ctx, borTxHash)
+	return b.reader.EventTxnLookup(ctx, borTxHash)
 }
 
 func (b *Bridge) blockEventsTimeWindowEnd(blockNum uint64, blockTime uint64) (uint64, error) {

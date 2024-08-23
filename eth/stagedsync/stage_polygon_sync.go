@@ -98,7 +98,7 @@ func NewPolygonSyncStageCfg(
 	}
 	borConfig := chainConfig.Bor.(*borcfg.BorConfig)
 	heimdallService := heimdall.NewService(borConfig, heimdallClient, heimdallStore, logger)
-	bridgeService := bridge.NewBridge(bridgeStore, logger, borConfig, heimdallClient)
+	bridgeService := bridge.NewBridge(bridgeStore, logger, borConfig, heimdallClient, nil)
 	p2pService := p2p.NewService(maxPeers, logger, sentry, statusDataProvider.GetStatusData)
 	checkpointVerifier := polygonsync.VerifyCheckpointHeaders
 	milestoneVerifier := polygonsync.VerifyMilestoneHeaders
@@ -290,7 +290,7 @@ func UnwindEvents(tx kv.RwTx, unwindPoint uint64) error {
 	}
 
 	eventId := make([]byte, 8) // first event ID for this sprint
-	binary.BigEndian.PutUint64(eventId[:], prevSprintLastID+1)
+	binary.BigEndian.PutUint64(eventId, prevSprintLastID+1)
 
 	eventCursor, err := tx.RwCursor(kv.BorEvents)
 	if err != nil {
