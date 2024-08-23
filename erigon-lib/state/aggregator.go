@@ -1508,6 +1508,45 @@ func (ac *AggregatorRoTx) SqueezeCommitmentFiles(mergedAgg *AggregatorRoTx) erro
 	mergedStorageFiles := mergedAgg.d[kv.StorageDomain].d.dirtyFiles.Items()
 	mergedCommitFiles := mergedAgg.d[kv.CommitmentDomain].d.dirtyFiles.Items()
 
+	for _, f := range accounts.files {
+		f.src.decompressor.EnableReadAhead()
+	}
+	for _, f := range mergedAccountFiles {
+		f.decompressor.EnableReadAhead()
+	}
+	for _, f := range storage.files {
+		f.src.decompressor.EnableReadAhead()
+	}
+	for _, f := range mergedStorageFiles {
+		f.decompressor.EnableReadAhead()
+	}
+	for _, f := range commitment.files {
+		f.src.decompressor.EnableReadAhead()
+	}
+	for _, f := range mergedCommitFiles {
+		f.decompressor.EnableReadAhead()
+	}
+	defer func() {
+		for _, f := range accounts.files {
+			f.src.decompressor.DisableReadAhead()
+		}
+		for _, f := range mergedAccountFiles {
+			f.decompressor.DisableReadAhead()
+		}
+		for _, f := range storage.files {
+			f.src.decompressor.DisableReadAhead()
+		}
+		for _, f := range mergedStorageFiles {
+			f.decompressor.DisableReadAhead()
+		}
+		for _, f := range commitment.files {
+			f.src.decompressor.DisableReadAhead()
+		}
+		for _, f := range mergedCommitFiles {
+			f.decompressor.DisableReadAhead()
+		}
+	}()
+
 	log.Info("[sqeeze_migration] see target files", "acc", len(mergedAccountFiles), "st", len(mergedStorageFiles), "com", len(mergedCommitFiles))
 
 	getSizeDelta := func(a, b string) (datasize.ByteSize, float32, error) {
@@ -1565,8 +1604,6 @@ func (ac *AggregatorRoTx) SqueezeCommitmentFiles(mergedAgg *AggregatorRoTx) erro
 			}
 			defer squeezedCompr.Close()
 
-			cf.decompressor.EnableReadAhead()
-			defer cf.decompressor.DisableReadAhead()
 			reader := NewArchiveGetter(cf.decompressor.MakeGetter(), commitment.d.compression)
 			reader.Reset(0)
 
