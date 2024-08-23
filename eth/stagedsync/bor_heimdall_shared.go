@@ -469,8 +469,8 @@ func fetchAndWriteHeimdallStateSyncEvents(
 
 	if config.OverrideStateSyncRecords != nil {
 		if val, ok := config.OverrideStateSyncRecords[strconv.FormatUint(blockNum, 10)]; ok {
-			eventRecords = eventRecords[0:val]
 			overrideCount = len(eventRecords) - val
+			eventRecords = eventRecords[0:val]
 			fmt.Println("OVR", overrideCount, "LEN", len(eventRecords))
 		}
 	}
