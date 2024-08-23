@@ -120,7 +120,8 @@ func SpawnStageHistoryDownload(cfg StageHistoryReconstructionCfg, ctx context.Co
 		destinationSlotForCL := cfg.sn.SegmentsMax()
 
 		slot := blk.Block.Slot
-		if destinationSlotForCL <= blk.Block.Slot {
+		isInCLSnapshots := destinationSlotForCL > blk.Block.Slot
+		if !isInCLSnapshots {
 			if err := beacon_indicies.WriteBeaconBlockAndIndicies(ctx, tx, blk, true); err != nil {
 				return false, err
 			}
@@ -157,7 +158,8 @@ func SpawnStageHistoryDownload(cfg StageHistoryReconstructionCfg, ctx context.Co
 				destinationSlotForEL = frozenBlocksInEL - 1
 			}
 		}
-		if slot == 0 {
+
+		if slot == 0 || isInCLSnapshots && isInElSnapshots {
 			return true, tx.Commit()
 		}
 		return (!cfg.backfilling || slot <= destinationSlotForCL) && (slot <= destinationSlotForEL || isInElSnapshots), tx.Commit()
