@@ -215,10 +215,19 @@ func (b *Bridge) ProcessNewBlocks(ctx context.Context, blocks []*types.Block) er
 		return err
 	}
 
+	var lastProcessedBlockInfo ProcessedBlockInfo
+	if ptr := b.lastProcessedBlockInfo.Load(); ptr != nil {
+		lastProcessedBlockInfo = *ptr
+	} else {
+		return errors.New("lastProcessedBlockInfo must be set before bridge processing")
+	}
+
 	b.logger.Debug(
 		bridgeLogPrefix("processing new blocks"),
 		"from", blocks[0].NumberU64(),
 		"to", blocks[len(blocks)-1].NumberU64(),
+		"lastProcessedBlockNum", lastProcessedBlockInfo.BlockNum,
+		"lastProcessedBlockTime", lastProcessedBlockInfo.BlockTime,
 		"lastProcessedEventID", lastProcessedEventID,
 	)
 
@@ -231,10 +240,8 @@ func (b *Bridge) ProcessNewBlocks(ctx context.Context, blocks []*types.Block) er
 		if !b.isSprintStart(blockNum) {
 			continue
 		}
-
-		lastProcessedBlockInfo := b.lastProcessedBlockInfo.Load()
-		if lastProcessedBlockInfo == nil {
-			return errors.New("lastProcessedBlockInfo must be set before bridge processing")
+		if blockNum <= lastProcessedBlockInfo.BlockNum {
+			continue
 		}
 
 		expectedNextBlockNum := lastProcessedBlockInfo.BlockNum + b.borConfig.CalculateSprintLength(blockNum)
@@ -243,7 +250,7 @@ func (b *Bridge) ProcessNewBlocks(ctx context.Context, blocks []*types.Block) er
 		}
 
 		blockTime := block.Time()
-		toTime, err := b.blockEventsTimeWindowEnd(blockNum, blockTime)
+		toTime, err := b.blockEventsTimeWindowEnd(lastProcessedBlockInfo, blockNum, blockTime)
 		if err != nil {
 			return err
 		}
@@ -272,12 +279,11 @@ func (b *Bridge) ProcessNewBlocks(ctx context.Context, blocks []*types.Block) er
 			lastProcessedEventID = endID
 		}
 
-		// need to update it for blockEventsTimeWindowEnd
-		b.lastProcessedBlockInfo.Store(&ProcessedBlockInfo{
+		processedBlock = true
+		lastProcessedBlockInfo = ProcessedBlockInfo{
 			BlockNum:  blockNum,
 			BlockTime: blockTime,
-		})
-		processedBlock = true
+		}
 	}
 
 	if !processedBlock {
@@ -292,10 +298,11 @@ func (b *Bridge) ProcessNewBlocks(ctx context.Context, blocks []*types.Block) er
 		return err
 	}
 
-	if err := b.store.PutProcessedBlockInfo(ctx, *b.lastProcessedBlockInfo.Load()); err != nil {
+	if err := b.store.PutProcessedBlockInfo(ctx, lastProcessedBlockInfo); err != nil {
 		return err
 	}
 
+	b.lastProcessedBlockInfo.Store(&lastProcessedBlockInfo)
 	b.signalProcessedBlocks()
 	return nil
 }
@@ -331,38 +338,13 @@ func (b *Bridge) EventTxnLookup(ctx context.Context, borTxHash libcommon.Hash) (
 	return b.reader.EventTxnLookup(ctx, borTxHash)
 }
 
-func (b *Bridge) blockEventsTimeWindowEnd(blockNum uint64, blockTime uint64) (uint64, error) {
+func (b *Bridge) blockEventsTimeWindowEnd(last ProcessedBlockInfo, blockNum uint64, blockTime uint64) (uint64, error) {
 	if b.borConfig.IsIndore(blockNum) {
 		stateSyncDelay := b.borConfig.CalculateStateSyncDelay(blockNum)
 		return blockTime - stateSyncDelay, nil
 	}
 
-	var wantLastBlock uint64
-	if sprintLen := b.borConfig.CalculateSprintLength(blockNum); blockNum >= sprintLen {
-		wantLastBlock = blockNum - sprintLen
-	}
-
-	lastProcessedBlock := b.lastProcessedBlockInfo.Load()
-	if lastProcessedBlock == nil {
-		return 0, errors.New("lastProcessedBlockInfo must be set")
-	}
-
-	lastProcessedBlockNum := lastProcessedBlock.BlockNum
-	if lastProcessedBlockNum != wantLastBlock {
-		return 0, fmt.Errorf(
-			"%w: for=%d, want=%d, have=%d", errors.New("unexpected code path - incorrect lastProcessedBlockNum"),
-			blockNum,
-			wantLastBlock,
-			lastProcessedBlockNum,
-		)
-	}
-
-	lastProcessedBlockTime := lastProcessedBlock.BlockTime
-	if lastProcessedBlockTime == 0 {
-		return 0, errors.New("unexpected code path - unknown last processed block time")
-	}
-
-	return lastProcessedBlockTime, nil
+	return last.BlockTime, nil
 }
 
 func (b *Bridge) waitForScraper(ctx context.Context, toTime uint64) error {

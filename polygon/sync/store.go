@@ -173,5 +173,37 @@ func (s *executionClientStore) bridgeReplayInitialBlockIfNeeded(ctx context.Cont
 		"blockNum", initialHeader.Number.Uint64(),
 	)
 
-	return s.bridgeStore.ReplayInitialBlock(ctx, types.NewBlockWithHeader(initialHeader))
+	if err = s.bridgeStore.ReplayInitialBlock(ctx, types.NewBlockWithHeader(initialHeader)); err != nil {
+		return err
+	}
+
+	// in case execution tip is ahead of the bridge tip, replay blocks to fill gaps
+	executionTip, err := s.executionStore.CurrentHeader(ctx)
+	if err != nil {
+		return err
+	}
+
+	executionTipNum := executionTip.Number.Uint64()
+	if executionTipNum <= initialBlockNum {
+		return nil
+	}
+
+	blocksCount := executionTipNum - initialBlockNum
+	s.logger.Debug(
+		syncLogPrefix("replaying post initial blocks for bridge store to fill gap with execution"),
+		"blocks", blocksCount,
+		"executionTip", executionTipNum,
+	)
+
+	blocks := make([]*types.Block, 0, blocksCount)
+	for blockNum := initialBlockNum + 1; blockNum <= executionTipNum; blockNum++ {
+		header, err := s.executionStore.GetHeader(ctx, blockNum)
+		if err != nil {
+			return err
+		}
+
+		blocks = append(blocks, types.NewBlockWithHeader(header))
+	}
+
+	return s.bridgeStore.ProcessNewBlocks(ctx, blocks)
 }
