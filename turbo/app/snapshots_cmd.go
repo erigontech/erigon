@@ -321,9 +321,7 @@ var snapshotCommand = cli.Command{
 		{
 			Name:   "meta",
 			Action: doMeta,
-			Flags: joinFlags([]cli.Flag{
-				&cli.PathFlag{Name: "src", Required: true},
-			}),
+			Flags:  joinFlags([]cli.Flag{}),
 		},
 		{
 			Name:   "debug",
@@ -864,15 +862,19 @@ func doDiff(cliCtx *cli.Context) error {
 }
 
 func doMeta(cliCtx *cli.Context) error {
-	fname := cliCtx.String("src")
-	if strings.HasSuffix(fname, ".seg") {
+	args := cliCtx.Args()
+	if args.Len() < 1 {
+		return errors.New("expecting file path as a first argument")
+	}
+	fname := args.First()
+	if strings.Contains(fname, ".seg") || strings.Contains(fname, ".kv") || strings.Contains(fname, ".v") || strings.Contains(fname, ".ef") {
 		src, err := seg.NewDecompressor(fname)
 		if err != nil {
 			return err
 		}
 		defer src.Close()
-		log.Info("meta", "count", src.Count(), "size", datasize.ByteSize(src.Size()).String(), "name", src.FileName())
-	} else if strings.HasSuffix(fname, ".bt") {
+		log.Info("meta", "count", src.Count(), "size", datasize.ByteSize(src.Size()).HumanReadable(), "serialized_dict", datasize.ByteSize(src.SerializedDictSize()).HumanReadable(), "dict_words", src.DictWords(), "name", src.FileName())
+	} else if strings.Contains(fname, ".bt") {
 		kvFPath := strings.TrimSuffix(fname, ".bt") + ".kv"
 		src, err := seg.NewDecompressor(kvFPath)
 		if err != nil {

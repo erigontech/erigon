@@ -22,7 +22,6 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
-	"math"
 	"sort"
 	"time"
 
@@ -1418,15 +1417,15 @@ func (r *BlockReader) EventsByBlock(ctx context.Context, tx kv.Tx, hash common.H
 		if !bytes.Equal(k, buf[:]) {
 			return result, nil
 		}
-		startEventId := binary.BigEndian.Uint64(v)
-		var endEventId uint64
-		if k, v, err = c.Next(); err != nil {
+		endEventId := binary.BigEndian.Uint64(v)
+		var startEventId uint64
+		if k, v, err = c.Prev(); err != nil {
 			return nil, err
 		}
 		if k == nil {
-			endEventId = math.MaxUint64
+			startEventId = 1
 		} else {
-			endEventId = binary.BigEndian.Uint64(v)
+			startEventId = binary.BigEndian.Uint64(v) + 1
 		}
 		c1, err := tx.Cursor(kv.BorEvents)
 		if err != nil {
@@ -1436,10 +1435,10 @@ func (r *BlockReader) EventsByBlock(ctx context.Context, tx kv.Tx, hash common.H
 		binary.BigEndian.PutUint64(buf[:], startEventId)
 		for k, v, err = c1.Seek(buf[:]); err == nil && k != nil; k, v, err = c1.Next() {
 			eventId := binary.BigEndian.Uint64(k)
-			if eventId >= endEventId {
+			if eventId > endEventId {
 				break
 			}
-			result = append(result, rlp.RawValue(common.Copy(v)))
+			result = append(result, common.Copy(v))
 		}
 		if err != nil {
 			return nil, err
