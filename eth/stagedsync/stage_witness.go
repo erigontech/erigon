@@ -11,6 +11,7 @@ import (
 	"github.com/erigontech/erigon-lib/common/datadir"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/kv/membatchwithdb"
+	"github.com/erigontech/erigon-lib/kv/rawdbv3"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/wrap"
 	"github.com/erigontech/erigon/consensus"
@@ -214,7 +215,8 @@ func SpawnWitnessStage(s *StageState, rootTx kv.RwTx, cfg WitnessCfg, ctx contex
 // generation and puts them in a WitnessStore.
 func PrepareForWitness(tx kv.Tx, block *types.Block, prevRoot libcommon.Hash, rl *trie.RetainList, cfg *WitnessCfg, ctx context.Context, logger log.Logger) (*WitnessStore, error) {
 	blockNr := block.NumberU64()
-	reader, err := rpchelper.CreateHistoryStateReader(tx, blockNr, 0, cfg.chainConfig.ChainName)
+	txNumsReader := rawdbv3.TxNums
+	reader, err := rpchelper.CreateHistoryStateReader(tx, txNumsReader, blockNr, 0, cfg.chainConfig.ChainName)
 	if err != nil {
 		return nil, err
 	}
@@ -340,7 +342,7 @@ func GenerateWitness(tx kv.Tx, block *types.Block, prevHeader *types.Header, ful
 	var txTds *state.TrieDbState
 
 	for i, txn := range block.Transactions() {
-		statedb.SetTxContext(txn.Hash(), block.Hash(), i)
+		statedb.SetTxContext(txn.Hash(), i)
 
 		// Ensure that the access list is loaded into witness
 		for _, a := range txn.GetAccessList() {
@@ -428,7 +430,7 @@ func VerifyWitness(tx kv.Tx, block *types.Block, prevHeader *types.Header, fullB
 			break
 		}
 
-		ibs.SetTxContext(txn.Hash(), block.Hash(), i)
+		ibs.SetTxContext(txn.Hash(), i)
 		receipt, _, err := core.ApplyTransaction(cfg.chainConfig, getHashFn, cfg.engine, nil, gp, ibs, s, header, txn, usedGas, usedBlobGas, vmConfig)
 		if err != nil {
 			return nil, fmt.Errorf("tx %x failed: %v", txn.Hash(), err)

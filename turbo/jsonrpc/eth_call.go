@@ -448,7 +448,7 @@ func (api *BaseAPI) getWitness(ctx context.Context, db kv.RoDB, blockNrOrHash rp
 	}
 	defer roTx.Rollback()
 
-	blockNr, hash, _, err := rpchelper.GetCanonicalBlockNumber(blockNrOrHash, roTx, api.filters) // DoCall cannot be executed on non-canonical blocks
+	blockNr, hash, _, err := rpchelper.GetCanonicalBlockNumber(ctx, blockNrOrHash, roTx, api._blockReader, api.filters) // DoCall cannot be executed on non-canonical blocks
 	if err != nil {
 		return nil, err
 	}
@@ -538,7 +538,8 @@ func (api *BaseAPI) getWitness(ctx context.Context, db kv.RoDB, blockNrOrHash rp
 
 	_ = store
 
-	cr := rawdb.NewCanonicalReader()
+	txNumsReader := rawdbv3.TxNums
+	cr := rawdb.NewCanonicalReader(txNumsReader)
 	agg, err := libstate.NewAggregator(ctx, api.dirs, config3.HistoryV3AggregationStep, txBatch.MemDB(), cr, logger)
 	if err != nil {
 		return nil, err
@@ -578,7 +579,7 @@ func (api *BaseAPI) getWitness(ctx context.Context, db kv.RoDB, blockNrOrHash rp
 	)
 	stageState := &stagedsync.StageState{ID: stages.Execution, BlockNumber: blockNr}
 	// Re-execute block
-	err = stagedsync.ExecBlockV3(stageState, stateSync, txc, stageState.BlockNumber, ctx, execCfg, false, logger)
+	err = stagedsync.ExecBlockV3(stageState, stateSync, txc, stageState.BlockNumber, ctx, execCfg, false, logger, false)
 	if err != nil {
 		return nil, err
 	}
