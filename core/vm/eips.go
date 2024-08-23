@@ -936,12 +936,12 @@ func opExtCall(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]
 	// gasCall := gas - max(gas/64, 5000)
 	// gas += max((contract.Gas-gas)/64, 5000)
 
-	if !value.IsZero() {
-		if interpreter.readOnly {
-			return nil, ErrWriteProtection
-		}
-		gas += params.CallStipend
-	}
+	// if !value.IsZero() {
+	// 	if interpreter.readOnly {
+	// 		return nil, ErrWriteProtection
+	// 	}
+	// 	// gas += params.CallStipend
+	// }
 
 	ret, returnGas, err := interpreter.evm.ExtCall(scope.Contract, toAddr, args, gas, &value)
 

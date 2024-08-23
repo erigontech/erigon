@@ -323,6 +323,31 @@ func opCallDataSize(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext
 }
 
 func opCallDataCopy(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]byte, error) {
+
+	// const auto& mem_index = stack.pop();
+	// const auto& input_index = stack.pop();
+	// const auto& size = stack.pop();
+
+	// if (!check_memory(gas_left, state.memory, mem_index, size))
+	//     return {EVMC_OUT_OF_GAS, gas_left};
+
+	// auto dst = static_cast<size_t>(mem_index);
+	// auto src = state.msg->input_size < input_index ? state.msg->input_size :
+	//                                                  static_cast<size_t>(input_index);
+	// auto s = static_cast<size_t>(size);
+	// auto copy_size = std::min(s, state.msg->input_size - src);
+
+	// if (const auto cost = copy_cost(s); (gas_left -= cost) < 0)
+	//     return {EVMC_OUT_OF_GAS, gas_left};
+
+	// if (copy_size > 0)
+	//     std::memcpy(&state.memory[dst], &state.msg->input_data[src], copy_size);
+
+	// if (s - copy_size > 0)
+	//     std::memset(&state.memory[dst + copy_size], 0, s - copy_size);
+
+	// return {EVMC_SUCCESS, gas_left};
+
 	var (
 		memOffset  = scope.Stack.Pop()
 		dataOffset = scope.Stack.Pop()
@@ -335,7 +360,21 @@ func opCallDataCopy(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext
 	// These values are checked for overflow during gas cost calculation
 	memOffset64 := memOffset.Uint64()
 	length64 := length.Uint64()
-	scope.Memory.Set(memOffset64, length64, getData(scope.Contract.Input, dataOffset64, length64))
+	src := uint64(len(scope.Contract.Input))
+	if src >= dataOffset64 {
+		src = dataOffset64
+	}
+	fmt.Println("SRC: ", src)
+	copySize := min(length64, uint64(len(scope.Contract.Input))-src)
+	if copySize > 0 {
+		fmt.Println("HIT 1")
+		scope.Memory.Set(memOffset64, copySize, scope.Contract.Input[src:src+copySize])
+	}
+	if length64-copySize > 0 {
+		fmt.Println("HIT 2")
+		scope.Memory.SetZero(memOffset64+copySize, length64-copySize)
+	}
+	// scope.Memory.Set(memOffset64, length64, getData(scope.Contract.Input, dataOffset64, length64))
 	return nil, nil
 }
 
@@ -356,51 +395,9 @@ func opReturnDataCopy(pc *uint64, interpreter *EVMInterpreter, scope *ScopeConte
 	length64 := length.Uint64()
 	offset64, overflow := dataOffset.Uint64WithOverflow()
 	if overflow {
-		return nil, ErrReturnDataOutOfBounds
+		// return nil, ErrReturnDataOutOfBounds // TODO(racytech): uncomenting this results in failing eof state_tests/eip7069_extcall/returndatacopy_memory_expansion
 	}
 
-	// const auto& mem_index = stack.pop();
-	// const auto& input_index = stack.pop();
-	// const auto& size = stack.pop();
-	// std::cout << "returndatacopy gas_before: " << gas_left << std::endl;
-	// if (!check_memory(gas_left, state.memory, mem_index, size))
-	//     return {EVMC_OUT_OF_GAS, gas_left};
-
-	// auto dst = static_cast<size_t>(mem_index);
-	// auto s = static_cast<size_t>(size);
-
-	// if (is_eof_container(state.original_code))
-	// {
-	//     std::cout << "is_eof_container" << std::endl;
-	//     auto src = state.return_data.size() < input_index ? state.return_data.size() :
-	//                                                         static_cast<size_t>(input_index);
-	//     auto copy_size = std::min(s, state.return_data.size() - src);
-
-	//     if (const auto cost = copy_cost(s); (gas_left -= cost) < 0)
-	//         return {EVMC_OUT_OF_GAS, gas_left};
-
-	//     if (copy_size > 0)
-	//         std::memcpy(&state.memory[dst], &state.return_data[src], copy_size);
-
-	//     if (s - copy_size > 0)
-	//         std::memset(&state.memory[dst + copy_size], 0, s - copy_size);
-	// }
-	// else
-	// {
-	//     std::cout << "is_legacy" << std::endl;
-	//     if (state.return_data.size() < input_index)
-	//         return {EVMC_INVALID_MEMORY_ACCESS, gas_left};
-	//     auto src = static_cast<size_t>(input_index);
-
-	//     if (src + s > state.return_data.size())
-	//         return {EVMC_INVALID_MEMORY_ACCESS, gas_left};
-
-	//     if (const auto cost = copy_cost(s); (gas_left -= cost) < 0)
-	//         return {EVMC_OUT_OF_GAS, gas_left};
-
-	//     if (s > 0)
-	//         std::memcpy(&state.memory[dst], &state.return_data[src], s);
-	// }
 	fmt.Println("MEM OFFSET: ", memOffset.Uint64())
 	if scope.Contract.Container != nil { // TODO(racytech): this may not be right
 		if returnDataSize < offset64 {
@@ -422,11 +419,13 @@ func opReturnDataCopy(pc *uint64, interpreter *EVMInterpreter, scope *ScopeConte
 		end := dataOffset
 		_, overflow = end.AddOverflow(&dataOffset, &length)
 		if overflow {
+			fmt.Println("HITTING CASE 1")
 			return nil, ErrReturnDataOutOfBounds
 		}
 
 		end64, overflow := end.Uint64WithOverflow()
 		if overflow || uint64(len(interpreter.returnData)) < end64 {
+			fmt.Println("HITTING CASE 2")
 			return nil, ErrReturnDataOutOfBounds
 		}
 		fmt.Printf("-------------> HITTIN legacy 0x%x, len: %v", interpreter.returnData[offset64:end64], length.Uint64())

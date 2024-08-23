@@ -280,14 +280,14 @@ func (evm *EVM) call(typ OpCode, caller ContractRef, addr libcommon.Address, inp
 		var contract *Contract
 		if typ == CALLCODE {
 			contract = NewContract(caller, caller.Address(), value, gas, evm.config.SkipAnalysis, evm.JumpDestCache)
-		} else if typ == DELEGATECALL || typ == EXTDELEGATECALL {
+		} else if typ == DELEGATECALL {
 			contract = NewContract(caller, caller.Address(), value, gas, evm.config.SkipAnalysis, evm.JumpDestCache).AsDelegate()
 		} else {
 			contract = NewContract(caller, addrCopy, value, gas, evm.config.SkipAnalysis, evm.JumpDestCache)
 		}
 		contract.SetCallCode(&addrCopy, codeHash, code, evm.parseContainer(code))
 		readOnly := false
-		if typ == STATICCALL || typ == EXTSTATICCALL {
+		if typ == STATICCALL {
 			readOnly = true
 		}
 
@@ -347,13 +347,13 @@ func (evm *EVM) StaticCall(caller ContractRef, addr libcommon.Address, input []b
 }
 
 func (evm *EVM) ExtCall(caller ContractRef, addr libcommon.Address, input []byte, gas uint64, value *uint256.Int) (ret []byte, leftOverGas uint64, err error) {
-	return evm.call(EXTCALL, caller, addr, input, gas, value, false)
+	return evm.call(CALL, caller, addr, input, gas, value, false)
 }
 func (evm *EVM) ExtDelegateCall(caller ContractRef, addr libcommon.Address, input []byte, gas uint64) (ret []byte, leftOverGas uint64, err error) {
-	return evm.call(EXTDELEGATECALL, caller, addr, input, gas, nil, false)
+	return evm.call(DELEGATECALL, caller, addr, input, gas, nil, false)
 }
 func (evm *EVM) ExtStaticCall(caller ContractRef, addr libcommon.Address, input []byte, gas uint64) (ret []byte, leftOverGas uint64, err error) {
-	return evm.call(EXTSTATICCALL, caller, addr, input, gas, nil, false)
+	return evm.call(STATICCALL, caller, addr, input, gas, nil, false)
 }
 
 type codeAndHash struct {
