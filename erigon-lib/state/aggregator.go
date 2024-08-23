@@ -1665,7 +1665,7 @@ func (ac *AggregatorRoTx) SqueezeCommitmentFiles(mergedAgg *AggregatorRoTx) erro
 			}
 			sizeDelta += delta
 
-			ac.a.logger.Info("[sqeeze_migration]: file done", "original", filepath.Base(originalPath),
+			ac.a.logger.Info("[sqeeze_migration] file done", "original", filepath.Base(originalPath),
 				"sizeDelta", fmt.Sprintf("%s (%.1f%%)", delta.HR(), deltaP))
 
 			fromStep, toStep := af.startTxNum/ac.a.StepSize(), af.endTxNum/ac.a.StepSize()
