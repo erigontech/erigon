@@ -37,11 +37,11 @@ func PruneBorBlocks(tx kv.RwTx, blockTo uint64, blocksDeleteLimit int, SpanIdAt 
 	defer c.Close()
 	var blockNumBytes [8]byte
 	binary.BigEndian.PutUint64(blockNumBytes[:], blockTo)
-	k, v, err := c.Seek(blockNumBytes[:])
+	_, _, err = c.Seek(blockNumBytes[:])
 	if err != nil {
 		return deleted, err
 	}
-	k, v, err = c.Prev()
+	k, v, err := c.Prev()
 	if err != nil {
 		return deleted, err
 	}

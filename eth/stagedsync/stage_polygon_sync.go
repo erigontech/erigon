@@ -291,7 +291,7 @@ func UnwindEvents(tx kv.RwTx, unwindPoint uint64) error {
 	}
 
 	eventId := make([]byte, 8) // first event ID for this sprint
-	binary.BigEndian.PutUint64(eventId[:], prevSprintLastID+1)
+	binary.BigEndian.PutUint64(eventId, prevSprintLastID+1)
 
 	eventCursor, err := tx.RwCursor(kv.BorEvents)
 	if err != nil {
