@@ -37,11 +37,11 @@ var SqueezeCommitmentFiles = Migration{
 		ctx := context.Background()
 
 		if !EnableSqueezeCommitmentFiles || !libstate.AggregatorSqueezeCommitmentValues { //nolint:staticcheck
+			log.Info("[sqeeze_migration] disabled")
 			return db.Update(ctx, func(tx kv.RwTx) error {
 				return BeforeCommit(tx, nil, true)
 			})
 		}
-		logger.Info("File migration is disabled", "name", "squeeze_commit_files")
 
 		logEvery := time.NewTicker(10 * time.Second)
 		defer logEvery.Stop()
@@ -55,6 +55,10 @@ var SqueezeCommitmentFiles = Migration{
 		if err = agg.OpenFolder(); err != nil {
 			return err
 		}
+		t := time.Now()
+		defer func() {
+			log.Info("[sqeeze_migration] done", "took", time.Since(t))
+		}()
 
 		ac := agg.BeginFilesRo()
 		defer ac.Close()
@@ -67,6 +71,7 @@ var SqueezeCommitmentFiles = Migration{
 		}
 
 		if existsV2Dir {
+			log.Info("[sqeeze_migration] `domain_v2` folder found, using it as a target `domain`")
 			a2, err := libstate.NewAggregator(ctx, dirs2, config3.HistoryV3AggregationStep, db, nil, logger)
 			if err != nil {
 				panic(err)
@@ -79,6 +84,7 @@ var SqueezeCommitmentFiles = Migration{
 				return err
 			}
 		} else {
+			log.Info("[sqeeze_migration] normal mode start")
 			if err = ac.SqueezeCommitmentFiles(ac); err != nil {
 				return err
 			}
