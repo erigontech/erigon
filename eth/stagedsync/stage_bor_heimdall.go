@@ -231,6 +231,11 @@ func BorHeimdallForward(
 
 	var nextEventRecord *heimdall.EventRecordWithTime
 
+	// sometimes via config eveents are skipped from particular blocks and
+	// pushed into the next one, when this happens we need to skip validation
+	// as the times won't match the expected window
+	var skipCount int
+
 	for blockNum = lastBlockNum + 1; blockNum <= headNumber; blockNum++ {
 		select {
 		default:
@@ -357,7 +362,7 @@ func BorHeimdallForward(
 			var records int
 
 			if lastStateSyncEventID == 0 || lastStateSyncEventID != endStateSyncEventId {
-				lastStateSyncEventID, records, callTime, err = fetchRequiredHeimdallStateSyncEventsIfNeeded(
+				lastStateSyncEventID, records, skipCount, callTime, err = fetchRequiredHeimdallStateSyncEventsIfNeeded(
 					ctx,
 					header,
 					tx,
@@ -368,6 +373,7 @@ func BorHeimdallForward(
 					s.LogPrefix(),
 					logger,
 					lastStateSyncEventID,
+					skipCount,
 				)
 
 				if err != nil {
