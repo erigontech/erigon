@@ -349,24 +349,63 @@ func opReturnDataCopy(pc *uint64, interpreter *EVMInterpreter, scope *ScopeConte
 		memOffset  = scope.Stack.Pop()
 		dataOffset = scope.Stack.Pop()
 		length     = scope.Stack.Pop()
+
+		returnDataSize = uint64(len(interpreter.returnData))
 	)
 
+	// const auto& mem_index = stack.pop();
+	// const auto& input_index = stack.pop();
+	// const auto& size = stack.pop();
+	// auto dst = static_cast<size_t>(mem_index);
+	// auto s = static_cast<size_t>(size);
+	// if (is_eof_container(state.original_code))
+	// {
+	//     auto src = state.return_data.size() < input_index ? state.return_data.size() :
+	//                                                         static_cast<size_t>(input_index);
+	//     auto copy_size = std::min(s, state.return_data.size() - src);
+
+	//     if (const auto cost = copy_cost(s); (gas_left -= cost) < 0)
+	//         return {EVMC_OUT_OF_GAS, gas_left};
+
+	//     if (copy_size > 0)
+	//         std::memcpy(&state.memory[dst], &state.return_data[src], copy_size);
+
+	//     if (s - copy_size > 0)
+	//         std::memset(&state.memory[dst + copy_size], 0, s - copy_size);
+	// }
+	length64 := length.Uint64()
 	offset64, overflow := dataOffset.Uint64WithOverflow()
 	if overflow {
 		return nil, ErrReturnDataOutOfBounds
 	}
-	// we can reuse dataOffset now (aliasing it for clarity)
-	end := dataOffset
-	_, overflow = end.AddOverflow(&dataOffset, &length)
-	if overflow {
-		return nil, ErrReturnDataOutOfBounds
+
+	if scope.Contract.Container != nil { // TODO(racytech): this may not be right
+		if returnDataSize < offset64 {
+			offset64 = returnDataSize
+		}
+		copySize := min(length64, returnDataSize-offset64)
+
+		if copySize > 0 {
+			scope.Memory.Set(memOffset.Uint64(), copySize, interpreter.returnData[offset64:])
+		}
+		if length64-copySize > 0 {
+			scope.Memory.Set(memOffset.Uint64()+copySize, length64-copySize, interpreter.returnData[0:])
+		}
+	} else {
+		// we can reuse dataOffset now (aliasing it for clarity)
+		end := dataOffset
+		_, overflow = end.AddOverflow(&dataOffset, &length)
+		if overflow {
+			return nil, ErrReturnDataOutOfBounds
+		}
+
+		end64, overflow := end.Uint64WithOverflow()
+		if overflow || uint64(len(interpreter.returnData)) < end64 {
+			return nil, ErrReturnDataOutOfBounds
+		}
+		scope.Memory.Set(memOffset.Uint64(), length.Uint64(), interpreter.returnData[offset64:end64])
 	}
 
-	end64, overflow := end.Uint64WithOverflow()
-	if overflow || uint64(len(interpreter.returnData)) < end64 {
-		return nil, ErrReturnDataOutOfBounds
-	}
-	scope.Memory.Set(memOffset.Uint64(), length.Uint64(), interpreter.returnData[offset64:end64])
 	return nil, nil
 }
 
