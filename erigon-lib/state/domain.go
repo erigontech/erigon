@@ -122,24 +122,24 @@ type domainVisible struct {
 	caches *sync.Pool
 }
 
+var DomainCompressCfg = seg.Cfg{
+	DictReducerSoftLimit: 2000000,
+	MinPatternLen:        20,
+	MaxPatternLen:        32,
+	SamplingFactor:       4,
+	MaxDictPatterns:      64 * 1024 * 2,
+}
+
 func NewDomain(cfg domainCfg, aggregationStep uint64, name kv.Domain, valsTable, indexKeysTable, historyValsTable, indexTable string, integrityCheck func(name kv.Domain, fromStep, toStep uint64) bool, logger log.Logger) (*Domain, error) {
 	if cfg.hist.iiCfg.dirs.SnapDomain == "" {
 		panic("empty `dirs` variable")
 	}
 
-	compressCfg := seg.DefaultCfg
-	compressCfg.Workers = 1
-	compressCfg.DictReducerSoftLimit = 2000000
-	compressCfg.MinPatternLen = 20
-	compressCfg.MaxPatternLen = 32
-	compressCfg.SamplingFactor = 4
-	compressCfg.MaxDictPatterns = 64 * 1024 * 2
-
 	d := &Domain{
 		name:      name,
 		valsTable: valsTable,
 
-		compressCfg: compressCfg,
+		compressCfg: DomainCompressCfg,
 		compression: cfg.compress,
 
 		dirtyFiles: btree2.NewBTreeGOptions[*filesItem](filesItemLess, btree2.Options{Degree: 128, NoLocks: false}),
