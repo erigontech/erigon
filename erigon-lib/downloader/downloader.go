@@ -1990,6 +1990,7 @@ func (d *Downloader) ReCalcStats(interval time.Duration) {
 	stats.BytesHashed = uint64(connStats.BytesHashed.Int64())
 	stats.BytesFlushed = uint64(connStats.BytesFlushed.Int64())
 	stats.BytesDownload = uint64(connStats.BytesReadData.Int64())
+	stats.BytesCompleted = uint64(connStats.BytesCompleted.Int64())
 
 	lastMetadataReady := stats.MetadataReady
 
@@ -2205,14 +2206,14 @@ func (d *Downloader) ReCalcStats(interval time.Duration) {
 	timeLeft := calculateTime(remainingBytes, rate)
 
 	var logStr strings.Builder
-	if stats.MetadataReady != stats.FilesTotal {
+	if stats.MetadataReady < stats.FilesTotal {
 		logStr.WriteString(fmt.Sprintf("(%d/%d files) ", stats.MetadataReady, stats.FilesTotal))
 	}
 	logStr.WriteString(fmt.Sprintf("%.2f%% - %s/%s", percentDone, bytesDone, common.ByteCount(stats.BytesTotal)))
 	logStr.WriteString(" rate=" + common.ByteCount(rate) + "/s")
 	logStr.WriteString(" time-left=" + timeLeft)
 	logStr.WriteString(" total-time=" + time.Since(d.startTime).Round(time.Second).String())
-	if stats.MetadataReady != stats.FilesTotal {
+	if stats.MetadataReady < stats.FilesTotal {
 		logStr.WriteString(" no-metadata=" + strconv.Itoa(int(stats.FilesTotal-stats.MetadataReady)))
 	}
 
