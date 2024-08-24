@@ -1379,7 +1379,7 @@ func (d *Downloader) mainLoop(silent bool) error {
 	logEvery := time.NewTicker(20 * time.Second)
 	defer logEvery.Stop()
 
-	statInterval := 5 * time.Second
+	statInterval := 20 * time.Second
 	statEvery := time.NewTicker(statInterval)
 	defer statEvery.Stop()
 
@@ -2331,53 +2331,56 @@ func (d *Downloader) ReCalcStats(interval time.Duration) {
 
 	d.lock.Unlock()
 
-	prefix := d.logPrefix
+	if !prevStats.Completed {
 
-	if d.logPrefix == "" {
-		prefix = "[snapshots]"
-	}
+		prefix := d.logPrefix
 
-	if stats.Completed {
-		log.Info(fmt.Sprintf("[%s] Downloading complete", prefix), "time", time.Since(d.startTime).String())
-	}
+		if d.logPrefix == "" {
+			prefix = "[snapshots]"
+		}
 
-	dbg.ReadMemStats(&m)
+		if stats.Completed {
+			log.Info(fmt.Sprintf("[%s] Downloading complete", prefix), "time", time.Since(d.startTime).String())
+		}
 
-	status := "Downloading"
+		dbg.ReadMemStats(&m)
 
-	percentDone := float32(100) * (float32(stats.BytesDownload) / float32(stats.BytesTotal))
-	bytesDone := common.ByteCount(stats.BytesDownload)
-	rate := stats.DownloadRate
-	remainingBytes := stats.BytesTotal - stats.BytesDownload
+		status := "Downloading"
 
-	if stats.BytesDownload >= stats.BytesTotal && stats.MetadataReady == stats.FilesTotal && stats.BytesTotal > 0 {
-		status = "Verifying"
-		percentDone = float32(100) * (float32(stats.BytesCompleted) / float32(stats.BytesTotal))
-		bytesDone = common.ByteCount(stats.BytesCompleted)
-		rate = stats.CompletionRate
-		remainingBytes = stats.BytesTotal - stats.BytesCompleted
-	}
+		percentDone := float32(100) * (float32(stats.BytesDownload) / float32(stats.BytesTotal))
+		bytesDone := common.ByteCount(stats.BytesDownload)
+		rate := stats.DownloadRate
+		remainingBytes := stats.BytesTotal - stats.BytesDownload
 
-	if stats.BytesTotal == 0 {
-		percentDone = 0
-	}
+		if stats.BytesDownload >= stats.BytesTotal && stats.MetadataReady == stats.FilesTotal && stats.BytesTotal > 0 {
+			status = "Verifying"
+			percentDone = float32(100) * (float32(stats.BytesCompleted) / float32(stats.BytesTotal))
+			bytesDone = common.ByteCount(stats.BytesCompleted)
+			rate = stats.CompletionRate
+			remainingBytes = stats.BytesTotal - stats.BytesCompleted
+		}
 
-	timeLeft := calculateTime(remainingBytes, rate)
+		if stats.BytesTotal == 0 {
+			percentDone = 0
+		}
 
-	var logStr strings.Builder
-	if stats.MetadataReady < stats.FilesTotal {
-		logStr.WriteString(fmt.Sprintf("(%d/%d files) ", stats.MetadataReady, stats.FilesTotal))
-	}
-	logStr.WriteString(fmt.Sprintf("%.2f%% - %s/%s", percentDone, bytesDone, common.ByteCount(stats.BytesTotal)))
-	logStr.WriteString(" rate=" + common.ByteCount(rate) + "/s")
-	logStr.WriteString(" time-left=" + timeLeft)
-	logStr.WriteString(" total-time=" + time.Since(d.startTime).Round(time.Second).String())
-	if stats.MetadataReady < stats.FilesTotal {
-		logStr.WriteString(" no-metadata=" + strconv.Itoa(int(stats.FilesTotal-stats.MetadataReady)))
-	}
+		timeLeft := calculateTime(remainingBytes, rate)
 
-	if !stats.Completed {
-		log.Info(fmt.Sprintf("[%s] %s", prefix, status), "progress", logStr.String(), "alloc", common.ByteCount(m.Alloc), "sys", common.ByteCount(m.Sys))
+		var logStr strings.Builder
+		if stats.MetadataReady < stats.FilesTotal {
+			logStr.WriteString(fmt.Sprintf("(%d/%d files) ", stats.MetadataReady, stats.FilesTotal))
+		}
+		logStr.WriteString(fmt.Sprintf("%.2f%% - %s/%s", percentDone, bytesDone, common.ByteCount(stats.BytesTotal)))
+		logStr.WriteString(" rate=" + common.ByteCount(rate) + "/s")
+		logStr.WriteString(" time-left=" + timeLeft)
+		logStr.WriteString(" total-time=" + time.Since(d.startTime).Round(time.Second).String())
+		if stats.MetadataReady < stats.FilesTotal {
+			logStr.WriteString(" no-metadata=" + strconv.Itoa(int(stats.FilesTotal-stats.MetadataReady)))
+		}
+
+		if !stats.Completed {
+			log.Info(fmt.Sprintf("[%s] %s", prefix, status), "progress", logStr.String(), "alloc", common.ByteCount(m.Alloc), "sys", common.ByteCount(m.Sys))
+		}
 	}
 }
 
