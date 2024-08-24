@@ -2195,12 +2195,16 @@ func (d *Downloader) ReCalcStats(interval time.Duration) {
 	rate := stats.DownloadRate
 	remainingBytes := stats.BytesTotal - stats.BytesDownload
 
-	if stats.BytesDownload >= stats.BytesTotal && stats.MetadataReady == stats.FilesTotal {
+	if stats.BytesDownload >= stats.BytesTotal && stats.MetadataReady == stats.FilesTotal && stats.BytesTotal > 0 {
 		status = "Verifying"
 		percentDone = float32(100) * (float32(stats.BytesCompleted) / float32(stats.BytesTotal))
 		bytesDone = common.ByteCount(stats.BytesCompleted)
 		rate = stats.CompletionRate
 		remainingBytes = stats.BytesTotal - stats.BytesCompleted
+	}
+
+	if stats.BytesTotal == 0 {
+		percentDone = 0
 	}
 
 	timeLeft := calculateTime(remainingBytes, rate)
