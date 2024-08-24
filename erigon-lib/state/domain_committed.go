@@ -139,7 +139,6 @@ func (dt *DomainRoTx) findShortenedKey(fullKey []byte, itemGetter ArchiveGetter,
 				"key", fmt.Sprintf("%x", fullKey), "idx", "bt", "err", err, "file", item.decompressor.FileName())
 		}
 
-		fmt.Printf("k5: %t, %x, %t\n", item.bindex != nil, fullKey, cur != nil)
 		if cur == nil || !bytes.Equal(cur.Key(), fullKey) {
 			return nil, false
 		}
@@ -305,13 +304,11 @@ func (dt *DomainRoTx) commitmentValTransformDomain(rng MergeRange, accounts, sto
 			auxBuf := dt.keyBuf[:0]
 			if isStorage {
 				if len(key) == length.Addr+length.Hash {
-					fmt.Printf("k1: %x\n", key)
 					// Non-optimised key originating from a database record
 					auxBuf = append(auxBuf[:0], key...)
 				} else {
 					// Optimised key referencing a state file record (file number and offset within the file)
 					auxBuf, found = storage.lookupByShortenedKey(key, sig)
-					fmt.Printf("k2: %x, %x\n", key, auxBuf)
 					if !found {
 						dt.d.logger.Crit("valTransform: lost storage full key",
 							"shortened", fmt.Sprintf("%x", key),
@@ -323,8 +320,6 @@ func (dt *DomainRoTx) commitmentValTransformDomain(rng MergeRange, accounts, sto
 				}
 
 				shortened, found := storage.findShortenedKey(auxBuf, ms, mergedStorage)
-				fmt.Printf("k3: %x, %x\n", auxBuf, shortened)
-				panic(1)
 				if !found {
 					if len(auxBuf) == length.Addr+length.Hash {
 						return auxBuf, nil // if plain key is lost, we can save original fullkey
