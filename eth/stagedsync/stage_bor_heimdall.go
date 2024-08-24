@@ -296,6 +296,11 @@ func BorHeimdallForward(
 				return err
 			}
 
+			// this will happen if for example chaindb is removed
+			if lastPersistedBlockNum > blockNum {
+				lastPersistedBlockNum = blockNum
+			}
+
 			// if the last time we persisted snapshots is too far away re-run the forward
 			// initialization process - this is to avoid memory growth due to recusrion
 			// in persistValidatorSets
@@ -640,6 +645,9 @@ func initValidatorSets(
 
 	if lastPersistedBlockNum > 0 {
 		parentHeader = chain.GetHeaderByNumber(lastPersistedBlockNum)
+		if parentHeader == nil {
+			return nil, fmt.Errorf("[%s] header not found: %d", logPrefix, lastPersistedBlockNum)
+		}
 		snap = loadSnapshot(lastPersistedBlockNum, parentHeader.Hash(), config, recents, signatures, snapDb, logger)
 		firstBlockNum = lastPersistedBlockNum + 1
 	} else {

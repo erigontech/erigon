@@ -46,13 +46,13 @@ func generateCellRow(tb testing.TB, size int) (row []*cell, bitmap uint16) {
 		th := rand.Intn(120)
 		switch {
 		case th > 70:
-			n, err = rand.Read(row[i].accountPlainKey[:])
+			n, err = rand.Read(row[i].accountAddr[:])
 			require.NoError(tb, err)
-			row[i].accountPlainKeyLen = n
+			row[i].accountAddrLen = n
 		case th > 20 && th <= 70:
-			n, err = rand.Read(row[i].storagePlainKey[:])
+			n, err = rand.Read(row[i].storageAddr[:])
 			require.NoError(tb, err)
-			row[i].storagePlainKeyLen = n
+			row[i].storageAddrLen = n
 		case th <= 20:
 			n, err = rand.Read(row[i].extension[:th])
 			row[i].extLen = n
@@ -93,10 +93,10 @@ func TestBranchData_MergeHexBranches2(t *testing.T) {
 		}
 		require.EqualValues(t, row[i].extLen, c.extLen)
 		require.EqualValues(t, row[i].extension, c.extension)
-		require.EqualValues(t, row[i].accountPlainKeyLen, c.accountPlainKeyLen)
-		require.EqualValues(t, row[i].accountPlainKey, c.accountPlainKey)
-		require.EqualValues(t, row[i].storagePlainKeyLen, c.storagePlainKeyLen)
-		require.EqualValues(t, row[i].storagePlainKey, c.storagePlainKey)
+		require.EqualValues(t, row[i].accountAddrLen, c.accountAddrLen)
+		require.EqualValues(t, row[i].accountAddr, c.accountAddr)
+		require.EqualValues(t, row[i].storageAddrLen, c.storageAddrLen)
+		require.EqualValues(t, row[i].storageAddr, c.storageAddr)
 		i++
 	}
 }
@@ -166,13 +166,13 @@ func TestBranchData_ReplacePlainKeys(t *testing.T) {
 		if c == nil {
 			continue
 		}
-		if c.accountPlainKeyLen > 0 {
-			offt, _ := binary.Uvarint(c.accountPlainKey[:c.accountPlainKeyLen])
-			t.Logf("%d apk %x, offt %d\n", i, c.accountPlainKey[:c.accountPlainKeyLen], offt)
+		if c.accountAddrLen > 0 {
+			offt, _ := binary.Uvarint(c.accountAddr[:c.accountAddrLen])
+			t.Logf("%d apk %x, offt %d\n", i, c.accountAddr[:c.accountAddrLen], offt)
 		}
-		if c.storagePlainKeyLen > 0 {
-			offt, _ := binary.Uvarint(c.storagePlainKey[:c.storagePlainKeyLen])
-			t.Logf("%d spk %x offt %d\n", i, c.storagePlainKey[:c.storagePlainKeyLen], offt)
+		if c.storageAddrLen > 0 {
+			offt, _ := binary.Uvarint(c.storageAddr[:c.storageAddrLen])
+			t.Logf("%d spk %x offt %d\n", i, c.storageAddr[:c.storageAddrLen], offt)
 		}
 
 	}

@@ -48,3 +48,6 @@ func (c *DownloaderClient) Verify(ctx context.Context, in *proto_downloader.Veri
 func (c *DownloaderClient) Stats(ctx context.Context, in *proto_downloader.StatsRequest, opts ...grpc.CallOption) (*proto_downloader.StatsReply, error) {
 	return c.server.Stats(ctx, in)
 }
+func (c *DownloaderClient) SetLogPrefix(ctx context.Context, in *proto_downloader.SetLogPrefixRequest, opts ...grpc.CallOption) (*emptypb.Empty, error) {
+	return c.server.SetLogPrefix(ctx, in)
+}

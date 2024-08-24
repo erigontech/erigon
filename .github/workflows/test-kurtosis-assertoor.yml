@@ -6,7 +6,7 @@ on:
   workflow_dispatch:
   # pull_request:
   #   branches:
-  #     - kurtosis_assertoor
+  #     - sudeep/kurtosis_assertoor
   #   types:
   #     - opened
   #     - reopened
@@ -14,7 +14,7 @@ on:
   #     - ready_for_review
   # push:
   #   branches:
-  #     - kurtosis_assertoor
+  #     - sudeep/kurtosis_assertoor
 
 
 
@@ -39,7 +39,7 @@ jobs:
 
       - name: download kurtosis config
         run: |
-          wget -O kurtosis_config_with_p.yaml https://raw.githubusercontent.com/erigontech/erigon/kurtosis_assertoor/.github/workflows/kurtosis/config.yaml
+          wget -O kurtosis_config_with_p.yaml https://raw.githubusercontent.com/erigontech/erigon/main/.github/workflows/kurtosis/config.yaml
           sed 's/<<ERIGON_IMAGE_PLACEHOLDER>>/thorax\/erigon:ci-'$GITHUB_SHA'/' kurtosis_config_with_p.yaml > kurtosis_config.yaml
 
       - name: Run Kurtosis + assertoor tests

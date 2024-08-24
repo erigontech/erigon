@@ -22,9 +22,10 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	stateLib "github.com/erigontech/erigon-lib/state"
 	"os"
 	"time"
+
+	stateLib "github.com/erigontech/erigon-lib/state"
 
 	"github.com/erigontech/erigon-lib/wrap"
 

@@ -64,6 +64,7 @@ import (
 	"github.com/erigontech/erigon/eth/stagedsync/stages"
 	"github.com/erigontech/erigon/turbo/services"
 	"github.com/erigontech/erigon/turbo/shards"
+	"github.com/erigontech/erigon/turbo/snapshotsync/freezeblocks"
 )
 
 var (
@@ -243,6 +244,8 @@ func ExecV3(ctx context.Context,
 	}
 	txNumInDB := doms.TxNum()
 
+	txNumsReader := rawdbv3.TxNums.WithCustomReadTxNumFunc(freezeblocks.ReadTxNumFuncFromBlockReader(ctx, cfg.blockReader))
+
 	var (
 		inputTxNum    = doms.TxNum()
 		stageProgress = execStage.BlockNumber
@@ -255,7 +258,7 @@ func ExecV3(ctx context.Context,
 	blockComplete.Store(true)
 
 	nothingToExec := func(applyTx kv.Tx) (bool, error) {
-		_, lastTxNum, err := rawdbv3.TxNums.Last(applyTx)
+		_, lastTxNum, err := txNumsReader.Last(applyTx)
 		if err != nil {
 			return false, err
 		}
@@ -266,11 +269,11 @@ func ExecV3(ctx context.Context,
 	//  2. ExecutionStage > Snapshots: no half-block data possible. Rely on DB.
 	restoreTxNum := func(applyTx kv.Tx) error {
 		var err error
-		maxTxNum, err = rawdbv3.TxNums.Max(applyTx, maxBlockNum)
+		maxTxNum, err = txNumsReader.Max(applyTx, maxBlockNum)
 		if err != nil {
 			return err
 		}
-		ok, _blockNum, err := rawdbv3.TxNums.FindBlockNum(applyTx, doms.TxNum())
+		ok, _blockNum, err := txNumsReader.FindBlockNum(applyTx, doms.TxNum())
 		if err != nil {
 			return err
 		}
@@ -278,13 +281,13 @@ func ExecV3(ctx context.Context,
 			return fmt.Errorf("seems broken TxNums index not filled. can't find blockNum of txNum=%d", inputTxNum)
 		}
 		{
-			_max, _ := rawdbv3.TxNums.Max(applyTx, _blockNum)
+			_max, _ := txNumsReader.Max(applyTx, _blockNum)
 			if doms.TxNum() == _max {
 				_blockNum++
 			}
 		}
 
-		_min, err := rawdbv3.TxNums.Min(applyTx, _blockNum)
+		_min, err := txNumsReader.Min(applyTx, _blockNum)
 		if err != nil {
 			return err
 		}
@@ -298,7 +301,7 @@ func ExecV3(ctx context.Context,
 		inputTxNum = _min
 		outputTxNum.Store(inputTxNum)
 
-		//_max, _ := rawdbv3.TxNums.Max(applyTx, blockNum)
+		//_max, _ := txNumsReader.Max(applyTx, blockNum)
 		//fmt.Printf("[commitment] found domain.txn %d, inputTxn %d, offset %d. DB found block %d {%d, %d}\n", doms.TxNum(), inputTxNum, offsetFromBlockBeginning, blockNum, _min, _max)
 		doms.SetBlockNum(_blockNum)
 		doms.SetTxNum(inputTxNum)
@@ -548,7 +551,7 @@ func ExecV3(ctx context.Context,
 							rs.ReTry(txTask, in)
 						})
 
-						//lastTxNumInDb, _ := rawdbv3.TxNums.Max(tx, outputBlockNum.Get())
+						//lastTxNumInDb, _ := txNumsReader.Max(tx, outputBlockNum.Get())
 						//if lastTxNumInDb != outputTxNum.Load()-1 {
 						//	panic(fmt.Sprintf("assert: %d != %d", lastTxNumInDb, outputTxNum.Load()))
 						//}
@@ -1278,20 +1281,22 @@ func reconstituteStep(last bool,
 ) error {
 	var startOk, endOk bool
 	startTxNum, endTxNum := as.TxNumRange()
+
+	txNumsReader := rawdbv3.TxNums.WithCustomReadTxNumFunc(freezeblocks.ReadTxNumFuncFromBlockReader(ctx, blockReader))
 	var startBlockNum, endBlockNum uint64 // First block which is not covered by the history snapshot files
 	if err := chainDb.View(ctx, func(tx kv.Tx) (err error) {
-		startOk, startBlockNum, err = rawdbv3.TxNums.FindBlockNum(tx, startTxNum)
+		startOk, startBlockNum, err = txNumsReader.FindBlockNum(tx, startTxNum)
 		if err != nil {
 			return err
 		}
 		if startBlockNum > 0 {
 			startBlockNum--
-			startTxNum, err = rawdbv3.TxNums.Min(tx, startBlockNum)
+			startTxNum, err = txNumsReader.Min(tx, startBlockNum)
 			if err != nil {
 				return err
 			}
 		}
-		endOk, endBlockNum, err = rawdbv3.TxNums.FindBlockNum(tx, endTxNum)
+		endOk, endBlockNum, err = txNumsReader.FindBlockNum(tx, endTxNum)
 		if err != nil {
 			return err
 		}
@@ -1816,25 +1821,25 @@ func ReconstituteState(ctx context.Context, s *StageState, dirs datadir.Dirs, wo
 		return nil
 	}
 	lastStep := aggSteps[len(aggSteps)-1]
-
+	txNumsReader := rawdbv3.TxNums.WithCustomReadTxNumFunc(freezeblocks.ReadTxNumFuncFromBlockReader(ctx, blockReader))
 	var ok bool
 	var blockNum uint64 // First block which is not covered by the history snapshot files
 	var txNum uint64
 	if err := chainDb.View(ctx, func(tx kv.Tx) error {
 		_, toTxNum := lastStep.TxNumRange()
-		ok, blockNum, err = rawdbv3.TxNums.FindBlockNum(tx, toTxNum)
+		ok, blockNum, err = txNumsReader.FindBlockNum(tx, toTxNum)
 		if err != nil {
 			return err
 		}
 		if !ok {
-			lastBn, lastTn, _ := rawdbv3.TxNums.Last(tx)
+			lastBn, lastTn, _ := txNumsReader.Last(tx)
 			return fmt.Errorf("blockNum for mininmaxTxNum=%d not found. See lastBlockNum=%d,lastTxNum=%d", toTxNum, lastBn, lastTn)
 		}
 		if blockNum == 0 {
 			return errors.New("not enough transactions in the history data")
 		}
 		blockNum--
-		txNum, err = rawdbv3.TxNums.Max(tx, blockNum)
+		txNum, err = txNumsReader.Max(tx, blockNum)
 		if err != nil {
 			return err
 		}

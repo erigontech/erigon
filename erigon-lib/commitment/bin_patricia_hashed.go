@@ -120,8 +120,8 @@ package commitment
 //	apl           int                             // length of account plain key
 //	spk           [length.Addr + length.Hash]byte // storage plain key
 //	spl           int                             // length of the storage plain key
-//	downHashedKey [maxKeySize]byte
-//	downHashedLen int
+//	hashedExtension [maxKeySize]byte
+//	hashedExtLen int
 //	extension     [halfKeySize]byte
 //	extLen        int
 //	Nonce         uint64
@@ -137,12 +137,12 @@ package commitment
 //	cl.Balance = *cell.Balance.Clone()
 //	cl.Nonce = cell.Nonce
 //	cl.StorageLen = cell.StorageLen
-//	cl.accountPlainKeyLen = cell.apl
-//	cl.storagePlainKeyLen = cell.spl
+//	cl.accountAddrLen = cell.apl
+//	cl.storageAddrLen = cell.spl
 //	cl.hashLen = cell.hl
 //
-//	copy(cl.accountPlainKey[:], cell.apk[:])
-//	copy(cl.storagePlainKey[:], cell.spk[:])
+//	copy(cl.accountAddr[:], cell.apk[:])
+//	copy(cl.storageAddr[:], cell.spk[:])
 //	copy(cl.hash[:], cell.h[:])
 //
 //	if cell.extLen > 0 {
@@ -150,10 +150,10 @@ package commitment
 //		copy(cl.extension[:], compactedExt)
 //		cl.extLen = len(compactedExt)
 //	}
-//	if cell.downHashedLen > 0 {
-//		compactedDHK := binToCompact(cell.downHashedKey[:cell.downHashedLen])
-//		copy(cl.downHashedKey[:], compactedDHK)
-//		cl.downHashedLen = len(compactedDHK)
+//	if cell.hashedExtLen > 0 {
+//		compactedDHK := binToCompact(cell.hashedExtension[:cell.hashedExtLen])
+//		copy(cl.hashedExtension[:], compactedDHK)
+//		cl.hashedExtLen = len(compactedDHK)
 //	}
 //
 //	copy(cl.CodeHash[:], cell.CodeHash[:])
@@ -170,7 +170,7 @@ package commitment
 //func (cell *BinaryCell) fillEmpty() {
 //	cell.apl = 0
 //	cell.spl = 0
-//	cell.downHashedLen = 0
+//	cell.hashedExtLen = 0
 //	cell.extLen = 0
 //	cell.hl = 0
 //	cell.Nonce = 0
@@ -181,13 +181,13 @@ package commitment
 //}
 //
 //func (cell *BinaryCell) fillFromUpperCell(upBinaryCell *BinaryCell, depth, depthIncrement int) {
-//	if upBinaryCell.downHashedLen >= depthIncrement {
-//		cell.downHashedLen = upBinaryCell.downHashedLen - depthIncrement
+//	if upBinaryCell.hashedExtLen >= depthIncrement {
+//		cell.hashedExtLen = upBinaryCell.hashedExtLen - depthIncrement
 //	} else {
-//		cell.downHashedLen = 0
+//		cell.hashedExtLen = 0
 //	}
-//	if upBinaryCell.downHashedLen > depthIncrement {
-//		copy(cell.downHashedKey[:], upBinaryCell.downHashedKey[depthIncrement:upBinaryCell.downHashedLen])
+//	if upBinaryCell.hashedExtLen > depthIncrement {
+//		copy(cell.hashedExtension[:], upBinaryCell.hashedExtension[depthIncrement:upBinaryCell.hashedExtLen])
 //	}
 //	if upBinaryCell.extLen >= depthIncrement {
 //		cell.extLen = upBinaryCell.extLen - depthIncrement
@@ -273,7 +273,7 @@ package commitment
 //	extraLen := 0
 //	if cell.apl > 0 {
 //		if depth > halfKeySize {
-//			return errors.New("deriveHashedKeys accountPlainKey present at depth > halfKeySize")
+//			return errors.New("deriveHashedKeys accountAddr present at depth > halfKeySize")
 //		}
 //		extraLen = halfKeySize - depth
 //	}
@@ -285,13 +285,13 @@ package commitment
 //		}
 //	}
 //	if extraLen > 0 {
-//		if cell.downHashedLen > 0 {
-//			copy(cell.downHashedKey[extraLen:], cell.downHashedKey[:cell.downHashedLen])
+//		if cell.hashedExtLen > 0 {
+//			copy(cell.hashedExtension[extraLen:], cell.hashedExtension[:cell.hashedExtLen])
 //		}
-//		cell.downHashedLen += extraLen
+//		cell.hashedExtLen += extraLen
 //		var hashedKeyOffset, downOffset int
 //		if cell.apl > 0 {
-//			if err := binHashKey(keccak, cell.apk[:cell.apl], cell.downHashedKey[:], depth); err != nil {
+//			if err := binHashKey(keccak, cell.apk[:cell.apl], cell.hashedExtension[:], depth); err != nil {
 //				return err
 //			}
 //			downOffset = halfKeySize - depth
@@ -300,7 +300,7 @@ package commitment
 //			if depth >= halfKeySize {
 //				hashedKeyOffset = depth - halfKeySize
 //			}
-//			if err := binHashKey(keccak, cell.spk[accountKeyLen:cell.spl], cell.downHashedKey[downOffset:], hashedKeyOffset); err != nil {
+//			if err := binHashKey(keccak, cell.spk[accountKeyLen:cell.spl], cell.hashedExtension[downOffset:], hashedKeyOffset); err != nil {
 //				return err
 //			}
 //		}
@@ -308,8 +308,8 @@ package commitment
 //	return nil
 //}
 //
-//func (cell *BinaryCell) fillFromFields(data []byte, pos int, fieldBits PartFlags) (int, error) {
-//	if fieldBits&HashedKeyPart != 0 {
+//func (cell *BinaryCell) fillFromFields(data []byte, pos int, fieldBits cellFields) (int, error) {
+//	if fieldBits&fieldExtension != 0 {
 //		l, n := binary.Uvarint(data[pos:])
 //		if n == 0 {
 //			return 0, errors.New("fillFromFields buffer too small for hashedKey len")
@@ -320,27 +320,27 @@ package commitment
 //		if len(data) < pos+int(l) {
 //			return 0, fmt.Errorf("fillFromFields buffer too small for hashedKey exp %d got %d", pos+int(l), len(data))
 //		}
-//		cell.downHashedLen = int(l)
+//		cell.hashedExtLen = int(l)
 //		cell.extLen = int(l)
 //		if l > 0 {
-//			copy(cell.downHashedKey[:], data[pos:pos+int(l)])
+//			copy(cell.hashedExtension[:], data[pos:pos+int(l)])
 //			copy(cell.extension[:], data[pos:pos+int(l)])
 //			pos += int(l)
 //		}
 //	} else {
-//		cell.downHashedLen = 0
+//		cell.hashedExtLen = 0
 //		cell.extLen = 0
 //	}
-//	if fieldBits&AccountPlainPart != 0 {
+//	if fieldBits&fieldAccountAddr != 0 {
 //		l, n := binary.Uvarint(data[pos:])
 //		if n == 0 {
-//			return 0, errors.New("fillFromFields buffer too small for accountPlainKey len")
+//			return 0, errors.New("fillFromFields buffer too small for accountAddr len")
 //		} else if n < 0 {
-//			return 0, errors.New("fillFromFields value overflow for accountPlainKey len")
+//			return 0, errors.New("fillFromFields value overflow for accountAddr len")
 //		}
 //		pos += n
 //		if len(data) < pos+int(l) {
-//			return 0, errors.New("fillFromFields buffer too small for accountPlainKey")
+//			return 0, errors.New("fillFromFields buffer too small for accountAddr")
 //		}
 //		cell.apl = int(l)
 //		if l > 0 {
@@ -350,16 +350,16 @@ package commitment
 //	} else {
 //		cell.apl = 0
 //	}
-//	if fieldBits&StoragePlainPart != 0 {
+//	if fieldBits&fieldStorageAddr != 0 {
 //		l, n := binary.Uvarint(data[pos:])
 //		if n == 0 {
-//			return 0, errors.New("fillFromFields buffer too small for storagePlainKey len")
+//			return 0, errors.New("fillFromFields buffer too small for storageAddr len")
 //		} else if n < 0 {
-//			return 0, errors.New("fillFromFields value overflow for storagePlainKey len")
+//			return 0, errors.New("fillFromFields value overflow for storageAddr len")
 //		}
 //		pos += n
 //		if len(data) < pos+int(l) {
-//			return 0, errors.New("fillFromFields buffer too small for storagePlainKey")
+//			return 0, errors.New("fillFromFields buffer too small for storageAddr")
 //		}
 //		cell.spl = int(l)
 //		if l > 0 {
@@ -369,7 +369,7 @@ package commitment
 //	} else {
 //		cell.spl = 0
 //	}
-//	if fieldBits&HashPart != 0 {
+//	if fieldBits&fieldHash != 0 {
 //		l, n := binary.Uvarint(data[pos:])
 //		if n == 0 {
 //			return 0, errors.New("fillFromFields buffer too small for hash len")
@@ -682,32 +682,32 @@ package commitment
 //			hashedKeyOffset = depth - halfKeySize
 //		}
 //		singleton := depth <= halfKeySize
-//		if err := binHashKey(bph.keccak, cell.spk[bph.accountKeyLen:cell.spl], cell.downHashedKey[:], hashedKeyOffset); err != nil {
+//		if err := binHashKey(bph.keccak, cell.spk[bph.accountKeyLen:cell.spl], cell.hashedExtension[:], hashedKeyOffset); err != nil {
 //			return nil, err
 //		}
-//		cell.downHashedKey[halfKeySize-hashedKeyOffset] = 16 // Add terminator
+//		cell.hashedExtension[halfKeySize-hashedKeyOffset] = 16 // Add terminator
 //		if singleton {
 //			if bph.trace {
-//				fmt.Printf("leafHashWithKeyVal(singleton) for [%x]=>[%x]\n", cell.downHashedKey[:halfKeySize-hashedKeyOffset+1], cell.Storage[:cell.StorageLen])
+//				fmt.Printf("leafHashWithKeyVal(singleton) for [%x]=>[%x]\n", cell.hashedExtension[:halfKeySize-hashedKeyOffset+1], cell.Storage[:cell.StorageLen])
 //			}
 //			aux := make([]byte, 0, 33)
-//			if aux, err = bph.leafHashWithKeyVal(aux, cell.downHashedKey[:halfKeySize-hashedKeyOffset+1], cell.Storage[:cell.StorageLen], true); err != nil {
+//			if aux, err = bph.leafHashWithKeyVal(aux, cell.hashedExtension[:halfKeySize-hashedKeyOffset+1], cell.Storage[:cell.StorageLen], true); err != nil {
 //				return nil, err
 //			}
 //			storageRootHash = *(*[length.Hash]byte)(aux[1:])
 //			storageRootHashIsSet = true
 //		} else {
 //			if bph.trace {
-//				fmt.Printf("leafHashWithKeyVal for [%x]=>[%x]\n", cell.downHashedKey[:halfKeySize-hashedKeyOffset+1], cell.Storage[:cell.StorageLen])
+//				fmt.Printf("leafHashWithKeyVal for [%x]=>[%x]\n", cell.hashedExtension[:halfKeySize-hashedKeyOffset+1], cell.Storage[:cell.StorageLen])
 //			}
-//			return bph.leafHashWithKeyVal(buf, cell.downHashedKey[:halfKeySize-hashedKeyOffset+1], cell.Storage[:cell.StorageLen], false)
+//			return bph.leafHashWithKeyVal(buf, cell.hashedExtension[:halfKeySize-hashedKeyOffset+1], cell.Storage[:cell.StorageLen], false)
 //		}
 //	}
 //	if cell.apl > 0 {
-//		if err := binHashKey(bph.keccak, cell.apk[:cell.apl], cell.downHashedKey[:], depth); err != nil {
+//		if err := binHashKey(bph.keccak, cell.apk[:cell.apl], cell.hashedExtension[:], depth); err != nil {
 //			return nil, err
 //		}
-//		cell.downHashedKey[halfKeySize-depth] = 16 // Add terminator
+//		cell.hashedExtension[halfKeySize-depth] = 16 // Add terminator
 //		if !storageRootHashIsSet {
 //			if cell.extLen > 0 {
 //				// Extension
@@ -730,9 +730,9 @@ package commitment
 //		var valBuf [128]byte
 //		valLen := cell.accountForHashing(valBuf[:], storageRootHash)
 //		if bph.trace {
-//			fmt.Printf("accountLeafHashWithKey for [%x]=>[%x]\n", cell.downHashedKey[:halfKeySize+1-depth], rlp.RlpEncodedBytes(valBuf[:valLen]))
+//			fmt.Printf("accountLeafHashWithKey for [%x]=>[%x]\n", cell.hashedExtension[:halfKeySize+1-depth], rlp.RlpEncodedBytes(valBuf[:valLen]))
 //		}
-//		return bph.accountLeafHashWithKey(buf, cell.downHashedKey[:halfKeySize+1-depth], rlp.RlpEncodedBytes(valBuf[:valLen]))
+//		return bph.accountLeafHashWithKey(buf, cell.hashedExtension[:halfKeySize+1-depth], rlp.RlpEncodedBytes(valBuf[:valLen]))
 //	}
 //	buf = append(buf, 0x80+32)
 //	if cell.extLen > 0 {
@@ -764,12 +764,12 @@ package commitment
 //		if bph.trace {
 //			fmt.Printf("needUnfolding root, rootChecked = %t\n", bph.rootChecked)
 //		}
-//		if bph.rootChecked && bph.root.downHashedLen == 0 && bph.root.hl == 0 {
+//		if bph.rootChecked && bph.root.hashedExtLen == 0 && bph.root.hl == 0 {
 //			// Previously checked, empty root, no unfolding needed
 //			return 0
 //		}
 //		cell = &bph.root
-//		if cell.downHashedLen == 0 && cell.hl == 0 && !bph.rootChecked {
+//		if cell.hashedExtLen == 0 && cell.hl == 0 && !bph.rootChecked {
 //			// Need to attempt to unfold the root
 //			return 1
 //		}
@@ -784,7 +784,7 @@ package commitment
 //	if len(hashedKey) <= depth {
 //		return 0
 //	}
-//	if cell.downHashedLen == 0 {
+//	if cell.hashedExtLen == 0 {
 //		if cell.hl == 0 {
 //			// cell is empty, no need to unfold further
 //			return 0
@@ -792,9 +792,9 @@ package commitment
 //		// unfold branch node
 //		return 1
 //	}
-//	cpl := commonPrefixLen(hashedKey[depth:], cell.downHashedKey[:cell.downHashedLen-1])
+//	cpl := commonPrefixLen(hashedKey[depth:], cell.hashedExtension[:cell.hashedExtLen-1])
 //	if bph.trace {
-//		fmt.Printf("cpl=%d, cell.downHashedKey=[%x], depth=%d, hashedKey[depth:]=[%x]\n", cpl, cell.downHashedKey[:cell.downHashedLen], depth, hashedKey[depth:])
+//		fmt.Printf("cpl=%d, cell.hashedExtension=[%x], depth=%d, hashedKey[depth:]=[%x]\n", cpl, cell.hashedExtension[:cell.hashedExtLen], depth, hashedKey[depth:])
 //	}
 //	unfolding := cpl + 1
 //	if depth < halfKeySize && depth+unfolding > halfKeySize {
@@ -844,7 +844,7 @@ package commitment
 //		fieldBits := branchData[pos]
 //		pos++
 //		var err error
-//		if pos, err = cell.fillFromFields(branchData, pos, PartFlags(fieldBits)); err != nil {
+//		if pos, err = cell.fillFromFields(branchData, pos, cellFields(fieldBits)); err != nil {
 //			return false, fmt.Errorf("prefix [%x], branchData[%x]: %w", bph.currentKey[:bph.currentKeyLen], branchData, err)
 //		}
 //		if bph.trace {
@@ -880,7 +880,7 @@ package commitment
 //	var col byte
 //	var upDepth, depth int
 //	if bph.activeRows == 0 {
-//		if bph.rootChecked && bph.root.hl == 0 && bph.root.downHashedLen == 0 {
+//		if bph.rootChecked && bph.root.hl == 0 && bph.root.hashedExtLen == 0 {
 //			// No unfolding for empty root
 //			return nil
 //		}
@@ -909,7 +909,7 @@ package commitment
 //	bph.touchMap[row] = 0
 //	bph.afterMap[row] = 0
 //	bph.branchBefore[row] = false
-//	if upCell.downHashedLen == 0 {
+//	if upCell.hashedExtLen == 0 {
 //		depth = upDepth + 1
 //		if unfolded, err := bph.unfoldBranchNode(row, touched && !present /* deleted */, depth); err != nil {
 //			return err
@@ -917,9 +917,9 @@ package commitment
 //			// Return here to prevent activeRow from being incremented
 //			return nil
 //		}
-//	} else if upCell.downHashedLen >= unfolding {
+//	} else if upCell.hashedExtLen >= unfolding {
 //		depth = upDepth + unfolding
-//		nibble := upCell.downHashedKey[unfolding-1]
+//		nibble := upCell.hashedExtension[unfolding-1]
 //		if touched {
 //			bph.touchMap[row] = uint16(1) << nibble
 //		}
@@ -935,13 +935,13 @@ package commitment
 //			cell.apl = 0
 //		}
 //		if unfolding > 1 {
-//			copy(bph.currentKey[bph.currentKeyLen:], upCell.downHashedKey[:unfolding-1])
+//			copy(bph.currentKey[bph.currentKeyLen:], upCell.hashedExtension[:unfolding-1])
 //		}
 //		bph.currentKeyLen += unfolding - 1
 //	} else {
-//		// upCell.downHashedLen < unfolding
-//		depth = upDepth + upCell.downHashedLen
-//		nibble := upCell.downHashedKey[upCell.downHashedLen-1]
+//		// upCell.hashedExtLen < unfolding
+//		depth = upDepth + upCell.hashedExtLen
+//		nibble := upCell.hashedExtension[upCell.hashedExtLen-1]
 //		if touched {
 //			bph.touchMap[row] = uint16(1) << nibble
 //		}
@@ -949,17 +949,17 @@ package commitment
 //			bph.afterMap[row] = uint16(1) << nibble
 //		}
 //		cell := &bph.grid[row][nibble]
-//		cell.fillFromUpperCell(upCell, depth, upCell.downHashedLen)
+//		cell.fillFromUpperCell(upCell, depth, upCell.hashedExtLen)
 //		if bph.trace {
 //			fmt.Printf("cell (%d, %x) depth=%d\n", row, nibble, depth)
 //		}
 //		if row >= halfKeySize {
 //			cell.apl = 0
 //		}
-//		if upCell.downHashedLen > 1 {
-//			copy(bph.currentKey[bph.currentKeyLen:], upCell.downHashedKey[:upCell.downHashedLen-1])
+//		if upCell.hashedExtLen > 1 {
+//			copy(bph.currentKey[bph.currentKeyLen:], upCell.hashedExtension[:upCell.hashedExtLen-1])
 //		}
-//		bph.currentKeyLen += upCell.downHashedLen - 1
+//		bph.currentKeyLen += upCell.hashedExtLen - 1
 //	}
 //	bph.depths[bph.activeRows] = depth
 //	bph.activeRows++
@@ -1029,7 +1029,7 @@ package commitment
 //		upBinaryCell.apl = 0
 //		upBinaryCell.spl = 0
 //		upBinaryCell.extLen = 0
-//		upBinaryCell.downHashedLen = 0
+//		upBinaryCell.hashedExtLen = 0
 //		if bph.branchBefore[row] {
 //			_, err = bph.branchEncoder.CollectUpdate(bph.ctx, updateKey, 0, bph.touchMap[row], 0, RetrieveCellNoop)
 //			if err != nil {
@@ -1126,7 +1126,7 @@ package commitment
 //				return nil, err
 //			}
 //
-//			// TODO extension and downHashedKey should be encoded to hex format and vice versa, data loss due to array sizes
+//			// TODO extension and hashedExtension should be encoded to hex format and vice versa, data loss due to array sizes
 //			return cell.unwrapToHexCell(), nil
 //		}
 //
@@ -1147,10 +1147,10 @@ package commitment
 //			}
 //		}
 //		upBinaryCell.extLen = depth - upDepth - 1
-//		upBinaryCell.downHashedLen = upBinaryCell.extLen
+//		upBinaryCell.hashedExtLen = upBinaryCell.extLen
 //		if upBinaryCell.extLen > 0 {
 //			copy(upBinaryCell.extension[:], bph.currentKey[upDepth:bph.currentKeyLen])
-//			copy(upBinaryCell.downHashedKey[:], bph.currentKey[upDepth:bph.currentKeyLen])
+//			copy(upBinaryCell.hashedExtension[:], bph.currentKey[upDepth:bph.currentKeyLen])
 //		}
 //		if depth < halfKeySize {
 //			upBinaryCell.apl = 0
@@ -1229,15 +1229,15 @@ package commitment
 //			fmt.Printf("updateBinaryCell setting (%d, %x), depth=%d\n", row, col, depth)
 //		}
 //	}
-//	if cell.downHashedLen == 0 {
-//		copy(cell.downHashedKey[:], hashedKey[depth:])
-//		cell.downHashedLen = len(hashedKey) - depth
+//	if cell.hashedExtLen == 0 {
+//		copy(cell.hashedExtension[:], hashedKey[depth:])
+//		cell.hashedExtLen = len(hashedKey) - depth
 //		if bph.trace {
-//			fmt.Printf("set downHasheKey=[%x]\n", cell.downHashedKey[:cell.downHashedLen])
+//			fmt.Printf("set downHasheKey=[%x]\n", cell.hashedExtension[:cell.hashedExtLen])
 //		}
 //	} else {
 //		if bph.trace {
-//			fmt.Printf("left downHasheKey=[%x]\n", cell.downHashedKey[:cell.downHashedLen])
+//			fmt.Printf("left downHasheKey=[%x]\n", cell.hashedExtension[:cell.hashedExtLen])
 //		}
 //	}
 //	if len(hashedKey) == halfKeySize { // set account key
@@ -1353,7 +1353,7 @@ package commitment
 //func (bph *BinPatriciaHashed) Reset() {
 //	bph.rootChecked = false
 //	bph.root.hl = 0
-//	bph.root.downHashedLen = 0
+//	bph.root.hashedExtLen = 0
 //	bph.root.apl = 0
 //	bph.root.spl = 0
 //	bph.root.extLen = 0
@@ -1367,7 +1367,7 @@ package commitment
 //
 //func (c *BinaryCell) bytes() []byte {
 //	var pos = 1
-//	size := 1 + c.hl + 1 + c.apl + c.spl + 1 + c.downHashedLen + 1 + c.extLen + 1 // max size
+//	size := 1 + c.hl + 1 + c.apl + c.spl + 1 + c.hashedExtLen + 1 + c.extLen + 1 // max size
 //	buf := make([]byte, size)
 //
 //	var flags uint8
@@ -1392,19 +1392,19 @@ package commitment
 //		copy(buf[pos:pos+c.spl], c.spk[:])
 //		pos += c.spl
 //	}
-//	if c.downHashedLen != 0 {
+//	if c.hashedExtLen != 0 {
 //		flags |= 8
-//		buf[pos] = byte(c.downHashedLen)
+//		buf[pos] = byte(c.hashedExtLen)
 //		pos++
-//		copy(buf[pos:pos+c.downHashedLen], c.downHashedKey[:])
-//		pos += c.downHashedLen
+//		copy(buf[pos:pos+c.hashedExtLen], c.hashedExtension[:])
+//		pos += c.hashedExtLen
 //	}
 //	if c.extLen != 0 {
 //		flags |= 16
 //		buf[pos] = byte(c.extLen)
 //		pos++
-//		copy(buf[pos:pos+c.downHashedLen], c.downHashedKey[:])
-//		//pos += c.downHashedLen
+//		copy(buf[pos:pos+c.hashedExtLen], c.hashedExtension[:])
+//		//pos += c.hashedExtLen
 //	}
 //	buf[0] = flags
 //	return buf
@@ -1439,10 +1439,10 @@ package commitment
 //		pos += c.spl
 //	}
 //	if flags&8 != 0 {
-//		c.downHashedLen = int(buf[pos])
+//		c.hashedExtLen = int(buf[pos])
 //		pos++
-//		copy(c.downHashedKey[:], buf[pos:pos+c.downHashedLen])
-//		pos += c.downHashedLen
+//		copy(c.hashedExtension[:], buf[pos:pos+c.hashedExtLen])
+//		pos += c.hashedExtLen
 //	}
 //	if flags&16 != 0 {
 //		c.extLen = int(buf[pos])
@@ -1653,11 +1653,11 @@ package commitment
 //		bc.Balance = *cl.Balance.Clone()
 //		bc.Nonce = cl.Nonce
 //		bc.StorageLen = cl.StorageLen
-//		bc.apl = cl.accountPlainKeyLen
-//		bc.spl = cl.storagePlainKeyLen
+//		bc.apl = cl.accountAddrLen
+//		bc.spl = cl.storageAddrLen
 //		bc.hl = cl.hashLen
-//		copy(bc.apk[:], cl.accountPlainKey[:])
-//		copy(bc.spk[:], cl.storagePlainKey[:])
+//		copy(bc.apk[:], cl.accountAddr[:])
+//		copy(bc.spk[:], cl.storageAddr[:])
 //		copy(bc.h[:], cl.hash[:])
 //
 //		if cl.extLen > 0 {
@@ -1665,10 +1665,10 @@ package commitment
 //			copy(bc.extension[:], binExt)
 //			bc.extLen = len(binExt)
 //		}
-//		if cl.downHashedLen > 0 {
-//			bindhk := compactToBin(cl.downHashedKey[:cl.downHashedLen])
-//			copy(bc.downHashedKey[:], bindhk)
-//			bc.downHashedLen = len(bindhk)
+//		if cl.hashedExtLen > 0 {
+//			bindhk := compactToBin(cl.hashedExtension[:cl.hashedExtLen])
+//			copy(bc.hashedExtension[:], bindhk)
+//			bc.hashedExtLen = len(bindhk)
 //		}
 //
 //		copy(bc.CodeHash[:], cl.CodeHash[:])
