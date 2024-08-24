@@ -415,6 +415,8 @@ func mergeEfs(preval, val, buf []byte) ([]byte, error) {
 
 type valueTransformer func(val []byte, startTxNum, endTxNum uint64) ([]byte, error)
 
+const DomainMinStepsToCompress = 16
+
 func (dt *DomainRoTx) mergeFiles(ctx context.Context, domainFiles, indexFiles, historyFiles []*filesItem, r DomainRanges, vt valueTransformer, ps *background.ProgressSet) (valuesIn, indexIn, historyIn *filesItem, err error) {
 	if !r.any() {
 		return
@@ -461,7 +463,7 @@ func (dt *DomainRoTx) mergeFiles(ctx context.Context, domainFiles, indexFiles, h
 	}
 
 	compression := dt.d.compression
-	if toStep-fromStep < 64 {
+	if toStep-fromStep < DomainMinStepsToCompress {
 		compression = CompressNone
 	}
 	kvWriter = NewArchiveWriter(kvFile, compression)

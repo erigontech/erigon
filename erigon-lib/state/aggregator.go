@@ -1605,7 +1605,12 @@ func (ac *AggregatorRoTx) SqueezeCommitmentFiles(mergedAgg *AggregatorRoTx) erro
 			}
 			defer squeezedCompr.Close()
 
-			reader := NewArchiveGetter(cf.decompressor.MakeGetter(), commitment.d.compression)
+			steps := cf.endTxNum/ac.a.aggregationStep - cf.startTxNum/ac.a.aggregationStep
+			compression := commitment.d.compression
+			if steps < DomainMinStepsToCompress {
+				compression = CompressNone
+			}
+			reader := NewArchiveGetter(cf.decompressor.MakeGetter(), compression)
 			reader.Reset(0)
 
 			writer := NewArchiveWriter(squeezedCompr, commitment.d.compression)
