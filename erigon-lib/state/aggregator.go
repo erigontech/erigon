@@ -1592,8 +1592,13 @@ func (ac *AggregatorRoTx) SqueezeCommitmentFiles(mergedAgg *AggregatorRoTx) erro
 		err := func() error {
 			af, sf := mergedAccountFiles[ai], mergedStorageFiles[si]
 
+			steps := cf.endTxNum/ac.a.aggregationStep - cf.startTxNum/ac.a.aggregationStep
+			compression := commitment.d.compression
+			if steps < DomainMinStepsToCompress {
+				compression = CompressNone
+			}
 			ac.a.logger.Info("[sqeeze_migration] file start", "original", cf.decompressor.FileName(),
-				"progress", fmt.Sprintf("%d/%d", ci+1, len(mergedAccountFiles)), "compress_cfg", commitment.d.compressCfg)
+				"progress", fmt.Sprintf("%d/%d", ci+1, len(mergedAccountFiles)), "compress_cfg", commitment.d.compressCfg, "compress", compression)
 
 			originalPath := cf.decompressor.FilePath()
 			squeezedTmpPath := originalPath + sqExt + ".tmp"
@@ -1605,11 +1610,6 @@ func (ac *AggregatorRoTx) SqueezeCommitmentFiles(mergedAgg *AggregatorRoTx) erro
 			}
 			defer squeezedCompr.Close()
 
-			steps := cf.endTxNum/ac.a.aggregationStep - cf.startTxNum/ac.a.aggregationStep
-			compression := commitment.d.compression
-			if steps < DomainMinStepsToCompress {
-				compression = CompressNone
-			}
 			reader := NewArchiveGetter(cf.decompressor.MakeGetter(), compression)
 			reader.Reset(0)
 
