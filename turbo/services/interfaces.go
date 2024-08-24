@@ -60,6 +60,7 @@ type BorEventReader interface {
 	EventsByBlock(ctx context.Context, tx kv.Tx, hash common.Hash, blockNum uint64) ([]rlp.RawValue, error)
 	BorStartEventID(ctx context.Context, tx kv.Tx, hash common.Hash, blockNum uint64) (uint64, error)
 	LastFrozenEventId() uint64
+	LastFrozenEventBlockNum() uint64
 }
 
 type BorSpanReader interface {

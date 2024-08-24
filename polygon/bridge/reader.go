@@ -45,7 +45,7 @@ func NewReader(store Store, logger log.Logger, stateReceiverContractAddress stri
 
 // Events returns all sync events at blockNum
 func (r *Reader) Events(ctx context.Context, blockNum uint64) ([]*types.Message, error) {
-	start, end, err := r.store.EventIDRange(ctx, blockNum)
+	start, end, err := r.store.BlockEventIDsRange(ctx, blockNum)
 	if err != nil {
 		if errors.Is(err, ErrEventIDRangeNotFound) {
 			return nil, nil
