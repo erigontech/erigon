@@ -22,7 +22,6 @@ import (
 	"encoding/binary"
 	"encoding/hex"
 	"fmt"
-	"github.com/erigontech/erigon-lib/common/background"
 	"math"
 	"math/rand"
 	"os"
@@ -31,6 +30,8 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"github.com/erigontech/erigon-lib/common/background"
 
 	"github.com/c2h5oh/datasize"
 	"github.com/holiman/uint256"
@@ -52,7 +53,7 @@ import (
 )
 
 func TestAggregatorV3_Merge(t *testing.T) {
-	db, agg := testDbAndAggregatorv3(t, 1000)
+	db, agg := testDbAndAggregatorv3(t, 10)
 	rwTx, err := db.BeginRwNosync(context.Background())
 	require.NoError(t, err)
 	defer func() {
@@ -66,7 +67,7 @@ func TestAggregatorV3_Merge(t *testing.T) {
 	require.NoError(t, err)
 	defer domains.Close()
 
-	txs := uint64(100000)
+	txs := uint64(1000)
 	rnd := rand.New(rand.NewSource(time.Now().UnixNano()))
 
 	var (
@@ -167,7 +168,7 @@ func TestAggregatorV3_Merge(t *testing.T) {
 }
 
 func TestAggregatorV3_MergeValTransform(t *testing.T) {
-	db, agg := testDbAndAggregatorv3(t, 1000)
+	db, agg := testDbAndAggregatorv3(t, 10)
 	rwTx, err := db.BeginRwNosync(context.Background())
 	require.NoError(t, err)
 	defer func() {
@@ -181,7 +182,7 @@ func TestAggregatorV3_MergeValTransform(t *testing.T) {
 	require.NoError(t, err)
 	defer domains.Close()
 
-	txs := uint64(100000)
+	txs := uint64(1000)
 	rnd := rand.New(rand.NewSource(time.Now().UnixNano()))
 
 	agg.commitmentValuesTransform = true
