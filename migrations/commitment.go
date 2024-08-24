@@ -59,6 +59,9 @@ var SqueezeCommitmentFiles = Migration{
 		if err = agg.OpenFolder(); err != nil {
 			return err
 		}
+		if err := agg.BuildMissedIndices(ctx, estimate.IndexSnapshot.Workers()); err != nil {
+			return err
+		}
 		ac := agg.BeginFilesRo()
 		defer ac.Close()
 
@@ -77,7 +80,7 @@ var SqueezeCommitmentFiles = Migration{
 		}
 
 		{
-			log.Info("[sqeeze_migration] `domain_v2` folder found, using it as a target `domain`")
+			log.Info("[sqeeze_migration] `domain_old` folder found, using it as a target `domain`")
 			dirs2 := dirs
 			dirs2.SnapDomain += "_old"
 			aggOld, err := libstate.NewAggregator(ctx, dirs2, config3.HistoryV3AggregationStep, db, nil, logger)
@@ -88,6 +91,9 @@ var SqueezeCommitmentFiles = Migration{
 				panic(err)
 			}
 			defer aggOld.Close()
+			if err := aggOld.BuildMissedIndices(ctx, estimate.IndexSnapshot.Workers()); err != nil {
+				return err
+			}
 
 			acOld := aggOld.BeginFilesRo()
 			defer acOld.Close()
