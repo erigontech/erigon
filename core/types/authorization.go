@@ -120,15 +120,14 @@ func decodeAuthorizations(auths *[]Authorization, s *rlp.Stream) error {
 	i := 0
 	for _, err = s.List(); err == nil; _, err = s.List() {
 		auth := Authorization{}
+
+		// chainId
 		if b, err = s.Uint256Bytes(); err != nil {
 			return err
 		}
 		auth.ChainID = new(uint256.Int).SetBytes(b)
 
-		if auth.Nonce, err = s.Uint(); err != nil {
-			return err
-		}
-
+		// address
 		if b, err = s.Bytes(); err != nil {
 			return err
 		}
@@ -138,16 +137,24 @@ func decodeAuthorizations(auths *[]Authorization, s *rlp.Stream) error {
 		}
 		auth.Address = libcommon.BytesToAddress(b)
 
+		// nonce
+		if auth.Nonce, err = s.Uint(); err != nil {
+			return err
+		}
+
+		// yparity
 		if b, err = s.Uint256Bytes(); err != nil {
 			return err
 		}
 		auth.YParity.SetBytes(b)
 
+		// r
 		if b, err = s.Uint256Bytes(); err != nil {
 			return err
 		}
 		auth.R.SetBytes(b)
 
+		// s
 		if b, err = s.Uint256Bytes(); err != nil {
 			return err
 		}
@@ -181,15 +188,14 @@ func encodeAuthorizations(authorizations []Authorization, w io.Writer, b []byte)
 		if err := auth.ChainID.EncodeRLP(w); err != nil {
 			return err
 		}
-		// 2. encode Nonce
-		if err := rlp.EncodeInt(auth.Nonce, w, b); err != nil {
-			return err
-		}
-		// 3. encode Address
+		// 2. encode Address
 		if err := rlp.EncodeOptionalAddress(&auth.Address, w, b); err != nil {
 			return err
 		}
-
+		// 3. encode Nonce
+		if err := rlp.EncodeInt(auth.Nonce, w, b); err != nil {
+			return err
+		}
 		// 4. encode YParity, R, S
 		if err := auth.YParity.EncodeRLP(w); err != nil {
 			return err

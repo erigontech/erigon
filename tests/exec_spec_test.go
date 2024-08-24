@@ -14,7 +14,7 @@
 // You should have received a copy of the GNU Lesser General Public License
 // along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
-//go:build integration
+////go:build integration
 
 package tests
 
@@ -35,6 +35,7 @@ func TestExecutionSpec(t *testing.T) {
 
 	// TODO(yperbasis) make it work
 	bt.skipLoad(`^prague/eip2935_historical_block_hashes_from_state/block_hashes/block_hashes_history.json`)
+	bt.whitelist("7702")
 
 	checkStateRoot := true
 

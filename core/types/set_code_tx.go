@@ -1,6 +1,7 @@
 package types
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
 	"io"
@@ -12,6 +13,7 @@ import (
 	libcommon "github.com/erigontech/erigon-lib/common"
 	rlp2 "github.com/erigontech/erigon-lib/rlp"
 	types2 "github.com/erigontech/erigon-lib/types"
+	"github.com/erigontech/erigon/params"
 	"github.com/erigontech/erigon/rlp"
 )
 
@@ -296,4 +298,19 @@ func (tx *SetCodeTransaction) encodePayload(w io.Writer, b []byte, payloadSize, 
 	}
 	return nil
 
+}
+
+// ParseDelegation tries to parse the address from a delegation slice.
+func ParseDelegation(code []byte) (libcommon.Address, bool) {
+	if len(code) != 23 || !bytes.HasPrefix(code, params.DelegatedDesignationPrefix) {
+		return libcommon.Address{}, false
+	}
+	var addr libcommon.Address
+	copy(addr[:], code[len(params.DelegatedDesignationPrefix):])
+	return addr, true
+}
+
+// AddressToDelegation adds the delegation prefix to the specified address.
+func AddressToDelegation(addr libcommon.Address) []byte {
+	return append(params.DelegatedDesignationPrefix, addr.Bytes()...)
 }

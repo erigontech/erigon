@@ -20,7 +20,6 @@
 package vm
 
 import (
-	"bytes"
 	"errors"
 	"fmt"
 	"math"
@@ -35,7 +34,6 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/core/tracing"
 	"github.com/erigontech/erigon/core/types"
-	"github.com/erigontech/erigon/core/vm/evmtypes"
 	"github.com/erigontech/erigon/params"
 )
 
@@ -374,9 +372,7 @@ func opReturnDataCopy(pc *uint64, interpreter *EVMInterpreter, scope *ScopeConte
 
 func opExtCodeSize(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]byte, error) {
 	slot := scope.Stack.Peek()
-	address := slot.Bytes20()
-	_, _, codesize, _ := delegatedDesignationHandler(interpreter.evm.IntraBlockState(), libcommon.BytesToAddress(address[:]))
-	slot.SetUint64(codesize)
+	slot.SetUint64(uint64(len(interpreter.evm.IntraBlockState().ResolveCode(slot.Bytes20()))))
 	return nil, nil
 }
 
@@ -412,20 +408,14 @@ func opExtCodeCopy(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext)
 	)
 	addr := libcommon.Address(a.Bytes20())
 	len64 := length.Uint64()
-	var code []byte
-	if _, ddCode, _, ddPresent := delegatedDesignationHandler(interpreter.evm.IntraBlockState(), addr); ddPresent {
-		code = ddCode
-	} else {
-		code = interpreter.evm.IntraBlockState().GetCode(addr)
-	}
-	codeCopy := getDataBig(code, &codeOffset, len64)
+	codeCopy := getDataBig(interpreter.evm.IntraBlockState().ResolveCode(addr), &codeOffset, len64)
 	scope.Memory.Set(memOffset.Uint64(), len64, codeCopy)
 	return nil, nil
 }
 
 // opExtCodeHash returns the code hash of a specified account.
 // There are several cases when the function is called, while we can relay everything
-// to `state.GetCodeHash` function to ensure the correctness.
+// to `state.ResolveCodeHash` function to ensure the correctness.
 //
 //	(1) Caller tries to get the code hash of a normal contract account, state
 //
@@ -456,18 +446,18 @@ func opExtCodeCopy(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext)
 //	(6) Caller tries to get the code hash for an account which is marked as deleted,
 //
 // this account should be regarded as a non-existent account and zero should be returned.
+//  (4) Caller tries to get the code hash of a delegated account, the result should be
+// 
+// equal the result of calling extcodehash on the account directly.
+//
 func opExtCodeHash(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]byte, error) {
 	slot := scope.Stack.Peek()
 	address := libcommon.Address(slot.Bytes20())
 
-	if dd, _, _, ddPresent := delegatedDesignationHandler(interpreter.evm.IntraBlockState(), address); ddPresent {
-		address = dd
-	}
-
 	if interpreter.evm.IntraBlockState().Empty(address) {
 		slot.Clear()
 	} else {
-		slot.SetBytes(interpreter.evm.IntraBlockState().GetCodeHash(address).Bytes())
+		slot.SetBytes(interpreter.evm.IntraBlockState().ResolveCodeHash(address).Bytes())
 	}
 	return nil, nil
 }
@@ -1006,27 +996,4 @@ func makeSwap(size int64) executionFunc {
 		scope.Stack.Swap(int(size))
 		return nil, nil
 	}
-}
-
-// return the delegated info (code, codesize) if delegated designation is present at the address's code
-// populates ddCodeSize even in case of non-delegated designation
-func delegatedDesignationHandler(ibs evmtypes.IntraBlockState, address libcommon.Address) (designatedDelegation libcommon.Address, ddCode []byte, ddCodeSize uint64, ddPresent bool) {
-	ddPresent = false
-	codesize := uint64(ibs.GetCodeSize(address))
-	if codesize == 23 {
-		// potentially delegated designation
-		// get code and check
-		code := ibs.GetCode(address)
-		if bytes.Equal(code[0:3], params.DelegatedDesignationPrefix[:]) {
-			// delegated designation
-			ddPresent = true
-			designatedDelegation = libcommon.BytesToAddress(code[3:23])
-			ddCode = ibs.GetCode(designatedDelegation)
-			ddCodeSize = uint64(ibs.GetCodeSize(designatedDelegation))
-		}
-	} else {
-		// optimization for non-delegated designation (to be used by callers)
-		ddCodeSize = codesize
-	}
-	return
 }
