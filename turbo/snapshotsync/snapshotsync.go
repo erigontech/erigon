@@ -353,7 +353,7 @@ func WaitForDownloader(ctx context.Context, logPrefix string, dirs datadir.Dirs,
 
 	}
 
-	downloadStartTime := time.Now()
+	//downloadStartTime := time.Now()
 	const logInterval = 20 * time.Second
 	logEvery := time.NewTicker(logInterval)
 	defer logEvery.Stop()
@@ -379,9 +379,9 @@ func WaitForDownloader(ctx context.Context, logPrefix string, dirs datadir.Dirs,
 			}
 			if stats, err = snapshotDownloader.Stats(ctx, &proto_downloader.StatsRequest{}); err != nil {
 				log.Warn("Error while waiting for snapshots progress", "err", err)
-			} else {
-				logStats(ctx, stats, downloadStartTime, stagesIdsList, logPrefix, headerchain)
-			}
+			} //} else {
+			//logStats(ctx, stats, downloadStartTime, stagesIdsList, logPrefix, headerchain)
+			//}
 		}
 	}
 
@@ -402,9 +402,9 @@ func WaitForDownloader(ctx context.Context, logPrefix string, dirs datadir.Dirs,
 		case <-logEvery.C:
 			if stats, err = snapshotDownloader.Stats(ctx, &proto_downloader.StatsRequest{}); err != nil {
 				log.Warn("Error while waiting for snapshots progress", "err", err)
-			} else {
-				logStats(ctx, stats, downloadStartTime, stagesIdsList, logPrefix, headerchain)
-			}
+			} //} else {
+			//logStats(ctx, stats, downloadStartTime, stagesIdsList, logPrefix, headerchain)
+			//}
 		}
 	}
 

@@ -98,6 +98,7 @@ type Downloader struct {
 	stuckFileDetailedLogs bool
 
 	logPrefix string
+	startTime time.Time
 }
 
 type downloadInfo struct {
@@ -1378,7 +1379,7 @@ func (d *Downloader) mainLoop(silent bool) error {
 	logEvery := time.NewTicker(20 * time.Second)
 	defer logEvery.Stop()
 
-	statInterval := 20 * time.Second
+	statInterval := 5 * time.Second
 	statEvery := time.NewTicker(statInterval)
 	defer statEvery.Stop()
 
@@ -1949,6 +1950,7 @@ func (d *Downloader) torrentInfo(name string) (*torrentInfo, error) {
 }
 
 func (d *Downloader) ReCalcStats(interval time.Duration) {
+	var m runtime.MemStats
 	d.lock.RLock()
 
 	torrentClient := d.torrentClient
@@ -2104,6 +2106,7 @@ func (d *Downloader) ReCalcStats(interval time.Duration) {
 	}
 
 	stats.BytesCompleted = uint64(downloadedBytes)
+	stats.BytesDownload = uint64(downloadedBytes)
 
 	var webTransfers int32
 
@@ -2177,31 +2180,44 @@ func (d *Downloader) ReCalcStats(interval time.Duration) {
 		stats.Completed = false
 	}
 
+	dbg.ReadMemStats(&m)
+
 	prefix := d.logPrefix
+	status := "Downloading"
+
 	if d.logPrefix == "" {
 		prefix = "[snapshots]"
 	}
 
+	percentDone := float32(100) * (float32(stats.BytesDownload) / float32(stats.BytesTotal))
+	bytesDone := common.ByteCount(stats.BytesDownload)
+	rate := stats.DownloadRate
+	remainingBytes := stats.BytesTotal - stats.BytesDownload
+
+	if stats.BytesDownload >= stats.BytesTotal && stats.MetadataReady == stats.FilesTotal {
+		status = "Verifying"
+		percentDone = float32(100) * (float32(stats.BytesCompleted) / float32(stats.BytesTotal))
+		bytesDone = common.ByteCount(stats.BytesCompleted)
+		rate = stats.CompletionRate
+		remainingBytes = stats.BytesTotal - stats.BytesCompleted
+	}
+
+	timeLeft := calculateTime(remainingBytes, rate)
+
+	var logStr strings.Builder
+	if stats.MetadataReady != stats.FilesTotal {
+		logStr.WriteString(fmt.Sprintf("(%d/%d files) ", stats.MetadataReady, stats.FilesTotal))
+	}
+	logStr.WriteString(fmt.Sprintf("%.2f%% - %s/%s", percentDone, bytesDone, common.ByteCount(stats.BytesTotal)))
+	logStr.WriteString(" rate=" + common.ByteCount(rate) + "/s")
+	logStr.WriteString(" time-left=" + timeLeft)
+	logStr.WriteString(" total-time=" + time.Since(d.startTime).Round(time.Second).String())
+	if stats.MetadataReady != stats.FilesTotal {
+		logStr.WriteString(" no-metadata=" + strconv.Itoa(int(stats.FilesTotal-stats.MetadataReady)))
+	}
+
 	if !stats.Completed {
-		logger.Debug(fmt.Sprintf("[%s]", prefix),
-			"len", len(torrents),
-			"webTransfers", webTransfers,
-			"torrent", torrentInfo,
-			"db", dbInfo,
-			"t-complete", tComplete,
-			"hashed", common.ByteCount(stats.BytesHashed),
-			"hash-rate", fmt.Sprintf("%s/s", common.ByteCount(stats.HashRate)),
-			"completed", common.ByteCount(stats.BytesCompleted),
-			"completion-rate", fmt.Sprintf("%s/s", common.ByteCount(stats.CompletionRate)),
-			"flushed", common.ByteCount(stats.BytesFlushed),
-			"flush-rate", fmt.Sprintf("%s/s", common.ByteCount(stats.FlushRate)),
-			"webseed-trips", stats.WebseedTripCount.Load(),
-			"webseed-active", stats.WebseedActiveTrips.Load(),
-			"webseed-max-active", stats.WebseedMaxActiveTrips.Load(),
-			"webseed-discards", stats.WebseedDiscardCount.Load(),
-			"webseed-fails", stats.WebseedServerFails.Load(),
-			"webseed-bytes", common.ByteCount(uint64(stats.WebseedBytesDownload.Load())),
-			"localHashes", stats.LocalFileHashes, "localHashTime", stats.LocalFileHashTime)
+		log.Info(fmt.Sprintf("[%s] %s", prefix, status), "progress", logStr.String(), "alloc", common.ByteCount(m.Alloc), "sys", common.ByteCount(m.Sys))
 	}
 
 	if lastMetadataReady != stats.MetadataReady {
@@ -2323,6 +2339,26 @@ func (d *Downloader) ReCalcStats(interval time.Duration) {
 
 	stats.PeersUnique = int32(len(peers))
 	stats.FilesTotal = int32(len(torrents)) + webTransfers
+
+	logger.Debug("[snapshots] downloading",
+		"len", len(torrents),
+		"webTransfers", webTransfers,
+		"torrent", torrentInfo,
+		"db", dbInfo,
+		"t-complete", tComplete,
+		"hashed", common.ByteCount(stats.BytesHashed),
+		"hash-rate", fmt.Sprintf("%s/s", common.ByteCount(stats.HashRate)),
+		"completed", common.ByteCount(stats.BytesCompleted),
+		"completion-rate", fmt.Sprintf("%s/s", common.ByteCount(stats.CompletionRate)),
+		"flushed", common.ByteCount(stats.BytesFlushed),
+		"flush-rate", fmt.Sprintf("%s/s", common.ByteCount(stats.FlushRate)),
+		"webseed-trips", stats.WebseedTripCount.Load(),
+		"webseed-active", stats.WebseedActiveTrips.Load(),
+		"webseed-max-active", stats.WebseedMaxActiveTrips.Load(),
+		"webseed-discards", stats.WebseedDiscardCount.Load(),
+		"webseed-fails", stats.WebseedServerFails.Load(),
+		"webseed-bytes", common.ByteCount(uint64(stats.WebseedBytesDownload.Load())),
+		"localHashes", stats.LocalFileHashes, "localHashTime", stats.LocalFileHashTime)
 
 	d.lock.Lock()
 	d.stats = stats
@@ -2872,4 +2908,16 @@ func openClient(ctx context.Context, dbDir, snapDir string, cfg *torrent.ClientC
 
 func (d *Downloader) SetLogPrefix(prefix string) {
 	d.logPrefix = prefix
+}
+
+func calculateTime(amountLeft, rate uint64) string {
+	if rate == 0 {
+		return "999hrs:99m"
+	}
+	timeLeftInSeconds := amountLeft / rate
+
+	hours := timeLeftInSeconds / 3600
+	minutes := (timeLeftInSeconds / 60) % 60
+
+	return fmt.Sprintf("%dhrs:%dm", hours, minutes)
 }
