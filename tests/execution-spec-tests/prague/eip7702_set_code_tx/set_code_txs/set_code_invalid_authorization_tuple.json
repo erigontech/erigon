@@ -253,7 +253,7 @@
             "comment": "`execution-spec-tests` generated test",
             "filling-transition-tool": "ethereumjs t8n v1",
             "description": "Test function documentation:\n\n    Test attempting to set the code of an account with invalid authorization tuple.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/pectra-devnet-3@v1.0.0/tests/prague/eip7702_set_code_tx/test_set_code_txs.py#L1742",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/pectra-devnet-3@v1.1.0/tests/prague/eip7702_set_code_tx/test_set_code_txs.py#L1815",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7702.md",
             "reference-spec-version": "a6bf54ffc1506ed00f8234731684ccfe935ec9a3"
         }
@@ -512,7 +512,7 @@
             "comment": "`execution-spec-tests` generated test",
             "filling-transition-tool": "ethereumjs t8n v1",
             "description": "Test function documentation:\n\n    Test attempting to set the code of an account with invalid authorization tuple.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/pectra-devnet-3@v1.0.0/tests/prague/eip7702_set_code_tx/test_set_code_txs.py#L1742",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/pectra-devnet-3@v1.1.0/tests/prague/eip7702_set_code_tx/test_set_code_txs.py#L1815",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7702.md",
             "reference-spec-version": "a6bf54ffc1506ed00f8234731684ccfe935ec9a3"
         }
@@ -760,7 +760,7 @@
             "comment": "`execution-spec-tests` generated test",
             "filling-transition-tool": "ethereumjs t8n v1",
             "description": "Test function documentation:\n\n    Test attempting to set the code of an account with invalid authorization tuple.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/pectra-devnet-3@v1.0.0/tests/prague/eip7702_set_code_tx/test_set_code_txs.py#L1742",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/pectra-devnet-3@v1.1.0/tests/prague/eip7702_set_code_tx/test_set_code_txs.py#L1815",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7702.md",
             "reference-spec-version": "a6bf54ffc1506ed00f8234731684ccfe935ec9a3"
         }
