@@ -45,6 +45,10 @@ var SqueezeCommitmentFiles = Migration{
 
 		logEvery := time.NewTicker(10 * time.Second)
 		defer logEvery.Stop()
+		t := time.Now()
+		defer func() {
+			log.Info("[sqeeze_migration] done", "took", time.Since(t))
+		}()
 
 		agg, err := libstate.NewAggregator(ctx, dirs, config3.HistoryV3AggregationStep, db, nil, logger)
 		if err != nil {
@@ -55,42 +59,43 @@ var SqueezeCommitmentFiles = Migration{
 		if err = agg.OpenFolder(); err != nil {
 			return err
 		}
-		t := time.Now()
-		defer func() {
-			log.Info("[sqeeze_migration] done", "took", time.Since(t))
-		}()
-
 		ac := agg.BeginFilesRo()
 		defer ac.Close()
 
-		dirs2 := dirs
-		dirs2.SnapDomain += "_v2"
-		existsV2Dir, err := dir.Exist(dirs2.SnapDomain)
+		existsV2Dir, err := dir.Exist(dirs.SnapDomain + "_old")
 		if err != nil {
 			return err
 		}
-
-		if existsV2Dir {
-			log.Info("[sqeeze_migration] `domain_v2` folder found, using it as a target `domain`")
-			a2, err := libstate.NewAggregator(ctx, dirs2, config3.HistoryV3AggregationStep, db, nil, logger)
-			if err != nil {
-				panic(err)
-			}
-			if err = a2.OpenFolder(); err != nil {
-				panic(err)
-			}
-			defer a2.Close()
-
-			ac2 := a2.BeginFilesRo()
-			defer ac2.Close()
-			if err = ac.SqueezeCommitmentFiles(ac2); err != nil {
-				return err
-			}
-		} else {
+		if !existsV2Dir {
 			log.Info("[sqeeze_migration] normal mode start")
 			if err = ac.SqueezeCommitmentFiles(ac); err != nil {
 				return err
 			}
+			return db.Update(ctx, func(tx kv.RwTx) error {
+				return BeforeCommit(tx, nil, true)
+			})
+		}
+
+		{
+			log.Info("[sqeeze_migration] `domain_v2` folder found, using it as a target `domain`")
+			dirs2 := dirs
+			dirs2.SnapDomain += "_old"
+			aggOld, err := libstate.NewAggregator(ctx, dirs2, config3.HistoryV3AggregationStep, db, nil, logger)
+			if err != nil {
+				panic(err)
+			}
+			if err = aggOld.OpenFolder(); err != nil {
+				panic(err)
+			}
+			defer aggOld.Close()
+
+			acOld := aggOld.BeginFilesRo()
+			defer acOld.Close()
+
+			if err = acOld.SqueezeCommitmentFiles(ac); err != nil {
+				return err
+			}
+
 		}
 
 		return db.Update(ctx, func(tx kv.RwTx) error {
