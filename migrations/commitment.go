@@ -91,10 +91,11 @@ var SqueezeCommitmentFiles = Migration{
 			if err != nil {
 				panic(err)
 			}
+			defer aggOld.Close()
 			if err = aggOld.OpenFolder(); err != nil {
 				panic(err)
 			}
-			defer aggOld.Close()
+			aggOld.SetCompressWorkers(estimate.CompressSnapshot.Workers())
 			if err := aggOld.BuildMissedIndices(ctx, estimate.IndexSnapshot.Workers()); err != nil {
 				return err
 			}
