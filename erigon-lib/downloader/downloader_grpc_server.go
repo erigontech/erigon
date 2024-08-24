@@ -146,3 +146,9 @@ func (s *GrpcServer) Stats(ctx context.Context, request *proto_downloader.StatsR
 func Proto2InfoHash(in *prototypes.H160) metainfo.Hash {
 	return gointerfaces.ConvertH160toAddress(in)
 }
+
+func (s *GrpcServer) SetLogPrefix(ctx context.Context, request *proto_downloader.SetLogPrefixRequest) (*emptypb.Empty, error) {
+	s.d.SetLogPrefix(request.Prefix)
+
+	return &emptypb.Empty{}, nil
+}

@@ -86,7 +86,15 @@ func DeleteChainConfig(db kv.Deleter, hash libcommon.Hash) error {
 	return db.Delete(kv.ConfigTable, hash[:])
 }
 
-func WriteGenesis(db kv.Putter, g *types.Genesis) error {
+func WriteGenesisIfNotExist(db kv.RwTx, g *types.Genesis) error {
+	has, err := db.Has(kv.ConfigTable, kv.GenesisKey)
+	if err != nil {
+		return err
+	}
+	if has {
+		return nil
+	}
+
 	// Marshal json g
 	val, err := json.Marshal(g)
 	if err != nil {

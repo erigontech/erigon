@@ -483,20 +483,6 @@ func WriteBodyForStorage(db kv.Putter, hash common.Hash, number uint64, body *ty
 	return db.Put(kv.BlockBody, dbutils.BlockBodyKey(number, hash), data)
 }
 
-// ReadBodyByNumber - returns canonical block body
-func ReadBodyByNumber(db kv.Tx, number uint64) (*types.Body, uint64, uint32, error) {
-	hash, err := ReadCanonicalHash(db, number)
-	if err != nil {
-		return nil, 0, 0, fmt.Errorf("failed ReadCanonicalHash: %w", err)
-	}
-	if hash == (common.Hash{}) {
-		return nil, 0, 0, nil
-	}
-	body, baseTxnID, txCount := ReadBody(db, hash, number)
-	// TODO baseTxnID from ReadBody is baseTxnID+1, but we could expect original baseTxnID here
-	return body, baseTxnID, txCount, nil
-}
-
 func ReadBodyWithTransactions(db kv.Getter, hash common.Hash, number uint64) (*types.Body, error) {
 	body, firstTxId, txCount := ReadBody(db, hash, number)
 	if body == nil {

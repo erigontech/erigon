@@ -21,12 +21,14 @@ package stages_test
 
 import (
 	"fmt"
+	"math/big"
+	"testing"
+
 	libcommon "github.com/erigontech/erigon-lib/common"
 	protosentry "github.com/erigontech/erigon-lib/gointerfaces/sentryproto"
 	"github.com/erigontech/erigon/eth/protocols/eth"
+	"github.com/erigontech/erigon/p2p/sentry/sentry_multi_client"
 	"github.com/erigontech/erigon/rlp"
-	"math/big"
-	"testing"
 
 	"github.com/holiman/uint256"
 
@@ -129,72 +131,74 @@ func TestGenerateChain(t *testing.T) {
 		t.Errorf("wrong balance of addr3: %s", st.GetBalance(addr3))
 	}
 
-	// Test of receipts
-	hashPacket := make([]libcommon.Hash, 0, len(chain.Blocks))
-	for _, block := range chain.Blocks {
-		hashPacket = append(hashPacket, block.Hash())
-	}
+	if sentry_multi_client.EnableP2PReceipts {
+		// Test of receipts
+		hashPacket := make([]libcommon.Hash, 0, len(chain.Blocks))
+		for _, block := range chain.Blocks {
+			hashPacket = append(hashPacket, block.Hash())
+		}
 
-	b, err := rlp.EncodeToBytes(&eth.GetReceiptsPacket66{
-		RequestId:         1,
-		GetReceiptsPacket: hashPacket,
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	m.ReceiveWg.Add(1)
-	for _, err = range m.Send(&protosentry.InboundMessage{Id: protosentry.MessageId_GET_RECEIPTS_66, Data: b, PeerId: m.PeerId}) {
+		b, err := rlp.EncodeToBytes(&eth.GetReceiptsPacket66{
+			RequestId:         1,
+			GetReceiptsPacket: hashPacket,
+		})
 		if err != nil {
 			t.Fatal(err)
 		}
-	}
 
-	m.ReceiveWg.Wait()
+		m.ReceiveWg.Add(1)
+		for _, err = range m.Send(&protosentry.InboundMessage{Id: protosentry.MessageId_GET_RECEIPTS_66, Data: b, PeerId: m.PeerId}) {
+			if err != nil {
+				t.Fatal(err)
+			}
+		}
 
-	msg := m.SentMessage(0)
+		m.ReceiveWg.Wait()
 
-	if protosentry.MessageId_RECEIPTS_66 != msg.Id {
-		t.Errorf("receipt id %d do not match the expected id %d", msg.Id, protosentry.MessageId_RECEIPTS_66)
-	}
-	r1 := types.Receipt{Type: 0, PostState: []byte{}, Status: 1, CumulativeGasUsed: 21000, Bloom: [256]byte{}, Logs: types.Logs{}, TxHash: libcommon.HexToHash("0x9ca7a9e6bf23353fc5ac37f5c5676db1accec4af83477ac64cdcaa37f3a837f9"), ContractAddress: libcommon.HexToAddress("0x0000000000000000000000000000000000000000"), GasUsed: 21000, BlockHash: libcommon.HexToHash("0x5c7909bf8d4d8db71f0f6091aa412129591a8e41ff2230369ddf77a00bf57149"), BlockNumber: big.NewInt(1), TransactionIndex: 0}
-	r2 := types.Receipt{Type: 0, PostState: []byte{}, Status: 1, CumulativeGasUsed: 21000, Bloom: [256]byte{}, Logs: types.Logs{}, TxHash: libcommon.HexToHash("0xf190eed1578cdcfe69badd05b7ef183397f336dc3de37baa4adbfb4bc657c11e"), ContractAddress: libcommon.HexToAddress("0x0000000000000000000000000000000000000000"), GasUsed: 21000, BlockHash: libcommon.HexToHash("0xe4d4617526870ba7c5b81900e31bd2525c02f27fe06fd6c3caf7bed05f3271f4"), BlockNumber: big.NewInt(2), TransactionIndex: 0}
-	r3 := types.Receipt{Type: 0, PostState: []byte{}, Status: 1, CumulativeGasUsed: 42000, Bloom: [256]byte{}, Logs: types.Logs{}, TxHash: libcommon.HexToHash("0x309a030e44058e435a2b01302006880953e2c9319009db97013eb130d7a24eab"), ContractAddress: libcommon.HexToAddress("0x0000000000000000000000000000000000000000"), GasUsed: 21000, BlockHash: libcommon.HexToHash("0xe4d4617526870ba7c5b81900e31bd2525c02f27fe06fd6c3caf7bed05f3271f4"), BlockNumber: big.NewInt(2), TransactionIndex: 1}
+		msg := m.SentMessage(0)
 
-	encodedEmpty, err := rlp.EncodeToBytes(types.Receipts{})
-	if err != nil {
-		t.Fatal(err)
-	}
-	encodedFirst, err := rlp.EncodeToBytes(types.Receipts{
-		&r1,
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	encodedSecond, err := rlp.EncodeToBytes(types.Receipts{
-		&r2,
-		&r3,
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
+		if protosentry.MessageId_RECEIPTS_66 != msg.Id {
+			t.Errorf("receipt id %d do not match the expected id %d", msg.Id, protosentry.MessageId_RECEIPTS_66)
+		}
+		r1 := types.Receipt{Type: 0, PostState: []byte{}, Status: 1, CumulativeGasUsed: 21000, Bloom: [256]byte{}, Logs: types.Logs{}, TxHash: libcommon.HexToHash("0x9ca7a9e6bf23353fc5ac37f5c5676db1accec4af83477ac64cdcaa37f3a837f9"), ContractAddress: libcommon.HexToAddress("0x0000000000000000000000000000000000000000"), GasUsed: 21000, BlockHash: libcommon.HexToHash("0x5c7909bf8d4d8db71f0f6091aa412129591a8e41ff2230369ddf77a00bf57149"), BlockNumber: big.NewInt(1), TransactionIndex: 0}
+		r2 := types.Receipt{Type: 0, PostState: []byte{}, Status: 1, CumulativeGasUsed: 21000, Bloom: [256]byte{}, Logs: types.Logs{}, TxHash: libcommon.HexToHash("0xf190eed1578cdcfe69badd05b7ef183397f336dc3de37baa4adbfb4bc657c11e"), ContractAddress: libcommon.HexToAddress("0x0000000000000000000000000000000000000000"), GasUsed: 21000, BlockHash: libcommon.HexToHash("0xe4d4617526870ba7c5b81900e31bd2525c02f27fe06fd6c3caf7bed05f3271f4"), BlockNumber: big.NewInt(2), TransactionIndex: 0}
+		r3 := types.Receipt{Type: 0, PostState: []byte{}, Status: 1, CumulativeGasUsed: 42000, Bloom: [256]byte{}, Logs: types.Logs{}, TxHash: libcommon.HexToHash("0x309a030e44058e435a2b01302006880953e2c9319009db97013eb130d7a24eab"), ContractAddress: libcommon.HexToAddress("0x0000000000000000000000000000000000000000"), GasUsed: 21000, BlockHash: libcommon.HexToHash("0xe4d4617526870ba7c5b81900e31bd2525c02f27fe06fd6c3caf7bed05f3271f4"), BlockNumber: big.NewInt(2), TransactionIndex: 1}
 
-	res := []rlp.RawValue{
-		encodedFirst,
-		encodedSecond,
-		encodedEmpty,
-		encodedEmpty,
-		encodedEmpty,
-	}
+		encodedEmpty, err := rlp.EncodeToBytes(types.Receipts{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		encodedFirst, err := rlp.EncodeToBytes(types.Receipts{
+			&r1,
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		encodedSecond, err := rlp.EncodeToBytes(types.Receipts{
+			&r2,
+			&r3,
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
 
-	b, err = rlp.EncodeToBytes(&eth.ReceiptsRLPPacket66{
-		RequestId:         1,
-		ReceiptsRLPPacket: res,
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if string(b) != string(msg.GetData()) {
-		t.Errorf("receipt data %s do not match the expected msg %s", string(msg.GetData()), string(b))
+		res := []rlp.RawValue{
+			encodedFirst,
+			encodedSecond,
+			encodedEmpty,
+			encodedEmpty,
+			encodedEmpty,
+		}
+
+		b, err = rlp.EncodeToBytes(&eth.ReceiptsRLPPacket66{
+			RequestId:         1,
+			ReceiptsRLPPacket: res,
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if string(b) != string(msg.GetData()) {
+			t.Errorf("receipt data %s do not match the expected msg %s", string(msg.GetData()), string(b))
+		}
 	}
 }

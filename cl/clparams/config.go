@@ -33,6 +33,7 @@ import (
 	"github.com/erigontech/erigon-lib/chain/networkname"
 	libcommon "github.com/erigontech/erigon-lib/common"
 
+	"github.com/erigontech/erigon/cl/beacon/beacon_router_configuration"
 	"github.com/erigontech/erigon/cl/utils"
 )
 
@@ -51,6 +52,32 @@ type CaplinConfig struct {
 	MevRelayUrl string
 	// EnableValidatorMonitor is used to enable the validator monitor metrics and corresponding logs
 	EnableValidatorMonitor bool
+
+	// Devnets config
+	CustomConfigPath       string
+	CustomGenesisStatePath string
+
+	// Network stuff
+	CaplinDiscoveryAddr    string
+	CaplinDiscoveryPort    uint64
+	CaplinDiscoveryTCPPort uint64
+	SentinelAddr           string
+	SentinelPort           uint64
+	// Erigon Sync
+	LoopBlockLimit uint64
+	// Beacon API router configuration
+	BeaconAPIRouter beacon_router_configuration.RouterConfiguration
+
+	BootstrapNodes []string
+	StaticPeers    []string
+}
+
+func (c CaplinConfig) IsDevnet() bool {
+	return c.CustomConfigPath != "" || c.CustomGenesisStatePath != ""
+}
+
+func (c CaplinConfig) HaveInvalidDevnetParams() bool {
+	return c.CustomConfigPath == "" || c.CustomGenesisStatePath == ""
 }
 
 func (c CaplinConfig) RelayUrlExist() bool {
@@ -65,6 +92,8 @@ const (
 	SepoliaNetwork NetworkType = 11155111
 	GnosisNetwork  NetworkType = 100
 	ChiadoNetwork  NetworkType = 10200
+
+	CustomNetwork NetworkType = -1
 )
 
 const (
@@ -158,9 +187,8 @@ type NetworkConfig struct {
 	SyncCommsSubnetKey         string // SyncCommsSubnetKey is the ENR key of the sync committee subnet bitfield in the enr.
 	MinimumPeersInSubnetSearch uint64 // PeersInSubnetSearch is the required amount of peers that we need to be able to lookup in a subnet search.
 
-	ContractDeploymentBlock uint64 // the eth1 block in which the deposit contract is deployed.
-	BootNodes               []string
-	StaticPeers             []string
+	BootNodes   []string
+	StaticPeers []string
 }
 
 var NetworkConfigs map[NetworkType]NetworkConfig = map[NetworkType]NetworkConfig{
@@ -180,7 +208,6 @@ var NetworkConfigs map[NetworkType]NetworkConfig = map[NetworkType]NetworkConfig
 		AttSubnetKey:                    "attnets",
 		SyncCommsSubnetKey:              "syncnets",
 		MinimumPeersInSubnetSearch:      20,
-		ContractDeploymentBlock:         11184524,
 		BootNodes:                       MainnetBootstrapNodes,
 	},
 
@@ -200,7 +227,6 @@ var NetworkConfigs map[NetworkType]NetworkConfig = map[NetworkType]NetworkConfig
 		AttSubnetKey:                    "attnets",
 		SyncCommsSubnetKey:              "syncnets",
 		MinimumPeersInSubnetSearch:      20,
-		ContractDeploymentBlock:         1273020,
 		BootNodes:                       SepoliaBootstrapNodes,
 	},
 
@@ -220,7 +246,6 @@ var NetworkConfigs map[NetworkType]NetworkConfig = map[NetworkType]NetworkConfig
 		AttSubnetKey:                    "attnets",
 		SyncCommsSubnetKey:              "syncnets",
 		MinimumPeersInSubnetSearch:      20,
-		ContractDeploymentBlock:         19475089,
 		BootNodes:                       GnosisBootstrapNodes,
 	},
 
@@ -240,7 +265,6 @@ var NetworkConfigs map[NetworkType]NetworkConfig = map[NetworkType]NetworkConfig
 		AttSubnetKey:                    "attnets",
 		SyncCommsSubnetKey:              "syncnets",
 		MinimumPeersInSubnetSearch:      20,
-		ContractDeploymentBlock:         155530,
 		BootNodes:                       ChiadoBootstrapNodes,
 	},
 
@@ -260,7 +284,6 @@ var NetworkConfigs map[NetworkType]NetworkConfig = map[NetworkType]NetworkConfig
 		AttSubnetKey:                    "attnets",
 		SyncCommsSubnetKey:              "syncnets",
 		MinimumPeersInSubnetSearch:      20,
-		ContractDeploymentBlock:         155530,
 		BootNodes:                       HoleskyBootstrapNodes,
 	},
 }
@@ -313,6 +336,11 @@ type ConfigForkVersion uint32
 
 func (v ConfigForkVersion) MarshalJSON() ([]byte, error) {
 	return []byte(fmt.Sprintf("\"0x%08x\"", v)), nil
+}
+
+type VersionScheduleEntry struct {
+	Epoch        uint64 `yaml:"EPOCH" json:"EPOCH,string"`
+	StateVersion StateVersion
 }
 
 // BeaconChainConfig contains constant configs for node to participate in beacon chain.
@@ -443,8 +471,7 @@ type BeaconChainConfig struct {
 	ElectraForkVersion   ConfigForkVersion `yaml:"ELECTRA_FORK_VERSION" spec:"true" json:"ELECTRA_FORK_VERSION"`        // ElectraForkVersion is used to represent the fork version for Electra.
 	ElectraForkEpoch     uint64            `yaml:"ELECTRA_FORK_EPOCH" spec:"true" json:"ELECTRA_FORK_EPOCH,string"`     // ElectraForkEpoch is used to represent the assigned fork epoch for Electra.
 
-	ForkVersionSchedule map[libcommon.Bytes4]uint64 `json:"-"` // Schedule of fork epochs by version.
-	ForkVersionNames    map[libcommon.Bytes4]string `json:"-"` // Human-readable names of fork versions.
+	ForkVersionSchedule map[libcommon.Bytes4]VersionScheduleEntry `json:"-"` // Schedule of fork epochs by version.
 
 	// New values introduced in Altair hard fork 1.
 	// Participation flag indices.
@@ -546,29 +573,17 @@ func (b *BeaconChainConfig) GetCurrentStateVersion(epoch uint64) StateVersion {
 // InitializeForkSchedule initializes the schedules forks baked into the config.
 func (b *BeaconChainConfig) InitializeForkSchedule() {
 	b.ForkVersionSchedule = configForkSchedule(b)
-	b.ForkVersionNames = configForkNames(b)
 }
 
-func configForkSchedule(b *BeaconChainConfig) map[libcommon.Bytes4]uint64 {
-	fvs := map[libcommon.Bytes4]uint64{}
-	fvs[utils.Uint32ToBytes4(uint32(b.GenesisForkVersion))] = 0
-	fvs[utils.Uint32ToBytes4(uint32(b.AltairForkVersion))] = b.AltairForkEpoch
-	fvs[utils.Uint32ToBytes4(uint32(b.BellatrixForkVersion))] = b.BellatrixForkEpoch
-	fvs[utils.Uint32ToBytes4(uint32(b.CapellaForkVersion))] = b.CapellaForkEpoch
-	fvs[utils.Uint32ToBytes4(uint32(b.DenebForkVersion))] = b.DenebForkEpoch
-	fvs[utils.Uint32ToBytes4(uint32(b.ElectraForkVersion))] = b.ElectraForkEpoch
+func configForkSchedule(b *BeaconChainConfig) map[libcommon.Bytes4]VersionScheduleEntry {
+	fvs := map[libcommon.Bytes4]VersionScheduleEntry{}
+	fvs[utils.Uint32ToBytes4(uint32(b.GenesisForkVersion))] = VersionScheduleEntry{b.GenesisSlot / b.SlotsPerEpoch, Phase0Version}
+	fvs[utils.Uint32ToBytes4(uint32(b.AltairForkVersion))] = VersionScheduleEntry{b.AltairForkEpoch, AltairVersion}
+	fvs[utils.Uint32ToBytes4(uint32(b.BellatrixForkVersion))] = VersionScheduleEntry{b.BellatrixForkEpoch, BellatrixVersion}
+	fvs[utils.Uint32ToBytes4(uint32(b.CapellaForkVersion))] = VersionScheduleEntry{b.CapellaForkEpoch, CapellaVersion}
+	fvs[utils.Uint32ToBytes4(uint32(b.DenebForkVersion))] = VersionScheduleEntry{b.DenebForkEpoch, DenebVersion}
+	fvs[utils.Uint32ToBytes4(uint32(b.ElectraForkVersion))] = VersionScheduleEntry{b.ElectraForkEpoch, ElectraVersion}
 	return fvs
-}
-
-func configForkNames(b *BeaconChainConfig) map[libcommon.Bytes4]string {
-	fvn := map[libcommon.Bytes4]string{}
-	fvn[utils.Uint32ToBytes4(uint32(b.GenesisForkVersion))] = "phase0"
-	fvn[utils.Uint32ToBytes4(uint32(b.AltairForkVersion))] = "altair"
-	fvn[utils.Uint32ToBytes4(uint32(b.BellatrixForkVersion))] = "bellatrix"
-	fvn[utils.Uint32ToBytes4(uint32(b.CapellaForkVersion))] = "capella"
-	fvn[utils.Uint32ToBytes4(uint32(b.DenebForkVersion))] = "deneb"
-	fvn[utils.Uint32ToBytes4(uint32(b.ElectraForkVersion))] = "electra"
-	return fvn
 }
 
 func (b *BeaconChainConfig) ParticipationWeights() []uint64 {

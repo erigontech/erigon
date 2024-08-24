@@ -24,9 +24,15 @@ import (
 )
 
 type PolygonBridge interface {
+	PolygonBridgeReader
+	InitialBlockReplayNeeded(ctx context.Context) (uint64, bool, error)
+	ReplayInitialBlock(ctx context.Context, block *types.Block) error
 	ProcessNewBlocks(ctx context.Context, blocks []*types.Block) error
 	Synchronize(ctx context.Context, blockNum uint64) error
 	Unwind(ctx context.Context, blockNum uint64) error
+}
+
+type PolygonBridgeReader interface {
 	Events(ctx context.Context, blockNum uint64) ([]*types.Message, error)
 	EventTxnLookup(ctx context.Context, borTxHash libcommon.Hash) (uint64, bool, error)
 }
@@ -34,4 +40,9 @@ type PolygonBridge interface {
 type Service interface {
 	PolygonBridge
 	Run(ctx context.Context) error
+}
+
+type ReaderService interface {
+	PolygonBridgeReader
+	Close()
 }

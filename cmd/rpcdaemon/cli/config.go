@@ -65,7 +65,7 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/paths"
 	"github.com/erigontech/erigon/consensus"
-	"github.com/erigontech/erigon/consensus/mainnet"
+	"github.com/erigontech/erigon/consensus/ethash"
 	"github.com/erigontech/erigon/core/rawdb"
 	"github.com/erigontech/erigon/core/state"
 	"github.com/erigontech/erigon/core/types"
@@ -74,7 +74,6 @@ import (
 	"github.com/erigontech/erigon/node"
 	"github.com/erigontech/erigon/node/nodecfg"
 	"github.com/erigontech/erigon/polygon/bor"
-	"github.com/erigontech/erigon/polygon/bor/borcfg"
 	"github.com/erigontech/erigon/rpc"
 	"github.com/erigontech/erigon/rpc/rpccfg"
 	"github.com/erigontech/erigon/turbo/debug"
@@ -396,8 +395,10 @@ func RemoteServices(ctx context.Context, cfg *httpcfg.HttpCfg, logger log.Logger
 		allBorSnapshots.OptimisticalyReopenWithDB(db)
 		allSnapshots.LogStat("remote")
 		allBorSnapshots.LogStat("bor:remote")
+		blockReader = freezeblocks.NewBlockReader(allSnapshots, allBorSnapshots)
+		txNumsReader := rawdbv3.TxNums.WithCustomReadTxNumFunc(freezeblocks.ReadTxNumFuncFromBlockReader(ctx, blockReader))
 
-		cr := rawdb.NewCanonicalReader()
+		cr := rawdb.NewCanonicalReader(txNumsReader)
 		agg, err := libstate.NewAggregator(ctx, cfg.Dirs, config3.HistoryV3AggregationStep, db, cr, logger)
 		if err != nil {
 			return nil, nil, nil, nil, nil, nil, nil, ff, fmt.Errorf("create aggregator: %w", err)
@@ -408,7 +409,7 @@ func RemoteServices(ctx context.Context, cfg *httpcfg.HttpCfg, logger log.Logger
 			aggTx := agg.BeginFilesRo()
 			defer aggTx.Close()
 			aggTx.LogStats(tx, func(endTxNumMinimax uint64) (uint64, error) {
-				_, histBlockNumProgress, err := rawdbv3.TxNums.FindBlockNum(tx, endTxNumMinimax)
+				_, histBlockNumProgress, err := txNumsReader.FindBlockNum(tx, endTxNumMinimax)
 				return histBlockNumProgress, err
 			})
 			return nil
@@ -439,7 +440,7 @@ func RemoteServices(ctx context.Context, cfg *httpcfg.HttpCfg, logger log.Logger
 						ac := agg.BeginFilesRo()
 						defer ac.Close()
 						ac.LogStats(tx, func(endTxNumMinimax uint64) (uint64, error) {
-							_, histBlockNumProgress, err := rawdbv3.TxNums.FindBlockNum(tx, endTxNumMinimax)
+							_, histBlockNumProgress, err := txNumsReader.FindBlockNum(tx, endTxNumMinimax)
 							return histBlockNumProgress, err
 						})
 						return nil
@@ -448,7 +449,6 @@ func RemoteServices(ctx context.Context, cfg *httpcfg.HttpCfg, logger log.Logger
 			}()
 		}
 		onNewSnapshot()
-		blockReader = freezeblocks.NewBlockReader(allSnapshots, allBorSnapshots)
 
 		db, err = temporal.New(rwKv, agg)
 		if err != nil {
@@ -510,19 +510,13 @@ func RemoteServices(ctx context.Context, cfg *httpcfg.HttpCfg, logger log.Logger
 					return nil, nil, nil, nil, nil, nil, nil, ff, err
 				}
 				// Skip the compatibility check, until we have a schema in erigon-lib
-
-				borConfig := cc.Bor.(*borcfg.BorConfig)
-
-				engine = bor.NewRo(cc, borKv, blockReader,
-					bor.NewChainSpanner(bor.GenesisContractValidatorSetABI(), cc, true, logger),
-					bor.NewGenesisContractsClient(cc, borConfig.ValidatorContract, borConfig.StateReceiverContract, logger), logger)
-
+				engine = bor.NewRo(cc, borKv, blockReader, logger)
 			default:
-				engine = mainnet.NewMainnetConsensus()
+				engine = ethash.NewFaker()
 			}
 
 		default:
-			engine = mainnet.NewMainnetConsensus()
+			engine = ethash.NewFaker()
 		}
 	} else {
 		remoteCE = &remoteConsensusEngine{}
@@ -935,13 +929,9 @@ func (e *remoteConsensusEngine) init(db kv.RoDB, blockReader services.FullBlockR
 			return false
 		}
 
-		borConfig := cc.Bor.(*borcfg.BorConfig)
-
-		e.engine = bor.NewRo(cc, borKv, blockReader,
-			bor.NewChainSpanner(bor.GenesisContractValidatorSetABI(), cc, true, logger),
-			bor.NewGenesisContractsClient(cc, borConfig.ValidatorContract, borConfig.StateReceiverContract, logger), logger)
+		e.engine = bor.NewRo(cc, borKv, blockReader, logger)
 	} else {
-		e.engine = mainnet.NewMainnetConsensus()
+		e.engine = ethash.NewFaker()
 	}
 
 	return true
@@ -1031,7 +1021,7 @@ func (e *remoteConsensusEngine) FinalizeAndAssemble(_ *chain.Config, _ *types.He
 	panic("remoteConsensusEngine.FinalizeAndAssemble not supported")
 }
 
-func (e *remoteConsensusEngine) Seal(_ consensus.ChainHeaderReader, _ *types.Block, _ chan<- *types.Block, _ <-chan struct{}) error {
+func (e *remoteConsensusEngine) Seal(_ consensus.ChainHeaderReader, _ *types.BlockWithReceipts, _ chan<- *types.BlockWithReceipts, _ <-chan struct{}) error {
 	panic("remoteConsensusEngine.Seal not supported")
 }
 
@@ -1041,10 +1031,6 @@ func (e *remoteConsensusEngine) SealHash(_ *types.Header) libcommon.Hash {
 
 func (e *remoteConsensusEngine) CalcDifficulty(_ consensus.ChainHeaderReader, _ uint64, _ uint64, _ *big.Int, _ uint64, _ libcommon.Hash, _ libcommon.Hash, _ uint64) *big.Int {
 	panic("remoteConsensusEngine.CalcDifficulty not supported")
-}
-
-func (e *remoteConsensusEngine) GenerateSeal(_ consensus.ChainHeaderReader, _ *types.Header, _ *types.Header, _ consensus.Call) []byte {
-	panic("remoteConsensusEngine.GenerateSeal not supported")
 }
 
 func (e *remoteConsensusEngine) APIs(_ consensus.ChainHeaderReader) []rpc.API {

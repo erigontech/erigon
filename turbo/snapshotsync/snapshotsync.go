@@ -119,7 +119,9 @@ func BuildProtoRequest(downloadRequest []services.DownloadRequest) *proto_downlo
 }
 
 // RequestSnapshotsDownload - builds the snapshots download request and downloads them
-func RequestSnapshotsDownload(ctx context.Context, downloadRequest []services.DownloadRequest, downloader proto_downloader.DownloaderClient) error {
+func RequestSnapshotsDownload(ctx context.Context, downloadRequest []services.DownloadRequest, downloader proto_downloader.DownloaderClient, logPrefix string) error {
+	preq := &proto_downloader.SetLogPrefixRequest{Prefix: logPrefix}
+	downloader.SetLogPrefix(ctx, preq)
 	// start seed large .seg of large size
 	req := BuildProtoRequest(downloadRequest)
 	if _, err := downloader.Add(ctx, req); err != nil {
@@ -153,11 +155,11 @@ func adjustBlockPrune(blocks, minBlocksToDownload uint64) uint64 {
 }
 
 func shouldUseStepsForPruning(name string) bool {
-	return strings.HasPrefix(name, "idx") || strings.HasPrefix(name, "history")
+	return strings.HasPrefix(name, "idx") || strings.HasPrefix(name, "history") || strings.HasPrefix(name, "accessor")
 }
 
 func canSnapshotBePruned(name string) bool {
-	return strings.HasPrefix(name, "idx") || strings.HasPrefix(name, "history") || strings.Contains(name, "transactions")
+	return strings.HasPrefix(name, "idx") || strings.HasPrefix(name, "history") || strings.Contains(name, "transactions") || strings.Contains(name, "accessor")
 }
 
 func buildBlackListForPruning(pruneMode bool, stepPrune, minBlockToDownload, blockPrune uint64, preverified snapcfg.Preverified) (map[string]struct{}, error) {
@@ -342,7 +344,7 @@ func WaitForDownloader(ctx context.Context, logPrefix string, dirs datadir.Dirs,
 			return ctx.Err()
 		default:
 		}
-		if err := RequestSnapshotsDownload(ctx, downloadRequest, snapshotDownloader); err != nil {
+		if err := RequestSnapshotsDownload(ctx, downloadRequest, snapshotDownloader, logPrefix); err != nil {
 			log.Error(fmt.Sprintf("[%s] call downloader", logPrefix), "err", err)
 			time.Sleep(10 * time.Second)
 			continue
@@ -538,18 +540,18 @@ func logStats(ctx context.Context, stats *proto_downloader.StatsReply, startTime
 		downloadTimeLeft := calculateTime(remainingBytes, stats.CompletionRate)
 
 		log.Info(fmt.Sprintf("[%s] %s", logPrefix, logReason),
-			"progress", fmt.Sprintf("%.2f%% %s/%s", stats.Progress, common.ByteCount(stats.BytesCompleted), common.ByteCount(stats.BytesTotal)),
+			"progress", fmt.Sprintf("(%d/%d files) %.2f%% %s/%s", stats.MetadataReady, stats.FilesTotal, stats.Progress, common.ByteCount(stats.BytesCompleted), common.ByteCount(stats.BytesTotal)),
 			// TODO: "downloading", stats.Downloading,
+			"download-rate", common.ByteCount(stats.DownloadRate)+"/s",
 			"time-left", downloadTimeLeft,
 			"total-time", time.Since(startTime).Round(time.Second).String(),
-			"download", common.ByteCount(stats.DownloadRate)+"/s",
 			"flush", common.ByteCount(stats.FlushRate)+"/s",
 			"hash", common.ByteCount(stats.HashRate)+"/s",
 			"complete", common.ByteCount(stats.CompletionRate)+"/s",
 			"upload", common.ByteCount(stats.UploadRate)+"/s",
 			"peers", stats.PeersUnique,
 			"files", stats.FilesTotal,
-			"metadata", fmt.Sprintf("%d/%d", stats.MetadataReady, stats.FilesTotal),
+			"no-metadata", strconv.Itoa(int(stats.FilesTotal-stats.MetadataReady)),
 			"connections", stats.ConnectionsTotal,
 			"alloc", common.ByteCount(m.Alloc), "sys", common.ByteCount(m.Sys),
 		)

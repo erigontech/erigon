@@ -19,6 +19,7 @@ package sync
 import (
 	"context"
 	"errors"
+	"fmt"
 
 	"github.com/erigontech/erigon-lib/log/v3"
 
@@ -96,11 +97,24 @@ func (s *Sync) commitExecution(ctx context.Context, newTip *types.Header, finali
 	return s.execution.UpdateForkChoice(ctx, newTip, finalizedHeader)
 }
 
-func (s *Sync) handleMilestoneMismatch(ctx context.Context, ccBuilder CanonicalChainBuilder) error {
+func (s *Sync) handleMilestoneTipMismatch(
+	ctx context.Context,
+	ccBuilder CanonicalChainBuilder,
+	milestone EventNewMilestone,
+) error {
 	// the milestone doesn't correspond to the tip of the chain
 	// unwind to the previous verified milestone
 	oldTip := ccBuilder.Root()
 	oldTipNum := oldTip.Number.Uint64()
+
+	s.logger.Debug(
+		syncLogPrefix("local chain tip does not match the milestone, unwinding to the previous verified milestone"),
+		"oldTipNum", oldTipNum,
+		"milestoneId", milestone.Id,
+		"milestoneStart", milestone.StartBlock(),
+		"milestoneEnd", milestone.EndBlock(),
+		"milestoneRootHash", milestone.RootHash(),
+	)
 
 	if err := s.execution.UpdateForkChoice(ctx, oldTip, oldTip); err != nil {
 		return err
@@ -111,7 +125,11 @@ func (s *Sync) handleMilestoneMismatch(ctx context.Context, ccBuilder CanonicalC
 		return err
 	}
 	if newTip == nil {
-		return errors.New("sync.Sync.handleMilestoneMismatch: unexpected to have no milestone headers since the last milestone after receiving a new milestone event")
+		err = errors.New("unexpected empty headers from p2p since new milestone")
+		return fmt.Errorf(
+			"%w: oldTipNum=%d, milestoneId=%d, milestoneStart=%d, milestoneEnd=%d, milestoneRootHash=%s",
+			err, oldTipNum, milestone.Id, milestone.StartBlock(), milestone.EndBlock(), milestone.RootHash(),
+		)
 	}
 
 	if err = s.commitExecution(ctx, newTip, newTip); err != nil {
@@ -123,7 +141,7 @@ func (s *Sync) handleMilestoneMismatch(ctx context.Context, ccBuilder CanonicalC
 	return nil
 }
 
-func (s *Sync) onMilestoneEvent(
+func (s *Sync) applyNewMilestoneOnTip(
 	ctx context.Context,
 	event EventNewMilestone,
 	ccBuilder CanonicalChainBuilder,
@@ -135,19 +153,17 @@ func (s *Sync) onMilestoneEvent(
 
 	milestoneHeaders := ccBuilder.HeadersInRange(milestone.StartBlock().Uint64(), milestone.Length())
 	err := s.milestoneVerifier(milestone, milestoneHeaders)
+	if errors.Is(err, ErrBadHeadersRootHash) {
+		return s.handleMilestoneTipMismatch(ctx, ccBuilder, milestone)
+	}
 	if err != nil {
-		s.logger.Debug(
-			syncLogPrefix("onMilestoneEvent: local chain tip does not match the milestone, unwinding to the previous verified milestone"),
-			"err", err,
-		)
-
-		return s.handleMilestoneMismatch(ctx, ccBuilder)
+		return err
 	}
 
 	return ccBuilder.Prune(milestone.EndBlock().Uint64())
 }
 
-func (s *Sync) onNewBlockEvent(
+func (s *Sync) applyNewBlockOnTip(
 	ctx context.Context,
 	event EventNewBlock,
 	ccBuilder CanonicalChainBuilder,
@@ -160,7 +176,6 @@ func (s *Sync) onNewBlockEvent(
 	}
 
 	var newBlocks []*types.Block
-	var err error
 	if ccBuilder.ContainsHash(newBlockHeader.ParentHash) {
 		newBlocks = []*types.Block{event.NewBlock}
 	} else {
@@ -168,7 +183,7 @@ func (s *Sync) onNewBlockEvent(
 		if err != nil {
 			if (p2p.ErrIncompleteHeaders{}).Is(err) || (p2p.ErrMissingBodies{}).Is(err) {
 				s.logger.Debug(
-					syncLogPrefix("onNewBlockEvent: failed to fetch complete blocks, ignoring event"),
+					syncLogPrefix("applyNewBlockOnTip: failed to fetch complete blocks, ignoring event"),
 					"err", err,
 					"peerId", event.PeerId,
 					"lastBlockNum", newBlockHeaderNum,
@@ -184,10 +199,13 @@ func (s *Sync) onNewBlockEvent(
 	}
 
 	if err := s.blocksVerifier(newBlocks); err != nil {
-		s.logger.Debug(syncLogPrefix("onNewBlockEvent: invalid new block event from peer, penalizing and ignoring"), "err", err)
+		s.logger.Debug(
+			syncLogPrefix("applyNewBlockOnTip: invalid new block event from peer, penalizing and ignoring"),
+			"err", err,
+		)
 
 		if err = s.p2pService.Penalize(ctx, event.PeerId); err != nil {
-			s.logger.Debug(syncLogPrefix("onNewBlockEvent: issue with penalizing peer"), "err", err)
+			s.logger.Debug(syncLogPrefix("applyNewBlockOnTip: issue with penalizing peer"), "err", err)
 		}
 
 		return nil
@@ -199,18 +217,22 @@ func (s *Sync) onNewBlockEvent(
 	}
 
 	oldTip := ccBuilder.Tip()
-	if err = ccBuilder.Connect(ctx, newHeaders); err != nil {
-		s.logger.Debug(syncLogPrefix("onNewBlockEvent: couldn't connect a header to the local chain tip, ignoring"), "err", err)
+	if err := ccBuilder.Connect(ctx, newHeaders); err != nil {
+		s.logger.Debug(
+			syncLogPrefix("applyNewBlockOnTip: couldn't connect a header to the local chain tip, ignoring"),
+			"err", err,
+		)
+
 		return nil
 	}
 
 	newTip := ccBuilder.Tip()
 	if newTip != oldTip {
-		if err = s.store.InsertBlocks(ctx, newBlocks); err != nil {
+		if err := s.store.InsertBlocks(ctx, newBlocks); err != nil {
 			return err
 		}
 
-		if err = s.commitExecution(ctx, newTip, ccBuilder.Root()); err != nil {
+		if err := s.commitExecution(ctx, newTip, ccBuilder.Root()); err != nil {
 			return err
 		}
 	}
@@ -218,7 +240,7 @@ func (s *Sync) onNewBlockEvent(
 	return nil
 }
 
-func (s *Sync) onNewBlockHashesEvent(
+func (s *Sync) applyNewBlockHashesOnTip(
 	ctx context.Context,
 	event EventNewBlockHashes,
 	ccBuilder CanonicalChainBuilder,
@@ -232,7 +254,7 @@ func (s *Sync) onNewBlockHashesEvent(
 		if err != nil {
 			if (p2p.ErrIncompleteHeaders{}).Is(err) || (p2p.ErrMissingBodies{}).Is(err) {
 				s.logger.Debug(
-					syncLogPrefix("onNewBlockHashesEvent: failed to fetch complete blocks, ignoring event"),
+					syncLogPrefix("applyNewBlockHashesOnTip: failed to fetch complete blocks, ignoring event"),
 					"err", err,
 					"peerId", event.PeerId,
 					"lastBlockNum", headerHashNum.Number,
@@ -249,7 +271,7 @@ func (s *Sync) onNewBlockHashesEvent(
 			PeerId:   event.PeerId,
 		}
 
-		err = s.onNewBlockEvent(ctx, newBlockEvent, ccBuilder)
+		err = s.applyNewBlockOnTip(ctx, newBlockEvent, ccBuilder)
 		if err != nil {
 			return err
 		}
@@ -276,15 +298,15 @@ func (s *Sync) Run(ctx context.Context) error {
 		case event := <-s.events:
 			switch event.Type {
 			case EventTypeNewMilestone:
-				if err = s.onMilestoneEvent(ctx, event.AsNewMilestone(), ccBuilder); err != nil {
+				if err = s.applyNewMilestoneOnTip(ctx, event.AsNewMilestone(), ccBuilder); err != nil {
 					return err
 				}
 			case EventTypeNewBlock:
-				if err = s.onNewBlockEvent(ctx, event.AsNewBlock(), ccBuilder); err != nil {
+				if err = s.applyNewBlockOnTip(ctx, event.AsNewBlock(), ccBuilder); err != nil {
 					return err
 				}
 			case EventTypeNewBlockHashes:
-				if err = s.onNewBlockHashesEvent(ctx, event.AsNewBlockHashes(), ccBuilder); err != nil {
+				if err = s.applyNewBlockHashesOnTip(ctx, event.AsNewBlockHashes(), ccBuilder); err != nil {
 					return err
 				}
 			}
@@ -335,11 +357,9 @@ func (s *Sync) syncToTipUsingMilestones(ctx context.Context, tip *types.Header) 
 	})
 }
 
-func (s *Sync) sync(
-	ctx context.Context,
-	tip *types.Header,
-	tipDownloader func(ctx context.Context, startBlockNum uint64) (*types.Header, error),
-) (*types.Header, error) {
+type tipDownloaderFunc func(ctx context.Context, startBlockNum uint64) (*types.Header, error)
+
+func (s *Sync) sync(ctx context.Context, tip *types.Header, tipDownloader tipDownloaderFunc) (*types.Header, error) {
 	for {
 		newTip, err := tipDownloader(ctx, tip.Number.Uint64()+1)
 		if err != nil {

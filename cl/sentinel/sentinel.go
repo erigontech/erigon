@@ -22,9 +22,11 @@ import (
 	"fmt"
 	"net"
 	"net/http"
+	"os/signal"
 	"strconv"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -254,6 +256,7 @@ func New(
 	opts = append(opts, libp2p.ConnectionGater(gater))
 
 	host, err := libp2p.New(opts...)
+	signal.Reset(syscall.SIGINT)
 	if err != nil {
 		return nil, err
 	}

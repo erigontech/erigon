@@ -24,7 +24,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"github.com/erigontech/erigon-lib/common/datadir"
 	"io"
 	"math/big"
 	"os"
@@ -32,6 +31,8 @@ import (
 	"runtime/pprof"
 	"testing"
 	"time"
+
+	"github.com/erigontech/erigon-lib/common/datadir"
 
 	"github.com/holiman/uint256"
 	"github.com/urfave/cli/v2"
@@ -41,6 +42,7 @@ import (
 	common2 "github.com/erigontech/erigon-lib/common/dbg"
 	"github.com/erigontech/erigon-lib/common/hexutility"
 	"github.com/erigontech/erigon-lib/kv/memdb"
+	"github.com/erigontech/erigon-lib/kv/rawdbv3"
 	"github.com/erigontech/erigon-lib/log/v3"
 	state2 "github.com/erigontech/erigon-lib/state"
 
@@ -176,7 +178,7 @@ func runCmd(ctx *cli.Context) error {
 		return err
 	}
 	defer sd.Close()
-	stateReader := state.NewStateReaderV3(sd)
+	stateReader := state.NewReaderV3(sd)
 	statedb = state.New(stateReader)
 	if ctx.String(SenderFlag.Name) != "" {
 		sender = libcommon.HexToAddress(ctx.String(SenderFlag.Name))
@@ -312,7 +314,7 @@ func runCmd(ctx *cli.Context) error {
 			fmt.Println("Could not commit state: ", err)
 			os.Exit(1)
 		}
-		fmt.Println(string(state.NewDumper(tx, 0).DefaultDump()))
+		fmt.Println(string(state.NewDumper(tx, rawdbv3.TxNums, 0).DefaultDump()))
 	}
 
 	if memProfilePath := ctx.String(MemProfileFlag.Name); memProfilePath != "" {

@@ -482,37 +482,37 @@ func Test_HexPatriciaHashed_Sepolia(t *testing.T) {
 func Test_Cell_EncodeDecode(t *testing.T) {
 	rnd := rand.New(rand.NewSource(time.Now().UnixMilli()))
 	first := &cell{
-		hashLen:            length.Hash,
-		accountPlainKeyLen: length.Addr,
-		storagePlainKeyLen: length.Addr + length.Hash,
-		downHashedLen:      rnd.Intn(129),
-		extLen:             rnd.Intn(65),
-		downHashedKey:      [128]byte{},
-		extension:          [64]byte{},
-		storagePlainKey:    [52]byte{},
-		hash:               [32]byte{},
-		accountPlainKey:    [20]byte{},
+		hashLen:         length.Hash,
+		accountAddrLen:  length.Addr,
+		storageAddrLen:  length.Addr + length.Hash,
+		hashedExtLen:    rnd.Intn(129),
+		extLen:          rnd.Intn(65),
+		hashedExtension: [128]byte{},
+		extension:       [64]byte{},
+		storageAddr:     [52]byte{},
+		hash:            [32]byte{},
+		accountAddr:     [20]byte{},
 	}
 	b := uint256.NewInt(rnd.Uint64())
 	first.Balance = *b
 
-	rnd.Read(first.downHashedKey[:first.downHashedLen])
+	rnd.Read(first.hashedExtension[:first.hashedExtLen])
 	rnd.Read(first.extension[:first.extLen])
-	rnd.Read(first.storagePlainKey[:])
-	rnd.Read(first.accountPlainKey[:])
+	rnd.Read(first.storageAddr[:])
+	rnd.Read(first.accountAddr[:])
 	rnd.Read(first.hash[:])
 
 	second := new(cell)
 	err := second.Decode(first.Encode())
 	require.NoError(t, err)
 
-	require.EqualValues(t, first.downHashedLen, second.downHashedLen)
-	require.EqualValues(t, first.downHashedKey[:], second.downHashedKey[:])
-	require.EqualValues(t, first.accountPlainKeyLen, second.accountPlainKeyLen)
-	require.EqualValues(t, first.storagePlainKeyLen, second.storagePlainKeyLen)
+	require.EqualValues(t, first.hashedExtLen, second.hashedExtLen)
+	require.EqualValues(t, first.hashedExtension[:], second.hashedExtension[:])
+	require.EqualValues(t, first.accountAddrLen, second.accountAddrLen)
+	require.EqualValues(t, first.storageAddrLen, second.storageAddrLen)
 	require.EqualValues(t, first.hashLen, second.hashLen)
-	require.EqualValues(t, first.accountPlainKey[:], second.accountPlainKey[:])
-	require.EqualValues(t, first.storagePlainKey[:], second.storagePlainKey[:])
+	require.EqualValues(t, first.accountAddr[:], second.accountAddr[:])
+	require.EqualValues(t, first.storageAddr[:], second.storageAddr[:])
 	require.EqualValues(t, first.hash[:], second.hash[:])
 	require.EqualValues(t, first.extension[:first.extLen], second.extension[:second.extLen])
 

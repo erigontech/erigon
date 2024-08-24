@@ -29,6 +29,7 @@ import (
 	"github.com/erigontech/erigon-lib/chain"
 	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/kv"
+	"github.com/erigontech/erigon-lib/kv/rawdbv3"
 
 	"github.com/erigontech/erigon/consensus"
 	"github.com/erigontech/erigon/core"
@@ -52,8 +53,8 @@ type BlockGetter interface {
 }
 
 // ComputeTxEnv returns the execution environment of a certain transaction.
-func ComputeTxEnv(ctx context.Context, engine consensus.EngineReader, block *types.Block, cfg *chain.Config, headerReader services.HeaderReader, dbtx kv.Tx, txIndex int) (core.Message, evmtypes.BlockContext, evmtypes.TxContext, *state.IntraBlockState, state.StateReader, error) {
-	reader, err := rpchelper.CreateHistoryStateReader(dbtx, block.NumberU64(), txIndex, cfg.ChainName)
+func ComputeTxEnv(ctx context.Context, engine consensus.EngineReader, block *types.Block, cfg *chain.Config, headerReader services.HeaderReader, txNumsReader rawdbv3.TxNumsReader, dbtx kv.Tx, txIndex int) (core.Message, evmtypes.BlockContext, evmtypes.TxContext, *state.IntraBlockState, state.StateReader, error) {
+	reader, err := rpchelper.CreateHistoryStateReader(dbtx, txNumsReader, block.NumberU64(), txIndex, cfg.ChainName)
 	if err != nil {
 		return nil, evmtypes.BlockContext{}, evmtypes.TxContext{}, nil, nil, err
 	}
@@ -76,7 +77,7 @@ func ComputeTxEnv(ctx context.Context, engine consensus.EngineReader, block *typ
 	signer := types.MakeSigner(cfg, block.NumberU64(), block.Time())
 	rules := cfg.Rules(blockContext.BlockNumber, blockContext.Time)
 	txn := block.Transactions()[txIndex]
-	statedb.SetTxContext(txn.Hash(), block.Hash(), txIndex)
+	statedb.SetTxContext(txn.Hash(), txIndex)
 	msg, _ := txn.AsMessage(*signer, block.BaseFee(), rules)
 	if msg.FeeCap().IsZero() && engine != nil {
 		syscall := func(contract libcommon.Address, data []byte) ([]byte, error) {

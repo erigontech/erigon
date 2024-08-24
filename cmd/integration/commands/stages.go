@@ -52,7 +52,6 @@ import (
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cmd/hack/tool/fromdb"
 	"github.com/erigontech/erigon/consensus"
-	"github.com/erigontech/erigon/consensus/mainnet"
 	"github.com/erigontech/erigon/core"
 	"github.com/erigontech/erigon/core/rawdb"
 	"github.com/erigontech/erigon/core/rawdb/blockio"
@@ -1271,7 +1270,9 @@ func allSnapshots(ctx context.Context, db kv.RoDB, logger log.Logger) (*freezebl
 		_allSnapshotsSingleton = freezeblocks.NewRoSnapshots(snapCfg, dirs.Snap, 0, logger)
 		_allBorSnapshotsSingleton = freezeblocks.NewBorRoSnapshots(snapCfg, dirs.Snap, 0, logger)
 		var err error
-		cr := rawdb.NewCanonicalReader()
+		blockReader := freezeblocks.NewBlockReader(_allSnapshotsSingleton, _allBorSnapshotsSingleton)
+
+		cr := rawdb.NewCanonicalReader(rawdbv3.TxNums.WithCustomReadTxNumFunc(freezeblocks.ReadTxNumFuncFromBlockReader(ctx, blockReader)))
 		_aggSingleton, err = libstate.NewAggregator(ctx, dirs, config3.HistoryV3AggregationStep, db, cr, logger)
 		if err != nil {
 			panic(err)
@@ -1323,7 +1324,7 @@ func allSnapshots(ctx context.Context, db kv.RoDB, logger log.Logger) (*freezebl
 			ac := _aggSingleton.BeginFilesRo()
 			defer ac.Close()
 			ac.LogStats(tx, func(endTxNumMinimax uint64) (uint64, error) {
-				_, histBlockNumProgress, err := rawdbv3.TxNums.FindBlockNum(tx, endTxNumMinimax)
+				_, histBlockNumProgress, err := rawdbv3.TxNums.WithCustomReadTxNumFunc(freezeblocks.ReadTxNumFuncFromBlockReader(ctx, blockReader)).FindBlockNum(tx, endTxNumMinimax)
 				return histBlockNumProgress, err
 			})
 			return nil
@@ -1518,7 +1519,7 @@ func initConsensusEngine(ctx context.Context, cc *chain2.Config, dir string, db 
 			heimdallClient = heimdall.NewHeimdallClient(config.HeimdallURL, logger)
 		}
 	} else {
-		consensusConfig = &mainnet.MainnetConfig{}
+		consensusConfig = &config.Ethash
 	}
 	return ethconsensusconfig.CreateConsensusEngine(ctx, &nodecfg.Config{Dirs: datadir.New(dir)}, cc, consensusConfig, config.Miner.Notify, config.Miner.Noverify,
 		heimdallClient, config.WithoutHeimdall, blockReader, db.ReadOnly(), logger, nil, nil), heimdallClient

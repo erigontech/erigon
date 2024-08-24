@@ -27,6 +27,7 @@ import (
 	"github.com/erigontech/erigon-lib/common/datadir"
 	"github.com/erigontech/erigon-lib/kv/temporal"
 	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/turbo/snapshotsync/freezeblocks"
 	"github.com/erigontech/erigon/turbo/stages/headerdownload"
 
 	"github.com/erigontech/erigon-lib/commitment"
@@ -249,10 +250,10 @@ func RebuildPatriciaTrieBasedOnFiles(rwTx kv.RwTx, cfg TrieCfg, ctx context.Cont
 		}
 		defer rwTx.Rollback()
 	}
-
+	txNumsReader := rawdbv3.TxNums.WithCustomReadTxNumFunc(freezeblocks.ReadTxNumFuncFromBlockReader(ctx, cfg.blockReader))
 	var foundHash bool
 	toTxNum := rwTx.(*temporal.Tx).AggTx().(*state.AggregatorRoTx).EndTxNumNoCommitment()
-	ok, blockNum, err := rawdbv3.TxNums.FindBlockNum(rwTx, toTxNum)
+	ok, blockNum, err := txNumsReader.FindBlockNum(rwTx, toTxNum)
 	if err != nil {
 		return libcommon.Hash{}, err
 	}
@@ -264,11 +265,11 @@ func RebuildPatriciaTrieBasedOnFiles(rwTx kv.RwTx, cfg TrieCfg, ctx context.Cont
 		blockNum = bb.Number
 		foundHash = bb.Offset() != 0
 	} else {
-		firstTxInBlock, err := rawdbv3.TxNums.Min(rwTx, blockNum)
+		firstTxInBlock, err := txNumsReader.Min(rwTx, blockNum)
 		if err != nil {
 			return libcommon.Hash{}, fmt.Errorf("failed to find first txNum in block %d : %w", blockNum, err)
 		}
-		lastTxInBlock, err := rawdbv3.TxNums.Max(rwTx, blockNum)
+		lastTxInBlock, err := txNumsReader.Max(rwTx, blockNum)
 		if err != nil {
 			return libcommon.Hash{}, fmt.Errorf("failed to find last txNum in block %d : %w", blockNum, err)
 		}

@@ -29,6 +29,7 @@ import (
 	hexutil2 "github.com/erigontech/erigon-lib/common/hexutil"
 	"github.com/erigontech/erigon-lib/common/hexutility"
 	"github.com/erigontech/erigon-lib/kv"
+	"github.com/erigontech/erigon-lib/kv/rawdbv3"
 
 	"github.com/erigontech/erigon/consensus"
 	"github.com/erigontech/erigon/core"
@@ -40,6 +41,7 @@ import (
 	"github.com/erigontech/erigon/rpc"
 	"github.com/erigontech/erigon/turbo/adapter/ethapi"
 	"github.com/erigontech/erigon/turbo/rpchelper"
+	"github.com/erigontech/erigon/turbo/snapshotsync/freezeblocks"
 	"github.com/erigontech/erigon/turbo/transactions"
 )
 
@@ -143,7 +145,8 @@ func (api *OtterscanAPIImpl) runTracer(ctx context.Context, tx kv.Tx, hash commo
 	}
 	engine := api.engine()
 
-	msg, blockCtx, txCtx, ibs, _, err := transactions.ComputeTxEnv(ctx, engine, block, chainConfig, api._blockReader, tx, int(txIndex))
+	txNumsReader := rawdbv3.TxNums.WithCustomReadTxNumFunc(freezeblocks.ReadTxNumFuncFromBlockReader(ctx, api._blockReader))
+	msg, blockCtx, txCtx, ibs, _, err := transactions.ComputeTxEnv(ctx, engine, block, chainConfig, api._blockReader, txNumsReader, tx, int(txIndex))
 	if err != nil {
 		return nil, err
 	}
@@ -357,7 +360,7 @@ func (api *OtterscanAPIImpl) getBlockWithSenders(ctx context.Context, number rpc
 		return api.pendingBlock(), nil, nil
 	}
 
-	n, hash, _, err := rpchelper.GetBlockNumber(rpc.BlockNumberOrHashWithNumber(number), tx, api.filters)
+	n, hash, _, err := rpchelper.GetBlockNumber(ctx, rpc.BlockNumberOrHashWithNumber(number), tx, api._blockReader, api.filters)
 	if err != nil {
 		return nil, nil, err
 	}

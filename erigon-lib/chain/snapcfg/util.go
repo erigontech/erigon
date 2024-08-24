@@ -19,6 +19,7 @@ package snapcfg
 import (
 	_ "embed"
 	"encoding/json"
+	"github.com/pkg/errors"
 	"path/filepath"
 	"slices"
 	"sort"
@@ -93,15 +94,28 @@ func (p Preverified) Typed(types []snaptype.Type) Preverified {
 
 		var preferredVersion, minVersion snaptype.Version
 
-		parts := strings.Split(name, "-")
-		if len(parts) < 3 {
-			if strings.HasPrefix(p.Name, "domain") || strings.HasPrefix(p.Name, "history") || strings.HasPrefix(p.Name, "idx") {
+		countSep := 0
+		var lastSep, dot int
+		for i := range name {
+			if name[i] == '-' {
+				countSep++
+				lastSep = i
+			}
+			if name[i] == '.' {
+				dot = i
+			}
+		}
+
+		if countSep < 2 {
+			if strings.HasPrefix(p.Name, "domain") || strings.HasPrefix(p.Name, "history") || strings.HasPrefix(p.Name, "idx") || strings.HasPrefix(p.Name, "accessor") {
 				bestVersions.Set(p.Name, p)
 				continue
 			}
 			continue
 		}
-		typeName, _ := strings.CutSuffix(parts[2], filepath.Ext(parts[2]))
+
+		//typeName, _ := strings.CutSuffix(parts[2], filepath.Ext(parts[2]))
+		typeName := name[lastSep+1 : dot]
 		include := false
 
 		for _, typ := range types {
@@ -158,7 +172,7 @@ func (p Preverified) Versioned(preferredVersion snaptype.Version, minVersion sna
 	for _, p := range p {
 		v, name, ok := strings.Cut(p.Name, "-")
 		if !ok {
-			if strings.HasPrefix(p.Name, "domain") || strings.HasPrefix(p.Name, "history") || strings.HasPrefix(p.Name, "idx") {
+			if strings.HasPrefix(p.Name, "domain") || strings.HasPrefix(p.Name, "history") || strings.HasPrefix(p.Name, "idx") || strings.HasPrefix(p.Name, "accessor") {
 				bestVersions.Set(p.Name, p)
 				continue
 			}
@@ -167,7 +181,7 @@ func (p Preverified) Versioned(preferredVersion snaptype.Version, minVersion sna
 
 		parts := strings.Split(name, "-")
 		if len(parts) < 3 {
-			if strings.HasPrefix(p.Name, "domain") || strings.HasPrefix(p.Name, "history") || strings.HasPrefix(p.Name, "idx") {
+			if strings.HasPrefix(p.Name, "domain") || strings.HasPrefix(p.Name, "history") || strings.HasPrefix(p.Name, "idx") || strings.HasPrefix(p.Name, "accessor") {
 				bestVersions.Set(p.Name, p)
 				continue
 			}
@@ -227,25 +241,19 @@ func (p Preverified) Versioned(preferredVersion snaptype.Version, minVersion sna
 
 func (p Preverified) MaxBlock(version snaptype.Version) (uint64, error) {
 	max := uint64(0)
-
 	for _, p := range p {
 		_, fileName := filepath.Split(p.Name)
 		ext := filepath.Ext(fileName)
 		if ext != ".seg" {
 			continue
 		}
-		onlyName := fileName[:len(fileName)-len(ext)]
-		parts := strings.Split(onlyName, "-")
 
-		to, err := strconv.ParseUint(parts[2], 10, 64)
+		to, err := ExtractBlockFromName(fileName[:len(fileName)-len(ext)], version)
 		if err != nil {
-			return 0, err
-		}
-
-		if version != 0 {
-			if v, err := snaptype.ParseVersion(parts[0]); err != nil || v != version {
+			if errors.Is(err, errWrongVersion) {
 				continue
 			}
+			return 0, err
 		}
 
 		if max < to {
@@ -258,6 +266,53 @@ func (p Preverified) MaxBlock(version snaptype.Version) (uint64, error) {
 	}
 
 	return max*1_000 - 1, nil
+}
+
+var errWrongVersion = errors.New("wrong version")
+
+func ExtractBlockFromName(name string, v snaptype.Version) (block uint64, err error) {
+	i := 0
+	for i < len(name) && name[i] != '-' {
+		i++
+	}
+
+	version, err := snaptype.ParseVersion(name[:i])
+	if err != nil {
+		return 0, err
+	}
+
+	if v != 0 && v != version {
+		return 0, errWrongVersion
+	}
+
+	i++
+
+	for i < len(name) && name[i] != '-' { // skipping parts[1]
+		i++
+	}
+
+	i++
+	start := i
+	if start > len(name)-1 {
+		return 0, errors.New("invalid name")
+	}
+
+	for i < len(name) && name[i] != '-' {
+		i++
+	}
+
+	end := i
+
+	if i > len(name) {
+		end = len(name)
+	}
+
+	block, err = strconv.ParseUint(name[start:end], 10, 64)
+	if err != nil {
+		return 0, err
+	}
+
+	return block, nil
 }
 
 func (p Preverified) MarshalJSON() ([]byte, error) {
@@ -378,8 +433,8 @@ func Seedable(networkName string, info snaptype.FileInfo) bool {
 	return KnownCfg(networkName).Seedable(info)
 }
 
-func MergeLimit(networkName string, snapType snaptype.Enum, fromBlock uint64) uint64 {
-	return KnownCfg(networkName).MergeLimit(snapType, fromBlock)
+func MergeLimitFromCfg(cfg *Cfg, snapType snaptype.Enum, fromBlock uint64) uint64 {
+	return cfg.MergeLimit(snapType, fromBlock)
 }
 
 func MaxSeedableSegment(chain string, dir string) uint64 {
@@ -398,8 +453,8 @@ func MaxSeedableSegment(chain string, dir string) uint64 {
 
 var oldMergeSteps = append([]uint64{snaptype.Erigon2OldMergeLimit}, snaptype.MergeSteps...)
 
-func MergeSteps(networkName string, snapType snaptype.Enum, fromBlock uint64) []uint64 {
-	mergeLimit := MergeLimit(networkName, snapType, fromBlock)
+func MergeStepsFromCfg(cfg *Cfg, snapType snaptype.Enum, fromBlock uint64) []uint64 {
+	mergeLimit := MergeLimitFromCfg(cfg, snapType, fromBlock)
 
 	if mergeLimit == snaptype.Erigon2OldMergeLimit {
 		return oldMergeSteps

@@ -110,13 +110,20 @@ func MustOpen(indexFile string) *Index {
 	return idx
 }
 
-func OpenIndex(indexFilePath string) (*Index, error) {
+func OpenIndex(indexFilePath string) (id *Index, err error) {
+	defer func() {
+		// recover from panic if one occurred. Set err to nil if no panic
+		if r := recover(); r != nil {
+			// do r with only the stack trace
+			err = fmt.Errorf("incomplete file %s %v", indexFilePath, dbg.Stack())
+		}
+	}()
+
 	_, fName := filepath.Split(indexFilePath)
 	idx := &Index{
 		filePath: indexFilePath,
 		fileName: fName,
 	}
-	var err error
 	idx.f, err = os.Open(indexFilePath)
 	if err != nil {
 		return nil, err
@@ -423,7 +430,7 @@ func (idx *Index) DisableReadAhead() {
 	}
 	leftReaders := idx.readAheadRefcnt.Add(-1)
 	if leftReaders == 0 {
-		_ = mmap.MadviseNormal(idx.mmapHandle1)
+		_ = mmap.MadviseRandom(idx.mmapHandle1)
 	} else if leftReaders < 0 {
 		log.Warn("read-ahead negative counter", "file", idx.FileName())
 	}
@@ -435,6 +442,7 @@ func (idx *Index) EnableReadAhead() *Index {
 }
 func (idx *Index) EnableWillNeed() *Index {
 	idx.readAheadRefcnt.Add(1)
+	fmt.Printf("[dbg] madv_will_need: %s\n", idx.fileName)
 	_ = mmap.MadviseWillNeed(idx.mmapHandle1)
 	return idx
 }
