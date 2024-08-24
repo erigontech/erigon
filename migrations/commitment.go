@@ -74,6 +74,10 @@ var SqueezeCommitmentFiles = Migration{
 			if err = ac.SqueezeCommitmentFiles(ac); err != nil {
 				return err
 			}
+			ac.Close()
+			if err := agg.BuildMissedIndices(ctx, estimate.IndexSnapshot.Workers()); err != nil {
+				return err
+			}
 			return db.Update(ctx, func(tx kv.RwTx) error {
 				return BeforeCommit(tx, nil, true)
 			})
@@ -101,7 +105,11 @@ var SqueezeCommitmentFiles = Migration{
 			if err = acOld.SqueezeCommitmentFiles(ac); err != nil {
 				return err
 			}
-
+			acOld.Close()
+			ac.Close()
+			if err := agg.BuildMissedIndices(ctx, estimate.IndexSnapshot.Workers()); err != nil {
+				return err
+			}
 		}
 
 		return db.Update(ctx, func(tx kv.RwTx) error {
