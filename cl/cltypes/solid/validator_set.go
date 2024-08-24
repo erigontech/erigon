@@ -18,6 +18,7 @@ package solid
 
 import (
 	"encoding/json"
+	"io"
 
 	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/length"
@@ -387,4 +388,36 @@ func (v *ValidatorSet) UnmarshalJSON(data []byte) error {
 		v.Append(val)
 	}
 	return nil
+}
+
+func (v *ValidatorSet) ReadMerkleTree(r io.Reader) error {
+	if v.MerkleTree == nil {
+		v.MerkleTree = &merkle_tree.MerkleTree{}
+		hashBuffer := make([]byte, 8*32)
+		v.MerkleTree.Initialize(v.l, merkle_tree.OptimalMaxTreeCacheDepth, func(idx int, out []byte) {
+			validator := v.Get(idx)
+			if err := validator.CopyHashBufferTo(hashBuffer); err != nil {
+				panic(err)
+			}
+			hashBuffer = hashBuffer[:(8 * 32)]
+			if err := merkle_tree.MerkleRootFromFlatLeaves(hashBuffer, out); err != nil {
+				panic(err)
+			}
+		}, nil)
+	}
+	return v.MerkleTree.ReadMerkleTree(r)
+}
+
+func (arr *ValidatorSet) WriteMerkleTree(w io.Writer) error {
+	if arr.MerkleTree == nil {
+		arr.MerkleTree = &merkle_tree.MerkleTree{}
+		cap := uint64(arr.c)
+		arr.MerkleTree.Initialize(arr.l, merkle_tree.OptimalMaxTreeCacheDepth, func(idx int, out []byte) {
+			validator := arr.Get(idx)
+			if err := validator.CopyHashBufferTo(out); err != nil {
+				panic(err)
+			}
+		}, &cap)
+	}
+	return arr.MerkleTree.WriteMerkleTree(w)
 }
