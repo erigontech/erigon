@@ -76,6 +76,11 @@ func (f *ForkChoiceStore) OnBlock(ctx context.Context, block *cltypes.SignedBeac
 	if err != nil {
 		return err
 	}
+	// ignore block if it already exists
+	if _, ok := f.GetHeader(blockRoot); ok {
+		return nil
+	}
+
 	if f.Slot() < block.Block.Slot {
 		return errors.New("block is too early compared to current_slot")
 	}
