@@ -28,6 +28,7 @@ import (
 	"github.com/erigontech/erigon-lib/common/math"
 
 	"github.com/erigontech/erigon/core/tracing"
+	"github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/core/vm/stack"
 	"github.com/erigontech/erigon/params"
 )
@@ -175,10 +176,11 @@ func makeCallVariantGasCallEIP2929(oldCalculator gasFunc) gasFunc {
 
 		// delegated designation costs
 		if evm.chainRules.IsPrague {
-			if dd, _, _, ddPresent := delegatedDesignationHandler(evm.IntraBlockState(), addr); ddPresent {
+			code := evm.IntraBlockState().GetCode(addr)
+			if _, ok := types.ParseDelegation(code); ok {
 				// If the caller cannot afford the cost, this change will be rolled back
 				ddCost := params.WarmStorageReadCostEIP2929
-				if evm.IntraBlockState().AddAddressToAccessList(dd) {
+				if evm.IntraBlockState().AddAddressToAccessList(addr) {
 					ddCost = params.ColdAccountAccessCostEIP2929
 				}
 
