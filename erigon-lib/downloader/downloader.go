@@ -2106,7 +2106,6 @@ func (d *Downloader) ReCalcStats(interval time.Duration) {
 		stats.Completed = stats.Completed && torrentComplete
 	}
 
-	stats.BytesCompleted = uint64(downloadedBytes)
 	stats.BytesDownload = uint64(downloadedBytes)
 
 	var webTransfers int32
@@ -2133,7 +2132,6 @@ func (d *Downloader) ReCalcStats(interval time.Duration) {
 					bytesCompleted = tLen
 				}
 
-				stats.BytesCompleted += bytesCompleted
 				stats.BytesTotal += tLen
 
 				stats.BytesDownload += bytesCompleted
@@ -2179,50 +2177,6 @@ func (d *Downloader) ReCalcStats(interval time.Duration) {
 		}
 
 		stats.Completed = false
-	}
-
-	dbg.ReadMemStats(&m)
-
-	prefix := d.logPrefix
-	status := "Downloading"
-
-	if d.logPrefix == "" {
-		prefix = "[snapshots]"
-	}
-
-	percentDone := float32(100) * (float32(stats.BytesDownload) / float32(stats.BytesTotal))
-	bytesDone := common.ByteCount(stats.BytesDownload)
-	rate := stats.DownloadRate
-	remainingBytes := stats.BytesTotal - stats.BytesDownload
-
-	if stats.BytesDownload >= stats.BytesTotal && stats.MetadataReady == stats.FilesTotal && stats.BytesTotal > 0 {
-		status = "Verifying"
-		percentDone = float32(100) * (float32(stats.BytesCompleted) / float32(stats.BytesTotal))
-		bytesDone = common.ByteCount(stats.BytesCompleted)
-		rate = stats.CompletionRate
-		remainingBytes = stats.BytesTotal - stats.BytesCompleted
-	}
-
-	if stats.BytesTotal == 0 {
-		percentDone = 0
-	}
-
-	timeLeft := calculateTime(remainingBytes, rate)
-
-	var logStr strings.Builder
-	if stats.MetadataReady < stats.FilesTotal {
-		logStr.WriteString(fmt.Sprintf("(%d/%d files) ", stats.MetadataReady, stats.FilesTotal))
-	}
-	logStr.WriteString(fmt.Sprintf("%.2f%% - %s/%s", percentDone, bytesDone, common.ByteCount(stats.BytesTotal)))
-	logStr.WriteString(" rate=" + common.ByteCount(rate) + "/s")
-	logStr.WriteString(" time-left=" + timeLeft)
-	logStr.WriteString(" total-time=" + time.Since(d.startTime).Round(time.Second).String())
-	if stats.MetadataReady < stats.FilesTotal {
-		logStr.WriteString(" no-metadata=" + strconv.Itoa(int(stats.FilesTotal-stats.MetadataReady)))
-	}
-
-	if !stats.Completed {
-		log.Info(fmt.Sprintf("[%s] %s", prefix, status), "progress", logStr.String(), "alloc", common.ByteCount(m.Alloc), "sys", common.ByteCount(m.Sys))
 	}
 
 	if lastMetadataReady != stats.MetadataReady {
@@ -2376,6 +2330,55 @@ func (d *Downloader) ReCalcStats(interval time.Duration) {
 	}
 
 	d.lock.Unlock()
+
+	prefix := d.logPrefix
+
+	if d.logPrefix == "" {
+		prefix = "[snapshots]"
+	}
+
+	if stats.Completed {
+		log.Info(fmt.Sprintf("[%s] Downloading complete", prefix), "time", time.Since(d.startTime).String())
+	}
+
+	dbg.ReadMemStats(&m)
+
+	status := "Downloading"
+
+	percentDone := float32(100) * (float32(stats.BytesDownload) / float32(stats.BytesTotal))
+	bytesDone := common.ByteCount(stats.BytesDownload)
+	rate := stats.DownloadRate
+	remainingBytes := stats.BytesTotal - stats.BytesDownload
+
+	if stats.BytesDownload >= stats.BytesTotal && stats.MetadataReady == stats.FilesTotal && stats.BytesTotal > 0 {
+		status = "Verifying"
+		percentDone = float32(100) * (float32(stats.BytesCompleted) / float32(stats.BytesTotal))
+		bytesDone = common.ByteCount(stats.BytesCompleted)
+		rate = stats.CompletionRate
+		remainingBytes = stats.BytesTotal - stats.BytesCompleted
+	}
+
+	if stats.BytesTotal == 0 {
+		percentDone = 0
+	}
+
+	timeLeft := calculateTime(remainingBytes, rate)
+
+	var logStr strings.Builder
+	if stats.MetadataReady < stats.FilesTotal {
+		logStr.WriteString(fmt.Sprintf("(%d/%d files) ", stats.MetadataReady, stats.FilesTotal))
+	}
+	logStr.WriteString(fmt.Sprintf("%.2f%% - %s/%s", percentDone, bytesDone, common.ByteCount(stats.BytesTotal)))
+	logStr.WriteString(" rate=" + common.ByteCount(rate) + "/s")
+	logStr.WriteString(" time-left=" + timeLeft)
+	logStr.WriteString(" total-time=" + time.Since(d.startTime).Round(time.Second).String())
+	if stats.MetadataReady < stats.FilesTotal {
+		logStr.WriteString(" no-metadata=" + strconv.Itoa(int(stats.FilesTotal-stats.MetadataReady)))
+	}
+
+	if !stats.Completed {
+		log.Info(fmt.Sprintf("[%s] %s", prefix, status), "progress", logStr.String(), "alloc", common.ByteCount(m.Alloc), "sys", common.ByteCount(m.Sys))
+	}
 }
 
 type filterWriter struct {
