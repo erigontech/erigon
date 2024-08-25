@@ -110,7 +110,8 @@ func (c *CommitteeSubscribeMgmt) AddAttestationSubscription(ctx context.Context,
 
 	if _, ok := c.subnetSubscriptions[subnetId]; !ok {
 		c.subnetSubscriptions[subnetId] = &subscription{
-			aggregate:        p.IsAggregator,
+			//aggregate:        p.IsAggregator,
+			aggregate:        true,
 			latestTargetSlot: slot,
 		}
 	} else {

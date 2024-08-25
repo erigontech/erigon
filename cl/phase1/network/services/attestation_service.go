@@ -182,7 +182,8 @@ func (s *attestationService) ProcessMessage(ctx context.Context, subnet *uint64,
 	if valid, err := blsVerify(signature[:], signingRoot[:], pubKey[:]); err != nil {
 		return err
 	} else if !valid {
-		log.Warn("lodestar: invalid signature", "signature", common.Bytes2Hex(signature[:]), "signningRoot", common.Bytes2Hex(signingRoot[:]), "pubKey", common.Bytes2Hex(pubKey[:]))
+		log.Warn("invalid signature", "signature", common.Bytes2Hex(signature[:]), "signningRoot", common.Bytes2Hex(signingRoot[:]),
+			"pubKey", common.Bytes2Hex(pubKey[:]), "onBitValidatorIndex", beaconCommittee[onBitIndex], "validatorIndex", vIndex)
 		return errors.New("invalid signature")
 	}
 
