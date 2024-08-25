@@ -48,7 +48,8 @@ var (
 )
 
 const (
-	stateFetchLimit    = 50
+	StateEventsFetchLimit = 50
+
 	apiHeimdallTimeout = 10 * time.Second
 	retryBackOff       = time.Second
 	maxRetries         = 5
@@ -179,11 +180,11 @@ func (c *Client) FetchStateSyncEvents(ctx context.Context, fromID uint64, to tim
 
 		eventRecords = append(eventRecords, response.Result...)
 
-		if len(response.Result) < stateFetchLimit || (limit > 0 && len(eventRecords) >= limit) {
+		if len(response.Result) < StateEventsFetchLimit || (limit > 0 && len(eventRecords) >= limit) {
 			break
 		}
 
-		fromID += uint64(stateFetchLimit)
+		fromID += uint64(StateEventsFetchLimit)
 	}
 
 	sort.SliceStable(eventRecords, func(i, j int) bool {
@@ -526,7 +527,7 @@ func latestSpanURL(urlString string) (*url.URL, error) {
 }
 
 func stateSyncListURL(urlString string, fromID uint64, to int64) (*url.URL, error) {
-	queryParams := fmt.Sprintf(fetchStateSyncEventsFormat, fromID, to, stateFetchLimit)
+	queryParams := fmt.Sprintf(fetchStateSyncEventsFormat, fromID, to, StateEventsFetchLimit)
 	return makeURL(urlString, fetchStateSyncEventsPath, queryParams)
 }
 

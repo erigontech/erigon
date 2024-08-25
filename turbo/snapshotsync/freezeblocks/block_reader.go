@@ -319,6 +319,10 @@ func (r *RemoteBlockReader) LastFrozenEventId() uint64 {
 	panic("not implemented")
 }
 
+func (r *RemoteBlockReader) LastFrozenEventBlockNum() uint64 {
+	panic("not implemented")
+}
+
 func (r *RemoteBlockReader) Span(_ context.Context, _ kv.Getter, _ uint64) ([]byte, error) {
 	panic("not implemented")
 }
@@ -1599,6 +1603,43 @@ func (r *BlockReader) LastFrozenEventId() uint64 {
 		lastEventID = binary.BigEndian.Uint64(buf[length.Hash+length.BlockNum : length.Hash+length.BlockNum+8])
 	}
 	return lastEventID
+}
+
+func (r *BlockReader) LastFrozenEventBlockNum() uint64 {
+	if r.borSn == nil {
+		return 0
+	}
+
+	segmentsRotx := r.borSn.ViewType(borsnaptype.BorEvents)
+	defer segmentsRotx.Close()
+
+	segments := segmentsRotx.VisibleSegments
+	if len(segments) == 0 {
+		return 0
+	}
+	// find the last segment which has a built index
+	var lastSegment *VisibleSegment
+	for i := len(segments) - 1; i >= 0; i-- {
+		if segments[i].src.Index() != nil {
+			gg := segments[i].src.MakeGetter()
+			if gg.HasNext() {
+				lastSegment = segments[i]
+				break
+			}
+		}
+	}
+	if lastSegment == nil {
+		return 0
+	}
+	var lastBlockNum uint64
+	var buf []byte
+	gg := lastSegment.src.MakeGetter()
+	for gg.HasNext() {
+		buf, _ = gg.Next(buf[:0])
+		lastBlockNum = binary.BigEndian.Uint64(buf[length.Hash : length.Hash+length.BlockNum])
+	}
+
+	return lastBlockNum
 }
 
 func lastId(ctx context.Context, tx kv.Tx, db string) (uint64, bool, error) {

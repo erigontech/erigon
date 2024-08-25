@@ -96,6 +96,8 @@ type Downloader struct {
 	downloadLimit   *rate.Limit
 
 	stuckFileDetailedLogs bool
+
+	logPrefix string
 }
 
 type downloadInfo struct {
@@ -341,6 +343,7 @@ func New(ctx context.Context, cfg *downloadercfg.Cfg, logger log.Logger, verbosi
 		webDownloadSessions: map[string]*RCloneSession{},
 		downloading:         map[string]*downloadInfo{},
 		webseedsDiscover:    discover,
+		logPrefix:           "",
 	}
 	d.webseeds.SetTorrent(d.torrentFS, snapLock.Downloads, cfg.DownloadTorrentFilesFromWebseed)
 
@@ -2174,8 +2177,13 @@ func (d *Downloader) ReCalcStats(interval time.Duration) {
 		stats.Completed = false
 	}
 
+	prefix := d.logPrefix
+	if d.logPrefix == "" {
+		prefix = "[snapshots]"
+	}
+
 	if !stats.Completed {
-		logger.Debug("[snapshots] download info",
+		logger.Debug(fmt.Sprintf("[%s]", prefix),
 			"len", len(torrents),
 			"webTransfers", webTransfers,
 			"torrent", torrentInfo,
@@ -2860,4 +2868,8 @@ func openClient(ctx context.Context, dbDir, snapDir string, cfg *torrent.ClientC
 	}()
 
 	return db, c, m, torrentClient, nil
+}
+
+func (d *Downloader) SetLogPrefix(prefix string) {
+	d.logPrefix = prefix
 }

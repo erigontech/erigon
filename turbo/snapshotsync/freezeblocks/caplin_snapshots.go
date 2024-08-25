@@ -144,19 +144,19 @@ func (s *CaplinSnapshots) LS() {
 	}
 }
 
-func (s *CaplinSnapshots) SegFilePaths(from, to uint64) []string {
+func (s *CaplinSnapshots) SegFileNames(from, to uint64) []string {
 	view := s.View()
 	defer view.Close()
 
 	var res []string
 	for _, seg := range view.BeaconBlockRotx.VisibleSegments {
 		if seg.from >= from && seg.to <= to {
-			res = append(res, seg.src.FilePath())
+			res = append(res, seg.src.FileName())
 		}
 	}
 	for _, seg := range view.BlobSidecarRotx.VisibleSegments {
 		if seg.from >= from && seg.to <= to {
-			res = append(res, seg.src.FilePath())
+			res = append(res, seg.src.FileName())
 		}
 	}
 	return res
