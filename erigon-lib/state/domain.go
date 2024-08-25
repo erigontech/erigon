@@ -123,6 +123,7 @@ type domainVisible struct {
 }
 
 var DomainCompressCfg = seg.Cfg{
+	MinPatternScore:      1000,
 	DictReducerSoftLimit: 2000000,
 	MinPatternLen:        20,
 	MaxPatternLen:        32,
