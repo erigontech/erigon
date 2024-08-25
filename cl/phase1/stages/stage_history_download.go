@@ -134,7 +134,6 @@ func SpawnStageHistoryDownload(cfg StageHistoryReconstructionCfg, ctx context.Co
 				if err != nil {
 					return false, fmt.Errorf("error retrieving whether execution payload is present: %s", err)
 				}
-				fmt.Println("hasELBlock", payload.BlockNumber)
 			}
 
 			if !hasELBlock {
@@ -159,7 +158,6 @@ func SpawnStageHistoryDownload(cfg StageHistoryReconstructionCfg, ctx context.Co
 		}
 
 		if slot == 0 || (isInCLSnapshots && isInElSnapshots) {
-			fmt.Println("slot", slot, "isInCLSnapshots", isInCLSnapshots, "isInElSnapshots", isInElSnapshots, "isInCLSnapshotsk", cfg.sn.SegmentsMax(), "isInElSnapshots", cfg.engine.FrozenBlocks(ctx))
 			return true, tx.Commit()
 		}
 		return (!cfg.backfilling || slot <= cfg.sn.SegmentsMax()) && (slot <= destinationSlotForEL || isInElSnapshots), tx.Commit()

@@ -17,7 +17,6 @@
 package network
 
 import (
-	"fmt"
 	"math"
 	"sync"
 	"sync/atomic"
@@ -243,7 +242,6 @@ Loop:
 			break
 		}
 
-		fmt.Println("checking3", *slot, clFrozenBlocks, elFrozenBlocks)
 		if b.engine != nil && b.engine.SupportInsertion() {
 			blockHash, err := beacon_indicies.ReadExecutionBlockHash(tx, b.expectedRoot)
 			if err != nil {
@@ -254,23 +252,19 @@ Loop:
 				return err
 			}
 			if blockHash == (libcommon.Hash{}) || blockNumber == nil {
-				fmt.Println("need brak")
 				break
 			}
-			fmt.Println("checking1", *blockNumber, elFrozenBlocks, blockHash)
 			if *blockNumber >= elFrozenBlocks {
 				has, err := b.engine.HasBlock(ctx, blockHash)
 				if err != nil {
 					return err
 				}
-				fmt.Println("chekcing2", *blockNumber, elFrozenBlocks, blockHash, has)
 				if !has {
 					break
 				}
 			}
 		}
 		if *slot <= clFrozenBlocks {
-			fmt.Println("checking4", clFrozenBlocks, elFrozenBlocks)
 			break
 		}
 		b.slotToDownload.Store(*slot - 1)
