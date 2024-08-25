@@ -107,14 +107,26 @@ func (a *ApiHandler) GetEthV1ValidatorAttestationData(
 	if err != nil {
 		return nil, beaconhttp.NewEndpointError(http.StatusInternalServerError, err)
 	}
-	headBlockRoot, _, err := a.forkchoiceStore.GetHead()
+	/*headBlockRoot, _, err := a.forkchoiceStore.GetHead()
 	if err != nil {
 		return nil, err
+	}*/
+	if a.forkchoiceStore.IsRootOptimistic(attestationData.BeaconBlockRoot()) {
+		return nil, beaconhttp.NewEndpointError(
+			http.StatusServiceUnavailable,
+			errors.New("head is optimistic"),
+		)
 	}
+	/*if a.forkchoiceStore.IsRootOptimistic(headBlockRoot) {
+		return nil, beaconhttp.NewEndpointError(
+			http.StatusServiceUnavailable,
+
+	}
+
 	if headBlockRoot != (libcommon.Hash{}) {
 		attestationData.SetBeaconBlockRoot(headBlockRoot)
 	}
-
+	*/
 	return newBeaconResponse(attestationData), nil
 }
 
