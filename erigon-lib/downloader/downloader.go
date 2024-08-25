@@ -2366,20 +2366,17 @@ func (d *Downloader) ReCalcStats(interval time.Duration) {
 
 		timeLeft := calculateTime(remainingBytes, rate)
 
-		var logStr strings.Builder
-		if stats.MetadataReady < stats.FilesTotal {
-			logStr.WriteString(fmt.Sprintf("(%d/%d files) ", stats.MetadataReady, stats.FilesTotal))
-		}
-		logStr.WriteString(fmt.Sprintf("%.2f%% - %s/%s", percentDone, bytesDone, common.ByteCount(stats.BytesTotal)))
-		logStr.WriteString(" rate=" + common.ByteCount(rate) + "/s")
-		logStr.WriteString(" time-left=" + timeLeft)
-		logStr.WriteString(" total-time=" + time.Since(d.startTime).Round(time.Second).String())
-		if stats.MetadataReady < stats.FilesTotal {
-			logStr.WriteString(" no-metadata=" + strconv.Itoa(int(stats.FilesTotal-stats.MetadataReady)))
-		}
-
 		if !stats.Completed {
-			log.Info(fmt.Sprintf("[%s] %s", prefix, status), "progress", logStr.String(), "alloc", common.ByteCount(m.Alloc), "sys", common.ByteCount(m.Sys))
+			log.Info(
+				fmt.Sprintf("[%s] %s", prefix, status),
+				"progress", fmt.Sprintf("(%d/%d files) %.2f%% - %s/%s", stats.MetadataReady, stats.FilesTotal, percentDone, bytesDone, common.ByteCount(stats.BytesTotal)),
+				"rate", fmt.Sprintf("%s/s", common.ByteCount(rate)),
+				"time-left", timeLeft,
+				"total-time", time.Since(d.startTime).Round(time.Second).String(),
+				"flush-rate", fmt.Sprintf("%s/s", common.ByteCount(stats.FlushRate)),
+				"hash-rate", fmt.Sprintf("%s/s", common.ByteCount(stats.HashRate)),
+				"alloc", common.ByteCount(m.Alloc),
+				"sys", common.ByteCount(m.Sys))
 		}
 	}
 }
