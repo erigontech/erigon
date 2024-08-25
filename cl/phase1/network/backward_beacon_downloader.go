@@ -247,7 +247,11 @@ Loop:
 			if err != nil {
 				return err
 			}
-			if blockHash != (libcommon.Hash{}) && *slot >= elFrozenBlocks {
+			blockNumber, err := beacon_indicies.ReadExecutionBlockNumber(tx, b.expectedRoot)
+			if err != nil {
+				return err
+			}
+			if blockHash != (libcommon.Hash{}) && blockNumber != nil && *blockNumber >= elFrozenBlocks {
 				has, err := b.engine.HasBlock(ctx, blockHash)
 				if err != nil {
 					return err
@@ -257,7 +261,7 @@ Loop:
 				}
 			}
 		}
-		if *slot < clFrozenBlocks {
+		if *slot <= clFrozenBlocks {
 			break
 		}
 		b.slotToDownload.Store(*slot - 1)
