@@ -56,9 +56,9 @@ type CommitteeSubscribeMgmt struct {
 	state        *state.CachingBeaconState
 	syncedData   *synced_data.SyncedDataManager
 	// subscriptions
-	aggregationPool    aggregation.AggregationPool
-	validatorSubsMutex sync.RWMutex
-	validatorSubs      map[uint64]*validatorSub // committeeIndex -> validatorSub
+	aggregationPool     aggregation.AggregationPool
+	validatorSubsMutex  sync.RWMutex
+	subnetSubscriptions map[uint64]*subscription // subnet -> subscription status
 }
 
 func NewCommitteeSubscribeManagement(
@@ -73,22 +73,21 @@ func NewCommitteeSubscribeManagement(
 	syncedData *synced_data.SyncedDataManager,
 ) *CommitteeSubscribeMgmt {
 	c := &CommitteeSubscribeMgmt{
-		indiciesDB:      indiciesDB,
-		beaconConfig:    beaconConfig,
-		netConfig:       netConfig,
-		ethClock:        ethClock,
-		sentinel:        sentinel,
-		state:           state,
-		aggregationPool: aggregationPool,
-		syncedData:      syncedData,
-		validatorSubs:   make(map[uint64]*validatorSub),
+		indiciesDB:          indiciesDB,
+		beaconConfig:        beaconConfig,
+		netConfig:           netConfig,
+		ethClock:            ethClock,
+		sentinel:            sentinel,
+		state:               state,
+		aggregationPool:     aggregationPool,
+		syncedData:          syncedData,
+		subnetSubscriptions: make(map[uint64]*subscription),
 	}
 	go c.sweepByStaleSlots(ctx)
 	return c
 }
 
-type validatorSub struct {
-	subnetId         uint64
+type subscription struct {
 	aggregate        bool
 	latestTargetSlot uint64
 }
@@ -104,23 +103,22 @@ func (c *CommitteeSubscribeMgmt) AddAttestationSubscription(ctx context.Context,
 	}
 
 	log.Debug("Add attestation subscription", "slot", slot, "committeeIndex", cIndex, "isAggregator", p.IsAggregator, "validatorIndex", p.ValidatorIndex)
-	commiteePerSlot := headState.CommitteeCount(p.Slot / c.beaconConfig.SlotsPerEpoch)
+	commiteePerSlot := headState.CommitteeCount(slot / c.beaconConfig.SlotsPerEpoch)
 	subnetId := subnets.ComputeSubnetForAttestation(commiteePerSlot, slot, cIndex, c.beaconConfig.SlotsPerEpoch, c.netConfig.AttestationSubnetCount)
 	// add validator to subscription
 	c.validatorSubsMutex.Lock()
 
-	if _, ok := c.validatorSubs[cIndex]; !ok {
-		c.validatorSubs[cIndex] = &validatorSub{
-			subnetId:         subnetId,
+	if _, ok := c.subnetSubscriptions[subnetId]; !ok {
+		c.subnetSubscriptions[subnetId] = &subscription{
 			aggregate:        p.IsAggregator,
 			latestTargetSlot: slot,
 		}
 	} else {
 		// set aggregator to true if any validator in the committee is an aggregator
-		c.validatorSubs[cIndex].aggregate = (c.validatorSubs[cIndex].aggregate || p.IsAggregator)
+		c.subnetSubscriptions[subnetId].aggregate = (c.subnetSubscriptions[subnetId].aggregate || p.IsAggregator)
 		// update latest target slot
-		if c.validatorSubs[cIndex].latestTargetSlot < slot {
-			c.validatorSubs[cIndex].latestTargetSlot = slot
+		if c.subnetSubscriptions[subnetId].latestTargetSlot < slot {
+			c.subnetSubscriptions[subnetId].latestTargetSlot = slot
 		}
 	}
 
@@ -138,10 +136,19 @@ func (c *CommitteeSubscribeMgmt) AddAttestationSubscription(ctx context.Context,
 }
 
 func (c *CommitteeSubscribeMgmt) CheckAggregateAttestation(att *solid.Attestation) error {
-	committeeIndex := att.AttestantionData().CommitteeIndex()
+	headState := c.syncedData.HeadState()
+	if headState == nil {
+		return errors.New("head state not available")
+	}
+	cIndex := att.AttestantionData().CommitteeIndex()
+	slot := att.AttestantionData().Slot()
+	commiteePerSlot := headState.CommitteeCount(slot / c.beaconConfig.SlotsPerEpoch)
+	subnetId := subnets.ComputeSubnetForAttestation(commiteePerSlot, slot, cIndex, c.beaconConfig.SlotsPerEpoch, c.netConfig.AttestationSubnetCount)
+
+	// check if need to aggregate attestation in this subnet
 	c.validatorSubsMutex.RLock()
 	defer c.validatorSubsMutex.RUnlock()
-	if sub, ok := c.validatorSubs[committeeIndex]; ok && sub.aggregate {
+	if sub, ok := c.subnetSubscriptions[subnetId]; ok && sub.aggregate {
 		// aggregate attestation
 		if err := c.aggregationPool.AddAttestation(att); err != nil {
 			return err
@@ -166,12 +173,18 @@ func (c *CommitteeSubscribeMgmt) sweepByStaleSlots(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			curSlot := c.ethClock.GetCurrentSlot()
+			var (
+				curSlot  = c.ethClock.GetCurrentSlot()
+				toRemove = make([]uint64, 0)
+			)
 			c.validatorSubsMutex.Lock()
-			for committeeIdx, sub := range c.validatorSubs {
+			for subnetId, sub := range c.subnetSubscriptions {
 				if slotIsStale(curSlot, sub.latestTargetSlot) {
-					delete(c.validatorSubs, committeeIdx)
+					toRemove = append(toRemove, subnetId)
 				}
+			}
+			for _, subnetId := range toRemove {
+				delete(c.subnetSubscriptions, subnetId)
 			}
 			c.validatorSubsMutex.Unlock()
 		}
