@@ -77,9 +77,16 @@ func (f *ForkChoiceStore) OnBlock(ctx context.Context, block *cltypes.SignedBeac
 		return err
 	}
 	// ignore block if it already exists
-	if _, ok := f.GetHeader(blockRoot); ok {
-		return nil
-	}
+	/*if state, err := f.GetStateAtBlockRoot(blockRoot, false); err == nil && state != nil {
+		f.emitters.State().SendBlock(&beaconevents.BlockData{
+			Slot:                block.Block.Slot,
+			Block:               blockRoot,
+			ExecutionOptimistic: f.optimisticStore.IsOptimistic(blockRoot),
+		})
+		if f.validatorMonitor != nil {
+			f.validatorMonitor.OnNewBlock(state, block.Block)
+		}
+	}*/
 
 	if f.Slot() < block.Block.Slot {
 		return errors.New("block is too early compared to current_slot")

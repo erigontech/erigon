@@ -186,7 +186,12 @@ func (b *blockService) processAndStoreBlock(ctx context.Context, block *cltypes.
 	}); err != nil {
 		return err
 	}
-	if err := b.forkchoiceStore.OnBlock(ctx, block, true, true, true); err != nil {
+
+	newPayload := true
+	if _, blockExist := b.forkchoiceStore.GetHeader(block.Block.ParentRoot); blockExist {
+		newPayload = false
+	}
+	if err := b.forkchoiceStore.OnBlock(ctx, block, newPayload, true, true); err != nil {
 		return err
 	}
 	go b.importBlockOperations(block)
