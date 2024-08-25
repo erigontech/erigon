@@ -129,6 +129,7 @@ var DomainCompressCfg = seg.Cfg{
 	MaxPatternLen:        32,
 	SamplingFactor:       4,
 	MaxDictPatterns:      64 * 1024 * 2,
+	Workers:              1,
 }
 
 func NewDomain(cfg domainCfg, aggregationStep uint64, name kv.Domain, valsTable, indexKeysTable, historyValsTable, indexTable string, integrityCheck func(name kv.Domain, fromStep, toStep uint64) bool, logger log.Logger) (*Domain, error) {
