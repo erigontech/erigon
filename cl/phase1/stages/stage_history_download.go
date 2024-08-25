@@ -157,7 +157,7 @@ func SpawnStageHistoryDownload(cfg StageHistoryReconstructionCfg, ctx context.Co
 			}
 		}
 
-		if slot == 0 || isInCLSnapshots && isInElSnapshots {
+		if slot == 0 || (isInCLSnapshots && isInElSnapshots) {
 			return true, tx.Commit()
 		}
 		return (!cfg.backfilling || slot <= cfg.sn.SegmentsMax()) && (slot <= destinationSlotForEL || isInElSnapshots), tx.Commit()
