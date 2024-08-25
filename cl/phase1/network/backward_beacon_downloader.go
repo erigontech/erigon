@@ -256,12 +256,13 @@ Loop:
 				fmt.Println("need brak")
 				break
 			}
+			fmt.Println("checking1", *blockNumber, elFrozenBlocks, blockHash)
 			if *blockNumber >= elFrozenBlocks {
 				has, err := b.engine.HasBlock(ctx, blockHash)
 				if err != nil {
 					return err
 				}
-				fmt.Println("chekcing", *blockNumber, elFrozenBlocks, blockHash, has)
+				fmt.Println("chekcing2", *blockNumber, elFrozenBlocks, blockHash, has)
 				if !has {
 					break
 				}
