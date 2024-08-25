@@ -18,6 +18,7 @@ package services
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"sync"
@@ -216,7 +217,10 @@ func (s *attestationService) ProcessMessage(ctx context.Context, subnet *uint64,
 	}
 	s.emitters.Operation().SendAttestation(att)
 	epoch := slot / s.beaconCfg.SlotsPerEpoch
-	log.Debug("Attestation processed", "slot", slot, "epoch", epoch, "committeeIndex", committeeIndex, "subnetId", subnetId, "validatorIndex", vIndex, "committeeCount", committeeCount)
+	if vIndex == 238692 {
+		attData, _ := json.Marshal(att)
+		log.Debug("Attestation processed", "slot", slot, "epoch", epoch, "committeeIndex", committeeIndex, "subnetId", subnetId, "validatorIndex", vIndex, "committeeCount", committeeCount, "attData", string(attData))
+	}
 	return nil
 }
 
