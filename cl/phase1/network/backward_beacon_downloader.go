@@ -251,7 +251,10 @@ Loop:
 			if err != nil {
 				return err
 			}
-			if blockHash != (libcommon.Hash{}) && blockNumber != nil && *blockNumber >= elFrozenBlocks {
+			if blockHash == (libcommon.Hash{}) || blockNumber == nil {
+				break
+			}
+			if *blockNumber >= elFrozenBlocks {
 				has, err := b.engine.HasBlock(ctx, blockHash)
 				if err != nil {
 					return err
