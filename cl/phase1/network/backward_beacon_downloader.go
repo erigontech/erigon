@@ -17,6 +17,7 @@
 package network
 
 import (
+	"fmt"
 	"math"
 	"sync"
 	"sync/atomic"
@@ -252,6 +253,7 @@ Loop:
 				return err
 			}
 			if blockHash == (libcommon.Hash{}) || blockNumber == nil {
+				fmt.Println("need brak")
 				break
 			}
 			if *blockNumber >= elFrozenBlocks {
@@ -259,6 +261,7 @@ Loop:
 				if err != nil {
 					return err
 				}
+				fmt.Println("chekcing", *blockNumber, elFrozenBlocks, blockHash, has)
 				if !has {
 					break
 				}
