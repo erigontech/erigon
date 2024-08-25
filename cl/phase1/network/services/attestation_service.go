@@ -183,7 +183,7 @@ func (s *attestationService) ProcessMessage(ctx context.Context, subnet *uint64,
 		return err
 	} else if !valid {
 		log.Warn("invalid signature", "signature", common.Bytes2Hex(signature[:]), "signningRoot", common.Bytes2Hex(signingRoot[:]),
-			"pubKey", common.Bytes2Hex(pubKey[:]), "onBitValidatorIndex", beaconCommittee[onBitIndex], "validatorIndex", vIndex)
+			"pubKey", common.Bytes2Hex(pubKey[:]), "validatorIndex", vIndex)
 		return errors.New("invalid signature")
 	}
 
@@ -215,6 +215,7 @@ func (s *attestationService) ProcessMessage(ctx context.Context, subnet *uint64,
 		return err
 	}
 	s.emitters.Operation().SendAttestation(att)
+	log.Debug("Attestation processed", "slot", slot, "committeeIndex", committeeIndex, "subnetId", subnetId, "validatorIndex", vIndex)
 	return nil
 }
 

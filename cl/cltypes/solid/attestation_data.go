@@ -145,10 +145,6 @@ func (a AttestationData) RawSlot() []byte {
 	return a[:8]
 }
 
-func (a AttestationData) RawValidatorIndex() []byte {
-	return a[8:16]
-}
-
 func (a AttestationData) RawBeaconBlockRoot() []byte {
 	return a[16:48]
 }
