@@ -51,6 +51,7 @@ import (
 	"github.com/erigontech/erigon/cl/gossip"
 	"github.com/erigontech/erigon/cl/persistence/beacon_indicies"
 	"github.com/erigontech/erigon/cl/phase1/core/state"
+	"github.com/erigontech/erigon/cl/phase1/core/state/raw"
 	"github.com/erigontech/erigon/cl/transition"
 	"github.com/erigontech/erigon/cl/transition/impl/eth2"
 	"github.com/erigontech/erigon/cl/transition/machine"
@@ -104,7 +105,12 @@ func (a *ApiHandler) GetEthV1ValidatorAttestationData(
 		*slot,
 		*committeeIndex,
 	)
-	if err != nil {
+	if err == raw.ErrGetBlockRootAtSlotFuture {
+		return nil, beaconhttp.NewEndpointError(
+			http.StatusServiceUnavailable,
+			errors.New("beacon node is still syncing"),
+		)
+	} else if err != nil {
 		return nil, beaconhttp.NewEndpointError(http.StatusInternalServerError, err)
 	}
 	/*	headBlockRoot, _, err := a.forkchoiceStore.GetHead()
