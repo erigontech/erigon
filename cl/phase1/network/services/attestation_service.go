@@ -215,7 +215,8 @@ func (s *attestationService) ProcessMessage(ctx context.Context, subnet *uint64,
 		return err
 	}
 	s.emitters.Operation().SendAttestation(att)
-	log.Debug("Attestation processed", "slot", slot, "committeeIndex", committeeIndex, "subnetId", subnetId, "validatorIndex", vIndex)
+	epoch := slot / s.beaconCfg.SlotsPerEpoch
+	log.Debug("Attestation processed", "slot", slot, "epoch", epoch, "committeeIndex", committeeIndex, "subnetId", subnetId, "validatorIndex", vIndex, "committeeCount", committeeCount)
 	return nil
 }
 

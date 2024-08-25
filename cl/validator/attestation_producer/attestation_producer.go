@@ -109,7 +109,7 @@ func (ap *attestationProducer) ProduceAndCacheAttestationData(baseState *state.C
 		0,
 		0,
 		libcommon.Hash{},
-		baseState.CurrentJustifiedCheckpoint(),
+		baseState.CurrentJustifiedCheckpoint().Copy(),
 		solid.NewCheckpointFromParameters(
 			targetRoot,
 			targetEpoch,
