@@ -117,10 +117,8 @@ func SpawnStageHistoryDownload(cfg StageHistoryReconstructionCfg, ctx context.Co
 			currEth1Progress.Store(int64(blk.Block.Body.ExecutionPayload.BlockNumber))
 		}
 
-		destinationSlotForCL := cfg.sn.SegmentsMax()
-
 		slot := blk.Block.Slot
-		isInCLSnapshots := destinationSlotForCL > blk.Block.Slot
+		isInCLSnapshots := cfg.sn.SegmentsMax() > blk.Block.Slot
 		if !isInCLSnapshots {
 			if err := beacon_indicies.WriteBeaconBlockAndIndicies(ctx, tx, blk, true); err != nil {
 				return false, err
@@ -153,7 +151,7 @@ func SpawnStageHistoryDownload(cfg StageHistoryReconstructionCfg, ctx context.Co
 		isInElSnapshots := true
 		if blk.Version() >= clparams.BellatrixVersion && cfg.engine != nil && cfg.engine.SupportInsertion() {
 			frozenBlocksInEL := cfg.engine.FrozenBlocks(ctx)
-			isInElSnapshots = blk.Block.Body.ExecutionPayload.BlockNumber < frozenBlocksInEL
+			isInElSnapshots = frozenBlocksInEL > blk.Block.Body.ExecutionPayload.BlockNumber
 			if cfg.engine.HasGapInSnapshots(ctx) && frozenBlocksInEL > 0 {
 				destinationSlotForEL = frozenBlocksInEL - 1
 			}
@@ -162,7 +160,7 @@ func SpawnStageHistoryDownload(cfg StageHistoryReconstructionCfg, ctx context.Co
 		if slot == 0 || isInCLSnapshots && isInElSnapshots {
 			return true, tx.Commit()
 		}
-		return (!cfg.backfilling || slot <= destinationSlotForCL) && (slot <= destinationSlotForEL || isInElSnapshots), tx.Commit()
+		return (!cfg.backfilling || slot <= cfg.sn.SegmentsMax()) && (slot <= destinationSlotForEL || isInElSnapshots), tx.Commit()
 	})
 	prevProgress := cfg.downloader.Progress()
 
