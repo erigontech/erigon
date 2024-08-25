@@ -107,6 +107,14 @@ func (a *ApiHandler) GetEthV1ValidatorAttestationData(
 	if err != nil {
 		return nil, beaconhttp.NewEndpointError(http.StatusInternalServerError, err)
 	}
+	headBlockRoot, _, err := a.forkchoiceStore.GetHead()
+	if err != nil {
+		return nil, err
+	}
+	if headBlockRoot != (libcommon.Hash{}) {
+		attestationData.SetBeaconBlockRoot(headBlockRoot)
+	}
+
 	return newBeaconResponse(attestationData), nil
 }
 
