@@ -243,6 +243,7 @@ Loop:
 			break
 		}
 
+		fmt.Println("checking3", *slot, clFrozenBlocks, elFrozenBlocks)
 		if b.engine != nil && b.engine.SupportInsertion() {
 			blockHash, err := beacon_indicies.ReadExecutionBlockHash(tx, b.expectedRoot)
 			if err != nil {
@@ -269,6 +270,7 @@ Loop:
 			}
 		}
 		if *slot <= clFrozenBlocks {
+			fmt.Println("checking4", clFrozenBlocks, elFrozenBlocks)
 			break
 		}
 		b.slotToDownload.Store(*slot - 1)
