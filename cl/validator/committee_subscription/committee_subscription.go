@@ -111,12 +111,12 @@ func (c *CommitteeSubscribeMgmt) AddAttestationSubscription(ctx context.Context,
 	if _, ok := c.subnetSubscriptions[subnetId]; !ok {
 		c.subnetSubscriptions[subnetId] = &subscription{
 			//aggregate:        p.IsAggregator,
-			aggregate:        true,
+			aggregate:        false,
 			latestTargetSlot: slot,
 		}
 	} else {
 		// set aggregator to true if any validator in the committee is an aggregator
-		c.subnetSubscriptions[subnetId].aggregate = (c.subnetSubscriptions[subnetId].aggregate || p.IsAggregator)
+		//c.subnetSubscriptions[subnetId].aggregate = (c.subnetSubscriptions[subnetId].aggregate || p.IsAggregator)
 		// update latest target slot
 		if c.subnetSubscriptions[subnetId].latestTargetSlot < slot {
 			c.subnetSubscriptions[subnetId].latestTargetSlot = slot
