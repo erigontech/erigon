@@ -24,6 +24,7 @@ import (
 
 	"github.com/Giulio2002/bls"
 	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
 	"github.com/erigontech/erigon/cl/utils"
@@ -77,6 +78,7 @@ func (p *aggregationPoolImpl) AddAttestation(inAtt *solid.Attestation) error {
 	}
 
 	if utils.IsNonStrictSupersetBitlist(att.AggregationBits(), inAtt.AggregationBits()) {
+		log.Info("[test] IsNonStrictSupersetBitlist", "slot", inAtt.AttestantionData().Slot(), "att", att.AggregationBits(), "inAtt", inAtt.AggregationBits())
 		// the on bit is already set, so ignore
 		return ErrIsSuperset
 	}
