@@ -470,8 +470,10 @@ func (sdb *IntraBlockState) Selfdestruct6780(addr libcommon.Address) {
 	if stateObject == nil {
 		return
 	}
-	if stateObject.newlyCreated && (addr != [20]byte{169, 79, 83, 116, 252, 229, 237, 188, 142, 42, 134, 151, 193, 83, 49, 103, 126, 110, 191, 11}) {
-		sdb.Selfdestruct(addr)
+	if stateObject.newlyCreated {
+		if _, ok := types.ParseDelegation(sdb.GetCode(addr)); !ok {
+			sdb.Selfdestruct(addr)
+		}
 	}
 }
 
