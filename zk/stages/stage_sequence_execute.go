@@ -338,15 +338,18 @@ func SpawnSequencingStage(
 		// add a check to the verifier and also check for responses
 		batchState.onBuiltBlock(blockNumber)
 
-		// commit block data here so it is accessible in other threads
 		if !batchState.isL1Recovery() {
+			// commit block data here so it is accessible in other threads
 			if errCommitAndStart := sdb.CommitAndStart(); errCommitAndStart != nil {
 				return errCommitAndStart
 			}
 			defer sdb.tx.Rollback()
 		}
 
-		cfg.legacyVerifier.StartAsyncVerification(batchState.forkId, batchState.batchNumber, block.Root(), batchCounters.CombineCollectorsNoChanges().UsedAsMap(), batchState.builtBlocks, batchState.hasExecutorForThisBatch, batchContext.cfg.zk.SequencerBatchVerificationTimeout)
+		// do not use remote executor in l1recovery mode
+		// if we need remote executor in l1 recovery then we must allow commit/start DB transactions
+		useExecutorForVerification := !batchState.isL1Recovery() && batchState.hasExecutorForThisBatch
+		cfg.legacyVerifier.StartAsyncVerification(batchState.forkId, batchState.batchNumber, block.Root(), batchCounters.CombineCollectorsNoChanges().UsedAsMap(), batchState.builtBlocks, useExecutorForVerification, batchContext.cfg.zk.SequencerBatchVerificationTimeout)
 
 		// check for new responses from the verifier
 		needsUnwind, err := updateStreamAndCheckRollback(batchContext, batchState, streamWriter, u)
