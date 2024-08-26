@@ -86,9 +86,7 @@ func (l *JsonStreamLogger_ZkEvm) CaptureState(pc uint64, op vm.OpCode, gas, cost
 	}
 
 	if !l.stateClosed {
-		l.stream.WriteObjectEnd()
-		_ = l.stream.Flush()
-		l.stateClosed = true
+		l.writeStateClose()
 	}
 	if !l.firstCapture {
 		l.stream.WriteMore()
@@ -115,9 +113,6 @@ func (l *JsonStreamLogger_ZkEvm) CaptureState(pc uint64, op vm.OpCode, gas, cost
 	}
 
 	l.writeCounters()
-
-	// l.stream.WriteObjectEnd()
-	// _ = l.stream.Flush()
 }
 
 func (l *JsonStreamLogger_ZkEvm) prepareStorage(scope *vm.ScopeContext, contract *vm.Contract, op vm.OpCode) bool {
@@ -289,22 +284,26 @@ func (l *JsonStreamLogger_ZkEvm) writeCounters() {
 	}
 }
 
+func (l *JsonStreamLogger_ZkEvm) writeStateClose() {
+	l.stream.WriteObjectEnd()
+	_ = l.stream.Flush()
+	l.stateClosed = true
+}
+
 // CaptureFault implements the Tracer interface to trace an execution fault
 // while running an opcode.
 func (l *JsonStreamLogger_ZkEvm) CaptureFault(pc uint64, op vm.OpCode, gas, cost uint64, scope *vm.ScopeContext, depth int, err error) {
 	if !l.stateClosed {
-		l.stream.WriteMore()
-		l.stream.WriteObjectField("error")
-		l.stream.WriteString(err.Error())
-		l.stream.WriteObjectEnd()
-		_ = l.stream.Flush()
-		l.stateClosed = true
+		l.writeError(err)
+		l.writeStateClose()
 	}
 }
 
 // CaptureEnd is called after the call finishes to finalize the tracing.
 func (l *JsonStreamLogger_ZkEvm) CaptureEnd(output []byte, usedGas uint64, err error) {
-	// not needed for this tracer
+	if !l.stateClosed {
+		l.writeStateClose()
+	}
 }
 
 // not needed for this tracer
