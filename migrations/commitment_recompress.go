@@ -33,7 +33,7 @@ import (
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/seg"
-	libstate "github.com/erigontech/erigon-lib/state"
+	"github.com/erigontech/erigon-lib/state"
 	"github.com/erigontech/erigon/eth/ethconfig/estimate"
 )
 
@@ -71,11 +71,11 @@ var RecompressCommitmentFiles = Migration{
 		}
 		for _, from := range files {
 			_, fromFileName := filepath.Split(from)
-			fromStep, toStep, err := libstate.ParseStepsFromFileName(fromFileName)
+			fromStep, toStep, err := state.ParseStepsFromFileName(fromFileName)
 			if err != nil {
 				return err
 			}
-			if toStep-fromStep < libstate.DomainMinStepsToCompress {
+			if toStep-fromStep < state.DomainMinStepsToCompress {
 				continue
 			}
 
@@ -89,7 +89,7 @@ var RecompressCommitmentFiles = Migration{
 			_ = os.Remove(strings.Replace(to, ".kv", ".kv.torrent", -1))
 		}
 
-		agg, err := libstate.NewAggregator(ctx, dirs, config3.HistoryV3AggregationStep, db, nil, logger)
+		agg, err := state.NewAggregator(ctx, dirs, config3.HistoryV3AggregationStep, db, nil, logger)
 		if err != nil {
 			return err
 		}
@@ -104,7 +104,7 @@ var RecompressCommitmentFiles = Migration{
 		ac := agg.BeginFilesRo()
 		defer ac.Close()
 
-		aggV2, err := libstate.NewAggregator(ctx, dirs2, config3.HistoryV3AggregationStep, db, nil, logger)
+		aggV2, err := state.NewAggregator(ctx, dirs2, config3.HistoryV3AggregationStep, db, nil, logger)
 		if err != nil {
 			panic(err)
 		}
@@ -160,16 +160,16 @@ func recompressDomain(ctx context.Context, dirs datadir.Dirs, from, to string, l
 	}
 	defer decompressor.Close()
 	defer decompressor.EnableReadAhead().DisableReadAhead()
-	r := libstate.NewArchiveGetter(decompressor.MakeGetter(), libstate.DetectCompressType(decompressor.MakeGetter()))
+	r := state.NewArchiveGetter(decompressor.MakeGetter(), state.DetectCompressType(decompressor.MakeGetter()))
 
-	compressCfg := libstate.DomainCompressCfg
+	compressCfg := state.DomainCompressCfg
 	compressCfg.Workers = estimate.CompressSnapshot.Workers()
 	c, err := seg.NewCompressor(ctx, "recompressDomain", to, dirs.Tmp, compressCfg, log.LvlInfo, logger)
 	if err != nil {
 		return err
 	}
 	defer c.Close()
-	w := libstate.NewArchiveWriter(c, libstate.CompressKeys)
+	w := state.NewArchiveWriter(c, state.CompressKeys)
 	var k, v []byte
 	var i int
 	for r.HasNext() {
