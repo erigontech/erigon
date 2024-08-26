@@ -28,6 +28,6 @@ var ClearBorDB = Migration{
 			return err
 		}
 
-		return nil
+		return tx.Commit()
 	},
 }
