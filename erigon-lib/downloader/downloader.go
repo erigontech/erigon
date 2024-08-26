@@ -1384,6 +1384,7 @@ func (d *Downloader) mainLoop(silent bool) error {
 	defer statEvery.Stop()
 
 	var m runtime.MemStats
+	prevStats := d.Stats()
 	for {
 		select {
 		case <-d.ctx.Done():
@@ -1392,6 +1393,11 @@ func (d *Downloader) mainLoop(silent bool) error {
 			d.ReCalcStats(statInterval)
 
 		case <-logEvery.C:
+			if !prevStats.Completed {
+				d.logProgress()
+				prevStats = d.Stats()
+			}
+
 			if silent {
 				continue
 			}
@@ -1950,7 +1956,6 @@ func (d *Downloader) torrentInfo(name string) (*torrentInfo, error) {
 }
 
 func (d *Downloader) ReCalcStats(interval time.Duration) {
-	var m runtime.MemStats
 	d.lock.RLock()
 
 	torrentClient := d.torrentClient
@@ -2330,55 +2335,56 @@ func (d *Downloader) ReCalcStats(interval time.Duration) {
 	}
 
 	d.lock.Unlock()
+}
 
-	if !prevStats.Completed {
+func (d *Downloader) logProgress() {
+	var m runtime.MemStats
+	prefix := d.logPrefix
 
-		prefix := d.logPrefix
-
-		if d.logPrefix == "" {
-			prefix = "[snapshots]"
-		}
-
-		if stats.Completed {
-			log.Info(fmt.Sprintf("[%s] Downloading complete", prefix), "time", time.Since(d.startTime).String())
-		}
-
-		dbg.ReadMemStats(&m)
-
-		status := "Downloading"
-
-		percentDone := float32(100) * (float32(stats.BytesDownload) / float32(stats.BytesTotal))
-		bytesDone := common.ByteCount(stats.BytesDownload)
-		rate := stats.DownloadRate
-		remainingBytes := stats.BytesTotal - stats.BytesDownload
-
-		if stats.BytesDownload >= stats.BytesTotal && stats.MetadataReady == stats.FilesTotal && stats.BytesTotal > 0 {
-			status = "Verifying"
-			percentDone = float32(100) * (float32(stats.BytesCompleted) / float32(stats.BytesTotal))
-			bytesDone = common.ByteCount(stats.BytesCompleted)
-			rate = stats.CompletionRate
-			remainingBytes = stats.BytesTotal - stats.BytesCompleted
-		}
-
-		if stats.BytesTotal == 0 {
-			percentDone = 0
-		}
-
-		timeLeft := calculateTime(remainingBytes, rate)
-
-		if !stats.Completed {
-			log.Info(
-				fmt.Sprintf("[%s] %s", prefix, status),
-				"progress", fmt.Sprintf("(%d/%d files) %.2f%% - %s/%s", stats.MetadataReady, stats.FilesTotal, percentDone, bytesDone, common.ByteCount(stats.BytesTotal)),
-				"rate", fmt.Sprintf("%s/s", common.ByteCount(rate)),
-				"time-left", timeLeft,
-				"total-time", time.Since(d.startTime).Round(time.Second).String(),
-				"flush-rate", fmt.Sprintf("%s/s", common.ByteCount(stats.FlushRate)),
-				"hash-rate", fmt.Sprintf("%s/s", common.ByteCount(stats.HashRate)),
-				"alloc", common.ByteCount(m.Alloc),
-				"sys", common.ByteCount(m.Sys))
-		}
+	if d.logPrefix == "" {
+		prefix = "[snapshots]"
 	}
+
+	if d.stats.Completed {
+		log.Info(fmt.Sprintf("[%s] Downloading complete", prefix), "time", time.Since(d.startTime).String())
+	}
+
+	dbg.ReadMemStats(&m)
+
+	status := "Downloading"
+
+	percentDone := float32(100) * (float32(d.stats.BytesDownload) / float32(d.stats.BytesTotal))
+	bytesDone := common.ByteCount(d.stats.BytesDownload)
+	rate := d.stats.DownloadRate
+	remainingBytes := d.stats.BytesTotal - d.stats.BytesDownload
+
+	if d.stats.BytesDownload >= d.stats.BytesTotal && d.stats.MetadataReady == d.stats.FilesTotal && d.stats.BytesTotal > 0 {
+		status = "Verifying"
+		percentDone = float32(100) * (float32(d.stats.BytesCompleted) / float32(d.stats.BytesTotal))
+		bytesDone = common.ByteCount(d.stats.BytesCompleted)
+		rate = d.stats.CompletionRate
+		remainingBytes = d.stats.BytesTotal - d.stats.BytesCompleted
+	}
+
+	if d.stats.BytesTotal == 0 {
+		percentDone = 0
+	}
+
+	timeLeft := calculateTime(remainingBytes, rate)
+
+	if !d.stats.Completed {
+		log.Info(
+			fmt.Sprintf("[%s] %s", prefix, status),
+			"progress", fmt.Sprintf("(%d/%d files) %.2f%% - %s/%s", d.stats.MetadataReady, d.stats.FilesTotal, percentDone, bytesDone, common.ByteCount(d.stats.BytesTotal)),
+			"rate", fmt.Sprintf("%s/s", common.ByteCount(rate)),
+			"time-left", timeLeft,
+			"total-time", time.Since(d.startTime).Round(time.Second).String(),
+			"download-rate", fmt.Sprintf("%s/s", common.ByteCount(d.stats.DownloadRate)),
+			"completion-rate", fmt.Sprintf("%s/s", common.ByteCount(d.stats.CompletionRate)),
+			"alloc", common.ByteCount(m.Alloc),
+			"sys", common.ByteCount(m.Sys))
+	}
+
 }
 
 type filterWriter struct {
