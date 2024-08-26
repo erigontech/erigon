@@ -1395,8 +1395,8 @@ func (d *Downloader) mainLoop(silent bool) error {
 		case <-logEvery.C:
 			if !prevStats.Completed {
 				d.logProgress()
-				prevStats = d.Stats()
 			}
+			prevStats = d.Stats()
 
 			if silent {
 				continue
