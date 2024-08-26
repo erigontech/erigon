@@ -641,9 +641,6 @@ func (h *History) collate(ctx context.Context, step, txFrom, txTo uint64, roTx k
 	defer collector.Close()
 
 	for txnmb, k, err := keysCursor.Seek(txKey[:]); err == nil && txnmb != nil; txnmb, k, err = keysCursor.Next() {
-		if err != nil {
-			return HistoryCollation{}, fmt.Errorf("iterate over %s history cursor: %w", h.filenameBase, err)
-		}
 		txNum := binary.BigEndian.Uint64(txnmb)
 		if txNum >= txTo { // [txFrom; txTo)
 			break
