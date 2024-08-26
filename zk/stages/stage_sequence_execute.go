@@ -228,7 +228,7 @@ func SpawnSequencingStage(
 						return err
 					}
 					if len(batchState.blockState.transactionsForInclusion) == 0 {
-						time.Sleep(250 * time.Millisecond)
+						time.Sleep(batchContext.cfg.zk.SequencerTimeoutOnEmptyTxPool)
 					} else {
 						log.Trace(fmt.Sprintf("[%s] Yielded transactions from the pool", logPrefix), "txCount", len(batchState.blockState.transactionsForInclusion))
 					}
@@ -298,7 +298,7 @@ func SpawnSequencingStage(
 				if batchState.isL1Recovery() {
 					// just go into the normal loop waiting for new transactions to signal that the recovery
 					// has finished as far as it can go
-					if batchState.isThereAnyTransactionsToRecover() {
+					if !batchState.isThereAnyTransactionsToRecover() {
 						log.Info(fmt.Sprintf("[%s] L1 recovery no more transactions to recover", logPrefix))
 					}
 

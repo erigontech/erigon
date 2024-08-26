@@ -491,6 +491,11 @@ var (
 		Usage: "This is a maximum time that a batch verification could take. Including retries. This could be interpreted as maximum that that the sequencer can run without executor. Setting it to 0s will mean infinite timeout. Defaults to 30min",
 		Value: "30m",
 	}
+	SequencerTimeoutOnEmptyTxPool = cli.StringFlag{
+		Name:  "zkevm.sequencer-timeout-on-empty-tx-pool",
+		Usage: "Timeout before requesting txs from the txpool if none were found before. Defaults to 250ms",
+		Value: "250ms",
+	}
 	SequencerHaltOnBatchNumber = cli.Uint64Flag{
 		Name:  "zkevm.sequencer-halt-on-batch-number",
 		Usage: "Halt the sequencer on this batch number",
