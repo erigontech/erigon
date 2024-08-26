@@ -150,7 +150,7 @@ var RecompressCommitmentFiles = Migration{
 }
 
 func recompressDomain(ctx context.Context, dirs datadir.Dirs, from, to string, logger log.Logger) error {
-	logger.Info("[recompress] f", "f", from, "to", to)
+	logger.Info("[recompress] file", "f", to)
 	decompressor, err := seg.NewDecompressor(from)
 	if err != nil {
 		return err
