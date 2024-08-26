@@ -712,7 +712,7 @@ var (
 	EnableP2PReceipts = dbg.EnvBool("P2P_RECEIPTS", false)
 )
 
-func (cs *MultiClient) getReceipts66(ctx context.Context, inreq *proto_sentry.InboundMessage, sentryClient direct.SentryClient) error {
+func (cs *MultiClient) getReceipts66(ctx context.Context, inreq *proto_sentry.InboundMessage, sentryClient proto_sentry.SentryClient) error {
 	if !EnableP2PReceipts {
 		return nil
 	}

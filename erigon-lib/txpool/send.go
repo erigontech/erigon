@@ -145,7 +145,7 @@ func (f *Send) AnnouncePooledTxs(types []byte, sizes []uint32, hashes types2.Has
 				continue
 			}
 
-			protocols := sentry.Protocols(sentryClient, nil)
+			protocols := sentry.Protocols(sentryClient)
 
 			switch protocols[rand.Intn(len(protocols)-1)] {
 			case 66, 67:
@@ -231,7 +231,7 @@ func (f *Send) PropagatePooledTxsToPeersList(peers []types2.PeerID, types []byte
 			}
 
 			for _, peer := range peers {
-				switch slices.Max(sentry.Protocols(sentryClient, peer)) {
+				switch slices.Max(sentry.PeerProtocols(sentryClient, peer)) {
 				case 66, 67:
 					if i > prevI {
 						req := &sentryproto.SendMessageByIdRequest{

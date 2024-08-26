@@ -119,7 +119,9 @@ func BuildProtoRequest(downloadRequest []services.DownloadRequest) *proto_downlo
 }
 
 // RequestSnapshotsDownload - builds the snapshots download request and downloads them
-func RequestSnapshotsDownload(ctx context.Context, downloadRequest []services.DownloadRequest, downloader proto_downloader.DownloaderClient) error {
+func RequestSnapshotsDownload(ctx context.Context, downloadRequest []services.DownloadRequest, downloader proto_downloader.DownloaderClient, logPrefix string) error {
+	preq := &proto_downloader.SetLogPrefixRequest{Prefix: logPrefix}
+	downloader.SetLogPrefix(ctx, preq)
 	// start seed large .seg of large size
 	req := BuildProtoRequest(downloadRequest)
 	if _, err := downloader.Add(ctx, req); err != nil {
@@ -342,7 +344,7 @@ func WaitForDownloader(ctx context.Context, logPrefix string, dirs datadir.Dirs,
 			return ctx.Err()
 		default:
 		}
-		if err := RequestSnapshotsDownload(ctx, downloadRequest, snapshotDownloader); err != nil {
+		if err := RequestSnapshotsDownload(ctx, downloadRequest, snapshotDownloader, logPrefix); err != nil {
 			log.Error(fmt.Sprintf("[%s] call downloader", logPrefix), "err", err)
 			time.Sleep(10 * time.Second)
 			continue

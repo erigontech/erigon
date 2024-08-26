@@ -96,7 +96,7 @@ require (
 	golang.org/x/sys v0.23.0
 	golang.org/x/time v0.6.0
 	google.golang.org/grpc v1.65.0
-	google.golang.org/grpc/cmd/protoc-gen-go-grpc v1.5.1
+	google.golang.org/grpc/cmd/protoc-gen-go-grpc v1.4.0
 	google.golang.org/protobuf v1.34.2
 	gopkg.in/check.v1 v1.0.0-20201130134442-10cb98267c6c
 	gopkg.in/natefinch/lumberjack.v2 v2.2.1

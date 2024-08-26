@@ -18,6 +18,8 @@ import (
 	"google.golang.org/protobuf/types/known/emptypb"
 )
 
+var _ sentryproto.SentryClient = (*sentryMultiplexer)(nil)
+
 type sentryMultiplexer struct {
 	clients []sentryproto.SentryClient
 }
@@ -59,7 +61,7 @@ func (m *sentryMultiplexer) PenalizePeer(ctx context.Context, in *sentryproto.Pe
 		})
 	}
 
-	return nil, g.Wait()
+	return &emptypb.Empty{}, g.Wait()
 }
 
 func (m *sentryMultiplexer) PeerMinBlock(ctx context.Context, in *sentryproto.PeerMinBlockRequest, opts ...grpc.CallOption) (*emptypb.Empty, error) {
@@ -74,7 +76,7 @@ func (m *sentryMultiplexer) PeerMinBlock(ctx context.Context, in *sentryproto.Pe
 		})
 	}
 
-	return nil, g.Wait()
+	return &emptypb.Empty{}, g.Wait()
 }
 
 // Handshake is not performed on the multi-client level
@@ -218,48 +220,56 @@ func (m *sentryMultiplexer) SendMessageToAll(ctx context.Context, in *sentryprot
 	return &sentryproto.SentPeers{Peers: allSentPeers}, nil
 }
 
-type reply[T protoreflect.ProtoMessage] struct {
-	r   T
-	err error
+type StreamReply[T protoreflect.ProtoMessage] struct {
+	R   T
+	Err error
 }
 
 // SentryMessagesStreamS implements proto_sentry.Sentry_ReceiveMessagesServer
 type SentryStreamS[T protoreflect.ProtoMessage] struct {
-	ch  chan reply[T]
-	ctx context.Context
+	Ch  chan StreamReply[T]
+	Ctx context.Context
 	grpc.ServerStream
 }
 
 func (s *SentryStreamS[T]) Send(m T) error {
-	s.ch <- reply[T]{r: m}
+	s.Ch <- StreamReply[T]{R: m}
 	return nil
 }
 
-func (s *SentryStreamS[T]) Context() context.Context { return s.ctx }
+func (s *SentryStreamS[T]) Context() context.Context { return s.Ctx }
 
 func (s *SentryStreamS[T]) Err(err error) {
 	if err == nil {
 		return
 	}
-	s.ch <- reply[T]{err: err}
+	s.Ch <- StreamReply[T]{Err: err}
+}
+
+func (s *SentryStreamS[T]) Close() {
+	if s.Ch != nil {
+		ch := s.Ch
+		s.Ch = nil
+		close(ch)
+	}
 }
 
 type SentryStreamC[T protoreflect.ProtoMessage] struct {
-	ch  chan reply[T]
-	ctx context.Context
+	Ch  chan StreamReply[T]
+	Ctx context.Context
 	grpc.ClientStream
 }
 
 func (c *SentryStreamC[T]) Recv() (T, error) {
-	m, ok := <-c.ch
+	m, ok := <-c.Ch
 	if !ok {
 		var t T
 		return t, io.EOF
 	}
-	return m.r, m.err
+	return m.R, m.Err
 }
 
-func (c *SentryStreamC[T]) Context() context.Context { return c.ctx }
+func (c *SentryStreamC[T]) Context() context.Context { return c.Ctx }
 
 func (c *SentryStreamC[T]) RecvMsg(anyMessage interface{}) error {
 	m, err := c.Recv()
@@ -274,8 +284,8 @@ func (c *SentryStreamC[T]) RecvMsg(anyMessage interface{}) error {
 func (m *sentryMultiplexer) Messages(ctx context.Context, in *sentryproto.MessagesRequest, opts ...grpc.CallOption) (sentryproto.Sentry_MessagesClient, error) {
 	g, gctx := errgroup.WithContext(ctx)
 
-	ch := make(chan reply[*sentryproto.InboundMessage], 16384)
-	streamServer := &SentryStreamS[*sentryproto.InboundMessage]{ch: ch, ctx: ctx}
+	ch := make(chan StreamReply[*sentryproto.InboundMessage], 16384)
+	streamServer := &SentryStreamS[*sentryproto.InboundMessage]{Ch: ch, Ctx: ctx}
 
 	go func() {
 		defer close(ch)
@@ -295,6 +305,10 @@ func (m *sentryMultiplexer) Messages(ctx context.Context, in *sentryproto.Messag
 					inboundMessage, err := messages.Recv()
 
 					if err != nil {
+						if errors.Is(err, io.EOF) {
+							return nil
+						}
+
 						streamServer.Err(err)
 
 						select {
@@ -314,7 +328,7 @@ func (m *sentryMultiplexer) Messages(ctx context.Context, in *sentryproto.Messag
 		g.Wait()
 	}()
 
-	return &SentryStreamC[*sentryproto.InboundMessage]{ch: ch, ctx: ctx}, nil
+	return &SentryStreamC[*sentryproto.InboundMessage]{Ch: ch, Ctx: ctx}, nil
 }
 
 func (m *sentryMultiplexer) Peers(ctx context.Context, in *emptypb.Empty, opts ...grpc.CallOption) (*sentryproto.PeersReply, error) {
@@ -429,8 +443,8 @@ func (m *sentryMultiplexer) PeerById(ctx context.Context, in *sentryproto.PeerBy
 func (m *sentryMultiplexer) PeerEvents(ctx context.Context, in *sentryproto.PeerEventsRequest, opts ...grpc.CallOption) (sentryproto.Sentry_PeerEventsClient, error) {
 	g, gctx := errgroup.WithContext(ctx)
 
-	ch := make(chan reply[*sentryproto.PeerEvent], 16384)
-	streamServer := &SentryStreamS[*sentryproto.PeerEvent]{ch: ch, ctx: ctx}
+	ch := make(chan StreamReply[*sentryproto.PeerEvent], 16384)
+	streamServer := &SentryStreamS[*sentryproto.PeerEvent]{Ch: ch, Ctx: ctx}
 
 	go func() {
 		defer close(ch)
@@ -450,6 +464,10 @@ func (m *sentryMultiplexer) PeerEvents(ctx context.Context, in *sentryproto.Peer
 					inboundMessage, err := messages.Recv()
 
 					if err != nil {
+						if errors.Is(err, io.EOF) {
+							return nil
+						}
+
 						streamServer.Err(err)
 
 						select {
@@ -469,7 +487,7 @@ func (m *sentryMultiplexer) PeerEvents(ctx context.Context, in *sentryproto.Peer
 		g.Wait()
 	}()
 
-	return &SentryStreamC[*sentryproto.PeerEvent]{ch: ch, ctx: ctx}, nil
+	return &SentryStreamC[*sentryproto.PeerEvent]{Ch: ch, Ctx: ctx}, nil
 }
 
 func (m *sentryMultiplexer) AddPeer(ctx context.Context, in *sentryproto.AddPeerRequest, opts ...grpc.CallOption) (*sentryproto.AddPeerReply, error) {

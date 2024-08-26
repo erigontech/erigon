@@ -231,6 +231,15 @@ func BorHeimdallForward(
 
 	var nextEventRecord *heimdall.EventRecordWithTime
 
+	// sometimes via config eveents are skipped from particular blocks and
+	// pushed into the next one, when this happens we need to skip validation
+	// as the times won't match the expected window. In practice it only affects
+	// these blocks: 14949120,14949184, 14953472, 14953536, 14953600, 14953664,
+	// 14953728, 14953792, 14953856 so it seems keeping a local skip marker is good
+	// enough - it will only impact sync from origin operations.  If
+	// this becomes more prevalent this will need to be re-thought
+	var skipCount int
+
 	for blockNum = lastBlockNum + 1; blockNum <= headNumber; blockNum++ {
 		select {
 		default:
@@ -287,6 +296,7 @@ func BorHeimdallForward(
 		if cfg.blockReader.BorSnapshots().SegmentsMin() == 0 {
 			snapTime = snapTime + time.Since(snapStart)
 			// SegmentsMin is only set if running as an uploader process (check SnapshotsCfg.snapshotUploader and
+			// SegmentsMin is only set if running as an uploader process (check SnapshotsCfg.snapshotUploader and
 			// UploadLocationFlag) when we remove snapshots based on FrozenBlockLimit and number of uploaded snapshots
 			// avoid calling this if block for blockNums <= SegmentsMin to avoid reinsertion of snapshots
 			snap := loadSnapshot(blockNum, header.Hash(), cfg.borConfig, recents, signatures, cfg.snapDb, logger)
@@ -294,6 +304,11 @@ func BorHeimdallForward(
 			lastPersistedBlockNum, err := lastPersistedSnapshotBlock(cfg.snapDb)
 			if err != nil {
 				return err
+			}
+
+			// this will happen if for example chaindb is removed
+			if lastPersistedBlockNum > blockNum {
+				lastPersistedBlockNum = blockNum
 			}
 
 			// if the last time we persisted snapshots is too far away re-run the forward
@@ -357,7 +372,7 @@ func BorHeimdallForward(
 			var records int
 
 			if lastStateSyncEventID == 0 || lastStateSyncEventID != endStateSyncEventId {
-				lastStateSyncEventID, records, callTime, err = fetchRequiredHeimdallStateSyncEventsIfNeeded(
+				lastStateSyncEventID, records, skipCount, callTime, err = fetchRequiredHeimdallStateSyncEventsIfNeeded(
 					ctx,
 					header,
 					tx,
@@ -368,6 +383,7 @@ func BorHeimdallForward(
 					s.LogPrefix(),
 					logger,
 					lastStateSyncEventID,
+					skipCount,
 				)
 
 				if err != nil {
