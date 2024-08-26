@@ -21,7 +21,6 @@ import (
 	"time"
 
 	"github.com/erigontech/erigon-lib/common/datadir"
-	"github.com/erigontech/erigon-lib/common/dir"
 	"github.com/erigontech/erigon-lib/config3"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/log/v3"
@@ -36,7 +35,7 @@ var SqueezeCommitmentFiles = Migration{
 	Up: func(db kv.RwDB, dirs datadir.Dirs, progress []byte, BeforeCommit Callback, logger log.Logger) (err error) {
 		ctx := context.Background()
 
-		if !EnableSqueezeCommitmentFiles || !libstate.AggregatorSqueezeCommitmentValues { //nolint:staticcheck
+		if !EnableSqueezeCommitmentFiles {
 			log.Info("[sqeeze_migration] disabled")
 			return db.Update(ctx, func(tx kv.RwTx) error {
 				return BeforeCommit(tx, nil, true)
@@ -50,6 +49,7 @@ var SqueezeCommitmentFiles = Migration{
 			log.Info("[sqeeze_migration] done", "took", time.Since(t))
 		}()
 
+		log.Info("[sqeeze_migration] 'squeeze' mode start")
 		agg, err := libstate.NewAggregator(ctx, dirs, config3.HistoryV3AggregationStep, db, nil, logger)
 		if err != nil {
 			return err
@@ -64,55 +64,13 @@ var SqueezeCommitmentFiles = Migration{
 		}
 		ac := agg.BeginFilesRo()
 		defer ac.Close()
-
-		existsV2Dir, err := dir.Exist(dirs.SnapDomain + "_old")
-		if err != nil {
+		if err = ac.SqueezeCommitmentFiles(ac); err != nil {
 			return err
 		}
-		if !existsV2Dir {
-			log.Info("[sqeeze_migration] normal mode start")
-			if err = ac.SqueezeCommitmentFiles(ac); err != nil {
-				return err
-			}
-			ac.Close()
-			if err := agg.BuildMissedIndices(ctx, estimate.IndexSnapshot.Workers()); err != nil {
-				return err
-			}
-			return db.Update(ctx, func(tx kv.RwTx) error {
-				return BeforeCommit(tx, nil, true)
-			})
+		ac.Close()
+		if err := agg.BuildMissedIndices(ctx, estimate.IndexSnapshot.Workers()); err != nil {
+			return err
 		}
-
-		{
-			log.Info("[sqeeze_migration] `domain_old` folder found, using it as a target `domain`")
-			dirs2 := dirs
-			dirs2.SnapDomain += "_old"
-			aggOld, err := libstate.NewAggregator(ctx, dirs2, config3.HistoryV3AggregationStep, db, nil, logger)
-			if err != nil {
-				panic(err)
-			}
-			defer aggOld.Close()
-			if err = aggOld.OpenFolder(); err != nil {
-				panic(err)
-			}
-			aggOld.SetCompressWorkers(estimate.CompressSnapshot.Workers())
-			if err := aggOld.BuildMissedIndices(ctx, estimate.IndexSnapshot.Workers()); err != nil {
-				return err
-			}
-
-			acOld := aggOld.BeginFilesRo()
-			defer acOld.Close()
-
-			if err = acOld.SqueezeCommitmentFiles(ac); err != nil {
-				return err
-			}
-			acOld.Close()
-			ac.Close()
-			if err := agg.BuildMissedIndices(ctx, estimate.IndexSnapshot.Workers()); err != nil {
-				return err
-			}
-		}
-
 		return db.Update(ctx, func(tx kv.RwTx) error {
 			return BeforeCommit(tx, nil, true)
 		})
