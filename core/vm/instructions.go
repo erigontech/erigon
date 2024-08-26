@@ -408,6 +408,7 @@ func opExtCodeCopy(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext)
 	)
 	addr := libcommon.Address(a.Bytes20())
 	len64 := length.Uint64()
+
 	codeCopy := getDataBig(interpreter.evm.IntraBlockState().ResolveCode(addr), &codeOffset, len64)
 	scope.Memory.Set(memOffset.Uint64(), len64, codeCopy)
 	return nil, nil
@@ -446,10 +447,10 @@ func opExtCodeCopy(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext)
 //	(6) Caller tries to get the code hash for an account which is marked as deleted,
 //
 // this account should be regarded as a non-existent account and zero should be returned.
-//  (4) Caller tries to get the code hash of a delegated account, the result should be
-// 
-// equal the result of calling extcodehash on the account directly.
 //
+//	(4) Caller tries to get the code hash of a delegated account, the result should be
+//
+// equal the result of calling extcodehash on the account directly.
 func opExtCodeHash(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]byte, error) {
 	slot := scope.Stack.Peek()
 	address := libcommon.Address(slot.Bytes20())

@@ -353,6 +353,11 @@ func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (*evmtype
 	isEIP3860 := vmConfig.HasEip3860(rules)
 	accessTuples := slices.Clone[types2.AccessList](msg.AccessList())
 
+	if !contractCreation {
+		// Increment the nonce for the next transaction
+		st.state.SetNonce(msg.From(), st.state.GetNonce(sender.Address())+1)
+	}
+
 	// set code tx
 	auths := msg.Authorizations()
 	verifiedAuthorities := make([]libcommon.Address, 0)
@@ -451,8 +456,6 @@ func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (*evmtype
 		// of the contract's address, but before the execution of the code.
 		ret, _, st.gasRemaining, vmerr = st.evm.Create(sender, st.data, st.gasRemaining, st.value, bailout)
 	} else {
-		// Increment the nonce for the next transaction
-		st.state.SetNonce(msg.From(), st.state.GetNonce(sender.Address())+1)
 		ret, st.gasRemaining, vmerr = st.evm.Call(sender, st.to(), st.data, st.gasRemaining, st.value, bailout)
 	}
 	if refunds {

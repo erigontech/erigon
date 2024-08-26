@@ -32,6 +32,7 @@ import (
 )
 
 var activators = map[int]func(*JumpTable){
+	7702: enable7702,
 	7516: enable7516,
 	6780: enable6780,
 	5656: enable5656,
@@ -319,4 +320,27 @@ func enable7516(jt *JumpTable) {
 		numPop:      0,
 		numPush:     1,
 	}
+}
+
+func enable7702(jt *JumpTable) {
+	jt[EXTCODECOPY].constantGas = params.WarmStorageReadCostEIP2929
+	jt[EXTCODECOPY].dynamicGas = gasExtCodeCopyEIP7702
+
+	jt[EXTCODESIZE].constantGas = params.WarmStorageReadCostEIP2929
+	jt[EXTCODESIZE].dynamicGas = gasEip7702CodeCheck
+
+	jt[EXTCODEHASH].constantGas = params.WarmStorageReadCostEIP2929
+	jt[EXTCODEHASH].dynamicGas = gasEip7702CodeCheck
+
+	jt[CALL].constantGas = params.WarmStorageReadCostEIP2929
+	jt[CALL].dynamicGas = gasCallEIP7702
+
+	jt[CALLCODE].constantGas = params.WarmStorageReadCostEIP2929
+	jt[CALLCODE].dynamicGas = gasCallCodeEIP7702
+
+	jt[STATICCALL].constantGas = params.WarmStorageReadCostEIP2929
+	jt[STATICCALL].dynamicGas = gasStaticCallEIP7702
+
+	jt[DELEGATECALL].constantGas = params.WarmStorageReadCostEIP2929
+	jt[DELEGATECALL].dynamicGas = gasDelegateCallEIP7702
 }

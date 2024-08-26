@@ -283,6 +283,7 @@ func (sdb *IntraBlockState) GetCodeHash(addr libcommon.Address) libcommon.Hash {
 }
 
 func (sdb *IntraBlockState) ResolveCodeHash(addr libcommon.Address) libcommon.Hash {
+	// eip-7702
 	code := sdb.GetCode(addr)
 	if delegation, ok := types.ParseDelegation(code); ok {
 		return sdb.GetCodeHash(delegation)
@@ -292,6 +293,7 @@ func (sdb *IntraBlockState) ResolveCodeHash(addr libcommon.Address) libcommon.Ha
 }
 
 func (sdb *IntraBlockState) ResolveCode(addr libcommon.Address) []byte {
+	// eip-7702
 	code := sdb.GetCode(addr)
 	if delegation, ok := types.ParseDelegation(code); ok {
 		return sdb.GetCode(delegation)
