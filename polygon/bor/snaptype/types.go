@@ -109,15 +109,15 @@ var (
 						return false, e
 					}
 
-					logger.Info("extractingRange", "blockNum", blockNum, "start", startEventId, "end", endEventId)
+					if blockNum >= blockTo {
+						return false, nil
+					}
+
 					if e := extractEventRange(startEventId, endEventId, tx, blockNum, blockHash, collect); e != nil {
 						return false, e
 					}
 					startEventId = endEventId
 
-					if blockNum >= blockTo {
-						return false, nil
-					}
 					lastEventId = binary.BigEndian.Uint64(eventIdBytes)
 					select {
 					case <-ctx.Done():
