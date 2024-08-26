@@ -116,6 +116,9 @@ var RecompressCommitmentFiles = Migration{
 		if err := aggV2.BuildMissedIndices(ctx, estimate.IndexSnapshot.Workers()); err != nil {
 			return err
 		}
+		if err := agg.BuildMissedIndices(ctx, estimate.IndexSnapshot.Workers()); err != nil {
+			return err
+		}
 
 		acV2 := aggV2.BeginFilesRo()
 		defer acV2.Close()
