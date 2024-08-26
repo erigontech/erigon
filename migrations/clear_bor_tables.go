@@ -9,9 +9,9 @@ import (
 	reset2 "github.com/erigontech/erigon/core/rawdb/rawdbreset"
 )
 
-var ClearBorDB = Migration{
+var ClearBorTables = Migration{
 	// migration required due to change of `BorEventNums` to last event ID (https://github.com/erigontech/erigon/commit/13b4b7768485736e54ff5ca3270ebeec5c023ba8)
-	Name: "clear_bor_db",
+	Name: "clear_bor_tables",
 	Up: func(db kv.RwDB, dirs datadir.Dirs, progress []byte, BeforeCommit Callback, logger log.Logger) (err error) {
 		tx, err := db.BeginRw(context.Background())
 		if err != nil {
