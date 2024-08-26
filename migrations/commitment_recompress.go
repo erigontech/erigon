@@ -140,8 +140,9 @@ var RecompressCommitmentFiles = Migration{
 		agg.Close()
 		aggOld.Close()
 
-		log.Info("[recompress] success", "remove", dirs.SnapDomain+"_backup", "remove", dirs.SnapDomain+"_old")
+		log.Info("[recompress] removing", "dir", dirsOld.SnapDomain)
 		_ = os.RemoveAll(dirsOld.SnapDomain)
+		log.Info("[recompress] success", "please_remove", dirs.SnapDomain+"_backup")
 		return db.Update(ctx, func(tx kv.RwTx) error {
 			return BeforeCommit(tx, nil, true)
 		})
