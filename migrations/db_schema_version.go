@@ -60,7 +60,7 @@ var dropBor = Migration{
 
 		logger.Info("running bor migration")
 
-		if err := tx.DropBucket(kv.BorEventNums); err != nil {
+		if err := tx.ClearBucket(kv.BorEventNums); err != nil {
 			return err
 		}
 
