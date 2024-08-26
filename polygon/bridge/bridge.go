@@ -235,9 +235,9 @@ func (b *Bridge) ProcessNewBlocks(ctx context.Context, blocks []*types.Block) er
 	blockNumToEventId := make(map[uint64]uint64)
 	eventTxnToBlockNum := make(map[libcommon.Hash]uint64)
 	for _, block := range blocks {
-		// check if block is start of span
+		// check if block is start of span and > 0
 		blockNum := block.NumberU64()
-		if !b.isSprintStart(blockNum) {
+		if blockNum == 0 || !b.borConfig.IsSprintStart(blockNum) {
 			continue
 		}
 		if blockNum <= lastProcessedBlockInfo.BlockNum {
@@ -452,12 +452,4 @@ func (b *Bridge) waitProcessedBlocksSignal(ctx context.Context) error {
 		}
 		return nil
 	}
-}
-
-func (b *Bridge) isSprintStart(headerNum uint64) bool {
-	if headerNum%b.borConfig.CalculateSprintLength(headerNum) != 0 || headerNum == 0 {
-		return false
-	}
-
-	return true
 }
