@@ -116,15 +116,10 @@ func (ap *attestationProducer) ProduceAndCacheAttestationData(baseState *state.C
 		),
 	)
 	ap.attestationsCache.Add(slot, baseAttestationData)
-
-	beaconBlockRoot, err := baseState.GetBlockRootAtSlot(slot)
-	if err != nil {
-		return solid.AttestationData{}, err
-	}
 	return solid.NewAttestionDataFromParameters(
 		slot,
 		committeeIndex,
-		beaconBlockRoot,
+		baseStateBlockRoot,
 		baseAttestationData.Source(),
 		baseAttestationData.Target(),
 	), nil

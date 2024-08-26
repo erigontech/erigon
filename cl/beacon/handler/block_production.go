@@ -113,13 +113,13 @@ func (a *ApiHandler) GetEthV1ValidatorAttestationData(
 	} else if err != nil {
 		return nil, beaconhttp.NewEndpointError(http.StatusInternalServerError, err)
 	}
-	/*	headBlockRoot, _, err := a.forkchoiceStore.GetHead()
-		if err != nil {
-			return nil, err
-		}
-		if headBlockRoot != (libcommon.Hash{}) {
-			attestationData.SetBeaconBlockRoot(headBlockRoot)
-		}*/
+	headBlockRoot, _, err := a.forkchoiceStore.GetHead()
+	if err != nil {
+		return nil, err
+	}
+	if headBlockRoot != (libcommon.Hash{}) {
+		attestationData.SetBeaconBlockRoot(headBlockRoot)
+	}
 	if a.forkchoiceStore.IsRootOptimistic(attestationData.BeaconBlockRoot()) {
 		return nil, beaconhttp.NewEndpointError(
 			http.StatusServiceUnavailable,
