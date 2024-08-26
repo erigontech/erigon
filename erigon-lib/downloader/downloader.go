@@ -2222,7 +2222,7 @@ func (d *Downloader) ReCalcStats(interval time.Duration) {
 		}
 		sort.Strings(files)
 
-		logger.Log(verbosity, "[snapshots] downloading", "files", amount, "list", strings.Join(files, ", "))
+		logger.Log(verbosity, "[snapshots] files progress", "files", amount, "list", strings.Join(files, ", "))
 	}
 
 	if d.stuckFileDetailedLogs && time.Since(stats.lastTorrentStatus) > 5*time.Minute {
