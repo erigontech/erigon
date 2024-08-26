@@ -152,6 +152,7 @@ func init() {
 
 	withDataDir(printTorrentHashes)
 	withChainFlag(printTorrentHashes)
+	createTorrent.Flags().BoolVar(&all, "all", false, "Produce all possible .torrent files")
 	printTorrentHashes.PersistentFlags().BoolVar(&forceRebuild, "rebuild", false, "Force re-create .torrent files")
 	printTorrentHashes.Flags().StringVar(&targetFile, "targetfile", "", "write output to file")
 	if err := printTorrentHashes.MarkFlagFilename("targetfile"); err != nil {
