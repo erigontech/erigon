@@ -58,7 +58,7 @@ var RecompressCommitmentFiles = Migration{
 			log.Info("[recompress_migration] done", "took", time.Since(t))
 		}()
 
-		log.Info("[recompress_migration] 'recompressDomain' mode start")
+		log.Info("[recompress_migration] start")
 		dirsOld := dirs
 		dirsOld.SnapDomain += "_old"
 		dir.MustExist(dirsOld.SnapDomain, dirs.SnapDomain+"_backup")
@@ -150,6 +150,7 @@ var RecompressCommitmentFiles = Migration{
 }
 
 func recompressDomain(ctx context.Context, dirs datadir.Dirs, from, to string, logger log.Logger) error {
+	logger.Info("[recompress] f", "f", from, "to", to)
 	decompressor, err := seg.NewDecompressor(from)
 	if err != nil {
 		return err
@@ -160,7 +161,7 @@ func recompressDomain(ctx context.Context, dirs datadir.Dirs, from, to string, l
 
 	compressCfg := state.DomainCompressCfg
 	compressCfg.Workers = estimate.CompressSnapshot.Workers()
-	c, err := seg.NewCompressor(ctx, "recompressDomain", to, dirs.Tmp, compressCfg, log.LvlInfo, logger)
+	c, err := seg.NewCompressor(ctx, "recompress", to, dirs.Tmp, compressCfg, log.LvlInfo, logger)
 	if err != nil {
 		return err
 	}
