@@ -61,8 +61,11 @@ var RecompressCommitmentFiles = Migration{
 		log.Info("[recompress_migration] 'recompressDomain' mode start")
 		dirsOld := dirs
 		dirsOld.SnapDomain += "_old"
-		dir.MustExist(dirsOld.SnapDomain)
+		dir.MustExist(dirsOld.SnapDomain, dirs.SnapDomain+"_backup")
 		if err := rclone(logger, dirs.SnapDomain, dirsOld.SnapDomain); err != nil {
+			return err
+		}
+		if err := rclone(logger, dirs.SnapDomain, dirs.SnapDomain+"_backup"); err != nil {
 			return err
 		}
 		files, err := storageFiles(dirsOld)
@@ -138,11 +141,11 @@ var RecompressCommitmentFiles = Migration{
 		aggOld.Close()
 
 		log.Info("[recompress] rename", "from", dirs.SnapDomain, "to", dirs.SnapDomain+"_old")
-		_ = os.Remove(dirs.SnapDomain + "_old")
-		if err := os.Rename(dirs.SnapDomain, dirs.SnapDomain+"_old"); err != nil {
-			return err
-		}
-		log.Info("[recompress] rename", "from", dirsOld.SnapDomain, "to", dirs.SnapDomain)
+		//_ = os.Remove(dirs.SnapDomain + "_old")
+		//if err := os.Rename(dirs.SnapDomain, dirs.SnapDomain+"_old"); err != nil {
+		//	return err
+		//}
+		//log.Info("[recompress] rename", "from", dirsOld.SnapDomain, "to", dirs.SnapDomain)
 		if err := os.Rename(dirsOld.SnapDomain, dirs.SnapDomain); err != nil {
 			return err
 		}
