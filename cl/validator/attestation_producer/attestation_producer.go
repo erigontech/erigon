@@ -20,6 +20,7 @@ import (
 	"context"
 	"errors"
 	"sync"
+	"time"
 
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
@@ -41,15 +42,12 @@ type attestationProducer struct {
 	beaconCfg *clparams.BeaconChainConfig
 
 	attCacheMutex     sync.RWMutex
-	attestationsCache *lru.Cache[uint64, solid.AttestationData] // Epoch => Base AttestationData
+	attestationsCache *lru.CacheWithTTL[uint64, solid.AttestationData] // Epoch => Base AttestationData
 }
 
 func New(ctx context.Context, beaconCfg *clparams.BeaconChainConfig) AttestationDataProducer {
-	attestationsCache, err := lru.New[uint64, solid.AttestationData]("attestations", attestationsCacheSize)
-	if err != nil {
-		panic(err)
-	}
-
+	ttl := time.Duration(beaconCfg.SecondsPerSlot) * time.Second
+	attestationsCache := lru.NewWithTTL[uint64, solid.AttestationData]("attestations", attestationsCacheSize, ttl)
 	p := &attestationProducer{
 		beaconCfg:         beaconCfg,
 		attestationsCache: attestationsCache,
