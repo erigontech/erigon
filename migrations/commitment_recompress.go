@@ -59,13 +59,13 @@ var RecompressCommitmentFiles = Migration{
 		}()
 
 		log.Info("[recompress_migration] 'recompressDomain' mode start")
-		dirs2 := dirs
-		dirs2.SnapDomain += "_v2"
-		dir.MustExist(dirs2.SnapDomain)
-		if err := rclone(logger, dirs.SnapDomain, dirs2.SnapDomain); err != nil {
+		dirsOld := dirs
+		dirsOld.SnapDomain += "_old"
+		dir.MustExist(dirsOld.SnapDomain)
+		if err := rclone(logger, dirs.SnapDomain, dirsOld.SnapDomain); err != nil {
 			return err
 		}
-		files, err := storageFiles(dirs)
+		files, err := storageFiles(dirsOld)
 		if err != nil {
 			return err
 		}
@@ -79,7 +79,7 @@ var RecompressCommitmentFiles = Migration{
 				continue
 			}
 
-			to := filepath.Join(dirs2.SnapDomain, fromFileName)
+			to := filepath.Join(dirs.SnapDomain, fromFileName)
 			if err := recompressDomain(ctx, dirs, from, to, logger); err != nil {
 				return err
 			}
@@ -104,46 +104,46 @@ var RecompressCommitmentFiles = Migration{
 		ac := agg.BeginFilesRo()
 		defer ac.Close()
 
-		aggV2, err := state.NewAggregator(ctx, dirs2, config3.HistoryV3AggregationStep, db, nil, logger)
+		aggOld, err := state.NewAggregator(ctx, dirsOld, config3.HistoryV3AggregationStep, db, nil, logger)
 		if err != nil {
 			panic(err)
 		}
-		defer aggV2.Close()
-		if err = aggV2.OpenFolder(); err != nil {
+		defer aggOld.Close()
+		if err = aggOld.OpenFolder(); err != nil {
 			panic(err)
 		}
-		aggV2.SetCompressWorkers(estimate.CompressSnapshot.Workers())
-		if err := aggV2.BuildMissedIndices(ctx, estimate.IndexSnapshot.Workers()); err != nil {
+		aggOld.SetCompressWorkers(estimate.CompressSnapshot.Workers())
+		if err := aggOld.BuildMissedIndices(ctx, estimate.IndexSnapshot.Workers()); err != nil {
 			return err
 		}
 		if err := agg.BuildMissedIndices(ctx, estimate.IndexSnapshot.Workers()); err != nil {
 			return err
 		}
 
-		acV2 := aggV2.BeginFilesRo()
-		defer acV2.Close()
+		acOld := aggOld.BeginFilesRo()
+		defer acOld.Close()
 
-		if err = ac.SqueezeCommitmentFiles(acV2); err != nil {
+		if err = acOld.SqueezeCommitmentFiles(ac); err != nil {
 			return err
 		}
-		acV2.Close()
+		acOld.Close()
 		ac.Close()
 		if err := agg.BuildMissedIndices(ctx, estimate.IndexSnapshot.Workers()); err != nil {
 			return err
 		}
-		if err := aggV2.BuildMissedIndices(ctx, estimate.IndexSnapshot.Workers()); err != nil {
+		if err := aggOld.BuildMissedIndices(ctx, estimate.IndexSnapshot.Workers()); err != nil {
 			return err
 		}
 		agg.Close()
-		aggV2.Close()
+		aggOld.Close()
 
 		log.Info("[recompress] rename", "from", dirs.SnapDomain, "to", dirs.SnapDomain+"_old")
 		_ = os.Remove(dirs.SnapDomain + "_old")
 		if err := os.Rename(dirs.SnapDomain, dirs.SnapDomain+"_old"); err != nil {
 			return err
 		}
-		log.Info("[recompress] rename", "from", dirs2.SnapDomain, "to", dirs.SnapDomain)
-		if err := os.Rename(dirs2.SnapDomain, dirs.SnapDomain); err != nil {
+		log.Info("[recompress] rename", "from", dirsOld.SnapDomain, "to", dirs.SnapDomain)
+		if err := os.Rename(dirsOld.SnapDomain, dirs.SnapDomain); err != nil {
 			return err
 		}
 
