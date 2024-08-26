@@ -22,7 +22,6 @@ import (
 	"github.com/erigontech/erigon-lib/common/datadir"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/log/v3"
-	reset2 "github.com/erigontech/erigon/core/rawdb/rawdbreset"
 )
 
 var dbSchemaVersion5 = Migration{
@@ -39,27 +38,5 @@ var dbSchemaVersion5 = Migration{
 			return err
 		}
 		return tx.Commit()
-	},
-}
-
-var dropBor = Migration{
-	Name: "dropBor",
-	Up: func(db kv.RwDB, dirs datadir.Dirs, progress []byte, BeforeCommit Callback, logger log.Logger) (err error) {
-		tx, err := db.BeginRw(context.Background())
-		if err != nil {
-			return err
-		}
-		defer tx.Rollback()
-
-		// This migration is no-op, but it forces the migration mechanism to apply it and thus write the DB schema version info
-		if err := BeforeCommit(tx, nil, true); err != nil {
-			return err
-		}
-
-		if err := reset2.ResetBorHeimdall(context.Background(), tx); err != nil {
-			return err
-		}
-
-		return nil
 	},
 }

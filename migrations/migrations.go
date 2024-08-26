@@ -54,7 +54,7 @@ var migrations = map[kv.Label][]Migration{
 		ProhibitNewDownloadsLock,
 		SqueezeCommitmentFiles,
 		ProhibitNewDownloadsLock2,
-		dropBor,
+		ClearBorDB,
 	},
 	kv.TxPoolDB: {},
 	kv.SentryDB: {},
