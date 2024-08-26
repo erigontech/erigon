@@ -22,9 +22,7 @@ import (
 	"github.com/erigontech/erigon-lib/common/datadir"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon/eth/ethconfig"
-	"github.com/erigontech/erigon/eth/stagedsync/stages"
-	"github.com/erigontech/erigon/turbo/snapshotsync/freezeblocks"
+	reset2 "github.com/erigontech/erigon/core/rawdb/rawdbreset"
 )
 
 var dbSchemaVersion5 = Migration{
@@ -58,21 +56,10 @@ var dropBor = Migration{
 			return err
 		}
 
-		logger.Info("running bor migration")
-
-		if err := tx.ClearBucket(kv.BorEventNums); err != nil {
+		if err := reset2.ResetBorHeimdall(context.Background(), tx); err != nil {
 			return err
 		}
 
-		snapCfg := ethconfig.NewSnapCfg(true, false, false)
-		sn := freezeblocks.NewRoSnapshots(snapCfg, dirs.Snap, 0, logger)
-		borSn := freezeblocks.NewBorRoSnapshots(snapCfg, dirs.Snap, 0, logger)
-		blockReader := freezeblocks.NewBlockReader(sn, borSn)
-
-		if err := stages.SaveStageProgress(tx, stages.BorHeimdall, blockReader.LastFrozenEventBlockNum()); err != nil {
-			return err
-		}
-
-		return tx.Commit()
+		return nil
 	},
 }
