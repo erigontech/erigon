@@ -231,35 +231,38 @@ func (f *Send) PropagatePooledTxsToPeersList(peers []types2.PeerID, types []byte
 			}
 
 			for _, peer := range peers {
-				switch slices.Max(sentry.PeerProtocols(sentryClient, peer)) {
-				case 66, 67:
-					if i > prevI {
-						req := &sentryproto.SendMessageByIdRequest{
-							PeerId: peer,
-							Data: &sentryproto.OutboundMessageData{
-								Id:   sentryproto.MessageId_NEW_POOLED_TRANSACTION_HASHES_66,
-								Data: iData,
-							},
+				protocols := sentry.PeerProtocols(sentryClient, peer)
+				if len(protocols) > 0 {
+					switch slices.Max(protocols) {
+					case 66, 67:
+						if i > prevI {
+							req := &sentryproto.SendMessageByIdRequest{
+								PeerId: peer,
+								Data: &sentryproto.OutboundMessageData{
+									Id:   sentryproto.MessageId_NEW_POOLED_TRANSACTION_HASHES_66,
+									Data: iData,
+								},
+							}
+							if _, err := sentryClient.SendMessageById(f.ctx, req, &grpc.EmptyCallOption{}); err != nil {
+								f.logger.Debug("[txpool.send] PropagatePooledTxsToPeersList", "err", err)
+							}
 						}
-						if _, err := sentryClient.SendMessageById(f.ctx, req, &grpc.EmptyCallOption{}); err != nil {
-							f.logger.Debug("[txpool.send] PropagatePooledTxsToPeersList", "err", err)
-						}
-					}
-				case 68:
+					case 68:
 
-					if j > prevJ {
-						req := &sentryproto.SendMessageByIdRequest{
-							PeerId: peer,
-							Data: &sentryproto.OutboundMessageData{
-								Id:   sentryproto.MessageId_NEW_POOLED_TRANSACTION_HASHES_68,
-								Data: jData,
-							},
+						if j > prevJ {
+							req := &sentryproto.SendMessageByIdRequest{
+								PeerId: peer,
+								Data: &sentryproto.OutboundMessageData{
+									Id:   sentryproto.MessageId_NEW_POOLED_TRANSACTION_HASHES_68,
+									Data: jData,
+								},
+							}
+							if _, err := sentryClient.SendMessageById(f.ctx, req, &grpc.EmptyCallOption{}); err != nil {
+								f.logger.Debug("[txpool.send] PropagatePooledTxsToPeersList68", "err", err)
+							}
 						}
-						if _, err := sentryClient.SendMessageById(f.ctx, req, &grpc.EmptyCallOption{}); err != nil {
-							f.logger.Debug("[txpool.send] PropagatePooledTxsToPeersList68", "err", err)
-						}
-					}
 
+					}
 				}
 			}
 		}

@@ -20,12 +20,22 @@ import (
 
 var _ sentryproto.SentryClient = (*sentryMultiplexer)(nil)
 
+type client struct {
+	sentryproto.SentryClient
+	hasHandshake bool
+}
+
 type sentryMultiplexer struct {
-	clients []sentryproto.SentryClient
+	clients []*client
 }
 
 func NewSentryMultiplexer(clients []sentryproto.SentryClient) *sentryMultiplexer {
-	return &sentryMultiplexer{clients}
+	mux := &sentryMultiplexer{}
+	mux.clients = make([]*client, len(clients))
+	for i, c := range clients {
+		mux.clients[i] = &client{c, false}
+	}
+	return mux
 }
 
 func (m *sentryMultiplexer) SetStatus(ctx context.Context, in *sentryproto.StatusData, opts ...grpc.CallOption) (*sentryproto.SetStatusReply, error) {
@@ -34,10 +44,12 @@ func (m *sentryMultiplexer) SetStatus(ctx context.Context, in *sentryproto.Statu
 	for _, client := range m.clients {
 		client := client
 
-		g.Go(func() error {
-			_, err := client.SetStatus(gctx, in, opts...)
-			return err
-		})
+		if client.hasHandshake {
+			g.Go(func() error {
+				_, err := client.SetStatus(gctx, in, opts...)
+				return err
+			})
+		}
 	}
 
 	err := g.Wait()
@@ -81,7 +93,43 @@ func (m *sentryMultiplexer) PeerMinBlock(ctx context.Context, in *sentryproto.Pe
 
 // Handshake is not performed on the multi-client level
 func (m *sentryMultiplexer) HandShake(ctx context.Context, in *emptypb.Empty, opts ...grpc.CallOption) (*sentryproto.HandShakeReply, error) {
-	return nil, status.Errorf(codes.Unimplemented, "method SetStatus not implemented")
+	g, gctx := errgroup.WithContext(ctx)
+
+	var protocol sentryproto.Protocol
+	var mu sync.Mutex
+
+	for _, client := range m.clients {
+		client := client
+
+		if !client.hasHandshake {
+			g.Go(func() error {
+				reply, err := client.HandShake(gctx, &emptypb.Empty{}, grpc.WaitForReady(true))
+
+				if err != nil {
+					return err
+				}
+
+				mu.Lock()
+				defer mu.Unlock()
+
+				if reply.Protocol > protocol {
+					protocol = reply.Protocol
+				}
+
+				client.hasHandshake = true
+
+				return nil
+			})
+		}
+	}
+
+	err := g.Wait()
+
+	if err != nil {
+		return nil, err
+	}
+
+	return &sentryproto.HandShakeReply{Protocol: protocol}, nil
 }
 
 func (m *sentryMultiplexer) SendMessageByMinBlock(ctx context.Context, in *sentryproto.SendMessageByMinBlockRequest, opts ...grpc.CallOption) (*sentryproto.SentPeers, error) {

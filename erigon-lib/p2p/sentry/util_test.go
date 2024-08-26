@@ -9,7 +9,6 @@ import (
 	"github.com/erigontech/erigon-lib/gointerfaces/sentryproto"
 	"github.com/erigontech/erigon-lib/gointerfaces/typesproto"
 	sentry "github.com/erigontech/erigon-lib/p2p/sentry"
-	"github.com/erigontech/erigon/eth/protocols/eth"
 	"github.com/erigontech/erigon/p2p"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/mock/gomock"
@@ -18,7 +17,7 @@ import (
 )
 
 var eth67 = p2p.Protocol{
-	Name:           eth.ProtocolName,
+	Name:           "eth",
 	Version:        67,
 	Length:         17,
 	DialCandidates: nil,
@@ -34,7 +33,7 @@ var eth67 = p2p.Protocol{
 }
 
 var eth68 = p2p.Protocol{
-	Name:           eth.ProtocolName,
+	Name:           "eth",
 	Version:        68,
 	Length:         17,
 	DialCandidates: nil,

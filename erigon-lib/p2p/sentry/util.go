@@ -16,16 +16,18 @@ func PeerProtocols(sentry sentryproto.SentryClient, peer *typesproto.H512) []byt
 		info := reply.GetPeer()
 		var protocols []byte
 
-		for _, cap := range info.Caps {
-			parts := strings.Split(cap, "/")
-			if len(parts) > 1 && strings.EqualFold(parts[0], "ETH") {
-				if version, err := strconv.Atoi(parts[1]); err == nil {
-					protocols = append(protocols, byte(version))
+		if info != nil {
+			for _, cap := range info.Caps {
+				parts := strings.Split(cap, "/")
+				if len(parts) > 1 && strings.EqualFold(parts[0], "ETH") {
+					if version, err := strconv.Atoi(parts[1]); err == nil {
+						protocols = append(protocols, byte(version))
+					}
 				}
 			}
-		}
 
-		return protocols
+			return protocols
+		}
 	}
 
 	return nil
