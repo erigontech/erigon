@@ -147,7 +147,17 @@ func (f *Send) AnnouncePooledTxs(types []byte, sizes []uint32, hashes types2.Has
 
 			protocols := sentry.Protocols(sentryClient)
 
-			switch protocols[rand.Intn(len(protocols)-1)] {
+			if len(protocols) == 0 {
+				continue
+			}
+
+			var protocolIndex int
+
+			if len(protocols) > 1 {
+				protocolIndex = rand.Intn(len(protocols) - 1)
+			}
+
+			switch protocols[protocolIndex] {
 			case 66, 67:
 				if i > prevI {
 					req := &sentryproto.SendMessageToRandomPeersRequest{
