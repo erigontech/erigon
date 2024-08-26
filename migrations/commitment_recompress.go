@@ -140,15 +140,15 @@ var RecompressCommitmentFiles = Migration{
 		agg.Close()
 		aggOld.Close()
 
-		log.Info("[recompress] rename", "from", dirs.SnapDomain, "to", dirs.SnapDomain+"_old")
-		//_ = os.Remove(dirs.SnapDomain + "_old")
+		log.Info("[recompress] success", "remove", dirs.SnapDomain+"_backup", "remove", dirs.SnapDomain+"_old")
+		_ = os.RemoveAll(dirsOld.SnapDomain)
 		//if err := os.Rename(dirs.SnapDomain, dirs.SnapDomain+"_old"); err != nil {
 		//	return err
 		//}
 		//log.Info("[recompress] rename", "from", dirsOld.SnapDomain, "to", dirs.SnapDomain)
-		if err := os.Rename(dirsOld.SnapDomain, dirs.SnapDomain); err != nil {
-			return err
-		}
+		//if err := os.Rename(dirsOld.SnapDomain, dirs.SnapDomain); err != nil {
+		//	return err
+		//}
 
 		return db.Update(ctx, func(tx kv.RwTx) error {
 			return BeforeCommit(tx, nil, true)
