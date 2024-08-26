@@ -2176,26 +2176,6 @@ func (d *Downloader) ReCalcStats(interval time.Duration) {
 		stats.Completed = false
 	}
 
-	logger.Debug("[snapshots] downloading",
-		"len", len(torrents),
-		"webTransfers", webTransfers,
-		"torrent", torrentInfo,
-		"db", dbInfo,
-		"t-complete", tComplete,
-		"hashed", common.ByteCount(stats.BytesHashed),
-		"hash-rate", fmt.Sprintf("%s/s", common.ByteCount(stats.HashRate)),
-		"completed", common.ByteCount(stats.BytesCompleted),
-		"completion-rate", fmt.Sprintf("%s/s", common.ByteCount(stats.CompletionRate)),
-		"flushed", common.ByteCount(stats.BytesFlushed),
-		"flush-rate", fmt.Sprintf("%s/s", common.ByteCount(stats.FlushRate)),
-		"webseed-trips", stats.WebseedTripCount.Load(),
-		"webseed-active", stats.WebseedActiveTrips.Load(),
-		"webseed-max-active", stats.WebseedMaxActiveTrips.Load(),
-		"webseed-discards", stats.WebseedDiscardCount.Load(),
-		"webseed-fails", stats.WebseedServerFails.Load(),
-		"webseed-bytes", common.ByteCount(uint64(stats.WebseedBytesDownload.Load())),
-		"localHashes", stats.LocalFileHashes, "localHashTime", stats.LocalFileHashTime)
-
 	if lastMetadataReady != stats.MetadataReady {
 		now := time.Now()
 		stats.LastMetadataUpdate = &now
@@ -2327,6 +2307,28 @@ func (d *Downloader) ReCalcStats(interval time.Duration) {
 	}
 
 	d.lock.Unlock()
+
+	if !stats.Completed {
+		logger.Debug("[snapshots] downloading",
+			"len", len(torrents),
+			"webTransfers", webTransfers,
+			"torrent", torrentInfo,
+			"db", dbInfo,
+			"t-complete", tComplete,
+			"hashed", common.ByteCount(stats.BytesHashed),
+			"hash-rate", fmt.Sprintf("%s/s", common.ByteCount(stats.HashRate)),
+			"completed", common.ByteCount(stats.BytesCompleted),
+			"completion-rate", fmt.Sprintf("%s/s", common.ByteCount(stats.CompletionRate)),
+			"flushed", common.ByteCount(stats.BytesFlushed),
+			"flush-rate", fmt.Sprintf("%s/s", common.ByteCount(stats.FlushRate)),
+			"webseed-trips", stats.WebseedTripCount.Load(),
+			"webseed-active", stats.WebseedActiveTrips.Load(),
+			"webseed-max-active", stats.WebseedMaxActiveTrips.Load(),
+			"webseed-discards", stats.WebseedDiscardCount.Load(),
+			"webseed-fails", stats.WebseedServerFails.Load(),
+			"webseed-bytes", common.ByteCount(uint64(stats.WebseedBytesDownload.Load())),
+			"localHashes", stats.LocalFileHashes, "localHashTime", stats.LocalFileHashTime)
+	}
 }
 
 func (d *Downloader) logProgress() {
