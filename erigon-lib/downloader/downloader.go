@@ -2331,55 +2331,6 @@ func (d *Downloader) ReCalcStats(interval time.Duration) {
 	}
 }
 
-func (d *Downloader) logProgress() {
-	var m runtime.MemStats
-	prefix := d.logPrefix
-
-	if d.logPrefix == "" {
-		prefix = "[snapshots]"
-	}
-
-	if d.stats.Completed {
-		log.Info(fmt.Sprintf("[%s] Downloading complete", prefix), "time", time.Since(d.startTime).String())
-	}
-
-	dbg.ReadMemStats(&m)
-
-	status := "Downloading"
-
-	percentDone := float32(100) * (float32(d.stats.BytesDownload) / float32(d.stats.BytesTotal))
-	bytesDone := common.ByteCount(d.stats.BytesDownload)
-	rate := d.stats.DownloadRate
-	remainingBytes := d.stats.BytesTotal - d.stats.BytesDownload
-
-	if d.stats.BytesDownload >= d.stats.BytesTotal && d.stats.MetadataReady == d.stats.FilesTotal && d.stats.BytesTotal > 0 {
-		status = "Verifying"
-		percentDone = float32(100) * (float32(d.stats.BytesCompleted) / float32(d.stats.BytesTotal))
-		bytesDone = common.ByteCount(d.stats.BytesCompleted)
-		rate = d.stats.CompletionRate
-		remainingBytes = d.stats.BytesTotal - d.stats.BytesCompleted
-	}
-
-	if d.stats.BytesTotal == 0 {
-		percentDone = 0
-	}
-
-	timeLeft := calculateTime(remainingBytes, rate)
-
-	if !d.stats.Completed {
-		log.Info(
-			fmt.Sprintf("[%s] %s", prefix, status),
-			"progress", fmt.Sprintf("(%d/%d files) %.2f%% - %s/%s", d.stats.MetadataReady, d.stats.FilesTotal, percentDone, bytesDone, common.ByteCount(d.stats.BytesTotal)),
-			"rate", fmt.Sprintf("%s/s", common.ByteCount(rate)),
-			"time-left", timeLeft,
-			"total-time", time.Since(d.startTime).Round(time.Second).String(),
-			"download-rate", fmt.Sprintf("%s/s", common.ByteCount(d.stats.DownloadRate)),
-			"completion-rate", fmt.Sprintf("%s/s", common.ByteCount(d.stats.CompletionRate)),
-			"alloc", common.ByteCount(m.Alloc),
-			"sys", common.ByteCount(m.Sys))
-	}
-}
-
 type filterWriter struct {
 	files     map[string][]byte
 	remainder []byte
@@ -2915,6 +2866,55 @@ func openClient(ctx context.Context, dbDir, snapDir string, cfg *torrent.ClientC
 
 func (d *Downloader) SetLogPrefix(prefix string) {
 	d.logPrefix = prefix
+}
+
+func (d *Downloader) logProgress() {
+	var m runtime.MemStats
+	prefix := d.logPrefix
+
+	if d.logPrefix == "" {
+		prefix = "[snapshots]"
+	}
+
+	if d.stats.Completed {
+		log.Info(fmt.Sprintf("[%s] Downloading complete", prefix), "time", time.Since(d.startTime).String())
+	}
+
+	dbg.ReadMemStats(&m)
+
+	status := "Downloading"
+
+	percentDone := float32(100) * (float32(d.stats.BytesDownload) / float32(d.stats.BytesTotal))
+	bytesDone := common.ByteCount(d.stats.BytesDownload)
+	rate := d.stats.DownloadRate
+	remainingBytes := d.stats.BytesTotal - d.stats.BytesDownload
+
+	if d.stats.BytesDownload >= d.stats.BytesTotal && d.stats.MetadataReady == d.stats.FilesTotal && d.stats.BytesTotal > 0 {
+		status = "Verifying"
+		percentDone = float32(100) * (float32(d.stats.BytesCompleted) / float32(d.stats.BytesTotal))
+		bytesDone = common.ByteCount(d.stats.BytesCompleted)
+		rate = d.stats.CompletionRate
+		remainingBytes = d.stats.BytesTotal - d.stats.BytesCompleted
+	}
+
+	if d.stats.BytesTotal == 0 {
+		percentDone = 0
+	}
+
+	timeLeft := calculateTime(remainingBytes, rate)
+
+	if !d.stats.Completed {
+		log.Info(
+			fmt.Sprintf("[%s] %s", prefix, status),
+			"progress", fmt.Sprintf("(%d/%d files) %.2f%% - %s/%s", d.stats.MetadataReady, d.stats.FilesTotal, percentDone, bytesDone, common.ByteCount(d.stats.BytesTotal)),
+			"rate", fmt.Sprintf("%s/s", common.ByteCount(rate)),
+			"time-left", timeLeft,
+			"total-time", time.Since(d.startTime).Round(time.Second).String(),
+			"download-rate", fmt.Sprintf("%s/s", common.ByteCount(d.stats.DownloadRate)),
+			"completion-rate", fmt.Sprintf("%s/s", common.ByteCount(d.stats.CompletionRate)),
+			"alloc", common.ByteCount(m.Alloc),
+			"sys", common.ByteCount(m.Sys))
+	}
 }
 
 func calculateTime(amountLeft, rate uint64) string {
