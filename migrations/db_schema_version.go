@@ -22,6 +22,9 @@ import (
 	"github.com/erigontech/erigon-lib/common/datadir"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/eth/ethconfig"
+	"github.com/erigontech/erigon/eth/stagedsync/stages"
+	"github.com/erigontech/erigon/turbo/snapshotsync/freezeblocks"
 )
 
 var dbSchemaVersion5 = Migration{
@@ -37,6 +40,39 @@ var dbSchemaVersion5 = Migration{
 		if err := BeforeCommit(tx, nil, true); err != nil {
 			return err
 		}
+		return tx.Commit()
+	},
+}
+
+var dropBor = Migration{
+	Name: "dropBor",
+	Up: func(db kv.RwDB, dirs datadir.Dirs, progress []byte, BeforeCommit Callback, logger log.Logger) (err error) {
+		tx, err := db.BeginRw(context.Background())
+		if err != nil {
+			return err
+		}
+		defer tx.Rollback()
+
+		// This migration is no-op, but it forces the migration mechanism to apply it and thus write the DB schema version info
+		if err := BeforeCommit(tx, nil, true); err != nil {
+			return err
+		}
+
+		logger.Info("running bor migration")
+
+		if err := tx.DropBucket(kv.BorEventNums); err != nil {
+			return err
+		}
+
+		snapCfg := ethconfig.NewSnapCfg(true, false, false)
+		sn := freezeblocks.NewRoSnapshots(snapCfg, dirs.Snap, 0, logger)
+		borSn := freezeblocks.NewBorRoSnapshots(snapCfg, dirs.Snap, 0, logger)
+		blockReader := freezeblocks.NewBlockReader(sn, borSn)
+
+		if err := stages.SaveStageProgress(tx, stages.BorHeimdall, blockReader.LastFrozenEventBlockNum()); err != nil {
+			return err
+		}
+
 		return tx.Commit()
 	},
 }
