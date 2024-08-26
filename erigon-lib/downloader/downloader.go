@@ -1385,15 +1385,18 @@ func (d *Downloader) mainLoop(silent bool) error {
 
 	var m runtime.MemStats
 
+	//Need to know is completed from previous stats in order to print "Download completed" message
+	prevStatsCompleted := d.stats.Completed
 	for {
 		select {
 		case <-d.ctx.Done():
 			return d.ctx.Err()
 		case <-statEvery.C:
+			prevStatsCompleted = d.stats.Completed
 			d.ReCalcStats(statInterval)
 
 		case <-logEvery.C:
-			if !d.stats.Completed {
+			if !prevStatsCompleted {
 				d.logProgress()
 			}
 
@@ -1404,7 +1407,8 @@ func (d *Downloader) mainLoop(silent bool) error {
 			stats := d.Stats()
 
 			dbg.ReadMemStats(&m)
-			if stats.Completed {
+
+			if stats.Completed && stats.FilesTotal > 0 {
 				d.logger.Info("[snapshots] Seeding",
 					"up", common.ByteCount(stats.UploadRate)+"/s",
 					"peers", stats.PeersUnique,
@@ -1414,17 +1418,6 @@ func (d *Downloader) mainLoop(silent bool) error {
 				)
 				continue
 			}
-
-			d.logger.Info("[snapshots] Downloading",
-				"progress", fmt.Sprintf("%.2f%% %s/%s", stats.Progress, common.ByteCount(stats.BytesCompleted), common.ByteCount(stats.BytesTotal)),
-				"downloading", stats.Downloading,
-				"download", common.ByteCount(stats.DownloadRate)+"/s",
-				"upload", common.ByteCount(stats.UploadRate)+"/s",
-				"peers", stats.PeersUnique,
-				"conns", stats.ConnectionsTotal,
-				"files", stats.FilesTotal,
-				"alloc", common.ByteCount(m.Alloc), "sys", common.ByteCount(m.Sys),
-			)
 
 			if stats.PeersUnique == 0 {
 				ips := d.TorrentClient().BadPeerIPs()
