@@ -29,7 +29,6 @@ func SetupBootnodesAccess(metricsMux *http.ServeMux, node *node.ErigonNode) {
 	}
 
 	metricsMux.HandleFunc("/bootnodes", func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Access-Control-Allow-Origin", "*")
 		w.Header().Set("Content-Type", "application/json")
 
 		bootnodes := node.Node().Config().P2P.BootstrapNodesV5
