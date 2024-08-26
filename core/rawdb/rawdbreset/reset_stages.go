@@ -122,10 +122,11 @@ func ResetPolygonSync(tx kv.RwTx, db kv.RoDB, agg *state.Aggregator, br services
 	if err := tx.ClearBucket(kv.BorSpans); err != nil {
 		return err
 	}
-	if err := clearStageProgress(tx, stages.PolygonSync); err != nil {
+	if err := ResetBlocks(tx, db, agg, br, bw, dirs, cc, logger); err != nil {
 		return err
 	}
-	return ResetBlocks(tx, db, agg, br, bw, dirs, cc, logger)
+
+	return stages.SaveStageProgress(tx, stages.PolygonSync, 0)
 }
 
 func ResetSenders(ctx context.Context, db kv.RwDB, tx kv.RwTx) error {
