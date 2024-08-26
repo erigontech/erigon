@@ -55,6 +55,14 @@ func (c *BorConfig) CalculateProducerDelay(number uint64) uint64 {
 	return borKeyValueConfigHelper(c.ProducerDelay, number)
 }
 
+func (c *BorConfig) IsSprintStart(number uint64) bool {
+	return number%c.CalculateSprintLength(number) == 0
+}
+
+func (c *BorConfig) IsSprintEnd(number uint64) bool {
+	return c.IsSprintStart(number + 1)
+}
+
 func (c *BorConfig) CalculateSprintLength(number uint64) uint64 {
 	if c.sprints == nil {
 		c.sprints = asSprints(c.Sprint)
