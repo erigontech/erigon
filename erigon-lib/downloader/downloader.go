@@ -2873,7 +2873,7 @@ func (d *Downloader) logProgress() {
 	prefix := d.logPrefix
 
 	if d.logPrefix == "" {
-		prefix = "[snapshots]"
+		prefix = "snapshots"
 	}
 
 	if d.stats.Completed {
