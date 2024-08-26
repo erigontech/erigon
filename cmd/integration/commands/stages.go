@@ -873,7 +873,8 @@ func stageBodies(db kv.RwDB, ctx context.Context, logger log.Logger) error {
 }
 
 func stagePolygonSync(db kv.RwDB, ctx context.Context, logger log.Logger) error {
-	_, _, sync, _, _ := newSync(ctx, db, nil /* miningConfig */, logger)
+	engine, _, sync, _, _ := newSync(ctx, db, nil /* miningConfig */, logger)
+	heimdallClient := engine.(*bor.Bor).HeimdallClient
 	sn, borSn, agg, _ := allSnapshots(ctx, db, logger)
 	defer sn.Close()
 	defer borSn.Close()
@@ -891,7 +892,7 @@ func stagePolygonSync(db kv.RwDB, ctx context.Context, logger log.Logger) error 
 		}
 
 		s := stage(sync, tx, nil, stages.Senders)
-		cfg := stagedsync.NewPolygonSyncStageCfg(logger, nil, nil, nil, nil, 0, nil, br, nil, 0) // we only need blockReader and blockWriter (blockWriter is constructed in NewPolygonSyncStageCfg)
+		cfg := stagedsync.NewPolygonSyncStageCfg(logger, chainConfig, nil, heimdallClient, nil, 0, nil, br, nil, 0) // we only need blockReader and blockWriter (blockWriter is constructed in NewPolygonSyncStageCfg)
 		if unwind > 0 {
 			u := sync.NewUnwindState(stages.Senders, s.BlockNumber-unwind, s.BlockNumber, true, false)
 			if err := stagedsync.UnwindPolygonSyncStage(ctx, tx, u, cfg); err != nil {
