@@ -87,9 +87,11 @@ func SpawnSequencingStage(
 	// we consider the data stream as verified by the executor so treat it as "safe" and unwind blocks beyond there
 	// if we identify any.  During normal operation this function will simply check and move on without performing
 	// any action.
-	isUnwinding, err := handleBatchEndChecks(batchContext, batchState, executionAt, u)
-	if err != nil || isUnwinding {
-		return err
+	if !batchState.isAnyRecovery() {
+		isUnwinding, err := handleBatchEndChecks(batchContext, batchState, executionAt, u)
+		if err != nil || isUnwinding {
+			return err
+		}
 	}
 
 	tryHaltSequencer(batchContext, batchState.batchNumber)
@@ -225,12 +227,11 @@ func SpawnSequencingStage(
 					if err != nil {
 						return err
 					}
-				}
-
-				if len(batchState.blockState.transactionsForInclusion) == 0 {
-					time.Sleep(250 * time.Millisecond)
-				} else {
-					log.Trace(fmt.Sprintf("[%s] Yielded transactions from the pool", logPrefix), "txCount", len(batchState.blockState.transactionsForInclusion))
+					if len(batchState.blockState.transactionsForInclusion) == 0 {
+						time.Sleep(250 * time.Millisecond)
+					} else {
+						log.Trace(fmt.Sprintf("[%s] Yielded transactions from the pool", logPrefix), "txCount", len(batchState.blockState.transactionsForInclusion))
+					}
 				}
 
 				for i, transaction := range batchState.blockState.transactionsForInclusion {
@@ -339,21 +340,26 @@ func SpawnSequencingStage(
 		batchState.onBuiltBlock(blockNumber)
 
 		// commit block data here so it is accessible in other threads
-		if errCommitAndStart := sdb.CommitAndStart(); errCommitAndStart != nil {
-			return errCommitAndStart
+		if !batchState.isL1Recovery() {
+			if errCommitAndStart := sdb.CommitAndStart(); errCommitAndStart != nil {
+				return errCommitAndStart
+			}
+			defer sdb.tx.Rollback()
 		}
-		defer sdb.tx.Rollback()
 
 		cfg.legacyVerifier.StartAsyncVerification(batchState.forkId, batchState.batchNumber, block.Root(), batchCounters.CombineCollectorsNoChanges().UsedAsMap(), batchState.builtBlocks, batchState.hasExecutorForThisBatch, batchContext.cfg.zk.SequencerBatchVerificationTimeout)
 
 		// check for new responses from the verifier
 		needsUnwind, err := updateStreamAndCheckRollback(batchContext, batchState, streamWriter, u)
 
-		// lets commit everything after updateStreamAndCheckRollback no matter of its result
-		if errCommitAndStart := sdb.CommitAndStart(); errCommitAndStart != nil {
-			return errCommitAndStart
+		// lets commit everything after updateStreamAndCheckRollback no matter of its result unless
+		// we're in L1 recovery where losing some blocks on restart doesn't matter
+		if !batchState.isL1Recovery() {
+			if errCommitAndStart := sdb.CommitAndStart(); errCommitAndStart != nil {
+				return errCommitAndStart
+			}
+			defer sdb.tx.Rollback()
 		}
-		defer sdb.tx.Rollback()
 
 		// check the return values of updateStreamAndCheckRollback
 		if err != nil || needsUnwind {
