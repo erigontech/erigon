@@ -80,7 +80,7 @@ var RecompressCommitmentFiles = Migration{
 			}
 
 			to := filepath.Join(dirs2.SnapDomain, fromFileName)
-			if err := recompressDomain(ctx, dirs2, from, to, logger); err != nil {
+			if err := recompressDomain(ctx, dirs, from, to, logger); err != nil {
 				return err
 			}
 			_ = os.Remove(strings.Replace(to, ".kv", ".bt", -1))
