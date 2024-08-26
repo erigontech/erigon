@@ -242,14 +242,15 @@ func New(
 		return nil, err
 	}
 
+	defaultLimits := rcmgr.DefaultLimits.AutoScale()
 	newLimit := rcmgr.PartialLimitConfig{
 		System: rcmgr.ResourceLimits{
 			// Default:  64 * 16, now it's 64 * 4
-			StreamsOutbound: rcmgr.LimitVal(rcmgr.DefaultLimits.SystemBaseLimit.StreamsOutbound/4),
+			StreamsOutbound: rcmgr.LimitVal(defaultLimits.ToPartialLimitConfig().System.StreamsOutbound/4),
 			// Default: 128 * 16, now it's 128 * 4
-			StreamsInbound: rcmgr.LimitVal(rcmgr.DefaultLimits.SystemBaseLimit.StreamsOutbound/4),
+			StreamsInbound: rcmgr.LimitVal(defaultLimits.ToPartialLimitConfig().System.StreamsOutbound/4),
 		},
-	}.Build(rcmgr.DefaultLimits.AutoScale())
+	}.Build(defaultLimits)
 
 	rmgr, err := rcmgr.NewResourceManager(rcmgr.NewFixedLimiter(newLimit), rcmgr.WithTraceReporter(str))
 	if err != nil {
