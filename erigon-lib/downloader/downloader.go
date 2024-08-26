@@ -1384,7 +1384,7 @@ func (d *Downloader) mainLoop(silent bool) error {
 	defer statEvery.Stop()
 
 	var m runtime.MemStats
-	prevStats := d.Stats()
+
 	for {
 		select {
 		case <-d.ctx.Done():
@@ -1393,10 +1393,9 @@ func (d *Downloader) mainLoop(silent bool) error {
 			d.ReCalcStats(statInterval)
 
 		case <-logEvery.C:
-			if !prevStats.Completed {
+			if !d.stats.Completed {
 				d.logProgress()
 			}
-			prevStats = d.Stats()
 
 			if silent {
 				continue
@@ -2384,7 +2383,6 @@ func (d *Downloader) logProgress() {
 			"alloc", common.ByteCount(m.Alloc),
 			"sys", common.ByteCount(m.Sys))
 	}
-
 }
 
 type filterWriter struct {
