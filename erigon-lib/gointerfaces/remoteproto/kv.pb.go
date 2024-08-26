@@ -1665,7 +1665,7 @@ func (x *Pairs) GetNextPageToken() string {
 	return ""
 }
 
-type PairsPagination struct {
+type ParisPagination struct {
 	state         protoimpl.MessageState
 	sizeCache     protoimpl.SizeCache
 	unknownFields protoimpl.UnknownFields
@@ -1674,8 +1674,8 @@ type PairsPagination struct {
 	Limit   int64  `protobuf:"zigzag64,2,opt,name=limit,proto3" json:"limit,omitempty"`
 }
 
-func (x *PairsPagination) Reset() {
-	*x = PairsPagination{}
+func (x *ParisPagination) Reset() {
+	*x = ParisPagination{}
 	if protoimpl.UnsafeEnabled {
 		mi := &file_remote_kv_proto_msgTypes[19]
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
@@ -1683,13 +1683,13 @@ func (x *PairsPagination) Reset() {
 	}
 }
 
-func (x *PairsPagination) String() string {
+func (x *ParisPagination) String() string {
 	return protoimpl.X.MessageStringOf(x)
 }
 
-func (*PairsPagination) ProtoMessage() {}
+func (*ParisPagination) ProtoMessage() {}
 
-func (x *PairsPagination) ProtoReflect() protoreflect.Message {
+func (x *ParisPagination) ProtoReflect() protoreflect.Message {
 	mi := &file_remote_kv_proto_msgTypes[19]
 	if protoimpl.UnsafeEnabled && x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
@@ -1701,19 +1701,19 @@ func (x *PairsPagination) ProtoReflect() protoreflect.Message {
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use PairsPagination.ProtoReflect.Descriptor instead.
-func (*PairsPagination) Descriptor() ([]byte, []int) {
+// Deprecated: Use ParisPagination.ProtoReflect.Descriptor instead.
+func (*ParisPagination) Descriptor() ([]byte, []int) {
 	return file_remote_kv_proto_rawDescGZIP(), []int{19}
 }
 
-func (x *PairsPagination) GetNextKey() []byte {
+func (x *ParisPagination) GetNextKey() []byte {
 	if x != nil {
 		return x.NextKey
 	}
 	return nil
 }
 
-func (x *PairsPagination) GetLimit() int64 {
+func (x *ParisPagination) GetLimit() int64 {
 	if x != nil {
 		return x.Limit
 	}
@@ -1954,7 +1954,7 @@ var file_remote_kv_proto_rawDesc = []byte{
 	0x18, 0x02, 0x20, 0x03, 0x28, 0x0c, 0x52, 0x06, 0x76, 0x61, 0x6c, 0x75, 0x65, 0x73, 0x12, 0x26,
 	0x0a, 0x0f, 0x6e, 0x65, 0x78, 0x74, 0x5f, 0x70, 0x61, 0x67, 0x65, 0x5f, 0x74, 0x6f, 0x6b, 0x65,
 	0x6e, 0x18, 0x03, 0x20, 0x01, 0x28, 0x09, 0x52, 0x0d, 0x6e, 0x65, 0x78, 0x74, 0x50, 0x61, 0x67,
-	0x65, 0x54, 0x6f, 0x6b, 0x65, 0x6e, 0x22, 0x42, 0x0a, 0x0f, 0x50, 0x61, 0x69, 0x72, 0x73, 0x50,
+	0x65, 0x54, 0x6f, 0x6b, 0x65, 0x6e, 0x22, 0x42, 0x0a, 0x0f, 0x50, 0x61, 0x72, 0x69, 0x73, 0x50,
 	0x61, 0x67, 0x69, 0x6e, 0x61, 0x74, 0x69, 0x6f, 0x6e, 0x12, 0x19, 0x0a, 0x08, 0x6e, 0x65, 0x78,
 	0x74, 0x5f, 0x6b, 0x65, 0x79, 0x18, 0x01, 0x20, 0x01, 0x28, 0x0c, 0x52, 0x07, 0x6e, 0x65, 0x78,
 	0x74, 0x4b, 0x65, 0x79, 0x12, 0x14, 0x0a, 0x05, 0x6c, 0x69, 0x6d, 0x69, 0x74, 0x18, 0x02, 0x20,
@@ -2064,7 +2064,7 @@ var file_remote_kv_proto_goTypes = []any{
 	(*HistoryRangeReq)(nil),         // 19: remote.HistoryRangeReq
 	(*DomainRangeReq)(nil),          // 20: remote.DomainRangeReq
 	(*Pairs)(nil),                   // 21: remote.Pairs
-	(*PairsPagination)(nil),         // 22: remote.PairsPagination
+	(*ParisPagination)(nil),         // 22: remote.ParisPagination
 	(*IndexPagination)(nil),         // 23: remote.IndexPagination
 	(*typesproto.H256)(nil),         // 24: types.H256
 	(*typesproto.H160)(nil),         // 25: types.H160
@@ -2343,7 +2343,7 @@ func file_remote_kv_proto_init() {
 			}
 		}
 		file_remote_kv_proto_msgTypes[19].Exporter = func(v any, i int) any {
-			switch v := v.(*PairsPagination); i {
+			switch v := v.(*ParisPagination); i {
 			case 0:
 				return &v.state
 			case 1:
