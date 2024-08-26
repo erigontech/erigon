@@ -271,10 +271,9 @@ func (st *StateTransition) preCheck(gasBailout bool) error {
 			// libcommon.Hash{} means that the sender is not in the state.
 			// Historically there were transactions with 0 gas price and non-existing sender,
 			// so we have to allow that.
-			code := st.state.GetCode(st.msg.From())
 
 			// eip-7702 allows tx origination from accounts having delegated designation code.
-			if _, ok := types.ParseDelegation(code); !ok {
+			if _, ok := st.state.GetDelegatedDesignation(st.msg.From()); !ok {
 				return fmt.Errorf("%w: address %v, codehash: %s", ErrSenderNoEOA,
 					st.msg.From().Hex(), codeHash)
 			}
@@ -388,8 +387,7 @@ func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (*evmtype
 			// 4. authority code should be empty or already delegated
 			if codeHash := st.state.GetCodeHash(authority); codeHash != emptyCodeHash && codeHash != (libcommon.Hash{}) {
 				// check for delegation
-				code := st.state.GetCode(authority)
-				if _, ok := types.ParseDelegation(code); ok {
+				if _, ok := st.state.GetDelegatedDesignation(authority); ok {
 					// noop: has delegated designation
 				} else {
 					log.Debug("authority code is not empty or not delegated, skipping", "auth index", i)

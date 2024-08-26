@@ -28,7 +28,6 @@ import (
 	"github.com/erigontech/erigon-lib/common/math"
 
 	"github.com/erigontech/erigon/core/tracing"
-	"github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/core/vm/stack"
 	"github.com/erigontech/erigon/params"
 )
@@ -268,7 +267,7 @@ func makeCallVariantGasCallEIP7702(oldCalculator gasFunc) gasFunc {
 		}
 
 		// Check if code is a delegation and if so, charge for resolution.
-		if dd, ok := types.ParseDelegation(evm.intraBlockState.GetCode(addr)); ok {
+		if dd, ok := evm.intraBlockState.GetDelegatedDesignation(addr); ok {
 			var ddCost uint64
 			if evm.intraBlockState.AddAddressToAccessList(dd) {
 				ddCost = params.ColdAccountAccessCostEIP2929
@@ -314,7 +313,7 @@ func gasEip7702CodeCheck(evm *EVM, contract *Contract, stack *stack.Stack, mem *
 		cost = params.ColdAccountAccessCostEIP2929 - params.WarmStorageReadCostEIP2929
 	}
 
-	if dd, ok := types.ParseDelegation(evm.intraBlockState.GetCode(addr)); ok {
+	if dd, ok := evm.intraBlockState.GetDelegatedDesignation(addr); ok {
 		if evm.intraBlockState.AddAddressToAccessList(dd) {
 			cost += params.ColdAccountAccessCostEIP2929
 		} else {
@@ -341,8 +340,8 @@ func gasExtCodeCopyEIP7702(evm *EVM, contract *Contract, stack *stack.Stack, mem
 		}
 	}
 
-	// Check if code is a delegation and if so, charge for resolution
-	if dd, ok := types.ParseDelegation(evm.intraBlockState.GetCode(addr)); ok {
+	// Check if addr has a delegation and if so, charge for resolution
+	if dd, ok := evm.intraBlockState.GetDelegatedDesignation(addr); ok {
 		var overflow bool
 		if evm.intraBlockState.AddAddressToAccessList(dd) {
 			if gas, overflow = math.SafeAdd(gas, params.ColdAccountAccessCostEIP2929); overflow {

@@ -48,6 +48,8 @@ type revision struct {
 // SystemAddress - sender address for internal state updates.
 var SystemAddress = libcommon.HexToAddress("0xfffffffffffffffffffffffffffffffffffffffe")
 
+var EmptyAddress = libcommon.Address{}
+
 // BalanceIncrease represents the increase of balance of an account that did not require
 // reading the account first
 type BalanceIncrease struct {
@@ -284,9 +286,8 @@ func (sdb *IntraBlockState) GetCodeHash(addr libcommon.Address) libcommon.Hash {
 
 func (sdb *IntraBlockState) ResolveCodeHash(addr libcommon.Address) libcommon.Hash {
 	// eip-7702
-	code := sdb.GetCode(addr)
-	if delegation, ok := types.ParseDelegation(code); ok {
-		return sdb.GetCodeHash(delegation)
+	if dd, ok := sdb.GetDelegatedDesignation(addr); ok {
+		return sdb.GetCodeHash(dd)
 	}
 
 	return sdb.GetCodeHash(addr)
@@ -294,12 +295,20 @@ func (sdb *IntraBlockState) ResolveCodeHash(addr libcommon.Address) libcommon.Ha
 
 func (sdb *IntraBlockState) ResolveCode(addr libcommon.Address) []byte {
 	// eip-7702
-	code := sdb.GetCode(addr)
-	if delegation, ok := types.ParseDelegation(code); ok {
-		return sdb.GetCode(delegation)
+	if dd, ok := sdb.GetDelegatedDesignation(addr); ok {
+		return sdb.GetCode(dd)
 	}
 
-	return code
+	return sdb.GetCode(addr)
+}
+
+func (sdb *IntraBlockState) GetDelegatedDesignation(addr libcommon.Address) (libcommon.Address, bool) {
+	// eip-7702
+	code := sdb.GetCode(addr)
+	if delegation, ok := types.ParseDelegation(code); ok {
+		return delegation, true
+	}
+	return EmptyAddress, false
 }
 
 // GetState retrieves a value from the given account's storage trie.
