@@ -28,7 +28,6 @@ func SetupHeadersAccess(metricsMux *http.ServeMux, diag *diaglib.DiagnosticClien
 	}
 
 	metricsMux.HandleFunc("/headers", func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Access-Control-Allow-Origin", "*")
 		w.Header().Set("Content-Type", "application/json")
 		writeHeaders(w, diag)
 	})

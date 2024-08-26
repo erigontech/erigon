@@ -114,6 +114,18 @@ func SetupMiddleMuxHandler(mux *http.ServeMux, middleMux *http.ServeMux, path st
 	middleMux.HandleFunc(path+"/", func(w http.ResponseWriter, r *http.Request) {
 		r.URL.Path = strings.TrimPrefix(r.URL.Path, path)
 		r.URL.RawPath = strings.TrimPrefix(r.URL.RawPath, path)
+
+		// Set CORS headers
+		w.Header().Set("Access-Control-Allow-Origin", "*")
+		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
+		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization")
+
+		// Handle preflight requests
+		if r.Method == "OPTIONS" {
+			w.WriteHeader(http.StatusOK)
+			return
+		}
+
 		mux.ServeHTTP(w, r)
 	})
 }

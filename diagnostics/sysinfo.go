@@ -32,31 +32,26 @@ func SetupSysInfoAccess(metricsMux *http.ServeMux, diag *diaglib.DiagnosticClien
 	}
 
 	metricsMux.HandleFunc("/hardware-info", func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Access-Control-Allow-Origin", "*")
 		w.Header().Set("Content-Type", "application/json")
 		writeHardwareInfo(w, diag)
 	})
 
 	metricsMux.HandleFunc("/cpu-usage", func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Access-Control-Allow-Origin", "*")
 		w.Header().Set("Content-Type", "application/json")
 		writeCPUUsage(w)
 	})
 
 	metricsMux.HandleFunc("/processes-info", func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Access-Control-Allow-Origin", "*")
 		w.Header().Set("Content-Type", "application/json")
 		writeProcessesInfo(w)
 	})
 
 	metricsMux.HandleFunc("/memory-info", func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Access-Control-Allow-Origin", "*")
 		w.Header().Set("Content-Type", "application/json")
 		writeMemoryInfo(w)
 	})
 
 	metricsMux.HandleFunc("/heap-profile", func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Access-Control-Allow-Origin", "*")
 		w.Header().Set("Content-Type", "aplication/profile")
 		writeHeapProfile(w)
 	})
