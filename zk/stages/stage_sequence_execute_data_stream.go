@@ -5,12 +5,12 @@ import (
 	"fmt"
 
 	"github.com/ledgerwatch/erigon/core/rawdb"
+	"github.com/ledgerwatch/erigon/core/vm"
+	"github.com/ledgerwatch/erigon/eth/stagedsync"
+	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 	"github.com/ledgerwatch/erigon/zk/datastream/server"
 	verifier "github.com/ledgerwatch/erigon/zk/legacy_executor_verifier"
 	"github.com/ledgerwatch/log/v3"
-	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
-	"github.com/ledgerwatch/erigon/eth/stagedsync"
-	"github.com/ledgerwatch/erigon/core/vm"
 )
 
 type SequencerBatchStreamWriter struct {
@@ -106,6 +106,9 @@ func handleBatchEndChecks(batchContext *BatchContext, batchState *BatchState, th
 	latestCounters := vm.NewCountersFromUsedMap(rawCounters)
 
 	endBatchCounters, err := prepareBatchCounters(batchContext, batchState, latestCounters)
+	if err != nil {
+		return false, err
+	}
 
 	if err = runBatchLastSteps(batchContext, lastBatch, thisBlock, endBatchCounters); err != nil {
 		return false, err

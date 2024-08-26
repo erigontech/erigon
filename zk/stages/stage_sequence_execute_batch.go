@@ -145,11 +145,16 @@ func runBatchLastSteps(
 		return err
 	}
 
-	lastBlock, err := batchContext.sdb.hermezDb.GetHighestBlockInBatch(thisBatch)
+	// get the last block number written to batch
+	// we should match it's state root in batch end entry
+	// if we get the last block in DB errors may occur since we have DB unwinds AFTER we commit batch end to datastream
+	// the last block written to the datastream before batch end should be the correct one once we are here
+	// if it is not, we have a bigger problem
+	lastBlockNumber, err := batchContext.cfg.datastreamServer.GetHighestBlockNumber()
 	if err != nil {
 		return err
 	}
-	block, err := rawdb.ReadBlockByNumber(batchContext.sdb.tx, lastBlock)
+	block, err := rawdb.ReadBlockByNumber(batchContext.sdb.tx, lastBlockNumber)
 	if err != nil {
 		return err
 	}
@@ -159,8 +164,7 @@ func runBatchLastSteps(
 	}
 
 	// the unwind of this value is handed by UnwindExecutionStageDbWrites
-	_, err = rawdb.IncrementStateVersionByBlockNumberIfNeeded(batchContext.sdb.tx, lastBlock)
-	if err != nil {
+	if _, err = rawdb.IncrementStateVersionByBlockNumberIfNeeded(batchContext.sdb.tx, lastBlockNumber); err != nil {
 		return fmt.Errorf("writing plain state version: %w", err)
 	}
 

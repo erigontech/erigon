@@ -218,6 +218,7 @@ func SpawnStageBatches(
 	}
 
 	lastHash := emptyHash
+	lastBlockRoot := emptyHash
 	atLeastOneBlockWritten := false
 	startTime := time.Now()
 
@@ -252,6 +253,9 @@ LOOP:
 					}
 				}
 			case *types.BatchEnd:
+				if entry.StateRoot != lastBlockRoot {
+					log.Warn(fmt.Sprintf("[%s] batch end state root mismatches last block's: %x, expected: %x", logPrefix, entry.StateRoot, lastBlockRoot))
+				}
 				if err := writeBatchEnd(hermezDb, entry); err != nil {
 					return fmt.Errorf("write batch end error: %v", err)
 				}
@@ -360,6 +364,7 @@ LOOP:
 				}
 
 				lastHash = entry.L2Blockhash
+				lastBlockRoot = entry.StateRoot
 
 				atLeastOneBlockWritten = true
 				lastBlockHeight = entry.L2BlockNumber

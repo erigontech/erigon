@@ -186,10 +186,10 @@ func (c *StreamClient) ExecutePerFile(bookmark *types.BookmarkProto, function fu
 		}
 		file, err := c.readFileEntry()
 		if err != nil {
-			return fmt.Errorf("error reading file entry: %v", err)
+			return fmt.Errorf("reading file entry: %v", err)
 		}
 		if err := function(file); err != nil {
-			return fmt.Errorf("error executing function: %v", err)
+			return fmt.Errorf("executing function: %v", err)
 
 		}
 		count++
