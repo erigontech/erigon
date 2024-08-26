@@ -23,6 +23,8 @@ import (
 	"math/big"
 	"time"
 
+	"github.com/erigontech/erigon-lib/wrap"
+
 	mapset "github.com/deckarep/golang-set/v2"
 
 	"github.com/erigontech/erigon-lib/log/v3"
@@ -53,29 +55,18 @@ type MiningBlock struct {
 }
 
 type MiningState struct {
-	MiningConfig      *params.MiningConfig
-	PendingResultCh   chan *types.Block
-	MiningResultCh    chan *types.Block
-	MiningResultPOSCh chan *types.BlockWithReceipts
-	MiningBlock       *MiningBlock
+	MiningConfig    *params.MiningConfig
+	PendingResultCh chan *types.Block
+	MiningResultCh  chan *types.BlockWithReceipts
+	MiningBlock     *MiningBlock
 }
 
 func NewMiningState(cfg *params.MiningConfig) MiningState {
 	return MiningState{
 		MiningConfig:    cfg,
 		PendingResultCh: make(chan *types.Block, 1),
-		MiningResultCh:  make(chan *types.Block, 1),
+		MiningResultCh:  make(chan *types.BlockWithReceipts, 1),
 		MiningBlock:     &MiningBlock{},
-	}
-}
-
-func NewProposingState(cfg *params.MiningConfig) MiningState {
-	return MiningState{
-		MiningConfig:      cfg,
-		PendingResultCh:   make(chan *types.Block, 1),
-		MiningResultCh:    make(chan *types.Block, 1),
-		MiningResultPOSCh: make(chan *types.BlockWithReceipts, 1),
-		MiningBlock:       &MiningBlock{},
 	}
 }
 
@@ -108,7 +99,7 @@ var maxTransactions uint16 = 1000
 // SpawnMiningCreateBlockStage
 // TODO:
 // - resubmitAdjustCh - variable is not implemented
-func SpawnMiningCreateBlockStage(s *StageState, tx kv.RwTx, cfg MiningCreateBlockCfg, quit <-chan struct{}, logger log.Logger) (err error) {
+func SpawnMiningCreateBlockStage(s *StageState, txc wrap.TxContainer, cfg MiningCreateBlockCfg, quit <-chan struct{}, logger log.Logger) (err error) {
 	current := cfg.miner.MiningBlock
 	txPoolLocals := []libcommon.Address{} //txPoolV2 has no concept of local addresses (yet?)
 	coinbase := cfg.miner.MiningConfig.Etherbase
@@ -119,11 +110,11 @@ func SpawnMiningCreateBlockStage(s *StageState, tx kv.RwTx, cfg MiningCreateBloc
 	)
 
 	logPrefix := s.LogPrefix()
-	executionAt, err := s.ExecutionAt(tx)
+	executionAt, err := s.ExecutionAt(txc.Tx)
 	if err != nil {
 		return fmt.Errorf("getting last executed block: %w", err)
 	}
-	parent := rawdb.ReadHeaderByNumber(tx, executionAt)
+	parent := rawdb.ReadHeaderByNumber(txc.Tx, executionAt)
 	if parent == nil { // todo: how to return error and don't stop Erigon?
 		return fmt.Errorf("empty block %d", executionAt)
 	}
@@ -142,18 +133,18 @@ func SpawnMiningCreateBlockStage(s *StageState, tx kv.RwTx, cfg MiningCreateBloc
 
 	blockNum := executionAt + 1
 
-	localUncles, remoteUncles, err := readNonCanonicalHeaders(tx, blockNum, cfg.engine, coinbase, txPoolLocals)
+	localUncles, remoteUncles, err := readNonCanonicalHeaders(txc.Tx, blockNum, cfg.engine, coinbase, txPoolLocals)
 	if err != nil {
 		return err
 	}
-	chain := ChainReader{Cfg: cfg.chainConfig, Db: tx, BlockReader: cfg.blockReader, Logger: logger}
+	chain := ChainReader{Cfg: cfg.chainConfig, Db: txc.Tx, BlockReader: cfg.blockReader, Logger: logger}
 	var GetBlocksFromHash = func(hash libcommon.Hash, n int) (blocks []*types.Block) {
-		number := rawdb.ReadHeaderNumber(tx, hash)
+		number, _ := cfg.blockReader.HeaderNumber(context.Background(), txc.Tx, hash)
 		if number == nil {
 			return nil
 		}
 		for i := 0; i < n; i++ {
-			block, _, _ := cfg.blockReader.BlockWithSenders(context.Background(), tx, hash, *number)
+			block, _, _ := cfg.blockReader.BlockWithSenders(context.Background(), txc.Tx, hash, *number)
 			if block == nil {
 				break
 			}
@@ -194,9 +185,7 @@ func SpawnMiningCreateBlockStage(s *StageState, tx kv.RwTx, cfg MiningCreateBloc
 	header.Extra = cfg.miner.MiningConfig.ExtraData
 
 	logger.Info(fmt.Sprintf("[%s] Start mine", logPrefix), "block", executionAt+1, "baseFee", header.BaseFee, "gasLimit", header.GasLimit)
-
-	stateReader := state.NewPlainStateReader(tx)
-	ibs := state.New(stateReader)
+	ibs := state.New(state.NewReaderV3(txc.Doms))
 
 	if err = cfg.engine.Prepare(chain, header, ibs); err != nil {
 		logger.Error("Failed to prepare header for mining",

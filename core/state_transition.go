@@ -229,6 +229,7 @@ func (st *StateTransition) buyGas(gasBailout bool) error {
 	}
 	st.gasRemaining += st.msg.Gas()
 	st.initialGas = st.msg.Gas()
+	st.evm.BlobFee = blobGasVal
 
 	if subBalance {
 		st.state.SubBalance(st.msg.From(), gasVal, tracing.BalanceDecreaseGasBuy)
@@ -315,7 +316,6 @@ func (st *StateTransition) preCheck(gasBailout bool) error {
 // nil evm execution result.
 func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (*evmtypes.ExecutionResult, error) {
 	coinbase := st.evm.Context.Coinbase
-
 	senderInitBalance := st.state.GetBalance(st.msg.From()).Clone()
 	coinbaseInitBalance := st.state.GetBalance(coinbase).Clone()
 

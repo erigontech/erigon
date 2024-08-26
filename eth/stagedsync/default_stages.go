@@ -65,7 +65,7 @@ func DefaultStages(ctx context.Context,
 				return SpawnStageHeaders(s, u, ctx, txc.Tx, headers, test, logger)
 			},
 			Unwind: func(u *UnwindState, s *StageState, txc wrap.TxContainer, logger log.Logger) error {
-				return HeadersUnwind(u, s, txc.Tx, headers, test)
+				return HeadersUnwind(ctx, u, s, txc.Tx, headers, test)
 			},
 			Prune: func(p *PruneState, tx kv.RwTx, logger log.Logger) error {
 				return nil
@@ -303,7 +303,7 @@ func UploaderPipelineStages(ctx context.Context, snapshots SnapshotsCfg, headers
 				return SpawnStageHeaders(s, u, ctx, txc.Tx, headers, test, logger)
 			},
 			Unwind: func(u *UnwindState, s *StageState, txc wrap.TxContainer, logger log.Logger) error {
-				return HeadersUnwind(u, s, txc.Tx, headers, test)
+				return HeadersUnwind(ctx, u, s, txc.Tx, headers, test)
 			},
 			Prune: func(p *PruneState, tx kv.RwTx, logger log.Logger) error {
 				return nil
@@ -400,7 +400,7 @@ func StateStages(ctx context.Context, headers HeadersCfg, bodies BodiesCfg, bloc
 				return nil
 			},
 			Unwind: func(u *UnwindState, s *StageState, txc wrap.TxContainer, logger log.Logger) error {
-				return HeadersUnwind(u, s, txc.Tx, headers, false)
+				return HeadersUnwind(ctx, u, s, txc.Tx, headers, false)
 			},
 		},
 		{

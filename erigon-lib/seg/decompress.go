@@ -133,6 +133,9 @@ type Decompressor struct {
 	wordsCount      uint64
 	emptyWordsCount uint64
 
+	serializedDictSize uint64
+	dictWords          int
+
 	filePath, FileName1 string
 
 	readAheadRefcnt atomic.Int32 // ref-counter: allow enable/disable read-ahead from goroutines. only when refcnt=0 - disable read-ahead once
@@ -217,13 +220,14 @@ func NewDecompressor(compressedFilePath string) (*Decompressor, error) {
 	}
 	// read patterns from file
 	d.data = d.mmapHandle1[:d.size]
-	defer d.EnableReadAhead().DisableReadAhead() //speedup opening on slow drives
+	defer d.EnableMadvNormal().DisableReadAhead() //speedup opening on slow drives
 
 	d.wordsCount = binary.BigEndian.Uint64(d.data[:8])
 	d.emptyWordsCount = binary.BigEndian.Uint64(d.data[8:16])
 
 	pos := uint64(24)
 	dictSize := binary.BigEndian.Uint64(d.data[16:pos])
+	d.serializedDictSize = dictSize
 
 	if pos+dictSize > uint64(d.size) {
 		return nil, &ErrCompressedFileCorrupted{
@@ -258,6 +262,7 @@ func NewDecompressor(compressedFilePath string) (*Decompressor, error) {
 		//fmt.Printf("depth = %d, pattern = [%x]\n", depth, data[dictPos:dictPos+l])
 		dictPos += l
 	}
+	d.dictWords = len(patterns)
 
 	if dictSize > 0 {
 		var bitLen int
@@ -435,6 +440,8 @@ func buildPosTable(depths []uint64, poss []uint64, table *posTable, code uint16,
 func (d *Decompressor) DataHandle() unsafe.Pointer {
 	return unsafe.Pointer(&d.data[0])
 }
+func (d *Decompressor) SerializedDictSize() uint64 { return d.serializedDictSize }
+func (d *Decompressor) DictWords() int             { return d.dictWords }
 
 func (d *Decompressor) Size() int64 {
 	return d.size
@@ -524,6 +531,14 @@ func (d *Decompressor) EnableReadAhead() *Decompressor {
 	}
 	d.readAheadRefcnt.Add(1)
 	_ = mmap.MadviseSequential(d.mmapHandle1)
+	return d
+}
+func (d *Decompressor) EnableMadvNormal() *Decompressor {
+	if d == nil || d.mmapHandle1 == nil {
+		return d
+	}
+	d.readAheadRefcnt.Add(1)
+	_ = mmap.MadviseNormal(d.mmapHandle1)
 	return d
 }
 func (d *Decompressor) EnableMadvWillNeed() *Decompressor {

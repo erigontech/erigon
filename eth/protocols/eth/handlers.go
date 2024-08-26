@@ -146,7 +146,7 @@ func AnswerGetBlockBodiesQuery(db kv.Tx, query GetBlockBodiesPacket, blockReader
 			lookups >= 2*MaxBodiesServe {
 			break
 		}
-		number := rawdb.ReadHeaderNumber(db, hash)
+		number, _ := blockReader.HeaderNumber(context.Background(), db, hash)
 		if number == nil {
 			continue
 		}
@@ -176,7 +176,7 @@ func AnswerGetReceiptsQuery(ctx context.Context, cfg *chain.Config, receiptsGett
 			lookups >= 2*maxReceiptsServe {
 			break
 		}
-		number := rawdb.ReadHeaderNumber(db, hash)
+		number, _ := br.HeaderNumber(context.Background(), db, hash)
 		if number == nil {
 			return nil, nil
 		}

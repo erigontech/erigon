@@ -121,9 +121,8 @@ type AggStats struct {
 	Completed bool
 	Progress  float32
 
-	BytesCompleted, BytesTotal     uint64
-	CompletionRate                 uint64
-	DroppedCompleted, DroppedTotal uint64
+	BytesCompleted, BytesTotal uint64
+	CompletionRate             uint64
 
 	BytesDownload, BytesUpload uint64
 	UploadRate, DownloadRate   uint64
@@ -1982,16 +1981,14 @@ func (d *Downloader) ReCalcStats(interval time.Duration) {
 	connStats := torrentClient.ConnStats()
 
 	stats.Completed = true
-	stats.BytesDownload = uint64(connStats.BytesReadUsefulIntendedData.Int64())
 	stats.BytesUpload = uint64(connStats.BytesWrittenData.Int64())
 	stats.BytesHashed = uint64(connStats.BytesHashed.Int64())
 	stats.BytesFlushed = uint64(connStats.BytesFlushed.Int64())
-	stats.BytesCompleted = uint64(connStats.BytesCompleted.Int64()) - stats.DroppedCompleted
+	stats.BytesDownload = uint64(connStats.BytesReadData.Int64())
 
 	lastMetadataReady := stats.MetadataReady
 
-	stats.BytesTotal, stats.ConnectionsTotal, stats.MetadataReady =
-		atomic.LoadUint64(&stats.DroppedTotal), 0, 0
+	stats.BytesTotal, stats.ConnectionsTotal, stats.MetadataReady = 0, 0, 0
 
 	var zeroProgress []string
 	var noMetadata []string
@@ -2008,6 +2005,8 @@ func (d *Downloader) ReCalcStats(interval time.Duration) {
 	var dbInfo int
 	var tComplete int
 	var torrentInfo int
+
+	downloadedBytes := int64(0)
 
 	for _, t := range torrents {
 		select {
@@ -2028,7 +2027,6 @@ func (d *Downloader) ReCalcStats(interval time.Duration) {
 		weebseedPeersOfThisFile := t.WebseedPeerConns()
 
 		tLen := t.Length()
-
 		var bytesCompleted int64
 
 		if torrentComplete {
@@ -2038,6 +2036,7 @@ func (d *Downloader) ReCalcStats(interval time.Duration) {
 		} else {
 			bytesCompleted = t.BytesCompleted()
 		}
+
 		progress := float32(float64(100) * (float64(bytesCompleted) / float64(tLen)))
 
 		if info, ok := downloading[torrentName]; ok {
@@ -2047,7 +2046,7 @@ func (d *Downloader) ReCalcStats(interval time.Duration) {
 			}
 		}
 
-		stats.BytesCompleted += uint64(bytesCompleted)
+		downloadedBytes += bytesCompleted
 		stats.BytesTotal += uint64(tLen)
 
 		for _, peer := range peersOfThisFile {
@@ -2100,6 +2099,8 @@ func (d *Downloader) ReCalcStats(interval time.Duration) {
 
 		stats.Completed = stats.Completed && torrentComplete
 	}
+
+	stats.BytesCompleted = uint64(downloadedBytes)
 
 	var webTransfers int32
 
@@ -2657,7 +2658,14 @@ func SeedableFiles(dirs datadir.Dirs, chainName string, all bool) ([]string, err
 	if err != nil {
 		return nil, err
 	}
-	files = append(append(append(files, l1...), l2...), l3...)
+	var l4 []string
+	if all {
+		l4, err = seedableStateFilesBySubDir(dirs.Snap, "accessor", all)
+		if err != nil {
+			return nil, err
+		}
+	}
+	files = append(append(append(append(files, l1...), l2...), l3...), l4...)
 	return files, nil
 }
 

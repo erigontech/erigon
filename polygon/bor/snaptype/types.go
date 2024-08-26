@@ -93,34 +93,28 @@ var (
 			MinSupported: 1,
 		},
 		snaptype.RangeExtractorFunc(
-			func(ctx context.Context, blockFrom, blockTo uint64, _ snaptype.FirstKeyGetter, db kv.RoDB, chainConfig *chain.Config, collect func([]byte) error, workers int, lvl log.Lvl, logger log.Logger) (uint64, error) {
+			func(ctx context.Context, blockFrom, blockTo uint64, firstEventId snaptype.FirstKeyGetter, db kv.RoDB, chainConfig *chain.Config, collect func([]byte) error, workers int, lvl log.Lvl, logger log.Logger) (uint64, error) {
 				logEvery := time.NewTicker(20 * time.Second)
 				defer logEvery.Stop()
 
 				from := hexutility.EncodeTs(blockFrom)
-				var first bool = true
-				var prevBlockNum uint64
-				var startEventId uint64
+				startEventId := firstEventId(ctx)
 				var lastEventId uint64
 
 				if err := kv.BigChunks(db, kv.BorEventNums, from, func(tx kv.Tx, blockNumBytes, eventIdBytes []byte) (bool, error) {
+					endEventId := binary.BigEndian.Uint64(eventIdBytes) + 1
 					blockNum := binary.BigEndian.Uint64(blockNumBytes)
-					if first {
-						startEventId = binary.BigEndian.Uint64(eventIdBytes)
-						first = false
-						prevBlockNum = blockNum
-					} else if blockNum != prevBlockNum {
-						endEventId := binary.BigEndian.Uint64(eventIdBytes)
-						blockHash, e := rawdb.ReadCanonicalHash(tx, prevBlockNum)
-						if e != nil {
-							return false, e
-						}
-						if e := extractEventRange(startEventId, endEventId, tx, prevBlockNum, blockHash, collect); e != nil {
-							return false, e
-						}
-						startEventId = endEventId
-						prevBlockNum = blockNum
+					blockHash, e := rawdb.ReadCanonicalHash(tx, blockNum)
+					if e != nil {
+						return false, e
 					}
+
+					logger.Info("extractingRange", "blockNum", blockNum, "start", startEventId, "end", endEventId)
+					if e := extractEventRange(startEventId, endEventId, tx, blockNum, blockHash, collect); e != nil {
+						return false, e
+					}
+					startEventId = endEventId
+
 					if blockNum >= blockTo {
 						return false, nil
 					}
@@ -141,52 +135,6 @@ var (
 					return true, nil
 				}); err != nil {
 					return 0, err
-				}
-
-				if startEventId > 0 {
-					// if we have reached the last entry in kv.BorEventNums we will have a start event
-					// but no end - so we assume that the last event is going to be the last recorded
-					// event in the db
-					if startEventId == lastEventId {
-						if err := db.View(ctx, func(tx kv.Tx) error {
-							cursor, err := tx.Cursor(kv.BorEvents)
-							if err != nil {
-								return err
-							}
-
-							defer cursor.Close()
-							k, _, err := cursor.Last()
-							if err != nil {
-								return err
-							}
-
-							if k != nil {
-								lastEventId = binary.BigEndian.Uint64(k)
-							}
-
-							return nil
-						}); err != nil {
-							return 0, err
-						}
-					}
-
-					fmt.Println("LKID", startEventId, lastEventId)
-
-					if lastEventId == 16 {
-						fmt.Println("LKID 16")
-					}
-
-					if lastEventId >= startEventId {
-						if err := db.View(ctx, func(tx kv.Tx) error {
-							blockHash, e := rawdb.ReadCanonicalHash(tx, prevBlockNum)
-							if e != nil {
-								return e
-							}
-							return extractEventRange(startEventId, lastEventId+1, tx, prevBlockNum, blockHash, collect)
-						}); err != nil {
-							return 0, err
-						}
-					}
 				}
 
 				return lastEventId, nil
@@ -582,6 +530,7 @@ func buildValueIndex(ctx context.Context, sn snaptype.FileInfo, salt uint32, d *
 	}
 }
 
+// extractEventRange moves [startEventID, endEventID) to snapshots
 func extractEventRange(startEventId, endEventId uint64, tx kv.Tx, blockNum uint64, blockHash common.Hash, collect func([]byte) error) error {
 	var blockNumBuf [8]byte
 	var eventIdBuf [8]byte

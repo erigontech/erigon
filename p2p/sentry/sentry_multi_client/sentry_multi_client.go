@@ -708,7 +708,15 @@ func (cs *MultiClient) getBlockBodies66(ctx context.Context, inreq *proto_sentry
 	return nil
 }
 
-func (cs *MultiClient) getReceipts66(ctx context.Context, inreq *proto_sentry.InboundMessage, sentryClient proto_sentry.SentryClient) error {
+var (
+	EnableP2PReceipts = dbg.EnvBool("P2P_RECEIPTS", false)
+)
+
+func (cs *MultiClient) getReceipts66(ctx context.Context, inreq *proto_sentry.InboundMessage, sentryClient direct.SentryClient) error {
+	if !EnableP2PReceipts {
+		return nil
+	}
+
 	err := cs.getReceiptsActiveGoroutineNumber.Acquire(ctx, 1)
 	if err != nil {
 		return err

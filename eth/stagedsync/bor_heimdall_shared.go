@@ -28,7 +28,6 @@ import (
 	"github.com/erigontech/erigon-lib/log/v3"
 
 	"github.com/erigontech/erigon-lib/kv"
-	"github.com/erigontech/erigon/accounts/abi"
 	"github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/polygon/bor"
 	"github.com/erigontech/erigon/polygon/bor/borcfg"
@@ -376,7 +375,6 @@ func fetchRequiredHeimdallStateSyncEventsIfNeeded(
 	blockReader services.FullBlockReader,
 	heimdallClient heimdall.HeimdallClient,
 	chainID string,
-	stateReceiverABI abi.ABI,
 	logPrefix string,
 	logger log.Logger,
 	lastStateSyncEventID uint64,
@@ -397,7 +395,6 @@ func fetchRequiredHeimdallStateSyncEventsIfNeeded(
 		blockReader,
 		heimdallClient,
 		chainID,
-		stateReceiverABI,
 		logPrefix,
 		logger,
 	)
@@ -412,7 +409,6 @@ func fetchAndWriteHeimdallStateSyncEvents(
 	blockReader services.FullBlockReader,
 	heimdallClient heimdall.HeimdallClient,
 	chainID string,
-	stateReceiverABI abi.ABI,
 	logPrefix string,
 	logger log.Logger) (uint64, int, time.Duration, error) {
 	fetchStart := time.Now()
@@ -426,7 +422,7 @@ func fetchAndWriteHeimdallStateSyncEvents(
 		return lastStateSyncEventID, 0, 0, nil
 	}
 
-	from, to, err := bor.CalculateEventWIndow(ctx, config, header, tx, blockReader)
+	from, to, err := bor.CalculateEventWindow(ctx, config, header, tx, blockReader)
 
 	if err != nil {
 		return lastStateSyncEventID, 0, time.Since(fetchStart), err
@@ -460,7 +456,6 @@ func fetchAndWriteHeimdallStateSyncEvents(
 	)
 
 	eventRecords, err := heimdallClient.FetchStateSyncEvents(ctx, fromId, fetchTo, fetchLimit)
-
 	if err != nil {
 		return lastStateSyncEventID, 0, time.Since(fetchStart), err
 	}
@@ -477,48 +472,67 @@ func fetchAndWriteHeimdallStateSyncEvents(
 		binary.BigEndian.PutUint64(val[:], lastStateSyncEventID+1)
 	}
 
-	wroteIndex := false
+	var initialRecordTime *time.Time
+	var lastEventRecord *heimdall.EventRecordWithTime
+
 	for i, eventRecord := range eventRecords {
 		if eventRecord.ID <= lastStateSyncEventID {
 			continue
 		}
 
-		if lastStateSyncEventID+1 != eventRecord.ID || eventRecord.ChainID != chainID ||
-			!(eventRecord.Time.After(from) && eventRecord.Time.Before(to)) {
-			return lastStateSyncEventID, i, time.Since(fetchStart), fmt.Errorf(
-				"invalid event record received %s, %s, %s, %s",
-				fmt.Sprintf("blockNum=%d", blockNum),
-				fmt.Sprintf("eventId=%d (exp %d)", eventRecord.ID, lastStateSyncEventID+1),
-				fmt.Sprintf("chainId=%s (exp %s)", eventRecord.ChainID, chainID),
-				fmt.Sprintf("time=%s (exp from %s, to %s)", eventRecord.Time, from, to),
-			)
+		// Note: this check is only valid for events with eventRecord.ID > lastStateSyncEventID
+		var afterCheck = func(limitTime time.Time, eventTime time.Time, initialTime *time.Time) bool {
+			if initialTime == nil {
+				return eventTime.After(from)
+			}
+
+			return initialTime.After(from)
 		}
 
-		data, err := eventRecord.Pack(stateReceiverABI)
+		// don't apply this for devnets we may have looser state event constraints
+		// (TODO these probably needs fixing)
+		if !(chainID == "1337") {
+			if lastStateSyncEventID+1 != eventRecord.ID || eventRecord.ChainID != chainID ||
+				!(afterCheck(from, eventRecord.Time, initialRecordTime) && eventRecord.Time.Before(to)) {
+				return lastStateSyncEventID, i, time.Since(fetchStart), fmt.Errorf(
+					"invalid event record received %s, %s, %s, %s",
+					fmt.Sprintf("blockNum=%d", blockNum),
+					fmt.Sprintf("eventId=%d (exp %d)", eventRecord.ID, lastStateSyncEventID+1),
+					fmt.Sprintf("chainId=%s (exp %s)", eventRecord.ChainID, chainID),
+					fmt.Sprintf("time=%s (exp from %s, to %s)", eventRecord.Time, from, to),
+				)
+			}
+		}
+
+		data, err := eventRecord.MarshallBytes()
 		if err != nil {
 			logger.Error(fmt.Sprintf("[%s] Unable to pack txn for commitState", logPrefix), "err", err)
 			return lastStateSyncEventID, i, time.Since(fetchStart), err
 		}
 
-		var eventIdBuf [8]byte
-		binary.BigEndian.PutUint64(eventIdBuf[:], eventRecord.ID)
-
-		if err = tx.Put(kv.BorEvents, eventIdBuf[:], data); err != nil {
+		eventIdBytes := eventRecord.MarshallIdBytes()
+		if err = tx.Put(kv.BorEvents, eventIdBytes, data); err != nil {
 			return lastStateSyncEventID, i, time.Since(fetchStart), err
 		}
 
-		if !wroteIndex {
-			var blockNumBuf [8]byte
-			binary.BigEndian.PutUint64(blockNumBuf[:], blockNum)
-			binary.BigEndian.PutUint64(eventIdBuf[:], eventRecord.ID)
-			if err = tx.Put(kv.BorEventNums, blockNumBuf[:], eventIdBuf[:]); err != nil {
-				return lastStateSyncEventID, i, time.Since(fetchStart), err
-			}
-
-			wroteIndex = true
+		if initialRecordTime == nil {
+			eventTime := eventRecord.Time
+			initialRecordTime = &eventTime
 		}
 
 		lastStateSyncEventID++
+		lastEventRecord = eventRecord
+	}
+
+	if lastEventRecord != nil {
+		logger.Info("putting state sync events", "blockNum", blockNum, "lastID", lastEventRecord.ID)
+
+		var blockNumBuf [8]byte
+		binary.BigEndian.PutUint64(blockNumBuf[:], blockNum)
+		eventIdBytes := lastEventRecord.MarshallIdBytes()
+		if err = tx.Put(kv.BorEventNums, blockNumBuf[:], eventIdBytes); err != nil {
+			return lastStateSyncEventID, len(eventRecords), time.Since(fetchStart), err
+		}
 	}
 
 	return lastStateSyncEventID, len(eventRecords), time.Since(fetchStart), nil

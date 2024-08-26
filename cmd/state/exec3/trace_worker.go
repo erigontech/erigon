@@ -84,6 +84,10 @@ func NewTraceWorker(tx kv.TemporalTx, cc *chain.Config, engine consensus.EngineR
 	return ie
 }
 
+func (e *TraceWorker) Close() {
+	e.evm.JumpDestCache.LogStats()
+}
+
 func (e *TraceWorker) ChangeBlock(header *types.Header) {
 	e.blockNum = header.Number.Uint64()
 	blockCtx := transactions.NewEVMBlockContext(e.engine, header, true /* requireCanonical */, e.tx, e.headerReader, e.evm.ChainConfig())
@@ -96,14 +100,14 @@ func (e *TraceWorker) ChangeBlock(header *types.Header) {
 }
 
 func (e *TraceWorker) GetLogs(txIdx int, txn types.Transaction) types.Logs {
-	return e.ibs.GetLogs(txn.Hash())
+	return e.ibs.GetLogs(txn.Hash(), e.blockNum, e.header.Hash())
 }
 
 func (e *TraceWorker) ExecTxn(txNum uint64, txIndex int, txn types.Transaction) (*evmtypes.ExecutionResult, error) {
 	e.stateReader.SetTxNum(txNum)
 	txHash := txn.Hash()
 	e.ibs.Reset()
-	e.ibs.SetTxContext(txHash, e.blockHash, txIndex)
+	e.ibs.SetTxContext(txHash, txIndex)
 	gp := new(core.GasPool).AddGas(txn.GetGas()).AddBlobGas(txn.GetBlobGas())
 	msg, err := txn.AsMessage(*e.signer, e.header.BaseFee, e.rules)
 	if err != nil {

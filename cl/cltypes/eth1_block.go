@@ -361,7 +361,7 @@ func (b *Eth1Block) RlpHeader(parentRoot *libcommon.Hash) (*types.Header, error)
 
 	// If the header hash does not match the block hash, return an error.
 	if header.Hash() != b.BlockHash {
-		return nil, fmt.Errorf("cannot derive rlp header: mismatching hash: %s != %s", header.Hash(), b.BlockHash)
+		return nil, fmt.Errorf("cannot derive rlp header: mismatching hash: %s != %s, %d", header.Hash(), b.BlockHash, header.Number)
 	}
 
 	return header, nil

@@ -531,9 +531,12 @@ type GossipSubscription struct {
 
 	stopCh    chan struct{}
 	closeOnce sync.Once
+	lock      sync.Mutex
 }
 
 func (sub *GossipSubscription) checkIfTopicNeedsToEnabledOrDisabled() {
+	sub.lock.Lock()
+	defer sub.lock.Unlock()
 	var err error
 	expirationTime := sub.expiration.Load().(time.Time)
 	if sub.subscribed.Load() && time.Now().After(expirationTime) {
@@ -569,8 +572,12 @@ func (sub *GossipSubscription) OverwriteSubscriptionExpiry(expiry time.Time) {
 
 // calls the cancel func for the subscriber and closes the topic and sub
 func (s *GossipSubscription) Close() {
+	s.lock.Lock()
+	defer s.lock.Unlock()
 	s.closeOnce.Do(func() {
-		close(s.stopCh)
+		if s.stopCh != nil {
+			close(s.stopCh)
+		}
 		if s.cf != nil {
 			s.cf()
 		}

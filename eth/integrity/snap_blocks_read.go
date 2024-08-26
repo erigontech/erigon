@@ -19,8 +19,9 @@ package integrity
 import (
 	"context"
 	"fmt"
-	"github.com/erigontech/erigon-lib/common"
 	"time"
+
+	"github.com/erigontech/erigon-lib/common"
 
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/log/v3"

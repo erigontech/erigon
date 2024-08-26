@@ -25,8 +25,6 @@ import (
 	"fmt"
 	"sort"
 
-	"github.com/holiman/uint256"
-
 	"github.com/erigontech/erigon-lib/chain"
 	libcommon "github.com/erigontech/erigon-lib/common"
 	types2 "github.com/erigontech/erigon-lib/types"
@@ -37,6 +35,7 @@ import (
 	"github.com/erigontech/erigon/core/vm/evmtypes"
 	"github.com/erigontech/erigon/crypto"
 	"github.com/erigontech/erigon/turbo/trie"
+	"github.com/holiman/uint256"
 )
 
 var _ evmtypes.IntraBlockState = new(IntraBlockState) // compile-time interface-check
@@ -79,10 +78,10 @@ type IntraBlockState struct {
 	// The refund counter, also used by state transitioning.
 	refund uint64
 
-	thash, bhash libcommon.Hash
-	txIndex      int
-	logs         map[libcommon.Hash][]*types.Log
-	logSize      uint
+	thash   libcommon.Hash
+	txIndex int
+	logs    map[libcommon.Hash][]*types.Log
+	logSize uint
 
 	// Per-transaction access list
 	accessList *accessList
@@ -158,7 +157,6 @@ func (sdb *IntraBlockState) Reset() {
 	sdb.balanceInc = make(map[libcommon.Address]*BalanceIncrease)
 	//clear(sdb.balanceInc)
 	sdb.thash = libcommon.Hash{}
-	sdb.bhash = libcommon.Hash{}
 	sdb.txIndex = 0
 	sdb.logSize = 0
 }
@@ -166,15 +164,19 @@ func (sdb *IntraBlockState) Reset() {
 func (sdb *IntraBlockState) AddLog(log2 *types.Log) {
 	sdb.journal.append(addLogChange{txhash: sdb.thash})
 	log2.TxHash = sdb.thash
-	log2.BlockHash = sdb.bhash
 	log2.TxIndex = uint(sdb.txIndex)
 	log2.Index = sdb.logSize
 	sdb.logs[sdb.thash] = append(sdb.logs[sdb.thash], log2)
 	sdb.logSize++
 }
 
-func (sdb *IntraBlockState) GetLogs(hash libcommon.Hash) []*types.Log {
-	return sdb.logs[hash]
+func (sdb *IntraBlockState) GetLogs(hash libcommon.Hash, blockNumber uint64, blockHash libcommon.Hash) []*types.Log {
+	logs := sdb.logs[hash]
+	for _, l := range logs {
+		l.BlockNumber = blockNumber
+		l.BlockHash = blockHash
+	}
+	return logs
 }
 
 func (sdb *IntraBlockState) Logs() []*types.Log {
@@ -777,9 +779,8 @@ func (sdb *IntraBlockState) Print(chainRules chain.Rules) {
 // SetTxContext sets the current transaction hash and index and block hash which are
 // used when the EVM emits new state logs. It should be invoked before
 // transaction execution.
-func (sdb *IntraBlockState) SetTxContext(thash, bhash libcommon.Hash, ti int) {
+func (sdb *IntraBlockState) SetTxContext(thash libcommon.Hash, ti int) {
 	sdb.thash = thash
-	sdb.bhash = bhash
 	sdb.txIndex = ti
 }
 

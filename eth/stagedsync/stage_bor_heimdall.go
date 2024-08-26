@@ -34,7 +34,6 @@ import (
 	"github.com/erigontech/erigon-lib/common/dbg"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon/accounts/abi"
 	"github.com/erigontech/erigon/consensus"
 	"github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/dataflow"
@@ -57,20 +56,19 @@ const (
 )
 
 type BorHeimdallCfg struct {
-	db               kv.RwDB
-	snapDb           kv.RwDB // Database to store and retrieve snapshot checkpoints
-	miningState      *MiningState
-	chainConfig      *chain.Config
-	borConfig        *borcfg.BorConfig
-	heimdallClient   heimdall.HeimdallClient
-	blockReader      services.FullBlockReader
-	hd               *headerdownload.HeaderDownload
-	penalize         func(context.Context, []headerdownload.PenaltyItem)
-	stateReceiverABI abi.ABI
-	recents          *lru.ARCCache[libcommon.Hash, *bor.Snapshot]
-	signatures       *lru.ARCCache[libcommon.Hash, libcommon.Address]
-	recordWaypoints  bool
-	unwindTypes      []string
+	db              kv.RwDB
+	snapDb          kv.RwDB // Database to store and retrieve snapshot checkpoints
+	miningState     *MiningState
+	chainConfig     *chain.Config
+	borConfig       *borcfg.BorConfig
+	heimdallClient  heimdall.HeimdallClient
+	blockReader     services.FullBlockReader
+	hd              *headerdownload.HeaderDownload
+	penalize        func(context.Context, []headerdownload.PenaltyItem)
+	recents         *lru.ARCCache[libcommon.Hash, *bor.Snapshot]
+	signatures      *lru.ARCCache[libcommon.Hash, libcommon.Address]
+	recordWaypoints bool
+	unwindTypes     []string
 }
 
 func StageBorHeimdallCfg(
@@ -93,20 +91,19 @@ func StageBorHeimdallCfg(
 	}
 
 	return BorHeimdallCfg{
-		db:               db,
-		snapDb:           snapDb,
-		miningState:      &miningState,
-		chainConfig:      &chainConfig,
-		borConfig:        borConfig,
-		heimdallClient:   heimdallClient,
-		blockReader:      blockReader,
-		hd:               hd,
-		penalize:         penalize,
-		stateReceiverABI: bor.GenesisContractStateReceiverABI(),
-		recents:          recents,
-		signatures:       signatures,
-		recordWaypoints:  recordWaypoints,
-		unwindTypes:      unwindTypes,
+		db:              db,
+		snapDb:          snapDb,
+		miningState:     &miningState,
+		chainConfig:     &chainConfig,
+		borConfig:       borConfig,
+		heimdallClient:  heimdallClient,
+		blockReader:     blockReader,
+		hd:              hd,
+		penalize:        penalize,
+		recents:         recents,
+		signatures:      signatures,
+		recordWaypoints: recordWaypoints,
+		unwindTypes:     unwindTypes,
 	}
 }
 
@@ -368,7 +365,6 @@ func BorHeimdallForward(
 					cfg.blockReader,
 					cfg.heimdallClient,
 					cfg.chainConfig.ChainID.String(),
-					cfg.stateReceiverABI,
 					s.LogPrefix(),
 					logger,
 					lastStateSyncEventID,
@@ -644,6 +640,9 @@ func initValidatorSets(
 
 	if lastPersistedBlockNum > 0 {
 		parentHeader = chain.GetHeaderByNumber(lastPersistedBlockNum)
+		if parentHeader == nil {
+			return nil, fmt.Errorf("[%s] header not found: %d", logPrefix, lastPersistedBlockNum)
+		}
 		snap = loadSnapshot(lastPersistedBlockNum, parentHeader.Hash(), config, recents, signatures, snapDb, logger)
 		firstBlockNum = lastPersistedBlockNum + 1
 	} else {

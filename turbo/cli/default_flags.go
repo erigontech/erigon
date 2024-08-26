@@ -25,6 +25,7 @@ import (
 // DefaultFlags contains all flags that are used and supported by Erigon binary.
 var DefaultFlags = []cli.Flag{
 	&utils.DataDirFlag,
+	&utils.EthashDatasetDirFlag,
 	&utils.ExternalConsensusFlag,
 	&utils.TxPoolDisableFlag,
 	&utils.TxPoolLocalsFlag,
@@ -183,6 +184,7 @@ var DefaultFlags = []cli.Flag{
 	&utils.CaplinCheckpointSyncUrlFlag,
 	&utils.SentinelAddrFlag,
 	&utils.SentinelPortFlag,
+	&utils.SentinelBootnodes,
 
 	&utils.OtsSearchMaxCapFlag,
 
@@ -216,6 +218,8 @@ var DefaultFlags = []cli.Flag{
 	&utils.CaplinArchiveFlag,
 	&utils.CaplinMevRelayUrl,
 	&utils.CaplinValidatorMonitorFlag,
+	&utils.CaplinCustomConfigFlag,
+	&utils.CaplinCustomGenesisFlag,
 
 	&utils.TrustedSetupFile,
 	&utils.RPCSlowFlag,
@@ -224,4 +228,5 @@ var DefaultFlags = []cli.Flag{
 	&SyncLoopBlockLimitFlag,
 	&SyncLoopBreakAfterFlag,
 	&SyncLoopPruneLimitFlag,
+	&SyncParallelStateFlushing,
 }

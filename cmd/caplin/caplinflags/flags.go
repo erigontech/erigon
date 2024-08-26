@@ -28,16 +28,14 @@ var CliFlags = []cli.Flag{
 	&BeaconApiPort,
 	&BeaconApiAddr,
 	&ChaindataFlag,
-	&BeaconDBModeFlag,
-	&TransitionChainFlag,
 	&InitSyncFlag,
-	&RecordModeDir,
-	&RecordModeFlag,
 	&RunEngineAPI,
 	&EngineApiHostFlag,
 	&EngineApiPortFlag,
 	&MevRelayUrl,
 	&JwtSecret,
+	&CustomConfig,
+	&CustomGenesisState,
 	&utils.DataDirFlag,
 	&utils.BeaconApiAllowCredentialsFlag,
 	&utils.BeaconApiAllowMethodsFlag,
@@ -50,11 +48,6 @@ var (
 		Name:  "chaindata",
 		Usage: "chaindata of database",
 		Value: "",
-	}
-	NoBeaconApi = cli.BoolFlag{
-		Name:  "no-beacon-api",
-		Usage: "turn off the beacon api",
-		Value: false,
 	}
 	BeaconApiReadTimeout = cli.Uint64Flag{
 		Name:  "beacon.api.read.timeout",
@@ -76,30 +69,13 @@ var (
 		Usage: "sets the port to listen for beacon api requests",
 		Value: 5555,
 	}
-	BeaconDBModeFlag = cli.StringFlag{
-		Name:  "beacon-db-mode",
-		Usage: "level of storing on beacon chain, minimal(only 500k blocks stored), full (all blocks stored), light (no blocks stored)",
-		Value: "full",
-	}
-	TransitionChainFlag = cli.BoolFlag{
-		Name:  "transition-chain",
-		Usage: "enable chain transition",
-	}
+
 	InitSyncFlag = cli.BoolFlag{
 		Value: false,
 		Name:  "initial-sync",
 		Usage: "use initial-sync",
 	}
-	RecordModeFlag = cli.BoolFlag{
-		Value: false,
-		Name:  "record-mode",
-		Usage: "enable/disable record mode",
-	}
-	RecordModeDir = cli.StringFlag{
-		Value: "caplin-recordings",
-		Name:  "record-dir",
-		Usage: "directory for states and block recordings",
-	}
+
 	ErigonPrivateApiFlag = cli.StringFlag{
 		Name:  "private.api.addr",
 		Usage: "connect to existing erigon instance",
@@ -128,6 +104,16 @@ var (
 	MevRelayUrl = cli.StringFlag{
 		Name:  "mev-relay-url",
 		Usage: "Http URL of the MEV relay",
+		Value: "",
+	}
+	CustomConfig = cli.StringFlag{
+		Name:  "custom-config",
+		Usage: "Path to custom config file",
+		Value: "",
+	}
+	CustomGenesisState = cli.StringFlag{
+		Name:  "custom-genesis-state",
+		Usage: "Path to custom genesis state file",
 		Value: "",
 	}
 )
