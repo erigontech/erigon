@@ -749,7 +749,6 @@ func marshalReceipt(receipt *types.Receipt, txn types.Transaction, chainConfig *
 	}
 
 	fields := map[string]interface{}{
-		"root":              common.BytesToHash(receipt.PostState),
 		"blockHash":         receipt.BlockHash,
 		"blockNumber":       hexutil.Uint64(receipt.BlockNumber.Uint64()),
 		"transactionHash":   txnHash,
