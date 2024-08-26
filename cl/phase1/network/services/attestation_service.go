@@ -216,10 +216,10 @@ func (s *attestationService) ProcessMessage(ctx context.Context, subnet *uint64,
 		return err
 	}
 	s.emitters.Operation().SendAttestation(att)
-	epoch := slot / s.beaconCfg.SlotsPerEpoch
 	if vIndex == 238692 {
 		attData, _ := json.Marshal(att)
-		log.Debug("Attestation processed", "slot", slot, "epoch", epoch, "committeeIndex", committeeIndex, "subnetId", subnetId, "validatorIndex", vIndex, "committeeCount", committeeCount, "attData", string(attData))
+		log.Debug("Attestation processed", "cur_slot", currentSlot, "cur_epoch", currentSlot/s.beaconCfg.SlotsPerEpoch,
+			"committeeIndex", committeeIndex, "subnetId", subnetId, "validatorIndex", vIndex, "committeeCount", committeeCount, "attData", string(attData))
 	}
 	return nil
 }
