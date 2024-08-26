@@ -2885,14 +2885,14 @@ func (d *Downloader) logProgress() {
 	status := "Downloading"
 
 	percentDone := float32(100) * (float32(d.stats.BytesDownload) / float32(d.stats.BytesTotal))
-	bytesDone := common.ByteCount(d.stats.BytesDownload)
+	bytesDone := d.stats.BytesDownload
 	rate := d.stats.DownloadRate
 	remainingBytes := d.stats.BytesTotal - d.stats.BytesDownload
 
 	if d.stats.BytesDownload >= d.stats.BytesTotal && d.stats.MetadataReady == d.stats.FilesTotal && d.stats.BytesTotal > 0 {
 		status = "Verifying"
 		percentDone = float32(100) * (float32(d.stats.BytesCompleted) / float32(d.stats.BytesTotal))
-		bytesDone = common.ByteCount(d.stats.BytesCompleted)
+		bytesDone = d.stats.BytesCompleted
 		rate = d.stats.CompletionRate
 		remainingBytes = d.stats.BytesTotal - d.stats.BytesCompleted
 	}
@@ -2904,9 +2904,8 @@ func (d *Downloader) logProgress() {
 	timeLeft := calculateTime(remainingBytes, rate)
 
 	if !d.stats.Completed {
-		log.Info(
-			fmt.Sprintf("[%s] %s", prefix, status),
-			"progress", fmt.Sprintf("(%d/%d files) %.2f%% - %s/%s", d.stats.MetadataReady, d.stats.FilesTotal, percentDone, bytesDone, common.ByteCount(d.stats.BytesTotal)),
+		log.Info(fmt.Sprintf("[%s] %s", prefix, status),
+			"progress", fmt.Sprintf("(%d/%d files) %.2f%% - %s/%s", d.stats.MetadataReady, d.stats.FilesTotal, percentDone, common.ByteCount(bytesDone), common.ByteCount(d.stats.BytesTotal)),
 			"rate", fmt.Sprintf("%s/s", common.ByteCount(rate)),
 			"time-left", timeLeft,
 			"total-time", time.Since(d.startTime).Round(time.Second).String(),
@@ -2914,6 +2913,21 @@ func (d *Downloader) logProgress() {
 			"completion-rate", fmt.Sprintf("%s/s", common.ByteCount(d.stats.CompletionRate)),
 			"alloc", common.ByteCount(m.Alloc),
 			"sys", common.ByteCount(m.Sys))
+
+		diagnostics.Send(diagnostics.SnapshotDownloadStatistics{
+			Downloaded:           bytesDone,
+			Total:                d.stats.BytesTotal,
+			TotalTime:            time.Since(d.startTime).Round(time.Second).Seconds(),
+			DownloadRate:         d.stats.DownloadRate,
+			UploadRate:           d.stats.UploadRate,
+			Peers:                d.stats.PeersUnique,
+			Files:                d.stats.FilesTotal,
+			Connections:          d.stats.ConnectionsTotal,
+			Alloc:                m.Alloc,
+			Sys:                  m.Sys,
+			DownloadFinished:     d.stats.Completed,
+			TorrentMetadataReady: d.stats.MetadataReady,
+		})
 	}
 }
 
