@@ -26,6 +26,7 @@ const (
 	Downloader_Verify_FullMethodName               = "/downloader.Downloader/Verify"
 	Downloader_Stats_FullMethodName                = "/downloader.Downloader/Stats"
 	Downloader_SetLogPrefix_FullMethodName         = "/downloader.Downloader/SetLogPrefix"
+	Downloader_Completed_FullMethodName            = "/downloader.Downloader/Completed"
 )
 
 // DownloaderClient is the client API for Downloader service.
@@ -45,6 +46,8 @@ type DownloaderClient interface {
 	Stats(ctx context.Context, in *StatsRequest, opts ...grpc.CallOption) (*StatsReply, error)
 	// Set log prefix for downloader
 	SetLogPrefix(ctx context.Context, in *SetLogPrefixRequest, opts ...grpc.CallOption) (*emptypb.Empty, error)
+	// Get is download completed
+	Completed(ctx context.Context, in *CompletedRequest, opts ...grpc.CallOption) (*CompletedReply, error)
 }
 
 type downloaderClient struct {
@@ -115,6 +118,16 @@ func (c *downloaderClient) SetLogPrefix(ctx context.Context, in *SetLogPrefixReq
 	return out, nil
 }
 
+func (c *downloaderClient) Completed(ctx context.Context, in *CompletedRequest, opts ...grpc.CallOption) (*CompletedReply, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(CompletedReply)
+	err := c.cc.Invoke(ctx, Downloader_Completed_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // DownloaderServer is the server API for Downloader service.
 // All implementations must embed UnimplementedDownloaderServer
 // for forward compatibility
@@ -132,6 +145,8 @@ type DownloaderServer interface {
 	Stats(context.Context, *StatsRequest) (*StatsReply, error)
 	// Set log prefix for downloader
 	SetLogPrefix(context.Context, *SetLogPrefixRequest) (*emptypb.Empty, error)
+	// Get is download completed
+	Completed(context.Context, *CompletedRequest) (*CompletedReply, error)
 	mustEmbedUnimplementedDownloaderServer()
 }
 
@@ -156,6 +171,9 @@ func (UnimplementedDownloaderServer) Stats(context.Context, *StatsRequest) (*Sta
 }
 func (UnimplementedDownloaderServer) SetLogPrefix(context.Context, *SetLogPrefixRequest) (*emptypb.Empty, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method SetLogPrefix not implemented")
+}
+func (UnimplementedDownloaderServer) Completed(context.Context, *CompletedRequest) (*CompletedReply, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method Completed not implemented")
 }
 func (UnimplementedDownloaderServer) mustEmbedUnimplementedDownloaderServer() {}
 
@@ -278,6 +296,24 @@ func _Downloader_SetLogPrefix_Handler(srv interface{}, ctx context.Context, dec 
 	return interceptor(ctx, in, info, handler)
 }
 
+func _Downloader_Completed_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(CompletedRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(DownloaderServer).Completed(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Downloader_Completed_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(DownloaderServer).Completed(ctx, req.(*CompletedRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // Downloader_ServiceDesc is the grpc.ServiceDesc for Downloader service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -308,6 +344,10 @@ var Downloader_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "SetLogPrefix",
 			Handler:    _Downloader_SetLogPrefix_Handler,
+		},
+		{
+			MethodName: "Completed",
+			Handler:    _Downloader_Completed_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},

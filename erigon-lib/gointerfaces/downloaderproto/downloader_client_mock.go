@@ -304,3 +304,47 @@ func (c *MockDownloaderClientSetLogPrefixCall) DoAndReturn(f func(context.Contex
 	c.Call = c.Call.DoAndReturn(f)
 	return c
 }
+
+// Completed mocks base method.
+func (m *MockDownloaderClient) Completed(arg0 context.Context, arg1 *CompletedRequest, arg2 ...grpc.CallOption) (*CompletedReply, error) {
+	m.ctrl.T.Helper()
+	varargs := []any{arg0, arg1}
+	for _, a := range arg2 {
+		varargs = append(varargs, a)
+	}
+	ret := m.ctrl.Call(m, "Completed", varargs...)
+	ret0, _ := ret[0].(*CompletedReply)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// Stats indicates an expected call of Completed.
+func (mr *MockDownloaderClientMockRecorder) Completed(arg0, arg1 any, arg2 ...any) *MockDownloaderClientCompletedCall {
+	mr.mock.ctrl.T.Helper()
+	varargs := append([]any{arg0, arg1}, arg2...)
+	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Completed", reflect.TypeOf((*MockDownloaderClient)(nil).Completed), varargs...)
+	return &MockDownloaderClientCompletedCall{Call: call}
+}
+
+// MockDownloaderClientCompletedCall wrap *gomock.Call
+type MockDownloaderClientCompletedCall struct {
+	*gomock.Call
+}
+
+// Return rewrite *gomock.Call.Return
+func (c *MockDownloaderClientCompletedCall) Return(arg0 *CompletedReply, arg1 error) *MockDownloaderClientCompletedCall {
+	c.Call = c.Call.Return(arg0, arg1)
+	return c
+}
+
+// Do rewrite *gomock.Call.Do
+func (c *MockDownloaderClientCompletedCall) Do(f func(context.Context, *CompletedRequest, ...grpc.CallOption) (*CompletedReply, error)) *MockDownloaderClientCompletedCall {
+	c.Call = c.Call.Do(f)
+	return c
+}
+
+// DoAndReturn rewrite *gomock.Call.DoAndReturn
+func (c *MockDownloaderClientCompletedCall) DoAndReturn(f func(context.Context, *CompletedRequest, ...grpc.CallOption) (*CompletedReply, error)) *MockDownloaderClientCompletedCall {
+	c.Call = c.Call.DoAndReturn(f)
+	return c
+}

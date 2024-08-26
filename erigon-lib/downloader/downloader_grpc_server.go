@@ -156,3 +156,7 @@ func (s *GrpcServer) SetLogPrefix(ctx context.Context, request *proto_downloader
 
 	return &emptypb.Empty{}, nil
 }
+
+func (s *GrpcServer) Completed(ctx context.Context, request *proto_downloader.CompletedRequest) (*proto_downloader.CompletedReply, error) {
+	return &proto_downloader.CompletedReply{Completed: s.d.Completed()}, nil
+}
