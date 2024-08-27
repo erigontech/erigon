@@ -259,7 +259,6 @@ func Downloader(ctx context.Context, logger log.Logger) error {
 	if seedbox {
 		snapcfg.LoadRemotePreverified()
 	}
-
 	d, err := downloader.New(ctx, cfg, logger, log.LvlInfo, seedbox)
 	if err != nil {
 		return err
