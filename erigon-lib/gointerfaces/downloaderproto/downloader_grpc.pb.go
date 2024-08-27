@@ -24,7 +24,6 @@ const (
 	Downloader_Add_FullMethodName                  = "/downloader.Downloader/Add"
 	Downloader_Delete_FullMethodName               = "/downloader.Downloader/Delete"
 	Downloader_Verify_FullMethodName               = "/downloader.Downloader/Verify"
-	Downloader_Stats_FullMethodName                = "/downloader.Downloader/Stats"
 	Downloader_SetLogPrefix_FullMethodName         = "/downloader.Downloader/SetLogPrefix"
 	Downloader_Completed_FullMethodName            = "/downloader.Downloader/Completed"
 )
@@ -43,7 +42,6 @@ type DownloaderClient interface {
 	// Trigger verification of files
 	// If some part of file is bad - such part will be re-downloaded (without returning error)
 	Verify(ctx context.Context, in *VerifyRequest, opts ...grpc.CallOption) (*emptypb.Empty, error)
-	Stats(ctx context.Context, in *StatsRequest, opts ...grpc.CallOption) (*StatsReply, error)
 	// Set log prefix for downloader
 	SetLogPrefix(ctx context.Context, in *SetLogPrefixRequest, opts ...grpc.CallOption) (*emptypb.Empty, error)
 	// Get is download completed
@@ -98,16 +96,6 @@ func (c *downloaderClient) Verify(ctx context.Context, in *VerifyRequest, opts .
 	return out, nil
 }
 
-func (c *downloaderClient) Stats(ctx context.Context, in *StatsRequest, opts ...grpc.CallOption) (*StatsReply, error) {
-	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
-	out := new(StatsReply)
-	err := c.cc.Invoke(ctx, Downloader_Stats_FullMethodName, in, out, cOpts...)
-	if err != nil {
-		return nil, err
-	}
-	return out, nil
-}
-
 func (c *downloaderClient) SetLogPrefix(ctx context.Context, in *SetLogPrefixRequest, opts ...grpc.CallOption) (*emptypb.Empty, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(emptypb.Empty)
@@ -142,7 +130,6 @@ type DownloaderServer interface {
 	// Trigger verification of files
 	// If some part of file is bad - such part will be re-downloaded (without returning error)
 	Verify(context.Context, *VerifyRequest) (*emptypb.Empty, error)
-	Stats(context.Context, *StatsRequest) (*StatsReply, error)
 	// Set log prefix for downloader
 	SetLogPrefix(context.Context, *SetLogPrefixRequest) (*emptypb.Empty, error)
 	// Get is download completed
@@ -165,9 +152,6 @@ func (UnimplementedDownloaderServer) Delete(context.Context, *DeleteRequest) (*e
 }
 func (UnimplementedDownloaderServer) Verify(context.Context, *VerifyRequest) (*emptypb.Empty, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method Verify not implemented")
-}
-func (UnimplementedDownloaderServer) Stats(context.Context, *StatsRequest) (*StatsReply, error) {
-	return nil, status.Errorf(codes.Unimplemented, "method Stats not implemented")
 }
 func (UnimplementedDownloaderServer) SetLogPrefix(context.Context, *SetLogPrefixRequest) (*emptypb.Empty, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method SetLogPrefix not implemented")
@@ -260,24 +244,6 @@ func _Downloader_Verify_Handler(srv interface{}, ctx context.Context, dec func(i
 	return interceptor(ctx, in, info, handler)
 }
 
-func _Downloader_Stats_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(StatsRequest)
-	if err := dec(in); err != nil {
-		return nil, err
-	}
-	if interceptor == nil {
-		return srv.(DownloaderServer).Stats(ctx, in)
-	}
-	info := &grpc.UnaryServerInfo{
-		Server:     srv,
-		FullMethod: Downloader_Stats_FullMethodName,
-	}
-	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(DownloaderServer).Stats(ctx, req.(*StatsRequest))
-	}
-	return interceptor(ctx, in, info, handler)
-}
-
 func _Downloader_SetLogPrefix_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(SetLogPrefixRequest)
 	if err := dec(in); err != nil {
@@ -336,10 +302,6 @@ var Downloader_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "Verify",
 			Handler:    _Downloader_Verify_Handler,
-		},
-		{
-			MethodName: "Stats",
-			Handler:    _Downloader_Stats_Handler,
 		},
 		{
 			MethodName: "SetLogPrefix",
