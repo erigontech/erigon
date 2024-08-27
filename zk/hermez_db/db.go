@@ -694,19 +694,6 @@ func (db *HermezDb) DeleteReusedL1InfoTreeIndexes(fromBlock, toBlock uint64) err
 	return nil
 }
 
-func (db *HermezDb) WriteGerForL1BlockHash(l1BlockHash common.Hash, ger common.Hash) error {
-	return db.tx.Put(L1_BLOCK_HASH_GER, l1BlockHash.Bytes(), ger.Bytes())
-}
-
-func (db *HermezDbReader) GetGerForL1BlockHash(l1BlockHash common.Hash) (common.Hash, error) {
-	bytes, err := db.tx.GetOne(L1_BLOCK_HASH_GER, l1BlockHash.Bytes())
-	if err != nil {
-		return common.Hash{}, err
-	}
-
-	return common.BytesToHash(bytes), nil
-}
-
 func (db *HermezDb) DeleteL1BlockHashGers(l1BlockHashes *[]common.Hash) error {
 	for _, l1BlockHash := range *l1BlockHashes {
 		err := db.tx.Delete(L1_BLOCK_HASH_GER, l1BlockHash.Bytes())
@@ -716,18 +703,6 @@ func (db *HermezDb) DeleteL1BlockHashGers(l1BlockHashes *[]common.Hash) error {
 	}
 
 	return nil
-}
-
-func (db *HermezDb) WriteL1BlockHash(l1BlockHash common.Hash) error {
-	return db.tx.Put(L1_BLOCK_HASHES, l1BlockHash.Bytes(), []byte{1})
-}
-
-func (db *HermezDbReader) CheckL1BlockHashWritten(l1BlockHash common.Hash) (bool, error) {
-	bytes, err := db.tx.GetOne(L1_BLOCK_HASHES, l1BlockHash.Bytes())
-	if err != nil {
-		return false, err
-	}
-	return len(bytes) > 0, nil
 }
 
 func (db *HermezDb) DeleteL1BlockHashes(l1BlockHashes *[]common.Hash) error {
