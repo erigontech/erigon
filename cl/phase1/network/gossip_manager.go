@@ -164,7 +164,7 @@ func (g *GossipManager) routeAndProcess(ctx context.Context, data *sentinel.Goss
 		if err := obj.DecodeSSZ(data.Data, int(version)); err != nil {
 			return err
 		}
-		if obj.Block.Slot != g.ethClock.GetCurrentSlot() {
+		if g.ethClock.GetCurrentSlot()-obj.Block.Slot >= 3 {
 			return fmt.Errorf("block slot is not current slot")
 		}
 		log.Debug("[test] Received block via gossip", "slot", obj.Block.Slot, "peer", data.Peer.Pid)
