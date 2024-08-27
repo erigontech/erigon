@@ -17,15 +17,18 @@
 package p2p
 
 import (
+	"context"
 	"sync"
 
-	"github.com/erigontech/erigon-lib/log/v3"
+	"google.golang.org/protobuf/types/known/emptypb"
 
-	sentry "github.com/erigontech/erigon-lib/gointerfaces/sentryproto"
+	"github.com/erigontech/erigon-lib/gointerfaces/sentryproto"
+	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/polygon/polygoncommon"
 )
 
 type PeerTracker interface {
+	Run(ctx context.Context) error
 	ListPeersMayHaveBlockNum(blockNum uint64) []*PeerId
 	BlockNumPresent(peerId *PeerId, blockNum uint64)
 	BlockNumMissing(peerId *PeerId, blockNum uint64)
@@ -33,21 +36,73 @@ type PeerTracker interface {
 	PeerDisconnected(peerId *PeerId)
 }
 
-func NewPeerTracker() PeerTracker {
-	return newPeerTracker(RandPeerShuffle)
-}
-
-func newPeerTracker(peerShuffle PeerShuffle) *peerTracker {
-	return &peerTracker{
+func NewPeerTracker(
+	logger log.Logger,
+	peerProvider peerProvider,
+	peerEventRegistrar peerEventRegistrar,
+	opts ...PeerTrackerOption,
+) PeerTracker {
+	pt := &peerTracker{
+		logger:             logger,
+		peerProvider:       peerProvider,
+		peerEventRegistrar: peerEventRegistrar,
 		peerSyncProgresses: map[PeerId]*peerSyncProgress{},
-		peerShuffle:        peerShuffle,
+		peerShuffle:        RandPeerShuffle,
 	}
+
+	for _, opt := range opts {
+		opt(pt)
+	}
+
+	return pt
 }
 
 type peerTracker struct {
+	logger             log.Logger
+	peerProvider       peerProvider
+	peerEventRegistrar peerEventRegistrar
 	mu                 sync.Mutex
 	peerSyncProgresses map[PeerId]*peerSyncProgress
 	peerShuffle        PeerShuffle
+}
+
+func (pt *peerTracker) Run(ctx context.Context) error {
+	var unregister polygoncommon.UnregisterFunc
+	defer func() { unregister() }()
+
+	err := func() error {
+		// we lock the pt for updates so that we:
+		//   1. register the observer but buffer the updates coming from it until we do 2.
+		//   2. replay the current state of connected peers
+		pt.mu.Lock()
+		defer pt.mu.Unlock()
+
+		// 1. register the observer
+		unregister = pt.peerEventRegistrar.RegisterPeerEventObserver(NewPeerEventObserver(pt.logger, pt))
+
+		// 2. replay the current state of connected peers
+		reply, err := pt.peerProvider.Peers(ctx, &emptypb.Empty{})
+		if err != nil {
+			return err
+		}
+
+		for _, peer := range reply.Peers {
+			peerId, err := PeerIdFromHex(peer.Id)
+			if err != nil {
+				return err
+			}
+
+			pt.PeerConnected(peerId)
+		}
+
+		return nil
+	}()
+	if err != nil {
+		return err
+	}
+
+	<-ctx.Done()
+	return ctx.Err()
 }
 
 func (pt *peerTracker) ListPeersMayHaveBlockNum(blockNum uint64) []*PeerId {
@@ -109,16 +164,16 @@ func (pt *peerTracker) updatePeerSyncProgress(peerId *PeerId, update func(psp *p
 	update(peerSyncProgress)
 }
 
-func NewPeerEventObserver(logger log.Logger, peerTracker PeerTracker) polygoncommon.Observer[*sentry.PeerEvent] {
-	return func(message *sentry.PeerEvent) {
+func NewPeerEventObserver(logger log.Logger, peerTracker PeerTracker) polygoncommon.Observer[*sentryproto.PeerEvent] {
+	return func(message *sentryproto.PeerEvent) {
 		peerId := PeerIdFromH512(message.PeerId)
 
 		logger.Debug("[p2p.peerEventObserver] received new peer event", "id", message.EventId, "peerId", peerId)
 
 		switch message.EventId {
-		case sentry.PeerEvent_Connect:
+		case sentryproto.PeerEvent_Connect:
 			peerTracker.PeerConnected(peerId)
-		case sentry.PeerEvent_Disconnect:
+		case sentryproto.PeerEvent_Disconnect:
 			peerTracker.PeerDisconnected(peerId)
 		}
 	}

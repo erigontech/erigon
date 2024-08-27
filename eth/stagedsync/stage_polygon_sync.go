@@ -497,13 +497,7 @@ func (s *polygonSyncStageService) runBgComponentsOnce(ctx context.Context) {
 		})
 
 		eg.Go(func() error {
-			s.p2p.Run(ctx)
-			select {
-			case <-ctx.Done():
-				return nil
-			default:
-				return errors.New("p2p service stopped")
-			}
+			return s.p2p.Run(ctx)
 		})
 
 		eg.Go(func() error {

@@ -20,6 +20,7 @@ import (
 	"context"
 	"fmt"
 	"math/big"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -29,11 +30,15 @@ import (
 	"google.golang.org/grpc"
 
 	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/direct"
 	sentry "github.com/erigontech/erigon-lib/gointerfaces/sentryproto"
 	erigonlibtypes "github.com/erigontech/erigon-lib/gointerfaces/typesproto"
+	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/eth/protocols/eth"
+	sentrymulticlient "github.com/erigontech/erigon/p2p/sentry/sentry_multi_client"
 	"github.com/erigontech/erigon/rlp"
+	"github.com/erigontech/erigon/turbo/testlog"
 )
 
 func TestFetcherFetchHeaders(t *testing.T) {
@@ -521,27 +526,64 @@ func TestFetcherFetchBodiesErrMissingBodies(t *testing.T) {
 }
 
 func newFetcherTest(t *testing.T, requestIdGenerator RequestIdGenerator) *fetcherTest {
+	ctx, cancel := context.WithCancel(context.Background())
 	fetcherConfig := FetcherConfig{
 		responseTimeout: 200 * time.Millisecond,
 		retryBackOff:    time.Second,
 		maxRetries:      1,
 	}
-	messageListenerTest := newMessageListenerTest(t)
-	messageListener := messageListenerTest.messageListener
-	messageSender := NewMessageSender(messageListenerTest.sentryClient)
+	logger := testlog.Logger(t, log.LvlTrace)
+	ctrl := gomock.NewController(t)
+	sentryClient := direct.NewMockSentryClient(ctrl)
+	statusDataFactory := sentrymulticlient.StatusDataFactory(func(ctx context.Context) (*sentry.StatusData, error) {
+		return &sentry.StatusData{}, nil
+	})
+	peerPenalizer := NewPeerPenalizer(sentryClient)
+	messageListener := NewMessageListener(logger, sentryClient, statusDataFactory, peerPenalizer)
+	messageSender := NewMessageSender(sentryClient)
 	fetcher := newFetcher(fetcherConfig, messageListener, messageSender, requestIdGenerator)
 	return &fetcherTest{
-		messageListenerTest:         messageListenerTest,
+		ctx:                         ctx,
+		ctxCancel:                   cancel,
+		t:                           t,
 		fetcher:                     fetcher,
+		logger:                      logger,
+		sentryClient:                sentryClient,
+		messageListener:             messageListener,
 		headersRequestResponseMocks: map[uint64]requestResponseMock{},
 	}
 }
 
 type fetcherTest struct {
-	*messageListenerTest
+	ctx                         context.Context
+	ctxCancel                   context.CancelFunc
+	t                           *testing.T
 	fetcher                     *fetcher
+	logger                      log.Logger
+	sentryClient                *direct.MockSentryClient
+	messageListener             MessageListener
 	headersRequestResponseMocks map[uint64]requestResponseMock
 	peerEvents                  chan *delayedMessage[*sentry.PeerEvent]
+}
+
+func (ft *fetcherTest) run(f func(ctx context.Context, t *testing.T)) {
+	var done atomic.Bool
+	ft.t.Run("start", func(t *testing.T) {
+		go func() {
+			defer done.Store(true)
+			err := ft.messageListener.Run(ft.ctx)
+			require.ErrorIs(t, err, context.Canceled)
+		}()
+	})
+
+	ft.t.Run("test", func(t *testing.T) {
+		f(ft.ctx, t)
+	})
+
+	ft.t.Run("stop", func(t *testing.T) {
+		ft.ctxCancel()
+		require.Eventually(t, func() bool { return done.Load() }, time.Second, 5*time.Millisecond)
+	})
 }
 
 func (ft *fetcherTest) mockSentryStreams(mocks ...requestResponseMock) {
@@ -681,42 +723,15 @@ func (ft *fetcherTest) mockSendMessageByIdForBodies(req *sentry.SendMessageByIdR
 }
 
 func (ft *fetcherTest) mockSentryPeerEventsStream() {
-	peerConnectEvents := []*sentry.PeerEvent{
-		{
-			EventId: sentry.PeerEvent_Connect,
-			PeerId:  PeerIdFromUint64(1).H512(),
-		},
-		{
-			EventId: sentry.PeerEvent_Connect,
-			PeerId:  PeerIdFromUint64(2).H512(),
-		},
-	}
-
-	streamChan := make(chan *delayedMessage[*sentry.PeerEvent], len(peerConnectEvents))
-	for _, event := range peerConnectEvents {
-		streamChan <- &delayedMessage[*sentry.PeerEvent]{
-			message: event,
-		}
-	}
-
-	ft.peerEvents = streamChan
+	ft.peerEvents = make(chan *delayedMessage[*sentry.PeerEvent])
 	ft.sentryClient.
 		EXPECT().
 		PeerEvents(gomock.Any(), gomock.Any(), gomock.Any()).
 		Return(&mockSentryMessagesStream[*sentry.PeerEvent]{
 			ctx:    ft.ctx,
-			stream: streamChan,
+			stream: ft.peerEvents,
 		}, nil).
 		AnyTimes()
-}
-
-func (ft *fetcherTest) mockDisconnectPeerEvent(peerId *PeerId) {
-	ft.peerEvents <- &delayedMessage[*sentry.PeerEvent]{
-		message: &sentry.PeerEvent{
-			EventId: sentry.PeerEvent_Disconnect,
-			PeerId:  peerId.H512(),
-		},
-	}
 }
 
 type requestResponseMock struct {
