@@ -173,50 +173,6 @@ func (c *MockDownloaderClientProhibitNewDownloadsCall) DoAndReturn(f func(contex
 	return c
 }
 
-// Stats mocks base method.
-func (m *MockDownloaderClient) Stats(arg0 context.Context, arg1 *StatsRequest, arg2 ...grpc.CallOption) (*StatsReply, error) {
-	m.ctrl.T.Helper()
-	varargs := []any{arg0, arg1}
-	for _, a := range arg2 {
-		varargs = append(varargs, a)
-	}
-	ret := m.ctrl.Call(m, "Stats", varargs...)
-	ret0, _ := ret[0].(*StatsReply)
-	ret1, _ := ret[1].(error)
-	return ret0, ret1
-}
-
-// Stats indicates an expected call of Stats.
-func (mr *MockDownloaderClientMockRecorder) Stats(arg0, arg1 any, arg2 ...any) *MockDownloaderClientStatsCall {
-	mr.mock.ctrl.T.Helper()
-	varargs := append([]any{arg0, arg1}, arg2...)
-	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Stats", reflect.TypeOf((*MockDownloaderClient)(nil).Stats), varargs...)
-	return &MockDownloaderClientStatsCall{Call: call}
-}
-
-// MockDownloaderClientStatsCall wrap *gomock.Call
-type MockDownloaderClientStatsCall struct {
-	*gomock.Call
-}
-
-// Return rewrite *gomock.Call.Return
-func (c *MockDownloaderClientStatsCall) Return(arg0 *StatsReply, arg1 error) *MockDownloaderClientStatsCall {
-	c.Call = c.Call.Return(arg0, arg1)
-	return c
-}
-
-// Do rewrite *gomock.Call.Do
-func (c *MockDownloaderClientStatsCall) Do(f func(context.Context, *StatsRequest, ...grpc.CallOption) (*StatsReply, error)) *MockDownloaderClientStatsCall {
-	c.Call = c.Call.Do(f)
-	return c
-}
-
-// DoAndReturn rewrite *gomock.Call.DoAndReturn
-func (c *MockDownloaderClientStatsCall) DoAndReturn(f func(context.Context, *StatsRequest, ...grpc.CallOption) (*StatsReply, error)) *MockDownloaderClientStatsCall {
-	c.Call = c.Call.DoAndReturn(f)
-	return c
-}
-
 // Verify mocks base method.
 func (m *MockDownloaderClient) Verify(arg0 context.Context, arg1 *VerifyRequest, arg2 ...grpc.CallOption) (*emptypb.Empty, error) {
 	m.ctrl.T.Helper()

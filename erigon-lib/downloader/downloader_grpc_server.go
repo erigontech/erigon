@@ -125,28 +125,6 @@ func (s *GrpcServer) Verify(ctx context.Context, request *proto_downloader.Verif
 	return &emptypb.Empty{}, nil
 }
 
-func (s *GrpcServer) Stats(ctx context.Context, request *proto_downloader.StatsRequest) (*proto_downloader.StatsReply, error) {
-	stats := s.d.Stats()
-	return &proto_downloader.StatsReply{
-		MetadataReady: stats.MetadataReady,
-		FilesTotal:    stats.FilesTotal,
-
-		Completed: stats.Completed,
-		Progress:  stats.Progress,
-
-		PeersUnique:      stats.PeersUnique,
-		ConnectionsTotal: stats.ConnectionsTotal,
-
-		BytesCompleted: stats.BytesCompleted,
-		BytesTotal:     stats.BytesTotal,
-		UploadRate:     stats.UploadRate,
-		DownloadRate:   stats.DownloadRate,
-		HashRate:       stats.HashRate,
-		FlushRate:      stats.FlushRate,
-		CompletionRate: stats.CompletionRate,
-	}, nil
-}
-
 func Proto2InfoHash(in *prototypes.H160) metainfo.Hash {
 	return gointerfaces.ConvertH160toAddress(in)
 }
