@@ -883,7 +883,6 @@ func (d *Downloader) mainLoop(silent bool) error {
 		waiting := map[string]struct{}{}
 
 		downloadComplete := make(chan downloadStatus, 100)
-		seedHashMismatches := map[infohash.T][]*seedHash{}
 
 		// set limit here to make load predictable, not to control Disk/CPU consumption
 		// will impact start times depending on the amount of non complete files - should
