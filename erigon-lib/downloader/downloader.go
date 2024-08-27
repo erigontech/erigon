@@ -1253,74 +1253,10 @@ func (d *Downloader) mainLoop(silent bool) error {
 					delete(waiting, t.Name())
 					d.torrentDownload(t, downloadComplete)
 				case len(t.WebseedPeerConns()) > 0:
-					if d.webDownloadClient != nil {
-						var peerUrls []*url.URL
-
-						for _, peer := range t.WebseedPeerConns() {
-							if peerUrl, err := webPeerUrl(peer); err == nil {
-								peerUrls = append(peerUrls, peerUrl)
-							}
-						}
-
-						d.logger.Debug("[snapshots] Downloading from webseed", "file", t.Name(), "webpeers", len(t.WebseedPeerConns()))
-						delete(waiting, t.Name())
-						session, err := d.webDownload(peerUrls, t, nil, downloadComplete)
-
-						if err != nil {
-							d.logger.Warn("Can't complete web download", "file", t.Info().Name, "err", err)
-
-							if session == nil {
-								delete(waiting, t.Name())
-								d.torrentDownload(t, downloadComplete)
-							}
-							continue
-						}
-					} else {
-						d.logger.Debug("[snapshots] Downloading from torrent", "file", t.Name(), "peers", len(t.PeerConns()), "webpeers", len(t.WebseedPeerConns()))
-						delete(waiting, t.Name())
-						d.torrentDownload(t, downloadComplete)
-					}
+					d.logger.Debug("[snapshots] Downloading from torrent", "file", t.Name(), "peers", len(t.PeerConns()), "webpeers", len(t.WebseedPeerConns()))
+					delete(waiting, t.Name())
+					d.torrentDownload(t, downloadComplete)
 				default:
-					if d.webDownloadClient != nil {
-						d.lock.RLock()
-						webDownload, ok := d.webDownloadInfo[t.Name()]
-						d.lock.RUnlock()
-
-						if !ok {
-							var mismatches []*seedHash
-							var err error
-
-							webDownload, mismatches, err = d.getWebDownloadInfo(t)
-
-							if err != nil {
-								if len(mismatches) > 0 {
-									seedHashMismatches[t.InfoHash()] = append(seedHashMismatches[t.InfoHash()], mismatches...)
-									logSeedHashMismatches(t.InfoHash(), t.Name(), seedHashMismatches, d.logger)
-								}
-
-								d.logger.Warn("Can't complete web download", "file", t.Info().Name, "err", err)
-								continue
-							}
-						}
-
-						root, _ := path.Split(webDownload.url.String())
-						peerUrl, err := url.Parse(root)
-
-						if err != nil {
-							d.logger.Warn("Can't complete web download", "file", t.Info().Name, "err", err)
-							continue
-						}
-
-						d.lock.Lock()
-						delete(d.webDownloadInfo, t.Name())
-						d.lock.Unlock()
-
-						d.logger.Debug("[snapshots] Downloading from web", "file", t.Name(), "webpeers", len(t.WebseedPeerConns()))
-						delete(waiting, t.Name())
-						d.webDownload([]*url.URL{peerUrl}, t, &webDownload, downloadComplete)
-						continue
-					}
-
 					d.logger.Debug("[snapshots] Downloading from torrent", "file", t.Name(), "peers", len(t.PeerConns()))
 					delete(waiting, t.Name())
 					d.torrentDownload(t, downloadComplete)
@@ -1550,12 +1486,6 @@ func (d *Downloader) torrentDownload(t *torrent.Torrent, statusChan chan downloa
 				} else {
 					lastRead = bytesRead.Int64()
 					idleCount = 0
-				}
-
-				//fallback to webDownloadClient, but only if it's enabled
-				if d.webDownloadClient != nil && idleCount > 6 {
-					t.DisallowDataDownload()
-					return
 				}
 			}
 		}
