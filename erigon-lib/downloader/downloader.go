@@ -2942,10 +2942,7 @@ func calculateTime(amountLeft, rate uint64) string {
 
 	return fmt.Sprintf("%dhrs:%dm", hours, minutes)
 }
-<<<<<<< HEAD
 
 func (d *Downloader) Completed() bool {
 	return d.stats.Completed
 }
-=======
->>>>>>> main
