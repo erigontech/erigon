@@ -23,13 +23,15 @@ func setup(t *testing.T) (*heimdall.MockHeimdallClient, *Bridge) {
 	ctrl := gomock.NewController(t)
 	logger := testlog.Logger(t, log.LvlDebug)
 	borConfig := borcfg.BorConfig{
-		Sprint:                map[string]uint64{"0": 2},
-		StateReceiverContract: "0x0000000000000000000000000000000000001001",
+		Sprint:                     map[string]uint64{"0": 2},
+		StateReceiverContract:      "0x0000000000000000000000000000000000001001",
+		IndoreBlock:                big.NewInt(10),
+		StateSyncConfirmationDelay: map[string]uint64{"0": 1},
 	}
 
 	heimdallClient := heimdall.NewMockHeimdallClient(ctrl)
 	b := Assemble(t.TempDir(), logger, &borConfig, heimdallClient)
-
+	t.Cleanup(b.Close)
 	return heimdallClient, b
 }
 
@@ -37,11 +39,11 @@ func getBlocks(t *testing.T, numBlocks int) []*types.Block {
 	// Feed in new blocks
 	rawBlocks := make([]*types.RawBlock, 0, numBlocks)
 
-	for i := 0; i < numBlocks; i++ {
+	for i := 1; i <= numBlocks; i++ {
 		rawBlocks = append(rawBlocks, &types.RawBlock{
 			Header: &types.Header{
 				Number: big.NewInt(int64(i)),
-				Time:   uint64(50 * (i + 1)),
+				Time:   uint64(50 * i),
 			},
 			Body: &types.RawBody{},
 		})
@@ -70,26 +72,46 @@ func TestBridge(t *testing.T) {
 			ChainID: "80002",
 			Data:    hexutil.MustDecode("0x01"),
 		},
-		Time: time.Unix(50, 0), // block 2
+		// pre-indore: block0Time=1,block2Time=100,block4Time=200 => event1 falls in block4 (toTime=preSprintBlockTime=100)
+		Time: time.Unix(50, 0),
 	}
+	event1Data, err := event1.MarshallBytes()
+	require.NoError(t, err)
 	event2 := &heimdall.EventRecordWithTime{
 		EventRecord: heimdall.EventRecord{
 			ID:      2,
 			ChainID: "80002",
 			Data:    hexutil.MustDecode("0x02"),
 		},
-		Time: time.Unix(100, 0), // block 2
+		// pre-indore: block0Time=1,block2Time=100,block4Time=200 => event2 falls in block4 (toTime=preSprintBlockTime=100)
+		Time: time.Unix(99, 0), // block 2
 	}
+	event2Data, err := event2.MarshallBytes()
+	require.NoError(t, err)
 	event3 := &heimdall.EventRecordWithTime{
 		EventRecord: heimdall.EventRecord{
 			ID:      3,
 			ChainID: "80002",
 			Data:    hexutil.MustDecode("0x03"),
 		},
-		Time: time.Unix(200, 0), // block 4
+		// pre-indore: block4Time=200,block6Time=300 => event3 falls in block6 (toTime=preSprintBlockTime=200)
+		Time: time.Unix(199, 0),
 	}
+	event3Data, err := event3.MarshallBytes()
+	require.NoError(t, err)
+	event4 := &heimdall.EventRecordWithTime{
+		EventRecord: heimdall.EventRecord{
+			ID:      4,
+			ChainID: "80002",
+			Data:    hexutil.MustDecode("0x04"),
+		},
+		// post-indore: block8Time=400,block10Time=500 => event4 falls in block10 (toTime=currentSprintBlockTime-delay=500-1=499)
+		Time: time.Unix(498, 0),
+	}
+	event4Data, err := event4.MarshallBytes()
+	require.NoError(t, err)
 
-	events := []*heimdall.EventRecordWithTime{event1, event2, event3}
+	events := []*heimdall.EventRecordWithTime{event1, event2, event3, event4}
 
 	heimdallClient.EXPECT().FetchStateSyncEvents(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).Return(events, nil).Times(1)
 	heimdallClient.EXPECT().FetchStateSyncEvents(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).Return([]*heimdall.EventRecordWithTime{}, nil).AnyTimes()
@@ -110,26 +132,44 @@ func TestBridge(t *testing.T) {
 		}
 	}(b)
 
-	err := b.Synchronize(ctx, 100) // hack to wait for b.ready
+	err = b.store.Prepare(ctx)
 	require.NoError(t, err)
 
-	blocks := getBlocks(t, 5)
+	replayBlockNum, replayNeeded, err := b.InitialBlockReplayNeeded(ctx)
+	require.NoError(t, err)
+	require.True(t, replayNeeded)
+	require.Equal(t, uint64(0), replayBlockNum)
 
+	genesis := types.NewBlockWithHeader(&types.Header{Time: 1, Number: big.NewInt(0)})
+	err = b.ReplayInitialBlock(ctx, genesis)
+	require.NoError(t, err)
+
+	blocks := getBlocks(t, 10)
 	err = b.ProcessNewBlocks(ctx, blocks)
 	require.NoError(t, err)
 
-	res, err := b.Events(ctx, 4)
+	err = b.Synchronize(ctx, 6)
 	require.NoError(t, err)
 
-	event1Data, err := event1.MarshallBytes()
+	res, err := b.Events(ctx, 2)
 	require.NoError(t, err)
+	require.Len(t, res, 0)
 
-	event2Data, err := event2.MarshallBytes()
+	res, err = b.Events(ctx, 4)
 	require.NoError(t, err)
-
-	require.Equal(t, 2, len(res))               // have first two events
+	require.Len(t, res, 2)                      // have first two events
 	require.Equal(t, event1Data, res[0].Data()) // check data fields
 	require.Equal(t, event2Data, res[1].Data())
+
+	res, err = b.Events(ctx, 6)
+	require.NoError(t, err)
+	require.Len(t, res, 1)                      // have third event
+	require.Equal(t, event3Data, res[0].Data()) // check data fields
+
+	res, err = b.Events(ctx, 10)
+	require.NoError(t, err)
+	require.Len(t, res, 1)                      // have fourth event
+	require.Equal(t, event4Data, res[0].Data()) // check data fields
 
 	// get non-sprint block
 	res, err = b.Events(ctx, 1)
@@ -160,7 +200,8 @@ func TestBridge_Unwind(t *testing.T) {
 			ChainID: "80002",
 			Data:    hexutil.MustDecode("0x01"),
 		},
-		Time: time.Unix(50, 0), // block 2
+		// pre-indore: block0Time=1,block2Time=100,block4Time=200 => event1 falls in block4 (toTime=preSprintBlockTime=100)
+		Time: time.Unix(50, 0),
 	}
 	event2 := &heimdall.EventRecordWithTime{
 		EventRecord: heimdall.EventRecord{
@@ -168,7 +209,8 @@ func TestBridge_Unwind(t *testing.T) {
 			ChainID: "80002",
 			Data:    hexutil.MustDecode("0x02"),
 		},
-		Time: time.Unix(100, 0), // block 2
+		// pre-indore: block0Time=1,block2Time=100,block4Time=200 => event2 falls in block4 (toTime=preSprintBlockTime=100)
+		Time: time.Unix(99, 0), // block 2
 	}
 	event3 := &heimdall.EventRecordWithTime{
 		EventRecord: heimdall.EventRecord{
@@ -176,15 +218,17 @@ func TestBridge_Unwind(t *testing.T) {
 			ChainID: "80002",
 			Data:    hexutil.MustDecode("0x03"),
 		},
-		Time: time.Unix(200, 0), // block 4
+		// pre-indore: block4Time=200,block6Time=300 => event3 falls in block6 (toTime=preSprintBlockTime=200)
+		Time: time.Unix(199, 0),
 	}
 	event4 := &heimdall.EventRecordWithTime{
 		EventRecord: heimdall.EventRecord{
 			ID:      4,
 			ChainID: "80002",
-			Data:    hexutil.MustDecode("0x03"),
+			Data:    hexutil.MustDecode("0x04"),
 		},
-		Time: time.Unix(300, 0), // block 6
+		// post-indore: block8Time=400,block10Time=500 => event4 falls in block10 (toTime=currentSprintBlockTime-delay=500-1=499)
+		Time: time.Unix(498, 0),
 	}
 
 	events := []*heimdall.EventRecordWithTime{event1, event2, event3, event4}
@@ -208,27 +252,42 @@ func TestBridge_Unwind(t *testing.T) {
 		}
 	}(b)
 
-	err := b.Synchronize(ctx, 100) // hack to wait for b.ready
+	err := b.store.Prepare(ctx)
 	require.NoError(t, err)
 
-	blocks := getBlocks(t, 8)
+	genesis := types.NewBlockWithHeader(&types.Header{Time: 1, Number: big.NewInt(0)})
+	err = b.ReplayInitialBlock(ctx, genesis)
+	require.NoError(t, err)
 
+	blocks := getBlocks(t, 10)
 	err = b.ProcessNewBlocks(ctx, blocks)
 	require.NoError(t, err)
 
-	event1Data, err := event1.MarshallBytes()
+	err = b.Synchronize(ctx, 10)
 	require.NoError(t, err)
 
 	res, err := b.Events(ctx, 4)
-	require.Equal(t, event1Data, res[0].Data())
 	require.NoError(t, err)
+	require.Len(t, res, 2)
+	res, err = b.Events(ctx, 6)
+	require.NoError(t, err)
+	require.Len(t, res, 1)
+	res, err = b.Events(ctx, 10)
+	require.NoError(t, err)
+	require.Len(t, res, 1)
 
-	err = b.Unwind(ctx, 3)
+	err = b.Unwind(ctx, 5)
 	require.NoError(t, err)
 
 	res, err = b.Events(ctx, 4)
-	require.Equal(t, len(res), 0)
 	require.NoError(t, err)
+	require.Len(t, res, 2)
+	res, err = b.Events(ctx, 6)
+	require.NoError(t, err)
+	require.Len(t, res, 0)
+	res, err = b.Events(ctx, 10)
+	require.NoError(t, err)
+	require.Len(t, res, 0)
 
 	cancel()
 	wg.Wait()

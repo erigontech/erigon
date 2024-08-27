@@ -133,7 +133,7 @@ func (a *aggregateAndProofServiceImpl) ProcessMessage(
 	// [REJECT] The aggregate attestation's target block is an ancestor of the block named in the LMD vote -- i.e. get_checkpoint_block(store, aggregate.data.beacon_block_root, aggregate.data.target.epoch) == aggregate.data.target.root
 	if a.forkchoiceStore.Ancestor(
 		aggregateData.BeaconBlockRoot(),
-		epoch*a.beaconCfg.SlotsPerEpoch,
+		target.Epoch()*a.beaconCfg.SlotsPerEpoch,
 	) != target.BlockRoot() {
 		return errors.New("invalid target block")
 	}
