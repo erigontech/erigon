@@ -1327,52 +1327,6 @@ func (d *Downloader) mainLoop(silent bool) error {
 				}
 			}
 
-			d.lock.Lock()
-			lastMetadatUpdate := d.stats.LastMetadataUpdate
-			d.lock.Unlock()
-
-			if lastMetadatUpdate != nil &&
-				((len(available) == 0 && time.Since(*lastMetadatUpdate) > 30*time.Second) ||
-					time.Since(*lastMetadatUpdate) > 5*time.Minute) {
-
-				for _, t := range d.torrentClient.Torrents() {
-					if t.Info() == nil {
-						if isComplete, _, _ := d.checkComplete(t.Name()); isComplete {
-							continue
-						}
-
-						d.lock.RLock()
-						_, ok := d.webDownloadInfo[t.Name()]
-						d.lock.RUnlock()
-
-						if !ok {
-							if _, ok := seedHashMismatches[t.InfoHash()]; ok {
-								continue
-							}
-
-							info, mismatches, err := d.getWebDownloadInfo(t)
-
-							seedHashMismatches[t.InfoHash()] = append(seedHashMismatches[t.InfoHash()], mismatches...)
-
-							if err != nil {
-								if len(mismatches) > 0 {
-									logSeedHashMismatches(t.InfoHash(), t.Name(), seedHashMismatches, d.logger)
-								}
-								continue
-							}
-
-							d.lock.Lock()
-							d.webDownloadInfo[t.Name()] = info
-							d.lock.Unlock()
-						}
-					} else {
-						d.lock.Lock()
-						delete(d.webDownloadInfo, t.Name())
-						d.lock.Unlock()
-					}
-				}
-			}
-
 		}
 	}()
 
