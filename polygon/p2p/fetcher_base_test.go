@@ -532,7 +532,7 @@ func newFetcherTest(t *testing.T, requestIdGenerator RequestIdGenerator) *fetche
 		retryBackOff:    time.Second,
 		maxRetries:      1,
 	}
-	logger := testlog.Logger(t, log.LvlTrace)
+	logger := testlog.Logger(t, log.LvlCrit)
 	ctrl := gomock.NewController(t)
 	sentryClient := direct.NewMockSentryClient(ctrl)
 	statusDataFactory := sentrymulticlient.StatusDataFactory(func(ctx context.Context) (*sentry.StatusData, error) {
