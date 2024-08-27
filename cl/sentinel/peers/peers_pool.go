@@ -22,7 +22,6 @@ import (
 	"sync/atomic"
 
 	"github.com/erigontech/erigon-lib/common/ring"
-	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/libp2p/go-libp2p/core/peer"
 )
 
@@ -97,7 +96,6 @@ func (p *Pool) AddPeer(pid peer.ID) {
 	p.peerData[pid] = newItem
 	// add it to our queue as a new item
 	p.queue.PushBack(newItem)
-	log.Info("[test] AddPeer", "peer", pid)
 }
 
 func (p *Pool) SetBanStatus(pid peer.ID, banned bool) {
@@ -116,7 +114,6 @@ func (p *Pool) RemovePeer(pid peer.ID) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	delete(p.peerData, pid)
-	log.Info("[test] RemovePeer", "peer", pid)
 }
 
 // returnPeer is an internal function to return per to the pool. assume has lock
