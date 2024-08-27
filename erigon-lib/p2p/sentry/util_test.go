@@ -9,43 +9,31 @@ import (
 	"github.com/erigontech/erigon-lib/gointerfaces/sentryproto"
 	"github.com/erigontech/erigon-lib/gointerfaces/typesproto"
 	sentry "github.com/erigontech/erigon-lib/p2p/sentry"
-	"github.com/erigontech/erigon/p2p"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/mock/gomock"
 	"google.golang.org/grpc"
 	"google.golang.org/protobuf/types/known/emptypb"
 )
 
-var eth67 = p2p.Protocol{
-	Name:           "eth",
-	Version:        67,
-	Length:         17,
-	DialCandidates: nil,
-	Run: func(peer *p2p.Peer, rw p2p.MsgReadWriter) *p2p.PeerError {
-		return nil
-	},
-	NodeInfo: func() interface{} {
-		return nil
-	},
-	PeerInfo: func(peerID [64]byte) interface{} {
-		return nil
-	},
-}
+func newClient(ctrl *gomock.Controller, peerId *typesproto.H512, caps []string) *direct.MockSentryClient {
+	client := direct.NewMockSentryClient(ctrl)
+	client.EXPECT().PeerById(gomock.Any(), gomock.Any(), gomock.Any()).
+		Return(&sentryproto.PeerByIdReply{
+			Peer: &typesproto.PeerInfo{
+				Id:   peerId.String(),
+				Caps: caps,
+			},
+		}, nil).AnyTimes()
 
-var eth68 = p2p.Protocol{
-	Name:           "eth",
-	Version:        68,
-	Length:         17,
-	DialCandidates: nil,
-	/*Run: func(peer *p2p.Peer, rw p2p.MsgReadWriter) *p2p.PeerError {
-		return nil
-	},
-	NodeInfo: func() interface{} {
-		return nil
-	},
-	PeerInfo: func(peerID [64]byte) interface{} {
-		return nil
-	},*/
+	client.EXPECT().Peers(gomock.Any(), gomock.Any(), gomock.Any()).
+		Return(&sentryproto.PeersReply{
+			Peers: []*typesproto.PeerInfo{{
+				Id:   peerId.String(),
+				Caps: caps,
+			}},
+		}, nil).AnyTimes()
+
+	return client
 }
 
 type sentryClient struct {
@@ -53,15 +41,15 @@ type sentryClient struct {
 	mock *direct.MockSentryClient
 }
 
-func (c *sentryClient) NodeInfo(ctx context.Context, in *emptypb.Empty, opts ...grpc.CallOption) (*typesproto.NodeInfoReply, error) {
-	return c.mock.NodeInfo(ctx, in, opts...)
+func (c *sentryClient) Peers(ctx context.Context, in *emptypb.Empty, opts ...grpc.CallOption) (*sentryproto.PeersReply, error) {
+	return c.mock.Peers(ctx, in, opts...)
 }
 
 func TestProtocols(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	defer ctrl.Finish()
 
-	direct := newClient(ctrl, 0, []p2p.Protocol{eth67})
+	direct := newClient(ctrl, gointerfaces.ConvertHashToH512([64]byte{0}), []string{"eth/67"})
 	direct.EXPECT().Protocol().Return(67)
 
 	p := sentry.Protocols(direct)
@@ -70,7 +58,7 @@ func TestProtocols(t *testing.T) {
 	require.Equal(t, byte(67), p[0])
 
 	base := &sentryClient{
-		mock: newClient(ctrl, 1, []p2p.Protocol{eth68}),
+		mock: newClient(ctrl, gointerfaces.ConvertHashToH512([64]byte{1}), []string{"eth/68"}),
 	}
 
 	p = sentry.Protocols(base)
@@ -94,14 +82,7 @@ func TestProtocolsByPeerId(t *testing.T) {
 
 	peerId := gointerfaces.ConvertHashToH512([64]byte{})
 
-	direct := newClient(ctrl, 0, []p2p.Protocol{eth67})
-	direct.EXPECT().PeerById(gomock.Any(), gomock.Any(), gomock.Any()).
-		Return(&sentryproto.PeerByIdReply{
-			Peer: &typesproto.PeerInfo{
-				Id:   peerId.String(),
-				Caps: []string{"eth/67"},
-			},
-		}, nil).AnyTimes()
+	direct := newClient(ctrl, peerId, []string{"eth/67"})
 
 	p := sentry.PeerProtocols(direct, peerId)
 

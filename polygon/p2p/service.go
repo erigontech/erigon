@@ -23,7 +23,7 @@ import (
 	"github.com/erigontech/erigon-lib/log/v3"
 
 	"github.com/erigontech/erigon-lib/gointerfaces/sentryproto"
-	sentrymulticlient "github.com/erigontech/erigon/p2p/sentry/sentry_multi_client"
+	"github.com/erigontech/erigon-lib/p2p/sentry"
 )
 
 //go:generate mockgen -typed=true -source=./service.go -destination=./service_mock.go -package=p2p . Service
@@ -39,7 +39,7 @@ func NewService(
 	maxPeers int,
 	logger log.Logger,
 	sentryClient sentryproto.SentryClient,
-	statusDataFactory sentrymulticlient.StatusDataFactory,
+	statusDataFactory sentry.StatusDataFactory,
 ) Service {
 	fetcherConfig := FetcherConfig{
 		responseTimeout: 5 * time.Second,
@@ -55,7 +55,7 @@ func newService(
 	fetcherConfig FetcherConfig,
 	logger log.Logger,
 	sentryClient sentryproto.SentryClient,
-	statusDataFactory sentrymulticlient.StatusDataFactory,
+	statusDataFactory sentry.StatusDataFactory,
 	requestIdGenerator RequestIdGenerator,
 ) *service {
 	peerTracker := NewPeerTracker()

@@ -8,6 +8,8 @@ import (
 	"fmt"
 	"io"
 	"net"
+	"strconv"
+	"strings"
 	"sync"
 	"testing"
 
@@ -15,7 +17,6 @@ import (
 	"github.com/erigontech/erigon-lib/gointerfaces/sentryproto"
 	"github.com/erigontech/erigon-lib/gointerfaces/typesproto"
 	"github.com/erigontech/erigon-lib/p2p/sentry"
-	"github.com/erigontech/erigon/p2p"
 	"github.com/erigontech/erigon/p2p/enode"
 	"github.com/erigontech/secp256k1"
 	"github.com/stretchr/testify/require"
@@ -24,20 +25,26 @@ import (
 	"google.golang.org/protobuf/types/known/emptypb"
 )
 
-func newClient(ctrl *gomock.Controller, i int, protocols []p2p.Protocol) *direct.MockSentryClient {
+func newClient(ctrl *gomock.Controller, i int, caps []string) *direct.MockSentryClient {
 	client := direct.NewMockSentryClient(ctrl)
 	pk, _ := ecdsa.GenerateKey(secp256k1.S256(), rand.Reader)
 	node := enode.NewV4(&pk.PublicKey, net.IPv4(127, 0, 0, byte(i)), 30001, 30001)
 
 	protocolMap := map[string]interface{}{}
-	for _, proto := range protocols {
-		protocolMap[proto.Name] = struct {
-			Name    string `json:"name"`
-			Version uint   `json:"version"`
-		}{
-			Name:    proto.Name,
-			Version: proto.Version,
+	for _, cap := range caps {
+		parts := strings.Split(cap, "/")
+		if len(parts) > 1 {
+			if version, err := strconv.Atoi(parts[1]); err == nil {
+				protocolMap[parts[0]] = struct {
+					Name    string `json:"name"`
+					Version uint   `json:"version"`
+				}{
+					Name:    parts[0],
+					Version: uint(version),
+				}
+			}
 		}
+
 	}
 	marshaledProtocols, _ := json.Marshal(protocolMap)
 
@@ -53,6 +60,8 @@ func newClient(ctrl *gomock.Controller, i int, protocols []p2p.Protocol) *direct
 		ListenerAddr: fmt.Sprintf("127.0.0.%d", i),
 		Protocols:    marshaledProtocols,
 	}, nil).AnyTimes()
+
+	client.EXPECT().HandShake(gomock.Any(), gomock.Any(), gomock.Any()).Return(&sentryproto.HandShakeReply{}, nil).AnyTimes()
 
 	return client
 }
@@ -71,8 +80,8 @@ func TestCreateMultiplexer(t *testing.T) {
 	require.NotNil(t, mux)
 
 	hs, err := mux.HandShake(context.Background(), &emptypb.Empty{})
-	require.Nil(t, hs)
-	require.Error(t, err)
+	require.NotNil(t, hs)
+	require.NoError(t, err)
 
 	info, err := mux.NodeInfo(context.Background(), &emptypb.Empty{})
 	require.Nil(t, info)
@@ -121,6 +130,10 @@ func TestStatus(t *testing.T) {
 
 	mux := sentry.NewSentryMultiplexer(clients)
 	require.NotNil(t, mux)
+
+	hs, err := mux.HandShake(context.Background(), &emptypb.Empty{})
+	require.NoError(t, err)
+	require.NotNil(t, hs)
 
 	reply, err := mux.SetStatus(context.Background(), &sentryproto.StatusData{})
 	require.NoError(t, err)

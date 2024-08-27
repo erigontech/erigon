@@ -35,9 +35,9 @@ import (
 	"github.com/erigontech/erigon-lib/direct"
 	sentry "github.com/erigontech/erigon-lib/gointerfaces/sentryproto"
 	"github.com/erigontech/erigon-lib/log/v3"
+	libsentry "github.com/erigontech/erigon-lib/p2p/sentry"
 	"github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/eth/protocols/eth"
-	sentrymulticlient "github.com/erigontech/erigon/p2p/sentry/sentry_multi_client"
 	"github.com/erigontech/erigon/rlp"
 	"github.com/erigontech/erigon/turbo/testlog"
 )
@@ -236,7 +236,7 @@ func newMessageListenerTest(t *testing.T) *messageListenerTest {
 	inboundMessagesStream := make(chan *delayedMessage[*sentry.InboundMessage])
 	peerEventsStream := make(chan *delayedMessage[*sentry.PeerEvent])
 	sentryClient := direct.NewMockSentryClient(ctrl)
-	statusDataFactory := sentrymulticlient.StatusDataFactory(func(ctx context.Context) (*sentry.StatusData, error) {
+	statusDataFactory := libsentry.StatusDataFactory(func(ctx context.Context) (*sentry.StatusData, error) {
 		return &sentry.StatusData{}, nil
 	})
 	return &messageListenerTest{
