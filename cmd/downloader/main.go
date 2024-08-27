@@ -239,6 +239,9 @@ func Downloader(ctx context.Context, logger log.Logger) error {
 	if known, ok := snapcfg.KnownWebseeds[chain]; ok {
 		webseedsList = append(webseedsList, known...)
 	}
+	if seedbox {
+		snapcfg.LoadRemotePreverified()
+	}
 	cfg, err := downloadercfg.New(dirs, version, torrentLogLevel, downloadRate, uploadRate, torrentPort, torrentConnsPerFile, torrentDownloadSlots, staticPeers, webseedsList, chain, true, dbWritemap)
 	if err != nil {
 		return err
@@ -256,9 +259,6 @@ func Downloader(ctx context.Context, logger log.Logger) error {
 
 	cfg.AddTorrentsFromDisk = true // always true unless using uploader - which wants control of torrent files
 
-	if seedbox {
-		snapcfg.LoadRemotePreverified()
-	}
 	d, err := downloader.New(ctx, cfg, logger, log.LvlInfo, seedbox)
 	if err != nil {
 		return err
