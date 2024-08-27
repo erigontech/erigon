@@ -891,12 +891,18 @@ func stagePolygonSync(db kv.RwDB, ctx context.Context, logger log.Logger) error 
 			return nil
 		}
 
-		stage := stage(stageSync, tx, nil, stages.Senders)
+		stageState := stage(stageSync, tx, nil, stages.Senders)
 		cfg := stagedsync.NewPolygonSyncStageCfg(logger, chainConfig, nil, heimdallClient, nil, 0, nil, br, nil, 0) // we only need blockReader and blockWriter (blockWriter is constructed in NewPolygonSyncStageCfg)
 		if unwind > 0 {
-			u := stageSync.NewUnwindState(stages.Senders, stage.BlockNumber-unwind, stage.BlockNumber, true, false)
+			u := stageSync.NewUnwindState(stages.Senders, stageState.BlockNumber-unwind, stageState.BlockNumber, true, false)
 			if err := stagedsync.UnwindPolygonSyncStage(ctx, tx, u, cfg); err != nil {
 				return err
+			}
+
+			for _, s := range []stages.SyncStage{stages.Snapshots, stages.Headers, stages.Bodies, stages.PolygonSync} {
+				if err := stages.SaveStageProgress(tx, s, stageState.BlockNumber-unwind); err != nil {
+					return err
+				}
 			}
 		}
 
