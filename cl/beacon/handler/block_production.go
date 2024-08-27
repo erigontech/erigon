@@ -120,7 +120,10 @@ func (a *ApiHandler) GetEthV1ValidatorAttestationData(
 			errors.New("head is optimistic"),
 		)
 	}
-
+	if *slot%3 == 0 {
+		bytes, _ := json.Marshal(attestationData)
+		log.Info("AttestationProduction: Attestation produced", "cur_slot", a.ethClock.GetCurrentSlot(), "slot", *slot, "committee_index", *committeeIndex, "data", string(bytes))
+	}
 	return newBeaconResponse(attestationData), nil
 }
 
