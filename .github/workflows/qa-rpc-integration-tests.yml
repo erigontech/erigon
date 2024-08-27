@@ -237,9 +237,7 @@ jobs:
           trace_replayTransaction/test_24.json,\
           trace_replayTransaction/test_29.tar
   
-  
-
-  # Capture test runner script exit status
+          # Capture test runner script exit status
           test_exit_status=$?
           
           # Save the subsection reached status
