@@ -21,18 +21,19 @@ import (
 	"github.com/ledgerwatch/log/v3"
 )
 
-func getNextPoolTransactions(ctx context.Context, cfg SequenceBlockCfg, executionAt, forkId uint64, alreadyYielded mapset.Set[[32]byte]) ([]types.Transaction, error) {
+func getNextPoolTransactions(ctx context.Context, cfg SequenceBlockCfg, executionAt, forkId uint64, alreadyYielded mapset.Set[[32]byte]) ([]types.Transaction, bool, error) {
 	cfg.txPool.LockFlusher()
 	defer cfg.txPool.UnlockFlusher()
 
 	var transactions []types.Transaction
+	var allConditionsOk bool
 	var err error
 
 	gasLimit := utils.GetBlockGasLimitForFork(forkId)
 
 	if err := cfg.txPoolDb.View(ctx, func(poolTx kv.Tx) error {
 		slots := types2.TxsRlp{}
-		if _, _, err = cfg.txPool.YieldBest(cfg.yieldSize, &slots, poolTx, executionAt, gasLimit, alreadyYielded); err != nil {
+		if allConditionsOk, _, err = cfg.txPool.YieldBest(cfg.yieldSize, &slots, poolTx, executionAt, gasLimit, alreadyYielded); err != nil {
 			return err
 		}
 		yieldedTxs, err := extractTransactionsFromSlot(&slots)
@@ -42,10 +43,10 @@ func getNextPoolTransactions(ctx context.Context, cfg SequenceBlockCfg, executio
 		transactions = append(transactions, yieldedTxs...)
 		return nil
 	}); err != nil {
-		return nil, err
+		return nil, allConditionsOk, err
 	}
 
-	return transactions, err
+	return transactions, allConditionsOk, err
 }
 
 func getLimboTransaction(ctx context.Context, cfg SequenceBlockCfg, txHash *common.Hash) ([]types.Transaction, error) {

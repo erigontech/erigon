@@ -137,6 +137,7 @@ func SpawnSequencingStage(
 
 	log.Info(fmt.Sprintf("[%s] Starting batch %d...", logPrefix, batchState.batchNumber))
 
+	var allConditionsOK bool
 	for blockNumber := executionAt + 1; runLoopBlocks; blockNumber++ {
 		log.Info(fmt.Sprintf("[%s] Starting block %d (forkid %v)...", logPrefix, blockNumber, batchState.forkId))
 		logTicker.Reset(10 * time.Second)
@@ -223,12 +224,18 @@ func SpawnSequencingStage(
 						return err
 					}
 				} else if !batchState.isL1Recovery() {
-					batchState.blockState.transactionsForInclusion, err = getNextPoolTransactions(ctx, cfg, executionAt, batchState.forkId, batchState.yieldedTransactions)
+					batchState.blockState.transactionsForInclusion, allConditionsOK, err = getNextPoolTransactions(ctx, cfg, executionAt, batchState.forkId, batchState.yieldedTransactions)
 					if err != nil {
 						return err
 					}
+
 					if len(batchState.blockState.transactionsForInclusion) == 0 {
-						time.Sleep(batchContext.cfg.zk.SequencerTimeoutOnEmptyTxPool)
+						if allConditionsOK {
+							time.Sleep(batchContext.cfg.zk.SequencerTimeoutOnEmptyTxPool)
+						} else {
+							time.Sleep(batchContext.cfg.zk.SequencerTimeoutOnEmptyTxPool / 5) // we do not need to sleep too long for txpool not ready
+						}
+
 					} else {
 						log.Trace(fmt.Sprintf("[%s] Yielded transactions from the pool", logPrefix), "txCount", len(batchState.blockState.transactionsForInclusion))
 					}
