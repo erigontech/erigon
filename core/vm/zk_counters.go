@@ -347,7 +347,6 @@ func SimpleCounterOperations(cc *CounterCollector) *[256]executionFunc {
 		CREATE2:        cc.opCreate2,
 		RETURN:         cc.opReturn,
 		REVERT:         cc.opRevert,
-		SENDALL:        cc.opSendAll,
 		SELFDESTRUCT:   cc.opSendAll,
 		INVALID:        cc.opInvalid,
 		ADDRESS:        cc.opAddress,
