@@ -434,7 +434,8 @@ func (s *polygonSyncStageService) Run(ctx context.Context, tx kv.RwTx, stageStat
 	s.runBgComponentsOnce(ctx)
 
 	if s.executionEngine.cachedForkChoice != nil {
-		err := s.executionEngine.UpdateForkChoice(ctx, s.executionEngine.cachedForkChoice, nil)
+		s.logger.Info(s.appendLogPrefix("new fork - processing cached fork choice after unwind"))
+		err := s.executionEngine.updateForkChoice(tx, s.executionEngine.cachedForkChoice)
 		if err != nil {
 			return err
 		}
@@ -1377,6 +1378,7 @@ func (e *polygonSyncStageExecutionEngine) updateForkChoice(tx kv.RwTx, tip *type
 	}
 
 	if len(badNodes) > 0 {
+		e.logger.Info(e.appendLogPrefix("new fork - unwinding and caching fork choice"))
 		badNode := badNodes[len(badNodes)-1]
 		e.cachedForkChoice = tip
 		return e.unwinder.UnwindTo(badNode.number, ForkReset(badNode.hash), tx)

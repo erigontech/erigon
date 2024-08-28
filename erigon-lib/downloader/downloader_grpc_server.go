@@ -56,6 +56,10 @@ func (s *GrpcServer) ProhibitNewDownloads(ctx context.Context, req *proto_downlo
 func (s *GrpcServer) Add(ctx context.Context, request *proto_downloader.AddRequest) (*emptypb.Empty, error) {
 	defer s.d.ReCalcStats(10 * time.Second) // immediately call ReCalc to set stat.Complete flag
 
+	if len(s.d.torrentClient.Torrents()) == 0 {
+		s.d.startTime = time.Now()
+	}
+
 	logEvery := time.NewTicker(20 * time.Second)
 	defer logEvery.Stop()
 

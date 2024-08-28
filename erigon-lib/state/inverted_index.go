@@ -1186,7 +1186,7 @@ func (it *RecentInvertedIdxIter) advanceInDB() {
 		}
 		if v == nil {
 			if !it.orderAscend {
-				_, v, _ = it.cursor.PrevDup()
+				_, v, err = it.cursor.PrevDup()
 				if err != nil {
 					panic(err)
 				}

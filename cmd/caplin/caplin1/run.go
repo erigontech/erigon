@@ -245,7 +245,7 @@ func RunCaplinService(ctx context.Context, engine execution_client.ExecutionEngi
 	rcsn := freezeblocks.NewBeaconSnapshotReader(csn, eth1Getter, beaconConfig)
 
 	pool := pool.NewOperationsPool(beaconConfig)
-	attestationProducer := attestation_producer.New(beaconConfig)
+	attestationProducer := attestation_producer.New(ctx, beaconConfig)
 
 	caplinFcuPath := path.Join(dirs.Tmp, "caplin-forkchoice")
 	os.RemoveAll(caplinFcuPath)
