@@ -49,6 +49,7 @@ func EnvBool(envVarName string, defaultVal bool) bool {
 		return true
 	}
 	if v == "false" {
+		log.Warn("[env] please use ERIGON_ prefix for env variables of erigon", "var", envVarName)
 		log.Info("[dbg] env", envVarName, false)
 		return false
 	}
