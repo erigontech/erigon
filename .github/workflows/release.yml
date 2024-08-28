@@ -115,7 +115,7 @@ jobs:
         env:
           BUILD_VERSION: ${{ inputs.release_version }}
           DOCKER_URL: ${{ env.DOCKERHUB_REPOSITORY }}
-          DOCKER_PUBLISH_LATEST_CONDITION: ${{ inputs.publish_latest_tag && "--tag ${{ env.DOCKER_URL }}:latest" || "" }}
+          DOCKER_PUBLISH_LATEST_CONDITION: ${{ inputs.publish_latest_tag && '--tag ${{ env.DOCKER_URL }}:latest' || '' }}
         run: |
           docker buildx build \
           --file ${{ env.DOCKERFILE_PATH }} \
