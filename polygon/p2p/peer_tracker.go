@@ -67,6 +67,8 @@ type peerTracker struct {
 }
 
 func (pt *peerTracker) Run(ctx context.Context) error {
+	pt.logger.Debug(peerTrackerLogPrefix("running peer tracker component"))
+
 	var unregister polygoncommon.UnregisterFunc
 	defer func() { unregister() }()
 
@@ -78,7 +80,7 @@ func (pt *peerTracker) Run(ctx context.Context) error {
 		defer pt.mu.Unlock()
 
 		// 1. register the observer
-		unregister = pt.peerEventRegistrar.RegisterPeerEventObserver(NewPeerEventObserver(pt.logger, pt))
+		unregister = pt.peerEventRegistrar.RegisterPeerEventObserver(NewPeerEventObserver(pt))
 
 		// 2. replay the current state of connected peers
 		reply, err := pt.peerProvider.Peers(ctx, &emptypb.Empty{})
@@ -137,6 +139,7 @@ func (pt *peerTracker) PeerDisconnected(peerId *PeerId) {
 	pt.mu.Lock()
 	defer pt.mu.Unlock()
 
+	pt.logger.Debug(peerTrackerLogPrefix("peer disconnected"), "peerId", peerId.String())
 	delete(pt.peerSyncProgresses, *peerId)
 }
 
@@ -144,6 +147,7 @@ func (pt *peerTracker) PeerConnected(peerId *PeerId) {
 	pt.mu.Lock()
 	defer pt.mu.Unlock()
 
+	pt.logger.Debug(peerTrackerLogPrefix("peer connected"), "peerId", peerId.String())
 	peerIdVal := *peerId
 	if _, ok := pt.peerSyncProgresses[peerIdVal]; !ok {
 		pt.peerSyncProgresses[peerIdVal] = &peerSyncProgress{
@@ -164,12 +168,9 @@ func (pt *peerTracker) updatePeerSyncProgress(peerId *PeerId, update func(psp *p
 	update(peerSyncProgress)
 }
 
-func NewPeerEventObserver(logger log.Logger, peerTracker PeerTracker) polygoncommon.Observer[*sentryproto.PeerEvent] {
+func NewPeerEventObserver(peerTracker PeerTracker) polygoncommon.Observer[*sentryproto.PeerEvent] {
 	return func(message *sentryproto.PeerEvent) {
 		peerId := PeerIdFromH512(message.PeerId)
-
-		logger.Debug("[p2p.peerEventObserver] received new peer event", "id", message.EventId, "peerId", peerId)
-
 		switch message.EventId {
 		case sentryproto.PeerEvent_Connect:
 			peerTracker.PeerConnected(peerId)
@@ -177,4 +178,8 @@ func NewPeerEventObserver(logger log.Logger, peerTracker PeerTracker) polygoncom
 			peerTracker.PeerDisconnected(peerId)
 		}
 	}
+}
+
+func peerTrackerLogPrefix(message string) string {
+	return "[p2p.peerTracker] " + message
 }
