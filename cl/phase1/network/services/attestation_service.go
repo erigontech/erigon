@@ -182,7 +182,7 @@ func (s *attestationService) ProcessMessage(ctx context.Context, subnet *uint64,
 	if valid, err := blsVerify(signature[:], signingRoot[:], pubKey[:]); err != nil {
 		return err
 	} else if !valid {
-		log.Warn("lodestar: invalid signature", "signature", common.Bytes2Hex(signature[:]), "signningRoot", common.Bytes2Hex(signingRoot[:]), "pubKey", common.Bytes2Hex(pubKey[:]))
+		log.Warn("invalid signature", "signature", common.Bytes2Hex(signature[:]), "signningRoot", common.Bytes2Hex(signingRoot[:]), "pubKey", common.Bytes2Hex(pubKey[:]))
 		return errors.New("invalid signature")
 	}
 
@@ -197,7 +197,7 @@ func (s *attestationService) ProcessMessage(ctx context.Context, subnet *uint64,
 	// get_checkpoint_block(store, attestation.data.beacon_block_root, attestation.data.target.epoch) == attestation.data.target.root
 	startSlotAtEpoch := targetEpoch * s.beaconCfg.SlotsPerEpoch
 	if s.forkchoiceStore.Ancestor(root, startSlotAtEpoch) != att.AttestantionData().Target().BlockRoot() {
-		return errors.New("invalid target block")
+		return fmt.Errorf("invalid target block. root %v targetEpoch %v targetBlockRoot %v", root.Hex(), targetEpoch, att.AttestantionData().Target().BlockRoot().Hex())
 	}
 	// [IGNORE] The current finalized_checkpoint is an ancestor of the block defined by attestation.data.beacon_block_root --
 	// i.e. get_checkpoint_block(store, attestation.data.beacon_block_root, store.finalized_checkpoint.epoch) == store.finalized_checkpoint.root

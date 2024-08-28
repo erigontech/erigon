@@ -233,7 +233,7 @@ func CalcProducerDelay(number uint64, succession int, c *borcfg.BorConfig) uint6
 	// When the block is the first block of the sprint, it is expected to be delayed by `producerDelay`.
 	// That is to allow time for block propagation in the last sprint
 	delay := c.CalculatePeriod(number)
-	if number%c.CalculateSprintLength(number) == 0 {
+	if c.IsSprintStart(number) {
 		delay = c.CalculateProducerDelay(number)
 	}
 
@@ -584,7 +584,7 @@ func ValidateHeaderExtraLength(extraBytes []byte) error {
 // ValidateHeaderSprintValidators validates that the extra-data contains a validators list only in the last header of a sprint.
 func ValidateHeaderSprintValidators(header *types.Header, config *borcfg.BorConfig) error {
 	number := header.Number.Uint64()
-	isSprintEnd := isSprintStart(number+1, config.CalculateSprintLength(number))
+	isSprintEnd := config.IsSprintEnd(number)
 	validatorBytes := GetValidatorBytes(header, config)
 	validatorBytesLen := len(validatorBytes)
 
@@ -950,7 +950,7 @@ func (c *Bor) Prepare(chain consensus.ChainHeaderReader, header *types.Header, s
 	// client calls `GetCurrentValidators` because it makes a contract call
 	// where it fetches producers internally. As we fetch data from span
 	// in Erigon, use directly the `GetCurrentProducers` function.
-	if isSprintStart(number+1, c.config.CalculateSprintLength(number)) {
+	if c.config.IsSprintEnd(number) {
 		spanID := uint64(heimdall.SpanIdAt(number + 1))
 		newValidators, err := c.spanner.GetCurrentProducers(spanID, chain)
 		if err != nil {
@@ -1050,7 +1050,7 @@ func (c *Bor) Finalize(config *chain.Config, header *types.Header, state *state.
 		return nil, nil, nil, consensus.ErrUnexpectedRequests
 	}
 
-	if isSprintStart(headerNumber, c.config.CalculateSprintLength(headerNumber)) {
+	if c.config.IsSprintStart(headerNumber) {
 		cx := statefull.ChainContext{Chain: chain, Bor: c}
 
 		if c.blockReader != nil {
@@ -1117,7 +1117,7 @@ func (c *Bor) FinalizeAndAssemble(chainConfig *chain.Config, header *types.Heade
 		return nil, nil, nil, consensus.ErrUnexpectedRequests
 	}
 
-	if isSprintStart(headerNumber, c.config.CalculateSprintLength(headerNumber)) {
+	if c.config.IsSprintStart(headerNumber) {
 		cx := statefull.ChainContext{Chain: chain, Bor: c}
 
 		if c.blockReader != nil {
@@ -1643,10 +1643,6 @@ func (c *Bor) getNextHeimdallSpanForTest(
 	heimdallSpan.ChainID = c.chainConfig.ChainID.String()
 
 	return &heimdallSpan, nil
-}
-
-func isSprintStart(number, sprint uint64) bool {
-	return number%sprint == 0
 }
 
 // BorTransfer transfer in Bor
