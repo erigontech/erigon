@@ -70,7 +70,6 @@ type HermezDb interface {
 	WriteBlockL1InfoTreeIndex(blockNumber uint64, l1Index uint64) error
 	WriteBlockL1InfoTreeIndexProgress(blockNumber uint64, l1Index uint64) error
 	WriteLatestUsedGer(blockNo uint64, ger common.Hash) error
-	WriteLocalExitRootForBatchNo(batchNo uint64, localExitRoot common.Hash) error
 }
 
 type DatastreamClient interface {
@@ -255,9 +254,6 @@ LOOP:
 			case *types.BatchEnd:
 				if entry.StateRoot != lastBlockRoot {
 					log.Warn(fmt.Sprintf("[%s] batch end state root mismatches last block's: %x, expected: %x", logPrefix, entry.StateRoot, lastBlockRoot))
-				}
-				if err := writeBatchEnd(hermezDb, entry); err != nil {
-					return fmt.Errorf("write batch end error: %v", err)
 				}
 			case *types.FullL2Block:
 				if cfg.zkCfg.SyncLimit > 0 && entry.L2BlockNumber >= cfg.zkCfg.SyncLimit {
@@ -750,14 +746,6 @@ func PruneBatchesStage(s *stagedsync.PruneState, tx kv.RwTx, cfg BatchesCfg, ctx
 		}
 	}
 	return nil
-}
-
-func writeBatchEnd(hermezDb HermezDb, batchEnd *types.BatchEnd) (err error) {
-	// utils.CalculateAccInputHash(oldAccInputHash, batchStart., l1InfoRoot common.Hash, timestampLimit uint64, sequencerAddr common.Address, forcedBlockhashL1 common.Hash)
-	if batchEnd.LocalExitRoot != emptyHash {
-		err = hermezDb.WriteLocalExitRootForBatchNo(batchEnd.Number, batchEnd.LocalExitRoot)
-	}
-	return
 }
 
 // writeL2Block writes L2Block to ErigonDb and HermezDb

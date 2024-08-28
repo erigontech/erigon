@@ -38,7 +38,7 @@ const BLOCK_L1_BLOCK_HASHES = "block_l1_block_hashes"                   // block
 const L1_BLOCK_HASH_GER = "l1_block_hash_ger"                           // l1 block hash -> GER
 const INTERMEDIATE_TX_STATEROOTS = "hermez_intermediate_tx_stateRoots"  // l2blockno -> stateRoot
 const BATCH_WITNESSES = "hermez_batch_witnesses"                        // batch number -> witness
-const BATCH_COUNTERS = "hermez_batch_counters"                          // batch number -> counters
+const BATCH_COUNTERS = "hermez_batch_counters"                          // block number -> counters
 const L1_BATCH_DATA = "l1_batch_data"                                   // batch number -> l1 batch data from transaction call data
 const REUSED_L1_INFO_TREE_INDEX = "reused_l1_info_tree_index"           // block number => const 1
 const LATEST_USED_GER = "latest_used_ger"                               // batch number -> GER latest used GER
@@ -47,8 +47,6 @@ const SMT_DEPTHS = "smt_depths"                                         // block
 const L1_INFO_LEAVES = "l1_info_leaves"                                 // l1 info tree index -> l1 info tree leaf
 const L1_INFO_ROOTS = "l1_info_roots"                                   // root hash -> l1 info tree index
 const INVALID_BATCHES = "invalid_batches"                               // batch number -> true
-const BATCH_PARTIALLY_PROCESSED = "batch_partially_processed"           // batch number -> true
-const LOCAL_EXIT_ROOTS = "local_exit_roots"                             // batch number -> local exit root
 const ROllUP_TYPES_FORKS = "rollup_types_forks"                         // rollup type id -> fork id
 const FORK_HISTORY = "fork_history"                                     // index -> fork id + last verified batch
 const JUST_UNWOUND = "just_unwound"                                     // batch number -> true
@@ -86,8 +84,6 @@ var HermezDbTables = []string{
 	L1_INFO_LEAVES,
 	L1_INFO_ROOTS,
 	INVALID_BATCHES,
-	BATCH_PARTIALLY_PROCESSED,
-	LOCAL_EXIT_ROOTS,
 	ROllUP_TYPES_FORKS,
 	FORK_HISTORY,
 	JUST_UNWOUND,
@@ -1608,18 +1604,6 @@ func (db *HermezDbReader) GetInvalidBatch(batchNo uint64) (bool, error) {
 		return false, err
 	}
 	return len(v) > 0, nil
-}
-
-func (db *HermezDb) WriteLocalExitRootForBatchNo(batchNo uint64, root common.Hash) error {
-	return db.tx.Put(LOCAL_EXIT_ROOTS, Uint64ToBytes(batchNo), root.Bytes())
-}
-
-func (db *HermezDbReader) GetLocalExitRootForBatchNo(batchNo uint64) (common.Hash, error) {
-	v, err := db.tx.GetOne(LOCAL_EXIT_ROOTS, Uint64ToBytes(batchNo))
-	if err != nil {
-		return common.Hash{}, err
-	}
-	return common.BytesToHash(v), nil
 }
 
 func (db *HermezDb) WriteRollupType(rollupType, forkId uint64) error {

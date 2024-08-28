@@ -176,7 +176,7 @@ func createBatchStartEntriesProto(
 			}
 
 			// seal off the last batch
-			if localExitRoot, err = utils.GetBatchLocalExitRootFromSCStorage(workingBatch, reader, tx); err != nil {
+			if localExitRoot, err = utils.GetBatchLocalExitRootFromSCStorageForLatestBlock(workingBatch, reader, tx); err != nil {
 				return nil, err
 			}
 			entries.Add(newBatchEndProto(localExitRoot, root, workingBatch))

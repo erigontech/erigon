@@ -34,6 +34,8 @@ func main() {
 	var lastBlockRoot common.Hash
 	progressBatch := uint64(0)
 	progressBlock := uint64(0)
+	lastSeenBatch := uint64(0)
+	lastSeenBlock := uint64(0)
 
 	function := func(file *types.FileEntry) error {
 		switch file.EntryType {
@@ -65,6 +67,10 @@ func main() {
 			if err != nil {
 				return err
 			}
+			if lastSeenBatch+1 != batchStart.Number {
+				return fmt.Errorf("unexpected batch %d, expected %d", batchStart.Number, lastSeenBatch+1)
+			}
+			lastSeenBatch = batchStart.Number
 			progressBatch = batchStart.Number
 			if previousFile != nil {
 				if previousFile.EntryType != types.BookmarkEntryType {
@@ -106,6 +112,10 @@ func main() {
 			if err != nil {
 				return err
 			}
+			if l2Block.L2BlockNumber > 0 && lastSeenBlock+1 != l2Block.L2BlockNumber {
+				return fmt.Errorf("unexpected block %d, expected %d", l2Block.L2BlockNumber, lastSeenBlock+1)
+			}
+			lastSeenBlock = l2Block.L2BlockNumber
 			progressBlock = l2Block.L2BlockNumber
 			if previousFile != nil {
 				if previousFile.EntryType != types.BookmarkEntryType && !previousFile.IsL2BlockEnd() {

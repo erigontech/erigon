@@ -88,9 +88,12 @@ func SpawnSequencingStage(
 	// if we identify any.  During normal operation this function will simply check and move on without performing
 	// any action.
 	if !batchState.isAnyRecovery() {
-		isUnwinding, err := handleBatchEndChecks(batchContext, batchState, executionAt, u)
-		if err != nil || isUnwinding {
+		isUnwinding, err := alignExecutionToDatastream(batchContext, batchState, executionAt, u)
+		if err != nil {
 			return err
+		}
+		if isUnwinding {
+			return sdb.tx.Commit()
 		}
 	}
 
@@ -382,9 +385,25 @@ func SpawnSequencingStage(
 		return err
 	}
 
-	if err = runBatchLastSteps(batchContext, batchState.batchNumber, block.NumberU64(), batchCounters); err != nil {
+	/*
+		if adding something below that line we must ensure
+		- it is also handled property in processInjectedInitialBatch
+		- it is also handled property in alignExecutionToDatastream
+		- it is also handled property in doCheckForBadBatch
+		- it is unwound correctly
+	*/
+
+	if err := finalizeLastBatchInDatastream(batchContext, batchState.batchNumber, block.NumberU64()); err != nil {
 		return err
 	}
+
+	// TODO: It is 99% sure that there is no need to write this in any of processInjectedInitialBatch, alignExecutionToDatastream, doCheckForBadBatch but it is worth double checknig
+	// the unwind of this value is handed by UnwindExecutionStageDbWrites
+	if _, err := rawdb.IncrementStateVersionByBlockNumberIfNeeded(batchContext.sdb.tx, block.NumberU64()); err != nil {
+		return fmt.Errorf("writing plain state version: %w", err)
+	}
+
+	log.Info(fmt.Sprintf("[%s] Finish batch %d...", batchContext.s.LogPrefix(), batchState.batchNumber))
 
 	return sdb.tx.Commit()
 }

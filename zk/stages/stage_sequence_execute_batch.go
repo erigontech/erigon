@@ -8,7 +8,6 @@ import (
 	"github.com/ledgerwatch/erigon/core/vm"
 	"github.com/ledgerwatch/erigon/eth/stagedsync"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
-	"github.com/ledgerwatch/erigon/zk/utils"
 	"github.com/ledgerwatch/log/v3"
 )
 
@@ -111,64 +110,4 @@ func updateStreamAndCheckRollback(
 	}
 
 	return false, nil
-}
-
-func runBatchLastSteps(
-	batchContext *BatchContext,
-	thisBatch uint64,
-	blockNumber uint64,
-	batchCounters *vm.BatchCounterCollector,
-) error {
-	l1InfoIndex, err := batchContext.sdb.hermezDb.GetBlockL1InfoTreeIndex(blockNumber)
-	if err != nil {
-		return err
-	}
-
-	counters, err := batchCounters.CombineCollectors(l1InfoIndex != 0)
-	if err != nil {
-		return err
-	}
-
-	log.Info(fmt.Sprintf("[%s] counters consumed", batchContext.s.LogPrefix()), "batch", thisBatch, "counts", counters.UsedAsString())
-
-	if err = batchContext.sdb.hermezDb.WriteBatchCounters(blockNumber, counters.UsedAsMap()); err != nil {
-		return err
-	}
-
-	// Local Exit Root (ler): read s/c storage every batch to store the LER for the highest block in the batch
-	ler, err := utils.GetBatchLocalExitRootFromSCStorage(thisBatch, batchContext.sdb.hermezDb.HermezDbReader, batchContext.sdb.tx)
-	if err != nil {
-		return err
-	}
-	// write ler to hermezdb
-	if err = batchContext.sdb.hermezDb.WriteLocalExitRootForBatchNo(thisBatch, ler); err != nil {
-		return err
-	}
-
-	// get the last block number written to batch
-	// we should match it's state root in batch end entry
-	// if we get the last block in DB errors may occur since we have DB unwinds AFTER we commit batch end to datastream
-	// the last block written to the datastream before batch end should be the correct one once we are here
-	// if it is not, we have a bigger problem
-	lastBlockNumber, err := batchContext.cfg.datastreamServer.GetHighestBlockNumber()
-	if err != nil {
-		return err
-	}
-	block, err := rawdb.ReadBlockByNumber(batchContext.sdb.tx, lastBlockNumber)
-	if err != nil {
-		return err
-	}
-	blockRoot := block.Root()
-	if err = batchContext.cfg.datastreamServer.WriteBatchEnd(batchContext.sdb.hermezDb, thisBatch, &blockRoot, &ler); err != nil {
-		return err
-	}
-
-	// the unwind of this value is handed by UnwindExecutionStageDbWrites
-	if _, err = rawdb.IncrementStateVersionByBlockNumberIfNeeded(batchContext.sdb.tx, lastBlockNumber); err != nil {
-		return fmt.Errorf("writing plain state version: %w", err)
-	}
-
-	log.Info(fmt.Sprintf("[%s] Finish batch %d...", batchContext.s.LogPrefix(), thisBatch))
-
-	return nil
 }

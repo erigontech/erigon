@@ -646,7 +646,7 @@ func (api *ZkEvmAPIImpl) GetBatchByNumber(ctx context.Context, batchNumber rpc.B
 	}
 
 	// local exit root
-	localExitRoot, err := utils.GetBatchLocalExitRoot(batchNo, hermezDb, tx)
+	localExitRoot, err := utils.GetBatchLocalExitRootFromSCStorageForLatestBlock(batchNo, hermezDb, tx)
 	if err != nil {
 		return nil, err
 	}
