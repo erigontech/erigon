@@ -34,6 +34,7 @@ type Service interface {
 	MessageListener
 	PeerTracker
 	PeerPenalizer
+	Run(ctx context.Context) error
 	MaxPeers() int
 }
 
