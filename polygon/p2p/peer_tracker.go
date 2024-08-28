@@ -94,7 +94,7 @@ func (pt *peerTracker) Run(ctx context.Context) error {
 				return err
 			}
 
-			pt.PeerConnected(peerId)
+			pt.peerConnected(peerId)
 		}
 
 		pt.logger.Debug(peerTrackerLogPrefix("replayed current state of connected peers"), "count", len(reply.Peers))
@@ -148,7 +148,12 @@ func (pt *peerTracker) PeerConnected(peerId *PeerId) {
 	pt.mu.Lock()
 	defer pt.mu.Unlock()
 
+	pt.peerConnected(peerId)
+}
+
+func (pt *peerTracker) peerConnected(peerId *PeerId) {
 	pt.logger.Debug(peerTrackerLogPrefix("peer connected"), "peerId", peerId.String())
+
 	peerIdVal := *peerId
 	if _, ok := pt.peerSyncProgresses[peerIdVal]; !ok {
 		pt.peerSyncProgresses[peerIdVal] = &peerSyncProgress{
