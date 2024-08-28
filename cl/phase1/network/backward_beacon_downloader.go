@@ -17,6 +17,7 @@
 package network
 
 import (
+	"math"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -33,6 +34,7 @@ import (
 	"github.com/erigontech/erigon/cl/persistence/beacon_indicies"
 	"github.com/erigontech/erigon/cl/phase1/execution_client"
 	"github.com/erigontech/erigon/cl/rpc"
+	"github.com/erigontech/erigon/turbo/snapshotsync/freezeblocks"
 )
 
 // Whether the reverse downloader arrived at expected height or condition.
@@ -48,12 +50,13 @@ type BackwardBeaconDownloader struct {
 	finished       atomic.Bool
 	reqInterval    *time.Ticker
 	db             kv.RwDB
+	sn             *freezeblocks.CaplinSnapshots
 	neverSkip      bool
 
 	mu sync.Mutex
 }
 
-func NewBackwardBeaconDownloader(ctx context.Context, rpc *rpc.BeaconRpcP2P, engine execution_client.ExecutionEngine, db kv.RwDB) *BackwardBeaconDownloader {
+func NewBackwardBeaconDownloader(ctx context.Context, rpc *rpc.BeaconRpcP2P, sn *freezeblocks.CaplinSnapshots, engine execution_client.ExecutionEngine, db kv.RwDB) *BackwardBeaconDownloader {
 	return &BackwardBeaconDownloader{
 		ctx:         ctx,
 		rpc:         rpc,
@@ -61,6 +64,7 @@ func NewBackwardBeaconDownloader(ctx context.Context, rpc *rpc.BeaconRpcP2P, eng
 		reqInterval: time.NewTicker(300 * time.Millisecond),
 		neverSkip:   true,
 		engine:      engine,
+		sn:          sn,
 	}
 }
 
@@ -202,8 +206,32 @@ Loop:
 		return err
 	}
 	defer tx.Rollback()
+
+	elFrozenBlocks := uint64(math.MaxUint64)
+	if b.engine != nil && b.engine.SupportInsertion() {
+		elFrozenBlocks = b.engine.FrozenBlocks(ctx)
+	}
+	clFrozenBlocks := uint64(0)
+	if b.sn != nil {
+		clFrozenBlocks = b.sn.SegmentsMax()
+	}
+
+	updateFrozenBlocksTicker := time.NewTicker(5 * time.Second)
+	defer updateFrozenBlocksTicker.Stop()
 	// it will stop if we end finding a gap or if we reach the maxIterations
 	for {
+
+		select {
+		case <-updateFrozenBlocksTicker.C:
+			if b.sn != nil {
+				clFrozenBlocks = b.sn.SegmentsMax()
+			}
+			if b.engine != nil && b.engine.SupportInsertion() {
+				elFrozenBlocks = b.engine.FrozenBlocks(ctx)
+			}
+		default:
+		}
+
 		// check if the expected root is in db
 		slot, err := beacon_indicies.ReadBlockSlotByBlockRoot(tx, b.expectedRoot)
 		if err != nil {
@@ -219,7 +247,14 @@ Loop:
 			if err != nil {
 				return err
 			}
-			if blockHash != (libcommon.Hash{}) {
+			blockNumber, err := beacon_indicies.ReadExecutionBlockNumber(tx, b.expectedRoot)
+			if err != nil {
+				return err
+			}
+			if blockHash == (libcommon.Hash{}) || blockNumber == nil {
+				break
+			}
+			if *blockNumber >= elFrozenBlocks {
 				has, err := b.engine.HasBlock(ctx, blockHash)
 				if err != nil {
 					return err
@@ -228,6 +263,9 @@ Loop:
 					break
 				}
 			}
+		}
+		if *slot <= clFrozenBlocks {
+			break
 		}
 		b.slotToDownload.Store(*slot - 1)
 		if err := beacon_indicies.MarkRootCanonical(b.ctx, tx, *slot, b.expectedRoot); err != nil {

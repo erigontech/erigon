@@ -117,19 +117,23 @@ func SpawnStageHistoryDownload(cfg StageHistoryReconstructionCfg, ctx context.Co
 			currEth1Progress.Store(int64(blk.Block.Body.ExecutionPayload.BlockNumber))
 		}
 
-		destinationSlotForCL := cfg.sn.SegmentsMax()
-
 		slot := blk.Block.Slot
-		if destinationSlotForCL <= blk.Block.Slot {
+		isInCLSnapshots := cfg.sn.SegmentsMax() > blk.Block.Slot
+		if !isInCLSnapshots {
 			if err := beacon_indicies.WriteBeaconBlockAndIndicies(ctx, tx, blk, true); err != nil {
 				return false, err
 			}
 		}
 		if cfg.engine != nil && cfg.engine.SupportInsertion() && blk.Version() >= clparams.BellatrixVersion {
+			frozenBlocksInEL := cfg.engine.FrozenBlocks(ctx)
+
 			payload := blk.Block.Body.ExecutionPayload
-			hasELBlock, err := cfg.engine.HasBlock(ctx, payload.BlockHash)
-			if err != nil {
-				return false, fmt.Errorf("error retrieving whether execution payload is present: %s", err)
+			hasELBlock := frozenBlocksInEL > blk.Block.Body.ExecutionPayload.BlockNumber
+			if !hasELBlock {
+				hasELBlock, err = cfg.engine.HasBlock(ctx, payload.BlockHash)
+				if err != nil {
+					return false, fmt.Errorf("error retrieving whether execution payload is present: %s", err)
+				}
 			}
 
 			if !hasELBlock {
@@ -147,15 +151,16 @@ func SpawnStageHistoryDownload(cfg StageHistoryReconstructionCfg, ctx context.Co
 		isInElSnapshots := true
 		if blk.Version() >= clparams.BellatrixVersion && cfg.engine != nil && cfg.engine.SupportInsertion() {
 			frozenBlocksInEL := cfg.engine.FrozenBlocks(ctx)
-			isInElSnapshots = blk.Block.Body.ExecutionPayload.BlockNumber < frozenBlocksInEL
+			isInElSnapshots = frozenBlocksInEL > blk.Block.Body.ExecutionPayload.BlockNumber
 			if cfg.engine.HasGapInSnapshots(ctx) && frozenBlocksInEL > 0 {
 				destinationSlotForEL = frozenBlocksInEL - 1
 			}
 		}
-		if slot == 0 {
+
+		if slot == 0 || (isInCLSnapshots && isInElSnapshots) {
 			return true, tx.Commit()
 		}
-		return (!cfg.backfilling || slot <= destinationSlotForCL) && (slot <= destinationSlotForEL || isInElSnapshots), tx.Commit()
+		return (!cfg.backfilling || slot <= cfg.sn.SegmentsMax()) && (slot <= destinationSlotForEL || isInElSnapshots), tx.Commit()
 	})
 	prevProgress := cfg.downloader.Progress()
 
