@@ -28,6 +28,7 @@ import (
 	"go.uber.org/mock/gomock"
 
 	"github.com/erigontech/erigon-lib/gointerfaces/sentryproto"
+	"github.com/erigontech/erigon-lib/gointerfaces/typesproto"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/polygon/polygoncommon"
 	"github.com/erigontech/erigon/turbo/testlog"
@@ -70,9 +71,18 @@ func TestPeerTracker(t *testing.T) {
 func TestPeerTrackerPeerEventObserver(t *testing.T) {
 	t.Parallel()
 
+	alreadyConnectedPeerEnode := "enode://c87922d094c326ca660248b48cf1aa6d0ec6eb3a572c5cb64152008c1e3c8d67f5d9b66df427883aae6b01383c8cc56027eaf7e6062c9b191663076ad397b1e5@194.233.65.96:30303"
+	alreadyConnectedPeerId, err := PeerIdFromEnode(alreadyConnectedPeerEnode)
+	require.NoError(t, err)
 	peerEventsStream := make(chan *sentryproto.PeerEvent)
 	test := newPeerTrackerTest(t)
-	test.mockPeerProvider(&sentryproto.PeersReply{})
+	test.mockPeerProvider(&sentryproto.PeersReply{
+		Peers: []*typesproto.PeerInfo{
+			{
+				Enode: alreadyConnectedPeerEnode,
+			},
+		},
+	})
 	test.mockPeerEvents(peerEventsStream)
 	peerTracker := test.peerTracker
 	test.run(func(ctx context.Context, t *testing.T) {
@@ -93,11 +103,12 @@ func TestPeerTrackerPeerEventObserver(t *testing.T) {
 				return len(peerIds) == wantPeerIdsLen
 			}
 		}
-		require.Eventually(t, waitCond(2), time.Second, 5*time.Millisecond)
-		require.Len(t, peerIds, 2)
+		require.Eventually(t, waitCond(3), time.Second, 5*time.Millisecond)
+		require.Len(t, peerIds, 3)
 		sortPeerIdsAssumingUints(peerIds)
 		require.Equal(t, PeerIdFromUint64(1), peerIds[0])
 		require.Equal(t, PeerIdFromUint64(2), peerIds[1])
+		require.Equal(t, alreadyConnectedPeerId, peerIds[2])
 
 		peerEventsStream <- &sentryproto.PeerEvent{
 			PeerId:  PeerIdFromUint64(1).H512(),
@@ -105,9 +116,11 @@ func TestPeerTrackerPeerEventObserver(t *testing.T) {
 		}
 
 		peerIds = peerTracker.ListPeersMayHaveBlockNum(100)
-		require.Eventually(t, waitCond(1), time.Second, 5*time.Millisecond)
-		require.Len(t, peerIds, 1)
+		require.Eventually(t, waitCond(2), time.Second, 5*time.Millisecond)
+		require.Len(t, peerIds, 2)
+		sortPeerIdsAssumingUints(peerIds)
 		require.Equal(t, PeerIdFromUint64(2), peerIds[0])
+		require.Equal(t, alreadyConnectedPeerId, peerIds[1])
 	})
 }
 
