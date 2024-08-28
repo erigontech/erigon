@@ -209,9 +209,9 @@ func (tft *trackingFetcherTest) run(f func(ctx context.Context, t *testing.T)) {
 	tft.t.Run("start", func(t *testing.T) {
 		go func() {
 			defer done.Store(true)
-			var eg errgroup.Group
+			eg, ctx := errgroup.WithContext(tft.ctx)
 			eg.Go(func() error {
-				return tft.peerTracker.Run(tft.ctx)
+				return tft.peerTracker.Run(ctx)
 			})
 			eg.Go(func() error {
 				// wait for the tracker to be initialised before simulating peer events,
@@ -222,7 +222,7 @@ func (tft *trackingFetcherTest) run(f func(ctx context.Context, t *testing.T)) {
 					return tft.peerTrackerInitialised.Load()
 				}, time.Second, 100*time.Millisecond, "expected peer tracker to be initialised")
 
-				return tft.messageListener.Run(tft.ctx)
+				return tft.messageListener.Run(ctx)
 			})
 			err := eg.Wait()
 			require.ErrorIs(t, err, context.Canceled)
