@@ -466,8 +466,9 @@ func (s *polygonSyncStageService) Run(ctx context.Context, tx kv.RwTx, stageStat
 				return nil
 			}
 			if errors.Is(err, context.Canceled) {
-				s.logger.Warn(s.appendLogPrefix("tx action was cancelled by creator"))
-				continue
+				// we return a different err and not context.Canceled because that will cancel the stage loop
+				// instead we want the stage loop to return to this stage and re-processes
+				return errors.New("txAction cancelled by requester")
 			}
 			if err != nil {
 				return err
