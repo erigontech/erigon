@@ -302,6 +302,17 @@ func (sdb *IntraBlockState) ResolveCode(addr libcommon.Address) []byte {
 	return sdb.GetCode(addr)
 }
 
+func (sdb *IntraBlockState) ResolveCodeSize(addr libcommon.Address) int {
+	// eip-7702
+	size := sdb.GetCodeSize(addr)
+	if size == 23 {
+		// might be delegated designation
+		return len(sdb.ResolveCode(addr))
+	}
+
+	return size
+}
+
 func (sdb *IntraBlockState) GetDelegatedDesignation(addr libcommon.Address) (libcommon.Address, bool) {
 	// eip-7702
 	code := sdb.GetCode(addr)
