@@ -62,6 +62,21 @@ jobs:
           
           echo "Erigon (RpcDaemon) started"
 
+      - name: Wait for port 8545 to be opened
+        run: |
+          for i in {1..30}; do
+            if nc -z localhost 8545; then
+              echo "Port 8545 is open"
+              break
+            fi
+            echo "Waiting for port 8545 to open..."
+            sleep 10
+          done
+          if ! nc -z localhost 8545; then
+            echo "Port 8545 did not open in time"
+            exit 1
+          fi
+
       - name: Run RPC Integration Tests
         id: test_step
         run: |
