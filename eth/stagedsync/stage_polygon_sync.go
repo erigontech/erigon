@@ -1430,7 +1430,7 @@ func (e *polygonSyncStageExecutionEngine) currentHeader(ctx context.Context, tx 
 func awaitTxAction[T any](
 	ctx context.Context,
 	txActionStream chan<- polygonSyncStageTxAction,
-	cb func(tx kv.RwTx, respond func(T) error) error,
+	cb func(tx kv.RwTx, respond func(response T) error) error,
 ) (T, error) {
 	responseStream := make(chan T)
 	respondFunc := func(response T) error {
