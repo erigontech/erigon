@@ -22,6 +22,8 @@ import (
 
 	"github.com/erigontech/erigon-lib/gointerfaces"
 	"github.com/erigontech/erigon-lib/gointerfaces/typesproto"
+	"github.com/erigontech/erigon/crypto"
+	"github.com/erigontech/erigon/p2p/enode"
 )
 
 func PeerIdFromH512(h512 *typesproto.H512) *PeerId {
@@ -29,12 +31,13 @@ func PeerIdFromH512(h512 *typesproto.H512) *PeerId {
 	return &peerId
 }
 
-func PeerIdFromHex(hexValue string) (*PeerId, error) {
-	b, err := hex.DecodeString(hexValue)
+func PeerIdFromEnode(url string) (*PeerId, error) {
+	n, err := enode.ParseV4(url)
 	if err != nil {
 		return nil, err
 	}
 
+	b := crypto.MarshalPubkey(n.Pubkey())
 	peerId := PeerId(b[:64])
 	return &peerId, nil
 }

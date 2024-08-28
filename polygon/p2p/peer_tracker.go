@@ -89,7 +89,7 @@ func (pt *peerTracker) Run(ctx context.Context) error {
 		}
 
 		for _, peer := range reply.Peers {
-			peerId, err := PeerIdFromHex(peer.Id)
+			peerId, err := PeerIdFromEnode(peer.Enode)
 			if err != nil {
 				return err
 			}
