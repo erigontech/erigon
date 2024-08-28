@@ -97,6 +97,7 @@ func (pt *peerTracker) Run(ctx context.Context) error {
 			pt.PeerConnected(peerId)
 		}
 
+		pt.logger.Debug(peerTrackerLogPrefix("replayed current state of connected peers"), "count", len(reply.Peers))
 		return nil
 	}()
 	if err != nil {
