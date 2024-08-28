@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/VictoriaMetrics/metrics"
 	"github.com/gateway-fm/cdk-erigon-lib/kv"
 	"github.com/ledgerwatch/log/v3"
 
@@ -41,7 +42,11 @@ type IL1Syncer interface {
 	Stop()
 }
 
-var ErrStateRootMismatch = errors.New("state root mismatch")
+var (
+	ErrStateRootMismatch = errors.New("state root mismatch")
+
+	lastCheckedL1BlockCounter = metrics.GetOrCreateCounter(`last_checked_l1_block`)
+)
 
 type L1SyncerCfg struct {
 	db     kv.RwDB
@@ -172,6 +177,9 @@ Loop:
 	}
 
 	latestCheckedBlock := cfg.syncer.GetLastCheckedL1Block()
+
+	lastCheckedL1BlockCounter.Set(latestCheckedBlock)
+
 	if highestWrittenL1BlockNo > l1BlockProgress {
 		log.Info(fmt.Sprintf("[%s] Saving L1 syncer progress", logPrefix), "latestCheckedBlock", latestCheckedBlock, "newVerificationsCount", newVerificationsCount, "newSequencesCount", newSequencesCount, "highestWrittenL1BlockNo", highestWrittenL1BlockNo)
 
