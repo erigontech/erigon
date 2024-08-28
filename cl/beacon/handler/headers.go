@@ -31,7 +31,7 @@ func (a *ApiHandler) getHeaders(w http.ResponseWriter, r *http.Request) (*beacon
 	var potentialRoot libcommon.Hash
 	// First lets find some good candidates for the query. TODO(Giulio2002): this does not give all the headers.
 	switch {
-	case queryParentHash != nil && querySlot != nil:
+	case queryParentHash != nil:
 		// get all blocks with this parent
 		slot, err = beacon_indicies.ReadBlockSlotByBlockRoot(tx, *queryParentHash)
 		if err != nil {
@@ -40,14 +40,13 @@ func (a *ApiHandler) getHeaders(w http.ResponseWriter, r *http.Request) (*beacon
 		if slot == nil {
 			break
 		}
-		if *slot+1 != *querySlot {
-			break
+		for i := uint64(1); i < a.beaconChainCfg.SlotsPerEpoch; i++ {
+			potentialRoot, err = beacon_indicies.ReadCanonicalBlockRoot(tx, (*slot)+i)
+			if err != nil {
+				return nil, err
+			}
+			candidates = append(candidates, potentialRoot)
 		}
-		potentialRoot, err = beacon_indicies.ReadCanonicalBlockRoot(tx, *slot+1)
-		if err != nil {
-			return nil, err
-		}
-		candidates = append(candidates, potentialRoot)
 	case queryParentHash == nil && querySlot != nil:
 		potentialRoot, err = beacon_indicies.ReadCanonicalBlockRoot(tx, *querySlot)
 		if err != nil {
