@@ -932,6 +932,10 @@ Loop:
 
 			select {
 			case <-logEvery.C:
+				if inMemExec {
+					break
+				}
+
 				stepsInDB := rawdbhelpers.IdxStepsCountV3(applyTx)
 				progress.Log("", rs, in, rws, count, logGas, inputBlockNum.Load(), outputBlockNum.GetValueUint64(), outputTxNum.Load(), mxExecRepeats.GetValueUint64(), stepsInDB, shouldGenerateChangesets)
 
@@ -943,9 +947,6 @@ Loop:
 				//	}
 				//}
 
-				if inMemExec {
-					break
-				}
 				// If we skip post evaluation, then we should compute root hash ASAP for fail-fast
 				if !skipPostEvaluation && rs.SizeEstimate() < commitThreshold {
 					break
