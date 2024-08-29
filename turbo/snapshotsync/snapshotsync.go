@@ -83,11 +83,6 @@ func WaitForDownloader(ctx context.Context, logPrefix string, histV3, blobs bool
 		return nil
 	}
 
-	snapshots.Close()
-	if cc.Bor != nil {
-		borSnapshots.Close()
-	}
-
 	//Corner cases:
 	// - Erigon generated file X with hash H1. User upgraded Erigon. New version has preverified file X with hash H2. Must ignore H2 (don't send to Downloader)
 	// - Erigon "download once": means restart/upgrade/downgrade must not download files (and will be fast)
@@ -209,7 +204,7 @@ func WaitForDownloader(ctx context.Context, logPrefix string, histV3, blobs bool
 	// prohibits further downloads, except some exceptions
 	for _, p := range blockReader.AllTypes() {
 		if _, err := snapshotDownloader.ProhibitNewDownloads(ctx, &proto_downloader.ProhibitNewDownloadsRequest{
-			Type: p.String(),
+			Type: p.Name(),
 		}); err != nil {
 			return err
 		}
@@ -222,7 +217,7 @@ func WaitForDownloader(ctx context.Context, logPrefix string, histV3, blobs bool
 			}
 
 			if _, err := snapshotDownloader.ProhibitNewDownloads(ctx, &proto_downloader.ProhibitNewDownloadsRequest{
-				Type: p.String(),
+				Type: p.Name(),
 			}); err != nil {
 				return err
 			}
@@ -249,7 +244,6 @@ func WaitForDownloader(ctx context.Context, logPrefix string, histV3, blobs bool
 func logStats(ctx context.Context, stats *proto_downloader.StatsReply, startTime time.Time, stagesIdsList []string, logPrefix string, logReason string) {
 	var m runtime.MemStats
 
-	diagnostics.Send(diagnostics.SyncStagesList{Stages: stagesIdsList})
 	diagnostics.Send(diagnostics.SnapshotDownloadStatistics{
 		Downloaded:           stats.BytesCompleted,
 		Total:                stats.BytesTotal,

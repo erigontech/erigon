@@ -152,12 +152,11 @@ func (d *Dumper) DumpToCollector(c DumpCollector, excludeCode, excludeStorage bo
 	if d.historyV3 {
 		ttx := d.db.(kv.TemporalTx)
 		var err error
-		// Why only account does +1?
 		txNum, err = rawdbv3.TxNums.Min(ttx, d.blockNumber+1)
 		if err != nil {
 			return nil, err
 		}
-		txNumForStorage, err = rawdbv3.TxNums.Min(ttx, d.blockNumber)
+		txNumForStorage, err = rawdbv3.TxNums.Min(ttx, d.blockNumber+1)
 		if err != nil {
 			return nil, err
 		}
@@ -281,7 +280,7 @@ func (d *Dumper) DumpToCollector(c DumpCollector, excludeCode, excludeStorage bo
 					addr,
 					incarnation,
 					libcommon.Hash{}, /* startLocation */
-					d.blockNumber,
+					d.blockNumber+1,
 					func(_, loc, vs []byte) (bool, error) {
 						account.Storage[libcommon.BytesToHash(loc).String()] = common.Bytes2Hex(vs)
 						h, _ := libcommon.HashData(loc)

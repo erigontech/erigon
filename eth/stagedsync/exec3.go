@@ -512,7 +512,7 @@ func ExecV3(ctx context.Context,
 Loop:
 	for blockNum = block; blockNum <= maxBlockNum; blockNum++ {
 		inputBlockNum.Store(blockNum)
-		b, err = blockWithSenders(chainDb, applyTx, blockReader, blockNum)
+		b, err = blockWithSenders(ctx, chainDb, applyTx, blockReader, blockNum)
 		if err != nil {
 			return err
 		}
@@ -750,15 +750,15 @@ Loop:
 	}
 	return nil
 }
-func blockWithSenders(db kv.RoDB, tx kv.Tx, blockReader services.BlockReader, blockNum uint64) (b *types.Block, err error) {
+func blockWithSenders(ctx context.Context, db kv.RoDB, tx kv.Tx, blockReader services.BlockReader, blockNum uint64) (b *types.Block, err error) {
 	if tx == nil {
-		tx, err = db.BeginRo(context.Background())
+		tx, err = db.BeginRo(ctx)
 		if err != nil {
 			return nil, err
 		}
 		defer tx.Rollback()
 	}
-	return blockReader.BlockByNumber(context.Background(), tx, blockNum)
+	return blockReader.BlockByNumber(ctx, tx, blockNum)
 }
 
 func processResultQueue(in *exec22.QueueWithRetry, rws *exec22.ResultsQueue, outputTxNumIn uint64, rs *state.StateV3, agg *libstate.Aggregator, applyTx kv.Tx, backPressure chan struct{}, applyWorker *exec3.Worker, canRetry, forceStopAtBlockEnd bool) (outputTxNum uint64, conflicts, triggers int, processedBlockNum uint64, stopedAtBlockEnd bool, err error) {
@@ -1040,7 +1040,7 @@ func reconstituteStep(last bool,
 
 		for bn := startBlockNum; bn <= endBlockNum; bn++ {
 			t = time.Now()
-			b, err = blockWithSenders(chainDb, nil, blockReader, bn)
+			b, err = blockWithSenders(ctx, chainDb, nil, blockReader, bn)
 			if err != nil {
 				return err
 			}

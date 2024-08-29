@@ -75,7 +75,7 @@ type ErigonLogs []*ErigonLog
 
 type Logs []*Log
 
-func (logs Logs) Filter(addrMap map[libcommon.Address]struct{}, topics [][]libcommon.Hash) Logs {
+func (logs Logs) Filter(addrMap map[libcommon.Address]struct{}, topics [][]libcommon.Hash, maxLogs uint64) Logs {
 	topicMap := make(map[int]map[libcommon.Hash]struct{}, 7)
 
 	//populate topic map
@@ -89,6 +89,8 @@ func (logs Logs) Filter(addrMap map[libcommon.Address]struct{}, topics [][]libco
 	}
 
 	o := make(Logs, 0, len(logs))
+	var logCount uint64
+	logCount = 0
 	for _, v := range logs {
 		// check address if addrMap is not empty
 		if len(addrMap) != 0 {
@@ -120,12 +122,19 @@ func (logs Logs) Filter(addrMap map[libcommon.Address]struct{}, topics [][]libco
 		if found {
 			o = append(o, v)
 		}
+
+		logCount += 1
+		if maxLogs != 0 && logCount >= maxLogs {
+			break
+		}
 	}
 	return o
 }
 
-func (logs Logs) CointainTopics(addrMap map[libcommon.Address]struct{}, topicsMap map[libcommon.Hash]struct{}) Logs {
+func (logs Logs) CointainTopics(addrMap map[libcommon.Address]struct{}, topicsMap map[libcommon.Hash]struct{}, maxLogs uint64) Logs {
 	o := make(Logs, 0, len(logs))
+	var logCount uint64
+	logCount = 0
 	for _, v := range logs {
 		found := false
 
@@ -149,6 +158,10 @@ func (logs Logs) CointainTopics(addrMap map[libcommon.Address]struct{}, topicsMa
 			if found {
 				o = append(o, v)
 			}
+		}
+		logCount += 1
+		if maxLogs != 0 && logCount >= maxLogs {
+			break
 		}
 	}
 	return o

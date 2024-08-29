@@ -428,7 +428,10 @@ func (tx *DynamicFeeTransaction) GetChainID() *uint256.Int {
 
 func (tx *DynamicFeeTransaction) Sender(signer Signer) (libcommon.Address, error) {
 	if sc := tx.from.Load(); sc != nil {
-		return sc.(libcommon.Address), nil
+		zeroAddr := libcommon.Address{}
+		if sc.(libcommon.Address) != zeroAddr { // Sender address can never be zero in a transaction with a valid signer
+			return sc.(libcommon.Address), nil
+		}
 	}
 	addr, err := signer.Sender(tx)
 	if err != nil {

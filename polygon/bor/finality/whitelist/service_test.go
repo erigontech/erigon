@@ -548,11 +548,7 @@ func TestPropertyBasedTestingMilestone(t *testing.T) {
 		}
 
 		fitlerFn := func(i uint64) bool {
-			if i <= uint64(1000) {
-				return true
-			}
-
-			return false
+			return i <= uint64(1000)
 		}
 
 		var (

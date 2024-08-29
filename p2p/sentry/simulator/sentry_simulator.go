@@ -440,7 +440,7 @@ func (s *server) getHeaderByHash(ctx context.Context, hash common.Hash) (*corety
 }
 
 func (s *server) downloadHeaders(ctx context.Context, header *freezeblocks.Segment) error {
-	fileName := snaptype.SegmentFileName(0, header.From(), header.To(), snaptype.Enums.Headers)
+	fileName := snaptype.SegmentFileName(0, header.From(), header.To(), coresnaptype.Enums.Headers)
 	session := sync.NewTorrentSession(s.downloader, s.chain)
 
 	s.logger.Info("Downloading", "file", fileName)

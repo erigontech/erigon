@@ -25,7 +25,6 @@ import (
 	"github.com/ledgerwatch/erigon-lib/common/datadir"
 	"github.com/ledgerwatch/erigon-lib/common/dbg"
 	"github.com/ledgerwatch/erigon-lib/common/dir"
-	"github.com/ledgerwatch/erigon-lib/downloader/snaptype"
 	"github.com/ledgerwatch/erigon-lib/etl"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/kvcfg"
@@ -38,6 +37,7 @@ import (
 	"github.com/ledgerwatch/erigon/cmd/utils"
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/rawdb/blockio"
+	coresnaptype "github.com/ledgerwatch/erigon/core/snaptype"
 	"github.com/ledgerwatch/erigon/diagnostics"
 	"github.com/ledgerwatch/erigon/eth/ethconfig"
 	"github.com/ledgerwatch/erigon/eth/ethconfig/estimate"
@@ -63,7 +63,7 @@ var snapshotCommand = cli.Command{
 	Name:  "snapshots",
 	Usage: `Managing snapshots (historical data partitions)`,
 	Before: func(context *cli.Context) error {
-		_, _, err := debug.Setup(context, true /* rootLogger */)
+		_, _, _, err := debug.Setup(context, true /* rootLogger */)
 		if err != nil {
 			return err
 		}
@@ -197,7 +197,7 @@ var (
 )
 
 func doIntegrity(cliCtx *cli.Context) error {
-	logger, _, err := debug.Setup(cliCtx, true /* root logger */)
+	logger, _, _, err := debug.Setup(cliCtx, true /* root logger */)
 	if err != nil {
 		return err
 	}
@@ -268,7 +268,7 @@ func doDiff(cliCtx *cli.Context) error {
 }
 
 func doDecompressSpeed(cliCtx *cli.Context) error {
-	logger, _, err := debug.Setup(cliCtx, true /* rootLogger */)
+	logger, _, _, err := debug.Setup(cliCtx, true /* rootLogger */)
 	if err != nil {
 		return err
 	}
@@ -310,7 +310,7 @@ func doDecompressSpeed(cliCtx *cli.Context) error {
 func doRam(cliCtx *cli.Context) error {
 	var logger log.Logger
 	var err error
-	if logger, _, err = debug.Setup(cliCtx, true /* rootLogger */); err != nil {
+	if logger, _, _, err = debug.Setup(cliCtx, true /* rootLogger */); err != nil {
 		return err
 	}
 	defer logger.Info("Done")
@@ -334,7 +334,7 @@ func doRam(cliCtx *cli.Context) error {
 }
 
 func doIndicesCommand(cliCtx *cli.Context) error {
-	logger, _, err := debug.Setup(cliCtx, true /* rootLogger */)
+	logger, _, _, err := debug.Setup(cliCtx, true /* rootLogger */)
 	if err != nil {
 		return err
 	}
@@ -409,7 +409,7 @@ func openSnaps(ctx context.Context, cfg ethconfig.BlocksFreezing, dirs datadir.D
 		return
 	}
 
-	borSnaps.LogStat("open")
+	borSnaps.LogStat("bor:open")
 	agg = openAgg(ctx, dirs, chainDB, logger)
 	err = chainDB.View(ctx, func(tx kv.Tx) error {
 		ac := agg.BeginFilesRo()
@@ -433,7 +433,7 @@ func openSnaps(ctx context.Context, cfg ethconfig.BlocksFreezing, dirs datadir.D
 func doUncompress(cliCtx *cli.Context) error {
 	var logger log.Logger
 	var err error
-	if logger, _, err = debug.Setup(cliCtx, true /* rootLogger */); err != nil {
+	if logger, _, _, err = debug.Setup(cliCtx, true /* rootLogger */); err != nil {
 		return err
 	}
 	ctx := cliCtx.Context
@@ -486,7 +486,7 @@ func doUncompress(cliCtx *cli.Context) error {
 func doCompress(cliCtx *cli.Context) error {
 	var err error
 	var logger log.Logger
-	if logger, _, err = debug.Setup(cliCtx, true /* rootLogger */); err != nil {
+	if logger, _, _, err = debug.Setup(cliCtx, true /* rootLogger */); err != nil {
 		return err
 	}
 	ctx := cliCtx.Context
@@ -536,7 +536,7 @@ func doCompress(cliCtx *cli.Context) error {
 func doRetireCommand(cliCtx *cli.Context) error {
 	var logger log.Logger
 	var err error
-	if logger, _, err = debug.Setup(cliCtx, true /* rootLogger */); err != nil {
+	if logger, _, _, err = debug.Setup(cliCtx, true /* rootLogger */); err != nil {
 		return err
 	}
 	defer logger.Info("Done")
@@ -577,7 +577,7 @@ func doRetireCommand(cliCtx *cli.Context) error {
 			return err
 		})
 		blockReader, _ := br.IO()
-		from2, to2, ok := freezeblocks.CanRetire(forwardProgress, blockReader.FrozenBlocks(), snaptype.Enums.Headers, nil)
+		from2, to2, ok := freezeblocks.CanRetire(forwardProgress, blockReader.FrozenBlocks(), coresnaptype.Enums.Headers, nil)
 		if ok {
 			from, to, every = from2, to2, to2-from2
 		}
@@ -685,8 +685,9 @@ func doUploaderCommand(cliCtx *cli.Context) error {
 	var logger log.Logger
 	var err error
 	var metricsMux *http.ServeMux
+	var pprofMux *http.ServeMux
 
-	if logger, metricsMux, err = debug.Setup(cliCtx, true /* root logger */); err != nil {
+	if logger, metricsMux, pprofMux, err = debug.Setup(cliCtx, true /* root logger */); err != nil {
 		return err
 	}
 
@@ -709,7 +710,7 @@ func doUploaderCommand(cliCtx *cli.Context) error {
 		return err
 	}
 
-	diagnostics.Setup(cliCtx, ethNode, metricsMux)
+	diagnostics.Setup(cliCtx, ethNode, metricsMux, pprofMux)
 
 	err = ethNode.Serve()
 	if err != nil {
@@ -814,6 +815,7 @@ func dbCfg(label kv.Label, path string) mdbx.MdbxOpts {
 	// integration tool don't intent to create db, then easiest way to open db - it's pass mdbx.Accede flag, which allow
 	// to read all options from DB, instead of overriding them
 	opts = opts.Accede()
+
 	return opts
 }
 func openAgg(ctx context.Context, dirs datadir.Dirs, chainDB kv.RwDB, logger log.Logger) *libstate.Aggregator {
@@ -825,5 +827,6 @@ func openAgg(ctx context.Context, dirs datadir.Dirs, chainDB kv.RwDB, logger log
 		panic(err)
 	}
 	agg.SetWorkers(estimate.CompressSnapshot.Workers())
+
 	return agg
 }

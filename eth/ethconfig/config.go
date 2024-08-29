@@ -45,7 +45,8 @@ import (
 	"github.com/ledgerwatch/erigon/rpc"
 )
 
-//const HistoryV3AggregationStep = 3_125_000 / 100 // use this to reduce step size for dev/debug
+// BorDefaultMinerGasPrice defines the minimum gas price for bor validators to mine a transaction.
+var BorDefaultMinerGasPrice = big.NewInt(25 * params.GWei)
 
 // FullNodeGPO contains default gasprice oracle settings for full node.
 var FullNodeGPO = gaspricecfg.Config{

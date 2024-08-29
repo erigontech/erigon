@@ -37,6 +37,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/common/dir"
 	"github.com/ledgerwatch/erigon-lib/common/disk"
 	"github.com/ledgerwatch/erigon-lib/common/mem"
+	"github.com/ledgerwatch/erigon-lib/diagnostics"
 
 	"github.com/erigontech/mdbx-go/mdbx"
 	lru "github.com/hashicorp/golang-lru/arc/v2"
@@ -71,6 +72,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/kv/remotedbserver"
 	libstate "github.com/ledgerwatch/erigon-lib/state"
 	"github.com/ledgerwatch/erigon-lib/txpool"
+	"github.com/ledgerwatch/erigon-lib/txpool/txpoolcfg"
 	"github.com/ledgerwatch/erigon-lib/txpool/txpooluitl"
 	libtypes "github.com/ledgerwatch/erigon-lib/types"
 	"github.com/ledgerwatch/erigon-lib/wrap"
@@ -263,6 +265,9 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 		return nil, err
 	}
 
+	if config.HistoryV3 {
+		return nil, errors.New("seems you using erigon2 git branch on erigon3 DB")
+	}
 	ctx, ctxCancel := context.WithCancel(context.Background())
 
 	// kv_remote architecture does blocks on stream.Send - means current architecture require unlimited amount of txs to provide good throughput
@@ -309,6 +314,9 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 	backend.chainConfig = chainConfig
 	backend.genesisBlock = genesis
 	backend.genesisHash = genesis.Hash()
+
+	setBorDefaultMinerGasPrice(chainConfig, config, logger)
+	setBorDefaultTxPoolPriceLimit(chainConfig, config.TxPool, logger)
 
 	if err := chainKv.Update(context.Background(), func(tx kv.RwTx) error {
 		isCorrectSync, useSnapshots, err := snap.EnsureNotChanged(tx, config.Snapshot)
@@ -566,6 +574,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 		chainConfig,
 		genesis,
 		backend.config.NetworkID,
+		logger,
 	)
 
 	// limit "new block" broadcasts to at most 10 random peers at time
@@ -796,13 +805,13 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 	if !config.Sync.UseSnapshots && backend.downloaderClient != nil {
 		for _, p := range blockReader.AllTypes() {
 			backend.downloaderClient.ProhibitNewDownloads(ctx, &protodownloader.ProhibitNewDownloadsRequest{
-				Type: p.String(),
+				Type: p.Name(),
 			})
 		}
 
 		for _, p := range snaptype.CaplinSnapshotTypes {
 			backend.downloaderClient.ProhibitNewDownloads(ctx, &protodownloader.ProhibitNewDownloadsRequest{
-				Type: p.String(),
+				Type: p.Name(),
 			})
 		}
 
@@ -1438,7 +1447,10 @@ func (s *Ethereum) Start() error {
 		return currentTD
 	}
 
+	nodeStages := s.stagedSync.StagesIdsList()
+
 	if params.IsChainPoS(s.chainConfig, currentTDProvider) {
+		nodeStages = s.pipelineStagedSync.StagesIdsList()
 		s.waitForStageLoopStop = nil // TODO: Ethereum.Stop should wait for execution_server shutdown
 		go s.eth1ExecutionServer.Start(s.sentryCtx)
 	} else if s.config.PolygonSync {
@@ -1459,6 +1471,9 @@ func (s *Ethereum) Start() error {
 	} else {
 		go stages2.StageLoop(s.sentryCtx, s.chainDB, s.stagedSync, s.sentriesClient.Hd, s.waitForStageLoopStop, s.config.Sync.LoopThrottle, s.logger, s.blockReader, hook, s.config.ForcePartialCommit)
 	}
+
+	stages := diagnostics.InitStagesFromList(nodeStages)
+	diagnostics.Send(diagnostics.SyncStageList{StagesList: stages})
 
 	if s.chainConfig.Bor != nil {
 		s.engine.(*bor.Bor).Start(s.chainDB)
@@ -1632,4 +1647,20 @@ func (s *Ethereum) Sentinel() rpcsentinel.SentinelClient {
 
 func (s *Ethereum) DataDir() string {
 	return s.config.Dirs.DataDir
+}
+
+// setBorDefaultMinerGasPrice enforces Miner.GasPrice to be equal to BorDefaultMinerGasPrice (25gwei by default)
+func setBorDefaultMinerGasPrice(chainConfig *chain.Config, config *ethconfig.Config, logger log.Logger) {
+	if chainConfig.Bor != nil && (config.Miner.GasPrice == nil || config.Miner.GasPrice.Cmp(ethconfig.BorDefaultMinerGasPrice) != 0) {
+		logger.Warn("Sanitizing invalid bor miner gas price", "provided", config.Miner.GasPrice, "updated", ethconfig.BorDefaultMinerGasPrice)
+		config.Miner.GasPrice = ethconfig.BorDefaultMinerGasPrice
+	}
+}
+
+// setBorDefaultTxPoolPriceLimit enforces MinFeeCap to be equal to BorDefaultTxPoolPriceLimit (25gwei by default)
+func setBorDefaultTxPoolPriceLimit(chainConfig *chain.Config, config txpoolcfg.Config, logger log.Logger) {
+	if chainConfig.Bor != nil && config.MinFeeCap != txpoolcfg.BorDefaultTxPoolPriceLimit {
+		logger.Warn("Sanitizing invalid bor min fee cap", "provided", config.MinFeeCap, "updated", txpoolcfg.BorDefaultTxPoolPriceLimit)
+		config.MinFeeCap = txpoolcfg.BorDefaultTxPoolPriceLimit
+	}
 }

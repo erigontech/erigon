@@ -10,6 +10,7 @@ import (
 	"sort"
 	"time"
 
+	borsnaptype "github.com/ledgerwatch/erigon/polygon/bor/snaptype"
 	"github.com/ledgerwatch/log/v3"
 
 	"github.com/ledgerwatch/erigon-lib/common/hexutility"
@@ -24,6 +25,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/recsplit"
 	"github.com/ledgerwatch/erigon/core/rawdb"
+	coresnaptype "github.com/ledgerwatch/erigon/core/snaptype"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/eth/ethconfig"
 	bortypes "github.com/ledgerwatch/erigon/polygon/bor/types"
@@ -355,30 +357,51 @@ func (r *BlockReader) HeadersRange(ctx context.Context, walker func(header *type
 }
 
 func (r *BlockReader) HeaderByNumber(ctx context.Context, tx kv.Getter, blockHeight uint64) (h *types.Header, err error) {
+	var dbgPrefix string
+	dbgLogs := dbg.Enabled(ctx)
+	if dbgLogs {
+		dbgPrefix = fmt.Sprintf("[dbg] BlockReader(idxMax=%d,segMax=%d).HeaderByNumber(blk=%d) -> ", r.sn.idxMax.Load(), r.sn.segmentsMax.Load(), blockHeight)
+	}
+
 	if tx != nil {
 		blockHash, err := rawdb.ReadCanonicalHash(tx, blockHeight)
 		if err != nil {
 			return nil, err
 		}
-		if blockHash == (common.Hash{}) {
-			return nil, nil
-		}
-		h = rawdb.ReadHeader(tx, blockHash, blockHeight)
-		if h != nil {
-			return h, nil
+		// if no canonical marker - still can try read from files
+		if blockHash != emptyHash {
+			h = rawdb.ReadHeader(tx, blockHash, blockHeight)
+			if h != nil {
+				return h, nil
+			} else {
+				if dbgLogs {
+					log.Info(dbgPrefix + "not found in db")
+				}
+			}
+		} else {
+			if dbgLogs {
+				log.Info(dbgPrefix + "canonical hash is empty")
+			}
 		}
 	}
 
-	view := r.sn.View()
-	defer view.Close()
-	seg, ok := view.HeadersSegment(blockHeight)
+	seg, ok, release := r.sn.ViewSingleFile(coresnaptype.Headers, blockHeight)
 	if !ok {
+		if dbgLogs {
+			log.Info(dbgPrefix + "not found file for such blockHeight")
+		}
 		return
 	}
+	defer release()
 
 	h, _, err = r.headerFromSnapshot(blockHeight, seg, nil)
 	if err != nil {
 		return nil, err
+	}
+	if h == nil {
+		if dbgLogs {
+			log.Info(dbgPrefix + "got nil from file")
+		}
 	}
 	return h, nil
 }
@@ -393,9 +416,8 @@ func (r *BlockReader) HeaderByHash(ctx context.Context, tx kv.Getter, hash commo
 		return h, nil
 	}
 
-	view := r.sn.View()
-	defer view.Close()
-	segments := view.Headers()
+	segments, release := r.sn.ViewType(coresnaptype.Headers)
+	defer release()
 
 	buf := make([]byte, 128)
 	for i := len(segments) - 1; i >= 0; i-- {
@@ -425,12 +447,11 @@ func (r *BlockReader) CanonicalHash(ctx context.Context, tx kv.Getter, blockHeig
 		return h, nil
 	}
 
-	view := r.sn.View()
-	defer view.Close()
-	seg, ok := view.HeadersSegment(blockHeight)
+	seg, ok, release := r.sn.ViewSingleFile(coresnaptype.Headers, blockHeight)
 	if !ok {
 		return
 	}
+	defer release()
 
 	header, _, err := r.headerFromSnapshot(blockHeight, seg, nil)
 	if err != nil {
@@ -444,6 +465,15 @@ func (r *BlockReader) CanonicalHash(ctx context.Context, tx kv.Getter, blockHeig
 }
 
 func (r *BlockReader) Header(ctx context.Context, tx kv.Getter, hash common.Hash, blockHeight uint64) (h *types.Header, err error) {
+	//TODO: investigate why code blolow causing getting error `Could not set forkchoice                 app=caplin stage=ForkChoice err="execution Client RPC failed to retrieve ForkChoiceUpdate response, err: unknown ancestor"`
+	//maxBlockNumInFiles := r.sn.BlocksAvailable()
+	//if maxBlockNumInFiles == 0 || blockHeight > maxBlockNumInFiles {
+	//	if tx == nil {
+	//		return nil, nil
+	//	}
+	//	h = rawdb.ReadHeader(tx, hash, blockHeight)
+	//	return h, nil
+	//}
 	if tx != nil {
 		h = rawdb.ReadHeader(tx, hash, blockHeight)
 		if h != nil {
@@ -451,12 +481,12 @@ func (r *BlockReader) Header(ctx context.Context, tx kv.Getter, hash common.Hash
 		}
 	}
 
-	view := r.sn.View()
-	defer view.Close()
-	seg, ok := view.HeadersSegment(blockHeight)
+	seg, ok, release := r.sn.ViewSingleFile(coresnaptype.Headers, blockHeight)
 	if !ok {
 		return
 	}
+	defer release()
+
 	h, _, err = r.headerFromSnapshot(blockHeight, seg, nil)
 	if err != nil {
 		return h, err
@@ -465,7 +495,20 @@ func (r *BlockReader) Header(ctx context.Context, tx kv.Getter, hash common.Hash
 }
 
 func (r *BlockReader) BodyWithTransactions(ctx context.Context, tx kv.Getter, hash common.Hash, blockHeight uint64) (body *types.Body, err error) {
-	if tx != nil {
+	var dbgPrefix string
+	dbgLogs := dbg.Enabled(ctx)
+	if dbgLogs {
+		dbgPrefix = fmt.Sprintf("[dbg] BlockReader(idxMax=%d,segMax=%d).BodyWithTransactions(hash=%x,blk=%d) -> ", r.sn.idxMax.Load(), r.sn.segmentsMax.Load(), hash, blockHeight)
+	}
+
+	maxBlockNumInFiles := r.sn.BlocksAvailable()
+	if maxBlockNumInFiles == 0 || blockHeight > maxBlockNumInFiles {
+		if tx == nil {
+			if dbgLogs {
+				log.Info(dbgPrefix + "RoTx is nil")
+			}
+			return nil, nil
+		}
 		body, err = rawdb.ReadBodyWithTransactions(tx, hash, blockHeight)
 		if err != nil {
 			return nil, err
@@ -473,35 +516,59 @@ func (r *BlockReader) BodyWithTransactions(ctx context.Context, tx kv.Getter, ha
 		if body != nil {
 			return body, nil
 		}
+		if dbgLogs {
+			log.Info(dbgPrefix + "found in db=false")
+		}
 	}
 
-	view := r.sn.View()
-	defer view.Close()
+	seg, ok, release := r.sn.ViewSingleFile(coresnaptype.Bodies, blockHeight)
+	if !ok {
+		if dbgLogs {
+			log.Info(dbgPrefix + "no bodies file for this block num")
+		}
+		return nil, nil
+	}
+	defer release()
 
 	var baseTxnID uint64
-	var txsAmount uint32
+	var txCount uint32
 	var buf []byte
-	seg, ok := view.BodiesSegment(blockHeight)
-	if !ok {
-		return nil, nil
-	}
-	body, baseTxnID, txsAmount, buf, err = r.bodyFromSnapshot(blockHeight, seg, buf)
+	body, baseTxnID, txCount, buf, err = r.bodyFromSnapshot(blockHeight, seg, buf)
 	if err != nil {
 		return nil, err
 	}
+	release()
+
 	if body == nil {
+		if dbgLogs {
+			log.Info(dbgPrefix + "got nil body from file")
+		}
 		return nil, nil
 	}
-	txnSeg, ok := view.TxsSegment(blockHeight)
+
+	txnSeg, ok, release := r.sn.ViewSingleFile(coresnaptype.Transactions, blockHeight)
 	if !ok {
+		if dbgLogs {
+			log.Info(dbgPrefix+"no transactions file for this block num", "r.sn.BlocksAvailable()", r.sn.BlocksAvailable(), "r.sn.idxMax", r.sn.idxMax.Load(), "r.sn.segmetntsMax", r.sn.segmentsMax.Load())
+		}
 		return nil, nil
 	}
-	txs, senders, err := r.txsFromSnapshot(baseTxnID, txsAmount, txnSeg, buf)
+	defer release()
+
+	txs, senders, err := r.txsFromSnapshot(baseTxnID, txCount, txnSeg, buf)
 	if err != nil {
 		return nil, err
 	}
+	release()
+
 	if txs == nil {
+		if dbgLogs {
+			log.Info(dbgPrefix + "got nil txs from file")
+		}
 		return nil, nil
+	}
+	if dbgLogs {
+		log.Info(dbgPrefix+"got non-nil txs from file", "len(txs)", len(txs))
 	}
 	body.Transactions = txs
 	body.SendersToTxs(senders)
@@ -523,16 +590,19 @@ func (r *BlockReader) BodyRlp(ctx context.Context, tx kv.Getter, hash common.Has
 func (r *BlockReader) Body(ctx context.Context, tx kv.Getter, hash common.Hash, blockHeight uint64) (body *types.Body, txAmount uint32, err error) {
 	maxBlockNumInFiles := r.sn.BlocksAvailable()
 	if maxBlockNumInFiles == 0 || blockHeight > maxBlockNumInFiles {
+		if tx == nil {
+			return nil, 0, nil
+		}
 		body, _, txAmount = rawdb.ReadBody(tx, hash, blockHeight)
 		return body, txAmount, nil
 	}
-	view := r.sn.View()
-	defer view.Close()
 
-	seg, ok := view.BodiesSegment(blockHeight)
+	seg, ok, release := r.sn.ViewSingleFile(coresnaptype.Bodies, blockHeight)
 	if !ok {
 		return
 	}
+	defer release()
+
 	body, _, txAmount, _, err = r.bodyFromSnapshot(blockHeight, seg, nil)
 	if err != nil {
 		return nil, 0, err
@@ -555,11 +625,17 @@ func (r *BlockReader) blockWithSenders(ctx context.Context, tx kv.Getter, hash c
 	var dbgPrefix string
 	dbgLogs := dbg.Enabled(ctx)
 	if dbgLogs {
-		dbgPrefix = fmt.Sprintf("[dbg] BlockReader.blockWithSenders(hash=%x,blk=%d,forceCanonical=%t) -> ", hash, blockHeight, forceCanonical)
+		dbgPrefix = fmt.Sprintf("[dbg] BlockReader(idxMax=%d,segMax=%d).blockWithSenders(hash=%x,blk=%d) -> ", r.sn.idxMax.Load(), r.sn.segmentsMax.Load(), hash, blockHeight)
 	}
 
 	maxBlockNumInFiles := r.sn.BlocksAvailable()
-	if tx != nil && (maxBlockNumInFiles == 0 || blockHeight > maxBlockNumInFiles) {
+	if maxBlockNumInFiles == 0 || blockHeight > maxBlockNumInFiles {
+		if tx == nil {
+			if dbgLogs {
+				log.Info(dbgPrefix + "RoTx is nil")
+			}
+			return nil, nil, nil
+		}
 		if forceCanonical {
 			canonicalHash, err := rawdb.ReadCanonicalHash(tx, blockHeight)
 			if err != nil {
@@ -590,15 +666,14 @@ func (r *BlockReader) blockWithSenders(ctx context.Context, tx kv.Getter, hash c
 		return
 	}
 
-	view := r.sn.View()
-	defer view.Close()
-	seg, ok := view.HeadersSegment(blockHeight)
+	seg, ok, release := r.sn.ViewSingleFile(coresnaptype.Headers, blockHeight)
 	if !ok {
 		if dbgLogs {
 			log.Info(dbgPrefix + "no header files for this block num")
 		}
 		return
 	}
+	defer release()
 
 	var buf []byte
 	h, buf, err := r.headerFromSnapshot(blockHeight, seg, buf)
@@ -611,21 +686,26 @@ func (r *BlockReader) blockWithSenders(ctx context.Context, tx kv.Getter, hash c
 		}
 		return
 	}
+	release()
 
 	var b *types.Body
 	var baseTxnId uint64
 	var txsAmount uint32
-	bodySeg, ok := view.BodiesSegment(blockHeight)
+	bodySeg, ok, release := r.sn.ViewSingleFile(coresnaptype.Bodies, blockHeight)
 	if !ok {
 		if dbgLogs {
 			log.Info(dbgPrefix + "no bodies file for this block num")
 		}
 		return
 	}
+	defer release()
+
 	b, baseTxnId, txsAmount, buf, err = r.bodyFromSnapshot(blockHeight, bodySeg, buf)
 	if err != nil {
 		return nil, nil, err
 	}
+	release()
+
 	if b == nil {
 		if dbgLogs {
 			log.Info(dbgPrefix + "got nil body from file")
@@ -644,18 +724,21 @@ func (r *BlockReader) blockWithSenders(ctx context.Context, tx kv.Getter, hash c
 		return block, senders, nil
 	}
 
-	txnSeg, ok := view.TxsSegment(blockHeight)
+	txnSeg, ok, release := r.sn.ViewSingleFile(coresnaptype.Transactions, blockHeight)
 	if !ok {
 		if dbgLogs {
-			log.Info(dbgPrefix + "no transactions file for this block num")
+			log.Info(dbgPrefix+"no transactions file for this block num", "r.sn.BlocksAvailable()", r.sn.BlocksAvailable(), "r.sn.indicesReady", r.sn.indicesReady.Load())
 		}
 		return
 	}
+	defer release()
 	var txs []types.Transaction
 	txs, senders, err = r.txsFromSnapshot(baseTxnId, txsAmount, txnSeg, buf)
 	if err != nil {
 		return nil, nil, err
 	}
+	release()
+
 	block = types.NewBlockFromStorage(hash, h, txs, b.Uncles, b.Withdrawals)
 	if len(senders) != block.Transactions().Len() {
 		if dbgLogs {
@@ -792,7 +875,7 @@ func (r *BlockReader) txsFromSnapshot(baseTxnID uint64, txsAmount uint32, txsSeg
 		}
 	}() // avoid crash because Erigon's core does many things
 
-	idxTxnHash := txsSeg.Index(snaptype.Indexes.TxnHash)
+	idxTxnHash := txsSeg.Index(coresnaptype.Indexes.TxnHash)
 
 	if idxTxnHash == nil {
 		return nil, nil, nil
@@ -830,7 +913,7 @@ func (r *BlockReader) txsFromSnapshot(baseTxnID uint64, txsAmount uint32, txsSeg
 }
 
 func (r *BlockReader) txnByID(txnID uint64, sn *Segment, buf []byte) (txn types.Transaction, err error) {
-	idxTxnHash := sn.Index(snaptype.Indexes.TxnHash)
+	idxTxnHash := sn.Index(coresnaptype.Indexes.TxnHash)
 
 	offset := idxTxnHash.OrdinalLookup(txnID - idxTxnHash.BaseDataID())
 	gg := sn.MakeGetter()
@@ -853,8 +936,8 @@ func (r *BlockReader) txnByHash(txnHash common.Hash, segments []*Segment, buf []
 	for i := len(segments) - 1; i >= 0; i-- {
 		sn := segments[i]
 
-		idxTxnHash := sn.Index(snaptype.Indexes.TxnHash)
-		idxTxnHash2BlockNum := sn.Index(snaptype.Indexes.TxnHash2BlockNum)
+		idxTxnHash := sn.Index(coresnaptype.Indexes.TxnHash)
+		idxTxnHash2BlockNum := sn.Index(coresnaptype.Indexes.TxnHash2BlockNum)
 
 		if idxTxnHash == nil || idxTxnHash2BlockNum == nil {
 			continue
@@ -910,18 +993,18 @@ func (r *BlockReader) TxnByIdxInBlock(ctx context.Context, tx kv.Getter, blockNu
 		return rawdb.TxnByIdxInBlock(tx, canonicalHash, blockNum, txIdxInBlock)
 	}
 
-	view := r.sn.View()
-	defer view.Close()
-	seg, ok := view.BodiesSegment(blockNum)
+	seg, ok, release := r.sn.ViewSingleFile(coresnaptype.Bodies, blockNum)
 	if !ok {
 		return
 	}
+	defer release()
 
 	var b *types.BodyForStorage
 	b, _, err = r.bodyForStorageFromSnapshot(blockNum, seg, nil)
 	if err != nil {
 		return nil, err
 	}
+	release()
 	if b == nil {
 		return
 	}
@@ -931,10 +1014,12 @@ func (r *BlockReader) TxnByIdxInBlock(ctx context.Context, tx kv.Getter, blockNu
 		return nil, nil
 	}
 
-	txnSeg, ok := view.TxsSegment(blockNum)
+	txnSeg, ok, release := r.sn.ViewSingleFile(coresnaptype.Transactions, blockNum)
 	if !ok {
 		return
 	}
+	defer release()
+
 	// +1 because block has system-txn in the beginning of block
 	return r.txnByID(b.BaseTxId+1+uint64(txIdxInBlock), txnSeg, nil)
 }
@@ -949,10 +1034,9 @@ func (r *BlockReader) TxnLookup(_ context.Context, tx kv.Getter, txnHash common.
 		return *n, true, nil
 	}
 
-	view := r.sn.View()
-	defer view.Close()
-
-	_, blockNum, ok, err := r.txnByHash(txnHash, view.Txs(), nil)
+	txns, release := r.sn.ViewType(coresnaptype.Transactions)
+	defer release()
+	_, blockNum, ok, err := r.txnByHash(txnHash, txns, nil)
 	if err != nil {
 		return 0, false, err
 	}
@@ -961,15 +1045,13 @@ func (r *BlockReader) TxnLookup(_ context.Context, tx kv.Getter, txnHash common.
 }
 
 func (r *BlockReader) FirstTxnNumNotInSnapshots() uint64 {
-	view := r.sn.View()
-	defer view.Close()
-
-	sn, ok := view.TxsSegment(r.sn.BlocksAvailable())
+	sn, ok, release := r.sn.ViewSingleFile(coresnaptype.Transactions, r.sn.BlocksAvailable())
 	if !ok {
 		return 0
 	}
+	defer release()
 
-	lastTxnID := sn.Index(snaptype.Indexes.TxnHash).BaseDataID() + uint64(sn.Count())
+	lastTxnID := sn.Index(coresnaptype.Indexes.TxnHash).BaseDataID() + uint64(sn.Count())
 	return lastTxnID
 }
 
@@ -1181,10 +1263,10 @@ func (r *BlockReader) BorStartEventID(ctx context.Context, tx kv.Tx, hash common
 	}
 
 	borTxHash := bortypes.ComputeBorTxHash(blockHeight, hash)
-	view := r.borSn.View()
-	defer view.Close()
 
-	segments := view.Events()
+	segments, release := r.borSn.ViewType(borsnaptype.BorEvents)
+	defer release()
+
 	for i := len(segments) - 1; i >= 0; i-- {
 		sn := segments[i]
 		if sn.from > blockHeight {
@@ -1214,7 +1296,10 @@ func (r *BlockReader) BorStartEventID(ctx context.Context, tx kv.Tx, hash common
 
 func (r *BlockReader) EventsByBlock(ctx context.Context, tx kv.Tx, hash common.Hash, blockHeight uint64) ([]rlp.RawValue, error) {
 	maxBlockNumInFiles := r.FrozenBorBlocks()
-	if tx != nil && (maxBlockNumInFiles == 0 || blockHeight > maxBlockNumInFiles) {
+	if maxBlockNumInFiles == 0 || blockHeight > maxBlockNumInFiles {
+		if tx == nil {
+			return nil, nil
+		}
 		c, err := tx.Cursor(kv.BorEventNums)
 		if err != nil {
 			return nil, err
@@ -1259,9 +1344,10 @@ func (r *BlockReader) EventsByBlock(ctx context.Context, tx kv.Tx, hash common.H
 		return result, nil
 	}
 	borTxHash := bortypes.ComputeBorTxHash(blockHeight, hash)
-	view := r.borSn.View()
-	defer view.Close()
-	segments := view.Events()
+
+	segments, release := r.borSn.ViewType(borsnaptype.BorEvents)
+	defer release()
+
 	var buf []byte
 	result := []rlp.RawValue{}
 	for i := len(segments) - 1; i >= 0; i-- {
@@ -1299,10 +1385,9 @@ func (r *BlockReader) EventsByBlock(ctx context.Context, tx kv.Tx, hash common.H
 
 // EventsByIdFromSnapshot returns the list of records limited by time, or the number of records along with a bool value to signify if the records were limited by time
 func (r *BlockReader) EventsByIdFromSnapshot(from uint64, to time.Time, limit int) ([]*heimdall.EventRecordWithTime, bool, error) {
-	view := r.borSn.View()
-	defer view.Close()
+	segments, release := r.borSn.ViewType(borsnaptype.BorEvents)
+	defer release()
 
-	segments := view.Events()
 	var buf []byte
 	var result []*heimdall.EventRecordWithTime
 	stateContract := bor.GenesisContractStateReceiverABI()
@@ -1379,9 +1464,9 @@ func (r *BlockReader) LastFrozenEventId() uint64 {
 		return 0
 	}
 
-	view := r.borSn.View()
-	defer view.Close()
-	segments := view.Events()
+	segments, release := r.borSn.ViewType(borsnaptype.BorEvents)
+	defer release()
+
 	if len(segments) == 0 {
 		return 0
 	}
@@ -1436,9 +1521,9 @@ func (r *BlockReader) LastFrozenSpanId() uint64 {
 		return 0
 	}
 
-	view := r.borSn.View()
-	defer view.Close()
-	segments := view.Spans()
+	segments, release := r.borSn.ViewType(borsnaptype.BorSpans)
+	defer release()
+
 	if len(segments) == 0 {
 		return 0
 	}
@@ -1480,9 +1565,9 @@ func (r *BlockReader) Span(ctx context.Context, tx kv.Getter, spanId uint64) ([]
 		}
 		return common.Copy(v), nil
 	}
-	view := r.borSn.View()
-	defer view.Close()
-	segments := view.Spans()
+	segments, release := r.borSn.ViewType(borsnaptype.BorSpans)
+	defer release()
+
 	for i := len(segments) - 1; i >= 0; i-- {
 		sn := segments[i]
 		idx := sn.Index()
@@ -1584,9 +1669,9 @@ func (r *BlockReader) Checkpoint(ctx context.Context, tx kv.Getter, checkpointId
 		return common.Copy(v), nil
 	}
 
-	view := r.borSn.View()
-	defer view.Close()
-	segments := view.Checkpoints()
+	segments, release := r.borSn.ViewType(borsnaptype.BorCheckpoints)
+	defer release()
+
 	for i := len(segments) - 1; i >= 0; i-- {
 		sn := segments[i]
 		index := sn.Index()
@@ -1610,9 +1695,8 @@ func (r *BlockReader) LastFrozenCheckpointId() uint64 {
 		return 0
 	}
 
-	view := r.borSn.View()
-	defer view.Close()
-	segments := view.Checkpoints()
+	segments, release := r.borSn.ViewType(borsnaptype.BorCheckpoints)
+	defer release()
 	if len(segments) == 0 {
 		return 0
 	}

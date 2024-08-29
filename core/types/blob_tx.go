@@ -82,7 +82,10 @@ func (stx *BlobTx) AsMessage(s Signer, baseFee *big.Int, rules *chain.Rules) (Me
 
 func (stx *BlobTx) Sender(signer Signer) (libcommon.Address, error) {
 	if sc := stx.from.Load(); sc != nil {
-		return sc.(libcommon.Address), nil
+		zeroAddr := libcommon.Address{}
+		if sc.(libcommon.Address) != zeroAddr { // Sender address can never be zero in a transaction with a valid signer
+			return sc.(libcommon.Address), nil
+		}
 	}
 	addr, err := signer.Sender(stx)
 	if err != nil {
@@ -369,7 +372,7 @@ func decodeBlobVersionedHashes(hashes *[]libcommon.Hash, s *rlp.Stream) error {
 			copy((_hash)[:], b)
 			*hashes = append(*hashes, _hash)
 		} else {
-			return fmt.Errorf("wrong size for blobVersionedHashes: %d, %v", len(b), b[0])
+			return fmt.Errorf("wrong size for blobVersionedHashes: %d", len(b))
 		}
 	}
 

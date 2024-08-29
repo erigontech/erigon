@@ -1,9 +1,24 @@
+// Copyright 2024 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+
 package diagnostics_test
 
 import (
 	"strconv"
 	"testing"
-	"time"
 
 	"github.com/ledgerwatch/erigon-lib/diagnostics"
 	"github.com/stretchr/testify/require"
@@ -143,37 +158,7 @@ func TestGetPeers(t *testing.T) {
 
 	peers := peerStats.GetPeers()
 	require.Equal(t, 3, len(peers))
-	require.Equal(t, &mockInboundPeerStats, peers["test1"])
-}
-
-func TestLastUpdated(t *testing.T) {
-	peerStats := diagnostics.NewPeerStats(1000)
-
-	peerStats.AddOrUpdatePeer("test1", mockInboundUpdMsg)
-	require.NotEmpty(t, peerStats.GetLastUpdate("test1"))
-
-	for i := 1; i < 20; i++ {
-		pid := "test" + strconv.Itoa(i)
-		peerStats.AddOrUpdatePeer(pid, mockInboundUpdMsg)
-		//wait for 1 milisecond to make sure that the last update time is different
-		time.Sleep(10 * time.Millisecond)
-	}
-
-	require.True(t, peerStats.GetLastUpdate("test2").After(peerStats.GetLastUpdate("test1")))
-
-	oldestPeers := peerStats.GetOldestUpdatedPeersWithSize(10)
-
-	// we have 100 peers, but we should get only 10 oldest
-	require.Equal(t, len(oldestPeers), 10)
-	// the oldest peer should be test1
-	require.Equal(t, "test1", oldestPeers[0].PeerID)
-
-	// update test1 to
-	peerStats.AddOrUpdatePeer("test1", mockInboundUpdMsg)
-	oldestPeers = peerStats.GetOldestUpdatedPeersWithSize(10)
-
-	// the oldest peer should not be test1
-	require.NotEqual(t, "test1", oldestPeers[0].PeerID)
+	require.True(t, peers["test1"].Equal(mockInboundPeerStats))
 }
 
 func TestRemovePeersWhichExceedLimit(t *testing.T) {
@@ -184,6 +169,7 @@ func TestRemovePeersWhichExceedLimit(t *testing.T) {
 		pid := "test" + strconv.Itoa(i)
 		peerStats.AddOrUpdatePeer(pid, mockInboundUpdMsg)
 	}
+	require.Equal(t, 100, peerStats.GetPeersCount())
 
 	peerStats.RemovePeersWhichExceedLimit(limit)
 
@@ -193,6 +179,24 @@ func TestRemovePeersWhichExceedLimit(t *testing.T) {
 	peerStats.RemovePeersWhichExceedLimit(limit)
 
 	require.Equal(t, 100, peerStats.GetPeersCount())
+}
+
+func TestRemovePeer(t *testing.T) {
+	limit := 10
+	peerStats := diagnostics.NewPeerStats(limit)
+
+	for i := 1; i < 11; i++ {
+		pid := "test" + strconv.Itoa(i)
+		peerStats.AddOrUpdatePeer(pid, mockInboundUpdMsg)
+	}
+	require.Equal(t, 10, peerStats.GetPeersCount())
+
+	peerStats.RemovePeer("test1")
+
+	require.Equal(t, limit-1, peerStats.GetPeersCount())
+
+	firstPeerStats := peerStats.GetPeerStatistics("test1")
+	require.True(t, firstPeerStats.Equal(diagnostics.PeerStatistics{}))
 }
 
 func TestAddingPeersAboveTheLimit(t *testing.T) {

@@ -17,6 +17,7 @@ import (
 	"time"
 
 	lru "github.com/hashicorp/golang-lru/arc/v2"
+	"github.com/ledgerwatch/erigon-lib/common/dbg"
 	"github.com/ledgerwatch/log/v3"
 	"github.com/xsleonard/go-merkle"
 	"golang.org/x/crypto/sha3"
@@ -1438,6 +1439,7 @@ func (c *Bor) getHeaderByNumber(ctx context.Context, tx kv.Tx, number uint64) (*
 		return nil, err
 	}
 	if header == nil {
+		_, _ = c.blockReader.HeaderByNumber(dbg.ContextWithDebug(ctx, true), tx, number)
 		return nil, fmt.Errorf("[bor] header not found: %d", number)
 	}
 	return header, nil

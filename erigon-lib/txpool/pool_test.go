@@ -645,26 +645,43 @@ func TestShanghaiValidateTx(t *testing.T) {
 		expected   txpoolcfg.DiscardReason
 		dataLen    int
 		isShanghai bool
+		creation   bool
 	}{
 		"no shanghai": {
 			expected:   txpoolcfg.Success,
 			dataLen:    32,
 			isShanghai: false,
+			creation:   true,
 		},
 		"shanghai within bounds": {
 			expected:   txpoolcfg.Success,
 			dataLen:    32,
 			isShanghai: true,
+			creation:   true,
 		},
-		"shanghai exactly on bound": {
+		"shanghai exactly on bound - create tx": {
 			expected:   txpoolcfg.Success,
 			dataLen:    fixedgas.MaxInitCodeSize,
 			isShanghai: true,
+			creation:   true,
 		},
-		"shanghai one over bound": {
+		"shanghai one over bound - create tx": {
 			expected:   txpoolcfg.InitCodeTooLarge,
 			dataLen:    fixedgas.MaxInitCodeSize + 1,
 			isShanghai: true,
+			creation:   true,
+		},
+		"shanghai exactly on bound - calldata tx": {
+			expected:   txpoolcfg.Success,
+			dataLen:    fixedgas.MaxInitCodeSize,
+			isShanghai: true,
+			creation:   false,
+		},
+		"shanghai one over bound - calldata tx": {
+			expected:   txpoolcfg.Success,
+			dataLen:    fixedgas.MaxInitCodeSize + 1,
+			isShanghai: true,
+			creation:   false,
 		},
 	}
 
@@ -700,7 +717,7 @@ func TestShanghaiValidateTx(t *testing.T) {
 				FeeCap:   *uint256.NewInt(21000),
 				Gas:      500000,
 				SenderID: 0,
-				Creation: true,
+				Creation: test.creation,
 			}
 
 			txns := types.TxSlots{

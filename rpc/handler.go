@@ -578,9 +578,28 @@ func writeNilIfNotPresent(stream *jsoniter.Stream) {
 	} else {
 		hasNil = false
 	}
-	if !hasNil {
-		stream.WriteNil()
+	if hasNil {
+		// not needed
+		return
 	}
+
+	var validJsonEnd bool
+	if len(b) > 0 {
+		// assumption is that api call handlers would write valid json in case of errors
+		// we are not guaranteed that they did write valid json if last elem is "}" or "]"
+		// since we don't check json nested-ness
+		// however appending "null" after "}" or "]" does not help much either
+		lastIdx := len(b) - 1
+		validJsonEnd = b[lastIdx] == '}' || b[lastIdx] == ']'
+	}
+	if validJsonEnd {
+		// not needed
+		return
+	}
+
+	// does not have nil ending
+	// does not have valid json
+	stream.WriteNil()
 }
 
 // unsubscribe is the callback function for all *_unsubscribe calls.

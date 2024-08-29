@@ -1,182 +1,185 @@
+// Copyright 2024 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+
 package diagnostics
 
 import (
 	"context"
+	"encoding/json"
+	"fmt"
+	"io"
+	"time"
 
+	"github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/log/v3"
+)
+
+var (
+	SnapshotDownloadStatisticsKey = []byte("diagSnapshotDownloadStatistics")
+	SnapshotIndexingStatisticsKey = []byte("diagSnapshotIndexingStatistics")
+	SnapshotFillDBStatisticsKey   = []byte("diagSnapshotFillDBStatistics")
 )
 
 func (d *DiagnosticClient) setupSnapshotDiagnostics(rootCtx context.Context) {
 	d.runSnapshotListener(rootCtx)
 	d.runSegmentDownloadingListener(rootCtx)
-	d.runSegmentIndexingListener(rootCtx)
-	d.runSegmentIndexingFinishedListener(rootCtx)
 	d.runSnapshotFilesListListener(rootCtx)
+	d.runSegmentIndexingListener(rootCtx)
+	d.runFileDownloadedListener(rootCtx)
+	d.runFillDBListener(rootCtx)
 }
 
-func (d *DiagnosticClient) runSnapshotListener(rootCtx context.Context) {
+func (d *DiagnosticClient) runFillDBListener(rootCtx context.Context) {
 	go func() {
-		ctx, ch, closeChannel := Context[SnapshotDownloadStatistics](rootCtx, 1)
+		ctx, ch, closeChannel := Context[SnapshotFillDBStageUpdate](rootCtx, 1)
 		defer closeChannel()
 
-		StartProviders(ctx, TypeOf(SnapshotDownloadStatistics{}), log.Root())
+		StartProviders(ctx, TypeOf(SnapshotFillDBStageUpdate{}), log.Root())
 		for {
 			select {
 			case <-rootCtx.Done():
 				return
 			case info := <-ch:
-				d.mu.Lock()
-				d.syncStats.SnapshotDownload.Downloaded = info.Downloaded
-				d.syncStats.SnapshotDownload.Total = info.Total
-				d.syncStats.SnapshotDownload.TotalTime = info.TotalTime
-				d.syncStats.SnapshotDownload.DownloadRate = info.DownloadRate
-				d.syncStats.SnapshotDownload.UploadRate = info.UploadRate
-				d.syncStats.SnapshotDownload.Peers = info.Peers
-				d.syncStats.SnapshotDownload.Files = info.Files
-				d.syncStats.SnapshotDownload.Connections = info.Connections
-				d.syncStats.SnapshotDownload.Alloc = info.Alloc
-				d.syncStats.SnapshotDownload.Sys = info.Sys
-				d.syncStats.SnapshotDownload.DownloadFinished = info.DownloadFinished
-				d.syncStats.SnapshotDownload.TorrentMetadataReady = info.TorrentMetadataReady
-				d.mu.Unlock()
+				d.SetFillDBInfo(info.Stage)
 
-				if info.DownloadFinished {
-					return
-				}
-			}
-		}
+				totalTimeString := time.Duration(info.TimeElapsed) * time.Second
 
-	}()
-}
-
-func (d *DiagnosticClient) runSegmentDownloadingListener(rootCtx context.Context) {
-	go func() {
-		ctx, ch, closeChannel := Context[SegmentDownloadStatistics](rootCtx, 1)
-		defer closeChannel()
-
-		StartProviders(ctx, TypeOf(SegmentDownloadStatistics{}), log.Root())
-		for {
-			select {
-			case <-rootCtx.Done():
-				return
-			case info := <-ch:
-				d.mu.Lock()
-				if d.syncStats.SnapshotDownload.SegmentsDownloading == nil {
-					d.syncStats.SnapshotDownload.SegmentsDownloading = map[string]SegmentDownloadStatistics{}
-				}
-
-				d.syncStats.SnapshotDownload.SegmentsDownloading[info.Name] = info
-				d.mu.Unlock()
+				d.UpdateSnapshotStageStats(SyncStageStats{
+					TimeElapsed: totalTimeString.String(),
+					TimeLeft:    "unknown",
+					Progress:    fmt.Sprintf("%d%%", (info.Stage.Current*100)/info.Stage.Total),
+				}, "Fill DB from snapshots")
+				d.SaveSnapshotStageStatsToDB()
 			}
 		}
 	}()
 }
 
-func (d *DiagnosticClient) runSegmentIndexingListener(rootCtx context.Context) {
-	go func() {
-		ctx, ch, closeChannel := Context[SnapshotIndexingStatistics](rootCtx, 1)
-		defer closeChannel()
-
-		StartProviders(ctx, TypeOf(SnapshotIndexingStatistics{}), log.Root())
-		for {
-			select {
-			case <-rootCtx.Done():
-				return
-			case info := <-ch:
-				d.addOrUpdateSegmentIndexingState(info)
-			}
-		}
-	}()
-}
-
-func (d *DiagnosticClient) runSegmentIndexingFinishedListener(rootCtx context.Context) {
-	go func() {
-		ctx, ch, closeChannel := Context[SnapshotSegmentIndexingFinishedUpdate](rootCtx, 1)
-		defer closeChannel()
-
-		StartProviders(ctx, TypeOf(SnapshotSegmentIndexingFinishedUpdate{}), log.Root())
-		for {
-			select {
-			case <-rootCtx.Done():
-				return
-			case info := <-ch:
-				d.mu.Lock()
-				found := false
-				for i := range d.syncStats.SnapshotIndexing.Segments {
-					if d.syncStats.SnapshotIndexing.Segments[i].SegmentName == info.SegmentName {
-						found = true
-						d.syncStats.SnapshotIndexing.Segments[i].Percent = 100
-					}
-				}
-
-				if !found {
-					d.syncStats.SnapshotIndexing.Segments = append(d.syncStats.SnapshotIndexing.Segments, SnapshotSegmentIndexingStatistics{
-						SegmentName: info.SegmentName,
-						Percent:     100,
-						Alloc:       0,
-						Sys:         0,
-					})
-				}
-				d.mu.Unlock()
-			}
-		}
-	}()
-}
-
-func (d *DiagnosticClient) addOrUpdateSegmentIndexingState(upd SnapshotIndexingStatistics) {
+func (d *DiagnosticClient) SetFillDBInfo(info SnapshotFillDBStage) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
-	if d.syncStats.SnapshotIndexing.Segments == nil {
-		d.syncStats.SnapshotIndexing.Segments = []SnapshotSegmentIndexingStatistics{}
-	}
 
-	for i := range upd.Segments {
-		found := false
-		for j := range d.syncStats.SnapshotIndexing.Segments {
-			if d.syncStats.SnapshotIndexing.Segments[j].SegmentName == upd.Segments[i].SegmentName {
-				d.syncStats.SnapshotIndexing.Segments[j].Percent = upd.Segments[i].Percent
-				d.syncStats.SnapshotIndexing.Segments[j].Alloc = upd.Segments[i].Alloc
-				d.syncStats.SnapshotIndexing.Segments[j].Sys = upd.Segments[i].Sys
-				found = true
+	d.setFillDBInfo(info)
+}
+
+func (d *DiagnosticClient) setFillDBInfo(info SnapshotFillDBStage) {
+	if d.syncStats.SnapshotFillDB.Stages == nil {
+		d.syncStats.SnapshotFillDB.Stages = []SnapshotFillDBStage{info}
+	} else {
+
+		for idx, stg := range d.syncStats.SnapshotFillDB.Stages {
+			if stg.StageName == info.StageName {
+				d.syncStats.SnapshotFillDB.Stages[idx] = info
 				break
 			}
 		}
+	}
+}
 
-		if !found {
-			d.syncStats.SnapshotIndexing.Segments = append(d.syncStats.SnapshotIndexing.Segments, upd.Segments[i])
+func (d *DiagnosticClient) SaveSnapshotStageStatsToDB() {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	d.saveSnapshotStageStatsToDB()
+}
+
+func (d *DiagnosticClient) saveSnapshotStageStatsToDB() {
+	err := d.db.Update(d.ctx, func(tx kv.RwTx) error {
+		err := SnapshotFillDBUpdater(d.syncStats.SnapshotFillDB)(tx)
+		if err != nil {
+			return err
 		}
+
+		err = StagesListUpdater(d.syncStages)(tx)
+		if err != nil {
+			return err
+		}
+
+		return nil
+	})
+	if err != nil {
+		log.Debug("[Diagnostics] Failed to update snapshot download info", "err", err)
+	}
+}
+
+// Deprecated - it's not thread-safe and used only in tests. Need introduce another method or add special methods for Tests.
+func (d *DiagnosticClient) SyncStatistics() SyncStatistics {
+	var newStats SyncStatistics
+	statsBytes, err := json.Marshal(d.syncStats)
+	if err != nil {
+		return SyncStatistics{}
+	}
+	err = json.Unmarshal(statsBytes, &newStats)
+	if err != nil {
+		return SyncStatistics{}
+	}
+	return newStats
+}
+
+func (d *DiagnosticClient) SyncStatsJson(w io.Writer) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	if err := json.NewEncoder(w).Encode(d.syncStats); err != nil {
+		log.Debug("[diagnostics] SyncStatsJson", "err", err)
+	}
+}
+
+func (d *DiagnosticClient) SnapshotFilesListJson(w io.Writer) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	if err := json.NewEncoder(w).Encode(d.snapshotFileList); err != nil {
+		log.Debug("[diagnostics] SnapshotFilesListJson", "err", err)
+	}
+}
+
+func SnapshotDownloadInfoFromTx(tx kv.Tx) ([]byte, error) {
+	bytes, err := ReadDataFromTable(tx, kv.DiagSyncStages, SnapshotDownloadStatisticsKey)
+	if err != nil {
+		return nil, err
 	}
 
-	d.syncStats.SnapshotIndexing.TimeElapsed = upd.TimeElapsed
+	return common.CopyBytes(bytes), nil
 }
 
-func (d *DiagnosticClient) runSnapshotFilesListListener(rootCtx context.Context) {
-	go func() {
-		ctx, ch, closeChannel := Context[SnapshoFilesList](rootCtx, 1)
-		defer closeChannel()
+func SnapshotIndexingInfoFromTx(tx kv.Tx) ([]byte, error) {
+	bytes, err := ReadDataFromTable(tx, kv.DiagSyncStages, SnapshotIndexingStatisticsKey)
+	if err != nil {
+		return nil, err
+	}
 
-		StartProviders(ctx, TypeOf(SnapshoFilesList{}), log.Root())
-		for {
-			select {
-			case <-rootCtx.Done():
-				return
-			case info := <-ch:
-				d.mu.Lock()
-				d.snapshotFileList = info
-				d.mu.Unlock()
-
-				if len(info.Files) > 0 {
-					return
-				}
-			}
-		}
-	}()
+	return common.CopyBytes(bytes), nil
 }
 
-func (d *DiagnosticClient) SyncStatistics() SyncStatistics {
-	return d.syncStats
+func SnapshotFillDBInfoFromTx(tx kv.Tx) ([]byte, error) {
+	bytes, err := ReadDataFromTable(tx, kv.DiagSyncStages, SnapshotFillDBStatisticsKey)
+	if err != nil {
+		return nil, err
+	}
+
+	return common.CopyBytes(bytes), nil
 }
 
-func (d *DiagnosticClient) SnapshotFilesList() SnapshoFilesList {
-	return d.snapshotFileList
+func SnapshotDownloadUpdater(info SnapshotDownloadStatistics) func(tx kv.RwTx) error {
+	return PutDataToTable(kv.DiagSyncStages, SnapshotDownloadStatisticsKey, info)
+}
+
+func SnapshotIndexingUpdater(info SnapshotIndexingStatistics) func(tx kv.RwTx) error {
+	return PutDataToTable(kv.DiagSyncStages, SnapshotIndexingStatisticsKey, info)
+}
+
+func SnapshotFillDBUpdater(info SnapshotFillDBStatistics) func(tx kv.RwTx) error {
+	return PutDataToTable(kv.DiagSyncStages, SnapshotFillDBStatisticsKey, info)
 }

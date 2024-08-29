@@ -18,17 +18,23 @@ package dbg
 
 import (
 	"os"
+	"path/filepath"
 	"runtime"
+	"runtime/pprof"
 	"strconv"
 	"sync"
 	"time"
 
 	"github.com/ledgerwatch/log/v3"
+
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/mmap"
 )
 
 var (
 	// force skipping of any non-Erigon2 .torrent files
 	DownloaderOnlyBlocks = EnvBool("DOWNLOADER_ONLY_BLOCKS", false)
+	saveHeapProfile      = EnvBool("SAVE_HEAP_PROFILE", false)
 )
 
 var StagesOnlyBlocks = EnvBool("STAGES_ONLY_BLOCKS", false)
@@ -319,4 +325,82 @@ func LogHashMismatchReason() bool {
 		}
 	})
 	return logHashMismatchReason
+}
+
+type saveHeapOptions struct {
+	memStats *runtime.MemStats
+	logger   *log.Logger
+}
+
+type SaveHeapOption func(options *saveHeapOptions)
+
+func SaveHeapWithMemStats(memStats *runtime.MemStats) SaveHeapOption {
+	return func(options *saveHeapOptions) {
+		options.memStats = memStats
+	}
+}
+
+func SaveHeapWithLogger(logger *log.Logger) SaveHeapOption {
+	return func(options *saveHeapOptions) {
+		options.logger = logger
+	}
+}
+
+func SaveHeapProfileNearOOM(opts ...SaveHeapOption) {
+	if !saveHeapProfile {
+		return
+	}
+
+	var options saveHeapOptions
+	for _, opt := range opts {
+		opt(&options)
+	}
+
+	var logger log.Logger
+	if options.logger != nil {
+		logger = *options.logger
+	}
+
+	var memStats runtime.MemStats
+	if options.memStats != nil {
+		memStats = *options.memStats
+	} else {
+		ReadMemStats(&memStats)
+	}
+
+	totalMemory := mmap.TotalMemory()
+	if logger != nil {
+		logger.Info(
+			"[Experiment] heap profile threshold check",
+			"alloc", libcommon.ByteCount(memStats.Alloc),
+			"total", libcommon.ByteCount(totalMemory),
+		)
+	}
+	if memStats.Alloc < (totalMemory/100)*45 {
+		return
+	}
+
+	// above 45%
+	filePath := filepath.Join(os.TempDir(), "erigon-mem.prof")
+	if logger != nil {
+		logger.Info("[Experiment] saving heap profile as near OOM", "filePath", filePath)
+	}
+
+	f, err := os.Create(filePath)
+	if err != nil && logger != nil {
+		logger.Warn("[Experiment] could not create heap profile file", "err", err)
+	}
+
+	defer func() {
+		err := f.Close()
+		if err != nil && logger != nil {
+			logger.Warn("[Experiment] could not close heap profile file", "err", err)
+		}
+	}()
+
+	runtime.GC()
+	err = pprof.WriteHeapProfile(f)
+	if err != nil && logger != nil {
+		logger.Warn("[Experiment] could not write heap profile file", "err", err)
+	}
 }

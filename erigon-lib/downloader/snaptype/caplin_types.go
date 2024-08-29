@@ -2,20 +2,22 @@ package snaptype
 
 var (
 	BeaconBlocks = snapType{
-		enum: Enums.BeaconBlocks,
+		enum: CaplinEnums.BeaconBlocks,
+		name: "beaconblocks",
 		versions: Versions{
 			Current:      1,
 			MinSupported: 1,
 		},
-		indexes: []Index{Indexes.BeaconBlockSlot},
+		indexes: []Index{CaplinIndexes.BeaconBlockSlot},
 	}
 	BlobSidecars = snapType{
-		enum: Enums.BlobSidecars,
+		enum: CaplinEnums.BlobSidecars,
+		name: "blobsidecars",
 		versions: Versions{
 			Current:      1,
 			MinSupported: 1,
 		},
-		indexes: []Index{Indexes.BlobSidecarSlot},
+		indexes: []Index{CaplinIndexes.BlobSidecarSlot},
 	}
 
 	CaplinSnapshotTypes = []Type{BeaconBlocks, BlobSidecars}

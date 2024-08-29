@@ -204,7 +204,7 @@ func (api *APIImpl) GetLogs(ctx context.Context, crit filters.FilterCriteria) (t
 				log.Index = logIndex
 				logIndex++
 			}
-			filtered := logs.Filter(addrMap, crit.Topics)
+			filtered := logs.Filter(addrMap, crit.Topics, 0)
 			if len(filtered) == 0 {
 				continue
 			}
@@ -470,7 +470,7 @@ func (api *APIImpl) getLogsV3(ctx context.Context, tx kv.TemporalTx, begin, end 
 		//	log.Index = logIndex
 		//	logIndex++
 		//}
-		filtered := types.Logs(rawLogs).Filter(addrMap, crit.Topics)
+		filtered := types.Logs(rawLogs).Filter(addrMap, crit.Topics, 0)
 		for _, log := range filtered {
 			log.BlockNumber = blockNum
 			log.BlockHash = blockHash

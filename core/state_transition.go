@@ -256,6 +256,7 @@ func (st *StateTransition) buyGas(gasBailout bool) error {
 	}
 	st.gasRemaining += st.msg.Gas()
 	st.initialGas = st.msg.Gas()
+	st.evm.BlobFee = blobGasVal
 
 	if subBalance {
 		st.state.SubBalance(st.msg.From(), gasVal)
@@ -305,7 +306,8 @@ func (st *StateTransition) preCheck(gasBailout bool) error {
 	// Make sure the transaction gasFeeCap is greater than the block's baseFee.
 	if st.evm.ChainRules().IsLondon {
 		// Skip the checks if gas fields are zero and baseFee was explicitly disabled (eth_call)
-		if !st.evm.Config().NoBaseFee || !st.gasFeeCap.IsZero() || !st.tip.IsZero() {
+		skipCheck := st.evm.Config().NoBaseFee && st.gasFeeCap.IsZero() && st.tip.IsZero()
+		if !skipCheck {
 			if err := CheckEip1559TxGasFeeCap(st.msg.From(), st.gasFeeCap, st.tip, st.evm.Context.BaseFee, st.msg.IsFree()); err != nil {
 				return err
 			}
@@ -320,7 +322,7 @@ func (st *StateTransition) preCheck(gasBailout bool) error {
 			return err
 		}
 		maxFeePerBlobGas := st.msg.MaxFeePerBlobGas()
-		if blobGasPrice.Cmp(maxFeePerBlobGas) > 0 {
+		if !st.evm.Config().NoBaseFee && blobGasPrice.Cmp(maxFeePerBlobGas) > 0 {
 			return fmt.Errorf("%w: address %v, maxFeePerBlobGas: %v blobGasPrice: %v, excessBlobGas: %v",
 				ErrMaxFeePerBlobGas,
 				st.msg.From().Hex(), st.msg.MaxFeePerBlobGas(), blobGasPrice, st.evm.Context.ExcessBlobGas)
@@ -460,7 +462,7 @@ func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (*Executi
 		// nonce to calculate the address of the contract that is being created
 		// It does get incremented inside the `Create` call, after the computation
 		// of the contract's address, but before the execution of the code.
-		ret, _, st.gasRemaining, vmerr = st.evm.Create(sender, st.data, st.gasRemaining, st.value)
+		ret, _, st.gasRemaining, vmerr = st.evm.Create(sender, st.data, st.gasRemaining, st.value, bailout)
 	} else {
 		// Increment the nonce for the next transaction
 		st.state.SetNonce(msg.From(), st.state.GetNonce(sender.Address())+1)

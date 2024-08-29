@@ -138,7 +138,7 @@ func (api *ErigonImpl) GetLogs(ctx context.Context, crit filters.FilterCriteria)
 				log.Index = logIndex
 				logIndex++
 			}
-			filtered := logs.Filter(addrMap, crit.Topics)
+			filtered := logs.Filter(addrMap, crit.Topics, 0)
 			if len(filtered) == 0 {
 				continue
 			}
@@ -310,10 +310,16 @@ func (api *ErigonImpl) GetLatestLogs(ctx context.Context, crit filters.FilterCri
 				logIndex++
 			}
 			var filtered types.Logs
+			var maxLogCount uint64
+			maxLogCount = 0
+			if logOptions.LogCount != 0 {
+				maxLogCount = logOptions.LogCount - logCount
+			}
+
 			if logOptions.IgnoreTopicsOrder {
-				filtered = logs.CointainTopics(addrMap, topicsMap)
+				filtered = logs.CointainTopics(addrMap, topicsMap, maxLogCount)
 			} else {
-				filtered = logs.Filter(addrMap, crit.Topics)
+				filtered = logs.Filter(addrMap, crit.Topics, maxLogCount)
 			}
 			if len(filtered) == 0 {
 				continue

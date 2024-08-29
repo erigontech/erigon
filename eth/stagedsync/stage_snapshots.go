@@ -29,6 +29,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/common/datadir"
 	"github.com/ledgerwatch/erigon-lib/common/dbg"
 	"github.com/ledgerwatch/erigon-lib/common/dir"
+	"github.com/ledgerwatch/erigon-lib/diagnostics"
 	"github.com/ledgerwatch/erigon-lib/downloader"
 	"github.com/ledgerwatch/erigon-lib/downloader/snaptype"
 	"github.com/ledgerwatch/erigon-lib/etl"
@@ -38,10 +39,12 @@ import (
 	"github.com/ledgerwatch/erigon-lib/kv/rawdbv3"
 	"github.com/ledgerwatch/erigon-lib/state"
 	"github.com/ledgerwatch/erigon/core/rawdb"
+	coresnaptype "github.com/ledgerwatch/erigon/core/snaptype"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/eth/ethconfig"
 	"github.com/ledgerwatch/erigon/eth/ethconfig/estimate"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
+	borsnaptype "github.com/ledgerwatch/erigon/polygon/bor/snaptype"
 	"github.com/ledgerwatch/erigon/rpc"
 	"github.com/ledgerwatch/erigon/turbo/services"
 	"github.com/ledgerwatch/erigon/turbo/shards"
@@ -191,12 +194,21 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 	if !cfg.blockReader.FreezingCfg().Enabled {
 		return nil
 	}
+
+	diagnostics.Send(diagnostics.CurrentSyncStage{Stage: string(stages.Snapshots)})
+
 	cstate := snapshotsync.NoCaplin
 	if cfg.caplin { //TODO(Giulio2002): uncomment
 		cstate = snapshotsync.AlsoCaplin
 	}
 
 	if cfg.snapshotUploader != nil {
+		subStages := diagnostics.InitSubStagesFromList([]string{"Indexing", "Fill DB"})
+		diagnostics.Send(diagnostics.SetSyncSubStageList{
+			Stage: string(stages.Snapshots),
+			List:  subStages,
+		})
+
 		u := cfg.snapshotUploader
 
 		u.init(ctx, logger)
@@ -234,6 +246,13 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 			cfg.notifier.Events.OnNewSnapshot()
 		}
 	} else {
+		subStages := diagnostics.InitSubStagesFromList([]string{"Download snapshots", "Indexing", "Fill DB"})
+		diagnostics.Send(diagnostics.SetSyncSubStageList{
+			Stage: string(stages.Snapshots),
+			List:  subStages,
+		})
+
+		diagnostics.Send(diagnostics.CurrentSyncSubStage{SubStage: "Download snapshots"})
 		if err := snapshotsync.WaitForDownloader(ctx, s.LogPrefix(), cfg.historyV3, cfg.blobs, cstate, cfg.agg, tx, cfg.blockReader, &cfg.chainConfig, cfg.snapshotDownloader, s.state.StagesIdsList()); err != nil {
 			return err
 		}
@@ -250,6 +269,7 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 		return histBlockNumProgress
 	})
 
+	diagnostics.Send(diagnostics.CurrentSyncSubStage{SubStage: "Indexing"})
 	if err := cfg.blockRetire.BuildMissedIndicesIfNeed(ctx, s.LogPrefix(), cfg.notifier.Events, &cfg.chainConfig); err != nil {
 		return err
 	}
@@ -280,6 +300,7 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 		s.BlockNumber = frozenBlocks
 	}
 
+	diagnostics.Send(diagnostics.CurrentSyncSubStage{SubStage: "Fill DB"})
 	if err := FillDBFromSnapshots(s.LogPrefix(), ctx, tx, cfg.dirs, cfg.blockReader, cfg.agg, logger); err != nil {
 		return err
 	}
@@ -288,6 +309,7 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 }
 
 func FillDBFromSnapshots(logPrefix string, ctx context.Context, tx kv.RwTx, dirs datadir.Dirs, blockReader services.FullBlockReader, agg *state.Aggregator, logger log.Logger) error {
+	startTime := time.Now()
 	blocksAvailable := blockReader.FrozenBlocks()
 	logEvery := time.NewTicker(logInterval)
 	defer logEvery.Stop()
@@ -334,6 +356,14 @@ func FillDBFromSnapshots(logPrefix string, ctx context.Context, tx kv.RwTx, dirs
 				case <-ctx.Done():
 					return ctx.Err()
 				case <-logEvery.C:
+					diagnostics.Send(diagnostics.SnapshotFillDBStageUpdate{
+						Stage: diagnostics.SnapshotFillDBStage{
+							StageName: string(stage),
+							Current:   header.Number.Uint64(),
+							Total:     blocksAvailable,
+						},
+						TimeElapsed: time.Since(startTime).Seconds(),
+					})
 					logger.Info(fmt.Sprintf("[%s] Total difficulty index: %dk/%dk", logPrefix, header.Number.Uint64()/1000, blockReader.FrozenBlocks()/1000))
 				default:
 				}
@@ -373,6 +403,14 @@ func FillDBFromSnapshots(logPrefix string, ctx context.Context, tx kv.RwTx, dirs
 					case <-ctx.Done():
 						return ctx.Err()
 					case <-logEvery.C:
+						diagnostics.Send(diagnostics.SnapshotFillDBStageUpdate{
+							Stage: diagnostics.SnapshotFillDBStage{
+								StageName: string(stage),
+								Current:   blockNum,
+								Total:     blocksAvailable,
+							},
+							TimeElapsed: time.Since(startTime).Seconds(),
+						})
 						logger.Info(fmt.Sprintf("[%s] MaxTxNums index: %dk/%dk", logPrefix, blockNum/1000, blockReader.FrozenBlocks()/1000))
 					default:
 					}
@@ -398,6 +436,16 @@ func FillDBFromSnapshots(logPrefix string, ctx context.Context, tx kv.RwTx, dirs
 			if err := rawdb.WriteSnapshots(tx, blockReader.FrozenFiles(), agg.Files()); err != nil {
 				return err
 			}
+
+		default:
+			diagnostics.Send(diagnostics.SnapshotFillDBStageUpdate{
+				Stage: diagnostics.SnapshotFillDBStage{
+					StageName: string(stage),
+					Current:   blocksAvailable, // as we are done with other stages
+					Total:     blocksAvailable,
+				},
+				TimeElapsed: time.Since(startTime).Seconds(),
+			})
 		}
 	}
 	return nil
@@ -537,14 +585,14 @@ func (u *snapshotUploader) maxUploadedHeader() uint64 {
 		for _, state := range u.files {
 			if state.local && state.remote {
 				if state.info != nil {
-					if state.info.Type.Enum() == snaptype.Enums.Headers {
+					if state.info.Type.Enum() == coresnaptype.Enums.Headers {
 						if state.info.To > max {
 							max = state.info.To
 						}
 					}
 				} else {
 					if info, _, ok := snaptype.ParseFileName(u.cfg.dirs.Snap, state.file); ok {
-						if info.Type.Enum() == snaptype.Enums.Headers {
+						if info.Type.Enum() == coresnaptype.Enums.Headers {
 							if info.To > max {
 								max = info.To
 							}
@@ -1016,8 +1064,8 @@ func (u *snapshotUploader) removeBefore(before uint64) {
 	for _, f := range list {
 		if f.To > before {
 			switch f.Type.Enum() {
-			case snaptype.Enums.BorEvents, snaptype.Enums.BorSpans,
-				snaptype.Enums.BorCheckpoints, snaptype.Enums.BorMilestones:
+			case borsnaptype.Enums.BorEvents, borsnaptype.Enums.BorSpans,
+				borsnaptype.Enums.BorCheckpoints, borsnaptype.Enums.BorMilestones:
 				borToReopen = append(borToReopen, filepath.Base(f.Path))
 			default:
 				toReopen = append(toReopen, filepath.Base(f.Path))
@@ -1292,4 +1340,5 @@ func (u *snapshotUploader) upload(ctx context.Context, logger log.Logger) {
 			u.removeBefore(maxUploaded - u.cfg.syncConfig.FrozenBlockLimit)
 		}
 	}
+
 }

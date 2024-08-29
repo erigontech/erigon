@@ -72,14 +72,14 @@ func NewHeimdall(ctx context.Context, chain string, snapshotLocation string, log
 	for _, file := range localFiles {
 		info, _, _ := snaptype.ParseFileName(torrentDir, file.Name())
 		if info.Ext == ".seg" {
-			if info.Type.Enum() == snaptype.Enums.BorSpans {
+			if info.Type.Enum() == borsnaptype.Enums.BorSpans {
 				err = info.Type.BuildIndexes(ctx, info, nil, torrentDir, nil, log.LvlWarn, logger)
 				if err != nil {
 					return HeimdallSimulator{}, err
 				}
 			}
 
-			if info.Type.Enum() == snaptype.Enums.BorEvents {
+			if info.Type.Enum() == borsnaptype.Enums.BorEvents {
 				err = info.Type.BuildIndexes(ctx, info, nil, torrentDir, nil, log.LvlWarn, logger)
 				if err != nil {
 					return HeimdallSimulator{}, err
