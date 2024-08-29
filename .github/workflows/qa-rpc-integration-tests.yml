@@ -4,7 +4,6 @@ on:
   push:
     branches:
       - 'release/2.*'
-      - qa_tests_rpc_integration_v2  # only to debug the workflow
   pull_request:
     branches:
       - 'release/2.*'
