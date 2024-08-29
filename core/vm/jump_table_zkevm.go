@@ -39,7 +39,12 @@ func newForkID4InstructionSet() JumpTable {
 	instructionSet[EXTCODEHASH].execute = opExtCodeHash_zkevm
 
 	// SELFDESTRUCT is replaces by SENDALL
-	instructionSet[SELFDESTRUCT].execute = opSendAll_zkevm
+	instructionSet[SELFDESTRUCT] = &operation{
+		execute:    opSendAll_zkevm,
+		dynamicGas: gasSelfdestruct_zkevm,
+		numPop:     1,
+		numPush:    0,
+	}
 
 	validateAndFillMaxStack(&instructionSet)
 	return instructionSet
