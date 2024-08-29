@@ -33,7 +33,9 @@ import (
 	"github.com/erigontech/erigon-lib/direct"
 	"github.com/erigontech/erigon-lib/gointerfaces"
 	remote "github.com/erigontech/erigon-lib/gointerfaces/remoteproto"
+	"github.com/erigontech/erigon-lib/gointerfaces/sentryproto"
 	sentry "github.com/erigontech/erigon-lib/gointerfaces/sentryproto"
+	"github.com/erigontech/erigon-lib/gointerfaces/typesproto"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/kv/memdb"
 	"github.com/erigontech/erigon-lib/log/v3"
@@ -89,6 +91,16 @@ func TestSendTxPropagate(t *testing.T) {
 				return nil, nil
 			}).
 			Times(times)
+
+		sentryServer.EXPECT().PeerById(gomock.Any(), gomock.Any()).
+			DoAndReturn(
+				func(_ context.Context, r *sentry.PeerByIdRequest) (*sentryproto.PeerByIdReply, error) {
+					return &sentryproto.PeerByIdReply{
+						Peer: &typesproto.PeerInfo{
+							Id:   r.PeerId.String(),
+							Caps: []string{"eth/68"},
+						}}, nil
+				}).AnyTimes()
 
 		m := NewMockSentry(ctx, sentryServer)
 		send := NewSend(ctx, []sentry.SentryClient{direct.NewSentryClientDirect(direct.ETH68, m)}, nil, log.New())
@@ -184,6 +196,16 @@ func TestSendTxPropagate(t *testing.T) {
 				return nil, nil
 			}).
 			Times(times)
+
+		sentryServer.EXPECT().PeerById(gomock.Any(), gomock.Any()).
+			DoAndReturn(
+				func(_ context.Context, r *sentry.PeerByIdRequest) (*sentryproto.PeerByIdReply, error) {
+					return &sentryproto.PeerByIdReply{
+						Peer: &typesproto.PeerInfo{
+							Id:   r.PeerId.String(),
+							Caps: []string{"eth/68"},
+						}}, nil
+				}).AnyTimes()
 
 		m := NewMockSentry(ctx, sentryServer)
 		send := NewSend(ctx, []sentry.SentryClient{direct.NewSentryClientDirect(direct.ETH68, m)}, nil, log.New())
