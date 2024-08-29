@@ -1645,9 +1645,6 @@ func dumpRange(ctx context.Context, f snaptype.FileInfo, dumper dumpFunc, firstK
 
 	lastKeyValue, err = dumper(ctx, chainDB, chainConfig, f.From, f.To, firstKey, func(v []byte) error {
 		if noCompress {
-			if f.Type.Name() == "bodies" {
-				logger.Debug("don't compress bodies", "file", f.Name())
-			}
 			return sn.AddUncompressedWord(v)
 		}
 		return sn.AddWord(v)

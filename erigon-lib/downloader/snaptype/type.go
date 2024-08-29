@@ -483,7 +483,7 @@ func ExtractRange(ctx context.Context, f FileInfo, extractor RangeExtractor, fir
 
 	lastKeyValue, err = extractor.Extract(ctx, f.From, f.To, firstKey, chainDB, chainConfig, func(v []byte) error {
 		if noCompress {
-			logger.Error("don't compress", "file", f.Name())
+			logger.Debug("don't compress bor", "file", f.Name())
 			return sn.AddUncompressedWord(v)
 		}
 		return sn.AddWord(v)
