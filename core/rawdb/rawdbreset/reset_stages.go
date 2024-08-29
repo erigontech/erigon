@@ -113,15 +113,12 @@ func ResetBorHeimdall(ctx context.Context, tx kv.RwTx) error {
 }
 
 func ResetPolygonSync(tx kv.RwTx, db kv.RoDB, agg *state.Aggregator, br services.FullBlockReader, bw *blockio.BlockWriter, dirs datadir.Dirs, cc chain.Config, logger log.Logger) error {
-	if err := tx.ClearBucket(kv.BorEventNums); err != nil {
-		return err
+	for _, table := range []string{kv.BorEventNums, kv.BorEvents, kv.BorSpans, kv.BorEventProcessedBlocks, kv.BorMilestones, kv.BorCheckpoints, kv.BorProducerSelections} {
+		if err := tx.ClearBucket(table); err != nil {
+			return err
+		}
 	}
-	if err := tx.ClearBucket(kv.BorEvents); err != nil {
-		return err
-	}
-	if err := tx.ClearBucket(kv.BorSpans); err != nil {
-		return err
-	}
+
 	if err := ResetBlocks(tx, db, agg, br, bw, dirs, cc, logger); err != nil {
 		return err
 	}
