@@ -47,8 +47,9 @@ type GossipManager struct {
 	forkChoice *forkchoice.ForkChoiceStore
 	sentinel   sentinel.SentinelClient
 	// configs
-	beaconConfig *clparams.BeaconChainConfig
-	ethClock     eth_clock.EthereumClock
+	beaconConfig  *clparams.BeaconChainConfig
+	networkConfig *clparams.NetworkConfig
+	ethClock      eth_clock.EthereumClock
 
 	emitters     *beaconevents.EventEmitter
 	committeeSub *committee_subscription.CommitteeSubscribeMgmt
@@ -69,6 +70,7 @@ func NewGossipReceiver(
 	s sentinel.SentinelClient,
 	forkChoice *forkchoice.ForkChoiceStore,
 	beaconConfig *clparams.BeaconChainConfig,
+	networkConfig *clparams.NetworkConfig,
 	ethClock eth_clock.EthereumClock,
 	emitters *beaconevents.EventEmitter,
 	comitteeSub *committee_subscription.CommitteeSubscribeMgmt,
@@ -87,6 +89,7 @@ func NewGossipReceiver(
 		forkChoice:                   forkChoice,
 		emitters:                     emitters,
 		beaconConfig:                 beaconConfig,
+		networkConfig:                networkConfig,
 		ethClock:                     ethClock,
 		committeeSub:                 comitteeSub,
 		blockService:                 blockService,
@@ -229,13 +232,16 @@ func (g *GossipManager) routeAndProcess(ctx context.Context, data *sentinel.Goss
 }
 
 func (g *GossipManager) Start(ctx context.Context) {
-	operationsCh := make(chan *sentinel.GossipData, 1<<20) // large quantity of attestation messages from gossip
+	attestationCh := make(chan *sentinel.GossipData, 1<<20) // large quantity of attestation messages from gossip
+	operationsCh := make(chan *sentinel.GossipData, 1<<16)
 	blobsCh := make(chan *sentinel.GossipData, 1<<16)
 	blocksCh := make(chan *sentinel.GossipData, 1<<10)
 	syncCommitteesCh := make(chan *sentinel.GossipData, 1<<16)
 	defer close(operationsCh)
 	defer close(blobsCh)
 	defer close(blocksCh)
+	defer close(syncCommitteesCh)
+	defer close(attestationCh)
 
 	// Start couple of goroutines that listen for new gossip messages and sends them to the operations processor.
 	goWorker := func(ch <-chan *sentinel.GossipData, workerCount int) {
@@ -256,10 +262,11 @@ func (g *GossipManager) Start(ctx context.Context) {
 			go worker()
 		}
 	}
-	goWorker(operationsCh, 16)
+	goWorker(attestationCh, int(g.networkConfig.AttestationSubnetCount))
+	goWorker(syncCommitteesCh, 4)
+	goWorker(operationsCh, 1)
 	goWorker(blocksCh, 1)
 	goWorker(blobsCh, 1)
-	goWorker(syncCommitteesCh, 1)
 
 	noWaitSend := func(ch chan<- *sentinel.GossipData, data *sentinel.GossipData) {
 		select {
@@ -300,6 +307,8 @@ Reconnect:
 				noWaitSend(blobsCh, data)
 			case gossip.IsTopicSyncCommittee(data.Name) || data.Name == gossip.TopicNameSyncCommitteeContributionAndProof:
 				noWaitSend(syncCommitteesCh, data)
+			case gossip.IsTopicBeaconAttestation(data.Name):
+				noWaitSend(attestationCh, data)
 			default:
 				noWaitSend(operationsCh, data)
 			}
