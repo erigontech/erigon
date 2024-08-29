@@ -378,9 +378,10 @@ func (s *SentinelServer) SetSubscribeExpiry(ctx context.Context, expiryReq *sent
 func (s *SentinelServer) handleGossipPacket(pkt *sentinel.GossipMessage) error {
 	var err error
 	if strings.Contains(pkt.TopicName, "beacon_block") {
+		begin := time.Now()
 		s.logger.Info("[test][Sentinel Gossip] Received Packet", "topic", pkt.TopicName)
+		defer s.logger.Info("[test][Sentinel Gossip] Processed Packet", "topic", pkt.TopicName, "time", time.Since(begin))
 	}
-
 	data := pkt.Data
 	topic := pkt.TopicName
 	// If we use snappy codec then decompress it accordingly.
