@@ -1641,11 +1641,11 @@ func dumpRange(ctx context.Context, f snaptype.FileInfo, dumper dumpFunc, firstK
 	// Means:
 	//  - build must be fast
 	//  - merge can be slow and expensive
-	println(f.Type.Name(), f.Ext)
-	noCompress := (f.Ext == "seg" && f.Type.Name() == "bodies") || (f.To-f.From) < (snaptype.Erigon2MergeLimit-1)
+	noCompress := (f.Ext == ".seg" && f.Type.Name() == "bodies") || (f.To-f.From) < (snaptype.Erigon2MergeLimit-1)
 
 	lastKeyValue, err = dumper(ctx, chainDB, chainConfig, f.From, f.To, firstKey, func(v []byte) error {
 		if noCompress {
+			logger.Debug("don't compress", "file", f.Name())
 			return sn.AddUncompressedWord(v)
 		}
 		return sn.AddWord(v)
