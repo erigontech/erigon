@@ -10,6 +10,7 @@ import (
 	"github.com/gateway-fm/cdk-erigon-lib/kv"
 	"github.com/gateway-fm/cdk-erigon-lib/kv/kvcfg"
 	"github.com/ledgerwatch/erigon/common/dbutils"
+	"github.com/ledgerwatch/erigon/common/math"
 	"github.com/ledgerwatch/erigon/core/types"
 	ethTypes "github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/rlp"
@@ -193,7 +194,29 @@ func ReadReceipts_zkEvm(db kv.Tx, block *types.Block, senders []libcommon.Addres
 
 	//[hack] there was a cumulativeGasUsed bug priod to forkid8, so we need to check for it
 	hermezDb := hermez_db.NewHermezDbReader(db)
-	forkid8BlockNum, _, _ := hermezDb.GetForkIdBlock(8)
+	forkBlocks, err := hermezDb.GetAllForkBlocks()
+	if err != nil {
+		log.Error("Failed to get fork blocks", "err", err, "stack", dbg.Stack())
+		return nil
+	}
+
+	forkid8BlockNum := uint64(0)
+	highestForkId := uint64(0)
+	for forkId, forkBlock := range forkBlocks {
+		if forkId > highestForkId {
+			highestForkId = forkId
+		}
+		if forkId == 8 {
+			forkid8BlockNum = forkBlock
+			break
+		}
+	}
+
+	// if we don't have forkid8 and highest saved is lower, then we are lower than forkid
+	// otherwise we are higher than forkid8 but don't have it saved so it should be treated as if it was 0
+	if forkid8BlockNum == 0 && highestForkId < 8 {
+		forkid8BlockNum = math.MaxUint64
+	}
 
 	if err := receipts.DeriveFields_zkEvm(forkid8BlockNum, block.Hash(), block.NumberU64(), block.Transactions(), senders); err != nil {
 		log.Error("Failed to derive block receipts fields", "hash", block.Hash(), "number", block.NumberU64(), "err", err, "stack", dbg.Stack())

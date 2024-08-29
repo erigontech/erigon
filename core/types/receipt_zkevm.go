@@ -94,9 +94,8 @@ func (r Receipts) DeriveFields_zkEvm(forkId8BlockNum uint64, hash common.Hash, n
 		}
 		// The used gas can be calculated based on previous r
 		// [hack] there was a cumulativeGasUsed bug priod to forkid8, so we need to check for it
-		// if the block is before forkId8 or forkid8 is not even on yet
-		// comuluative is equal to gas used
-		if i == 0 || number < forkId8BlockNum || forkId8BlockNum == 0 {
+		// if the block is before forkId8 comuluative is equal to gas used
+		if i == 0 || number < forkId8BlockNum {
 			r[i].GasUsed = r[i].CumulativeGasUsed
 		} else {
 			r[i].GasUsed = r[i].CumulativeGasUsed - r[i-1].CumulativeGasUsed

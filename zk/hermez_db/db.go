@@ -1029,6 +1029,29 @@ func (db *HermezDbReader) GetForkIdBlock(forkId uint64) (uint64, bool, error) {
 	return blockNum, found, err
 }
 
+func (db *HermezDbReader) GetAllForkBlocks() (map[uint64]uint64, error) {
+	c, err := db.tx.Cursor(FORKID_BLOCK)
+	if err != nil {
+		return nil, err
+	}
+	defer c.Close()
+
+	forkBlocks := make(map[uint64]uint64)
+	var k, v []byte
+
+	for k, v, err = c.First(); k != nil; k, v, err = c.Next() {
+		if err != nil {
+			break
+		}
+		currentForkId := BytesToUint64(k)
+		blockNum := BytesToUint64(v)
+
+		forkBlocks[currentForkId] = blockNum
+	}
+
+	return forkBlocks, err
+}
+
 func (db *HermezDb) DeleteForkIdBlock(fromBlockNo, toBlockNo uint64) error {
 	return db.deleteFromBucketWithUintKeysRange(FORKID_BLOCK, fromBlockNo, toBlockNo)
 }
