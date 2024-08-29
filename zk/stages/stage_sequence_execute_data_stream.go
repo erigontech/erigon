@@ -107,7 +107,7 @@ func alignExecutionToDatastream(batchContext *BatchContext, batchState *BatchSta
 
 	block, err := rawdb.ReadBlockByNumber(batchContext.sdb.tx, lastDatastreamBlock)
 	if err != nil {
-		return true, err
+		return false, err
 	}
 
 	log.Warn(fmt.Sprintf("[%s] Unwinding due to a datastream gap", batchContext.s.LogPrefix()), "streamHeight", lastDatastreamBlock, "sequencerHeight", lastExecutedBlock)
