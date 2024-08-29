@@ -48,8 +48,8 @@ on:
 jobs:
 
   build-release:
-    ## runs-on: ubuntu-22.04
-    runs-on: ubuntu-latest-devops-xxlarge
+    runs-on: ubuntu-22.04
+    ## runs-on: ubuntu-latest-devops-xxlarge
     timeout-minutes: 30
     name: Build Artifacts and multi-platform Docker image, publish draft of the Release Notes
 
