@@ -479,8 +479,8 @@ func ExtractRange(ctx context.Context, f FileInfo, extractor RangeExtractor, fir
 	}
 	defer sn.Close()
 
-	println("bor", f.Type.Name())
-	noCompress := f.Type.Name() == "borevents" || f.Type.Name() == "borspans"
+	println("bor", f.Type.Name(), f.Ext)
+	noCompress := f.Ext == "seg" && (f.Type.Name() == "borevents" || f.Type.Name() == "borspans")
 
 	lastKeyValue, err = extractor.Extract(ctx, f.From, f.To, firstKey, chainDB, chainConfig, func(v []byte) error {
 		if noCompress {
