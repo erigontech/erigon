@@ -30,6 +30,7 @@ import (
 
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/gossip"
 )
 
@@ -629,7 +630,13 @@ func (s *GossipSubscription) run(ctx context.Context, sub *pubsub.Subscription, 
 				continue
 			}
 			if strings.Contains(topicName, "beacon_block") {
-				log.Debug("[test] received beacon block", "from", msg.ReceivedFrom)
+				epoch := s.s.ethClock.GetCurrentEpoch()
+				version := s.s.cfg.BeaconConfig.GetCurrentStateVersion(epoch)
+				obj := cltypes.NewSignedBeaconBlock(s.s.cfg.BeaconConfig)
+				if err := obj.DecodeSSZ(msg.Data, int(version)); err != nil {
+					continue
+				}
+				log.Debug("[test] received beacon block", "from", msg.ReceivedFrom, "slot", obj.Block.Slot)
 			}
 			s.ch <- &GossipMessage{
 				From:      msg.ReceivedFrom,
