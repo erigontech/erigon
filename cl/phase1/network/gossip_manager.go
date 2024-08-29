@@ -289,6 +289,14 @@ Reconnect:
 			}
 
 			if data.Name == gossip.TopicNameBeaconBlock || gossip.IsTopicBlobSidecar(data.Name) {
+				currentEpoch := g.ethClock.GetCurrentEpoch()
+				version := g.beaconConfig.GetCurrentStateVersion(currentEpoch)
+				obj := cltypes.NewSignedBeaconBlock(g.beaconConfig)
+				if err := obj.DecodeSSZ(data.Data, int(version)); err != nil {
+					log.Warn("[test] Failed to decode block", "err", err)
+					continue
+				}
+				log.Info("[test] Before into channel", "slot", obj.Block.Slot, "peer", data.Peer.Pid)
 				blocksCh <- data
 			} else if gossip.IsTopicSyncCommittee(data.Name) || data.Name == gossip.TopicNameSyncCommitteeContributionAndProof {
 				syncCommitteesCh <- data
