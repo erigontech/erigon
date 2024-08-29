@@ -42,7 +42,7 @@ type DecodedInboundMessage[TPacket any] struct {
 type UnregisterFunc = polygoncommon.UnregisterFunc
 
 type MessageListener interface {
-	Run(ctx context.Context)
+	Run(ctx context.Context) error
 	RegisterNewBlockObserver(observer polygoncommon.Observer[*DecodedInboundMessage[*eth.NewBlockPacket]]) UnregisterFunc
 	RegisterNewBlockHashesObserver(observer polygoncommon.Observer[*DecodedInboundMessage[*eth.NewBlockHashesPacket]]) UnregisterFunc
 	RegisterBlockHeadersObserver(observer polygoncommon.Observer[*DecodedInboundMessage[*eth.BlockHeadersPacket66]]) UnregisterFunc
@@ -92,7 +92,7 @@ type messageListener struct {
 	stopWg                  sync.WaitGroup
 }
 
-func (ml *messageListener) Run(ctx context.Context) {
+func (ml *messageListener) Run(ctx context.Context) error {
 	ml.logger.Debug(messageListenerLogPrefix("running p2p message listener component"))
 
 	backgroundLoops := []func(ctx context.Context){
@@ -115,6 +115,7 @@ func (ml *messageListener) Run(ctx context.Context) {
 	ml.blockHeadersObservers.Close()
 	ml.blockBodiesObservers.Close()
 	ml.peerEventObservers.Close()
+	return ctx.Err()
 }
 
 func (ml *messageListener) RegisterNewBlockObserver(observer polygoncommon.Observer[*DecodedInboundMessage[*eth.NewBlockPacket]]) UnregisterFunc {

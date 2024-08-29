@@ -101,7 +101,7 @@ func NewService(
 func (s *service) Run(parentCtx context.Context) error {
 	group, ctx := errgroup.WithContext(parentCtx)
 
-	group.Go(func() error { s.p2pService.Run(ctx); return nil })
+	group.Go(func() error { return s.p2pService.Run(ctx) })
 	group.Go(func() error { return s.store.Run(ctx) })
 	group.Go(func() error { return s.events.Run(ctx) })
 	group.Go(func() error { return s.heimdallService.Run(ctx) })
