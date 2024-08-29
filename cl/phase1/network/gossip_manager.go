@@ -268,7 +268,7 @@ func (g *GossipManager) Start(ctx context.Context) {
 	goWorker(blocksCh, 1)
 	goWorker(blobsCh, 1)
 
-	noWaitSend := func(ch chan<- *sentinel.GossipData, data *sentinel.GossipData) {
+	sendOrDrop := func(ch chan<- *sentinel.GossipData, data *sentinel.GossipData) {
 		select {
 		case ch <- data:
 		default:
@@ -302,15 +302,15 @@ Reconnect:
 
 			switch {
 			case data.Name == gossip.TopicNameBeaconBlock:
-				noWaitSend(blocksCh, data)
+				sendOrDrop(blocksCh, data)
 			case gossip.IsTopicBlobSidecar(data.Name):
-				noWaitSend(blobsCh, data)
+				sendOrDrop(blobsCh, data)
 			case gossip.IsTopicSyncCommittee(data.Name) || data.Name == gossip.TopicNameSyncCommitteeContributionAndProof:
-				noWaitSend(syncCommitteesCh, data)
+				sendOrDrop(syncCommitteesCh, data)
 			case gossip.IsTopicBeaconAttestation(data.Name):
-				noWaitSend(attestationCh, data)
+				sendOrDrop(attestationCh, data)
 			default:
-				noWaitSend(operationsCh, data)
+				sendOrDrop(operationsCh, data)
 			}
 		}
 	}
