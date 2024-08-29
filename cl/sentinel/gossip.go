@@ -32,6 +32,7 @@ import (
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/gossip"
+	"github.com/erigontech/erigon/cl/utils"
 )
 
 const (
@@ -630,10 +631,16 @@ func (s *GossipSubscription) run(ctx context.Context, sub *pubsub.Subscription, 
 				continue
 			}
 			if strings.Contains(topicName, "beacon_block") {
+				data, err := utils.DecompressSnappy(msg.Data)
+				if err != nil {
+					log.Warn("[test] fail to decompress snappy", "err", err)
+					continue
+				}
 				epoch := s.s.ethClock.GetCurrentEpoch()
 				version := s.s.cfg.BeaconConfig.GetCurrentStateVersion(epoch)
 				obj := cltypes.NewSignedBeaconBlock(s.s.cfg.BeaconConfig)
-				if err := obj.DecodeSSZ(msg.Data, int(version)); err != nil {
+				if err := obj.DecodeSSZ(data, int(version)); err != nil {
+					log.Warn("[test] fail to decode ssz", "err", err)
 					continue
 				}
 				log.Debug("[test] received beacon block", "from", msg.ReceivedFrom, "slot", obj.Block.Slot)
