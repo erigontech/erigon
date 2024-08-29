@@ -896,10 +896,8 @@ func stagePolygonSync(db kv.RwDB, ctx context.Context, logger log.Logger) error 
 				return err
 			}
 
-			for _, s := range []stages.SyncStage{stages.Snapshots, stages.Headers, stages.Bodies, stages.PolygonSync} {
-				if err := stages.SaveStageProgress(tx, s, stageState.BlockNumber-unwind); err != nil {
-					return err
-				}
+			if err := stages.SaveStageProgress(tx, stages.Snapshots, stageState.BlockNumber-unwind); err != nil {
+				return err
 			}
 		}
 
