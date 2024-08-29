@@ -26,7 +26,6 @@ import (
 	"github.com/erigontech/erigon/cl/cltypes/solid"
 	"github.com/erigontech/erigon/cl/phase1/core/state"
 	"github.com/erigontech/erigon/cl/phase1/core/state/lru"
-	"github.com/erigontech/erigon/cl/phase1/forkchoice"
 	"github.com/erigontech/erigon/cl/transition"
 
 	libcommon "github.com/erigontech/erigon-lib/common"
@@ -37,22 +36,20 @@ var (
 	ErrHeadStateNotAvailable = errors.New("head state not available")
 )
 
-const attestationsCacheSize = 10
+const attestationsCacheSize = 21
 
 type attestationProducer struct {
-	beaconCfg       *clparams.BeaconChainConfig
-	forkchoiceStore forkchoice.ForkChoiceStorage
+	beaconCfg *clparams.BeaconChainConfig
 
 	attCacheMutex     sync.RWMutex
 	attestationsCache *lru.CacheWithTTL[uint64, solid.AttestationData] // Epoch => Base AttestationData
 }
 
-func New(ctx context.Context, beaconCfg *clparams.BeaconChainConfig, forkchoice forkchoice.ForkChoiceStorage) AttestationDataProducer {
+func New(ctx context.Context, beaconCfg *clparams.BeaconChainConfig) AttestationDataProducer {
 	ttl := time.Duration(beaconCfg.SecondsPerSlot) * time.Second
 	attestationsCache := lru.NewWithTTL[uint64, solid.AttestationData]("attestations", attestationsCacheSize, ttl)
 	p := &attestationProducer{
 		beaconCfg:         beaconCfg,
-		forkchoiceStore:   forkchoice,
 		attestationsCache: attestationsCache,
 	}
 	return p
@@ -132,12 +129,12 @@ func (ap *attestationProducer) ProduceAndCacheAttestationData(baseState *state.C
 	if epochStartTargetSlot == baseState.Slot() {
 		targetRoot = baseStateBlockRoot
 	} else {
-		headBlockRoot, _, err := ap.forkchoiceStore.GetHead()
-		if err != nil || headBlockRoot == (libcommon.Hash{}) {
-			log.Warn("Failed to get head block root", "err", err)
+		targetRoot, err = baseState.GetBlockRootAtSlot(epochStartTargetSlot)
+		if err != nil {
+			return solid.AttestationData{}, err
+		}
+		if targetRoot == (libcommon.Hash{}) {
 			targetRoot = baseStateBlockRoot
-		} else {
-			targetRoot = headBlockRoot
 		}
 	}
 

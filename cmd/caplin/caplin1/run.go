@@ -245,6 +245,7 @@ func RunCaplinService(ctx context.Context, engine execution_client.ExecutionEngi
 	rcsn := freezeblocks.NewBeaconSnapshotReader(csn, eth1Getter, beaconConfig)
 
 	pool := pool.NewOperationsPool(beaconConfig)
+	attestationProducer := attestation_producer.New(ctx, beaconConfig)
 
 	caplinFcuPath := path.Join(dirs.Tmp, "caplin-forkchoice")
 	os.RemoveAll(caplinFcuPath)
@@ -307,7 +308,6 @@ func RunCaplinService(ctx context.Context, engine execution_client.ExecutionEngi
 	}
 	beaconRpc := rpc.NewBeaconRpcP2P(ctx, sentinel, beaconConfig, ethClock)
 	committeeSub := committee_subscription.NewCommitteeSubscribeManagement(ctx, indexDB, beaconConfig, networkConfig, ethClock, sentinel, state, aggregationPool, syncedDataManager)
-	attestationProducer := attestation_producer.New(ctx, beaconConfig, forkChoice)
 	// Define gossip services
 	blockService := services.NewBlockService(ctx, indexDB, forkChoice, syncedDataManager, ethClock, beaconConfig, emitters)
 	blobService := services.NewBlobSidecarService(ctx, beaconConfig, forkChoice, syncedDataManager, ethClock, emitters, false)
