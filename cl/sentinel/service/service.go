@@ -377,7 +377,9 @@ func (s *SentinelServer) SetSubscribeExpiry(ctx context.Context, expiryReq *sent
 
 func (s *SentinelServer) handleGossipPacket(pkt *sentinel.GossipMessage) error {
 	var err error
-	s.logger.Info("[test][Sentinel Gossip] Received Packet", "topic", pkt.TopicName)
+	if strings.Contains(pkt.TopicName, "beacon_block") {
+		s.logger.Info("[test][Sentinel Gossip] Received Packet", "topic", pkt.TopicName)
+	}
 
 	data := pkt.Data
 	topic := pkt.TopicName
