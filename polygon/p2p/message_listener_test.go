@@ -231,7 +231,7 @@ func TestMessageListenerShouldPenalizePeerWhenErrInvalidRlp(t *testing.T) {
 
 func newMessageListenerTest(t *testing.T) *messageListenerTest {
 	ctx, cancel := context.WithCancel(context.Background())
-	logger := testlog.Logger(t, log.LvlTrace)
+	logger := testlog.Logger(t, log.LvlCrit)
 	ctrl := gomock.NewController(t)
 	inboundMessagesStream := make(chan *delayedMessage[*sentry.InboundMessage])
 	peerEventsStream := make(chan *delayedMessage[*sentry.PeerEvent])
@@ -274,10 +274,11 @@ type messageListenerTest struct {
 // are no regressions.
 func (mlt *messageListenerTest) run(f func(ctx context.Context, t *testing.T)) {
 	var done atomic.Bool
-	mlt.t.Run("start", func(_ *testing.T) {
+	mlt.t.Run("start", func(t *testing.T) {
 		go func() {
-			mlt.messageListener.Run(mlt.ctx)
-			done.Store(true)
+			defer done.Store(true)
+			err := mlt.messageListener.Run(mlt.ctx)
+			require.ErrorIs(t, err, context.Canceled)
 		}()
 	})
 

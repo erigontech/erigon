@@ -17,12 +17,14 @@
 package p2p
 
 import (
+	"context"
 	"math/rand"
 	"time"
 
-	"github.com/erigontech/erigon-lib/log/v3"
+	"golang.org/x/sync/errgroup"
 
 	"github.com/erigontech/erigon-lib/gointerfaces/sentryproto"
+	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/p2p/sentry"
 )
 
@@ -32,6 +34,7 @@ type Service interface {
 	MessageListener
 	PeerTracker
 	PeerPenalizer
+	Run(ctx context.Context) error
 	MaxPeers() int
 }
 
@@ -58,10 +61,9 @@ func newService(
 	statusDataFactory sentry.StatusDataFactory,
 	requestIdGenerator RequestIdGenerator,
 ) *service {
-	peerTracker := NewPeerTracker()
 	peerPenalizer := NewPeerPenalizer(sentryClient)
 	messageListener := NewMessageListener(logger, sentryClient, statusDataFactory, peerPenalizer)
-	messageListener.RegisterPeerEventObserver(NewPeerEventObserver(logger, peerTracker))
+	peerTracker := NewPeerTracker(logger, sentryClient, messageListener)
 	messageSender := NewMessageSender(sentryClient)
 	fetcher := NewFetcher(fetcherConfig, messageListener, messageSender, requestIdGenerator)
 	fetcher = NewPenalizingFetcher(logger, fetcher, peerPenalizer)
@@ -81,6 +83,13 @@ type service struct {
 	PeerPenalizer
 	PeerTracker
 	maxPeers int
+}
+
+func (s *service) Run(ctx context.Context) error {
+	eg, ctx := errgroup.WithContext(ctx)
+	eg.Go(func() error { return s.MessageListener.Run(ctx) })
+	eg.Go(func() error { return s.PeerTracker.Run(ctx) })
+	return eg.Wait()
 }
 
 func (s *service) MaxPeers() int {
