@@ -1001,7 +1001,7 @@ func (a *ApiHandler) broadcastBlock(ctx context.Context, blk *cltypes.SignedBeac
 	for idx, blob := range blobsSidecarsBytes {
 		idx64 := uint64(idx)
 		if _, err := a.sentinel.PublishGossip(ctx, &sentinel.GossipData{
-			Name:     gossip.TopicNamePrefixBlobSidecar,
+			Name:     gossip.TopicNameBlobSidecar(idx64),
 			Data:     blob,
 			SubnetId: &idx64,
 		}); err != nil {

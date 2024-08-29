@@ -229,9 +229,9 @@ func (g *GossipManager) routeAndProcess(ctx context.Context, data *sentinel.Goss
 }
 
 func (g *GossipManager) Start(ctx context.Context) {
-	operationsCh := make(chan *sentinel.GossipData, 1<<16)
+	operationsCh := make(chan *sentinel.GossipData, 1<<20) // large quantity of attestation messages from gossip
 	blobsCh := make(chan *sentinel.GossipData, 1<<16)
-	blocksCh := make(chan *sentinel.GossipData, 1<<16)
+	blocksCh := make(chan *sentinel.GossipData, 1<<10)
 	syncCommitteesCh := make(chan *sentinel.GossipData, 1<<16)
 	defer close(operationsCh)
 	defer close(blobsCh)
@@ -256,10 +256,18 @@ func (g *GossipManager) Start(ctx context.Context) {
 			go worker()
 		}
 	}
-	goWorker(operationsCh, 1)
+	goWorker(operationsCh, 16)
 	goWorker(blocksCh, 1)
 	goWorker(blobsCh, 1)
 	goWorker(syncCommitteesCh, 1)
+
+	noWaitSend := func(ch chan<- *sentinel.GossipData, data *sentinel.GossipData) {
+		select {
+		case ch <- data:
+		default:
+			log.Warn("[Beacon Gossip] Dropping message due to full channel", "topic", data.Name)
+		}
+	}
 
 Reconnect:
 	for {
@@ -285,12 +293,15 @@ Reconnect:
 				continue Reconnect
 			}
 
-			if data.Name == gossip.TopicNameBeaconBlock || gossip.IsTopicBlobSidecar(data.Name) {
-				blocksCh <- data
-			} else if gossip.IsTopicSyncCommittee(data.Name) || data.Name == gossip.TopicNameSyncCommitteeContributionAndProof {
-				syncCommitteesCh <- data
-			} else {
-				operationsCh <- data
+			switch {
+			case data.Name == gossip.TopicNameBeaconBlock:
+				noWaitSend(blocksCh, data)
+			case gossip.IsTopicBlobSidecar(data.Name):
+				noWaitSend(blobsCh, data)
+			case gossip.IsTopicSyncCommittee(data.Name) || data.Name == gossip.TopicNameSyncCommitteeContributionAndProof:
+				noWaitSend(syncCommitteesCh, data)
+			default:
+				noWaitSend(operationsCh, data)
 			}
 		}
 	}
