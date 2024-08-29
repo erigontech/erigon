@@ -48,8 +48,6 @@ import (
 	"github.com/libp2p/go-libp2p/core/host"
 	"github.com/libp2p/go-libp2p/core/network"
 	"github.com/libp2p/go-libp2p/core/peer"
-	rcmgr "github.com/libp2p/go-libp2p/p2p/host/resource-manager"
-	rcmgrObs "github.com/libp2p/go-libp2p/p2p/host/resource-manager/obs"
 
 	sentinelrpc "github.com/erigontech/erigon-lib/gointerfaces/sentinelproto"
 	"github.com/erigontech/erigon-lib/log/v3"
@@ -237,16 +235,16 @@ func New(
 	if err != nil {
 		return nil, err
 	}
-	str, err := rcmgrObs.NewStatsTraceReporter()
-	if err != nil {
-		return nil, err
-	}
-
-	rmgr, err := rcmgr.NewResourceManager(rcmgr.NewFixedLimiter(rcmgr.DefaultLimits.AutoScale()), rcmgr.WithTraceReporter(str))
-	if err != nil {
-		return nil, err
-	}
-	opts = append(opts, libp2p.ResourceManager(rmgr))
+	/*
+		str, err := rcmgrObs.NewStatsTraceReporter()
+		if err != nil {
+			return nil, err
+		}
+		rmgr, err := rcmgr.NewResourceManager(rcmgr.NewFixedLimiter(rcmgr.DefaultLimits.AutoScale()), rcmgr.WithTraceReporter(str))
+		if err != nil {
+			return nil, err
+		}*/
+	opts = append(opts, libp2p.ResourceManager(&network.NullResourceManager{}))
 
 	gater, err := NewGater(cfg)
 	if err != nil {

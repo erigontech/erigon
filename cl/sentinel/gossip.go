@@ -628,6 +628,9 @@ func (s *GossipSubscription) run(ctx context.Context, sub *pubsub.Subscription, 
 			if msg.ReceivedFrom == s.host {
 				continue
 			}
+			if strings.Contains(topicName, "beacon_block") {
+				log.Debug("[test] received beacon block", "from", msg.ReceivedFrom)
+			}
 			s.ch <- &GossipMessage{
 				From:      msg.ReceivedFrom,
 				TopicName: topicName,
