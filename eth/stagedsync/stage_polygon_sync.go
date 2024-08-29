@@ -348,6 +348,9 @@ func UnwindSpans(tx kv.RwTx, unwindPoint uint64) error {
 			return err
 		}
 	}
+	if err != nil {
+		return err
+	}
 
 	producerCursor, err := tx.RwCursor(kv.BorProducerSelections)
 	if err != nil {
