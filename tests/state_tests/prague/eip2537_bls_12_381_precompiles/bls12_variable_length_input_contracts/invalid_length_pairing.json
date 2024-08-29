@@ -1,0 +1,197 @@
+{
+    "tests/prague/eip2537_bls_12_381_precompiles/test_bls12_variable_length_input_contracts.py::test_invalid_length_pairing[fork_PragueEIP7692-state_test-precompile_address_17---zero_length]": {
+        "env": {
+            "currentCoinbase": "0x2adc25665018aa1fe0e6bc666dac8fc2697ff9ba",
+            "currentGasLimit": "0x016345785d8a0000",
+            "currentNumber": "0x01",
+            "currentTimestamp": "0x03e8",
+            "currentRandom": "0x0000000000000000000000000000000000000000000000000000000000000000",
+            "currentDifficulty": "0x00",
+            "currentBaseFee": "0x07",
+            "currentExcessBlobGas": "0x00"
+        },
+        "pre": {
+            "0x0000000000000000000000000000000000001000": {
+                "nonce": "0x01",
+                "balance": "0x00",
+                "code": "0x6000600060006000600060116201a5e0f1600055",
+                "storage": {}
+            },
+            "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b": {
+                "nonce": "0x00",
+                "balance": "0x038d7ea4c68000",
+                "code": "0x",
+                "storage": {}
+            }
+        },
+        "transaction": {
+            "nonce": "0x00",
+            "gasPrice": "0x0a",
+            "gasLimit": [
+                "0x05f5e100"
+            ],
+            "to": "0x0000000000000000000000000000000000001000",
+            "value": [
+                "0x00"
+            ],
+            "data": [
+                "0x"
+            ],
+            "sender": "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b",
+            "secretKey": "0x45a915e4d060149eb4365960e6a7a45f334393093061116b197e3240065ff2d8"
+        },
+        "post": {
+            "Prague": [
+                {
+                    "hash": "0x0f8eab82e893acf1b322439fcc3698f3b51b5cfad8732b0ec6360069f4827275",
+                    "logs": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
+                    "txbytes": "0xf861800a8405f5e100940000000000000000000000000000000000001000808026a00c80636d627692750a38994c80e17de29770a0e34498f5e6eccd4f233ec21b5fa04c33c43ced36fe3329a16f21f2704902ac998ae26f175265e7b14a6229b1feb1",
+                    "indexes": {
+                        "data": 0,
+                        "gas": 0,
+                        "value": 0
+                    }
+                }
+            ]
+        },
+        "_info": {
+            "hash": "0xb66cb6d6de1875e36b5f56459f45da5b9a22039483c92bf6778156d953d32a73",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "Hyperledger Besu evm 24.8-develop-f5d6e72",
+            "description": "Test function documentation:\n\n    Test the BLS12_PAIRING precompile, by expecting the call to fail for all possible input\n    lengths (up to k == PAIRINGS_TO_TEST) because the incorrect input length was used.\n\n    If any of the calls succeeds, the test will fail.",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.0.8/tests/prague/eip2537_bls_12_381_precompiles/test_bls12_variable_length_input_contracts.py#L426",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-2537.md",
+            "reference-spec-version": "cd0f016ad0c4c68b8b1f5c502ef61ab9353b6e5e"
+        }
+    },
+    "tests/prague/eip2537_bls_12_381_precompiles/test_bls12_variable_length_input_contracts.py::test_invalid_length_pairing[fork_PragueEIP7692-state_test-precompile_address_17---input_too_short]": {
+        "env": {
+            "currentCoinbase": "0x2adc25665018aa1fe0e6bc666dac8fc2697ff9ba",
+            "currentGasLimit": "0x016345785d8a0000",
+            "currentNumber": "0x01",
+            "currentTimestamp": "0x03e8",
+            "currentRandom": "0x0000000000000000000000000000000000000000000000000000000000000000",
+            "currentDifficulty": "0x00",
+            "currentBaseFee": "0x07",
+            "currentExcessBlobGas": "0x00"
+        },
+        "pre": {
+            "0x0000000000000000000000000000000000001000": {
+                "nonce": "0x01",
+                "balance": "0x00",
+                "code": "0x6000600061017f6000600060116201a5e0f1600055600060006102ff60006000601162024dd8f16001556000600061047f6000600060116202f5d0f1600255600060006105ff60006000601162039dc8f16003556000600061077f600060006011620445c0f1600455600060006108ff6000600060116204edb8f160055560006000610a7f600060006011620595b0f160065560006000610bff60006000601162063da8f160075560006000610d7f6000600060116206e5a0f160085560006000610eff60006000601162078d98f16009556000600061107f60006000601162083590f1600a55600060006111ff6000600060116208dd88f1600b556000600061137f60006000601162098580f1600c55600060006114ff600060006011620a2d78f1600d556000600061167f600060006011620ad570f1600e55600060006117ff600060006011620b7d68f1600f556000600061197f600060006011620c2560f160105560006000611aff600060006011620ccd58f160115560006000611c7f600060006011620d7550f160125560006000611dff600060006011620e1d48f1601355",
+                "storage": {}
+            },
+            "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b": {
+                "nonce": "0x00",
+                "balance": "0x038d7ea4c68000",
+                "code": "0x",
+                "storage": {}
+            }
+        },
+        "transaction": {
+            "nonce": "0x00",
+            "gasPrice": "0x0a",
+            "gasLimit": [
+                "0x05f5e100"
+            ],
+            "to": "0x0000000000000000000000000000000000001000",
+            "value": [
+                "0x00"
+            ],
+            "data": [
+                "0x"
+            ],
+            "sender": "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b",
+            "secretKey": "0x45a915e4d060149eb4365960e6a7a45f334393093061116b197e3240065ff2d8"
+        },
+        "post": {
+            "Prague": [
+                {
+                    "hash": "0x50192827ad83ef6e9b4e09f918629e9e6ff0e59569cac4ab827d4a60a657e4c7",
+                    "logs": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
+                    "txbytes": "0xf861800a8405f5e100940000000000000000000000000000000000001000808026a00c80636d627692750a38994c80e17de29770a0e34498f5e6eccd4f233ec21b5fa04c33c43ced36fe3329a16f21f2704902ac998ae26f175265e7b14a6229b1feb1",
+                    "indexes": {
+                        "data": 0,
+                        "gas": 0,
+                        "value": 0
+                    }
+                }
+            ]
+        },
+        "_info": {
+            "hash": "0xbdb41f9c44b4db814571d699bdebcba47184cdbf4a6cb360d7c111da8966a641",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "Hyperledger Besu evm 24.8-develop-f5d6e72",
+            "description": "Test function documentation:\n\n    Test the BLS12_PAIRING precompile, by expecting the call to fail for all possible input\n    lengths (up to k == PAIRINGS_TO_TEST) because the incorrect input length was used.\n\n    If any of the calls succeeds, the test will fail.",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.0.8/tests/prague/eip2537_bls_12_381_precompiles/test_bls12_variable_length_input_contracts.py#L426",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-2537.md",
+            "reference-spec-version": "cd0f016ad0c4c68b8b1f5c502ef61ab9353b6e5e"
+        }
+    },
+    "tests/prague/eip2537_bls_12_381_precompiles/test_bls12_variable_length_input_contracts.py::test_invalid_length_pairing[fork_PragueEIP7692-state_test-precompile_address_17---input_too_long]": {
+        "env": {
+            "currentCoinbase": "0x2adc25665018aa1fe0e6bc666dac8fc2697ff9ba",
+            "currentGasLimit": "0x016345785d8a0000",
+            "currentNumber": "0x01",
+            "currentTimestamp": "0x03e8",
+            "currentRandom": "0x0000000000000000000000000000000000000000000000000000000000000000",
+            "currentDifficulty": "0x00",
+            "currentBaseFee": "0x07",
+            "currentExcessBlobGas": "0x00"
+        },
+        "pre": {
+            "0x0000000000000000000000000000000000001000": {
+                "nonce": "0x01",
+                "balance": "0x00",
+                "code": "0x600060006101816000600060116201a5e0f16000556000600061030160006000601162024dd8f1600155600060006104816000600060116202f5d0f16002556000600061060160006000601162039dc8f160035560006000610781600060006011620445c0f1600455600060006109016000600060116204edb8f160055560006000610a81600060006011620595b0f160065560006000610c0160006000601162063da8f160075560006000610d816000600060116206e5a0f160085560006000610f0160006000601162078d98f16009556000600061108160006000601162083590f1600a55600060006112016000600060116208dd88f1600b556000600061138160006000601162098580f1600c5560006000611501600060006011620a2d78f1600d5560006000611681600060006011620ad570f1600e5560006000611801600060006011620b7d68f1600f5560006000611981600060006011620c2560f160105560006000611b01600060006011620ccd58f160115560006000611c81600060006011620d7550f160125560006000611e01600060006011620e1d48f1601355",
+                "storage": {}
+            },
+            "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b": {
+                "nonce": "0x00",
+                "balance": "0x038d7ea4c68000",
+                "code": "0x",
+                "storage": {}
+            }
+        },
+        "transaction": {
+            "nonce": "0x00",
+            "gasPrice": "0x0a",
+            "gasLimit": [
+                "0x05f5e100"
+            ],
+            "to": "0x0000000000000000000000000000000000001000",
+            "value": [
+                "0x00"
+            ],
+            "data": [
+                "0x"
+            ],
+            "sender": "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b",
+            "secretKey": "0x45a915e4d060149eb4365960e6a7a45f334393093061116b197e3240065ff2d8"
+        },
+        "post": {
+            "Prague": [
+                {
+                    "hash": "0x6e7761b58a00c6d184c8f9215b3dc4bbd217b7fe55616458c39332f2ec5b05e5",
+                    "logs": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
+                    "txbytes": "0xf861800a8405f5e100940000000000000000000000000000000000001000808026a00c80636d627692750a38994c80e17de29770a0e34498f5e6eccd4f233ec21b5fa04c33c43ced36fe3329a16f21f2704902ac998ae26f175265e7b14a6229b1feb1",
+                    "indexes": {
+                        "data": 0,
+                        "gas": 0,
+                        "value": 0
+                    }
+                }
+            ]
+        },
+        "_info": {
+            "hash": "0x199fe422afe3b0147ce64de0f6a8ce41f2f07123db320e9bd00a67001326821f",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "Hyperledger Besu evm 24.8-develop-f5d6e72",
+            "description": "Test function documentation:\n\n    Test the BLS12_PAIRING precompile, by expecting the call to fail for all possible input\n    lengths (up to k == PAIRINGS_TO_TEST) because the incorrect input length was used.\n\n    If any of the calls succeeds, the test will fail.",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.0.8/tests/prague/eip2537_bls_12_381_precompiles/test_bls12_variable_length_input_contracts.py#L426",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-2537.md",
+            "reference-spec-version": "cd0f016ad0c4c68b8b1f5c502ef61ab9353b6e5e"
+        }
+    }
+}

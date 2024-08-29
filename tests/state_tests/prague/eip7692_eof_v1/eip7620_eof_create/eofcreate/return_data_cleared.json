@@ -63,9 +63,9 @@
         "_info": {
             "hash": "0x10762f664d81434f2a7731985a9aad589de6dcf91d7c422b8a9e050a90c9a323",
             "comment": "`execution-spec-tests` generated test",
-            "filling-transition-tool": "Hyperledger Besu evm 24.7-develop-30c96c7",
+            "filling-transition-tool": "Hyperledger Besu evm 24.8-develop-f5d6e72",
             "description": "Test function documentation:\n\n    Verifies the return data is not re-used from a extcall but is cleared upon eofcreate",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692-prague@v1.0.7/tests/prague/eip7692_eof_v1/eip7620_eof_create/test_eofcreate.py#L389",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.0.8/tests/prague/eip7692_eof_v1/eip7620_eof_create/test_eofcreate.py#L389",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7620.md",
             "reference-spec-version": "52ddbcdddcf72dd72427c319f2beddeb468e1737"
         }

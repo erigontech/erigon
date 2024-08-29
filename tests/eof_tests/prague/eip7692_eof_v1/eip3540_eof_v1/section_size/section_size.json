@@ -13,9 +13,31 @@
         "_info": {
             "hash": "0x35a339078e9cee540492224ae9e3437594dad4c37a9a7139b1898975b38891de",
             "comment": "`execution-spec-tests` generated test",
-            "filling-transition-tool": "Hyperledger Besu evm 24.7-develop-30c96c7",
+            "filling-transition-tool": "Hyperledger Besu evm 24.8-develop-f5d6e72",
             "description": "Test function documentation:\n\n    Test custom_size is auto, more or less then the actual size of the section",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692-prague@v1.0.7/tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_section_size.py#L37",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.0.8/tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_section_size.py#L40",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-3540.md",
+            "reference-spec-version": "8dcb0a8c1c0102c87224308028632cc986a61183"
+        }
+    },
+    "tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_section_size.py::test_section_size[fork_PragueEIP7692-eof_test-section_kind_DATA-section_size_ZERO-exception_EOFException.INVALID_SECTION_BODIES_SIZE]": {
+        "vectors": {
+            "0": {
+                "code": "0xef00010100040200010003040000000080000130500000daaa",
+                "results": {
+                    "Prague": {
+                        "exception": "EOFException.INVALID_SECTION_BODIES_SIZE",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0x3ad5eb94db503ea2e1f624491df27cf25255a46c8fcf184dfdc1a4dabe0d6025",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "Hyperledger Besu evm 24.8-develop-f5d6e72",
+            "description": "Test function documentation:\n\n    Test custom_size is auto, more or less then the actual size of the section",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.0.8/tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_section_size.py#L40",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-3540.md",
             "reference-spec-version": "8dcb0a8c1c0102c87224308028632cc986a61183"
         }
@@ -35,9 +57,9 @@
         "_info": {
             "hash": "0x4758eac0d5f58c8a7b4f66064e1178fec48deb846f29bd3740380902755d3357",
             "comment": "`execution-spec-tests` generated test",
-            "filling-transition-tool": "Hyperledger Besu evm 24.7-develop-30c96c7",
+            "filling-transition-tool": "Hyperledger Besu evm 24.8-develop-f5d6e72",
             "description": "Test function documentation:\n\n    Test custom_size is auto, more or less then the actual size of the section",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692-prague@v1.0.7/tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_section_size.py#L37",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.0.8/tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_section_size.py#L40",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-3540.md",
             "reference-spec-version": "8dcb0a8c1c0102c87224308028632cc986a61183"
         }
@@ -57,9 +79,96 @@
         "_info": {
             "hash": "0x63e015a40baf37f0c1a02ddf4486c7a1fc831d6617ec403ff746ce9cf58f9901",
             "comment": "`execution-spec-tests` generated test",
-            "filling-transition-tool": "Hyperledger Besu evm 24.7-develop-30c96c7",
+            "filling-transition-tool": "Hyperledger Besu evm 24.8-develop-f5d6e72",
             "description": "Test function documentation:\n\n    Test custom_size is auto, more or less then the actual size of the section",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692-prague@v1.0.7/tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_section_size.py#L37",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.0.8/tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_section_size.py#L40",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-3540.md",
+            "reference-spec-version": "8dcb0a8c1c0102c87224308028632cc986a61183"
+        }
+    },
+    "tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_section_size.py::test_section_size[fork_PragueEIP7692-eof_test-section_kind_DATA-section_size_HUGE-exception_EOFException.TOPLEVEL_CONTAINER_TRUNCATED]": {
+        "vectors": {
+            "0": {
+                "code": "0xef00010100040200010003048000000080000130500000daaa",
+                "results": {
+                    "Prague": {
+                        "exception": "EOFException.TOPLEVEL_CONTAINER_TRUNCATED",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0x69ca03b584c3fc3517ebf555eeb8462325ceaa4bd5805f0fb4a3821343aa9737",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "Hyperledger Besu evm 24.8-develop-f5d6e72",
+            "description": "Test function documentation:\n\n    Test custom_size is auto, more or less then the actual size of the section",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.0.8/tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_section_size.py#L40",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-3540.md",
+            "reference-spec-version": "8dcb0a8c1c0102c87224308028632cc986a61183"
+        }
+    },
+    "tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_section_size.py::test_section_size[fork_PragueEIP7692-eof_test-section_kind_DATA-section_size_MAX-exception_EOFException.TOPLEVEL_CONTAINER_TRUNCATED]": {
+        "vectors": {
+            "0": {
+                "code": "0xef0001010004020001000304ffff000080000130500000daaa",
+                "results": {
+                    "Prague": {
+                        "exception": "EOFException.TOPLEVEL_CONTAINER_TRUNCATED",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0x9949348650839b09f9f6177d62b850389daf34a2e7d359f1990c07eb741fe1a6",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "Hyperledger Besu evm 24.8-develop-f5d6e72",
+            "description": "Test function documentation:\n\n    Test custom_size is auto, more or less then the actual size of the section",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.0.8/tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_section_size.py#L40",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-3540.md",
+            "reference-spec-version": "8dcb0a8c1c0102c87224308028632cc986a61183"
+        }
+    },
+    "tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_section_size.py::test_section_size[fork_PragueEIP7692-eof_test-section_kind_CODE-section_size_NORMAL-exception_None]": {
+        "vectors": {
+            "0": {
+                "code": "0xef00010100040200010003040003000080000130500000aaaa",
+                "results": {
+                    "Prague": {
+                        "result": true
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0x35a339078e9cee540492224ae9e3437594dad4c37a9a7139b1898975b38891de",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "Hyperledger Besu evm 24.8-develop-f5d6e72",
+            "description": "Test function documentation:\n\n    Test custom_size is auto, more or less then the actual size of the section",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.0.8/tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_section_size.py#L40",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-3540.md",
+            "reference-spec-version": "8dcb0a8c1c0102c87224308028632cc986a61183"
+        }
+    },
+    "tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_section_size.py::test_section_size[fork_PragueEIP7692-eof_test-section_kind_CODE-section_size_ZERO-exception_EOFException.ZERO_SECTION_SIZE]": {
+        "vectors": {
+            "0": {
+                "code": "0xef00010100040200010000040003000080000130500000aaaa",
+                "results": {
+                    "Prague": {
+                        "exception": "EOFException.ZERO_SECTION_SIZE",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0x975d9b5d2bb9b552010cd7b0661bcf0b155b91a9ba76308e195ceb1d84d69748",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "Hyperledger Besu evm 24.8-develop-f5d6e72",
+            "description": "Test function documentation:\n\n    Test custom_size is auto, more or less then the actual size of the section",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.0.8/tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_section_size.py#L40",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-3540.md",
             "reference-spec-version": "8dcb0a8c1c0102c87224308028632cc986a61183"
         }
@@ -79,9 +188,9 @@
         "_info": {
             "hash": "0x98b148f814353d745a82cfd33ca11bb1b692e51a21bbf0c1cf82511aeaf09058",
             "comment": "`execution-spec-tests` generated test",
-            "filling-transition-tool": "Hyperledger Besu evm 24.7-develop-30c96c7",
+            "filling-transition-tool": "Hyperledger Besu evm 24.8-develop-f5d6e72",
             "description": "Test function documentation:\n\n    Test custom_size is auto, more or less then the actual size of the section",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692-prague@v1.0.7/tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_section_size.py#L37",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.0.8/tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_section_size.py#L40",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-3540.md",
             "reference-spec-version": "8dcb0a8c1c0102c87224308028632cc986a61183"
         }
@@ -101,14 +210,58 @@
         "_info": {
             "hash": "0xea5335ce4f71cceb70dab53c445bde495699a8bf7d87ca8368eb5537174917d3",
             "comment": "`execution-spec-tests` generated test",
-            "filling-transition-tool": "Hyperledger Besu evm 24.7-develop-30c96c7",
+            "filling-transition-tool": "Hyperledger Besu evm 24.8-develop-f5d6e72",
             "description": "Test function documentation:\n\n    Test custom_size is auto, more or less then the actual size of the section",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692-prague@v1.0.7/tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_section_size.py#L37",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.0.8/tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_section_size.py#L40",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-3540.md",
             "reference-spec-version": "8dcb0a8c1c0102c87224308028632cc986a61183"
         }
     },
-    "tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_section_size.py::test_section_size[fork_PragueEIP7692-eof_test-section_kind_CODE-section_size_NORMAL-exception_None]": {
+    "tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_section_size.py::test_section_size[fork_PragueEIP7692-eof_test-section_kind_CODE-section_size_HUGE-exception_EOFException.INVALID_SECTION_BODIES_SIZE]": {
+        "vectors": {
+            "0": {
+                "code": "0xef00010100040200018000040003000080000130500000aaaa",
+                "results": {
+                    "Prague": {
+                        "exception": "EOFException.INVALID_SECTION_BODIES_SIZE",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0xb167ea4675a98815da15dcaa93f81b38d7100f6554249948a594f5b67d1321b4",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "Hyperledger Besu evm 24.8-develop-f5d6e72",
+            "description": "Test function documentation:\n\n    Test custom_size is auto, more or less then the actual size of the section",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.0.8/tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_section_size.py#L40",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-3540.md",
+            "reference-spec-version": "8dcb0a8c1c0102c87224308028632cc986a61183"
+        }
+    },
+    "tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_section_size.py::test_section_size[fork_PragueEIP7692-eof_test-section_kind_CODE-section_size_MAX-exception_EOFException.INVALID_SECTION_BODIES_SIZE]": {
+        "vectors": {
+            "0": {
+                "code": "0xef0001010004020001ffff040003000080000130500000aaaa",
+                "results": {
+                    "Prague": {
+                        "exception": "EOFException.INVALID_SECTION_BODIES_SIZE",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0xcded93fc635736911207c08beeb62e3c7fc2978970b0680dc05fc7a774ffc91d",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "Hyperledger Besu evm 24.8-develop-f5d6e72",
+            "description": "Test function documentation:\n\n    Test custom_size is auto, more or less then the actual size of the section",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.0.8/tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_section_size.py#L40",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-3540.md",
+            "reference-spec-version": "8dcb0a8c1c0102c87224308028632cc986a61183"
+        }
+    },
+    "tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_section_size.py::test_section_size[fork_PragueEIP7692-eof_test-section_kind_TYPE-section_size_NORMAL-exception_None]": {
         "vectors": {
             "0": {
                 "code": "0xef00010100040200010003040003000080000130500000aaaa",
@@ -122,9 +275,31 @@
         "_info": {
             "hash": "0x35a339078e9cee540492224ae9e3437594dad4c37a9a7139b1898975b38891de",
             "comment": "`execution-spec-tests` generated test",
-            "filling-transition-tool": "Hyperledger Besu evm 24.7-develop-30c96c7",
+            "filling-transition-tool": "Hyperledger Besu evm 24.8-develop-f5d6e72",
             "description": "Test function documentation:\n\n    Test custom_size is auto, more or less then the actual size of the section",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692-prague@v1.0.7/tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_section_size.py#L37",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.0.8/tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_section_size.py#L40",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-3540.md",
+            "reference-spec-version": "8dcb0a8c1c0102c87224308028632cc986a61183"
+        }
+    },
+    "tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_section_size.py::test_section_size[fork_PragueEIP7692-eof_test-section_kind_TYPE-section_size_ZERO-exception_EOFException.ZERO_SECTION_SIZE]": {
+        "vectors": {
+            "0": {
+                "code": "0xef00010100000200010003040003000080000130500000aaaa",
+                "results": {
+                    "Prague": {
+                        "exception": "EOFException.ZERO_SECTION_SIZE",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0x236dfda55134e21d1f936be3179d59a62378d1c7294f76877d3e4914f27889b0",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "Hyperledger Besu evm 24.8-develop-f5d6e72",
+            "description": "Test function documentation:\n\n    Test custom_size is auto, more or less then the actual size of the section",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.0.8/tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_section_size.py#L40",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-3540.md",
             "reference-spec-version": "8dcb0a8c1c0102c87224308028632cc986a61183"
         }
@@ -144,9 +319,9 @@
         "_info": {
             "hash": "0xb9dec30e9d4af5f90f145b399c62657e83b8ea92c4dbe80604c3d0987f6101f4",
             "comment": "`execution-spec-tests` generated test",
-            "filling-transition-tool": "Hyperledger Besu evm 24.7-develop-30c96c7",
+            "filling-transition-tool": "Hyperledger Besu evm 24.8-develop-f5d6e72",
             "description": "Test function documentation:\n\n    Test custom_size is auto, more or less then the actual size of the section",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692-prague@v1.0.7/tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_section_size.py#L37",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.0.8/tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_section_size.py#L40",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-3540.md",
             "reference-spec-version": "8dcb0a8c1c0102c87224308028632cc986a61183"
         }
@@ -166,30 +341,53 @@
         "_info": {
             "hash": "0x02d5d0d64ce2f8e2b307645e4c9d20d5d1ba0aaef994b7403232734871c9d558",
             "comment": "`execution-spec-tests` generated test",
-            "filling-transition-tool": "Hyperledger Besu evm 24.7-develop-30c96c7",
+            "filling-transition-tool": "Hyperledger Besu evm 24.8-develop-f5d6e72",
             "description": "Test function documentation:\n\n    Test custom_size is auto, more or less then the actual size of the section",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692-prague@v1.0.7/tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_section_size.py#L37",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.0.8/tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_section_size.py#L40",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-3540.md",
             "reference-spec-version": "8dcb0a8c1c0102c87224308028632cc986a61183"
         }
     },
-    "tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_section_size.py::test_section_size[fork_PragueEIP7692-eof_test-section_kind_TYPE-section_size_NORMAL-exception_None]": {
+    "tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_section_size.py::test_section_size[fork_PragueEIP7692-eof_test-section_kind_TYPE-section_size_HUGE-exception_EOFException.INVALID_SECTION_BODIES_SIZE]": {
         "vectors": {
             "0": {
-                "code": "0xef00010100040200010003040003000080000130500000aaaa",
+                "code": "0xef00010180000200010003040003000080000130500000aaaa",
                 "results": {
                     "Prague": {
-                        "result": true
+                        "exception": "EOFException.INVALID_SECTION_BODIES_SIZE",
+                        "result": false
                     }
                 }
             }
         },
         "_info": {
-            "hash": "0x35a339078e9cee540492224ae9e3437594dad4c37a9a7139b1898975b38891de",
+            "hash": "0xdbbde3d0bbe3188156259fdb5ac8176a4911359623f787d0466268369eddb524",
             "comment": "`execution-spec-tests` generated test",
-            "filling-transition-tool": "Hyperledger Besu evm 24.7-develop-30c96c7",
+            "filling-transition-tool": "Hyperledger Besu evm 24.8-develop-f5d6e72",
             "description": "Test function documentation:\n\n    Test custom_size is auto, more or less then the actual size of the section",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692-prague@v1.0.7/tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_section_size.py#L37",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.0.8/tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_section_size.py#L40",
+            "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-3540.md",
+            "reference-spec-version": "8dcb0a8c1c0102c87224308028632cc986a61183"
+        }
+    },
+    "tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_section_size.py::test_section_size[fork_PragueEIP7692-eof_test-section_kind_TYPE-section_size_MAX-exception_EOFException.INVALID_SECTION_BODIES_SIZE]": {
+        "vectors": {
+            "0": {
+                "code": "0xef000101ffff0200010003040003000080000130500000aaaa",
+                "results": {
+                    "Prague": {
+                        "exception": "EOFException.INVALID_SECTION_BODIES_SIZE",
+                        "result": false
+                    }
+                }
+            }
+        },
+        "_info": {
+            "hash": "0x023163e41d5eb73578e1e624ebc937c29a9c675520f1ea36a66f264ae1ae4d20",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "Hyperledger Besu evm 24.8-develop-f5d6e72",
+            "description": "Test function documentation:\n\n    Test custom_size is auto, more or less then the actual size of the section",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.0.8/tests/prague/eip7692_eof_v1/eip3540_eof_v1/test_section_size.py#L40",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-3540.md",
             "reference-spec-version": "8dcb0a8c1c0102c87224308028632cc986a61183"
         }

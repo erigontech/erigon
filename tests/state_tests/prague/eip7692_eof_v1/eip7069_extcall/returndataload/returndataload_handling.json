@@ -1,5 +1,5 @@
 {
-    "tests/prague/eip7692_eof_v1/eip7069_extcall/test_returndataload.py::test_returndataload_handling[fork_PragueEIP7692-state_test-offset_0-len_0-EXTCALL]": {
+    "tests/prague/eip7692_eof_v1/eip7069_extcall/test_returndataload.py::test_returndataload_handling[fork_PragueEIP7692-state_test-offset_0-len_0-opcode_EXTCALL]": {
         "env": {
             "currentCoinbase": "0x2adc25665018aa1fe0e6bc666dac8fc2697ff9ba",
             "currentGasLimit": "0x016345785d8a0000",
@@ -13,7 +13,7 @@
         "pre": {
             "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b": {
                 "nonce": "0x00",
-                "balance": "0x0de0b6b3a7640000",
+                "balance": "0x3635c9adc5dea00000",
                 "code": "0x",
                 "storage": {}
             },
@@ -49,7 +49,7 @@
         "post": {
             "Prague": [
                 {
-                    "hash": "0x045f64b3010a0ba69a9b6a2fd0296451fb344bdf38670b3379df023add162dc5",
+                    "hash": "0x657338eb444677994ba2e0022b4b72ac71c47652819b298a039b6b26b237ea24",
                     "logs": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
                     "txbytes": "0xf860800a831e8480940000000000000000000000000000000000001100808025a0b3afc79e7eb6744553c987dfa51e04eec7c6d695e6f730badd8150d43c6611fda056587ba537d9e4baf5e9fdb797ed4d7cf237c28c5d368b92f2f3681334585fec",
                     "indexes": {
@@ -61,16 +61,16 @@
             ]
         },
         "_info": {
-            "hash": "0x6fe69e91fe667111fcaf7d39ae702ce230212e04e65568045c4982d3761836b5",
+            "hash": "0x35ab9f7508fba0629f42e973435d64745360f98729a46573cc5d0081c7859ae1",
             "comment": "`execution-spec-tests` generated test",
-            "filling-transition-tool": "Hyperledger Besu evm 24.7-develop-30c96c7",
+            "filling-transition-tool": "Hyperledger Besu evm 24.8-develop-f5d6e72",
             "description": "Test function documentation:\n\n    Much simpler than returndatacopy, no memory or boosted call.  Returner is called\n    and results are stored in storage slot, which is asserted for expected values.\n    The parameters offset and return data are configured to test boundary conditions.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692-prague@v1.0.7/tests/prague/eip7692_eof_v1/eip7069_extcall/test_returndataload.py#L184",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.0.8/tests/prague/eip7692_eof_v1/eip7069_extcall/test_returndataload.py#L179",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7069.md",
             "reference-spec-version": "1795943aeacc86131d5ab6bb3d65824b3b1d4cad"
         }
     },
-    "tests/prague/eip7692_eof_v1/eip7069_extcall/test_returndataload.py::test_returndataload_handling[fork_PragueEIP7692-state_test-offset_0-len_0-EXTDELEGATECALL]": {
+    "tests/prague/eip7692_eof_v1/eip7069_extcall/test_returndataload.py::test_returndataload_handling[fork_PragueEIP7692-state_test-offset_0-len_0-opcode_EXTDELEGATECALL]": {
         "env": {
             "currentCoinbase": "0x2adc25665018aa1fe0e6bc666dac8fc2697ff9ba",
             "currentGasLimit": "0x016345785d8a0000",
@@ -84,7 +84,7 @@
         "pre": {
             "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b": {
                 "nonce": "0x00",
-                "balance": "0x0de0b6b3a7640000",
+                "balance": "0x3635c9adc5dea00000",
                 "code": "0x",
                 "storage": {}
             },
@@ -120,7 +120,7 @@
         "post": {
             "Prague": [
                 {
-                    "hash": "0x9d7ad16b0913a987440cfa0ee8541d9a57586482342f67b118c7b6345c9f3c4e",
+                    "hash": "0xc3ba9a36403e1f0eb1b288465959f3113d858b601956ed252f7f85df1dabed0c",
                     "logs": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
                     "txbytes": "0xf860800a831e8480940000000000000000000000000000000000001100808025a0b3afc79e7eb6744553c987dfa51e04eec7c6d695e6f730badd8150d43c6611fda056587ba537d9e4baf5e9fdb797ed4d7cf237c28c5d368b92f2f3681334585fec",
                     "indexes": {
@@ -132,16 +132,16 @@
             ]
         },
         "_info": {
-            "hash": "0xcb14998cb163bd492edc4de46ec2c36477668a94fedba6394e0dd41fede12ef8",
+            "hash": "0x5f90570e794d43b8dee3747ee9df463d4dbdd99d6cdd670794666b64301d119e",
             "comment": "`execution-spec-tests` generated test",
-            "filling-transition-tool": "Hyperledger Besu evm 24.7-develop-30c96c7",
+            "filling-transition-tool": "Hyperledger Besu evm 24.8-develop-f5d6e72",
             "description": "Test function documentation:\n\n    Much simpler than returndatacopy, no memory or boosted call.  Returner is called\n    and results are stored in storage slot, which is asserted for expected values.\n    The parameters offset and return data are configured to test boundary conditions.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692-prague@v1.0.7/tests/prague/eip7692_eof_v1/eip7069_extcall/test_returndataload.py#L184",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.0.8/tests/prague/eip7692_eof_v1/eip7069_extcall/test_returndataload.py#L179",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7069.md",
             "reference-spec-version": "1795943aeacc86131d5ab6bb3d65824b3b1d4cad"
         }
     },
-    "tests/prague/eip7692_eof_v1/eip7069_extcall/test_returndataload.py::test_returndataload_handling[fork_PragueEIP7692-state_test-offset_0-len_0-EXTSTATICCALL]": {
+    "tests/prague/eip7692_eof_v1/eip7069_extcall/test_returndataload.py::test_returndataload_handling[fork_PragueEIP7692-state_test-offset_0-len_0-opcode_EXTSTATICCALL]": {
         "env": {
             "currentCoinbase": "0x2adc25665018aa1fe0e6bc666dac8fc2697ff9ba",
             "currentGasLimit": "0x016345785d8a0000",
@@ -155,7 +155,7 @@
         "pre": {
             "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b": {
                 "nonce": "0x00",
-                "balance": "0x0de0b6b3a7640000",
+                "balance": "0x3635c9adc5dea00000",
                 "code": "0x",
                 "storage": {}
             },
@@ -191,7 +191,7 @@
         "post": {
             "Prague": [
                 {
-                    "hash": "0x14657a0ba15558eb817336322cc90f3540ce8c8edc742737f201cf060fef0ff7",
+                    "hash": "0xf1678d41f620ceae5bc739f56ccd1e6fb93537713dec1237ec0008e0732b426d",
                     "logs": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
                     "txbytes": "0xf860800a831e8480940000000000000000000000000000000000001100808025a0b3afc79e7eb6744553c987dfa51e04eec7c6d695e6f730badd8150d43c6611fda056587ba537d9e4baf5e9fdb797ed4d7cf237c28c5d368b92f2f3681334585fec",
                     "indexes": {
@@ -203,16 +203,16 @@
             ]
         },
         "_info": {
-            "hash": "0xf66074bf4504998a25ff42c7dc957315d6b05f537bea2fe50af5140f7efc10f4",
+            "hash": "0xd3a3b5ec267850f8df285a20d48b5bf657a1713dd6e887ca08623ac831cc4b6b",
             "comment": "`execution-spec-tests` generated test",
-            "filling-transition-tool": "Hyperledger Besu evm 24.7-develop-30c96c7",
+            "filling-transition-tool": "Hyperledger Besu evm 24.8-develop-f5d6e72",
             "description": "Test function documentation:\n\n    Much simpler than returndatacopy, no memory or boosted call.  Returner is called\n    and results are stored in storage slot, which is asserted for expected values.\n    The parameters offset and return data are configured to test boundary conditions.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692-prague@v1.0.7/tests/prague/eip7692_eof_v1/eip7069_extcall/test_returndataload.py#L184",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.0.8/tests/prague/eip7692_eof_v1/eip7069_extcall/test_returndataload.py#L179",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7069.md",
             "reference-spec-version": "1795943aeacc86131d5ab6bb3d65824b3b1d4cad"
         }
     },
-    "tests/prague/eip7692_eof_v1/eip7069_extcall/test_returndataload.py::test_returndataload_handling[fork_PragueEIP7692-state_test-offset_0-len_10-EXTCALL]": {
+    "tests/prague/eip7692_eof_v1/eip7069_extcall/test_returndataload.py::test_returndataload_handling[fork_PragueEIP7692-state_test-offset_0-len_10-opcode_EXTCALL]": {
         "env": {
             "currentCoinbase": "0x2adc25665018aa1fe0e6bc666dac8fc2697ff9ba",
             "currentGasLimit": "0x016345785d8a0000",
@@ -226,7 +226,7 @@
         "pre": {
             "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b": {
                 "nonce": "0x00",
-                "balance": "0x0de0b6b3a7640000",
+                "balance": "0x3635c9adc5dea00000",
                 "code": "0x",
                 "storage": {}
             },
@@ -262,7 +262,7 @@
         "post": {
             "Prague": [
                 {
-                    "hash": "0xcb7cb736bf1289bcc80ff0357e4751b3528932fba6d29e62ac3f10e929098f38",
+                    "hash": "0xb8869b3c845f38ec84b30cc5ab05dd46f8fffeaa4c9638045fe2eda610beb9fc",
                     "logs": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
                     "txbytes": "0xf860800a831e8480940000000000000000000000000000000000001100808025a0b3afc79e7eb6744553c987dfa51e04eec7c6d695e6f730badd8150d43c6611fda056587ba537d9e4baf5e9fdb797ed4d7cf237c28c5d368b92f2f3681334585fec",
                     "indexes": {
@@ -274,16 +274,16 @@
             ]
         },
         "_info": {
-            "hash": "0xb1e695611541242cfac559e6db41d2cca9b6f8764ef544b33c636393b05bddd6",
+            "hash": "0x4b58a35fd201b74914da64697e7951517fb462f99f7dc61c3cdd4705229c00cb",
             "comment": "`execution-spec-tests` generated test",
-            "filling-transition-tool": "Hyperledger Besu evm 24.7-develop-30c96c7",
+            "filling-transition-tool": "Hyperledger Besu evm 24.8-develop-f5d6e72",
             "description": "Test function documentation:\n\n    Much simpler than returndatacopy, no memory or boosted call.  Returner is called\n    and results are stored in storage slot, which is asserted for expected values.\n    The parameters offset and return data are configured to test boundary conditions.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692-prague@v1.0.7/tests/prague/eip7692_eof_v1/eip7069_extcall/test_returndataload.py#L184",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.0.8/tests/prague/eip7692_eof_v1/eip7069_extcall/test_returndataload.py#L179",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7069.md",
             "reference-spec-version": "1795943aeacc86131d5ab6bb3d65824b3b1d4cad"
         }
     },
-    "tests/prague/eip7692_eof_v1/eip7069_extcall/test_returndataload.py::test_returndataload_handling[fork_PragueEIP7692-state_test-offset_0-len_10-EXTDELEGATECALL]": {
+    "tests/prague/eip7692_eof_v1/eip7069_extcall/test_returndataload.py::test_returndataload_handling[fork_PragueEIP7692-state_test-offset_0-len_10-opcode_EXTDELEGATECALL]": {
         "env": {
             "currentCoinbase": "0x2adc25665018aa1fe0e6bc666dac8fc2697ff9ba",
             "currentGasLimit": "0x016345785d8a0000",
@@ -297,7 +297,7 @@
         "pre": {
             "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b": {
                 "nonce": "0x00",
-                "balance": "0x0de0b6b3a7640000",
+                "balance": "0x3635c9adc5dea00000",
                 "code": "0x",
                 "storage": {}
             },
@@ -333,7 +333,7 @@
         "post": {
             "Prague": [
                 {
-                    "hash": "0xa8d2cbb05534a1d39b9f5e0d77fb86fdb415891500384c80690ac21527f60079",
+                    "hash": "0x41e7c21baa755d60a2ac416a8096b2f886ab438d81291bcb29e6501005959ffc",
                     "logs": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
                     "txbytes": "0xf860800a831e8480940000000000000000000000000000000000001100808025a0b3afc79e7eb6744553c987dfa51e04eec7c6d695e6f730badd8150d43c6611fda056587ba537d9e4baf5e9fdb797ed4d7cf237c28c5d368b92f2f3681334585fec",
                     "indexes": {
@@ -345,16 +345,16 @@
             ]
         },
         "_info": {
-            "hash": "0xb81f1765a08bb49fb9f0393c67dcd419922bcc1cf5e925c9b045e19b12c3c3a9",
+            "hash": "0xa891353c19e618612f67383d554bee8ee9aa7c050269a94b10171ae2f0112f7f",
             "comment": "`execution-spec-tests` generated test",
-            "filling-transition-tool": "Hyperledger Besu evm 24.7-develop-30c96c7",
+            "filling-transition-tool": "Hyperledger Besu evm 24.8-develop-f5d6e72",
             "description": "Test function documentation:\n\n    Much simpler than returndatacopy, no memory or boosted call.  Returner is called\n    and results are stored in storage slot, which is asserted for expected values.\n    The parameters offset and return data are configured to test boundary conditions.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692-prague@v1.0.7/tests/prague/eip7692_eof_v1/eip7069_extcall/test_returndataload.py#L184",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.0.8/tests/prague/eip7692_eof_v1/eip7069_extcall/test_returndataload.py#L179",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7069.md",
             "reference-spec-version": "1795943aeacc86131d5ab6bb3d65824b3b1d4cad"
         }
     },
-    "tests/prague/eip7692_eof_v1/eip7069_extcall/test_returndataload.py::test_returndataload_handling[fork_PragueEIP7692-state_test-offset_0-len_10-EXTSTATICCALL]": {
+    "tests/prague/eip7692_eof_v1/eip7069_extcall/test_returndataload.py::test_returndataload_handling[fork_PragueEIP7692-state_test-offset_0-len_10-opcode_EXTSTATICCALL]": {
         "env": {
             "currentCoinbase": "0x2adc25665018aa1fe0e6bc666dac8fc2697ff9ba",
             "currentGasLimit": "0x016345785d8a0000",
@@ -368,7 +368,7 @@
         "pre": {
             "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b": {
                 "nonce": "0x00",
-                "balance": "0x0de0b6b3a7640000",
+                "balance": "0x3635c9adc5dea00000",
                 "code": "0x",
                 "storage": {}
             },
@@ -404,7 +404,7 @@
         "post": {
             "Prague": [
                 {
-                    "hash": "0xfd5a2289a618e78285d2985dea7adf6c629c375c42b76c0d62b971615db017ff",
+                    "hash": "0x4d370a7ae662acacd29a9dc4586ab004401f71fe5f4bb8611e915277d06b1f11",
                     "logs": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
                     "txbytes": "0xf860800a831e8480940000000000000000000000000000000000001100808025a0b3afc79e7eb6744553c987dfa51e04eec7c6d695e6f730badd8150d43c6611fda056587ba537d9e4baf5e9fdb797ed4d7cf237c28c5d368b92f2f3681334585fec",
                     "indexes": {
@@ -416,16 +416,16 @@
             ]
         },
         "_info": {
-            "hash": "0x7185e00f90e005a2fbedd0cf258f694721c2ef5c25cccf4a1abf2f532af7fe8c",
+            "hash": "0xc119c60bca957b83b2f9af3b009c3ed359a0039783b510adf11ff7b0b99af95f",
             "comment": "`execution-spec-tests` generated test",
-            "filling-transition-tool": "Hyperledger Besu evm 24.7-develop-30c96c7",
+            "filling-transition-tool": "Hyperledger Besu evm 24.8-develop-f5d6e72",
             "description": "Test function documentation:\n\n    Much simpler than returndatacopy, no memory or boosted call.  Returner is called\n    and results are stored in storage slot, which is asserted for expected values.\n    The parameters offset and return data are configured to test boundary conditions.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692-prague@v1.0.7/tests/prague/eip7692_eof_v1/eip7069_extcall/test_returndataload.py#L184",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.0.8/tests/prague/eip7692_eof_v1/eip7069_extcall/test_returndataload.py#L179",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7069.md",
             "reference-spec-version": "1795943aeacc86131d5ab6bb3d65824b3b1d4cad"
         }
     },
-    "tests/prague/eip7692_eof_v1/eip7069_extcall/test_returndataload.py::test_returndataload_handling[fork_PragueEIP7692-state_test-offset_0-len_20-EXTCALL]": {
+    "tests/prague/eip7692_eof_v1/eip7069_extcall/test_returndataload.py::test_returndataload_handling[fork_PragueEIP7692-state_test-offset_0-len_20-opcode_EXTCALL]": {
         "env": {
             "currentCoinbase": "0x2adc25665018aa1fe0e6bc666dac8fc2697ff9ba",
             "currentGasLimit": "0x016345785d8a0000",
@@ -439,7 +439,7 @@
         "pre": {
             "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b": {
                 "nonce": "0x00",
-                "balance": "0x0de0b6b3a7640000",
+                "balance": "0x3635c9adc5dea00000",
                 "code": "0x",
                 "storage": {}
             },
@@ -475,7 +475,7 @@
         "post": {
             "Prague": [
                 {
-                    "hash": "0xa92c3b75a28efae26993d2aa705327b99d53f0fcc50b9816ce3b359894448ac4",
+                    "hash": "0x12938434ccf2a19a40e014682f00102ec66412f1c499445423637d16682c62c5",
                     "logs": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
                     "txbytes": "0xf860800a831e8480940000000000000000000000000000000000001100808025a0b3afc79e7eb6744553c987dfa51e04eec7c6d695e6f730badd8150d43c6611fda056587ba537d9e4baf5e9fdb797ed4d7cf237c28c5d368b92f2f3681334585fec",
                     "indexes": {
@@ -487,16 +487,16 @@
             ]
         },
         "_info": {
-            "hash": "0x895b71132ce7b8b11f085bc00a0795f3bed186f2924263ed74ca8286bfd4378a",
+            "hash": "0x7bddc8b29d5eed10e335c982872bf9add2b81a902d8458ab8b47f71983ea54cd",
             "comment": "`execution-spec-tests` generated test",
-            "filling-transition-tool": "Hyperledger Besu evm 24.7-develop-30c96c7",
+            "filling-transition-tool": "Hyperledger Besu evm 24.8-develop-f5d6e72",
             "description": "Test function documentation:\n\n    Much simpler than returndatacopy, no memory or boosted call.  Returner is called\n    and results are stored in storage slot, which is asserted for expected values.\n    The parameters offset and return data are configured to test boundary conditions.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692-prague@v1.0.7/tests/prague/eip7692_eof_v1/eip7069_extcall/test_returndataload.py#L184",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.0.8/tests/prague/eip7692_eof_v1/eip7069_extcall/test_returndataload.py#L179",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7069.md",
             "reference-spec-version": "1795943aeacc86131d5ab6bb3d65824b3b1d4cad"
         }
     },
-    "tests/prague/eip7692_eof_v1/eip7069_extcall/test_returndataload.py::test_returndataload_handling[fork_PragueEIP7692-state_test-offset_0-len_20-EXTDELEGATECALL]": {
+    "tests/prague/eip7692_eof_v1/eip7069_extcall/test_returndataload.py::test_returndataload_handling[fork_PragueEIP7692-state_test-offset_0-len_20-opcode_EXTDELEGATECALL]": {
         "env": {
             "currentCoinbase": "0x2adc25665018aa1fe0e6bc666dac8fc2697ff9ba",
             "currentGasLimit": "0x016345785d8a0000",
@@ -510,7 +510,7 @@
         "pre": {
             "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b": {
                 "nonce": "0x00",
-                "balance": "0x0de0b6b3a7640000",
+                "balance": "0x3635c9adc5dea00000",
                 "code": "0x",
                 "storage": {}
             },
@@ -546,7 +546,7 @@
         "post": {
             "Prague": [
                 {
-                    "hash": "0x869fb937606ff0342e8ba6332a2e70ff5b000990c91a36b29bcc0ab26033f9f0",
+                    "hash": "0xdaae96ab8a63b6fd584116c6c9d2c1b6880105dd7e4a766d070ec0c96be47de1",
                     "logs": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
                     "txbytes": "0xf860800a831e8480940000000000000000000000000000000000001100808025a0b3afc79e7eb6744553c987dfa51e04eec7c6d695e6f730badd8150d43c6611fda056587ba537d9e4baf5e9fdb797ed4d7cf237c28c5d368b92f2f3681334585fec",
                     "indexes": {
@@ -558,16 +558,16 @@
             ]
         },
         "_info": {
-            "hash": "0x6f59d3313c701d7e1a3abc7394f9e62c63b7e58c09e882910d1660d51c6d9863",
+            "hash": "0x2df500ab9c63a6f10094f3acceda79a9e54aa458f2617710a9165da7d87238b5",
             "comment": "`execution-spec-tests` generated test",
-            "filling-transition-tool": "Hyperledger Besu evm 24.7-develop-30c96c7",
+            "filling-transition-tool": "Hyperledger Besu evm 24.8-develop-f5d6e72",
             "description": "Test function documentation:\n\n    Much simpler than returndatacopy, no memory or boosted call.  Returner is called\n    and results are stored in storage slot, which is asserted for expected values.\n    The parameters offset and return data are configured to test boundary conditions.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692-prague@v1.0.7/tests/prague/eip7692_eof_v1/eip7069_extcall/test_returndataload.py#L184",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.0.8/tests/prague/eip7692_eof_v1/eip7069_extcall/test_returndataload.py#L179",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7069.md",
             "reference-spec-version": "1795943aeacc86131d5ab6bb3d65824b3b1d4cad"
         }
     },
-    "tests/prague/eip7692_eof_v1/eip7069_extcall/test_returndataload.py::test_returndataload_handling[fork_PragueEIP7692-state_test-offset_0-len_20-EXTSTATICCALL]": {
+    "tests/prague/eip7692_eof_v1/eip7069_extcall/test_returndataload.py::test_returndataload_handling[fork_PragueEIP7692-state_test-offset_0-len_20-opcode_EXTSTATICCALL]": {
         "env": {
             "currentCoinbase": "0x2adc25665018aa1fe0e6bc666dac8fc2697ff9ba",
             "currentGasLimit": "0x016345785d8a0000",
@@ -581,7 +581,7 @@
         "pre": {
             "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b": {
                 "nonce": "0x00",
-                "balance": "0x0de0b6b3a7640000",
+                "balance": "0x3635c9adc5dea00000",
                 "code": "0x",
                 "storage": {}
             },
@@ -617,7 +617,7 @@
         "post": {
             "Prague": [
                 {
-                    "hash": "0x69db3b4ad3d9b8dab3b572c9135d32aea7d5eda2b5b2b7e58c37d1dab8cb1a1f",
+                    "hash": "0xf05512575e267399285de69d58c164ca76be2ce6e6eaad85af2426e90efa4ad2",
                     "logs": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
                     "txbytes": "0xf860800a831e8480940000000000000000000000000000000000001100808025a0b3afc79e7eb6744553c987dfa51e04eec7c6d695e6f730badd8150d43c6611fda056587ba537d9e4baf5e9fdb797ed4d7cf237c28c5d368b92f2f3681334585fec",
                     "indexes": {
@@ -629,16 +629,16 @@
             ]
         },
         "_info": {
-            "hash": "0x0f58ac2e74e053c31c7de9425035e109391a5e554092bda17c5de3081d57f393",
+            "hash": "0x9ad25a80939702f34540132f328a6550d2b0e5727c71cd591aaf8c98ad072d38",
             "comment": "`execution-spec-tests` generated test",
-            "filling-transition-tool": "Hyperledger Besu evm 24.7-develop-30c96c7",
+            "filling-transition-tool": "Hyperledger Besu evm 24.8-develop-f5d6e72",
             "description": "Test function documentation:\n\n    Much simpler than returndatacopy, no memory or boosted call.  Returner is called\n    and results are stored in storage slot, which is asserted for expected values.\n    The parameters offset and return data are configured to test boundary conditions.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692-prague@v1.0.7/tests/prague/eip7692_eof_v1/eip7069_extcall/test_returndataload.py#L184",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.0.8/tests/prague/eip7692_eof_v1/eip7069_extcall/test_returndataload.py#L179",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7069.md",
             "reference-spec-version": "1795943aeacc86131d5ab6bb3d65824b3b1d4cad"
         }
     },
-    "tests/prague/eip7692_eof_v1/eip7069_extcall/test_returndataload.py::test_returndataload_handling[fork_PragueEIP7692-state_test-offset_0-len_30-EXTCALL]": {
+    "tests/prague/eip7692_eof_v1/eip7069_extcall/test_returndataload.py::test_returndataload_handling[fork_PragueEIP7692-state_test-offset_0-len_30-opcode_EXTCALL]": {
         "env": {
             "currentCoinbase": "0x2adc25665018aa1fe0e6bc666dac8fc2697ff9ba",
             "currentGasLimit": "0x016345785d8a0000",
@@ -652,7 +652,7 @@
         "pre": {
             "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b": {
                 "nonce": "0x00",
-                "balance": "0x0de0b6b3a7640000",
+                "balance": "0x3635c9adc5dea00000",
                 "code": "0x",
                 "storage": {}
             },
@@ -688,7 +688,7 @@
         "post": {
             "Prague": [
                 {
-                    "hash": "0x6eb3659ce9f0edd78b4916e34432052bc681ed3245764fe837edb18d8bf5176e",
+                    "hash": "0xdab8b7d723eae7df3dc7f6a302b7644866a3b2a361661d8a3e8873c09f116c4f",
                     "logs": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
                     "txbytes": "0xf860800a831e8480940000000000000000000000000000000000001100808025a0b3afc79e7eb6744553c987dfa51e04eec7c6d695e6f730badd8150d43c6611fda056587ba537d9e4baf5e9fdb797ed4d7cf237c28c5d368b92f2f3681334585fec",
                     "indexes": {
@@ -700,16 +700,16 @@
             ]
         },
         "_info": {
-            "hash": "0x3866a8db98eb916946ab465610611ffb8e917c1f6aed7cff44d3ad1df1696d0f",
+            "hash": "0x9062c8a8993e5d21e2923884f4a5a44a840f54880c29ad2277946cbeebf951e0",
             "comment": "`execution-spec-tests` generated test",
-            "filling-transition-tool": "Hyperledger Besu evm 24.7-develop-30c96c7",
+            "filling-transition-tool": "Hyperledger Besu evm 24.8-develop-f5d6e72",
             "description": "Test function documentation:\n\n    Much simpler than returndatacopy, no memory or boosted call.  Returner is called\n    and results are stored in storage slot, which is asserted for expected values.\n    The parameters offset and return data are configured to test boundary conditions.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692-prague@v1.0.7/tests/prague/eip7692_eof_v1/eip7069_extcall/test_returndataload.py#L184",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.0.8/tests/prague/eip7692_eof_v1/eip7069_extcall/test_returndataload.py#L179",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7069.md",
             "reference-spec-version": "1795943aeacc86131d5ab6bb3d65824b3b1d4cad"
         }
     },
-    "tests/prague/eip7692_eof_v1/eip7069_extcall/test_returndataload.py::test_returndataload_handling[fork_PragueEIP7692-state_test-offset_0-len_30-EXTDELEGATECALL]": {
+    "tests/prague/eip7692_eof_v1/eip7069_extcall/test_returndataload.py::test_returndataload_handling[fork_PragueEIP7692-state_test-offset_0-len_30-opcode_EXTDELEGATECALL]": {
         "env": {
             "currentCoinbase": "0x2adc25665018aa1fe0e6bc666dac8fc2697ff9ba",
             "currentGasLimit": "0x016345785d8a0000",
@@ -723,7 +723,7 @@
         "pre": {
             "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b": {
                 "nonce": "0x00",
-                "balance": "0x0de0b6b3a7640000",
+                "balance": "0x3635c9adc5dea00000",
                 "code": "0x",
                 "storage": {}
             },
@@ -759,7 +759,7 @@
         "post": {
             "Prague": [
                 {
-                    "hash": "0x82d3eb5fb54d4c39bdfa0688ac7816d1f2b4076faa18bdc715024179aa9835fe",
+                    "hash": "0x7e85de6f99b1089a9d9fbe8816a8b4e74236315ff6758aae47a510c5b23c24d2",
                     "logs": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
                     "txbytes": "0xf860800a831e8480940000000000000000000000000000000000001100808025a0b3afc79e7eb6744553c987dfa51e04eec7c6d695e6f730badd8150d43c6611fda056587ba537d9e4baf5e9fdb797ed4d7cf237c28c5d368b92f2f3681334585fec",
                     "indexes": {
@@ -771,16 +771,16 @@
             ]
         },
         "_info": {
-            "hash": "0x07634ba7d7ca683e2ded61aa8f8caa3bec6a4222552c91fc60442a98cb128c86",
+            "hash": "0xef94f0edad77d7dcb0a7f48fb1a9b1c2fb96543a6170dedfbec4b8e874ec430b",
             "comment": "`execution-spec-tests` generated test",
-            "filling-transition-tool": "Hyperledger Besu evm 24.7-develop-30c96c7",
+            "filling-transition-tool": "Hyperledger Besu evm 24.8-develop-f5d6e72",
             "description": "Test function documentation:\n\n    Much simpler than returndatacopy, no memory or boosted call.  Returner is called\n    and results are stored in storage slot, which is asserted for expected values.\n    The parameters offset and return data are configured to test boundary conditions.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692-prague@v1.0.7/tests/prague/eip7692_eof_v1/eip7069_extcall/test_returndataload.py#L184",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.0.8/tests/prague/eip7692_eof_v1/eip7069_extcall/test_returndataload.py#L179",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7069.md",
             "reference-spec-version": "1795943aeacc86131d5ab6bb3d65824b3b1d4cad"
         }
     },
-    "tests/prague/eip7692_eof_v1/eip7069_extcall/test_returndataload.py::test_returndataload_handling[fork_PragueEIP7692-state_test-offset_0-len_30-EXTSTATICCALL]": {
+    "tests/prague/eip7692_eof_v1/eip7069_extcall/test_returndataload.py::test_returndataload_handling[fork_PragueEIP7692-state_test-offset_0-len_30-opcode_EXTSTATICCALL]": {
         "env": {
             "currentCoinbase": "0x2adc25665018aa1fe0e6bc666dac8fc2697ff9ba",
             "currentGasLimit": "0x016345785d8a0000",
@@ -794,7 +794,7 @@
         "pre": {
             "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b": {
                 "nonce": "0x00",
-                "balance": "0x0de0b6b3a7640000",
+                "balance": "0x3635c9adc5dea00000",
                 "code": "0x",
                 "storage": {}
             },
@@ -830,7 +830,7 @@
         "post": {
             "Prague": [
                 {
-                    "hash": "0xb01257a2686fdcd3295630918539a54a4c3ab8914248a593c0a237028cb116f4",
+                    "hash": "0x9aa899ed3aa1f4863b40adcd39b50f7b25dea65edc46201bc6506293bf0776e6",
                     "logs": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
                     "txbytes": "0xf860800a831e8480940000000000000000000000000000000000001100808025a0b3afc79e7eb6744553c987dfa51e04eec7c6d695e6f730badd8150d43c6611fda056587ba537d9e4baf5e9fdb797ed4d7cf237c28c5d368b92f2f3681334585fec",
                     "indexes": {
@@ -842,16 +842,16 @@
             ]
         },
         "_info": {
-            "hash": "0xe134799bfecdd6bbf9627fdfe8f41e3b6fcc5b8e005997084356634335de079f",
+            "hash": "0x529212af083b0ab4021107bb8b77a20d8a247e5968007f444cde8ff13a4fc88c",
             "comment": "`execution-spec-tests` generated test",
-            "filling-transition-tool": "Hyperledger Besu evm 24.7-develop-30c96c7",
+            "filling-transition-tool": "Hyperledger Besu evm 24.8-develop-f5d6e72",
             "description": "Test function documentation:\n\n    Much simpler than returndatacopy, no memory or boosted call.  Returner is called\n    and results are stored in storage slot, which is asserted for expected values.\n    The parameters offset and return data are configured to test boundary conditions.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692-prague@v1.0.7/tests/prague/eip7692_eof_v1/eip7069_extcall/test_returndataload.py#L184",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.0.8/tests/prague/eip7692_eof_v1/eip7069_extcall/test_returndataload.py#L179",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7069.md",
             "reference-spec-version": "1795943aeacc86131d5ab6bb3d65824b3b1d4cad"
         }
     },
-    "tests/prague/eip7692_eof_v1/eip7069_extcall/test_returndataload.py::test_returndataload_handling[fork_PragueEIP7692-state_test-offset_10-len_0-EXTCALL]": {
+    "tests/prague/eip7692_eof_v1/eip7069_extcall/test_returndataload.py::test_returndataload_handling[fork_PragueEIP7692-state_test-offset_10-len_0-opcode_EXTCALL]": {
         "env": {
             "currentCoinbase": "0x2adc25665018aa1fe0e6bc666dac8fc2697ff9ba",
             "currentGasLimit": "0x016345785d8a0000",
@@ -865,7 +865,7 @@
         "pre": {
             "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b": {
                 "nonce": "0x00",
-                "balance": "0x0de0b6b3a7640000",
+                "balance": "0x3635c9adc5dea00000",
                 "code": "0x",
                 "storage": {}
             },
@@ -901,7 +901,7 @@
         "post": {
             "Prague": [
                 {
-                    "hash": "0xe530fb9119b6e1fc5d04092db9d93a8712cea3cb916cb0bb927e83079fcfcdef",
+                    "hash": "0xccfc0effba30e00da621ee59d05b24cf3237013b9313d357dd4fdea1c0b5a29d",
                     "logs": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
                     "txbytes": "0xf860800a831e8480940000000000000000000000000000000000001100808025a0b3afc79e7eb6744553c987dfa51e04eec7c6d695e6f730badd8150d43c6611fda056587ba537d9e4baf5e9fdb797ed4d7cf237c28c5d368b92f2f3681334585fec",
                     "indexes": {
@@ -913,16 +913,16 @@
             ]
         },
         "_info": {
-            "hash": "0x82fa730ebe962ea0afa4a8b410a737e0ccde38537af46df2dfd00fe60cfc71c6",
+            "hash": "0xccc0a8500be1ab57d7493c3a581cae891b59e92c8c8f4a2b04c62c8604e1d67a",
             "comment": "`execution-spec-tests` generated test",
-            "filling-transition-tool": "Hyperledger Besu evm 24.7-develop-30c96c7",
+            "filling-transition-tool": "Hyperledger Besu evm 24.8-develop-f5d6e72",
             "description": "Test function documentation:\n\n    Much simpler than returndatacopy, no memory or boosted call.  Returner is called\n    and results are stored in storage slot, which is asserted for expected values.\n    The parameters offset and return data are configured to test boundary conditions.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692-prague@v1.0.7/tests/prague/eip7692_eof_v1/eip7069_extcall/test_returndataload.py#L184",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.0.8/tests/prague/eip7692_eof_v1/eip7069_extcall/test_returndataload.py#L179",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7069.md",
             "reference-spec-version": "1795943aeacc86131d5ab6bb3d65824b3b1d4cad"
         }
     },
-    "tests/prague/eip7692_eof_v1/eip7069_extcall/test_returndataload.py::test_returndataload_handling[fork_PragueEIP7692-state_test-offset_10-len_0-EXTDELEGATECALL]": {
+    "tests/prague/eip7692_eof_v1/eip7069_extcall/test_returndataload.py::test_returndataload_handling[fork_PragueEIP7692-state_test-offset_10-len_0-opcode_EXTDELEGATECALL]": {
         "env": {
             "currentCoinbase": "0x2adc25665018aa1fe0e6bc666dac8fc2697ff9ba",
             "currentGasLimit": "0x016345785d8a0000",
@@ -936,7 +936,7 @@
         "pre": {
             "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b": {
                 "nonce": "0x00",
-                "balance": "0x0de0b6b3a7640000",
+                "balance": "0x3635c9adc5dea00000",
                 "code": "0x",
                 "storage": {}
             },
@@ -972,7 +972,7 @@
         "post": {
             "Prague": [
                 {
-                    "hash": "0x564b7f00398cd752d52c2c8b3c6a19531850800f8f0224136e904b470ad0f2c5",
+                    "hash": "0x06241a3e3b9e0a0426bb7edc09a91adedc1ea42b843ba63b8169746b61746bfd",
                     "logs": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
                     "txbytes": "0xf860800a831e8480940000000000000000000000000000000000001100808025a0b3afc79e7eb6744553c987dfa51e04eec7c6d695e6f730badd8150d43c6611fda056587ba537d9e4baf5e9fdb797ed4d7cf237c28c5d368b92f2f3681334585fec",
                     "indexes": {
@@ -984,16 +984,16 @@
             ]
         },
         "_info": {
-            "hash": "0xb6fb74f01f51ae72ece41af922d799224f0857cee6fc2b92b33a0827e5aede31",
+            "hash": "0x390e22f9047b8b9b74bbb57fb3301de5f3247d9b150ac99d0ab769b3fcad08ef",
             "comment": "`execution-spec-tests` generated test",
-            "filling-transition-tool": "Hyperledger Besu evm 24.7-develop-30c96c7",
+            "filling-transition-tool": "Hyperledger Besu evm 24.8-develop-f5d6e72",
             "description": "Test function documentation:\n\n    Much simpler than returndatacopy, no memory or boosted call.  Returner is called\n    and results are stored in storage slot, which is asserted for expected values.\n    The parameters offset and return data are configured to test boundary conditions.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692-prague@v1.0.7/tests/prague/eip7692_eof_v1/eip7069_extcall/test_returndataload.py#L184",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.0.8/tests/prague/eip7692_eof_v1/eip7069_extcall/test_returndataload.py#L179",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7069.md",
             "reference-spec-version": "1795943aeacc86131d5ab6bb3d65824b3b1d4cad"
         }
     },
-    "tests/prague/eip7692_eof_v1/eip7069_extcall/test_returndataload.py::test_returndataload_handling[fork_PragueEIP7692-state_test-offset_10-len_0-EXTSTATICCALL]": {
+    "tests/prague/eip7692_eof_v1/eip7069_extcall/test_returndataload.py::test_returndataload_handling[fork_PragueEIP7692-state_test-offset_10-len_0-opcode_EXTSTATICCALL]": {
         "env": {
             "currentCoinbase": "0x2adc25665018aa1fe0e6bc666dac8fc2697ff9ba",
             "currentGasLimit": "0x016345785d8a0000",
@@ -1007,7 +1007,7 @@
         "pre": {
             "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b": {
                 "nonce": "0x00",
-                "balance": "0x0de0b6b3a7640000",
+                "balance": "0x3635c9adc5dea00000",
                 "code": "0x",
                 "storage": {}
             },
@@ -1043,7 +1043,7 @@
         "post": {
             "Prague": [
                 {
-                    "hash": "0xed88712225fd9146750a66b3ca346f68037ee2cc8ec5545feeb83c87bef17ba5",
+                    "hash": "0x04d67a8c2e5c8b8323f874e1ce1e5e6e11099f7a1cb9577eec1a6bb50412d02b",
                     "logs": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
                     "txbytes": "0xf860800a831e8480940000000000000000000000000000000000001100808025a0b3afc79e7eb6744553c987dfa51e04eec7c6d695e6f730badd8150d43c6611fda056587ba537d9e4baf5e9fdb797ed4d7cf237c28c5d368b92f2f3681334585fec",
                     "indexes": {
@@ -1055,16 +1055,16 @@
             ]
         },
         "_info": {
-            "hash": "0x50e0e969d2c2f8b14690548444896f0511b7572e92ff99d887c1e6b2c2b72458",
+            "hash": "0xc6a3a350783b211b4f8472a79936c92336fe75d5c8fd47c103f442024951f92c",
             "comment": "`execution-spec-tests` generated test",
-            "filling-transition-tool": "Hyperledger Besu evm 24.7-develop-30c96c7",
+            "filling-transition-tool": "Hyperledger Besu evm 24.8-develop-f5d6e72",
             "description": "Test function documentation:\n\n    Much simpler than returndatacopy, no memory or boosted call.  Returner is called\n    and results are stored in storage slot, which is asserted for expected values.\n    The parameters offset and return data are configured to test boundary conditions.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692-prague@v1.0.7/tests/prague/eip7692_eof_v1/eip7069_extcall/test_returndataload.py#L184",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.0.8/tests/prague/eip7692_eof_v1/eip7069_extcall/test_returndataload.py#L179",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7069.md",
             "reference-spec-version": "1795943aeacc86131d5ab6bb3d65824b3b1d4cad"
         }
     },
-    "tests/prague/eip7692_eof_v1/eip7069_extcall/test_returndataload.py::test_returndataload_handling[fork_PragueEIP7692-state_test-offset_10-len_10-EXTCALL]": {
+    "tests/prague/eip7692_eof_v1/eip7069_extcall/test_returndataload.py::test_returndataload_handling[fork_PragueEIP7692-state_test-offset_10-len_10-opcode_EXTCALL]": {
         "env": {
             "currentCoinbase": "0x2adc25665018aa1fe0e6bc666dac8fc2697ff9ba",
             "currentGasLimit": "0x016345785d8a0000",
@@ -1078,7 +1078,7 @@
         "pre": {
             "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b": {
                 "nonce": "0x00",
-                "balance": "0x0de0b6b3a7640000",
+                "balance": "0x3635c9adc5dea00000",
                 "code": "0x",
                 "storage": {}
             },
@@ -1114,7 +1114,7 @@
         "post": {
             "Prague": [
                 {
-                    "hash": "0xf83054e174cf1d23b8497977f197e4185f6fb0a38572e2bbd7c8114f2093d439",
+                    "hash": "0xf8df8f163462dfb34ad2b86933b6fcf44d4bbcef0b478aeb8f8c9ce45cf90b92",
                     "logs": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
                     "txbytes": "0xf860800a831e8480940000000000000000000000000000000000001100808025a0b3afc79e7eb6744553c987dfa51e04eec7c6d695e6f730badd8150d43c6611fda056587ba537d9e4baf5e9fdb797ed4d7cf237c28c5d368b92f2f3681334585fec",
                     "indexes": {
@@ -1126,16 +1126,16 @@
             ]
         },
         "_info": {
-            "hash": "0x06a23bbd1b9a78cd4839e5c15b7a800be6248ec4486e0ee1af5124ff047155e2",
+            "hash": "0xdc4ab707615ea82f2687ab47734e315412487ae595b9a9014476ce16e3158a97",
             "comment": "`execution-spec-tests` generated test",
-            "filling-transition-tool": "Hyperledger Besu evm 24.7-develop-30c96c7",
+            "filling-transition-tool": "Hyperledger Besu evm 24.8-develop-f5d6e72",
             "description": "Test function documentation:\n\n    Much simpler than returndatacopy, no memory or boosted call.  Returner is called\n    and results are stored in storage slot, which is asserted for expected values.\n    The parameters offset and return data are configured to test boundary conditions.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692-prague@v1.0.7/tests/prague/eip7692_eof_v1/eip7069_extcall/test_returndataload.py#L184",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.0.8/tests/prague/eip7692_eof_v1/eip7069_extcall/test_returndataload.py#L179",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7069.md",
             "reference-spec-version": "1795943aeacc86131d5ab6bb3d65824b3b1d4cad"
         }
     },
-    "tests/prague/eip7692_eof_v1/eip7069_extcall/test_returndataload.py::test_returndataload_handling[fork_PragueEIP7692-state_test-offset_10-len_10-EXTDELEGATECALL]": {
+    "tests/prague/eip7692_eof_v1/eip7069_extcall/test_returndataload.py::test_returndataload_handling[fork_PragueEIP7692-state_test-offset_10-len_10-opcode_EXTDELEGATECALL]": {
         "env": {
             "currentCoinbase": "0x2adc25665018aa1fe0e6bc666dac8fc2697ff9ba",
             "currentGasLimit": "0x016345785d8a0000",
@@ -1149,7 +1149,7 @@
         "pre": {
             "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b": {
                 "nonce": "0x00",
-                "balance": "0x0de0b6b3a7640000",
+                "balance": "0x3635c9adc5dea00000",
                 "code": "0x",
                 "storage": {}
             },
@@ -1185,7 +1185,7 @@
         "post": {
             "Prague": [
                 {
-                    "hash": "0x320c77390512da2c5a2cfd2056f2f729a499d825fb65f856bd4758bd00d71f00",
+                    "hash": "0xe55336ae62f57be186ac80a37dcc8fa9a45d78269c4125443b958fa2a8fe7dd8",
                     "logs": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
                     "txbytes": "0xf860800a831e8480940000000000000000000000000000000000001100808025a0b3afc79e7eb6744553c987dfa51e04eec7c6d695e6f730badd8150d43c6611fda056587ba537d9e4baf5e9fdb797ed4d7cf237c28c5d368b92f2f3681334585fec",
                     "indexes": {
@@ -1197,16 +1197,16 @@
             ]
         },
         "_info": {
-            "hash": "0xb17f47a71a89d36551220dc6d9837ec389064fd2d65b148b0e81ff1f5cead480",
+            "hash": "0xd90dcdfc36105447a9aadaebb4034b225175a17dd3e0bcb3de0e195d90e595d4",
             "comment": "`execution-spec-tests` generated test",
-            "filling-transition-tool": "Hyperledger Besu evm 24.7-develop-30c96c7",
+            "filling-transition-tool": "Hyperledger Besu evm 24.8-develop-f5d6e72",
             "description": "Test function documentation:\n\n    Much simpler than returndatacopy, no memory or boosted call.  Returner is called\n    and results are stored in storage slot, which is asserted for expected values.\n    The parameters offset and return data are configured to test boundary conditions.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692-prague@v1.0.7/tests/prague/eip7692_eof_v1/eip7069_extcall/test_returndataload.py#L184",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.0.8/tests/prague/eip7692_eof_v1/eip7069_extcall/test_returndataload.py#L179",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7069.md",
             "reference-spec-version": "1795943aeacc86131d5ab6bb3d65824b3b1d4cad"
         }
     },
-    "tests/prague/eip7692_eof_v1/eip7069_extcall/test_returndataload.py::test_returndataload_handling[fork_PragueEIP7692-state_test-offset_10-len_10-EXTSTATICCALL]": {
+    "tests/prague/eip7692_eof_v1/eip7069_extcall/test_returndataload.py::test_returndataload_handling[fork_PragueEIP7692-state_test-offset_10-len_10-opcode_EXTSTATICCALL]": {
         "env": {
             "currentCoinbase": "0x2adc25665018aa1fe0e6bc666dac8fc2697ff9ba",
             "currentGasLimit": "0x016345785d8a0000",
@@ -1220,7 +1220,7 @@
         "pre": {
             "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b": {
                 "nonce": "0x00",
-                "balance": "0x0de0b6b3a7640000",
+                "balance": "0x3635c9adc5dea00000",
                 "code": "0x",
                 "storage": {}
             },
@@ -1256,7 +1256,7 @@
         "post": {
             "Prague": [
                 {
-                    "hash": "0x3259e51c03c736a1bd0fadd4606c6396662f5d16807d79cf41bcd214c74a70a4",
+                    "hash": "0xad6394c458ee44a2aae0711533b1f0a6aa2dd4160349cdb328766fc1fa0c46b0",
                     "logs": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
                     "txbytes": "0xf860800a831e8480940000000000000000000000000000000000001100808025a0b3afc79e7eb6744553c987dfa51e04eec7c6d695e6f730badd8150d43c6611fda056587ba537d9e4baf5e9fdb797ed4d7cf237c28c5d368b92f2f3681334585fec",
                     "indexes": {
@@ -1268,16 +1268,16 @@
             ]
         },
         "_info": {
-            "hash": "0x31489c7a041f543fba11284eeff42c8022bb8ba959e81fe13b9e434303e2c3af",
+            "hash": "0xd6e000f8f43493ffd0af716a01d2554eedcf447ec0c3f61011c13fabcd6d6bbe",
             "comment": "`execution-spec-tests` generated test",
-            "filling-transition-tool": "Hyperledger Besu evm 24.7-develop-30c96c7",
+            "filling-transition-tool": "Hyperledger Besu evm 24.8-develop-f5d6e72",
             "description": "Test function documentation:\n\n    Much simpler than returndatacopy, no memory or boosted call.  Returner is called\n    and results are stored in storage slot, which is asserted for expected values.\n    The parameters offset and return data are configured to test boundary conditions.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692-prague@v1.0.7/tests/prague/eip7692_eof_v1/eip7069_extcall/test_returndataload.py#L184",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.0.8/tests/prague/eip7692_eof_v1/eip7069_extcall/test_returndataload.py#L179",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7069.md",
             "reference-spec-version": "1795943aeacc86131d5ab6bb3d65824b3b1d4cad"
         }
     },
-    "tests/prague/eip7692_eof_v1/eip7069_extcall/test_returndataload.py::test_returndataload_handling[fork_PragueEIP7692-state_test-offset_10-len_20-EXTCALL]": {
+    "tests/prague/eip7692_eof_v1/eip7069_extcall/test_returndataload.py::test_returndataload_handling[fork_PragueEIP7692-state_test-offset_10-len_20-opcode_EXTCALL]": {
         "env": {
             "currentCoinbase": "0x2adc25665018aa1fe0e6bc666dac8fc2697ff9ba",
             "currentGasLimit": "0x016345785d8a0000",
@@ -1291,7 +1291,7 @@
         "pre": {
             "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b": {
                 "nonce": "0x00",
-                "balance": "0x0de0b6b3a7640000",
+                "balance": "0x3635c9adc5dea00000",
                 "code": "0x",
                 "storage": {}
             },
@@ -1327,7 +1327,7 @@
         "post": {
             "Prague": [
                 {
-                    "hash": "0x765243ad2c7ee35e030cb1aa88ea95cab21e6f98aeccd39a9f08e0da45d08fc5",
+                    "hash": "0xa12d4896df1db0ce491ecb30f2913b4239c62596bcfb792384b6caa959b18905",
                     "logs": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
                     "txbytes": "0xf860800a831e8480940000000000000000000000000000000000001100808025a0b3afc79e7eb6744553c987dfa51e04eec7c6d695e6f730badd8150d43c6611fda056587ba537d9e4baf5e9fdb797ed4d7cf237c28c5d368b92f2f3681334585fec",
                     "indexes": {
@@ -1339,16 +1339,16 @@
             ]
         },
         "_info": {
-            "hash": "0x6a47acd1a14d22f3a7f7c78a5a04c0d26d954830bbe18839ee7deb0d873625cd",
+            "hash": "0xf2eb88bbde49339148b73b85b02fc950c6e143513d3d798d37694e3ccc8356e2",
             "comment": "`execution-spec-tests` generated test",
-            "filling-transition-tool": "Hyperledger Besu evm 24.7-develop-30c96c7",
+            "filling-transition-tool": "Hyperledger Besu evm 24.8-develop-f5d6e72",
             "description": "Test function documentation:\n\n    Much simpler than returndatacopy, no memory or boosted call.  Returner is called\n    and results are stored in storage slot, which is asserted for expected values.\n    The parameters offset and return data are configured to test boundary conditions.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692-prague@v1.0.7/tests/prague/eip7692_eof_v1/eip7069_extcall/test_returndataload.py#L184",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.0.8/tests/prague/eip7692_eof_v1/eip7069_extcall/test_returndataload.py#L179",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7069.md",
             "reference-spec-version": "1795943aeacc86131d5ab6bb3d65824b3b1d4cad"
         }
     },
-    "tests/prague/eip7692_eof_v1/eip7069_extcall/test_returndataload.py::test_returndataload_handling[fork_PragueEIP7692-state_test-offset_10-len_20-EXTDELEGATECALL]": {
+    "tests/prague/eip7692_eof_v1/eip7069_extcall/test_returndataload.py::test_returndataload_handling[fork_PragueEIP7692-state_test-offset_10-len_20-opcode_EXTDELEGATECALL]": {
         "env": {
             "currentCoinbase": "0x2adc25665018aa1fe0e6bc666dac8fc2697ff9ba",
             "currentGasLimit": "0x016345785d8a0000",
@@ -1362,7 +1362,7 @@
         "pre": {
             "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b": {
                 "nonce": "0x00",
-                "balance": "0x0de0b6b3a7640000",
+                "balance": "0x3635c9adc5dea00000",
                 "code": "0x",
                 "storage": {}
             },
@@ -1398,7 +1398,7 @@
         "post": {
             "Prague": [
                 {
-                    "hash": "0x1e1bb77491e6a73f20f4363952e8e3d9142e8333ce8099b0626b14b6d1e0acce",
+                    "hash": "0xeedfdf3015319e33a21ed787539c01c61cf6fd2bcf1f1dbe83157940f4d7364d",
                     "logs": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
                     "txbytes": "0xf860800a831e8480940000000000000000000000000000000000001100808025a0b3afc79e7eb6744553c987dfa51e04eec7c6d695e6f730badd8150d43c6611fda056587ba537d9e4baf5e9fdb797ed4d7cf237c28c5d368b92f2f3681334585fec",
                     "indexes": {
@@ -1410,16 +1410,16 @@
             ]
         },
         "_info": {
-            "hash": "0x1ccbaaf3c553f3f9757aa908771cac59183aafa6fb387baaabd7169a59158a7d",
+            "hash": "0x7454267c7abd8bf83075c3e984d8ac37209b4693009e671a08ddc0c41db5646e",
             "comment": "`execution-spec-tests` generated test",
-            "filling-transition-tool": "Hyperledger Besu evm 24.7-develop-30c96c7",
+            "filling-transition-tool": "Hyperledger Besu evm 24.8-develop-f5d6e72",
             "description": "Test function documentation:\n\n    Much simpler than returndatacopy, no memory or boosted call.  Returner is called\n    and results are stored in storage slot, which is asserted for expected values.\n    The parameters offset and return data are configured to test boundary conditions.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692-prague@v1.0.7/tests/prague/eip7692_eof_v1/eip7069_extcall/test_returndataload.py#L184",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.0.8/tests/prague/eip7692_eof_v1/eip7069_extcall/test_returndataload.py#L179",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7069.md",
             "reference-spec-version": "1795943aeacc86131d5ab6bb3d65824b3b1d4cad"
         }
     },
-    "tests/prague/eip7692_eof_v1/eip7069_extcall/test_returndataload.py::test_returndataload_handling[fork_PragueEIP7692-state_test-offset_10-len_20-EXTSTATICCALL]": {
+    "tests/prague/eip7692_eof_v1/eip7069_extcall/test_returndataload.py::test_returndataload_handling[fork_PragueEIP7692-state_test-offset_10-len_20-opcode_EXTSTATICCALL]": {
         "env": {
             "currentCoinbase": "0x2adc25665018aa1fe0e6bc666dac8fc2697ff9ba",
             "currentGasLimit": "0x016345785d8a0000",
@@ -1433,7 +1433,7 @@
         "pre": {
             "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b": {
                 "nonce": "0x00",
-                "balance": "0x0de0b6b3a7640000",
+                "balance": "0x3635c9adc5dea00000",
                 "code": "0x",
                 "storage": {}
             },
@@ -1469,7 +1469,7 @@
         "post": {
             "Prague": [
                 {
-                    "hash": "0x9aceda4e15bf5d3c88b241c0bc39abbdacac29046f509e13af922b176afb3920",
+                    "hash": "0xc42e75577d5feee8ff9e12fc15a1942e913dccb3570ae7d3e73749001d5fd24c",
                     "logs": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
                     "txbytes": "0xf860800a831e8480940000000000000000000000000000000000001100808025a0b3afc79e7eb6744553c987dfa51e04eec7c6d695e6f730badd8150d43c6611fda056587ba537d9e4baf5e9fdb797ed4d7cf237c28c5d368b92f2f3681334585fec",
                     "indexes": {
@@ -1481,16 +1481,16 @@
             ]
         },
         "_info": {
-            "hash": "0x929924caa3933c6a95f5d95da3c3eda948866558245a85613f2f7dbe554d1502",
+            "hash": "0xb60fecbd45565259a1c71ee2bdd59e224d9e9a796907b78525831342f02f8d48",
             "comment": "`execution-spec-tests` generated test",
-            "filling-transition-tool": "Hyperledger Besu evm 24.7-develop-30c96c7",
+            "filling-transition-tool": "Hyperledger Besu evm 24.8-develop-f5d6e72",
             "description": "Test function documentation:\n\n    Much simpler than returndatacopy, no memory or boosted call.  Returner is called\n    and results are stored in storage slot, which is asserted for expected values.\n    The parameters offset and return data are configured to test boundary conditions.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692-prague@v1.0.7/tests/prague/eip7692_eof_v1/eip7069_extcall/test_returndataload.py#L184",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.0.8/tests/prague/eip7692_eof_v1/eip7069_extcall/test_returndataload.py#L179",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7069.md",
             "reference-spec-version": "1795943aeacc86131d5ab6bb3d65824b3b1d4cad"
         }
     },
-    "tests/prague/eip7692_eof_v1/eip7069_extcall/test_returndataload.py::test_returndataload_handling[fork_PragueEIP7692-state_test-offset_10-len_30-EXTCALL]": {
+    "tests/prague/eip7692_eof_v1/eip7069_extcall/test_returndataload.py::test_returndataload_handling[fork_PragueEIP7692-state_test-offset_10-len_30-opcode_EXTCALL]": {
         "env": {
             "currentCoinbase": "0x2adc25665018aa1fe0e6bc666dac8fc2697ff9ba",
             "currentGasLimit": "0x016345785d8a0000",
@@ -1504,7 +1504,7 @@
         "pre": {
             "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b": {
                 "nonce": "0x00",
-                "balance": "0x0de0b6b3a7640000",
+                "balance": "0x3635c9adc5dea00000",
                 "code": "0x",
                 "storage": {}
             },
@@ -1540,7 +1540,7 @@
         "post": {
             "Prague": [
                 {
-                    "hash": "0xe14b107070ef3daba9a4e7484b5691877566181f3134bf2a991d3cf4f4d508be",
+                    "hash": "0x7d5d62a42b0b46efd205a17863674a9056a8a31a93b1e6580aee76f098ba2f59",
                     "logs": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
                     "txbytes": "0xf860800a831e8480940000000000000000000000000000000000001100808025a0b3afc79e7eb6744553c987dfa51e04eec7c6d695e6f730badd8150d43c6611fda056587ba537d9e4baf5e9fdb797ed4d7cf237c28c5d368b92f2f3681334585fec",
                     "indexes": {
@@ -1552,16 +1552,16 @@
             ]
         },
         "_info": {
-            "hash": "0x1af179152a1c6e6fed93934c02cbe82e60f82ae863843c6bf4ea6b09d145b641",
+            "hash": "0xe90cbd790e91a007948013fb0e25659ac035c74dcb6eaebe32cd4ebce9b07691",
             "comment": "`execution-spec-tests` generated test",
-            "filling-transition-tool": "Hyperledger Besu evm 24.7-develop-30c96c7",
+            "filling-transition-tool": "Hyperledger Besu evm 24.8-develop-f5d6e72",
             "description": "Test function documentation:\n\n    Much simpler than returndatacopy, no memory or boosted call.  Returner is called\n    and results are stored in storage slot, which is asserted for expected values.\n    The parameters offset and return data are configured to test boundary conditions.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692-prague@v1.0.7/tests/prague/eip7692_eof_v1/eip7069_extcall/test_returndataload.py#L184",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.0.8/tests/prague/eip7692_eof_v1/eip7069_extcall/test_returndataload.py#L179",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7069.md",
             "reference-spec-version": "1795943aeacc86131d5ab6bb3d65824b3b1d4cad"
         }
     },
-    "tests/prague/eip7692_eof_v1/eip7069_extcall/test_returndataload.py::test_returndataload_handling[fork_PragueEIP7692-state_test-offset_10-len_30-EXTDELEGATECALL]": {
+    "tests/prague/eip7692_eof_v1/eip7069_extcall/test_returndataload.py::test_returndataload_handling[fork_PragueEIP7692-state_test-offset_10-len_30-opcode_EXTDELEGATECALL]": {
         "env": {
             "currentCoinbase": "0x2adc25665018aa1fe0e6bc666dac8fc2697ff9ba",
             "currentGasLimit": "0x016345785d8a0000",
@@ -1575,7 +1575,7 @@
         "pre": {
             "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b": {
                 "nonce": "0x00",
-                "balance": "0x0de0b6b3a7640000",
+                "balance": "0x3635c9adc5dea00000",
                 "code": "0x",
                 "storage": {}
             },
@@ -1611,7 +1611,7 @@
         "post": {
             "Prague": [
                 {
-                    "hash": "0x319092f6870005cae2485d24386cdaf01224221e361afb08c4b47564ff3a8b29",
+                    "hash": "0x746769d463b606274e8de64f7048f3f17ce54fcb0ef509b6b2aa2f80f12f6fbc",
                     "logs": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
                     "txbytes": "0xf860800a831e8480940000000000000000000000000000000000001100808025a0b3afc79e7eb6744553c987dfa51e04eec7c6d695e6f730badd8150d43c6611fda056587ba537d9e4baf5e9fdb797ed4d7cf237c28c5d368b92f2f3681334585fec",
                     "indexes": {
@@ -1623,16 +1623,16 @@
             ]
         },
         "_info": {
-            "hash": "0x8d5a9ff1e2a4975f9d678cf0178dc506cb40ce5841461e4d70d2aa9c5b974787",
+            "hash": "0xd5f59fcc0ed6ddcc2a86e07cb090cbda74ab83afdf6088042bdbb26defb11f95",
             "comment": "`execution-spec-tests` generated test",
-            "filling-transition-tool": "Hyperledger Besu evm 24.7-develop-30c96c7",
+            "filling-transition-tool": "Hyperledger Besu evm 24.8-develop-f5d6e72",
             "description": "Test function documentation:\n\n    Much simpler than returndatacopy, no memory or boosted call.  Returner is called\n    and results are stored in storage slot, which is asserted for expected values.\n    The parameters offset and return data are configured to test boundary conditions.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692-prague@v1.0.7/tests/prague/eip7692_eof_v1/eip7069_extcall/test_returndataload.py#L184",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.0.8/tests/prague/eip7692_eof_v1/eip7069_extcall/test_returndataload.py#L179",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7069.md",
             "reference-spec-version": "1795943aeacc86131d5ab6bb3d65824b3b1d4cad"
         }
     },
-    "tests/prague/eip7692_eof_v1/eip7069_extcall/test_returndataload.py::test_returndataload_handling[fork_PragueEIP7692-state_test-offset_10-len_30-EXTSTATICCALL]": {
+    "tests/prague/eip7692_eof_v1/eip7069_extcall/test_returndataload.py::test_returndataload_handling[fork_PragueEIP7692-state_test-offset_10-len_30-opcode_EXTSTATICCALL]": {
         "env": {
             "currentCoinbase": "0x2adc25665018aa1fe0e6bc666dac8fc2697ff9ba",
             "currentGasLimit": "0x016345785d8a0000",
@@ -1646,7 +1646,7 @@
         "pre": {
             "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b": {
                 "nonce": "0x00",
-                "balance": "0x0de0b6b3a7640000",
+                "balance": "0x3635c9adc5dea00000",
                 "code": "0x",
                 "storage": {}
             },
@@ -1682,7 +1682,7 @@
         "post": {
             "Prague": [
                 {
-                    "hash": "0x7c99dc4966c61a01a12a1bf35ad1e3e6e8ff96115cae778504e6b228b5f5df1a",
+                    "hash": "0xbb08e6053dd2b4361eba9b68c0c88558aaca71bc4edc1dbd5e37c02352cb4bf8",
                     "logs": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
                     "txbytes": "0xf860800a831e8480940000000000000000000000000000000000001100808025a0b3afc79e7eb6744553c987dfa51e04eec7c6d695e6f730badd8150d43c6611fda056587ba537d9e4baf5e9fdb797ed4d7cf237c28c5d368b92f2f3681334585fec",
                     "indexes": {
@@ -1694,16 +1694,16 @@
             ]
         },
         "_info": {
-            "hash": "0x6e3b82d4c5371afd76d47c41e23a983769bacfdb1f1dff65bbe9763b5001dad3",
+            "hash": "0x2db130ee88cefb8219c271a8bc7aab6d529ab590f4d91dd01b500f47951707e1",
             "comment": "`execution-spec-tests` generated test",
-            "filling-transition-tool": "Hyperledger Besu evm 24.7-develop-30c96c7",
+            "filling-transition-tool": "Hyperledger Besu evm 24.8-develop-f5d6e72",
             "description": "Test function documentation:\n\n    Much simpler than returndatacopy, no memory or boosted call.  Returner is called\n    and results are stored in storage slot, which is asserted for expected values.\n    The parameters offset and return data are configured to test boundary conditions.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692-prague@v1.0.7/tests/prague/eip7692_eof_v1/eip7069_extcall/test_returndataload.py#L184",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.0.8/tests/prague/eip7692_eof_v1/eip7069_extcall/test_returndataload.py#L179",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7069.md",
             "reference-spec-version": "1795943aeacc86131d5ab6bb3d65824b3b1d4cad"
         }
     },
-    "tests/prague/eip7692_eof_v1/eip7069_extcall/test_returndataload.py::test_returndataload_handling[fork_PragueEIP7692-state_test-offset_20-len_0-EXTCALL]": {
+    "tests/prague/eip7692_eof_v1/eip7069_extcall/test_returndataload.py::test_returndataload_handling[fork_PragueEIP7692-state_test-offset_20-len_0-opcode_EXTCALL]": {
         "env": {
             "currentCoinbase": "0x2adc25665018aa1fe0e6bc666dac8fc2697ff9ba",
             "currentGasLimit": "0x016345785d8a0000",
@@ -1717,7 +1717,7 @@
         "pre": {
             "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b": {
                 "nonce": "0x00",
-                "balance": "0x0de0b6b3a7640000",
+                "balance": "0x3635c9adc5dea00000",
                 "code": "0x",
                 "storage": {}
             },
@@ -1753,7 +1753,7 @@
         "post": {
             "Prague": [
                 {
-                    "hash": "0xe548acbe6ee3f53f5b69d06f917c5a08dc744a34d31fa4c1c728d2092a66bafd",
+                    "hash": "0xd8ecb68b964c2267237a76b6b90c05e2b88d679ded39fae2b1a46b3b01355f4a",
                     "logs": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
                     "txbytes": "0xf860800a831e8480940000000000000000000000000000000000001100808025a0b3afc79e7eb6744553c987dfa51e04eec7c6d695e6f730badd8150d43c6611fda056587ba537d9e4baf5e9fdb797ed4d7cf237c28c5d368b92f2f3681334585fec",
                     "indexes": {
@@ -1765,16 +1765,16 @@
             ]
         },
         "_info": {
-            "hash": "0x998d655d65a619e8372b6a4307bd916c168e0bfb52ec1d1508e59a7297d558a2",
+            "hash": "0x46be438bd1a899e9471eef862c776203a4ca31dd87a6adb0cb931ee4b7e9ca4c",
             "comment": "`execution-spec-tests` generated test",
-            "filling-transition-tool": "Hyperledger Besu evm 24.7-develop-30c96c7",
+            "filling-transition-tool": "Hyperledger Besu evm 24.8-develop-f5d6e72",
             "description": "Test function documentation:\n\n    Much simpler than returndatacopy, no memory or boosted call.  Returner is called\n    and results are stored in storage slot, which is asserted for expected values.\n    The parameters offset and return data are configured to test boundary conditions.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692-prague@v1.0.7/tests/prague/eip7692_eof_v1/eip7069_extcall/test_returndataload.py#L184",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.0.8/tests/prague/eip7692_eof_v1/eip7069_extcall/test_returndataload.py#L179",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7069.md",
             "reference-spec-version": "1795943aeacc86131d5ab6bb3d65824b3b1d4cad"
         }
     },
-    "tests/prague/eip7692_eof_v1/eip7069_extcall/test_returndataload.py::test_returndataload_handling[fork_PragueEIP7692-state_test-offset_20-len_0-EXTDELEGATECALL]": {
+    "tests/prague/eip7692_eof_v1/eip7069_extcall/test_returndataload.py::test_returndataload_handling[fork_PragueEIP7692-state_test-offset_20-len_0-opcode_EXTDELEGATECALL]": {
         "env": {
             "currentCoinbase": "0x2adc25665018aa1fe0e6bc666dac8fc2697ff9ba",
             "currentGasLimit": "0x016345785d8a0000",
@@ -1788,7 +1788,7 @@
         "pre": {
             "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b": {
                 "nonce": "0x00",
-                "balance": "0x0de0b6b3a7640000",
+                "balance": "0x3635c9adc5dea00000",
                 "code": "0x",
                 "storage": {}
             },
@@ -1824,7 +1824,7 @@
         "post": {
             "Prague": [
                 {
-                    "hash": "0xeb158174c9257f09a83bc16b90f35ac8dd8be519241fe7da4cf68e7b698c8c42",
+                    "hash": "0x90560c1111d50ffe6d60ede857d07e1cbc8c64e5f57aaded3e6904d188d84ee9",
                     "logs": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
                     "txbytes": "0xf860800a831e8480940000000000000000000000000000000000001100808025a0b3afc79e7eb6744553c987dfa51e04eec7c6d695e6f730badd8150d43c6611fda056587ba537d9e4baf5e9fdb797ed4d7cf237c28c5d368b92f2f3681334585fec",
                     "indexes": {
@@ -1836,16 +1836,16 @@
             ]
         },
         "_info": {
-            "hash": "0xa4b61705671924a89925ff1ce0b8eeeaa0bf5b18393daf6e76a647ad7d2a6921",
+            "hash": "0xaeda2216218c5a5a29b4ed87f8c28da06404869fe0b3160e8c153f5b5c9b0855",
             "comment": "`execution-spec-tests` generated test",
-            "filling-transition-tool": "Hyperledger Besu evm 24.7-develop-30c96c7",
+            "filling-transition-tool": "Hyperledger Besu evm 24.8-develop-f5d6e72",
             "description": "Test function documentation:\n\n    Much simpler than returndatacopy, no memory or boosted call.  Returner is called\n    and results are stored in storage slot, which is asserted for expected values.\n    The parameters offset and return data are configured to test boundary conditions.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692-prague@v1.0.7/tests/prague/eip7692_eof_v1/eip7069_extcall/test_returndataload.py#L184",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.0.8/tests/prague/eip7692_eof_v1/eip7069_extcall/test_returndataload.py#L179",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7069.md",
             "reference-spec-version": "1795943aeacc86131d5ab6bb3d65824b3b1d4cad"
         }
     },
-    "tests/prague/eip7692_eof_v1/eip7069_extcall/test_returndataload.py::test_returndataload_handling[fork_PragueEIP7692-state_test-offset_20-len_0-EXTSTATICCALL]": {
+    "tests/prague/eip7692_eof_v1/eip7069_extcall/test_returndataload.py::test_returndataload_handling[fork_PragueEIP7692-state_test-offset_20-len_0-opcode_EXTSTATICCALL]": {
         "env": {
             "currentCoinbase": "0x2adc25665018aa1fe0e6bc666dac8fc2697ff9ba",
             "currentGasLimit": "0x016345785d8a0000",
@@ -1859,7 +1859,7 @@
         "pre": {
             "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b": {
                 "nonce": "0x00",
-                "balance": "0x0de0b6b3a7640000",
+                "balance": "0x3635c9adc5dea00000",
                 "code": "0x",
                 "storage": {}
             },
@@ -1895,7 +1895,7 @@
         "post": {
             "Prague": [
                 {
-                    "hash": "0xb70de79b415dbad86874ab67abb44a44ec6e9b4fdf6a99420c0698c3a58142d2",
+                    "hash": "0x5ef09f12562d8e0e956b77a57136e5596addabd7ce0662028b49e53305c6ee9d",
                     "logs": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
                     "txbytes": "0xf860800a831e8480940000000000000000000000000000000000001100808025a0b3afc79e7eb6744553c987dfa51e04eec7c6d695e6f730badd8150d43c6611fda056587ba537d9e4baf5e9fdb797ed4d7cf237c28c5d368b92f2f3681334585fec",
                     "indexes": {
@@ -1907,16 +1907,16 @@
             ]
         },
         "_info": {
-            "hash": "0x66b322697f982fb62e5e04b5744ada89c633a72d5fb0722f5489660c9b0aa072",
+            "hash": "0x0db5905b3a435320f735b18013e8662d76fbd70dca2d37bdbf06a60fc6203201",
             "comment": "`execution-spec-tests` generated test",
-            "filling-transition-tool": "Hyperledger Besu evm 24.7-develop-30c96c7",
+            "filling-transition-tool": "Hyperledger Besu evm 24.8-develop-f5d6e72",
             "description": "Test function documentation:\n\n    Much simpler than returndatacopy, no memory or boosted call.  Returner is called\n    and results are stored in storage slot, which is asserted for expected values.\n    The parameters offset and return data are configured to test boundary conditions.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692-prague@v1.0.7/tests/prague/eip7692_eof_v1/eip7069_extcall/test_returndataload.py#L184",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.0.8/tests/prague/eip7692_eof_v1/eip7069_extcall/test_returndataload.py#L179",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7069.md",
             "reference-spec-version": "1795943aeacc86131d5ab6bb3d65824b3b1d4cad"
         }
     },
-    "tests/prague/eip7692_eof_v1/eip7069_extcall/test_returndataload.py::test_returndataload_handling[fork_PragueEIP7692-state_test-offset_20-len_10-EXTCALL]": {
+    "tests/prague/eip7692_eof_v1/eip7069_extcall/test_returndataload.py::test_returndataload_handling[fork_PragueEIP7692-state_test-offset_20-len_10-opcode_EXTCALL]": {
         "env": {
             "currentCoinbase": "0x2adc25665018aa1fe0e6bc666dac8fc2697ff9ba",
             "currentGasLimit": "0x016345785d8a0000",
@@ -1930,7 +1930,7 @@
         "pre": {
             "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b": {
                 "nonce": "0x00",
-                "balance": "0x0de0b6b3a7640000",
+                "balance": "0x3635c9adc5dea00000",
                 "code": "0x",
                 "storage": {}
             },
@@ -1966,7 +1966,7 @@
         "post": {
             "Prague": [
                 {
-                    "hash": "0x94c39124c0c4e2630cdea4780656be83102b3d4352eff2c158bf62ed7193a5e6",
+                    "hash": "0x3b2594cbfa5af001a1744008bf8aa14ca153445ed89c34208c5cb259c2b0e148",
                     "logs": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
                     "txbytes": "0xf860800a831e8480940000000000000000000000000000000000001100808025a0b3afc79e7eb6744553c987dfa51e04eec7c6d695e6f730badd8150d43c6611fda056587ba537d9e4baf5e9fdb797ed4d7cf237c28c5d368b92f2f3681334585fec",
                     "indexes": {
@@ -1978,16 +1978,16 @@
             ]
         },
         "_info": {
-            "hash": "0x84162e000eaefb4f2a3931f31ca6e5a2dd316a8c24e6691969a7afddddf38c35",
+            "hash": "0xc713078718dda8af09e81c34d9b6538a65aadbd6fca09e17bbc4ce1bd3ecc902",
             "comment": "`execution-spec-tests` generated test",
-            "filling-transition-tool": "Hyperledger Besu evm 24.7-develop-30c96c7",
+            "filling-transition-tool": "Hyperledger Besu evm 24.8-develop-f5d6e72",
             "description": "Test function documentation:\n\n    Much simpler than returndatacopy, no memory or boosted call.  Returner is called\n    and results are stored in storage slot, which is asserted for expected values.\n    The parameters offset and return data are configured to test boundary conditions.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692-prague@v1.0.7/tests/prague/eip7692_eof_v1/eip7069_extcall/test_returndataload.py#L184",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.0.8/tests/prague/eip7692_eof_v1/eip7069_extcall/test_returndataload.py#L179",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7069.md",
             "reference-spec-version": "1795943aeacc86131d5ab6bb3d65824b3b1d4cad"
         }
     },
-    "tests/prague/eip7692_eof_v1/eip7069_extcall/test_returndataload.py::test_returndataload_handling[fork_PragueEIP7692-state_test-offset_20-len_10-EXTDELEGATECALL]": {
+    "tests/prague/eip7692_eof_v1/eip7069_extcall/test_returndataload.py::test_returndataload_handling[fork_PragueEIP7692-state_test-offset_20-len_10-opcode_EXTDELEGATECALL]": {
         "env": {
             "currentCoinbase": "0x2adc25665018aa1fe0e6bc666dac8fc2697ff9ba",
             "currentGasLimit": "0x016345785d8a0000",
@@ -2001,7 +2001,7 @@
         "pre": {
             "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b": {
                 "nonce": "0x00",
-                "balance": "0x0de0b6b3a7640000",
+                "balance": "0x3635c9adc5dea00000",
                 "code": "0x",
                 "storage": {}
             },
@@ -2037,7 +2037,7 @@
         "post": {
             "Prague": [
                 {
-                    "hash": "0x686903f45a532db207055af07890f71bbdd6abdebda6f685986fb6d8561247c7",
+                    "hash": "0x5e5dae9b7f23db20f62e314853d299770242ba93aa14cd34ef0e9421d7e5cc0c",
                     "logs": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
                     "txbytes": "0xf860800a831e8480940000000000000000000000000000000000001100808025a0b3afc79e7eb6744553c987dfa51e04eec7c6d695e6f730badd8150d43c6611fda056587ba537d9e4baf5e9fdb797ed4d7cf237c28c5d368b92f2f3681334585fec",
                     "indexes": {
@@ -2049,16 +2049,16 @@
             ]
         },
         "_info": {
-            "hash": "0xfe2bb8f6ebd52963561804abbe634927a01405d1b0a2f5c8ff18bb65e5962b9c",
+            "hash": "0x5f282436530b08dccff0d772641a0b950ff92145f2dd4e7977ab3582faa19f17",
             "comment": "`execution-spec-tests` generated test",
-            "filling-transition-tool": "Hyperledger Besu evm 24.7-develop-30c96c7",
+            "filling-transition-tool": "Hyperledger Besu evm 24.8-develop-f5d6e72",
             "description": "Test function documentation:\n\n    Much simpler than returndatacopy, no memory or boosted call.  Returner is called\n    and results are stored in storage slot, which is asserted for expected values.\n    The parameters offset and return data are configured to test boundary conditions.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692-prague@v1.0.7/tests/prague/eip7692_eof_v1/eip7069_extcall/test_returndataload.py#L184",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.0.8/tests/prague/eip7692_eof_v1/eip7069_extcall/test_returndataload.py#L179",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7069.md",
             "reference-spec-version": "1795943aeacc86131d5ab6bb3d65824b3b1d4cad"
         }
     },
-    "tests/prague/eip7692_eof_v1/eip7069_extcall/test_returndataload.py::test_returndataload_handling[fork_PragueEIP7692-state_test-offset_20-len_10-EXTSTATICCALL]": {
+    "tests/prague/eip7692_eof_v1/eip7069_extcall/test_returndataload.py::test_returndataload_handling[fork_PragueEIP7692-state_test-offset_20-len_10-opcode_EXTSTATICCALL]": {
         "env": {
             "currentCoinbase": "0x2adc25665018aa1fe0e6bc666dac8fc2697ff9ba",
             "currentGasLimit": "0x016345785d8a0000",
@@ -2072,7 +2072,7 @@
         "pre": {
             "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b": {
                 "nonce": "0x00",
-                "balance": "0x0de0b6b3a7640000",
+                "balance": "0x3635c9adc5dea00000",
                 "code": "0x",
                 "storage": {}
             },
@@ -2108,7 +2108,7 @@
         "post": {
             "Prague": [
                 {
-                    "hash": "0xfce0b87f34b31a406ddccdcf4b6b891c955cd8eec5fcec74b21471bc67b0256e",
+                    "hash": "0x3ec1b898874d88dc30ef9656c79e41e8f86457823cc076d8648678420473bba9",
                     "logs": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
                     "txbytes": "0xf860800a831e8480940000000000000000000000000000000000001100808025a0b3afc79e7eb6744553c987dfa51e04eec7c6d695e6f730badd8150d43c6611fda056587ba537d9e4baf5e9fdb797ed4d7cf237c28c5d368b92f2f3681334585fec",
                     "indexes": {
@@ -2120,16 +2120,16 @@
             ]
         },
         "_info": {
-            "hash": "0x55abdfb16fee840c595ec2ef6bf12bfdaf1895342c77fdf602ae2e878bd25ee8",
+            "hash": "0x788295028e2f02ccc58b2b0a69fd8da1b22c0f37f5b0e25b3bfbd1ff45e80e40",
             "comment": "`execution-spec-tests` generated test",
-            "filling-transition-tool": "Hyperledger Besu evm 24.7-develop-30c96c7",
+            "filling-transition-tool": "Hyperledger Besu evm 24.8-develop-f5d6e72",
             "description": "Test function documentation:\n\n    Much simpler than returndatacopy, no memory or boosted call.  Returner is called\n    and results are stored in storage slot, which is asserted for expected values.\n    The parameters offset and return data are configured to test boundary conditions.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692-prague@v1.0.7/tests/prague/eip7692_eof_v1/eip7069_extcall/test_returndataload.py#L184",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.0.8/tests/prague/eip7692_eof_v1/eip7069_extcall/test_returndataload.py#L179",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7069.md",
             "reference-spec-version": "1795943aeacc86131d5ab6bb3d65824b3b1d4cad"
         }
     },
-    "tests/prague/eip7692_eof_v1/eip7069_extcall/test_returndataload.py::test_returndataload_handling[fork_PragueEIP7692-state_test-offset_20-len_20-EXTCALL]": {
+    "tests/prague/eip7692_eof_v1/eip7069_extcall/test_returndataload.py::test_returndataload_handling[fork_PragueEIP7692-state_test-offset_20-len_20-opcode_EXTCALL]": {
         "env": {
             "currentCoinbase": "0x2adc25665018aa1fe0e6bc666dac8fc2697ff9ba",
             "currentGasLimit": "0x016345785d8a0000",
@@ -2143,7 +2143,7 @@
         "pre": {
             "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b": {
                 "nonce": "0x00",
-                "balance": "0x0de0b6b3a7640000",
+                "balance": "0x3635c9adc5dea00000",
                 "code": "0x",
                 "storage": {}
             },
@@ -2179,7 +2179,7 @@
         "post": {
             "Prague": [
                 {
-                    "hash": "0x787ebcf45dbb7678aa56b5b5b9118e0b23d944196dbb6a8371d95322c314ef72",
+                    "hash": "0x48485855305d21587bbea8d51a8ae8e99783258257ecf3b11b3b1fcf50722cc6",
                     "logs": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
                     "txbytes": "0xf860800a831e8480940000000000000000000000000000000000001100808025a0b3afc79e7eb6744553c987dfa51e04eec7c6d695e6f730badd8150d43c6611fda056587ba537d9e4baf5e9fdb797ed4d7cf237c28c5d368b92f2f3681334585fec",
                     "indexes": {
@@ -2191,16 +2191,16 @@
             ]
         },
         "_info": {
-            "hash": "0xe6cef4aaab290be62a800e92096ada37810e38ada32ae39aa5687003c28c88a8",
+            "hash": "0x491357c56be9ab0e1676906edaa7b17c0992d78d97a589188e98e64afc1ef575",
             "comment": "`execution-spec-tests` generated test",
-            "filling-transition-tool": "Hyperledger Besu evm 24.7-develop-30c96c7",
+            "filling-transition-tool": "Hyperledger Besu evm 24.8-develop-f5d6e72",
             "description": "Test function documentation:\n\n    Much simpler than returndatacopy, no memory or boosted call.  Returner is called\n    and results are stored in storage slot, which is asserted for expected values.\n    The parameters offset and return data are configured to test boundary conditions.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692-prague@v1.0.7/tests/prague/eip7692_eof_v1/eip7069_extcall/test_returndataload.py#L184",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.0.8/tests/prague/eip7692_eof_v1/eip7069_extcall/test_returndataload.py#L179",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7069.md",
             "reference-spec-version": "1795943aeacc86131d5ab6bb3d65824b3b1d4cad"
         }
     },
-    "tests/prague/eip7692_eof_v1/eip7069_extcall/test_returndataload.py::test_returndataload_handling[fork_PragueEIP7692-state_test-offset_20-len_20-EXTDELEGATECALL]": {
+    "tests/prague/eip7692_eof_v1/eip7069_extcall/test_returndataload.py::test_returndataload_handling[fork_PragueEIP7692-state_test-offset_20-len_20-opcode_EXTDELEGATECALL]": {
         "env": {
             "currentCoinbase": "0x2adc25665018aa1fe0e6bc666dac8fc2697ff9ba",
             "currentGasLimit": "0x016345785d8a0000",
@@ -2214,7 +2214,7 @@
         "pre": {
             "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b": {
                 "nonce": "0x00",
-                "balance": "0x0de0b6b3a7640000",
+                "balance": "0x3635c9adc5dea00000",
                 "code": "0x",
                 "storage": {}
             },
@@ -2250,7 +2250,7 @@
         "post": {
             "Prague": [
                 {
-                    "hash": "0xd930c970e40b153262c986e780ee1d6d1621aa2bfbed13e22b622c242fc088e6",
+                    "hash": "0xf3af1a3126c57226f1f0e2fa720fa1c963c41ab93039f840b07e86c387893b0e",
                     "logs": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
                     "txbytes": "0xf860800a831e8480940000000000000000000000000000000000001100808025a0b3afc79e7eb6744553c987dfa51e04eec7c6d695e6f730badd8150d43c6611fda056587ba537d9e4baf5e9fdb797ed4d7cf237c28c5d368b92f2f3681334585fec",
                     "indexes": {
@@ -2262,16 +2262,16 @@
             ]
         },
         "_info": {
-            "hash": "0x081aac93f573fa3b742e0103fa878b47ee0da3ef4da88274506ac4018fb7cd59",
+            "hash": "0xdf40b935935a02e0eb3d9458507867631545489022ae94997b9499aca45c80dc",
             "comment": "`execution-spec-tests` generated test",
-            "filling-transition-tool": "Hyperledger Besu evm 24.7-develop-30c96c7",
+            "filling-transition-tool": "Hyperledger Besu evm 24.8-develop-f5d6e72",
             "description": "Test function documentation:\n\n    Much simpler than returndatacopy, no memory or boosted call.  Returner is called\n    and results are stored in storage slot, which is asserted for expected values.\n    The parameters offset and return data are configured to test boundary conditions.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692-prague@v1.0.7/tests/prague/eip7692_eof_v1/eip7069_extcall/test_returndataload.py#L184",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.0.8/tests/prague/eip7692_eof_v1/eip7069_extcall/test_returndataload.py#L179",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7069.md",
             "reference-spec-version": "1795943aeacc86131d5ab6bb3d65824b3b1d4cad"
         }
     },
-    "tests/prague/eip7692_eof_v1/eip7069_extcall/test_returndataload.py::test_returndataload_handling[fork_PragueEIP7692-state_test-offset_20-len_20-EXTSTATICCALL]": {
+    "tests/prague/eip7692_eof_v1/eip7069_extcall/test_returndataload.py::test_returndataload_handling[fork_PragueEIP7692-state_test-offset_20-len_20-opcode_EXTSTATICCALL]": {
         "env": {
             "currentCoinbase": "0x2adc25665018aa1fe0e6bc666dac8fc2697ff9ba",
             "currentGasLimit": "0x016345785d8a0000",
@@ -2285,7 +2285,7 @@
         "pre": {
             "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b": {
                 "nonce": "0x00",
-                "balance": "0x0de0b6b3a7640000",
+                "balance": "0x3635c9adc5dea00000",
                 "code": "0x",
                 "storage": {}
             },
@@ -2321,7 +2321,7 @@
         "post": {
             "Prague": [
                 {
-                    "hash": "0x5bbd0ff60a235cc7a251b8c67bfceb6354f5b9348338f1daef8ff53063dac65a",
+                    "hash": "0x4e140ae032af44a49352b91680435b052d86980eac190636b6f26c99a76266e0",
                     "logs": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
                     "txbytes": "0xf860800a831e8480940000000000000000000000000000000000001100808025a0b3afc79e7eb6744553c987dfa51e04eec7c6d695e6f730badd8150d43c6611fda056587ba537d9e4baf5e9fdb797ed4d7cf237c28c5d368b92f2f3681334585fec",
                     "indexes": {
@@ -2333,16 +2333,16 @@
             ]
         },
         "_info": {
-            "hash": "0x08005f42416979391a7f4a59ee5310d754a841cc35922946cb8a8f045ae1704c",
+            "hash": "0xef9e74fa3284ec0e61c7499b55789ccf217cba831e7657296ffc3efaf0f6e30c",
             "comment": "`execution-spec-tests` generated test",
-            "filling-transition-tool": "Hyperledger Besu evm 24.7-develop-30c96c7",
+            "filling-transition-tool": "Hyperledger Besu evm 24.8-develop-f5d6e72",
             "description": "Test function documentation:\n\n    Much simpler than returndatacopy, no memory or boosted call.  Returner is called\n    and results are stored in storage slot, which is asserted for expected values.\n    The parameters offset and return data are configured to test boundary conditions.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692-prague@v1.0.7/tests/prague/eip7692_eof_v1/eip7069_extcall/test_returndataload.py#L184",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.0.8/tests/prague/eip7692_eof_v1/eip7069_extcall/test_returndataload.py#L179",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7069.md",
             "reference-spec-version": "1795943aeacc86131d5ab6bb3d65824b3b1d4cad"
         }
     },
-    "tests/prague/eip7692_eof_v1/eip7069_extcall/test_returndataload.py::test_returndataload_handling[fork_PragueEIP7692-state_test-offset_20-len_30-EXTCALL]": {
+    "tests/prague/eip7692_eof_v1/eip7069_extcall/test_returndataload.py::test_returndataload_handling[fork_PragueEIP7692-state_test-offset_20-len_30-opcode_EXTCALL]": {
         "env": {
             "currentCoinbase": "0x2adc25665018aa1fe0e6bc666dac8fc2697ff9ba",
             "currentGasLimit": "0x016345785d8a0000",
@@ -2356,7 +2356,7 @@
         "pre": {
             "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b": {
                 "nonce": "0x00",
-                "balance": "0x0de0b6b3a7640000",
+                "balance": "0x3635c9adc5dea00000",
                 "code": "0x",
                 "storage": {}
             },
@@ -2392,7 +2392,7 @@
         "post": {
             "Prague": [
                 {
-                    "hash": "0xba15d72765b41e4f2f20aec3e726f646e52618135345f9fbb0d442ba9791e664",
+                    "hash": "0x9c3a18319226ddf6637cc3c612f9e856c2ece202c733212f0a0732eba5992840",
                     "logs": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
                     "txbytes": "0xf860800a831e8480940000000000000000000000000000000000001100808025a0b3afc79e7eb6744553c987dfa51e04eec7c6d695e6f730badd8150d43c6611fda056587ba537d9e4baf5e9fdb797ed4d7cf237c28c5d368b92f2f3681334585fec",
                     "indexes": {
@@ -2404,16 +2404,16 @@
             ]
         },
         "_info": {
-            "hash": "0x10b3041e6190f41e9276706761e488c833daf9ff12418a678152ae01be7bd6a5",
+            "hash": "0x5081190989198731356f5fa4256808c62c3df6602cc552c97bd6d21df2823ac3",
             "comment": "`execution-spec-tests` generated test",
-            "filling-transition-tool": "Hyperledger Besu evm 24.7-develop-30c96c7",
+            "filling-transition-tool": "Hyperledger Besu evm 24.8-develop-f5d6e72",
             "description": "Test function documentation:\n\n    Much simpler than returndatacopy, no memory or boosted call.  Returner is called\n    and results are stored in storage slot, which is asserted for expected values.\n    The parameters offset and return data are configured to test boundary conditions.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692-prague@v1.0.7/tests/prague/eip7692_eof_v1/eip7069_extcall/test_returndataload.py#L184",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.0.8/tests/prague/eip7692_eof_v1/eip7069_extcall/test_returndataload.py#L179",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7069.md",
             "reference-spec-version": "1795943aeacc86131d5ab6bb3d65824b3b1d4cad"
         }
     },
-    "tests/prague/eip7692_eof_v1/eip7069_extcall/test_returndataload.py::test_returndataload_handling[fork_PragueEIP7692-state_test-offset_20-len_30-EXTDELEGATECALL]": {
+    "tests/prague/eip7692_eof_v1/eip7069_extcall/test_returndataload.py::test_returndataload_handling[fork_PragueEIP7692-state_test-offset_20-len_30-opcode_EXTDELEGATECALL]": {
         "env": {
             "currentCoinbase": "0x2adc25665018aa1fe0e6bc666dac8fc2697ff9ba",
             "currentGasLimit": "0x016345785d8a0000",
@@ -2427,7 +2427,7 @@
         "pre": {
             "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b": {
                 "nonce": "0x00",
-                "balance": "0x0de0b6b3a7640000",
+                "balance": "0x3635c9adc5dea00000",
                 "code": "0x",
                 "storage": {}
             },
@@ -2463,7 +2463,7 @@
         "post": {
             "Prague": [
                 {
-                    "hash": "0x001ae290240cc9264035959db08fbb78191fbc00ba4fde7a8e800eb9db73cf3c",
+                    "hash": "0x2d7738a30f647cfc6545c6376480e9da61c59b8f289004af7a401a1e35af1ea0",
                     "logs": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
                     "txbytes": "0xf860800a831e8480940000000000000000000000000000000000001100808025a0b3afc79e7eb6744553c987dfa51e04eec7c6d695e6f730badd8150d43c6611fda056587ba537d9e4baf5e9fdb797ed4d7cf237c28c5d368b92f2f3681334585fec",
                     "indexes": {
@@ -2475,16 +2475,16 @@
             ]
         },
         "_info": {
-            "hash": "0x3668b24d67ec9362c0b78cf0eb4370f41e89137c0ea9698c3f51525c0cacdcec",
+            "hash": "0x7a92eaaeeb7e767022b3a31b587471e8b4bff4bff99dc79b0a1944a108687918",
             "comment": "`execution-spec-tests` generated test",
-            "filling-transition-tool": "Hyperledger Besu evm 24.7-develop-30c96c7",
+            "filling-transition-tool": "Hyperledger Besu evm 24.8-develop-f5d6e72",
             "description": "Test function documentation:\n\n    Much simpler than returndatacopy, no memory or boosted call.  Returner is called\n    and results are stored in storage slot, which is asserted for expected values.\n    The parameters offset and return data are configured to test boundary conditions.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692-prague@v1.0.7/tests/prague/eip7692_eof_v1/eip7069_extcall/test_returndataload.py#L184",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.0.8/tests/prague/eip7692_eof_v1/eip7069_extcall/test_returndataload.py#L179",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7069.md",
             "reference-spec-version": "1795943aeacc86131d5ab6bb3d65824b3b1d4cad"
         }
     },
-    "tests/prague/eip7692_eof_v1/eip7069_extcall/test_returndataload.py::test_returndataload_handling[fork_PragueEIP7692-state_test-offset_20-len_30-EXTSTATICCALL]": {
+    "tests/prague/eip7692_eof_v1/eip7069_extcall/test_returndataload.py::test_returndataload_handling[fork_PragueEIP7692-state_test-offset_20-len_30-opcode_EXTSTATICCALL]": {
         "env": {
             "currentCoinbase": "0x2adc25665018aa1fe0e6bc666dac8fc2697ff9ba",
             "currentGasLimit": "0x016345785d8a0000",
@@ -2498,7 +2498,7 @@
         "pre": {
             "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b": {
                 "nonce": "0x00",
-                "balance": "0x0de0b6b3a7640000",
+                "balance": "0x3635c9adc5dea00000",
                 "code": "0x",
                 "storage": {}
             },
@@ -2534,7 +2534,7 @@
         "post": {
             "Prague": [
                 {
-                    "hash": "0x7588cb56f07d0bdb849c81b9101d305114229402ca860e7b8efc9ae8d896572f",
+                    "hash": "0xa0f45f8179eee256b0e98c40380d5947e01e9dcf8f0be1f5f93149c88fa931d3",
                     "logs": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
                     "txbytes": "0xf860800a831e8480940000000000000000000000000000000000001100808025a0b3afc79e7eb6744553c987dfa51e04eec7c6d695e6f730badd8150d43c6611fda056587ba537d9e4baf5e9fdb797ed4d7cf237c28c5d368b92f2f3681334585fec",
                     "indexes": {
@@ -2546,16 +2546,16 @@
             ]
         },
         "_info": {
-            "hash": "0x9f918aaf9db6a9de54006165b9f27be54aa4dcb0138ff3d1593601de240f8994",
+            "hash": "0x02d68d1522f755b7d361f8c510be2c79dc33616e4f029a4b5fab211086bcd05d",
             "comment": "`execution-spec-tests` generated test",
-            "filling-transition-tool": "Hyperledger Besu evm 24.7-develop-30c96c7",
+            "filling-transition-tool": "Hyperledger Besu evm 24.8-develop-f5d6e72",
             "description": "Test function documentation:\n\n    Much simpler than returndatacopy, no memory or boosted call.  Returner is called\n    and results are stored in storage slot, which is asserted for expected values.\n    The parameters offset and return data are configured to test boundary conditions.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692-prague@v1.0.7/tests/prague/eip7692_eof_v1/eip7069_extcall/test_returndataload.py#L184",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.0.8/tests/prague/eip7692_eof_v1/eip7069_extcall/test_returndataload.py#L179",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7069.md",
             "reference-spec-version": "1795943aeacc86131d5ab6bb3d65824b3b1d4cad"
         }
     },
-    "tests/prague/eip7692_eof_v1/eip7069_extcall/test_returndataload.py::test_returndataload_handling[fork_PragueEIP7692-state_test-offset_30-len_0-EXTCALL]": {
+    "tests/prague/eip7692_eof_v1/eip7069_extcall/test_returndataload.py::test_returndataload_handling[fork_PragueEIP7692-state_test-offset_30-len_0-opcode_EXTCALL]": {
         "env": {
             "currentCoinbase": "0x2adc25665018aa1fe0e6bc666dac8fc2697ff9ba",
             "currentGasLimit": "0x016345785d8a0000",
@@ -2569,7 +2569,7 @@
         "pre": {
             "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b": {
                 "nonce": "0x00",
-                "balance": "0x0de0b6b3a7640000",
+                "balance": "0x3635c9adc5dea00000",
                 "code": "0x",
                 "storage": {}
             },
@@ -2605,7 +2605,7 @@
         "post": {
             "Prague": [
                 {
-                    "hash": "0xd4ed156f254cc2989105d974a7e884873ad54823cfa9eeb43d0b0a6d37d1318c",
+                    "hash": "0x8f426f04d0059e2307cadf689e174e7dae6d57000ed0b2ce9706ea2f953f80e4",
                     "logs": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
                     "txbytes": "0xf860800a831e8480940000000000000000000000000000000000001100808025a0b3afc79e7eb6744553c987dfa51e04eec7c6d695e6f730badd8150d43c6611fda056587ba537d9e4baf5e9fdb797ed4d7cf237c28c5d368b92f2f3681334585fec",
                     "indexes": {
@@ -2617,16 +2617,16 @@
             ]
         },
         "_info": {
-            "hash": "0x263002c5c71d23aa594f20c5ab51b2dd3ae81c854b3044f98c7774ddb92350e2",
+            "hash": "0xf4f228147ba10946530916cea9b888245b76a190fb5d7a6fd1e0ad18af5d3716",
             "comment": "`execution-spec-tests` generated test",
-            "filling-transition-tool": "Hyperledger Besu evm 24.7-develop-30c96c7",
+            "filling-transition-tool": "Hyperledger Besu evm 24.8-develop-f5d6e72",
             "description": "Test function documentation:\n\n    Much simpler than returndatacopy, no memory or boosted call.  Returner is called\n    and results are stored in storage slot, which is asserted for expected values.\n    The parameters offset and return data are configured to test boundary conditions.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692-prague@v1.0.7/tests/prague/eip7692_eof_v1/eip7069_extcall/test_returndataload.py#L184",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.0.8/tests/prague/eip7692_eof_v1/eip7069_extcall/test_returndataload.py#L179",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7069.md",
             "reference-spec-version": "1795943aeacc86131d5ab6bb3d65824b3b1d4cad"
         }
     },
-    "tests/prague/eip7692_eof_v1/eip7069_extcall/test_returndataload.py::test_returndataload_handling[fork_PragueEIP7692-state_test-offset_30-len_0-EXTDELEGATECALL]": {
+    "tests/prague/eip7692_eof_v1/eip7069_extcall/test_returndataload.py::test_returndataload_handling[fork_PragueEIP7692-state_test-offset_30-len_0-opcode_EXTDELEGATECALL]": {
         "env": {
             "currentCoinbase": "0x2adc25665018aa1fe0e6bc666dac8fc2697ff9ba",
             "currentGasLimit": "0x016345785d8a0000",
@@ -2640,7 +2640,7 @@
         "pre": {
             "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b": {
                 "nonce": "0x00",
-                "balance": "0x0de0b6b3a7640000",
+                "balance": "0x3635c9adc5dea00000",
                 "code": "0x",
                 "storage": {}
             },
@@ -2676,7 +2676,7 @@
         "post": {
             "Prague": [
                 {
-                    "hash": "0x1b73e5e9f0f329e4b20bb7b77f4026841f961da36f0892250733d97c978337a3",
+                    "hash": "0x8312d4cebb305be0e416ab32c9d94a1b0fdc8cb039cf5c7a23b1f684c9af08d9",
                     "logs": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
                     "txbytes": "0xf860800a831e8480940000000000000000000000000000000000001100808025a0b3afc79e7eb6744553c987dfa51e04eec7c6d695e6f730badd8150d43c6611fda056587ba537d9e4baf5e9fdb797ed4d7cf237c28c5d368b92f2f3681334585fec",
                     "indexes": {
@@ -2688,16 +2688,16 @@
             ]
         },
         "_info": {
-            "hash": "0x5f176d16f2d818cc8b228e6e78427b003dd5a85f4aeb6c061b342615b9cdfdb9",
+            "hash": "0x1ed82954a26afbb6c1e733e40be2271d90f32abb5907395d4039b75a22b78370",
             "comment": "`execution-spec-tests` generated test",
-            "filling-transition-tool": "Hyperledger Besu evm 24.7-develop-30c96c7",
+            "filling-transition-tool": "Hyperledger Besu evm 24.8-develop-f5d6e72",
             "description": "Test function documentation:\n\n    Much simpler than returndatacopy, no memory or boosted call.  Returner is called\n    and results are stored in storage slot, which is asserted for expected values.\n    The parameters offset and return data are configured to test boundary conditions.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692-prague@v1.0.7/tests/prague/eip7692_eof_v1/eip7069_extcall/test_returndataload.py#L184",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.0.8/tests/prague/eip7692_eof_v1/eip7069_extcall/test_returndataload.py#L179",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7069.md",
             "reference-spec-version": "1795943aeacc86131d5ab6bb3d65824b3b1d4cad"
         }
     },
-    "tests/prague/eip7692_eof_v1/eip7069_extcall/test_returndataload.py::test_returndataload_handling[fork_PragueEIP7692-state_test-offset_30-len_0-EXTSTATICCALL]": {
+    "tests/prague/eip7692_eof_v1/eip7069_extcall/test_returndataload.py::test_returndataload_handling[fork_PragueEIP7692-state_test-offset_30-len_0-opcode_EXTSTATICCALL]": {
         "env": {
             "currentCoinbase": "0x2adc25665018aa1fe0e6bc666dac8fc2697ff9ba",
             "currentGasLimit": "0x016345785d8a0000",
@@ -2711,7 +2711,7 @@
         "pre": {
             "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b": {
                 "nonce": "0x00",
-                "balance": "0x0de0b6b3a7640000",
+                "balance": "0x3635c9adc5dea00000",
                 "code": "0x",
                 "storage": {}
             },
@@ -2747,7 +2747,7 @@
         "post": {
             "Prague": [
                 {
-                    "hash": "0x95eadb2192047faf8b5e4d2e3b86e277ad1805e9ec535f1033dd0e54743aad3b",
+                    "hash": "0x550352b29b552c2a7aba8d2225ac4dc8ba623e255b5ad69c990230b3902277ae",
                     "logs": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
                     "txbytes": "0xf860800a831e8480940000000000000000000000000000000000001100808025a0b3afc79e7eb6744553c987dfa51e04eec7c6d695e6f730badd8150d43c6611fda056587ba537d9e4baf5e9fdb797ed4d7cf237c28c5d368b92f2f3681334585fec",
                     "indexes": {
@@ -2759,16 +2759,16 @@
             ]
         },
         "_info": {
-            "hash": "0xedb812df5001192c70205166870dcfa3c44ccb90fcf40b04b2ddb52021e3ce9a",
+            "hash": "0x52d6d1774c7c0e51ba17e1c610ab8f4cfecd36c2e528f23110cae71993701cb3",
             "comment": "`execution-spec-tests` generated test",
-            "filling-transition-tool": "Hyperledger Besu evm 24.7-develop-30c96c7",
+            "filling-transition-tool": "Hyperledger Besu evm 24.8-develop-f5d6e72",
             "description": "Test function documentation:\n\n    Much simpler than returndatacopy, no memory or boosted call.  Returner is called\n    and results are stored in storage slot, which is asserted for expected values.\n    The parameters offset and return data are configured to test boundary conditions.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692-prague@v1.0.7/tests/prague/eip7692_eof_v1/eip7069_extcall/test_returndataload.py#L184",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.0.8/tests/prague/eip7692_eof_v1/eip7069_extcall/test_returndataload.py#L179",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7069.md",
             "reference-spec-version": "1795943aeacc86131d5ab6bb3d65824b3b1d4cad"
         }
     },
-    "tests/prague/eip7692_eof_v1/eip7069_extcall/test_returndataload.py::test_returndataload_handling[fork_PragueEIP7692-state_test-offset_30-len_10-EXTCALL]": {
+    "tests/prague/eip7692_eof_v1/eip7069_extcall/test_returndataload.py::test_returndataload_handling[fork_PragueEIP7692-state_test-offset_30-len_10-opcode_EXTCALL]": {
         "env": {
             "currentCoinbase": "0x2adc25665018aa1fe0e6bc666dac8fc2697ff9ba",
             "currentGasLimit": "0x016345785d8a0000",
@@ -2782,7 +2782,7 @@
         "pre": {
             "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b": {
                 "nonce": "0x00",
-                "balance": "0x0de0b6b3a7640000",
+                "balance": "0x3635c9adc5dea00000",
                 "code": "0x",
                 "storage": {}
             },
@@ -2818,7 +2818,7 @@
         "post": {
             "Prague": [
                 {
-                    "hash": "0x6d8f993aeda0991b8210135814e97a4481976300511f99e0e45ed66449e41216",
+                    "hash": "0x044414620a571444a08fad697d7f83d6f7eee0d6c960cc84265622faa87811d0",
                     "logs": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
                     "txbytes": "0xf860800a831e8480940000000000000000000000000000000000001100808025a0b3afc79e7eb6744553c987dfa51e04eec7c6d695e6f730badd8150d43c6611fda056587ba537d9e4baf5e9fdb797ed4d7cf237c28c5d368b92f2f3681334585fec",
                     "indexes": {
@@ -2830,16 +2830,16 @@
             ]
         },
         "_info": {
-            "hash": "0xd8609937caa23f1381be47912b5741d0aeb3731521a80e0cd8a812c7f88e28bf",
+            "hash": "0x01f0db63c2b6aed963604881ea968259960e0c85a8d9a5bb3e7d41aac9546171",
             "comment": "`execution-spec-tests` generated test",
-            "filling-transition-tool": "Hyperledger Besu evm 24.7-develop-30c96c7",
+            "filling-transition-tool": "Hyperledger Besu evm 24.8-develop-f5d6e72",
             "description": "Test function documentation:\n\n    Much simpler than returndatacopy, no memory or boosted call.  Returner is called\n    and results are stored in storage slot, which is asserted for expected values.\n    The parameters offset and return data are configured to test boundary conditions.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692-prague@v1.0.7/tests/prague/eip7692_eof_v1/eip7069_extcall/test_returndataload.py#L184",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.0.8/tests/prague/eip7692_eof_v1/eip7069_extcall/test_returndataload.py#L179",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7069.md",
             "reference-spec-version": "1795943aeacc86131d5ab6bb3d65824b3b1d4cad"
         }
     },
-    "tests/prague/eip7692_eof_v1/eip7069_extcall/test_returndataload.py::test_returndataload_handling[fork_PragueEIP7692-state_test-offset_30-len_10-EXTDELEGATECALL]": {
+    "tests/prague/eip7692_eof_v1/eip7069_extcall/test_returndataload.py::test_returndataload_handling[fork_PragueEIP7692-state_test-offset_30-len_10-opcode_EXTDELEGATECALL]": {
         "env": {
             "currentCoinbase": "0x2adc25665018aa1fe0e6bc666dac8fc2697ff9ba",
             "currentGasLimit": "0x016345785d8a0000",
@@ -2853,7 +2853,7 @@
         "pre": {
             "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b": {
                 "nonce": "0x00",
-                "balance": "0x0de0b6b3a7640000",
+                "balance": "0x3635c9adc5dea00000",
                 "code": "0x",
                 "storage": {}
             },
@@ -2889,7 +2889,7 @@
         "post": {
             "Prague": [
                 {
-                    "hash": "0x90ddb90575ce6a7a8602821f069c640e1bf51305700c8c8c18be75a1e84018b0",
+                    "hash": "0xb61e66337429ac2911db2a25fb08b5f068aa18bfcd8c7af5a6ca7b98f9223d56",
                     "logs": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
                     "txbytes": "0xf860800a831e8480940000000000000000000000000000000000001100808025a0b3afc79e7eb6744553c987dfa51e04eec7c6d695e6f730badd8150d43c6611fda056587ba537d9e4baf5e9fdb797ed4d7cf237c28c5d368b92f2f3681334585fec",
                     "indexes": {
@@ -2901,16 +2901,16 @@
             ]
         },
         "_info": {
-            "hash": "0x87b24c19b1ce2b69ffc73e8aeb9e497dd2b627a67ce417d45ae9bcf9f9fd8075",
+            "hash": "0x75f4ab6317f47f77c7c9cd5cba4dbd19eb5c3bec9ab71dede485238f0873243c",
             "comment": "`execution-spec-tests` generated test",
-            "filling-transition-tool": "Hyperledger Besu evm 24.7-develop-30c96c7",
+            "filling-transition-tool": "Hyperledger Besu evm 24.8-develop-f5d6e72",
             "description": "Test function documentation:\n\n    Much simpler than returndatacopy, no memory or boosted call.  Returner is called\n    and results are stored in storage slot, which is asserted for expected values.\n    The parameters offset and return data are configured to test boundary conditions.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692-prague@v1.0.7/tests/prague/eip7692_eof_v1/eip7069_extcall/test_returndataload.py#L184",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.0.8/tests/prague/eip7692_eof_v1/eip7069_extcall/test_returndataload.py#L179",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7069.md",
             "reference-spec-version": "1795943aeacc86131d5ab6bb3d65824b3b1d4cad"
         }
     },
-    "tests/prague/eip7692_eof_v1/eip7069_extcall/test_returndataload.py::test_returndataload_handling[fork_PragueEIP7692-state_test-offset_30-len_10-EXTSTATICCALL]": {
+    "tests/prague/eip7692_eof_v1/eip7069_extcall/test_returndataload.py::test_returndataload_handling[fork_PragueEIP7692-state_test-offset_30-len_10-opcode_EXTSTATICCALL]": {
         "env": {
             "currentCoinbase": "0x2adc25665018aa1fe0e6bc666dac8fc2697ff9ba",
             "currentGasLimit": "0x016345785d8a0000",
@@ -2924,7 +2924,7 @@
         "pre": {
             "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b": {
                 "nonce": "0x00",
-                "balance": "0x0de0b6b3a7640000",
+                "balance": "0x3635c9adc5dea00000",
                 "code": "0x",
                 "storage": {}
             },
@@ -2960,7 +2960,7 @@
         "post": {
             "Prague": [
                 {
-                    "hash": "0x590d74e07638034ad3b57810615fa66d87ed91556eb77704a781b18a0fb464ed",
+                    "hash": "0x6cf35a4fb6fe555c41ade0d5e4ccc8cbe0411537ab137da713c1c597adf23fd5",
                     "logs": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
                     "txbytes": "0xf860800a831e8480940000000000000000000000000000000000001100808025a0b3afc79e7eb6744553c987dfa51e04eec7c6d695e6f730badd8150d43c6611fda056587ba537d9e4baf5e9fdb797ed4d7cf237c28c5d368b92f2f3681334585fec",
                     "indexes": {
@@ -2972,16 +2972,16 @@
             ]
         },
         "_info": {
-            "hash": "0x7efb923a24d12cb6ab2a39fd1e611842db6d75fc57d715a0e78720fc1791930a",
+            "hash": "0x79c22bc4ea771919859c445cc3c78b3fb1dc47cb1a1706987fd5247008304310",
             "comment": "`execution-spec-tests` generated test",
-            "filling-transition-tool": "Hyperledger Besu evm 24.7-develop-30c96c7",
+            "filling-transition-tool": "Hyperledger Besu evm 24.8-develop-f5d6e72",
             "description": "Test function documentation:\n\n    Much simpler than returndatacopy, no memory or boosted call.  Returner is called\n    and results are stored in storage slot, which is asserted for expected values.\n    The parameters offset and return data are configured to test boundary conditions.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692-prague@v1.0.7/tests/prague/eip7692_eof_v1/eip7069_extcall/test_returndataload.py#L184",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.0.8/tests/prague/eip7692_eof_v1/eip7069_extcall/test_returndataload.py#L179",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7069.md",
             "reference-spec-version": "1795943aeacc86131d5ab6bb3d65824b3b1d4cad"
         }
     },
-    "tests/prague/eip7692_eof_v1/eip7069_extcall/test_returndataload.py::test_returndataload_handling[fork_PragueEIP7692-state_test-offset_30-len_20-EXTCALL]": {
+    "tests/prague/eip7692_eof_v1/eip7069_extcall/test_returndataload.py::test_returndataload_handling[fork_PragueEIP7692-state_test-offset_30-len_20-opcode_EXTCALL]": {
         "env": {
             "currentCoinbase": "0x2adc25665018aa1fe0e6bc666dac8fc2697ff9ba",
             "currentGasLimit": "0x016345785d8a0000",
@@ -2995,7 +2995,7 @@
         "pre": {
             "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b": {
                 "nonce": "0x00",
-                "balance": "0x0de0b6b3a7640000",
+                "balance": "0x3635c9adc5dea00000",
                 "code": "0x",
                 "storage": {}
             },
@@ -3031,7 +3031,7 @@
         "post": {
             "Prague": [
                 {
-                    "hash": "0x9b3f556500d9b89c47c5ea80f8ee959c9c0d6bfc2b75a36896598bce1ff53e79",
+                    "hash": "0xd2a4b28b2214d42181b56c6771bd74e0a156e1bc306a0b31b608dc5a6df48447",
                     "logs": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
                     "txbytes": "0xf860800a831e8480940000000000000000000000000000000000001100808025a0b3afc79e7eb6744553c987dfa51e04eec7c6d695e6f730badd8150d43c6611fda056587ba537d9e4baf5e9fdb797ed4d7cf237c28c5d368b92f2f3681334585fec",
                     "indexes": {
@@ -3043,16 +3043,16 @@
             ]
         },
         "_info": {
-            "hash": "0x985fc41fcd2ae7a96ff0210fd42ee7e8da140da642f3e3ac4e352acb090a2f96",
+            "hash": "0x67394b3405368847ff950bde01c8cbc2625f955012e17f17664381ad1ef15a44",
             "comment": "`execution-spec-tests` generated test",
-            "filling-transition-tool": "Hyperledger Besu evm 24.7-develop-30c96c7",
+            "filling-transition-tool": "Hyperledger Besu evm 24.8-develop-f5d6e72",
             "description": "Test function documentation:\n\n    Much simpler than returndatacopy, no memory or boosted call.  Returner is called\n    and results are stored in storage slot, which is asserted for expected values.\n    The parameters offset and return data are configured to test boundary conditions.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692-prague@v1.0.7/tests/prague/eip7692_eof_v1/eip7069_extcall/test_returndataload.py#L184",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.0.8/tests/prague/eip7692_eof_v1/eip7069_extcall/test_returndataload.py#L179",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7069.md",
             "reference-spec-version": "1795943aeacc86131d5ab6bb3d65824b3b1d4cad"
         }
     },
-    "tests/prague/eip7692_eof_v1/eip7069_extcall/test_returndataload.py::test_returndataload_handling[fork_PragueEIP7692-state_test-offset_30-len_20-EXTDELEGATECALL]": {
+    "tests/prague/eip7692_eof_v1/eip7069_extcall/test_returndataload.py::test_returndataload_handling[fork_PragueEIP7692-state_test-offset_30-len_20-opcode_EXTDELEGATECALL]": {
         "env": {
             "currentCoinbase": "0x2adc25665018aa1fe0e6bc666dac8fc2697ff9ba",
             "currentGasLimit": "0x016345785d8a0000",
@@ -3066,7 +3066,7 @@
         "pre": {
             "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b": {
                 "nonce": "0x00",
-                "balance": "0x0de0b6b3a7640000",
+                "balance": "0x3635c9adc5dea00000",
                 "code": "0x",
                 "storage": {}
             },
@@ -3102,7 +3102,7 @@
         "post": {
             "Prague": [
                 {
-                    "hash": "0xf3ffc344176a05a8b9131fad6b77062427503daf29e7da7e379c45e23be53b3f",
+                    "hash": "0x02328e00435e37a4ae83d7ddd8306be4fcebbe0987074cd282f95c62a39309d9",
                     "logs": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
                     "txbytes": "0xf860800a831e8480940000000000000000000000000000000000001100808025a0b3afc79e7eb6744553c987dfa51e04eec7c6d695e6f730badd8150d43c6611fda056587ba537d9e4baf5e9fdb797ed4d7cf237c28c5d368b92f2f3681334585fec",
                     "indexes": {
@@ -3114,16 +3114,16 @@
             ]
         },
         "_info": {
-            "hash": "0x2dc690876d15da0efc5e31a8c21807a73dd9bfe55187ffcc5e20386fbcbafbab",
+            "hash": "0x4c6c3bb9e9d9808c5b9619e9a9d8bb0ba9403dba86ece13fec8ebd63fddc589e",
             "comment": "`execution-spec-tests` generated test",
-            "filling-transition-tool": "Hyperledger Besu evm 24.7-develop-30c96c7",
+            "filling-transition-tool": "Hyperledger Besu evm 24.8-develop-f5d6e72",
             "description": "Test function documentation:\n\n    Much simpler than returndatacopy, no memory or boosted call.  Returner is called\n    and results are stored in storage slot, which is asserted for expected values.\n    The parameters offset and return data are configured to test boundary conditions.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692-prague@v1.0.7/tests/prague/eip7692_eof_v1/eip7069_extcall/test_returndataload.py#L184",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.0.8/tests/prague/eip7692_eof_v1/eip7069_extcall/test_returndataload.py#L179",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7069.md",
             "reference-spec-version": "1795943aeacc86131d5ab6bb3d65824b3b1d4cad"
         }
     },
-    "tests/prague/eip7692_eof_v1/eip7069_extcall/test_returndataload.py::test_returndataload_handling[fork_PragueEIP7692-state_test-offset_30-len_20-EXTSTATICCALL]": {
+    "tests/prague/eip7692_eof_v1/eip7069_extcall/test_returndataload.py::test_returndataload_handling[fork_PragueEIP7692-state_test-offset_30-len_20-opcode_EXTSTATICCALL]": {
         "env": {
             "currentCoinbase": "0x2adc25665018aa1fe0e6bc666dac8fc2697ff9ba",
             "currentGasLimit": "0x016345785d8a0000",
@@ -3137,7 +3137,7 @@
         "pre": {
             "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b": {
                 "nonce": "0x00",
-                "balance": "0x0de0b6b3a7640000",
+                "balance": "0x3635c9adc5dea00000",
                 "code": "0x",
                 "storage": {}
             },
@@ -3173,7 +3173,7 @@
         "post": {
             "Prague": [
                 {
-                    "hash": "0x0570206c19aac75f2ccc684833c86e8d7ef29cabd3f932e852442a5ff1d2d572",
+                    "hash": "0x589e8cf7dedc5b9b86ade7caaeb84b4853242a98cc812b24b39a6a74e1c14cbd",
                     "logs": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
                     "txbytes": "0xf860800a831e8480940000000000000000000000000000000000001100808025a0b3afc79e7eb6744553c987dfa51e04eec7c6d695e6f730badd8150d43c6611fda056587ba537d9e4baf5e9fdb797ed4d7cf237c28c5d368b92f2f3681334585fec",
                     "indexes": {
@@ -3185,16 +3185,16 @@
             ]
         },
         "_info": {
-            "hash": "0x50e244a99acb7f1f7e00a606b1ae74c20a870329e7a558ead6e47d1ba28f2c50",
+            "hash": "0x9a66c7203ad889573d536c9984529bd8d41fdcd28726892de998e40f9366db78",
             "comment": "`execution-spec-tests` generated test",
-            "filling-transition-tool": "Hyperledger Besu evm 24.7-develop-30c96c7",
+            "filling-transition-tool": "Hyperledger Besu evm 24.8-develop-f5d6e72",
             "description": "Test function documentation:\n\n    Much simpler than returndatacopy, no memory or boosted call.  Returner is called\n    and results are stored in storage slot, which is asserted for expected values.\n    The parameters offset and return data are configured to test boundary conditions.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692-prague@v1.0.7/tests/prague/eip7692_eof_v1/eip7069_extcall/test_returndataload.py#L184",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.0.8/tests/prague/eip7692_eof_v1/eip7069_extcall/test_returndataload.py#L179",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7069.md",
             "reference-spec-version": "1795943aeacc86131d5ab6bb3d65824b3b1d4cad"
         }
     },
-    "tests/prague/eip7692_eof_v1/eip7069_extcall/test_returndataload.py::test_returndataload_handling[fork_PragueEIP7692-state_test-offset_30-len_30-EXTCALL]": {
+    "tests/prague/eip7692_eof_v1/eip7069_extcall/test_returndataload.py::test_returndataload_handling[fork_PragueEIP7692-state_test-offset_30-len_30-opcode_EXTCALL]": {
         "env": {
             "currentCoinbase": "0x2adc25665018aa1fe0e6bc666dac8fc2697ff9ba",
             "currentGasLimit": "0x016345785d8a0000",
@@ -3208,7 +3208,7 @@
         "pre": {
             "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b": {
                 "nonce": "0x00",
-                "balance": "0x0de0b6b3a7640000",
+                "balance": "0x3635c9adc5dea00000",
                 "code": "0x",
                 "storage": {}
             },
@@ -3244,7 +3244,7 @@
         "post": {
             "Prague": [
                 {
-                    "hash": "0x5aefe05e986bc9443bf825b0520c726485afbd9fe70a329612d00da810a945bb",
+                    "hash": "0xb10078738e30edee173b3ddbf5dca8cdb39716c74c99399f64b06d1e731ad9c4",
                     "logs": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
                     "txbytes": "0xf860800a831e8480940000000000000000000000000000000000001100808025a0b3afc79e7eb6744553c987dfa51e04eec7c6d695e6f730badd8150d43c6611fda056587ba537d9e4baf5e9fdb797ed4d7cf237c28c5d368b92f2f3681334585fec",
                     "indexes": {
@@ -3256,16 +3256,16 @@
             ]
         },
         "_info": {
-            "hash": "0xdfedd1dd932b9335bb291a21bfd7d6e22ae487b7314f175597c66b8d862d5841",
+            "hash": "0x5bc8002299f031a112802282a7a93749b834e45eb28d128745564ecfc5c6c1b9",
             "comment": "`execution-spec-tests` generated test",
-            "filling-transition-tool": "Hyperledger Besu evm 24.7-develop-30c96c7",
+            "filling-transition-tool": "Hyperledger Besu evm 24.8-develop-f5d6e72",
             "description": "Test function documentation:\n\n    Much simpler than returndatacopy, no memory or boosted call.  Returner is called\n    and results are stored in storage slot, which is asserted for expected values.\n    The parameters offset and return data are configured to test boundary conditions.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692-prague@v1.0.7/tests/prague/eip7692_eof_v1/eip7069_extcall/test_returndataload.py#L184",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.0.8/tests/prague/eip7692_eof_v1/eip7069_extcall/test_returndataload.py#L179",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7069.md",
             "reference-spec-version": "1795943aeacc86131d5ab6bb3d65824b3b1d4cad"
         }
     },
-    "tests/prague/eip7692_eof_v1/eip7069_extcall/test_returndataload.py::test_returndataload_handling[fork_PragueEIP7692-state_test-offset_30-len_30-EXTDELEGATECALL]": {
+    "tests/prague/eip7692_eof_v1/eip7069_extcall/test_returndataload.py::test_returndataload_handling[fork_PragueEIP7692-state_test-offset_30-len_30-opcode_EXTDELEGATECALL]": {
         "env": {
             "currentCoinbase": "0x2adc25665018aa1fe0e6bc666dac8fc2697ff9ba",
             "currentGasLimit": "0x016345785d8a0000",
@@ -3279,7 +3279,7 @@
         "pre": {
             "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b": {
                 "nonce": "0x00",
-                "balance": "0x0de0b6b3a7640000",
+                "balance": "0x3635c9adc5dea00000",
                 "code": "0x",
                 "storage": {}
             },
@@ -3315,7 +3315,7 @@
         "post": {
             "Prague": [
                 {
-                    "hash": "0xe8bdc986d98ac12c6f45cddb977a5eeaceae2963fe95c67a4152bc313c1ff560",
+                    "hash": "0x522e833bd1c60df906e2be36d27f7f3d5f5d1a9c81f077514416e95d8aeae443",
                     "logs": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
                     "txbytes": "0xf860800a831e8480940000000000000000000000000000000000001100808025a0b3afc79e7eb6744553c987dfa51e04eec7c6d695e6f730badd8150d43c6611fda056587ba537d9e4baf5e9fdb797ed4d7cf237c28c5d368b92f2f3681334585fec",
                     "indexes": {
@@ -3327,16 +3327,16 @@
             ]
         },
         "_info": {
-            "hash": "0xcbd3c71d447143a518ef9784c2a0658ae5208f04deb5baf210e93fd7d40b1862",
+            "hash": "0x6d9eb19fb93573cefe4e71aa8e32db899f7ddf8e95ba9916b2ba9aa4e6d17ad4",
             "comment": "`execution-spec-tests` generated test",
-            "filling-transition-tool": "Hyperledger Besu evm 24.7-develop-30c96c7",
+            "filling-transition-tool": "Hyperledger Besu evm 24.8-develop-f5d6e72",
             "description": "Test function documentation:\n\n    Much simpler than returndatacopy, no memory or boosted call.  Returner is called\n    and results are stored in storage slot, which is asserted for expected values.\n    The parameters offset and return data are configured to test boundary conditions.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692-prague@v1.0.7/tests/prague/eip7692_eof_v1/eip7069_extcall/test_returndataload.py#L184",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.0.8/tests/prague/eip7692_eof_v1/eip7069_extcall/test_returndataload.py#L179",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7069.md",
             "reference-spec-version": "1795943aeacc86131d5ab6bb3d65824b3b1d4cad"
         }
     },
-    "tests/prague/eip7692_eof_v1/eip7069_extcall/test_returndataload.py::test_returndataload_handling[fork_PragueEIP7692-state_test-offset_30-len_30-EXTSTATICCALL]": {
+    "tests/prague/eip7692_eof_v1/eip7069_extcall/test_returndataload.py::test_returndataload_handling[fork_PragueEIP7692-state_test-offset_30-len_30-opcode_EXTSTATICCALL]": {
         "env": {
             "currentCoinbase": "0x2adc25665018aa1fe0e6bc666dac8fc2697ff9ba",
             "currentGasLimit": "0x016345785d8a0000",
@@ -3350,7 +3350,7 @@
         "pre": {
             "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b": {
                 "nonce": "0x00",
-                "balance": "0x0de0b6b3a7640000",
+                "balance": "0x3635c9adc5dea00000",
                 "code": "0x",
                 "storage": {}
             },
@@ -3386,7 +3386,7 @@
         "post": {
             "Prague": [
                 {
-                    "hash": "0xb0723d0a594664a6b6981667c7650e850a370389c1cfd85f33d6e7150b855bca",
+                    "hash": "0x93c864c56ff8031ec307e1beaf9dad1882c520cc9d31b76c0f7a79fa0baf282f",
                     "logs": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
                     "txbytes": "0xf860800a831e8480940000000000000000000000000000000000001100808025a0b3afc79e7eb6744553c987dfa51e04eec7c6d695e6f730badd8150d43c6611fda056587ba537d9e4baf5e9fdb797ed4d7cf237c28c5d368b92f2f3681334585fec",
                     "indexes": {
@@ -3398,11 +3398,11 @@
             ]
         },
         "_info": {
-            "hash": "0x85d000d1e0c63d2f642e66b369c3c3552cc5569a7afe2737c10e82d8de4eeaf9",
+            "hash": "0x43e6106a8e0637619921380b6935ec42e57ba07ce2cdea07ce0f34fb5ae1ed4f",
             "comment": "`execution-spec-tests` generated test",
-            "filling-transition-tool": "Hyperledger Besu evm 24.7-develop-30c96c7",
+            "filling-transition-tool": "Hyperledger Besu evm 24.8-develop-f5d6e72",
             "description": "Test function documentation:\n\n    Much simpler than returndatacopy, no memory or boosted call.  Returner is called\n    and results are stored in storage slot, which is asserted for expected values.\n    The parameters offset and return data are configured to test boundary conditions.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692-prague@v1.0.7/tests/prague/eip7692_eof_v1/eip7069_extcall/test_returndataload.py#L184",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.0.8/tests/prague/eip7692_eof_v1/eip7069_extcall/test_returndataload.py#L179",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7069.md",
             "reference-spec-version": "1795943aeacc86131d5ab6bb3d65824b3b1d4cad"
         }

@@ -1,5 +1,5 @@
 {
-    "tests/prague/eip7692_eof_v1/eip7069_extcall/test_returndataload.py::test_returndatacopy_oob[fork_PragueEIP7692-state_test-CallerIsLegacy]": {
+    "tests/prague/eip7692_eof_v1/eip7069_extcall/test_returndataload.py::test_returndatacopy_oob[fork_PragueEIP7692-state_test-opcode_CALL]": {
         "env": {
             "currentCoinbase": "0x2adc25665018aa1fe0e6bc666dac8fc2697ff9ba",
             "currentGasLimit": "0x016345785d8a0000",
@@ -13,7 +13,7 @@
         "pre": {
             "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b": {
                 "nonce": "0x00",
-                "balance": "0x0de0b6b3a7640000",
+                "balance": "0x3635c9adc5dea00000",
                 "code": "0x",
                 "storage": {}
             },
@@ -32,7 +32,7 @@
             "0x0000000000000000000000000000000000001200": {
                 "nonce": "0x01",
                 "balance": "0x00",
-                "code": "0x600060006000600060006110006207a120f16002553d6005556001600060003e600051600455600060006000600060006111006207a120f16003553d60065500",
+                "code": "0x600060006000600060006110005af16002553d6005556001600060003e600051600455600060006000600060006111005af16003553d60065500",
                 "storage": {
                     "0x02": "0x1984",
                     "0x04": "0x1984",
@@ -61,7 +61,7 @@
         "post": {
             "Prague": [
                 {
-                    "hash": "0xac7e65e701ddd5134d08a660611fec0c10460dbcdb83b1509f35423b84d2c057",
+                    "hash": "0xda61aaa1018100dbcc6d4efca1ad1fb0747f17089ea66fd9eb51d873f189501d",
                     "logs": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
                     "txbytes": "0xf860800a831e8480940000000000000000000000000000000000001200808025a0579270f05e0fb88612d80ef3697e95436cfc7138ed2dff05f1ef8ef23d63697ba012375b06fa1aab67d5d80cb235011a8899a981bef190290b2cdbff5b50d52f34",
                     "indexes": {
@@ -73,16 +73,16 @@
             ]
         },
         "_info": {
-            "hash": "0x2af1c09c2e045108c90538e26acc1271c2bd121b15d15aba7ac7e094bf41e1fd",
+            "hash": "0x93b556382d29b51381039497c0bbff1f7fe578cf11e820eb9699f0e65306627a",
             "comment": "`execution-spec-tests` generated test",
-            "filling-transition-tool": "Hyperledger Besu evm 24.7-develop-30c96c7",
+            "filling-transition-tool": "Hyperledger Besu evm 24.8-develop-f5d6e72",
             "description": "Test function documentation:\n\n    Extends the RETURNDATACOPY test for correct out-of-bounds behavior, by checking if the\n    caller frame's context being EOF or legacy doesn't impact the execution logic of the\n    RETURNDATACOPY instance under test.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692-prague@v1.0.7/tests/prague/eip7692_eof_v1/eip7069_extcall/test_returndataload.py#L277",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.0.8/tests/prague/eip7692_eof_v1/eip7069_extcall/test_returndataload.py#L270",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7069.md",
             "reference-spec-version": "1795943aeacc86131d5ab6bb3d65824b3b1d4cad"
         }
     },
-    "tests/prague/eip7692_eof_v1/eip7069_extcall/test_returndataload.py::test_returndatacopy_oob[fork_PragueEIP7692-state_test-CallerIsEOF]": {
+    "tests/prague/eip7692_eof_v1/eip7069_extcall/test_returndataload.py::test_returndatacopy_oob[fork_PragueEIP7692-state_test-opcode_EXTCALL]": {
         "env": {
             "currentCoinbase": "0x2adc25665018aa1fe0e6bc666dac8fc2697ff9ba",
             "currentGasLimit": "0x016345785d8a0000",
@@ -96,7 +96,7 @@
         "pre": {
             "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b": {
                 "nonce": "0x00",
-                "balance": "0x0de0b6b3a7640000",
+                "balance": "0x3635c9adc5dea00000",
                 "code": "0x",
                 "storage": {}
             },
@@ -138,7 +138,7 @@
         "post": {
             "Prague": [
                 {
-                    "hash": "0x82a392e8db0fe1851edd3d4730e81cd7a8d6d99cb92859500cfefdb5dcef42db",
+                    "hash": "0x3cc197ffe28e91b622fc38e5612059116f8337bd253f3d9ce84705f3bab23b04",
                     "logs": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
                     "txbytes": "0xf860800a831e8480940000000000000000000000000000000000001200808025a0579270f05e0fb88612d80ef3697e95436cfc7138ed2dff05f1ef8ef23d63697ba012375b06fa1aab67d5d80cb235011a8899a981bef190290b2cdbff5b50d52f34",
                     "indexes": {
@@ -150,11 +150,11 @@
             ]
         },
         "_info": {
-            "hash": "0x111d10472e229d54778b4861d7916e6a35e5c35096f7369b98c02d27d7f87a15",
+            "hash": "0x5daa4589facdca77d4011fb3fa062c5a28a4023e4256d18e837e06f8a679d1a1",
             "comment": "`execution-spec-tests` generated test",
-            "filling-transition-tool": "Hyperledger Besu evm 24.7-develop-30c96c7",
+            "filling-transition-tool": "Hyperledger Besu evm 24.8-develop-f5d6e72",
             "description": "Test function documentation:\n\n    Extends the RETURNDATACOPY test for correct out-of-bounds behavior, by checking if the\n    caller frame's context being EOF or legacy doesn't impact the execution logic of the\n    RETURNDATACOPY instance under test.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692-prague@v1.0.7/tests/prague/eip7692_eof_v1/eip7069_extcall/test_returndataload.py#L277",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.0.8/tests/prague/eip7692_eof_v1/eip7069_extcall/test_returndataload.py#L270",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7069.md",
             "reference-spec-version": "1795943aeacc86131d5ab6bb3d65824b3b1d4cad"
         }

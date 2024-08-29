@@ -13,7 +13,7 @@
         "pre": {
             "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b": {
                 "nonce": "0x00",
-                "balance": "0x0de0b6b3a7640000",
+                "balance": "0x3635c9adc5dea00000",
                 "code": "0x",
                 "storage": {}
             },
@@ -51,7 +51,7 @@
         "post": {
             "Prague": [
                 {
-                    "hash": "0x6f544065fc7dedfd84f013bc06084c27a2615a4523037c755d6e3e198ca617c1",
+                    "hash": "0x6242f843620544c039fa8d7f8b65d6247bcfe5f778909657189b56991fcdaa8f",
                     "logs": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
                     "txbytes": "0xf860800a831e8480940000000000000000000000000000000000001100808025a0b3afc79e7eb6744553c987dfa51e04eec7c6d695e6f730badd8150d43c6611fda056587ba537d9e4baf5e9fdb797ed4d7cf237c28c5d368b92f2f3681334585fec",
                     "indexes": {
@@ -63,11 +63,11 @@
             ]
         },
         "_info": {
-            "hash": "0xfd647572ea98586a0a2363fe807b89f8a537943d10f9fddc989abe632892f483",
+            "hash": "0x0ad811e839a1b5e3b64acc3e492d2d85f4680ae3eb31c5faa235c8ef0d0e5514",
             "comment": "`execution-spec-tests` generated test",
-            "filling-transition-tool": "Hyperledger Besu evm 24.7-develop-30c96c7",
+            "filling-transition-tool": "Hyperledger Besu evm 24.8-develop-f5d6e72",
             "description": "Test function documentation:\n\n    Tests call data into EXT*CALL including multiple offset conditions.\n\n    Caller pushes data into memory, then calls the target.  Target writes 64 bytes of call data\n    to storage and a success byte.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692-prague@v1.0.7/tests/prague/eip7692_eof_v1/eip7069_extcall/test_calldata.py#L128",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.0.8/tests/prague/eip7692_eof_v1/eip7069_extcall/test_calldata.py#L128",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7069.md",
             "reference-spec-version": "1795943aeacc86131d5ab6bb3d65824b3b1d4cad"
         }
@@ -86,7 +86,7 @@
         "pre": {
             "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b": {
                 "nonce": "0x00",
-                "balance": "0x0de0b6b3a7640000",
+                "balance": "0x3635c9adc5dea00000",
                 "code": "0x",
                 "storage": {}
             },
@@ -124,7 +124,7 @@
         "post": {
             "Prague": [
                 {
-                    "hash": "0x40b46d9e0720fc56c7ded5acd5802fee74457d6531c8739da0d36735ffab3666",
+                    "hash": "0xb294a687eec02f76edfc0418c2dfe2c03434a52fe99cd5bd74313a8393c0c2fd",
                     "logs": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
                     "txbytes": "0xf860800a831e8480940000000000000000000000000000000000001100808025a0b3afc79e7eb6744553c987dfa51e04eec7c6d695e6f730badd8150d43c6611fda056587ba537d9e4baf5e9fdb797ed4d7cf237c28c5d368b92f2f3681334585fec",
                     "indexes": {
@@ -136,11 +136,11 @@
             ]
         },
         "_info": {
-            "hash": "0xbb6f40c2a697c9b14cbe9a83034150a32a5f3ccf2f6f0674972195c81eeb3a65",
+            "hash": "0xde8b4788e88328c251a81b96c9991d952a4c4f61d398f2e96b235a95e80bb892",
             "comment": "`execution-spec-tests` generated test",
-            "filling-transition-tool": "Hyperledger Besu evm 24.7-develop-30c96c7",
+            "filling-transition-tool": "Hyperledger Besu evm 24.8-develop-f5d6e72",
             "description": "Test function documentation:\n\n    Tests call data into EXT*CALL including multiple offset conditions.\n\n    Caller pushes data into memory, then calls the target.  Target writes 64 bytes of call data\n    to storage and a success byte.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692-prague@v1.0.7/tests/prague/eip7692_eof_v1/eip7069_extcall/test_calldata.py#L128",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.0.8/tests/prague/eip7692_eof_v1/eip7069_extcall/test_calldata.py#L128",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7069.md",
             "reference-spec-version": "1795943aeacc86131d5ab6bb3d65824b3b1d4cad"
         }
@@ -159,7 +159,7 @@
         "pre": {
             "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b": {
                 "nonce": "0x00",
-                "balance": "0x0de0b6b3a7640000",
+                "balance": "0x3635c9adc5dea00000",
                 "code": "0x",
                 "storage": {}
             },
@@ -197,7 +197,7 @@
         "post": {
             "Prague": [
                 {
-                    "hash": "0x4176927cd46408e339bf208d4d6bc910aadff4cdf69ed882e4a1315655f0e3be",
+                    "hash": "0x497dc8096f776fbd873eff837819f866dbc1939028a59906ba5b641476eda1f6",
                     "logs": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
                     "txbytes": "0xf860800a831e8480940000000000000000000000000000000000001100808025a0b3afc79e7eb6744553c987dfa51e04eec7c6d695e6f730badd8150d43c6611fda056587ba537d9e4baf5e9fdb797ed4d7cf237c28c5d368b92f2f3681334585fec",
                     "indexes": {
@@ -209,11 +209,11 @@
             ]
         },
         "_info": {
-            "hash": "0xf0c46fa775e00fb5036da5884580d36b54197fe6cd59c7978e78785975b7d41e",
+            "hash": "0x94683ceee12c2eb0c7a915dc4a28c0f1b65b97ad5a0330f9857e9dfcbea27ef3",
             "comment": "`execution-spec-tests` generated test",
-            "filling-transition-tool": "Hyperledger Besu evm 24.7-develop-30c96c7",
+            "filling-transition-tool": "Hyperledger Besu evm 24.8-develop-f5d6e72",
             "description": "Test function documentation:\n\n    Tests call data into EXT*CALL including multiple offset conditions.\n\n    Caller pushes data into memory, then calls the target.  Target writes 64 bytes of call data\n    to storage and a success byte.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692-prague@v1.0.7/tests/prague/eip7692_eof_v1/eip7069_extcall/test_calldata.py#L128",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.0.8/tests/prague/eip7692_eof_v1/eip7069_extcall/test_calldata.py#L128",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7069.md",
             "reference-spec-version": "1795943aeacc86131d5ab6bb3d65824b3b1d4cad"
         }
@@ -232,7 +232,7 @@
         "pre": {
             "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b": {
                 "nonce": "0x00",
-                "balance": "0x0de0b6b3a7640000",
+                "balance": "0x3635c9adc5dea00000",
                 "code": "0x",
                 "storage": {}
             },
@@ -270,7 +270,7 @@
         "post": {
             "Prague": [
                 {
-                    "hash": "0x79cd19d91a458b1c82d27e92cf45756331b21e4e3a8cbfcf786df93c3e1f9d71",
+                    "hash": "0x8e717ea7ca351cf22f390d3d9a36545847243054a8cad6dce097967d1b8c1ede",
                     "logs": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
                     "txbytes": "0xf860800a831e8480940000000000000000000000000000000000001100808025a0b3afc79e7eb6744553c987dfa51e04eec7c6d695e6f730badd8150d43c6611fda056587ba537d9e4baf5e9fdb797ed4d7cf237c28c5d368b92f2f3681334585fec",
                     "indexes": {
@@ -282,11 +282,11 @@
             ]
         },
         "_info": {
-            "hash": "0xad71f150f1d978c55c46da8fdef560cec6449b97be88733086b734995bf76f09",
+            "hash": "0x8f3bcd256756ece8872356bc31fa0d6a434705e3b56c8d612ce59544b71b554d",
             "comment": "`execution-spec-tests` generated test",
-            "filling-transition-tool": "Hyperledger Besu evm 24.7-develop-30c96c7",
+            "filling-transition-tool": "Hyperledger Besu evm 24.8-develop-f5d6e72",
             "description": "Test function documentation:\n\n    Tests call data into EXT*CALL including multiple offset conditions.\n\n    Caller pushes data into memory, then calls the target.  Target writes 64 bytes of call data\n    to storage and a success byte.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692-prague@v1.0.7/tests/prague/eip7692_eof_v1/eip7069_extcall/test_calldata.py#L128",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.0.8/tests/prague/eip7692_eof_v1/eip7069_extcall/test_calldata.py#L128",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7069.md",
             "reference-spec-version": "1795943aeacc86131d5ab6bb3d65824b3b1d4cad"
         }
@@ -305,7 +305,7 @@
         "pre": {
             "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b": {
                 "nonce": "0x00",
-                "balance": "0x0de0b6b3a7640000",
+                "balance": "0x3635c9adc5dea00000",
                 "code": "0x",
                 "storage": {}
             },
@@ -343,7 +343,7 @@
         "post": {
             "Prague": [
                 {
-                    "hash": "0x82b5046f9e6b9462281bacbbbf7b2cc2d8629d7e3fbb24b901ec1ba628daf6cc",
+                    "hash": "0xf82b55e949a84a4b96ca2a797c0ae38c01498c48cef8bafc3679dfe8d3032d0f",
                     "logs": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
                     "txbytes": "0xf860800a831e8480940000000000000000000000000000000000001100808025a0b3afc79e7eb6744553c987dfa51e04eec7c6d695e6f730badd8150d43c6611fda056587ba537d9e4baf5e9fdb797ed4d7cf237c28c5d368b92f2f3681334585fec",
                     "indexes": {
@@ -355,11 +355,11 @@
             ]
         },
         "_info": {
-            "hash": "0x45984941539f9c1a9011a056b5dada93fba032ce17b6d53c218b68129a606b55",
+            "hash": "0x3dec534e8f9af1665e6dab642fed08789ea7ff8419c7787b60e46013ee78f959",
             "comment": "`execution-spec-tests` generated test",
-            "filling-transition-tool": "Hyperledger Besu evm 24.7-develop-30c96c7",
+            "filling-transition-tool": "Hyperledger Besu evm 24.8-develop-f5d6e72",
             "description": "Test function documentation:\n\n    Tests call data into EXT*CALL including multiple offset conditions.\n\n    Caller pushes data into memory, then calls the target.  Target writes 64 bytes of call data\n    to storage and a success byte.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692-prague@v1.0.7/tests/prague/eip7692_eof_v1/eip7069_extcall/test_calldata.py#L128",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.0.8/tests/prague/eip7692_eof_v1/eip7069_extcall/test_calldata.py#L128",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7069.md",
             "reference-spec-version": "1795943aeacc86131d5ab6bb3d65824b3b1d4cad"
         }
@@ -378,7 +378,7 @@
         "pre": {
             "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b": {
                 "nonce": "0x00",
-                "balance": "0x0de0b6b3a7640000",
+                "balance": "0x3635c9adc5dea00000",
                 "code": "0x",
                 "storage": {}
             },
@@ -416,7 +416,7 @@
         "post": {
             "Prague": [
                 {
-                    "hash": "0x0b3791897c34a2b93e7bac8ed9d71856fe39aae62369c1458cf08fcba8278ee0",
+                    "hash": "0xee4ee280d918ac0ee1099c15c65a8499342fa27be4f4bbf5638cd9158fd1dfe9",
                     "logs": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
                     "txbytes": "0xf860800a831e8480940000000000000000000000000000000000001100808025a0b3afc79e7eb6744553c987dfa51e04eec7c6d695e6f730badd8150d43c6611fda056587ba537d9e4baf5e9fdb797ed4d7cf237c28c5d368b92f2f3681334585fec",
                     "indexes": {
@@ -428,11 +428,11 @@
             ]
         },
         "_info": {
-            "hash": "0x619c553ae130d52920be51ad35141435b067de096fb605a6e9556c75121146dc",
+            "hash": "0x48946409ce498c7e0762f14a0dee268c3ff1ea97420529618403b6584ec93770",
             "comment": "`execution-spec-tests` generated test",
-            "filling-transition-tool": "Hyperledger Besu evm 24.7-develop-30c96c7",
+            "filling-transition-tool": "Hyperledger Besu evm 24.8-develop-f5d6e72",
             "description": "Test function documentation:\n\n    Tests call data into EXT*CALL including multiple offset conditions.\n\n    Caller pushes data into memory, then calls the target.  Target writes 64 bytes of call data\n    to storage and a success byte.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692-prague@v1.0.7/tests/prague/eip7692_eof_v1/eip7069_extcall/test_calldata.py#L128",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.0.8/tests/prague/eip7692_eof_v1/eip7069_extcall/test_calldata.py#L128",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7069.md",
             "reference-spec-version": "1795943aeacc86131d5ab6bb3d65824b3b1d4cad"
         }
@@ -451,7 +451,7 @@
         "pre": {
             "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b": {
                 "nonce": "0x00",
-                "balance": "0x0de0b6b3a7640000",
+                "balance": "0x3635c9adc5dea00000",
                 "code": "0x",
                 "storage": {}
             },
@@ -489,7 +489,7 @@
         "post": {
             "Prague": [
                 {
-                    "hash": "0x9c0eaa966f492f1d766c5a3f22ec50d3902bb214a5e86dbaa4ae4b941b82a385",
+                    "hash": "0x7dfdf3073b25f5dbd7ffba59acbb0414fc8f05e2c2bd7e74380fcb340f2dfed3",
                     "logs": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
                     "txbytes": "0xf860800a831e8480940000000000000000000000000000000000001100808025a0b3afc79e7eb6744553c987dfa51e04eec7c6d695e6f730badd8150d43c6611fda056587ba537d9e4baf5e9fdb797ed4d7cf237c28c5d368b92f2f3681334585fec",
                     "indexes": {
@@ -501,11 +501,11 @@
             ]
         },
         "_info": {
-            "hash": "0xa7eabb23ff4af2c24938fbd801645567c3e8d8faa500ab3d06733620fb6d7620",
+            "hash": "0xc486cf8a543e0d0b987a3bd98027e92bdf387e47b97d8b763f5b2688a0442f72",
             "comment": "`execution-spec-tests` generated test",
-            "filling-transition-tool": "Hyperledger Besu evm 24.7-develop-30c96c7",
+            "filling-transition-tool": "Hyperledger Besu evm 24.8-develop-f5d6e72",
             "description": "Test function documentation:\n\n    Tests call data into EXT*CALL including multiple offset conditions.\n\n    Caller pushes data into memory, then calls the target.  Target writes 64 bytes of call data\n    to storage and a success byte.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692-prague@v1.0.7/tests/prague/eip7692_eof_v1/eip7069_extcall/test_calldata.py#L128",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.0.8/tests/prague/eip7692_eof_v1/eip7069_extcall/test_calldata.py#L128",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7069.md",
             "reference-spec-version": "1795943aeacc86131d5ab6bb3d65824b3b1d4cad"
         }
@@ -524,7 +524,7 @@
         "pre": {
             "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b": {
                 "nonce": "0x00",
-                "balance": "0x0de0b6b3a7640000",
+                "balance": "0x3635c9adc5dea00000",
                 "code": "0x",
                 "storage": {}
             },
@@ -562,7 +562,7 @@
         "post": {
             "Prague": [
                 {
-                    "hash": "0x731d9250a608062393e0a4b77f10c1d0a9df45eba4c6ba31c067b7dc9a09486c",
+                    "hash": "0xcb15c5164d5ba5a02d5a3a8ac3588f3a567722115f92808fe5de404cfa5be4a3",
                     "logs": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
                     "txbytes": "0xf860800a831e8480940000000000000000000000000000000000001100808025a0b3afc79e7eb6744553c987dfa51e04eec7c6d695e6f730badd8150d43c6611fda056587ba537d9e4baf5e9fdb797ed4d7cf237c28c5d368b92f2f3681334585fec",
                     "indexes": {
@@ -574,11 +574,11 @@
             ]
         },
         "_info": {
-            "hash": "0x0436461496de8dbaf4c1d545f41dd0ff45191b65570272a2e268d8f7bc058ba9",
+            "hash": "0x46139965fa0b77b48f5c510e527aca120984a337196872af0b1b600978bbaac0",
             "comment": "`execution-spec-tests` generated test",
-            "filling-transition-tool": "Hyperledger Besu evm 24.7-develop-30c96c7",
+            "filling-transition-tool": "Hyperledger Besu evm 24.8-develop-f5d6e72",
             "description": "Test function documentation:\n\n    Tests call data into EXT*CALL including multiple offset conditions.\n\n    Caller pushes data into memory, then calls the target.  Target writes 64 bytes of call data\n    to storage and a success byte.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692-prague@v1.0.7/tests/prague/eip7692_eof_v1/eip7069_extcall/test_calldata.py#L128",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.0.8/tests/prague/eip7692_eof_v1/eip7069_extcall/test_calldata.py#L128",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7069.md",
             "reference-spec-version": "1795943aeacc86131d5ab6bb3d65824b3b1d4cad"
         }
@@ -597,7 +597,7 @@
         "pre": {
             "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b": {
                 "nonce": "0x00",
-                "balance": "0x0de0b6b3a7640000",
+                "balance": "0x3635c9adc5dea00000",
                 "code": "0x",
                 "storage": {}
             },
@@ -635,7 +635,7 @@
         "post": {
             "Prague": [
                 {
-                    "hash": "0x5c41df91ca620e25e2f82b94c782bc2e09afcd84c28ce1cb081bf15fafd31c9a",
+                    "hash": "0xe1ba48b7bc3386c26f30489c31cf0e949a94f273e23a549c63b3a01ba7ac61c8",
                     "logs": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
                     "txbytes": "0xf860800a831e8480940000000000000000000000000000000000001100808025a0b3afc79e7eb6744553c987dfa51e04eec7c6d695e6f730badd8150d43c6611fda056587ba537d9e4baf5e9fdb797ed4d7cf237c28c5d368b92f2f3681334585fec",
                     "indexes": {
@@ -647,11 +647,11 @@
             ]
         },
         "_info": {
-            "hash": "0x12a00abb20436d0021f165237d29f2188584967bcae903b952f72a54dcdb477a",
+            "hash": "0xebdd4a27518eaf3657a3bc6112558ea760daec14d76a4478d33477cba64232ba",
             "comment": "`execution-spec-tests` generated test",
-            "filling-transition-tool": "Hyperledger Besu evm 24.7-develop-30c96c7",
+            "filling-transition-tool": "Hyperledger Besu evm 24.8-develop-f5d6e72",
             "description": "Test function documentation:\n\n    Tests call data into EXT*CALL including multiple offset conditions.\n\n    Caller pushes data into memory, then calls the target.  Target writes 64 bytes of call data\n    to storage and a success byte.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692-prague@v1.0.7/tests/prague/eip7692_eof_v1/eip7069_extcall/test_calldata.py#L128",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.0.8/tests/prague/eip7692_eof_v1/eip7069_extcall/test_calldata.py#L128",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7069.md",
             "reference-spec-version": "1795943aeacc86131d5ab6bb3d65824b3b1d4cad"
         }
@@ -670,7 +670,7 @@
         "pre": {
             "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b": {
                 "nonce": "0x00",
-                "balance": "0x0de0b6b3a7640000",
+                "balance": "0x3635c9adc5dea00000",
                 "code": "0x",
                 "storage": {}
             },
@@ -708,7 +708,7 @@
         "post": {
             "Prague": [
                 {
-                    "hash": "0xa708c8d2176aba97f39aff52c4da7162c5ff885985e7f296496957362a9694ab",
+                    "hash": "0xde7505e8536e385f6b20055443015ca96ace9d709ea98346b1e6608359efea77",
                     "logs": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
                     "txbytes": "0xf860800a831e8480940000000000000000000000000000000000001100808025a0b3afc79e7eb6744553c987dfa51e04eec7c6d695e6f730badd8150d43c6611fda056587ba537d9e4baf5e9fdb797ed4d7cf237c28c5d368b92f2f3681334585fec",
                     "indexes": {
@@ -720,11 +720,11 @@
             ]
         },
         "_info": {
-            "hash": "0x15d2410b9f091b047048357266347353be73742ff190b9b048cb0ad1f705b088",
+            "hash": "0xbc074bdd3fa315e110d2a175f56bc98a2692f9958f3f7da347b4261b3b3898af",
             "comment": "`execution-spec-tests` generated test",
-            "filling-transition-tool": "Hyperledger Besu evm 24.7-develop-30c96c7",
+            "filling-transition-tool": "Hyperledger Besu evm 24.8-develop-f5d6e72",
             "description": "Test function documentation:\n\n    Tests call data into EXT*CALL including multiple offset conditions.\n\n    Caller pushes data into memory, then calls the target.  Target writes 64 bytes of call data\n    to storage and a success byte.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692-prague@v1.0.7/tests/prague/eip7692_eof_v1/eip7069_extcall/test_calldata.py#L128",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.0.8/tests/prague/eip7692_eof_v1/eip7069_extcall/test_calldata.py#L128",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7069.md",
             "reference-spec-version": "1795943aeacc86131d5ab6bb3d65824b3b1d4cad"
         }
@@ -743,7 +743,7 @@
         "pre": {
             "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b": {
                 "nonce": "0x00",
-                "balance": "0x0de0b6b3a7640000",
+                "balance": "0x3635c9adc5dea00000",
                 "code": "0x",
                 "storage": {}
             },
@@ -781,7 +781,7 @@
         "post": {
             "Prague": [
                 {
-                    "hash": "0x0c8206f7c59ad2560eebdd2b54e1abb655ae8eef6346509d075ee5eda2430764",
+                    "hash": "0xa81b5d1f25b1bc4eeed51ed54630e950cac2fcb27fc1711d870cfe2a25bfcd55",
                     "logs": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
                     "txbytes": "0xf860800a831e8480940000000000000000000000000000000000001100808025a0b3afc79e7eb6744553c987dfa51e04eec7c6d695e6f730badd8150d43c6611fda056587ba537d9e4baf5e9fdb797ed4d7cf237c28c5d368b92f2f3681334585fec",
                     "indexes": {
@@ -793,11 +793,11 @@
             ]
         },
         "_info": {
-            "hash": "0x50c3eb1f27c5ba852906e488df7dc5bf7e51bdae5cd2cd1725071a40bd06ed1e",
+            "hash": "0x67ff78c1245fa91977b93e669ceb011578778946007aa3cd7d4ddedad97e6dfd",
             "comment": "`execution-spec-tests` generated test",
-            "filling-transition-tool": "Hyperledger Besu evm 24.7-develop-30c96c7",
+            "filling-transition-tool": "Hyperledger Besu evm 24.8-develop-f5d6e72",
             "description": "Test function documentation:\n\n    Tests call data into EXT*CALL including multiple offset conditions.\n\n    Caller pushes data into memory, then calls the target.  Target writes 64 bytes of call data\n    to storage and a success byte.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692-prague@v1.0.7/tests/prague/eip7692_eof_v1/eip7069_extcall/test_calldata.py#L128",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.0.8/tests/prague/eip7692_eof_v1/eip7069_extcall/test_calldata.py#L128",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7069.md",
             "reference-spec-version": "1795943aeacc86131d5ab6bb3d65824b3b1d4cad"
         }
@@ -816,7 +816,7 @@
         "pre": {
             "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b": {
                 "nonce": "0x00",
-                "balance": "0x0de0b6b3a7640000",
+                "balance": "0x3635c9adc5dea00000",
                 "code": "0x",
                 "storage": {}
             },
@@ -854,7 +854,7 @@
         "post": {
             "Prague": [
                 {
-                    "hash": "0x1a35b09452174e16e1fe457068cffd37687945b00de6c5fbe94bb6962b3670cf",
+                    "hash": "0x2d9bb6e7222ef9a08d22a69cfa35cbe14158bd490e09561caf38f46b690b86d4",
                     "logs": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
                     "txbytes": "0xf860800a831e8480940000000000000000000000000000000000001100808025a0b3afc79e7eb6744553c987dfa51e04eec7c6d695e6f730badd8150d43c6611fda056587ba537d9e4baf5e9fdb797ed4d7cf237c28c5d368b92f2f3681334585fec",
                     "indexes": {
@@ -866,11 +866,11 @@
             ]
         },
         "_info": {
-            "hash": "0xcf56ba2a6965f2660b7d53b1163e576184d6ea82c54624255196b8551f30dde5",
+            "hash": "0x92202441fcb90d8b4bb59372fa442f5669f976fa246a1ed082a0b230f2ad18af",
             "comment": "`execution-spec-tests` generated test",
-            "filling-transition-tool": "Hyperledger Besu evm 24.7-develop-30c96c7",
+            "filling-transition-tool": "Hyperledger Besu evm 24.8-develop-f5d6e72",
             "description": "Test function documentation:\n\n    Tests call data into EXT*CALL including multiple offset conditions.\n\n    Caller pushes data into memory, then calls the target.  Target writes 64 bytes of call data\n    to storage and a success byte.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692-prague@v1.0.7/tests/prague/eip7692_eof_v1/eip7069_extcall/test_calldata.py#L128",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.0.8/tests/prague/eip7692_eof_v1/eip7069_extcall/test_calldata.py#L128",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7069.md",
             "reference-spec-version": "1795943aeacc86131d5ab6bb3d65824b3b1d4cad"
         }
@@ -889,7 +889,7 @@
         "pre": {
             "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b": {
                 "nonce": "0x00",
-                "balance": "0x0de0b6b3a7640000",
+                "balance": "0x3635c9adc5dea00000",
                 "code": "0x",
                 "storage": {}
             },
@@ -927,7 +927,7 @@
         "post": {
             "Prague": [
                 {
-                    "hash": "0x2b15485b280313eb25c14a686e4a6612786b1c202997d0ad09ee2b26777fdb5f",
+                    "hash": "0x83bcabd7c9fb1574434ccb21a2aed7dc0512c018f9d44c69cbfd72912bfb3e88",
                     "logs": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
                     "txbytes": "0xf860800a831e8480940000000000000000000000000000000000001100808025a0b3afc79e7eb6744553c987dfa51e04eec7c6d695e6f730badd8150d43c6611fda056587ba537d9e4baf5e9fdb797ed4d7cf237c28c5d368b92f2f3681334585fec",
                     "indexes": {
@@ -939,11 +939,11 @@
             ]
         },
         "_info": {
-            "hash": "0xc2ad6cd58154e0be29f77d7d43a27f412663d58896d4d1eb4bd7689a9050c737",
+            "hash": "0x24c03e05769f0ea803744ea27fe7ba131e71af8ec669252febc19f5b0271aa63",
             "comment": "`execution-spec-tests` generated test",
-            "filling-transition-tool": "Hyperledger Besu evm 24.7-develop-30c96c7",
+            "filling-transition-tool": "Hyperledger Besu evm 24.8-develop-f5d6e72",
             "description": "Test function documentation:\n\n    Tests call data into EXT*CALL including multiple offset conditions.\n\n    Caller pushes data into memory, then calls the target.  Target writes 64 bytes of call data\n    to storage and a success byte.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692-prague@v1.0.7/tests/prague/eip7692_eof_v1/eip7069_extcall/test_calldata.py#L128",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.0.8/tests/prague/eip7692_eof_v1/eip7069_extcall/test_calldata.py#L128",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7069.md",
             "reference-spec-version": "1795943aeacc86131d5ab6bb3d65824b3b1d4cad"
         }
@@ -962,7 +962,7 @@
         "pre": {
             "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b": {
                 "nonce": "0x00",
-                "balance": "0x0de0b6b3a7640000",
+                "balance": "0x3635c9adc5dea00000",
                 "code": "0x",
                 "storage": {}
             },
@@ -1000,7 +1000,7 @@
         "post": {
             "Prague": [
                 {
-                    "hash": "0xdf9be904f28d3a2f197021c94211c64822e5c9106d17fb12342b01c48047c468",
+                    "hash": "0xc3a0ce2c60e3ac32d6f51e7333b0181e0da4b223263c48b8247efb22329a9134",
                     "logs": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
                     "txbytes": "0xf860800a831e8480940000000000000000000000000000000000001100808025a0b3afc79e7eb6744553c987dfa51e04eec7c6d695e6f730badd8150d43c6611fda056587ba537d9e4baf5e9fdb797ed4d7cf237c28c5d368b92f2f3681334585fec",
                     "indexes": {
@@ -1012,11 +1012,11 @@
             ]
         },
         "_info": {
-            "hash": "0xa51674c9d2400b119ccea9fb970a5dfa079002f184b9f0a570ac02c212f3047a",
+            "hash": "0x3193ea2f2253c652bd9e3c481abf5975a453ffe585f83dfe1df2391a0866e57f",
             "comment": "`execution-spec-tests` generated test",
-            "filling-transition-tool": "Hyperledger Besu evm 24.7-develop-30c96c7",
+            "filling-transition-tool": "Hyperledger Besu evm 24.8-develop-f5d6e72",
             "description": "Test function documentation:\n\n    Tests call data into EXT*CALL including multiple offset conditions.\n\n    Caller pushes data into memory, then calls the target.  Target writes 64 bytes of call data\n    to storage and a success byte.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692-prague@v1.0.7/tests/prague/eip7692_eof_v1/eip7069_extcall/test_calldata.py#L128",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.0.8/tests/prague/eip7692_eof_v1/eip7069_extcall/test_calldata.py#L128",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7069.md",
             "reference-spec-version": "1795943aeacc86131d5ab6bb3d65824b3b1d4cad"
         }
@@ -1035,7 +1035,7 @@
         "pre": {
             "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b": {
                 "nonce": "0x00",
-                "balance": "0x0de0b6b3a7640000",
+                "balance": "0x3635c9adc5dea00000",
                 "code": "0x",
                 "storage": {}
             },
@@ -1073,7 +1073,7 @@
         "post": {
             "Prague": [
                 {
-                    "hash": "0x8525982334e9e4ce3da1a8034028d92ed2c067180e52008b96552bc49498e790",
+                    "hash": "0x868ca76ae8950e8f31d342c2a808c5b10b03d94498e9d0371774f81cac79d9ba",
                     "logs": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
                     "txbytes": "0xf860800a831e8480940000000000000000000000000000000000001100808025a0b3afc79e7eb6744553c987dfa51e04eec7c6d695e6f730badd8150d43c6611fda056587ba537d9e4baf5e9fdb797ed4d7cf237c28c5d368b92f2f3681334585fec",
                     "indexes": {
@@ -1085,11 +1085,11 @@
             ]
         },
         "_info": {
-            "hash": "0x198f3b78b18426a8ca819ff82414003a1b2d0f82e2da34fc4c7b66239a230f45",
+            "hash": "0x8066bef974c30314e3e100367813955dde0ebbed915471201f6f4a0d50e1a4fc",
             "comment": "`execution-spec-tests` generated test",
-            "filling-transition-tool": "Hyperledger Besu evm 24.7-develop-30c96c7",
+            "filling-transition-tool": "Hyperledger Besu evm 24.8-develop-f5d6e72",
             "description": "Test function documentation:\n\n    Tests call data into EXT*CALL including multiple offset conditions.\n\n    Caller pushes data into memory, then calls the target.  Target writes 64 bytes of call data\n    to storage and a success byte.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692-prague@v1.0.7/tests/prague/eip7692_eof_v1/eip7069_extcall/test_calldata.py#L128",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.0.8/tests/prague/eip7692_eof_v1/eip7069_extcall/test_calldata.py#L128",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7069.md",
             "reference-spec-version": "1795943aeacc86131d5ab6bb3d65824b3b1d4cad"
         }
@@ -1108,7 +1108,7 @@
         "pre": {
             "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b": {
                 "nonce": "0x00",
-                "balance": "0x0de0b6b3a7640000",
+                "balance": "0x3635c9adc5dea00000",
                 "code": "0x",
                 "storage": {}
             },
@@ -1146,7 +1146,7 @@
         "post": {
             "Prague": [
                 {
-                    "hash": "0x79d5818977db004c352c7454cc279b8fde004bdc8768eb68902785b5b2ca37b2",
+                    "hash": "0xf1470bbfcd9e15fd572546802fab8f4d1b45c6bcee61b13bbf2d3ac5d88f20a2",
                     "logs": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
                     "txbytes": "0xf860800a831e8480940000000000000000000000000000000000001100808025a0b3afc79e7eb6744553c987dfa51e04eec7c6d695e6f730badd8150d43c6611fda056587ba537d9e4baf5e9fdb797ed4d7cf237c28c5d368b92f2f3681334585fec",
                     "indexes": {
@@ -1158,11 +1158,11 @@
             ]
         },
         "_info": {
-            "hash": "0x21809074a02888bc0241aac5f2caeb615c4bb653e5eb63e375e19c10ac8c253b",
+            "hash": "0x0a6230e23bcb3bdcee84064c5b0249c1f1e5ffd0e825b056c34672b6a4b7c89d",
             "comment": "`execution-spec-tests` generated test",
-            "filling-transition-tool": "Hyperledger Besu evm 24.7-develop-30c96c7",
+            "filling-transition-tool": "Hyperledger Besu evm 24.8-develop-f5d6e72",
             "description": "Test function documentation:\n\n    Tests call data into EXT*CALL including multiple offset conditions.\n\n    Caller pushes data into memory, then calls the target.  Target writes 64 bytes of call data\n    to storage and a success byte.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692-prague@v1.0.7/tests/prague/eip7692_eof_v1/eip7069_extcall/test_calldata.py#L128",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.0.8/tests/prague/eip7692_eof_v1/eip7069_extcall/test_calldata.py#L128",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7069.md",
             "reference-spec-version": "1795943aeacc86131d5ab6bb3d65824b3b1d4cad"
         }
@@ -1181,7 +1181,7 @@
         "pre": {
             "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b": {
                 "nonce": "0x00",
-                "balance": "0x0de0b6b3a7640000",
+                "balance": "0x3635c9adc5dea00000",
                 "code": "0x",
                 "storage": {}
             },
@@ -1219,7 +1219,7 @@
         "post": {
             "Prague": [
                 {
-                    "hash": "0x33b1182d26d6d75a25cb265586001870a636745efa2c6afc091482a9446185bc",
+                    "hash": "0xdb0a5699f9fbf52c878eb04af8a9b46489320dae9a4604282fd80283a81a7a8c",
                     "logs": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
                     "txbytes": "0xf860800a831e8480940000000000000000000000000000000000001100808025a0b3afc79e7eb6744553c987dfa51e04eec7c6d695e6f730badd8150d43c6611fda056587ba537d9e4baf5e9fdb797ed4d7cf237c28c5d368b92f2f3681334585fec",
                     "indexes": {
@@ -1231,11 +1231,11 @@
             ]
         },
         "_info": {
-            "hash": "0xde11f843639b640531ae80b0e136458346ef6fdc2d56c6a41af0d5015a598d1e",
+            "hash": "0xdc330c1d2a524f874d8fb2475ab3190eaa91a8aba41a11dbf033fd7439b8c162",
             "comment": "`execution-spec-tests` generated test",
-            "filling-transition-tool": "Hyperledger Besu evm 24.7-develop-30c96c7",
+            "filling-transition-tool": "Hyperledger Besu evm 24.8-develop-f5d6e72",
             "description": "Test function documentation:\n\n    Tests call data into EXT*CALL including multiple offset conditions.\n\n    Caller pushes data into memory, then calls the target.  Target writes 64 bytes of call data\n    to storage and a success byte.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692-prague@v1.0.7/tests/prague/eip7692_eof_v1/eip7069_extcall/test_calldata.py#L128",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.0.8/tests/prague/eip7692_eof_v1/eip7069_extcall/test_calldata.py#L128",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7069.md",
             "reference-spec-version": "1795943aeacc86131d5ab6bb3d65824b3b1d4cad"
         }
@@ -1254,7 +1254,7 @@
         "pre": {
             "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b": {
                 "nonce": "0x00",
-                "balance": "0x0de0b6b3a7640000",
+                "balance": "0x3635c9adc5dea00000",
                 "code": "0x",
                 "storage": {}
             },
@@ -1292,7 +1292,7 @@
         "post": {
             "Prague": [
                 {
-                    "hash": "0x533f4cda49b65c7d96bab83996ddf30f07c24217f775651a12c810860af33d7b",
+                    "hash": "0xd3e85bb8c7775d8036a4ee337e6020c4e3a7fdb144e6b7f4271dec4b6d7958b2",
                     "logs": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
                     "txbytes": "0xf860800a831e8480940000000000000000000000000000000000001100808025a0b3afc79e7eb6744553c987dfa51e04eec7c6d695e6f730badd8150d43c6611fda056587ba537d9e4baf5e9fdb797ed4d7cf237c28c5d368b92f2f3681334585fec",
                     "indexes": {
@@ -1304,11 +1304,11 @@
             ]
         },
         "_info": {
-            "hash": "0xea7eca408a04d604fe831958a58910925ef01766b6730f4b5fd158fb102d8932",
+            "hash": "0xc7d6786b3e9e7dc3a98320a47d6b6badff614ee62e6f59190c1347a9b292a303",
             "comment": "`execution-spec-tests` generated test",
-            "filling-transition-tool": "Hyperledger Besu evm 24.7-develop-30c96c7",
+            "filling-transition-tool": "Hyperledger Besu evm 24.8-develop-f5d6e72",
             "description": "Test function documentation:\n\n    Tests call data into EXT*CALL including multiple offset conditions.\n\n    Caller pushes data into memory, then calls the target.  Target writes 64 bytes of call data\n    to storage and a success byte.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692-prague@v1.0.7/tests/prague/eip7692_eof_v1/eip7069_extcall/test_calldata.py#L128",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.0.8/tests/prague/eip7692_eof_v1/eip7069_extcall/test_calldata.py#L128",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7069.md",
             "reference-spec-version": "1795943aeacc86131d5ab6bb3d65824b3b1d4cad"
         }
@@ -1327,7 +1327,7 @@
         "pre": {
             "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b": {
                 "nonce": "0x00",
-                "balance": "0x0de0b6b3a7640000",
+                "balance": "0x3635c9adc5dea00000",
                 "code": "0x",
                 "storage": {}
             },
@@ -1365,7 +1365,7 @@
         "post": {
             "Prague": [
                 {
-                    "hash": "0x7e0d05ecd620ee9f1cbc7f6bd85bf06b57185fe14c4580b51566f25f849f50b7",
+                    "hash": "0xdcdefafa037579267fb2c46b90eb6d0627a249a5269101ac63a00668f1f38ce3",
                     "logs": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
                     "txbytes": "0xf860800a831e8480940000000000000000000000000000000000001100808025a0b3afc79e7eb6744553c987dfa51e04eec7c6d695e6f730badd8150d43c6611fda056587ba537d9e4baf5e9fdb797ed4d7cf237c28c5d368b92f2f3681334585fec",
                     "indexes": {
@@ -1377,11 +1377,11 @@
             ]
         },
         "_info": {
-            "hash": "0x9ece4adf6a10a857e1e118edb4c66cea9c96622a5cd53121fd35cce98b52f944",
+            "hash": "0xe996db897160756bfc904cf5844f30d19e174566d06bf2244297de5566a21622",
             "comment": "`execution-spec-tests` generated test",
-            "filling-transition-tool": "Hyperledger Besu evm 24.7-develop-30c96c7",
+            "filling-transition-tool": "Hyperledger Besu evm 24.8-develop-f5d6e72",
             "description": "Test function documentation:\n\n    Tests call data into EXT*CALL including multiple offset conditions.\n\n    Caller pushes data into memory, then calls the target.  Target writes 64 bytes of call data\n    to storage and a success byte.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692-prague@v1.0.7/tests/prague/eip7692_eof_v1/eip7069_extcall/test_calldata.py#L128",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.0.8/tests/prague/eip7692_eof_v1/eip7069_extcall/test_calldata.py#L128",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7069.md",
             "reference-spec-version": "1795943aeacc86131d5ab6bb3d65824b3b1d4cad"
         }
@@ -1400,7 +1400,7 @@
         "pre": {
             "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b": {
                 "nonce": "0x00",
-                "balance": "0x0de0b6b3a7640000",
+                "balance": "0x3635c9adc5dea00000",
                 "code": "0x",
                 "storage": {}
             },
@@ -1438,7 +1438,7 @@
         "post": {
             "Prague": [
                 {
-                    "hash": "0x2e8ca8fc0337ce95af32d4dd730b57acaa4bda16796f6ded4e23781de97c0b45",
+                    "hash": "0x9356f353afdcacce09336bc84fcd4b2db03620a6de36642ac42c2bb6ea4ad6b9",
                     "logs": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
                     "txbytes": "0xf860800a831e8480940000000000000000000000000000000000001100808025a0b3afc79e7eb6744553c987dfa51e04eec7c6d695e6f730badd8150d43c6611fda056587ba537d9e4baf5e9fdb797ed4d7cf237c28c5d368b92f2f3681334585fec",
                     "indexes": {
@@ -1450,11 +1450,11 @@
             ]
         },
         "_info": {
-            "hash": "0x9a2bc0d93117052228b1e84749c84eca99bb47712f62cfa7e433c45b19e172fa",
+            "hash": "0xb125ba68904d75d71e70c70fde2f0db461fd21f2c367314230c69689a79963f6",
             "comment": "`execution-spec-tests` generated test",
-            "filling-transition-tool": "Hyperledger Besu evm 24.7-develop-30c96c7",
+            "filling-transition-tool": "Hyperledger Besu evm 24.8-develop-f5d6e72",
             "description": "Test function documentation:\n\n    Tests call data into EXT*CALL including multiple offset conditions.\n\n    Caller pushes data into memory, then calls the target.  Target writes 64 bytes of call data\n    to storage and a success byte.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692-prague@v1.0.7/tests/prague/eip7692_eof_v1/eip7069_extcall/test_calldata.py#L128",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.0.8/tests/prague/eip7692_eof_v1/eip7069_extcall/test_calldata.py#L128",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7069.md",
             "reference-spec-version": "1795943aeacc86131d5ab6bb3d65824b3b1d4cad"
         }
@@ -1473,7 +1473,7 @@
         "pre": {
             "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b": {
                 "nonce": "0x00",
-                "balance": "0x0de0b6b3a7640000",
+                "balance": "0x3635c9adc5dea00000",
                 "code": "0x",
                 "storage": {}
             },
@@ -1511,7 +1511,7 @@
         "post": {
             "Prague": [
                 {
-                    "hash": "0x0532d9945a03118977333f503da37a8c17266e045ef9b17037adad8770af5f6f",
+                    "hash": "0x18b1d66698dbb287268a26a955d53efaec092ef5ea0d42abff6d042aba7e9190",
                     "logs": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
                     "txbytes": "0xf860800a831e8480940000000000000000000000000000000000001100808025a0b3afc79e7eb6744553c987dfa51e04eec7c6d695e6f730badd8150d43c6611fda056587ba537d9e4baf5e9fdb797ed4d7cf237c28c5d368b92f2f3681334585fec",
                     "indexes": {
@@ -1523,11 +1523,11 @@
             ]
         },
         "_info": {
-            "hash": "0x1eca46669db055579c50899f20a4948dc9f2fd521f64d6633a09a03c3ee825d8",
+            "hash": "0x5694fbbc3fbb471674062e58ef74ef0ee02207c9d234be20c63de998f539bfff",
             "comment": "`execution-spec-tests` generated test",
-            "filling-transition-tool": "Hyperledger Besu evm 24.7-develop-30c96c7",
+            "filling-transition-tool": "Hyperledger Besu evm 24.8-develop-f5d6e72",
             "description": "Test function documentation:\n\n    Tests call data into EXT*CALL including multiple offset conditions.\n\n    Caller pushes data into memory, then calls the target.  Target writes 64 bytes of call data\n    to storage and a success byte.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692-prague@v1.0.7/tests/prague/eip7692_eof_v1/eip7069_extcall/test_calldata.py#L128",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.0.8/tests/prague/eip7692_eof_v1/eip7069_extcall/test_calldata.py#L128",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7069.md",
             "reference-spec-version": "1795943aeacc86131d5ab6bb3d65824b3b1d4cad"
         }
@@ -1546,7 +1546,7 @@
         "pre": {
             "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b": {
                 "nonce": "0x00",
-                "balance": "0x0de0b6b3a7640000",
+                "balance": "0x3635c9adc5dea00000",
                 "code": "0x",
                 "storage": {}
             },
@@ -1584,7 +1584,7 @@
         "post": {
             "Prague": [
                 {
-                    "hash": "0x909dfbde8e80ba11016aa60a6995a3b3e2cc0a4a5ba65ef859b70e25ae1d3e23",
+                    "hash": "0x2ccf06a1594fb21f87e4bda739e91cdbbe28188bd01d65c3dd8e8af285793b46",
                     "logs": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
                     "txbytes": "0xf860800a831e8480940000000000000000000000000000000000001100808025a0b3afc79e7eb6744553c987dfa51e04eec7c6d695e6f730badd8150d43c6611fda056587ba537d9e4baf5e9fdb797ed4d7cf237c28c5d368b92f2f3681334585fec",
                     "indexes": {
@@ -1596,11 +1596,11 @@
             ]
         },
         "_info": {
-            "hash": "0x081ff15003f6bc2d354423ec27963ba8a510ac32bdce676f978778628c510f0c",
+            "hash": "0xd3e178823e637bb68cf9ebac9c30d08420a947a629952097a3a851ee01edc593",
             "comment": "`execution-spec-tests` generated test",
-            "filling-transition-tool": "Hyperledger Besu evm 24.7-develop-30c96c7",
+            "filling-transition-tool": "Hyperledger Besu evm 24.8-develop-f5d6e72",
             "description": "Test function documentation:\n\n    Tests call data into EXT*CALL including multiple offset conditions.\n\n    Caller pushes data into memory, then calls the target.  Target writes 64 bytes of call data\n    to storage and a success byte.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692-prague@v1.0.7/tests/prague/eip7692_eof_v1/eip7069_extcall/test_calldata.py#L128",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.0.8/tests/prague/eip7692_eof_v1/eip7069_extcall/test_calldata.py#L128",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7069.md",
             "reference-spec-version": "1795943aeacc86131d5ab6bb3d65824b3b1d4cad"
         }
@@ -1619,7 +1619,7 @@
         "pre": {
             "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b": {
                 "nonce": "0x00",
-                "balance": "0x0de0b6b3a7640000",
+                "balance": "0x3635c9adc5dea00000",
                 "code": "0x",
                 "storage": {}
             },
@@ -1657,7 +1657,7 @@
         "post": {
             "Prague": [
                 {
-                    "hash": "0x7ba16d20016d224811e9e5aa68d27ce8fd7e381e9d8a6776176075b583f56b6d",
+                    "hash": "0xc48267d3eeb9049d6c853dc96828fc9e42dbc23afd71de50c92c9a57c36b9da6",
                     "logs": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
                     "txbytes": "0xf860800a831e8480940000000000000000000000000000000000001100808025a0b3afc79e7eb6744553c987dfa51e04eec7c6d695e6f730badd8150d43c6611fda056587ba537d9e4baf5e9fdb797ed4d7cf237c28c5d368b92f2f3681334585fec",
                     "indexes": {
@@ -1669,11 +1669,11 @@
             ]
         },
         "_info": {
-            "hash": "0xd366163fa2603adf884a2ed401906399b697b9fedfb8bc74367ba5498fa6851a",
+            "hash": "0xa2f507d1c593babfd4eea232fbb2b8e5140eff3f7068ec2a3c4c47f201cbaf4d",
             "comment": "`execution-spec-tests` generated test",
-            "filling-transition-tool": "Hyperledger Besu evm 24.7-develop-30c96c7",
+            "filling-transition-tool": "Hyperledger Besu evm 24.8-develop-f5d6e72",
             "description": "Test function documentation:\n\n    Tests call data into EXT*CALL including multiple offset conditions.\n\n    Caller pushes data into memory, then calls the target.  Target writes 64 bytes of call data\n    to storage and a success byte.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692-prague@v1.0.7/tests/prague/eip7692_eof_v1/eip7069_extcall/test_calldata.py#L128",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.0.8/tests/prague/eip7692_eof_v1/eip7069_extcall/test_calldata.py#L128",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7069.md",
             "reference-spec-version": "1795943aeacc86131d5ab6bb3d65824b3b1d4cad"
         }
@@ -1692,7 +1692,7 @@
         "pre": {
             "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b": {
                 "nonce": "0x00",
-                "balance": "0x0de0b6b3a7640000",
+                "balance": "0x3635c9adc5dea00000",
                 "code": "0x",
                 "storage": {}
             },
@@ -1730,7 +1730,7 @@
         "post": {
             "Prague": [
                 {
-                    "hash": "0x0add7ab045e1e0caf85ed783fd53b07f264d4d90d142c8c2c622aeb3ce26c167",
+                    "hash": "0xc78fa13f562230860335367c49a1888219d930e2ad5cdca7623aa3ed49672410",
                     "logs": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
                     "txbytes": "0xf860800a831e8480940000000000000000000000000000000000001100808025a0b3afc79e7eb6744553c987dfa51e04eec7c6d695e6f730badd8150d43c6611fda056587ba537d9e4baf5e9fdb797ed4d7cf237c28c5d368b92f2f3681334585fec",
                     "indexes": {
@@ -1742,11 +1742,11 @@
             ]
         },
         "_info": {
-            "hash": "0x0d5082e9ce5f5c1d23c1bfe5843a5a3f3bff52511ce860242775df8162631428",
+            "hash": "0x657eb396b0dcc2117c40c57b8e0c2920a3a06c32eb1317c528acb4a407c4c61d",
             "comment": "`execution-spec-tests` generated test",
-            "filling-transition-tool": "Hyperledger Besu evm 24.7-develop-30c96c7",
+            "filling-transition-tool": "Hyperledger Besu evm 24.8-develop-f5d6e72",
             "description": "Test function documentation:\n\n    Tests call data into EXT*CALL including multiple offset conditions.\n\n    Caller pushes data into memory, then calls the target.  Target writes 64 bytes of call data\n    to storage and a success byte.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692-prague@v1.0.7/tests/prague/eip7692_eof_v1/eip7069_extcall/test_calldata.py#L128",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.0.8/tests/prague/eip7692_eof_v1/eip7069_extcall/test_calldata.py#L128",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7069.md",
             "reference-spec-version": "1795943aeacc86131d5ab6bb3d65824b3b1d4cad"
         }
@@ -1765,7 +1765,7 @@
         "pre": {
             "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b": {
                 "nonce": "0x00",
-                "balance": "0x0de0b6b3a7640000",
+                "balance": "0x3635c9adc5dea00000",
                 "code": "0x",
                 "storage": {}
             },
@@ -1803,7 +1803,7 @@
         "post": {
             "Prague": [
                 {
-                    "hash": "0x6bba9bcf39de37778ff8a4b512211c45f2d3ffcf3b6216eb6d74d2bc2b6882f8",
+                    "hash": "0x21e3bdb60be590410eaabb346a1934626c96ea4be295da20769672a5d17d985d",
                     "logs": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
                     "txbytes": "0xf860800a831e8480940000000000000000000000000000000000001100808025a0b3afc79e7eb6744553c987dfa51e04eec7c6d695e6f730badd8150d43c6611fda056587ba537d9e4baf5e9fdb797ed4d7cf237c28c5d368b92f2f3681334585fec",
                     "indexes": {
@@ -1815,11 +1815,11 @@
             ]
         },
         "_info": {
-            "hash": "0xd283ac92c9fa36501a1a431a49420ec68a19cdf798408fb65bc4c7ce8bc8fca2",
+            "hash": "0xda135c100d9e1858ffbe44531291e68cf8c6f7148448917d8765cb5bbb52dd17",
             "comment": "`execution-spec-tests` generated test",
-            "filling-transition-tool": "Hyperledger Besu evm 24.7-develop-30c96c7",
+            "filling-transition-tool": "Hyperledger Besu evm 24.8-develop-f5d6e72",
             "description": "Test function documentation:\n\n    Tests call data into EXT*CALL including multiple offset conditions.\n\n    Caller pushes data into memory, then calls the target.  Target writes 64 bytes of call data\n    to storage and a success byte.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692-prague@v1.0.7/tests/prague/eip7692_eof_v1/eip7069_extcall/test_calldata.py#L128",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.0.8/tests/prague/eip7692_eof_v1/eip7069_extcall/test_calldata.py#L128",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7069.md",
             "reference-spec-version": "1795943aeacc86131d5ab6bb3d65824b3b1d4cad"
         }
@@ -1838,7 +1838,7 @@
         "pre": {
             "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b": {
                 "nonce": "0x00",
-                "balance": "0x0de0b6b3a7640000",
+                "balance": "0x3635c9adc5dea00000",
                 "code": "0x",
                 "storage": {}
             },
@@ -1876,7 +1876,7 @@
         "post": {
             "Prague": [
                 {
-                    "hash": "0x9f7da927d1f7a5bed598ba38be91b8a0fccca1c661ea8535d622be416a427e87",
+                    "hash": "0x78ccc21c24cf968bec420d074dbbdbbb49ba537494c87c5668b77995f8d0e346",
                     "logs": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
                     "txbytes": "0xf860800a831e8480940000000000000000000000000000000000001100808025a0b3afc79e7eb6744553c987dfa51e04eec7c6d695e6f730badd8150d43c6611fda056587ba537d9e4baf5e9fdb797ed4d7cf237c28c5d368b92f2f3681334585fec",
                     "indexes": {
@@ -1888,11 +1888,11 @@
             ]
         },
         "_info": {
-            "hash": "0x2aaa20e2bc344abe39742ab42e07c6f8f1e35b313ef783a7baf0f3edc822ddd5",
+            "hash": "0xf7a02ce647ac279483a14524c40eaf837fe247397fd9f942d2c181d1b370c2f9",
             "comment": "`execution-spec-tests` generated test",
-            "filling-transition-tool": "Hyperledger Besu evm 24.7-develop-30c96c7",
+            "filling-transition-tool": "Hyperledger Besu evm 24.8-develop-f5d6e72",
             "description": "Test function documentation:\n\n    Tests call data into EXT*CALL including multiple offset conditions.\n\n    Caller pushes data into memory, then calls the target.  Target writes 64 bytes of call data\n    to storage and a success byte.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692-prague@v1.0.7/tests/prague/eip7692_eof_v1/eip7069_extcall/test_calldata.py#L128",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.0.8/tests/prague/eip7692_eof_v1/eip7069_extcall/test_calldata.py#L128",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7069.md",
             "reference-spec-version": "1795943aeacc86131d5ab6bb3d65824b3b1d4cad"
         }
@@ -1911,7 +1911,7 @@
         "pre": {
             "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b": {
                 "nonce": "0x00",
-                "balance": "0x0de0b6b3a7640000",
+                "balance": "0x3635c9adc5dea00000",
                 "code": "0x",
                 "storage": {}
             },
@@ -1949,7 +1949,7 @@
         "post": {
             "Prague": [
                 {
-                    "hash": "0x57baf9ddf85e76a88739e49033091aec25bd894af7025317978e97a277dad1bc",
+                    "hash": "0x627ec894397e4845fcceb0edefb2e7b007dc402d3bd464729e4aeb07a701d137",
                     "logs": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
                     "txbytes": "0xf860800a831e8480940000000000000000000000000000000000001100808025a0b3afc79e7eb6744553c987dfa51e04eec7c6d695e6f730badd8150d43c6611fda056587ba537d9e4baf5e9fdb797ed4d7cf237c28c5d368b92f2f3681334585fec",
                     "indexes": {
@@ -1961,11 +1961,11 @@
             ]
         },
         "_info": {
-            "hash": "0xc8d0a3f95bc57671b434fae4be89e50d61552a8593a273bd39e2cf34bd2e8ac2",
+            "hash": "0x12df480d246ad7bab6a4ffc79d46f95d3e475fc48bd91bfe61d14d9e6d981b02",
             "comment": "`execution-spec-tests` generated test",
-            "filling-transition-tool": "Hyperledger Besu evm 24.7-develop-30c96c7",
+            "filling-transition-tool": "Hyperledger Besu evm 24.8-develop-f5d6e72",
             "description": "Test function documentation:\n\n    Tests call data into EXT*CALL including multiple offset conditions.\n\n    Caller pushes data into memory, then calls the target.  Target writes 64 bytes of call data\n    to storage and a success byte.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692-prague@v1.0.7/tests/prague/eip7692_eof_v1/eip7069_extcall/test_calldata.py#L128",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.0.8/tests/prague/eip7692_eof_v1/eip7069_extcall/test_calldata.py#L128",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7069.md",
             "reference-spec-version": "1795943aeacc86131d5ab6bb3d65824b3b1d4cad"
         }
@@ -1984,7 +1984,7 @@
         "pre": {
             "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b": {
                 "nonce": "0x00",
-                "balance": "0x0de0b6b3a7640000",
+                "balance": "0x3635c9adc5dea00000",
                 "code": "0x",
                 "storage": {}
             },
@@ -2022,7 +2022,7 @@
         "post": {
             "Prague": [
                 {
-                    "hash": "0x36038ecce00b8095073606315940a88d72d1c4861e19672e86c260e4551250f4",
+                    "hash": "0x47f981d33561e87aaa995940f1ba1c36dd5a1225d796d8a37763f53342b95b84",
                     "logs": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
                     "txbytes": "0xf860800a831e8480940000000000000000000000000000000000001100808025a0b3afc79e7eb6744553c987dfa51e04eec7c6d695e6f730badd8150d43c6611fda056587ba537d9e4baf5e9fdb797ed4d7cf237c28c5d368b92f2f3681334585fec",
                     "indexes": {
@@ -2034,11 +2034,11 @@
             ]
         },
         "_info": {
-            "hash": "0xb79eeaf411730abc35a69977f1c078d908edaaa98789a4f3c89ed738daf4d25a",
+            "hash": "0xa5969788fef9a02a45f4274ffef664fac9b11726707a4bb7fb1384b22787907d",
             "comment": "`execution-spec-tests` generated test",
-            "filling-transition-tool": "Hyperledger Besu evm 24.7-develop-30c96c7",
+            "filling-transition-tool": "Hyperledger Besu evm 24.8-develop-f5d6e72",
             "description": "Test function documentation:\n\n    Tests call data into EXT*CALL including multiple offset conditions.\n\n    Caller pushes data into memory, then calls the target.  Target writes 64 bytes of call data\n    to storage and a success byte.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692-prague@v1.0.7/tests/prague/eip7692_eof_v1/eip7069_extcall/test_calldata.py#L128",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.0.8/tests/prague/eip7692_eof_v1/eip7069_extcall/test_calldata.py#L128",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7069.md",
             "reference-spec-version": "1795943aeacc86131d5ab6bb3d65824b3b1d4cad"
         }
@@ -2057,7 +2057,7 @@
         "pre": {
             "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b": {
                 "nonce": "0x00",
-                "balance": "0x0de0b6b3a7640000",
+                "balance": "0x3635c9adc5dea00000",
                 "code": "0x",
                 "storage": {}
             },
@@ -2095,7 +2095,7 @@
         "post": {
             "Prague": [
                 {
-                    "hash": "0x557a1cceede52da6f96e04a21d8c3c1202ec6edcd90d1b6a7a798b4461f43532",
+                    "hash": "0x182c380a15bb72bfb4b1c3a9751a86e6608853c671c70c807d6230838fb57a39",
                     "logs": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
                     "txbytes": "0xf860800a831e8480940000000000000000000000000000000000001100808025a0b3afc79e7eb6744553c987dfa51e04eec7c6d695e6f730badd8150d43c6611fda056587ba537d9e4baf5e9fdb797ed4d7cf237c28c5d368b92f2f3681334585fec",
                     "indexes": {
@@ -2107,11 +2107,11 @@
             ]
         },
         "_info": {
-            "hash": "0x7a5f36d367faf1fdf4c17e9e1430e3f9626352224348ec95c7b773b3e750f015",
+            "hash": "0x642b8a56c40548ec8759698b981ed789bc426d96b5cb47a1ddd2fc7f9f6d52d0",
             "comment": "`execution-spec-tests` generated test",
-            "filling-transition-tool": "Hyperledger Besu evm 24.7-develop-30c96c7",
+            "filling-transition-tool": "Hyperledger Besu evm 24.8-develop-f5d6e72",
             "description": "Test function documentation:\n\n    Tests call data into EXT*CALL including multiple offset conditions.\n\n    Caller pushes data into memory, then calls the target.  Target writes 64 bytes of call data\n    to storage and a success byte.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692-prague@v1.0.7/tests/prague/eip7692_eof_v1/eip7069_extcall/test_calldata.py#L128",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.0.8/tests/prague/eip7692_eof_v1/eip7069_extcall/test_calldata.py#L128",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7069.md",
             "reference-spec-version": "1795943aeacc86131d5ab6bb3d65824b3b1d4cad"
         }
@@ -2130,7 +2130,7 @@
         "pre": {
             "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b": {
                 "nonce": "0x00",
-                "balance": "0x0de0b6b3a7640000",
+                "balance": "0x3635c9adc5dea00000",
                 "code": "0x",
                 "storage": {}
             },
@@ -2168,7 +2168,7 @@
         "post": {
             "Prague": [
                 {
-                    "hash": "0x649cb3103a4de98811022b0db9bc5ba6c54fd7c0f39580804542d3f0b5709ca5",
+                    "hash": "0xd769af598f0fd7645e9f35f8594af21a4661473103c1824af0ae02c0424b445d",
                     "logs": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
                     "txbytes": "0xf860800a831e8480940000000000000000000000000000000000001100808025a0b3afc79e7eb6744553c987dfa51e04eec7c6d695e6f730badd8150d43c6611fda056587ba537d9e4baf5e9fdb797ed4d7cf237c28c5d368b92f2f3681334585fec",
                     "indexes": {
@@ -2180,11 +2180,11 @@
             ]
         },
         "_info": {
-            "hash": "0x6516bacb5e85de69dac061176e9fae2bba04670ff949ca5c2a724f89fffd012a",
+            "hash": "0x70708d8b6c71b553971892daa037a737b2971f057a714c8f6d669984ba74f56b",
             "comment": "`execution-spec-tests` generated test",
-            "filling-transition-tool": "Hyperledger Besu evm 24.7-develop-30c96c7",
+            "filling-transition-tool": "Hyperledger Besu evm 24.8-develop-f5d6e72",
             "description": "Test function documentation:\n\n    Tests call data into EXT*CALL including multiple offset conditions.\n\n    Caller pushes data into memory, then calls the target.  Target writes 64 bytes of call data\n    to storage and a success byte.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692-prague@v1.0.7/tests/prague/eip7692_eof_v1/eip7069_extcall/test_calldata.py#L128",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.0.8/tests/prague/eip7692_eof_v1/eip7069_extcall/test_calldata.py#L128",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7069.md",
             "reference-spec-version": "1795943aeacc86131d5ab6bb3d65824b3b1d4cad"
         }
@@ -2203,7 +2203,7 @@
         "pre": {
             "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b": {
                 "nonce": "0x00",
-                "balance": "0x0de0b6b3a7640000",
+                "balance": "0x3635c9adc5dea00000",
                 "code": "0x",
                 "storage": {}
             },
@@ -2241,7 +2241,7 @@
         "post": {
             "Prague": [
                 {
-                    "hash": "0x960a22fb826c5accbbe03b1392b4bbd74fe2f8dd818014b4480303c7015d7bd8",
+                    "hash": "0x8c9025a0fc5d16d7d5130cae0be735e01e90bbf811c011d2bd832141a0605ebd",
                     "logs": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
                     "txbytes": "0xf860800a831e8480940000000000000000000000000000000000001100808025a0b3afc79e7eb6744553c987dfa51e04eec7c6d695e6f730badd8150d43c6611fda056587ba537d9e4baf5e9fdb797ed4d7cf237c28c5d368b92f2f3681334585fec",
                     "indexes": {
@@ -2253,11 +2253,11 @@
             ]
         },
         "_info": {
-            "hash": "0x6b52d6dbd3283a317379b177df7d2420abe976e10d68300e93e0332118614e47",
+            "hash": "0xd88d2cfe9ef9f6e06ffd38d21ad8b22a5616fadebeeb6614610154219b86d28c",
             "comment": "`execution-spec-tests` generated test",
-            "filling-transition-tool": "Hyperledger Besu evm 24.7-develop-30c96c7",
+            "filling-transition-tool": "Hyperledger Besu evm 24.8-develop-f5d6e72",
             "description": "Test function documentation:\n\n    Tests call data into EXT*CALL including multiple offset conditions.\n\n    Caller pushes data into memory, then calls the target.  Target writes 64 bytes of call data\n    to storage and a success byte.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692-prague@v1.0.7/tests/prague/eip7692_eof_v1/eip7069_extcall/test_calldata.py#L128",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.0.8/tests/prague/eip7692_eof_v1/eip7069_extcall/test_calldata.py#L128",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7069.md",
             "reference-spec-version": "1795943aeacc86131d5ab6bb3d65824b3b1d4cad"
         }
@@ -2276,7 +2276,7 @@
         "pre": {
             "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b": {
                 "nonce": "0x00",
-                "balance": "0x0de0b6b3a7640000",
+                "balance": "0x3635c9adc5dea00000",
                 "code": "0x",
                 "storage": {}
             },
@@ -2314,7 +2314,7 @@
         "post": {
             "Prague": [
                 {
-                    "hash": "0x6021538ab882822d144fede254b453c3b7a4e288641c9bbffe827f7806a51bed",
+                    "hash": "0x9aa91621d6c1997160e2d5447f997b4a9594919a755ef81faee5acf42a58c5ae",
                     "logs": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
                     "txbytes": "0xf860800a831e8480940000000000000000000000000000000000001100808025a0b3afc79e7eb6744553c987dfa51e04eec7c6d695e6f730badd8150d43c6611fda056587ba537d9e4baf5e9fdb797ed4d7cf237c28c5d368b92f2f3681334585fec",
                     "indexes": {
@@ -2326,11 +2326,11 @@
             ]
         },
         "_info": {
-            "hash": "0xc2350dbf59de71ec17e712dab06d5960270ce8065a8da706d488f57557975a5e",
+            "hash": "0xc49320f6fe78b53a0570d66ecb7ad949ae9b51b84b14304bad9177bc5464112f",
             "comment": "`execution-spec-tests` generated test",
-            "filling-transition-tool": "Hyperledger Besu evm 24.7-develop-30c96c7",
+            "filling-transition-tool": "Hyperledger Besu evm 24.8-develop-f5d6e72",
             "description": "Test function documentation:\n\n    Tests call data into EXT*CALL including multiple offset conditions.\n\n    Caller pushes data into memory, then calls the target.  Target writes 64 bytes of call data\n    to storage and a success byte.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692-prague@v1.0.7/tests/prague/eip7692_eof_v1/eip7069_extcall/test_calldata.py#L128",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.0.8/tests/prague/eip7692_eof_v1/eip7069_extcall/test_calldata.py#L128",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7069.md",
             "reference-spec-version": "1795943aeacc86131d5ab6bb3d65824b3b1d4cad"
         }
@@ -2349,7 +2349,7 @@
         "pre": {
             "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b": {
                 "nonce": "0x00",
-                "balance": "0x0de0b6b3a7640000",
+                "balance": "0x3635c9adc5dea00000",
                 "code": "0x",
                 "storage": {}
             },
@@ -2387,7 +2387,7 @@
         "post": {
             "Prague": [
                 {
-                    "hash": "0x1aeeb78670774aa809e2448cf9a5d342a6463f816f734c904c10fd56cf8f91b2",
+                    "hash": "0x20fcc218b7c0ac701cf914fe327841748d3c31c1dd07e395940a1f9d3e05611e",
                     "logs": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
                     "txbytes": "0xf860800a831e8480940000000000000000000000000000000000001100808025a0b3afc79e7eb6744553c987dfa51e04eec7c6d695e6f730badd8150d43c6611fda056587ba537d9e4baf5e9fdb797ed4d7cf237c28c5d368b92f2f3681334585fec",
                     "indexes": {
@@ -2399,11 +2399,11 @@
             ]
         },
         "_info": {
-            "hash": "0xd8bc810485aa990cc6fa9695d2c68ab473affb2669abf7a7385ae9df5c490561",
+            "hash": "0x190d31ac1ce2206adec96a8eea9e2b06ac632b85847677eb85309b82c8e44eb6",
             "comment": "`execution-spec-tests` generated test",
-            "filling-transition-tool": "Hyperledger Besu evm 24.7-develop-30c96c7",
+            "filling-transition-tool": "Hyperledger Besu evm 24.8-develop-f5d6e72",
             "description": "Test function documentation:\n\n    Tests call data into EXT*CALL including multiple offset conditions.\n\n    Caller pushes data into memory, then calls the target.  Target writes 64 bytes of call data\n    to storage and a success byte.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692-prague@v1.0.7/tests/prague/eip7692_eof_v1/eip7069_extcall/test_calldata.py#L128",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.0.8/tests/prague/eip7692_eof_v1/eip7069_extcall/test_calldata.py#L128",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7069.md",
             "reference-spec-version": "1795943aeacc86131d5ab6bb3d65824b3b1d4cad"
         }
@@ -2422,7 +2422,7 @@
         "pre": {
             "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b": {
                 "nonce": "0x00",
-                "balance": "0x0de0b6b3a7640000",
+                "balance": "0x3635c9adc5dea00000",
                 "code": "0x",
                 "storage": {}
             },
@@ -2460,7 +2460,7 @@
         "post": {
             "Prague": [
                 {
-                    "hash": "0xc0e75cfef5f052e3ddb6df1f6c10437a37ead27c52f7ca8e0190a039a04b8fbf",
+                    "hash": "0x3864c8d4049fa973e07f295d78693c2e66e3f599cfdb77bb0fc4eb566fcaab37",
                     "logs": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
                     "txbytes": "0xf860800a831e8480940000000000000000000000000000000000001100808025a0b3afc79e7eb6744553c987dfa51e04eec7c6d695e6f730badd8150d43c6611fda056587ba537d9e4baf5e9fdb797ed4d7cf237c28c5d368b92f2f3681334585fec",
                     "indexes": {
@@ -2472,11 +2472,11 @@
             ]
         },
         "_info": {
-            "hash": "0xe0dd82b24be9695c91c63dbb17f96ec95d06589b10fcb2bdcfe96df8e0771412",
+            "hash": "0x9b26d0830dc4c6a0f35b9434565ae5465eeb76eaacf9643be0a7b572e99996f4",
             "comment": "`execution-spec-tests` generated test",
-            "filling-transition-tool": "Hyperledger Besu evm 24.7-develop-30c96c7",
+            "filling-transition-tool": "Hyperledger Besu evm 24.8-develop-f5d6e72",
             "description": "Test function documentation:\n\n    Tests call data into EXT*CALL including multiple offset conditions.\n\n    Caller pushes data into memory, then calls the target.  Target writes 64 bytes of call data\n    to storage and a success byte.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692-prague@v1.0.7/tests/prague/eip7692_eof_v1/eip7069_extcall/test_calldata.py#L128",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.0.8/tests/prague/eip7692_eof_v1/eip7069_extcall/test_calldata.py#L128",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7069.md",
             "reference-spec-version": "1795943aeacc86131d5ab6bb3d65824b3b1d4cad"
         }
@@ -2495,7 +2495,7 @@
         "pre": {
             "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b": {
                 "nonce": "0x00",
-                "balance": "0x0de0b6b3a7640000",
+                "balance": "0x3635c9adc5dea00000",
                 "code": "0x",
                 "storage": {}
             },
@@ -2533,7 +2533,7 @@
         "post": {
             "Prague": [
                 {
-                    "hash": "0x12d08f39695b6a960b6c364a19afd1d9ee1a87d4b702b31c717e5dcba3e19d9d",
+                    "hash": "0x16ba7679c6510f2b9f26b49767c37acda5a922f469ca95f5db4afff7de5ef674",
                     "logs": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
                     "txbytes": "0xf860800a831e8480940000000000000000000000000000000000001100808025a0b3afc79e7eb6744553c987dfa51e04eec7c6d695e6f730badd8150d43c6611fda056587ba537d9e4baf5e9fdb797ed4d7cf237c28c5d368b92f2f3681334585fec",
                     "indexes": {
@@ -2545,11 +2545,11 @@
             ]
         },
         "_info": {
-            "hash": "0x5b6192d23405b650a513770459aec5b4ad611acc2d705a2c9954772e68aea964",
+            "hash": "0xdc852f364ec4c49d34f26b04df9a8a93a7cf2063595c2354906da34024c89d2a",
             "comment": "`execution-spec-tests` generated test",
-            "filling-transition-tool": "Hyperledger Besu evm 24.7-develop-30c96c7",
+            "filling-transition-tool": "Hyperledger Besu evm 24.8-develop-f5d6e72",
             "description": "Test function documentation:\n\n    Tests call data into EXT*CALL including multiple offset conditions.\n\n    Caller pushes data into memory, then calls the target.  Target writes 64 bytes of call data\n    to storage and a success byte.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692-prague@v1.0.7/tests/prague/eip7692_eof_v1/eip7069_extcall/test_calldata.py#L128",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.0.8/tests/prague/eip7692_eof_v1/eip7069_extcall/test_calldata.py#L128",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7069.md",
             "reference-spec-version": "1795943aeacc86131d5ab6bb3d65824b3b1d4cad"
         }
@@ -2568,7 +2568,7 @@
         "pre": {
             "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b": {
                 "nonce": "0x00",
-                "balance": "0x0de0b6b3a7640000",
+                "balance": "0x3635c9adc5dea00000",
                 "code": "0x",
                 "storage": {}
             },
@@ -2606,7 +2606,7 @@
         "post": {
             "Prague": [
                 {
-                    "hash": "0xd9d9e17e723e6c1357530deaf8890820df6fff2711e3c26fac7ec4c9d9386aad",
+                    "hash": "0x57d27deba701453e5c73e5ec8bf5e998a9569d86dfcc1d8298d873146fdf9dc3",
                     "logs": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
                     "txbytes": "0xf860800a831e8480940000000000000000000000000000000000001100808025a0b3afc79e7eb6744553c987dfa51e04eec7c6d695e6f730badd8150d43c6611fda056587ba537d9e4baf5e9fdb797ed4d7cf237c28c5d368b92f2f3681334585fec",
                     "indexes": {
@@ -2618,11 +2618,11 @@
             ]
         },
         "_info": {
-            "hash": "0x0f877eccbb3682098465d1b025ee2f74fea2160bf3c817a66e71b0dd014a0bdd",
+            "hash": "0x1b6d6927242adf738fba4d5775ba4b2bc5c8a5598ec5e9833f02eb46d5df8d25",
             "comment": "`execution-spec-tests` generated test",
-            "filling-transition-tool": "Hyperledger Besu evm 24.7-develop-30c96c7",
+            "filling-transition-tool": "Hyperledger Besu evm 24.8-develop-f5d6e72",
             "description": "Test function documentation:\n\n    Tests call data into EXT*CALL including multiple offset conditions.\n\n    Caller pushes data into memory, then calls the target.  Target writes 64 bytes of call data\n    to storage and a success byte.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692-prague@v1.0.7/tests/prague/eip7692_eof_v1/eip7069_extcall/test_calldata.py#L128",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.0.8/tests/prague/eip7692_eof_v1/eip7069_extcall/test_calldata.py#L128",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7069.md",
             "reference-spec-version": "1795943aeacc86131d5ab6bb3d65824b3b1d4cad"
         }
@@ -2641,7 +2641,7 @@
         "pre": {
             "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b": {
                 "nonce": "0x00",
-                "balance": "0x0de0b6b3a7640000",
+                "balance": "0x3635c9adc5dea00000",
                 "code": "0x",
                 "storage": {}
             },
@@ -2679,7 +2679,7 @@
         "post": {
             "Prague": [
                 {
-                    "hash": "0x5312d2d26f7c3b8feedddc04e16ed0d5d7bf8c45d1864361c4d574da4b29c65a",
+                    "hash": "0x940ff08def600d3b4766434f660bb50e3dfd48531622d617d250cbd6548b3047",
                     "logs": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
                     "txbytes": "0xf860800a831e8480940000000000000000000000000000000000001100808025a0b3afc79e7eb6744553c987dfa51e04eec7c6d695e6f730badd8150d43c6611fda056587ba537d9e4baf5e9fdb797ed4d7cf237c28c5d368b92f2f3681334585fec",
                     "indexes": {
@@ -2691,11 +2691,11 @@
             ]
         },
         "_info": {
-            "hash": "0x55aa36448253bcdb63171dd7f3b0591105258783b07d7ec99229eb21e0fcc7e8",
+            "hash": "0xc3667e6753f97ed5c115b22c4746654a19e8e86b31ef4b3684dfdff1f349181b",
             "comment": "`execution-spec-tests` generated test",
-            "filling-transition-tool": "Hyperledger Besu evm 24.7-develop-30c96c7",
+            "filling-transition-tool": "Hyperledger Besu evm 24.8-develop-f5d6e72",
             "description": "Test function documentation:\n\n    Tests call data into EXT*CALL including multiple offset conditions.\n\n    Caller pushes data into memory, then calls the target.  Target writes 64 bytes of call data\n    to storage and a success byte.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692-prague@v1.0.7/tests/prague/eip7692_eof_v1/eip7069_extcall/test_calldata.py#L128",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.0.8/tests/prague/eip7692_eof_v1/eip7069_extcall/test_calldata.py#L128",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7069.md",
             "reference-spec-version": "1795943aeacc86131d5ab6bb3d65824b3b1d4cad"
         }
@@ -2714,7 +2714,7 @@
         "pre": {
             "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b": {
                 "nonce": "0x00",
-                "balance": "0x0de0b6b3a7640000",
+                "balance": "0x3635c9adc5dea00000",
                 "code": "0x",
                 "storage": {}
             },
@@ -2752,7 +2752,7 @@
         "post": {
             "Prague": [
                 {
-                    "hash": "0x31fed48f6395956487f834a78dcf38396839f75f302c0d607afec4c566abd340",
+                    "hash": "0x20d57e1c997fe89b92fc82651fa265fb3d7aceb5e39e5608527fa0600aa613b2",
                     "logs": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
                     "txbytes": "0xf860800a831e8480940000000000000000000000000000000000001100808025a0b3afc79e7eb6744553c987dfa51e04eec7c6d695e6f730badd8150d43c6611fda056587ba537d9e4baf5e9fdb797ed4d7cf237c28c5d368b92f2f3681334585fec",
                     "indexes": {
@@ -2764,11 +2764,11 @@
             ]
         },
         "_info": {
-            "hash": "0x9b033f51564bafbcdbee6cb4a04ce01c3953f7faf29bd0961814793999ed67fd",
+            "hash": "0x85d7afa1dabb3367763d712ccbef37a7076af162dfa5479cb502dce4d5bc3865",
             "comment": "`execution-spec-tests` generated test",
-            "filling-transition-tool": "Hyperledger Besu evm 24.7-develop-30c96c7",
+            "filling-transition-tool": "Hyperledger Besu evm 24.8-develop-f5d6e72",
             "description": "Test function documentation:\n\n    Tests call data into EXT*CALL including multiple offset conditions.\n\n    Caller pushes data into memory, then calls the target.  Target writes 64 bytes of call data\n    to storage and a success byte.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692-prague@v1.0.7/tests/prague/eip7692_eof_v1/eip7069_extcall/test_calldata.py#L128",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.0.8/tests/prague/eip7692_eof_v1/eip7069_extcall/test_calldata.py#L128",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7069.md",
             "reference-spec-version": "1795943aeacc86131d5ab6bb3d65824b3b1d4cad"
         }
@@ -2787,7 +2787,7 @@
         "pre": {
             "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b": {
                 "nonce": "0x00",
-                "balance": "0x0de0b6b3a7640000",
+                "balance": "0x3635c9adc5dea00000",
                 "code": "0x",
                 "storage": {}
             },
@@ -2825,7 +2825,7 @@
         "post": {
             "Prague": [
                 {
-                    "hash": "0x79228f5d3829d03e05e9483a42d5956d321675d4c43aee2bcb5179a5621502de",
+                    "hash": "0xc02d62174c65169e6e008df081a02407acdd8a8716d796b93f1029cae29e42a2",
                     "logs": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
                     "txbytes": "0xf860800a831e8480940000000000000000000000000000000000001100808025a0b3afc79e7eb6744553c987dfa51e04eec7c6d695e6f730badd8150d43c6611fda056587ba537d9e4baf5e9fdb797ed4d7cf237c28c5d368b92f2f3681334585fec",
                     "indexes": {
@@ -2837,11 +2837,11 @@
             ]
         },
         "_info": {
-            "hash": "0x70fd375fa484edac9f40eba586135d91732d5afb87c19934ff0a6b8fd43271fa",
+            "hash": "0x7cd792be6ed03fe9eec94cdaf3c7c326f8815f3056d4f4e2e9a491ef057cea1f",
             "comment": "`execution-spec-tests` generated test",
-            "filling-transition-tool": "Hyperledger Besu evm 24.7-develop-30c96c7",
+            "filling-transition-tool": "Hyperledger Besu evm 24.8-develop-f5d6e72",
             "description": "Test function documentation:\n\n    Tests call data into EXT*CALL including multiple offset conditions.\n\n    Caller pushes data into memory, then calls the target.  Target writes 64 bytes of call data\n    to storage and a success byte.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692-prague@v1.0.7/tests/prague/eip7692_eof_v1/eip7069_extcall/test_calldata.py#L128",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.0.8/tests/prague/eip7692_eof_v1/eip7069_extcall/test_calldata.py#L128",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7069.md",
             "reference-spec-version": "1795943aeacc86131d5ab6bb3d65824b3b1d4cad"
         }
@@ -2860,7 +2860,7 @@
         "pre": {
             "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b": {
                 "nonce": "0x00",
-                "balance": "0x0de0b6b3a7640000",
+                "balance": "0x3635c9adc5dea00000",
                 "code": "0x",
                 "storage": {}
             },
@@ -2898,7 +2898,7 @@
         "post": {
             "Prague": [
                 {
-                    "hash": "0x8bb55c81c74cd90d6188a7d86d158773a49f43e682a03290fe5c770e09282a4a",
+                    "hash": "0x94bf3cca5a5f2a8011078be8b78fdf7d7d821576bfbd74248046643cfc1821f1",
                     "logs": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
                     "txbytes": "0xf860800a831e8480940000000000000000000000000000000000001100808025a0b3afc79e7eb6744553c987dfa51e04eec7c6d695e6f730badd8150d43c6611fda056587ba537d9e4baf5e9fdb797ed4d7cf237c28c5d368b92f2f3681334585fec",
                     "indexes": {
@@ -2910,11 +2910,11 @@
             ]
         },
         "_info": {
-            "hash": "0x5e2ebaf3eb78e50fe20ba0f1309a7d8eb05d42f180ea4d8400ad7e25bb8de26b",
+            "hash": "0xad0775316e384be2e9e6cba774834209a634462a20bc4c815d85683d8b9792b5",
             "comment": "`execution-spec-tests` generated test",
-            "filling-transition-tool": "Hyperledger Besu evm 24.7-develop-30c96c7",
+            "filling-transition-tool": "Hyperledger Besu evm 24.8-develop-f5d6e72",
             "description": "Test function documentation:\n\n    Tests call data into EXT*CALL including multiple offset conditions.\n\n    Caller pushes data into memory, then calls the target.  Target writes 64 bytes of call data\n    to storage and a success byte.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692-prague@v1.0.7/tests/prague/eip7692_eof_v1/eip7069_extcall/test_calldata.py#L128",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.0.8/tests/prague/eip7692_eof_v1/eip7069_extcall/test_calldata.py#L128",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7069.md",
             "reference-spec-version": "1795943aeacc86131d5ab6bb3d65824b3b1d4cad"
         }
@@ -2933,7 +2933,7 @@
         "pre": {
             "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b": {
                 "nonce": "0x00",
-                "balance": "0x0de0b6b3a7640000",
+                "balance": "0x3635c9adc5dea00000",
                 "code": "0x",
                 "storage": {}
             },
@@ -2971,7 +2971,7 @@
         "post": {
             "Prague": [
                 {
-                    "hash": "0x05f521e9178a006b60296856e8e8f4c0c7dd4d8c16374770576bf2efba54f354",
+                    "hash": "0x57408a10d09fb5908935fc673e58c0fc184c35660b5ea2633e5834ffb169f42e",
                     "logs": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
                     "txbytes": "0xf860800a831e8480940000000000000000000000000000000000001100808025a0b3afc79e7eb6744553c987dfa51e04eec7c6d695e6f730badd8150d43c6611fda056587ba537d9e4baf5e9fdb797ed4d7cf237c28c5d368b92f2f3681334585fec",
                     "indexes": {
@@ -2983,11 +2983,11 @@
             ]
         },
         "_info": {
-            "hash": "0x8c4622143095eacf5e0ae51714b15bf9d2285d78b6e7c4109cd6d8e353d30bff",
+            "hash": "0xe564319bf95f6fdcc8cad424fdc3f6265a5cbd34a3a7aa44cff8f8e89565817c",
             "comment": "`execution-spec-tests` generated test",
-            "filling-transition-tool": "Hyperledger Besu evm 24.7-develop-30c96c7",
+            "filling-transition-tool": "Hyperledger Besu evm 24.8-develop-f5d6e72",
             "description": "Test function documentation:\n\n    Tests call data into EXT*CALL including multiple offset conditions.\n\n    Caller pushes data into memory, then calls the target.  Target writes 64 bytes of call data\n    to storage and a success byte.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692-prague@v1.0.7/tests/prague/eip7692_eof_v1/eip7069_extcall/test_calldata.py#L128",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.0.8/tests/prague/eip7692_eof_v1/eip7069_extcall/test_calldata.py#L128",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7069.md",
             "reference-spec-version": "1795943aeacc86131d5ab6bb3d65824b3b1d4cad"
         }
@@ -3006,7 +3006,7 @@
         "pre": {
             "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b": {
                 "nonce": "0x00",
-                "balance": "0x0de0b6b3a7640000",
+                "balance": "0x3635c9adc5dea00000",
                 "code": "0x",
                 "storage": {}
             },
@@ -3044,7 +3044,7 @@
         "post": {
             "Prague": [
                 {
-                    "hash": "0xc3ddec7071e764240adfa12d17baaeb75c2765a39cea504892833ae4551c420c",
+                    "hash": "0x249eee8a44dc9426ec2055e1afb6f13e4dd4a77f7b62ebe55f6e0fa448d6af99",
                     "logs": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
                     "txbytes": "0xf860800a831e8480940000000000000000000000000000000000001100808025a0b3afc79e7eb6744553c987dfa51e04eec7c6d695e6f730badd8150d43c6611fda056587ba537d9e4baf5e9fdb797ed4d7cf237c28c5d368b92f2f3681334585fec",
                     "indexes": {
@@ -3056,11 +3056,11 @@
             ]
         },
         "_info": {
-            "hash": "0x6d36dd0b3cec40e44f8a6c91c20d13141573fc2932089797c4c60b807b85259e",
+            "hash": "0x356faf94c033372f6d1d578cfecc61103a5c75821406538130547d511040f001",
             "comment": "`execution-spec-tests` generated test",
-            "filling-transition-tool": "Hyperledger Besu evm 24.7-develop-30c96c7",
+            "filling-transition-tool": "Hyperledger Besu evm 24.8-develop-f5d6e72",
             "description": "Test function documentation:\n\n    Tests call data into EXT*CALL including multiple offset conditions.\n\n    Caller pushes data into memory, then calls the target.  Target writes 64 bytes of call data\n    to storage and a success byte.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692-prague@v1.0.7/tests/prague/eip7692_eof_v1/eip7069_extcall/test_calldata.py#L128",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.0.8/tests/prague/eip7692_eof_v1/eip7069_extcall/test_calldata.py#L128",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7069.md",
             "reference-spec-version": "1795943aeacc86131d5ab6bb3d65824b3b1d4cad"
         }
@@ -3079,7 +3079,7 @@
         "pre": {
             "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b": {
                 "nonce": "0x00",
-                "balance": "0x0de0b6b3a7640000",
+                "balance": "0x3635c9adc5dea00000",
                 "code": "0x",
                 "storage": {}
             },
@@ -3117,7 +3117,7 @@
         "post": {
             "Prague": [
                 {
-                    "hash": "0x8f3da5af33932c00bbcd80abf245ed6b8964e39cece292e041f49d5f1e758f1e",
+                    "hash": "0x53a003d4f576b81a756405b762003ae01bfce087135eaa5d905dccb23ec6ddf9",
                     "logs": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
                     "txbytes": "0xf860800a831e8480940000000000000000000000000000000000001100808025a0b3afc79e7eb6744553c987dfa51e04eec7c6d695e6f730badd8150d43c6611fda056587ba537d9e4baf5e9fdb797ed4d7cf237c28c5d368b92f2f3681334585fec",
                     "indexes": {
@@ -3129,11 +3129,11 @@
             ]
         },
         "_info": {
-            "hash": "0xfb4d87a210dc9067ce6f604b4952bd156db52f53351491ac69471c15ebd4b7d2",
+            "hash": "0xcb193baeb9a6246651e632df2547f7f0b669eb8561dd36d423482c14c50ce743",
             "comment": "`execution-spec-tests` generated test",
-            "filling-transition-tool": "Hyperledger Besu evm 24.7-develop-30c96c7",
+            "filling-transition-tool": "Hyperledger Besu evm 24.8-develop-f5d6e72",
             "description": "Test function documentation:\n\n    Tests call data into EXT*CALL including multiple offset conditions.\n\n    Caller pushes data into memory, then calls the target.  Target writes 64 bytes of call data\n    to storage and a success byte.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692-prague@v1.0.7/tests/prague/eip7692_eof_v1/eip7069_extcall/test_calldata.py#L128",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.0.8/tests/prague/eip7692_eof_v1/eip7069_extcall/test_calldata.py#L128",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7069.md",
             "reference-spec-version": "1795943aeacc86131d5ab6bb3d65824b3b1d4cad"
         }
@@ -3152,7 +3152,7 @@
         "pre": {
             "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b": {
                 "nonce": "0x00",
-                "balance": "0x0de0b6b3a7640000",
+                "balance": "0x3635c9adc5dea00000",
                 "code": "0x",
                 "storage": {}
             },
@@ -3190,7 +3190,7 @@
         "post": {
             "Prague": [
                 {
-                    "hash": "0xf8e062fed0d24f1e2d8742146dd0e42c98da77a50bb048961cc60533256501a2",
+                    "hash": "0x99f310502cfedd8671e40e0f09e79de25b7102b53d48c2a640bb6a3ee9c5c60c",
                     "logs": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
                     "txbytes": "0xf860800a831e8480940000000000000000000000000000000000001100808025a0b3afc79e7eb6744553c987dfa51e04eec7c6d695e6f730badd8150d43c6611fda056587ba537d9e4baf5e9fdb797ed4d7cf237c28c5d368b92f2f3681334585fec",
                     "indexes": {
@@ -3202,11 +3202,11 @@
             ]
         },
         "_info": {
-            "hash": "0x3866d4713cba0cac80fdd749c37ceb40c81dfeb5a7b019a6fc4b3f73925b09f6",
+            "hash": "0x36094580cfdad398abcc60b62c8974880385e3746d4a5413c42f270c009e5022",
             "comment": "`execution-spec-tests` generated test",
-            "filling-transition-tool": "Hyperledger Besu evm 24.7-develop-30c96c7",
+            "filling-transition-tool": "Hyperledger Besu evm 24.8-develop-f5d6e72",
             "description": "Test function documentation:\n\n    Tests call data into EXT*CALL including multiple offset conditions.\n\n    Caller pushes data into memory, then calls the target.  Target writes 64 bytes of call data\n    to storage and a success byte.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692-prague@v1.0.7/tests/prague/eip7692_eof_v1/eip7069_extcall/test_calldata.py#L128",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.0.8/tests/prague/eip7692_eof_v1/eip7069_extcall/test_calldata.py#L128",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7069.md",
             "reference-spec-version": "1795943aeacc86131d5ab6bb3d65824b3b1d4cad"
         }
@@ -3225,7 +3225,7 @@
         "pre": {
             "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b": {
                 "nonce": "0x00",
-                "balance": "0x0de0b6b3a7640000",
+                "balance": "0x3635c9adc5dea00000",
                 "code": "0x",
                 "storage": {}
             },
@@ -3263,7 +3263,7 @@
         "post": {
             "Prague": [
                 {
-                    "hash": "0xa9ff5205c9627e24ec415a6740918399e1177eb1d2da58619f522b2ca930cb9b",
+                    "hash": "0x3d586741bdc48ba2a5f247966450d90b7c8c171449488106f90e945a07d34eba",
                     "logs": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
                     "txbytes": "0xf860800a831e8480940000000000000000000000000000000000001100808025a0b3afc79e7eb6744553c987dfa51e04eec7c6d695e6f730badd8150d43c6611fda056587ba537d9e4baf5e9fdb797ed4d7cf237c28c5d368b92f2f3681334585fec",
                     "indexes": {
@@ -3275,11 +3275,11 @@
             ]
         },
         "_info": {
-            "hash": "0x3a453a9a57eb11e14ab8f431f75c477d1f572b76dd5ab2bfeb51b6a6907f5e17",
+            "hash": "0xed5e429dced659c3828b8528e02be58172c66069b3a9bada4855c5ed40b5b8b6",
             "comment": "`execution-spec-tests` generated test",
-            "filling-transition-tool": "Hyperledger Besu evm 24.7-develop-30c96c7",
+            "filling-transition-tool": "Hyperledger Besu evm 24.8-develop-f5d6e72",
             "description": "Test function documentation:\n\n    Tests call data into EXT*CALL including multiple offset conditions.\n\n    Caller pushes data into memory, then calls the target.  Target writes 64 bytes of call data\n    to storage and a success byte.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692-prague@v1.0.7/tests/prague/eip7692_eof_v1/eip7069_extcall/test_calldata.py#L128",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.0.8/tests/prague/eip7692_eof_v1/eip7069_extcall/test_calldata.py#L128",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7069.md",
             "reference-spec-version": "1795943aeacc86131d5ab6bb3d65824b3b1d4cad"
         }
@@ -3298,7 +3298,7 @@
         "pre": {
             "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b": {
                 "nonce": "0x00",
-                "balance": "0x0de0b6b3a7640000",
+                "balance": "0x3635c9adc5dea00000",
                 "code": "0x",
                 "storage": {}
             },
@@ -3336,7 +3336,7 @@
         "post": {
             "Prague": [
                 {
-                    "hash": "0x3431821176e46040f54481388b4d9231e2fdcc6130e9818829eb9fc2ef295749",
+                    "hash": "0x0c0973c35fb2a1782f8dde1a875624bd4db70a07839c96daab5088ba143949d2",
                     "logs": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
                     "txbytes": "0xf860800a831e8480940000000000000000000000000000000000001100808025a0b3afc79e7eb6744553c987dfa51e04eec7c6d695e6f730badd8150d43c6611fda056587ba537d9e4baf5e9fdb797ed4d7cf237c28c5d368b92f2f3681334585fec",
                     "indexes": {
@@ -3348,11 +3348,11 @@
             ]
         },
         "_info": {
-            "hash": "0x519af7d5d55b9d969a78534702673efa08a98655ec00d741126dbdeaabd162fd",
+            "hash": "0xfc3430cb3e5ee86df6d336d68405d5b2702953326cfa84dab36d3f89ab6f8359",
             "comment": "`execution-spec-tests` generated test",
-            "filling-transition-tool": "Hyperledger Besu evm 24.7-develop-30c96c7",
+            "filling-transition-tool": "Hyperledger Besu evm 24.8-develop-f5d6e72",
             "description": "Test function documentation:\n\n    Tests call data into EXT*CALL including multiple offset conditions.\n\n    Caller pushes data into memory, then calls the target.  Target writes 64 bytes of call data\n    to storage and a success byte.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692-prague@v1.0.7/tests/prague/eip7692_eof_v1/eip7069_extcall/test_calldata.py#L128",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.0.8/tests/prague/eip7692_eof_v1/eip7069_extcall/test_calldata.py#L128",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7069.md",
             "reference-spec-version": "1795943aeacc86131d5ab6bb3d65824b3b1d4cad"
         }
@@ -3371,7 +3371,7 @@
         "pre": {
             "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b": {
                 "nonce": "0x00",
-                "balance": "0x0de0b6b3a7640000",
+                "balance": "0x3635c9adc5dea00000",
                 "code": "0x",
                 "storage": {}
             },
@@ -3409,7 +3409,7 @@
         "post": {
             "Prague": [
                 {
-                    "hash": "0x07e183ae9ffee64e49a9fd9f044f4653deeb53c914358058168dc034654959ad",
+                    "hash": "0x82f5d60e503f37a24941e5888f06693c9b536c7fcb613435b42fdd98f7121370",
                     "logs": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
                     "txbytes": "0xf860800a831e8480940000000000000000000000000000000000001100808025a0b3afc79e7eb6744553c987dfa51e04eec7c6d695e6f730badd8150d43c6611fda056587ba537d9e4baf5e9fdb797ed4d7cf237c28c5d368b92f2f3681334585fec",
                     "indexes": {
@@ -3421,11 +3421,11 @@
             ]
         },
         "_info": {
-            "hash": "0xf129e85261508a3251616d2c3a098be37cc70c80a63ca2119e5eb028e40074ad",
+            "hash": "0x879b0879640acb493e95879ef4f31c86a65b96a499776bc0b29b27c54ee03ea3",
             "comment": "`execution-spec-tests` generated test",
-            "filling-transition-tool": "Hyperledger Besu evm 24.7-develop-30c96c7",
+            "filling-transition-tool": "Hyperledger Besu evm 24.8-develop-f5d6e72",
             "description": "Test function documentation:\n\n    Tests call data into EXT*CALL including multiple offset conditions.\n\n    Caller pushes data into memory, then calls the target.  Target writes 64 bytes of call data\n    to storage and a success byte.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692-prague@v1.0.7/tests/prague/eip7692_eof_v1/eip7069_extcall/test_calldata.py#L128",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.0.8/tests/prague/eip7692_eof_v1/eip7069_extcall/test_calldata.py#L128",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7069.md",
             "reference-spec-version": "1795943aeacc86131d5ab6bb3d65824b3b1d4cad"
         }
@@ -3444,7 +3444,7 @@
         "pre": {
             "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b": {
                 "nonce": "0x00",
-                "balance": "0x0de0b6b3a7640000",
+                "balance": "0x3635c9adc5dea00000",
                 "code": "0x",
                 "storage": {}
             },
@@ -3482,7 +3482,7 @@
         "post": {
             "Prague": [
                 {
-                    "hash": "0xa8e024c5ff1f05b357902905b813f1ca4ef1711c47b7e3b32e0b7e6c318f05fd",
+                    "hash": "0x1078ab0774e721aae7c1feba55d3df8d22794b0adfbe5936b9c68165bb81291b",
                     "logs": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
                     "txbytes": "0xf860800a831e8480940000000000000000000000000000000000001100808025a0b3afc79e7eb6744553c987dfa51e04eec7c6d695e6f730badd8150d43c6611fda056587ba537d9e4baf5e9fdb797ed4d7cf237c28c5d368b92f2f3681334585fec",
                     "indexes": {
@@ -3494,11 +3494,11 @@
             ]
         },
         "_info": {
-            "hash": "0x5020b9828f2003cf14fd5c586144e9631591aab56fb35490f6425444f8030fd1",
+            "hash": "0xf9c25a7200ffe9fb70d7456da40d02ce1c3c7ab0a86ee524589a70faf2f5ad79",
             "comment": "`execution-spec-tests` generated test",
-            "filling-transition-tool": "Hyperledger Besu evm 24.7-develop-30c96c7",
+            "filling-transition-tool": "Hyperledger Besu evm 24.8-develop-f5d6e72",
             "description": "Test function documentation:\n\n    Tests call data into EXT*CALL including multiple offset conditions.\n\n    Caller pushes data into memory, then calls the target.  Target writes 64 bytes of call data\n    to storage and a success byte.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692-prague@v1.0.7/tests/prague/eip7692_eof_v1/eip7069_extcall/test_calldata.py#L128",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.0.8/tests/prague/eip7692_eof_v1/eip7069_extcall/test_calldata.py#L128",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7069.md",
             "reference-spec-version": "1795943aeacc86131d5ab6bb3d65824b3b1d4cad"
         }
@@ -3517,7 +3517,7 @@
         "pre": {
             "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b": {
                 "nonce": "0x00",
-                "balance": "0x0de0b6b3a7640000",
+                "balance": "0x3635c9adc5dea00000",
                 "code": "0x",
                 "storage": {}
             },
@@ -3555,7 +3555,7 @@
         "post": {
             "Prague": [
                 {
-                    "hash": "0x48cb95d4f822ebaaec59762d77129e5bf3ccc7c59e5dd112a04ea4e347064400",
+                    "hash": "0x3439ccbcd0ae9e85b36f7635263a34f5f568738edceaa409e285138885b93b36",
                     "logs": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
                     "txbytes": "0xf860800a831e8480940000000000000000000000000000000000001100808025a0b3afc79e7eb6744553c987dfa51e04eec7c6d695e6f730badd8150d43c6611fda056587ba537d9e4baf5e9fdb797ed4d7cf237c28c5d368b92f2f3681334585fec",
                     "indexes": {
@@ -3567,11 +3567,11 @@
             ]
         },
         "_info": {
-            "hash": "0xa6929509a3981a1365915a1286488da1f040507ad5fccf576df2b10b47cfde0c",
+            "hash": "0x800030e27b187d6f9a11c1faebf5a73bfc4f0de3761265c9511201e252ff26ef",
             "comment": "`execution-spec-tests` generated test",
-            "filling-transition-tool": "Hyperledger Besu evm 24.7-develop-30c96c7",
+            "filling-transition-tool": "Hyperledger Besu evm 24.8-develop-f5d6e72",
             "description": "Test function documentation:\n\n    Tests call data into EXT*CALL including multiple offset conditions.\n\n    Caller pushes data into memory, then calls the target.  Target writes 64 bytes of call data\n    to storage and a success byte.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692-prague@v1.0.7/tests/prague/eip7692_eof_v1/eip7069_extcall/test_calldata.py#L128",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.0.8/tests/prague/eip7692_eof_v1/eip7069_extcall/test_calldata.py#L128",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7069.md",
             "reference-spec-version": "1795943aeacc86131d5ab6bb3d65824b3b1d4cad"
         }
@@ -3590,7 +3590,7 @@
         "pre": {
             "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b": {
                 "nonce": "0x00",
-                "balance": "0x0de0b6b3a7640000",
+                "balance": "0x3635c9adc5dea00000",
                 "code": "0x",
                 "storage": {}
             },
@@ -3628,7 +3628,7 @@
         "post": {
             "Prague": [
                 {
-                    "hash": "0x7911cf783289eff628ca9d3882f93bde409f1ecf59a34b243f78b434be820ac3",
+                    "hash": "0x60e9ef479b12e59b16523e5451d2cfdd3c0bede14ac6c9e65f2737ee84e3a6b0",
                     "logs": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
                     "txbytes": "0xf860800a831e8480940000000000000000000000000000000000001100808025a0b3afc79e7eb6744553c987dfa51e04eec7c6d695e6f730badd8150d43c6611fda056587ba537d9e4baf5e9fdb797ed4d7cf237c28c5d368b92f2f3681334585fec",
                     "indexes": {
@@ -3640,11 +3640,11 @@
             ]
         },
         "_info": {
-            "hash": "0x3ad35693a135372da1afad54e13b0fdd61d7d8d452f128880a30338a25497a62",
+            "hash": "0x6523631e75dbd3d11a561bc89730e6bca391f40617d7b99647f7f67cdb83e700",
             "comment": "`execution-spec-tests` generated test",
-            "filling-transition-tool": "Hyperledger Besu evm 24.7-develop-30c96c7",
+            "filling-transition-tool": "Hyperledger Besu evm 24.8-develop-f5d6e72",
             "description": "Test function documentation:\n\n    Tests call data into EXT*CALL including multiple offset conditions.\n\n    Caller pushes data into memory, then calls the target.  Target writes 64 bytes of call data\n    to storage and a success byte.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692-prague@v1.0.7/tests/prague/eip7692_eof_v1/eip7069_extcall/test_calldata.py#L128",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.0.8/tests/prague/eip7692_eof_v1/eip7069_extcall/test_calldata.py#L128",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7069.md",
             "reference-spec-version": "1795943aeacc86131d5ab6bb3d65824b3b1d4cad"
         }
@@ -3663,7 +3663,7 @@
         "pre": {
             "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b": {
                 "nonce": "0x00",
-                "balance": "0x0de0b6b3a7640000",
+                "balance": "0x3635c9adc5dea00000",
                 "code": "0x",
                 "storage": {}
             },
@@ -3701,7 +3701,7 @@
         "post": {
             "Prague": [
                 {
-                    "hash": "0x075653c5c2d2e9656c27b22eddecb541f6363497f79b049e79cf4917011f745c",
+                    "hash": "0xbf60737d4d424585a04ff7d22a88df2726f1fcc7682cc08cf84dacf9ac8e0b91",
                     "logs": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
                     "txbytes": "0xf860800a831e8480940000000000000000000000000000000000001100808025a0b3afc79e7eb6744553c987dfa51e04eec7c6d695e6f730badd8150d43c6611fda056587ba537d9e4baf5e9fdb797ed4d7cf237c28c5d368b92f2f3681334585fec",
                     "indexes": {
@@ -3713,11 +3713,11 @@
             ]
         },
         "_info": {
-            "hash": "0x806ed655bd5219caa44cc454518a94b076771fb988d4a83445e7338d28c2d74e",
+            "hash": "0x44514eee798da834ca8aee2d645e9677400afce48b1818d55faa16182c9e3193",
             "comment": "`execution-spec-tests` generated test",
-            "filling-transition-tool": "Hyperledger Besu evm 24.7-develop-30c96c7",
+            "filling-transition-tool": "Hyperledger Besu evm 24.8-develop-f5d6e72",
             "description": "Test function documentation:\n\n    Tests call data into EXT*CALL including multiple offset conditions.\n\n    Caller pushes data into memory, then calls the target.  Target writes 64 bytes of call data\n    to storage and a success byte.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692-prague@v1.0.7/tests/prague/eip7692_eof_v1/eip7069_extcall/test_calldata.py#L128",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.0.8/tests/prague/eip7692_eof_v1/eip7069_extcall/test_calldata.py#L128",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7069.md",
             "reference-spec-version": "1795943aeacc86131d5ab6bb3d65824b3b1d4cad"
         }
@@ -3736,7 +3736,7 @@
         "pre": {
             "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b": {
                 "nonce": "0x00",
-                "balance": "0x0de0b6b3a7640000",
+                "balance": "0x3635c9adc5dea00000",
                 "code": "0x",
                 "storage": {}
             },
@@ -3774,7 +3774,7 @@
         "post": {
             "Prague": [
                 {
-                    "hash": "0xb04c3a1e73a235f306cb1675a903be9cb8e5c748669a8853b5b9a8f4c5b7b1c5",
+                    "hash": "0x20a2ae36e2ea5b406324f543df8d9a88a171d4af4d4bdc3555fc233706d96ff6",
                     "logs": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
                     "txbytes": "0xf860800a831e8480940000000000000000000000000000000000001100808025a0b3afc79e7eb6744553c987dfa51e04eec7c6d695e6f730badd8150d43c6611fda056587ba537d9e4baf5e9fdb797ed4d7cf237c28c5d368b92f2f3681334585fec",
                     "indexes": {
@@ -3786,11 +3786,11 @@
             ]
         },
         "_info": {
-            "hash": "0x5974b90cd40537c3ea7a61d0e8e488e1d2d4b2d3611ce9738be2e9d8d2ece40a",
+            "hash": "0x6ec32eb68bf6273129c83c249eb65821f6a812fb0104f9dc696047127ce5cc35",
             "comment": "`execution-spec-tests` generated test",
-            "filling-transition-tool": "Hyperledger Besu evm 24.7-develop-30c96c7",
+            "filling-transition-tool": "Hyperledger Besu evm 24.8-develop-f5d6e72",
             "description": "Test function documentation:\n\n    Tests call data into EXT*CALL including multiple offset conditions.\n\n    Caller pushes data into memory, then calls the target.  Target writes 64 bytes of call data\n    to storage and a success byte.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692-prague@v1.0.7/tests/prague/eip7692_eof_v1/eip7069_extcall/test_calldata.py#L128",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.0.8/tests/prague/eip7692_eof_v1/eip7069_extcall/test_calldata.py#L128",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7069.md",
             "reference-spec-version": "1795943aeacc86131d5ab6bb3d65824b3b1d4cad"
         }
@@ -3809,7 +3809,7 @@
         "pre": {
             "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b": {
                 "nonce": "0x00",
-                "balance": "0x0de0b6b3a7640000",
+                "balance": "0x3635c9adc5dea00000",
                 "code": "0x",
                 "storage": {}
             },
@@ -3847,7 +3847,7 @@
         "post": {
             "Prague": [
                 {
-                    "hash": "0x490fbdd214735e42a7f959e5b77cc88eec739df55231e85f005df3820dc1e70c",
+                    "hash": "0x4b9353d961977152b0cf66fad732ceae7e02d7e43f6a2084710c02e1e98cd13a",
                     "logs": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
                     "txbytes": "0xf860800a831e8480940000000000000000000000000000000000001100808025a0b3afc79e7eb6744553c987dfa51e04eec7c6d695e6f730badd8150d43c6611fda056587ba537d9e4baf5e9fdb797ed4d7cf237c28c5d368b92f2f3681334585fec",
                     "indexes": {
@@ -3859,11 +3859,11 @@
             ]
         },
         "_info": {
-            "hash": "0xc055953c6ed1a691b254a1d67ad6f58ffa7076b833dee20328cfc790de56014c",
+            "hash": "0x4ee0d824655f75163499a2e2d3810979222014da29515d74e5b32074023f005e",
             "comment": "`execution-spec-tests` generated test",
-            "filling-transition-tool": "Hyperledger Besu evm 24.7-develop-30c96c7",
+            "filling-transition-tool": "Hyperledger Besu evm 24.8-develop-f5d6e72",
             "description": "Test function documentation:\n\n    Tests call data into EXT*CALL including multiple offset conditions.\n\n    Caller pushes data into memory, then calls the target.  Target writes 64 bytes of call data\n    to storage and a success byte.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692-prague@v1.0.7/tests/prague/eip7692_eof_v1/eip7069_extcall/test_calldata.py#L128",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.0.8/tests/prague/eip7692_eof_v1/eip7069_extcall/test_calldata.py#L128",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7069.md",
             "reference-spec-version": "1795943aeacc86131d5ab6bb3d65824b3b1d4cad"
         }
@@ -3882,7 +3882,7 @@
         "pre": {
             "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b": {
                 "nonce": "0x00",
-                "balance": "0x0de0b6b3a7640000",
+                "balance": "0x3635c9adc5dea00000",
                 "code": "0x",
                 "storage": {}
             },
@@ -3920,7 +3920,7 @@
         "post": {
             "Prague": [
                 {
-                    "hash": "0xe0e3c74d18feda94363f0a767d029abcc8a092770ba1f351ba37a950a777cd3e",
+                    "hash": "0xbaa045d8e2036ab2be4feefb5dfac045d42096712df281cf55f6bc68d0f4ce39",
                     "logs": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
                     "txbytes": "0xf860800a831e8480940000000000000000000000000000000000001100808025a0b3afc79e7eb6744553c987dfa51e04eec7c6d695e6f730badd8150d43c6611fda056587ba537d9e4baf5e9fdb797ed4d7cf237c28c5d368b92f2f3681334585fec",
                     "indexes": {
@@ -3932,11 +3932,11 @@
             ]
         },
         "_info": {
-            "hash": "0x229709c14c9c210798363f94c53fbedbe3979a88a52f18cee190e52e7de21a41",
+            "hash": "0xb5c40cff24ecd96055faeba3487a15c8e3c2068a498dfcfff2ec11ca3b5843a2",
             "comment": "`execution-spec-tests` generated test",
-            "filling-transition-tool": "Hyperledger Besu evm 24.7-develop-30c96c7",
+            "filling-transition-tool": "Hyperledger Besu evm 24.8-develop-f5d6e72",
             "description": "Test function documentation:\n\n    Tests call data into EXT*CALL including multiple offset conditions.\n\n    Caller pushes data into memory, then calls the target.  Target writes 64 bytes of call data\n    to storage and a success byte.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692-prague@v1.0.7/tests/prague/eip7692_eof_v1/eip7069_extcall/test_calldata.py#L128",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.0.8/tests/prague/eip7692_eof_v1/eip7069_extcall/test_calldata.py#L128",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7069.md",
             "reference-spec-version": "1795943aeacc86131d5ab6bb3d65824b3b1d4cad"
         }
@@ -3955,7 +3955,7 @@
         "pre": {
             "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b": {
                 "nonce": "0x00",
-                "balance": "0x0de0b6b3a7640000",
+                "balance": "0x3635c9adc5dea00000",
                 "code": "0x",
                 "storage": {}
             },
@@ -3993,7 +3993,7 @@
         "post": {
             "Prague": [
                 {
-                    "hash": "0xb40b62ca949dfeccc4d2d504b0fd1f118474670435b1f198f2a6d8d64e45b40b",
+                    "hash": "0x8d2906cdc8c3035c64b3de6f3d06865dc4b9a84b88f046ff5c8c8683e1134254",
                     "logs": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
                     "txbytes": "0xf860800a831e8480940000000000000000000000000000000000001100808025a0b3afc79e7eb6744553c987dfa51e04eec7c6d695e6f730badd8150d43c6611fda056587ba537d9e4baf5e9fdb797ed4d7cf237c28c5d368b92f2f3681334585fec",
                     "indexes": {
@@ -4005,11 +4005,11 @@
             ]
         },
         "_info": {
-            "hash": "0xb188ef5250d7a083cc9de033066732c4fbcb616a360cc7899e4e0bad08c69f53",
+            "hash": "0xf988eb1bcbb34c34f10add4a66a2a975e434e9de854311848e01fbbf15947c26",
             "comment": "`execution-spec-tests` generated test",
-            "filling-transition-tool": "Hyperledger Besu evm 24.7-develop-30c96c7",
+            "filling-transition-tool": "Hyperledger Besu evm 24.8-develop-f5d6e72",
             "description": "Test function documentation:\n\n    Tests call data into EXT*CALL including multiple offset conditions.\n\n    Caller pushes data into memory, then calls the target.  Target writes 64 bytes of call data\n    to storage and a success byte.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692-prague@v1.0.7/tests/prague/eip7692_eof_v1/eip7069_extcall/test_calldata.py#L128",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.0.8/tests/prague/eip7692_eof_v1/eip7069_extcall/test_calldata.py#L128",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7069.md",
             "reference-spec-version": "1795943aeacc86131d5ab6bb3d65824b3b1d4cad"
         }
@@ -4028,7 +4028,7 @@
         "pre": {
             "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b": {
                 "nonce": "0x00",
-                "balance": "0x0de0b6b3a7640000",
+                "balance": "0x3635c9adc5dea00000",
                 "code": "0x",
                 "storage": {}
             },
@@ -4066,7 +4066,7 @@
         "post": {
             "Prague": [
                 {
-                    "hash": "0x0720f53e8873dabd7e46660fa2dd0c892d4601021755f8fb4a32cd0a269ad32e",
+                    "hash": "0xc4865ea320a390f1af9de658fd8e635ea997cfc435cf92bdc515678f0afc21c8",
                     "logs": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
                     "txbytes": "0xf860800a831e8480940000000000000000000000000000000000001100808025a0b3afc79e7eb6744553c987dfa51e04eec7c6d695e6f730badd8150d43c6611fda056587ba537d9e4baf5e9fdb797ed4d7cf237c28c5d368b92f2f3681334585fec",
                     "indexes": {
@@ -4078,11 +4078,11 @@
             ]
         },
         "_info": {
-            "hash": "0x52f4ff668c55e81ec47dca1b9098d2294e1e367d79f4e64acffddce6c213ff79",
+            "hash": "0x69adec6254a8beb3ede53b7fca5cb350d3e905d9bcaa5e86c30c314e8a5e58b4",
             "comment": "`execution-spec-tests` generated test",
-            "filling-transition-tool": "Hyperledger Besu evm 24.7-develop-30c96c7",
+            "filling-transition-tool": "Hyperledger Besu evm 24.8-develop-f5d6e72",
             "description": "Test function documentation:\n\n    Tests call data into EXT*CALL including multiple offset conditions.\n\n    Caller pushes data into memory, then calls the target.  Target writes 64 bytes of call data\n    to storage and a success byte.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692-prague@v1.0.7/tests/prague/eip7692_eof_v1/eip7069_extcall/test_calldata.py#L128",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.0.8/tests/prague/eip7692_eof_v1/eip7069_extcall/test_calldata.py#L128",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7069.md",
             "reference-spec-version": "1795943aeacc86131d5ab6bb3d65824b3b1d4cad"
         }
@@ -4101,7 +4101,7 @@
         "pre": {
             "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b": {
                 "nonce": "0x00",
-                "balance": "0x0de0b6b3a7640000",
+                "balance": "0x3635c9adc5dea00000",
                 "code": "0x",
                 "storage": {}
             },
@@ -4139,7 +4139,7 @@
         "post": {
             "Prague": [
                 {
-                    "hash": "0xdcdba61e065db5788e5bbb582fc9cff6149cc3c2a1207ac729ab9ec5dc074603",
+                    "hash": "0xadcd27b7af3696234db6e5da1835394cb898eb48a59eb3a9fc4cb8bc0a1e6124",
                     "logs": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
                     "txbytes": "0xf860800a831e8480940000000000000000000000000000000000001100808025a0b3afc79e7eb6744553c987dfa51e04eec7c6d695e6f730badd8150d43c6611fda056587ba537d9e4baf5e9fdb797ed4d7cf237c28c5d368b92f2f3681334585fec",
                     "indexes": {
@@ -4151,11 +4151,11 @@
             ]
         },
         "_info": {
-            "hash": "0xc8ed8007c5406c7090cae7a2aff1542b035b1bf24c6646f800baab70da150dc1",
+            "hash": "0x93da2d0ee7335907ef79fd70636ba4b377e375dafafb50c5a7c69fdea6e20b30",
             "comment": "`execution-spec-tests` generated test",
-            "filling-transition-tool": "Hyperledger Besu evm 24.7-develop-30c96c7",
+            "filling-transition-tool": "Hyperledger Besu evm 24.8-develop-f5d6e72",
             "description": "Test function documentation:\n\n    Tests call data into EXT*CALL including multiple offset conditions.\n\n    Caller pushes data into memory, then calls the target.  Target writes 64 bytes of call data\n    to storage and a success byte.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692-prague@v1.0.7/tests/prague/eip7692_eof_v1/eip7069_extcall/test_calldata.py#L128",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.0.8/tests/prague/eip7692_eof_v1/eip7069_extcall/test_calldata.py#L128",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7069.md",
             "reference-spec-version": "1795943aeacc86131d5ab6bb3d65824b3b1d4cad"
         }
@@ -4174,7 +4174,7 @@
         "pre": {
             "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b": {
                 "nonce": "0x00",
-                "balance": "0x0de0b6b3a7640000",
+                "balance": "0x3635c9adc5dea00000",
                 "code": "0x",
                 "storage": {}
             },
@@ -4212,7 +4212,7 @@
         "post": {
             "Prague": [
                 {
-                    "hash": "0xcc37789d3e1c3e3a97f72012edd49c62a63f6242a13722817f03d3e43807cda5",
+                    "hash": "0x1466d714a97471f67783f6920b39e009597b4288b3604d343a71094b4b29deec",
                     "logs": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
                     "txbytes": "0xf860800a831e8480940000000000000000000000000000000000001100808025a0b3afc79e7eb6744553c987dfa51e04eec7c6d695e6f730badd8150d43c6611fda056587ba537d9e4baf5e9fdb797ed4d7cf237c28c5d368b92f2f3681334585fec",
                     "indexes": {
@@ -4224,11 +4224,11 @@
             ]
         },
         "_info": {
-            "hash": "0x082b1e32beee5021ef02b04086e83a6d0b8f50d4e7289d1499b8235b142a2e15",
+            "hash": "0x1324c1786aafb48d0c5788b1bd879065488e650eb4351efb6b7c4937c03dc753",
             "comment": "`execution-spec-tests` generated test",
-            "filling-transition-tool": "Hyperledger Besu evm 24.7-develop-30c96c7",
+            "filling-transition-tool": "Hyperledger Besu evm 24.8-develop-f5d6e72",
             "description": "Test function documentation:\n\n    Tests call data into EXT*CALL including multiple offset conditions.\n\n    Caller pushes data into memory, then calls the target.  Target writes 64 bytes of call data\n    to storage and a success byte.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692-prague@v1.0.7/tests/prague/eip7692_eof_v1/eip7069_extcall/test_calldata.py#L128",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.0.8/tests/prague/eip7692_eof_v1/eip7069_extcall/test_calldata.py#L128",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7069.md",
             "reference-spec-version": "1795943aeacc86131d5ab6bb3d65824b3b1d4cad"
         }
@@ -4247,7 +4247,7 @@
         "pre": {
             "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b": {
                 "nonce": "0x00",
-                "balance": "0x0de0b6b3a7640000",
+                "balance": "0x3635c9adc5dea00000",
                 "code": "0x",
                 "storage": {}
             },
@@ -4285,7 +4285,7 @@
         "post": {
             "Prague": [
                 {
-                    "hash": "0xaadae31f1e3d5ebac25b3399bf24dbc5ec59399e392ae472dfd15c02ff549441",
+                    "hash": "0x255c9372efb5ef004fca46b4522a8e395f40fb08123a6f9f6a00afd1c445d46c",
                     "logs": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
                     "txbytes": "0xf860800a831e8480940000000000000000000000000000000000001100808025a0b3afc79e7eb6744553c987dfa51e04eec7c6d695e6f730badd8150d43c6611fda056587ba537d9e4baf5e9fdb797ed4d7cf237c28c5d368b92f2f3681334585fec",
                     "indexes": {
@@ -4297,11 +4297,11 @@
             ]
         },
         "_info": {
-            "hash": "0xaafb5afe016730751a21d9bf8a57138d7210e09b0f541226cf985039c8139358",
+            "hash": "0x27ea3ccfc19043cf38c309c3ecb61dcd5781343e18dbe7fb21ae8c9f4249967f",
             "comment": "`execution-spec-tests` generated test",
-            "filling-transition-tool": "Hyperledger Besu evm 24.7-develop-30c96c7",
+            "filling-transition-tool": "Hyperledger Besu evm 24.8-develop-f5d6e72",
             "description": "Test function documentation:\n\n    Tests call data into EXT*CALL including multiple offset conditions.\n\n    Caller pushes data into memory, then calls the target.  Target writes 64 bytes of call data\n    to storage and a success byte.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692-prague@v1.0.7/tests/prague/eip7692_eof_v1/eip7069_extcall/test_calldata.py#L128",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.0.8/tests/prague/eip7692_eof_v1/eip7069_extcall/test_calldata.py#L128",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7069.md",
             "reference-spec-version": "1795943aeacc86131d5ab6bb3d65824b3b1d4cad"
         }
@@ -4320,7 +4320,7 @@
         "pre": {
             "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b": {
                 "nonce": "0x00",
-                "balance": "0x0de0b6b3a7640000",
+                "balance": "0x3635c9adc5dea00000",
                 "code": "0x",
                 "storage": {}
             },
@@ -4358,7 +4358,7 @@
         "post": {
             "Prague": [
                 {
-                    "hash": "0x6bf70e35d9b4536ad5f4ff7e627e1e14db684c7686592547ee168132542f848c",
+                    "hash": "0xad4ae4186d2cc8e6996e0e28cc5ee627f01e873120c5cb6107beddbc0be36637",
                     "logs": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
                     "txbytes": "0xf860800a831e8480940000000000000000000000000000000000001100808025a0b3afc79e7eb6744553c987dfa51e04eec7c6d695e6f730badd8150d43c6611fda056587ba537d9e4baf5e9fdb797ed4d7cf237c28c5d368b92f2f3681334585fec",
                     "indexes": {
@@ -4370,11 +4370,11 @@
             ]
         },
         "_info": {
-            "hash": "0x2b9e276aa620ac24a8814c2cd417490d127c69bc66ed4324c98eddf8958e8a5a",
+            "hash": "0x667176577e0b61578f858872fffe940b8e2f8fd8a2987c667855b0fb3e6ee76b",
             "comment": "`execution-spec-tests` generated test",
-            "filling-transition-tool": "Hyperledger Besu evm 24.7-develop-30c96c7",
+            "filling-transition-tool": "Hyperledger Besu evm 24.8-develop-f5d6e72",
             "description": "Test function documentation:\n\n    Tests call data into EXT*CALL including multiple offset conditions.\n\n    Caller pushes data into memory, then calls the target.  Target writes 64 bytes of call data\n    to storage and a success byte.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692-prague@v1.0.7/tests/prague/eip7692_eof_v1/eip7069_extcall/test_calldata.py#L128",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.0.8/tests/prague/eip7692_eof_v1/eip7069_extcall/test_calldata.py#L128",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7069.md",
             "reference-spec-version": "1795943aeacc86131d5ab6bb3d65824b3b1d4cad"
         }
@@ -4393,7 +4393,7 @@
         "pre": {
             "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b": {
                 "nonce": "0x00",
-                "balance": "0x0de0b6b3a7640000",
+                "balance": "0x3635c9adc5dea00000",
                 "code": "0x",
                 "storage": {}
             },
@@ -4431,7 +4431,7 @@
         "post": {
             "Prague": [
                 {
-                    "hash": "0xfed011ac375b377b3e4470d3aa280d2b50c4b7c6cbfb71fe60d5a3f6c14fd88d",
+                    "hash": "0xe4ccb960f2dcb63ec98e7a1b7eb24959a815e04c37cecbd1a8a18342915d0a7a",
                     "logs": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
                     "txbytes": "0xf860800a831e8480940000000000000000000000000000000000001100808025a0b3afc79e7eb6744553c987dfa51e04eec7c6d695e6f730badd8150d43c6611fda056587ba537d9e4baf5e9fdb797ed4d7cf237c28c5d368b92f2f3681334585fec",
                     "indexes": {
@@ -4443,11 +4443,11 @@
             ]
         },
         "_info": {
-            "hash": "0xf40e7b644a5d0c638d106eedae67eb919a3bb3233ed82acfbc98afce75761926",
+            "hash": "0x0584c4bda0ffee8be9b3565c39c78cf225dd494c736df1e5b19ce0c1eba1ccba",
             "comment": "`execution-spec-tests` generated test",
-            "filling-transition-tool": "Hyperledger Besu evm 24.7-develop-30c96c7",
+            "filling-transition-tool": "Hyperledger Besu evm 24.8-develop-f5d6e72",
             "description": "Test function documentation:\n\n    Tests call data into EXT*CALL including multiple offset conditions.\n\n    Caller pushes data into memory, then calls the target.  Target writes 64 bytes of call data\n    to storage and a success byte.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692-prague@v1.0.7/tests/prague/eip7692_eof_v1/eip7069_extcall/test_calldata.py#L128",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.0.8/tests/prague/eip7692_eof_v1/eip7069_extcall/test_calldata.py#L128",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7069.md",
             "reference-spec-version": "1795943aeacc86131d5ab6bb3d65824b3b1d4cad"
         }
@@ -4466,7 +4466,7 @@
         "pre": {
             "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b": {
                 "nonce": "0x00",
-                "balance": "0x0de0b6b3a7640000",
+                "balance": "0x3635c9adc5dea00000",
                 "code": "0x",
                 "storage": {}
             },
@@ -4504,7 +4504,7 @@
         "post": {
             "Prague": [
                 {
-                    "hash": "0x9764f50144394025c214086537afb6e6dd45e51fad230d4a33bbe3b1ed873a55",
+                    "hash": "0x9edd5a9504d3da0339dcc87dd91589df5fa7b9a724adc021897d03a6f36455c7",
                     "logs": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
                     "txbytes": "0xf860800a831e8480940000000000000000000000000000000000001100808025a0b3afc79e7eb6744553c987dfa51e04eec7c6d695e6f730badd8150d43c6611fda056587ba537d9e4baf5e9fdb797ed4d7cf237c28c5d368b92f2f3681334585fec",
                     "indexes": {
@@ -4516,11 +4516,11 @@
             ]
         },
         "_info": {
-            "hash": "0x0c35d5dd7c53b30ff1aea0fcbcc7221b45acae2edb6cbcbbfe738fd892d4c32a",
+            "hash": "0x507747d1c298ee9420278b6adf7bc2ae8a660f0e8c1793c158e94659c2428ddd",
             "comment": "`execution-spec-tests` generated test",
-            "filling-transition-tool": "Hyperledger Besu evm 24.7-develop-30c96c7",
+            "filling-transition-tool": "Hyperledger Besu evm 24.8-develop-f5d6e72",
             "description": "Test function documentation:\n\n    Tests call data into EXT*CALL including multiple offset conditions.\n\n    Caller pushes data into memory, then calls the target.  Target writes 64 bytes of call data\n    to storage and a success byte.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692-prague@v1.0.7/tests/prague/eip7692_eof_v1/eip7069_extcall/test_calldata.py#L128",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.0.8/tests/prague/eip7692_eof_v1/eip7069_extcall/test_calldata.py#L128",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7069.md",
             "reference-spec-version": "1795943aeacc86131d5ab6bb3d65824b3b1d4cad"
         }
@@ -4539,7 +4539,7 @@
         "pre": {
             "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b": {
                 "nonce": "0x00",
-                "balance": "0x0de0b6b3a7640000",
+                "balance": "0x3635c9adc5dea00000",
                 "code": "0x",
                 "storage": {}
             },
@@ -4577,7 +4577,7 @@
         "post": {
             "Prague": [
                 {
-                    "hash": "0x9da8257bcf6a38148836c093cf3bc45c37d3293d9e50d7b3300295de9c12ac0c",
+                    "hash": "0xb02cd4c2e3533afcc05d800c9f54dc7ea0f829a966acf8a18d8f5d91b441fdbd",
                     "logs": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
                     "txbytes": "0xf860800a831e8480940000000000000000000000000000000000001100808025a0b3afc79e7eb6744553c987dfa51e04eec7c6d695e6f730badd8150d43c6611fda056587ba537d9e4baf5e9fdb797ed4d7cf237c28c5d368b92f2f3681334585fec",
                     "indexes": {
@@ -4589,11 +4589,11 @@
             ]
         },
         "_info": {
-            "hash": "0x13381ab1c0ea6b6b84b4ce6079ff129f554a077d9919a54daab4cbe0c767d7fb",
+            "hash": "0xf011cd20cee052f5846ba27908ed1ff19526ea811c08db6dff060539ae6399f2",
             "comment": "`execution-spec-tests` generated test",
-            "filling-transition-tool": "Hyperledger Besu evm 24.7-develop-30c96c7",
+            "filling-transition-tool": "Hyperledger Besu evm 24.8-develop-f5d6e72",
             "description": "Test function documentation:\n\n    Tests call data into EXT*CALL including multiple offset conditions.\n\n    Caller pushes data into memory, then calls the target.  Target writes 64 bytes of call data\n    to storage and a success byte.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692-prague@v1.0.7/tests/prague/eip7692_eof_v1/eip7069_extcall/test_calldata.py#L128",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.0.8/tests/prague/eip7692_eof_v1/eip7069_extcall/test_calldata.py#L128",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7069.md",
             "reference-spec-version": "1795943aeacc86131d5ab6bb3d65824b3b1d4cad"
         }
@@ -4612,7 +4612,7 @@
         "pre": {
             "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b": {
                 "nonce": "0x00",
-                "balance": "0x0de0b6b3a7640000",
+                "balance": "0x3635c9adc5dea00000",
                 "code": "0x",
                 "storage": {}
             },
@@ -4650,7 +4650,7 @@
         "post": {
             "Prague": [
                 {
-                    "hash": "0x38872dae17f99119d064974b886e4f67d9011dc1fcfa2b39fc692b7f0a189fbf",
+                    "hash": "0xbf1ffdf987f4cf3cb5fe48d08464104b716a09b2adb24b569ebbe753217bb773",
                     "logs": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
                     "txbytes": "0xf860800a831e8480940000000000000000000000000000000000001100808025a0b3afc79e7eb6744553c987dfa51e04eec7c6d695e6f730badd8150d43c6611fda056587ba537d9e4baf5e9fdb797ed4d7cf237c28c5d368b92f2f3681334585fec",
                     "indexes": {
@@ -4662,11 +4662,11 @@
             ]
         },
         "_info": {
-            "hash": "0x68257fa9d3cbe24ca622c66508c647a94e6eddb7ecfe0e25c8ab31f0449ad8c7",
+            "hash": "0xa35fc666353ba42a952872ffd982d13aa1002532494db25f0bb7b2b24cd21192",
             "comment": "`execution-spec-tests` generated test",
-            "filling-transition-tool": "Hyperledger Besu evm 24.7-develop-30c96c7",
+            "filling-transition-tool": "Hyperledger Besu evm 24.8-develop-f5d6e72",
             "description": "Test function documentation:\n\n    Tests call data into EXT*CALL including multiple offset conditions.\n\n    Caller pushes data into memory, then calls the target.  Target writes 64 bytes of call data\n    to storage and a success byte.",
-            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692-prague@v1.0.7/tests/prague/eip7692_eof_v1/eip7069_extcall/test_calldata.py#L128",
+            "url": "https://github.com/ethereum/execution-spec-tests/blob/eip7692@v1.0.8/tests/prague/eip7692_eof_v1/eip7069_extcall/test_calldata.py#L128",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7069.md",
             "reference-spec-version": "1795943aeacc86131d5ab6bb3d65824b3b1d4cad"
         }
