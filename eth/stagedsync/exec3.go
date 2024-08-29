@@ -934,23 +934,27 @@ Loop:
 			case <-logEvery.C:
 				stepsInDB := rawdbhelpers.IdxStepsCountV3(applyTx)
 				progress.Log("", rs, in, rws, count, logGas, inputBlockNum.Load(), outputBlockNum.GetValueUint64(), outputTxNum.Load(), mxExecRepeats.GetValueUint64(), stepsInDB, shouldGenerateChangesets)
+
+				//TODO: https://github.com/erigontech/erigon/issues/10724
 				//if applyTx.(state2.HasAggTx).AggTx().(*state2.AggregatorRoTx).CanPrune(applyTx, outputTxNum.Load()) {
 				//	//small prune cause MDBX_TXN_FULL
 				//	if _, err := applyTx.(state2.HasAggTx).AggTx().(*state2.AggregatorRoTx).PruneSmallBatches(ctx, 10*time.Hour, applyTx); err != nil {
 				//		return err
 				//	}
 				//}
+
 				// If we skip post evaluation, then we should compute root hash ASAP for fail-fast
-				aggregatorRo := applyTx.(state2.HasAggTx).AggTx().(*state2.AggregatorRoTx)
 				if inMemExec {
 					break
 				}
 				if !skipPostEvaluation && rs.SizeEstimate() < commitThreshold {
 					break
 				}
+				aggregatorRo := applyTx.(state2.HasAggTx).AggTx().(*state2.AggregatorRoTx)
 				//if !aggregatorRo.CanPrune(applyTx, outputTxNum.Load()) {
 				//	break
 				//}
+
 				var (
 					commitStart = time.Now()
 					tt          = time.Now()
