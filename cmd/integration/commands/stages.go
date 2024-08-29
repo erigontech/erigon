@@ -879,20 +879,17 @@ func stagePolygonSync(db kv.RwDB, ctx context.Context, logger log.Logger) error 
 	defer sn.Close()
 	defer borSn.Close()
 	defer agg.Close()
-	br, bw := blocksIO(db, logger)
+	blockReader, blockWriter := blocksIO(db, logger)
 	dirs := datadir.New(datadirCli)
 	chainConfig := fromdb.ChainConfig(db)
 
 	return db.Update(ctx, func(tx kv.RwTx) error {
 		if reset {
-			if err := reset2.ResetPolygonSync(tx, db, agg, br, bw, dirs, *chainConfig, logger); err != nil {
-				return err
-			}
-			return nil
+			return reset2.ResetPolygonSync(tx, db, agg, blockReader, blockWriter, dirs, *chainConfig, logger)
 		}
 
 		stageState := stage(stageSync, tx, nil, stages.Senders)
-		cfg := stagedsync.NewPolygonSyncStageCfg(logger, chainConfig, nil, heimdallClient, nil, 0, nil, br, nil, 0) // we only need blockReader and blockWriter (blockWriter is constructed in NewPolygonSyncStageCfg)
+		cfg := stagedsync.NewPolygonSyncStageCfg(logger, chainConfig, nil, heimdallClient, nil, 0, nil, blockReader, nil, 0) // we only need blockReader and blockWriter (blockWriter is constructed in NewPolygonSyncStageCfg)
 		if unwind > 0 {
 			u := stageSync.NewUnwindState(stages.Senders, stageState.BlockNumber-unwind, stageState.BlockNumber, true, false)
 			if err := stagedsync.UnwindPolygonSyncStage(ctx, tx, u, cfg); err != nil {
