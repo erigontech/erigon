@@ -86,6 +86,14 @@ func GenerateCompositeTrieKey(addressHash libcommon.Hash, seckey libcommon.Hash)
 	return compositeKey
 }
 
+// Address + storageLocationHash
+func GenerateStoragePlainKey(address libcommon.Address, storageKey libcommon.Hash) []byte {
+	storagePlainKey := make([]byte, 0, length.Addr+length.Hash)
+	storagePlainKey = append(storagePlainKey, address.Bytes()...)
+	storagePlainKey = append(storagePlainKey, storageKey.Bytes()...)
+	return storagePlainKey
+}
+
 // AddrHash + incarnation + KeyHash
 // For contract storage
 func GenerateCompositeStorageKey(addressHash libcommon.Hash, incarnation uint64, seckey libcommon.Hash) []byte {

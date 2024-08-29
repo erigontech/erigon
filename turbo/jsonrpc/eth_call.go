@@ -23,39 +23,32 @@ import (
 	"fmt"
 	"math/big"
 
-	"github.com/c2h5oh/datasize"
 	"github.com/holiman/uint256"
 	"google.golang.org/grpc"
 
+	"github.com/erigontech/erigon-lib/commitment"
 	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/hexutil"
 	"github.com/erigontech/erigon-lib/common/hexutility"
-	"github.com/erigontech/erigon-lib/config3"
 	"github.com/erigontech/erigon-lib/gointerfaces"
 	txpool_proto "github.com/erigontech/erigon-lib/gointerfaces/txpoolproto"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/kv/membatchwithdb"
 	"github.com/erigontech/erigon-lib/kv/rawdbv3"
-	"github.com/erigontech/erigon-lib/kv/temporal"
 	"github.com/erigontech/erigon-lib/log/v3"
 	libstate "github.com/erigontech/erigon-lib/state"
 	types2 "github.com/erigontech/erigon-lib/types"
-	"github.com/erigontech/erigon-lib/wrap"
-	"github.com/erigontech/erigon/common/math"
 	"github.com/erigontech/erigon/consensus"
 	"github.com/erigontech/erigon/core"
-	"github.com/erigontech/erigon/core/rawdb"
 	"github.com/erigontech/erigon/core/state"
 	"github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/core/types/accounts"
 	"github.com/erigontech/erigon/core/vm"
 	"github.com/erigontech/erigon/core/vm/evmtypes"
 	"github.com/erigontech/erigon/crypto"
-	"github.com/erigontech/erigon/eth/ethconfig"
+	"github.com/erigontech/erigon/eth/consensuschain"
 	"github.com/erigontech/erigon/eth/stagedsync"
-	"github.com/erigontech/erigon/eth/stagedsync/stages"
 	"github.com/erigontech/erigon/eth/tracers/logger"
-	"github.com/erigontech/erigon/ethdb/prune"
 	"github.com/erigontech/erigon/params"
 	"github.com/erigontech/erigon/rpc"
 	ethapi2 "github.com/erigontech/erigon/turbo/adapter/ethapi"
@@ -539,65 +532,65 @@ func (api *BaseAPI) getWitness(ctx context.Context, db kv.RoDB, blockNrOrHash rp
 	_ = store
 
 	txNumsReader := rawdbv3.TxNums
-	cr := rawdb.NewCanonicalReader(txNumsReader)
-	agg, err := libstate.NewAggregator(ctx, api.dirs, config3.HistoryV3AggregationStep, txBatch.MemDB(), cr, logger)
-	if err != nil {
-		return nil, err
-	}
+	// cr := rawdb.NewCanonicalReader(txNumsReader)
+	// agg, err := libstate.NewAggregator(ctx, api.dirs, config3.HistoryV3AggregationStep, txBatch.MemDB(), cr, logger)
+	// if err != nil {
+	// 	return nil, err
+	// }
 
-	temporalDB, err := temporal.New(txBatch.MemDB(), agg)
-	if err != nil {
-		return nil, err
-	}
+	// temporalDB, err := temporal.New(txBatch.MemDB(), agg)
+	// if err != nil {
+	// 	return nil, err
+	// }
 
-	txc := wrap.TxContainer{Tx: txBatch}
-	batchSizeStr := "512M"
-	var batchSize datasize.ByteSize
-	err = batchSize.UnmarshalText([]byte(batchSizeStr))
-	if err != nil {
-		return nil, err
-	}
+	// txc := wrap.TxContainer{Tx: txBatch}
+	// batchSizeStr := "512M"
+	// var batchSize datasize.ByteSize
+	// err = batchSize.UnmarshalText([]byte(batchSizeStr))
+	// if err != nil {
+	// 	return nil, err
+	// }
 
-	pruneMode := prune.Mode{
-		Initialised: false,
-		History:     prune.Distance(math.MaxUint64),
-	}
-	vmConfig := &vm.Config{}
-	syncCfg := ethconfig.Defaults.Sync
+	// pruneMode := prune.Mode{
+	// 	Initialised: false,
+	// 	History:     prune.Distance(math.MaxUint64),
+	// }
+	// vmConfig := &vm.Config{}
+	// syncCfg := ethconfig.Defaults.Sync
 
-	execCfg := stagedsync.StageExecuteBlocksCfg(temporalDB, pruneMode, batchSize, chainConfig, engine, vmConfig, nil,
-		/*stateStream=*/ false,
-		/*badBlockHalt=*/ true, api.dirs, api._blockReader, nil, nil, syncCfg, nil)
+	// execCfg := stagedsync.StageExecuteBlocksCfg(temporalDB, pruneMode, batchSize, chainConfig, engine, vmConfig, nil,
+	// 	/*stateStream=*/ false,
+	// 	/*badBlockHalt=*/ true, api.dirs, api._blockReader, nil, nil, syncCfg, nil)
 
-	stateSyncStages := stagedsync.DefaultStages(ctx, stagedsync.SnapshotsCfg{}, stagedsync.HeadersCfg{}, stagedsync.BorHeimdallCfg{}, stagedsync.BlockHashesCfg{}, stagedsync.BodiesCfg{}, stagedsync.SendersCfg{}, stagedsync.ExecuteBlockCfg{}, stagedsync.TxLookupCfg{}, stagedsync.FinishCfg{}, true)
-	stateSync := stagedsync.New(
-		ethconfig.Defaults.Sync,
-		stateSyncStages,
-		stagedsync.DefaultUnwindOrder,
-		stagedsync.DefaultPruneOrder,
-		logger,
-	)
-	stageState := &stagedsync.StageState{ID: stages.Execution, BlockNumber: blockNr}
+	// stateSyncStages := stagedsync.DefaultStages(ctx, stagedsync.SnapshotsCfg{}, stagedsync.HeadersCfg{}, stagedsync.BorHeimdallCfg{}, stagedsync.BlockHashesCfg{}, stagedsync.BodiesCfg{}, stagedsync.SendersCfg{}, stagedsync.ExecuteBlockCfg{}, stagedsync.TxLookupCfg{}, stagedsync.FinishCfg{}, true)
+	// stateSync := stagedsync.New(
+	// 	ethconfig.Defaults.Sync,
+	// 	stateSyncStages,
+	// 	stagedsync.DefaultUnwindOrder,
+	// 	stagedsync.DefaultPruneOrder,
+	// 	logger,
+	// )
+	// stageState := &stagedsync.StageState{ID: stages.Execution, BlockNumber: blockNr}
 	// Re-execute block
-	err = stagedsync.ExecBlockV3(stageState, stateSync, txc, stageState.BlockNumber, ctx, execCfg, false, logger, false)
+	// err = stagedsync.ExecBlockV3(stageState, stateSync, txc, stageState.BlockNumber, ctx, execCfg, false, logger, false)
+	// if err != nil {
+	// 	return nil, err
+	// }
+
+	// execute block ephemerally
+	chainReader := consensuschain.NewReader(chainConfig, txBatch, api._blockReader, logger)
+	// var getTracer func(txIndex int, txHash libcommon.Hash) (vm.EVMLogger, error)
+	// stateReader := rpchelper.NewLatestStateReader(txBatch)
+	stateReader, err := rpchelper.CreateHistoryStateReader(roTx, txNumsReader, blockNr, 0, "")
+	// stateReader := state.NewHistoryReaderV3()
 	if err != nil {
 		return nil, err
 	}
-
-	// // execute block ephemerally
-	// chainReader := consensuschain.NewReader(chainConfig, txBatch, api._blockReader, logger)
-	// // var getTracer func(txIndex int, txHash libcommon.Hash) (vm.EVMLogger, error)
-	// // stateReader := rpchelper.NewLatestStateReader(txBatch)
-	// stateReader, err := rpchelper.CreateHistoryStateReader(roTx, blockNr, 0, "")
-	// // stateReader := state.NewHistoryReaderV3()
-	// if err != nil {
-	// 	return nil, err
-	// }
-	// execResult, err := core.ExecuteBlockEphemerally(chainConfig, &vm.Config{}, store.GetHashFn, engine, block, stateReader, store.TrieStateWriter, chainReader, nil, logger)
-	// if err != nil {
-	// 	return nil, err
-	// }
-	// _ = execResult
+	execResult, err := core.ExecuteBlockEphemerally(chainConfig, &vm.Config{}, store.GetHashFn, engine, block, stateReader, store.TrieStateWriter, chainReader, nil, logger)
+	if err != nil {
+		return nil, err
+	}
+	_ = execResult
 
 	// if execResult.TxRoot.String() != block.Header().TxHash.String() {
 	// 	return nil, fmt.Errorf("transaction root mismatch , from execResult %s, from header %s", execResult.TxRoot.String(), block.Header().TxHash.String())
@@ -626,11 +619,74 @@ func (api *BaseAPI) getWitness(ctx context.Context, db kv.RoDB, blockNrOrHash rp
 	// }
 
 	_ = rl
+
+	// store.Tds.ResolveBuffer()
+
+	// // Prepare (resolve) storage tries so that actual modifications can proceed without database access
+	// storageTouches := store.Tds.BuildStorageReads()
+
+	// // Prepare (resolve) accounts trie so that actual modifications can proceed without database access
+	// accountTouches := store.Tds.BuildAccountReads()
+
+	// store.Tds.PopulateAccountBlockProof(accountTouches)
+	// store.Tds.PopulateStorageBlockProof(storageTouches)
+
+	// store.Tds.ExtractWitness(true, false)
 	// buf, err := stagedsync.VerifyWitness(roTx, block, prevHeader, fullBlock, uint64(txIndex), store.ChainReader, store.Tds, txTds, store.GetHashFn, &cfg, &witness, logger)
 	// if err != nil {
 	// 	return nil, fmt.Errorf("error verifying witness for block %d: %v", blockNr, err)
 	// }
+	touchedPlainKeys, touchedHashedKeys := store.Tds.GetTouchedPlainKeys()
+	_ = touchedPlainKeys
+	_ = touchedHashedKeys
+	domains, err := libstate.NewSharedDomains(txBatch, log.New())
+	if err != nil {
+		return nil, err
+	}
+	sdCtx := libstate.NewSharedDomainsCommitmentContext(domains, commitment.ModeUpdate, commitment.VariantHexPatriciaTrie)
+	_ = sdCtx
+	patricieTrie := sdCtx.Trie()
+	_ = patricieTrie
+	hph, ok := patricieTrie.(*commitment.HexPatriciaHashed)
+	if !ok {
+		return nil, errors.New("casting to HexPatriciaTrieHashed failed")
+	}
 
+	// accountReadAddrHashes := store.Tds.BuildAccountReads()
+	// _ = accountReadAddrHashes
+
+	updates := commitment.NewUpdates(commitment.ModeDirect, sdCtx.TempDir(), hph.HashAndNibblizeKey)
+	for _, key := range touchedPlainKeys {
+		updates.TouchPlainKey(key, nil, func(c *commitment.KeyUpdate, _ []byte) {
+			c.PlainKey = key
+			c.HashedKey = hph.HashAndNibblizeKey(key)
+		})
+	}
+	rootHash, err := hph.Process(ctx, updates, "computeWitness")
+	if err != nil {
+		return nil, err
+	}
+	_ = rootHash
+	if !bytes.Equal(rootHash, prevHeader.Root[:]) {
+		return nil, errors.New("root hash mismatch")
+	}
+
+	// check the first address
+	firstAddress := touchedPlainKeys[0]
+	fmt.Printf("First address = %x \n", firstAddress)
+
+	firstAddressComputedHash := crypto.Keccak256(firstAddress)
+	fmt.Printf("First address computed hash = %x\n", firstAddressComputedHash)
+
+	firstAddressHash := touchedHashedKeys[0]
+	if !bytes.Equal(firstAddressComputedHash, firstAddressHash) {
+		return nil, errors.New("mismatch between address hash found and computed")
+	}
+
+	nibblizedAddrHash := hph.HashAndNibblizeKey(firstAddress)
+	fmt.Printf("nibblizedAddrHash = %x\n", nibblizedAddrHash)
+
+	hph.PrintAccountsInGrid()
 	return nil, nil
 }
 

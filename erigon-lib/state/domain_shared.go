@@ -1163,6 +1163,10 @@ func (sdc *SharedDomainsCommitmentContext) KeysCount() uint64 {
 	return sdc.updates.Size()
 }
 
+func (sdc *SharedDomainsCommitmentContext) Trie() commitment.Trie {
+	return sdc.patriciaTrie
+}
+
 // TouchPlainKey marks plainKey as updated and applies different fn for different key types
 // (different behaviour for Code, Account and Storage key modifications).
 func (sdc *SharedDomainsCommitmentContext) TouchKey(d kv.Domain, key string, val []byte) {

@@ -899,7 +899,7 @@ func (hph *HexPatriciaHashed) unfold(hashedKey []byte, unfolding int) error {
 	hph.afterMap[row] = 0
 	hph.branchBefore[row] = false
 
-	if upCell.hashedExtLen == 0 {
+	if upCell.hashedExtLen == 0 { // normal branch node
 		// root unfolded
 		depth = upDepth + 1
 		if unfolded, err := hph.unfoldBranchNode(row, touched && !present /* deleted */, depth); err != nil {
@@ -908,7 +908,7 @@ func (hph *HexPatriciaHashed) unfold(hashedKey []byte, unfolding int) error {
 			// Return here to prevent activeRow from being incremented
 			return nil
 		}
-	} else if upCell.hashedExtLen >= unfolding {
+	} else if upCell.hashedExtLen >= unfolding { // extension node
 		depth = upDepth + unfolding
 		nibble := upCell.hashedExtension[unfolding-1]
 		if touched {
@@ -918,7 +918,7 @@ func (hph *HexPatriciaHashed) unfold(hashedKey []byte, unfolding int) error {
 			hph.afterMap[row] = uint16(1) << nibble
 		}
 		cell := &hph.grid[row][nibble]
-		cell.fillFromUpperCell(upCell, depth, unfolding)
+		cell.fillFromUpperCell(upCell, depth, unfolding) // upcell is the account cell before the extension
 		if hph.trace {
 			fmt.Printf("cell (%d, %x) depth=%d\n", row, nibble, depth)
 		}
@@ -1268,7 +1268,7 @@ func (hph *HexPatriciaHashed) Process(ctx context.Context, updates *Updates, log
 		logEvery     = time.NewTicker(20 * time.Second)
 	)
 	defer logEvery.Stop()
-
+	hph.trace = true
 	err = updates.HashSort(ctx, func(hashedKey, plainKey []byte, stateUpdate *Update) error {
 		select {
 		case <-logEvery.C:
@@ -1784,7 +1784,7 @@ func commonPrefixLen(b1, b2 []byte) int {
 
 // nolint
 // Hashes provided key and expands resulting hash into nibbles (each byte split into two nibbles by 4 bits)
-func (hph *HexPatriciaHashed) hashAndNibblizeKey(key []byte) []byte {
+func (hph *HexPatriciaHashed) HashAndNibblizeKey(key []byte) []byte {
 	hashedKey := make([]byte, length.Hash)
 
 	hph.keccak.Reset()
@@ -1808,4 +1808,20 @@ func (hph *HexPatriciaHashed) hashAndNibblizeKey(key []byte) []byte {
 		nibblized[i*2+1] = b & 0xf
 	}
 	return nibblized
+}
+
+func (hph *HexPatriciaHashed) Grid() [128][16]cell {
+	return hph.grid
+}
+
+func (hph *HexPatriciaHashed) PrintAccountsInGrid() {
+	fmt.Printf("SEARCHING FOR ACCOUNTS IN GRID\n")
+	for row := 0; row < 128; row++ {
+		for col := 0; col < 16; col++ {
+			c := hph.grid[row][col]
+			if c.accountAddr[19] != 0 && c.accountAddr[0] != 0 {
+				fmt.Printf("FOUND account %x in position (%d,%d)\n", c.accountAddr, row, col)
+			}
+		}
+	}
 }
