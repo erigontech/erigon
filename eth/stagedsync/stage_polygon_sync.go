@@ -348,6 +348,19 @@ func UnwindSpans(tx kv.RwTx, unwindPoint uint64) error {
 			return err
 		}
 	}
+
+	producerCursor, err := tx.RwCursor(kv.BorProducerSelections)
+	if err != nil {
+		return err
+	}
+
+	defer producerCursor.Close()
+	for k, _, err = producerCursor.Seek(spanIdBytes[:]); err == nil && k != nil; k, _, err = producerCursor.Next() {
+		if err = producerCursor.DeleteCurrent(); err != nil {
+			return err
+		}
+	}
+
 	return err
 }
 
