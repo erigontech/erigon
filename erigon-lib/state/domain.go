@@ -128,7 +128,7 @@ var DomainCompressCfg = seg.Cfg{
 	DictReducerSoftLimit: 2000000,
 	MinPatternLen:        20,
 	MaxPatternLen:        32,
-	SamplingFactor:       1,
+	SamplingFactor:       4,
 	MaxDictPatterns:      64 * 1024 * 2,
 	Workers:              1,
 }
