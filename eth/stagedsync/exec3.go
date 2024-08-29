@@ -927,7 +927,10 @@ Loop:
 
 		// MA commitTx
 		if !parallel {
-			metrics2.UpdateBlockConsumerPostExecutionDelay(b.Time(), blockNum, logger)
+			if !inMemExec && !isMining {
+				metrics2.UpdateBlockConsumerPostExecutionDelay(b.Time(), blockNum, logger)
+			}
+
 			outputBlockNum.SetUint64(blockNum)
 
 			select {
