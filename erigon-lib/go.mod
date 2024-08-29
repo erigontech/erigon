@@ -4,7 +4,7 @@ go 1.21.5
 
 require (
 	github.com/erigontech/erigon-snapshot v1.3.1-0.20240814160410-2ce37904b978
-	github.com/erigontech/interfaces v0.0.0-20240816222220-760b11456e56
+	github.com/erigontech/interfaces v0.0.0-20240819221809-43fdab2057da
 	github.com/erigontech/mdbx-go v0.38.4
 	github.com/erigontech/secp256k1 v1.1.0
 	github.com/rs/dnscache v0.0.0-20211102005908-e0241e321417
@@ -47,7 +47,7 @@ require (
 	golang.org/x/sys v0.23.0
 	golang.org/x/time v0.6.0
 	google.golang.org/grpc v1.65.0
-	google.golang.org/grpc/cmd/protoc-gen-go-grpc v1.5.1
+	google.golang.org/grpc/cmd/protoc-gen-go-grpc v1.4.0
 	google.golang.org/protobuf v1.34.2
 )
 
@@ -151,7 +151,7 @@ require (
 )
 
 replace (
-	github.com/anacrolix/torrent => github.com/erigontech/torrent v1.54.2-alpha-35
+	github.com/anacrolix/torrent => github.com/erigontech/torrent v1.54.2-alpha-37
 	github.com/holiman/bloomfilter/v2 => github.com/AskAlexSharov/bloomfilter/v2 v2.0.8
 	github.com/tidwall/btree => github.com/AskAlexSharov/btree v1.6.2
 )

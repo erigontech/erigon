@@ -144,7 +144,7 @@ the case in the group of items `12, 13` or in the group of items `29, 30, 31`. S
 extension nodes". However, the value in an extension node is always the representation of a prefix group, rather than a
 leaf. To produce the hash of an extension node, one applies the hash function to the two-piece RLP. The first piece is
 the representation of the non-redundant part of the key. The second part is the hash of the branch node representing the
-prefix group. This shown in the member function `hashChildren` of the
+prefix group. This is shown in the member function `hashChildren` of the
 type `hasher` [turbo/trie/hasher.go](../../turbo/trie/hasher.go), under the `*shortNode` case.
 
 This is the illustration of resulting leaf nodes, branch nodes, and extension nodes for our example:

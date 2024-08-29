@@ -191,6 +191,10 @@ func (c *SubscribeLogsStreamC) Recv() (*remote.SubscribeLogsReply, error) {
 
 // -- end SubscribeLogs
 
+func (s *EthBackendClientDirect) CanonicalBodyForStorage(ctx context.Context, in *remote.CanonicalBodyForStorageRequest, opts ...grpc.CallOption) (*remote.CanonicalBodyForStorageReply, error) {
+	return s.server.CanonicalBodyForStorage(ctx, in)
+}
+
 func (s *EthBackendClientDirect) CanonicalHash(ctx context.Context, in *remote.CanonicalHashRequest, opts ...grpc.CallOption) (*remote.CanonicalHashReply, error) {
 	return s.server.CanonicalHash(ctx, in)
 }

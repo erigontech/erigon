@@ -45,6 +45,9 @@ func (c *DownloaderClient) Delete(ctx context.Context, in *proto_downloader.Dele
 func (c *DownloaderClient) Verify(ctx context.Context, in *proto_downloader.VerifyRequest, opts ...grpc.CallOption) (*emptypb.Empty, error) {
 	return c.server.Verify(ctx, in)
 }
-func (c *DownloaderClient) Stats(ctx context.Context, in *proto_downloader.StatsRequest, opts ...grpc.CallOption) (*proto_downloader.StatsReply, error) {
-	return c.server.Stats(ctx, in)
+func (c *DownloaderClient) SetLogPrefix(ctx context.Context, in *proto_downloader.SetLogPrefixRequest, opts ...grpc.CallOption) (*emptypb.Empty, error) {
+	return c.server.SetLogPrefix(ctx, in)
+}
+func (c *DownloaderClient) Completed(ctx context.Context, in *proto_downloader.CompletedRequest, opts ...grpc.CallOption) (*proto_downloader.CompletedReply, error) {
+	return c.server.Completed(ctx, in)
 }

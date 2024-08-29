@@ -460,7 +460,11 @@ func (dt *DomainRoTx) mergeFiles(ctx context.Context, domainFiles, indexFiles, h
 		return nil, nil, nil, fmt.Errorf("merge %s compressor: %w", dt.d.filenameBase, err)
 	}
 
-	kvWriter = NewArchiveWriter(kvFile, dt.d.compression)
+	compression := dt.d.compression
+	if toStep-fromStep < 64 {
+		compression = CompressNone
+	}
+	kvWriter = NewArchiveWriter(kvFile, compression)
 	if dt.d.noFsync {
 		kvWriter.DisableFsync()
 	}

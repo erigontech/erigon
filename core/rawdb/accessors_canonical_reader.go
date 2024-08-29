@@ -47,15 +47,16 @@ type CanonicalTxnIds struct {
 	endOfCurrentBlock kv.TxnId
 }
 type CanonicalReader struct {
+	txNumsReader rawdbv3.TxNumsReader
 }
 
-func NewCanonicalReader() *CanonicalReader {
-	return &CanonicalReader{}
+func NewCanonicalReader(txNumsReader rawdbv3.TxNumsReader) *CanonicalReader {
+	return &CanonicalReader{txNumsReader: txNumsReader}
 }
-func (*CanonicalReader) TxnIdsOfCanonicalBlocks(tx kv.Tx, fromTxNum, toTxNum int, asc order.By, limit int) (stream.U64, error) {
-	return TxnIdsOfCanonicalBlocks(tx, fromTxNum, toTxNum, asc, limit)
+func (c *CanonicalReader) TxnIdsOfCanonicalBlocks(tx kv.Tx, fromTxNum, toTxNum int, asc order.By, limit int) (stream.U64, error) {
+	return TxnIdsOfCanonicalBlocks(tx, c.txNumsReader, fromTxNum, toTxNum, asc, limit)
 }
-func (*CanonicalReader) TxNum2ID(tx kv.Tx, txNum uint64) (blockNum uint64, txnID kv.TxnId, ok bool, err error) {
+func (c *CanonicalReader) TxNum2ID(tx kv.Tx, txNum uint64) (blockNum uint64, txnID kv.TxnId, ok bool, err error) {
 	return TxNum2TxnID(tx, txNum)
 	//if blockNum == 0 {
 	//	return kv.TxnId(txNum), nil
@@ -69,11 +70,11 @@ func (*CanonicalReader) TxNum2ID(tx kv.Tx, txNum uint64) (blockNum uint64, txnID
 	//}
 	//
 	//// body freezed and pruned. then TxNum and TxnIDX are identical
-	//_min, err := rawdbv3.TxNums.Min(tx, blockNum)
+	//_min, err := c.txNumsReader.Min(tx, blockNum)
 	//if err != nil {
 	//	return 0, err
 	//}
-	//_max, err := rawdbv3.TxNums.Max(tx, blockNum)
+	//_max, err := c.txNumsReader.Max(tx, blockNum)
 	//if err != nil {
 	//	return 0, err
 	//}
@@ -83,7 +84,7 @@ func (*CanonicalReader) TxNum2ID(tx kv.Tx, txNum uint64) (blockNum uint64, txnID
 	//return kv.TxnId(txNum), nil
 }
 
-func (*CanonicalReader) BaseTxnID(tx kv.Tx, blockNum uint64, blockHash common2.Hash) (kv.TxnId, error) {
+func (c *CanonicalReader) BaseTxnID(tx kv.Tx, blockNum uint64, blockHash common2.Hash) (kv.TxnId, error) {
 	if blockNum == 0 {
 		return kv.TxnId(0), nil
 	}
@@ -94,7 +95,7 @@ func (*CanonicalReader) BaseTxnID(tx kv.Tx, blockNum uint64, blockHash common2.H
 		return 0, err
 	}
 	if b == nil { // freezed and pruned
-		_min, err := rawdbv3.TxNums.Min(tx, blockNum)
+		_min, err := c.txNumsReader.Min(tx, blockNum)
 		if err != nil {
 			return 0, err
 		}
@@ -104,7 +105,7 @@ func (*CanonicalReader) BaseTxnID(tx kv.Tx, blockNum uint64, blockHash common2.H
 
 }
 
-func (*CanonicalReader) LastFrozenTxNum(tx kv.Tx) (kv.TxnId, error) {
+func (c *CanonicalReader) LastFrozenTxNum(tx kv.Tx) (kv.TxnId, error) {
 	n, ok, err := ReadFirstNonGenesisHeaderNumber(tx)
 	if err != nil {
 		return 0, err
@@ -112,11 +113,11 @@ func (*CanonicalReader) LastFrozenTxNum(tx kv.Tx) (kv.TxnId, error) {
 	if !ok {
 		//seq, err := tx.ReadSequence(kv.EthTx)
 		//seq-1
-		_, _lastTxNumInFiles, err := rawdbv3.TxNums.Last(tx)
+		_, _lastTxNumInFiles, err := c.txNumsReader.Last(tx)
 		return kv.TxnId(_lastTxNumInFiles), err
 
 	}
-	_max, err := rawdbv3.TxNums.Max(tx, n)
+	_max, err := c.txNumsReader.Max(tx, n)
 	if err != nil {
 		return 0, err
 	}
@@ -159,7 +160,7 @@ func TxNum2TxnID(tx kv.Tx, txNum uint64) (blockNum uint64, txnID kv.TxnId, ok bo
 // [fromTxNum, toTxNum)
 // To get all canonical blocks, use fromTxNum=0, toTxNum=-1
 // For reverse iteration use order.Desc and fromTxNum=-1, toTxNum=-1
-func TxnIdsOfCanonicalBlocks(tx kv.Tx, fromTxNum, toTxNum int, asc order.By, limit int) (stream.U64, error) {
+func TxnIdsOfCanonicalBlocks(tx kv.Tx, txNumsReader rawdbv3.TxNumsReader, fromTxNum, toTxNum int, asc order.By, limit int) (stream.U64, error) {
 	if asc && fromTxNum > 0 && toTxNum > 0 && fromTxNum >= toTxNum {
 		return nil, fmt.Errorf("fromTxNum >= toTxNum: %d, %d", fromTxNum, toTxNum)
 	}
@@ -167,7 +168,7 @@ func TxnIdsOfCanonicalBlocks(tx kv.Tx, fromTxNum, toTxNum int, asc order.By, lim
 		return nil, fmt.Errorf("fromTxNum <= toTxNum: %d, %d", fromTxNum, toTxNum)
 	}
 
-	it := &CanonicalTxnIds{tx: tx, fromTxNum: fromTxNum, toTxNum: toTxNum, orderAscend: asc, limit: limit}
+	it := &CanonicalTxnIds{tx: tx, txNumsReader: txNumsReader, fromTxNum: fromTxNum, toTxNum: toTxNum, orderAscend: asc, limit: limit}
 	if err := it.init(); err != nil {
 		it.Close() //it's responsibility of constructor (our) to close resource on error
 		return nil, err
@@ -204,6 +205,7 @@ func (s *CanonicalTxnIds) init() (err error) {
 	if s.fromTxNum >= 0 {
 		var fromBlockNum uint64
 		var ok bool
+		//ok, blockFrom, err := s.txNumsReader.FindBlockNum(tx, uint64(s.fromTxNum))
 		fromBlockNum, s.fromTxnID, ok, err = TxNum2TxnID(s.tx, uint64(s.fromTxNum))
 		if err != nil {
 			return err
@@ -217,6 +219,7 @@ func (s *CanonicalTxnIds) init() (err error) {
 	if s.toTxNum >= 0 {
 		var blockTo uint64
 		var ok bool
+		//ok, blockTo, err := s.txNumsReader.FindBlockNum(tx, uint64(s.toTxNum))
 		blockTo, s.toTxnID, ok, err = TxNum2TxnID(s.tx, uint64(s.toTxNum))
 		if err != nil {
 			return err

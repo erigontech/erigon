@@ -26,6 +26,7 @@ import (
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/u256"
 	"github.com/erigontech/erigon-lib/kv/order"
+	"github.com/erigontech/erigon-lib/kv/rawdbv3"
 	"github.com/erigontech/erigon-lib/kv/stream"
 	"github.com/erigontech/erigon/core/rawdb"
 	"github.com/erigontech/erigon/core/types"
@@ -90,7 +91,7 @@ func TestCanonicalIter(t *testing.T) {
 	require.Equal(true, it.HasNext())
 	require.Equal([]uint64{1, 2, 3, 4, 5}, stream.ToArrU64Must(it))
 
-	it, err = rawdb.TxnIdsOfCanonicalBlocks(tx, 0, -1, order.Asc, -1)
+	it, err = rawdb.TxnIdsOfCanonicalBlocks(tx, rawdbv3.TxNums, 0, -1, order.Asc, -1)
 	require.NoError(err)
 	require.Equal(true, it.HasNext())
 	exp := append(append(txNumsOfBlock(0, b), txNumsOfBlock(1, b)...), txNumsOfBlock(3, b)...)
@@ -100,7 +101,7 @@ func TestCanonicalIter(t *testing.T) {
 
 	//reverse
 	//TODO: reverse
-	//rit, err := rawdb.TxnIdsOfCanonicalBlocks(tx, -1, -1, order.Desc, -1)
+	//rit, err := rawdb.TxnIdsOfCanonicalBlocks(tx, rawdbv3.TxNums, -1, -1, order.Desc, -1)
 	//require.NoError(err)
 	//require.Equal(true, rit.HasNext())
 	//slices.Reverse(exp)

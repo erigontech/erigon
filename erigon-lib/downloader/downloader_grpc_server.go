@@ -56,6 +56,10 @@ func (s *GrpcServer) ProhibitNewDownloads(ctx context.Context, req *proto_downlo
 func (s *GrpcServer) Add(ctx context.Context, request *proto_downloader.AddRequest) (*emptypb.Empty, error) {
 	defer s.d.ReCalcStats(10 * time.Second) // immediately call ReCalc to set stat.Complete flag
 
+	if len(s.d.torrentClient.Torrents()) == 0 {
+		s.d.startTime = time.Now()
+	}
+
 	logEvery := time.NewTicker(20 * time.Second)
 	defer logEvery.Stop()
 
@@ -121,28 +125,16 @@ func (s *GrpcServer) Verify(ctx context.Context, request *proto_downloader.Verif
 	return &emptypb.Empty{}, nil
 }
 
-func (s *GrpcServer) Stats(ctx context.Context, request *proto_downloader.StatsRequest) (*proto_downloader.StatsReply, error) {
-	stats := s.d.Stats()
-	return &proto_downloader.StatsReply{
-		MetadataReady: stats.MetadataReady,
-		FilesTotal:    stats.FilesTotal,
-
-		Completed: stats.Completed,
-		Progress:  stats.Progress,
-
-		PeersUnique:      stats.PeersUnique,
-		ConnectionsTotal: stats.ConnectionsTotal,
-
-		BytesCompleted: stats.BytesCompleted,
-		BytesTotal:     stats.BytesTotal,
-		UploadRate:     stats.UploadRate,
-		DownloadRate:   stats.DownloadRate,
-		HashRate:       stats.HashRate,
-		FlushRate:      stats.FlushRate,
-		CompletionRate: stats.CompletionRate,
-	}, nil
-}
-
 func Proto2InfoHash(in *prototypes.H160) metainfo.Hash {
 	return gointerfaces.ConvertH160toAddress(in)
+}
+
+func (s *GrpcServer) SetLogPrefix(ctx context.Context, request *proto_downloader.SetLogPrefixRequest) (*emptypb.Empty, error) {
+	s.d.SetLogPrefix(request.Prefix)
+
+	return &emptypb.Empty{}, nil
+}
+
+func (s *GrpcServer) Completed(ctx context.Context, request *proto_downloader.CompletedRequest) (*proto_downloader.CompletedReply, error) {
+	return &proto_downloader.CompletedReply{Completed: s.d.Completed()}, nil
 }

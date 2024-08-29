@@ -46,6 +46,7 @@ import (
 	"google.golang.org/protobuf/types/known/emptypb"
 
 	"github.com/erigontech/erigon-lib/common/dir"
+	"github.com/erigontech/erigon-lib/config3"
 
 	"github.com/erigontech/erigon-lib/chain"
 	"github.com/erigontech/erigon-lib/chain/networkname"
@@ -55,7 +56,6 @@ import (
 	"github.com/erigontech/erigon-lib/common/dbg"
 	"github.com/erigontech/erigon-lib/common/disk"
 	"github.com/erigontech/erigon-lib/common/mem"
-	"github.com/erigontech/erigon-lib/config3"
 	"github.com/erigontech/erigon-lib/diagnostics"
 	"github.com/erigontech/erigon-lib/direct"
 	"github.com/erigontech/erigon-lib/downloader"
@@ -71,6 +71,7 @@ import (
 	prototypes "github.com/erigontech/erigon-lib/gointerfaces/typesproto"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/kv/kvcache"
+	"github.com/erigontech/erigon-lib/kv/rawdbv3"
 	"github.com/erigontech/erigon-lib/kv/remotedbserver"
 	"github.com/erigontech/erigon-lib/kv/temporal"
 	"github.com/erigontech/erigon-lib/log/v3"
@@ -294,11 +295,12 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 	var genesis *types.Block
 	if err := backend.chainDB.Update(context.Background(), func(tx kv.RwTx) error {
 
-		if config.Genesis == nil {
-			genesisConfig, err := rawdb.ReadGenesis(tx)
-			if err != nil {
-				return err
-			}
+		genesisConfig, err := rawdb.ReadGenesis(tx)
+		if err != nil {
+			return err
+		}
+
+		if genesisConfig != nil {
 			config.Genesis = genesisConfig
 		}
 
@@ -1211,6 +1213,7 @@ func (s *Ethereum) StartMining(ctx context.Context, db kv.RwDB, stateDiffClient 
 		defer streamCancel()
 
 		mineEvery := time.NewTicker(miner.MiningConfig.Recommit)
+
 		defer mineEvery.Stop()
 
 		s.logger.Info("Starting to mine", "etherbase", eb)
@@ -1220,9 +1223,6 @@ func (s *Ethereum) StartMining(ctx context.Context, db kv.RwDB, stateDiffClient 
 
 		hasWork := true // Start mining immediately
 		errc := make(chan error, 1)
-
-		workCtx, workCancel := context.WithCancel(ctx)
-		defer workCancel()
 
 		for {
 			// Only reset if some work was done previously as we'd like to rely
@@ -1243,12 +1243,15 @@ func (s *Ethereum) StartMining(ctx context.Context, db kv.RwDB, stateDiffClient 
 					hasWork = true
 
 				case <-s.notifyMiningAboutNewTxs:
+					//log.Warn("[dbg] notifyMiningAboutNewTxs")
+
 					// Skip mining based on new txn notif for bor consensus
 					hasWork = s.chainConfig.Bor == nil
 					if hasWork {
 						s.logger.Debug("Start mining based on txpool notif")
 					}
 				case <-mineEvery.C:
+					//log.Warn("[dbg] mineEvery", "working", working, "waiting", waiting.Load())
 					if !(working || waiting.Load()) {
 						s.logger.Debug("Start mining based on miner.recommit", "duration", miner.MiningConfig.Recommit)
 					}
@@ -1272,12 +1275,13 @@ func (s *Ethereum) StartMining(ctx context.Context, db kv.RwDB, stateDiffClient 
 				hasWork = false
 				mineEvery.Reset(miner.MiningConfig.Recommit)
 				go func() {
-					err := stages2.MiningStep(ctx, db, mining, tmpDir, logger)
+					err = stages2.MiningStep(ctx, db, mining, tmpDir, logger)
 
 					waiting.Store(true)
-					defer waiting.Store(false)
-
-					errc <- err
+					defer func() {
+						waiting.Store(false)
+						errc <- err
+					}()
 
 					if err != nil {
 						return
@@ -1291,8 +1295,8 @@ func (s *Ethereum) StartMining(ctx context.Context, db kv.RwDB, stateDiffClient 
 								s.minedBlocks <- block.Block
 							}
 							return
-						case <-workCtx.Done():
-							errc <- workCtx.Err()
+						case <-ctx.Done():
+							errc <- ctx.Err()
 							return
 						}
 					}
@@ -1431,13 +1435,6 @@ func setUpBlockReader(ctx context.Context, db kv.RwDB, dirs datadir.Dirs, snConf
 	if isBor {
 		allBorSnapshots = freezeblocks.NewBorRoSnapshots(snConfig.Snapshot, dirs.Snap, minFrozenBlock, logger)
 	}
-	cr := rawdb.NewCanonicalReader()
-	agg, err := libstate.NewAggregator(ctx, dirs, config3.HistoryV3AggregationStep, db, cr, logger)
-	if err != nil {
-		return nil, nil, nil, nil, nil, err
-	}
-
-	agg.SetProduceMod(snConfig.Snapshot.ProduceE3)
 
 	g := &errgroup.Group{}
 	g.Go(func() error {
@@ -1450,6 +1447,15 @@ func setUpBlockReader(ctx context.Context, db kv.RwDB, dirs datadir.Dirs, snConf
 		}
 		return nil
 	})
+
+	blockReader := freezeblocks.NewBlockReader(allSnapshots, allBorSnapshots)
+	cr := rawdb.NewCanonicalReader(rawdbv3.TxNums.WithCustomReadTxNumFunc(freezeblocks.ReadTxNumFuncFromBlockReader(ctx, blockReader)))
+	agg, err := libstate.NewAggregator(ctx, dirs, config3.HistoryV3AggregationStep, db, cr, logger)
+	if err != nil {
+		return nil, nil, nil, nil, nil, err
+	}
+	agg.SetProduceMod(snConfig.Snapshot.ProduceE3)
+
 	g.Go(func() error {
 		return agg.OpenFolder()
 	})
@@ -1457,7 +1463,6 @@ func setUpBlockReader(ctx context.Context, db kv.RwDB, dirs datadir.Dirs, snConf
 		return nil, nil, nil, nil, nil, err
 	}
 
-	blockReader := freezeblocks.NewBlockReader(allSnapshots, allBorSnapshots)
 	blockWriter := blockio.NewBlockWriter()
 
 	return blockReader, blockWriter, allSnapshots, allBorSnapshots, agg, nil

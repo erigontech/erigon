@@ -136,6 +136,7 @@ func ProcessFrozenBlocks(ctx context.Context, db kv.RwDB, blockReader services.F
 	sawZeroBlocksTimes := 0
 	initialCycle, firstCycle := true, true
 	for {
+		// run stages first time - it will download blocks
 		if hook != nil {
 			if err := db.View(ctx, func(tx kv.Tx) (err error) {
 				err = hook.BeforeRun(tx, false)
@@ -429,20 +430,16 @@ func MiningStep(ctx context.Context, db kv.RwDB, mining *stagedsync.Sync, tmpDir
 			err = fmt.Errorf("%+v, trace: %s", rec, dbg.Stack())
 		}
 	}() // avoid crash because Erigon's core does many things
-
 	tx, err := db.BeginRo(ctx)
 	if err != nil {
 		return err
 	}
 	defer tx.Rollback()
 
-	var miningBatch kv.RwTx
-
 	mb := membatchwithdb.NewMemoryBatch(tx, tmpDir, logger)
-	defer mb.Rollback()
-	miningBatch = mb
+	defer mb.Close()
 
-	txc := wrap.TxContainer{Tx: miningBatch}
+	txc := wrap.TxContainer{Tx: mb}
 	sd, err := state.NewSharedDomains(mb, logger)
 	if err != nil {
 		return err
@@ -453,7 +450,6 @@ func MiningStep(ctx context.Context, db kv.RwDB, mining *stagedsync.Sync, tmpDir
 	if _, err = mining.Run(nil, txc, false /* firstCycle */, false); err != nil {
 		return err
 	}
-	tx.Rollback()
 	return nil
 }
 

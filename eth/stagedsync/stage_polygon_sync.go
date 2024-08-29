@@ -92,15 +92,18 @@ func NewPolygonSyncStageCfg(
 			txActionStream: txActionStream,
 		},
 	}
+	bridgeStore := &polygonSyncStageBridgeStore{
+		eventReader:    blockReader,
+		txActionStream: txActionStream,
+	}
 	borConfig := chainConfig.Bor.(*borcfg.BorConfig)
 	heimdallService := heimdall.NewService(borConfig, heimdallClient, heimdallStore, logger)
+	bridgeService := bridge.NewBridge(bridgeStore, logger, borConfig, heimdallClient, nil)
 	p2pService := p2p.NewService(maxPeers, logger, sentry, statusDataProvider.GetStatusData)
 	checkpointVerifier := polygonsync.VerifyCheckpointHeaders
 	milestoneVerifier := polygonsync.VerifyMilestoneHeaders
 	blocksVerifier := polygonsync.VerifyBlocks
-	syncStore := &polygonSyncStageSyncStore{
-		executionEngine: executionEngine,
-	}
+	syncStore := polygonsync.NewStore(logger, executionEngine, bridgeService)
 	blockDownloader := polygonsync.NewBlockDownloader(
 		logger,
 		p2pService,
@@ -112,11 +115,6 @@ func NewPolygonSyncStageCfg(
 		blockLimit,
 	)
 	events := polygonsync.NewTipEvents(logger, p2pService, heimdallService)
-	bridgeStore := &polygonSyncStageBridgeStore{
-		eventReader:    blockReader,
-		txActionStream: txActionStream,
-	}
-	bridgeService := bridge.NewBridge(bridgeStore, logger, borConfig, heimdallClient)
 	sync := polygonsync.NewSync(
 		syncStore,
 		executionEngine,
@@ -133,6 +131,7 @@ func NewPolygonSyncStageCfg(
 	syncService := &polygonSyncStageService{
 		logger:          logger,
 		sync:            sync,
+		syncStore:       syncStore,
 		events:          events,
 		p2p:             p2pService,
 		executionEngine: executionEngine,
@@ -267,32 +266,66 @@ func UnwindEvents(tx kv.RwTx, unwindPoint uint64) error {
 	if err != nil {
 		return err
 	}
-
 	defer cursor.Close()
+
 	var blockNumBuf [8]byte
 	binary.BigEndian.PutUint64(blockNumBuf[:], unwindPoint+1)
-	k, eventId, err := cursor.Seek(blockNumBuf[:])
+
+	_, _, err = cursor.Seek(blockNumBuf[:])
 	if err != nil {
 		return err
 	}
-	if k != nil {
-		eventCursor, err := tx.RwCursor(kv.BorEvents)
-		if err != nil {
+
+	_, prevSprintLastIDBytes, err := cursor.Prev() // last event ID of previous sprint
+	if err != nil {
+		return err
+	}
+
+	var prevSprintLastID uint64
+	if prevSprintLastIDBytes == nil {
+		// we are unwinding the first entry, remove all items from BorEvents
+		prevSprintLastID = 0
+	} else {
+		prevSprintLastID = binary.BigEndian.Uint64(prevSprintLastIDBytes)
+	}
+
+	eventId := make([]byte, 8) // first event ID for this sprint
+	binary.BigEndian.PutUint64(eventId, prevSprintLastID+1)
+
+	eventCursor, err := tx.RwCursor(kv.BorEvents)
+	if err != nil {
+		return err
+	}
+	defer eventCursor.Close()
+
+	for eventId, _, err = eventCursor.Seek(eventId); err == nil && eventId != nil; eventId, _, err = eventCursor.Next() {
+		if err = eventCursor.DeleteCurrent(); err != nil {
 			return err
 		}
-		defer eventCursor.Close()
-		for eventId, _, err = eventCursor.Seek(eventId); err == nil && eventId != nil; eventId, _, err = eventCursor.Next() {
-			if err = eventCursor.DeleteCurrent(); err != nil {
-				return err
-			}
-		}
-		if err != nil {
-			return err
-		}
+	}
+	if err != nil {
+		return err
+	}
+
+	k, _, err := cursor.Next() // move cursor back to this sprint
+	if err != nil {
+		return err
 	}
 
 	for ; err == nil && k != nil; k, _, err = cursor.Next() {
 		if err = cursor.DeleteCurrent(); err != nil {
+			return err
+		}
+	}
+
+	epbCursor, err := tx.RwCursor(kv.BorEventProcessedBlocks)
+	if err != nil {
+		return err
+	}
+
+	defer epbCursor.Close()
+	for k, _, err = epbCursor.Seek(blockNumBuf[:]); err == nil && k != nil; k, _, err = epbCursor.Next() {
+		if err = epbCursor.DeleteCurrent(); err != nil {
 			return err
 		}
 	}
@@ -377,6 +410,7 @@ type polygonSyncStageTxAction struct {
 type polygonSyncStageService struct {
 	logger          log.Logger
 	sync            *polygonsync.Sync
+	syncStore       polygonsync.Store
 	events          *polygonsync.TipEvents
 	p2p             p2p.Service
 	executionEngine *polygonSyncStageExecutionEngine
@@ -400,7 +434,8 @@ func (s *polygonSyncStageService) Run(ctx context.Context, tx kv.RwTx, stageStat
 	s.runBgComponentsOnce(ctx)
 
 	if s.executionEngine.cachedForkChoice != nil {
-		err := s.executionEngine.UpdateForkChoice(ctx, s.executionEngine.cachedForkChoice, nil)
+		s.logger.Info(s.appendLogPrefix("new fork - processing cached fork choice after unwind"))
+		err := s.executionEngine.updateForkChoice(tx, s.executionEngine.cachedForkChoice)
 		if err != nil {
 			return err
 		}
@@ -472,6 +507,10 @@ func (s *polygonSyncStageService) runBgComponentsOnce(ctx context.Context) {
 		})
 
 		eg.Go(func() error {
+			return s.syncStore.Run(ctx)
+		})
+
+		eg.Go(func() error {
 			return s.sync.Run(ctx)
 		})
 
@@ -479,22 +518,6 @@ func (s *polygonSyncStageService) runBgComponentsOnce(ctx context.Context) {
 			s.bgComponentsErr <- err
 		}
 	}()
-}
-
-type polygonSyncStageSyncStore struct {
-	executionEngine *polygonSyncStageExecutionEngine
-}
-
-func (s *polygonSyncStageSyncStore) InsertBlocks(ctx context.Context, blocks []*types.Block) error {
-	return s.executionEngine.InsertBlocks(ctx, blocks)
-}
-
-func (s *polygonSyncStageSyncStore) Flush(context.Context) error {
-	return nil
-}
-
-func (s *polygonSyncStageSyncStore) Run(context.Context) error {
-	return nil
 }
 
 type polygonSyncStageHeimdallStore struct {
@@ -1111,6 +1134,45 @@ func (s polygonSyncStageBridgeStore) LastProcessedEventID(ctx context.Context) (
 	return r.id, nil
 }
 
+func (s polygonSyncStageBridgeStore) LastProcessedBlockInfo(ctx context.Context) (bridge.ProcessedBlockInfo, bool, error) {
+	type response struct {
+		info bridge.ProcessedBlockInfo
+		ok   bool
+		err  error
+	}
+
+	r, err := awaitTxAction(ctx, s.txActionStream, func(tx kv.RwTx, responseStream chan<- response) error {
+		info, ok, err := bridge.LastProcessedBlockInfo(tx)
+		responseStream <- response{info: info, ok: ok, err: err}
+		return nil
+	})
+	if err != nil {
+		return bridge.ProcessedBlockInfo{}, false, err
+	}
+
+	return r.info, r.ok, r.err
+}
+
+func (s polygonSyncStageBridgeStore) PutProcessedBlockInfo(ctx context.Context, info bridge.ProcessedBlockInfo) error {
+	type response struct {
+		err error
+	}
+
+	r, err := awaitTxAction(ctx, s.txActionStream, func(tx kv.RwTx, responseStream chan<- response) error {
+		responseStream <- response{err: bridge.PutProcessedBlockInfo(tx, info)}
+		return nil
+	})
+	if err != nil {
+		return err
+	}
+
+	return r.err
+}
+
+func (s polygonSyncStageBridgeStore) LastFrozenEventBlockNum() uint64 {
+	return s.eventReader.LastFrozenEventBlockNum()
+}
+
 func (s polygonSyncStageBridgeStore) LastEventIDWithinWindow(ctx context.Context, fromID uint64, toTime time.Time) (uint64, error) {
 	type response struct {
 		id  uint64
@@ -1132,13 +1194,13 @@ func (s polygonSyncStageBridgeStore) LastEventIDWithinWindow(ctx context.Context
 	return r.id, nil
 }
 
-func (s polygonSyncStageBridgeStore) PutEventIDs(ctx context.Context, eventMap map[uint64]uint64) error {
+func (s polygonSyncStageBridgeStore) PutBlockNumToEventID(ctx context.Context, blockNumToEventId map[uint64]uint64) error {
 	type response struct {
 		err error
 	}
 
 	r, err := awaitTxAction(ctx, s.txActionStream, func(tx kv.RwTx, responseStream chan<- response) error {
-		responseStream <- response{err: bridge.PutEventsIDs(tx, eventMap)}
+		responseStream <- response{err: bridge.PutBlockNumToEventID(tx, blockNumToEventId)}
 		return nil
 	})
 	if err != nil {
@@ -1156,12 +1218,12 @@ func (s polygonSyncStageBridgeStore) Events(context.Context, uint64, uint64) ([]
 	panic("polygonSyncStageBridgeStore.Events not supported")
 }
 
-func (s polygonSyncStageBridgeStore) EventIDRange(context.Context, uint64) (uint64, uint64, error) {
+func (s polygonSyncStageBridgeStore) BlockEventIDsRange(context.Context, uint64) (uint64, uint64, error) {
 	// used for accessing events in execution
 	// astrid stage integration intends to use the bridge only for scrapping
 	// not for reading which remains the same in execution (via BlockReader)
 	// astrid standalone mode introduces its own reader
-	panic("polygonSyncStageBridgeStore.EventIDRange not supported")
+	panic("polygonSyncStageBridgeStore.BlockEventIDsRange not supported")
 }
 
 func (s polygonSyncStageBridgeStore) EventTxnToBlockNum(context.Context, common.Hash) (uint64, bool, error) {
@@ -1201,6 +1263,24 @@ type polygonSyncStageExecutionEngine struct {
 	stageState       *StageState
 	unwinder         Unwinder
 	cachedForkChoice *types.Header
+}
+
+func (e *polygonSyncStageExecutionEngine) GetHeader(ctx context.Context, blockNum uint64) (*types.Header, error) {
+	type response struct {
+		header *types.Header
+		err    error
+	}
+
+	r, err := awaitTxAction(ctx, e.txActionStream, func(tx kv.RwTx, responseStream chan<- response) error {
+		header, err := e.blockReader.HeaderByNumber(ctx, tx, blockNum)
+		responseStream <- response{header: header, err: err}
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	return r.header, r.err
 }
 
 func (e *polygonSyncStageExecutionEngine) InsertBlocks(ctx context.Context, blocks []*types.Block) error {
@@ -1298,6 +1378,7 @@ func (e *polygonSyncStageExecutionEngine) updateForkChoice(tx kv.RwTx, tip *type
 	}
 
 	if len(badNodes) > 0 {
+		e.logger.Info(e.appendLogPrefix("new fork - unwinding and caching fork choice"))
 		badNode := badNodes[len(badNodes)-1]
 		e.cachedForkChoice = tip
 		return e.unwinder.UnwindTo(badNode.number, ForkReset(badNode.hash), tx)

@@ -196,7 +196,7 @@ func NewAggregator(ctx context.Context, dirs datadir.Dirs, aggregationStep uint6
 		},
 		replaceKeysInValues:         a.commitmentValuesTransform,
 		restrictSubsetFileDeletions: a.commitmentValuesTransform,
-		compress:                    CompressNone,
+		compress:                    CompressKeys,
 	}
 	if a.d[kv.CommitmentDomain], err = NewDomain(cfg, aggregationStep, kv.CommitmentDomain, kv.TblCommitmentVals, kv.TblCommitmentHistoryKeys, kv.TblCommitmentHistoryVals, kv.TblCommitmentIdx, integrityCheck, logger); err != nil {
 		return nil, err
