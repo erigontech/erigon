@@ -299,11 +299,23 @@ Reconnect:
 				log.Info("[test] Before into channel", "slot", obj.Block.Slot, "peer", data.Peer.Pid)
 				blocksCh <- data
 			} else if gossip.IsTopicBlobSidecar(data.Name) {
-				blobsCh <- data
+				select {
+				case blobsCh <- data:
+				default:
+					log.Warn("[test][gossipmgr] Blobs channel is full")
+				}
 			} else if gossip.IsTopicSyncCommittee(data.Name) || data.Name == gossip.TopicNameSyncCommitteeContributionAndProof {
-				syncCommitteesCh <- data
+				select {
+				case syncCommitteesCh <- data:
+				default:
+					log.Warn("[test][gossipmgr] SyncCommittee channel is full")
+				}
 			} else {
-				operationsCh <- data
+				select {
+				case operationsCh <- data:
+				default:
+					log.Warn("[test][gossipmgr] Operations channel is full")
+				}
 			}
 		}
 	}
