@@ -212,6 +212,9 @@ func WriteBeaconBlockHeaderAndIndicies(ctx context.Context, tx kv.RwTx, signedHe
 	if err := WriteParentBlockRoot(ctx, tx, blockRoot, signedHeader.Header.ParentRoot); err != nil {
 		return err
 	}
+	if err := AddBlockRootToParentRootsIndex(tx, signedHeader.Header.ParentRoot, blockRoot); err != nil {
+		return err
+	}
 	if forceCanonical {
 		if err := MarkRootCanonical(ctx, tx, signedHeader.Header.Slot, blockRoot); err != nil {
 			return err
@@ -406,4 +409,37 @@ func ReadSignedHeaderByBlockRoot(ctx context.Context, tx kv.Tx, blockRoot libcom
 		return nil, false, err
 	}
 	return h, canonical == blockRoot, nil
+}
+
+func ReadBlockRootsByParentRoot(tx kv.Tx, parentRoot libcommon.Hash) ([]libcommon.Hash, error) {
+	roots, err := tx.GetOne(kv.ParentRootToBlockRoots, parentRoot[:])
+	if err != nil {
+		return nil, err
+	}
+	if len(roots) == 0 {
+		return nil, nil
+	}
+	blockRoots := make([]libcommon.Hash, 0, len(roots)/32)
+	for i := 0; i < len(roots); i += 32 {
+		var blockRoot libcommon.Hash
+		copy(blockRoot[:], roots[i:i+32])
+		blockRoots = append(blockRoots, blockRoot)
+	}
+	return blockRoots, nil
+}
+
+func AddBlockRootToParentRootsIndex(tx kv.RwTx, parentRoot, blockRoot libcommon.Hash) error {
+	roots, err := tx.GetOne(kv.ParentRootToBlockRoots, parentRoot[:])
+	if err != nil {
+		return err
+	}
+	// check if it is already there
+	for i := 0; i < len(roots); i += 32 {
+		if bytes.Equal(roots[i:i+32], blockRoot[:]) {
+			return nil
+		}
+	}
+
+	roots = append(libcommon.Copy(roots), blockRoot[:]...)
+	return tx.Put(kv.ParentRootToBlockRoots, parentRoot[:], roots)
 }
