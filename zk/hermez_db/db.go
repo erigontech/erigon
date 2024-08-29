@@ -528,6 +528,27 @@ func (db *HermezDb) WriteSequence(l1BlockNo, batchNo uint64, l1TxHash, stateRoot
 	return db.tx.Put(L1SEQUENCES, ConcatKey(l1BlockNo, batchNo), val)
 }
 
+// RollbackSequences deletes the sequences up to the given batch number
+func (db *HermezDb) RollbackSequences(batchNo uint64) error {
+	for {
+		latestSequence, err := db.GetLatestSequence()
+		if err != nil {
+			return err
+		}
+
+		if latestSequence == nil || latestSequence.BatchNo <= batchNo {
+			break
+		}
+
+		err = db.tx.Delete(L1SEQUENCES, ConcatKey(latestSequence.L1BlockNo, latestSequence.BatchNo))
+		if err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
 func (db *HermezDb) TruncateSequences(l2BlockNo uint64) error {
 	batchNo, err := db.GetBatchNoByL2Block(l2BlockNo)
 	if err != nil {

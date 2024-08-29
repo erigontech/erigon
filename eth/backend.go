@@ -799,6 +799,7 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 		seqAndVerifTopics := [][]libcommon.Hash{{
 			contracts.SequencedBatchTopicPreEtrog,
 			contracts.SequencedBatchTopicEtrog,
+			contracts.RollbackBatchesTopic,
 			contracts.VerificationTopicPreEtrog,
 			contracts.VerificationTopicEtrog,
 			contracts.VerificationValidiumTopicEtrog,

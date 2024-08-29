@@ -149,6 +149,13 @@ Loop:
 						highestWrittenL1BlockNo = info.L1BlockNo
 					}
 					newSequencesCount++
+				case logRollbackBatches:
+					if err := hermezDb.RollbackSequences(info.BatchNo); err != nil {
+						return fmt.Errorf("failed to write rollback sequence, %w", err)
+					}
+					if info.L1BlockNo > highestWrittenL1BlockNo {
+						highestWrittenL1BlockNo = info.L1BlockNo
+					}
 				case logVerify:
 					if info.BatchNo > highestVerification.BatchNo {
 						highestVerification = info
@@ -222,6 +229,7 @@ var (
 	logSequence         BatchLogType = 1
 	logVerify           BatchLogType = 2
 	logL1InfoTreeUpdate BatchLogType = 4
+	logRollbackBatches  BatchLogType = 5
 
 	logIncompatible BatchLogType = 100
 )
@@ -265,6 +273,9 @@ func parseLogType(l1RollupId uint64, log *ethTypes.Log) (l1BatchInfo types.L1Bat
 		}
 	case contracts.UpdateL1InfoTreeTopic:
 		batchLogType = logL1InfoTreeUpdate
+	case contracts.RollbackBatchesTopic:
+		batchLogType = logRollbackBatches
+		batchNum = new(big.Int).SetBytes(log.Topics[1].Bytes()).Uint64()
 	default:
 		batchLogType = logUnknown
 		batchNum = 0
