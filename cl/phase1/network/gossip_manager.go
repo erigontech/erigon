@@ -314,7 +314,7 @@ Reconnect:
 				select {
 				case operationsCh <- data:
 				default:
-					log.Warn("[test][gossipmgr] Operations channel is full")
+					log.Warn("[test][gossipmgr] Operations channel is full", "topic", data.Name)
 				}
 			}
 		}
