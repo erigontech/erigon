@@ -452,7 +452,10 @@ func (api *ZkEvmAPIImpl) GetBatchByNumber(ctx context.Context, batchNumber rpc.B
 	}
 	if _, ok := syncStatus.(bool); !ok {
 		bn := syncStatus.(map[string]interface{})["currentBlock"]
-		highestBatchNo, err = hermezDb.GetBatchNoByL2Block(uint64(bn.(hexutil.Uint64)))
+		if highestBatchNo, err = hermezDb.GetBatchNoByL2Block(uint64(bn.(hexutil.Uint64))); err != nil {
+			return nil, err
+		}
+
 	}
 	if batchNumber > rpc.BlockNumber(highestBatchNo) {
 		return nil, nil
@@ -1338,9 +1341,10 @@ func convertBlockToRpcBlock(
 			}
 
 			cid := tx.GetChainID()
-			if cid.Cmp(uint256.NewInt(0)) != 0 {
-				tran.ChainID = (*types.ArgBig)(cid.ToBig())
+			if cid == nil {
+				cid = uint256.NewInt(0)
 			}
+			tran.ChainID = (*types.ArgBig)(cid.ToBig())
 
 			t := types.TransactionOrHash{Tx: &tran}
 			result.Transactions = append(result.Transactions, t)

@@ -21,10 +21,10 @@ import (
 	"fmt"
 	"math/big"
 
-	"github.com/holiman/uint256"
 	libcommon "github.com/gateway-fm/cdk-erigon-lib/common"
 	"github.com/gateway-fm/cdk-erigon-lib/common/hexutility"
 	types2 "github.com/gateway-fm/cdk-erigon-lib/types"
+	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/log/v3"
 
 	"github.com/ledgerwatch/erigon/accounts/abi"
@@ -414,10 +414,9 @@ func newRPCTransaction(tx types.Transaction, blockHash libcommon.Hash, blockNumb
 	switch t := tx.(type) {
 	case *types.LegacyTx:
 		chainId = types.DeriveChainId(&t.V)
-		// if a legacy transaction has an EIP-155 chain id, include it explicitly, otherwise chain id is not included
-		if !chainId.IsZero() {
-			result.ChainID = (*hexutil.Big)(chainId.ToBig())
-		}
+
+		result.ChainID = (*hexutil.Big)(chainId.ToBig())
+
 		result.GasPrice = (*hexutil.Big)(t.GasPrice.ToBig())
 		result.V = (*hexutil.Big)(t.V.ToBig())
 		result.R = (*hexutil.Big)(t.R.ToBig())

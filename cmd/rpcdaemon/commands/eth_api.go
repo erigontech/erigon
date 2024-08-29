@@ -422,9 +422,7 @@ func newRPCTransaction(tx types.Transaction, blockHash common.Hash, blockNumber 
 	case *types.LegacyTx:
 		chainId = types.DeriveChainId(&t.V)
 		// if a legacy transaction has an EIP-155 chain id, include it explicitly, otherwise chain id is not included
-		if !chainId.IsZero() {
-			result.ChainID = (*hexutil.Big)(chainId.ToBig())
-		}
+		result.ChainID = (*hexutil.Big)(chainId.ToBig())
 		result.GasPrice = (*hexutil.Big)(t.GasPrice.ToBig())
 		result.V = (*hexutil.Big)(t.V.ToBig())
 		result.R = (*hexutil.Big)(t.R.ToBig())
