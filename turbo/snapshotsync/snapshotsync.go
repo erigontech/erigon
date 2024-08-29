@@ -333,6 +333,11 @@ func WaitForDownloader(ctx context.Context, logPrefix string, dirs datadir.Dirs,
 		downloadRequest = append(downloadRequest, services.NewDownloadRequest(p.Name, p.Hash))
 	}
 
+	if headerchain {
+		log.Info("[OtterSync] Starting Ottersync")
+		log.Info(greatOtterBanner)
+	}
+
 	log.Info(fmt.Sprintf("[%s] Requesting downloads", logPrefix))
 	for {
 		select {
@@ -349,30 +354,24 @@ func WaitForDownloader(ctx context.Context, logPrefix string, dirs datadir.Dirs,
 
 	}
 
-	const logInterval = 20 * time.Second
-	logEvery := time.NewTicker(logInterval)
-	defer logEvery.Stop()
+	const checkInterval = 20 * time.Second
+	checkEvery := time.NewTicker(checkInterval)
+	defer checkEvery.Stop()
 
 	// Check once without delay, for faster erigon re-start
-	stats, err := snapshotDownloader.Stats(ctx, &proto_downloader.StatsRequest{})
+	completedResp, err := snapshotDownloader.Completed(ctx, &proto_downloader.CompletedRequest{})
 	if err != nil {
 		return err
 	}
 
 	// Print download progress until all segments are available
-
-	firstLog := true
-	for !stats.Completed {
+	for !completedResp.Completed {
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
-		case <-logEvery.C:
-			if firstLog && headerchain {
-				log.Info("[OtterSync] Starting Ottersync")
-				log.Info(greatOtterBanner)
-				firstLog = false
-			}
-			if stats, err = snapshotDownloader.Stats(ctx, &proto_downloader.StatsRequest{}); err != nil {
+		case <-checkEvery.C:
+			completedResp, err = snapshotDownloader.Completed(ctx, &proto_downloader.CompletedRequest{})
+			if err != nil {
 				log.Warn("Error while waiting for snapshots progress", "err", err)
 			}
 		}
@@ -381,21 +380,6 @@ func WaitForDownloader(ctx context.Context, logPrefix string, dirs datadir.Dirs,
 	if blockReader.FreezingCfg().Verify {
 		if _, err := snapshotDownloader.Verify(ctx, &proto_downloader.VerifyRequest{}); err != nil {
 			return err
-		}
-
-		if stats, err = snapshotDownloader.Stats(ctx, &proto_downloader.StatsRequest{}); err != nil {
-			log.Warn("Error while waiting for snapshots progress", "err", err)
-		}
-	}
-
-	for !stats.Completed {
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		case <-logEvery.C:
-			if stats, err = snapshotDownloader.Stats(ctx, &proto_downloader.StatsRequest{}); err != nil {
-				log.Warn("Error while waiting for snapshots progress", "err", err)
-			}
 		}
 	}
 

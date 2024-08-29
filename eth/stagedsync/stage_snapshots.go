@@ -267,6 +267,7 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 	if err := snapshotsync.WaitForDownloader(ctx, s.LogPrefix() /*headerChain=*/, cfg.dirs, true, cfg.blobs, cfg.prune, cstate, cfg.agg, tx, cfg.blockReader, &cfg.chainConfig, cfg.snapshotDownloader, s.state.StagesIdsList()); err != nil {
 		return err
 	}
+
 	if err := cfg.blockReader.Snapshots().ReopenSegments([]snaptype.Type{coresnaptype.Headers, coresnaptype.Bodies}, true); err != nil {
 		return err
 	}
