@@ -60,11 +60,6 @@ type HermezDb interface {
 	DeleteReusedL1InfoTreeIndexes(fromBlockNum, toBlockNum uint64) error
 	WriteBlockL1BlockHash(l2BlockNo uint64, l1BlockHash common.Hash) error
 	DeleteBlockL1BlockHashes(fromBlockNum, toBlockNum uint64) error
-	WriteL1BlockHash(l1BlockHash common.Hash) error
-	CheckL1BlockHashWritten(l1BlockHash common.Hash) (bool, error)
-	DeleteL1BlockHashes(l1BlockHashes *[]common.Hash) error
-	WriteGerForL1BlockHash(l1BlockHash, ger common.Hash) error
-	DeleteL1BlockHashGers(l1BlockHashes *[]common.Hash) error
 	WriteBatchGlobalExitRoot(batchNumber uint64, ger *types.GerUpdate) error
 	WriteIntermediateTxStateRoot(l2BlockNumber uint64, txHash common.Hash, rpcRoot common.Hash) error
 	WriteBlockL1InfoTreeIndex(blockNumber uint64, l1Index uint64) error
@@ -592,11 +587,6 @@ func UnwindBatchesStage(u *stagedsync.UnwindState, tx kv.RwTx, cfg BatchesCfg, c
 		return fmt.Errorf("get block global exit roots error: %v", err)
 	}
 
-	l1BlockHashes, err := hermezDb.GetBlockL1BlockHashes(fromBlock, toBlock)
-	if err != nil {
-		return fmt.Errorf("get block l1 block hashes error: %v", err)
-	}
-
 	if err := hermezDb.DeleteGlobalExitRoots(&gers); err != nil {
 		return fmt.Errorf("delete global exit roots error: %v", err)
 	}
@@ -607,14 +597,6 @@ func UnwindBatchesStage(u *stagedsync.UnwindState, tx kv.RwTx, cfg BatchesCfg, c
 
 	if err := hermezDb.DeleteBlockGlobalExitRoots(fromBlock, toBlock); err != nil {
 		return fmt.Errorf("delete block global exit roots error: %v", err)
-	}
-
-	if err := hermezDb.DeleteL1BlockHashes(&l1BlockHashes); err != nil {
-		return fmt.Errorf("delete l1 block hashes error: %v", err)
-	}
-
-	if err := hermezDb.DeleteL1BlockHashGers(&l1BlockHashes); err != nil {
-		return fmt.Errorf("delete l1 block hash gers error: %v", err)
 	}
 
 	if err := hermezDb.DeleteBlockL1BlockHashes(fromBlock, toBlock); err != nil {
@@ -804,25 +786,8 @@ func writeL2Block(eriDb ErigonDb, hermezDb HermezDb, l2Block *types.FullL2Block,
 	}
 
 	if l2Block.L1BlockHash != emptyHash {
-		l1BlockHashWritten, err := hermezDb.CheckL1BlockHashWritten(l2Block.L1BlockHash)
-		if err != nil {
-			return fmt.Errorf("get global exit root error: %v", err)
-		}
-
-		if !l1BlockHashWritten {
-			if err := hermezDb.WriteBlockL1BlockHash(l2Block.L2BlockNumber, l2Block.L1BlockHash); err != nil {
-				return fmt.Errorf("write block global exit root error: %v", err)
-			}
-
-			if err := hermezDb.WriteL1BlockHash(l2Block.L1BlockHash); err != nil {
-				return fmt.Errorf("write global exit root error: %v", err)
-			}
-
-			if l2Block.GlobalExitRoot != emptyHash {
-				if err := hermezDb.WriteGerForL1BlockHash(l2Block.L1BlockHash, l2Block.GlobalExitRoot); err != nil {
-					return fmt.Errorf("write ger for l1 block hash error: %v", err)
-				}
-			}
+		if err := hermezDb.WriteBlockL1BlockHash(l2Block.L2BlockNumber, l2Block.L1BlockHash); err != nil {
+			return fmt.Errorf("write block global exit root error: %v", err)
 		}
 	}
 
