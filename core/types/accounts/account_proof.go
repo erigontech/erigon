@@ -22,3 +22,22 @@ type StorProofResult struct {
 	Value *hexutil.Big       `json:"value"`
 	Proof []hexutility.Bytes `json:"proof"`
 }
+
+type SMTAccProofResult struct {
+	Address         libcommon.Address       `json:"address"`
+	Balance         *hexutil.Big            `json:"balance"`
+	CodeHash        libcommon.Hash          `json:"codeHash"`
+	CodeLength      hexutil.Uint64          `json:"codeLength"`
+	Nonce           hexutil.Uint64          `json:"nonce"`
+	BalanceProof    []hexutility.Bytes      `json:"balanceProof"`
+	NonceProof      []hexutility.Bytes      `json:"nonceProof"`
+	CodeHashProof   []hexutility.Bytes      `json:"codeHashProof"`
+	CodeLengthProof []hexutility.Bytes      `json:"codeLengthProof"`
+	StorageProof    []SMTStorageProofResult `json:"storageProof"`
+}
+
+type SMTStorageProofResult struct {
+	Key   libcommon.Hash     `json:"key"`
+	Value *hexutil.Big       `json:"value"`
+	Proof []hexutility.Bytes `json:"proof"`
+}
