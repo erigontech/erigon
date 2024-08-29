@@ -288,7 +288,7 @@ Reconnect:
 				continue Reconnect
 			}
 
-			if data.Name == gossip.TopicNameBeaconBlock || gossip.IsTopicBlobSidecar(data.Name) {
+			if data.Name == gossip.TopicNameBeaconBlock {
 				currentEpoch := g.ethClock.GetCurrentEpoch()
 				version := g.beaconConfig.GetCurrentStateVersion(currentEpoch)
 				obj := cltypes.NewSignedBeaconBlock(g.beaconConfig)
@@ -298,6 +298,8 @@ Reconnect:
 				}
 				log.Info("[test] Before into channel", "slot", obj.Block.Slot, "peer", data.Peer.Pid)
 				blocksCh <- data
+			} else if gossip.IsTopicBlobSidecar(data.Name) {
+				blobsCh <- data
 			} else if gossip.IsTopicSyncCommittee(data.Name) || data.Name == gossip.TopicNameSyncCommitteeContributionAndProof {
 				syncCommitteesCh <- data
 			} else {
