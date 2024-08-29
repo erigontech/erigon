@@ -943,10 +943,10 @@ Loop:
 				//	}
 				//}
 
-				// If we skip post evaluation, then we should compute root hash ASAP for fail-fast
 				if inMemExec {
 					break
 				}
+				// If we skip post evaluation, then we should compute root hash ASAP for fail-fast
 				if !skipPostEvaluation && rs.SizeEstimate() < commitThreshold {
 					break
 				}
