@@ -932,7 +932,7 @@ Loop:
 
 			select {
 			case <-logEvery.C:
-				if inMemExec {
+				if inMemExec || isMining {
 					break
 				}
 
