@@ -19,6 +19,7 @@ package solid
 import (
 	"encoding/binary"
 	"encoding/json"
+	"io"
 	"strconv"
 
 	"github.com/erigontech/erigon-lib/common/length"
@@ -224,4 +225,25 @@ func (arr *byteBasedUint64Slice) DecodeSSZ(buf []byte, _ int) error {
 // EncodingSizeSSZ returns the size in bytes that the slice would occupy when encoded in SSZ format.
 func (arr *byteBasedUint64Slice) EncodingSizeSSZ() int {
 	return arr.l * 8
+}
+
+func (arr *byteBasedUint64Slice) ReadMerkleTree(r io.Reader) error {
+	if arr.MerkleTree == nil {
+		arr.MerkleTree = &merkle_tree.MerkleTree{}
+		arr.MerkleTree.Initialize((arr.l+3)/4, merkle_tree.OptimalMaxTreeCacheDepth, func(idx int, out []byte) {
+			copy(out, arr.u[idx*length.Hash:])
+		}, nil)
+	}
+	return arr.MerkleTree.ReadMerkleTree(r)
+}
+
+func (arr *byteBasedUint64Slice) WriteMerkleTree(w io.Writer) error {
+	if arr.MerkleTree == nil {
+		arr.MerkleTree = &merkle_tree.MerkleTree{}
+		cap := uint64((arr.c*8 + length.Hash - 1) / length.Hash)
+		arr.MerkleTree.Initialize((arr.l+3)/4, merkle_tree.OptimalMaxTreeCacheDepth, func(idx int, out []byte) {
+			copy(out, arr.u[idx*length.Hash:])
+		}, &cap)
+	}
+	return arr.MerkleTree.WriteMerkleTree(w)
 }

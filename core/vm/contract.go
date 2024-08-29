@@ -59,7 +59,7 @@ type Contract struct {
 	caller        ContractRef
 	self          libcommon.Address
 	jumpdests     *JumpDestCache // Aggregated result of JUMPDEST analysis.
-	analysis      []uint64       // Locally cached result of JUMPDEST analysis
+	analysis      bitvec         // Locally cached result of JUMPDEST analysis
 	skipAnalysis  bool
 
 	Code      []byte
@@ -73,7 +73,7 @@ type Contract struct {
 }
 
 type JumpDestCache struct {
-	*simplelru.LRU[libcommon.Hash, []uint64]
+	*simplelru.LRU[libcommon.Hash, bitvec]
 	hit, total int
 	trace      bool
 }
@@ -84,7 +84,7 @@ var (
 )
 
 func NewJumpDestCache(trace bool) *JumpDestCache {
-	c, err := simplelru.NewLRU[libcommon.Hash, []uint64](jumpDestCacheLimit, nil)
+	c, err := simplelru.NewLRU[libcommon.Hash, bitvec](jumpDestCacheLimit, nil)
 	if err != nil {
 		panic(err)
 	}
@@ -130,10 +130,6 @@ func (c *Contract) validJumpdest(dest *uint256.Int) (bool, bool) {
 	return c.isCode(udest), true
 }
 
-func isCodeFromAnalysis(analysis []uint64, udest uint64) bool {
-	return analysis[udest/64]&(uint64(1)<<(udest&63)) == 0
-}
-
 // isCode returns true if the provided PC location is an actual opcode, as
 // opposed to a data-segment following a PUSHN operation.
 func (c *Contract) isCode(udest uint64) bool {
@@ -154,7 +150,7 @@ func (c *Contract) isCode(udest uint64) bool {
 		}
 		// Also stash it in current contract for faster access
 		c.analysis = analysis
-		return isCodeFromAnalysis(analysis, udest)
+		return c.analysis.codeSegment(udest)
 	}
 
 	// We don't have the code hash, most likely a piece of initcode not already
@@ -165,7 +161,7 @@ func (c *Contract) isCode(udest uint64) bool {
 		c.analysis = codeBitmap(c.Code)
 	}
 
-	return isCodeFromAnalysis(c.analysis, udest)
+	return c.analysis.codeSegment(udest)
 }
 
 // AsDelegate sets the contract to be a delegate call and returns the current

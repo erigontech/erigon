@@ -19,7 +19,6 @@ package bordb
 import (
 	"encoding/binary"
 	"errors"
-	"math"
 
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon/polygon/bor/snaptype"
@@ -31,6 +30,7 @@ import (
 // doesn't change sequences of kv.EthTx
 // doesn't delete Receipts, Senders, Canonical markers, TotalDifficulty
 func PruneBorBlocks(tx kv.RwTx, blockTo uint64, blocksDeleteLimit int, SpanIdAt func(number uint64) uint64) (deleted int, err error) {
+	// events
 	c, err := tx.Cursor(kv.BorEventNums)
 	if err != nil {
 		return deleted, err
@@ -38,13 +38,17 @@ func PruneBorBlocks(tx kv.RwTx, blockTo uint64, blocksDeleteLimit int, SpanIdAt 
 	defer c.Close()
 	var blockNumBytes [8]byte
 	binary.BigEndian.PutUint64(blockNumBytes[:], blockTo)
-	k, v, err := c.Seek(blockNumBytes[:])
+	_, _, err = c.Seek(blockNumBytes[:])
 	if err != nil {
 		return deleted, err
 	}
-	var eventIdTo uint64 = math.MaxUint64
+	k, v, err := c.Prev()
+	if err != nil {
+		return deleted, err
+	}
+	var eventIdTo uint64 = 0
 	if k != nil {
-		eventIdTo = binary.BigEndian.Uint64(v)
+		eventIdTo = binary.BigEndian.Uint64(v) + 1
 	}
 
 	c1, err := tx.RwCursor(kv.BorEvents)
@@ -67,6 +71,32 @@ func PruneBorBlocks(tx kv.RwTx, blockTo uint64, blocksDeleteLimit int, SpanIdAt 
 	if err != nil {
 		return deleted, err
 	}
+
+	epbCursor, err := tx.RwCursor(kv.BorEventProcessedBlocks)
+	if err != nil {
+		return deleted, err
+	}
+
+	defer epbCursor.Close()
+	counter = blocksDeleteLimit
+	for k, _, err = epbCursor.First(); err == nil && k != nil && counter > 0; k, _, err = epbCursor.Next() {
+		blockNum := binary.BigEndian.Uint64(k)
+		if blockNum >= blockTo {
+			break
+		}
+
+		if err = epbCursor.DeleteCurrent(); err != nil {
+			return deleted, err
+		}
+
+		deleted++
+		counter--
+	}
+	if err != nil {
+		return deleted, err
+	}
+
+	// spans
 	firstSpanToKeep := SpanIdAt(blockTo)
 	c2, err := tx.RwCursor(kv.BorSpans)
 	if err != nil {
@@ -74,7 +104,7 @@ func PruneBorBlocks(tx kv.RwTx, blockTo uint64, blocksDeleteLimit int, SpanIdAt 
 	}
 	defer c2.Close()
 	counter = blocksDeleteLimit
-	for k, _, err := c2.First(); err == nil && k != nil && counter > 0; k, _, err = c2.Next() {
+	for k, _, err = c2.First(); err == nil && k != nil && counter > 0; k, _, err = c2.Next() {
 		spanId := binary.BigEndian.Uint64(k)
 		if spanId >= firstSpanToKeep {
 			break
@@ -84,6 +114,9 @@ func PruneBorBlocks(tx kv.RwTx, blockTo uint64, blocksDeleteLimit int, SpanIdAt 
 		}
 		deleted++
 		counter--
+	}
+	if err != nil {
+		return deleted, err
 	}
 
 	if snaptype.CheckpointsEnabled() {

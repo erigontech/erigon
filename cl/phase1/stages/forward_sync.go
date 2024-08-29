@@ -8,10 +8,12 @@ import (
 	"time"
 
 	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
+	"github.com/erigontech/erigon/cl/persistence/beacon_indicies"
 	"github.com/erigontech/erigon/cl/persistence/blob_storage"
 	"github.com/erigontech/erigon/cl/phase1/core/state"
 	network2 "github.com/erigontech/erigon/cl/phase1/network"
@@ -93,7 +95,6 @@ func processDownloadedBlockBatches(ctx context.Context, cfg *Cfg, highestBlockPr
 		st        *state.CachingBeaconState
 	)
 	newHighestBlockProcessed = highestBlockProcessed
-
 	// Iterate over each block in the sorted list
 	for _, block := range blocks {
 		// Compute the hash of the current block
@@ -104,6 +105,15 @@ func processDownloadedBlockBatches(ctx context.Context, cfg *Cfg, highestBlockPr
 			return
 		}
 
+		var hasSignedHeaderInDB bool
+
+		if err = cfg.indiciesDB.View(ctx, func(tx kv.Tx) error {
+			_, hasSignedHeaderInDB, err = beacon_indicies.ReadSignedHeaderByBlockRoot(ctx, tx, blockRoot)
+			return err
+		}); err != nil {
+			err = fmt.Errorf("failed to read signed header: %w", err)
+			return
+		}
 		// Process the block
 		if err = processBlock(ctx, cfg, cfg.indiciesDB, block, false, true, false); err != nil {
 			// Return an error if block processing fails
@@ -111,19 +121,21 @@ func processDownloadedBlockBatches(ctx context.Context, cfg *Cfg, highestBlockPr
 			return
 		}
 
-		// Perform post-processing on the block
-		st, err = cfg.forkChoice.GetStateAtBlockRoot(blockRoot, false)
-		if err == nil && block.Block.Slot%(cfg.beaconCfg.SlotsPerEpoch*2) == 0 && st != nil {
-			// Dump the beacon state on disk if conditions are met
-			if err = cfg.forkChoice.DumpBeaconStateOnDisk(st); err != nil {
-				// Return an error if dumping the state fails
-				err = fmt.Errorf("failed to dump state: %w", err)
-				return
-			}
-			if err = saveHeadStateOnDiskIfNeeded(cfg, st); err != nil {
-				// Return an error if saving the head state fails
-				err = fmt.Errorf("failed to save head state: %w", err)
-				return
+		if !hasSignedHeaderInDB {
+			// Perform post-processing on the block
+			st, err = cfg.forkChoice.GetStateAtBlockRoot(blockRoot, false)
+			if err == nil && block.Block.Slot%(cfg.beaconCfg.SlotsPerEpoch*2) == 0 && st != nil {
+				// Dump the beacon state on disk if conditions are met
+				if err = cfg.forkChoice.DumpBeaconStateOnDisk(st); err != nil {
+					// Return an error if dumping the state fails
+					err = fmt.Errorf("failed to dump state: %w", err)
+					return
+				}
+				if err = saveHeadStateOnDiskIfNeeded(cfg, st); err != nil {
+					// Return an error if saving the head state fails
+					err = fmt.Errorf("failed to save head state: %w", err)
+					return
+				}
 			}
 		}
 
@@ -136,7 +148,6 @@ func processDownloadedBlockBatches(ctx context.Context, cfg *Cfg, highestBlockPr
 		if block.Version() < clparams.BellatrixVersion || !shouldInsert {
 			continue
 		}
-
 		// Add the block to the block collector
 		if err = cfg.blockCollector.AddBlock(block.Block); err != nil {
 			// Return an error if adding the block to the collector fails

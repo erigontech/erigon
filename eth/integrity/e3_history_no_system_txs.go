@@ -31,10 +31,12 @@ import (
 	"github.com/erigontech/erigon-lib/kv/temporal"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/state"
+	"github.com/erigontech/erigon/turbo/services"
+	"github.com/erigontech/erigon/turbo/snapshotsync/freezeblocks"
 )
 
 // E3 History - usually don't have anything attributed to 1-st system txs (except genesis)
-func E3HistoryNoSystemTxs(ctx context.Context, chainDB kv.RwDB, agg *state.Aggregator) error {
+func E3HistoryNoSystemTxs(ctx context.Context, chainDB kv.RwDB, blockReader services.FullBlockReader, agg *state.Aggregator) error {
 	count := atomic.Uint64{}
 	logEvery := time.NewTicker(20 * time.Second)
 	defer logEvery.Stop()
@@ -75,7 +77,7 @@ func E3HistoryNoSystemTxs(ctx context.Context, chainDB kv.RwDB, agg *state.Aggre
 						if err != nil {
 							return err
 						}
-						ok, blockNum, err := rawdbv3.TxNums.FindBlockNum(tx, txNum)
+						ok, blockNum, err := rawdbv3.TxNums.WithCustomReadTxNumFunc(freezeblocks.ReadTxNumFuncFromBlockReader(ctx, blockReader)).FindBlockNum(tx, txNum)
 						if err != nil {
 							return err
 						}

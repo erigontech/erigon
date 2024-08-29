@@ -311,7 +311,10 @@ func (e *EthereumExecutionModule) ValidateChain(ctx context.Context, req *execut
 }
 
 func (e *EthereumExecutionModule) purgeBadChain(ctx context.Context, tx kv.RwTx, latestValidHash, headHash libcommon.Hash) error {
-	tip := rawdb.ReadHeaderNumber(tx, headHash)
+	tip, err := e.blockReader.HeaderNumber(ctx, tx, headHash)
+	if err != nil {
+		return err
+	}
 
 	currentHash := headHash
 	currentNumber := *tip
@@ -358,7 +361,7 @@ func (e *EthereumExecutionModule) HasBlock(ctx context.Context, in *execution.Ge
 	}
 	blockHash := gointerfaces.ConvertH256ToHash(in.BlockHash)
 
-	num := rawdb.ReadHeaderNumber(tx, blockHash)
+	num, _ := e.blockReader.HeaderNumber(ctx, tx, blockHash)
 	if num == nil {
 		return &execution.HasBlockResponse{HasBlock: false}, nil
 	}

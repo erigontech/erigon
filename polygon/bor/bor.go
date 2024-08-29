@@ -79,6 +79,8 @@ const (
 	inmemorySignatures      = 4096 // Number of recent block signatures to keep in memory
 )
 
+var enableBoreventsRemoteFallback = dbg.EnvBool("BOREVENTS_REMOTE_FALLBACK", false)
+
 // Bor protocol constants.
 var (
 	defaultSprintLength = map[string]uint64{
@@ -231,7 +233,7 @@ func CalcProducerDelay(number uint64, succession int, c *borcfg.BorConfig) uint6
 	// When the block is the first block of the sprint, it is expected to be delayed by `producerDelay`.
 	// That is to allow time for block propagation in the last sprint
 	delay := c.CalculatePeriod(number)
-	if number%c.CalculateSprintLength(number) == 0 {
+	if c.IsSprintStart(number) {
 		delay = c.CalculateProducerDelay(number)
 	}
 
@@ -249,6 +251,35 @@ func MinNextBlockTime(parent *types.Header, succession int, config *borcfg.BorCo
 // ValidateHeaderTimeSignerSuccessionNumber - valset.ValidatorSet abstraction for unit tests
 type ValidateHeaderTimeSignerSuccessionNumber interface {
 	GetSignerSuccessionNumber(signer libcommon.Address, number uint64) (int, error)
+}
+
+func CalculateEventWindow(ctx context.Context, config *borcfg.BorConfig, header *types.Header, tx kv.Getter, headerReader services.HeaderReader) (from time.Time, to time.Time, err error) {
+
+	blockNum := header.Number.Uint64()
+	blockNum += blockNum % config.CalculateSprintLength(blockNum)
+
+	prevHeader, err := headerReader.HeaderByNumber(ctx, tx, blockNum-config.CalculateSprintLength(blockNum))
+
+	if err != nil {
+		return time.Time{}, time.Time{}, fmt.Errorf("window calculation failed: %w", err)
+	}
+
+	if config.IsIndore(blockNum) {
+		stateSyncDelay := config.CalculateStateSyncDelay(blockNum)
+		to = time.Unix(int64(header.Time-stateSyncDelay), 0)
+		from = time.Unix(int64(prevHeader.Time-stateSyncDelay), 0)
+	} else {
+		to = time.Unix(int64(prevHeader.Time), 0)
+		prevHeader, err := headerReader.HeaderByNumber(ctx, tx, prevHeader.Number.Uint64()-config.CalculateSprintLength(prevHeader.Number.Uint64()))
+
+		if err != nil {
+			return time.Time{}, time.Time{}, fmt.Errorf("window calculation failed: %w", err)
+		}
+
+		from = time.Unix(int64(prevHeader.Time), 0)
+	}
+
+	return from, to, nil
 }
 
 type spanReader interface {
@@ -553,7 +584,7 @@ func ValidateHeaderExtraLength(extraBytes []byte) error {
 // ValidateHeaderSprintValidators validates that the extra-data contains a validators list only in the last header of a sprint.
 func ValidateHeaderSprintValidators(header *types.Header, config *borcfg.BorConfig) error {
 	number := header.Number.Uint64()
-	isSprintEnd := isSprintStart(number+1, config.CalculateSprintLength(number))
+	isSprintEnd := config.IsSprintEnd(number)
 	validatorBytes := GetValidatorBytes(header, config)
 	validatorBytesLen := len(validatorBytes)
 
@@ -919,7 +950,7 @@ func (c *Bor) Prepare(chain consensus.ChainHeaderReader, header *types.Header, s
 	// client calls `GetCurrentValidators` because it makes a contract call
 	// where it fetches producers internally. As we fetch data from span
 	// in Erigon, use directly the `GetCurrentProducers` function.
-	if isSprintStart(number+1, c.config.CalculateSprintLength(number)) {
+	if c.config.IsSprintEnd(number) {
 		spanID := uint64(heimdall.SpanIdAt(number + 1))
 		newValidators, err := c.spanner.GetCurrentProducers(spanID, chain)
 		if err != nil {
@@ -1019,7 +1050,7 @@ func (c *Bor) Finalize(config *chain.Config, header *types.Header, state *state.
 		return nil, nil, nil, consensus.ErrUnexpectedRequests
 	}
 
-	if isSprintStart(headerNumber, c.config.CalculateSprintLength(headerNumber)) {
+	if c.config.IsSprintStart(headerNumber) {
 		cx := statefull.ChainContext{Chain: chain, Bor: c}
 
 		if c.blockReader != nil {
@@ -1086,7 +1117,7 @@ func (c *Bor) FinalizeAndAssemble(chainConfig *chain.Config, header *types.Heade
 		return nil, nil, nil, consensus.ErrUnexpectedRequests
 	}
 
-	if isSprintStart(headerNumber, c.config.CalculateSprintLength(headerNumber)) {
+	if c.config.IsSprintStart(headerNumber) {
 		cx := statefull.ChainContext{Chain: chain, Bor: c}
 
 		if c.blockReader != nil {
@@ -1510,9 +1541,8 @@ func (c *Bor) CommitStates(
 	}
 
 	events := chain.Chain.BorEventsByBlock(header.Hash(), blockNum)
-
-	//if len(events) == 50 || len(events) == 0 { // we still sometime could get 0 events from borevent file
-	if blockNum <= chain.Chain.FrozenBorBlocks() && len(events) == 50 { // we still sometime could get 0 events from borevent file
+	if enableBoreventsRemoteFallback && blockNum <= chain.Chain.FrozenBorBlocks() && len(events) == 50 {
+		// we still sometime could get 0 events from borevent file
 		var to time.Time
 		if c.config.IsIndore(blockNum) {
 			stateSyncDelay := c.config.CalculateStateSyncDelay(blockNum)
@@ -1613,10 +1643,6 @@ func (c *Bor) getNextHeimdallSpanForTest(
 	heimdallSpan.ChainID = c.chainConfig.ChainID.String()
 
 	return &heimdallSpan, nil
-}
-
-func isSprintStart(number, sprint uint64) bool {
-	return number%sprint == 0
 }
 
 // BorTransfer transfer in Bor

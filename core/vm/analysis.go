@@ -20,73 +20,96 @@
 package vm
 
 const (
-	set2BitsMask = uint16(0b11)
-	set3BitsMask = uint16(0b111)
-	set4BitsMask = uint16(0b1111)
-	set5BitsMask = uint16(0b1_1111)
-	set6BitsMask = uint16(0b11_1111)
-	set7BitsMask = uint16(0b111_1111)
+	set2BitsMask = uint64(0b11)
+	set3BitsMask = uint64(0b111)
+	set4BitsMask = uint64(0b1111)
+	set5BitsMask = uint64(0b1_1111)
+	set6BitsMask = uint64(0b11_1111)
+	set7BitsMask = uint64(0b111_1111)
 )
+
+// TODO(racytech): fix this part. Make sure merge did not brake anything. If it did investigate.
 
 // bitvec is a bit vector which maps bytes in a program.
 // An unset bit means the byte is an opcode, a set bit means
 // it's data (i.e. argument of PUSHxx).
-type bitvec []byte
+// type bitvec []byte
 
-func (bits bitvec) set1(pos uint64) {
-	bits[pos/8] |= 1 << (pos % 8)
-}
+// func (bits bitvec) set1(pos uint64) {
+// 	bits[pos/8] |= 1 << (pos % 8)
+// }
 
-func (bits bitvec) setN(flag uint16, pos uint64) {
-	a := flag << (pos % 8)
-	bits[pos/8] |= byte(a)
-	if b := byte(a >> 8); b != 0 {
-		bits[pos/8+1] = b
-	}
-}
+// func (bits bitvec) setN(flag uint16, pos uint64) {
+// 	a := flag << (pos % 8)
+// 	bits[pos/8] |= byte(a)
+// 	if b := byte(a >> 8); b != 0 {
+// 		bits[pos/8+1] = b
+// 	}
+// }
 
 func (bits bitvec) set8(pos uint64) {
-	a := byte(0xFF << (pos % 8))
+	a := uint64(0xFF << (pos % 8))
 	bits[pos/8] |= a
 	bits[pos/8+1] = ^a
 }
 
-func (bits bitvec) set16(pos uint64) {
-	a := byte(0xFF << (pos % 8))
-	bits[pos/8] |= a
-	bits[pos/8+1] = 0xFF
-	bits[pos/8+2] = ^a
-}
+// func (bits bitvec) set16(pos uint64) {
+// 	a := byte(0xFF << (pos % 8))
+// 	bits[pos/8] |= a
+// 	bits[pos/8+1] = 0xFF
+// 	bits[pos/8+2] = ^a
+// }
 
-// codeSegment checks if the position is in a code segment.
-func (bits *bitvec) codeSegment(pos uint64) bool {
-	return (((*bits)[pos/8] >> (pos % 8)) & 1) == 0
-}
+// // codeSegment checks if the position is in a code segment.
+// func (bits *bitvec) codeSegment(pos uint64) bool {
+// 	return (((*bits)[pos/8] >> (pos % 8)) & 1) == 0
+// }
 
 // codeBitmap collects data locations in code.
-func codeBitmap(code []byte) []uint64 {
+func codeBitmap(code []byte) bitvec {
 	// The bitmap is 4 bytes longer than necessary, in case the code
 	// ends with a PUSH32, the algorithm will push zeroes onto the
 	// bitvector outside the bounds of the actual code.
-	bits := make([]uint64, (len(code)+32+63)/64)
-
-	for pc := 0; pc < len(code); {
+	bits := make(bitvec, (len(code)+32+63)/64)
+	for pc := uint64(0); pc < uint64(len(code)); {
 		op := OpCode(code[pc])
 		pc++
-		if op >= PUSH1 && op <= PUSH32 {
-			numbits := int(op - PUSH1 + 1)
-			x := uint64(1) << (op - PUSH1)
-			x = x | (x - 1) // Smear the bit to the right
-			idx := pc / 64
-			shift := pc & 63
-			bits[idx] |= x << shift
-			if shift+shift > 64 {
-				bits[idx+1] |= x >> (64 - shift)
-			}
-			pc += numbits
+		if int8(op) < int8(PUSH1) { // If not PUSH (the int8(op) > int(PUSH32) is always false).
+			continue
 		}
+		if op == PUSH1 {
+			bits.set1(pc)
+			pc += 1
+			continue
+		}
+
+		numbits := uint64(op - PUSH1 + 1)
+		bits.setN(uint64(1)<<numbits-1, pc)
+		pc += numbits
 	}
 	return bits
+}
+
+// bitvec is a bit vector which maps bytes in a program.
+// An unset bit means the byte is an opcode, a set bit means
+// it's data (i.e. argument of PUSHxx).
+type bitvec []uint64
+
+func (bits bitvec) set1(pos uint64) {
+	bits[pos/64] |= 1 << (pos % 64)
+}
+
+func (bits bitvec) setN(flag uint64, pc uint64) {
+	shift := pc % 64
+	bits[pc/64] |= flag << shift
+	if shift > 32 {
+		bits[pc/64+1] = flag >> (64 - shift)
+	}
+}
+
+// codeSegment checks if the position is in a code segment.
+func (bits bitvec) codeSegment(pos uint64) bool {
+	return ((bits[pos/64] >> (pos % 64)) & 1) == 0
 }
 
 // eofCodeBitmap collects data locations in code.
@@ -100,17 +123,17 @@ func eofCodeBitmap(code []byte) bitvec {
 
 // eofCodeBitmapInternal is the internal implementation of codeBitmap for EOF
 // code validation.
-func eofCodeBitmapInternal(code, bits bitvec) bitvec {
+func eofCodeBitmapInternal(code []byte, bits bitvec) bitvec {
 	for pc := uint64(0); pc < uint64(len(code)); {
 		var (
 			op      = OpCode(code[pc])
-			numbits uint8
+			numbits uint64
 		)
 		pc++
 
 		switch {
 		case op >= PUSH1 && op <= PUSH32:
-			numbits = uint8(op - PUSH1 + 1)
+			numbits = uint64(op - PUSH1 + 1)
 		case op == RJUMP || op == RJUMPI:
 			numbits = 2
 		case op == RJUMPV:
@@ -125,26 +148,26 @@ func eofCodeBitmapInternal(code, bits bitvec) bitvec {
 				// Count missing, no more bits to mark.
 				return bits
 			}
-			numbits = code[pc]*2 + 1
+			numbits = uint64(code[pc]*2 + 1)
 			if pc+uint64(numbits) > end {
 				// Jump table is truncated, mark as many bits
 				// as possible.
-				numbits = uint8(end - pc)
+				numbits = uint64(end - pc)
 			}
 		default:
 			// Op had no immediate operand, continue.
 			continue
 		}
 
-		if numbits >= 8 {
-			for ; numbits >= 16; numbits -= 16 {
-				bits.set16(pc)
-				pc += 16
-			}
-			for ; numbits >= 8; numbits -= 8 {
-				bits.set8(pc)
-				pc += 8
-			}
+		if numbits >= 8 { // TODO(racytech): fix this
+			// for ; numbits >= 16; numbits -= 16 {
+			// 	bits.setN(pc)
+			// 	pc += 16
+			// }
+			// for ; numbits >= 8; numbits -= 8 {
+			// 	bits.set8(pc)
+			// 	pc += 8
+			// }
 		}
 		switch numbits {
 		case 1:

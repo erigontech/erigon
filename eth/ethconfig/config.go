@@ -36,7 +36,6 @@ import (
 	"github.com/erigontech/erigon-lib/common/datadir"
 	"github.com/erigontech/erigon-lib/downloader/downloadercfg"
 	"github.com/erigontech/erigon-lib/txpool/txpoolcfg"
-	"github.com/erigontech/erigon/cl/beacon/beacon_router_configuration"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/consensus/ethash/ethashcfg"
 	"github.com/erigontech/erigon/core/types"
@@ -79,7 +78,8 @@ var Defaults = Config{
 		BodyCacheLimit:             256 * 1024 * 1024,
 		BodyDownloadTimeoutSeconds: 2,
 		//LoopBlockLimit:             100_000,
-		PruneLimit: 100,
+		PruneLimit:            100,
+		ParallelStateFlushing: true,
 	},
 	Ethash: ethashcfg.Config{
 		CachesInMem:      2,
@@ -189,7 +189,6 @@ type Config struct {
 
 	Snapshot     BlocksFreezing
 	Downloader   *downloadercfg.Cfg
-	BeaconRouter beacon_router_configuration.RouterConfiguration
 	CaplinConfig clparams.CaplinConfig
 
 	Dirs datadir.Dirs
@@ -241,12 +240,7 @@ type Config struct {
 	// Ethstats service
 	Ethstats string
 	// Consensus layer
-	InternalCL             bool
-	CaplinDiscoveryAddr    string
-	CaplinDiscoveryPort    uint64
-	CaplinDiscoveryTCPPort uint64
-	SentinelAddr           string
-	SentinelPort           uint64
+	InternalCL bool
 
 	OverridePragueTime *big.Int `toml:",omitempty"`
 	PragueEOFTime      *big.Int `toml:",omitempty"`
@@ -279,6 +273,7 @@ type Sync struct {
 	PruneLimit                 int //the maximum records to delete from the DB during pruning
 	BreakAfterStage            string
 	LoopBlockLimit             uint
+	ParallelStateFlushing      bool
 
 	UploadLocation   string
 	UploadFrom       rpc.BlockNumber

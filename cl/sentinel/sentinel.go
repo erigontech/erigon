@@ -22,9 +22,11 @@ import (
 	"fmt"
 	"net"
 	"net/http"
+	"os/signal"
 	"strconv"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -240,7 +242,15 @@ func New(
 		return nil, err
 	}
 
-	rmgr, err := rcmgr.NewResourceManager(rcmgr.NewFixedLimiter(rcmgr.DefaultLimits.AutoScale()), rcmgr.WithTraceReporter(str))
+	defaultLimits := rcmgr.DefaultLimits.AutoScale()
+	newLimit := rcmgr.PartialLimitConfig{
+		System: rcmgr.ResourceLimits{
+			StreamsOutbound: 16,
+			StreamsInbound:  16,
+		},
+	}.Build(defaultLimits)
+
+	rmgr, err := rcmgr.NewResourceManager(rcmgr.NewFixedLimiter(newLimit), rcmgr.WithTraceReporter(str))
 	if err != nil {
 		return nil, err
 	}
@@ -254,6 +264,7 @@ func New(
 	opts = append(opts, libp2p.ConnectionGater(gater))
 
 	host, err := libp2p.New(opts...)
+	signal.Reset(syscall.SIGINT)
 	if err != nil {
 		return nil, err
 	}

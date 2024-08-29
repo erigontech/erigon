@@ -44,9 +44,10 @@ import (
 */
 
 var databaseTablesCfg = kv.TableCfg{
-	kv.BorEvents:    {},
-	kv.BorEventNums: {},
-	kv.BorTxLookup:  {},
+	kv.BorEvents:               {},
+	kv.BorEventNums:            {},
+	kv.BorEventProcessedBlocks: {},
+	kv.BorTxLookup:             {},
 }
 
 var ErrEventIDRangeNotFound = errors.New("event id range not found")
@@ -57,13 +58,16 @@ type Store interface {
 
 	LatestEventID(ctx context.Context) (uint64, error)
 	LastProcessedEventID(ctx context.Context) (uint64, error)
-	PutEventTxnToBlockNum(ctx context.Context, txMap map[libcommon.Hash]uint64) error
+	PutEventTxnToBlockNum(ctx context.Context, eventTxnToBlockNum map[libcommon.Hash]uint64) error
 	EventTxnToBlockNum(ctx context.Context, borTxHash libcommon.Hash) (uint64, bool, error)
 	LastEventIDWithinWindow(ctx context.Context, fromID uint64, toTime time.Time) (uint64, error)
 	PutEvents(ctx context.Context, events []*heimdall.EventRecordWithTime) error
 	Events(ctx context.Context, start, end uint64) ([][]byte, error)
-	PutEventIDs(ctx context.Context, eventMap map[uint64]uint64) error
-	EventIDRange(ctx context.Context, blockNum uint64) (uint64, uint64, error)
+	PutBlockNumToEventID(ctx context.Context, blockNumToEventId map[uint64]uint64) error
+	BlockEventIDsRange(ctx context.Context, blockNum uint64) (start uint64, end uint64, err error) // [start,end)
+	LastProcessedBlockInfo(ctx context.Context) (ProcessedBlockInfo, bool, error)
+	PutProcessedBlockInfo(ctx context.Context, info ProcessedBlockInfo) error
+	LastFrozenEventBlockNum() uint64
 	PruneEventIDs(ctx context.Context, blockNum uint64) error
 }
 
@@ -145,7 +149,66 @@ func LastProcessedEventID(tx kv.Tx) (uint64, error) {
 	return binary.BigEndian.Uint64(v), err
 }
 
-func (s *MdbxStore) PutEventTxnToBlockNum(ctx context.Context, txMap map[libcommon.Hash]uint64) error {
+func (s *MdbxStore) LastProcessedBlockInfo(ctx context.Context) (ProcessedBlockInfo, bool, error) {
+	tx, err := s.db.BeginRo(ctx)
+	if err != nil {
+		return ProcessedBlockInfo{}, false, err
+	}
+
+	defer tx.Rollback()
+	return LastProcessedBlockInfo(tx)
+}
+
+func LastProcessedBlockInfo(tx kv.Tx) (ProcessedBlockInfo, bool, error) {
+	var info ProcessedBlockInfo
+
+	cursor, err := tx.Cursor(kv.BorEventProcessedBlocks)
+	if err != nil {
+		return info, false, err
+	}
+
+	defer cursor.Close()
+	k, v, err := cursor.Last()
+	if err != nil {
+		return info, false, err
+	}
+	if len(k) == 0 {
+		return info, false, nil
+	}
+
+	info.UnmarshallBytes(k, v)
+	return info, true, nil
+}
+
+func (s *MdbxStore) PutProcessedBlockInfo(ctx context.Context, info ProcessedBlockInfo) error {
+	tx, err := s.db.BeginRw(ctx)
+	if err != nil {
+		return err
+	}
+
+	defer tx.Rollback()
+
+	if err = PutProcessedBlockInfo(tx, info); err != nil {
+		return err
+	}
+
+	return tx.Commit()
+}
+
+func PutProcessedBlockInfo(tx kv.RwTx, info ProcessedBlockInfo) error {
+	k, v := info.MarshallBytes()
+	return tx.Put(kv.BorEventProcessedBlocks, k, v)
+}
+
+func (s *MdbxStore) LastFrozenEventBlockNum() uint64 {
+	return 0 // handle when the bridge manages its own snapshots
+}
+
+func (s *MdbxStore) PutEventTxnToBlockNum(ctx context.Context, eventTxnToBlockNum map[libcommon.Hash]uint64) error {
+	if len(eventTxnToBlockNum) == 0 {
+		return nil
+	}
+
 	tx, err := s.db.BeginRw(ctx)
 	if err != nil {
 		return err
@@ -154,7 +217,7 @@ func (s *MdbxStore) PutEventTxnToBlockNum(ctx context.Context, txMap map[libcomm
 
 	vByte := make([]byte, 8)
 
-	for k, v := range txMap {
+	for k, v := range eventTxnToBlockNum {
 		binary.BigEndian.PutUint64(vByte, v)
 
 		err = tx.Put(kv.BorTxLookup, k.Bytes(), vByte)
@@ -187,7 +250,7 @@ func (s *MdbxStore) EventTxnToBlockNum(ctx context.Context, borTxHash libcommon.
 	return blockNum, true, nil
 }
 
-// LastEventIDWithinWindow gets the last event id where event.ID >= fromID and event.Time <= toTime
+// LastEventIDWithinWindow gets the last event id where event.ID >= fromID and event.Time < toTime.
 func (s *MdbxStore) LastEventIDWithinWindow(ctx context.Context, fromID uint64, toTime time.Time) (uint64, error) {
 	tx, err := s.db.BeginRo(ctx)
 	if err != nil {
@@ -207,10 +270,10 @@ func LastEventIDWithinWindow(tx kv.Tx, fromID uint64, toTime time.Time) (uint64,
 		return 0, nil
 	}
 
-	kLastID := make([]byte, 8)
-	binary.BigEndian.PutUint64(kLastID, fromID)
+	k := make([]byte, 8)
+	binary.BigEndian.PutUint64(k, fromID)
 
-	it, err := tx.RangeAscend(kv.BorEvents, kLastID, nil, -1)
+	it, err := tx.RangeAscend(kv.BorEvents, k, nil, -1)
 	if err != nil {
 		return 0, err
 	}
@@ -228,9 +291,6 @@ func LastEventIDWithinWindow(tx kv.Tx, fromID uint64, toTime time.Time) (uint64,
 			return 0, err
 		}
 
-		// The table stores the first event ID for the range. In the
-		// case where event.Time == block.Time, we would want the table to
-		// store the current ID instead of the previous one
 		if !event.Time.Before(toTime) {
 			return eventID, nil
 		}
@@ -248,7 +308,11 @@ func (s *MdbxStore) PutEvents(ctx context.Context, events []*heimdall.EventRecor
 	}
 	defer tx.Rollback()
 
-	return PutEvents(tx, events)
+	if err = PutEvents(tx, events); err != nil {
+		return err
+	}
+
+	return tx.Commit()
 }
 
 func PutEvents(tx kv.RwTx, events []*heimdall.EventRecordWithTime) error {
@@ -265,7 +329,7 @@ func PutEvents(tx kv.RwTx, events []*heimdall.EventRecordWithTime) error {
 		}
 	}
 
-	return tx.Commit()
+	return nil
 }
 
 // Events gets raw events, start inclusive, end exclusive
@@ -301,21 +365,29 @@ func (s *MdbxStore) Events(ctx context.Context, start, end uint64) ([][]byte, er
 	return events, err
 }
 
-func (s *MdbxStore) PutEventIDs(ctx context.Context, eventMap map[uint64]uint64) error {
+func (s *MdbxStore) PutBlockNumToEventID(ctx context.Context, blockNumToEventId map[uint64]uint64) error {
+	if len(blockNumToEventId) == 0 {
+		return nil
+	}
+
 	tx, err := s.db.BeginRw(ctx)
 	if err != nil {
 		return err
 	}
 	defer tx.Rollback()
 
-	return PutEventsIDs(tx, eventMap)
+	if err = PutBlockNumToEventID(tx, blockNumToEventId); err != nil {
+		return err
+	}
+
+	return tx.Commit()
 }
 
-func PutEventsIDs(tx kv.RwTx, eventMap map[uint64]uint64) error {
+func PutBlockNumToEventID(tx kv.RwTx, blockNumToEventId map[uint64]uint64) error {
 	kByte := make([]byte, 8)
 	vByte := make([]byte, 8)
 
-	for k, v := range eventMap {
+	for k, v := range blockNumToEventId {
 		binary.BigEndian.PutUint64(kByte, k)
 		binary.BigEndian.PutUint64(vByte, v)
 
@@ -325,13 +397,13 @@ func PutEventsIDs(tx kv.RwTx, eventMap map[uint64]uint64) error {
 		}
 	}
 
-	return tx.Commit()
+	return nil
 }
 
-// EventIDRange returns the state sync event ID range for the given block number.
+// BlockEventIDsRange returns the [start, end] event ID for the given block number
 // ErrEventIDRangeNotFound is thrown if the block number is not found in the database.
-// If the given block number is the last in the database, then the second uint64 (representing end ID) is 0.
-func (s *MdbxStore) EventIDRange(ctx context.Context, blockNum uint64) (uint64, uint64, error) {
+// If the given block number is the first in the database, then the first uint64 (representing start ID) is 0.
+func (s *MdbxStore) BlockEventIDsRange(ctx context.Context, blockNum uint64) (uint64, uint64, error) {
 	var start, end uint64
 
 	tx, err := s.db.BeginRo(ctx)
@@ -356,21 +428,25 @@ func (s *MdbxStore) EventIDRange(ctx context.Context, blockNum uint64) (uint64, 
 		return start, end, fmt.Errorf("%w: %d", ErrEventIDRangeNotFound, blockNum)
 	}
 
-	start = binary.BigEndian.Uint64(v)
+	end = binary.BigEndian.Uint64(v)
 
-	_, v, err = cursor.Next()
+	_, v, err = cursor.Prev()
 	if err != nil {
 		return start, end, err
 	}
 
-	if v != nil { // may be empty if blockNum is the last entry
-		end = binary.BigEndian.Uint64(v)
+	if v != nil { // may be empty if blockNum is the first entry
+		start = binary.BigEndian.Uint64(v) + 1
 	}
 
 	return start, end, nil
 }
 
 func (s *MdbxStore) PruneEventIDs(ctx context.Context, blockNum uint64) error {
+	//
+	// TODO rename func to Unwind, unwind BorEventProcessedBlocks, BorTxnLookup - in separate PR
+	//
+
 	tx, err := s.db.BeginRw(ctx)
 	if err != nil {
 		return err

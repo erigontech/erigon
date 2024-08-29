@@ -18,6 +18,7 @@ package solid
 
 import (
 	"encoding/json"
+	"io"
 
 	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/length"
@@ -182,4 +183,25 @@ func (h *hashList) Range(fn func(int, libcommon.Hash, int) bool) {
 
 func (h *hashList) Pop() libcommon.Hash {
 	panic("didnt ask, dont need it, go fuck yourself")
+}
+
+func (h *hashList) ReadMerkleTree(r io.Reader) error {
+	if h.MerkleTree == nil {
+		h.MerkleTree = &merkle_tree.MerkleTree{}
+		h.MerkleTree.Initialize(h.l, merkle_tree.OptimalMaxTreeCacheDepth, func(idx int, out []byte) {
+			copy(out, h.u[idx*length.Hash:(idx+1)*length.Hash])
+		}, /*limit=*/ nil)
+	}
+	return h.MerkleTree.ReadMerkleTree(r)
+}
+
+func (h *hashList) WriteMerkleTree(w io.Writer) error {
+	if h.MerkleTree == nil {
+		cap := uint64(h.c)
+		h.MerkleTree = &merkle_tree.MerkleTree{}
+		h.MerkleTree.Initialize(h.l, merkle_tree.OptimalMaxTreeCacheDepth, func(idx int, out []byte) {
+			copy(out, h.u[idx*length.Hash:(idx+1)*length.Hash])
+		}, /*limit=*/ &cap)
+	}
+	return h.MerkleTree.WriteMerkleTree(w)
 }

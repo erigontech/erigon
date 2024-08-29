@@ -242,7 +242,7 @@ func (test *snapshotTest) run() bool {
 	db := memdb.NewStateDB("")
 	defer db.Close()
 
-	cr := rawdb.NewCanonicalReader()
+	cr := rawdb.NewCanonicalReader(rawdbv3.TxNums)
 	agg, err := stateLib.NewAggregator(context.Background(), datadir.New(""), 16, db, cr, log.New())
 	if err != nil {
 		test.err = err
@@ -359,9 +359,9 @@ func (test *snapshotTest) checkEqual(state, checkstate *IntraBlockState) error {
 		return fmt.Errorf("got GetRefund() == %d, want GetRefund() == %d",
 			state.GetRefund(), checkstate.GetRefund())
 	}
-	if !reflect.DeepEqual(state.GetLogs(libcommon.Hash{}), checkstate.GetLogs(libcommon.Hash{})) {
+	if !reflect.DeepEqual(state.GetLogs(libcommon.Hash{}, 0, libcommon.Hash{}), checkstate.GetLogs(libcommon.Hash{}, 0, libcommon.Hash{})) {
 		return fmt.Errorf("got GetLogs(libcommon.Hash{}) == %v, want GetLogs(libcommon.Hash{}) == %v",
-			state.GetLogs(libcommon.Hash{}), checkstate.GetLogs(libcommon.Hash{}))
+			state.GetLogs(libcommon.Hash{}, 0, libcommon.Hash{}), checkstate.GetLogs(libcommon.Hash{}, 0, libcommon.Hash{}))
 	}
 	return nil
 }
