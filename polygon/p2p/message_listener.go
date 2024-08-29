@@ -78,7 +78,6 @@ func newMessageListener(
 }
 
 type messageListener struct {
-	once                    sync.Once
 	logger                  log.Logger
 	sentryClient            sentryproto.SentryClient
 	statusDataFactory       sentry.StatusDataFactory
