@@ -87,10 +87,10 @@ var RecompressCommitmentFiles = Migration{
 			if err := recompressDomain(ctx, dirs, from, to, logger); err != nil {
 				return err
 			}
-			_ = os.Remove(strings.Replace(to, ".kv", ".bt", -1))
-			_ = os.Remove(strings.Replace(to, ".kv", ".kvei", -1))
-			_ = os.Remove(strings.Replace(to, ".kv", ".bt.torrent", -1))
-			_ = os.Remove(strings.Replace(to, ".kv", ".kv.torrent", -1))
+			_ = os.Remove(strings.ReplaceAll(to, ".kv", ".bt"))
+			_ = os.Remove(strings.ReplaceAll(to, ".kv", ".kvei"))
+			_ = os.Remove(strings.ReplaceAll(to, ".kv", ".bt.torrent"))
+			_ = os.Remove(strings.ReplaceAll(to, ".kv", ".kv.torrent"))
 		}
 
 		agg, err := state.NewAggregator(ctx, dirs, config3.HistoryV3AggregationStep, db, nil, logger)
@@ -198,7 +198,7 @@ func storageFiles(dirs datadir.Dirs) ([]string, error) {
 	if err != nil {
 		return nil, err
 	}
-	var res []string
+	res := make([]string, 0, len(files))
 	for _, f := range files {
 		if !strings.Contains(f, kv.StorageDomain.String()) {
 			continue
@@ -208,6 +208,7 @@ func storageFiles(dirs datadir.Dirs) ([]string, error) {
 	return res, nil
 }
 
+// nolint
 func rclone(logger log.Logger, from, to string) error {
 	cmd := exec.Command("rclone", "sync", "--progress", "--stats-one-line", from, to)
 	stdoutPipe, err := cmd.StdoutPipe()
