@@ -927,24 +927,38 @@ Loop:
 
 		// MA commitTx
 		if !parallel {
-			metrics2.UpdateBlockConsumerPostExecutionDelay(b.Time(), blockNum, logger)
+			if !inMemExec && !isMining {
+				metrics2.UpdateBlockConsumerPostExecutionDelay(b.Time(), blockNum, logger)
+			}
+
 			outputBlockNum.SetUint64(blockNum)
 
 			select {
 			case <-logEvery.C:
+				if inMemExec || isMining {
+					break
+				}
+
 				stepsInDB := rawdbhelpers.IdxStepsCountV3(applyTx)
 				progress.Log("", rs, in, rws, count, logGas, inputBlockNum.Load(), outputBlockNum.GetValueUint64(), outputTxNum.Load(), mxExecRepeats.GetValueUint64(), stepsInDB, shouldGenerateChangesets)
+
+				//TODO: https://github.com/erigontech/erigon/issues/10724
 				//if applyTx.(state2.HasAggTx).AggTx().(*state2.AggregatorRoTx).CanPrune(applyTx, outputTxNum.Load()) {
 				//	//small prune cause MDBX_TXN_FULL
 				//	if _, err := applyTx.(state2.HasAggTx).AggTx().(*state2.AggregatorRoTx).PruneSmallBatches(ctx, 10*time.Hour, applyTx); err != nil {
 				//		return err
 				//	}
 				//}
-				// If we skip post evaluation, then we should compute root hash ASAP for fail-fast
+
 				aggregatorRo := applyTx.(state2.HasAggTx).AggTx().(*state2.AggregatorRoTx)
-				if (!skipPostEvaluation && rs.SizeEstimate() < commitThreshold && !aggregatorRo.CanPrune(applyTx, outputTxNum.Load())) || inMemExec {
+
+				needCalcRoot := rs.SizeEstimate() >= commitThreshold ||
+					skipPostEvaluation || // If we skip post evaluation, then we should compute root hash ASAP for fail-fast
+					aggregatorRo.CanPrune(applyTx, outputTxNum.Load()) // if have something to prune - better prune ASAP to keep chaindata smaller
+				if !needCalcRoot {
 					break
 				}
+
 				var (
 					commitStart = time.Now()
 					tt          = time.Now()
