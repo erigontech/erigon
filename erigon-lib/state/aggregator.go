@@ -1381,12 +1381,6 @@ func (a *Aggregator) recalcVisibleFilesMinimaxTxNum() {
 	aggTx := a.BeginFilesRo()
 	defer aggTx.Close()
 	a.visibleFilesMinimaxTxNum.Store(aggTx.minimaxTxNumInDomainFiles())
-
-	fmt.Printf("[dbg] a1: EndTxNumMinimax=%d, minimaxTxNumInDomainFiles=%d\n", a.EndTxNumMinimax()/a.StepSize(), aggTx.minimaxTxNumInDomainFiles()/a.StepSize())
-	for _, d := range a.d {
-		fmt.Printf("[dbg] a2[%s]: dirtyFilesEndTxNumMinimax=%d\n", d.name.String(), d.dirtyFilesEndTxNumMinimax()/a.StepSize())
-	}
-
 }
 
 type RangesV3 struct {
