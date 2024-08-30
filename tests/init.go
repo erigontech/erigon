@@ -364,7 +364,6 @@ var Forks = map[string]*chain.Config{
 		ShanghaiTime:                  big.NewInt(0),
 		CancunTime:                    big.NewInt(0),
 		PragueTime:                    big.NewInt(0),
-		DepositContract:               common.HexToAddress("0x00000000219ab540356cBB839Cbe05303d7705Fa"),
 	},
 	"CancunToPragueAtTime15k": {
 		ChainID:                       big.NewInt(1),
@@ -385,7 +384,6 @@ var Forks = map[string]*chain.Config{
 		ShanghaiTime:                  big.NewInt(0),
 		CancunTime:                    big.NewInt(0),
 		PragueTime:                    big.NewInt(15_000),
-		DepositContract:               common.HexToAddress("0x00000000219ab540356cBB839Cbe05303d7705Fa"),
 	},
 }
 
