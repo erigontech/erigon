@@ -1346,7 +1346,9 @@ func (a *Aggregator) FirstTxNumOfStep(step uint64) uint64 { // could have some s
 	return firstTxNumOfStep(step, a.StepSize())
 }
 
-func (a *Aggregator) EndTxNumDomainsFrozen() uint64 {
+func (a *Aggregator) DirtyFilesEndTxNumMinimax() uint64 {
+	a.dirtyFilesLock.Lock()
+	defer a.dirtyFilesLock.Unlock()
 	return min(
 		a.d[kv.AccountsDomain].dirtyFilesEndTxNumMinimax(),
 		a.d[kv.StorageDomain].dirtyFilesEndTxNumMinimax(),
@@ -1358,26 +1360,27 @@ func (a *Aggregator) EndTxNumDomainsFrozen() uint64 {
 func (a *Aggregator) recalcVisibleFiles() {
 	defer a.recalcVisibleFilesMinimaxTxNum()
 
+	dirtyFilesMiniMax := a.DirtyFilesEndTxNumMinimax()
+
 	a.visibleFilesLock.Lock()
 	defer a.visibleFilesLock.Unlock()
-
 	for _, d := range a.d {
 		if d == nil {
 			continue
 		}
-		d.reCalcVisibleFiles()
+		d.reCalcVisibleFiles(dirtyFilesMiniMax)
 	}
 	for _, ii := range a.iis {
 		if ii == nil {
 			continue
 		}
-		ii.reCalcVisibleFiles()
+		ii.reCalcVisibleFiles(dirtyFilesMiniMax)
 	}
 	for _, ap := range a.ap {
 		if ap == nil {
 			continue
 		}
-		ap.reCalcVisibleFiles()
+		ap.reCalcVisibleFiles(dirtyFilesMiniMax)
 	}
 }
 
@@ -1385,6 +1388,12 @@ func (a *Aggregator) recalcVisibleFilesMinimaxTxNum() {
 	aggTx := a.BeginFilesRo()
 	defer aggTx.Close()
 	a.visibleFilesMinimaxTxNum.Store(aggTx.minimaxTxNumInDomainFiles())
+
+	fmt.Printf("[dbg] a1: EndTxNumMinimax=%d, minimaxTxNumInDomainFiles=%d\n", a.EndTxNumMinimax()/a.StepSize(), aggTx.minimaxTxNumInDomainFiles()/a.StepSize())
+	for _, d := range a.d {
+		fmt.Printf("[dbg] a2[%s]: dirtyFilesEndTxNumMinimax=%d\n", d.name.String(), d.dirtyFilesEndTxNumMinimax()/a.StepSize())
+	}
+
 }
 
 type RangesV3 struct {
