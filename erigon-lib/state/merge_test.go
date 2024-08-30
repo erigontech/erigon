@@ -51,7 +51,7 @@ func TestFindMergeRangeCornerCases(t *testing.T) {
 			item.decompressor = &seg.Decompressor{FileName1: fName}
 			return true
 		})
-		ii.reCalcVisibleFiles()
+		ii.reCalcVisibleFiles(ii.dirtyFilesEndTxNumMinimax())
 
 		ic := ii.BeginFilesRo()
 		defer ic.Close()
@@ -76,7 +76,7 @@ func TestFindMergeRangeCornerCases(t *testing.T) {
 			item.decompressor = &seg.Decompressor{FileName1: fName}
 			return true
 		})
-		ii.reCalcVisibleFiles()
+		ii.reCalcVisibleFiles(ii.dirtyFilesEndTxNumMinimax())
 		ic = ii.BeginFilesRo()
 		defer ic.Close()
 
@@ -97,7 +97,7 @@ func TestFindMergeRangeCornerCases(t *testing.T) {
 			item.decompressor = &seg.Decompressor{FileName1: fName}
 			return true
 		})
-		h.reCalcVisibleFiles()
+		ii.reCalcVisibleFiles(ii.dirtyFilesEndTxNumMinimax())
 		ic.Close()
 
 		hc := h.BeginFilesRo()
@@ -120,7 +120,7 @@ func TestFindMergeRangeCornerCases(t *testing.T) {
 			item.decompressor = &seg.Decompressor{FileName1: fName}
 			return true
 		})
-		ii.reCalcVisibleFiles()
+		ii.reCalcVisibleFiles(ii.dirtyFilesEndTxNumMinimax())
 
 		h := &History{InvertedIndex: ii, dirtyFiles: btree2.NewBTreeG[*filesItem](filesItemLess)}
 		h.scanDirtyFiles([]string{
@@ -132,7 +132,7 @@ func TestFindMergeRangeCornerCases(t *testing.T) {
 			item.decompressor = &seg.Decompressor{FileName1: fName}
 			return true
 		})
-		h.reCalcVisibleFiles()
+		h.reCalcVisibleFiles(h.dirtyFilesEndTxNumMinimax())
 
 		hc := h.BeginFilesRo()
 		defer hc.Close()
@@ -156,7 +156,7 @@ func TestFindMergeRangeCornerCases(t *testing.T) {
 			item.decompressor = &seg.Decompressor{FileName1: fName}
 			return true
 		})
-		ii.reCalcVisibleFiles()
+		ii.reCalcVisibleFiles(ii.dirtyFilesEndTxNumMinimax())
 
 		h := &History{InvertedIndex: ii, dirtyFiles: btree2.NewBTreeG[*filesItem](filesItemLess)}
 		h.scanDirtyFiles([]string{
@@ -168,7 +168,7 @@ func TestFindMergeRangeCornerCases(t *testing.T) {
 			item.decompressor = &seg.Decompressor{FileName1: fName}
 			return true
 		})
-		h.reCalcVisibleFiles()
+		h.reCalcVisibleFiles(h.dirtyFilesEndTxNumMinimax())
 
 		hc := h.BeginFilesRo()
 		defer hc.Close()
@@ -193,7 +193,7 @@ func TestFindMergeRangeCornerCases(t *testing.T) {
 			item.decompressor = &seg.Decompressor{FileName1: fName}
 			return true
 		})
-		ii.reCalcVisibleFiles()
+		ii.reCalcVisibleFiles(ii.dirtyFilesEndTxNumMinimax())
 
 		h := &History{InvertedIndex: ii, dirtyFiles: btree2.NewBTreeG[*filesItem](filesItemLess)}
 		h.scanDirtyFiles([]string{
@@ -207,7 +207,7 @@ func TestFindMergeRangeCornerCases(t *testing.T) {
 			item.decompressor = &seg.Decompressor{FileName1: fName}
 			return true
 		})
-		h.reCalcVisibleFiles()
+		h.reCalcVisibleFiles(h.dirtyFilesEndTxNumMinimax())
 
 		hc := h.BeginFilesRo()
 		defer hc.Close()
@@ -231,7 +231,7 @@ func TestFindMergeRangeCornerCases(t *testing.T) {
 			item.decompressor = &seg.Decompressor{FileName1: fName}
 			return true
 		})
-		ii.reCalcVisibleFiles()
+		ii.reCalcVisibleFiles(ii.dirtyFilesEndTxNumMinimax())
 
 		h := &History{InvertedIndex: ii, dirtyFiles: btree2.NewBTreeG[*filesItem](filesItemLess)}
 		h.scanDirtyFiles([]string{
@@ -245,7 +245,7 @@ func TestFindMergeRangeCornerCases(t *testing.T) {
 			item.decompressor = &seg.Decompressor{FileName1: fName}
 			return true
 		})
-		h.reCalcVisibleFiles()
+		h.reCalcVisibleFiles(h.dirtyFilesEndTxNumMinimax())
 
 		hc := h.BeginFilesRo()
 		defer hc.Close()
@@ -269,7 +269,7 @@ func TestFindMergeRangeCornerCases(t *testing.T) {
 			item.decompressor = &seg.Decompressor{FileName1: fName}
 			return true
 		})
-		ii.reCalcVisibleFiles()
+		ii.reCalcVisibleFiles(ii.dirtyFilesEndTxNumMinimax())
 
 		// `kill -9` may leave small garbage files, but if big one already exists we assume it's good(fsynced) and no reason to merge again
 		h := &History{InvertedIndex: ii, dirtyFiles: btree2.NewBTreeG[*filesItem](filesItemLess)}
@@ -283,7 +283,7 @@ func TestFindMergeRangeCornerCases(t *testing.T) {
 			item.decompressor = &seg.Decompressor{FileName1: fName}
 			return true
 		})
-		h.reCalcVisibleFiles()
+		h.reCalcVisibleFiles(h.dirtyFilesEndTxNumMinimax())
 
 		hc := h.BeginFilesRo()
 		defer hc.Close()
@@ -311,7 +311,7 @@ func TestFindMergeRangeCornerCases(t *testing.T) {
 			item.decompressor = &seg.Decompressor{FileName1: fName}
 			return true
 		})
-		ii.reCalcVisibleFiles()
+		ii.reCalcVisibleFiles(ii.dirtyFilesEndTxNumMinimax())
 
 		h := &History{InvertedIndex: ii, dirtyFiles: btree2.NewBTreeG[*filesItem](filesItemLess)}
 		h.scanDirtyFiles([]string{
@@ -326,7 +326,7 @@ func TestFindMergeRangeCornerCases(t *testing.T) {
 			item.decompressor = &seg.Decompressor{FileName1: fName}
 			return true
 		})
-		h.reCalcVisibleFiles()
+		h.reCalcVisibleFiles(h.dirtyFilesEndTxNumMinimax())
 
 		hc := h.BeginFilesRo()
 		defer hc.Close()
@@ -353,7 +353,7 @@ func TestFindMergeRangeCornerCases(t *testing.T) {
 			item.decompressor = &seg.Decompressor{FileName1: fName}
 			return true
 		})
-		ii.reCalcVisibleFiles()
+		ii.reCalcVisibleFiles(ii.dirtyFilesEndTxNumMinimax())
 
 		h := &History{InvertedIndex: ii, dirtyFiles: btree2.NewBTreeG[*filesItem](filesItemLess)}
 		h.scanDirtyFiles([]string{
@@ -366,7 +366,7 @@ func TestFindMergeRangeCornerCases(t *testing.T) {
 			item.decompressor = &seg.Decompressor{FileName1: fName}
 			return true
 		})
-		h.reCalcVisibleFiles()
+		h.reCalcVisibleFiles(h.dirtyFilesEndTxNumMinimax())
 
 		hc := h.BeginFilesRo()
 		defer hc.Close()
@@ -392,7 +392,7 @@ func TestFindMergeRangeCornerCases(t *testing.T) {
 			item.decompressor = &seg.Decompressor{FileName1: fName}
 			return true
 		})
-		ii.reCalcVisibleFiles()
+		ii.reCalcVisibleFiles(ii.dirtyFilesEndTxNumMinimax())
 
 		h := &History{InvertedIndex: ii, dirtyFiles: btree2.NewBTreeG[*filesItem](filesItemLess)}
 		h.scanDirtyFiles([]string{
@@ -406,7 +406,7 @@ func TestFindMergeRangeCornerCases(t *testing.T) {
 			item.decompressor = &seg.Decompressor{FileName1: fName}
 			return true
 		})
-		h.reCalcVisibleFiles()
+		h.reCalcVisibleFiles(h.dirtyFilesEndTxNumMinimax())
 
 		hc := h.BeginFilesRo()
 		defer hc.Close()
@@ -428,7 +428,7 @@ func TestFindMergeRangeCornerCases(t *testing.T) {
 			item.decompressor = &seg.Decompressor{FileName1: fName}
 			return true
 		})
-		ii.reCalcVisibleFiles()
+		ii.reCalcVisibleFiles(ii.dirtyFilesEndTxNumMinimax())
 		ic := ii.BeginFilesRo()
 		defer ic.Close()
 		mr := ic.findMergeRange(4, 32)
