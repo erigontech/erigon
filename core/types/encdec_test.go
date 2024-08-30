@@ -179,7 +179,7 @@ func (tr *TRand) RandAuthorizations(size int) []Authorization {
 			ChainID: uint256.NewInt(*tr.RandUint64()),
 			Address: tr.RandAddress(),
 			Nonce:   *tr.RandUint64(),
-			YParity: *uint256.NewInt(*tr.RandUint64()),
+			V:       *uint256.NewInt(*tr.RandUint64()),
 			R:       *uint256.NewInt(*tr.RandUint64()),
 			S:       *uint256.NewInt(*tr.RandUint64()),
 		}

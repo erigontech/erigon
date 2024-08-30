@@ -21,7 +21,7 @@ type Authorization struct {
 	ChainID *uint256.Int      `json:"chainId"`
 	Address libcommon.Address `json:"address"`
 	Nonce   uint64            `json:"nonce"`
-	YParity uint256.Int       `json:"v"`
+	V       uint256.Int       `json:"v"`
 	R       uint256.Int       `json:"r"`
 	S       uint256.Int       `json:"s"`
 }
@@ -31,7 +31,7 @@ func (ath *Authorization) copy() *Authorization {
 		ChainID: ath.ChainID,
 		Address: ath.Address,
 		Nonce:   ath.Nonce,
-		YParity: *ath.YParity.Clone(),
+		V:       *ath.V.Clone(),
 		R:       *ath.R.Clone(),
 		S:       *ath.S.Clone(),
 	}
@@ -69,10 +69,10 @@ func (ath *Authorization) RecoverSigner(data *bytes.Buffer, b []byte) (*libcommo
 	copy(sig[32-len(r):32], r)
 	copy(sig[64-len(s):64], s)
 
-	if ath.YParity.Eq(u256.Num0) || ath.YParity.Eq(u256.Num1) {
-		sig[64] = byte(ath.YParity.Uint64())
+	if ath.V.Eq(u256.Num0) || ath.V.Eq(u256.Num1) {
+		sig[64] = byte(ath.V.Uint64())
 	} else {
-		return nil, fmt.Errorf("invalid YParity value: %d", ath.YParity.Uint64())
+		return nil, fmt.Errorf("invalid v value: %d", ath.V.Uint64())
 	}
 
 	if !crypto.ValidateSignatureValues(sig[64], &ath.R, &ath.S, false) {
@@ -97,7 +97,7 @@ func authorizationSize(auth Authorization) (authLen int) {
 	authLen += rlp2.U64Len(auth.Nonce)
 	authLen += (1 + length.Addr)
 
-	authLen += (1 + rlp.Uint256LenExcludingHead(&auth.YParity)) + (1 + rlp.Uint256LenExcludingHead(&auth.R)) + (1 + rlp.Uint256LenExcludingHead(&auth.S))
+	authLen += (1 + rlp.Uint256LenExcludingHead(&auth.V)) + (1 + rlp.Uint256LenExcludingHead(&auth.R)) + (1 + rlp.Uint256LenExcludingHead(&auth.S))
 
 	return
 }
@@ -142,11 +142,11 @@ func decodeAuthorizations(auths *[]Authorization, s *rlp.Stream) error {
 			return err
 		}
 
-		// yparity
+		// v
 		if b, err = s.Uint256Bytes(); err != nil {
 			return err
 		}
-		auth.YParity.SetBytes(b)
+		auth.V.SetBytes(b)
 
 		// r
 		if b, err = s.Uint256Bytes(); err != nil {
@@ -196,8 +196,8 @@ func encodeAuthorizations(authorizations []Authorization, w io.Writer, b []byte)
 		if err := rlp.EncodeInt(auth.Nonce, w, b); err != nil {
 			return err
 		}
-		// 4. encode YParity, R, S
-		if err := auth.YParity.EncodeRLP(w); err != nil {
+		// 4. encode V, R, S
+		if err := auth.V.EncodeRLP(w); err != nil {
 			return err
 		}
 		if err := auth.R.EncodeRLP(w); err != nil {
