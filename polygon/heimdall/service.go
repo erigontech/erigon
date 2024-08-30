@@ -113,11 +113,21 @@ func newCheckpointFetcher(client HeimdallClient, logger log.Logger) entityFetche
 }
 
 func newMilestoneFetcher(client HeimdallClient, logger log.Logger) entityFetcher[*Milestone] {
+	fetchEntity := func(ctx context.Context, number int64) (*Milestone, error) {
+		milestone, err := client.FetchMilestone(ctx, number)
+		if errors.Is(ErrNotInMilestoneList, err) {
+			// this is needed because there may be an unfortunate edge case where FetchFirstMilestoneNum returned 10
+			// but by the time our request reaches heimdall milestone=10 has been already pruned
+			return milestone, fmt.Errorf("%w: %w", errTransientFetchFailure, err)
+		}
+		return milestone, err
+	}
+
 	return newEntityFetcher(
 		"MilestoneFetcher",
 		client.FetchFirstMilestoneNum,
 		client.FetchMilestoneCount,
-		client.FetchMilestone,
+		fetchEntity,
 		nil,
 		0,
 		logger,

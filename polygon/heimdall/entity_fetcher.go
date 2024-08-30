@@ -19,12 +19,16 @@ package heimdall
 import (
 	"cmp"
 	"context"
+	"errors"
 	"slices"
 	"time"
 
 	"github.com/erigontech/erigon-lib/log/v3"
 )
 
+var errTransientFetchFailure = errors.New("transient fetch failure")
+
+//go:generate mockgen -typed=true -source=./entity_fetcher.go -destination=./entity_fetcher_mock.go -package=heimdall
 type entityFetcher[TEntity Entity] interface {
 	FetchEntityIdRange(ctx context.Context) (ClosedRange, error)
 	FetchEntitiesRange(ctx context.Context, idRange ClosedRange) ([]TEntity, error)
@@ -103,9 +107,20 @@ func (f *entityFetcherImpl[TEntity]) FetchEntitiesRange(ctx context.Context, idR
 }
 
 func (f *entityFetcherImpl[TEntity]) FetchEntitiesRangeSequentially(ctx context.Context, idRange ClosedRange) ([]TEntity, error) {
-	return ClosedRangeMap(idRange, func(id uint64) (TEntity, error) {
-		return f.fetchEntity(ctx, int64(id))
-	})
+	entities := make([]TEntity, 0, idRange.Len())
+	for id := idRange.Start; id <= idRange.End; id++ {
+		entity, err := f.fetchEntity(ctx, int64(id))
+		if err != nil {
+			if errors.Is(err, errTransientFetchFailure) {
+				return entities, err
+			}
+			return nil, err
+		}
+
+		entities = append(entities, entity)
+	}
+
+	return entities, nil
 }
 
 func (f *entityFetcherImpl[TEntity]) FetchAllEntities(ctx context.Context) ([]TEntity, error) {
