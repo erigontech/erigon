@@ -27,6 +27,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/erigontech/erigon-lib/common/dbg"
 	"github.com/tidwall/btree"
 
 	"github.com/erigontech/erigon-lib/common"
@@ -62,6 +63,7 @@ func (ii *InvertedIndex) dirtyFilesEndTxNumMinimax() uint64 {
 }
 func (h *History) dirtyFilesEndTxNumMinimax() uint64 {
 	if h.snapshotsDisabled {
+		fmt.Printf("[dbg] maxu64 %s\n", dbg.Stack())
 		return math.MaxUint64
 	}
 	minimax := h.InvertedIndex.dirtyFilesEndTxNumMinimax()
