@@ -25,7 +25,6 @@
     stateRoot
     timestamp
     transactionsRoot
-    totalDifficulty
     transactions {
       createdContract {
         address
