@@ -935,7 +935,7 @@ Loop:
 
 			select {
 			case <-logEvery.C:
-				if inMemExec || isMining {
+				if inMemExec || isMining || skipPostEvaluation {
 					break
 				}
 
@@ -950,14 +950,14 @@ Loop:
 				//	}
 				//}
 
+				aggregatorRo := applyTx.(state2.HasAggTx).AggTx().(*state2.AggregatorRoTx)
 				// If we skip post evaluation, then we should compute root hash ASAP for fail-fast
-				if !skipPostEvaluation && rs.SizeEstimate() < commitThreshold {
+				needCalcRoot := !skipPostEvaluation && rs.SizeEstimate() < commitThreshold
+				//
+				//needCalcRoot := skipPostEvaluation || rs.SizeEstimate() >= commitThreshold || aggregatorRo.CanPrune(applyTx, outputTxNum.Load())
+				if !needCalcRoot {
 					break
 				}
-				aggregatorRo := applyTx.(state2.HasAggTx).AggTx().(*state2.AggregatorRoTx)
-				//if !aggregatorRo.CanPrune(applyTx, outputTxNum.Load()) {
-				//	break
-				//}
 
 				var (
 					commitStart = time.Now()
