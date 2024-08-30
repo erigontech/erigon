@@ -952,9 +952,7 @@ Loop:
 
 				aggregatorRo := applyTx.(state2.HasAggTx).AggTx().(*state2.AggregatorRoTx)
 				// If we skip post evaluation, then we should compute root hash ASAP for fail-fast
-				needCalcRoot := skipPostEvaluation || rs.SizeEstimate() >= commitThreshold
-				// TODO: "prune earlier" feature disabled until https://github.com/erigontech/erigon/issues/11801
-				//needCalcRoot = needCalcRoot || aggregatorRo.CanPrune(applyTx, outputTxNum.Load())
+				needCalcRoot := skipPostEvaluation || rs.SizeEstimate() >= commitThreshold || aggregatorRo.CanPrune(applyTx, outputTxNum.Load())
 				if !needCalcRoot {
 					break
 				}
