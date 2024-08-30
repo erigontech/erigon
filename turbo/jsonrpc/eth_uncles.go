@@ -24,7 +24,6 @@ import (
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/log/v3"
 
-	"github.com/erigontech/erigon/core/rawdb"
 	"github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/rpc"
 	"github.com/erigontech/erigon/turbo/adapter/ethapi"
@@ -51,11 +50,6 @@ func (api *APIImpl) GetUncleByBlockNumberAndIndex(ctx context.Context, number rp
 		return nil, nil // not error, see https://github.com/erigontech/erigon/issues/1645
 	}
 	additionalFields := make(map[string]interface{})
-	td, err := rawdb.ReadTd(tx, block.Hash(), blockNum)
-	if err != nil {
-		return nil, err
-	}
-	additionalFields["totalDifficulty"] = (*hexutil.Big)(td)
 
 	uncles := block.Uncles()
 	if index >= hexutil.Uint(len(uncles)) {
@@ -81,13 +75,7 @@ func (api *APIImpl) GetUncleByBlockHashAndIndex(ctx context.Context, hash common
 	if block == nil {
 		return nil, nil // not error, see https://github.com/erigontech/erigon/issues/1645
 	}
-	number := block.NumberU64()
 	additionalFields := make(map[string]interface{})
-	td, err := rawdb.ReadTd(tx, hash, number)
-	if err != nil {
-		return nil, err
-	}
-	additionalFields["totalDifficulty"] = (*hexutil.Big)(td)
 
 	uncles := block.Uncles()
 	if index >= hexutil.Uint(len(uncles)) {

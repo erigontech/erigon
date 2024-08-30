@@ -290,7 +290,6 @@
                       "    \"size\": \"0x3e1\",",
                       "    \"stateRoot\": \"0xb3f9408d80048b6f206951c4e387f8da37fb8510eccc18527865fa746c47bbc5\",",
                       "    \"timestamp\": \"0x56bff9bb\",",
-                      "    \"totalDifficulty\": \"0x6332227c16fd7c67\",",
                       "    \"transactions\": [",
                       "      \"0x730724cb08a6eb17bf6b3296359d261570d343ea7944a17a9d7287d77900db08\",",
                       "      \"0xef2ea39c20ba09553b2f3cf02380406ac766039ca56612937eed5e7f3503fb3a\",",
@@ -336,7 +335,7 @@
                   "raw": "{{HOST}}",
                   "host": ["{{HOST}}"]
                 },
-                "description": "Returns information about a block given the block's number.\r\n\r\n**Parameters**\r\n\r\nTAG - Integer block number or one of \"earliest\", \"latest\" or \"pending\"\r\n\r\nBoolean - If true it returns the full transaction objects, if false only the hashes of the transactions\r\n\r\n**Returns**\r\n\r\nObject - An object of type Block defined as:\r\n\r\nnumber: QUANTITY - The block number or null when pending\r\n\r\nhash: DATA, 32 Bytes - Hash of the block or null when pending\r\n\r\nparentHash: DATA, 32 Bytes - Hash of the parent block\r\n\r\nnonce: DATA, 8 bytes - Hash of the proof of work or null when pending\r\n\r\nsha3Uncles: DATA, 32 Bytes - SHA3 of the uncles data in the block\r\n\r\nlogsBloom: DATA, 256 Bytes - The bloom filter for the block's logs or null when pending\r\n\r\ntransactionsRoot: DATA, 32 Bytes - The root of the transaction trie of the block\r\n\r\nstateRoot: DATA, 32 Bytes - The root of the final state trie of the block\r\n\r\nreceiptsRoot: DATA, 32 Bytes - The root of the receipts trie of the block\r\n\r\nminer: DATA, 20 Bytes - The address of the beneficiary to whom the mining rewards were given\r\n\r\ndifficulty: QUANTITY - Integer of the difficulty for this block\r\n\r\ntotalDifficulty: QUANTITY - Integer of the total difficulty of the chain until this block\r\n\r\nextraData: DATA - The extra data field of this block\r\n\r\nsize: QUANTITY - Integer the size of this block in bytes\r\n\r\ngasLimit: QUANTITY - The maximum gas allowed in this block\r\n\r\ngasUsed: QUANTITY - The total used gas by all transactions in this block\r\n\r\ntimestamp: QUANTITY - The unix timestamp for when the block was collated\r\n\r\ntransactions: ARRAY - Array of transaction objects, or 32 Bytes transaction hashes depending on the last given parameter\r\n\r\nuncles: ARRAY - Array of uncle hashes\r\n\r\n"
+                "description": "Returns information about a block given the block's number.\r\n\r\n**Parameters**\r\n\r\nTAG - Integer block number or one of \"earliest\", \"latest\" or \"pending\"\r\n\r\nBoolean - If true it returns the full transaction objects, if false only the hashes of the transactions\r\n\r\n**Returns**\r\n\r\nObject - An object of type Block defined as:\r\n\r\nnumber: QUANTITY - The block number or null when pending\r\n\r\nhash: DATA, 32 Bytes - Hash of the block or null when pending\r\n\r\nparentHash: DATA, 32 Bytes - Hash of the parent block\r\n\r\nnonce: DATA, 8 bytes - Hash of the proof of work or null when pending\r\n\r\nsha3Uncles: DATA, 32 Bytes - SHA3 of the uncles data in the block\r\n\r\nlogsBloom: DATA, 256 Bytes - The bloom filter for the block's logs or null when pending\r\n\r\ntransactionsRoot: DATA, 32 Bytes - The root of the transaction trie of the block\r\n\r\nstateRoot: DATA, 32 Bytes - The root of the final state trie of the block\r\n\r\nreceiptsRoot: DATA, 32 Bytes - The root of the receipts trie of the block\r\n\r\nminer: DATA, 20 Bytes - The address of the beneficiary to whom the mining rewards were given\r\n\r\ndifficulty: QUANTITY - Integer of the difficulty for this block\r\n\r\nextraData: DATA - The extra data field of this block\r\n\r\nsize: QUANTITY - Integer the size of this block in bytes\r\n\r\ngasLimit: QUANTITY - The maximum gas allowed in this block\r\n\r\ngasUsed: QUANTITY - The total used gas by all transactions in this block\r\n\r\ntimestamp: QUANTITY - The unix timestamp for when the block was collated\r\n\r\ntransactions: ARRAY - Array of transaction objects, or 32 Bytes transaction hashes depending on the last given parameter\r\n\r\nuncles: ARRAY - Array of uncle hashes\r\n\r\n"
               },
               "response": []
             },
@@ -368,7 +367,6 @@
                       "    \"size\": \"0x3e1\",",
                       "    \"stateRoot\": \"0xb3f9408d80048b6f206951c4e387f8da37fb8510eccc18527865fa746c47bbc5\",",
                       "    \"timestamp\": \"0x56bff9bb\",",
-                      "    \"totalDifficulty\": \"0x6332227c16fd7c67\",",
                       "    \"transactions\": [",
                       "      \"0x730724cb08a6eb17bf6b3296359d261570d343ea7944a17a9d7287d77900db08\",",
                       "      \"0xef2ea39c20ba09553b2f3cf02380406ac766039ca56612937eed5e7f3503fb3a\",",
@@ -870,7 +868,6 @@
                       "    \"size\": \"0x21a\",",
                       "    \"stateRoot\": \"0x1e6e030581fd1873b4784280859cd3b3c04aa85520f08c304cf5ee63d3935add\",",
                       "    \"timestamp\": \"0x55ba4242\",",
-                      "    \"totalDifficulty\": \"0xffd003ffe\",",
                       "    \"transactionsRoot\": \"0x56e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421\",",
                       "    \"uncles\": []",
                       "  }",
@@ -949,7 +946,6 @@
                       "    \"size\": \"0x21a\",",
                       "    \"stateRoot\": \"0x1e6e030581fd1873b4784280859cd3b3c04aa85520f08c304cf5ee63d3935add\",",
                       "    \"timestamp\": \"0x55ba4242\",",
-                      "    \"totalDifficulty\": \"0xffd003ffe\",",
                       "    \"transactionsRoot\": \"0x56e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421\",",
                       "    \"uncles\": []",
                       "  }",
