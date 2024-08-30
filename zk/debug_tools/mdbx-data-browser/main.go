@@ -16,6 +16,7 @@ func main() {
 	app.Commands = []*cli.Command{
 		getBatchByNumberCmd,
 		getBlockByNumberCmd,
+		getBatchAffiliationCmd,
 	}
 
 	logging.SetupLogger("mdbx data browser")

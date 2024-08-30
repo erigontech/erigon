@@ -67,6 +67,21 @@ var (
 		},
 	}
 
+	getBatchAffiliationCmd = &cli.Command{
+		Action: dumpBatchAffiliation,
+		Name:   "output-batch-affiliation",
+		Usage:  "Outputs batch affiliation for provided block numbers",
+		Flags: []cli.Flag{
+			&utils.DataDirFlag,
+			&cli.Uint64SliceFlag{
+				Name:        "bn",
+				Usage:       "Block numbers",
+				Destination: batchOrBlockNumbers,
+			},
+			fileOutputFlag,
+		},
+	}
+
 	// parameters
 	chainDataDir        string
 	batchOrBlockNumbers *cli.Uint64Slice = cli.NewUint64Slice()
@@ -148,6 +163,36 @@ func dumpBlocksByNumbers(cliCtx *cli.Context) error {
 	return nil
 }
 
+// dumpBatchAffiliation retrieves batch numbers by given block numbers and dumps them either on standard output or to a file
+func dumpBatchAffiliation(cliCtx *cli.Context) error {
+	if !cliCtx.IsSet(utils.DataDirFlag.Name) {
+		return errors.New("chain data directory is not provided")
+	}
+
+	chainDataDir = cliCtx.String(utils.DataDirFlag.Name)
+
+	tx, cleanup, err := createDbTx(chainDataDir, cliCtx.Context)
+	if err != nil {
+		return fmt.Errorf("failed to create read-only db transaction: %w", err)
+	}
+	defer cleanup()
+
+	r := NewDbDataRetriever(tx)
+	batchInfo, err := r.GetBatchAffiliation(batchOrBlockNumbers.Value())
+	if err != nil {
+		return err
+	}
+	jsonBatchAffiliation, err := json.MarshalIndent(batchInfo, "", "  ")
+	if err != nil {
+		return fmt.Errorf("failed to serialize batch affiliation info into the JSON format: %w", err)
+	}
+
+	if err := outputResults(string(jsonBatchAffiliation)); err != nil {
+		return fmt.Errorf("failed to output results: %w", err)
+	}
+	return nil
+}
+
 // createDbTx creates a read-only database transaction, that allows querying it.
 func createDbTx(chainDataDir string, ctx context.Context) (kv.Tx, func(), error) {
 	db := mdbx.MustOpen(chainDataDir)
@@ -183,7 +228,7 @@ func outputResults(results string) error {
 			return err
 		}
 
-		fmt.Printf("results are written to the '%s'", path)
+		fmt.Printf("results are written to the '%s'\n", path)
 		return nil
 	}
 

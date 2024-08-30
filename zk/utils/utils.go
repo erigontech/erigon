@@ -6,10 +6,13 @@ import (
 	"github.com/ledgerwatch/erigon-lib/chain"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/state"
 	"github.com/ledgerwatch/erigon/core/systemcontracts"
+	eritypes "github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 	"github.com/ledgerwatch/erigon/zk/hermez_db"
+	zktx "github.com/ledgerwatch/erigon/zk/tx"
 	"github.com/ledgerwatch/log/v3"
 )
 
@@ -81,7 +84,6 @@ type ForkConfigWriter interface {
 }
 
 type DbReader interface {
-	GetLocalExitRootForBatchNo(batchNo uint64) (libcommon.Hash, error)
 	GetHighestBlockInBatch(batchNo uint64) (uint64, error)
 }
 
@@ -131,28 +133,23 @@ func RecoverySetBlockConfigForks(blockNum uint64, forkId uint64, cfg ForkConfigW
 	return nil
 }
 
-func GetBatchLocalExitRoot(batchNo uint64, db DbReader, tx kv.Tx) (libcommon.Hash, error) {
-	// check db first
-	localExitRoot, err := db.GetLocalExitRootForBatchNo(batchNo)
-	if err != nil {
-		return libcommon.Hash{}, err
-	}
-
-	if localExitRoot != (libcommon.Hash{}) {
-		return localExitRoot, nil
-	}
-
-	return GetBatchLocalExitRootFromSCStorage(batchNo, db, tx)
-}
-
-func GetBatchLocalExitRootFromSCStorage(batchNo uint64, db DbReader, tx kv.Tx) (libcommon.Hash, error) {
+func GetBatchLocalExitRootFromSCStorageForLatestBlock(batchNo uint64, db DbReader, tx kv.Tx) (libcommon.Hash, error) {
 	if batchNo > 0 {
 		blockNo, err := db.GetHighestBlockInBatch(batchNo)
 		if err != nil {
 			return libcommon.Hash{}, err
 		}
 
-		stateReader := state.NewPlainState(tx, blockNo+1, systemcontracts.SystemContractCodeLookup["hermez"])
+		return GetBatchLocalExitRootFromSCStorageByBlock(blockNo, db, tx)
+	}
+
+	return libcommon.Hash{}, nil
+
+}
+
+func GetBatchLocalExitRootFromSCStorageByBlock(blockNumber uint64, db DbReader, tx kv.Tx) (libcommon.Hash, error) {
+	if blockNumber > 0 {
+		stateReader := state.NewPlainState(tx, blockNumber+1, systemcontracts.SystemContractCodeLookup["hermez"])
 		defer stateReader.Close()
 		rawLer, err := stateReader.ReadAccountStorage(state.GER_MANAGER_ADDRESS, 1, &state.GLOBAL_EXIT_ROOT_POS_1)
 		if err != nil {
@@ -162,4 +159,52 @@ func GetBatchLocalExitRootFromSCStorage(batchNo uint64, db DbReader, tx kv.Tx) (
 	}
 
 	return libcommon.Hash{}, nil
+}
+
+func GenerateBatchData(
+	tx kv.Tx,
+	hermezDb state.ReadOnlyHermezDb,
+	batchBlocks []*eritypes.Block,
+	forkId uint64,
+) (batchL2Data []byte, err error) {
+	lastBlockNoInPreviousBatch := uint64(0)
+	firstBlockInBatch := batchBlocks[0]
+	if firstBlockInBatch.NumberU64() != 0 {
+		lastBlockNoInPreviousBatch = firstBlockInBatch.NumberU64() - 1
+	}
+
+	lastBlockInPreviousBatch, err := rawdb.ReadBlockByNumber(tx, lastBlockNoInPreviousBatch)
+	if err != nil {
+		return nil, err
+	}
+
+	batchL2Data = []byte{}
+	for i := 0; i < len(batchBlocks); i++ {
+		var dTs uint32
+		if i == 0 {
+			dTs = uint32(batchBlocks[i].Time() - lastBlockInPreviousBatch.Time())
+		} else {
+			dTs = uint32(batchBlocks[i].Time() - batchBlocks[i-1].Time())
+		}
+		iti, err := hermezDb.GetBlockL1InfoTreeIndex(batchBlocks[i].NumberU64())
+		if err != nil {
+			return nil, err
+		}
+		egTx := make(map[libcommon.Hash]uint8)
+		for _, txn := range batchBlocks[i].Transactions() {
+			eg, err := hermezDb.GetEffectiveGasPricePercentage(txn.Hash())
+			if err != nil {
+				return nil, err
+			}
+			egTx[txn.Hash()] = eg
+		}
+
+		bl2d, err := zktx.GenerateBlockBatchL2Data(uint16(forkId), dTs, uint32(iti), batchBlocks[i].Transactions(), egTx)
+		if err != nil {
+			return nil, err
+		}
+		batchL2Data = append(batchL2Data, bl2d...)
+	}
+
+	return batchL2Data, err
 }

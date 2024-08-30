@@ -230,7 +230,7 @@ func (bcc *BatchCounterCollector) CombineCollectors(verifyMerkleProof bool) (Cou
 	return combined, nil
 }
 
-// CombineCollectors takes the batch level data from all transactions and combines these counters with each transactions'
+// CombineCollectorsNoChanges takes the batch level data from all transactions and combines these counters with each transactions'
 // rlp level counters and execution level counters
 // this one returns the counters as they are so far, without adding processBatchLevelData, processChangeL2Block and decodeChangeL2BlockTx
 // used to save batch counter progress without adding the said counters twice

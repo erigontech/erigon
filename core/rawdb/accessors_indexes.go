@@ -63,3 +63,34 @@ func WriteTxLookupEntries(db kv.Putter, block *types.Block) {
 func DeleteTxLookupEntry(db kv.Deleter, hash libcommon.Hash) error {
 	return db.Delete(kv.TxLookup, hash.Bytes())
 }
+
+func ReadReceipt(db kv.Tx, txHash libcommon.Hash) (*types.Receipt, libcommon.Hash, uint64, uint64, error) {
+	// Retrieve the context of the receipt based on the transaction hash
+	blockNumber, err := ReadTxLookupEntry(db, txHash)
+	if err != nil {
+		return nil, libcommon.Hash{}, 0, 0, err
+	}
+	if blockNumber == nil {
+		return nil, libcommon.Hash{}, 0, 0, nil
+	}
+	blockHash, err := ReadCanonicalHash(db, *blockNumber)
+	if err != nil {
+		return nil, libcommon.Hash{}, 0, 0, err
+	}
+	if blockHash == (libcommon.Hash{}) {
+		return nil, libcommon.Hash{}, 0, 0, nil
+	}
+	b, senders, err := ReadBlockWithSenders(db, blockHash, *blockNumber)
+	if err != nil {
+		return nil, libcommon.Hash{}, 0, 0, err
+	}
+	// Read all the receipts from the block and return the one with the matching hash
+	receipts := ReadReceipts(db, b, senders)
+	for receiptIndex, receipt := range receipts {
+		if receipt.TxHash == txHash {
+			return receipt, blockHash, *blockNumber, uint64(receiptIndex), nil
+		}
+	}
+	log.Error("Receipt not found", "number", blockNumber, "hash", blockHash, "txhash", txHash)
+	return nil, libcommon.Hash{}, 0, 0, nil
+}

@@ -44,7 +44,6 @@ func enable2929_zkevm(jt *JumpTable) {
 	// factor here
 	jt[SELFDESTRUCT].constantGas = params.SelfdestructGasEIP150
 	jt[SELFDESTRUCT].dynamicGas = gasSelfdestructEIP2929_zkevm
-	jt[SENDALL].dynamicGas = gasSelfdestructEIP2929_zkevm
 }
 
 func enable3529_zkevm(jt *JumpTable) {

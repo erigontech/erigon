@@ -31,17 +31,22 @@ type ReadOnlyHermezDb interface {
 	GetBatchGlobalExitRoots(fromBatchNum, toBatchNum uint64) (*[]dstypes.GerUpdate, error)
 	GetBlockGlobalExitRoot(l2BlockNo uint64) (libcommon.Hash, error)
 	GetBlockL1BlockHash(l2BlockNo uint64) (libcommon.Hash, error)
-	GetGerForL1BlockHash(l1BlockHash libcommon.Hash) (libcommon.Hash, error)
 	GetIntermediateTxStateRoot(blockNum uint64, txhash libcommon.Hash) (libcommon.Hash, error)
 	GetReusedL1InfoTreeIndex(blockNum uint64) (bool, error)
 	GetSequenceByBatchNo(batchNo uint64) (*zktypes.L1BatchInfo, error)
+	GetSequenceByBatchNoOrHighest(batchNo uint64) (*zktypes.L1BatchInfo, error)
 	GetHighestBlockInBatch(batchNo uint64) (uint64, error)
 	GetLowestBlockInBatch(batchNo uint64) (uint64, bool, error)
 	GetL2BlockNosByBatch(batchNo uint64) ([]uint64, error)
 	GetBatchGlobalExitRoot(batchNum uint64) (*dstypes.GerUpdate, error)
 	GetVerificationByBatchNo(batchNo uint64) (*zktypes.L1BatchInfo, error)
+	GetVerificationByBatchNoOrHighest(batchNo uint64) (*zktypes.L1BatchInfo, error)
 	GetL1BatchData(batchNumber uint64) ([]byte, error)
 	GetL1InfoTreeUpdateByGer(ger libcommon.Hash) (*zktypes.L1InfoTreeUpdate, error)
+	GetBlockL1InfoTreeIndex(blockNumber uint64) (uint64, error)
+	GetBlockInfoRoot(blockNumber uint64) (libcommon.Hash, error)
+	GetLastBlockGlobalExitRoot(l2BlockNo uint64) (libcommon.Hash, uint64, error)
+	GetForkId(batchNo uint64) (uint64, error)
 }
 
 func (sdb *IntraBlockState) GetTxCount() (uint64, error) {

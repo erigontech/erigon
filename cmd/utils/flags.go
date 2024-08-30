@@ -531,6 +531,11 @@ var (
 		Usage: "This is a maximum time that a batch verification could take. Including retries. This could be interpreted as maximum that that the sequencer can run without executor. Setting it to 0s will mean infinite timeout. Defaults to 30min",
 		Value: "30m",
 	}
+	SequencerTimeoutOnEmptyTxPool = cli.StringFlag{
+		Name:  "zkevm.sequencer-timeout-on-empty-tx-pool",
+		Usage: "Timeout before requesting txs from the txpool if none were found before. Defaults to 250ms",
+		Value: "250ms",
+	}
 	SequencerHaltOnBatchNumber = cli.Uint64Flag{
 		Name:  "zkevm.sequencer-halt-on-batch-number",
 		Usage: "Halt the sequencer on this batch number",
@@ -595,17 +600,17 @@ var (
 	DataStreamWriteTimeout = cli.DurationFlag{
 		Name:  "zkevm.data-stream-writeTimeout",
 		Usage: "Define the TCP write timeout when sending data to a datastream client",
-		Value: 5 * time.Second,
+		Value: 20 * time.Second,
 	}
 	DataStreamInactivityTimeout = cli.DurationFlag{
 		Name:  "zkevm.data-stream-inactivity-timeout",
 		Usage: "Define the inactivity timeout when interacting with a data stream server",
-		Value: 10 * time.Second,
+		Value: 10 * time.Minute,
 	}
 	DataStreamInactivityCheckInterval = cli.DurationFlag{
 		Name:  "zkevm.data-stream-inactivity-check-interval",
 		Usage: "Define the inactivity check interval timeout when interacting with a data stream server",
-		Value: 2 * time.Second,
+		Value: 5 * time.Minute,
 	}
 	Limbo = cli.BoolFlag{
 		Name:  "zkevm.limbo",

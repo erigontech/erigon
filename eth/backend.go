@@ -1034,6 +1034,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 		seqAndVerifTopics := [][]libcommon.Hash{{
 			contracts.SequencedBatchTopicPreEtrog,
 			contracts.SequencedBatchTopicEtrog,
+			contracts.RollbackBatchesTopic,
 			contracts.VerificationTopicPreEtrog,
 			contracts.VerificationTopicEtrog,
 			contracts.VerificationValidiumTopicEtrog,

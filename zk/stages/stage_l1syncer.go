@@ -12,6 +12,7 @@ import (
 	"math/big"
 
 	"github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/metrics"
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	ethTypes "github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/eth/ethconfig"
@@ -41,7 +42,11 @@ type IL1Syncer interface {
 	Stop()
 }
 
-var ErrStateRootMismatch = errors.New("state root mismatch")
+var (
+	ErrStateRootMismatch = errors.New("state root mismatch")
+
+	lastCheckedL1BlockCounter = metrics.GetOrCreateGauge(`last_checked_l1_block`)
+)
 
 type L1SyncerCfg struct {
 	db     kv.RwDB
@@ -144,6 +149,13 @@ Loop:
 						highestWrittenL1BlockNo = info.L1BlockNo
 					}
 					newSequencesCount++
+				case logRollbackBatches:
+					if err := hermezDb.RollbackSequences(info.BatchNo); err != nil {
+						return fmt.Errorf("failed to write rollback sequence, %w", err)
+					}
+					if info.L1BlockNo > highestWrittenL1BlockNo {
+						highestWrittenL1BlockNo = info.L1BlockNo
+					}
 				case logVerify:
 					if info.BatchNo > highestVerification.BatchNo {
 						highestVerification = info
@@ -172,6 +184,9 @@ Loop:
 	}
 
 	latestCheckedBlock := cfg.syncer.GetLastCheckedL1Block()
+
+	lastCheckedL1BlockCounter.Set(float64(latestCheckedBlock))
+
 	if highestWrittenL1BlockNo > l1BlockProgress {
 		log.Info(fmt.Sprintf("[%s] Saving L1 syncer progress", logPrefix), "latestCheckedBlock", latestCheckedBlock, "newVerificationsCount", newVerificationsCount, "newSequencesCount", newSequencesCount, "highestWrittenL1BlockNo", highestWrittenL1BlockNo)
 
@@ -214,6 +229,7 @@ var (
 	logSequence         BatchLogType = 1
 	logVerify           BatchLogType = 2
 	logL1InfoTreeUpdate BatchLogType = 4
+	logRollbackBatches  BatchLogType = 5
 
 	logIncompatible BatchLogType = 100
 )
@@ -257,6 +273,9 @@ func parseLogType(l1RollupId uint64, log *ethTypes.Log) (l1BatchInfo types.L1Bat
 		}
 	case contracts.UpdateL1InfoTreeTopic:
 		batchLogType = logL1InfoTreeUpdate
+	case contracts.RollbackBatchesTopic:
+		batchLogType = logRollbackBatches
+		batchNum = new(big.Int).SetBytes(log.Topics[1].Bytes()).Uint64()
 	default:
 		batchLogType = logUnknown
 		batchNum = 0
@@ -272,80 +291,13 @@ func parseLogType(l1RollupId uint64, log *ethTypes.Log) (l1BatchInfo types.L1Bat
 }
 
 func UnwindL1SyncerStage(u *stagedsync.UnwindState, tx kv.RwTx, cfg L1SyncerCfg, ctx context.Context) (err error) {
-	useExternalTx := tx != nil
-	if !useExternalTx {
-		tx, err = cfg.db.BeginRw(ctx)
-		if err != nil {
-			return err
-		}
-		defer tx.Rollback()
-	}
-	log.Debug("l1 sync: unwinding")
-
-	/*
-		1. unwind sequences table
-		2. unwind verifications table
-		3. update l1verifications batchno and l1syncer stage progress
-	*/
-
-	err = tx.ClearBucket(hermez_db.L1SEQUENCES)
-	if err != nil {
-		return err
-	}
-	err = tx.ClearBucket(hermez_db.L1VERIFICATIONS)
-	if err != nil {
-		return err
-	}
-
-	// the below are very inefficient due to key layout
-	//hermezDb := hermez_db.NewHermezDb(tx)
-	//err = hermezDb.TruncateSequences(u.UnwindPoint)
-	//if err != nil {
-	//	return err
-	//}
-	//
-	//err = hermezDb.TruncateVerifications(u.UnwindPoint)
-	//if err != nil {
-	//	return err
-	//}
-	// get the now latest l1 verification
-	//v, err := hermezDb.GetLatestVerification()
-	//if err != nil {
-	//	return err
-	//}
-
-	if err := stages.SaveStageProgress(tx, stages.L1VerificationsBatchNo, 0); err != nil {
-		return fmt.Errorf("failed to save stage progress, %w", err)
-	}
-	if err := stages.SaveStageProgress(tx, stages.L1Syncer, 0); err != nil {
-		return fmt.Errorf("failed to save stage progress, %w", err)
-	}
-
-	if !useExternalTx {
-		if err := tx.Commit(); err != nil {
-			return err
-		}
-	}
+	// we want to keep L1 data during an unwind, as we only sync finalised data there should be
+	// no need to unwind here
 	return nil
 }
 
 func PruneL1SyncerStage(s *stagedsync.PruneState, tx kv.RwTx, cfg L1SyncerCfg, ctx context.Context) (err error) {
-	useExternalTx := tx != nil
-	if !useExternalTx {
-		tx, err = cfg.db.BeginRw(ctx)
-		if err != nil {
-			return err
-		}
-		defer tx.Rollback()
-	}
-
-	// TODO: implement prune L1 Verifications stage! (if required)
-
-	if !useExternalTx {
-		if err := tx.Commit(); err != nil {
-			return err
-		}
-	}
+	// no need to prune this data
 	return nil
 }
 
